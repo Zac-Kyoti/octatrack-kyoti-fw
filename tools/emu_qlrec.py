@@ -4,20 +4,51 @@
 """
 Isolation-exercise the QUANTIZE LIVE REC front-panel toggle (build_qlrec.py).
 
+Session 50: the toast used to be a one-shot "persistent" (dur<=0)
+FUN_4005a2b8 call, closed explicitly on [REC] release.  That HUNG a real MKI --
+dur<=0 registers on what real disassembly shows is a modal window stack, so the
+OS's input dispatch stopped reaching our own [REC]-release handler at all.
+Fixed by periodically RE-ARMING a short dur>0 (self-timing, non-modal) call
+instead.  Flashed post-fix: no hang. Six follow-up requests, folded in here as
+Session 51 (see tools/patch_qlrec.s's header + NOTES.md "Session 51" for the
+full story):
+
   qlr_play   @ detour of 0x40061778  ([PLAY] press, keycode 0x28)
-       - REC not held            -> stock ([PLAY] resumes at 0x4006177e), nothing else
-       - REC held, 1st press     -> stock (stock starts LIVE REC), counter = 1
-       - REC held, 2nd press     -> flip 0x800000ac + shadow 0x100fff3c, re-checksum,
-                                    NOTIFY("QUANT LIVE REC ON"/"OFF", dur 0), swallow
-       - REC held, 3rd press     -> swallow, no transport, no flip
-       - REC held, 4th press     -> flip back, NOTIFY the other string, swallow
+       - REC not held              -> stock ([PLAY] resumes at 0x4006177e)
+       - REC held, very 1st press  -> stock (stock starts LIVE REC), G_CNT := 1,
+                                       G_WINDOW := MAX_GAP
+       - REC held, later press,
+         G_WINDOW > 0 (fast enough)-> completes the pair: flip 0x800000ac +
+                                       shadow + re-checksum, NOTIFY(text,
+                                       REARM_DUR), G_ARM := 1, G_WINDOW reset,
+                                       swallow
+       - REC held, later press,
+         G_WINDOW <= 0 (too slow)  -> discard the stale pairing attempt, THIS
+                                       press becomes the new reference
+                                       (G_WINDOW reset, no flip), swallow
+       Session 51 item 6: the shown string is now INVERTED vs the raw bit --
+       HW-confirmed the PERSONALIZE menu's checked glyph is raw 0, not raw 1.
 
   qlr_recrel @ detour of 0x4004883a  ([REC] release)
-       - always clears REC_HELD + the counter
-       - closes our toast (NOTIFY_CLOSE) iff we opened one (G_OURS)
+       - always clears REC_HELD + G_CNT
+       - Session 51 item 4: if G_ARM, clears it AND calls NOTIFY_CLOSE for an
+         instant close (safe now that dur is never <=0, unlike pre-Session-50)
 
-The full keymap dispatch is not modelled -- these are the two cave routines run
-against the real assembled bytes with the OS calls stubbed to `rts`.
+  qlr_tick   @ detour of 0x400522ca  (per-control-frame tick, jsr-kind)
+       - Session 51 item 1 (new): while REC_HELD and a hold is in progress
+         (G_CNT != 0), decrements G_WINDOW once per tick (independent of
+         toast/G_ARM state) -- this is what makes the pairing window actually
+         expire over time.
+       - G_ARM == 0               -> just replay the displaced `lea`, rts
+       - G_ARM != 0, G_RTICKS > 1 -> decrement G_RTICKS, replay+rts (not time yet)
+       - G_ARM != 0, G_RTICKS <= 1 (post-decrement) -> re-issue
+         NOTIFY(G_LASTMSG, REARM_DUR), reset G_RTICKS, THEN replay+rts
+
+The full keymap dispatch is not modelled -- these are the three cave routines run
+against the real assembled bytes with the OS calls stubbed to `rts`.  What this
+harness CANNOT show: whether the real FUN_4005a2b8/FUN_40056bec bodies behave as
+assumed -- see tools/emu_notify_probe.py for the full-firmware dynamic check of
+that (Session 50's actual hang-finding tool).
 
 Run after:  python3 tools/build_qlrec.py
 Usage:      python3 tools/emu_qlrec.py
@@ -37,6 +68,7 @@ _nm = subprocess.run(["m68k-elf-nm", str(_elf)], capture_output=True, text=True)
 SYM = {p[2]: int(p[0], 16) for p in (l.split() for l in _nm.splitlines()) if len(p) == 3}
 QLR_PLAY = SYM["qlr_play"]
 QLR_RECREL = SYM["qlr_recrel"]
+QLR_TICK = SYM["qlr_tick"]
 MSG_ON, MSG_OFF = SYM["qlr_msg_on"], SYM["qlr_msg_off"]
 
 CKSUM = 0x4001f23c
@@ -44,13 +76,21 @@ NOTIFY = 0x4005a2b8
 NOTIFY_CLOSE = 0x40056bec
 PROJ_GATE = 0x4009b5c0
 PLAY_RESUME = 0x4006177e
+WATCHDOG_A2 = 0x46c7dfba   # displaced `lea` target at the qlr_tick detour site
 SENTINEL = 0x40200000      # synthetic return address (a swallowed key `rts`es here)
 
 REC_HELD = 0x460d1726
 QLR = 0x800000ac
 QLR_SH = 0x100fff3c
 G_CNT = 0x80006a5c
-G_OURS = 0x80006a60
+G_ARM = 0x80006a60
+G_RTICKS = 0x80006a64
+G_LASTMSG = 0x80006a68
+G_WINDOW = 0x80006a6c      # Session 51: double-tap pairing window (ticks remaining)
+G_PEND = 0x80006a70        # Session 51-bis: is a press currently waiting for its FRESH partner
+REARM_DUR = 0x20
+REARM_INTERVAL = 0x10
+MAX_GAP = 0x10
 
 fails = []
 
@@ -75,17 +115,19 @@ def mk():
     return uc
 
 
-def run_play(rec_held, cnt=0, qlr=0, sh=0xdead, ours=0):
+def run_play(rec_held, cnt=0, qlr=0, sh=0xdead, arm=0, window=MAX_GAP, pend=1):
     uc = mk()
     uc.mem_write(REC_HELD, struct.pack(">I", rec_held))
     uc.mem_write(QLR, struct.pack(">I", qlr))
     uc.mem_write(QLR_SH, struct.pack(">I", sh))
     uc.mem_write(G_CNT, struct.pack(">I", cnt))
-    uc.mem_write(G_OURS, struct.pack(">B", ours))
+    uc.mem_write(G_ARM, struct.pack(">B", arm))
+    uc.mem_write(G_WINDOW, struct.pack(">i", window))
+    uc.mem_write(G_PEND, struct.pack(">B", pend))
     sp0 = 0x41010000
     uc.mem_write(sp0, struct.pack(">III", SENTINEL, 0x28, 1))   # ret, keycode, event
     uc.reg_write(UC_M68K_REG_A7, sp0)
-    st = dict(cksum=False, notify=None, notify_dur=None, close=False,
+    st = dict(cksum=False, notify=None, notify_dur=None,
               proj_gate=False, resume=False, swallowed=False)
 
     def hook(uc, addr, size, u):
@@ -95,8 +137,6 @@ def run_play(rec_held, cnt=0, qlr=0, sh=0xdead, ours=0):
             sp = uc.reg_read(UC_M68K_REG_A7)
             st["notify"] = struct.unpack(">I", uc.mem_read(sp + 4, 4))[0]
             st["notify_dur"] = struct.unpack(">I", uc.mem_read(sp + 8, 4))[0]
-        elif addr == NOTIFY_CLOSE:
-            st["close"] = True
         elif addr == PROJ_GATE:
             st["proj_gate"] = True
         elif addr == PLAY_RESUME:
@@ -115,15 +155,20 @@ def run_play(rec_held, cnt=0, qlr=0, sh=0xdead, ours=0):
     st["qlr"] = struct.unpack(">I", uc.mem_read(QLR, 4))[0]
     st["sh"] = struct.unpack(">I", uc.mem_read(QLR_SH, 4))[0]
     st["cnt"] = struct.unpack(">I", uc.mem_read(G_CNT, 4))[0]
-    st["ours"] = uc.mem_read(G_OURS, 1)[0]
+    st["arm"] = uc.mem_read(G_ARM, 1)[0]
+    st["rticks"] = struct.unpack(">i", uc.mem_read(G_RTICKS, 4))[0]
+    st["lastmsg"] = struct.unpack(">I", uc.mem_read(G_LASTMSG, 4))[0]
+    st["window"] = struct.unpack(">i", uc.mem_read(G_WINDOW, 4))[0]
+    st["pend"] = uc.mem_read(G_PEND, 1)[0]
     return st
 
 
-def run_recrel(rec_held=1, cnt=3, ours=1):
+def run_recrel(rec_held=1, cnt=3, arm=1, pend=1):
     uc = mk()
     uc.mem_write(REC_HELD, struct.pack(">I", rec_held))
     uc.mem_write(G_CNT, struct.pack(">I", cnt))
-    uc.mem_write(G_OURS, struct.pack(">B", ours))
+    uc.mem_write(G_ARM, struct.pack(">B", arm))
+    uc.mem_write(G_PEND, struct.pack(">B", pend))
     sp0 = 0x41010000
     uc.mem_write(sp0, struct.pack(">III", SENTINEL, 0x29, 0))
     uc.reg_write(UC_M68K_REG_A7, sp0)
@@ -143,7 +188,42 @@ def run_recrel(rec_held=1, cnt=3, ours=1):
     uc.hook_del(h)
     st["rec_held"] = struct.unpack(">I", uc.mem_read(REC_HELD, 4))[0]
     st["cnt"] = struct.unpack(">I", uc.mem_read(G_CNT, 4))[0]
-    st["ours"] = uc.mem_read(G_OURS, 1)[0]
+    st["arm"] = uc.mem_read(G_ARM, 1)[0]
+    st["pend"] = uc.mem_read(G_PEND, 1)[0]
+    return st
+
+
+def run_tick(arm=0, rticks=REARM_INTERVAL, lastmsg=None, rec_held=0, cnt=0, window=MAX_GAP, pend=0):
+    uc = mk()
+    uc.mem_write(G_ARM, struct.pack(">B", arm))
+    uc.mem_write(G_RTICKS, struct.pack(">i", rticks))
+    uc.mem_write(G_LASTMSG, struct.pack(">I", lastmsg if lastmsg is not None else MSG_ON))
+    uc.mem_write(REC_HELD, struct.pack(">I", rec_held))
+    uc.mem_write(G_CNT, struct.pack(">I", cnt))
+    uc.mem_write(G_WINDOW, struct.pack(">i", window))
+    uc.mem_write(G_PEND, struct.pack(">B", pend))
+    sp0 = 0x41010000
+    uc.mem_write(sp0, struct.pack(">I", SENTINEL))   # jsr-kind: only a return addr on entry
+    uc.reg_write(UC_M68K_REG_A7, sp0)
+    st = dict(notify=None, notify_dur=None, a2=None)
+
+    def hook(uc, addr, size, u):
+        if addr == NOTIFY:
+            sp = uc.reg_read(UC_M68K_REG_A7)
+            st["notify"] = struct.unpack(">I", uc.mem_read(sp + 4, 4))[0]
+            st["notify_dur"] = struct.unpack(">I", uc.mem_read(sp + 8, 4))[0]
+        elif addr == SENTINEL:
+            st["a2"] = uc.reg_read(UC_M68K_REG_A2)
+            uc.emu_stop()
+
+    h = uc.hook_add(UC_HOOK_CODE, hook)
+    try:
+        uc.emu_start(QLR_TICK, 0, count=20000)
+    except UcError:
+        pass
+    uc.hook_del(h)
+    st["rticks"] = struct.unpack(">i", uc.mem_read(G_RTICKS, 4))[0]
+    st["window"] = struct.unpack(">i", uc.mem_read(G_WINDOW, 4))[0]
     return st
 
 
@@ -156,47 +236,125 @@ def test_play():
     check("REC not held -> counter untouched", r["cnt"] == 0)
 
     r = run_play(rec_held=1, cnt=0, qlr=0)
-    check("1st press -> stock resume (stock starts LIVE REC)", r["resume"] and r["proj_gate"])
-    check("1st press -> counter = 1", r["cnt"] == 1)
-    check("1st press -> no flip / no toast", r["qlr"] == 0 and r["notify"] is None)
+    check("very 1st press -> stock resume (stock starts LIVE REC)", r["resume"] and r["proj_gate"])
+    check("very 1st press -> counter = 1", r["cnt"] == 1)
+    check("very 1st press -> arms the pairing window", r["window"] == MAX_GAP)
+    check("very 1st press -> sets G_PEND", r["pend"] == 1)
+    check("very 1st press -> no flip / no toast", r["qlr"] == 0 and r["notify"] is None)
 
-    r = run_play(rec_held=1, cnt=1, qlr=0, sh=0xdead)
-    check("2nd press -> QLR 0 -> 1", r["qlr"] == 1)
-    check("2nd press -> shadow 0x100fff3c = 1", r["sh"] == 1)
-    check("2nd press -> re-checksum called", r["cksum"])
-    check('2nd press -> NOTIFY("QUANT LIVE REC ON")', r["notify"] == MSG_ON,
-          f"got 0x{(r['notify'] or 0):08x} want 0x{MSG_ON:08x}")
-    check("2nd press -> NOTIFY dur = 0 (persistent)", r["notify_dur"] == 0, str(r["notify_dur"]))
-    check("2nd press -> G_OURS set", r["ours"] == 1)
-    check("2nd press -> [PLAY] swallowed (no resume, no transport gate)",
+    r = run_play(rec_held=1, cnt=1, qlr=0, sh=0xdead, window=5)
+    check("2nd press, FAST (window still > 0) -> QLR 0 -> 1", r["qlr"] == 1)
+    check("2nd press, fast -> shadow 0x100fff3c = 1", r["sh"] == 1)
+    check("2nd press, fast -> re-checksum called", r["cksum"])
+    check('2nd press, fast, QLR now 1 -> NOTIFY the OFF string (menu-inverted label, item 6)',
+          r["notify"] == MSG_OFF, f"got 0x{(r['notify'] or 0):08x} want 0x{MSG_OFF:08x}")
+    check("2nd press, fast -> NOTIFY dur = REARM_DUR (self-timing, NEVER 0 -- Session 50)",
+          r["notify_dur"] == REARM_DUR, str(r["notify_dur"]))
+    check("2nd press, fast -> G_LASTMSG = the OFF string", r["lastmsg"] == MSG_OFF)
+    check("2nd press, fast -> G_RTICKS armed to REARM_INTERVAL", r["rticks"] == REARM_INTERVAL)
+    check("2nd press, fast -> G_ARM set", r["arm"] == 1)
+    check("2nd press, fast -> G_PEND cleared (a flip does NOT pre-arm a new pending press)",
+          r["pend"] == 0)
+    check("2nd press, fast -> [PLAY] swallowed (no resume, no transport gate)",
           r["swallowed"] and not r["resume"] and not r["proj_gate"])
-    check("2nd press -> counter = 2", r["cnt"] == 2)
+    check("2nd press, fast -> counter = 2", r["cnt"] == 2)
 
-    r = run_play(rec_held=1, cnt=2, qlr=1)
-    check("3rd press -> swallowed, nothing else", r["swallowed"] and not r["resume"])
-    check("3rd press -> no flip / no toast", r["qlr"] == 1 and r["notify"] is None)
-    check("3rd press -> counter = 3", r["cnt"] == 3)
+    r = run_play(rec_held=1, cnt=1, qlr=0, window=0)
+    check("2nd press, TOO SLOW (window <= 0) -> no flip", r["qlr"] == 0 and r["notify"] is None)
+    check("2nd press, too slow -> discarded, becomes the new reference (window re-armed)",
+          r["window"] == MAX_GAP)
+    check("2nd press, too slow -> swallowed, not sent to stock",
+          r["swallowed"] and not r["resume"] and not r["proj_gate"])
 
-    r = run_play(rec_held=1, cnt=3, qlr=1)
-    check("4th press -> QLR 1 -> 0", r["qlr"] == 0)
-    check('4th press -> NOTIFY("QUANT LIVE REC OFF")', r["notify"] == MSG_OFF,
-          f"got 0x{(r['notify'] or 0):08x} want 0x{MSG_OFF:08x}")
-    check("4th press -> swallowed", r["swallowed"] and not r["resume"])
+    r = run_play(rec_held=1, cnt=1, qlr=0, window=-3)
+    check("2nd press, window already very negative -> still treated as too slow (no flip)",
+          r["qlr"] == 0 and r["notify"] is None and r["window"] == MAX_GAP)
+
+    r = run_play(rec_held=1, cnt=2, qlr=1, window=5)
+    check("3rd press, fast, QLR now 0 -> NOTIFY the ON string", r["notify"] == MSG_ON)
+    check("3rd press, fast -> QLR 1 -> 0", r["qlr"] == 0)
+
+    # --- HW-confirmed bug fix: a fast press right after a flip must NOT
+    # complete a "pair" with the flip itself (G_PEND cleared by the flip) ---
+    r = run_play(rec_held=1, cnt=5, qlr=1, window=MAX_GAP, pend=0)
+    check("press right after a flip (G_PEND=0, window freshly re-armed) -> "
+          "NOT flipped, even though the window itself looks fast enough",
+          r["qlr"] == 1 and r["notify"] is None)
+    check("that press becomes the new pending reference", r["pend"] == 1 and r["window"] == MAX_GAP)
+
+    r = run_play(rec_held=1, cnt=5, qlr=1, window=5, pend=1)
+    check("a GENUINE pending press, fast -> still flips normally", r["notify"] == MSG_ON)
+    check("a genuine flip clears G_PEND again (require a fresh pair for the next one)",
+          r["pend"] == 0)
 
 
 def test_recrel():
     print("qlr_recrel  ([REC] release) ---------------------------------")
 
-    r = run_recrel(rec_held=1, cnt=3, ours=1)
+    r = run_recrel(rec_held=1, cnt=3, arm=1, pend=1)
     check("clears REC_HELD (0x460d1726)", r["rec_held"] == 0)
     check("clears the press counter", r["cnt"] == 0)
-    check("toast was ours -> NOTIFY_CLOSE called", r["close"])
-    check("toast was ours -> G_OURS cleared", r["ours"] == 0)
+    check("clears G_PEND", r["pend"] == 0)
+    check("toast was armed -> NOTIFY_CLOSE called (Session 51 item 4: instant close)",
+          r["close"])
+    check("toast was armed -> G_ARM cleared", r["arm"] == 0)
 
-    r = run_recrel(rec_held=1, cnt=1, ours=0)
-    check("no toast of ours -> NOTIFY_CLOSE not called", not r["close"])
-    check("no toast of ours -> still clears REC_HELD + counter",
-          r["rec_held"] == 0 and r["cnt"] == 0)
+    r = run_recrel(rec_held=1, cnt=1, arm=0)
+    check("not armed -> NOTIFY_CLOSE NOT called (nothing to close)", not r["close"])
+    check("not armed -> still clears REC_HELD + counter, no crash",
+          r["rec_held"] == 0 and r["cnt"] == 0 and r["arm"] == 0)
+
+
+def test_tick():
+    print("qlr_tick  (per-control-frame re-arm + pairing-window countdown) --------")
+
+    r = run_tick(arm=0)
+    check("not armed -> no NOTIFY call", r["notify"] is None)
+    check("not armed -> displaced `lea 0x46c7dfba,%a2` still replayed",
+          r["a2"] == WATCHDOG_A2, f"a2=0x{(r['a2'] or 0):08x}")
+
+    r = run_tick(arm=1, rticks=5)
+    check("armed, ticks remaining -> no NOTIFY call yet", r["notify"] is None)
+    check("armed, ticks remaining -> G_RTICKS decremented", r["rticks"] == 4)
+    check("armed, ticks remaining -> displaced lea still replayed",
+          r["a2"] == WATCHDOG_A2)
+
+    r = run_tick(arm=1, rticks=1, lastmsg=MSG_ON)
+    check("armed, ticks hit 0 -> NOTIFY re-issued with the last message",
+          r["notify"] == MSG_ON)
+    check("armed, ticks hit 0 -> dur = REARM_DUR (still self-timing, never 0)",
+          r["notify_dur"] == REARM_DUR, str(r["notify_dur"]))
+    check("armed, ticks hit 0 -> G_RTICKS reset to REARM_INTERVAL",
+          r["rticks"] == REARM_INTERVAL)
+    check("armed, ticks hit 0 -> displaced lea still replayed after the re-arm",
+          r["a2"] == WATCHDOG_A2)
+
+    r = run_tick(arm=1, rticks=1, lastmsg=MSG_OFF)
+    check("re-arm uses whatever G_LASTMSG currently holds (OFF string here)",
+          r["notify"] == MSG_OFF)
+
+    r = run_tick(arm=1, rticks=0, lastmsg=MSG_ON)
+    check("G_RTICKS already at/below 0 (stale) -> still re-arms, doesn't wait forever",
+          r["notify"] == MSG_ON)
+
+    # --- Session 51 item 1: the pairing-window countdown ---
+    r = run_tick(rec_held=0, cnt=1, window=5, pend=1)
+    check("REC not held -> window NOT decremented (nothing pending without REC)",
+          r["window"] == 5)
+
+    r = run_tick(rec_held=1, cnt=1, window=5, pend=0)
+    check("REC held but G_PEND=0 (Session 51-bis: e.g. right after a flip) -> "
+          "window NOT decremented", r["window"] == 5)
+
+    r = run_tick(rec_held=1, cnt=1, window=5, pend=1)
+    check("REC held, a press genuinely pending -> window decremented once", r["window"] == 4)
+
+    r = run_tick(rec_held=1, cnt=1, window=0, pend=1)
+    check("window already at 0 -> keeps counting down (goes negative, not stuck)",
+          r["window"] == -1)
+
+    r = run_tick(rec_held=1, cnt=1, window=5, pend=1, arm=0)
+    check("window countdown is independent of G_ARM/toast state", r["window"] == 4)
 
 
 def test_string_len():
@@ -213,6 +371,7 @@ def test_string_len():
 if __name__ == "__main__":
     test_play()
     test_recrel()
+    test_tick()
     test_string_len()
     print()
     if fails:

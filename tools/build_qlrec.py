@@ -16,8 +16,16 @@ its getter/setter and its power-cycle persistence are all stock -- we only add a
 front-panel gesture that writes the same word + 'ANDY' shadow and re-checksums.
 
 Detours:
-  0x40061778  6 B  jsr 0x4009b5c0     -> jmp qlr_play    ([PLAY] press)
-  0x4004883a  6 B  clr.l 0x460d1726   -> jmp qlr_recrel   ([REC] release)
+  0x40061778  6 B  jsr 0x4009b5c0        -> jmp qlr_play    ([PLAY] press)
+  0x4004883a  6 B  clr.l 0x460d1726      -> jmp qlr_recrel   ([REC] release)
+  0x400522ca  6 B  lea 0x46c7dfba,%a2    -> jsr qlr_tick     (per-control-frame re-arm tick)
+
+Session 50 REWRITE: the toast is now a periodically re-armed dur>0 (self-timing)
+notification instead of a one-shot dur<=0 ("persistent") one -- the dur<=0 form
+was flashed and confirmed to hang the unit (it registers on what real disassembly
+of FUN_4005a2b8 shows is a modal window stack, not a passive banner). See
+tools/patch_qlrec.s's header and NOTES.md "Session 50" for the full root cause
+and fix design. NOT yet reflashed -- emulator-validate before trying again.
 
 Usage:   python3 tools/build_qlrec.py [VERSTR]
 Outputs: out/mainos_qlrec.bin, out/elek_qlrec.bin,
@@ -43,7 +51,8 @@ PATCHES = [
      [(0x4009b6f2, "cave", "203c0000091a", 18, "jmp")]),
     ("patch_qlrec", 0x400d7400, None,
      [(0x40061778, "qlr_play",   "4eb94009b5c0", 6, "jmp"),
-      (0x4004883a, "qlr_recrel", "42b9460d1726", 6, "jmp")]),
+      (0x4004883a, "qlr_recrel", "42b9460d1726", 6, "jmp"),
+      (0x400522ca, "qlr_tick",   "45f946c7dfba", 6, "jsr")]),   # lea 0x46c7dfba,%a2
 ]
 
 FREE_END = 0x400d7c3c
@@ -147,8 +156,11 @@ def main():
 
     print(f"\n  {OUT_SYX.name}  (MIDI DIN)  +  {OUT_BIN.name}  (CF card)")
     print(f"  version screen / SYSTEM STATUS -> OS VERSION will read:  {VERSTR}")
-    print("  Hold [REC], tap [PLAY] twice -> toggles QUANTIZE LIVE REC; toast shows")
-    print("  while [REC] is held.  PERSONALIZE row + power-cycle persistence unchanged.")
+    print("  Hold [REC], tap [PLAY] twice CLOSE TOGETHER (within MAX_GAP ticks) ->")
+    print("  toggles QUANTIZE LIVE REC; toast shows while [REC] is held (periodic")
+    print("  dur>0 re-arm, Session 50/51 -- never a persistent dur<=0 toast, which hung")
+    print("  the unit) and closes instantly on release.  PERSONALIZE row + power-cycle")
+    print("  persistence unchanged.")
     print("  Revert = flash downloads/extracted/OCTATRACK_OS1.40C.syx")
 
 
