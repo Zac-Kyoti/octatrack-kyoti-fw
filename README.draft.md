@@ -24,20 +24,20 @@
 
 # OT Kyoti FW
 
-> Hello Elektron fans. I'm Zac Kyoti, a musician and music tech hacker based out
-> of the US west coast. This repo contains the info needed to build your own
-> unofficial Octatrack KYOTI firmware.
+> Welcome Elektron fans. I'm Zac Kyoti, a musician and music tech hacker located
+> on the US west coast. This repo contains knowledge and tools that may be used
+> to build your own unofficial Octatrack KYOTI firmware.
 >
 > **Design Philosophy:** KYOTI firmware is designed as a set of features, QOL
 > improvements, and bugfixes, not available in the factory firmware, which can be
 > applied individually, in combination, or as a comprehensive build. All mods are
-> designed to cleanly interlock. The KYOTI firmware design perspective comes from
-> a place of, foremost, deep respect and appreciation for the architecture of
+> designed to cleanly interlock. The KYOTI firmware design perspective comes
+> foremost from a place of deep respect and appreciation for the architecture of
 > these instruments before any mod is applied. As such, my approach is to make the
 > modded instrument "feel" like stock — customizations appearing seamless,
-> respecting UX/UI conventions, and (ideally) stage-ready and bug-free. KYOTI
-> firmware is not about complete overhaul of the instrument's plumbing (there are
-> plenty of other projects that do that, which you may consider combining with
+> respecting existing UX/UI conventions, and (ideally) stage-ready and bug-free.
+> KYOTI firmware is not about complete overhaul of the instrument's plumbing (there
+> are plenty of other projects that do that, which you may consider combining with
 > KYOTI); it's more about making the stock instrument be the best version of
 > itself it can be. Read on and enjoy!
 >
