@@ -50,13 +50,14 @@ STOCK_IMAGE = ROOT / "out" / "raw" / "section_3_MAIN_OS.bin"
 PATCHED_IMAGE = ROOT / "out" / "mainos_partreapply.bin"
 DEMO = pathlib.Path.home() / "Desktop" / "OT Backup" / "KYOTI" / "OT DEMO"
 
-if not (OCTABAM / "tools" / "emu_rtos.py").exists():
+if not (OCTABAM / "tools" / "emu" / "emu_rtos.py").exists():
     sys.exit("missing refs/octabam -> python3 tools/refs/sync.py")
 if not (OCTABAM / ".venv" / "lib" / "unicorn-emac").is_dir():
     sys.exit("missing the EMAC-patched Unicorn -> "
              "( cd refs/octabam && PY=$(command -v python3) bash scripts/build_unicorn.sh )")
 os.chdir(OCTABAM)
 sys.path.insert(0, str(OCTABAM / "tools"))
+import toolpath                  # noqa: E402
 import emu_rtos as er            # noqa: E402
 import emu_card as ec            # noqa: E402
 
@@ -340,11 +341,96 @@ def cmd_probe(rt, poke_pickup):
     return True
 
 
+def cmd_repeat(rt):
+    """HW finding (2026-09-13, real MKI, PARTREAPPLY flashed): P1(Part0 T1=PICKUP,
+    silent) -> P5(Part1 T1=FLEX, sample B) sounds correct the FIRST time; jump back
+    to P1 then forward to P5 AGAIN and T1 now plays Part0's PICKUP content (sample A)
+    under the FLEX machine. The fix's #1 mechanism (SLOT_MIRROR write + KILL_BIT) was
+    always flagged unverified/suspect (HANDOFF) -- this does a real P1->P5->P1->P5
+    round trip and snapshots the voice struct + SLOT_MIRROR + KILL_BIT at BOTH
+    arrivals at P5 to see exactly what differs the second time."""
+    blob = part_ptr(rt)
+    curbank = u8(rt, er.CUR_BANK)
+    T = 0
+    m0 = blob + PARTS_OFF + 0 * PART_STRIDE + MACHINE_OFF + T
+    m1 = blob + PARTS_OFF + 1 * PART_STRIDE + MACHINE_OFF + T
+    print(f"\n===== emu_partswitch --repeat : P1<->P5 round trip, T{T+1} PICKUP<->FLEX =====")
+    print(f"curbank={curbank}  PART_PTR={blob:#x}")
+
+    def slot_addr(part, track, typ):
+        return blob + PARTS_OFF + part * PART_STRIDE + 0x2ca + track * 5 + typ
+
+    print(f"poke       : Part0 T{T+1} machine {u8(rt, m0)} -> 4 (PICKUP);  "
+          f"Part1 T{T+1} machine stays {u8(rt, m1)} (FLEX)")
+    rt.uc.mem_write(m0, b"\x04")
+    rt.uc.mem_write(slot_addr(0, T, 4), bytes([128 + T]))   # Part0 PICKUP buffer slot
+    rt.uc.mem_write(slot_addr(1, T, 1), b"\x02")            # Part1 FLEX slot -> slot 2 (distinct from 128+T and from slot 1)
+    print(f"           : Part0 PICKUP slot @ {slot_addr(0,T,4):#x} = {u8(rt, slot_addr(0,T,4))};  "
+          f"Part1 FLEX slot @ {slot_addr(1,T,1):#x} = {u8(rt, slot_addr(1,T,1))}")
+
+    vb = VOICE_BASE + T * VOICE_STRIDE
+    sm1 = SLOT_MIRROR + 1 * 6322 + T * 5
+
+    def snap(tag):
+        v = rd(rt, vb, 0x50)
+        print(f"\n  {tag}")
+        print(f"    voice[T{T+1}] +0..+0x50 = {v.hex(' ')}")
+        print(f"    SLOT_MIRROR Part1[T]     = {rd(rt, sm1, 5).hex(' ')}")
+        print(f"    KILL_BIT 0x8000184c      = {u8(rt, KILL_BIT):#04x}")
+        print(f"    applied bank/part        = {u8(rt, APPLIED_BANK)}/{u8(rt, APPLIED_PART)}")
+        return v
+
+    rt.watch_pc([FUN_400972fc_ENTRY, FUN_40009094, FUN_4002b654])
+    n_pc = 0
+
+    def switch(bank, pat, tag):
+        nonlocal n_pc
+        rt.uc.mem_write(0x800065b8, b"\x00\x00\x00\x00")
+        rt.run(until=lambda r: r.pc == er.MAIN_SPIN)
+        sb, sp = rt.seq_select_live(bank, pat)
+        rt.run(ms=1500)
+        print(f"\n----- switch: bank {sb} pattern {sp}  ({tag}) -----")
+        for s, line in rt.pc_hits[n_pc:]:
+            print(f"    PC-HIT {line}")
+        n_pc = len(rt.pc_hits)
+
+    rt.seq_select_live(curbank, 0)
+    rt.internal_clock()
+    rt.frame = True
+    rt.next_frame = rt.sample + er.FRAME_PERIOD
+    rt.exact_clock()
+    tgt = rt.frame_count + 60
+    rt.start_transport_live()
+    rt.run(ms=8000, until=lambda r: r.frame_count >= tgt)
+    snap("after initial P1 (Part0, T1=PICKUP)")
+
+    switch(curbank, 4, "P1->P5 #1 (Part0->Part1, T1 PICKUP->FLEX)")
+    v1 = snap("ARRIVAL #1 at P5 (Part1, T1=FLEX)")
+
+    switch(curbank, 0, "P5->P1 (Part1->Part0, T1 FLEX->PICKUP)")
+    snap("back at P1 (Part0, T1=PICKUP)")
+
+    switch(curbank, 4, "P1->P5 #2 (Part0->Part1, T1 PICKUP->FLEX AGAIN)")
+    v2 = snap("ARRIVAL #2 at P5 (Part1, T1=FLEX)")
+
+    print(f"\n===== DIFF: arrival #1 vs arrival #2 at P5, voice[T{T+1}] +0..+0x50 =====")
+    diffs = [(i, v1[i], v2[i]) for i in range(len(v1)) if v1[i] != v2[i]]
+    if not diffs:
+        print("  (byte-identical -- whatever differs audibly is NOT in this 0x50-byte window)")
+    else:
+        for i, a, b in diffs:
+            print(f"    +{i:#04x}: arrival#1={a:#04x}  arrival#2={b:#04x}")
+    return True
+
+
 def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--probe", action="store_true", help="DEMO as-is (all FLEX)")
     ap.add_argument("--repro", action="store_true",
                     help="poke Part0 T1 -> PICKUP first, then switch to Part1 (FLEX)")
+    ap.add_argument("--repeat", action="store_true",
+                    help="HW finding follow-up: P1->P5->P1->P5 round trip, diff the voice "
+                         "struct between the first and second arrival at P5")
     ap.add_argument("--patched", action="store_true",
                     help="boot out/mainos_partreapply.bin (tools/build_partreapply.py) instead of stock")
     ap.add_argument("--image", help="explicit MAIN OS section to boot (e.g. out/mainos_merged.bin)")
@@ -369,7 +455,10 @@ def main(argv):
     print(f"load       : mounted={mounted} posted={posted} saved_bank={saved_bank} "
           f"final_bank={final_bank} ({elapsed:.0f} ms)")
 
-    cmd_probe(rt, poke_pickup=a.repro)
+    if a.repeat:
+        cmd_repeat(rt)
+    else:
+        cmd_probe(rt, poke_pickup=a.repro)
 
 
 if __name__ == "__main__":
