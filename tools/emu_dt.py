@@ -7,14 +7,14 @@ Emulate the DT (MUTE MODE == 2) path in the DT build, against the real image byt
 DT mute is a pure sequencer mute: the `pre` hook clears the same D5 mute/solo bits as OT+FX
 (so FUN_40004db8 keeps every DSP-frame level word -> the sounding voice AND its FX still
 reach the mix, untouched), but does NOT call the FUN_40008f84 note-off and does NOT maintain
-DAT_8000184a.  `pre_v` drops new "start" voice-commands for a silenced track (no new trigs).
-Net: whatever voice is playing rides its own amp envelope to its natural end (fade / sustain
-/ infinite loop); only re-triggering is suppressed.
+DAT_8000184a.  `mt_trig` drops the real per-trig voice-start (FUN_40006844) for a silenced
+track (no new trigs).  Net: whatever voice is playing rides its own amp envelope to its
+natural end (fade / sustain / infinite loop); only re-triggering is suppressed.
 
   static : get/set_mutemode now cover 3 modes (OT / OT+FX / DT); val_tbl[2] -> "DT".
-  emu    : `pre`   gate 2 -> D5 bits cleared, NO note-off, REL_STATE untouched, shadow cleared;
-                   gate 1 -> unchanged (note-off + REL_STATE);  gate 0 -> stock bail.
-           `pre_v` gate 2 -> drops muted / solo-non-soloed starts, passes retrig / soloed.
+  emu    : `pre`     gate 2 -> D5 bits cleared, NO note-off, REL_STATE untouched, shadow cleared;
+                     gate 1 -> unchanged (note-off + REL_STATE);  gate 0 -> stock bail.
+           `mt_trig` gate 2 -> drops muted / solo-non-soloed trigs, passes soloed/unmuted.
 
 Usage:  python3 tools/emu_dt.py [out/mainos_mutemode_dt.bin]
 """
@@ -34,7 +34,7 @@ SHADOW     = 0x80006c66
 GATE       = 0x800000dc
 NOTEOFF    = 0x40008f84
 BACK       = 0x40004dcc
-BACK_V     = 0x40005180
+MT_BACK    = 0x4000684a
 fail = 0
 
 
@@ -56,7 +56,7 @@ SYM = {p[2]: int(p[0], 16) for p in
 MSYM = {p[2]: int(p[0], 16) for p in
         (l.split() for l in subprocess.run(["m68k-elf-nm", "out/patch_mutemode_dt.elf"],
          capture_output=True, text=True).stdout.splitlines()) if len(p) == 3}
-PRE, PRE_V = SYM["pre"], SYM["pre_v"]
+PRE, MT_TRIG = SYM["pre"], SYM["mt_trig"]
 
 
 # ------------------------------------------------------------------ static: menu
@@ -175,43 +175,137 @@ check(no == [] and uc.mem_read(SHADOW, 1)[0] == 0, "no work, shadow cleared")
 check((d5 >> (8 + 3)) & 1 == 1, f"D5 mute bit 3 left SET -> stock cut (D5={d5:#010x})")
 
 
-# ------------------------------------------------------------------ emu: pre_v
-def run_v(track, cmd, mute_state, solo_flag, gate):
+# ------------------------------------------------------------------ emu: mt_trig
+# Session ??-bis: pre_v (detouring FUN_40005178/trig_to_voice) is GONE -- proven dead code
+# for ordinary sequenced trigs by driving the real firmware in the full-firmware emulator
+# (79 real trigs over 6s, FUN_40005178 entered ZERO times). The real per-trig dispatch is
+# FUN_40006844 (via FUN_40006820's 8-track fan-out) -- found by tracing the actual trig-flag
+# write back through live execution, not by re-reading a decompile. mt_trig detours its
+# entry (`movew sr,d2`/`movew #0x2700,sr`, 6 B); the track number is already in D1 at entry
+# (0..7, guaranteed by the fan-out), nothing is pushed to the stack, and there is no cmd
+# value at all to filter on.
+STOP_ADDR = 0xDEAD0000
+RET_ADDR = 0x400003fc   # a mapped, harmless ROM address -- must be fetchable for the hook to fire
+MT_BACK = 0x4000684a
+SENTINEL_D2, SENTINEL_A2 = 0xCAFED00D, 0xCAFEA2A2
+SP0 = 0xF000
+
+
+def run_mt(track, mute_state, solo_flag, gate):
+    """Simulates FUN_40006820's REAL stack frame at the `bccs 0x40006844` fallthrough:
+    [sp+0]=its saved D2, [sp+4]=its saved A2, [sp+8]=the real return address (Session
+    ??-ter: a bare single-return-address harness passed here but the same fix crashed
+    real playback instantly, because an early return must also unwind those 2 extra
+    longs). Returns ('drop'|'pass', final_sp, d2, a2)."""
     uc = new_uc()
     uc.mem_write(MUTE_STATE, struct.pack(">I", mute_state))
     uc.mem_write(SOLO_FLAG, bytes([solo_flag]))
     uc.mem_write(GATE, struct.pack(">I", gate))
-    sp = 0xF000
-    uc.mem_write(sp, struct.pack(">I", 0xDEAD0000))
-    uc.mem_write(sp + 4, struct.pack(">I", track))
-    uc.mem_write(sp + 8, struct.pack(">I", cmd))
-    uc.mem_write(sp + 12, struct.pack(">I", 1))
+    uc.reg_write(UC_M68K_REG_SR, 0x2700)   # supervisor mode -- the "pass" path replays the
+                                            # displaced `movew sr,d2`, privileged on ColdFire
+    sp = SP0 - 8
+    ret = RET_ADDR
+    uc.mem_write(sp, struct.pack(">I", SENTINEL_D2))
+    uc.mem_write(sp + 4, struct.pack(">I", SENTINEL_A2))
+    uc.mem_write(sp + 8, struct.pack(">I", ret))
     uc.reg_write(UC_M68K_REG_A7, sp)
+    uc.reg_write(UC_M68K_REG_D1, track)
     out = {"where": None}
 
     def hook(u, addr, size, _):
-        if addr == BACK_V:
+        if addr == MT_BACK:
             out["where"] = "pass"
-            u.reg_write(UC_M68K_REG_PC, 0xDEAD0000)
+            u.reg_write(UC_M68K_REG_PC, STOP_ADDR)
+        if addr == ret:
+            out["where"] = "drop"
+            u.reg_write(UC_M68K_REG_PC, STOP_ADDR)
     uc.hook_add(UC_HOOK_CODE, hook)
     try:
-        uc.emu_start(PRE_V, 0xDEAD0000, count=5000)
+        uc.emu_start(MT_TRIG, STOP_ADDR, count=5000)
     except UcError:
         pass
-    if out["where"] is None and uc.reg_read(UC_M68K_REG_PC) == 0xDEAD0000:
-        out["where"] = "drop"
-    return out["where"]
+    return out["where"], uc.reg_read(UC_M68K_REG_A7), uc.reg_read(UC_M68K_REG_D2), uc.reg_read(UC_M68K_REG_A2)
 
 
-print("\n=== emu: DT `pre_v` (gate 2) -- suppress new trigs on silenced tracks ===")
-START, RETRIG = 0x80, 0x90
-check(run_v(3, START, 1 << (8 + 3), 0, 2) == "drop", "muted t3 start -> DROP")
-check(run_v(3, RETRIG, 1 << (8 + 3), 0, 2) == "pass", "muted t3 retrig (stop bit) -> PASS")
-check(run_v(3, START, 0, 0, 2) == "pass", "unmuted t3, no solo -> PASS")
-check(run_v(3, START, 1 << 0, 1, 2) == "drop", "solo t0, non-soloed t3 start -> DROP")
-check(run_v(0, START, 1 << 0, 1, 2) == "pass", "solo t0, soloed t0 start -> PASS")
-check(run_v(3, START, 1 << (8 + 3), 0, 1) == "drop", "regression: OT+FX still drops muted start")
-check(run_v(3, START, 1 << (8 + 3), 0, 0) == "pass", "regression: OT lets the start through")
+def check_drop(res, label):
+    w, sp, d2, a2 = res
+    check(w == "drop", f"{label} -> DROP (got {w})")
+    check(sp == SP0 + 4, f"{label}: SP correctly unwound past D2/A2/ret (got {sp:#x})")
+    check(d2 == SENTINEL_D2 and a2 == SENTINEL_A2,
+          f"{label}: caller's D2/A2 correctly restored (got d2={d2:#x} a2={a2:#x})")
+
+
+def check_pass(res, label):
+    w, sp, d2, a2 = res
+    check(w == "pass", f"{label} -> PASS (got {w})")
+    check(sp == SP0 - 8, f"{label}: SP unchanged, ready for FUN_40006844's own epilogue (got {sp:#x})")
+
+
+print("\n=== emu: DT `mt_trig` (gate 2) -- suppress new trigs on silenced tracks ===")
+check_drop(run_mt(3, 1 << (8 + 3), 0, 2), "muted t3")
+check_pass(run_mt(3, 0, 0, 2), "unmuted t3, no solo")
+check_drop(run_mt(3, 1 << 0, 1, 2), "solo t0, non-soloed t3")
+check_pass(run_mt(0, 1 << 0, 1, 2), "solo t0, soloed t0")
+check_drop(run_mt(3, 1 << (8 + 3), 0, 1), "regression: OT+FX still drops muted track")
+check_pass(run_mt(3, 1 << (8 + 3), 0, 0), "regression: OT lets it through")
+for t in range(8):
+    check_drop(run_mt(t, 1 << (8 + t), 0, 2), f"every audio track (t={t})")
+
+print("\n=== emu: DT `mt_rebind` (gate 2) -- gate the arena-pointer rebind write ===")
+# Session ??-quater: see patch_softmute.s / emu_solo.py for the full reasoning -- mt_trig
+# alone made no HW difference; this second hook gates the one remaining DSP-visible
+# write mt_trig doesn't touch. Working hypothesis, not emulator-provable end to end.
+MT_REBIND = SYM["mt_rebind"]
+MR_BACK = 0x4000f4e4
+A2_TARGET = 0x80050000
+SENT_A5, SENT_A4 = 0x46c92000, 0x100b1000
+
+
+def run_mr(track, mute_state, solo_flag, gate):
+    uc = new_uc()
+    uc.mem_write(MUTE_STATE, struct.pack(">I", mute_state))
+    uc.mem_write(SOLO_FLAG, bytes([solo_flag]))
+    uc.mem_write(GATE, struct.pack(">I", gate))
+    uc.mem_write(A2_TARGET, b"\x00" * 16)
+    sp = 0xF000
+    uc.mem_write(sp + 0x40, struct.pack(">I", track))
+    uc.reg_write(UC_M68K_REG_A7, sp)
+    uc.reg_write(UC_M68K_REG_A2, A2_TARGET)
+    uc.reg_write(UC_M68K_REG_A4, SENT_A4)
+    uc.reg_write(UC_M68K_REG_A5, SENT_A5)
+
+    def hook(u, addr, size, _):
+        if addr == MR_BACK:
+            u.reg_write(UC_M68K_REG_PC, STOP_ADDR)
+    uc.hook_add(UC_HOOK_CODE, hook)
+    try:
+        uc.emu_start(MT_REBIND, STOP_ADDR, count=2000)
+    except UcError:
+        pass
+    a2p4 = struct.unpack(">I", uc.mem_read(A2_TARGET + 4, 4))[0]
+    a2p8 = struct.unpack(">I", uc.mem_read(A2_TARGET + 8, 4))[0]
+    return a2p4, a2p8
+
+
+def check_mr_skipped(res, label):
+    a2p4, a2p8 = res
+    check(a2p4 == 0 and a2p8 == 0, f"{label}: BOTH writes skipped (got +4={a2p4:#x} +8={a2p8:#x})")
+
+
+def check_mr_written(res, label):
+    a2p4, a2p8 = res
+    check(a2p4 == SENT_A5 and a2p8 == SENT_A4,
+          f"{label}: BOTH writes happened (got +4={a2p4:#x} +8={a2p8:#x})")
+
+
+check_mr_skipped(run_mr(3, 1 << (8 + 3), 0, 2), "muted t3")
+check_mr_written(run_mr(3, 0, 0, 2), "unmuted t3, no solo")
+check_mr_skipped(run_mr(3, 1 << 0, 1, 2), "solo t0, non-soloed t3")
+check_mr_written(run_mr(0, 1 << 0, 1, 2), "solo t0, soloed t0")
+check_mr_skipped(run_mr(3, 1 << (8 + 3), 0, 1), "regression: OT+FX still gates muted track")
+check_mr_written(run_mr(3, 1 << (8 + 3), 0, 0), "regression: OT lets it through")
+for t in range(8):
+    check_mr_skipped(run_mr(t, 1 << (8 + t), 0, 2), f"every audio track (t={t})")
 
 print()
 print("ALL GOOD" if not fail else f"{fail} FAILURE(S)")

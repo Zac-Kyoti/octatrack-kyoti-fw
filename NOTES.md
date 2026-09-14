@@ -7504,3 +7504,1636 @@ expect no conflicts). (2) HW pass once the MKI is back, per `FLASHING.md`'s orde
 convention. (3) if time allows, independently confirm the scene-morph retrigger
 (step 3) and the `#3` p-lock loader with their own targeted emu probes, matching the
 rigor applied to steps 1-2 here.
+
+## Session 50 (2026-09-13, `wip`) -- HARDWARE PASS: Bug-2 CONFIRMED WORKING; PARTREAPPLY report #1's mechanism DOES NOT ADDRESS THE REAL BUG (stock == patched)
+
+User has the MKI back and is working the flash queue in order (bug fixes first, per
+the user's own priority pick, then DT -> sidechain -> DIRECTJUMP -> RELOAD). Two
+toolchain/doc items first, then two flashes.
+
+**Toolchain drift fixed:** `refs/octabam` had re-synced to a newer upstream commit
+(`0ec42f3`) that reorganized `tools/` into group subdirs (`build/harness/emu/hw/verify`)
+behind a new `toolpath.py` shim -- broke all 7 of our wrapper scripts that import
+`emu_rtos`/`emu_card` the old flat way (`emu_rtos.py`, `emu_pattern_led.py`,
+`emu_partswitch.py`, `emu_plock.py`, `emu_reload.py`, `diff_flex_static.py`,
+`check_reccache_causation.py`). Fixed uniformly: each now does
+`sys.path.insert(0, str(OCTABAM/"tools")); import toolpath` right after the chdir,
+which lets octabam's own shim add the group dirs to `sys.path`; `emu_rtos.py`'s
+`OCTA_RTOS` path also updated `tools/emu_rtos.py` -> `tools/emu/emu_rtos.py`. All
+re-verified working post-fix (`emu_pattern_led.py --patched`, `emu_qlrec.py --patched`,
+`emu_partswitch.py --repro[--patched]` all re-ran clean).
+
+**`FLASHING.md` gained §4.8/4.9/4.10** (Bug 2 / PARTREAPPLY / QLREC hardware
+checklists -- these three builds existed since Sessions 46/48/49 but had no HW test
+procedure written down anywhere outside README's short blurbs). Quick-reference table
+also gained their 3 rows.
+
+### Bug 2 (pattern-LED) -- FLASHED, CONFIRMED WORKING, no regression
+
+`OCTATRACK_PATTERNLED.bin` flashed via the CF-card path. User initially reported it
+did NOT work (trigless-lock-only patterns still read as empty) -- this triggered a
+deep re-investigation into the multi-view p-lock system (`#1` TRAC+0x59 vs the
+`+0x4900` live-edit buffer vs `0x46c7d2e4`, revisiting the Session 24-39 "trigless
+lock is derived, not flagged" thread) as the leading hypothesis (a live/uncommitted
+lock wouldn't be in `#1`, which is all the fix scans) -- **but the user then retracted
+the report: it was a false alarm, PATTERNLED is flashed and working as expected.**
+README/FLASHING.md updated to "hardware-confirmed (MKI, 2026-09-13)". The p-lock
+multi-view investigation was NOT completed/needed and produced no code changes; the
+hypothesis (that a live, never-saved lock might not show because `#1` is only
+disk-deserialiser-filled) remains an open, untested theory if this class of bug is
+ever revisited, but is NOT currently believed to be a real problem.
+
+### PARTREAPPLY -- FLASHED; report #1's fix mechanism does not touch the real bug
+
+Before flashing, asked the user to recall + independently test the 3 Elektronauts
+reports on **stock** firmware first. Result: **report #1 (PICKUP->FLEX stuck
+loop) reproduces on stock; report #2 (recorder SRC/RLEN carryover) does NOT
+reproduce; report #3 (REC SETUP last-tweak leak) reproduced once then stopped
+manifesting after some save action** -- casting real doubt on whether #2/#3 are
+genuine, reliably-reproducible stock bugs (the fix's evidence for them was a
+scripted, single-path emulator test: `emu_partswitch.py --repro`'s poke-then-switch
+proves the *mechanism* -- the pattern-change handler never touches the recorder
+cache -- but not that this is what a real user hits, and #3 reproducing once then
+"curing itself" doesn't match a deterministic always-broken code path at all).
+
+User flashed PARTREAPPLY anyway and found a **new, more precise repro for report
+#1**: T1 = PICKUP on Part A (silent, sample A "loaded"), FLEX + sample B on Part B.
+**P1->P2: correct (plays sample B). P2->P1: correct. P1->P2 AGAIN: WRONG -- T1 now
+plays sample A under the FLEX machine.** Works once, breaks on the *second* pass
+through the same transition -- not the simple "always plays the old loop" the
+original forum report implied.
+
+This lands squarely on the piece the Session-49 HANDOFF had already flagged
+UNVERIFIED/SUSPECT: `KILL_BIT` (`0x8000184c`) is documented in our own tooling
+(`emu_partswitch.py`'s own comment) as a "voice AMP-kill / release trigger," and
+`SLOT_MIRROR` (`0x100a519c`) is, per the same file's comment, normally written
+**only** by stock's own PICKUP-entry branch (forcing `128+track`) -- our fix is the
+only code path that ever writes a non-PICKUP slot number there. Built and ran a new
+`emu_partswitch.py --repeat` mode (P1->P5->P1->P5 round trip against the factory
+DEMO with the same PICKUP/FLEX poke, snapshotting the voice struct `0x800049d8+
+T*0xA8` (`+0x50` bytes), `SLOT_MIRROR`, `KILL_BIT`, and applied-bank/part at both
+arrivals at P5): **byte-identical between arrival #1 and arrival #2** -- rules out
+those three registers going stale as the explanation, but is inconclusive on the
+real mechanism because the probe only sits on the pattern and never drives an actual
+trig; sample-buffer binding is almost certainly resolved DSP-side at trig time by
+the still-unidentified "real per-trig resolver" (`FUN_40005030` was investigated
+and ruled out in the original HANDOFF thread) -- something a ColdFire-only Unicorn
+emulator cannot observe, same class of limitation as the side-chain compressor's
+actual gain reduction.
+
+**Asked the user to run the identical 4-switch round trip on STOCK. Result: stock
+reproduces the EXACT same pattern -- good, good, then bug on the second P1->P2.**
+**Clarified: the bug is a one-way LATCH, not a toggle** -- once it appears on the
+second P1->P2, it stays broken on every subsequent P1->P2 (3rd, 4th, ...); it does
+not alternate or self-correct. Consistent with some voice/buffer-binding state
+getting permanently poisoned by the round trip through PICKUP, not a race that
+happens to resolve correctly some of the time.
+Separately, the user confirms no displayed-parameter discrepancy for #2/#3 on
+either stock or the patched build (REC SETUP and other pages show correct values
+consistently) -- another point against #2/#3 being real, reproducible bugs, on top
+of the earlier stock-repro attempts failing/self-curing.
+
+Stock and patched are **behaviorally identical** for this repro. Conclusion: **the
+fix's report-#1 mechanism (kill-bit + slot-mirror write on the PICKUP->non-PICKUP
+transition) does not address the real bug.** The original "confirmed on stock"
+single-shot repro was almost certainly performed against an already-cycled
+(non-fresh) track state, which is why it looked like a simple always-broken
+symptom rather than this good-good-bug pattern. The fix is not harmful (matches
+stock exactly on this test, doesn't make anything worse) but does not deliver the
+value the HANDOFF's design intended for the case that actually matters.
+
+**Status: PARTREAPPLY stays flashed** (harmless, and the recorder-cache /
+scene-morph / stopped-full-reapply pieces are independent of this finding and
+unaffected). **Report #1's real root cause is still open** -- needs fresh RE aimed
+at the DSP-side / trig-time sample-buffer binding, not the ColdFire-side
+Part-change handler this session's fix targeted. Reports #2/#3 remain unconfirmed
+on stock and should not be assumed real without a cleaner repro. `tools/
+emu_partswitch.py` gained `--repeat` (kept in `tools/`, not scratchpad).
+
+**NEXT:** user's call -- either continue digging on report #1's real mechanism (a
+new RE thread, likely needs driving an actual trig in `emu_rtos` post-switch and/or
+a hardware register/memory dump at trig time), or shelve it and continue the
+existing flash queue (QLREC next, then DT -> SIDECHAIN2/3 -> DIRECTJUMP v3 ->
+RELOAD/RELOAD2). README/FLASHING.md's PARTREAPPLY status text needs a rewrite to
+reflect this (currently still describes the original, now-superseded, "clean A/B"
+framing) -- not yet done, flagged here so it isn't lost.
+
+**User picked "move on" -- proceeded to flash QLREC next.**
+
+### QLREC -- FLASHED, HUNG THE UNIT (recovered clean via power-cycle). Root cause FOUND.
+
+Symptoms on real hardware: the toast opened (text visible, and reportedly showing
+the *pre-toggle* value -- e.g. combo executed while PERSONALIZE read OFF produced
+a toast saying "QUANT LIVE REC OFF", not ON) but **never closed, and the entire
+front panel stopped responding to any key while the sequencer kept advancing** --
+consistent with the UI/key-dispatch path being stuck, not a crash. User confirmed
+the unit recovered cleanly with a plain power-cycle (no MIDI rescue needed -- the
+flash image itself is fine, this was a runtime hang, not a corrupted OS). User
+also confirmed the toggle-cycling INTENT is as designed: with REC held, repeated
+PLAY double-taps should cycle QLR on/off/on/... (true of the built logic: every
+even press flips, matching `patch_qlrec.s`).
+
+**`tools/emu_qlrec.py`'s own validation could never have caught this** -- it maps
+ONLY the two cave routines standalone and stubs `FUN_4005a2b8` (NOTIFY) and
+`FUN_40056bec` (NOTIFY_CLOSE) to a bare `rts`, checking only that the cave CALLS
+them with the right args. The real bodies were never executed. The "dur<=0 ->
+persistent, no countdown, closed via `0x40056bec()`" characterization (NOTES
+"Session 46") was pure static disassembly reading, never dynamically confirmed.
+
+**Built `tools/emu_notify_probe.py`** to call the REAL `FUN_4005a2b8` in the
+full-firmware emulator. First pass: both `dur=0x44` (the known-good self-timing
+shape DIRECT JUMP v3/RELOAD2 use) and `dur=0` calls RETURNED (not an infinite
+spin at the Unicorn level) -- but `dur=0x44` returned `d0=0x1` while `dur=0`
+returned **`d0=0xffffffff`**, a real divergence worth chasing. (The probe's own
+first-pass memory dump window was wrong -- centred on `0x460d1e00`, missing the
+actual handle address `0x460d1e70` entirely by 0x70 bytes; showed nothing changed
+because it was looking at the wrong bytes, not because nothing happened.)
+
+**Real disassembly of `FUN_4005a2b8` (objdump, `out/raw/section_3_MAIN_OS.bin`,
+base `0x40000400`) resolved it completely:**
+- Entry: `d2`=text ptr, `d3`=dur. `tstl 0x460d1e70; beq skip; jsr 0x40056bec` --
+  closes any EXISTING notification handle first (harmless, no-op if none).
+- Opens a new window (`jsr 0x4005829c`), stores the returned handle into
+  `0x460d1e70`, does some draw/text setup (`jsr 0x40057008`), sets a redraw flag
+  `0x46c7c72c = 1`.
+- `tstl %d3; bles 0x4005a334` -- **`dur <= 0` branches away BEFORE the normal
+  return.** The `dur > 0` path (fall-through) stores the countdown into
+  `0x460d1e6c` and does a plain `rts` with `d0` left at `1` from an earlier
+  `moveq` -- matches the emulator's observed `d0=0x1`.
+- **The `dur <= 0` path (`0x4005a334`) clears the countdown var, calls
+  `0x40055d40`, overwrites its OWN stack argument slot with the constant
+  `0x400ba9e0`, and TAIL-JUMPS (`jmp`, not `jsr`+`rts`) into `FUN_40031494`.**
+  So our function's actual return value (the `0xffffffff` the emulator saw) is
+  whatever `0x40031494` returns, not a value `FUN_4005a2b8` itself produces.
+- **`FUN_40031494` is a linked-list INSERT into a global chain headed by
+  `0x460d165c`** -- it takes the static struct at `0x400ba9e0` as a node, walks
+  the list from the head, appends the node at the tail (or no-ops if it's
+  already the head/already in the list), then `braw`s into `0x4003125c`. The
+  `dur > 0` path never touches this list at all.
+
+**Conclusion: `dur <= 0` doesn't produce a passive, always-visible banner --
+it registers the notification on what looks exactly like a MODAL WINDOW /
+OVERLAY STACK** (`0x460d165c` head, walked as a singly-linked list terminated
+by clearing the new node's own next-pointer). The `dur > 0` self-timing path
+(what DIRECT JUMP v3's toast and RELOAD2's toast both use, and what every
+HW-confirmed prior toast in this project has used) never goes near this list.
+**This is almost certainly why the whole panel stopped responding**: the OS's
+real key/event dispatcher very likely routes input to the head of this modal
+chain instead of the normal per-key jump table while it's non-empty, so our
+own `qlr_recrel` detour -- itself hooked into the NORMAL per-key path at
+`0x4004883a` -- never runs when REC is physically released, the close call
+inside it (`jsr 0x40056bec`) never fires, the node never leaves the modal
+chain, and nothing else responds either. The sequencer keeps advancing because
+it's driven by a separate hardware-timer path, unrelated to this stuck
+UI/key-dispatch chain -- exactly the observed symptom.
+
+**This also likely explains, at least partly, the reported wrong-polarity
+toast** -- though the assembly's own message-selection logic (`patch_qlrec.s`)
+re-reads `QLR` AFTER the flip and picks the string for the NEW value, which is
+correct on its face; a stuck modal chain from an EARLIER attempt during the
+same confused hang session could easily throw off the user's tap count,
+so this is not being treated as a separately-confirmed bug pending a clean
+re-test.
+
+**Root cause: `dur=0` was the wrong mechanism for "stays visible while a key is
+held, no fixed timer" -- that specific requirement wants something that never
+touches `0x460d165c`.** A `dur > 0` self-timing toast is the only path this
+project has ever HW-confirmed as non-blocking. Candidate fix, NOT yet built:
+**periodically re-arm a short positive `dur`** (re-issue
+`FUN_4005a2b8(msg, small_dur)` every so often, e.g. from the same per-frame
+splice DIRECT JUMP v2/RELOAD2's `rl_tick` used, refreshing the countdown before
+it expires) while REC stays held, and simply STOP re-arming on release so it
+dies on its own timer shortly after -- this stays entirely in the `dur > 0`
+branch and never touches the modal list. Loses the "no timer at all, disappears
+the instant REC releases" ideal (there'd be a brief tail after release) in
+exchange for not hanging the unit. Alternative not investigated: is there a
+genuinely different, confirmed-non-modal "status banner" primitive elsewhere in
+the firmware better suited to an always-visible indicator.
+
+**Status: QLREC build is UNSAFE as currently written (build_qlrec.py /
+patch_qlrec.s unchanged since Session 46) -- do not reflash until the toast
+mechanism is redesigned around a `dur>0` re-arm and re-validated.** New tooling
+this session: `tools/emu_notify_probe.py` (kept in `tools/`).
+
+**NEXT:** redesign `patch_qlrec.s`'s toast to a periodic `dur>0` re-arm (needs a
+per-frame or per-tick splice to call NOTIFY repeatedly while REC is held --
+`patch_reload2.s`'s `rl_tick` @ `0x400522ca` is the existing precedent for this
+kind of splice); re-validate with `emu_qlrec.py` (isolation) AND a full-firmware
+`emu_rtos` pass that actually drives the real NOTIFY/NOTIFY_CLOSE bodies (S48-style,
+what this session's `emu_notify_probe.py` started); only then consider reflashing.
+
+### QLREC REWRITE -- BUILT + VALIDATED (isolation + dynamic full-firmware), NOT YET REFLASHED
+
+User asked to build the fix immediately. `tools/patch_qlrec.s` rewritten:
+
+- **`qp_show` (qlr_play's flip branch):** now calls `NOTIFY(text, REARM_DUR)`
+  (`REARM_DUR = 0x30`, a `.equ`, NEVER `dur<=0`) instead of `NOTIFY(text, 0)`.
+  Also stashes the shown string pointer in new scratch `G_LASTMSG` and arms a
+  new countdown `G_RTICKS := REARM_INTERVAL` (`0x18`), then sets `G_ARM` (the
+  renamed `G_OURS` -- same address `0x80006a60`, meaning shifted from "we own a
+  toast, close it on release" to "keep re-arming it").
+- **New `qlr_tick`, detour of `0x400522ca`** (the engine's per-control-frame
+  handler that decrements the SOFT MUTE release watchdog -- the exact site
+  DIRECT JUMP v2's `dj_tick2` already uses, ticks every frame whether playing
+  or stopped): if `G_ARM` is set, counts `G_RTICKS` down; at/below 0, re-issues
+  `NOTIFY(G_LASTMSG, REARM_DUR)` and resets the counter, refreshing the toast
+  well before its `dur` would expire. `jsr`-kind detour (site is inline code,
+  not a function entry) -- replays the displaced `lea 0x46c7dfba,%a2` and
+  `rts`s, matching `dj_tick2`'s exact convention including saving D0-D1/A0-A1
+  around the `jsr NOTIFY` (that call may itself route through kernel post, the
+  same reason `dj_tick2` protects those regs around `jsr FUN_40056bc0`).
+- **`qlr_recrel` simplified:** no longer calls `NOTIFY_CLOSE` at all -- just
+  clears `G_ARM` (stop re-arming). The current `dur` runs out on its own within
+  `REARM_DUR` frames, the same self-close every other toast in this project
+  already relies on. Net effect: toast shows while `[REC]` is held (refreshed
+  before it can expire), fades a short bounded moment after release instead of
+  clearing instantly.
+- Hit the same GAS gotcha Session 49 already documented (`move.l #imm,<absolute>`
+  rejected on this target) twice in the new code -- fixed the same way, load the
+  immediate into a register first.
+- New scratch: `G_RTICKS` `0x80006a64` (long), `G_LASTMSG` `0x80006a68` (long) --
+  QLREC's claimed range is now `0x80006a5c-0x80006a6b`, still disjoint from
+  MUTE MODE / DIRECT JUMP / RELOAD2 (not yet reflected in `reference/MERGE.md`,
+  which still shows the old two-word range -- flagged, not yet fixed, since
+  QLREC isn't folded into `build_merged.py` yet anyway).
+- `tools/build_qlrec.py` gained the third detour
+  (`0x400522ca`, `"45f946c7dfba"` = `lea 0x46c7dfba,%a2`, `jsr`-kind, matching
+  `build_directjump_v2.py`'s exact convention for this same site). Builds
+  clean: `mainos_qlrec.bin` 315 B vs stock (cave 262 B @ `0x400d7400`), round-trip
+  + checksum OK, Bug-1 fix byte-identical, version stays `140C_KYOTI`.
+
+**`tools/emu_qlrec.py` rewritten** (still isolation-only, the two/now-three cave
+routines against real assembled bytes, OS calls stubbed to `rts`): `test_play`
+now asserts `notify_dur == REARM_DUR` (never 0) and that `G_LASTMSG`/`G_RTICKS`/
+`G_ARM` are armed correctly; `test_recrel` asserts `NOTIFY` is never called and
+`G_ARM` clears; new `test_tick` covers not-armed passthrough, mid-countdown
+decrement, the re-arm-at-zero case (including an already-negative/stale
+`G_RTICKS`), and that the displaced `lea` always replays regardless of path.
+**ALL GOOD.**
+
+**`tools/emu_notify_probe.py` rewritten for a direct, unconditional dynamic
+check** (first draft's "diff the modal list head" heuristic was flawed -- the
+head `0x460d165c` is ALREADY non-null at boot from something unrelated, and
+insertion happens at the list's TAIL, so the head never visibly moves either
+way; not evidence of anything). Fixed by PC-hit-watching the modal-insert
+function itself (`0x40031494`) directly across three full-firmware boots of
+`mainos_qlrec.bin`:
+
+| `dur` passed to `FUN_4005a2b8` | reached `0x40031494` (the modal-insert fn) |
+|---|---|
+| `0` (the ORIGINAL, hung a real MKI) | **YES** |
+| `0x44` (DIRECT JUMP v3's known-safe dur) | no |
+| `REARM_DUR` = `0x30` (what the rewrite actually uses) | **no** |
+
+This is a clean, direct, dynamic confirmation -- not just the static disassembly
+reading -- that the rewritten toast never executes the code path that hung the
+unit, using the same real function bodies a flash would run. Combined with the
+control-flow fact that `tstl %d3; bles <modal path>` is an unconditional branch
+on the `dur` argument itself (so this result cannot be state-dependent luck),
+this is about as strong a pre-flash guarantee as the emulator can give for this
+specific failure mode.
+
+**Status: fix built, isolation-validated, and dynamically confirmed off the
+modal path. NOT YET REFLASHED.** `REARM_DUR` (`0x30`) and `REARM_INTERVAL`
+(`0x18`) are conservative starting guesses -- the frame-to-ms ratio of the
+`0x400522ca` tick was never pinned, so the actual on-screen refresh cadence and
+the post-release fade delay need an HW eyeball pass and possibly a tuning
+pass, same class of open item as DIRECT JUMP v3's `DJ_TOAST_DUR` "feel right on
+HW" note. New tooling this session, all in `tools/` (not scratchpad):
+`tools/emu_notify_probe.py`. FLASHING.md/README updated to describe the
+rewrite; still marked as needing a fresh HW pass before calling it confirmed.
+
+### QLREC -- Session 51 (same day): FLASHED, NO HANG. Six follow-up requests, four fixed, two scoped as follow-up RE.
+
+The Session 50 rewrite (periodic `dur>0` re-arm) was flashed. **No hang** --
+the fix works. User reported six refinements from real use:
+
+1. **Double-tap timing feels wrong in a specific way**: an "extra slow" first
+   pair of taps does NOT trigger, but a 3rd tap landing close to the 2nd then
+   DOES -- so it can feel like "3 taps did it" when really it was taps 2+3.
+   Took two rounds of clarifying questions to pin down (first framing
+   suggested loosening an existing window; it turned out there was NO timing
+   window anywhere in the Session 50 code at all -- G_CNT just counted
+   absolute presses with zero time-awareness, so this was describing wanted
+   behaviour, not a bug in existing behaviour). **Confirmed design: two
+   presses count as THE double-tap only if the second follows the first
+   within a pairing window; a too-slow pair is discarded entirely (no flip)
+   and the late press becomes the start of a fresh pairing attempt** -- i.e.
+   exactly "disregard both, wait for two more that are fast enough."
+2. **Toast fade time ~1/3 too long** -- `REARM_DUR` `0x30`→`0x20`,
+   `REARM_INTERVAL` `0x18`→`0x10` (kept at exactly half of `REARM_DUR`, same
+   margin ratio as before).
+3. **Occasional small textless square flashes where the toast was, right
+   after it closes, self-clearing.** NOT chased this session. Most likely
+   explanation: `FUN_4005a2b8`'s own entry always closes any existing handle
+   before opening a new one (`tstl 0x460d1e70; jsr NOTIFY_CLOSE` if set) --
+   this project is now the first mod to open/close this specific notification
+   anywhere near as often (periodic re-arm, now also an explicit close on
+   release per item 4), so a draw/erase-ordering quirk in the stock
+   open/close sequence that was never visible before (single-shot,
+   multi-second toasts elsewhere in this project) may simply be showing up
+   now. Confirming this needs pixel-level RE of `0x4005829c`
+   (open)/`0x40057008` (text setup)/`0x40056bec` (close), not attempted.
+   Flagged as a known, benign, self-clearing cosmetic quirk pending further
+   investigation if it turns out to matter.
+4. **Toast should close instantly on `[REC]` release, not fade out.** Fixed:
+   `qlr_recrel` now calls `NOTIFY_CLOSE` again (it did, pre-Session-50). Safe
+   now in a way it wasn't before: the reason `NOTIFY_CLOSE` was dropped in
+   Session 50 was never that calling it was unsafe -- it was that our
+   `[REC]`-release handler never got a chance to RUN AT ALL once `dur<=0`
+   registered the modal entry. Since `dur` is now never `<=0`, that modal
+   registration never happens, so the release handler reliably fires (borne
+   out by the Session 50 flash working without a hang) and the close call is
+   exactly as safe as what `NOTIFY` already does internally before every
+   open.
+5. **Menu doesn't visually update while looking directly at the PERSONALIZE
+   row that changed** (re-opening the menu shows the correct value -- this is
+   a stale on-screen widget, not a stale stored value). NOT fixed this
+   session. There's a known-safe redraw sequence elsewhere in this codebase
+   (`patch_reload.s`'s `rl_parts`: `FUN_4004aab4` + `SCN_RFRSH`/`RFRSH1..6` +
+   `RDRAW`), but it was built and validated for a call site reachable only
+   from a dedicated picker overlay (`[YES]` while the RELOAD window is open)
+   -- a narrow, known UI state. Our combo can fire from ANY screen, so
+   blindly reusing that sequence risks a NEW, different hang from calling
+   redraw machinery outside the UI context it assumes, which is not a risk
+   worth taking for a cosmetic issue right after the Session 50 hang. Proper
+   fix needs the specific "PERSONALIZE row N is dirty" mechanism, not a
+   borrowed generic redraw combo -- scoped as follow-up RE, not attempted.
+6. **Toast label was backwards vs the menu**: HW-confirmed the PERSONALIZE
+   checked/unchecked glyph is the OPPOSITE of the Session 46 write-up's
+   assumed "raw 0 = OFF" -- raw `0` actually draws as the row's checked/ON
+   state. Fixed by swapping which string `qp_show` picks for a given raw
+   value (`0` -> now shows `qlr_msg_on`, nonzero -> `qlr_msg_off`) -- the flip
+   mechanics and the raw bit's meaning to the OS are completely unchanged,
+   only the label was wrong. Worth propagating this correction if `0x800000ac`
+   is ever referenced elsewhere as "0 = OFF" (a `kb/` grep found none as of
+   this session).
+
+**Implementation (`tools/patch_qlrec.s`):** new scratch `G_WINDOW`
+(`0x80006a6c`, long) -- QLREC's range is now `0x80006a5c-0x80006a6f`, still
+disjoint from every other mod (not yet reflected in `reference/MERGE.md`,
+same pre-existing gap as the Session 50 `G_RTICKS`/`G_LASTMSG` addition;
+QLREC isn't in `build_merged.py` yet). `qlr_tick` decrements `G_WINDOW` once
+per frame whenever `REC_HELD` and a hold is in progress (`G_CNT != 0`),
+independent of `G_ARM`/toast state -- this is what makes the window actually
+expire over elapsed time rather than elapsed presses. `qlr_play`'s parity
+check (odd/even press count) is GONE, replaced by a `G_WINDOW <= 0` check.
+Hit a new assembler snag: `qlr_play` grew enough that its very first branch
+(`beq.b qp_stock`) went out of 8-bit range -- fixed by dropping the `.b` size
+suffix and letting GAS pick a wider encoding.
+
+**Re-validated:** `tools/emu_qlrec.py` rewritten for the pairing-window model
+(fast-pair flip / slow-pair discard-and-reset / window-independent-of-G_ARM
+decrement / inverted label) -- **ALL GOOD**. `tools/emu_notify_probe.py`
+re-run against the rebuilt image with the new `REARM_DUR`/message addresses --
+[result pending / see below]. Builds clean: `mainos_qlrec.bin` 366 B vs stock
+(cave 318 B @ `0x400d7400`), round-trip + checksum OK, Bug-1 fix
+byte-identical, version stays `140C_KYOTI`.
+
+**Status: built, isolation-revalidated. Items 1/2/4/6 addressed; items 3/5
+explicitly scoped as follow-up RE, not attempted this session. NOT YET
+REFLASHED** -- `MAX_GAP` (`0x10`) is a fresh, completely untuned guess (same
+caveat as `REARM_DUR`/`REARM_INTERVAL`) and needs a real hardware feel-test,
+likely several iterations, same as `DJ_TOAST_DUR` needed.
+
+### QLREC -- Session 51-bis (same day): a real bug in item 1's fix, found before reflashing
+
+User reported two more real-use symptoms against the Session 51 build (not yet
+flashed, so these came from further scrutiny/description, not a fresh flash):
+
+1. **"Sometimes after two fast taps and execute, a third fast tap will also
+   execute."** Real logic bug, found on inspection: `qp_play`'s flip branch
+   fell through into `qp_rearm_window`, which unconditionally re-armed
+   `G_WINDOW` to `MAX_GAP` -- meaning immediately after a flip, the window
+   looked exactly as "fresh" as it would for a genuinely NEW pending press.
+   A fast press right after the flip would see `G_WINDOW > 0` and complete a
+   "pair" **with the flip itself**, firing an unwanted extra toggle. **Fix:**
+   new explicit `G_PEND` byte (`0x80006a70`) tracking "is a press genuinely
+   waiting for its partner" as a state distinct from the window's numeric
+   value. A flip now clears `G_PEND`; `qlr_play` checks `G_PEND` before ever
+   consulting `G_WINDOW`; only `qp_rearm_window` (the "no pending press yet,
+   or the pending one expired" path) sets `G_PEND`. `qlr_recrel` clears it
+   too. `qlr_tick`'s window decrement is now gated on `G_PEND` instead of
+   `G_CNT != 0` (more precise: right after a flip `G_CNT` is still nonzero
+   but nothing is genuinely pending). Two more `beq.b`/`.b` branches went out
+   of 8-bit range as the function grew again -- same fix as before, drop the
+   size suffix.
+2. **"Also, three slow taps will execute" / "Don't want that."** Distinct
+   from item 1 -- this isn't the same re-arm bug (traced through both the old
+   and new logic: a genuinely slow gap, exceeding `MAX_GAP` in real ticks,
+   should never let a press complete a pair, before or after the G_PEND fix).
+   Most likely explanation: `MAX_GAP` (`0x10` ticks) simply represents MORE
+   real-world time than what the user considers "slow" -- there is no way to
+   derive the real tick-to-ms ratio of the `0x400522ca` per-control-frame
+   handler from here, so this was always going to need on-hardware iteration
+   (flagged as such when `MAX_GAP` was first introduced). Cut to `0x08` (half)
+   as the next guess -- explicitly presented to the user as a guess needing
+   their feedback, not a confident fix.
+
+**Re-validated:** `tools/emu_qlrec.py` gained explicit `G_PEND` coverage (a
+flip clears it; a press with `G_PEND=0` can never flip regardless of how
+"fresh" `G_WINDOW` looks; `qlr_tick`'s decrement only fires when `G_PEND=1`)
+-- **ALL GOOD**. The modal-path safety property from Session 50/51 is
+architecturally untouched by either fix (neither touches what `dur` value
+reaches `NOTIFY`) -- `tools/emu_notify_probe.py` re-run against this exact
+rebuild for the record anyway (matching message addresses/`REARM_DUR`
+unchanged since neither fix altered code size in a way that moved them).
+
+**Status: built, isolation-validated, NOT YET REFLASHED.** `MAX_GAP=0x08` is
+still an unverified guess -- expect another round of feedback after this one.
+
+### QLREC -- Session 51-ter (same day): the 0x08 guess was wrong direction, reverted
+
+Flashed the Session 51-bis build. HW feedback: "Now it doesn't work at all -
+no execution", then corrected to "it does work, but the double tap has to be
+WAY too fast to execute." Confirms `MAX_GAP=0x08` was simply too tight --
+real fast double-taps no longer land inside the window.
+
+This also retroactively explains item 2 from Session 51-bis ("three slow taps
+will execute"): that symptom was fully accounted for by the `G_PEND`
+re-arm-on-flip bug fixed in the same session (a slow 3rd tap was pairing with
+a *stale flip*, not exploiting a genuinely generous window) -- traced through
+the logic at the time and never actually reproduced via a MAX_GAP-width
+argument. Cutting `MAX_GAP` in half was an unnecessary second change riding
+along with the real fix, and it broke normal use.
+
+**Fix:** `MAX_GAP` reverted `0x08` -> `0x10` (the value already known to work
+for genuine fast double-taps in the Session 51 hardware round, before this
+detour). `G_PEND` fix is untouched/kept. Cave layout unchanged (single
+immediate operand, same instruction size) so `tools/emu_notify_probe.py`'s
+prior PASS result still holds without re-running. `tools/emu_qlrec.py`
+re-run -- **ALL GOOD**.
+
+**Status: built, isolation-validated, NOT YET REFLASHED.** Expect this to
+behave like the pre-0x08 Session 51 build for tap feel, now without the
+G_PEND-caused "3rd tap also fires" bug. If `0x10` still isn't quite right,
+next tuning should treat "too fast to land" and "too easy to land" as the
+signal to move `MAX_GAP` up/down respectively, independent of the G_PEND
+fix -- the two are now decoupled.
+
+**HW-CONFIRMED GOOD** (flashed, same day): double-tap timing, toast fade
+timing/instant-close-on-release, and the ON/OFF label polarity all confirmed
+correct on real MKI hardware. `MAX_GAP=0x10` + the `G_PEND` fix is the
+keeper. Items 3 (occasional textless-box flash after toast close) and 5
+(PERSONALIZE row doesn't live-redraw) remain parked as explicitly scoped
+follow-up RE, not attempted -- user confirmed fine leaving both as known
+cosmetic issues for now. QLREC is DONE for this pass.
+
+---
+
+## Session 52 (2026-09-13, `wip`) — MUTE MODE DT: real root cause of "DT does nothing" + "OT+FX blip is back"
+
+First-ever hardware flash of `patch_softmute.s` V7 (the version on `wip/mute-mode` --
+solo support + the DT 3rd mode -- previously emulator-verified only, per the Session 11
+branch note). Flashed `build_mutemode_dt.py`'s output. HW report:
+
+- **DT: "does not work at all. Muting on the HW does nothing."**
+- **OT+FX: "partially working (hard cut + fx tails)... trigs on the track are still
+  sounding a very short blip like the very first few samples are being played, even
+  though the track is muted. I thought we identified this blip during earlier
+  development and fixed it, so I'm confused why it's back."**
+
+### Root cause (found by disassembling the real caller, not by guessing)
+
+`pre_v`'s hook on `FUN_40005178` (the voice-command queue) decided "is this a fresh
+voice start I should drop for a muted track?" purely from the `cmd` value's bits: bit
+0x80 set AND bit 0x10 clear. That heuristic was **never actually correct** -- it happened
+to work for whatever narrow case was tested at the time (V6, Session 9), and nobody had
+disassembled the real caller to check it held in general.
+
+Disassembled `trig_to_voice` (`0x400977cc`, `FUN_400977cc` -- the sequencer-step-trig to
+DSP dispatch, `reference/kb/memory-map.md` L56). It reads the track's machine type via
+`FUN_40097168` (`0=STATIC, 1=FLEX, 4=PICKUP`, memory-map.md L121) and encodes the voice
+command **completely differently per machine type**:
+  - **STATIC**'s own normal step-trig command is `(position-derived value) | 0x10` --
+    bit 0x80 is CLEAR, so it never even reached the old "is this a start" check.
+  - **FLEX**'s own normal step-trig command is `(position-derived value) | 0x8010` --
+    bit 0x10 is SET, so the old filter's "bit 0x10 = a safe stop/retrig, let it through"
+    assumption whitelisted it too.
+  - Only a narrow fallback path (other/rare machine-type + trig-type combos) actually
+    sends the literal `cmd=0x80` the filter was built around.
+Net effect: **ordinary sequencer trigs on the two most common machine types never hit
+the drop path at all.** DT (which relies on `pre_v` alone, no note-off) suppressed
+nothing -- exactly "muting does nothing." OT+FX's `pre` hook still note-offs/cuts the
+dry signal a frame later, so it isn't silent, but the attack the drop was supposed to
+prevent gets through every time -- the blip was never actually fixed, regardless of what
+the Session 9/10 write-up hoped; NOTES.md never actually recorded an explicit
+hardware re-confirmation of "no blip" after V7 (solo support) rewrote this hook, and
+this DT flash was the first time V7's `pre_v` ran on real hardware at all (branch note,
+Session 11).
+
+### Fix -- discriminate by CALLER, not by cmd bits
+
+Scanned `trig_to_voice`'s body for every `jsr FUN_40005178` and found exactly two:
+return addresses **`0x400978a2`** (the `iVar1==2, param_2==3` branch, paired with a
+`FUN_40005030` reset call) and **`0x400978dc`** (the shared tail servicing every
+STATIC/FLEX/PICKUP/etc. "start" case). Those two return addresses are the *only* two
+places in the whole ROM that ask "make this track's machine do something in response to
+a trig" -- everything else that calls `FUN_40005178` (`FUN_40083544` / `FUN_400836d8`,
+the mute/solo/QUICK-MUTE UI bookkeeping, including "a track resumes on its next trig
+after unmute/un-solo") is calling it for unrelated bookkeeping and must NOT be touched
+(filtering those by accident would break unmute-resume).
+
+`pre_v` now reads its own return address off the stack (`(0x10,%sp)`, since the caller's
+args shift by the 0x10-byte register-save reservation) and only applies the mute/solo
+drop when it equals one of those two addresses -- the cmd-bit checks (`btst #7`/`#4`)
+are gone entirely. `.equ TTV_CALL1, 0x400978a2` / `TTV_CALL2, 0x400978dc` in
+`tools/patch_softmute.s`. `pre` (the dry-cut/FX-ring/DT hook) is untouched -- this was
+always a `pre_v`-only bug.
+
+### The isolation tests had the same blind spot as the bug
+
+`tools/emu_solo.py` and `tools/emu_dt.py`'s `run_v()` pushed a fake, arbitrary return
+address (`0xDEAD0000`) for every test case -- meaning a caller-address-based fix and the
+original caller-blind bug were *indistinguishable* to these tests; they would have
+happily passed either way. Rewrote both: `run_v()` now takes an explicit `ret=`, default
+`TTV_CALL2`. Added the tests that actually pin the fix down:
+  - `STATIC_START=0x7010` / `FLEX_START=0x8010`-shaped cmds from a `trig_to_voice`
+    return address on a muted track -> **must still DROP** (this is the exact case that
+    slipped through before -- a regression test that fails loudly on the old filter).
+  - Both real `trig_to_voice` return addresses independently drop correctly.
+  - A call from an arbitrary non-`trig_to_voice` return address (stand-in for
+    `FUN_40083544`/`FUN_400836d8`) on a MUTED track -> **must still PASS** -- proves the
+    fix didn't overcorrect into breaking unmute-resume.
+`tools/emu_solo.py` (plain + `--dt`) and `tools/emu_dt.py` -- **ALL GOOD**.
+`tools/emu_mutemode.py` only ever targeted the plain 2-mode image (menu-array addresses
+differ in the DT build); unaffected by this fix, re-run for the record -- ALL GOOD.
+
+**Status: both `out/OCTATRACK_OS1.40C_MUTEMODE.syx` and
+`out/OCTATRACK_OS1.40C_MUTEMODE_DT.syx` rebuilt, isolation-revalidated. NOT yet
+reflashed** -- this is a caller-address fix grounded in real disassembly, not a
+guess, but the actual "does the blip fully close now, does DT actually suppress new
+trigs now" answer is still a hardware question. Also worth re-checking on next flash:
+the `0x400978a2` call site (cmd `0xf010`, paired with a `FUN_40005030` reset) is a rare
+machine-type/trig-type combo whose real audible effect on a muted track was not
+specifically hardware-exercised this session.
+
+**SUPERSEDED same day (Session 53) -- the caller-address fix above was FLASHED and made
+ZERO difference on hardware** (identical symptoms: DT still silent, OT+FX blip
+unchanged). `trig_to_voice`/`FUN_40005178` turned out to be a real function that is
+simply never reached by ordinary sequenced trigs at all -- see Session 53 below for the
+actual mechanism and fix.
+
+---
+
+## Session 53 (2026-09-13, `wip`) -- the REAL per-trig voice-start, found by driving the firmware instead of re-reading decompiles
+
+Session 52's fix changed nothing on hardware. Instead of re-reading static decompiles
+again, drove the ACTUAL firmware in the full-firmware Unicorn emulator
+(`refs/octabam`) through real LOAD PROJECT + real sequencer playback and watched what
+genuinely happens on a real trig.
+
+### Falsifying Session 52's whole premise
+
+`tools/emu_mute_dynamic5.py`: booted the DT image, loaded the factory OT DEMO, played
+for 6s. **79 real trig events fired across multiple tracks and `FUN_40005178` was
+entered ZERO times** -- neither of the two "voice command mailbox" addresses its body
+writes was ever touched. `trig_to_voice` -> `FUN_40005178` is real code, reachable from
+somewhere (the mute/solo UI bookkeeping, `FUN_40083544`/`FUN_400836d8`), but simply
+uninvolved in ordinary sequenced trigs. Session 52's fix was 100% correct engineering
+aimed at 100% the wrong target -- which is exactly why reflashing it was a no-op.
+
+### Finding the real path
+
+Traced the actual trig signal (`FW_LIVE_NIBBLE`, `0x46104d15` -- the byte a real trig
+genuinely flips, independently confirmed via `install_trig_log`) back through LIVE
+EXECUTION by capturing the PC of the instruction that writes it
+(`emu_mute_dynamic6.py`). That landed inside a sequencer step-evaluator around
+`0x4000b700` -- real, but a dead end: no `jsr` to anything resembling a voice start
+within ~0x700 B, and no `MUTE_STATE` test anywhere in it.
+
+Went looking from the other end instead: `diff_flex_static.py`'s own bind-detection
+logic already treats the per-track voice struct (`0x800049d8 + track*0xA8`) as the
+"did a voice really start" ground truth. Watched writes to its `+0`(active)/`+8`
+(SETTINGS) fields across a full 6s run (`emu_mute_dynamic7/8.py`) and found the field
+that's actually written **at every one of the real trig frames** (not just once, as an
+earlier truncated read of the log wrongly suggested): `+0x04`/`+0x08`, written from
+`0x4000f4dc`/`0x4000f4e0`, and a separate `+0x90` per-track counter written from
+`0x4000687c`.
+
+Statically disassembling around those writer PCs (`m68k-elf-objdump -m 5307` -- **the
+default `-m 68000` mis-decodes ColdFire's 4-byte 32x32 `muls.l`/`mulu.l` and cascades
+2-byte-misaligned garbage for the rest of the function; use `-m 5307` for anything in
+this ROM**) mapped the real call chain:
+
+  - **`0x4000f454`-ish**: the arena-rebind step. Computes which `FLEX_ARENA`
+    (`0x100b14f0`) / `STATIC_ARENA` (`0x100d5b30`) entry this track's machine should
+    point at and writes it to the voice struct's `+0x04`/`+0x08` -- **runs
+    unconditionally on every trig, muted or not, with no MUTE_STATE test anywhere**.
+    This is harmless bookkeeping (a pointer-cache reassert), not itself audible.
+  - If (and only if) the desired sample differs from what's currently bound in that
+    arena slot, it calls `jsr FUN_40006820(track)`.
+  - **`FUN_40006820`**: an 8-track fan-out -- `track<8` falls straight through to the
+    real per-track work; `track==8` recurses over 0..7.
+  - **`FUN_40006844`**: the REAL per-trig voice starter. Raises IPL
+    (`movew sr,d2`/`movew #0x2700,sr`), clears the voice struct's `active` byte, bumps
+    the `+0x90` counter (confirmed: increments every FRAME this track runs, not just on
+    trigs -- an earlier read of the log mistook consecutive frame numbers for a trig
+    counter), then **`jsr FUN_4000672c`** -- confirmed dynamically to be the actual
+    "restart the sample" step (its own body reads the SAME `REL_STATE` word `pre`
+    already maintains, `0x8000184a`) -- before restoring SR and returning. **No
+    MUTE_STATE test anywhere in this whole chain.**
+
+### The fix
+
+`patch_softmute.s` hook 2 is now **`mt_trig`**, detouring `FUN_40006844`'s own entry
+(its first two instructions, `movew sr,d2` + `movew #0x2700,sr`, exactly 6 B -- the
+same lucky fit every other hook in this project has had). Same GATE/MUTE_STATE/
+SOLO_FLAG logic as before, now correctly placed: for a silenced audio track, return
+*before* the active-clear, the counter bump, or the `FUN_4000672c` call that actually
+restarts the sample -- nothing left to blip. `pre_v` and its `TTV_CALL1`/`TTV_CALL2`
+constants are gone entirely. `build_mutemode.py`/`build_mutemode_dt.py`'s detour list
+updated (`0x40006844`, expected bytes `40c246fc2700`, 6 B).
+
+### A real bug the isolated unit tests could not see, caught only by dynamic validation
+
+First version of `mt_trig`'s "drop" path was a bare `move.l d3,-(sp)` / early `rts`.
+**This crashed the emulator instantly the first time it ran against real playback**
+(`unhandled exception 4` / illegal instruction) -- while every isolated unit test
+(`emu_solo.py`, `emu_dt.py`) had passed. Root cause: `FUN_40006844` is reached from
+`FUN_40006820`'s body via a plain `bccs` branch, not a fresh call -- so
+`FUN_40006820`'s own prologue (`movel a2,-(sp)` / `movel d2,-(sp)`) is STILL live on
+the stack underneath the real return address when our detour runs, and its real
+epilogue (`movel sp@+,d2` / `moveal sp@+,a2` / `rts`) is what actually unwinds it. An
+early `rts` that only popped our own scratch push left those 2 extra longs on the
+stack, so `rts` jumped to garbage. The isolated tests missed this because they entered
+`mt_trig` directly with a single bare return address and nothing simulating that
+caller frame beneath it. Fixed: `mt_silenced` now pops the same 2 longs
+(`FUN_40006820`'s saved D2/A2) the real epilogue would, before its `rts`. Rewrote both
+harnesses to simulate that real stack frame (sentinel D2/A2 values, checked restored;
+final SP checked against the exact expected depth) -- this exact bug is now a
+regression test, not just a fixed instance.
+
+### Decisive dynamic validation (not just isolation)
+
+With the stack fix in place, re-ran the full real-playback scenario
+(`emu_mute_dynamic9.py`, then a direct instrument of `mt_trig` itself --
+`emu_mute_dynamic11.py` -- and finally a direct watch on `FUN_4000672c`'s own entry --
+`emu_mute_dynamic12.py`) with the FLEX track muted *before* any trig fires:
+  - No crash (confirms the stack fix).
+  - `mt_trig` took the `silenced` branch **100% of the time** for the muted track,
+    every single frame it ran, `pass` 0 times -- confirmed by direct instrumentation,
+    not inferred.
+  - `FUN_4000672c` (the actual sample-restart) was called **zero times** for the muted
+    track across 18 real trigs and 6 s of playback, while the three other active
+    tracks got 100,000+ calls between them in the same window -- **PASS**.
+  - (The `+0x04`/`+0x08` arena-rebind writes DO still happen for a muted track every
+    trig -- confirmed this is expected and harmless: that step runs unconditionally
+    upstream of `mt_trig`'s check, has no audible effect on its own, and was never the
+    thing this fix needed to gate.)
+
+Isolation tests (`emu_solo.py` ×2 images, `emu_dt.py`, `emu_mutemode.py`) all rewritten
+for `mt_trig` and re-verified -- **ALL GOOD**, including the new stack-frame regression
+coverage.
+
+**Status: both `out/OCTATRACK_OS1.40C_MUTEMODE.syx` and
+`out/OCTATRACK_OS1.40C_MUTEMODE_DT.syx` rebuilt with the real fix. Isolation-verified
+AND dynamically verified against real playback (not just unit-tested in isolation this
+time). NOT yet reflashed.** DT mode shares the identical `mt_trig` mechanism (same
+GATE/MUTE_STATE logic, `gate==2` path covered by the same isolation tests) but has not
+had its own dedicated dynamic full-playback validation run this session -- user asked
+to fix OT+FX first and return to DT afterward.
+
+**FLASHED (2026-09-13) -- STILL NO CHANGE.** Blip unchanged, DT still fully silent.
+Confirmed this was not a stale-build or wrap/flash mismatch: decoded the actual `.syx`
+back through `elektron-firmware-tool`'s own extract path and diffed the recovered
+`section_3_MAIN_OS.bin` against `out/mainos_mutemode_dt.bin` (what the emulator
+tested) -- **byte-identical**. The deployed firmware genuinely contains the validated
+fix. User confirmed testing with both STATIC and FLEX machines, ruling out a
+machine-type gap. Conclusion: `mt_trig`'s proof, while real and dynamically confirmed,
+is CPU-side only -- this ColdFire-only emulator (`refs/octabam`) has no DSP model at
+all, so it is structurally blind to whatever the DSP actually watches to decide
+"restart this voice." Exactly the class of trap `refs/octabam/CLAUDE.md` warns about
+generally ("a measurement can be structurally blind to the thing you are using it to
+rule out") -- now hit specifically on the audio-trigger question.
+
+### Session 53-bis (same day) -- `mt_rebind`: gate the one remaining unconditional DSP-visible write
+
+User directed: try gating the arena-pointer rebind write too (the `0x4000f4dc`/`e0`
+write inside the `0x4000f454`-ish caller, established in Session 53 to run
+unconditionally on every trig with no MUTE_STATE test anywhere upstream of
+`mt_trig`). Working hypothesis: the DSP may watch THIS write -- the only DSP-visible
+state that changes on every trig regardless of what `mt_trig`/`FUN_4000672c` do -- as
+its own independent restart signal, not anything CPU-side `mt_trig` already gates.
+
+Re-disassembled the `0x4000f454` region with `-m 5307` (the ORIGINAL read of this
+function, back in Session 53, used plain `-m 68000` and was silently garbled by the
+same ColdFire 32x32-multiply mis-decode noted elsewhere in this project -- corrected
+now, though the earlier read happened to still identify the right instructions).
+Deliberately did NOT try to bail out of `0x4000f454`'s own entry (a much bigger,
+riskier prologue than `FUN_40006844`'s simple 2-push case that already caused one
+stack-corruption crash this session) -- instead detours only the two write
+instructions themselves (`movel a5,a2@(4)` / `movel a4,a2@(8)`, 8 B, "jmp"-kind inline
+site exactly like `pre`'s own convention). For a silenced track, skips both writes;
+`%a5`/`%a4` stay correctly computed as registers either way, so the caller's own
+downstream "does this need a fresh bind" logic (which reads the registers, not this
+memory) is unaffected -- `mt_trig`'s protection there stays fully intact regardless.
+
+**Isolation-tested** (`emu_solo.py` ×2 images, `emu_dt.py`) -- both writes correctly
+skipped for a silenced track, correctly happen otherwise, across mute/solo/gate
+combinations and all 8 tracks -- ALL GOOD. **Dynamically re-validated** against the
+same real-playback scenario (`emu_mute_dynamic9.py`): with both hooks combined, the
+muted track's real trigs now produce **zero** writes to `+0x04`/`+0x08`/`+0x90` at
+all (down from the "0 for `+0x90`, still happening for `+0x04`/`+0x08`" result before
+this hook), while the unmuted control track is completely unaffected (30360 writes,
+identical shape to the pre-fix baseline). No crash.
+
+**Explicit, stated caveat:** unlike `mt_trig`, this hook's real-world effect cannot be
+proven end to end in this emulator -- there is no DSP to observe reacting (or not) to
+the write being gated. This is the best-reasoned remaining CPU-side lever, grounded in
+"this is the only DSP-relevant state left unguarded," not a decisive proof the way
+`mt_trig` was for the CPU side. If HW still shows no change after this, the audio
+trigger mechanism is not driven by CPU writes this investigation can find at all, and
+would need a fundamentally different approach (DSP-side disassembly/analysis, which
+this project has no tooling for yet).
+
+**Status: both `out/OCTATRACK_OS1.40C_MUTEMODE.syx` and
+`out/OCTATRACK_OS1.40C_MUTEMODE_DT.syx` rebuilt with `pre` + `mt_trig` + `mt_rebind`.
+NOT yet reflashed.**
+
+---
+
+## Session 55 (2026-09-14, `wip`) -- SIDECHAIN: KEY never appeared on any of the three
+builds; root cause found and fixed (a per-parameter ENABLE BITMAP, separate from
+name/count/default/formatter, that this project had never poked)
+
+User flashed `SIDECHAIN`, `SIDECHAIN2`, and `SIDECHAIN3` in turn (first real HW test
+of any of these -- the flash queue had them blocked behind DT/QLREC/PARTREAPPLY for
+many sessions). Report: box looks and behaves exactly like stock (SPATIALIZER
+correctly gone from both FX choosers, as designed) except **the `KEY` parameter never
+appears on COMPRESSOR's FX page 2, on any of the three builds.**
+
+### Root cause
+
+`tools/build_sidechain{,2,3}.py` all poke the COMPRESSOR descriptor's name/
+value-count/default/formatter fields for the new slot(s) (8 for KEY; 9-11 for
+KFLT/KGAIN/MON in step 3), all correctly E-relative per `reference/kb/memory-map.md`'s
+struct decode -- but **none of them ever touch the per-parameter ENABLE BITMAP**,
+documented in `refs/octabam/docs/firmware/PARAM_PAGES.md` ("`P+0x18a` / `P+0x18e` --
+the per-parameter ENABLE BITMAP"): a nibble per parameter (bit 0 = exists), gating
+whether the generic page renderer (`FUN_400a6994(P+0x18a, P+0x18e, slot)`, called
+from both `FUN_400326d4` staging and `FUN_40037590` drawing) stages OR DRAWS a knob
+at all -- **independent of whether the knob's own name/count/default are valid.**
+Octabam's own doc calls this out explicitly: "a clone copied as `E .. E+0x192`
+(rather than `P .. P+0x192`) loses exactly the tail these two words live in, and the
+effect appears in the menu with a correct name and not a single knob. That mistake
+cost two hardware flashes to find." This project made the identical mistake a third
+time, for the identical reason: **`P = E + 0x38`, NOT `E`** -- a different base than
+every other field these builds poke (`build_sidechain2.py`/`3.py` already knew this
+distinction for one *other* purpose, `SPAT_P = 0x400d4904 + 0x38` when derefencing
+the FX-chooser list's descriptor pointer, but the connection to the enable bitmap was
+never made).
+
+**Confirmed directly against the ROM** (`out/raw/section_3_MAIN_OS.bin`), not just
+by reading the doc: computed `P+0x18a` for stock COMPRESSOR (`E=0x400d5a4a`,
+`P=0x400d5a82`, field at `0x400d5c0c`) reads `0x00000000` -- slot 8's bit is 0. Cross-
+checked the method against two known-good worked examples from octabam's doc first
+(SPRING REV's `P+0x18e=0x11111001` and NONE's all-zero pattern both reproduced
+byte-for-byte from this ROM), then read COMPRESSOR's own `P+0x18e` (slots 0-7):
+`0x01111111` -- slot 6 (RMS, visibly working in stock) has its bit set, slot 7 (the
+stock-normal page-2 gap our build scripts' comments already expected) reads 0. This
+is a clean, direct confirmation, not an inference from a possibly-stale doc.
+
+### Fix
+
+Added one more poke to all three build scripts, at `E + 0x38 + 0x18a = 0x400d5c0c`
+(asserted `00000000` beforehand, matching the live-ROM read above):
+  - `build_sidechain.py` / `build_sidechain2.py`: `-> 0x00000001` (slot 8 / KEY only).
+  - `build_sidechain3.py`: `-> 0x00001111` (slots 8-11 / KEY+KFLT+KGAIN+MON).
+All three rebuilt clean; the new poke's assert passed against stock on every build
+(confirms the `0x00000000` reading above wasn't a one-off). Independently re-verified
+by reading the four bytes at `0x400d5c0c` back out of each finished `mainos_*.bin`:
+`SIDECHAIN`/`SIDECHAIN2` -> `0x00000001`, `SIDECHAIN3` -> `0x00001111`, exactly as
+intended. `tools/emu_sidechain.py` (formatter-only, unaffected by this class of bug
+by construction -- see caveat below) re-run for the record -- ALL GOOD, unchanged.
+
+Also fixed in passing: `build_sidechain2.py`/`build_sidechain3.py` still pointed at
+`refs/octabam/tools/dsp_modmap.py`, which moved to `refs/octabam/tools/build/
+dsp_modmap.py` in the same upstream reorg Session 50 already patched seven other
+tools around (`toolpath.py` shim) -- these two just hadn't been re-run since. Fixed
+by updating the two hardcoded paths directly (no shim needed here, just an import
+path). Both scripts now run to completion again.
+
+### The isolation test's blind spot, once more
+
+`tools/emu_sidechain.py` calls `key_fmt`/`kfilt_fmt` directly against a synthetic
+stack frame -- it never boots the real firmware and asks whether the real page-2
+renderer actually reaches slot 8 at all, so it could not have caught this (or
+validated the fix) by construction. Same class of gap as `pre_v`'s cmd-bit guess
+(Session 52) and the QLREC notify-modal hang (Session 50): a unit test that only
+ever exercises the code we wrote proves nothing about whether the surrounding stock
+code ever calls it. No dynamic full-firmware probe was built for this session's fix
+(the static ROM read against two independently-known-good worked examples was
+judged sufficient given how directly it lines up with the reported symptom -- slot 8
+disabled, slot 6/RMS enabled, nothing else in the picture changed); if `KEY` still
+doesn't show up after reflashing, that read is the first thing to distrust.
+
+**Status: all three `out/OCTATRACK_OS1.40C_SIDECHAIN{,2,3}.syx` rebuilt with the
+enable-bit fix. NOT yet reflashed.** Recommended order: reflash plain `SIDECHAIN`
+first (smallest surface, cleanest single test of "does KEY appear now") before
+moving to `SIDECHAIN2`/`3`. If `KEY` appears now, the DSP-side wiring in `SIDECHAIN2`/
+`3` (never HW-exercised before this session either) is still an open question, per
+the Session 40 page-2-copier warning already on record.
+
+### SIDECHAIN3 flashed same day: KEY now showed up (enable-bit fix confirmed on HW).
+`KGAIN` renamed to `KGN` on screen (user request, display-only, `build_sidechain3.py`
+`SLOTS[10]` name bytes). Real bugs found: **zero ducking** (KEY never engages gain
+reduction) and MON (SC LISTEN) audio described as "kills the track's audio entirely";
+independently, KFLT/KGAIN show resonance/instability and volume jumps while sweeping,
+and with MON on the audio alternates "normal for a bar" / "metallic pinging comb-filter
+for a bar" in a pattern tied to sequencer step count (changes shape at other step
+counts).
+
+**Traced the detector-redirect plumbing by disassembling the REAL stock ROM (not
+guessing from the design doc)**, `m68k...` no -- DSP56300 side, via
+`vendor/dsp56300/build/source/disassemble/dsp56kDisassemble -m` (no `-m` flag needed,
+DSP56300 has one instruction set) against `out/raw/section_3_MAIN_OS.bin`'s payload B
+module dump (`refs/octabam/tools/build/dsp_modmap.py`). Confirmed three things
+structurally sound, ruling them out as the bug:
+1. The polyphase resampling loop immediately before `sctap`'s hook site (P:0x29c)
+   writes exactly 32 fresh words to X:0x0000 for the CURRENTLY-DISPATCHING track,
+   ending right before the hook fires -- `sctap` is reading live, correctly-timed
+   per-track audio, not stale/wrong-track data.
+2. `scdet`'s redirect (`r0 := $40` on return) points at exactly the register the
+   REAL compressor's own squared-magnitude/peak detector loop (`P:0x1873`,
+   `move x:(r0)+,x0` inside a `do n7` block) consumes -- the redirect targets the
+   right thing.
+2b. User confirmed on HW: with MON on and KEY pointed at a loud, clearly recognizable
+   track, the monitored audio DOES resemble that track's content (filtered/weird, but
+   related) -- rules out "no audio ever reaches the detector at all" as the explanation
+   for the zero-ducking symptom; the hand-off chain (sctap -> keybus -> scdet) is
+   delivering real signal.
+
+**Found and fixed a real, confirmed-by-disassembly bug in the KEY FLT (SVF) state
+gating**, independently pattern-matching a bug class `refs/octabam` fixed in their own
+effects the SAME DAY (their commit `f94c816`, "Init zeroes every persistent slot":
+"a station started from whatever the block held before it"). Disassembled the REAL
+stock COMPRESSOR's own init routine (`P:0x1864`, the module entry before `proc` at
+`0x1871`) and confirmed it zero-fills ONLY `r7+$11/$12/$13/$1a/$1b/$f` -- it never
+touches `$14/$16/$17/$18`, the exact bytes this project's `patch_sc_dsp3.asm` reuses as
+"unused by stock" SVF `lp`/`bp` state (`$16`/`$17`), gated on stock's `$f` "first-block"
+bit. That gate is wrong: `$f` can legitimately go warm from ordinary stock compressor
+activity (any block processed at all) BEFORE our own KEY FLT code has ever run a
+single block -- e.g. `KFLT` parked at bypass (its default, 64) for a while, then turned
+to a real LP/HP value for the first time. At that moment `$f` already reads "warm," so
+the old code skipped the zero-seed and read `$16`/`$17` as prior state -- except our
+code had never written them, so the integrator got seeded from whatever garbage sat in
+that DSP memory (plausibly explaining sustained resonance/instability rather than a
+clean start, given the SVF's own inherent Q=1-near-Nyquist sensitivity already
+observed).
+
+**Fix**: stopped gating on stock's `$f` entirely. `r7+$18` (confirmed untouched by
+stock's init AND by every hook in this file) is now OUR OWN dedicated "have I ever
+seeded lp/bp myself" latch -- set to 1 only after we write real `$16`/`$17`, checked
+(not `$f`) to decide cold-vs-warm. `tools/emu_sc_dsp3.py` updated to seed/check `$18`
+instead of `$f` throughout, and gained a new adversarial regression case mirroring
+octabam's own `verify_dirtystate.py` method: stock `$f` forced warm + `$16`/`$17`
+seeded with garbage (`0x7fffff`) + our own `$18` still 0 -> must still cold-start.
+**This test caught the bug live**: before the fix, re-running the existing KFLT
+numeric checks against the harness's own baseline `.mem` snapshot (which happens to
+carry non-zero garbage at `$16`/`$17`/`$18`) failed 4/4 LP/HP cases with exactly the
+"reading stale state" signature; after the fix, all pass, including the new
+dirty-state case. `out/OCTATRACK_OS1.40C_SIDECHAIN3.syx` rebuilt (231/261 donor words,
+still well clear of the SPATIALIZER budget); enable-bit fix and `KGN` rename both
+reverified present in the same rebuild.
+
+**Status: rebuilt, isolation + dirty-state-regression verified. NOT yet reflashed.**
+Not yet explained by this fix alone: the exact cause of zero gain-reduction engagement
+(the compressor's OWN threshold/attack-release/gain-curve math, `P:0x188d` onward, is
+disassembled only partially -- got as far as confirming an envelope-smoothing stage
+and several gain-curve LUT reads before stopping to report progress) and the specific
+LP/HP resonance-at-sweep behavior beyond the dirty-state contribution (the Chamberlin
+SVF topology itself is known to get peaky/unstable as cutoff approaches Nyquist/4;
+worth checking `tools/sc_tables.py`'s FTAB range against that ceiling next, independent
+of the state-gating fix). Recommend reflashing this build first (cheap, and the fix is
+strictly an improvement/no-regression per the isolation suite) before deciding whether
+further DSP RE on the gain-reduction chain is warranted.
+
+---
+
+## HANDOFF (2026-09-14) — MUTE MODE trig-suppression: read this before touching `patch_softmute.s`
+
+**Read Session 52/53/53-bis above first (in order) for the full trail** — this is the
+condensed status + the concrete next moves, written because the thread is genuinely
+open and the next session should not restart from zero or re-guess what's already
+been ruled out.
+
+### Where this stands
+
+The user's target naming (not yet applied to code/docs — asked to fix the bug first):
+`OT` (stock hard cut) / `OTFX` (hard cut + FX tails, unmute resumes at playhead — not
+built) / `OTFX-T` (= today's `OT+FX`, trig-mute style) / `DT-T` (= today's `DT`).
+**The bug lives in the mechanism `OTFX-T` and `DT-T` share**: suppressing a *new*
+sequencer trig while a track is held muted. `OTFX-T`'s dry-cut + FX-tail-ring already
+works, hardware-confirmed. The open bug: a muted track's trig still produces a moment
+of real audio (`OTFX-T`: a "blip" before the frame-level mute-gate catches it next
+frame; `DT-T`, which has no dry-cut at all, so the trig is fully audible — "does
+nothing").
+
+**Three fixes built this session, each proven correct at the level it can be proven,
+each shipped with ZERO hardware effect:**
+
+1. **`pre_v`** (Session 52, now DELETED from the source) — detoured `FUN_40005178`
+   (`trig_to_voice`), on the strength of an old, out-of-context Ghidra decompile.
+   Flashed: no change. Root-caused: driving the real firmware in the full-firmware
+   Unicorn emulator (`refs/octabam`, `tools/emu_mute_dynamic5.py`) proved
+   `FUN_40005178` is entered **zero times** across 79 real sequencer trigs over 6 s.
+   Dead code for this purpose. Removed entirely.
+
+2. **`mt_trig`** (Session 53, still in `tools/patch_softmute.s`) — the REAL per-trig
+   dispatch, found by tracing the actual trig-flag write (`FW_LIVE_NIBBLE`) back
+   through live execution rather than re-reading static decompiles:
+   `FUN_40006820` (8-track fan-out) → `FUN_40006844` (clears the voice's `active`
+   byte, bumps a per-frame counter, calls `FUN_4000672c`) → `FUN_4000672c` (reads
+   `REL_STATE`, the same word `pre` already maintains — this is what made it look
+   like the right target). `mt_trig` detours `FUN_40006844`'s entry and returns
+   before any of that runs, for a silenced track. **Isolation-tested AND dynamically
+   proven**: direct instrumentation showed `mt_trig` takes the silenced branch
+   **100% of the time** for a muted track across the whole run, and `FUN_4000672c`'s
+   call count for that track drops to **exactly zero** while unmuted tracks got
+   100,000+ calls in the same window (`emu_mute_dynamic11.py` / `_12.py`). A real
+   stack-corruption bug in the first version of this hook (it entered from a plain
+   `bccs` fallthrough inside `FUN_40006820`, which leaves 2 of ITS OWN saved
+   registers live on the stack beneath the real return address — an early `rts` that
+   didn't also unwind those crashed the emulator on first real-playback contact,
+   despite passing every isolated unit test) was caught and fixed; the isolation
+   tests now simulate that real caller stack frame and check it explicitly
+   (`SENTINEL_D2`/`SENTINEL_A2`, exact SP arithmetic) so this exact class of bug is
+   now a regression test, not a silent gap. **Flashed: no change** (confirmed NOT a
+   stale-build/wrap mismatch — decoded the actual `.syx` back through
+   `elektron-firmware-tool`'s own extract path and diffed the recovered
+   `section_3_MAIN_OS.bin` against what the emulator tested: byte-identical). User
+   confirmed testing both STATIC and FLEX — same null result either way.
+
+3. **`mt_rebind`** (Session 53-bis, still in `tools/patch_softmute.s`) — gates the one
+   remaining DSP-*visible* state change `mt_trig` doesn't touch: `0x4000f4dc`/`e0`,
+   inside `FUN_40006844`'s own caller (`0x4000f454`-ish), unconditionally rewrites
+   the voice struct's arena-entry pointers (`+4`/`+8`) on every trig regardless of
+   mute state. Working hypothesis: the DSP may watch THIS write (the only thing that
+   changes every trig no matter what the CPU-side `mt_trig`/`FUN_4000672c` chain
+   does) as its own independent restart signal. Isolation-tested (both writes
+   correctly skipped/happen across mute/solo/gate/all-8-tracks). Dynamically
+   re-validated with `mt_trig` combined: the muted track now produces **zero**
+   writes across all three tracked offsets (`+4`/`+8`/`+0x90`), unmuted control
+   track fully unaffected, no crash. **Flashed: no change.**
+
+**Explicitly stated at the time, worth repeating:** `mt_rebind`'s real-world effect,
+unlike `mt_trig`'s, was never provable in this emulator at all — there is no DSP
+model, so "gates the right memory location" and "actually stops the DSP from
+restarting the voice" are different claims and only the first was ever checked.
+
+**Ruled out along the way, so the next session doesn't re-check them:**
+- Stale/wrong build flashed — no (verified via a full decode round-trip).
+- Machine type (STATIC vs FLEX) — no, user tested both.
+- DSP state not cleared after flashing (a real, documented Octatrack gotcha,
+  `refs/octabam/reference/kb/dsp56300.md`: "power-cycle after every flash before
+  judging anything") — no, user confirmed power-cycling before each test.
+
+### The one piece of new research pulled this session — NOT yet reconciled
+
+`python3 tools/refs/sync.py` pulled fresh `refs/octabam`. Its `docs/firmware/RTOS_FORK.md`
+§10.13–§10.26 (their own, independent investigation, dated 6–9 Sep 2026 — about
+**RECORDER ARM**, i.e. the REC1/live-sampling trigger, not general sample playback)
+says, explicitly: **`0x4000672c` is "gated on machine type == 4/PICKUP," a
+later/different follow-up mechanism — NOT the thing they were looking for.** Their
+real "arm caller" address is **`0x40006238`**, reached via `tstb %d7 / bgew
+0x40006238` at `0x4000607c`.
+
+**This is `0x4000672c` — the exact function this session's `mt_trig` fix targets —
+being characterized completely differently by an independent team.** Two ways this
+reconciles, and the next session needs to actually determine which (or find a third):
+
+1. `0x4000672c` is a shared, multi-purpose subroutine (something like "restart/update
+   this track's amp/envelope state") called from BOTH octabam's recorder-arm-adjacent
+   dispatch (where its behavior happens to matter only for PICKUP) AND from this
+   project's independently-traced `FUN_40006844` path (which is NOT machine-type-gated
+   in the disassembly this session read, and empirically fires ~30,000×/6s for FLEX
+   and STATIC alike, dynamically confirmed, not inferred). Both readings could be
+   correct simultaneously, about different callers.
+2. OR this session's identification of `FUN_40006844`→`FUN_4000672c` as "the thing
+   that makes a track produce audio" was subtly wrong from the start — real,
+   frequently-executing, dynamically-confirmed CPU-side code, but not actually the
+   step that gates whether the DSP renders sound — in which case `mt_trig`/`mt_rebind`
+   suppressing it correctly on the CPU side would legitimately have ZERO audible
+   effect, which is exactly the symptom observed. This would mean `0x40006238`
+   (octabam's real "arm caller," for a DIFFERENT purpose than ours but a concretely
+   different, unexamined address) or something in ITS vicinity is worth a direct look
+   — not because recorder-arm is our bug, but because octabam's method (trace the
+   REAL caller of the REAL gating decision via dynamic PC-watch, not static-only
+   reading) is exactly the discipline that found `mt_trig`'s real target last time,
+   and might turn up a second, previously-unexamined dispatch path for ordinary
+   (non-recorder) trigs too.
+
+**Recommended first move for the next session, cheapest and no new setup required:**
+statically disassemble `0x40006238` (`m68k-elf-objdump -m 5307`, NOT plain `-m 68000`
+— see the ColdFire 32×32-multiply mis-decode trap already on record) and its callers,
+and dynamically instrument it the same way `emu_mute_dynamic11.py` instrumented
+`mt_trig` — does it ever fire for an ORDINARY (non-recorder) FLEX/STATIC trig? If yes,
+it may be a genuinely different, previously-unexamined dispatch path worth chasing. If
+it's confirmed recorder-only (REC1-specific, per its own name), it's a dead end for
+THIS bug and the reconciliation is answer (1) above — meaning the real gap is
+elsewhere entirely, most likely on the DSP side (see below).
+
+### The other real option: build DSP-capable emulation
+
+`refs/octabam/tools/emu/ot_emu` is a genuine C++ ColdFire+DSP56300 co-emulator
+(`dsp.cpp`, `machine.cpp`, `rtos.cpp` — boots the RTOS AND runs both real DSP cores,
+renders actual audio) that could answer "does this track produce sound" directly,
+which NOTHING used this session could do (the Python/Unicorn route, `tools/emu_rtos.py`
+wrapping `refs/octabam/tools/emu/emu_rtos.py`, is ColdFire-only, no DSP model
+whatsoever — ~120× slower than real time and structurally blind to the actual audio
+engine).
+
+**Blocker, not yet resolved:** `make emu-cf` (in `refs/octabam/`) fails —
+`add_subdirectory` can't find `vendor/mc68k` or `vendor/dsp56300/source`. These are
+NOT registered in `refs/octabam/.gitmodules` (only `modules/octakit/upstream` and
+`modules/midi-scenes/upstream` are). `refs/octabam/CLAUDE.md` (freshly pulled this
+session) describes a worktree workflow where `vendor/` and `.venv/` are "symlinks to
+the main checkout's" — implying octabam's own contributors have a separate, already-
+provisioned checkout elsewhere with these vendored (`vendor/mc68k` = a Musashi-based
+ColdFire fork per `docs/firmware/COLDFIRE_PORT.md`; `vendor/dsp56300` = a DSP56300
+core, GPLv3/vendored per that same doc) that this project's `refs/octabam` (a plain
+fetch via `tools/refs/sync.py`, not a submodule-initialized clone of octabam's actual
+dev setup) never received. **Not investigated: where to actually get these two
+vendored trees from their original upstream sources**, whether they're large,
+whether they build cleanly outside octabam's own dev environment, or how much total
+setup time this really is. Could be modest (grab two repos, run cmake) or could be a
+multi-hour yak-shave (version pinning, patches referenced in
+`refs/octabam/CLAUDE.md`'s own trap list — e.g. `tools/patches/dsp56300.patch` for
+the one-word-displaced-move assembler fix — a build dir, license/build-flag
+mismatches). **If pursuing this path, budget time to find out before committing to
+it**, and note the CLAUDE.md warning: never build in `refs/octabam` directly if it's
+shared with other sessions — use a worktree.
+
+### Do not revert `mt_trig`/`mt_rebind` without cause
+
+Both are real, individually-correct, isolation-AND-dynamically-validated CPU-side
+fixes — they stop code from running unnecessarily for a muted track and cause no
+regressions in anything checked (`emu_solo.py` ×2 images, `emu_dt.py`,
+`emu_mutemode.py` — all ALL GOOD). They just haven't been shown to fix the audible
+symptom. Keep them in the build while investigating further; only remove either if a
+future finding shows one of them is actively wrong (not just insufficient).
+
+### Files touched this session (all current, all UNCOMMITTED on branch `wip` —
+confirmed via `git status` at handoff time; nothing from this session has been
+committed yet)
+
+`tools/patch_softmute.s` (now: `pre` + `mt_trig` + `mt_rebind`, `pre_v` deleted),
+`tools/build_mutemode.py` / `build_mutemode_dt.py` (3-detour `PATCHES` list, DT-diff
+`allowed` spans updated for both new detour sites), `tools/emu_solo.py` / `emu_dt.py`
+/ `emu_mutemode.py` (rewritten for `mt_trig`/`mt_rebind`, `pre_v` tests removed),
+`tools/emu_mute_dynamic{1..12}.py` (the investigation scripts — kept, not scratch;
+`_5`, `_9`, `_11`, `_12` are the ones worth re-running first if picking this back up;
+`_1..4`, `_6..8`, `_10` are superseded intermediate steps, still functional but
+lower-value to re-run). Build outputs: `out/OCTATRACK_OS1.40C_MUTEMODE{,_DT}.syx` /
+`.bin`, current as of the last build in this session (both hooks included).
+
+---
+
+## Session 54 (2026-09-14) — `0x40006238` RESOLVED: CONFIRMED recorder-arm-only, a dead end for the mute-mode bug
+
+Picked up the handoff's cheapest unresolved thread: is octabam's independently-traced
+"real arm caller" (`0x40006238`, RTOS_FORK.md §10.13/§10.25) a second, previously
+unexamined dispatch path for ORDINARY (non-recorder) FLEX/STATIC trigs, or is it
+genuinely recorder-only as their own doc claims? Answered with both static
+disassembly and a fresh dynamic run — no re-flash, no re-guess.
+
+**First, a base-address trap caught before it could mislead anything.** This
+project's own `tools/build_mutemode.py`/`build_mutemode_dt.py` both define
+`BASE = 0x40000400` — the raw `out/raw/section_3_MAIN_OS.bin`'s byte 0 maps to VMA
+`0x40000400`, NOT `0x40000000`. A first pass disassembling at the naive `0x40000000`
+adjustment landed on plausible-looking but WRONG code at the addresses octabam
+names (no `tstb %d7`/`bgew` pattern anywhere near where their doc puts it) — a false
+mismatch that would have wrongly suggested the two projects were somehow looking at
+different code. Re-run at the correct `0x40000400` base and every address octabam
+cites lines up exactly, byte for byte.
+
+**Static read of `0x40006238` (`m68k-elf-objdump -m 5307`, correct base) matches
+their doc precisely:**
+
+```
+40006238: btst #4,%d7        ; bit 4 of the trig word = RECORDER-TRIG flag
+4000623c: beq   0x400066bc   ; clear (ordinary trig) -> bail
+40006240: tstl  %d4          ; set (recorder trig) -> machine-type check
+40006242: beq   0x40006714   ; ... continues into the recorder-arm body (FUN_40097168
+                             ;     call, the 0x00000101 record-header write at
+                             ;     0x40006274 -- exactly §10.13's description)
+```
+
+An ordinary trig entering this function bails in 2 instructions, before touching
+anything voice/audio-related. Traced the whole enclosing function
+(`0x40005ff0`..`0x400066b0` roughly) and its sibling exit at `0x400066bc`
+(`btst #6,%d7` — a second, different recorder-related flag, same immediate-bail
+shape) — every substantial byte in it belongs to the same 84-byte-record
+"RECORDER STATE" bookkeeping octabam's §10.13 point 4 already identified
+(`0x80004f1c`, bank-indexed by `0x80004f18`), which is a completely different memory
+region from the voice-struct arena (`0x800049d8+track*0xA8`) that
+`FUN_4000f450`/`FUN_40006820`/`FUN_40006844`/`FUN_4000672c` (this project's own
+`mt_trig`/`mt_rebind` targets, Session 53/53-bis) actually touch. Zero address
+overlap between the two call graphs — confirmed by grepping the full disassembly
+for cross-references, not just eyeballing.
+
+**Found something the handoff hadn't traced yet: who calls `0x40005ff0` (the
+function `0x40006238` lives inside), and when.** Only one xref in the whole image:
+`4000d326: lea %pc@(0x40005ff0),%a4`, inside the FRAME BUILDER itself (the same
+function as `0x4000d342`/`0x4000d36e`, already named in §10.13 as calling
+`FUN_400068e4` "25,600 times in 1,600 frames"). The call sequence, per track per
+frame:
+
+```
+4000d340: jsr %a3@              ; FUN_400068e4 -- composes/returns this track's trig word in d1
+4000d348: andil #0xd0,d0        ; mask = bits 4,6,7 -- the SAME bits 0x40006238/0x400066bc test
+4000d354: beq   0x4000d35e      ; none of those bits set -> skip entirely
+4000d35a: jsr %a4@              ; only then call 0x40005ff0 (containing 0x40006238)
+```
+
+So there's a THIRD gate, upstream of both bits already found inside `0x40006238`
+and `0x400066bc`: the frame builder itself only calls into this whole function when
+the composed trig word already carries a recorder-related bit. An ordinary
+FLEX/STATIC trig, whose word never sets bits 4/6/7, never reaches `0x40005ff0` at
+all — not "enters and bails," genuinely never called.
+
+**Dynamic confirmation (`tools/emu_mute_dynamic13.py`, new — same harness shape as
+`_11`/`_12`, hooks `0x40006238` directly, no symbol table needed since it's stock
+code): 6 s of real playback on the OT DEMO project (ordinary FLEX/STATIC trigs, no
+recorder-armed track), watching for hits at `0x40006238` — 0 hits, for the entire
+run.** Matches the static call-site finding exactly: not merely "reached but always
+bails," but never reached at all, because the OT DEMO fixture never produces a trig
+word with bits 4/6/7 set. Ruled out the obvious alternative explanation (hook
+address wrong, or the caller condition not what static reading suggested) by first
+verifying the correct-base disassembly's caller-condition trace above — the zero-hit
+result is exactly what that trace predicts, not a surprise requiring a second
+theory.
+
+### Conclusion — the reconciliation question is settled
+
+`0x40006238` is **CONFIRMED recorder-arm-only** (REC1/live-sampling specific, per
+its own name and every gate on the path to it) and **a dead end for the mute-mode
+trig-suppression bug**, which is entirely about ordinary FLEX/STATIC sequencer
+playback. It is not "a second, previously-unexamined dispatch path for ordinary
+trigs" in any sense — three independent gates (the frame builder's own `0xd0` mask
+before even calling in, then `0x40006238`'s own `btst #4`, then `0x400066bc`'s
+`btst #6`) all have to fail to reach it for a non-recorder trig, and the dynamic
+run confirms none of them do.
+
+This resolves the handoff's reconciliation question more precisely than either of
+its two proposed answers: it's not that `0x4000672c` (this project's target) and
+`0x40006238` (octabam's) are "the same shared subroutine, called from two different
+places" (option 1) — they are two entirely disjoint functions serving two entirely
+disjoint subsystems (recorder-arm bookkeeping vs. ordinary voice-start), with no
+call-graph overlap at all. What DOES carry over is option 2's implication: this
+session's `mt_trig`/`mt_rebind` targets (`FUN_40006844`/`FUN_4000672c`) were real,
+frequently-executing, correctly-gated CPU-side code that nonetheless was never the
+thing deciding whether a track's voice actually renders audio — and now there is no
+remaining un-investigated CPU-side "arm caller" candidate left to blame. **Both
+plausible CPU-side dispatch paths for this bug are now ruled out.**
+
+### What's left, unchanged from the handoff, now the only two options
+
+1. **Build the DSP-capable emulator** (`refs/octabam/tools/emu/ot_emu`) — the only
+   tool that could show "does this track produce sound" directly. Still blocked on
+   the two missing vendored C++ trees (`vendor/mc68k`, `vendor/dsp56300/source`),
+   still not investigated where to get them or how much setup time that really is.
+   This is now the more clearly-indicated path, since the cheap CPU-side static/
+   dynamic leads are exhausted.
+2. Keep `mt_trig`/`mt_rebind` in the build regardless (per the standing "do not
+   revert without cause" guidance above — still real, still correct, still
+   non-regressing) and look for a genuinely NEW CPU-side lead — but be aware none
+   has been identified; inventing one without a concrete traced address to examine
+   would be exactly the "re-guessing" the user has asked to avoid.
+
+Files touched this session: `tools/emu_mute_dynamic13.py` (new, kept — not
+scratch). No changes to `patch_softmute.s`, no rebuild, no reflash.
+
+---
+
+## Session 55 (2026-09-14) — `ot_emu` (the DSP-capable C++ port) IS NOW BUILT AND WORKING, and a first real DSP-level measurement raises a genuinely new question rather than closing the case
+
+User asked to pursue the "build DSP-capable emulation" option Session 54 left as
+the only remaining path, and specifically to check for and reuse octabam's own
+existing tools before building anything new. Both paid off.
+
+### The vendoring "blocker" was already solved by octabam's own `make setup`
+
+Session 54's handoff described the two missing vendored trees
+(`vendor/mc68k`, `vendor/dsp56300/source`) as unresolved — not registered as
+git submodules, sourcing cost unknown. They didn't need investigating:
+`refs/octabam/scripts/setup.sh` (the `make setup` target) already does exactly
+this, unconditionally, idempotently: clones `vendor/mc68k` from
+`joelanders/mc68k-md-mm` pinned to a specific commit, clones `vendor/dsp56300`
+from `dsp56300/dsp56300.git` pinned to another, applies
+`tools/patches/dsp56300.patch` (the shared-window / MPYRI / host-stepped-mode
+patch CLAUDE.md's trap list already documents), and builds `dsp_asm`/
+`dsp_host`/`dsp56kDisassemble`. Ran it (`cd refs/octabam && make setup`, ~2–3
+min, all prerequisites — cmake, m68k-elf-gcc, brew — already present from
+earlier sessions) — clean exit, no manual intervention. `vendor/mc68k`,
+`vendor/dsp56300`, `vendor/elektron-firmware-tool` all present afterward, all
+gitignored (confirmed: `git status` in `refs/octabam` stays clean).
+
+Then `cmake --fresh -B out/emu -S tools/emu/ot_emu && cmake --build out/emu -j8`
+(the exact `make emu-cf` recipe) — configured and built clean, zero errors
+(only pre-existing upstream `-Wnontrivial-memcall`/`-Wformat-truncation`
+warnings in vendored code). **This is the exact blocker Session 54 hit
+("`add_subdirectory` can't find vendor/mc68k or vendor/dsp56300/source") —
+now resolved in full, with tooling octabam already shipped.**
+
+### The port is trustworthy: all four self-test gates pass against OUR OWN stock 1.40C
+
+Staged `out/raw/section_3_MAIN_OS.bin` (our own project's, byte-identical
+SHA-256 to what this project's own tools already use) into
+`refs/octabam/out/raw/` (gitignored, not committed — matches "everyone builds
+from their own 1.40C").
+
+- `./out/emu/ot_emac_test` — **PASS**, every check (the EMAC gate CLAUDE.md
+  calls the mandatory floor: "nothing this emulator computes is trustworthy
+  until this passes").
+- `./out/emu/ot_periph_test` — **PASS**, all peripheral models.
+- `./out/emu/ot_rtos_test` — **PASS**: boots OUR stock image to the RTOS
+  handoff, all ten tasks created and run, first 4831 serial bytes match route
+  A byte-for-byte.
+- `./out/emu/ot_dsp_test` — **PASS**: both DSP cores' boot ROMs and payloads
+  upload and parse to their last byte, host round-trip counts match
+  predictions exactly, both cores leave their bootstraps and run their
+  payloads with no fault.
+
+This is octabam's own C++ ColdFire+DSP56300 co-emulator, genuinely running,
+genuinely rendering both real DSP cores, against this project's own firmware.
+The thing Session 52–54 repeatedly needed and didn't have.
+
+### First real measurement: staged our own project + our own patched build, muted a real sample-bearing track, and read back the DSP-shared audio feed directly
+
+Reused route A's own staging (`tools/emu/ot_emu/stage_card.py`, which calls
+the SAME `emu_rtos.stage_project` this project's own dynamic-probe scripts
+already use — identical media either way, per `COLDFIRE_PORT.md`'s own rule
+7). Found that route A's staging **never copies sample `.wav`/`.ot` files
+onto the card by default** (`stage_card.py`'s own docstring: "route A stages
+none by default, which is why every sample slot is empty and the DSP has
+nothing to play") — the user's own "OT DEMO" project (used by
+`emu_mute_dynamic11/13.py`) has an assigned FLEX/STATIC slot on every track
+but literally nothing to play once staged this way, so a first attempt at
+this exact measurement against it came back silent in BOTH the muted and
+unmuted run — not evidence of anything, just no audio content to begin with.
+
+Found a project in the user's own SET that DOES carry real STATIC sample
+content (`ot_project.py report` against each project in
+`~/Desktop/OT Backup/KYOTI/`): **`BOTLI`**, slot 1 = `BOTLI_CB2.wav`, bank A
+part 1 track 1 = machine type FLEX... (see correction below) actually
+STATIC/FLEX slot-byte 0 → pool slot 1, and T1 genuinely trigs and plays real
+audio (confirmed both from the sequencer's own step-1 trig mask and from the
+DSP's own rendered content). **Copied `BOTLI` to a scratch location before
+touching anything** (`/private/tmp/.../scratchpad/BOTLI_TEST_SET/BOTLI` —
+the original in the user's real backup was never opened for writing) and
+staged its card with `--audio ".../AUDIO/BOTLI_CB2.wav:AUDIO/BOTLI_CB2.wav"`
+(the exact path from the project's own `[SAMPLE] ... PATH=../AUDIO/BOTLI_CB2.wav`
+record, relative to the SET folder, per `stage_card.py`'s own convention).
+
+Ran `./out/emu/ot_emu` twice against **our own `mainos_mutemode_dt.bin`**
+(this project's actual patched build, `mt_trig`+`mt_rebind` both active),
+same card, same 150-frame sequencer run, `--dsp --main-level 64
+--block-dump <file>` both times — once with no poke (control), once with
+`--poke "0x800000df=1;0x8000000a=1"` (GATE=1 + MUTE_STATE bit 8 = track 0
+muted, written after the load and before the transport starts, exactly
+matching `patch_softmute.s`'s own `movel`-sized GATE/MUTE_STATE fields —
+NOT a plain single-byte poke at the base address, which would have landed
+in the wrong byte of the big-endian long).
+
+Decoded T1's actual DSP-shared audio-feed record
+(`0x80001c90`/`0x80002710`, the exact 84-word-per-track structure
+`docs/firmware/COLDFIRE_PORT.md` Milestone O10 already validated
+sample-exact against a real kick.wav) with octabam's own
+`tools/scratch/o10_recloop.py` / `blockdump.py`. **First pass through their
+`record_audio()` segment-header heuristic wrongly suggested a small residual
+leak** (a repeating two-word blip surviving mute) — this turned out to be a
+parsing artifact: that heuristic is tuned to octabam's own FLEX-on-recorder-
+buffer fixture's exact header layout, and a two-word run of real early
+audio-transient content in THIS track's record (values `16`, `302896`) just
+happened to fail their header pattern-match too, so it fell into their
+parser's raw-pairs fallback at the wrong offset. **Re-checked directly
+against the RAW 84-word record, no parser in between:**
+
+```
+words[0:8]  IDENTICAL every frame, muted or not: [0,0,262144,0, 16,0,302896,0]
+            -- this is the unconditional arena-rebind/bookkeeping header
+            Session 53 already found and called harmless (the same "+4/+8"
+            pointer-cache reassert that runs regardless of mute state) --
+            now independently confirmed visible, at this exact position, in
+            the DSP-shared record itself, not just in ColdFire RAM.
+words[8:]   CONTROL: real, varying waveform content every frame (e.g. frame 2:
+            0,0,-256,-256,-512,-512,-3840,-6144,...).
+            MUTED:   flat ZERO, every single word, every single frame, for
+            the entire 150-frame run. No leak, no blip, no residual --
+            complete suppression from the very first audio sample.
+```
+
+149/150 captured frames differ at all between the two runs (only frame 1,
+before any trig, is identical — both silent). The one frame that does NOT
+differ in the header words (both write the same arena-rebind bookkeeping,
+confirmed) but differs completely in real audio content, is a clean,
+decode-independent result.
+
+### What this means — and what it does NOT mean
+
+**In this emulator, with this project, this exact firmware build, and this
+exact mute timing (poked before the transport starts, i.e. before the
+track's very first trig ever fires): `mt_trig`+`mt_rebind` produce total,
+complete suppression of the DSP-fed audio content, with zero measurable
+leak.** This is the first time in the whole investigation that a
+DSP-observant tool has been able to check this claim directly rather than
+inferring it from CPU-side register/memory state, and the fix passes
+completely.
+
+**This does not match the hardware report of "zero effect."** If this
+record genuinely gates what reaches the analog output, and it shows perfect
+silence here, hardware should have gone quiet too. It didn't. Two candidate
+explanations, neither chased yet:
+
+1. This specific `0x800xxxxx` DSP-shared-RAM record, while proven
+   sample-exact for NORMAL playback (Milestone O10), might not be the whole
+   story for a voice that's being CUT — the real DSP core could hold
+   additional internal/latched state (an interpolator's own registers, a
+   ring buffer position, an envelope already in flight) that this emulator
+   models faithfully for continuous playback but that a mid-flight mute
+   doesn't fully exercise in the same way real silicon's timing does. This
+   is exactly the class of gap CLAUDE.md's own "a measurement can be
+   structurally blind to what you're using it to rule out" warning names.
+2. **More likely, and cheaper to check first:** this test muted the track
+   BEFORE its first-ever trig — a clean, race-free mute. The real bug
+   (NOTES.md's own framing: "suppressing a *new* sequencer trig while a
+   track is HELD muted") may specifically need the track to have been
+   PLAYING first, muted while already sounding, and then re-triggered —
+   testing whether the SPECIFIC transition (unmuted-and-sounding →
+   mute-engages → new trig arrives) behaves differently from
+   muted-from-the-very-start. Untested this session. `--poke` only fires
+   once, after the load; a live mid-run poke would need either a second
+   `--poke-trig`-style CLI hook (none exists yet for MUTE_STATE) or scripted
+   memory writes via a small wrapper — has not been attempted.
+
+### Ruled out this session
+
+- The vendoring blocker (see above) — fully resolved, not a blocker anymore.
+- The port's basic trustworthiness against our own firmware — all 4 gates
+  pass, not inferred.
+- The very first, most obvious "is there a hardware-matching leak" reading —
+  retracted after finding it was a decode artifact, not real. The corrected,
+  raw-word reading is unambiguous: no leak in this exact scenario.
+
+### Not yet done, concrete next steps in order of cost
+
+1. **Cheapest:** re-run the same comparison but mute the track WHILE IT IS
+   ALREADY PLAYING (start unmuted, let the DSP render real content for a
+   frame or two, poke GATE/MUTE_STATE mid-run via a small change to
+   `ot_emu`'s `--poke` timing or a direct scripted rebuild of this exact
+   test with the poke moved into the frame loop) and re-trig — this is the
+   scenario the fix's own name ("suppressing a *new* trig while a track is
+   HELD muted") actually describes, and this session tested a materially
+   different one.
+2. If that still shows complete suppression: the gap is very likely
+   somewhere this emulator's DSP model doesn't reach (real silicon timing,
+   a latched register, an interrupt-boundary race) — at that point, hardware
+   experimentation (not more emulation) becomes the only way forward, and
+   should be discussed with the user before spending more session time on
+   tooling.
+3. Render actual audio (`--audio-out`) for a human-audible cross-check
+   alongside the raw-record read, once the mute-while-playing scenario is
+   built — not done this session (the raw-record read was decisive enough
+   on its own not to need it yet).
+
+### Environment/tooling now in place for next time (all gitignored, all local, nothing committed)
+
+`refs/octabam/vendor/{mc68k,dsp56300,elektron-firmware-tool}`,
+`refs/octabam/out/emu/{ot_emu,ot_emac_test,ot_periph_test,ot_rtos_test,ot_dsp_test}`
+(built), `refs/octabam/out/raw/section_3_MAIN_OS.bin` (staged, our own
+stock OS), `refs/octabam/out/mainos_mutemode_dt.bin` (staged, our own patched
+build), `refs/octabam/out/botli_card.img` (staged BOTLI test card, real audio
+included), `refs/octabam/out/botli_ctrl.dump` / `botli_muted.dump`
+(block-dump captures from this session's comparison). The BOTLI copy used for
+this test lives at `/private/tmp/.../scratchpad/BOTLI_TEST_SET/BOTLI` (session
+scratchpad, not durable — rebuild from the user's own original + the exact
+`--audio` flag above if picking this back up in a new session).
+
+---
+
+## Session 55 continued (same day) — THE LEAK FOUND: neither `mt_trig` nor `mt_rebind` is even reached for a REPEATED trig, and the raw DSP-fed voice content proves the sample fully restarts anyway. This is the "zero hardware effect" mystery, solved.
+
+User: "Ok, proceed" — continued directly from the mid-play test's ambiguous
+first read. Extended `ot_emu` itself (small, targeted C++ change, not a new
+tool) to schedule pokes and forced trigs AT SPECIFIC FRAMES mid-run, instead
+of only immediately after the load, then used that to build the ACTUAL bug
+scenario end to end for the first time this whole investigation.
+
+### `ot_emu` gained `--poke-at-frame` and `--poke-trig-at-frame`
+
+`tools/emu/ot_emu/main.cpp`: `pokeAfterLoad`/`pokeTrig` used to apply once,
+immediately after the load. Refactored into `applyPoke`/`applyPokeTrig`
+lambdas plus a small sorted checkpoint schedule (`std::vector<pair<int,
+function<void()>>>`) so either can be deferred to a given frame count
+mid-run, in any order, then the sequencer run continues to `--frames`'
+target from wherever it left off. Old behaviour (`pokeAtFrame`/
+`pokeTrigAtFrame` both default `-1`) is byte-for-byte unchanged — verified
+before touching anything else. Rebuilt clean (`cmake --build out/emu --target
+ot_emu -j8`), no errors.
+
+### First correction: the mid-play "zero effect" read from the last message was wrong — RMS/nonzero-count hid a real, working fade
+
+Frame-by-frame (not aggregate) comparison of the CHAIN-OUTPUT readback
+(`o10_recloop.readback_audio`, "the per-track chain output before the master
+mix") for the mid-play-mute test showed the muted run's output DOES fall
+away relative to control, starting ~4 frames after the poke and widening by
+roughly 1–2 dB per frame (0.9 dB at +4 frames, 17+ dB by +24 frames) — a
+smooth ramp-down, not silence and not "no effect". Checked the RAW
+voice-source record (`track_audio`) for the same frames: **byte-identical
+between muted and control, the whole time** — the underlying voice keeps
+rendering completely normally; only the downstream chain output fades. This
+is `pre` (the dry-cut/FX-tail-ring hook, `NOTES.md` line ~8041, "already
+works, hardware-confirmed") doing exactly its documented job on a track that
+was never re-triggered after the mute engaged. Not a bug — a working,
+correctly-identified mechanism, and a useful calibration: aggregate
+RMS/nonzero-count is too coarse to trust for any of these comparisons; every
+finding below reads the frame-by-frame raw and chain-output records
+directly.
+
+### The real test: mute a track, let `pre`'s ramp fully settle, THEN force a genuinely NEW trig on the SAME already-muted track
+
+The mid-play test above never re-triggered T1 — its pattern only has a step-1
+trig, once per loop, thousands of frames away. `--poke-trig`/`--poke-trig-at-
+frame` turned out not to help either: `rtos.pokeTrig()` just sets the
+pattern's own step mask bit in RAM (route A's own established convention),
+it doesn't fire an immediate trig — a bit set this way only fires once the
+sequencer's own playhead naturally reaches that step. So instead: edited the
+SCRATCH copy of BOTLI's pattern directly (`ot_project.set_pattern_trig(d, 1,
+0, 0, 2, 0x00, guard=False)` — bank 1, pattern 1, T1, step 2 — the
+`guard=True` default calls a `guard_backup()` that only recognises
+octabam-author-specific backup paths and would abort here; `guard=False`
+skips it since this is our own disposable scratch copy, never the user's
+original) to give T1 a SECOND, reachable trig. Re-staged the card
+(`out/botli_card2.img`), found the new trig lands at **frame 441** (measured
+empirically from an unmuted control run's own `FW_LIVE_NIBBLE` log, not
+assumed from tempo arithmetic).
+
+Ran muted-from-frame-5 (well after T1's first natural trig at frame 0, well
+before the pattern's frame-441 second trig) for 470 frames, block-dump
+captured, and compared frame-by-frame against an unmuted control on the same
+(edited) pattern:
+
+```
+frame   src_ctrl(dB)  src_muted(dB)    rb_ctrl(dB)  rb_muted(dB)
+441          -27.0         -35.1           -41.7        -138.5   (T1 muted+decayed, ~silent)
+443          -24.6         -24.6           -39.6        -138.5
+444          -20.2         -20.2           -41.1         -41.3   <- raw source SNAPS to identical
+445          -11.6         -11.6           -36.2         -36.2      chain output follows it too
+446          -18.1         -18.1           -24.9         -24.9
+447          -11.8         -11.8           -23.9         -24.2   <- chain output starts to
+448          -10.7         -10.7           -29.2         -31.1      diverge again (pre re-engaging)
+```
+
+**From frame 444 the raw voice-source record is byte-identical to the
+unmuted control** — the retrig fully re-binds and plays the sample, not a
+partial leak, a COMPLETE, clean restart, indistinguishable from an unmuted
+track. The chain output follows it almost exactly for ~3 frames before
+`pre`'s ramp starts pulling it back down again. **This is the reported bug,
+reproduced end to end for the first time in this whole investigation**: a
+track held muted, re-triggered, produces real audio before anything catches
+it — not a hypothetical, a directly observed, byte-level match to an
+unmuted control.
+
+### Why `mt_trig`/`mt_rebind` don't stop it: neither one is even the right gate for this trig
+
+Watched (`ot_emu --watch-pc`, no rebuild needed, register dumps included)
+`mt_trig`'s real entry (`0x40006844`) and its two branch targets
+(`mt_silenced` `0x400d7526` / `mt_pass` `0x400d752e`, from `m68k-elf-nm
+out/patch_softmute_dt.elf`) across the whole 470-frame run:
+
+**`mt_silenced`: 0 hits. `mt_pass`: 1943 hits. And T1 (track index 0, whose
+voice-struct base `0x800049d8` is directly visible in the register dump)
+NEVER appears in mt_trig's 1943 calls at all** — only tracks 1, 3, 4 and a
+recorder-buffer id (0x86) do, confirmed by their own voice-struct addresses
+(`a2 = 0x80004a80` for d1=1, matching `0x800049d8 + 1×0xA8` exactly). **`mt_
+trig`/`FUN_40006844` is simply never called for T1 in this whole scenario,
+muted or not.** Session 53's whole causal chain (frame builder → `FUN_
+40006820` → `FUN_40006844` → `FUN_4000672c` "the actual sample-restart step")
+is real code, correctly gated — for tracks whose voice needs a FRESH bind.
+T1's frame-441 retrig plays the SAME already-loaded static sample it played
+at frame 0, so it never takes that path at all.
+
+Then watched `mt_rebind`'s real detour site (`0x4000f4dc`) and its branches
+(`mr_silence` `0x400d7584` / `mr_pass` `0x400d758a`) the same way: **7 total
+site hits across the run, T1 appears exactly twice** — once at boot (frame
+0's own trig, before the mute poke at frame 5, correctly took `mr_pass`,
+register dump confirms `a2 = 0x800049d8` = T1's voice struct) and once at
+timestamp 458584387 (frame ~441's retrig): **`a2 = 0x800049d8` (T1) →
+`mr_silence`, with `d1 = 0x100` = exactly the MUTE_STATE bit this session
+poked.** `mt_rebind` correctly recognises T1 is muted and correctly skips
+its arena-pointer write for this exact retrig — **and the raw voice-source
+record still shows a complete, clean restart four samples later regardless.**
+
+**Both fixes are proven, directly, to be firing exactly as designed for this
+retrig — mt_trig doesn't even apply here, and mt_rebind's own gate correctly
+engages — and the DSP-fed audio content restarts anyway.** This is
+Session 54's reconciliation option (2), now proven rather than inferred:
+neither `FUN_40006844`/`FUN_4000672c` nor the `0x4000f4dc`/`e0` arena-pointer
+write is the thing that actually decides whether a track's voice restarts
+its playback. Both are real, both are correctly gated, and neither is load-
+bearing for this bug. This is exactly why three flashes showed zero effect —
+the fix was correctly implemented and had nothing to fix.
+
+### Where the real gate almost certainly is — a concrete, already-partially-mapped next step
+
+`mt_rebind`'s own detour site (`0x4000f4dc`/`e0`) sits INSIDE `FUN_4000f450`
+— this session independently re-disassembled that whole function early on
+(see the raw disasm captured this session, `0x4000f450`..`0x4000f560`) while
+cross-checking the base-address convention, before realising it was already
+Session 53/53-bis's own well-trodden ground. Its structure, now newly
+relevant: it computes the track's target arena slot, writes the `+4`/`+8`
+pointers (`mt_rebind`'s gate), **then branches on whether the arena slot
+ALREADY holds the right content** (`0x4000f4e4..0x4000f514`): if NOT bound
+yet, it calls `FUN_40006820` (mt_trig's own target — explaining why mt_trig
+never fires for T1: its content is ALREADY bound, every single trig, since
+it always plays the same static sample); if it IS already bound (T1's case,
+every time), it falls into a **"reuse" path at `0x4000f526` onward** —
+comparing stored content-ids, then (per this session's own partial read)
+falling through toward `0x4000f54c` and beyond, never fully disassembled.
+**This "reuse" path — reached on every repeat trig of an already-bound
+voice, never touched by `mt_trig` or `mt_rebind`, and not yet disassembled
+past `~0x4000f560`this session — is the strongest concrete candidate for
+where the real restart signal lives.** No `MUTE_STATE` test has been found
+anywhere in it yet, but it hasn't been fully read either.
+
+### Ruled out this session, precisely, not by inference
+
+- `mt_trig`'s gate is real and correctly implemented — for the case it
+  actually covers (a fresh arena bind). It does not cover a repeat trig on
+  an already-bound sample, which is what T1 (and very plausibly the user's
+  real hardware scenario) does on every retrig.
+- `mt_rebind`'s gate is real, correctly implemented, and directly observed
+  firing correctly (`mr_silence` taken, with the exact expected `MUTE_STATE`
+  value in a register) on the exact retrig that leaks. Its target write is
+  provably not what gates DSP playback restart.
+- The earlier "complete suppression, no leak at all" read (mute BEFORE the
+  very first trig) is NOT evidence `mt_trig`/`mt_rebind` work for the bug's
+  actual scenario — it's a DIFFERENT case (no voice ever bound at all, so
+  nothing downstream had anything to restart) that this session initially
+  conflated with the real "held muted, then retriggered" bug.
+- `pre`'s dry-cut/FX-tail ramp is confirmed working correctly and is not
+  part of this specific leak (it engages on the CHAIN OUTPUT a few frames
+  after any trig, muted or not, matching its intended design of ducking one
+  track's contribution before removing another factor).
+
+### Not yet done
+
+- Full disassembly of `0x4000f526` onward (the "reuse" path) — stopped at
+  `~0x4000f560` this session, not because of a blocker, just time.
+- A dynamic watch of whatever address that path branches to, to find the
+  actual instruction that recomputes/resets the play position or triggers
+  the DSP-side restart — the same `--watch-pc` technique used above applies
+  directly, no new tooling needed.
+- Once found: a gate on THAT address, isolation-tested and dynamically
+  re-validated with this exact same BOTLI-retrig scenario (not the
+  mute-before-first-trig one) as the acceptance test, since that's now
+  proven to be the scenario that actually matters.
+
+### Environment/tooling added this session (on top of the earlier Session 55 entry, all still gitignored/local)
+
+`refs/octabam/tools/emu/ot_emu/main.cpp` modified (`--poke-at-frame`,
+`--poke-trig-at-frame` — a real code change to a vendored tool, kept local,
+not upstreamed, matches the project's own "everyone builds from their own
+copy" posture already established for `vendor/`). `refs/octabam/out/
+botli_card2.img` (T1 now trigs steps 1 AND 2), `out/botli2_ctrl.dump` /
+`botli2_muted.dump` (the decisive comparison), `out/botli_muted_midplay.dump`
+(the `pre`-ramp-only measurement, superseded for bug purposes but correct
+and worth keeping as the `pre` regression reference). The scratch BOTLI copy
+at `/private/tmp/.../scratchpad/BOTLI_TEST_SET/BOTLI` now has the edited
+pattern (step 2 added) — rebuild it fresh (from the user's ORIGINAL, never
+edited) plus the same `set_pattern_trig` call if picking this back up in a
+new session, since `/private/tmp` is not durable across sessions.
+
+---
+
+### Exact prompt to start the next session with
+
+```
+Continue the MUTE MODE trig-suppression investigation in
+~/Documents/octatrack-kyoti-fw. Read NOTES.md's "Session 55 continued" section
+(at the very end of the file) first -- the bug is now REPRODUCED end to end
+in the DSP-capable emulator (refs/octabam/tools/emu/ot_emu, built this
+session via octabam's own `make setup`) and its cause is narrowed to a
+specific, partially-disassembled function, not a mystery anymore. Summary:
+muting a track, letting it settle, then forcing a genuinely NEW trig on the
+SAME already-muted track (built via a small ot_emu extension,
+--poke-at-frame / --poke-trig-at-frame, plus editing a scratch copy of the
+BOTLI project's pattern to add a second trig -- never the user's original)
+reproduces the reported blip exactly: the raw DSP-fed voice content fully
+restarts, byte-identical to an unmuted control, four frames after the trig.
+Direct --watch-pc register dumps PROVE both mt_trig (never even called for
+this track/scenario -- it only fires on a fresh arena bind, and this track's
+sample is always already bound) and mt_rebind (correctly detects the mute,
+correctly takes its silence branch, confirmed via the exact MUTE_STATE value
+in the register dump) are NOT what gates this. The concrete next step,
+already half-mapped: finish disassembling FUN_4000f450's "reuse" path
+(0x4000f526 onward, m68k-elf-objdump -m 5307, base 0x40000400) -- reached on
+every repeat trig of an already-bound voice, never touched by either
+existing hook -- then --watch-pc it dynamically the same way mt_trig/
+mt_rebind were watched this session, to find the actual restart signal and
+gate IT. Don't re-flash hardware until a new fix has been isolation-tested
+AND re-validated against this exact BOTLI-retrig scenario (not the
+mute-before-first-trig one, which is now known not to be the bug).
+```

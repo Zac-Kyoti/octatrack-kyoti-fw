@@ -10,7 +10,7 @@ Identical to build_mutemode.py except:
       * patch_mutemode  -> N_MODES = 3, value strings  OT / OT+FX / DT
       * patch_softmute  -> GATE (0x800000dc) == 2 selects DT: the same D5-bit clearing as
         OT+FX (FUN_40004db8 keeps every frame level word -> the sounding voice + its FX
-        reach the mix untouched) and the same `pre_v` new-trig drop, but NO note-off /
+        reach the mix untouched) and the same `mt_trig` new-trig drop, but NO note-off /
         DAT_8000184a hold.  Net: a pure sequencer mute -- the voice already playing rides
         its own amp envelope (fades, sustains, or loops forever per the AMP page), only new
         trigs are suppressed.  Exactly a Digitakt trig mute.  Solo folds in the same way.
@@ -45,8 +45,9 @@ PATCHES = [
     ("patch_trigscale", 0x400d7b00, None,
      [(0x4009b6f2, "cave", "203c0000091a", 18)]),
     ("patch_softmute", 0x400d7400, "DT_MODE=1",              # gated + the DT (mode 2) branch
-     [(0x40004dc6, "pre",   "2a3980000008", 6),
-      (0x40005178, "pre_v", "4feffff448d7001c", 8)]),
+     [(0x40004dc6, "pre",       "2a3980000008", 6),
+      (0x40006844, "mt_trig",   "40c246fc2700", 6),
+      (0x4000f4dc, "mt_rebind", "254d0004254c0008", 8)]),
     ("patch_mutemode", 0x400d7600, "DT_MODE=1", []),         # menu stub: OT / OT+FX / DT
 ]
 
@@ -177,7 +178,7 @@ def main():
 
     # --- the OT / OT+FX behaviour must stay byte-identical to build_mutemode.py, save for
     #     the DT delta: the two caves that grew (patch_softmute, patch_mutemode), the
-    #     relocated menu arrays, and the pre_v detour word that now points at a moved symbol.
+    #     relocated menu arrays, and the mt_trig detour word that now points at a moved symbol.
     mm = ROOT / "out/mainos_mutemode.bin"
     if mm.exists():
         mmb = mm.read_bytes()
@@ -185,7 +186,8 @@ def main():
         allowed = [(0x400d7400, 0x400d7700),        # patch_softmute cave
                    (0x400d7600, 0x400d7700),        # patch_mutemode cave (inside the above span)
                    (0x400d7700, 0x400d7800),        # relocated PERSONALIZE arrays
-                   (0x40005178, 0x40005180)]        # pre_v detour jmp target (symbol moved)
+                   (0x40006844, 0x4000684a),        # mt_trig detour jmp target (symbol moved)
+                   (0x4000f4dc, 0x4000f4e4)]        # mt_rebind detour jmp target (symbol moved)
         stray = [i for i in diff
                  if not any(lo - BASE <= i < hi - BASE for lo, hi in allowed)]
         print(f"  vs build_mutemode.py: {len(diff)} bytes differ, {len(stray)} outside the DT delta")

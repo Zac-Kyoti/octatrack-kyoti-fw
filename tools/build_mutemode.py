@@ -67,8 +67,9 @@ PATCHES = [
     ("patch_trigscale", 0x400d7b00, None,
      [(0x4009b6f2, "cave", "203c0000091a", 18)]),
     ("patch_softmute", 0x400d7400, None,                    # NB: no ALWAYS_ON -> gated
-     [(0x40004dc6, "pre",   "2a3980000008", 6),
-      (0x40005178, "pre_v", "4feffff448d7001c", 8)]),
+     [(0x40004dc6, "pre",       "2a3980000008", 6),
+      (0x40006844, "mt_trig",   "40c246fc2700", 6),
+      (0x4000f4dc, "mt_rebind", "254d0004254c0008", 8)]),
     ("patch_mutemode", 0x400d7600, None, []),               # menu stub, spliced in below
     #  ^ gated patch_softmute V7 is ~330 B @0x400d7400 (ends ~0x400d7542); mutemode clears it
 

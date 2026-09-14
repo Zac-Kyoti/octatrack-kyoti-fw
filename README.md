@@ -58,7 +58,7 @@ a 6-byte detour into a code cave (`tools/patch_trigscale.s`). Flashed to a real
 Octatrack MKI (2026-08-28) — the stall is gone, no regression. Write-up:
 [`NOTES.md`](NOTES.md) "Session 5–7"; emulator `tools/emu_trigbug.py`.
 
-### Bug 2 — a pattern with only parameter locks reads as empty  ·  *emulator-validated, not flashed*
+### Bug 2 — a pattern with only parameter locks reads as empty  ·  **fixed, hardware-confirmed (MKI)**
 
 A pattern whose only content is p-locks — parameter locks on a **MIDI track**, or
 **trigless locks** on an audio track, with no trig anywhere — showed as an unused
@@ -71,7 +71,8 @@ value: `tools/patch_pattern_led.s`, `python3 tools/build_pattern_led.py` →
 `OCTATRACK_OS1.40C_PATTERNLED.{syx,bin}` (version stays `1.40C`, base = stock
 only). Validated in the full-firmware emulator (`tools/emu_pattern_led.py`): stock
 reproduces the bug, patched lights the LED, a genuinely empty pattern still reads
-empty. Write-up: [`NOTES.md`](NOTES.md) "Session 48". **Never flashed.**
+empty. Write-up: [`NOTES.md`](NOTES.md) "Session 48". **Flashed to the MKI
+(2026-09-13) — confirmed working, no regression.**
 
 ### MUTE MODE — a PERSONALIZE toggle for audio-track mute behaviour
 
@@ -81,14 +82,33 @@ so a freshly flashed unit is stock until you opt in.
 | mode | effect | build |
 |---|---|---|
 | **OT** | stock behaviour, byte-for-byte. | any |
-| **OT+FX** | *soft mute*: on mute the dry signal cuts fast and clean (like a per-track STOP), the track's FX inserts ring their delay/reverb tails out, and a muted track's trigs make no sound. On **`wip` this also extends to SOLO** — a track silenced because another track is soloed gets the same soft cut instead of the stock hard cut (softmute V7). | `build_mutemode.py` |
-| **DT** | pure *sequencer* mute, Digitakt-style: the voice that is already sounding keeps playing under its own AMP envelope, its FX ring, and only *new* trigs are suppressed. | `build_mutemode_dt.py` |
+| **OT+FX** | *soft mute*: on mute the dry signal cuts fast and clean (like a per-track STOP), the track's FX inserts ring their delay/reverb tails out. On **`wip` this also extends to SOLO** — a track silenced because another track is soloed gets the same soft cut instead of the stock hard cut (softmute V7). **A muted track's trigs are supposed to make no sound — this specific part is a known, unfixed bug, see below.** | `build_mutemode.py` |
+| **DT** | pure *sequencer* mute, Digitakt-style: the voice that is already sounding keeps playing under its own AMP envelope, its FX ring, and only *new* trigs are suppressed — **also currently broken, see below.** | `build_mutemode_dt.py` |
 
 Sources: `tools/patch_mutemode.s`, `tools/patch_softmute.s` (V7 on this branch,
 `--defsym DT_MODE=1` for the DT build); emulators `tools/emu_mutemode.py`,
 `tools/emu_mute.py`, `tools/emu_solo.py`, `tools/emu_dt.py`; write-ups
 [`NOTES.md`](NOTES.md) "Session 9–12". The toggle also writes the checksummed
 `'ANDY'` battery-SRAM shadow so it survives a power cycle ("Session 19").
+
+**⚠️ KNOWN BUG, still open as of 2026-09-14 — do not flash expecting this fixed.**
+HW flash (2026-09-13, first-ever flash of V7) found: DT suppressed no new trigs at
+all, and OT+FX's trig-attack blip (believed fixed since Session 9) was still present.
+Session 52's `pre_v` hook was believed to fix it (root-caused via `trig_to_voice`'s
+real caller, isolation-revalidated) — flashing it changed nothing on hardware. Root
+cause: `pre_v` targeted a function that real sequencer trigs never call at all (proven
+in a full-firmware emulator, zero entries across a real playback run) — 100% correct
+engineering aimed at the wrong target. Session 53/53-bis found and built the REAL
+per-trig gates, `mt_trig` and `mt_rebind` (still in `patch_softmute.s`), each
+individually proven correct by direct dynamic CPU-side instrumentation — **also
+flashed, also zero hardware effect.** Session 55 finally explained why, using a
+genuinely DSP-capable emulator (not just CPU-side instruction tracing): both hooks
+fire and gate exactly as designed for a track's very first trig, but **a second trig
+on a track that was already held muted while playing — the actual bug scenario —
+never reaches either hook**, and the DSP-rendered voice content restarts in full,
+byte-identical to an unmuted track. Root cause is now narrowed to a specific,
+not-yet-fully-disassembled code path (`FUN_4000f450`'s reuse branch) but not yet
+fixed. Full trail: [`NOTES.md`](NOTES.md) "Session 52" through "Session 55 continued".
 
 **A fourth mode is designed and reverse-engineered but not built** — `OTFX`:
 instant dry cut, FX tails ring, and unmute **resumes the sample at the playhead**
@@ -189,19 +209,57 @@ A **power move** — hold `[PTN]` + tap a `[TRACK]` key for immediate per-track
 reload, no picker — is scoped but not built (the chord is free; it needs a
 track-key-handler hook).
 
-### QUANTIZE LIVE REC — a front-panel toggle for the live-record quantize  ·  *emulator only, not flashed*
+### QUANTIZE LIVE REC — a front-panel toggle for the live-record quantize  ·  *hardware-confirmed; two cosmetic issues parked*
 
 The all-or-nothing **QUANTIZE LIVE REC** (the PERSONALIZE row — *not* the
 per-track 50 % TRIG QUANT in the TRACK TRIG MENU) has no shortcut. This adds one,
-Digitone-style: **hold `[REC]`, tap `[PLAY]` twice** to toggle it, with a
-"QUANT LIVE REC ON / OFF" toast that shows while `[REC]` is held and clears when
-you let go (no timer). The first `[REC]` + `[PLAY]` still starts live recording
-exactly as on stock — only every second press within the same `[REC]` hold flips
-the setting, and it is swallowed so the transport is untouched. The setting is a
-stock PERSONALIZE word already inside the battery-backed `'ANDY'` block, so the
-toggle survives a power cycle with no extra plumbing. Two detours, one cave:
-`tools/patch_qlrec.s`, `python3 tools/build_qlrec.py` → `140C_KYOTI`. Write-up:
-[`NOTES.md`](NOTES.md) "Session 46"; emulator `tools/emu_qlrec.py`. **Never flashed.**
+Digitone-style: **hold `[REC]`, tap `[PLAY]` twice, close together** to toggle
+it, with a "QUANT LIVE REC ON / OFF" toast that shows while `[REC]` is held and
+closes instantly on release. The first `[REC]` + `[PLAY]` still starts live
+recording exactly as on stock; a second tap only flips the setting if it lands
+within a short pairing window of the first, otherwise it's discarded and
+starts a fresh pairing attempt. The setting is a stock PERSONALIZE word already
+inside the battery-backed `'ANDY'` block, so the toggle survives a power cycle
+with no extra plumbing. Three detours, one cave: `tools/patch_qlrec.s`,
+`python3 tools/build_qlrec.py` → `140C_KYOTI`.
+
+**Flashed and hung the MKI (2026-09-13, original design):** it opened the
+toast with a one-shot `dur=0` ("persistent, no timer") call and never closed
+it — the whole front panel stopped responding to any key (sequencer kept
+running — a clean power-cycle recovered it, no corruption). Root cause found
+by disassembling `FUN_4005a2b8`: `dur=0` doesn't produce a passive banner — it
+tail-jumps into a linked-list-insert function (`FUN_40031494`, list head
+`0x460d165c`) that is structurally a **modal window/overlay stack**, a path
+the project's other (HW-confirmed-safe) toasts never touch since they all use
+a self-timing `dur>0`.
+
+**Rewritten and reflashed — no hang.** The toast is a **periodically re-armed
+`dur>0`** call: a per-frame hook (`qlr_tick`, detour of `0x400522ca`, the same
+site DIRECT JUMP v2 uses for its own toast countdown) re-issues the same
+self-timing call every `REARM_INTERVAL` ticks while `[REC]` stays held, always
+before the previous one could expire. Dynamically confirmed off the modal path
+in the emulator (`tools/emu_notify_probe.py`) *and* HW-confirmed by actually
+flashing it.
+
+**Six real-use refinements** came back from that flash, all now HW-confirmed
+or deliberately parked. The double-tap requires the two taps to land within a
+pairing window of each other (a too-slow pair is discarded, not flipped, and
+starts a fresh attempt); the toast fade time was shortened; it closes
+instantly on `[REC]` release instead of fading (safe now that `dur` is never
+`<=0`, unlike the design that hung); the ON/OFF label was found to be
+backwards relative to what the PERSONALIZE menu actually shows checked, now
+fixed. The pairing window itself needed two more passes after real hardware
+use turned up a genuine logic bug (a fast tap right after a successful flip
+could pair with the flip itself) and a wrong-direction tuning guess along the
+way — both since corrected and confirmed. Two items are deliberately left
+parked rather than chased further: a rare, self-clearing cosmetic glitch (a
+small textless box briefly appears where the toast was after it closes), and
+the PERSONALIZE menu not visually refreshing while you're already looking at
+the row it just changed (the stored value is correct — it reads right next
+time you open the menu). Write-up: [`NOTES.md`](NOTES.md) "Session 46"
+(original design), "Session 50" (the hang, root cause, and rewrite), "Session
+51/51-bis/51-ter" (refinement pass, logic-bug fix, tuning correction). **All
+of the above is HW-confirmed** except the two parked cosmetic items.
 
 ### Backlog — scoped, not built
 
@@ -216,12 +274,13 @@ toggle survives a power cycle with no extra plumbing. Two detours, one cave:
 | element | build | on-hardware status (Octatrack MKI) |
 |---|---|---|
 | Bug 1 manual-trig fix | all | **confirmed** — flashed 2026-08-28, stall gone, no regression |
-| Bug 2 p-lock-only pattern shows empty | `build_pattern_led.py` | **emulator only** (full-firmware `emu_pattern_led.py`, stock-repro + patched-fix + no false positive), never flashed |
-| **QUANTIZE LIVE REC** front-panel toggle | `build_qlrec.py` | **emulator only** (`emu_qlrec.py`), never flashed |
-| MUTE MODE menu + `OT+FX` soft **mute** mechanism | `build_mutemode.py` | **confirmed** — the Session-10 build was flashed and works |
+| Bug 2 p-lock-only pattern shows empty | `build_pattern_led.py` | **confirmed** — flashed 2026-09-13, grid LED lights correctly, no regression |
+| Part-change carryover — recorder cache / scene-morph pieces | `build_partreapply.py` | flashed 2026-09-13, behaviorally safe; reports #2/#3 (recorder, REC SETUP) could not be reliably reproduced on stock, treat as unconfirmed |
+| ↳ report #1 (PICKUP→FLEX stuck loop) | `build_partreapply.py` | **fix does not address the real bug** — reproduces identically on stock and patched on a repeated pattern switch (good → good → bug); root cause still open, see `NOTES.md` "Session 50" |
+| **QUANTIZE LIVE REC** front-panel toggle | `build_qlrec.py` | original design hung the unit 2026-09-13; rewrite (periodic `dur>0` re-arm) **HW-confirmed**, no hang; double-tap timing, toast fade/instant-close, and label polarity **all HW-confirmed correct**; 2 cosmetic issues (textless-box flash, PERSONALIZE row not live-redrawing) parked, not chased further |
+| MUTE MODE menu + `OT+FX` soft **mute** mechanism | `build_mutemode.py` | the Session-10 build (V6b, no SOLO extension) was flashed and confirmed on hardware; **today's `build_mutemode.py` ships V7 (SOLO extension), which is a different compiled image and was NOT independently reflashed until 2026-09-13, see below** |
 | ↳ the `'ANDY'`-shadow persistence (survives power cycle) | `build_mutemode.py` | emulator-verified, **not yet flashed** |
-| ↳ the **SOLO** extension (softmute V7) | `build_mutemode.py` (`wip`) | **emulator only**, never flashed |
-| **DT** sequencer-mute mode | `build_mutemode_dt.py` | **emulator only**, never flashed |
+| ↳ the **SOLO** extension (softmute V7) + **DT** sequencer-mute mode | `build_mutemode.py` / `build_mutemode_dt.py` | **flashed 2026-09-13 — found a real bug**: `pre_v`'s new-trig-drop filter never actually caught STATIC/FLEX's own normal step-trig commands, so DT suppressed nothing and OT+FX's blip never closed; root cause + caller-address fix in `NOTES.md` "Session 52", isolation-revalidated, **rebuilt but not yet reflashed** |
 | MUTE MODE 4th option (`OTFX` playhead-resume) | — | **reverse-engineered only**, not built |
 | **DIRECT JUMP** pattern-change mode | `build_directjump*.py` | **emulator only** (stub-level), never flashed |
 | side-chain `KEY` menu + formatter | `build_sidechain.py` / `build_sidechain3.py` | **emulator only**, never flashed |

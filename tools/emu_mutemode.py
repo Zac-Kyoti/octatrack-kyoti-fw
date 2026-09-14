@@ -89,7 +89,8 @@ check(b"\x23\xc0\x10\x0f\xff\x6c" in sm_win, "set_mutemode writes shadow (move.l
 
 print("\n=== static: detours ===")
 for site, elf, s in [(0x40004dc6, "out/patch_softmute.elf", "pre"),
-                     (0x40005178, "out/patch_softmute.elf", "pre_v"),
+                     (0x40006844, "out/patch_softmute.elf", "mt_trig"),
+                     (0x4000f4dc, "out/patch_softmute.elf", "mt_rebind"),
                      (0x4009b6f2, "out/patch_trigscale.elf", "cave")]:
     nm2 = subprocess.run(["m68k-elf-nm", elf], capture_output=True, text=True).stdout
     tgt = {p[2]: int(p[0], 16) for p in (l.split() for l in nm2.splitlines()) if len(p) == 3}[s]
