@@ -31,9 +31,16 @@
 ;
 ; SVF integrator state, per compressor instance, in the compressor's own r7
 ; block at r7+$16 (lp) / r7+$17 (bp) -- unused by the stock module (RE: state
-; block r7+$f..$1b, only $f/$10/$11/$12/$13/$15/$19/$1a/$1b touched).  r7+$f
-; bit0 = the stock "first-block" gate (0 at init, m0 after) -> read it to know
-; whether $16/$17 are warm; no separate init hook needed.
+; block r7+$f..$1b; disassembly of the real init routine at P:0x1864 confirms
+; it zero-fills only $11/$12/$13/$1a/$1b/$f, leaving $14/$16/$17/$18 untouched
+; and therefore NOT guaranteed zero -- whatever DSP memory held before this
+; track's compressor instance was assigned lands there unchanged).  r7+$18 is
+; OUR OWN dedicated "have I ever seeded lp/bp myself" latch (never touched by
+; stock or by any other hook here): do not gate on the stock "first-block" bit
+; (r7+$f) instead -- it can legitimately go warm from ordinary stock activity
+; before our KEY FLT code has ever run once (e.g. KFLT parked at bypass for a
+; while, then turned to LP/HP for the first time), which would otherwise seed
+; the integrator from garbage at $16/$17.
 ;
 ; AUDIT THE OUTPUT BY DISASSEMBLY.  No `mpy x0,y0` (assembles as mpysu) --
 ; only x1,x0 / x1,y0 operand orders, which emit true signed mpy.
@@ -126,11 +133,19 @@ zz05:
 zz06:
         move    #>@FTAB@,r1
         move    p:(r1+n1),x1          ; x1 = f coefficient (Q23, < 0.32)
-        move    x:(r7+$f),a
-        and     #>$1,a
+;   NOTE: do NOT gate on the stock "first-block" bit (r7+$f) here -- it can go
+;   warm from ordinary stock compressor activity before OUR code has ever run
+;   a KEY FLT block (e.g. KFLT sits at bypass for a while, then gets turned to
+;   LP/HP for the first time). $16/$17 are untouched by stock's own init
+;   (0x1864's zero-fill list is $11/$12/$13/$1a/$1b/$f only -- confirmed by
+;   disassembly), so reading them on the stock bit's word risks seeding the
+;   integrator from garbage. Own the gate: $18 is ALSO untouched by stock and
+;   by every other hook here, so use it as OUR single "have I ever seeded
+;   lp/bp myself" latch, set only below, never by anything else.
+        move    x:(r7+$18),a
         tst     a
         bne     zz07
-        move    #0,y1                 ; first block -> lp = bp = 0
+        move    #0,y1                 ; never seeded -> lp = bp = 0
         move    #0,y0
         bra     zz08
 zz07:
@@ -166,6 +181,8 @@ zz13:
 zz12:
         move    y1,x:(r7+$16)
         move    y0,x:(r7+$17)
+        move    #1,a
+        move    a,x:(r7+$18)          ; latch: lp/bp are now genuinely ours
 
 zz10:
 ; -- SC LISTEN : if on, stash the processed key -> keybus[key] gen 1 --

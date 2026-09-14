@@ -60,7 +60,7 @@ SLOTS = [
      dict(name="000000000000", cnt="00000080", dflt="7f", b="00000000")),
     (9,  b"KFLT\x00\x00",     128, 64, "kfilt_fmt",
      dict(name="000000000000", cnt="00000002", dflt="00", b="400475f8")),
-    (10, b"KGAIN\x00",        128, 64, FMT_BIPOLAR,
+    (10, b"KGN\x00\x00\x00",  128, 64, FMT_BIPOLAR,
      dict(name="000000000000", cnt="00000080", dflt="00", b="00000000")),
     (11, b"MON\x00\x00\x00",  2,   0,  FMT_ONOFF,
      dict(name="000000000000", cnt="00000080", dflt="00", b="00000000")),
@@ -151,7 +151,7 @@ def sc_assemble(kadj, org):
 
 def dsp_module_fileoff(img, va, ln, p_addr):
     import importlib.util
-    spec = importlib.util.spec_from_file_location("mm", ROOT / "refs/octabam/tools/dsp_modmap.py")
+    spec = importlib.util.spec_from_file_location("mm", ROOT / "refs/octabam/tools/build/dsp_modmap.py")
     mm = importlib.util.module_from_spec(spec); spec.loader.exec_module(mm)
     mods, _ = mm.modules(bytes(img), va, ln)
     for sp, addr, cnt, data in mods:
@@ -162,7 +162,7 @@ def dsp_module_fileoff(img, va, ln, p_addr):
 
 def dsp_xtable_fileoff(img, va, ln, x_addr):
     import importlib.util
-    spec = importlib.util.spec_from_file_location("mm", ROOT / "refs/octabam/tools/dsp_modmap.py")
+    spec = importlib.util.spec_from_file_location("mm", ROOT / "refs/octabam/tools/build/dsp_modmap.py")
     mm = importlib.util.module_from_spec(spec); spec.loader.exec_module(mm)
     mods, _ = mm.modules(bytes(img), va, ln)
     for sp, addr, cnt, data in mods:
@@ -231,6 +231,19 @@ def main():
         label = name.rstrip(b"\x00").decode()
         print(f"  slot {slot:2d}  {label:5s}  count {cnt:3d}  "
               f"default {dflt:3d}  A 0x{a_val:08x}")
+
+    # Per-parameter ENABLE BITMAP -- NOT relative to E like the fields above.
+    # refs/octabam/docs/firmware/PARAM_PAGES.md ("P+0x18a / P+0x18e"): the
+    # struct base for this one field is P = E + 0x38; FUN_400a6994(P+0x18a,
+    # P+0x18e, slot) gates whether the generic renderer stages OR DRAWS a
+    # knob at all, independent of name/count/default being valid. Confirmed
+    # against stock: slots 8-11's nibbles here all read 0 (RMS's slot 6, in
+    # the neighbouring P+0x18e word, reads 1). Without this poke KEY/KFLT/
+    # KGAIN/MON compile clean and never appear on screen.
+    ea = E + 0x38 + 0x18a
+    assert int.from_bytes(img[o(ea):o(ea) + 4], "big") == 0, "enable bitmap (slots 8-11) not 0"
+    img[o(ea):o(ea) + 4] = (0x1111).to_bytes(4, "big")
+    print(f"  enable bitmap 0x{ea:08x}  slots 8-11 -> 0x00001111 (all on)")
 
     # ---------------- DSP (both payloads) ----------------
     print("\n=== DSP: SPATIALIZER donor + sctap / scdet / sctail ===")

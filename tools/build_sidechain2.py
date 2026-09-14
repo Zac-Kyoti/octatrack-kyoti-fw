@@ -61,6 +61,14 @@ CF_POKES = [
     (E + 0x96 + KEY_SLOT,     "7f",           b"\x00",                "KEY default 127 -> 0 (OFF)"),
     (E + 0xa2 + 4 * KEY_SLOT, "00000000",     None,                   "KEY min (assert 0)"),
     (E + 0x132 + 4 * KEY_SLOT, "00000000",    None,                   "KEY widget ptr (assert 0)"),
+    # Per-parameter ENABLE BITMAP -- NOT relative to E like the fields above.
+    # refs/octabam/docs/firmware/PARAM_PAGES.md ("P+0x18a / P+0x18e"): the
+    # struct base for this one field is P = E + 0x38; FUN_400a6994(P+0x18a,
+    # P+0x18e, slot) gates whether the generic renderer stages OR DRAWS a
+    # knob at all, independent of name/count/default being valid. Confirmed
+    # against stock: slot 8's bit here reads 0 (RMS's slot 6 reads 1).
+    # Without this the parameter compiles clean and never appears on screen.
+    (E + 0x38 + 0x18a,        "00000000",     (1).to_bytes(4, "big"), "KEY enable bit (P+0x18a, slot 8)"),
 ]
 CF_A_ARRAY = E + 0x102 + 4 * KEY_SLOT
 
@@ -141,7 +149,7 @@ def sc_assemble(kadj, org):
 def dsp_module_fileoff(img, va, ln, p_addr):
     """file offset of DSP P-word p_addr within payload at va."""
     import importlib.util
-    spec = importlib.util.spec_from_file_location("mm", ROOT / "refs/octabam/tools/dsp_modmap.py")
+    spec = importlib.util.spec_from_file_location("mm", ROOT / "refs/octabam/tools/build/dsp_modmap.py")
     mm = importlib.util.module_from_spec(spec); spec.loader.exec_module(mm)
     mods, _ = mm.modules(bytes(img), va, ln)
     for sp, addr, cnt, data in mods:
@@ -152,7 +160,7 @@ def dsp_module_fileoff(img, va, ln, p_addr):
 
 def dsp_xtable_fileoff(img, va, ln, x_addr):
     import importlib.util
-    spec = importlib.util.spec_from_file_location("mm", ROOT / "refs/octabam/tools/dsp_modmap.py")
+    spec = importlib.util.spec_from_file_location("mm", ROOT / "refs/octabam/tools/build/dsp_modmap.py")
     mm = importlib.util.module_from_spec(spec); spec.loader.exec_module(mm)
     mods, _ = mm.modules(bytes(img), va, ln)
     for sp, addr, cnt, data in mods:

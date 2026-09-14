@@ -271,8 +271,9 @@ def main():
 
     probe = base_mem(words, scdet, sctail, False, None, None)
     r7 = r7_of(probe)
-    FF, S16, S17 = r7 + 0xf, r7 + 0x16, r7 + 0x17
-    print(f"r7 = X:0x{r7:05x}   first-block gate X:0x{FF:05x}   SVF state X:0x{S16:05x}/0x{S17:05x}\n")
+    FF, S16, S17, S18 = r7 + 0xf, r7 + 0x16, r7 + 0x17, r7 + 0x18
+    print(f"r7 = X:0x{r7:05x}   first-block gate X:0x{FF:05x}   "
+          f"SVF state X:0x{S16:05x}/0x{S17:05x}   our own seed latch X:0x{S18:05x}\n")
 
     MARK = [((0x10 + i) << 12) | 0xABC for i in range(0x20)]
     KEYV, K = 1, 0                       # KEY=1 -> abs track 0 (CORE_BASE 0)
@@ -307,7 +308,7 @@ def main():
     for kflt, tag in ((64, "bypass"), (10, "LP idx5"), (40, "LP idx20"),
                       (78, "HP idx7"), (120, "HP idx28")):
         mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
-                       [(1, FF, [0])])          # fresh: first-block gate = 0
+                       [(1, S18, [0])])         # fresh: our own seed latch = 0
         (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kflt=kflt), pokey=pk_sig)
         if kflt == 64:
             exp = sig
@@ -316,13 +317,29 @@ def main():
         check(f"KFLT {kflt:3d} {tag:9s}", close(x40[:NW], exp[:NW], 3),
               f"got[:4]={[s24(v) for v in x40[:4]]} exp[:4]={[s24(v) for v in exp[:4]]}")
 
+    # 3b. dirty-state regression: stock's own "first-block" bit ($f) falsely
+    # warm (as it can be from ordinary stock activity before our KEY FLT code
+    # has ever run) + garbage sitting in $16/$17, but OUR OWN latch ($18) is
+    # still 0 -- must still cold-start (lp=bp=0), NOT read the garbage.
+    print("\nKEY FLT dirty-state guard (our own latch, not stock's $f):")
+    kflt = 40
+    exp_cold, _, _ = ref_svf(sig, kflt)
+    mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
+                   [(1, FF, [1]),                     # stock bit falsely "warm"
+                    (1, S16, [0x7fffff]), (1, S17, [0x7fffff]),   # garbage
+                    (1, S18, [0])])                    # our latch: never seeded
+    (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kflt=kflt), pokey=pk_sig)
+    check("$f warm + garbage $16/$17, $18=0 -> still cold-starts",
+          close(x40[:NW], exp_cold[:NW], 3),
+          f"got[:4]={[s24(v) for v in x40[:4]]} exp[:4]={[s24(v) for v in exp_cold[:4]]}")
+
     # 4. SVF state persistence (block 2 continues, no reset) ---------------
     print("\nKEY FLT state persistence:")
     kflt = 24
     exp1, lp1, bp1 = ref_svf(sig, kflt)
     exp2, _, _ = ref_svf(sig, kflt, lp1, bp1)
     mem = base_mem(words, scdet, sctail, False,
-                   [(1, 0x40, [0] * 0x20), (1, FF, [1]),          # warm gate
+                   [(1, 0x40, [0] * 0x20), (1, S18, [1]),          # our latch: warm
                     (1, S16, [lp1 & 0xFFFFFF]), (1, S17, [bp1 & 0xFFFFFF])], None)
     (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kflt=kflt), pokey=pk_sig)
     check("block 2 continues the SVF", close(x40[:NW], exp2[:NW], 3),
@@ -330,12 +347,12 @@ def main():
 
     # 5. SC LISTEN stash (scdet -> keybus gen 1) --------------------------
     print("\nSC LISTEN:")
-    mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20), (1, FF, [0])], None)
+    mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)], [(1, S18, [0])])
     (x40, g1) = run(mem, scdet, [('x', 0x40, 0x60), ('y', SLOT + 0x20, SLOT + 0x40)],
                     P(key=KEYV, kflt=40, mon=1), pokey=pk_sig)
     check("MON=1: keybus[0] gen1 == processed X:$40", g1 == x40,
           f"g1[:3]={[hex(v) for v in g1[:3]]} x40[:3]={[hex(v) for v in x40[:3]]}")
-    mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20), (1, FF, [0])], None)
+    mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)], [(1, S18, [0])])
     (g1,) = run(mem, scdet, [('y', SLOT + 0x20, SLOT + 0x40)], P(key=KEYV, mon=0), pokey=pk_sig)
     check("MON=0: keybus[0] gen1 untouched", all(v == 0 for v in g1))
 

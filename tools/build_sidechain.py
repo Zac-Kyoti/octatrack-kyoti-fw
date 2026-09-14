@@ -21,6 +21,19 @@ parameter slot 7 (page-2 encoder position 1, immediately after RMS):
   B-wgt   E+0x132+4*7 = 0x400d5b98   400475f8     -> 00000000   (plain dial, A's text)
   (min    E+0xa2+4*7  = 0x400d5b08   00000000     -- asserted, unchanged)
 
+  Also flips the KEY slot's bit in the per-parameter ENABLE BITMAP -- a field
+  the name/count/default/formatter pokes above do NOT touch and that is NOT
+  relative to E like they are. `refs/octabam/docs/firmware/PARAM_PAGES.md`
+  ("P+0x18a / P+0x18e -- the per-parameter ENABLE BITMAP"): the real struct
+  base for this one field is P = E + 0x38, and FUN_400a6994(P+0x18a, P+0x18e,
+  slot) gates whether the generic page renderer stages OR DRAWS a knob at all
+  -- independent of whether the knob's own name/count/default are valid.
+  Without this poke the parameter would compile clean and simply never
+  appear on screen (confirmed against stock: slot 8's bit in P+0x18a reads 0;
+  slot 6, RMS, reads 1). One nibble per slot, slots 8-11 packed into the u32
+  at P+0x18a (slot 8 = bit 0 of the low nibble):
+  enable  E+0x38+0x18a = 0x400d5c0c   00000000     -> 00000001
+
 Usage:   python3 tools/build_sidechain.py [VERSTR]      (default "140C_KYOTI")
 Outputs: out/mainos_sidechain.bin, out/elek_sidechain.bin,
          out/OCTATRACK_OS1.40C_SIDECHAIN.syx, out/OCTATRACK_SIDECHAIN.bin
@@ -63,6 +76,7 @@ POKES = [
     (E + 0x96 + KEY_SLOT,     "7f",           b"\x00",                "KEY default 127 -> 0 (OFF)"),
     (E + 0xa2 + 4 * KEY_SLOT, "00000000",     None,                   "KEY min (assert 0)"),
     (E + 0x132 + 4 * KEY_SLOT, "00000000",    None,                   "KEY widget ptr (assert 0)"),
+    (E + 0x38 + 0x18a,        "00000000",     (1).to_bytes(4, "big"), "KEY enable bit (P+0x18a, slot 8)"),
 ]
 A_ARRAY_SLOT7 = E + 0x102 + 4 * KEY_SLOT   # <- key_fmt address, filled after assembly (name kept)
 
