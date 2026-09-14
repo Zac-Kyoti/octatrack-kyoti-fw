@@ -27,6 +27,7 @@ DEMO = pathlib.Path.home() / "Desktop" / "OT Backup" / "KYOTI" / "OT DEMO"
 
 os.chdir(OCTABAM)
 sys.path.insert(0, str(OCTABAM / "tools"))
+import toolpath  # noqa: E402  -- octabam's tools/ reorganized into build/harness/emu/hw/verify; this adds them to sys.path
 import emu_rtos as er
 import emu_card as ec
 

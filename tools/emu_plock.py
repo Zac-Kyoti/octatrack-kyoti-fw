@@ -43,13 +43,14 @@ OUR_IMAGE = ROOT / "out" / "raw" / "section_3_MAIN_OS.bin"
 DEMO = pathlib.Path.home() / "Desktop" / "OT Backup" / "KYOTI" / "OT DEMO"
 DEMO_BANK1 = DEMO / "bank01.work"
 
-if not (OCTABAM / "tools" / "emu_rtos.py").exists():
+if not (OCTABAM / "tools" / "emu" / "emu_rtos.py").exists():
     sys.exit("missing refs/octabam -> python3 tools/refs/sync.py")
 if not (OCTABAM / ".venv" / "lib" / "unicorn-emac").is_dir():
     sys.exit("missing the EMAC-patched Unicorn -> "
              "( cd refs/octabam && PY=$(command -v python3) bash scripts/build_unicorn.sh )")
 os.chdir(OCTABAM)
 sys.path.insert(0, str(OCTABAM / "tools"))
+import toolpath                  # noqa: E402
 import emu_rtos as er            # noqa: E402
 import emu_card as ec            # noqa: E402
 

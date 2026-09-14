@@ -39,7 +39,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OCTABAM = ROOT / "refs" / "octabam"
-OCTA_RTOS = OCTABAM / "tools" / "emu_rtos.py"
+OCTA_RTOS = OCTABAM / "tools" / "emu" / "emu_rtos.py"
 OUR_IMAGE = ROOT / "out" / "raw" / "section_3_MAIN_OS.bin"
 
 # a real hardware export to put on the emulated card; the factory demo is reproducible
@@ -75,6 +75,7 @@ def main(argv):
 
     os.chdir(OCTABAM)                       # octabam's script resolves REPO from its own path,
     sys.path.insert(0, str(OCTABAM / "tools"))   # and imports emu_bringup / emu_card as siblings
+    import toolpath  # noqa: E402  -- adds tools/build,harness,emu,hw,verify to sys.path
     sys.argv = [str(OCTA_RTOS)] + passthru
     print(f"[emu_rtos wrapper] octabam @ {OCTABAM.relative_to(ROOT)}  ·  image = our {OUR_IMAGE.name}")
     print(f"[emu_rtos wrapper] argv: {' '.join(passthru)}\n")
