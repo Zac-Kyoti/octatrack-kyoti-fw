@@ -19,6 +19,28 @@ reachable on hardware.
   byte-for-byte.  tools/emu_directjump_v4.py drives the real stock layer push/rebuild/
   dispatch code against both the v3 image (reproduces the HW failure) and this one.
 
+  Session 61 (flashed this v4, "sort of works" -- two follow-up fixes, both DJ_KEYMAP-gated
+  so v1/v2/v3 are untouched by either):
+
+  1. Toast now closes the instant [PTN] is released, instead of riding out its own
+     ~DJ_TOAST_DUR timer regardless.  New hook `dj_ptnrel` at FUN_40043418 (the stock
+     "tear down the PTN-held overlay" cleanup -- confirmed its only jsr caller image-wide
+     is inside FUN_4005a044's own RELEASE branch, so this fires on every [PTN] release,
+     combo or not) calls NOTIFY_CLOSE (FUN_40056bec, the closer for the FUN_4005a2b8 toast
+     v3/v4 both use) -- same no-op-if-none-open primitive patch_qlrec.s already relies on
+     for the identical "close the moment the key is released" behaviour on REC/QLREC.
+
+  2. THE PLAYHEAD BUG: dj_c (Hook C, shared unconditionally by every DJ build, v1-v4) was
+     also writing the resume step into D7 ("per-track positions derive from D7").  Wrong --
+     stock code just above the hook site (0x400a47f6-0x400a4834, unmodified, runs on every
+     manual pattern switch with or without DIRECT JUMP) already sets D7 correctly to
+     `LEN_TBL[newScale] * DAT_80006628`, a TICK count consumed by the two per-track
+     tick-phase loops that run immediately after the hook.  Stomping it with a raw,
+     unscaled step index fed those loops garbage units, corrupting every track's own next-
+     tick phase on every jump -- this, not the master step (DAT_800065b6, which the hook
+     DOES set correctly), is what broke "no discernible change in sound" between two
+     identically-triggered patterns.  Fix: dj_c no longer touches D7 at all.
+
 ----- v3's notes, unchanged -----
 
   v1 (build_directjump.py)   FUN_40059f8c -- the SELECT-BANK/PATTERN timed window:
@@ -78,7 +100,8 @@ PATCHES = [
     ("patch_directjump", 0x400d7400, DEFSYM,
      [(0x400a4006, "dj_a", "4a398000667e",     6, "jsr"),
       (0x400a42fa, "dj_b", "203c00008e56",     6, "jsr"),
-      (0x400a4840, "dj_c", "420013c0800065b6", 8, "jsr")]),
+      (0x400a4840, "dj_c", "420013c0800065b6", 8, "jsr"),
+      (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jsr")]),
 ]
 
 # [PTN]-held keymap layer 0x400bf0f2, 26-byte record for YES (code 0x31): all-NULL in stock.
@@ -86,6 +109,7 @@ PATCHES = [
 PTN_LAYER_YES = 0x400bf0be
 PTN_LAYER_YES_STOCK = bytes([0x31, 0x00]) + bytes(24)
 STOCK_YES_HANDLER = 0x4005e4c8
+PTN_LAYER_REL = 0x40043418      # FUN_40043418 entry -- dj_ptnrel's detour site (Session 61)
 
 RESTORE_SITES = (0x4001f322, 0x4001f3be, 0x4001fb24)
 FREE_END = 0x400d7c3c
@@ -179,7 +203,8 @@ def main():
         (ROOT / f"out/patch_directjump_v4.{ext}").write_bytes(
             (ROOT / f"out/patch_directjump.{ext}").read_bytes())
 
-    # --- v4 = v3's byte set, minus the 0x4005e4c8 detour, plus the 4-byte slot poke ---
+    # --- v4 = v3's byte set, minus the 0x4005e4c8 detour, plus the 4-byte slot poke and
+    #     the 6-byte dj_ptnrel detour @ 0x40043418 (Session 61's PTN-release toast-close) ---
     v3 = ROOT / "out/mainos_directjump_v3.bin"
     if v3.exists():
         v3b = v3.read_bytes()
@@ -187,7 +212,8 @@ def main():
         v4_touched = {i for i in range(len(img)) if img[i] != stock[i]}
         cave = set(range(o(0x400d7400), o(0x400d7c3c)))
         want = (v3_touched - set(range(o(STOCK_YES_HANDLER), o(STOCK_YES_HANDLER) + 8))) \
-            | {i for i in range(ro + 2, ro + 6) if img[i] != stock[i]}
+            | {i for i in range(ro + 2, ro + 6) if img[i] != stock[i]} \
+            | {i for i in range(o(PTN_LAYER_REL), o(PTN_LAYER_REL) + 6) if img[i] != stock[i]}
         stray = [i for i in (v4_touched ^ want) if i not in cave]
         print(f"  vs mainos_directjump_v3.bin: v4 touches {len(v4_touched)} vs v3 {len(v3_touched)}; "
               f"{len(stray)} unexpected outside the cave")

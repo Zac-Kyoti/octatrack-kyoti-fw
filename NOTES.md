@@ -10332,3 +10332,82 @@ built, emu-verified both ways above. **NOT yet reflashed.** `build_merged.py`
 still wires `DJ_V3` (dead combo) into the merge — needs bumping to the
 `DJ_KEYMAP` mechanism (and RELOAD2's own fix) before the merged build is
 touched again; not done this session.
+## Session 61 (2026-09-15, `wip`) — DIRECTJUMP_V4 flashed, "sort of works": two real bugs found + fixed, dynamically verified against real stock code
+
+**User report after flashing v4**: toast comes up, pattern switching happens
+quickly — the combo itself works now. Two problems remain: (1) the toast needs
+to close the instant `[PTN]` is released, "just like we did with REC on
+QLREC"; (2) pattern jumps don't respect the playhead — two patterns with
+identical trigs (kick on 1/5/9/13 in both) should sound seamless across a
+manual jump, and they don't.
+
+### Bug 1 — toast rides out its own timer instead of closing on [PTN] release
+
+Confirmed via disassembly of the STOCK image: `FUN_40043418` (tears down the
+`[PTN]`-held overlay layer, clears `PTN_MODE`/`PTN_USED`) has **exactly one
+jsr caller image-wide**: `0x4005a0c4`, inside `FUN_4005a044`'s own RELEASE
+branch — reached on *every* `[PTN]` release, whether a plain quick tap or a
+combo DJ consumed. Fix: `dj_ptnrel`, a new detour at `FUN_40043418`'s entry
+(`.ifdef DJ_KEYMAP`, so only v4 gets it — v1/v2/v3 untouched), calls
+`NOTIFY_CLOSE` (`FUN_40056bec`) — the exact closer for the `FUN_4005a2b8`
+toast v3/v4 both use, and the same no-op-if-nothing-open primitive
+`patch_qlrec.s`'s `qlr_recrel` already relies on for the identical "close the
+instant the key is released" behaviour on REC/QLREC, per the user's own
+reference point.
+
+### Bug 2 — the actual playhead bug: `dj_c` was clobbering D7
+
+Re-disassembled the full step==0 commit body (`0x400a47f6`-`0x400a4b78`,
+stock, unmodified) around Hook C's site to understand what D7 is really for.
+Found: **D7 is a tick count** (`LEN_TBL[newScale] * DAT_80006628`), computed
+by stock code that runs *before* Hook C (`0x400a47f6`-`0x400a4834`, always
+runs on a step==0 commit, DIRECT JUMP or not) and consumed directly by two
+per-track tick-phase loops that run *immediately after* Hook C
+(`0x400a4884`-`0x400a49e0` for tracks 0-7, `0x400a4a14`-`0x400a4b78` for
+8-15 — `remsl`/`subl` math computing `0x800065e4[track]`/`0x80006604[track]`,
+each track's own next-tick phase, polymetric-length-aware).
+
+`dj_c` (Hook C, **shared unconditionally by every DJ build since Session
+15/21** — v1 through v4 alike, not gated by any overlay-version `.ifdef`) was
+overwriting D7 with the raw, unscaled resume-step index
+(`savedStep % newLen`, values 0-63) on the theory ("per-track positions
+derive from D7") that the per-track loops read their position from D7. They
+do — but in *tick* units, not step units. Feeding them a tiny step index
+instead of `newLen*DAT_80006628` corrupted every track's own phase
+accumulator on every single manual jump. The master step
+(`DAT_800065b6`, which this hook also sets, correctly) was never the problem;
+the per-track scheduling math downstream of the clobbered D7 was. This is
+almost certainly the actual, full explanation for "pattern jumps don't
+respect the playhead" — it's not a resume-*position* bug, it's a
+resume-*timing* bug at the per-track level, one that's been present in every
+DIRECT JUMP build since it was first built.
+
+**Fix: `dj_c` no longer touches D7 at all** — it only sets
+`DAT_800065b6 = savedStep % newLen`, exactly mirroring what stock's own
+`clr.b d0 ; move.b d0,(0x800065b6).l` did at that site (same target, our
+value instead of 0), and lets D7 carry through untouched from the stock code
+that already set it correctly just above.
+
+### Verification
+
+`tools/emu_directjump.py`'s `test_c` updated: the "d7 = <resume step>"
+assertions are now "d7 preserved (not stomped)" against a seeded canary value
+— confirms dj_c literally never writes D7 in any case (not-armed / armed
+same-length / armed shorter / armed longer). `tools/emu_directjump_v4.py`
+gained `check_ptn_release_closes_toast`, which runs the REAL
+`FUN_4005a044` ([PTN] release, event=0) against both images: **v3 never
+reaches `NOTIFY_CLOSE`** (toast rides out its timer, matching the flashed
+behaviour), **v4 reaches it on every release** — combo-consumed
+(`PTN_USED=1`) and plain quick-tap (`PTN_USED=0`) alike, confirming the "only
+caller, fires unconditionally" RE finding dynamically, not just by
+inspection. All four build→emu pairs (v1/v2/v3/v4) rebuilt and re-run:
+`ALL GOOD` across the board.
+
+### Status
+
+`out/OCTATRACK_OS1.40C_DIRECTJUMP_V4.syx` rebuilt with both fixes (534 B
+changed vs stock, was 501 — +6 B for the new `dj_ptnrel` detour, dj_c itself
+shrank by one instruction). **Not yet reflashed.** Same standing note as
+Session 60: RELOAD2's `rl_yes` shares the dead-`0x4005e4c8`-while-`[PTN]`-held
+mechanism v1-v3 had and has not been fixed; unrelated to either bug this
+session, not touched.

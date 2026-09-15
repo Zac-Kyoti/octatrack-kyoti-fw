@@ -12,7 +12,8 @@ insns), like emu_otfx.py, so this drives each stub in isolation.
   dj_b @0x400a42fa  gate bypass.  Checks the return-address rewrite (armed) vs the
                     displaced `move.l #0x8e56,d0` (not armed) and D6.
   dj_c @0x400a4840  playhead resume.  Checks DAT_800065b6 = 0 (not armed) vs
-                    savedStep % newLen with D7 set (armed), incl. a shorter new pattern.
+                    savedStep % newLen (armed), incl. a shorter new pattern, and that
+                    D7 is left untouched either way (Session 61 -- see patch_directjump.s).
 
 FUN_4009e884 (the real PC sender) is stubbed: the call is trapped, its args recorded,
 and control returned -- we only assert that dj_a calls it with (bank, pat) at the right
@@ -242,7 +243,12 @@ def test_c():
     check("not armed: STEP = 0", uc.mem_read(STEP, 1) == b"\x00")
     check("not armed: d7 preserved", t["d7"] == SEED[UC_M68K_REG_D7], hex(t["d7"]))
 
-    # armed, same length (new pattern len 16, saved step 9) -> STEP=9, d7=9
+    # armed, same length (new pattern len 16, saved step 9) -> STEP=9, D7 UNTOUCHED
+    # (Session 61 fix: D7 already holds stock's own LEN_TBL[newScale]*DAT_80006628 tick
+    # count from code that ran before this hook -- the per-track tick-phase loops just
+    # below the hook site consume it directly.  Stomping it with the raw step index was
+    # the actual cause of "pattern jumps don't respect the playhead": the master step
+    # this hook sets was always right, but the per-track phase math fed by D7 was not.)
     uc = mk()
     uc.mem_write(G_ARMED, b"\xff")
     uc.mem_write(ACT_PAT, b"\x01"); uc.mem_write(ACT_BANK, b"\x00")
@@ -250,10 +256,11 @@ def test_c():
     uc.mem_write(G_STEP, b"\x09")
     t = run(uc, DJ_C, 0x400a4848)
     check("armed same-len: STEP = 9", uc.mem_read(STEP, 1) == b"\x09")
-    check("armed same-len: d7 = 9", t["d7"] == 9, hex(t["d7"]))
+    check("armed same-len: d7 preserved (not stomped)", t["d7"] == SEED[UC_M68K_REG_D7],
+          hex(t["d7"]))
     check("armed: G_ARMED cleared", uc.mem_read(G_ARMED, 1) == b"\x00")
 
-    # armed, shorter new pattern (len 8, saved step 13) -> 13 % 8 = 5
+    # armed, shorter new pattern (len 8, saved step 13) -> 13 % 8 = 5, D7 still untouched
     uc = mk()
     uc.mem_write(G_ARMED, b"\xff")
     uc.mem_write(ACT_PAT, b"\x02"); uc.mem_write(ACT_BANK, b"\x00")
@@ -262,7 +269,8 @@ def test_c():
     t = run(uc, DJ_C, 0x400a4848)
     check("armed shorter: STEP = 5 (13 % 8)", uc.mem_read(STEP, 1) == b"\x05",
           str(uc.mem_read(STEP, 1)))
-    check("armed shorter: d7 = 5", t["d7"] == 5, hex(t["d7"]))
+    check("armed shorter: d7 preserved (not stomped)", t["d7"] == SEED[UC_M68K_REG_D7],
+          hex(t["d7"]))
 
     # armed, longer new pattern (len 64, saved step 20) -> 20
     uc = mk()

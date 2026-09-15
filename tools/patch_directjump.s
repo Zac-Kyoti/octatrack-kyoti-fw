@@ -86,6 +86,8 @@
 |   and tears itself down.  No handle to manage, no follow-up tick -> no dj_tick2, no
 |   0x400522ca splice.  patch_reload2's rl_yes uses the identical call (pea DUR ; text).
     .equ NOTIFY,    0x4005a2b8          | FUN_4005a2b8(char *text, int dur_frames)
+    .equ NOTIFY_CLOSE, 0x40056bec       | tears down the FUN_4005a2b8 toast; no-op if none open
+                                        | (same primitive + idiom as patch_qlrec.s's qlr_recrel)
     .ifndef DJ_TOAST_DUR
     .equ DJ_TOAST_DUR, 0x44             | same dwell patch_reload2 uses for its toast
     .endif
@@ -322,9 +324,23 @@ djb_orig:
 
 | ================= Hook C @ 0x400a4840 =================
 | detour replaces `clr.b %d0 ; move.b %d0,(0x800065b6).l` (8 B) -> jsr dj_c + nop.
-| Not armed: just do DAT_800065b6 = 0.  Armed: set D7 and DAT_800065b6 to
-| (savedStep % newPatternLen) so the per-track recompute (all a function of D7) and the
-| master step both resume at the playhead.  D6/D7 are live here; D0-D2/A0 are free.
+| Not armed: just do DAT_800065b6 = 0.  Armed: set DAT_800065b6 to (savedStep % newLen)
+| so the master step resumes at the playhead.  D6/D7 are live here; D0-D2/A0 are free.
+|
+| ** Session 61 fix: this hook must NOT touch D7. ** The earlier build wrote the resume
+| step into D7 too ("per-track positions derive from D7"), on the theory that the
+| per-track tick-phase loops just below this hook site (0x400a4884.. / 0x400a4a14..,
+| the ones computing 0x800065e4[track]/0x80006604[track] via `remsl`) read their
+| position from D7.  Re-disassembly (Session 61) of the code BEFORE this hook site
+| (0x400a47f6-0x400a4834, still stock, unmodified, runs every step==0 regardless of
+| DIRECT JUMP) shows D7 is already correctly set there to `LEN_TBL[newScale] *
+| DAT_80006628` -- a TICK count, not a step index -- and BOTH per-track loops consume
+| that D7 directly afterward.  Overwriting D7 here with a raw, unscaled step index
+| (0-63) fed the tick-phase math completely wrong units, corrupting every track's own
+| phase accumulator on every manual jump -- this is what actually caused "the pattern
+| jump doesn't respect the playhead": it's not that DAT_800065b6 (the master step,
+| which this hook DOES set correctly) was wrong, it's that the phase accumulators
+| driving each track's own next-tick scheduling were fed garbage.  D7 is left alone.
 
     .global dj_c
 dj_c:
@@ -359,6 +375,27 @@ djc_mod:
     sub.l   %d1,%d0
     bra.b   djc_mod
 djc_store:
-    move.l  %d0,%d7                    | per-track positions derive from D7
-    move.b  %d0,STEP                   | master step
+    move.b  %d0,STEP                   | master step -- D7 is left untouched (see above)
     rts
+
+    .ifdef DJ_KEYMAP
+| ================= [PTN] release -- close the toast immediately =================
+| detour replaces the first 6 bytes of FUN_40043418 (`pea 0x400bf0f2`), the stock
+| "tear down the PTN-held overlay" cleanup.  Confirmed the ONLY jsr caller of
+| FUN_40043418 image-wide is 0x4005a0c4, inside FUN_4005a044's own RELEASE branch --
+| i.e. this runs on every [PTN] release, whether or not our combo fired (a quick tap
+| alone reaches it too).  NOTIFY_CLOSE (FUN_40056bec) is a no-op if nothing is open
+| (tstl 0x460d1e70 guards its whole body), so calling it unconditionally here is safe
+| the same way patch_qlrec.s's qlr_recrel already relies on for the identical toast
+| primitive.  Matches the user's ask: "the toast needs to disappear immediately if the
+| user releases PTN, just like we did with REC on QLREC."
+    .global dj_ptnrel
+dj_ptnrel:
+    lea     -16(%sp),%sp
+    movem.l %d0-%d1/%a0-%a1,(%sp)
+    jsr     NOTIFY_CLOSE                | FUN_40056bec -- closes 0x460d1e70 if open, else rts
+    movem.l (%sp),%d0-%d1/%a0-%a1
+    lea     16(%sp),%sp
+    pea     0x400bf0f2                  | displaced original
+    rts
+    .endif

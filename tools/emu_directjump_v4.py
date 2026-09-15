@@ -61,9 +61,11 @@ YES_CODE = 0x31
 YES_SLOT = DISPATCH_BASE + YES_CODE * 24
 
 PTN_MODE = 0x460d1742
+PTN_USED = 0x460d173e            # !=0 -> PTN release skips the SELECT PATTERN chooser
 POPUP2 = 0x460d1ab2              # SELECT-window "in use" flag PTN's own handler touches
 CKSUM = 0x4001f23c
 NOTIFY = 0x4005a2b8
+NOTIFY_CLOSE = 0x40056bec        # tears down the FUN_4005a2b8 toast; no-op if none open
 DJ_MODE = 0x800000d8
 
 fails = []
@@ -151,11 +153,40 @@ def run(label, image_path):
     return uc, slot
 
 
+def check_ptn_release_closes_toast(label, image_path, expect_close):
+    """Session 61: run the REAL FUN_4005a044 ([PTN] release, event=0) and confirm whether
+    the toast-close primitive (NOTIFY_CLOSE) gets reached.  v3 never hooks this path (the
+    toast rides out its own timer regardless of when [PTN] is released); v4 adds dj_ptnrel
+    at FUN_40043418 -- confirmed the ONLY jsr caller of that function image-wide -- so it
+    fires on every [PTN] release, combo-consumed or a plain quick tap alike."""
+    print(f"{label} -- [PTN] release closes the toast -------------------")
+    for tag, ptn_used in (("combo-consumed release (PTN_USED=1)", 1),
+                          ("quick-tap release (PTN_USED=0)", 0)):
+        uc = mk(pathlib.Path(image_path).read_bytes())
+        uc.mem_write(PTN_USED, struct.pack(">I", ptn_used))
+        uc.mem_write(POPUP2, b"\x00\x00\x00\x00")
+        hit = {"v": False}
+
+        def on_close(uc):
+            hit["v"] = True
+
+        call(uc, FUN_PTN_PRESS, [0x2e, 0], extra_hooks={NOTIFY_CLOSE: on_close})
+        check(f"  {tag}: NOTIFY_CLOSE reached = {expect_close}", hit["v"] == expect_close,
+              f"got {hit['v']}")
+
+
 def main():
     v3 = ROOT / "out/mainos_directjump_v3.bin"
     v4 = ROOT / "out/mainos_directjump_v4.bin"
     if not v3.exists() or not v4.exists():
         sys.exit("missing out/mainos_directjump_v{3,4}.bin -- build both first")
+
+    check_ptn_release_closes_toast("v3 image (no dj_ptnrel -- toast rides out its own timer)",
+                                    v3, expect_close=False)
+    print()
+    check_ptn_release_closes_toast("v4 image (dj_ptnrel closes it immediately)",
+                                    v4, expect_close=True)
+    print()
 
     _, slot3 = run("v3 image (the flashed, dead-on-HW build)", v3)
     check("v3: YES dispatch slot goes to 0 while [PTN] held -- reproduces the HW failure",
