@@ -8409,6 +8409,357 @@ of the state-gating fix). Recommend reflashing this build first (cheap, and the 
 strictly an improvement/no-regression per the isolation suite) before deciding whether
 further DSP RE on the gain-reduction chain is warranted.
 
+### Same-day HW retest of the dirty-state-fixed SIDECHAIN3: ducking works, MON still rings
+
+Reflashed. **Ducking now engages** (needed page-1 threshold/ratio/attack/release
+tweaking by ear, as expected — the compressor's own gain-computation chain was never
+touched by any of this session's fixes). **Filter sounds better** (consistent with the
+dirty-state fix addressing real garbage-seeding, not a placebo). **MON (SC LISTEN)
+still rings/alternates "normal for a bar, metallic pinging for a bar," cyclic with
+pattern length.**
+
+Narrowed hard with two on-hardware answers: (1) with MON off, ducking itself is
+**clean** — no cyclic artifact — so the bug is NOT in the shared `sctap`/`scdet`
+detector-and-filter chain (gen-0 of the keybus ring), which ducking alone exercises
+and which now works. (2) the MON ringing happens **even with KFLT at bypass/OFF** —
+so it is NOT the SVF filter either (rules out "dirty-state fix didn't go far enough").
+By elimination this isolates the bug to the ONE mechanism ducking never touches: the
+SC LISTEN gen-1 stash (`scdet` writes the processed key to `Y:$820+track*$80`) and
+`sctail`'s read-back of it into the output buffer.
+
+Checked two concrete failure theories by disassembling the real stock COMPRESSOR
+module end to end (`out/dsp/comp_mod_stock.bin`, `P:0x1864..0x1915` for payload B) —
+both ruled OUT:
+- **`n6` register-clobber** (scdet saves the original `r0` into `n6` at proc+0;
+  `sctail` reads it back at proc-end, ~140 instructions later): grepped every `n6`
+  reference in the whole body — written ONCE (the original displaced instruction) and
+  read back exactly twice, both by STOCK's OWN code (`P:0x18df`, `P:0x1906`) the same
+  way `sctail` does. `n6` demonstrably survives the whole routine untouched; not a
+  clobber bug.
+- **A later gain-multiply re-processing the substituted output** (would explain
+  metallic ringing as the key signal self-modulated by its own gain-reduction
+  envelope, tracking its own rhythm): `sctail`'s splice site
+  (`move m0,x:(r7+$f)`, `P:0x1915`) IS the literal last instruction of the module —
+  confirmed by grep, nothing after it. Nothing re-touches the output post-splice.
+
+**Status: root cause of the MON-specific ringing still open.** Both the address math
+for the gen-1 write (`scdet`) and read (`sctail`) were re-derived and match (same
+`$800 + track*0x80 (+ 0x20 for gen1)` formula, same `@KADJ@`-adjusted absolute track).
+Next step if resumed: since gen-1's write-then-read is entirely intra-call (no
+cross-hook timing dependency at all, simpler than gen-0's proven-working cross-hook
+case), the mechanism SHOULD be the safest part of the design on paper — worth doubting
+that reasoning itself next, e.g. by instrumenting `sctail`'s actual read values
+dynamically (a `dsp_host` probe analogous to `emu_sc_dsp3.py`'s existing harness, but
+driving `scdet`+`sctail` back-to-back with a real block boundary between them) rather
+than further static re-derivation, which has now been done twice with no bug found.
+
+### New bug reported, NOT YET INVESTIGATED further (user flagged as a later item):
+copying the COMPRESSOR (with KEY/KFLT/KGN/MON) from FX2 to FX1, then double-tapping
+FX1 to reopen its chooser, highlights **LO-FI**, not COMPRESSOR. Checked the ID2POS
+rebuild math from Session 17 (`build_sidechain3.py`'s `ID2POS` loop) against the real
+ROM twice and it holds up: dumped the actual stock `FX1_LIST`/`FX2_LIST` and confirmed
+FX1 is exactly FX2's first 11 entries (`NONE FLTR EQ DJEQ PHSR FLNG CHOR SPAT COMB
+COMP LOFI`, positions 0-10) — so a single shared `ID2POS` table is valid, and per the
+rebuild COMP correctly lands at post-removal position 8, LOFI at 9. The stored table
+values are not obviously wrong. Most likely explanations, neither confirmed: (a) the
+OS's copy-and-reopen highlight logic doesn't do a plain `ID2POS[assigned_id]` lookup
+the way the plain "open chooser fresh" path presumably does, or (b) this is a
+pre-existing STOCK quirk (COMPRESSOR/LOFI have simply never sat adjacent to a
+just-removed entry before, since this is the first time anything has ever been
+removed from these lists) unrelated to our patch. **Cheapest next diagnostic**: does
+the same wrong-highlight-after-copy reproduce on stock firmware with some other
+effect pair — settles (a) vs (b) before touching any code.
+
+### Same-day follow-up on both threads (user: "let's keep going on both")
+
+**MON ringing — both register-survival theories now disproven by direct evidence,
+isolated `sctail` logic proven correct dynamically; root cause still open.**
+
+Built two new tools (kept in `tools/`, not scratchpad): `emu_sc_dsp3_sctail.py`
+(isolated dynamic test of `sctail` alone — the one cave routine `emu_sc_dsp3.py`
+NEVER actually calls as `-proc` anywhere; grep confirms every existing `base_mem()`
+call passes `patch_tail=False`, so `sctail`'s own logic had **zero** dynamic coverage
+before today, only static disassembly review) and `emu_sc_dsp3_fullbody.py` (attempts
+to run the REAL, complete `COMP_PROC`→`COMP_TAIL` body via `dsp_host` against the
+`--patched` image, not just our isolated hooks).
+
+- `emu_sc_dsp3_sctail.py`: after fixing the stale `refs/octabam/tools/dsp_modmap.py`
+  path (same Session-50-class drift as everywhere else, `dsp_modmap.py` now lives at
+  `tools/build/dsp_modmap.py`), found `sctail` genuinely reads the seeded gen-1 signal
+  correctly when it should (MON=1,KEY=1) and correctly leaves output untouched when it
+  shouldn't run (MON=0, or KEY=0) — **ALL GOOD**, once two words of `dsp_host`-internal
+  harness noise at X:0x13/0x14 (reproduced even with zero `-params`/`-pokey`, unrelated
+  to this cave entirely) were identified and excluded rather than misread as a bug.
+- Chased a new, more specific theory before this: `sctail` reads
+  `x:(r6+$d)`/`x:(r6+$e)` for its own KEY/MON check, using `r6` — NOT `n6` (already
+  proven to survive in Session 55's first pass). Since a general-purpose address
+  register is far more likely to get reused across ~140 real instructions than the
+  one-off anchor `n6` was, this looked like a strong candidate: if `r6` gets clobbered
+  somewhere in the real gain-computation body between `scdet`'s entry and `sctail`'s
+  exit, `sctail` would read garbage instead of the real MON/KEY state.
+  **Disproven by grepping every `r6` reference in the full disassembled body
+  (`out/dsp/comp_mod_stock.bin`, `P:0x1864..0x1915`): seven hits, ALL reads
+  (`move x:(r6+$0/$1/$2/$3/$4/$5/$c),...`), zero writes.** `r6` is used purely as a
+  stable params-block base throughout, exactly like `n6` — both register-survival
+  theories are now ruled out by direct evidence, not just plausibility.
+- `emu_sc_dsp3_fullbody.py` (run cold at `COMP_PROC` via `dsp_host`, seeding keybus
+  gen-0 with a recognisable signal, MON=1/KEY=1/KFLT=bypass) came back with `X:0` all
+  zero — a real discrepancy, but NOT trusted as evidence of a hardware bug given (a)
+  `sctail`'s isolated logic just proved clean and (b) `r6`/`n6` both proven to survive
+  the real body untouched, leaving no known mechanism for this cold, out-of-context
+  invocation to go wrong other than a missing precondition in the probe itself (e.g.
+  whatever real dispatcher setup establishes before jumping to `COMP_PROC` on actual
+  hardware, not reproduced by jumping straight to `-proc COMP_PROC`). Flagged as
+  inconclusive, not as a finding.
+
+**Status: the individual mechanisms (scdet's stash, sctail's read-back, both anchor
+registers) are now all independently proven correct. The MON ringing is not explained
+by anything found so far.** Remaining candidates, in rough order of plausibility: (1)
+something in the real per-frame dispatch context that a cold `-proc COMP_PROC` jump
+doesn't reproduce (would need either a much more careful full-context probe or the
+kind of real-playback dynamic driving Session 53 used on the ColdFire side — NOTES
+already flags DSP-side realistic-playback simulation as a capability this toolchain
+does not currently have); (2) a genuinely hardware-only phenomenon (cross-core timing,
+real ADC/DAC behaviour) outside what any emulator here can observe, matching the
+project's own previously-documented limitation for "the side-chain compressor's actual
+gain reduction." Not a place to keep guessing from static reads alone — next progress
+here most likely needs either a bigger tooling investment or further hardware
+experiments (e.g., does the ringing's cyclic period change if the KEY track's OWN
+sample content changes but its trig pattern doesn't, which would implicate audio-
+content-dependent state over pure trig-timing).
+
+**Chooser-highlight bug — narrowed hard, very likely NOT caused by our patch.**
+Found the real ColdFire consumer of `ID2POS` via `m68k-elf-objdump` xref search for
+`0x400d6150` (two hits, `P:0x4003770a` and `P:0x40059a84`). The second is the relevant
+one: reads the current bank/part (`0x80000000`/`0x80000003`), computes the bank-blob
+address for the current track's stored FX slot (`0x46c82456 + part*6322 + track +
+0x8ed88`), reads the STORED effect id from there, then does TWO separate id-indexed
+lookups: `ID2POS[id]` (`0x400d6150`) for the cursor/viewport position, and a SECOND,
+previously-undocumented table `0x400d5fdc[id]` (id → `E+0x38` descriptor pointer,
+confirmed a plain 32-entry array, unused ids defaulting to NONE's `P`) to stage the
+highlighted effect's parameter page via `FUN_400326d4`.
+
+**Dumped `0x400d5fdc` directly: id `0x18` (COMPRESSOR) → `0x400d5a82` (COMP's own `P`,
+correct) and id `0x1c` (LOFI) → `0x400d5da6` (LOFI's own `P`, correct) — this table is
+untouched by our SPATIALIZER removal and is NOT stale.** Combined with `ID2POS`
+already being independently re-verified correct (Session 55, twice), BOTH tables this
+highlighting path reads are provably right for the correct id. Since the id itself is
+read from PERSISTENT BANK STORAGE (not anything our patch writes or could have
+corrupted), the most likely remaining explanation is that **the COPY action itself
+wrote the wrong id into that storage slot** — a stock mechanism, located elsewhere
+(not yet found), that this session's work never touches. This makes "does it reproduce
+on stock firmware" an even stronger next diagnostic than before — the RE now actively
+points away from our code, not just fails to find a cause in it.
+
+## Session 56 (2026-09-14, `wip`) — chooser-highlight bug: RESOLVED. Not stock, not the copy action — a second, un-rebuilt id->position table
+
+User tested the stock-firmware hypothesis from Session 55's end and **ruled it out**:
+the bug does NOT reproduce on stock, and has nothing to do with copying between FX
+buses. Precisely isolated instead: **only in the Effect 1 chooser**, selecting COMB
+highlights COMPRESSOR (the entry below); selecting COMPRESSOR highlights LOFI (the
+entry below); selecting LOFI highlights nothing. No other entry is affected.
+
+That precise pattern — "select X, highlight X+1," breaking completely at the very
+last entry, isolated to FX1 only — pointed straight at a stale boundary/length
+constant specific to FX1's shorter post-removal list, not a copy-action bug at all
+(the earlier theory is retracted).
+
+**Root cause**: `m68k-elf-objdump` xref search for FX1_LIST (`0x400d6060`) turned up
+a second per-FX-bus highlight-setup routine (`P:0x40059bd0`) that is structurally a
+TWIN of the one already found for FX2 (`P:0x40059a84`, Session 55) — same shape
+(scan the list for its NUL terminator, `jsr 0x4007ec60` to init a 7-row viewport,
+read the stored effect id from Part storage, look up a position, `jsr 0x4007edb0`
+to apply it) but with every FX1-specific detail swapped in: `lea 0x400d6060` (FX1_LIST,
+not FX2_LIST), its own viewport struct at `0x460d5c8c` (not FX2's `0x460d5ca0`), its
+own storage offset `0x8ed80` (not FX2's `0x8ed88`) — **and, critically, `lea
+0x400d60d0,%a0` for the id->position lookup, NOT `0x400d6150` (the table
+`build_sidechain2.py`/`_3` had been calling `ID2POS` and treating as shared).**
+
+**FX1 has its own, completely separate id->position table**, sitting exactly `0x80`
+bytes (32 × 4-byte entries) before what turned out to be FX2's own copy. Dumped both
+from stock: byte-for-byte identical values (`COMB`→8, `COMP`→9, `LOFI`→10, `SPAT`→7,
+etc.) — which is exactly why this was never caught by comparing the two chooser
+LISTS earlier (Session 55 confirmed `FX1_LIST == FX2_LIST[:11]`, correctly, but never
+checked whether the id2pos tables were ALSO two copies rather than one shared table).
+Session 55's rebuild loop only ever touched `0x400d6150` (FX2's copy) — `0x400d60d0`
+(FX1's copy) was untouched, still holding the stale pre-removal values. Reading it
+for COMB (`0x13`→8, stale) lands on position 8, which is now COMPRESSOR post-removal;
+for COMPRESSOR (`0x18`→9, stale) lands on position 9, now LOFI; for LOFI (`0x1c`→10,
+stale) lands on position 10, which doesn't exist in FX1's now-10-entry list at all —
+matching all three reported symptoms exactly, including the complete breakdown at
+the list's new end.
+
+**Fix**: `build_sidechain2.py`/`build_sidechain3.py` gained `FX1_ID2POS = 0x400d60d0`
+and apply the IDENTICAL rebuild transform (id `0x05`→0, every id at a position >
+`SPAT_POS` shifts down 1) to both tables, not just `ID2POS`. Rebuilt both outputs;
+independently re-verified by reading `FX1_ID2POS`/`ID2POS` back out of the finished
+`mainos_sidechain3.bin` for `COMB`/`COMP`/`LOFI`/`SPAT` — both tables now agree
+(`COMB`→7, `COMP`→8, `LOFI`→9, `SPAT`→0), matching their real positions in the
+truncated list. `emu_sidechain.py` and `emu_sc_dsp3.py --patched` re-run for the
+record (neither touches this ColdFire table, unaffected either way) — **ALL GOOD**.
+
+**Status: both `out/OCTATRACK_OS1.40C_SIDECHAIN{2,3}.syx` rebuilt with the fix. NOT
+yet reflashed.** Worth a final sanity pass on `reference/kb/memory-map.md` /
+`reference/MERGE.md` if this thread is picked up again: both docs' "ID2POS" mentions
+now need a "there are two, one per FX bus" caveat so this doesn't get missed a third
+time in some future mod that touches these lists.
+
+## Session 57 (2026-09-14, `wip`) — chooser bug HW-CONFIRMED FIXED; MON ringing disentangled into two separate phenomena, one theory disproven, one new lead
+
+**Chooser highlight bug: user reflashed `SIDECHAIN3` and confirmed fixed.** Closed.
+
+**MON ringing — user isolated it into two genuinely separate phenomena** (previous
+sessions' "always present, not sample/trig-dependent" characterization conflated
+them):
+
+1. **"Ringing quality"** — a constant textural/metallic coloration, present in what
+   MON plays regardless of trigs on EITHER track (confirmed: still present with
+   ZERO trigs on the compressor track). Root cause still fully open.
+2. **"Oscillation"** — a separate, tempo-locked rising/falling character (beats
+   audibly at 120 BPM, reads as steady at 90/150) that ONLY appears when the
+   **compressor track itself** has active trigs — not the key track (confirmed
+   NOT trig-dependent on the key track, NOT sample-content-dependent on the key
+   track, in earlier rounds this same session).
+
+**Theory tried and DISPROVEN**: the compressor track's own AMP envelope
+(Attack/Hold/Release) reshaping whatever audio flows through that track on each of
+its own retrigs, independent of anything this project built — a completely
+mundane, expected mechanism that would explain a tempo-locked beat via real-ms
+envelope times interacting with a tempo-proportional trig interval. User flattened
+the AMP page and the oscillation was unaffected. Ruled out cleanly.
+
+**New lead, NOT yet tested**: `KEY FLT` is the only stage in `patch_sc_dsp3.asm`'s
+`scdet` that uses the **dynamic** `n7` sample count (`do n7,>zz13`) — the keybus
+copy-in, `KEY GAIN`, the `SC LISTEN` gen-1 stash, and `sctail`'s read-back all
+hardcode a fixed `#<$20` (32) instead. `n7` is documented elsewhere in this project
+(Session 17) as varying for a "split block" (a new trig landing mid-block only
+gives that frame partial samples to work with). If the COMPRESSOR track's own
+retrigger causes `n7 < 32` for that frame, `KEY FLT`'s SVF loop would only filter
+the first `n7` samples of `X:$40`, while every other 32-hardcoded stage upstream/
+downstream (including what `sctail` ultimately hands to MON) would still touch the
+full 32 words — a real, trig-tempo-locked discontinuity at exactly the boundary a
+split block would create. Consistent with "oscillation" being compressor-track-
+trig-tied and NOT filter-independent (unlike the baseline "ringing quality," which
+was confirmed present even at `KFLT` bypass, where this loop doesn't run at all —
+so this theory targets ONLY the oscillation, not the ringing quality).
+
+**Next diagnostic (not yet run)**: does "oscillation" specifically (not the
+baseline ringing) still occur with `KFLT` at bypass, compressor-track trigs still
+present? If it disappears at bypass, that confirms the `n7` mismatch and the fix is
+to drive the gain-stage/copy-in/gen-1-stash loops off `n7` instead of a hardcoded
+32 (matching what `KEY FLT` already does) — needs care: those stages currently
+process a fixed 32-word chunk of `X:$40`/keybus regardless of block size, and
+switching to `n7` changes their addressing/loop bounds, not just the count.
+
+**Status: baseline "ringing quality" root cause still completely open (two failed
+static/dynamic RE passes, Session 55). Oscillation has one untested, well-motivated
+lead (the `n7` mismatch). No code changes this round.**
+
+## Session 58 (2026-09-14, `wip`) — MON redesigned to bypass the compressor module entirely, instead of continuing to hunt for the mystery inside it
+
+`n7` mismatch theory tested and DISPROVEN too (oscillation still occurs with `KFLT`
+at bypass, where that loop never runs). Further isolated: not trig-dependent on the
+key track, not content-dependent on the key track OR the compressor track (changing
+the compressor track's own sample changes nothing about what's monitored -- confirms
+`sctail`'s substitution was a clean, total replacement, never a mix), not explained
+by the compressor track's AMP envelope (tested, no effect), and NOT a hard on/off
+voice-gate (continuous, never silent). Every specific mechanism inside `scdet`/
+`sctail` had already been independently verified correct by this point (register
+survival, isolated dynamic tests, dirty-state guard). The user's question reframed
+the actual problem: rather than find the one remaining bug in ~60 instructions of
+unmapped stock compressor envelope/gain math, stop sharing that execution context at
+all.
+
+### The redesign
+
+Traced the DISPATCHER (not the compressor module) to find a point downstream of
+BOTH FX1 and FX2 having fully returned for a track. Found it: right after the
+per-track FX1-then-FX2 call sequence (`P:0x29c`..`0x302` for payload B, `0x4a7`..
+`0x50d` for payload A -- FX1 dispatched via `x:(r6+$1b)`, FX2 immediately after via
+`x:(r6+$1c)`, identical structure both times), the dispatcher does ONE MORE thing
+before advancing to the next track (`x:$420 += 1`, confirmed the same absolute
+track-index counter this project already validated in Session 17): it reads
+`x:>$206,r0` and calls a small "commit" subroutine (`func_00034f` in payload B /
+`func_00055a` in payload A) that copies this track's now-fully-processed audio out
+of the shared `X:0` scratch buffer into a per-track persistent output slot. That
+`move x:>$206,r0` instruction, byte-identical in both payloads
+(confirmed by disassembly: `60f000 000206`), is the new splice site.
+
+Ruled out one detour before committing to this: whether `func_00038b` (a parallel
+path branched to when a per-frame variable `x:$20e` is non-zero, at the very start
+of the per-track cycle) might mean split-block frames skip the whole FX1/FX2
+dispatch our existing hooks sit in entirely. Disassembled it: it's a per-voice
+pitch/rate ramp setup routine (unrolled across several call sites with the same
+`brset #$11 / lua / bra` shape), not a parallel FX dispatcher -- a dead end for that
+specific worry, but not a blocker for the redesign, which doesn't depend on it
+either way.
+
+### Implementation
+
+`tools/patch_sc_dsp3.asm`:
+- `scdet` UNCHANGED in its core logic (detector redirect, KEY GAIN, KEY FLT, the
+  gen-1 stash all stay exactly as before -- all independently proven correct).
+  Added: when MON is checked (the old `zz10` block), it now ALSO publishes
+  `MON_ON[track]` / `MON_KEY[track]` to `Y:(0x800 + track*0x80 + 0x40/0x41)` --
+  the dead "gen-2" slot of THIS track's own keybus stride (never written by the
+  gen-0/gen-1 mechanisms, so no new memory-safety question versus what Session 17
+  already established safe). Published as ON+key-track when KEY!=0 and MON=1;
+  explicitly published OFF on every other exit path (MON=0, or KEY=0) so a stale
+  flag from an earlier frame can never linger. `track` throughout is `x:$420`,
+  confirmed still holding the CURRENT track (not yet incremented) at every point
+  `scdet` or the new hook can run.
+- `sctail` DELETED. Replaced by `moncommit`, spliced at the dispatcher's commit
+  step instead of the compressor's proc-end: replays the displaced
+  `move x:>$206,r0`, reads `MON_ON[x:$420]`, and if set, independently re-fetches
+  `MON_KEY[x:$420]` and copies keybus[key] gen 1 straight into `X:0` -- a fresh
+  fetch every time, not a value carried across the compressor's own call, and
+  running in a completely separate instruction stream from whatever the
+  compressor's envelope/gain code does.
+
+`tools/build_sidechain3.py`: `DSP` dict gained `commit_hook` (payload A `0x50e`,
+payload B `0x303`) replacing `comp_tail`; the third detour now asserts/patches the
+dispatcher's `move x:>$206,r0` (bytes `60f000 000206`) instead of the compressor's
+proc-end `move m0,x:(r7+$f)`. `dsp_module_fileoff` already resolves any P-address
+generically (not compressor-specific), so no new resolution logic was needed --
+just a different address. Builds clean: 256/261 donor words (was 231; net growth
+from adding `moncommit` and the publish code, still comfortably under budget).
+
+### Testing
+
+Rewrote `tools/emu_sc_dsp3.py`'s SC LISTEN section to add three new checks
+(`MON_ON`/`MON_KEY` publish correctly for MON=1, MON=0, and KEY=0) -- ALL GOOD,
+`scdet`'s existing checks (copy/KEY-select, KEY GAIN, KEY FLT, dirty-state guard,
+persistence) all still pass unchanged, confirming the core logic wasn't disturbed.
+
+Deleted `tools/emu_sc_dsp3_sctail.py` and `tools/emu_sc_dsp3_fullbody.py` -- both
+tested the now-removed proc-end hook and would have silently tested nothing
+meaningful against the new design (their setup drove page-2 params, which
+`moncommit` never reads at all). Replaced with `tools/emu_sc_dsp3_moncommit.py`:
+isolated test of `moncommit` alone, driven purely through `MON_ON`/`MON_KEY` and a
+seeded gen-1 signal -- checks the substitution fires correctly when `MON_ON=1`,
+stays inert when `MON_ON=0`, and (new coverage the old test never had) that one
+track's `MON_ON` flag can never leak into a DIFFERENT track's commit. ALL GOOD,
+including in `--patched` mode against the real built image (both `ensure_patched_mem`
+functions updated to check the new dispatcher-level detour instead of the removed
+proc-end one).
+
+Full regression re-verified against `mainos_sidechain3.bin` after rebuild: enable
+bitmap (`0x1111`), `KGN` name, and both chooser `ID2POS` tables (Sessions 55/56)
+all still correct -- this redesign touched none of that.
+
+**Status: `out/OCTATRACK_OS1.40C_SIDECHAIN3.syx` rebuilt with the redesign.
+Isolation-verified (including in `--patched` mode against the real image).
+NOT yet reflashed.** If the ringing/oscillation is gone or changed after this
+reflash, that confirms the compressor module's own internal timing was the cause
+(narrowing exactly where, still open, no longer matters for MON's correctness
+either way, since MON no longer depends on it). If it PERSISTS even now, that
+would be a genuinely new and important result: it would mean the artifact is
+further upstream than anything this whole investigation has touched -- in
+`scdet`'s own redirect/gain/filter math (already isolation-tested clean, but
+never dynamically tested against a REAL, moving audio stream), or in the keybus
+gen-0 publish tap itself (`sctap`, proven correct for DUCKING's purposes but
+never stress-tested with MON's specific full-fidelity playback requirement).
+
 ---
 
 ## HANDOFF (2026-09-14) — MUTE MODE trig-suppression: read this before touching `patch_softmute.s`
@@ -9136,4 +9487,744 @@ mt_rebind were watched this session, to find the actual restart signal and
 gate IT. Don't re-flash hardware until a new fix has been isolation-tested
 AND re-validated against this exact BOTLI-retrig scenario (not the
 mute-before-first-trig one, which is now known not to be the bug).
+```
+
+---
+
+## Session 56 (2026-09-14, `wip`) — the "reuse" path fully disassembled, and its unguarded write DYNAMICALLY CONFIRMED to fire on T1's own leaking retrig
+
+Picked up exactly where Session 55 continued's handoff left off. Scratch BOTLI
+setup is not durable across sessions (`/private/tmp`), so rebuilt it fresh from
+the user's real, untouched `~/Desktop/OT Backup/KYOTI/BOTLI` (never opened for
+writing): copied to a new scratchpad location, re-applied the same
+`ot_project.set_pattern_trig(d, 1, 0, 0, 2, 0x00, guard=False)` edit (bank 1,
+pattern 0, T1, step 2 — gives T1 a second, reachable trig at frame 441, same as
+last session), re-staged via `stage_card.py` to a fresh `botli_card2.img`.
+
+### A tooling correction found first: the project's own `-m 5307` objdump convention is WRONG for this firmware
+
+`tools/emu_mute_dynamic13.py`'s header comment (and by extension anything else
+citing "m68k-elf-objdump -m 5307") names the wrong ColdFire variant.
+`m68k-elf-objdump -D -b binary -m 5307 --adjust-vma=0x40000400 out/mainos.bin`
+produces silently WRONG disassembly for a specific instruction class: any
+`mvsb`/`mvzb`/`mov3q` (ColdFire ISA_B "move byte/word with sign/zero extend" /
+"move 3-bit quick") opcode decodes as a bare `.short` (undecoded raw word) under
+`-m 5307` (ISA_A only), which — because objdump still advances exactly 2 bytes
+per undecoded word — does NOT desync alignment, but DOES silently hide real
+instructions as inert data in the printed listing. `patch_softmute.s`'s own
+header says the real target is `-mcpu=5407` (assembler side); the matching
+**objdump flag is `-m 5407`**, confirmed: every `.short` in a raw `-m 5307` dump
+of `FUN_4000f450` resolves cleanly under `-m 5407` (`mvsb`/`mvzb`/`mov3ql`), and
+the two independently-known-correct anchors (`mt_rebind`'s own detour bytes at
+`0x4000f4dc`, and the `jsr 0x40006820` "not yet bound" branch at `0x4000f51e`,
+both already hard-verified against the project's own patch scripts) read
+byte-identical either way, so this was purely a table-coverage gap, not a
+misalignment. **Use `-m 5407` for all future static disassembly of this
+firmware; `emu_mute_dynamic13.py`'s comment should be corrected too (not done
+this session, flagging here so it isn't propagated further).**
+
+### `FUN_4000f450`'s "reuse" path (`0x4000f526` onward), fully disassembled
+
+Full listing in `/private/tmp/.../scratchpad/mainos_5407.dis` this session (not
+durable — regenerate with the command above if picking this back up). Structure,
+address range `0x4000f526`-`~0x4000f900`:
+
+- `0x4000f526`-`0x4000f54c`: the content-id comparison Session 55 already read
+  correctly (falls into "reuse" when the arena slot already holds this track's
+  content — T1's case, every trig).
+- `0x4000f54c`-`0x4000f672`: computes four flag/derived values (`d1`/`d3`/`d4`/
+  `d5`/`d7`) from the track's machine-type byte, some part-config bytes, and a
+  `0x3fff` bound check — feeds the position math below. Not fully named, but
+  every value here is fed from the track's own PART/machine-type bytes, nothing
+  from `MUTE_STATE`.
+- `0x4000f672`-`0x4000f6da`: computes a work pointer (`a1` or `a0`, depending on
+  a `d6==4` "recorder?" branch at `0x4000f68c`) into what looks like a
+  per-machine-type 300-byte-stride table anchored off `a4` (a4 = a static base,
+  `0x4000f484`-era `a2` is the VOICE_BASE+track*0xA8 struct; `a4` is a
+  DIFFERENT, still-unnamed base — likely the ARENA/pool descriptor table, since
+  `a4@(1092)`/`a4@(300..)` read like slot-count/slot-array fields).
+  **CORRECTION mid-session**: this is the same region octabam's own CLAUDE.md
+  flags as the recorder-length-converter/EMAC-fractional-multiply danger zone
+  (`0x4000f700`: `macl %d1,%d0` — a genuine EMAC multiply) — did NOT chase this
+  further; it's upstream of the writes that matter below and not itself a
+  MUTE_STATE gap candidate (no mute-relevant test could sensibly live inside a
+  pure arithmetic macro).
+- `0x4000f700`-`0x4000f78a`: fixed-point start/end-point arithmetic (the `macl`
+  at `0x4000f700`/`0x4000f732`, a `remsl`/`mulsl` pair at `0x4000f80a`/`f80e` —
+  percentage-of-length math, consistent with computing START/END/LOOP sample
+  positions from the track's TRIM/LOOP percentage bytes). Produces two values,
+  left in `%d2`/`%a1`.
+- **`0x4000f790`-`0x4000f7a4`: six unconditional `movel` writes into the voice
+  struct** (`%a2@(0x2c)`, `%a2@(0x28)`, `%a2@(0x34)`, `%a2@(0x30)`, `%a2@(0x3c)`,
+  `%a2@(0x38)` — three D2/A1 pairs, almost certainly START/END for two buffer
+  halves or a normal+alternate pair). **No `MUTE_STATE` test anywhere before or
+  between these.**
+- `0x4000f7a8`-`0x4000f820`: a second position computation (current play
+  pointer, `a0`), branching on machine-type/part-state bytes and a modulo
+  (`remsl`/`mulsl` again at `0x4000f80a`-ish for a LOOP-wrap case).
+- **`0x4000f820`-`0x4000f838`: five more unconditional writes** — `%a2@(0x40)`,
+  `%a2@(0x44)`, `%a2@(0x48)` (all the same `a0`, the just-computed play
+  pointer), `%a3@(0x38)` (**a THIRD struct pointer**, `a3` = `%sp@(50)`, i.e.
+  the "current arena slot" pointer saved back at `0x4000f48e` — so this reaches
+  outside the per-track voice struct into the shared arena-slot record too),
+  **then `addql #1,%a2@(0x90)`** (`0x4000f834`) — **the EXACT per-track trig
+  counter offset `patch_softmute.s` already named and dynamically confirmed
+  (hook 2's own header comment: "VOICE_BASE+track*0xA8+0x90 -- confirmed
+  dynamically: this exact location increments 1,2,3,4,... on every real
+  trig")** — followed by `movel %a0,%a2@(0x98)` (`0x4000f838`, a 14th write).
+  **This is a SEPARATE bump of the SAME counter field `mt_trig`'s own hook
+  (`FUN_40006844`) was built around — from a completely different call site,
+  never gated by either existing hook, and (per the disasm) unconditional on
+  `MUTE_STATE` the entire way down from `0x4000f526`.**
+
+### Dynamic confirmation: this whole tail fires for T1 on its own leaking retrig, muted the whole time
+
+`refs/octabam/out/emu/ot_emu --image out/mainos_mutemode_dt.bin --card
+out/botli_card2.img --set OCTABAM --project BOTLI --mount --sequencer
+--internal-clock --frames 470 --dsp --main-level 64 --poke
+"0x800000df=1;0x8000000a=1" --poke-at-frame 5 --watch-pc
+"0x4000f834,0x4000f790,0x4000f794,0x4000f798,0x4000f79c,0x4000f7a0,0x4000f7a4"`
+(GATE=1/OT+FX + MUTE_STATE bit 8 = track 0 muted, applied mid-run at frame 5 —
+same convention as every earlier probe this thread).
+
+14 hits total, in two clean groups of 7:
+- **Group 1, instruction timestamps 446287027-446287046**: frame 0's own
+  natural trig, BEFORE the mute poke (applied at frame 5) — expected, baseline.
+- **Group 2, instruction timestamps 458584541-458584560**: frame 441's forced
+  retrig — well AFTER the frame-5 mute poke. **`a2 = 0x800049d8` at every one
+  of the 7 watched addresses** — T1's own voice-struct base
+  (`VOICE_BASE + 0×0xA8`), the identical value Session 55 continued's
+  `mt_rebind` watch confirmed on this exact same retrig (where `mr_silence` was
+  correctly taken, `d1 = 0x100` matching `MUTE_STATE` bit 8).
+
+**This proves the whole `0x4000f790`-`0x4000f838` write sequence — six START/
+END-style position writes, five more play-pointer/arena writes, and the
+per-track trig counter bump `mt_trig`'s own hook was named after — executes in
+full for T1's frame-441 retrig, on the SAME call where `mt_rebind`'s gate
+correctly recognised the mute and correctly skipped its own two writes.** This
+is the missing piece Session 55 continued closed with as "the strongest
+concrete candidate" — now dynamically verified, not just statically inferred.
+
+### Proposed fix (NOT YET BUILT) — narrowest candidate: gate the counter bump only
+
+Following this project's own established minimal-hook philosophy (gate the
+smallest thing that plausibly matters, leave everything else's computation
+untouched): detour the 8-byte pair at `0x4000f834`/`0x4000f838` (`addql #1,
+%a2@(144)` + `movel %a0,%a2@(152)`, `52aa 0090 2548 0098`) — same 6-byte-`jmp`-
+plus-2-bytes-spare budget every other hook in this project uses. In the cave:
+test `MUTE_STATE`/`SOLO_FLAG` the same way `mr_silence` does (track number from
+`%sp@(0x40)`, confirmed STILL the valid, unshifted argument slot this deep into
+the function — the prologue's `lea sp@(-60),sp` + `moveml ...,sp@` never
+pushes anything additional on the path that reaches here, and the one place
+that does push/pop (`0x4000f514`-`0x4000f520`, the "jsr FUN_40006820" branch)
+is a DIFFERENT branch that returns early and never reaches `0x4000f834` at
+all); if muted (or solo-silenced), **skip only the `addql`**, always still
+execute the `movel %a0,%a2@(152)` (unknown purpose, kept unconditional out of
+caution — same reasoning `mt_rebind` used for leaving `%a5`/`%a4` computation
+untouched while gating only their store). `%d0`/`%d1` confirmed free to clobber
+at this exact point (`0x4000f83c` reloads `%d0` fresh, `0x4000f842` reloads
+`%d1` fresh, neither's pre-hook value is read again first).
+
+**Caveat, stated as plainly as `mt_rebind`'s own was**: this is the NARROWEST
+plausible candidate, not a proven one. The dynamic watch proves all 7 addresses
+fire unconditionally; it does NOT by itself distinguish whether the counter
+bump, the START/END writes, or the play-pointer writes are the thing the DSP
+actually keys its restart on. Gating only the counter is the cheapest single
+change to isolation-test and dynamically re-validate first; if the BOTLI
+retrig comparison (Session 55 continued's byte-identical-to-unmuted-control
+test) still shows a full restart with only the counter gated, the next
+candidate is the six `0x4000f790`-`0x4000f7a4` position writes.
+
+### `mt_ctr` BUILT, isolation-proven at the CPU level, DSP-level A/B says it does NOT fix the bug
+
+Built (`patch_softmute.s` hook 4, wired into `build_mutemode_dt.py`'s
+`patch_softmute` detour list at `0x4000f834`, allowlisted in the vs-
+`build_mutemode.py` consistency check). Assembled clean, all of
+`build_mutemode_dt.py`'s own checks passed (manual-trig fix byte-identical,
+0 stray bytes vs `build_mutemode.py` outside the new cave/detour, no cave
+overlaps).
+
+**CPU-level gate confirmed correct** (`ot_emu --watch-pc
+"0x4000f834,0x400d75e0,0x400d75ea"`, same BOTLI card/scenario): frame 0's
+natural trig enters `mt_ctr` and exits via `mc_pass` (unmuted, both writes
+happen). Frame 441's forced retrig — muted since frame 5 — enters `mt_ctr` and
+exits via **`mc_silence`**, with `d0=0x8` (track 0 + 8) and `d1=0x100`
+(`MUTE_STATE` bit 8) confirming the gate fired on the right test, for the
+right track. The hook behaves exactly as designed, same as `mt_rebind` before
+it.
+
+**DSP-level A/B (the real test) says this does NOT fix the leak.** Two fresh
+`--block-dump` captures against the rebuilt `mainos_mutemode_dt.bin`
+(`out/botli3_ctrl.dump` no poke, `out/botli3_muted.dump` same
+mute-at-frame-5 poke as every prior probe), compared frame-by-frame on T1's
+raw voice-source record (`track_audio`, same decode `o10_recloop.py` already
+uses) from frame 435 to 460:
+
+```
+ frame  ctrl_peak_dB  muted_peak_dB  identical?
+   441         -27.9          -27.9  True    <- pre-retrig, as expected
+   442         -26.1          -26.1  True
+   443         -28.8          -22.4  False   <- first frame to diverge
+   444         -17.9           -5.6  False   <- muted run LOUDER than control here
+   445         -14.1           -4.3  False
+   446          -4.6           -4.5  False
+   447         -10.3           -4.8  False
+   448          -5.6           -4.8  False
+   449          -4.3           -3.0  False
+   ...content continues at -1 to -10 dB through frame 460, no decay trend
+```
+
+Two things are now established, precisely: (1) the content is **no longer
+byte-identical to the unmuted control** past frame 442 — gating the counter
+DID change something real, so the hypothesis that this call site matters is
+not dead; but (2) the muted run is **not silence** either — it stays loud
+(mostly -3 to -10 dB, occasionally louder than control at the same frame,
+e.g. frame 444: muted -5.6 dB vs control -17.9 dB) with no visible decay
+trend across the 16 frames sampled. **Gating only the counter bump trades a
+clean restart for a DIFFERENT, still-substantial burst of audio — not a fix.**
+Most likely explanation, not yet confirmed: the six START/END position
+writes at `0x4000f790`-`0x4000f7a4` (still fully unconditional, ungated) and
+the play-pointer writes at `0x4000f820`-`0x4000f830` still land fresh
+position data in the voice struct every retrig regardless of mute, and
+whatever DSP-side logic reads them evidently does not need this ColdFire-side
+counter to notice new content — it may instead be edge-triggered on the
+position values themselves changing, or on something in the still-untouched
+arena-slot write at `%a3@(0x38)` (`0x4000f830`, a THIRD struct this session's
+disasm flagged but did not chase).
+
+**RULED OUT this session, precisely, not by inference**: the per-track trig
+counter bump at `%a2@(0x90)` (`0x4000f834`, reached from `FUN_4000f450`'s own
+"reuse" path) is NOT, by itself, the DSP's restart-detection signal. Gating
+it changes the resulting audio (proving the call site is real and DSP-
+visible in some way) but does not silence it.
+
+### Not yet done
+
+- **Next candidate, not yet tried**: gate the six position writes at
+  `0x4000f790`-`0x4000f7a4` (three `movel` pairs into `%a2@(0x28/0x2c)`,
+  `%a2@(0x30/0x34)`, `%a2@(0x38/0x3c)`) instead of, or in addition to, the
+  counter. Same detour-pair technique; three separate 8-byte pairs (each is
+  two consecutive 4-byte `movel`s) or one larger span if a single jmp can
+  cover all six writes' address range cheaply — check the exact byte count
+  and pick the narrowest cave that still fits a `jmp`.
+  - Whether to leave `mt_ctr` (the counter gate) in place alongside a new
+    position-write gate, or revert it first and re-test the position gate in
+    isolation, is an open call — reverting first is cleaner for attributing
+    which gate does what, but leaving both in is closer to "gate everything
+    this session found unconditional" if the position writes alone don't
+    fully silence it either.
+  - Also worth a look, not yet disassembled in detail: the `%a3@(0x38)`
+    write at `0x4000f830` (`a3` = the arena-slot pointer saved at
+    `0x4000f48e`, a structure distinct from the per-track voice struct `a2`
+    points at) — a THIRD struct touched unconditionally, not yet considered
+    as its own candidate.
+- Keep using the exact `track_audio`/`blockdump.py` frame-by-frame comparison
+  `tools/cmp_botli_retrig.py` (saved this session:
+  `python3 tools/cmp_botli_retrig.py CTRL.dump MUTED.dump [FIRST] [LAST]`)
+  used — aggregate RMS is not enough, as Session 55
+  continued already found once.
+- Still do not reflash hardware until the DSP-level A/B comparison shows the
+  muted run go convincingly quiet (not just "different"), matching the
+  unmuted-control's decay-to-silence shape a working fix should produce.
+
+## Session 56 continued (same day) — `mt_pos` BUILT and tested: the six position writes have ZERO measurable effect, ruling them out cleanly; next candidate identified
+
+User: "Let's continue with Mute Mode." Built the next candidate exactly as
+scoped above.
+
+### `mt_pos` (hook 5): gates the six `0x4000f790`-`0x4000f7a4` START/END-style
+writes as one 24 B block. Wired into `build_mutemode_dt.py`, `mt_ctr` (hook 4)
+DISABLED for this round (commented out of the detour list, code left in
+`patch_softmute.s` for reference) to isolate causality cleanly. Cave growth
+forced `patch_mutemode`'s load address to move `0x400d7600` -> `0x400d7670`
+(patch_softmute grew to 612 B and started overlapping it) — purely a cave-
+layout fix, no behavioural change; still clears `LBL_AT` (`0x400d7700`) with
+room to spare, all of `build_mutemode_dt.py`'s own consistency checks passed
+(0 stray bytes vs `build_mutemode.py`, manual-trig fix untouched, no cave
+overlaps).
+
+**CPU-level gate confirmed correct** (`ot_emu --watch-pc
+"0x4000f790,0x400d7640,0x400d7646"`, same BOTLI card): frame 0 takes
+`mp_pass` (unmuted). Frame 441's forced retrig takes **`mp_silence`**, with
+`d0=0x8`/`d1=0x100` matching track 0 + `MUTE_STATE` bit 8, exactly like
+`mt_ctr` and `mt_rebind` before it — same gate-correctness pattern, third
+hook running for three.
+
+**DSP-level A/B: ZERO effect, cleaner (and more informative) than `mt_ctr`'s
+partial one.** Fresh `--block-dump` pair (`out/botli4_ctrl.dump`,
+`out/botli4_muted.dump`), compared with the now-`tools/`-resident
+`cmp_botli_retrig.py` from frame 435 to 469 (extended range vs last time):
+**every single frame reports `identical? True`**, muted vs control, all the
+way through frame 469 — not just "close", byte-for-byte identical, same as
+the original ungated leak. Skipping these six writes changes NOTHING about
+the resulting DSP-fed audio.
+
+**RULED OUT this session, precisely, not by inference**: the six START/END-
+style position writes at `%a2@(0x28/0x2c/0x30/0x34/0x38/0x3c)` are NOT read
+by whatever drives the DSP's immediate playback content — gating them is
+completely inert. Combined with `mt_ctr`'s partial (content-changing but
+non-silencing) effect, the emerging picture: the trig counter bump is
+DSP-visible in SOME way (changes the resulting audio) but isn't itself the
+"where to play from" signal; the position/loop-bound fields aren't DSP-
+visible at all on this timescale. The likely remaining candidate is the
+ACTUAL current-play-pointer write, `a0`-based and computed separately
+(`0x4000f7a8`-`0x4000f820`'s own modulo/loop-wrap arithmetic), written at
+`0x4000f820`-`0x4000f830` — a genuinely different register/value than the
+`d2`/`a1` pair `mt_pos` gated.
+
+### Next candidate: `0x4000f820`-`0x4000f830`, the play-pointer writes
+
+Four writes, 20 B, `0x4000f820` to `0x4000f834` (right where the counter
+bump — currently disabled — begins): `movel %a0,%a2@(0x40)`, `movel
+%a0,%a2@(0x44)`, `movel %a0,%a2@(0x48)` (three copies of the SAME just-
+computed play pointer into the per-track voice struct), and `movel
+%a0,%a3@(0x38)` (a THIRD struct, `a3` = the arena-slot pointer, reloaded
+fresh from `%sp@(0x32)` immediately before by `moveal %sp@(0x32),%a3` at
+`0x4000f82c`). This is the strongest remaining candidate precisely because
+`a0` here is the actual CURRENT PLAYBACK POSITION (the output of the
+modulo/loop-wrap arithmetic just above it), not a cached bound — exactly
+the kind of value a DSP-side player would read every frame to know where to
+fetch the next samples from.
+
+Design for the next hook (`mt_ptr`, not yet built): always execute the
+`moveal %sp@(0x32),%a3` reload (harmless local-variable reload, no reason to
+gate it); gate only the four `movel %a0,...` writes, same silenced-track
+test as every hook above, same track-number source (`(0x40,%sp)`, still
+valid this deep in). `%d0`/`%d1` clobbered by the gate check itself, same as
+every hook so far — `mt_pos`'s own clean result (byte-identical unmuted
+output, no corruption) is good empirical evidence this same
+clobber-then-branch pattern is safe in this general vicinity of the
+function, so no new liveness proof attempted by hand this time; verify
+empirically instead (compare the new build's UNMUTED control run against
+`out/botli4_ctrl.dump` — byte-identical there would confirm no register
+corruption on the pass-through path, same check style already used).
+
+### Not yet done
+
+- Build `mt_ptr` (design above), wire into `build_mutemode_dt.py` (mind the
+  cave-size growth again — check for a `patch_mutemode` collision before
+  assuming the current `0x400d7670` load address still has room).
+- Isolation `--watch-pc` check (silence branch taken on the T1 retrig, pass
+  branch taken on frame 0 — same pattern as every hook so far).
+- DSP-level A/B via `tools/cmp_botli_retrig.py` against fresh
+  `out/botli5_ctrl.dump` / `out/botli5_muted.dump`. Also diff the new
+  build's OWN unmuted control against `out/botli4_ctrl.dump` first, to rule
+  out register-clobber corruption before trusting the muted-run comparison.
+- If `mt_ptr` alone doesn't produce real silence either: the remaining
+  unconditional writes past `0x4000f834` (currently untouched, `mt_ctr`
+  disabled) are the counter bump and `movel %a0,%a2@(0x98)` — worth
+  re-combining `mt_ctr` + `mt_ptr` together next, since `mt_ctr` alone did
+  measurably change the output even though it didn't silence it.
+- Still do not reflash hardware until the DSP-level A/B shows real silence,
+  not just a difference from control.
+
+### Environment/tooling this session
+
+Corrected objdump invocation (`-m 5407`, not `-m 5307`) — see above; full raw
+disasm at `/private/tmp/.../scratchpad/mainos_5407.dis` and
+`/private/tmp/.../scratchpad/mainos_full.dis` (the original, `-m 5307`,
+partially-garbled version — kept only as the before/after evidence for the
+tooling-correction note above, not useful for further work). Neither survives
+the session boundary; regenerate with `m68k-elf-objdump -D -b binary -m 5407
+--adjust-vma=0x40000400 out/mainos.bin` if picking this back up.
+`refs/octabam/out/botli_card2.img` rebuilt fresh this session (same recipe as
+Session 55 continued, scratch BOTLI copy + `set_pattern_trig` + `stage_card.py`
+— the scratch BOTLI project itself is also gone again at
+`/private/tmp/.../scratchpad/BOTLI_TEST_SET/BOTLI`, rebuild the same way).
+
+### Exact prompt to start the next session with
+
+```
+Continue the MUTE MODE trig-suppression investigation in
+~/Documents/octatrack-kyoti-fw. Read NOTES.md's "Session 56" section (at the
+very end of the file) first, ALL of it including the "mt_ctr BUILT... DSP-
+level A/B says it does NOT fix the bug" subsection -- a fix was already tried
+and dynamically disproven this session, don't repeat it. Summary: the "reuse"
+path inside FUN_4000f450 (0x4000f526 onward, the same function mt_rebind
+partially hooks at 0x4000f4dc) is now fully disassembled (use
+`m68k-elf-objdump -D -b binary -m 5407 --adjust-vma=0x40000400 out/mainos.bin`
+-- NOT -m 5307, that flag silently mis-decodes real instructions as inert
+.short data). It writes six START/END-style position fields into the voice
+struct (0x4000f790-0x4000f7a4), five more play-pointer/arena writes
+(0x4000f820-0x4000f830, including a THIRD struct via %a3@(0x38), not yet
+examined as its own candidate), and bumps the per-track trig counter
+(%a2@+0x90, 0x4000f834) -- all completely unconditional on MUTE_STATE, all
+dynamically confirmed firing on T1's real frame-441 leaking retrig
+(ot_emu --watch-pc, out/mainos_mutemode_dt.bin + a freshly rebuilt
+out/botli_card2.img -- rebuild the scratch BOTLI + card first, /private/tmp
+doesn't survive a session boundary; exact recipe in the Session 55
+continued / Session 56 text). A new hook, `mt_ctr` (patch_softmute.s hook 4,
+wired into build_mutemode_dt.py), gates ONLY the counter bump at 0x4000f834.
+It's built, and CPU-level (--watch-pc) proves its own gate fires correctly.
+But the real test -- a DSP-level block-dump A/B on T1's raw voice-source
+record, frame-by-frame (tools/scratch pattern: bd.classes(bd.read(dump)) +
+o10_recloop.track_audio/record_audio, NOT aggregate RMS) -- shows the muted
+run is no longer byte-identical to an unmuted control past frame 442 (so the
+call site is real) but ALSO not silence: it stays loud (-3 to -10 dB,
+sometimes louder than control) with no decay trend through frame 460. Gating
+the counter changes the leak, does not fix it. The concrete next step,
+already scoped in NOTES.md: gate the six 0x4000f790-0x4000f7a4 position
+writes instead (or in addition -- open call, argued both ways in NOTES.md),
+same detour-pair technique, then re-run the exact same frame-by-frame DSP-
+level comparison (not just --watch-pc) and look for the muted run actually
+trending toward silence, not just differing from control. Do not reflash
+hardware until that comparison shows real silence.
+```
+
+## Session 56 continued (same day) — a methodology correction (compare READBACK, not just raw source), `mt_pos`/`mt_ptr` reconfirmed inert, `mt_ctr` found to make the blip WORSE, and a `pre`-side hypothesis tried and also ruled out. Build restored to the known-safe baseline.
+
+User: "Let's continue with Mute Mode." Built and tested `mt_pos` (see above), then
+pushed further this same continuation.
+
+### A methodology gap found and fixed: `track_audio` (raw voice source) is the WRONG signal to judge audibility by itself
+
+Every comparison up to and including `mt_pos`'s test used only
+`o10_recloop.track_audio` (Session 55 continued's own "src" column) via
+`tools/cmp_botli_retrig.py`. Re-reading Session 55 continued's ORIGINAL table
+carefully (it has FOUR columns: `src_ctrl`/`src_muted`/`rb_ctrl`/`rb_muted`,
+not two) exposed the gap: `track_audio` captures the voice generator's own
+output, UPSTREAM of the track's FX chain and the mute-gate mixing that
+happens after it (`o10_recloop.readback_audio`, "the per-track chain OUTPUT
+before the master mix" — the "rb" column). A hook can leave `track_audio`
+showing a full "restart" and STILL be completely silent at `readback_audio`,
+if whatever gates audibility acts downstream of the voice generator. Fixed
+`tools/cmp_botli_retrig.py` to print both signals side by side (`src=?` /
+`rb=?` columns) — this is the tool to use from here on; a `src`-only reading
+is not sufficient to judge whether a hook is helping.
+
+### Every hook tested so far, RECHECKED with the corrected tool, against a properly-identified BASELINE
+
+First re-ran the ORIGINAL ungated leak (`out/botli2_*.dump`, Session 55
+continued's own capture, predates every hook this session added) through the
+fixed tool. This is the correct comparison baseline — and it changes the
+picture substantially:
+
+```
+ frame  src_ctrl  src_muted  src=?    rb_ctrl  rb_muted  rb=?
+   440     -26.1      -28.8  False      -38.7    -138.5 False
+   ...
+   444     -17.9      -17.9   True      -38.4    -138.5 False   <- src "restarts" here (the
+   445     -14.1      -14.1   True      -31.0     -30.8 False      finding Session 55 called
+   446      -4.6       -4.6   True      -30.1     -30.0 False      "the bug") but readback is
+   447     -10.3      -10.3   True      -17.9     -18.1 False      STILL near-silent (-138.5)
+   448      -5.6       -5.6   True      -16.4     -16.5 False      through frame 444 -- the
+   449      -4.3       -4.3   True      -22.3     -23.9 False      AUDIBLE blip is frames
+   450      -4.5       -4.5   True      -18.8     -22.0 False      445-448, where rb_muted
+   ...                                                             tracks rb_ctrl within ~0.2 dB
+   456      -5.1       -5.1   True      -19.5     -31.7 False   <- by here `pre`'s own ducking
+   460      -1.2       -1.2   True      -13.2     -30.7 False      has pulled rb_muted well
+                                                                     below rb_ctrl again
+```
+
+This IS a real, audible ~4-frame blip (445-448, rb_muted within ~0.2 dB of
+rb_ctrl) — confirms the bug is real, exactly where Session 55 found it — but
+it clarifies the SHAPE: `rb` is silent through 444 regardless of any hook
+(that part was never broken), the leak is specifically frames ~445-448, and
+`pre`'s own ducking already pulls it back down by ~449-450 on its own, with
+no help from any of hooks 4-6. **The useful metric going forward is the
+`rb` delta specifically in frames 445-449, not "identical or not" over an
+arbitrary wide window.**
+
+Recomparing each hook against this baseline, `rb` column, frames 445-449:
+
+- **`mt_pos` alone, `mt_ptr` alone**: `rb` values byte-for-byte IDENTICAL to
+  the ungated baseline at every single frame checked (435-469). Confirms
+  the earlier `src`-only "zero effect" reading was actually right for the
+  RIGHT reason this time — these two are inert at both levels, cleanly
+  ruled out.
+- **`mt_ctr` alone**: `rb_muted` at 445/446/449 is **10-12 dB LOUDER** than
+  the ungated baseline's own `rb_muted` at those same frames (e.g. frame
+  445: baseline -30.8 dB, `mt_ctr` -22.4 dB; frame 449: baseline -23.9 dB,
+  `mt_ctr` -16.3 dB). **`mt_ctr` makes the actual audible blip WORSE, not
+  better.** This reframes the earlier "partial effect" reading (which was
+  `src`-only and didn't know if the change was good or bad) into a clear,
+  concrete negative: gating the trig-counter bump is actively
+  counterproductive, not merely insufficient.
+- **Combined (`mt_pos`+`mt_ptr`+`mt_ctr`)**: dominated by `mt_ctr`'s own
+  effect, same pattern (some frames louder, e.g. 445 combined -18.6 dB vs
+  baseline -30.8 dB), consistent with `mt_pos`/`mt_ptr` contributing
+  nothing on top.
+
+**RULED OUT this session, precisely, at the correct (readback) level**: none
+of `mt_pos`, `mt_ptr`, or `mt_ctr` reduce the audible blip; `mt_ctr` actively
+increases it in the critical frames. Build restored to disable all three
+(commented out of `build_mutemode_dt.py`'s detour list, code kept in
+`patch_softmute.s` for the record, matching this project's standing
+convention of preserving ruled-out hooks with their own reasoning intact).
+
+### A second hypothesis tried: `pre` only note-offs on the mute EDGE, never again for a later retrig — RULED OUT
+
+Working theory: `pre` (hook 1) computes `D1 = newly-silenced (0->1 edge on
+SHADOW)` and calls `F_NOTEOFF` only for tracks in `D1` — once, at the moment
+a track is first muted. A track muted since frame 5 and retriggered at frame
+441 creates no new edge (`SHADOW` is already 1), so `F_NOTEOFF` is never
+called again for that retrig; the freshly retriggered voice's own envelope
+might then ride through uncontested. Built as `--defsym ALWAYS_NOTEOFF=1`
+(patch_softmute.s hook 1, cleanly gated, no effect unless the defsym is
+passed): replaces the edge-only `D1` with the full currently-silenced set
+`D2`, so `F_NOTEOFF` fires for every silenced track EVERY frame, not just
+once.
+
+**Readback-level A/B: also ruled out, cleanly.** `rb_muted` from frame 445
+onward is **byte-for-byte identical** to the ungated baseline (`out/
+botli2_muted.dump`) — zero effect on the blip whatsoever. Worse, it
+introduced a NEW regression: frames 441-442 (well BEFORE the retrig, on the
+original note that had already been muted since frame 5) got LOUDER, not
+quieter (`src_muted` -8.2/-7.5 dB vs the baseline's own -27.9/-26.1 dB at
+the same frames) — repeatedly calling `F_NOTEOFF` on an already-releasing
+voice appears to disturb its decay rather than reinforce it, exactly the
+risk flagged (untested) when this hook was written. **Confirmed bad on both
+counts: no benefit, real regression.** Reverted (`build_mutemode_dt.py`'s
+`patch_softmute` defsym back to plain `"DT_MODE=1"`, `ALWAYS_NOTEOFF` code
+kept in `patch_softmute.s`, gated, inert by default).
+
+### Where this leaves the investigation
+
+**Six hypotheses tried and ruled out this session and last**: `mt_trig`
+(dispatch never reached for this scenario), `mt_rebind` (correctly gated,
+doesn't touch the real signal), `mt_pos`, `mt_ptr` (both fully inert),
+`mt_ctr` (actively worse), `ALWAYS_NOTEOFF` (inert on the blip, regresses
+the normal case). The blip is real, reproducible, and precisely bounded
+(frames 445-448 of this exact scenario) — but nothing tried so far, on
+either the ColdFire dispatch side (`FUN_4000f450`'s "reuse" path) or the
+`pre` mixing-gate side, touches it.
+
+**This suggests the actual mechanism may not be ColdFire-RAM-visible at
+all** — consistent with Session 55's own earlier caution ("a measurement
+can be structurally blind to the thing you're using it to rule out").
+Every hook tried so far gates a ColdFire-side WRITE, on the theory that the
+DSP reads that memory location to decide what to play. If the DSP instead
+reacts to something else entirely — an unconditional host-port
+block/command that fires on every trig regardless of content, an interrupt,
+or DSP-program state that isn't seeded from any of the ColdFire addresses
+examined — no ColdFire-side gate could ever fix it, no matter how narrowly
+targeted.
+
+**Concrete next step, not yet attempted**: use `ot_emu`'s DSP-side
+instrumentation directly (`--dsp-pcwatch core:pc`, `--dsp-watch
+core:space:addr`, `--dsp-map`/`--dsp-writes` for finding WHICH DSP words
+change during the retrig transition) on the BOTLI retrig scenario, comparing
+the DSP program's own behaviour frame-by-frame around 441-448 between a
+muted and unmuted run — the same class of tool `refs/octabam` already used
+to root-cause several of ITS OWN DSP-side defects (see its `CLAUDE.md`,
+"traps that have already cost real work"). This requires first finding
+WHERE in the DSP payload the per-track playback loop and its "read new
+content" decision live (not yet located this session) — likely via
+`--dsp-map`/`--dsp-writes`'s non-zero-word-change census on a muted vs
+unmuted run, narrowing to the DSP addresses that only change around a real
+trig, then disassembling that DSP code (`vendor/dsp56300/build/source/
+disassemble/dsp56kDisassemble`, same tool `refs/octabam/tools/scratch/
+peek_disasm.py` already wraps) rather than continuing to guess at ColdFire
+write sites one at a time.
+
+### Not yet done
+
+- Locate the DSP-side playback/restart logic via `--dsp-map`/`--dsp-writes`
+  census (muted vs unmuted BOTLI retrig run), not further ColdFire-side
+  guesses.
+- Disassemble whatever DSP region that census points to
+  (`dsp56kDisassemble`, `peek_disasm.py`).
+- Once a real DSP-side candidate is found: the fix likely has to live on
+  the DSP side too (a DSP payload patch, a different discipline than every
+  ColdFire hook built so far in this project) — worth flagging to the user
+  before committing effort there, since it's new ground for this project.
+- Current build state: `out/mainos_mutemode_dt.bin` is back to the
+  known-safe baseline (`mt_trig` + `mt_rebind` only, byte-identical
+  behaviour to before this whole "reuse path" investigation started) —
+  confirmed via a clean rebuild. Safe to use as a reference point for
+  future A/B tests.
+- Still do not reflash hardware — no fix has been found yet, safe or
+  otherwise.
+
+### Exact prompt to start the next session with
+
+```
+Continue the MUTE MODE trig-suppression investigation in
+~/Documents/octatrack-kyoti-fw. Read NOTES.md's "Session 56 continued"
+section (the one titled "a methodology correction... Build restored to the
+known-safe baseline", near the very end of the file) first. IMPORTANT
+CORRECTION: when comparing `ot_emu --block-dump` captures, always use BOTH
+signals `tools/cmp_botli_retrig.py` prints -- `src` (raw voice-source,
+`o10_recloop.track_audio`) AND `rb` (readback/chain OUTPUT,
+`o10_recloop.readback_audio`, what actually reaches the mix) -- `src` alone
+is not sufficient and produced a misleading read earlier this same day.
+Summary: SIX separate hypotheses for the mute-mode retrig blip (a real,
+reproducible ~4-frame audible leak at frames 445-448 of the BOTLI T1-retrig
+scenario, `rb_muted` within ~0.2 dB of `rb_ctrl`) have now been tried and
+ruled out: mt_trig, mt_rebind (both from Session 55), mt_pos, mt_ptr, mt_ctr
+(all three gate different unconditional writes inside FUN_4000f450's "reuse"
+path, Session 56 -- mt_pos/mt_ptr are fully inert, mt_ctr makes the blip
+LOUDER, not quieter), and ALWAYS_NOTEOFF (a `pre`-side hypothesis -- calling
+F_NOTEOFF every frame instead of just on the mute edge -- inert on the blip
+AND regresses the normal mute case). None of these ColdFire-RAM-side gates
+touch the real mechanism. The concrete next step, not yet attempted: stop
+guessing at ColdFire write sites and use `ot_emu`'s DSP-side instrumentation
+directly (`--dsp-map`/`--dsp-writes` to find which DSP words actually change
+during the muted-vs-unmuted retrig transition, then disassemble that DSP
+region with `vendor/dsp56300/build/source/disassemble/dsp56kDisassemble` /
+`refs/octabam/tools/scratch/peek_disasm.py`) -- the restart signal may not
+be ColdFire-RAM-visible at all, which would explain why six different
+ColdFire-side gates all failed to touch it. The build is currently at a
+known-safe baseline (`out/mainos_mutemode_dt.bin`, just mt_trig + mt_rebind,
+confirmed via a clean rebuild) -- nothing is broken, but nothing is fixed
+either. Do not reflash hardware.
+```
+
+---
+
+## Session 57 (2026-09-14, `wip`) — **THE LEAK IS FOUND AND FIXED.** It was never the voice: stock CLAMPS a silenced track's second level word to 6144 instead of zeroing it, and a retrig plays full-level straight into that open route.
+
+User: "We HAVE to nail this." Nailed.
+
+### First, two instrument corrections that unblocked everything
+
+**(1) Neither `src` nor `rb` can see the mute at all.** Ran the retrig scenario in
+stock OT mode (`GATE=0` + `MUTE_STATE` bit 8) and compared to an unmuted control:
+**byte-identical in BOTH signals, every frame.** A genuinely hard-muted track is
+indistinguishable from an unmuted one in `track_audio` (voice generator) and in
+`readback_audio` (per-track chain output). Both capture points are UPSTREAM of where
+the mute is applied. So every "it's inert / it's worse / it changed" reading taken
+from those two signals in Session 56 was measuring something that structurally could
+not show the fix. (Session 55's own `rb` blip IS real — it shows the track's
+contribution — but it cannot show whether that contribution is then gated.)
+
+**(2) The ESAI capture (`--audio-out`) is unusable here.** Captured real codec output
+for control / stock-mute / OT+FX-mute. The **unmuted control contains zero non-zero
+samples in the entire file** — the master/ESAI path is simply not exercised for this
+project in the emulator. Any conclusion from it would have been backwards (the muted
+run was the only one with audio). Ruled out as an instrument; do not use it for this
+scenario without fixing the path first.
+
+**The instrument that DOES work**: the per-track level words in the host-port feed —
+core 1 block `0x80000110`, 64 bytes per track, `+2` and `+4` for track 0. This is the
+firmware telling the DSP how loud each track is, and it is exactly where a mute lands.
+
+### The mechanism, read out of stock code
+
+`0x4000d0a4..0x4000d0dc`, a per-track loop that runs every frame, driven by **`REL_STATE`
+(`0x8000184a`) — the very byte `pre` maintains** with `REL_STATE |= silenced`:
+
+```
+4000d0b6:  movew #6144,%d2           | the cap
+4000d0ba:  mvzb 0x8000184a,%d0       | REL_STATE
+4000d0c0:  asrl #1,%d0 / bccs        | per track: in release / silenced?
+4000d0c4:  clrw  %a0@(2)             | YES -> dry level := 0     <- the mute you hear
+4000d0c8:  clrb  %a0@(43)
+4000d0cc:  cmpw  %a0@(4),%d2         | and the second word: if 6144 > it, leave it,
+4000d0d0:  bgts  0x4000d0d6          | else CLAMP IT DOWN TO 6144 -- never to zero
+4000d0d2:  movew %d2,%a0@(4)
+```
+
+A silenced track therefore keeps a **permanent −14.5 dB route to the mix**. That route
+is the OT+FX feature — it is how the FX inserts go on ringing after the dry is cut.
+Measured directly, T1 muted from frame 5: `+2` = 0 every frame (dry correctly cut),
+`+4` = **exactly 6144 every frame**, from the mute right through the retrig and to the
+end of the run.
+
+**The bug:** a new trig plays the sample at FULL level straight into that still-open
+6144 route. Nothing about the voice is wrong — stock never intended the grace to apply
+to a note that started *after* the mute.
+
+This also explains, precisely, why six previous hypotheses all failed: `mt_trig`,
+`mt_rebind`, `mt_pos`, `mt_ptr`, `mt_ctr` and `ALWAYS_NOTEOFF` were all trying to stop
+the VOICE, and every one of them was measured with instruments that sit upstream of
+this word. They could not have shown a fix even if they had been right.
+
+### The fix — `relcut`, hook 8 @ `0x4000d0c4`
+
+For a track in a new **HARDCUT** set, zero `+4` instead of clamping it to 6144.
+HARDCUT = "this track took a REAL trig while silenced", set by `mt_rebind`'s own
+`mr_silence` path — the one site already proven (Session 55, `--watch-pc` register
+dump) to fire exactly then and only then. `pre` masks HARDCUT down to the currently
+silenced set every frame, so unmuting forgets it and the grace returns next time.
+
+Net behaviour: **the FX-tail grace still belongs to the note that was sounding when the
+mute engaged; a new trig gets no route out at all.**
+
+### Validated (controlled A/B — same build, same card, relcut the only variable)
+
+```
+T1:                 dry (+2)   route (+4)
+unmuted                32512        32512
+muted, no fix              0   6144  ... every frame, forever
+muted, +relcut             0   6144 until the retrig (f444), then 0 ... forever
+```
+
+- **Fix works**: the route closes at the retrig and stays closed.
+- **Grace preserved**: 439 frames of ordinary muting before the retrig are untouched
+  (6144 held), identical to no-fix.
+- **Zero regression**: with nothing muted, relcut-on vs relcut-off is **byte-identical
+  across every host-port block class** — provably no effect when no track is silenced.
+- The emulator was confirmed **deterministic** first (same build twice = byte-identical),
+  so these A/Bs mean what they say.
+
+### Two real hazards found on the way (both worth keeping)
+
+- **`0x80006c67` is NOT free patch RAM.** Stock writes a 16-bit `0xc8c` over `0x80006c66`
+  from pc `0x4009882c` — so the byte next to SHADOW is the LOW HALF of a stock field.
+  Using it for HARDCUT made even an UNMUTED run diverge. HARDCUT now lives at
+  **`0x8000b000`**, chosen after censusing both writes AND reads over a full run (zero of
+  either in `0x8000b000..0x8000b0ff`, unlike `0x80006a00/6b00/6c00/6d00/6e00/7000/7800`
+  which are all busy). ⚠ "No traffic in THIS scenario" is not proof it is free under
+  every feature (recorder, arranger, MIDI) — re-census before trusting it on hardware.
+  **Note this also means SHADOW itself (`0x80006c66`) is occasionally clobbered by that
+  same stock write — a pre-existing hazard in this project, not introduced here.**
+- **Cross-build diffs are only meaningful with one variable changed.** A persistent
+  "regression" chased for several rounds turned out to be the *baseline* capture
+  (`botli5_ctrl`) having `mt_ptr` installed. Bisecting (relcut off, layout restored,
+  dead code stripped) showed the diff was identical in every variant — i.e. not ours.
+  Always A/B against the same build with the single hook toggled.
+
+### Housekeeping
+
+The ruled-out hooks (`mt_ctr`, `mt_pos`, `mt_ptr`, `fxcut`, `ALWAYS_NOTEOFF`) were
+REMOVED from `patch_softmute.s` — they had grown the cave past the PERSONALIZE arrays,
+forcing relocations that added noise to every comparison. A compact block in the file
+lists each one, its address and its measured outcome, and points here. The cave is back
+to its normal layout (patch_softmute 536 B, arrays at their original `0x400d7700/60/c0`);
+`patch_mutemode` moved `0x400d7600` -> `0x400d7620`, the only layout change that remains.
+
+New tool: `tools/cmp_botli_audio.py` (ESAI-level comparison; kept even though the ESAI
+path is unexercised, since it is correct and will be useful once that is fixed).
+`tools/cmp_botli_retrig.py` now prints both `src` and `rb` — but note correction (1)
+above: neither can see the mute gate, so judge mute fixes by the level words instead.
+
+### NOT yet done
+
+- **Not flashed.** Standing rule respected — no hardware write this session.
+- **The unmute-restores-grace path is reasoned, not measured**: `pre` masks HARDCUT with
+  the silenced set every frame, so unmuting must clear it, but `ot_emu` only schedules
+  ONE `--poke-at-frame`, so a mute→retrig→unmute→re-mute sequence could not be driven in
+  a single run. Worth a small `ot_emu` extension (a second poke checkpoint) to close.
+- **The SOLO path is not covered.** The release loop is shared, so `relcut` applies, but
+  `pre`'s solo branch computes the silenced set differently and the solo case was not
+  exercised here.
+- **DT mode**: `pre` skips REL_STATE maintenance in DT, so this loop never processes the
+  track and `relcut` never fires. DT's own retrig suppression is still unsolved — but it
+  is now a much better-posed question: DT needs its own way into this same level word.
+
+### Exact prompt to start the next session with
+
+```
+Continue MUTE MODE in ~/Documents/octatrack-kyoti-fw. Read NOTES.md "Session 57" (at the
+end) first -- the retrig leak is FOUND and FIXED in the emulator, do not re-litigate it.
+Root cause: the stock per-track release loop at 0x4000d0a4..0x4000d0dc (driven by
+REL_STATE, the byte `pre` maintains) zeroes a silenced track's DRY level word (+2) but only
+CLAMPS its second level word (+4) to 6144 -- a permanent -14.5 dB route to the mix, which
+IS the OT+FX FX-tail-ring feature. A trig that arrives while the track is muted plays at
+full level straight into that open route. Fix = hook 8 `relcut` @ 0x4000d0c4 in
+patch_softmute.s: zero +4 instead of clamping, but ONLY for a track in the HARDCUT set
+(0x8000b000, set by mt_rebind's mr_silence = "took a real trig while silenced", masked down
+to the silenced set every frame by `pre`). Validated by controlled A/B (same build, same
+card, relcut the only variable): route holds 6144 for 439 frames of ordinary muting then
+goes to 0 at the retrig and stays there; and with nothing muted, relcut-on vs relcut-off is
+byte-identical across every block class. IMPORTANT measurement rule: `src`/`rb` from
+cmp_botli_retrig.py CANNOT see the mute at all (a stock hard-muted run is byte-identical to
+unmuted in both) -- judge mute behaviour by the per-track LEVEL WORDS in the host-port feed
+(core 1 block 0x80000110, 64 B per track, +2 dry / +4 route). The ESAI --audio-out path is
+unexercised in this emulator (an unmuted control has zero non-zero samples) -- do not use
+it. Next steps, in order: (1) flash and confirm on the MKI -- this is the first fix in this
+whole thread with a measured mechanism behind it; (2) measure the unmute-restores-grace
+path, which needs a SECOND --poke-at-frame checkpoint in ot_emu; (3) the SOLO branch and
+(4) DT mode, which skips REL_STATE entirely so relcut never fires for it.
 ```

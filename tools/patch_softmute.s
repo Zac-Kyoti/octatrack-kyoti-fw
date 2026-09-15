@@ -25,7 +25,16 @@
 |
 | _DAT_80000008 layout:  bits 0..7 = per-track SOLO   bits 8..15 = MUTE   bits 16..23 = CUE.
 |
-| Two hooks, one cave:
+| Session 56 (NOT YET HARDWARE-VALIDATED, DSP-level A/B still pending): a FOURTH hook,
+| `mt_ctr` @ 0x4000f834 -- see its own header comment below. `mt_trig`/`mt_rebind` were
+| both dynamically PROVEN (ot_emu --watch-pc, real BOTLI retrig) to fire exactly as
+| designed, on the exact retrig that still leaks audio -- neither gates DSP restart.
+| `mt_ctr` gates the ONE remaining unconditional per-trig write this session could find
+| that hook 3's own function (FUN_4000f450) makes past its own detour site: a bump of the
+| SAME per-track trig counter hook 2 was built around, from a completely different,
+| ungated call path (every repeat trig of an already-bound voice -- T1's exact case).
+|
+| Four hooks, one cave:
 |
 |  1. `pre`   @ 0x40004dc6 (the displaced `move.l 0x80000008,D5`).  With MUTE MODE == OT+FX,
 |     compute the "silenced" audio-track set for this frame:
@@ -67,6 +76,22 @@
     .equ SOLO_FLAG,   0x80000037     | byte, non-zero while SOLO mode is engaged
     .equ REL_STATE,   0x8000184a     | byte: voice t in RELEASE when bit t set
     .equ SHADOW,      0x80006c66     | patch RAM: last frame's "silenced" set (8 bits)
+    .equ HARDCUT,     0x8000b000     | patch RAM (Session 57): per-track "this track got a
+                                     | REAL TRIG while silenced" set.  Set by mt_rebind's
+                                     | mr_silence, consumed by `relcut`, and masked down to
+                                     | the currently-silenced set every frame by `pre` (so
+                                     | unmuting forgets it and the FX-tail grace returns).
+                                     | ⚠ NOT 0x80006c67 (the byte next to SHADOW): stock
+                                     | writes a 16-bit 0xc8c over 0x80006c66 from pc
+                                     | 0x4009882c, so 0x80006c67 is the LOW HALF of a stock
+                                     | field.  Using it made even an UNMUTED run diverge
+                                     | (measured).  0x8000b000 was chosen after censusing
+                                     | writes AND reads over a full run: zero of either in
+                                     | 0x8000b000..0x8000b0ff, unlike 0x80006a00/6b00/6c00/
+                                     | 6d00/6e00/7000/7800 which are all actively used.
+                                     | Caveat: "no traffic in THIS scenario" is not proof
+                                     | it is free under every feature (recorder, arranger,
+                                     | MIDI...) -- re-census before trusting it on hardware.
     .equ F_NOTEOFF,   0x40008f84     | FUN_40008f84(t) -- per-track note-off
     .equ BACK,        0x40004dcc     | FUN_40004dbc, after the displaced `move.l 0x80000008,D5`
 
@@ -88,6 +113,7 @@ pre:
     beq     p1_active
     .endif
     clr.b   SHADOW                      | OT (or unknown): stock; keep the shadow clean for later
+    clr.b   HARDCUT                     | ... and the retrig-while-silenced set with it
     bra     p1_done
 p1_active:
     .endif
@@ -123,6 +149,15 @@ p1_zero:
     moveq   #0,%d2
 
 p1_edge:
+| ---- HARDCUT &= silenced (Session 57) ----
+| A track that is no longer silenced forgets its "retriggered while silenced" flag, so
+| the FX-tail grace is available again the next time it IS muted.  Done here, before the
+| DT branch, so it is maintained identically in both OT+FX and DT.
+    moveq   #0,%d0
+    move.b  HARDCUT,%d0
+    and.l   %d2,%d0
+    move.b  %d0,HARDCUT
+
     .ifdef DT_MODE
 | ---- DT: the D5 mute/solo bits are already cleared above (voice + FX keep flowing to the
 |      mix untouched); the voice rides its own amp envelope.  No note-off, no REL_STATE. ----
@@ -332,9 +367,124 @@ mt_rebind:
     bne     mr_pass                      | soloed -> let it through
 | fallthrough: solo active + this track not soloed -> silence it
 mr_silence:
+| Session 57: this is the one place already PROVEN (ot_emu --watch-pc, real BOTLI retrig,
+| register dump showing a2 = T1's voice struct and d1 = the exact MUTE_STATE bit) to be
+| reached exactly when a SILENCED track receives a REAL new trig -- and only then (7 site
+| hits across a whole 470-frame run).  Record it: the FX-tail grace belongs to the note
+| that was already sounding when the mute engaged, NOT to a new trig, and `fxcut` uses
+| this to drop the still-open second level word for such a track.
+    move.l  (0x40,%sp),%d0               | track (the same stack slot this hook already uses)
+    moveq   #0,%d1
+    move.b  HARDCUT,%d1
+    bset    %d0,%d1
+    move.b  %d1,HARDCUT
     jmp     MR_BACK                      | skip BOTH arena-pointer writes for a silenced track
 
 mr_pass:
     move.l  %a5,(4,%a2)                  | displaced instr 1
     move.l  %a4,(8,%a2)                  | displaced instr 2
     jmp     MR_BACK
+
+| ---------------- hooks 4-7: TRIED, MEASURED, RULED OUT (Session 56 / 57) ---------------
+| Removed from this file to keep the cave small (they also pushed the PERSONALIZE arrays
+| out of their usual home and made cross-build comparisons noisy).  Full reasoning, the
+| measurements, and the exact detour bytes for each are in NOTES.md, Sessions 56-57:
+|
+|   mt_ctr  0x4000f834  gate the reuse-path per-track trig counter  -> made the blip LOUDER
+|   mt_pos  0x4000f790  gate the six START/END position writes      -> completely inert
+|   mt_ptr  0x4000f820  gate the play-pointer writes                -> completely inert
+|   fxcut   0x40004e9e  cut the frame builder's per-track word C    -> wrong producer, inert
+|   (plus `--defsym ALWAYS_NOTEOFF=1` in hook 1: note-off every frame rather than on the
+|    mute edge -> inert on the blip AND a regression on the ordinary mute)
+|
+| All five aimed at stopping the retriggered VOICE.  The voice was never the problem --
+| see hook 8.
+|
+| ============================ hook 8: 0x4000d0c4 (THE 6144 TAIL-RING CLAMP) =============
+| Session 57 -- THE leak, located exactly.  Hooks 2-7 all missed because they assumed the
+| retriggered VOICE had to be stopped.  It doesn't: stock already cuts a silenced track's
+| dry level to zero.  What it does NOT do is close the track's SECOND route to the mix --
+| it merely CAPS it.  The stock loop at 0x4000d0a4..0x4000d0dc, per track, driven by
+| REL_STATE (0x8000184a -- the very byte `pre` maintains with `REL_STATE |= silenced`):
+|
+|   4000d0b6:  movew #6144,%d2           | the cap
+|   4000d0ba:  mvzb 0x8000184a,%d0       | REL_STATE
+|   4000d0c0:  asrl #1,%d0 / bccs        | per track: in release/silenced?
+|   4000d0c4:  clrw  %a0@(2)             | YES -> dry level := 0          <- the mute you hear
+|   4000d0c8:  clrb  %a0@(43)
+|   4000d0cc:  cmpw  %a0@(4),%d2         | and the second word: if 6144 > it, leave it,
+|   4000d0d0:  bgts  0x4000d0d6          | otherwise CLAMP it DOWN TO 6144 -- never to 0
+|   4000d0d2:  movew %d2,%a0@(4)
+|
+| So a silenced track keeps a permanent -14.5 dB route to the mix.  That is the FX-tail
+| ring: the dry goes, the tail keeps flowing at a fixed reduced level.  Measured directly
+| in the host-port feed (core 1, 0x80000110 + 64*track): with T1 muted, word +2 is 0 and
+| word +4 sits at exactly 6144, every frame, from the mute right through the retrig.
+| A retrig plays the sample at full level straight into that open 6144 route -> the blip.
+|
+| This also explains every dead end: mt_pos/mt_ptr/mt_ctr/ALWAYS_NOTEOFF were all trying to
+| stop the voice, and `rb` (the per-track chain output) is measured UPSTREAM of this word,
+| so none of them could ever have shown a difference here even in principle.
+|
+| Fix: for a track in the HARDCUT set (one that took a REAL trig while silenced -- recorded
+| by mt_rebind's own mr_silence, the site proven to fire exactly then), zero word +4 instead
+| of clamping it to 6144.  The tail-ring grace still applies to the note that was sounding
+| when the mute engaged; a NEW trig gets no route out at all.  Every other track, and every
+| other mode, keeps stock behaviour exactly.
+|
+| Detours 18 B (0x4000d0c4..0x4000d0d6 -- the clrw/clrb and the whole clamp).  0x4000d0d6 is
+| a branch target (from the `bccs` at 0x4000d0c2 and the `bgts` at 0x4000d0d0) but it is the
+| END of the span, so nothing lands inside it.  Track index = 8 - %d1 (the loop counts %d1
+| 8..1 while %a0 walks 64 bytes per track).  %d0 (the shifted REL_STATE) and %d1/%d2/%a0 are
+| all live, so %d0/%d3 are saved and restored rather than clobbered.
+    .equ RC_BACK,   0x4000d0d6        | the loop's own per-track tail
+    .global relcut
+relcut:
+    clr.w   (2,%a0)                     | displaced 1: dry level := 0 (unchanged)
+    clr.b   (43,%a0)                    | displaced 2 (unchanged)
+
+| FAST PATH FIRST.  This hook sits in a loop that runs once per releasing track EVERY
+| frame (~3,760 times in a 470-frame run), unlike hooks 2-6 which sit on the trig path and
+| fire a handful of times.  An earlier draft read GATE (a 32-bit absolute load) before
+| anything else; that much extra work, that often, measurably perturbed the emulator's
+| ColdFire/DSP lockstep and made even an UNMUTED run differ from stock -- with provably
+| identical logic (the assembled rc_clamp replays the three displaced instructions exactly).
+| So: test HARDCUT first.  It is zero except in the rare window between a retrig-while-
+| silenced and the next unmute, so the common path is one byte load and one branch.
+    move.l  %d3,-(%sp)
+    move.b  HARDCUT,%d3                 | sets Z when nothing is flagged
+    beq     rc_clamp                    | common case -> stock behaviour, minimum work
+
+    move.l  %d0,-(%sp)
+    .ifndef ALWAYS_ON
+    move.l  GATE,%d0
+    .ifdef DT_MODE
+    subq.l  #1,%d0                      | mode 1 -> 0, mode 2 -> 1
+    cmpi.l  #1,%d0
+    bhi     rc_clamp2                   | MUTE MODE not in { OT+FX, DT } -> stock
+    .else
+    cmpi.l  #1,%d0
+    bne     rc_clamp2
+    .endif
+    .endif
+
+    moveq   #8,%d0
+    sub.l   %d1,%d0                     | D0 = this track's index (the loop counts D1 8..1)
+    btst    %d0,%d3                     | did THIS track take a real trig while silenced ?
+    beq     rc_clamp2                   | no -> keep the FX-tail grace exactly as stock
+
+    move.l  (%sp)+,%d0
+    move.l  (%sp)+,%d3
+    clr.w   (4,%a0)                     | HARD CUT: close the 6144 route completely
+    jmp     RC_BACK
+
+rc_clamp2:
+    move.l  (%sp)+,%d0
+
+rc_clamp:
+    move.l  (%sp)+,%d3
+    cmp.w   (4,%a0),%d2                 | displaced 3
+    bgt     rc_done                     | displaced 4
+    move.w  %d2,(4,%a0)                 | displaced 5
+rc_done:
+    jmp     RC_BACK

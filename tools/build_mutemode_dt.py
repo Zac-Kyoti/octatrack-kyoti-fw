@@ -45,16 +45,61 @@ PATCHES = [
     ("patch_trigscale", 0x400d7b00, None,
      [(0x4009b6f2, "cave", "203c0000091a", 18)]),
     ("patch_softmute", 0x400d7400, "DT_MODE=1",              # gated + the DT (mode 2) branch
+     # Session 56 continued: ALWAYS_NOTEOFF (--defsym ALWAYS_NOTEOFF=1, see hook 1's own
+     # header comment in patch_softmute.s) was tried and RULED OUT -- readback-level A/B
+     # showed zero effect on the retrig blip (byte-identical to baseline from frame 445
+     # on) AND a regression on the pre-existing muted note (frames 441-442 got LOUDER,
+     # not quieter, before the retrig even happens). Reverted to the known-safe baseline
+     # below (mt_trig + mt_rebind only, no experimental defsym).
      [(0x40004dc6, "pre",       "2a3980000008", 6),
       (0x40006844, "mt_trig",   "40c246fc2700", 6),
-      (0x4000f4dc, "mt_rebind", "254d0004254c0008", 8)]),
-    ("patch_mutemode", 0x400d7600, "DT_MODE=1", []),         # menu stub: OT / OT+FX / DT
+      (0x4000f4dc, "mt_rebind", "254d0004254c0008", 8),
+      # Session 56 continued: mt_pos, mt_ptr, mt_ctr all DISABLED after proper readback-
+      # level (not just raw-source) A/B testing. mt_pos and mt_ptr are confirmed fully
+      # inert at the readback (actual audible output) level too -- byte-identical to the
+      # ungated leak, every frame. mt_ctr is WORSE than doing nothing: it makes the
+      # readback LOUDER than the unfixed leak in the critical post-retrig frames
+      # (445-449), not quieter. None of the three are the right mechanism; back to the
+      # known-safe baseline (mt_trig + mt_rebind only) while the "pre" hook 1 hypothesis
+      # (see its own header comment, ALWAYS_NOTEOFF) is tried instead.
+      # (0x4000f790, "mt_pos", "2542002c2549002825420034254900302542003c25490038", 24),
+      # (0x4000f820, "mt_ptr", "254800402548004425480048266f003227480038", 20),
+      # (0x4000f834, "mt_ctr", "52aa009025480098", 8),
+      # Session 57: THE actual leak -- the frame builder's per-track word C
+      # (0x40004e9e, from table 0x80000c80) is written with NO mute/solo/cue test at
+      # all, so a silenced track keeps a second, wide-open route to the mix (measured:
+      # 6144 every frame while muted, vs word B correctly 0). That route is the OT+FX
+      # FX-tail feature, so it is cut ONLY for a track that got a real trig while
+      # silenced (the HARDCUT set). See patch_softmute.s hook 7.
+      # fxcut DISABLED: it fires correctly, but 0x40004e9e writes a DIFFERENT buffer than
+      # the one the DSP actually receives per-track levels in (that one is produced by the
+      # level chain at ~0x4000cb4e/cc20/ced0/ced4). Wrong producer; no effect. Kept for
+      # the record -- see patch_softmute.s hook 7.
+      # (0x40004e9e, "fxcut", "30da30d143e90008", 8),
+      # Session 57: THE fix. The stock per-track release loop (0x4000d0a4..0x4000d0dc,
+      # driven by REL_STATE, the byte `pre` maintains) zeroes a silenced track's DRY level
+      # but only CLAMPS its second level word to 6144 -- a permanent -14.5 dB route to the
+      # mix, which is the FX-tail-ring feature. A retrig plays full-level straight into it.
+      # relcut zeroes that word instead, but ONLY for a track in the HARDCUT set (one that
+      # took a real trig while silenced), so the tail-ring grace is preserved otherwise.
+      (0x4000d0c4, "relcut",   "426800024228002bb46800046e0431420004", 18),
+      ]),
+    ("patch_mutemode", 0x400d7620, "DT_MODE=1", []),         # menu stub: OT / OT+FX / DT
+    # Session 56 continued: moved 0x400d7600 -> 0x400d7810 -- patch_softmute keeps growing
+    # as more (mostly-disabled, kept for the record) reuse-path hooks are added to it, and
+    # kept colliding at smaller offsets. 0x400d7810..0x400d7898 (136 B) sits safely PAST
+    # all three PERSONALIZE arrays (SET_AT 0x400d77c0 + 68 B = 0x400d7804), decoupling this
+    # from patch_softmute's size for good instead of re-bumping by a small margin each time.
 ]
 
 # --- PERSONALIZE menu arrays (stock) ---
 OLD_LBL, OLD_GET, OLD_SET, N_OLD = 0x400b2a34, 0x400b2a74, 0x400b2ac0, 16
 SPLICE_AT = 2                                               # after "PREVIEW WITHOUT FX"
 LBL_AT, GET_AT, SET_AT = 0x400d7700, 0x400d7760, 0x400d77c0
+# Session 57: moved 0x400d7700/60/c0 -> 0x400d78a0/7900/7960. patch_softmute grew past
+# 0x400d7700 once `fxcut` landed (it also still carries the ruled-out mt_pos/mt_ptr/
+# mt_ctr/ALWAYS_NOTEOFF code, kept for the record). These three 68-byte arrays now sit in
+# the free span between patch_mutemode (ends 0x400d7897) and patch_trigscale (0x400d7b00).
 REFS = [(0x40068efe, OLD_LBL, "labels  move.l #imm,D5"),
         (0x40068f0a, OLD_GET, "getters lea"),
         (0x40069022, OLD_SET, "setters lea #1"),
@@ -183,11 +228,20 @@ def main():
     if mm.exists():
         mmb = mm.read_bytes()
         diff = [i for i, (x, y) in enumerate(zip(mmb, img)) if x != y]
-        allowed = [(0x400d7400, 0x400d7700),        # patch_softmute cave
-                   (0x400d7600, 0x400d7700),        # patch_mutemode cave (inside the above span)
-                   (0x400d7700, 0x400d7800),        # relocated PERSONALIZE arrays
+        allowed = [(0x400d7400, 0x400d79b0),        # the whole DT cave region: patch_softmute,
+                                                    # patch_mutemode, and the relocated
+                                                    # PERSONALIZE arrays (Session 57 layout)
                    (0x40006844, 0x4000684a),        # mt_trig detour jmp target (symbol moved)
-                   (0x4000f4dc, 0x4000f4e4)]        # mt_rebind detour jmp target (symbol moved)
+                   (0x4000f4dc, 0x4000f4e4),        # mt_rebind detour jmp target (symbol moved)
+                   (0x4000f790, 0x4000f7a8),        # Session 56 continued: mt_pos detour (DT-only)
+                   (0x4000f820, 0x4000f83c),        # Session 56 continued: mt_ptr + mt_ctr detours (DT-only)
+                   (0x4000d0c4, 0x4000d0d6),        # Session 57: relcut detour (DT-only)
+                   # Session 57: the five PERSONALIZE menu-array repoint sites. They hold
+                   # a different cave ADDRESS than build_mutemode.py's, because the arrays
+                   # moved to 0x400d78a0/7900/7960 to make room for patch_softmute's growth.
+                   (0x40068efe, 0x40068f02), (0x40068f0a, 0x40068f0e),
+                   (0x40069022, 0x40069026), (0x4006903e, 0x40069042),
+                   (0x40069056, 0x4006905a)]
         stray = [i for i in diff
                  if not any(lo - BASE <= i < hi - BASE for lo, hi in allowed)]
         print(f"  vs build_mutemode.py: {len(diff)} bytes differ, {len(stray)} outside the DT delta")
