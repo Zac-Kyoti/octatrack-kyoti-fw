@@ -234,11 +234,44 @@ sounding keeps playing under its own AMP envelope; only new trigs are suppressed
 5. Switch **DT → OT+FX** live while a muted voice is ringing — it should adopt the
    `OT+FX` behaviour on the next mute.
 
-### 4.5  DIRECT JUMP  (`build_directjump.py` / `_v2` — emulator only, never flashed)
+### 4.5  DIRECT JUMP  (`build_directjump_v4.py` — v1/v2/v3 FLASHED 2026-09-14/15, DID NOTHING; root cause found, v4 fixes it, NOT yet reflashed — see below, READ BEFORE FLASHING)
+
+**⚠️ DIRECTJUMP_V3 was flashed and had NO effect whatsoever** — no toast, no
+toggle, the combo did literally nothing, on a unit otherwise working normally.
+**Root cause found (NOTES.md "Session 60"), and it's stock, structural
+behaviour, not a bug in any patch here**: holding **[PTN]** unconditionally
+pushes a small stock UI overlay layer (`0x400bf0f2`) whose own `[YES]` record
+has a NULL press handler. The runtime key-dispatch table entry for `[YES]`
+gets overwritten with that NULL for as long as `[PTN]` is held — v1/v2/v3 all
+detour the *stock* `[YES]` handler (`0x4005e4c8`), which that NULLed table
+entry never reaches. **This is genuinely dead code while the chord is being
+held**, confirmed by running the real, unmodified firmware's own layer-push
+code under emulation (`tools/emu_directjump_v4.py`), not just by reasoning
+about the disassembly.
+
+**Fix (`build_directjump_v4.py`, `patch_directjump.s` `--defsym DJ_KEYMAP=1`)**:
+no detour on `0x4005e4c8` at all. The build instead writes `dj_toggle`'s
+address directly into that overlay layer's own `[YES]` record, so the exact
+same stock rebuild that used to zero the runtime dispatch slot now points it
+at our toggle. Verified two ways: (1) `tools/emu_directjump_v4.py` runs the
+real `FUN_4005a044` ([PTN] press) + the real layer-push/table-rebuild code
+against both the v3 image (reproduces the dead slot) and the v4 image
+(dispatch slot → `dj_toggle`, then actually `jsr`s it and confirms the toggle,
+re-checksum, and toast all fire) — the closest thing to a hardware round-trip
+this project's emulator harnesses do; (2) a byte-diff assertion that v4
+touches exactly v3's cave + the one 4-byte record field, nothing else.
+
+**⚠️ Likely shared root cause, NOT yet fixed**: `patch_reload2.s`'s `rl_yes`
+(the `RELOAD FROM PROJECT` `[PTN]`-hold picker's `[YES]` confirm) detours the
+*same* `0x4005e4c8` behind the *same* `PTN_MODE` gate — so RELOAD2's
+`[PTN]`+`[YES]` flow is very likely equally dead on real hardware for the
+identical reason. It just hasn't been flash-tested yet (queued behind
+DIRECTJUMP). Worth the same kind of keymap-slot fix before it's ever flashed
+standalone or in `build_merged.py`.
 
 1. Hold **[PTN]** and tap **[YES]** → a transient **"DIRECT JUMP ON"** overlay
-   (~0.7 s), then **OFF** on the next chord. The SELECT PATTERN chooser must not
-   pop on the [PTN] release.
+   (~0.7 s / ~68 frames), then **OFF** on the next chord. The SELECT PATTERN
+   chooser must not pop on the [PTN] release.
 2. With DIRECT JUMP **ON**, play a pattern and manually cue another (different
    Part): it should switch on the **next step tick**, keep the **step position**
    (modulo the new pattern's length), and load the new Part at once. A MIDI
@@ -247,10 +280,13 @@ sounding keeps playing under its own AMP envelope; only new trigs are suppressed
    when the arranger is running or a chain is active).
 4. Turn it **OFF** → manual pattern changes are stock (end-of-pattern quantised,
    restart at step 1).
+5. **[PTN] tapped alone** (no [YES]) still opens SELECT PATTERN normally —
+   v4 doesn't touch that path.
 
-> Five hardware-only unknowns are in `NOTES.md` "Session 15 continued" /
-> "Session 21 continued"; `TOAST_FRAMES` (the v2 overlay duration) may need one
-> tweak after a HW listen.
+> Five further hardware-only unknowns are in `NOTES.md` "Session 15 continued" /
+> "Session 21 continued"; `DJ_TOAST_DUR` (default 0x44, ~68 frames) may need one
+> tweak after a HW listen. v1/v2/v3 (`build_directjump.py`/`_v2`/`_v3.py`) are
+> kept for reference but should not be reflashed — they reproduce the dead combo.
 
 ### 4.6  Side-chain compressor  (`build_sidechain2.py` / `_3` — emulator only, never flashed)
 

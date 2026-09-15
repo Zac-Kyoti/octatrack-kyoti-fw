@@ -117,7 +117,7 @@ JUMP already uses it, DT still needs it — see below). Everything here is emula
 | **DT** mute mode | built, `emu_dt.py` clean · `build_mutemode_dt.py`. Persists across a power cycle (Session 22 folded in the `'ANDY'` shadow — byte-identical to `build_mutemode.py`). | `NOTES.md` "Session 12" |
 | **OT+FX → SOLO** (softmute V7) | built, `emu_solo.py` clean · `build_mutemode.py` on this branch | `NOTES.md` "Session 11" |
 | **4th MUTE MODE** — instant cut + FX tails + resume-at-playhead | RE'd, not built; gated on the same HW unknown as DT | `NOTES.md` "Session 14" |
-| **DIRECT JUMP** pattern-change mode | **Re-scoped + rebuilt (Session 21):** toggle is now **`[PTN]` + `[YES]`** (flashes "DIRECT JUMP ON/OFF" ~0.7 s) — no PERSONALIZE entry, so **no menu-array surgery**. `DJ_MODE` `0x800000a8`→`0x800000d8` with the Session-19 ANDY-shadow persistence. `patch_directjump.s` / `build_directjump.py` / `emu_directjump.py` updated, `emu_directjump.py` ALL GOOD (adds `test_toggle`). 522 B vs stock. **Not flashed.** | `NOTES.md` "Session 15" + "Session 21" (+ continued) |
+| **DIRECT JUMP** pattern-change mode | **`DIRECTJUMP_V3` flashed 2026-09-14/15 — DID NOTHING** (combo dead). Root cause: stock `[PTN]`-held UI overlay NULLs the `[YES]` runtime dispatch slot the whole time it's held, so v1/v2/v3's `0x4005e4c8` detour is never reached (Session 60). **Fix: `build_directjump_v4.py`** (`--defsym DJ_KEYMAP=1`) writes `dj_toggle` straight into that overlay's own `[YES]` slot instead of detouring stock YES. Dynamically verified against the *real* stock layer-push/dispatch code (`tools/emu_directjump_v4.py`), not just the hand-built stub. **Not yet reflashed.** ⚠️ RELOAD2's `rl_yes` shares the same dead `0x4005e4c8` hook — likely equally broken, not yet fixed. | `NOTES.md` "Session 15" + "Session 21" (+ continued) + **"Session 60"** |
 | **DSP side-chain compressor** | see below | `NOTES.md` "Session 17" (+ continued 1–8) |
 | **RELOAD FROM PROJECT** — per-pattern / per-track reload from the CF card, no transport stop | **Built, not flashed.** Two images: **`build_reload2.py`** (SEQ-focused, 3-item `TRK SEQ` / `PTN SEQ` / `PART + PTN SEQ`; opens on `TRK SEQ`) and `build_reload.py` (3-item `PTN SEQ` / `ALL PARTS` / `PARTS + PTN SEQ`). **`TRK SEQ`** (S47) = the one currently-addressed track (audio or MIDI, from `0x80000000`/`0x80000012`) — `G_KIND=3`, slices `slab+t*0x91a` (audio) / `slab+0x48d0+t*0x8b0` (MIDI) out of the parsed pattern. **`PTN SEQ`** = whole pattern, restores the live `slab+0x8e57` Part-link byte after the copy. **`PART + PTN SEQ`** (S47) = whole pattern incl. the link + `FUN_40009094(bank, savedPart)` + `0x80000003` — faithful "back to the card". **UX:** hold `[PTN]` ~0.5 s opens a sticky no-timeout picker, `[YES]` executes + closes, `[NO]` cancels; quick tap = SELECT PATTERN. 6 detours (`rl_ptn` / `rl_no` / `rl_yes` / `rl_arr_a` / `rl_arr_b` / `rl_job`). New scratch `G_TRK 0x80006a54` / `G_TMIDI 0x80006a55`. `rl_arm_trk` = the entry point for a future `[PTN]+[TRACK]` power move (chord is free; not built). **`emu_reload2.py` `--combo` + `--trk` ALL GOOD**; `--patched` = the whole-pattern worker. HW-only: hold feel; arrow/`[TRACK]` reaching the picker; `FUN_4008cebc` vs a real card; `FUN_40009094` from the storage task while playing. `FLASHING.md` §4.7. | `NOTES.md` "Session 42"–"44" + "Session 47" |
 | **QUANTIZE LIVE REC** — surface the PERSONALIZE row to the panel | **Built, not flashed (Session 46).** **Hold `[REC]`, tap `[PLAY]` twice** → toggles `QUANTIZE LIVE REC` (`0x800000ac`, the all-or-nothing live-rec quantize, *not* the per-track TRIG QUANT). Persistent "QUANT LIVE REC ON/OFF" toast shows while `[REC]` is held, clears on release (no timer). No menu surgery — the variable + its power-cycle persistence are stock (`0x800000ac` is inside the `0x64` ANDY span); we mirror the setter (word + shadow `0x100fff3c` + `jsr FUN_4001f23c`). 2 detours: `qlr_play` `0x40061778` / `qlr_recrel` `0x4004883a`. `patch_qlrec.s` + `build_qlrec.py` + `emu_qlrec.py` **ALL GOOD**. 247 B vs stock. HW-only: eyeball the toast, the feel of odd-press swallowing. | `NOTES.md` "Session 46" |
@@ -163,10 +163,13 @@ session, in order:
 3. If (2) good → **flash `SIDECHAIN3`** (step 3: `KEY GAIN` + `KEY FLT` SVF + `SC LISTEN`,
    built Session 36). HW test additions in `NOTES.md` "Session 36"; tune `sc_tables.py`
    (gain law / filter range / q) after a listen.
-4. **Flash `DIRECTJUMP_V3`** (`build_directjump_v3.py` — the overlay the merge carries;
-   `FUN_4005a2b8` self-timing toast) — the `[PTN]`+`[YES]` toggle + the 5 sequencer-hook
-   unknowns + does the toast read cleanly / `DJ_TOAST_DUR` feel right.
-   HW test lists: `NOTES.md` "Session 15 continued" + "Session 21 continued" + "Session 45".
+4. **Flash `DIRECTJUMP_V4`** (`build_directjump_v4.py` — v1/v2/v3 are DEAD ON HARDWARE,
+   Session 60: the `[PTN]`-held stock overlay NULLs `[YES]`'s dispatch slot the whole time
+   it's held, so their `0x4005e4c8` detour never runs; v4 fixes it by writing `dj_toggle`
+   into that overlay's own `[YES]` slot instead) — the `[PTN]`+`[YES]` toggle now actually
+   reaches dj_toggle + the 5 sequencer-hook unknowns + does the toast read cleanly /
+   `DJ_TOAST_DUR` feel right. HW test lists: `NOTES.md` "Session 15 continued" +
+   "Session 21 continued" + "Session 45" + "Session 60".
 5. Then: build the 4th mute mode; OT+FX-solo checklist (`NOTES.md` "Session 11 → NEXT").
 
 **Also no-flash:** all three MUTE MODE builds + DIRECT JUMP now carry the `'ANDY'`-shadow
@@ -186,8 +189,22 @@ open decisions: `reference/MERGE.md`.
 confirmation toast is `FUN_4005a2b8(text, dur)`, the OS's own self-timing notification
 (what `patch_reload2` uses, = ems-octakit `GK_STOCK_NOTIFICATION_SHOW`). No countdown
 boxes (v1), no `0x400522ca` splice (v2), no shared popup handle. `emu_directjump_v3.py`
-ALL GOOD; dj_a/b/c byte-identical to v1. Preferred everywhere; v1/v2 kept until v3
-flashes.
+ALL GOOD; dj_a/b/c byte-identical to v1. **Flashed 2026-09-14/15 — did nothing** (the
+combo never reaches `0x4005e4c8` at all while `[PTN]` is held; see v4 below).
+
+**DIRECT JUMP v4 (Session 60) — the fix, keeps v3's toast:**
+`build_directjump_v4.py` / `--defsym DJ_V3=1,DJ_KEYMAP=1` — drops the `0x4005e4c8`
+detour entirely and instead pokes `dj_toggle`'s address into the stock `[PTN]`-held
+overlay layer's own (normally NULL) `[YES]` record, so the layer's own rebuild wires
+the runtime dispatch straight to it. `tools/emu_directjump_v4.py` runs the *real* stock
+`FUN_4005a044`/layer-push/rebuild code (not a hand-built stub) and confirms: the dead
+slot on the v3 image (reproducing the HW failure), the live slot → `dj_toggle` on v4,
+and that `jsr`-ing that live slot actually runs the toggle end to end (re-checksum +
+toast fire + `DJ_MODE` flips). **Now the preferred build — v1/v2/v3 kept for reference
+but should not be flashed again.** `build_merged.py` still wires `DJ_V3` (the old, dead
+combo) — needs bumping to `DJ_KEYMAP` before the merge is touched again (not done yet;
+RELOAD2's `rl_yes` likely needs the identical fix first, since it shares the same
+detour).
 
 **"Part params carry over after a pattern→Part change" (Session 49) — FIXED, built,
 emu-validated, NOT flashed:** three Elektronauts reports, one family — a pattern change

@@ -128,7 +128,22 @@
     .text
 
 | ================= [PTN] + [YES] toggle =================
-| Detour replaces the first 8 bytes of the YES handler 0x4005e4c8:
+| ** v1/v2/v3 are DEAD ON HARDWARE (DIRECTJUMP_V3 flashed 2026-09-14: nothing happens). **
+| [PTN] press (FUN_4005a044 -> 0x4004346c) pushes the "PTN held" keymap layer 0x400bf0f2
+| onto the layer list 0x460d165c (FUN_40031494 -> rebuild 0x4003125c).  Its 26-byte records
+| (@0x400bef04): trig 0x00-0x0f -> select pattern, NO 0x32 -> 0x40056aa8, and YES 0x31 @
+| 0x400bf0be with press/release/hold all = 0.  The rebuild overwrites a slot unless the
+| field is -1, and the dispatcher (0x40031734) skips NULL -- so while [PTN] is held [YES]
+| is swallowed and the stock YES handler (our detour below) is never called.  The layer
+| is popped by 0x40043418 on [PTN] release / chooser close.
+|
+| v4 (build_directjump_v4.py, --defsym DJ_KEYMAP=1): no detour at 0x4005e4c8 at all --
+| the build writes dj_toggle into that NULL press slot (0x400bf0c0), so dj_toggle is
+| called as press(keycode, event) ONLY while the PTN layer is up.  PTN_MODE == 1 still
+| gates it (the layer also stays up through the 4 s chooser window, PTN_MODE == 2), and
+| "not our combo" is a plain rts: stock does nothing with [YES] in this layer.
+|
+| v1-v3: detour replaces the first 8 bytes of the YES handler 0x4005e4c8:
 |     0x4005e4c8  222f 0004   move.l 4(%sp),%d1     ; keycode
 |     0x4005e4cc  202f 0008   move.l 8(%sp),%d0     ; event
 | with `jmp dj_toggle` + nop.  On entry the stack is exactly what the stock handler saw:
@@ -189,9 +204,13 @@ djt_show:
     rts                                | swallow the YES key
 
 djt_stock:
+    .ifdef DJ_KEYMAP
+    rts                                | the PTN-held layer's stock [YES] slot is NULL: nothing
+    .else
     move.l  4(%sp),%d1                 | displaced: move.l 4(%sp),%d1
     move.l  8(%sp),%d0                 | displaced: move.l 8(%sp),%d0
     jmp     YES_RESUME
+    .endif
 
 dj_msg_on:
     .asciz "DIRECT JUMP ON"

@@ -10228,3 +10228,107 @@ whole thread with a measured mechanism behind it; (2) measure the unmute-restore
 path, which needs a SECOND --poke-at-frame checkpoint in ot_emu; (3) the SOLO branch and
 (4) DT mode, which skips REL_STATE entirely so relcut never fires for it.
 ```
+
+## Session 60 (2026-09-15, `wip`) — DIRECT JUMP flashed, did nothing: root cause found (stock, structural), v4 fix built + dynamically verified, NOT yet reflashed
+
+**User report**: flashed `DIRECTJUMP_V3`. No effect whatsoever — no toast, no
+toggle, the `[PTN]`+`[YES]` combo does literally nothing. Unit otherwise fine.
+
+### Root cause — found by disassembling STOCK `section_3_MAIN_OS.bin`, not a patch
+
+`[PTN]` press unconditionally runs `FUN_4005a044` → `jsr 0x4004346c` →
+`pea 0x400bf0f2 ; jsr FUN_40031494`. This **pushes a small stock UI overlay
+keymap layer** (26-byte records: trig 0x00-0x0f, NO=0x32, YES=0x31) onto a
+layer list at `0x460d165c` (push = append at the tail; the list is walked
+head→tail, so newest-pushed is processed LAST). That push triggers a full
+rebuild (`FUN_40031494` → `braw FUN_4003125c`) of a flat, 24-byte-stride
+runtime dispatch table at `0x46c7d8de` (`slot(code) = 0x46c7d8de + code*24`):
+each active layer's press pointer for a key **unconditionally overwrites**
+that key's slot as the layer is processed, so the *last*-processed (= most
+recently pushed = topmost) layer's value always wins for as long as it's on
+the stack.
+
+The PTN-held overlay's own YES record (`0x400bf0f2` → entries `0x400bef04`,
+record for code `0x31` @ `0x400bf0be`) has **press = NULL**. So the instant
+`[PTN]` goes down, the runtime dispatch slot for `[YES]`
+(`0x46c7dd76 = 0x46c7d8de + 0x31*24`) gets overwritten with `0` and **stays
+0 until `[PTN]` is released** (the layer is popped by `0x40043418`).
+
+**v1/v2/v3 all detour the stock `[YES]` *handler*, `0x4005e4c8`.** That
+handler is only ever reached by whatever consults the flat dispatch table —
+and while `[PTN]` is held, that table's `[YES]` slot is NULL, so the real
+runtime code the detour lives inside is **never entered at all**. This is
+entirely stock, structural firmware behaviour; none of DIRECT JUMP's own
+sequencer hooks or persistence code are at fault, and it has nothing to do
+with `DJ_V3`'s toast primitive specifically — v1 and v2 are equally dead.
+
+Confirmed the base (non-overlay) keymap really does register YES → `0x4005e4c8`
+at that same table slot: boot pushes the real base-keymap selector struct
+(`0x400c090a`/`0x400c091e`, picked by `0x46c8d18c`) through the identical
+`FUN_40031494` push+rebuild path (`0x40061bc4-0x40061bda`) — so outside a
+`[PTN]` hold, `0x46c7dd76` correctly holds `0x4005e4c8`, matching that the
+combo's *toggle*, if reachable, would be a legitimate override of stock YES.
+
+### Fix — `patch_directjump.s` `--defsym DJ_KEYMAP=1`, `build_directjump_v4.py`
+
+No detour on `0x4005e4c8` at all (`djt_stock`'s tail becomes a plain `rts`
+under `DJ_KEYMAP`, since stock does nothing with `[YES]` in this layer
+anyway). Instead the **build** writes `dj_toggle`'s address directly into the
+overlay layer's own `[YES]` record press field (`0x400bf0f2+0xe` = record
+`0x400bf0be`, offset `+2`; stock value asserted NULL first) — so the *same*
+stock rebuild that used to zero the runtime slot now points it at
+`dj_toggle`. Everything else (`DJ_MODE`/shadow/re-checksum, the `DJ_V3` toast,
+`dj_a`/`dj_b`/`dj_c`) is byte-for-byte v3's. Build asserts v4's touched-byte
+set = v3's cave + exactly that one 4-byte field (no stray edits) and that
+`0x4005e4c8` itself is untouched. 501 B changed vs stock (v3 was 516 — the
+detour + its `jmp` bytes are simply gone).
+
+### Verification — real stock code, not just the hand-built dj_toggle stub
+
+`tools/emu_directjump_v4.py` runs the **actual, unmodified firmware's own**
+`FUN_4005a044` ([PTN] press) and `FUN_40031494`/`FUN_4003125c` (layer push +
+table rebuild) under Unicorn against the finished images — first pushing the
+real base-keymap selector struct (the same one boot uses) so the layer
+ordering this depends on is the genuine one, not fabricated:
+
+  * **v3 image**: after the push, the `[YES]` runtime dispatch slot reads
+    `0x4005e4c8` (base registered correctly); after the real `[PTN]` press,
+    the same slot reads **`0`** — reproducing the exact HW failure.
+  * **v4 image**: after the same sequence, the slot reads `dj_toggle`'s
+    address. The harness then **`jsr`s that live slot directly** (the same
+    call the real per-key ISR would make) and confirms it runs `dj_toggle`
+    for real: the re-checksum call fires, the `NOTIFY` toast call fires with
+    the right args, and `DJ_MODE` flips 0→1 — end to end, through the real
+    dispatch table, not a synthetic call to `dj_toggle`'s entry point.
+
+(The `[PTN]`-press call's own stock tail trails off into kernel code past
+`0x40027de4` that Unicorn can't run standalone — same class of limit already
+documented for `FUN_400a1eea` — but that's after the layer push/rebuild this
+test cares about has already completed, so it's an expected trailing
+exception, not a failure.) `ALL GOOD`. `dj_a`/`dj_b`/`dj_c` re-confirmed
+byte-identical to v1 (`emu_directjump_v3.py`, still green after rebuilding
+each variant in its own build→emu pair — the shared `out/patch_directjump.*`
+filename across all four build scripts means whichever was built *last*
+is what an emu script not run immediately after its own build will see;
+not a regression, just the existing project convention).
+
+### ⚠️ Likely the same root cause hits RELOAD2 — NOT yet fixed, flagged only
+
+`patch_reload2.s`'s `rl_yes` (the `[PTN]`-hold picker's `[YES]` confirm) also
+detours `0x4005e4c8`, gated the same way on `PTN_MODE`. By this exact
+mechanism its `[PTN]`+`[YES]` flow is very likely equally dead on hardware —
+it just hasn't been flash-tested yet (queued behind DIRECTJUMP in the flash
+order). `build_merged.py`'s whole `[YES]`-trampoline design (Session 45: DJ's
+`dj_toggle` chained from RELOAD2's `rl_yes`, both hanging off the one detour
+at `0x4005e4c8`) sits on the same dead hook. Worth the identical keymap-slot
+treatment before RELOAD2 is ever flashed standalone or the merged build is
+attempted — not done here, out of scope for "why doesn't DIRECT JUMP do
+anything."
+
+### Status
+
+`out/OCTATRACK_OS1.40C_DIRECTJUMP_V4.syx` / `OCTATRACK_DIRECTJUMP_V4.bin`
+built, emu-verified both ways above. **NOT yet reflashed.** `build_merged.py`
+still wires `DJ_V3` (dead combo) into the merge — needs bumping to the
+`DJ_KEYMAP` mechanism (and RELOAD2's own fix) before the merged build is
+touched again; not done this session.
