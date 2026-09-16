@@ -83,23 +83,50 @@ PATCHES = [
       # relcut zeroes that word instead, but ONLY for a track in the HARDCUT set (one that
       # took a real trig while silenced), so the tail-ring grace is preserved otherwise.
       (0x4000d0c4, "relcut",   "426800024228002bb46800046e0431420004", 18),
+      # Session 58: drop the trig at its real dispatch site (0x4000d498, an indirect
+      # jsr through a per-machine-type handler table) instead of trying to stop the
+      # voice afterwards. Broadened (Session 58 continued) to cover both OT+FX and DT.
+      # See patch_softmute.s hook 9.
+      (0x4000d498, "dt_trig",  "2f002f034e90", 6),
+      # Session 58 continued: this dispatch only covers the REUSE path (an already-bound
+      # voice). The FRESH-bind path (FUN_40006820, reached once a voice has gone cold --
+      # quickly in OT+FX via relcut's note-off, or after AMP RELEASE completes in DT) has
+      # six OTHER callers hook 9 never touches. Gate it at its own single entry instead.
+      # See patch_softmute.s hook 10.
+      (0x40006820, "fresh_bind", "2f0a2f02222f000c", 8),
+      # Session 58 continued again: THE actual leak. relcut (hook 8) only fires when the
+      # stock release loop's REL_STATE bit is true for a track; a stock function (never
+      # touched before now) transiently CLEARS a muted track's bit as ordinary "a note is
+      # starting" bookkeeping, skipping relcut for exactly one frame and letting a fresh,
+      # unmuted-value level-chain write through uncorrected. Fix: OR the currently-
+      # silenced set back in immediately before this function's own store, so a muted
+      # track's bit can never actually go to 0. See patch_softmute.s hook 11.
+      # Session 58 continued again: the REL_STATE race (relcut, hook 8, misses 3 of 1999
+      # eligible frames because a stock function transiently clears a muted track's
+      # REL_STATE bit) is NOT fixed in this build. TWO different surgical attempts --
+      # detouring the writer (0x4000bf22) and detouring the reader (0x4000d0ba, the
+      # release loop's own once-per-frame REL_STATE load) -- BOTH produced severe,
+      # reproducible controlled-A/B regressions (the second one worse than the first,
+      # and unlike the first, affecting T1's OWN state from frame 4 onward -- a real
+      # correctness problem, not just cross-track timing drift). Abandoned rather than
+      # ship either. Full detail, both attempts, in NOTES.md. Code for both kept in
+      # patch_softmute.s (hook 11, currently `relstate_or`) for the record; not wired in.
+      # (0x4000d0ba, "relstate_or", "71b98000184a", 6),
       ]),
-    ("patch_mutemode", 0x400d7620, "DT_MODE=1", []),         # menu stub: OT / OT+FX / DT
-    # Session 56 continued: moved 0x400d7600 -> 0x400d7810 -- patch_softmute keeps growing
-    # as more (mostly-disabled, kept for the record) reuse-path hooks are added to it, and
-    # kept colliding at smaller offsets. 0x400d7810..0x400d7898 (136 B) sits safely PAST
-    # all three PERSONALIZE arrays (SET_AT 0x400d77c0 + 68 B = 0x400d7804), decoupling this
-    # from patch_softmute's size for good instead of re-bumping by a small margin each time.
+    ("patch_mutemode", 0x400d76c0, "DT_MODE=1", []),         # menu stub: OT / OT+FX / DT
+    # Session 58 continued again: patch_softmute grew once more (relstate_guard, hook 11).
+    # patch_mutemode moved 0x400d7680 -> 0x400d76c0 (ends 0x400d7748); the PERSONALIZE
+    # arrays moved out further too, to LBL_AT 0x400d7750, for the same reason.
 ]
 
 # --- PERSONALIZE menu arrays (stock) ---
 OLD_LBL, OLD_GET, OLD_SET, N_OLD = 0x400b2a34, 0x400b2a74, 0x400b2ac0, 16
 SPLICE_AT = 2                                               # after "PREVIEW WITHOUT FX"
-LBL_AT, GET_AT, SET_AT = 0x400d7700, 0x400d7760, 0x400d77c0
-# Session 57: moved 0x400d7700/60/c0 -> 0x400d78a0/7900/7960. patch_softmute grew past
-# 0x400d7700 once `fxcut` landed (it also still carries the ruled-out mt_pos/mt_ptr/
-# mt_ctr/ALWAYS_NOTEOFF code, kept for the record). These three 68-byte arrays now sit in
-# the free span between patch_mutemode (ends 0x400d7897) and patch_trigscale (0x400d7b00).
+LBL_AT, GET_AT, SET_AT = 0x400d7750, 0x400d77b0, 0x400d7810
+# Session 58 continued again: moved 0x400d7710/70/d0 -> 0x400d7750/b0/810 -- patch_mutemode
+# (ends 0x400d7748) grew into the old array location once relstate_guard (hook 11) pushed
+# patch_softmute's own end further out. These three 68-byte arrays now sit in the free
+# span between patch_mutemode and patch_trigscale (0x400d7b00), with room to spare.
 REFS = [(0x40068efe, OLD_LBL, "labels  move.l #imm,D5"),
         (0x40068f0a, OLD_GET, "getters lea"),
         (0x40069022, OLD_SET, "setters lea #1"),
@@ -236,6 +263,9 @@ def main():
                    (0x4000f790, 0x4000f7a8),        # Session 56 continued: mt_pos detour (DT-only)
                    (0x4000f820, 0x4000f83c),        # Session 56 continued: mt_ptr + mt_ctr detours (DT-only)
                    (0x4000d0c4, 0x4000d0d6),        # Session 57: relcut detour (DT-only)
+                   (0x4000d498, 0x4000d49e),        # Session 58: dt_trig detour (DT-only)
+                   (0x40006820, 0x40006828),        # Session 58 continued: fresh_bind detour (DT-only)
+                   (0x4000d0ba, 0x4000d0c0),        # Session 58 continued again: relstate_or detour (DT-only)
                    # Session 57: the five PERSONALIZE menu-array repoint sites. They hold
                    # a different cave ADDRESS than build_mutemode.py's, because the arrays
                    # moved to 0x400d78a0/7900/7960 to make room for patch_softmute's growth.

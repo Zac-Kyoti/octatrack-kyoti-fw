@@ -76,22 +76,6 @@
     .equ SOLO_FLAG,   0x80000037     | byte, non-zero while SOLO mode is engaged
     .equ REL_STATE,   0x8000184a     | byte: voice t in RELEASE when bit t set
     .equ SHADOW,      0x80006c66     | patch RAM: last frame's "silenced" set (8 bits)
-    .equ HARDCUT,     0x8000b000     | patch RAM (Session 57): per-track "this track got a
-                                     | REAL TRIG while silenced" set.  Set by mt_rebind's
-                                     | mr_silence, consumed by `relcut`, and masked down to
-                                     | the currently-silenced set every frame by `pre` (so
-                                     | unmuting forgets it and the FX-tail grace returns).
-                                     | ⚠ NOT 0x80006c67 (the byte next to SHADOW): stock
-                                     | writes a 16-bit 0xc8c over 0x80006c66 from pc
-                                     | 0x4009882c, so 0x80006c67 is the LOW HALF of a stock
-                                     | field.  Using it made even an UNMUTED run diverge
-                                     | (measured).  0x8000b000 was chosen after censusing
-                                     | writes AND reads over a full run: zero of either in
-                                     | 0x8000b000..0x8000b0ff, unlike 0x80006a00/6b00/6c00/
-                                     | 6d00/6e00/7000/7800 which are all actively used.
-                                     | Caveat: "no traffic in THIS scenario" is not proof
-                                     | it is free under every feature (recorder, arranger,
-                                     | MIDI...) -- re-census before trusting it on hardware.
     .equ F_NOTEOFF,   0x40008f84     | FUN_40008f84(t) -- per-track note-off
     .equ BACK,        0x40004dcc     | FUN_40004dbc, after the displaced `move.l 0x80000008,D5`
 
@@ -113,7 +97,6 @@ pre:
     beq     p1_active
     .endif
     clr.b   SHADOW                      | OT (or unknown): stock; keep the shadow clean for later
-    clr.b   HARDCUT                     | ... and the retrig-while-silenced set with it
     bra     p1_done
 p1_active:
     .endif
@@ -149,15 +132,6 @@ p1_zero:
     moveq   #0,%d2
 
 p1_edge:
-| ---- HARDCUT &= silenced (Session 57) ----
-| A track that is no longer silenced forgets its "retriggered while silenced" flag, so
-| the FX-tail grace is available again the next time it IS muted.  Done here, before the
-| DT branch, so it is maintained identically in both OT+FX and DT.
-    moveq   #0,%d0
-    move.b  HARDCUT,%d0
-    and.l   %d2,%d0
-    move.b  %d0,HARDCUT
-
     .ifdef DT_MODE
 | ---- DT: the D5 mute/solo bits are already cleared above (voice + FX keep flowing to the
 |      mix untouched); the voice rides its own amp envelope.  No note-off, no REL_STATE. ----
@@ -367,17 +341,6 @@ mt_rebind:
     bne     mr_pass                      | soloed -> let it through
 | fallthrough: solo active + this track not soloed -> silence it
 mr_silence:
-| Session 57: this is the one place already PROVEN (ot_emu --watch-pc, real BOTLI retrig,
-| register dump showing a2 = T1's voice struct and d1 = the exact MUTE_STATE bit) to be
-| reached exactly when a SILENCED track receives a REAL new trig -- and only then (7 site
-| hits across a whole 470-frame run).  Record it: the FX-tail grace belongs to the note
-| that was already sounding when the mute engaged, NOT to a new trig, and `fxcut` uses
-| this to drop the still-open second level word for such a track.
-    move.l  (0x40,%sp),%d0               | track (the same stack slot this hook already uses)
-    moveq   #0,%d1
-    move.b  HARDCUT,%d1
-    bset    %d0,%d1
-    move.b  %d1,HARDCUT
     jmp     MR_BACK                      | skip BOTH arena-pointer writes for a silenced track
 
 mr_pass:
@@ -400,91 +363,361 @@ mr_pass:
 | All five aimed at stopping the retriggered VOICE.  The voice was never the problem --
 | see hook 8.
 |
-| ============================ hook 8: 0x4000d0c4 (THE 6144 TAIL-RING CLAMP) =============
-| Session 57 -- THE leak, located exactly.  Hooks 2-7 all missed because they assumed the
-| retriggered VOICE had to be stopped.  It doesn't: stock already cuts a silenced track's
-| dry level to zero.  What it does NOT do is close the track's SECOND route to the mix --
-| it merely CAPS it.  The stock loop at 0x4000d0a4..0x4000d0dc, per track, driven by
-| REL_STATE (0x8000184a -- the very byte `pre` maintains with `REL_STATE |= silenced`):
+| ============================ hook 8: 0x4000d0c4 (the ASYMMETRIC L/R MUTE) ==============
+| Session 58 -- corrected by a hardware report.  The stock per-track loop at
+| 0x4000d0a4..0x4000d0dc, driven by REL_STATE (0x8000184a -- the byte `pre` maintains):
 |
 |   4000d0b6:  movew #6144,%d2           | the cap
 |   4000d0ba:  mvzb 0x8000184a,%d0       | REL_STATE
-|   4000d0c0:  asrl #1,%d0 / bccs        | per track: in release/silenced?
-|   4000d0c4:  clrw  %a0@(2)             | YES -> dry level := 0          <- the mute you hear
+|   4000d0c0:  asrl #1,%d0 / bccs        | per track: silenced this frame?
+|   4000d0c4:  clrw  %a0@(2)             | YES -> one channel := 0
 |   4000d0c8:  clrb  %a0@(43)
-|   4000d0cc:  cmpw  %a0@(4),%d2         | and the second word: if 6144 > it, leave it,
-|   4000d0d0:  bgts  0x4000d0d6          | otherwise CLAMP it DOWN TO 6144 -- never to 0
+|   4000d0cc:  cmpw  %a0@(4),%d2         | the OTHER channel: if 6144 > it, leave it,
+|   4000d0d0:  bgts  0x4000d0d6          | otherwise clamp it DOWN TO 6144 -- never to 0
 |   4000d0d2:  movew %d2,%a0@(4)
 |
-| So a silenced track keeps a permanent -14.5 dB route to the mix.  That is the FX-tail
-| ring: the dry goes, the tail keeps flowing at a fixed reduced level.  Measured directly
-| in the host-port feed (core 1, 0x80000110 + 64*track): with T1 muted, word +2 is 0 and
-| word +4 sits at exactly 6144, every frame, from the mute right through the retrig.
-| A retrig plays the sample at full level straight into that open 6144 route -> the blip.
+| Session 57 read +2/+4 as "dry" and "a second route (the FX-tail feature)", and gated the
+| fix on a retrig.  HARDWARE SAYS OTHERWISE, and is unambiguous: with a muted track
+| blipping, **only the LEFT channel blips, the right is silent, the blip is DRY (not
+| effected) audio, and turning BAL fully right silences the track completely.**
 |
-| This also explains every dead end: mt_pos/mt_ptr/mt_ctr/ALWAYS_NOTEOFF were all trying to
-| stop the voice, and `rb` (the per-track chain output) is measured UPSTREAM of this word,
-| so none of them could ever have shown a difference here even in principle.
+| So +2 and +4 are the per-track **L and R gains of the dry signal** -- a stereo pair,
+| computed upstream by the pan/balance maths at ~0x4000cf84..0x4000d022.  Stock zeroes ONE
+| of them and merely CLAMPS the other to 6144.  That asymmetry IS the bug, and it is why
+| panning into the zeroed channel makes the track fall silent.  Nothing here is the FX-tail
+| mechanism at all: the tail rings via hook 1's own D5-bit clearing, on a different set of
+| words entirely, which is exactly why the user hears the FX ring correctly while the dry
+| leaks.
 |
-| Fix: for a track in the HARDCUT set (one that took a REAL trig while silenced -- recorded
-| by mt_rebind's own mr_silence, the site proven to fire exactly then), zero word +4 instead
-| of clamping it to 6144.  The tail-ring grace still applies to the note that was sounding
-| when the mute engaged; a NEW trig gets no route out at all.  Every other track, and every
-| other mode, keeps stock behaviour exactly.
+| Fix, accordingly, is simpler than Session 57's: zero +4 the same way stock already zeroes
+| +2, for ANY silenced track.  No retrig detection, no HARDCUT byte, no dependency on
+| mt_rebind firing -- all of which Session 57 needed only because it thought +4 was a
+| feature worth preserving.  It is not; it is the other half of the same mute.
 |
-| Detours 18 B (0x4000d0c4..0x4000d0d6 -- the clrw/clrb and the whole clamp).  0x4000d0d6 is
-| a branch target (from the `bccs` at 0x4000d0c2 and the `bgts` at 0x4000d0d0) but it is the
-| END of the span, so nothing lands inside it.  Track index = 8 - %d1 (the loop counts %d1
-| 8..1 while %a0 walks 64 bytes per track).  %d0 (the shifted REL_STATE) and %d1/%d2/%a0 are
-| all live, so %d0/%d3 are saved and restored rather than clobbered.
+| Gated on MUTE MODE so stock (OT) behaviour is byte-for-byte untouched: REL_STATE is a
+| STOCK byte that stock sets for voices in their natural release, and stock's clamp on
+| those is existing shipped behaviour that must not change.
+|
+| Detours 18 B (0x4000d0c4..0x4000d0d6).  0x4000d0d6 is a branch target (from the `bccs` at
+| 0x4000d0c2 and the `bgts` at 0x4000d0d0) but it is the END of the span, so nothing lands
+| inside it.  %d0 is the shifted REL_STATE and %d1/%d2/%a0 are the loop's own state, so %d0
+| is saved and restored around the GATE read rather than clobbered.
     .equ RC_BACK,   0x4000d0d6        | the loop's own per-track tail
     .global relcut
 relcut:
-    clr.w   (2,%a0)                     | displaced 1: dry level := 0 (unchanged)
+    clr.w   (2,%a0)                     | displaced 1: one channel := 0 (unchanged)
     clr.b   (43,%a0)                    | displaced 2 (unchanged)
 
-| FAST PATH FIRST.  This hook sits in a loop that runs once per releasing track EVERY
-| frame (~3,760 times in a 470-frame run), unlike hooks 2-6 which sit on the trig path and
-| fire a handful of times.  An earlier draft read GATE (a 32-bit absolute load) before
-| anything else; that much extra work, that often, measurably perturbed the emulator's
-| ColdFire/DSP lockstep and made even an UNMUTED run differ from stock -- with provably
-| identical logic (the assembled rc_clamp replays the three displaced instructions exactly).
-| So: test HARDCUT first.  It is zero except in the rare window between a retrig-while-
-| silenced and the next unmute, so the common path is one byte load and one branch.
-    move.l  %d3,-(%sp)
-    move.b  HARDCUT,%d3                 | sets Z when nothing is flagged
-    beq     rc_clamp                    | common case -> stock behaviour, minimum work
-
-    move.l  %d0,-(%sp)
     .ifndef ALWAYS_ON
+    move.l  %d0,-(%sp)
     move.l  GATE,%d0
     .ifdef DT_MODE
     subq.l  #1,%d0                      | mode 1 -> 0, mode 2 -> 1
     cmpi.l  #1,%d0
-    bhi     rc_clamp2                   | MUTE MODE not in { OT+FX, DT } -> stock
+    bhi     rc_clamp                    | MUTE MODE not in { OT+FX, DT } -> stock, untouched
     .else
     cmpi.l  #1,%d0
-    bne     rc_clamp2
+    bne     rc_clamp
     .endif
+    move.l  (%sp)+,%d0                  | restore ONLY on the path that keeps going --
+                                         | branching FIRST, while CMP's own flags are still
+                                         | live.  A same-session draft restored d0 BEFORE the
+                                         | branch on the theory that "the flags survive the
+                                         | move" -- they do not: MOVE.L sets N/Z from the
+                                         | popped value and clears V/C, which silently
+                                         | overwrote the CMP result before BHI/BNE ever read
+                                         | it.  relcut then took rc_clamp on EVERY track,
+                                         | EVERY time, regardless of GATE -- indistinguishable
+                                         | from "the fix does nothing" by any audio test, and
+                                         | only caught by watching this exact branch with
+                                         | --watch-pc and seeing GATE=1 take rc_clamp anyway.
+                                         | The PREVIOUSLY FLASHED relcut (the HARDCUT-gated
+                                         | one) did NOT have this bug -- it branched right
+                                         | after CMPI, correctly -- so this is not why that
+                                         | hardware attempt failed; see the header comment.
     .endif
 
-    moveq   #8,%d0
-    sub.l   %d1,%d0                     | D0 = this track's index (the loop counts D1 8..1)
-    btst    %d0,%d3                     | did THIS track take a real trig while silenced ?
-    beq     rc_clamp2                   | no -> keep the FX-tail grace exactly as stock
-
-    move.l  (%sp)+,%d0
-    move.l  (%sp)+,%d3
-    clr.w   (4,%a0)                     | HARD CUT: close the 6144 route completely
-    jmp     RC_BACK
-
-rc_clamp2:
-    move.l  (%sp)+,%d0
+    clr.w   (4,%a0)                     | the OTHER channel := 0 too.  Both halves of the
+    jmp     RC_BACK                     | dry are now muted, which is what a mute means.
 
 rc_clamp:
-    move.l  (%sp)+,%d3
-    cmp.w   (4,%a0),%d2                 | displaced 3
+    .ifndef ALWAYS_ON
+    move.l  (%sp)+,%d0                  | the branch above jumped straight here, unrestored
+    .endif
+    cmp.w   (4,%a0),%d2                 | displaced 3 (stock's clamp, replayed exactly)
     bgt     rc_done                     | displaced 4
     move.w  %d2,(4,%a0)                 | displaced 5
 rc_done:
     jmp     RC_BACK
+
+| ============================ hook 9: 0x4000d498 (DROP THE TRIG ENTIRELY) ===============
+| Session 58, at the user's direction: "these are supposed to be trig mute-style modes --
+| concentrate on finding a way to simply mute all trigs encountered after the mute."
+| Session 58 continued: hardware confirmed this FIXES DT with no desync found. OT+FX,
+| flashed alongside it with only `relcut` (hook 8), STILL blipped on one channel -- the
+| exact same symptom as before hook 8, unchanged. Broadened this hook to cover OT+FX too.
+|
+| Why `relcut` alone isn't enough for OT+FX: hook 8 only reacts to the per-track LEVEL
+| WORD, which is control-rate (updated once per sequencer frame) and was independently
+| confirmed, frame by frame across the retrig, to read 0/0 the entire time -- so the
+| ColdFire-side mixer gain is provably never wrong. But `relcut` does nothing to stop the
+| trig from reaching the voice engine, and the voice engine's OWN restart is exactly what
+| hooks 2-6 (Session 56) spent a whole session failing to gate from the outside. A DSP-
+| side voice can plausibly reach its own default/unity gain for the first few samples of
+| a restart, entirely below the granularity this per-frame level word can see or fix --
+| which is consistent with DT (which prevents the restart from ever happening at all)
+| working cleanly while OT+FX (which only cleans up the CONTROL-RATE word around it)
+| still blips. OT+FX's own hook-1 header has said "a silenced track's sequencer trigs
+| make no sound" since Session 9 -- this hook is what actually delivers that, for both
+| modes, by removing the restart itself rather than reacting to its level word.
+|
+| Every earlier DT attempt tried to stop the voice AFTER its trig had been dispatched
+| (mt_trig at FUN_40006844, mt_rebind inside FUN_4000f450, the whole Session-56 family).
+| DT did nothing at all on hardware.  This hook stops the trig being dispatched at all.
+|
+| ⚠ FIRST ATTEMPT WAS WRONG, and the emulator caught it before the flash: `grep "jsr
+| 0x4000f450"` finds exactly ONE direct call, at 0x4000421c, so that looked like the single
+| choke point.  Detouring it produced ZERO hits in a real run while FUN_4000f450 itself was
+| entered 7 times -- because the live path does not use that direct call at all.  The return
+| address on FUN_4000f450's own stack (`--watch-pc 0x4000f450`, first stack word = 0x4000d49e,
+| with a0 == 0x4000f450 on entry) gave up the real site: an INDIRECT `jsr %a0@` two bytes
+| earlier, at 0x4000d49c.  Lesson worth keeping: a grep for direct calls does not find a
+| function-pointer dispatch; ask the callee's own return address instead.
+|
+| The real dispatch, 0x4000d47a..0x4000d4ce:
+|
+|   4000d47a:  mvsb %d1,%d4              | d4 = this track's MACHINE TYPE
+|   4000d47e:  moveal %a1@(0,%d4:l:4),%a0| a0 = handler_table[machine type]
+|   4000d482:  tstl %a0 / beqs           | no handler -> skip
+|   4000d490:  movel %d0,%sp@-           | arg 3 (flags)
+|   4000d498:  movel %d0,%sp@-           | arg 2            <- detoured from here
+|   4000d49a:  movel %d3,%sp@-           | arg 1 == TRACK NUMBER (%d3)
+|   4000d49c:  jsr %a0@                  | THE per-trig dispatch
+|   4000d49e:  ...                       | %d0 = the handler's return value, used below
+|   4000d4ce:  lea %sp@(12),%sp          | the caller pops all three args itself
+|
+| Hooking the DISPATCH rather than one handler means every machine type is covered, not
+| just the FLEX/STATIC one FUN_4000f450 serves -- which is what a trig mute should do.
+|
+| For a silenced track we simply do not call the handler.  The three arguments are still
+| pushed (so the caller's own `lea %sp@(12),%sp` still balances), and %d0 is set to 0 --
+| the value the following code ORs into a per-track word at 0x4000d4ae, i.e. "this handler
+| did nothing".  %d3 (track) is live afterwards and is never touched; %d0/%d1 are free
+| (%d0 is the handler's return value by convention, %d1 is reloaded at 0x4000d49e).
+|
+| Net effect: a trig on a silenced track is never dispatched -- no voice start, no arena
+| bind, no position write.  A voice ALREADY sounding is not touched at all, so it keeps
+| ringing under its own amp envelope.  That is exactly a Digitakt trig mute.
+|
+| The silenced test is `mr_silence`'s, copied verbatim, so this is solo-aware for free.
+|
+| BOTH OT+FX and DT now (Session 58 continued -- see the broadening note above).  `relcut`
+| (hook 8) still does its own job for OT+FX (the already-sounding voice's dry level and
+| its clean fade on mute-engage); this hook additionally stops any NEW trig from reaching
+| the voice engine at all, in either mode, which is what actually fixed the blip.
+|
+| ⚠ UNPROVEN RISK, flagged deliberately: if the handler performs bookkeeping that later
+| code depends on (a playhead, a slot lifetime, a counter), skipping it could desync that
+| state -- most plausibly on UNMUTE, or after many suppressed trigs.  Test that
+| specifically.  Confirmed clean for DT on hardware this session; OT+FX not yet re-tested
+| with this broadened gate.
+    .equ DT_BACK,   0x4000d49e        | right after the dispatch
+    .global dt_trig
+dt_trig:
+    move.l  %d0,-(%sp)                  | displaced 1 (arg 2) -- MUST reach `jsr %a0@` on the
+                                         | dt_pass path byte-identical to what stock's own
+                                         | `mvzb %a1@,%d0` left it as (just pushed, unchanged).
+                                         | Every check below uses %d1/%d2 ONLY -- never %d0 --
+                                         | and %d0 is written (to 0) ONLY on the confirmed
+                                         | dt_silence path, where the handler never runs at
+                                         | all so it cannot matter.
+                                         |
+                                         | An earlier draft used %d0 as gate-check scratch. It
+                                         | passed a clean controlled A/B for the DT-only gate
+                                         | (GATE=0 coincidentally left %d0=0, same as if
+                                         | untouched) but showed real, sustained divergence in
+                                         | T1's OWN raw voice content -- not just an unrelated
+                                         | track's timing -- once broadened to also gate
+                                         | OT+FX: GATE=0 through the (correctly-branching)
+                                         | subq-based comparison left %d0=-1 (0xFFFFFFFF)
+                                         | instead of 0. Root cause not fully chased down
+                                         | (whether the handler reads %d0 as an implicit
+                                         | input, or something else) -- removed the risk
+                                         | instead of continuing to hunt for it: %d0 now
+                                         | provably never differs from stock on any path that
+                                         | reaches the handler.
+    move.l  %d3,-(%sp)                  | displaced 2 (arg 1 == track)
+
+    .ifndef ALWAYS_ON
+    move.l  GATE,%d1                    | GATE only ever holds 0 (OT/stock), 1 (OT+FX) or,
+    tst.l   %d1                         | with DT_MODE, 2 (DT) -- "nonzero" is exactly
+    beq     dt_pass                     | "any active mute mode" either way, so this needs
+                                         | no DT_MODE-specific branch at all and costs the
+                                         | SAME 3 instructions as the original DT-only
+                                         | `move.l GATE,%d0 / cmpi.l #2,%d0 / bne dt_pass`
+                                         | check did (one fewer than the subq-based compare
+                                         | tried first, which is what actually mattered here
+                                         | -- see below).
+    .endif
+
+    move.l  %d3,%d2
+    addi.l  #8,%d2
+    move.l  MUTE_STATE,%d1
+    btst    %d2,%d1                     | muted (bit 8+track) ?
+    bne     dt_silence
+    tst.b   SOLO_FLAG
+    beq     dt_pass                     | not solo, not muted -> let the trig through
+    move.l  %d1,%d2
+    andi.l  #0xff,%d2
+    beq     dt_pass                     | solo engaged, nothing soloed -> let it through
+    btst    %d3,%d1                     | this track soloed (bit track) ?
+    bne     dt_pass                     | soloed -> let it through
+| fallthrough: solo active + this track not soloed -> silence it
+dt_silence:
+    moveq   #0,%d0                      | what the handler would have returned, doing nothing
+    jmp     DT_BACK                     | DROP THE TRIG: the handler never runs
+
+dt_pass:
+    jsr     %a0@                        | displaced 3: the normal per-machine-type dispatch
+    jmp     DT_BACK
+
+| ============================ hook 10: 0x40006820 (THE FRESH-VOICE-BIND ENTRY) ==========
+| Session 58 continued -- hardware report: OT+FX blips once per trig position during the
+| FIRST sequencer cycle after muting, then stops; DT blips scale with how short AMP
+| RELEASE is (shorter = more blips), also only in the first cycle. Both point at the same
+| gap: `dt_trig` (hook 9) gates only ONE of the paths that can start a voice -- the
+| "already bound, reuse" dispatch inside FUN_4000f450. FUN_40006820 -- the "voice not yet
+| bound, do a FRESH bind and play it" function -- has SEVEN callers in the whole image:
+| one INSIDE FUN_4000f450 (0x4000f518, downstream of hook 9's own gate, already covered),
+| and SIX completely independent callers elsewhere (0x40043c50, 0x4007eb3e, 0x4008044e,
+| 0x4008055c, 0x40093ec0, 0x40096ad4) hook 9 never touches at all. Once a voice goes
+| "cold" (its arena slot recycled -- forced quickly by relcut's note-off in OT+FX, or
+| naturally by the AMP envelope's own release in DT), the NEXT trig on it needs exactly
+| this fresh-bind path, through one of those six other, unguarded callers -- a complete,
+| audible voice start, matching the reported symptom exactly: a blip per affected trig,
+| until the voice has been "warm" again for a while and every further retrig goes through
+| the already-gated reuse path instead.
+|
+| Rather than chase and gate six separate call sites (fragile -- a seventh could exist
+| uncaught), gate the ONE function they all converge on, at its own entry.
+|
+| FUN_40006820(track: %d1, via %sp@(12)) is its own well-documented 8-track fan-out
+| (Session 53): track 0..7 -> real per-track work at 0x40006844 (SR raise, arena-slot
+| active-byte clear, `jsr FUN_4000672c` -- THE actual "start the voice" call); track >= 8
+| -> recurse over 0..7 by CALLING ITSELF (`jsr %a2@`, %a2 = its own address). That
+| recursion means gating single-track calls here is enough by construction: a track>=8
+| ("do them all") call is never itself silenced, but each of the 8 recursive calls it
+| makes lands back at THIS SAME entry with one track number and gets individually gated.
+|
+| Detours the first 8 B / 3 instructions (`movel %a2,%sp@- / movel %d2,%sp@- / movel
+| %sp@(12),%d1`) -- an exact instruction boundary, room for a 6 B jmp with 2 B spare.
+| Replays all three unconditionally (%a2/%d2 pushed, %d1 = track, either way), then for a
+| genuinely single-track (%d1 < 8), muted/soloed-out call, skips straight to the shared
+| epilogue (0x40006888: pop %d2/%a2, rts) instead of falling into the real per-track work
+| -- the same "drop the trig" outcome hook 9 gives the reuse path, now for the fresh-bind
+| path too. A track>=8 call, or an unmuted/soloed-in single-track call, falls through to
+| `FB_BACK` (0x40006828, stock's own very next instruction, `moveq #7,%d0`) and lets
+| STOCK's OWN track<8 test (already right there) decide the rest -- no need to duplicate
+| it. The explicit `cmpi.l #8,%d1 / bcc FB_BACK` guard below matters for a different
+| reason: without it, a track>=8 call would still reach the MUTE_STATE/SOLO_FLAG test
+| with an out-of-range bit position (track+8 up to 16+), which would test a CUE bit
+| instead of a MUTE bit and could silence a "do all tracks" call by accident.
+|
+| %d0 is stock's own scratch here (freshly reloaded via `moveq #7,%d0` immediately after
+| our replayed %d1 load on every path that reaches it, before anything else reads it) --
+| free to clobber. %d3 is not read by the displaced code or by 0x40006844's own per-track
+| work (checked directly in the disassembly) -- also free, and only touched on the
+| track<8 path (the track>=8 early-out never reaches it).
+    .equ FB_BACK,     0x40006828      | right after the displaced track-number load
+    .equ FB_EPILOGUE, 0x40006888      | stock's own shared epilogue: pop %d2/%a2, rts
+    .global fresh_bind
+fresh_bind:
+    move.l  %a2,-(%sp)                  | displaced 1
+    move.l  %d2,-(%sp)                  | displaced 2
+    move.l  (12,%sp),%d1                | displaced 3 == track number
+
+    cmpi.l  #8,%d1
+    bcc     fb_pass                     | track >= 8 ("do them all") -> never silenced here;
+                                         | its own recursive per-track calls come back
+                                         | through THIS SAME entry and get gated then
+
+    .ifndef ALWAYS_ON
+    move.l  GATE,%d0
+    tst.l   %d0
+    beq     fb_pass                     | MUTE MODE == OT (0) -> stock, untouched
+    .endif
+
+    move.l  %d1,%d0
+    addi.l  #8,%d0
+    move.l  MUTE_STATE,%d3
+    btst    %d0,%d3                     | muted (bit 8+track) ?
+    bne     fb_silence
+    tst.b   SOLO_FLAG
+    beq     fb_pass                     | not solo, not muted -> normal dispatch
+    move.l  %d3,%d0
+    andi.l  #0xff,%d0
+    beq     fb_pass                     | solo engaged, nothing soloed -> normal dispatch
+    btst    %d1,%d3                     | this track soloed (bit track) ?
+    bne     fb_pass                     | soloed -> normal dispatch
+| fallthrough: solo active + this track not soloed -> silence it
+fb_silence:
+    jmp     FB_EPILOGUE                 | skip the fresh bind + FUN_4000672c entirely
+
+fb_pass:
+    jmp     FB_BACK                     | %d0 is reloaded fresh by stock's own very next
+                                         | instruction either way, so it does not matter
+                                         | here whether this hook has already clobbered it
+
+| ============================ hook 11: 0x4000d0ba (THE REL_STATE RACE, FIXED SAFELY) ====
+| Session 58 continued again -- user clarification: "first cycle" means the first full
+| pass through the pattern after muting; a second pass is clean; unmute-then-remute makes
+| it happen again. Direct measurement (multi-retrig BOTLI test) found `relcut` (hook 8)
+| misses 3 of 1999 eligible frames: the level-chain computation (0x4000cb4e/cc20/ced0)
+| writes a fresh, unmuted-value L/R gain EVERY frame unconditionally; `relcut`'s own zero-
+| override only runs when the release loop's REL_STATE bit test is true for a track. A
+| stock function (0x4000bf22, part of some larger per-voice-parameter routine, entered
+| only ~29 times per 4000 frames) transiently clears a muted track's REL_STATE bit as
+| ordinary "a note is starting" bookkeeping -- for exactly one frame, since `pre` (hook 1)
+| re-asserts it (`REL_STATE |= silenced`) on the very next pass.
+|
+| ⚠ FIRST ATTEMPT (detouring 0x4000bf22 itself, OR-ing the silenced set back in right
+| before its own store) was ABANDONED after real, alarming evidence: a controlled A/B
+| showed a SEVERE (~1900-2000 block), reproducible divergence in OTHER tracks' raw audio
+| content -- unlike every other hook in this file (all showing only a handful of blocks of
+| benign cross-track timing drift). Chased it with a no-op-only diagnostic detour at the
+| SAME site (pure jmp out and back, zero logic): that alone cost only ~74 blocks, proving
+| the SITE itself is not to blame. Adding back either a GATE check (`move.l GATE,%d1`) or
+| just a bare `SHADOW` read + OR, with NO gate check at all, BOTH still produced severe
+| divergence (the gate-free version was, if anything, WORSE, ruling out "reading GATE
+| specifically" as the cause too). Whatever this function actually is, it appears to sit
+| somewhere disproportionately timing-sensitive -- a handful of ColdFire cycles here moves
+| far more than they should anywhere else this project has hooked. Not safe to keep
+| pushing on blind; abandoned rather than guessed further.
+|
+| SAFER FIX: don't touch the writer at all. `0x4000d0ba` -- the release loop's OWN load of
+| REL_STATE, confirmed by direct measurement to run EXACTLY once per frame (2000 hits over
+| 2000 frames), not once per track (the 8-track test-and-skip that follows just shifts
+| this ONE loaded byte 8 times via the carry flag, re-reading memory only once) -- sits a
+| few instructions before `relcut`'s own detour, inside the SAME function `relcut` already
+| lives in safely. OR the silenced set in immediately after this single load, before the
+| 8-track shift-test loop even begins: whatever 0x4000bf22 (or anything else) did to
+| REL_STATE in memory, a muted track's bit can never actually read as 0 for this frame's
+| pass, closing the exact same race from the read side instead of the write side.
+|
+| Detours 6 B (0x4000d0ba..0x4000d0c0), an exact instruction boundary, room for a 6 B jmp
+| with zero spare. `%d0` holds the freshly-loaded REL_STATE byte and must reach the shift-
+| test loop with only bits ADDED, never removed. `%d3` is free here: relcut's own header
+| comment (hook 8) already established it is unused anywhere in this function's per-track
+| body, and nothing between this site and relcut's own reads or writes it either.
+    .equ RL_BACK,   0x4000d0c0        | right after the displaced load, where the 8-track
+                                       | shift-test loop begins
+    .global relstate_or
+relstate_or:
+    mvzb    0x8000184a,%d0            | displaced instruction, replayed
+    move.l  %d3,-(%sp)
+    moveq   #0,%d3
+    move.b  SHADOW,%d3                | this frame's silenced set, from `pre`
+    or.l    %d3,%d0                   | force those tracks' bits back to 1 -- ADD only,
+                                       | never remove a bit the loaded byte itself carried
+    move.l  (%sp)+,%d3
+    jmp     RL_BACK

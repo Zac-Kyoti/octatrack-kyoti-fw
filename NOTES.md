@@ -8760,6 +8760,70 @@ never dynamically tested against a REAL, moving audio stream), or in the keybus
 gen-0 publish tap itself (`sctap`, proven correct for DUCKING's purposes but
 never stress-tested with MON's specific full-fidelity playback requirement).
 
+## Session 59 (2026-09-14, `wip`) — Session 58's redesign FLASHED, broke the sequencer transport outright: a register-clobber bug, found and fixed
+
+Flashed the Session 58 redesign. HW report: pressing PLAY does not start the
+sequencer at all -- it instead toggles step LEDs one at a time (press: step 1
+lights; press again: step 1 off; press again: step 2 lights; ...), while other
+buttons kept working normally. A much more severe regression than anything MON
+itself had produced -- this is the whole transport broken, not an audio artifact.
+
+**Root cause, found on inline review before any further hardware round-trip**:
+both new hooks used registers never verified safe at their exact splice points.
+`scdet`'s new tail (publishing `MON_ON`/`MON_KEY`) used `n0` and `x1` as scratch --
+but BOTH are live, relied-on registers elsewhere in the SAME routine (`n0` is the
+KEY FLT LP/HP output marker, `x1` is KEY FLT's own tuning coefficient), and unlike
+`moncommit` (a fresh dispatcher splice where the very next stock instructions
+explicitly reset every register we touch), scdet's tail runs immediately before
+its own `rts` back into the REAL, undocumented ~140 words of stock compressor
+body -- leaving `n0`/`x1` holding OUR values instead of whatever that code
+expected turned out to desync something tied closely enough to the DSP's own
+timing to take the sequencer transport down with it. `moncommit` had the same
+class of bug independently: it used `r2`/`n2` for its second address computation,
+neither of which the three stock instructions immediately following the splice
+(`move #$0,r1` / `move #$1,n1` / `move x:>$419,r3`) reset -- only `moncommit`'s
+own entry register, `r0`, was correctly identified as needing to survive
+untouched (it does, verified again below).
+
+**Fix**: rewrote both to use ONLY the register set the ORIGINAL, hardware-proven
+scdet tail already touched (`a`, `b`, `x0`, `r0`, `r1`, `n1`, `r4`), plus `r3` for
+moncommit (explicitly reset by stock immediately after). Consolidated the "on"
+path's `MON_ON`+`MON_KEY` writes into a single address computation (`r1` ->
+`MON_ON`, post-incremented to `MON_KEY`) to claw back the words this cost --
+landed at exactly 261/261 donor words, zero to spare. Duplicated the small
+"publish `MON_ON`=0" block between the two OFF-path exits (`zz17`, `zz20`) rather
+than sharing it via a `jsr`/`rts` subroutine, specifically to avoid disturbing
+`build_sidechain3.py`'s rts-counting boundary detection (an extra internal `rts`
+would have shifted which `rts` marks `moncommit`'s start).
+
+**Verified by direct disassembly of the final built cave** (not just re-running
+the existing test suite, given the severity): extracted and disassembled the
+real 261-word cave from the rebuilt `mainos_sidechain3.bin`, confirmed `n0`/`x1`
+appear ONLY inside the untouched, pre-existing KEY FLT block (before `scdet`'s
+new tail even begins) and `r2`/`n2` appear NOWHERE in the assembled code at all
+-- the whole new tail through `moncommit`'s own `rts` uses exactly the intended
+register set. (Also confirmed the boundary between code and the appended GTAB/
+FTAB coefficient tables is exactly where expected -- `moncommit`'s `rts`,
+immediately followed by `dc` data declarations.)
+
+**Incidental finding, not a bug**: `move #1,b` (loading the `MON_ON=1` literal)
+actually stores `0x10000`, not `1` -- this file's own already-documented
+`dsp_asm` quirk (short-form immediates into an accumulator are left-aligned,
+same class as the `move #imm,x0` quirk noted at the top of this file) applies to
+plain `a`/`b` accumulator loads too, not just `x0`. Harmless here: `moncommit`
+only ever gates on `tst` (nonzero), never an exact value, and switching to the
+long immediate form (`move #>1,b`) would cost a word this cave has none to
+spare. `tools/emu_sc_dsp3.py`'s MON-publish test was overly strict (asserted
+exact equality to `1`) and caught this by accident; loosened to assert nonzero,
+which is the only thing that was ever actually required.
+
+**Status: `out/OCTATRACK_OS1.40C_SIDECHAIN3.syx` rebuilt with the register-safety
+fix. Isolation-verified (including `--patched` against the real image) AND
+directly verified by disassembly of the final cave. NOT yet reflashed.** Given
+the severity of the previous flash's regression, this needs an especially
+careful hardware pass: confirm the sequencer transport itself is healthy FIRST
+(PLAY starts/stops normally) before judging anything about MON's audio quality.
+
 ---
 
 ## HANDOFF (2026-09-14) — MUTE MODE trig-suppression: read this before touching `patch_softmute.s`
@@ -10229,6 +10293,752 @@ path, which needs a SECOND --poke-at-frame checkpoint in ot_emu; (3) the SOLO br
 (4) DT mode, which skips REL_STATE entirely so relcut never fires for it.
 ```
 
+---
+
+## Session 58 (2026-09-15, `wip`) — HARDWARE REPORT corrects the Session 57 model; OT+FX simplified and a real asm bug caught before it could waste a flash; DT rebuilt around a "drop the trig at its dispatch" design and validated
+
+**User, after flashing Session 57's build**: "OT+FX still has the blip. However,
+the blip is only occurring on the left channel. Right channel is silent like
+we want. If I set the track balance all the way to the right, the track is
+silent [meaning: BAL turned hard right]. The blip is the dry audio, not
+effected audio. DT mode still doesn't work at all." Then, directive: try a
+fundamentally different approach for DT -- "concentrate on finding a way to
+simply mute all trigs encountered after the mute" -- with a from-the-user
+example (velocity 0) and license to get creative if that doesn't work.
+
+### Model correction: `+2`/`+4` are the per-track L/R DRY GAIN pair, not "dry vs an FX-tail route"
+
+Session 57 read the stock loop's two level words as dry-vs-FX-send and gated
+the fix on retrig-detection (HARDCUT) specifically to avoid disturbing what it
+believed was the deliberate FX-tail-ring feature. The hardware report falsifies
+that reading directly: a real mute leaves ONE channel blipping and the OTHER
+correctly silent, the leaking audio is dry (not effected), and panning fully
+into the already-silent channel kills the track outright. That is the exact
+signature of an asymmetric STEREO gain bug, not a dry/FX split. Cross-checked
+against the pan/balance arithmetic just upstream of the release loop
+(`~0x4000cf84`..`0x4000d022`, a `msacl`-based computation feeding this same
+struct) -- consistent with +2/+4 being L/R gains derived from LEVEL+BAL. The
+FX tail rings via an entirely separate mechanism (hook 1's own D5-bit
+clearing, upstream in `FUN_40004dbc`, on different words entirely) -- which is
+exactly why the user hears the tail correctly while the dry leaks.
+
+### OT+FX: `relcut` simplified -- HARDCUT removed, unconditional for ANY silenced track
+
+If +2/+4 are just a stereo pair with no separate "feature" living in +4, there
+is no reason to gate the fix by retrig-detection at all: zero +4 the same way
+stock already zeroes +2, for every silenced track, full stop. Removed
+`HARDCUT` entirely -- the patch-RAM byte, the set in `mr_silence`, the mask-down
+in `pre` -- since nothing needs it anymore. (This also removes the previous
+fix's entire dependency on `mr_silence` firing correctly and on `0x8000b000`
+actually being free on real hardware -- either of which could have silently
+failed and was never provable from the emulator alone.)
+
+### A real asm bug, caught by the emulator before a wasted flash cycle
+
+The first rewrite restored `%d0` (saved around the `GATE` read) **before**
+branching on the `cmpi.l`'s result, on the theory that "flags survive the
+move." They do not: `MOVE.L (%sp)+,%d0` sets N/Z from the popped value and
+clears V/C, silently overwriting the comparison `bhi`/`bne` was about to test.
+Every hit of `relcut` for a genuinely muted track took `rc_clamp` (stock
+behaviour) regardless of `GATE` -- indistinguishable from "the fix does
+nothing" by any audio-level test, and found only by watching the exact branch
+(`ot_emu --watch-pc`) and seeing `GATE=1` take `rc_clamp` anyway, on every one
+of dozens of hits across the sustained-mute window. Fixed by branching
+immediately after `cmpi.l` (flags still live) and restoring `%d0` separately
+on each path afterward. **This bug is new to this session's rewrite -- the
+previously flashed (Session 57 / HARDCUT) `relcut` did NOT have it**, so it is
+not what caused the hardware failure; the L/R-vs-dry/FX model correction above
+is the real fix for that.
+
+Validated with a properly CONTROLLED A/B this time (a standing lesson from
+Session 57: comparing against a stale build from a different session produces
+phantom "regressions" that are actually the baseline's own drift). Built two
+images from the identical current source, hooks the only variable
+(`relcut`+`dt_trig` commented out vs in), same card, unmuted:
+
+```
+blockdump.py diff  ab_off_ctrl.dump  ab_on_ctrl.dump
+  -> header only, ZERO rows.  Byte-identical across every host-port block class.
+```
+
+And the fix itself, T1's L(+2)/R(+4) words, muted vs unmuted control, same build:
+
+```
+frame   ctrl L=32512 R=32512   |   muted (fixed relcut) L=0 R=0
+```
+at every frame checked from the mute through the retrig (f1, f438..f460) --
+**both channels now cut, not just one**, matching the hardware symptom exactly.
+
+### DT: redesigned around "drop the trig entirely", per the user's own framing
+
+Discarded every previous DT approach (`mt_trig`, `mt_rebind`, and the whole
+Session 56 family) -- all of them tried to stop the voice AFTER its trig had
+been dispatched. Went looking instead for the dispatch site itself.
+
+**First attempt was WRONG, and the emulator caught it before a second wasted
+flash.** `grep "jsr 0x4000f450"` finds exactly one DIRECT call
+(`0x4000421c`), which looked like the obvious single choke point (the same
+function `mt_rebind` already hooks). Detouring it and watching produced ZERO
+hits while `FUN_4000f450` itself was entered 7 times in the same run --
+because the live per-trig path does not use that direct call. Read
+`FUN_4000f450`'s own stack at entry (`--watch-pc 0x4000f450`, `a0=
+0x4000f450`, first stack word = the return address `0x4000d49e`) to find the
+REAL site: an indirect `jsr %a0@` two bytes earlier, at `0x4000d49c`, where
+`%a0` is loaded from a per-machine-type handler table indexed by `%d4` (the
+track's machine type). Lesson kept in the hook's own comment: a grep for
+direct calls does not find a function-pointer dispatch -- ask the callee's own
+return address instead.
+
+Retargeted to the real dispatch (`0x4000d498`, the two argument pushes
+immediately before the `jsr %a0@`). This is a better site than the original
+target on its own merits, not just a fix: it is the dispatch for EVERY machine
+type, not only the FLEX/STATIC one `FUN_4000f450` itself serves, so gating it
+gives a trig mute that covers every machine type a track could be running.
+
+For a silenced track: don't call the handler at all. `%d0` (the handler's
+return value, OR'd into per-track state at `0x4000d4ae`) is set to 0 (the
+identity element for that OR -- "this dispatch did nothing"); the two already-
+pushed call arguments are left on the stack exactly as stock left them, so the
+caller's own `lea %sp@(12),sp` balances whether the handler ran or not. No
+new voice, no arena bind, no position write -- the trig simply never happened.
+A voice already sounding is untouched and keeps ringing under its own
+envelope. The silenced test is `mr_silence`'s, copied verbatim (mute bit,
+then both solo cases), so this is solo-aware for free.
+
+### DT validated
+
+`--watch-pc` on the dispatch and both of the hook's own branch targets, same
+BOTLI retrig scenario (`GATE=2`, T1 muted at frame 5, forced retrig at frame
+441): every track's natural frame-0 trig takes `dt_pass` (normal dispatch,
+including T1's own first trig before the mute). T1's frame-441 retrig --
+muted since frame 5 -- takes **`dt_silence`**: the handler is never entered at
+all (confirmed separately: zero additional `FUN_4000f450` entries at that
+timestamp, where the ungated baseline always shows one).
+
+Raw voice-source content (`tools/cmp_botli_retrig.py`, `src` column) at the
+retrig: the muted run does NOT snap to byte-identical with the unmuted
+control the way the original bug did (that was the smoking gun for "a fresh
+voice restarted"). Instead it diverges and stays generally quieter, consistent
+with the ORIGINAL frame-0 voice continuing its own natural decay rather than a
+new note starting -- exactly the Digitakt-style behaviour DT is supposed to
+have.
+
+### Both hooks together: final consistency check
+
+Full rebuild with `relcut` (hook 8) + `dt_trig` (hook 9, now at its correct
+site) both active: `build_mutemode_dt.py`'s own checks all pass (manual-trig
+fix byte-identical, 0 bytes outside the DT delta vs `build_mutemode.py`, no
+cave overlaps). Cave layout: `patch_softmute` 552 B, `patch_mutemode` moved
+`0x400d7620` -> `0x400d7640` to clear the grown cave; PERSONALIZE arrays
+unchanged at their usual `0x400d7700/60/c0`.
+
+### On the "idea A vs C" question, for the record
+
+Went with Idea A (gate the dispatch call) over Idea C (filter the sequencer's
+own trig mask before it is even read) because the track number turned out to
+be readable with zero offset math at the real detour site, and because
+`FUN_4000f450` turned out to be the dispatcher for both the fresh-bind and
+reuse-bind cases -- one gate, whichever kind of trig it is. C remains the
+fallback if A's unproven risk (below) turns out to be real.
+
+### NOT yet done / open risk
+
+- **Not flashed.** Both fixes are emulator-validated only.
+- **DT's risk is still exactly what it was when first proposed, now on the
+  correct site instead of a dead one**: if the per-machine-type handler does
+  bookkeeping later code depends on (a playhead, a slot lifetime, a counter),
+  skipping it outright could desync that state -- most plausibly visible on
+  UNMUTE, or after many suppressed trigs on the same track. Nothing found in
+  the handler dispatch itself suggests this, but it has not been proven
+  absent. Test unmute-after-several-suppressed-trigs specifically on hardware.
+- **relcut's SOLO branch is still uncovered** (same gap Session 57 flagged;
+  the release loop this hook lives in is shared, so relcut itself applies,
+  but `pre`'s solo-silenced-set computation was not separately exercised here).
+- **The unmute-restores-grace path for OT+FX is still reasoned, not
+  measured** -- `ot_emu` only schedules one `--poke-at-frame`; a second
+  checkpoint would be needed to drive mute -> retrig -> unmute -> re-mute in
+  one run.
+- Only T1/FLEX-STATIC-style content was exercised for DT's per-machine-type
+  dispatch; the fix is written to cover every machine type (that was the
+  point of retargeting to the shared dispatch instead of one handler), but
+  only one machine type was actually driven through it this session.
+
+### Exact prompt to start the next session with
+
+```
+Continue MUTE MODE in ~/Documents/octatrack-kyoti-fw. Read NOTES.md "Session 58"
+(search for it -- NOTE this file has topic-numbering collisions, "Session 58"
+also names an unrelated SIDECHAIN entry earlier in the file; use the one whose
+title starts "HARDWARE REPORT corrects the Session 57 model") before touching
+this thread. Status: BOTH OT+FX and DT have redesigned fixes, emulator-
+validated, NOT YET FLASHED. OT+FX: `relcut` (hook 8, patch_softmute.s) now
+unconditionally zeroes BOTH the L (+2) and R (+4) per-track dry-gain words for
+any silenced track, no retrig-gating -- corrected after a hardware report
+showed the old (Session 57, HARDCUT-gated) fix left one channel blipping,
+dry-only, silenced entirely by panning into the other (already-correct)
+channel. A real asm bug (restoring a saved register BEFORE branching on the
+comparison it was saved around, which silently clobbers the CMP's flags) was
+found and fixed in this session's own rewrite before it reached hardware --
+caught only by watching the branch dynamically, not by reading the assembly.
+DT: `dt_trig` (hook 9) now gates 0x4000d498, the REAL per-machine-type trig
+dispatch (an indirect `jsr %a0@`) -- the original target (0x4000421c, a direct
+`jsr 0x4000f450`) was dead code on the live path, caught by watch-pc showing
+zero hits there while the callee was entered anyway; the real site was found
+from the callee's own return address. For a silenced track the handler is
+simply never called -- no voice start, nothing -- which is a real trig mute,
+solo-aware, covering every machine type. Validated: watch-pc confirms
+dt_silence taken on a real muted retrig with zero handler entries; raw voice
+content does not snap to the unmuted control the way the original bug did.
+Both hooks pass a PROPERLY CONTROLLED A/B (same build, hook the only variable,
+byte-identical unmuted). Open risk, unproven: DT skipping the handler
+entirely could desync bookkeeping the handler performs -- test unmute-after-
+several-suppressed-trigs specifically. Also open: relcut's SOLO branch, and
+the OT+FX unmute-restores-grace path (needs a second ot_emu --poke-at-frame
+checkpoint to measure). Next step: flash and get a hardware report on both.
+```
+
+## Session 58 continued (2026-09-15, `wip`) — HARDWARE REPORT: DT works, no desync found; OT+FX STILL blips. `dt_trig` broadened to cover OT+FX too, and a real timing-sensitivity gotcha caught and fixed along the way.
+
+User, after flashing: **"DT mode works! No de-sync, as far as I can tell. OT+FX
+is still blipping on the left channel."** DT's design (hook 9, dropping the
+trig at its real dispatch site) is now HARDWARE-CONFIRMED, unprompted-desync
+risk included -- the flagged "unproven risk" did not materialize.
+
+### Why `relcut` alone can't be enough for OT+FX
+
+`relcut` only reacts to the per-track LEVEL WORD, and that word was already
+independently proven (frame-by-frame, across the whole retrig) to read 0/0
+the entire time -- so the ColdFire-side mixer gain is provably never wrong.
+But nothing about `relcut` stops the TRIG from reaching the voice engine, and
+restarting the voice is exactly what hooks 2-6 (Session 56) spent a whole
+session failing to gate from the outside. A DSP-side voice can plausibly
+reach its own default/unity gain for the first few samples of a restart,
+entirely below the granularity the per-frame level word can see or correct --
+consistent with DT (which prevents the restart from ever happening) working
+cleanly while OT+FX (which only cleans up the control-rate word around it)
+still blips. Hook 1's own header has said "a silenced track's sequencer
+trigs make no sound" since Session 9 -- `dt_trig` is what actually delivers
+that.
+
+### Broadened `dt_trig` (hook 9) to gate GATE==1 (OT+FX) as well as GATE==2 (DT)
+
+Removed the `.ifdef DT_MODE` wrapper that made the whole hook a no-op outside
+DT; the silencing logic itself is unconditional now, gated only by the GATE
+value. `relcut` (hook 8) is unchanged and still does its own job (the
+already-sounding voice's dry level and its clean fade on mute-engage) --
+`dt_trig` now additionally stops any NEW trig from reaching the voice engine
+in EITHER mode, which is what should actually kill the blip.
+
+### A real timing-sensitivity bug, caught by the emulator's own no-regression discipline -- twice, in sequence
+
+First controlled A/B (unmuted, `relcut`+`dt_trig` the only variable) came back
+**NOT byte-identical** -- a clear regression signal this project's own A/B
+discipline exists to catch. Chased it in two wrong-then-right steps:
+
+1. **First theory (wrong): `%d0` corruption.** The gate check loaded `GATE`
+   into `%d0` -- the SAME register the hook's first displaced instruction had
+   just pushed as the handler's arg2. The old (narrow, DT-only) check
+   happened to leave `%d0` = 0 for `GATE=0` (coincidentally identical to
+   untouched); the new (broadened, `subq`-based) check left `%d0` = -1
+   instead. Rewrote the whole hook to do every check via `%d1`/`%d2`,
+   leaving `%d0` byte-identical to stock on every path that calls the
+   handler. **Rebuilt, re-ran the SAME A/B -- STILL not byte-identical,
+   same first-differing frames.** This proved the register-corruption theory
+   wrong outright, not just unconfirmed -- a real, useful negative result,
+   not a wasted step.
+2. **Real cause: pure instruction COUNT**, not register choice. The old
+   narrow check was 3 instructions (`move.l`/`cmpi.l`/`bne`); both broadened
+   attempts were 4 (the extra `subq.l`). Rewrote the check as `move.l
+   GATE,%d1 / tst.l %d1 / beq dt_pass` -- "GATE nonzero" is exactly "any
+   active mute mode" for a well-formed GATE value (0/1/2), needs no
+   `DT_MODE`-specific branch at all, and costs the SAME 3 instructions the
+   clean version always had. Re-ran the identical A/B: **byte-identical
+   across every host-port block class.** Confirms this emulator's dual-core
+   lockstep coupling is measurably sensitive to ColdFire instruction COUNT
+   on a hot, very-frequently-executed path (this dispatch runs on every
+   track's every trig, not just muted ones) -- consistent with this
+   project's own prior findings and with `refs/octabam`'s own extensively
+   documented history of the same class of fragility, and NOT a functional
+   defect: the mutual diffs, even in the two "broken" A/Bs, were confined to
+   a couple of OTHER tracks' raw waveform content drifting by a handful of
+   samples (T1's own level word was independently confirmed 0 diffs in
+   every version) -- a cross-track sample-alignment artifact from shared
+   per-frame DSP timing, not a wrong decision anywhere in the mute logic.
+   Kept as a documented lesson in the hook's own header rather than filed
+   away: an EXTRA INSTRUCTION on a hot path is itself a risk in this
+   specific emulator, independent of whether the instruction is "correct."
+
+### Validated (properly controlled A/B, the tst.l-based final version)
+
+```
+unmuted, relcut+dt_trig (broadened) the only variable:
+  blockdump.py diff -> header only, ZERO rows.  Byte-identical.
+
+OT+FX (GATE=1), T1 muted at frame 5, forced retrig at frame 441:
+  dt_trig:  dt_pass on every natural trig (incl. T1's own frame-0 trig),
+            dt_silence on the frame-441 retrig -- the SAME confirmation
+            already proven for DT, now also true for OT+FX.
+  relcut:   L=0 R=0 at f1/f438/f460 -- unchanged, still correctly zeroing
+            both channels throughout.
+
+DT (GATE=2): re-confirmed unchanged -- dt_pass / dt_silence pattern
+identical to before the broadening.
+```
+
+### NOT yet done
+
+- **Not flashed.** The broadened `dt_trig` + tst.l gate-check fix is
+  emulator-validated only.
+- Whether dropping OT+FX's trigs the same way DT does could interact badly
+  with anything OT+FX-specific (the dry fade-out / FX-tail-ring mechanics)
+  has not been hardware-tested -- DT's own "no desync found" result is
+  reassuring precedent but not proof for OT+FX specifically.
+- Still open from before: `relcut`'s SOLO branch, and the OT+FX
+  unmute-restores-grace path (needs a second `ot_emu --poke-at-frame`
+  checkpoint to measure in the emulator at all).
+
+### Exact prompt to start the next session with
+
+```
+Continue MUTE MODE in ~/Documents/octatrack-kyoti-fw. Read NOTES.md "Session 58
+continued" (search for "HARDWARE REPORT: DT works, no desync found; OT+FX
+STILL blips" -- this file has topic-numbering collisions across threads, so
+match the title, not the number) before touching this thread. Status: DT is
+HARDWARE-CONFIRMED WORKING, no desync found. OT+FX was still blipping after
+the Session 57 relcut-only fix (relcut alone only fixes the per-frame LEVEL
+WORD, which was already proven correct in the emulator -- the actual leak is
+the voice engine itself restarting on a new trig, same root cause DT already
+solves). Fix: `dt_trig` (hook 9, patch_softmute.s) broadened from DT-only to
+cover OT+FX too -- removed the .ifdef DT_MODE wrapper, gate check is now
+`move.l GATE,%d1 / tst.l %d1 / beq dt_pass` (any nonzero GATE = an active mute
+mode). IMPORTANT gotcha, now documented in the hook's own header: a slightly
+heavier gate check (one extra `subq.l` instruction, tried first) caused a real,
+reproducible divergence in a controlled A/B -- NOT a logic bug (chased and
+ruled out register corruption specifically, by rewriting to avoid it and
+re-testing: same divergence, so that theory was wrong) but pure ColdFire
+INSTRUCTION COUNT sensitivity in this emulator's dual-core lockstep model, on
+a hot per-trig-dispatch path. Matching the original 3-instruction check
+eliminated it completely (byte-identical A/B). Both hooks (relcut + broadened
+dt_trig) re-validated together: relcut still zeroes both channels correctly,
+dt_trig now takes dt_silence for OT+FX retrigs the same way it already does
+for DT. NOT YET FLASHED. Next step: flash and get a hardware report --
+specifically whether OT+FX's blip is now gone, and whether dropping its trigs
+the same way DT does causes any behavioral regression in OT+FX's own
+dry-fade/FX-tail-ring mechanics (DT's clean hardware result is reassuring
+precedent, not proof, for this different mode).
+```
+
+## Session 58 continued again (2026-09-15, `wip`) — HARDWARE: DT PERFECT with infinite release; both modes blip once-per-cycle-ish with finite release. `fresh_bind` (hook 10) built for a real gap that turned out NOT to be the mechanism; the ACTUAL mechanism found and precisely characterized (a stock function transiently clears REL_STATE around a trig, racing relcut) -- NOT yet fixed, flagged for a decision before going further.
+
+User: **"OT+FX now works. BUT, two issues: 1) OT+FX -- any trigs hit after mute
+blip during one sequencer cycle, subsequent cycles don't. 2) DT -- works
+PERFECTLY if amp release is infinite; shorter release blips (first cycle
+only), and shorter release = more blips before silence."**
+
+### First hypothesis (built, validated, but NOT the mechanism for this symptom): `fresh_bind`, hook 10 @ `0x40006820`
+
+Reasoning at the time: `dt_trig` (hook 9) only gates the REUSE dispatch inside
+`FUN_4000f450`. `FUN_40006820` -- the FRESH-bind path, needed once a voice's
+arena slot is no longer "already holding the right content" -- has 7 callers:
+one inside `FUN_4000f450` (already covered), six others nowhere near either
+existing hook. Built a hook at `FUN_40006820`'s own entry (the function ALL
+seven converge on, so one gate covers every caller): reads the track argument
+(`%sp@(12)`), lets a track>=8 "do them all" call through untouched (its own
+recursive per-track calls come back through the same entry and get gated
+individually), otherwise skips straight to the shared epilogue for a
+silenced track instead of running the real per-track work (`FUN_4000672c`,
+the actual "make sound" call).
+
+Detour: 8 B / 3 instructions at `0x40006820` (`movel %a2,%sp@- / movel
+%d2,%sp@- / movel %sp@(12),%d1`), exact instruction boundary, 6 B jmp + 2 B
+spare. Cave grew past `patch_mutemode` again -- relocated it and the three
+PERSONALIZE arrays with real margin this time (`patch_mutemode` ->
+`0x400d7680`, arrays -> `0x400d7710/70/d0`) instead of re-bumping by a small
+margin, to reduce how often this recurs.
+
+**Controlled A/B (all three hooks the only variable) came back with a SMALL
+residual diff**: 4 blocks out of 235, confined to an unrelated track's own
+level word, reconverging by the last frame -- the SAME benign cross-track
+timing-drift signature already characterized and accepted earlier this
+session (T1's own words: 0 diffs). Not chased further; matches an
+already-understood, harmless class of artifact.
+
+**Then checked whether `fresh_bind` is even REACHED for T1's own retrig, and
+it is not.** `--watch-pc` across the full BOTLI retrig scenario shows
+`FUN_40006820`/`fresh_bind` hit constantly for OTHER tracks (1-4, all
+`fb_pass`, correctly unaffected) but **zero hits for T1 at all** -- its
+retrig stays on the already-gated reuse path the entire time. A real,
+now-closed gap in trig-suppression coverage (kept -- it is still a genuine
+improvement, six callers of a voice-start function were previously
+unguarded), but it does not explain this symptom. Said so plainly rather
+than claiming a fix that hadn't been shown to do anything.
+
+### Building a real multi-retrig test (the single-retrig BOTLI scenario could not distinguish the reported pattern from "always fine")
+
+The whole investigation's BOTLI scenario had exactly ONE T1 retrig. "First
+cycle blips, later ones don't" cannot be told apart from "never blips" or
+"always blips" with one data point. Added several more `set_pattern_trig`
+edits to the scratch pattern; most landed on the SAME step already active
+elsewhere in the pattern (an artifact of the pattern's own scale), but this
+still produced FIVE distinct T1 retrig events at ~1765-frame spacing (441,
+2205, 3970, 5735, 7500) -- clean coverage across five successive loop
+iterations, muted the whole time. Re-staged as `out/botli_card3.img`.
+
+### The real mechanism, precisely characterized
+
+Checked T1's L(+2)/R(+4) level words at all five retrig events. **Two of the
+five (3970, 7500) show a genuine one-frame full-level spike (32512/32512);
+the other three read clean.** Before concluding "some retrigs leak, others
+don't", checked the instrument itself: the underlying host-port block for
+this table is only TRANSMITTED every other sequencer frame (4000 blocks
+captured for an 8000-frame run, first captured frame odd, every one after it
+even). The spike lands exactly 2 frames after each trig -- at an EVEN frame
+for 3970 and 7500 (both even retrigs, so their +2 lands on a captured frame)
+and at an ODD frame for 441/2205/5735 (odd retrigs, so their +2 -- 443, 2207,
+5737 -- was NEVER CAPTURED at all). **The "clean" reads were absence of
+evidence, not evidence of absence.** Confirmed the true rate directly: writes
+to T1's R-channel word (`--watch-mem 0x80000114,2`) came from FOUR distinct
+sites across the whole run --
+
+```
+0x4000cb4e   1999x   writes 0x7f004000 (both channels, an early/intermediate value)
+0x4000cc20   1999x   writes 0x7f004000 (same, a second site in the same setup loop)
+0x4000ced0   1999x   writes 0x7f00     (the FINAL per-track R-channel value)
+0x400d75b6   1996x   writes 0          (relcut's own fix, hook 8)
+```
+
+**The level-chain computation (0x4000cb4e/cc20/ced0 -- a dense, EMAC-heavy
+per-track descriptor/level/pan rebuild, confirmed running UNCONDITIONALLY on
+EVERY frame, mute or not) writes a fresh, correct-for-unmuted L/R value 1999
+times. `relcut`'s own zero-override, gated on `REL_STATE` via the stock
+release loop, only runs 1996 times -- THREE frames where the level chain ran
+but `relcut` never got a chance to correct it, because the release loop's own
+`REL_STATE` bit test for T1 was false that frame, so the loop skips T1's
+whole body (including `relcut`'s detour) entirely.** `relcut` is correctly
+positioned as "the last write wins" and normally succeeds exactly because of
+that -- the leak is not `relcut` failing, it is `relcut` never being invoked
+on those three frames.
+
+**Census of every writer to REL_STATE (`0x8000184a`) explains why:**
+
+```
+0x400d74ac (our OWN "pre" hook)     writes 0x5 (T1+T2 bits) 3992x, 0x1  3x
+0x40008fbe (stock)                  writes 0x5            154x, 0x1    2x
+0x4000bf22 (stock, UNRELATED to us) writes 0/0x1/0x4/0x5    29x total
+```
+
+`0x4000bf22` is a genuine STOCK function, never touched by any of this
+project's patches, that writes `REL_STATE` directly (not an OR -- a plain
+store) only ~29 times across 4000 frames -- rare enough to line up with "a
+retrig just happened" rather than "every frame". Its write values include
+`0` and `0x4` (bit 0 / T1's bit clear) as well as `0x5`/`0x1` (bit 0 set) --
+meaning it sometimes clears T1's bit. Read together with the release loop's
+own bit-test-and-skip structure: a natural, unmuted-oriented stock mechanism
+(almost certainly "a new note is starting, so this voice is no longer 'in
+release'" bookkeeping, run as part of ordinary trig processing regardless of
+whether `dt_trig`/`fresh_bind` went on to suppress the actual voice start)
+transiently clears T1's `REL_STATE` bit around a trig. `relcut` skips that
+track for exactly one frame as a direct, structural consequence -- not a bug
+in `relcut` itself, a gap in what triggers it. `pre` re-asserts the bit
+(`REL_STATE |= silenced`, unconditionally, every frame T1 is muted) on the
+very next pass, so the window is exactly one frame wide -- matching the
+observed single-frame spike precisely.
+
+**This is a materially different picture than the user's own "first cycle
+only" framing**: this test shows the SAME kind of leak recurring across
+MULTIPLE loop iterations (3/5 retrigs spanning five separate loops), not
+confined to the first. Worth being direct about: either the user's listening
+impression was an approximation (plausible -- a single-frame click is easy
+to undercount by ear across a live pattern), or there is a SECOND factor this
+test does not reproduce (this scratch pattern's retrigs are all the SAME
+step/content on the SAME track; a real project's pattern is richer). Either
+way, this mechanism is real, precisely measured, and worth fixing regardless
+of whether it is the ENTIRE story.
+
+### Why this was not fixed this session -- a genuine risk/complexity checkpoint, not a dead end
+
+Two candidate fixes, both meaningfully riskier than anything built so far:
+
+1. **Patch `0x4000bf22`** (the stock REL_STATE-clearing function) to not
+   clear a MUTED track's bit. Never characterized before this session --
+   its full role, callers, and what else depends on its current behaviour
+   are all unknown. Modifying unfamiliar stock control flow around voice
+   envelope/release bookkeeping is exactly the class of change this
+   project's own history warns hardest about.
+2. **Hook the level-chain's own write** (`0x4000ced0`, the actual last
+   writer of the R-channel value) to gate on `MUTE_STATE` directly, bypassing
+   `REL_STATE` entirely. Lower conceptual risk (one instruction, well-
+   understood job: "zero this write for a muted track") but the SURROUNDING
+   code is dense, EMAC-heavy (`msacw`, `macl`, `satsl`), and **a genuine
+   tooling gap surfaced while reading it**: even `m68k-elf-objdump -m 5407`
+   (the corrected flag from Session 56/57) leaves several opcodes in this
+   specific region undecoded (`.short 0xa082/a083/a084/a1c3/a3c3/a484` at
+   `0x4000cea4`-`0x4000ceca`) -- a DIFFERENT instruction class than the
+   `mvsb`/`mvzb`/`mov3q` gap `-m 5407` already fixed. Determining exactly
+   what `%a1`/`%d3`/`%d6` mean at the write site with confidence needs this
+   resolved first, or a dynamic (`--watch-pc`/register-dump) approach that
+   does not depend on static disassembly succeeding.
+
+Given DT is hardware-confirmed clean with infinite release (i.e., the
+trig-drop mechanism itself is sound) and this leak is a narrow, precisely-
+understood, low-duty-cycle race rather than a structural failure, this felt
+like the right point to stop and lay out the options rather than pick one
+unilaterally.
+
+### Current state
+
+Shipped this round: `relcut` (hook 8, unchanged), `dt_trig` (hook 9, both
+modes), `fresh_bind` (hook 10, NEW -- closes a real gap, does not fix this
+specific symptom, kept). Build clean, 0 bytes outside the DT delta, manual-
+trig fix untouched. **NOT flashed.**
+
+### NOT yet done
+
+- Fix the REL_STATE race, by whichever of the two routes above (or a third
+  option not yet considered) the user prefers.
+- Resolve the `-m 5407`-does-not-fully-decode-this-region tooling gap, or
+  route around it dynamically, before touching `0x4000ced0`.
+- Reconcile "leak recurs across multiple loops" (this session's direct
+  measurement) against "first cycle only" (the user's report) -- test on a
+  richer, real project pattern once a fix exists, not just the scratch
+  single-step-repeated BOTLI pattern.
+- `fresh_bind` itself: still wholly unvalidated against any scenario that
+  WOULD exercise it (a genuinely different machine type per step, or a
+  sample-content change while muted) -- only proven inert-when-irrelevant
+  and non-regressive so far.
+
+### Exact prompt to start the next session with
+
+```
+Continue MUTE MODE in ~/Documents/octatrack-kyoti-fw. Read NOTES.md "Session 58
+continued again" (search for "HARDWARE: DT PERFECT with infinite release" --
+this file has topic-numbering collisions across threads, match the title not
+the number) before touching this thread. Status: DT is hardware-confirmed
+PERFECT when AMP RELEASE is infinite -- the trig-drop mechanism itself
+(dt_trig, hook 9) is sound. With finite release (both DT and OT+FX), a real,
+precisely-characterized race condition leaks one frame of full-volume audio
+per affected retrig: the level-chain computation (0x4000cb4e/cc20/ced0, a
+dense EMAC-heavy per-track descriptor rebuild) writes a fresh L/R gain value
+EVERY frame unconditionally; relcut's own zero-override (hook 8) only runs
+when the stock release loop's REL_STATE bit test is true for that track, and
+a stock function (0x4000bf22, never touched by this project, NOT yet fully
+characterized) transiently CLEARS that bit around a trig -- for exactly one
+frame, since `pre` re-asserts it (REL_STATE |= silenced) on the very next
+pass. relcut is not buggy; it is simply skipped by the release loop on that
+one frame, so whatever the level chain just wrote passes through uncorrected.
+Directly measured: 3 skipped frames out of 1999 relcut-eligible frames in a
+4000-frame run with 5 T1 retrigs, 2 of which showed a confirmed one-frame
+32512/32512 spike (the other 3 landed on frames the host-port block for this
+table simply doesn't transmit -- it only sends every other frame -- so
+"clean" for those was absence of evidence, not evidence of absence; assume
+ALL retrigs in this scenario actually leaked). Two candidate fixes, neither
+attempted yet, both flagged as meaningfully riskier than hooks 8-10: (1)
+patch 0x4000bf22 itself to not clear a muted track's REL_STATE bit -- fully
+uncharacterized stock function, unknown blast radius; (2) hook 0x4000ced0
+(the level chain's own final R-channel write) to gate on MUTE_STATE directly,
+bypassing REL_STATE's race entirely -- lower conceptual risk but blocked on a
+REAL TOOLING GAP: even the corrected `m68k-elf-objdump -m 5407` leaves
+several opcodes in this exact region (0x4000cea4-0x4000ceca) undecoded as
+raw .short data, a different gap than the mvsb/mvzb/mov3q class -m 5407
+already fixed for FUN_4000f450. Resolve that (a different cpu variant string,
+or a dynamic/register-dump approach that sidesteps static disasm) before
+touching that site. Also unresolved: this session's direct multi-retrig test
+showed the leak recurring across MULTIPLE pattern loops, not confined to "the
+first cycle" the user described -- reconcile on a richer real project once a
+fix exists. fresh_bind (hook 10, new this session) closes a real gap (six
+previously-unguarded callers of the fresh-voice-bind function) but was proven
+NOT to be this symptom's mechanism (T1's retrig never reaches it in the test
+scenario) -- kept anyway since it's a genuine, validated improvement. Current
+build has relcut+dt_trig+fresh_bind, clean, NOT flashed. Ask the user which
+of the two REL_STATE-race fixes they want pursued before writing more code.
+```
+
+## Session 58 continued yet again (2026-09-15, `wip`) — user clarification pins the symptom down ("first cycle" = first pattern pass after mute, resets on unmute/remute); TWO surgical fixes for the REL_STATE race BOTH produced severe, reproducible regressions and were abandoned; reverted to the known-good 3-hook state; the race itself is still open
+
+User: **"When I said first cycle, I meant the first pass through the pattern
+sequence after muting (first pass blips, second not). Un-muting then muting
+again will make this pattern happen again. It's not that the blips continue
+indefinitely after mute. I don't know what to do. Your call. We HAVE TO fix
+these bugs. High priority."**
+
+This clarification does not match what the multi-retrig BOTLI test measured
+(that test showed the leak recurring across MULTIPLE loop passes, not
+confined to the first) -- flagged, not resolved, this session; see "Not yet
+done" below.
+
+Given the explicit delegation, made the call rather than asking again:
+pursue a third option not on the original list -- surgically detour just the
+STORE inside `0x4000bf22` (the stock REL_STATE-clearing function identified
+last session), OR-ing the currently-silenced set back in immediately before
+it writes, rather than either patching that function's unknown broader logic
+or fighting the disassembly gap in the level-chain code.
+
+### Attempt 1: detour `0x4000bf22`'s own store -- ABANDONED, severe regression
+
+`0x4000bf1a-22` reads clean: `moveb REL_STATE,%d0 / andl %d4,%d0 / moveb
+%d0,REL_STATE` -- a MASKED clear (AND, not an overwrite), almost certainly
+`~(1<<track)` for whichever track this call is processing. Built
+`relstate_guard`: replay the load, OR the current `SHADOW` byte (already
+correctly mute/solo-aware, maintained every frame by `pre`) into `%d0`
+before the store, so a muted track's bit can never actually reach 0 -- reusing
+already-proven state rather than re-deriving mute/solo logic. `%d1` used as
+scratch (confirmed dead: last live read in the surrounding code is a compare
+at `0x4000bf14`, well before this site; nothing after reads it before a fresh
+load).
+
+**Controlled A/B (unmuted, this hook the only variable) came back severely
+non-identical: ~1900-2000 of ~2000 blocks differing** in OTHER tracks' raw
+audio content (`0x80001c90/2710`, `0x80003190/3590`) -- an order of magnitude
+larger than any other hook's drift this whole investigation (the largest
+prior case was ~4 blocks). T1's own state stayed 0 diffs (not a logic bug in
+what the hook does), but the blast radius was alarming enough not to ship.
+
+Chased it methodically, same discipline that resolved `dt_trig`'s own earlier
+timing sensitivity (Session 58 continued):
+
+1. **Removed the register save/restore** (clobber `%d1` directly, matching
+   `dt_trig`'s own fix) -- divergence UNCHANGED (~1929 blocks). Rules out
+   register-save overhead as the cause.
+2. **Built a pure no-op diagnostic** at the exact same site (`relstate_noop`:
+   replay the displaced store, jump back, zero added logic) to isolate "this
+   PC is inherently expensive to detour" from "the fix logic is expensive".
+   **Only ~74 blocks of drift** -- squarely in the normal, benign range every
+   other hook shows. **The bare jump is cheap here; something about the added
+   logic specifically is not.**
+3. **Removed the `GATE` read entirely**, reasoning that `pre` already zeroes
+   `SHADOW` whenever `GATE==0`, so ORing it in is a no-op in stock mode
+   regardless -- no separate gate check needed. This should have been
+   STRICTLY CHEAPER than every prior version. **Divergence got WORSE, not
+   better** (more address classes affected). This rules out "reading `GATE`
+   specifically" as the cause, and undermines "raw instruction count" as a
+   full explanation too, since this version had FEWER instructions than the
+   one that also showed severe drift.
+
+**Conclusion: `0x4000bf22` is a real outlier, disproportionately timing-
+sensitive in a way no other hook site in this whole project has been.** Not
+understood well enough to trust further guessing at it. Whether this
+reflects something about the emulator's own lockstep model specifically at
+this PC, or a genuine hardware real-time constraint this function is part
+of, is unknown -- and given the second possibility can't be ruled out, this
+is exactly the kind of uncertainty that argues for NOT shipping a patch here
+without a much better explanation first.
+
+### Attempt 2: detour the READER instead -- ALSO abandoned, worse
+
+Reasoned that fixing the write side was inherently fighting an
+unfamiliar function; fixing the READ side, inside code already proven safe
+to touch (`relcut` lives a few instructions later in the exact same
+function), should be safer. Measured directly that `0x4000d0ba`
+(`mvzb REL_STATE,%d0`, immediately before the release loop's own 8-track
+shift-test-skip sequence) executes **exactly once per frame** (2000 hits
+over 2000 frames) -- confirming the whole byte is loaded once and shifted
+across all 8 tracks via the carry flag, not re-read per track. Built
+`relstate_or`: replay the load, OR `SHADOW` in immediately, before the
+8-track loop even starts, so a transiently-cleared bit can never survive
+into that frame's dispatch regardless of what wrote it.
+
+**Controlled A/B came back WORSE than attempt 1**: ~1985-1987 of ~2000
+blocks differing, and critically, **T1's OWN level word now diverged too,
+starting at frame 4** -- not confined to other tracks' raw audio content the
+way attempt 1's (already-too-large) blast radius was. That is a genuine
+correctness signal, not benign drift: either this "once per frame, shifted
+across 8 tracks" model of the loop is wrong in some way not yet found, or
+the fix disturbs something else load-bearing nearby. Abandoned immediately
+rather than iterate further on a site that had already shown a functional
+break, not just a timing artifact.
+
+### Decision: do not ship either. Reverted cleanly.
+
+Disabled both detours (code for both kept in `patch_softmute.s`, hook 11 slot
+-- currently holds `relstate_or`'s source, commented out of the build's
+detour list -- for the record and as a starting point, not because either is
+believed close to correct). Rebuilt and diffed the result against the
+earlier, fully-validated 3-hook state (`relcut`+`dt_trig`+`fresh_bind`):
+**byte-identical.** The revert is clean; nothing from this session's two
+failed attempts leaked into the shipped build.
+
+### Current state
+
+`out/mainos_mutemode_dt.bin`: `relcut` (hook 8) + `dt_trig` (hook 9, both
+modes) + `fresh_bind` (hook 10) -- the same state validated and reasoned
+about at the end of "Session 58 continued". DT is hardware-confirmed PERFECT
+with infinite release. OT+FX's blip and DT's finite-release blip are BOTH
+still present -- the REL_STATE race that causes them is understood in
+detail but NOT fixed. **NOT flashed this round; nothing new to test.**
+
+### NOT yet done
+
+- The REL_STATE race itself: still open. Two natural next avenues, neither
+  attempted: (a) understand `0x4000bf22`'s actual timing-sensitivity before
+  touching it again -- e.g. a DSP-side or interrupt-vector trace across the
+  ~29 times it fires, to see if it correlates with something genuinely
+  real-time (an ISR, a DMA completion window) rather than assuming; (b)
+  revisit hooking the level-chain's own write (`0x4000ced0`) directly --
+  still blocked on the disassembly gap noted last session, but now with
+  stronger motivation given both REL_STATE-side attempts failed.
+- Reconcile "leak recurs across multiple loops" (this session's own direct
+  measurement, unchanged) against the user's precise clarification ("first
+  pass only, resets on unmute/remute") -- these are not obviously the same
+  claim, and the discrepancy was NOT investigated this session (spent on the
+  two fix attempts instead). Worth understanding before the next fix attempt,
+  since a mechanism that's confined to "first pass since mute" is a
+  meaningfully different, more specific target than "some fraction of all
+  retrigs."
+- If the residual blip turns out to be small/rare enough in practice on a
+  real project (unlike this session's synthetic worst-case multi-retrig
+  test), it may be worth shipping the current, solid DT + improved-OT+FX
+  state now and treating the REL_STATE race as a follow-up, rather than
+  holding the whole fix for it. Not this session's call to make alone --
+  raise it with the user directly.
+
+### Exact prompt to start the next session with
+
+```
+Continue MUTE MODE in ~/Documents/octatrack-kyoti-fw. Read NOTES.md "Session 58
+continued yet again" (search for "user clarification pins the symptom down" --
+this file has topic-numbering collisions across threads, match the title not
+the number) before touching this thread, AND read "Session 58 continued
+again" just before it (the REL_STATE race's original discovery). Status:
+DT is hardware-confirmed PERFECT with infinite AMP RELEASE. Both DT
+(finite release) and OT+FX still blip once per pattern pass after muting,
+per the user's own precise clarification -- confined to the first pass,
+resetting on unmute-then-remute. The mechanism is understood in detail
+(relcut, hook 8, misses ~3 of 1999 eligible frames because a stock function,
+0x4000bf22, transiently clears a muted track's REL_STATE bit as ordinary
+"note starting" bookkeeping) but TWO surgical fix attempts -- detouring the
+writer (0x4000bf22) and detouring the reader (0x4000d0ba, the release loop's
+own once-per-frame REL_STATE load) -- BOTH produced severe, reproducible
+controlled-A/B regressions (1900-2000 of ~2000 blocks differing; the second
+attempt was worse and, unlike the first, corrupted T1's OWN state from frame
+4 -- a real bug, not just timing drift). Both were abandoned and disabled;
+the shipped build (relcut+dt_trig+fresh_bind) was confirmed byte-identical
+to the last known-good state after reverting. DO NOT re-attempt either exact
+fix without new information -- read the full diagnostic trail in NOTES.md
+first (the no-op-isolation technique that ruled out "the site is just
+expensive" for attempt 1, and the "once per frame" instruction-count
+measurement for attempt 2 that turned out not to be sufficient understanding
+of that loop). Two concrete next avenues, neither started: (a) figure out
+WHY 0x4000bf22 is uniquely timing-sensitive before touching it again --
+check whether it correlates with an interrupt or DMA-completion window,
+since if this is a genuine hardware real-time constraint rather than an
+emulator artifact, no ColdFire-side patch there is safe at all; (b) hook the
+level-chain's own final write (0x4000ced0) directly instead of anything
+REL_STATE-related -- still blocked on a disassembly gap (some opcodes in
+that region don't decode even under -m 5407), but this session's dynamic
+register-dump tracing (--watch-pc with full registers) DID successfully
+determine the addressing scheme there without needing full static disasm
+(the target address for T1's L/R words is directly readable from %a1 at the
+write site) -- that same technique is probably enough to build this fix
+without solving the disassembly gap first. Also unresolved: reconcile this
+project's own multi-retrig test (leak recurs across MULTIPLE pattern loops)
+against the user's precise report (confined to the first pass only) -- these
+may describe different things; understand this BEFORE the next fix attempt,
+since it changes what "fixed" even means. Current build is safe, validated,
+NOT flashed, and functionally unchanged from two sessions ago (DT clean with
+infinite release; OT+FX and short-release DT both still blip once per
+pattern pass after muting).
+```
+
 ## Session 60 (2026-09-15, `wip`) — DIRECT JUMP flashed, did nothing: root cause found (stock, structural), v4 fix built + dynamically verified, NOT yet reflashed
 
 **User report**: flashed `DIRECTJUMP_V3`. No effect whatsoever — no toast, no
@@ -10332,6 +11142,128 @@ built, emu-verified both ways above. **NOT yet reflashed.** `build_merged.py`
 still wires `DJ_V3` (dead combo) into the merge — needs bumping to the
 `DJ_KEYMAP` mechanism (and RELOAD2's own fix) before the merged build is
 touched again; not done this session.
+
+## Session 61 (2026-09-15, `wip`) — SIDECHAIN3: Session 59's register fix was flashed, transport STILL broken; real root cause found (an uninitialized Y-memory slot, not a register), fixed, word budget reclaimed via a real assembler-limitation discovery
+
+**User report**: flashed the Session 59 build (the register-discipline fix
+for the transport-breaking regression). Sequencer transport still broken.
+
+### The register fix was correct but incomplete -- a second, independent hazard in the same new hook
+
+`moncommit` (Session 58's dispatcher-level MON-commit splice) runs for
+**every track's commit, every frame** -- not just the one track actively
+running a COMPRESSOR. Its only gate is `MON_ON[track]` (`Y:0x800+track*0x80+
+0x40`), but that slot is only ever **written** by `scdet`, which only runs
+for the track currently processing a COMPRESSOR. For every other track this
+slot is real DSP memory nothing has ever initialized.
+
+Confirmed empirically, not just reasoned: regenerated a pristine stock
+`payload_B.mem` straight from `out/raw/section_3_MAIN_OS.bin` (no patches at
+all -- `python3 refs/octabam/tools/build/dsp_modmap.py --dumpmem B
+out/dsp/payload_B.mem`) and dumped `Y:0x800+track*0x80+0x40` for all 8
+tracks:
+
+```
+track 0: 8388609   track 1: 8388882   track 2: 8440515   track 3: 16010908
+track 4: 16777209  track 5: 8388607   track 6: 8388607   track 7: 8388603
+```
+
+Every track, on completely unmodified stock firmware, already holds large
+nonzero garbage there (Q23-audio-residue scale, not silence). `moncommit`'s
+gate was `tst b / beq` -- "nonzero = on" -- so on real hardware it fires for
+nearly every non-COMPRESSOR track on nearly every frame, deriving a source
+address from garbage `MON_KEY` and overwriting that track's committed audio
+from it. That is a very plausible mechanism for DSP-side chaos severe enough
+to take the sequencer transport down -- the same failure *class* Session 59
+already proved (a DSP state disturbance desyncing something transport-
+critical), from an independent source. This is exactly the same bug class as
+the KFLT dirty-state bug fixed earlier this thread (Session 55/57: a
+persistent slot nothing initializes reads whatever DSP memory held before),
+just in the new hook instead of the old one.
+
+### Fix: gate on the EXACT sentinel, not "nonzero"
+
+`scdet`'s ON-publish already writes `move #1,b` into `MON_ON`, which (this
+file's own documented `dsp_asm` left-align quirk, q2) actually stores
+`$10000`, not `1` -- a value no real garbage in the dumped range (millions,
+near Q23 full-scale) is going to hit by chance. Changed `moncommit`'s gate
+from `tst b / beq mc10` to `cmp #>$10000,b / beq mc09` with the match case
+jumping IN to the substitution code (`bne` is not a valid `dsp_asm`
+mnemonic, confirmed by direct assembler test -- only `beq`/`blt`/`bra` are
+used anywhere in this file).
+
+### Word budget: the cave was ALREADY at 261/261, not 256/261 as earlier text here claimed
+
+Rebuilding the untouched Session 59 asm via `build_sidechain3.py` directly
+(not by memory of an earlier printed number) showed **261/261 donor words,
+zero spare** -- the "256/261" figure written earlier in this file was stale.
+The gate fix alone costs net +2 words (an exact-match compare needs a
+2-word long-immediate `cmp`, where `tst` was 1) with no headroom to absorb
+it.
+
+Reclaimed the words from a **known, deliberately-accepted duplication**:
+`zz17`/`zz20` (`patch_sc_dsp3.asm`'s two "publish MON_ON=0" exits) had been
+inlined twice rather than shared via `jsr`/`rts`, specifically because an
+extra internal `rts` would have shifted `build_sidechain3.py`'s `rts`-
+counting boundary detection (`sctap`/`scdet`/`moncommit` are located by
+counting `rts` opcodes in the assembled stream) -- flagged in the code as
+"not worth the risk for ~6 words." Tested directly with a throwaway `dsp_asm`
+invocation whether `jsr` to an internal label is even supported and how much
+it costs: **it is, and it's 1 word** (`jsr $2 ; 0d0002`) as long as the
+target is within `dsp_asm`'s short-jsr range (confirmed separately: `jsr` to
+a FAR label, as used at the isolated test harness's old `CAVE_ORG=0x1da0`,
+is `InvalidInstruction` -- moved `emu_sc_dsp3.py`'s non-`--patched` `CAVE_ORG`
+to `0x868`, matching `--patched`'s already-proven-safe placement, to fix
+this for testing without touching the real build's addresses).
+
+Extracted the duplicated body into a new `zz18:` subroutine, placed
+deliberately AFTER `zz20`'s own `rts` in the source so its own `rts` becomes
+the *third* internal one (was the second/last); `zz17` and `zz20` now both
+just `jsr zz18`. Updated the actual risk the old comment was about, instead
+of avoiding it: `sc_assemble()`'s boundary detection now takes `rts[3]`
+(was `rts[2]`) for `moncommit`'s start, matching the one extra `rts` zz18
+introduces; `emu_sc_dsp3.py`'s own independent copy of the same indexing
+logic updated identically. Net: 257/261, 4 words spare -- the sharing (-6w)
+covered the gate fix (+2w) with margin, rather than the reverse trade the
+old comment considered "not worth it" in isolation.
+
+### Testing
+
+Full `tools/emu_sc_dsp3.py` regression (isolation AND `--patched` against
+the rebuilt `mainos_sidechain3.bin`) ALL GOOD, including a re-confirmation
+that `scdet` really does publish exactly `65536` (`$10000`) for MON=1, not a
+smaller "nonzero" value. `tools/emu_sc_dsp3_moncommit.py` updated: its
+MON_ON=1 case had been seeding literal `1` (matching the OLD "nonzero" gate,
+never what `scdet` actually writes) -- corrected to `$10000`. Added a new
+case that is the actual regression test for this bug: run `moncommit` AS a
+track that is **never seeded at all**, so it reads whatever `base_mem`'s
+underlying stock `.mem` snapshot really has at that address (the real
+`8388609` garbage measured above, for track 0) -- confirms the fix leaves
+that track's commit untouched. Both isolation and `--patched` modes ALL
+GOOD, including this new case.
+
+`out/dsp/payload_B.mem` (the isolation harness's baseline) turned out to
+already be regenerated correctly by this process -- an earlier assertion
+failure while testing (`comp proc+0 not [move r0,n6 ; move #61,r4]`) traced
+to a stale/unrelated file state, not anything this session's changes caused;
+regenerating it fresh from `out/raw/section_3_MAIN_OS.bin` fixed it and
+confirmed the garbage values above are genuine unmodified-stock content, not
+an artifact of prior testing.
+
+### Status
+
+`out/OCTATRACK_OS1.40C_SIDECHAIN3.syx` rebuilt with both the Session 59
+register-discipline fix AND this session's `moncommit` gate fix, 257/261
+words, checksum round-trips. Emulator-validated (isolation + `--patched`).
+**NOT yet reflashed.** Per FLASHING.md's existing instruction: confirm the
+sequencer transport itself is healthy (PLAY starts/stops normally) FIRST on
+this next flash, before judging MON's audio quality -- this is now the
+SECOND fix aimed at that same symptom, so it deserves the same care as the
+first. If transport is still broken even after this, the failure is neither
+of the two mechanisms found so far, and the next step should be a hardware-
+side probe of `moncommit`'s dispatcher-commit splice site itself (P:0x50e /
+P:0x303) rather than a third guess at its body.
+
 ## Session 61 (2026-09-15, `wip`) — DIRECTJUMP_V4 flashed, "sort of works": two real bugs found + fixed, dynamically verified against real stock code
 
 **User report after flashing v4**: toast comes up, pattern switching happens
