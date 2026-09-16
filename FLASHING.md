@@ -234,7 +234,7 @@ sounding keeps playing under its own AMP envelope; only new trigs are suppressed
 5. Switch **DT → OT+FX** live while a muted voice is ringing — it should adopt the
    `OT+FX` behaviour on the next mute.
 
-### 4.5  DIRECT JUMP  (`build_directjump_v4.py` — FLASHED 2026-09-14/15: v3 did nothing, first v4 "sort of worked" — two real bugs found + fixed, NOT yet reflashed — see below, READ BEFORE FLASHING)
+### 4.5  DIRECT JUMP  (`build_directjump_v4.py` — v3 flashed and did nothing (Session 60); first v4 "sort of worked" (Session 61); THAT v4 threw a hardware EXCEPTION after a few [PTN] presses (Session 62) — root cause diagnosed + rebuilt with no risk of it, NOT yet reflashed — see below, READ BEFORE FLASHING)
 
 **⚠️ DIRECTJUMP_V3 was flashed and had NO effect whatsoever** — no toast, no
 toggle, the combo did literally nothing, on a unit otherwise working normally.
@@ -244,62 +244,59 @@ pushes a small stock UI overlay layer (`0x400bf0f2`) whose own `[YES]` record
 has a NULL press handler. The runtime key-dispatch table entry for `[YES]`
 gets overwritten with that NULL for as long as `[PTN]` is held — v1/v2/v3 all
 detour the *stock* `[YES]` handler (`0x4005e4c8`), which that NULLed table
-entry never reaches. **This is genuinely dead code while the chord is being
-held**, confirmed by running the real, unmodified firmware's own layer-push
-code under emulation (`tools/emu_directjump_v4.py`), not just by reasoning
-about the disassembly.
+entry never reaches.
 
 **First fix (v4): no detour on `0x4005e4c8` at all.** The build instead
 writes `dj_toggle`'s address directly into that overlay layer's own `[YES]`
 record, so the exact same stock rebuild that used to zero the runtime
-dispatch slot now points it at our toggle.
+dispatch slot now points it at our toggle. Flashed — combo reachable, toast
+comes up, pattern switching works.
 
-**⚠️ That v4 was flashed and "sort of works" — combo now reachable, but two
-real bugs found + fixed since (NOTES.md "Session 61"), NOT yet reflashed:**
+**⚠️ That build (Session 61) then threw a real hardware exception**:
+`EXCEPTION SPP:4 VEC:04 FS:0 SR:2004 ADDR: 400BF0F2 R0178` after pressing
+`[PTN]` a few times. VEC:04 = illegal instruction, and the fault address is
+*exactly* the `[PTN]`-held overlay layer struct — the CPU tried to execute at
+a data address inside the one subsystem Session 61's new toast-close hook
+(`dj_ptnrel`) touched. Diagnosis (NOTES.md "Session 62"): that hook called
+`NOTIFY_CLOSE` directly from *inside* another function that was itself
+mid-teardown of the very list our layer lives on — a nesting `patch_qlrec.s`'s
+otherwise-identical, HW-proven-safe `NOTIFY_CLOSE` call never has to survive.
+**Rebuilt to touch no code at all**: `dj_ptnrel` now only arms the countdown
+stock's own per-frame tick already reads (closes the toast ~1 frame later,
+through the OS's own normal, safe context, instead of calling anything
+directly) — a toast that was never open is left completely untouched. If a
+unit hits this exception: **a plain power cycle recovers it** — this is a
+runtime crash, not flash corruption, the OS on the card is unaffected.
 
-1. **Toast used to ride out its own ~0.7 s timer regardless of [PTN].** Fixed:
-   a new hook (`dj_ptnrel`) at `FUN_40043418` — confirmed the *only* caller
-   of that function image-wide is inside the stock `[PTN]`-release handler,
-   so it fires on every release, combo or plain tap alike — closes the toast
-   the instant `[PTN]` comes up, via the same `NOTIFY_CLOSE` primitive (and
-   the same "no-op if nothing's open" idiom) `patch_qlrec.s` already uses for
-   REC/QLREC's identical close-on-release behaviour.
-2. **The actual playhead bug.** `dj_c` (Hook C — shared unconditionally by
-   every DIRECT JUMP build since it was first built, v1 through v4 alike) was
-   overwriting a CPU register, D7, with the raw resume-step index. Wrong: D7
-   is a *tick* count that stock code just above the hook already sets
-   correctly (`LEN_TBL[newScale] * DAT_80006628`), consumed directly by two
-   per-track tick-phase loops that run immediately after the hook — feeding
-   them a tiny, unscaled step index instead corrupted every track's own
-   next-tick phase on every single manual jump. The master step (which this
-   hook also sets, and always set *correctly*) was never the problem — this
-   was a resume-**timing** bug, not a resume-**position** bug. Fixed: `dj_c`
-   no longer touches D7 at all.
-
-Both fixes verified with real, unmodified stock code under emulation (not
-just the hand-built stubs): `tools/emu_directjump_v4.py`'s
-`check_ptn_release_closes_toast` runs the actual `[PTN]`-release handler
-against both the v3 image (toast never closes early — matches the flashed
-behaviour) and v4 (closes every time); `tools/emu_directjump.py`'s `test_c`
-now asserts D7 is *preserved*, not set, in every `dj_c` case.
-
-1. Hold **[PTN]** and tap **[YES]** → a transient **"DIRECT JUMP ON"** overlay
+1. **Press `[PTN]` a few times in a row FIRST**, on its own, before testing
+   anything else — this is exactly the sequence that crashed the previous
+   build. Confirm no exception before moving on.
+2. Hold **[PTN]** and tap **[YES]** → a transient **"DIRECT JUMP ON"** overlay
    (~0.7 s / ~68 frames), then **OFF** on the next chord. The SELECT PATTERN
    chooser must not pop on the [PTN] release. **Release [PTN] while the toast
-   is still up → it should vanish immediately**, not linger out its timer.
-2. With DIRECT JUMP **ON**, play a pattern and manually cue another with
+   is still up** → it should vanish almost immediately (next frame), not
+   linger out its timer.
+3. With DIRECT JUMP **ON**, play a pattern and manually cue another with
    **identical trigs** (e.g. kick on steps 1/5/9/13 in both): the switch
    should be **inaudible** — same step position, same timing, no audible
    glitch or reset. Then try patterns with *different* content to confirm the
    switch happens on the **next step tick**, keeps the **step position**
    (modulo the new pattern's length), and loads the new Part at once. A MIDI
    Program Change goes out ~1 step early.
-3. The **arranger** and **pattern chains** must be unchanged (DIRECT JUMP bails
+4. The **arranger** and **pattern chains** must be unchanged (DIRECT JUMP bails
    when the arranger is running or a chain is active).
-4. Turn it **OFF** → manual pattern changes are stock (end-of-pattern quantised,
+5. Turn it **OFF** → manual pattern changes are stock (end-of-pattern quantised,
    restart at step 1).
-5. **[PTN] tapped alone** (no [YES]) still opens SELECT PATTERN normally —
+6. **[PTN] tapped alone** (no [YES]) still opens SELECT PATTERN normally —
    v4 doesn't touch that path.
+
+**⚠️ Likely shared root cause, NOT yet fixed**: `patch_reload2.s`'s `rl_yes`
+(the `RELOAD FROM PROJECT` `[PTN]`-hold picker's `[YES]` confirm) detours the
+*same* `0x4005e4c8` behind the *same* `PTN_MODE` gate — so RELOAD2's
+`[PTN]`+`[YES]` flow is very likely equally dead on real hardware for the
+identical reason. It just hasn't been flash-tested yet (queued behind
+DIRECTJUMP). Worth the same kind of keymap-slot fix before it's ever flashed
+standalone or in `build_merged.py`.
 
 > Five further hardware-only unknowns are in `NOTES.md` "Session 15 continued" /
 > "Session 21 continued"; `DJ_TOAST_DUR` (default 0x44, ~68 frames) may need one

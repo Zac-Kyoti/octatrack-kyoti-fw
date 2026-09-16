@@ -11343,3 +11343,70 @@ shrank by one instruction). **Not yet reflashed.** Same standing note as
 Session 60: RELOAD2's `rl_yes` shares the dead-`0x4005e4c8`-while-`[PTN]`-held
 mechanism v1-v3 had and has not been fixed; unrelated to either bug this
 session, not touched.
+
+## Session 62 (2026-09-15, `wip`) — DIRECTJUMP_V4 (Session-61 build) flashed, EXCEPTION VEC:04 ADDR 0x400BF0F2 after a few [PTN] presses; root cause diagnosed, `dj_ptnrel` rebuilt with no jsr calls at all, re-verified
+
+**User report**: `EXCEPTION SPP:4 VEC:04 FS:0 SR:2004 ADDR: 400BF0F2 R0178` after
+pressing `[PTN]` a few times. VEC:04 = illegal instruction; the fault address
+is **exactly** `0x400bf0f2` — the `[PTN]`-held keymap overlay layer struct
+itself, meaning the CPU tried to *execute* at a data address inside that
+subsystem. This is the ONE thing Session 61's `dj_ptnrel` (the `[PTN]`-release
+toast-close hook) newly touches — the D7 fix from the same session is
+unrelated (nowhere near this memory region) and almost certainly not at
+fault.
+
+### Diagnosis
+
+`dj_ptnrel`'s previous version called `jsr NOTIFY_CLOSE` (`FUN_40056bec`)
+directly, from inside `FUN_40043418`'s own body — *before* that function's
+own next action, which pops OUR layer struct (`0x400bf0f2`) off the shared
+UI-layer list (`0x460d165c`). Traced `NOTIFY_CLOSE`'s full call chain:
+`FUN_40055db4` (destroys the toast's window object, then `clrl` the handle —
+confirmed this properly clears `0x460d1e70`, ruling out the "stale handle /
+double free" theory I first suspected) → `FUN_4003146c` (pops ITS OWN
+placeholder, `0x400ba9e0`, off that *same* `0x460d165c` list) → a kernel-post
+call (`0x40000c3c`, task-reschedule-capable per this project's own RTOS
+notes). `patch_qlrec.s`'s `qlr_recrel` calls this exact same `NOTIFY_CLOSE`
+and is HW-proven safe — but it fires from a plain key-release detour, never
+from *inside another function that's itself mid-teardown of a different node
+on the very same list*. That nesting — pop-in-progress on the caller's own
+stack, another pop (plus a reschedule) happening underneath it before the
+first one completes — is the one thing this call site had that qlrec's
+didn't, and it's the prime suspect, though disassembly alone can't fully
+prove which exact step corrupted the list.
+
+### Fix — touch no code, only the two words stock's own tick already reads
+
+Rather than resolve the exact mechanism, removed the entire risk class:
+`dj_ptnrel` no longer calls `NOTIFY_CLOSE`, or anything else. It reads
+`NOTIFY_HANDLE` (`0x460d1e70`); if a toast is actually open, it sets
+`NOTIFY_COUNTDOWN` (`0x460d1e6c`) to `1`. Stock's own per-frame tick
+(`0x40056c28`, completely untouched, the same mechanism every toast in this
+project already closes through) then calls `NOTIFY_CLOSE` itself, from its
+own normal, HW-proven-safe context, one frame later — imperceptible to a
+person releasing a key, but with zero new call chains, zero list surgery, and
+nothing for this hook to get wrong. A toast that was never opened is
+untouched (`NOTIFY_HANDLE == 0` skips the write entirely); one that was open
+closes exactly the way it always did, just sooner.
+
+### Verification
+
+`tools/emu_directjump_v4.py`'s `check_ptn_release_closes_toast` rewritten:
+runs the real `FUN_4005a044` release path on both images and checks (a) the
+countdown gets armed to `1` only when a toast is actually open (`v3`: never
+touched, matching its lack of the hook; `v4`: armed exactly when
+`NOTIFY_HANDLE != 0`) and (b), the more important assertion now,
+**`NOTIFY_CLOSE` is never reached directly by our code on either image** —
+the specific thing that crashed hardware. All 4 build→emu pairs (v1-v4)
+rebuilt and re-run: `ALL GOOD`.
+
+### Status
+
+`out/OCTATRACK_OS1.40C_DIRECTJUMP_V4.syx` rebuilt (529 B changed vs stock).
+**Not yet reflashed.** Given a real hardware exception happened on the
+previous build of this exact file, this one deserves a cautious pass:
+confirm the unit recovered cleanly from the crash (a plain power cycle should
+do it — this was a runtime exception, not flash corruption; the OS on the
+card/flash is untouched by a crash screen) before reflashing, and repeat the
+"press `[PTN]` a few times" sequence specifically as the first HW test this
+time, before moving on to the toast/playhead checks themselves.

@@ -86,8 +86,11 @@
 |   and tears itself down.  No handle to manage, no follow-up tick -> no dj_tick2, no
 |   0x400522ca splice.  patch_reload2's rl_yes uses the identical call (pea DUR ; text).
     .equ NOTIFY,    0x4005a2b8          | FUN_4005a2b8(char *text, int dur_frames)
-    .equ NOTIFY_CLOSE, 0x40056bec       | tears down the FUN_4005a2b8 toast; no-op if none open
-                                        | (same primitive + idiom as patch_qlrec.s's qlr_recrel)
+    .equ NOTIFY_CLOSE,    0x40056bec    | tears down the FUN_4005a2b8 toast (jsr'd only by
+                                        | stock's own per-frame tick below -- see Session 62
+                                        | in dj_ptnrel's comment for why we never jsr it ourselves)
+    .equ NOTIFY_HANDLE,    0x460d1e70   | nonzero while a FUN_4005a2b8 toast is open
+    .equ NOTIFY_COUNTDOWN, 0x460d1e6c   | frames left; stock's tick (0x40056c28) closes it at 0
     .ifndef DJ_TOAST_DUR
     .equ DJ_TOAST_DUR, 0x44             | same dwell patch_reload2 uses for its toast
     .endif
@@ -379,23 +382,45 @@ djc_store:
     rts
 
     .ifdef DJ_KEYMAP
-| ================= [PTN] release -- close the toast immediately =================
+| ================= [PTN] release -- close the toast almost immediately =================
 | detour replaces the first 6 bytes of FUN_40043418 (`pea 0x400bf0f2`), the stock
 | "tear down the PTN-held overlay" cleanup.  Confirmed the ONLY jsr caller of
 | FUN_40043418 image-wide is 0x4005a0c4, inside FUN_4005a044's own RELEASE branch --
 | i.e. this runs on every [PTN] release, whether or not our combo fired (a quick tap
-| alone reaches it too).  NOTIFY_CLOSE (FUN_40056bec) is a no-op if nothing is open
-| (tstl 0x460d1e70 guards its whole body), so calling it unconditionally here is safe
-| the same way patch_qlrec.s's qlr_recrel already relies on for the identical toast
-| primitive.  Matches the user's ask: "the toast needs to disappear immediately if the
-| user releases PTN, just like we did with REC on QLREC."
+| alone reaches it too).  Matches the user's ask: "the toast needs to disappear
+| immediately if the user releases PTN, just like we did with REC on QLREC."
+|
+| ** Session 62: NOT a jsr NOTIFY_CLOSE here -- an earlier build tried exactly that and
+| the unit threw EXCEPTION VEC:04 (illegal instruction) at ADDR 0x400BF0F2 (our OWN
+| layer struct!) after a few [PTN] presses. ** FUN_40043418 hasn't popped 0x400bf0f2 off
+| the shared UI-layer list (0x460d165c) yet at this point in its body -- that pop is the
+| very next thing it does, right after the displaced `pea` we replay below -- and
+| NOTIFY_CLOSE's own teardown (FUN_40055db4 destroying the toast's window object, then
+| FUN_4003146c popping ITS OWN placeholder 0x400ba9e0 from that *same* list, then a
+| kernel-post reschedule) apparently doesn't tolerate running while a DIFFERENT node
+| (ours, still-linked) is mid-teardown on the caller's own stack.  qlr_recrel's identical
+| `jsr NOTIFY_CLOSE` call (patch_qlrec.s) is HW-proven safe -- but it fires from a plain
+| key-release detour, not from inside another function that's itself about to pop a node
+| off the very list NOTIFY_CLOSE's own pop touches; that nesting is the one thing this
+| site has that qlrec's doesn't, and disassembly alone couldn't rule it out as the cause.
+|
+| Fix: touch no code at all, only the two plain data words the toast's own per-frame tick
+| (0x40056c28, entirely stock, HW-proven -- this is how EVERY toast in this project
+| already closes on its own timer) already reads.  If a toast is open (NOTIFY_HANDLE
+| nonzero), set its countdown to 1 so that tick closes it -- via NOTIFY_CLOSE, but called
+| from the OS's own safe per-frame context, never from ours -- on the very next frame
+| (indistinguishable from instant to a person releasing a key).  No jsr, no list surgery,
+| nothing to get wrong: this is definitionally at least as safe as flashing v4 without
+| this hook at all, since a toast that was never opened is untouched (NOTIFY_HANDLE==0
+| skips the write) and one that WAS opened closes exactly the way it already did before
+| this hook existed, just sooner.
     .global dj_ptnrel
 dj_ptnrel:
-    lea     -16(%sp),%sp
-    movem.l %d0-%d1/%a0-%a1,(%sp)
-    jsr     NOTIFY_CLOSE                | FUN_40056bec -- closes 0x460d1e70 if open, else rts
-    movem.l (%sp),%d0-%d1/%a0-%a1
-    lea     16(%sp),%sp
+    tst.l   NOTIFY_HANDLE               | 0x460d1e70 -- is a toast actually open?
+    beq.b   dpr_done
+    moveq   #1,%d0
+    move.l  %d0,NOTIFY_COUNTDOWN        | 0x460d1e6c -- stock's own tick closes it next frame
+dpr_done:
     pea     0x400bf0f2                  | displaced original
     rts
     .endif

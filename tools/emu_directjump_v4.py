@@ -43,6 +43,16 @@ boot itself uses, per 0x40061bc4-40061bda in the stock image) -- so the ordering
 test relies on (base processed first, our overlay appended after and read last) is the
 real, always-present ordering, not a fabricated one.
 
+Session 62 also covers dj_ptnrel (the [PTN]-release toast-close hook, added in Session 61
+and then rebuilt here after it crashed real hardware -- EXCEPTION VEC:04, ADDR 0x400BF0F2
+-- because that first version called NOTIFY_CLOSE directly from inside FUN_40043418, ahead
+of that function's own pop of the very layer struct at that address).  The fixed version
+never calls anything: it only arms the countdown stock's own per-frame tick already reads.
+`check_ptn_release_closes_toast` runs the REAL FUN_4005a044 release path and confirms (a)
+that countdown gets set to 1 -- closing next frame -- only when a toast is actually open,
+and (b), just as importantly, that NOTIFY_CLOSE itself is never reached directly by our
+code on either image.
+
 Run after:  python3 tools/build_directjump_v3.py  &&  python3 tools/build_directjump_v4.py
 Usage:      python3 tools/emu_directjump_v4.py
 """
@@ -65,7 +75,10 @@ PTN_USED = 0x460d173e            # !=0 -> PTN release skips the SELECT PATTERN c
 POPUP2 = 0x460d1ab2              # SELECT-window "in use" flag PTN's own handler touches
 CKSUM = 0x4001f23c
 NOTIFY = 0x4005a2b8
-NOTIFY_CLOSE = 0x40056bec        # tears down the FUN_4005a2b8 toast; no-op if none open
+NOTIFY_CLOSE = 0x40056bec        # tears down the FUN_4005a2b8 toast; dj_ptnrel must NEVER
+                                  # jsr this directly (Session 62) -- only stock's own tick does
+NOTIFY_HANDLE = 0x460d1e70       # nonzero while a toast is open
+NOTIFY_COUNTDOWN = 0x460d1e6c    # frames left; stock's tick (0x40056c28) closes it at 0
 DJ_MODE = 0x800000d8
 
 fails = []
@@ -153,26 +166,37 @@ def run(label, image_path):
     return uc, slot
 
 
-def check_ptn_release_closes_toast(label, image_path, expect_close):
-    """Session 61: run the REAL FUN_4005a044 ([PTN] release, event=0) and confirm whether
-    the toast-close primitive (NOTIFY_CLOSE) gets reached.  v3 never hooks this path (the
-    toast rides out its own timer regardless of when [PTN] is released); v4 adds dj_ptnrel
-    at FUN_40043418 -- confirmed the ONLY jsr caller of that function image-wide -- so it
-    fires on every [PTN] release, combo-consumed or a plain quick tap alike."""
-    print(f"{label} -- [PTN] release closes the toast -------------------")
+def check_ptn_release_closes_toast(label, image_path, expect_touch):
+    """Session 62: run the REAL FUN_4005a044 ([PTN] release, event=0) and confirm whether
+    the countdown that stock's own per-frame tick (0x40056c28, untouched, HW-proven) reads
+    gets armed to expire next frame.  v3 never hooks this path at all -- a toast rides out
+    its own full timer regardless of when [PTN] is released.  v4's dj_ptnrel (at
+    FUN_40043418, confirmed the ONLY jsr caller of that function image-wide, so this fires
+    on every [PTN] release, combo-consumed or a plain quick tap alike) sets NOTIFY_COUNTDOWN
+    to 1 ONLY when NOTIFY_HANDLE shows a toast is actually open -- and, critically, NEVER
+    jsrs NOTIFY_CLOSE directly (an earlier version did exactly that and crashed real
+    hardware after a few [PTN] presses -- see patch_directjump.s's dj_ptnrel comment)."""
+    print(f"{label} -- [PTN] release arms the toast's own close-next-frame countdown ---")
     for tag, ptn_used in (("combo-consumed release (PTN_USED=1)", 1),
                           ("quick-tap release (PTN_USED=0)", 0)):
-        uc = mk(pathlib.Path(image_path).read_bytes())
-        uc.mem_write(PTN_USED, struct.pack(">I", ptn_used))
-        uc.mem_write(POPUP2, b"\x00\x00\x00\x00")
-        hit = {"v": False}
+        for toast_open in (True, False):
+            uc = mk(pathlib.Path(image_path).read_bytes())
+            uc.mem_write(PTN_USED, struct.pack(">I", ptn_used))
+            uc.mem_write(POPUP2, b"\x00\x00\x00\x00")
+            uc.mem_write(NOTIFY_HANDLE, struct.pack(">I", 0x460d1e00 if toast_open else 0))
+            uc.mem_write(NOTIFY_COUNTDOWN, struct.pack(">I", 0x44 if toast_open else 0))
+            close_hit = {"v": False}
 
-        def on_close(uc):
-            hit["v"] = True
+            def on_close(uc):
+                close_hit["v"] = True
 
-        call(uc, FUN_PTN_PRESS, [0x2e, 0], extra_hooks={NOTIFY_CLOSE: on_close})
-        check(f"  {tag}: NOTIFY_CLOSE reached = {expect_close}", hit["v"] == expect_close,
-              f"got {hit['v']}")
+            call(uc, FUN_PTN_PRESS, [0x2e, 0], extra_hooks={NOTIFY_CLOSE: on_close})
+            countdown = struct.unpack(">I", uc.mem_read(NOTIFY_COUNTDOWN, 4))[0]
+            touched = countdown == 1 if toast_open else countdown != 0
+            state = "toast open" if toast_open else "no toast"
+            check(f"  {tag}, {state}: countdown armed to 1 = {expect_touch and toast_open}",
+                  touched == (expect_touch and toast_open), f"countdown={countdown}")
+            check(f"  {tag}, {state}: NOTIFY_CLOSE never jsr'd directly", not close_hit["v"])
 
 
 def main():
@@ -182,10 +206,10 @@ def main():
         sys.exit("missing out/mainos_directjump_v{3,4}.bin -- build both first")
 
     check_ptn_release_closes_toast("v3 image (no dj_ptnrel -- toast rides out its own timer)",
-                                    v3, expect_close=False)
+                                    v3, expect_touch=False)
     print()
-    check_ptn_release_closes_toast("v4 image (dj_ptnrel closes it immediately)",
-                                    v4, expect_close=True)
+    check_ptn_release_closes_toast("v4 image (dj_ptnrel arms the countdown)",
+                                    v4, expect_touch=True)
     print()
 
     _, slot3 = run("v3 image (the flashed, dead-on-HW build)", v3)
