@@ -11599,3 +11599,119 @@ only touches `dj_c`'s data computation, not any control-flow/stack
 mechanics; the crash-fix from Session 64 is untouched. First HW test should
 be the playhead scenario itself: two patterns with identical trigs (e.g.
 kick on 1/5/9/13 in both) should sound seamless across a manual jump.
+
+## Session 67 (2026-09-15, `wip`) — DIRECTJUMP_V4's D7 fix STILL doesn't fix the playhead-reset bug; deep dive finds a previously-unexamined per-track gate + gets an inconclusive dynamic result; HANDOFF to a fresh session
+
+**User report**: flashed the Session-66 D7 fix. Still resets every new
+pattern to step 1. **Confirmed diagnostic**: the switch itself still
+happens **fast** (within ~1 step, not waiting for the old pattern to end) —
+so `dj_a`/`dj_b` (arm + CHAIN-AFTER-gate bypass) are working correctly and
+are NOT the bug. The bug is specifically in how the new pattern's per-track
+playback position gets seeded after the switch, confirming (again) that
+`dj_c` / the code path it feeds is the right area — the fix just isn't
+complete or isn't correct.
+
+### This session's investigation (all read-only RE + Unicorn micro-tests, no code changed)
+
+1. **Found a previously-unexamined gate.** `0x80006604[track]` (the
+   per-track phase accumulator `dj_c`'s D7 write feeds, via the seeding loop
+   at `0x400a4884..`) is read back by exactly one other place image-wide:
+   `0x400a3ca6`, a **separate function** from the seeder — the real per-tick
+   trig-fire dispatcher. It self-increments the counter each call and fires
+   a trig (`jsr FUN_400a536c`) when the counter wraps past
+   `LEN_TBL[trackScale]`. **But this whole path is gated on
+   `0x80006500[track] == 1`** — a per-track byte with **17 refs across at
+   least 6 different functions** (`0x4009b2xx`, `0x4009b9xx/ba/bb`,
+   `0x4009cxxx`, `0x4009fxxx`, `0x400a05xx`, `0x400a12xx`, `0x400a29xx`, plus
+   the seeder/consumer themselves), never traced this session. Working
+   hypothesis (untested): "this track is currently active/playing," not
+   something a manual pattern jump should need to touch — but this is a
+   hypothesis, not a confirmed fact, and every previous "that's surely
+   unrelated" assumption in this thread has cost a flash cycle.
+
+2. **Empirically verified (direct Unicorn execution of the REAL stock
+   seeding loop, not hand-derived arithmetic — hand-deriving the exact
+   `remsl`/subtract sequence produced nonsense negative numbers that
+   didn't match execution, so trust the emulator here, not the notes below
+   it) that for track 0, with a correctly-populated per-pattern scale:**
+   `phase = D7 mod trackLen`. Concretely: `D7=0 -> phase=0`,
+   `D7=16 (=trackLen, stock's own normal full-length value) -> phase=0`
+   (confirms D7=fullLength and D7=0 are equivalent mod trackLen, i.e. stock's
+   own normal commit already behaves like "start fresh" by this measure —
+   consistent), `D7=7 -> phase=7`, `D7=24 (tps=3, resumeStep=8, trackLen=16)
+   -> phase=8`. This is exactly the semantics Session 66's fix intended:
+   the seed value written looks correct for track 0.
+
+   **Tracks 1-7 all returned phase=0 in this same test, regardless of D7** —
+   not yet understood. Most likely a test-setup gap (the loop reads a
+   PER-TRACK scale-index table this test didn't populate correctly for
+   tracks other than 0, so they may be taking an early bail/guard branch
+   that stores 0 defensively) rather than a real per-track bug, but **this
+   was not confirmed either way** and is a live suspect: if the seeding
+   loop genuinely only seeds track 0 correctly and leaves tracks 1-7 at a
+   stale/zero phase for some structural reason, that alone would explain
+   the reported symptom (only SOME tracks — or none convincingly — resuming
+   correctly, reading to the ear as "reset").
+
+3. **Attempted to test the CONSUMER function end-to-end** (seed a phase via
+   the emulator, then call `0x400a3ca6` repeatedly and count calls until
+   `FUN_400a536c` fires, comparing a `phase=0` seed against a `phase=7`
+   seed — if the fix works, the `phase=7` run should fire ~9 calls sooner).
+   **Inconclusive — neither run ever fired the trig within 20 calls.** This
+   function reads several tables via `a4`-relative and `sp`-relative
+   pointers (`sp@(120)`, `sp@(152)`, `sp@(96)`, `a4@(0x50)`, `a4@` at three
+   different computed offsets `d4`/`d6`/`d7` derived from
+   `0x8000004e`/`3` mode bytes) that this test did not correctly
+   populate — most likely it's taking an early-exit branch this test's
+   under-specified environment forces, not a real finding. **Do not trust
+   this null result as evidence of anything** — it just means the isolated
+   single-function Unicorn approach has hit its limit for this specific
+   function; it needs either a much more careful environment reconstruction
+   or (better) the full-firmware route below.
+
+### Why isolated-function Unicorn testing needs to be retired for this bug
+
+This is the second time (see Session 66's own D7 fix, which passed every
+isolated + emulator check and still failed on hardware) that clean-looking
+isolated verification did not predict real behaviour. The mechanism spans
+at least three separate functions (`dj_c`'s hook site, the seeding loop, the
+per-tick consumer) plus at least one more unexamined gate
+(`0x80006500[track]`), each with implicit dependencies on caller-supplied
+table pointers this project's stub-based testing has been reconstructing by
+hand and getting subtly wrong. **The next session should use
+`tools/emu_rtos.py`** (already vendored, `refs/octabam/` populated, already
+runs — `python3 tools/emu_rtos.py --help` works in this checkout) instead:
+it runs the OS's own real scheduler and a real project's real sequencer, so
+per-track state gets built up by the actual firmware rather than
+reconstructed by guesswork. Concretely:
+
+  * Point `--image` at `out/mainos_directjump_v4.bin` (DIRECT JUMP built in,
+    `DJ_MODE` defaults OFF — will need a way to flip it on inside the sim,
+    e.g. `--watch-mem`/poke, or building a variant with `DJ_MODE` defaulted
+    to 1 for testing purposes only).
+  * `--sequencer --via-key --frames N` to run real playback on the DEMO
+    project (`~/Desktop/OT Backup/KYOTI/OT DEMO`, already the default
+    `--project`).
+  * Manually poke `PEND_PAT`/`PEND_BANK` (`0x800065c0`/`0x800065bf`) mid-run
+    (via `--watch-mem` to find the right frame, or a small patch to the
+    wrapper/octabam script to inject a poke at a chosen frame) to simulate
+    the user manually cueing a different pattern while playing, matching
+    real usage.
+  * Watch `0x80006604` (all 8-16 bytes, one per track) and
+    `0x80006500` across the switch, and ideally hook `FUN_400a536c` (the
+    real trig-fire call) to get actual fire timestamps per track — compare
+    against a DJ_MODE=OFF (stock) run of the identical scenario as a
+    reference for "what wrong/reset behaviour looks like," and a hand-
+    computed "what correct behaviour should look like" (each track's next
+    fire should land at the same tick offset it would have on the OLD
+    pattern, not restart from 0).
+
+### Status
+
+**No code changed this session** — investigation only, to avoid another
+guess-then-flash cycle without better evidence. `patch_directjump.s`/
+`build_directjump_v4.py`/`emu_directjump*.py` are exactly as Session 66 left
+them (D7 = `resumeStep * DAT_80006628`, confirmed producing sane per-track
+seed values for track 0 in isolation, but demonstrably still insufficient
+on real hardware for the full multi-track picture). **HANDOFF to a fresh
+session** — see the prompt the user was given alongside this commit.
