@@ -10,11 +10,20 @@ from the FX choosers, sctap publish tap, scdet detector redirect) PLUS:
   * three more COMPRESSOR page-2 parameters -- KFLT (slot 9), KGAIN (slot 10),
     MON / "SC LISTEN" (slot 11) -- next to KEY (slot 8) and RMS (slot 6).
   * the DSP cave is tools/patch_sc_dsp3.asm (a superset of patch_sc_dsp.asm):
-      scdet   now also scales the staged key by KEY GAIN and runs a one-pole-pair
-              Chamberlin SVF (KEY FLT: <64 low-pass, >64 high-pass, 64 bypass);
-      sctail  is a THIRD hook, spliced over the COMPRESSOR's proc-end
-              `move m0,x:(r7+$f)`, that overwrites the wet output with the
-              processed key when SC LISTEN is on.
+      scdet      now also scales the staged key by KEY GAIN and runs a
+                 one-pole-pair Chamberlin SVF (KEY FLT: <64 LP, >64 HP, 64
+                 bypass); when MON is on it also publishes MON_ON/MON_KEY
+                 (Y:0x800+track*0x80+0x40/0x41, this track's own otherwise-
+                 dead keybus gen-2 slot) for moncommit to read.
+      moncommit  a THIRD hook, spliced at the DISPATCHER's per-track COMMIT
+                 step (NOT inside the compressor module -- Session 55/57
+                 found the old proc-end splice shared an unmapped, buggy
+                 timing dependency with the compressor's own undocumented
+                 envelope/gain math; Session 58 redesigned around it entirely
+                 rather than keep chasing it). Runs strictly after this
+                 track's whole FX1+FX2 processing has already returned, and
+                 if MON_ON says so, overwrites X:0 with a fresh re-fetch of
+                 keybus[key] gen 1 before this track's audio is committed.
   * two coefficient tables (tools/sc_tables.py: 16-word gain, 32-word f) are
     appended to the cave; @GTAB@ / @FTAB@ in the .asm are resolved to their
     absolute P addresses in a first sizing pass.
@@ -67,12 +76,20 @@ SLOTS = [
 ]
 
 # ======================= DSP (SPATIALIZER donor) =======================
+# commit_hook: the dispatcher's per-track COMMIT step (`move x:>$206,r0`,
+# reading this track's output-slot pointer immediately before the copy-to-
+# output-slot call) -- confirmed identical in both payloads by disassembly
+# (NOTES.md Session 58): same instruction, same 5-instruction tail after it
+# (`move #$0,r1 / move #$1,n1 / move x:>$419,r3 / jsr <per-payload commit fn>`),
+# just at each payload's own address. `moncommit` splices here instead of the
+# old proc-end `sctail` site -- it runs after the WHOLE compressor module
+# (including its own undocumented envelope/gain math) has already returned.
 DSP = {
     "A": dict(va=0x400e2324, ln=0x136cb, cave_org=0x00aa8, kadj="add     #3,a",
-              disp_hook=0x004a7, comp_proc=0x01ab1, comp_tail=0x01b55,
+              disp_hook=0x004a7, comp_proc=0x01ab1, commit_hook=0x0050e,
               stub_init=0x007c8, stub_proc=0x007c9),
     "B": dict(va=0x400f59ef, ln=0x12d05, cave_org=0x00868, kadj="sub     #1,a",
-              disp_hook=0x0029c, comp_proc=0x01871, comp_tail=0x01915,
+              disp_hook=0x0029c, comp_proc=0x01871, commit_hook=0x00303,
               stub_init=0x00588, stub_proc=0x00589),
 }
 SC_SRC = ROOT / "tools/patch_sc_dsp3.asm"
@@ -81,7 +98,8 @@ NOP = 0x000000
 
 FX1_LIST, FX1_LEN = 0x400d6060, 11
 FX2_LIST, FX2_LEN = 0x400d6090, 15
-ID2POS = 0x400d6150
+FX1_ID2POS = 0x400d60d0   # FX1's OWN id->position table, separate from ID2POS
+ID2POS = 0x400d6150       # FX2's own copy
 SPAT_P = 0x400d4904 + 0x38
 SPAT_POS = 7
 
@@ -118,7 +136,7 @@ def cf_assemble(name, at):
 def sc_assemble(kadj, org):
     """assemble patch_sc_dsp3.asm at `org`, append the gain/f tables.
     Two passes so `move #>@GTAB@` / `move #>@FTAB@` widths don't shift.
-    Returns (words, sctap, scdet, sctail)."""
+    Returns (words, sctap, scdet, moncommit)."""
     def one(gt, ft):
         src = (SC_SRC.read_text().replace("@KADJ@", kadj)
                .replace("@GTAB@", f"${gt:x}").replace("@FTAB@", f"${ft:x}"))
@@ -146,7 +164,14 @@ def sc_assemble(kadj, org):
     if " dc " in d or "InvalidInstruction" in d or "mpysu" in d or "macsu" in d:
         sys.exit(f"cave did not round-trip clean:\n{d}")
     rts = [i for i, w in enumerate(code) if w == 0x00000c]
-    return words, org, org + rts[0] + 1, org + rts[2] + 1
+    # rts[0] = sctap's own rts (sctap/scdet boundary).
+    # scdet has THREE internal rts as of the zz18 shared OFF-publish sub
+    # (patch_sc_dsp3.asm, called via `jsr` from zz17 and zz20): rts[1] =
+    # zz16's (the KEY-present exit), rts[2] = zz20's (the KEY-OFF exit,
+    # unchanged position from before zz18 existed), rts[3] = zz18's own --
+    # placed deliberately AFTER zz20's in the source so it lands last and
+    # moncommit (HOOK 3, immediately following) starts right after it.
+    return words, org, org + rts[0] + 1, org + rts[3] + 1
 
 
 def dsp_module_fileoff(img, va, ln, p_addr):
@@ -246,11 +271,11 @@ def main():
     print(f"  enable bitmap 0x{ea:08x}  slots 8-11 -> 0x00001111 (all on)")
 
     # ---------------- DSP (both payloads) ----------------
-    print("\n=== DSP: SPATIALIZER donor + sctap / scdet / sctail ===")
+    print("\n=== DSP: SPATIALIZER donor + sctap / scdet / moncommit ===")
     for tag, d in DSP.items():
-        words, sctap, scdet, sctail = sc_assemble(d["kadj"], d["cave_org"])
+        words, sctap, scdet, moncommit = sc_assemble(d["kadj"], d["cave_org"])
         print(f"  payload {tag}: cave {len(words)}w @ P:0x{d['cave_org']:05x}  "
-              f"sctap=0x{sctap:x} scdet=0x{scdet:x} sctail=0x{sctail:x}")
+              f"sctap=0x{sctap:x} scdet=0x{scdet:x} moncommit=0x{moncommit:x}")
 
         spat_off = dsp_module_fileoff(img, d["va"], d["ln"], d["cave_org"])
         assert rd3(img, spat_off) == 0x250000, \
@@ -273,12 +298,15 @@ def main():
         img[cp + 3:cp + 6] = w3(NOP)
         print(f"    COMPRESSOR P:0x{d['comp_proc']:05x} -> jsr 0x{scdet:x} + nop")
 
-        ct = dsp_module_fileoff(img, d["va"], d["ln"], d["comp_tail"])
-        assert (rd3(img, ct), rd3(img, ct + 3)) == (0x0a77a0, 0x00000f), \
-            f"payload {tag} comp proc-end not `move m0,x:(r7+$f)`: {rd3(img,ct):06x} {rd3(img,ct+3):06x}"
-        img[ct:ct + 3] = w3(jsr_short(sctail))
-        img[ct + 3:ct + 6] = w3(NOP)
-        print(f"    COMPRESSOR P:0x{d['comp_tail']:05x} -> jsr 0x{sctail:x} + nop")
+        # dispatcher-level commit hook (payload A P:0x50e / payload B P:0x303,
+        # both `move x:>$206,r0` -- confirmed identical detour bytes in both
+        # payloads by disassembly, NOTES.md Session 58)
+        mc = dsp_module_fileoff(img, d["va"], d["ln"], d["commit_hook"])
+        assert (rd3(img, mc), rd3(img, mc + 3)) == (0x60f000, 0x000206), \
+            f"payload {tag} commit hook not `move x:>$206,r0`: {rd3(img,mc):06x} {rd3(img,mc+3):06x}"
+        img[mc:mc + 3] = w3(jsr_short(moncommit))
+        img[mc + 3:mc + 6] = w3(NOP)
+        print(f"    dispatcher P:0x{d['commit_hook']:05x} -> jsr 0x{moncommit:x} + nop")
 
         xt = dsp_xtable_fileoff(img, d["va"], d["ln"], 0x215)
         ini_off, prc_off = xt + 5 * 3, xt + (0x20 + 5) * 3
@@ -306,12 +334,20 @@ def main():
             wr32(base + i * 4, v)
         wr32(base + len(new) * 4, 0)
         print(f"  {tag}: {ln} -> {len(new)} entries")
-    wr32(ID2POS + 0x05 * 4, 0)
-    for idv in range(0x20):
-        pos = u32(ID2POS + idv * 4)
-        if idv != 0x05 and pos > SPAT_POS:
-            wr32(ID2POS + idv * 4, pos - 1)
-    print("  ID2POS rebuilt (id 0x05 -> 0)")
+    # FX1 has its OWN separate id->position table (FX1_ID2POS, 0x400d60d0) --
+    # NOT shared with FX2's ID2POS despite identical stock values. Confirmed
+    # 2026-09-14 (NOTES.md Session 56) by disassembling the FX1 chooser's own
+    # highlight code, which reads FX1_ID2POS, not ID2POS. Missing this left
+    # FX1 highlighting off by one for every id past SPAT_POS (select COMB,
+    # COMPRESSOR highlights; select COMPRESSOR, LOFI highlights; select LOFI,
+    # nothing highlights -- position 10 doesn't exist in FX1's 10-entry list).
+    for tbl in (ID2POS, FX1_ID2POS):
+        wr32(tbl + 0x05 * 4, 0)
+        for idv in range(0x20):
+            pos = u32(tbl + idv * 4)
+            if idv != 0x05 and pos > SPAT_POS:
+                wr32(tbl + idv * 4, pos - 1)
+    print("  ID2POS + FX1_ID2POS rebuilt (id 0x05 -> 0)")
 
     OUT.write_bytes(bytes(img))
     changed = sum(1 for a, b in zip(stock, img) if a != b)

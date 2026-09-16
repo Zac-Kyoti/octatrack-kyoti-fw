@@ -31,7 +31,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 DSP_ASM = ROOT / "vendor/dsp56300/build/source/dsp_host/dsp_asm"
 DSP_HOST = ROOT / "vendor/dsp56300/build/source/dsp_host/dsp_host"
 DIS = ROOT / "vendor/dsp56300/build/source/disassemble/dsp56kDisassemble"
-MODMAP = ROOT / "refs/octabam/tools/dsp_modmap.py"
+MODMAP = ROOT / "refs/octabam/tools/build/dsp_modmap.py"
 SRC = ROOT / "tools/patch_sc_dsp3.asm"
 SCRATCH = ROOT / "out/dsp"
 RTS_ADDR = 0
@@ -43,11 +43,16 @@ PATCHED = "--patched" in sys.argv
 if PATCHED:
     MEM_B = SCRATCH / "payload_B_sc3.mem"
     CAVE_ORG = 0x868                    # SPATIALIZER P addr, payload B
-    COMP_MOD, COMP_PROC, COMP_TAIL = 0x1864, 0x1871, 0x1915
+    COMP_MOD, COMP_PROC = 0x1864, 0x1871
+    COMMIT_HOOK = 0x303                  # dispatcher's per-track commit step
 else:
     MEM_B = ROOT / "out/dsp/payload_B.mem"
-    CAVE_ORG = 0x1da0
-    COMP_MOD, COMP_PROC, COMP_TAIL = 0x1864, 0x1871, 0x1b55
+    # was 0x1da0 -- moved under 0xfff so the zz17/zz20 -> zz18 `jsr` (Session
+    # 59/60's word-budget rescue) stays in dsp_asm's short-jsr range; matches
+    # --patched's CAVE_ORG so this isolation placement is proven collision-free.
+    CAVE_ORG = 0x868
+    COMP_MOD, COMP_PROC = 0x1864, 0x1871
+    COMMIT_HOOK = 0x303
 KB_BASE = 0x800
 Q23 = 1 << 23
 NW = 30                                 # dsp_host caps n7 at 15 frames = 30 words
@@ -109,9 +114,14 @@ def assemble():
     total = len(words)
     if total > 261:
         sys.exit(f"cave {total} words > SPATIALIZER donor's 261")
-    # rts positions delimit the three routines
+    # rts positions delimit the three routines. scdet now has THREE internal
+    # rts (zz16's, zz20's, and zz18's -- the shared OFF-publish sub zz17/zz20
+    # both `jsr` into, added to reclaim word budget for moncommit's exact-
+    # match fix): rts[0] = sctap's own, rts[3] = zz18's (last in source order,
+    # so moncommit/HOOK 3 starts right after it). See build_sidechain3.py's
+    # matching comment.
     rts = [i for i, w in enumerate(words[:n]) if w == 0x00000c]
-    sctap, scdet, sctail = CAVE_ORG, CAVE_ORG + rts[0] + 1, CAVE_ORG + rts[2] + 1
+    sctap, scdet, sctail = CAVE_ORG, CAVE_ORG + rts[0] + 1, CAVE_ORG + rts[3] + 1
     global RTS_ADDR
     RTS_ADDR = CAVE_ORG + rts[0]                       # sctap's own rts -- a safe -init
     # round-trip sanity on the code region
@@ -150,11 +160,16 @@ def ensure_patched_mem(words):
             if x != y:
                 sys.exit(f"--patched cave word {k} differs: image 0x{x:06x} vs asm 0x{y:06x}")
     cmod = next(m for m in mods if m[0] == 0 and m[1] == COMP_MOD)
-    for off, nm in ((COMP_PROC, "scdet"), (COMP_TAIL, "sctail")):
-        w = cmod[2][off - COMP_MOD]
-        if w >> 12 != 0x0D0:
-            sys.exit(f"--patched: COMPRESSOR P:0x{off:x} is 0x{w:06x}, not `jsr` to the cave")
-    print(f"  --patched: cave + scdet/sctail detours verified against {imgp.name}")
+    w = cmod[2][COMP_PROC - COMP_MOD]
+    if w >> 12 != 0x0D0:
+        sys.exit(f"--patched: COMPRESSOR P:0x{COMP_PROC:x} is 0x{w:06x}, not `jsr` to the cave")
+    # moncommit's detour lives in the DISPATCHER module, not the compressor's --
+    # find whichever loaded module actually contains it.
+    dmod = next(m for m in mods if m[0] == 0 and m[1] <= COMMIT_HOOK < m[1] + len(m[2]))
+    w = dmod[2][COMMIT_HOOK - dmod[1]]
+    if w >> 12 != 0x0D0:
+        sys.exit(f"--patched: dispatcher P:0x{COMMIT_HOOK:x} is 0x{w:06x}, not `jsr` to the cave")
+    print(f"  --patched: cave + scdet/moncommit detours verified against {imgp.name}")
 
 
 def r7_of(mem):
@@ -167,7 +182,13 @@ def r7_of(mem):
     return int(m.group(1), 16)
 
 
-def base_mem(words, scdet, sctail, patch_tail, xseed, yseed):
+def base_mem(words, scdet, moncommit, patch_tail, xseed, yseed):
+    # `moncommit`/`patch_tail` are unused here in isolation mode: moncommit no
+    # longer lives inside the compressor module (it's a dispatcher-level hook
+    # now, NOTES.md Session 58), so there is nothing of it to splice into
+    # COMP_MOD. Kept as a parameter only so existing call sites (all pass
+    # `moncommit, False`) don't need touching; see emu_sc_dsp3_moncommit.py
+    # for moncommit's own isolated test, which builds its own mem directly.
     mods = load_mem(MEM_B)
     if not PATCHED:
         for m in mods:
@@ -176,11 +197,6 @@ def base_mem(words, scdet, sctail, patch_tail, xseed, yseed):
                 assert (m[2][i], m[2][i + 1]) == (0x221e00, 0x346100), \
                     f"comp proc+0 not [move r0,n6 ; move #61,r4]: {m[2][i]:06x} {m[2][i+1]:06x}"
                 m[2][i], m[2][i + 1] = 0x0bf080, scdet         # jsr scdet (long, test only)
-                if patch_tail:
-                    j = COMP_TAIL - COMP_MOD
-                    assert (m[2][j], m[2][j + 1]) == (0x0a77a0, 0x00000f), \
-                        f"comp proc-end not `move m0,x:(r7+$f)`: {m[2][j]:06x} {m[2][j+1]:06x}"
-                    m[2][j], m[2][j + 1] = 0x0bf080, sctail    # jsr sctail
                 break
         mods.append([0, CAVE_ORG, list(words)])                # PATCHED: already in .mem
     mods.append([1, 0x20c, [15]])                      # n7 = frames (headless ctx = 0)
@@ -231,8 +247,11 @@ def ref_gain(src, kgain):
 
 
 def ref_svf(src, kflt, lp=0, bp=0):
-    """mono-sum (L+R)/2, one-pole-pair Chamberlin SVF, q=1, dup L/R.
-    src is interleaved L/R; returns interleaved, same length."""
+    """mono-sum (L+R)/2, one-pole-pair Chamberlin SVF, q=2 (Session 64 --
+    overdamped so both LP and HP are real-pole/non-resonant across the whole
+    FTAB range; was q=1, which rang on fast transients -- see patch_sc_dsp3.asm's
+    KEY FLT header), dup L/R. src is interleaved L/R; returns interleaved,
+    same length."""
     if kflt < 64:
         idx, is_lp = kflt >> 1, True
     else:
@@ -242,7 +261,7 @@ def ref_svf(src, kflt, lp=0, bp=0):
     for k in range(0, len(src) - 1, 2):
         inp = (s24(src[k]) + s24(src[k + 1])) >> 1
         lp = lp + ((f * bp) >> 23)
-        hp = inp - lp - bp
+        hp = inp - lp - 2 * bp
         bp = bp + ((f * hp) >> 23)
         o = lp if is_lp else hp
         o = max(-Q23, min(Q23 - 1, o)) & 0xFFFFFF
@@ -345,6 +364,47 @@ def main():
     check("block 2 continues the SVF", close(x40[:NW], exp2[:NW], 3),
           f"got[:4]={[s24(v) for v in x40[:4]]} exp[:4]={[s24(v) for v in exp2[:4]]}")
 
+    # 4b. NO RESONANCE (Session 64): hardware report was audible ringing on a
+    # fast-transient kick that tracked KFLT position -- q=1 (textbook
+    # Chamberlin damping) is UNDERdamped (complex/oscillatory poles) at the
+    # upper end of the FTAB range. Fixed to q=2 (patch_sc_dsp3.asm's KEY FLT
+    # header has the full derivation). Test the actual mathematical property
+    # directly -- both LP and HP read off the SAME 2-state system
+    # (lp'=lp+f*bp, hp=in-lp'-q*bp, bp'=bp+f*hp), whose state-transition
+    # matrix is [[1,f],[-f, 1-f*(f+q)]]; its eigenvalues (poles) are REAL
+    # (no possibility of oscillation, by definition -- a complex pole pair is
+    # what ringing/resonance IS) iff the characteristic discriminant
+    # trace^2 - 4*det >= 0. An impulse-response TIME-DOMAIN shape check was
+    # tried first and produced false failures: a real-pole pair with two
+    # different decay rates can show a small secondary "shoulder" after its
+    # first zero-crossing (one exponential term overtaking the other) before
+    # its final monotonic decay -- normal for real poles, not evidence of
+    # resonance, and indistinguishable from real ringing by shape heuristics
+    # alone. The discriminant is the actual criterion; check it exactly, for
+    # every FTAB entry (not just spot values).
+    print("\nKEY FLT no resonance (real poles, not just 'small', for every FTAB entry):")
+    q = 2
+    all_real = True
+    worst = None
+    for idx in range(sc_tables.FLT_N):
+        f = s24(FLT_T[idx]) / Q23
+        tr = 2 - f * f - f * q
+        det = 1 - f * q
+        disc = tr * tr - 4 * det
+        if disc < 0:
+            all_real = False
+        if worst is None or disc < worst[1]:
+            worst = (idx, disc)
+    # idx 0 (the lowest cutoff, ~40 Hz, smallest f) is always the tightest
+    # margin: disc -> 4f^2 as f -> 0, so it shrinks toward (but, for any f>0,
+    # never reaches) the f=0 degenerate double-root case -- small numerically,
+    # not fragile: it's an exact algebraic fact about this discriminant, not
+    # floating-point noise, and nothing here runs in floating point on the
+    # real DSP anyway (this check is offline analysis of the fixed q=2/coefficient
+    # choice, not a runtime computation).
+    check(f"all {sc_tables.FLT_N} FTAB indices give real (non-oscillating) poles at q={q}",
+          all_real, f"worst-case discriminant idx={worst[0]} disc={worst[1]:.3e}")
+
     # 5. SC LISTEN stash (scdet -> keybus gen 1) --------------------------
     print("\nSC LISTEN:")
     mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)], [(1, S18, [0])])
@@ -355,6 +415,32 @@ def main():
     mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)], [(1, S18, [0])])
     (g1,) = run(mem, scdet, [('y', SLOT + 0x20, SLOT + 0x40)], P(key=KEYV, mon=0), pokey=pk_sig)
     check("MON=0: keybus[0] gen1 untouched", all(v == 0 for v in g1))
+
+    # 6. MON publish (scdet -> MON_ON[my track]/MON_KEY[my track], Y:0x800+
+    #    track*0x80+0x40/0x41 -- the moncommit hook's only input) ------------
+    print("\nMON publish (scdet -> MON_ON/MON_KEY for moncommit):")
+    MYTRACK = 3
+    MON_ADDR = KB_BASE + MYTRACK * 0x80 + 0x40   # this track's own dead gen-2 slot
+    mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
+                   [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [0xdead, 0xdead])])
+    (pub,) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2)], P(key=KEYV, mon=1), pokey=pk_sig)
+    # MON_ON is only ever gated by `tst` (nonzero = on) in moncommit, never
+    # compared for an exact value -- `move #1,b`'s short-immediate encoding
+    # is left-aligned (this file's own documented dsp_asm quirk, q2) and
+    # actually loads 0x10000, not 1. Harmless (still nonzero), and switching
+    # to the long form costs a P-word this cave has none to spare (261/261).
+    check("MON=1: MON_ON!=0, MON_KEY==key track", pub[0] != 0 and pub[1] == K,
+          f"got={pub}")
+
+    mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
+                   [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [1, K])])
+    (pub,) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2)], P(key=KEYV, mon=0), pokey=pk_sig)
+    check("MON=0: MON_ON published OFF", pub[0] == 0, f"got={pub}")
+
+    mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
+                   [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [1, K])])
+    (pub,) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2)], P(key=0, mon=1), pokey=pk_sig)
+    check("KEY=0: MON_ON published OFF (even with MON=1)", pub[0] == 0, f"got={pub}")
 
     print()
     if fails:

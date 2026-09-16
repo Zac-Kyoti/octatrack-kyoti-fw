@@ -93,7 +93,13 @@ NOP = 0x000000
 #  every id past position 7 shifts down one.
 FX1_LIST, FX1_LEN = 0x400d6060, 11
 FX2_LIST, FX2_LEN = 0x400d6090, 15
-ID2POS = 0x400d6150
+FX1_ID2POS = 0x400d60d0   # FX1's OWN copy -- a separate table from ID2POS below,
+                          # NOT shared with FX2 despite the identical stock values;
+                          # confirmed 2026-09-14 (NOTES.md Session 56) by disassembling
+                          # the FX1 chooser's own highlight code, which reads THIS
+                          # table, not ID2POS -- rebuilding only ID2POS left FX1
+                          # highlighting off by one for every id past SPAT_POS
+ID2POS = 0x400d6150       # FX2's own copy
 SPAT_P = 0x400d4904 + 0x38          # the SPATIALIZER descriptor pointer in the lists
 SPAT_POS = 7
 
@@ -291,16 +297,19 @@ def main():
         wr32(base + len(new) * 4, 0)                              # new terminator
         print(f"  {tag} chooser: {ln} -> {len(new)} entries (SPATIALIZER dropped)")
 
-    # ID2POS: id 0x05 -> 0 ; every id at a cursor position > SPAT_POS shifts down 1
-    wr32(ID2POS + 0x05 * 4, 0)
-    moved = []
-    for idv in range(0x20):
-        pos = u32(ID2POS + idv * 4)
-        if idv != 0x05 and pos > SPAT_POS:
-            wr32(ID2POS + idv * 4, pos - 1)
-            moved.append((idv, pos, pos - 1))
-    print(f"  ID2POS: id 0x05 -> 0; shifted {len(moved)} entries down "
-          f"({', '.join(f'0x{i:02x}:{a}->{b}' for i, a, b in moved)})")
+    # ID2POS (FX2) + FX1_ID2POS (FX1's own, separate copy): id 0x05 -> 0 ; every id
+    # at a cursor position > SPAT_POS shifts down 1. Both tables, same transform --
+    # they are NOT the same table despite matching stock values.
+    for tag, tbl in (("FX2 ID2POS", ID2POS), ("FX1 ID2POS", FX1_ID2POS)):
+        wr32(tbl + 0x05 * 4, 0)
+        moved = []
+        for idv in range(0x20):
+            pos = u32(tbl + idv * 4)
+            if idv != 0x05 and pos > SPAT_POS:
+                wr32(tbl + idv * 4, pos - 1)
+                moved.append((idv, pos, pos - 1))
+        print(f"  {tag}: id 0x05 -> 0; shifted {len(moved)} entries down "
+              f"({', '.join(f'0x{i:02x}:{a}->{b}' for i, a, b in moved)})")
 
     OUT.write_bytes(bytes(img))
     changed = sum(1 for a, b in zip(stock, img) if a != b)

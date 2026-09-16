@@ -234,70 +234,32 @@ sounding keeps playing under its own AMP envelope; only new trigs are suppressed
 5. Switch **DT → OT+FX** live while a muted voice is ringing — it should adopt the
    `OT+FX` behaviour on the next mute.
 
-### 4.5  DIRECT JUMP  (`build_directjump_v4.py` — crash-free as of Session 64; playhead-preservation bug found + fixed (Session 66), NOT yet reflashed — see below, READ BEFORE FLASHING)
+### 4.5  DIRECT JUMP  (`build_directjump_v4.py` — v1/v2/v3 FLASHED 2026-09-14/15, DID NOTHING; root cause found, v4 fixes it, NOT yet reflashed — see below, READ BEFORE FLASHING)
 
-**History (Sessions 60-64), briefly**: `DIRECTJUMP_V3` was flashed and did
-nothing (stock `[PTN]`-held UI overlay NULLs the `[YES]` dispatch slot); v4
-fixed that. That v4 threw a hardware exception (`VEC:04 ADDR 0x400BF0F2`)
-after a few `[PTN]` presses, **twice**, on two different attempted fixes to
-the toast-close hook — the actual cause was a stack-discipline bug (a
-displaced `pea` instruction's pushed value being consumed by a stray `rts`
-instead of surviving as an argument for the code after it). **Fixed in
-Session 64, confirmed on hardware in Session 66 (no exception after
-repeated `[PTN]` presses).**
+**⚠️ DIRECTJUMP_V3 was flashed and had NO effect whatsoever** — no toast, no
+toggle, the combo did literally nothing, on a unit otherwise working normally.
+**Root cause found (NOTES.md "Session 60"), and it's stock, structural
+behaviour, not a bug in any patch here**: holding **[PTN]** unconditionally
+pushes a small stock UI overlay layer (`0x400bf0f2`) whose own `[YES]` record
+has a NULL press handler. The runtime key-dispatch table entry for `[YES]`
+gets overwritten with that NULL for as long as `[PTN]` is held — v1/v2/v3 all
+detour the *stock* `[YES]` handler (`0x4005e4c8`), which that NULLed table
+entry never reaches. **This is genuinely dead code while the chord is being
+held**, confirmed by running the real, unmodified firmware's own layer-push
+code under emulation (`tools/emu_directjump_v4.py`), not just by reasoning
+about the disassembly.
 
-**⚠️ Then (Session 66): with DIRECT JUMP ON, a manual pattern change always
-started the new pattern at step 1**, not at the playhead position — the
-original Session-60 complaint, untested until now since every flash in
-between hit the crash before this could be exercised.
-
-**Root cause (NOTES.md "Session 66")**: the master step counter
-(`DAT_800065b6`) was being set correctly all along — the bug was one level
-deeper. Traced where the per-track phase state Session 61 investigated
-(`0x800065e4[track]` / `0x80006604[track]`) is actually *consumed*, not just
-computed: `0x80006604[track]` turns out to be a genuine free-running
-per-track phase accumulator, read by a completely separate function
-(`0x400a3ca6`) that fires a trig for that track whenever the counter wraps.
-Session 61's fix ("leave D7 untouched") left D7 at stock's own default — the
-**full new-pattern length** — which seeds every track's phase as "the
-transport just started fresh," regardless of where the master step claims
-to be. That's the actual, direct cause of "always starts at step 1."
-
-**Fix**: `dj_c` now re-derives D7 as `(resumeStep) * DAT_80006628` — exactly
-stock's own formula (`LEN_TBL[newScale] * DAT_80006628`), with the *resume*
-step standing in for the full length, so every track's phase is seeded as
-"already `resumeStep` steps into the new pattern" instead of "just started."
-(Session 60's very first build also wrote D7, but with the raw, un-scaled
-step index — Session 61 correctly caught that unit mismatch but overcorrected
-by removing the write entirely instead of fixing the scaling; this session
-restores the write with the missing `* DAT_80006628` factor.)
-
-Verified: `tools/emu_directjump.py`'s `dj_c` test now seeds a non-1 tick
-multiplier specifically so the multiplication is a non-vacuous check, and
-asserts the exact expected `D7` value (alongside the master-step assertions)
-across shorter/longer/same-length new-pattern scenarios. All four build
-variants rebuilt and passing.
-
-1. **Press `[PTN]` a few times in a row FIRST**, on its own — confirm no
-   exception (should already be solid per Session 64/66, but cheap to
-   re-check on a fresh flash).
-2. Hold **[PTN]** and tap **[YES]** → a transient **"DIRECT JUMP ON"** overlay
-   (~0.7 s / ~68 frames), then **OFF** on the next chord. The SELECT PATTERN
-   chooser must not pop on the [PTN] release. Release [PTN] while the toast
-   is still up → it should vanish almost immediately, not linger.
-3. **With DIRECT JUMP ON, play a pattern and manually cue another with
-   identical trigs** (e.g. kick on steps 1/5/9/13 in both): the switch
-   should be **inaudible** — same step position, same timing, no glitch or
-   reset. Then try patterns with *different* content to confirm the switch
-   happens on the next step tick, keeps the step position (modulo the new
-   pattern's length), and loads the new Part at once. A MIDI Program Change
-   goes out ~1 step early.
-4. The **arranger** and **pattern chains** must be unchanged (DIRECT JUMP
-   bails when the arranger is running or a chain is active).
-5. Turn it **OFF** → manual pattern changes are stock (end-of-pattern
-   quantised, restart at step 1).
-6. **[PTN] tapped alone** (no [YES]) still opens SELECT PATTERN normally —
-   v4 doesn't touch that path.
+**Fix (`build_directjump_v4.py`, `patch_directjump.s` `--defsym DJ_KEYMAP=1`)**:
+no detour on `0x4005e4c8` at all. The build instead writes `dj_toggle`'s
+address directly into that overlay layer's own `[YES]` record, so the exact
+same stock rebuild that used to zero the runtime dispatch slot now points it
+at our toggle. Verified two ways: (1) `tools/emu_directjump_v4.py` runs the
+real `FUN_4005a044` ([PTN] press) + the real layer-push/table-rebuild code
+against both the v3 image (reproduces the dead slot) and the v4 image
+(dispatch slot → `dj_toggle`, then actually `jsr`s it and confirms the toggle,
+re-checksum, and toast all fire) — the closest thing to a hardware round-trip
+this project's emulator harnesses do; (2) a byte-diff assertion that v4
+touches exactly v3's cave + the one 4-byte record field, nothing else.
 
 **⚠️ Likely shared root cause, NOT yet fixed**: `patch_reload2.s`'s `rl_yes`
 (the `RELOAD FROM PROJECT` `[PTN]`-hold picker's `[YES]` confirm) detours the
@@ -307,30 +269,108 @@ identical reason. It just hasn't been flash-tested yet (queued behind
 DIRECTJUMP). Worth the same kind of keymap-slot fix before it's ever flashed
 standalone or in `build_merged.py`.
 
+1. Hold **[PTN]** and tap **[YES]** → a transient **"DIRECT JUMP ON"** overlay
+   (~0.7 s / ~68 frames), then **OFF** on the next chord. The SELECT PATTERN
+   chooser must not pop on the [PTN] release.
+2. With DIRECT JUMP **ON**, play a pattern and manually cue another (different
+   Part): it should switch on the **next step tick**, keep the **step position**
+   (modulo the new pattern's length), and load the new Part at once. A MIDI
+   Program Change goes out ~1 step early.
+3. The **arranger** and **pattern chains** must be unchanged (DIRECT JUMP bails
+   when the arranger is running or a chain is active).
+4. Turn it **OFF** → manual pattern changes are stock (end-of-pattern quantised,
+   restart at step 1).
+5. **[PTN] tapped alone** (no [YES]) still opens SELECT PATTERN normally —
+   v4 doesn't touch that path.
+
 > Five further hardware-only unknowns are in `NOTES.md` "Session 15 continued" /
 > "Session 21 continued"; `DJ_TOAST_DUR` (default 0x44, ~68 frames) may need one
 > tweak after a HW listen. v1/v2/v3 (`build_directjump.py`/`_v2`/`_v3.py`) are
 > kept for reference but should not be reflashed — they reproduce the dead combo.
 
-### 4.6  Side-chain compressor  (`build_sidechain2.py` / `_3` — emulator only, never flashed)
+### 4.6  Side-chain compressor  (`build_sidechain3.py` — ducking + chooser + transport all HARDWARE-CONFIRMED; KEY FLT rebuilt non-resonant 2026-09-15, MKI, NOT yet reflashed)
 
-`build_sidechain2.py` **donates SPATIALIZER** for DSP code space and removes it
-from the FX1/FX2 choosers; a legacy project using SPATIALIZER shows "SPAT" and
-passes audio through.
+`SIDECHAIN3` **donates SPATIALIZER** for DSP code space and removes it from the
+FX1/FX2 choosers; a legacy project using SPATIALIZER shows "SPAT" and passes
+audio through.
 
-1. On a track with a **COMPRESSOR**, page 2 now has **`KEY`** (`OFF` / `T1..T4` or
-   `T5..T8` for that track's DSP core). Choose a track that has an obvious rhythm
-   (a kick).
+1. On a track with a **COMPRESSOR**, page 2 now has **`KEY`** (after the `RMS`
+   gap), then `KFLT`, `KGN`, `MON`. `KEY` = `OFF` / `T1..T4` or `T5..T8` for that
+   track's DSP core.
 2. Trigger the key track and the compressor track together → the compressor
-   ducks in time with the key, **even when the key track is muted**.
+   ducks in time with the key, even when the key track is muted. **Confirmed
+   working 2026-09-14** — needs page-1 threshold/ratio/attack/release tuned by
+   ear first (the compressor's own gain-computation chain is untouched by any
+   of this project's fixes).
 3. `KEY = OFF` → the compressor keys off its own input (stock).
-4. `build_sidechain3.py` adds `KEY FLT` (LP/OFF/HP 2-pole SVF), `KEY GAIN`
-   (±24 dB into the detector) and `SC LISTEN` (monitor the processed key).
-   Calibrate `tools/sc_tables.py` (gain law / filter range) after a listen.
+4. **`KFLT` (LP/OFF/HP 2-pole SVF) — damping changed `q=1` -> `q=2` 2026-09-15,
+   NOT YET HARDWARE-TESTED.** `KFLT` sits BEFORE the compressor's own
+   detector, so this filter shapes both SC LISTEN's audio AND the signal that
+   actually drives gain reduction. `q=1` (the prior value) is proven
+   UNDERdamped — complex/resonant poles at the upper end of the cutoff
+   range — confirmed both by a hardware report (audible ringing on a kick,
+   tracking KFLT position, worse away from OFF) and independently by solving
+   this loop's own characteristic equation. `q=2` is proven to give REAL
+   (non-oscillatory) poles for **every one of the 32 FTAB entries**, not just
+   spot-checked ones (NOTES.md Session 65 has the full derivation and the
+   worst-case margin). Should now roll off cleanly in whichever direction,
+   at the existing slope, with **no resonant peak/ring anywhere in its
+   range** — that is the specific thing to listen for on this flash. `KGN`
+   (±24 dB into the detector) unaffected, still sounds noticeably better as
+   of the Session 55 dirty-state fix.
+5. **`MON` (SC LISTEN, monitor the processed key) — transport-safe as of
+   2026-09-15 (Sessions 59/61).** No ringing at `KFLT` `OFF` was already
+   hardware-confirmed (Session 63) before the q=2 change above; that
+   confirmation stands (OFF bypasses KEY FLT entirely, untouched by this
+   fix). What's newly at stake on this flash is whether KFLT itself, now
+   non-resonant by construction, actually sounds clean through its full
+   range — Session 63's "it's just normal filter resonance" verdict was
+   correct about the CAUSE but overturned on functional grounds (a resonant
+   sidechain key source is a real defect, not just an audition quirk); this
+   flash is the fix for that, not a re-confirmation of something already closed.
 
-> HW test plans: `NOTES.md` "Session 17 continued (8)" and "Session 36".
+The sequencer-transport regression this build caused on its first two flashes
+(PLAY not starting playback, cycling step LEDs instead) is fixed and
+**hardware-confirmed healthy** as of the 2026-09-15 flash — two independent
+causes, a register-clobber bug (Session 59) and an uninitialized-Y-memory-slot
+hazard in the `moncommit` hook (Session 61). Not touched by the q=2 change
+(same `moncommit`/`scdet` register discipline, one extra `sub` inside KEY
+FLT's own loop only) — no reason to expect a transport regression from this
+flash, but confirm PLAY is healthy first anyway, as always with this build.
+
+> HW test plans: `NOTES.md` "Session 17 continued (8)" and "Session 36"; the
+> full MON/KFLT investigation trail is Sessions 55/57/58/59/61/63/65 (58 is
+> the dispatcher-level redesign, 59 is the register-clobber transport fix, 61
+> is the uninitialized-Y-slot transport fix, 63 diagnosed the ringing as
+> ordinary filter resonance — correct diagnosis, but the user overturned the
+> "not a bug" conclusion on functional grounds, since this filter also feeds
+> the compressor's detector — 65 is the q=2 fix making KEY FLT provably
+> non-resonant everywhere in its range).
 > Power-cycle after the flash before judging audio — an OS upgrade doesn't clear
 > the DSP state RAM (see §6 (a-bis)).
+
+#### 4.6b  Chooser-highlight bug — RESOLVED 2026-09-14, fixed in `build_sidechain3.py`
+
+**Was**: only in the Effect 1 chooser, selecting COMB highlighted COMPRESSOR (the
+entry below); selecting COMPRESSOR highlighted LOFI; selecting LOFI highlighted
+nothing. No other entry affected, and confirmed NOT reproducible on stock firmware
+(ruling out the earlier "copy action" theory — see NOTES.md Session 55 for that
+now-superseded trail).
+
+**Root cause (NOTES.md Session 56)**: FX1 and FX2 each have their OWN, separate
+id->position table for chooser cursor placement — `0x400d60d0` (FX1) and
+`0x400d6150` (FX2, what the build scripts call `ID2POS`) — sitting back to back in
+ColdFire data with byte-identical stock values, which is exactly why this was missed
+the first time (Session 55 rebuilt only `0x400d6150` when removing SPATIALIZER from
+the choosers). FX1's copy was left stale, one position too high for every id past
+SPATIALIZER's old slot — matching the symptom exactly, including the total breakdown
+at LOFI (whose stale position, 10, doesn't exist in FX1's new 10-entry list at all).
+
+**Fixed**: `build_sidechain2.py`/`build_sidechain3.py` now rebuild both tables
+identically. Rebuilt, independently re-verified by reading both tables back out of
+the finished binary. **NOT yet reflashed** — flash the current
+`out/OCTATRACK_OS1.40C_SIDECHAIN3.syx` and confirm COMB/COMPRESSOR/LOFI all
+highlight correctly in the FX1 chooser now.
 
 ### 4.7  RELOAD FROM PROJECT  (`build_reload.py` / `build_reload2.py` — emulator only, never flashed)
 

@@ -88,7 +88,7 @@ these into another tool; read them from a build run.
 | Region | What |
 |---|---|
 | `0x400d5ac8–0x400d5ba3` | COMPRESSOR descriptor slots 8–11 (`KEY` / `KFLT` / `KGAIN` / `MON`) |
-| `0x400d607e–0x400d61c3` | FX1/FX2 chooser lists + `ID2POS` (SPATIALIZER pulled) |
+| `0x400d607e–0x400d61c3` | FX1/FX2 chooser lists + id->position tables (SPATIALIZER pulled). **Two separate id->position tables live here, not one**: `0x400d60d0` is FX1's OWN copy, `0x400d6150` (called `ID2POS` in the build scripts) is FX2's — identical stock values made this easy to miss (Session 55 fixed FX2's copy only; Session 56 found and fixed FX1's). Any future edit to these lists must rebuild BOTH. |
 | DSP payload A `0x400e2324+`, B `0x400f59ef+` | SPATIALIZER donor cave + `sctap`/`scdet`/`sctail` hooks + `X:0x215[5]` null-stub. **Separate address space — zero ColdFire interaction.** |
 
 ---
