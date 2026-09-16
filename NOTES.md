@@ -12608,3 +12608,176 @@ slot into the compressor track's own SC LISTEN'd input on a recurring
 per-frame basis (a genuine externally-sourced feed, not a decay artifact).
 
 Archive builds and status unchanged from Session 68 -- do not reflash yet.
+
+## Session 69 (2026-09-16, `wip`) — DIRECT JUMP: root cause FOUND dynamically (a stale, mischaracterized multiplier + two arrays `dj_c` never touches) — NOT YET FIXED, NOT flashed
+
+**Followed Session 67's HANDOFF exactly**: built the full-firmware dynamic test
+it specified (`tools/emu_rtos.py` against a real project, injecting a manual
+pattern change by poking `PEND_PAT`/`PEND_BANK` mid-run, watching per-track
+state and hooking `FUN_400a536c`) instead of continuing isolated single-
+function Unicorn tests. It found the real bug. **No code under
+`tools/patch_directjump.s` changed this session** — this is a diagnosis
+HANDOFF, per the user's explicit instruction not to propose a third hardware
+flash without dynamic proof a fix actually works.
+
+### 0. A real infra bug, fixed first (blocked ALL dynamic testing silently)
+
+`refs/octabam/.venv/lib/unicorn-emac/libunicorn.2.dylib` (the EMAC-patched
+Unicorn route A requires) was built **6 Sep**, before the patch file
+`tools/patches/unicorn_emac_fractional.patch` it's built from was last
+revised (**12 Sep**) — stale by six days. `emu_bringup.emac_selftest()`
+failed silently-ish (a clear error message, but nothing had ever actually
+tried to run route A since the 12 Sep patch revision, so this had never been
+caught): every `tools/emu_rtos.py` invocation this session refused to run
+at all until rebuilt. Fixed: `( cd refs/octabam && PY=$(command -v python3)
+bash scripts/build_unicorn.sh )` — self-test now passes. **Lesson for next
+time**: a `refs/octabam` re-sync (`tools/refs/sync.py`) can silently move
+`tools/patches/*.patch` out from under an already-built local artifact;
+`build_unicorn.sh` needs re-running after any refs sync that touches that
+patch file, not just once at setup.
+
+### 1. Built `tools/emu_directjump_dynamic.py`
+
+Drives real playback (`~/Desktop/OT Backup/KYOTI/OT DEMO`, the same default
+project `tools/emu_rtos.py` uses) via full-firmware route A, pokes
+`PEND_PAT`/`PEND_BANK` mid-run exactly as a real `[PTN]`+trig press would at
+the memory level, and watches (with independent per-address hook closures —
+`Rtos.watch_mem()` looks up `self.mem_writes` fresh on every hit, so calling
+it twice silently merges both hooks into the SECOND call's list; worth
+knowing for anyone else building on top of `emu_rtos.py`) `0x80006604`
+(`dj_c`'s seed target), `0x80006500` (Session 67's untraced gate),
+`0x800065c3` (trig-fire countdown), `0x800065e4` (audio per-track step), and
+a code hook on `FUN_400a536c` itself. Two conditions per run: `DJ_MODE`
+poked to 1 (functionally identical to the `[PTN]`+`[YES]` combo) vs left at
+its image default 0 (stock reference), same image
+(`out/mainos_directjump_v4.bin`), same poke, same frame.
+
+### 2. `press_play_live()` (the M6d real-PLAY-key route) silently no-ops on a real project
+
+`0x80000029` — the byte PLAY's handler tests first, `beqs` a bare `rts` if
+clear (`RTOS_FORK.md` §9.4) — is `0x01` for octabam's own tiny validation
+fixture (`out/_testproj`) right after load, but stayed `0x00` for
+`OT DEMO` even after a 20-second load budget (ruled out as a load-timing
+issue by direct measurement, not assumption). `press_play_live()` returned
+`D0=0x4` (an early-exit code) and `TRANSPORT`/`STEP` never moved, even over
+6000 frames (~2.2 s of audio). **This is a previously-undocumented gap**:
+the M6d PLAY-injection route has only ever been measured against octabam's
+own minimal fixture project, never a real one. Forcing `0x80000029=1` before
+calling `press_play_live()` got a different `D0` (`0x1`) but STILL never
+armed the trig-fire countdown (see below) — identical numbers to the
+fallback path, so PLAY's handler evidently reaches the same tail call either
+way once its own front gate is satisfied.
+
+**Working alternative, used for everything below**: `start_transport_live()`
+(the M6c direct `FW_TRANSPORT`/`FW_START_TRACK` route, bypassing PLAY's own
+front-end entirely) correctly advances the real master step register
+(`STEP`, `0x800065b6`) against the real project — calibrated at ~57.7
+frames/step for `OT DEMO`'s bank 0 pattern 0 (a 6-step pattern), confirmed
+across 4+ full pattern-loop wraps.
+
+### 3. Session 67 lead #1 RESOLVED: `0x80006500[track]` is a static "track active" flag, not a bug candidate
+
+Watched across 1100+ frames of real playback including a switch: written to
+`0x01` for all 8 tracks exactly once, at frame 0 (`FW_START_TRACK`'s own
+init, PC `0x4009c260`), and again once more at the switch commit (PC
+`0x400a4c2e`, DJ_MODE=1 run only — stock doesn't re-touch it). Never
+transitions to any other value. **Confirms Session 67's own "working
+hypothesis, untested" outright**: it is "this track is playing," set once,
+not a per-tick timing gate a manual jump needs to manipulate. Ruled out.
+
+### 4. THE ROOT CAUSE: `dj_c` multiplies by the wrong constant, and never touches the array real trig dispatch actually reads
+
+**a) `D7`'s multiplier is mischaracterized — and it's provably always 0 for a normal pattern.**
+`patch_directjump.s` (Sessions 60-67) names `0x80006628` `TICKS_PER_STEP`,
+commented "stock's own per-step tick multiplier (usually 1)". But this
+project's OWN earlier, more careful static RE — Session 15, `NOTES.md`
+L2891/2921/3020/3027, written *before* any DIRECT JUMP code existed —
+already identified this exact address: **`_DAT_80006628` = active
+loop-region START, in BARS, normally 0** (`FUN_400a0570` sets the pending
+region; the commit copies pending→active; "normally start=0"; units are
+*loop repeats*, `iVar6 = _DAT_80006628 * patternLen`). Nobody cross-checked
+Sessions 60-67's new comment against Session 15's old, correct one. Dynamic
+proof: in the DJ_MODE=1 run, the pattern was at step 1 pre-poke; the switch
+committed at frame 461 (~1 step tick later — DIRECT JUMP's fast-switch
+timing dynamically confirmed for the first time under full-firmware route
+A, matching Sessions 66-67's hardware report); the committed `STEP` register
+correctly read back as `2` (the true resume step) — **but `0x80006604`
+(all 4 tracks it wrote) was set to literal `0x0`**, at PC `0x400a4924`
+(stock code, not `dj_c` — `dj_c`'s own hook site `0x400a4840` runs earlier).
+`resumeStep(2) * DAT_80006628(0) = 0` explains this exactly: `dj_c`'s D7
+write is silently neutered by its own multiplier being zero on any pattern
+without a custom LOOP FROM/TO region — i.e. almost always.
+
+**b) Even if D7 were fixed, `0x80006604`/`14` may be the wrong target array entirely.**
+Session 15's ORIGINAL design (`NOTES.md` L3030-3032, written before any
+build attempt) explicitly said the exit stub must rewrite **FOUR** things
+after a switch: `DAT_800065b6` (master step — `dj_c` DOES fix this, it's
+correct), `DAT_800065e4[]`/`DAT_800065f4[]` (per-track audio/MIDI step),
+`DAT_800065c3[]` (trig-fire countdown), and `DAT_80006604/14[]`. **`dj_c`
+(as built, Sessions 60-67) only ever touches the master step and attempts
+`0x80006604/14` via D7 — it never writes `0x800065e4/f4` or `0x800065c3` at
+all** (grepped `tools/patch_directjump.s`: zero references). Dynamic proof
+this matters: in the SAME DJ_MODE=1 switch, `0x800065e4[t]` (all 8 tracks)
+was written to `0x0` at frame 461, at PC `0x400a4916` AND `0x400a497a` (pure
+stock code — two separate stock write sites, unconditional) — i.e. **every
+track's own per-track step position is reset to pattern-start by stock's
+own switch-commit code regardless of `DJ_MODE`, and `dj_c` does nothing to
+stop it.** This is a direct, dynamically-measured match for the reported
+hardware symptom ("every manual pattern change resets the new pattern to
+step 1") that is **completely independent of the D7/multiplier bug above** —
+either one alone would produce exactly this symptom, which is presumably
+why two different attempts at fixing D7's value (Sessions 60/65) both
+failed identically on hardware: neither ever addressed this second array.
+
+**Reframing of Sessions 60-67's whole approach**: `0x80006604[track]`
+("dj_c's seeded per-track phase/tick counter", Session 61's characterization,
+carried forward through Session 67's handoff as lead #2) is very likely LOOP
+FROM/TO bookkeeping, not the general per-step trig-timing register — it's
+computed as `loop-region-start * patternLen`, which is 0 for any pattern
+without a custom loop region (the common case), *by design*, matching this
+session's own ordinary-playback calibration (`0x80006604` stayed all-zero
+through 4+ full pattern loops of normal, non-switching playback on this
+project's tracks — not a harness gap, just genuinely inert for a track using
+its full pattern length). Two sessions of fix attempts targeting this array
+may have been aimed at a register that mostly doesn't matter for ordinary
+(non-per-track-scaled, non-custom-loop-region) tracks — which is most
+tracks in most projects, matching the hardware report's "every manual
+pattern change", not "some".
+
+`0x800065c3[track]` (trig-fire countdown) was also watched across the same
+switch: idle at `0xff` (sentinel, "not armed") through ordinary play, then
+at the commit frame cycles `0x1` → `0x0` → (next step boundary) `0xff`
+again — some real per-track re-init activity happens here at switch time
+that ordinary play never exercises, but `FUN_400a536c` itself was never
+observed to fire in ANY run this session (ordinary play or across a switch,
+either DJ_MODE), so this session could not pin down its exact role or
+confirm/deny it as a THIRD contributor. Flagged, not resolved.
+
+### 5. Recommended next step (NOT done this session — no code changed)
+
+Extend `dj_c`'s fix (or add a hook right after the stock per-track step
+recompute completes, near `0x400a4aa2`/`LAB_400a4ba0`) to ALSO write
+`DAT_800065e4[t]` = `DAT_800065f4[t]` = `resumeStep % trackLen[t]` for every
+track (matching Session 15's original 4-array plan), and drop or fix the D7
+multiplier (either find the actual "ticks per step" constant, if one exists
+and is genuinely needed for `0x80006604/14`'s real purpose, or leave
+`0x80006604/14` alone entirely if Finding 4's reframing holds and it's just
+loop-region bookkeeping irrelevant to ordinary tracks). Per-track SCALE
+(`DAT_800065d3..e2`, "step limit" per NOTES L2918) means `trackLen[t]` can
+differ from the master pattern length — Session 15's own open item #4 flagged
+this and it was never resolved either.
+
+**Before any fourth-attempt build**: re-run `tools/emu_directjump_dynamic.py`
+(now working, calibrated, and instrumented — frames-before/after default to
+one full pattern loop before the poke and two after) against the candidate
+fix and confirm `FUN_400a536c` actually fires, and at the frame relative to
+the poke that a correct resume predicts, not just that the watched arrays
+hold plausible-looking values. This session never got `FUN_400a536c` to
+fire even once, in any configuration — closing that gap (why doesn't it
+fire during ORDINARY playback either, over 4+ full pattern loops on a
+pattern with real programmed trigs on track 0?) is arguably a prerequisite
+for trusting any future "it fires at the right frame now" result.
+
+Tooling: `tools/emu_directjump_dynamic.py` (kept, working, calibrated).
+Throwaway calibration probes lived in the session's scratchpad, not this
+repo. `patch_directjump.s` / `build_directjump_v4.py` unchanged.
