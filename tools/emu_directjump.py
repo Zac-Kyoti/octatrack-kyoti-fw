@@ -11,9 +11,11 @@ insns), like emu_otfx.py, so this drives each stub in isolation.
                     register save/restore, and the Z flag left for the caller's beq.w.
   dj_b @0x400a42fa  gate bypass.  Checks the return-address rewrite (armed) vs the
                     displaced `move.l #0x8e56,d0` (not armed) and D6.
-  dj_c @0x400a4840  playhead resume.  Checks DAT_800065b6 = 0 (not armed) vs
-                    savedStep % newLen (armed), incl. a shorter new pattern, and that
-                    D7 is left untouched either way (Session 61 -- see patch_directjump.s).
+  dj_c @0x400a4840  playhead resume.  Checks DAT_800065b6 = 0 + D7 untouched (not armed)
+                    vs savedStep % newLen + D7 = (that) * TICKS_PER_STEP (armed), incl. a
+                    shorter/longer new pattern (Session 65 -- see patch_directjump.s;
+                    Session 61 had this hook leave D7 alone entirely, which flashed clean
+                    but made every jump start every track fresh at phase 0).
 
 FUN_4009e884 (the real PC sender) is stubbed: the call is trapped, its args recorded,
 and control returned -- we only assert that dj_a calls it with (bank, pat) at the right
@@ -54,6 +56,7 @@ ARR_ACT = 0x460d1aec
 CHAIN_ACT = 0x80006546
 LEN_TBL = 0x400aba50
 PAT_SCALE = 0x400eb034
+TICKS_PER_STEP = 0x80006628
 SW_LABEL = 0x400a43a0
 RET_A = 0x400a400c        # instruction after the dj_a detour
 RET_B = 0x400a4300        # instruction after the dj_b detour
@@ -89,6 +92,9 @@ def mk():
     # pattern-length table: index 4 -> 16, index 6 -> 64  (just two entries we use)
     for idx, ln in ((4, 16), (6, 64), (2, 8)):
         uc.mem_write(LEN_TBL + idx * 4, struct.pack(">I", ln))
+    # non-1, so dj_c's D7 = resumeStep * TICKS_PER_STEP is a non-trivial check (a value of
+    # 1 here would make "multiplied" and "untouched" indistinguishable for a lot of inputs)
+    uc.mem_write(TICKS_PER_STEP, struct.pack(">I", 3))
     return uc
 
 
@@ -243,12 +249,11 @@ def test_c():
     check("not armed: STEP = 0", uc.mem_read(STEP, 1) == b"\x00")
     check("not armed: d7 preserved", t["d7"] == SEED[UC_M68K_REG_D7], hex(t["d7"]))
 
-    # armed, same length (new pattern len 16, saved step 9) -> STEP=9, D7 UNTOUCHED
-    # (Session 61 fix: D7 already holds stock's own LEN_TBL[newScale]*DAT_80006628 tick
-    # count from code that ran before this hook -- the per-track tick-phase loops just
-    # below the hook site consume it directly.  Stomping it with the raw step index was
-    # the actual cause of "pattern jumps don't respect the playhead": the master step
-    # this hook sets was always right, but the per-track phase math fed by D7 was not.)
+    # armed, same length (new pattern len 16, saved step 9) -> STEP=9, D7 = 9 * ticksPerStep
+    # (Session 65: Session 61's "leave D7 untouched" fix flashed clean but made every
+    # manual jump start every track fresh at phase 0 -- "starts at step 1" every time.
+    # D7 must be re-derived from the RESUME step using stock's own formula, matching the
+    # per-track tick-phase loops just below this hook that consume it directly.)
     uc = mk()
     uc.mem_write(G_ARMED, b"\xff")
     uc.mem_write(ACT_PAT, b"\x01"); uc.mem_write(ACT_BANK, b"\x00")
@@ -256,11 +261,10 @@ def test_c():
     uc.mem_write(G_STEP, b"\x09")
     t = run(uc, DJ_C, 0x400a4848)
     check("armed same-len: STEP = 9", uc.mem_read(STEP, 1) == b"\x09")
-    check("armed same-len: d7 preserved (not stomped)", t["d7"] == SEED[UC_M68K_REG_D7],
-          hex(t["d7"]))
+    check("armed same-len: d7 = 9 * ticksPerStep(3) = 27", t["d7"] == 27, hex(t["d7"]))
     check("armed: G_ARMED cleared", uc.mem_read(G_ARMED, 1) == b"\x00")
 
-    # armed, shorter new pattern (len 8, saved step 13) -> 13 % 8 = 5, D7 still untouched
+    # armed, shorter new pattern (len 8, saved step 13) -> 13 % 8 = 5, D7 = 5 * ticksPerStep
     uc = mk()
     uc.mem_write(G_ARMED, b"\xff")
     uc.mem_write(ACT_PAT, b"\x02"); uc.mem_write(ACT_BANK, b"\x00")
@@ -269,10 +273,9 @@ def test_c():
     t = run(uc, DJ_C, 0x400a4848)
     check("armed shorter: STEP = 5 (13 % 8)", uc.mem_read(STEP, 1) == b"\x05",
           str(uc.mem_read(STEP, 1)))
-    check("armed shorter: d7 preserved (not stomped)", t["d7"] == SEED[UC_M68K_REG_D7],
-          hex(t["d7"]))
+    check("armed shorter: d7 = 5 * ticksPerStep(3) = 15", t["d7"] == 15, hex(t["d7"]))
 
-    # armed, longer new pattern (len 64, saved step 20) -> 20
+    # armed, longer new pattern (len 64, saved step 20) -> 20, D7 = 20 * ticksPerStep
     uc = mk()
     uc.mem_write(G_ARMED, b"\xff")
     uc.mem_write(ACT_PAT, b"\x03"); uc.mem_write(ACT_BANK, b"\x00")
@@ -280,6 +283,7 @@ def test_c():
     uc.mem_write(G_STEP, b"\x14")
     t = run(uc, DJ_C, 0x400a4848)
     check("armed longer: STEP = 20", uc.mem_read(STEP, 1) == b"\x14")
+    check("armed longer: d7 = 20 * ticksPerStep(3) = 60", t["d7"] == 60, hex(t["d7"]))
 
 
 # ---------------------------------------------------------------- dj_toggle

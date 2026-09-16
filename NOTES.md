@@ -11503,3 +11503,99 @@ hook closes that gap specifically.
 **Not yet reflashed.** Same recovery note as Session 62: a plain power
 cycle should recover a unit that hit this exception — it's a runtime crash,
 not flash corruption.
+
+## Session 66 (2026-09-15, `wip`) — DIRECTJUMP_V4 flashed, NO EXCEPTION (Session 64's stack-discipline fix holds on hardware), but manual jumps always start the new pattern at step 1; found the real playhead mechanism and re-fixed D7 correctly this time
+
+**User report**: flashed the Session-64 build. No crash after repeated `[PTN]`
+presses — the stack-discipline fix holds. But: "with Direct Jump on, a
+pattern change starts each new pattern at step 1. Not what we want... the
+new pattern must start in exactly the same step position it would have been
+in if the pattern change had never happened."
+
+This is the ORIGINAL Session-60 complaint, untested since (every flash
+between then and now hit the `[PTN]`-press crash before playhead behaviour
+could be exercised) — meaning Session 61's D7 fix has now been shown, for
+the first time on real hardware, to be **insufficient**.
+
+### Re-investigation: what actually consumes the per-track phase state
+
+Session 61 found the per-track tick-phase loops just after Hook C
+(`0x400a4884..` / `0x400a4a14..`) *compute* `0x800065e4[track]` and
+`0x80006604[track]` from D7, and concluded "leave D7 alone, it's already
+correct." That stopped one level too early — it never traced *where those
+two arrays get read back*. Did that this session:
+
+  * `0x800065e4[track]`: only 2 refs image-wide — the write site just found,
+    and `0x400a4ba2` (right at `LAB_400a4ba0`, "fires trigs").
+  * `0x80006604[track]`: only 2 refs — the write site, and `0x400a3ca6`, a
+    **completely different function**.
+
+`0x400a3ca6` turned out to be the real per-tick trig-fire dispatcher (called
+far more often than once per sequencer step — this is the fine-grained
+engine tick, not the step tick). Its core, per track: **self-increment
+`0x80006604[track]`** every call; when it reaches `LEN_TBL[trackScale]`
+(compared *unscaled*, no `DAT_80006628` factor at this consumption site),
+**wrap it to 0 and fire a trig** for that track. This is genuinely a
+per-track phase accumulator that free-runs and fires on wrap — not display
+state, not something update-once-then-ignored.
+
+So the per-track loop after Hook C is **seeding this phase accumulator**
+(`0x80006604[track] = D7 - ((D7-1+trackLen) % trackLen) * trackLen`) for
+every track, from D7. With D7 = stock's own default
+(`LEN_TBL[newScale] * DAT_80006628`, the **full new-pattern length**) — which
+is exactly what Session 61's fix left it as — this formula seeds every
+track's phase **as if the transport had just wrapped to a fresh start**,
+regardless of where the master step (`DAT_800065b6`, which Hook C does set
+correctly) claims to be. That fresh-phase seeding is the actual, direct
+cause of "always starts at step 1": the *master step counter* was right all
+along; the *per-track trigger-firing machinery* was never told to resume
+anywhere but 0.
+
+Also confirmed `DAT_80006628` (the multiplier stock applies when computing
+D7 from a step count) is read fresh, unconditionally, by stock code that
+runs *before* Hook C on every commit (`0x400a40b0-bc`) — and that the
+consumption site (`0x400a3ca6`) compares `trackLen` against the phase
+counter with **no** `DAT_80006628` scaling of its own, meaning D7's own
+`*DAT_80006628` factor and `trackLen` already share units at the point Hook
+C's per-track loop runs (this only works out because `DAT_80006628` is
+normally `1`, a general-purpose per-pattern speed multiplier for a rarer
+feature — not something DIRECT JUMP needs to special-case, just preserve).
+
+### The actual fix: `dj_c` re-derives D7, but scaled correctly this time
+
+Session 60's very first build *did* write D7 — with the raw, unscaled resume
+step (0-63), which Session 61 correctly identified as wrong-*units* (it
+wasn't multiplied by `DAT_80006628`) and, rather than fix the scaling,
+removed the write entirely. That overcorrection is what Session 66 undoes:
+
+`dj_c`'s `djc_store` now sets, after the already-needed master-step write:
+
+```
+D7 = (savedStep mod newLen) * DAT_80006628
+```
+
+— i.e. exactly stock's own formula
+(`LEN_TBL[newScale] * DAT_80006628`), with the wrapped resume step standing
+in for the full pattern length. This seeds every track's phase as "the
+transport has already played `resumeStep` steps into the new pattern,"
+instead of "the transport just started" (D7 = full length) or feeding the
+per-track math nonsense units (D7 = raw unscaled step, Session 60).
+
+### Verification
+
+`tools/emu_directjump.py`'s `test_c`: `mk()` now seeds `DAT_80006628` = `3`
+(a non-1 value, so the multiply is a non-vacuous check — `1` would make
+"multiplied" and "untouched" indistinguishable for several of the test
+inputs). All three armed cases (same-length / shorter / longer new pattern)
+now assert `D7 == resumeStep * 3` exactly, alongside the master-step
+assertions that were already correct; all pass. All four build→emu pairs
+(v1-v4) rebuilt and re-run: `ALL GOOD`.
+
+### Status
+
+`out/OCTATRACK_OS1.40C_DIRECTJUMP_V4.syx` rebuilt (542 B changed vs stock).
+**Not yet reflashed.** No crash risk change from Session 64 — this session
+only touches `dj_c`'s data computation, not any control-flow/stack
+mechanics; the crash-fix from Session 64 is untouched. First HW test should
+be the playhead scenario itself: two patterns with identical trigs (e.g.
+kick on 1/5/9/13 in both) should sound seamless across a manual jump.

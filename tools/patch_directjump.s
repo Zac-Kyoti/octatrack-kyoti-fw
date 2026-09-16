@@ -333,20 +333,35 @@ djb_orig:
 | Not armed: just do DAT_800065b6 = 0.  Armed: set DAT_800065b6 to (savedStep % newLen)
 | so the master step resumes at the playhead.  D6/D7 are live here; D0-D2/A0 are free.
 |
-| ** Session 61 fix: this hook must NOT touch D7. ** The earlier build wrote the resume
-| step into D7 too ("per-track positions derive from D7"), on the theory that the
-| per-track tick-phase loops just below this hook site (0x400a4884.. / 0x400a4a14..,
-| the ones computing 0x800065e4[track]/0x80006604[track] via `remsl`) read their
-| position from D7.  Re-disassembly (Session 61) of the code BEFORE this hook site
-| (0x400a47f6-0x400a4834, still stock, unmodified, runs every step==0 regardless of
-| DIRECT JUMP) shows D7 is already correctly set there to `LEN_TBL[newScale] *
-| DAT_80006628` -- a TICK count, not a step index -- and BOTH per-track loops consume
-| that D7 directly afterward.  Overwriting D7 here with a raw, unscaled step index
-| (0-63) fed the tick-phase math completely wrong units, corrupting every track's own
-| phase accumulator on every manual jump -- this is what actually caused "the pattern
-| jump doesn't respect the playhead": it's not that DAT_800065b6 (the master step,
-| which this hook DOES set correctly) was wrong, it's that the phase accumulators
-| driving each track's own next-tick scheduling were fed garbage.  D7 is left alone.
+| ** Session 65: back to writing D7, but correctly this time. ** Session 60's original
+| build wrote the raw resume step into D7; Session 61 found the per-track tick-phase
+| loops below this hook (0x400a4884.. / 0x400a4a14.., computing 0x800065e4[track]/
+| 0x80006604[track] via `remsl`) consume D7 as a TICK count and "fixed" this by leaving
+| D7 untouched -- which flashed clean (no crash) but made every manual jump start every
+| track fresh at its own phase 0, i.e. exactly "starts at step 1" every time: D7
+| defaults to stock's own `LEN_TBL[newScale] * DAT_80006628` (the FULL new-pattern
+| length), and the per-track formula `(d7-1+trackLen)%trackLen` / `d7-that*trackLen`
+| seeds each track's phase AS IF the transport were sitting at the pattern's own end,
+| about to wrap to a fresh start -- not resuming mid-pattern at all.
+|
+| Re-examined where 0x80006604[track] is actually CONSUMED (0x400a3ca6, a completely
+| different function -- the real per-tick trig-fire dispatcher): it self-increments this
+| exact per-track counter every call and fires a trig when it wraps past `LEN_TBL[track
+| Scale]` -- confirming it genuinely is "ticks until this track's next trig", not display
+| state, and that trackLen there is compared UNSCALED (no `*DAT_80006628`), matching D7's
+| own stock formula only because DAT_80006628 is normally 1 (a general multiplier for a
+| rarer per-pattern speed feature) -- i.e. D7 and trackLen already share the same units
+| stock relies on, we're not introducing a new one.
+|
+| Fix: after computing the (already-needed, for STEP) wrapped resume step, ALSO set
+| D7 = resumeStep * DAT_80006628 -- exactly stock's own formula (`LEN_TBL[newScale] *
+| DAT_80006628`) with the resume step standing in for the full length, so the per-track
+| loops seed every track's phase as if the transport had already played resumeStep steps
+| into the new pattern, instead of zero.
+
+    .equ TICKS_PER_STEP, 0x80006628    | stock's own per-step tick multiplier (usually 1);
+                                       | already set fresh by stock code before this hook
+                                       | runs on every commit (0x400a40b0-bc, unconditional)
 
     .global dj_c
 dj_c:
@@ -381,7 +396,12 @@ djc_mod:
     sub.l   %d1,%d0
     bra.b   djc_mod
 djc_store:
-    move.b  %d0,STEP                   | master step -- D7 is left untouched (see above)
+    move.b  %d0,STEP                   | master step
+    move.l  TICKS_PER_STEP,%d1         | re-read fresh (stock set it earlier this same commit)
+    muls.l  %d1,%d0                    | d0 = resumeStep * ticksPerStep -- stock's own D7 formula,
+                                       | with resumeStep standing in for the full new-pattern length
+    move.l  %d0,%d7                    | seeds every track's phase loop as "already resumeStep
+                                       | steps into the new pattern" instead of "just started"
     rts
 
     .ifdef DJ_KEYMAP

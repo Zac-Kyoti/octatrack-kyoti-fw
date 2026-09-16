@@ -234,66 +234,68 @@ sounding keeps playing under its own AMP envelope; only new trigs are suppressed
 5. Switch **DT → OT+FX** live while a muted voice is ringing — it should adopt the
    `OT+FX` behaviour on the next mute.
 
-### 4.5  DIRECT JUMP  (`build_directjump_v4.py` — three flash rounds so far (Sessions 60-62), same hardware exception twice; the actual bug found and fixed (Session 64), NOT yet reflashed — see below, READ BEFORE FLASHING)
+### 4.5  DIRECT JUMP  (`build_directjump_v4.py` — crash-free as of Session 64; playhead-preservation bug found + fixed (Session 66), NOT yet reflashed — see below, READ BEFORE FLASHING)
 
-**⚠️ DIRECTJUMP_V3 was flashed and had NO effect whatsoever** — no toast, no
-toggle, the combo did literally nothing. **Root cause found (NOTES.md
-"Session 60"), stock/structural**: holding **[PTN]** unconditionally pushes a
-small stock UI overlay layer (`0x400bf0f2`) whose own `[YES]` record has a
-NULL press handler, so the runtime dispatch slot for `[YES]` is NULLed for as
-long as `[PTN]` is held; v1/v2/v3 all detour the *stock* `[YES]` handler
-(`0x4005e4c8`), which that NULLed slot never reaches.
+**History (Sessions 60-64), briefly**: `DIRECTJUMP_V3` was flashed and did
+nothing (stock `[PTN]`-held UI overlay NULLs the `[YES]` dispatch slot); v4
+fixed that. That v4 threw a hardware exception (`VEC:04 ADDR 0x400BF0F2`)
+after a few `[PTN]` presses, **twice**, on two different attempted fixes to
+the toast-close hook — the actual cause was a stack-discipline bug (a
+displaced `pea` instruction's pushed value being consumed by a stray `rts`
+instead of surviving as an argument for the code after it). **Fixed in
+Session 64, confirmed on hardware in Session 66 (no exception after
+repeated `[PTN]` presses).**
 
-**First fix (v4): no detour on `0x4005e4c8` at all.** The build instead
-writes `dj_toggle`'s address directly into that overlay layer's own `[YES]`
-record. Flashed — combo reachable, toast comes up, pattern switching works.
+**⚠️ Then (Session 66): with DIRECT JUMP ON, a manual pattern change always
+started the new pattern at step 1**, not at the playhead position — the
+original Session-60 complaint, untested until now since every flash in
+between hit the crash before this could be exercised.
 
-**⚠️ That build (Session 61) then threw a real hardware exception, TWICE, on
-two different attempted fixes**: `EXCEPTION SPP:4 VEC:04 FS:0 SR:2004 ADDR:
-400BF0F2 R0178` after pressing `[PTN]` a few times, on Session 61's build
-*and* on Session 62's follow-up (which had removed the thing Session 62
-suspected was the cause). The second identical crash proved the diagnosis
-wrong and pointed at something more basic.
+**Root cause (NOTES.md "Session 66")**: the master step counter
+(`DAT_800065b6`) was being set correctly all along — the bug was one level
+deeper. Traced where the per-track phase state Session 61 investigated
+(`0x800065e4[track]` / `0x80006604[track]`) is actually *consumed*, not just
+computed: `0x80006604[track]` turns out to be a genuine free-running
+per-track phase accumulator, read by a completely separate function
+(`0x400a3ca6`) that fires a trig for that track whenever the counter wraps.
+Session 61's fix ("leave D7 untouched") left D7 at stock's own default — the
+**full new-pattern length** — which seeds every track's phase as "the
+transport just started fresh," regardless of where the master step claims
+to be. That's the actual, direct cause of "always starts at step 1."
 
-**Actual root cause (NOTES.md "Session 64")**: a plain stack-discipline bug
-in the Session 61 toast-close hook (`dj_ptnrel`), present in every version of
-it regardless of what the hook's body did. The hook replayed a displaced
-`pea 0x400bf0f2` (a stock instruction whose pushed value is meant to *survive*
-on the stack as an argument for code right after it) and then did `rts` — but
-the hook was entered via `jsr`, which already has the correct return address
-sitting on the stack; the `pea` buried that return address under our own
-pushed value, and `rts` popped **the pea'd value itself** as if it were a
-return address, jumping straight to `0x400bf0f2` — our own read-only data,
-first bytes `0x00000000` — an illegal instruction. Exactly the reported
-crash, on every single `[PTN]` release. Fixed by switching the detour to
-`jmp`-kind (no auto-pushed return address) and ending the hook with `pea
-0x400bf0f2 ; jmp 0x4004341e` instead of `rts` — matching the idiom this
-patch's own `djt_stock` already uses for the identical situation.
-**Confirmed by hand-reconstructing the old buggy byte pattern and re-running
-the emulator against it** — it fails with the exact same crash signature
-Unicorn independently reproduces; the fixed build passes clean. If a unit
-hits this exception: **a plain power cycle recovers it** — this is a runtime
-crash, not flash corruption, the OS on the card is unaffected.
+**Fix**: `dj_c` now re-derives D7 as `(resumeStep) * DAT_80006628` — exactly
+stock's own formula (`LEN_TBL[newScale] * DAT_80006628`), with the *resume*
+step standing in for the full length, so every track's phase is seeded as
+"already `resumeStep` steps into the new pattern" instead of "just started."
+(Session 60's very first build also wrote D7, but with the raw, un-scaled
+step index — Session 61 correctly caught that unit mismatch but overcorrected
+by removing the write entirely instead of fixing the scaling; this session
+restores the write with the missing `* DAT_80006628` factor.)
 
-1. **Press `[PTN]` a few times in a row FIRST**, on its own, before testing
-   anything else — this is exactly the sequence that crashed the two earlier
-   builds. Confirm no exception before moving on.
+Verified: `tools/emu_directjump.py`'s `dj_c` test now seeds a non-1 tick
+multiplier specifically so the multiplication is a non-vacuous check, and
+asserts the exact expected `D7` value (alongside the master-step assertions)
+across shorter/longer/same-length new-pattern scenarios. All four build
+variants rebuilt and passing.
+
+1. **Press `[PTN]` a few times in a row FIRST**, on its own — confirm no
+   exception (should already be solid per Session 64/66, but cheap to
+   re-check on a fresh flash).
 2. Hold **[PTN]** and tap **[YES]** → a transient **"DIRECT JUMP ON"** overlay
    (~0.7 s / ~68 frames), then **OFF** on the next chord. The SELECT PATTERN
-   chooser must not pop on the [PTN] release. **Release [PTN] while the toast
-   is still up** → it should vanish almost immediately (next frame), not
-   linger out its timer.
-3. With DIRECT JUMP **ON**, play a pattern and manually cue another with
-   **identical trigs** (e.g. kick on steps 1/5/9/13 in both): the switch
-   should be **inaudible** — same step position, same timing, no audible
-   glitch or reset. Then try patterns with *different* content to confirm the
-   switch happens on the **next step tick**, keeps the **step position**
-   (modulo the new pattern's length), and loads the new Part at once. A MIDI
-   Program Change goes out ~1 step early.
-4. The **arranger** and **pattern chains** must be unchanged (DIRECT JUMP bails
-   when the arranger is running or a chain is active).
-5. Turn it **OFF** → manual pattern changes are stock (end-of-pattern quantised,
-   restart at step 1).
+   chooser must not pop on the [PTN] release. Release [PTN] while the toast
+   is still up → it should vanish almost immediately, not linger.
+3. **With DIRECT JUMP ON, play a pattern and manually cue another with
+   identical trigs** (e.g. kick on steps 1/5/9/13 in both): the switch
+   should be **inaudible** — same step position, same timing, no glitch or
+   reset. Then try patterns with *different* content to confirm the switch
+   happens on the next step tick, keeps the step position (modulo the new
+   pattern's length), and loads the new Part at once. A MIDI Program Change
+   goes out ~1 step early.
+4. The **arranger** and **pattern chains** must be unchanged (DIRECT JUMP
+   bails when the arranger is running or a chain is active).
+5. Turn it **OFF** → manual pattern changes are stock (end-of-pattern
+   quantised, restart at step 1).
 6. **[PTN] tapped alone** (no [YES]) still opens SELECT PATTERN normally —
    v4 doesn't touch that path.
 
