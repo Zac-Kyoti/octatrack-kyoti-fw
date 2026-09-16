@@ -91,6 +91,9 @@
                                         | in dj_ptnrel's comment for why we never jsr it ourselves)
     .equ NOTIFY_HANDLE,    0x460d1e70   | nonzero while a FUN_4005a2b8 toast is open
     .equ NOTIFY_COUNTDOWN, 0x460d1e6c   | frames left; stock's tick (0x40056c28) closes it at 0
+    .equ PTN_LAYER_REL_RESUME, 0x4004341e | FUN_40043418+6 -- resumed via jmp, not rts (see
+                                          | dj_ptnrel's comment: the displaced `pea` must
+                                          | survive on the stack as FUN_3146c's argument)
     .ifndef DJ_TOAST_DUR
     .equ DJ_TOAST_DUR, 0x44             | same dwell patch_reload2 uses for its toast
     .endif
@@ -390,30 +393,40 @@ djc_store:
 | alone reaches it too).  Matches the user's ask: "the toast needs to disappear
 | immediately if the user releases PTN, just like we did with REC on QLREC."
 |
-| ** Session 62: NOT a jsr NOTIFY_CLOSE here -- an earlier build tried exactly that and
-| the unit threw EXCEPTION VEC:04 (illegal instruction) at ADDR 0x400BF0F2 (our OWN
-| layer struct!) after a few [PTN] presses. ** FUN_40043418 hasn't popped 0x400bf0f2 off
-| the shared UI-layer list (0x460d165c) yet at this point in its body -- that pop is the
-| very next thing it does, right after the displaced `pea` we replay below -- and
-| NOTIFY_CLOSE's own teardown (FUN_40055db4 destroying the toast's window object, then
-| FUN_4003146c popping ITS OWN placeholder 0x400ba9e0 from that *same* list, then a
-| kernel-post reschedule) apparently doesn't tolerate running while a DIFFERENT node
-| (ours, still-linked) is mid-teardown on the caller's own stack.  qlr_recrel's identical
-| `jsr NOTIFY_CLOSE` call (patch_qlrec.s) is HW-proven safe -- but it fires from a plain
-| key-release detour, not from inside another function that's itself about to pop a node
-| off the very list NOTIFY_CLOSE's own pop touches; that nesting is the one thing this
-| site has that qlrec's doesn't, and disassembly alone couldn't rule it out as the cause.
+| ** Session 62 tried `jsr NOTIFY_CLOSE` here and the unit threw EXCEPTION VEC:04 at
+| ADDR 0x400BF0F2. Session 63's fix (below, touching only two data words, no jsr at
+| all) threw the IDENTICAL exception -- proving the Session 62 diagnosis (a bad
+| interaction with NOTIFY_CLOSE's own list surgery) was WRONG. The real bug was
+| always in this hook's OWN stack discipline, present in every version:
 |
-| Fix: touch no code at all, only the two plain data words the toast's own per-frame tick
-| (0x40056c28, entirely stock, HW-proven -- this is how EVERY toast in this project
-| already closes on its own timer) already reads.  If a toast is open (NOTIFY_HANDLE
-| nonzero), set its countdown to 1 so that tick closes it -- via NOTIFY_CLOSE, but called
-| from the OS's own safe per-frame context, never from ours -- on the very next frame
-| (indistinguishable from instant to a person releasing a key).  No jsr, no list surgery,
-| nothing to get wrong: this is definitionally at least as safe as flashing v4 without
-| this hook at all, since a toast that was never opened is untouched (NOTIFY_HANDLE==0
-| skips the write) and one that WAS opened closes exactly the way it already did before
-| this hook existed, just sooner.
+|   `pea 0x400bf0f2` is not an inert instruction to "replay" -- it's a stock PUSH,
+|   and the value it pushes is MEANT TO STAY on the stack as an argument for
+|   FUN_40043418's own later `jsr FUN_3146c` (0x4004341e) and `jsr FUN_7e81c`
+|   (0x40043424..2a), both of which read it without popping -- FUN_40043418 only
+|   cleans it up once, at the very end (`addql #8,%sp` @0x40043440, for it AND a
+|   second pushed pointer together).  This build's detour is kind=jsr, so entering
+|   dj_ptnrel ALREADY has a correct return address (0x4004341e, auto-pushed by the
+|   `jsr dj_ptnrel` planted at the detour site) sitting on top of the stack.  Every
+|   earlier version of this hook then did `pea 0x400bf0f2 ; rts` -- but that `pea`
+|   pushes 0x400bf0f2 ON TOP OF that return address, so the following `rts` pops
+|   THE PEA'D VALUE, not the real return address, and "returns" by jumping straight
+|   to 0x400bf0f2 -- exactly the crash address, on literally every single call
+|   (matching djt_stock in this same file, which replays two register-only moves
+|   then `jmp`s a literal address -- NOT `rts` -- for exactly this reason: `rts`
+|   after a stub that itself pushes something is only safe when that stub's push is
+|   ALSO what the caller-side kind=jsr auto-return machinery expects, which a `pea`
+|   whose value must survive as an outgoing argument never is).
+|
+| Fix: this detour is now kind=jmp (see build_directjump_v4.py), so entering
+| dj_ptnrel pushes NOTHING -- the stack is exactly what stock would have at this
+| point.  `pea 0x400bf0f2` then pushes the one, correct, surviving argument, and
+| a literal `jmp 0x4004341e` (not `rts`) falls through to the untouched rest of
+| FUN_40043418's body, matching djt_stock's own idiom exactly.
+|
+| The toast-close mechanism itself (only ever writing two plain data words the
+| stock per-frame tick @0x40056c28 already reads, closing the toast via NOTIFY_CLOSE
+| from the OS's own safe context one frame later, never called by us directly) is
+| unchanged and was never the problem.
     .global dj_ptnrel
 dj_ptnrel:
     tst.l   NOTIFY_HANDLE               | 0x460d1e70 -- is a toast actually open?
@@ -421,6 +434,7 @@ dj_ptnrel:
     moveq   #1,%d0
     move.l  %d0,NOTIFY_COUNTDOWN        | 0x460d1e6c -- stock's own tick closes it next frame
 dpr_done:
-    pea     0x400bf0f2                  | displaced original
-    rts
+    pea     0x400bf0f2                  | displaced original -- the value MUST survive on
+                                        | the stack, so no rts (see kind=jmp note above)
+    jmp     PTN_LAYER_REL_RESUME        | 0x4004341e -- resume FUN_40043418's own body
     .endif

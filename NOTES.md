@@ -11410,3 +11410,96 @@ do it — this was a runtime exception, not flash corruption; the OS on the
 card/flash is untouched by a crash screen) before reflashing, and repeat the
 "press `[PTN]` a few times" sequence specifically as the first HW test this
 time, before moving on to the toast/playhead checks themselves.
+
+## Session 64 (2026-09-15, `wip`) — DIRECTJUMP_V4 threw the IDENTICAL exception after Session 62's fix; the Session 62 diagnosis was wrong; the real bug found (a stack-discipline error in `dj_ptnrel`, present since Session 61) and fixed
+
+**User report**: flashed the Session-62 build. **Same exception**
+(`VEC:04 ADDR 0x400BF0F2`) after pressing `[PTN]` a few times — proving
+Session 62's diagnosis (an unsafe nesting with `NOTIFY_CLOSE`'s own list
+surgery) was **wrong**: that build no longer called `NOTIFY_CLOSE`, or
+anything else, at all. The crash had to be coming from something else
+entirely.
+
+### The real bug — found by tracing `dj_ptnrel`'s own stack discipline
+
+`dj_ptnrel`'s detour at `FUN_40043418` was declared **kind=jsr** (the
+convention `dj_a`/`dj_b`/`dj_c` use, where the replaced instruction is
+6 bytes and the substituted `jsr dj_ptnrel` — also 6 bytes — auto-pushes the
+correct "resume here" return address, so those stubs end in a bare `rts`).
+`dj_ptnrel`'s body then does `pea 0x400bf0f2 ; rts` to "replay" the displaced
+instruction.
+
+**That's the bug.** The displaced instruction, `pea 0x400bf0f2`, is not an
+inert instruction being replayed for its side-effect-free sake — it's a
+stock **push**, and stock's own following code (`jsr FUN_3146c` at
+`0x4004341e`, then `jsr FUN_7e81c` right after) reads that pushed value as
+an **argument without popping it**; `FUN_40043418` only cleans it up once,
+at the very end (`addql #8,%sp`, for it and a second pushed pointer
+together). So the pushed value is meant to **survive on the stack**, not be
+consumed immediately.
+
+But `dj_ptnrel` was entered via `jsr`, so on entry the stack already has the
+correct return address (`0x4004341e`) sitting on top, auto-pushed by the
+`jsr dj_ptnrel` instruction planted at the detour site. Doing `pea
+0x400bf0f2` pushes OUR value on top of THAT, burying the real return
+address one slot deeper. The following `rts` then pops **the pea'd value**
+— `0x400bf0f2` — as if it were a return address, and "returns" by jumping
+straight to it. `0x400bf0f2` is our own keymap layer struct: read-only data,
+its first bytes `00 00 00 00`. The CPU tries to execute that as an
+instruction and traps — `VEC:04`, illegal instruction, `ADDR 0x400BF0F2`.
+Exactly the reported crash, byte for byte, on every single `[PTN]` release
+once the hook exists — this bug was present in **both** the Session 61
+(`jsr NOTIFY_CLOSE`) and Session 62 (countdown-only) versions equally, since
+neither touched this part of the stub.
+
+This file's own `djt_stock` (in `dj_toggle`) already has the correct idiom
+for exactly this situation: it replays two displaced register-only `move`s
+(which don't touch the stack) and then does a literal `jmp YES_RESUME` —
+**not** `rts` — to continue. `dj_ptnrel` should have followed the same
+pattern from the start.
+
+### Fix
+
+Two changes, together: (1) the detour at `0x40043418` is now **kind=jmp**
+(no auto-pushed return address at all — `build_directjump_v4.py`); (2)
+`dj_ptnrel` ends with `pea 0x400bf0f2 ; jmp 0x4004341e` instead of `rts` —
+the pushed value now correctly survives as data for `FUN_40043418`'s own
+later code, and control resumes at the right address via a literal,
+hardcoded jump, matching `djt_stock`'s idiom exactly. Confirmed by
+disassembling the rebuilt cave directly: `400d75ec: pea 0x400bf0f2` /
+`400d75f2: jmp 0x4004341e`, no `rts` anywhere in the stub.
+
+### Verification, and confirming the test itself is meaningful
+
+`tools/emu_directjump_v4.py`'s `check_ptn_release_closes_toast` gained a
+direct regression check: a hook on `0x400BF0F2` itself (`PTN_LAYER_STRUCT`)
+that fails loudly if the PC ever lands there — the exact hardware symptom.
+Also fixed the toast-close/countdown logic
+(unchanged since Session 62, was never the problem).
+
+**Confirmed the new check is not vacuous**: hand-reconstructed the OLD buggy
+byte pattern (`jsr`-kind detour + `pea 0x400bf0f2 ; rts`) directly in a copy
+of the built image and re-ran the check against it — it **failed exactly as
+expected**, with Unicorn independently reproducing the same
+`UC_ERR_EXCEPTION` class the real hardware hit, landing on `0x400BF0F2`
+precisely where the "PC never lands on the layer struct" assertion catches
+it. The fixed build passes cleanly. All 4 build→emu pairs (v1-v4) rebuilt
+and re-run: `ALL GOOD`.
+
+### Why this didn't get caught in Session 61/62's own emulator testing
+
+The `call()` harness's own "did we get back out" check only watches for
+its own synthetic `ret_trap` address — it never asserted anything about
+*where* control went if something diverged first, and simply treated any
+`UcError` during the release-path call as an acceptable "trailing OS tail,
+out of scope" background exception (matching the genuinely benign trailing
+exception the *press*-path test already has, past `0x40027de4`). That
+leniency papered over a real, distinct failure. The new `PTN_LAYER_STRUCT`
+hook closes that gap specifically.
+
+### Status
+
+`out/OCTATRACK_OS1.40C_DIRECTJUMP_V4.syx` rebuilt (533 B changed vs stock).
+**Not yet reflashed.** Same recovery note as Session 62: a plain power
+cycle should recover a unit that hit this exception — it's a runtime crash,
+not flash corruption.

@@ -26,9 +26,31 @@ reachable on hardware.
      ~DJ_TOAST_DUR timer regardless.  New hook `dj_ptnrel` at FUN_40043418 (the stock
      "tear down the PTN-held overlay" cleanup -- confirmed its only jsr caller image-wide
      is inside FUN_4005a044's own RELEASE branch, so this fires on every [PTN] release,
-     combo or not) calls NOTIFY_CLOSE (FUN_40056bec, the closer for the FUN_4005a2b8 toast
-     v3/v4 both use) -- same no-op-if-none-open primitive patch_qlrec.s already relies on
-     for the identical "close the moment the key is released" behaviour on REC/QLREC.
+     combo or not).
+
+     Went through THREE tries to get this right, all documented in patch_directjump.s's
+     dj_ptnrel comment and NOTES.md Sessions 61-63:
+       - Session 61: `jsr NOTIFY_CLOSE` directly.  Flashed -- EXCEPTION VEC:04 @ 0x400BF0F2
+         after a few [PTN] presses.
+       - Session 62: diagnosed (wrongly) as an unsafe nesting with NOTIFY_CLOSE's own list
+         surgery; rewrote to touch no code at all, only arm NOTIFY_COUNTDOWN so stock's own
+         tick closes it a frame later.  Flashed -- IDENTICAL exception, proving that
+         diagnosis wrong; the bug was never in what dj_ptnrel called.
+       - Session 63 (the actual bug, in every earlier version): the detour was kind=jsr, so
+         entering dj_ptnrel already has a correct return address auto-pushed on the stack.
+         Every version then did `pea 0x400bf0f2 ; rts` to replay the displaced instruction --
+         but that `pea` is not inert data, it's a stock PUSH whose value is MEANT TO SURVIVE
+         as an argument FUN_40043418's own later code reads without popping.  Pushing it put
+         it ON TOP of the auto-pushed return address, so `rts` popped THE PEA'D VALUE instead
+         -- "returning" by jumping straight to 0x400bf0f2, the exact crash address, on every
+         single call.  Fixed by switching the detour to kind=jmp (no auto-push) and ending
+         with `pea 0x400bf0f2 ; jmp 0x4004341e` instead of `rts` -- the same idiom this
+         file's own djt_stock already uses for its two-register-move replay, for exactly
+         this reason.
+
+     The toast-close *mechanism* itself (arm NOTIFY_COUNTDOWN, let stock's own per-frame
+     tick call NOTIFY_CLOSE a frame later, never call it directly ourselves) was correct
+     from Session 62 onward and is unchanged here.
 
   2. THE PLAYHEAD BUG: dj_c (Hook C, shared unconditionally by every DJ build, v1-v4) was
      also writing the resume step into D7 ("per-track positions derive from D7").  Wrong --
@@ -101,7 +123,7 @@ PATCHES = [
      [(0x400a4006, "dj_a", "4a398000667e",     6, "jsr"),
       (0x400a42fa, "dj_b", "203c00008e56",     6, "jsr"),
       (0x400a4840, "dj_c", "420013c0800065b6", 8, "jsr"),
-      (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jsr")]),
+      (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),
 ]
 
 # [PTN]-held keymap layer 0x400bf0f2, 26-byte record for YES (code 0x31): all-NULL in stock.

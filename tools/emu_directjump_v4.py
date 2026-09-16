@@ -166,16 +166,31 @@ def run(label, image_path):
     return uc, slot
 
 
+PTN_LAYER_STRUCT = 0x400bf0f2    # our own layer struct -- Session 61/62's crash address:
+                                  # `rts` after a stub-local `pea` popped THIS as a return
+                                  # address and jumped to it as code.  Session 63 fixed the
+                                  # stack discipline (kind=jmp, `jmp` not `rts`) -- watching
+                                  # this address directly is the regression test for it.
+
+
 def check_ptn_release_closes_toast(label, image_path, expect_touch):
-    """Session 62: run the REAL FUN_4005a044 ([PTN] release, event=0) and confirm whether
+    """Session 62/63: run the REAL FUN_4005a044 ([PTN] release, event=0) and confirm whether
     the countdown that stock's own per-frame tick (0x40056c28, untouched, HW-proven) reads
     gets armed to expire next frame.  v3 never hooks this path at all -- a toast rides out
     its own full timer regardless of when [PTN] is released.  v4's dj_ptnrel (at
     FUN_40043418, confirmed the ONLY jsr caller of that function image-wide, so this fires
     on every [PTN] release, combo-consumed or a plain quick tap alike) sets NOTIFY_COUNTDOWN
     to 1 ONLY when NOTIFY_HANDLE shows a toast is actually open -- and, critically, NEVER
-    jsrs NOTIFY_CLOSE directly (an earlier version did exactly that and crashed real
-    hardware after a few [PTN] presses -- see patch_directjump.s's dj_ptnrel comment)."""
+    jsrs NOTIFY_CLOSE directly (Session 61 tried that and crashed real hardware after a few
+    [PTN] presses -- see patch_directjump.s's dj_ptnrel comment).
+
+    Also asserts execution never lands ON the layer struct itself (PTN_LAYER_STRUCT,
+    0x400BF0F2) as a PC value -- the EXACT crash this hook produced TWICE on real hardware
+    (Session 61's jsr NOTIFY_CLOSE version, and Session 62's rewrite: both had the identical
+    stack-discipline bug, `pea 0x400bf0f2 ; rts`, that this check exists specifically to
+    catch and neither Session 61 nor 62's emulator testing caught -- `call()`'s ret_trap
+    mechanism only watches for ITS OWN address, not for control landing somewhere entirely
+    unexpected first)."""
     print(f"{label} -- [PTN] release arms the toast's own close-next-frame countdown ---")
     for tag, ptn_used in (("combo-consumed release (PTN_USED=1)", 1),
                           ("quick-tap release (PTN_USED=0)", 0)):
@@ -186,14 +201,21 @@ def check_ptn_release_closes_toast(label, image_path, expect_touch):
             uc.mem_write(NOTIFY_HANDLE, struct.pack(">I", 0x460d1e00 if toast_open else 0))
             uc.mem_write(NOTIFY_COUNTDOWN, struct.pack(">I", 0x44 if toast_open else 0))
             close_hit = {"v": False}
+            struct_hit = {"v": False}
 
             def on_close(uc):
                 close_hit["v"] = True
 
-            call(uc, FUN_PTN_PRESS, [0x2e, 0], extra_hooks={NOTIFY_CLOSE: on_close})
+            def on_struct(uc):
+                struct_hit["v"] = True
+
+            call(uc, FUN_PTN_PRESS, [0x2e, 0],
+                 extra_hooks={NOTIFY_CLOSE: on_close, PTN_LAYER_STRUCT: on_struct})
             countdown = struct.unpack(">I", uc.mem_read(NOTIFY_COUNTDOWN, 4))[0]
             touched = countdown == 1 if toast_open else countdown != 0
             state = "toast open" if toast_open else "no toast"
+            check(f"  {tag}, {state}: PC never lands on the layer struct (0x400BF0F2)",
+                  not struct_hit["v"])
             check(f"  {tag}, {state}: countdown armed to 1 = {expect_touch and toast_open}",
                   touched == (expect_touch and toast_open), f"countdown={countdown}")
             check(f"  {tag}, {state}: NOTIFY_CLOSE never jsr'd directly", not close_hit["v"])

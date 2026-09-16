@@ -234,43 +234,50 @@ sounding keeps playing under its own AMP envelope; only new trigs are suppressed
 5. Switch **DT → OT+FX** live while a muted voice is ringing — it should adopt the
    `OT+FX` behaviour on the next mute.
 
-### 4.5  DIRECT JUMP  (`build_directjump_v4.py` — v3 flashed and did nothing (Session 60); first v4 "sort of worked" (Session 61); THAT v4 threw a hardware EXCEPTION after a few [PTN] presses (Session 62) — root cause diagnosed + rebuilt with no risk of it, NOT yet reflashed — see below, READ BEFORE FLASHING)
+### 4.5  DIRECT JUMP  (`build_directjump_v4.py` — three flash rounds so far (Sessions 60-62), same hardware exception twice; the actual bug found and fixed (Session 64), NOT yet reflashed — see below, READ BEFORE FLASHING)
 
 **⚠️ DIRECTJUMP_V3 was flashed and had NO effect whatsoever** — no toast, no
-toggle, the combo did literally nothing, on a unit otherwise working normally.
-**Root cause found (NOTES.md "Session 60"), and it's stock, structural
-behaviour, not a bug in any patch here**: holding **[PTN]** unconditionally
-pushes a small stock UI overlay layer (`0x400bf0f2`) whose own `[YES]` record
-has a NULL press handler. The runtime key-dispatch table entry for `[YES]`
-gets overwritten with that NULL for as long as `[PTN]` is held — v1/v2/v3 all
-detour the *stock* `[YES]` handler (`0x4005e4c8`), which that NULLed table
-entry never reaches.
+toggle, the combo did literally nothing. **Root cause found (NOTES.md
+"Session 60"), stock/structural**: holding **[PTN]** unconditionally pushes a
+small stock UI overlay layer (`0x400bf0f2`) whose own `[YES]` record has a
+NULL press handler, so the runtime dispatch slot for `[YES]` is NULLed for as
+long as `[PTN]` is held; v1/v2/v3 all detour the *stock* `[YES]` handler
+(`0x4005e4c8`), which that NULLed slot never reaches.
 
 **First fix (v4): no detour on `0x4005e4c8` at all.** The build instead
 writes `dj_toggle`'s address directly into that overlay layer's own `[YES]`
-record, so the exact same stock rebuild that used to zero the runtime
-dispatch slot now points it at our toggle. Flashed — combo reachable, toast
-comes up, pattern switching works.
+record. Flashed — combo reachable, toast comes up, pattern switching works.
 
-**⚠️ That build (Session 61) then threw a real hardware exception**:
-`EXCEPTION SPP:4 VEC:04 FS:0 SR:2004 ADDR: 400BF0F2 R0178` after pressing
-`[PTN]` a few times. VEC:04 = illegal instruction, and the fault address is
-*exactly* the `[PTN]`-held overlay layer struct — the CPU tried to execute at
-a data address inside the one subsystem Session 61's new toast-close hook
-(`dj_ptnrel`) touched. Diagnosis (NOTES.md "Session 62"): that hook called
-`NOTIFY_CLOSE` directly from *inside* another function that was itself
-mid-teardown of the very list our layer lives on — a nesting `patch_qlrec.s`'s
-otherwise-identical, HW-proven-safe `NOTIFY_CLOSE` call never has to survive.
-**Rebuilt to touch no code at all**: `dj_ptnrel` now only arms the countdown
-stock's own per-frame tick already reads (closes the toast ~1 frame later,
-through the OS's own normal, safe context, instead of calling anything
-directly) — a toast that was never open is left completely untouched. If a
-unit hits this exception: **a plain power cycle recovers it** — this is a
-runtime crash, not flash corruption, the OS on the card is unaffected.
+**⚠️ That build (Session 61) then threw a real hardware exception, TWICE, on
+two different attempted fixes**: `EXCEPTION SPP:4 VEC:04 FS:0 SR:2004 ADDR:
+400BF0F2 R0178` after pressing `[PTN]` a few times, on Session 61's build
+*and* on Session 62's follow-up (which had removed the thing Session 62
+suspected was the cause). The second identical crash proved the diagnosis
+wrong and pointed at something more basic.
+
+**Actual root cause (NOTES.md "Session 64")**: a plain stack-discipline bug
+in the Session 61 toast-close hook (`dj_ptnrel`), present in every version of
+it regardless of what the hook's body did. The hook replayed a displaced
+`pea 0x400bf0f2` (a stock instruction whose pushed value is meant to *survive*
+on the stack as an argument for code right after it) and then did `rts` — but
+the hook was entered via `jsr`, which already has the correct return address
+sitting on the stack; the `pea` buried that return address under our own
+pushed value, and `rts` popped **the pea'd value itself** as if it were a
+return address, jumping straight to `0x400bf0f2` — our own read-only data,
+first bytes `0x00000000` — an illegal instruction. Exactly the reported
+crash, on every single `[PTN]` release. Fixed by switching the detour to
+`jmp`-kind (no auto-pushed return address) and ending the hook with `pea
+0x400bf0f2 ; jmp 0x4004341e` instead of `rts` — matching the idiom this
+patch's own `djt_stock` already uses for the identical situation.
+**Confirmed by hand-reconstructing the old buggy byte pattern and re-running
+the emulator against it** — it fails with the exact same crash signature
+Unicorn independently reproduces; the fixed build passes clean. If a unit
+hits this exception: **a plain power cycle recovers it** — this is a runtime
+crash, not flash corruption, the OS on the card is unaffected.
 
 1. **Press `[PTN]` a few times in a row FIRST**, on its own, before testing
-   anything else — this is exactly the sequence that crashed the previous
-   build. Confirm no exception before moving on.
+   anything else — this is exactly the sequence that crashed the two earlier
+   builds. Confirm no exception before moving on.
 2. Hold **[PTN]** and tap **[YES]** → a transient **"DIRECT JUMP ON"** overlay
    (~0.7 s / ~68 frames), then **OFF** on the next chord. The SELECT PATTERN
    chooser must not pop on the [PTN] release. **Release [PTN] while the toast
