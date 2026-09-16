@@ -12461,3 +12461,150 @@ Session 57 already showed the OLDER q=1-adjacent build rang even at KFLT
 OFF, a different-but-related symptom), so the pinging bug is orthogonal to
 q=1-vs-q=2 and should be root-caused BEFORE spending a flash cycle on
 another A/B.
+
+## Session 69 (2026-09-16, `wip`) — SIDECHAIN3: r7-stability CONFIRMED (leading hypothesis (a) is FALSE) via existing disassembly, not new instrumentation; a second check (does the SVF's own fixed-point truncation sustain a persistent audible tone?) also comes back NO -- both results reframe the bug away from "the filter itself" and toward something continuously re-exciting it
+
+No code changed this session (read-only RE + one offline numeric simulation,
+no emulator/hardware runs needed for either result).
+
+### Check (a) from Session 68's handoff: is `r7` stable across "no voice ever
+### bound" vs "voice bound and playing"? CONFIRMED STABLE -- answered from
+### disassembly already in hand, not new instrumentation
+
+Session 68 left this as the first thing to check, proposing dynamic
+instrumentation (`ot_emu --watch-pc` or hardware) as the way to check it.
+Before reaching for that, re-read what this project's OWN Session 17
+disassembly of the stock DSP frame engine already says (`NOTES.md`
+"Session 17 continued (4)", ~line 3398) -- it turns out to already answer
+this, in full, from real disassembly of the actual stock dispatcher (not a
+harness model):
+
+- **The per-track loop (`func_000385`) runs a FIXED 4 iterations per DSP
+  core, unconditionally, every single dispatcher call** -- `x:0x418` counter
+  `0x20 -> 0x80`, `+0x20`/track, `bne func_000385`. Nothing in that loop
+  reads voice state, trig state, or mute state to decide whether to run an
+  iteration. It is a straight positional walk over "this core's 4 tracks,"
+  full stop.
+- **Inside each iteration, the FX dispatch (`func_0004a7`) runs FX1 then
+  FX2 unconditionally too**, and it is where the per-instance state pointer
+  advances: "`r6` advances `+6` (`n6`), state ptr `x:0x20a` advances `+0x100`
+  per effect." No voice/trig gate here either -- the only conditional in
+  that stretch is a crossfader-touch check that skips a 16-tap INPUT filter,
+  not the dispatch itself.
+- Therefore **`r7` for a given (track, FX-slot) pair is fully determined by
+  that pair's fixed position in this unconditional per-frame walk** -- i.e.
+  by which track number and which FX1/FX2 slot the compressor is assigned
+  to in the project, a static fact that does not change between "before any
+  trig" and "after a real trig," because the walk that derives `r7` runs
+  identically in both cases.
+
+**Independent cross-confirmation, from a different project reversing the
+identical stock dispatcher** (`refs/octabam`, the community DSP-remixer
+project, built from the same 1.40C stock OS): `refs/octabam/docs/firmware/DSP.md`
+§10-11 documents the exact same mechanism, hardware-measured (not modelled)
+via `dsp/r7probe.asm` and `dsp/baseprobe.asm`: `r7 = 0x6000 + 0x100 *
+(instance's position in the allocator walk)`, and derives the closed form
+"FX2 instance `k` gets ... state block `0x6000 + (2+2k)*0x100`" purely from
+track/slot position. `refs/octabam/CLAUDE.md`'s own hard-won warning in this
+exact area -- **"any module logic keyed on a dispatcher fact (r7, r6,
+X:0x213, instance blocks) is measured under the port ... never modelled in
+`dsp_host`"** -- is a warning against trusting a *harness's stub model* of
+the dispatcher, which is not what either finding here rests on: this
+project's Session 17 result is from disassembling the real stock dispatcher
+bytes, and octabam's is from hardware probes, not `dsp_host`. Both indict
+the same mechanism and agree it has no voice-binding dependency.
+
+**Conclusion: hypothesis (a) is FALSE.** `r7` does not shift when a voice
+binds to the track. Session 55's "nothing else in the stock COMPRESSOR
+module touches `r7+$14/$16/$17/$18`" proof (confirmed twice, Sessions 55 and
+66, by disassembling the module at the r7 the static analysis assumed) DOES
+transfer to the real runtime address, because that address never moves.
+Whatever is generating the persistent pinging, it is not "our latch lives at
+the wrong address after a real trig." The `r7`/`$18`-latch mechanism itself
+is still a live suspect (Session 68's alternative framing -- "designed to
+survive this moment correctly ... prime suspect for being subtly wrong, not
+evidence against it being involved" still stands), but not via this
+particular failure mode.
+
+### A second, new check: can the SVF's OWN fixed-point truncation arithmetic
+### sustain a persistent, audible oscillation from a single real trig, with
+### zero input afterward? Simulated it. NO -- it settles to an exact,
+### inaudible fixed point, fast
+
+Motivation: q=2 makes the poles real (Session 65), which rules out
+*resonance* (oscillatory decay) but says nothing about *fixed-point*
+behaviour -- `patch_sc_dsp3.asm`'s SVF loop truncates on every `move
+acc,y-or-x-mem` (no explicit rounding), which is the textbook precondition
+for a "zero-input limit cycle": a recursive filter that never mathematically
+reaches exact (0,0) under quantization, and instead settles into a small
+self-sustaining nonzero loop. This would fit "starts on first real audio,
+never clears" disturbingly well, so it was worth checking directly rather
+than assumed either way.
+
+Built a bit-exact Python model of the recursion (`lp = lp + ((f*bp)>>23)`;
+`hp = inp - lp - q*bp`; `bp = bp + ((f*hp)>>23)`, all integer ops, `>>`
+matching the DSP's truncating `asr` including sign, in
+`tools/check_svf_limitcycle.py` -- same arithmetic as `emu_sc_dsp3.py`'s
+`ref_svf`, generalised over `q`). Ran a single impulse (full-scale, and
+also two much smaller values down to 1 LSB) into the filter, then silence,
+for every one of the 32 FTAB entries, at both `q=1` and `q=2`, tracking
+whether `(lp,bp)` ever revisits a prior state (a cycle) or reaches exact
+`(0,0)`.
+
+**Result, unanimous across all 32 FTAB entries x both `q` values x all three
+impulse sizes:** the state never reaches exact `(0,0)`, but it also never
+sustains a large or growing oscillation -- it converges, in well under 2,000
+samples (most under 500; the smallest impulse converges in as few as ~20),
+onto an exact PERIOD-1 fixed point (a `(lp,bp)` pair that maps to itself
+under further zero input) at a tiny residual magnitude: **single digits to
+a few hundred LSB**, against a full-scale range of 8,388,608 -- roughly
+-90 dB to -140 dB below full scale, i.e. below the noise floor of anything
+on this hardware, not an audible tone. (Full table in the tool run output;
+not reproduced here -- rerun `python3 tools/check_svf_limitcycle.py` if
+needed, it's self-contained against `tools/sc_tables.py`, no build/emulator
+needed, ~1s wall.)
+
+**This is a genuine, previously-undocumented fixed-point artifact of the
+KEY FLT SVF** (worth keeping in mind for the "AN EFFECT'S PERSISTENT SLOT"
+family of traps `refs/octabam/CLAUDE.md` warns about), but it is NOT loud
+enough to be what the user is hearing, and it decays/settles in tens of
+milliseconds, not indefinitely. **Ruling this out matters because it
+redirects the investigation**: the mechanism that is actually pinging
+audibly, forever, cannot be "this filter's own arithmetic fails to fully
+zero out after one transient" -- a single real trig's transient, run
+through a real-pole q=2 filter with this truncation behaviour, should be
+inaudible within ~50 ms. For the reported symptom (audible, indefinite,
+starts exactly at the first real trig) to be consistent with this filter's
+actual dynamics, **something must be feeding it a nonzero, non-decaying, or
+periodically-refreshed input every frame from then on** -- not "residual
+state that never quite clears on its own."
+
+### Handoff: the next concrete, cheap (no flash) check
+
+Given both of the above, the most promising next question is **whether the
+compressor's KEY-track input is genuinely exact digital zero, every frame,
+once the track has gone quiet after a trig** -- if `sctap`'s tap point
+(`X:0x0000` at `func_0004a7`, Session 17's own injection point) or the raw
+audio the track's own voice engine leaves behind ever carries nonzero
+residue after the note has ostensibly ended (a DC offset, a decaying tail
+the voice engine doesn't fully silence, dither, etc.), the SVF -- now known
+to be a real, damped, but NOT perfectly zero-settling system -- would have a
+standing small input to respond to indefinitely, which a fixed non-resonant
+filter cannot on its own turn into something loud, but which the existing
+KEY GAIN stage (up to ~+24 dB) or repeated per-frame accumulation might.
+Check via `ot_emu`/`dsp_host` instrumentation: dump `X:0x0000` (or wherever
+`sctap` reads) for the KEY track over many frames, well after any trig has
+finished and the track should be silent, both BEFORE the first-ever trig
+(known clean per Session 68 fact 2) and AFTER one has fired (known dirty).
+If that input is nonzero post-trig where it was exact zero pre-trig, THAT
+is the actual dirty-state site, and it is upstream of the SVF entirely (the
+voice engine or frame builder, not `patch_sc_dsp3.asm`). If it is exact zero
+in both cases, the standing-input hypothesis is wrong and the MON_ON/
+`moncommit` path (Session 68's fallback direction) becomes the stronger
+remaining suspect -- specifically, re-examine whether `moncommit`'s `beq
+mc09` gate can ever pass on stale/garbage MON_KEY content in a way that
+copies real, energetic audio from an unrelated track's `keybus[key]` gen-1
+slot into the compressor track's own SC LISTEN'd input on a recurring
+per-frame basis (a genuine externally-sourced feed, not a decay artifact).
+
+Archive builds and status unchanged from Session 68 -- do not reflash yet.
