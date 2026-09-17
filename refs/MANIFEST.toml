@@ -57,3 +57,17 @@ branch = "main"
 pin    = "HEAD"
 side   = "dsp"
 use    = "adds DSP56300 effects to the MKII by patching new DSP assembly + a Python build system. The DSP side COVERAGE.md flags as out of scope here; mapped, not patched."
+
+[repo.midisc]
+url    = "https://github.com/bkkbrls-del/midisc.git"
+branch = "main"
+pin    = "HEAD"
+side   = "coldfire"
+use    = "adds MIDI track scene A/B locks + XF morph to OS 1.40C (same OS version as this project). Dense, HW-confirmed 1.40C address map (tools/midisc/memory_map.py, docs/TECH.md): MIDI page/flat resolver, part-save freeze-twin persistence pattern, XF-over-step-lock morph engine, bank-register-clobber fix. Already vendored as a submodule by octabam (modules/midi-scenes). Added 2026-09-16."
+
+[repo.dsp56300]
+url    = "https://github.com/dsp56300/dsp56300.git"
+branch = "dsp56300"
+pin    = "HEAD"
+side   = "dsp"
+use    = "THE canonical DSP56300 CPU/DSP core emulator + disassembler (GPLv3) — the actual upstream octabam vendors into vendor/dsp56300 at a hand-pinned commit (scripts/setup.sh DSP56300_PIN), not at tip. NOTE: this repo's active branch is 'dsp56300', NOT 'main' (main is stale, last commit 2026-05-25) — whatsnew/sync must track 'dsp56300'. Track directly to see how stale octabam's vendored pin is and to mine opcode/CCR-flag semantics ourselves. Added 2026-09-16."

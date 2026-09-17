@@ -6,3 +6,5 @@ OctaLib = "6e2438ebae7687ad50b43f098b19bc1de1b8f4b9"  # Merge pull request #9 fr
 ems-octakit = "92cf70b3a51c99aebd9bb65f12919bbcb6ea2ce3"  # save queued clone Kits without relinking source Patterns
 octa-bt-pt = "e970dd0f9841ce5f648c2a257342cb8a3a05b54a"  # added the ability to upload presets and some built-in presets that I l
 octabam = "0ad97b9008f9a56a85a29e630687c2aa369c3c38"  # Merge pull request #253 from sambanks/selfname
+midisc = "eb8b4bc517364e952440f0df84fc147ce0cd27fa"  # Merge pull request #4 from bkkbrls-del/1.40MIDISC8
+dsp56300 = "46aa691da84a674fe843d406d36c89c7efcc8c01"  # Register analysis: MOVEP from an I/O address writes its destination re

@@ -55,6 +55,28 @@ no binary" approach — worth reading alongside this repo:
   (Bryan_T) — a parameter-default patch tool for OS 1.40C (Python / Streamlit):
   customise the firmware's default values and generate a flashable image from
   your own copy of the official OS.
+- **[bkkbrls-del/midisc](https://github.com/bkkbrls-del/midisc)** — added
+  2026-09-16. MIDI-track scene A/B locks + XF morph for OS **1.40C** (the same
+  base OS this project targets). A dense, HW-confirmed address map and a
+  reusable part-save persistence + composition pattern, distilled into
+  `reference/kb/memory-map.md` and `reference/kb/techniques.md`. Already
+  vendored by octabam as a submodule (`modules/midi-scenes`).
+
+## The DSP56300 emulator core
+
+- **[dsp56300/dsp56300](https://github.com/dsp56300/dsp56300)** — added
+  2026-09-16. The canonical, actively-developed Motorola/Freescale/NXP
+  DSP56300-family emulator (GPLv3) — the actual upstream octabam vendors a
+  pinned commit of into `vendor/dsp56300`. Tracked directly (branch
+  `dsp56300`, the active branch — not `main`) so this project can check its
+  own DSP56300 questions against current upstream instead of octabam's
+  vendored snapshot. See `reference/kb/dsp56300.md` for the currency gap this
+  surfaced. The org's flagship consumer project,
+  **[dsp56300/gearmulator](https://github.com/dsp56300/gearmulator)** (VST/AU/
+  CLAP/LV2 emulations of the Access Virus, Waldorf microQ, Nord Lead and
+  others — none of them the Octatrack), pulls this same repo in as a
+  submodule; reviewed 2026-09-16 and not tracked separately since it adds
+  nothing beyond that submodule for this project's purposes.
 
 ## Community reverse-engineering & documentation
 
@@ -62,9 +84,9 @@ no binary" approach — worth reading alongside this repo:
   large slice of the OS 1.40C Part/Kit/Bank/scene/sequencer address map, folded
   into `reference/kb/octakit-abi.md`.
 - **Bryan_T** (`octa-bt-pt`), **sambanks** (`octabam`), **snugsound** (`OctaLib`),
-  **mischa85** (`elektron-firmware-tool`) — the prior-art repos whose findings are
-  distilled, with per-fact attribution, into `reference/kb/*.md` (see
-  `reference/EXTERNAL_RESEARCH.md`).
+  **mischa85** (`elektron-firmware-tool`), **bkkbrls-del** (`midisc`) — the
+  prior-art repos whose findings are distilled, with per-fact attribution, into
+  `reference/kb/*.md` (see `reference/EXTERNAL_RESEARCH.md`).
 - **Elektronauts threads** that seeded specific findings here:
   - Octatrack CPU chip model — https://www.elektronauts.com/t/octatrack-cpu-chip-model/93304
   - Modifying Elektron firmware — https://www.elektronauts.com/t/modifying-elektron-firmware/36228

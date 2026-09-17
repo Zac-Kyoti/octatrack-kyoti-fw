@@ -13,6 +13,18 @@ agent that fetches the refs and appends new commits here.
 
 ## Pending
 
+- 2026-09-16  octabam@0ad97b9  178 new commits since our 2026-09-14 pin (2 days).
+              Not triaged individually — this repo is now moving too fast to
+              read commit-by-commit; next octabam sync should skim
+              `docs/RTOS_FORK.md` / `CLAUDE.md` "Traps" section deltas rather
+              than the raw log.                                    [ TODO — skim before next octabam sync ]
+- 2026-09-16  dsp56300@46aa691  132 commits ahead of octabam's vendored pin
+              (`c051afad`, 2026-07-28): DOR aa / DO FOREVER / MACRI / LRA Rn /
+              TRAP(cc) / ILLEGAL, MOVEP P<->low-I/O, absolute-short MOVE(M),
+              CMPU N-from-borrow, CCR overflow-flag pass, ADC/SBC, ESAI
+              underrun logging. Noted in kb/dsp56300.md; not cross-checked
+              against any of our own DSP56300 work yet (we have none pending).
+                                                                     [ noted, kb/dsp56300.md — no action needed until we touch DSP56300 semantics ]
 - 2026-09-06  octamax@7d9debc  OCTAMAX 2.x — dual-256 static-pool reclaim (DDR
               relocation), OCTAMAX_2 combined release. Techniques noted in
               kb/techniques.md; not adopted.                          [ noted, not adopted ]
@@ -46,6 +58,12 @@ agent that fetches the refs and appends new commits here.
 
 ## Distilled
 
+- 2026-09-16  midisc@eb8b4bc  first sync — new contributor, added to MANIFEST.toml.
+              Full 1.40C MIDI-scene address map + XF morph engine + part-save
+              freeze-twin persistence pattern + bank-register-clobber fix +
+              the "hook the caller, not the shared entry point" Octakit
+              composition pattern.
+              [ kb/memory-map.md "MIDI track scenes", kb/techniques.md "midisc" ]
 - 2026-09-09  ems-octakit@ec70dda  the append-a-runtime architecture — reclaim a flex-pool
               slice (4 constant patches @0x40096f80–0x40097130; cost 18.4 s / 3.6 %),
               append an aPLib-packed ~128 KB ColdFire runtime at 0x45d0dde0, ~10 boot

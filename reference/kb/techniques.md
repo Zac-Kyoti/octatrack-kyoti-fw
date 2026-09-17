@@ -279,4 +279,46 @@ Same "bring your own OS, ship no binary" stance as us, but the patch set is a
 
 Full address map from its `abi.inc` → [`kb/octakit-abi.md`](octakit-abi.md).
 
+## midisc — MIDI scene locks (1.40C, added 2026-09-16)
+
+> source: `refs/midisc/{docs/TECH.md,tools/midisc/*.py}` @ `eb8b4bc` · fetched
+> 2026-09-16 · **C** (HW-confirmed, shipping build `1.40MIDISC8`)
+
+Address map + the XF-morph/persistence design distilled into
+[`memory-map.md` "MIDI track scenes"](memory-map.md#midi-track-scenes--the-midisc-address-map-140c).
+Notes specific to *how it composes with other patches* (relevant since we
+already track the same kind of multi-patch composition question):
+
+- **Code caves on stock 1.40C**, reusable coordinates for anything targeting
+  the same OS build: `SAFE_CAVE 0x400D24D0..0x400D2CDC` (dirty/pack/unpack/
+  save/xf_mix/plock trampoline/morph), `VOICE_RELOAD_CAVE 0x400D2E84..0x2EA0`,
+  `CAVE2 0x400D2EE6..0x3020` (second zero gap after PLAYBACK string tables),
+  `CODE2 0x400D6500..0x6600`, `STUB 0x400D7600..0x7C48`, `PROJECT_CAVE
+  0x400E1EC4..0x2000`. **`CLEAR_CAVE` (`0x400C4302`) is UNSAFE for code** — a
+  stock pointer table at `0x400ba8fa` refs into it; midisc only puts filter-UI
+  data there, never Part-Clear logic. `SPARSE_CKPT_CAVE` (`0x400C1153`) is
+  *also* unsafe — it sits inside a data table, not a real zero pad; an earlier
+  midisc revision put code there and bricked on Part Reload. Cross-cave calls
+  go through fixed **sentinel addresses** (`SENT_PACK`, `SENT_UNPACK`, …)
+  patched post-link — the same "detour via a stable pointer, not a raw
+  address" idea as our own `SENT_*` cave-boundary calls.
+- **Composing with Octakit** (`refs/midisc/docs/TECH.md` "Compose with
+  Octakit", checked against `sambanks/octabam` modules `midi-scenes` /
+  `octakit` / `scenes-kits` and `emuyia/ems-octakit` pinned `ca3b527`): the
+  two patches both want `STOCK_APPLY` (`0x40009094`); midisc's answer is to
+  leave it **stock** and let Octakit own it alone, following along via
+  hold/dial/pad hooks + Part Save/Reload + an `AFTER_PROJECT_LOAD` seed
+  instead of body-hooking the shared entry point. General lesson for stacking
+  our own mods on top of someone else's patched region: **prefer hooking
+  the callers of a shared entry point over rewriting the entry point itself**
+  — it's what let two independently-developed patches share one hook site
+  without a merge conflict.
+- **`part_window` seam** (`SEAM_CAVE`, `0x400D46E2`): a small trampoline
+  (`IN d3=index → OUT a0=window, d1=stride`) that Octakit overrides to
+  redirect "part index" to "kit payload base" — a clean pattern for one patch
+  to let another patch redefine what "the current part" means, without
+  either patch hard-coding the other's layout.
+- **Do not force-push `main`** on this repo — octabam pins specific midisc
+  commits as a submodule; a rewritten history there breaks octabam's build.
+
 _(Extend as patterns recur.)_

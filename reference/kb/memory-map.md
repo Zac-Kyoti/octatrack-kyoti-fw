@@ -473,6 +473,75 @@ one short of `0x800000e0` — do **not** widen further. See `tools/patch_mutemod
 
 ---
 
+## MIDI track scenes — the midisc address map (1.40C)
+
+source: `refs/midisc/tools/midisc/memory_map.py` + `docs/TECH.md` @ `eb8b4bc` ·
+fetched 2026-09-16 · **C** (HW-confirmed by that project; a live ColdFire patch
+shipping as `1.40MIDISC8`, same base OS as this project — `BASE = 0x40000400`).
+midisc adds MIDI-track scene A/B locks + XF morph; octabam already vendors it
+as a submodule (`modules/midi-scenes`).
+
+**MIDI page/flat resolver** (`FUN_40031da4(track, page_kind)`, MIDI tracks
+`track >= 8`): `PAGE_MODE = 0x460D1684` (u32); flat index = `PAGE_MODE*6 +
+encoder`. `PAGE_MODE` 0=NOTE(flats 0-5) / 1=LFO(6-11) / 2=ARP(12-17) /
+3=CTRL1(18-23) / 4=CTRL2(24-29). ARP order TRAN,LEG,MODE,SPD,RNGE,NLEN;
+descriptor counts LEG=2 MODE=7 SPD=96 RNGE=8.
+
+**Live scene bank ("MSC")**: `MSC = 0x400D6600`, `16 scenes × 8 MIDI tracks ×
+32 flats` (index `scene*256 + track*32 + flat`), empty cell `0xFF`. Companion
+state: `SCENE_HELD = 0x460D169C`, `MIDI_FLAG = 0x80000012`, `BANK_PTR =
+0x46C82456`, `PART_DISP = 0x100B14CF`, `TRACK_DISP = 0x100B14CC`.
+
+**Part-Save / reboot persistence** — a sparse blob *inside the part window*
+(not a separate file), the pattern to copy for any new per-part persistent
+state: offset `bank+part*0x18B2 + 0x90522` (`SPARSE_OFF`), shadow twin at
+`+0x967EC`, 144 bytes, magic u16 `0x4D53` ('MS'), up to 46 `{u16 flat_or_id,
+u8 value}` entries. Durable save is the *same three-step path stock Part Save
+uses* — working→shadow→`PART_STAGING` (`0x100AB196`) + set `PART_SAVED`
+(`bank+0x9B312`) — a sparse-only write does not survive reboot. A **freeze
+twin** sits 144 B before the live sparse (`FREEZE_SPARSE_OFF = SPARSE_OFF -
+144`) so Part Reload can restore pre-edit state after a reboot, seeded from
+DRAM `CKPT` (`CLIP+0x200`, `CLIP = 0x460C9A00`) via a hook *after* stock
+`jsr faf0` (`AFTER_PROJECT_LOAD = 0x400622C6`) — stock `faf0` fills
+CF/bank/`PART_PROJECT` but never DRAM CKPT, so anything relying on CKPT must
+seed it itself post-load. **Never body-hook `PROJECT_LOAD` (`0x4000faf0`) or
+`PROJECT_SAVE` (`0x4000fbb4`)** directly — this project doesn't.
+
+**XF-over-step-lock morph engine** (`xf_mix`, `SAFE_CAVE`): scenes are an
+*offset layer* on top of step (p-lock) values, not a replacement — locked XF
+side reads the MSC scene cell, the empty XF side reads `TRIG_SNAP[track][flat]`
+(a DRAM snapshot of the raw trig/p-lock row taken by a trampoline right
+*before* remix) if that step locked the flat, else falls back to
+`MIDI_BEHIND` (`0x8F162`, the unlocked dial value). At full A/full B (weight
+0 or `0x7F` exactly) it additionally pokes `LFO_BASE` (`0x46C78960`,
+`track*32+flat`) so locked flats read as an absolute scene with no step-lock
+audible at the pure end; mid-XF it deliberately does **not** re-poke every
+step (reintroduces audible stepping on both-scene lerps). `xf_mix` writes
+`MIDI_VOICE` (`0x46C76DC0`) only, never `MIDI_SOUND` (`0x100A52B0`) — writing
+the UI-facing copy aliases unlocked cells into a sticky post-reboot state.
+
+**CC freeze-on-full-B gotcha, generalizable**: stock `CC_TX`
+(`0x4009EEC8`) reads the *dialed* `d2` register, not the mixed value, so a
+CTRL CC locked to scene B looked frozen on the panel but kept transmitting
+live values until a `build_voice_reload_d2` step explicitly reloads
+`d2 <- MIDI_VOICE[track*0x44+flat]` after every `xf_mix`. Generalizes: any
+mix/remix step that writes an internal "current value" table but leaves a
+register a downstream *send* path still reads independently will silently
+un-freeze under it.
+
+**Bank-register clobber** (useful defensive pattern for any code near
+`BANK_PTR`): stock `move.l d0,(0x46C82456)` at two bank switch/init sites
+(`0x400622AA` guarded, `0x40087D44` unconditional) clobbers caller registers
+on ColdFire — midisc wraps both with a `lea`/`movem` save-restore (not
+`movem` to `-(sp)`, which the ColdFire form doesn't support the same way).
+Site B (`0x40087D44`) must **never** pack/save state — mid bank-load is not
+a safe point for a durable write.
+
+→ full detail (hook site table, code-cave placement, compose-with-Octakit
+notes) in [`techniques.md`](techniques.md) "midisc — MIDI scene locks".
+
+---
+
 ## To import next (from `refs/`)
 
 - **octabam `docs/`** — swept 2026-09-02 (menu/UI) + 2026-09-06 (kernel, sequencer
