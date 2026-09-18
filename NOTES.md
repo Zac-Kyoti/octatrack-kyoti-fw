@@ -12781,3 +12781,154 @@ for trusting any future "it fires at the right frame now" result.
 Tooling: `tools/emu_directjump_dynamic.py` (kept, working, calibrated).
 Throwaway calibration probes lived in the session's scratchpad, not this
 repo. `patch_directjump.s` / `build_directjump_v4.py` unchanged.
+
+## Session 74 (2026-09-18, `wip`) — SIDECHAIN3: followed Session 73's own HANDOFF —
+the "another track's dispatch pass" half of the hook-12-style DSP-timing hypothesis is
+CLOSED (definitively, from disassembly already in this project's own NOTES, no new
+tooling needed); the "interrupt landing mid-sequence" half is architecturally unlikely
+but not provable either way. Found a NEW, well-motivated, previously-untested candidate
+mechanism instead: an `n7`-vs-fixed-32 loop-bound mismatch inside `scdet` ITSELF,
+distinct from the superficially similar theory Session 57/58 already disproved for a
+DIFFERENT symptom. No code changed, read-only RE this session.
+
+### Re-read hook-12's root-cause methodology (Session 58 "part 4" / "part 5"), per the
+### handoff's own instruction
+
+Confirmed the actual finding: octabam's kernel research showed the RTOS's TCB save
+area (`moveml d0-d7,a0-a7` at the PIT0 task-switch entry, `0x40000550`) never saves
+MACSR, and the level-chain interpolator (hook 12's site) runs at a DIFFERENT MACSR
+value than a sibling frame-builder site — so if hook 12's own added cycles ever let a
+PIT0 tick preempt mid-loop, the OTHER site (running next, wrong MACSR) corrupts every
+subsequent EMAC read for the rest of that pass. **Worth being precise about how solid
+this actually is**, since Session 73's phrasing ("the already-solved hook-12 ...
+regression") slightly overstates it: "part 5" reframed the two MACSR sites as
+SEQUENTIAL code in one function (not two racing tasks), which widened the hazard
+surface but also meant the original narrow mechanism was never fully nailed down: the
+project ultimately shipped hook 13 (`relstate_shadow`), a DIFFERENT approach that
+avoids the hot EMAC site entirely, rather than proving and fixing hook 12's own
+mechanism. The METHODOLOGY (pull `octabam`'s research on ColdFire-side RTOS/EMAC
+state, ask whether anything a hook touches fails to survive a task switch or
+interrupt) is the reusable part; the specific MACSR mechanism itself was a strong,
+plausible, but not fully closed-the-loop hypothesis even for hook 12.
+
+### The analogous DSP-side question, asked directly against this project's OWN
+### existing dispatcher disassembly (Session 17) — no new tooling needed
+
+Per the handoff: does anything written between "`scdet` stashes `keybus[key]` gen 1"
+and "`moncommit` reads it back" get disturbed by another track's dispatch pass, or by
+an interrupt landing in between? Re-read Session 17's own per-track dispatcher map
+(`func_000385`, 4 iterations/core; `func_0004a7`–`0x50d` = FX1+FX2 dispatch;
+`0x50e`–`0x53c` = mix-to-output-slot, THEN `x:0x420 += 1` / loop back to
+`func_000385`) side by side with `moncommit`'s own build-time splice address
+(`build_sidechain3.py`: `commit_hook` payload A **`0x50e`**) — `moncommit`'s splice
+**is** the first instruction of that `0x50e–0x53c` segment, i.e. the code
+immediately following `func_0004a7`'s own return, still inside the SAME
+`func_000385` iteration, strictly before the loop ever branches back for the next
+track.
+
+**"Another track's dispatch pass" is CLOSED, definitively**: `scdet` (called from
+inside THIS track's own `func_0004a7` FX dispatch) and `moncommit` (the very next
+instructions after that dispatch returns) are directly sequential code within ONE
+track's ONE loop iteration — no other track's `func_0004a7` call can run in between,
+by construction of the loop. This doesn't need a dynamic check; it falls straight out
+of disassembly this project already had in hand (Session 17), just never connected to
+this specific question before.
+
+**"An interrupt landing mid-sequence" stays open, but is architecturally unlikely, not
+disproven**: nothing found this session (or anywhere in this project's or octabam's
+DSP-side documentation) suggests the DSP56321 cores run anything RTOS-like or
+preemptible during the per-frame dispatch walk — unlike the ColdFire side (which
+genuinely has PIT0/RTOS task-switching, hook 12's whole mechanism), the DSP side
+appears to be a tight, single-threaded, frame-clocked loop with no evidence of a
+mid-dispatch interrupt source. **Not proven absent** — no DSP56300 interrupt-vector
+audit was done this session — but there is no positive evidence for it either, and the
+"another track" half being closed removes the more concrete version of the hazard.
+**Net: the hook-12-style mechanism, taken literally, does not look like a promising
+lead for SIDECHAIN3** — consistent with the handoff's own note 2, which already
+flagged this as the likely outcome and told future sessions not to assume the
+mechanism transfers 1:1.
+
+### A NEW candidate, found while re-reading `scdet`'s own code closely: a genuine
+### `n7`-vs-fixed-32 loop-bound mismatch, distinct from the one already disproved
+
+While confirming the dispatch-order question above, re-read all of `scdet`'s own
+copy/scale loops in `tools/patch_sc_dsp3.asm` closely (not just the parts Session 73
+touched). Four loops operate on the same 32-word buffer (`x:$40`–`x:$5F`, 16 stereo
+pairs):
+
+| step | loop | bound |
+|---|---|---|
+| gen-0 copy-in (`zz02`) | `do #<$20,>zz02` | fixed 32 |
+| KEY GAIN (`zz04`) | `do #<$20,>zz04` | fixed 32 |
+| **KEY FLT** (`zz13`) | **`do n7,>zz13`** | **dynamic `n7`** |
+| SC LISTEN gen-1 stash (`zz15`) | `do #<$20,>zz15` | fixed 32 |
+
+Three of the four loops process a hardcoded 32 words; only KEY FLT's own SVF loop
+uses `n7`, the DSP's hardware loop-count register. Per Session 17's dispatcher map,
+`n7` is exactly the register a **split block** (a trig landing mid-DSP-block) would
+set to the SEGMENT length (`x:0x20c`/`x:0x20d`, not the full 16 samples) for
+whichever `PROCESS_TABLE[id]` call is in progress — and Session 73 this week already
+confirmed dynamically, for THIS exact test scenario, that split blocks are genuinely
+active (`--dsp-watch 0:X:20c` showed real nonzero values on some frames). If `n7 < 16`
+on a split-block frame, KEY FLT's loop only filters the FIRST `n7` stereo pairs of
+`x:$40`; the KEY GAIN stage (which runs BEFORE it, same call, full 32 words) has
+already filled the REST of the buffer with unfiltered (gain-scaled only) key audio —
+so the SC LISTEN stash (`zz15`, unconditionally 32 words) would publish a buffer that
+is FILTERED for the first `n7` samples and RAW for the remainder, spliced mid-block,
+on any frame where a trig causes a split.
+
+**This is NOT the same theory Session 57/58 already tested and disproved** — that
+round's "oscillation" persisted even with `KFLT` at bypass, where the `do n7` loop
+never executes at all (`beq zz10` skips it entirely), which is airtight evidence
+against `n7` explaining THAT symptom. But this session's target bug has a materially
+different, and never-tested-against-this-mechanism, reproduction condition, from the
+very first line of this session's own prompt: **it reproduces only when KEY FLT ≠
+OFF.** A filtered/unfiltered splice artifact can only exist when filtering is actually
+engaged — exactly the condition this bug requires and the old one didn't. It also
+fits every one of Session 73's clarifying facts cleanly:
+
+- **Metallic/resonant**: a hard mid-block jump from smoothly-filtered to full-bandwidth
+  raw audio is a plausible read of "metallic," especially against a heavy LP setting.
+- **Periodic, tempo-tracking**: split blocks happen exactly at trig landings, which are
+  pattern/tempo-locked — not a beat-frequency mechanism, but produces the same
+  tempo-tracking signature.
+- **Tracks exactly with the key track's content, silent when it's silent**: both
+  halves of the splice are copies of the SAME key-track audio (filtered vs. raw), so
+  content and silence both carry through either way.
+- **"At least as loud as the sample," not subtle**: the raw half is full-level key
+  audio, not an attenuated residual — unlike the already-ruled-out -113 dBFS SVF
+  fixed-point tail (Session 69).
+- **Stops immediately when MON is off**: `moncommit`, the only thing that ever surfaces
+  this stash to the listener, is gated on MON exactly as observed.
+- **Why Session 73's own emulator replay of `test5`/`test6` showed no ringing**: the DFT
+  was run on "a matched loud segment" with no guarantee it coincided with a
+  split-block frame, and Session 73's OWN unresolved finding (exactly how the
+  split-block second `PROCESS_TABLE` call reaches the real body without passing
+  through either detour) already flags that `ot_emu`'s split-block dispatch behavior
+  for this exact module hasn't been fully validated against real silicon — consistent
+  with a bug that's real on hardware and invisible in that specific emulator replay,
+  the same shape of gap as everything else this thread has been chasing.
+
+**Not yet verified. Hypothesis only, from static reading, same caution as every other
+theory this thread has floated.** The concrete, cheap, NO-FLASH next step: rerun
+`ot_emu --dsp-watch` (or `--dsp-pcwatch`) against the ALREADY-CAPTURED `test5` hardware
+export, this time watching **`n7`'s actual value at `scdet`'s own entry PC**
+(`comp_proc+0`) alongside `x:0x20c` (already probed this session for the split flag) —
+check directly whether `n7 < 0x10` on frames where the split flag is active, and
+whether those frames land inside (or near) the loud segment Session 73's DFT already
+analyzed. If confirmed, the fix is the one Session 57 already scoped but never
+finished for the old architecture: drive `zz02`/`zz04`/`zz15`'s loop bounds off `n7`
+instead of a hardcoded `#<$20`, matching what `zz13` already does — care needed per
+Session 57's own note, since this changes addressing/loop bounds, not just a count.
+
+### HANDOFF
+
+1. **Primary next step**: the `n7`-watch experiment above, against the existing
+   `test5` capture — no new build, reuses this week's own `--dsp-watch` capability.
+2. Two real-hardware experiments from Session 72/73's own handoff are STILL untried
+   and still cheap (no new build): does the ringing change with KEY GAIN (only tested
+   at unity) or with RMS (only tested at 0)?
+3. The hook-12-style DSP-timing angle is now considered a low-priority lead (see
+   above) — don't re-chase it further without a genuinely new fact.
+4. Do not pursue the diagnostic build further, per Session 73's own finding — still
+   true, unrelated to this session's new lead.
