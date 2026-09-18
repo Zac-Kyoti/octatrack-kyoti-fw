@@ -12932,3 +12932,82 @@ Session 57's own note, since this changes addressing/loop bounds, not just a cou
    above) — don't re-chase it further without a genuinely new fact.
 4. Do not pursue the diagnostic build further, per Session 73's own finding — still
    true, unrelated to this session's new lead.
+
+## Session 74 continued (2026-09-18, `wip`) — SIDECHAIN3: the `n7`-vs-fixed-32 premise is
+now CONFIRMED by fresh static disassembly (no emulator run needed) — on any split-block
+frame, `scdet`'s entry genuinely runs with `n7 < 16`, in BOTH payloads. Still not confirmed
+as the actual audible-ringing mechanism; that needs a hardware or capture-correlated test.
+
+### Disassembled `P:0x4a7`–`0x506` (payload A) and `P:0x29c`–`0x2fb` (payload B) directly
+### against `out/raw/section_3_MAIN_OS.bin`, using `dsp_module_fileoff` (the same helper
+### `build_sidechain3.py` already uses) to locate the dispatch module and `dsp56kDisassemble
+### -le` to read it — no `ot_emu` run needed, this settles the question from the literal
+### stock firmware bytes
+
+The queued next step was a dynamic `ot_emu --dsp-watch`/`--dsp-pcwatch` run against the
+`test5` capture; turned out the same question is answerable more directly from static
+disassembly of the dispatcher's own FX1/FX2 call site, which this project already has the
+tooling for (`refs/octabam/tools/build/dsp_modmap.py` + the vendored `dsp56kDisassemble`).
+Both payloads disassemble to the byte-identical structure (relocated addresses only):
+
+```
+move   x:>$20c,b        ; b = split point
+tst    b
+beq    <skip-first-call>
+move   #$0,r0            ; r0 = 0 (first segment, a=0)
+clr    a  || move b,n7   ; PARALLEL MOVE: n7 = x:0x20c = split  <-- first call's n7
+jsr    (r2)               ; PROCESS_TABLE[id] -- taken only when split != 0
+<skip-first-call>:
+...
+move   x:(r1+$235),r2
+move   x:>$20d,n7        ; n7 = x:0x20d = 0x10 - split          <-- second/only call's n7
+move   x:>$20e,r0        ; r0 = x:0x20e = split*2
+jsr    (r2)               ; PROCESS_TABLE[id] -- ALWAYS taken
+```
+
+This confirms Session 17's own paraphrase exactly, but pins down the mechanism that
+paraphrase didn't spell out: `n7` is loaded via a PARALLEL MOVE (`clr a || move b,n7`) at
+the first call site, straight from `x:0x20c`; the second, always-taken call site loads it
+from `x:0x20d`. **On a non-split frame** (`x:0x20c == 0`), the first `jsr` is skipped
+entirely (`beq`) and only the second fires, with `r0 = x:0x20e = 0` and `n7 = x:0x20d = 0x10`
+— a normal, full-16-sample call, matching Session 17's "once (`r0=0`) otherwise." **On a
+split frame** (`x:0x20c != 0`), BOTH `jsr`s fire — first with `n7 = split`, second with
+`n7 = 0x10 - split` — and since `split` is strictly between 0 and 16 by construction of the
+branch, **both possible values of `n7` on a split frame are less than 16**, regardless of
+which of the two calls is the one that actually reaches `scdet` (Session 73 already
+established dynamically that only one of the two reaches our detour; this finding doesn't
+depend on resolving which one — either way, `n7 < 16` at that call).
+
+**This closes the static half of the hypothesis**: it is now a disassembly-proven fact,
+independent of any emulator's fidelity, that `scdet` runs with a short `n7` on split-block
+frames, in both payloads. `zz02`/`zz04`/`zz15`'s hardcoded `#<$20` loops therefore process a
+buffer that `zz13`'s KEY FLT loop did NOT fully touch that frame — the buffer-inconsistency
+premise from the "continued" section above is real, not speculative.
+
+**What's still open**: whether this inconsistency is actually what the user hears as
+"metallic, resonant ringing" — that's a claim about audible perception and about which
+call site actually reaches `scdet` in practice, neither of which static disassembly alone
+can settle. The cheapest remaining check is still a dynamic one (correlate `x:0x20c`
+activity, already probed in Session 73, against the loud segment Session 73's DFT
+analyzed) — but given the static premise is now solid, it may be just as informative (and
+requires no tooling at all) to build the actual fix (drive `zz02`/`zz04`/`zz15` off `n7`
+instead of `#<$20`, per Session 57's own scoping) and test it directly, either in
+emulation against the existing `test5`/`test6` pair or on hardware.
+
+### HANDOFF
+
+Two ways to proceed, not yet chosen between:
+1. **Build the fix** (drive `zz02`/`zz04`/`zz15`'s loop bounds off `n7`) and test it against
+   `test5`/`test6` in emulation, or flash and listen — the more direct test of whether this
+   IS the bug.
+2. **Verify first, no build**: correlate `x:0x20c` (already probed) against `scdet`'s own
+   hit timing under `ot_emu`, to confirm the mechanism fires during the actual captured
+   ringing before committing to a fix.
+3. Session 72/73's two real-hardware experiments (KEY GAIN, RMS) are now answered by the
+   user directly (Session 74 continued's own chat log, not yet folded into this file): KEY
+   GAIN scales the ringing's loudness both up and down around unity (bipolar, as expected,
+   since it scales the key track audio the ringing is made of) and does not change its
+   character; RMS has no effect on the ringing's character either. Both are consistent with
+   (neither confirms nor rules out) the `n7` mismatch mechanism, since KEY GAIN's stage
+   runs upstream of both the filtered and unfiltered portions of the buffer, and RMS only
+   feeds the compressor's own gain-reduction math, which `moncommit` never listens to.
