@@ -16381,3 +16381,28 @@ for testing purposes, clearly marked as non-hardware-representative if so). `too
 diag_echo_realkey.py` and `/tmp/quick_mutekey_check.py`'s logic (the latter not saved to
 `tools/` -- trivial to reproduce, see this addendum) are both ready to resume from once
 that's resolved.
+
+## Session 75 continued (2026-09-19, `wip`) — SIDECHAIN3: HARDWARE CONFIRMED FIXED. User
+flashed the Session 75 build (n7 fix + the split-block repeat-call guard, both fixes
+together) and confirmed: **the MON ringing/ring-modulation/resonance with KEY FLT on LP or
+HP is gone.** This closes the SIDECHAIN3 investigation thread that ran Sessions 55-75.
+
+**Root cause, in full, for whoever needs the summary**: two independent, compounding bugs
+in `scdet` (`tools/patch_sc_dsp3.asm`), both triggered by a mid-block trig landing on the
+compressor's own track (a split block, per the dispatcher's own `P:0x4a7..0x4d7` two-call
+mechanism, Session 74's disassembly): (1) the KEY FLT SVF loop bounded itself on the
+compressor's own per-call `n7` (a partial, segment-scoped sample count) while its three
+sibling loops (copy-in, KEY GAIN, the SC LISTEN gen-1 stash) always processed the full
+16-sample block, leaving part of the published buffer unfiltered raw audio on a split frame
+(Session 74's fix: hardcode the loop to the full block, independent of `n7`); (2) `scdet`
+itself gets invoked TWICE by the dispatcher on a split block (both `PROCESS_TABLE` calls
+normally resolve to the same target), re-exciting the SAME stateful SVF integrator twice in
+immediate succession every time a trig landed mid-block (Session 75's fix: a repeat-call
+guard keyed on the dispatcher's own `r0` convention, 0 for the frame's only/first call,
+nonzero for a genuine second call). Neither fix alone resolved the reported hardware
+symptom; both together did. Status: **CLOSED, hardware-verified.**
+
+Nothing further planned for this bug. `out/OCTATRACK_OS1.40C_SIDECHAIN3.syx` (already
+flashed, working) is the current known-good SIDECHAIN3 build. Any future SIDECHAIN work is
+UI/parameter tweaks and optimization, not bug-fixing -- see whatever session picks that up
+next for its own scope.
