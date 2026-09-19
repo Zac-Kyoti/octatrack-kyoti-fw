@@ -16382,6 +16382,466 @@ diag_echo_realkey.py` and `/tmp/quick_mutekey_check.py`'s logic (the latter not 
 `tools/` -- trivial to reproduce, see this addendum) are both ready to resume from once
 that's resolved.
 
+## Session 58 continued yet again, part 12 (2026-09-18/19, `wip`) — MUTE MODE: static RE
+RESOLVES the "FIRST THING TO DO" -- `0x460d10d0`/`0x460d10d4` do NOT gate `FUN_40083ab4`'s
+mute-apply logic at all, overturning the addendum's read of the raw r2 disassembly. Found
+and fixed a real argument-encoding bug in `diag_echo_realkey.py` itself, then a SECOND,
+more fundamental harness gap: the real key-handler call now provably sets the correct
+low-level internal mute mask, but `MUTE_STATE` (what hooks 9/10 actually gate on) never
+gets synced from it under `call_as_main`, at all, across a 3-second window. **Every leak
+number this session and part 11 produced (raw-poke AND real-key-path alike) is therefore
+inconclusive** -- neither test method used so far has validly exercised hooks 9/10 against
+a genuinely-muted `MUTE_STATE`. No verdict on the echo mechanism. HANDOFF.
+
+### Static RE of `0x460d10d0`/`0x460d10d4`, via Ghidra's real resolved cross-references
+(not a literal grep) against the full-auto-analysis project Session 70 12th pass built
+
+Used the same `analyzeHeadless ... -noanalysis -postScript` pattern as every prior Ghidra
+probe, now against the full-analysis project (Session 70's Constant Reference Analyzer run
+survives in `ghidra_project`, so this session's xrefs are Ghidra-resolved, not literal-byte
+matches). New scripts `tools/ghidra/attic/GhidraMute9.java` / `GhidraMute10.java`, dumps
+`out/ghidra/GhidraMute{9,10}_session58c12.txt`.
+
+**`FUN_40083ab4`'s full decompile** (r2's raw disassembly had hit an `invalid` opcode mid-
+function last session and the manual reading past that point was wrong):
+```c
+void FUN_40083ab4(int param_1,int param_2)
+{
+  uVar1 = param_1 - 0x10;                    // uVar1 = 0-7 track index; param_1 = KEYCODE
+  FUN_40083208(uVar1);                       // mute-screen UI, gated on _DAT_460fab34 (usually 0 -> no-op)
+  if ((_DAT_460d10d0 != 0) || (_DAT_460d10d4 != 0)) goto LAB_40083b90;
+  if (uVar1 == DAT_100b14cc) {               // pressed track == currently UI-selected track
+    ... extra recorder/consolidate bookkeeping (FUN_40077a8c/FUN_4006dbcc/etc) ...
+  }
+  _DAT_460fab44 = -(_DAT_460fab40 != 0) + 1;
+LAB_40083b90:
+  _DAT_460fab40 = 1 << (uVar1 & 0x3f) | _DAT_460fab40;   // <-- BOTH paths converge HERE
+  if (param_2 == 1) { FUN_400836d8(); return; }           // <-- and BOTH apply the mute
+  return;
+}
+```
+**Both branches of the `tst.l 0x460d10d0`/`0x460d10d4` check converge on the exact same
+tail.** The mute bit always gets OR'd into `_DAT_460fab40` and `FUN_400836d8()` (the real
+per-track mute-apply function) always gets called when `param_2==1`, regardless of those
+two flags. The check only skips the small `uVar1==DAT_100b14cc` side block -- it is not an
+early-bailout gate on the mute logic at all. **This directly overturns the prior session's
+"argument-independent gate ... before ever reaching the mute logic" reading.**
+
+### What `0x460d10d0`/`d4`/`d8` actually are -- confirms, refines the original Session-9 doc
+
+Decompiled the three sibling handlers `FUN_40030e6c`/`c60`/`a6c` and `FUN_400836d8` itself.
+Matches Session-9's finding exactly: `FUN_400836d8` computes `uVar6 = (_DAT_460d10d0 +
+(_DAT_460d10d4 + _DAT_460d10d8*2)*2) * 0x1000` -- the three flags ARE the mute-quantize
+mode word (bits 0/1/2), feeding the documented `0x1040/0x2040/0x4040` mailbox command
+nibble. Each of the three sibling handlers sets its own bit on key-press (`param_2!=0`) and
+clears it on release (`param_2==0`), UNLESS the currently-selected UI item is list-type `4`
+(`cVar2=='\x04'`) AND `FUN_40083480()==0`, in which case a different, list-picker path
+(`FUN_40097924`) runs instead and the flag is left untouched. Not fully identified which
+physical keys these three handlers correspond to (still plausibly CUE/MUTE/SOLO per
+Session 9, now confirmed structurally to double as list-browser navigation in the type-4
+special case) -- not needed to resolve this session's actual question, so not pursued
+further.
+
+### Real bug found and fixed: `diag_echo_realkey.py` passed the wrong argument encoding
+
+The decompile above requires `param_1` = KEYCODE (`track + 0x10`); the script passed bare
+`track`. This directly contradicts the original Session-9 doc's own paraphrase
+("`FUN_40040250(track, evt)` ... single press -> `FUN_40083ab4(track, 1)`") -- reconciled:
+`FUN_40040250`'s own first parameter is itself already a keycode (the button-table dispatch
+at `0x400bfc30` feeds it raw), and it passes that same value straight through unchanged;
+Session 9 just informally called that parameter "track" without checking its numeric range.
+Fixed (`tools/diag_echo_realkey.py`, `args=(track + 0x10, 1)`), with a comment recording
+the reasoning so a future session doesn't flip it back.
+
+### Re-ran with the fix -- D0 and MUTE_STATE UNCHANGED, but a deeper check finds the real story
+
+`python3 tools/diag_echo_realkey.py --track 1 --pre-ms 500 --post-ms 3000 --repeats 1`
+still shows `D0=0x8` and `MUTE_STATE` (`_DAT_80000008`) staying `00000000` for the entire
+run -- so the keycode fix alone was NOT the explanation for part-11-addendum's observation
+either. Added end-of-window reads of `_DAT_460fab40` (the mask `FUN_40083ab4` writes
+SYNCHRONOUSLY, per the decompile above) alongside `MUTE_STATE`:
+```
+end of window: _DAT_460fab40 00000002 -> 00000002, MUTE_STATE (final) = 00000000
+```
+**`_DAT_460fab40` already reads `0x2` (`1 << track 1`) right after the call, and stays
+exactly `0x2`, unchanged, for the full 3-second window that follows.** This proves
+`FUN_40083ab4` executed completely correctly end-to-end with the real key-handler path --
+keycode arithmetic, bit-set, everything -- once the encoding bug was fixed. **`MUTE_STATE`
+itself never becomes nonzero, across 3 full seconds of emulated runtime, even though the
+"real" internal mute mask it's supposed to mirror is provably already set.**
+
+NOTES.md's own Session-9-era finding ("V4 — hooked the real per-frame mute gate") already
+documented the missing link: `FUN_40083ab4` writes ONLY `_DAT_460fab40`; **"a periodic task
+then syncs that into `_DAT_80000008`"** (= `MUTE_STATE`, bit 8+t = muted -- the SAME global
+`pre`/hooks 9-10's SHADOW state is ultimately derived from). That periodic task evidently
+never runs, or never gets scheduled, under `Rtos.call_as_main`'s harness -- 3 seconds of
+emulated time is far longer than any plausible per-frame or per-UI-tick sync interval, so
+this isn't a slow-sync timing issue, it looks like the sync task simply doesn't execute at
+all in this call context.
+
+### This retires ALL of this session's + part 11's leak numbers as inconclusive, not just the raw-poke ones
+
+Since `MUTE_STATE` never leaves `0`, and `dt_trig`/`fresh_bind`'s SHADOW gating is driven
+from `MUTE_STATE`, of course every post-mute trig dispatch this run observed came back
+"pass" (15166 of them, up from part 11's 2) -- the track was never, from the sequencer's
+own gating logic's point of view, actually muted at any point in the run. **This is not a
+trig-masking leak; it is the same class of artifact as part 10's false alarm and part 11's
+own flagged concern, one level deeper: even the "real key path" test wasn't real enough,
+because the one glue step between the real key-handler's internal state and the state
+hooks 9/10 actually read never executes in this harness.** Neither test method attempted so
+far -- part 11's raw `MUTE_STATE` poke, or this session's real `FUN_40083ab4` call via
+`call_as_main` -- has produced a trustworthy verdict on whether hooks 9/10 leak trigs after
+a genuine mute. **Do not treat either session's leak counts as evidence of anything about
+the echo mechanism.**
+
+### NOT yet done -- two ways to get a trustworthy dynamic test, neither attempted this session
+
+1. **Find the real periodic sync task** (`_DAT_460fab40` -> `_DAT_80000008`) via the same
+   Ghidra-xref technique this session used on `0x460d10d0`/`d4` -- query `getReferencesTo()`
+   on `0x80000008` for WRITE references, find the task, and figure out why `call_as_main`
+   doesn't schedule it (task suspended? gated on a UI/display state never entered? a
+   different RTOS task queue `call_as_main` doesn't touch?).
+2. **Cheaper, more pragmatic**: since the transform is already documented (`_DAT_80000008`
+   bit `8+t` mirrors `_DAT_460fab40` bit `t`, "same bits the LED painter `FUN_40083eb0`
+   reads"), do the sync manually in the test harness right after confirming
+   `FUN_40083ab4`'s call left `_DAT_460fab40` correct -- a hybrid test that still exercises
+   the REAL mute-apply code path (unlike a fully raw poke) but doesn't depend on finding or
+   fixing the missing scheduler piece. Riskier only in that it assumes the bit-mirroring
+   documented from Session 9 is still exactly right for THIS image -- worth a quick sanity
+   check (single-track case is simple enough to verify by hand) before trusting it.
+3. Either way, once `MUTE_STATE` genuinely reads nonzero for the muted track, re-run
+   exactly the same dt_trig/fresh_bind leak-counting `diag_echo_realkey.py` already does,
+   across a few different mute-engage frames, and see whether a leak appears and whether
+   it's now actually consistent -- the original, still-unanswered question from part 11.
+4. Given this is now the SECOND session-length emulator cycle in a row that ended without a
+   trustworthy leak verdict (part 11: 3 cycles + this session's real-key attempt), worth
+   re-raising part-11's own standing suggestion to the user: weigh continuing with option 1
+   or 2 above against the already-proposed hardware-listening tests instead.
+
+### Housekeeping
+
+New: `tools/ghidra/attic/GhidraMute9.java`, `GhidraMute10.java` (both reusable static-RE
+probes, xref + decompile), `out/ghidra/GhidraMute{9,10}_session58c12.txt` (dumps). Modified:
+`tools/diag_echo_realkey.py` (keycode-encoding fix + `_DAT_460fab40`/end-of-window
+`MUTE_STATE` checks). **NOT committed** -- left for the user to review alongside this
+writeup. `reference/kb/dsp56300.md` (modified) and `ghidra_project.bak_pre_fullanalysis_s70/`,
+`tools/build_sidechain_diag.py`, `tools/patch_sc_diag.asm` (untracked) remain from the
+concurrent SIDECHAIN3/DIRECT JUMP threads, untouched by this session, not part of this commit
+if/when one happens.
+
+### Exact prompt to start the next session with
+
+```
+Continue MUTE MODE in ~/Documents/octatrack-kyoti-fw (branch `wip`). Read NOTES.md "Session
+58 continued yet again, part 12" (search for "static RE RESOLVES the" -- this file has
+topic-numbering collisions across threads, match the title not the number); skim "part 11"
+right before it (and its "Addendum" subsection) for how the echo got reframed as a
+trig-masking question and why the prior session's real-key-path attempt stalled. STATUS:
+Bug A (the REL_STATE race, OT+FX only) is fixed and emulator-validated (hook 13 v2,
+`relstate_shadow`) -- committed at `39c5c25`, NOT flashed, hardware is still on the
+pre-hook-13 `_BASELINE` build (see "part 9" for where that lives). DT's audio path is
+confirmed untouched. The open problem is still the tempo-locked "echo" after muting,
+reframed as very likely a TRIG-MASKING leak (hooks 9/10, `dt_trig`/`fresh_bind`) -- but
+THIS session found that neither test method tried so far (part 11's raw `MUTE_STATE` poke,
+or this session's real `FUN_40083ab4` call via `call_as_main`) has actually exercised that
+theory validly: static RE (fresh Ghidra decompile against the full-analysis project) proved
+`0x460d10d0`/`0x460d10d4` do NOT gate `FUN_40083ab4`'s mute logic (both branches converge
+and always apply the mute) -- overturning the prior session's read of that gate. A real
+argument-encoding bug in `diag_echo_realkey.py` was found and fixed (`param_1` must be a
+KEYCODE, `track+0x10`, not a bare track index). With that fixed, `FUN_40083ab4` now
+provably sets the correct low-level mute mask (`_DAT_460fab40`) -- but `MUTE_STATE`
+(`_DAT_80000008`), what hooks 9/10 actually gate on, never becomes nonzero across a 3-second
+window, because the periodic task that's supposed to sync `_DAT_460fab40` into it
+(documented since Session 9) apparently never runs under `call_as_main`'s scheduling. So
+every leak count either session produced is an artifact of `MUTE_STATE` staying `0` the
+whole time, not evidence about hooks 9/10 at all. FIRST THING TO DO: pick one of this
+section's two "NOT yet done" options -- either find the real `_DAT_460fab40`->`_DAT_80000008`
+sync task via Ghidra xrefs on `0x80000008` (same technique just used successfully on
+`0x460d10d0`/`d4`) and get it running, or manually mirror `_DAT_460fab40` into `_DAT_80000008`
+right after a real `FUN_40083ab4` call in the test harness (a defensible hybrid, since the
+real mute-apply code path is still exercised) -- then re-run the leak-counting test across a
+few different mute-engage frames and see whether a leak appears and is actually consistent.
+Given this is now two session-length emulator cycles in a row without a trustworthy verdict,
+also explicitly re-offer the user the hardware-listening-test alternative before continuing
+further blind harness debugging.
+```
+
+## Session 58 continued yet again, part 13 (2026-09-19, `wip`) — MUTE MODE: found the REAL
+mechanism behind `_DAT_80000008` (MUTE_STATE) -- NOT a sync task at all, a separately-posted
+kernel event this session could not trace to its poster -- then manually completed that one
+step in the test harness and got, for the first time this whole investigation, a
+**reproducible leak**: exactly 2 `fresh_bind` dispatches pass for the just-muted track, both
+at the literal mute-engage frame, IDENTICALLY across two different engage frames. This is
+the first trustworthy dynamic evidence of a real trig-masking leak. Caveat: its scale (2
+dispatches at one instant) does not obviously match the user's multi-second, multi-cycle
+echo description -- flagged, not resolved. HANDOFF.
+
+### `_DAT_80000008`'s mute bits are toggled by a posted kernel event, not synced from anything
+
+Followed part 12's own option 1 (find the real sync task via Ghidra xrefs on `0x80000008`
+WRITE references) instead of jumping straight to the manual-mirror fallback. New scripts
+`tools/ghidra/attic/GhidraMute{11,12,13}.java`.
+
+**`GhidraMute11`**: 13 functions hold Ghidra-resolved WRITE xrefs to `0x80000008` (it's a
+shared multi-purpose status word -- SOLO/MUTE/CUE bits, per NOTES' own existing layout doc
+-- so many unrelated writers is expected). None of them reference `_DAT_460fab40` at all;
+separately, `_DAT_460fab40` itself has exactly 9 referencing functions, ALL inside the
+already-known local mute-UI cluster (`FUN_40083480`/`400834d8`/`400836d8`/`400839dc`/
+`40083a30`/`40083a7c`/`40083ab4`/`40083ce0`/`40083e40`) -- **zero overlap with the 13
+`0x80000008` writers.** There is no Ghidra-resolvable path from one to the other. Session
+9's "V4" doc's "a periodic task then syncs that into `_DAT_80000008`" was an inference from
+limited/stubbed emulation, not a traced mechanism -- **this session retracts it.**
+
+Found the real mechanism instead, inside `FUN_40061a94` (a 4618-byte function -- turns out
+to be the top-level UI/kernel EVENT-DISPATCH LOOP: `FUN_40000d00(0x460d17ae)` pops an event
+from a queue, then a giant `switch` on the event's tag byte handles each kind). Case `'J'`,
+subcase `0`: `uVar10 = 0x100 << (track & 0x3f) ^ _DAT_80000008; ... _DAT_80000008 = uVar10;`
+(subcase `1` does the same for the CUE bits, `0x10000<<track`). **`_DAT_80000008`'s mute
+bits are XOR-toggled by a POSTED EVENT, completely independent of `_DAT_460fab40` and of
+`FUN_40083ab4`/`FUN_400836d8`'s own code path.**
+
+**`GhidraMute12`**: decompiled `FUN_40040250` (the real top-level track-key dispatcher) in
+full to check whether IT posts that event alongside calling `FUN_40083ab4`. **It does not**
+-- the single-press branch only calls `FUN_40083ab4()` (Ghidra renders it argument-less in
+the pseudo-C, likely a register-passthrough decompilation quirk, not evidence of a missing
+arg), the `evt==2` branch calls `FUN_40083ab4(param_1,2)`, else `FUN_40083e40`+`FUN_4007c264`.
+No kernel-event post anywhere in this function. So the real physical key-press's two effects
+(`_DAT_460fab40`'s update, driving the actual DSP mute; `_DAT_80000008`'s update, driving
+the LED and `FUN_40004dbc`'s per-frame frame-builder gate) are posted from two genuinely
+different places in the firmware, not one calling the other.
+
+**`GhidraMute13`**: tried to find the event's poster via `getReferencesTo(0x460d17ae)` (the
+queue address itself) -- **zero references returned, even from `FUN_40061a94`'s own
+consumer code**, which is known to use that exact address three times
+(`FUN_40092bb0`/`FUN_40092fcc`/`FUN_40000d00`, all confirmed present in the decompile).
+Ghidra evidently doesn't classify a raw constant passed as a queue-handle argument the same
+way as a memory operand reference here -- a real, acknowledged tooling limitation (this
+project's own doc map already flags computed/indirect addressing as sometimes invisible to
+xrefs even after the Constant Reference Analyzer), not evidence the queue is unused. **The
+event's poster is still unlocated.** Not pursued further this session -- see "not yet done".
+
+### Manually completed the missing half in the test harness, and re-ran the leak test
+
+Rather than keep spending Ghidra cycles hunting the poster, applied part 12's own "option 2"
+fallback, now on firmer ground (we know EXACTLY what the real dispatcher would do, from the
+literal decompiled 'J'-case transform, not a documentation guess): right after the real
+`FUN_40083ab4(track+0x10, 1)` call via `call_as_main` (which correctly, provably sets
+`_DAT_460fab40`, per part 12), `tools/diag_echo_realkey.py` now also does
+`_DAT_80000008 ^= (0x100 << track)` -- the EXACT transform `FUN_40061a94`'s own 'J'-case
+code performs, not an invented bit-position. This keeps the entire real audio-mute path
+(`FUN_40083ab4` -> `FUN_400836d8` -> the DSP voice-command mailbox) genuinely real; only the
+one still-untraced event-post step is reconstructed rather than executed.
+
+`python3 tools/diag_echo_realkey.py --track 1` (defaults: `--gate 1` = OT+FX mode, 2 repeats
+at different mute-engage frames per part 11's own consistency-testing convention):
+
+```
+=== run 1/2, pre_ms=2000, mute_frame=5514 ===
+  end of window: _DAT_460fab40 00000002 -> 00000002, MUTE_STATE (final) = 00000200
+  post-mute: dt_trig 0 pass / 10 silence  |  fresh_bind 2 pass / 49611 silence
+  -> LEAK: 2 dispatch(es) (frames: [5514, 5514])
+
+=== run 2/2, pre_ms=2733, mute_frame=7534 ===
+  end of window: _DAT_460fab40 00000002 -> 00000002, MUTE_STATE (final) = 00000200
+  post-mute: dt_trig 0 pass / 10 silence  |  fresh_bind 2 pass / 47591 silence
+  -> LEAK: 2 dispatch(es) (frames: [7534, 7534])
+```
+
+`_DAT_460fab40` and `MUTE_STATE` both stay correctly set for the ENTIRE post-mute window in
+both runs (confirmed by ~10 clean `dt_trig` silences and ~48-50k clean `fresh_bind` silences
+each run -- unlike every earlier attempt this session, this is not a test where the mute
+state silently reverted or never took hold). **Exactly 2 `fresh_bind` "pass" dispatches for
+the just-muted track, both landing at the LITERAL mute-engage frame itself (not spread over
+subsequent steps), identically in both runs despite the mute engaging ~2000 frames apart.**
+
+### This is the first trustworthy, reproducible leak this investigation has produced
+
+Unlike every earlier count this session and part 11 produced (1382, 15166, or the original
+part-11 2-then-0 inconsistent pair), this one comes from a test where `MUTE_STATE` is
+independently confirmed correct and stable for the whole window, using the REAL
+`FUN_40083ab4`->`FUN_400836d8` code path, reproduced identically across two different
+engage frames. **This satisfies "remarkably consistent" in a way nothing else this session
+or part 11 did.** It also retroactively re-validates part 11's ORIGINAL finding (2 leaks at
+the engage frame, in its first run) as the real signal all along -- part 11's own SECOND run
+showing zero leaks is now better explained as an artifact of THAT test's raw,
+frame-asynchronous `MUTE_STATE` poke landing badly for that specific timing, not evidence
+against the leak.
+
+**Caveat, stated plainly, not smoothed over**: the user's hardware description is a
+tempo-locked echo spanning roughly two full pattern cycles at 120 BPM (multiple seconds,
+sounding like the trig pattern audibly repeating over time). What this session measured is
+TWO dispatches at a SINGLE frame, the instant mute engages -- not a sustained run of leaked
+trigs across subsequent steps. These may not be the same phenomenon in scale, even if both
+are real. Two live possibilities: (a) this 2-dispatch leak is a real but minor/cosmetic bug,
+and the actual multi-second echo has a different, still-unfound cause; or (b) this 2-dispatch
+leak is a symptom of a larger, more sustained version of the same root cause that this
+specific test (a single mute engagement, ~8-10s total window) doesn't fully expose -- worth
+testing across a longer window and/or multiple mute/unmute cycles before concluding either
+way.
+
+### NOT yet done
+
+1. **Find WHY exactly 2 `fresh_bind` dispatches leak at the engage frame** -- read
+   `fresh_bind`'s own disassembly/decompile around its SHADOW-check boundary (address
+   `0x40006820`, hooks 9/10's own detour site) specifically for a race between when SHADOW
+   gets read and when the two leaked dispatches' own track-loop iteration happens within
+   that same frame -- this is now a concrete, scoped RE question, not blind guessing.
+2. **Locate the real event poster** (who calls `FUN_40000c3c` with the `0x460d17ae` queue
+   and a `'J'`-tagged payload) -- likely the raw key-scan ISR/task, a different subsystem
+   than anything this thread has examined. Would let a future test drop the manual
+   `_DAT_80000008` toggle entirely and go fully through the real path. Not blocking further
+   work (the manual toggle is well-justified, see above) but would remove the one remaining
+   synthetic step.
+3. **Test the caveat directly**: extend `diag_echo_realkey.py`'s post-mute window well
+   beyond one run's current ~8-10s (or add a second mute/unmute cycle) and see whether MORE
+   than 2 dispatches leak over a longer horizon, to distinguish the two possibilities above.
+4. Still not attempted: DT mode specifically (`--gate 2` presumably, per `patch_softmute.s`'s
+   own `GATE` doc comment -- not yet confirmed against this exact build) -- `dt_trig` showed
+   zero leaks in both runs above, but that was under OT+FX (`--gate 1`); the user's report
+   says DT shows the same echo too, which this specific test hasn't yet exercised.
+
+### Housekeeping
+
+New: `tools/ghidra/attic/GhidraMute{11,12,13}.java`. Dumps not saved to `out/ghidra/` this
+part (large, low marginal value beyond what's quoted above; reproducible cheaply from the
+scripts + this writeup if needed). Modified further: `tools/diag_echo_realkey.py` (the
+manual `_DAT_80000008` toggle + its long inline comment). **Still NOT committed.**
+
+### Exact prompt to start the next session with
+
+```
+Continue MUTE MODE in ~/Documents/octatrack-kyoti-fw (branch `wip`). Read NOTES.md "Session
+58 continued yet again, part 13" (search for "found the REAL mechanism behind" -- this file
+has topic-numbering collisions across threads, match the title not the number); skim "part
+12" right before it for how the `0x460d10d0`/`0x460d10d4` gate theory got overturned and the
+keycode-encoding bug that was fixed along the way. STATUS: Bug A (the REL_STATE race, OT+FX
+only) is fixed and emulator-validated (hook 13 v2, `relstate_shadow`) -- committed at
+`39c5c25`, NOT flashed, hardware still on the pre-hook-13 `_BASELINE` build (see "part 9" for
+where that lives). This session got the FIRST trustworthy, reproducible dynamic evidence of
+a real trig-masking leak: via the real `FUN_40083ab4`->`FUN_400836d8` key-handler path (with
+`MUTE_STATE` completed by a well-justified manual step -- the real sync mechanism turned out
+to be a posted kernel event this session couldn't trace to its source, not a periodic task as
+Session 9 had assumed), exactly 2 `fresh_bind` dispatches for the just-muted track pass at
+the literal mute-engage frame, identically across two different engage frames 2000 frames
+apart -- both times with `MUTE_STATE` independently confirmed correct and stable for the
+whole surrounding window. This is real, but its SCALE (2 dispatches at one instant) does not
+obviously match the user's own description of a multi-second, multi-cycle tempo-locked echo
+-- unresolved whether this is the same bug at a scale this test doesn't fully expose, or a
+separate, smaller issue. FIRST THING TO DO: pick from this section's "NOT yet done" list --
+most promising is probably (1) read `fresh_bind`'s own disassembly around its SHADOW check
+(`0x40006820`) to find the actual race producing exactly 2 leaked dispatches, since that's
+now a scoped, answerable RE question; (3) (extend the test window / add multiple mute cycles)
+directly tests whether the caveat resolves in favor of "same bug, bigger at scale" or "two
+separate issues". Given this is now the point where real signal finally appeared after two
+session-length cycles without one, this is also a natural moment to check in with the user
+on continuing vs. the hardware-listening-test alternative floated at the end of part 12,
+even though real progress just landed.
+```
+
+## Session 58 continued yet again, part 14 (2026-09-19, `wip`) — MUTE MODE: traced part 13's
+"2 leaked fresh_bind dispatches" to their exact call site -- and it's NOT the sequencer
+dispatching a future trig at all. It's `FUN_40007960`, this project's OWN already-documented
+per-frame playback-position/loop-wrap engine, reacting to the JUST-MUTED voice's own
+now-invalidated state. **This substantially downgrades part 13's finding**: it is very
+likely a construction artifact of THIS session's own hybrid test (a real gap between the
+`call_as_main` call and the separate manual `MUTE_STATE` poke that completes it), not
+genuine evidence of a sequencer-level trig-masking leak. Corrected course rather than
+standing on the earlier, more exciting-looking result. HANDOFF.
+
+### Instrumented `diag_echo_realkey.py`'s fresh_bind hook to capture the caller's return address
+
+Added a return-address read (`[sp+8]`, per hook 10's own documented prologue -- two pushes
+then the track-arg load, so the ORIGINAL caller's return address sits at that fixed offset)
+to the `fb_pass`/`fb_silence` hooks. Re-ran the single-run case (`--track 1 --repeats 1`):
+```
+fresh_bind leak return addresses (which of the 7 callers of FUN_40006820 dispatched each one):
+    frame 5514: called from 0x40008114
+    frame 5514: called from 0x40008114
+```
+**Both leaks, same frame, same exact call site.** Confirmed via `./disasm.sh` that
+`0x40008110` is a real, direct `jsr 0x40006820`, return address `0x40008114` -- not one of
+`patch_softmute.s`'s own documented "SEVEN callers" list, but that list was never meant to be
+exhaustive (hook 10 deliberately gates the function's own entry precisely because enumerating
+callers is fragile, per its own header comment) -- finding an 8th real caller doesn't expose
+any coverage gap in the shipped hook, it's just informative about what's actually happening.
+
+### The caller is `FUN_40007960` -- this project's own documented playback-position engine, NOT the sequencer
+
+Decompiled the containing function (`tools/ghidra/attic/GhidraMute14.java`): `FUN_40007960`
+is a dense, low-level per-voice function taking the track number as `param_3`, and
+`reference/kb/memory-map.md`'s OWN existing entry for `0x800049d8` (per-track voice state)
+already documents it by name: **"Playback-position engine (bounds/wrap/ping-pong) =
+`FUN_40007960`, ColdFire not DSP"** -- and its caller, `FUN_40004008`, is unmistakably a
+sample-rate/phase-accumulator stepper (`piVar7[3]` fractional phase, `_DAT_800062b0` =
+samples-elapsed-this-frame) -- i.e. **ordinary per-frame playhead advancement for an
+ALREADY-SOUNDING voice**, ColdFire-side bookkeeping that runs every audio control frame for
+every active voice, not sequencer trig dispatch.
+
+Inside `FUN_40007960`, the path that reaches `FUN_40006820` (`LAB_40008110`) is reached two
+ways: (1) an EARLY consistency check right at function entry -- `if (state->+8 != 0 ||
+state->+0x10 < 1 || state->+0x14 != otherfield) goto LAB_40008110;` -- i.e. "this voice's own
+engine-state pointer looks stale/inconsistent," or (2) deep in the loop-boundary logic, when
+the accumulated playback position exactly equals the loop-end boundary
+(`local_28 == *(iVar5-0x7fffb5e4)`), the ordinary "reached the loop point, wrap/rebind" case
+the KB entry already names ("torn on loop-wrap... clamp, don't mask"). Either way, this is
+`FUN_40006820` being called BECAUSE THE VOICE'S OWN STATE JUST CHANGED (very plausibly as a
+direct, ordinary consequence of the mute action itself -- `FUN_400836d8`'s real per-track
+voice-command mailbox write, or `relcut`/hook 8's own note-off machinery, invalidating this
+exact struct mid-frame) -- not because a NEW sequencer step tried to fire a note on a track
+that should have been silenced.
+
+### Strong reason to suspect this is a test-construction artifact, not a firmware bug
+
+This session's hybrid test does two SEPARATE things in sequence: (1) `call_as_main(
+FUN_40083ab4, ...)`, which runs to completion and returns, correctly setting
+`_DAT_460fab40`; (2) only AFTER that call returns, a separate, manual `mem_write` toggling
+`MUTE_STATE`'s bit. On real hardware, whatever single real event triggers both halves (part
+12/13's still-unlocated kernel-event post) very plausibly does so close together in time --
+part of processing ONE keypress, not two independently-timed actions. This test's own two
+steps are NOT guaranteed to land close together at all: `call_as_main` runs synchronously
+against the *live* RTOS scheduler, and any per-frame voice bookkeeping (like `FUN_40007960`,
+which runs unconditionally every frame for every active voice) that happens to execute
+BETWEEN step 1 and step 2 would legitimately, correctly (per `fresh_bind`'s own gate logic)
+see the OLD, not-yet-muted `MUTE_STATE` and let its `FUN_40006820` call through -- exactly
+matching what was observed, and with no need to invoke any real firmware defect at all.
+**This is a different, subtler version of the exact same "test-injection timing artifact"
+concern parts 10 and 11 already flagged for their own, cruder raw pokes -- this session's
+own two-step construction turns out not to be fully immune to it either.**
+
+### Revised assessment
+
+Part 13's "first trustworthy, reproducible leak" framing was premature. What's actually
+confirmed: `FUN_40006820` gets called (correctly, per stock's own per-frame voice bookkeeping)
+from `FUN_40007960` at the moment the muted voice's own state changes -- and whether
+`fresh_bind`'s gate sees that call as already-muted or not depends on the (probably
+artificial, in this test) ordering between `call_as_main`'s return and this session's manual
+`MUTE_STATE` completion. This says nothing definitive either way about the user's reported
+multi-second tempo-locked echo, which was already a scale mismatch (part 13's own caveat) --
+if anything, this session's finding makes the mismatch WORSE, since the mechanism just traced
+looks like a one-time, single-frame artifact of voice-state invalidation, structurally
+incapable of producing a repeating, tempo-locked, multi-cycle pattern on its own.
+
+### NOT yet done
+
+1. **Close the gap directly**: make the `MUTE_STATE` completion happen with as close to zero
+   emulated-time gap after `call_as_main` returns as possible (ideally the very next
+   instruction/frame), and re-run -- if the leak disappears or becomes inconsistent once the
+   gap shrinks, that confirms this was a test-construction artifact, not a firmware race.
+2. **Or find the real event poster** (part 12/13's still-open item) so both halves happen for
+   real, in whatever their true relative order is, removing the guesswork entirely.
+3. Given TWO consecutive findings this session (part 13's leak, now this session's own
+   correction of it) have turned out to trace back to test-construction subtleties rather
+   than confirmed firmware behavior, and given the user's own multi-second echo description
+   still has no mechanism this investigation has actually reproduced at the right scale,
+   this is a strong point to seriously weigh the hardware-listening-test alternative
+   (already floated twice, parts 12 and 13) rather than continue a fourth session-length
+   emulator cycle on this specific thread.
+
+### Housekeeping
+
+New: `tools/ghidra/attic/GhidraMute14.java`. Modified further: `tools/diag_echo_realkey.py`
+(return-address capture on the `fb_pass`/`fb_silence` hooks). **Still NOT committed.**
+
 ## Session 75 continued (2026-09-19, `wip`) — SIDECHAIN3: HARDWARE CONFIRMED FIXED. User
 flashed the Session 75 build (n7 fix + the split-block repeat-call guard, both fixes
 together) and confirmed: **the MON ringing/ring-modulation/resonance with KEY FLT on LP or

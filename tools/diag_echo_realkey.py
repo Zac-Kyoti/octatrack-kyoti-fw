@@ -82,11 +82,23 @@ def run_once(img_path, project_dir, track, gate, pre_ms, post_ms, steps):
         def on_hit(u, addr, size, ctx):
             store.append((rt.frame_count, u.reg_read(reg) & 0xff, label))
         return on_hit
-    D3, D1 = er.eb.UC_M68K_REG_D3, er.eb.UC_M68K_REG_D1
+    D3, D1, A7 = er.eb.UC_M68K_REG_D3, er.eb.UC_M68K_REG_D1, er.eb.UC_M68K_REG_A7
+    # fresh_bind's own prologue (patch_softmute.s hook 10 comment): pushes %a2 then %d2
+    # before loading track from (12,%sp) -- so at this point [sp+8] holds the ORIGINAL
+    # caller's return address (one of FUN_40006820's documented 7 callers: one inside
+    # FUN_4000f450, already covered by hook 9/dt_trig; six independent ones elsewhere).
+    # Capture it on "pass" hits to see whether the leaked dispatches are duplicate calls
+    # for the same trig event or genuinely distinct call sites.
+    def make_fb_hook(store, label):
+        def on_hit(u, addr, size, ctx):
+            sp = u.reg_read(A7)
+            ret = struct.unpack(">I", u.mem_read(sp + 8, 4))[0]
+            store.append((rt.frame_count, u.reg_read(D1) & 0xff, label, ret))
+        return on_hit
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, make_hook(dt_decisions, "pass", D3), begin=DT_PASS, end=DT_PASS + 1)
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, make_hook(dt_decisions, "silence", D3), begin=DT_SILENCE, end=DT_SILENCE + 1)
-    rt.uc.hook_add(er.eb.UC_HOOK_CODE, make_hook(fb_decisions, "pass", D1), begin=FB_PASS, end=FB_PASS + 1)
-    rt.uc.hook_add(er.eb.UC_HOOK_CODE, make_hook(fb_decisions, "silence", D1), begin=FB_SILENCE, end=FB_SILENCE + 1)
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, make_fb_hook(fb_decisions, "pass"), begin=FB_PASS, end=FB_PASS + 1)
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, make_fb_hook(fb_decisions, "silence"), begin=FB_SILENCE, end=FB_SILENCE + 1)
     rt.uc.ctl_flush_tb()
 
     rt.internal_clock()
@@ -99,27 +111,71 @@ def run_once(img_path, project_dir, track, gate, pre_ms, post_ms, steps):
     # engage the mute through the REAL key-handler path, not a raw poke
     rt.run(until=lambda r: r.pc == er.MAIN_SPIN)
     mute_before = rt.uc.mem_read(MUTE_STATE, 4)
-    d0 = rt.call_as_main(MUTE_KEY_FN, args=(track, 1))
+    # FUN_40083ab4's own body (fresh Ghidra decompile, "part 11 addendum" follow-up session):
+    # `uVar1 = param_1 - 0x10;` then uVar1 is used DIRECTLY as the 0-7 track index (bit-shift
+    # amount, compare against DAT_100b14cc). So param_1 must be a KEYCODE (track+0x10), not a
+    # bare track index -- passing plain `track` here makes uVar1 negative, so `1 << (uVar1&0x3f)`
+    # shifts out to 0 and no track's mute bit is ever set, regardless of which track is asked
+    # for. This reconciles with the original Session-9 doc's "FUN_40040250(track, evt) ...
+    # single press -> FUN_40083ab4(track, 1)": FUN_40040250's own "track" parameter is itself
+    # already a keycode (the button-table dispatch feeds it raw), passed straight through.
+    d0 = rt.call_as_main(MUTE_KEY_FN, args=(track + 0x10, 1))
     mute_after = rt.uc.mem_read(MUTE_STATE, 4)
     mute_frame = rt.frame_count
-    print(f"  called FUN_40083ab4({track}, 1) at frame {mute_frame}: D0={d0:#x}, "
+    print(f"  called FUN_40083ab4({track + 0x10:#x}, 1) [track {track}] at frame {mute_frame}: D0={d0:#x}, "
           f"MUTE_STATE {mute_before.hex()} -> {mute_after.hex()}")
     if mute_after == mute_before:
-        print("  !! MUTE_STATE did not change -- MUTE_KEY_FN address or calling "
-              "convention is probably wrong for this image; do not trust the rest "
-              "of this run")
+        print("  !! MUTE_STATE did not change after the real call -- this is EXPECTED, not a "
+              "bug in the call (see below): _DAT_80000008's mute bits are NOT derived from "
+              "_DAT_460fab40 by any sync task. GhidraMute11/12/13 (session 58 part 12 "
+              "follow-up) found they are toggled by a POSTED KERNEL EVENT ('J' case, XOR "
+              "0x100<<track, inside FUN_40061a94's message-dispatch loop) -- a completely "
+              "separate action from FUN_40083ab4/FUN_400836d8's own _DAT_460fab40 update. "
+              "The real per-key dispatcher (FUN_40040250) does NOT post that event itself "
+              "either (decompiled in full: only calls FUN_40083ab4/FUN_40083e40) -- the "
+              "poster is still unlocated (Ghidra found zero refs to the queue address "
+              "0x460d17ae, even from FUN_40061a94's own consumer code -- a real tooling "
+              "limitation, not evidence the queue is unused). Manually completing that "
+              "second, independent action below so this test still exercises the REAL "
+              "audio-mute code path (FUN_40083ab4 -> FUN_400836d8 -> the DSP voice-command "
+              "mailbox) while getting MUTE_STATE into the state hooks 9/10 actually gate on.")
+    # Manually perform the second, independent half of what a real keypress does (see above):
+    # toggle bit (8+track) in _DAT_80000008, matching FUN_40061a94's own 'J'-case transform
+    # (`0x100 << track ^ _DAT_80000008`) exactly. MUTE_STATE was zeroed before this call, so
+    # this cleanly sets just this track's mute bit -- not a raw guess at the bit position, the
+    # XOR shape is lifted verbatim from the real handler's own decompiled code.
+    mute_toggled = struct.unpack(">I", mute_after)[0] ^ (0x100 << track)
+    rt.uc.mem_write(MUTE_STATE, struct.pack(">I", mute_toggled))
+    print(f"  manually toggled MUTE_STATE bit (8+{track}): -> {mute_toggled:#010x} "
+          f"(real _DAT_460fab40-side mute IS real; only this LED/frame-gate mirror is synthetic)")
 
+    # FUN_40083ab4 sets _DAT_460fab40 SYNCHRONOUSLY and unconditionally (fresh Ghidra decompile
+    # this session); _DAT_80000008 (MUTE_STATE) is documented (NOTES.md "V4") as synced from it
+    # by a SEPARATE PERIODIC TASK, not written directly. Check both at the end of the window to
+    # tell "the call didn't do anything" apart from "it worked but the sync task hasn't fired
+    # yet in this harness".
+    fab40_before = rt.uc.mem_read(0x460fab40, 4)
     rt.run(ms=post_ms)
+    fab40_after = rt.uc.mem_read(0x460fab40, 4)
+    mute_end = rt.uc.mem_read(MUTE_STATE, 4)
+    print(f"  end of window: _DAT_460fab40 {fab40_before.hex()} -> {fab40_after.hex()}, "
+          f"MUTE_STATE (final) = {mute_end.hex()}")
 
     dt_post = [(f, tr, lab) for f, tr, lab in dt_decisions if tr == track and f >= mute_frame]
-    fb_post = [(f, tr, lab) for f, tr, lab in fb_decisions if tr == track and f >= mute_frame]
-    leaks = [x for x in dt_post + fb_post if x[2] == "pass"]
+    fb_post = [(f, tr, lab, ret) for f, tr, lab, ret in fb_decisions if tr == track and f >= mute_frame]
+    leaks = [x for x in dt_post if x[2] == "pass"] + [x for x in fb_post if x[2] == "pass"]
     n_dt_post = len(dt_post)
     n_fb_post = len(fb_post)
     print(f"  post-mute: dt_trig {sum(1 for *_,l in dt_post if l=='pass')} pass / "
           f"{sum(1 for *_,l in dt_post if l=='silence')} silence  |  "
-          f"fresh_bind {sum(1 for *_,l in fb_post if l=='pass')} pass / "
-          f"{sum(1 for *_,l in fb_post if l=='silence')} silence")
+          f"fresh_bind {sum(1 for *_,l,_ in fb_post if l=='pass')} pass / "
+          f"{sum(1 for *_,l,_ in fb_post if l=='silence')} silence")
+    fb_leaks = [x for x in fb_post if x[2] == "pass"]
+    if fb_leaks:
+        print("  fresh_bind leak return addresses (which of the 7 callers of "
+              "FUN_40006820 dispatched each one):")
+        for f, tr, lab, ret in fb_leaks:
+            print(f"    frame {f}: called from {ret:#010x}")
     return mute_frame, leaks
 
 
@@ -150,7 +206,7 @@ def main():
                                       pre_ms, args.post_ms, steps)
         results.append((pre_ms, mute_frame, leaks))
         if leaks:
-            print(f"  -> LEAK: {len(leaks)} dispatch(es) (frames: {[f for f,_,_ in leaks][:10]})")
+            print(f"  -> LEAK: {len(leaks)} dispatch(es) (frames: {[x[0] for x in leaks][:10]})")
         else:
             print("  -> clean")
 
