@@ -15781,3 +15781,136 @@ code was patched this pass -- per the 10th/11th passes' own standing rule, and b
 hypothesis above needs the dynamic confirmation described, not another blind flash.
 **Next session: instrument and test the countdown/quotient-carryover hypothesis before
 writing Hook D.**
+
+## Session 75 (2026-09-18/19, `wip`) — SIDECHAIN3: user flashed the n7 fix (Session 74) --
+ringing PERSISTED. Found and BUILT a second, independent fix: `scdet` genuinely runs TWICE
+on a split-block frame (proven, not just theorized -- re-reading the dispatcher's id-lookup
+code shows both `PROCESS_TABLE` calls normally resolve to the same target, and forcing a
+real double-call via `dsp_host -split` reproduces a substantially corrupted result), so the
+KEY FLT SVF integrator gets excited twice per frame with carried-over state on every trig
+that lands mid-block. Added a repeat-call guard; hit and resolved a real word-budget wall,
+a real silent register-flag bug (own mistake, self-caught) and a real test-harness bug
+(also self-caught) along the way. Emulator-clean in isolation, `--patched`, and via a
+direct proof the guard suppresses the repeat call exactly as intended. **NOT yet flashed.**
+
+### Re-examined "does `scdet` really run twice", this time all the way through, instead of
+### deferring to Session 73's diagnostic-build-specific finding
+
+Session 74's own writeup leaned on Session 73's "the second call bypasses both detours"
+result -- re-reading Session 73 closely, that result was measured ONLY against the
+diagnostic build (`patch_sc_diag.asm`), whose `comp_proc+0` detour is a REDIRECT AWAY from
+the real body (jumps straight to `@CTAIL@`, per that file's own design goal of removing the
+compressor machinery entirely) -- structurally different from the REAL `scdet`, which
+deliberately FALLS THROUGH into the real body after its own work. A call that reaches
+`comp_proc+0` in the diagnostic build can never reach the body from there by construction,
+so "the body executes without going through either detour" only tells you the SECOND call
+skips the diagnostic build's specific redirect -- it says nothing about whether the REAL
+`scdet` (which behaves completely differently at that same address) gets hit once or twice.
+That inference doesn't transfer, and was never re-checked against the real build.
+
+Disassembled `P:0x4a7`-`0x4d7` (payload A) one level deeper than Session 74's own pass,
+specifically the id-lookup feeding each `jsr (r2)`: the first call's `r1` comes from
+`x:0x208`-based `r6`; the second's from `x:0x419`-based `r6`; the dispatcher's own code
+between them (`func_0004bf`) EXISTS SPECIFICALLY to catch the case where these two differ
+(an id-change mid-dispatch, re-running `INIT_TABLE` if so) -- meaning under ordinary
+operation (no effect reassignment happening mid-frame, the overwhelmingly common case) both
+calls resolve to the IDENTICAL `r2`, i.e. the same `jsr` target, i.e. `comp_proc+0` (our
+real `scdet` detour) on BOTH calls when a block is split.
+
+### Proved the consequence directly, not just from the static reading
+
+`dsp_host` ships a `-split N` flag purpose-built to model exactly this two-call mechanism
+(its own source comments cite the identical `P:0x4b8..0x4d7` addresses this thread
+independently found -- see `vendor/dsp56300/source/dsp_host/dsp_host.cpp` lines ~773-786).
+Called `scdet` directly via `-proc scdet -split 6 -frames 14`: this makes `dsp_host` invoke
+`scdet` TWICE, exactly like the real dispatcher would on a split frame. Compared against a
+single clean call -- **substantially different output** (not a subtle rounding gap). This
+is a real, demonstrated mechanism, independent of whether the "same `r2`" reasoning above
+is airtight for every edge case: forcing the double-call this way and seeing corruption is
+proof the MECHANISM is real, whatever fraction of real split-block frames actually trigger
+it via the dispatcher's own path.
+
+### The fix: a repeat-call guard in `scdet`, keyed on `r0`'s incoming value
+
+The dispatcher's own convention (confirmed by both the disassembly and `dsp_host`'s
+`-split` model): the frame's ONLY or FIRST call always arrives with `r0=0`; a genuine
+SECOND call (split active) arrives with `r0=split*2`, always nonzero. `n6` already holds
+this call's original `r0` (`scdet`'s own first, displaced instruction). Right after `KEY`
+is confirmed on (past `beq zz20`) and `@KADJ@` converts it to an absolute track: test `n6`;
+if nonzero, this is definitely a repeat call -- skip straight to `zz16`'s own exit (still
+redirects the stock detector to `x:$40`, so the compressor's own gain-reduction math still
+gets the key-redirected signal for both segments) without re-running KEY GAIN, KEY FLT, or
+re-publishing the SC LISTEN stash / MON_ON / MON_KEY.
+
+### Three real bugs hit and fixed while building this, each caught by verification the
+### project's own standing rules already call for -- none shipped
+
+1. **Word budget**: the 4-word check (move/tst/bne -- this `dsp_asm`'s conditional branches
+   are ALWAYS 2 words, confirmed empirically, no short form exists) pushed the cave to 262
+   words against SPATIALIZER's fixed 261-word donor (verified zero slack either side of it
+   in stock P-memory). Tried shrinking the KEY GAIN table by one entry per the user's own
+   suggestion ("boost is used more than reduce") -- found a real complication first: the
+   stock bipolar display formatter (`FMT_BIPOLAR`) hardcodes its center at raw value 64, so
+   trimming the table cleanly (without adding DSP words to compensate) can only trim from
+   whichever end raw value 0 sits at -- the REDUCE end already, meaning the naive way to do
+   it actually cuts BOOST, the opposite of the request -- and doing it correctly needs a
+   custom formatter (real extra ColdFire work). Went a different, equivalent-value route
+   instead: `zz15`'s own MON_ON/MON_KEY publish re-derived the absolute key track from
+   scratch in 4 words even though the identical value already sits in `a` earlier in the
+   routine, right before it gets shifted for addressing -- stashing it in `r4` (verified
+   free for the whole routine by inspection) and reading it back at `zz15` turns that 4-word
+   re-derivation into 1, a net -3w against the guard's own +4w. Final cave: 259/261 words.
+2. **A silently wrong flag test (self-inflicted, self-caught)**: first tried dropping the
+   separate `tst b` after `move n6,b` to save a word, reasoning the move might set flags
+   itself -- it assembled, and passed the WHOLE existing suite unchanged, which looked like
+   confirmation. It wasn't: every existing test happens to call with `r0=0` already
+   (dsp_host's implicit default, coincidentally), so the branch never gets exercised either
+   way there. Only the `-split`-based direct proof (built for the mechanism check above)
+   caught it -- with `tst` dropped, the guard silently failed to suppress the repeat call at
+   all. Restored `tst b`; re-ran the SAME direct proof, now genuinely passing. Documented
+   here because it's the exact shape of trap this project's own standing rule warns about
+   ("disassemble what you assemble" / never trust "existing tests still pass" for a change
+   the existing tests don't actually exercise) -- worth a permanent regression check, not
+   just a one-off fix, which is what prompted item 3 below.
+3. **The test harness itself was silently wrong in TWO directions in a row, both
+   self-caught**: `dsp_host`'s own default for `-audio` (which ALSO sets the base `r0`) is
+   `0x80`, not `0` -- meaning every existing `run(mem, scdet, ...)` call in
+   `emu_sc_dsp3.py` was implicitly testing "repeat call" behavior even for ordinary,
+   single-call scenarios, once the guard existed. First fix (adding `audio=0` as the
+   BLANKET default for every call) broke `emu_sc_dsp3_moncommit.py` instead -- `-audio` ALSO
+   controls where `dsp_host` writes its own synthetic tone samples in X-memory
+   (`dsp_host.cpp` ~line 745), and forcing it to 0 for every caller moved that synthetic
+   audio straight into `moncommit`'s own dumped/checked `X:0-0x20` range. Corrected: `audio`
+   is opt-in per call (default `None`, i.e. leave `dsp_host`'s own default alone), passed
+   explicitly as `0` only at the `scdet` call sites that need to represent a real,
+   non-repeat dispatcher call. Added the missing `-audio` documentation to `run()`'s own
+   docstring so a future change to this file doesn't rediscover either gap the hard way.
+
+### Verification, final state
+
+`tools/emu_sc_dsp3.py` (plain and `--patched`) and `tools/emu_sc_dsp3_moncommit.py`: ALL
+GOOD, including a direct, `-split`-based check (not part of the committed suite --
+one-off, scratchpad) that the split-call scenario's `x:$40` output and published
+`MON_ON`/`MON_KEY` now EXACTLY match a clean single call -- the guard is proven, not just
+assumed, to suppress the repeat call's re-excitation and to leave MON's own state correctly
+published (an earlier, discarded design that routed a repeat call through the existing
+`zz20`/KEY-OFF exit would have WRONGLY zeroed `MON_ON`, undoing the first call's legitimate
+publish -- caught before it was ever built, by reasoning through `zz20`'s own side effect,
+not by trial and error). `tools/build_sidechain3.py`: assembles clean, cave 259/261 words
+both payloads, round-trip/checksum ok. Same output paths as every prior SIDECHAIN3 build.
+
+### HANDOFF
+
+**NOT flashed.** This is now the SECOND real, disassembly-and-emulator-verified fix for
+this bug (the first, Session 74's n7 fix, was flashed and did NOT resolve the ringing --
+still a real, necessary fix, just not sufficient on its own). This one is mechanistically
+well-supported (proven via direct double-call reproduction, not just inferred) and
+addresses a GENUINELY DIFFERENT failure mode (state carried across two full passes, vs. one
+pass covering only part of the block) -- but "well-supported" was also true of the first
+attempt, so the only real test is still the user's own ears: flash
+`out/OCTATRACK_OS1.40C_SIDECHAIN3.syx`, power-cycle, repeat the MON + KEY FLT != OFF test.
+If the ringing is gone, both fixes were real and this closes the bug. If it persists AGAIN,
+that's strong evidence the mechanism is neither of the two found so far, and the next
+session should treat "another instance of KEY FLT/MON interacting with the dispatcher's own
+per-frame bookkeeping in a way this thread hasn't found yet" as the working frame, rather
+than continuing to extend either of these two fixes.
