@@ -15986,6 +15986,104 @@ a new mechanism.
 `tools/emu_directjump_dynamic.py` (the four new watches) and this NOTES.md entry. No fix,
 no flash -- the causal chain is closer but not closed.
 
+## Session 70, 15th pass (2026-09-18, `wip`) — DIRECT JUMP: SELF-CORRECTION. The "track 0
+is structurally special-cased" claim from the 12th/13th/14th passes is WRONG -- caught by
+finally cross-checking the raw disassembly against the decompiled C, which this whole
+sub-thread had been reading uncritically. The "track 0 diverges in `DAT_80001904`"
+MEASUREMENT still stands, but the causal story built on top of it does not, and there is
+no longer good evidence it reflects a bug at all rather than ordinary per-track state.
+
+### ❌ RETRACTED: "`if (uVar20 * 0x91a == 0)` special-cases track 0"
+
+Dumped the actual disassembly (`GhidraDirectJump8.java`, full listing of `FUN_400a1eea`,
+`0x400a1eea`-`0x400a4d90`) and aligned it against the decompiled C the 12th pass quoted.
+The real instructions at this exact point are:
+
+```
+400a2996  lea (0x0,A4,D0*0x1),A0     ; A0 = blob + track*0x91a  (D0 held track*0x91a)
+400a299a  mvs.b: (0x56,A0),D0        ; D0 = blob[track*0x91a + 0x56]  -- THIS track's own
+                                       ; SCALE-selector byte, sign-extended
+400a299e  bne.b 0x400a29bc            ; branches on THE BYTE JUST LOADED, not on D0's
+                                       ; earlier (now-overwritten) value of track*0x91a
+```
+
+**The branch tests the freshly-loaded per-track SCALE-selector byte for zero/nonzero, not
+the track index.** Ghidra's decompiled C (`if (uVar20 * 0x91a == 0) {...}`) is technically
+describing the SAME machine state in a way that is only true by coincidence when reading
+it forward from the assignment two lines above (`cVar12 = puVar44[uVar20*0x91a+0x56]`) --
+the decompiler's own C literally names the wrong operand of the two `D0` writes as the
+one the branch reads. This is exactly the class of error `refs/octabam`'s own CLAUDE.md
+warns about repeatedly for its own domain ("disassemble what you assemble" / "the
+decompile is not the ground truth") and this session should have applied the same
+discipline immediately rather than three passes later. **Every "track 0 vs tracks 1-7"
+framing in the 12th/13th/14th passes should be read as "the track whose SCALE-selector
+byte is 0 vs the tracks whose selector is nonzero" instead** -- a per-project-DATA
+condition, not a fixed structural one.
+
+### ✅ Checked against this demo project's own data: ALL 8 tracks have selector byte 0x00
+
+Added a direct read (not a watch) to `tools/emu_directjump_dynamic.py`, dumping
+`blob[track*0x91a + 0x56]` for all 8 tracks, both patterns, pre- and post-switch:
+**every track, every pattern, reads `0x00`.** So the branch this whole sub-thread has
+been tracing is not even where tracks structurally diverge in THIS project -- every
+track takes the identical SCALE_MODE-gated fallback path (`0x400a29a0`-`0x400a29ba`),
+which itself resolves to a PATTERN-LEVEL byte (`blob+0x8e53`) when SCALE_MODE is Normal,
+identical for every track. Traced the rest of the same code block (`cVar41`/`cVar14`
+current-vs-other-pattern choice, `DAT_800065d3`-sourced `cVar12`) by hand against the
+13th pass's own measurements (`CNTDN_TBL` uniformly 0 across tracks at the switch tick) --
+every one of these inputs is ALSO uniform across tracks in this test. None of the
+per-track SCALE-wrap-check machinery this sub-thread has been chasing since the 12th pass
+actually diverges for this project's data.
+
+### ✅ Found what IS genuinely per-track, and it looks like ordinary state, not a bug
+
+`iVar7`, the offset into the final `DAT_80001904` write's OTHER inputs
+(`*(iVar7+0x46c7a810)`, `*(iVar7+0x46c7a830)`, `*(iVar7+0x46c7a14c)`,
+`*(iVar7+0x46c77bfa)`), is confirmed (loop tail: `iVar7 = iVar7 + 4`) to be a genuine
+**per-track running accumulator index** -- each track owns its own 4-byte slot in these
+arrays, and nothing says they should hold matching values across tracks even in
+perfectly correct stock operation; they are independent per-track playback-accumulator
+state. **The 13th pass's "track 0 alone diverges" measurement was real, but comparing
+raw values across DIFFERENT tracks was never a valid test for a bug** without first
+establishing that those tracks' independent state SHOULD coincide -- which nothing in
+the code says, and this project's own data (identical SCALE settings on every track)
+gives no reason to assume. The correct, controlled comparison the 13th pass should have
+run instead: watch ONE track's OWN `DAT_80001904` trajectory continuously through a
+DIRECT JUMP switch versus through a stock natural (CHAIN-AFTER) switch to the SAME target
+pattern, and look for a discontinuity introduced BY THE FORCED-EARLY COMMIT specifically
+-- not a cross-track snapshot diff, which conflates the switch with ordinary per-track
+independence.
+
+### Where this leaves the hunt
+
+Three sessions' worth of tracing (12th-14th passes) into `FUN_400a1eea`'s per-track
+SCALE-wrap-check machinery has now been checked as thoroughly as static-plus-measured
+analysis allows, and **produced no confirmed bug** -- every per-track input this thread
+traced is uniform across tracks in the test project, and the one place a real numeric
+difference was measured (`DAT_80001904`) has an entirely mundane, expected explanation
+(independent per-track accumulator state) that this thread failed to rule out before
+reporting it as a finding. This is being written up explicitly, not quietly dropped,
+because the 13th/14th passes' own commits already told the user this was a promising
+lead -- it needs an equally explicit correction, not a silent pivot next session.
+
+**This does not mean `FUN_400a1eea` is cleared, or that `DAT_80001904` is irrelevant** --
+the `refs/octabam` corroboration that it feeds the real audible live-nibble still stands,
+untouched by this correction. It means the SPECIFIC mechanism hypothesized (track-0/
+SCALE-selector asymmetry) is not it, and the next session needs the PROPERLY CONTROLLED
+same-track, DJ-vs-stock comparison described above -- not more per-track snapshot diffs
+-- before spending more time in this specific function. If that controlled comparison
+also comes up clean, the honest conclusion is that this three-pass sub-thread, despite
+real effort and real measurements, did not find the mechanism, and the 10th pass's
+still-unclosed recommendations (the audio-capable `ot_emu` route, or asking the user for
+another hardware data point) are more promising uses of the next session's time than a
+fourth pass through this same function.
+
+### What's committed
+
+`tools/emu_directjump_dynamic.py` (the scale-selector-byte dump),
+`tools/ghidra/attic/GhidraDirectJump8.java` (the disassembly-listing probe that caught
+the error), and this NOTES.md entry.
+
 ## Session 75 (2026-09-18/19, `wip`) — SIDECHAIN3: user flashed the n7 fix (Session 74) --
 ringing PERSISTED. Found and BUILT a second, independent fix: `scdet` genuinely runs TWICE
 on a split-block frame (proven, not just theorized -- re-reading the dispatcher's id-lookup

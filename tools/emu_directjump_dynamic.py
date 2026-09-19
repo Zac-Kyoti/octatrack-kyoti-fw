@@ -234,6 +234,13 @@ def run_one(er, a, dj_on):
     cur_pat = rt.uc.mem_read(ACT_PAT, 1)[0]
     cur_bank = rt.uc.mem_read(ACT_BANK, 1)[0]
     cur_step = rt.uc.mem_read(STEP, 1)[0]
+    # Session 70 14th pass: 0x400a299a reads blob[track*0x91a + 0x56] -- the REAL branch
+    # (0x400a299e bne) tests THIS BYTE for zero/nonzero, not the track index (that was a
+    # decompiler-C misreading, corrected by disassembly). Dump it for all 8 tracks to see
+    # whether track 0 genuinely differs in this project's own data.
+    blob = 0x400e21e0 + cur_bank * 0x9b340 + cur_pat * 0x8ed8
+    print("scale-selector byte (blob[track*0x91a+0x56]) per track: " +
+          " ".join(f"t{t}={rt.uc.mem_read(blob + t * 0x91a + 0x56, 1)[0]:#04x}" for t in range(8)))
     new_pat = (cur_pat + a.pattern_delta) & 0xff
     print(f"pre-switch : active bank={cur_bank} pattern={cur_pat} step={cur_step} "
           f"frame={rt.frame_count} fires-so-far={len(fires)} "
@@ -259,6 +266,11 @@ def run_one(er, a, dj_on):
     print(f"post-switch: active bank={rt.uc.mem_read(ACT_BANK,1)[0]} "
           f"pattern={rt.uc.mem_read(ACT_PAT,1)[0]} step={rt.uc.mem_read(STEP,1)[0]} "
           f"frame={rt.frame_count} total-fires={len(fires)}")
+    post_bank = rt.uc.mem_read(ACT_BANK, 1)[0]
+    post_pat = rt.uc.mem_read(ACT_PAT, 1)[0]
+    post_blob = 0x400e21e0 + post_bank * 0x9b340 + post_pat * 0x8ed8
+    print("scale-selector byte (blob[track*0x91a+0x56]) per track: " +
+          " ".join(f"t{t}={rt.uc.mem_read(post_blob + t * 0x91a + 0x56, 1)[0]:#04x}" for t in range(8)))
     print(f"phase tbl  : {rt.uc.mem_read(PHASE_TBL, 8).hex()}")
     print(f"gate  tbl  : {rt.uc.mem_read(GATE_TBL, 8).hex()}")
     print(f"cntdn tbl  : {rt.uc.mem_read(CNTDN_TBL, 8).hex()}  (0xff = never armed/fired)")
