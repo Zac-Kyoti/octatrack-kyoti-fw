@@ -170,8 +170,24 @@ zz07:
         move    x:(r7+$16),y1        ; warm: lp
         move    x:(r7+$17),y0        ;       bp
 zz08:
+; SIDECHAIN3 ringing bug (Session 74, NOTES.md): this loop used to run `do n7`,
+; matching the STOCK compressor's own per-call sample count -- but `n7` is
+; segment-scoped for a mid-block trig split (the dispatcher sets it to
+; `x:0x20c` or `x:0x20d`, each < 16, confirmed by fresh disassembly of both
+; payloads' `P:0x4a7`/`0x29c` dispatch sites), while the sibling loops right
+; below (zz02/zz04/zz15, and the gen-0 copy-in above) all hardcode a FIXED
+; 32-word/16-pair extent. On a split frame this filtered only the first `n7`
+; pairs of `x:$40`, leaving the rest of the SAME buffer holding unfiltered
+; (KEY-GAIN-only) key audio from the fixed-extent stages that already ran --
+; a hard filtered/raw splice published straight to MON via the SC LISTEN
+; gen-1 stash (zz15) on every trig that lands mid-block. `x:0x40` is always a
+; FULLY VALID 16-sample block regardless of split (sctap publishes it before
+; any split-handling runs, at the very top of the dispatch), so there is no
+; reason this filter needs to track the compressor's own per-call segment
+; count -- fix is to always process the whole block, matching the other
+; three loops instead of the one outlier.
         move    #$40,r0
-        do      n7,>zz13
+        do      #<$10,>zz13
         move    x:(r0)+,x0
         move    x:(r0)-,a
         tfr     x0,b

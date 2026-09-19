@@ -209,13 +209,13 @@ def base_mem(words, scdet, moncommit, patch_tail, xseed, yseed):
     return m
 
 
-def run(mem, proc, dumps, params, pokey=None):
+def run(mem, proc, dumps, params, pokey=None, frames=15):
     """dumps: list of ('x'|'y', lo, hi). One dsp_host run per dump."""
     res = []
     for i, (sp, lo, hi) in enumerate(dumps):
         df = SCRATCH / f"sc3_d{i}.bin"
         a = [DSP_HOST, "-mem", mem, "-init", f"{RTS_ADDR:x}", "-proc", f"{proc:x}",
-             "-frames", "15", "-blocks", "1", "-params", params,
+             "-frames", str(frames), "-blocks", "1", "-params", params,
              "-dumpy", f"{'@' if sp == 'x' else ''}{df},{lo:x},{hi:x}"]
         if pokey:
             a += ["-pokey", pokey]
@@ -335,6 +335,30 @@ def main():
             exp, _, _ = ref_svf(sig, kflt)
         check(f"KFLT {kflt:3d} {tag:9s}", close(x40[:NW], exp[:NW], 3),
               f"got[:4]={[s24(v) for v in x40[:4]]} exp[:4]={[s24(v) for v in exp[:4]]}")
+
+    # 3a. split-block regression (Session 74, NOTES.md): a mid-block trig sets
+    # n7 to the segment length (x:0x20c/x:0x20d in the real dispatcher, both
+    # < 16), NOT the full 16-sample block -- the fix makes this loop's own
+    # trip count a fixed `#<$10`, independent of whatever n7 the caller sets.
+    # Prove that directly: call scdet with `-frames` set LOW (dsp_host loads
+    # n7 from it, same mechanism the real dispatcher's split path uses) and
+    # confirm ALL 16 pairs still come out filtered -- comparing the FULL
+    # 32-word dump against ref_svf's full output, not the NW=30 truncation
+    # the other checks above use (that truncation exists to work around
+    # dsp_host's own "-frames" cap at 15, unrelated to this loop's own
+    # trip count now that it no longer reads n7 at all).
+    print("\nKEY FLT split-block regression (n7 must NOT bound this loop):")
+    kflt = 40
+    exp_full, _, _ = ref_svf(sig, kflt)
+    for short_n7 in (1, 6, 14):
+        mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
+                       [(1, S18, [0])])
+        (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kflt=kflt),
+                     pokey=pk_sig, frames=short_n7)
+        check(f"n7={short_n7:2d} at call time -> all 16 pairs still filtered",
+              close(x40, exp_full, 3),
+              f"last pair got={[s24(v) for v in x40[30:32]]} "
+              f"exp={[s24(v) for v in exp_full[30:32]]}")
 
     # 3b. dirty-state regression: stock's own "first-block" bit ($f) falsely
     # warm (as it can be from ordinary stock activity before our KEY FLT code
