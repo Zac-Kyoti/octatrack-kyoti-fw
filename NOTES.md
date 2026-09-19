@@ -16023,3 +16023,121 @@ that's strong evidence the mechanism is neither of the two found so far, and the
 session should treat "another instance of KEY FLT/MON interacting with the dispatcher's own
 per-frame bookkeeping in a way this thread hasn't found yet" as the working frame, rather
 than continuing to extend either of these two fixes.
+
+---
+
+## Session 58 continued yet again, part 11 (2026-09-18/19, `wip`) — MUTE MODE: precise hardware description of the "echo" (amp HOLD/RELEASE shape each individual echo normally, but neither control affects how many echoes occur or the total sequence length) strongly implies each echo is a genuine, fresh trig dispatch, not a DSP-level artifact -- but the one fresh_bind leak found this session does NOT reproduce at a different mute-engage frame, so it is very likely a test-injection artifact, not the real mechanism. Findings COMMITTED (`39c5c25`). HANDOFF to a new session to retest via the real mute key-handler path instead of a raw MUTE_STATE poke
+
+### Hardware description, precise (user, this session)
+
+Tested with a longer one-shot (`fatty.wav` preferred over `clap.wav`, easier to hear).
+**Echo still occurs with FX bypassed** -- rules out FX tail feedback entirely; this is a dry/
+engine-level phenomenon. AMP HOLD/RELEASE behave exactly like normal Octatrack envelope
+controls on EACH INDIVIDUAL ECHO: if HOLD ≥ 1.0 step, RELEASE has no effect on that echo's
+length (the note is already being cut by something else before RELEASE ever runs); if HOLD
+is shorter than that, RELEASE does shorten the echo, normally; if RELEASE is maxed, HOLD has
+no effect either. **User's own gloss: "typical behavior of the Octatrack amp controls."**
+Critically: **neither HOLD nor RELEASE affects the length of the WHOLE echo sequence** (how
+many echoes occur / how long the repeating stops) -- that duration is fixed and independent
+of the AMP page entirely.
+
+**Reading this**: each echo behaving like a completely normal, independent trig (own attack/
+hold/release, responsive to the AMP page exactly like a real note) is strong evidence each
+echo IS a genuine fresh voice dispatch -- not a level-word artifact, not an FX/DSP glitch.
+That points squarely at trig masking (hooks 9/10), exactly as reframed two sessions ago.
+Separately, since DT ALSO shows the echo and DT's audio path is confirmed (this session)
+to never touch `REL_STATE`/`relcut`/`FUN_40008f84` at all, whatever causes the echo must be
+common to BOTH modes -- trig masking is the ONLY mechanism hooks 9/10 share identically
+between OT+FX and DT, reinforcing it's the right place to keep looking. The FIXED, AMP-page-
+independent total duration suggests some separate constant (a watchdog, a fixed retry/grace
+count) governs how many trigs still leak through, not an interaction with the envelope.
+
+### This session's own leak: real, but did NOT reproduce -- likely a test artifact
+
+Per the user's own setup instructions: switched from `BOTLI`'s sustaining/looping track 4 to
+the real `out/hw-projects/SIDECHAIN_TEST/test` project's track 1 (UI "T2"), which carries
+`clap.wav` as a confirmed one-shot (`+23` loop-mode byte read back as 0 directly from the
+live voice state -- matches NOTES.md's own prior documentation of this project). Poked trigs
+at steps 1/5/9/13 (`tools/diag_echo_trigmask.py --project ... --track 1 --steps 1,5,9,13`),
+muted mid-run in OT+FX, and watched `dt_trig`'s and `fresh_bind`'s own internal PASS/SILENCE
+branch addresses directly (read from `m68k-elf-nm out/patch_softmute_rs.elf`), not just their
+shared entry points -- the same instrumentation flaw that made an earlier BOTLI-track-4 pass
+look artificially clean (that track never actually went cold, so `fresh_bind` was never
+meaningfully exercised at all: 0 hits pre- and post-mute).
+
+**First run** (mute engaged at frame 13781): `fresh_bind` let 2 dispatches for the just-muted
+track through to the real per-track work (`fb_pass`), both at exactly frame 13781 -- the
+literal mute-engage instant. `dt_trig` was clean (0/10 leaked).
+
+**Second run, identical setup, mute engaged at frame 5513 instead**: **zero leaks** --
+28 `dt_trig` and 73,042 `fresh_bind` post-mute attempts, every single one correctly silenced.
+
+**This inconsistency matters.** The user's own hardware description is "remarkably
+consistent." A leak that only shows up at one specific frame and not another, with nothing
+else about the scenario changed, has the signature of a timing coincidence in HOW this
+session injects the mute -- an instantaneous Python-side `mem_write` to `MUTE_STATE`, landing
+at whatever arbitrary point in a frame's own instruction stream the emulator happens to be at
+-- rather than a reliably-reproducible firmware bug. **Conclusion: this specific leak is
+very likely a test-harness artifact, not the real echo mechanism**, though it cannot be fully
+ruled out without the next check below.
+
+### NOT yet done -- the concrete next step
+
+**Retest via the REAL mute key-handler path instead of a raw `MUTE_STATE` poke.** A real
+key-press is ALSO asynchronous to the sequencer's per-frame processing, so this isn't purely
+about "realism" for its own sake -- it's the one variable this session's two runs didn't
+control for. Use `press_key_live` (or the real `FUNC+TRACK` / `MIXER` mute key handler
+address, not yet identified this session -- `FUN_400836d8` and the `FUN_40083ab4`/
+`FUN_40083e40` family from the ORIGINAL Session-9-era soft-mute research, lines ~2270-2290 of
+this file, are the likely candidates, though that research predates hooks 9/10 and may not
+be the exact live path anymore) rather than poking `MUTE_STATE` directly, and see whether the
+SAME kind of leak appears -- and, critically, whether it appears CONSISTENTLY across repeated
+runs/timings, matching "remarkably consistent," or is still timing-dependent like this
+session's own two attempts.
+
+If a real, consistent leak IS found via the key-handler path: the fix is presumably tightening
+hooks 9/10's own gate (or finding a THIRD dispatch path neither currently covers -- worth
+re-checking `fresh_bind`'s own header comment's claim of exactly six additional callers
+against the CURRENT image, in case a seventh exists). If no consistent leak is found even via
+the real key path: the echo's cause is NOT trig-masking after all, despite the strong
+circumstantial case above, and the fixed-duration/AMP-independent character described this
+session needs a different explanation -- possibly a stock watchdog or grace-period mechanism
+neither hooked nor yet identified.
+
+### Housekeeping
+
+Findings through part 10 (hook 13 v2, folded into `build_mutemode_dt.py`, all new
+diagnostic tooling) **committed this session**: `39c5c25`. `reference/kb/dsp56300.md` and
+`ghidra_project.bak_pre_fullanalysis_s70/` were left uncommitted deliberately -- they belong
+to the concurrent SIDECHAIN3/DIRECT JUMP threads, not this one.
+
+### Exact prompt to start the next session with
+
+```
+Continue MUTE MODE in ~/Documents/octatrack-kyoti-fw (branch `wip`). Read NOTES.md "Session
+58 continued yet again, part 11" (search for "precise hardware description of the 'echo'" --
+this file has topic-numbering collisions across threads, match the title not the number)
+FIRST, then "part 10" right before it for the false-alarm story and the hook-13 v2 redesign,
+then "part 9" for how hook 13 was folded into the real build_mutemode_dt.py and where the
+hardware-good BASELINE backup lives. STATUS: Bug A (the REL_STATE race, OT+FX only) is fixed
+and emulator-validated (hook 13 v2, `relstate_shadow`) -- committed at `39c5c25`, NOT
+flashed, hardware is still on the pre-hook-13 `_BASELINE` build. DT's audio path is confirmed
+untouched by anything this thread has built. The user reframed the remaining problem as a
+tempo-locked "echo" after muting that is very likely a TRIG-MASKING leak (hooks 9/10,
+`dt_trig`/`fresh_bind`), not an audio-path issue -- reasoning: each echo behaves like a
+completely normal trig (its OWN AMP HOLD/RELEASE shape it individually, exactly like a real
+note), but neither AMP control affects how many echoes occur or the total sequence duration,
+and DT mode (which doesn't touch REL_STATE/relcut/FUN_40008f84 at all) shows the SAME echo,
+meaning the shared mechanism must be trig masking. This session found a real fresh_bind leak
+(2 dispatches for a just-muted track reached the real per-track work) using a real one-shot
+project (`out/hw-projects/SIDECHAIN_TEST/test`, track 1 = clap.wav) and precise PASS/SILENCE
+branch instrumentation (`tools/diag_echo_trigmask.py`) -- but the SAME leak did NOT reproduce
+when the mute was engaged at a different frame in an otherwise-identical run, which looks
+like a test-injection timing artifact (this session mutes via a raw, frame-asynchronous
+`MUTE_STATE` memory poke) rather than a reliably-reproducible bug, given the user describes
+the real echo as "remarkably consistent." FIRST THING TO DO: retest via the REAL mute key-
+handler path (not a raw MUTE_STATE poke) to see if a leak appears, and whether it's
+consistent across runs -- see this section's "NOT yet done" for likely handler addresses
+(unconfirmed) and what a positive/negative result would each imply. Do not conclude anything
+about the echo's mechanism from this session's one non-reproducible leak alone.
+```
