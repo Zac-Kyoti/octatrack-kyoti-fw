@@ -16334,3 +16334,50 @@ consistent across runs -- see this section's "NOT yet done" for likely handler a
 (unconfirmed) and what a positive/negative result would each imply. Do not conclude anything
 about the echo's mechanism from this session's one non-reproducible leak alone.
 ```
+
+### Addendum, same session: tried the real key-handler path immediately -- `FUN_40083ab4` does not work as documented, stopped rather than keep guessing
+
+Built `tools/diag_echo_realkey.py` (`Rtos.call_as_main`, which runs a call for real against
+the live scheduler -- "the way a UI action would call it", not a cold detour) targeting
+`FUN_40083ab4`, the "single press -> mute" function this file's own Session-9-era research
+named. **It does not work.** First attempt: `MUTE_STATE` never changed at all after the call
+(`D0=0x8`, silently a no-op). Static re-check of `0x40083ab4`'s own disassembly found it
+takes two args (`%d4`=first, `%d3`=second, matching `call_as_main`'s `[sp+16]/[sp+20]`
+convention correctly) but immediately does `d2 = d4 - 16` -- suggesting the first arg is a
+KEYCODE (track+16), not a plain track index. Tried three encodings (17, 1, 9 for track 1) in
+a fast boot-only check (no long playback, `/tmp/quick_mutekey_check.py`): **all three
+returned the IDENTICAL `D0=0x8`**, meaning the function is bailing out on an early,
+ARGUMENT-INDEPENDENT gate (most likely `tst.l 0x460d10d0` / `tst.l 0x460d10d4`, both checked
+*before* the track/keycode comparison in the disassembly) -- not an encoding problem at all.
+
+**Stopped here rather than keep guessing.** This address/mechanism is from the ORIGINAL
+Session 9 soft-mute research, which predates hooks 8-13 entirely and was never re-verified
+against the current image or the current understanding of the mute mechanism. Two live
+possibilities, neither cheap to resolve: (a) this is genuinely the right function but needs
+additional UI/menu state set up first (whatever `0x460d10d0`/`0x460d10d4` gate on -- possibly
+"which screen/mode is active"), which a raw `call_as_main` can't replicate without first
+navigating there; (b) the real mute dispatch path has moved/changed since Session 9 and this
+is no longer the correct entry point at all. Distinguishing these needs real static RE
+(disassemble `0x460d10d0`/`0x460d10d4`'s own writers) that was not attempted this session.
+
+**Recommendation given to the user and accepted**: stop live emulator investigation of the
+echo here for now. Three separate long-running emulator cycles this session (dense retrig,
+sparse retrig, real one-shot with precise branch instrumentation) plus this real-key-path
+attempt have each cost significant wall-clock time without landing on a reproducible
+mechanism; further attempts should either invest properly in the `0x460d10d0`/`0x460d10d4`
+static RE first, or move to the incremental hardware-listening tests already gathered this
+session (FX bypass, AMP HOLD/RELEASE sweeps -- both already done, see above) rather than
+more blind emulator guessing.
+
+### Revised handoff
+
+Same overall status as the prompt above (Bug A fixed for OT+FX, committed at `39c5c25`/
+`072aa26`, not flashed; DT confirmed untouched; echo mechanism still open). ADD to the "first
+thing to do": before attempting `call_as_main(0x40083ab4, ...)` again, statically RE what
+writes `0x460d10d0` and `0x460d10d4` (both `tst.l`-checked, early-bailout gates in that
+function) -- if they're something like "a menu screen is open" or "PLAY mode is active",
+the emulator harness will need to be driven into that state first (or the check bypassed
+for testing purposes, clearly marked as non-hardware-representative if so). `tools/
+diag_echo_realkey.py` and `/tmp/quick_mutekey_check.py`'s logic (the latter not saved to
+`tools/` -- trivial to reproduce, see this addendum) are both ready to resume from once
+that's resolved.
