@@ -15510,3 +15510,274 @@ they are real, tested, working code for what they do; the open question is wheth
 they do matters. `out/OCTATRACK_DIRECTJUMP_V4.bin`/`.syx` reflect this exact source.
 DO NOT revert or simplify Hooks A-F without cause -- they may still be necessary
 (correct-but-insufficient), just not yet proven sufficient.
+
+## Session 70, 11th pass (2026-09-18, `wip`) — DIRECT JUMP: the LED test (10th pass's
+recommended step 3) came back, and it is a DECISIVE, SPECIFIC new symptom -- not just
+"still broken" but a description precise enough to redirect the whole search. Also: this
+session ran Ghidra's full auto-analysis on the image for the first time ever in this
+project's history (70 sessions have used `-noanalysis` exclusively), specifically to get
+real cross-references for `FUN_400a536c`'s output address, per recommended step 2.
+
+### The user's exact new data, asked-for and answered before any more code was written
+
+Asked to watch the trig-grid LEDs (current-step indicator), not listen, during a switch,
+and to compare against the OT's own internal metronome click as the ground truth for
+"master" position. The answer, verbatim in substance:
+
+- **The master metronome click stays perfectly solid through pattern switches.** It is
+  never disturbed. This is consistent with this session's whole prior run of fixes never
+  touching anything upstream of the per-pattern resume logic -- the master transport
+  clock was never the suspect and still isn't.
+- **The LED itself visibly jumps to an unexpected step at the moment of switching**,
+  provably wrong relative to the metronome: "they are not on the same step". This
+  directly answers 10th pass's open question (a) vs (b) -- **it is (a): the sequencer's
+  own visible position is wrong**, not merely "position right, something else audible is
+  wrong." The bug is real and visible at the LED level, contradicting nothing about the
+  emulator proofs on their own narrow terms (they proved specific registers' arithmetic
+  correct) but conclusively showing those registers are NOT what the hardware actually
+  reads to place the visible/audible step.
+- **THE NEW, SPECIFIC, PREVIOUSLY-UNKNOWN FACT: the offset is not always a whole step.**
+  "The sequence's trigs get offset even from the step positions (ie, after a switch, the
+  sequence may be playing back from a position BETWEEN two adjacent steps)... they get
+  disconnected from the global/master timing." This is not an off-by-N step-index bug.
+  It is a PHASE bug: the switched-to pattern is not staying locked to the master's own
+  sample/tick clock at all after the switch -- it is evidently running on some clock or
+  counter that free-runs independently of the master once the switch happens, which is
+  how it can drift to a non-step-aligned position. Every fix built so far (all in the
+  `DAT_800065b6`/quotient/remainder/`REFILL_TBL`/`FUN_400a536c` family) computes and
+  writes a STEP INDEX -- an integer. None of them has ever addressed, or even looked for,
+  a SUB-STEP PHASE ACCUMULATOR. This user report is the first evidence such a thing
+  matters at all, and it reframes "resume position" from "which step" to "which step AND
+  what fraction of the way through it" -- a strictly harder and previously un-scoped
+  problem.
+- **The "restart" is confirmed whole-sequencer, not a single track's audio glitch**: "the
+  whole sequencer visibly restarts" -- this answers 10th pass's other open question
+  directly and rules out the DSP/voice-retrigger hypothesis for the restart specifically
+  (though not necessarily for the rest of the symptom). And critically, **each restart
+  re-offsets the pattern to ANOTHER new, still possibly sub-step, position** -- "the
+  pattern gets offset once again, to a new and different position, which can also be
+  between steps." Whatever mechanism derives the post-wrap resume position is invoked
+  repeatedly (once per wrap, matching the per-pattern-length wraps the user described in
+  the 10th pass) and is NOT deterministic against the master phase: it does not converge
+  or re-lock, it just picks a new wrong position every time.
+
+### What this rules in and out
+
+- Rules out, specifically and by direct observation now (not inference): "the sequencer's
+  position is right and something else audible is wrong" (10th pass's option (a)/(b)
+  framing, now resolved to (a)) for at least the switch-moment misalignment. The
+  restart's whole-sequencer-snap nature independently rules out a single-track DSP
+  artifact as the explanation for THAT part.
+- Does NOT retract anything about the `REFILL_TBL` family being possibly irrelevant --
+  if anything this strengthens it: a family of fixes that only ever produces or checks
+  integer step indices cannot, by construction, produce or fix a sub-step phase error.
+  Whatever the master's own step-locked-and-sub-step-accurate representation is (the
+  thing the LED and audio ultimately read), it is now very unlikely to be reachable by
+  patching the step-index math alone, however exactly that math is proven.
+- Reframes the search: the real target is not "the right step index" but "the right
+  PHASE" -- a value with sub-step resolution that must be derived from, and stay locked
+  to, whatever counter the master metronome itself reads (which is untouched and correct
+  through switches). `FUN_400a536c`'s output byte (`0x46107959[track]`, a single byte per
+  track) was already suspected to be a modulation-source pulse rather than a voice
+  trigger; a single per-track byte has no room to encode a sub-step phase, which is one
+  more reason to suspect it is not the mechanism, and to look instead for a wider
+  (16-bit+) per-track or per-pattern field that could hold a fractional position.
+
+### Ghidra full auto-analysis run, for the first time this project has ever done it
+
+Backed up the existing incrementally-built project first (`cp -R ghidra_project
+ghidra_project.bak_pre_fullanalysis_s70`, gitignored either way, but kept as insurance
+against `-noanalysis`-built manual work being disturbed by the analyzers). Then ran:
+
+```
+JAVA_HOME=.../openjdk@21/... /opt/homebrew/Cellar/ghidra/12.1.2/libexec/support/analyzeHeadless \
+  ~/Documents/octatrack-kyoti-fw/ghidra_project octamax \
+  -process "section_3_MAIN_OS.bin" -analysisTimeoutPerFile 1500
+```
+
+(NOT `-noanalysis` -- the whole point was to get the Reference/Constant-Propagation
+analyzers to populate real cross-references for computed/split-immediate addressing,
+which a raw literal-byte grep across the image cannot see and which the project's
+`-noanalysis`-only convention has never produced.) First attempt used the wrong
+project-path/name split (`ghidra_project` as the dir AND the name) and failed instantly
+with "Could not find project" -- the correct form, confirmed against the
+`GhidraResolveNN.java`-era invocation earlier in this file, is `<parent-dir>/ghidra_project
+octamax` (dir, then project name), not `<parent-dir> ghidra_project`. Second attempt
+launched correctly; result and any new cross-reference findings for
+`FUN_400a536c`'s output continue in the next entry once the run and the follow-up probe
+are done.
+
+### Recommended next steps (updated, supersedes 10th pass's ordering)
+
+1. Do NOT write another integer-step-index fix. The LED data proves the target is a
+   PHASE, not an index -- any fix that only ever computes "which step" is now known, not
+   just suspected, to be incapable of fixing this.
+2. Finish the Ghidra cross-reference pass on `FUN_400a536c`'s output and on the vicinity
+   of the already-fixed registers, but reframe the search query: look for a WIDER field
+   (not a single byte) that could hold a fractional/sub-step position, and for whatever
+   the master metronome's OWN tick source is (untouched, still correct through switches)
+   so the eventual fix can derive the new pattern's phase FROM that same source rather
+   than re-deriving it from a per-pattern step/quotient table the way every fix so far
+   has.
+3. The audio-capable `ot_emu` route (10th pass's step 1) is still open and now more
+   clearly motivated: a sub-step phase error is exactly the kind of thing an
+   integer-step-only instrument (`emu_rtos.py`) is structurally unable to see, the same
+   "instrument blindness" trap `refs/octabam`'s own CLAUDE.md documents repeatedly. Not
+   yet attempted this pass; ot_emu's CLI (`tools/emu/ot_emu`, confirmed present and
+   already audio-capable through Milestone O10 -- FLEX voice renders sample-exact,
+   `--audio-out`/`--audio-in`/`--dsp`/`--main-level` all real) has no pattern-switch or
+   keypad-injection primitive yet, only a generic `postMessage`/`--poke`-at-frame
+   mechanism (used for bank-select and main-level); adding pattern-switch injection would
+   be new work on top of it, not something it already supports.
+
+## Session 70, 12th pass (2026-09-18, `wip`) — DIRECT JUMP: full untruncated decompile of
+`FUN_400a1eea` (the whole per-tick step engine, 10,628 bytes, never fully read end to end
+before this pass) LOCATES THE REAL COMMIT-AND-REFILL SEQUENCE, and finds a SPECIFIC,
+mechanistically precise, well-evidenced candidate for the sub-step phase bug the 11th
+pass's LED test proved real. Not yet fixed or dynamically tested -- this is the
+"find the mechanism" step the 10th/11th passes asked for, done properly this time.
+
+### Ghidra full auto-analysis, run for the first time ever in this project (correction)
+
+First invocation used the wrong project-path/name split and failed instantly (logged in
+the 11th pass entry above); the corrected form is `analyzeHeadless
+~/Documents/octatrack-kyoti-fw/ghidra_project octamax -process "section_3_MAIN_OS.bin"
+-analysisTimeoutPerFile 1500` (no `-noanalysis`). **It finished in 10 seconds** -- almost
+all of the image was already disassembled/functioned from ~70 sessions of manual
+one-shot probing, so the incremental work was small. The **68000 Constant Reference
+Analyzer** ran (2.3 s) -- this is specifically the analyzer that resolves
+split-immediate/register-relative addressing into real cross-references, which is what
+the 10th pass's recommended step 2 needed and no prior session had ever run.
+
+### `GhidraDirectJump6.java` -- the cross-reference query itself, and what it retracted
+
+Queried `getReferencesTo()` (Ghidra's own resolved xrefs, not a literal-byte grep) for
+`FUN_400a536c` and for the whole `0x46107950..0x46107968` vicinity of its output byte.
+**Found real callers and a real cluster this time** -- `FUN_400a536c`'s only caller is
+`FUN_400a1eea` itself (from `0x400a3d98`, plus 5 more call sites at
+`0x400a3eb4`/`0x400a4bb6`/`0x400a4bde`/`0x400a4c7c`/`0x400a4ca8`, all inside the same
+function), and a tight family around it: `FUN_400a5164`, `FUN_400a539c`, `FUN_400a5408`,
+`FUN_400a5434`, `FUN_400a5460`, `FUN_400a53fc`, all reading/writing
+`DAT_46107918`(int×16)/`DAT_46107958`(flag)/`DAT_46107959`(byte×16)/`DAT_46107969`
+(byte×16)/`DAT_46107979`(byte×16).
+
+❌ **RETRACTED, now by direct decompiled evidence rather than suspicion: `FUN_400a536c`
+and this whole family are the TRIG CONDITION LOCK evaluator (Elektron's 1:2/2:2/FILL/
+PRE/NEI/1ST/%-probability locks), not a voice or sample trigger of any kind.**
+`FUN_400a5164`'s switch statement is unmistakable: `case 0x1d/0x1e: uVar4 & 1` (1:2),
+`case 0x1f..0x21: uVar4 % 3` (1:3/2:3/3:3), `case 0x22..0x25: uVar4 & 3` (1:4..4:4), `%5`,
+`%6`, `%7`, `& 7` (1:8..8:8), and cases 8..0x1c increment a variable literally already
+named `s_pongping_400d817c` by a previous session's Ghidra work (PING-PONG condition).
+This branch of the search is closed for good -- do not revisit `FUN_400a536c` as a
+trigger-timing candidate again.
+
+### `FUN_400a1eea`'s real caller thread: `DAT_800064d0` feeds `FUN_4009d1e8`, a KB landmark
+
+`GhidraDirectJump6` also caught, in passing, that `FUN_400a1eea` calls `FUN_4009d1e8`
+(`tools/ghidra/attic`'s own list of all `FUN_` calls inside it) at
+`FUN_4009d1e8(uVar20, iVar19, iVar6, (&DAT_800064d0)[uVar20], uVar25)` -- i.e. **passing a
+REFILL_TBL entry directly as an argument to `FUN_4009d1e8`**, which Session 20's KB
+distillation already identified as `0x4009d1e8` = "step handler" (`reference/kb/`'s own
+"Per-step sequencer data" section: "step handler `0x4009d1e8`, consumers
+`0x4009d382..0x4009da12`"). So `REFILL_TBL` is NOT dead/irrelevant, as the 10th pass's
+suspicion implied -- it is a real, live input to a landmark function this project already
+knew was central to per-step sequencer data. Not traced further this pass (budget); the
+next session should decompile `FUN_4009d1e8` itself.
+
+### `GhidraDirectJump7.java` -- the full 57,959-character decompile, and the real commit site
+
+Requested a full decompile of `FUN_400a1eea` with no truncation (the earlier probe's
+9,000-char cutoff was hiding the back half of a 10,628-byte function). It completed
+whole. Reading it end to end against our own `patch_directjump.s` header comment (which
+already names the landmarks from Session 15's RE: `0x400a3fdc` step++, `0x400a4006`
+branch, step==2 Program Change, step==0 body with "bar ctr, ping-pong, CHAIN-AFTER gate,
+then... THE COMMIT @0x400a44d0") locates the ACTUAL commit-and-refill sequence precisely
+(previous passes' fixes were built from the header comment's summary, never from a full
+read of the decompiled body):
+
+```c
+// the commit (matches our header's "THE COMMIT @0x400a44d0"):
+if (DAT_800065c0 != -1) {
+    DAT_800065c1 = DAT_800065be;  DAT_800065c2 = DAT_800065bd;      // active -> "previous"
+    if (DAT_800065c0 != -1 && DAT_800065bf != -1) {
+        DAT_800065be = DAT_800065c0;  DAT_800065bd = DAT_800065bf; // pending -> ACTIVE (Hook C's own target)
+    }
+    _DAT_80006638 = _DAT_80006630;  _DAT_80006628 = _DAT_80006630;  _DAT_8000662c = _DAT_80006634;
+    if (_DAT_80006546 != 0) { /* chain-active pattern-queue advance, untouched by DIRECT JUMP */ }
+    DAT_400d8168 = DAT_800065bd;
+    FUN_40000c3c(0x460d17ae, &DAT_400d8167);   // posts an RTOS event -- our own patch already
+                                                // calls this a "kernel post" (comment near line 251);
+                                                // Ghidra's "does not return" tag on it is very likely
+                                                // a decompiler artifact of an RTOS syscall wrapper,
+                                                // not evidence of exotic control flow -- UNCONFIRMED,
+                                                // not re-derived this pass.
+}
+DAT_8000667e = 1;  // STOPFLAG family bookkeeping, not directly ours
+...
+LAB_400a4ba0:                                   // our header's own "common tail (fires trigs)"
+  puVar28 = &DAT_800065e4;                      // the QUOTIENT table, confirmed by address
+  uVar20 = 0;
+  do {
+    if (*pcStack000000a4 >= 0) *pcStack000000a4 = *pcStack000000a4 - 1;   // a per-track COUNTDOWN
+    if (*pcStack000000a4 == 0) {                                          // -- reaches 0 -> refill
+      if ((&DAT_800064d0)[uVar20] != 0) FUN_400a536c(uVar20);             // consume old trig-cond state
+      (&DAT_800064d0)[uVar20] = puVar28[1];                               // REFILL_TBL[track] = QUOTIENT[track]
+      ...
+    }
+    uVar20++; pcStack000000a4++; puVar28 += 2;
+  } while (uVar20 != 8);
+  // then the same shape again for tracks 8..15 against &DAT_800065f4 (the "f4" half of
+  // the quotient family the handoff already names) and pcStack000000c0 -- 16 sequencer
+  // tracks total (8 audio + 8 MIDI), confirming the 0x...e4/0x...f4 split is exactly the
+  // low/high track-bank halves, not two unrelated registers.
+```
+
+`pcStack000000a4` resolves (from the stack-variable-to-DAT map printed earlier in the
+same decompile) to **`&DAT_800065c3`** -- a per-track byte array immediately adjacent to
+the bank/pattern-commit bytes (`800065be`/`bd`/`c0`..`c2`), previously undocumented in
+this session's own register family list.
+
+### The specific, well-evidenced hypothesis this pass ends on
+
+Every fix built through the 10th pass writes `DAT_800065b6` (the MASTER step, an
+integer) to a corrected resume value at the moment of commit. **Nothing in any of those
+fixes touches `pcStack000000a4`/`DAT_800065c3[track]` (the per-track countdown gating
+refill) or the quotient table `DAT_800065e4/f4[track]` (the value each track gets
+refilled to) to make them consistent with the corrected resume step.** If that is
+correct, then after a DIRECT JUMP switch: `DAT_800065b6` reports the right integer step
+(mostly -- see below), but each track's own refill countdown keeps ticking down from
+whatever count it held BEFORE the switch, and when it hits zero it refills
+`REFILL_TBL[track]` from a quotient value computed under the OLD (pre-switch, or
+naturally-derived stock) assumption -- not re-derived from the new resume position. This
+would produce exactly what the 11th pass's LED test measured: a position offset that is
+not a whole step (each track's countdown is at a different point in its own cycle,
+independent of the master step), that differs per track, that reappears at every
+subsequent wrap (each countdown reaching zero re-triggers the same stale-quotient
+refill), and that can look like a "whole sequencer restart" if the desync between the
+corrected master step and the uncorrected per-track countdowns is large enough to trip
+other step==0-gated logic (the bar-counter/SCALE block at `DAT_800065b2` documented in
+this same function, itself gated on `DAT_800065b6 == 0`) into re-arming or re-resetting
+per-track chain state.
+
+**This is a hypothesis, clearly marked as such -- it has NOT been dynamically tested.**
+What would confirm or falsify it, cheaply, without a 6th hardware flash: instrument
+`emu_rtos.py` (or a small standalone Unicorn probe) to dump `DAT_800065c3[track]`
+(the countdown) and `DAT_800065e4/f4[track]` (the quotient) immediately before and after
+a DIRECT JUMP switch commits, across several switches with different saved/target steps,
+and check whether they are ever recomputed from the corrected `DAT_800065b6` value Hook C
+writes, or whether they simply carry over unmodified from before the switch. If they
+carry over unmodified, this is very likely the real bug, and the fix is to extend Hook C
+(or add a Hook D) to also recompute `DAT_800065c3[track]` and the quotient table for
+every track from the same corrected resume position, not just `DAT_800065b6` itself.
+
+### What's committed, and what's next
+
+`tools/ghidra/attic/GhidraDirectJump6.java` and `GhidraDirectJump7.java` (the probe
+scripts that produced this pass's findings) are being committed. `ghidra_project/` itself
+is gitignored as always; a full backup taken before running auto-analysis
+(`ghidra_project.bak_pre_fullanalysis_s70`, also local-only) is kept as insurance and can
+be deleted once the analyzed project has proven stable across a few more sessions. NO
+code was patched this pass -- per the 10th/11th passes' own standing rule, and because the
+hypothesis above needs the dynamic confirmation described, not another blind flash.
+**Next session: instrument and test the countdown/quotient-carryover hypothesis before
+writing Hook D.**
