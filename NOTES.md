@@ -15782,6 +15782,115 @@ hypothesis above needs the dynamic confirmation described, not another blind fla
 **Next session: instrument and test the countdown/quotient-carryover hypothesis before
 writing Hook D.**
 
+## Session 70, 13th pass (2026-09-18, `wip`) — DIRECT JUMP: ran the dynamic test the 12th
+pass called for. THE COUNTDOWN-CARRYOVER HYPOTHESIS IS FALSIFIED BY DIRECT MEASUREMENT.
+A NEW, DIFFERENT, DYNAMICALLY-PROVEN defect found instead: `DAT_80001904[track 0]` --
+the exact address `refs/octabam`'s independent RE identified as feeding the audible
+live-nibble computation -- desyncs from every other track SPECIFICALLY when a DIRECT JUMP
+switch commits, and does NOT desync in the stock (no-switch) reference run over the same
+window. User said "do it"; this pass rebuilt, instrumented, and ran, rather than reasoning
+further from static RE.
+
+### Rebuilt DIRECTJUMP_V4 from the current patch, then ran the Session 69 dynamic harness
+
+`tools/emu_directjump_dynamic.py` (built Session 69, before this session's Ghidra work)
+already existed and already watched almost exactly what the 12th pass's hypothesis
+needed -- `CNTDN_TBL` (`DAT_800065c3[t]`) and `STEP_AUDIO_TBL` (the quotient,
+`DAT_800065e4/f4[t]`) -- but never `REFILL_TBL` itself (`DAT_800064d0[t]`). Added that
+watch, plus a 256-byte snapshot diff of `DAT_80001904` (the 12th pass's `LIVE_NIBBLE_IN`
+finding) across the switch, to `tools/emu_directjump_dynamic.py` (committing the
+extension, not a throwaway). Rebuilt `out/mainos_directjump_v4.bin` fresh from the
+CURRENT `patch_directjump.s` (Hooks A-F, matching what a 6th flash would contain) via
+`python3 tools/build_directjump_v4.py` before running -- the Session 69 script's binary
+was stale otherwise.
+
+### ❌ RETRACTED: the 12th pass's "per-track countdown is never resynced" hypothesis
+
+Measured directly: `DAT_800065c3[t]` (the countdown gating refill-from-quotient) IS
+written right at the commit tick (frame 461 in this run) -- to `0x1` then, on the SAME
+tick, decremented to `0x0` by stock's own per-tick loop (pc `0x400a49c6` then
+`0x400a4bc6`) -- which primes an IMMEDIATE refill using the freshly-set quotient table
+that same tick, then correctly counts back down to the `0xff` "idle" sentinel one step
+later (frame 518, ~57 frames on, matching one step). This happens at a stock PC, not one
+of our cave addresses -- **stock resyncs this countdown on every commit, switch-triggered
+or not; nothing here needed fixing, and nothing in Hooks A-F needs to touch it.** The
+hypothesis is retracted outright, exactly as this project's own discipline asks: state it,
+test it, and say plainly when it's wrong rather than keep it alive.
+
+### ✅ A second, independent, and much stronger retraction: `REFILL_TBL` renamed, its old
+theory closed
+
+Watching `REFILL_TBL` (`DAT_800064d0[t]`) across ~1,800 frames shows it incrementing by
+**exactly 1, once per full pattern loop** (values 1, 2, 3(switch tick, written twice --
+once by stock at `0x400a4be6`, once by our OWN patch at `0x400d7702`), 4, 5, 6, 7 --
+frame deltas 289/172/344/345/344/345, i.e. one 6-step pattern loop each, not one per
+step). Combined with this session's earlier, decompiled-and-confirmed finding that
+`FUN_400a536c`/`FUN_400a5164` (which `REFILL_TBL` feeds and is fed by) are the TRIG
+CONDITION LOCK evaluator (1:2, X:Y, ping-pong, %), **`DAT_800064d0` is almost certainly
+the trig-condition repeat counter -- "how many times has this track's own cycle looped" --
+not a resume-position or refill register in the audio-timing sense its old name implied.**
+The name `REFILL_TBL` predates this session's clarification of what it actually feeds and
+should be read from here on as "trig-condition repeat counter," a subsystem adjacent to,
+but very likely irrelevant to, DIRECT JUMP's actual bug -- consistent with, and now much
+better evidenced than, the 10th pass's original suspicion that this whole family
+(`DAT_800065b6`/quotient/remainder/`REFILL_TBL`) may not govern audible trig timing at
+all. Every fix built across Sessions 60-70 targets this family; none of them, on this
+evidence, was ever touching the right subsystem, however exactly correct their own
+arithmetic was proven to be.
+
+### ✅ THE NEW FINDING: `DAT_80001904[track 0]` desyncs from every other track, ONLY under
+DIRECT JUMP, measured directly
+
+Snapshotting the 64-entry (8 tracks x 8 "step-group" slots, per the 12th pass's
+`iVar18 = track + step*8` indexing) `int` array at `0x80001904` before and after the same
+switch, in both conditions:
+
+| condition | tracks 1-7 (group 0) end at | track 0 (group 0) ends at |
+|---|---|---|
+| DJ_MODE=1 (real DIRECT JUMP switch, pattern 0->1 committed) | `0x06275190` (all seven, uniform) | `0x0609099c` -- **different** |
+| DJ_MODE=0 (stock reference, no switch reached in this window) | `0x05ae31c0` (all eight, uniform) | `0x05ae31c0` -- **same as the rest** |
+
+Track 0 tracks perfectly with every other track when nothing switches. **The moment a
+DIRECT JUMP switch actually commits, track 0 -- and only track 0 -- comes out with a
+different value in exactly the address this session independently connected (via
+`refs/octabam`'s own COLDFIRE_PORT.md O9b finding) to the real audible/visible live-nibble
+computation.** This is a measured fact, not an inference: same image, same poke, same
+frame, two conditions, one diverges and one doesn't, and the one that diverges is the one
+where a switch actually happened.
+
+**Why track 0 specifically, and a concrete lead on the mechanism:** `FUN_400a1eea`'s own
+decompiled body (12th pass, `GhidraDirectJump7.java`'s output) special-cases track 0
+explicitly -- `if (uVar20 * 0x91a == 0) { ...take a DIFFERENT lookup path... } else {
+...iVar15 = DAT_400d80dc[cVar12*4]; }` at the point where each track's own pattern-length
+selector gets resolved. **`patch_directjump.s` has no such special case anywhere** (grepped
+for `0x91a==0`/"track 0" -- nothing): every hook (`dj_pertrack_fix` included) loops all
+8/16 tracks uniformly. If stock's own per-tick engine genuinely needs track 0 handled
+differently at this exact point and our uniform per-track loop does not replicate that,
+this would produce precisely the observed track-0-only divergence. **Not yet confirmed
+this is the actual causal path** -- `DAT_80001904` itself is never written to by any of
+our hooks directly (grepped, confirmed absent from `patch_directjump.s`), so the
+divergence must be a downstream consequence of some upstream value our hooks DO write
+(most likely `SCALE_IX`, the per-track quotient/`STEP_AUDIO_TBL`, or the bank/pattern
+commit itself feeding `FUN_400a1eea`'s track-0 branch differently than tracks 1-7) --
+tracing which one is the next concrete step, not yet done this pass.
+
+### What's committed, and what's next
+
+`tools/emu_directjump_dynamic.py` (extended with the `REFILL_TBL` and `DAT_80001904`
+watches used to produce this pass's findings) and this NOTES.md entry. No hardware flash,
+no fix written -- per the running rule, and because the causal chain from our hooks to
+the track-0 divergence is not yet traced. **Next session: trace which of our own writes
+(`SCALE_IX`, `STEP_AUDIO_TBL`/quotient, or the bank/pattern commit itself) reaches
+`FUN_400a1eea`'s track-0-only branch differently than the other seven tracks' branch --
+`GhidraDirectJump7.java`'s full decompile already has the exact line numbers, this just
+needs the specific data-flow followed through rather than re-derived.** If that traces
+cleanly to one of our hooks, the fix is very likely narrow: special-case track 0 in
+whichever hook currently loops uniformly. If it does NOT trace to any of our hooks (i.e.
+this asymmetry exists in stock too, just never exercised because stock never switches
+mid-pattern the way DIRECT JUMP does), the fix is structural: whichever hook forces the
+early commit needs to also perform whatever track-0-specific step stock's own natural
+CHAIN-AFTER commit path would have done first.
+
 ## Session 75 (2026-09-18/19, `wip`) — SIDECHAIN3: user flashed the n7 fix (Session 74) --
 ringing PERSISTED. Found and BUILT a second, independent fix: `scdet` genuinely runs TWICE
 on a split-block frame (proven, not just theorized -- re-reading the dispatcher's id-lookup

@@ -69,6 +69,18 @@ CNTDN_TBL = 0x800065c3      # DAT_800065c3[t] -- NOTES.md L3025/3030-3032: decre
                             # (0x800065b6); grep confirms it never writes 0x800065c3 or
                             # 0x800065e4/f4 at all.
 REFILL_TBL = 0x800064d0     # DAT_800064d0[t] -- refills CNTDN_TBL after a fire (L3025)
+LIVE_NIBBLE_IN = 0x80001904  # DAT_80001904[track + step*8], int x 128 -- Session 70 12th
+                              # pass (GhidraDirectJump7.java): written by FUN_400a1eea from
+                              # bank/pattern-selection state (DAT_800065bd/be/c1/c2) + a
+                              # per-track bit (DAT_80006624), NEVER touched by any DIRECT
+                              # JUMP hook; independently identified by refs/octabam's own
+                              # ColdFire port (COLDFIRE_PORT.md O9b step 4) as one of the
+                              # TWO direct inputs to the exact ColdFire computation that
+                              # produces FW_LIVE_NIBBLE -- the sequencer's own live/audible
+                              # sub-step byte. Watching the whole 128-byte (16 track x 8
+                              # step slots x 4B... actually int x 8 tracks x 16 slots, see
+                              # note below) region across a switch is this pass's decisive
+                              # test.
 STEP_AUDIO_TBL = 0x800065e4  # DAT_800065e4[t] -- per-track step (audio), NOTES.md L2919/3023:
                              # computed at 0x400a4aa2 as `base / trackLen` from a STACK-LOCAL
                              # base (0x3c,SP) set up EARLIER in the same switch-commit code,
@@ -175,6 +187,10 @@ def run_one(er, a, dj_on):
     gate_writes = make_watch(GATE_TBL, 8)
     cntdn_writes = make_watch(CNTDN_TBL, 8)
     step_audio_writes = make_watch(STEP_AUDIO_TBL, 16)  # u16 x 8
+    refill_writes = make_watch(REFILL_TBL, 8)  # Session 70 12th pass: never watched before --
+                                                 # LAB_400a4ba0's own refill-from-quotient write,
+                                                 # gated on CNTDN_TBL[t] hitting 0 (Ghidra-traced
+                                                 # this session, GhidraDirectJump7.java)
     rt.uc.ctl_flush_tb()
 
     # NOTE (this session): press_play_live() -- through the real PLAY key
@@ -208,6 +224,9 @@ def run_one(er, a, dj_on):
     print(f"gate  tbl  : {rt.uc.mem_read(GATE_TBL, 8).hex()}")
     print(f"cntdn tbl  : {rt.uc.mem_read(CNTDN_TBL, 8).hex()}  (0xff = never armed/fired)")
     print(f"step-audio : {rt.uc.mem_read(STEP_AUDIO_TBL, 16).hex()}")
+    print(f"refill tbl : {rt.uc.mem_read(REFILL_TBL, 8).hex()}")
+    live_nibble_pre = rt.uc.mem_read(LIVE_NIBBLE_IN, 256)
+    print(f"live-nibble-in (0x{LIVE_NIBBLE_IN:x}, 64 x u32): {live_nibble_pre.hex()}")
 
     # ---- the manual pattern cue, at the memory level -------------------------
     rt.uc.mem_write(PEND_PAT, bytes([new_pat]))
@@ -226,6 +245,16 @@ def run_one(er, a, dj_on):
     print(f"gate  tbl  : {rt.uc.mem_read(GATE_TBL, 8).hex()}")
     print(f"cntdn tbl  : {rt.uc.mem_read(CNTDN_TBL, 8).hex()}  (0xff = never armed/fired)")
     print(f"step-audio : {rt.uc.mem_read(STEP_AUDIO_TBL, 16).hex()}")
+    print(f"refill tbl : {rt.uc.mem_read(REFILL_TBL, 8).hex()}")
+    live_nibble_post = rt.uc.mem_read(LIVE_NIBBLE_IN, 256)
+    print(f"live-nibble-in (0x{LIVE_NIBBLE_IN:x}, 64 x u32): {live_nibble_post.hex()}")
+    changed = [i for i in range(64)
+               if live_nibble_pre[i*4:i*4+4] != live_nibble_post[i*4:i*4+4]]
+    print(f"live-nibble-in slots CHANGED across the switch window: {changed}")
+    for i in changed:
+        pre = int.from_bytes(live_nibble_pre[i*4:i*4+4], "big")
+        post = int.from_bytes(live_nibble_post[i*4:i*4+4], "big")
+        print(f"   slot {i:2d} (track {i%8}, group {i//8}): {pre:#010x} -> {post:#010x}")
 
     print(f"\nFUN_400a536c (trig-fire) calls, frame relative to poke, "
           f"{fires_before_poke} before / {len(fires)-fires_before_poke} after:")
@@ -251,9 +280,15 @@ def run_one(er, a, dj_on):
     for fr, task, pc, addr, size, val in step_audio_writes:
         print(f"   frame {fr:.1f}  [{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
 
+    print(f"\n0x{REFILL_TBL:x} writes (DAT_800064d0[t], REFILL_TBL), "
+          f"{len(refill_writes)} total:")
+    for fr, task, pc, addr, size, val in refill_writes:
+        print(f"   frame {fr:.1f}  [{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
+
     return dict(fires=fires, fires_before_poke=fires_before_poke,
                 phase_writes=phase_writes, gate_writes=gate_writes,
-                cntdn_writes=cntdn_writes, step_audio_writes=step_audio_writes)
+                cntdn_writes=cntdn_writes, step_audio_writes=step_audio_writes,
+                refill_writes=refill_writes)
 
 
 if __name__ == "__main__":
