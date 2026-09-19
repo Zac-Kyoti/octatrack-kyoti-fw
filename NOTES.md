@@ -13011,3 +13011,78 @@ Two ways to proceed, not yet chosen between:
    (neither confirms nor rules out) the `n7` mismatch mechanism, since KEY GAIN's stage
    runs upstream of both the filtered and unfiltered portions of the buffer, and RMS only
    feeds the compressor's own gain-reduction math, which `moncommit` never listens to.
+
+## Session 74, fix built (2026-09-18, `wip`) — SIDECHAIN3: BUILT the `n7` fix (KEY FLT's
+loop now always covers the full 16-sample block, matching its three sibling loops
+instead of the compressor's own per-call segment count), added a regression check that
+PROVES it against the demonstrated bug (fails on the old code, passes on the new), and
+rebuilt SIDECHAIN3 clean. NOT flashed -- real-hardware confirmation is the next step.
+
+### The fix: `tools/patch_sc_dsp3.asm`, `zz13`'s loop bound
+
+Changed `do n7,>zz13` to `do #<$10,>zz13` (16, matching the sibling loops' fixed
+32-word/16-pair extent -- `zz02`'s copy-in, `zz04`'s KEY GAIN, `zz15`'s SC LISTEN gen-1
+stash all already hardcode `#<$20`). Chose this over the alternative NOTES.md's own
+earlier writeup floated (driving the other three loops off `n7` instead): `x:$40` is
+always a fully valid 16-sample block regardless of split (`sctap` publishes the complete
+block before any split-handling runs, confirmed by Session 17's own dispatcher map), so
+there's no reason KEY FLT needs to track the compressor's own per-call segment count --
+matching it to the OTHER three loops is the smaller, lower-risk diff (one loop-bound
+literal changed, no new arithmetic, no addressing changes) and avoids leaving part of the
+gen-1 stash a stale frame behind on split blocks (which driving the other three loops off
+`n7` instead would have done, since they'd then need to skip writing the remainder rather
+than filter it). Added a code comment at the change site citing this session's own
+disassembly finding, so a future reader doesn't have to rediscover why `n7` doesn't belong
+there. Confirmed the same fix applies verbatim to payload B (its dispatch site was
+disassembled and checked to be structurally identical this session, just relocated).
+
+### New regression test, and PROOF it actually catches the bug (not just "it assembled")
+
+Extended `tools/emu_sc_dsp3.py`: gave `run()` an optional `frames` parameter (was
+hardcoded to dsp_host's own `-frames 15`), and added a new check block that calls `scdet`
+with `-frames` set to 1, 6, and 14 (dsp_host loads `n7` from `-frames` before jumping to
+`-proc`, the same mechanism real hardware's split path uses -- confirmed from
+`dsp_host.cpp`'s own source, which turns out to already document the exact same
+`P:0x4b8..0x4d7` two-call split mechanism this session found by disassembly, independently,
+down to the same addresses -- and even ships a `-split` flag purpose-built to model it,
+not used here only because the simpler direct `-frames` override was enough to isolate
+this specific loop-bound question) and checks the FULL 32-word dump against `ref_svf`'s
+full output, not the `NW=30` truncation the pre-existing checks use (that truncation
+exists to work around `dsp_host`'s own "-frames capped at 15" CLI limitation, unrelated to
+this loop's own trip count now that it no longer reads `n7` at all).
+
+**Verified the test is a real regression check, not just a new assertion that happens to
+pass**: `git stash`ed the `.asm` fix, reran the suite -- the new check FAILS exactly as
+predicted (`n7=1/6/14` all report the last pair's got-value as raw, un-filtered
+sine-derived numbers instead of the filtered expected ones), confirming both that the bug
+is real and reproducible in emulation given the right test, and that this specific check
+would have caught it. Restored the fix (`git stash pop`), reran -- all green again,
+including this check, in BOTH plain (`sc3_iso.mem`-only) and `--patched` (validated
+against the actual `out/mainos_sidechain3.bin` image, not just the isolated assembled
+cave) modes. `tools/emu_sc_dsp3_moncommit.py` (unrelated, unaffected) also still passes,
+checked as a quick sanity pass since a full rebuild touches the same output tree.
+
+### Rebuilt `out/OCTATRACK_OS1.40C_SIDECHAIN3.syx` clean
+
+`tools/build_sidechain3.py`: assembled clean, cave still 258/261 donor words (the fix
+didn't change the loop's own word count -- a register-operand `do n7` and a short-immediate
+`do #<$10` assemble to the same size), round-trip payload/checksum ok, all existing
+guards passed (stock-byte assertions, manual-trig-fix identity check, container
+wrap/checksum). Same outputs as every prior SIDECHAIN3 build: `out/mainos_sidechain3.bin`,
+`out/OCTATRACK_OS1.40C_SIDECHAIN3.syx`, `out/OCTATRACK_SIDECHAIN3.bin`.
+
+### HANDOFF
+
+**NOT flashed.** This is a real, emulator-verified fix for a real, disassembly-confirmed
+bug, but it has NOT been confirmed to be the actual cause of the reported audible
+ringing -- that claim can only be settled by listening on real hardware, per this
+project's own standing rule (a lock-step/lockstep-adjacent emulator result is not
+sufficient evidence on its own for anything at this depth in the frame-builder,
+independent of how solid the static reasoning is). Next step is squarely the user's:
+flash `out/OCTATRACK_OS1.40C_SIDECHAIN3.syx`, power-cycle (stale DSP state RAM survives
+an OS upgrade -- octabam's own `FAILURE_MODES.md` warning, already this project's
+standing practice), and repeat the MON + KEY FLT ≠ OFF repro. If the ringing is gone,
+this bug is closed. If it persists, the `n7` mismatch was real (Session 74's own
+disassembly proves that much regardless) but not the audible mechanism, and the
+hook-12-style DSP-timing angle (downgraded this session, see above) or something not yet
+considered becomes the next lead.
