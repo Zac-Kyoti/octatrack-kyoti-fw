@@ -76,6 +76,35 @@ scdet:
         tst     a
         beq     zz20                   ; KEY OFF -> self-detect, skip all
         @KADJ@                         ; KEY 1..4 -> absolute track 0..7
+; SIDECHAIN3 ringing bug, take 2 (Session 75, NOTES.md): a mid-block trig
+; splits the block into TWO `PROCESS_TABLE[id]` calls to comp_proc (r0=0 for
+; the first, r0=split*2 for the second -- Session 74's disassembly of
+; P:0x4a7..0x4d7, both payloads), and re-reading the id-lookup code around
+; both call sites shows they normally resolve to the SAME `r2` (target
+; address) -- meaning `scdet` runs TWICE on a split frame, each time
+; redoing the FULL KEY GAIN + KEY FLT + SC LISTEN pipeline the n7 fix now
+; makes cover the whole block, with the SVF integrator's state (r7+$16/$17)
+; carried over from the first call into the second -- filtering the SAME
+; 16 samples twice in immediate succession is a different system than the
+; single-pass one Session 64/69 proved has real (non-oscillating) poles,
+; and was never analysed. `n6` already holds this call's original `r0`
+; (the very first instruction above); test it: nonzero means split*2, i.e.
+; this is definitely the SPLIT-BLOCK'S SECOND call, not the frame's only
+; one (which always arrives with r0=0) -- skip straight to `zz16`'s own
+; exit (still redirects the stock detector to `x:$40`) without touching
+; KEY GAIN/KEY FLT/the gen-1 stash or MON_ON/MON_KEY a second time.
+;
+; WORD BUDGET: this check (4w: move/tst/bne) pushed the cave 1 word over
+; SPATIALIZER's 261w donor. Paid for by `r4` (proven free for the whole
+; routine -- untouched anywhere between here and the final `move #$61,r4`
+; every exit path already does; audited by inspection, not just assumed):
+; stash `a` (abs key track, still clean here) into it now, so zz15's own
+; publish block below can read it back in 1 word instead of re-deriving it
+; from scratch in 4 (net -3w there against this check's +4w = -1 net).
+        move    a1,r4
+        move    n6,b
+        tst     b
+        bne     zz16
         asl     #7,a,a
         move    a1,n1
         move    #>$800,r1
@@ -261,13 +290,14 @@ zz10:
         move    x0,y:(r1)+
 zz15:
 ; publish MON_ON[my track]=1 and MON_KEY[my track]=redirect track in ONE
-; address pass (r1 -> MON_ON, post-incremented to MON_KEY) -- recomputes the
-; redirect track fresh rather than threading a live register across the
-; whole routine.
-        move    x:(r6+$d),b
-        asr     #$10,b,b
-        move    b1,a
-        @KADJ@                         ; a = absolute key track 0..7 (kept until the end)
+; address pass (r1 -> MON_ON, post-incremented to MON_KEY). Used to
+; recompute the redirect track fresh here rather than thread a live
+; register across the whole routine -- now threaded anyway via `r4`
+; (Session 75, see the word-budget note above `zz16`'s own check): `r4`
+; is free for the whole routine except its own final `move #$61,r4`
+; (every exit path does that AFTER this point, never before), so reading
+; it back here is safe and saves the 3-instruction re-derivation.
+        move    r4,a                   ; a = absolute key track 0..7 (kept until the end)
         move    x:>$420,b              ; b = MY track 0..7
         asl     #7,b,b
         move    b1,n1

@@ -209,14 +209,30 @@ def base_mem(words, scdet, moncommit, patch_tail, xseed, yseed):
     return m
 
 
-def run(mem, proc, dumps, params, pokey=None, frames=15):
-    """dumps: list of ('x'|'y', lo, hi). One dsp_host run per dump."""
+def run(mem, proc, dumps, params, pokey=None, frames=15, audio=None):
+    """dumps: list of ('x'|'y', lo, hi). One dsp_host run per dump.
+
+    `audio`, if given, overrides dsp_host's own r0 base (`-audio`, default
+    0x80). Left unset by default -- dsp_host ALSO uses this same base as
+    where it writes its own synthetic tone samples in X-memory (dsp_host.cpp
+    line ~745), so forcing it to 0 for every caller here once corrupted
+    `emu_sc_dsp3_moncommit.py`'s own X:0-0x20 dump (Session 75: found by
+    that test going from all-green to failing after an earlier, too-broad
+    version of this default). Pass `audio=0` explicitly only where the
+    real dispatcher's r0 value actually matters to the code under test --
+    `scdet`'s own repeat-call guard is the one case so far (it keys off
+    r0's incoming value being exactly 0 for the frame's only/first
+    PROCESS_TABLE call); every other existing check here never depended
+    on r0's incoming value at all (`scdet` always overwrites it itself
+    before using it), which is why they passed under either default."""
     res = []
     for i, (sp, lo, hi) in enumerate(dumps):
         df = SCRATCH / f"sc3_d{i}.bin"
         a = [DSP_HOST, "-mem", mem, "-init", f"{RTS_ADDR:x}", "-proc", f"{proc:x}",
              "-frames", str(frames), "-blocks", "1", "-params", params,
              "-dumpy", f"{'@' if sp == 'x' else ''}{df},{lo:x},{hi:x}"]
+        if audio is not None:
+            a += ["-audio", f"{audio:x}"]
         if pokey:
             a += ["-pokey", pokey]
         sh(*a)
@@ -305,16 +321,16 @@ def main():
     # 1. stage copy (step-2 regression) ------------------------------------
     print("copy / KEY select:")
     mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0xBEEF] * 0x20)], None)
-    (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV), pokey=pk)
+    (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV), pokey=pk, audio=0)
     check("KEY=1: X:$40 == keybus[0]", x40 == MARK, f"got[:3]={[hex(v) for v in x40[:3]]}")
-    (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=0), pokey=pk)
+    (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=0), pokey=pk, audio=0)
     check("KEY=0: X:$40 untouched", all(v == 0xBEEF for v in x40))
 
     # 2. KEY GAIN ---------------------------------------------------------
     print("\nKEY GAIN:")
     for kgain in (64, 88, 40, 120, 0):
         mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)], None)
-        (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kgain=kgain), pokey=pk)
+        (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kgain=kgain), pokey=pk, audio=0)
         exp = list(MARK) if kgain == 64 else ref_gain(MARK, kgain)
         db = (((kgain >> 3) * 8) - 64) * 0.375
         check(f"KGAIN {kgain:3d} ({db:+.0f} dB)", close(x40, exp, 2),
@@ -328,7 +344,7 @@ def main():
                       (78, "HP idx7"), (120, "HP idx28")):
         mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
                        [(1, S18, [0])])         # fresh: our own seed latch = 0
-        (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kflt=kflt), pokey=pk_sig)
+        (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kflt=kflt), pokey=pk_sig, audio=0)
         if kflt == 64:
             exp = sig
         else:
@@ -354,7 +370,7 @@ def main():
         mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
                        [(1, S18, [0])])
         (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kflt=kflt),
-                     pokey=pk_sig, frames=short_n7)
+                     pokey=pk_sig, frames=short_n7, audio=0)
         check(f"n7={short_n7:2d} at call time -> all 16 pairs still filtered",
               close(x40, exp_full, 3),
               f"last pair got={[s24(v) for v in x40[30:32]]} "
@@ -371,7 +387,7 @@ def main():
                    [(1, FF, [1]),                     # stock bit falsely "warm"
                     (1, S16, [0x7fffff]), (1, S17, [0x7fffff]),   # garbage
                     (1, S18, [0])])                    # our latch: never seeded
-    (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kflt=kflt), pokey=pk_sig)
+    (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kflt=kflt), pokey=pk_sig, audio=0)
     check("$f warm + garbage $16/$17, $18=0 -> still cold-starts",
           close(x40[:NW], exp_cold[:NW], 3),
           f"got[:4]={[s24(v) for v in x40[:4]]} exp[:4]={[s24(v) for v in exp_cold[:4]]}")
@@ -384,7 +400,7 @@ def main():
     mem = base_mem(words, scdet, sctail, False,
                    [(1, 0x40, [0] * 0x20), (1, S18, [1]),          # our latch: warm
                     (1, S16, [lp1 & 0xFFFFFF]), (1, S17, [bp1 & 0xFFFFFF])], None)
-    (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kflt=kflt), pokey=pk_sig)
+    (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kflt=kflt), pokey=pk_sig, audio=0)
     check("block 2 continues the SVF", close(x40[:NW], exp2[:NW], 3),
           f"got[:4]={[s24(v) for v in x40[:4]]} exp[:4]={[s24(v) for v in exp2[:4]]}")
 
@@ -433,11 +449,11 @@ def main():
     print("\nSC LISTEN:")
     mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)], [(1, S18, [0])])
     (x40, g1) = run(mem, scdet, [('x', 0x40, 0x60), ('y', SLOT + 0x20, SLOT + 0x40)],
-                    P(key=KEYV, kflt=40, mon=1), pokey=pk_sig)
+                    P(key=KEYV, kflt=40, mon=1), pokey=pk_sig, audio=0)
     check("MON=1: keybus[0] gen1 == processed X:$40", g1 == x40,
           f"g1[:3]={[hex(v) for v in g1[:3]]} x40[:3]={[hex(v) for v in x40[:3]]}")
     mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)], [(1, S18, [0])])
-    (g1,) = run(mem, scdet, [('y', SLOT + 0x20, SLOT + 0x40)], P(key=KEYV, mon=0), pokey=pk_sig)
+    (g1,) = run(mem, scdet, [('y', SLOT + 0x20, SLOT + 0x40)], P(key=KEYV, mon=0), pokey=pk_sig, audio=0)
     check("MON=0: keybus[0] gen1 untouched", all(v == 0 for v in g1))
 
     # 6. MON publish (scdet -> MON_ON[my track]/MON_KEY[my track], Y:0x800+
@@ -447,7 +463,7 @@ def main():
     MON_ADDR = KB_BASE + MYTRACK * 0x80 + 0x40   # this track's own dead gen-2 slot
     mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
                    [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [0xdead, 0xdead])])
-    (pub,) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2)], P(key=KEYV, mon=1), pokey=pk_sig)
+    (pub,) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2)], P(key=KEYV, mon=1), pokey=pk_sig, audio=0)
     # MON_ON is only ever gated by `tst` (nonzero = on) in moncommit, never
     # compared for an exact value -- `move #1,b`'s short-immediate encoding
     # is left-aligned (this file's own documented dsp_asm quirk, q2) and
@@ -458,12 +474,12 @@ def main():
 
     mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
                    [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [1, K])])
-    (pub,) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2)], P(key=KEYV, mon=0), pokey=pk_sig)
+    (pub,) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2)], P(key=KEYV, mon=0), pokey=pk_sig, audio=0)
     check("MON=0: MON_ON published OFF", pub[0] == 0, f"got={pub}")
 
     mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
                    [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [1, K])])
-    (pub,) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2)], P(key=0, mon=1), pokey=pk_sig)
+    (pub,) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2)], P(key=0, mon=1), pokey=pk_sig, audio=0)
     check("KEY=0: MON_ON published OFF (even with MON=1)", pub[0] == 0, f"got={pub}")
 
     print()
