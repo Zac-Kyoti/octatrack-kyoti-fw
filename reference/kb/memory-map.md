@@ -46,6 +46,40 @@ dispatcher) `0x4008445c` · prio 1 **sys** `0x40061a94` (serial+SPI, then spawns
 storage/UI/p3) · prio 0 **main** `0x4001f834` (init list, then idle `bras .` at
 `0x4001fc9c` — main *is* the idle task). Several prio-2/prio-1 rows still ❓.
 
+**⚠️ The saved task context does NOT include EMAC state.** The TCB fields above
+(`+0x0c..+0x4b`) are `moveml`-saved `d0-d7,a0-a7` only — no `MACSR`/`ACC0`/`ACC1`
+slot. The EMAC's rounding mode (`MACSR` bit 6, S/U) is genuinely global, process-wide
+state. **Confirmed directly against our own image** (`m68k-elf-objdump -m m68k:cfv4e`,
+Session "part 5"): the per-frame copier function (`0x4000cae8`, per the per-voice-record
+section below) sets `MACSR=0xb0` for an early knob/MIDI interpolator, then `MACSR=0x60`
+(fractional, S/U=1, 16-bit rounding on `movclrl` read-out per the CFPRM's pseudocode) for
+**four** near-identical back-to-back level-chain loops (`0x4000ccae`/`cd22`/`cd64`/`ce40`
+— our `levelchain_mute` hook 12's site, MUTE MODE thread, is the last of these four, at
+`0x4000ced0/ced4`), then later, **still inside the exact same function, no `rts` in
+between** — this is sequential code, not a separate task — sets `MACSR=0x20` twice more
+(`0x4000cf60` register-sourced, `0x4000d3ae` literal). No explicit interrupt-mask write
+(`%sr`/`trap`/`rte`) was found anywhere in this ~1.7 KB span either. So the hazard isn't
+"two tasks fight over MACSR" (there's only one task/call here) — it's that **this one
+function's own MACSR=0x60 window can, as far as static disassembly can show, be preempted
+by a PIT0 tick (5.0 ms / 220.5 samples) like any other code, and if some UNRELATED task
+elsewhere in the system also touches the EMAC while it's paused** (plausible in volume:
+`kb/techniques.md` already notes "~5,600 EMAC-site instructions run per sequencer frame"
+system-wide) **the resumed function reads back corrupted values for the rest of its own
+pass — every remaining track/ping this invocation still has to do, not just one.** Any
+change that adds cycles to one of the four level-chain loops (100+ combined hits/frame)
+shifts how close this function runs to the tick boundary and is a plausible way to open
+that window on a build that never opens it stock — a race a short/synthetic emulator
+scenario may never get scheduled into. **Not yet resolved**: which task calls this
+copier function at all, or whether it's even preemptible in practice (needs dynamic
+tracing, `emu_rtos.py`, not more static reading — see `NOTES.md` "Session 58 continued
+yet again, part 5"). (source: `refs/octabam` `CLAUDE.md` "MACSR S/U IS BIT 6..." +
+`docs/firmware/KERNEL.md` "Emulator facts", pulled 2026-09-16 at `f77d5d7`; octabam's own
+ColdFire port had this exact S/U bit wrong for this exact function once, "every voice
+rendered silent" — O9b, 8 Sep 2026 — independent confirmation this specific code is
+unusually easy to mismodel.) See
+`NOTES.md` "Session 58 continued yet again, part 4" for the mute-mode incident this
+was pulled to explain.
+
 ## Sequencer clock / tick
 
 | Addr | Conf | What | Source |

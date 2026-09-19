@@ -18,13 +18,6 @@ agent that fetches the refs and appends new commits here.
               read commit-by-commit; next octabam sync should skim
               `docs/RTOS_FORK.md` / `CLAUDE.md` "Traps" section deltas rather
               than the raw log.                                    [ TODO — skim before next octabam sync ]
-- 2026-09-16  dsp56300@46aa691  132 commits ahead of octabam's vendored pin
-              (`c051afad`, 2026-07-28): DOR aa / DO FOREVER / MACRI / LRA Rn /
-              TRAP(cc) / ILLEGAL, MOVEP P<->low-I/O, absolute-short MOVE(M),
-              CMPU N-from-borrow, CCR overflow-flag pass, ADC/SBC, ESAI
-              underrun logging. Noted in kb/dsp56300.md; not cross-checked
-              against any of our own DSP56300 work yet (we have none pending).
-                                                                     [ noted, kb/dsp56300.md — no action needed until we touch DSP56300 semantics ]
 - 2026-09-06  octamax@7d9debc  OCTAMAX 2.x — dual-256 static-pool reclaim (DDR
               relocation), OCTAMAX_2 combined release. Techniques noted in
               kb/techniques.md; not adopted.                          [ noted, not adopted ]
@@ -58,6 +51,35 @@ agent that fetches the refs and appends new commits here.
 
 ## Distilled
 
+- 2026-09-16  dsp56300@46aa691  132 commits ahead of octabam's vendored pin
+              (`c051afad`, 2026-07-28) — cross-checked against SIDECHAIN3
+              (NOTES.md Session 71), the first of our own threads to actually
+              touch DSP56300 semantics. Instruction-by-instruction audit of
+              `patch_sc_dsp3.asm` against every relevant fix (ASL/ASR carry
+              on AArch64/x64, CCR overflow-flag pass, mpyi/maci sign-extend,
+              multiplier product-scale fold): all either flag-only bugs our
+              branch-free, C/V-blind code never reads, or x64-only/immediate-
+              operand-only paths our register-register `mpy`, arm64 host
+              never hits. Does not explain the bug via our own patch code;
+              the STOCK compressor module's own disassembly was not
+              cross-checked the same way (not on hand this session).
+                                          [ kb/dsp56300.md "Checked against SIDECHAIN3" ]
+- 2026-09-16  octabam@f77d5d7  pulled specifically to root-cause the hook-12
+              (`levelchain_mute`) hardware silence regression (NOTES.md "Session 58
+              continued yet again, part 3/4"): the RTOS's saved task context
+              (`0x400005fc` TCB builder) has no MACSR/EMAC-accumulator slot — only
+              d0-d7/a0-a7 — and different frame-builder call sites run the EMAC in
+              different MACSR modes (our exact hook site, the level chain at
+              `0x4000ccae`, runs fractional `0x60`; two other sites run `0x20`).
+              octabam's own ColdFire port independently hit "every voice rendered
+              silent" from mismodeling this exact function's MACSR S/U bit (O9b,
+              8 Sep 2026) — same failure signature, different cause (their emulator
+              vs our detour), but confirms this code is uniquely easy to get wrong.
+              Also pulled their general "a lock-step/short-scenario emulator run
+              cannot show you a cross-task race; when local says clean and hardware
+              says broken, believe the hardware" rule (`CLAUDE.md`), which matches
+              our own standing methodology gap for this exact incident.
+              [ kb/memory-map.md "Kernel / RTOS scheduler" ]
 - 2026-09-16  midisc@eb8b4bc  first sync — new contributor, added to MANIFEST.toml.
               Full 1.40C MIDI-scene address map + XF morph engine + part-save
               freeze-twin persistence pattern + bank-register-clobber fix +

@@ -82,7 +82,17 @@ PATCHES = [
       # mix, which is the FX-tail-ring feature. A retrig plays full-level straight into it.
       # relcut zeroes that word instead, but ONLY for a track in the HARDCUT set (one that
       # took a real trig while silenced), so the tail-ring grace is preserved otherwise.
-      (0x4000d0c4, "relcut",   "426800024228002bb46800046e0431420004", 18),
+      # Session 58 continued yet again, part 8: relcut's own standalone detour REPLACED by
+      # hook 13 (relstate_shadow, below) -- relcut's LABEL/BODY are unchanged in
+      # patch_softmute.s, reached only via hook 13's own branches now. This closes the
+      # REL_STATE race for OT+FX (emulator-validated, tracks 1 and 2, muted + unmuted
+      # control -- see NOTES.md "part 8") WITHOUT touching either previously-poisoned
+      # REL_STATE site or the hook-12 EMAC danger zone. Does NOT help DT mode (a
+      # pre-existing gap from Session 57: `pre` never maintains REL_STATE for DT, so this
+      # whole loop -- relcut before, hook 13 now -- never engages there; DT's own
+      # finite-release blip needs a separate mechanism, not yet designed).
+      # Expected-bytes = relcut's own string with "6412" (the bccs opcode) prepended.
+      (0x4000d0c2, "relstate_shadow", "6412426800024228002bb46800046e0431420004", 20),
       # Session 58: drop the trig at its real dispatch site (0x4000d498, an indirect
       # jsr through a per-machine-type handler table) instead of trying to stop the
       # voice afterwards. Broadened (Session 58 continued) to cover both OT+FX and DT.
@@ -113,20 +123,19 @@ PATCHES = [
       # patch_softmute.s (hook 11, currently `relstate_or`) for the record; not wired in.
       # (0x4000d0ba, "relstate_or", "71b98000184a", 6),
       ]),
-    ("patch_mutemode", 0x400d76c0, "DT_MODE=1", []),         # menu stub: OT / OT+FX / DT
-    # Session 58 continued again: patch_softmute grew once more (relstate_guard, hook 11).
-    # patch_mutemode moved 0x400d7680 -> 0x400d76c0 (ends 0x400d7748); the PERSONALIZE
-    # arrays moved out further too, to LBL_AT 0x400d7750, for the same reason.
+    # Session 58 continued yet again, part 8: hook 13's extra `bcs` (vs relcut alone) grows
+    # patch_softmute 2 B past the old 0x400d76c0 start -- bumped 0x40 further out, same
+    # convention as every prior cave-growth in this file's history. Verified in
+    # build_relstate_shadow.py first (emulator-validated build) before folding in here.
+    ("patch_mutemode", 0x400d7700, "DT_MODE=1", []),         # menu stub: OT / OT+FX / DT
 ]
 
 # --- PERSONALIZE menu arrays (stock) ---
 OLD_LBL, OLD_GET, OLD_SET, N_OLD = 0x400b2a34, 0x400b2a74, 0x400b2ac0, 16
 SPLICE_AT = 2                                               # after "PREVIEW WITHOUT FX"
-LBL_AT, GET_AT, SET_AT = 0x400d7750, 0x400d77b0, 0x400d7810
-# Session 58 continued again: moved 0x400d7710/70/d0 -> 0x400d7750/b0/810 -- patch_mutemode
-# (ends 0x400d7748) grew into the old array location once relstate_guard (hook 11) pushed
-# patch_softmute's own end further out. These three 68-byte arrays now sit in the free
-# span between patch_mutemode and patch_trigscale (0x400d7b00), with room to spare.
+LBL_AT, GET_AT, SET_AT = 0x400d7790, 0x400d77f0, 0x400d7850
+# Session 58 continued yet again, part 8: moved 0x400d7750/b0/810 -> 0x400d7790/f0/850,
+# 0x40 further out, to make room for patch_mutemode's own 0x40 shift above.
 REFS = [(0x40068efe, OLD_LBL, "labels  move.l #imm,D5"),
         (0x40068f0a, OLD_GET, "getters lea"),
         (0x40069022, OLD_SET, "setters lea #1"),
@@ -255,17 +264,18 @@ def main():
     if mm.exists():
         mmb = mm.read_bytes()
         diff = [i for i, (x, y) in enumerate(zip(mmb, img)) if x != y]
-        allowed = [(0x400d7400, 0x400d79b0),        # the whole DT cave region: patch_softmute,
+        allowed = [(0x400d7400, 0x400d79f0),        # the whole DT cave region: patch_softmute,
                                                     # patch_mutemode, and the relocated
-                                                    # PERSONALIZE arrays (Session 57 layout)
+                                                    # PERSONALIZE arrays -- 0x40 further out
+                                                    # than before (part 8, hook 13's growth)
                    (0x40006844, 0x4000684a),        # mt_trig detour jmp target (symbol moved)
                    (0x4000f4dc, 0x4000f4e4),        # mt_rebind detour jmp target (symbol moved)
                    (0x4000f790, 0x4000f7a8),        # Session 56 continued: mt_pos detour (DT-only)
                    (0x4000f820, 0x4000f83c),        # Session 56 continued: mt_ptr + mt_ctr detours (DT-only)
-                   (0x4000d0c4, 0x4000d0d6),        # Session 57: relcut detour (DT-only)
+                   (0x4000d0c2, 0x4000d0d6),        # part 8: relstate_shadow detour (DT-only,
+                                                    # 2 B earlier than build_mutemode.py's relcut)
                    (0x4000d498, 0x4000d49e),        # Session 58: dt_trig detour (DT-only)
                    (0x40006820, 0x40006828),        # Session 58 continued: fresh_bind detour (DT-only)
-                   (0x4000d0ba, 0x4000d0c0),        # Session 58 continued again: relstate_or detour (DT-only)
                    # Session 57: the five PERSONALIZE menu-array repoint sites. They hold
                    # a different cave ADDRESS than build_mutemode.py's, because the arrays
                    # moved to 0x400d78a0/7900/7960 to make room for patch_softmute's growth.

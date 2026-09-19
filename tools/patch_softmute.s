@@ -363,7 +363,123 @@ mr_pass:
 | All five aimed at stopping the retriggered VOICE.  The voice was never the problem --
 | see hook 8.
 |
+| ============================ hook 13: 0x4000d0c2 (REL_STATE RACE + the unmuted-envelope
+| ==== regression, both closed -- SHADOW is now the ONLY signal, GATE/REL_STATE are not) ===
+| Session 58 continued yet again, part 8: first version of this hook only handled the case
+| "REL_STATE wrongly says not-silenced but SHADOW says muted" (the original race), by
+| falling into `relcut` (hook 8, below) UNCHANGED whenever REL_STATE's own bit was set.
+| Session 58 continued yet again, part 10: FLASHED, and the user reported ordinary,
+| completely UNMUTED playback in OT+FX/DT mode had shortened envelopes -- "amp hold
+| reduced to trig length". Root cause, found by testing `relcut` ALONE (no hook 13 at all,
+| the pre-existing hardware-good baseline) against a track with real content, nothing
+| muted, GATE toggled 0 vs 1: **`relcut` zeros the second level word (+4) for ANY track
+| whose REL_STATE bit is set and GATE != 0 -- it never checks whether THAT SPECIFIC track
+| is actually muted.** REL_STATE ("voice t in RELEASE") is a stock, per-voice indicator
+| that goes high for ordinary natural decay, muted or not; `relcut`'s own Session-58 header
+| comment even says the fix is meant for "ANY silenced track" but the code only ever
+| checked the GLOBAL GATE, not per-track mute state. Confirmed directly
+| (`tools/diag_relcut_unmuted.py` against `out/mainos_mutemode_dt_BASELINE.bin`, hook 13
+| not even present): 8267 of 8268 writes to +4 were VALUE 0, starting 2 frames after a
+| single natural trig, with MUTE_STATE at 0 for the entire run. **This predates hook 13
+| entirely** -- every build since Session 58 has had it; it was simply never tested with
+| nothing muted before.
+|
+| This is a SECOND, independent bug from the original race, and the RIGHT fix folds both
+| into one: make `SHADOW` (`pre`'s own independently-maintained, per-frame, per-track mute
+| set -- NEVER read by `relcut`'s old logic at all) the ONLY thing that decides whether a
+| track's dry signal gets force-muted. `REL_STATE` still matters, but ONLY for reproducing
+| STOCK's own pre-existing natural-release clamp for a track that is genuinely NOT muted --
+| exactly what un-modified stock already does, byte for byte. This also means the GLOBAL
+| GATE check disappears entirely: `pre` (hook 1) already clears `SHADOW` to 0 every single
+| frame whenever GATE is not OT+FX/DT ("OT (or unknown): stock; keep the shadow clean for
+| later" -- hook 1's own header), so a `SHADOW`-only design AUTOMATICALLY reproduces true
+| stock behaviour in GATE=0 with no separate check needed.
+|
+| Mechanism, read directly off this loop's own disassembly (`m68k-elf-objdump -m
+| m68k:cfv4e`):
+|
+|   4000d0ba:  mvzb 0x8000184a,%d0   | REL_STATE, loaded ONCE per frame
+|   4000d0c0:  asrl #1,%d0          | this track's bit -> Carry, OUTSIDE this detour
+|   4000d0c2:  bccs 0x4000d0d6      | stock: carry CLEAR -> skip; carry SET -> old relcut
+|   4000d0d6:  lea %a0@(64),%a0     | shared tail: next track (+0x40), loop back
+|
+| New decision tree, entirely SHADOW-driven:
+|   SHADOW bit SET (genuinely muted, regardless of REL_STATE) -> force +2/+43/+4 all to 0.
+|   SHADOW bit CLEAR (genuinely not muted):
+|     REL_STATE bit was CLEAR (not releasing either) -> do nothing, exact stock skip.
+|     REL_STATE bit was SET (genuine natural release)  -> replicate STOCK's OWN original
+|       behaviour exactly: zero the dry word, CLAMP (not zero) the route word to 6144.
+|
+| Track index from %a0, as before: `((%a0 - 0x80000110) >> 6) & 7`. `%d3` confirmed free
+| (hook 8's and hook 11's own header comments). `%d4` ALSO confirmed free this session:
+| scanned forward to 0x4000d124 (`moveb 0x8000184b,%d4`) with zero reads of %d4 anywhere in
+| between -- a fresh load before any use, proving no live value crosses this detour in it.
+| `scs %d4` captures REL_STATE's own carry bit into %d4 (0xFF/0x00) BEFORE the SHADOW-index
+| arithmetic gets a chance to disturb the flags -- `scs`/`scc` read condition codes without
+| writing them, so this is safe where a plain conditional branch immediately after would
+| not be. Branches on `btst`'s own Z flag immediately, before restoring %d3 (the same
+| flag-clobber class of bug relcut's own header comment already documents once: `move.l
+| (sp)+,%d3` sets N/Z from the popped value and clears V/C).
+|
+| `relcut`'s OWN body (hook 8, below) is now DEAD CODE -- no longer reached by anything,
+| stock or this hook. Left in place, unreferenced, per this project's own convention for
+| superseded-but-documented attempts (see hook 11's `relstate_or`) rather than deleted.
+|
+| REPLACES hook 8's own standalone stock-side detour, same as the part-8 version: span
+| 0x4000d0c2..0x4000d0d6 (20 B), expected-bytes = relcut's stock string with `6412`
+| prepended -- see the build script's PATCHES list.
+|
+| VALIDATED this session (NOTES.md "part 10"): (1) unmuted, GATE=0, byte-identical to
+| stock (SHADOW==0 always, untouched); (2) unmuted, GATE=1, a genuinely-not-muted track
+| with real content -- the route word is CLAMPED to 6144 on natural release, matching true
+| stock, NOT zeroed (the bug this version fixes); (3) muted, multi-retrig, both pings, both
+| modes -- the original race stays closed (SHADOW catches the momentary wrong REL_STATE
+| answer exactly as the part-8 version did).
+    .global relstate_shadow
+relstate_shadow:
+    scs     %d4                         | %d4.b = 0xff if REL_STATE's bit was SET (carry),
+                                         | else 0x00 -- captured before anything else can
+                                         | touch the flags
+    move.l  %d3,-(%sp)
+    move.l  %a0,%d3
+    sub.l   #0x80000110,%d3
+    lsr.l   #6,%d3
+    and.l   #7,%d3
+    btst    %d3,SHADOW                  | Z := this track's SHADOW bit is clear (not muted)?
+    beq     rs_not_muted                | branch WHILE Z is still live -- see the flag-
+                                         | clobber warning above; do not restore %d3 first
+    move.l  (%sp)+,%d3
+    | SHADOW says genuinely muted -- force full mute regardless of REL_STATE's own bit
+    clr.w   (2,%a0)
+    clr.b   (43,%a0)
+    clr.w   (4,%a0)
+    jmp     RC_BACK                     | (jmp, not bra: RC_BACK is the far-away stock
+                                         | address, out of any PC-relative branch's range)
+rs_not_muted:
+    move.l  (%sp)+,%d3
+    tst.b   %d4                         | was REL_STATE's own bit actually set?
+    bne     rs_release                  | yes -> local label; RC_BACK is too far for `beq`
+    jmp     RC_BACK                     | no -> genuinely idle track, exact stock skip
+rs_release:
+    | genuinely NOT muted, but in natural release -- replicate STOCK's ORIGINAL behaviour:
+    | zero the dry word, CLAMP (never zero) the route word -- this is what un-modified
+    | stock already does and must keep doing regardless of MUTE MODE.
+    clr.w   (2,%a0)
+    clr.b   (43,%a0)
+    cmp.w   (4,%a0),%d2
+    bgt     rs_clamp_done
+    move.w  %d2,(4,%a0)
+rs_clamp_done:
+    jmp     RC_BACK
+
 | ============================ hook 8: 0x4000d0c4 (the ASYMMETRIC L/R MUTE) ==============
+| ⚠ DEAD CODE as of Session 58 continued yet again, part 10 -- hook 13 (relstate_shadow)
+| above no longer jumps here at all; its own SHADOW-driven logic replicates what this hook
+| was trying to do (and fixes the bug this hook's GATE-only check had: it never checked
+| whether the SPECIFIC track was actually muted, so it zeroed +4 for ANY track's ordinary
+| natural release once MUTE MODE was on at all -- see hook 13's header for the full story
+| and NOTES.md "part 10"). Left in place, unreferenced, per this project's convention for
+| superseded-but-documented attempts rather than deleted -- do not re-wire this in as-is.
 | Session 58 -- corrected by a hardware report.  The stock per-track loop at
 | 0x4000d0a4..0x4000d0dc, driven by REL_STATE (0x8000184a -- the byte `pre` maintains):
 |
