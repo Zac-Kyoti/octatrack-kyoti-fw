@@ -123,6 +123,9 @@ PATCHES = [
      [(0x400a4006, "dj_a", "4a398000667e",     6, "jsr"),
       (0x400a42fa, "dj_b", "203c00008e56",     6, "jsr"),
       (0x400a4840, "dj_c", "420013c0800065b6", 8, "jsr"),
+      (0x400a4220, "dj_scaleix_fix", "13c28000663d", 6, "jsr"),
+      (0x400a3fe4, "dj_abstick", "13c0800065b6", 6, "jsr"),
+      (0x400a4d36, "dj_pertrack_fix", "4ab946107568", 6, "jsr"),
       (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),
 ]
 
@@ -233,9 +236,18 @@ def main():
         v3_touched = {i for i in range(len(v3b)) if v3b[i] != stock[i]}
         v4_touched = {i for i in range(len(img)) if img[i] != stock[i]}
         cave = set(range(o(0x400d7400), o(0x400d7c3c)))
+        # Session 70 (5th/7th/9th pass): new, deliberate hook sites -- SCALE_IX self-heal
+        # (Hook D), the absolute-tick counter (Hook E), and the per-track resume fix
+        # (Hook F) -- none present in v3 at all. Not a regression; expected divergence.
+        SCALEIX_FIX_SITE = 0x400a4220
+        ABSTICK_SITE = 0x400a3fe4
+        PERTRACK_FIX_SITE = 0x400a4d36
         want = (v3_touched - set(range(o(STOCK_YES_HANDLER), o(STOCK_YES_HANDLER) + 8))) \
             | {i for i in range(ro + 2, ro + 6) if img[i] != stock[i]} \
-            | {i for i in range(o(PTN_LAYER_REL), o(PTN_LAYER_REL) + 6) if img[i] != stock[i]}
+            | {i for i in range(o(PTN_LAYER_REL), o(PTN_LAYER_REL) + 6) if img[i] != stock[i]} \
+            | {i for i in range(o(SCALEIX_FIX_SITE), o(SCALEIX_FIX_SITE) + 6) if img[i] != stock[i]} \
+            | {i for i in range(o(ABSTICK_SITE), o(ABSTICK_SITE) + 6) if img[i] != stock[i]} \
+            | {i for i in range(o(PERTRACK_FIX_SITE), o(PERTRACK_FIX_SITE) + 6) if img[i] != stock[i]}
         stray = [i for i in (v4_touched ^ want) if i not in cave]
         print(f"  vs mainos_directjump_v3.bin: v4 touches {len(v4_touched)} vs v3 {len(v3_touched)}; "
               f"{len(stray)} unexpected outside the cave")
