@@ -69,6 +69,20 @@ CNTDN_TBL = 0x800065c3      # DAT_800065c3[t] -- NOTES.md L3025/3030-3032: decre
                             # (0x800065b6); grep confirms it never writes 0x800065c3 or
                             # 0x800065e4/f4 at all.
 REFILL_TBL = 0x800064d0     # DAT_800064d0[t] -- refills CNTDN_TBL after a fire (L3025)
+# Session 70 14th pass: the four other per-track pointer arrays FUN_400a1eea's own
+# SCALE-wrap-check (`if (DAT_800065b6=='\0') { ... uVar25 % iVar15 == 0/1 ... }`) writes
+# alongside GATE_TBL/CNTDN_TBL, confirmed from GhidraDirectJump7's outer-loop pointer
+# setup (pcStack000000a8 IS &DAT_800065c3 == CNTDN_TBL; already watched above). Track 0
+# resolves its own `iVar15` (the length these compares are against) via a DIFFERENT code
+# path than tracks 1-7 (reads pattern-blob fixed offsets `+0x50`/`+0x8e53` under a
+# SCALE_MODE flag at `+0x8e55`, instead of tracks 1-7's shared `DAT_400d80dc[selector*4]`
+# lookup) -- watching these four across the same switch, split by track 0 vs 1-7, is
+# this pass's attempt to find exactly where the numeric divergence into DAT_80001904
+# (feeding the real audible live-nibble, per the 12th/13th passes) first appears.
+LEN_AC = 0x800065d3          # *pcStack000000ac[t]
+LEN_9C = 0x8000663e          # *pcStack0000009c[t]
+LEN_94 = 0x800064f0          # *pcStack00000094[t]
+LEN_A0 = 0x800064e0          # *puStack000000a0[t]
 LIVE_NIBBLE_IN = 0x80001904  # DAT_80001904[track + step*8], int x 128 -- Session 70 12th
                               # pass (GhidraDirectJump7.java): written by FUN_400a1eea from
                               # bank/pattern-selection state (DAT_800065bd/be/c1/c2) + a
@@ -191,6 +205,10 @@ def run_one(er, a, dj_on):
                                                  # LAB_400a4ba0's own refill-from-quotient write,
                                                  # gated on CNTDN_TBL[t] hitting 0 (Ghidra-traced
                                                  # this session, GhidraDirectJump7.java)
+    len_ac_writes = make_watch(LEN_AC, 8)
+    len_9c_writes = make_watch(LEN_9C, 8)
+    len_94_writes = make_watch(LEN_94, 8)
+    len_a0_writes = make_watch(LEN_A0, 8)
     rt.uc.ctl_flush_tb()
 
     # NOTE (this session): press_play_live() -- through the real PLAY key
@@ -284,6 +302,15 @@ def run_one(er, a, dj_on):
           f"{len(refill_writes)} total:")
     for fr, task, pc, addr, size, val in refill_writes:
         print(f"   frame {fr:.1f}  [{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
+
+    for name, addr, log in (("LEN_AC/0x800065d3", LEN_AC, len_ac_writes),
+                             ("LEN_9C/0x8000663e", LEN_9C, len_9c_writes),
+                             ("LEN_94/0x800064f0", LEN_94, len_94_writes),
+                             ("LEN_A0/0x800064e0", LEN_A0, len_a0_writes)):
+        print(f"\n{name} writes, {len(log)} total:")
+        for fr, task, pc, a, size, val in log:
+            track = a - addr
+            print(f"   frame {fr:.1f}  track {track}  [{a:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
 
     return dict(fires=fires, fires_before_poke=fires_before_poke,
                 phase_writes=phase_writes, gate_writes=gate_writes,

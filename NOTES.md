@@ -15891,6 +15891,101 @@ mid-pattern the way DIRECT JUMP does), the fix is structural: whichever hook for
 early commit needs to also perform whatever track-0-specific step stock's own natural
 CHAIN-AFTER commit path would have done first.
 
+## Session 70, 14th pass (2026-09-18, `wip`) — DIRECT JUMP: followed the 13th pass's own
+next step (trace which write reaches `FUN_400a1eea`'s track-0 branch differently) with
+FOUR more targeted memory watches. Two came back clean -- a real, useful negative result,
+not a dead end -- and the exercise surfaced a methodological trap worth flagging before
+any more address-level watches get added: **this project's own byte-starved memory layout
+reuses single addresses for unrelated purposes at different code sites, and a bare
+address watch cannot tell them apart.**
+
+### Also connects to a MUCH older, independent finding: this exact asymmetry was already
+flagged once before, for a different bug
+
+Re-reading `NOTES.md` around the `TRIGQUANT`/manual-trig-key investigation (an early
+session, `GhidraResolve26`) turned up the **identical** `if (trackIndex * stride == 0) {
+...different path... } else { ...DAT_400d80dc[selector*4] lookup...}` shape -- same
+structure, same `DAT_400d80dc` table, same `+0x8e55`-gated fallback -- but in
+`FUN_400a1eea`'s MIDI-track loop (`0x8b0` stride, `+0x48fe` DIRECT/quantize-index byte),
+not the audio-track loop (`0x91a` stride, `+0x56`) the 12th/13th passes found. That
+session flagged "track 0 is handled asymmetrically from tracks 1-7" as "a very plausible
+bug site" for ITS OWN (unrelated, MIDI DIRECT/TRIGQUANT) investigation and left it
+unresolved, years before this session ever looked at DIRECT JUMP. **Two independent bug
+hunts, on two different per-track loops inside the SAME function, have now separately
+flagged the identical structural asymmetry.** That raises confidence this is a real,
+load-bearing quirk of how Elektron's own firmware resolves per-track SCALE/quantize
+length -- not an artifact of Ghidra's decompilation -- while still leaving open whether
+it is itself buggy in stock, or only becomes audible once something (DIRECT JUMP; whatever
+the older session's repro was) forces a boundary condition stock's own design never
+expected to be exercised off a natural CHAIN-AFTER/step boundary.
+
+### The four new watches -- `DAT_800065d3`/`DAT_8000663e`/`DAT_800064f0`/`DAT_800064e0`,
+the per-track bytes the SCALE-wrap-check itself writes
+
+Traced (`GhidraDirectJump7.java`'s decompile, re-read) the outer per-track pointer setup
+in `FUN_400a1eea`: `pcStack000000ac`=`&DAT_800065d3`, `pcStack0000009c`=`&DAT_8000663e`,
+`pcStack00000094`=`&DAT_800064f0`, `puStack000000a0`=`&DAT_800064e0` -- four more
+per-track byte arrays the SCALE-wrap-check (`if (DAT_800065b6=='\0') { ... if (0<iVar15)
+{ if (uVar25%iVar15==0/1) {...} } }`) writes when it fires, alongside `GATE_TBL` and
+`CNTDN_TBL` (already known). Added watches for all four to
+`tools/emu_directjump_dynamic.py` and reran the same DJ_MODE=1-vs-0 switch, track-by-track.
+
+**Result: `DAT_800065d3` (`LEN_AC`) and `DAT_8000663e` (`LEN_9C`) are UNIFORM across all
+8 tracks at every observed write, including the switch tick (frame 461) -- both in the
+DJ_MODE=1 and the DJ_MODE=0 run.** `DAT_8000663e` stays flat at `0x2` for every track at
+every pattern-loop boundary; `DAT_800065d3` writes `0x0` uniformly at frame 0 and frame
+461. **This specific narrow hypothesis -- that these two particular compare-bytes are
+where track 0's asymmetric length-resolution first shows up as a numeric difference from
+tracks 1-7 -- is not supported by this measurement, in this demo project's configuration.**
+Recorded as a real negative result, not silently dropped: it means either (a) this demo
+project's SCALE settings are uniform/default across tracks, so track 0's special code path
+and tracks 1-7's shared-table path happen to resolve to the same effective length here
+(the asymmetry exists in the CODE but isn't PhD numerically exercised by this particular
+project), or (b) the divergence into `DAT_80001904` (still measured, still real, per the
+13th pass) travels through a different channel than these four bytes.
+
+### The trap this surfaced: `DAT_800065d3`'s frame-461 write is NOT from the code this
+pass was trying to watch
+
+The frame-461 write to `LEN_AC`/`DAT_800065d3` logged at pc `0x400a49aa` -- a PC well past
+the SCALE-wrap-check body and the commit block (`0x400a44xx`-ish), inside the same
+LATE region as the countdown-decrement tail (`0x400a49c6`/`0x400a4bc6`, 13th pass). **This
+means `DAT_800065d3` is almost certainly reused for a second, unrelated purpose at a
+different code site** -- the same pattern this project's own KB has documented
+repeatedly elsewhere (byte-starved firmware reusing addresses across logically distinct
+arrays). A bare address watch cannot distinguish "the SCALE-wrap-check's own write" from
+"some unrelated late-function write that happens to land on the same byte", so a
+"uniform, no divergence" result from an address watch is weaker evidence than it looks
+without also checking the PC of every hit against the specific code region under
+suspicion -- which this pass did do (and that is exactly how the reused-address problem
+was caught here), but it means the NEGATIVE result above should be read as "no divergence
+from the specific write sites checked", not "no divergence anywhere in these arrays,
+ever."
+
+### What's next, concretely, and why address watches alone won't finish this
+
+The clean, decisive part of the causal chain (12th/13th passes) still stands: track 0's
+`iVar15` (its own SCALE length) resolves via a structurally different formula that reads
+fixed pattern-blob offsets under a `+0x8e55` flag, instead of tracks 1-7's shared
+`DAT_400d80dc[selector]` lookup; `DAT_80001904[track]` (feeding the real audible
+live-nibble, per `refs/octabam`) measurably diverges for track 0, and only under a real
+DIRECT JUMP switch. What is NOT yet pinned down is the exact intermediate step connecting
+the two, and this pass's own trap (byte reuse) shows why: **the next instrument needs to
+be PC-qualified, not just address-qualified** -- a hook on the specific instructions
+inside the SCALE-wrap-check's track-0 branch (`GhidraDirectJump7.java`'s decompile gives
+the C; the matching PCs need pulling from the same disassembly) reading the actual
+register/local values (`cVar12`, `iVar15`) at the moment they're computed for track 0 vs.
+track 1, across the same switch, rather than watching wherever they eventually get stored.
+Not yet built. `tools/emu_directjump_dynamic.py`'s existing `--watch-pc`-style hooks
+(`rt.uc.hook_add(UC_HOOK_CODE, ..., begin=PC, end=PC)`, already used for `TRIG_FIRE`) are
+the right primitive -- this just needs the specific PCs identified and instrumented, not
+a new mechanism.
+
+### What's committed
+
+`tools/emu_directjump_dynamic.py` (the four new watches) and this NOTES.md entry. No fix,
+no flash -- the causal chain is closer but not closed.
+
 ## Session 75 (2026-09-18/19, `wip`) — SIDECHAIN3: user flashed the n7 fix (Session 74) --
 ringing PERSISTED. Found and BUILT a second, independent fix: `scdet` genuinely runs TWICE
 on a split-block frame (proven, not just theorized -- re-reading the dispatcher's id-lookup
