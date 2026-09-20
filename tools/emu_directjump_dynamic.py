@@ -117,6 +117,13 @@ def main(argv):
     ap.add_argument("--pattern-delta", type=int, default=1,
                      help="new pattern = (current active pattern + this) -- same bank")
     ap.add_argument("--bank", type=int, default=None)
+    ap.add_argument("--groundtruth", action="store_true",
+                     help="Session 78: also run the confound-free ground-truth "
+                          "comparison (target pattern selected directly from the "
+                          "start, no poke) and diff its DAT_80001904 table against "
+                          "DJ_MODE=1's post-switch table. Skips the DJ_MODE=0 run "
+                          "(shown this session to never actually switch, so it "
+                          "cannot answer this question -- see NOTES.md Session 78).")
     a = ap.parse_args(argv)
 
     if not OCTA_RTOS.exists():
@@ -142,6 +149,15 @@ def main(argv):
     if not ok:
         sys.exit("refusing to run on a stock (un-fixed) Unicorn EMAC: " + detail)
     print(f"EMAC       : fixed -- {detail}")
+
+    if a.groundtruth:
+        print(f"\n{'=' * 70}\nDJ_MODE=1 (DIRECT JUMP ON)\n{'=' * 70}")
+        dj_result = run_one(er, a, True)
+        print(f"\n{'=' * 70}\nground truth (target pattern selected directly, no poke, "
+              f"run until STEP={dj_result['post_step']})\n{'=' * 70}")
+        gt_result = run_groundtruth(er, a, dj_result["new_pat"], dj_result["post_step"])
+        compare_groundtruth(dj_result, gt_result, dj_result["new_pat"])
+        return 0
 
     for cond, dj_on in (("DJ_MODE=1 (DIRECT JUMP ON)", True), ("DJ_MODE=0 (stock reference)", False)):
         print(f"\n{'=' * 70}\n{cond}\n{'=' * 70}")
@@ -268,6 +284,7 @@ def run_one(er, a, dj_on):
           f"frame={rt.frame_count} total-fires={len(fires)}")
     post_bank = rt.uc.mem_read(ACT_BANK, 1)[0]
     post_pat = rt.uc.mem_read(ACT_PAT, 1)[0]
+    post_step = rt.uc.mem_read(STEP, 1)[0]
     post_blob = 0x400e21e0 + post_bank * 0x9b340 + post_pat * 0x8ed8
     print("scale-selector byte (blob[track*0x91a+0x56]) per track: " +
           " ".join(f"t{t}={rt.uc.mem_read(post_blob + t * 0x91a + 0x56, 1)[0]:#04x}" for t in range(8)))
@@ -327,7 +344,107 @@ def run_one(er, a, dj_on):
     return dict(fires=fires, fires_before_poke=fires_before_poke,
                 phase_writes=phase_writes, gate_writes=gate_writes,
                 cntdn_writes=cntdn_writes, step_audio_writes=step_audio_writes,
-                refill_writes=refill_writes)
+                refill_writes=refill_writes, live_nibble_post=live_nibble_post,
+                new_pat=new_pat, post_bank=post_bank, post_step=post_step)
+
+
+def run_groundtruth(er, a, target_pattern, target_step):
+    """Session 78: the DJ-vs-stock-poke comparison in run_one() turned out to be
+    confounded -- a raw PEND_PAT/PEND_BANK poke with DJ_MODE=0 never actually
+    reaches stock's own switch-commit code path at all (0x400a4c2e's gate write
+    never fires, ACT_PAT never changes, across 2+ full pattern loops post-poke --
+    see NOTES.md Session 78). So "DJ_MODE=1 vs DJ_MODE=0" cannot answer pass 15's
+    question (does DIRECT JUMP's forced-early commit introduce a discontinuity
+    into DAT_80001904 vs what that table looks like for an honestly-arrived-at
+    pattern?).
+
+    First attempt at a fix here compared a fixed-frame-count snapshot (`target_pattern`
+    selected directly, run `frames_before` frames, snapshot) against DJ_MODE=1's
+    post-switch snapshot -- ALSO confounded, just differently: it caught the two
+    runs at different STEP values (1 vs 2), and the table's group-0/group-4
+    entries turned out NOT to be step-independent after all (they differ between
+    a genuinely fresh pattern0 pre-switch read and a settled pattern1 read at the
+    same step count) -- contradicting this function's own original docstring
+    claim that the table is purely a function of bank/pattern selection. Retracted;
+    see NOTES.md Session 78.
+
+    Fixed version: select `target_pattern` directly (no poke, no DIRECT JUMP
+    involved at all) and run until the STEP register FIRST reads `target_step`
+    -- the same value DJ_MODE=1's commit resumed at -- then snapshot immediately.
+    This matches the one variable (current step) the table's own indexing
+    (`DAT_80001904[track + step*8]`) says it plausibly depends on, without
+    relying on frame-count arithmetic or unverified claims about the table's
+    update semantics.
+    """
+    card, staged_name = er.stage_project(a.project, "OCTABAM", None,
+                                          tree="out/_emu_dj_tree_groundtruth")
+    r, rt = er.attach(str(IMAGE), card,
+                       ips=3990.0, pit_clock_hz=264e6, quantum=4096, step_quantum=32, tick=True)
+
+    if not rt.gate_m6a()[0]:
+        rt.run(ms=1000, until=lambda x: x.gate_m6a()[0])
+    mounted, posted, saved_bank, final_bank, elapsed = rt.load_project_live("OCTABAM", staged_name, run_ms=6000)
+    bank = a.bank if a.bank is not None else saved_bank
+    if bank is not None and final_bank != bank:
+        final_bank = rt.select_bank_live(bank)
+    seq_bank, seq_pattern = rt.seq_select_live(final_bank, target_pattern)
+    rt.internal_clock()
+    rt.frame = True
+    rt.next_frame = rt.sample + er.FRAME_PERIOD
+    rt.exact_clock()
+    # DJ_MODE left at its image default (0) -- this run never touches any
+    # DIRECT JUMP hook at all, by construction (no poke, target already active).
+
+    rt.start_transport_live()
+    print(f"groundtruth: selected bank={final_bank} pattern={target_pattern} directly, "
+          f"no poke, DJ_MODE untouched -- running until STEP first reads "
+          f"{target_step} (matching DJ_MODE=1's commit)")
+
+    safety_cap = rt.frame_count + 1 + max(a.frames_before, 2000)
+    rt.run(ms=2000.0 * er.FRAME_PERIOD / er.SAMPLE_HZ * 1000.0 * 5 + 10000,
+           until=lambda x: x.uc.mem_read(STEP, 1)[0] == target_step
+                           or x.frame_count >= safety_cap)
+
+    cur_bank = rt.uc.mem_read(ACT_BANK, 1)[0]
+    cur_pat = rt.uc.mem_read(ACT_PAT, 1)[0]
+    cur_step = rt.uc.mem_read(STEP, 1)[0]
+    live_nibble = rt.uc.mem_read(LIVE_NIBBLE_IN, 256)
+    reached = cur_step == target_step
+    print(f"settled    : active bank={cur_bank} pattern={cur_pat} step={cur_step} "
+          f"frame={rt.frame_count} (target step {'REACHED' if reached else 'NOT REACHED -- hit safety cap'})")
+    print(f"live-nibble-in (0x{LIVE_NIBBLE_IN:x}, 64 x u32): {live_nibble.hex()}")
+    return dict(bank=cur_bank, pattern=cur_pat, step=cur_step, live_nibble=live_nibble,
+                reached=reached)
+
+
+def compare_groundtruth(dj_result, gt_result, target_pattern):
+    print(f"\n{'=' * 70}\nDJ-commit vs ground-truth DAT_80001904 comparison "
+          f"(target pattern {target_pattern}, both sampled at STEP={dj_result['post_step']})"
+          f"\n{'=' * 70}")
+    if not gt_result["reached"]:
+        print("WARNING: ground-truth run never reached the target STEP (hit its "
+              "safety cap) -- this comparison is NOT valid, do not draw conclusions "
+              "from it.")
+    dj_tbl = dj_result["live_nibble_post"]
+    gt_tbl = gt_result["live_nibble"]
+    diffs = [i for i in range(64) if dj_tbl[i * 4:i * 4 + 4] != gt_tbl[i * 4:i * 4 + 4]]
+    if not diffs:
+        print("IDENTICAL across all 64 slots at matched STEP -- no evidence DIRECT "
+              "JUMP's forced-early commit disturbs this table, at least at the one "
+              "step number checked. NOTE: this checks the FIRST time the ground-truth "
+              "run reaches this step (one lap in); if DAT_80001904 depends on more "
+              "than current step number (e.g. lap count, ticks-since-selection), a "
+              "match at this one sample point does not rule that out.")
+        return
+    print(f"{len(diffs)} of 64 slots differ, AT MATCHED STEP -- narrows the confound "
+          f"considerably vs the frame-count-matched attempt, but does not by itself "
+          f"rule out a lap-count/ticks-since-selection dependency (see note above). "
+          f"Differing slots:")
+    for i in diffs:
+        dj_v = int.from_bytes(dj_tbl[i * 4:i * 4 + 4], "big")
+        gt_v = int.from_bytes(gt_tbl[i * 4:i * 4 + 4], "big")
+        print(f"   slot {i:2d} (track {i % 8}, group {i // 8}): "
+              f"DJ-commit={dj_v:#010x}  ground-truth={gt_v:#010x}")
 
 
 if __name__ == "__main__":

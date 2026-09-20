@@ -19179,3 +19179,126 @@ did not close it. Given this thread's own repeated pattern of promising
 leads that didn't reproduce (part 11's fresh_bind leak, part 16's blocked-
 cleanup theory), treat `fb_caller_93ec0`/`96ad4` as unconfirmed until the
 dynamic test above actually shows a hit inside a real muted window.
+
+## Session 79 (2026-09-20, `wip`) — DIRECT JUMP resumed: pass 15's own recommended DJ-vs-stock
+comparison run for the first time — the "DJ_MODE=0" arm turns out to be a no-op (a raw
+`PEND_PAT` poke never reaches stock's own switch-commit code at all), so a step-matched
+ground-truth test was built instead — and it shows a REAL, controlled discontinuity in
+`DAT_80001904` between a DIRECT-JUMP-committed step and an honestly-arrived-at same step,
+for the first time giving pass 11's "phase, not index" LED-test finding a register-level
+anchor. Root cause NOT yet found.
+
+Continuing directly from the 15th pass's own unclosed handoff (2026-09-18): "the next
+session needs the properly-controlled same-track DJ-vs-stock comparison... before spending
+more time in `FUN_400a1eea`." Independently arrived at the same next step this session via a
+side project (`~/Documents/ar-kyoti-fw`, a from-scratch RE of the Analog Rytm's own DIRECT
+JUMP-equivalent, undertaken specifically to look for invariants this project's implementation
+might be missing) — its atomic-paired-write / fresh-per-request-countdown-recompute framing
+is what prompted picking this exact thread back up; see `ar-kyoti-fw/MECHANISM.md` and its
+`NOTES.md` "Session 7, continued" for that side comparison, not duplicated here.
+
+### 1. `tools/emu_directjump_dynamic.py`'s existing DJ_MODE=1-vs-0 comparison is confounded
+### — the stock arm never actually switches  [MEASURED]
+
+Ran the tool as-is (`python3 tools/emu_directjump_dynamic.py`, defaults, `out/mainos_
+directjump_v4.bin`, "OT DEMO" project). Both conditions poke `PEND_PAT`/`PEND_BANK` the same
+way at frame 401. In the `DJ_MODE=1` run, the commit fires at frame 461 as expected (matching
+every prior session's timing). In the `DJ_MODE=0` run, **`ACT_PAT` never leaves pattern 0 for
+the rest of the run (1101 frames, two full pattern-0 loops post-poke)** — confirmed by four
+independent signals all agreeing: `ACT_PAT` stays 0; `0x80006500`'s commit-time write (PC
+`0x400a4c2e`) never fires a second time (only the frame-0 init write); `0x800065e4`
+(per-track step/quotient) gets zero writes; `LEN_94` (`0x800064f0`) just keeps cycling
+pattern 0's own 6 steps with no discontinuity. **A raw `PEND_PAT`/`PEND_BANK` poke, without
+whatever else a real `[PTN]`+trig press sets, does not reach stock's own queued-switch commit
+path at all** — this project's entire DIRECT JUMP dynamic-testing method (Sessions 67-70) has
+only ever exercised `dj_a`/`dj_c`'s own direct reads of these two globals, never stock's own
+natural CHAIN-AFTER-style commit. This means every "DJ_MODE=1 vs DJ_MODE=0" comparison this
+whole thread has ever run (including the 12th/13th-pass `DAT_80001904` cross-track snapshots)
+compared "switched early" against "never switched at all," not against a real stock switch —
+a real, previously unnoticed methodological gap, not fixed this session (finding what a real
+button press sets besides `PEND_PAT`/`PEND_BANK` is now a standing open item, see NEXT).
+
+### 2. Built a step-matched ground-truth comparison instead — sidesteps the confound entirely
+### [tool change, `tools/emu_directjump_dynamic.py`]
+
+Rather than chase what a real stock switch needs, sidestepped the whole question: added
+`run_groundtruth()` + `--groundtruth` + `compare_groundtruth()`. Selects the DIRECT JUMP
+target pattern **directly** as the active pattern from the very start of playback — no poke,
+no switch, no DIRECT JUMP hook touched at all — runs until the `STEP` register **first**
+reads the same value DIRECT JUMP's own commit resumed at, then snapshots `DAT_80001904`
+(the table `refs/octabam`'s own RE ties to the real audible live-nibble computation,
+Session 70 12th pass) for comparison against DIRECT JUMP's own post-commit snapshot of the
+same table, for the same target pattern.
+
+First attempt (frame-count-matched instead of step-matched) was itself confounded and is
+retracted in the tool's own docstring: it compared the two runs at DIFFERENT `STEP` values
+(1 vs 2) and found 20/64 slots differing — meaningless on its own, since it never established
+this table is step-independent (Session 70 12th pass's own comment claiming that was never
+actually verified, just carried forward as an assumption; retracted here).
+
+**Step-matched result**: both runs land on `STEP=2` for pattern 1 (DJ-commit at frame 461
+main run; ground-truth at frame 59, its own first natural arrival at step 2). **The SAME 20
+of 64 `DAT_80001904` slots still differ**, at genuinely matched `STEP`:
+
+```
+slots 0-7, 32-39 (all 8 tracks, groups 0 and 4): DJ-commit=0x035092b0  ground-truth=0x00f2f3a0
+slot 14 (track 6, group 1):                       DJ-commit=0x025e5310  ground-truth=0x00000000
+slot 56 (track 0, group 7):                        DJ-commit=0x025e5310  ground-truth=0x00000000
+slot 59 (track 3, group 7):                        DJ-commit=0x03c9b280  ground-truth=0x00000000
+slot 60 (track 4, group 7):                        DJ-commit=0x02d772e0  ground-truth=0x00000000
+```
+
+This is a real, controlled discontinuity: same target pattern, same `STEP` value, one arrived
+at via DIRECT JUMP's forced commit, one via honest natural playback — and the sequencer's own
+audible-timing input table disagrees between them. This is the first time in this project's
+entire multi-session DIRECT JUMP history that a `DAT_80001904` divergence has been isolated
+from every confound raised against it so far (not a poke-vs-no-poke artifact per this
+session's point 1; not a cross-track snapshot artifact per the 15th pass's own retraction;
+not a frame-count/lap-count artifact per this session's own first, retracted attempt).
+
+**Not yet established** (flagged, not claimed): which register(s) actually drive groups 0/4's
+step-dependent value, so the specific write DIRECT JUMP's commit fails to make is not yet
+identified. Working hypothesis, **[INFERRED, not measured]** — prompted directly by the
+`ar-kyoti-fw` comparison's framing (does this mechanism have an equivalent to AR's atomic
+paired write / fresh-per-request recompute for ALL derived state, not just the pieces each
+hook explicitly targets): DIRECT JUMP's commit forcibly writes `STEP`/`REFILL_TBL`/`SCALE_IX`
+via `G_ABSTICK`-relative math (ticks since **transport start**), but `FUN_400a1eea` may derive
+groups 0/4's value from something scoped to ticks/laps since **this pattern was selected**
+(a per-activation-relative counter, reset to 0 whenever `ACT_PAT` changes) that no DIRECT
+JUMP hook touches at all — which would produce exactly this shape of result: `STEP` correct,
+some other per-pattern-relative phase input still reflecting the wrong baseline. Not
+confirmed; `FUN_400a1eea`'s actual read set beyond `DAT_800065bd/be/c1/c2` +
+`DAT_80006624` (the 12th pass's own characterization, itself not exhaustively verified) has
+not been traced this session.
+
+### NEXT for this thread
+
+1. **Trace `FUN_400a1eea`'s actual inputs for the groups-0/4 computation** (full disassembly,
+   not decompiled C — this function has already produced one decompiler-misreading retraction
+   this thread, 15th pass) to find what specifically differs between the two runs at matched
+   `STEP`. Look specifically for anything resembling a per-pattern-activation counter/tick
+   count distinct from `G_ABSTICK`/`STEP`/`DAT_800065c3` (all already confirmed consistent
+   between the two conditions via this and prior sessions' watches).
+2. Once found: check whether DIRECT JUMP's commit (`dj_c`/Hook D/E/F) can reset or resync it
+   the same way `SCALE_IX`'s self-heal (Hook D) already does for a different piece of state —
+   i.e. whether this is fixable with the same shape of fix already proven to work for
+   `SCALE_IX`, or needs something new.
+3. Separately, lower priority: find what a real `[PTN]`+trig press sets besides `PEND_PAT`/
+   `PEND_BANK` (point 1 above) — needed before any future `DJ_MODE=1 vs DJ_MODE=0` comparison
+   in this codebase can be trusted; every one run before this session (and the ones this
+   session ran before switching to the ground-truth method) should be treated as "vs. no
+   switch," not "vs. a real stock switch."
+4. Slots 56/59/60 (group 7) behave differently from the uniform groups 0/4 pattern (DJ-commit
+   nonzero, ground-truth zero, not matching each other's magnitude either) — not investigated
+   this session, may be a second, separate signal or noise from these tracks' own per-track
+   config; worth a second look once point 1 is resolved.
+
+Tooling: `tools/emu_directjump_dynamic.py` gained `run_groundtruth()`/`--groundtruth`/
+`compare_groundtruth()` this session (committed). No hook/patch source changed — read-only
+dynamic analysis only, consistent with this thread's standing "no flash without dynamic
+proof" bar.
+
+**Housekeeping note**: `NOTES.md` was being concurrently appended to by another session
+while this entry was written (Section 13/trigless-lock work landed as "Session 78" during
+this same wall-clock window) — this entry is appended after that content and commits as its
+own separate hunk, not bundled with it.
