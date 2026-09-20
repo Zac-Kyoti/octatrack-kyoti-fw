@@ -105,3 +105,45 @@ kfl_lp_s:
     .asciz  "LP"
 kfl_hp_s:
     .asciz  "HP"
+
+| =====================================================================
+|  KEY list-widget trampoline  --  forces LFO TRIG's own B-callback
+|  (0x40046450, list-style "OFF"/"T1".."T4" renderer, see build_sidechain3.py's
+|  LIST_FN) into its simple single-centered-value mode instead of its
+|  3-row scroll-preview mode.
+|
+|  Disassembled 0x40046450 in full (Session 76 continued yet again (8)):
+|  its 5th stack argument (a caller-supplied flags word, read into %d5 at
+|  the callee's own +68(%sp) after its own -48 frame -- i.e. at +20(%sp)
+|  as seen from HERE, before that frame exists) has bit 1 as an internal
+|  mode switch:
+|      bit1 SET    -> measuretext once, drawtext the formatted value
+|                      (from the SAME buffer key_fmt already filled)
+|                      CENTERED on one line. Exactly "name + value", no
+|                      icon -- this is what real stock LFO TRIG must get
+|                      from its own (unlocated) caller.
+|      bit1 CLEAR  -> a second branch that formats/measures/draws THREE
+|                      separate rows (a fresh, uninitialised second
+|                      buffer at one of them) -- this is the garbage
+|                      3-line render COMPRESSOR's own generic per-slot
+|                      dispatcher drives us into, for reasons not fully
+|                      traced (its caller-context builder was not found
+|                      despite two dedicated passes -- background agent +
+|                      direct).
+|  Two dedicated tracing passes couldn't find WHERE that flags word
+|  originates, so rather than reproduce the caller's own setup, this
+|  trampoline just patches the one bit we need on the stack in place
+|  before falling straight into the real function -- same return address,
+|  same argument layout, LIST_FN re-reads its own (now-corrected) copy.
+|  d0/d1/a0/a1 scratch per the same convention key_fmt/kfilt_fmt rely on
+|  (LIST_FN's own %moveml saves d2-d6/a2-a5, not d0/d1/a0/a1).
+| =====================================================================
+    .equ LIST_FN, 0x40046450
+
+    .balign 2
+    .global key_list_fix
+key_list_fix:
+    move.l  20(%sp),%d0
+    or.l    #2,%d0
+    move.l  %d0,20(%sp)
+    jmp     LIST_FN

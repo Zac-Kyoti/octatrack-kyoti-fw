@@ -17961,3 +17961,389 @@ DSP logic with the SAME risk profile as this feature's two previously-failed
 declick attempts. Pending the user's call on whether to spend that risk given how
 mild the residual now is. Graininess (RMS floor idea, previous entry) also still
 pending user input, explicitly parked by the user this session.
+
+## Session 76 continued yet again (4, 2026-09-19, `wip`) -- SIDECHAIN3: HP->OFF
+declick implemented (a real, if modest, addition, as scoped in the prior entry's
+HANDOFF); a real (q2) short-immediate encoding bug caught by this session's own new
+test coverage before it ever mattered; KEY selector / KFLT cascade / MON declick
+discussed, none implemented yet. Not flashed.
+
+**Context:** previous entry's split-detector-offset fix was HARDWARE CONFIRMED
+(user flashed it -- the loud/quiet cycle alternation is gone). User then asked
+about the still-open HP->OFF click specifically: "would this be very complex? If
+simple, why don't we try it out?" Assessed as moderate (same class as the OFF->HP
+declick or KGN smoothing, not a redesign) and implemented.
+
+### The fix
+
+Mechanism (established in the prior entry, unchanged): OFF/bypass runs zero
+computation, so HP's last `in - tracker` output jumps straight to raw bypass
+output in one sample -- the jump is ~tracker's own last value (the low-frequency
+content HP had been subtracting, suddenly reappearing). Fix: fade that residual
+back OUT of x:$40 linearly over the first 8 samples of the FIRST OFF block after
+HP, then leave the rest as plain bypass -- `residual` is a single frozen value
+from HP's last completed block, decaying by a fixed `tracker>>3` step each
+sample, NOT a continuously-recomputed filter running in parallel with the dry
+signal (the thing that broke hardware twice before, KEY FLT header's own "WHY"
+comment) -- at every instant x:$40 is still exactly one coherent value.
+
+**One-shot, not every OFF block**: repurposed `r7+$18`'s nonzero value to ALSO
+remember which mode last ran (1=LP, 2=HP), since every existing reader only ever
+does `tst`/`bne` (zero-vs-nonzero, never cares which nonzero value) -- costs
+nothing to add. Gated the fade on BOTH ($18==2, last mode was HP) AND ($14's OLD
+value, read before this block overwrites it, was 0, meaning the PREVIOUS block
+was NOT also OFF) -- without the second check, the fade would incorrectly
+re-trigger every single block for as long as OFF is parked after leaving HP,
+subtracting an increasingly-stale residual against a NEW instant each time.
+LP->OFF needs none of this (already clean on hardware, per the prior entry) --
+excluded by the `==2` exact match. Preserves stereo width during the fade (each
+channel read/corrected independently against the same mono residual, unlike the
+main HP/LP loop's own deliberate mono mixdown).
+
+### A real bug caught by writing the test BEFORE trusting the design
+
+`move #1,a` / `move #2,a` (the new $18 mode-encoding write) hit the SAME (q2)
+"short-immediate is left-aligned" quirk this file already documents and already
+works around elsewhere (moncommit's own `$10000` MON-ON sentinel, top-of-file
+quirk list) -- they actually stored `$10000`/`$20000`, not `1`/`2`. The bypass
+branch's compare (`cmp #>2,a`, long-form, NOT shifted) would therefore NEVER
+have matched on real hardware -- the fade would silently never fire. Caught
+immediately by a direct test of $18's own post-write value (expected 2, got
+`131072` = `$20000`) -- exactly the kind of thing an end-to-end chained test
+(below) is for, not two halves that are only self-consistent in isolation. Fixed
+by writing the mode value with long-form immediates (`move #>1,a` / `move #>2,a`,
+which are NOT shifted) instead of chasing the quirk on the read side.
+
+### Verification
+
+New coverage in `emu_sc_dsp3.py`: `ref_declick_off()` (python model of the linear
+fade, including the asymmetric `>>3` truncation that never reaches exact 0,
+matching the .asm). Tests: $18 lands on 2/1 after a real HP/LP block; the fade
+itself matches `ref_declick_off()` exactly (directly-seeded state); LP->OFF is
+NOT declicked; a second consecutive OFF block does NOT re-declick; and an
+END-TO-END chained test that runs a REAL HP block, reads back whatever `$16`/
+`$18` the hardware ACTUALLY left (not assumed values), feeds those into a REAL
+OFF block, and confirms it declicks -- this is the check that would have caught
+the (q2) bug immediately on its own, without needing the separate targeted $18
+check. All four emulator suite combinations (`emu_sc_dsp3.py` plain +
+`--patched`, `emu_sc_dsp3_moncommit.py` plain + `--patched`): **ALL GOOD**
+against a fresh rebuild. Disassembled and round-tripped clean (no `mpysu`/
+`macsu`/invalid opcodes). Cave: 310 -> 346 words, still well inside the
+1063-word SPRING REVERB donor budget (~717 words slack remain).
+
+### Three more items discussed, not implemented this entry
+
+User asked about three more things in the same message:
+
+1. **Cascaded one-pole KFLT (12 dB/oct) to help graininess** -- plausibly a
+   secondary mitigation (steeper rolloff means less high-frequency key content
+   reaching a fast-ballistics detector), but the user's own diagnostic (raising
+   RMS fixes it) points at RMS/ballistics as the DOMINANT lever, not KFLT's
+   slope. More importantly: a genuine cascade needs a SECOND independent
+   tracker state, and every confirmed-free byte in the compressor's
+   per-instance memory block ($14, $16, $17) is now spoken for -- this needs
+   real RE work to find more free memory FIRST, not something to attempt
+   casually. Not pursued this entry, pending user interest.
+
+2. **KEY should render as a discrete selector (LFO MULT/TRIG-style), not a
+   knob.** Researched via a background agent (worktree-isolated, read-only).
+   Findings: LFO's own descriptor is `E = 0x400d37be` (id 5, page-class
+   `0x400328e4` -- the SAME page-class COMPRESSOR uses), page-2 layout
+   `PMTR WAVE MULT TRIG SPD DEP` (`refs/octabam/docs/firmware/PARAM_PAGES.md`).
+   LFO MULT's own B-callback (`0x400467a4`) turns out to be a "numeric bar"
+   widget style, NOT the discrete tick-selector the user actually wants
+   visually -- so it is NOT the right reference despite being the named
+   example. octabam's own B-field inventory (`PARAM_PAGES.md` §7) documents
+   that EVERY B-callback has its option count HARD-CODED (`cmp #N` compiled
+   in, confirmed directly in `0x40047254`'s own disassembly: `moveq #4,%d0`) --
+   meaning `SWITCH_FN` (2-position) genuinely does NOT generalize to KEY's
+   5-position case by just changing `count`, a DIFFERENT callback is needed.
+   Best untried candidate: `0x40047254`, CHORUS TAPS's own renderer, a
+   4-value-compiled (5-position, 0-4) tick-selector -- matches KEY's own
+   count=5 exactly, and is the visual style (discrete ticks across the full
+   knob) the user actually described, unlike LFO MULT. NOT yet hardware/
+   pattern-cross-verified the way `SWITCH_FN` was (5 independent real 2-position
+   switches, before this project trusted it) -- worth confirming by having the
+   user glance at stock CHORUS's own TAPS parameter (does it already look like
+   the desired tick-selector on their own unit?) before wiring this in, or
+   doing one more RE cross-check first. Not implemented this entry.
+
+3. **MON switch click, de-clickability.** Assessed as categorically different
+   from the KFLT/KGN clicks -- those smoothed a PARAMETER on the SAME
+   underlying signal; MON is a hard swap between two UNRELATED audio streams
+   (this track's own compressed output vs. a different track's key audio),
+   with no meaningful value to interpolate between. Also lives in `moncommit`,
+   a separate hook with its own specific fragility history (Session 59/60:
+   careless register reuse there hung the sequencer transport on real
+   hardware) -- more invasive, more hardware risk, for a fix that at best
+   would be "blur the switch with a brief blend of two different sounds," not
+   a true declick. Recommended treating this like a mixer's PFL/solo button
+   (an expected hard switch) rather than spending the risk here. Not
+   implemented, pending user's own call.
+
+### HANDOFF
+
+**NOT flashed.** Item 1 (HP->OFF declick) needs a real hardware re-test with
+KFLT swept HP->OFF repeatedly, MON on and off, to confirm the mild residual pop
+reported two entries ago is actually gone, and that the fade itself is
+inaudible/appropriately brief (8 samples ~ 181 us at 44.1 kHz was chosen as a
+reasonable declick window, not hardware-verified). Also worth a fresh listen on
+ordinary HP<->LP and LP<->OFF<->LP sweeps to confirm the $18 mode-encoding
+change didn't disturb anything already proven clean (the emulator suite says no,
+but this touches a shared latch several other checks depend on, so a broad
+sanity sweep is warranted before narrowing to just the new behavior). Items 2-4
+above are all awaiting the user's own steer before any further work.
+
+## Session 76 continued yet again (5, 2026-09-20, `wip`) -- SIDECHAIN3: KEY wired
+to LFO TRIG's own B-callback (a scrolling list, not a knob). Not flashed.
+
+User pushed back on the previous entry's CHORUS TAPS candidate: KEY is headed
+for cross-core (any of 8 tracks, so count will eventually be 9, not 5) --
+CHORUS TAPS's renderer has its option count compiled in (`moveq #4,%d0`
+disassembly-confirmed last entry), so it would need re-picking later regardless
+of whether it looked right today. Told to look again specifically at LFO's own
+TRIG (not MULT -- "nothing but a simple list that gets scrolled through").
+
+Disassembled TRIG's own B-callback directly this session (`0x40046450`,
+`m68k-elf-objdump`, VA 0x40046440-0x40046620): unlike CHORUS TAPS, there is NO
+compiled-in count comparison anywhere in it -- every count/index-shaped value
+it touches comes from its own stack parameters (the caller's per-call
+arguments), not a literal constant. That's exactly the property that matters
+for cross-core: a genuinely count-agnostic renderer wouldn't need re-deriving
+when KEY's count grows from 5 to 9 later. Also disassembled LFO MULT's own B
+(`0x400467a4`) for comparison -- its opening preamble (register saves, stack
+parameter offsets 52/56/64/68/72/76) is STRUCTURALLY near-identical to TRIG's,
+which doesn't square cleanly with the previous entry's "numeric bar" read of
+it; not fully traced either function's later logic to resolve that, but it
+doesn't matter for this decision -- the user asked for TRIG specifically, and
+TRIG passed its own test (no hardcoded count) on its own merits.
+
+**Wired in** (`tools/build_sidechain3.py`): `LIST_FN = 0x40046450`, KEY slot's
+`bnew` changed from `0` (plain knob) to `LIST_FN`. Rebuilt clean -- all
+descriptor-byte assertions passed, DSP cave byte-for-byte unchanged (this is a
+pure ColdFire menu-render change, confirmed by both payloads' cave word counts
+and addresses being identical to the prior entry). Re-ran both `--patched`
+emulator suites as a sanity check (DSP untouched, so unsurprising, but cheap to
+confirm) -- ALL GOOD.
+
+**Risk profile note, explicitly not hedged on this one**: unlike every other
+change this project makes, a wrong B-callback choice here is COSMETIC risk
+only -- a menu renders oddly, not a hung DSP or corrupted audio. Wired it in
+and rebuilt on that basis rather than insisting on the same hardware-
+cross-reference rigor `SWITCH_FN` got (5 independent real 2-position switches)
+before trusting it -- this is one confirmed disassembly read, not a
+cross-reference, explicitly flagged as such in the code comment.
+
+### HANDOFF
+
+**NOT flashed.** This entry's own change (KEY as a TRIG-style scrolling list)
+needs a hardware look -- does it actually render as OFF/T1/T2/T3/T4 spread
+across the knob, styled like LFO's own TRIG parameter? If TRIG's B-callback
+turns out to read its option COUNT from someplace still specific to LFO's own
+descriptor layout (not generically from whatever descriptor is passed), it
+could misrender or misbehave -- this session's disassembly read didn't fully
+trace where every value comes from, only confirmed the ABSENCE of a hardcoded
+literal count, which is the property that mattered for this decision but isn't
+a complete proof. Cheap to revert (one build-script line) if it looks wrong.
+Everything from the previous entry (HP->OFF declick, needs hardware test) is
+still pending too.
+
+## Session 76 continued yet again (6, 2026-09-20, `wip`) -- SIDECHAIN3: HP->OFF
+declick REVERTED (hardware regression); KEY UI garbage-line investigation
+started. Not flashed (revert + rebuild only, pending re-flash of the known-good
+image before the next real listening test).
+
+User flashed the previous entry's build (HP->OFF declick + KEY-as-list-selector)
+and reported two things: (1) the declick attempt made things WORSE, not
+better -- LP<->OFF<->LP regressed to popping (previously clean, confirmed clean
+twice this session) and HP->OFF itself was still not actually fixed; (2) KEY's
+new list-selector UI shows THREE lines where it should show two -- "KEY" (the
+param name, fine, unrelated to our code), a garbage/nonsense middle line (needs
+fixing), "OFF"/"T1"/etc (fine, the actual selected value).
+
+**Reverted**: `git checkout 4efc24f -- tools/patch_sc_dsp3.asm tools/emu_sc_dsp3.py`
+-- clean revert back to the split-detector-offset-fix commit (the last
+HARDWARE CONFIRMED state), confirmed via `git diff --stat` showing the entire
+uncommitted diff on both files WAS the declick attempt, nothing else mixed in.
+Did NOT touch `tools/build_sidechain3.py` (the KEY list-selector change is a
+separate, ColdFire-only change with its own separate problem, not part of this
+revert). Rebuilt; all four emulator suite combinations ALL GOOD against the
+reverted+rebuilt image (unsurprising -- this is exactly the commit's own
+already-proven state -- but confirmed rather than assumed). **Do not re-attempt
+this exact HP->OFF declick design** without a fundamentally different approach
+-- this is the fix's third failure mode this project's history (the SVF-era
+blend, the edge-blend crossfade, now this) even though the mechanism reasoning
+(one-shot linear fade, no continuously-blended signal) still looks sound on
+paper -- something about it is wrong in a way static analysis + emulator
+testing did not catch, matching this feature's whole pattern of surprising
+hardware-only failures. Next attempt (if any) should assume nothing from this
+one carries over cleanly.
+
+**KEY UI garbage line**: investigation started, not yet resolved. Working
+hypothesis: TRIG's own B-callback (`0x40046450`, wired in last entry) likely
+reads MORE descriptor data than the standard per-slot fields this project's
+own SLOTS mechanism populates (name/count/default/A-formatter/B-callback) --
+LFO's real TRIG parameter has its own descriptor with whatever EXTRA field(s)
+this callback expects already correctly set; COMPRESSOR's descriptor, extended
+with 4 new page-2 slots for this project, may not have an equivalent field
+populated for KEY, so the callback reads adjacent/uninitialized memory instead.
+Not yet confirmed by tracing the actual disassembly further -- the early
+conditional draw block (gated on a `%d5` flags-argument bit, before the
+`tstl %d3` branch already partially traced two entries ago) is the leading
+suspect for which draw produces the garbage line, but this needs a dedicated
+pass, not a guess-and-flash. To be continued.
+
+### HANDOFF
+
+Firmware is rebuilt with the revert in place (patch_sc_dsp3.asm/emu_sc_dsp3.py
+back to the 4efc24f state) but build_sidechain3.py's KEY-list-selector change
+(still has the garbage-line bug) is still in the tree, uncommitted, alongside
+the revert. **NOT flashed yet this entry** -- the user should NOT re-flash
+until either (a) the KEY UI garbage line is fixed, or (b) they explicitly want
+to test just the KFLT revert alone (in which case the CURRENT build already
+has the revert; the KEY UI issue would still be present in whatever gets
+flashed, since it's a separate change sitting in the same working tree).
+
+## Session 76 continued yet again (7, 2026-09-20, `wip`) -- SIDECHAIN3: KEY
+UI garbage line FIXED by dropping LIST_FN, back to plain B=0 widget. Not
+flashed.
+
+User: "I don't think you need to get so complex. Just look at the way stock
+handles LFO page 2 TRIG -- two lines, a list, simple." A background agent's
+deep trace (previous entry) hadn't located the caller-built context struct
+LIST_FN's "3-line" branch reads from (`%a3` offsets 2/3/7/11/14/18/20, fed to
+hardcoded `0x40012f30`/`0x40012bd8` measure/draw-text calls, bypassing any
+caller-supplied formatter entirely). Did two more direct checks myself before
+giving up on tracing it further:
+
+1. Found a SECOND real stock xref to `0x40046450` beyond the already-known
+   LFO(audio) TRIG one: LFO (MIDI)'s own descriptor (`E=0x400d412a`, abbr/
+   fullname both "LFO", confirmed by dump) uses the identical B value at the
+   same slot index (9). Confirms LIST_FN is genuinely reused stock-side
+   across two independent real pages, not a one-off.
+2. Directly diffed every per-slot descriptor byte (name/min@E+0xa2 (a field
+   `build_sidechain3.py` never writes -- not previously checked)/default/
+   count/A/B/C) between LFO(audio) TRIG (slot 9) and COMPRESSOR's own KEY
+   slot (8) pre-patch: nothing meaningfully differs -- the stock-unused KEY
+   slot is plain zero-filled, as expected. So the garbage isn't stale/wrong
+   DATA in our own descriptor fields; the "3-line" branch's context genuinely
+   comes from somewhere outside the 402-byte `E` entry (confirms previous
+   entry's finding, doesn't add a new lead). Also compared the undocumented
+   page-level flags byte (`E+0x36`) across all three descriptors out of
+   curiosity (COMPRESSOR=0x13 vs LFO(audio)=0x01/LFO(midi)=0x11) -- a real
+   difference, but ruled out as the cause: COMPRESSOR's OTHER existing
+   params (RMS/ATK/REL/KGN/MON, several different B-callbacks including
+   `0` and `SWITCH_FN`) all render correctly, so a page-wide flag can't be
+   what's uniquely breaking the ONE slot using LIST_FN.
+
+Given two dedicated tracing passes (one background-agent, one direct) both
+failed to locate the actual context-builder, and the user's own steer toward
+simplicity: **dropped `bnew` back to `0` for KEY** (`tools/build_sidechain3.py`
+SLOTS entry, was `LIST_FN`). This is the exact pre-LIST_FN state, proven
+clean before this whole detour started. `key_fmt` (KEY's A-formatter)
+already prints "OFF"/"T1".."T4" as the value line, and the encoder already
+steps discretely across just those 5 options across the full knob turn --
+that's driven by the descriptor's `count=5` field, independent of which
+B-callback draws it -- so this still delivers "name line + OFF/T1..T4 value
+line," just without the animated scroll-list visual LIST_FN would have given
+if it worked. Rebuilt clean; all four `emu_sc_dsp3*.py` (`--patched` and
+plain) combinations ALL GOOD (unsurprising -- this is a pure ColdFire
+descriptor-byte change, DSP payload bit-identical either way -- but run and
+confirmed rather than assumed).
+
+### HANDOFF
+
+**NOT flashed.** Current tree state: KFLT is the hardware-confirmed revert
+(matches commit `4efc24f`), KEY is back to the plain `B=0` widget (garbage
+line should be gone). This combination should be safe to flash and listen to
+next -- nothing else changed since the last two hardware-confirmed states.
+If the user still wants the true TRIG-style scrolling-list visual for KEY
+later (cross-core groundwork still applies whenever that's picked back up),
+the real blocker is unchanged from the previous entry: finding the generic
+per-slot draw dispatcher that builds LIST_FN's `%a3` context, which two
+separate tracing passes this session did not find. Don't re-attempt wiring
+LIST_FN back in without that piece actually in hand.
+
+## Session 76 continued yet again (8, 2026-09-20, `wip`) -- SIDECHAIN3: KEY
+back on LIST_FN (LFO TRIG's own B-callback), this time via a 1-bit-flip
+trampoline instead of the raw pointer. Not flashed.
+
+User flashed the plain-`B=0` build from the previous entry and rejected it:
+still wants the actual TRIG look -- "no knob icon, just two lines: the
+label, and below it, the values, as text." Rather than resume hunting for
+LIST_FN's caller (two passes already failed at that), disassembled
+`0x40046450` in full myself, entry to `rts` (`m68k-elf-objdump`,
+`0x40046450`-`0x4004661a`), and read every push/jsr against the two known
+signatures (`reference/kb/memory-map.md`'s `fillrect`/`drawtext`/
+`measuretext`) to work out what it actually does, instead of guessing from
+partial fragments as both earlier passes had.
+
+**Found the real switch.** The callback's 5th stack argument (`%d5`, a
+caller-supplied flags word) has **bit 1** as an internal mode select,
+independent of whatever else is in that word:
+- **bit1 SET**: `measuretext` the value string once, `drawtext` it
+  **centered on a single line** using the SAME buffer the A-formatter
+  (`key_fmt`) already filled earlier in the function (that early formatter
+  call is unconditional, both branches share it -- explains why the
+  bottom "OFF"/"T1" line was always correct even in the broken build).
+  Traced every stack push against `drawtext(font,surf,x,y,mode,str)`'s
+  documented signature to confirm this reading precisely (previous
+  session's guess that `%a3`'s offsets were STRING pointers was wrong --
+  they're Y-coordinates; arg order confirms it).
+- **bit1 CLEAR**: a second branch that measures/draws the value buffer
+  TWICE more at two different Y rows, AND computes a completely separate,
+  freshly-addressed second text buffer for a third draw -- three rows
+  total, matching exactly what the user is seeing (name + garbage +
+  value). This is almost certainly a "scrolling list, prev/current/next"
+  preview mode that needs data (the second buffer) some caller populates
+  ahead of the call -- data COMPRESSOR's own generic per-slot dispatcher
+  evidently isn't supplying, which is *why* it reads garbage rather than a
+  real adjacent option label.
+
+Also incidentally confirmed a second real stock xref to `0x40046450`
+beyond LFO(audio) TRIG: LFO (MIDI)'s own equivalent slot (`E=0x400d412a`,
+derived from the FX-id table gap and confirmed by dumping its abbr/
+fullname = "LFO") uses the identical B pointer at the same slot index (9)
+-- LIST_FN is genuinely shared stock-side across two real pages, not a
+one-off guess.
+
+**The fix, since the caller itself remains unlocated**: don't reproduce it
+-- intercept. Added `key_list_fix` to `tools/patch_sidechain.s`, a 4-
+instruction ColdFire trampoline (`out/patch_sidechain.elf` disassembly
+confirms it assembled exactly as intended):
+```
+movel %sp@(20),%d0     | read the flags word (offset 20 = LIST_FN's own
+oril  #2,%d0           | +68(%sp) minus the 48 bytes of frame LIST_FN
+movel %d0,%sp@(20)     | reserves before reading it -- verified by hand
+jmp   0x40046450        | against LIST_FN's own prologue, not guessed)
+```
+`d0` is safe scratch (LIST_FN's own `moveml` saves `d2-d6/a2-a5`, never
+`d0/d1/a0/a1` -- the same convention `key_fmt`/`kfilt_fmt` already rely
+on). `jmp` (not `jsr`) so the original return address LIST_FN's own `rts`
+expects is left untouched; the trampoline never builds its own frame at
+all. `tools/build_sidechain3.py`: KEY's `bnew` changed from the plain `0`
+(previous entry) to the string `"key_list_fix"`; extended the B-field
+write to resolve a string through `fmt_sym` exactly like the A-field
+already does (previously B was always a raw literal). Rebuilt clean --
+`slot 8 KEY ... B 0x400d708c` (the trampoline's own address, not
+`0x40046450` directly). All four `emu_sc_dsp3*.py` combinations ALL GOOD
+(unsurprising, DSP payload untouched -- confirmed anyway).
+
+**Confidence note**: this is a real disassembly-level trace of the actual
+function's own branch logic and stack layout (register-by-register,
+signature-checked against documented primitives), not a byte-comparison-
+across-descriptors guess like the previous entry's dead-end page-flags
+theory. Still not hardware-verified -- cosmetic-only risk if wrong (a menu
+renders oddly, nothing DSP-side moves).
+
+### HANDOFF
+
+**NOT flashed.** Needs the real hardware look: does KEY now show exactly
+"KEY" / "OFF"-or-"T1".."T4", centered, no icon, no garbage row -- matching
+LFO TRIG's own appearance? If the bit1 theory is right this should be
+byte-for-byte the same render path real TRIG takes. If it's WRONG in some
+way this trace didn't catch (a third row still appears, or the rectangle
+this callback ALSO draws when its OTHER flag, bit2, is set/clear looks
+off), the fallback is unchanged: `bnew=0` on KEY's `SLOTS` entry (the
+previous entry's proven-clean plain widget). KFLT is untouched this entry,
+still the hardware-confirmed `4efc24f` state.

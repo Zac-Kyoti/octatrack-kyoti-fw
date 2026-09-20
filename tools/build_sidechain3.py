@@ -87,13 +87,37 @@ FMT_ONOFF = 0x4003c14c          # stock "ON" / "OFF"
 # reference actually uses.
 SWITCH_FN = 0x40046f10
 
+# Stock N-way scrolling-list draw callback (LFO page-2 TRIG's own B, E=
+# 0x400d37be per refs/octabam/docs/firmware/PARAM_PAGES.md -- LFO shares
+# COMPRESSOR's own page-class 0x400328e4). Picked over LFO MULT's own B
+# (0x400467a4, structurally near-identical opening preamble on disassembly,
+# so not ruled out as the SAME family, but the user specifically wants
+# TRIG's visual behaviour -- "nothing but a simple list that gets scrolled
+# through" -- not MULT's, and TRIG is the one actually asked for). Unlike
+# CHORUS TAPS's own tick-selector (0x40047254, `moveq #4,%d0 / cmpl
+# %d2,%d0` -- the option count compiled directly into the function, single
+# use per octabam's own inventory, PARAM_PAGES.md SS7), TRIG's disassembly
+# (`m68k-elf-objdump`, this session) shows NO compiled-in count comparison
+# anywhere -- every option-count-shaped value it touches comes from its own
+# stack parameters, not a literal. That matters beyond just "looks right
+# today": KEY is headed for cross-core (any of 8 tracks, count 9 not 5) --
+# a hardcoded-count renderer like CHORUS TAPS's would need re-picking (or
+# re-deriving) later, where a genuinely count-agnostic one, if that's what
+# this is, would not. NOT hardware-cross-verified the way SWITCH_FN was (5
+# independent real 2-position switches, before this project trusted it) --
+# this is one confirmed disassembly read, not a cross-reference. Cosmetic-
+# only risk if wrong (a menu render, not DSP/audio), unlike everything else
+# this project touches -- worth trying and looking at, not worth blocking
+# on more RE first.
+LIST_FN = 0x40046450
+
 # descriptor slot -> (name, count, default, A-formatter, current-bytes to assert)
 #   A-formatter: "key_fmt"/"kfilt_fmt" resolved from patch_sidechain.elf, else a literal
 #   bnew: descriptor field B to WRITE (0 = plain knob widget, unchanged from
 #   before; SWITCH_FN = render as a stock bipolar switch instead)
 SLOTS = [
     (8,  b"KEY\x00\x00\x00", 5,   0,  "key_fmt",
-     dict(name="000000000000", cnt="00000080", dflt="7f", b="00000000"), 0),
+     dict(name="000000000000", cnt="00000080", dflt="7f", b="00000000"), "key_list_fix"),
     (9,  b"KFLT\x00\x00",     128, 64, "kfilt_fmt",
      dict(name="000000000000", cnt="00000002", dflt="00", b="400475f8"), 0),
     (10, b"KGN\x00\x00\x00",  128, 64, FMT_BIPOLAR,
@@ -319,12 +343,13 @@ def main():
         img[o(na):o(na) + 6] = name
         img[o(ca):o(ca) + 4] = cnt.to_bytes(4, "big")
         img[o(da)] = dflt
-        img[o(ba):o(ba) + 4] = bnew.to_bytes(4, "big")
+        b_val = fmt_sym[bnew] if isinstance(bnew, str) else bnew
+        img[o(ba):o(ba) + 4] = b_val.to_bytes(4, "big")
         a_val = fmt_sym[fmt] if isinstance(fmt, str) else fmt
         img[o(aa):o(aa) + 4] = a_val.to_bytes(4, "big")
         label = name.rstrip(b"\x00").decode()
         print(f"  slot {slot:2d}  {label:5s}  count {cnt:3d}  "
-              f"default {dflt:3d}  A 0x{a_val:08x}  B 0x{bnew:08x}")
+              f"default {dflt:3d}  A 0x{a_val:08x}  B 0x{b_val:08x}")
 
     # Per-parameter ENABLE BITMAP -- NOT relative to E like the fields above.
     # refs/octabam/docs/firmware/PARAM_PAGES.md ("P+0x18a / P+0x18e"): the
