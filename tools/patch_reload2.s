@@ -59,6 +59,62 @@
 |   this.  Deferred: it needs its own displaced-byte guard + a HW check that the
 |   track key reaches that handler and that swallowing the mute is harmless.
 |
+| ---- ⚠️ Session 60's flag, FIXED here (Session ??) ----
+| Session 60 (NOTES.md), while root-causing why DIRECT JUMP v1-v3 did NOTHING on
+| hardware, flagged that `rl_yes` (the detour @ 0x4005e4c8 below) sits on the exact
+| same dead hook: [PTN] press unconditionally pushes a UI overlay keymap layer
+| (26-byte records @ 0x400bf0f2, one per key) that OVERWRITES the runtime dispatch
+| table's YES slot for as long as [PTN] stays physically held -- the layer's own
+| YES record has press=NULL, so the slot goes to 0 and the real handler this
+| detour lives inside (0x4005e4c8) is never entered AT ALL while the chord is
+| held. DIRECT JUMP's whole gesture ([PTN]+[YES], pressed together) hits this on
+| every attempt, which is why it was flashed and did nothing; fixed there
+| (build_directjump_v4.py, --defsym DJ_KEYMAP=1) by writing the handler straight
+| into that dead slot instead of detouring 0x4005e4c8.
+|
+| RELOAD2's UX is different -- YES/NO are meant to answer a STICKY, no-timeout
+| picker that's designed to be navigated AFTER releasing [PTN] (that's the whole
+| point of "sticky": you don't have to keep it held) -- so the *existing*
+| 0x4005e4c8 / 0x4005e25c detours are NOT dead in general, only for the narrower
+| case of a user who presses YES/NO while STILL physically holding [PTN] down
+| (plausible: DIRECT JUMP's own combo trains users to expect exactly that
+| gesture, and nothing stops someone from doing it here too, intentionally or
+| out of habit). Dumping the actual stock table (`out/raw/section_3_MAIN_OS.bin`
+| @ 0x400bef04..0x400bf0d8) confirms both keys are affected while [PTN] is held,
+| for two different reasons:
+|   YES (code 0x31, record @ 0x400bf0be): press = NULL, exactly DIRECT JUMP's bug.
+|   NO  (code 0x32, record @ 0x400bf0a4): press = 0x40056aa8 -- NOT null, but that
+|     function's entire body is `cmp.l 0x460d1742,d0(==2) ; bne rts` -- i.e. it
+|     does something only when PTN_MODE reads the literal value 2, which our
+|     [PTN]-hold-for-the-picker case never produces (PTN_MODE is 0/1 throughout
+|     the press-hold-release cycle per Session 44's own RE of FUN_4005a044) -- so
+|     in every case this project's own [PTN]-held gesture can produce, it is
+|     already an unconditional no-op, safe to shadow.
+| Arrow keys (codes 0x34/0x21/0x33/0x20) have NO record in that table at all, so
+| they are NOT swallowed by this layer and need no fix.
+|
+| Fix (same shape as DJ_KEYMAP, applied to both slots): `rl_yes_ptnheld` /
+| `rl_no_ptnheld` are poked directly into the two dead/no-op press fields by the
+| build script (not a code detour -- see build_reload2.py). Each replays the
+| exact same G_MENU/POPUP gate `rl_yes`/`rl_no` already use and, when it applies,
+| `bsr`s the now-shared `rl_yes_exec` / `rl_no_exec` body (factored out of the
+| original inline code so both entry points -- the keymap slot AND the original
+| 0x4005e4c8/0x4005e25c detour -- drive identical logic). When it does NOT apply
+| (menu closed): `rl_yes_ptnheld` just `rts`s (stock's own NULL slot did nothing);
+| `rl_no_ptnheld` `jmp`s the original `NO_PTNHELD_STOCK` (0x40056aa8) so whatever
+| conditional behaviour that function has for a PTN_MODE this project's gesture
+| never produces is preserved byte-for-byte, not just assumed harmless.
+| The ORIGINAL 0x4005e4c8/0x4005e25c detours are UNCHANGED and still needed --
+| they're what answers the picker once the user has let go of [PTN], which is
+| the documented, no-timeout, common case.
+    .equ PTN_LAYER_YES,     0x400bf0be   | [PTN]-held layer record, code 0x31 (YES);
+                                        | press field @ +2. Stock: NULL.
+    .equ PTN_LAYER_NO,      0x400bf0a4   | [PTN]-held layer record, code 0x32 (NO);
+                                        | press field @ +2. Stock: 0x40056aa8.
+    .equ NO_PTNHELD_STOCK,  0x40056aa8   | that record's stock press handler (see above --
+                                        | an unconditional no-op for every PTN_MODE value
+                                        | this project's own [PTN]-hold gesture produces)
+
 | Stock 1.40C only reloads from the card at whole-BANK granularity, and doing so
 | glitches the audio (FUN_400a10c8 pre-step + FUN_400238a4 re-sync -- both
 | HW-observed).  This is per-pattern / per-track and seamless: the file work rides
@@ -211,17 +267,45 @@ rln_notrel:
     tst.l   POPUP
     bne.b   rln_stock                  | a modal dialog is up -> let stock [NO] answer it
 
-|   --- window open: [NO] = close, execute nothing ---
+    bsr.w   rl_no_exec
+    rts                                | swallow
+
+rln_stock:
+    jmp     NO_PRESS
+
+| ---- rl_no_ptnheld: poked into the [PTN]-held keymap layer's own NO press slot,
+| REPLACING stock NO_PTNHELD_STOCK (0x40056aa8) -- see the header comment above
+| for why that's safe (an unconditional no-op for every PTN_MODE our own [PTN]-
+| hold gesture can produce). Only reachable while [PTN] is physically held.
+    .global rl_no_ptnheld
+rl_no_ptnheld:
+    moveq   #1,%d1
+    cmp.l   8(%sp),%d1                 | event == press ?
+    bne.b   rnph_stock
+    tst.b   G_MENU
+    beq.b   rnph_stock                 | window closed -> replay the real stock behaviour
+    tst.l   POPUP
+    bne.b   rnph_stock
+
+    bsr.w   rl_no_exec
+    rts                                | swallow
+
+rnph_stock:
+    jmp     NO_PTNHELD_STOCK           | 0x40056aa8, byte-for-byte, stack undisturbed (jmp,
+                                        | not jsr -- see rl_yes_ptnheld's identical idiom)
+
+| ---- rl_no_exec: shared "close the window" body -- bsr'd from rl_no AND
+| rl_no_ptnheld so both entry points drive identical logic. Ends in rts back to
+| whichever entry bsr'd it. ----
+    .global rl_no_exec
+rl_no_exec:
     clr.b   G_MENU
     lea     -16(%sp),%sp
     movem.l %d0-%d1/%a0-%a1,(%sp)
     jsr     CLOSE_CB
     movem.l (%sp),%d0-%d1/%a0-%a1
     lea     16(%sp),%sp
-    rts                                | swallow
-
-rln_stock:
-    jmp     NO_PRESS
+    rts
 
 | ================= [YES]  -- execute + close  (@ 0x4005e4c8) =================
 | Detour replaces 8 bytes: move.l 4(%sp),%d1 ; move.l 8(%sp),%d0
@@ -237,6 +321,33 @@ rl_yes:
     tst.l   POPUP
     bne.w   rly_stock                  | a modal dialog came up -> stock YES
 
+    bsr.w   rl_yes_exec
+    rts
+
+| ---- rl_yes_ptnheld: poked into the [PTN]-held keymap layer's own YES press
+| slot (stock: NULL -- see the header comment above; the exact bug Session 60
+| found and fixed for DIRECT JUMP, applied here identically). Only reachable
+| while [PTN] is physically held.
+    .global rl_yes_ptnheld
+rl_yes_ptnheld:
+    move.l  8(%sp),%d0                 | event
+    moveq   #1,%d1
+    cmp.l   %d0,%d1
+    bne.b   ryph_rts
+    tst.b   G_MENU
+    beq.b   ryph_rts                   | window closed -> stock's own NULL slot did nothing
+    tst.l   POPUP
+    bne.b   ryph_rts
+
+    bsr.w   rl_yes_exec
+ryph_rts:
+    rts
+
+| ---- rl_yes_exec: shared "close the window + execute the selection" body --
+| bsr'd from rl_yes AND rl_yes_ptnheld so both entry points drive identical
+| logic. Ends in rts back to whichever entry bsr'd it. ----
+    .global rl_yes_exec
+rl_yes_exec:
 |   --- close the window ---
     clr.b   G_MENU
     lea     -16(%sp),%sp

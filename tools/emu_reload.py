@@ -552,7 +552,15 @@ def cmd_trk(rt):
     except Exception as e:
         faulted = f"{type(e).__name__}: {e}"
 
-    gk = rd(rt, G_KIND, 1)[0]
+    # G_TRK is set synchronously by rl_arm_trk itself, so it's already final here.
+    # G_KIND is NOT -- rl_arm_trk only ARMS the request (sets G_KIND=3, posts the
+    # job) and returns immediately; it's rl_job, running later on the storage
+    # task, that clears G_KIND. Sampling it here (right after rl_arm_trk returns,
+    # before the drain loop below has let rl_job run at all) always reads the
+    # just-armed 3, regardless of firmware correctness -- a test-timing bug, not
+    # a firmware one (the other 9 checks below, all sampled post-drain, already
+    # prove rl_job ran: FUN_4008cebc fired, the track actually reverted). Sample
+    # it after the drain loop instead, same as every other post-worker check.
     gtrk = rd(rt, 0x80006a54, 1)[0]
     after_P = after_Q = None
     for _ in range(300):
@@ -570,6 +578,7 @@ def cmd_trk(rt):
             break
     if after_P is None:
         after_P, after_Q = rd(rt, pP, PAT_STRIDE), rd(rt, pQ, PAT_STRIDE)
+    gk = rd(rt, G_KIND, 1)[0]
 
     def apl(buf, t):                        # a track's scribbled p-lock window
         o = t * TRAC_STRIDE + PL

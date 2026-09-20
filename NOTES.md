@@ -19180,6 +19180,107 @@ leads that didn't reproduce (part 11's fresh_bind leak, part 16's blocked-
 cleanup theory), treat `fb_caller_93ec0`/`96ad4` as unconfirmed until the
 dynamic test above actually shows a hit inside a real muted window.
 
+## Session 78 (2026-09-20, `wip`) — TRIGLESS-LOCK AUTO-REMOVE (Section 13 resumed): part 17's
+`fb_caller_93ec0`/`96ad4` lead checked and FALSIFIED for this feature; `+0x4900` re-confirmed
+(via real Ghidra xrefs, not grep) to be touched by NOTHING but its own LIVE handler; the
+Session-34 SAVE-path candidate address was wrong (it's "CREATE PROJECT", not a serialiser);
+the real "+0x4900 -> #1" merge is still unlocated. No code changed. Recommending HW
+export-and-diff now that the MKI is confirmed present (today's SIDECHAIN3 hardware sessions).
+
+Picked this thread back up per the user's request, re-reading Section 13 (`## Session 13`
+above) and everything the project has learned since (S20, S26-34, S48's *separate* PTN-LED
+trigless-lock bug fix, and today's mute-mode part 14-17 entries, which explicitly floated a
+new candidate for "how a p-lock gets applied to a currently-sounding voice with no trig" and
+asked whether it's the same mechanism as this feature).
+
+### Checked part 17's `fb_caller_93ec0` / `fb_caller_96ad4` lead — NOT the trigless-lock
+### mechanism
+
+Part 17 (this file, above) found `0x40093e9c`/`0x40096ab0`, gated on `-1 < DAT_400d7c44` /
+`DAT_400d7c48`, and read that gate as "is there a pending per-track apply queued" —
+speculating it might be how a p-lock reaches a live voice independent of a trig, i.e.
+possibly the trigless-lock runtime-apply path this feature would also need. Ran a fresh
+Ghidra headless probe (`tools/ghidra/attic/GhidraTriglessApplyWriters.java`, dump
+`/tmp/ghidra_triglessapply.log`, not saved to `out/ghidra/` — reproduce by rerunning against
+`ghidra_project`) to find what WRITES those two globals and decompiled the callers.
+
+**Result: `DAT_400d7c44`/`DAT_400d7c48` are a stashed MACHINE-TYPE byte, not a pending-apply
+flag.** `FUN_400940ac` (called from elsewhere, writer of `_44`) zeroes a track's machine-type
+byte (`blob+part*6322+track+0x8eda2`), stashes the OLD value it just overwrote into
+`DAT_460ba8a4`, resets that track's working-param array (`0x46c7dfda+track*0x20` — the same
+per-step lazy-load array Session 32 found, but here it's being defaulted for a *new* machine
+type, not populated from a step's `#1` record), and finally does `DAT_400d7c44 = param_2`
+(the NEW machine-type byte, not a flag). `fb_caller_93ec0` is the matching *restore*: gated on
+`-1 < DAT_400d7c44` (i.e. "is a stash pending"), it puts the track's ORIGINAL machine type
+back from `DAT_460ba8a4`, does bookkeeping for a `0x80`/PICKUP-preview slot special case
+(`FUN_40093814(0x80)`, a play-count table at `0x46c90a78 + idx*0x2c`), then clears the flag
+(`DAT_400d7c44 = 0xffffffff`). `fb_caller_96ad4`/`FUN_40096c54` are the byte-identical
+`_48`-keyed twin (bank/bus half 2). **Shape = "temporarily swap a track's machine type to
+something else (almost certainly the sample-browser PICKUP/FLEX preview), do a thing, swap
+it back" — nothing here reads a step's p-lock record or writes `#1`.** This falsifies the
+lead for THIS feature (does not touch the mute-mode "echo" question either way — that's a
+separate, still-open thread; flagging there too).
+
+### `+0x4900` re-confirmed untouched outside its own handler (full-analysis xrefs, not grep)
+
+Session 33's "`+0x4900` is referenced only by the LIVE write/erase cluster" was originally
+established before Session 70's Constant Reference Analyzer full-analysis run existed for
+this project — i.e. it may have relied on literal-byte matching rather than Ghidra-resolved
+xrefs (Session 58c12's own lesson: always prefer resolved xrefs once full analysis exists).
+Re-ran it properly: `tools/ghidra/attic/GhidraTriglessMergeSearch.java` (dump
+`/tmp/ghidra_mergesearch.log`) pulled real `ReferenceManager` xrefs to `DAT_400e6ae0` (=
+`blob + 0x4900`) against the current full-analysis `ghidra_project`. **Confirmed: exactly 5
+references, all inside `FUN_40041bc4` (the LIVE `[NO]`+knob handler itself) — nothing else in
+the whole firmware image touches this buffer.** This is a stronger result than Session 33 had
+(now Ghidra-verified, not grep-verified) — **with one real caveat**: `0x400e6ae0` is a fixed
+absolute address that only equals `blob + 0x4900` for a *specific* (bank, pattern, track) —
+Session 27's own capture read it as `blob + 10*0x8ed8 + 0x4900` for pattern 10, not `blob +
+0x4900` literally. A resolved xref search on this one literal address only finds code where
+Ghidra's constant propagation folded the SAME literal effective address — it would miss a
+generic, register-indexed sequencer loop that touches the identical *logical* field for a
+different runtime pattern/track and therefore never materialises this exact constant. So this
+result is solid for "no OTHER *fixed-address* consumer exists" but not proof against a
+register-indexed one; treat as suggestive, not closing. If nothing else ever reads
+`+0x4900`, either (a) the merge reads one of the *other* working views instead (`+0x48d8`
+param-bitmap or `+0x2880` PART-payload — Session 30's other live-edit representations,
+un-checked for xrefs this session), or (b) `+0x4900`'s displayed/played *value* never actually
+needs to leave this buffer for the feature to work, because what determines "is this step's
+lock now empty" might be readable from `+0x48d8` (the bitmap Session 30 found, "which params
+are locked", separate from the values in `+0x4900`) without ever touching `#1` on the LIVE
+edit path at all — worth checking `+0x48d8`'s (`DAT_400e6ab8`-ish, unconfirmed symbol) xrefs
+next, since Session 27/28 already showed `0x400339d8`'s rebuild reads it for the **live**-lock
+LED (`0x46c7d2e4`), separately from `#1`'s **stored**-lock LED (`0x46c7d48c`) — the two-LED
+split may mean the auto-remove predicate should key off `+0x48d8` going to 0, not off `#1`.
+
+### Session 34's SAVE-path candidate was the wrong function
+
+Session 34's NEXT list flagged `0x400645ce` (SAVE PROJECT) to trace. Ghidra resolves that
+address into `FUN_400644f0`, decompiled this session: it is the **CREATE NEW PROJECT** dialog
+handler (`CREATING PROJECT` / `NAME CANNOT BE EMPTY` / `NAME ALREADY IN USE` strings), not a
+bank/pattern serialiser, and (confirmed by the xref search above) does not reference `+0x4900`
+at all. The real "commit a live p-lock edit to disk" function is still unlocated under any
+name this project has used for it so far.
+
+### Status / recommendation
+
+The **core fix action stays validated and unchanged** (S31/S32): a trigless lock is
+`#1[step] != 0xFF && TRAC+0x00[step] bit clear`; clearing `#1[track][step]` to all-`0xFF`
+then calling `0x400339d8` turns the LED off with zero collateral, and `#1` is what both
+playback and save read. What's still missing is **where a LIVE `[NO]`+knob erase's effect
+actually lands** — not `#1` directly (S33/S34), not through `+0x4900` reaching anything else
+(re-confirmed this session) — so either `+0x48d8` is the real signal to hook (untested lead,
+above) or the merge happens somewhere genuinely unexamined.
+
+**The Session-34 blocker (\"blocked on the MKI being back\") no longer holds** — this same
+`wip` branch has hardware-confirmed SIDECHAIN3 flashes from *today* (Session 75-77, above), so
+the MKI is demonstrably in the user's hands right now. Session 13's own original Phase 0 (HW
+export-and-diff: build the targeted test patterns — trigless lock w/ 2 p-locks, after a LIVE
+erase of one param, after erasing the last param, a manually-placed empty trigless lock — on
+the MKI, export, diff the banks) was always this thread's own preferred path over continued
+emulator guessing, and now needs nothing except the user's hardware time. Alternative if the
+user would rather stay emulator-only a while longer: chase the `+0x48d8` xref lead above
+first (cheap, one more headless probe, no HW needed) before asking for exports.
+
 ## Session 79 (2026-09-20, `wip`) — DIRECT JUMP resumed: pass 15's own recommended DJ-vs-stock
 comparison run for the first time — the "DJ_MODE=0" arm turns out to be a no-op (a raw
 `PEND_PAT` poke never reaches stock's own switch-commit code at all), so a step-matched
@@ -19302,3 +19403,117 @@ proof" bar.
 while this entry was written (Section 13/trigless-lock work landed as "Session 78" during
 this same wall-clock window) — this entry is appended after that content and commits as its
 own separate hunk, not bundled with it.
+
+## Session 80 (2026-09-20, `wip`) — RELOAD2: fixed the dead-hook bug Session 60 flagged but never addressed; still not flashed
+
+**User asked to resume RELOAD2 toward a hardware flash.** Re-reading Session 60's own
+closing note turned up an unresolved flag: `patch_reload2.s`'s `rl_yes` — the `[YES]`
+detour @ `0x4005e4c8` that answers the "hold `[PTN]`" picker — sits on the *exact*
+dead-hook mechanism that made `DIRECTJUMP_V3` do nothing at all when flashed (Session 60):
+`[PTN]` press unconditionally pushes a UI overlay keymap layer onto the layer list, and
+that layer's own `[YES]` record (26-byte struct @ `0x400bf0be`, code `0x31`) has `press`
+= NULL. The rebuild this triggers overwrites the runtime dispatch table's YES slot with
+that NULL for as long as `[PTN]` stays physically held, so `0x4005e4c8` — and therefore
+`rl_yes` — is never entered at all. Session 60 flagged this for RELOAD2 explicitly
+("very likely equally dead... flagged only... not done here") and it was never touched
+in the five sessions since (checked: `patch_reload2.s`/`build_reload2.py`'s last commit
+is Session 47, `22468a7`, predating Session 60 by six days).
+
+### This session went further than DIRECT JUMP's own fix required
+
+RELOAD2's UX is not identical to DIRECT JUMP's — the picker is designed to be **sticky
+and no-timeout**, explicitly so the user does *not* have to keep `[PTN]` held while
+navigating/answering it (Session 44's whole design point). So unlike DIRECT JUMP v4
+(which dropped its `0x4005e4c8` detour entirely, since its toggle has no "after release"
+case), RELOAD2 genuinely needs **both** paths: the original `0x4005e4c8`/`0x4005e25c`
+detours for the common "released `[PTN]`, now navigating" case, *and* a fix for the case
+where the user answers YES/NO while still physically holding `[PTN]` down (plausible —
+DIRECT JUMP's own combo trains users to expect exactly that gesture, and nothing stops
+someone doing it here too).
+
+Dumped the actual stock table (`out/raw/section_3_MAIN_OS.bin` @ `0x400bee00`..`0x400bf120`,
+26-byte records) to find the true scope. Two keys affected, for two different reasons:
+  - **YES** (code `0x31` @ `0x400bf0be`): `press` = NULL. Exactly DIRECT JUMP's bug.
+  - **NO** (code `0x32` @ `0x400bf0a4`): `press` = `0x40056aa8` — **not** NULL. Disassembled
+    it (`r2`): `moveq #2,d0 ; cmp.l 0x460d1742,d0 ; bne rts ; bra 0x40056a70`. It only does
+    anything when `PTN_MODE` (`0x460d1742`, DIRECT JUMP's own "[PTN] held" flag) reads the
+    literal value **2** — and Session 44's own RE of `FUN_4005a044` established that flag
+    is 0 or 1 throughout our whole press-hold-release cycle, never 2. So for every case
+    this project's `[PTN]`-hold gesture can actually produce, `0x40056aa8` is an
+    unconditional no-op — safe to shadow, *and* safe to fall back to byte-for-byte (not
+    just assumed inert) for the one case it doesn't apply.
+  - **Arrow keys** (`0x34`/`0x21`/`0x33`/`0x20`) have **no record at all** in that table —
+    confirmed by dumping every record between the trig block and the terminator `0xff`.
+    Not swallowed, no fix needed.
+
+### Fix — same shape as `DJ_KEYMAP`, applied to both slots (`patch_reload2.s`, `build_reload2.py`)
+
+Factored `rl_yes`'s and `rl_no`'s bodies into shared `rl_yes_exec`/`rl_no_exec` (bsr'd,
+unchanged logic) and added two new entry points:
+  - `rl_yes_ptnheld` — poked into the YES record's NULL press field. Same G_MENU/POPUP
+    gate as `rl_yes`; if it doesn't apply, plain `rts` (matches stock's real behaviour:
+    nothing).
+  - `rl_no_ptnheld` — poked into the NO record's press field, **replacing** `0x40056aa8`.
+    Same gate; if it doesn't apply, `jmp NO_PTNHELD_STOCK` (0x40056aa8) — replays the
+    real stock function byte-for-byte rather than assuming it's safe to drop.
+
+`build_reload2.py` asserts both records' stock bytes before poking (mirrors
+`build_directjump_v4.py`'s `PTN_LAYER_YES` assert) and leaves the original
+`0x4005e4c8`/`0x4005e25c` detours completely untouched. Build ran clean:
+
+```
+=== [PTN]-held keymap layer: YES/NO press slots -> rl_yes_ptnheld/rl_no_ptnheld ===
+  0x400bf0c0  press NULL       -> rl_yes_ptnheld 0x400d74ee
+  0x400bf0a6  press 0x40056aa8 -> rl_no_ptnheld  0x400d7486
+  no overlaps; all within the free cave
+  mainos_reload2.bin: 1276 bytes changed vs stock
+  manual-trig fix bytes identical to build_trigscale_only.py: True
+```
+Round-tripped through `elektron-firmware-tool` clean (checksum verified).
+
+### Validation
+
+- `tools/emu_reload2.py --combo` **ALL GOOD**, unchanged from before the refactor — the
+  original detour-site behaviour (closed/open picker via `0x4005e4c8`/`0x4005e25c`) is
+  bit-for-bit the same; the `bsr`-based extraction didn't alter it.
+- **New**: `tools/emu_reload2_keymap.py` — the RELOAD2 analogue of
+  `emu_directjump_v4.py`. Drives the REAL stock `FUN_40031494`/`FUN_4003125c` (layer
+  push + table rebuild) and `FUN_4005a044` ([PTN] press) against the built image, not a
+  hand-built stub, then:
+    1. confirms the YES/NO runtime dispatch slots go to `rl_yes_ptnheld`/`rl_no_ptnheld`
+       while `[PTN]` is held (reproducing that they were NULL/`0x40056aa8` in stock first);
+    2. `jsr`s those live slots directly (the same call the real per-key ISR makes) with
+       the picker OPEN and confirms the real worker-arm / window-close path runs end to
+       end (`CLOSE_CB` + `JOB_POST` reached, `G_MENU`/`G_KIND` updated correctly);
+    3. does the same with the picker CLOSED and confirms `rl_yes_ptnheld` does nothing
+       (no stray `CLOSE_CB`/`JOB_POST`) while `rl_no_ptnheld` falls through to the REAL
+       `0x40056aa8` (hooked and confirmed reached, not just assumed);
+    4. confirms the original `0x4005e4c8`/`0x4005e25c` detours are still `jmp`s to our
+       code, not reverted.
+  **ALL GOOD.**
+- `tools/emu_reload2.py --trk` / `--patched --trk`: kicked off to re-check the untouched
+  worker/arm-track path is still intact (this session touched no worker code) — these two
+  runs are slow (the full `emu_rtos`-backed boot + project load) and didn't finish inside
+  this session's tool-call window; not a red flag on their own (`--combo`'s own boot line
+  shows a ~6 s RTOS handoff before anything runs), just not confirmed complete here.
+  **Re-run and confirm before flashing** if their pass/fail isn't already known.
+
+### Status — NOT YET FLASHED
+
+Build is emulator-clean on the two things this session touched (the keymap fix itself,
+dynamically, and the unchanged combo-driven picker logic). Recommend one more pass on
+`--trk`/`--patched --trk` to close out the worker-path regression check, then this is
+ready for the hardware pass described in `FLASHING.md` §4.7 — with the fix, the
+`[PTN]`-still-held gesture should now work in addition to the documented "release `[PTN]`,
+then answer" flow; HW should confirm both.
+
+**Also flagged, not acted on this session (out of scope for a standalone RELOAD2 flash):**
+`reference/MERGE.md`'s `[YES]` trampoline (`build_merged.py`) was designed around RELOAD2
+owning the `0x4005e4c8` *detour* and DIRECT JUMP chaining off its stock-fallback path. Two
+things have since moved: DIRECT JUMP's own preferred build (v4) already dropped that
+detour in favour of poking `dj_toggle` into the SAME overlay YES slot this session now
+also wants to poke `rl_yes_ptnheld` into — a fresh collision the trampoline design never
+anticipated. Whoever revisits `build_merged.py` needs to design a keymap-slot-level
+chain (YES slot -> one combined entry that tries RELOAD2's gate, then DIRECT JUMP's),
+not just bump `DJ_V3`->`DJ_KEYMAP` as Session 60 already flagged. Not needed for
+standalone `RELOAD2` testing; flagging so it isn't lost.

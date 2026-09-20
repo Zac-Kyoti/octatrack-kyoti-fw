@@ -36,6 +36,26 @@ patch_reload2.s:
 
   Dropped vs build_reload.py: "ALL PARTS" (the FUN_4004aab4(0..3) loop).
 
+  Session ??: FIXED a bug Session 60 (NOTES.md) flagged but never addressed --
+  rl_yes (the [YES] detour @ 0x4005e4c8) sits on the identical dead-hook mechanism
+  that made DIRECTJUMP_V3 do nothing when flashed: [PTN] press unconditionally
+  pushes a UI overlay keymap layer whose own YES record is NULL, so the runtime
+  dispatch slot for YES goes to 0 -- and 0x4005e4c8 is never entered at all --
+  for as long as [PTN] stays physically held.  A user who presses YES while
+  still holding PTN (plausible: DIRECT JUMP trains exactly that gesture) would
+  see nothing happen.  Fixed the same way DIRECT JUMP v4 was
+  (build_directjump_v4.py, --defsym DJ_KEYMAP=1): write the real handler
+  straight into the dead slot instead of relying on the detour to be reached.
+  RELOAD2 needs it for BOTH keys it uses -- NO's slot in that same layer isn't
+  NULL (it's 0x40056aa8), but that function is an unconditional no-op for every
+  PTN_MODE this project's own [PTN]-hold gesture can produce, so it's shadowed
+  too, falling back to it byte-for-byte otherwise.  The ORIGINAL 0x4005e4c8 /
+  0x4005e25c detours are kept, unchanged -- they're what answers the picker
+  once [PTN] has been released, the documented no-timeout common case.  Arrow
+  keys have no record in that layer's table at all, so they were never affected.
+  Full RE + design rationale: patch_reload2.s's own header comment; dynamic
+  proof against the real stock layer-push code: emu_reload2_keymap.py.
+
   1. patch_trigscale  -- MIDI manual-trig stall fix.  Byte-identical detour + cave
                          to build_trigscale_only.py / build_reload.py.
   2. patch_reload2    -- six detours:
@@ -126,6 +146,15 @@ PATCHES = [
       (0x40085864, "rl_job", "2d4afd762f2a0004", 8, "jmp")]),  # 0x14 case: move.l a2,-650(fp) ; move.l 4(a2),-(sp)
 ]
 
+# [PTN]-held keymap layer 0x400bf0f2, 26-byte records (see patch_reload2.s header
+# comment / patch_directjump.s's identical PTN_LAYER_YES for the RE).  press field
+# is record base + 2.  YES (code 0x31) is NULL in stock; NO (code 0x32) is
+# 0x40056aa8, an unconditional no-op for every PTN_MODE our own gesture produces.
+PTN_LAYER_YES = 0x400bf0be
+PTN_LAYER_YES_STOCK = bytes([0x31, 0x00]) + bytes(24)
+PTN_LAYER_NO = 0x400bf0a4
+PTN_LAYER_NO_STOCK = bytes([0x32, 0x00]) + (0x40056aa8).to_bytes(4, "big") + bytes(20)
+
 FREE_END = 0x400d7c3c
 
 
@@ -181,6 +210,20 @@ def main():
             branch = jsr(s[sym]) if kind == "jsr" else jmp(s[sym])
             img[do:do + n] = branch + b"\x4e\x71" * ((n - 6) // 2)
             print(f"    0x{site:08x} -> {name}:{sym} 0x{s[sym]:08x}  ({kind}, {n} B)")
+
+    print("\n=== [PTN]-held keymap layer: YES/NO press slots -> rl_yes_ptnheld/rl_no_ptnheld ===")
+    rsyms = syms["patch_reload2"]
+    yo = o(PTN_LAYER_YES)
+    if bytes(img[yo:yo + 26]) != PTN_LAYER_YES_STOCK:
+        sys.exit(f"PTN-layer YES record 0x{PTN_LAYER_YES:08x} unexpected: {bytes(img[yo:yo+26]).hex()}")
+    img[yo + 2:yo + 6] = rsyms["rl_yes_ptnheld"].to_bytes(4, "big")
+    print(f"  0x{PTN_LAYER_YES + 2:08x}  press NULL       -> rl_yes_ptnheld 0x{rsyms['rl_yes_ptnheld']:08x}")
+
+    no = o(PTN_LAYER_NO)
+    if bytes(img[no:no + 26]) != PTN_LAYER_NO_STOCK:
+        sys.exit(f"PTN-layer NO record 0x{PTN_LAYER_NO:08x} unexpected: {bytes(img[no:no+26]).hex()}")
+    img[no + 2:no + 6] = rsyms["rl_no_ptnheld"].to_bytes(4, "big")
+    print(f"  0x{PTN_LAYER_NO + 2:08x}  press 0x40056aa8 -> rl_no_ptnheld  0x{rsyms['rl_no_ptnheld']:08x}")
 
     spans.sort()
     for (a1, b1, n1), (a2, b2, n2) in zip(spans, spans[1:]):
