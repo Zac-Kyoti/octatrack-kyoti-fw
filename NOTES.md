@@ -16840,7 +16840,7 @@ incapable of producing a repeating, tempo-locked, multi-cycle pattern on its own
 ### Housekeeping
 
 New: `tools/ghidra/attic/GhidraMute14.java`. Modified further: `tools/diag_echo_realkey.py`
-(return-address capture on the `fb_pass`/`fb_silence` hooks). **Still NOT committed.**
+(return-address capture on the `fb_pass`/`fb_silence` hooks). Committed `6ccc86c`, pushed.
 
 ## Session 75 continued (2026-09-19, `wip`) — SIDECHAIN3: HARDWARE CONFIRMED FIXED. User
 flashed the Session 75 build (n7 fix + the split-block repeat-call guard, both fixes
@@ -16866,3 +16866,498 @@ Nothing further planned for this bug. `out/OCTATRACK_OS1.40C_SIDECHAIN3.syx` (al
 flashed, working) is the current known-good SIDECHAIN3 build. Any future SIDECHAIN work is
 UI/parameter tweaks and optimization, not bug-fixing -- see whatever session picks that up
 next for its own scope.
+
+---
+
+## Session 76 (2026-09-19, `wip`) -- SIDECHAIN3 UI: MON on COMPRESSOR page 2 now draws as a
+bipolar switch (OFF left / ON right) instead of a knob, matching stock SLIC/LEN/RATE. Pure
+ColdFire descriptor edit, zero DSP/cave impact. Built, all three emulator suites still ALL
+GOOD (unaffected by design -- DSP payload bytes didn't change). **NOT yet flashed.**
+
+### Scope for this thread, per the user
+
+SIDECHAIN3 (the MON ringing bug, Sessions 55-75) is closed and hardware-confirmed fixed --
+this is a new, separate thread: "relatively simple UI tweaks and optimizations" to the
+SIDECHAIN feature (`tools/patch_sc_dsp3.asm` / `tools/build_sidechain3.py`: KEY, KEY FLT,
+KEY GAIN, MON/SC LISTEN on the COMPRESSOR page). No list was given up front -- asked first,
+per instructions. First ask: **"make the FX page 2 MON control a bipolar switch on the UI
+rather than a knob. There are many examples of such bipolar switches in the stock OT FW...
+Playback Page 2: SLIC, LEN, RATE are good examples. The MON text labels should be ON
+(position 2, switch to the right) and OFF (position 1, switch to the left)."**
+
+### Found the mechanism: a per-parameter descriptor field nobody had documented yet
+
+`tools/build_sidechain3.py`'s own COMPRESSOR descriptor loop (added when KEY/KFLT/KGAIN/MON
+were first shipped) already pokes 5 fields per slot -- name (`E+0x4e+6*slot`), count
+(`E+0xd2+4*slot`), default (`E+0x96+slot`), and two 4-byte pointers it calls "A"
+(`E+0x102+4*slot`) and "B" (`E+0x132+4*slot`). `reference/kb/memory-map.md`'s own descriptor
+doc documents A ("formatter / custom-display callback") and a *different*, single,
+non-per-slot `E+0x176` ("page-class handler") but says nothing about B -- it was previously
+only ever WRITTEN (always forced to `0`, every slot, regardless of what `cur["b"]` asserted
+the stock leftover value to be) and never read for meaning. Turned out B is exactly the
+knob-vs-switch selector the user was asking to find.
+
+### Cross-referencing stock, not guessing
+
+Wrote a one-off dump script (`E+0x4e/0xd2/0x96/0x102/0x132`, per the exact formula
+`tools/build_sidechain3.py` already uses) against `out/raw/section_3_MAIN_OS.bin` and ran it
+over every effect's own `E` from the `reference/kb/memory-map.md` FX table, plus the FLEX/
+STATIC **machine**-page descriptors (`0x400d2fe4` / `0x400d3176`, a *different* page-class
+renderer per that same doc -- "both gate on `0x800000a0`... `0x40032814`/`0x400328e4`" for
+FX pages vs whatever the machine-page renderer is) to see whether the B field means the same
+thing across page classes:
+
+- **Machine pages** (FLEX/STATIC, both identical): SLIC (slot 7), LEN (slot 8), RATE (slot
+  9) -- all `count=2`, all **B = `0x40046f10`**, three *different* A-formatters (own label
+  text each).
+- **FX pages**: FILTER's ENV (slot 8) and HOLD (slot 9) -- `count=2`, **also B =
+  `0x40046f10`**; HOLD's A is `0x4003c14c` (**the exact same `FMT_ONOFF` MON already uses**).
+  SPATIALIZER's M/S and DELAY's X/TAPE/SYNC/LOCK/PASS (5 more real switches) all share a
+  *different* value, `0x400477d4`. COMPRESSOR's own pre-existing (stock, unused, unlabeled)
+  slots 7/9 and PLATE REV's unnamed slot 9 carry a *third* value, `0x400475f8` -- which is
+  also what KFLT's own slot already had for B before this session zeroed it (leftover
+  garbage from those unused stock slots, not meaningful -- confirmed by disassembly below).
+
+That's 5+ real, independent stock 2-position switches converging on one shared, reused value
+(`0x40046f10`) across two structurally-different page-class renderers, despite each having
+its own distinct label text -- strong evidence it's a generic, context-driven switch-draw
+callback, not something baked per-parameter. FILTER's HOLD is a byte-for-byte match of what
+MON wants (`count=2`, `A=FMT_ONOFF`, `B=0x40046f10`) -- about as close to a hardware-proven
+precedent as static RE gets without actually flashing it. Picked `0x40046f10` specifically
+(over the `0x400477d4` sibling) because it's the exact value the user's own SLIC/LEN/RATE
+reference uses.
+
+### Disassembled to make sure B really is a draw callback, not something coincidental
+
+`m68k-elf-objdump -D -b binary -m 68020 --adjust-vma=<addr>` against `0x40046f10`,
+`0x400477d4`, and `0x400475f8` (extracted from `section_3_MAIN_OS.bin`): three genuinely
+different functions, same shared skeleton (`movem.l`-heavy prologue, a conditional block
+gated on an incoming flags word, then two shared subroutine calls at `0x40012f30` /
+`0x40013a08` plus a shared string ref `0x400b465d`) but different internal field offsets
+(`addil #0x12/#0x28/#9` for `0x40046f10` vs `#0x12/#0x20` for `0x400477d4` vs `#0x12/#0x23`
+for `0x400475f8`) -- consistent with "draw-callback taking a context struct passed in
+registers," not three copies of the same thing, and not param-specific hardcoded pixel
+offsets (the whole point of reusing 0x40046f10 across 5 differently-labelled real params).
+This is why KFLT's B is safe to zero: it was never a live pointer to begin with, just
+leftover bytes in a slot nobody had used before KFLT claimed it, and the KFLT widget has
+worked correctly (hardware-confirmed) with B forced to 0 this entire time.
+
+### The change
+
+`tools/build_sidechain3.py`: added `SWITCH_FN = 0x40046f10` (with the full provenance above
+as a comment) and a 7th element per `SLOTS` tuple, `bnew` (the value to actually WRITE to
+the B field -- previously hardcoded to always write `0`). KEY/KFLT/KGAIN keep `bnew=0`
+(unchanged behaviour); MON gets `bnew=SWITCH_FN`. The assert against `cur["b"]` (the STOCK
+value before our patch) is untouched -- that's a pre-condition check, not the write value,
+and was already correctly `00000000` for MON's slot. Zero new cave bytes, zero new detours,
+zero DSP-side change of any kind -- this is a single 4-byte field repoint in an existing,
+already-patched descriptor struct.
+
+### Verification
+
+Build: `python3 tools/build_sidechain3.py` -- clean, `slot 11  MON  count 2  default 0
+A 0x4003c14c  B 0x40046f10`, DSP cave unchanged at 259/261 words both payloads (expected --
+this change touches nothing DSP-side), checksum/round-trip ok, same output paths as always.
+`tools/emu_sc_dsp3.py` (plain + `--patched`) and `tools/emu_sc_dsp3_moncommit.py`: **ALL
+GOOD**, unaffected by design (DSP payload bytes are bit-identical to the last flashed build).
+
+**What is NOT verified**: the actual on-screen switch rendering itself. There is no
+emulator for the ColdFire UI/display path in this project's toolchain -- everything above is
+static disassembly + cross-reference against 5 real stock precedents, the same standard of
+evidence the project's own rules call "well-supported" elsewhere (cf. Session 75's own
+HANDOFF language) but explicitly NOT a substitute for the real test. The only way to know
+for certain is to flash and look at the COMPRESSOR page 2 MON control on real hardware.
+
+### HANDOFF
+
+**NOT flashed** -- per standing instruction, nothing gets flashed without the user's own
+explicit go-ahead. `out/OCTATRACK_OS1.40C_SIDECHAIN3.syx` now has the switch-style MON;
+`out/OCTATRACK_OS1.40C_SIDECHAIN3.syx`'s prior (flashed, working) build is not preserved
+under a separate filename -- if the user wants to revert to knob-style MON without losing
+the hardware-confirmed ringing fix, `bnew=0` on MON's `SLOTS` entry reproduces it exactly.
+Cave budget note for whoever picks up the next UI tweak: still 259/261 words both payloads,
+unchanged by this session (2 words of slack) -- this specific tweak family (ColdFire
+descriptor field repoints) doesn't touch that budget at all, only DSP-side param math would.
+Next: user to flash-test MON's new switch rendering, then hand over the remaining UI-tweak
+wishlist (this was explicitly "start by asking" -- only MON was actually asked for and
+built).
+
+---
+
+## Session 76 continued (2026-09-19, `wip`) -- SIDECHAIN3 UI: MON switch HARDWARE
+CONFIRMED working. Next ask: KFLT click/pop at the LP/OFF/HP boundary. Hit a real word-
+budget wall trying to fix it the "obvious" way -- user's own idea (swap the DSP donor from
+SPATIALIZER to SPRING REVERB, restoring SPATIALIZER as a real effect) blew the wall open
+(261 -> 1063 words). Both the donor swap AND the actual KFLT crossfade fix built, emulator-
+verified (new targeted test coverage, not just "existing tests still pass"), disassembly-
+audited. **NOT yet flashed.**
+
+### MON switch: confirmed on hardware
+
+User flashed Session 76's build and confirmed: "Looks good, works fine." Closes that thread.
+
+### New ask: KFLT LP<->OFF<->HP transitions pop
+
+Precise complaint: turning KFLT through the literal bypass point (raw value 64) produces an
+audible click/pop -- "not a literal on/off where change at a non-zero crossing of the sample
+creates a discontinuity pop... something more like how a truly continuous multimode filter
+would behave." Root cause, from `patch_sc_dsp3.asm`: at KFLT==64 the whole SVF loop is
+skipped entirely (`beq zz10`), leaving `x:$40` whatever it was after KEY GAIN (raw/dry); any
+other value runs the filter and fully overwrites it with `lp'`/`hp`. Crossing 64 is a hard,
+instantaneous switch between two completely different signals. Checked `tools/sc_tables.py`:
+the LP/HP cutoff table (40-2200 Hz) is asymmetric at the boundary -- LP's nearest-to-OFF
+setting (2200 Hz) still filters real content, HP's nearest-to-OFF setting (40 Hz) barely
+touches anything -- so this isn't fixable by just widening the FTAB range symmetrically; it
+needed an actual crossfade.
+
+Asked the user up front whether the fix should eliminate the OFF detent entirely (continuous
+LP->notch->HP sweep, closer to a "real" analog multimode filter but changes the sound of the
+middle position) or keep OFF as a real state and just smooth the edges into/out of it. User
+picked the latter (keep OFF, crossfade the edges) -- smallest change to the existing,
+already-tuned sound.
+
+### Hit a real word-budget wall designing the minimal version
+
+Empirically probed the DSP56300 ISA via `dsp_asm` directly (write a snippet, assemble,
+inspect the opcode/word count -- faster and more reliable than trusting general DSP56xxx
+knowledge, given this project's own history of assembler-specific quirks, q1-q3 in this same
+file's header). Found: `mpy`'s two operands must both come from {x0,x1,y0,y1}, and by the
+time you reach the blend point in the KEY FLT loop all four are already pinned (x1=f
+coefficient, y0/y1=SVF state, x0=the just-computed wet sample) -- there is no free XY-slot
+for a blend coefficient without evicting and later restoring one of them, which itself costs
+more words. Variable-count shift (`asr <reg>,acc,acc`, confirmed working for x0/x1/y0/y1
+count sources) has the identical problem. Cheapest honest design found (a single fixed 50/50
+blend exactly at the LP/HP step closest to OFF, using only `move`/`add`/`asr #1`, no `mpy`)
+still priced out to roughly +16 words against a cave sitting at 259/261 -- 2 words of slack.
+Reported the real cost to the user with three options (narrow the fix to LP only, spend a
+session hunting for ~16 words of savings elsewhere, or reconsider the no-OFF continuous
+design since it turned out to cost close to zero words) rather than silently picking one.
+
+### User's counter-proposal: swap donors instead of fighting the budget
+
+**"Why don't we restore the SPATIALIZER effect, and get rid of SPRING REVERB instead?"**
+-- with explicit requirements: retool the FX2 chooser correctly (avoid the Session 55/56
+"highlighted effect is wrong" bug), graceful passthrough for older projects that still
+reference SPRING REVERB by id, SPRING REVERB fully removed from the FX2 list.
+
+Investigated before touching anything:
+- **SPRING REVERB's actual DSP module size**: read its dispatch entry (id `0x15`, `X:0x215`)
+  in both payloads, then walked the module boundaries with `refs/octabam/tools/build/
+  dsp_modmap.py` (the same tool `dsp_module_fileoff`/`dsp_xtable_fileoff` already use) --
+  **1063 words** in each payload, init to the next module's own start, no overlap either
+  side. ~4x SPATIALIZER's fixed 261.
+- **Confirmed FX2-exclusive**: `reference/kb/memory-map.md` already documents "reverbs are
+  FX2-exclusive (hardware menu restriction)"; verified directly against the stock FX1_LIST
+  dump -- SPRING REVERB's `E` address is genuinely absent from it. Its FX2_LIST position is
+  13 (`entries[13] == 0x400d5726+0x38`, matching `SPAT_P`'s own `E+0x38` convention).
+- **The Session 55/56 "wrong highlight" bug, re-read**: root cause was FX1 having its OWN
+  separate id->position table (`FX1_ID2POS`, `0x400d60d0`) distinct from FX2's `ID2POS`
+  (`0x400d6150`) -- missing that left FX1 highlighting off-by-one past the removed entry.
+  Since SPRING REVERB was never on FX1 at all, this donor swap only ever needs FX2_LIST/
+  ID2POS touched -- and restoring SPATIALIZER needs literally nothing (it's back simply by
+  no longer being removed). Structurally simpler than the bug it's avoiding, not just
+  avoiding it by luck.
+- **Backward-compat passthrough, already solved by the existing code**: read what
+  `stub_init`/`stub_proc` (the addresses SPATIALIZER's dispatch entry was nulled to) actually
+  point at -- NOT SPATIALIZER-specific at all. Cross-referencing X:0x215 across all 32 ids
+  shows this exact init/proc pair is ALREADY the shared "no real effect assigned" stub for 18
+  other unused ids in stock firmware. Retargeting SPRING REVERB's own entry at the identical
+  pair gives old projects the exact same graceful passthrough SPATIALIZER already got --
+  zero new code.
+- **Safety canary**: SPRING REVERB's real init routine's first 3 P-words (`0x22ee00
+  0x0140c0 0x000040`, identical in both payloads) replace the old single-word "move #0,x0"
+  SPATIALIZER canary before the splice.
+
+### Implementation surprise: `jsr` breaks past 0xfff
+
+First build attempt failed twice, both from the SAME underlying cause -- SPRING REVERB's
+`cave_org` (`0x1252`/`0x1012`) sits well past `0xfff`, the short-absolute-jsr addressing
+limit `jsr_short()` and `patch_sc_dsp3.asm`'s own internal `jsr zz18` calls both depended on
+(never an issue at SPATIALIZER's `0xaa8`/`0x868`). `dsp_asm`'s assembler has no long-absolute
+jsr/jmp form at all (confirmed by testing several syntaxes, all `InvalidInstruction`) --
+but `bsr` (PC-relative, always 2 words regardless of displacement magnitude/sign, verified
+empirically) works at any address and pushes a return address `rts` pops identically to
+`jsr`. Fixed both internal `jsr zz18` -> `bsr zz18` in the .asm, and wrote `bsr_long()` in
+`build_sidechain3.py` (hand-encodes the same `0x0D1080 + displacement` pattern, verified
+against `dsp_asm`'s own output at multiple origins including negative and >0xfff
+displacements) to replace `jsr_short()`+NOP at the three external dispatcher-hook detour
+sites. `jsr_short()` itself is kept (unused by this file's own `main()` now) only because
+`tools/build_merged.py` still imports it -- that file has NOT been updated for this donor
+swap and will need the same treatment before its own next real build (out of this session's
+scope: user's ask was specifically `patch_sc_dsp3.asm`/`build_sidechain3.py`).
+
+### The actual KFLT fix, once budget was no longer the constraint
+
+Single fixed 50/50 blend exactly at the LP/HP step closest to OFF (idx==31 for LP, idx==0
+for HP -- everything else unchanged, including literal bypass at KFLT==64 itself). Turns the
+one big wet<->dry jump into two smaller ones (full LP -> half -> OFF -> half -> full HP).
+Register plan (all confirmed free for the relevant span by grepping every reference in the
+file, not assumed): `n6` = edge flag (0/1, set once per call in each of the LP/HP idx-calc
+branches, free after the split-block check at the top of `scdet` consumes it); `r1` = dry
+(the pre-filter (L+R)/2 average, stashed the instruction after it's computed, read back at
+the blend tail before `x:$40` gets its final write -- free for the entire KEY FLT block, its
+last prior use is the KEY GAIN table lookup). Both edge-flag branches normalise into a clean
+accumulator before testing (`move n1,b`/`move b1,a` then `tst`/`cmp`) rather than testing the
+just-shifted register directly -- the exact q3 trap this file's own header already warns
+about (`asr`'s shifted-out bits land in acc0; `tst`/`cmp` see the whole accumulator). No
+`mpy` anywhere in the new code (avoids the mpysu-encoding trap entirely) -- the blend is
+`move`/`add`/`asr #1`/`move`, four words, gated by a 3-word flag check.
+
+### Verification
+
+Build: cave grew from 261w (post donor-swap) to 285w, comfortably inside the new 1063-word
+ceiling. `tools/emu_sc_dsp3.py` (plain + `--patched`) and `tools/emu_sc_dsp3_moncommit.py`
+updated for the new `CAVE_ORG`/`DONOR_WORDS`/detour-opcode-check (all previously hardcoded to
+the SPATIALIZER address and the old `jsr_short` `w>>12==0x0D0` pattern -- would have silently
+compared against the wrong P-memory region otherwise) -- **ALL GOOD**, all three suites.
+Added NEW targeted test coverage for the edge blend specifically (per this project's own
+standing rule: "existing tests still pass" is not evidence for a code path the existing tests
+don't exercise) -- `ref_dry()` (the exact same (L+R)/2 average `ref_svf`'s own loop computes,
+exposed standalone) plus a new "KEY FLT edge blend" section checking KFLT 62/65 (the two edge
+idx values) equal `(wet+dry)/2` exactly, AND KFLT 60/67 (one step further in on each side)
+are still 100% wet -- proving the flag fires on exactly the intended one idx per side, not a
+wider or off-by-one range. Manually disassembled the freshly assembled cave
+(`dsp56kDisassemble`) end to end and read every new instruction -- matches intent exactly,
+no `mpysu`/`macsu`, no unexpected opcode.
+
+### HANDOFF
+
+**NOT flashed.** Two independent, hardware-shipping-adjacent changes bundled in this build:
+(1) the SPATIALIZER<->SPRING REVERB donor swap (SPATIALIZER fully restored as a selectable
+effect; SPRING REVERB removed from the FX2 chooser, silently passes audio through for any
+project still referencing it) and (2) the KFLT edge-blend fix. Both are build-clean and
+emulator-verified, but the SPRING REVERB passthrough specifically has NO automated test (no
+DSP-level harness exercises the dispatch-null mechanism itself, same as SPATIALIZER's
+original one never did) -- this needs a real hardware check: does FX2's SPRING REVERB entry
+actually disappear from the chooser, does an OLD project that already has SPRING REVERB
+assigned on FX2 load and play back audio silently instead of crashing, does SPATIALIZER now
+appear and actually process audio correctly again. The KFLT fix needs the obvious test: sweep
+KFLT through the OFF point on a live signal with KEY assigned, confirm the pop is gone (or at
+least much smaller) at both the LP->OFF and OFF->HP transitions. `tools/build_merged.py` is
+now stale relative to this donor swap (still assumes SPATIALIZER's old `cave_org`/budget) --
+flag for whoever next touches that file, not addressed here (out of this session's scope).
+Cave budget for whoever picks up the NEXT SIDECHAIN UI tweak: 285/1063 words, ~778 words of
+slack -- the donor swap solved the immediate wall and then some.
+
+---
+
+## Session 76 continued again (2026-09-19, `wip`) -- SIDECHAIN3 UI: the KFLT edge-blend fix
+was a REGRESSION, not a fix. User flashed it: SPATIALIZER confirmed working (that part is
+solid), but the edge-blend zones produce a ring-modulation-like artifact on the TARGET
+track's audio when MON is off. Diagnosed the mechanism, **REVERTED the edge-blend code**
+(kept the donor swap -- confirmed unrelated and independently working). Cave back to
+261/1063 words, no bypass-click fix in place. Next KFLT attempt needs a fundamentally
+different approach -- see "what's actually needed" below.
+
+### The bug report
+
+"turning the KFLT knob into those areas creates an audio artifact in the TARGET track
+audio, when MON is OFF... sounds a lot like the target track audio is being ring-modulated."
+Only in the narrow edge zones the blend touches (idx 31 LP / idx 0 HP). May also happen with
+MON on, unconfirmed -- `moncommit` overwrites the target track's own committed audio with
+the (re-fetched) key signal for audition whenever MON is on, so the real gain-reduced target
+audio is inaudible at that moment regardless of whether it's also corrupted.
+
+### Root cause (mechanistic, not yet hardware-isolated further, but explains every symptom)
+
+`scdet`'s edge-blend wrote `(wet + dry) / 2` into `x:$40` **unconditionally**, whenever KFLT
+sat in the edge zone -- not just for MON's audition copy. `x:$40` is the buffer the REAL
+STOCK COMPRESSOR's own envelope-follower/detector reads AFTER `scdet` returns (this is the
+entire point of the `sctap`/`scdet` hooks -- redirect the detector's input to the processed
+key). So the blend was never just cosmetic for listening; it directly fed the actual
+gain-reduction math driving the target track.
+
+Summing a signal with a **phase-shifted copy of itself** (the SVF's filtered output has real
+phase shift relative to the dry input, especially near a cutoff) is textbook comb filtering
+-- constructive/destructive interference that varies with frequency. Feed that into an
+envelope follower and the follower's OWN gain-reduction output can end up modulating at a
+rate tied to the key signal's own frequency content, not just its amplitude envelope --
+which is exactly what "ring modulation on the target track" describes. Because the blend was
+a STATIC function of knob position (not a transient tied to a switching event), simply
+parking KFLT in the edge zone kept producing it continuously, not just during a sweep --
+matches "turning the knob into those areas" causing it, not just crossing through them.
+
+This also cleanly explains why MON hid it: MON's own copy of the blended signal (the SC
+LISTEN gen-1 stash) IS also comb-filtered, but the user is listening to `moncommit`'s
+substituted target-track audio at that point, not the real gain-reduced signal -- masking,
+not fixing, whatever the detector itself was doing.
+
+### Why the previous session's emulator tests didn't catch this
+
+They checked `x:$40`'s VALUE against a python reference for a single isolated `-proc scdet`
+call -- and the value WAS numerically exactly `(wet+dry)/2`, proven correct by that
+standard. What they never modeled: `x:$40` feeding a REAL envelope-follower/detector
+continuously across many blocks, or any frequency/phase-domain property of the blended
+signal (comb filtering is a property of the WAVEFORM's phase relationships, invisible to a
+few discrete numeric sample comparisons). "The numbers match a reference" is not the same
+question as "is this signal safe to feed a detector" -- a real gap in this test suite's
+coverage model, not a mistake in what it did check.
+
+### What's actually needed (not yet designed)
+
+A fix that avoids ever summing dry and phase-shifted-wet into the SAME buffer the real
+detector reads. Candidates, un-evaluated:
+- a **time-based** crossfade triggered by the transition EVENT (KFLT crossing into/out of
+  bypass since the last block), ramping over a short, fixed number of blocks, so resting the
+  knob anywhere -- including in the old edge zone -- always yields a single, pure signal
+  (100% wet or 100% dry), never a static per-sample blend. Needs new persistent state (a
+  fade-progress counter, a "was bypass last block" flag) -- `r7+$14` is confirmed untouched
+  by stock and by every hook in this file so far (per this file's own header), a candidate
+  slot.
+- anything that changes ONE continuous signal's gain smoothly rather than mixing two
+  differently-phase-shifted sources together.
+Do NOT reach for a wider/smoother version of the SAME amplitude-domain wet+dry sum this
+session tried -- a wider ramp still sums a signal with a phase-shifted copy of itself, just
+over more knob positions; it would not remove the comb-filtering mechanism, only spread it
+over a wider range (probably WORSE, not better -- narrowing was accidentally protective).
+
+### The revert
+
+`tools/patch_sc_dsp3.asm`: removed the `n6` edge-flag setup in both the LP and HP idx-calc
+branches, and the blend tail (`move n6,a / tst / beq / move r1,b / add x0,b / asr #1,b,b /
+move b,x0`) in the KEY FLT loop -- back to the exact pre-crossfade code, bar the `jsr zz18`
+-> `bsr zz18` conversions (kept -- those belong to the donor swap, not the crossfade, and
+`bsr` is required regardless since the cave sits past `dsp_asm`'s short-jsr range now).
+`tools/emu_sc_dsp3.py`: removed `ref_dry()` and the "KEY FLT edge blend" test section, and
+the matching docstring line -- back to exactly the coverage from before the crossfade
+attempt. `tools/build_sidechain3.py` untouched (nothing there was crossfade-specific).
+
+### Verification
+
+Rebuilt: cave back to 261/1063 words both payloads (matches the donor-swap-only build
+exactly), `mainos_sidechain3.bin: 1709 bytes changed vs stock` (matches the donor-swap-only
+byte count from before the crossfade was ever added). `tools/emu_sc_dsp3.py` (plain +
+`--patched`) and `tools/emu_sc_dsp3_moncommit.py`: **ALL GOOD**, all three suites, confirming
+a clean revert with nothing else disturbed.
+
+### HANDOFF
+
+**NOT flashed.** Current state: SPATIALIZER restored + SPRING REVERB donated/hidden (hardware
+-confirmed good), NO KFLT bypass-click fix in place (back to the original literal on/off,
+Sessions before this one). Do not re-attempt an amplitude-domain wet+dry sum anywhere `x:$40`
+feeds the real detector, regardless of blend width or shape -- the comb-filtering mechanism
+above applies to ANY such sum, not just the narrow one this session shipped. Next session:
+design a transition-EVENT-triggered, time-based fix instead (see "what's actually needed"
+above), and this time think through what a CONTINUOUSLY-RUNNING detector sees, not just what
+a single isolated `-proc scdet` call's numeric output looks like, before writing any code.
+
+---
+
+## Session 76 continued yet again (2026-09-19, `wip`) -- SIDECHAIN3 UI: KFLT click/pop, THIRD
+attempt -- one-pole tracker replaces the 2-pole Chamberlin SVF entirely. Simpler than either
+of the first two attempts (single-stream throughout, no time-based fade, no dual-stream
+blend), built, emulator-verified with new targeted coverage, disassembly-audited. **NOT yet
+flashed** -- this is the one that most plausibly fixes the actual bug, but every prior attempt
+this session also looked solid before hardware said otherwise, so treat it as unproven until
+tested.
+
+### Discarding the time-based-fade idea, and where the real fix came from
+
+User pushed back on the time-based fade proposed at the end of the previous entry: KFLT only
+ever touches the KEY signal (`x:$40`), never the target track's own audio directly, and asked
+for something simpler -- then specifically asked to look at how the STOCK FILTER effect
+reaches near-transparent at its own extreme (BASE=min/WDTH=max, its own factory default,
+confirmed directly off the ColdFire descriptor). Disassembled FILTER's real DSP module
+(`dsp56kDisassemble`, both payloads) -- confirmed it's a proper cascaded biquad, not
+anything like our SVF, with its own coefficient pipeline (trig/log table calls). Tried
+running it in isolation via `dsp_host` to dump actual coefficients -- segfaulted (the
+harness is built around our own small cave's isolated hooks, not a full stock effect with
+real cross-module dependencies; not worth the setup cost to chase further).
+
+The actually load-bearing insight, once the user reframed "don't emulate FILTER, just don't
+comb-filter and don't pop" and asked to think from scratch: **the old SVF's `hp = in - lp -
+2*bp` uses its own state UNWEIGHTED.** No matter how the tuning coefficient `f` is chosen,
+`lp`/`bp` contribute at full strength -- so stale state always matters, and this is a
+property of the EQUATION, not something a wider/gentler blend around it could ever fix (the
+reverted attempt earlier this session proved that empirically the hard way). A biquad avoids
+this because its feedback terms are coefficient-weighted (`a1*y[n-1]+a2*y[n-2]`) -- but you
+don't need a full biquad to get that property. **A plain one-pole EMA filter already has
+it**: `tracker += a*(in-tracker)`. At a's ceiling, `tracker` becomes `in` itself, EVERY
+sample, with NO dependence on its own history. And critically, a one-pole is unconditionally
+stable for any `a` in its valid range -- no discriminant, no pole-magnitude ceiling like the
+old SVF's fixed q=2 hit (found two sessions ago, un-shipped: pushing LP's cutoff toward
+transparent with q=2 fixed went genuinely unstable above ~5-6 kHz, which is what blocked
+reaching LP transparency the "obvious" way before this session even started down the dry/wet
+blend path). Bonus: a single real pole cannot resonate, full stop -- Session 64's whole
+"q >= 1.688 to avoid ringing" derivation is now moot, not because it was re-solved, but
+because the failure mode (a complex pole pair) is structurally impossible with one pole.
+
+HP is NOT symmetric: a highpass, even at its most transparent, still has to track something
+(a slow DC estimate) to subtract -- that's what "highpass" means, not a shortcoming of this
+implementation, checked by working through the algebra, not assumed. So HP's near-OFF edge
+gets close to transparent (near-DC, ~8 Hz) but not the LP side's genuine exact-unity limit.
+The mitigating fact: at that coefficient the tracker moves extremely slowly, so any error
+left over from reusing whatever the tracker last held decays gently rather than snapping.
+
+User's own contribution, mid-design: pointed out stock FILTER's BASE control reportedly goes
+from audibly-filtered to as-good-as-transparent in a single raw-value step (126->127) --
+i.e. no gradual ramp needed near an extreme, PROVIDED the coefficient landed on is itself
+well-behaved. That's exactly what licenses the edge-override design below (a single jump,
+not a multi-step crossfade).
+
+### The design
+
+Single state variable (`tracker`, r7+$16 -- the old `bp` integrator at r7+$17 is retired,
+no longer used by this cave at all), single coefficient (`x1`, same slot as before). Per
+sample: `diff = in - tracker; tracker += (a*diff)>>23; LP output = tracker; HP output =
+in - tracker` (n0 still marks LP vs HP for the output select, unchanged). No `mpy` beyond
+the one already-proven-safe `x1,y0` pairing (this file's own q1-q3 header quirks) -- only
+ONE multiply now, not two, so no new mpysu-trap surface at all.
+
+FTAB (`tools/sc_tables.py`): same 40-2200 Hz log-spaced shape as every prior session
+(preserves the Session-64-tuned "isolate the kick" character for ordinary use), but the
+per-entry VALUE is now `a = 1 - exp(-2*pi*fc/fs)` (one-pole EMA coefficient), not the old
+SVF's `f = 2*sin(pi*fc/fs)`.
+
+**The edge override, not a blend**: FTAB[31] (2200 Hz) is shared -- it's also HP's own
+deepest setting, and FTAB[0] (40 Hz) is also LP's own deepest setting. Pushing either toward
+"transparent" in the table itself would detune the OTHER mode's already-tuned end. So
+instead: LP's idx==31 and HP's idx==0 each get a ONE-TIME coefficient substitution, decided
+once per call before the loop even starts (zero per-sample cost, no register pressure) --
+`LP_EDGE` = the Q23 ceiling (`0x7fffff`, ~unity), `HP_EDGE` = a at ~8 Hz (`0x002554`). Wired
+as new `@LPEDGE@`/`@HPEDGE@` build tokens (mirroring `@GTAB@`/`@FTAB@`'s own pattern) so the
+literal values live in exactly one place (`sc_tables.py`'s `lp_edge()`/`hp_edge()`) and can't
+drift between `build_sidechain3.py` and `emu_sc_dsp3.py`'s own separate assemblers. At NO
+point does this write two different signals anywhere -- `x:$40` is always the output of
+exactly one coherent tracker, for every KFLT value including both edges, so the comb-
+filtering mechanism that broke the previous attempt cannot occur by construction, not by
+width or gentleness of any blend.
+
+### Verification
+
+Build: cave grew from 261w (post donor-swap, pre-crossfade baseline) to 268w -- 7 words for
+the whole redesign, comfortably inside 1063. `tools/emu_sc_dsp3.py`: rewrote the python
+reference model end to end (`ref_onepole()`/`a_for_kflt()` replace `ref_svf()`, mirroring the
+.asm's own idx-calc + edge-override dispatch exactly, not just the steady-state math) --
+every existing check ported (KEY GAIN, split-block, dirty-state, state-persistence) plus NEW
+coverage this session's own standing rule demands: KFLT 62/65 (both edge overrides) checked
+against the exact expected coefficient, AND KFLT 60/67 (one step further in) checked to
+confirm they're UNAFFECTED -- proving the override fires on exactly the intended one idx per
+side. The old "no resonance" discriminant check (meaningless for a system with only one
+pole) is replaced with a stability-range check (`0 <= a < Q23` for every FTAB entry and both
+edges) -- protects against the actual failure mode this topology can still have (a
+coefficient outside range = a genuinely diverging pole), not the one it structurally can't.
+`tools/emu_sc_dsp3.py` (plain + `--patched`) and `tools/emu_sc_dsp3_moncommit.py`: **ALL
+GOOD**, all three suites. Disassembled the freshly assembled cave end to end
+(`dsp56kDisassemble`) -- single `mpy x1,y0,b` (the confirmed-safe operand pairing), correct
+override literals at both edge branches, state seed/write-back touching only the one tracker
+register -- matches intent exactly, no `mpysu`/`macsu`, no unexpected opcode.
+
+### HANDOFF
+
+**NOT flashed.** This is the THIRD KFLT click/pop attempt this session (crossfade blend ->
+reverted for corrupting the real detector; wider-blend idea -> abandoned before building,
+same root cause; one-pole tracker -> this). Every one of the first two looked solid on paper
+and in the emulator before hardware disagreed, so say this plainly to whoever flashes next:
+**verify on real hardware before trusting it**, specifically (a) sweep KFLT through OFF in
+both directions on both LP and HP with a live signal and KEY assigned, confirm no click/pop
+AND no comb-filter/ring-mod artifact on the target track with MON off, (b) spot-check the
+"normal" (non-edge) LP/HP range still sounds like the same tuned filter it always has (FTAB's
+shape didn't change, but ALL 32 values were recomputed under the new formula, so a fresh ear
+check is warranted, not just trusting the numeric match to the python model). If this one
+also fails on hardware, the state-reseed idea floated during design (force the tracker to
+the current input sample specifically on re-entry from OFF, rather than trusting the slow-
+decay argument alone) was deliberately deferred to keep this attempt minimal -- that's the
+next thing to add, not a different topology. Cave budget: 268/1063 words, ~795 words of
+slack still. `tools/build_merged.py` remains stale relative to the donor swap (flagged two
+sessions ago, still not addressed, out of scope here too).

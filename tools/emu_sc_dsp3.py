@@ -9,15 +9,16 @@ Like emu_sc_dsp.py (step 2) this runs each hook AS its own -proc entry with the
 entry conditions seeded into the .mem, then reads back exactly what it produced.
 dsp_host can't run the stock COMPRESSOR end to end, so the compressor's
 gain-reduction response to the keybus is still a hardware test -- but the three
-new stages here (KEY GAIN scaler, 2-pole KEY FLT, SC LISTEN stash) are pure
+new stages here (KEY GAIN scaler, one-pole KEY FLT, SC LISTEN stash) are pure
 data transforms and ARE checked numerically against a Python reference:
 
   copy    KEY!=0, KFLT/KGAIN neutral  -> X:$40 == keybus[k]   (step-2 regression)
   KEY=0                               -> X:$40 untouched
   KEY GAIN  KGAIN != 64               -> X:$40 == keybus[k] * gain_table[idx]
-  KEY FLT LP / HP                     -> X:$40 == python_svf(keybus[k], f_table[idx])
+  KEY FLT LP / HP                     -> X:$40 == python_onepole(keybus[k], a_table[idx])
   KEY FLT bypass (KFLT == 64)         -> X:$40 == keybus[k]
-  state persistence (block 2)         -> continues the python SVF, no reset
+  KEY FLT edge override (idx 31/0)    -> X:$40 == python_onepole(keybus[k], LP_EDGE/HP_EDGE)
+  state persistence (block 2)         -> continues the python tracker, no reset
   SC LISTEN  MON=1                    -> keybus[k] gen 1 == the processed X:$40
 
 Payload B (tracks 1-4, CORE_BASE 0) only -- the code is byte-identical bar
@@ -38,19 +39,21 @@ RTS_ADDR = 0
 
 # default: throwaway placement of the cave over stock payload B (isolation test).
 # --patched: regenerate payload B's .mem from out/mainos_sidechain3.bin -- the
-#   cave is over the real SPATIALIZER donor and the three `jsr` detours are live.
+#   cave is over the real donor and the three detours are live.
 PATCHED = "--patched" in sys.argv
 if PATCHED:
     MEM_B = SCRATCH / "payload_B_sc3.mem"
-    CAVE_ORG = 0x868                    # SPATIALIZER P addr, payload B
+    CAVE_ORG = 0x1012                   # SPRING REVERB P addr, payload B (Session 76 continued)
     COMP_MOD, COMP_PROC = 0x1864, 0x1871
     COMMIT_HOOK = 0x303                  # dispatcher's per-track commit step
 else:
     MEM_B = ROOT / "out/dsp/payload_B.mem"
-    # was 0x1da0 -- moved under 0xfff so the zz17/zz20 -> zz18 `jsr` (Session
-    # 59/60's word-budget rescue) stays in dsp_asm's short-jsr range; matches
-    # --patched's CAVE_ORG so this isolation placement is proven collision-free.
-    CAVE_ORG = 0x868
+    # matches --patched's CAVE_ORG (SPRING REVERB donor, Session 76 continued)
+    # so this isolation placement is proven collision-free against the real
+    # thing. No longer constrained to stay under 0xfff for a short-jsr's sake
+    # -- zz17/zz20's internal calls into zz18 are `bsr` (PC-relative) now,
+    # not `jsr`, precisely because the donor swap moved the cave past 0xfff.
+    CAVE_ORG = 0x1012
     COMP_MOD, COMP_PROC = 0x1864, 0x1871
     COMMIT_HOOK = 0x303
 KB_BASE = 0x800
@@ -98,7 +101,9 @@ def assemble():
     # pass 1: placeholder table addrs to size the code
     def build(gt, ft):
         txt = SRC.read_text().replace("@KADJ@", "sub     #1,a") \
-                             .replace("@GTAB@", f"${gt:x}").replace("@FTAB@", f"${ft:x}")
+                             .replace("@GTAB@", f"${gt:x}").replace("@FTAB@", f"${ft:x}") \
+                             .replace("@LPEDGE@", f"${sc_tables.lp_edge():x}") \
+                             .replace("@HPEDGE@", f"${sc_tables.hp_edge():x}")
         a = SCRATCH / "sc3_test.asm"; a.write_text(txt)
         o = SCRATCH / "sc3_test.bin"
         sh(DSP_ASM, "-in", a, "-org", f"{CAVE_ORG:x}", "-out", o)
@@ -112,8 +117,8 @@ def assemble():
     assert len(code) == n, "code size shifted between sizing passes"
     words = code + GAIN_T + FLT_T
     total = len(words)
-    if total > 261:
-        sys.exit(f"cave {total} words > SPATIALIZER donor's 261")
+    if total > 1063:
+        sys.exit(f"cave {total} words > SPRING REVERB donor's 1063")
     # rts positions delimit the three routines. scdet now has THREE internal
     # rts (zz16's, zz20's, and zz18's -- the shared OFF-publish sub zz17/zz20
     # both `jsr` into, added to reclaim word budget for moncommit's exact-
@@ -159,16 +164,20 @@ def ensure_patched_mem(words):
         for k, (x, y) in enumerate(zip(got, words)):
             if x != y:
                 sys.exit(f"--patched cave word {k} differs: image 0x{x:06x} vs asm 0x{y:06x}")
+    # detour opcode word is always exactly 0x0D1080 (bsr_long's constant
+    # opcode half, build_sidechain3.py) -- was `w >> 12 == 0x0D0` (jsr_short's
+    # pattern) before the SPRING REVERB donor swap moved the cave past
+    # dsp_asm's short-jsr range (Session 76 continued).
     cmod = next(m for m in mods if m[0] == 0 and m[1] == COMP_MOD)
     w = cmod[2][COMP_PROC - COMP_MOD]
-    if w >> 12 != 0x0D0:
-        sys.exit(f"--patched: COMPRESSOR P:0x{COMP_PROC:x} is 0x{w:06x}, not `jsr` to the cave")
+    if w != 0x0D1080:
+        sys.exit(f"--patched: COMPRESSOR P:0x{COMP_PROC:x} is 0x{w:06x}, not `bsr` to the cave")
     # moncommit's detour lives in the DISPATCHER module, not the compressor's --
     # find whichever loaded module actually contains it.
     dmod = next(m for m in mods if m[0] == 0 and m[1] <= COMMIT_HOOK < m[1] + len(m[2]))
     w = dmod[2][COMMIT_HOOK - dmod[1]]
-    if w >> 12 != 0x0D0:
-        sys.exit(f"--patched: dispatcher P:0x{COMMIT_HOOK:x} is 0x{w:06x}, not `jsr` to the cave")
+    if w != 0x0D1080:
+        sys.exit(f"--patched: dispatcher P:0x{COMMIT_HOOK:x} is 0x{w:06x}, not `bsr` to the cave")
     print(f"  --patched: cave + scdet/moncommit detours verified against {imgp.name}")
 
 
@@ -262,27 +271,41 @@ def ref_gain(src, kgain):
     return out
 
 
-def ref_svf(src, kflt, lp=0, bp=0):
-    """mono-sum (L+R)/2, one-pole-pair Chamberlin SVF, q=2 (Session 64 --
-    overdamped so both LP and HP are real-pole/non-resonant across the whole
-    FTAB range; was q=1, which rang on fast transients -- see patch_sc_dsp3.asm's
-    KEY FLT header), dup L/R. src is interleaved L/R; returns interleaved,
-    same length."""
+def a_for_kflt(kflt):
+    """mirrors the .asm's own idx-calc + edge-override dispatch exactly:
+    KFLT<64 -> LP (idx = KFLT>>1, idx==31 -> LP_EDGE instead of FLT_T[31]);
+    KFLT>64 -> HP (idx = (KFLT-64)>>1, idx==0 -> HP_EDGE instead of FLT_T[0]).
+    Returns (a_coefficient, is_lp)."""
     if kflt < 64:
-        idx, is_lp = kflt >> 1, True
-    else:
-        idx, is_lp = (kflt - 64) >> 1, False
-    f = s24(FLT_T[idx])
+        idx = kflt >> 1
+        a = sc_tables.lp_edge() if idx == 31 else FLT_T[idx]
+        return a, True
+    idx = (kflt - 64) >> 1
+    a = sc_tables.hp_edge() if idx == 0 else FLT_T[idx]
+    return a, False
+
+
+def ref_onepole(src, kflt, tracker=0):
+    """mono-sum (L+R)/2, one-pole EMA tracker (Session 76 continued, 3rd
+    pass): tracker += a*(in-tracker); LP output = tracker, HP output =
+    in-tracker. Replaces the old 2-pole Chamberlin SVF -- see
+    patch_sc_dsp3.asm's KEY FLT header for why (coefficient-weighted
+    feedback: at a's Q23 ceiling the tracker becomes literally `in`, no
+    history dependence at all -- unlike the old SVF, whose `hp = in - lp -
+    2*bp` used state unweighted, so stale state always mattered regardless
+    of coefficient). src is interleaved L/R; returns interleaved, same
+    length, plus the final tracker value (state-persistence checks)."""
+    a, is_lp = a_for_kflt(kflt)
+    a = s24(a)
     out = list(src)
     for k in range(0, len(src) - 1, 2):
         inp = (s24(src[k]) + s24(src[k + 1])) >> 1
-        lp = lp + ((f * bp) >> 23)
-        hp = inp - lp - 2 * bp
-        bp = bp + ((f * hp) >> 23)
-        o = lp if is_lp else hp
+        diff = inp - tracker
+        tracker = tracker + ((a * diff) >> 23)
+        o = tracker if is_lp else (inp - tracker)
         o = max(-Q23, min(Q23 - 1, o)) & 0xFFFFFF
         out[k] = out[k + 1] = o
-    return out, lp, bp
+    return out, tracker
 
 
 # ---- signals ---------------------------------------------------------------
@@ -306,9 +329,9 @@ def main():
 
     probe = base_mem(words, scdet, sctail, False, None, None)
     r7 = r7_of(probe)
-    FF, S16, S17, S18 = r7 + 0xf, r7 + 0x16, r7 + 0x17, r7 + 0x18
+    FF, S16, S18 = r7 + 0xf, r7 + 0x16, r7 + 0x18
     print(f"r7 = X:0x{r7:05x}   first-block gate X:0x{FF:05x}   "
-          f"SVF state X:0x{S16:05x}/0x{S17:05x}   our own seed latch X:0x{S18:05x}\n")
+          f"tracker state X:0x{S16:05x}   our own seed latch X:0x{S18:05x}\n")
 
     MARK = [((0x10 + i) << 12) | 0xABC for i in range(0x20)]
     KEYV, K = 1, 0                       # KEY=1 -> abs track 0 (CORE_BASE 0)
@@ -337,19 +360,21 @@ def main():
               f"got[:2]={[hex(v) for v in x40[:2]]} exp[:2]={[hex(v) for v in exp[:2]]}")
 
     # 3. KEY FLT --------------------------------------------------------
-    print("\nKEY FLT (numeric vs python SVF):")
+    print("\nKEY FLT (numeric vs python one-pole tracker):")
     sig = sine(0x20, 3)                 # 3 cycles over the 16-frame block
     pk_sig = ",".join(f"{SLOT + i:x}={sig[i]:x}" for i in range(0x20))
     for kflt, tag in ((64, "bypass"), (10, "LP idx5"), (40, "LP idx20"),
-                      (78, "HP idx7"), (120, "HP idx28")):
+                      (78, "HP idx7"), (120, "HP idx28"),
+                      (60, "LP idx30 (one step in)"), (62, "LP idx31 (edge override)"),
+                      (65, "HP idx0 (edge override)"), (67, "HP idx1 (one step in)")):
         mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
                        [(1, S18, [0])])         # fresh: our own seed latch = 0
         (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kflt=kflt), pokey=pk_sig, audio=0)
         if kflt == 64:
             exp = sig
         else:
-            exp, _, _ = ref_svf(sig, kflt)
-        check(f"KFLT {kflt:3d} {tag:9s}", close(x40[:NW], exp[:NW], 3),
+            exp, _ = ref_onepole(sig, kflt)
+        check(f"KFLT {kflt:3d} {tag:24s}", close(x40[:NW], exp[:NW], 3),
               f"got[:4]={[s24(v) for v in x40[:4]]} exp[:4]={[s24(v) for v in exp[:4]]}")
 
     # 3a. split-block regression (Session 74, NOTES.md): a mid-block trig sets
@@ -359,13 +384,13 @@ def main():
     # Prove that directly: call scdet with `-frames` set LOW (dsp_host loads
     # n7 from it, same mechanism the real dispatcher's split path uses) and
     # confirm ALL 16 pairs still come out filtered -- comparing the FULL
-    # 32-word dump against ref_svf's full output, not the NW=30 truncation
+    # 32-word dump against ref_onepole's full output, not the NW=30 truncation
     # the other checks above use (that truncation exists to work around
     # dsp_host's own "-frames" cap at 15, unrelated to this loop's own
     # trip count now that it no longer reads n7 at all).
     print("\nKEY FLT split-block regression (n7 must NOT bound this loop):")
     kflt = 40
-    exp_full, _, _ = ref_svf(sig, kflt)
+    exp_full, _ = ref_onepole(sig, kflt)
     for short_n7 in (1, 6, 14):
         mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
                        [(1, S18, [0])])
@@ -378,72 +403,60 @@ def main():
 
     # 3b. dirty-state regression: stock's own "first-block" bit ($f) falsely
     # warm (as it can be from ordinary stock activity before our KEY FLT code
-    # has ever run) + garbage sitting in $16/$17, but OUR OWN latch ($18) is
-    # still 0 -- must still cold-start (lp=bp=0), NOT read the garbage.
+    # has ever run) + garbage sitting in $16, but OUR OWN latch ($18) is
+    # still 0 -- must still cold-start (tracker=0), NOT read the garbage.
     print("\nKEY FLT dirty-state guard (our own latch, not stock's $f):")
     kflt = 40
-    exp_cold, _, _ = ref_svf(sig, kflt)
+    exp_cold, _ = ref_onepole(sig, kflt)
     mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
                    [(1, FF, [1]),                     # stock bit falsely "warm"
-                    (1, S16, [0x7fffff]), (1, S17, [0x7fffff]),   # garbage
+                    (1, S16, [0x7fffff]),               # garbage
                     (1, S18, [0])])                    # our latch: never seeded
     (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kflt=kflt), pokey=pk_sig, audio=0)
-    check("$f warm + garbage $16/$17, $18=0 -> still cold-starts",
+    check("$f warm + garbage $16, $18=0 -> still cold-starts",
           close(x40[:NW], exp_cold[:NW], 3),
           f"got[:4]={[s24(v) for v in x40[:4]]} exp[:4]={[s24(v) for v in exp_cold[:4]]}")
 
-    # 4. SVF state persistence (block 2 continues, no reset) ---------------
+    # 4. tracker state persistence (block 2 continues, no reset) -----------
     print("\nKEY FLT state persistence:")
     kflt = 24
-    exp1, lp1, bp1 = ref_svf(sig, kflt)
-    exp2, _, _ = ref_svf(sig, kflt, lp1, bp1)
+    exp1, tr1 = ref_onepole(sig, kflt)
+    exp2, _ = ref_onepole(sig, kflt, tr1)
     mem = base_mem(words, scdet, sctail, False,
                    [(1, 0x40, [0] * 0x20), (1, S18, [1]),          # our latch: warm
-                    (1, S16, [lp1 & 0xFFFFFF]), (1, S17, [bp1 & 0xFFFFFF])], None)
+                    (1, S16, [tr1 & 0xFFFFFF])], None)
     (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kflt=kflt), pokey=pk_sig, audio=0)
-    check("block 2 continues the SVF", close(x40[:NW], exp2[:NW], 3),
+    check("block 2 continues the tracker", close(x40[:NW], exp2[:NW], 3),
           f"got[:4]={[s24(v) for v in x40[:4]]} exp[:4]={[s24(v) for v in exp2[:4]]}")
 
-    # 4b. NO RESONANCE (Session 64): hardware report was audible ringing on a
-    # fast-transient kick that tracked KFLT position -- q=1 (textbook
-    # Chamberlin damping) is UNDERdamped (complex/oscillatory poles) at the
-    # upper end of the FTAB range. Fixed to q=2 (patch_sc_dsp3.asm's KEY FLT
-    # header has the full derivation). Test the actual mathematical property
-    # directly -- both LP and HP read off the SAME 2-state system
-    # (lp'=lp+f*bp, hp=in-lp'-q*bp, bp'=bp+f*hp), whose state-transition
-    # matrix is [[1,f],[-f, 1-f*(f+q)]]; its eigenvalues (poles) are REAL
-    # (no possibility of oscillation, by definition -- a complex pole pair is
-    # what ringing/resonance IS) iff the characteristic discriminant
-    # trace^2 - 4*det >= 0. An impulse-response TIME-DOMAIN shape check was
-    # tried first and produced false failures: a real-pole pair with two
-    # different decay rates can show a small secondary "shoulder" after its
-    # first zero-crossing (one exponential term overtaking the other) before
-    # its final monotonic decay -- normal for real poles, not evidence of
-    # resonance, and indistinguishable from real ringing by shape heuristics
-    # alone. The discriminant is the actual criterion; check it exactly, for
-    # every FTAB entry (not just spot values).
-    print("\nKEY FLT no resonance (real poles, not just 'small', for every FTAB entry):")
-    q = 2
-    all_real = True
-    worst = None
+    # 4b. UNCONDITIONAL STABILITY (Session 76 continued, 3rd pass): the old
+    # 2-pole Chamberlin SVF needed a hardware-forced q=2 damping (Session 64)
+    # specifically because a 2-pole system CAN resonate for some parameter
+    # choice -- the old version of this check proved q=2 kept every FTAB
+    # entry's poles real (non-oscillating) by discriminant. A one-pole
+    # tracker has exactly ONE pole, at (1-a): a single real pole can never
+    # form a complex-conjugate pair, so it structurally cannot resonate --
+    # there is no discriminant to satisfy, no q to tune, and Session 64's
+    # ringing bug cannot recur here by construction, not by a tuned margin.
+    # What CAN still go wrong: a coefficient outside [0, Q23 ceiling] would
+    # make the pole magnitude |1-a| exceed 1 -> genuine instability (not
+    # coloration, a diverging filter) -- check every FTAB entry AND both
+    # edge overrides are in range, protecting against exactly the mistake
+    # that blocked pushing the OLD SVF's LP edge toward transparent (its
+    # q=2 pole went unstable well before reaching a useful cutoff; this
+    # topology has no such ceiling, which is WHY LP_EDGE can target the Q23
+    # ceiling directly instead of a compromise value).
+    print("\nKEY FLT unconditional stability (a in [0, Q23] for every coefficient):")
+    all_ok = True
     for idx in range(sc_tables.FLT_N):
-        f = s24(FLT_T[idx]) / Q23
-        tr = 2 - f * f - f * q
-        det = 1 - f * q
-        disc = tr * tr - 4 * det
-        if disc < 0:
-            all_real = False
-        if worst is None or disc < worst[1]:
-            worst = (idx, disc)
-    # idx 0 (the lowest cutoff, ~40 Hz, smallest f) is always the tightest
-    # margin: disc -> 4f^2 as f -> 0, so it shrinks toward (but, for any f>0,
-    # never reaches) the f=0 degenerate double-root case -- small numerically,
-    # not fragile: it's an exact algebraic fact about this discriminant, not
-    # floating-point noise, and nothing here runs in floating point on the
-    # real DSP anyway (this check is offline analysis of the fixed q=2/coefficient
-    # choice, not a runtime computation).
-    check(f"all {sc_tables.FLT_N} FTAB indices give real (non-oscillating) poles at q={q}",
-          all_real, f"worst-case discriminant idx={worst[0]} disc={worst[1]:.3e}")
+        a = FLT_T[idx]
+        if not (0 <= a < Q23):
+            all_ok = False
+    for name, a in (("LP_EDGE", sc_tables.lp_edge()), ("HP_EDGE", sc_tables.hp_edge())):
+        if not (0 <= a < Q23):
+            all_ok = False
+    check(f"all {sc_tables.FLT_N} FTAB entries + LP_EDGE/HP_EDGE give |pole|=|1-a|<=1",
+          all_ok, f"LP_EDGE=0x{sc_tables.lp_edge():06x} HP_EDGE=0x{sc_tables.hp_edge():06x}")
 
     # 5. SC LISTEN stash (scdet -> keybus gen 1) --------------------------
     print("\nSC LISTEN:")
@@ -467,8 +480,10 @@ def main():
     # MON_ON is only ever gated by `tst` (nonzero = on) in moncommit, never
     # compared for an exact value -- `move #1,b`'s short-immediate encoding
     # is left-aligned (this file's own documented dsp_asm quirk, q2) and
-    # actually loads 0x10000, not 1. Harmless (still nonzero), and switching
-    # to the long form costs a P-word this cave has none to spare (261/261).
+    # actually loads 0x10000, not 1. Harmless (still nonzero) -- left as-is,
+    # matching moncommit's own compensating exact-match check against
+    # $10000, not because the cave is still short on words (Session 76
+    # continued: the SPRING REVERB donor swap left ~800 words of slack).
     check("MON=1: MON_ON!=0, MON_KEY==key track", pub[0] != 0 and pub[1] == K,
           f"got={pub}")
 

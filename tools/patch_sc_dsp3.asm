@@ -21,26 +21,32 @@
 ; each site, control returns via rts).  Build tokens, rewritten per payload:
 ;   @KADJ@   "add #3,a" (payload A, CORE_BASE 4) / "sub #1,a" (payload B, 0)
 ;   @GTAB@   absolute P addr of the 16-word KEY GAIN table (gain/64, Q23)
-;   @FTAB@   absolute P addr of the 32-word KEY FLT  table (f=2 sin(pi fc/fs), Q23)
+;   @FTAB@   absolute P addr of the 32-word KEY FLT table (a = 1-exp(-2pi fc/fs), Q23)
+;   @LPEDGE@ literal Q23 immediate, LP's near-OFF edge-override coefficient
+;   @HPEDGE@ literal Q23 immediate, HP's near-OFF edge-override coefficient
 ; The tables are appended after the code by build_sidechain3.py; @GTAB@/@FTAB@
 ; are resolved in a first sizing pass so the `move #>imm` widths never shift.
+; @LPEDGE@/@HPEDGE@ are plain literal substitutions (tools/sc_tables.py's
+; lp_edge()/hp_edge()), not addresses -- fixed width regardless of pass.
 ;
 ; keybus ring (Y): slot(track,gen) = $800 + track*$80 + (gen&3)*$20.
 ;   gen 0 = the per-frame publish (sctap).  gen 1 = the SC LISTEN stash --
 ;   scdet writes the *processed* key there, sctail copies it to the dry buffer.
 ;
-; SVF integrator state, per compressor instance, in the compressor's own r7
-; block at r7+$16 (lp) / r7+$17 (bp) -- unused by the stock module (RE: state
-; block r7+$f..$1b; disassembly of the real init routine at P:0x1864 confirms
-; it zero-fills only $11/$12/$13/$1a/$1b/$f, leaving $14/$16/$17/$18 untouched
-; and therefore NOT guaranteed zero -- whatever DSP memory held before this
-; track's compressor instance was assigned lands there unchanged).  r7+$18 is
-; OUR OWN dedicated "have I ever seeded lp/bp myself" latch (never touched by
-; stock or by any other hook here): do not gate on the stock "first-block" bit
-; (r7+$f) instead -- it can legitimately go warm from ordinary stock activity
-; before our KEY FLT code has ever run once (e.g. KFLT parked at bypass for a
-; while, then turned to LP/HP for the first time), which would otherwise seed
-; the integrator from garbage at $16/$17.
+; One-pole tracker state, per compressor instance, in the compressor's own r7
+; block at r7+$16 -- unused by the stock module (RE: state block r7+$f..$1b;
+; disassembly of the real init routine at P:0x1864 confirms it zero-fills
+; only $11/$12/$13/$1a/$1b/$f, leaving $14/$16/$17/$18 untouched and
+; therefore NOT guaranteed zero -- whatever DSP memory held before this
+; track's compressor instance was assigned lands there unchanged). r7+$17
+; (the old 2-pole SVF's "bp" integrator, Sessions before 76) is no longer
+; used by this cave. r7+$18 is OUR OWN dedicated "have I ever seeded the
+; tracker myself" latch (never touched by stock or by any other hook here):
+; do not gate on the stock "first-block" bit (r7+$f) instead -- it can
+; legitimately go warm from ordinary stock activity before our KEY FLT code
+; has ever run once (e.g. KFLT parked at bypass for a while, then turned to
+; LP/HP for the first time), which would otherwise seed the tracker from
+; garbage at $16.
 ;
 ; AUDIT THE OUTPUT BY DISASSEMBLY.  No `mpy x0,y0` (assembles as mpysu) --
 ; only x1,x0 / x1,y0 operand orders, which emit true signed mpy.
@@ -136,26 +142,53 @@ zz04:
 zz03:
 
 ; -- KEY FLT : x:(r6+$d) bits 8-15, 0..127 ; 64 = bypass ; <64 LP ; >64 HP --
-; One Chamberlin SVF loop; n0 marks LP vs HP for the per-sample output
-; select.  Input is (L+R)/2, output is written to both L and R slots.
+; Session 76 continued (third pass): ONE-POLE tracker, not the old 2-pole
+; Chamberlin SVF. Single state var (r7+$16, "tracker"), single coefficient
+; (x1, Q23 "a"): tracker += a*(in - tracker); LP output = tracker; HP output
+; = in - tracker (n0 marks LP vs HP for the per-sample select, same as
+; before). r7+$17 (the old "bp" integrator) is no longer used by this cave.
 ;
-; DAMPING q = 2, NOT the textbook q = 1 (Session 64, hardware-driven): this is
-; a SIDECHAIN KEY filter, not a musical one -- both the SC LISTEN audition and
-; the actual signal reaching the compressor's detector are this filter's
-; output, so any resonant peak here both sounds wrong AND biases which
-; frequencies trigger gain reduction. q = 1 (zeta = 0.5 in the equivalent
-; continuous 2nd-order system) is UNDERdamped -- confirmed by hardware
-; listening test (audible ringing on a fast-transient kick, tracking KFLT
-; position, gone at OFF) and independently by solving this loop's own
-; characteristic equation (2x2 state matrix from lp'=lp+f*bp,
-; hp=in-lp'-q*bp, bp'=bp+f*hp): complex (oscillatory) poles at the higher end
-; of the FTAB range at q=1. q >= ~1.688 is the exact point the poles go real
-; (non-oscillatory) across the WHOLE 32-entry FTAB (checked numerically, all
-; 32 indices); q=2 clears that with margin and stays stable (max |pole| 0.82
-; across the range). Implemented as a literal SECOND `sub y0,a` below rather
-; than a coefficient multiply -- q=2 needs no new register or table entry,
-; just one extra word. Both LP and HP outputs come off the SAME 2-state
-; system, so this one change makes both non-resonant, not just HP.
+; WHY: the previous two attempts at a click-free OFF boundary both failed on
+; hardware -- a dry/wet amplitude blend near OFF corrupted the REAL
+; compressor's own detector (comb-filtering a signal against a phase-shifted
+; copy of itself, read continuously by an envelope follower -> audible ring
+; modulation on the TARGET track, not just a click); a wider version of the
+; same blend would only have spread that same corruption further, not fixed
+; it (NOTES.md, this session). The fix isn't a wider or smoother blend --
+; it's a topology whose FEEDBACK is coefficient-weighted. This one-pole
+; system's only feedback term is `a*(in-tracker)`: at a=0 the tracker never
+; moves (frozen); at a's Q23 ceiling the tracker becomes `in` itself, EVERY
+; sample, with NO dependence on its own history -- unlike the old SVF, where
+; `hp = in - lp - 2*bp` used `lp`/`bp` UNWEIGHTED, so stale state mattered
+; at full strength no matter how small the tuning coefficient got. A single
+; real pole also can't resonate (no q parameter needed, no discriminant to
+; satisfy, no "q >= 1.688" hardware-forced tuning like the old SVF needed --
+; Session 64's ringing bug straightforwardly cannot recur here), AND a
+; one-pole coefficient in [0, Q23-ceiling] is unconditionally stable -- no
+; upper bound like the old SVF's q=2 hit around ~5-6 kHz when pushed toward
+; a bright/transparent LP setting (worked out, not shipped, two sessions
+; ago). That headroom is what lets LP's near-OFF step target genuine near-
+; unity instead of a compromise value.
+;
+; THE EDGE OVERRIDE (not a blend -- a coefficient choice, one signal, always):
+; FTAB's normal 40-2200 Hz curve (unchanged, same shape as every prior
+; session) is shared by both LP (idx 0..31, low->high freq) and HP (idx
+; 0..31, low->high freq) -- so FTAB[31] (2200 Hz) is also HP's own deepest
+; setting, and FTAB[0] (40 Hz) is also LP's own deepest setting; pushing
+; either toward "transparent" in the table itself would detune the OTHER
+; mode's tuned end. Instead: idx==31 in the LP branch and idx==0 in the HP
+; branch each get a ONE-TIME coefficient override (checked once per call,
+; before the loop even starts -- zero per-sample cost) instead of the normal
+; FTAB fetch. LP's override is the Q23 ceiling (~unity, as close to a true
+; identity tracker as this format allows). HP's is ~8 Hz -- can't reach LP's
+; exact-identity limit (a highpass, even at its most transparent, still has
+; to track something to subtract; that's what "highpass" means, not a defect
+; of this design) but is slow and small enough that any residual error from
+; reusing whatever the tracker last held decays gently, not abruptly -- the
+; user's own real-hardware anecdote (stock FILTER's BASE control audibly
+; reaching transparent in a single raw-value step, 126->127) is the same
+; principle: the LAST step near an extreme doesn't need to be gradual if the
+; coefficient it lands on is inherently well-behaved.
         move    x:(r6+$d),b           ; (q1)
         asr     #$8,b,b
         move    b1,a                 ; (q3) a1 = (KEY<<8)|KFLT, a0 clean
@@ -171,33 +204,41 @@ zz03:
         asr     #$1,a,a
         move    a1,n1
         move    #0,n0
-        bra     zz06
+        move    n1,a                   ; (q3) a = idx, clean (re-load from n1)
+        tst     a
+        bne     zz06                    ; not the edge idx -> normal FTAB fetch
+        move    #>@HPEDGE@,x1           ; edge -> ~8 Hz, near-transparent HP
+        bra     zz09
 zz05:
 ;   LP : idx = KEY FLT >> 1 (0..31) ; marker n0 != 0
         asr     #$1,b,b
         move    b,n1
         move    #>$10,n0
+        move    b1,a                   ; (q3) a = idx, clean
+        cmp     #>$1f,a
+        bne     zz06                    ; not the edge idx -> normal FTAB fetch
+        move    #>@LPEDGE@,x1           ; edge -> Q23 ceiling, ~unity LP
+        bra     zz09
 zz06:
         move    #>@FTAB@,r1
-        move    p:(r1+n1),x1          ; x1 = f coefficient (Q23, < 0.32)
+        move    p:(r1+n1),x1          ; x1 = a coefficient (Q23)
+zz09:
 ;   NOTE: do NOT gate on the stock "first-block" bit (r7+$f) here -- it can go
 ;   warm from ordinary stock compressor activity before OUR code has ever run
 ;   a KEY FLT block (e.g. KFLT sits at bypass for a while, then gets turned to
-;   LP/HP for the first time). $16/$17 are untouched by stock's own init
-;   (0x1864's zero-fill list is $11/$12/$13/$1a/$1b/$f only -- confirmed by
-;   disassembly), so reading them on the stock bit's word risks seeding the
-;   integrator from garbage. Own the gate: $18 is ALSO untouched by stock and
-;   by every other hook here, so use it as OUR single "have I ever seeded
-;   lp/bp myself" latch, set only below, never by anything else.
+;   LP/HP for the first time). $16 is untouched by stock's own init (0x1864's
+;   zero-fill list is $11/$12/$13/$1a/$1b/$f only -- confirmed by
+;   disassembly), so reading it on the stock bit's word risks seeding the
+;   tracker from garbage. Own the gate: $18 is ALSO untouched by stock and
+;   by every other hook here, so use it as OUR single "have I ever seeded the
+;   tracker myself" latch, set only below, never by anything else.
         move    x:(r7+$18),a
         tst     a
         bne     zz07
-        move    #0,y1                 ; never seeded -> lp = bp = 0
-        move    #0,y0
+        move    #0,y1                 ; never seeded -> tracker = 0
         bra     zz08
 zz07:
-        move    x:(r7+$16),y1        ; warm: lp
-        move    x:(r7+$17),y0        ;       bp
+        move    x:(r7+$16),y1        ; warm: tracker
 zz08:
 ; SIDECHAIN3 ringing bug (Session 74, NOTES.md): this loop used to run `do n7`,
 ; matching the STOCK compressor's own per-call sample count -- but `n7` is
@@ -222,31 +263,27 @@ zz08:
         tfr     x0,b
         add     b,a
         asr     #$1,a,a               ; a = (L + R) / 2 = filter input
-        move    a,x0
-        mpy     x1,y0,b               ; b = f * bp
-        add     y1,b                  ; b = lp + f*bp = lp'
-        move    b,y1
-        tfr     x0,a
-        sub     b,a                   ; a = in - lp'
-        sub     y0,a                  ; a = in - lp' - bp
-        sub     y0,a                  ; a = in - lp' - 2*bp = hp   (q = 2, overdamped)
-        move    a,x0                  ; x0 = hp
-        mpy     x1,x0,b               ; b = f * hp
-        add     y0,b                  ; b = bp + f*hp = bp'
-        move    b,y0
+        move    a,x0                  ; x0 = in (kept for HP's own output)
+        sub     y1,a                   ; a = in - tracker = diff
+        move    a,y0                   ; y0 = diff (mpy operand slot)
+        mpy     x1,y0,b               ; b = a * diff
+        add     y1,b                  ; b = tracker + a*diff = updated tracker
+        move    b,y1                  ; y1 = tracker (persists)
+        move    x0,a                  ; a = in
+        sub     b,a                    ; a = in - tracker = hp (default candidate)
+        move    a,x0                   ; x0 = hp (default)
         move    n0,a                 ; marker: 0 = HP (keep x0=hp), != 0 = LP
         tst     a
         beq     zz14
-        move    y1,x0                ; LP -> output lp'
+        move    y1,x0                ; LP -> override with tracker
 zz14:
         move    x0,x:(r0)+
         move    x0,x:(r0)+
 zz13:
 zz12:
         move    y1,x:(r7+$16)
-        move    y0,x:(r7+$17)
         move    #1,a
-        move    a,x:(r7+$18)          ; latch: lp/bp are now genuinely ours
+        move    a,x:(r7+$18)          ; latch: tracker is now genuinely ours
 
 zz10:
 ; -- SC LISTEN : if on, stash the processed key -> keybus[key] gen 1, and
@@ -308,7 +345,7 @@ zz15:
         move    a,y:(r1)               ; MON_KEY[my track] = key track (still in a)
         bra     zz16
 zz17:
-; MON off -> publish MON_ON[my track] = 0.  Shared with zz20 via `jsr zz18`
+; MON off -> publish MON_ON[my track] = 0.  Shared with zz20 via `bsr zz18`
 ; (zz18 is placed at the END of scdet, after zz20's own rts, specifically so
 ; the ONE extra internal rts it introduces lands AFTER the rts
 ; build_sidechain3.py's sc_assemble() counts on to find moncommit's start --
@@ -316,14 +353,18 @@ zz17:
 ; duplicated inline instead (fear of disturbing that indexing), which cost
 ; ~9 words per copy for a 1-word `jsr`; reclaimed to make room for the
 ; moncommit MON_ON exact-match fix below (see moncommit's own header comment).
-        jsr     zz18
+; `bsr` (PC-relative, 2 words), not `jsr` (Session 76 continued): the SPRING
+; REVERB donor's cave_org sits past 0xfff, past dsp_asm's own absolute-jsr
+; range -- confirmed by direct test, `bsr` has no such limit since it's a
+; displacement, not an absolute address.
+        bsr     zz18
 zz16:
         move    #$40,r0              ; detector streams from the processed key
         move    #$61,r4             ; --- displaced ---
         rts
 zz20:
 ; KEY OFF -> publish MON_ON[my track] = 0 (no key selected, nothing to show)
-        jsr     zz18
+        bsr     zz18
         move    #$61,r4             ; --- displaced ; r0 unchanged ---
         rts
 
