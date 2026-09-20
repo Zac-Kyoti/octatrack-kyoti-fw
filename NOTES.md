@@ -20067,3 +20067,107 @@ added `COMMIT_SITES`/`install_commit_watch`/`print_commit_watch` and a
 `SNAP_C1`/`SNAP_C2` (`0x800065c1`/`0x800065c2`) write-watch, wired into both
 `run_one()` and `run_groundtruth()`. Log: `/tmp/dj_commitwatch_run.log`. Still
 read-only dynamic + static analysis only -- no hook/patch source changed.
+
+## Session 79, continued a seventh time (2026-09-20) — RETRACTION: the CNTDN_TBL-branch
+theory does NOT explain the measured DAT_80001904 divergence; the real mechanism is a
+pure write-CADENCE shift, precisely confirmed by arithmetic
+
+The previous entry ("continued a sixth time") narrowed the root cause to the
+`0x400a2c66` branch's ACT-vs-snapshot (`0x800065c1`/`c2`) pattern-data selection,
+gated on `CNTDN_TBL[track]`'s armed state. That branch and the snapshot mechanism are
+real, static facts (unchanged) -- but **checking whether it actually explains the
+measured `DAT_80001904` divergence, rather than assuming it, shows it does not.**
+
+### The check that broke it
+
+`CNTDN_TBL[track 0]` goes idle at frame 518 (measured earlier this session). The
+`compare_groundtruth` diff samples at frame 1101 -- 583 frames later, long past any
+CNTDN_TBL-armed window. If the CNTDN_TBL-branch theory were right, the divergence
+should have self-healed by then. It has not: DJ-commit reads `0x035092b0` at slots
+0-7/32-39 (group 0/4), ground-truth reads `0x03c9b280` -- and **neither value matches
+the OLD pattern's own value either** (`0x01e53340`, measured pre-switch in this same
+run). A value that matches neither the outgoing nor the incoming pattern, persisting
+long after the supposed gating condition cleared, cannot be explained by "briefly
+reading the wrong pattern's snapshot."
+
+### What actually explains it: pulled the full per-slot write history from both runs
+
+```
+run   frame   value        source PC
+dj    0       0x0000b400   0x4009c220  (one-time init write)
+dj    1       0x00f2f3a0   0x400a2e18  (TABLE_ARM_PC's own write, "table-arm" event)
+dj    346     0x01e53340   0x400a2e18  (natural loop boundary, 345 frames later)
+dj    518     0x025e5310   0x400a2e18  (DIRECT JUMP's forced-early commit -- only 172
+                                         frames after the previous write, i.e. HALF a
+                                         6-step loop, not a full one)
+dj    863     0x035092b0   0x400a2e18  (next natural loop boundary, 345 frames later)
+
+gt    0       0x0000b400   0x4009c220
+gt    1       0x00f2f3a0   0x400a2e18
+gt    346     0x01e53340   0x400a2e18
+gt    691     0x02d772e0   0x400a2e18  (natural loop boundary, full 345 frames later --
+                                         no DJ commit in this run at all)
+gt    1035    0x03c9b280   0x400a2e18  (natural loop boundary, 344 frames later)
+```
+
+Every FULL-loop write (345/344 frames apart, in both runs) increments the value by
+**exactly 15,876,000**. DIRECT JUMP's off-cycle write (172 frames after the previous
+one -- exactly half of 345, matching the commit landing at step 3 of a 6-step pattern)
+increments it by **exactly 7,938,000 -- exactly half of 15,876,000**
+(`15876000/6 == 7938000/3 == 2,646,000`, i.e. a fixed **per-STEP** increment, not
+per-frame). This is not approximate -- the arithmetic is exact to the byte.
+
+**`DAT_80001904` (at least these slots) is a plain elapsed-STEP counter/accumulator,
+incrementing by a fixed amount per step since the last write to this table -- not
+pattern-content data at all.** DIRECT JUMP's forced-early commit makes `CNTDN_TBL`
+(and whatever arms this table alongside it) fire an EXTRA, out-of-cycle "table-arm"
+write 3 steps into what would otherwise have been a 6-step interval. That single
+early write banks only half the expected increment, and **every subsequent write
+inherits the permanent phase/cadence offset** -- fully explaining why the divergence
+never self-heals and why it doesn't match either pattern's "real" data: there was never
+a "which pattern" question for this specific symptom, only a "how many steps since I
+last updated" one, corrupted once and carried forward forever after.
+
+### Status: this specific measured symptom (the DAT_80001904 discontinuity that has
+been the empirical throughline since Session 70's 13th pass) is very likely explained
+by a write-cadence shift, not by the `0x400a2c66` ACT-vs-snapshot branch. The
+`0x400a2c66` branch and the `0x800065c1`/`c2` snapshot mechanism documented in the
+previous two entries remain real, static, and dynamically-confirmed facts about the
+firmware -- but this entry withdraws the claim that they are what produces the
+measured bug. **Not re-attributing further this pass** -- given how many times this
+specific investigation has had to retract and re-attribute its own conclusion (Session
+70's countdown-carryover hypothesis, this session's "misread/coupling" framing, now
+this), the responsible next step is to verify what OTHER data this table-arm write
+(`0x400a2e18`, just past `TABLE_ARM_PC`) actually computes and stores beyond the
+dominant per-step term -- not to propose a fourth theory without checking it as
+rigorously as this one was.
+
+### NEXT for this thread
+
+1. Decode the FULL computation at `TABLE_ARM_PC`/`0x400a2e18` (not just "D0 = accumulator
+   - 0x285ff0 + table[track] + D7" from `GhidraDirectJump15.java`, which was read
+   before this per-step-accumulator structure was understood) to identify which term is
+   the dominant per-step counter and whether the ACT-vs-snapshot branch's output feeds
+   ANY part of it, or a different, smaller, so-far-unmeasured term.
+2. If the branch's output turns out irrelevant to `DAT_80001904` specifically, the
+   `CNTDN_TBL`/snapshot mechanism documented in the previous two entries may still be a
+   real, independent (currently cosmetic-impact-unconfirmed) quirk -- worth a short note
+   but not further pursued as THE fix target unless a separate, real symptom is found
+   for it.
+3. Given the actual, confirmed mechanism is "an early table-arm event permanently
+   shifts this counter's cadence," the much more promising fix direction is: make
+   DIRECT JUMP's forced commit NOT trigger an early table-arm write at all (e.g. gate
+   the write in `patch_directjump.s`'s existing hooks so it always lands on the SAME
+   per-step cadence a natural loop boundary would have used), or make it write the
+   value the NEXT natural boundary would have produced instead of an off-cycle partial
+   increment. This is a materially different, and probably simpler, fix shape than the
+   branch-override design sketched in the previous entry -- that design is now
+   superseded, not carried forward.
+4. Carried over, unresolved, lower priority: `0x800065c1`/`c2`'s downstream consumer
+   (if any, beyond what's already found) is still not fully traced; the `PEND_PAT`-poke-
+   alone confound in `run_one()`'s `DJ_MODE=0` arm; the second `DAT_80001904` clear-loop
+   covering groups 4/7.
+
+No patch source written. `tools/emu_directjump_dynamic.py` unchanged this pass (all
+analysis from the previous pass's own instrumentation + arithmetic on its log,
+`/tmp/dj_commitwatch_run.log`). Still read-only dynamic + static analysis only.
