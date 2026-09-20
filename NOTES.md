@@ -19820,3 +19820,121 @@ Tooling: `tools/ghidra/attic/GhidraDirectJump17.java`/`18.java`. `tools/
 emu_directjump_dynamic.py`: added `reset_flag_writes`/`prev_bank_ix_writes`/
 `flag_80001860_writes`/`flag_46107568_writes` watches to both run functions. No
 hook/patch source changed.
+
+## Session 79, continued a fifth time — DIRECT JUMP: ROOT CAUSE FOUND, mechanically proven
+end to end. The extra out-of-cycle table-arm event is caused by `CNTDN_TBL[track]`
+(`0x800065c3`, the ordinary trig-fire countdown, armed by DIRECT JUMP's commit exactly as
+designed) being read by a SECOND, unrelated piece of code as a signal to use pending-
+adjacent pattern/bank fields instead of the active ones -- for the whole duration the
+countdown is armed. Not yet fixed; no code changed.
+
+Per the user's own recommendation (a broad instruction-trace diff over the whole known
+control-flow region, rather than a third single-hypothesis guess-and-watch round after
+two refutations) -- this worked immediately and decisively.
+
+### Built a PC-trace diff instead of guessing a third candidate  [tool + method]
+
+Added a `UC_HOOK_CODE` trace over `[0x400a2b00, 0x400a2e30]` (both known scheduling-table
+blocks), filtered to frames `[300, 700]`, to both `run_one()` and `run_groundtruth()` --
+recording every PC actually executed, per tick, in both conditions. This directly answers
+"which branch differs" without needing to know in advance which global/flag matters.
+
+### Result: the divergence starts 14 frames AFTER the commit, not at it -- and is isolated
+### to one exact branch  [MEASURED]
+
+Per-tick instruction counts in the traced region, both conditions, frames 300-700:
+
+```
+frame 461 (the commit itself): DJ=328, GT=328  -- IDENTICAL, no divergence yet
+frame 475: DJ=336, GT=304  -- +32 instrs
+frame 490: DJ=336, GT=304  -- +32 instrs
+frame 504: DJ=336, GT=304  -- +32 instrs
+frame 518: DJ=744, GT=328  -- +416 instrs (the extra arm event itself)
+frame 533+: DJ=GT again -- matches resume
+```
+
+Diffing the actual PC sequences at frame 475 (the first divergent tick) pinpoints the
+EXACT instruction: index 13 of the trace. Both conditions execute identically up through
+`0x400a2c64` (`move.b (A0),D3b` -- `D3 = signed byte *A0`), then:
+
+```
+0x400a2c66  blt.b 0x400a2c8a     ; branch if D3 < 0
+```
+
+**Ground-truth always takes this branch** (D3 < 0, uses `0x400a2c8a`'s path: ACT_PAT
+`0x800065be` / ACT_BANK `0x800065bd`). **DJ-commit falls through instead** for frames
+475/490/504/518 (D3 >= 0, uses `0x400a2c68`'s path: `0x800065c1`/`0x800065c2`, two bytes
+past `PEND_PAT`/`PEND_BANK` -- exact field identity not confirmed, immediately adjacent to
+the pending-pattern queue). Both paths compute a pattern-BLOB ADDRESS (bank*0x9b340 +
+pat*0x8ed8 + 0x400e21e0) from whichever pair of fields wins -- i.e., **this branch decides
+which pattern's data this code reads for the rest of its work**, and DIRECT JUMP's commit
+makes it read the WRONG (pending-associated) pattern's data for several ticks.
+
+### What `D3` actually is: `CNTDN_TBL[track]` -- the SAME trig-fire countdown this thread
+### has watched since Session 69  [MEASURED]
+
+Traced `D3`'s source (`GhidraDirectJump20.java`/`21.java`, raw disassembly only): `A0` at
+`0x400a2c60` comes from a stack local `(0xa8,SP)`, which has exactly one real write in the
+whole function, `0x400a2962: move.l A5,(0xa8,SP)`, where `A5 = lea (-0x7fff9a3d).l` --
+**`-0x7fff9a3d` as unsigned 32-bit is `0x800065c3`, i.e. `CNTDN_TBL`** (`emu_directjump_
+dynamic.py`'s own constant, "trig-fire countdown, DAT_800065c3[t]"). `(0xa8,SP)` gets
+`addq.l #1` once per track elsewhere (`0x400a3584`), confirming it's a per-track array
+pointer walking `CNTDN_TBL` byte by byte. So the branch is exactly: **`CNTDN_TBL[track] <
+0` (idle/sentinel `0xFF`) -> use the active pattern; `CNTDN_TBL[track] >= 0` (armed,
+counting down) -> use the pending-adjacent fields instead.**
+
+### The full causal chain, now closed  [MEASURED end to end]
+
+Cross-referencing against `dj_dynamic_run1.log`'s own `CNTDN_TBL` write log from earlier
+this session:
+
+```
+frame 0    CNTDN_TBL[t] <- 0xff (idle)               at 0x4009bcc0 (init)
+frame 461  CNTDN_TBL[t] <- 0x1  (ARMED)               at 0x400a49c6 (stock commit code)
+frame 461  CNTDN_TBL[t] <- 0x0  (still armed, ticking) at 0x400a4bc6
+frame 518  CNTDN_TBL[t] <- 0xff (fires, back to idle)  at 0x400a4bc6
+```
+
+**`CNTDN_TBL` being armed from frame 461 to frame 518 is exactly, precisely, the window
+where the diverging branch takes the wrong path** (475, 490, 504, 518 all fall inside it;
+533 onward, after it resets to idle, matches ground truth again). Arming `CNTDN_TBL` at a
+commit is itself completely ordinary, stock behaviour -- Session 15's own original design
+already listed it as one of the four arrays a switch legitimately touches, and Session 69
+already confirmed `dj_c` doesn't write it directly (stock's own per-track loop does, same
+as for any switch, DIRECT JUMP or not). **The actual bug is that a SECOND, structurally
+unrelated piece of code (this table-arm blob-address selector) treats "the countdown is
+currently armed" as a signal about WHICH PATTERN is relevant** -- a coupling between two
+conceptually independent subsystems that no prior session in this project's 15+-session
+DIRECT JUMP history had found. For an ORDINARY switch (which historically only commits at
+step-0 loop boundaries), this coupling is presumably harmless or unreachable in a way that
+never surfaced; DIRECT JUMP's whole premise (committing mid-pattern, at an arbitrary step)
+is exactly what exposes it.
+
+### Status: root cause is MECHANICALLY PROVEN, not yet fixed  [status]
+
+Everything above is measured, not inferred -- the exact branch, the exact condition, the
+exact array, and the exact timing window all cross-check against each other and against
+this session's own earlier `CNTDN_TBL` write log. What's still open, deliberately not
+pursued this session (per this thread's own "no flash without dynamic proof a fix works"
+rule, and because a candidate fix needs the SAME rigor this diagnosis got): whether the
+right fix is (a) making DIRECT JUMP's commit also update whatever `0x800065c1`/`c2` hold so
+the "wrong path" computes the SAME blob address the "right path" would anyway, (b) making
+this specific branch also check for the DIRECT-JUMP-specific "just committed" condition and
+prefer ACT_PAT/ACT_BANK regardless of `CNTDN_TBL`'s state, or (c) something else -- not
+decided, not attempted.
+
+### NEXT for this thread
+
+1. **Confirm the exact identity of `0x800065c1`/`0x800065c2`** (raw disassembly of their
+   OTHER read/write sites, not yet done) -- almost certainly PEND_PAT/PEND_BANK-family but
+   not confirmed to be those literal globals.
+2. **Design and dynamically prove a fix** for the branch/coupling found this session, using
+   the exact same PC-trace-diff technique (confirm the branch now takes the SAME path in
+   both conditions post-fix) before considering a build.
+3. Carried over, lower priority: the `PEND_PAT`-poke-alone confound in `run_one()`'s
+   original `DJ_MODE=0` arm; the second clear-loop covering groups 4/7.
+
+Tooling: `tools/ghidra/attic/GhidraDirectJump19.java`-`21.java` (one-shot probes). `tools/
+emu_directjump_dynamic.py`: added a frame-filtered `pc_trace` watch (via new `TRACE_LO`/
+`TRACE_HI`/`TRACE_FRAME_LO`/`TRACE_FRAME_HI` constants) to both run functions. No
+hook/patch source changed -- still read-only dynamic + static analysis only.

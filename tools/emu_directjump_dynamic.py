@@ -102,6 +102,10 @@ STEP_AUDIO_TBL = 0x800065e4  # DAT_800065e4[t] -- per-track step (audio), NOTES.
                              # feeds 0x80006604/14, per the project's own static RE map.
 STEP_MIDI_TBL = 0x800065f4   # DAT_800065f4[t] -- same, MIDI
 TABLE_ARM_PC = 0x400a2e0c
+TRACE_LO = 0x400a2b00
+TRACE_HI = 0x400a2e30
+TRACE_FRAME_LO = 300
+TRACE_FRAME_HI = 700
 # Session 79 continued again: the SET side of the DAT_80001904 scheduled-value table,
 # found via GhidraDirectJump15.java raw disassembly:
 #   D0 = *G_ACCUM(0x4610757c) - 0x285ff0 + table_46c7a830[track] + D7 ; then stored into
@@ -220,6 +224,20 @@ def run_one(er, a, dj_on):
     def on_arm(u, addr, size, user):
         d7_at_arm.append((rt.frame_count, u.reg_read(er.eb.UC_M68K_REG_D7)))
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_arm, begin=TABLE_ARM_PC, end=TABLE_ARM_PC)
+
+    # Session 79 continued a fifth time: two single-hypothesis rounds (D7, RESET_FLAG)
+    # were both refuted. Rather than guess a third specific register/flag, trace every
+    # PC actually EXECUTED across the whole known control-flow region (both scheduling-
+    # table blocks, 0x400a2b00-0x400a2e30) within a frame window bracketing the
+    # commit -- this directly shows which branch diverges between conditions without
+    # needing to know in advance which one matters. Cheap: this code only runs a few
+    # times per tick, filtered to a few hundred frames.
+    pc_trace = []
+
+    def on_trace(u, addr, size, user):
+        if TRACE_FRAME_LO <= rt.frame_count <= TRACE_FRAME_HI:
+            pc_trace.append((rt.frame_count, addr))
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_trace, begin=TRACE_LO, end=TRACE_HI)
 
     # NOTE: rt.watch_mem() stores into self.mem_writes, looked up FRESH on every
     # hit -- calling it twice makes the FIRST hook's callback silently start
@@ -399,7 +417,13 @@ def run_one(er, a, dj_on):
         for fr, task, pc, a, size, val in log:
             print(f"   frame {fr:.1f}  [{a:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
 
+    print(f"\nPC trace over [0x{TRACE_LO:x}, 0x{TRACE_HI:x}], frames "
+          f"[{TRACE_FRAME_LO}, {TRACE_FRAME_HI}], {len(pc_trace)} hits:")
+    for fr, pc in pc_trace:
+        print(f"   frame {fr:.1f}  pc={pc:#x}")
+
     return dict(fires=fires, fires_before_poke=fires_before_poke, d7_at_arm=d7_at_arm,
+                pc_trace=pc_trace,
                 reset_flag_writes=reset_flag_writes, prev_bank_ix_writes=prev_bank_ix_writes,
                 flag_80001860_writes=flag_80001860_writes,
                 flag_46107568_writes=flag_46107568_writes,
@@ -484,6 +508,13 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
     prev_bank_ix_writes = gt_watch(0x800065bc, 1)
     flag_80001860_writes = gt_watch(0x80001860, 1)
     flag_46107568_writes = gt_watch(0x46107568, 4)
+
+    pc_trace = []
+
+    def on_trace(u, addr, size, user):
+        if TRACE_FRAME_LO <= rt.frame_count <= TRACE_FRAME_HI:
+            pc_trace.append((rt.frame_count, addr))
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_trace, begin=TRACE_LO, end=TRACE_HI)
     rt.uc.ctl_flush_tb()
 
     rt.start_transport_live()
@@ -519,8 +550,13 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
         print(f"\n{name} writes, {len(log)} total:")
         for fr, pc, a, size, val in log:
             print(f"   frame {fr:.1f}  [{a:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
+    print(f"\nPC trace over [0x{TRACE_LO:x}, 0x{TRACE_HI:x}], frames "
+          f"[{TRACE_FRAME_LO}, {TRACE_FRAME_HI}], {len(pc_trace)} hits:")
+    for fr, pc in pc_trace:
+        print(f"   frame {fr:.1f}  pc={pc:#x}")
     return dict(bank=cur_bank, pattern=cur_pat, step=cur_step, live_nibble=live_nibble,
                 reached=reached, live_nibble_writes=live_nibble_writes, d7_at_arm=d7_at_arm,
+                pc_trace=pc_trace,
                 reset_flag_writes=reset_flag_writes, prev_bank_ix_writes=prev_bank_ix_writes,
                 flag_80001860_writes=flag_80001860_writes,
                 flag_46107568_writes=flag_46107568_writes)
