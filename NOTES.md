@@ -19938,3 +19938,132 @@ Tooling: `tools/ghidra/attic/GhidraDirectJump19.java`-`21.java` (one-shot probes
 emu_directjump_dynamic.py`: added a frame-filtered `pc_trace` watch (via new `TRACE_LO`/
 `TRACE_HI`/`TRACE_FRAME_LO`/`TRACE_FRAME_HI` constants) to both run functions. No
 hook/patch source changed -- still read-only dynamic + static analysis only.
+
+## Session 79, continued a sixth time (2026-09-20)
+
+NEXT item 1 from the previous entry ("confirm the identity of `0x800065c1`/
+`0x800065c2`") is resolved, and it forces a **correction** to that entry's own
+framing of the root cause -- not a reversal of the finding, but a narrowing of
+the mechanism.
+
+### Identity of 0x800065c1/0x800065c2, and a corrected mechanism
+
+`GhidraDirectJump22.java`-`25.java` (resolved xrefs + raw-context dumps) traced
+both bytes exhaustively:
+
+- **`0x800065bf`=PEND_BANK, `0x800065c0`=PEND_PAT, `0x800065bd`=ACT_BANK,
+  `0x800065be`=ACT_PAT** -- these are exactly the constants this project's own
+  `tools/emu_directjump_dynamic.py` already had named (L55-58), now confirmed
+  by static trace rather than assumed.
+- **`0x800065c1`/`0x800065c2` are not independent globals.** Their only writers
+  anywhere in the image are two structurally identical blocks inside
+  `FUN_400a1eea` itself: `0x400a4074`/`0x400a4080` and the twin
+  `0x400a44a6`/`0x400a44b2`. Both do the exact same thing --
+  `0x800065c1 <- *ACT_PAT` (the value about to be overwritten), then
+  `0x800065c2 <- *ACT_BANK` -- **immediately followed, in the same block**, by
+  the actual PEND->ACT commit: `0x400a409e`/`0x400a40aa` (twin
+  `0x400a44d0`/`0x400a44dc`), gated on `PEND_BANK`/`PEND_PAT != 0xFF` (the
+  "nothing pending" sentinel). So `0x800065c1`/`c2` = **the outgoing
+  ACT_PAT/ACT_BANK, captured at the exact instant of a commit** -- not an
+  arbitrary earlier snapshot, not a periodically-refreshed cache.
+
+### The "skips the copy" hypothesis (implicit in the previous entry) is REFUTED
+
+The previous entry's framing -- "a SECOND, structurally unrelated piece of
+code... treats the countdown as armed... misreads which pattern is relevant"
+-- left open whether DIRECT JUMP's forced-early commit somehow skips or
+desyncs this copy. Built a direct dynamic test rather than assume: added
+`COMMIT_SITES`/`install_commit_watch`/`print_commit_watch` (PC-hit watches on
+all 8 copy/commit addresses) plus a continuous write-watch on
+`0x800065c1`-`0x800065c2`, wired into both `run_one()` and `run_groundtruth()`
+in `tools/emu_directjump_dynamic.py`.
+
+Result (`--groundtruth` run, log `/tmp/dj_commitwatch_run.log`): for the
+DIRECT JUMP run, block 2 (`0x400a44a6`-`0x400a44dc`) fires **exactly at frame
+461** -- the identical frame the DJ commit itself happens (matches this
+session's own earlier `CNTDN_TBL` arm-at-461 finding) -- and writes
+`0x800065c1 <- 0x0`, `0x800065c2 <- 0x0`. The run's own pre-switch log line
+reads `active bank=0 pattern=0` at the poke. **0x0/0x0 is exactly correct** --
+it is the outgoing pattern/bank, captured synchronously with the commit, not
+stale. Block 1 (the `0x400a4030`-`0x400a40aa` twin) never fires in this run at
+all (0 hits) -- consistent with this being a per-track-context-gated block
+where only one of the two paths applies to whichever track/context DIRECT
+JUMP's forced commit runs through.
+
+**So the copy is neither stale nor skipped.** DIRECT JUMP's commit goes
+through this exact shared commit code, synchronously, correctly.
+
+### Corrected mechanism
+
+This copy+commit block is **general-purpose switch-commit logic that ANY
+pattern switch runs through**, gated only on `PEND != 0xFF` -- not something
+DIRECT JUMP writes to directly, and not something it bypasses. Its purpose:
+preserve a one-instant-old snapshot of the outgoing ACT_PAT/ACT_BANK so that
+any in-flight, still-armed per-track process (`CNTDN_TBL[track]` not idle)
+that started under the OLD pattern can keep referencing that old pattern's
+data until it finishes, rather than the just-committed new one. The
+`0x400a2c66` branch (already found, Session 79 continued a fourth/fifth time)
+is what selects live (ACT_PAT/ACT_BANK) vs. snapshot (`0x800065c1`/`c2`) based
+on `CNTDN_TBL[track]`'s armed/idle state.
+
+Read this way, the mechanism itself is coherent and almost certainly
+deliberate -- not a synchronization bug. **The actual defect is narrower than
+the previous entry implied**: for an ORDINARY (quantized) switch, this commit
+always lands exactly at a step-0 boundary, where `CNTDN_TBL[track]` being
+freshly armed at that instant is just the NORMAL step-0 trig-fire countdown
+for the new pattern's own first step -- the "old pattern" snapshot, even when
+read, covers content that has not meaningfully diverged from the new pattern
+for the overwhelming majority of real use (same track, same boundary).
+**DIRECT JUMP forces this identical commit code to run OFF that boundary**, at
+an arbitrary mid-pattern step, so `CNTDN_TBL[track]` being armed at that
+instant (an ordinary, UNRELATED in-flight countdown for whatever step the
+track happened to be mid-way through) causes this transitional mechanism to
+serve genuinely-diverged old-pattern content for up to ~57 frames -- defeating
+DIRECT JUMP's entire premise of an immediate, atomic jump.
+
+### Status: root cause RE-CONFIRMED and NARROWED, not yet fixed
+
+Not "misread"/"coupling bug" (retracted) but "general-purpose transitional-
+snapshot design, exposed by DIRECT JUMP's non-boundary commit." Everything
+above is measured dynamically (frame-exact PC hits + write values cross-
+checked against the run's own pre-switch state), continuing this thread's
+"no flash without dynamic proof" discipline one level deeper than before.
+
+### NEXT for this thread
+
+1. **Fix design candidates**, evaluated:
+   - (a) *[[REJECTED -- moot]]* "make DJ's commit also update `0x800065c1`/
+     `c2`" -- the previous entry's own proposal. Moot: the copy already runs
+     correctly, synchronously, every time. There is nothing to add here.
+   - (b) *[[leading candidate]]* Give the `0x400a2c66` branch a DIRECT-JUMP-
+     specific override: at DJ-commit time, set a new one-shot per-track flag;
+     the branch checks it first and forces the ACT (live) path regardless of
+     `CNTDN_TBL`'s state, clearing the flag once consumed. Minimal footprint
+     -- touches only the branch and adds one new flag, doesn't alter the
+     shared commit block or `CNTDN_TBL` semantics for anything else.
+   - (c) *[[REJECTED]]* Have DIRECT JUMP's trigger also idle `CNTDN_TBL[track]`
+     at commit. Rejected: `CNTDN_TBL[track]` being armed at that instant is a
+     normal, UNRELATED in-flight countdown for whatever step the track
+     happened to be on -- forcibly idling it would suppress that countdown's
+     own (not-yet-characterized) consumer, likely a note-off/gate-length
+     mechanism, for a reason that has nothing to do with the pattern switch.
+2. **Before writing any patch**: characterize what `CNTDN_TBL[track]` actually
+   gates elsewhere end-to-end (so far only ever inferred as "trig-fire
+   countdown," never fully traced) -- needed to be confident a flag-override
+   bypass at `0x400a2c66` can't itself desync some OTHER consumer that also
+   depends on that branch's live-vs-snapshot choice.
+3. **Locate free cave space + confirm asserted-byte-pattern splice points**
+   for the branch site (and wherever DIRECT JUMP's own trigger code lives),
+   per this project's "guarded binary patch, never hand-assembled" convention
+   (`CLAUDE.md`). No patch source written yet -- `tools/patch_directjump.s`
+   does not exist.
+4. Carried over, lower priority, unchanged from the previous entry: the
+   `PEND_PAT`-poke-alone confound in `run_one()`'s original `DJ_MODE=0` arm;
+   the second `DAT_80001904` clear-loop covering groups 4/7.
+
+Tooling this pass: `tools/ghidra/attic/GhidraDirectJump22.java`-`25.java`
+(one-shot probes, xref + raw-context). `tools/emu_directjump_dynamic.py`:
+added `COMMIT_SITES`/`install_commit_watch`/`print_commit_watch` and a
+`SNAP_C1`/`SNAP_C2` (`0x800065c1`/`0x800065c2`) write-watch, wired into both
+`run_one()` and `run_groundtruth()`. Log: `/tmp/dj_commitwatch_run.log`. Still
+read-only dynamic + static analysis only -- no hook/patch source changed.

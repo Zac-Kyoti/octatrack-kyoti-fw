@@ -106,6 +106,52 @@ TRACE_LO = 0x400a2b00
 TRACE_HI = 0x400a2e30
 TRACE_FRAME_LO = 300
 TRACE_FRAME_HI = 700
+
+# Session 79 continued a sixth time (NEXT item 1/2): GhidraDirectJump22-25.java found
+# 0x800065c1/0x800065c2 are a "just-vacated ACT_BANK/ACT_PAT" snapshot, copied from
+# ACT_BANK/ACT_PAT (0x800065bd/0x800065be) at TWO points inside FUN_400a1eea, each
+# immediately followed by the actual PEND->ACT commit (gated on
+# PEND_BANK/PEND_PAT != -1):
+#   copy:   0x400a4074 (c1<-ACT_PAT), 0x400a4080 (c2<-ACT_BANK)
+#   commit: 0x400a409e (ACT_PAT<-D1), 0x400a40aa (ACT_BANK<-*PEND_BANK)
+# and the twin block:
+#   copy:   0x400a44a6 (c1<-ACT_PAT), 0x400a44b2 (c2<-ACT_BANK)
+#   commit: 0x400a44d0 (ACT_PAT<-D1), 0x400a44dc (ACT_BANK<-*PEND_BANK)
+# Hypothesis: for an ordinary switch, copy always executes on the SAME pass as
+# commit (so the snapshot is always the just-outgoing pattern). DIRECT JUMP's
+# forced-early commit may reach the commit instructions via a different path that
+# skips the copy -- this watch checks that directly instead of guessing further.
+COMMIT_SITES = {
+    "copy1_c1": 0x400a4074, "copy1_c2": 0x400a4080,
+    "commit1_pat": 0x400a409e, "commit1_bank": 0x400a40aa,
+    "copy2_c1": 0x400a44a6, "copy2_c2": 0x400a44b2,
+    "commit2_pat": 0x400a44d0, "commit2_bank": 0x400a44dc,
+}
+SNAP_C1 = 0x800065c1
+SNAP_C2 = 0x800065c2
+
+
+def install_commit_watch(rt, eb):
+    """Hook each COMMIT_SITES address, logging frame_count on every hit. Returns
+    dict name -> list[frame]."""
+    hits = {name: [] for name in COMMIT_SITES}
+    for name, addr in COMMIT_SITES.items():
+        def make(name=name):
+            def on_hit(u, address, size, user):
+                hits[name].append(rt.frame_count)
+            return on_hit
+        rt.uc.hook_add(eb.UC_HOOK_CODE, make(), begin=addr, end=addr)
+    return hits
+
+
+def print_commit_watch(hits):
+    print(f"\ncommit-site PC hits (copy-to-snapshot vs PEND->ACT commit, "
+          f"see COMMIT_SITES):")
+    for name, addr in COMMIT_SITES.items():
+        fr = hits[name]
+        shown = fr[:20]
+        more = f" ...(+{len(fr)-20} more)" if len(fr) > 20 else ""
+        print(f"   {name:14s} (0x{addr:x}): {len(fr)} hits  frames={shown}{more}")
 # Session 79 continued again: the SET side of the DAT_80001904 scheduled-value table,
 # found via GhidraDirectJump15.java raw disassembly:
 #   D0 = *G_ACCUM(0x4610757c) - 0x285ff0 + table_46c7a830[track] + D7 ; then stored into
@@ -238,6 +284,13 @@ def run_one(er, a, dj_on):
         if TRACE_FRAME_LO <= rt.frame_count <= TRACE_FRAME_HI:
             pc_trace.append((rt.frame_count, addr))
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_trace, begin=TRACE_LO, end=TRACE_HI)
+
+    commit_hits = install_commit_watch(rt, er.eb)
+    snap_writes = []
+
+    def on_snap_write(u, acc, addr, size, val, user):
+        snap_writes.append((rt.frame_count, u.reg_read(er.eb.UC_M68K_REG_PC), addr, size, val))
+    rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_snap_write, begin=SNAP_C1, end=SNAP_C2)
 
     # NOTE: rt.watch_mem() stores into self.mem_writes, looked up FRESH on every
     # hit -- calling it twice makes the FIRST hook's callback silently start
@@ -422,6 +475,12 @@ def run_one(er, a, dj_on):
     for fr, pc in pc_trace:
         print(f"   frame {fr:.1f}  pc={pc:#x}")
 
+    print_commit_watch(commit_hits)
+    print(f"\n0x{SNAP_C1:x}/0x{SNAP_C2:x} writes (the candidate snapshot pair), "
+          f"{len(snap_writes)} total:")
+    for fr, pc, addr, size, val in snap_writes:
+        print(f"   frame {fr:.1f}  [{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
+
     return dict(fires=fires, fires_before_poke=fires_before_poke, d7_at_arm=d7_at_arm,
                 pc_trace=pc_trace,
                 reset_flag_writes=reset_flag_writes, prev_bank_ix_writes=prev_bank_ix_writes,
@@ -431,6 +490,7 @@ def run_one(er, a, dj_on):
                 cntdn_writes=cntdn_writes, step_audio_writes=step_audio_writes,
                 refill_writes=refill_writes, live_nibble_post=live_nibble_post,
                 live_nibble_writes=live_nibble_writes,
+                commit_hits=commit_hits, snap_writes=snap_writes,
                 new_pat=new_pat, post_bank=post_bank, post_step=post_step,
                 post_frame=post_frame)
 
@@ -515,6 +575,13 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
         if TRACE_FRAME_LO <= rt.frame_count <= TRACE_FRAME_HI:
             pc_trace.append((rt.frame_count, addr))
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_trace, begin=TRACE_LO, end=TRACE_HI)
+
+    commit_hits = install_commit_watch(rt, er.eb)
+    snap_writes = []
+
+    def on_snap_write(u, acc, addr, size, val, user):
+        snap_writes.append((rt.frame_count, u.reg_read(er.eb.UC_M68K_REG_PC), addr, size, val))
+    rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_snap_write, begin=SNAP_C1, end=SNAP_C2)
     rt.uc.ctl_flush_tb()
 
     rt.start_transport_live()
@@ -554,12 +621,18 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
           f"[{TRACE_FRAME_LO}, {TRACE_FRAME_HI}], {len(pc_trace)} hits:")
     for fr, pc in pc_trace:
         print(f"   frame {fr:.1f}  pc={pc:#x}")
+    print_commit_watch(commit_hits)
+    print(f"\n0x{SNAP_C1:x}/0x{SNAP_C2:x} writes (the candidate snapshot pair), "
+          f"{len(snap_writes)} total:")
+    for fr, pc, addr, size, val in snap_writes:
+        print(f"   frame {fr:.1f}  [{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
     return dict(bank=cur_bank, pattern=cur_pat, step=cur_step, live_nibble=live_nibble,
                 reached=reached, live_nibble_writes=live_nibble_writes, d7_at_arm=d7_at_arm,
                 pc_trace=pc_trace,
                 reset_flag_writes=reset_flag_writes, prev_bank_ix_writes=prev_bank_ix_writes,
                 flag_80001860_writes=flag_80001860_writes,
-                flag_46107568_writes=flag_46107568_writes)
+                flag_46107568_writes=flag_46107568_writes,
+                commit_hits=commit_hits, snap_writes=snap_writes)
 
 
 def compare_groundtruth(dj_result, gt_result, target_pattern):
