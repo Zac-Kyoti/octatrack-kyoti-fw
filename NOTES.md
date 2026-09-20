@@ -20171,3 +20171,115 @@ rigorously as this one was.
 No patch source written. `tools/emu_directjump_dynamic.py` unchanged this pass (all
 analysis from the previous pass's own instrumentation + arithmetic on its log,
 `/tmp/dj_commitwatch_run.log`). Still read-only dynamic + static analysis only.
+
+## Session 79, continued an eighth time (2026-09-20) — FOUND THE REAL CONSUMER: DAT_80001904
+is a per-track phase-anchor timestamp feeding a MAC-based interpolation; DIRECT JUMP's
+early table-arm write shifts that anchor, giving a genuinely wrong (not just
+differently-timed) computed value. This completes and supersedes the "cadence shift"
+framing from the previous entry -- same root event, now with the actual consumer traced.
+
+The previous entry stopped at "an early table-arm write permanently shifts this
+counter's cadence" without knowing what consumes the counter or whether the shift is
+consequential. It is: found a real, single, CPU-side consumer this session's earlier
+`GhidraDirectJump9`-`14` passes missed (they scanned for readers of the table's own
+base address/lea form, which only ever appears inside the WRITER, `FUN_400a1eea`, `10`
+times, image-wide -- the consumer reads via a *different* base register loaded by its
+own `movea.l #-0x7fffe6fc,A0`, which is the same literal but wasn't cross-referenced to
+the same instruction set that scan matched against).
+
+### `FUN_4000ae12` -- the consumer
+
+Zero static callers (Ghidra) -- almost certainly reached via an interrupt vector or a
+per-audio-frame function-pointer dispatch, not a direct `jsr`. Decompile fails ("bad
+instruction data", ColdFire EMAC opcodes the decompiler doesn't model) -- read raw
+disassembly instead, this project's own established fallback. Two relevant blocks:
+
+```
+; ACCUM's writer (0x46104cf0) -- same address FUN_400a1eea's table-arm write reads:
+0x4000aeb4  D0 = DAT_46104cf4
+0x4000aeba  D1 = DAT_80001814        ; TEMPO
+0x4000aec0  D1 <<= 4                 ; TEMPO * 16
+0x4000aec2  D1 += D0
+0x4000aec4  DAT_46104cf0 = D1        ; ACCUM = DAT_46104cf4 + TEMPO*16
+
+; the consumer loop -- reads DAT_80001904[] directly, one 4-byte slot per iteration:
+0x4000aee0  D4 = DAT_46104cf0                    ; = ACCUM, freshly written just above
+0x4000aee6  A0 = &DAT_80001904                   ; -0x7fffe6fc, confirmed base
+0x4000aeec  D5 = DAT_80001820                    ; per-frame tempo-derived phase increment
+                                                  ; (NOTES already has this: "Tempo ->
+                                                  ; DAT_80001814; per-frame increment
+                                                  ; DAT_80001820 = 2^31 / tempo")
+0x4000aef6  D1 = *(A0)+                          ; D1 = DAT_80001904[slot]  (THE TABLE)
+0x4000aef8  D1 -= D4                             ; D1 = slot_value - ACCUM
+0x4000aefa  D3b = (D1 < 0)                       ; sign flag saved
+0x4000aefc  ACC1 = D1 * D5   (msac, also loads D2 = next slot via the same (A0)+ )
+0x4000af04  ACC0 = D2 * D5   (same pattern, next slot)
+   ... (loop continues, one MAC per slot, all 64)
+```
+
+**`DAT_80001904[slot]` is a phase-anchor TIMESTAMP** (confirmed: it is literally
+`ACCUM`'s own value, captured at the moment of the table-arm write) and this consumer
+computes `(anchor - now) * per_frame_increment`, multiply-accumulated per slot -- the
+textbook shape of **phase/ramp interpolation from a stored anchor point**, run every
+frame (or every audio buffer) for all 64 slots. Consistent with the "live-nibble"
+name and with Session 70's own "feeds the audible live-nibble computation" framing --
+that framing was RIGHT; this session's brief doubt about it (raised, then not acted on,
+in the "continued a seventh time" entry) is itself now retracted.
+
+### Why this makes the bug real, not cosmetic
+
+`ACCUM` free-runs continuously (incremented every frame, via the MAC at `0x4000ae30`,
+by `DAT_80001820` scaled by the `0x285ff0` constant -- this session's own exact-
+arithmetic finding, "2,646,000 per step," is `ACCUM`'s growth over one step's worth of
+frames at THIS test project's tempo, not a step-quantized counter in its own right).
+Every table-arm write latches `ACCUM`'s CURRENT value as the new anchor for that
+slot. The consumer's `(anchor - now)` term is only meaningful relative to WHEN the
+anchor was actually latched in real time -- and DIRECT JUMP's forced-early commit
+latches it 3 steps sooner than a natural loop boundary would have. The anchor itself
+is not "wrong" (it genuinely does record when the DJ commit happened) but it produces
+a **different, generally SHORTER (anchor-to-now, negative direction) delta than an
+honest switch at the SAME absolute moment would have**, feeding directly into an
+audio-rate MAC computation -- i.e. a real, plausible, audible glitch in whatever this
+"live-nibble" ramp actually drives, persisting until the next table-arm write refreshes
+the anchor (which is why the divergence measured in the previous entries never
+self-healed within the observation window: it lasts until the NEXT rearm, not until
+`CNTDN_TBL` idles).
+
+### Status: mechanism now understood end to end, from trigger (DIRECT JUMP's forced
+mid-loop commit) through the exact write (`0x400a2e18`, this table's own table-arm
+site) to the exact consumer (`FUN_4000ae12`'s MAC-based interpolation). Root cause is
+"DIRECT JUMP causes an out-of-cycle anchor-timestamp latch for a phase-interpolation
+table," not the branch-selection theory (superseded, previous entry) and not "just a
+cadence artifact with unknown consequence" (superseded, this entry supersedes its own
+predecessor's open question). Still not fixed; no patch source written.
+
+### NEXT for this thread
+
+1. **Fix direction, now well-grounded**: prevent DIRECT JUMP's commit from causing this
+   specific early anchor-latch, OR make it latch the value a natural boundary would
+   have produced. Two concrete shapes worth comparing:
+   - (a) Suppress the early table-arm write for this specific commit (skip it, let the
+     NEXT natural loop boundary set the anchor as normal) -- risk: the anchor would
+     then be stale relative to the JUST-switched pattern for up to a full loop, an
+     equivalent but inverted problem.
+   - (b) Compute what `ACCUM` WOULD be at the next natural loop boundary (current
+     `ACCUM` + remaining-steps-in-this-partial-loop * per-step rate) and latch THAT
+     instead of the raw current `ACCUM` -- keeps the anchor synchronized with the
+     cadence an honest switch would have produced, without delaying the actual pattern
+     switch itself (which DIRECT JUMP's whole feature is built around).
+   Neither is designed or dynamically tested yet.
+2. Confirm `DAT_46104cf4` (read at `0x4000aeb4`, feeds `ACCUM` alongside `TEMPO*16`) --
+   not traced this pass; likely the actual free-running MAC accumulator extract, worth
+   one more xref pass before designing a fix that touches this arithmetic.
+3. Identify what `FUN_4000ae12` is called FROM (no static callers found; likely an
+   interrupt vector or function-pointer table) -- matters for knowing the exact
+   frequency/context a fix's timing assumptions would need to hold under.
+4. Carried over, unresolved, lower priority: the `0x400a2c66` ACT-vs-snapshot branch's
+   real purpose (still real, still unexplained why it exists, but confirmed NOT to be
+   what produces this table's measured discontinuity); the `PEND_PAT`-poke-alone
+   confound in `run_one()`'s `DJ_MODE=0` arm.
+
+Tooling: `tools/ghidra/attic/GhidraDirectJump29.java`-`34.java` (full raw-disasm
+decode of the table-arm formula, `ACCUM`'s writer, and the consumer). No dynamic run
+this pass -- purely static, building on the previous pass's own dynamic log and exact
+arithmetic. No patch source written.
