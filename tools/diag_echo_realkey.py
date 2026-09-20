@@ -93,7 +93,16 @@ def run_once(img_path, project_dir, track, gate, pre_ms, post_ms, steps):
         def on_hit(u, addr, size, ctx):
             sp = u.reg_read(A7)
             ret = struct.unpack(">I", u.mem_read(sp + 8, 4))[0]
-            store.append((rt.frame_count, u.reg_read(D1) & 0xff, label, ret))
+            trk = u.reg_read(D1) & 0xff
+            # relparam_46c7dfba[trk]: the 45-frame release watchdog (emu_mute.py's own
+            # address map); DAT_8000184a bit trk: the note-off/release-pending flag
+            # FUN_40008f84 sets. Sampled at every fresh_bind entry (pass or blocked) to see
+            # whether the watchdog is being repeatedly re-armed (explaining a fading-over-
+            # cycles cadence) or just decays once and sits at 0 (which would NOT explain a
+            # multi-cycle fade on its own).
+            wd = struct.unpack(">I", u.mem_read(0x46c7dfba + trk * 4, 4))[0] if trk < 8 else -1
+            noteoff = (u.mem_read(0x8000184a, 1)[0] >> trk) & 1 if trk < 8 else -1
+            store.append((rt.frame_count, trk, label, ret, wd, noteoff))
         return on_hit
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, make_hook(dt_decisions, "pass", D3), begin=DT_PASS, end=DT_PASS + 1)
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, make_hook(dt_decisions, "silence", D3), begin=DT_SILENCE, end=DT_SILENCE + 1)
@@ -162,20 +171,38 @@ def run_once(img_path, project_dir, track, gate, pre_ms, post_ms, steps):
           f"MUTE_STATE (final) = {mute_end.hex()}")
 
     dt_post = [(f, tr, lab) for f, tr, lab in dt_decisions if tr == track and f >= mute_frame]
-    fb_post = [(f, tr, lab, ret) for f, tr, lab, ret in fb_decisions if tr == track and f >= mute_frame]
+    fb_post = [(f, tr, lab, ret, wd, no) for f, tr, lab, ret, wd, no in fb_decisions
+               if tr == track and f >= mute_frame]
     leaks = [x for x in dt_post if x[2] == "pass"] + [x for x in fb_post if x[2] == "pass"]
     n_dt_post = len(dt_post)
     n_fb_post = len(fb_post)
     print(f"  post-mute: dt_trig {sum(1 for *_,l in dt_post if l=='pass')} pass / "
           f"{sum(1 for *_,l in dt_post if l=='silence')} silence  |  "
-          f"fresh_bind {sum(1 for *_,l,_ in fb_post if l=='pass')} pass / "
-          f"{sum(1 for *_,l,_ in fb_post if l=='silence')} silence")
+          f"fresh_bind {sum(1 for x in fb_post if x[2]=='pass')} pass / "
+          f"{sum(1 for x in fb_post if x[2]=='silence')} silence")
     fb_leaks = [x for x in fb_post if x[2] == "pass"]
     if fb_leaks:
         print("  fresh_bind leak return addresses (which of the 7 callers of "
               "FUN_40006820 dispatched each one):")
-        for f, tr, lab, ret in fb_leaks:
-            print(f"    frame {f}: called from {ret:#010x}")
+        for f, tr, lab, ret, wd, no in fb_leaks:
+            print(f"    frame {f}: called from {ret:#010x}, watchdog={wd}, noteoff_bit={no}")
+
+    # Does the mute-blind per-frame staleness check (FUN_40007960's own goto LAB_40008110,
+    # return address 0x40008114) keep firing -- and getting BLOCKED -- repeatedly for as
+    # long as the track stays muted? If so its rate/watchdog-value over time should show
+    # whether the phenomenon's "fades over a couple cycles" character comes from this call
+    # slowing down/stopping (or the watchdog being repeatedly re-armed then finally not),
+    # or from something else entirely.
+    fb_silence = [x for x in fb_post if x[2] == "silence"]
+    from collections import Counter
+    by_ret = Counter(ret for _, _, _, ret, _, _ in fb_silence)
+    print(f"  fresh_bind SILENCE (blocked) calls: {len(fb_silence)} total, by caller:")
+    for ret, n in by_ret.most_common(10):
+        rows = [(f, wd, no) for f, _, _, r, wd, no in fb_silence if r == ret]
+        frames = [f for f, _, _ in rows]
+        print(f"    {ret:#010x}: {n} calls, frames {frames[0]}..{frames[-1]}")
+        print(f"      first 15 (frame, watchdog, noteoff_bit): {rows[:15]}")
+        print(f"      last 15 (frame, watchdog, noteoff_bit):  {rows[-15:]}")
     return mute_frame, leaks
 
 

@@ -16842,6 +16842,314 @@ incapable of producing a repeating, tempo-locked, multi-cycle pattern on its own
 New: `tools/ghidra/attic/GhidraMute14.java`. Modified further: `tools/diag_echo_realkey.py`
 (return-address capture on the `fb_pass`/`fb_silence` hooks). Committed `6ccc86c`, pushed.
 
+## Session 58 continued yet again, part 15 (2026-09-19, `wip`) — MUTE MODE: user-run hardware
+listening tests (no new build; this is pure behavioural characterisation on whatever is
+currently flashed) OVERTURN the entire "trig-masking leak" framing this thread has pursued
+since part 10. The decisive result: **sample-locking a trig to a NON-default sample slot,
+then muting right after that trig with no further real trig before mute, SUPPRESSES THE
+ECHO ENTIRELY** -- but only when the locked sample genuinely differs from default; locking
+the SAME sample as default does not suppress it. Combined with "pitch/VOL p-locks are
+reflected in the echo but sample-locks are not," this points at a THIRD mechanism, distinct
+from hooks 9/10 (`dt_trig`/`fresh_bind`) entirely -- one that updates an ALREADY-BOUND,
+still-alive voice's parameters per step, does not require or perform a fresh sample bind,
+and was never in scope for anything this project's SOFT MUTE design has gated since Session
+9. Not yet static-RE'd. HANDOFF / mid-session pause for direction check.
+
+### Correction: "stock" was never a meaningful test target
+
+The user correctly rejected the "test on stock firmware" framing from the previous exchange:
+stock's ONLY mute behaviour is the instant hard-cut (no FX tails at all) -- this whole "echo
+after an otherwise-good SOFT MUTE" phenomenon is specific to OUR OWN mod's mute behaviour by
+construction. Every test below is on whatever build is currently flashed (the pre-hook-13
+`_BASELINE`, unchanged this session) -- these are behavioural characterisation tests, not
+build validation, and needed no new build.
+
+### User's answers to the 5 proposed tests
+
+1. **Mute with sparse/no immediate upcoming trigs**: irrelevant -- "the echo always plays
+   back the full pattern content" regardless of trig density right after the mute point. It
+   tracks the PATTERN's own trig grid, wherever the trigs actually are, not just "whatever
+   was about to fire in the next few steps."
+2. **Does the echo reflect actual pattern content or repeat one note?** Confirmed reflects
+   pattern content for PITCH locks specifically ("a series of pitch-locked trigs will echo
+   exactly as their sequence of pitch locks"). See the sample-lock result below for the
+   crucial exception.
+3. **Requires a voice sounding at mute-instant?** No.
+4. **QUICK MUTE vs. FUNC+TRACK (different code paths, Session 9)**: identical behaviour.
+5. **Locked to step grid or sample loop length?** Locked to the step grid -- user's own
+   framing, worth quoting exactly: *"each individual 'echo' is just the existing trig
+   getting hit again by the sequencer. They occur at exactly the same time, but the audio
+   being fired by the trigs fades out over a brief period (tempo dependent)... It's more
+   like a mute applies a trig mask that starts relatively transparent and 'fades in' to
+   eventually fully mask the trigs over a couple pattern cycles."* This is the user's own,
+   more accurate redescription of the whole phenomenon -- "echo" is in scare quotes in their
+   own usage from here on because it isn't an audio-buffer echo at all.
+
+### The AMP follow-up test -- VOL, REL, and the decisive sample-lock result
+
+- **AMP VOL p-locks**: reflected correctly in the echo, in BOTH OT+FX and DT.
+- **AMP REL p-locks (locked to 0)**: **no effect** on the echo in OT+FX (the echo's envelope
+  length is governed by the OT+FX echo's own fixed/shortened shape regardless of the p-lock).
+  In DT, REL p-locks **do** show up in the echo, and DT's own non-p-locked echoes already
+  have a longer envelope than OT+FX's (consistent with part 10's original hardware report).
+- **Sample-lock to a genuinely different (non-default) sample slot, on the LAST real trig
+  before mute, with no further real trig before mute engages**: **the echo does not occur at
+  all.** Locking to the SAME sample as default does not suppress it -- it has to be an
+  actually different slot.
+
+### What this rules out, and the new working hypothesis
+
+Ruled out: hooks 9/10 (`dt_trig`/`fresh_bind`) leaking real per-trig dispatches through their
+own `MUTE_STATE` gate. If that were the mechanism, sample-lock content should have NO bearing
+on whether the phenomenon occurs at all -- a leaked dispatch is a leaked dispatch regardless
+of what sample the leaked trig points at. Instead, whether the "echo" happens depends on a
+property of the voice's state left behind by the LAST REAL (pre-mute) trig: specifically,
+whether that trig required a FRESH BIND (forced by locking a different sample -- this project
+has already established, this session and earlier, that sample-slot assignment only happens
+via `FUN_40006820`, a fresh bind) or went through REUSE (default/same-sample, no rebind
+needed, presumably `FUN_4000f450`'s "already bound" branch).
+
+**New hypothesis**: there is a mechanism -- NOT the `handler_table[machine_type]` dispatch at
+`0x4000d498` hook 9 gates, and NOT `FUN_40006820`'s fresh-bind entry hook 10 gates -- that
+keeps updating an ALREADY-BOUND, REUSE-eligible voice's parameters (pitch, VOL, and in DT,
+REL) once per step, for as long as that voice stays "warm," without ever performing a fresh
+sample bind. This would cleanly explain every result above:
+- Pitch/VOL update correctly (this mechanism's whole purpose looks like "push updated p-lock
+  values to an already-playing voice").
+- Sample-lock does NOT update (this mechanism can't rebind the sample -- that needs the full,
+  properly-gated dispatch).
+- REL differs between OT+FX/DT (the two modes' own envelope-retrigger handling for an
+  already-alive voice evidently reads different subsets of state here, consistent with
+  everything else this project has found about OT+FX vs. DT's differing audio-path
+  treatment).
+- A FRESH BIND on the last real trig before mute clears/resets whatever "keep updating this
+  now-warm voice" state this mechanism keys off of -- so muting right after a fresh-bound
+  trig leaves nothing for it to act on, and the phenomenon doesn't occur at all.
+
+If correct, this is a mechanism NONE of hooks 1/8/9/10/13 (this project's whole SOFT MUTE
+design, Session 9 through part 14) was ever positioned to gate, because none of them were
+designed around "an already-playing voice can keep receiving fresh per-step parameter
+updates without a new trig dispatch or a fresh bind" -- that possibility was never in the
+Session 9 design's model of how a voice starts or stops.
+
+### NOT yet done -- static RE target, now sharply scoped
+
+Look inside `FUN_4000f450` (the shared FLEX/STATIC per-trig handler, downstream of hook 9's
+gate) for its OWN internal reuse-vs-fresh-bind branch, specifically for any OTHER entry point
+into the "update an already-bound voice's params" logic that does NOT originate from the
+`0x4000d498` dispatch hook 9 sits on -- e.g. a periodic/per-step poll of "does the currently
+active step carry parameter-lock data for the currently-bound voice" that runs independent of
+an actual trig event. Also worth checking: whether this is the SAME mechanism responsible for
+Octatrack's documented trigless-lock feature (parameter locks on a step with no audible trig,
+applied to whatever's currently sounding) -- the user's own separate, currently-parked S48
+project thread already established trigless locks are a real, distinct mechanism this
+firmware has, previously found to interact with a DIFFERENT stock bug (the PTN LED not
+lighting for trigless-only patterns). If trigless-lock application is genuinely the same code
+path as this echo phenomenon, that would be a very strong, independently-motivated lead.
+
+### Mid-session pause for direction check
+
+This is now a sharply-scoped, well-evidenced static RE question, unlike the last several
+session-length cycles of broader guessing -- worth pursuing in the emulator/Ghidra next.
+Paused here rather than launching directly into it, since the user pushed back on scope
+creep once already this session; confirm before spending another RE cycle.
+
+## Session 58 continued yet again, part 16 (2026-09-19, `wip`) — MUTE MODE: real hardware
+data (3-case step test) further narrows the mechanism but is not fully explained yet;
+`FUN_4000f450` decompiled and shown to have zero mute-awareness of its own, and
+`FUN_40006820` (hook 10's site) shown to be a voice-INVALIDATION call, not a voice-start;
+a real accidental-rebuild incident happened and was assessed safe (nothing flashed,
+hardware unaffected) and the correct hardware-matching image identified; dynamic testing
+against that correct image confirms a real, reproducible bug (hook 10 blocking
+`FUN_40007960`'s own per-frame cleanup attempts, continuously, every frame) but shows NO
+fading/eventual-stop behaviour even over a 20-second window with a long one-shot sample --
+diverging from the user's real hardware experience. Paused, HANDOFF, no fix.
+
+### User's 3-case step data (pattern: step1=default sample [reuse], step10/15=different
+### sample [fresh-bind])
+
+- Mute at step 7 (last real trig = step1, reuse): echo includes ALL of steps 1/10/15,
+  cycling for ~2 pattern cycles.
+- Mute at step 11 (last real trig = step10, fresh-bind): echo includes ONLY step 15,
+  exactly once, no cycling.
+- Mute at step 16 (last real trig = step15, fresh-bind, nothing after before mute): no
+  echo at all.
+
+Flagged (own words) that my recap had dropped the load-bearing fact that steps 10/15 are
+locked to a genuinely different (non-default) sample, not just "fresh-bind trigs" in the
+abstract -- corrected understanding before continuing.
+
+### `FUN_4000f450` (real per-trig reuse/fresh-bind decision) decompiled in full
+### (`tools/ghidra/attic/GhidraMute15.java`, `out already discarded, not re-saved this
+### part -- rerun the script against `ghidra_project` to reproduce)
+
+Confirmed, directly from the decompile, not inference: **this function never reads
+`MUTE_STATE` or `SOLO_FLAG` anywhere in its body.** The only mute check in the whole
+per-trig call chain is hook 9's own gate at `0x4000d498`, upstream of this function being
+called at all. Its own reuse-vs-fresh-bind branch (`bVar14`) tests only whether the
+requested sample-slot identity/machine-type/index matches what's cached per-voice --
+content-based, not mute-based.
+
+**Also found, and this overturns a mislabeling in hook 10's own header comment**:
+`FUN_40006820` (the function hook 10 gates) does NOT start a voice. It clears the voice's
+active-state byte (`(&DAT_800049d8)[track*0xa8] = 0`) -- a FREE/INVALIDATE operation -- and
+calls a shared finalizer, `FUN_4000672c` (itself tangled up with an orthogonal FLEX-
+recorder-focus-ownership mechanism, `DAT_400d7c4c`, not investigated further, likely
+unrelated to this bug). `FUN_4000f450`'s OWN fresh-bind branch (`LAB_4000f514`) just calls
+this free/invalidate function and returns 0 immediately -- it does NOT do the "bind + play"
+setup work itself; that only happens on a SEPARATE, later call once the voice looks
+"not stale" again.
+
+**`FUN_40007960` (the already-known per-frame playback-position engine) shares the exact
+same staleness-check shape** (`if (state->+8 != 0 || state->+0x10 < 1 || state->+0x14 !=
+cached) call FUN_40006820`) and runs every frame, completely independent of mute state and
+of hook 9's gate. Working theory (STATED, not yet fully proven): hook 10 silencing a muted
+track's calls to `FUN_40006820` blocks this per-frame cleanup from ever completing, so the
+voice's active byte never actually clears, and any later REUSE-compatible dispatch
+(bypassing mute entirely, since `FUN_4000f450` has no mute-awareness of its own) can keep
+finding a "still valid" cached binding to play against. This explains why reuse-type
+content persists and fresh-bind-type content (different sample) can't participate in the
+same way -- still does not fully explain the exact 3-case cycling/once/never asymmetry.
+
+### Accidental rebuild incident -- assessed, disclosed, hardware unaffected
+
+While trying to get correct hook-9/10 cave addresses for dynamic testing, ran
+`python3 tools/build_mutemode_dt.py` directly against the CURRENT (much-evolved)
+`patch_softmute.s`, overwriting `out/mainos_mutemode_dt.bin` /
+`out/OCTATRACK_OS1.40C_MUTEMODE_DT.{bin,syx}` in place, with no backup. Since `out/` is
+entirely gitignored, this could not be recovered from git; hook 13 v1's exact source (the
+version actually built into the file that used to be there) was also never independently
+committed (Session 58 parts 8-10 were squashed into one later commit, `39c5c25`, after the
+v1->v2 redesign already happened) -- so the original bytes are not reconstructable exactly
+either way. **Disclosed to the user immediately.** Assessed for safety before doing anything
+further: `build_mutemode_dt.py`'s own `PATCHES` table currently wires in exactly three
+active hooks -- `relstate_shadow` (hook 13 v2), `dt_trig`, `fresh_bind`. The two dangerous,
+abandoned hooks from earlier in this project's history (`relstate_or`, hook 11, caused
+severe A/B regressions; the hook-12 EMAC-danger one that caused the real emergency-revert
+silence incident) are BOTH present in `patch_softmute.s` only as explicitly commented-out
+dead code -- neither is wired into this or any other current build. The rebuild passed
+every one of this project's own build-time safety gates (stock-byte assertions, cave-
+overlap checks, checksum, EFT container round-trip) cleanly. **Nothing was flashed** at any
+point -- only local file regeneration -- so the user's hardware was never at risk.
+
+**Corrected understanding of what's actually on the user's hardware, per the user's own
+correction**: NOT `_BASELINE` (contra part 10's own "user directed an immediate revert...
+done, per the user" -- that record is now known to be stale/wrong on this point, not
+re-litigated further this session). The user's hardware, and every hardware-listening test
+this whole "echo" investigation has drawn on (including today's), is running
+`OCTATRACK_MUTEMODE_DT` -- i.e. hooks 8(relcut)/9(dt_trig)/10(fresh_bind) + hook 13 **v1**
+(the version that produced the shortened-envelope symptom, per part 10's original hardware
+report) -- NOT v2 (`relstate_shadow`), which has never been flashed at all.
+
+### Reconstructing correct dt_trig/fresh_bind cave addresses without the lost v1 binary
+
+Since `FUN_4000f450`-adjacent hooks 9/10 haven't been touched since before hook 13 existed
+(confirmed by `git show 7a1a472:tools/patch_softmute.s`, the last commit before any hook-13
+work), their own LOGIC is provably identical between v1 (on hardware) and the current v2
+source -- only their CAVE POSITION differs, because hook 13's own new code, inserted
+earlier in the linear assembly, shifts everything after it by a constant `+0x5a` (90 bytes).
+Directly measured (assembling both `7a1a472`'s and current `patch_softmute.s` standalone
+with `m68k-elf-as -mcpu=5407 --defsym DT_MODE=1` + `m68k-elf-ld -Ttext=0x400d7400`, then
+`m68k-elf-nm`):
+```
+7a1a472 (no hook 13):  dt_pass=0x400d761c dt_silence=0x400d7614 fb_pass=0x400d7678 fb_silence=0x400d7672
+current (hook 13 v2):  dt_pass=0x400d7676 dt_silence=0x400d766e fb_pass=0x400d76d2 fb_silence=0x400d76cc
+```
+`diag_echo_realkey.py`'s existing hardcoded constants (`DT_PASS=0x400d7676` etc.) already
+match the CURRENT/v2 layout exactly -- they were correct all along for
+`out/mainos_relstate_shadow.bin` and now also for the freshly-rebuilt (v2)
+`out/mainos_mutemode_dt.bin`, just not for the lost v1 file. Since hooks 9/10's real
+behaviour is unchanged between v1 and v2 (only the orthogonal REL_STATE-race fix
+underneath them differs), testing against the rebuilt v2 image is a valid, meaningful proxy
+for hooks 9/10's real hardware behaviour, even though it isn't byte-identical to what's
+actually flashed.
+
+### Dynamic re-test against the correct (rebuilt v2) image -- confirms the bug, but shows NO fade
+
+`python3 tools/diag_echo_realkey.py out/mainos_mutemode_dt.bin --track 1 --post-ms 20000`
+(also re-run against `test5`, whose sample pool has `fatty.wav` in clap.wav's role, per the
+user's own correction that all their listening tests used a LONG one-shot that doesn't
+fully decay before the next trig, not a short one like `clap.wav`):
+
+Both runs (clap.wav AND fatty.wav) show the **identical signature**: 2 leaked `fresh_bind`
+dispatches at the literal mute-engage frame (matching part 13's original, now re-confirmed
+against the correct image), then tens of thousands of BLOCKED `FUN_40006820` calls, one or
+two every single frame, ALL from `FUN_40007960`'s own staleness-check site (`0x40008114`),
+for the ENTIRE post-mute window (6-20 seconds tested). Added per-hit sampling of the
+45-frame release watchdog (`relparam_46c7dfba[track]`) and the note-off flag
+(`DAT_8000184a` bit): **both sit at a constant, unmoving value (45 and 1 respectively) for
+the entire window, in both runs** -- no decay, no expiry, ever, regardless of sample choice.
+
+**This does not match the user's hardware experience**, which reliably fades and fully
+stops within about two pattern cycles. Switching from a short one-shot (`clap.wav`) to a
+long one that doesn't fully decay before the next trig (`fatty.wav`, per the user's own
+correction and long-standing preference for it in past hardware tests) made no observable
+difference to this signature at all -- ruling out "short sample masks the fade" as the
+explanation for the mismatch. Two live possibilities, neither resolved: (1) this minimal
+single-track test setup is missing something present in the user's real sessions (other
+tracks active, specific pattern/tempo context, something else) that matters for the
+eventual resolution; (2) the real "eventually stops" mechanism runs through a different
+code path than `FUN_40007960`/hook 10 entirely, and this session has been tracking a real
+but different bug from the one governing the actual fade.
+
+### Status and pause
+
+A real, verified, reproducible firmware bug IS confirmed this session (hook 10 blocking
+`FUN_40007960`'s own legitimate per-frame cleanup, unconditionally, for as long as a track
+stays muted) -- this is solid, dynamically confirmed against the correct hardware-matching
+image, not speculation. But it does not yet explain the user's actual reported symptom's
+temporal character (the fade/eventual stop), and no further concrete static-RE lever is in
+hand for that specific gap without more information from the user about how their own test
+setup differs from this session's minimal one. Paused here at the user's own implicit
+signal (repeated corrections this session) rather than continuing to guess.
+
+### Housekeeping
+
+`out/mainos_mutemode_dt.bin` / `out/OCTATRACK_OS1.40C_MUTEMODE_DT.{bin,syx}` now reflect
+hook 13 v2 (rebuilt from current source), NOT the v1 that's actually on the user's
+hardware -- flagged clearly here so a future session doesn't mistake this local file for a
+hardware-exact reference. Modified further: `tools/diag_echo_realkey.py` (watchdog +
+note-off sampling on every `fresh_bind` hit, both pass and silence). New:
+`tools/ghidra/attic/GhidraMute15.java`. Committing this part alongside parts 12-15's own
+prior work.
+
+### Exact prompt to start the next session with
+
+```
+Continue MUTE MODE in ~/Documents/octatrack-kyoti-fw (branch `wip`). Read NOTES.md "Session
+58 continued yet again, part 16" (search for "real hardware data (3-case step test)" --
+this file has topic-numbering collisions across threads, match the title not the number);
+skim parts 12-15 before it for the full arc (the 0x460d10d0/d4 gate theory overturned, the
+posted-kernel-event MUTE_STATE finding, the sample-lock hardware data). STATUS: Bug A (the
+REL_STATE race, OT+FX only) is fixed and emulator-validated (hook 13 v2,
+`relstate_shadow`), never flashed. The user's ACTUAL hardware runs `OCTATRACK_MUTEMODE_DT`
+with hook 13 **v1** (not v2, not baseline -- corrected this session; part 10's "reverted to
+baseline" record is stale). `out/mainos_mutemode_dt.bin` and its derived `.bin`/`.syx` were
+accidentally rebuilt this session from current (v2) source and no longer match hardware
+exactly -- safe to use for dt_trig/fresh_bind testing (their own logic is unchanged from
+v1, only cave position shifted, verified directly via `m68k-elf-nm` against both `7a1a472`
+and current `patch_softmute.s`) but NOT a byte-exact hardware reference for anything
+REL_STATE-race-related. A real, dynamically-confirmed bug exists: hook 10 blocks
+`FUN_40007960`'s (the project's own already-documented per-frame playback-position engine)
+legitimate per-frame attempts to free a muted track's stuck voice, unconditionally, for as
+long as the track stays muted -- confirmed via `tools/diag_echo_realkey.py` against the
+correct image, with the 45-frame release watchdog and note-off flag both sampled and shown
+to sit at a CONSTANT value (never decaying) for the entire post-mute window, in both a
+short (`clap.wav`) and long (`fatty.wav`) one-shot test. This does NOT match the user's
+real hardware experience of the echo fading and fully stopping within ~2 pattern cycles --
+switching sample length made no difference to the emulator's own signature. FIRST THING TO
+DO: this needs either (a) more precise information from the user about what differs between
+their real test sessions and this minimal single-muted-track emulator scenario (other
+tracks active? specific tempo/pattern length? anything else running?), since two full
+rebuild/retest cycles already ruled out sample duration as the variable; or (b) a
+completely different static-RE lever for finding what actually causes the eventual stop,
+which is not yet identified. Do not assume `FUN_40007960`/hook 10 is the complete
+explanation for the echo's temporal character -- it's a confirmed REAL bug, but possibly
+not the (or not the only) mechanism behind what the user actually hears. Given this
+session's own repeated pattern of corrections, lean toward asking the user precise
+questions before spending another emulator cycle.
+```
+
 ## Session 75 continued (2026-09-19, `wip`) — SIDECHAIN3: HARDWARE CONFIRMED FIXED. User
 flashed the Session 75 build (n7 fix + the split-block repeat-call guard, both fixes
 together) and confirmed: **the MON ringing/ring-modulation/resonance with KEY FLT on LP or
