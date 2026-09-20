@@ -19744,3 +19744,79 @@ session.
 Tooling: `tools/ghidra/attic/GhidraDirectJump14.java`-`16.java` (one-shot probes). `tools/
 emu_directjump_dynamic.py`: added `d7_at_arm` register watch (via a new `TABLE_ARM_PC`
 constant) to both `run_one()` and `run_groundtruth()`. No hook/patch source changed.
+
+## Session 79, continued a fourth time — DIRECT JUMP: the RESET_FLAG hypothesis is ALSO
+REFUTED -- the reset block never fires in either condition at all; the real gate for the
+anomalous extra arm event is narrowed to a stack-local test this session's tooling can't
+watch directly. Core finding (the cadence anomaly itself) unaffected and still stands.
+
+### Traced the trigger chain empirically -- RESET_FLAG (0x8000668d) never fires, in either
+### condition, across the whole run  [MEASURED, REFUTES the prior continuation's hypothesis]
+
+Per the previous continuation's own NEXT item, decompiled the caller of the reset block
+(`step_handler_confirmed` @ `0x4009d1e8`, a pre-existing Ghidra label, 2104 bytes -- not
+further decompiled this pass) and found both write sites for `0x8000668d`
+(`GhidraDirectJump18.java`): `0x400a13dc` (part of a larger, unconditional reset -- clears
+several unrelated globals too, looks like a full voice/track reinit, not tick-scoped) and
+`0x400a2264` (`D0 = 1 << PREV_BANK_IX(0x800065bc)`, gated on `PREV_BANK_IX != -1` and a
+second flag `0x80001860`). Notably, `0x46107568` (the first early-bail test at
+`0x400a2d1a`) turns out to be **the exact same flag DIRECT JUMP's own Hook F already reads**
+(`0x400a4d36`, Session 70 9th pass) -- a real, direct structural link, even though it did
+not end up being the active mechanism here (see below).
+
+Added a dynamic watch on all four addresses (`0x8000668d`, `0x800065bc`, `0x80001860`,
+`0x46107568`) to both conditions. Result: **`0x8000668d`, `0x800065bc`, and `0x80001860`
+get ZERO writes across the entire ~1100-frame run, in BOTH conditions.** The reset
+sub-block (`0x400a2d90`-`0x400a2dd8`) simply never executes in this scenario at all. Re-
+reading the surrounding control flow confirms why the earlier finding still holds despite
+this: the reset sub-block is **optional** -- both its "taken" and "not-taken" paths merge
+at `0x400a2dde` and fall through **unconditionally** into the accumulator read and the
+arm-site write (`0x400a2e12`). The arm site fires regardless of whether the reset ran; the
+reset just optionally refreshes the two tables it reads first. Since the reset never fires
+in either condition, `table_46c7a830[track]`/`table_46c77bfa[track]` must be holding
+whatever a one-time init set them to (identical in both conditions), and are not the
+source of the divergence. **This retracts the specific "pattern-change misread as
+pattern-loop, triggering a spurious reset" mechanism proposed last continuation** -- that
+code path exists and is real, but it is not what fires here.
+
+`0x46107568` itself (98 writes, both conditions) turns out to be a **clean, regular
+per-step countdown** (`0x285ff0` -> `0x1e47f4` -> `0x142ff8` -> `0xa17fc` -> `0x0`, four
+sub-writes per ~57.7-frame step, restarting every step) with **no visible anomaly around
+the commit frame** in either condition -- not the gate either.
+
+### What's left: the OTHER early-bail condition, a stack-local this tooling can't watch
+### directly  [status]
+
+`0x400a2d24`-`0x400a2d2a`'s `tst.b (0x94,SP)` (relative to whatever function's stack frame
+is active when `step_handler_confirmed`'s caller runs) is the one gating condition not yet
+ruled out -- and, since it's stack-relative rather than a fixed global address, it can't be
+watched with this tool's existing `make_watch`-style fixed-address hooks. **The core
+finding from two continuations ago is unaffected by any of this session's refutations**:
+the arm-site's own firing CADENCE genuinely differs (one anomalous half-length interval,
+exactly at the DIRECT JUMP commit frame, in DJ-commit but not ground-truth) -- only the
+proposed EXPLANATION for that cadence anomaly has been narrowed, twice now, by ruling out
+two real but inactive candidate mechanisms.
+
+### NEXT for this thread
+
+1. **Watch `(0x94,SP)` directly**: hook `UC_HOOK_CODE` at the exact PC that reads it
+   (`0x400a2d28`) and read the stack-relative value via `u.reg_read(UC_M68K_REG_A7) +
+   0x94` (or whatever register holds the active frame pointer at that PC -- confirm via
+   one more raw-disassembly check of the enclosing function's own prologue) at that instant,
+   across both conditions, the same technique already used successfully for `D7`.
+2. If that also comes back clean: the gate might instead be inside `step_handler_confirmed`
+   itself (not yet decompiled past its first ~200 instructions) -- its own return value
+   (tested via `0x8000668d`... no, already ruled out) or some OTHER output feeds the
+   caller's own decision at a point not yet examined. Read the rest of that function.
+3. Given this thread has now had four consecutive rounds of static-tracing-then-refutation
+   in one sitting, worth pausing for a fresh look rather than a fifth immediately -- the
+   project's own standing lesson (Session 69's Finding 4b, the 12th-14th pass track-0
+   hypothesis) is that chained hypothesis-refinement without a step back tends to compound
+   rather than resolve. The CADENCE ANOMALY itself remains solid, real, and dynamically
+   reproducible -- that's the one fact worth carrying into the next round with full
+   confidence; every proposed mechanism for WHY has been provisional so far.
+
+Tooling: `tools/ghidra/attic/GhidraDirectJump17.java`/`18.java`. `tools/
+emu_directjump_dynamic.py`: added `reset_flag_writes`/`prev_bank_ix_writes`/
+`flag_80001860_writes`/`flag_46107568_writes` watches to both run functions. No
+hook/patch source changed.

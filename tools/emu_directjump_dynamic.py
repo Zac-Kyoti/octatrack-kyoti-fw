@@ -220,7 +220,6 @@ def run_one(er, a, dj_on):
     def on_arm(u, addr, size, user):
         d7_at_arm.append((rt.frame_count, u.reg_read(er.eb.UC_M68K_REG_D7)))
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_arm, begin=TABLE_ARM_PC, end=TABLE_ARM_PC)
-    rt.uc.ctl_flush_tb()
 
     # NOTE: rt.watch_mem() stores into self.mem_writes, looked up FRESH on every
     # hit -- calling it twice makes the FIRST hook's callback silently start
@@ -232,6 +231,17 @@ def run_one(er, a, dj_on):
             log.append((rt.frame_count, rt._cur(), u.reg_read(er.eb.UC_M68K_REG_PC), a, size, val))
         rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_write, begin=addr, end=addr + length - 1)
         return log
+    # Session 79 continued again: trace the actual trigger chain for the scheduling-
+    # reset (GhidraDirectJump16/17/18.java): RESET_FLAG (0x8000668d, per-track bitmask,
+    # tested at 0x400a2d8c) has two SET sites -- 0x400a13dc (unconditional, part of a
+    # larger reset block) and 0x400a2264 (D0 = 1 << PREV_BANK_IX, gated on
+    # PREV_BANK_IX(0x800065bc) != -1 and FLAG_80001860 set). Watch all three plus the
+    # two early-bail globals (0x46107568 -- the SAME flag Hook F already reads at
+    # 0x400a4d36 -- and 0x80001860) to see exactly which path fires at the commit.
+    reset_flag_writes = make_watch(0x8000668d, 2)
+    prev_bank_ix_writes = make_watch(0x800065bc, 1)
+    flag_80001860_writes = make_watch(0x80001860, 1)
+    flag_46107568_writes = make_watch(0x46107568, 4)
     phase_writes = make_watch(PHASE_TBL, 8)
     gate_writes = make_watch(GATE_TBL, 8)
     cntdn_writes = make_watch(CNTDN_TBL, 8)
@@ -381,7 +391,18 @@ def run_one(er, a, dj_on):
     for fr, d7 in d7_at_arm:
         print(f"   frame {fr:.1f}  D7={d7:#x}")
 
+    for name, log in (("0x8000668d (RESET_FLAG)", reset_flag_writes),
+                       ("0x800065bc (PREV_BANK_IX?)", prev_bank_ix_writes),
+                       ("0x80001860 (FLAG)", flag_80001860_writes),
+                       ("0x46107568 (Hook F's own flag)", flag_46107568_writes)):
+        print(f"\n{name} writes, {len(log)} total:")
+        for fr, task, pc, a, size, val in log:
+            print(f"   frame {fr:.1f}  [{a:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
+
     return dict(fires=fires, fires_before_poke=fires_before_poke, d7_at_arm=d7_at_arm,
+                reset_flag_writes=reset_flag_writes, prev_bank_ix_writes=prev_bank_ix_writes,
+                flag_80001860_writes=flag_80001860_writes,
+                flag_46107568_writes=flag_46107568_writes,
                 phase_writes=phase_writes, gate_writes=gate_writes,
                 cntdn_writes=cntdn_writes, step_audio_writes=step_audio_writes,
                 refill_writes=refill_writes, live_nibble_post=live_nibble_post,
@@ -451,6 +472,18 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
     def on_arm(u, addr, size, user):
         d7_at_arm.append((rt.frame_count, u.reg_read(er.eb.UC_M68K_REG_D7)))
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_arm, begin=TABLE_ARM_PC, end=TABLE_ARM_PC)
+
+    def gt_watch(addr, length):
+        log = []
+
+        def on_w(u, acc, a, size, val, user):
+            log.append((rt.frame_count, u.reg_read(er.eb.UC_M68K_REG_PC), a, size, val))
+        rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_w, begin=addr, end=addr + length - 1)
+        return log
+    reset_flag_writes = gt_watch(0x8000668d, 2)
+    prev_bank_ix_writes = gt_watch(0x800065bc, 1)
+    flag_80001860_writes = gt_watch(0x80001860, 1)
+    flag_46107568_writes = gt_watch(0x46107568, 4)
     rt.uc.ctl_flush_tb()
 
     rt.start_transport_live()
@@ -479,8 +512,18 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
     print(f"\nD7 at table-arm site (0x{TABLE_ARM_PC:x}), {len(d7_at_arm)} hits:")
     for fr, d7 in d7_at_arm:
         print(f"   frame {fr:.1f}  D7={d7:#x}")
+    for name, log in (("0x8000668d (RESET_FLAG)", reset_flag_writes),
+                       ("0x800065bc (PREV_BANK_IX?)", prev_bank_ix_writes),
+                       ("0x80001860 (FLAG)", flag_80001860_writes),
+                       ("0x46107568 (Hook F's own flag)", flag_46107568_writes)):
+        print(f"\n{name} writes, {len(log)} total:")
+        for fr, pc, a, size, val in log:
+            print(f"   frame {fr:.1f}  [{a:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
     return dict(bank=cur_bank, pattern=cur_pat, step=cur_step, live_nibble=live_nibble,
-                reached=reached, live_nibble_writes=live_nibble_writes, d7_at_arm=d7_at_arm)
+                reached=reached, live_nibble_writes=live_nibble_writes, d7_at_arm=d7_at_arm,
+                reset_flag_writes=reset_flag_writes, prev_bank_ix_writes=prev_bank_ix_writes,
+                flag_80001860_writes=flag_80001860_writes,
+                flag_46107568_writes=flag_46107568_writes)
 
 
 def compare_groundtruth(dj_result, gt_result, target_pattern):
