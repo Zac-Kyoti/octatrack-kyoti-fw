@@ -17669,3 +17669,295 @@ decay argument alone) was deliberately deferred to keep this attempt minimal -- 
 next thing to add, not a different topology. Cave budget: 268/1063 words, ~795 words of
 slack still. `tools/build_merged.py` remains stale relative to the donor swap (flagged two
 sessions ago, still not addressed, out of scope here too).
+
+## Session 76 continued yet again (2, 2026-09-19, `wip`) -- SIDECHAIN3 fine-tuning:
+KFLT HP re-entry declick fix, KGN smoothing fix, and a real address-computation bug
+found and fixed in the toolchain (not flashed anywhere yet, this was caught by the
+emulator exactly as the standing rule is meant to catch it).
+
+**Context:** the prior entry's one-pole KFLT redesign got HARDWARE-CONFIRMED for its
+main goal (the LP/HP/OFF junction pop/click is gone). This entry is the promised
+fine-tuning pass, driven by three items the user reported after listening on real
+hardware: (1) a residual minor pop specifically on OFF<->HP (LP<->OFF<->LP is clean,
+left alone); (2) KGN (KEY GAIN) sweeps pop at various points across the whole range,
+but ONLY when MON is on; (3) a longstanding "grainy"/near-distorted character on the
+compressed target at low ATK/REL settings, present since the earliest sidechain build,
+worse with a spectrally busy key and fixed by raising RMS -- flagged for research, not
+necessarily a code fix.
+
+### 1. KFLT HP re-entry declick
+
+Root cause: KFLT's OFF/bypass branch (`zz10`) skips the whole one-pole filter loop
+entirely, so the tracker (`r7+$16`) never advances while parked at OFF -- re-entering
+HP later reads back whatever the tracker held from BEFORE that OFF period, however
+stale. Worked out the correct reseed target algebraically rather than trusting the
+prior session's floated idea verbatim: HP's output is `in - tracker`, so continuity
+with what bypass was JUST outputting (raw, unfiltered `in`) needs **tracker == 0** on
+the first post-OFF sample, not "the current input sample" (seeding to `in` would give
+`hp[0] = 0`, a jump TO silence -- worse, not better). LP is the opposite case (its
+output IS the tracker, so seeding to the current input WOULD be the right target
+there) -- but the user confirmed LP<->OFF<->LP is already clean on hardware, so LP's
+path is deliberately left untouched rather than "fixed" on paper alone.
+
+Implementation: a new one-shot flag, `r7+$14` (confirmed free -- flagged as exactly
+this candidate two sessions ago when the abandoned edge-blend attempt needed the same
+kind of state and never got to use it). Set only in the bypass branch; consumed
+(forced tracker=0) only in the HP branch, gated by the existing `n0` LP/HP marker so
+LP's code path is untouched byte-for-byte; expired (cleared) unconditionally at the
+routine's own tail so a bypass-then-LP-then-HP sequence can never fire on a stale flag
+from an old, already-superseded OFF period. `tools/patch_sc_dsp3.asm`'s KEY FLT
+section carries the full reasoning inline.
+
+### 2. KGN (KEY GAIN) smoothing
+
+Root cause: KEY GAIN applied its raw table-selected gain uniformly across a whole
+16-sample block, so every table-bucket crossing during a knob sweep was a literal
+STEP in `x:$40`. Inaudible with MON off (`x:$40` only feeds the compressor's
+DETECTOR there, and the compressor's own attack/release ballistics smooth whatever
+the detector sees before it ever reaches the target track's actual audio) -- but
+MON's audition path (`moncommit`, HOOK 3) plays `x:$40` AS the committed track audio
+with no smoothing of its own, so every crossing was an audible click while riding the
+knob with MON on.
+
+Fix: the same one-pole, coefficient-weighted-feedback principle as KEY FLT's own
+tracker, applied to the GAIN COEFFICIENT itself rather than the audio, updated once
+per call (block-rate -- the target changes at most once per 16-sample block, so
+per-sample resolution buys nothing). New coefficient `@KGNA@` (`sc_tables.py`'s
+`kgn_smooth_a()`, a real ~5 ms one-pole time constant at the block rate, not a
+guessed raw value) and new persistent state `r7+$17` -- the OLD 2-pole SVF's retired
+"bp" integrator slot, free since this session's redesign. 0 is the "never seeded"
+sentinel (every `gain_table()` entry is strictly positive, even -24 dB, so a real
+applied value can never collide with it) -- a fresh/reassigned compressor instance
+snaps straight to the target on its first block instead of smoothing in from garbage.
+
+The old exact-unity (KGAIN==64) bypass skip is GONE, deliberately: table idx 8
+(KGAIN 64-71) already stores a true 1.0 multiplier, so folding it into the same
+smoothed path costs nothing, and keeping a skip would let this new state go stale
+across a unity-parked gap -- exactly the same class of problem item 1 above exists to
+fix for KFLT. Removing it broke a pile of PRE-EXISTING emulator tests that assumed
+KGAIN==64 was a byte-exact no-op independent of any state (`r7+$17` is real,
+never-zeroed DSP memory just like `$16`/`$18`, and those tests never seeded it,
+since it used to be irrelevant) -- fixed centrally in `emu_sc_dsp3.py`'s `base_mem()`
+with an auto-seed-cold-unless-overridden default, rather than touching every one of
+those call sites individually.
+
+### A real toolchain bug, found (not by design, by the tests refusing to lie)
+
+`emu_sc_dsp3_moncommit.py` went from a clean baseline to failing after the full
+rebuild -- NOT from anything wrong in moncommit's own code (untouched this session),
+but because **both** `build_sidechain3.py`'s `sc_assemble()` and `emu_sc_dsp3.py`'s
+`assemble()` locate the three internal `scdet` `rts`s (and hence `moncommit`'s own
+start address) by scanning raw assembled CODE WORDS for the literal value `0x00000c`
+(rts's own opcode). That value is ALSO an ordinary 2-word branch's DISPLACEMENT
+operand -- and this session's new `bra zz08` (the KFLT HP-declick fix) happens to
+jump exactly 12 words forward, `0x00000c`, indistinguishable to a raw word scan from
+a real standalone `rts`. That phantom match shifted every later rts index by one,
+so `moncommit`'s computed address landed 10 words short -- **in the middle of `zz18`'s
+own body**, not moncommit's real entry point. `build_sidechain3.py` wired the
+dispatcher's real per-track COMMIT-step detour to that wrong address in the actual
+built image (`out/mainos_sidechain3.bin`) before this was caught.
+
+This is a genuine, previously-latent bug in shared project tooling, not a defect
+introduced by a design choice this session made -- no prior branch's displacement
+had ever happened to collide with `0x00000c` before. It went undetected by the
+EXISTING round-trip disassembly check (`" dc "` / `InvalidInstruction` / `mpysu` /
+`macsu`) because that check only rejects invalid opcodes, never wrong addresses --
+only re-running `emu_sc_dsp3_moncommit.py` after the full rebuild caught it (the
+standing per-change emulator-validation rule earning its keep exactly as intended).
+**Nothing had been flashed at any point this was live**, but had this gone to
+hardware, the dispatcher's per-track commit step -- code that runs for EVERY track,
+every frame -- would have jumped into the middle of an unrelated subroutine instead
+of `moncommit`, very plausibly the same "hung/confused DSP" failure class Session 59
+already proved this exact commit-hook site is sensitive to.
+
+Fix: new shared helper `tools/dsp_asm_util.py` (`find_rts()`, mirroring
+`sc_tables.py`'s own "shared so the two never drift" rationale) that locates `rts`
+via the DISASSEMBLER's own parsed instruction boundaries (it already knows a 2-word
+instruction's second word is an operand, not a fresh opcode) instead of a raw word
+scan. Both `build_sidechain3.py` and `emu_sc_dsp3.py` now use it. Verified: rebuilt,
+`moncommit` now correctly resolves to `P:0x10f9` (payload B) / matches payload A too,
+right where the `moncommit:` label actually sits in a fresh disassembly -- confirmed
+by eye, not just by the tool agreeing with itself.
+
+### 3. Compressor "graininess" at low ATK/REL with a busy key -- RESEARCH, no code change
+
+User's report: with the sidechain key active (MON off, i.e. this is about the real
+compressed output, not an audition artifact), low ATK/REL settings produce a fast,
+almost bitcrushed/distortion-like grain on the compressed target; raising RMS steadily
+reduces it, gone by about the halfway point. Confirmed present since the earliest
+sidechain build, not something this session's changes touch or introduce.
+
+Mechanism, worked out against the compressor's own disassembled stage order (Session
+17, this file, `1ab1`-`1b57`): stage 1 (detector power/square, now redirected to the
+processed KEY signal via `sctap`/`scdet`) feeds stage 3 (RMS leaky-integrator
+smoother, `r6+$c`) feeds stage 4 (log/THRS/RAT gain curve) feeds stage 5 (ATK/REL
+one-pole ballistics on the GAIN itself, `r6+$0`/`$1`) feeds stage 6 (wet = in * gain).
+RMS and ATK/REL are two SEPARATE smoothing stages -- RMS smooths the detector's
+ENVELOPE before the gain curve ever sees it; ATK/REL smooths the FINAL GAIN value,
+per sample, and is the stage the user's own report points at directly ("attack and
+release... at lower values"). None of this pipeline differs in any way between
+KEY=OFF and KEY!=OFF -- the ONLY thing that changes is which signal stage 1 measures.
+That is the whole explanation: a sidechain key (typically a busy drum loop) is far
+more spectrally/transient-rich than whatever a track would normally be self-
+compressing, so with RMS's own smoothing set low AND ATK/REL set fast, the gain curve
+ends up tracking near-audio-rate fluctuations in the key's own envelope rather than
+just its slower amplitude contour -- that fast-moving gain then multiplies directly
+onto the target's audio (stage 6), which is literally amplitude modulation at those
+rates, i.e. exactly what "distortion / bitcrush / grain" describes. This is a known,
+textbook sidechain-compression phenomenon (fast ballistics demodulating a busy
+detector signal into audible artifacts on the target), not a defect specific to this
+project's DSP code, and the user's own empirical fix (raise RMS) is the standard
+mitigation for exactly this mechanism -- it works by giving stage 3 more time to
+average out the key's own fast content before stage 4/5 ever see it.
+
+**Not implemented, by design -- this needs the user's call, not just mine:** the one
+surgical, scope-safe fix that fits the user's own constraint ("without affecting...
+KEY set to OFF") would be a MINIMUM RMS smoothing floor applied only inside the
+KEY!=OFF branch scdet already owns -- i.e. clamp the effective RMS coefficient up to
+some floor before stock's own stage-2/3 lookup uses it, exactly the same "intercept
+inside the existing KEY!=OFF branch, leave KEY=OFF's code path untouched" pattern
+already proven safe for KEY GAIN/KEY FLT. Two things make this a product decision,
+not just an engineering one: (a) it would change the compressor's responsiveness/
+character at fast RMS settings specifically when keying externally, which some users
+may want AS the effect (a "grittier" duck is sometimes musically desirable, not
+purely a defect); (b) picking the floor value is a taste call, not a derivable
+constant, the way KGNA's ~5 ms was. Flagging for next session pending the user's own
+listening-based verdict on whether they want this automatic, or whether RMS/KFLT
+being available as manual mitigations is enough.
+
+### Verification
+
+`tools/emu_sc_dsp3.py` (plain + `--patched`) and `tools/emu_sc_dsp3_moncommit.py`
+(plain + `--patched`): **ALL GOOD**, all four combinations, against a FRESH rebuild
+with the corrected `rts`-detection fix -- re-verified after finding and fixing the
+addressing bug above, not just before it. New coverage added this session: KFLT HP
+re-entry declick (forced reseed proven against a deliberately stale tracker AND a
+falsely-warm `$18` latch; the flag's one-shot consumption proven by reading it back
+post-block; LP proven unaffected by the same stale-state seed), KGN block-rate
+smoothing (cold-snap exactness, warm-state one-pole interpolation proven distinct
+from an instant jump, state persistence across two blocks, table/sentinel
+non-collision sanity). Disassembled the freshly assembled cave end to end
+(`dsp56kDisassemble`) as part of chasing the addressing bug -- confirmed by eye that
+every label/branch target and the `moncommit:` entry point land exactly where
+intended. Cave grew from 268 to 306 words (38 words for both fixes combined),
+comfortably inside the 1063-word SPRING REVERB donor budget (~757 words of slack
+remain). Rebuilt `out/mainos_sidechain3.bin`/the `.syx` via `build_sidechain3.py`
+with the corrected addressing.
+
+### HANDOFF
+
+**NOT flashed.** Items 1 and 2 are implemented and emulator-clean against a build
+with genuinely correct address wiring (re-verified after the rts-detection bug was
+found and fixed, not before). Item 3 is research only, deliberately not coded
+pending the user's steer on whether an automatic RMS floor is wanted. Before trusting
+items 1/2 on hardware: (a) sweep KFLT OFF<->HP repeatedly with MON on/off, confirm the
+residual pop reported this session is actually gone and LP<->OFF<->LP is still clean
+(unchanged code path, but worth a fresh ear check regardless); (b) sweep KGN through
+its full range with MON on, confirm no more clicks at bucket boundaries, and separately
+confirm the compressor's own gain-reduction response (MON off) doesn't feel
+sluggish/smeared now that KGN changes ramp in over ~15 blocks instead of instantly --
+5 ms was chosen as "fast enough to feel responsive, slow enough to declick," not
+hardware-verified. `tools/build_merged.py` remains stale relative to the SPATIALIZER/
+SPRING REVERB donor swap (flagged multiple sessions running, still out of scope here).
+
+## Session 76 continued yet again (3, 2026-09-19, `wip`) -- SIDECHAIN3: a real,
+previously-undiscovered detector bug found and fixed, from user hardware testing
+with a real project (`~/Desktop/SCTESTvol`, `isaak.wav`). KGN smoothing (previous
+entry) HARDWARE-CONFIRMED GOOD by the user. Not flashed.
+
+User reported two things after listening: (1) a very mild residual click
+specifically on HP->OFF (not OFF->HP, not LP<->OFF<->LP -- still open, see HANDOFF);
+(2) using a real project (kick on T1, `isaak.wav` on T2 with the sidechain
+COMPRESSOR, 16-step pattern, 120bpm), the compressor's gain-reduction ALTERNATES
+between two distinct behaviours every other pattern loop -- loop 1 louder in a
+portion of the sample, loop 2 quieter in that same portion, loop 3 identical to
+loop 1, loop 4 identical to loop 2. My first-pass answer (a plain "envelope warm-up,
+converges after loop 1" explanation) was WRONG -- that predicts monotonic
+convergence to a single steady state, not an indefinite 1-3/2-4 alternation. The
+user's correction ("get it? louder quieter louder quieter") was the clue that broke
+the case open.
+
+### The math that pointed at the real mechanism
+
+16 steps at 120bpm = one bar = 4 beats = exactly 2.0 s = 88200 samples/loop
+(44100 Hz). The DSP processes audio in fixed 16-sample blocks, run continuously
+from playback start (a free-running block clock, not resynced to the sequencer's
+own musical timing -- this is why the split mechanic below exists at all: trig
+events land at arbitrary sample offsets within whatever block happens to be
+current). `88200 mod 16 = 8` -- exactly HALF a block. So the retrigger's phase
+within the 16-sample block grid shifts by 8 samples every loop, and `16 / gcd(16,
+8) = 2`: the phase returns to its starting value every 2 loops, not every loop.
+That is an EXACT, period-2 match for "loop 1 = loop 3, loop 2 = loop 4" -- not a
+coincidence, a derivable consequence of this project's specific tempo/step-count
+against the fixed block size.
+
+### The bug
+
+A mid-block trig on the compressor's own track splits its processing into TWO
+`comp_proc` calls (Session 74/75, NOTES.md: r0=0 for the first call, r0=split*2
+for the second -- the dispatcher's own offset into the real audio buffer marking
+where the newly-triggered voice's segment begins). `scdet`'s detector-redirect
+(`zz16`, reached both directly by the split-guard on the second call and normally
+after the full KEY GAIN/KEY FLT/SC LISTEN pipeline on the first) has ALWAYS set
+`r0 := $40` unconditionally -- discarding that offset entirely. Correct for the
+first call (its own entry r0, saved in `n6`, is always 0 there) but WRONG for the
+split second call, where `n6 = split*2` and the detector should read starting at
+`$40 + n6`, not `$40 + 0`. x:$40 mirrors the WHOLE 16-sample-pair block 1:1 (the
+Session 74/75 fix specifically guarantees this), so `$40+n6` is directly valid --
+nothing else needed.
+
+**Concrete, not theoretical:** confirmed with a direct dsp_host register dump
+(reusing the same "-audio overrides r0" mechanism `run()`'s own docstring already
+documents) BEFORE writing the fix -- simulating a split second call with an
+incoming offset of `$a` left `r0=$40` (the bug) instead of the correct `$4a`.
+Because T2 (isaak.wav) has exactly one trig per loop, and that trig's block-phase
+alternates by exactly half a block every loop (the math above), the split point
+(and therefore how MUCH of the wrong/right audio the detector reads) alternates
+too -- this is very plausibly the direct cause of the reported loud/quiet
+alternation, not merely a coincidental timing artifact sitting next to it.
+
+### Fix
+
+`patch_sc_dsp3.asm`'s `zz16`: `move n6,a ; add #>$40,a ; move a1,r0` instead of a
+bare `move #$40,r0`. `lua (r0)+n6,r0` (the obvious first attempt, mirroring this
+file's own established `lua (rX)+nY,rX` idiom used everywhere else) was REJECTED
+by `dsp_asm` -- `InvalidInstruction`. Each of r0-r7 has its OWN dedicated n/m
+register pair on this ISA; `n6` only pairs with `r6` in a `lua`, never `r0`. Used
+plain accumulator arithmetic instead -- the exact same idiom `@KADJ@` already uses
+two lines above (`add`/`sub` then `move a1,<addr reg>`), so nothing new introduced,
+just reused. `n6` is read-only here, never clobbered -- confirmed nothing downstream
+needs anything else, and stock needs it later, unmodified, for its own dry-path
+re-anchor (`move n6,r0`, stage 6).
+
+### Verification
+
+New coverage in `emu_sc_dsp3.py` (`read_r0()`, parsing dsp_host's own end-of-run
+`REGS` printout the same way `r7_of()` already parses the instance line -- no
+memory dump can observe a register directly): confirms `r0==$40` for an unsplit/
+first call (`n6=0`, going through the FULL KEY GAIN/KEY FLT/SC LISTEN pipeline
+first, not just the short-circuited guard) and `r0==$40+n6` for three different
+simulated split offsets. All four suite combinations (`emu_sc_dsp3.py` plain +
+`--patched`, `emu_sc_dsp3_moncommit.py` plain + `--patched`): **ALL GOOD**, against
+a fresh rebuild. Disassembled the fixed region by eye (`dsp56kDisassemble`) --
+`move n6,a / add #>$40,a / move a1,r0 / move #$61,r4 / rts`, clean opcodes, no
+`mpysu`/`macsu`, matches intent exactly. Cave grew from 306 to 310 words (4 words
+for this fix), still comfortably inside the 1063-word SPRING REVERB donor budget.
+
+### HANDOFF
+
+**NOT flashed.** This is a genuinely new finding -- a bug in the ORIGINAL
+sidechain detector redirect (present since the split-guard was written, Session
+74/75), not something introduced this session, but only now found because the
+user tested with a real, musically-realistic project instead of isolated knob
+sweeps. Needs a real hardware re-test with the SAME project (`SCTESTvol`) once
+flashed: confirm the loud/quiet alternation between pattern loops is gone. The
+mild HP->OFF click (item 1 from the user's report this entry) is still
+UNRESOLVED -- mechanism understood (OFF/bypass runs zero computation, so the
+tracker's removed content reappears in one sample; HP's removed content, being
+the low end of typically bass/kick-heavy key material, is bigger than LP's) but
+NOT fixed -- a real fix needs a one-shot declick ramp running during the OFF
+block itself (bypass currently runs no code at all), which is genuine new
+DSP logic with the SAME risk profile as this feature's two previously-failed
+declick attempts. Pending the user's call on whether to spend that risk given how
+mild the residual now is. Graininess (RMS floor idea, previous entry) also still
+pending user input, explicitly parked by the user this session.

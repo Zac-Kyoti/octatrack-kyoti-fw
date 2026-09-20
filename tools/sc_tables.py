@@ -12,6 +12,17 @@ KEY GAIN  (16 entries, index = KGAIN >> 3, KGAIN 0..127, 64 = unity)
   stored value = (gain / 64) in Q23, so the cave does  mpy ; asl #6  -> * gain.
   gain law: dB = (KGAIN - 64) * (24 / 64)  ->  ~ +/-24 dB, ~3 dB per index step.
 
+  KGN_SMOOTH (Session 76 continued yet again): a knob sweep crosses these
+  ~3 dB table buckets one at a time, and applying the raw target uniformly
+  across a 16-sample block produced an audible click at every crossing when
+  MON was on (MON plays x:$40 directly as the committed track audio, no
+  smoothing of its own -- see patch_sc_dsp3.asm's "-- KEY GAIN --" header).
+  Fix: a one-pole, coefficient-weighted-feedback smoother on the APPLIED
+  gain itself (not the audio), updated once per call/block. kgn_smooth_a()
+  is that coefficient in Q23, from a real time constant (KGN_SMOOTH_MS)
+  rather than a guessed raw value, so its meaning stays legible and it's
+  trivially re-tunable in one place.
+
 KEY FLT  (32 entries, exp-spaced cutoff FC_LO..FC_HI)
   stored value = a = 1 - exp(-2*pi*fc/FS)  in Q23 (Session 76 continued,
   3rd pass -- one-pole EMA tracker: tracker += a*(in-tracker); LP output =
@@ -44,6 +55,8 @@ FC_HP_EDGE = 8.0
 Q23 = 1 << 23
 GAIN_N = 16
 FLT_N = 32
+BLOCK_SAMPLES = 16          # scdet's KEY GAIN loop runs once per 16-sample block
+KGN_SMOOTH_MS = 5.0         # one-pole time constant, block-rate (~14 blocks to ~95%)
 
 
 def _q23(x):
@@ -85,6 +98,11 @@ def hp_edge():
     return _q23(_one_pole_a(FC_HP_EDGE))
 
 
+def kgn_smooth_a():
+    dt = BLOCK_SAMPLES / FS
+    return _q23(1.0 - math.exp(-dt / (KGN_SMOOTH_MS / 1000.0)))
+
+
 if __name__ == "__main__":
     g, f = gain_table(), flt_table()
     print("KEY GAIN table (16):")
@@ -96,3 +114,5 @@ if __name__ == "__main__":
         print(f"  [{i:2d}] fc {flt_cutoff_hz(i):7.1f} Hz   a=0x{v:06x} ({v / Q23:.6f})")
     print(f"\nLP_EDGE  = 0x{lp_edge():06x} (~unity)")
     print(f"HP_EDGE  = 0x{hp_edge():06x} (fc {FC_HP_EDGE:.1f} Hz, a={hp_edge()/Q23:.6f})")
+    print(f"KGNA     = 0x{kgn_smooth_a():06x} ({KGN_SMOOTH_MS:.1f} ms, "
+          f"a={kgn_smooth_a()/Q23:.6f})")

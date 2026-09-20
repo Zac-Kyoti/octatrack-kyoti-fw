@@ -14,10 +14,12 @@ data transforms and ARE checked numerically against a Python reference:
 
   copy    KEY!=0, KFLT/KGAIN neutral  -> X:$40 == keybus[k]   (step-2 regression)
   KEY=0                               -> X:$40 untouched
-  KEY GAIN  KGAIN != 64               -> X:$40 == keybus[k] * gain_table[idx]
+  KEY GAIN  cold (r7+$17==0)          -> X:$40 == keybus[k] * gain_table[idx]  (snaps)
+  KEY GAIN  warm                      -> X:$40 == keybus[k] * one_pole(prev, target, KGNA)
   KEY FLT LP / HP                     -> X:$40 == python_onepole(keybus[k], a_table[idx])
   KEY FLT bypass (KFLT == 64)         -> X:$40 == keybus[k]
   KEY FLT edge override (idx 31/0)    -> X:$40 == python_onepole(keybus[k], LP_EDGE/HP_EDGE)
+  KEY FLT HP re-entry declick         -> r7+$14 set on OFF -> HP's first block seeds tracker=0
   state persistence (block 2)         -> continues the python tracker, no reset
   SC LISTEN  MON=1                    -> keybus[k] gen 1 == the processed X:$40
 
@@ -26,6 +28,7 @@ Payload B (tracks 1-4, CORE_BASE 0) only -- the code is byte-identical bar
 """
 import pathlib, re, struct, subprocess, sys
 import sc_tables
+import dsp_asm_util
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
@@ -36,6 +39,7 @@ MODMAP = ROOT / "refs/octabam/tools/build/dsp_modmap.py"
 SRC = ROOT / "tools/patch_sc_dsp3.asm"
 SCRATCH = ROOT / "out/dsp"
 RTS_ADDR = 0
+S17 = None                              # set by main() once r7 is known; see base_mem()
 
 # default: throwaway placement of the cave over stock payload B (isolation test).
 # --patched: regenerate payload B's .mem from out/mainos_sidechain3.bin -- the
@@ -103,7 +107,8 @@ def assemble():
         txt = SRC.read_text().replace("@KADJ@", "sub     #1,a") \
                              .replace("@GTAB@", f"${gt:x}").replace("@FTAB@", f"${ft:x}") \
                              .replace("@LPEDGE@", f"${sc_tables.lp_edge():x}") \
-                             .replace("@HPEDGE@", f"${sc_tables.hp_edge():x}")
+                             .replace("@HPEDGE@", f"${sc_tables.hp_edge():x}") \
+                             .replace("@KGNA@", f"${sc_tables.kgn_smooth_a():x}")
         a = SCRATCH / "sc3_test.asm"; a.write_text(txt)
         o = SCRATCH / "sc3_test.bin"
         sh(DSP_ASM, "-in", a, "-org", f"{CAVE_ORG:x}", "-out", o)
@@ -119,21 +124,26 @@ def assemble():
     total = len(words)
     if total > 1063:
         sys.exit(f"cave {total} words > SPRING REVERB donor's 1063")
-    # rts positions delimit the three routines. scdet now has THREE internal
-    # rts (zz16's, zz20's, and zz18's -- the shared OFF-publish sub zz17/zz20
-    # both `jsr` into, added to reclaim word budget for moncommit's exact-
-    # match fix): rts[0] = sctap's own, rts[3] = zz18's (last in source order,
-    # so moncommit/HOOK 3 starts right after it). See build_sidechain3.py's
-    # matching comment.
-    rts = [i for i, w in enumerate(words[:n]) if w == 0x00000c]
-    sctap, scdet, sctail = CAVE_ORG, CAVE_ORG + rts[0] + 1, CAVE_ORG + rts[3] + 1
-    global RTS_ADDR
-    RTS_ADDR = CAVE_ORG + rts[0]                       # sctap's own rts -- a safe -init
     # round-trip sanity on the code region
     (SCRATCH / "sc3_code.bin").write_bytes(b"".join(w.to_bytes(3, "little") for w in words[:n]))
     d = sh(DIS, "-in", SCRATCH / "sc3_code.bin", "-pc", f"{CAVE_ORG:x}", "-le")
     if " dc " in d or "InvalidInstruction" in d or "mpysu" in d or "macsu" in d:
         sys.exit(f"cave did not round-trip clean:\n{d}")
+    # rts positions delimit the three routines. scdet now has THREE internal
+    # rts (zz16's, zz20's, and zz18's -- the shared OFF-publish sub zz17/zz20
+    # both `jsr` into, added to reclaim word budget for moncommit's exact-
+    # match fix): rts[0] = sctap's own, rts[3] = zz18's (last in source order,
+    # so moncommit/HOOK 3 starts right after it). See build_sidechain3.py's
+    # matching comment. Found via dsp_asm_util.find_rts() (disassembler-
+    # parsed instruction boundaries), NOT a raw word scan for 0x00000c -- a
+    # scan matches that value anywhere, including a 2-word branch's own
+    # displacement operand (Session 76 continued yet again: this exact
+    # collision silently mis-located moncommit after this session's own new
+    # branch happened to have a displacement of 12).
+    rts = dsp_asm_util.find_rts(d, CAVE_ORG)
+    sctap, scdet, sctail = CAVE_ORG, CAVE_ORG + rts[0] + 1, CAVE_ORG + rts[3] + 1
+    global RTS_ADDR
+    RTS_ADDR = CAVE_ORG + rts[0]                       # sctap's own rts -- a safe -init
     return words, sctap, scdet, sctail, gtab_off, ftab_off
 
 
@@ -213,6 +223,17 @@ def base_mem(words, scdet, moncommit, patch_tail, xseed, yseed):
         mods.append([sp, addr, list(w)])
     for sp, addr, w in (yseed or []):
         mods.append([sp, addr, list(w)])
+    # KEY GAIN's own state (r7+$17, Session 76 continued yet again) is real,
+    # never-zeroed DSP memory like $16/$18 -- every test here that doesn't
+    # explicitly care about it (i.e. every test predating this session) needs
+    # a deterministic cold start, not whatever garbage the dumped payload
+    # happens to hold, or a call at the (very common) default KGAIN=64 would
+    # smooth from that garbage instead of landing on an exact unity multiply.
+    # Auto-seed cold UNLESS the caller already put an explicit S17 poke in
+    # xseed (the KEY GAIN-specific tests below do, to exercise the smoother
+    # itself) -- centralized here instead of touching every call site.
+    if S17 is not None and not any(sp == 1 and addr == S17 for sp, addr, w in (xseed or [])):
+        mods.append([1, S17, [0]])
     m = SCRATCH / "sc3_iso.mem"
     save_mem(m, mods)
     return m
@@ -250,6 +271,23 @@ def run(mem, proc, dumps, params, pokey=None, frames=15, audio=None):
     return res
 
 
+def read_r0(mem, proc, params, audio=None):
+    """run one -proc call, parse dsp_host's own end-of-run REGS dump for r0's
+    final value (same technique r7_of() already uses for r7's instance-line
+    printout) -- used to verify the split-detector-offset fix (Session 76
+    continued yet again): no dump/memory check can observe r0 directly, only
+    the register itself."""
+    a = [DSP_HOST, "-mem", mem, "-init", f"{RTS_ADDR:x}", "-proc", f"{proc:x}",
+         "-frames", "15", "-blocks", "1", "-params", params]
+    if audio is not None:
+        a += ["-audio", f"{audio:x}"]
+    out = sh(*a)
+    m = re.search(r"REGS r0=([0-9a-fA-F]+)", out)
+    if not m:
+        sys.exit(f"could not parse r0 from:\n{out}")
+    return int(m.group(1), 16)
+
+
 def check(name, cond, detail=""):
     print(f"  [{'ok ' if cond else 'FAIL'}] {name}" + (f"  ({detail})" if detail else ""))
     if not cond:
@@ -261,9 +299,22 @@ def close(a, b, tol):
 
 
 # ---- python reference models -------------------------------------------------
-def ref_gain(src, kgain):
+def ref_kgn_applied(target, prev):
+    """block-rate one-pole smoother on the APPLIED KEY GAIN coefficient
+    itself (Session 76 continued yet again), mirroring the .asm's own
+    cold-sentinel + coefficient-weighted-feedback update exactly: prev==0
+    (r7+$17's own "never seeded" sentinel -- gain_table() entries are all
+    strictly positive, so a real applied value can never collide with it)
+    snaps straight to target; otherwise one-pole toward it."""
+    if prev == 0:
+        return s24(target) & 0xFFFFFF
+    t, p, a = s24(target), s24(prev), s24(sc_tables.kgn_smooth_a())
+    return (p + ((a * (t - p)) >> 23)) & 0xFFFFFF
+
+
+def ref_gain(src, kgain, prev=0):
     idx = kgain >> 3
-    g = GAIN_T[idx]
+    g = ref_kgn_applied(GAIN_T[idx], prev)
     out = []
     for s in src:
         acc = (s24(g) * s24(s) * 128) >> 24   # mpy (frac, <<1) then asl #6, take a1
@@ -327,11 +378,13 @@ def main():
     if PATCHED:
         ensure_patched_mem(words)
 
+    global S17
     probe = base_mem(words, scdet, sctail, False, None, None)
     r7 = r7_of(probe)
-    FF, S16, S18 = r7 + 0xf, r7 + 0x16, r7 + 0x18
+    FF, S14, S16, S17, S18 = r7 + 0xf, r7 + 0x14, r7 + 0x16, r7 + 0x17, r7 + 0x18
     print(f"r7 = X:0x{r7:05x}   first-block gate X:0x{FF:05x}   "
-          f"tracker state X:0x{S16:05x}   our own seed latch X:0x{S18:05x}\n")
+          f"tracker state X:0x{S16:05x}   our own seed latch X:0x{S18:05x}\n"
+          f"     just-bypassed flag X:0x{S14:05x}   KGN applied-gain state X:0x{S17:05x}\n")
 
     MARK = [((0x10 + i) << 12) | 0xABC for i in range(0x20)]
     KEYV, K = 1, 0                       # KEY=1 -> abs track 0 (CORE_BASE 0)
@@ -349,15 +402,82 @@ def main():
     (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=0), pokey=pk, audio=0)
     check("KEY=0: X:$40 untouched", all(v == 0xBEEF for v in x40))
 
-    # 2. KEY GAIN ---------------------------------------------------------
-    print("\nKEY GAIN:")
-    for kgain in (64, 88, 40, 120, 0):
+    # 1a. split-detector-offset fix (Session 76 continued yet again): found
+    # investigating a real reported artifact (an alternating loud/quiet
+    # pattern between consecutive pattern loops, matching exactly the
+    # 88200-samples-per-loop / 16-sample-block phase drift's own period-2
+    # cycle for this project's 120bpm/16-step pattern). A mid-block split's
+    # SECOND call arrives with its own r0 already offset into the real audio
+    # buffer (`n6` here, scdet's saved copy) -- the redirect used to discard
+    # that and always land on a bare $40, so the detector re-read the FIRST
+    # part of the block's key audio instead of the segment past the split.
+    # No memory dump can observe r0 directly -- read_r0() parses dsp_host's
+    # own end-of-run REGS printout (same technique r7_of() already uses).
+    print("\nsplit-detector-offset (r0 must be $40+n6, not a bare $40):")
+    mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)], None)
+    r0 = read_r0(mem, scdet, P(key=KEYV), audio=0)
+    check("unsplit/first call (n6=0): r0 == $40", r0 == 0x40, f"got=0x{r0:x}")
+    for split_words in (2, 10, 30):
         mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)], None)
+        r0 = read_r0(mem, scdet, P(key=KEYV), audio=split_words)
+        exp = 0x40 + split_words
+        check(f"split 2nd call (n6=0x{split_words:x}): r0 == 0x{exp:x}",
+              r0 == exp, f"got=0x{r0:x}")
+
+    # 2. KEY GAIN -- cold (r7+$17==0) snaps straight to the table target ----
+    print("\nKEY GAIN (cold -> snaps to target):")
+    for kgain in (64, 88, 40, 120, 0):
+        mem = base_mem(words, scdet, sctail, False,
+                       [(1, 0x40, [0] * 0x20), (1, S17, [0])], None)
         (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kgain=kgain), pokey=pk, audio=0)
-        exp = list(MARK) if kgain == 64 else ref_gain(MARK, kgain)
+        exp = ref_gain(MARK, kgain, prev=0)
         db = (((kgain >> 3) * 8) - 64) * 0.375
         check(f"KGAIN {kgain:3d} ({db:+.0f} dB)", close(x40, exp, 2),
               f"got[:2]={[hex(v) for v in x40[:2]]} exp[:2]={[hex(v) for v in exp[:2]]}")
+
+    # 2a. KEY GAIN block-rate smoothing (Session 76 continued yet again): a
+    # knob sweep crosses ~3 dB table buckets one at a time, and applying each
+    # new target instantly produced an audible step in x:$40 -- inaudible via
+    # the compressor's own attack/release ballistics (MON off), but MON plays
+    # x:$40 directly as the committed track audio with no smoothing of its
+    # own, so every crossing was a click with MON on. Seed r7+$17 to a KNOWN
+    # WARM applied value (a different table entry, not the cold sentinel) and
+    # confirm the very next block's output is the one-pole INTERPOLATED
+    # value, not an instant jump to the new target -- proves the smoother
+    # itself runs, not just its cold-start snap.
+    print("\nKEY GAIN block-rate smoothing (warm -> one-pole toward target, not instant):")
+    prev_kgain, next_kgain = 64, 120                 # unity -> +21 dB, a big single-block jump
+    prev_applied = ref_gain(MARK, prev_kgain, prev=0)  # cold value the state is seeded with below
+    prev_g = GAIN_T[prev_kgain >> 3]
+    mem = base_mem(words, scdet, sctail, False,
+                   [(1, 0x40, [0] * 0x20), (1, S17, [prev_g])], None)
+    (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kgain=next_kgain), pokey=pk, audio=0)
+    exp_smoothed = ref_gain(MARK, next_kgain, prev=prev_g)
+    exp_instant = ref_gain(MARK, next_kgain, prev=0)
+    check("warm KGN 64->120: one block does NOT jump straight to target",
+          close(x40, exp_smoothed, 2) and not close(x40, exp_instant, 200),
+          f"got[:2]={[hex(v) for v in x40[:2]]} exp_smoothed[:2]="
+          f"{[hex(v) for v in exp_smoothed[:2]]} exp_instant[:2]={[hex(v) for v in exp_instant[:2]]}")
+
+    # 2b. KEY GAIN applied-gain state persistence (block 2 continues from
+    # block 1's own smoothed result, not from the raw target or a reset) --
+    # mirrors KEY FLT's own state-persistence check below.
+    print("\nKEY GAIN state persistence:")
+    kgain = 40
+    target = GAIN_T[kgain >> 3]
+    applied1 = ref_kgn_applied(target, 0)             # block 1: cold -> snaps to target
+    applied2 = ref_kgn_applied(target, applied1)      # block 2: warm, same target held
+    mem = base_mem(words, scdet, sctail, False,
+                   [(1, 0x40, [0] * 0x20), (1, S17, [applied1])], None)
+    (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kgain=kgain), pokey=pk, audio=0)
+    exp2 = ref_gain(MARK, kgain, prev=applied1)
+    check("block 2 continues the applied-gain state", close(x40, exp2, 2),
+          f"got[:2]={[hex(v) for v in x40[:2]]} exp[:2]={[hex(v) for v in exp2[:2]]} "
+          f"(applied1=0x{applied1:06x} applied2=0x{applied2:06x})")
+
+    print("\nKEY GAIN table sanity (no entry collides with the 0 cold-sentinel):")
+    check("all 16 GAIN_T entries are strictly nonzero",
+          all(v != 0 for v in GAIN_T), f"GAIN_T={[hex(v) for v in GAIN_T]}")
 
     # 3. KEY FLT --------------------------------------------------------
     print("\nKEY FLT (numeric vs python one-pole tracker):")
@@ -428,6 +548,45 @@ def main():
     (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kflt=kflt), pokey=pk_sig, audio=0)
     check("block 2 continues the tracker", close(x40[:NW], exp2[:NW], 3),
           f"got[:4]={[s24(v) for v in x40[:4]]} exp[:4]={[s24(v) for v in exp2[:4]]}")
+
+    # 4a. HP re-entry declick (Session 76 continued yet again -- hardware
+    # feedback: OFF<->HP still popped after the one-pole redesign fixed
+    # everything else; LP<->OFF<->LP was already clean, left untouched).
+    # r7+$14 set (simulating "the previous block was OFF") + a deliberately
+    # STALE $16/$18 (warm latch, garbage-ish tracker) must still force the
+    # tracker to 0 for THIS block on HP, ignoring both -- proves the new
+    # gate actually intercepts before the normal warm-continuation path.
+    print("\nKEY FLT HP re-entry declick (r7+$14 flag):")
+    kflt_hp = 78                                      # HP idx7, matches the case tested above
+    # a plausible "left over from earlier tracking" value, not the extreme
+    # 24-bit ceiling -- large fixed-point products at that extreme expose a
+    # rounding-direction gap between this test's plain-Python reference and
+    # the real mpy hardware (both structurally correct, just not bit-exact
+    # at that edge), which isn't what this check is trying to prove anyway.
+    stale_tracker = 0x200000
+    exp_reseed, _ = ref_onepole(sig, kflt_hp, tracker=0)
+    mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
+                   [(1, S14, [1]), (1, S16, [stale_tracker]), (1, S18, [1])])
+    (x40, flag_after) = run(mem, scdet,
+                            [('x', 0x40, 0x60), ('x', S14, S14 + 1)],
+                            P(key=KEYV, kflt=kflt_hp), pokey=pk_sig, audio=0)
+    check("HP after OFF: tracker forced to 0, stale $16/$18 ignored",
+          close(x40[:NW], exp_reseed[:NW], 3),
+          f"got[:4]={[s24(v) for v in x40[:4]]} exp[:4]={[s24(v) for v in exp_reseed[:4]]}")
+    check("HP after OFF: r7+$14 flag consumed (cleared) by this block",
+          flag_after[0] == 0, f"got={flag_after}")
+
+    # Same $14=1 + stale $16/$18 seed, but LP this time -- must be completely
+    # unaffected (n0 gates the reseed to HP only) and just warm-continue the
+    # (deliberately stale, arbitrary) tracker as it always has.
+    kflt_lp = 40                                      # LP idx20, matches the case tested above
+    exp_lp_stale, _ = ref_onepole(sig, kflt_lp, tracker=s24(stale_tracker))
+    mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
+                   [(1, S14, [1]), (1, S16, [stale_tracker]), (1, S18, [1])])
+    (x40,) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=KEYV, kflt=kflt_lp), pokey=pk_sig, audio=0)
+    check("LP is unaffected by r7+$14 (still just warm-continues)",
+          close(x40[:NW], exp_lp_stale[:NW], 3),
+          f"got[:4]={[s24(v) for v in x40[:4]]} exp[:4]={[s24(v) for v in exp_lp_stale[:4]]}")
 
     # 4b. UNCONDITIONAL STABILITY (Session 76 continued, 3rd pass): the old
     # 2-pole Chamberlin SVF needed a hardware-forced q=2 damping (Session 64)

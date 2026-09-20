@@ -45,6 +45,7 @@ Outputs: out/mainos_sidechain3.bin, out/elek_sidechain3.bin,
 import os, pathlib, subprocess, sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import sc_tables
+import dsp_asm_util
 
 BASE = 0x40000400
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -199,7 +200,8 @@ def sc_assemble(kadj, org):
         src = (SC_SRC.read_text().replace("@KADJ@", kadj)
                .replace("@GTAB@", f"${gt:x}").replace("@FTAB@", f"${ft:x}")
                .replace("@LPEDGE@", f"${sc_tables.lp_edge():x}")
-               .replace("@HPEDGE@", f"${sc_tables.hp_edge():x}"))
+               .replace("@HPEDGE@", f"${sc_tables.hp_edge():x}")
+               .replace("@KGNA@", f"${sc_tables.kgn_smooth_a():x}"))
         a = ROOT / "out/patch_sc_dsp3.asm"; a.write_text(src)
         o = ROOT / "out/patch_sc_dsp3.bin"
         r = subprocess.run([str(DSP_ASM), "-in", str(a), "-org", f"{org:x}", "-out", str(o)],
@@ -223,7 +225,6 @@ def sc_assemble(kadj, org):
                         "-pc", f"{org:x}", "-le"], capture_output=True, text=True).stdout
     if " dc " in d or "InvalidInstruction" in d or "mpysu" in d or "macsu" in d:
         sys.exit(f"cave did not round-trip clean:\n{d}")
-    rts = [i for i, w in enumerate(code) if w == 0x00000c]
     # rts[0] = sctap's own rts (sctap/scdet boundary).
     # scdet has THREE internal rts as of the zz18 shared OFF-publish sub
     # (patch_sc_dsp3.asm, called via `jsr` from zz17 and zz20): rts[1] =
@@ -231,6 +232,14 @@ def sc_assemble(kadj, org):
     # unchanged position from before zz18 existed), rts[3] = zz18's own --
     # placed deliberately AFTER zz20's in the source so it lands last and
     # moncommit (HOOK 3, immediately following) starts right after it.
+    # Found via dsp_asm_util.find_rts() (disassembler-parsed instruction
+    # boundaries), NOT a raw word scan for 0x00000c -- that also matches a
+    # 2-word branch's own displacement operand (Session 76 continued yet
+    # again: a new branch with a displacement of exactly 12 silently
+    # mis-located moncommit by one rts index before this fix -- caught only
+    # because emu_sc_dsp3_moncommit.py failed after a full rebuild, not by
+    # this same round-trip check above, which only rejects invalid opcodes).
+    rts = dsp_asm_util.find_rts(d, org)
     return words, org, org + rts[0] + 1, org + rts[3] + 1
 
 

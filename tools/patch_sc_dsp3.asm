@@ -24,6 +24,7 @@
 ;   @FTAB@   absolute P addr of the 32-word KEY FLT table (a = 1-exp(-2pi fc/fs), Q23)
 ;   @LPEDGE@ literal Q23 immediate, LP's near-OFF edge-override coefficient
 ;   @HPEDGE@ literal Q23 immediate, HP's near-OFF edge-override coefficient
+;   @KGNA@   literal Q23 immediate, KEY GAIN's block-rate smoothing coefficient
 ; The tables are appended after the code by build_sidechain3.py; @GTAB@/@FTAB@
 ; are resolved in a first sizing pass so the `move #>imm` widths never shift.
 ; @LPEDGE@/@HPEDGE@ are plain literal substitutions (tools/sc_tables.py's
@@ -38,15 +39,20 @@
 ; disassembly of the real init routine at P:0x1864 confirms it zero-fills
 ; only $11/$12/$13/$1a/$1b/$f, leaving $14/$16/$17/$18 untouched and
 ; therefore NOT guaranteed zero -- whatever DSP memory held before this
-; track's compressor instance was assigned lands there unchanged). r7+$17
-; (the old 2-pole SVF's "bp" integrator, Sessions before 76) is no longer
-; used by this cave. r7+$18 is OUR OWN dedicated "have I ever seeded the
-; tracker myself" latch (never touched by stock or by any other hook here):
-; do not gate on the stock "first-block" bit (r7+$f) instead -- it can
-; legitimately go warm from ordinary stock activity before our KEY FLT code
-; has ever run once (e.g. KFLT parked at bypass for a while, then turned to
-; LP/HP for the first time), which would otherwise seed the tracker from
-; garbage at $16.
+; track's compressor instance was assigned lands there unchanged). r7+$18 is
+; OUR OWN dedicated "have I ever seeded the tracker myself" latch (never
+; touched by stock or by any other hook here): do not gate on the stock
+; "first-block" bit (r7+$f) instead -- it can legitimately go warm from
+; ordinary stock activity before our KEY FLT code has ever run once (e.g.
+; KFLT parked at bypass for a while, then turned to LP/HP for the first
+; time), which would otherwise seed the tracker from garbage at $16.
+; r7+$17 (the old 2-pole SVF's "bp" integrator, Sessions before 76) was
+; retired by the one-pole redesign and is reclaimed below as the KEY GAIN
+; smoother's own persisted state (see "-- KEY GAIN --"). r7+$14 is a second
+; reclaimed word -- a one-shot "the previous block was OFF" flag consumed by
+; KEY FLT's HP branch only (see "-- KEY FLT --"); flagged as a free
+; candidate slot two sessions ago, used here for exactly the purpose floated
+; then.
 ;
 ; AUDIT THE OUTPUT BY DISASSEMBLY.  No `mpy x0,y0` (assembles as mpysu) --
 ; only x1,x0 / x1,y0 operand orders, which emit true signed mpy.
@@ -123,15 +129,54 @@ scdet:
 zz02:
 
 ; -- KEY GAIN : x:(r6+$e) bits 16-23, 0..127 ; 64 = unity --
+; Session 76 continued yet again (KGN smoothing): applying the raw table
+; gain uniformly across the block produced an instantaneous STEP in x:$40
+; every time a knob sweep crossed a table-bucket boundary -- inaudible with
+; MON off (x:$40 only feeds the DETECTOR there, and the compressor's own
+; attack/release ballistics smooth whatever the detector sees before it
+; ever reaches the target track's actual audio), but MON's audition path
+; (moncommit, HOOK 3) plays x:$40 AS the committed track audio with zero
+; smoothing of its own -- every bucket crossing was an audible click while
+; riding the knob with MON on. Fix: smooth the APPLIED gain itself with a
+; one-pole, coefficient-weighted-feedback tracker -- same principle as KEY
+; FLT's tracker below, applied to a scalar coefficient instead of the audio,
+; updated once per call (block-rate; the target changes at most once per
+; 16-sample block, so per-sample resolution buys nothing here). Persistent
+; state: r7+$17, the old 2-pole SVF's retired "bp" integrator slot (free
+; since the Session 76 KFLT redesign -- see this file's own header). 0 is
+; used as the "never seeded" sentinel -- gain_table()'s entries are all
+; strictly positive (even -24 dB is a small positive Q23 value), so a
+; genuine table value can never collide with it; a fresh/reassigned
+; compressor instance therefore snaps straight to the target on its first
+; KEY GAIN block instead of smoothing in from meaningless garbage.
+; The old exact-unity (KGAIN==64) bypass skip is gone: table idx 8 (KGAIN
+; 64-71, see sc_tables.py gain_table()) already stores a true 1.0
+; multiplier, so folding it into the same smoothed path is free -- and
+; necessary: a reintroduced skip would let this state go stale across a
+; unity-parked gap exactly like KEY FLT's pre-fix OFF gap did.
         move    x:(r6+$e),b           ; (q1) KGAIN|MON word
         asr     #$10,b,b
         move    b1,a                 ; (q3) a = KEY GAIN 0..127
-        cmp     #>$40,a
-        beq     zz03                   ; unity -> skip
         asr     #$3,a,a               ; a1 = gain table index 0..15
         move    a1,n1
         move    #>@GTAB@,r1
-        move    p:(r1+n1),x1          ; x1 = gain / 64  (Q23)
+        move    p:(r1+n1),x1          ; x1 = target gain/64 (Q23), this block
+        move    x:(r7+$17),b          ; b = applied gain (persisted; 0 = cold)
+        tst     b
+        bne     zz21
+        move    x1,b                  ; cold -> snap straight to target
+        bra     zz22
+zz21:
+        move    b,y1                  ; y1 = applied (preserved across the mpy)
+        move    x1,a                  ; a = target
+        sub     b,a                   ; a = target - applied = diff
+        move    a,y0                  ; y0 = diff (mpy operand slot)
+        move    #>@KGNA@,x1           ; x1 = smoothing coefficient
+        mpy     x1,y0,b               ; b = coeff * diff
+        add     y1,b                  ; b = applied + coeff*diff = updated applied
+zz22:
+        move    b,x:(r7+$17)          ; persist
+        move    b,x1                  ; x1 = smoothed gain, this block's multiply
         move    #$40,r0
         do      #<$20,>zz04
         move    x:(r0),x0
@@ -139,7 +184,6 @@ zz02:
         asl     #6,a,a                ; * 64
         move    a,x:(r0)+
 zz04:
-zz03:
 
 ; -- KEY FLT : x:(r6+$d) bits 8-15, 0..127 ; 64 = bypass ; <64 LP ; >64 HP --
 ; Session 76 continued (third pass): ONE-POLE tracker, not the old 2-pole
@@ -194,7 +238,14 @@ zz03:
         move    b1,a                 ; (q3) a1 = (KEY<<8)|KFLT, a0 clean
         and     #>$ff,a              ; a = KEY FLT 0..127
         cmp     #>$40,a
-        beq     zz10                   ; bypass -> no filter
+        bne     zz11                   ; not bypass -> continue to LP/HP dispatch
+; HP re-entry declick (Session 76 continued yet again -- hardware feedback:
+; OFF<->HP still popped after the one-pole redesign fixed everything else).
+; Mark that this block was OFF; consumed by the HP branch below, at zz09.
+        move    #1,b
+        move    b,x:(r7+$14)
+        bra     zz10
+zz11:
         move    a1,b                  ; b = KEY FLT (b0 clean)
         cmp     #>$40,b
         blt     zz05                   ; KEY FLT < 64 -> LP
@@ -232,6 +283,32 @@ zz09:
 ;   tracker from garbage. Own the gate: $18 is ALSO untouched by stock and
 ;   by every other hook here, so use it as OUR single "have I ever seeded the
 ;   tracker myself" latch, set only below, never by anything else.
+;
+;   HP re-entry declick: only HP needs a reseed on the block right after OFF
+;   -- HP's output is `in - tracker`, so continuity with whatever bypass was
+;   just outputting (raw, unfiltered `in`) requires tracker==0 on that first
+;   post-OFF sample, NOT the current input sample (seeding to the input
+;   sample would give hp[0]=0, a jump TO silence -- worse, not better). LP's
+;   output IS the tracker itself, where seeding to the input sample would be
+;   the right target -- but LP measured clean on real hardware without any
+;   of this (user confirmed, Session 76 continued yet again), so it is
+;   deliberately left on the plain warm-continuation path below, untouched.
+;   n0 (0=HP / $10=LP, set above) gates this to HP only; r7+$14 is set only
+;   in the bypass branch above and consumed (cleared) here, or expired at
+;   this routine's own tail below on the next filtered block either mode
+;   takes -- so a bypass-then-LP-then-HP sequence can never fire this on a
+;   stale flag from an old, already-superseded OFF period.
+        move    n0,a                  ; a = 0 (HP) / $10 (LP)
+        tst     a
+        bne     zz23                   ; LP -> normal warm-continuation path
+        move    x:(r7+$14),a          ; HP: was the previous block OFF?
+        tst     a
+        beq     zz23                   ; no -> normal warm-continuation path
+        move    #0,b
+        move    b,x:(r7+$14)          ; one-shot, consumed
+        move    b,y1                  ; tracker := 0 -> hp[0] = in[0], continuous
+        bra     zz08
+zz23:
         move    x:(r7+$18),a
         tst     a
         bne     zz07
@@ -284,6 +361,11 @@ zz12:
         move    y1,x:(r7+$16)
         move    #1,a
         move    a,x:(r7+$18)          ; latch: tracker is now genuinely ours
+        move    #0,b
+        move    b,x:(r7+$14)          ; expire "just bypassed" -- HP consumed it
+                                       ; above already if this was that block; LP
+                                       ; or any later block clears it here so it
+                                       ; can never fire on a stale flag
 
 zz10:
 ; -- SC LISTEN : if on, stash the processed key -> keybus[key] gen 1, and
@@ -359,7 +441,38 @@ zz17:
 ; displacement, not an absolute address.
         bsr     zz18
 zz16:
-        move    #$40,r0              ; detector streams from the processed key
+; SIDECHAIN3 split-detector-offset bug (found this session, investigating a
+; real reported artifact -- an alternating loud/quiet pattern between
+; consecutive pattern loops, tracking exactly the loop length's own phase
+; drift against the 16-sample DSP block grid). This redirect used to set
+; r0 := $40 unconditionally, discarding whatever offset the CALLER's own r0
+; held on entry -- correct for the frame's only/first call (n6, our saved
+; copy of that entry r0, is always 0 there), but WRONG for a mid-block
+; split's SECOND call, where n6 = split*2 (the dispatcher's own offset into
+; the real audio buffer marking where the newly-triggered voice's segment
+; begins -- see the header comment above, "SIDECHAIN3 ringing bug, take 2").
+; x:$40 mirrors the WHOLE 16-sample-pair block 1:1 (that same prior fix
+; specifically guarantees every pair is valid regardless of split), so the
+; correct redirect for BOTH calls is $40+n6, not a bare $40 -- confirmed by
+; a direct dsp_host register dump before writing this fix: simulating a
+; split second call (incoming r0=$a) left r0=$40 instead of the correct
+; $4a, i.e. stock's detector re-read the FIRST part of the block's key
+; audio instead of the segment actually following the split. n6 is
+; READ-ONLY here, never clobbered by this file -- stock needs it later,
+; unmodified, for its own dry-path re-anchor (`move n6,r0`, stage 6).
+        move    n6,a                   ; a = split offset (0 on an unsplit/first
+                                        ; call -- a no-op there); (r0)+n6 form
+                                        ; rejected by dsp_asm -- n6 only pairs
+                                        ; with r6 in a `lua`, not r0 (each of
+                                        ; r0-r7 has its OWN dedicated n/m pair
+                                        ; on this ISA) -- accumulator add
+                                        ; instead, same idiom @KADJ@ already
+                                        ; uses just above (add/sub then a1 into
+                                        ; an address register)
+        add     #>$40,a                 ; a = $40 + split offset
+        move    a1,r0                   ; detector streams from the processed
+                                        ; key, correctly offset for a split's
+                                        ; 2nd call
         move    #$61,r4             ; --- displaced ---
         rts
 zz20:
