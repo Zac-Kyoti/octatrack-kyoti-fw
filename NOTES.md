@@ -20283,3 +20283,115 @@ Tooling: `tools/ghidra/attic/GhidraDirectJump29.java`-`34.java` (full raw-disasm
 decode of the table-arm formula, `ACCUM`'s writer, and the consumer). No dynamic run
 this pass -- purely static, building on the previous pass's own dynamic log and exact
 arithmetic. No patch source written.
+
+## Session 79, continued a ninth time (2026-09-20) — traced FUN_400a539c (per user
+request) -- RED HERRING, unrelated trig-condition-lock reset. Found the table-arm-due
+bitmask's two writers both CLEAR it (never set a bit) -- the region is more tangled
+than previously described; the real "due" trigger is still unfound. Also: cross-checked
+against `ar-kyoti-fw/MECHANISM.md` per the user's explicit reminder that the goal is
+comparing AR's and OT's DIRECT JUMP designs, not just chasing OT bugs in isolation.
+
+### FUN_400a539c: not the table-arm gate's decision function
+
+Called from `0x400a2b7a` (inside the very block being investigated) with the per-track
+loop index as its only argument. Its body: a plain reset loop clearing
+`0x46107918`/`59`/`69` and setting `0x46107979`=1 for track indices `[arg..15]`. Those
+three base addresses (`0x46107950`-`68` vicinity) are the **trig-condition-lock family**
+(`FUN_400a536c`'s own output) that an earlier session (Session 70, cross-referenced
+in this session's own NOTES) already traced exhaustively and explicitly closed as
+unrelated to DIRECT JUMP ("do not revisit `FUN_400a536c` as a candidate"). Confirmed
+that closure still holds -- this call is incidental cleanup in the same per-track loop,
+not a decision about table-arm eligibility.
+
+### 0x80006626 (the table-arm-due bitmask): both known writers CLEAR it, never set it
+
+- `0x400a4054` -- inside the switch-commit reset block (the same block that clears
+  `GATE_TBL`-adjacent fields and copies the outgoing snapshot into `0x800065c1`/`c2`,
+  see the "continued a sixth time" entry): writes a **cleared** register (`D3`, zeroed a
+  few instructions earlier) -- i.e. this ZEROES THE WHOLE BITMASK on every switch
+  commit, ordinary or DIRECT JUMP.
+- `0x400a1384` -- in a separate function (`candidate_400a129e`, likewise a bulk-reset
+  routine judging by its surrounding clears of `0x46c769c0`/`0x46c77be2`/`0x46c79e7a`
+  and `0x80006680`/`82`/`84`) -- also writes a register that was **just cleared** two
+  instructions earlier.
+
+**No SET-bit write to this address has been found anywhere in the image** by either
+resolved-xref lookup or a raw text scan for the literal `6626`. Since the table-arm
+write demonstrably DOES fire dynamically (measured this session, frames 1/346/518/863),
+some bit-set mechanism must exist -- most likely reached via computed/indexed
+addressing this session's scans (both keyed to the literal hex text or Ghidra's
+resolved-reference table) would not catch. **Not found this pass -- open.**
+
+### The region is more tangled than the "continued a seventh/eighth time" entries
+implied
+
+Re-reading `0x400a2b00`-`0x400a2c60` while chasing this found that block is NOT a
+single linear "check due -> write" sequence. It contains at least two distinct
+sub-mechanisms that this session's earlier passes conflated:
+
+1. A **global-SCALE-threshold stale-entry clear loop** (`0x400a2bb0`-`0x400a2c30`,
+   reached when the `0x80006626` bit is set): computes a threshold from
+   `ACCUM - 0x285ff0 + LEN_TBL[SCALE_IX]*0x285ff0` (SCALE_IX = the GLOBAL scale byte,
+   `0x8000663d` -- not per-pattern) and clears any of `DAT_80001904[track+0/8/16]`
+   (three of the eight groups) whose stored value exceeds it.
+2. The **per-track table-arm write** this session has been tracing (`0x400a2c60`
+   onward), reached either by falling through from (1) or via the `0x400a2c48`
+   alternate entry (gated on a DIFFERENT byte at `(0xb0,SP)==1` plus `STOPFLAG`).
+
+Both eventually converge on the same blob-selection branch (`0x400a2c66`) and the same
+final write (`0x400a2e18`), but they are reached under different conditions and the
+first one's own gating gets its clear-threshold from the GLOBAL scale, not the
+per-track/pattern one the second computes. This session has NOT disentangled which
+condition is actually responsible for the writes measured dynamically (frames
+1/346/518/863) -- both remain plausible, unconfirmed candidates.
+
+### AR cross-check (per explicit user request this pass)
+
+Re-read `ar-kyoti-fw/MECHANISM.md`. AR's own DIRECT JUMP is NOT "instant" either -- it
+quantizes to the **next step boundary** (a "step-resolution-scaled countdown... at most
+a few dozen ticks", `FUN_4009905c`), same design shape OT's own `patch_directjump.s`
+header already documents ("switches on the NEXT step tick"). AR's stated invariant for
+"what makes DIRECT JUMP correct" is (1) an atomic paired write of the active-pattern
+pointer, and (2) a **fresh-per-request countdown recompute** -- explicitly NOT reusing
+or accumulating stale timing state across a superseded request.
+
+Applied to THIS specific OT bug: `patch_directjump.s`'s own Hook C already embodies
+AR's invariant #2 for the MASTER STEP (`G_ABSTICK mod newLen`, explicit comment "every
+pattern behaves as if it had been silently, continuously playing in the background the
+whole time since transport start" -- i.e. resume position is DERIVED fresh from
+elapsed absolute time, never carried over raw). **The table-arm anchor bug found this
+session is the SAME class of defect** -- `DAT_80001904[track]` is latched from `ACCUM`
+(current wall-clock-equivalent time) at an out-of-cycle instant, instead of being
+derived fresh the way `G_ABSTICK` already derives the correct step. This reframes the
+fix direction away from the two options sketched in the previous entry (suppress vs.
+guess-the-boundary) toward a THIRD, better-grounded one:
+
+**Fix candidate (c), AR-consistent**: at DJ commit, instead of merely NOT disturbing
+`DAT_80001904[track]`, explicitly recompute what it WOULD be if this pattern had been
+"continuously playing" since transport start -- i.e. derive it from `G_ABSTICK`
+(already computed by Hook C every commit) the same way the stock table-arm write
+derives it from `ACCUM`, rather than either suppressing the write or reading the raw
+current `ACCUM`. This mirrors AR's own "fresh recompute, not carried-over state"
+principle exactly, and (unlike candidate (a), suppress) doesn't risk leaving a
+pattern-mismatched anchor lingering for up to a full loop.
+
+### Status: mechanism still not fully closed -- the exact per-track "due" trigger for
+the table-arm write is unconfirmed (open, see above), though the write's OWN formula,
+its consumer, and a well-grounded (AR-derived) fix shape are now established. Not
+fixed; no patch source written.
+
+### NEXT for this thread
+
+1. Find the actual bit-SET write to `0x80006626` (or determine there isn't one and the
+   real gate is the `(0xb0,SP)==1`/STOPFLAG alternate path at `0x400a2c48` instead) --
+   needed before any fix can be confident about WHEN it needs to intervene.
+2. Design fix candidate (c) above concretely: what does `G_ABSTICK`-derived "expected
+   ACCUM" look like in the same units the stock code uses (`0x285ff0`-scaled), and
+   where exactly should it be written (patch the existing table-arm write's own D0
+   computation, or write `DAT_80001904[track]` directly from a new hook after Hook C).
+3. Carried over: the `0x400a2c66` ACT-vs-snapshot branch's own purpose (still real,
+   still not confirmed to matter for this specific symptom); `DAT_46104cf4`'s own
+   identity; `FUN_4000ae12`'s caller.
+
+Tooling: `tools/ghidra/attic/GhidraDirectJump35.java`-`38.java`. No dynamic run this
+pass. No patch source written.
