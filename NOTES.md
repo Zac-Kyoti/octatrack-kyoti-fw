@@ -19649,3 +19649,98 @@ emu_directjump_dynamic.py`: `run_groundtruth()` reworked from step-matched to fr
 (3rd revision this session, each retraction documented in the function's own docstring);
 added a continuous `live_nibble_writes` watch to both `run_one()` and `run_groundtruth()`.
 No hook/patch source changed -- still read-only dynamic analysis only.
+
+## Session 79, continued again — DIRECT JUMP: D7-clobbering hypothesis REFUTED by direct
+register watch; found the real mechanism instead -- DIRECT JUMP's commit fires an
+out-of-cycle "reset this track's scheduling state" event, evidenced by a clean cadence
+anomaly exactly at the commit frame
+
+### Hypothesis check: does `dj_c`'s `D7 = resumeStep*newLen` leak into the table-arm site's
+### own (unrelated) use of D7?  REFUTED  [MEASURED]
+
+Added a `UC_HOOK_CODE` register watch at the table-arm PC (`0x400a2e0c`, `tools/
+emu_directjump_dynamic.py`'s new `d7_at_arm`) to both conditions. Result: **D7 reads the
+identical constant value (`0xf23fa0`) at every single hit, in both DJ-commit and
+ground-truth, across the whole run.** Immediately explained by re-reading the surrounding
+disassembly one step further back (`GhidraDirectJump16.java`): `0x400a2de8-2df2` computes
+`D7 = 0x285ff0 * D2` **fresh, two instructions before** the table-arm site uses it -- this
+D7 has nothing to do with `dj_c`'s own D7 write at all; it's overwritten by unrelated local
+code on every execution, in both conditions, before ever being read here. Hypothesis
+cleanly refuted, not just empirically but now explained. No further time spent on it.
+
+### The real mechanism: an out-of-cycle "trig-condition satisfied -> reset this track's
+### scheduling state" event, firing exactly at the DIRECT JUMP commit  [MEASURED + one
+### remaining inferred link]
+
+The table-arm site (`0x400a2e12`, found last continuation) only fires **32 times** across
+the whole ~1100-frame run in both conditions -- much rarer than the ~4-frame clear-cadence.
+Its firing frames, both conditions:
+
+```
+ground-truth : 1, 346, 691, 1035   -- deltas 345, 345, 344  (one clean ~345-frame period
+                                       every time -- one full 6-step pattern loop, 6*57.7)
+DJ-commit    : 1, 346, 518, 863    -- deltas 345, 172, 345  (one anomalous HALF-length
+                                       interval, straddling the commit frame 461, then the
+                                       cadence resumes at the normal 345 -- but now
+                                       permanently phase-shifted ~173 frames relative to
+                                       ground truth's own, otherwise-identical cadence)
+```
+
+**This is the actual bug, precisely characterized for the first time**: DIRECT JUMP's
+commit causes ONE EXTRA re-arm/reset event to fire, out of the normal once-per-pattern-loop
+cadence, permanently shifting every subsequent event's phase. This is exactly the class of
+defect the LED test (11th pass) already found by ear/eye ("phase, not index") -- now
+anchored to a specific, measured, register/memory-level mechanism for the first time in
+this project's multi-session DIRECT JUMP history.
+
+Traced what the arm site's own gating code does (`GhidraDirectJump16.java`, raw
+disassembly `0x400a2d02`-`0x400a2e0c`, straight-line read, no decompiler involved this
+time): a per-track block that (a) bails early on two conditions (`tst.l (0x46107568).l`;
+`tst.b (0x94,SP)`), (b) otherwise calls `jsr 0x4009d1e8` (a not-yet-named function, distinct
+from the already-known `FUN_400a536c`/`FUN_400a5164` trig-condition-LOCK family) and tests
+one bit of its result (via `0x8000668d`), and (c) if that bit is set, **resets four
+per-track tables to fixed defaults**:
+
+```
+table_46c7a810[track] = 0x89d
+table_46c7a830[track] = 0            <- this IS the "+ table_46c7a830[track]" term the
+                                         arm-site's own D0 computation reads (previous entry)
+table_46c7a14c[track] = 1
+table_46c77bfa[track] = 0x285ff0     <- this IS the "- 0x285ff0" constant the arm-site
+                                         computation also uses
+table_46c75fa0[track*8+group] = 0
+0x8000668d = 0                        (clears the flag just tested)
+```
+
+**These are exactly the two constants the table-arm computation consumes** (`D0 =
+accumulator - 0x285ff0 + table_46c7a830[track] + D7`) -- confirming this reset block is the
+direct upstream cause of what gets stored into `DAT_80001904` on each arm event. The
+remaining, NOT-yet-measured link: which of the three gating conditions (the two early bails,
+or `jsr 0x4009d1e8`'s own return) is the one DIRECT JUMP's commit satisfies spuriously.
+**Working hypothesis, INFERRED, not measured**: this whole block reads as a "has this
+track's trig/lock condition just become satisfied" check, most plausibly using something
+like "did the active pattern/bank change since last tick" as part of its own test for
+"did we just complete a loop pass" -- which is true both for a genuine same-pattern wrap
+AND for DIRECT JUMP's mid-stream pattern swap, since both present as "the active
+pattern differs from what this check last saw." If so, this reset logic conflates "pattern
+CHANGED" with "pattern LOOPED", and DIRECT JUMP's commit trips the same path a natural
+wrap would, exactly once, per commit -- explaining the single anomalous interval measured.
+Not confirmed; `jsr 0x4009d1e8` itself has not been decompiled or disassembled this
+session.
+
+### NEXT for this thread
+
+1. **Decompile/disassemble `0x4009d1e8`** and the two early-bail conditions (`0x46107568`,
+   stack-local `(0x94,SP)`) to find which one DIRECT JUMP's commit actually satisfies, and
+   why -- this is now a narrow, well-scoped target instead of an open-ended search.
+2. Once found: this is squarely a candidate for a Hook-D-shaped fix (self-heal the wrongly-
+   tripped condition at the commit tick, the same shape as Session 70 6th pass's `SCALE_IX`
+   fix) -- but per this thread's own standing rule, no fix gets proposed before the
+   mechanism is dynamically confirmed, not just plausible.
+3. Carried over, still open, lower priority: the second clear-loop covering groups 4/7
+   (only groups 0/1/2's clear-loop has been decoded); the `PEND_PAT`-poke-alone confound in
+   `run_one()`'s original `DJ_MODE=0` arm.
+
+Tooling: `tools/ghidra/attic/GhidraDirectJump14.java`-`16.java` (one-shot probes). `tools/
+emu_directjump_dynamic.py`: added `d7_at_arm` register watch (via a new `TABLE_ARM_PC`
+constant) to both `run_one()` and `run_groundtruth()`. No hook/patch source changed.

@@ -101,6 +101,18 @@ STEP_AUDIO_TBL = 0x800065e4  # DAT_800065e4[t] -- per-track step (audio), NOTES.
                              # NOT from dj_c's D7 register -- a different input than what
                              # feeds 0x80006604/14, per the project's own static RE map.
 STEP_MIDI_TBL = 0x800065f4   # DAT_800065f4[t] -- same, MIDI
+TABLE_ARM_PC = 0x400a2e0c
+# Session 79 continued again: the SET side of the DAT_80001904 scheduled-value table,
+# found via GhidraDirectJump15.java raw disassembly:
+#   D0 = *G_ACCUM(0x4610757c) - 0x285ff0 + table_46c7a830[track] + D7 ; then stored into
+#   DAT_80001904[track][slot]. D7 here is READ, not computed locally -- and D7 is exactly
+# the register dj_c (patch_directjump.s) writes as its own commit mechanism
+# (`D7 = resumeStep*newLen`, deliberately left live on return, never saved/restored,
+# by its own header comment's design). FUN_400a1eea has zero static callers (it's the
+# per-tick task body itself, a single long-running loop) -- if D7 is not reloaded at the
+# top of every tick, dj_c's commit-tick write could leak into this unrelated computation
+# on every SUBSEQUENT tick until something else overwrites D7. Watching D7's actual value
+# at this exact PC, across both conditions, tests this directly.
 
 
 def main(argv):
@@ -202,6 +214,12 @@ def run_one(er, a, dj_on):
         ret, track = struct.unpack(">II", u.mem_read(sp, 8))
         fires.append((rt.frame_count, round(rt.sample, 1), track))
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_fire, begin=TRIG_FIRE, end=TRIG_FIRE)
+
+    d7_at_arm = []  # (frame, D7 value) every time the table-arm site executes
+
+    def on_arm(u, addr, size, user):
+        d7_at_arm.append((rt.frame_count, u.reg_read(er.eb.UC_M68K_REG_D7)))
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_arm, begin=TABLE_ARM_PC, end=TABLE_ARM_PC)
     rt.uc.ctl_flush_tb()
 
     # NOTE: rt.watch_mem() stores into self.mem_writes, looked up FRESH on every
@@ -359,7 +377,11 @@ def run_one(er, a, dj_on):
         print(f"   frame {fr:.1f}  slot {slot} (track {slot % 8}, group {slot // 8})  "
               f"[{a:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
 
-    return dict(fires=fires, fires_before_poke=fires_before_poke,
+    print(f"\nD7 at table-arm site (0x{TABLE_ARM_PC:x}), {len(d7_at_arm)} hits:")
+    for fr, d7 in d7_at_arm:
+        print(f"   frame {fr:.1f}  D7={d7:#x}")
+
+    return dict(fires=fires, fires_before_poke=fires_before_poke, d7_at_arm=d7_at_arm,
                 phase_writes=phase_writes, gate_writes=gate_writes,
                 cntdn_writes=cntdn_writes, step_audio_writes=step_audio_writes,
                 refill_writes=refill_writes, live_nibble_post=live_nibble_post,
@@ -423,6 +445,12 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
         live_nibble_writes.append((rt.frame_count, u.reg_read(er.eb.UC_M68K_REG_PC), addr, size, val))
     rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_write,
                     begin=LIVE_NIBBLE_IN, end=LIVE_NIBBLE_IN + 255)
+
+    d7_at_arm = []
+
+    def on_arm(u, addr, size, user):
+        d7_at_arm.append((rt.frame_count, u.reg_read(er.eb.UC_M68K_REG_D7)))
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_arm, begin=TABLE_ARM_PC, end=TABLE_ARM_PC)
     rt.uc.ctl_flush_tb()
 
     rt.start_transport_live()
@@ -448,8 +476,11 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
         slot = (addr - LIVE_NIBBLE_IN) // 4
         print(f"   frame {fr:.1f}  slot {slot} (track {slot % 8}, group {slot // 8})  "
               f"[{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
+    print(f"\nD7 at table-arm site (0x{TABLE_ARM_PC:x}), {len(d7_at_arm)} hits:")
+    for fr, d7 in d7_at_arm:
+        print(f"   frame {fr:.1f}  D7={d7:#x}")
     return dict(bank=cur_bank, pattern=cur_pat, step=cur_step, live_nibble=live_nibble,
-                reached=reached, live_nibble_writes=live_nibble_writes)
+                reached=reached, live_nibble_writes=live_nibble_writes, d7_at_arm=d7_at_arm)
 
 
 def compare_groundtruth(dj_result, gt_result, target_pattern):
