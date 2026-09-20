@@ -19491,21 +19491,28 @@ Round-tripped through `elektron-firmware-tool` clean (checksum verified).
     4. confirms the original `0x4005e4c8`/`0x4005e25c` detours are still `jmp`s to our
        code, not reverted.
   **ALL GOOD.**
-- `tools/emu_reload2.py --trk` / `--patched --trk`: kicked off to re-check the untouched
-  worker/arm-track path is still intact (this session touched no worker code) — these two
-  runs are slow (the full `emu_rtos`-backed boot + project load) and didn't finish inside
-  this session's tool-call window; not a red flag on their own (`--combo`'s own boot line
-  shows a ~6 s RTOS handoff before anything runs), just not confirmed complete here.
-  **Re-run and confirm before flashing** if their pass/fail isn't already known.
+- `tools/emu_reload2.py --trk`: ran once against the fixed image and **FAILED** one of
+  10 checks — `worker cleared G_KIND`. Traced it (not a firmware bug): `cmd_trk` in
+  `emu_reload.py` sampled `G_KIND` immediately after `rl_arm_trk` returns — the
+  subroutine that only ARMS the request (sets `G_KIND=3`, posts the job) and returns
+  at once — instead of after the drain loop that actually lets the async storage-task
+  worker (`rl_job`, the code that clears `G_KIND`) run. Confirmed pre-existing and
+  unrelated to this session's fix by stashing `patch_reload2.s`/`build_reload2.py`,
+  rebuilding the pre-fix baseline, and reproducing the byte-identical failure there
+  too. Fixed the one-line ordering bug in `emu_reload.py` (moved the `G_KIND` sample
+  after the drain loop, alongside every other post-worker check) — re-ran both
+  `--trk` and `--patched --trk` against the fixed image: **ALL GOOD, all 18 checks
+  across both**, `G_KIND` now reads 0 as expected.
 
-### Status — NOT YET FLASHED
+### Status — emulator-clean end to end, NOT YET FLASHED
 
-Build is emulator-clean on the two things this session touched (the keymap fix itself,
-dynamically, and the unchanged combo-driven picker logic). Recommend one more pass on
-`--trk`/`--patched --trk` to close out the worker-path regression check, then this is
-ready for the hardware pass described in `FLASHING.md` §4.7 — with the fix, the
-`[PTN]`-still-held gesture should now work in addition to the documented "release `[PTN]`,
-then answer" flow; HW should confirm both.
+Every emulator check for RELOAD2 now passes: `--combo` (picker logic, unchanged by
+the refactor), `--trk` and `--patched --trk` (worker path, plus the test-timing fix
+above), and the new `emu_reload2_keymap.py` (the keymap-poke fix itself, dynamically,
+against the real stock layer-push code). Committed (`77a8106`). Ready for the
+hardware pass described in `FLASHING.md` §4.7 — with the fix, the `[PTN]`-still-held
+YES/NO gesture should now work in addition to the documented "release `[PTN]`, then
+answer" flow; HW should confirm both.
 
 **Also flagged, not acted on this session (out of scope for a standalone RELOAD2 flash):**
 `reference/MERGE.md`'s `[YES]` trampoline (`build_merged.py`) was designed around RELOAD2
