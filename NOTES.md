@@ -20395,3 +20395,102 @@ fixed; no patch source written.
 
 Tooling: `tools/ghidra/attic/GhidraDirectJump35.java`-`38.java`. No dynamic run this
 pass. No patch source written.
+
+## Session 79, continued a tenth time (2026-09-20) — DECISIVE: the table-arm write's
+VALUE is exactly, provably correct at every instant it fires (zero error, 8/8 measured
+points). DIRECT JUMP's actual defect is a spurious EXTRA trigger event, not a wrong
+computation -- this supersedes every fix candidate proposed so far in this thread.
+
+Per the user's own recommendation-request, skipped further static hunting for the
+`0x80006626` bit-set trigger (open since the previous entry) and went straight to
+dynamic measurement instead, since candidate fix (c) (AR-consistent, derive the anchor
+from `G_ABSTICK`) only needed the empirical relationship, not the trigger condition.
+
+### The measurement
+
+Extended `tools/emu_directjump_dynamic.py` (`TABLE_ARM_STORE_PC = 0x400a2e18`,
+`G_ABSTICK = 0x80006a46`, `install_table_arm_watch`/`print_table_arm_watch`, wired into
+both `run_one()` and `run_groundtruth()`): hooks the exact table-arm store instruction
+and logs `(frame, G_ABSTICK, D0-about-to-be-stored, slot)`. Ran `--groundtruth`
+(log `/tmp/dj_abstick_run.log`). Collected 8 distinct (run, G_ABSTICK, value) points:
+
+```
+run   G_ABSTICK   stored value
+dj    0           0x00f2f3a0
+dj    6           0x01e53340
+dj    9           0x025e5310   <- DIRECT JUMP's own extra, out-of-cycle write
+dj    15          0x035092b0
+gt    0           0x00f2f3a0
+gt    6           0x01e53340
+gt    12          0x02d772e0
+gt    18          0x03c9b280
+```
+
+`value = 0x00f2f3a0 + G_ABSTICK * 0x285ff0` -- checked in Python against all 8 points:
+**exact match, zero error, every single one**, including the DJ-only `G_ABSTICK=9`
+point (verified: `0xf2f3a0 + 9*0x285ff0 == 0x25e5310`, byte-for-byte).
+
+### What this proves
+
+**There is no arithmetic bug anywhere in the table-arm write.** Every value it has ever
+written, in either run, at every `G_ABSTICK` it has ever fired at (including DIRECT
+JUMP's own off-cycle one), is EXACTLY the value the formula predicts from `G_ABSTICK`
+alone -- the same absolute-elapsed-step counter Hook C already uses, already proven
+frame-accurate and unaffected by DIRECT JUMP (`G_ABSTICK`/frame ratios match to within
+rounding in both runs: ~57.5 frames/step, identical). This retracts the premise of
+EVERY fix candidate proposed in this thread's previous four entries -- (a) "suppress
+the write", (b) "override the ACT-vs-snapshot branch", (c) "derive the anchor from
+`G_ABSTICK` instead of raw `ACCUM`" -- all of them assumed the WRITTEN VALUE was, or
+could be, wrong. It never is.
+
+**The actual defect: DIRECT JUMP's commit causes an EXTRA table-arm write to happen
+that would not otherwise occur at all**, at `G_ABSTICK=9` -- exactly one step after the
+commit (commit lands ~`G_ABSTICK=8`, three steps into the 6-step pattern) -- interrupting
+the natural once-per-pattern-loop cadence (`G_ABSTICK` multiples of 6: 0, 6, 12, 18...,
+confirmed identical in both runs whenever no DJ commit intervenes). The value stored at
+that extra write is perfectly correct FOR THAT INSTANT; the problem is that a plain
+quantized switch could never produce this event at all (an ordinary switch always
+commits exactly at a step-0/loop boundary, i.e. at a `G_ABSTICK` multiple of the
+pattern length -- never mid-loop) -- DIRECT JUMP is the only way to make this fire
+off-cadence, and doing so resets whatever downstream interpolation window
+(`FUN_4000ae12`'s `(anchor-now)*rate`, previous entry) this anchor governs three steps
+early, once, every time a DIRECT JUMP commit happens to land while this per-track gate
+last cleared more than one step ago.
+
+### Status: root cause is now FULLY understood and precisely scoped -- not a value bug,
+a spurious-extra-event bug. Every previous fix candidate in this thread is superseded.
+Not fixed; no patch source written.
+
+### The fix, now well-scoped
+
+**Suppress the extra table-arm write specifically for a DIRECT-JUMP-triggered commit --
+nothing else.** Since the value math needs no correction (proven above), the only
+change needed is preventing this ONE code path from firing off-cadence. Concretely:
+whatever currently sets bit `track` of `0x80006626` in response to a DIRECT JUMP
+commit (still unfound statically, previous entry) needs to NOT do so for a DIRECT JUMP
+commit specifically -- while leaving it completely untouched for every other case
+(ordinary switches, which per the measurement above never need this suppression since
+they only ever land ON the natural per-loop boundary already). This is narrower and
+safer than every previously-proposed candidate: it touches nothing about the value
+computation, nothing about `CNTDN_TBL`'s trig-fire semantics (the earlier, correctly-
+rejected candidate (c) concern), and nothing about the ACT-vs-snapshot branch (still
+real, still not implicated in this specific symptom).
+
+### NEXT for this thread
+
+1. Find the actual bit-SET write to `0x80006626` (same open item as the previous entry
+   -- now with a clear, narrow purpose: gate it on "not a DIRECT JUMP commit" rather
+   than needing to understand it for a value-correction fix).
+2. Once found, patch it (new hook in `patch_directjump.s`, gated on `G_JUST_COMMITTED`
+   or an equivalent one-shot DJ-commit flag already available) to skip setting the bit
+   for the DIRECT-JUMP-triggered case specifically.
+3. Dynamically re-run the SAME `install_table_arm_watch` instrumentation post-fix and
+   confirm DIRECT JUMP's own run now shows table-arm writes ONLY at `G_ABSTICK`
+   multiples of the pattern length, matching ground truth exactly -- the same
+   before/after dynamic-proof shape this thread has used throughout.
+4. Carried over, lower priority, unchanged: the `0x400a2c66` ACT-vs-snapshot branch's
+   own purpose; `DAT_46104cf4`'s identity; `FUN_4000ae12`'s caller.
+
+Tooling: `tools/emu_directjump_dynamic.py` (`TABLE_ARM_STORE_PC`, `G_ABSTICK`,
+`install_table_arm_watch`/`print_table_arm_watch`, committing the extension). Log:
+`/tmp/dj_abstick_run.log`. No patch source written -- still read-only dynamic analysis.

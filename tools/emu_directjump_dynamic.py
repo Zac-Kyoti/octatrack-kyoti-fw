@@ -107,6 +107,21 @@ TRACE_HI = 0x400a2e30
 TRACE_FRAME_LO = 300
 TRACE_FRAME_HI = 700
 
+# Session 79 continued a tenth time: TABLE_ARM_STORE_PC is the exact instruction that
+# writes DAT_80001904[slot] (GhidraDirectJump29.java: "0x400a2e18  move.l D0,(0x0,A0,A1*0x4)").
+# D0 holds the value about to be stored (confirmed = ACCUM - 0x285ff0 + TBL[idx] + D7,
+# GhidraDirectJump29/30/31/32/33 -- ACCUM is a free-running per-frame accumulator,
+# FUN_4000ae12 is the real consumer: (slot_value - ACCUM_now) * tempo-rate via EMAC MAC,
+# a phase-anchor timestamp). G_ABSTICK (patch_directjump.s) is the ALREADY-EXISTING
+# absolute-step-tick counter Hook C uses for the master-step fix, incremented by exactly
+# 1 every step tick, never reset. This watch correlates G_ABSTICK against the stored
+# table-arm value across several NATURAL (non-DJ) writes to empirically derive the
+# G_ABSTICK <-> anchor-value relationship, rather than hand-deriving ColdFire EMAC
+# fixed-point math from static disassembly (this session's own established preference:
+# measure, don't guess, when the arithmetic is opaque).
+TABLE_ARM_STORE_PC = 0x400a2e18
+G_ABSTICK = 0x80006a46
+
 # Session 79 continued a sixth time (NEXT item 1/2): GhidraDirectJump22-25.java found
 # 0x800065c1/0x800065c2 are a "just-vacated ACT_BANK/ACT_PAT" snapshot, copied from
 # ACT_BANK/ACT_PAT (0x800065bd/0x800065be) at TWO points inside FUN_400a1eea, each
@@ -152,6 +167,26 @@ def print_commit_watch(hits):
         shown = fr[:20]
         more = f" ...(+{len(fr)-20} more)" if len(fr) > 20 else ""
         print(f"   {name:14s} (0x{addr:x}): {len(fr)} hits  frames={shown}{more}")
+
+
+def install_table_arm_watch(rt, eb):
+    """(frame, G_ABSTICK, stored_value, slot_index) at every TABLE_ARM_STORE_PC hit."""
+    events = []
+
+    def on_store(u, addr, size, user):
+        d0 = u.reg_read(eb.UC_M68K_REG_D0)      # value about to be stored
+        a1 = u.reg_read(eb.UC_M68K_REG_A1)       # slot index (see GhidraDirectJump29)
+        abstick = int.from_bytes(rt.uc.mem_read(G_ABSTICK, 4), "big")
+        events.append((rt.frame_count, abstick, d0, a1))
+    rt.uc.hook_add(eb.UC_HOOK_CODE, on_store, begin=TABLE_ARM_STORE_PC, end=TABLE_ARM_STORE_PC)
+    return events
+
+
+def print_table_arm_watch(events):
+    print(f"\ntable-arm store events (frame, G_ABSTICK, stored D0, slot A1), "
+          f"{len(events)} total:")
+    for fr, abstick, d0, a1 in events:
+        print(f"   frame {fr:.1f}  G_ABSTICK={abstick}  D0={d0:#010x}  slot={a1}")
 # Session 79 continued again: the SET side of the DAT_80001904 scheduled-value table,
 # found via GhidraDirectJump15.java raw disassembly:
 #   D0 = *G_ACCUM(0x4610757c) - 0x285ff0 + table_46c7a830[track] + D7 ; then stored into
@@ -291,6 +326,8 @@ def run_one(er, a, dj_on):
     def on_snap_write(u, acc, addr, size, val, user):
         snap_writes.append((rt.frame_count, u.reg_read(er.eb.UC_M68K_REG_PC), addr, size, val))
     rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_snap_write, begin=SNAP_C1, end=SNAP_C2)
+
+    table_arm_events = install_table_arm_watch(rt, er.eb)
 
     # NOTE: rt.watch_mem() stores into self.mem_writes, looked up FRESH on every
     # hit -- calling it twice makes the FIRST hook's callback silently start
@@ -480,6 +517,7 @@ def run_one(er, a, dj_on):
           f"{len(snap_writes)} total:")
     for fr, pc, addr, size, val in snap_writes:
         print(f"   frame {fr:.1f}  [{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
+    print_table_arm_watch(table_arm_events)
 
     return dict(fires=fires, fires_before_poke=fires_before_poke, d7_at_arm=d7_at_arm,
                 pc_trace=pc_trace,
@@ -491,6 +529,7 @@ def run_one(er, a, dj_on):
                 refill_writes=refill_writes, live_nibble_post=live_nibble_post,
                 live_nibble_writes=live_nibble_writes,
                 commit_hits=commit_hits, snap_writes=snap_writes,
+                table_arm_events=table_arm_events,
                 new_pat=new_pat, post_bank=post_bank, post_step=post_step,
                 post_frame=post_frame)
 
@@ -582,6 +621,8 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
     def on_snap_write(u, acc, addr, size, val, user):
         snap_writes.append((rt.frame_count, u.reg_read(er.eb.UC_M68K_REG_PC), addr, size, val))
     rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_snap_write, begin=SNAP_C1, end=SNAP_C2)
+
+    table_arm_events = install_table_arm_watch(rt, er.eb)
     rt.uc.ctl_flush_tb()
 
     rt.start_transport_live()
@@ -626,13 +667,15 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
           f"{len(snap_writes)} total:")
     for fr, pc, addr, size, val in snap_writes:
         print(f"   frame {fr:.1f}  [{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
+    print_table_arm_watch(table_arm_events)
     return dict(bank=cur_bank, pattern=cur_pat, step=cur_step, live_nibble=live_nibble,
                 reached=reached, live_nibble_writes=live_nibble_writes, d7_at_arm=d7_at_arm,
                 pc_trace=pc_trace,
                 reset_flag_writes=reset_flag_writes, prev_bank_ix_writes=prev_bank_ix_writes,
                 flag_80001860_writes=flag_80001860_writes,
                 flag_46107568_writes=flag_46107568_writes,
-                commit_hits=commit_hits, snap_writes=snap_writes)
+                commit_hits=commit_hits, snap_writes=snap_writes,
+                table_arm_events=table_arm_events)
 
 
 def compare_groundtruth(dj_result, gt_result, target_pattern):
