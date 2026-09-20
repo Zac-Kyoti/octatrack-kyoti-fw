@@ -154,8 +154,9 @@ def main(argv):
         print(f"\n{'=' * 70}\nDJ_MODE=1 (DIRECT JUMP ON)\n{'=' * 70}")
         dj_result = run_one(er, a, True)
         print(f"\n{'=' * 70}\nground truth (target pattern selected directly, no poke, "
-              f"run until STEP={dj_result['post_step']})\n{'=' * 70}")
-        gt_result = run_groundtruth(er, a, dj_result["new_pat"], dj_result["post_step"])
+              f"run to frame={dj_result['post_frame']})\n{'=' * 70}")
+        gt_result = run_groundtruth(er, a, dj_result["new_pat"], dj_result["post_step"],
+                                     dj_result["post_frame"])
         compare_groundtruth(dj_result, gt_result, dj_result["new_pat"])
         return 0
 
@@ -225,6 +226,15 @@ def run_one(er, a, dj_on):
     len_9c_writes = make_watch(LEN_9C, 8)
     len_94_writes = make_watch(LEN_94, 8)
     len_a0_writes = make_watch(LEN_A0, 8)
+    # Session 79: continuous watch on the live-nibble table itself. Static analysis
+    # (GhidraDirectJump9/10/11) found only 2 real writers image-wide (0x4009c220,
+    # 0x4009c2ec), both inside an UNBOUNDED code region with ZERO call-type xrefs
+    # landing on it anywhere -- meaning either it's reached only via fall-through as
+    # part of a one-time init (matching its LEN_94-style neighbours' init-only
+    # writes at frame 0) with the VALUE change we measured coming from somewhere
+    # else entirely, or there's a genuinely indirect/computed writer no static text
+    # scan can find. This watch settles it empirically instead of guessing further.
+    live_nibble_writes = make_watch(LIVE_NIBBLE_IN, 256)
     rt.uc.ctl_flush_tb()
 
     # NOTE (this session): press_play_live() -- through the real PLAY key
@@ -285,6 +295,7 @@ def run_one(er, a, dj_on):
     post_bank = rt.uc.mem_read(ACT_BANK, 1)[0]
     post_pat = rt.uc.mem_read(ACT_PAT, 1)[0]
     post_step = rt.uc.mem_read(STEP, 1)[0]
+    post_frame = rt.frame_count
     post_blob = 0x400e21e0 + post_bank * 0x9b340 + post_pat * 0x8ed8
     print("scale-selector byte (blob[track*0x91a+0x56]) per track: " +
           " ".join(f"t{t}={rt.uc.mem_read(post_blob + t * 0x91a + 0x56, 1)[0]:#04x}" for t in range(8)))
@@ -341,15 +352,24 @@ def run_one(er, a, dj_on):
             track = a - addr
             print(f"   frame {fr:.1f}  track {track}  [{a:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
 
+    print(f"\n0x{LIVE_NIBBLE_IN:x} writes (DAT_80001904, live-nibble-in table), "
+          f"{len(live_nibble_writes)} total:")
+    for fr, task, pc, a, size, val in live_nibble_writes:
+        slot = (a - LIVE_NIBBLE_IN) // 4
+        print(f"   frame {fr:.1f}  slot {slot} (track {slot % 8}, group {slot // 8})  "
+              f"[{a:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
+
     return dict(fires=fires, fires_before_poke=fires_before_poke,
                 phase_writes=phase_writes, gate_writes=gate_writes,
                 cntdn_writes=cntdn_writes, step_audio_writes=step_audio_writes,
                 refill_writes=refill_writes, live_nibble_post=live_nibble_post,
-                new_pat=new_pat, post_bank=post_bank, post_step=post_step)
+                live_nibble_writes=live_nibble_writes,
+                new_pat=new_pat, post_bank=post_bank, post_step=post_step,
+                post_frame=post_frame)
 
 
-def run_groundtruth(er, a, target_pattern, target_step):
-    """Session 78: the DJ-vs-stock-poke comparison in run_one() turned out to be
+def run_groundtruth(er, a, target_pattern, target_step, target_frame):
+    """Session 78/79: the DJ-vs-stock-poke comparison in run_one() turned out to be
     confounded -- a raw PEND_PAT/PEND_BANK poke with DJ_MODE=0 never actually
     reaches stock's own switch-commit code path at all (0x400a4c2e's gate write
     never fires, ACT_PAT never changes, across 2+ full pattern loops post-poke --
@@ -358,23 +378,25 @@ def run_groundtruth(er, a, target_pattern, target_step):
     into DAT_80001904 vs what that table looks like for an honestly-arrived-at
     pattern?).
 
-    First attempt at a fix here compared a fixed-frame-count snapshot (`target_pattern`
-    selected directly, run `frames_before` frames, snapshot) against DJ_MODE=1's
-    post-switch snapshot -- ALSO confounded, just differently: it caught the two
-    runs at different STEP values (1 vs 2), and the table's group-0/group-4
-    entries turned out NOT to be step-independent after all (they differ between
-    a genuinely fresh pattern0 pre-switch read and a settled pattern1 read at the
-    same step count) -- contradicting this function's own original docstring
-    claim that the table is purely a function of bank/pattern selection. Retracted;
-    see NOTES.md Session 78.
+    Attempt 1 (frame-count-matched to `frames_before` only): compared runs at
+    DIFFERENT STEP values (1 vs 2) -- retracted, see NOTES.md Session 78.
 
-    Fixed version: select `target_pattern` directly (no poke, no DIRECT JUMP
-    involved at all) and run until the STEP register FIRST reads `target_step`
-    -- the same value DJ_MODE=1's commit resumed at -- then snapshot immediately.
-    This matches the one variable (current step) the table's own indexing
-    (`DAT_80001904[track + step*8]`) says it plausibly depends on, without
-    relying on frame-count arithmetic or unverified claims about the table's
-    update semantics.
+    Attempt 2 (STEP-matched, first-reached): found the SAME 20/64 slots differ
+    at matched STEP -- but a continuous write-watch added right after (this
+    function's own `live_nibble_writes` hook) showed `DAT_80001904` is written
+    roughly every 4 frames continuously throughout playback (362 writes across
+    an ~1100-frame run), not once at pattern-selection as Session 70's 12th pass
+    assumed -- so it plausibly depends on ABSOLUTE ELAPSED FRAMES since transport
+    start (a periodic accumulator), not on STEP or lap count at all. Matching on
+    first-reached-STEP left the two runs at wildly different absolute frame
+    counts (59 vs 1101) -- a real, unconsidered confound. See NOTES.md Session 79.
+
+    Attempt 3 (this version, frame-matched): select `target_pattern` directly (no
+    poke, no DIRECT JUMP involved at all) and run to the SAME ABSOLUTE FRAME
+    COUNT DJ_MODE=1's post-switch snapshot was taken at (`target_frame`) -- since
+    both runs start their transport at frame ~1, this controls for the periodic
+    accumulator directly, whatever drives it. Reports whether STEP also matches
+    at that frame as a bonus check on `G_ABSTICK`'s own resume-step design.
     """
     card, staged_name = er.stage_project(a.project, "OCTABAM", None,
                                           tree="out/_emu_dj_tree_groundtruth")
@@ -395,15 +417,21 @@ def run_groundtruth(er, a, target_pattern, target_step):
     # DJ_MODE left at its image default (0) -- this run never touches any
     # DIRECT JUMP hook at all, by construction (no poke, target already active).
 
+    live_nibble_writes = []
+
+    def on_write(u, acc, addr, size, val, user):
+        live_nibble_writes.append((rt.frame_count, u.reg_read(er.eb.UC_M68K_REG_PC), addr, size, val))
+    rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_write,
+                    begin=LIVE_NIBBLE_IN, end=LIVE_NIBBLE_IN + 255)
+    rt.uc.ctl_flush_tb()
+
     rt.start_transport_live()
     print(f"groundtruth: selected bank={final_bank} pattern={target_pattern} directly, "
-          f"no poke, DJ_MODE untouched -- running until STEP first reads "
-          f"{target_step} (matching DJ_MODE=1's commit)")
+          f"no poke, DJ_MODE untouched -- running to frame {target_frame} "
+          f"(matching DJ_MODE=1's post-switch snapshot frame; want STEP={target_step})")
 
-    safety_cap = rt.frame_count + 1 + max(a.frames_before, 2000)
-    rt.run(ms=2000.0 * er.FRAME_PERIOD / er.SAMPLE_HZ * 1000.0 * 5 + 10000,
-           until=lambda x: x.uc.mem_read(STEP, 1)[0] == target_step
-                           or x.frame_count >= safety_cap)
+    rt.run(ms=target_frame * er.FRAME_PERIOD / er.SAMPLE_HZ * 1000.0 * 5 + 10000,
+           until=lambda x: x.frame_count >= target_frame)
 
     cur_bank = rt.uc.mem_read(ACT_BANK, 1)[0]
     cur_pat = rt.uc.mem_read(ACT_PAT, 1)[0]
@@ -411,35 +439,38 @@ def run_groundtruth(er, a, target_pattern, target_step):
     live_nibble = rt.uc.mem_read(LIVE_NIBBLE_IN, 256)
     reached = cur_step == target_step
     print(f"settled    : active bank={cur_bank} pattern={cur_pat} step={cur_step} "
-          f"frame={rt.frame_count} (target step {'REACHED' if reached else 'NOT REACHED -- hit safety cap'})")
+          f"frame={rt.frame_count} (STEP {'MATCHES' if reached else 'DOES NOT MATCH'} "
+          f"DJ_MODE=1's own resume step {target_step})")
     print(f"live-nibble-in (0x{LIVE_NIBBLE_IN:x}, 64 x u32): {live_nibble.hex()}")
+    print(f"\n0x{LIVE_NIBBLE_IN:x} writes (DAT_80001904, live-nibble-in table), "
+          f"{len(live_nibble_writes)} total:")
+    for fr, pc, addr, size, val in live_nibble_writes:
+        slot = (addr - LIVE_NIBBLE_IN) // 4
+        print(f"   frame {fr:.1f}  slot {slot} (track {slot % 8}, group {slot // 8})  "
+              f"[{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
     return dict(bank=cur_bank, pattern=cur_pat, step=cur_step, live_nibble=live_nibble,
-                reached=reached)
+                reached=reached, live_nibble_writes=live_nibble_writes)
 
 
 def compare_groundtruth(dj_result, gt_result, target_pattern):
     print(f"\n{'=' * 70}\nDJ-commit vs ground-truth DAT_80001904 comparison "
-          f"(target pattern {target_pattern}, both sampled at STEP={dj_result['post_step']})"
-          f"\n{'=' * 70}")
+          f"(target pattern {target_pattern}, both sampled at frame={dj_result['post_frame']}; "
+          f"STEP {dj_result['post_step']} vs {gt_result['step']})\n{'=' * 70}")
     if not gt_result["reached"]:
-        print("WARNING: ground-truth run never reached the target STEP (hit its "
-              "safety cap) -- this comparison is NOT valid, do not draw conclusions "
-              "from it.")
+        print(f"NOTE: at the matched frame, ground-truth's own STEP ({gt_result['step']}) "
+              f"does NOT match DJ-commit's ({dj_result['post_step']}) -- informative on its "
+              f"own (a divergence in the resume-step math itself, separate from the table "
+              f"comparison below).")
     dj_tbl = dj_result["live_nibble_post"]
     gt_tbl = gt_result["live_nibble"]
     diffs = [i for i in range(64) if dj_tbl[i * 4:i * 4 + 4] != gt_tbl[i * 4:i * 4 + 4]]
     if not diffs:
-        print("IDENTICAL across all 64 slots at matched STEP -- no evidence DIRECT "
-              "JUMP's forced-early commit disturbs this table, at least at the one "
-              "step number checked. NOTE: this checks the FIRST time the ground-truth "
-              "run reaches this step (one lap in); if DAT_80001904 depends on more "
-              "than current step number (e.g. lap count, ticks-since-selection), a "
-              "match at this one sample point does not rule that out.")
+        print("IDENTICAL across all 64 slots at matched ABSOLUTE FRAME -- no evidence "
+              "DIRECT JUMP's forced-early commit disturbs this table.")
         return
-    print(f"{len(diffs)} of 64 slots differ, AT MATCHED STEP -- narrows the confound "
-          f"considerably vs the frame-count-matched attempt, but does not by itself "
-          f"rule out a lap-count/ticks-since-selection dependency (see note above). "
-          f"Differing slots:")
+    print(f"{len(diffs)} of 64 slots differ, AT MATCHED ABSOLUTE FRAME -- a real "
+          f"discontinuity, controlled for both STEP-vs-lap-count and elapsed-time "
+          f"confounds. Differing slots:")
     for i in diffs:
         dj_v = int.from_bytes(dj_tbl[i * 4:i * 4 + 4], "big")
         gt_v = int.from_bytes(gt_tbl[i * 4:i * 4 + 4], "big")

@@ -19517,3 +19517,128 @@ anticipated. Whoever revisits `build_merged.py` needs to design a keymap-slot-le
 chain (YES slot -> one combined entry that tries RELOAD2's gate, then DIRECT JUMP's),
 not just bump `DJ_V3`->`DJ_KEYMAP` as Session 60 already flagged. Not needed for
 standalone `RELOAD2` testing; flagging so it isn't lost.
+
+## Session 79, continued — DIRECT JUMP: traced `DAT_80001904`'s real writer, found it's a
+per-track scheduled-value/expiry table (not a live phase value), and the divergence
+survives a frame-matched AND step-matched control — root cause still open, mechanism now
+concrete enough to name
+
+Straight continuation of this session's earlier entry. Static tracing via three more
+one-shot Ghidra probes (`tools/ghidra/attic/GhidraDirectJump9.java` through `13.java`,
+kept per this project's own attic convention), interleaved with one more dynamic
+emulator run to close the frame/step confound the first static attempt left open.
+
+### `DAT_80001904` is written by exactly 2 static sites, both INSIDE `FUN_400a1eea` itself
+### -- Session 70 12th pass's characterization was directionally right, its "called from
+### bank/pattern selection" framing was not quite it  [MEASURED]
+
+`GhidraDirectJump9.java` (resolved `getReferencesTo`, not text-grep) found only 3 xrefs to
+`0x80001904` image-wide, none flagged "inside FUN_400a1eea" by my first pass -- because I
+was filtering by the WRONG range. `GhidraDirectJump10.java` dumped raw context at all 3:
+one is an unrelated EMAC/interpolation routine (`FUN_4000ae12`, a red herring, different
+subsystem); the other two (`0x4009c220`, `0x4009c2ec`) sit inside a ~300-byte span with
+**zero call-type xrefs landing on it anywhere** (`GhidraDirectJump11.java`) -- meaning it's
+not a separately-`jsr`'d function, it's inline control flow. A continuous write-watch
+added to `tools/emu_directjump_dynamic.py` (`live_nibble_writes`, see below) then showed
+**362 writes across an ~1100-frame run, roughly every 4 frames** -- not a one-time
+pattern-selection write as the 12th pass assumed (retracted). `GhidraDirectJump13.java`
+resolved the actual containing function: **`0x4009c220`/`0x4009c2ec` are themselves inside
+`FUN_400a1eea`** (the same 10,628-byte per-tick engine this whole sub-thread has already
+spent 4 passes in) -- Ghidra reports zero static callers for `FUN_400a1eea`'s own entry
+point too, consistent with it being the per-tick task body itself (scheduled by the RTOS
+via a function pointer, not a conventional `jsr` target).
+
+### The real mechanism: a per-track scheduled-value table compared against a global
+### accumulator, cleared on expiry -- not a live phase readout  [MEASURED, raw disassembly]
+
+Wider raw-disassembly context around `0x400a27e0` (`GhidraDirectJump13.java`) decodes
+cleanly:
+
+```
+0x400a27e2  TRANSPORT(0x800065b8) <- 1        ; unconditional, every time this runs
+0x400a27e8  A0 = &0x4610757c
+0x400a27ee  0x46c775ce <- *A0                  ; snapshot the accumulator elsewhere too
+0x400a27f4  D2 = *0x4610757c ; D2 -= 1         ; D2 = accumulator - 1
+--- per-track loop (D1 = 0..7) ---
+  A2 = &DAT_80001904 + track*4
+  A1 = &0x46c7fe44 + track            (a per-track flag-byte array)
+  A0 = &0x46c7e998 + track*4          (a per-track mirror table)
+  --- per-"group" loop (D3 = 16, 8, 0 -- i.e. groups 2, 1, 0 in this table's own stride) ---
+    if DAT_80001904[track + group] >= D2:  skip (still valid)
+    else:                                   clear DAT_80001904-mirror[track+group]; clear a flag bit
+```
+
+This is a **scheduled-value / expiry table**, not a continuously-refreshed live phase
+readout: each `DAT_80001904[track][group]` slot holds some tick value set by code not yet
+located, and this block's own job is to **compare it against a shared accumulator and
+clear it once expired** -- the actual VALUE differences this session measured are stale,
+carried-over "when was this last (re)armed" timestamps, not something recomputed fresh
+every read. This reframes both the earlier "per-pattern-activation counter" hypothesis and
+the "free-running global oscillator" hypothesis from this session's first pass: neither is
+quite right. **Only groups 0/1/2 are covered by this specific loop** -- the diff this
+session measured also touches groups 4 and 7, which must come from a second, structurally
+similar loop elsewhere in this same function, not yet located.
+
+### The divergence survives BOTH a step-match AND a frame-match control together
+### [MEASURED, `tools/emu_directjump_dynamic.py --groundtruth`]
+
+The step-matched result reported earlier this session turned out to still be confounded:
+the continuous write-watch showed this table updates roughly every 4 frames regardless of
+pattern/step, so matching on "first time STEP reaches the DIRECT JUMP resume value" left
+the two runs at very different ABSOLUTE elapsed frame counts (59 vs 1101) -- a real,
+previously-uncontrolled variable for a periodically-touched table. Rebuilt
+`run_groundtruth()` a third time to run to the SAME absolute frame DIRECT JUMP's own
+post-switch snapshot was taken at (1101), rather than to first-step-match.
+
+**Result, now controlled on both axes at once**: at frame 1101, STEP reads **2 in both
+conditions** (a clean, welcome confirmation that `G_ABSTICK`'s resume-step design -- Session
+70 8th/9th pass -- is correct, independent of this table's own bug). `DAT_80001904` still
+shows the **same 20 of 64 slots differing**. Notably, ground-truth's own group-0/4 value at
+frame 1101 (`0x03c9b280`) **exactly matches** the very first dynamic run's stock/DJ_MODE=0
+value at the same frame (also `0x03c9b280`, from a completely separate process launch,
+hours earlier) -- strong circumstantial evidence this accumulator's value is fully
+deterministic given elapsed frames and is normally IDENTICAL regardless of which pattern is
+active or whether any switch occurred, which sharpens the finding: **DIRECT JUMP's commit
+specifically is the only thing that changes it**, not an artifact of this session's own test
+methodology.
+
+### Callers of the `TRANSPORT<-1` block are unresolvable by static xref (it's inline, not
+### called) -- the where-does-DIRECT-JUMP-interact-with-this-block question is still open
+
+`GhidraDirectJump13.java` also checked whether DIRECT JUMP's hook sites or the stock
+switch-commit code (`0x400a4800`-`0x400a4e00`) call into this region at all -- moot, since
+nothing calls into `FUN_400a1eea` via a resolvable static xref at all (it's the per-tick
+task body). The real question -- does DIRECT JUMP's forced `STEP`/`REFILL_TBL`/`SCALE_IX`
+write cause THIS specific internal branch of `FUN_400a1eea` to be taken on a different tick,
+or with a different `D2` than organic playback would -- needs either (a) locating the
+branch condition that leads INTO `0x400a27e0` from earlier in the same function (not done
+this session), or (b) a dynamic watch on `0x4610757c` and the per-track expiry-table SET
+sites (not yet located either) across both conditions, the same technique that resolved
+the STEP/frame confound above.
+
+### NEXT for this thread
+
+1. **Find the branch condition leading into `0x400a27e0`** (read backward from there within
+   `FUN_400a1eea`, raw disassembly) -- this is the natural next static step, now that the
+   destination block itself is fully decoded.
+2. **Locate the SET side of this scheduled-value table** (whatever writes a fresh tick
+   value INTO `DAT_80001904[track][group]`, as opposed to the clear-on-expiry code found
+   this session) -- the divergence is far more likely to originate there than in the
+   clear/compare logic itself.
+3. **Find the second expiry loop covering groups 4/7** (this session only decoded the
+   groups-0/1/2 loop; the measured diff also touches groups 4 and 7).
+4. Once (1)-(3) exist: dynamic watch on `0x4610757c` and whatever the SET site turns out to
+   be, across both DJ-commit and frame-matched ground-truth conditions -- same technique
+   that already closed the STEP/frame confound, should directly show which write differs
+   and why.
+5. Lower priority, carried over from earlier this session: the `PEND_PAT`-poke-alone
+   confound in `run_one()`'s original `DJ_MODE=0` arm (what does a real `[PTN]`+trig press
+   set besides `PEND_PAT`/`PEND_BANK`) -- still unresolved, still needed before that arm of
+   the tool can be trusted for anything else.
+
+Tooling this continuation: `tools/ghidra/attic/GhidraDirectJump9.java` through
+`GhidraDirectJump13.java` (one-shot probes, kept per project convention). `tools/
+emu_directjump_dynamic.py`: `run_groundtruth()` reworked from step-matched to frame-matched
+(3rd revision this session, each retraction documented in the function's own docstring);
+added a continuous `live_nibble_writes` watch to both `run_one()` and `run_groundtruth()`.
+No hook/patch source changed -- still read-only dynamic analysis only.
