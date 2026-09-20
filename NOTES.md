@@ -18502,4 +18502,680 @@ one-shot):
    across cores, widen KEY's count to 9, flatten `key_fmt`'s coreBase
    logic, re-verify the descriptor end to end.
 
+## Session 77 (2026-09-20, `wip`) -- CROSS-CORE SIDECHAIN: followed Session
+76's own handoff step 2 (settle track<->core mapping against OUR OWN image)
+-- SETTLED, and better than static RE alone: we already had a hardware-
+confirmed proof sitting in the shipped SIDECHAIN3 code, just never read that
+way before.
+
+**Track<->payload mapping: SETTLED. Payload A = tracks 5-8, payload B =
+tracks 1-4.** `tools/build_sidechain3.py`'s `DSP` table wires payload A
+(`va=0x400e2324`, first DSP boot upload) with `kadj="add #3,a"` and payload B
+(`va=0x400f59ef`, second upload) with `kadj="sub #1,a"` -- these are the
+`@KADJ@` build tokens in `tools/patch_sc_dsp3.asm`'s `scdet`, applied to the
+KEY parameter's raw value (1..4) to produce the absolute 0-indexed track
+whose keybus slot the detector reads (comment at the call site: "KEY 1..4 ->
+absolute track 0..7"). `add #3,a` on 1..4 gives 4..7 (tracks 5-8); `sub #1,a`
+on 1..4 gives 0..3 (tracks 1-4). Since SIDECHAIN3's KEY chooser is **hardware
+confirmed shipping** (Session 76 continued (9): "looks and sounds good") --
+i.e. picking a same-core sibling on real MKI hardware correctly reads THAT
+track's audio, not some other track's -- this arithmetic is proven correct
+against our own image, not merely asserted from a decompile. octabam's own
+dual-core harness independently states the identical mapping in a code
+comment (`refs/octabam/tools/harness/dsp_host/dsp_host.cpp:50-51`: "BusVerb
+exists only in payload A (core 0, tracks 5-8) and BusDelay only in payload B
+(core 1, tracks 1-4)"), and `refs/octabam/docs/effects/XBUS.md` states the
+same.
+
+**A second, independent confirmation, from a tool built this session:** ported
+`refs/octa-bt-pt/tools/dsp_modmap.py` to `tools/dsp_modmap.py` (near-verbatim,
+only the import path changed) and ran it against our own
+`out/raw/section_3_MAIN_OS.bin` -- both payloads parse cleanly at 100%
+consumption under field order `ac` (98 modules / 26,521 words for A, 91
+modules / 25,408 words for B; several extracted module addresses cross-check
+exactly against our own already-built `build_sidechain3.py` constants, e.g.
+payload B's `P:0x01012` module is exactly the 1,063-word SPRING REVERB donor
+`cave_org` we already use). Extracted the `X:0x255` module XBUS.md calls "the
+stock allocator's slot table" from both payloads (`--extract A 0x255` /
+`--extract B 0x255`) and decoded its 8 words as four `(count,addr)` pairs:
+payload A gets shared-window base addresses **`0x030000`/`0x034000`** (the
+LOW half), payload B gets **`0x038000`/`0x03c000`** (the HIGH half) -- the
+other two pairs (`0x1000/0x4000`, `0x1c00/0x8000`) are identical between
+payloads and sit in each core's own PRIVATE region, not the shared one. This
+is a second, fully independent line of evidence (straight from our own
+stock image's own allocator table, nothing to do with the KEY-selector math)
+agreeing with the `@KADJ@` proof and with XBUS.md's own description of the
+split ("the stock allocator's slot table already hands the low half to core
+0, high half to core 1") -- three independent confirmations now (our own
+hardware-tested KEY math, octabam's dual-core-harness comment, and this
+session's direct read of our own stock allocator table) all agreeing that
+payload A / tracks 5-8 sits on the LOW half of the shared window
+(`0x30000-0x37FFF`) and payload B / tracks 1-4 on the HIGH half
+(`0x38000-0x3FFFF`). This resolves the disagreement `reference/kb/dsp56300.md` had flagged
+between octabam (A=5-8) and octa-bt-pt (A=1-4) -- octa-bt-pt is now believed
+wrong, at least for MKI (never independently checked against MKII, and no
+reason to re-derive it there). Updated `reference/kb/dsp56300.md` (the
+payload table + a new settled-note) and `reference/kb/memory-map.md` (flagged
+that ITS OWN "core 0"/"core 1" labels, quoting a different octabam doc
+verbatim, are INVERTED from `dsp56300.md`'s now-settled labelling even though
+the underlying track groupings agree everywhere -- go by track numbers, not
+by "core 0/1", when cross-referencing kb sources). No hardware flash needed
+for this step; it was sitting in already-shipped, already-tested code.
+
+**A design tension surfaced while re-reading our own signal flow that the
+handoff brief's "single smoothed scalar per track" suggestion glossed over.**
+Currently `sctap` publishes each track's RAW pre-filter dry audio into its
+OWN core's keybus ring, per-sample, every block (`do #<$20,>zz01`, 32
+samples); KEY FLT and KEY GAIN are then applied on the CONSUMING track's own
+`scdet`, from that raw feed -- meaning two different consumers on the same
+core, both keying off the same source track, can each run a different
+KEY FLT setting (LP/HP/OFF, independently tuned) against the identical raw
+source audio. A cross-core publish of "one smoothed scalar per track" (the
+brief's phrasing) would have to pick ONE filter setting at the SOURCE side
+before crossing the shared window, forcing every foreign-core consumer of
+that source track to share one filtered detector signal -- a real behavioural
+narrowing versus what same-core KEY already does today. The alternative --
+publish raw per-sample audio cross-core (32 Q23 words/block per track, same
+shape as the existing same-core keybus, just relocated into the shared
+window and quad-buffered for the race) -- preserves full parity with
+same-core KEY (every consumer keeps its own independent KEY FLT/KEY GAIN)
+at a real but bounded shared-window cost: only the 4 tracks on the *other*
+core ever need publishing (a track never needs to reach itself cross-core),
+so 4 tracks x 32 words x 4 buffers = 512 words per direction, x2 directions
+= 1024 words worst case if every track on both cores could be a KEY source
+for the other core -- "a lot" by octabam's own accounting of the shared
+window budget, but the window is currently completely unclaimed by us
+(`0x30000-0x3FFFF` minus the stock `0x30000-0x30047` staging area), so no
+existing allocation collides. **Not decided which of these two shapes to
+build -- this is a real UX/behaviour choice (does cross-core KEY FLT stay
+per-consumer-independent, like same-core KEY does today, or become one
+shared filtered signal per source track?), not a pure engineering
+implementation detail, and belongs to the user, not a session default.**
+Leaning toward raw-audio-relay (preserves feature parity with the shipped
+same-core behaviour, and the budget is affordable) unless the user would
+rather trade that parity for a simpler design.
+
+**Toolchain investment for step 5 (dual-core-aware emulator), sized but not
+started:** octabam's own dual-core harness is real, substantial, already
+hardware-swept tooling -- `refs/octabam/tools/harness/dsp_host/dsp_host.cpp`
+(1341 lines, `-memB`/`-core`/`-skew` dual-core dsp_host fork), a full ColdFire+
+DSP port at `refs/octabam/tools/emu/ot_emu/` (~5900 lines across dsp/machine/
+rtos/main/periph/v4e), and `refs/octabam/tools/patches/dsp56300.patch` (581
+lines against the SAME vendored `dsp56300` tree we already build `dsp_asm`/
+`dsp_host` from). Per the project's own stated philosophy (`refs/octabam/
+CLAUDE.md`: "A port is a proof... never port by rewriting; run their build
+against the shared stock image first"), the right move is very likely to
+apply their `dsp56300.patch` to our own `vendor/dsp56300` checkout and build
+THEIR `dsp_host.cpp` as a new tool pointed at our own image's two extracted
+payloads (via `tools/dsp_modmap.py` against our own
+`out/raw/section_3_MAIN_OS.bin` -- ported and run this session, see above)
+-- rather than hand-rolling a second dual-core
+emulator from scratch. Not attempted this session: it's a genuine build-
+system integration (vendor patch compatibility, our own dsp_asm build script
+changes) with its own failure modes, and doing it carelessly risks silently
+building the wrong binary (`CLAUDE.md`'s own "do NOT symlink out/emu" trap is
+exactly this family of mistake) -- better scoped as its own next step than
+squeezed in after an already-substantial RE session.
+
+**Decision made this session: raw-audio-relay, not a single filtered
+scalar.** User's call, asked directly rather than defaulted -- cross-core KEY
+keeps full parity with same-core KEY (every listener keeps its own
+independently-tunable KEY FLT/KEY GAIN against the source track's raw audio),
+accepting the larger (but affordable, ~1024-word-worst-case) shared-window
+footprint over the cheaper single-shared-scalar design. This decides the
+shape of the cross-core payload: NOT a block-rate smoothed scalar (what the
+Session 76 brief had suggested as "almost certainly" sufficient) but a
+per-sample raw-audio relay, same shape as the existing same-core keybus,
+just relocated into shared memory for the 4 tracks that live on the far
+core. Note for whoever designs the actual buffer layout next: the EXISTING
+same-core keybus's "`gen`" field (`slot(track,gen) = $800+track*$80+
+(gen&3)*$20`) is NOT a temporal rotation -- gen 0/1 tag *different purposes*
+(the raw tap vs the SC LISTEN stash) at the SAME instant, sctap/scdet never
+race because there's only one core. A genuinely time-rotating 4-buffer ring
+(XBUS's race fix) is a DIFFERENT mechanism that happens to reuse the same
+"4 slots of `$20` words" shape by coincidence of both being quad structures
+-- don't conflate the two when building the cross-core version test against
+each other by name alone.
+
+**Toolchain assessment (step 5), started, not finished:** checked whether
+`refs/octabam/tools/patches/dsp56300.patch` (581 lines / 14 files) applies to
+our own `vendor/dsp56300` checkout. Our vendored commit (`4fb5fea`, 2 Sep
+2026) is a strict descendant of the commit octabam patched from (`c051afad`,
+28 Jul 2026, confirmed via `git merge-base --is-ancestor` against octabam's
+own copy of the same upstream repo, since ours doesn't carry that much
+history) -- good odds going in, and it paid off: **`git apply --check` shows
+11 of 14 files apply cleanly**, only `source/CMakeLists.txt`,
+`source/dsp56kEmu/dsp.h` and `source/dsp56kEmu/jitops_alu.cpp` fail. The
+`CMakeLists.txt` failure is trivial (our own single-core `dsp_host` tool
+already carries the identical one-line `add_subdirectory(dsp_host)` the
+patch wants to add, just via a different history -- content match, not a
+real conflict). The other two need real reconciliation (upstream drift
+between the two vendor commits) -- not attempted. **A real naming collision,
+found before it could bite**: our own existing single-core harness ALSO
+lives at `vendor/dsp56300/source/dsp_host/` with a CMake target literally
+named `dsp_host` (built 2 Sep, backs `emu_sc_dsp3.py` and everything in
+`tools/emu_*.py` that isn't full-firmware RTOS) -- octabam's dual-core fork
+is a **different, incompatible 1341-line `dsp_host.cpp`** that would need
+its own subdirectory/target name (e.g. `dsp_host_xcore`) to coexist, not
+overwrite ours. Silently overwriting would have broken every existing
+`emu_*.py` tool that depends on the current single-core one -- exactly the
+family of mistake `CLAUDE.md`'s own "do NOT symlink out/emu" trap warns
+about. Not yet done: reconcile the 2 real conflicts, rename the new target,
+build it, and run it against our own two extracted payloads
+(`tools/dsp_modmap.py --dumpmem`) to confirm it boots our image at all before
+trusting anything it reports.
+
+**Toolchain investment DONE this session -- dual-core emulator built, working,
+validated against our own image.** Reconciled `dsp.h` (upstream added
+`<atomic>` after octabam's base commit -- pure line-drift, `<functional>` +
+the `m_hostStepped`/`idleStep`/`setInterruptTakenHook` block both applied by
+hand, content-identical to the patch's intent) and `jitops_alu.cpp` (our
+vendor commit's `alu_mpy`/`decode_qq_read` had grown a `g_mpyOperandShift`
+parameter octabam's base commit didn't have -- `op_Mpyri` hand-written to
+match our own `op_Mpyi`'s actual call shape, not the patch's literal text).
+The other 11 files applied via plain `git apply`. Built octabam's
+1341-line dual-core `dsp_host.cpp` as a NEW CMake target `dsp_host_xcore`
+under `vendor/dsp56300/source/dsp_host_xcore/` (own `CMakeLists.txt`, own
+`add_subdirectory` line) specifically so it does NOT collide with our own
+existing single-core `dsp_host` at `source/dsp_host/` -- confirmed the two
+would otherwise share a path and a CMake target name, which would have
+silently broken every existing `emu_*.py` tool. **Regression-tested**: our
+own `tools/emu_sc_dsp3.py` suite (the hardware-shipped SIDECHAIN3's own
+validation) is **ALL GOOD** rebuilt against the patched `dsp56kEmu` library --
+no behavioural change to anything already shipped.
+
+**Booted successfully against OUR OWN image, both real payloads, first try:**
+`dsp_host_xcore -mem out/payload_a.mem -memB out/payload_b.mem -inst 2 -core
+0,1 -init 1ab1,1871 -proc 1ab1,1871 -blocks 4` (payload dumps via this
+session's own `tools/dsp_modmap.py --dumpmem`) ran both cores lock-step,
+correctly reported "core 1: X/Y 0x30000..0x3ffff shared with core 0", loaded
+91/98 modules matching `dsp_modmap.py`'s own count exactly, **auto-detected
+payload B's real dispatcher setup at `P:0x0017a`** by opcode-pattern matching
+-- exactly the address octabam's own header comment names for their image
+(`P:0x372` for A / `P:0x17a` for B) -- a further independent confirmation our
+image structurally matches theirs closely enough for this tooling to carry
+over unmodified. Both instances' inits returned ok, both produced non-zero
+output, clean exit.
+
+**A real side-effect worth flagging, found while regression-testing, not a
+regression itself:** the patch fixes a genuine long-standing `dsp_asm` bug
+(`refs/octabam/CLAUDE.md`'s own "one-word displaced move" trap -- until their
+14 Sep 2026, `move x:(rN+disp),a`-style instructions with a small displacement
+and a data-ALU register destination assembled to the CORRECT two-word form
+where the chip has a one-word encoding). `patch_sc_dsp3.asm` uses this
+addressing form extensively (8+ sites: `x:(r6+$d)`, `x:(r7+$14/16/17/18)`,
+etc.). Rebuilding `build_sidechain3.py` with the newly-patched `dsp_asm`
+(done once this session, to confirm nothing broke) now produces a
+byte-DIFFERENT (smaller, more correctly-encoded) cave than the one actually
+flashed and hardware-confirmed on the user's MKI -- `emu_sc_dsp3.py` still
+says ALL GOOD because the numeric behaviour is identical (same instruction,
+correct encoding), but hardware CYCLE TIMING of the one-word form under our
+own code is, per octabam's own caveat, unmeasured. Not a problem for the
+shipped, already-flashed SIDECHAIN3 (untouched, still whatever's on the
+card) -- but **any future rebuild of SIDECHAIN3 (or any earlier DSP build)
+from this point on will not be byte-identical to the archived hardware-
+tested one**, and would want its own hardware confirmation pass if ever
+reflashed. Purely a build-output (`out/`, gitignored) side effect this
+session, nothing shipped or committed changed.
+
+**Reproducibility**: `vendor/` is gitignored (project convention, "never an
+Elektron byte in the repo") but there was no existing script to reproduce
+even the ORIGINAL single-core `dsp_asm`/`dsp_host` build (per-project memory:
+it was a scratchpad script, already gone) -- meaning this session's
+substantial manual reconciliation work would have evaporated on a fresh
+clone with nothing to show for it. Saved the reconciled patch + the two new
+files + a reproduction script under `tools/dsp56300_xcore/` (`vendor.patch`,
+`dsp_host_xcore.cpp`, `CMakeLists.txt`, `setup.sh`) -- `setup.sh` applies the
+patch (idempotent, detects prior application), drops in the new target,
+rebuilds all four binaries, and re-runs `emu_sc_dsp3.py` as a regression
+gate. Ran it end to end this session to confirm the idempotent path works.
+
+**Shared-window buffer layout + generation-tracking design, worked out this
+session (not yet implemented in asm, not yet validated under
+`dsp_host_xcore`):**
+
+- `BASE_A = 0x30100` (payload A, tracks 5-8 / local index 0..3 = absolute
+  4..7), `BASE_B = 0x38100` (payload B, tracks 1-4 / local index 0..3 =
+  absolute 0..3). Both clear `0x30000-0x30047`'s confirmed stock staging
+  reservation by a wide margin; also clear the *unconfirmed but plausible*
+  mirror reservation at `0x38000-0x38047` (never independently checked
+  whether payload B's own per-frame staging lives there too -- XBUS.md only
+  documents the low-half one -- but the chosen base makes the question moot
+  either way). `slot(local_track, gen) = BASE + local_track*0x80 +
+  (gen&3)*0x20` -- same `$80`/`$20` stride as the existing same-core keybus
+  formula, deliberately, so the idiom is familiar; footprint 4 tracks x 4
+  gens x 32 words = 0x200 (512) words per core, comfortably inside "a lot"
+  territory by octabam's accounting but nowhere near the 64K budget and
+  nothing else claims this window.
+- **Generation tracking does NOT need XBUS's housekeeper election.** XBUS
+  elects a single instance to run housekeeping because its accumulators need
+  clearing before reuse (a shared mutable resource multiple senders write
+  into). Our design has no accumulator -- each track's own 32-word slot is
+  wholly overwritten by that track's own publish every block, so there is no
+  clear-vs-write race (XBUS's defect #3) to guard against at all, only the
+  write-vs-read one (defect #1's shape). This removes a whole class of
+  complexity XBUS needed and we don't.
+- **The remaining race (write-vs-read) still needs XBUS's core proof**: four
+  buffers, reader always two generations behind the writer, because "the
+  only clearable/reusable buffer is the one transitioning read->write, and
+  that transition is the flip a skewed reader may still be inside" is a
+  structural argument that applies here just as much as it does to an
+  accumulator -- reads are still of memory the OTHER core is concurrently
+  capable of touching.
+- **Generation counter, one per core, no cross-core write, seeded at
+  init**: piggyback on `sctap`, which ALREADY runs unconditionally for
+  every track every block regardless of whether SIDECHAIN3 is even in use on
+  that track (it's the base publish tap, `P:0x004a7`, not gated on any
+  parameter) -- gate an increment of a new per-core-private scratch word on
+  "this is core-local track index 0" (absolute track == core_base, i.e.
+  track 4 for payload A / track 0 for payload B), which is a STRUCTURAL
+  property (some track always dispatches first each block; sctap already
+  runs for it unconditionally) rather than an elected one, so no election
+  machinery is needed at all -- simpler than XBUS's own mechanism here too.
+  Both payloads get the identical code (same source, same relative gate,
+  different `CORE_BASE`/`@KADJ@`-style build token), so if both cores are
+  truly rate-locked (XBUS's own standing, unverified-by-anyone assumption --
+  inherited here unchanged, same caveat applies) their two independently-
+  advanced counters read the same value at any real instant. A foreign-core
+  reader then computes its read generation as `(my_own_local_counter - 2) &
+  3` -- "my own", never the far core's word, exactly XBUS's rule.
+- **Open, deliberately not resolved by reasoning alone**: whether the two
+  cores' generation counters ever actually agree in practice (drift,
+  missed/double increments at boot or under load) is exactly the kind of
+  claim XBUS's own traps say a local "clean" run cannot prove -- `dsp_host_
+  xcore`'s `-skew N` fuzz is the tool to throw at this once the asm exists,
+  and a hardware test remains the only real proof afterward, per XBUS's own
+  standing caveat.
+
+**NEXT (in order):**
+1. Implement the above: extend `sctap` with the per-core generation
+   increment (gated on core-local track 0), relocate/duplicate the 4
+   foreign-core tracks' publish into `BASE_A`/`BASE_B`, extend `scdet`'s
+   detector redirect to compute a foreign-core read address when KEY selects
+   outside this track's own 4 same-core siblings.
+2. Widen KEY's count 5->9 (OFF + T1..T8, flat), flatten `key_fmt`'s
+   `coreBase` logic in `patch_sidechain.s` to plain track numbers (no more
+   core-relative branching once the detector can reach any track).
+3. Validate under `dsp_host_xcore`, including a `-skew` sweep before
+   trusting any "clean" result (see the open question above) -- the
+   dual-core emulator built this session (see above) is what makes this
+   step possible at all; do not skip it and go straight to a build.
+4. Re-verify the descriptor end to end, per the "descriptor formatter
+   overrides count, a clone inherits the donor's" trap (`CLAUDE.md`) --
+   directly relevant since KEY's own count field is what's changing.
+5. Any build from this thread is named `OCTATRACK_SIDECHAIN3_CROSS` per the
+   user's own naming instruction this session.
+
 Nothing built yet for this phase. `main`/`wip` both clean at `ca5b716`.
+
+## Session 77 continued (2026-09-20, `wip`) -- CROSS-CORE SIDECHAIN: implemented
+and numerically validated the mechanism designed above, widened KEY on the
+ColdFire side, and built `OCTATRACK_SIDECHAIN3_CROSS`. Emulator-only --
+**nothing hardware-tested**, and the user asked to keep going through this
+in one sitting rather than pause again, so the full trail (including two
+real bugs chased and fixed, and one long false-alarm chase that turned out
+to be a test-harness artifact, not a real defect) is recorded below in
+detail -- this is new, unreviewed mechanism, and the NEXT session needs the
+reasoning, not just the diff.
+
+**Implemented in `tools/patch_sc_dsp3.asm`:**
+- `sctap` (Hook 1, unconditional, every track, every block) extended with:
+  a per-core generation counter (`@GCNT@`, one word, `$300fc` payload A /
+  `$380fc` payload B) seeded via an exact-sentinel check (`@GSEED@`,
+  `$300fb`/`$380fb`, same "exact match not nonzero" idiom as this file's own
+  MON_ON hazard fix -- true cold DSP RAM is not reliably zero, a plain
+  nonzero test would read boot garbage as "already seeded"), advanced once
+  per block gated on "this is core-local track 0" (`cmp #>@COREBASE@,a`) --
+  a STRUCTURAL condition (sctap already runs unconditionally for that track;
+  no election needed, unlike XBUS's housekeeper, because there is nothing to
+  clear here); then an unconditional publish of this track's own X:0 into
+  `@SBASE@ + (local*4 + gen)*$20` (local = track - `@COREBASE@`), using ONLY
+  the register set step-2's own header already audited safe for this splice
+  (`a,b,r0,r1,n1,x0` -- deliberately did NOT reach for r4/r5/x1/n0/y0/y1,
+  which scdet uses freely but sctap's own clobber budget was never proven
+  for; this hook runs for every track every block, the hottest path in the
+  file, so an unaudited register here has a much bigger blast radius).
+- `scdet` (Hook 2): `@KADJ@` retired -- KEY 1..8 now maps straight to
+  absolute track 0..7 via one `sub #>1,a`, identical on both payloads (no
+  more per-payload offset math at all). After the existing split-block guard
+  and the r5 stash computation (UNCHANGED -- it's the consumer's own
+  private per-source-track scratch, doesn't care which core the source
+  lives on, see the design note landed in the source itself), a new test
+  (`and #>4,b` on the absolute track, uniform on both payloads; only the
+  branch SENSE -- `@FOREIGN_BR@` = `beq zz24` payload A / `bne zz24` payload
+  B -- differs, mirroring `@KADJ@`'s own old per-payload-token style) selects
+  between the UNCHANGED same-core copy and a new foreign-core copy: local
+  index = track - `@FCOREBASE@`, read generation = `(GCNT + 2) & 3` (XBUS's
+  four-buffer/read-two-back shape; "+2" instead of "-2" since they're equal
+  mod 4 and this avoids a negative immediate), address = `@FSBASE@ +
+  (local*4 + read_gen)*$20`. Everything downstream (KEY GAIN, KEY FLT, SC
+  LISTEN, MON_ON/MON_KEY, moncommit) is completely untouched -- confirmed by
+  design and by the regression suite below, not just asserted.
+
+**Assembly-level correctness, both payloads, checked by disassembly before
+ever running it** (`tools/patch_sc_dsp3.asm`'s own long-standing "AUDIT THE
+OUTPUT BY DISASSEMBLY" rule): every new instruction sequence -- the
+`and`-then-`move b1,a` normalize-before-use dance (avoids the file's own
+documented "logical op leaves the extension byte stale" trap), `add
+#>N,acc` / `sub #>N,acc` for plain integer arithmetic (the `#>` long form,
+NOT the short `move #imm,reg` form, which this file's own (q2) quirk
+already flags as left-aligned on STORE -- confirmed empirically this
+session that `cmp #>N,acc` reads normally while `move #N,acc` stores
+left-aligned, exactly as the existing MON_ON sentinel `$10000` already
+implied, and reused that SAME already-proven pattern for the new GSEED
+sentinel rather than inventing an untested one) -- all encoded exactly as
+intended, confirmed via `dsp56kDisassemble` against the real assembled
+bytes for BOTH payloads (`@FOREIGN_BR@`/`@COREBASE@`/`@FCOREBASE@`/`@SBASE@`/
+`@FSBASE@` all substituted correctly, mirror-image between A and B as
+designed). Cave grew 295w -> 388w, still well inside SPRING REVERB's 1063.
+
+**Numeric validation, `tools/emu_sc_dsp3_xcore.py` (new file), all against
+payload B (COREBASE=0), single-core `dsp_host` -- deliberately scoped to
+what a single core CAN prove (see the file's own docstring for what it
+can't):**
+- generation counter: first-ever call seeds GSEED to the sentinel and GCNT
+  to 0 (no advance); five further calls on the gating track (0) advance
+  0->1->2->3->0, wrapping correctly; three calls on non-gating tracks
+  (1,2,3) leave GCNT untouched. All ok.
+- publish address: the gating track's own call both advances GCNT AND
+  publishes into the NEW generation at local index 0; a non-gating track
+  publishes into the CURRENT (unchanged) generation at ITS OWN local index.
+  Confirmed by requiring the destination slot equal whatever X:0 actually
+  held after the call (see the X:0 debugging note below for why this
+  doesn't pin down the exact bytes) -- ok.
+- foreign-core read: pre-seeded all four generations of a foreign track
+  with four distinct patterns, set this core's own GCNT to a known G, and
+  confirmed KEY selecting that foreign track reads back EXACTLY the
+  `(G+2)&3` generation's pattern and NONE of the other three -- ok. This is
+  the mechanism's own single riskiest new piece and it checks out exactly
+  as designed.
+- Full same-core regression (`emu_sc_dsp3.py`, both plain and `--patched`
+  against the real rebuilt image): still **ALL GOOD**, unregressed.
+
+**A real debugging detour, worth recording so it isn't re-chased**: the
+first version of the "publish address" test seeded X:0 with a custom
+32-word ramp and expected the destination slot to equal it exactly -- it
+came back with SOME words replaced by `0x400000`/`0x404000`-ish values,
+in a pattern that didn't move with `-frames`. Traced (via `-trace`,
+disassembly-matched instruction-by-instruction, and a battery of isolation
+runs) all the way down to: this happens even with a BARE `rts` as both
+`-init` and `-proc`, no code from this feature involved at all, and with NO
+stock dump loaded either -- i.e. it is `dsp_host`'s own X:0 handling under
+its simulated audio/ESAI setup, not anything this session wrote. Given the
+file's OWN long-standing, hardware-shipped `sctap` (X:0 -> keybus, unchanged
+since step 2) has apparently NEVER been independently tested against a
+custom X:0 seed either (`emu_sc_dsp3.py`'s own tests always seed the KEYBUS
+side directly and check scdet's read of it, never sctap's read of X:0) --
+this is a pre-existing gap in the test harness, not a regression, and not
+worth spending more time on right now. Fixed by not fighting it: the
+publish test no longer controls X:0's content, it just requires the
+destination slot to match whatever X:0 organically held after the call,
+which still fully proves the address arithmetic (the only genuinely new
+thing) without needing to also prove the loop's source. **A second,
+separate false alarm on the way there**: the SAME symptom appeared on the
+proven same-core path too when reproduced via a hand-rolled call that
+skipped `emu_sc_dsp3.py`'s own `main()` setup step (`r7_of()` -> `sc3.S17`,
+which seeds KEY GAIN's r7+$17 state to a known cold value before ANY
+`base_mem()` call) -- without it, KEY GAIN smooths from genuine boot garbage
+instead of snapping to unity, which looked exactly like a cross-core
+addressing bug for a while before the same-core path reproduced the
+identical symptom and ruled the cross-core code out. Lesson for whoever
+extends this test file further: always replicate `main()`'s S17 setup
+before calling `base_mem()` directly, or KEY GAIN behaves unpredictably.
+
+**Real, genuinely dual-core validation** (`tools/dsp56300_xcore/`'s
+`dsp_host_xcore`, built last session): booted BOTH real, freshly-built
+payloads (`out/mainos_sidechain3_cross.bin`, dumped via `tools/dsp_modmap.py
+--dumpmem`) with an sctap instance on each core (core 0 = track 4, core 1 =
+track 0, each core's own gating track), ran 50 blocks. Both cores'
+independently-tracked generation counters read back **identical** (`Y:
+0x300fc == Y:0x380fc == 2`, matching the expected `51 mod 4` given `-init`
+and `-proc` both point at sctap so it also runs once during init) --
+confirming the core design assumption (no cross-core read of the counter,
+just trust the two cores' independent per-block advances to agree) actually
+holds under REAL, independent dual-core execution, not just the same-core
+approximation above. Re-ran under `-skew -5/3/10` (instruction-level
+interleave fuzzing, not lock-step) -- **identical result every time**, no
+crash, no divergence. This is real signal (a genuine dual-core run, not
+`dsp_host`'s single-core model), though it only exercises the WRITE/advance
+side; a live cross-core READ actually racing a WRITE (the scenario XBUS's
+own three hardware-confirmed defects were about) was NOT set up this
+session -- it needs a `scdet`-carrying instance under `dsp_host_xcore` too
+(the compressor-splice machinery `base_mem()` does for single-core doesn't
+have a dual-core equivalent yet), which is real remaining work, not done
+here. Inherited XBUS's own standing caveat unchanged: only a hardware test
+is final proof that a timing defect is gone.
+
+**ColdFire side, `tools/patch_sidechain.s` + `tools/build_sidechain3.py`**:
+KEY's descriptor count 5 -> 9 (a prior session's own comment, Session 76,
+had already flagged this exact number as coming -- "KEY is headed for
+cross-core... count 9 not 5"). `key_fmt` simplified drastically: the old
+`CUR_TRACK`/`coreBase` indirection (read the edited track, branch high/low,
+add an offset) is gone entirely -- KEY's value 1..8 now printed directly as
+"T<value>", since the DSP side made the value itself a flat absolute track
+number. `key_list_fix`'s trampoline (forces the LFO-TRIG-style list
+rendering) needed no change, confirmed count-agnostic by disassembly two
+sessions ago and re-verified here by the fact the build's own descriptor
+print shows `count 9` correctly and nothing else broke.
+
+**Naming**: this is a REAL, deliberate divergence from the archived,
+hardware-shipped single-core `SIDECHAIN3` image (KEY's value semantics
+changed, not just internal plumbing) -- renamed the build's own OUTPUT
+artifacts from `SIDECHAIN3` to `SIDECHAIN3_CROSS` throughout
+`build_sidechain3.py` (`out/mainos_sidechain3_cross.bin`,
+`out/OCTATRACK_OS1.40C_SIDECHAIN3_CROSS.syx`, etc.) and updated
+`emu_sc_dsp3.py`'s `--patched` mode to match, per the user's own naming
+instruction this session. Did NOT rename the SCRIPT/asm FILES themselves
+(`build_sidechain3.py`, `patch_sc_dsp3.asm`, `patch_sidechain.s` stay as
+they are) -- matches this project's own established pattern of evolving
+`patch_sc_dsp3.asm` in place across many sessions rather than forking a new
+file per change, and avoids adding yet another stale reference to
+`build_merged.py`'s own already-documented, pre-existing SPATIALIZER-cave
+incompatibility (Session 76 continued: "needs the same donor-swap pass
+before its next real build", untouched by this session, still open).
+Built: `out/OCTATRACK_OS1.40C_SIDECHAIN3_CROSS.syx` +
+`out/OCTATRACK_SIDECHAIN3_CROSS.bin`, both regenerated from a clean state
+this session and re-verified against the full test suite above after the
+rename.
+
+**NEXT (in order):**
+1. A genuinely dual-core scdet foreign-read-under-real-write-race test
+   (needs a compressor-splice-carrying instance under `dsp_host_xcore`,
+   which doesn't exist yet -- `base_mem()`'s splice logic is single-core
+   only). This is the one thing that would meaningfully raise confidence
+   before a hardware attempt; everything else practical to check with an
+   emulator has been.
+2. Hardware test, once the user is back at the MKI -- per XBUS's own
+   standing caveat, nothing short of this is final proof the cross-core
+   race is actually safe on real silicon, and per this project's own
+   "guarded binary patches" discipline, `OCTATRACK_SIDECHAIN3_CROSS` should
+   not be treated as more than emulator-verified until then.
+3. If hardware surfaces a problem: `-guard`/`-meter`/`-skew` under
+   `dsp_host_xcore` are the tools to reach for first (per octabam's own
+   "measurement blind to what it's ruling out" trap, prefer a REAL
+   dual-core run over reasoning about it) before writing a third design.
+
+## Session 77 continued again (2026-09-20, `wip`) -- CROSS-CORE SIDECHAIN:
+**HARDWARE CONFIRMED.** User flashed `OCTATRACK_SIDECHAIN3_CROSS` to the MKI:
+"Seems to be working well." No crash, no transport regression, no report of
+the cross-core race the emulator work above couldn't fully rule out --
+KEY reaching a track on the OTHER DSP core, across the shared-window
+publish/generation-counter/foreign-read mechanism this session designed and
+built, plays correctly on real silicon. **Cross-core SIDECHAIN is shipping**
+alongside the previously-confirmed single-core SIDECHAIN3 feature set (KEY
+list select, KEY FLT, KEY GAIN, SC LISTEN/MON) -- the compressor can now key
+off ANY of the 8 tracks, not just this track's own 4 same-core siblings.
+**User: consider this build final for now** -- may want minor fine-tuning
+later, but no open work is planned against it. This settles the two things
+flagged as NOT provable from the emulator alone: a live cross-core read
+actually racing a write, and the true cold-boot value of the shared
+window's GSEED/GCNT words (`NOTES.md`'s own "Session 77 continued" callout)
+-- both are now moot, hardware is the actual proof and it came back clean.
+
+Updated for this: `START_HERE.md` frontier section, `README.md`'s SIDE-CHAIN
+COMPRESSOR writeup + hardware-status table, `BUILD_KYOTI.md`'s build table +
+hardware-status table, `FLASHING.md` §4.6 (added a current-state summary
+covering the one-pole KEY FLT redesign through cross-core, since that
+section's own body text still described the retired 2-pole SVF era and
+had not been touched since the Session 76 rewrite) -- all now say
+`OCTATRACK_SIDECHAIN3_CROSS` is hardware-confirmed on MKI, superseding the
+single-core-only `SIDECHAIN3` line as the one to build/flash going forward.
+No code changed this entry -- documentation only.
+
+## Session 58 continued yet again, part 17 (2026-09-20, `wip`) — MUTE MODE: a
+from-scratch MUTEMODE_NEW detour tried and abandoned on the user's own
+hardware report; back on the MUTEMODE_DT/"echo" thread; octabam pulled to
+its current `main` (a major reorg since this thread last touched it -- now
+a module/remix system) and a directly relevant hardware-confirmed precedent
+found (`flex-seekbind`); two NEW, previously-untested `FUN_40006820` callers
+decompiled and a dynamic test built to check them against the real echo
+scenario.
+
+### The MUTEMODE_NEW detour (abandoned)
+
+At the user's explicit request, a separate session attempted a from-scratch
+MUTE MODE redesign without reading this thread's own history, built as a
+live PERSONALIZE menu entry (repurposing MKI's dead "LED BRIGHTNESS" slot).
+Flashed: **OT works, OTFX and OTFX-T do not work at all, DT-T behaves like
+OT (no muting at all)**. Per the user's direction, this is now abandoned --
+not chased further, not merged with this thread's own work. Its own files
+(`tools/{patch,build,emu}_mutemode_new.py`) are left in place, untracked,
+uncommitted, purely as a record; nothing from it is wired into any build
+this project ships. The one possibly-reusable idea (a live PERSONALIZE
+selector rather than a build-time `GATE`/`DT_MODE` flag) is NOT adopted here
+without the user asking for it separately -- this thread's own `GATE`
+mechanism in `patch_softmute.s` stays as it is.
+
+### octabam pulled: `refs/octabam` had drifted to a much larger, reorganised
+### project
+
+`git fetch` found dozens of new upstream commits; the clone was in a
+detached HEAD with real local modifications (an `ot_emu` extension for
+mute-while-playing checkpoint scheduling, `--poke-at-frame` /
+`--poke-trig-at-frame`, built during the abandoned MUTEMODE_NEW session, plus
+several `tools/scratch/mute_probe_*.py` diagnostics). Committed those to a
+local branch (`local-mute-wip`, not pushed, not part of octabam upstream),
+then rebased onto `origin/main`. One real conflict: upstream renamed
+`tools/scratch/` to `tools/harness/` and independently added its own timed-
+action scheduler (`--call-at`, `--midi`) to the exact same run loop our
+`--poke-at-frame` patched. Resolved by merging both into one `ActKind`-
+tagged action list (Call/Midi/Poke/PokeTrig) rather than picking one side;
+rebuilds clean (`cmake --build out/emu --target ot_emu`). octabam's own
+`CLAUDE.md` has been substantially rewritten since this thread last read it
+-- it is now a "remixer" (`modules/<name>/manifest.py` + `remixes/<name>.py`),
+`docs/history/` (including `RTOS_FORK.md`) was removed from the tree on 16
+Sep 2026 (still recoverable: `git show <sha>:docs/history/RTOS_FORK.md`),
+and the accumulated "traps" section has grown substantially -- worth a skim
+before the next DSP-adjacent session on this project, not reproduced here.
+
+### `modules/flex-seekbind/` -- a hardware-confirmed precedent directly on
+### `FUN_4000f450`, this thread's own central function
+
+`grep`ing octabam's tree for this thread's own key addresses
+(`40006820`/`40007960`/`4000f450`/`4000d350`/`4000d36e`) hit exactly one
+file: `modules/flex-seekbind/manifest.py`. Its own docstring, verbatim:
+
+> The bind (0x4000f450) decides at its tail whether a re-bind is the same
+> sample (return 0) or a new one (return 0x100) from its slot/type/
+> generation verdict (sp@55) and a position compare against a settings
+> field (0x4000f8cc..0x4000f8ea). On a recorder-buffer voice re-trigged
+> every bar the verdict holds and the compare fails, so every bar is a new
+> note and the DSP restarts the voice (a chirp, then hash at 140% of the
+> signal over 300 samples).
+
+This is independent, hardware-tested confirmation (`docs/firmware/
+RECORDER_CLICK.md`, measured on real MKII hardware, OCTABAM81-84) of two
+things this thread has spent many sessions inferring from emulator evidence
+alone: (1) `FUN_4000f450` genuinely is the "same sample (seek) vs new note
+(restart)" decision point our own `fresh_bind` sits downstream of, and (2)
+taking the "new note" path when the DSP should really just seek produces a
+real, audible, self-contained transient (a chirp + 300-sample hash) --
+*not* a sustained multi-second echo. This is useful negative evidence: even
+if our own `fresh_bind`/hook 10 mis-times relative to this exact verdict, the
+KIND of artifact that produces on its own doesn't match the user's reported
+symptom (a tempo-locked echo over ~2 pattern cycles) -- so this specific
+mechanism, while real and worth keeping in mind, is not by itself a
+sufficient explanation for the echo. The tail address (`0x4000f8cc`,
+`tstb (55,sp) / beqs 0x4000f8ea`) is new, precise information this thread
+did not have before; worth cross-referencing against `FUN_4000f450`'s own
+already-decompiled body (`GhidraMute15.java`, part 16) in a future session.
+
+### Two NEW, previously-unexamined `FUN_40006820` callers found
+
+Hook 10's own header (this file, above) lists `FUN_40006820`'s 7 callers but
+only ever gates their convergence point; no prior session decompiled the 6
+independent ones individually. Did so this session
+(`tools/ghidra/attic/GhidraEchoCallers.java`, against `ghidra_project`):
+
+- `0x40043c50` -> real entry `0x40043ba0`, `fb_caller_40043c50`: gated on an
+  event/opcode `param_1 == 0x2a`; sets `(&DAT_46c80354)[track] = 0x40`
+  (looks like a level-ramp reset) then `FUN_40006820(track)`. Shape suggests
+  a MIDI/CV note-off or similar single-track gate-off, not a trig dispatch.
+- `0x4007eb3e`, `0x40080434` (both `0x4008044e` and `0x8055c` land in the
+  SAME function): all three call `FUN_40006820(0xffffffff)` -- ALL tracks --
+  as part of an OS-upgrade flow or a screensaver/task-switch transition.
+  Unrelated to per-track mute/trig behaviour; ruled out.
+- **`0x40093e9c` (`fb_caller_93ec0`) and `0x40096ab0` (`fb_caller_96ad4`) --
+  near-identical, one per bank/bus half**: gated on `if (-1 < DAT_400d7c44
+  [or _48])` (reads as "is there a pending per-track apply queued"), each
+  sets `(&DAT_46c80354)[track] = 0x40`, calls `FUN_40006820(track)` to
+  invalidate the CURRENT voice, then copies in a NEW machine-type/sample-
+  slot byte plus a block of per-track state, and finally resets the pending
+  index to `-1`. **This is NOT anywhere on the trig-dispatch chain hooks
+  9/10 gate** -- it looks like how a PARAMETER LOCK change (e.g. a
+  different sample slot on a later step) gets applied to a track's live
+  voice, entirely independent of `MUTE_STATE`. The user's own "3-case step
+  data" (part 16) used exactly this shape of test (steps 10/15 locked to a
+  DIFFERENT, non-default sample) -- if a p-locked sample-slot change
+  reaches this apply path regardless of mute state, that would explain a
+  fresh, audible voice dispatch that neither hook 9 nor hook 10 has any
+  power to stop, on exactly the kind of step content the user was using.
+
+### Dynamic test built and launched: do either candidate fire during a real
+### muted post-mute window?
+
+`tools/diag_echo_newcallers.py` -- built directly on top of the already-
+working `diag_echo_realkey.py` (real key-handler mute path, `Rtos.
+call_as_main`, not a raw `MUTE_STATE` poke), adding `UC_HOOK_CODE` watches on
+all three per-track candidates above, reading `param_1` from `(4,%sp)` at
+each function's own real entry point (verified against the decompile's own
+entry addresses, not the call-site addresses hook 10's header happens to
+cite). Run against `out/mainos_mutemode_dt.bin` (DT mode, `SIDECHAIN_TEST` project,
+track 1, steps 1/5/9/13) -- **result: clean.**
+
+```
+  post-mute: dt_trig 0 pass / 16 silence  |  fresh_bind 2 pass / 77176 silence
+  post-mute NEW-CANDIDATE hits: 0 total
+```
+
+The `dt_trig`/`fresh_bind` numbers exactly reproduce part 16's own signature
+(2 leaked fresh_bind dispatches at the mute-engage frame, then tens of
+thousands of blocked calls) -- so the harness is behaving as expected. All
+three new candidates (`40043c50`/`93ec0`/`96ad4`) got zero hits across the
+whole post-mute window. This is NOT strong evidence against them: as flagged
+before running it, `SIDECHAIN_TEST` has no p-locked sample-slot change on
+any of its steps, so `fb_caller_93ec0`/`96ad4` (gated on "is there a pending
+per-track apply queued") structurally cannot fire regardless of whether
+they're the real mechanism. **Ruled out only for content-free trigs; still
+open for the user's own original 3-case content** (steps 10/15 locked to a
+different, non-default sample) -- the next, more decisive run needs a real
+project with that shape. Per this project's own hard constraint (test data
+must be real hardware exports, never a hand-fabricated `.work`/bank blob),
+that project needs to come from the user, or from constructing the lock
+record live via emulator pokes against a REAL loaded project (more RE work
+on the lock-record format, not yet done) -- asked the user which they'd
+prefer rather than guessing at the lock-record layout blind.
+
+### Status and handoff
+
+Nothing flashed this session. `out/mainos_mutemode_dt.bin` is unchanged
+(still the part-16 note applies: v2 hook 13, not the v1 the user's hardware
+actually runs -- fine for dt_trig/fresh_bind/candidate testing, not a
+byte-exact REL_STATE-race reference). The real "echo" mechanism is still not
+found; this session narrowed the search (ruled out 4 of 6 previously-
+unexamined `FUN_40006820` callers, added 2 real candidates, corroborated
+`FUN_4000f450`'s tail behaviour against independent hardware evidence) but
+did not close it. Given this thread's own repeated pattern of promising
+leads that didn't reproduce (part 11's fresh_bind leak, part 16's blocked-
+cleanup theory), treat `fb_caller_93ec0`/`96ad4` as unconfirmed until the
+dynamic test above actually shows a hit inside a real muted window.

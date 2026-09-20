@@ -9,17 +9,20 @@
 ;
 ; New page-2 controls the DSP acts on (packing = octabam PARAM_PAGES;
 ; emu_sc_dsp3.py -params index in parens):
-;   KEY      x:(r6+$d) bits 16-23   0..4    OFF / same-core track    (8)
-;   KEY FLT  x:(r6+$d) bits  8-15   0..127  64=bypass  <64 LP  >64 HP (9)
-;   KEY GAIN x:(r6+$e) bits 16-23   0..127  64=unity  ~+/-24 dB       (10)
-;   SC LISTN x:(r6+$e) bits  8-15   0..1    OFF / ON  (audition key)  (11)
+;   KEY      x:(r6+$d) bits 16-23   0..8    OFF / any of T1..T8, flat  (8)
+;   KEY FLT  x:(r6+$d) bits  8-15   0..127  64=bypass  <64 LP  >64 HP  (9)
+;   KEY GAIN x:(r6+$e) bits 16-23   0..127  64=unity  ~+/-24 dB        (10)
+;   SC LISTN x:(r6+$e) bits  8-15   0..1    OFF / ON  (audition key)   (11)
+; KEY's range widened 0..4 -> 0..8 in Session 77 (cross-core SIDECHAIN,
+; NOTES.md): it now names an absolute track T1..T8 directly, same value on
+; both payloads, rather than "one of this track's own 4 same-core siblings"
+; -- @KADJ@ (the old per-payload relative-offset token) is retired.
 ;
 ; dsp_asm quirks (see patch_sc_dsp.asm header): no directives / constants /
 ; jmp / jcc -- literals only, labels substituted textually (raw substring, so
 ; every label here is `zzNN`, all 4 chars, all distinct => none is a prefix of
 ; another), every routine ends `rts` (the build hand-encodes `jsr <cave>` at
 ; each site, control returns via rts).  Build tokens, rewritten per payload:
-;   @KADJ@   "add #3,a" (payload A, CORE_BASE 4) / "sub #1,a" (payload B, 0)
 ;   @GTAB@   absolute P addr of the 16-word KEY GAIN table (gain/64, Q23)
 ;   @FTAB@   absolute P addr of the 32-word KEY FLT table (a = 1-exp(-2pi fc/fs), Q23)
 ;   @LPEDGE@ literal Q23 immediate, LP's near-OFF edge-override coefficient
@@ -30,9 +33,43 @@
 ; @LPEDGE@/@HPEDGE@ are plain literal substitutions (tools/sc_tables.py's
 ; lp_edge()/hp_edge()), not addresses -- fixed width regardless of pass.
 ;
+; Cross-core tokens (Session 77, NOTES.md has the full design writeup):
+;   @COREBASE@   this core's own base track index: 4 (payload A, tracks 5-8)
+;                / 0 (payload B, tracks 1-4)
+;   @FCOREBASE@  the FOREIGN core's base track index: the other one of the
+;                pair above
+;   @SBASE@      this core's OWN publish region in the shared window:
+;                $30100 (payload A) / $38100 (payload B) -- where sctap
+;                writes so the FOREIGN core can read
+;   @FSBASE@     the FOREIGN core's publish region: the other one of the
+;                pair above -- where scdet reads a foreign KEY selection from
+;   @GCNT@       this core's own generation counter, one word, in the shared
+;                window right before its own @SBASE@ block: $300fc (A) /
+;                $380fc (B). Never read the FOREIGN core's copy of this --
+;                each core tracks its OWN belief about "what generation is
+;                everyone on right now" and assumes the two agree (XBUS's own
+;                rule, inherited along with its caveat: this assumes the two
+;                cores are rate-locked, unverified, see NOTES.md)
+;   @GSEED@      this core's own "have I ever seeded @GCNT@" sentinel word,
+;                right before @GCNT@: $300fb (A) / $380fb (B)
+;   @FOREIGN_BR@ "beq zzXX" (payload A) / "bne zzXX" (payload B) -- branches
+;                to the foreign-core read path when a track-membership test
+;                (`and #>4,acc`, uniform on both payloads) says this KEY
+;                selection is NOT on this core's own half
+; Shared-window layout: 4 tracks x 4 generations x 32 words = $200 (512)
+; words per core, `slot(local_track, gen) = SBASE + local_track*$80 +
+; (gen&3)*$20` -- same $80/$20 stride as the existing same-core keybus
+; formula below, deliberately, so the idiom stays familiar. No accumulation
+; (each publish wholly overwrites its own slot), so unlike XBUS's bus there
+; is no clear-vs-write race and no housekeeper election needed -- only the
+; write-vs-read race, guarded the same way XBUS's is: four buffers, reader
+; always two generations behind the writer.
+;
 ; keybus ring (Y): slot(track,gen) = $800 + track*$80 + (gen&3)*$20.
 ;   gen 0 = the per-frame publish (sctap).  gen 1 = the SC LISTEN stash --
 ;   scdet writes the *processed* key there, sctail copies it to the dry buffer.
+;   This is SAME-CORE-ONLY and unaffected by cross-core KEY (see the design
+;   note above scdet's r5 computation) -- it stays exactly as it was.
 ;
 ; One-pole tracker state, per compressor instance, in the compressor's own r7
 ; block at r7+$16 -- unused by the stock module (RE: state block r7+$f..$1b;
@@ -58,7 +95,25 @@
 ; only x1,x0 / x1,y0 operand orders, which emit true signed mpy.
 ; ===========================================================================
 
-; ---- HOOK 1 : publish tap (identical to step 2) ---------------------------
+; ---- HOOK 1 : publish tap (same-core keybus unchanged from step 2; extended
+; Session 77 with a cross-core publish into the shared window) -------------
+; Clobber budget for THIS splice (audited, step 2's own header): stock
+; reloads a,b,r0,r1,n1,x0 right after each rejoin -- everything added below
+; stays strictly within that set, on purpose (this hook runs unconditionally
+; for every track every block, the hottest path in this whole file, so an
+; unaudited register here has a much bigger blast radius than anything in
+; scdet, which only runs for tracks actually using COMPRESSOR).
+;
+; Cross-core design (NOTES.md "Session 77" has the full reasoning): every
+; track sctap ever sees IS one of this core's own 4 tracks (a core's own
+; dispatcher only ever dispatches its own tracks), so there is no same/
+; foreign branch needed here at all -- every call publishes.  Unlike XBUS's
+; accumulator bus, there is nothing to CLEAR (each track's slot is wholly
+; overwritten every publish, never summed), so no housekeeper election is
+; needed either -- just a per-core generation counter, advanced once per
+; block, gated on "this is core-local track 0" (@COREBASE@ itself), which is
+; a STRUCTURAL condition (some track always dispatches first; sctap already
+; runs for it unconditionally) rather than an elected one.
 sctap:
         move    x:>$420,a               ; a1 = track index 0..7
         asl     #7,a,a                  ; a1 = index * $80
@@ -70,6 +125,61 @@ sctap:
         move    x:(r0)+,x0
         move    x0,y:(r1)+
 zz01:
+; -- generation counter advance (Session 77), gated on core-local track 0 --
+        move    x:>$420,a               ; a1 = track index (reload; a/r0/r1/n1/x0
+                                        ; all spent by the loop above)
+        cmp     #>@COREBASE@,a
+        bne     zz30                    ; not this core's local index 0 -> skip
+; GSEED holds the exact sentinel $10000 once this core has ever run this
+; path before -- same "exact match, not nonzero" idiom as MON_ON (this
+; file's own moncommit hazard fix), needed because true cold DSP RAM in a
+; region nothing has ever written before is NOT reliably zero (the
+; "persistent slot" trap) and a plain nonzero test would very likely read
+; boot garbage as "already seeded" and skip the one-time reset to a KNOWN
+; value both cores must agree on. HARDWARE-ONLY validation gap: dsp_host /
+; dsp_host_xcore zero all DSP RAM at their own "boot", so no emulator run
+; can exercise the TRUE cold-boot garbage case -- see NOTES.md.
+        move    #>@GSEED@,r1
+        move    y:(r1),b               ; b = seed sentinel word
+        cmp     #>$10000,b
+        beq     zz29                    ; already seeded -> normal advance
+        move    #1,b                    ; (q2) stores as $10000, matching the
+        move    b,y:(r1)                ; cmp above -- same quirk, same fix
+        move    #>@GCNT@,r1
+        move    #0,b
+        move    b,y:(r1)                ; first-ever block -> generation 0
+        bra     zz30
+zz29:
+        move    #>@GCNT@,r1
+        move    y:(r1),b
+        add     #>1,b                   ; b = GCNT + 1 (plain arithmetic add,
+                                        ; not the quirky short move form -- q2
+                                        ; only affects `move #imm,reg`)
+        and     #>3,b                   ; wrap 0..3 (masking risk on b)
+        move    b1,a                   ; (q3) a = clean wrapped value
+        move    a,y:(r1)
+zz30:
+; -- publish this track's own audio into the shared window --
+; SBASE + (local_index*4 + gen) * $20, local_index = track - @COREBASE@
+        move    x:>$420,a
+        sub     #>@COREBASE@,a          ; a1 = local index 0..3 (plain subtract,
+                                        ; not a masking op -- no staleness risk)
+        asl     #2,a,a                  ; a1 = local*4
+        move    a1,x0                   ; x0 = local*4 (audited-safe scratch)
+        move    #>@GCNT@,r1
+        move    y:(r1),b
+        and     #>3,b                   ; b = gen 0..3 (masking risk on b)
+        move    b1,a                   ; (q3) a = gen, clean
+        add     x0,a                    ; a = local*4 + gen
+        asl     #5,a,a                  ; a = combined * $20
+        move    a1,n1
+        move    #>@SBASE@,r1
+        lua     (r1)+n1,r1              ; r1 -> this track's shared-window slot
+        move    #0,r0
+        do      #<$20,>zz31
+        move    x:(r0)+,x0
+        move    x0,y:(r1)+
+zz31:
         move    x:>$208,r6              ; --- displaced (move #$6,n6 stays stock) ---
         rts
 
@@ -84,10 +194,16 @@ scdet:
         move    r0,n6                   ; --- displaced: dry-path anchor ---
         move    x:(r6+$d),b            ; (q1) KEY|KFLT word
         asr     #$10,b,b
-        move    b1,a                  ; (q3) a = KEY 0..4, a0 clean
+        move    b1,a                  ; (q3) a = KEY 0..8, a0 clean
         tst     a
         beq     zz20                   ; KEY OFF -> self-detect, skip all
-        @KADJ@                         ; KEY 1..4 -> absolute track 0..7
+        sub     #>1,a                   ; KEY 1..8 -> absolute track 0..7, FLAT --
+                                        ; @KADJ@ retired (Session 77): widening KEY
+                                        ; to reach any of the 8 tracks removed the
+                                        ; old "same-core siblings relative to my
+                                        ; own track" indirection entirely, so this
+                                        ; one subtract is now identical on both
+                                        ; payloads (NOTES.md "Session 77").
 ; SIDECHAIN3 ringing bug, take 2 (Session 75, NOTES.md): a mid-block trig
 ; splits the block into TWO `PROCESS_TABLE[id]` calls to comp_proc (r0=0 for
 ; the first, r0=split*2 for the second -- Session 74's disassembly of
@@ -117,16 +233,78 @@ scdet:
         move    n6,b
         tst     b
         bne     zz16
+; r5 = SOURCE track's own same-core-private gen-1 stash slot base (SC
+; LISTEN). UNCHANGED for a foreign-core KEY selection (Session 77 design
+; note, NOTES.md "Session 77"): this is the CONSUMER's own private scratch,
+; addressed purely by the source track's index 0..7 -- keybus spans all 8
+; index positions in every core's own private Y memory, but a core's own
+; sctap only ever WRITES its own 4 tracks' gen-0 slots, leaving every other
+; index's gen-1 slot (never touched by gen-0 publish, never touched by any
+; OTHER hook here) equally free for this per-consumer stash purpose whether
+; the source track happens to live on this core or the other one.
+        asl     #7,a,a
+        move    a1,n1
+        move    #>$800,r1
+        lua     (r1)+n1,r1
+        move    r1,r5                 ; r5 = slot base (SC LISTEN stash)
+; -- same-core vs foreign-core source select (Session 77) --
+        move    r4,b                   ; b = abs track (fresh reload; a/n1/r1
+                                        ; just spent above computing r5)
+        and     #>4,b                  ; b = 4 if track's high half is set, else 0
+        move    b1,a                  ; (q3) a = clean 4-or-0
+        tst     a
+        @FOREIGN_BR@                    ; -> zz24 iff this track is on the OTHER
+                                        ; core (which half is "foreign" flips
+                                        ; between payloads -- see the header's
+                                        ; token table)
+; -- same-core copy (UNCHANGED from step 3) --
+        move    r4,a
         asl     #7,a,a
         move    a1,n1
         move    #>$800,r1
         lua     (r1)+n1,r1            ; r1 -> keybus[abs] gen 0
-        move    r1,r5                 ; r5 = slot base (SC LISTEN stash)
         move    #$40,r0
         do      #<$20,>zz02
         move    y:(r1)+,x0
         move    x0,x:(r0)+
 zz02:
+        bra     zz25
+zz24:
+; -- foreign-core copy (Session 77): shared-window relay, 2 generations
+; behind this core's own write generation (XBUS's own proven race-safety
+; shape -- four buffers, reader always two behind the writer; the "-2" is
+; done as "+2" since -2 == +2 mod 4, avoiding a negative immediate).
+; @GCNT@ here is THIS core's OWN counter, never the foreign core's word --
+; standing in for "what generation the foreign core is almost certainly on
+; right now", which only holds if the two cores are truly rate-locked
+; (inherited from XBUS unverified, see NOTES.md "Session 77" and
+; refs/octabam/docs/effects/XBUS.md's own standing caveat).
+        move    r4,a                    ; a = abs track
+        sub     #>@FCOREBASE@,a         ; a = foreign-local index 0..3 (plain
+                                        ; subtract, no masking risk -- @FOREIGN_BR@
+                                        ; already proved this track is on the
+                                        ; foreign half, so this is always in range)
+        asl     #2,a,a                  ; a = local*4
+        move    a1,x1                   ; x1 = local*4 (safe here -- not yet used
+                                        ; for anything else in this routine; the
+                                        ; KEY FLT coefficient use of x1 starts
+                                        ; much later, well past this point)
+        move    #>@GCNT@,r1
+        move    y:(r1),b
+        add     #>2,b                   ; b = GCNT + 2 (== GCNT - 2 mod 4)
+        and     #>3,b                   ; b = read_gen 0..3 (masking risk on b)
+        move    b1,a                   ; (q3) a = read_gen, clean
+        add     x1,a                    ; a = local*4 + read_gen
+        asl     #5,a,a                  ; a = combined * $20
+        move    a1,n1
+        move    #>@FSBASE@,r1
+        lua     (r1)+n1,r1              ; r1 -> foreign track's shared-window slot
+        move    #$40,r0
+        do      #<$20,>zz26
+        move    y:(r1)+,x0
+        move    x0,x:(r0)+
+zz26:
+zz25:
 
 ; -- KEY GAIN : x:(r6+$e) bits 16-23, 0..127 ; 64 = unity --
 ; Session 76 continued yet again (KGN smoothing): applying the raw table
@@ -466,9 +644,10 @@ zz16:
                                         ; with r6 in a `lua`, not r0 (each of
                                         ; r0-r7 has its OWN dedicated n/m pair
                                         ; on this ISA) -- accumulator add
-                                        ; instead, same idiom @KADJ@ already
-                                        ; uses just above (add/sub then a1 into
-                                        ; an address register)
+                                        ; instead, same idiom the cross-core
+                                        ; addressing above already uses
+                                        ; (add/sub then a1 into an address
+                                        ; register)
         add     #>$40,a                 ; a = $40 + split offset
         move    a1,r0                   ; detector streams from the processed
                                         ; key, correctly offset for a split's

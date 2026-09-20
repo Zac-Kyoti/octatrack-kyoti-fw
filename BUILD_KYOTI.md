@@ -32,7 +32,7 @@ build is byte-for-byte reproducible from the stock file.
 | `python3 tools/build_directjump_v2.py` | `140C_KYOTI` | the same DIRECT JUMP feature with a box-free toast overlay (its own binary) |
 | `python3 tools/build_sidechain.py` | `140C_KYOTI` | Bug 1 fix + a `KEY` parameter on the COMPRESSOR page — **menu only, DSP untouched** (does nothing audible; proves the control surface) |
 | `python3 tools/build_sidechain2.py` | `140C_KYOTI` | + the DSP hooks: same-DSP-core side-chain — a compressor keys off a chosen track (even muted). **SPATIALIZER is donated** for the code space and removed from the FX menu |
-| `python3 tools/build_sidechain3.py` | `140C_KYOTI` | Bug 1 fix + the full side-chain **menu scaffolding** (`KEY` `KFLT` `KGAIN` `MON`), **no DSP** |
+| `python3 tools/build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | `140C_KYOTI` | Bug 1 fix + the full **SIDE-CHAIN COMPRESSOR** (`KEY` reaching any of the 8 tracks, `KFLT`, `KGAIN`, `SC LISTEN`/`MON`), donor now SPRING REVERB. **Hardware-confirmed, shipping** — see below |
 | `python3 tools/build_reload2.py` | `140C_KYOTI` | Bug 1 fix + **RELOAD FROM PROJECT** (SEQ-focused): **hold `[PTN]`** opens a sticky picker (opens on `TRK SEQ`; arrows to `PTN SEQ` / `PART + PTN SEQ`), `[YES]` executes + closes / `[NO]` cancels, no timeout. `TRK SEQ` = the one currently-addressed track (audio or MIDI); `PTN SEQ` = the whole pattern, Part assignment preserved; `PART + PTN SEQ` = whole pattern incl. the Part link + apply that Part. From the card's last SAVE BANK, **without stopping playback** |
 | `python3 tools/build_reload.py` | `140C_KYOTI` | RELOAD FROM PROJECT, **3-item variant**: same gesture, picker `PTN SEQ` / `ALL PARTS` (all 4 Parts, `FUN_4004aab4` ×4) / `PARTS + PTN SEQ`. Separate image; no per-track option |
 
@@ -58,8 +58,7 @@ cross-reference. See [`CREDITS.md`](CREDITS.md).
 | **DT** mode (`build_mutemode_dt.py`) | **emulator only**, never flashed |
 | MUTE MODE 4th option (`OTFX` playhead-resume) | **reverse-engineered only** — not built; landing it renumbers the menu to `OT / OTFX / OTFX-T / DT-T` |
 | **DIRECT JUMP** (`build_directjump.py`) | **emulator only** — the hooks are stub-tested; `FUN_400a1eea` has instructions Unicorn can't run. Never flashed |
-| side-chain `KEY` menu + formatter (`build_sidechain.py`, `build_sidechain3.py`) | **emulator only**, never flashed |
-| side-chain DSP hooks (`build_sidechain2.py`) | hooks **emulator-verified** under dsp56kEmu; the audio result is untested |
+| **SIDE-CHAIN COMPRESSOR**, incl. cross-core `KEY` (`build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS`) | **hardware-confirmed** — flashed 2026-09-20, MKI, works well. `KEY` reaches any of the 8 tracks (not just same-core siblings); `KFLT`/`KGAIN`/`SC LISTEN` all confirmed. User considers this build final for now |
 | **RELOAD FROM PROJECT** picker + SEQ worker (`build_reload.py`, `build_reload2.py`) | picker + whole-pattern SEQ worker + per-track slice **emulator-verified** (`emu_reload.py` / `emu_reload2.py` — `--combo` + `--patched` + `--trk`, full-firmware emulator with a mounted card); the parse against a real card, `FUN_40009094` from the storage task, and the picker rendering are a hardware test. Never flashed |
 
 The ColdFire emulator (Unicorn, real image bytes) proves control-flow and the
@@ -85,11 +84,11 @@ OCTATRACK_*.bin                   CF-card OS UPGRADE transport (faster)
 - **Your own copy of the official OS 1.40C** — from
   <https://www.elektron.se/support-downloads/octatrack-mkii>. The same image
   serves MKI and MKII.
-- *For `build_sidechain2.py` only* — the DSP56300 toolchain (`dsp_asm`,
-  `dsp56kDisassemble`) built into `vendor/dsp56300/`, and the external-RE clone
-  cache (`python3 tools/refs/sync.py`, which `build_sidechain2.py` reads
-  `dsp_modmap.py` from). `build_sidechain.py` / `build_sidechain3.py` need
-  neither — they are ColdFire-only.
+- *For `build_sidechain2.py` and `build_sidechain3.py`* — the DSP56300
+  toolchain (`dsp_asm`, `dsp56kDisassemble`) built into `vendor/dsp56300/`,
+  and the external-RE clone cache (`python3 tools/refs/sync.py`, which both
+  scripts read `dsp_modmap.py` from). `build_sidechain.py` alone is
+  ColdFire-only and needs neither.
 
 ## One-time setup
 

@@ -140,26 +140,30 @@ emulator `tools/emu_directjump.py` (the hooks are exercised as stubs —
 full-handler test). Hardware-only unknowns are listed in `NOTES.md`; **never
 flashed**.
 
-### SIDE-CHAIN COMPRESSOR — external key input for the stock DynamiX compressor  ·  *in progress, not flashed*
+### SIDE-CHAIN COMPRESSOR — external key input for the stock DynamiX compressor  ·  **hardware-confirmed, shipping**
 
-Adds a `KEY` parameter (and, at step 3, `KEY FLT` / `KEY GAIN` / `SC LISTEN`) to
-the COMPRESSOR effect's page 2: pick one of the eight audio tracks to *drive* the
-compression on the track the compressor sits on (classic kick-ducks-the-pad), and
-it keeps keying even when the key track is muted. Scoped to the **same DSP core**
-— a compressor on tracks 1–4 chooses a key among 1–4, one on 5–8 among 5–8.
+Adds `KEY` / `KEY FLT` / `KEY GAIN` / `SC LISTEN` to the COMPRESSOR effect's
+page 2: pick any of the eight audio tracks to *drive* the compression on the
+track the compressor sits on (classic kick-ducks-the-pad), and it keeps keying
+even when the key track is muted. `KEY` reaches **any of the 8 tracks**, flat
+(`T1`..`T8`) — not just the four tracks that share the compressor's own DSP
+core, since the cross-core extension (below) shipped 2026-09-20.
 
-This is a DSP56300 job, not ColdFire — the compressor is 180 DSP words. Built in
-stages, none flashed:
+This is a DSP56300 job, not ColdFire. Built in stages:
 
 | build | contents | state |
 |---|---|---|
 | `build_sidechain.py` | the `KEY` menu parameter only; the DSP is untouched, so it does nothing audible | menu + dynamic `T1..T8` formatter **emulator-verified** |
-| `build_sidechain2.py` | + the DSP hooks: every track publishes its pre-FX block to a shared ring, and the compressor's detector reads the chosen track's ring. **SPATIALIZER is donated** for the code space and removed from the FX menu. | hooks **emulator-verified** under dsp56kEmu; the gain-reduction audio path is a **hardware** test |
-| `build_sidechain3.py` | + `KEY GAIN` scaler + `KEY FLT` 2-pole Chamberlin SVF + `SC LISTEN` in the DSP | transforms **emulator-verified** vs a Python SVF reference |
+| `build_sidechain2.py` | + the DSP hooks: every track publishes its pre-FX block to a shared ring, and the compressor's detector reads the chosen track's ring. **SPATIALIZER is donated** for the code space and removed from the FX menu. | hooks **emulator-verified** under dsp56kEmu |
+| `build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | + `KEY GAIN` (declick-smoothed) + `KEY FLT` (one-pole LP/HP/OFF, declicked) + `SC LISTEN`/`MON`, all over a donated SPRING REVERB; **plus cross-core `KEY`** — a per-core generation counter and a shared-window (`Y:0x30000-0x3FFFF`) publish/foreign-read mechanism (adapted from octabam's own XBUS cross-core bus design) let the compressor key off any of the 8 tracks, not just its own core's 4 | **HARDWARE CONFIRMED on MKI, 2026-09-20** — single-core and cross-core both. Emulator-verified first: `emu_sc_dsp3.py` (same-core), `emu_sc_dsp3_xcore.py` (generation counter + cross-core addressing), and a genuine dual-core run under `tools/dsp56300_xcore`'s `dsp_host_xcore` (lock-step + timing-skew fuzz) |
 
-Write-up: [`NOTES.md`](NOTES.md) "Session 17" (+ "Session 36"); DSP source
-`tools/patch_sc_dsp.asm` / `patch_sc_dsp3.asm`; emulators `tools/emu_sidechain.py`,
-`tools/emu_sc_dsp.py`, `tools/emu_sc_dsp3.py`.
+A very mild HP↔OFF filter pop remains (three declick designs tried and
+reverted — see `NOTES.md` Session 76's trail); low-ATK/REL "graininess" on a
+busy key is filed as research-only, no fix attempted. Neither blocks
+shipping. Write-up: [`NOTES.md`](NOTES.md) "Session 17" (+ continued 1–8) →
+"Session 77" (×3, the cross-core work); DSP source `tools/patch_sc_dsp.asm` /
+`patch_sc_dsp3.asm`; emulators `tools/emu_sidechain.py`, `tools/emu_sc_dsp.py`,
+`tools/emu_sc_dsp3.py`, `tools/emu_sc_dsp3_xcore.py`.
 
 ### RELOAD FROM PROJECT — reload a pattern from the CF card without stopping playback  ·  *emulator-validated, not flashed*
 
@@ -283,8 +287,7 @@ of the above is HW-confirmed** except the two parked cosmetic items.
 | ↳ the **SOLO** extension (softmute V7) + **DT** sequencer-mute mode | `build_mutemode.py` / `build_mutemode_dt.py` | **flashed 2026-09-13 — found a real bug**: `pre_v`'s new-trig-drop filter never actually caught STATIC/FLEX's own normal step-trig commands, so DT suppressed nothing and OT+FX's blip never closed; root cause + caller-address fix in `NOTES.md` "Session 52", isolation-revalidated, **rebuilt but not yet reflashed** |
 | MUTE MODE 4th option (`OTFX` playhead-resume) | — | **reverse-engineered only**, not built |
 | **DIRECT JUMP** pattern-change mode | `build_directjump*.py` | **emulator only** (stub-level), never flashed |
-| side-chain `KEY` menu + formatter | `build_sidechain.py` / `build_sidechain3.py` | **emulator only**, never flashed |
-| side-chain DSP hooks | `build_sidechain2.py` / `build_sidechain3.py` | hooks **emulator-verified** (dsp56kEmu); audio path untested, never flashed |
+| side-chain compressor (`KEY`/`KEY FLT`/`KEY GAIN`/`SC LISTEN`, cross-core) | `build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | **confirmed** — flashed 2026-09-20, MKI, "seems to be working well"; cross-core `KEY` (any of 8 tracks) included |
 | **RELOAD FROM PROJECT** — modal picker | `build_reload2.py` (TRK SEQ / PTN SEQ / PART + PTN SEQ) / `build_reload.py` (PTN SEQ / ALL PARTS / PARTS + PTN SEQ) | modal picker + the SEQ worker **emulator-verified end to end** (`emu_reload.py` / `emu_reload2.py` — `--combo` / `--patched` / `--trk`); the parse vs a real card, `FUN_40009094` from the storage task, and whether arrows/track keys reach the picker on HW are hardware tests, never flashed |
 
 `OT` mode is byte-for-byte stock, and every mod is `OFF` by default. The soft

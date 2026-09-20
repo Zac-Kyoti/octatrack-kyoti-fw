@@ -288,7 +288,27 @@ standalone or in `build_merged.py`.
 > tweak after a HW listen. v1/v2/v3 (`build_directjump.py`/`_v2`/`_v3.py`) are
 > kept for reference but should not be reflashed — they reproduce the dead combo.
 
-### 4.6  Side-chain compressor  (`build_sidechain3.py` — ducking + chooser + transport all HARDWARE-CONFIRMED; KEY FLT rebuilt non-resonant 2026-09-15, MKI, NOT yet reflashed)
+### 4.6  Side-chain compressor  (`build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` — **HARDWARE CONFIRMED, SHIPPING, MKI, 2026-09-20. User considers this build final for now.**)
+
+> **Current state (2026-09-20, supersedes everything below in this section):**
+> `KEY FLT` is a **one-pole** tracker (LP/HP/OFF), not the 2-pole Chamberlin
+> SVF this section's own body text describes — that redesign landed Session
+> 76 and made the whole q=1-vs-q=2 resonance question below moot (a single
+> real pole can't resonate at all). `KEY` is now a **list-style chooser**
+> (matching LFO TRIG's own UI) reaching **any of the 8 tracks** flat
+> (`T1`..`T8`), not just this track's own 4 same-core siblings — the
+> cross-core reach (a per-core generation counter + a shared-DSP-window
+> publish/foreign-read mechanism, `NOTES.md` "Session 77" ×3) was flashed
+> today and the user reports it "seems to be working well": no crash, no
+> transport regression, cross-core `KEY` audible and correct. `KEY GAIN` and
+> `SC LISTEN`/`MON` are unchanged from what's described below. The build to
+> flash going forward is `out/OCTATRACK_OS1.40C_SIDECHAIN3_CROSS.syx`, not a
+> plain `SIDECHAIN3` (that name no longer gets built — `build_sidechain3.py`
+> itself now produces the CROSS output, since the value semantics genuinely
+> changed). The rest of this section is the historical trail that reached
+> the *single-core* feature-complete state (Session 55–65) — still useful
+> for the register-discipline / transport-safety history, superseded on the
+> filter design and the `KEY` range.
 
 `SIDECHAIN3` **donates SPATIALIZER** for DSP code space and removes it from the
 FX1/FX2 choosers; a legacy project using SPATIALIZER shows "SPAT" and passes
@@ -706,7 +726,7 @@ OCTATRACK_*.bin                   CF-card OS UPGRADE transport (faster)
 | `python3 tools/build_directjump_v2.py` | `140C_KYOTI` | DIRECT JUMP with the box-free toast overlay |
 | `python3 tools/build_sidechain.py` | `140C_KYOTI` | Bug-1 fix + the COMPRESSOR `KEY` menu param (DSP inert) |
 | `python3 tools/build_sidechain2.py` | `140C_KYOTI` | + the side-chain DSP hooks (SPATIALIZER donated) |
-| `python3 tools/build_sidechain3.py` | `140C_KYOTI` | + `KEY FLT` / `KEY GAIN` / `SC LISTEN` in the DSP |
+| `python3 tools/build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | `140C_KYOTI` | + `KEY FLT` / `KEY GAIN` / `SC LISTEN` in the DSP, `KEY` reaching any of the 8 tracks (cross-core) — **hardware-confirmed, shipping** |
 | `python3 tools/build_pattern_led.py` | `1.40C` | Bug 2 fix only: p-lock-only pattern lights the grid LED |
 | `python3 tools/build_partreapply.py` | `1.40C` | fix only: Part params fully re-apply on a pattern→Part change |
 | `python3 tools/build_qlrec.py` | `140C_KYOTI` | Bug-1 fix + QUANTIZE LIVE REC front-panel toggle |

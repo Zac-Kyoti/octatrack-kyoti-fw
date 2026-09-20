@@ -23,8 +23,12 @@ data transforms and ARE checked numerically against a Python reference:
   state persistence (block 2)         -> continues the python tracker, no reset
   SC LISTEN  MON=1                    -> keybus[k] gen 1 == the processed X:$40
 
-Payload B (tracks 1-4, CORE_BASE 0) only -- the code is byte-identical bar
-@KADJ@, and emu_sc_dsp.py already checks the A/B detour encodings.
+Payload B (tracks 1-4, CORE_BASE 0) only -- emu_sc_dsp.py already checks the
+A/B detour encodings. Session 77 (cross-core SIDECHAIN) added per-payload
+cross-core tokens (corebase/fcorebase/sbase/fsbase/gcnt/gseed/foreign_br,
+see patch_sc_dsp3.asm's own header) but this file still only exercises the
+SAME-CORE KEY path numerically -- the cross-core publish/read path has its
+own dedicated test, tools/emu_sc_dsp3_xcore.py (dual-core, via dsp_host_xcore).
 """
 import pathlib, re, struct, subprocess, sys
 import sc_tables
@@ -42,7 +46,7 @@ RTS_ADDR = 0
 S17 = None                              # set by main() once r7 is known; see base_mem()
 
 # default: throwaway placement of the cave over stock payload B (isolation test).
-# --patched: regenerate payload B's .mem from out/mainos_sidechain3.bin -- the
+# --patched: regenerate payload B's .mem from out/mainos_sidechain3_cross.bin -- the
 #   cave is over the real donor and the three detours are live.
 PATCHED = "--patched" in sys.argv
 if PATCHED:
@@ -104,7 +108,13 @@ def assemble():
     return (words, sctap, scdet, sctail, gtab_off, ftab_off)."""
     # pass 1: placeholder table addrs to size the code
     def build(gt, ft):
-        txt = SRC.read_text().replace("@KADJ@", "sub     #1,a") \
+        # payload B's cross-core tokens (Session 77) -- same literals as
+        # build_sidechain3.py's DSP["B"] entry.
+        txt = SRC.read_text() \
+                             .replace("@COREBASE@", "0").replace("@FCOREBASE@", "4") \
+                             .replace("@SBASE@", "$38100").replace("@FSBASE@", "$30100") \
+                             .replace("@GCNT@", "$380fc").replace("@GSEED@", "$380fb") \
+                             .replace("@FOREIGN_BR@", "bne zz24") \
                              .replace("@GTAB@", f"${gt:x}").replace("@FTAB@", f"${ft:x}") \
                              .replace("@LPEDGE@", f"${sc_tables.lp_edge():x}") \
                              .replace("@HPEDGE@", f"${sc_tables.hp_edge():x}") \
@@ -148,13 +158,14 @@ def assemble():
 
 
 def ensure_patched_mem(words):
-    """--patched: build payload B's .mem from out/mainos_sidechain3.bin (octabam's
-    dsp_modmap only dumps the stock image, so replicate its dumpmem here), then
-    assert the cave + the three jsr detours landed as build_sidechain3.py wrote."""
+    """--patched: build payload B's .mem from out/mainos_sidechain3_cross.bin
+    (octabam's dsp_modmap only dumps the stock image, so replicate its dumpmem
+    here), then assert the cave + the three jsr detours landed as
+    build_sidechain3.py wrote."""
     import importlib.util
-    imgp = ROOT / "out/mainos_sidechain3.bin"
+    imgp = ROOT / "out/mainos_sidechain3_cross.bin"
     if not imgp.exists():
-        sys.exit("run tools/build_sidechain3.py first (out/mainos_sidechain3.bin missing)")
+        sys.exit("run tools/build_sidechain3.py first (out/mainos_sidechain3_cross.bin missing)")
     spec = importlib.util.spec_from_file_location("mm", MODMAP)
     mm = importlib.util.module_from_spec(spec); spec.loader.exec_module(mm)
     img = imgp.read_bytes()

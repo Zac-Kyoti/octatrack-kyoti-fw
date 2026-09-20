@@ -38,9 +38,24 @@ treatment SPATIALIZER used to get, for any older project that still
 references it by id. Cave + tables must fit within SPRING REVERB's 1063-word
 P region in each payload (currently ~230 + 48, i.e. still nowhere near full).
 
+Session 77 (cross-core SIDECHAIN, NOTES.md): KEY widened 0..4 -> 0..8 (any
+of the 8 tracks, flat, not just this track's own 4 same-core siblings) and
+patch_sc_dsp3.asm's sctap/scdet extended with the shared-window publish +
+per-core generation counter + foreign-core read (see that file's own header
+for the full design). This is a REAL divergence from the archived,
+hardware-shipped single-core image -- the output name changed from
+SIDECHAIN3 to SIDECHAIN3_CROSS accordingly, so re-running this script no
+longer reproduces the old shipped bytes under the old name. Not yet
+hardware-tested; see NOTES.md "Session 77" for exactly what is and isn't
+validated (emulator-proven: same-core path unregressed, generation-counter
+seed/advance, publish/foreign-read address arithmetic, and a real dual-core
+smoke test under tools/dsp56300_xcore/'s dsp_host_xcore, including a
+-skew fuzz. NOT proven: an actual live cross-core race under real
+per-track/per-block dispatch, or anything on real hardware).
+
 Usage:   python3 tools/build_sidechain3.py [VERSTR]      (default "140C_KYOTI")
-Outputs: out/mainos_sidechain3.bin, out/elek_sidechain3.bin,
-         out/OCTATRACK_OS1.40C_SIDECHAIN3.syx, out/OCTATRACK_SIDECHAIN3.bin
+Outputs: out/mainos_sidechain3_cross.bin, out/elek_sidechain3_cross.bin,
+         out/OCTATRACK_OS1.40C_SIDECHAIN3_CROSS.syx, out/OCTATRACK_SIDECHAIN3_CROSS.bin
 """
 import os, pathlib, subprocess, sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -54,10 +69,10 @@ STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 DSP_ASM = ROOT / "vendor/dsp56300/build/source/dsp_host/dsp_asm"
 DIS = ROOT / "vendor/dsp56300/build/source/disassemble/dsp56kDisassemble"
-OUT = ROOT / "out/mainos_sidechain3.bin"
-ELEK = ROOT / "out/elek_sidechain3.bin"
-OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_SIDECHAIN3.syx"
-OUT_BIN = ROOT / "out/OCTATRACK_SIDECHAIN3.bin"
+OUT = ROOT / "out/mainos_sidechain3_cross.bin"
+ELEK = ROOT / "out/elek_sidechain3_cross.bin"
+OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_SIDECHAIN3_CROSS.syx"
+OUT_BIN = ROOT / "out/OCTATRACK_SIDECHAIN3_CROSS.bin"
 VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_KYOTI"
 
 # ======================= ColdFire =======================
@@ -116,7 +131,11 @@ LIST_FN = 0x40046450
 #   bnew: descriptor field B to WRITE (0 = plain knob widget, unchanged from
 #   before; SWITCH_FN = render as a stock bipolar switch instead)
 SLOTS = [
-    (8,  b"KEY\x00\x00\x00", 5,   0,  "key_fmt",
+    # count 5->9 (Session 77, cross-core SIDECHAIN): OFF + T1..T8 flat, not
+    # OFF + 4 same-core siblings -- see patch_sidechain.s's own header and
+    # NOTES.md "Session 77". key_list_fix's own count-agnostic trampoline
+    # (Session 76 continued yet again (8/9)) needs no change for this.
+    (8,  b"KEY\x00\x00\x00", 9,   0,  "key_fmt",
      dict(name="000000000000", cnt="00000080", dflt="7f", b="00000000"), "key_list_fix"),
     (9,  b"KFLT\x00\x00",     128, 64, "kfilt_fmt",
      dict(name="000000000000", cnt="00000002", dflt="00", b="400475f8"), 0),
@@ -148,12 +167,20 @@ SLOTS = [
 # for the pre-write sanity assert (so a future firmware revision that moved it
 # fails loud instead of silently splicing over the wrong bytes).
 DSP = {
+    # Cross-core tokens (Session 77, NOTES.md): @KADJ@ is retired now that KEY
+    # is a flat 0..8 track picker (`sub #>1,a` in patch_sc_dsp3.asm itself,
+    # identical on both payloads). corebase/fcorebase/sbase/fsbase/gcnt/gseed/
+    # foreign_br are the new per-payload build tokens -- see the asm file's
+    # own header for what each means; SBASE_A/GCNT_A/GSEED_A etc. below are
+    # the literal addresses chosen for the shared-window buffer layout.
     "A": dict(va=0x400e2324, ln=0x136cb, cave_org=0x01252, spring_proc=0x012be,
-              kadj="add     #3,a",
+              corebase="4", fcorebase="0", sbase="$30100", fsbase="$38100",
+              gcnt="$300fc", gseed="$300fb", foreign_br="beq zz24",
               disp_hook=0x004a7, comp_proc=0x01ab1, commit_hook=0x0050e,
               stub_init=0x007c8, stub_proc=0x007c9),
     "B": dict(va=0x400f59ef, ln=0x12d05, cave_org=0x01012, spring_proc=0x0107e,
-              kadj="sub     #1,a",
+              corebase="0", fcorebase="4", sbase="$38100", fsbase="$30100",
+              gcnt="$380fc", gseed="$380fb", foreign_br="bne zz24",
               disp_hook=0x0029c, comp_proc=0x01871, commit_hook=0x00303,
               stub_init=0x00588, stub_proc=0x00589),
 }
@@ -216,12 +243,18 @@ def cf_assemble(name, at):
     return (ROOT / f"out/{name}.bin").read_bytes(), syms
 
 
-def sc_assemble(kadj, org):
+def sc_assemble(tok, org):
     """assemble patch_sc_dsp3.asm at `org`, append the gain/f tables.
     Two passes so `move #>@GTAB@` / `move #>@FTAB@` widths don't shift.
+    `tok` is one payload's DSP dict entry (corebase/fcorebase/sbase/fsbase/
+    gcnt/gseed/foreign_br -- the cross-core build tokens).
     Returns (words, sctap, scdet, moncommit)."""
     def one(gt, ft):
-        src = (SC_SRC.read_text().replace("@KADJ@", kadj)
+        src = (SC_SRC.read_text()
+               .replace("@COREBASE@", tok["corebase"]).replace("@FCOREBASE@", tok["fcorebase"])
+               .replace("@SBASE@", tok["sbase"]).replace("@FSBASE@", tok["fsbase"])
+               .replace("@GCNT@", tok["gcnt"]).replace("@GSEED@", tok["gseed"])
+               .replace("@FOREIGN_BR@", tok["foreign_br"])
                .replace("@GTAB@", f"${gt:x}").replace("@FTAB@", f"${ft:x}")
                .replace("@LPEDGE@", f"${sc_tables.lp_edge():x}")
                .replace("@HPEDGE@", f"${sc_tables.hp_edge():x}")
@@ -367,7 +400,7 @@ def main():
     # ---------------- DSP (both payloads) ----------------
     print("\n=== DSP: SPRING REVERB donor + sctap / scdet / moncommit ===")
     for tag, d in DSP.items():
-        words, sctap, scdet, moncommit = sc_assemble(d["kadj"], d["cave_org"])
+        words, sctap, scdet, moncommit = sc_assemble(d, d["cave_org"])
         print(f"  payload {tag}: cave {len(words)}w @ P:0x{d['cave_org']:05x}  "
               f"sctap=0x{sctap:x} scdet=0x{scdet:x} moncommit=0x{moncommit:x}")
 

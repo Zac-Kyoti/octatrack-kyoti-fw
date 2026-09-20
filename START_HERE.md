@@ -79,7 +79,8 @@ published repo, `upstream` = mxldyn (fetch only, for `whatsnew.py`).
 Two branches. **`main`** is the stable line: only hardware-tested build tooling,
 plus the shared knowledge base. **`wip`** (this) is the active
 frontier — everything not yet on hardware: the DT and solo mute modes, a
-DIRECT JUMP pattern-change mode, and an in-progress DSP side-chain compressor.
+DIRECT JUMP pattern-change mode, and a DSP side-chain compressor (now
+hardware-confirmed on MKI, single-core and cross-core both).
 Octamax's current state is tracked via `refs/octamax/` (see `reference/EXTERNAL_RESEARCH.md`),
 not a mirrored branch.
 
@@ -118,7 +119,7 @@ JUMP already uses it, DT still needs it — see below). Everything here is emula
 | **OT+FX → SOLO** (softmute V7) | built, `emu_solo.py` clean · `build_mutemode.py` on this branch | `NOTES.md` "Session 11" |
 | **4th MUTE MODE** — instant cut + FX tails + resume-at-playhead | RE'd, not built; gated on the same HW unknown as DT | `NOTES.md` "Session 14" |
 | **DIRECT JUMP** pattern-change mode | **Sessions 60-64** (full trail in NOTES.md): `V3` flashed and did nothing → **v4** fixed reachability, then threw a hardware `EXCEPTION VEC:04 ADDR 0x400BF0F2` after a few `[PTN]` presses **twice** before the real cause (a stack-discipline bug) was found and fixed in Session 64 — **confirmed crash-free on hardware in Session 66**. Combo toggling and the fast (~1-step) switch timing are both **HW-confirmed working** (and Session 69 additionally confirmed the fast-switch timing dynamically, under full-firmware emulation). **⚠️ STILL OPEN: with DIRECT JUMP ON, every manual pattern change starts the new pattern at step 1**, not the playhead position — two fix attempts on `dj_c`'s D7 write (Sessions 60/65) both failed on hardware despite passing isolated emulator checks each time. **Session 69 found the likely root cause dynamically (full-firmware route A, `tools/emu_directjump_dynamic.py`, no code changed yet)**: `dj_c`'s D7 multiplier `0x80006628` (commented "per-step tick multiplier, usually 1") is actually the project's own OWN Session-15-documented **loop-region start, normally 0** — so D7 evaluates to 0 regardless of the true resume step, dynamically confirmed (`0x80006604` written to literal `0x0` at a real switch despite a correct nonzero resume step). Independently, `dj_c` never writes `DAT_800065e4[]`/`DAT_800065f4[]` (per-track audio/MIDI step) at all, which Session 15's *original* 4-array design (before any build attempt) said the fix must cover — and this array was dynamically observed being reset to 0 by stock code on every switch, unopposed. Either bug alone reproduces the reported symptom. Not yet fixed or reflashed — full detail + the exact next steps: `NOTES.md` "Session 69". ⚠️ RELOAD2's `rl_yes` shares the dead-`0x4005e4c8`-while-`[PTN]`-held mechanism v1-v3 had — likely equally broken, not yet fixed. | `NOTES.md` "Session 15" + "Session 21" (+ continued) + **"Session 60"** → **"Session 69"** |
-| **DSP side-chain compressor** | **single-core: HARDWARE CONFIRMED, SHIPPING** (see below). Cross-core (any of 8 tracks) is the next phase, not started. | `NOTES.md` "Session 17" (+ continued 1–8) → "Session 76" |
+| **DSP side-chain compressor** | **HARDWARE CONFIRMED, SHIPPING — single-core AND cross-core (any of 8 tracks)** (see below). User considers this final for now; may want minor fine-tuning later. | `NOTES.md` "Session 17" (+ continued 1–8) → "Session 77" (×3) |
 | **RELOAD FROM PROJECT** — per-pattern / per-track reload from the CF card, no transport stop | **Built, not flashed.** Two images: **`build_reload2.py`** (SEQ-focused, 3-item `TRK SEQ` / `PTN SEQ` / `PART + PTN SEQ`; opens on `TRK SEQ`) and `build_reload.py` (3-item `PTN SEQ` / `ALL PARTS` / `PARTS + PTN SEQ`). **`TRK SEQ`** (S47) = the one currently-addressed track (audio or MIDI, from `0x80000000`/`0x80000012`) — `G_KIND=3`, slices `slab+t*0x91a` (audio) / `slab+0x48d0+t*0x8b0` (MIDI) out of the parsed pattern. **`PTN SEQ`** = whole pattern, restores the live `slab+0x8e57` Part-link byte after the copy. **`PART + PTN SEQ`** (S47) = whole pattern incl. the link + `FUN_40009094(bank, savedPart)` + `0x80000003` — faithful "back to the card". **UX:** hold `[PTN]` ~0.5 s opens a sticky no-timeout picker, `[YES]` executes + closes, `[NO]` cancels; quick tap = SELECT PATTERN. 6 detours (`rl_ptn` / `rl_no` / `rl_yes` / `rl_arr_a` / `rl_arr_b` / `rl_job`). New scratch `G_TRK 0x80006a54` / `G_TMIDI 0x80006a55`. `rl_arm_trk` = the entry point for a future `[PTN]+[TRACK]` power move (chord is free; not built). **`emu_reload2.py` `--combo` + `--trk` ALL GOOD**; `--patched` = the whole-pattern worker. HW-only: hold feel; arrow/`[TRACK]` reaching the picker; `FUN_4008cebc` vs a real card; `FUN_40009094` from the storage task while playing. `FLASHING.md` §4.7. | `NOTES.md` "Session 42"–"44" + "Session 47" |
 | **QUANTIZE LIVE REC** — surface the PERSONALIZE row to the panel | **Built, not flashed (Session 46).** **Hold `[REC]`, tap `[PLAY]` twice** → toggles `QUANTIZE LIVE REC` (`0x800000ac`, the all-or-nothing live-rec quantize, *not* the per-track TRIG QUANT). Persistent "QUANT LIVE REC ON/OFF" toast shows while `[REC]` is held, clears on release (no timer). No menu surgery — the variable + its power-cycle persistence are stock (`0x800000ac` is inside the `0x64` ANDY span); we mirror the setter (word + shadow `0x100fff3c` + `jsr FUN_4001f23c`). 2 detours: `qlr_play` `0x40061778` / `qlr_recrel` `0x4004883a`. `patch_qlrec.s` + `build_qlrec.py` + `emu_qlrec.py` **ALL GOOD**. 247 B vs stock. HW-only: eyeball the toast, the feel of odd-press swallowing. | `NOTES.md` "Session 46" |
 
@@ -143,11 +144,32 @@ DSP56300 toolchain (`dsp_asm` + `dsp_host`) built in `vendor/` (gitignored; scra
 |---|---|---|
 | `build_sidechain.py` → `SIDECHAIN.*` | `KEY` menu param only (COMPRESSOR pg2, descriptor slot 8), DSP inert | `emu_sidechain.py` clean |
 | `build_sidechain2.py` → `SIDECHAIN2.*` | + 37-word DSP hooks (`patch_sc_dsp.asm` = `sctap`+`scdet`) over a **donated SPATIALIZER** (also pulled from the FX1/FX2 choosers + ID2POS) | `emu_sc_dsp.py --patched` + `emu_sidechain.py` clean |
-| `build_sidechain3.py` → `SIDECHAIN3.*` | **SINGLE-CORE SIDECHAIN — HARDWARE CONFIRMED, SHIPPING (2026-09-20, Session 76 continued yet again (8)).** KEY (pick one of this track's own 4 same-core siblings, list-style UI matching LFO TRIG), KEY GAIN (declick-smoothed), KEY FLT (one-pole LP/HP/OFF, declicked), SC LISTEN / MON, over a donated SPRING REVERB (1063-word P budget/payload, ~260 used). `patch_sc_dsp3.asm` (DSP) + `patch_sidechain.s` (ColdFire menu/formatters, incl. the `key_list_fix` trampoline) + `sc_tables.py` (coefficient tables) + `build_sidechain3.py`. | `emu_sc_dsp3.py` / `emu_sc_dsp3_moncommit.py` (plain + `--patched`) all clean; **user confirms it sounds and looks good on real hardware** |
+| `build_sidechain3.py` → `SIDECHAIN3_CROSS.*` | **CROSS-CORE SIDECHAIN — HARDWARE CONFIRMED, SHIPPING (2026-09-20, Session 77 continued again).** KEY now picks ANY of the 8 tracks, flat (T1..T8, widened from "this track's own 4 same-core siblings"), list-style UI matching LFO TRIG; KEY GAIN (declick-smoothed), KEY FLT (one-pole LP/HP/OFF, declicked), SC LISTEN / MON, over a donated SPRING REVERB (1063-word P budget/payload, ~388 used). Cross-core reach via a per-core generation counter + shared-window publish/foreign-read (`Y:0x30000-0x3FFFF`, see "Cross-core SIDECHAIN" below). `patch_sc_dsp3.asm` (DSP) + `patch_sidechain.s` (ColdFire menu/formatters, incl. the `key_list_fix` trampoline) + `sc_tables.py` (coefficient tables) + `build_sidechain3.py` (output renamed `SIDECHAIN3`→`SIDECHAIN3_CROSS` since the value semantics genuinely changed). | `emu_sc_dsp3.py` / `emu_sc_dsp3_xcore.py` / `emu_sc_dsp3_moncommit.py` (plain + `--patched`) all clean, plus a real dual-core run under `tools/dsp56300_xcore`'s `dsp_host_xcore` (lock-step + `-skew` fuzz); **user confirms it sounds and looks good on real MKI hardware, cross-core included** |
 
 **Known-open, deliberately left alone**: a very mild HP↔OFF pop remains (three separate hardware-tested declick designs have each failed or regressed — see `NOTES.md` Session 76's trail — do not re-attempt without a fundamentally different approach); low-ATK/REL "graininess" on a busy key (research-only so far, no fix attempted, user may revisit).
 
-**NEXT PHASE: cross-core SIDECHAIN** — let KEY pick *any* of the 8 tracks, not just this track's 4 same-core siblings. This is a materially harder problem (the DSP is two independent cores with only a small shared-memory window between them) and should lean heavily on **octabam** (`refs/octabam/`), which has already shipped a working cross-core mechanism (`refs/octabam/docs/effects/XBUS.md` + `refs/octabam/CLAUDE.md`'s traps list) for its own reverb/delay bus. Read `NOTES.md`'s newest entry for the full handoff brief before starting.
+**Cross-core SIDECHAIN — DONE, HARDWARE CONFIRMED (Session 77, ×3).** KEY now picks *any* of the 8 tracks, not just this track's 4 same-core siblings. Leaned heavily on **octabam** (`refs/octabam/`)'s own shipped cross-core mechanism (`refs/octabam/docs/effects/XBUS.md` + `refs/octabam/CLAUDE.md`'s traps list) for the race-safety shape (four rotating buffers, reader two behind the writer) — adapted rather than ported wholesale, since this feature needed no accumulator/housekeeper-election machinery XBUS's own bus does. Full design + implementation + validation trail in `NOTES.md`'s three "Session 77" entries. **User: consider this build final for now** — minor fine-tuning may follow, no open work is queued.
+
+**Session 77 (+ continued, + continued again): HARDWARE CONFIRMED, SHIPPING.**
+Track↔payload mapping settled (payload A = tracks 5–8, payload B = tracks
+1–4, three independent confirmations). Cross-core KEY is a raw-audio-relay
+(user's call — full parity with same-core KEY). Dual-core emulator toolchain
+built (`tools/dsp56300_xcore/`, reproducible via its own `setup.sh`) and used
+to validate the shared-window publish/generation-counter/foreign-core-read
+mechanism (`tools/patch_sc_dsp3.asm`'s `sctap`/`scdet`) both numerically
+(`tools/emu_sc_dsp3_xcore.py`) and under a real dual-core run (both cores'
+generation counters agree after 50 blocks, lock-step and under `-skew`
+fuzzing). KEY widened 0→8 flat on the ColdFire side (`tools/patch_sidechain.s`,
+`tools/build_sidechain3.py`, descriptor count 5→9). Built and flashed
+`out/OCTATRACK_OS1.40C_SIDECHAIN3_CROSS.syx` — user: **"seems to be working
+well"** on the MKI, no crash, no regression, cross-core KEY audibly correct.
+**The compressor can now key off any of the 8 tracks, not just this track's
+own 4 same-core siblings — this settles the SIDECHAIN thread. Consider it
+final for now** (the user may want minor fine-tuning later, no open work is
+queued against it). Full trail, including two real bugs fixed along the way
+and a debugging detour worth knowing about before touching this thread
+again: `NOTES.md`'s three "Session 77..." entries, right after the Session
+76 handoff brief.
 
 Not emulable: the actual gain-reduction-from-`keybus` chain — `dsp_host` can't run the stock
 compressor end-to-end, so it's a hardware test. (`emu_sc_dsp3.py` numerically verifies the
@@ -163,10 +185,10 @@ session, in order:
 
 1. **Flash DT** — settles the shared "does the DSP keep advancing a 0-amp voice?" unknown
    (DT + the 4th mute mode both rest on it). Checklist: `NOTES.md` "Session 12 → NEXT".
-2. ~~Flash `SIDECHAIN2`~~ / ~~flash `SIDECHAIN3`~~ — **done, single-core SIDECHAIN is
-   HARDWARE CONFIRMED and shipping as of 2026-09-20** (see "Side-chain compressor" above).
-   Next up for this thread is the **cross-core** phase (any of 8 tracks, not just same-core
-   siblings) — not started, see `NOTES.md`'s newest entry for the handoff brief.
+2. ~~Flash `SIDECHAIN2`~~ / ~~flash `SIDECHAIN3`~~ / ~~flash `SIDECHAIN3_CROSS`~~ —
+   **done, both single-core AND cross-core SIDECHAIN are HARDWARE CONFIRMED and
+   shipping as of 2026-09-20** (see "Side-chain compressor" above). User considers
+   this build final for now; no further work queued against this thread.
 4. **Flash `DIRECTJUMP_V4`** (`build_directjump_v4.py` — v1/v2/v3 are DEAD ON HARDWARE,
    Session 60: the `[PTN]`-held stock overlay NULLs `[YES]`'s dispatch slot the whole time
    it's held, so their `0x4005e4c8` detour never runs; v4 fixes it by writing `dj_toggle`

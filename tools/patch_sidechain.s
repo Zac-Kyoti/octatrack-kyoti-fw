@@ -8,21 +8,21 @@
 |  side + the dynamic KEY formatter on real hardware).
 |
 |  Adds  KEY  to the COMPRESSOR effect page 2 (parameter-descriptor slot
-|  7, right after RMS).  Value semantics:
+|  7, right after RMS).  Value semantics (Session 77, cross-core SIDECHAIN --
+|  widened from the original 0..4 "same-core siblings only" range once the
+|  DSP side could reach any track, see NOTES.md "Session 77"):
 |      0        = OFF  (stock behaviour: the compressor keys off its own
 |                       track, unchanged)
-|      1 .. 4   = one of the four audio tracks that share this track's
-|                 DSP core -- rendered "T1".."T4" while the edited track
-|                 (0x100b14cc) is 1..4, "T5".."T8" while it is 5..8, so
-|                 the chooser can never point at a track the compressor
-|                 is not wired to.
+|      1 .. 8   = track T1..T8, ANY of the eight tracks, flat -- same value
+|                 on both payloads, no longer relative to the edited track's
+|                 own DSP core. Value count 5->9 in build_sidechain3.py's own
+|                 SLOTS table.
 |
 |  Everything except this formatter is a data poke done by
 |  build_sidechain.py (name / value-count 2->5 / default 1->0 / the
 |  A-array formatter pointer / zero the stale B-array widget pointer).
 | =====================================================================
 
-    .equ CUR_TRACK, 0x100b14cc      | u8, 0..7  -- current / edited audio track
     .equ SPRINTF,   0x40013a08      | int sprintf(char *buf, const char *fmt, ...)
     .equ S_OFF,     0x400b4e78      | stock "OFF" string literal
 
@@ -35,7 +35,7 @@
     .global key_fmt
 key_fmt:
     move.l  4(%sp),%a1             | a1 = buf
-    move.l  8(%sp),%d0             | d0 = value (0..4)
+    move.l  8(%sp),%d0             | d0 = value (0..8)
     bne.b   kf_track
 
 |  value 0 -> "OFF": rewrite the two stack args in place and tail-jump to
@@ -45,22 +45,11 @@ key_fmt:
     move.l  %a1,4(%sp)            | arg1 := buf  (unchanged)
     jmp     SPRINTF                | tail: sprintf(buf, "OFF")
 
-|  value 1..4 -> "T<n>", n = coreBase + value - 1
-|      coreBase = 1  when CUR_TRACK in 0..3
-|      coreBase = 5  when CUR_TRACK in 4..7
+|  value 1..8 -> "T<n>", n = value directly -- Session 77 dropped the old
+|  CUR_TRACK/coreBase indirection entirely: KEY is now a flat absolute track
+|  picker, so the value on the stack already IS the track number to print.
 kf_track:
-    clr.l   %d1
-    move.b  CUR_TRACK,%d1           | d1 = current track 0..7
-    cmpi.l  #4,%d1
-    bcc.b   kf_hi                   | unsigned >= 4  -> high core (T5..T8)
-    moveq   #1,%d1
-    bra.b   kf_num
-kf_hi:
-    moveq   #5,%d1
-kf_num:
-    add.l   %d0,%d1                 | d1 = coreBase + value
-    subq.l  #1,%d1                  | d1 = track number 1..8
-    move.l  %d1,-(%sp)             | sprintf arg: n
+    move.l  %d0,-(%sp)             | sprintf arg: n = value
     pea     kf_fmt                  | sprintf arg: "T%d"
     move.l  %a1,-(%sp)            | sprintf arg: buf
     jsr     SPRINTF

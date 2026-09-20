@@ -439,9 +439,13 @@ bit `0x80001538[t] &= ~(1<<flat)`, byte `0x80001658[t*32+flat]`. (Cf. our
 > from the host-port block dump. confidence: **C** for the record split + id slots,
 > **L** for the exact page offsets.
 
-`0x80000110` / `0x80000310` → **core 1** (tracks 5–8), `0x80000210` / `0x80000410`
-→ **core 0** (tracks 1–4). 128 halfwords each = **32 per track**, one DSP word per
-halfword:
+`0x80000110` / `0x80000310` → tracks 5–8, `0x80000210` / `0x80000410` → tracks
+1–4. 128 halfwords each = **32 per track**, one DSP word per halfword. (This
+source's own "core 0"/"core 1" labels are inverted from `dsp56300.md`'s
+settled labelling — payload A = tracks 5–8 there, hardware-proven via our own
+SIDECHAIN3 `@KADJ@` math; track groupings agree everywhere, only the two
+labels disagree depending which octabam doc you're reading. Go by track
+numbers, not by "core 0/1", when cross-referencing sources.)
 
 | halfword | field |
 |---|---|
