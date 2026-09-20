@@ -18347,3 +18347,159 @@ this callback ALSO draws when its OTHER flag, bit2, is set/clear looks
 off), the fallback is unchanged: `bnew=0` on KEY's `SLOTS` entry (the
 previous entry's proven-clean plain widget). KFLT is untouched this entry,
 still the hardware-confirmed `4efc24f` state.
+
+## Session 76 continued yet again (9, 2026-09-20, `wip`) -- SIDECHAIN3
+(single-core) HARDWARE CONFIRMED, SHIPPING. Committed + pushed (`ca5b716`).
+Cross-core is the next phase -- not started, brief below.
+
+User flashed the `key_list_fix` build from the previous entry: "Looks and
+sounds good. We can call SIDECHAIN (single core) good for shipping." The
+bit1 theory was right -- KEY now renders as a genuine two-line list, no
+icon, matching LFO TRIG. Committed (`ca5b716`, only the three files this
+thread actually touched -- `NOTES.md`/`build_sidechain3.py`/
+`patch_sidechain.s` -- `reference/kb/dsp56300.md`'s own pre-existing
+unrelated diff left alone, per the project's own staging discipline) and
+pushed to `origin/wip`. Single-core SIDECHAIN is now considered feature-
+complete: KEY (list selector, one of this track's 4 same-core siblings),
+KEY GAIN (declicked), KEY FLT (one-pole LP/HP/OFF, declicked bar the one
+remaining mild HP<->OFF pop), SC LISTEN/MON. `START_HERE.md` updated to
+match (frontier table + the "Side-chain compressor" section rewritten to
+current state, stale "flash SIDECHAIN2/3" NEXT-list items struck through).
+
+### Cross-core SIDECHAIN -- handoff brief for the next phase
+
+User's own framing: "we will be relying on a lot of information contained
+in the octabam repo for this phase." Right call -- octabam has *shipped* a
+working cross-core mechanism (its FX2 bus: one reverb, one delay, all
+eight tracks, hardware-confirmed) and paid for the mistakes in three
+separate hardware sessions. Read before designing anything, don't re-pay
+for lessons already on file:
+
+- **`refs/octabam/docs/effects/XBUS.md`** -- the architecture record. Read
+  in full first.
+- **`refs/octabam/docs/history/XBUS_LOG.md`** -- the dated trail XBUS.md
+  was distilled from (every finding AND retraction).
+- **`refs/octabam/CLAUDE.md`** -- project-wide traps list. Several bite a
+  cross-core sidechain specifically, not just their bus:
+  - "A measurement can be structurally blind to the thing you're using it
+    to rule out" -- their own XBUS step 3 shipped a cross-core race for
+    months because it was measured through a reverb tail that smears
+    per-sample damage away. Pick a test signal/metric that can actually
+    SHOW a block-rate glitch (a click, not an averaged level) before
+    trusting a "clean" result.
+  - "The fix assumes the cores are rate-locked (same sample clock,
+    constant phase offset). Unverified, and nothing local can verify it."
+    -- an open risk even in their shipped, hardware-swept implementation.
+    Inherit this uncertainty; don't assume it away.
+  - "A descriptor's display formatter overrides its value count, and a
+    cloned descriptor inherits the donor's" -- directly relevant to our
+    own KEY UI work this session (`key_fmt`/`key_list_fix`): if KEY's
+    count grows 5->9 for cross-core, re-verify the whole descriptor, not
+    just the count field.
+  - "THE HARNESS'S MODEL OF THE DISPATCHER IS NOT THE DISPATCHER" -- the
+    stock dispatcher bumps `r7` **three times per track** (third
+    unconditional, after FX2); anything keyed on `r7`/`r6`/instance
+    blocks must be measured under a real dual-core port, never modelled
+    in a single-call harness. This directly bears on our own r7 state
+    block (`$f..$1b`) if any cross-core logic ends up reading another
+    track's r7-relative state instead of a proper shared-Y publish.
+  - `dsp_host` (their fork) **boots both cores since 7 Sep 2026**, lock-
+    step by default or under a `-skew` interleave fuzz -- but even that
+    is explicitly "a fuzz of the hardware's timing, never the timing...
+    only the unit can say a timing defect is gone."
+
+**Facts extracted this session, so the next one doesn't re-derive them:**
+
+- **Chip**: DSP56721, two cores. octabam measured (marker-flash test, not
+  guessed): **core 0 / payload A serves tracks 5-8, core 1 / payload B
+  serves tracks 1-4** -- inverted from the naive assumption, and disputed
+  in our OWN kb (`reference/kb/memory-map.md` flags octabam vs octa-bt-pt
+  disagreeing on this). octabam's finding is for **their** build; verify
+  against **our own** `out/raw/section_3_MAIN_OS.bin` before trusting it
+  (MKI vs MKII offsets differ per `CHIP.md`'s own caveat) -- a marker-
+  flash-style empirical test, same method octabam used, is the way to
+  settle it if static RE doesn't.
+- **The only real cross-core channel**: a 64K window, `Y:0x30000-0x3FFFF`,
+  where P/X/Y all alias, hardware-shared between the two cores (not a
+  ColdFire-mediated copy). Split in half by the stock allocator itself
+  (not octabam's invention) -- low half `0x30000-0x37FFF` naturally goes
+  to core 0, high half `0x38000-0x3FFFF` to core 1. `0x30000-0x30047`
+  specifically is **stock's own per-frame parameter staging, rewritten
+  every frame -- never usable for anything of ours.** Nothing on OUR
+  firmware currently touches this window at all (our own keybus mechanism
+  is core-LOCAL, `Y:0x800-0xC00` per `START_HERE.md`), so it should be
+  free ground for us modulo that one stock sub-range -- confirm nothing
+  else claims it before allocating.
+- **The race and its fix**: two cores writing/reading a shared buffer
+  without synchronisation glitches at block boundaries (octabam's own
+  three hardware-confirmed defects: clear-vs-read, a per-instance-not-
+  per-core rotation read, clear-vs-write). Their fix, proven over months
+  of hardware sweeps: **four rotating buffers, write to the current one,
+  read two back** (so an idle buffer sits on each side of the reader),
+  **rotation tracked PRIVATELY per core** (never read the shared rotation
+  word directly from the other core's dispatch), **seeded at init, not
+  self-healing**. This is almost certainly the right pattern to adapt --
+  don't re-derive a simpler scheme from first principles, it's exactly
+  the kind of thing that looks fine locally and glitches on hardware only
+  (see the "measurement blind to what it rules out" trap above).
+- **Our own current mechanism is lighter than XBUS's**: they sum up to 7
+  live audio senders per block with auto-gain (1/sqrt(N) law). A
+  sidechain compressor's detector only needs ONE selected track's level
+  (already smoothed/filtered by the existing KEY FLT + KEY GAIN chain,
+  not raw audio) -- almost certainly should NOT need XBUS's full
+  accumulator-sum machinery, just a race-safe way to get one track's
+  already-computed detector input from its own core to the requesting
+  core. Worth designing the lightest version that's still race-safe
+  (probably still wants the 4-buffer/read-two-back shape for the race
+  fix itself, just carrying one scalar instead of a summed audio stream)
+  rather than porting XBUS's bus wholesale.
+- **Tooling gap**: our own `emu_sc_dsp3.py` harness runs through
+  `vendor/dsp56300`'s `dsp_host`, which per our own `reference/kb/
+  dsp56300.md` is **single-core, pokes `r6` directly** -- explicitly
+  flagged there as blind to "any bug that needs the second DSP core or
+  the shared-window accumulators." Cross-core work needs a genuinely
+  dual-core-aware harness before any hardware flash is justified --
+  either extend our own toolchain or lean on octabam's dual-core-capable
+  fork (`tools/ot_emu`, referenced in our own kb as already folding
+  `dsp_host` in and running both cores). This is likely the single
+  biggest new toolchain investment the phase requires; budget for it
+  before attempting a cross-core build.
+- **UI**: KEY's count goes from 5 (OFF + this track's own 4 same-core
+  siblings, `key_fmt`'s `coreBase` 1-or-5 logic in `patch_sidechain.s`)
+  to 9 (OFF + T1..T8, flat, no core-relative branching needed once the
+  detector itself can actually reach any track). The just-proven
+  `key_list_fix` trampoline (forces bit1 in LIST_FN's flags argument,
+  see the previous two entries) is confirmed count-agnostic by its own
+  disassembly (no compiled-in literal count anywhere in `0x40046450`) --
+  should keep working unchanged, just re-verify per the descriptor-
+  formatter-overrides-count trap above once the count field actually
+  changes.
+- **DSP cave budget is fine, separate concern from the shared window**:
+  SPRING REVERB donor gives 1063 words/payload, ~260 used -- plenty of
+  room for the cross-core logic itself. The 64K shared window is a
+  completely separate, much scarcer budget (a few hundred words is
+  already "a lot" by octabam's own accounting) -- don't conflate the two
+  when reasoning about whether there's room.
+
+**Suggested first steps for the next session** (a plan, not a mandate --
+this is genuinely a harder RE + design problem than anything done in the
+single-core build, budget for real hardware-iteration risk, not a
+one-shot):
+
+1. Read `XBUS.md` + `XBUS_LOG.md` + the cited `CLAUDE.md` traps in full.
+2. Settle the track<->core/payload mapping against OUR OWN image
+   (static RE first; a marker-flash hardware test if static RE can't
+   settle it).
+3. Decide the minimal cross-core payload (a single smoothed scalar per
+   track, most likely) rather than porting XBUS's full audio-sum bus.
+4. Design the shared-window layout: pick an address inside
+   `Y:0x30000-0x3FFFF` (respecting `0x30000-0x30047`), adapt the 4-buffer/
+   read-two-back/per-core-private-rotation pattern.
+5. Get a genuinely dual-core-aware emulator path working (`tools/ot_emu`
+   or equivalent) BEFORE writing the real cross-core DSP logic -- this
+   should come before step 4's implementation, not after.
+6. Only then: extend `patch_sc_dsp3.asm`'s detector redirect to reach
+   across cores, widen KEY's count to 9, flatten `key_fmt`'s coreBase
+   logic, re-verify the descriptor end to end.
+
+Nothing built yet for this phase. `main`/`wip` both clean at `ca5b716`.
