@@ -24359,3 +24359,179 @@ with a measured mechanism, above), and the `G_KIND` stuck-flag root cause behind
 `RELOAD BUSY` — which the user's "works most of the time" report ties directly
 to the gesture's remaining unreliability.
 
+## Session 78 continued a twelfth time — the fix failed on hardware; stop inferring the gesture, measure it
+
+### ARTLTEST5: the patch did not fire
+
+User flashed `patch_triglock` (the `0x400426fc` build), performed the gesture, saved, exported:
+
+    ARTLTEST5.strd/.work:  #1 locks: NONE            <- both p-locks really were erased
+                           +0x19 TRIGLESS steps=[6]  <- the flag is STILL SET
+
+Verified the shipped image was the current one (`4eb9400d7200` present at `0x400426fc`),
+so this is not a stale-file mistake. The cave either never ran, or ran and rejected at a
+guard.
+
+### An over-claim, corrected
+
+The eleventh entry said `FUN_40042158` is "the ONLY writer of `#1`, proven twice over."
+**That was wrong.** The proof was a scan for code literals pointing at `TRAC+0x58`, which
+only catches code that folds the offset into an absolute constant. Code that loads the
+blob pointer and then indexes with a `0x59` displacement is invisible to that scan -- and
+there are **1224** literal references to `0x46c82456` in the image. The scan found *a*
+writer; it never established it was *the* writer. The measured claims from that entry
+still stand (`FUN_40042158` does write `#1`; `FUN_40041bc4` writes no TRAC bytes; the
+`0x400a7280` page/encoder map; `local_6` is the step); only the exclusivity claim falls.
+
+### The methodological problem, named
+
+Three builds, two flashes, both failed, and both times the emulator "validated" the patch
+by **driving the target function synthetically with the arguments the patch assumed**.
+That is not validation -- it re-asserts the hypothesis. The emulator cannot perform the
+`[NO]`+knob gesture, and the gesture is the entire question. Every remaining hypothesis
+about it is untestable offline.
+
+### The fix: a hardware trace channel
+
+The firmware has no debug output, but **a project save serialises the whole bank blob to
+the card**, so any RAM inside the blob is a recorder whose tape the user can export back.
+
+`tools/patch_triglock_diag.s` = the same cave plus instrumentation writing to `#1` of
+bank 1 / pattern 16 / track 8 / step 1 -- RAM `0x4016c097`, disk `0x8a042` in
+`bank01.work`/`.strd`. That region is p-lock value data for a step with no trig of any
+kind, so nothing reads or plays it. (Cosmetic: pattern 16 may read as "not empty" on the
+pattern grid -- the Session 48 emptiness test -- until the log is cleared.)
+
+Log layout: `+0x00` total entries, `+0x01` last reason, `+0x02..+0x09` snapshot of the
+last call that stored `0xFF` (track/value/bank/pattern/step/bitmap-base/pre-update
+bitmap/track bit), `+0x0a..+0x11` per-reason histogram. Reason codes 1-6 name the exact
+guard that rejected; 7 = deleted.
+
+**`0xFF` means "never written"**, not 255 -- a freshly loaded project has `0xFF` there, so
+the counters map `0xFF -> 1` on first use and saturate at `0xFE`. The first build of this
+diagnostic got that wrong and reported every counter as 255; caught in the emulator before
+it shipped, which is the point of validating the instrument as well as the patch.
+
+Emulator check of the instrument itself (`ARTLTEST1`, synthetic erases):
+
+    after erase 1 of 2 : entries=1 reason=4 (row not empty)   hist[4]=1
+    after erase 2 of 2 : entries=2 reason=7 (DELETED)          hist[4]=1 hist[7]=1
+
+### What the readout will decide
+
+- `+0x00 == 0xFF` -> the cave is never entered; `FUN_40042158`'s tail is not on the
+  gesture's path, and the detour target is wrong rather than mis-guarded. Next step is a
+  wider instrumentation pass over the dispatcher cases and the LIVE/armed function
+  entries, same channel.
+- `+0x00 > 0, +0x01 != 7` -> the cave runs and a named guard rejects; the snapshot gives
+  the arguments it saw. Guard 2 (no prior stored p-lock) is the most likely candidate,
+  since `0x46c7d48c` is a rebuilt cache whose state during LIVE REC is unknown.
+- `+0x01 == 7` -> the flag really is cleared and something re-sets it, or the LED is
+  painted from a source other than `TRAC+0x10` (the PART payload stock also writes when
+  creating a trigless lock is the obvious suspect -- this patch does not touch it).
+
+Tools: `tools/patch_triglock_diag.s`, `tools/build_triglock_diag.py`,
+`tools/read_triglock_log.py`.
+
+## Session 58 continued yet again, part 18 addendum 14 (2026-09-21, `wip`) — HARDWARE: OTFX
+CONFIRMED WORKING. Persistence hardened to ONE word (the two-word design was the first-flash
+bug), defaults verified by booting with no battery data, and the per-project stretch goal
+scoped against the real file format.
+
+### Hardware
+
+User flashed addendum 13's build: "OTFX is working and it sounds good to me." All four MUTE
+MODE values are now confirmed on the unit: OT / OTFX / OTFX-T / DT-T.
+
+### Persistence: one persisted word, not two  [the addendum-12 design was wrong]
+
+Addendum 12 decoupled the menu ORDER from the GATE value by adding a SECOND battery-backed
+word (`MUTE_UI` at 0x800000d8) holding the menu index. Two independently-persisted words can
+disagree, and on the user's first flash they did: a unit coming from an older build had a GATE
+value stored but no menu index, so the menu could show one mode while the firmware ran
+another. That is very likely what made the first OTFX report ambiguous.
+
+Replaced: there is now ONE persisted word (GATE, 0x800000dc) and the menu index is DERIVED
+from it, through a 4-byte table and its exact inverse, in the getter and setter only -- i.e.
+once per key press, so the audio path pays nothing:
+
+```
+  ui_to_gate = [0, 3, 1, 2]      gate_to_ui = [0, 2, 3, 1]      (verified exact inverses)
+
+  stepping from a fresh unit, pressing YES:
+    GATE 0 -> "OT"    GATE 3 -> "OTFX"    GATE 1 -> "OTFX-T"    GATE 2 -> "DT-T"  -> wraps
+```
+
+Both getter and setter also clamp an out-of-range GATE to 0 before using it, so a corrupt
+battery block can never produce a silently wrong label.
+
+### Defaults and persistence, VERIFIED rather than assumed
+
+```
+  boot with no battery data (no poke at all, fresh SRAM):
+    runtime 0x800000dc = 00000000      shadow 0x100fff6c = 00000000     -> "OT"
+```
+
+That is the requirement met: **no battery bit -> OT**, which is also what an OS UPGRADE leaves
+behind since it resets PERSONALIZE. The save half is the Session-19 'ANDY' mechanism,
+unchanged: `set_mutemode` writes the runtime word AND its shadow at 0x100fff6c, and the
+PERSONALIZE key handler re-checksums the block on the way out. The boot restore covers it
+because this build patches the block memcpy length 0x64 -> 0x70 at all three restore sites
+(0x4001f322 / 0x4001f3be / 0x4001fb24, each asserted as `pea 0x64` before patching); 0x80000070
++ 0x70 = 0x800000e0, so 0x800000dc..df ride along with one word to spare.
+
+### Verification
+
+```
+  patch_softmute (the whole audio path) vs v9:  0 bytes differ
+  OT (GATE 0) vs the build on the unit:         BIT-IDENTICAL
+  OTFX-T (GATE 1) vs the build on the unit:     BIT-IDENTICAL
+```
+
+Cave layout moved again to fit the bigger menu stub: `patch_mutemode` 208 B at 0x400d7800,
+PERSONALIZE arrays at 0x400d78e0 / 0x400d7940 / 0x400d79a0. ⚠ The last array now ends at
+0x400d79e4 against the build's own allowlist end of 0x400d79f0 -- **12 bytes of headroom
+left**. The next thing that grows here needs that span widened, deliberately.
+
+### STRETCH GOAL SCOPED: per-project MUTE MODE
+
+**What the format allows.** The `project` file is PLAIN TEXT with a `[SETTINGS]` block of
+`KEY=value` lines (`TEMPOx24=2880`, `PATTERN_CHANGE_AUTO_SILENCE_TRACKS=0`, ...) plus a
+`[META]` block that already records `OS_VERSION=R0178140C_KYOTI`. A `MUTEMODE=` key is
+structurally natural.
+
+**How the parser works** [read from the binary]. The key names live in one flat NUL-separated
+string pool (`[SETTINGS]` 0x400b79c4, `TEMPOx24` 0x400b7a4c, ...), each referenced exactly
+once. The parse is per line: `strchr(line, '=')` (`pea 0x3d`), split at the '=', then a CHAIN
+of `strcmp` against each known key, falling through on mismatch (`0x40086d70`: `pea
+0x400b7a4c` / `jsr strcmp` / `bne` to the next). A per-line strcmp chain is the tolerant shape
+-- unknown keys almost certainly fall off the end and are ignored -- **but that was NOT
+verified, and it is the gate on the whole feature**: a project saved with an extra key must
+still load on stock 1.40C, which is the user's revert path.
+
+**Scope, honestly:**
+
+| piece | effort | risk |
+|---|---|---|
+| read `MUTEMODE=` on load, set GATE | one control-rate hook in the strcmp chain | LOW -- no audio-path cost |
+| write `MUTEMODE=` on save | find + hook the serializer | **the real risk: it writes user data** |
+| semantics/UI (global default vs per-project, dirty flag, write-through vs on-save) | design, not code | MEDIUM -- most likely to surprise in use |
+| cover every load path (load, RELOAD, part/arranger reload) | audit | MEDIUM -- this thread has missed a path before (addendum 10) |
+
+**Verdict: feasible, but NOT low risk as stated** -- not because of the firmware, which is
+ordinary control-rate work, but because the write half touches the user's project files. That
+is a different risk class from everything in MUTE MODE so far: the worst firmware bug here has
+cost a reflash, whereas a malformed `project` file can strand a project.
+
+**Recommended subset, which IS low risk: READ-ONLY per-project override.** Parse `MUTEMODE=`
+on load when present and apply it; never write it. The line gets added by hand or by a small
+script on the CF card for the projects that want an override. One hook, zero data risk, fully
+reversible (delete the line). If that earns its keep, the writer can follow as a separate,
+separately-tested step. Before either, run the cheap gating test: put an unknown key in a real
+project file, load it with a STOCK 1.40C image in the emulator, and confirm nothing breaks.
+
+### Status
+
+`out/mainos_mutemode_dt.bin` = `mainos_otfx_v10.bin`. All build guards pass. NOT flashed --
+the behaviour is unchanged from the build already on the unit (audio path byte-identical); only
+the menu/persistence plumbing changed, so a reflash is only needed to pick that up.
