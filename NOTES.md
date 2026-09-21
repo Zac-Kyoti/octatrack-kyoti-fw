@@ -21929,3 +21929,161 @@ everything else back to the pre-fix, Hooks-G/G2-only state).
 pass (no new detour or watch needed for either the fix attempt or its revert).
 Logs: `/tmp/dj_barfix_run.log` (fix present, refuted), `/tmp/dj_revert_run.log`
 (post-revert, confirms clean).
+
+## Session 58 continued yet again, part 18 (2026-09-20, `wip`) — MUTE MODE: the "echo" is
+now MECHANICALLY EXPLAINED, end to end, with rendered audio as the evidence at every step.
+It is NOT leaked trigs and NOT a level fade: DT mute deliberately lets the already-sounding
+voice keep playing, nothing ever starts a new voice while muted (measured: zero voice-start
+writes post-mute), but the per-step machinery keeps re-attacking that surviving voice at the
+track's own trig positions until its sample data runs out and the playback-position engine
+frees it. Also: part 17's "FIRST THING TO DO" (the 2205-sample countdown) is a DEAD END, and
+this thread's long-standing "fixed WALL-CLOCK duration" belief is OVERTURNED by a direct
+tempo experiment -- the duration is musical-time locked (exactly 32 steps).
+
+### New tooling (all in `tools/`, reusable, committed)
+
+- **`tools/emu_echo_dsp.py`** -- drives octabam's real dual-core DSP-rendering `ot_emu`
+  against `MMTESTDT` and measures the RENDERED AUDIO around a mute: per-trig RMS at every
+  predicted trig position plus a 20 ms envelope. One flag per variable (`--mute-frame`,
+  `--no-mute`, `--gate`, `--frames`, `--watch-mem`, `--watch-read`, `--watch-pc`,
+  `--coverage`, `--extra-poke`, and `--` passthrough for raw `ot_emu` flags). ~90 s a run.
+- **`tools/echo_ratio.py`** -- muted vs unmuted, sample for sample: per-burst RMS ratio AND
+  normalised cross-correlation, to tell "same waveform scaled down" (a gain ramp) from
+  "different audio entirely".
+- **`tools/echo_blockdiff.py`** -- reads an `ot_emu --block-dump` and scores every host-port
+  word by how well its changes line up with the track's own trig steps. This is what found
+  the per-step value that reaches the DSP.
+
+### ⚠️ NEW TRAP, same family as part 17's CUE-byte bug: the GATE poke needs all four bytes
+
+`--poke`/`--poke-early` write ONE BYTE each (`main.cpp`'s `pokeBytes` -> `m.write8`), but
+`patch_softmute.s` reads `move.l GATE,%d0`. So `--poke-early 0x800000dc=2` sets the HIGH
+byte of a big-endian long: GATE reads `0x02000000`, matches neither 1 nor 2, and every hook
+falls through to its stock path. **Measured**: that run renders a clean instant cut and NO
+echo at all -- it silently turns a soft-mute test into a stock-mute test. Part 17's own
+recipe, copied verbatim, reproduced nothing until this was found. `emu_echo_dsp.py` now
+writes all four bytes and carries the warning inline. (Useful by-product: that accident is a
+real STOCK control -- stock mute on this exact project/card cuts instantly, no echo, so the
+echo is unambiguously our own mod's behaviour.)
+
+### The echo, reproduced and then dissected
+
+With GATE correct, part 17's result reproduces exactly (bursts at ~1120/1740-1780/2000 ms,
+a weak one at ~3120 ms, then silence). Four runs differing ONLY in the mute frame
+(`--mute-frame 5512 / 7579 / 8957 / 10679` = mute at loop-2 step 1 / step 7 / step 11 /
+step 16) all show the same shape, and extending to `--frames 40000` (~14 s) confirms the
+echo **stops permanently and never resumes**.
+
+**1. Nothing starts a new voice while muted.** Watching the per-voice records
+(`0x800049d8 + track*0xA8`, `--watch-mem`): every PRE-mute trig writes the voice's SETTINGS
+pointer (`+8`, from `0x400d758e` -- our own cave), its window bounds (`+48`/`+52`, at
+`0x4000f798`/`0x4000f79c`) and then `active <- 0xFF` (`0x4000f912`). **After the mute, not
+one of those writes ever happens again** -- no bind, no re-seek, no voice start. Hook 9 is
+doing its job, exactly as part 17's PC trace said. Only ONE voice record is ever touched
+(track 0's); no other track's voice is borrowed.
+
+**2. The surviving voice is what is sounding.** The last pre-mute trig's voice is never
+freed while muted (hook 10 blocks `FUN_40006820`, part 16's confirmed bug) and keeps
+playing. Between bursts the render is not digital silence but a low-level tail
+(~0.0002-0.001 RMS) -- the sample still running.
+
+**3. The bursts are the surviving voice being RE-ATTACKED once per trig step.**
+`tools/echo_ratio.py` against an otherwise-identical unmuted baseline: post-mute bursts are
+**LOUDER than the unmuted ones at the same positions** (ratios 3.37, 1.61, 1.44, 1.87),
+**LONGER** (at +1780 ms the muted render is 0.0551 where the unmuted has already decayed to
+0.0005) and a **DIFFERENT WAVEFORM** (normalised cross-correlation only 0.16-0.53 against
+the unmuted burst). So it is neither "the same note leaking through" nor a gain ramp on the
+same audio.
+
+**4. What reaches the DSP at each step.** `--block-dump` + `tools/echo_blockdiff.py` over
+every host-port block class: in core 1's 672-word parameter block
+(`0x80001c90`/`0x80002710`, ping-pong pair) **word 1 changes on 7 of 7 post-mute occasions,
+100% of them exactly on this track's own trig steps** -- and its values are precisely the
+`FW_LIVE_NIBBLE` sequence (`0x0c0c`, `0x0707`, `0x0808`, `0x0404`, `0x0f0f`, ... the same
+0/c/7/8/4/f cycle the nibble log shows), duplicated into both bytes. Written by
+`0x4000b910` (`move.b (a2),(a1,a3.l)` with `a1 = 0x46104d15`, `a3` = the track index) and
+`0x4000b9bc`. **This per-step hand-off to the DSP continues completely unaffected by
+`MUTE_STATE`** -- it is the audible link part 17's static work predicted ("`step_handler_
+confirmed` applies a step's params unconditionally") and it is on a path hook 9 never sees.
+The 5 post-mute bursts coincide one-for-one with the 5 post-mute nibble updates that land
+while the voice is still alive; the next nibble update, after the voice is freed, makes no
+sound at all. (Correlational, not yet causal -- see "what is NOT yet proven".)
+
+**5. What ends the echo.** The voice is freed by `clr.b (a2)` at **`0x40008ea6`**, inside
+the playback-position engine (`0x40008e6e` region, the reverse/bounds path) -- i.e. the
+sample finally runs out of data. `active <- 0` there, and the render is digitally silent
+from that instant on, for the rest of the run. In **all four** runs the silence begins
+exactly **11025 ColdFire frames after the last pre-mute voice start** (= 2 pattern loops =
+4.00 s at 120 BPM), predicting each run's first silent trig to the frame.
+
+### OVERTURNED: the duration is MUSICAL-TIME locked (32 steps), not fixed wall-clock
+
+Parts 15-17 recorded, and part 17 repeated as established, that the echo's duration is a
+FIXED WALL-CLOCK value with "2 cycles at 120 BPM" merely being what it equals at that tempo,
+and that only a hardware test at another tempo could settle it. **Settled here, in the
+emulator.** The tempo word is `0x80001814` (plus copies at `+4`/`+8`/`+0x10`), encoded as
+**24 x BPM** (2880 = 120 BPM; read with `--mem-dump`). Halving it to 1440 at the mute
+instant (`--extra-poke`) visibly doubles the step cadence in the run's own `FW_LIVE_NIBBLE`
+log (steps 344.5 -> 689 frames apart), so the poke genuinely takes.
+
+Result: the echo does NOT keep its 11025-frame length. It stretches to a cutoff between
+d=18606 (last audible) and d=19985 (silent) frames from the voice start. Converting to
+STEPS across the tempo change (6 steps elapsed at 120 BPM before the poke, the rest at 60):
+**audible through step 30, silent at step 32, after the voice started -- at BOTH tempi**
+(120 BPM: audible at d=10335 = 30 steps, silent at d=11024 = 32 steps; 60 BPM: predicted
+19981, measured 19985, within 3 frames). So the invariant is **exactly 32 steps = 2 bars of
+musical time**, not seconds.
+
+The natural reading (consistent with everything above, not separately proven): these test
+samples are tempo-following/timestretched 2-bar loops, so "the sample runs out of data" IS a
+32-step event, and the echo lasts as long as the surviving voice has data left. That makes
+the ~2-cycle duration a property of the CONTENT, not a firmware constant -- and it matches
+the user's own hardware report ("just under two 16-step cycles at 120 BPM") exactly.
+
+### DEAD END, closed: part 17's own "FIRST THING TO DO" (the armed 2205-sample countdown)
+
+Part 17 handed off "find what CONSUMES `0x46c7a810`'s 0x89d once armed, plus `0x46c7a830`/
+`0x46c7a14c`/`0x46c77bfa`". Watched all four with `--watch-mem` across the real muted run:
+**`0x46c7a810` is written to 0 once per STEP** (all 16, not just the 3 trigs) by `0x400a3374`
+and `0x400a3bce`, identically before and after the mute, and **never holds 0x89d during
+playback at all** (the 0x89d/0x1d arming block only runs during boot/load, matching Session
+79's own "the reset sub-block never fires" finding). `0x46c80354` (part 17's "level-ramp
+reset" candidate) gets **zero** writes in the whole run. None of these is the lever; the
+audible path is the per-step nibble hand-off in item 4 above. Do not re-open this.
+
+### What is NOT yet proven
+
+- **Causality of item 4.** The nibble hand-off and the bursts are both step-locked, so their
+  one-for-one coincidence is strong but correlational. The clean test is a build that
+  suppresses the per-step write (`0x4000b910`/`0x4000b9bc`) for a muted track and re-renders:
+  the prediction is that the low-level tail survives (DT mode's intent) while the bursts
+  vanish. NOT built, NOT flashed.
+- **The user's own 3-case asymmetry does not reproduce here.** On hardware (part 15/16),
+  muting right after a fresh-bind trig to a DIFFERENT sample suppressed the echo entirely.
+  In the emulator all four mute phases, including muting right after the p-locked step 15,
+  give the same 5-burst echo. Either the emulator diverges here or the hardware case turned
+  on something else (sample length/trim); unresolved, worth one precise question to the user
+  rather than another blind run.
+- Whether the timestretch reading of the 32-step law is right (see above).
+
+### Fix direction this implies
+
+DT mode's design (see `patch_softmute.s`'s own header) is deliberate: "the voice that is
+already sounding keeps playing under its OWN amp envelope ... only NEW trigs are suppressed".
+The surviving voice is therefore CORRECT behaviour; the defect is narrower than this thread
+has been treating it -- **a muted track's still-live voice must stop receiving the per-step
+parameter hand-off that re-attacks it**. That is a gate on the per-track write at
+`0x4000b910`/`0x4000b9bc` (the track index is already in `a3` at that instruction, so a
+`MUTE_STATE` test is cheap there), NOT another attempt to tighten hooks 9/10 -- both of which
+this session re-confirmed are doing exactly their job. Note also that hook 10 blocking
+`FUN_40006820` (part 16's confirmed bug) is what keeps the voice alive long enough to be
+re-attacked 5 times; fixing either layer alone may be enough, and they should be A/B'd
+separately.
+
+### Status
+
+Nothing built, nothing flashed. `out/mainos_mutemode_dt.bin` untouched (still hook 13 v2,
+not the v1 on the user's hardware -- fine for this work, as part 16 established). Renders
+live in `refs/octabam/out/echo_*.{wav,log,dump}` (gitignored; regenerate with the tools
+above). `refs/octabam` is on its local `local-mute-wip` branch with the two local build
+fixes (`--poke-at-frame`, the raised `--watch-read` cap) -- both were needed and used.
