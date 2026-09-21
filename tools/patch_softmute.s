@@ -40,6 +40,13 @@
 |
 | Four hooks, one cave:
 |
+| part 18 addendum 10: every hook below used to require SOLO_FLAG (0x80000037) to be set
+| before it would consider the solo mask. Stock does NOT work that way -- its own not-solo
+| branch (0x40004e3a..) builds D1 = (D5.low8 == 0) ? -1 : 0 and ANDs every non-soloed
+| track's level word with it, so ONE solo bit silences the rest whether or not the flag is
+| set. The flag test has been removed everywhere; "silenced" now means, exactly as stock
+| means it: muted, OR (something is soloed AND this track is not).
+|
 |  1. `pre`   @ 0x40004dc6 (the displaced `move.l 0x80000008,D5`).  With MUTE MODE == OT+FX,
 |     compute the "silenced" audio-track set for this frame:
 |         not solo   -> silenced = mute mask (bits 8..15 -> 0..7)
@@ -77,6 +84,16 @@
 
     .equ GATE,        0x800000dc     | MUTE MODE word (0 = OT/stock, 1 = OT+FX).  Ignored when ALWAYS_ON.
     .equ MUTE_STATE,  0x80000008     | bits 0..7 SOLO   bits 8..15 MUTE   bits 16..23 CUE
+    .equ SOLO_BYTE,   0x8000000b     | MUTE_STATE's SOLO byte (bits 0..7), one per track --
+                                         | big-endian, so the low byte of the long at
+                                         | 0x80000008.  A single `tst.b` on it answers "is
+                                         | anything soloed?" in the same two instructions the
+                                         | old SOLO_FLAG test used, which keeps the per-frame
+                                         | instruction count unchanged (part 18 addendum 10:
+                                         | adding even ~3 instructions per track per frame
+                                         | measurably perturbed the render -- 0.994
+                                         | correlation, same energy -- in a loop this KB
+                                         | already flags as timing-sensitive).
     .equ SOLO_FLAG,   0x80000037     | byte, non-zero while SOLO mode is engaged
     .equ REL_STATE,   0x8000184a     | byte: voice t in RELEASE when bit t set
     .equ SHADOW,      0x80006c66     | patch RAM: last frame's "silenced" set (8 bits)
@@ -109,15 +126,34 @@ p1_active:
     tst.b   SOLO_FLAG
     bne     p1_solo
 
-    | not solo: silenced = mute mask
+    | SOLO_FLAG == 0 -- but stock STILL solo-silences on this branch, which this project
+    | never knew: the not-solo branch (0x40004e3a..) builds D1 = (D5.low8 == 0) ? -1 : 0 at
+    | 0x40004e64 and ANDs every NON-soloed track's level word with it at 0x40004e8a. So a
+    | single solo bit, with SOLO_FLAG never set, silences every other track instantly,
+    | post-FX (no FX tails), identically in every MUTE MODE.
+    |
+    | *** part 18 addendum 10: THIS is the SOLO bug the user reported, and the reason
+    | addendum 8's fix (which only touched the SOLO_FLAG branch) did nothing on hardware.
+    | Reproduced in the DSP port by setting ONE solo bit and no flag: 0.0147 at the event
+    | then digital silence, vs a normal mute's smooth multi-second reverb decay. ***
     move.l  %d5,%d2
     lsr.l   #8,%d2
-    andi.l  #0xff,%d2
-    | keep the muted tracks' frame level words: D5 &= ~(silenced << 8)
-    move.l  %d2,%d0
-    lsl.l   #8,%d0
-    not.l   %d0
-    and.l   %d0,%d5
+    andi.l  #0xff,%d2                   | silenced = mute mask
+    move.l  %d5,%d0
+    andi.l  #0xff,%d0                   | soloed mask (stock reads the whole low byte)
+    beq     p1_ns_clear                 | nothing soloed -> stock's own D1 is already -1 and
+                                         | the clear below is a no-op on bits 0..7, so this
+                                         | path stays BYTE-IDENTICAL to before for a plain
+                                         | mute.  That is the safety property for the modes
+                                         | the user has already confirmed working.
+    eori.l  #0xff,%d0                   | silenced-by-solo = ~soloed & 0xff
+    or.l    %d0,%d2                     | silenced = muted OR not-soloed
+p1_ns_clear:
+    | keep EVERY track's frame level words: clear D5 bits 0..15 (mute AND solo).  Clearing
+    | 8..15 is exactly what the old `D5 &= ~(silenced << 8)` did; clearing 0..7 is the new
+    | part.  The CUE bits (16..23) are deliberately left alone -- stock's own cue-send word
+    | at 0x40004e6e..78 keys off them, and cueing is not ours to change.
+    andi.l  #0xffff0000,%d5
     bra     p1_edge
 
 p1_solo:
@@ -275,11 +311,11 @@ mt_trig:
     move.l  MUTE_STATE,%d3
     btst    %d0,%d3                     | muted (bit 8+track) ?
     bne     mt_silenced
-    tst.b   SOLO_FLAG
-    beq     mt_pass                     | not solo, not muted -> let it through
+    tst.b   SOLO_BYTE                   | anything soloed at all ?
+    beq     mt_pass
     move.l  %d3,%d0
     andi.l  #0xff,%d0
-    beq     mt_pass                     | solo engaged, nothing soloed -> let it through
+    beq     mt_pass                     | nothing soloed -> let it through
     btst    %d1,%d3                     | this track soloed (bit track) ?
     bne     mt_pass                     | soloed -> let it through
 | fallthrough: solo active + this track not soloed -> silence it
@@ -361,11 +397,11 @@ mt_rebind:
     move.l  MUTE_STATE,%d1
     btst    %d0,%d1                      | muted (bit 8+track) ?
     bne     mr_silence
-    tst.b   SOLO_FLAG
-    beq     mr_pass                      | not solo, not muted -> let it through
+    tst.b   SOLO_BYTE                   | anything soloed at all ?
+    beq     mr_pass
     move.l  %d1,%d0
     andi.l  #0xff,%d0
-    beq     mr_pass                      | solo engaged, nothing soloed -> let it through
+    beq     mr_pass                      | nothing soloed -> let it through
     move.l  (0x40,%sp),%d0
     btst    %d0,%d1                      | this track soloed (bit track) ?
     bne     mr_pass                      | soloed -> let it through
@@ -711,11 +747,11 @@ dt_trig:
     move.l  MUTE_STATE,%d1
     btst    %d2,%d1                     | muted (bit 8+track) ?
     bne     dt_silence
-    tst.b   SOLO_FLAG
-    beq     dt_pass                     | not solo, not muted -> let the trig through
+    tst.b   SOLO_BYTE                   | anything soloed at all ?
+    beq     dt_pass
     move.l  %d1,%d2
     andi.l  #0xff,%d2
-    beq     dt_pass                     | solo engaged, nothing soloed -> let it through
+    beq     dt_pass                     | nothing soloed -> let it through
     btst    %d3,%d1                     | this track soloed (bit track) ?
     bne     dt_pass                     | soloed -> let it through
 | fallthrough: solo active + this track not soloed -> silence it
@@ -798,11 +834,11 @@ fresh_bind:
     move.l  MUTE_STATE,%d3
     btst    %d0,%d3                     | muted (bit 8+track) ?
     bne     fb_silence
-    tst.b   SOLO_FLAG
-    beq     fb_pass                     | not solo, not muted -> normal dispatch
+    tst.b   SOLO_BYTE                   | anything soloed at all ?
+    beq     fb_pass
     move.l  %d3,%d0
     andi.l  #0xff,%d0
-    beq     fb_pass                     | solo engaged, nothing soloed -> normal dispatch
+    beq     fb_pass                     | nothing soloed -> normal dispatch
     btst    %d1,%d3                     | this track soloed (bit track) ?
     bne     fb_pass                     | soloed -> normal dispatch
 | fallthrough: solo active + this track not soloed -> silence it
@@ -929,11 +965,11 @@ live_nibble:
     addi.l  #8,%d2
     btst    %d2,%d1                   | muted (bit 8+track) ?
     bne     ln_skip
-    tst.b   SOLO_FLAG
-    beq     ln_store                  | not solo, not muted -> normal
+    tst.b   SOLO_BYTE                   | anything soloed at all ?
+    beq     ln_store
     move.l  %d1,%d2
     andi.l  #0xff,%d2
-    beq     ln_store                  | solo engaged, nothing soloed -> normal
+    beq     ln_store                  | nothing soloed -> normal
     move.l  %a3,%d2
     btst    %d2,%d1                   | this track soloed ?
     bne     ln_store                  | soloed -> normal
@@ -1005,13 +1041,13 @@ trigflag:
     lsr.l   #8,%d0                    | mute bits 8..15 -> 0..7, so %d4 indexes them directly
     btst    %d4,%d0                   | this track muted ?
     bne     tf_skip
-    tst.b   SOLO_FLAG
-    beq     tf_pass                   | not solo, not muted -> normal
+    tst.b   SOLO_BYTE                   | anything soloed at all ?
+    beq     tf_pass
     move.l  MUTE_STATE,%d0
     andi.l  #0xff,%d0
-    beq     tf_pass                   | solo engaged, nothing soloed -> normal
+    beq     tf_pass                   | nothing soloed -> normal
     btst    %d4,%d0                   | this track soloed ?
-    beq     tf_skip                   | not soloed while solo is active -> silenced
+    beq     tf_skip                   | not soloed while something is -> silenced
     .endif
 tf_pass:
     jmp     TF_BACK

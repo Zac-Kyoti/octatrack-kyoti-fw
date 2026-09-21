@@ -56,7 +56,7 @@ STEP_FRAMES = LOOP_FRAMES / 16.0
 TRIG_STEPS = (1, 10, 15)         # MMTESTDT track 0's real trigs
 
 
-def run(label, mute_frame, frames, gate, load_ms, watch_read, watch_pc, coverage, extra, watch_mem="", extra_poke="", image=None, solo_track=None, fx=False, cue_track=None):
+def run(label, mute_frame, frames, gate, load_ms, watch_read, watch_pc, coverage, extra, watch_mem="", extra_poke="", image=None, solo_track=None, fx=False, cue_track=None, solo_bit_only=None):
     prefix = OUTDIR / f"echo_{label}"
     # --poke/--poke-early write ONE BYTE each (main.cpp's pokeBytes -> m.write8), but the
     # patch reads GATE with `move.l GATE,%d0` -- so poking the base address alone sets the
@@ -81,7 +81,11 @@ def run(label, mute_frame, frames, gate, load_ms, watch_read, watch_pc, coverage
         # the CUE bit for track N. The frame builder's solo branch provably never tests the
         # cue bits (KB memory-map, re-derived 20 Sep), so nothing this project has hooked
         # covers this path -- which is the hypothesis under test.
-        if cue_track is not None:
+        if solo_bit_only is not None:
+            # a SOLO BIT with NO SOLO_FLAG -- stock's *not-solo* branch still silences every
+            # non-soloed track in that state (0x40004e80..8c), which hook 1 never defused.
+            spec = f"{SOLO_BYTE:#x}={1 << solo_bit_only}"
+        elif cue_track is not None:
             spec = f"{CUE_BYTE:#x}={1 << cue_track}"
         elif solo_track is not None:
             spec = f"{SOLO_FLAG:#x}=1;{SOLO_BYTE:#x}={1 << solo_track}"
@@ -222,6 +226,8 @@ def main():
     ap.add_argument("--image", default=None, help="mainos .bin to run (default: the DT build)")
     ap.add_argument("--fx", action="store_true",
                     help="use the MMTESTFX card (DARK REV on the test track) instead of MMTESTDT")
+    ap.add_argument("--solo-bit", type=int, default=None, metavar="N",
+                    help="set ONLY the solo bit for track N (no SOLO_FLAG)")
     ap.add_argument("--cue", type=int, default=None, metavar="N",
                     help="CUE track N (the real MIXER + CUE+TRIG gesture) instead of muting")
     ap.add_argument("--solo", type=int, default=None, metavar="N",
@@ -242,7 +248,7 @@ def main():
                 sys.exit(f"missing: {p}")
         prefix = run(a.label, mute_frame, a.frames, a.gate, a.load_ms,
                      a.watch_read, a.watch_pc, a.coverage, list(a.extra), a.watch_mem,
-                     a.extra_poke, a.image, a.solo, a.fx, a.cue)
+                     a.extra_poke, a.image, a.solo, a.fx, a.cue, a.solo_bit)
     analyze(prefix, mute_frame, a.frames, slots)
     return 0
 

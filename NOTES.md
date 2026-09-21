@@ -23401,3 +23401,96 @@ The addendum-8 hook-1 change is KEPT for now: it fixes a real, emulator-verified
 user reported no regression from it. It is, however, now an unverified-on-hardware change
 that did not fix its target -- flagged here so it is not mistaken for a confirmed fix. Offer
 to revert it if the user prefers a smaller diff while the real cause is hunted.
+
+## Session 58 continued yet again, part 18 addendum 10 (2026-09-21, `wip`) — SOLO ROOT CAUSE
+FOUND AND FIXED. Stock solo-silences from the *not-solo* branch too, on the solo MASK alone
+with SOLO_FLAG never set -- a state every hook in this project was blind to. Reproduced,
+fixed, and verified BIT-IDENTICAL to the flashed build whenever nothing is soloed.
+
+### The user's decisive datum: the cut is INSTANT
+
+That killed every trig-masking theory (those can only stop the NEXT trig) and meant something
+zeroes the sounding track's audio in the same frame. Combined with "no FX tails", it had to be
+a post-FX level word -- i.e. `FUN_40004dbc` after all, despite addendum 9 excluding its solo
+branch.
+
+### What this project never read: the NOT-SOLO branch also implements solo
+
+Addendum 5 decoded the solo branch (`0x40004dd4`). The other one was never disassembled.
+`0x40004e3a..`:
+
+```
+40004e64  mvzb %d5,%d1 / seq %d1 / extbl %d1   ; D1 = -1 if D5.low8 == 0, else 0
+40004e6e  btst %d3,%d5   (d3=16+t)             ; CUE bit -> the cue-send word, else clrw
+40004e80  btst %d3,%d5   (d3=t)                ; SOLOED ? -> keep the level word
+40004e86  btst %d3,%d5   (d3=8+t)              ; MUTED  ? -> clrw
+40004e8a  andl %d1,%d2                         ; else AND with D1  == ZERO if anything soloed
+```
+
+**So one solo bit silences every other track, instantly, post-FX, with `SOLO_FLAG`
+(`0x80000037`) never involved.** Hook 1's not-solo path cleared only the MUTE bits out of D5
+and left the SOLO bits untouched, so stock's `andl %d1` ran unopposed -- in every MUTE MODE,
+which is exactly what the user hears. Addendum 8's fix touched only the SOLO_FLAG branch,
+which is why the hardware was unchanged by it.
+
+**Reproduced** (`tools/emu_echo_dsp.py --solo-bit N`, new: sets ONE solo bit, no flag): on
+the flashed build, DT, a reverb-carrying track renders `0.0147` at the event then digital
+silence -- against a plain mute's multi-second decay. First reproduction of the reported
+symptom in any emulator.
+
+### The fix, in two parts
+
+1. **`pre`'s not-solo path** now computes `silenced = muted OR (~soloed if anything soloed)`
+   and clears D5 bits 0..15 (mute AND solo), so neither of stock's two silencing paths can
+   fire while our mode is active. Cue bits (16..23) are deliberately untouched -- stock's own
+   cue-send word keys off them.
+2. **The `SOLO_FLAG` precondition is removed from all six hooks** (`mt_trig`, `mt_rebind`,
+   `dt_trig`, `fresh_bind`, `live_nibble`, `trigflag`). They all used to require the flag
+   before looking at the solo mask, which made them blind to the real state. "Silenced" now
+   means what stock means: muted, OR something is soloed and this track is not.
+
+### ⚠️ A real regression was created and then removed -- worth reading before editing here
+
+The first version of part 2 simply deleted the flag test, which left each hook executing ~3
+MORE instructions per track per frame in the common case. That measurably perturbed the
+render: UNMUTED playback stopped being bit-identical to the flashed build, diverging from
+4.0 s with the same energy (RMS 0.0543 vs 0.0541) and **0.994 correlation at zero lag** --
+same waveform, ~0.6% detail difference, no time shift. The emulator was confirmed
+deterministic first (two runs of one build: `max|diff| = 0`), so this was real, not noise.
+It is exactly the hazard `reference/kb/memory-map.md` already flags for this region ("any
+change that adds cycles to one of the four level-chain loops ... shifts how close this
+function runs to the tick boundary"), and the same family as the hook-12 silence incident.
+
+Fixed by adding `.equ SOLO_BYTE, 0x8000000b` (MUTE_STATE's solo byte -- big-endian low byte
+of the long) and keying each hook's early-out on `tst.b SOLO_BYTE / beq <pass>`: identical
+semantics, identical instruction count to the old flag test. **Do not "simplify" that back
+into a longword read and mask** -- the cost is the point.
+
+### Verification
+
+```
+  vs the build the user is running, sample-exact over 1,120,928 samples x 8 slots:
+    UNMUTED playback : max|diff| = 0.0000000000   BIT-IDENTICAL
+    plain MUTE (DT)  : max|diff| = 0.0000000000   BIT-IDENTICAL
+
+                    +493ms  +993ms  +1493ms  +1993ms  +2493ms  +2992ms
+    DT muted        0.0504  0.0381   0.0368   0.0222   0.0205   0.0119
+    DT SOLO-silenced 0.0499  0.0381   0.0356   0.0225   0.0207   0.0127   (was instant silence)
+    OT+FX SOLO-sil.  0.0126  0.0066   0.0025   0.0006   0.0003   0.0001   (matches OT+FX mute)
+```
+
+Solo-silenced now behaves exactly like muted, per mode. Nothing changes when no track is
+soloed -- that is the safety property, and it is verified sample-exact rather than argued.
+
+### Known remaining risks, stated before flashing
+
+- **Bit 7.** `FUN_4007c428` (addendum 7) maintains MUTE_STATE bit 7 as an aggregate
+  "something is soloed" while `0x80000034` is set. Stock's own branches treat bit 7 as track
+  7's solo bit (`btst` with d3=0..7, and `mvzb` for D1), so this fix mirrors stock exactly
+  rather than guessing -- but if soloing behaves oddly specifically on the LAST audio track,
+  that is where to look.
+- **CUE MUTES TRK.** `0x40004e3a` ORs the cue bits into the mute positions when `0x8000009c`
+  is set, and that happens AFTER our hook runs, so a cued track still takes stock's hard cut
+  if that PERSONALIZE option is on. Not addressed here; a separate feature.
+- Only the solo MASK path is fixed. If the hardware also sets `SOLO_FLAG`, addendum 8's
+  branch covers that, and both now converge on the same behaviour.
