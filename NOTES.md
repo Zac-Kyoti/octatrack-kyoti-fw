@@ -22840,3 +22840,93 @@ detour it, until that is understood.)
    addresses; re-run it and record them this time).
 3. Only then design a hook. Do not gate anything until the hard cut's actual producer is
    measured, per this session's own hook-14/15 lesson.
+
+## Session 58 continued yet again, part 18 addendum 7 (2026-09-20, `wip`) — SOLO static RE:
+the 13 MUTE_STATE writers finally recorded WITH ADDRESSES, and a second, previously-unknown
+cue/solo MODE flag (`0x80000034`) found that drives its own DSP-frame path none of this
+project's hooks touch. No fix yet; no code changed.
+
+### The 13 `0x80000008` (MUTE_STATE) writers -- addresses, at last
+
+Part 13 ran this exact query and recorded only the COUNT. Re-run (`tools/ghidra/attic/
+GhidraSoloMix1.java`, dump `out/ghidra/GhidraSoloMix1.txt`):
+
+```
+FUN_4000e79c  FUN_400238a4  FUN_4003d29c  FUN_4003d394  FUN_40043e00  FUN_40045404
+FUN_4005e3d8  FUN_40061a94  FUN_40065514  FUN_4007d18c  FUN_4007d5f8  FUN_4007d7b0
+FUN_400866c4
+```
+
+**Key negative result: not one of them ever SETS a per-track SOLO bit (`1 << track`).** They
+set mute (`0x100 << t`) and cue (`0x10000 << t`) -- e.g. `FUN_40061a94`'s 'J' case, already
+known -- and they READ the solo bits (the CC-out emit at `FUN_40033e3c(t,0x32,...)`), but
+nothing writes them. So solo is not stored the way this project assumed; it is derived.
+
+### `FUN_4007c428` -- the transform every writer funnels MUTE_STATE through
+
+```c
+uint FUN_4007c428(uint v) {
+  if (DAT_80000034 != 0) {
+    if ((v & 0x7f) == 0) v = v & 0xffff7f7f;     // nothing soloed -> clear bits 7 and 15
+    else                 v = v & 0xffff7fff | 0x80;  // something soloed -> set bit 7, clear 15
+  }
+  return v;
+}
+```
+
+So **bit 7 of MUTE_STATE is an aggregate "something is soloed" flag**, maintained only while
+`DAT_80000034` is set, and bit 15 (what this project has been calling track 7's MUTE bit) is
+cleared in the same breath. Both of this thread's assumptions -- "bits 0..7 are eight
+per-track solo bits" and "bits 8..15 are eight per-track mute bits" -- are therefore too
+simple at the top of each range. Worth re-checking before any solo hook is designed.
+
+### `0x80000034`: a SECOND mode flag, with its own path to the DSP
+
+Not previously known to this project. Besides gating the transform above, it gates a block
+at the very end of the per-frame track loop (`0x40004d8c`, immediately before that function's
+`rts`):
+
+```
+40004d8c  tstb 0x80000034
+40004d92  beqs <skip>
+40004d94  lea 0x8000030c,%a0        ; a frame buffer, selector-indexed like the others
+40004d9a  movel %d7,%d1 / lsll #9   ; d7 = 0x800000e0, the ping-pong selector
+40004da0  movew %a0@(0,%d1:l),%d0
+40004da4  oril #1536,%d0            ; |= 0x600
+40004daa  movew %d0,%a0@(0,%d1:l)
+```
+
+i.e. when the flag is set, a `0x600` flag pair is OR-ed into a DSP frame word **every frame,
+for the whole mix rather than per track**. Nothing this project has ever hooked touches this.
+Both mode flags are persisted in the battery-SRAM shadow (`0x80000034` <-> `0x100b1494`,
+`SOLO_FLAG 0x80000037` <-> `0x100b1497`) and restored together, which is why they survive
+power cycles.
+
+Also decoded in passing: `FUN_4003d394` and `FUN_40043e00` are momentary preview handlers --
+press saves `MUTE_STATE & 0xffff00` and sets `0x100<<t | 0x10000<<t` (mute AND cue) for the
+UI-selected track, release restores it through `FUN_4007c428`. Not the MIXER gesture, but the
+same "mute+cue together" shape, which is suggestive.
+
+### Where this leaves the solo bug
+
+The working picture is now: the MIXER's cue/solo is a MODE (`0x80000034`) with a derived
+aggregate bit and its own per-frame DSP signal, not a per-track solo mask of the kind this
+project's hooks were written against. That is consistent with everything observed -- four
+poked "solo" states all behaving correctly in the port, and the hardware cutting hard in
+every MUTE MODE.
+
+**Not found this session**: the handler that actually runs on MIXER + CUE + TRIG. The button
+dispatch table at `0x400bfc30` is NOT a flat keycode->handler array (entries appear at
+indices 12/13/14, 25/26/27, 38/39/40 -- a stride-13 2-D table, presumably key x context),
+so identifying the CUE keycode needs that table decoded properly rather than read off.
+
+### Next session -- in this order
+
+1. **Decode the `0x400bfc30` dispatch table** (stride 13, three track-key entries per row).
+   With the CUE and MIXER keycodes in hand, drive the REAL gesture in `ot_emu` via `--live`
+   ("key <code> down|up"), then dump `MUTE_STATE`, `0x80000034` and `0x80000037` to learn the
+   state the hardware is actually in. Everything else is guesswork until that is known; this
+   session burned four state-poke experiments proving that.
+2. Then, and only then, instrument whichever path does the cutting (the `0x600` frame write
+   and the level chain are the two candidates) and design the hook.
+3. Do NOT re-run the four poked solo/cue states (addendum 6) -- they are recorded as correct.
