@@ -136,6 +136,20 @@
     .equ PEND_PAT,  0x800065c0
     .equ PEND_BANK, 0x800065bf
     .equ STEP,      0x800065b6
+    .equ TRK_SCALE_IX, 0x8000663e       | LIVE per-track scale index, 1 byte per track
+                                        | (stride 1, measured: 0x400a3dbc addq.l #1,A3 in
+                                        | the per-track loop). The step-counter wrap check
+                                        | at 0x400a3cee compares STEP_IN_PAT[t] against
+                                        | LEN_TBL[TRK_SCALE_IX[t]] -- so THIS is what
+                                        | decides each track's own loop length. Stock only
+                                        | refreshes it from the pattern blob immediately
+                                        | AFTER a wrap (0x400a3d08 per-track / 0x400a3d0e
+                                        | pattern-default), so after a mid-pattern commit
+                                        | it still holds the OUTGOING pattern's index for
+                                        | one whole cycle -- see dj_pertrack_fix.
+                                        | (An identical MIDI-track pair exists at
+                                        | 0x80006646 / counter 0x80006508, 0x400a3dd2
+                                        | onward -- untouched: no measured symptom.)
     .equ STEP_IN_PAT, 0x800064f0        | per-track step-within-pattern counter, 1 byte per
                                         | track. Stock: ++ at 0x400a3ce2 every step tick,
                                         | wrapped to 0 at 0x400a3cf6 on reaching the track's
@@ -666,6 +680,22 @@ dpf_normal:
     move.w  #0x8e54,%d1
     move.b  (%a1,%d1.l),%d1             | pattern-default scale index (SCALE_MODE == 0)
 dpf_gotidx:
+|   Session 79 (NOTES.md, "continued a seventeenth time"): d1 holds this track's scale
+|   index for the incoming pattern right here, chosen by the SAME SCALE_MODE test stock
+|   itself uses -- for the one instant before the LEN_TBL lookup below overwrites it with
+|   the length. That index is exactly what the step-counter wrap check reads live out of
+|   TRK_SCALE_IX[t] (0x400a3ce6/0x400a3cee), and stock only reloads that cache AFTER a
+|   wrap, so a mid-pattern DIRECT JUMP commit leaves the OUTGOING pattern's index in place
+|   for one full cycle: measured on the user's own DJTESTxxx export, a track at trackLen 3
+|   ran 6 ticks after the commit (wrapping at frame 805 instead of 633), missed one
+|   DAT_80001904 anchor write, then self-corrected once stock's own post-wrap reload
+|   finally ran. Refresh it here instead of waiting for that wrap -- same principle as
+|   Hook D (dj_scaleix_fix), which already undoes the identical staleness for the MASTER
+|   scale index; this is its per-track counterpart, and the long-open Session 15 #4 gap.
+|   Costs nothing extra: the value is already computed, and %a0 is reloaded on the very
+|   next line anyway.
+    lea     TRK_SCALE_IX,%a0
+    move.b  %d1,(%a0,%d6.l)             | TRK_SCALE_IX[t] = the INCOMING pattern's index
     lea     0x400aba50,%a0
     move.l  (%a0,%d1.l*4),%d1           | d1 = this track's OWN trackLen
     move.l  G_ABSTICK,%d0                | d0 = absolute tick count

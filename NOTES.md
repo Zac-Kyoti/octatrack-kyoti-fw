@@ -22676,3 +22676,88 @@ test track (so tails are measurable at all), and identifying the handler that se
 per-track solo bit so solo can be engaged the real way end to end. Until then, the useful
 question to ask the user is exactly HOW they engage solo on the unit (which key combination),
 since that determines which handler runs.
+
+## Session 79, continued a seventeenth time (2026-09-20) — the per-track SCALE residual is
+FIXED too. Session 15's #4 ("per-track-SCALEd tracks are not made exactly right"), open
+since 2026-07, is closed: 2 instructions at an existing hook, dynamically proven on the
+user's own DJTESTxxx export, no regression on the uniform project.
+
+The previous entry characterized the residual (a differently-scaled track runs ONE cycle
+too long after a DIRECT JUMP commit, misses one anchor write, then self-corrects) and
+showed it was pre-existing rather than introduced by the STEP_IN_PAT fix. The user asked
+whether there was a path to fix it. There was, and it turned out to be small.
+
+### The mechanism, decoded  [GhidraDirectJump45/46.java]
+
+```
+400a3cda  movea.l (0x78,SP),A0        ; A0 = &STEP_IN_PAT[t]  (0x800064f0+t)
+400a3ce0  addq.l #1,D0
+400a3ce2  move.b D0b,(A0)             ; the per-tick increment
+400a3ce6  mvs.b (A3),D1               ; D1 = LIVE per-track scale index, 0x8000663e[t]
+400a3ce8  lea (0x400aba50).l,A1       ; LEN_TBL
+400a3cee  cmp.l (0x0,A1,D1*0x4),D0    ; counter vs LEN_TBL[thatIndex]
+400a3cf2  blt.w ...                   ; not yet
+400a3cf6  clr.b (A0)                  ; WRAP
+400a3d02  tst.b (0x0,A4,D4*0x1)       ; D4 = 0x8e55 = SCALE_MODE
+400a3d08  move.b (0x1,A2),(A3)        ; refresh cache from blob+0x51 (per-track), or
+400a3d0e  move.b (0x0,A4,D6*0x1),(A3) ; from blob+0x8e54 (pattern default)
+```
+
+**`0x8000663e[t]` is a LIVE per-track scale-index cache, and stock refreshes it ONLY
+immediately after a wrap.** Stride confirmed as 1 (`0x400a3dbc addq.l #1,A3`, loop back
+at `0x400a3dc8`) -- measured, not assumed, since a fix writes into it. So a mid-pattern
+DIRECT JUMP commit leaves the OUTGOING pattern's index in the cache until the next wrap,
+and the wrap check uses it -- which is exactly the measured "one long cycle, then
+self-corrects" shape: the cache is only reloaded BY the very wrap whose timing it got
+wrong.
+
+This is the per-track counterpart of the stale-`SCALE_IX` bug Hook D
+(`dj_scaleix_fix`) already fixes for the MASTER scale index (Session 70, 5th pass) --
+same bug class, one level down.
+
+### The fix: 2 instructions, no new detour, reusing a value already in hand
+
+`dj_pertrack_fix`'s `dpf_gotidx` already holds this track's INCOMING scale index in `d1`
+-- selected by the same `SCALE_MODE` test stock itself uses -- for the one instant before
+the `LEN_TBL` lookup overwrites it with the length. Store it to `TRK_SCALE_IX[t]` there.
+`%a0` is reloaded on the next line anyway, so nothing else had to move.
+
+### Dynamic proof  [MEASURED, both projects]
+
+On `DJTESTxxx` (track 1 at trackLen 3, seven tracks at 6), post-commit:
+
+```
+                     before this fix        after this fix     ground truth
+t1 counter wraps     frame 805 (6 ticks)    frame 633          frame 633
+t1 anchor writes     518, ---, 863, 1035    518, 691, 863,     518, 691, 863,
+                     (691 MISSING)          1035               1035
+```
+The missed anchor write is back and the cadence matches ground truth from the commit
+onward. Final comparison unchanged at `4 of 64`, all four still group 7 (the unrelated
+residue) -- groups 0/4 were already clean and stayed clean.
+
+**No regression on the uniform project**: `DEMO_PROJECT` re-run is still `3 of 64`, armed
+flag still zero at ticks 6/12. Expected -- every track there holds scale index 2 already,
+so the new write is a no-op.
+
+### Noted, deliberately NOT touched
+
+An identical MIDI-track block exists at `0x400a3dd2` onward, with its own cache at
+`0x80006646` and counter at `0x80006508` (same shape, same post-wrap-only refresh). It
+very likely has the same staleness -- but there is no measured symptom pointing at it,
+and this thread's rule is no fix without dynamic proof. Recorded as a lead, not patched.
+
+### Status
+
+DIRECT JUMP's `DAT_80001904` thread is now closed at the emulator level for both the
+uniform and the per-track-SCALE case. Build: 856 bytes via 6 detour sites. Still
+**emulator-only, nothing flashed** -- the user intends to flash this build and listen.
+
+### NEXT
+1. The MIDI-track counterpart above, if a symptom ever points there.
+2. The group-7 residue (3-4 slots, both projects, different PCs) -- still un-attributed.
+3. `DAT_46104cf4`'s identity; `FUN_4000ae12`'s caller -- carried over.
+
+Tooling: `tools/ghidra/attic/GhidraDirectJump45.java` (wrap-check decode), `46.java`
+(stride/loop confirmation). Logs: `/tmp/dj_scalefix.log` (DJTESTxxx, the fix),
+`/tmp/dj_regress.log` (DEMO_PROJECT, no regression).
