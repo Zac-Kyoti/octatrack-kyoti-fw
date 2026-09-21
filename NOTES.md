@@ -23494,3 +23494,250 @@ soloed -- that is the safety property, and it is verified sample-exact rather th
   if that PERSONALIZE option is on. Not addressed here; a separate feature.
 - Only the solo MASK path is fixed. If the hardware also sets `SOLO_FLAG`, addendum 8's
   branch covers that, and both now converge on the same behaviour.
+
+## Session 78 continued an eleventh time — `FUN_40042158` found: the stored-p-lock writer, and the trigless lock's own creator
+
+The previous ten entries chased the wrong function. This one settles the thread with a
+named instruction, a reproduced bug, and a detour anchor that does not depend on any
+label inherited from an earlier session.
+
+### `FUN_40041bc4` is not the erase — proven, not argued
+
+`tools/emu_artl_drive_erase.py` boots the user's real `ARTLTEST1` through
+`load_project_live` (so the per-track tables the decode reads are real — the thing
+Session 34 lacked, which made its run degenerate), opens the LIVE gates, opens the
+per-track gate, and calls `FUN_40041bc4` over 64 argument combinations with a write
+watchpoint on the whole `TRAC` block.
+
+**Result: the function runs (134 writes, `d0 = 2·arg1+1`) and writes ZERO bytes anywhere
+in `TRAC`.** It touches only live scratch:
+
+    blob+0x5100/0x5101   blob+0x48d0/0x48d4   blob+0x9b332
+    0x1001aa1e/aa22      0x1001b24e/b24f      0x100f8598 (dirty)   0x46c7d2e4[0] |= 1
+
+The `0x46c7d2e4` index came out **0, not 6** — that array is `byte[step] |= 1<<track`, so
+the step is not an argument, it is read from the playhead, which is parked at 0 with the
+transport stopped. That is the "clear as the playhead passes" semantics, and it is why
+every synthetic drive of this function collapses to step 0.
+
+Session 34 reached the same conclusion from a degenerate boot; it is now solid.
+
+### The per-track gate, corrected
+
+`FUN_4009b290(n)` for `n >= 0` returns the byte at **`0x80006500 + (n & 15)`** (for
+`n < 0` it returns `[0x800065b8]`, the transport). Session 34's "`0x80006508 + trk`" was
+that same table reached through the `track+8` form `FUN_40041bc4` uses; calling it with a
+plain audio track index needs `0x80006500 + track`. Poking the wrong end of the table is
+why the first toggle run returned `-1` from every call.
+
+### Finding the writer: literals that point into `TRAC`
+
+Instead of guessing, scan every 4-byte literal in the image that lands inside
+`TRAC(pat0,trk0)` and tag it by offset. The whole binary contains exactly **two**
+literals pointing at `TRAC+0x58` — the `#1` base that `lea (0x58,a0,d5:l)` indexing uses:
+
+    +0x58  2 refs: 0x400422e2, 0x400423da
+
+Both are inside one function, and its entry is the `linkw %fp,#-84` at **`0x40042158`** —
+immediately after `FUN_40041bc4` ends at `0x40042156`. **That adjacency is why ten
+sessions never saw it: every tool and note treated `0x40042158`+ as the tail of
+`FUN_40041bc4`.**
+
+### `FUN_40042158(track, param, value, step_override, cached)`
+
+    guards: PART byte != 4;  0x460d172a != 0 (LIVE);  0x460d1a94 == 0  (note: 0x1a94,
+            NOT the 0x1a90 FUN_40041bc4 tests);  FUN_4009b290(track) == 1
+    FUN_4009b2d4(cached, track, ..., &local_8) -> local_8=bank local_7=pattern local_6=STEP
+    if (step_override != -1) step = step_override        <- caller can force the step
+    audio (track < 8):
+      bit-test TRAC+0x00 (trig) at step
+        clear -> bit-test TRAC+0x08, then TRAC+0x10, then TRAC+0x18
+          all clear -> NO trig of any kind owns this step, so CREATE one:
+                         PART payload init
+                         TRAC+0x10 |= 1<<step          <<<< the trigless lock is BORN here
+                         #1[step][param] = value
+                         dirty + 0x10016xxx mirrors + 0x46c7d48c
+      otherwise (some layer already owns the step):
+                         #1[step][param] = value       <<<< 0x400422ee
+                         [0x4017d512 + bank*0x9b340] = 1
+                         mirror at 0x100161a7 when the pattern is the displayed one
+                         0x46c7d48c update
+
+**`local_6` is the STEP**, not Session 33's "param-page descriptor": it is used directly as
+the bit index into `TRAC+0x00`, the note/sample trig mask, which is step-indexed. Session
+33's label for that output byte was wrong and is corrected here.
+
+`param_4` being a **step override** is what finally makes this testable headless — no
+running playhead required, which is exactly what defeated Session 34.
+
+### The (page, encoder) -> `#1` byte-offset mapping — the other open problem, solved
+
+From dispatch case **opcode 64** (`0x40062496`), the decode before the call is:
+
+    param_page = msg[2] / 6
+    enc        = msg[2] % 6
+    param      = PAGE_TBL[0x400a7280][param_page] * 6 + enc       <- the flat `#1` index
+    value      = FUN_40054cd8(track, param, msg[3])               <- clamps to the param's
+                                                                     min/max, returns it
+    if (value < 0) bail
+    FUN_40042158(track, param, value, -1, cached)
+
+So the page/encoder -> `#1` offset map is a table at **`0x400a7280`**, and
+`FUN_40054cd8` is a clamp, not a router. Opcode 64 is the knob-turn **write**; it cannot
+itself produce the `0xFF` "not locked" sentinel except where a param's own range reaches
+it.
+
+### The UI message table, decoded
+
+`0x40061cfa` is 78 **16-bit** offsets from itself (not longwords), `index = msg[0]-1`,
+default `+0x1022`. The p-lock cases:
+
+| opcode | case | calls |
+|---|---|---|
+| 64 | `0x40062496` | `FUN_40054cd8` then **`FUN_40042158`** (writes `#1`) |
+| 65 | `0x400625b8` | `FUN_40042d1c` |
+| 66 | `0x40062640` | `FUN_40042d1c` |
+| 70 | `0x400629ee` | `FUN_4004f124` (armed) / **`FUN_40041bc4`** (LIVE) — live scratch only |
+| 74 | `0x40062a56` | `FUN_4004ef54` (armed) / `FUN_40041784` (LIVE) |
+
+Case 70 requires `msg[1] == 8` and does **not** itself test `0x460d1a90`; only the callee
+does. `FUN_40042d1c` returns a **step** (its callers pass it straight into
+`FUN_40042158`'s `step_override`), and it also places note trigs — measured: calling it
+on `ARTLTEST1` set `trig` bits 0 and 1.
+
+### The bug, reproduced in the emulator against the user's real project
+
+`tools/emu_artl_store_write.py`, on `ARTLTEST1`'s real trigless lock (step 6, `#1` bytes
+`0x00`=`0x30` PTCH and `0x02`=`0x4e` LEN):
+
+    A. erase param 0x00   0x400422ee  TRAC+0x119 <- 0xff   #1[6]={0x2:0x4e}  TRIGLESS=[6]
+    B. erase param 0x02   0x400422ee  TRAC+0x11b <- 0xff   #1[6]=EMPTY       TRIGLESS=[6]
+
+`TRAC+0x119` = `0x59 + 6*32 + 0` and `TRAC+0x11b` = param 2 — the arithmetic checks out.
+**B is the user's hardware report, reproduced headless**: the row empties and
+`TRAC+0x10` bit 6 survives, so the step stays lit. The script asserts the loaded state
+matches the two known real locks before it will report anything, so a bad load fails
+loudly instead of producing a confident wrong answer.
+
+The feature is now the exact inverse of code stock already contains, at one instruction.
+
+### Detour design (for the next build; supersedes `patch_triglock.s` entirely)
+
+Anchor **`0x400422f2`** — `addil #0x4017d512,%d0`, exactly 6 bytes, immediately after the
+`#1` store at `0x400422ee`. Overwrite with `jsr <cave>`; the cave replays the `addil` and
+`rts`. Registers live at that point, all verified against the disassembly:
+
+    d5 = value byte written        d3 = step            d4 = step*32
+    d0 = bank * 0x9b340            d2 = pattern*0x8ed8  d1 = track*0x91a
+    a0 = d4+d0+d2+d1 + 0x400e2238  a1 = param           fp@(8) = track
+    TRAC base = d0 + d2 + d1 + 0x400e21e0
+
+Cave logic — fires ONLY as the 1->0 transition of an erase, never as a sweep:
+
+    if (d5 != 0xFF) return                       ; not an erase
+    if any of #1[step][0..31] != 0xFF return     ; not the LAST lock
+    if TRAC+0x00 / +0x08 / +0x18 bit step set    ; a real trig owns the step --
+        return                                   ;   never touch retrig/one-shot/etc.
+    if TRAC+0x10 bit step clear return           ; not a trigless lock
+    TRAC+0x10 &= ~(1<<step)                      ; the one thing stock omits
+    mirror 0x1001615e/0x10016162 when pattern == [0x80000004] && bank == [0x80000002]
+
+Why this satisfies Session 13's constraints without extra machinery:
+
+- **multi-pass**: erasing 1 of 2 leaves the row non-empty, so nothing fires; erasing the
+  last empties it and fires. Falls out of the row check, no counter needed.
+- **manually-placed empty trigless locks persist**: they are never the subject of an erase
+  write, so the cave never runs for them.
+- **never a global sweep**: the cave only ever runs on the instruction that just wrote
+  `0xFF` into `#1`.
+- **only pure p-lock trigless locks**: the three layer tests are the same ones stock's own
+  create path uses, in the same order.
+
+Known ambiguity, not a regression: a param whose legal range includes 255 stores as `0xFF`
+and is already indistinguishable from "unlocked" to stock itself, so the LED is already
+wrong for that case today.
+
+### Status of the flashed image
+
+`patch_triglock.s` / `build_triglock.py` are **abandoned**, not merely inert: their detour
+site `0x4004214e` is the target of all three of `FUN_40041bc4`'s early-bail branches, so on
+a bail the cave reads uninitialised stack as (bank, pattern, step) and can write 32 bytes
+of `0xFF` plus a cleared bit into arbitrary RAM. The user was told in-session to reflash
+stock `1.40C`. The new anchor has no such exposure — `0x400422f2` is reachable only after
+the decode has run and the store has already happened.
+
+### Tools added this pass
+
+- `tools/emu_artl_drive_erase.py` — drives `FUN_40041bc4` on a real project, watches `TRAC`.
+- `tools/emu_artl_trigless_toggle.py` — drives `FUN_4004271c` / `FUN_40042d1c`.
+- `tools/emu_artl_store_write.py` — the stock-baseline reproduction above; this is the
+  script the fix must flip from "bit survives" to "bit cleared".
+- `tools/ghidra/attic/GhidraArtlUnlockPath.java`, `GhidraArtlStoreWriter.java`.
+
+## Session 58 continued yet again, part 18 addendum 11 (2026-09-21, `wip`) — SOLO CONFIRMED
+ON HARDWARE. Three modes now work. Scoping the FOURTH, "OTFX", and handing off.
+
+### Hardware
+
+User flashed addendum 10: "Works great. Solo muting working as expected." So OT, the current
+OT+FX, and DT are all behaving, mute and solo alike. The user renames them OT / OTFX-T / DT-T,
+reserving **OTFX** for a new fourth mode.
+
+### The new mode: OTFX
+
+User's spec: "hard cut + FX tails, but when unmuting, playback picks up where it would be had
+we never muted."
+
+**Measured this session, and it settles the design** (`--watch-mem` on the live playhead
+`0x80004a1c`, mute at frame 5532, 12000 frames):
+
+```
+  OT (stock)      playhead at mute 0x638 -> 0x000031e1 by frame 11897   (83374 writes)
+  OT+FX (today)   playhead at mute 0x638 -> 0x00014be1                  (83370 writes)
+  DT    (today)   playhead at mute 0x638 -> 0x00014be1                  (83370 writes)
+```
+
+The playhead advances while muted in EVERY mode -- so "keeps running underneath" is not the
+distinguishing feature. What distinguishes them is the *value*: stock reaches only `0x31e1`
+because its trigs keep firing and keep RESTARTING the sample, while our two modes mask trigs
+(hooks 9/10/15) so a single voice runs on ~10x further. **"Picks up where it would be had we
+never muted" therefore means: do NOT mask trigs at all.** OTFX is the only mode of the four
+that wants the sequencer left completely alone.
+
+So OTFX = stock's behaviour (trigs fire, voices restart, playhead tracks the pattern) with
+ONE change: the dry output is cut while the FX route stays open, so inserts ring their tails.
+That is a smaller change than any of the three existing modes, and it does not need any of
+the trig-masking machinery -- it needs those hooks to PASS for this GATE value.
+
+### What the next session needs to know about the mechanism
+
+The per-frame DSP frame builder `FUN_40004dbc` (hook 1 `pre` sits on its displaced
+`move.l 0x80000008,%d5` at `0x40004dc6`) writes FOUR words per track per frame, from three
+source tables -- re-derived from the binary this session with `-m m68k:cfv4e`:
+
+```
+  word 1  from 0x80000c60, gated on the track's CUE bit (16+t) -- the cue send, else clrw
+  word 2  from 0x80000c60, gated on solo/mute -- THE MAIN LEVEL, what stock's mute zeroes
+  word 3  from 0x80000c80  -- Session 57 called this "a second, wide-open route to the mix",
+                             i.e. the FX-tail route; never gated by stock's mute
+  word 4  from 0x8000485a (stride 8)
+```
+
+Session 57 separately established that the per-track levels the DSP actually receives are
+produced by the level chain (`frame_builder @4000c8a4`), and that the stock release loop
+zeroes a silenced track's DRY level while only CLAMPING the second word to 6144 -- the
+tail-ring route. Identifying which of these words is dry vs FX send/return, and which
+producer the DSP really consumes, is the first job: **measure it, do not infer it.**
+
+### The rest of MUTE MODE, honestly
+
+The user asked whether MUTE MODE is done after OTFX. Close, but these are open:
+- **Bug A (the REL_STATE race, OT+FX only)** is still unfixed; hook 13 is DISABLED after
+  failing on hardware twice (addendum 4).
+- **CUE MUTES TRK**: `0x40004e3a` ORs the cue bits into the mute positions when `0x8000009c`
+  is set, AFTER hook 1 runs, so a cued track still takes stock's hard cut with that option on.
+- **Bit 7**: `FUN_4007c428` keeps MUTE_STATE bit 7 as an aggregate "something is soloed";
+  stock's branches also read it as track 7's solo bit. Untested on the last audio track.
+- Adding a fourth GATE value needs `patch_mutemode` (N_MODES 3 -> 4, a fourth value string)
+  plus whatever renaming the user wants (OT / OTFX / OTFX-T / DT-T). The `'ANDY'` battery-SRAM
+  persistence covers the same word, so it comes along for free.
