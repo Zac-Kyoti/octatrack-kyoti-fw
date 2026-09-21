@@ -44,6 +44,8 @@ OUTDIR = OCTABAM / "out"
 SET_NAME, PROJECT_NAME = "MMTESTDT", "test"
 GATE_ADDR = 0x800000DC          # patch_softmute.s's GATE (m68k-elf-nm out/patch_softmute_rs.elf)
 MUTE_BYTE = 0x8000000A          # MUTE_STATE's MUTE byte -- NOT 0x80000009 (that is CUE)
+SOLO_BYTE = 0x8000000B          # MUTE_STATE's SOLO byte (bits 0-7, one per track)
+SOLO_FLAG = 0x80000037          # "solo mode engaged" (patch_softmute.s's own equ)
 
 FRAMES_PER_SEC = 44100.0 / 16.0  # 2756.25 ColdFire/DSP frames per second
 LOOP_FRAMES = 5512               # 16 steps @ 120 BPM
@@ -51,7 +53,7 @@ STEP_FRAMES = LOOP_FRAMES / 16.0
 TRIG_STEPS = (1, 10, 15)         # MMTESTDT track 0's real trigs
 
 
-def run(label, mute_frame, frames, gate, load_ms, watch_read, watch_pc, coverage, extra, watch_mem="", extra_poke="", image=None):
+def run(label, mute_frame, frames, gate, load_ms, watch_read, watch_pc, coverage, extra, watch_mem="", extra_poke="", image=None, solo_track=None):
     prefix = OUTDIR / f"echo_{label}"
     # --poke/--poke-early write ONE BYTE each (main.cpp's pokeBytes -> m.write8), but the
     # patch reads GATE with `move.l GATE,%d0` -- so poking the base address alone sets the
@@ -67,7 +69,12 @@ def run(label, mute_frame, frames, gate, load_ms, watch_read, watch_pc, coverage
            "--poke-early", gate_poke,
            "--audio-out", str(prefix)]
     if mute_frame is not None:
-        spec = f"{MUTE_BYTE:#x}=1"
+        # --solo N silences the TEST track the other way round: engage solo mode and solo a
+        # DIFFERENT track, so the test track is silenced by not-being-soloed. That is the
+        # second half of what MUTE MODE has to get right, and hook 15 routes it through the
+        # very same branch as a real mute.
+        spec = (f"{SOLO_FLAG:#x}=1;{SOLO_BYTE:#x}={1 << solo_track}" if solo_track is not None
+                else f"{MUTE_BYTE:#x}=1")
         if extra_poke:
             spec += ";" + extra_poke
         cmd += ["--poke", spec, "--poke-at-frame", str(mute_frame)]
@@ -184,6 +191,8 @@ def main():
     ap.add_argument("--watch-mem", default="", help="ADDR,LEN[;ADDR,LEN...] -- log WRITES with the writing PC")
     ap.add_argument("--extra-poke", default="", help="more 'addr=byte' pokes applied WITH the mute")
     ap.add_argument("--image", default=None, help="mainos .bin to run (default: the DT build)")
+    ap.add_argument("--solo", type=int, default=None, metavar="N",
+                    help="silence the test track by SOLOing track N instead of muting it")
     ap.add_argument("--watch-pc", default="", help="comma-separated PCs -- log registers there")
     ap.add_argument("--coverage", action="store_true", help="every ColdFire PC from the transport start")
     ap.add_argument("--slots", default="0,2,4", help="ESAI TX0 slots to report")
@@ -200,7 +209,7 @@ def main():
                 sys.exit(f"missing: {p}")
         prefix = run(a.label, mute_frame, a.frames, a.gate, a.load_ms,
                      a.watch_read, a.watch_pc, a.coverage, list(a.extra), a.watch_mem,
-                     a.extra_poke, a.image)
+                     a.extra_poke, a.image, a.solo)
     analyze(prefix, mute_frame, a.frames, slots)
     return 0
 

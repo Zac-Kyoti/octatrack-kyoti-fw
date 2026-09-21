@@ -22381,3 +22381,40 @@ user's discretion.
   worth a listen on hardware since hook 15 also changes that mode.
 - Single track, single tempo, one project. The user's hardware 3-case asymmetry still does
   not reproduce in the emulator (unchanged from part 18).
+
+### ADDENDUM 3, same session -- the SOLO path validated too: hook 15 covers all four cases
+
+Per the user's own requirement ("a track silenced by SOLO has to sound exactly like one that
+was manually muted, in every MUTE MODE"), tested the solo half before recommending a flash --
+hook 15 routes solo-silencing through the SAME branch as a mute by construction, but that
+had not been exercised.
+
+`tools/emu_echo_dsp.py --solo N` (new) silences the test track the other way round: it pokes
+`SOLO_FLAG` (`0x80000037`) and one SOLO bit in `MUTE_STATE`'s solo byte (`0x8000000b`, bits
+0-7) for a DIFFERENT track, so track 0 is silenced by not-being-soloed rather than by being
+muted. Mute and solo are then the only variable between runs.
+
+```
+                                   baseline (PRE_LN)                    hook 15
+  DT,    muted     0.0287 / 0.0104 / 0.0159 / 0.0087 / 0.0033        all 0
+  DT,    SOLOED    0.0287 / 0.0101 / 0.0160 / 0.0087 / 0.0033        all 0
+  OT+FX, muted     0.0058 / 0.0047 / 0.0048 / 0.0027 / 0.0004        all 0
+  OT+FX, SOLOED    0.0058 / 0.0047 / 0.0048 / 0.0012 / 0.0010        all 0
+```
+
+**Two things this settles.** First, solo-silencing has the identical bug, to within noise, in
+both modes -- the user's assumption was right, it is not a separate defect. Second, hook 15
+clears all four cases equally, so mute-silenced and solo-silenced tracks now behave the same
+by construction AND by measurement, which is exactly the stated requirement.
+
+One extra observation from the baseline solo runs, not present in the mute runs: with solo
+engaged, the echo also appears on **slot 0** (0.0287/0.0101/... where the muted runs hold
+slot 0 at exactly 0) -- i.e. a solo-silenced track's leaked audio reaches an output the
+muted case never touches, presumably the cue/solo bus routing. Hook 15 zeroes that too. Not
+investigated further; noted because it means the solo case was, if anything, leaking slightly
+wider than the mute case.
+
+Still untested before a flash: nothing in the emulator distinguishes the SOLO variants beyond
+this (single soloed track, single silenced track); and the UI-side question from addendum 2
+(whether those per-trig flag bits drive trig LEDs / recorder arming / MIDI tracks) is
+unchanged and is the main thing to watch for on hardware.
