@@ -23741,3 +23741,10 @@ The user asked whether MUTE MODE is done after OTFX. Close, but these are open:
 - Adding a fourth GATE value needs `patch_mutemode` (N_MODES 3 -> 4, a fourth value string)
   plus whatever renaming the user wants (OT / OTFX / OTFX-T / DT-T). The `'ANDY'` battery-SRAM
   persistence covers the same word, so it comes along for free.
+
+### Addendum 11 follow-up: bit-7 aggregate confirmed non-issue on hardware
+
+User confirms no issues with mute/solo on audio tracks 7 or 8 -- both operated as expected.
+This closes the one open risk addendum 10 flagged (`FUN_4007c428`'s MUTE_STATE bit-7
+aggregate vs stock's own reading of it as track 7's solo bit): the fix's mirroring of
+stock's own bit-7 handling is confirmed correct in practice, not just by construction.
