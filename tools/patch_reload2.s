@@ -225,16 +225,29 @@ rl_ptn:
     bne.b   rlp_stock                  | not a hold -> stock
 
 |   --- [PTN] HOLD ---
+|   Session 80 continued: dropped the RUNNING gate (user's ask -- these actions
+|   must work whether the transport is playing or stopped; none of the worker's
+|   own logic in rl_job actually depends on RUNNING, so there was never a real
+|   correctness reason to require it here -- see that session's NOTES.md entry
+|   for the open display-refresh-while-stopped question this raises).
+|
+|   Also dropped the G_KIND ("a reload is already queued") gate here -- this is
+|   what made the picker permanently unopenable after the hardware report of
+|   "PTN hold stops working entirely, no recovery": if G_KIND ever got stuck
+|   nonzero for ANY reason (a real storage-task timing edge this session could
+|   not pin down conclusively -- see NOTES.md "Session 80 continued", the
+|   FUN_40022778 single-fixed-scratch-buffer finding), this gate meant NOTHING
+|   could ever reopen the picker again, full stop. The re-entrancy protection
+|   that gate existed for moved to rl_yes_exec instead (guards the actual
+|   ARM+POST step, where a genuine double-post could corrupt an in-flight job)
+|   -- opening the picker itself is now always available, so a stuck flag is a
+|   diagnosable "YES seems to do nothing" instead of an unrecoverable dead key.
     tst.b   G_MENU
     bne.b   rlp_holdtail               | already open
     tst.l   POPUP
     bne.b   rlp_holdtail               | a modal dialog is up
     tst.l   ARR_ACT
     bne.b   rlp_holdtail               | arranger
-    tst.l   RUNNING
-    beq.b   rlp_holdtail               | only while the sequencer is playing
-    tst.b   G_KIND
-    bne.b   rlp_holdtail               | a reload is already queued
 
     moveq   #1,%d0
     move.b  %d0,G_MENU                 | open
@@ -356,6 +369,21 @@ rl_yes_exec:
     movem.l (%sp),%d0-%d1/%a0-%a1
     lea     16(%sp),%sp
 
+|   Session 80 continued: refuse to arm a NEW request while a previous one's
+|   G_KIND hasn't been serviced/cleared yet (rl_job clears it right at entry,
+|   normally within a frame or two) -- this is now the ONLY re-entrancy guard
+|   in the whole feature (rl_ptn no longer blocks reopening on G_KIND; see its
+|   own comment). Arming anyway here would write G_TRK/G_TMIDI/G_PAT/G_KIND
+|   out from under a job that's still in flight, and Session 80's static read
+|   of FUN_40022778 found it always posts through ONE fixed scratch message
+|   buffer (0x460bd912) -- a second post before the first is read is a real,
+|   not just theoretical, corruption risk. Toast instead of silently no-op'ing
+|   so a stuck G_KIND is an observable, reportable symptom, not a mystery.
+    tst.b   G_KIND
+    beq.b   ryx_ok
+    lea     rl_msg_busy,%a0
+    bra.w   rly_show
+ryx_ok:
     moveq   #0,%d2
     move.b  G_SEL,%d2                  | 0 TRK SEQ / 1 PTN SEQ / 2 PART + PTN SEQ
 
@@ -521,6 +549,9 @@ rl_msg_ptn:
     .align 2
 rl_msg_ppt:
     .asciz "PART + PTN SEQ"
+    .align 2
+rl_msg_busy:
+    .asciz "RELOAD BUSY"
     .align 2
 rl_fmt_trk:
     .asciz "T%d SEQ"

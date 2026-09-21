@@ -20494,3 +20494,160 @@ real, still not implicated in this specific symptom).
 Tooling: `tools/emu_directjump_dynamic.py` (`TABLE_ARM_STORE_PC`, `G_ABSTICK`,
 `install_table_arm_watch`/`print_table_arm_watch`, committing the extension). Log:
 `/tmp/dj_abstick_run.log`. No patch source written -- still read-only dynamic analysis.
+
+## Session 80 continued (2026-09-20, `wip`) — RELOAD2 hardware report: 3 real bugs found and fixed (RUNNING gate, unrecoverable G_KIND lockout); reload-timing correctness + list-UI rework deferred to a later session
+
+**Housekeeping note**: appended after "Session 80" and after a concurrent
+DIRECT JUMP session's own entries landed in between — this continues the
+RELOAD2 thread, not the DIRECT JUMP one just above.
+
+**User flashed the Session-80 build and reported 4 things** after testing on
+real MKI hardware:
+1. Holding `[PTN]` does nothing unless the sequencer is playing — but these
+   actions should work whether the transport is running or stopped.
+2. The single-line popup (redraws with only the CURRENTLY highlighted item)
+   should be a real list showing all 3 items at once, one highlighted — user
+   pointed at `[FUNC]+[UP ARROW]`'s own stock multi-item list menu (which tells
+   the trig buttons how to behave) as a UI/UX model to repurpose (not its
+   handlers, just the look). **Deferred — user said "we can work on #2 and #4
+   later."**
+3. After ONE successful TRK SEQ reload, holding `[PTN]` again stopped opening
+   the picker AT ALL — permanently, regardless of further saves/reloads/edits.
+4. The TRK SEQ reload itself has real timing/sync problems: an audible gap,
+   the reloaded pattern lands out of sync with the master sequencer AND with
+   its own pre-reload step position, and a moment after the trig LEDs restore,
+   the reloaded pattern resets to step 1. **Deferred — same "later" as #2.**
+
+### #1 — the RUNNING gate — FIXED
+
+`rl_ptn`'s hold-to-open gate included `tst.l RUNNING ; beq rlp_holdtail`. None
+of `rl_job`'s own worker logic actually depends on RUNNING (the live-blob
+memcpy happens regardless; `RELOAD_NOW`/`0x46c8028a` only gets consumed by
+`FUN_400a1eea`'s per-step poll when the transport IS running, and just sits
+armed harmlessly otherwise, picked up on the next PLAY) — there was never a
+real correctness reason for this gate. Dropped it. `emu_reload2.py --combo`
+updated (the "hold [PTN] while STOPPED" case now asserts the SAME open
+behaviour as playing, not the old "gated out" behaviour) and reconfirmed
+`ALL GOOD`.
+
+**Open, not investigated this session**: does the trig-LED / p-lock display
+refresh immediately after a reload while STOPPED, or only on the next PLAY
+(since the per-step handler that unconditionally re-reads working-set #1 into
+#2 only runs while ticking, per Session 42's own RE)? Flagged for a hardware
+look, not fixed speculatively.
+
+### #3 — "stops working entirely, no recovery" — root cause NOT conclusively
+pinned down, but made structurally impossible regardless
+
+**Three failed diagnostic attempts, each an instructive tooling mistake, not a
+finding** (full detail + exact fixes in `tools/diag_reload2_reopen.py`'s own
+docstring):
+1. Raced a concurrent `build_reload2.py` rebuild against a still-running
+   background emulator test reading the same output file — corrupted read,
+   discarded.
+2. Forgot that `emu_reload2.py`'s own `__main__`/`main()` does the
+   `erl.OUR_IMAGE = erl.RELOAD_IMAGE` reassignment that a standalone script
+   calling `erl.boot_and_load()` directly must do itself — silently booted
+   the STOCK image, producing an illegal-instruction fault at a cave address
+   that only exists in the patched build. Looked like a real crash; wasn't.
+3. Reused `cmd_trk`'s `rl_arm_trk`-direct shortcut (which deliberately skips
+   `rl_yes`'s real close logic — see its own comment) as if it modelled a
+   real `[YES]` press. `G_MENU` stayed at 1 afterward because nothing in the
+   path exercised ever clears it — a test artifact, not a hardware finding.
+   The follow-up "real [YES] press" attempt then hit `call_as_main`'s own
+   precondition (`self.pc == MAIN_SPIN`, checked at its very first line) —
+   `cmd_trk`'s drain loop doesn't leave the CPU parked there — and, once that
+   was understood, re-parking via `rt.run(until=..., max_bursts=2_000_000)`
+   still weren't enough steps (pc ended inside `FUN_4008ded0`, the bank
+   deserialiser — real, still-in-flight storage-task work left over from
+   `cmd_trk`'s own reload). Switching to small `ms=100` increments with
+   per-iteration prints (matching `cmd_trk`'s own proven-tractable chunk
+   size) showed why: pc bounced between `FUN_4008ded0` and other real kernel
+   addresses across 4 iterations with ~5 minutes of real wall-clock time
+   EACH and no sign of converging — killed after ~19 minutes rather than
+   let run for an unknown, possibly very long remainder. (An earlier,
+   even blinder version of this same mistake — calling `rt.run(ms=3000)`
+   unconditionally after the `call_as_main` fault — cost 38+ minutes before
+   being killed; also not a hang, just an unreasonably large single request
+   against a full-system, every-task-modelled emulator.) A real, decisive
+   dynamic repro of this exact interaction is still open for a future
+   session with a bigger time budget or a smarter way to skip the residual
+   storage-task work.
+
+**What actually moved this forward: a cheap static read instead of more
+expensive dynamic chasing.** Disassembled `FUN_40022778` (the storage-task
+job poster `rl_yes_exec`/`rl_arm_trk` call): it always builds its message in
+ONE FIXED scratch buffer (`0x460bd912`), never a per-call queue slot. A
+second post before the first is drained is therefore a plausible, real way
+for a request to get silently overwritten or coalesced by the kernel's own
+queue primitive (`0x40000c3c`, not traced this session — would be the next
+step for a conclusive answer). Not confirmed as THE mechanism, but plausible
+enough, and — critically — **irrelevant to the actual fix**, because:
+
+**The real design flaw, independent of root cause**: `rl_ptn`'s own
+`tst.b G_KIND ; bne rlp_holdtail` gate meant that IF `G_KIND` ever got stuck
+nonzero for ANY reason (this race, or something else entirely undiscovered),
+NOTHING could ever reopen the picker again — a full, permanent, unrecoverable
+lockout, exactly matching the hardware report. That's a bad design
+independent of what causes the stuck state.
+
+**Fix**: `rl_ptn` no longer checks `G_KIND` at all — the picker ALWAYS opens
+(subject only to the legitimate G_MENU/POPUP/ARR_ACT gates). The re-entrancy
+protection that gate used to provide moved to `rl_yes_exec` instead, which is
+the actually-correct place for it: if `G_KIND` is still nonzero when `[YES]`
+is pressed (a previous request hasn't been serviced yet), it refuses to
+arm/post a NEW one — no `G_TRK`/`G_TMIDI`/`G_PAT`/`G_KIND` stomped out from
+under a job that might still be in flight, no second post into
+`FUN_40022778`'s single shared buffer — and shows a new "RELOAD BUSY" toast
+instead of silently doing nothing. So even in the worst case (G_KIND
+genuinely stuck forever), the user now gets a diagnosable, reportable
+symptom ("the picker opens fine but YES always says BUSY") instead of a
+mysterious dead key with zero feedback.
+
+Two new `emu_reload.py` `cmd_combo` checks (fast, isolated, no full-RTOS
+boot): holding `[PTN]` with `G_KIND` manually stuck at a nonzero value still
+opens the picker; pressing `[YES]` with `G_KIND` stuck shows the toast,
+leaves `G_KIND` untouched (not corrupted), and does NOT call `JOB_POST` or
+`FUN_4004aab4`. `--combo`: **ALL GOOD, 18/18 checks.** `--trk` (the
+untouched worker path) re-confirmed **ALL GOOD** after the `rl_yes_exec`
+edit (real end-to-end, full RTOS).
+
+### #2 (list-style UI) and #4 (reload timing/sync + step-1 reset) — deferred
+
+User: "we can work on #2 and #4 later." Brief notes for picking this back up:
+
+- **#4's step-1 reset is not new** — Session 42 (this feature's very first RE
+  session) already flagged it as an accepted MVP gap: "stock immediate-reload
+  zeroes `_DAT_800065b4` (step-0 restart). Accept for MVP, or reuse DIRECT
+  JUMP's modulo position-preserve. — not done." It was never revisited. A real
+  fix means porting DIRECT JUMP's own hard-won playhead-preservation design
+  (`G_ABSTICK`, the per-track resume math, Sessions 60–79's whole saga) to
+  this feature's `RELOAD_NOW`/`0x46c8028a` trigger path — comparable in depth
+  to that saga, not a quick patch. The "audio gap" / "out of sync with the
+  master sequencer" parts of the report are new data points, not yet
+  investigated at all.
+- **#2**: looked for reusable prior art. SIDECHAIN3's own "list-style UI"
+  (`LIST_FN`/`key_list_fix`, Session 76) turned out to be the wrong shape —
+  it's the stock renderer for one parameter's name+value inside a normal
+  8-slot menu PAGE, not a multi-item picker with a cursor. The user's own
+  pointer (`[FUNC]+[UP]`'s stock list menu, the one that reconfigures trig
+  button behaviour) is a better lead and not yet RE'd at all this session —
+  `reference/kb/memory-map.md` already notes "FUNC is not a plain keymap
+  record — its held-flag was not located (Session 21)," so the entry gesture
+  itself is still unmapped, separate from whatever list-rendering primitive
+  it calls into. Also briefly looked at `GK_STOCK_MACHINE_CHOOSER`
+  (`0x40079424`, the FX/machine picker) as an alternative reusable list
+  widget — large, undocumented function, not disassembled beyond confirming
+  it exists; abandoned when the user redirected to the `[FUNC]+[UP]` lead
+  instead of chasing this one further blind.
+
+### Status
+
+Committed. **Not yet reflashed** — `build_reload2.py` needs a rebuild +
+reflash to carry both this session's fixes (RUNNING gate, the G_KIND
+lockout fix) to hardware. HW test list once flashed: hold `[PTN]` while
+STOPPED (should now open); do one TRK SEQ reload, then immediately try
+holding `[PTN]` again (should reopen — this is the one to watch closely,
+since the emulator could only get partial, inconclusive dynamic evidence
+this session); if it's still somehow stuck, does `[YES]` now show "RELOAD
+BUSY" instead of nothing.

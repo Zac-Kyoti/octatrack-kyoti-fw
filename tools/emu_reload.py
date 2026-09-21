@@ -728,13 +728,29 @@ def cmd_combo(rt):
     check(end == "PTN_RESUME(stock)" and g(G_MENU_A) == 0 and POPUP2_FN not in calls,
           f"quick tap [PTN]: end={end} G_MENU={g(G_MENU_A)} popup2={POPUP2_FN in calls}")
 
-    # --- hold [PTN] while STOPPED -> gated out, falls to stock hold tail ---
+    # --- hold [PTN] while STOPPED -> Session 80 continued: opens the SAME as
+    # while playing (user's ask -- these actions must work whether or not the
+    # transport is running; the RUNNING gate was dropped from rl_ptn) ---
     reset_gates(running=0)
     calls = []
     end = _run_cave_fn(rt, rl_ptn, 0x2e, 2, calls)
-    check(end == "PTN_HOLDTAIL(stock)" and g(G_MENU_A) == 0 and POPUP2_FN not in calls
-          and g(0x460d173e, 4) == 0,
+    check(end == "PTN_HOLDTAIL(stock)" and g(G_MENU_A) == 1 and g(G_SEL_A) == 0
+          and POPUP2_FN in calls and g(0x460d173e, 4) == 1,
           f"hold [PTN] stopped: end={end} G_MENU={g(G_MENU_A)} popup2={POPUP2_FN in calls}")
+
+    # --- hold [PTN] with a PREVIOUS reload's G_KIND stuck nonzero -> Session 80
+    # continued: opens anyway. This used to be a hard, permanent gate ("a
+    # reload is already queued") -- if G_KIND ever got stuck for any reason,
+    # NOTHING could reopen the picker again (the user's hardware report: "PTN
+    # hold stops working entirely, no recovery"). Re-entrancy protection moved
+    # to rl_yes_exec (below) instead, so opening the picker is now unconditional. ---
+    reset_gates()
+    rt.uc.mem_write(G_KIND_A, bytes([3]))   # simulate a stuck previous TRK SEQ request
+    calls = []
+    end = _run_cave_fn(rt, rl_ptn, 0x2e, 2, calls)
+    check(end == "PTN_HOLDTAIL(stock)" and g(G_MENU_A) == 1 and g(G_SEL_A) == 0
+          and POPUP2_FN in calls,
+          f"hold [PTN] with G_KIND stuck: end={end} G_MENU={g(G_MENU_A)} popup2={POPUP2_FN in calls}")
 
     # --- arrows move the highlight (window open, wrapping) ---
     reset_gates(menu=1, sel=0)
@@ -771,6 +787,23 @@ def cmd_combo(rt):
               f"YES [{name}]: end={end} G_MENU->{gm} close={CLOSE_FN in calls} "
               f"G_KIND={gk}(want {want_kind}) FUN_4004aab4x{n_partreld}(want {want_n_parts}) "
               f"post={POST_FN in calls}(want {want_seqpost}) G_PAT={gp}")
+
+    # --- [YES] with a PREVIOUS reload's G_KIND still stuck nonzero -> Session 80
+    # continued: refuses to arm a new request (would stomp G_TRK/G_TMIDI/G_PAT/
+    # G_KIND out from under a job that may still be in flight, and Session 80's
+    # own static read of FUN_40022778 found it always posts through ONE fixed
+    # scratch message buffer -- a second post before the first is read is a
+    # real corruption risk, not just theoretical). Still closes the window and
+    # toasts "RELOAD BUSY" (via TOAST_FN) instead of silently doing nothing. ---
+    reset_gates(actpat=5, menu=1, sel=0)
+    rt.uc.mem_write(G_KIND_A, bytes([3]))   # a previous TRK SEQ request, unserviced
+    calls = []
+    end = _run_cave_fn(rt, rl_yes, 0x31, 1, calls)
+    check(end == "rts" and g(G_MENU_A) == 0 and CLOSE_FN in calls and TOAST_FN in calls
+          and g(G_KIND_A) == 3 and POST_FN not in calls and PARTRELD_FN not in calls,
+          f"YES while busy (G_KIND stuck): end={end} G_MENU->{g(G_MENU_A)} "
+          f"close={CLOSE_FN in calls} toast={TOAST_FN in calls} G_KIND={g(G_KIND_A)} "
+          f"post={POST_FN in calls} FUN_4004aab4x{calls.count(PARTRELD_FN)}")
 
     # --- [NO] cancels (window open, nothing runs) ---
     reset_gates(actpat=5, menu=1, sel=min(1, n - 1))
