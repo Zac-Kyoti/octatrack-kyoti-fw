@@ -20651,3 +20651,85 @@ holding `[PTN]` again (should reopen — this is the one to watch closely,
 since the emulator could only get partial, inconclusive dynamic evidence
 this session); if it's still somehow stuck, does `[YES]` now show "RELOAD
 BUSY" instead of nothing.
+
+## Session 79, continued an eleventh time (2026-09-20) — ruled out the bitmask family and
+BAR_CTR as the table-arm write's trigger; the exact trigger remains open after five
+independent dynamic/static angles. Consolidating rather than proposing a sixth
+hypothesis without evidence for it.
+
+### Bitmask family (0x80006626/680/682/684): dynamically confirmed inert
+
+Extended `tools/emu_directjump_dynamic.py` with write-watches on all four. **Zero
+writes to any of them, in either run, across the whole observation window.** They are
+cleared once (at the switch-commit reset block, `0x400a4048`-`4054`/`400a2a16`) and
+never written again during play in this project's own test data -- consistent with
+being SET (to whatever their post-reset/boot value is) once and never dynamically
+toggled at all, at least for this project's exercised code paths. This rules them out
+as a per-tick "due" signal; whatever the `btst` tests on them are checking, they must
+be reading a value that's effectively constant across this whole run. Retracts this
+session's own working assumption (Session 79 continued a ninth/tenth times) that they
+were a dynamic gate.
+
+### BAR_CTR (0x800065b2): DOES get disturbed by DIRECT JUMP, but not on the timeline
+that would explain the table-arm anomaly
+
+```
+DJ run:          frame 0->1, 289->2, 461->3, 461->0(!), 633->1, 978->2
+ground truth:    frame 0->1, 289->2,          633->3,    978->4
+```
+
+DIRECT JUMP's forced commit DOES cause an extra, transient `BAR_CTR` write
+(`2`->`3` at `0x400a423a`, the normal step==0 body's own bar-counter increment) --
+but it is immediately overwritten to `0` in the SAME tick (`0x400a483a`, presumably
+the genuine, CORRECT "bar counter resets when a real switch lands" logic that any
+switch -- ordinary or DIRECT JUMP -- would also trigger). The reset to 0 is very
+likely expected/correct, not a bug. The TRANSIENT `3` never persists to be read by
+anything. **This does not line up with the table-arm anomaly's own timing** (extra
+write at frame 518/G_ABSTICK=9; `BAR_CTR`'s reset happens at frame 461, 57 frames
+earlier) -- ruled out as the direct trigger, though `BAR_CTR`'s PERMANENT downstream
+divergence from ground truth after this point (DJ: 0,1,2... vs gt: 0,1,2,3,4...) is
+the exact same class of "extra event permanently shifts a counter's cadence" this
+whole thread has now found in three separate places (`DAT_80001904`'s writes,
+`CNTDN_TBL`, and now `BAR_CTR`) -- worth noting as a pattern, not a new lead on its own.
+
+### Status: the table-arm write's exact per-tick trigger condition remains
+UNRESOLVED after five independent investigative angles this session: (1) static
+xref/text-scan for the literal `0x80006626` address, (2) PC-trace diff between a
+natural and an extra write within the same run, (3) full raw-disassembly decode of
+the gating code back to `0x400a29c0`, (4) dynamic write-watch on the bitmask family,
+(5) dynamic write-watch on `BAR_CTR`. Each ruled something out; none has produced a
+positive, confirmed answer. **Pausing the trigger-hunt here rather than proposing a
+sixth untested hypothesis.**
+
+### Why this doesn't block a fix
+
+The write's VALUE formula is proven exactly correct regardless of trigger (previous
+entry, 8/8 points, zero error) -- a fix does not need to know WHY the extra write
+fires to be safe and effective. A viable, conservative fix that sidesteps the open
+trigger question entirely: gate the table-arm write's OWN store (or the whole
+`0x400a2c30`-`0x400a2e18` computation) on a new one-shot "just had a DIRECT JUMP
+commit" suppression window (reusing the existing `G_JUST_COMMITTED`-style flag
+infrastructure `patch_directjump.s` already has, extended to cover a few ticks rather
+than one), rather than patching the stock trigger condition itself. This trades
+"understand and fix the exact stock mechanism" for "detect DIRECT JUMP's own
+fingerprint and suppress its side effect broadly" -- less elegant, but doesn't
+require resolving an open question that has resisted five independent attempts.
+
+### NEXT for this thread
+
+1. Decide between: (a) keep hunting the exact trigger (a sixth angle -- e.g. a
+   register-state dump, not just memory writes, at the exact moment table-arm's
+   gating code runs for both a natural and the extra write, to see EVERY register
+   difference rather than guessing which global to watch), or (b) build the
+   suppression-window fix that doesn't need the trigger, per above.
+2. If (b): design the exact suppression window length (how many ticks after a DJ
+   commit must table-arm writes be held back, or should the NEXT write after a DJ
+   commit simply be deferred to the following natural boundary instead of
+   suppressed outright -- needs the same care Hooks A-F already apply elsewhere in
+   this commit path).
+3. Carried over, unchanged: the `0x400a2c66` ACT-vs-snapshot branch's own purpose;
+   `DAT_46104cf4`'s identity; `FUN_4000ae12`'s caller.
+
+Tooling: `tools/emu_directjump_dynamic.py` (`bitmask_680/682/684_writes`,
+`bar_ctr_writes`, committing the extension). Logs: `/tmp/dj_bitmask2_run.log`,
+`/tmp/dj_barctr_run.log`. No patch source written.

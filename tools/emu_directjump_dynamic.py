@@ -350,6 +350,32 @@ def run_one(er, a, dj_on):
     prev_bank_ix_writes = make_watch(0x800065bc, 1)
     flag_80001860_writes = make_watch(0x80001860, 1)
     flag_46107568_writes = make_watch(0x46107568, 4)
+    # Session 79 continued a tenth time: both KNOWN static writers of 0x80006626 (the
+    # table-arm-due bitmask) only CLEAR it (0x400a4054, 0x400a1384) -- no SET-bit write
+    # was found by resolved-xref lookup or a literal-text scan, almost certainly because
+    # it's written via computed/indexed addressing. A runtime write-watch can't miss it
+    # regardless of addressing mode -- this settles it dynamically instead of guessing.
+    table_arm_due_writes = make_watch(0x80006626, 2)
+    # Session 79 continued a tenth time: GhidraDirectJump39.java found the ACTUAL
+    # write-path gate is 0x80006682 (tested 0x400a2ae0), not 0x80006626 (which gates a
+    # different CNTDN-recompute sub-block). 0x80006680/82/84 are a related per-track
+    # bitmask family, all cleared together at every switch commit (0x400a4048-4054) --
+    # find what SETS 0x80006682's bit back, dynamically (static text/xref scans keep
+    # missing writers via computed addressing).
+    bitmask_680_writes = make_watch(0x80006680, 2)
+    bitmask_682_writes = make_watch(0x80006682, 2)
+    bitmask_684_writes = make_watch(0x80006684, 2)
+    # Session 79 continued a tenth time: all four bitmask-family writers above came back
+    # silent (never written in either run) -- ruling them out as the dynamic "due"
+    # signal. GhidraDirectJump39.java's own gate for the table-arm write path is a
+    # BAR_CTR (0x800065b2) mod CHAIN-interval check. BAR_CTR is documented (NOTES.md
+    # Session 15 map) as incremented unconditionally on EVERY step==0 body entry,
+    # switching or not -- and DIRECT JUMP's own hooks (A-D) are known to force a
+    # step==0 entry off the natural loop boundary to make the commit land. If that
+    # forced entry ALSO bumps BAR_CTR an extra, out-of-cycle time (a side effect no
+    # existing hook corrects for), it would trip this modulo check early -- exactly the
+    # same class of bug Hooks A-F already fix elsewhere in this same commit path.
+    bar_ctr_writes = make_watch(0x800065b2, 2)
     phase_writes = make_watch(PHASE_TBL, 8)
     gate_writes = make_watch(GATE_TBL, 8)
     cntdn_writes = make_watch(CNTDN_TBL, 8)
@@ -518,6 +544,12 @@ def run_one(er, a, dj_on):
     for fr, pc, addr, size, val in snap_writes:
         print(f"   frame {fr:.1f}  [{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
     print_table_arm_watch(table_arm_events)
+    for name, log in (("0x80006626", table_arm_due_writes), ("0x80006680", bitmask_680_writes),
+                       ("0x80006682", bitmask_682_writes), ("0x80006684", bitmask_684_writes),
+                       ("0x800065b2 (BAR_CTR)", bar_ctr_writes)):
+        print(f"\n{name} writes, {len(log)} total:")
+        for fr, task, pc, addr, size, val in log:
+            print(f"   frame {fr:.1f}  [{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
 
     return dict(fires=fires, fires_before_poke=fires_before_poke, d7_at_arm=d7_at_arm,
                 pc_trace=pc_trace,
@@ -530,6 +562,9 @@ def run_one(er, a, dj_on):
                 live_nibble_writes=live_nibble_writes,
                 commit_hits=commit_hits, snap_writes=snap_writes,
                 table_arm_events=table_arm_events,
+                table_arm_due_writes=table_arm_due_writes,
+                bitmask_680_writes=bitmask_680_writes, bitmask_682_writes=bitmask_682_writes,
+                bitmask_684_writes=bitmask_684_writes, bar_ctr_writes=bar_ctr_writes,
                 new_pat=new_pat, post_bank=post_bank, post_step=post_step,
                 post_frame=post_frame)
 
@@ -607,6 +642,11 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
     prev_bank_ix_writes = gt_watch(0x800065bc, 1)
     flag_80001860_writes = gt_watch(0x80001860, 1)
     flag_46107568_writes = gt_watch(0x46107568, 4)
+    table_arm_due_writes = gt_watch(0x80006626, 2)
+    bitmask_680_writes = gt_watch(0x80006680, 2)
+    bitmask_682_writes = gt_watch(0x80006682, 2)
+    bitmask_684_writes = gt_watch(0x80006684, 2)
+    bar_ctr_writes = gt_watch(0x800065b2, 2)
 
     pc_trace = []
 
@@ -668,6 +708,12 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
     for fr, pc, addr, size, val in snap_writes:
         print(f"   frame {fr:.1f}  [{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
     print_table_arm_watch(table_arm_events)
+    for name, log in (("0x80006626", table_arm_due_writes), ("0x80006680", bitmask_680_writes),
+                       ("0x80006682", bitmask_682_writes), ("0x80006684", bitmask_684_writes),
+                       ("0x800065b2 (BAR_CTR)", bar_ctr_writes)):
+        print(f"\n{name} writes, {len(log)} total:")
+        for fr, pc, addr, size, val in log:
+            print(f"   frame {fr:.1f}  [{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
     return dict(bank=cur_bank, pattern=cur_pat, step=cur_step, live_nibble=live_nibble,
                 reached=reached, live_nibble_writes=live_nibble_writes, d7_at_arm=d7_at_arm,
                 pc_trace=pc_trace,
@@ -675,7 +721,10 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
                 flag_80001860_writes=flag_80001860_writes,
                 flag_46107568_writes=flag_46107568_writes,
                 commit_hits=commit_hits, snap_writes=snap_writes,
-                table_arm_events=table_arm_events)
+                table_arm_events=table_arm_events,
+                table_arm_due_writes=table_arm_due_writes,
+                bitmask_680_writes=bitmask_680_writes, bitmask_682_writes=bitmask_682_writes,
+                bitmask_684_writes=bitmask_684_writes, bar_ctr_writes=bar_ctr_writes)
 
 
 def compare_groundtruth(dj_result, gt_result, target_pattern):
