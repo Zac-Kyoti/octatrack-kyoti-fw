@@ -20853,3 +20853,130 @@ the detour, the twin site's raw disassembly). Logs: `/tmp/dj_hookg_run.log` (bui
 `/tmp/dj_hookg2_run.log` (build 2), `/tmp/dj_diag_run.log` (G_SUPPRESS_TICK
 diagnostic), `/tmp/dj_hookg3_run.log` (build 3, current state). First patch code
 written and built this session -- still emulator-only, not flashed.
+
+## Session 79, continued a thirteenth/fourteenth time (2026-09-20) -- candidate (d)
+(BAR_CTR fix) built, dynamically tested, and REFUTED; found the real trigger
+mechanism (CNTDN_TBL arm-to-1-then-fire), reverted the dead code
+
+Per the user's explicit choice ("Pursue candidate (d): fix BAR_CTR (Recommended)")
+from the previous entry's `AskUserQuestion`, and per the user's standing reminder
+this session to keep the Analog Rytm's DIRECT JUMP design in mind (`ar-kyoti-fw/
+MECHANISM.md`'s "fresh-per-request countdown recompute" invariant): implemented,
+built, and dynamically tested deriving `BAR_CTR` fresh from `G_ABSTICK` inside
+`dj_c`, exactly the same "as if this pattern had been continuously playing since
+transport start" principle already used for `STEP`/`D7`. **Dynamic proof shows it
+does nothing** -- reverted.
+
+### Found `BAR_CTR`'s reset site precisely first
+
+Ghidra returned EMPTY for `0x400a4790-0x400a4850` (no error, just no defined
+instructions in the project database -- second time this exact range has done
+this). Fell back to raw `m68k-elf-objdump -D -b binary -m 68000 --adjust-vma=
+0x40000400 --start-address=0x400a4790 --stop-address=0x400a4850 out/raw/
+section_3_MAIN_OS.bin`: `0x400a483a: movew (A3),0x800065b2`, with `A3` loaded via
+`lea 0x8000662a,%a3` immediately before -- confirms `BAR_CTR = *(0x8000662a)`
+("loop region start", normally 0 for a plain switch), stock, unmodified,
+immediately before Hook C (`0x400a4840`) runs.
+
+### Built candidate (d): `dj_quot32` (new helper, restoring-division shape like
+### `dj_mod32` but tracking the quotient into `%d4`) + `move.w BAR_CTR, G_ABSTICK/
+### newLen` inside `dj_c`
+
+Clean build (`0 unexpected outside the cave`, no new allowlist entry needed --
+reuses the existing `0x400a4840` detour). Dynamic re-test (`/tmp/dj_barfix_run.log`,
+`emu_directjump_dynamic.py --groundtruth`):
+
+- `bar_ctr_writes` confirmed the fix fired correctly and computed a sane value
+  (`0x1` at frame 461, i.e. `G_ABSTICK/newLen` = `8/6` = `1`, matching the
+  formula exactly).
+- **The table-arm write's own real memory-write log (`0x80001904 writes`, NOT
+  the stale PC-hit watch) is BYTE-IDENTICAL with and without this fix**: same
+  frames (0, 346, 863 after Hooks G/G2 suppress the 518 one), same values, same
+  PCs. Zero change.
+- **Final `DJ-commit vs ground-truth` comparison: 19 of 64 slots differ --
+  identical to the pre-fix count.** Zero measured benefit.
+
+This directly refutes candidate (d): `BAR_CTR` is not the schedule driver for
+this write's cadence, despite `GhidraDirectJump39.java`'s static finding that
+some table-arm gate code reads `BAR_CTR mod CHAIN-interval` -- most likely that
+check's `interval==1` branch is unconditionally true for this test project's
+config, making `BAR_CTR`'s value irrelevant to whether the write fires at all.
+
+### Re-derived the real mechanism from raw objdump + this session's own data --
+### it's `CNTDN_TBL`, already found and (wrongly) retracted twice in this exact
+### thread's history
+
+Disassembled `0x400a2a70-0x400a2e40` directly (`m68k-elf-objdump`) while chasing
+the refutation and independently re-derived the "permanent phase shift" framing
+from "continued a seventh time" (write-cadence shift, not a which-pattern
+question) -- then found that entry's own conclusion already named the real next
+step precisely, and that an EVEN EARLIER entry ("continued a fifth time") had
+already found the actual trigger mechanically: **`CNTDN_TBL[track]`
+(`0x800065c3`, the ordinary trig-fire countdown) gets armed to `0x1` by DIRECT
+JUMP's commit (stock, ordinary behaviour for any switch) and fires -- goes idle
+-- exactly one tick later, at frame 518, the SAME frame the extra table-arm
+write happens.** This session's own real (not stale-PC-watch) write log
+independently confirms the "seventh time" entry's write-cadence-shift finding:
+with Hooks G/G2 suppressing the frame-518 write, the *next* real write still
+lands at G_ABSTICK=15 (not the correctly-scheduled 12) -- the schedule doesn't
+resync just because the store was suppressed, meaning whatever decides "due"
+fires again regardless of the write outcome, consistent with a countdown
+(CNTDN_TBL) reaching zero rather than a value-comparison against the stored
+anchor.
+
+Also found (via `GhidraDirectJump43.java`) that the due-check code, both known
+write sites, and the whole DIRECT JUMP commit region are part of ONE giant
+function (`consumer_a6c0_a33f8` @ `0x400a1eea`, body spanning to ~`0x400a4f17`
+with a gap at `0x400a4568-0x400a4b99` where Ghidra again has no defined
+instructions -- same gap class as the `BAR_CTR` reset site above) -- there is no
+separate "caller" to trace; DJ's commit and the periodic due-check are just
+different branches through the same per-tick handler.
+
+### Reverted the BAR_CTR fix
+
+Zero measured benefit and unquantified regression risk (forcing `BAR_CTR` away
+from its stock value on every DIRECT JUMP commit could affect whatever ELSE
+reads it, never characterized). Removed `dj_c`'s BAR_CTR override, the now-dead
+`dj_quot32` helper (nothing else called it), rebuilt, and re-ran the SAME dynamic
+validation to confirm the revert is clean: `/tmp/dj_revert_run.log` shows
+`BAR_CTR` back to stock behaviour (6 writes, resets to `0x0` at `0x400a483a` with
+no follow-up override), Hooks G/G2 still suppressing correctly
+(`G_SUPPRESS_TICK <- 0x9`, matching), and the final comparison unchanged at
+**19 of 64 slots differ** -- byte-for-byte the same as with the BAR_CTR fix
+present, confirming the revert introduced no regression of its own. `BAR_CTR`'s
+`.equ` kept (documentation only, unused by any hook) since it's a real,
+confirmed address future sessions may want when tracing `CNTDN_TBL` instead.
+
+### Status: candidate (d) closed as refuted. Current best state is still Hooks
+### G/G2 alone (20/64 -> 19/64, a real if incomplete improvement). The
+### well-evidenced next lead is `CNTDN_TBL`, not `BAR_CTR`
+
+The "continued a seventh time" entry's own recommendation is now the right next
+step, re-confirmed independently this pass: **don't suppress the extra write --
+make it never become due in the first place, or make it write the value the
+NEXT natural boundary would have produced.** Concretely: trace what specifically
+reads `CNTDN_TBL[track]`'s arm-to-1/fire-to-idle transition and connects it to
+the table-arm due-check firing an extra time (the "seventh time" entry's
+write-cadence data and this session's real-write-log confirmation both point at
+`CNTDN_TBL` reaching zero as the trigger, not yet mechanically proven the way
+`BAR_CTR`'s irrelevance now is). This project's own history has already
+retracted two theories on this exact question (Session 79 "sixth"/"seventh"
+times); a third pass needs the SAME PC-trace-diff rigor that found and then
+correctly retracted those, not a fourth guess-and-watch round.
+
+Not yet decided by the user: continue this thread with a fifth build attempt
+(now aimed at `CNTDN_TBL` specifically), or consider Hooks G/G2's proven
+20/64->19/64 improvement the deliverable for this thread for now. Per this
+project's own standing rule, everything above is emulator-only -- nothing
+flashed.
+
+Tooling: `tools/ghidra/attic/GhidraDirectJump42.java` (raw-objdump fallback probe
+for the `BAR_CTR` reset site, empty-Ghidra-range case), `GhidraDirectJump43.java`
+(function-boundary + caller probe, found the single-giant-function structure).
+`tools/patch_directjump.s`: `dj_c`'s BAR_CTR override and the `dj_quot32` helper
+added and then reverted this pass (net: BAR_CTR `.equ` kept as documentation,
+everything else back to the pre-fix, Hooks-G/G2-only state).
+`tools/build_directjump_v4.py`/`tools/emu_directjump_dynamic.py` unchanged this
+pass (no new detour or watch needed for either the fix attempt or its revert).
+Logs: `/tmp/dj_barfix_run.log` (fix present, refuted), `/tmp/dj_revert_run.log`
+(post-revert, confirms clean).

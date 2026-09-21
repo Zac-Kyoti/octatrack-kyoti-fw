@@ -155,6 +155,17 @@
     .equ PEND_PAT,  0x800065c0
     .equ PEND_BANK, 0x800065bf
     .equ STEP,      0x800065b6
+    .equ BAR_CTR,   0x800065b2          | "which bar/loop repetition" counter (word),
+                                        | Session 79 (NOTES.md): copied from 0x8000662a
+                                        | (the pending switch's own "loop region start",
+                                        | normally 0) at every switch commit, stock,
+                                        | unmodified, immediately before dj_c runs.
+                                        | Kept (unused by any hook currently) as a pointer
+                                        | for future sessions -- deriving it fresh from
+                                        | G_ABSTICK was tried and dynamically DISPROVEN as
+                                        | a fix for the table-arm schedule ("continued a
+                                        | thirteenth/fourteenth time"); the real driver is
+                                        | very likely CNTDN_TBL, not this.
     .equ SCALE_IX,  0x8000663d
     .equ STOPFLAG,  0x8000667e
     .equ RUNNING,   0x800065b8
@@ -511,6 +522,22 @@ djc_store:
     move.l  %d0,%d7                    | D7 -> quotient(0x800065e4/f4[t]) = resumeStep exactly
                                        | for unscaled tracks, feeding REFILL_TBL precisely
                                        | instead of coarsely
+|   Session 79 (NOTES.md, "continued a thirteenth/fourteenth time"): tried deriving
+|   BAR_CTR (0x800065b2) fresh from G_ABSTICK here, on the theory that its mid-loop
+|   reset (copied from 0x8000662a immediately before this hook runs) was the driver of
+|   the permanently-shifted table-arm write schedule Hooks G/G2 (below) can only
+|   suppress one write at a time, not correct. Built and dynamically re-tested:
+|   BYTE-IDENTICAL table-arm write cadence and final mismatch count (19/64) with and
+|   without this fix -- proves BAR_CTR is NOT the schedule driver. Reverted rather than
+|   left in: zero measured benefit, and forcing BAR_CTR away from its stock value on
+|   every DIRECT JUMP commit carries unquantified regression risk for whatever else
+|   reads it. The real driver is very likely CNTDN_TBL (0x800065c3[t]) being armed to
+|   0x1 at commit and firing (idling) exactly at the extra write's own frame -- see
+|   NOTES.md, "continued a fifth/seventh time" (found and retracted as a DIFFERENT
+|   branch's cause earlier this thread) and "continued a fourteenth time" (re-confirmed
+|   as the timing match against this session's own Hooks-G-suppressed re-test). Not
+|   re-attempted this pass; the `dj_quot32` helper this fix used has been removed along
+|   with it (dead code, nothing else called it).
     moveq   #1,%d0
     move.b  %d0,G_JUST_COMMITTED        | tell Hook F a real commit happened this tick
 |   Session 79 (NOTES.md, "continued a tenth/eleventh/twelfth time"): DIRECT JUMP's
