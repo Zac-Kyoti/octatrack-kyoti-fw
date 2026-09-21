@@ -22930,3 +22930,335 @@ so identifying the CUE keycode needs that table decoded properly rather than rea
 2. Then, and only then, instrument whichever path does the cutting (the `0x600` frame write
    and the level chain are the two candidates) and design the hook.
 3. Do NOT re-run the four poked solo/cue states (addendum 6) -- they are recorded as correct.
+
+## Session 78 continued a ninth time (2026-09-20, `wip`) — TRIGLESS-LOCK AUTO-REMOVE:
+**FLASHED, DOES NOT WORK.** Hardware says the LED still stays lit after erasing the last
+lock, and still stays lit across a pattern switch. Re-reading the decompile immediately
+after the report found a real, specific error in the patch's own predicate: the 64-bit
+field it keys on is indexed by **STEP**, not by param.
+
+### Hardware result (user, MKI, `OCTATRACK_TRIGLOCK.bin`)
+
+- Erase the 2nd (last) param lock on a trigless lock: **LED does not go off.**
+- Switch away from the pattern and back: **LED still lit.**
+
+i.e. no observable change from stock. Nothing worse either -- no hang, no corruption
+reported, unit fine.
+
+### The predicate is wrong: `+0x48d8` is a per-STEP bitmap, not a per-param one
+
+`patch_triglock.s` gates everything on "the 64-bit field at `blob + trk*0x8b0 +
+pat*0x8ed8 + bank*0x9b340 + 0x48d8` is all-zero", which the patch's own comments
+describe as "which params are locked on this step" -- inherited from Session 30's label
+for that field ("+0x48d8 param bitmap ... 2xu32 'which params locked'"). Re-reading
+`FUN_40041bc4`'s own use of it, that label is wrong:
+
+```c
+iVar8 = (int)local_6;                      // local_6 = the STEP (established this session)
+FUN_400a6904(uVar3,uVar9,iVar8);           // test bit [STEP] of the 64-bit pair
+if ((extraout_D1 & 1) != 0) {
+    uVar14 = FUN_400a694c(0,1,iVar8);      // build a 64-bit mask for bit [STEP]
+    *(uint *)(&DAT_400e6ab8 + iVar13) = uVar3 & uVar4;   // clear bit [STEP]
+```
+
+The bit index is the **step**, and the field is per `(bank, pattern, track)`. So it is
+"**which STEPS on this track carry a lock**" -- the blob-side twin of `0x46c7d48c`, 64
+bits for 64 steps -- not a per-param mask for one step. Consequences:
+
+1. The patch's guard ("all-zero") actually means "**no step anywhere on this track has a
+   lock**", not "this step has no locked params left". On any realistic pattern (any
+   other step on that track still holding a lock) it is false, and the detour silently
+   does nothing -- which matches the hardware report exactly.
+2. Even when it is true, it is not the 1->0-of-the-last-param transition: the stock code
+   clears the step's bit whenever it was set, so the bit would fall on the FIRST param
+   erase, not the last. Had the patch fired, it would likely have cleared BOTH params'
+   worth of `#1` on the first erase -- a latent data-loss bug that the hardware simply
+   never reached, since the guard kept it inert.
+
+### The emulator test encoded the same misunderstanding
+
+`tools/emu_triglock.py`'s three cases planted that 64-bit field by hand (all-zero ->
+expect clear; one high bit set -> expect no clear) and all three passed. They validated
+the code as written against the semantics the code assumed -- not against what the field
+actually means. A passing test built from the same wrong premise as the patch is worth
+nothing, and that is exactly what happened here; noting it so the next build's test is
+designed from the firmware's own use of a field rather than from a prior session's label
+for it.
+
+### Next measurement, before any re-build (asked of the user)
+
+Export the project after doing the erase on the patched firmware, and check the step's
+`TRAC+0x19` (disk) / `TRAC+0x10` (RAM) trig-type-layer bit. **Stock never clears that bit
+-- proven across all four `ARTLTEST` exports -- so it is an unambiguous "did the detour
+run at all" marker**, independent of any LED behaviour:
+- bit **cleared** -> the detour fired and did its work; the LED is being driven by
+  something else (leading candidate: `0x46c7d2e4`, the LIVE-edit lock-presence bitmap,
+  which `0x400339d8` rebuilds from the `+0x4900` scratch buffer -- and that buffer is NOT
+  all-`0xFF` after a live erase, since `FUN_40041bc4` itself writes its encoder
+  accumulator bytes into `+0x4900[step]`. Session 32's "clear #1 -> LED off" validation
+  never covered this case: its test bank was disk-loaded, so `+0x4900` was empty and only
+  `0x46c7d48c` could light the step).
+- bit **still set** -> the detour never fired, consistent with the wrong-guard analysis
+  above, and the fix is the predicate, not the action.
+
+`out/` build is left as-is (flashed image unchanged) pending that answer. Revert path
+unchanged: reflash stock 1.40C.
+
+## Session 80 continued (2) (2026-09-20, `wip`) — RELOAD2: hardware report #2. Entry gesture moved [PTN]-hold → [BANK]+[YES]; stopped-transport regression fixed; 4 issues still open
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" / "Session 80
+continued"), appended after whatever concurrent DIRECT JUMP / trigless-lock
+entries landed in between.
+
+**User flashed the previous build and reported six things.** Two are fixed here,
+one was a regression I introduced, and three are still open.
+
+### The regression I caused — FIXED
+
+Session 80 continued dropped `rl_ptn`'s `RUNNING` gate and the commit message
+claimed it "was never actually load-bearing." **That was an INFERENCE and
+hardware falsified it**: executing a reload with the transport stopped now
+started playback, jerkily. The gate had been suppressing a real downstream
+behaviour.
+
+Fix: `rlj_setflag` only arms `RELOAD_NOW` (`0x46c8028a`) when `RUNNING` is
+nonzero; when stopped it sets `RDRAW` instead. The slab copy has already
+happened by that point, so a stopped reload still fully updates the data and
+the step engine reads the patched slab on the next PLAY. **The claim that
+`RELOAD_NOW` is what reaches into the transport is itself a HYPOTHESIS — the
+actual start mechanism was never traced.** Needs hardware to confirm/falsify.
+`--trk` (transport running) re-confirmed ALL GOOD, so the playing path is
+unaffected by the new gate.
+
+### The entry gesture moved off [PTN] entirely — [BANK]+[YES]
+
+Hardware killed [PTN]-hold on three counts: it fired ~1 try in 5; [PTN] was
+triple-booked (stock's SELECT PATTERN chooser, DIRECT JUMP's own `[PTN]+[YES]`,
+our hold); and our `rl_yes_ptnheld` poke **collided with the exact slot DIRECT
+JUMP v4 pokes `dj_toggle` into** — the collision `reference/MERGE.md`'s `[YES]`
+trampoline was invented to paper over. User proposed `[BANK]+[YES]`, mirroring
+DIRECT JUMP's `[PTN]+[YES]`.
+
+RE (measured, this session):
+- `[BANK]` press `0x4007af80` pushes overlay layer struct `0x400cff14` through
+  the **same** `FUN_40031494` push+rebuild `[PTN]` uses; `[BANK]` release
+  `0x4007b3e0` pops it (`0x4003146c` @ `0x4007b40e`). It also shows the SELECT
+  BANK window (`FUN_40059f8c`, dur `0xf0`).
+- That layer's records are at `0x400cff34`: trigs `0x00-0x0f` → `0x4007b2fc`,
+  NO (`0x32`) → `0x4007b25c`, **YES (`0x31`) @ `0x400d00ee` with press = NULL**
+  — structurally identical to `[PTN]`'s dead slot. Press field `0x400d00f0`.
+- `[BANK]`'s hold handler `0x4007af24` is tiny: `0x460e73c2 = 1`, rts. Release
+  reads: `0x460e73c6 == 2` → `0x40056a70`; else `0x460e73c2 == 0` →
+  `0x40056a70`; else `0x460e73bc = 1` and → `0x40031200`.
+
+Implementation: `rl_bank_yes` is poked into `0x400d00f0` (build asserts the
+stock 26 bytes first). It opens the picker on a YES **press** while `[BANK]` is
+held, and clears `BANK_COMMIT` (`0x460e73c2`) so the `[BANK]` release takes the
+`0x40056a70` dismiss path instead of committing a bank change under our picker
+— **INFERRED from the release disassembly, NOT hardware-verified; if `[BANK]`
+release misbehaves, deleting that one `clr.l` is the first thing to try.**
+
+**`rl_ptn` and BOTH `[PTN]`-layer pokes (`rl_yes_ptnheld` / `rl_no_ptnheld`) are
+GONE.** `[PTN]` is now byte-for-byte stock in this build, asserted at build time
+and re-asserted in the emulator. PTN+YES belongs to DIRECT JUMP alone; BANK+YES
+is ours; no shared slot, so the merged build needs no `[YES]` trampoline for
+this pair any more. Detour count 6 → 5; image 1303 → 1219 bytes vs stock.
+
+Validation: `emu_reload2.py --combo` **ALL GOOD (19/19)** including 5 new
+BANK+YES cases (opens / opens while stopped / opens with `G_KIND` stuck /
+release does nothing / inert when already open). `emu_reload2_keymap.py`
+retargeted from the PTN layer to the BANK layer and **ALL GOOD**: the YES
+dispatch slot really resolves to `rl_bank_yes` after a REAL `[BANK]` press +
+table rebuild, jsr'ing that live slot really opens the picker, and `[PTN]`'s
+handler and both its layer records are confirmed stock.
+
+### Corrections to our own knowledge base (measured)
+
+- **`reference/kb/memory-map.md` is WRONG about `[PTN]`'s key timing.** It says
+  the `+8` hold/repeat delay is `0` for PTN ("nonzero only for the arrows").
+  The raw base keymap records say otherwise: PTN (`0x2e`) is delay `0x1e`,
+  repeat `0`; BANK (`0x2f`) the same; UP/RIGHT (`0x34`/`0x21`, shared handler
+  `0x4004b970`) delay `0x1e` repeat `0x1e`; DOWN/LEFT (`0x33`/`0x20`, shared
+  handler `0x400491a0`) delay `0x0f` repeat `0x04`. Not yet edited in the KB.
+- `FUN_400238a4` (cited in Session 42 as the RELOAD BANK "end re-sync that cuts
+  audio a few steps later") **has ZERO call references image-wide** — that
+  address is wrong or it is only reached indirectly.
+
+### Still open (user: "we can work on #2 and #4 later", now with more data)
+
+1. **List UI.** User clarified `[FUNC]+[UP]` is a *design reference only*, not
+   an available gesture. Located its data: a 12-entry string-pointer array at
+   **`0x400beb72`** (2-byte aligned, which is why a naive 4-aligned reference
+   scan misses it) — `TRACKS / CHROMATIC / SLOTS / … / QUICK MUTE / DELAY CTRL /
+   …`, strings in the `0x400b5340`-`0x400b53a5` cluster. Its **renderer is not
+   yet located** — that is the next step for the real list widget. (The UP
+   branch of `0x4004b970` cycles `0x460d16ac` and refreshes 8 tracks.)
+2. **Reload timing.** New hardware detail: LEDs update instantly, the reloaded
+   TRK SEQ plays steps 1-3 (or 1-2), **pauses just under a second**, then
+   restarts. Lead worth chasing (INFERRED): our worker rejoins stock's exit
+   (`JOB14_EXIT`), so the stock job-completion dance still runs — `0x40023bf4`
+   → `0x40022e04` (sets `0x46c77bf6` via `0x4009b5ac`) and `0x40080844`, which
+   tears down the "RELOADING BANK" overlay **including a keymap layer pop**
+   (`0x4003146c` with `0x400d0bc4`) and sets RDRAW. That begin/done overlay
+   lifecycle brackets our reload for roughly the observed duration, and it is
+   the same layer-push/rebuild machinery Session 60 found breaking DIRECT JUMP.
+   The step-1 reset itself remains Session 42's own deferred MVP gap.
+3. **Arrow glitches** ("strange visual glitches, move away from the option
+   window"). Relevant measured fact above: LEFT/RIGHT genuinely share handlers
+   with DOWN/UP **and auto-repeat**, which our two arrow detours were never
+   designed around.
+4. **"RELOAD BUSY" on most `[YES]` presses.** This is the Session-80 diagnostic
+   toast doing its job: it CONFIRMS the previously-unproven hypothesis that
+   `G_KIND` really does get stuck, i.e. posted jobs frequently are not being
+   serviced. Combined with the measured fact that `FUN_40022778` always builds
+   its message in ONE fixed scratch buffer (`0x460bd912`), the ~1s job duration
+   above gives a plausible window for a second press to clobber the first.
+   Still not root-caused.
+
+### Status
+
+Committed, **NOT yet flashed**. Next hardware pass should check: hold `[BANK]`
+and tap `[YES]` opens the picker (and that `[BANK]` release doesn't do anything
+weird — the `BANK_COMMIT` clear is the inferred bit); `[PTN]` behaves exactly
+like stock again; and whether a stopped-transport reload still starts playback.
+
+### Confirmed from firmware alone: `+0x48d8` is per-STEP (closes the ninth-pass question)
+
+`tools/ghidra/attic/GhidraArtlBitHelpers.java` decompiles the two helpers
+`FUN_40041bc4` uses on that field:
+
+```c
+FUN_400a6904(hi,lo,n)  // 64-bit logical shift RIGHT by n  -> caller tests bit0 = test bit n
+FUN_400a694c(hi,lo,n)  // 64-bit logical shift LEFT  by n  -> called as (0,1,n) = mask, bit n set
+```
+
+Both take the bit index as `n`, and the caller passes `iVar8` for `n`. The SAME `iVar8`
+indexes `(&DAT_46c7d2e4)[iVar8] |= 1 << track` at `0x400420fa` -- and `0x46c7d2e4` is
+independently established (Sessions 28/29, and `emu_plock.py`'s own constant comment) as
+**byte[STEP] = bitmap of tracks**. So `iVar8` is the step, and therefore:
+
+> **`+0x48d8` = a 64-bit per-STEP lock bitmap for one (bank, pattern, track) -- the
+> blob-side twin of `0x46c7d48c`. Session 30's label "param bitmap / which params
+> locked" is WRONG.** `kb/file-format.md` and the Session 30 entry should be corrected.
+
+This fully explains the dead flash: `patch_triglock.s`'s guard ("that field is all-zero")
+means "no step on this whole track holds a lock", which is false on any real pattern.
+
+### Why this can't be fixed by swapping in a different field
+
+`FUN_40041bc4` clears the step's bit in that field whenever it was set -- so the bit
+falls on the FIRST param erase, not the last. It is a "this step has lock presence" flag,
+not a count, so it cannot express the 1->0-of-the-last-param transition either.
+
+Nothing else in the live view tracks per-param lock state for a step. The only structure
+that does is `#1[step]`'s own 32 bytes -- which is exactly the structure that is stale
+mid-session (this whole thread's core finding). **So the detour cannot know "was that the
+last one" without knowing WHICH `#1` byte the just-erased param owns** -- i.e. the
+(page, encoder) -> `#1` byte-offset mapping this build was specifically designed to avoid
+needing. That design was the error: the mapping is not avoidable.
+
+### And the mapping problem and the missing-commit problem are the SAME problem
+
+`ARTLTEST1`'s own two real snapshots prove stock resolves it: `.strd` has `#1` bytes
+`0x00` (PTCH) and `0x02` (LEN) locked; `.work`, after PTCH was live-erased, has byte
+`0x00` cleared and `0x02` intact. Stock therefore performs a **per-param** resolution of
+"which byte does this knob own" somewhere between the gesture and the export. Whatever
+code does that is both the unlocated commit AND the mapping. Finding one hands us the
+other; neither is separately solvable by substituting another field.
+
+### Blocked on test data
+
+The four `ARTLTEST` project exports are **gone** -- not on the Desktop, not in
+`~/Desktop/OT Backup/KYOTI/`, nowhere under `~` (searched). They are the only real
+trigless-lock ground truth this project has, and per the standing rule (real hardware
+exports only, never fabricate a bank blob) nothing here can be reconstructed locally.
+Asked the user to restore them or re-export. Not needed for the field-semantics finding
+above (settled statically), but required to validate any future predicate against real
+data instead of assumptions -- the precise failure mode of this build.
+
+**No new build. Nothing flashed. The flashed image stays as-is (inert, harmless) until a
+predicate exists that is derived from firmware behaviour rather than a label.**
+
+## Session 58 continued yet again, part 18 addendum 8 (2026-09-20, `wip`) — SOLO BUG FOUND
+AND FIXED (emulator): hook 1's own `p1_solo` left D5 untouched whenever the soloed mask read
+zero, so stock's solo branch hard-cut every MUTED track, in every MUTE MODE. Reproduced
+exactly, fixed, and verified across all three modes. Ready for hardware test.
+
+### Reproduced at last -- and it was our bug, not an unhooked path
+
+Six poked solo/cue states had all behaved correctly (addenda 6-7), which was itself the clue:
+the hard cut needed SOLO mode engaged **with the soloed mask reading zero**. Re-reading
+`p1_solo` made it obvious:
+
+```
+p1_solo:
+    move.l  %d5,%d2
+    andi.l  #0xff,%d2
+    beq     p1_zero      <-- bails here leaving D5 COMPLETELY UNTOUCHED
+```
+
+Stock's solo branch (re-derived in addendum 5) has TWO silencing paths, both post-FX hard
+cuts that also kill the FX return:
+
+```
+  not soloed AND muted -> clr.l   both words
+  not soloed           -> words AND D1,  D1 = (D5.low8 == 0) ? -1 : 0
+```
+
+Hook 1 only ever defused them by clearing D5's low 16 bits -- and it skipped that on the
+`p1_zero` path. So: solo engaged + nothing (visibly) soloed + a muted track = stock's
+`clr.l`, a hard cut, identical in OT+FX and DT because it happens before either mode's own
+handling can matter.
+
+**Measured on the FX fixture, DT, mute engaged 20 frames after a trig:**
+
+```
+                         +493ms  +993ms  +1493ms  +1993ms  +2493ms  +2992ms
+  muted (normal)         0.0504  0.0381   0.0368   0.0222   0.0205   0.0119
+  muted + SOLO_FLAG      0.0000  0.0000   0.0000   0.0000   0.0000   0.0000   <-- the bug
+```
+
+The bugged run is 0.0186 at the event then digital silence within 20 ms -- exactly the
+user's "quick cut, no fx tails".
+
+### The fix
+
+`p1_solo` now, whenever solo is engaged: computes `silenced = (~soloed if anything soloed
+else 0) OR the mute mask`, and clears D5's low 16 bits **unconditionally**. So neither stock
+hard-cut path can ever run while our mode is active, a muted track follows MUTE MODE whether
+or not solo happens to be engaged, and a solo-silenced track goes through exactly the same
+machinery as a manually muted one -- which is what the user asked for. Stock's own reading of
+the low byte (bit 7 included) is mirrored rather than second-guessed, given addendum 7's
+open question about `FUN_4007c428`'s bit-7 aggregate.
+
+### Verified, all three modes
+
+```
+                              +493ms  +993ms  +1493ms  +1993ms  +2493ms  +2992ms
+  DT   muted                  0.0504  0.0381   0.0368   0.0222   0.0205   0.0119
+  DT   soloed                 0.0538  0.0463   0.0368   0.0181   0.0206   0.0115
+  DT   muted + SOLO_FLAG      0.0513  0.0403   0.0365   0.0190   0.0207   0.0126   (was all 0)
+  DT   unmuted                0.0536  0.0547   0.0496   0.0492   0.0561   0.0550
+  OT+FX muted                 0.0128  0.0065   0.0025   0.0006   0.0003
+  OT+FX muted + SOLO_FLAG     0.0126  0.0066   0.0025   0.0006   0.0003   (identical)
+  OT    muted + SOLO_FLAG     0.0000  0.0000   0.0000   0.0000   0.0000   (stock, by design)
+```
+
+Every silencing route now lands on the same behaviour as a manual mute in the same mode, and
+OT stays stock. Unmuted playback is untouched.
+
+### Caveat, stated plainly
+
+The state reproduced here is "muted track + `SOLO_FLAG` engaged". Whether that is *exactly*
+what the unit is in when soloing via MIXER or QUICK MUTE + CUE+TRIG is still not proven --
+the handler behind that gesture remains unidentified (addendum 7). But the fix removes BOTH
+of stock's hard-cut paths unconditionally while solo is engaged, so it covers the reported
+symptom whichever of them the hardware is taking. If the hard cut somehow survives on
+hardware, that would mean a third path outside `FUN_40004dbc` entirely, and the level chain
+(addendum 6) becomes the next suspect.
+
+### Status
+
+`out/mainos_mutemode_dt.bin` + `OCTATRACK_OS1.40C_MUTEMODE_DT.{syx,bin}` rebuilt with the fix
+(patch_softmute 850 B, all guards pass, 0 bytes outside the DT delta, checksum + EFT
+round-trip clean). Hook 13 still out, hook 15 still in. NOT FLASHED.

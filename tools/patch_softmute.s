@@ -121,12 +121,38 @@ p1_active:
     bra     p1_edge
 
 p1_solo:
-    | solo: soloed mask = D5 bits 0..7
+    | Solo engaged.  BOTH of stock's solo-branch silencing paths are post-FX HARD cuts that
+    | also kill the FX return (re-derived from the binary, part 18 addendum 5):
+    |     not soloed AND muted -> `clr.l` both words
+    |     not soloed           -> words AND D1, where D1 = (D5.low8 == 0) ? -1 : 0
+    | so the ONLY way a silenced track can follow MUTE MODE is for neither to run. That means
+    | clearing D5's low 16 bits UNCONDITIONALLY here.
+    |
+    | *** part 18 addendum 8: this is the SOLO bug the user reported on hardware ("soloing in
+    | all modes produces the OT type cut, quick cut, no fx tails"). The previous version
+    | branched to p1_zero when the soloed mask was 0 and left D5 UNTOUCHED on that path -- so
+    | with solo engaged and nothing soloed, stock's `clr.l` still hard-cut every MUTED track,
+    | in every MUTE MODE. Reproduced exactly in the DSP-rendering port: muted + SOLO_FLAG
+    | rendered 0.0186 then digital silence within 20 ms, against a normal mute's smooth
+    | 0.0504 -> 0.0119 decay over 3 s on the same reverb-carrying track. ***
     move.l  %d5,%d2
-    andi.l  #0xff,%d2
-    beq     p1_zero                     | solo engaged but nothing soloed -> nothing silenced
+    andi.l  #0xff,%d2                   | soloed mask (stock reads the whole low byte, bit 7
+                                         | included -- mirror it exactly rather than guessing
+                                         | about FUN_4007c428's bit-7 aggregate)
+    beq     p1_solo_none
     eori.l  #0xff,%d2                   | silenced = ~soloed & 0xff  (the 8 audio tracks)
-    | keep EVERY track's frame level words: clear D5 bits 0..15
+    bra     p1_solo_fold
+p1_solo_none:
+    moveq   #0,%d2                      | solo engaged but nothing soloed -> nothing silenced
+                                         | BY SOLO.  Muted tracks are still silenced, below.
+p1_solo_fold:
+    | Fold the MUTE mask in: a muted track must follow MUTE MODE (fade / FX tails / DT ride)
+    | whether or not solo happens to be engaged, instead of stock's `clr.l`.
+    move.l  %d5,%d0
+    lsr.l   #8,%d0
+    andi.l  #0xff,%d0
+    or.l    %d0,%d2                     | silenced = solo-silenced OR muted
+    | keep EVERY track's frame level words: clear D5 bits 0..15, ALWAYS on this path
     |  -> every track: solo bit clear + mute bit clear -> the "& D1" keep path
     |  -> D1 = (D5.b == 0) ? -1 : 0  becomes -1 -> words pass through unchanged
     andi.l  #0xffff0000,%d5
