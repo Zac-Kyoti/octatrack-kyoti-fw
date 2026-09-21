@@ -45,9 +45,11 @@ confirmed the Bug-1 fix.
 
 > **Branches.** The published **`main`** is the conservative line: the Bug-1 fix
 > + MUTE MODE `OT` / `OT+FX` only, at the exact patch that was flashed and
-> confirmed on hardware. **`wip`** is the working branch and carries
-> everything below, including work that has **not** been on hardware. Per-feature
-> status is in the tables.
+> confirmed on hardware. **`wip`** is the working branch and carries everything
+> below. Bug 2, **QUANTIZE LIVE REC**, and the **SIDE-CHAIN COMPRESSOR** are
+> finished and hardware-confirmed on `wip`; **MUTE MODE**'s newer modes,
+> **DIRECT JUMP**, and **RELOAD FROM PROJECT** are still active work-in-progress
+> with real open bugs. Per-feature status is in the tables.
 
 ### Bug 1 — Plays-Free MIDI manual-trig stall  ·  **fixed, hardware-confirmed (MKI)**
 
@@ -74,7 +76,7 @@ reproduces the bug, patched lights the LED, a genuinely empty pattern still read
 empty. Write-up: [`NOTES.md`](NOTES.md) "Session 48". **Flashed to the MKI
 (2026-09-13) — confirmed working, no regression.**
 
-### MUTE MODE — a PERSONALIZE toggle for audio-track mute behaviour
+### MUTE MODE — a PERSONALIZE toggle for audio-track mute behaviour  ·  *active WIP, real bug open*
 
 Off by default (`MUTE MODE = OT`). Stored in a battery-backed PERSONALIZE word,
 so a freshly flashed unit is stock until you opt in.
@@ -91,24 +93,19 @@ Sources: `tools/patch_mutemode.s`, `tools/patch_softmute.s` (V7 on this branch,
 [`NOTES.md`](NOTES.md) "Session 9–12". The toggle also writes the checksummed
 `'ANDY'` battery-SRAM shadow so it survives a power cycle ("Session 19").
 
-**⚠️ KNOWN BUG, still open as of 2026-09-14 — do not flash expecting this fixed.**
-HW flash (2026-09-13, first-ever flash of V7) found: DT suppressed no new trigs at
-all, and OT+FX's trig-attack blip (believed fixed since Session 9) was still present.
-Session 52's `pre_v` hook was believed to fix it (root-caused via `trig_to_voice`'s
-real caller, isolation-revalidated) — flashing it changed nothing on hardware. Root
-cause: `pre_v` targeted a function that real sequencer trigs never call at all (proven
-in a full-firmware emulator, zero entries across a real playback run) — 100% correct
-engineering aimed at the wrong target. Session 53/53-bis found and built the REAL
-per-trig gates, `mt_trig` and `mt_rebind` (still in `patch_softmute.s`), each
-individually proven correct by direct dynamic CPU-side instrumentation — **also
-flashed, also zero hardware effect.** Session 55 finally explained why, using a
-genuinely DSP-capable emulator (not just CPU-side instruction tracing): both hooks
-fire and gate exactly as designed for a track's very first trig, but **a second trig
-on a track that was already held muted while playing — the actual bug scenario —
-never reaches either hook**, and the DSP-rendered voice content restarts in full,
-byte-identical to an unmuted track. Root cause is now narrowed to a specific,
-not-yet-fully-disassembled code path (`FUN_4000f450`'s reuse branch) but not yet
-fixed. Full trail: [`NOTES.md`](NOTES.md) "Session 52" through "Session 55 continued".
+**⚠️ KNOWN BUG, still open as of 2026-09-20 — do not flash expecting this fixed.**
+Session 57 found and fixed the original leak behind the 2026-09-13 flash reports:
+stock clamps a silenced track's second level word to 6144 instead of zeroing it, so
+a retrig on an already-muted track played back at full level through that still-open
+route. Fixed, flashed — and with **AMP RELEASE set to infinite**, `DT` mode is now
+**hardware-confirmed clean**. With a **finite** release, however, both `OT+FX` and
+`DT` still produce a real, once-per-cycle-ish blip/echo. The mechanism is now
+precisely characterized — a stock function transiently clears the mute-state byte
+around a trig, racing this project's own mute-cut hook — but the fix is **not yet
+built**. A separate, from-scratch MUTE MODE redesign (`build_mutemode_new.py`) was
+tried at the user's request and abandoned after hardware testing showed its other
+modes non-functional; it is not merged into anything this project ships. Full trail:
+[`NOTES.md`](NOTES.md) "Session 57" onward (many parts).
 
 **A fourth mode is designed and reverse-engineered but not built** — `OTFX`:
 instant dry cut, FX tails ring, and unmute **resumes the sample at the playhead**
@@ -118,7 +115,7 @@ mute gate `FUN_40004db8` is fully disassembled; two DSP-behaviour unknowns
 remain, and the plan is to flash `DT` first to settle them. Write-up:
 [`NOTES.md`](NOTES.md) "Session 14".
 
-### DIRECT JUMP — an Elektron-style immediate pattern change  ·  *emulator only, not flashed*
+### DIRECT JUMP — an Elektron-style immediate pattern change  ·  *active WIP, partly hardware-confirmed*
 
 Toggled by **`[PTN]` + `[YES]`** (a transient "DIRECT JUMP ON/OFF" overlay), no
 PERSONALIZE entry. When on, manually cueing a new pattern:
@@ -126,19 +123,26 @@ PERSONALIZE entry. When on, manually cueing a new pattern:
 - switches on the **next step tick** instead of quantising to the end of the
   current pattern,
 - keeps the **playhead step position** (the new pattern resumes where the old
-  one was, modulo its length) rather than restarting at step 1,
+  one was, modulo its length) rather than restarting at step 1 — **still open,
+  see below**,
 - loads the new **Part immediately**,
 - sends the MIDI Program Change ~1 step early.
 
-The arranger and pattern chains are untouched. `tools/patch_directjump.s` — a
-front-panel toggle stub + three hooks into the per-step sequencer engine
-(`FUN_400a1eea`). `python3 tools/build_directjump.py` → `140C_KYOTI`.
-`build_directjump_v2.py` is the same feature with a box-free toast overlay.
-Write-up: [`NOTES.md`](NOTES.md) "Session 15" + "Session 21" + "Session 35";
-emulator `tools/emu_directjump.py` (the hooks are exercised as stubs —
-`FUN_400a1eea` itself has instructions Unicorn can't run, so this is **not** a
-full-handler test). Hardware-only unknowns are listed in `NOTES.md`; **never
-flashed**.
+The arranger and pattern chains are untouched. Current build:
+`python3 tools/build_directjump_v4.py` → `140C_KYOTI` (`tools/patch_directjump.s`
++ a `[PTN]`-held keymap fix). The toggle's **reachability and switch timing are
+hardware-confirmed**: earlier `v1`–`v3` builds were dead on hardware — the stock
+`[PTN]`-held overlay swallowed `[YES]`'s dispatch the whole time it was held, so
+the detour never ran at all — until `v4` fixed it by writing the toggle straight
+into that overlay's own `[YES]` slot. A crash found along the way
+(`EXCEPTION VEC:04`) was also root-caused and fixed. **Still open:** with DIRECT
+JUMP on, a manual pattern change currently restarts the new pattern at step 1
+instead of keeping the playhead position; the root cause was mechanically proven
+2026-09-20 (a spurious extra write into the sequencer's table-arm state on
+commit), but the fix is not yet built or flashed. Write-up:
+[`NOTES.md`](NOTES.md) "Session 15" + "Session 21" + "Session 35" → "Session 60"
+through "Session 79" (many parts); emulator `tools/emu_directjump.py` /
+`tools/emu_directjump_v4.py` / `tools/emu_directjump_dynamic.py`.
 
 ### SIDE-CHAIN COMPRESSOR — external key input for the stock DynamiX compressor  ·  **hardware-confirmed, shipping**
 
@@ -165,7 +169,7 @@ shipping. Write-up: [`NOTES.md`](NOTES.md) "Session 17" (+ continued 1–8) →
 `patch_sc_dsp3.asm`; emulators `tools/emu_sidechain.py`, `tools/emu_sc_dsp.py`,
 `tools/emu_sc_dsp3.py`, `tools/emu_sc_dsp3_xcore.py`.
 
-### RELOAD FROM PROJECT — reload a pattern from the CF card without stopping playback  ·  *emulator-validated, not flashed*
+### RELOAD FROM PROJECT — reload a pattern from the CF card without stopping playback  ·  *active WIP, partly hardware-confirmed*
 
 Stock 1.40C can only reload from the card at whole-**bank** granularity, and doing
 so glitches the audio. This adds a per-pattern reload, seamlessly. Adapted from
@@ -179,8 +183,8 @@ it has **no timeout** — it stays until you answer it. While it is open
 `[YES]`/`[NO]` act only on the picker. All items reload from the card's last
 **SAVE BANK** snapshot:
 
-The **SEQ-focused build** (`tools/patch_reload2.s`, `python3 tools/build_reload2.py`
-→ `OCTATRACK_OS1.40C_RELOAD2.{syx,bin}`) — the window opens with **TRK SEQ**
+Current build (`tools/patch_reload2.s`, `python3 tools/build_reload2.py` →
+`OCTATRACK_OS1.40C_RELOAD2.{syx,bin}`) — the window opens with **TRK SEQ**
 highlighted, so `[PTN]`-hold then `[YES]` is a complete gesture:
 
 | item | what it does |
@@ -189,25 +193,35 @@ highlighted, so `[PTN]`-hold then `[YES]` is a complete gesture:
 | **PTN SEQ** | the whole active pattern's sequence data — all 8 audio + all 8 MIDI tracks + length + scale. The pattern's Part **assignment is preserved** (a sequence reload never re-points the pattern at a different Part). |
 | **PART + PTN SEQ** | faithful restore: PTN SEQ *including* the Part link, then that saved Part is made current on the engine. The pattern comes back exactly as the card has it. |
 
-The 3-item build `tools/patch_reload.s` (`python3 tools/build_reload.py`) has
-**PTN SEQ** / **ALL PARTS** (all 4 Parts, `FUN_4004aab4` ×4) / **PARTS + PTN SEQ**
-instead.
+An earlier 3-item build (**PTN SEQ** / **ALL PARTS** / **PARTS + PTN SEQ**, no
+per-track option) predates the hardening below and isn't maintained going
+forward — historical only, see `NOTES.md`.
 
-Both: an async job on the storage task parses the target pattern from `bankNN.strd`
+An async job on the storage task parses the target pattern from `bankNN.strd`
 with the firmware's own per-pattern chunk parser, copies it into the live blob, and
 fires the sequencer's own no-stop reload flag. No other pattern, no other bank, no
 disk write. Guards are the stock ones: a never-saved bank shows *"THIS BANK HAS
 NEVER BEEN SAVED! NOTHING TO RELOAD!"*. No confirmation prompt.
 
 Six hooks (the `[PTN]` key handler for the hold, the `[NO]` and `[YES]` handlers,
-two arrow key handlers, and the storage task's bank-reload case). Write-up:
-[`NOTES.md`](NOTES.md) "Session 42"–"44" + "Session 47"; emulator
-`tools/emu_reload.py` / `emu_reload2.py` — `--combo` (the whole picker,
-single-stepped), `--patched` (the whole-pattern SEQ worker end to end), and
-`--trk` (per-track slice: only the addressed track reverts) pass. The hold-event
-feel, whether an arrow/track key reaches the picker on hardware, `FUN_40009094`
-from the storage task while playing, and the parse against a real CF card are a
-**hardware** test. **Never flashed.**
+two arrow key handlers, and the storage task's bank-reload case). **First hardware
+flash (2026-09-20) found 3 real bugs**: the `[YES]`/`[NO]` handlers could be
+unreachable while still physically holding `[PTN]` (the same overlay issue DIRECT
+JUMP hit — fixed and dynamically verified against the real keymap code); a
+`RUNNING`-transport gate that turned out not to be load-bearing (dropped, so the
+picker now works whether the transport is running or stopped); and a case where,
+after one successful reload, holding `[PTN]` again stopped opening the picker at
+all with no recovery (fixed by removing the flawed gate rather than chasing its
+exact root cause). **These fixes are built and emulator-verified but not yet
+reflashed.** A real fix for the reload's own timing (an audible gap and a reset to
+step 1 rather than the playhead position — comparable in scope to DIRECT JUMP's own
+playhead work) and a proper multi-item list-style picker UI are both deferred.
+Write-up: [`NOTES.md`](NOTES.md) "Session 42"–"44" + "Session 47" + "Session 80"
+(+ continued); emulator `tools/emu_reload.py` / `emu_reload2.py` — `--combo` (the
+whole picker, single-stepped), `--patched` (the whole-pattern SEQ worker end to
+end), and `--trk` (per-track slice: only the addressed track reverts) pass. Still
+hardware-only: the parse against a real CF card, `FUN_40009094` from the storage
+task while playing, and the reload's seamless-timing feel.
 
 A **power move** — hold `[PTN]` + tap a `[TRACK]` key for immediate per-track
 reload, no picker — is scoped but not built (the chord is free; it needs a
@@ -265,13 +279,28 @@ time you open the menu). Write-up: [`NOTES.md`](NOTES.md) "Session 46"
 51/51-bis/51-ter" (refinement pass, logic-bug fix, tuning correction). **All
 of the above is HW-confirmed** except the two parked cosmetic items.
 
-### Backlog — scoped, not built
+### TRIGLESS-LOCK AUTO-REMOVE — drop an emptied trigless lock  ·  *built, emulator-clean, not flashed*
 
-- **Auto-remove an emptied trigless lock.** When a LIVE-REC `[NO]`+knob erase
-  clears a step's last p-lock, drop the now-purposeless trigless lock too. The
-  data model is deeply mapped (`reference/kb/file-format.md`); the one missing
-  piece is the `+0x4900` → stored-record commit, best settled by a hardware
-  export-and-diff pass. Brief: [`NOTES.md`](NOTES.md) "Session 13" + "Session 39".
+When a LIVE-REC `[NO]`+knob erase clears a step's last p-lock, stock leaves the
+now-purposeless trigless lock lit on the trig row indefinitely — the erase handler
+never commits the change into the stored p-lock array or clears the trig-type-layer
+flag the firmware separately sets when the lock was created. `tools/patch_triglock.s`,
+`python3 tools/build_triglock.py` → `1.40C` (stock-transparent, two hunks vs stock).
+Write-up: [`NOTES.md`](NOTES.md) "Session 13" + "Session 39" + "Session 78" (+
+continued, many parts). **Never flashed.**
+
+### Part-change carryover — Part params leaking across a pattern→Part change  ·  *active WIP, partly hardware-confirmed*
+
+Three Elektronauts reports, one family: a pattern change that links a different
+Part runs only a partial stock re-apply, so stale Part-2 state can leak into the
+newly-linked Part. `tools/patch_partreapply.s`, `python3 tools/build_partreapply.py`
+→ `1.40C` (stock-transparent). Flashed 2026-09-13: the recorder-cache and
+scene-morph pieces are behaviorally safe, though reports #2/#3 (recorder, REC
+SETUP) could not be reliably reproduced on stock and are treated as unconfirmed.
+**The originally reported #1 bug — a FLEX track stuck playing an old PICKUP
+loop — is NOT fixed**: it reproduces identically on stock and patched on a
+repeated pattern switch. Root cause still open. Write-up: [`NOTES.md`](NOTES.md)
+"Session 49" + "Session 50".
 
 ### Hardware-test status — read before you flash
 
@@ -282,21 +311,22 @@ of the above is HW-confirmed** except the two parked cosmetic items.
 | Part-change carryover — recorder cache / scene-morph pieces | `build_partreapply.py` | flashed 2026-09-13, behaviorally safe; reports #2/#3 (recorder, REC SETUP) could not be reliably reproduced on stock, treat as unconfirmed |
 | ↳ report #1 (PICKUP→FLEX stuck loop) | `build_partreapply.py` | **fix does not address the real bug** — reproduces identically on stock and patched on a repeated pattern switch (good → good → bug); root cause still open, see `NOTES.md` "Session 50" |
 | **QUANTIZE LIVE REC** front-panel toggle | `build_qlrec.py` | original design hung the unit 2026-09-13; rewrite (periodic `dur>0` re-arm) **HW-confirmed**, no hang; double-tap timing, toast fade/instant-close, and label polarity **all HW-confirmed correct**; 2 cosmetic issues (textless-box flash, PERSONALIZE row not live-redrawing) parked, not chased further |
-| MUTE MODE menu + `OT+FX` soft **mute** mechanism | `build_mutemode.py` | the Session-10 build (V6b, no SOLO extension) was flashed and confirmed on hardware; **today's `build_mutemode.py` ships V7 (SOLO extension), which is a different compiled image and was NOT independently reflashed until 2026-09-13, see below** |
-| ↳ the `'ANDY'`-shadow persistence (survives power cycle) | `build_mutemode.py` | emulator-verified, **not yet flashed** |
-| ↳ the **SOLO** extension (softmute V7) + **DT** sequencer-mute mode | `build_mutemode.py` / `build_mutemode_dt.py` | **flashed 2026-09-13 — found a real bug**: `pre_v`'s new-trig-drop filter never actually caught STATIC/FLEX's own normal step-trig commands, so DT suppressed nothing and OT+FX's blip never closed; root cause + caller-address fix in `NOTES.md` "Session 52", isolation-revalidated, **rebuilt but not yet reflashed** |
+| MUTE MODE menu + `OT+FX` soft **mute** mechanism (`main`) | `build_mutemode.py` | the Session-10 build (V6b, no SOLO extension) was flashed and confirmed on hardware |
+| ↳ the `'ANDY'`-shadow persistence (survives power cycle) | `build_mutemode.py` | emulator-verified, **not yet independently flashed** |
+| ↳ the **SOLO** extension (softmute V7) + **DT** sequencer-mute mode | `build_mutemode.py` / `build_mutemode_dt.py` | **active WIP.** Session 57 found+fixed the original level-clamp leak, flashed; `DT` is now **hardware-confirmed clean with AMP RELEASE set to infinite**. With a finite release, both `OT+FX` and `DT` still show a real once-per-cycle-ish blip/echo — root cause precisely characterized (a stock function races this project's mute-cut hook) but **not yet fixed**; see `NOTES.md` "Session 57" onward |
 | MUTE MODE 4th option (`OTFX` playhead-resume) | — | **reverse-engineered only**, not built |
-| **DIRECT JUMP** pattern-change mode | `build_directjump*.py` | **emulator only** (stub-level), never flashed |
-| side-chain compressor (`KEY`/`KEY FLT`/`KEY GAIN`/`SC LISTEN`, cross-core) | `build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | **confirmed** — flashed 2026-09-20, MKI, "seems to be working well"; cross-core `KEY` (any of 8 tracks) included |
-| **RELOAD FROM PROJECT** — modal picker | `build_reload2.py` (TRK SEQ / PTN SEQ / PART + PTN SEQ) / `build_reload.py` (PTN SEQ / ALL PARTS / PARTS + PTN SEQ) | modal picker + the SEQ worker **emulator-verified end to end** (`emu_reload.py` / `emu_reload2.py` — `--combo` / `--patched` / `--trk`); the parse vs a real card, `FUN_40009094` from the storage task, and whether arrows/track keys reach the picker on HW are hardware tests, never flashed |
+| **DIRECT JUMP** pattern-change mode | `build_directjump_v4.py` | **active WIP, partly hardware-confirmed** — toggle reachability and switch timing confirmed working on hardware (earlier `v1`–`v3` were dead on hardware, superseded); the playhead-preserving behaviour (currently resets to step 1) is root-caused but **not yet fixed** |
+| side-chain compressor (`KEY`/`KEY FLT`/`KEY GAIN`/`SC LISTEN`, cross-core) | `build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | **confirmed, final for now** — flashed 2026-09-20, MKI, "seems to be working well"; cross-core `KEY` (any of 8 tracks) included |
+| **RELOAD FROM PROJECT** — modal picker | `build_reload2.py` (TRK SEQ / PTN SEQ / PART + PTN SEQ) | **active WIP, partly hardware-confirmed** — first flash (2026-09-20) found 3 real bugs, 2 fixed (a `[PTN]`-held reachability issue and a permanent picker lockout) but **not yet reflashed**; the reload's own timing (audible gap / step-1 reset) and a real list-style picker UI are deferred |
+| **TRIGLESS-LOCK AUTO-REMOVE** | `build_triglock.py` | **emulator only** — built and clean 2026-09-20, never flashed |
 
-`OT` mode is byte-for-byte stock, and every mod is `OFF` by default. The soft
-paths, DIRECT JUMP and RELOAD FROM PROJECT are validated in a ColdFire emulator
-(Unicorn, real image bytes — RELOAD in a full-firmware emulator with a mounted
-card), control-flow + frame-word edits, not the audio engine; the side-chain DSP
-runs in dsp56kEmu. Nothing here proves how anything *sounds* on the unit.
-Flash at your own risk; keep the official `.syx` on hand
-([`FLASHING.md`](FLASHING.md)).
+`OT` mode is byte-for-byte stock, and every mod is `OFF` by default. Everything
+above is validated primarily in a ColdFire emulator (Unicorn, real image bytes —
+RELOAD in a full-firmware emulator with a mounted card) and the side-chain DSP in
+dsp56kEmu — control-flow and frame-word edits, not a guarantee of how anything
+*sounds*; items marked hardware-confirmed above have also been flashed and
+listened to on a real MKI. Flash at your own risk; keep the official `.syx` on
+hand ([`FLASHING.md`](FLASHING.md)).
 
 ---
 
@@ -404,7 +434,7 @@ See **[`BUILD_KYOTI.md`](BUILD_KYOTI.md)** for the full walkthrough. In short:
 
 ```sh
 ./fetch-os.sh && ./analyze.sh && ./setup.sh   # one-time: bring your own OS 1.40C + tools
-python3 tools/build_mutemode.py               # -> out/OCTATRACK_*MUTEMODE.{syx,bin}
+python3 tools/build_qlrec.py                  # -> out/OCTATRACK_*QLREC.{syx,bin}
 ```
 
 Every build is a guarded binary patch: it asserts the stock bytes at each splice,
