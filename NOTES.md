@@ -22761,3 +22761,82 @@ uniform and the per-track-SCALE case. Build: 856 bytes via 6 detour sites. Still
 Tooling: `tools/ghidra/attic/GhidraDirectJump45.java` (wrap-check decode), `46.java`
 (stride/loop confirmation). Logs: `/tmp/dj_scalefix.log` (DJTESTxxx, the fix),
 `/tmp/dj_regress.log` (DEMO_PROJECT, no regression).
+
+## Session 58 continued yet again, part 18 addendum 6 (2026-09-20, `wip`) — the user's FX
+test project is staged and CONFIRMS the shipped build's DT mute on a real reverb tail; but
+FOUR different emulated "solo" states all behave CORRECTLY, so the hardware's solo state is
+something none of them reproduces. Solo gesture is now known: MIXER, then CUE + TRIG.
+
+### New fixture: `MMTESTFX` (the user's re-export, WITH an FX insert)
+
+`~/Desktop/MMTESTxxx` + `~/Desktop/heaven.wav`, staged to `out/hw-projects/MMTESTFX/` and
+built into `refs/octabam/out/mmtestfx_card.img` (SET `MMTESTFX`, PROJECT `test`). Differences
+from the old MMTESTDT fixture, all of them useful: **track 0 now has FX2 = DARK REV** (TIME
+79, MIX 84 -- so tails are finally measurable, which the old project made impossible), a
+single sample (`heaven.wav`, no second-slot p-lock), and trigs every 4 steps (1378 frames)
+rather than 1/10/15. `tools/emu_echo_dsp.py` gained `--fx` (use this card), `--cue N` and
+`--solo N`; it also no longer assumes the old trig layout (`log_trig_frames()` reads the
+run's own `FW_LIVE_NIBBLE` log).
+
+### The shipped build's DT mute, now visible against a real reverb tail
+
+RMS at the real trig positions, mute engaged 20 frames after the trig at cf 5512:
+
+```
+     cf     t_from_mute    UNMUTED    MUTED
+   6890        +493ms       0.0536    0.0504
+   8268        +993ms       0.0547    0.0381
+   9646       +1493ms       0.0496    0.0368
+  11024       +1993ms       0.0492    0.0222
+  12402       +2493ms       0.0561    0.0205
+  13780       +2992ms       0.0550    0.0119
+```
+
+Unmuted holds steady at ~0.05; muted decays smoothly to 0.0119 over ~3 s. That is the
+reverb ringing out while new trigs are masked -- exactly the intended behaviour, now
+demonstrated on a track that actually has an FX insert.
+
+### FOUR emulated "solo" states, none of which reproduces the hardware bug
+
+All against the FX fixture, DT mode, same frame, compared at the same trig positions:
+
+| emulated state | result |
+|---|---|
+| `SOLO_FLAG` + solo bit for another track | 0.0463 / 0.0422 / 0.0358 / 0.0222 / 0.0209 / 0.0123 |
+| the REAL handler `0x400654dc` called mid-run | no silencing at all; track keeps playing loudly |
+| CUE bit only for another track (`--cue 1`) | 0.0570 / 0.0580 / 0.0526 / 0.0506 / 0.0574 / 0.0560 -- no silencing |
+| CUE bit + `SOLO_FLAG` + solo bit together | 0.0463 / 0.0422 / 0.0358 / 0.0222 / 0.0209 / 0.0123 |
+
+The first and fourth are **indistinguishable from the MUTED column above** -- i.e. in the
+emulator, solo already behaves exactly like mute, which is what the user is asking for and
+is NOT what the hardware does. **Do not re-run these four; they are recorded here precisely
+so the next session doesn't.**
+
+### What the user's gesture actually is, and the lead it points at
+
+Solo is engaged as: **MIXER button, then CUE + TRIG(track)**. So the code that runs is the
+MIXER screen's CUE-key handling, not the `0x400654dc` solo-engage handler this session found
+(which sets `SOLO_FLAG`, a persisted copy at `0x100b1497`, and calls `FUN_4004d948(-1)`, and
+notably sets NO per-track solo bit -- that setter is still unidentified).
+
+**The strongest remaining lead is the LEVEL CHAIN, not the frame builder.** Session 57's own
+finding, never followed up in this context: `0x40004e9e` (inside `FUN_40004dbc`, where all of
+this thread's mute work lives) "writes a DIFFERENT buffer than the one the DSP actually
+receives per-track levels in -- that one is produced by the level chain at ~`0x4000cb4e` /
+`0x4000cc20` / `0x4000ced0` / `0x4000ced4`". Every hook this project has ever shipped gates
+the frame builder. If the MIXER's cue/solo silencing is implemented in the level chain
+instead, it would be a post-FX hard cut, invisible to all four states tested above, and
+identical in every MUTE MODE -- which is exactly the reported symptom. (Caution: `0x4000ced0`
+is hook 12's old site, abandoned in part 2 for the EMAC/MACSR hazard -- instrument it, do not
+detour it, until that is understood.)
+
+### Next session
+
+1. Instrument the level-chain output words for the test track under mute vs the MIXER
+   cue/solo gesture and see which one hard-zeroes them. `--watch-mem` + the FX fixture.
+2. Find the handler that sets the per-track SOLO bits (`MUTE_STATE` bits 0..7) and the MIXER
+   screen's CUE+TRIG path -- a Ghidra xref pass on `0x80000008` WRITE references
+   (`GhidraMute11.java` did this once and only recorded the COUNT, 13 functions, not the
+   addresses; re-run it and record them this time).
+3. Only then design a hook. Do not gate anything until the hard cut's actual producer is
+   measured, per this session's own hook-14/15 lesson.

@@ -38,14 +38,17 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 OCTABAM = ROOT / "refs/octabam"
 OT_EMU = OCTABAM / "out/emu/ot_emu"
 CARD = OCTABAM / "out/mmtestdt_dsp_card.img"
+CARD_FX = OCTABAM / "out/mmtestfx_card.img"   # the user's FX build: DARK REV on track 0
 IMAGE = ROOT / "out/mainos_mutemode_dt.bin"
 OUTDIR = OCTABAM / "out"
 
 SET_NAME, PROJECT_NAME = "MMTESTDT", "test"
+SET_FX, PROJECT_FX = "MMTESTFX", "test"
 GATE_ADDR = 0x800000DC          # patch_softmute.s's GATE (m68k-elf-nm out/patch_softmute_rs.elf)
 MUTE_BYTE = 0x8000000A          # MUTE_STATE's MUTE byte -- NOT 0x80000009 (that is CUE)
 SOLO_BYTE = 0x8000000B          # MUTE_STATE's SOLO byte (bits 0-7, one per track)
 SOLO_FLAG = 0x80000037          # "solo mode engaged" (patch_softmute.s's own equ)
+CUE_BYTE  = 0x80000009          # MUTE_STATE's CUE byte (bits 16-23, one per track)
 
 FRAMES_PER_SEC = 44100.0 / 16.0  # 2756.25 ColdFire/DSP frames per second
 LOOP_FRAMES = 5512               # 16 steps @ 120 BPM
@@ -53,7 +56,7 @@ STEP_FRAMES = LOOP_FRAMES / 16.0
 TRIG_STEPS = (1, 10, 15)         # MMTESTDT track 0's real trigs
 
 
-def run(label, mute_frame, frames, gate, load_ms, watch_read, watch_pc, coverage, extra, watch_mem="", extra_poke="", image=None, solo_track=None):
+def run(label, mute_frame, frames, gate, load_ms, watch_read, watch_pc, coverage, extra, watch_mem="", extra_poke="", image=None, solo_track=None, fx=False, cue_track=None):
     prefix = OUTDIR / f"echo_{label}"
     # --poke/--poke-early write ONE BYTE each (main.cpp's pokeBytes -> m.write8), but the
     # patch reads GATE with `move.l GATE,%d0` -- so poking the base address alone sets the
@@ -62,8 +65,9 @@ def run(label, mute_frame, frames, gate, load_ms, watch_read, watch_pc, coverage
     # test: measured 20 Sep 2026, it renders a clean instant cut and NO echo at all.
     # Write all four bytes explicitly.
     gate_poke = ";".join(f"{GATE_ADDR + i:#x}={(gate >> (8 * (3 - i))) & 0xFF}" for i in range(4))
-    cmd = [str(OT_EMU), "--image", str(image or IMAGE), "--card", str(CARD),
-           "--set", SET_NAME, "--project", PROJECT_NAME,
+    card, setn, projn = (CARD_FX, SET_FX, PROJECT_FX) if fx else (CARD, SET_NAME, PROJECT_NAME)
+    cmd = [str(OT_EMU), "--image", str(image or IMAGE), "--card", str(card),
+           "--set", setn, "--project", projn,
            "--sequencer", "--internal-clock", "--frames", str(frames),
            "--load-ms", str(load_ms), "--dsp", "--main-level", "64",
            "--poke-early", gate_poke,
@@ -73,8 +77,16 @@ def run(label, mute_frame, frames, gate, load_ms, watch_read, watch_pc, coverage
         # DIFFERENT track, so the test track is silenced by not-being-soloed. That is the
         # second half of what MUTE MODE has to get right, and hook 15 routes it through the
         # very same branch as a real mute.
-        spec = (f"{SOLO_FLAG:#x}=1;{SOLO_BYTE:#x}={1 << solo_track}" if solo_track is not None
-                else f"{MUTE_BYTE:#x}=1")
+        # --cue N reproduces the user's real gesture (MIXER, then CUE+TRIG): it sets only
+        # the CUE bit for track N. The frame builder's solo branch provably never tests the
+        # cue bits (KB memory-map, re-derived 20 Sep), so nothing this project has hooked
+        # covers this path -- which is the hypothesis under test.
+        if cue_track is not None:
+            spec = f"{CUE_BYTE:#x}={1 << cue_track}"
+        elif solo_track is not None:
+            spec = f"{SOLO_FLAG:#x}=1;{SOLO_BYTE:#x}={1 << solo_track}"
+        else:
+            spec = f"{MUTE_BYTE:#x}=1"
         if extra_poke:
             spec += ";" + extra_poke
         cmd += ["--poke", spec, "--poke-at-frame", str(mute_frame)]
@@ -145,6 +157,23 @@ def trig_frames(frames):
         loop += 1
 
 
+def log_trig_frames(label):
+    """The run's own FW_LIVE_NIBBLE log is ground truth for where this project's trigs
+    actually fall -- do not assume steps 1/10/15, the user re-exports the project."""
+    log = OUTDIR / f"echo_{label}.log"
+    out = []
+    if log.exists():
+        for line in log.read_text(errors="replace").splitlines():
+            if line.strip().startswith("frame ") and "track" in line and "nibble" in line:
+                try:
+                    f = int(line.split()[1])
+                except (IndexError, ValueError):
+                    continue
+                if not out or f != out[-1]:
+                    out.append(f)
+    return out
+
+
 def analyze(prefix, mute_frame, frames, slots):
     path = pathlib.Path(str(prefix) + "_core0.wav")
     data, sr = load_wav(path)
@@ -191,6 +220,10 @@ def main():
     ap.add_argument("--watch-mem", default="", help="ADDR,LEN[;ADDR,LEN...] -- log WRITES with the writing PC")
     ap.add_argument("--extra-poke", default="", help="more 'addr=byte' pokes applied WITH the mute")
     ap.add_argument("--image", default=None, help="mainos .bin to run (default: the DT build)")
+    ap.add_argument("--fx", action="store_true",
+                    help="use the MMTESTFX card (DARK REV on the test track) instead of MMTESTDT")
+    ap.add_argument("--cue", type=int, default=None, metavar="N",
+                    help="CUE track N (the real MIXER + CUE+TRIG gesture) instead of muting")
     ap.add_argument("--solo", type=int, default=None, metavar="N",
                     help="silence the test track by SOLOing track N instead of muting it")
     ap.add_argument("--watch-pc", default="", help="comma-separated PCs -- log registers there")
@@ -209,7 +242,7 @@ def main():
                 sys.exit(f"missing: {p}")
         prefix = run(a.label, mute_frame, a.frames, a.gate, a.load_ms,
                      a.watch_read, a.watch_pc, a.coverage, list(a.extra), a.watch_mem,
-                     a.extra_poke, a.image, a.solo)
+                     a.extra_poke, a.image, a.solo, a.fx, a.cue)
     analyze(prefix, mute_frame, a.frames, slots)
     return 0
 
