@@ -23748,3 +23748,12 @@ User confirms no issues with mute/solo on audio tracks 7 or 8 -- both operated a
 This closes the one open risk addendum 10 flagged (`FUN_4007c428`'s MUTE_STATE bit-7
 aggregate vs stock's own reading of it as track 7's solo bit): the fix's mirroring of
 stock's own bit-7 handling is confirmed correct in practice, not just by construction.
+
+### CUE MUTES TRK -- closed, by the user's own decision, not a bug
+
+The user has decided a track hard-cut by the "CUE MUTES TRK" PERSONALIZE option should stay
+a hard cut in every MUTE MODE -- i.e. this behaviour (addendum 10's own "known remaining
+risk" item) is INTENDED, not a gap to close. `0x40004e3a`'s OR of the cue bits into the mute
+positions (gated on `0x8000009c`) runs after hook 1 and is therefore left completely
+untouched by this project's own hooks, which is now confirmed to be the correct outcome.
+Closed. Do not revisit this as an open item in any future MUTE MODE session.
