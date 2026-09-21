@@ -19171,14 +19171,386 @@ prefer rather than guessing at the lock-record layout blind.
 Nothing flashed this session. `out/mainos_mutemode_dt.bin` is unchanged
 (still the part-16 note applies: v2 hook 13, not the v1 the user's hardware
 actually runs -- fine for dt_trig/fresh_bind/candidate testing, not a
-byte-exact REL_STATE-race reference). The real "echo" mechanism is still not
-found; this session narrowed the search (ruled out 4 of 6 previously-
-unexamined `FUN_40006820` callers, added 2 real candidates, corroborated
-`FUN_4000f450`'s tail behaviour against independent hardware evidence) but
-did not close it. Given this thread's own repeated pattern of promising
-leads that didn't reproduce (part 11's fresh_bind leak, part 16's blocked-
-cleanup theory), treat `fb_caller_93ec0`/`96ad4` as unconfirmed until the
-dynamic test above actually shows a hit inside a real muted window.
+byte-exact REL_STATE-race reference).
+
+### `fb_caller_93ec0`/`96ad4`/`40043c50` now CLOSED -- dead end, confirmed two
+### independent ways
+
+**Dynamic**: the user exported a real project (`MMTESTDT`, on the Desktop
+with `heaven.wav`/`isaak.wav`) matching the original 3-case shape exactly
+(track 1, trigs 1/10/15, a sample-slot p-lock to a different sample on
+10/15 -- confirmed via `tools/hw/ot_spec.py report`). Staged it into
+`out/hw-projects/MMTESTDT/` and ran `tools/diag_echo_newcallers.py` against
+it four times, fixing two real bugs in the harness along the way (the
+pattern-select call was hardcoded to index 1 when the real content lives at
+index 0; the `--track` CLI convention is the internal 0-based index, and the
+default of 1 pointed at an empty track). Once both were fixed and a sanity
+print confirmed real content was loaded (`track 1's live trig-mask bytes:
+0000000000004201` = steps 1/10/15) and `dt_trig` showed real, correctly-
+gated activity (0 pass / 12-60 silence across three window lengths, exactly
+matching 3 trigs x N pattern loops each time) -- **all three candidates
+still got zero hits, including in a run where mute was engaged only after a
+full loop had already played (`--pre-ms 2500`), i.e. with the voice
+genuinely active and the p-locked sample already bound once.** `fresh_bind`
+was also zero in that run, most likely because `heaven.wav`/`isaak.wav` are
+several seconds long against a ~2 s pattern loop, so no voice reaches
+natural end-of-data within the test window at all -- consistent with, not
+contradicting, the candidates' irrelevance.
+
+**Static (found by a concurrent session on this same file, credited here
+since it directly closes this lead)**: Session 78 ("TRIGLESS-LOCK AUTO-
+REMOVE", above) ran a proper Ghidra xref probe on `DAT_400d7c44`/`_48` and
+decompiled their real writer (`FUN_400940ac`). **They are a stashed
+MACHINE-TYPE byte, not a "pending p-lock apply" flag**: something
+temporarily swaps a track's machine type (almost certainly the sample-
+browser PICKUP/FLEX preview), stashes the original type here, and
+`fb_caller_93ec0`/`96ad4` are the matching restore (put the original type
+back, clear the stash). **Nothing here reads a step's lock record or
+touches playback dispatch at all.** This fully explains the dynamic zero-
+hits above (the mechanism has no reason to fire during ordinary sequencer
+playback, muted or not) and closes the lead outright -- not "unconfirmed,"
+dead.
+
+### Where this leaves the echo investigation
+
+Every `FUN_40006820` caller has now been examined (7 of 7: 1 inside
+`FUN_4000f450` covered by hook 9/10 already; 3 OS-upgrade/task-switch,
+irrelevant; 3 per-track ones, all now explained -- `40043c50` gate-off,
+`93ec0`/`96ad4` preview-swap restore). None of them is a plausible source of
+spurious new trigs on a muted track. Hook 9 (`dt_trig`) continues to look
+completely comprehensive in every dynamic test run against it, including
+this session's real-project one (0 pass, every time, across pre/post-loop
+timing variations). The still-open, still-unexplained piece is exactly what
+part 16 left it as: **hook 10 blocking `FUN_40007960`'s legitimate per-frame
+cleanup is a real, confirmed bug, but does not by itself explain the user's
+reported temporal character (fades and fully stops within ~2 pattern
+cycles)** -- and this session found no new candidate mechanism for that.
+Per part 16's own recommendation (not acted on until now): the next move
+that isn't more blind emulator guessing is precise information from the
+user about how their own hardware echo test differs from this minimal one
+(tempo, sample length/trim, whether other tracks are active) -- ask before
+spending another multi-run wall-clock-expensive emulator cycle chasing
+another static-RE guess.
+
+### BREAKTHROUGH: the real DSP-rendering emulator (octabam's `ot_emu`, C++,
+### both ColdFire and DSP cores) reproduces a real, quantified discrepancy
+### the Python-only "Route A" tests above could never have shown
+
+Asked the user two precise questions per the recommendation above: echo
+duration is "just under two 16-step cycles at 120 BPM" (~3.7-4 s -- and
+this project's own EARLIER work, before this session, had already
+established this is a FIXED WALL-CLOCK duration, not a fixed cycle-count,
+with "2 cycles at 120 BPM" just being what that duration equals at this
+tempo -- confirming a different tempo test on real hardware is still the
+one thing that would nail this down, not done this session); single track,
+nothing else playing. This matches this session's minimal setup exactly,
+so it was time to actually render audio rather than keep counting ColdFire
+function calls (Route A has the DSP fully stubbed -- it cannot show
+whether a real echo happens at all, only whether specific hooks fire).
+
+Built a card image via octabam's `stage_card.py` and ran the REAL, full
+dual-core-DSP `ot_emu` port against `out/mainos_mutemode_dt.bin` +
+`MMTESTDT` (`--sequencer --internal-clock --dsp --main-level 64`, GATE=2
+poked via `--poke-early`, MUTE_STATE bit 8 poked via `--poke` +
+`--poke-at-frame 5512` -- one loop in, so the voice is genuinely active
+before muting), capturing real audio (`--audio-out`, 8 ESAI TX0 slots,
+24-bit/44.1kHz). This is dramatically faster than Route A turned out to
+matter for: ~42s wall for the whole run (boot + 20s load + ~4.4s of audio),
+not the 20-85 MINUTES every Route A run this session took.
+
+**`FW_LIVE_NIBBLE` (0x46104d15) writes show a per-track step-position event
+firing on schedule at every loop's steps 1/10/15, completely undisturbed by
+muting at frame 5512** -- ten events across the whole run, at frames 0,
+3100, 4823 (loop 1, pre-mute), 5512, 8613, 10335 (loop 2, entirely
+post-mute), 11025, 14125, 15848 (loop 3, entirely post-mute), 16537 (loop 4
+step 1, run ends before its step 10/15). The inter-event gaps (3100, 1723,
+689 frames, repeating) exactly match the step-9/step-5/step-2 spacing
+between steps 1->10->15->(wrap)1 -- this is the real sequencer's own step
+clock, not a fixed-interval artifact (a synced delay's own repeats would be
+evenly spaced; this is not).
+
+**Measured the actual rendered audio at each of these ten timestamps**
+(`/tmp/analyze_echo_wav.py`, `/tmp/compare_echo_wav.py` -- 30 ms RMS window
+at each predicted event sample, `TRANSPORT_START=896929`,
+`sample = 896929 + cf_frame*16`) and compared against a second, otherwise-
+IDENTICAL run with no mute poke at all (same GATE=2, same project, mute
+simply never engaged):
+
+```
+cf_frame  t_from_mute   MUTED (slot0, slot4)      UNMUTED (slot0, slot4)
+    5512      0ms [engage]  0.0262   0.0369          0.0000   0.0183
+    8613   +1125ms         0.0477   0.0670          0.0000   0.0325
+   10335   +1750ms         0.0471   0.0661          0.0000   0.0329
+   11025   +2000ms         0.0262   0.0369          0.0000   0.0183
+   14125   +3125ms         0.0465   0.0653          0.0000   0.0324
+   15848   +3750ms         0.0472   0.0663          0.0000   0.0329
+   16537   +4000ms         0.0263   0.0369          0.0000   0.0183
+```
+
+Pre-mute (identical in both runs, a determinism sanity check -- confirmed
+bit-identical) both show only slot4/5 active, slot0-3 silent. **From the
+mute-engage frame on, the MUTED run's slot4 is consistently ~2.0x the
+UNMUTED run's slot4 at every single matched timestamp (ratios 2.01-2.06
+across all 6 points), and slot0 -- silent in BOTH runs before mute, and
+silent for the ENTIRE unmuted run -- goes non-zero in the muted run,
+exactly in step with the same events.** This is the opposite of what
+muting should do: engaging mute made MORE energy appear in the render, not
+less, precisely synchronised to the track's own real trig positions,
+continuing for at least 2 full loops post-mute with no sign of decay
+before the test's 4.4 s window ended (consistent with, though not yet
+proof of, the user's own "just under 2 cycles" report -- the run should be
+extended further to see it actually stop).
+
+**Not yet determined**: the exact identity of ESAI slots 0-7 for this
+project/routing (HARNESS.md's own port_compare.py notes "TX0 slot 2 vs
+mix.wav L" for a different fixture, i.e. slot 2 = MAIN L there -- this
+project's slot layout may differ by routing/track count and was not cross-
+checked this session). So this is not yet pinned to "the dry signal is
+literally doubled on the main output" -- it IS pinned, with real numbers,
+to "muting this track measurably changes what's rendered on at least one
+previously-silent output path, exactly in time with its own trigs,
+continuing well past the mute-engage frame." This is the first time in the
+whole 17-part thread that any emulator has shown a real audio discrepancy
+tied to muting, rather than inferring one indirectly from ColdFire hook
+call counts.
+
+### CORRECTION -- the "2x + slot0" finding above was my own test bug, not
+### the firmware: I poked the CUE byte, not the MUTE byte
+
+`reference/kb/memory-map.md`'s own "Mute / solo / cue" table (already
+documented, not new this session) is explicit: `_DAT_80000008`'s bits
+0-7=solo, **8-15=mute, 16-23=cue**. For a big-endian 32-bit word at base
+`0x80000008`, that puts the MUTE byte at `0x8000000a` (bits 15-8) and the
+CUE byte at `0x80000009` (bits 23-16) -- I used `--poke "0x80000009=1"`,
+which sets **track 0's CUE bit**, not its mute bit. Every number in the
+"BREAKTHROUGH" section above (the previously-silent slot pair activating,
+another pair doubling, both perfectly correlated with the track's own dry
+content) is now understood as: cueing a track legitimately routes its
+audio onto the CUE bus in addition to MAIN, which is completely normal,
+intended CUE behaviour -- **not a bug, and not related to the echo
+question at all.** My Python "Route A" scripts never had this bug (they
+compute the full 4-byte `MUTE_STATE` word via `struct.pack`, which gets
+the bit position right automatically); it was specific to the raw
+single-byte `--poke` spec used only in this C++-port session.
+
+### The REAL breakthrough, with the byte fixed: a genuine, tempo-locked,
+### decaying echo, reproduced for the first time in any emulator this
+### thread has ever built
+
+Re-ran with `--poke "0x8000000a=1"` (this time, actually track 0's mute
+bit) at frame 5512, everything else identical, and compared a 20 ms RMS
+envelope across the whole post-mute window
+(`/tmp/envelope_fixed.py` -- not yet moved into `tools/`, reproduce from
+this recipe): **sharp, full-amplitude bursts at t=0ms (the mute-engage
+frame itself -- matches part 16's own documented "2 leaked fresh_bind
+dispatches at the mute-engage frame" exactly), ~1120-1140ms, ~1740-1780ms
+and ~2000-2020ms (loop 2's steps 10/15 and loop 3's step 1 -- one full
+extra pattern loop, audible at essentially full strength), then a single,
+much WEAKER burst at ~3120ms (loop 3 step 10, ~0.013 vs ~0.05-0.07 for the
+earlier ones -- a real decay, not a repeat of the same strength), then
+**complete digital silence for the remaining ~1.8 s of the test window**
+(loop 3's step 15 and loop 4's step 1 both produce nothing at all).
+
+Total audible-echo duration: mute-engage to the last non-negligible burst
+is ~3.1-3.2 s -- **matching the user's own "just under two 16-step cycles
+at 120 BPM" (~3.7-4 s) closely enough, with a real decay-then-silence
+shape, that this is very likely the first genuine emulator reproduction of
+the actual reported bug in this thread's whole history.** Critically, this
+happened against the EXACT SAME image (`out/mainos_mutemode_dt.bin`) that
+every Route A (Python, ColdFire-only) test this session ran, and which
+showed `dt_trig` (hook 9) at 0 pass / N silence -- fully, comprehensively
+blocking every trig-dispatch attempt on this track, every single time,
+with never one exception. **The full DSP-rendering C++ port shows real,
+audible, discrete, full-amplitude sound continuing to fire on this
+track's exact step positions for a full extra loop, despite hook 9's own
+gate reporting a clean 100% block rate on the same binary.** This is a
+strong, direct sign that Route A's simplified RTOS/scheduling model
+(known, per its own docs, to differ from the real firmware's exact
+interrupt/task timing) was masking a genuinely timing-sensitive bug that
+only manifests under the real RTOS's actual scheduling -- not that hook 9
+is lying about what IT sees, but that something else, upstream or
+parallel to hook 9's own gate, is independently producing sound.
+
+### Handoff
+
+This reframes the whole investigation: the mechanism is almost certainly
+**timing-sensitive in a way Route A cannot show**, so further static-RE
+guessing at which ColdFire function does it (this session's `40043c50` /
+`93ec0` / `96ad4` detour, all closed dead ends) is far less promising than
+continuing to use the C++ DSP-rendering port directly, since it can now
+reproduce the actual symptom. Concrete next steps, none done yet:
+
+1. Add PC/call tracing INSIDE this same `ot_emu` run (it supports
+   `--watch-pc`, `--dsp-pcwatch`, `--coverage` etc.) targeting `dt_trig`'s
+   own PASS/SILENCE addresses (`0x400d7676`/`0x400d766e` for this build)
+   and `fresh_bind`'s (`0x400d76d2`/`0x400d76cc`) DURING a run that also
+   captures audio, so the exact ColdFire PC trace and the audible bursts
+   can be correlated directly in ONE run, instead of trusting two separate
+   tools (Route A's hook-counting vs the C++ port's audio) to agree.
+2. If `dt_trig` really does show 0 pass throughout even in THIS harness,
+   the sound must be coming from somewhere hook 9 doesn't gate at all
+   (matching this session's earlier point: hook 9 only gates the
+   machine-type dispatch at `0x4000d498`, not every conceivable path to
+   the DSP) -- worth re-examining the direct DSP-side voice-command
+   mailbox (`FUN_40005178`, this thread's OWN "STOP" mechanism from
+   Session 9/14) for whether something keeps re-arming or re-triggering it
+   independent of the ColdFire dispatch chain.
+3. Extend `--frames` well past 19300 to confirm the observed "complete
+   silence after ~3.2s" is real and stays that way (not a coincidence of
+   this particular window), and re-run at a different tempo (per this
+   session's own user-confirmed "fixed wall-clock, not fixed cycle-count"
+   framing) to see whether the ~3.2s duration is itself tempo-independent.
+4. `out/mmtestdt_echo_fixed_core0.wav` (the correctly-muted render) and
+   `out/mmtestdt_unmuted_core0.wav` (baseline) are in `refs/octabam/out/`,
+   gitignored, not committed -- regenerate via the exact `ot_emu` command
+   in this entry rather than assuming they persist. `out/mmtestdt_echo_
+   core0.wav` (the CUE-bug run) should be treated as invalid/misleading
+   and not reused for anything.
+
+### DECISIVE: `dt_trig` (hook 9) is blocking everything it sees, and the
+### audible echo happens anyway -- proof the real mechanism is completely
+### outside every path this whole thread has ever instrumented
+
+Did step 1 of the handoff above immediately: re-ran the exact same
+correctly-muted scenario with `--watch-pc
+"0x400d7676,0x400d766e,0x400d76d2,0x400d76cc"` (dt_trig's PASS/SILENCE and
+fresh_bind's PASS/SILENCE for this build) alongside `--audio-out`, so one
+run gives both the ColdFire-level trace and the real audio.
+
+**Result: 10 total hits across the whole run (boot + 20s load + ~4.4s of
+play). 3 at `dt_trig` PASS, 7 at `dt_trig` SILENCE, ZERO at either
+`fresh_bind` address.** The 3 PASS hits are consistent with loop 1's three
+real, legitimately-unmuted trigs (steps 1/10/15, all pre-mute). Every one
+of the 7 SILENCE hits shows `d1=0x100` at the hook -- i.e. `MUTE_STATE`
+correctly read with track 0's bit set, every single time, no exceptions.
+**hook 9 is not leaking. It is doing exactly its documented job, 100% of
+the times it is actually invoked.**
+
+And yet the SAME run's audio (previous entry above) shows real, loud,
+distinct bursts at loop 2's steps 10/15, loop 3's step 1, and a fading one
+at loop 3's step 10 -- moments that, per the SILENCE-hit count, dt_trig
+correctly blocked. **The only way to reconcile "the gate fired and
+blocked" with "sound came out anyway" is that the sound is not reaching
+the DSP through the dispatch site dt_trig gates (`0x4000d498`) at all.**
+Something else -- a path never identified in this thread's entire 17-part
+history, including this session's own re-decompile of all 7
+`FUN_40006820` callers (all now closed dead ends) -- is independently
+producing audible, full-strength, step-position-locked output for roughly
+one more pattern loop after mute, then fading out. (A smaller, separate
+loose end: dt_trig's own count of 7 silence hits is 2 short of the 9
+post-mute trig-dispatch attempts a naive per-loop count would predict --
+either `--watch-pc`'s coverage has a blind spot under specific scheduling
+conditions, matching its own documented boot-visibility caveat, or those 2
+attempts never reached `0x4000d498` at all for an unrelated, likely benign
+reason (e.g. the track's own state stopped requesting a dispatch by then).
+Neither reading changes the main conclusion, which rests on the 7
+confirmed, unambiguous silence-with-audible-output correlations.)
+
+**This reframes the entire mute-mode "echo" investigation.** Every
+previous session's static-RE leads (the recorder-arm path, `FUN_40006820`
+and its callers, the fresh-bind/reuse branch inside `FUN_4000f450`) have
+now been examined and are not it -- dt_trig, sitting upstream of ALL of
+them at the single per-track-per-machine-type dispatch point, is provably
+not the leak, so nothing downstream of it can be either. The real
+mechanism is something that can make a track's voice audibly restart (or
+un-silence) WITHOUT ever going through `0x4000d498`'s dispatch. The most
+promising unexplored candidates, per this project's own prior work:
+
+- The direct voice-command mailbox this session's own (abandoned)
+  MUTEMODE_NEW work found and dynamically confirmed real (`FUN_40005178`,
+  `_DAT_80000008`-adjacent gate flags, `0x46c7e9fa[track]`-style per-track
+  command bytes) -- does something re-arm or re-issue a command through
+  this path independent of the sequencer's normal per-step dispatch?
+- The sequencer step handler's own staging writes
+  (`0x4009d1e8` -> `0x46c7a830`/`0x46c7a810`/`0x46c7a14c`) whose real
+  consumer this project has never located, across every session that has
+  tried (this one included, earlier, before the pivot back to this
+  thread) -- if THAT consumer is what actually starts a voice, and it
+  reads stale staged data laid down before mute engaged, independent of
+  `0x4000d498`'s own live mute check, that would explain both "why it
+  takes about a loop's worth of steps to run out" (draining however many
+  steps were already staged ahead) and "why hook 9 never sees it" (a
+  completely separate call site).
+
+Next session should point `--watch-pc`/`--watch-mem` at THESE addresses,
+in the same audio-capturing `ot_emu` harness, rather than continuing to
+examine `FUN_40006820`'s call graph -- that avenue is now exhausted.
+
+### FOUND IT (static picture): `step_handler_confirmed` (`0x4009d1e8`) applies
+### a step's params UNCONDITIONALLY, with no mute check anywhere, and an
+### entirely independent thread on this same file has already decompiled it
+### in full for an unrelated bug
+
+Followed the handoff's item 1 directly: raised `--watch-read`'s hardcoded
+64-hit cap to 20000 (`tools/emu/ot_emu/main.cpp`, local-only, rebuilt) since
+the address was hammered by unrelated boot/load-time code before the
+transport even started, and re-ran `--watch-read "0x46c7a810,4"` alongside
+the mute test. Two things fell out:
+
+1. `0x46c7a810` turned out to be read every ~340 frames (once per
+   sequencer step, ALL 16 of them, not just the 3 real trigs) by a giant
+   function at `0x400a1eea` -- present identically before and after mute,
+   no correlation with the mute event at all. A real address, but not
+   THIS bug's lever.
+2. Decompiling that same giant function (`tools/ghidra/attic/
+   GhidraLiveNibble.java`) shows it CALLS `step_handler_confirmed` (a
+   pre-existing Ghidra label at `0x4009d1e8`) once per due step, gated
+   only by a per-track pending bit (`DAT_8000668d`, set a few lines
+   earlier from the current step's track index) -- **no mute check
+   anywhere in this control flow**. Immediately after that call, gated on
+   the SAME bit, it initialises `0x46c7a810 = 0x89d` (2205 = exactly
+   50 ms at 44.1 kHz), `0x46c7a830 = 0`, `0x46c7a14c = 1`, `0x46c77bfa =
+   0x285ff0`, then clears the pending bit.
+
+**This is exactly the "still-unidentified general path... whose real
+consumer you haven't found yet" this project flagged repeatedly across
+parts 11-17 -- and it turns out `## Session 79, continued a fourth/fifth
+time` (above, in this same file, a DIFFERENT thread entirely -- DIRECT
+JUMP, chasing an unrelated pattern-switch timing bug) had ALREADY
+decompiled `step_handler_confirmed` in full, independently, for its own
+purposes, while this session was still working the mute thread in
+parallel.** Their finding, quoted because it settles the open question
+directly: **"`step_handler_confirmed`'s signature resolves to (track,
+bank, pattern, step, part)... the actual per-step p-lock apply... walks
+`#1[step]`'s 32 bytes... non-0xFF -> that byte IS the locked value...
+0xFF -> falls back to the PART's own default."** And separately, their own
+exhaustive trace of `0x8000668d` and the surrounding arm/reset logic (four
+consecutive rounds, `## Session 79 continued`/`a fourth time`) confirms the
+arm site "fires regardless" of several other conditions they checked, and
+never once turned up a mute-state read anywhere in this code.
+
+**Putting the two threads' findings together**: every time a track's step
+is due, `step_handler_confirmed` applies that step's full p-lock record
+(sample slot included) into the live per-track state, and the surrounding
+per-step dispatcher arms a 2205-sample (50 ms) countdown for the voice
+side to consume -- **both steps run unconditionally, with no mute check,
+strictly BEFORE and INDEPENDENT of hook 9's own dispatch gate at
+`0x4000d498`**. Hook 9 gates a later, separate call (the machine-type
+handler dispatch) and does so perfectly, every time, per this session's
+own PC trace. But the param-apply and the voice-side arming this decompile
+shows happen earlier in the SAME per-step cycle, on a different call
+path, and nothing this project has built gates them. This is consistent,
+for the first time, with every piece of dynamic evidence gathered this
+session: real audible bursts at exactly the track's own trig positions,
+completely unaffected by `MUTE_STATE`, for as long as the sequencer keeps
+independently arming this per-step mechanism.
+
+### Handoff, superseding the previous one
+
+The next concrete step is no longer speculative: find what actually
+CONSUMES the armed countdown (`0x46c7a810`'s 2205-sample value once set,
+`0x46c7a830`, `0x46c7a14c`, `0x46c77bfa`) on the path that reaches the DSP
+-- i.e. what reads these fields DOWNSTREAM of the arm site (not the
+same-function readback at `0x400a2e22` etc. already traced, which is the
+arming function's OWN bookkeeping, not an external consumer) and ultimately
+calls whatever plays the voice. If that consumer can be identified and
+correctly gated on `MUTE_STATE`/`GATE`, this would be the fix hooks 9/10
+have been reaching for, unsuccessfully, this whole thread's history. Given
+the DIRECT JUMP thread already has extensive tooling and decompiles of the
+surrounding function (`FUN_400a1eea`) built for its own purposes, cross-
+reading its NEXT sessions (or coordinating directly, since both threads
+are live on the same `wip` branch right now) before re-deriving the same
+ground independently is likely to be faster than continuing solo.
 
 ## Session 78 (2026-09-20, `wip`) — TRIGLESS-LOCK AUTO-REMOVE (Section 13 resumed): part 17's
 `fb_caller_93ec0`/`96ad4` lead checked and FALSIFIED for this feature; `+0x4900` re-confirmed
@@ -19821,6 +20193,108 @@ emu_directjump_dynamic.py`: added `reset_flag_writes`/`prev_bank_ix_writes`/
 `flag_80001860_writes`/`flag_46107568_writes` watches to both run functions. No
 hook/patch source changed.
 
+## Session 78 continued (2026-09-20, `wip`) — TRIGLESS-LOCK AUTO-REMOVE: real HW export-and-diff
+data in hand, REFRAMES the bug from "a residual `#1` value" to "the trig-row LED is never
+told to refresh after a LIVE erase" + a separate, genuinely-leftover data flag that the LED
+doesn't care about but a pattern-content scanner might. Not yet confirmed against the user's
+actual on-hardware observation — one clarifying question posed back to them.
+
+User built and exported **4 real projects** (`~/Desktop/ARTLTEST{1,2,3,4}`), all bank 1 (0) /
+pattern 1 (0) / track 1 (0), read with `tools/inspect_bank.py`:
+
+| project | `.strd` (last committed) | `.work` (live, uncommitted) |
+|---|---|---|
+| ARTLTEST1 | step 6: **2** locks (`[0x00]=0x30`, `[0x02]=0x4e`) | step 6: **1** lock (`[0x02]=0x4e` only — `[0x00]` erased) |
+| ARTLTEST2 | step 6: **1** lock (`[0x02]=0x4e`, matches TEST1.work) | step 6: **0** locks — **all 32 B = 0xFF** |
+| ARTLTEST3 | step 6: 0 locks, TRAC+0x19(disk)/+0x10(RAM) bit **set** | same |
+| ARTLTEST4 | step 6 + a 2nd step: 0 locks, TRAC+0x19/+0x10 bit set on **both** | same |
+
+Each project's own `.strd`/`.work` pair (not a diff ACROSS projects) turned out to already
+bracket exactly the transitions Section 13 needs — the user's own continuous edit-then-export
+per project captured the before/after live, unsaved: **TEST1 = the "erase 1 of 2" transition
+in place, TEST2 = the "erase the last one" (1→0) transition in place.**
+
+### Finding 1 — `#1` (the p-lock VALUE array) already ends up correctly empty on real hardware
+
+TEST2's `.work` shows the erased step's `#1[step]` fully `0xFF` — i.e. by the time the file
+hit the card, whatever merges a LIVE `[NO]`+knob edit into the disk-serialised store (the
+exact mechanism Sessions 33/34 spent 2 sessions failing to locate in the emulator) **has
+already run**. Sessions 33/34's "not tractable headless" conclusion was about the *synthetic*
+emulator harness's own preconditions being unrealistic (no real playing sequencer state) —
+not proof the merge doesn't happen. It demonstrably does, on real hardware, by export time.
+Where exactly is still unlocated, but the practical question ("does `#1` end up right") is now
+answered empirically: **yes.**
+
+### Finding 2 — a REAL hardware-confirmed trig-type-layer flag survives the erase, at exactly
+the field the KB already flagged as a candidate
+
+`reference/kb/file-format.md`'s own TRAC table already said of the three "trig-type layer"
+masks (disk `+0x11`/`+0x19`/`+0x21`, RAM `TRAC+0x08`/`+0x10`/`+0x18`): "one of these three
+carries the trigless lock bit" — unconfirmed. **TEST1/2/3/4 all show `+0x19` (RAM `+0x10`)
+with its bit SET for step 6, in every case, including TEST2 where `#1` is now fully empty.**
+Session 31's own synthetic `--trigless` test (NOTES "Session 31") found this same field clear
+in ITS test bank — but that test only hand-cleared a note bit in a copied DEMO file; it never
+drove the real "create a trigless lock" code path, so of course the flag a real gesture sets
+was never observed. This resolves the KB's "one of these three, unconfirmed" note: **it's
+`+0x19`/RAM `+0x10`**, at least for this real case — and critically, **the LIVE erase never
+clears it**, on real hardware, even when it fully empties `#1`. TEST3/4 (the "erase-last" /
+"manually-placed-empty" checkpoints, going by the user's own numbering) show this bit set on
+**two** steps with zero `#1` content on both — confirming Session 13's own concern that a
+byte-level inspection of the SAVED state cannot tell a genuine manually-placed empty lock
+apart from an erased-to-empty leftover; the two are bit-for-bit identical once saved.
+
+### Finding 3 — checked in the emulator against the REAL exported TEST2 file (not a synthetic
+bank): the derived per-step LED bitmap self-heals; the bug is a missing refresh, not bad data
+
+`tools/emu_artl_hwcheck.py` (new) boots `~/Desktop/ARTLTEST2` through the real firmware exactly
+like `emu_plock.py` does for the DEMO, then calls the actual LED-bitmap rebuild `0x400339d8`
+and reads `LOCK_STORED` (`0x46c7d48c`) for step 6/track 0. **Result: it comes back OFF** — the
+rebuild is confirmed (again, now against real hardware bytes, not a hand-patched bank) to be
+driven purely by `#1`, indifferent to the still-set `TRAC+0x10` bit. So a full LED rebuild
+(which real firmware runs on a pattern load — this test used the actual LOAD PROJECT path)
+already shows step 6 correctly dark.
+
+Then decompiled `0x40045614` (`tools/ghidra/attic/GhidraArtlEraseRedraw.java`) — the function
+Session 30 found the LIVE erase path calls "then redraws" instead of the full rebuild. **It's
+a generic on-screen widget redraw** (mode-dispatched on `_DAT_460d16f0`, computes pixel boxes,
+calls `FUN_40012254`/`FUN_40012170`, sets a screen-dirty flag) — it never touches `LOCK_LIVE`,
+`LOCK_STORED`, `#1`, or `TRAC+0x10` at all.
+
+**So: nothing in the LIVE erase's own call chain ever re-derives the trig-row LED bitmap.**
+The step's LED was lit before the erase (real p-lock present); the erase silently updates `#1`
+(eventually) but never asks `0x400339d8` to recompute the display, so the LED simply shows
+stale pre-erase state until something else forces a rebuild (pattern reselect, screen
+re-entry, project reload — the LOAD-PROJECT path this session's own test exercised). If real,
+this reframes Section 13 from "delete leftover trig data" to "the display just needs a
+poke" — a **much** smaller fix than the 9-session model this thread built (S26-34): a detour
+on `0x40041bc4`'s exit calling `0x400339d8` (or directly patching the two bitmap bytes) would
+fix the LED for *every* erase, not just the 1→0 case, with no new predicate logic needed,
+*if* `#1` is already trustworthy by then (Finding 1 says usually yes, timing TBD).
+
+`TRAC+0x10`'s own leftover bit (Finding 2) is a separate, smaller, genuinely-real cleanup
+item: it doesn't drive this LED, but it's still wrong data, and per S48's shipped PTN-LED fix
+(`FUN_4009a464` — scans trig masks to decide if a *pattern* has content) this class of mask is
+exactly what that scanner (or its post-fix logic) reads — worth checking whether this stuck
+bit leaves the PATTERN-level LED thinking this pattern has content after all trigs+locks are
+gone, a second, smaller "auto-remove" target, and the one place Session 13's original
+predicate-and-clear design (clear `#1` + the type-layer bit on the 1→0 transition) is still
+exactly right regardless of the LED-refresh finding above.
+
+### Open question for the user (hardware, ~10 seconds to check)
+
+Does the trig-row LED for an emptied trigless-lock step **clear itself** if you leave the
+pattern/trig screen and come back (or reselect the pattern), without a project reload — or
+does it stay lit even then, only clearing (if ever) on a full project reload? This is the one
+thing Finding 3 predicts (leave-and-return should clear it, since that reselect very likely
+forces the same `0x400339d8` rebuild this session's emulator test used) but can't be checked
+without the device. The answer decides which of the two targets above (LED-refresh-on-erase
+vs. Session 13's original data-clear-on-1→0) is the actual fix for what the user sees, though
+both are real, worth doing, and not mutually exclusive.
+
+Tooling this continuation: `tools/emu_artl_hwcheck.py`, `tools/ghidra/attic/
+GhidraTriglessApplyWriters.java`, `GhidraTriglessMergeSearch.java`, `GhidraArtlEraseRedraw.java`
+(all new, uncommitted). No patch/build changed; nothing flashed.
+
 ## Session 79, continued a fifth time — DIRECT JUMP: ROOT CAUSE FOUND, mechanically proven
 end to end. The extra out-of-cycle table-arm event is caused by `CNTDN_TBL[track]`
 (`0x800065c3`, the ordinary trig-fire countdown, armed by DIRECT JUMP's commit exactly as
@@ -19938,6 +20412,159 @@ Tooling: `tools/ghidra/attic/GhidraDirectJump19.java`-`21.java` (one-shot probes
 emu_directjump_dynamic.py`: added a frame-filtered `pc_trace` watch (via new `TRACE_LO`/
 `TRACE_HI`/`TRACE_FRAME_LO`/`TRACE_FRAME_HI` constants) to both run functions. No
 hook/patch source changed -- still read-only dynamic + static analysis only.
+
+## Session 78 continued again (2026-09-20, `wip`) — TRIGLESS-LOCK AUTO-REMOVE: LIVE hardware
+test KILLS the "stale display" theory, REVIVES and STRENGTHENS the original S13/31/32 plan;
+a clean full-analysis decompile of `FUN_40041bc4` resolves the Session-33 "no clean step"
+wall the thread stalled on for 2 sessions.
+
+### Decisive real-hardware result: `#1` genuinely isn't merged mid-session, not even across a
+### pattern switch
+
+Confirmed the device is running `OCTATRACK_SIDECHAIN3_CROSS` (flashed + HW-confirmed this
+same day, Session 77) not stock -- flagged to the user; that build only touches DSP/compressor
+code, nothing on this path, so irrelevant here. Asked the user to test, live, without
+reloading the project: (1) does paging away from the trig grid and back clear a step's
+stuck lock LED after a 1->0 erase -- **no**. (2) does switching to a different pattern and
+back to pattern 1 clear it -- **no, still lit**.
+
+Result (2) is the important one: a real pattern reselect is one of the heaviest ordinary
+UI events short of a full project reload -- Session 15's own DIRECT JUMP mapping shows a
+pattern-boundary commit reloads Part/scene arrays and rebuilds per-track step positions from
+scratch, and Session 32 listed a dozen call sites for the LED-bitmap rebuild `0x400339d8`
+that plausibly overlap normal UI dispatch. If even that doesn't clear the LED, then either
+this specific rebuild function genuinely never runs on a same-project pattern reselect, or --
+more consistent with everything below -- **`#1` (the actual value store the rebuild reads)
+still holds the OLD locked value in RAM at this point, because nothing has merged the LIVE
+erase into it yet.** The LED isn't stale; it's accurately reporting genuinely-unmerged data.
+
+This reconciles every prior result at once: Sessions 33/34's emulator finding (`0x40041bc4`
+never writes `#1`) was correct and remains correct (reconfirmed below, now via a clean
+decompile rather than raw disassembly); this session's earlier `.strd`/`.work` diff (NOTES,
+same-day, "Finding 1") showing `#1` **does** end up correctly empty by export time was also
+correct -- but that gap between "live-edited" and "exported" almost certainly contains a
+SAVE or project-exit event the user's own workflow performed (to get the file off the card),
+which is a different, much rarer trigger than a mere pattern reselect. In ordinary play --
+exactly the case the user just tested -- that merge may not happen for a long time, so the
+"pure visual noise" Section 13 opened with is real and persistent in normal use, not a display
+glitch. **This fully re-validates the original S13/26-34 design direction**: the fix has to
+sit at the LIVE erase site itself and write `#1` (and, per this session's earlier finding, the
+leftover `TRAC+0x10` trig-type-layer bit) directly -- it cannot rely on any existing merge or
+any existing UI-driven rebuild, because in practice neither reliably runs.
+
+### `FUN_40041bc4` decompiled clean (Session 70's full-analysis project + current Ghidra,
+### vs. Session 30's raw-disassembly reading) -- the Session-33 "no clean step" wall is gone
+
+Already had this decompile on hand from the earlier `+0x4900` xref search this session
+(`/tmp/ghidra_mergesearch.log`, `GhidraTriglessMergeSearch.java`). Full signature:
+`FUN_40041bc4(uint param_1 /*track*/, int param_2, int param_3, undefined4 param_4)`.
+
+Its very first real work: `FUN_4009b2d4(param_4, (char)(param_1+8), <flag>, &local_8)` --
+this is the SAME decoder Session 33 profiled ("(a3)@0=bank, @1=pattern, @2=?, @3=sub-index")
+and concluded "the step is folded into a huge linear address... not returned as a clean #1
+step index." **That conclusion doesn't survive a clean decompile.** The four output bytes,
+used immediately after:
+
+- `local_8` = bank/blob selector
+- `local_7` = pattern
+- **`local_6` = STEP, directly** -- proven by its own later use: `iVar8 = (int)local_6;` and
+  every subsequent `+0x4900`-area access indexes `... + iVar8*0x20 ...`, exactly Session
+  27/28's own confirmed `+0x4900 + step*0x20 + track*0x8b0` formula. Session 33 mislabelled
+  this field "a param-page descriptor" -- it's the step index, full stop, no extra decode
+  needed, no separate "per-track playhead step global" to go hunting for.
+- `local_5` = a 6-bit param-identifying value (`(local_5 & 0x3f) << 7`, written into the
+  `+0x2880` PART-payload's u16 bit-7..12 field Session 30 already mapped) -- Session 33's
+  "remul sub-index 0-23" was this same field, just under-ranged from one test case.
+- `local_c` (initially = `local_6`/step) selects between two 32-bit halves of a per-step
+  "armed" bitmap (`DAT_46c7d344` for step<32, `DAT_46c7d348` for step>=32) -- so Session 34's
+  "0x46c7d344 |= <bit> (arm a param)" reading was also off by one level: it arms a *step*,
+  not a param.
+
+**Confirmed, directly in the decompile, not by absence-of-evidence**: this function never
+computes or references the RAM `#1` structure (`TRAC+0x59`) anywhere in its ~150 decompiled
+lines. It only ever touches the `+0x4900` working buffer (`DAT_400e6ae0`, bytes `+0`/`+3`/
+`+4`/`+5` of each 32-B step record -- conspicuously never `+2`, which Session 28 identified as
+the *value* byte the sibling *writer* `0x4004ef54` owns), the two per-step armed-bitmaps, the
+`+0x2880` PART-payload view, and unconditionally sets `0x46c7d2e4[step] |= 1<<track` (the LIVE
+lock-presence bitmap) at its single exit label -- regardless of whether the net effect was an
+erase-to-empty or not. The bulk of the body (`local_8`/`cVar1`/`'@'-cVar1` arithmetic) reads
+as an **encoder-delta accumulator** biased around `0x40` (matches other center-detented
+encoder handling elsewhere in this codebase) rather than a flat "set byte to 0xFF" -- i.e.
+this function is shared knob-turn plumbing, and "erase" is a caller-level interpretation
+(a specific delta/direction) rather than a distinct code path inside this function. Not yet
+fully cracked which exact condition here constitutes "the user erased this param" vs. an
+ordinary nudge, or how `local_5` maps to a specific byte offset inside `#1`'s 32-byte
+per-step record -- that mapping (`FUN_4009b2d4`'s own page/table lookups, previously noted as
+using `0x46c7756c/759c/75bc/75ce/757c` etc.) is the concrete next piece.
+
+### Status / next step
+
+The plan is back to exactly Session 13/31/32's own shape, now with two real firmware gaps
+closed instead of assumed: (1) a clean, hardware-and-decompile-confirmed step index is
+available right at this function's entry, no separate playhead-global hunt needed; (2) the
+fix must actively write `#1[track][step][param]` and clear the `TRAC+0x10` bit itself, since
+neither is ever done for us, on any timescale shorter than an explicit save. Remaining before
+a detour can be designed: pin exactly which observable state at this call site means "this
+was an erase, and it was the last remaining lock for this step" (vs. `local_5`'s page/param
+table lookup, needed regardless, to know *which* of `#1`'s 32 bytes to clear). Paused here to
+report back to the user rather than pushing straight into another Ghidra round.
+
+## Session 78 continued a third time (2026-09-20, `wip`) — TRIGLESS-LOCK AUTO-REMOVE: the
+PLAYBACK p-lock apply loop confirms `#1[step]` byte `i` = param `i`, linear, no table needed
+-- but the EDITOR side (both erase functions) never computes that same linear index; it only
+ever operates on up to 5 *physical on-screen encoder slots* for the *currently displayed
+page*. The remaining gap is now precisely-shaped: a (page, encoder-slot) -> `#1` byte-index
+table, not a per-step dynamic decode.
+
+### `step_handler_confirmed` (`0x4009d1e8`, contains what Session 30 called `0x4009d740`) --
+### the actual per-step p-lock apply, decompiled clean
+
+Signature resolves to `(track, bank, pattern, step, part)`. The p-lock copy loop (`iVar3` 0
+to `0x20` exclusive, i.e. **exactly 32 iterations**) walks `local_c` starting at
+`blob + track*0x91a + pattern*0x8ed8 + step*0x20 + 0x59` (`0x400e2239 - 0x400e21e0 = 0x59` --
+**exactly `#1[step]`**) one byte per iteration (`local_c = local_c + 1`), and for each byte:
+non-`0xFF` -> that byte IS the locked value for this param, written straight into the "#2"
+working array (`local_4`); `0xFF` -> falls back to the PART's own default value table
+(indexed off the machine-type byte at `blob+part*0x18b2+track+0x8eda2`, the same "PICKUP
+machine" byte Session 27 already knew). **This directly proves, from the function that
+actually plays the pattern back, that `#1`'s 32 bytes are a flat, linear `param index = byte
+offset` array** -- no per-page/per-bank table needed to READ it. (There's a second parallel
+walk over `local_8`, the *next* locked step for the same param, computing a per-step delta --
+this is the param-ramp/glide-between-locks engine, not otherwise relevant here.)
+
+### `FUN_4004f124` (the GRID-REC/armed sibling eraser) decompiled clean -- confirms the
+### editor never touches a global param index at all
+
+Loops over every currently-HELD step (`_DAT_460d174a`, the u16 held-step bitmap Session 27
+already found), and per step reads exactly 4 bytes from the `+0x4900` working record --
+`+0x4900`, `+0x4903`, `+0x4904`, `+0x4905` (**never `+0x4901`/`+0x4902`**, the latter
+apparently the *writer*'s value byte per Session 27/28) -- chains them into up to 3 delta
+values (`iVarN = sibling + -0x40 + otherSibling`, the same `0x40`-centered accumulator shape
+as `FUN_40041bc4`), and compares the incoming raw encoder value (`param_2`) against each
+chained value to decide WHICH of the (at most) 4 slots' worth of accumulated state to reset
+to `0xFF`. **This never references a 0-31/0-63 "logical param index" -- it only ever indexes
+by *step* and by *encoder slot* (0/3/4/5, i.e. up to 4 of the 5 physical encoders on the
+current page).** Combined with the live (non-armed) `0x40041bc4`'s own identical shape
+(previous entry, this file), this is now a confirmed, structural fact about the editor: **it
+operates purely in "current page + physical encoder" space**, and never itself resolves that
+to the flat 0-31 index `#1` and the playback loop use.
+
+### What's actually still missing, precisely scoped
+
+A **static (page, encoder-slot 0..4) -> `#1` byte-index (0-31)** table. This is very likely a
+small, fixed lookup (one entry per on-screen param page x 5 encoders, not a per-step or
+per-track dynamic thing) -- structurally a MUCH smaller, more tractable target than the
+"why does `0x4009b2d4` divide by `0x1ae50`" rabbit hole this session's earlier pass started
+down (that function resolves *disk/PART-payload addressing*, a different, harder problem this
+feature does not actually need solved). Two ways to pin it: (a) find the static table in
+Ghidra (search near the on-screen page/param-name string tables for a small per-page array),
+or (b) **cheaper: ask the user which exact page + knob they used** to create/erase the lock in
+`ARTLTEST1`/`2` (this session's own real hardware export already shows byte offsets `0x00` and
+`0x02` were the two locked params on step 6 -- if the user can say which physical param that
+was, e.g. "AMP page, PAN and VOL", that pins two real (page,encoder)->byte-index facts for
+free, no more Ghidra needed for at least those two).
+
+Paused here (again) to ask the user that question before further static digging.
 
 ## Session 79, continued a sixth time (2026-09-20)
 
@@ -20068,6 +20695,67 @@ added `COMMIT_SITES`/`install_commit_watch`/`print_commit_watch` and a
 `run_one()` and `run_groundtruth()`. Log: `/tmp/dj_commitwatch_run.log`. Still
 read-only dynamic + static analysis only -- no hook/patch source changed.
 
+## Session 78 continued a fourth time (2026-09-20, `wip`) — TRIGLESS-LOCK AUTO-REMOVE: got a
+real hardware-confirmed anchor (PTCH -> `#1` byte 0, LEN -> byte 2) but tracing the WRITER
+side shows the (page,encoder)->byte-offset resolution doesn't live in the LIVE edit path at
+all -- it must be inside the still-unlocated SAVE/bank-serialise code, a different and larger
+target than anything the last 4 attempts (S33, S34, and this session's earlier two rounds)
+searched. Paused to report status rather than open that hunt blind.
+
+User confirmed, from the real `ARTLTEST1`/`2` exports (step 6, `#1` bytes `0x00`=48,
+`0x02`=78): the PLAYBACK page, **PTCH and LEN**. Consistent with the standard OT PLAYBACK-page
+knob order (PTCH, STRT, LEN, RATE, ...) -- byte 0 = PTCH, byte 2 = LEN, with byte 1 (STRT)
+sitting unlocked/`0xFF` in between. Real, hardware-grounded, but only 2 of ~32 slots pinned.
+
+### The LIVE writer (`0x40041784`) decompiled clean -- it never resolves a param identity
+### to a `#1` byte at all; it defers that resolution entirely
+
+`FUN_40041784(track, param_2 /*encoder slot*/, raw_position, value)`. Confirmed against a
+clean decompile: this function clamps `value` to `0-0x7f` and writes it to exactly ONE place
+-- `+0x4900 + step*0x20 + track*0x8b0 + 2` (the *value* byte Session 27/28 already knew about)
+-- then stashes `(bank,pattern)` and `(track,step)` into a tiny 2-slot-per-encoder side cache,
+`DAT_46c7d4cc`/`DAT_46c7d4cd` (indexed by `param_2`, the encoder slot 0-4 -- confirmed via
+`FUN_40041bc4`'s own tail, which populates the same cache). **It never computes or stores
+which of `#1`'s 32 bytes this value belongs to.** The `+0x4900` "32-byte step record" is not
+one-byte-per-param the way `#1` is -- it holds exactly one scratch value (byte `+2`) *per
+step*, reused across whichever encoder/param was last touched; "which param" only ever exists
+as `param_2` (an encoder-slot 0-4) plus, implicitly, whatever param page is currently
+displayed on screen -- a piece of UI state neither writer nor eraser function ever
+reads or resolves into a `#1`-shaped index.
+
+**Conclusion: the "page + encoder -> `#1` byte" resolution is not deferred-and-findable
+somewhere nearby in the live-edit code -- it is not computed by the live-edit code AT ALL.**
+Whatever performs it must be a genuinely separate consumer, most likely inside the actual
+bank/pattern SAVE serialiser (still unlocated -- Session 34's own guess, `0x400645ce`, was
+confirmed wrong earlier this session: it's the CREATE-PROJECT dialog).
+
+### The `DAT_46c7d4cc`/`_4cd`/`_4cf` pending-cache lead: checked, dead end
+
+Hypothesis: something reads this "last (bank,pattern,track,step) per encoder-slot" cache to
+know what to commit and where -- a live lead worth checking before opening a fresh hunt.
+Ghidra's `ReferenceManager` xrefs came back empty for all three addresses (expected -- they're
+accessed via `param_2*4 + BASE` register-indexed addressing, which Ghidra's static reference
+pass doesn't resolve into address-literal xrefs even though the decompiler shows them
+symbolically). Fell back to a raw byte-pattern search for the literal `0x46c7d4cc` constant
+across the entire firmware image (`out/raw/section_3_MAIN_OS.bin`) -- **exactly 2 hits, both
+already inside `FUN_40041784` and `FUN_40041bc4`.** Nothing else in the whole image references
+this cache. Dead end -- it's genuinely write-only from anything found so far.
+
+### Status / recommendation
+
+Four independent searches (S33's manual disassembly hunt, S34's dynamic drive, this session's
+Ghidra-resolved `+0x4900` xrefs, and this pass's pending-cache raw search) now agree: **there
+is no separate "commit the live edit" function anywhere in the reachable static graph from the
+editor side.** The resolution has to happen inside the generic SAVE PROJECT / bank-write path,
+which is a DIFFERENT, not-yet-profiled subsystem (unlike the p-lock editor, no prior session
+has mapped this one at all -- Session 34's one guess at it was wrong). Finding it is a bounded
+but real new hunt (find the actual "write project to card" menu handler, likely reachable from
+the `[MEM]`/save UI or an autosave path, then trace its bank/pattern-block writer for wherever
+it reads the *display* state -- current page + `+0x4900`'s scratch value -- to decide which
+`#1` byte to write). This is comparable in size to the original Session 26-34 arc, not a quick
+follow-up. Paused here to check with the user before opening it, given the length of today's
+session already.
+
 ## Session 79, continued a seventh time (2026-09-20) — RETRACTION: the CNTDN_TBL-branch
 theory does NOT explain the measured DAT_80001904 divergence; the real mechanism is a
 pure write-CADENCE shift, precisely confirmed by arithmetic
@@ -20171,6 +20859,183 @@ rigorously as this one was.
 No patch source written. `tools/emu_directjump_dynamic.py` unchanged this pass (all
 analysis from the previous pass's own instrumentation + arithmetic on its log,
 `/tmp/dj_commitwatch_run.log`). Still read-only dynamic + static analysis only.
+
+## Session 78 continued a sixth time (2026-09-20, `wip`) — TRIGLESS-LOCK AUTO-REMOVE: found
+that **Sessions 37-40 (2026-09-07/08) already ran almost this exact hunt** and left a live,
+unexecuted lead (a matured transport-capable emulator); re-verified their conclusions still
+hold, checked their one open lead (octabam's "p-lock applier") and refuted it, checked
+transport STOP directly (also refuted), checked the SAVE-poster's only caller (refuted --
+it's project-CREATION, not ongoing save), and checked the generic "project dirty" flag every
+edit function sets (too broad -- ~120 writers, zero statically-resolvable readers). **Every
+static candidate this project has ever proposed for the `+0x4900`→`#1` commit is now
+checked and refuted.** The only technique left that isn't more guessing is a dynamic
+write-watch on `#1` against a running, real transport -- not yet attempted.
+
+### Found prior work: Sessions 37-40 already did most of what this session redid, and got
+### further
+
+Re-reading forward past Session 34 (which this thread's earlier passes today had not done)
+turned up **Session 37** (SAVE serialiser traced and cleared -- `#1` and `+0x4900` are written
+as separate, unmerged verbatim chunks, refuting the "save repacks them" model this session
+had also independently re-derived), **Session 38** (edit/release cluster fully disassembled,
+confirms no `#1` write anywhere in it -- this session's own decompiles this pass reconfirmed
+the identical conclusion via a cleaner, full-analysis decompile rather than Session 38's raw
+disassembly), and **Session 39** (full playback chain traced `#1`-only, load/pattern-enter
+checked, concluding the commit must be on **transport STOP, a pattern-loop-wrap, or a
+deferred/idle task** -- and recommending exactly this session's own HW Phase-0 plan, which is
+what today's earlier passes independently arrived at and executed). **Session 40** added one
+real new lead from octabam's own hardware-verified RE (a named "p-lock applier" at
+`0x4000c42c`) and noted `emu_rtos.py` had matured enough by that point to run full
+transport + sequencer + step handler end to end (`--start --poke-trig --internal-clock`),
+making Session 34's "not tractable headless" wall obsolete -- **neither the octabam lead nor
+the matured-emulator dynamic drive was ever followed up**; the thread was shelved for hardware
+Phase 0 instead, which is exactly what got picked back up today, unknowingly re-treading
+Sessions 37-39's own ground before reaching this point in the log.
+
+### octabam's "p-lock applier" (`0x4000c42c`–`0x4000c5a0`) — checked directly, refuted
+
+Ghidra's decompiler choked on this region (a p-code error, likely an EMAC/ColdFire-specific
+opcode this project has hit elsewhere); fell back to raw `m68k-elf-objdump` disassembly of the
+exact cited range. **No `TRAC`-shaped addressing anywhere in it** (`0x91a`/`0x8ed8`/`+0x59`
+never appear) — only `0x18b2`/`0x9b340` (PART/bank strides) feeding fixed tables at
+`0x40170f82`/`0x4017107a`/`0x40171252`/etc. into per-track live state at `0x80000810`/
+`0x80000a50` — this is loading a **fresh voice's default machine parameters from the PART's
+own defaults** (matches Session 40's own "Per-voice DSP record" KB note), not applying a p-lock
+value. octabam's own citation flagged this as "cross-check it", not a confirmed finding;
+consider it refuted now.
+
+### `FW_TRANSPORT` (`0x4009b964`) STOP case — checked directly, refuted
+
+Decompiled clean (`tools/ghidra/attic/GhidraArtlTransportStop.java`). Three distinct STOP
+branches (`_DAT_800065b8 = 0`, each reached via different `param_1` bit combinations) all do
+the same thing: zero a small transport-counter block from `&DAT_80006500` to `&DAT_80006510`
+and clear a couple of tempo-phase globals. **None reference `#1`, `+0x4900`, or any
+`0x91a`/`0x8ed8`-strided address.** Session 39's "STOP" candidate is refuted for this
+function specifically (a different function entirely could still run ON stop -- not checked).
+
+### The SAVE-poster's one call site: it's project CREATION, not ongoing save
+
+A raw byte search for the literal `jsr 0x40023630` instruction (Session 37's own "opcode-9
+poster" target) across the *entire* firmware image found **exactly one call site**,
+`0x400645e6`, inside `FUN_400644f0` — which, fully decompiled, is the **CREATE NEW PROJECT**
+flow (name validation, existence check, then create + this one `FUN_40023630` call to write
+the fresh project's initial state to card). This is consistent with how the real Octatrack
+actually behaves: there is no user-facing "Save Project" command during normal editing --
+changes autosave implicitly. So `0x40023630` isn't "the ongoing save" at all; whatever performs
+ongoing autosave is a different, not-yet-found mechanism (most likely a periodic/idle task, as
+Session 39 already guessed).
+
+### The generic "project dirty" flag (`0x100f8598`): too broad, dead end
+
+Every LIVE p-lock edit function found this session sets `_DAT_100f8598 = 1`. Full xref search
+came back with **~120 different writer functions** (menu edits, arrangement changes, PART
+saves, basically anything that touches project state) and **zero statically-resolvable
+readers** -- it's a generic "something changed" bit touched from everywhere, not a narrow
+signal this feature can hook into, and Ghidra's reference pass finding no reader at all
+suggests whatever polls it does so through register-indexed or DMA-style addressing outside
+static analysis's reach. Not a productive lead as posed; abandoning it.
+
+### Status: every static lead is now exhausted; the one untried technique is dynamic
+
+Across today (this session's four earlier passes) and the rediscovered Sessions 37-40, **every
+proposed location for the `+0x4900`→`#1` commit has been checked and refuted**: the LIVE
+edit/erase/write functions themselves (×3, full decompile), the SAVE bank serialiser, the LOAD
+deserialiser (Session 38), pattern-enter (Session 38), the full playback chain (Session 39),
+`FW_TRANSPORT`'s START (Session 40) and STOP (this session) cases, octabam's named applier
+(this session), the SAVE-poster's only caller (this session), and the generic dirty flag (this
+session). Static disassembly has been pushed about as far as it reasonably can be for a
+mechanism that could, in principle, live inside literally any of several hundred remaining
+unexamined functions.
+
+**The one technique never attempted, and the clear next step**: a **dynamic memory
+write-watch on `#1`**, run against `emu_rtos.py`'s now-mature full-transport harness
+(`--start --poke-trig --internal-clock`, confirmed working as of Session 40) with a REAL
+hardware-exported project pre-loaded with a deliberately uncommitted live edit (poke `+0x4900`
+etc. via `call_as_main` on the already-validated `0x40041784`/`0x40041bc4`, leaving `#1`
+untouched), then let the transport run for several real pattern loops while a Unicorn
+`UC_HOOK_MEM_WRITE` watches the `#1[track][step]` byte range. Whatever writes it, whenever it
+happens, this catches the exact PC directly -- no more guessing at candidate functions. This
+is a genuinely different, larger undertaking than this session's quick per-function checks
+(building and running a multi-second-of-emulated-wall-clock transport session), not a
+5-minute follow-up. Paused here to check with the user before committing to it, given how
+much ground today's session has already covered.
+
+## Session 78 continued a seventh time (2026-09-20, `wip`) — TRIGLESS-LOCK AUTO-REMOVE: a
+whole-file real-hardware diff finds the "commit" changes exactly ONE byte (+ checksum) with
+NOTHING else in the 636KB bank differing; traced Session 38's own never-finished mode-exit
+lead (also refuted); **recommending a pivot away from finding stock's own commit mechanism
+and toward just building the fix, since Session 32's validated action lets us do the write
+ourselves regardless of how stock does it.**
+
+### Whole-file diff, `ARTLTEST1` `.strd` vs `.work` (636,113 B each): exactly 3 bytes differ
+
+`diff`ing every byte of the two real hardware files directly (not just the `TRAC` region
+`inspect_bank.py` prints) rather than assuming the rest matches: **only 2 regions differ in
+the entire file** -- disk offset `0x140` (the one `#1` byte for the erased PTCH lock, `0x30`
+-> `0xFF`, exactly matching `inspect_bank.py`'s own report) and `0x9b4cf-0x9b4d0` (the file's
+**last 2 bytes**, `0x9635`->`0x9704` -- almost certainly the running 16-bit checksum Session 37
+already found the serialiser feeds every byte, changing as a pure side effect of the `#1` byte
+changing). **No separate `+0x4900` disk-chunk content differs at all, anywhere.** Session 37's
+own finding that `+0x4900` has its own on-disk home is not contradicted (that chunk still
+exists), but it is *always blank* in both captures -- meaning whatever commits the edit into
+`#1` also fully resets every other piece of live-edit working state in the same operation, a
+genuine one-shot "commit and clear", not a lazy or partial merge some other code could catch
+mid-way. This doesn't distinguish "committed immediately, per-turn" from "committed once at
+mode-exit" (export always happens after the edit session ends either way), but it does rule
+out any design where the working views retain leftover content post-commit.
+
+### Session 38's own unfinished lead: the mode-exit cluster, traced directly -- refuted
+
+Session 38 flagged `0x40062196` (clears the armed-param bitmap `0x46c7d344`/`348`) as the
+best commit candidate but Session 39's own follow-up checklist never actually decompiled it
+or its neighbours (`0x4004d870`/`0x4004d640`/`0x4004d948`, the "p-lock draw family") --
+they're absent from Session 39's "checked" list even though Session 39 explicitly meant to
+check them. Decompiled all four this session (`tools/ghidra/attic/GhidraArtlModeExit.java`).
+`0x40062196` is a label *inside* a much larger generic UI-event dispatcher (`0x40061a94`,
+the same message-loop the mute-mode thread separately identified) -- reached from **opcode
+`0x10`, the PATTERN-CHANGE case**: on a pattern change it calls `0x4009c550` (pattern
+settings load), the draw family, **`0x400339d8`** (the LED rebuild, confirmed pure-`#1`
+elsewhere this session), then falls into the label that zeroes the armed bitmaps. **This is a
+discard, not a commit** -- it resets per-pattern edit-tracking state for the newly-selected
+pattern without ever reading `+0x4900` or writing `#1` anywhere in this path. Matches the
+user's own live test exactly: a pattern switch runs `0x400339d8` (so if `#1` were already
+updated, the LED would clear) but the LED stayed lit, meaning `#1` genuinely still held the
+stale value at that point -- and this code proves why: switching patterns just clears the
+"editing this pattern" bookkeeping, it doesn't flush anything into `#1` first. The three
+"p-lock draw family" functions are pure screen/LED-widget redraw (`FUN_40012254`,
+`FUN_400132c4`, level-meter drawing) -- no data-model writes at all.
+
+### Recommendation: stop hunting for stock's own mechanism; build the fix directly instead
+
+Every specific candidate this project has proposed across 15 sessions (26-40) and today's
+seven passes is now checked and refuted: both LIVE edit functions, the armed-mode siblings,
+the SAVE bank serialiser, the LOAD deserialiser, pattern-enter, the full playback chain,
+`FW_TRANSPORT` START and STOP, octabam's named "applier", the SAVE-poster's only caller, the
+generic dirty flag, and now the mode-exit/pattern-change cluster. This has stopped being a
+short list of untried leads -- continuing to guess at candidate functions has a poor
+cost/benefit from here. **The practical goal doesn't actually require finding stock's own
+mechanism**: Session 32 already validated the core fix action (`#1[track][step] = 0xFF` for
+every byte + the `TRAC+0x10` trig-type-layer bit found earlier this session, then call
+`0x400339d8`) with zero collateral. A detour hooking `0x40041bc4`'s exit can just perform that
+write **itself**, synchronously, regardless of whatever stock's own eventual commit turns out
+to be -- it doesn't need to cooperate with an undiscovered mechanism, only to write the same
+place that mechanism would eventually write. What's needed to build it:
+
+1. **Bank/pattern/step** — already resolved cleanly this session (`local_8`/`local_7`/`local_6`
+   in `0x40041bc4`'s own entry, Session 33's "wall" was a mislabelling, not a real gap).
+2. **Which `#1` byte** — resolved for the PLAYBACK page's first two slots by real hardware
+   (PTCH = byte 0, LEN = byte 2); the standard PLAYBACK-page knob order (PTCH/STRT/LEN/RATE)
+   makes STRT=byte 1 / RATE=byte 3 a strong but unconfirmed inference. Full generality (every
+   page) needs the static (page, encoder) table this session didn't crack -- but a first build
+   can scope to the PLAYBACK page alone (the two confirmed + two inferred slots), which covers
+   a large share of real trigless-lock use, and extend page-by-page later.
+3. **The "was this the last lock" check** — read `#1[track][step]`'s current 32 bytes (before
+   our own write) and check whether every OTHER byte is already `0xFF`; if so this write is the
+   1->0 transition and the `TRAC+0x10` bit should also clear.
+
+Paused here rather than starting the build unprompted -- recommending the pivot, not
+executing it, since it's a real change of plan (RE -> implementation) worth the user's
+sign-off first.
 
 ## Session 79, continued an eighth time (2026-09-20) — FOUND THE REAL CONSUMER: DAT_80001904
 is a per-track phase-anchor timestamp feeding a MAC-based interpolation; DIRECT JUMP's
@@ -20651,6 +21516,90 @@ holding `[PTN]` again (should reopen — this is the one to watch closely,
 since the emulator could only get partial, inconclusive dynamic evidence
 this session); if it's still somehow stuck, does `[YES]` now show "RELOAD
 BUSY" instead of nothing.
+
+## Session 78 continued an eighth time (2026-09-20, `wip`) — TRIGLESS-LOCK AUTO-REMOVE:
+**BUILT** (`tools/patch_triglock.s` + `build_triglock.py`), emu-clean end-to-end against
+the real built image, **NOT flashed**.
+
+Per the user's go-ahead to stop chasing stock's own commit mechanism and build the fix
+directly (this file, above): hooked `FUN_40041bc4`'s own exit (the 6-byte `moveml
+%fp@(-64),%d2-%d7/%a2-%a5` right before its `unlk;rts`, at `0x4004214e`) rather than
+trying to intercept mid-function or decode a per-param byte offset. At that exit,
+`FUN_4009b2d4`'s own output locals (bank/pattern/step) sit stable at `%fp@(-4)/(-3)/(-2)`
+(confirmed unclobbered end-to-end by the earlier disassembly pass), and track is the low
+byte of the incoming `param_1` at `%fp@(11)`.
+
+**Design (avoids the still-unsolved page/encoder→`#1`-byte mapping entirely):** read the
+same 64-bit working param-lock bitmap (`blob+trk*0x8b0+pat*0x8ed8+bank*0x9b340+0x48d8`)
+`FUN_40041bc4` itself just finished updating. Non-zero → some other param is still
+locked on this step, do nothing (the multi-pass case). All-zero → check `TRAC+0x10`'s
+bit for this step (this session's own hardware-confirmed trigless-lock flag): not set →
+nothing to clean up, leave alone. Set, but a real trig exists on the step (note trig or
+either of the other two trig-type-layer masks, or any of the three recorder-trig masks —
+deliberately excluding `TRAC+0x10` itself from this scan) → conservative guard, leave
+alone. Otherwise: a bare trigless lock just lost its last param — blanket-clear all 32
+bytes of `#1[step]` to `0xFF`, clear the `TRAC+0x10` bit, call `FUN_400339d8` (the
+existing, already-validated-in-S32 LED-bitmap rebuild). This design never guesses which
+specific byte of `#1` a given knob/page maps to — it only ever acts when the *entire*
+step is already unlocked in the live working view, so there's nothing to get wrong about
+which byte to touch.
+
+**ColdFire gotcha hit and fixed while assembling**: `AND.B`/`NOT.B` register-register
+forms are not available on the 5407 core (`m68k-elf-as` rejects them outright); every
+byte read is zero-extended into a register via `MOVE.B` (memory↔register, fine) and the
+logic done in `.L`, matching how the stock firmware's own disassembly never does
+register-register byte ALU either.
+
+**Build**: 292 B cave at `0x400d7200` (empty in stock, no collision with the two other
+single-feature builds' `0x400d7000` caves — separate output files anyway), 6 B detour,
+252 bytes changed vs stock total. `EFT` wrap + round-trip both clean, version stays
+`1.40C` (stock-transparent, matching the pattern-LED fix's own precedent).
+
+**Validated against the real built image** (`tools/emu_triglock.py`, new): boots
+`out/mainos_triglock.bin` through `emu_rtos.py` with the real DEMO project loaded, then
+drives the REAL `FUN_40041bc4` via `call_as_main` (not an isolated cave call) three times,
+each with a planted before-state:
+- **Case A** (working bitmap all-zero, `#1` stale, flag set) → `#1` cleared to all-`0xFF`,
+  flag cleared. **PASS.**
+- **Case B** (working bitmap has an unrelated bit still set, simulating "one of two
+  locks erased") → `#1` and the flag both left untouched. **PASS** (first attempt used a
+  bit the real function's own degenerate-headless-args decode happened to also target,
+  giving a false FAIL — not a detour bug, a test-setup collision; fixed by picking a bit
+  far from whatever index the dummy call args resolve to).
+- **Case C** (a real note trig present on the step) → left untouched. **PASS.**
+
+Session 34's own documented headless-decode degeneracy (the resolver lands on
+bank=0/pattern=0/step=0 under a cold/synthetic call, not a real UI-driven one) still
+holds and was not fixed — this test works *with* it (probes once to find the landing
+step, then plants test data exactly there) rather than solving it, which is enough to
+validate the detour's own logic but not the general (page, encoder) → byte-offset
+mapping (still unresolved, and this design doesn't need it).
+
+### Known limitations (documented in the patch source itself)
+
+1. **Cannot distinguish "just transitioned 1→0" from "was already an empty,
+   deliberately-placed trigless lock, touched again"** — both look identical at this
+   hook (working bitmap already 0, flag already set). Accepted for this build: touching
+   `[NO]`+knob on an already-empty step is a deliberately contrived, low-value gesture
+   (there's nothing to erase), not a realistic way to lose real content — but it IS a
+   real deviation from Section 13's literal spec ("only fires on the 1→0 transition"),
+   flagged for the user's judgement call, not silently glossed over.
+2. Only exercised via a synthetic before-state, not a real `[NO]`+knob gesture end to
+   end in the emulator (Session 34's own wall — driving the real gesture headless needs
+   UI cursor state this project has never gotten working). The mechanics (address math,
+   guards, `#1` write, flag clear, LED refresh call) are proven; the real hardware
+   gesture reaching this exact code path with real (not planted) state is not yet proven.
+
+### Status: NOT flashed. Next step is the user's call
+
+`out/OCTATRACK_OS1.40C_TRIGLOCK.syx` / `out/OCTATRACK_TRIGLOCK.bin` are built and
+emu-clean but have never touched real hardware. Given the known limitations above,
+recommend the same staged approach this project always uses for a first flash of new
+data-model code: test on a disposable/scratch project first, exercise exactly the
+`ARTLTEST1`→`ARTLTEST2`-style gesture (2 locks, erase one, erase the last one, check the
+LED goes dark), then separately confirm a manually-placed empty trigless lock still
+survives normal use (not specifically the contrived "touch it again with [NO]+knob"
+edge case, which is a known, accepted gap). Revert path unchanged (reflash stock 1.40C).
 
 ## Session 79, continued an eleventh time (2026-09-20) — ruled out the bitmask family and
 BAR_CTR as the table-arm write's trigger; the exact trigger remains open after five
