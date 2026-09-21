@@ -126,6 +126,8 @@ PATCHES = [
       (0x400a4220, "dj_scaleix_fix", "13c28000663d", 6, "jsr"),
       (0x400a3fe4, "dj_abstick", "13c0800065b6", 6, "jsr"),
       (0x400a4d36, "dj_pertrack_fix", "4ab946107568", 6, "jsr"),
+      (0x400a2e12, "dj_tablearm_suppress", "41f98000190421809c00", 10, "jsr"),
+      (0x400a33ec, "dj_tablearm_suppress2", "45f98000190425801c00", 10, "jsr"),
       (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),
 ]
 
@@ -239,15 +241,20 @@ def main():
         # Session 70 (5th/7th/9th pass): new, deliberate hook sites -- SCALE_IX self-heal
         # (Hook D), the absolute-tick counter (Hook E), and the per-track resume fix
         # (Hook F) -- none present in v3 at all. Not a regression; expected divergence.
+        # Session 79 (12th pass): + Hooks G/G2, the table-arm extra-write suppressors.
         SCALEIX_FIX_SITE = 0x400a4220
         ABSTICK_SITE = 0x400a3fe4
         PERTRACK_FIX_SITE = 0x400a4d36
+        TABLEARM_SUPPRESS_SITE = 0x400a2e12
+        TABLEARM_SUPPRESS2_SITE = 0x400a33ec
         want = (v3_touched - set(range(o(STOCK_YES_HANDLER), o(STOCK_YES_HANDLER) + 8))) \
             | {i for i in range(ro + 2, ro + 6) if img[i] != stock[i]} \
             | {i for i in range(o(PTN_LAYER_REL), o(PTN_LAYER_REL) + 6) if img[i] != stock[i]} \
             | {i for i in range(o(SCALEIX_FIX_SITE), o(SCALEIX_FIX_SITE) + 6) if img[i] != stock[i]} \
             | {i for i in range(o(ABSTICK_SITE), o(ABSTICK_SITE) + 6) if img[i] != stock[i]} \
-            | {i for i in range(o(PERTRACK_FIX_SITE), o(PERTRACK_FIX_SITE) + 6) if img[i] != stock[i]}
+            | {i for i in range(o(PERTRACK_FIX_SITE), o(PERTRACK_FIX_SITE) + 6) if img[i] != stock[i]} \
+            | {i for i in range(o(TABLEARM_SUPPRESS_SITE), o(TABLEARM_SUPPRESS_SITE) + 10) if img[i] != stock[i]} \
+            | {i for i in range(o(TABLEARM_SUPPRESS2_SITE), o(TABLEARM_SUPPRESS2_SITE) + 10) if img[i] != stock[i]}
         stray = [i for i in (v4_touched ^ want) if i not in cave]
         print(f"  vs mainos_directjump_v3.bin: v4 touches {len(v4_touched)} vs v3 {len(v3_touched)}; "
               f"{len(stray)} unexpected outside the cave")

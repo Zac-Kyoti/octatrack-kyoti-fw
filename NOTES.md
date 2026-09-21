@@ -20733,3 +20733,123 @@ require resolving an open question that has resisted five independent attempts.
 Tooling: `tools/emu_directjump_dynamic.py` (`bitmask_680/682/684_writes`,
 `bar_ctr_writes`, committing the extension). Logs: `/tmp/dj_bitmask2_run.log`,
 `/tmp/dj_barctr_run.log`. No patch source written.
+
+## Session 79, continued a twelfth time (2026-09-20) — WROTE, BUILT, AND DYNAMICALLY
+TESTED a real patch for the first time this thread (Hooks G/G2). It correctly
+suppresses the exact extra write, through two real bugs found and fixed by re-testing
+after each build -- but dynamic proof then showed the fix, even once fully correct on
+its own terms, does NOT resolve the actual symptom: the underlying periodic SCHEDULE
+is permanently phase-shifted, and suppressing one write's value doesn't touch that.
+New, better-targeted fix direction identified, not yet built.
+
+### The patch: two write sites, a tick-match suppression, two build-and-test bugs found
+
+Added `G_SUPPRESS_TICK` (long, `0x80006a4b`) + Hooks G/G2 to `tools/patch_directjump.s`,
+detouring BOTH of `DAT_80001904`'s write sites (`0x400a2e18` -- this thread's original
+find -- and a second, previously unfound twin at `0x400a33f2`, covering the table's
+other half via `%a2`/`%d1` instead of `%a0`/`%a1`; found only because re-testing the
+FIRST attempt's build showed group-4 slots still writing the extra value). `dj_c`
+(Hook C) now saves `G_ABSTICK` into `G_SUPPRESS_TICK` at commit; Hooks G/G2 skip their
+own store only when the CURRENT `G_ABSTICK` matches it.
+
+Built via `tools/build_directjump_v4.py` (added both detours + extended the v3-vs-v4
+divergence allowlist), assembled clean, round-trip checksum ok. **Two real bugs found
+by re-running this thread's own `tools/emu_directjump_dynamic.py --groundtruth`
+instrumentation after each build -- neither would have been caught by static review
+alone:**
+
+1. **First build**: a naive one-shot boolean flag (`G_SUPPRESS_ARM`, set/cleared).
+   Dynamic re-test showed only track 0's write was suppressed -- `DAT_80001904`'s
+   writer fires once PER TRACK in an 8-iteration loop, and the one-shot flag got
+   consumed by the FIRST iteration, leaving tracks 1-7 to write the extra value
+   normally. Also exposed the missing second write site (group-4 slots still wrote via
+   `0x400a33f2`, untouched by the single detour). Redesigned as the tick-match above,
+   which naturally covers every track/site sharing one `G_ABSTICK` value with no
+   consumption-counting.
+2. **Second build** (tick-match, single site only fixed so far): dynamic re-test showed
+   the fix suppressed NOTHING at all. A dedicated `G_SUPPRESS_TICK` write-watch found
+   why: `dj_c` stored `G_ABSTICK+1` (a rough frame-count/frames-per-step ESTIMATE from
+   several entries ago -- "commit lands ~`G_ABSTICK=8`" -- never actually measured),
+   but the extra write's own measured `G_ABSTICK` is 9, THE SAME value `dj_c` itself
+   reads at the commit, not one tick later. Removed the `+1` (also hit a real ColdFire
+   constraint along the way: `move.l` has no memory-to-memory form on `-mcpu=5407`,
+   caught immediately by the assembler).
+
+### Third build: the fix is correct on its own terms, dynamically confirmed -- and
+STILL doesn't resolve the symptom
+
+With both bugs fixed, the exact extra write (all 16 slots across both sites, frame
+518/`G_ABSTICK=9`) is confirmed gone from `DAT_80001904`'s own memory-write log --
+verified directly, not inferred. But the final `DJ-commit vs ground-truth` comparison
+at the matched frame only improved by ONE slot (20/64 -> 19/64), not the ~16 expected.
+
+**Why**: table-arm's own periodic "is a write due" check is untouched by this fix --
+Hooks G/G2 only intercept the STORE, not whatever decides WHEN to attempt one. That
+check's own `G_ABSTICK` sequence (traced via the still-firing, now-informational PC
+hook) is `0, 6, 9(now suppressed), 15, 21...` -- i.e. **the schedule itself is
+permanently shifted from `G_ABSTICK mod 6 == 0` to `G_ABSTICK mod 6 == 3`, forever,
+not just for the one suppressed instant.** Suppressing the write at 9 only delays
+which WRONG value is visible (now 15's value persists at the matched frame instead of
+9's) -- it does not, and structurally cannot, correct a schedule whose own phase has
+already permanently shifted. This is the exact same "extra event permanently shifts a
+periodic counter's cadence, and nothing downstream ever resyncs" pattern this thread
+has now found in FOUR places (`DAT_80001904`'s writes, `CNTDN_TBL`, `BAR_CTR`, and now
+table-arm's own check schedule) -- strong evidence this is one root mechanism wearing
+several different downstream faces, not four unrelated defects.
+
+### The better-targeted next candidate: BAR_CTR's reset, not the write
+
+The "continued an eleventh time" entry found `BAR_CTR` gets reset to `0` at DIRECT
+JUMP's commit (at `0x400a483a`, presumably legitimate "a switch landed" stock logic
+that any switch would trigger) and ruled it out as the table-arm trigger because the
+RESET's own frame (461) didn't match the extra WRITE's frame (518). That reasoning no
+longer holds now that the SCHEDULE itself (not a single write) is understood to be
+what's shifted: a reset landing mid-loop (`BAR_CTR: ...2->0` at `G_ABSTICK~9`, instead
+of at a natural loop boundary where it would have incremented to some `N` anyway)
+would shift ANY `BAR_CTR`-driven modulo schedule by exactly this shape -- permanently,
+starting from that reset, not just for one instant -- matching what's now measured
+precisely. `GhidraDirectJump39.java` (already found, this session) identified the
+table-arm gate as a `BAR_CTR mod CHAIN-interval` check -- directly consistent.
+
+**Candidate fix (d), not built or tested**: rather than reset `BAR_CTR` to a raw `0`
+at a DIRECT-JUMP-triggered commit, derive it fresh from `G_ABSTICK` instead --
+`BAR_CTR = G_ABSTICK / patternLengthInSteps` (integer division) -- the same "derive
+fresh from elapsed absolute time, never carry over or reset raw state" principle
+`patch_directjump.s`'s own Hooks C/F already apply to `STEP` and the per-track
+quotient table (and the same principle `ar-kyoti-fw/MECHANISM.md` documents as AR's
+own correctness invariant, cross-checked earlier this session per the user's explicit
+request). This would need a new hook at `0x400a483a` (`BAR_CTR`'s own reset site,
+stock, unmodified so far) and confirmation of exactly which units/divisor make
+`BAR_CTR`'s own semantics line up (not yet derived).
+
+### Status: real patch code exists, builds clean, and is dynamically CONFIRMED to do
+exactly what it was designed to do (suppress the one extra write, fully, both sites,
+all tracks) -- but that design target turned out to be the wrong layer to intervene
+at. Hooks G/G2 + `G_SUPPRESS_TICK` are left in place in `patch_directjump.s` (harmless
+-- they correctly suppress what they target, just don't fix the user-facing symptom on
+their own) pending a decision on whether to pursue candidate (d) as a fourth
+iteration or take a different direction. **Not flashed** -- this entire patch has only
+ever been emulator-tested, per this thread's own standing rule.
+
+### NEXT for this thread
+
+1. Decide: pursue candidate (d) (derive `BAR_CTR` from `G_ABSTICK` at DJ's commit) as
+   a fourth build-and-dynamically-test iteration, or reconsider the approach given
+   three iterations have each needed a real correction after dynamic testing.
+2. If pursuing (d): confirm `BAR_CTR`'s own units/divisor before writing the hook
+   (what exactly does `0x800065b2` count, and in what step-length terms), then repeat
+   the SAME re-test-after-build discipline that caught both bugs in Hooks G/G2 --
+   confirm via the table-arm PC watch that its own `G_ABSTICK` sequence resyncs to
+   multiples of 6 after the fix, not just that one write's value looks right.
+3. Carried over, unchanged: `DAT_46104cf4`'s identity; `FUN_4000ae12`'s caller; the
+   `0x400a2c66` ACT-vs-snapshot branch's own purpose (still real, still not implicated
+   in any symptom measured so far).
+
+Tooling: `tools/patch_directjump.s` (Hooks G/G2, `G_SUPPRESS_TICK`),
+`tools/build_directjump_v4.py` (two new detours + allowlist entries),
+`tools/emu_directjump_dynamic.py` (`suppress_tick_writes` diagnostic watch).
+`tools/ghidra/attic/GhidraDirectJump40.java`/`41.java` (instruction-length dump for
+the detour, the twin site's raw disassembly). Logs: `/tmp/dj_hookg_run.log` (build 1),
+`/tmp/dj_hookg2_run.log` (build 2), `/tmp/dj_diag_run.log` (G_SUPPRESS_TICK
+diagnostic), `/tmp/dj_hookg3_run.log` (build 3, current state). First patch code
+written and built this session -- still emulator-only, not flashed.

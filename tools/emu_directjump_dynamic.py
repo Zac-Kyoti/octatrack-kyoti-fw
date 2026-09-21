@@ -376,6 +376,12 @@ def run_one(er, a, dj_on):
     # existing hook corrects for), it would trip this modulo check early -- exactly the
     # same class of bug Hooks A-F already fix elsewhere in this same commit path.
     bar_ctr_writes = make_watch(0x800065b2, 2)
+    # Session 79 continued a twelfth time: Hook G/G2's tick-match fix built clean but
+    # dynamically STILL doesn't suppress anything (post-build re-test shows every write
+    # still going through the "normal" store path). Watch G_SUPPRESS_TICK directly to
+    # see what dj_c actually wrote there and cross-check against G_ABSTICK's value at
+    # that moment -- narrows whether the bug is in dj_c's write or Hook G's read/compare.
+    suppress_tick_writes = make_watch(0x80006a4b, 4)
     phase_writes = make_watch(PHASE_TBL, 8)
     gate_writes = make_watch(GATE_TBL, 8)
     cntdn_writes = make_watch(CNTDN_TBL, 8)
@@ -546,7 +552,8 @@ def run_one(er, a, dj_on):
     print_table_arm_watch(table_arm_events)
     for name, log in (("0x80006626", table_arm_due_writes), ("0x80006680", bitmask_680_writes),
                        ("0x80006682", bitmask_682_writes), ("0x80006684", bitmask_684_writes),
-                       ("0x800065b2 (BAR_CTR)", bar_ctr_writes)):
+                       ("0x800065b2 (BAR_CTR)", bar_ctr_writes),
+                       ("0x80006a4b (G_SUPPRESS_TICK)", suppress_tick_writes)):
         print(f"\n{name} writes, {len(log)} total:")
         for fr, task, pc, addr, size, val in log:
             print(f"   frame {fr:.1f}  [{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
