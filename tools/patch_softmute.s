@@ -293,21 +293,36 @@ p1_otfx:
 |
 | %d2 (the silenced set) and %d5 are already computed by the shared path; %d0-%d3 are hook
 | 1's own saved registers; %a0 belongs to the caller and is pushed/popped on this path only.
-| THE RANGE, BISECTED WITH RENDERS (the OTFX_PROBE build below, one build + nine runs):
+| WHICH WORDS, BISECTED WITH RENDERS -- and CORRECTED after a hardware report.
 |
-|   bytes  0..15   zeroing these silences the track AND leaves the tail ringing  <-- what we want
-|   bytes 16..31   contain the TAIL's own route: zeroing 0..31 kills the reverb outright
-|   bytes 32..63   nothing audible -- zeroing them silences nothing at all
-|   +2 / +4        the DRY L/R gains (hook 8's hardware result).  Zeroing ONLY these leaves a
-|                  ~-28 dB per-trig RE-EXCITATION: the dry is gone but the voice still feeds
-|                  the insert, so every trig that fires while muted puts new energy into the
-|                  reverb and the decay stops being monotonic.
-|   +6 or +10      EITHER ONE, alone, silences the voice upstream of the insert and gives a
-|                  clean monotonic decay in both channels.  These are the voice's own feed.
+| The first version of this cut zeroed bytes 2..15, on the strength of an audio bisection
+| alone: every range containing +6 or +10 silenced the track and let the tail ring out, and
+| +2/+4 were "known" to be the dry L/R gains from hook 8's hardware result.  IT SHIPPED AND
+| IT WAS WRONG.  The user flashed it and reported OTFX behaving exactly like OTFX-T, and the
+| test that had never been run -- an actual UNMUTE -- reproduced it at once:
 |
-| The shipped range is 2..15: the tested contiguous span that covers the dry pair and both
-| effective words, and stops short of the tail route at +16.  Byte +0 is deliberately left
-| alone -- it was never needed and its meaning is unknown.
+|   mute at frame 5532, UNMUTE at 9500 (between trigs; the next trig is at 10335)
+|                             silent while muted    audio at the unmute, +0/+40/+80 ms
+|     OT (stock, the target)        yes             0.0633  0.0653  0.0654
+|     cut 2..6   (the dry pair)     yes             0.0000  0.0000  0.0000   <-- FREEZES it
+|     cut 6..8   (+6 alone)         yes             0.0621  0.0653  0.0654   <-- correct
+|     cut 10..12 (+10 alone)        yes             0.0621  0.0653  0.0654   <-- correct
+|     cut 2..15  (what shipped)     yes             0.0000  0.0000  0.0000   <-- FREEZES it
+|
+| So +2/+4 do NOT merely scale the dry: zeroing them stops the voice ADVANCING, and playback
+| cannot resume mid-sample afterwards -- which is precisely the property OTFX exists for.
+| +6 and +10 silence the voice upstream of the insert while leaving it running, so the tail
+| rings out AND the unmute picks up where the pattern would have been.  Both are cut, for
+| symmetry: each is independently sufficient here, but this project has been bitten before by
+| a stereo pair where stock zeroed one side and clamped the other (hook 8), and a centred
+| test project cannot tell an L/R pair from a redundant one.
+|
+| ⚠ The lesson, at cost: an audio bisection answered "what silences the track" and I read it
+| as "what cuts the dry".  The defining property of this mode was never measured until the
+| user's hardware said otherwise -- the emulator evidence for it was a ColdFire-side playhead
+| counter, which kept advancing while the DSP-side voice did not.  Measure the PROPERTY, not
+| a proxy for it.
+|
     clr.b   SHADOW                      | like DT-T: no note-off state to carry
     tst.l   %d2
     beq     p1_done
@@ -350,20 +365,15 @@ p1_oc_next:
     move.l  %a1,-(%sp)
     lea     0x80000110,%a0              | ping-pong half 0, track 0
     lea     0x80000310,%a1              | ping-pong half 1, track 0 -- zeroing BOTH halves is
-                                         | why this needs no knowledge of `sel`, which the
-                                         | release loop takes from its own stack frame and
-                                         | hook 1 has no access to
+                                         | why this needs no knowledge of `sel`
     moveq   #0,%d3
 p1_oc_loop:
     btst    %d3,%d2
     beq     p1_oc_next
-    moveq   #2,%d0
-p1_oc_word:
-    clr.w   (0,%a0,%d0.l)
-    clr.w   (0,%a1,%d0.l)
-    addq.l  #2,%d0
-    cmpi.l  #16,%d0                     | bytes 2..15 of the block -- see the range map below
-    bcs     p1_oc_word
+    clr.w   (6,%a0)                     | half 0
+    clr.w   (10,%a0)
+    clr.w   (6,%a1)                     | half 1
+    clr.w   (10,%a1)
 p1_oc_next:
     lea     (64,%a0),%a0
     lea     (64,%a1),%a1

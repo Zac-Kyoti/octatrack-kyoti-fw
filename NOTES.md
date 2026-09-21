@@ -24112,3 +24112,103 @@ activity -- so this class of difference plausibly exists run-to-run on hardware 
 failure mode the bit-identity rule genuinely guards against is different in kind: cycles
 pushing the level chain past its tick deadline, which would show up as glitches or dropouts,
 not as a subtle tonal shift. Nothing like that appears anywhere in 7 s of render.
+
+## Session 58 continued yet again, part 18 addendum 13 (2026-09-21, `wip`) — HARDWARE: OTFX
+shipped BROKEN and the user caught it. Root cause: the dry pair +2/+4 does not scale the dry,
+it stops the voice ADVANCING. Fixed to cut +6/+10 only, and the unmute is now rendered
+directly instead of inferred.
+
+### The report
+
+User flashed addendum 12's build: "OTFX not working as expected. It seems to be working
+exactly the same way that OTFX-T does." Their restatement of the spec: OTFX should cut the dry
+the way OT does, unmuting should open the dry back up at the sample position it would have
+been at had it never been muted, PLUS the FX tails.
+
+### Reproduced in ten minutes, by running the test that had never been run
+
+Addendum 12 shipped this mode with its DEFINING property unmeasured. The evidence for "trigs
+fire and the sample keeps running underneath" was a ColdFire-side playhead counter
+(0x80004a1c) reaching stock's 0x31e1 -- and that counter kept advancing while the DSP-side
+voice did not. `ot_emu` could only fire one timed poke, so an unmute had never been rendered.
+
+Added `--poke2` / `--poke2-at-frame` to ot_emu (local-mute-wip) and `--unmute-frame` to
+`emu_echo_dsp.py`. Mute at 5532, UNMUTE at 9500 -- deliberately BETWEEN trigs (the next is at
+10335), so "resumes mid-sample" and "waits for the next trig" cannot be confused:
+
+```
+                          audio at the unmute, +0 / +40 / +80 / +160 ms
+  OT (stock, the target)   0.0633  0.0653  0.0654  0.0673   <- resumes instantly, mid-sample
+  OTFX-T                   0.0000  0.0000  0.0000  0.0000   <- correct for a trig-masking mode
+  OTFX (as shipped)        0.0000  0.0000  0.0000  0.0000   <- THE BUG, exactly as reported
+```
+
+### Root cause: +2/+4 are not a gain [MEASURED]
+
+Every trig hook was verified to PASS for GATE 3 in the flashed image (all five read GATE,
+`subq #1 / cmpi #1 / bhi pass`), so trigs really were being dispatched. The cut itself was
+freezing the voice. Bisected again, this time scoring BOTH properties at once:
+
+```
+  cut range              silent while muted    unmute resumes mid-sample
+  +2/+4  (the dry pair)        yes                    NO   <-- freezes the voice
+  +6 alone                     yes                    YES
+  +10 alone                    yes                    YES
+  2..15  (what shipped)        yes                    NO   <-- contains +2/+4
+```
+
+So zeroing +2/+4 stops the voice advancing, and playback cannot pick up mid-sample afterwards.
+Addendum 12's audio-only bisection answered "what silences the track" and it was read as "what
+cuts the dry" -- the two are not the same question, and hook 8's hardware result (+2/+4 are the
+dry L/R gains) does not license the inference either, because "zeroing a gain" and "zeroing
+the thing a gain is derived from" look identical in an audio-only test.
+
+### The fix [v9, current build]
+
+`p1_otfx` now clears ONLY +6 and +10, in both ping-pong halves, per silenced track. Both are
+cut rather than just one: each is independently sufficient here, but this project has been
+bitten before by a stereo pair where stock zeroed one side and clamped the other (hook 8), and
+a centred test project cannot tell an L/R pair from a redundant one.
+
+```
+  UNMUTE (dry card)    mid-mute   unmute +0 / +40 / +80 / +160 ms
+    OT (stock)          0.0000    0.0633  0.0653  0.0654  0.0673
+    OTFX (v9)           0.0000    0.0621  0.0653  0.0654  0.0673   <- matches stock
+
+  FX card, post-mute:  0.0034  0.0019  0.0007  0.0001  0.0000  0.0000   monotonic, tail rings
+
+  bit-identity vs the build on the unit:  OT  BIT-IDENTICAL   OTFX-T  BIT-IDENTICAL
+                                          DT-T differs (the known one instruction per frame)
+```
+
+### Known, and worth the user's ear rather than another guess
+
+At the mute instant on a DRY track (no insert configured), OTFX is not quite as abrupt as OT:
+
+```
+  20 ms windows from the mute:   0      20      40      60      80     120     200 ms
+    OT (stock)                 0.0032  0.0000  0.0000  0.0000  0.0000  0.0000  0.0000
+    OTFX (v9)                  0.0095  0.0021  0.0014  0.0021  0.0018  0.0006  0.0001
+    OTFX-T                     0.0145  0.0021  0.0014  0.0021  0.0018  0.0006  0.0001
+```
+
+~200 ms of residual at about -31 dB relative to the pre-mute level, and IDENTICAL to OTFX-T's
+-- a mode the user already reports as behaving correctly. It is probably unavoidable in this
+design: the tail rings because hook 1 keeps the frame level word open, and whatever the DSP
+has in flight leaks out through that same open word. Cutting the word instead is precisely
+stock's mute, which kills the tail. Flagged rather than chased.
+
+### The lesson, recorded at full cost
+
+This is the second time in two sessions that a confident claim rested on a proxy: addendum 12
+claimed "behaviour preserved" for DT-T from a table measured on a different build (it had a
+fall-through bug), and claimed OTFX worked from a playhead counter rather than an unmute. Both
+were caught by someone else -- the user's hardware, and the user's question. **Measure the
+property the feature is defined by, not a proxy for it, and re-measure it against the build
+being claimed about.**
+
+### Status
+
+`out/mainos_mutemode_dt.bin` = `mainos_otfx_v9.bin`, all build guards pass. New: ot_emu's
+`--poke2`/`--poke2-at-frame`, `emu_echo_dsp.py --unmute-frame`. NOT yet flashed -- this build
+is a candidate for the user's second hardware test of OTFX.

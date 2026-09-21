@@ -56,7 +56,7 @@ STEP_FRAMES = LOOP_FRAMES / 16.0
 TRIG_STEPS = (1, 10, 15)         # MMTESTDT track 0's real trigs
 
 
-def run(label, mute_frame, frames, gate, load_ms, watch_read, watch_pc, coverage, extra, watch_mem="", extra_poke="", image=None, solo_track=None, fx=False, cue_track=None, solo_bit_only=None):
+def run(label, mute_frame, frames, gate, load_ms, watch_read, watch_pc, coverage, extra, watch_mem="", extra_poke="", image=None, solo_track=None, fx=False, cue_track=None, solo_bit_only=None, unmute_frame=None):
     prefix = OUTDIR / f"echo_{label}"
     # --poke/--poke-early write ONE BYTE each (main.cpp's pokeBytes -> m.write8), but the
     # patch reads GATE with `move.l GATE,%d0` -- so poking the base address alone sets the
@@ -94,6 +94,15 @@ def run(label, mute_frame, frames, gate, load_ms, watch_read, watch_pc, coverage
         if extra_poke:
             spec += ";" + extra_poke
         cmd += ["--poke", spec, "--poke-at-frame", str(mute_frame)]
+        # part 18 addendum 12 follow-up: the UNMUTE half. OTFX's whole claim is about what
+        # happens when the mute is RELEASED -- whether playback picks up mid-sample where the
+        # pattern would have been, or only at the next trig like the trig-masking modes. That
+        # was never rendered, only inferred from a ColdFire-side playhead counter. Needs
+        # ot_emu's --poke2/--poke2-at-frame (added on the local-mute-wip branch).
+        if unmute_frame is not None:
+            clear = MUTE_BYTE if (solo_track is None and cue_track is None and solo_bit_only is None) else (
+                SOLO_BYTE if solo_bit_only is not None or solo_track is not None else CUE_BYTE)
+            cmd += ["--poke2", f"{clear:#x}=0", "--poke2-at-frame", str(unmute_frame)]
     if watch_mem:
         cmd += ["--watch-mem", watch_mem]
     if watch_read:
@@ -235,6 +244,8 @@ def main():
     ap.add_argument("--watch-pc", default="", help="comma-separated PCs -- log registers there")
     ap.add_argument("--coverage", action="store_true", help="every ColdFire PC from the transport start")
     ap.add_argument("--slots", default="0,2,4", help="ESAI TX0 slots to report")
+    ap.add_argument("--unmute-frame", type=int, default=None, metavar="N",
+                    help="release the mute at this frame -- the OTFX unmute test")
     ap.add_argument("--analyze-only", action="store_true")
     ap.add_argument("extra", nargs="*", help="extra ot_emu args after --")
     a = ap.parse_args()
@@ -248,7 +259,7 @@ def main():
                 sys.exit(f"missing: {p}")
         prefix = run(a.label, mute_frame, a.frames, a.gate, a.load_ms,
                      a.watch_read, a.watch_pc, a.coverage, list(a.extra), a.watch_mem,
-                     a.extra_poke, a.image, a.solo, a.fx, a.cue, a.solo_bit)
+                     a.extra_poke, a.image, a.solo, a.fx, a.cue, a.solo_bit, a.unmute_frame)
     analyze(prefix, mute_frame, a.frames, slots)
     return 0
 
