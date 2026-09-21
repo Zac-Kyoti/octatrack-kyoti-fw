@@ -5,6 +5,10 @@
 | tails out, and a silenced track's sequencer trigs make no sound.
 |
 | Session 9 (V1-V6): the mute case.  Session 11 (V7): the SOLO case, same technique.
+| *** 20 Sep 2026 (part 18 addendum 5): the user RETRACTS Session 11's solo hardware
+| confirmation -- solo was never properly tested. On hardware SOLO currently ignores
+| MUTE MODE entirely and always gives an OT-style hard cut with no FX tails. The solo
+| handling below (p1_solo) is therefore UNVERIFIED on hardware, not working-as-shipped.
 |
 | Session 12 (--defsym DT_MODE=1): a third MUTE MODE, "DT".  DT mute is a pure *sequencer*
 | mute -- exactly like a Digitakt trig mute: the voice that is already sounding keeps playing

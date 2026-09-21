@@ -22592,3 +22592,87 @@ the pattern blob, two wrong approaches retracted in its own docstring);
 `tools/emu_directjump_dynamic.py` gains `--start-pattern`. Test data:
 `~/Desktop/DJTESTxxx`, exported from the user's own MKI for this test (real hardware
 export, not fabricated). Log: `/tmp/dj_scaletest.log`.
+
+## Session 58 continued yet again, part 18 addendum 5 (2026-09-20, `wip`) — HARDWARE: the
+no-hook-13 build is GOOD in all modes ("no bugs that I can hear"), but SOLO ignores MUTE MODE
+entirely (always an OT-style hard cut, no FX tails). Also: **Session 11's SOLO hardware
+confirmation is RETRACTED by the user** -- solo was never properly tested. And OT mode's mute
+is confirmed bit-identical to stock.
+
+### Hardware report
+
+- The addendum-4 build (hook 15 in, hook 13 out) is **working in all modes** -- full-length
+  notes, no echo, FX tails ringing. The echo thread's fix is confirmed on the unit.
+- **Open bug**: "soloing in all modes produces the OT type cut (quick cut, no fx tails).
+  Soloing should treat tracks that get muted according to the Mute Mode chosen."
+
+### ⚠️ RETRACTION: Session 11's "V7 = SOLO case, same technique, hardware-confirmed"
+
+The user states plainly that solo was never properly tested and Session 11 must not be
+treated as confirmation. Everything this project believed about SOLO behaviour on hardware is
+therefore **unverified**, including the claim that `pre`'s solo branch makes non-soloed
+tracks ring their FX tails. The Session-11 STATIC facts are unaffected and were independently
+re-derived from the binary this session (see below) -- it is only the hardware claim that is
+withdrawn.
+
+### Answering the user's OT question: OT mode IS stock, no smoothing of ours
+
+Rendered our build at GATE=0 (MUTE MODE = OT) and a stock image (`mainos_trigscale_only.bin`),
+same project, same mute at frame 5532, and compared **sample by sample across all 8 ESAI
+slots**: from 0.5 s after the transport start to the end of the run -- including right across
+the mute -- `max|difference| = 0.000000`, i.e. **bit-identical**. Post-mute both go silent
+instantly and identically. The only divergence is a transient inside the first 0.5 s of
+playback (max 0.034 at 0-0.25 s) where both runs carry the SAME energy (RMS 0.0448 vs 0.0448)
+and differ only in detail -- the signature of a small timing shift at transport start, not a
+behavioural change. **So: no fade, no smoothing, no "fast cut" of ours in OT mode -- the cut
+is stock's own.**
+
+### The solo branch, re-derived from the binary (`-m m68k:cfv4e`, not r2's plain m68k)
+
+```
+40004dc6  movel 0x80000008,%d5        <- hook 1's displaced instruction
+40004dcc  tstb  0x80000037            <- SOLO_FLAG
+40004dd2  beqs  0x40004e3a            <- not-solo branch
+40004dea  mvzb  %d5,%d1 / seq %d1 / extbl %d1   -> D1 = -1 if D5.low8 == 0 else 0
+40004df6  btst  %d3,%d5               <- this track SOLOED?  yes -> keep both words
+40004dfc  btst  %d3+8,%d5             <- this track MUTED?   yes -> clrl (HARD zero, both words)
+40004e00  andl  %d1,%d4 / andl %d1,%d2                       else -> AND with D1
+```
+
+**Every decision reads D5**, which hook 1 owns -- so `p1_solo`'s `andi.l #0xffff0000,%d5`
+should make D1 = -1 and every track keep its words (no stock cut), leaving the silencing to
+our own hooks. That is the design; hardware says it is not what happens.
+
+### The real solo-engage handler, found this session
+
+`0x400654dc` (disengage at `0x400654f8`):
+```
+  moveq #1,%d0 / moveb %d0,0x80000037 / moveb %d0,0x100b1497 / pea -1 / jsr 0x4004d948
+```
+So engaging solo sets the flag, sets a persisted copy at `0x100b1497`, and calls
+`FUN_4004d948(-1)` -- a broad per-track refresh (it walks `0x46c82456` + `6322*n`, the
+sequenced-data RAM). **Note it does NOT set any per-track solo bit** -- which track is soloed
+must be set by a different handler (a track key pressed while solo mode is engaged), still
+unidentified.
+
+### Why the emulator could not reproduce the bug -- and what to do instead
+
+Three attempts, none reproduced the hardware symptom:
+1. Poking `SOLO_FLAG` + a solo bit (`tools/emu_echo_dsp.py --solo N`): DT+solo renders a
+   smooth decaying tail, i.e. it behaves CORRECTLY, matching DT+mute.
+2. Same in OT+FX: solo and mute give near-identical decays (0.0181/0.0031/0.0010/0.0020 vs
+   0.0146/0.0019/0.0006/0.0012).
+3. Calling the REAL handler `0x400654dc` mid-run via `--call-at`: track 0 simply keeps
+   playing loudly (0.0364/0.0509/0.0522...), no silencing at all.
+
+Two structural reasons this test cannot settle it: **(a)** the test project has NO FX
+configured, so "FX tails ring or not" is invisible to it -- the exact thing the user is
+hearing; **(b)** the per-track solo bit is being poked rather than set by whatever real
+handler does it, so the emulated "solo" may not be the state the hardware is actually in.
+
+**Next session should NOT run more poke-based solo tests.** The two things that would make
+this tractable: a test project from the user that actually has an FX insert configured on the
+test track (so tails are measurable at all), and identifying the handler that sets the
+per-track solo bit so solo can be engaged the real way end to end. Until then, the useful
+question to ask the user is exactly HOW they engage solo on the unit (which key combination),
+since that determines which handler runs.
