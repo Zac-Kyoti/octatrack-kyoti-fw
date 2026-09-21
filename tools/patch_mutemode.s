@@ -40,8 +40,34 @@
 |   [RIGHT] -> (+1, wrap=0)   clamp
 |   [LEFT]  -> (-1, wrap=0)   clamp
 
-    .equ MUTE_MODE,    0x800000dc
-    .equ SH_MUTE_MODE, 0x100fff6c    | battery-SRAM shadow = 0x100fff00 + (MUTE_MODE - 0x80000070)
+| part 18 addendum 12: the menu's ORDER is decoupled from the value the hooks read.
+|
+| The user wants the modes listed OT / OTFX / OTFX-T / DT-T (increasing "stickiness").
+| Renumbering GATE to match would be expensive in a way that is easy to miss: patch_softmute's
+| hook 1 tests the modes as a CHAIN, so a mode's position in that chain is its instruction
+| count, and moving OTFX-T from first-tested to second-tested would silently cost it two
+| instructions per frame -- which is more than enough to break its bit-identity (measured:
+| ONE is enough).  So GATE keeps the numbering every measurement in addendum 12 was taken
+| with, and the menu gets its own word:
+|
+|   MUTE_UI  0x800000d8  the MENU index, 0..3, what the getter/setter cycle through
+|   GATE     0x800000dc  what patch_softmute reads -- UI_TO_GATE[MUTE_UI]
+|
+|   UI 0 "OT"      -> GATE 0      UI 2 "OTFX-T" -> GATE 1
+|   UI 1 "OTFX"    -> GATE 3      UI 3 "DT-T"   -> GATE 2
+|
+| The translation happens in the SETTER, i.e. once per key press, so it costs the audio path
+| nothing at all.  Both words live in the 0x800000d4..df span the build's own battery-SRAM
+| restore already covers (pea 0x64 -> 0x70), and the setter writes both shadows, so both
+| persist across a power cycle.  A freshly flashed unit has both at 0 = OT, as before.
+|
+| ⚠ ONE-TIME NOTE AFTER FLASHING: a unit coming from an older build has a GATE value stored
+| but no MUTE_UI, so the menu may show the wrong entry until MUTE MODE is set once.  Setting
+| it once writes both words and they stay in step from then on.
+    .equ MUTE_MODE,    0x800000d8    | the MENU index (0..3)
+    .equ SH_MUTE_MODE, 0x100fff68    | battery-SRAM shadow = 0x100fff00 + (MUTE_MODE - 0x80000070)
+    .equ GATE,         0x800000dc    | what patch_softmute reads
+    .equ SH_GATE,      0x100fff6c    | its shadow
     .ifdef DT_MODE
     .equ N_MODES,   4                | OT / OTFX-T / DT-T / OTFX   (--defsym DT_MODE=1)
     .else
@@ -63,25 +89,35 @@ vm_0:
     .align 2
 vm_1:
     .ifdef DT_MODE
-    .asciz "OTFX-T"                  | renamed from "OT+FX" (part 18 addendum 12): the -T
-    .else                            | suffix marks the modes that also stop the TRIGS
+    .asciz "OTFX"                    | hard cut + FX tails, sequencer untouched -- unmuting
+    .else                            | picks up where the pattern would have been
     .asciz "OT+FX"
     .endif
     .align 2
     .ifdef DT_MODE
 vm_2:
+    .asciz "OTFX-T"                  | renamed from "OT+FX": the -T suffix marks the modes
+    .align 2                         | that also stop the TRIGS
+vm_3:
     .asciz "DT-T"                    | renamed from "DT", same reason
     .align 2
-vm_3:
-    .asciz "OTFX"                    | the fourth mode: hard cut + FX tails, sequencer
-    .align 2                         | untouched, so unmuting picks up where the pattern
-    .endif                           | would have been had the track never been muted
+    .endif
 val_tbl:
     .long vm_0
     .long vm_1
     .ifdef DT_MODE
     .long vm_2
     .long vm_3
+    .endif
+
+| ---- menu index -> the value patch_softmute reads ----
+    .ifdef DT_MODE
+ui_to_gate:
+    .byte 0                          | UI 0 "OT"     -> GATE 0
+    .byte 3                          | UI 1 "OTFX"   -> GATE 3
+    .byte 1                          | UI 2 "OTFX-T" -> GATE 1
+    .byte 2                          | UI 3 "DT-T"   -> GATE 2
+    .align 2
     .endif
 
 | ---- getter: return &val_tbl[clamp(MUTE_MODE, 0, NMAX)] ----
@@ -128,6 +164,17 @@ sm_wlo:
     bpl.b   sm_store
     moveq   #NMAX,%d0
 sm_store:
-    move.l  %d0,MUTE_MODE       | volatile runtime word (read by the getter + patch_softmute)
+    move.l  %d0,MUTE_MODE       | volatile runtime word (the MENU index, read by the getter)
     move.l  %d0,SH_MUTE_MODE    | battery-SRAM shadow -- the key handler re-checksums on return
+    .ifdef DT_MODE
+| ---- translate the menu index into the value patch_softmute reads, and persist that too ----
+    lea     ui_to_gate,%a0
+    moveq   #0,%d1
+    move.b  (%a0,%d0.l),%d1
+    move.l  %d1,GATE
+    move.l  %d1,SH_GATE
+    .else
+    move.l  %d0,GATE            | 2-mode build: the menu index IS the gate
+    move.l  %d0,SH_GATE
+    .endif
     rts

@@ -24012,3 +24012,40 @@ running underneath exactly as if nothing had been muted.
 
 `out/mainos_mutemode_dt.bin` is v6 (`mainos_otfx_v6.bin`). OT and OTFX-T remain BIT-IDENTICAL
 to the flashed build; DT-T still pays the one instruction per frame. Nothing flashed.
+
+### Menu order: decoupled from GATE, so the user's order costs nothing [v7, current build]
+
+The user chose to list the modes **OT / OTFX / OTFX-T / DT-T**. Renumbering GATE to match
+would have made the bit-identity problem WORSE, and in a way that is easy to miss: hook 1
+tests the modes as a CHAIN, so a mode's POSITION in that chain IS its instruction count.
+Moving OTFX-T from first-tested to second-tested would have silently cost it two instructions
+per frame -- and one is already enough to break bit-identity.
+
+So the menu got its own word instead:
+
+```
+  MUTE_UI  0x800000d8   the menu index 0..3, what the getter/setter cycle through
+  GATE     0x800000dc   what patch_softmute reads -- ui_to_gate[MUTE_UI] = {0, 3, 1, 2}
+```
+
+The translation happens in the SETTER, once per key press, so the audio path pays nothing.
+Both words sit inside the 0x800000d4..df span the build's battery-SRAM restore already
+covers, and the setter writes both shadows, so both persist. A freshly flashed unit has both
+at 0 = OT.
+
+**Verified**: the reordered build differs from v6 in 347 bytes, and **ZERO of them are in the
+patch_softmute region** -- every difference is patch_mutemode, the relocated PERSONALIZE
+arrays (now 0x400d78c0/7920/7980) and the five repoint sites, none of which run per frame.
+Re-rendered anyway: GATE 0 and GATE 1 still BIT-IDENTICAL to the flashed build.
+
+⚠ One-time note for the flash: a unit coming from an older build has a GATE value stored but
+no MUTE_UI, so the menu may show the wrong entry until MUTE MODE is set once. Setting it once
+writes both words and they stay in step from then on.
+
+### Where this leaves MUTE MODE
+
+OTFX is DONE in the emulator: hard cut, inserts ringing out to digital silence, sequencer
+untouched (playhead 0x31e1, stock's own value). The ONE open item is the user's decision on
+the single instruction per frame -- DT-T pays it in the current build; OT and OTFX-T are
+bit-identical to what is on the unit. Switching which mode pays is a one-line change in
+p1_edge (variant v3 is already built and measured). Nothing flashed.

@@ -7,7 +7,10 @@ PERSONALIZE "MUTE MODE" toggle) with a THIRD mode, "DT", added.
 
 Identical to build_mutemode.py except:
   - patch_softmute AND patch_mutemode are assembled with --defsym DT_MODE=1
-      * patch_mutemode  -> N_MODES = 3, value strings  OT / OT+FX / DT
+      * patch_mutemode  -> N_MODES = 4, value strings  OT / OTFX / OTFX-T / DT-T.  The
+        MENU INDEX (0x800000d8) is a separate word from the GATE the hooks read
+        (0x800000dc); the setter translates one to the other through ui_to_gate[], so the
+        listed order is the user's without renumbering GATE -- see patch_mutemode.s.
       * patch_softmute  -> GATE (0x800000dc) == 2 selects DT: the same D5-bit clearing as
         OT+FX (FUN_40004db8 keeps every frame level word -> the sounding voice + its FX
         reach the mix untouched) and the same `mt_trig` new-trig drop, but NO note-off /
@@ -177,7 +180,7 @@ PATCHES = [
 # --- PERSONALIZE menu arrays (stock) ---
 OLD_LBL, OLD_GET, OLD_SET, N_OLD = 0x400b2a34, 0x400b2a74, 0x400b2ac0, 16
 SPLICE_AT = 2                                               # after "PREVIEW WITHOUT FX"
-LBL_AT, GET_AT, SET_AT = 0x400d78a0, 0x400d7900, 0x400d7960
+LBL_AT, GET_AT, SET_AT = 0x400d78c0, 0x400d7920, 0x400d7980
 # Session 58 continued yet again, part 8: moved 0x400d7750/b0/810 -> 0x400d7790/f0/850,
 # 0x40 further out, to make room for patch_mutemode's own 0x40 shift above.
 REFS = [(0x40068efe, OLD_LBL, "labels  move.l #imm,D5"),
@@ -351,7 +354,7 @@ def main():
 
     print(f"\n  {OUT_SYX.name}  (MIDI DIN)  +  {OUT_BIN.name}  (CF card)")
     print(f"  version screen / SYSTEM STATUS -> OS VERSION will read:  {VERSTR}")
-    print("  PERSONALIZE -> MUTE MODE:  OT (stock) | OT+FX (soft mute) | DT (sequencer mute).  Default OT.")
+    print("  PERSONALIZE -> MUTE MODE:  OT | OTFX | OTFX-T | DT-T.  Default OT.")
     print("  Revert = flash downloads/extracted/OCTATRACK_OS1.40C.syx")
 
 
