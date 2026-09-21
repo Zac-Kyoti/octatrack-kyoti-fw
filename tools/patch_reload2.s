@@ -148,11 +148,24 @@
     .equ PARTAPPLY, 0x40009094          | FUN_40009094(bank, part) -- apply a Part by event (parts-switch path)
     .equ RDRAW,     0x46c7c72c          | screen redraw dirty flag (set to 1)
 
-|   [PTN] key handler FUN_4005a044(keycode@4, event@8).  Detour @ entry:
-|   displaced `move.l 8(sp),d0 ; moveq #1,d1` (6 B).  event 2 = HOLD.
-    .equ PTN_HOLD_H,  0x4005a044
-    .equ PTN_RESUME,  0x4005a04a        | after the displaced 2 insns (cmp d0,d1 ; bne ...)
-    .equ PTN_HOLDTAIL,0x4005a0d2        | stock hold tail: PTN_MODE = 1 ; jmp 0x40027de4
+|   ---- [BANK]-held overlay layer (Session 80 continued (2)) ----
+|   [BANK] press 0x4007af80 pushes layer struct 0x400cff14 (records @ 0x400cff34)
+|   through the same FUN_40031494 push+rebuild [PTN] uses; [BANK] release
+|   0x4007b3e0 pops it (0x4003146c @ 0x4007b40e).  Record 17 = code 0x31 (YES)
+|   @ 0x400d00ee, press field @ 0x400d00f0, stock value NULL -- the dead slot
+|   build_reload2.py pokes rl_bank_yes into.
+    .equ BANK_LAYER_YES, 0x400d00ee     | code 0x31 record in the [BANK]-held layer
+    .equ BANK_COMMIT,    0x460e73c2     | [BANK] release: !=0 -> commit path
+                                        | (0x40031200); 0 -> 0x40056a70 dismiss.
+                                        | rl_bank_yes clears it (INFERRED, see there)
+
+|   [PTN] key handler FUN_4005a044.  RETIRED in Session 80 continued (2) -- the
+|   entry gesture moved to [BANK]+[YES], so rl_ptn and its detour are gone and
+|   PTN_USED / the hold tail are no longer referenced.  Addresses kept for the
+|   record only.
+|   .equ PTN_HOLD_H,  0x4005a044
+|   .equ PTN_RESUME,  0x4005a04a
+|   .equ PTN_HOLDTAIL,0x4005a0d2
 
 |   [NO] handler @ 0x4005e25c.  Detour replaces `move.l 8(sp),d0 ; beq.s 0x4005e276` (6 B).
     .equ NO_REL,    0x4005e276          | event 0 -> stock release cleanup
@@ -214,53 +227,65 @@
 
     .text
 
-| ================= [PTN] HOLD -- open the picker  (@ 0x4005a044) =================
-| Detour replaces 6 bytes: move.l 8(%sp),%d0 ; moveq #1,%d1
-
-    .global rl_ptn
-rl_ptn:
-    move.l  8(%sp),%d0                 | displaced -- d0 = event
-    moveq   #2,%d1
-    cmp.l   %d0,%d1
-    bne.b   rlp_stock                  | not a hold -> stock
-
-|   --- [PTN] HOLD ---
-|   Session 80 continued: dropped the RUNNING gate (user's ask -- these actions
-|   must work whether the transport is playing or stopped; none of the worker's
-|   own logic in rl_job actually depends on RUNNING, so there was never a real
-|   correctness reason to require it here -- see that session's NOTES.md entry
-|   for the open display-refresh-while-stopped question this raises).
+| ================= [BANK] + [YES] -- open the picker =================
+| Session 80 continued (2): THE ENTRY GESTURE MOVED OFF [PTN] ENTIRELY.
 |
-|   Also dropped the G_KIND ("a reload is already queued") gate here -- this is
-|   what made the picker permanently unopenable after the hardware report of
-|   "PTN hold stops working entirely, no recovery": if G_KIND ever got stuck
-|   nonzero for ANY reason (a real storage-task timing edge this session could
-|   not pin down conclusively -- see NOTES.md "Session 80 continued", the
-|   FUN_40022778 single-fixed-scratch-buffer finding), this gate meant NOTHING
-|   could ever reopen the picker again, full stop. The re-entrancy protection
-|   that gate existed for moved to rl_yes_exec instead (guards the actual
-|   ARM+POST step, where a genuine double-post could corrupt an in-flight job)
-|   -- opening the picker itself is now always available, so a stuck flag is a
-|   diagnosable "YES seems to do nothing" instead of an unrecoverable dead key.
+| Why: hardware testing killed the [PTN]-hold entry on three counts at once.
+|   * It only fired about 1 try in 5 (user-measured).
+|   * [PTN] was triple-booked: stock's SELECT PATTERN chooser, DIRECT JUMP's
+|     own [PTN]+[YES] toggle, and our hold -- with TWO keymap-slot workarounds
+|     (rl_yes_ptnheld / rl_no_ptnheld) layered on just to stay reachable.
+|   * Our poke into the [PTN]-held layer's YES slot COLLIDED with the slot
+|     DIRECT JUMP v4 pokes dj_toggle into -- a guaranteed merged-build conflict
+|     that reference/MERGE.md's [YES] trampoline was invented to paper over.
+|
+| [BANK]+[YES] (user's own suggestion) mirrors DIRECT JUMP's [PTN]+[YES] and
+| resolves all three: PTN+YES is now DIRECT JUMP's alone, BANK+YES is ours,
+| no shared slot, no trampoline needed.
+|
+| Mechanism -- identical in shape to the one already proven twice (DIRECT JUMP
+| v4's dj_toggle poke, and this file's own late rl_yes_ptnheld):
+|   [BANK] press (handler 0x4007af80) pushes the BANK-held keymap overlay layer
+|   0x400cff14 via the same FUN_40031494 push+rebuild PTN uses, and [BANK]
+|   release pops it (0x4003146c @ 0x4007b40e). That layer's records live at
+|   0x400cff34: trigs 0x00-0x0f (select bank), NO 0x32 -> 0x4007b25c, and
+|   YES 0x31 @ 0x400d00ee with press = NULL -- the SAME dead slot PTN's layer
+|   has. build_reload2.py pokes rl_bank_yes into its press field (0x400d00f0),
+|   asserting the stock 26 bytes first. So this is only ever reachable while
+|   [BANK] is physically held, which IS the gesture.
+|
+| The picker stays sticky/no-timeout after [BANK] is released (the layer pops,
+| dispatch returns to the base keymap, and the existing rl_yes / rl_no /
+| rl_arr_a / rl_arr_b detours answer it exactly as before).
+
+    .global rl_bank_yes
+rl_bank_yes:
+    moveq   #1,%d1
+    cmp.l   8(%sp),%d1                 | event == press ?
+    bne.b   rby_rts
     tst.b   G_MENU
-    bne.b   rlp_holdtail               | already open
+    bne.b   rby_rts                    | already open
     tst.l   POPUP
-    bne.b   rlp_holdtail               | a modal dialog is up
+    bne.b   rby_rts                    | a modal dialog is up
     tst.l   ARR_ACT
-    bne.b   rlp_holdtail               | arranger
+    bne.b   rby_rts                    | arranger
 
     moveq   #1,%d0
     move.b  %d0,G_MENU                 | open
     clr.b   G_SEL                      | default = item 0 (TRK SEQ) -- [YES] straight away
-    move.l  %d0,PTN_USED               | suppress SELECT PATTERN on the [PTN] release
+|   Suppress what the [BANK] RELEASE would otherwise do. Release (0x4007b3e0)
+|   reads: if 0x460e73c6 == 2 -> 0x40056a70 ; else if 0x460e73c2 == 0 ->
+|   0x40056a70 ; else set 0x460e73bc = 1 and -> 0x40031200. Clearing
+|   BANK_COMMIT routes the release down the 0x40056a70 path (the same shared
+|   "dismiss the transient select window" routine the [PTN] layer's own NO slot
+|   branches to) instead of committing a bank change under our picker.
+|   ** INFERRED from that disassembly, NOT yet hardware-verified -- if [BANK]
+|   release misbehaves on the unit, deleting this one clr.l is the first thing
+|   to try. **
+    clr.l   BANK_COMMIT
     jsr     rl_draw
-
-rlp_holdtail:
-    jmp     PTN_HOLDTAIL               | stock: PTN_MODE = 1 ; jmp 0x40027de4
-
-rlp_stock:
-    moveq   #1,%d1                     | displaced #2
-    jmp     PTN_RESUME
+rby_rts:
+    rts
 
 | ================= [NO] -- close the window  (@ 0x4005e25c) =================
 | Detour replaces 6 bytes: move.l 8(%sp),%d0 ; beq.s 0x4005e276
@@ -286,30 +311,9 @@ rln_notrel:
 rln_stock:
     jmp     NO_PRESS
 
-| ---- rl_no_ptnheld: poked into the [PTN]-held keymap layer's own NO press slot,
-| REPLACING stock NO_PTNHELD_STOCK (0x40056aa8) -- see the header comment above
-| for why that's safe (an unconditional no-op for every PTN_MODE our own [PTN]-
-| hold gesture can produce). Only reachable while [PTN] is physically held.
-    .global rl_no_ptnheld
-rl_no_ptnheld:
-    moveq   #1,%d1
-    cmp.l   8(%sp),%d1                 | event == press ?
-    bne.b   rnph_stock
-    tst.b   G_MENU
-    beq.b   rnph_stock                 | window closed -> replay the real stock behaviour
-    tst.l   POPUP
-    bne.b   rnph_stock
-
-    bsr.w   rl_no_exec
-    rts                                | swallow
-
-rnph_stock:
-    jmp     NO_PTNHELD_STOCK           | 0x40056aa8, byte-for-byte, stack undisturbed (jmp,
-                                        | not jsr -- see rl_yes_ptnheld's identical idiom)
-
-| ---- rl_no_exec: shared "close the window" body -- bsr'd from rl_no AND
-| rl_no_ptnheld so both entry points drive identical logic. Ends in rts back to
-| whichever entry bsr'd it. ----
+| ---- rl_no_exec: shared "close the window" body -- bsr'd from rl_no.
+| (rl_no_ptnheld, the [PTN]-held layer NO-slot poke, was RETIRED in Session 80
+| continued (2) along with the whole [PTN] entry gesture.) ----
     .global rl_no_exec
 rl_no_exec:
     clr.b   G_MENU
@@ -337,28 +341,12 @@ rl_yes:
     bsr.w   rl_yes_exec
     rts
 
-| ---- rl_yes_ptnheld: poked into the [PTN]-held keymap layer's own YES press
-| slot (stock: NULL -- see the header comment above; the exact bug Session 60
-| found and fixed for DIRECT JUMP, applied here identically). Only reachable
-| while [PTN] is physically held.
-    .global rl_yes_ptnheld
-rl_yes_ptnheld:
-    move.l  8(%sp),%d0                 | event
-    moveq   #1,%d1
-    cmp.l   %d0,%d1
-    bne.b   ryph_rts
-    tst.b   G_MENU
-    beq.b   ryph_rts                   | window closed -> stock's own NULL slot did nothing
-    tst.l   POPUP
-    bne.b   ryph_rts
-
-    bsr.w   rl_yes_exec
-ryph_rts:
-    rts
-
 | ---- rl_yes_exec: shared "close the window + execute the selection" body --
-| bsr'd from rl_yes AND rl_yes_ptnheld so both entry points drive identical
-| logic. Ends in rts back to whichever entry bsr'd it. ----
+| bsr'd from rl_yes.  (rl_yes_ptnheld, the [PTN]-held layer YES-slot poke, was
+| RETIRED in Session 80 continued (2): the entry gesture moved to [BANK]+[YES],
+| which frees that slot for DIRECT JUMP v4's dj_toggle exclusively -- removing
+| the merged-build collision reference/MERGE.md's [YES] trampoline existed for.)
+| Ends in rts back to whichever entry bsr'd it. ----
     .global rl_yes_exec
 rl_yes_exec:
 |   --- close the window ---
@@ -723,8 +711,32 @@ rlj_setflag:
     move.b  ACT_PAT,%d1
     cmp.b   %d1,%d0
     bne.b   rlj_ok
+|   Session 80 continued (2): HARDWARE REGRESSION FIX. Dropping rl_ptn's RUNNING
+|   gate (so the picker opens while stopped, as asked) exposed this: executing a
+|   reload with the transport STOPPED starts playback, jerkily. The claim in the
+|   previous commit that RUNNING "was never actually load-bearing" was an
+|   INFERENCE, and hardware falsified it -- the gate was suppressing a real
+|   downstream behaviour, not just guarding the UI.
+|
+|   RELOAD_NOW (0x46c8028a) is the stock "reload now" flag FUN_400a1eea polls
+|   once per STEP (0x400a2530). With the transport stopped there are no step
+|   ticks to consume it, so arming it while stopped is at best pointless and is
+|   the most plausible way our reload reaches into the transport's own machinery
+|   (** HYPOTHESIS, not proven -- the exact start mechanism was not traced; this
+|   needs the hardware re-test to confirm or falsify **). The slab copy itself
+|   has ALREADY happened by this point regardless, so a stopped-transport reload
+|   still fully updates the data; the step engine reads the patched slab on the
+|   next PLAY the same way it would have anyway. Ask for a screen refresh instead
+|   of poking the sequencer.
+    tst.l   RUNNING
+    beq.b   rlj_stopped
     moveq   #1,%d0
     move.l  %d0,RELOAD_NOW
+    bra.b   rlj_ok
+rlj_stopped:
+    moveq   #1,%d0
+    move.l  %d0,RDRAW                  | redraw only -- never arm the step engine
+                                       | while it isn't ticking
 
 rlj_ok:
     moveq   #1,%d0

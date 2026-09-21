@@ -138,22 +138,31 @@ PATCHES = [
     ("patch_trigscale", 0x400d7b00, None,
      [(0x4009b6f2, "cave", "203c0000091a", 18, "jmp")]),
     ("patch_reload2", 0x400d7400, None,
-     [(0x4005a044, "rl_ptn", "202f00087201", 6, "jmp"),        # PTN handler: move.l 8(sp),d0 ; moveq #1,d1  (event 2 = HOLD)
-      (0x4005e25c, "rl_no", "202f00086714", 6, "jmp"),         # NO handler: move.l 8(sp),d0 ; beq.s 0x4005e276
+     # Session 80 continued (2): the rl_ptn detour @0x4005a044 is GONE -- the entry
+     # gesture moved from [PTN]-hold to [BANK]+[YES] (see patch_reload2.s). [PTN] is
+     # now byte-for-byte stock again as far as this build is concerned.
+     [(0x4005e25c, "rl_no", "202f00086714", 6, "jmp"),         # NO handler: move.l 8(sp),d0 ; beq.s 0x4005e276
       (0x4005e4c8, "rl_yes", "222f0004202f0008", 8, "jmp"),    # YES handler: move.l 4(sp),d1 ; move.l 8(sp),d0
       (0x4004b970, "rl_arr_a", "4feffff448d7040c", 8, "jmp"),  # UP/RIGHT handler: lea -12(sp),sp ; movem.l d2-d3/a2,(sp)
       (0x400491a0, "rl_arr_b", "2f02206f0008", 6, "jmp"),      # DOWN/LEFT handler: move.l d2,-(sp) ; movea.l 8(sp),a0
       (0x40085864, "rl_job", "2d4afd762f2a0004", 8, "jmp")]),  # 0x14 case: move.l a2,-650(fp) ; move.l 4(a2),-(sp)
 ]
 
-# [PTN]-held keymap layer 0x400bf0f2, 26-byte records (see patch_reload2.s header
-# comment / patch_directjump.s's identical PTN_LAYER_YES for the RE).  press field
-# is record base + 2.  YES (code 0x31) is NULL in stock; NO (code 0x32) is
-# 0x40056aa8, an unconditional no-op for every PTN_MODE our own gesture produces.
-PTN_LAYER_YES = 0x400bf0be
-PTN_LAYER_YES_STOCK = bytes([0x31, 0x00]) + bytes(24)
-PTN_LAYER_NO = 0x400bf0a4
-PTN_LAYER_NO_STOCK = bytes([0x32, 0x00]) + (0x40056aa8).to_bytes(4, "big") + bytes(20)
+# Session 80 continued (2): the [BANK]-held keymap overlay layer.
+# [BANK] press (0x4007af80) pushes layer struct 0x400cff14 through the same
+# FUN_40031494 push+rebuild [PTN] uses; [BANK] release (0x4007b3e0) pops it via
+# 0x4003146c.  Its records live at 0x400cff34: trigs 0x00-0x0f, NO (0x32) ->
+# 0x4007b25c, then YES (0x31) at record index 17 = 0x400d00ee with press = NULL
+# -- structurally identical to the [PTN] layer's own dead YES slot.  We poke
+# rl_bank_yes into that press field (record + 2).
+#
+# The two [PTN]-layer pokes this build used to make (rl_yes_ptnheld into
+# 0x400bf0be+2, rl_no_ptnheld into 0x400bf0a4+2) are GONE: moving the gesture
+# to [BANK]+[YES] frees the [PTN] layer's YES slot for DIRECT JUMP v4's
+# dj_toggle exclusively, which removes the merged-build collision that
+# reference/MERGE.md's [YES] trampoline was built to work around.
+BANK_LAYER_YES = 0x400d00ee
+BANK_LAYER_YES_STOCK = bytes([0x31, 0x00]) + bytes(24)
 
 FREE_END = 0x400d7c3c
 
@@ -211,19 +220,22 @@ def main():
             img[do:do + n] = branch + b"\x4e\x71" * ((n - 6) // 2)
             print(f"    0x{site:08x} -> {name}:{sym} 0x{s[sym]:08x}  ({kind}, {n} B)")
 
-    print("\n=== [PTN]-held keymap layer: YES/NO press slots -> rl_yes_ptnheld/rl_no_ptnheld ===")
+    print("\n=== [BANK]-held keymap layer: YES press slot -> rl_bank_yes ===")
     rsyms = syms["patch_reload2"]
-    yo = o(PTN_LAYER_YES)
-    if bytes(img[yo:yo + 26]) != PTN_LAYER_YES_STOCK:
-        sys.exit(f"PTN-layer YES record 0x{PTN_LAYER_YES:08x} unexpected: {bytes(img[yo:yo+26]).hex()}")
-    img[yo + 2:yo + 6] = rsyms["rl_yes_ptnheld"].to_bytes(4, "big")
-    print(f"  0x{PTN_LAYER_YES + 2:08x}  press NULL       -> rl_yes_ptnheld 0x{rsyms['rl_yes_ptnheld']:08x}")
+    yo = o(BANK_LAYER_YES)
+    if bytes(img[yo:yo + 26]) != BANK_LAYER_YES_STOCK:
+        sys.exit(f"BANK-layer YES record 0x{BANK_LAYER_YES:08x} unexpected: {bytes(img[yo:yo+26]).hex()}")
+    img[yo + 2:yo + 6] = rsyms["rl_bank_yes"].to_bytes(4, "big")
+    print(f"  0x{BANK_LAYER_YES + 2:08x}  press NULL -> rl_bank_yes 0x{rsyms['rl_bank_yes']:08x}")
 
-    no = o(PTN_LAYER_NO)
-    if bytes(img[no:no + 26]) != PTN_LAYER_NO_STOCK:
-        sys.exit(f"PTN-layer NO record 0x{PTN_LAYER_NO:08x} unexpected: {bytes(img[no:no+26]).hex()}")
-    img[no + 2:no + 6] = rsyms["rl_no_ptnheld"].to_bytes(4, "big")
-    print(f"  0x{PTN_LAYER_NO + 2:08x}  press 0x40056aa8 -> rl_no_ptnheld  0x{rsyms['rl_no_ptnheld']:08x}")
+    # [PTN] must now be untouched by this build (the gesture moved to [BANK]+[YES]).
+    for addr, what in ((0x4005a044, "PTN key handler"),
+                       (0x400bf0be, "PTN-layer YES record"),
+                       (0x400bf0a4, "PTN-layer NO record")):
+        a = o(addr)
+        if bytes(img[a:a + 8]) != bytes(stock[a:a + 8]):
+            sys.exit(f"{what} 0x{addr:08x} was modified -- [PTN] must be left stock now")
+    print("  [PTN] handler + both [PTN]-layer records verified untouched (stock)")
 
     spans.sort()
     for (a1, b1, n1), (a2, b2, n2) in zip(spans, spans[1:]):
@@ -261,10 +273,12 @@ def main():
 
     print(f"\n  {OUT_SYX.name}  (MIDI DIN)  +  {OUT_BIN.name}  (CF card)")
     print(f"  version screen / SYSTEM STATUS -> OS VERSION will read:  {VERSTR}")
-    print("  Hold [PTN] ~0.5 s  (while playing)  ->  picker window (sticky, no timeout), TRK SEQ highlighted")
-    print("  arrows                             ->  TRK SEQ / PTN SEQ / PART + PTN SEQ")
-    print("  [YES]                              ->  execute the highlight + close, no transport stop")
-    print("  [NO]                               ->  close the window, execute nothing")
+    print("  Hold [BANK], tap [YES]   ->  picker window (sticky, no timeout), TRK SEQ highlighted")
+    print("    (works whether the transport is running or stopped)")
+    print("  arrows                   ->  TRK SEQ / PTN SEQ / PART + PTN SEQ")
+    print("  [YES]                    ->  execute the highlight + close")
+    print("  [NO]                     ->  close the window, execute nothing")
+    print("  [PTN] is left completely stock by this build -- PTN+YES belongs to DIRECT JUMP.")
     print("  Revert = flash downloads/extracted/OCTATRACK_OS1.40C.syx")
 
 

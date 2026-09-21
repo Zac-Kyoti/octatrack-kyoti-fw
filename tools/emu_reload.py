@@ -302,13 +302,18 @@ def _sym(name):
 
 def cmd_patched(rt):
     print("\n===== --patched : drive the SEQ worker end to end on the built image =====")
-    rl_ptn = _sym("rl_ptn")
+    # Session 80 continued (2): patch_reload2.s no longer has rl_ptn (the entry
+    # gesture moved to [BANK]+[YES]); this is only printed for orientation.
+    try:
+        entry = f"rl_ptn={_sym('rl_ptn'):#x}"
+    except KeyError:
+        entry = f"rl_bank_yes={_sym('rl_bank_yes'):#x}"
     curbank = rt.uc.mem_read(er.CUR_BANK, 1)[0]
     blob = part_ptr(rt)
     P, Q = 0, DISK_PAT          # P = active pattern 0 -> the worker's discard loop is empty
     pP, pQ = blob + P * PAT_STRIDE, blob + Q * PAT_STRIDE
     rt.seq_select_live(curbank, P)
-    print(f"curbank={curbank}  blob={blob:#x}  rl_ptn={rl_ptn:#x}  reload target P={P}, bystander Q={Q}")
+    print(f"curbank={curbank}  blob={blob:#x}  {entry}  reload target P={P}, bystander Q={Q}")
 
     saved_P = rd(rt, pP, PAT_STRIDE)
     saved_Q = rd(rt, pQ, PAT_STRIDE)
@@ -680,11 +685,23 @@ def cmd_combo(rt):
     private stack, gates forced, no scheduler.  Data-driven by COMBO_ITEMS
     (emu_reload2.py overrides it for the 2-item build)."""
     eb = er.eb
-    rl_ptn, rl_no, rl_yes = _sym("rl_ptn"), _sym("rl_no"), _sym("rl_yes")
+    rl_no, rl_yes = _sym("rl_no"), _sym("rl_yes")
     rl_arr_a, rl_arr_b = _sym("rl_arr_a"), _sym("rl_arr_b")
+    # Session 80 continued (2): patch_reload2.s opens on [BANK]+[YES] (rl_bank_yes);
+    # patch_reload.s still opens on [PTN]-hold (rl_ptn). Exactly one exists per image.
+    def _opt(name):
+        try:
+            return _sym(name)
+        except KeyError:
+            return None
+    rl_bank_yes, rl_ptn = _opt("rl_bank_yes"), _opt("rl_ptn")
+    if rl_bank_yes is None and rl_ptn is None:
+        print("\n--combo: SKIP (neither rl_bank_yes nor rl_ptn in this image)")
+        return True
+    gesture = f"rl_bank_yes={rl_bank_yes:#x}" if rl_bank_yes else f"rl_ptn={rl_ptn:#x}"
     n = len(COMBO_ITEMS)
     print("\n===== --combo : single-step the OT-native picker in isolation =====")
-    print(f"rl_ptn={rl_ptn:#x}  rl_no={rl_no:#x}  rl_yes={rl_yes:#x}  "
+    print(f"{gesture}  rl_no={rl_no:#x}  rl_yes={rl_yes:#x}  "
           f"rl_arr_a={rl_arr_a:#x}  rl_arr_b={rl_arr_b:#x}  ({n} items)")
 
     for a in (POPUP2_FN, CLOSE_FN, POST_FN, TOAST_FN, PARTRELD_FN, *REFRESH_FNS):
@@ -712,45 +729,56 @@ def cmd_combo(rt):
         ok &= bool(cond)
         print(f"  {'ok  ' if cond else 'FAIL'} {label}")
 
-    # --- open: hold [PTN] (keycode 0x2e, event 2) ---
-    reset_gates()
-    calls = []
-    end = _run_cave_fn(rt, rl_ptn, 0x2e, 2, calls)
-    check(end == "PTN_HOLDTAIL(stock)" and g(G_MENU_A) == 1 and g(G_SEL_A) == 0
-          and POPUP2_FN in calls and g(0x460d173e, 4) == 1,
-          f"hold [PTN]: end={end} G_MENU={g(G_MENU_A)} G_SEL={g(G_SEL_A)} "
-          f"popup2={POPUP2_FN in calls} PTN_USED={g(0x460d173e,4)}")
+    # --- the ENTRY GESTURE. patch_reload2.s moved it from [PTN]-hold to
+    # [BANK]+[YES] in Session 80 continued (2) (hardware: [PTN]-hold fired ~1 try
+    # in 5, and [PTN] was triple-booked with stock's chooser and DIRECT JUMP's own
+    # [PTN]+[YES]). patch_reload.s still has the old rl_ptn gesture, and this
+    # cmd_combo is shared by both builds -- so drive whichever the image has. ---
+    if rl_bank_yes is not None:
+        # rl_bank_yes is poked into the [BANK]-held layer's dead YES slot, so it
+        # is called as press(keycode=0x31 YES, event=1) and always ends in rts.
+        for label, kw in (("BANK+YES", {}),
+                          ("BANK+YES stopped", {"running": 0}),
+                          ("BANK+YES with G_KIND stuck", {})):
+            reset_gates(**kw)
+            if "stuck" in label:
+                rt.uc.mem_write(G_KIND_A, bytes([3]))
+            calls = []
+            end = _run_cave_fn(rt, rl_bank_yes, 0x31, 1, calls)
+            check(end == "rts" and g(G_MENU_A) == 1 and g(G_SEL_A) == 0
+                  and POPUP2_FN in calls,
+                  f"{label} opens: end={end} G_MENU={g(G_MENU_A)} G_SEL={g(G_SEL_A)} "
+                  f"popup2={POPUP2_FN in calls}")
 
-    # --- quick tap ([PTN] press, event 1) -> stock, window not opened ---
-    reset_gates()
-    calls = []
-    end = _run_cave_fn(rt, rl_ptn, 0x2e, 1, calls)
-    check(end == "PTN_RESUME(stock)" and g(G_MENU_A) == 0 and POPUP2_FN not in calls,
-          f"quick tap [PTN]: end={end} G_MENU={g(G_MENU_A)} popup2={POPUP2_FN in calls}")
+        # a [YES] RELEASE (event 0) in that layer must do nothing at all
+        reset_gates()
+        calls = []
+        end = _run_cave_fn(rt, rl_bank_yes, 0x31, 0, calls)
+        check(end == "rts" and g(G_MENU_A) == 0 and POPUP2_FN not in calls,
+              f"BANK+YES release does nothing: end={end} G_MENU={g(G_MENU_A)} "
+              f"popup2={POPUP2_FN in calls}")
 
-    # --- hold [PTN] while STOPPED -> Session 80 continued: opens the SAME as
-    # while playing (user's ask -- these actions must work whether or not the
-    # transport is running; the RUNNING gate was dropped from rl_ptn) ---
-    reset_gates(running=0)
-    calls = []
-    end = _run_cave_fn(rt, rl_ptn, 0x2e, 2, calls)
-    check(end == "PTN_HOLDTAIL(stock)" and g(G_MENU_A) == 1 and g(G_SEL_A) == 0
-          and POPUP2_FN in calls and g(0x460d173e, 4) == 1,
-          f"hold [PTN] stopped: end={end} G_MENU={g(G_MENU_A)} popup2={POPUP2_FN in calls}")
+        # already open -> second BANK+YES must not re-open/redraw over itself
+        reset_gates(menu=1)
+        calls = []
+        end = _run_cave_fn(rt, rl_bank_yes, 0x31, 1, calls)
+        check(end == "rts" and POPUP2_FN not in calls,
+              f"BANK+YES when already open is inert: end={end} popup2={POPUP2_FN in calls}")
+    else:
+        # --- legacy [PTN]-hold gesture (patch_reload.s) ---
+        reset_gates()
+        calls = []
+        end = _run_cave_fn(rt, rl_ptn, 0x2e, 2, calls)
+        check(end == "PTN_HOLDTAIL(stock)" and g(G_MENU_A) == 1 and g(G_SEL_A) == 0
+              and POPUP2_FN in calls and g(0x460d173e, 4) == 1,
+              f"hold [PTN]: end={end} G_MENU={g(G_MENU_A)} G_SEL={g(G_SEL_A)} "
+              f"popup2={POPUP2_FN in calls} PTN_USED={g(0x460d173e,4)}")
 
-    # --- hold [PTN] with a PREVIOUS reload's G_KIND stuck nonzero -> Session 80
-    # continued: opens anyway. This used to be a hard, permanent gate ("a
-    # reload is already queued") -- if G_KIND ever got stuck for any reason,
-    # NOTHING could reopen the picker again (the user's hardware report: "PTN
-    # hold stops working entirely, no recovery"). Re-entrancy protection moved
-    # to rl_yes_exec (below) instead, so opening the picker is now unconditional. ---
-    reset_gates()
-    rt.uc.mem_write(G_KIND_A, bytes([3]))   # simulate a stuck previous TRK SEQ request
-    calls = []
-    end = _run_cave_fn(rt, rl_ptn, 0x2e, 2, calls)
-    check(end == "PTN_HOLDTAIL(stock)" and g(G_MENU_A) == 1 and g(G_SEL_A) == 0
-          and POPUP2_FN in calls,
-          f"hold [PTN] with G_KIND stuck: end={end} G_MENU={g(G_MENU_A)} popup2={POPUP2_FN in calls}")
+        reset_gates()
+        calls = []
+        end = _run_cave_fn(rt, rl_ptn, 0x2e, 1, calls)
+        check(end == "PTN_RESUME(stock)" and g(G_MENU_A) == 0 and POPUP2_FN not in calls,
+              f"quick tap [PTN]: end={end} G_MENU={g(G_MENU_A)} popup2={POPUP2_FN in calls}")
 
     # --- arrows move the highlight (window open, wrapping) ---
     reset_gates(menu=1, sel=0)
