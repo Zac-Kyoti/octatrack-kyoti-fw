@@ -837,3 +837,86 @@ relstate_or:
                                        | never remove a bit the loaded byte itself carried
     move.l  (%sp)+,%d3
     jmp     RL_BACK
+
+| ==== hook 14: 0x4000b90c (THE PER-STEP LIVE-NIBBLE HAND-OFF TO THE DSP) ===============
+| Session 58 continued yet again, part 18 -- the first hook in this thread built on
+| RENDERED AUDIO rather than on ColdFire call counts, and the first one aimed at the
+| mechanism that actually produces the "echo".
+|
+| What part 18 measured (see NOTES.md, and tools/emu_echo_dsp.py / echo_blockdiff.py):
+| while a track is muted in DT mode NOTHING ever starts a voice -- hooks 9/10 are clean,
+| zero `active <- 0xFF` writes post-mute. The audible bursts are the voice that was
+| ALREADY sounding when the mute engaged (which DT mode deliberately lets ride its own
+| amp envelope) being RE-ATTACKED once per trig step. The signal that does it reaches the
+| DSP as word 1 of core 1's 672-word parameter block, which mirrors this per-track byte:
+|
+|     0x4000b906  lea.l 0x46104d15,%a1        | FW_LIVE_NIBBLE, per-track
+|     0x4000b90c  movea.l (0x72,%a7),%a3      | <- the track index
+|     0x4000b910  move.b (%a2),(%a1,%a3.l)    | <- THE STEP'S VALUE, written unconditionally
+|
+| Measured: that store fires on every one of the track's own trig steps after the mute,
+| completely unaffected by MUTE_STATE, and each firing coincides with an audible burst --
+| until the surviving voice's sample runs out and the playback-position engine frees it
+| (clr.b at 0x40008ea6), after which further firings make no sound at all. It is on a call
+| path hook 9 never sees, which is why 17 parts of gating the dispatch chain never touched
+| this.
+|
+| The gate: for a silenced track, leave the per-track byte EXACTLY as it was, so the DSP
+| is simply never told about the new step. Everything else is untouched -- in particular
+| the frame level words still reach the mix, so DT's intended behaviour (the already-
+| sounding voice keeps playing and fades out under its own AMP envelope, FX ring) is
+| preserved by construction; only the re-attack is removed.
+|
+| The companion site 0x4000b9bc (a read-modify-write that ORs 0x10 into the SAME byte) is
+| deliberately NOT gated: the value the DSP block carries is the low nibble this store
+| writes (measured 0x0c0c / 0x0707 / 0x0808 in the block against 0x1c / 0x17 / 0x18 in
+| RAM), so the 0x10 flag is local bookkeeping other firmware may read. If a test shows
+| bursts surviving this hook, gate that one too -- do not assume it.
+|
+| Detours 8 B (0x4000b90c..0x4000b914), two whole instructions, both replayed below.
+| %d1/%d2 are provably dead here (each is written before its next read: 0x4000b91a loads
+| %d1, 0x4000b92e loads %d2) but are saved and restored anyway -- hook 9's own header
+| records what a wrong register assumption cost this project once already.
+| ASSEMBLED ONLY WITH --defsym LIVE_NIBBLE=1. The A/B below came out NEGATIVE (the hook
+| works, the echo does not change), so it is kept purely as a record and must not cost
+| the shipped build a single cave byte -- with it assembled unconditionally,
+| patch_softmute grows past patch_mutemode's cave and every downstream address has to
+| move. To re-run the experiment: add --defsym LIVE_NIBBLE=1, re-enable the detour in
+| build_mutemode_dt.py, and bump patch_mutemode + the three PERSONALIZE arrays by 0x80.
+    .ifdef LIVE_NIBBLE
+    .equ LN_BACK,   0x4000b914        | right after the displaced load + store
+    .global live_nibble
+live_nibble:
+    movea.l (0x72,%a7),%a3            | displaced 1: the per-track index
+    .ifndef ALWAYS_ON
+    move.l  %d1,-(%sp)
+    move.l  %d2,-(%sp)
+    move.l  GATE,%d1
+    tst.l   %d1
+    beq     ln_store                  | MUTE MODE == OT (or unset) -> byte-for-byte stock
+    move.l  MUTE_STATE,%d1
+    move.l  %a3,%d2
+    addi.l  #8,%d2
+    btst    %d2,%d1                   | muted (bit 8+track) ?
+    bne     ln_skip
+    tst.b   SOLO_FLAG
+    beq     ln_store                  | not solo, not muted -> normal
+    move.l  %d1,%d2
+    andi.l  #0xff,%d2
+    beq     ln_store                  | solo engaged, nothing soloed -> normal
+    move.l  %a3,%d2
+    btst    %d2,%d1                   | this track soloed ?
+    bne     ln_store                  | soloed -> normal
+| fallthrough: solo active + this track not soloed -> silenced, same as muted
+ln_skip:
+    move.l  (%sp)+,%d2
+    move.l  (%sp)+,%d1
+    jmp     LN_BACK                   | the per-track byte keeps its old value: the DSP is
+                                       | never told this step happened
+ln_store:
+    move.l  (%sp)+,%d2
+    move.l  (%sp)+,%d1
+    .endif
+    move.b  (%a2),(%a1,%a3.l)         | displaced 2
+    jmp     LN_BACK
+    .endif

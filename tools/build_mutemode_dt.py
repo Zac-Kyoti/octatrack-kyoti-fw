@@ -104,6 +104,20 @@ PATCHES = [
       # six OTHER callers hook 9 never touches. Gate it at its own single entry instead.
       # See patch_softmute.s hook 10.
       (0x40006820, "fresh_bind", "2f0a2f02222f000c", 8),
+      # Session 58 continued yet again, part 18: the per-step LIVE-NIBBLE hand-off to the
+      # DSP (0x46104d15[track], mirrored into core 1's parameter block) is written with NO
+      # mute test at all, on a path hook 9 never sees -- measured, on rendered audio, to be
+      # what re-attacks the voice DT mute deliberately leaves sounding, once per trig step,
+      # until that voice's sample runs out. See patch_softmute.s hook 14.
+      # DISABLED after a direct A/B on rendered audio (part 18): the hook fires exactly as
+      # designed -- post-mute the per-track byte is provably frozen (the run's own
+      # FW_LIVE_NIBBLE log shows the value store gone, only site B's 0x10 flag re-OR'd) --
+      # and the echo is COMPLETELY UNCHANGED (0.0287/0.0096/0.0157/0.0083 vs
+      # 0.0287/0.0104/0.0159/0.0087 baseline). So this byte is NOT what re-attacks the
+      # surviving voice; part 18's block-diff correlation was just step-locking, not cause.
+      # Kept in patch_softmute.s as hook 14 for the record. Do not re-enable without a new
+      # reason -- this exact test has already been run.
+      # (0x4000b90c, "live_nibble", "266f00721392b800", 8),
       # Session 58 continued again: THE actual leak. relcut (hook 8) only fires when the
       # stock release loop's REL_STATE bit is true for a track; a stock function (never
       # touched before now) transiently CLEARS a muted track's bit as ordinary "a note is

@@ -22066,7 +22066,7 @@ audible path is the per-step nibble hand-off in item 4 above. Do not re-open thi
   rather than another blind run.
 - Whether the timestretch reading of the 32-step law is right (see above).
 
-### Fix direction this implies
+### Fix direction this implies -- ⚠️ BUILT AND TESTED, REFUTED; see the addendum below
 
 DT mode's design (see `patch_softmute.s`'s own header) is deliberate: "the voice that is
 already sounding keeps playing under its OWN amp envelope ... only NEW trigs are suppressed".
@@ -22236,3 +22236,59 @@ re-aimed twice for the same-run diffs. `tools/patch_directjump.s`: `STEP_IN_PAT`
 Logs: `/tmp/dj_rearm_run.log`, `/tmp/dj_due_trace.log`, `/tmp/dj_duegate_run.log`,
 `/tmp/dj_due_trace2.log`, `/tmp/dj_armflag_run.log`, `/tmp/dj_armwrite_run.log`,
 `/tmp/dj_stepinpat_run.log` (the fix), `/tmp/dj_final_run.log` (G/G2 removed).
+
+### ADDENDUM, same session -- hook 14 BUILT, and the A/B REFUTES this part's own lead
+
+Built the fix the section above proposed, ran it against the same DSP harness, and it does
+NOT work. Recording it in full because the negative is worth more than the hypothesis was.
+
+**The hook** (`patch_softmute.s` hook 14, `live_nibble`): detours `0x4000b90c` (8 B, two
+whole instructions -- the track-index load and the per-track store, both replayed), and for
+a silenced track skips the store so the per-track byte keeps its old value. Same GATE +
+`MUTE_STATE` + SOLO idiom as hook 9. Build guards all pass (stock bytes asserted, no cave
+overlap, checksum + EFT round-trip clean, "0 bytes outside the DT delta"). Growing
+`patch_softmute` past `0x400d7700` needed `patch_mutemode` and the three PERSONALIZE arrays
+bumped 0x80 further out -- the same convention part 8 used.
+
+**The hook provably works.** The run's own `FW_LIVE_NIBBLE` log is the proof: pre-mute the
+value stores now come from our cave (`pc 0x400d7746` instead of `0x4000b910`), and post-mute
+they are **gone entirely** -- the byte freezes at `0x18` and only site B's `0x10` flag keeps
+being re-OR'd. Exactly the designed behaviour.
+
+**And the echo is completely unchanged.** Per-trig RMS, hook 14 vs the same image without it,
+mute at frame 7579:
+
+```
+                      +375ms  +1000ms  +1250ms  +2375ms  +3000ms  +3250ms
+  baseline (PRE_LN)   0.0287   0.0104   0.0159   0.0087   0.0033   0.0000
+  hook 14             0.0287   0.0096   0.0157   0.0083   0.0033   0.0000
+```
+
+Same five bursts, same decay, same permanent silence at the same frame. **So the per-step
+live-nibble hand-off is NOT what re-attacks the voice** -- part 18's item 4 was step-locked
+correlation, nothing more, exactly the caveat that section flagged. Retracted as a cause;
+the measurement itself (what the byte is, where it is written, that it ignores `MUTE_STATE`)
+still stands, it just isn't the lever.
+
+**Two more candidates killed in the same pass:**
+- **Slice index.** Watched the live voice's `+32` (`0x800049f8`, "re-bound every audio frame
+  -> tracks p-locks/scenes"): **one** write in the whole run, `0xff`, before the transport
+  even starts. It never changes post-mute. The bursts are not slice jumps.
+- **Sample content.** Both test samples are CONTINUOUS music (`heaven.wav` 3.274 s, a
+  steadily decaying tail; `isaak.wav` 4.000 s, loud throughout), not sparse one-shots -- so
+  "the surviving voice simply plays on" cannot produce step-locked bursts with near-silence
+  between them. Note also that **even UNMUTED this project's notes are short** (~40-60 ms
+  bursts, near-silence between): the AMP envelope here is short, which means the post-mute
+  bursts really are the envelope being re-attacked, not a gate opening over a sustained note.
+
+**What survived the re-test.** With the nibble frozen, re-running the block-diff over every
+host-port class leaves exactly one trig-aligned candidate: **word 30 of core 1's 128-word
+class (`0x80000110`/`0x80000310`), 13 of 24 post-mute changes on a trig step (54%)**. Not
+examined yet -- that is where the next session should start, together with the ColdFire side
+of whatever writes it. Everything else in that class scores 0-2%.
+
+**Nothing shipped changed.** Hook 14's code is now behind `--defsym LIVE_NIBBLE=1` and its
+detour is commented out in `build_mutemode_dt.py` (with the A/B numbers inline so nobody
+re-runs it blindly); `patch_mutemode` and the PERSONALIZE arrays are back at their original
+addresses. The rebuilt `out/mainos_mutemode_dt.bin` is **byte-identical (md5 match) to the
+pre-session image**, kept as `out/mainos_mutemode_dt_PRE_LN.bin`. Nothing flashed.

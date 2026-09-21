@@ -51,7 +51,7 @@ STEP_FRAMES = LOOP_FRAMES / 16.0
 TRIG_STEPS = (1, 10, 15)         # MMTESTDT track 0's real trigs
 
 
-def run(label, mute_frame, frames, gate, load_ms, watch_read, watch_pc, coverage, extra, watch_mem="", extra_poke=""):
+def run(label, mute_frame, frames, gate, load_ms, watch_read, watch_pc, coverage, extra, watch_mem="", extra_poke="", image=None):
     prefix = OUTDIR / f"echo_{label}"
     # --poke/--poke-early write ONE BYTE each (main.cpp's pokeBytes -> m.write8), but the
     # patch reads GATE with `move.l GATE,%d0` -- so poking the base address alone sets the
@@ -60,7 +60,7 @@ def run(label, mute_frame, frames, gate, load_ms, watch_read, watch_pc, coverage
     # test: measured 20 Sep 2026, it renders a clean instant cut and NO echo at all.
     # Write all four bytes explicitly.
     gate_poke = ";".join(f"{GATE_ADDR + i:#x}={(gate >> (8 * (3 - i))) & 0xFF}" for i in range(4))
-    cmd = [str(OT_EMU), "--image", str(IMAGE), "--card", str(CARD),
+    cmd = [str(OT_EMU), "--image", str(image or IMAGE), "--card", str(CARD),
            "--set", SET_NAME, "--project", PROJECT_NAME,
            "--sequencer", "--internal-clock", "--frames", str(frames),
            "--load-ms", str(load_ms), "--dsp", "--main-level", "64",
@@ -183,6 +183,7 @@ def main():
     ap.add_argument("--watch-read", default="", help="ADDR,LEN -- log data READS with the reading PC")
     ap.add_argument("--watch-mem", default="", help="ADDR,LEN[;ADDR,LEN...] -- log WRITES with the writing PC")
     ap.add_argument("--extra-poke", default="", help="more 'addr=byte' pokes applied WITH the mute")
+    ap.add_argument("--image", default=None, help="mainos .bin to run (default: the DT build)")
     ap.add_argument("--watch-pc", default="", help="comma-separated PCs -- log registers there")
     ap.add_argument("--coverage", action="store_true", help="every ColdFire PC from the transport start")
     ap.add_argument("--slots", default="0,2,4", help="ESAI TX0 slots to report")
@@ -194,12 +195,12 @@ def main():
     slots = [int(s) for s in a.slots.split(",") if s != ""]
     prefix = OUTDIR / f"echo_{a.label}"
     if not a.analyze_only:
-        for p in (OT_EMU, CARD, IMAGE):
+        for p in (OT_EMU, CARD, pathlib.Path(a.image) if a.image else IMAGE):
             if not p.exists():
                 sys.exit(f"missing: {p}")
         prefix = run(a.label, mute_frame, a.frames, a.gate, a.load_ms,
                      a.watch_read, a.watch_pc, a.coverage, list(a.extra), a.watch_mem,
-                     a.extra_poke)
+                     a.extra_poke, a.image)
     analyze(prefix, mute_frame, a.frames, slots)
     return 0
 
