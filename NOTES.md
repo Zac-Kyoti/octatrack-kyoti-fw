@@ -22087,3 +22087,152 @@ not the v1 on the user's hardware -- fine for this work, as part 16 established)
 live in `refs/octabam/out/echo_*.{wav,log,dump}` (gitignored; regenerate with the tools
 above). `refs/octabam` is on its local `local-mute-wip` branch with the two local build
 fixes (`--poke-at-frame`, the raised `--watch-read` cap) -- both were needed and used.
+
+## Session 79, continued a fifteenth time (2026-09-20) -- ROOT CAUSE FOUND AND FIXED.
+The DAT_80001904 discontinuity that has been this thread's empirical throughline since
+Session 70's 13th pass is closed: 19/64 -> 3/64 mismatched slots, table-arm write
+cadence now BYTE-IDENTICAL to ground truth. Hooks G/G2 removed as redundant.
+
+Continued straight on from the BAR_CTR refutation (previous entry). The fix is four
+instructions in an EXISTING hook, and it is the same "as if this pattern had been
+playing continuously all along" primitive `dj_c` already uses for `STEP`/`D7` -- i.e.
+exactly the Analog Rytm's fresh-recompute invariant the user asked this thread to keep
+in mind (`ar-kyoti-fw/MECHANISM.md`).
+
+### How it was found: three same-run PC-trace diffs, each narrowing one branch
+
+Not a sixth hypothesis -- the "fifth time" entry's own technique (trace-diff rather than
+guess-and-watch), applied three times, each time measuring rather than inferring:
+
+1. **The re-arm flag at `*(0xb0,SP)` is NOT the gate.** `GhidraDirectJump44.java`
+   (proper ColdFire decode; raw objdump garbles `mvs`/`mvz`/`divsl` in this region)
+   showed a per-track byte set to 1 at `0x400a2aac` and read as a gate at
+   `0x400a2c4c/50`. Measured: it passes on EVERY tick in BOTH conditions (208/208
+   reads, all `==1`). Ruled out.
+2. **`0x46107568` is just "this frame is a step boundary".** A same-run trace diff of
+   frame 518 vs 504 isolated `tst.l 0x46107568 ; bne.w` at `0x400a2d1a/0x400a2d20`.
+   Measured: it reads 0 once per step tick (346/403/461/518/576/633/691), identically
+   in both runs -- frame 504 was simply mid-step, a badly chosen comparison frame.
+   Ruled out, and the lesson recorded: compare two frames of the SAME KIND.
+3. **The real gate.** Re-ran the diff correctly -- tick 9 (frame 518, extra write
+   fires) vs tick 10 (frame 576, no write), BOTH step boundaries, same run. The paths
+   are identical up to `0x400a2d2a` and diverge there:
+
+```
+400a2d24  movea.l (0x94,SP),A0
+400a2d28  tst.b (A0)
+400a2d2a  bne.w 0x400a3574     <-- tick 10 takes this (bail). tick 9 falls through.
+```
+
+### What that byte is: `STEP_IN_PAT` = 0x800064f0[track]  [MEASURED, not inferred]
+
+Captured `A0` itself at the test rather than trusting Session 70's 14th-pass guess:
+`0x800064f0 + track`, all 8 tracks. Its full write history (new `armflag_writes` watch)
+identifies it exactly -- it is **not a flag but the per-track step-within-pattern
+counter**: `++` once per step tick at `0x400a3ce2`, wrapped to 0 at `0x400a3cf6` on
+reaching the track's length. Reading 0 means "we are at step 0", and that is the SOLE
+condition that lets the `DAT_80001904` table-arm write run.
+
+```
+             ground truth                  DIRECT JUMP
+frame 289    6 -> wrap 0                   6 -> wrap 0
+frame 346    1   (write runs)              1   (write runs)
+frame 461    3                             3, then <- 0 at pc 0x400a4bf0  *** commit ***
+frame 518    4                             1
+frame 633    6 -> wrap 0                   3
+frame 691    1   (write runs)              4
+```
+
+**Stock's switch-commit tail resets this counter to 0 for all 8 tracks at
+`0x400a4bf0`.** For an ORDINARY switch that is harmless -- it only ever commits at a
+loop boundary, where the counter was wrapping to 0 that same tick anyway. DIRECT JUMP
+commits MID-PATTERN, so the reset **permanently re-phases** the counter: measured, the
+armed byte reads 0 at ticks 6/12/18 in ground truth but 6/9/15 in a DIRECT JUMP run --
+three ticks early, forever, never resyncing. That single fact explains the entire
+symptom history: the extra out-of-cycle table-arm write, the permanent cadence shift
+("continued a seventh time"), why suppressing the write (Hooks G/G2) could not fix it,
+and why `BAR_CTR` was irrelevant.
+
+### The fix: 4 instructions in the EXISTING `dj_pertrack_fix` hook  [DYNAMICALLY PROVEN]
+
+`dj_pertrack_fix` (Hook F, `0x400a4d36`) already runs on the same commit, already loops
+over all 8 tracks, and already computes `G_ABSTICK mod trackLen[t]` for `REFILL_TBL`.
+Two facts made the fix nearly free, both MEASURED (by write order at frame 461), not
+assumed:
+
+- it runs **after** stock's `0x400a4bf0` reset, so it can simply overwrite it;
+- the value it already has in `d0` is **exactly right with no offset** -- it computed
+  `3` at frame 461, which is precisely what ground truth's counter holds at that
+  instant, because Hook E's own `G_ABSTICK` increment (`0x400a3fe4`) has already landed
+  by this point in the tick. (A naive derivation would have used `G_ABSTICK` as read
+  earlier in the frame and been off by one -- the same class of bug that cost this
+  session two builds on `G_SUPPRESS_TICK`.)
+
+So: store the same `d0` to `STEP_IN_PAT[t]` as well. Result, dynamically:
+
+```
+                           mismatched slots (of 64)   table-arm write cadence (DJ run)
+stock DIRECT JUMP                    20               ticks 0, 6, 9, 15   (3 ticks early)
++ Hooks G/G2 (suppression)           19               ticks 0, 6, --, 15  (still shifted)
++ BAR_CTR fix (refuted)              19               unchanged, byte-identical
++ STEP_IN_PAT fix                     3               ticks 0, 6, 12, 18  == GROUND TRUTH
+```
+
+All 16 group-0/group-4 slots -- the ones this write drives, and the exact slots this
+thread has measured as wrong since Session 70's 13th pass -- are now IDENTICAL to
+ground truth, and the full `DAT_80001904` write log (frames 0/346/691/1035, values
+0xb400 / 0x1e53340 / 0x2d772e0 / 0x3c9b280) matches ground truth byte for byte.
+
+### Hooks G/G2 REMOVED (not merely redundant -- a latent hazard)
+
+With the schedule corrected there is no extra write left to suppress, and G/G2 would
+suppress ANY table-arm write whose tick matched the commit's `G_SUPPRESS_TICK`. In this
+test project no legitimate write lands on that tick, but for a different pattern length
+one could -- i.e. keeping them would leave a latent, timing-dependent way to drop a
+CORRECT write. Removed the two hook bodies, `G_SUPPRESS_TICK`, `dj_c`'s write to it, and
+both detour sites + their build-script allowlist entries. Rebuilt and re-validated:
+**still 3/64, schedule still ticks 6/12** -- no regression, and the patch now touches
+848 bytes via 6 detour sites instead of 943 via 8 (two fewer stock-code splices on real
+hardware).
+
+### What the remaining 3 slots are -- NOT this mechanism
+
+```
+slot 56 (track 0, group 7): DJ=0x025e5310  GT=0x00000000
+slot 59 (track 3, group 7): DJ=0x03c9b280  GT=0x02d772e0
+slot 60 (track 4, group 7): DJ=0x02d772e0  GT=0x03c9b280
+```
+All three are group 7, a region written by entirely different PCs (`0x4009c36e`/
+`0x4009c380` at init, `0x4000d138` per-frame) -- not the table-arm write at all. Slots
+59/60 are a straight SWAP of each other's values, which is a track-assignment/ordering
+difference, not a cadence one. Deliberately NOT re-attributed this pass, per this
+thread's own history of premature attribution.
+
+### NEXT for this thread
+
+1. The group-7 residue above (3 slots) -- likely related to the long-carried "second
+   `DAT_80001904` clear-loop covering groups 4/7" item, and/or the `0x400a2c66`
+   ACT-vs-snapshot branch, which remains a real, dynamically-confirmed fork that has
+   still never been shown to cause any measured symptom.
+2. **Validate the STEP_IN_PAT fix against DIFFERENT-LENGTH patterns.** Everything above
+   is one same-scale test project (both patterns idx2/len6). `dj_pertrack_fix` computes
+   per-track `trackLen`, so it should hold, but per-track SCALE is this patch's oldest
+   known unresolved gap (Session 15 #4) and has never been exercised against this
+   counter.
+3. Carried over, untouched: `DAT_46104cf4`'s identity; `FUN_4000ae12`'s caller.
+
+Per this project's standing rule, all of the above is emulator-only -- **nothing
+flashed**, and no flash should be proposed without the user's explicit direction on that
+step. This fix is the strongest dynamic evidence this thread has produced, but it is
+still emulator evidence.
+
+Tooling: `tools/ghidra/attic/GhidraDirectJump44.java` (proper ColdFire decode of the
+gate region). `tools/emu_directjump_dynamic.py`: new `install_rearm_watch`/
+`install_due_watch`/`install_armflag_watch` (+ their printers) and an `armflag_writes`
+memory watch, all wired into BOTH run functions; `TRACE_LO/HI`/`TRACE_FRAME_LO/HI`
+re-aimed twice for the same-run diffs. `tools/patch_directjump.s`: `STEP_IN_PAT` `.equ`
++ 2 instructions in `dj_pertrack_fix`; Hooks G/G2 and `G_SUPPRESS_TICK` removed.
+`tools/build_directjump_v4.py`: both suppressor detours + allowlist entries removed.
+Logs: `/tmp/dj_rearm_run.log`, `/tmp/dj_due_trace.log`, `/tmp/dj_duegate_run.log`,
+`/tmp/dj_due_trace2.log`, `/tmp/dj_armflag_run.log`, `/tmp/dj_armwrite_run.log`,
+`/tmp/dj_stepinpat_run.log` (the fix), `/tmp/dj_final_run.log` (G/G2 removed).

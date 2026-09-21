@@ -102,10 +102,17 @@ STEP_AUDIO_TBL = 0x800065e4  # DAT_800065e4[t] -- per-track step (audio), NOTES.
                              # feeds 0x80006604/14, per the project's own static RE map.
 STEP_MIDI_TBL = 0x800065f4   # DAT_800065f4[t] -- same, MIDI
 TABLE_ARM_PC = 0x400a2e0c
-TRACE_LO = 0x400a2b00
-TRACE_HI = 0x400a2e30
-TRACE_FRAME_LO = 300
-TRACE_FRAME_HI = 700
+# Session 79 continued a fifteenth time: re-aimed from the "fifth time" pass's
+# [0x400a2b00, 0x400a2e30] / frames 300-700 (which found the 0x400a2c66 branch) at the
+# stretch BELOW the re-arm gate, over just two ticks of ONE run. The re-arm flag at
+# *(0xb0,SP) is now measured to pass on every tick in both conditions (208/208), so the
+# real "is the table-arm write due" decision must live between 0x400a2c52 and the write
+# at 0x400a2e12. Diffing frame 518 (DJ's extra write fires) against frame 504 (same run,
+# same conditions, no write) isolates that branch without a cross-run confound.
+TRACE_LO = 0x400a2d20
+TRACE_HI = 0x400a2e20
+TRACE_FRAME_LO = 510
+TRACE_FRAME_HI = 580
 
 # Session 79 continued a tenth time: TABLE_ARM_STORE_PC is the exact instruction that
 # writes DAT_80001904[slot] (GhidraDirectJump29.java: "0x400a2e18  move.l D0,(0x0,A0,A1*0x4)").
@@ -187,6 +194,161 @@ def print_table_arm_watch(events):
           f"{len(events)} total:")
     for fr, abstick, d0, a1 in events:
         print(f"   frame {fr:.1f}  G_ABSTICK={abstick}  D0={d0:#010x}  slot={a1}")
+
+
+# Session 79 continued a fifteenth time: the extra table-arm write's REAL gate, decoded
+# properly by GhidraDirectJump44.java (raw objdump garbles these ColdFire opcodes):
+#   0x400a2a96/9a  D1 = LEN_TBL[SCALE_IX] - LEN_TBL[perTrackScale]   (master - track length)
+#   0x400a2aa2     move.b D1b,(A2)   -- CNTDN_TBL[track] = that difference
+#   0x400a2aa4     bgt.b             -- difference > 0 -> ordinary path, flag untouched
+#   0x400a2aa6     clr.b (A2)        -- else clamp CNTDN_TBL[track] to 0 ...
+#   0x400a2aac     move.b #1,(A3)    -- ... and SET the per-track re-arm flag *(0xb0,SP)
+#   0x400a2afa     clr.b (A0)        -- the flag's only clear site
+#   0x400a2c4c/50  mvz.b (A2),D0 ; cmp.l D0,D1(=1)
+#   0x400a2c52     bne.w 0x400a3574  -- flag != 1 -> SKIP; the table-arm write is reached
+#                                       ONLY when this gate sees exactly 1.
+# BAR_CTR is refuted as the schedule driver ("continued a thirteenth/fourteenth time"), so
+# watch this flag's whole lifecycle instead, in both runs, and diff.
+REARM_DIFF_PC = 0x400a2aa2
+REARM_SET_PC = 0x400a2aac
+REARM_CLR_PC = 0x400a2afa
+REARM_GATE_PC = 0x400a2c50
+REARM_FRAME_LO = 330
+REARM_FRAME_HI = 700
+REARM_PRINT_CAP = 300
+
+
+# Session 79 continued a fifteenth time, part 2: a same-run PC-trace diff (frame 518,
+# where DJ's extra table-arm write fires, vs frame 504, same run/conditions, where it does
+# not) isolated the real "is the write due" decision to ONE instruction pair:
+#     0x400a2d1a  tst.l (0x46107568).l
+#     0x400a2d20  bne.w 0x400a3574      -- nonzero -> bail; ZERO -> fall through to the
+#                                          write at 0x400a2e12
+# (the same test also appears at 0x400a2b9c earlier in the flow). The re-arm flag at
+# *(0xb0,SP) passes on EVERY tick in both conditions, so it is not the discriminator --
+# this long is. 0x46107568 sits 0x14 below ACCUM (0x4610757c), i.e. in the audio-engine
+# region, so watch both its value at the test and every write to it.
+DUE_GATE_VAL = 0x46107568
+DUE_GATE_PC = 0x400a2d1a
+
+
+# Session 79 continued a fifteenth time, part 3: the corrected same-run trace diff (tick 9
+# @ frame 518, where the extra write fires, vs tick 10 @ frame 576, no write -- BOTH step
+# boundaries, unlike the first attempt which compared a mid-step frame) narrows the real
+# due condition to ONE more instruction pair:
+#     0x400a2d24  movea.l (0x94,SP),A0
+#     0x400a2d28  tst.b (A0)
+#     0x400a2d2a  bne.w 0x400a3574    -- nonzero -> bail; ZERO -> the table-arm write runs
+# Session 70's 14th pass GUESSED (0x94,SP) points at 0x800064f0, never confirmed. Capture
+# A0 itself so the flag's real address is measured, not inherited.
+ARMFLAG_PC = 0x400a2d28
+
+
+def install_armflag_watch(rt, eb):
+    """(frame, G_ABSTICK, track, A0, byte at A0) at every ARMFLAG_PC hit."""
+    events = []
+
+    def on_hit(u, addr, size, user):
+        if not (REARM_FRAME_LO <= rt.frame_count <= REARM_FRAME_HI):
+            return
+        a0 = u.reg_read(eb.UC_M68K_REG_A0)
+        events.append((rt.frame_count,
+                       int.from_bytes(rt.uc.mem_read(G_ABSTICK, 4), "big"),
+                       u.reg_read(eb.UC_M68K_REG_D5), a0,
+                       rt.uc.mem_read(a0, 1)[0]))
+    rt.uc.hook_add(eb.UC_HOOK_CODE, on_hit, begin=ARMFLAG_PC, end=ARMFLAG_PC)
+    return events
+
+
+def print_armflag_watch(events):
+    zero = [e for e in events if e[4] == 0]
+    addrs = sorted({e[3] for e in events})
+    print(f"\ntable-arm ARMED flag (tst.b (A0) @ 0x{ARMFLAG_PC:x}; ZERO means the write "
+          f"actually runs for that track), frames [{REARM_FRAME_LO}, {REARM_FRAME_HI}]: "
+          f"{len(events)} reads, {len(zero)} ZERO. Distinct A0 addresses seen: "
+          + ", ".join(f"0x{a:x}" for a in addrs[:16])
+          + (f" ...(+{len(addrs)-16} more)" if len(addrs) > 16 else ""))
+    for fr, abstick, trk, a0, val in zero:
+        print(f"   frame {fr:7.1f}  G_ABSTICK={abstick:3d}  track={trk}  "
+              f"A0=0x{a0:x}  byte=0  <-- WRITE RUNS")
+
+
+def install_due_watch(rt, eb):
+    """(frame, G_ABSTICK, track, *DUE_GATE_VAL) at every DUE_GATE_PC hit."""
+    events = []
+
+    def on_hit(u, addr, size, user):
+        if not (REARM_FRAME_LO <= rt.frame_count <= REARM_FRAME_HI):
+            return
+        events.append((rt.frame_count,
+                       int.from_bytes(rt.uc.mem_read(G_ABSTICK, 4), "big"),
+                       u.reg_read(eb.UC_M68K_REG_D5),
+                       int.from_bytes(rt.uc.mem_read(DUE_GATE_VAL, 4), "big")))
+    rt.uc.hook_add(eb.UC_HOOK_CODE, on_hit, begin=DUE_GATE_PC, end=DUE_GATE_PC)
+    return events
+
+
+def print_due_watch(events):
+    zero = [e for e in events if e[3] == 0]
+    print(f"\ntable-arm DUE gate (tst.l 0x{DUE_GATE_VAL:x} @ 0x{DUE_GATE_PC:x}; ZERO means "
+          f"the write path is entered), frames [{REARM_FRAME_LO}, {REARM_FRAME_HI}]: "
+          f"{len(events)} reads, {len(zero)} of them ZERO:")
+    seen = set()
+    for fr, abstick, trk, val in events:
+        if trk != 0 and val != 0:
+            continue                      # per-frame summary via track 0, plus every zero
+        tag = "  <-- DUE, write path entered" if val == 0 else ""
+        key = (fr, trk)
+        if key in seen:
+            continue
+        seen.add(key)
+        print(f"   frame {fr:7.1f}  G_ABSTICK={abstick:3d}  track={trk}  "
+              f"*0x{DUE_GATE_VAL:x}={val:#010x}{tag}")
+
+
+def install_rearm_watch(rt, eb):
+    """Per-track re-arm-flag lifecycle: (frame, G_ABSTICK, track, label, value)."""
+    events = []
+
+    def mk(label, reg):
+        def on_hit(u, addr, size, user):
+            if not (REARM_FRAME_LO <= rt.frame_count <= REARM_FRAME_HI):
+                return
+            val = None if reg is None else u.reg_read(reg)
+            events.append((rt.frame_count,
+                           int.from_bytes(rt.uc.mem_read(G_ABSTICK, 4), "big"),
+                           u.reg_read(eb.UC_M68K_REG_D5),   # track index (see 0x400a2b0a)
+                           label, val))
+        return on_hit
+
+    for pc, label, reg in ((REARM_DIFF_PC, "diff", eb.UC_M68K_REG_D1),
+                           (REARM_SET_PC, "SET", None),
+                           (REARM_CLR_PC, "clr", None),
+                           (REARM_GATE_PC, "gate", eb.UC_M68K_REG_D0)):
+        rt.uc.hook_add(eb.UC_HOOK_CODE, mk(label, reg), begin=pc, end=pc)
+    return events
+
+
+def print_rearm_watch(events):
+    def s32(v):
+        return v - (1 << 32) if v >= (1 << 31) else v
+
+    gate = [e for e in events if e[3] == "gate"]
+    gate_pass = [e for e in gate if e[4] == 1]
+    other = [e for e in events if e[3] != "gate"]
+    print(f"\nre-arm flag lifecycle (the table-arm write's real gate), frames "
+          f"[{REARM_FRAME_LO}, {REARM_FRAME_HI}]: {len(other)} diff/SET/clr events, "
+          f"{len(gate)} gate reads, {len(gate_pass)} of them PASSING (flag==1):")
+    for fr, abstick, trk, label, val in other[:REARM_PRINT_CAP]:
+        extra = "" if val is None else f"={s32(val)}"
+        print(f"   frame {fr:7.1f}  G_ABSTICK={abstick:3d}  track={trk}  {label}{extra}")
+    if len(other) > REARM_PRINT_CAP:
+        print(f"   ...(+{len(other) - REARM_PRINT_CAP} more)")
+    print("   -- gate reads that PASS, i.e. the table-arm write path is actually reached --")
+    for fr, abstick, trk, _, _ in gate_pass[:REARM_PRINT_CAP]:
+        print(f"   frame {fr:7.1f}  G_ABSTICK={abstick:3d}  track={trk}  gate PASS")
+    if len(gate_pass) > REARM_PRINT_CAP:
+        print(f"   ...(+{len(gate_pass) - REARM_PRINT_CAP} more)")
 # Session 79 continued again: the SET side of the DAT_80001904 scheduled-value table,
 # found via GhidraDirectJump15.java raw disassembly:
 #   D0 = *G_ACCUM(0x4610757c) - 0x285ff0 + table_46c7a830[track] + D7 ; then stored into
@@ -328,6 +490,9 @@ def run_one(er, a, dj_on):
     rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_snap_write, begin=SNAP_C1, end=SNAP_C2)
 
     table_arm_events = install_table_arm_watch(rt, er.eb)
+    rearm_events = install_rearm_watch(rt, er.eb)
+    due_events = install_due_watch(rt, er.eb)
+    armflag_events = install_armflag_watch(rt, er.eb)
 
     # NOTE: rt.watch_mem() stores into self.mem_writes, looked up FRESH on every
     # hit -- calling it twice makes the FIRST hook's callback silently start
@@ -382,6 +547,14 @@ def run_one(er, a, dj_on):
     # see what dj_c actually wrote there and cross-check against G_ABSTICK's value at
     # that moment -- narrows whether the bug is in dj_c's write or Hook G's read/compare.
     suppress_tick_writes = make_watch(0x80006a4b, 4)
+    # Session 79 continued a fifteenth time: the long the table-arm write's real DUE gate
+    # tests (0x400a2d1a/0x400a2d20) -- who writes it, and when, decides the write cadence.
+    due_gate_writes = make_watch(DUE_GATE_VAL, 4)
+    # Session 79 continued a fifteenth time: 0x800064f0[track] IS the table-arm write's
+    # armed flag (measured at 0x400a2d28, confirming Session 70's 14th-pass guess). It
+    # clears at ticks 6/12 in ground truth but 6/9 after a DIRECT JUMP commit -- three
+    # ticks early. Whoever clears it early is the root cause.
+    armflag_writes = make_watch(0x800064f0, 8)
     phase_writes = make_watch(PHASE_TBL, 8)
     gate_writes = make_watch(GATE_TBL, 8)
     cntdn_writes = make_watch(CNTDN_TBL, 8)
@@ -550,10 +723,15 @@ def run_one(er, a, dj_on):
     for fr, pc, addr, size, val in snap_writes:
         print(f"   frame {fr:.1f}  [{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
     print_table_arm_watch(table_arm_events)
+    print_rearm_watch(rearm_events)
+    print_due_watch(due_events)
+    print_armflag_watch(armflag_events)
     for name, log in (("0x80006626", table_arm_due_writes), ("0x80006680", bitmask_680_writes),
                        ("0x80006682", bitmask_682_writes), ("0x80006684", bitmask_684_writes),
                        ("0x800065b2 (BAR_CTR)", bar_ctr_writes),
-                       ("0x80006a4b (G_SUPPRESS_TICK)", suppress_tick_writes)):
+                       ("0x80006a4b (G_SUPPRESS_TICK)", suppress_tick_writes),
+                       (f"0x{DUE_GATE_VAL:x} (table-arm DUE gate)", due_gate_writes),
+                       ("0x800064f0[t] (table-arm ARMED flag)", armflag_writes)):
         print(f"\n{name} writes, {len(log)} total:")
         for fr, task, pc, addr, size, val in log:
             print(f"   frame {fr:.1f}  [{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
@@ -569,6 +747,9 @@ def run_one(er, a, dj_on):
                 live_nibble_writes=live_nibble_writes,
                 commit_hits=commit_hits, snap_writes=snap_writes,
                 table_arm_events=table_arm_events,
+                rearm_events=rearm_events,
+                due_events=due_events,
+                armflag_events=armflag_events,
                 table_arm_due_writes=table_arm_due_writes,
                 bitmask_680_writes=bitmask_680_writes, bitmask_682_writes=bitmask_682_writes,
                 bitmask_684_writes=bitmask_684_writes, bar_ctr_writes=bar_ctr_writes,
@@ -654,6 +835,8 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
     bitmask_682_writes = gt_watch(0x80006682, 2)
     bitmask_684_writes = gt_watch(0x80006684, 2)
     bar_ctr_writes = gt_watch(0x800065b2, 2)
+    due_gate_writes = gt_watch(DUE_GATE_VAL, 4)
+    armflag_writes = gt_watch(0x800064f0, 8)
 
     pc_trace = []
 
@@ -670,6 +853,9 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
     rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_snap_write, begin=SNAP_C1, end=SNAP_C2)
 
     table_arm_events = install_table_arm_watch(rt, er.eb)
+    rearm_events = install_rearm_watch(rt, er.eb)
+    due_events = install_due_watch(rt, er.eb)
+    armflag_events = install_armflag_watch(rt, er.eb)
     rt.uc.ctl_flush_tb()
 
     rt.start_transport_live()
@@ -715,9 +901,14 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
     for fr, pc, addr, size, val in snap_writes:
         print(f"   frame {fr:.1f}  [{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
     print_table_arm_watch(table_arm_events)
+    print_rearm_watch(rearm_events)
+    print_due_watch(due_events)
+    print_armflag_watch(armflag_events)
     for name, log in (("0x80006626", table_arm_due_writes), ("0x80006680", bitmask_680_writes),
                        ("0x80006682", bitmask_682_writes), ("0x80006684", bitmask_684_writes),
-                       ("0x800065b2 (BAR_CTR)", bar_ctr_writes)):
+                       ("0x800065b2 (BAR_CTR)", bar_ctr_writes),
+                       (f"0x{DUE_GATE_VAL:x} (table-arm DUE gate)", due_gate_writes),
+                       ("0x800064f0[t] (table-arm ARMED flag)", armflag_writes)):
         print(f"\n{name} writes, {len(log)} total:")
         for fr, pc, addr, size, val in log:
             print(f"   frame {fr:.1f}  [{addr:#x}] <- {val:#x} ({size}B) at pc {pc:#x}")
@@ -729,6 +920,9 @@ def run_groundtruth(er, a, target_pattern, target_step, target_frame):
                 flag_46107568_writes=flag_46107568_writes,
                 commit_hits=commit_hits, snap_writes=snap_writes,
                 table_arm_events=table_arm_events,
+                rearm_events=rearm_events,
+                due_events=due_events,
+                armflag_events=armflag_events,
                 table_arm_due_writes=table_arm_due_writes,
                 bitmask_680_writes=bitmask_680_writes, bitmask_682_writes=bitmask_682_writes,
                 bitmask_684_writes=bitmask_684_writes, bar_ctr_writes=bar_ctr_writes)

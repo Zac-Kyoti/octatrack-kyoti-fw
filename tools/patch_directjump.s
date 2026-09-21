@@ -131,30 +131,18 @@
     .equ G_JUST_COMMITTED, 0x80006a4a   | one-shot: dj_c sets this; Hook F (below) consumes
                                         | it once, after BOTH per-track loops have finished
                                         | for this tick, then clears it
-    .equ G_SUPPRESS_TICK, 0x80006a4b    | Session 79 (NOTES.md): dj_c sets this to
-                                        | G_ABSTICK+1 at commit time. Hooks G/G2 (below)
-                                        | suppress a table-arm write only when the CURRENT
-                                        | G_ABSTICK matches this saved value -- a tick-match,
-                                        | not a one-shot consume: DAT_80001904's real writer
-                                        | fires once PER TRACK (an 8-iteration loop), and an
-                                        | earlier one-shot-boolean version of this hook only
-                                        | suppressed the FIRST track's write, since the flag
-                                        | was already cleared by the time tracks 1-7 checked
-                                        | it (measured post-build: 7 of 8 slots still wrote
-                                        | the extra value). A tick-match naturally covers
-                                        | every track/slot/site that fires on the SAME tick,
-                                        | with no explicit clear needed (G_ABSTICK only ever
-                                        | increases, so it can never match this saved value
-                                        | again once it moves past it). 4 bytes (long), same
-                                        | free gap as G_JUST_COMMITTED (0x80006a4b-0x80006a4e,
-                                        | still before RELOAD2's 0x80006a50).
-
-|   stock symbols
     .equ ACT_PAT,   0x800065be
     .equ ACT_BANK,  0x800065bd
     .equ PEND_PAT,  0x800065c0
     .equ PEND_BANK, 0x800065bf
     .equ STEP,      0x800065b6
+    .equ STEP_IN_PAT, 0x800064f0        | per-track step-within-pattern counter, 1 byte per
+                                        | track. Stock: ++ at 0x400a3ce2 every step tick,
+                                        | wrapped to 0 at 0x400a3cf6 on reaching the track's
+                                        | length, and force-reset to 0 for all 8 tracks by
+                                        | the switch-commit tail at 0x400a4bf0. Reading 0 is
+                                        | the sole gate (0x400a2d28) for DAT_80001904's
+                                        | table-arm write -- see dj_pertrack_fix.
     .equ BAR_CTR,   0x800065b2          | "which bar/loop repetition" counter (word),
                                         | Session 79 (NOTES.md): copied from 0x8000662a
                                         | (the pending switch's own "loop region start",
@@ -540,30 +528,6 @@ djc_store:
 |   with it (dead code, nothing else called it).
     moveq   #1,%d0
     move.b  %d0,G_JUST_COMMITTED        | tell Hook F a real commit happened this tick
-|   Session 79 (NOTES.md, "continued a tenth/eleventh/twelfth time"): DIRECT JUMP's
-|   forced mid-loop commit makes DAT_80001904's own per-track "table-arm" write (Hooks
-|   G/G2, below -- there are TWO write sites, 0x400a2e18 and its twin 0x400a33f2, one
-|   per half of the 64-slot table) fire ONE EXTRA time that a stock CHAIN-AFTER-gated
-|   switch could never produce at all (those only ever land on a loop boundary). The
-|   written VALUE is proven exactly correct regardless (measured, exact formula:
-|   value = base + G_ABSTICK*0x285ff0) -- the only defect is that this ONE tick's
-|   worth of writes happens at all. Rather than patch the stock trigger condition
-|   itself (five independent RE angles this session failed to locate it precisely),
-|   save THIS tick's G_ABSTICK value here; Hooks G/G2 suppress a write only when the
-|   CURRENT G_ABSTICK matches it -- covers every track and both sites that fire on
-|   that one tick, self-clears once G_ABSTICK moves past it (see G_SUPPRESS_TICK).
-|   Measured dynamically (not assumed): dj_c's own G_ABSTICK read at the commit and
-|   the extra table-arm write's own G_ABSTICK read are the SAME value (both 9 in the
-|   session's own test project) -- an earlier version of this hook stored
-|   G_ABSTICK+1, based on a rough frame-count/frames-per-step estimate rather than a
-|   direct measurement, and suppressed nothing at all (confirmed via a dedicated
-|   G_SUPPRESS_TICK write-watch after the post-build dynamic re-test still showed
-|   every write going through the unsuppressed path). No offset -- save it as-is.
-    move.l  %d1,-(%sp)                  | scratch (D1 not read again before this rts) --
-                                        | ColdFire's move.l has no mem-to-mem form
-    move.l  G_ABSTICK,%d1
-    move.l  %d1,G_SUPPRESS_TICK          | the ABSTICK value Hooks G/G2 must suppress
-    move.l  (%sp)+,%d1
     rts
 
 | ================= Hook D @ 0x400a4220 =================
@@ -710,6 +674,30 @@ dpf_gotidx:
     bsr     dj_mod32                    | d0 = G_ABSTICK mod trackLen[t]
     lea     0x800064d0,%a0
     move.b  %d0,(%a0,%d6.l)             | REFILL_TBL[t] = this track's own correct position
+|   Session 79 (NOTES.md, "continued a fifteenth time"): STEP_IN_PAT (0x800064f0[t]) is the
+|   per-track step-within-pattern counter -- stock increments it once per step tick at
+|   0x400a3ce2 and wraps it to 0 at 0x400a3cf6 on reaching the track's length. Reading 0
+|   ("we are at step 0") is the ONLY thing that makes the DAT_80001904 table-arm write
+|   run: measured, the write path's last gate is `tst.b (A0) ; bne.w 0x400a3574` at
+|   0x400a2d28/0x400a2d2a with A0 == 0x800064f0+t (same-run trace diff, tick 9 vs tick 10,
+|   both step boundaries). Stock's commit tail resets this counter to 0 for every track at
+|   0x400a4bf0 -- correct for an ORDINARY switch, which only ever commits at a loop
+|   boundary where the counter was wrapping to 0 anyway, but DIRECT JUMP commits
+|   mid-pattern, so the reset PERMANENTLY re-phases it (measured: ground truth reads 0 at
+|   ticks 6/12/18, a DIRECT JUMP run at 6/9/15 -- three ticks early, forever, never
+|   resyncing). That is the whole "extra out-of-cycle table-arm write + permanent cadence
+|   shift" symptom this thread has chased since Session 70's 13th pass; Hooks G/G2 below
+|   could only suppress the one visible write, never the phase. Fix: this hook already runs
+|   AFTER 0x400a4bf0 on the same commit (measured by write order at frame 461) and has
+|   already computed exactly the right value -- `G_ABSTICK mod trackLen[t]`, which lands at
+|   3 here, matching ground truth's own counter at that instant, because Hook E's
+|   G_ABSTICK increment (0x400a3fe4) has already happened by this point in the tick. So
+|   just store the SAME d0 to STEP_IN_PAT[t] as well, undoing stock's reset-to-0 with the
+|   "as if this pattern had been playing continuously all along" position -- the identical
+|   principle dj_c already applies to STEP and D7, and the Analog Rytm's own
+|   fresh-per-request recompute invariant (ar-kyoti-fw/MECHANISM.md).
+    lea     STEP_IN_PAT,%a0
+    move.b  %d0,(%a0,%d6.l)             | STEP_IN_PAT[t] = same correct position
 dpf_skip:
     addq.l  #1,%d6
     cmpi.l  #8,%d6
@@ -737,76 +725,6 @@ dj_mod32_skip:
     subq.l  #1,%d3
     bne.b   dj_mod32_loop
     move.l  %d2,%d0
-    rts
-
-| ================= Hooks G / G2 @ 0x400a2e12 / 0x400a33ec =================
-| Session 79 (NOTES.md "Session 79, continued a tenth/eleventh/twelfth time"):
-| DAT_80001904's per-track write fires exactly correctly (measured: value ==
-| base + G_ABSTICK*0x285ff0, zero error, 8/8 points across a DIRECT JUMP run and a
-| ground-truth run) EXCEPT it fires ONE EXTRA time after a DIRECT JUMP commit that a
-| stock CHAIN-AFTER-gated switch could never produce at all (those only ever land on
-| the pattern's own loop boundary; DIRECT JUMP forces the same commit code to run
-| mid-loop instead).  There are TWO write sites in the image -- 0x400a2e18 (this
-| session's original find, covers the table's first half via %a0/%a1) and an
-| identically-shaped twin at 0x400a33f2 (found only after the first hook's own
-| dynamic re-test showed its slots 32-39 still writing the extra value -- covers the
-| other half via %a2/%d1).  Five independent RE angles this session (static
-| xref/text scan of 0x80006626, a PC-trace diff between a natural and the extra
-| write, a full raw-disasm decode of the gating code back to 0x400a29c0, and dynamic
-| write-watches on the 0x80006626/80/82/84 bitmask family and on BAR_CTR) did not
-| locate the exact per-tick trigger condition precisely enough to gate either site at
-| its own source.  Rather than keep guessing, these hooks detect DIRECT JUMP's own
-| fingerprint instead: G_SUPPRESS_TICK (set by dj_c above to G_ABSTICK+1 at commit
-| time) and skip a write only when the CURRENT G_ABSTICK matches it -- a tick-match,
-| not a one-shot consume, so it covers every track and both sites that fire on that
-| one tick without needing to count iterations.  (An earlier, one-shot-boolean version
-| of this hook only suppressed the FIRST of 8 per-track writes at the first site, and
-| never touched the second site at all -- both gaps found by re-running this exact
-| dynamic instrumentation after building it, confirming the "no flash without dynamic
-| proof" step is not optional even for a hook that looks obviously correct.)
-|
-| Hook G detour replaces 10 B spanning two whole instructions at 0x400a2e12
-| (`lea (-0x7fffe6fc).l,%a0` [6B] ; `move.l %d0,(0x0,%a0,%a1.l*4)` [4B] -- the exact
-| original sequence, not a mid-instruction split): the displaced `lea` sets up %a0 for
-| the store this hook may suppress, but %a0 is REDEFINED again by stock's own very
-| next instruction (`lea (0x46c7a810).l,%a0`, confirmed via raw disassembly)
-| regardless of what this hook leaves it as, so there is nothing to preserve past the
-| return.  %d0 (the value that would be stored) and %a1 (the slot index, read again at
-| 0x400a2e2c for a DIFFERENT table) are never touched, only read.  %d2 is used as
-| scratch (push/pop -- restored to its exact prior value either way, so it does not
-| matter whether it was live).
-    .global dj_tablearm_suppress
-dj_tablearm_suppress:
-    move.l  %d2,-(%sp)
-    move.l  G_ABSTICK,%d2
-    cmp.l   G_SUPPRESS_TICK,%d2
-    beq.b   dta_suppress
-    move.l  (%sp)+,%d2
-    lea     (-0x7fffe6fc).l,%a0         | displaced: %a0 = LIVE_NIBBLE_IN base (0x80001904)
-    move.l  %d0,(0x0,%a0,%a1.l*4)       | displaced: the store itself, unmodified
-    rts
-dta_suppress:
-    move.l  (%sp)+,%d2
-    rts
-
-| Hook G2 detour replaces the twin 10 B at 0x400a33ec (`lea (-0x7fffe6fc).l,%a2` [6B] ;
-| `move.l %d0,(0x0,%a2,%d1.l*4)` [4B]).  Same shape as Hook G, mirrored onto this
-| site's own registers (%a2/%d1 here instead of %a0/%a1) -- confirmed via raw
-| disassembly that %d1 is not read again after this store (its next use, further down,
-| redefines it from %a1 first), so nothing needs preserving past the return here
-| either.  %d2 used as scratch, same reasoning as Hook G.
-    .global dj_tablearm_suppress2
-dj_tablearm_suppress2:
-    move.l  %d2,-(%sp)
-    move.l  G_ABSTICK,%d2
-    cmp.l   G_SUPPRESS_TICK,%d2
-    beq.b   dta2_suppress
-    move.l  (%sp)+,%d2
-    lea     (-0x7fffe6fc).l,%a2         | displaced: %a2 = LIVE_NIBBLE_IN base (0x80001904)
-    move.l  %d0,(0x0,%a2,%d1.l*4)       | displaced: the store itself, unmodified
-    rts
-dta2_suppress:
-    move.l  (%sp)+,%d2
     rts
 
     .ifdef DJ_KEYMAP
