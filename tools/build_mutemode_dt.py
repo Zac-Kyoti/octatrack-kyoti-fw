@@ -118,6 +118,10 @@ PATCHES = [
       # Kept in patch_softmute.s as hook 14 for the record. Do not re-enable without a new
       # reason -- this exact test has already been run.
       # (0x4000b90c, "live_nibble", "266f00721392b800", 8),
+      # part 18 addendum 2: the per-trig FLAG BITS in the DSP frame word (0xd0|nibble) are
+      # built with no mute test at all and still go out on every post-mute trig step -- the
+      # only trig-aligned host-port word left once hook 14 cleared the nibble. See hook 15.
+      (0x40004c72, "trigflag", "7003c0816738", 6),
       # Session 58 continued again: THE actual leak. relcut (hook 8) only fires when the
       # stock release loop's REL_STATE bit is true for a track; a stock function (never
       # touched before now) transiently CLEARS a muted track's bit as ordinary "a note is
@@ -141,13 +145,15 @@ PATCHES = [
     # patch_softmute 2 B past the old 0x400d76c0 start -- bumped 0x40 further out, same
     # convention as every prior cave-growth in this file's history. Verified in
     # build_relstate_shadow.py first (emulator-validated build) before folding in here.
-    ("patch_mutemode", 0x400d7700, "DT_MODE=1", []),         # menu stub: OT / OT+FX / DT
+    # part 18 addendum 2: hook 15 grows patch_softmute past 0x400d7700; bumped 0x80 further
+    # out, same convention as part 8's growth. The three arrays below move by the same 0x80.
+    ("patch_mutemode", 0x400d7780, "DT_MODE=1", []),         # menu stub: OT / OT+FX / DT
 ]
 
 # --- PERSONALIZE menu arrays (stock) ---
 OLD_LBL, OLD_GET, OLD_SET, N_OLD = 0x400b2a34, 0x400b2a74, 0x400b2ac0, 16
 SPLICE_AT = 2                                               # after "PREVIEW WITHOUT FX"
-LBL_AT, GET_AT, SET_AT = 0x400d7790, 0x400d77f0, 0x400d7850
+LBL_AT, GET_AT, SET_AT = 0x400d7810, 0x400d7870, 0x400d78d0
 # Session 58 continued yet again, part 8: moved 0x400d7750/b0/810 -> 0x400d7790/f0/850,
 # 0x40 further out, to make room for patch_mutemode's own 0x40 shift above.
 REFS = [(0x40068efe, OLD_LBL, "labels  move.l #imm,D5"),
@@ -290,6 +296,7 @@ def main():
                                                     # 2 B earlier than build_mutemode.py's relcut)
                    (0x4000d498, 0x4000d49e),        # Session 58: dt_trig detour (DT-only)
                    (0x40006820, 0x40006828),        # Session 58 continued: fresh_bind detour (DT-only)
+                   (0x40004c72, 0x40004c78),        # part 18 addendum 2: trigflag detour (DT-only)
                    # Session 57: the five PERSONALIZE menu-array repoint sites. They hold
                    # a different cave ADDRESS than build_mutemode.py's, because the arrays
                    # moved to 0x400d78a0/7900/7960 to make room for patch_softmute's growth.

@@ -22292,3 +22292,92 @@ detour is commented out in `build_mutemode_dt.py` (with the A/B numbers inline s
 re-runs it blindly); `patch_mutemode` and the PERSONALIZE arrays are back at their original
 addresses. The rebuilt `out/mainos_mutemode_dt.bin` is **byte-identical (md5 match) to the
 pre-session image**, kept as `out/mainos_mutemode_dt_PRE_LN.bin`. Nothing flashed.
+
+### ADDENDUM 2, same session -- FOUND AND FIXED (emulator): hook 15, the per-trig FLAG BITS
+
+Following the one lead addendum 1 left standing produced a working fix. Not flashed.
+
+**The lead.** With hook 14 freezing the live nibble, the only host-port word still changing
+in step with the track's trigs was **word 30 of core 1's 128-word block** -- the per-track
+DSP frame word at `0x8000014c + sel*512 + track*64`. Watching both its ping-pong addresses
+with `--watch-mem` shows it is built once per trig by three writes inside the per-frame DSP
+frame loop, then finalised:
+
+```
+  0x40004c72  moveq #3,%d0 / and.l %d1,%d0 / beq 0x40004cb0   "did a trig happen this frame?"
+  0x40004c7e  bset #7   -> 0x80 | nibble
+  0x40004c8a  or  #0x10 -> 0x90 | nibble
+  0x40004cba  or  #0x40 -> 0xd0 | nibble
+  0x4000d4b0  or.l %d2,%d0 / move.w %d0,(%a5,%d1.l)   <- the DISPATCHED HANDLER's return
+```
+
+Measured, muted: the `0xd0` goes out on **every** post-mute trig step, unchanged. The only
+part of the word the mute reaches is bit 8 (`0x100`), which is the handler's own return
+value OR'd in at `0x4000d4b0` -- and hook 9 correctly makes that 0, so a muted trig writes
+`0x00d4` where an unmuted one writes `0x01dc`. **The flags still tell the DSP "a trig is
+happening on this track NOW"; only "a voice started" is missing.** `0x4000d4b0` itself is a
+red herring: with hook 9 silencing, `%d0` is 0, so the `or.l` writes the word back unchanged.
+
+**The hook.** `patch_softmute.s` hook 15, `trigflag`, detours `0x40004c72` (6 B, exactly the
+three displaced instructions) and for a silenced track takes stock's OWN "no trig this
+frame" exit (`0x40004cb0`), so the word is built exactly as on the 13 steps that carry no
+trig. `%d4` is the track index (the enclosing loop clears it at `0x40004c38`, `btst %d4,%d2`
+at `0x40004d08`, `addq.l #1,%d4` / `lea 0x40(%a1),%a1` / `cmp.l %d4,%d0` against 8 at the
+tail). `%d0` is the only free register (`%d1` read at `0x40004c80`, `%d2` at `0x40004cd8`,
+`%d3` at `0x40004c6c`), which is why the mute test is `move.l MUTE_STATE,%d0 / lsr.l #8,%d0
+/ btst %d4,%d0` rather than a `1<<(8+track)` mask.
+
+**⚠️ The first draft of this hook was silently inert, and the audio A/B alone could not tell
+that from a real negative.** It gated on `SHADOW` -- but `pre` (hook 1) **deliberately
+clears SHADOW in DT mode** ("so a live DT -> OT+FX switch re-asserts every note-off"), so in
+the one mode this bug lives in, SHADOW is always 0. The A/B looked exactly like hook 14's
+honest negative: same numbers, no change. It was caught only by re-dumping the host-port
+blocks and seeing the `0xd0` sequence still there, i.e. by checking the hook had any effect
+at all before believing its result. **Check that a hook fires before accepting that it
+failed** -- this thread has now produced one true negative (hook 14, verified firing) and
+one false one (hook 15 draft 1) in the same session.
+
+**Results, corrected hook 15** (per-trig RMS, slot 2; full tables in the run logs):
+
+| case | baseline (PRE_LN) | hook 15 |
+|---|---|---|
+| DT, mute @7579 (between trigs) | 0.0287 / 0.0104 / 0.0159 / 0.0087 / 0.0033 | **0 / 0 / 0 / 0 / 0** |
+| DT, mute @8957 | echo through +2750 ms | **all 0** |
+| DT, mute @10679 | echo through +2125 ms | **all 0** |
+| OT+FX (GATE=1), mute @7579 | 0.0058 / 0.0047 / 0.0048 / 0.0027 / 0.0004 | **all 0** |
+| UNMUTED control | 0.0262 / 0.0464 / 0.0472 / 0.0263 / ... | **identical, every trig** |
+
+**DT's intended behaviour survives.** Muting at frame 5532 -- 20 frames after a trig, with
+the note genuinely sounding -- renders the ringing note and its natural tail **identically to
+baseline** (0.0192 at the mute instant, then 0.0001-0.0002 decaying to silence over ~120 ms);
+the baseline then starts echoing at +1120 ms and hook 15 produces nothing. So the voice still
+rides its own AMP envelope out, exactly as DT is designed to, and only the re-attacks are
+gone.
+
+**Verified at the DSP-word level, not just by ear**: post-mute, word 30 now carries only the
+bare nibble (`0x0004`, `0x000f`, `0x0000`, ...) -- 7 changes across the run, all flagless --
+against 24 in the baseline, every one carrying `0xd0`/`0x40`. Pre-mute is unchanged.
+
+**Note: this fixes OT+FX too.** Both modes echo in the baseline (OT+FX more quietly), and
+hook 15 clears both -- consistent with part 11's hardware reasoning that the mechanism has
+to be common to both modes.
+
+### Status after addendum 2
+
+`out/mainos_mutemode_dt.bin` + `OCTATRACK_OS1.40C_MUTEMODE_DT.{syx,bin}` now CONTAIN hook 15
+(patch_softmute 832 B; `patch_mutemode` and the three PERSONALIZE arrays bumped 0x80 out to
+make room, same convention as part 8; all build guards pass, "0 bytes outside the DT delta",
+checksum + EFT round-trip clean). The pre-session image is preserved as
+`out/mainos_mutemode_dt_PRE_LN.bin`. **NOT FLASHED** -- this is the first candidate fix in
+this thread that survives every emulator check, so it is a hardware-test candidate, at the
+user's discretion.
+
+**Open / untested before flashing:**
+- Only the SOLO path's code was reasoned about, not dynamically exercised (no soloed-track run).
+- Whether those flag bits drive anything else (trig LEDs, recorder arming, MIDI tracks) was
+  not investigated -- the hook suppresses them for a silenced track, so a UI-side side effect
+  is possible and should be watched for on hardware.
+- OT+FX's own FX-tail-ring feature could not be judged from this project (no FX configured);
+  worth a listen on hardware since hook 15 also changes that mode.
+- Single track, single tempo, one project. The user's hardware 3-case asymmetry still does
+  not reproduce in the emulator (unchanged from part 18).

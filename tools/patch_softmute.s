@@ -920,3 +920,70 @@ ln_store:
     move.b  (%a2),(%a1,%a3.l)         | displaced 2
     jmp     LN_BACK
     .endif
+
+| ==== hook 15: 0x40004c72 (THE PER-TRIG FLAG BITS IN THE DSP FRAME WORD) ===============
+| Session 58 continued yet again, part 18 addendum 2. Found by following the ONLY
+| trig-aligned host-port word left once hook 14 had frozen the live nibble and proved that
+| byte innocent (see NOTES.md): word 30 of core 1's 128-word block, i.e. the per-track
+| frame word at 0x8000014c + sel*512 + track*64.
+|
+| Once per trig, three writes inside the per-frame DSP frame loop build that word up:
+|
+|     0x40004c72  moveq #3,%d0 / and.l %d1,%d0 / beq 0x40004cb0   <- "did a trig happen?"
+|     0x40004c7e  bset #7  -> 0x80 | nibble
+|     0x40004c8a  or  #0x10 -> 0x90 | nibble
+|     0x40004cba  or  #0x40 -> 0xd0 | nibble
+|
+| Measured, muted, with hook 14 in place: that 0xd0 goes out on EVERY post-mute trig step,
+| unchanged. The only part of the word the mute does reach is bit 8 (0x100), which is the
+| dispatched handler's own return value OR'd in later at 0x4000d4b0 -- and hook 9 correctly
+| makes that 0, so post-mute the word reads 0x00d4 where an unmuted trig reads 0x01dc. The
+| flags still say "a trig is happening on this track NOW"; only the "a voice started" bit
+| is missing. Working hypothesis this hook tests: that is what re-attacks the voice DT mute
+| deliberately leaves sounding.
+|
+| The gate: for a silenced track take stock's OWN "no trig this frame" exit (0x40004cb0), so
+| the word is built exactly as it is on the 13 steps that carry no trig. Nothing else is
+| touched -- the frame LEVEL words are still kept, so DT's intended "the sounding voice
+| rides its own AMP envelope and its FX ring" behaviour is unaffected by construction.
+|
+| Registers: %d4 IS the track index here -- the enclosing loop clears it at 0x40004c38,
+| `btst %d4,%d2` at 0x40004d08 uses it as one, and the tail does `addq.l #1,%d4` /
+| `lea 0x40(%a1),%a1` / `cmp.l %d4,%d0` against 8. %d0 is free: both exits reload it
+| (0x40004c78 `move.w (%a1),%d0`, and 0x40004cb0's own path likewise), so no save/restore
+| is needed and no flags hazard exists -- the `btst` is read by the very next instruction.
+| The gate reads GATE + MUTE_STATE + SOLO_FLAG directly, exactly as hook 9 does -- NOT
+| SHADOW. A first draft used SHADOW and was silently inert: `pre` (hook 1) deliberately
+| CLEARS SHADOW in DT mode ("so a live DT -> OT+FX switch re-asserts every note-off"), so
+| in the one mode this bug lives in, SHADOW is always 0. Caught only by checking that the
+| DSP word actually changed -- the audio A/B alone looked like an ordinary negative result.
+| %d0 is the ONLY free register here (%d1 is read at 0x40004c80, %d2 at 0x40004cd8, %d3 at
+| 0x40004c6c/0x40004cce, %d4 is the track index), hence the `lsr.l #8` trick instead of
+| building a 1<<(8+track) mask in a second register.
+    .equ TF_BACK,   0x40004c78        | stock's fall-through: build the per-trig flag bits
+    .equ TF_SKIP,   0x40004cb0        | stock's own "no trig this frame" continuation
+    .global trigflag
+trigflag:
+    moveq   #3,%d0                    | displaced 1
+    and.l   %d1,%d0                   | displaced 2
+    beq     tf_skip                   | displaced 3: stock's own branch, unchanged
+    .ifndef ALWAYS_ON
+    move.l  GATE,%d0
+    tst.l   %d0
+    beq     tf_pass                   | MUTE MODE == OT (or unset) -> byte-for-byte stock
+    move.l  MUTE_STATE,%d0
+    lsr.l   #8,%d0                    | mute bits 8..15 -> 0..7, so %d4 indexes them directly
+    btst    %d4,%d0                   | this track muted ?
+    bne     tf_skip
+    tst.b   SOLO_FLAG
+    beq     tf_pass                   | not solo, not muted -> normal
+    move.l  MUTE_STATE,%d0
+    andi.l  #0xff,%d0
+    beq     tf_pass                   | solo engaged, nothing soloed -> normal
+    btst    %d4,%d0                   | this track soloed ?
+    beq     tf_skip                   | not soloed while solo is active -> silenced
+    .endif
+tf_pass:
+    jmp     TF_BACK
+tf_skip:
+    jmp     TF_SKIP
