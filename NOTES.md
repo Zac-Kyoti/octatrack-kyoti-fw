@@ -23867,13 +23867,11 @@ Per-trig RMS on the FX card, slot 2, against the two reference behaviours render
 ```
 
 Stock cuts instantly with no tail (one 20 ms window at 0.0147, then digital silence); OTFX
-cuts the dry and rings the reverb out over ~3 s, like OTFX-T. **Known remaining leak**: OTFX's
-column is not monotonic -- it rises again at +3992 ms, and the ~0.0019 floor is a per-trig
-RE-EXCITATION (about -28 dB relative to the pre-mute trigs). The dry is cut, but the voice
-still feeds the insert, so each trig that fires while muted puts a little new energy into the
-reverb. +2/+4 are therefore post-FX dry gains, not the voice's feed into the chain. Closing
-this needs the pre-insert gain (or the FX send) identified in the same per-track block -- the
-natural next measurement, and the reason OTFX is "working" but not yet "done".
+cuts the dry and rings the reverb out over ~3 s, like OTFX-T. **A leak showed up here and was then CLOSED** -- see
+"the range, bisected" below. With only +2/+4 cut, OTFX's column was not monotonic (it rose
+again at +3992 ms, a ~0.0019 floor = about -28 dB): the dry was gone but the voice still fed
+the insert, so every trig firing while muted put new energy into the reverb. +2/+4 are
+post-FX dry gains, not the voice's feed into the chain.
 
 ### ⚠ THE BLOCKER: four modes cost one instruction per frame, and one is too many
 
@@ -23966,8 +23964,51 @@ first differing sample, which is what every claim above rests on.
 
 1. **The user's decision** on the one instruction (which mode pays, a separate OTFX build, or
    more RE to find a control-rate lever that needs no per-frame test at all).
-2. **The per-trig re-excitation.** Find the pre-insert gain / FX send for a track in the same
-   per-track block and zero it alongside +2/+4. The efficient way is a probe build whose cut
-   range is selected at RUNTIME from two poked bytes (`0x800000d4`/`d5` are free and
-   battery-restored), so the block can be bisected with renders instead of rebuilds.
-3. Unchanged and still open: Bug A (the REL_STATE race, OTFX-T only; hook 13 stays disabled).
+2. Unchanged and still open: Bug A (the REL_STATE race, OTFX-T only; hook 13 stays disabled).
+
+### The range, bisected -- the per-trig leak is CLOSED [MEASURED, one build + nine renders]
+
+Rather than guess which word carries the voice's feed into the insert, built ONE diagnostic
+image (`--defsym OTFX_PROBE=1`, kept in `patch_softmute.s`) whose cut range is read fresh
+every frame from two free, battery-restored PERSONALIZE bytes (`0x800000d4`/`d5`). The block
+is then bisectable with `--extra-poke` and renders instead of rebuilds. The probe's control
+(range 2..6) reproduces the fixed build's numbers exactly, which is what licenses the rest.
+
+```
+  range    post-mute per-trig RMS, slot 2 (+1117 +1743 +1993 +3117 +3742 +3992 ms)
+  2..6     0.0035 0.0018 0.0019 0.0009 0.0006 0.0019   dry cut; NON-monotonic -> the leak
+  0..64    0.0000 0.0000 0.0000 0.0000 0.0000 0.0000   everything dead, tail included
+  0..32    0.0000 0.0000 0.0000 0.0000 0.0000 0.0000   ditto -- the tail's route is in 16..32
+  32..64   0.0379 0.0617 0.0386 0.0380 0.0618 0.0385   silences NOTHING (and no dry cut)
+  16..32   0.0436 0.0590 0.0393 0.0515 0.0613 0.0415   silences nothing
+  0..16    0.0035 0.0018 0.0007 0.0001 0.0000 0.0000   clean, monotonic
+  6..16    0.0034 0.0019 0.0007 0.0001 0.0000 0.0000   clean, monotonic
+  2..16    0.0035 0.0018 0.0007 0.0001 0.0000 0.0000   clean  <-- SHIPPED
+  +6 only  0.0034 0.0019 0.0007 0.0001 0.0000 0.0000   clean, BOTH channels
+  +10 only 0.0034 0.0019 0.0007 0.0001 0.0000 0.0000   clean, BOTH channels
+  +8 / +12 / +14 alone                                  silence nothing
+```
+
+So the per-track block splits cleanly into three regions: **0..15 the track's own levels**
+(cut them and the track goes silent while the tail rings on), **16..31 the tail's own route**
+(cut them too and the reverb dies outright), **32..63 nothing audible at all**. Within the
+first region, +2/+4 are the DRY pair (hook 8's hardware result, independently reconfirmed
+here) and **either +6 or +10 alone silences the voice upstream of the insert**, in both
+channels. The shipped cut is the tested contiguous span 2..15; byte +0 is left alone because
+it was never needed and its meaning is unknown.
+
+**v6, the current build** -- OTFX against the mode it should sound like on the way down:
+
+```
+                      +1117   +1743   +1993   +3117   +3742   +3992 ms
+  OTFX-T (GATE 1)    0.0040  0.0017  0.0006  0.0001  0.0000  0.0000
+  OTFX   (GATE 3)    0.0035  0.0018  0.0007  0.0001  0.0000  0.0000
+```
+
+Monotonic, decaying to digital silence, matching OTFX-T's own tail -- and the live playhead
+still reaches **0x31e1**, stock's own value, with the wider cut in place. So OTFX now does
+what the user asked for: a hard cut, the inserts ringing their tails out, and the sequencer
+running underneath exactly as if nothing had been muted.
+
+`out/mainos_mutemode_dt.bin` is v6 (`mainos_otfx_v6.bin`). OT and OTFX-T remain BIT-IDENTICAL
+to the flashed build; DT-T still pays the one instruction per frame. Nothing flashed.

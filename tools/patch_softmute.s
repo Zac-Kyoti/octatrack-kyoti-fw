@@ -96,6 +96,8 @@
                                          | already flags as timing-sensitive).
     .equ SOLO_FLAG,   0x80000037     | byte, non-zero while SOLO mode is engaged
     .equ REL_STATE,   0x8000184a     | byte: voice t in RELEASE when bit t set
+    .equ PROBE_LO,    0x800000d4     | OTFX_PROBE only: free, battery-restored PERSONALIZE
+    .equ PROBE_HI,    0x800000d5     | bytes, poked by the harness to bisect the block
     .equ SHADOW,      0x80006c66     | patch RAM: last frame's "silenced" set (8 bits)
     .equ F_NOTEOFF,   0x40008f84     | FUN_40008f84(t) -- per-track note-off
     .equ BACK,        0x40004dcc     | FUN_40004dbc, after the displaced `move.l 0x80000008,D5`
@@ -282,26 +284,87 @@ p1_otfx:
 |
 | %d2 (the silenced set) and %d5 are already computed by the shared path; %d0-%d3 are hook
 | 1's own saved registers; %a0 belongs to the caller and is pushed/popped on this path only.
+| THE RANGE, BISECTED WITH RENDERS (the OTFX_PROBE build below, one build + nine runs):
+|
+|   bytes  0..15   zeroing these silences the track AND leaves the tail ringing  <-- what we want
+|   bytes 16..31   contain the TAIL's own route: zeroing 0..31 kills the reverb outright
+|   bytes 32..63   nothing audible -- zeroing them silences nothing at all
+|   +2 / +4        the DRY L/R gains (hook 8's hardware result).  Zeroing ONLY these leaves a
+|                  ~-28 dB per-trig RE-EXCITATION: the dry is gone but the voice still feeds
+|                  the insert, so every trig that fires while muted puts new energy into the
+|                  reverb and the decay stops being monotonic.
+|   +6 or +10      EITHER ONE, alone, silences the voice upstream of the insert and gives a
+|                  clean monotonic decay in both channels.  These are the voice's own feed.
+|
+| The shipped range is 2..15: the tested contiguous span that covers the dry pair and both
+| effective words, and stops short of the tail route at +16.  Byte +0 is deliberately left
+| alone -- it was never needed and its meaning is unknown.
     clr.b   SHADOW                      | like DT-T: no note-off state to carry
     tst.l   %d2
     beq     p1_done
+    .ifdef OTFX_PROBE
+| ⚠ DIAGNOSTIC BUILD ONLY (--defsym OTFX_PROBE=1).  Instead of the two fixed dry words, zero
+| the byte range [PROBE_LO, PROBE_HI) of every silenced track's 64-byte block, in BOTH
+| ping-pong halves, with the range read fresh every frame from two free PERSONALIZE bytes.
+| That makes the block bisectable with RENDERS instead of rebuilds -- which is the cheap way
+| to find the pre-insert gain / FX send that the +2/+4 dry cut does not reach (the ~-28 dB
+| per-trig re-excitation of the reverb).  Never ship this.
     move.l  %a0,-(%sp)
-    lea     0x80000110,%a0              | per-track block, ping-pong half 0, track 0
+    move.l  %a1,-(%sp)
+    lea     0x80000110,%a0              | ping-pong half 0, track 0
+    lea     0x80000310,%a1              | ping-pong half 1, track 0
     moveq   #0,%d3
 p1_oc_loop:
     btst    %d3,%d2
     beq     p1_oc_next
-    clr.w   (2,%a0)                     | half 0: dry L
-    clr.w   (4,%a0)                     | half 0: dry R
-    clr.w   (0x202,%a0)                 | half 1: dry L
-    clr.w   (0x204,%a0)                 | half 1: dry R
+    moveq   #0,%d0
+    move.b  PROBE_LO,%d0
+p1_oc_word:
+    clr.w   (0,%a0,%d0.l)
+    clr.w   (0,%a1,%d0.l)
+    addq.l  #2,%d0
+    moveq   #0,%d1
+    move.b  PROBE_HI,%d1
+    cmp.l   %d1,%d0
+    bcs     p1_oc_word
 p1_oc_next:
     lea     (64,%a0),%a0
+    lea     (64,%a1),%a1
     addq.l  #1,%d3
     cmpi.l  #8,%d3
     bne     p1_oc_loop
+    movea.l (%sp)+,%a1
     movea.l (%sp)+,%a0
     bra     p1_done
+    .else
+    move.l  %a0,-(%sp)
+    move.l  %a1,-(%sp)
+    lea     0x80000110,%a0              | ping-pong half 0, track 0
+    lea     0x80000310,%a1              | ping-pong half 1, track 0 -- zeroing BOTH halves is
+                                         | why this needs no knowledge of `sel`, which the
+                                         | release loop takes from its own stack frame and
+                                         | hook 1 has no access to
+    moveq   #0,%d3
+p1_oc_loop:
+    btst    %d3,%d2
+    beq     p1_oc_next
+    moveq   #2,%d0
+p1_oc_word:
+    clr.w   (0,%a0,%d0.l)
+    clr.w   (0,%a1,%d0.l)
+    addq.l  #2,%d0
+    cmpi.l  #16,%d0                     | bytes 2..15 of the block -- see the range map below
+    bcs     p1_oc_word
+p1_oc_next:
+    lea     (64,%a0),%a0
+    lea     (64,%a1),%a1
+    addq.l  #1,%d3
+    cmpi.l  #8,%d3
+    bne     p1_oc_loop
+    movea.l (%sp)+,%a1
+    movea.l (%sp)+,%a0
+    bra     p1_done
+    .endif
 
 p1_edge_ot:
     .endif
