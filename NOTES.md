@@ -23757,3 +23757,217 @@ risk" item) is INTENDED, not a gap to close. `0x40004e3a`'s OR of the cue bits i
 positions (gated on `0x8000009c`) runs after hook 1 and is therefore left completely
 untouched by this project's own hooks, which is now confirmed to be the correct outcome.
 Closed. Do not revisit this as an open item in any future MUTE MODE session.
+
+### Build + validation (same session, after the analysis above)
+
+`tools/patch_triglock.s` and `tools/build_triglock.py` were **rewritten**, not amended —
+the old detour site was both inert and unsafe, so nothing of it was worth keeping.
+
+Final anchor: **`0x400426fc`** (`moveb %a0@(0,%d3:l),%d1 ; orl %d1,%d0`, 6 B), not the
+`0x40042706` exit first tried. Reason, found by testing rather than reasoning: an exit-site
+hook cannot distinguish "the last lock was just erased" from "[NO]+knob on a step that was
+already empty", and measured against `ARTLTEST3` it **deleted the user's deliberately
+placed empty trigless lock** — a direct violation of Session 13's requirement. At
+`0x400426fc` stock has not yet OR'd this track's bit into the per-step bitmap, so the
+pre-update value is still readable and answers exactly that question for free. The cave
+also replays that read-modify as AND-NOT when deleting, so stock's own store at
+`0x40042702` clears the bitmap bit instead of setting it — no after-the-fact undo needed.
+
+Entry state at the detour, valid on both the audio (`braw` from `0x400425a4`) and MIDI
+(fallthrough) paths: `a0` = bitmap base (`0x46c7d48c` audio / `0x46c7d2e4` MIDI — which is
+also how the cave tells the track class apart), `d0` = `1<<track`, `d3` = step. Everything
+else comes from the frame (`%fp@(11)` track, `%fp@(19)` value, `%fp@(-4)/(-3)/(-2)`
+bank/pattern/step), so the cave is path-independent.
+
+Build: 382 B cave at `0x400d7200` + 6 B detour, 320 bytes changed vs stock, EFT wrap and
+round-trip clean, version stays `1.40C`.
+
+`tools/emu_triglock.py` was also rewritten — the old one planted `+0x48d8` by hand
+according to the wrong assumption and so passed while encoding the same misunderstanding
+as the patch. It now runs the identical erase sequence through stock and patched images on
+the real `ARTLTEST1` and diffs them. All six checks pass, plus the `ARTLTEST3` empty-lock
+regression.
+
+**Honest limit on what the emulator proved.** `0x400339d8` reports step 6 dark on *stock
+too*, so that rebuild is not what paints a trigless lock's LED; the patch provably clears
+the stored `TRAC+0x10` flag, and that the panel follows is the one link only hardware can
+close. That is consistent with the user's own observation that the LED survived a pattern
+switch — only a persistent stored flag can do that, and `TRAC+0x10` is the only such flag
+carrying this state.
+
+**Not flashed.** `FLASHING.md` §4.11 rewritten with the gesture test and the two
+regressions to run.
+
+## Session 58 continued yet again, part 18 addendum 12 (2026-09-21, `wip`) — OTFX BUILT AND
+WORKING in the emulator (playhead stock-exact, dry cut, FX tails ring). But adding a FOURTH
+mode costs exactly ONE INSTRUCTION PER FRAME to exactly one of the three shipped modes, and
+one instruction per frame is enough to break this project's bit-identity rule. That trade is
+the one open decision; the mode itself is done bar one measured leak.
+
+### What was built
+
+`MUTE MODE` now has four values (`patch_mutemode.s`, `N_MODES` 3 -> 4), renamed as the user
+asked: **OT / OTFX-T / DT-T / OTFX**. GATE (`0x800000dc`) 3 selects OTFX; the `'ANDY'`
+battery-SRAM persistence covers the same word, so it comes along for free.
+
+OTFX = DT-T's frame handling (hook 1 clears D5's low 16 bits, so the frame level words stay
+open and the inserts keep ringing; no note-off, no REL_STATE) plus ONE addition: every frame,
+zero a silenced track's dry L/R gains. It masks no trigs at all -- hooks 2/3/9/10/15 all PASS
+for GATE 3 -- so the sequencer is left completely alone.
+
+### The mechanism, measured rather than inferred (addendum 11's first task)
+
+`FUN_40004dbc`'s not-solo branch, decoded properly with `-m m68k:cfv4e`, writes four words
+per track per frame into `[0x80003c10]` (8 bytes/track):
+
+```
+  word 1  0x80000c60 + t*4 + 2   gated on the CUE bit (16+t), else clrw   -- the cue send
+  word 2  0x80000c60 + t*4 + 0   gated on solo/mute                       -- THE MAIN LEVEL
+  word 3  0x80000c80 + t*2       never gated
+  word 4  0x8000485a + t*8       never gated
+```
+
+`--watch-mem` over a whole run says which producers are live, and how often:
+
+```
+  0x80000c60   7006 writes   7000 of them from 0x4000d70c   (once per frame)
+  0x80000c80   7000 writes   all from 0x4000cf36            (once per frame)
+  0x80000112   3499 writes   all from 0x4000ced4            (once per frame, per half)
+  0x80000114  10497 writes   3499 each from 0x4000cb4e / 0x4000cc20 / 0x4000ced0
+```
+
+So the per-track DSP parameter block (`0x80000110 + sel*512 + track*64`, the same block hook
+15's flag word lives in at +0x3c) has its **+2/+4 dry L/R gains rewritten EVERY frame, for
+both ping-pong halves**. That settles the cadence question: the cut has to be re-applied
+every frame, it cannot be a one-shot, and it must not be keyed on REL_STATE -- that is the
+race that sank hooks 8/11/13, and in the one mode where trigs never stop it would leak a
+frame of full-level dry on every single trig. `[0x80003c10]` was watched too and is NOT the
+same buffer: it cycles through `0x800055e0 / 0x80005460 / 0x800054e0 / 0x80005560`, a 4-deep
+ring of 128-byte frames, so hook 1 cannot cheaply derive the block base from it.
+
+### OTFX works [MEASURED, FX card, DARK REV on track 0, mute at frame 5532]
+
+The defining property first -- the live playhead at `0x80004a1c`:
+
+```
+  OT (stock)       0x31e1        (addendum 11)
+  OTFX-T / DT-T    0x14be1       (trigs masked, one voice runs ~10x further)
+  OTFX  (new)      0x31e1        STOCK-EXACT -- trigs fire, voices restart, playhead tracks
+```
+
+That is "playback picks up where it would be had we never muted", measured rather than argued.
+
+Per-trig RMS on the FX card, slot 2, against the two reference behaviours rendered the same way:
+
+```
+                       pre-mute        +1117   +1743   +1993   +3117   +3742   +3992 ms
+  OT (stock)        0.035/0.053/0.073  0.0000  0.0000  0.0000  0.0000  0.0000  0.0000
+  OTFX-T (GATE 1)   0.035/0.057/0.069  0.0040  0.0017  0.0006  0.0001  0.0000  0.0000
+  OTFX   (GATE 3)   0.035/0.050/0.068  0.0035  0.0018  0.0019  0.0007  0.0006  0.0019
+```
+
+Stock cuts instantly with no tail (one 20 ms window at 0.0147, then digital silence); OTFX
+cuts the dry and rings the reverb out over ~3 s, like OTFX-T. **Known remaining leak**: OTFX's
+column is not monotonic -- it rises again at +3992 ms, and the ~0.0019 floor is a per-trig
+RE-EXCITATION (about -28 dB relative to the pre-mute trigs). The dry is cut, but the voice
+still feeds the insert, so each trig that fires while muted puts a little new energy into the
+reverb. +2/+4 are therefore post-FX dry gains, not the voice's feed into the chain. Closing
+this needs the pre-insert gain (or the FX send) identified in the same per-track block -- the
+natural next measurement, and the reason OTFX is "working" but not yet "done".
+
+### ⚠ THE BLOCKER: four modes cost one instruction per frame, and one is too many
+
+Built the dry cut first at its natural site -- `0x4000d0b4`, the head of stock's own per-track
+release loop, a clean 6-byte fit (`moveq #8,%d1` + `movew #6144,%d2`), not a branch target
+anywhere in the image, reached once per FRAME rather than once per track. It fails, and the
+way it fails is the useful part:
+
+```
+  emulator determinism control   two renders of one build, and a third run of the same
+                                 image in a different batch:  max|diff| = 0, BIT-IDENTICAL
+                                 (parallel runs do not perturb it -- checked, because six
+                                 renders were running at once)
+
+  B1  no detour, hook 1 unfixed          GATE 2 BIT-IDENTICAL      GATE 0 differs
+  B2  no detour, hook 1 fixed (`bcc`)    GATE 2 BIT-IDENTICAL      GATE 0 BIT-IDENTICAL
+  B3  detour with a PURE NO-OP BODY      GATE 2 differs            GATE 0 differs
+```
+
+**B3 is the finding.** A detour that replays its two displaced instructions and jumps straight
+back -- zero logic, no GATE read, nothing -- still moves the render in every mode. The detour
+itself is the cost, so no amount of tuning inside that cave could ever recover it. Any NEW
+per-frame detour in this region is off the table; the work has to ride an existing one, and
+hook 1 is the only per-frame hook this project has.
+
+B1/B2 also settle two cheaper questions for free:
+- **Hooks 9/10/15's gate change is free.** They now act only for GATE in {1,2} (`subq #1 /
+  cmpi #1 / bhi pass`, the idiom hooks 2/3 have always used) instead of "any nonzero GATE", so
+  OTFX passes them. That is one extra instruction PER TRIG, and it is bit-identical.
+- **Per-frame additions are not.** Hook 1's first draft appended `cmpi #3 / beq p1_active` to
+  the mode dispatch -- two instructions per frame, on the OT path only -- and that alone broke
+  GATE 0. Rewriting the dispatch as `cmpi #2 / bcc p1_active` (GATE >= 2) restores it: same
+  instruction count for OT, OT+FX and DT-T, and GATE 3 reaches the shared path for free.
+
+That gets three of the four modes free. The last one is not free, and cannot be made free:
+telling FOUR modes apart needs one more test than telling three apart, and every arrangement
+of that test lands its cost on one of the three shipped modes. Four arrangements were built
+and rendered:
+
+```
+  v2/v5  `bhi p1_otfx` at p1_edge     OT ok    OTFX-T ok    DT-T DIFFERS
+  v3     `beq p1_dt_done` first       OT ok    OTFX-T DIFFERS    DT-T ok
+  v4     split at the top dispatch    OT DIFFERS    OTFX-T ok    DT-T DIFFERS (*)
+```
+
+(*) v4's DT-T failure is NOT explained by instruction count -- its stream is unchanged. The
+cave grew and everything after the insertion moved, so something about placement/alignment
+matters too. Worth knowing before anyone assumes "same instructions" is sufficient.
+
+**What the divergence actually is.** Not a phase shift, and not a behaviour change either:
+
+```
+                     whole-run RMS            corr @ zero lag   best lag
+  OT       (v4)   0.018510 -> 0.018019 (-2.7%)     0.910          +0
+  DT-T     (v2)   0.023796 -> 0.023587 (-0.9%)     0.929          +0
+  OTFX-T   (v3)   0.018896 -> 0.018959 (+0.3%)     0.927          +0
+
+  DT-T per-trig RMS, shipped build vs v4:
+    0.0348 0.0542 0.0725 | 0.0449 0.0378 0.0222 0.0119 0.0064 0.0027
+    0.0348 0.0547 0.0712 | 0.0483 0.0383 0.0233 0.0112 0.0065 0.0032
+```
+
+Same envelope, same decay, same timing, whole-run energy within 0.03-2.7% -- but the samples
+differ, because a one-instruction shift reshuffles the ColdFire/DSP interleave and a reverb
+tail decorrelates fast under sub-sample jitter. So the BEHAVIOUR of the mode that pays is
+preserved as far as any measurement here can show; what is lost is the sample-exact equality
+that addendum 10 made the standing rule. Whether that rule should bend for this feature is
+the user's call, not this session's -- it is the one thing blocking OTFX, and the choice of
+WHICH mode pays is a one-line change in `p1_edge`.
+
+Worth stating plainly for whoever picks this up: bit-identity is a sound SAFETY property (if
+it holds, there is definitely no regression) but its converse does not follow. One not-taken
+branch per frame is ~2756 extra cycles/second against a ~90 MHz part -- about 0.003% CPU,
+where the perturbation addendum 10 rightly rejected was roughly 24 instructions per frame.
+
+### State
+
+`out/mainos_mutemode_dt.bin` is **v5**: OT and OTFX-T bit-identical to the flashed build,
+DT-T diverging as above, OTFX working. All build guards pass (stock bytes asserted, no cave
+overlap, "0 bytes outside the DT delta", checksum + EFT round-trip clean). `patch_softmute`
+946 B; `patch_mutemode` moved to `0x400d7800` and the three PERSONALIZE arrays to
+`0x400d78a0/7900/7960`, the same 0x80 bump convention as part 8 and addendum 2. Every build
+kept for comparison: `mainos_mutemode_dt_PRE_OTFX.bin` (the flashed one),
+`mainos_otfx_{v1,b1,b2,b3noop,v2,v3,v4,v5}.bin`. **NOTHING FLASHED.**
+
+New tool: `tools/cmp_render_exact.py` -- integer-exact per-slot render comparison with the
+first differing sample, which is what every claim above rests on.
+
+### NEXT
+
+1. **The user's decision** on the one instruction (which mode pays, a separate OTFX build, or
+   more RE to find a control-rate lever that needs no per-frame test at all).
+2. **The per-trig re-excitation.** Find the pre-insert gain / FX send for a track in the same
+   per-track block and zero it alongside +2/+4. The efficient way is a probe build whose cut
+   range is selected at RUNTIME from two poked bytes (`0x800000d4`/`d5` are free and
+   battery-restored), so the block can be bisected with renders instead of rebuilds.
+3. Unchanged and still open: Bug A (the REL_STATE race, OTFX-T only; hook 13 stays disabled).

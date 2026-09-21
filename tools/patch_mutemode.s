@@ -6,11 +6,19 @@
 | (delta, wrap) on the stack and clamps/wraps the value word.
 |
 |   MUTE MODE   0x800000dc   0 = "OT"     -> stock instant post-FX cut
-|                            1 = "OT+FX"  -> patch_softmute: dry cuts, FX inserts ring tails
-|                            2 = "DT"     -> patch_softmute: pure sequencer mute (Digitakt
+|                            1 = "OTFX-T" -> patch_softmute: dry cuts, FX inserts ring tails,
+|                                            and new trigs are suppressed (the -T suffix).
+|                                            Was called "OT+FX" through addendum 11.
+|                            2 = "DT-T"   -> patch_softmute: pure sequencer mute (Digitakt
 |                                            style) -- the sounding voice rides its own amp
 |                                            envelope, only new trigs are suppressed.
-|                                            Built only with --defsym DT_MODE=1.
+|                                            Was called "DT" through addendum 11.
+|                            3 = "OTFX"   -> patch_softmute: hard cut + FX tails with the
+|                                            SEQUENCER LEFT ALONE -- trigs keep firing and
+|                                            voices keep restarting underneath, so unmuting
+|                                            picks up exactly where the pattern would have
+|                                            been.  The dry is cut every frame by hook 16.
+|                                            2 and 3 are built only with --defsym DT_MODE=1.
 |
 | 0x800000dc is the same free PERSONALIZE word patch_softmute already reads as GATE, so
 | 0 = a freshly-flashed unit behaves exactly like stock.
@@ -35,7 +43,7 @@
     .equ MUTE_MODE,    0x800000dc
     .equ SH_MUTE_MODE, 0x100fff6c    | battery-SRAM shadow = 0x100fff00 + (MUTE_MODE - 0x80000070)
     .ifdef DT_MODE
-    .equ N_MODES,   3                | OT / OT+FX / DT      (--defsym DT_MODE=1)
+    .equ N_MODES,   4                | OT / OTFX-T / DT-T / OTFX   (--defsym DT_MODE=1)
     .else
     .equ N_MODES,   2                | OT / OT+FX
     .endif
@@ -54,18 +62,26 @@ vm_0:
     .asciz "OT"
     .align 2
 vm_1:
+    .ifdef DT_MODE
+    .asciz "OTFX-T"                  | renamed from "OT+FX" (part 18 addendum 12): the -T
+    .else                            | suffix marks the modes that also stop the TRIGS
     .asciz "OT+FX"
+    .endif
     .align 2
     .ifdef DT_MODE
 vm_2:
-    .asciz "DT"
+    .asciz "DT-T"                    | renamed from "DT", same reason
     .align 2
-    .endif
+vm_3:
+    .asciz "OTFX"                    | the fourth mode: hard cut + FX tails, sequencer
+    .align 2                         | untouched, so unmuting picks up where the pattern
+    .endif                           | would have been had the track never been muted
 val_tbl:
     .long vm_0
     .long vm_1
     .ifdef DT_MODE
     .long vm_2
+    .long vm_3
     .endif
 
 | ---- getter: return &val_tbl[clamp(MUTE_MODE, 0, NMAX)] ----

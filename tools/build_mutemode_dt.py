@@ -136,6 +136,13 @@ PATCHES = [
       # built with no mute test at all and still go out on every post-mute trig step -- the
       # only trig-aligned host-port word left once hook 14 cleared the nibble. See hook 15.
       (0x40004c72, "trigflag", "7003c0816738", 6),
+      # part 18 addendum 12: the FOURTH mode, OTFX (GATE == 3) -- hard cut + FX tails with
+      # the sequencer left completely alone. It adds NO detour of its own: hooks 2/3/9/10/15
+      # simply PASS for GATE 3 (so trigs fire and voices restart as on stock, and the
+      # playhead tracks the pattern), and the dry cut rides hook 1's existing per-frame
+      # detour. A dedicated detour at the natural site (0x4000d0b4) was built and REJECTED:
+      # even with a pure no-op body it broke bit-identity in every mode. See hook 1's
+      # `p1_otfx_cut` and NOTES.md part 18 addendum 12.
       # Session 58 continued again: THE actual leak. relcut (hook 8) only fires when the
       # stock release loop's REL_STATE bit is true for a track; a stock function (never
       # touched before now) transiently CLEARS a muted track's bit as ordinary "a note is
@@ -161,13 +168,16 @@ PATCHES = [
     # build_relstate_shadow.py first (emulator-validated build) before folding in here.
     # part 18 addendum 2: hook 15 grows patch_softmute past 0x400d7700; bumped 0x80 further
     # out, same convention as part 8's growth. The three arrays below move by the same 0x80.
-    ("patch_mutemode", 0x400d7780, "DT_MODE=1", []),         # menu stub: OT / OT+FX / DT
+    # part 18 addendum 12: hook 16 (otfx_dry) grows patch_softmute past 0x400d7780; bumped
+    # 0x80 further out again, same convention as part 8 and addendum 2. The three arrays
+    # below move by the same 0x80.
+    ("patch_mutemode", 0x400d7800, "DT_MODE=1", []),   # menu: OT / OTFX-T / DT-T / OTFX
 ]
 
 # --- PERSONALIZE menu arrays (stock) ---
 OLD_LBL, OLD_GET, OLD_SET, N_OLD = 0x400b2a34, 0x400b2a74, 0x400b2ac0, 16
 SPLICE_AT = 2                                               # after "PREVIEW WITHOUT FX"
-LBL_AT, GET_AT, SET_AT = 0x400d7810, 0x400d7870, 0x400d78d0
+LBL_AT, GET_AT, SET_AT = 0x400d78a0, 0x400d7900, 0x400d7960
 # Session 58 continued yet again, part 8: moved 0x400d7750/b0/810 -> 0x400d7790/f0/850,
 # 0x40 further out, to make room for patch_mutemode's own 0x40 shift above.
 REFS = [(0x40068efe, OLD_LBL, "labels  move.l #imm,D5"),

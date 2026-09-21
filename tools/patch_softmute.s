@@ -114,8 +114,12 @@ pre:
     cmpi.l  #1,%d0                      | MUTE MODE == OT+FX ?
     beq     p1_active
     .ifdef DT_MODE
-    cmpi.l  #2,%d0                      | MUTE MODE == DT ?  (same D5 handling, no note-off)
-    beq     p1_active
+    cmpi.l  #2,%d0                      | MUTE MODE == DT (2) or OTFX (3) ?
+    bcc     p1_active                   | `bcc` (GATE >= 2), not a second `beq` plus a third
+                                         | compare: MEASURED, this costs OT, OT+FX and DT-T
+                                         | exactly ZERO extra instructions, while an appended
+                                         | `cmpi #3 / beq` here (two per frame) was on its own
+                                         | enough to break OT's bit-identity.
     .endif
     clr.b   SHADOW                      | OT (or unknown): stock; keep the shadow clean for later
     bra     p1_done
@@ -203,9 +207,102 @@ p1_edge:
 |      mix untouched); the voice rides its own amp envelope.  No note-off, no REL_STATE. ----
     move.l  GATE,%d0
     cmpi.l  #2,%d0
-    bne     p1_edge_ot
-    clr.b   SHADOW                      | so a live DT -> OT+FX switch re-asserts every note-off
+    bcs     p1_edge_ot                  | GATE < 2 (OT+FX) -> the note-off path.  `bcs` in
+                                         | place of the original `bne` is free: same count,
+                                         | same taken/not-taken outcome for GATE 1 and GATE 2.
+    bhi     p1_otfx                     | GATE > 2 (OTFX) -> the dry cut.
+                                         | ⚠ THIS IS THE ONE INSTRUCTION THAT IS NOT FREE.
+                                         | DT-T executes it (not taken) once per frame, and
+                                         | one instruction per frame is enough to move this
+                                         | build's render off bit-identical -- measured three
+                                         | ways (see NOTES.md part 18 addendum 12).  Telling
+                                         | four modes apart needs one more test than telling
+                                         | three apart, and every arrangement of that test
+                                         | lands its cost on one of the three shipped modes.
+                                         | DT-T's own BEHAVIOUR is unchanged (per-trig RMS
+                                         | matches the shipped build to within a few percent,
+                                         | whole-run RMS to 0.03%); it is the sample-exact
+                                         | equality that is lost.  Which mode pays is a
+                                         | one-line change here -- it is the user's call.
+                                         | GATE 2 (DT) and GATE 3 (OTFX) both fall through to
+                                         | the no-note-off path: DT because the voice must ride
+                                         | its own amp envelope, OTFX because the voice must keep
+                                         | playing untouched (the playhead has to stay where the
+                                         | pattern puts it) while hook 16 zeroes the dry instead.
+                                         | `bcs` rather than `bne` keeps the instruction count
+                                         | identical for GATE 1 and GATE 2.
+
+| ---- OTFX (GATE 3): the DRY HARD CUT ------------------------------------------------
+| OTFX is DT's frame handling (level words left open so the inserts keep ringing, no
+| note-off, no REL_STATE) plus this: every frame, zero a silenced track's dry L/R gains.
+| Hooks 2/3/9/10/15 all PASS for GATE 3, so trigs fire and voices restart exactly as on
+| stock -- measured, the live playhead reaches stock's own 0x31e1 rather than the 0x14be1
+| the trig-masking modes reach -- and unmuting therefore picks up where the pattern would
+| have been.  The track is silent because its dry gain is zero, not because the sequencer
+| was stopped.
+|
+| WHERE THE DRY IS.  The per-track DSP parameter block is 0x80000110 + sel*512 + track*64;
+| its +2/+4 are the dry L/R gains (established on HARDWARE in Session 58 -- see hook 8's
+| header: with only +2 zeroed the leak is dry, one channel only, and panning BAL into the
+| zeroed channel silences the track).  Measured this session with --watch-mem: the level
+| chain rewrites +2 (0x4000ced4) and +4 (0x4000cb4e/0x4000cc20/0x4000ced0) EVERY frame for
+| both halves, so the cut must be re-applied every frame -- and must NOT be keyed on
+| REL_STATE, which is exactly the race that sank hooks 8/11/13 and which would leak one
+| frame of full-level dry on every trig in the one mode where trigs never stop.
+|
+| ⚠ WHY IT LIVES HERE, in hook 1's cave, and not at its natural site.  The obvious place is
+| the head of stock's own per-track release loop (0x4000d0b4, a clean 6-byte fit).  That was
+| built and MEASURED, and it fails this project's own bit-identity rule: a detour there with
+| a PURE NO-OP body -- replay the two displaced instructions, jump back, zero logic -- still
+| perturbs the render in every mode (max|diff| 1032338 at GATE 0, 1347105 at GATE 2, against
+| a build proven bit-identical to itself).  The detour itself is the cost, so no amount of
+| tuning inside that cave can recover it.  Riding hook 1's EXISTING per-frame detour costs
+| the other modes nothing at all except the single not-taken `bhi` above, which DT-T pays.
+|
+| %d0-%d3 are ours (hook 1 saved them on entry); %d5 is the function's own displaced
+| MUTE_STATE and is untouched; %a0 is the caller's and is pushed/popped, on this path only.
+| Both ping-pong halves are zeroed (+0/+0x200) so this needs no knowledge of `sel`.
+p1_otfx:
+| OTFX (GATE 3) = DT-T's frame handling -- the level words are already left open by the
+| shared path above, so the inserts keep reaching the mix and ring their tails -- plus this:
+| every frame, zero a silenced track's dry L/R gains.  No note-off, no REL_STATE, and none
+| of the trig-masking hooks (2/3/9/10/15 all PASS for GATE 3), so trigs fire and voices
+| restart exactly as on stock.  MEASURED: the live playhead reaches stock's own 0x31e1
+| rather than the 0x14be1 the trig-masking modes reach, which is precisely "playback picks
+| up where it would have been had we never muted".  The track is silent because its dry gain
+| is zero, not because the sequencer was stopped.
+|
+| WHERE THE DRY IS: the per-track DSP parameter block is 0x80000110 + sel*512 + track*64,
+| and its +2/+4 are the dry L/R gains (established on HARDWARE in Session 58 -- see hook 8's
+| header).  Measured this session with --watch-mem: the level chain rewrites +2 (0x4000ced4)
+| and +4 (0x4000cb4e/0x4000cc20/0x4000ced0) EVERY frame for both halves, so the cut must be
+| re-applied every frame, and must NOT be keyed on REL_STATE -- that race is what sank hooks
+| 8/11/13, and in the one mode where trigs never stop it would leak a frame of full-level dry
+| on every trig.  Both ping-pong halves are zeroed, so this needs no knowledge of `sel`.
+|
+| %d2 (the silenced set) and %d5 are already computed by the shared path; %d0-%d3 are hook
+| 1's own saved registers; %a0 belongs to the caller and is pushed/popped on this path only.
+    clr.b   SHADOW                      | like DT-T: no note-off state to carry
+    tst.l   %d2
+    beq     p1_done
+    move.l  %a0,-(%sp)
+    lea     0x80000110,%a0              | per-track block, ping-pong half 0, track 0
+    moveq   #0,%d3
+p1_oc_loop:
+    btst    %d3,%d2
+    beq     p1_oc_next
+    clr.w   (2,%a0)                     | half 0: dry L
+    clr.w   (4,%a0)                     | half 0: dry R
+    clr.w   (0x202,%a0)                 | half 1: dry L
+    clr.w   (0x204,%a0)                 | half 1: dry R
+p1_oc_next:
+    lea     (64,%a0),%a0
+    addq.l  #1,%d3
+    cmpi.l  #8,%d3
+    bne     p1_oc_loop
+    movea.l (%sp)+,%a0
     bra     p1_done
+
 p1_edge_ot:
     .endif
 | ---- shadow edge (always update the shadow) ----
@@ -731,9 +828,19 @@ dt_trig:
     move.l  %d3,-(%sp)                  | displaced 2 (arg 1 == track)
 
     .ifndef ALWAYS_ON
-    move.l  GATE,%d1                    | GATE only ever holds 0 (OT/stock), 1 (OT+FX) or,
-    tst.l   %d1                         | with DT_MODE, 2 (DT) -- "nonzero" is exactly
-    beq     dt_pass                     | "any active mute mode" either way, so this needs
+    move.l  GATE,%d1                    | part 18 addendum 12: with OTFX (GATE 3) added,
+    subq.l  #1,%d1                      | "nonzero" is no longer "masks trigs" -- OTFX must
+    cmpi.l  #1,%d1                      | leave the sequencer completely alone.  This is the
+    bhi     dt_pass                     | same { OT+FX, DT } range test hooks 2/3 have always
+                                         | used (mode 1 -> 0, mode 2 -> 1, anything else > 1),
+                                         | one instruction more than the old `tst.l`.  It runs
+                                         | only when a trig is actually dispatched, not per
+                                         | frame -- and the bit-identical A/B for GATE 0/1/2 is
+                                         | what actually licenses it.
+                                         | (old comment, still true of the branch it replaced:)
+                                         | GATE only ever holds 0 (OT/stock), 1 (OT+FX) or,
+                                         | with DT_MODE, 2 (DT) -- "nonzero" was exactly
+                                         | "any active mute mode" either way, so this needed
                                          | no DT_MODE-specific branch at all and costs the
                                          | SAME 3 instructions as the original DT-only
                                          | `move.l GATE,%d0 / cmpi.l #2,%d0 / bne dt_pass`
@@ -825,8 +932,9 @@ fresh_bind:
 
     .ifndef ALWAYS_ON
     move.l  GATE,%d0
-    tst.l   %d0
-    beq     fb_pass                     | MUTE MODE == OT (0) -> stock, untouched
+    subq.l  #1,%d0                      | part 18 addendum 12: act only for { OT+FX, DT }.
+    cmpi.l  #1,%d0                      | MUTE MODE == OT (0) -> stock, untouched; OTFX (3)
+    bhi     fb_pass                     | likewise -- it never masks a trig.
     .endif
 
     move.l  %d1,%d0
@@ -1035,8 +1143,9 @@ trigflag:
     beq     tf_skip                   | displaced 3: stock's own branch, unchanged
     .ifndef ALWAYS_ON
     move.l  GATE,%d0
-    tst.l   %d0
-    beq     tf_pass                   | MUTE MODE == OT (or unset) -> byte-for-byte stock
+    subq.l  #1,%d0                    | part 18 addendum 12: act only for { OT+FX, DT }.
+    cmpi.l  #1,%d0                    | MUTE MODE == OT (or unset) -> byte-for-byte stock;
+    bhi     tf_pass                   | OTFX (3) too -- its trigs must reach the DSP normally.
     move.l  MUTE_STATE,%d0
     lsr.l   #8,%d0                    | mute bits 8..15 -> 0..7, so %d4 indexes them directly
     btst    %d4,%d0                   | this track muted ?
