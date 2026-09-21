@@ -23262,3 +23262,142 @@ hardware, that would mean a third path outside `FUN_40004dbc` entirely, and the 
 `out/mainos_mutemode_dt.bin` + `OCTATRACK_OS1.40C_MUTEMODE_DT.{syx,bin}` rebuilt with the fix
 (patch_softmute 850 B, all guards pass, 0 bytes outside the DT delta, checksum + EFT
 round-trip clean). Hook 13 still out, hook 15 still in. NOT FLASHED.
+
+## Session 78 continued a tenth time (2026-09-20, `wip`) — TRIGLESS-LOCK AUTO-REMOVE:
+real-project field dump kills BOTH readings of `+0x48d8`, and finds a **latent
+memory-corruption hazard in the flashed image**. Recommended immediate revert to stock.
+
+### `+0x48d8`/`+0x48e0` are neither step- nor param-indexed: they are EMPTY at load
+
+`tools/emu_artl_fields.py` (rewritten to assert what it observes rather than infer from
+a differential whose premise it hadn't checked) loads the user's real `ARTLTEST1` -- a
+genuine hardware-authored trigless lock, bank1/pat1/trk1, step 6, `#1` bytes `0x00`
+(PTCH) and `0x02` (LEN):
+
+```
+#1[step 6] locked bytes: [('0x0','0x30'), ('0x2','0x4e')]
+TRAC+0x10 type layer B (trigless-lock flag)   00 .. 40   steps=[6]      <- set, persistent
++0x48d8 @ 0x400e6ab8 = 00000000 00000000   bits set = []
++0x48e0 @ 0x400e6ac0 = 00000000 00000000   bits set = []
++0x4900[step 6] live scratch: ff ff ... ff
+```
+
+Neither bit 6 (step-indexed) nor bits 0/2 (param-indexed): **both fields are simply
+empty after a load.** They are live/working scratch, populated only by editing -- the
+same lifecycle as `+0x4900`. So the ninth pass's "it's per-STEP" correction was ALSO
+wrong as a description of what the field inventories; the only thing proven about the
+bit index is that `FUN_40041bc4` addresses it by step (helpers confirmed as 64-bit
+shift/test/mask, and the same index feeds `0x46c7d2e4[step]`). Persistent lock presence
+lives in `TRAC+0x10` and `#1`, both confirmed set/populated at load here.
+
+### Which means the patch's guards would all have PASSED on this project
+
+On freshly-loaded `ARTLTEST1`: `+0x48d8` == 0 (guard 1 passes), `TRAC+0x10` bit 6 set
+(guard 2 passes), all six trig masks clear at step 6 (guard 3 passes). So had
+`FUN_40041bc4` been called for the user's erase, the detour WOULD have fired and cleared
+`#1` + the flag. Hardware says nothing happened. **So that function is not doing the
+user's erase** -- Session 30's assumption, inherited unexamined ever since.
+
+Supporting evidence: `FUN_40041bc4` (and its writer sibling `FUN_40041784`) both bail
+unless `0x460d1a90 == 0`. The knob-op dispatcher (decompiled properly this pass,
+`GhidraArtlKnobDispatch.java`; it lives inside `0x40061a94`, not a standalone
+`0x40062a00` function) routes the erase opcode as:
+```c
+if (_DAT_460d172e == 0) { if (_DAT_460d172a != 0) FUN_40041bc4(...); }
+else                      FUN_4004f124(...);
+```
+so the routing matches Session 28's table -- but the callee's own `0x460d1a90` gate can
+still short-circuit it. If `0x460d1a90` is "[NO] is held", neither live function can ever
+service a `[NO]`+knob erase, and the real handler is elsewhere. Not yet proven; what sets
+that flag is still unlocated (15 literal refs; the `0x4005e1fc`/`0x4005e25c` key handlers
+only ever CLEAR it).
+
+### ⚠️ LATENT HAZARD IN THE FLASHED IMAGE -- revert recommended
+
+All three of `FUN_40041bc4`'s early-bail gates branch to **`0x4004214e`** -- the exact
+address `patch_triglock.s` detours:
+```
+40041bd6:  beqw 0x4004214e      ; 0x460d172a == 0  -> bail
+40041be0:  bnew 0x4004214e      ; 0x460d1a90 != 0  -> bail
+40041bf8:  bnew 0x4004214e      ; per-track gate   -> bail
+```
+On every one of those paths the resolver has NOT run, so `%fp@(-4)/(-3)/(-2)` hold
+**uninitialised stack bytes**, and the cave reads them as (bank, pattern, step). With a
+garbage bank (0-255) the computed addresses land arbitrarily far outside the blob; if the
+guards happen to be satisfied by whatever is there, the cave writes **32 bytes of `0xFF`
+plus a cleared bit into arbitrary RAM**. Nothing has been observed to go wrong on the
+user's unit, and the guards make it unlikely per call, but this is real and it is
+unbounded -- it is not a "wrong result" bug, it is a stray-write bug.
+
+**Told the user to reflash stock 1.40C.** The build is not merely inert, it is unsafe to
+leave on the unit. Any v2 must either (a) detour a site only reachable on the real
+completed path, or (b) re-check all three gates inside the cave before touching the
+locals -- and must be validated against a state where the locals are known-uninitialised,
+a case the original `emu_triglock.py` never constructed.
+
+## Session 58 continued yet again, part 18 addendum 9 (2026-09-20, `wip`) — HARDWARE: the
+addendum-8 solo fix did NOT fix the reported symptom. Solo still hard cuts in every mode.
+Two more candidate paths excluded. STOP GUESSING AT THE STATE -- the one cheap measurement
+that ends this is a project SAVED while solo is engaged.
+
+### Hardware result
+
+User flashed the addendum-8 build: "Engaging solo still hard cuts in every mode." No
+regression reported, but the target symptom is unchanged.
+
+**What that proves**: the cut is NOT stock's solo branch inside `FUN_40004dbc`. Addendum 8's
+fix defuses BOTH of that branch's silencing paths unconditionally whenever solo is engaged
+(verified in the port: the previously-dead "muted + SOLO_FLAG" case now decays exactly like
+a normal mute, 0.0513/0.0403/0.0365/0.0190/0.0126). The defect it fixed was real -- it is
+just not the one the user hears.
+
+### Two more paths excluded this session
+
+- **The level chain** (Session 57's "the REAL producer of the per-track levels the DSP
+  receives", `0x4000cb4e`/`cc20`/`ced0`/`ced4`) resolves to `frame_builder @4000c8a4`, 884
+  bytes, and **it never reads `MUTE_STATE`, `SOLO_FLAG`, or the `0x80000034` mode flag at
+  all**. It cannot be implementing solo silencing. This retires addendum 6's "strongest
+  remaining lead".
+- **`FUN_4004d948`** (called with -1 by the solo-engage handler) reads `SOLO_FLAG` twice but
+  is a display painter -- 13 calls each to `FUN_40012bd8`/`FUN_40012254`, no voice or level
+  work. Not an audio path.
+
+Running list of everything now excluded for the solo cut: the frame builder's solo branch
+(both paths), the level chain, `FUN_4004d948`, the per-step live-nibble byte, the per-trig
+flag bits, the slice index, and six separately-poked solo/cue/mode states that all behaved
+CORRECTLY in the port.
+
+### The measurement that ends this, and why it is the right next move
+
+Six poked states, one static-RE fix, and one wasted flash have all come from *guessing what
+state the unit is in* when solo is engaged. That guessing has now cost more than the bug.
+
+`FUN_400866c4` -- the project deserializer, decoded in addendum 7 -- reads these keys:
+
+```
+  TRACK_CUE_MASK    -> MUTE_STATE bits 16..23
+  TRACK_MUTE_MASK   -> MUTE_STATE bits  8..15
+  TRACK_SOLO_MASK   -> MUTE_STATE bits  0..7
+```
+
+They are plain text in `project.work` (the current fixture has all three `=0`). **So a
+project SAVED while a track is soloed records, in plain text, exactly which bits the gesture
+sets.** With that file the emulator boots straight into the real state, the hard cut should
+reproduce on the first run, and every remaining question becomes measurable instead of
+guessed.
+
+Asked the user for exactly that: engage solo the way they normally do (MIXER or QUICK MUTE,
+then CUE+TRIG), SAVE the project, and export it.
+
+Second, much smaller question worth asking alongside it, because it discriminates two very
+different mechanisms: does the cut happen **the instant** CUE+TRIG is pressed (something
+actively stops the sounding voice) or only **from the next trig onward** (new trigs are
+suppressed and what was already sounding is left alone)?
+
+### Status
+
+The addendum-8 hook-1 change is KEPT for now: it fixes a real, emulator-verified defect
+(solo engaged + a muted track was getting stock's `clr.l` hard cut in every mode) and the
+user reported no regression from it. It is, however, now an unverified-on-hardware change
+that did not fix its target -- flagged here so it is not mistaken for a confirmed fix. Offer
+to revert it if the user prefers a smaller diff while the real cause is hunted.
