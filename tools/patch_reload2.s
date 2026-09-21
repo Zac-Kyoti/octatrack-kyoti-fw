@@ -155,6 +155,26 @@
 |   @ 0x400d00ee, press field @ 0x400d00f0, stock value NULL -- the dead slot
 |   build_reload2.py pokes rl_bank_yes into.
     .equ BANK_LAYER_YES, 0x400d00ee     | code 0x31 record in the [BANK]-held layer
+|   Session 80 continued (3) -- deferring the SELECT BANK window to the release.
+|   MEASURED on stock by tools/diag_bank_window.py (do not re-derive by reading):
+|     * [BANK] press SHOWS the window (FUN_40059f8c, dur 0xf0, onClose 0x4007b408)
+|       and THEN pushes the overlay layer.
+|     * [BANK] RELEASE pops NOTHING -- zero teardown calls, layer still live.
+|       The WINDOW owns the LAYER: onClose 0x4007b408 is the only thing that pops
+|       it, so the layer's lifetime is the window's, exactly as stock [PTN] does.
+|     * Calling 0x4007b408 directly pops the layer cleanly and restores the YES
+|       dispatch slot to 0x4005e4c8 -- that is stock [PTN]'s own "swallow" route
+|       (its release calls teardown 0x40043418 directly when 0x460d173e is set).
+|   So the window may NOT simply be suppressed: something must still run teardown
+|   exactly once, or the [BANK] overlay strands on the dispatch table forever.
+    .equ BANK_SHOW,      0x4007af42     | press tail: pea onClose ; clr.l -(sp)  (6 B displaced)
+    .equ BANK_SHOW_RES,  0x4007af58     | resume after the suppressed jsr FUN_40059f8c
+    .equ BANK_REL,       0x4007b3e0     | [BANK] release handler (8 B displaced)
+    .equ BANK_REL_RES,   0x4007b3e8     | resume after moveq #2,d0 ; cmp.l BANK_SEL,d0
+    .equ BANK_TEARDOWN,  0x4007b408     | window onClose -> pops the overlay layer
+    .equ BANK_TEXT,      0x400b7302     | "SELECT BANK"
+    .equ BANK_SEL,       0x460e73c6     | trig handler sets it -> its own "bank N" toast is up
+    .equ SHOW_WIN,       0x40059f8c     | FUN_40059f8c(text, dur, flag, onClose)
     .equ BANK_COMMIT,    0x460e73c2     | [BANK] release: !=0 -> commit path
                                         | (0x40031200); 0 -> 0x40056a70 dismiss.
                                         | rl_bank_yes clears it (INFERRED, see there)
@@ -279,13 +299,71 @@ rl_bank_yes:
 |   BANK_COMMIT routes the release down the 0x40056a70 path (the same shared
 |   "dismiss the transient select window" routine the [PTN] layer's own NO slot
 |   branches to) instead of committing a bank change under our picker.
-|   ** INFERRED from that disassembly, NOT yet hardware-verified -- if [BANK]
-|   release misbehaves on the unit, deleting this one clr.l is the first thing
-|   to try. **
+|   HARDWARE-CONFIRMED (Session 80 continued (3)): [BANK] release behaves, and
+|   the picker survives the release, so this clr.l does what it was meant to.
     clr.l   BANK_COMMIT
     jsr     rl_draw
 rby_rts:
     rts
+
+| ====== defer the SELECT BANK window from [BANK] press to [BANK] release ======
+| User report (hardware): stock shows SELECT BANK on PRESS, so a [BANK]+[YES]
+| reload flashes it underneath the picker for as long as it takes to reach
+| [YES]. Stock [PTN] does NOT do this -- it shows SELECT PATTERN on RELEASE and
+| swallows it entirely when the hold was used for something else. Mirror that.
+|
+| Press side: suppress ONLY the jsr FUN_40059f8c. The 4 pushed args must still
+| occupy the stack -- the routine's own `lea 28(sp),sp` at 0x4007af78 reclaims
+| 16 B of window args + 12 B of its later pushes -- so reserve 16 B instead of
+| pushing them. The layer push at 0x4007af58 is deliberately left intact: it is
+| what makes [BANK]+[YES] reachable at all.
+
+    .global rl_bank_press
+rl_bank_press:
+    lea     -16(%sp),%sp               | the 4 window args we are NOT pushing
+    jmp     BANK_SHOW_RES              | skip the jsr; layer push still happens
+
+| Release side: decide which of the three exits runs, then fall into the stock
+| release logic unchanged. Exactly one teardown must happen on every path.
+|
+|   BANK_SEL != 0   a trig already picked a bank, so the trig handler's own
+|                   "bank N" toast (0x4007b2b0) is up carrying the SAME onClose
+|                   -- it owns the teardown. Show nothing, tear nothing down.
+|   G_MENU != 0     our picker is up: this press was a RELOAD gesture. Swallow
+|                   the window completely and pop the layer right now, which is
+|                   precisely what stock [PTN] does on its own swallow path.
+|   otherwise       a plain [BANK] tap: show the window HERE, with stock's own
+|                   args and onClose, so the layer is torn down when it closes.
+|
+| Ordering note: the window is shown BEFORE the stock decision runs, which is
+| safe because that decision only reaches the dismiss routine 0x40056a70 when
+| BANK_COMMIT == 0, and BANK_COMMIT is non-zero on exactly the plain-tap path
+| (press sets it). The swallow path DOES hit 0x40056a70 -- harmless, and already
+| hardware-proven, since the shipped build takes it on every release and the
+| picker survives.
+
+    .global rl_bank_rel
+rl_bank_rel:
+    tst.l   BANK_SEL
+    bne.b   rbr_stock                  | trig's own toast owns the teardown
+    tst.b   G_MENU
+    bne.b   rbr_swallow
+
+    pea     BANK_TEARDOWN              | stock's own 4 args, moved here verbatim
+    clr.l   -(%sp)
+    pea     0xf0
+    pea     BANK_TEXT
+    jsr     SHOW_WIN
+    lea     16(%sp),%sp
+    bra.b   rbr_stock
+
+rbr_swallow:
+    jsr     BANK_TEARDOWN              | pop the layer now, show nothing
+
+rbr_stock:
+    moveq   #2,%d0                     | displaced
+    cmp.l   BANK_SEL,%d0               | displaced
+    jmp     BANK_REL_RES
 
 | ================= [NO] -- close the window  (@ 0x4005e25c) =================
 | Detour replaces 6 bytes: move.l 8(%sp),%d0 ; beq.s 0x4005e276

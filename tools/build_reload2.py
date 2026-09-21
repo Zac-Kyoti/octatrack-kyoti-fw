@@ -145,7 +145,15 @@ PATCHES = [
       (0x4005e4c8, "rl_yes", "222f0004202f0008", 8, "jmp"),    # YES handler: move.l 4(sp),d1 ; move.l 8(sp),d0
       (0x4004b970, "rl_arr_a", "4feffff448d7040c", 8, "jmp"),  # UP/RIGHT handler: lea -12(sp),sp ; movem.l d2-d3/a2,(sp)
       (0x400491a0, "rl_arr_b", "2f02206f0008", 6, "jmp"),      # DOWN/LEFT handler: move.l d2,-(sp) ; movea.l 8(sp),a0
-      (0x40085864, "rl_job", "2d4afd762f2a0004", 8, "jmp")]),  # 0x14 case: move.l a2,-650(fp) ; move.l 4(a2),-(sp)
+      (0x40085864, "rl_job", "2d4afd762f2a0004", 8, "jmp"),    # 0x14 case: move.l a2,-650(fp) ; move.l 4(a2),-(sp)
+      # Session 80 continued (3): move stock's SELECT BANK window from [BANK]
+      # press to [BANK] release, so a [BANK]+[YES] reload never flashes it.
+      # Both sites are private to [BANK]: 0x4007af30 (the press tail this first
+      # site lives in) and 0x4007b408 (the teardown) have ZERO xrefs, "SELECT
+      # BANK" (0x400b7302) has exactly one use -- the call we suppress -- and
+      # nothing in the image branches into either displaced range (scanned).
+      (0x4007af42, "rl_bank_press", "487a04c442a7", 6, "jmp"),   # press tail: pea 0x4007b408(pc) ; clr.l -(sp)
+      (0x4007b3e0, "rl_bank_rel", "7002b0b9460e73c6", 8, "jmp")]),  # release: moveq #2,d0 ; cmp.l 0x460e73c6,d0
 ]
 
 # Session 80 continued (2): the [BANK]-held keymap overlay layer.

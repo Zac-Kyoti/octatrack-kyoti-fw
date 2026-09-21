@@ -24212,3 +24212,150 @@ being claimed about.**
 `out/mainos_mutemode_dt.bin` = `mainos_otfx_v9.bin`, all build guards pass. New: ot_emu's
 `--poke2`/`--poke2-at-frame`, `emu_echo_dsp.py --unmute-frame`. NOT yet flashed -- this build
 is a candidate for the user's second hardware test of OTFX.
+
+## Session 80 continued (3) (2026-09-21, `wip`) — RELOAD2: `[BANK]`+`[YES]` confirmed on hardware; the SELECT BANK window deferred from press to release
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" / "continued" /
+"continued (2)"), appended after whatever concurrent entries landed in between.
+
+### Hardware report #3 (user, MKI, `OCTATRACK_RELOAD2.bin`)
+
+Flashed the `[BANK]`+`[YES]` build. Results:
+
+- **`[BANK]`+`[YES]` works** — "most of the time". The user's read is that the
+  failures line up with the OT being stuck in the `RELOAD BUSY` state, which is
+  consistent with the still-unfixed `G_KIND` stuck-flag problem (issue #6).
+- **`[PTN]` behaves exactly like stock.** The retirement of `rl_ptn` and both
+  `[PTN]`-layer pokes is confirmed good on the unit.
+- **A stopped transport is no longer started by a reload.** The `RUNNING`-gate
+  restoration (Session 80 continued (2)) is confirmed — it *was* load-bearing,
+  as hardware had said and as the previous commit's "never actually
+  load-bearing" claim had wrongly denied.
+- **`BANK_COMMIT` clear behaves.** The `clr.l BANK_COMMIT` in `rl_bank_yes` was
+  shipped as an explicitly INFERRED, unverified guess with "delete this first if
+  release misbehaves" attached. Release does not misbehave, so the inference
+  held. Its comment is updated from INFERRED to HARDWARE-CONFIRMED.
+- **New issue — the SELECT BANK toast flashes under the picker.** Stock opens
+  its timed SELECT BANK window on `[BANK]` **press**, unlike `[PTN]`, which
+  opens SELECT PATTERN on **release**. So every `[BANK]`+`[YES]` shows the bank
+  window underneath our picker for as long as it takes to reach `[YES]`, and it
+  is then dismissed by our own toast. Harmless but wrong-looking. User asked for
+  the stock behaviour to be moved to release and swallowed entirely during a
+  reload gesture — "the same way that we have done with DIRECT JUMP".
+- Still unaddressed, as expected: audio gap, TRK SEQ desync / restart.
+
+### Correction to Session 80 continued (2): release does NOT pop the layer
+
+That entry states `[BANK]` release "pops it (`0x4003146c` @ `0x4007b40e`)". That
+is **wrong**. `0x4007b408` is not part of the release handler — the release
+handler ends at `0x4007b406`. `0x4007b408` is the **window's `onClose`
+callback**, and it is the only thing that pops the overlay layer.
+
+Measured on stock (`tools/diag_bank_window.py --stock`, real handlers under
+Unicorn, not a static read):
+
+| step | observed |
+|---|---|
+| `[BANK]` press `0x4007af80` | `SHOW_WINDOW(text=0x400b7302 "SELECT BANK", dur=0xf0, onClose=0x4007b408)` **then** `PUSH_LAYER`; YES dispatch slot → `0` (the dead slot we poke) |
+| `[BANK]` release `0x4007b3e0` | **no calls at all**; the layer is **still live** |
+| `0x4007b408` called directly | `POP_LAYER`; layer gone; YES slot restored to `0x4005e4c8` |
+
+So **the window owns the layer**: layer lifetime == window lifetime, which is
+also why a quick `[BANK]` tap leaves the overlay active for the `0xf0` window
+duration *after* release. Stock `[PTN]` is built the same way (`0x40043418` is
+its teardown, reached either as the SELECT PATTERN window's `onClose` or called
+**directly** on its swallow path when `0x460d173e` is set).
+
+This is why "just don't show the window on press" is unsafe on its own: with no
+window, nothing would ever run teardown and the `[BANK]` overlay would strand on
+the dispatch table permanently. Exactly one teardown must happen on every path.
+
+### Implementation — two new detours (7 total)
+
+Both sites are private to `[BANK]`, verified by an all-forms reference scan
+(absolute `jsr`/`jmp`/`pea`, pc-relative `pea`/`lea`, and `Bcc`/`BRA`/`BSR`
+including `bsr.w`): `0x4007af30` (the press tail) and `0x4007b408` (teardown)
+have zero xrefs, `"SELECT BANK"` `0x400b7302` has exactly one use — the call we
+suppress — and **nothing in the image references any address inside either
+displaced range**.
+
+- `rl_bank_press` @ `0x4007af42` (6 B: `pea 0x4007b408(pc)` ; `clr.l -(sp)`).
+  Suppresses only the `jsr FUN_40059f8c`. The four window args must still occupy
+  the stack because the routine's own `lea 28(sp),sp` at `0x4007af78` reclaims
+  16 B of them plus 12 B of its later pushes, so the cave does `lea -16(sp),sp`
+  and resumes at `0x4007af58`. **The layer push is deliberately left intact** —
+  it is what makes `[BANK]`+`[YES]` reachable at all.
+- `rl_bank_rel` @ `0x4007b3e0` (8 B: `moveq #2,d0` ; `cmp.l 0x460e73c6,d0`).
+  Three routes, then falls into the stock release decision unchanged:
+  - `BANK_SEL` (`0x460e73c6`) `!= 0` — a trig already picked a bank, so the trig
+    handler's own sprintf'd "bank N" toast (`0x4007b2b0`) is up carrying the
+    **same** `onClose`. Show nothing, tear nothing down; that toast owns it.
+  - `G_MENU != 0` — our picker is up, so this was a RELOAD gesture: swallow the
+    window completely and call teardown directly. Stock `[PTN]`'s own shape.
+  - otherwise — plain tap: show the window **here**, with stock's own text, dur
+    and `onClose`, so the layer is torn down when it closes.
+
+Ordering is safe because the window is shown before the stock decision runs, and
+that decision only reaches the dismiss routine `0x40056a70` when `BANK_COMMIT ==
+0` — true on exactly the swallow path (`rl_bank_yes` clears it), never on the
+plain-tap path (press sets it). The swallow path does hit `0x40056a70`, which is
+already hardware-proven harmless: the shipped build takes it on every release
+and the picker survives.
+
+### Validation
+
+`tools/diag_bank_window.py` (new) — **ALL GOOD**, stock and patched. The patched
+half checks all three release routes plus a **stack-balance check on the press
+side** (A7 restored exactly, which is what makes the `lea -16(sp),sp`
+reservation trustworthy rather than merely argued). Hardware I/O
+(`0x4007e760`/`0x4007e81c`/`0x4007e998`) and the two stock release exits
+(`0x40031200`/`0x40056a70`) are stubbed to `rts` so the routines run to
+completion — so this measures the **lifecycle**, not what those routines do.
+
+`emu_reload2.py --combo` **ALL GOOD 19/19**; `emu_reload2_keymap.py` **ALL
+GOOD**; `--trk` worker path unaffected. Build: 7 detours, 1306 B vs stock.
+
+### Knowledge-base corrections (measured) — one applied, one RETRACTED
+
+**Applied** to `reference/kb/memory-map.md` (`0x46c7d8de` row). The old claim
+that the hold/repeat delay is `0` for "trig / track / PLAY / REC / PTN / BANK"
+is wrong, and it conflated two independent fields. Measured by walking T1
+`0x400bfc10` / T2 `0x400c01f4` in 26-byte strides (the two tables are identical
+here): record `[22..23]` = hold delay, `[24..25]` = repeat interval. Trigs
+`0x00-0x0f` delay `0x10`; track keys `0x10-0x17` and `0x22-0x26` delay `0x1e`;
+**PTN is keycode `0x2e`** (not `0x1c`) delay `0x1e`; BANK `0x2f` delay `0x1e` —
+all repeat `0`. Only `YES 0x31` / `NO 0x32` have delay `0`. Repeat is nonzero
+only for the arrows: **UP `0x34` + RIGHT `0x21` share handler `0x4004b970`
+(`0x1e`/`0x1e`); DOWN `0x33` + LEFT `0x20` share `0x400491a0` (`0x0f`/`0x04`)**
+— so LEFT/RIGHT are not distinct keys to a handler *and* they auto-repeat, which
+is almost certainly the mechanism behind the user's reported arrow glitches
+(issue #3): our two arrow detours swallow four auto-repeating keys.
+
+**RETRACTED**: the claim recorded in "Session 80 continued (2)" that
+`FUN_400238a4` (cited in Session 42) has ZERO call references image-wide is
+**WRONG, and was a tooling artifact of my own scan** — it only looked for
+absolute `jsr`/`jmp`/`pea` and raw pointers. `FUN_400238a4` is called from
+`0x400239a2` via **`bsr.w`** (`4eba ff00`), which is pc-relative and therefore
+invisible to that scan; `reference/upstream-notes.md:799` already documented
+exactly this instruction. Nothing was written into the KB on the strength of the
+false claim. **Lesson for any future xref sweep in this project: m68k reaches
+code four ways — absolute, pc-relative EA (`487a`/`4xfa`), short branches, and
+`bsr.w`/`bra.w` — and a scan that omits any of them produces confident false
+negatives.** The same class of mistake would have hidden the pc-relative `pea`
+that is the *only* reference to `0x4007b408`.
+
+### Status
+
+**NOT yet flashed.** Next hardware pass should check: no SELECT BANK toast at
+any point during `[BANK]`+`[YES]` → arrows → `[YES]`/`[NO]`; a plain `[BANK]`
+tap still shows SELECT BANK, now on release; `[BANK]`+trig still selects a bank
+and still shows its "bank N" toast; and that the `[BANK]` overlay never strands
+(if it did, trig keys would keep selecting banks and `[YES]` would keep opening
+the picker long after release).
+
+Still open and untouched: the list UI (stock's 12-entry table at `0x400beb72`,
+renderer still unlocated), the ~1 s pause-then-restart, the arrow glitches (now
+with a measured mechanism, above), and the `G_KIND` stuck-flag root cause behind
+`RELOAD BUSY` — which the user's "works most of the time" report ties directly
+to the gesture's remaining unreliability.
+
