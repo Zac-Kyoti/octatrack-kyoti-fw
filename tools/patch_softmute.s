@@ -213,6 +213,15 @@ p1_edge:
                                          | place of the original `bne` is free: same count,
                                          | same taken/not-taken outcome for GATE 1 and GATE 2.
     bhi     p1_otfx                     | GATE > 2 (OTFX) -> the dry cut.
+| ---- GATE == 2 (DT-T) falls through to here.  ⚠ THIS TAIL IS LOAD-BEARING: without it DT-T
+|      falls straight into p1_otfx and is SILENCED by the dry cut.  That bug was in the v5/v6
+|      builds of this session and was caught only by measuring DT-T's post-mute LEVEL against
+|      the flashed build (median 30.6 dB quieter, up to 48 dB).  "GATE 2 is not bit-identical"
+|      did NOT catch it -- an innocent explanation (the one extra instruction) was already to
+|      hand, and it also explains v4's DT-T divergence, which this session first wrote off as
+|      alignment sensitivity.  Measure the BEHAVIOUR, not just the equality.
+    clr.b   SHADOW                      | DT-T: no note-off state to carry
+    bra     p1_done
                                          | ⚠ THIS IS THE ONE INSTRUCTION THAT IS NOT FREE.
                                          | DT-T executes it (not taken) once per frame, and
                                          | one instruction per frame is enough to move this

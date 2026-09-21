@@ -24049,3 +24049,66 @@ untouched (playhead 0x31e1, stock's own value). The ONE open item is the user's 
 the single instruction per frame -- DT-T pays it in the current build; OT and OTFX-T are
 bit-identical to what is on the unit. Switching which mode pays is a one-line change in
 p1_edge (variant v3 is already built and measured). Nothing flashed.
+
+### ⚠ CORRECTION: v5/v6 had a real DT-T BUG, and bit-identity did not catch it
+
+Asked what the DT-T divergence would actually sound like, measured the thing that bears on
+that -- 20 ms level envelopes and error-to-signal over the whole run, rather than a
+correlation number -- and it immediately exposed a genuine bug in the build:
+
+```
+  DT-T, shipped build vs v6, 20 ms windows:
+    AFTER the mute:  level diff MEDIAN 30.6 dB, up to 48 dB
+```
+
+30 dB is not timing jitter. Cause, in the assembled dispatch:
+
+```
+  400d74a0:  bcsw p1_edge_ot     GATE < 2 -> OT+FX
+  400d74a4:  bhiw p1_otfx        GATE > 2 -> OTFX ... branches to the NEXT address
+  400d74a8:  p1_otfx:            <- GATE == 2 (DT-T) FELL THROUGH INTO THE DRY CUT
+```
+
+DT-T's own tail (`clr.b SHADOW / bra p1_done`) was lost when the v3 layout was rewritten for
+v5, so **DT-T was being silenced by OTFX's dry cut**. Restored, and the tail now carries a
+comment saying it is load-bearing.
+
+**Three lessons, all of them this session's own mistakes:**
+
+1. **Bit-identity failed to catch a behavioural bug**, because a benign explanation for "GATE
+   2 differs" (the one extra instruction) was already to hand and got accepted. The rule is a
+   safety property, not a diagnosis -- when it fails, the failure still has to be explained.
+2. **The per-trig RMS table did not catch it either.** That table was measured on v4 and the
+   "behaviour preserved" claim was then carried forward to v5/v6 without re-measuring. Claims
+   must be re-run against the build they are being made about.
+3. **v4's DT-T divergence is now explained**: same fall-through bug, not the
+   "placement/alignment" sensitivity speculated earlier in this addendum. That speculation is
+   RETRACTED -- there is no evidence for it.
+
+### What the DT-T cost actually is, with the bug fixed [v8, current build]
+
+```
+  DT-T, shipped build vs v8, 20 ms windows, slot 2:
+                      level diff            error re signal
+    before the mute   median 0.36 dB, 90th 1.19, max 2.00    median -8.0 dB
+    after  the mute   median 0.37 dB, 90th 1.37, max 2.83    median -9.8 dB
+
+  per-trig RMS   shipped  0.0348 0.0542 0.0725 | 0.0449 0.0378 0.0222 0.0119 0.0064 0.0027
+                 v8       0.0348 0.0586 0.0649 | 0.0492 0.0384 0.0228 0.0113 0.0063 0.0032
+```
+
+Level, timing (best lag 0), envelope shape and decay rate are preserved; the waveform's fine
+structure is not (the difference signal sits only ~9 dB below the signal, which is what
+happens when a reverb tail takes a different realization of the same decay). The divergence
+**begins at sample 902878, about 0.13 s into ordinary playback and well BEFORE the mute at
+sample 985506** -- so it is a property of selecting DT-T at all, not of muting in it. GATE 0
+and GATE 1 remain BIT-IDENTICAL; OTFX (GATE 3) is unaffected by the fix (0.0035 / 0.0018 /
+0.0007 / 0.0001 / 0 / 0, monotonic to digital silence).
+
+Not measured, and worth saying so rather than implying otherwise: no spectral/loudness-model
+comparison and no listening test. The emulator is also deterministic in a way the hardware is
+not -- on the unit the CPU/DSP handoff phase already moves with UI, LED, MIDI and card
+activity -- so this class of difference plausibly exists run-to-run on hardware already. The
+failure mode the bit-identity rule genuinely guards against is different in kind: cycles
+pushing the level chain past its tick deadline, which would show up as glitches or dropouts,
+not as a subtle tonal shift. Nothing like that appears anywhere in 7 s of render.
