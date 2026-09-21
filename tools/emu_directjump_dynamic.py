@@ -376,6 +376,10 @@ def main(argv):
     ap.add_argument("--pattern-delta", type=int, default=1,
                      help="new pattern = (current active pattern + this) -- same bank")
     ap.add_argument("--bank", type=int, default=None)
+    ap.add_argument("--start-pattern", type=int, default=None,
+                    help="0-based pattern to start the DJ run on (before the poke); "
+                         "the switch target is this + --pattern-delta. Default: the "
+                         "pattern the project itself loads with.")
     ap.add_argument("--groundtruth", action="store_true",
                      help="Session 78: also run the confound-free ground-truth "
                           "comparison (target pattern selected directly from the "
@@ -437,6 +441,13 @@ def run_one(er, a, dj_on):
     if bank is not None and final_bank != bank:
         final_bank = rt.select_bank_live(bank)
     pattern = rt.uc.mem_read(er.CUR_PATTERN, 1)[0]
+    # Session 79 continued a sixteenth time: the switch TARGET is `cur_pat + pattern_delta`,
+    # and dj_pertrack_fix derives trackLen[t] from the TARGET pattern -- so to exercise a
+    # specific pattern's per-track SCALE, the run has to START somewhere else and switch
+    # INTO it. DJTESTxxx loads with ACT_PAT=0, which is exactly the scale-diverse pattern,
+    # so without this the run would switch AWAY from the only pattern worth testing.
+    if a.start_pattern is not None:
+        pattern = a.start_pattern
     seq_bank, seq_pattern = rt.seq_select_live(final_bank, pattern)
     # Without this, a project saved with CLOCK RECEIVE on (external MIDI
     # clock master) waits forever for pulses that never come -- 0 ticks, 0

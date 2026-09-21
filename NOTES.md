@@ -22492,3 +22492,103 @@ what does not:
 taken on (`out/mainos_test_no13.bin`). All build guards pass. Ready for a second hardware
 test: expect full-length notes, no echo, FX tails ringing, and Bug A back to its pre-hook-13
 behaviour in OT+FX.
+
+## Session 79, continued a sixteenth time (2026-09-20) — the STEP_IN_PAT fix validated
+against a REAL per-track-SCALE project (user-exported `DJTESTxxx`): it generalizes; the
+one residual is PRE-EXISTING, self-correcting, and provably not introduced by the fix
+
+Per my own recommendation (and the user's choice) not to flash until the fix was tested
+against something other than the single uniform configuration the whole thread has used.
+
+### First: none of the existing projects could test this at all  [MEASURED]
+
+Scanned every real hardware export in the repo. `DEMO_PROJECT` -- all 8 banks x 16
+patterns x 8 tracks, 1024 combinations -- is **uniformly `scaleIdx=2` (trackLen 6),
+without a single exception**; `MMTESTDT` and `SIDECHAIN_TEST` are uniformly 16 steps /
+1X. So "len 6" was not merely the tested case, it was the ONLY case this project could
+express. Two earlier scan attempts were wrong and retracted before use: a raw
+byte-offset read of the bank files returned garbage (wrong container layout), and a live
+`SCALE_IX`/`LEN_TBL` probe read a global that is only refreshed by a real switch-commit
+tick -- and was answering the wrong question anyway, since `SCALE_IX` is the MASTER
+length, not the per-track length `dj_pertrack_fix` uses. The working scanner
+(`tools/scan_dj_project_lengths.py`) reads each track's own SCALE byte out of the loaded
+pattern blob using dj_pertrack_fix's own addressing, and was cross-checked against the
+independently-established "idx2/len6" fact before being trusted.
+
+### The user exported `DJTESTxxx` -- bank 1 pattern 0 is a proper controlled experiment
+
+```
+pattern 0, scale_mode=1:   t0: LEN 16  scale 2 -> trackLen 6   (baseline)
+                           t1: LEN 16  scale 0 -> trackLen 3   (SCALE varied, length held)
+                           t2: LEN 12  scale 2 -> trackLen 6   (LENGTH varied, scale held)
+                           t3-t7: LEN 16 scale 2 -> trackLen 6 (baseline)
+```
+Added `--start-pattern` to the harness: the switch target is `cur_pat + delta` and
+`dj_pertrack_fix` derives trackLen from the TARGET, but this project loads with ACT_PAT=0
+-- the diverse pattern -- so without it the run would switch AWAY from the only pattern
+worth testing. Ran `--start-pattern 1 --pattern-delta -1`, i.e. DIRECT JUMP *into* the
+scale-diverse pattern.
+
+### Result 1: LENGTH does not drive this counter, SCALE does  [MEASURED -- closes an
+### open question, and confirms dj_pertrack_fix's divisor choice]
+
+t2 (LENGTH 12) wraps at ticks 6/12 -- identical to the LENGTH-16 baseline tracks, in
+BOTH conditions. The raw length byte at blob+0x50 has no effect on `STEP_IN_PAT`'s wrap
+period; `LEN_TBL[scaleIdx]` alone does. `dj_pertrack_fix` deriving `trackLen[t]` from
+SCALE only is therefore correct, not an oversight -- previously an assumption, now
+measured.
+
+### Result 2: the fix generalizes  [MEASURED]
+
+`4 of 64 slots differ`, and **all four are group 7** (slots 56/57/59/60) -- the same
+unrelated region as the uniform project's residue, written by entirely different PCs.
+**Groups 0 and 4 -- every slot the table-arm write actually drives -- are IDENTICAL to
+ground truth**, with a track running trackLen 3 alongside seven at trackLen 6, at a
+master length different from the one ever tested before. The per-track cadence is
+per-track correct: t1 wraps on its own faster 3-tick schedule while t0/t2-t7 wrap every
+6, exactly as ground truth does.
+
+### Result 3: one residual on the scaled track -- PRE-EXISTING, self-correcting, NOT
+### caused by this fix  [MEASURED, with the proof in the write log]
+
+Ground truth t1 wraps every 3 ticks (frames 116/289/461/633/805/978). The DJ run, for
+exactly ONE cycle after the commit, runs 6 ticks instead of 3 (commit at 461 -> wrap at
+805 instead of 633), missing one anchor write (frame 691), and then **self-corrects**:
+its next wrap is at 978, back on the 3-tick schedule, and its table-arm values match
+ground truth byte-for-byte from frame 863 onward. Cause: stock's wrap comparison still
+holds the OUTGOING pattern's per-track length for that first cycle -- the per-track
+analogue of the stale-`SCALE_IX` bug Session 70 already found and fixed for the MASTER
+length (Hook D), and exactly the "per-track-SCALEd tracks are not made exactly right"
+gap `dj_c`'s own comment has flagged as open since Session 15 (#4).
+
+**Proof it is not introduced by the STEP_IN_PAT fix**: at the commit the write log shows
+stock's reset (`0x400a4bf0`) write `0`, then the fix (`0x400d770c`) write `0` -- the SAME
+value. The fix is a provable no-op for that track in this run, so removing it could not
+change the residual. The long cycle comes from the stale wrap length, a different
+variable the fix never touches.
+
+### Status
+
+The STEP_IN_PAT fix holds up outside the configuration it was derived in: correct for
+unscaled tracks at a new master length, per-track correct for a scaled track, and
+neutral (not harmful) in the one case where a pre-existing per-track-scale gap still
+shows. That gap is now characterized for the first time (one long cycle, self-healing,
+one missed anchor write) rather than merely suspected.
+
+Still emulator-only -- **nothing flashed**.
+
+### NEXT
+
+1. The per-track stale wrap length (Session 15 #4) is now a concrete, measured target
+   rather than a vague one: find where stock computes the wrap length used at
+   `0x400a3cf6` and whether it has a Hook-D-style "computed before the ACT_PAT copy"
+   staleness. Lower priority than it sounds -- it self-corrects after one cycle.
+2. The group-7 residue (3-4 slots, both projects, different PCs entirely) -- unchanged,
+   still deliberately un-attributed.
+3. `DAT_46104cf4`'s identity; `FUN_4000ae12`'s caller -- carried over, untouched.
+
+Tooling: `tools/scan_dj_project_lengths.py` (new -- per-track SCALE/LENGTH scanner via
+the pattern blob, two wrong approaches retracted in its own docstring);
+`tools/emu_directjump_dynamic.py` gains `--start-pattern`. Test data:
+`~/Desktop/DJTESTxxx`, exported from the user's own MKI for this test (real hardware
+export, not fabricated). Log: `/tmp/dj_scaletest.log`.
