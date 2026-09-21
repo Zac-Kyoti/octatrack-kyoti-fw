@@ -92,7 +92,21 @@ PATCHES = [
       # whole loop -- relcut before, hook 13 now -- never engages there; DT's own
       # finite-release blip needs a separate mechanism, not yet designed).
       # Expected-bytes = relcut's own string with "6412" (the bccs opcode) prepended.
-      (0x4000d0c2, "relstate_shadow", "6412426800024228002bb46800046e0431420004", 20),
+      # *** DISABLED, part 18 addendum 4 -- hook 13 IS the "shortened envelopes" regression ***
+      # Hardware, 20 Sep 2026: with this in, EVERY note is cut to about one step, in ALL
+      # modes, muted or not. Reproduced in the DSP emulator and bisected to this one entry:
+      # stock renders the sample continuously (0.0186/0.0170/0.0248/0.0324/... sustained),
+      # this build renders a ~20 ms blip then silence (0.0166/0.0002/0.0001/...), and simply
+      # commenting out this line restores the stock numbers EXACTLY. It breaks at GATE=0 too,
+      # which is why it is not one of the GATE-gated hooks.
+      # This is the SAME symptom part 10 reported for hook 13 v1 ("enabling the mode with
+      # NOTHING muted shortened every note's envelope -- amp hold reduced to trig length");
+      # v2 was a redesign that the CPU-only emulator said was clean, and it is not. Two
+      # independent hardware failures for the same hook: it stays out until redesigned
+      # against the DSP-rendering harness, not against hook-call counts.
+      # Cost of removing it: Bug A (the REL_STATE race, OT+FX only) reverts to its
+      # pre-hook-13 state -- i.e. what the user's hardware ran for most of this thread.
+      # (0x4000d0c2, "relstate_shadow", "6412426800024228002bb46800046e0431420004", 20),
       # Session 58: drop the trig at its real dispatch site (0x4000d498, an indirect
       # jsr through a per-machine-type handler table) instead of trying to stop the
       # voice afterwards. Broadened (Session 58 continued) to cover both OT+FX and DT.

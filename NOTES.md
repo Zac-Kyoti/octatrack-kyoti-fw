@@ -22418,3 +22418,77 @@ Still untested before a flash: nothing in the emulator distinguishes the SOLO va
 this (single soloed track, single silenced track); and the UI-side question from addendum 2
 (whether those per-trig flag bits drive trig LEDs / recorder arming / MIDI tracks) is
 unchanged and is the main thing to watch for on hardware.
+
+## Session 58 continued yet again, part 18 addendum 4 (2026-09-20, `wip`) — HARDWARE: hook 15
+WORKS (user confirms no echoes, FX tails ring), but the flash exposed a SEVERE regression --
+every note cut to ~one step, in all modes. Bisected in the DSP emulator to **hook 13
+(`relstate_shadow`)**, which is now DISABLED. Hook 13 has now failed on hardware twice.
+
+### The hardware report
+
+User flashed the addendum-2 build. Two findings, one good and one blocking:
+- **Hook 15 works on real hardware**: "I can hear the fx tails are ringing after mute, and I
+  don't hear any echoes." That is the echo fix confirmed on the unit, not just in the port.
+- **Blocking**: "in all modes, the sample is being cut off at a length of 1 step."
+
+### Root cause: hook 13, bisected against a STOCK render
+
+Reproduced immediately in the DSP harness by rendering the same project with a stock image
+(`out/mainos_trigscale_only.bin`) and with the flashed build, both UNMUTED:
+
+```
+  stock :  0.0186  0.0170  0.0248  0.0324  0.0312  0.0282  0.0238 ...  (sample plays on)
+  flashed: 0.0166  0.0002  0.0001  0.0002  0.0002  0.0002  0.0001 ...  (~20 ms, then nothing)
+```
+
+Then bisected. It is NOT hook 15 (the pre-hook-15 image truncates identically) and it is not
+any GATE-gated hook (**it happens at GATE=0 too**, where hooks 1/9/10/15 all bail). Commenting
+out the single `relstate_shadow` entry in `build_mutemode_dt.py`'s PATCHES table and rebuilding
+restores the stock numbers **exactly** (0.0186 / 0.0170 / 0.0248 / 0.0324 ...).
+
+**This is the same symptom part 10 reported for hook 13 v1** ("enabling the mode with NOTHING
+muted shortened every note's envelope -- amp hold reduced to trig length"). v2 was the redesign
+meant to fix that, was declared clean by the CPU-only emulator, and is not. **Two independent
+hardware failures for the same hook.** It stays out until it can be redesigned against the
+DSP-rendering harness rather than against hook-call counts. Cost: Bug A (the REL_STATE race,
+OT+FX only) reverts to its pre-hook-13 state -- what the user's hardware ran for most of this
+thread anyway.
+
+### With hook 13 out and hook 15 in, DT finally behaves as designed
+
+Same mute test (DT, mute at frame 7579), post-mute 20 ms envelope:
+
+```
+  0ms 0.0197 | 40 0.0226 | 80 0.0211 | 120 0.0232 | 160 0.0181 | 200 0.0191 | 240 0.0168
+  280 0.0172 | 320 0.0151 | 360 0.0180 | 400 0.0149 | 440 0.0162 | ... | 760 0.0131
+```
+
+A **smooth, continuous decay with no gaps and no bursts** -- exactly DT mute's stated design
+("the voice already playing rides its own amp envelope"). No re-attacks at the trig positions.
+OT+FX goes fully silent post-mute (this project has no FX configured, so nothing to ring), and
+the SOLO path matches DT's mute path as before.
+
+### ⚠️ Methodological correction -- this invalidates part of part 18's own characterisation
+
+**Every measurement earlier in this session was taken on a firmware that was truncating every
+note.** In addendum 1 I noted "even UNMUTED this project's notes are short (~40-60 ms bursts,
+near-silence between)" and used it to argue the post-mute bursts had to be genuine envelope
+re-attacks. That observation was this bug, not the project's AMP settings. What survives and
+what does not:
+
+- **Survives**: hook 15's fix (confirmed independently on hardware by ear, and in the port),
+  and the identification of the per-trig flag bits as the thing that had to be gated.
+- **Suspect, re-measure if it matters**: part 18's "exactly 5 bursts", the "32 steps of
+  musical time" law, and "the voice is freed when its sample runs out" (`clr.b` at
+  `0x40008ea6`). All were measured with truncation present, so the voice lifetimes involved
+  were not the real ones. The tempo experiment's *conclusion* (musical-time-locked, not
+  wall-clock) may well still hold, but it was measured under the bug and should not be quoted
+  as settled until re-run on the corrected build.
+
+### Status
+
+`out/mainos_mutemode_dt.bin` + `OCTATRACK_OS1.40C_MUTEMODE_DT.{syx,bin}` rebuilt WITHOUT hook
+13 and WITH hook 15; md5-verified byte-identical to the exact image these measurements were
+taken on (`out/mainos_test_no13.bin`). All build guards pass. Ready for a second hardware
+test: expect full-length notes, no echo, FX tails ringing, and Bug A back to its pre-hook-13
+behaviour in OT+FX.
