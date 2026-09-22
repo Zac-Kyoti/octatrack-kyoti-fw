@@ -107,7 +107,7 @@ def main(argv):
     rt.uc.mem_write(DJ_MODE, (1 if a.dj else 0).to_bytes(4, "big"))
 
     st = dict(d7=[], nxt=None, pair=None, step=None, cntdn=None, scale=None, injected=0,
-              stepF=None, ticksF=None)
+              stepF=None, ticksF=None, mstep=None)
 
     def on_d7(u, addr, size, user):
         got = u.reg_read(er.eb.UC_M68K_REG_D7)
@@ -127,6 +127,7 @@ def main(argv):
         if st["step"] is None and st["nxt"] is not None:
             st["step"] = bytes(u.mem_read(STEP_ARR, 16))
             st["cntdn"] = bytes(u.mem_read(CNTDN_ARR, 16))
+            st["mstep"] = bytes(u.mem_read(0x800065B6, 1))[0]
 
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_d7, begin=D7_PC, end=D7_PC)
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_boundary, begin=BOUNDARY_PC, end=BOUNDARY_PC)
@@ -243,6 +244,8 @@ def main(argv):
     else:
         print("\n  (Hook F site not reached after the commit)")
 
+    print(f"\n  master STEP (0x800065b6) after the commit = {st['mstep']}"
+          f"   -- per-track STEP[0] = {st['step'][0] if st['step'] else -1}")
     print(f"\n  tracks matching the model: {16 - bad}/16")
     if bad == 0:
         print("  => D7 drives the per-track rebuild exactly as modelled.")

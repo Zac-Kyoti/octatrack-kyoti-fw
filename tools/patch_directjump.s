@@ -663,7 +663,16 @@ djc_fix:
 |   cost regardless of how large G_ABSTICK has grown. D3 clobbered here is safe: the
 |   per-track loop right after dj_c returns reloads it fresh (ACT_BANK) before ever
 |   reading it, confirmed by inspection of the code between dj_c's `rts` and that reload.
-    move.l  G_ABSTICK,%d0              | d0 = absolute tick count (32-bit, never wraps)
+|   Session 79 cont.35: read the offset HOOK H ACTUALLY STORED, not G_ABSTICK directly.
+|   Hook H (0x400a47f6) runs earlier on this same commit path and may have substituted 0
+|   for an out-of-range counter. Taking G_ABSTICK here regardless made the master step
+|   disagree with every per-track step in exactly that case -- MEASURED: with the counter
+|   forced past the bound, the per-track arrays all held 0 while the master held 4, a
+|   four-step split that would make the master wrap early and produce one short bar. That
+|   is the same master-vs-per-track disagreement class that caused the original desync.
+|   Reading MASTER_STEPS makes the two consistent by construction: identical to G_ABSTICK
+|   in the normal case, and 0 whenever Hook H's guard fired.
+    move.l  MASTER_STEPS,%d0           | d0 = the offset Hook H stored (master steps)
     tst.l   %d1
     ble.b   djc_store                 | guard: bad length -> just use the raw tick count
     moveq   #0,%d2                     | d2 = remainder accumulator

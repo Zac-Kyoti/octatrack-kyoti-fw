@@ -27185,3 +27185,77 @@ pushes it up), both comfortably inside the `98301` ceiling; a contrived set of c
 gives `P = 4324320`, which exceeds it and would still need the guard.
 
 Build: 1001 bytes changed, 0 unexpected outside the cave, manual-trig bytes identical.
+
+## Session 79, continued a thirty-fifth time — `dj_c` must read Hook H's stored offset, not `G_ABSTICK` (found by a user question about timing)
+
+The user asked whether the overflow fallback would make master timing jump or stall. Checking
+rather than answering from the design exposed a real inconsistency.
+
+`dj_c` computed the master step as `G_ABSTICK mod patternLength`, independently of Hook H's
+guard. When the guard fires, Hook H stores 0 (so every per-track array lands on step 0) but
+`dj_c` still derived the master step from the raw counter. **Measured**, counter forced past
+the bound, DJTEST2 A07:
+
+| | master STEP | per-track STEP |
+|---|---|---|
+| normal | 10 | 10 |
+| guard fired, before fix | **4** | **0** |
+
+A four-step split between the master and every track — the same master-vs-per-track
+disagreement class that caused the original desync, and it would have made the master wrap
+early and produce **one short bar** at the next master boundary.
+
+Fixed: `dj_c` now reads `MASTER_STEPS` (`0x80006628`), the value Hook H actually stored. Hook H
+runs earlier on the same commit path (`0x400a47f6` < `0x400a4840`), so the value is fresh, and
+the two are consistent by construction — identical to `G_ABSTICK` normally, 0 whenever the
+guard fired. Re-measured: guard case master 0 / tracks 0, normal case master 10 / tracks 10,
+both 16/16.
+
+### Answers recorded, since they will be asked again
+
+- **The fallback only applies with DIRECT JUMP ON.** Hook H writes only when `G_ARMED` is set.
+  With the feature off nothing reads `G_ABSTICK`; the counter still ticks and still resets, but
+  it is inert. This is what the DJ-OFF gates verify.
+- **Nothing happens *at* the limit.** There is no timer and no event; playback continues
+  indefinitely. The counter merely becomes unrepresentable, which matters only at the *next*
+  jump.
+- **What a jump past the limit sounds like:** every track lands on its own step 1 — i.e. the
+  jump behaves as DIRECT START. Not noise, not a wrong position.
+- **Timing does not stall or lurch.** The commit fires at the same step boundary regardless;
+  the offset only changes *where* tracks land, not *when*. Same step rate, no dropped or extra
+  tick. (Before this fix there WOULD have been one short bar — see above.)
+- **It persists until the transport is stopped and restarted.** Toggling DIRECT JUMP off/on
+  does **not** reset the counter: the only two writes to `G_ABSTICK` are `dj_abstick`'s
+  increment and Hook T's clear at transport start.
+
+### Why AR does not have this problem — the honest answer
+
+AR's dividend is `masterStep mod patternLen`: the current position *within the current
+pattern*, bounded by construction. AR's DIRECT JUMP means "land at the same step index, wrapped
+into the new pattern's length". **It never uses elapsed absolute time.**
+
+The OT feature as specified by the user is a strictly larger thing: *every pattern behaves as
+if it had been playing silently all along at its own length*. That genuinely requires absolute
+elapsed time, because `(G mod L1) mod L2 != G mod L2` unless `L2 | L1` — so for non-nested
+lengths (16 -> 12, or anything involving the 7-step track) AR's cheaper formulation gives a
+different, less musical answer.
+
+**So AR avoids the overflow by solving a smaller problem, not by being better engineered
+here.** There is no avoidance to port; the bound is the price of the richer semantics.
+
+### What CAN be done — and it is exact, not an approximation
+
+The per-track landing position `(G * tps_master / tps_t) mod len_t` is **periodic in G**, with
+period `P / tps_master` where `P = LCM(tps_t * len_t)`. Reducing the counter by that period
+changes **nothing** about where any track lands.
+
+For A07: `P = 4032` ticks -> period 672 master steps -> worst-case quotient ~1344 against the
+32767 ceiling, **24x headroom**. The limit disappears for any pattern whose `P` is
+representable, which is every realistic one. Contrived coprime length sets (`P = 4324320`)
+still need the guard.
+
+Implementation note for whoever picks this up: reduce in the TICK domain (`D7 mod P`, via a
+hook after `D7` is built at `0x400a4834`), because reducing `G` instead requires
+`tps_master | P`, which is not guaranteed in per-track mode. And whatever is reduced, `dj_c`'s
+master step must stay consistent with it — this session's bug is exactly what happens when it
+does not.
