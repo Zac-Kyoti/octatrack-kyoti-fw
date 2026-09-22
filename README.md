@@ -279,15 +279,40 @@ time you open the menu). Write-up: [`NOTES.md`](NOTES.md) "Session 46"
 51/51-bis/51-ter" (refinement pass, logic-bug fix, tuning correction). **All
 of the above is HW-confirmed** except the two parked cosmetic items.
 
-### TRIGLESS-LOCK AUTO-REMOVE — drop an emptied trigless lock  ·  *built, emulator-clean, not flashed*
+### TRIGLESS-LOCK AUTO-REMOVE — drop an emptied trigless lock  ·  *core behaviour hardware-confirmed; placeholder refinement emulator-clean, not yet flashed*
 
-When a LIVE-REC `[NO]`+knob erase clears a step's last p-lock, stock leaves the
-now-purposeless trigless lock lit on the trig row indefinitely — the erase handler
-never commits the change into the stored p-lock array or clears the trig-type-layer
-flag the firmware separately sets when the lock was created. `tools/patch_triglock.s`,
-`python3 tools/build_triglock.py` → `1.40C` (stock-transparent, two hunks vs stock).
-Write-up: [`NOTES.md`](NOTES.md) "Session 13" + "Session 39" + "Session 78" (+
-continued, many parts). **Never flashed.**
+A **trigless lock** is a step that carries parameter locks but no audible trig. Erase
+its last remaining lock and stock leaves it lit on the trig row forever — the step is
+inert but still looks like it holds something.
+
+The handler had been mis-identified for about fifty sessions. Static analysis pointed at
+the `0x40041xxx`/`0x40062xxx` p-lock cluster, and three builds aimed there did nothing on
+hardware. What settled it was a **diagnostic firmware that traces itself on the unit**:
+it logs into the bank blob, which a project save serialises to the card, so the trace
+exports back off the machine. That showed none of the suspected message opcodes occur
+during the gesture at all. The real path is `opcode 8` → `0x40061ed4` → `FUN_40041af4`
+(no `linkw`, which is why every function-boundary scan missed it) → `FUN_40038874`.
+
+Stock already works out that a step's p-lock row has gone empty — it just applies that
+only to the per-step stored-p-lock bitmap and never to the trig-type-layer flag that
+lights the LED. The fix adds only the missing half.
+
+The detour sits on the **erase store** rather than on stock's emptiness verdict, so that
+an empty trigless lock placed deliberately with `FUNC`+`TRIG` is never mistaken for one
+that just lost its last lock: it fires only when the param being erased *was* actually
+locked and every other param in the row is already clear. That matters because LIVE REC
+erases as the playhead passes — holding `[NO]` and sweeping a knob across a pattern would
+otherwise have silently removed placeholders the playhead crossed.
+
+`tools/patch_triglock.s`, `python3 tools/build_triglock.py` → `1.40C` (stock-transparent,
+one hunk + cave). Validated against **real hardware-exported projects**, stock vs patched,
+including a real `FUNC`+`TRIG`-style empty placeholder. Write-up: [`NOTES.md`](NOTES.md)
+"Session 13" + "Session 78" (continued, many parts).
+
+**Known ambiguity, pre-existing in stock:** a parameter whose legal range includes 255
+stores as the same `0xFF` that means "not locked", so stock itself cannot tell such a lock
+from an absent one. The LED is already wrong for that case today, patched or not.
+
 
 ### Part-change carryover — Part params leaking across a pattern→Part change  ·  *active WIP, partly hardware-confirmed*
 

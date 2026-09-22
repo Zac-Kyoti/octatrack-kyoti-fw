@@ -602,7 +602,68 @@ hold **[REC]**, tap **[PLAY]** twice, close together.
 > (refinement, `G_PEND` bug fix, `MAX_GAP` correction). **Hardware-confirmed
 > in full** except the two parked cosmetic items above.
 
----
+### 4.11  Auto-remove an emptied trigless lock  (`build_triglock.py` — **retargeted onto the traced handler, emu-validated, NOT YET FLASHED**)
+
+> **Three earlier TRIGLOCK builds were aimed at the wrong code entirely** and did nothing.
+> If any of them is on the unit, flash stock `1.40C` first
+> (`downloads/extracted/OCTATRACK_OS1.40C.syx`). The very first one is also unsafe to
+> leave on (it could write into arbitrary RAM); the later two were merely inert.
+
+Fixes: a **trigless lock** (a step holding only parameter locks, no audible trig) whose
+**last remaining lock is erased** stays lit on the trig row forever.
+
+**How the target was found.** Static analysis put this thread on the `0x40041xxx` /
+`0x40062xxx` p-lock cluster for ~50 sessions. A diagnostic firmware that logs into the
+bank blob — which a project save serialises to the card, so the trace exports back —
+showed that **none of that cluster runs during the gesture**. The real path, measured:
+
+    opcode 8 -> case 0x40061ed4 -> FUN_40041af4 -> FUN_40038874   (audio)
+
+`FUN_40041af4` has no `linkw`, which is why every function-boundary scan missed it.
+
+**Root cause.** `FUN_40038874` *already* scans `#1[step][0..31]` to decide whether a step's
+p-lock row has gone empty, and uses that to clear the track's bit from the per-step
+bitmap. It simply never also clears the trig-type-layer flag `TRAC+0x10`, which is what
+keeps the LED lit.
+
+**The patch** detours `0x40038af2` (6 B). Reaching that instruction *is* stock's own
+verdict that the row is empty — the "still has locks" case branches away at `0x40038ad8`
+— so the cave holds **no predicate of its own**, and multi-pass behaviour is inherited
+rather than reimplemented. It clears `TRAC+0x10`, its `0x1001615e` mirror, and the dirty
+flags, guarded so a step owned by any real trig (note/sample, layers A/C, the three
+recorder masks) is never touched.
+
+**Emulator validation** — `python3 tools/emu_triglock.py`, driving `FUN_40038874` on the
+real `ARTLTEST1` export, stock vs patched:
+
+| check | result |
+|---|---|
+| erase 1 of 2 — stock keeps the step lit | PASS |
+| erase 1 of 2 — **patch also keeps it lit** (multi-pass intact) | PASS |
+| erase the last — stock leaves the flag set (**reproduces the hardware bug**) | PASS |
+| erase the last — **patch clears the flag** | PASS |
+| no other trig layer disturbed | PASS |
+| `#1` byte-for-byte identical to stock | PASS |
+
+Unlike the three earlier builds, this run drives the function a hardware trace implicated,
+and the stock half reproduces the reported symptom — so the comparison is meaningful
+rather than a restatement of an assumption.
+
+**Known limitation**: `[NO]`+knob aimed at a param of an already-empty, deliberately
+placed trigless lock removes it. Stock's scan finds the row empty either way and the
+pre-erase byte is gone by this point; fixing it needs a second detour inside the param
+loop.
+
+**Gesture test after flashing** — bank 1 / pattern 1 / track 1, step 7:
+
+1. Trigless lock with two locks on the PLAYBACK page: PTCH and LEN.
+2. Erase **one** → the step must **stay lit**.
+3. Erase the **second** → the step must go **dark** and be inert.
+4. Regression: ordinary trig with p-locks, erase every lock → the **trig must remain**.
+5. Regression: an empty trigless lock placed deliberately must survive a pattern switch
+   and a reload (but see the limitation above — do not aim `[NO]`+knob at it).
+
+**Revert**: flash `downloads/extracted/OCTATRACK_OS1.40C.syx`.
 
 ## 5. Reverting to the official firmware
 

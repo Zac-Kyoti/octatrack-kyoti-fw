@@ -25006,6 +25006,101 @@ returns to baseline, and the `[BANK]`/`[YES]` dispatch slots return to their
 expected handlers. If any of those drifts monotonically across iterations, that
 is the bug. Single-reload green is now known to be worthless as evidence here.
 
+## Session 78 continued a thirteenth time — ARTLTEST8 NAMES THE HANDLER. The thread's central assumption was wrong for fifty sessions.
+
+### The trace
+
+Diag v3 on hardware, gesture = create a trigless lock with PTCH+LEN on bank 1 / pattern 1
+/ track 1 step 7, then erase both, then save:
+
+    opcode 255 (loader) TRAC+0x10 steps0-7  0xff -> 0x00
+    opcode   1          TRAC+0x10 steps0-7  0x00 -> 0x40    <- the trigless lock is CREATED
+    opcode   1          #1[6][0] PTCH       0xff -> 0x40
+    opcode   1          #1[6][2] LEN        0xff -> 0x00
+    opcode   8          #1[6][0] PTCH       0x40 -> 0xff    <- ERASE
+    opcode   8          #1[6][2] LEN        0x00 -> 0xff    <- ERASE, flag never touched
+
+    CULPRIT HISTOGRAM:  opcode 1 x3    opcode 8 x2
+
+Opcodes observed overall: 1, 5, 8, 9, 17, 18, 20, 21, 24, 43, 50, 51. **None of
+64/65/66/70/74.**
+
+### What that overturns
+
+Every function this thread has studied since Session 26 -- `FUN_40041bc4`, `FUN_40041784`,
+`FUN_40042158`, `FUN_4004f124`, `FUN_4004ef54`, and the whole `0x40062xxx` dispatch cluster
+-- is **uninvolved in the LIVE `[NO]`+knob gesture**. Three builds were aimed at code that
+never executes during an erase. The Session 30 note "`0x40041bc4` = the LIVE-REC p-lock
+write/erase (the feature's hook target)" was an assumption that was never tested against
+the gesture, and it propagated unchallenged through ten continuations of this session.
+
+### The real path
+
+    opcode 8  ->  case 0x40061ed4
+                  if (0x460d172a != 0)   ; LIVE REC
+                      jsr FUN_40041af4
+
+`FUN_40041af4` sits immediately BEFORE `FUN_40041bc4` and has **no `linkw`**, so every
+function-boundary scan this project ever ran missed it. It reads the track from
+`0x80000000`, gates on `0x460d1a90` / `0x460d1a94`, and tail-calls:
+
+    FUN_40038668   MIDI tracks   (0x80000012 != 0)
+    FUN_40038874   AUDIO tracks  <- the one that matters
+
+with `(trackmask, clear_trigs, param_mask)`. **The `0x40038xxx` range had never been
+looked at in this thread at all.**
+
+### `FUN_40038874` already computes the feature's predicate
+
+    for track in 0..7:
+      step = FUN_4009b2b0(track)        ; = [0x800064e0 + track] & 0x3f, the edit step
+      if trackmask & (1<<track):
+        if clear_trigs: clear TRAC +0x00/+0x08/+0x10/+0x18 at step (+ mirrors)
+        if param_mask:
+          for p in 0..31 where param_mask & (1<<p):
+              #1[step][p] = 0xFF ; mirror 0x100161a7[...] = 0xFF ; dirty ; FUN_40027e00()
+          if clear_trigs == 0 && param_mask != 0xffffffff:
+              scan #1[step][0..31]
+              if any byte != 0xFF: d0 = bitmap[step] |  (1<<track) ; goto SET
+          d0 = bitmap[step] & ~(1<<track)          ; the row is EMPTY
+     SET: 0x46c7d48c[step] = d0                     ; 0x40038af8
+
+Stock **already** works out "this step's p-lock row is now completely empty" and uses it
+to clear the track's bit from the per-step stored-p-lock bitmap. It just never also clears
+`TRAC+0x10`. That is the entire bug, in one missing operation.
+
+### The patch, rewritten a fourth time
+
+Detour `0x40038af8` (`moveb %d0,%a5@(0,%a3:l) ; addql #1,%d7`, 6 B) -- the single point
+where that verdict is committed, on both paths. At entry `d7` = track, `a3` = step,
+`a5` = `0x46c7d48c`, and `d0` = the new bitmap byte, so **`(d0 & (1<<track)) == 0` IS the
+"last lock just went away" predicate, computed by stock itself**. Nothing is re-derived
+and no state of our own is kept; multi-pass semantics are inherited rather than
+implemented.
+
+`TRAC = [0x46c82456] + [0x100b14d0]*0x8ed8 + track*0x91a` -- the same globals the function
+uses for its own addressing; no bank term, the blob pointer already selects the bank.
+Guards: none of `+0x00/+0x08/+0x18/+0x20/+0x28/+0x30` may own the step, and `+0x10` must.
+Then clear `+0x10`, its `0x1001615e` mirror, the two dirty flags and `FUN_40027e00()`,
+matching what stock does after each of its own edits here.
+
+Build: 258 B cave at `0x400d7200`, 6 B detour, 224 bytes changed, EFT round-trip clean.
+(`0x9b332` exceeds ColdFire's 16-bit displacement -- folded into the address register.)
+
+**Known limitation, unchanged in kind but now precisely located**: `[NO]`+knob at a param
+of an already-empty trigless lock deletes it, because stock's scan finds the row empty
+either way and the pre-erase byte value is gone by this point. Fixing it needs a second
+detour on the erase store inside the param loop.
+
+### The methodological lesson, recorded because it cost four builds
+
+Three flashed builds were "validated" in the emulator by driving the assumed target
+function with the assumed arguments. That is not validation; it restates the hypothesis.
+What finally worked was instrumenting the firmware to report what it actually did, on the
+user's own hardware, through a channel (the bank blob, serialised by a project save) that
+survives back to the desk. **Any future claim of the form "function X handles gesture Y"
+in this project should be treated as unproven until a trace shows it.**
+
 ## Session 79, continued a twentieth time — OT's complete per-track state vector enumerated; TWO long-standing misreadings corrected
 
 Follow-on from the AR-side breakthrough (`ar-kyoti-fw` Session 8, commit `4afd3c3`), which
@@ -25144,6 +25239,57 @@ mid-cycle" bug class rather than adding a seventh patch for it.
    real per-step activity and a stock-vs-patched diff over it is clean.
 
 No patch source was changed this session. Measurement only.
+
+### The fourth build hung — a detour-site hazard, and a permanent guard against it
+
+First attempt detoured `0x40038af8` (`moveb %d0,%a5@(0,%a3:l) ; addql #1,%d7`), the point
+where the bitmap verdict is committed. The emulator caught it immediately: stock ran fine,
+the patched image never returned (`call_as_main(0x40038874) did not return in 2,000,000
+steps`, outer pc stuck at `0x40038894`).
+
+Instruction-level tracing of the cave showed it ran **once, correctly, and returned** --
+12 instructions, taking the "row still has locks" exit, which is right for erase 1 of 2.
+The fault was outside it: `addql #1,%d7` at `0x40038afc` is the **enclosing loop's
+increment**, and `0x40038afc` is a branch target from `0x400388a4` and `0x40038a1a` -- the
+paths that skip a track not in the mask. Swallowing it into a 6-byte `jsr` sent those
+tracks into the middle of the instruction, and the loop never terminated.
+
+**`build_triglock.py` now refuses any detour whose displaced bytes contain a branch
+target** (`assert_no_branch_into`, decoding Bcc/BRA/BSR with 8/16/32-bit displacements
+over a window around the site). Self-tested both ways: it refuses `0x40038af8` naming both
+culprit branches, and accepts the site actually used. This hazard class had never been
+checked by any build script in this project.
+
+**New site `0x40038af2`** (`moveb %a5@(0,%a3:l),%d1 ; andl %d1,%d0`, 6 B, no branch lands
+inside). It is strictly better than the original choice: reaching it already *is* stock's
+verdict that the row is empty -- the "still has locks" case branched away at `0x40038ad8`
+and never arrives -- so the cave carries **no predicate of its own at all**. Entry state:
+`d7` = track, `a3` = step, `a5` = bitmap base, `d0` = `~(1<<track)`.
+
+Build: 246 B cave, 6 B detour, 215 bytes changed, EFT round-trip clean.
+
+Also confirmed this pass, and worth recording separately: driving `FUN_40038874` on stock
+reproduces the hardware bug exactly (`FUN_4009b2b0 -> step 6`; erase 1 of 2 leaves
+`{0x2:0x4e}` with `TRIGLESS=[6]`; erase the last empties `#1` with `TRIGLESS=[6]`). That is
+independent confirmation that the traced worker really is the gesture's path -- the first
+time in this thread that an emulator run and the hardware have agreed about the same code.
+
+### Validation of the retargeted build — all six checks pass
+
+    === stock ===                                  === patched ===
+    FUN_4009b2b0 -> step 6                         FUN_4009b2b0 -> step 6
+    erase PTCH (1 of 2)  #1={0x2:0x4e} TRIGLESS=[6]   #1={0x2:0x4e} TRIGLESS=[6]
+    erase LEN  (last)    #1=EMPTY      TRIGLESS=[6]   #1=EMPTY      layers=none
+
+PASS on all six: multi-pass intact on both images, stock reproduces the bug, patch clears
+the flag, no other trig layer disturbed, `#1` byte-for-byte identical to stock.
+
+The distinction from the three earlier "validated" builds is the one that matters: this
+harness drives the function a **hardware trace** implicated, and its stock half reproduces
+the symptom the user reported. The earlier runs drove an assumed target with assumed
+arguments and could only ever confirm themselves.
+
+`FLASHING.md` §4.11 rewritten. **Not flashed.**
 
 ## Session 79, continued a twenty-first time — the three open arrays answered, and stock turns out to ALREADY contain the AR-shaped per-track rebuild
 
@@ -25428,7 +25574,6 @@ No patch source changed. `out/mainos_directjump_v4.bin` was rebuilt and verified
 "IDENTICAL with DJ off" result applies to current source — but only on `OT DEMO`, which has
 all 16 tracks at `SCALE=2` and performs no pattern switch, so it exercises neither the
 `SCALE_MODE == 0` branch nor any DJ hook. A `DJTESTxxx`-based run is in progress.
-
 ## Session 79, continued a twenty-fourth time — DJTESTxxx characterised: it covers BOTH scale branches
 
 `tools/diag_seq_activity.py` extended to read the pattern blob directly and print the
@@ -25471,3 +25616,61 @@ now measured from RAM rather than from the static image.
 `DJTESTxxx` pattern 0 (`SCALE_MODE == 1`) and pattern 1 (`SCALE_MODE == 0`) are in progress.
 Still untested in all cases: the DJ-**on** path, since no run has yet performed a pattern
 switch (`stock rebuild loop 0x400a4884` executes 0 times in every run so far).
+
+## Session 78 continued a fourteenth time — hardware-confirmed, then redesigned for FUNC+TRIG placeholders
+
+### Hardware result of the `0x40038af2` build
+
+User flashed and reported **positive results on all four gesture tests**: multi-pass
+intact (erase 1 of 2 keeps the step lit), erasing the last p-lock clears the step, an
+ordinary trig with p-locks keeps its trig, and a deliberately empty trigless lock survives
+a pattern switch and reload. First working build of this feature.
+
+### The correction that forced a redesign
+
+I argued the remaining limitation was near-moot on the grounds that "with the fix in
+place there is no UI path to create an empty trigless lock", reasoning only from the
+create side of the trace (`opcode 1` sets `TRAC+0x10` and writes a real `#1` byte in the
+same message). **The user corrected this: `FUNC`+`TRIG` places an empty trigless lock,
+as it should.** That is a first-class, deliberate placeholder workflow, so the limitation
+was not an edge case at all -- it was a collision with normal use.
+
+Worse than a targeted mis-fire: LIVE REC erases *as the playhead passes*, so the user need
+not be aiming at the step. Holding `[NO]` and sweeping one knob across a pattern was enough
+to silently delete every placeholder the playhead crossed -- no audible tell (the step was
+already silent), nothing to undo.
+
+### Redesign: hook the erase STORE, not stock's emptiness verdict
+
+At `0x40038af2` the two states are genuinely indistinguishable -- `TRAC+0x10` set and
+`#1[step]` all-`0xFF` -- whether the last lock was just erased or the row was never
+occupied. The information needed exists exactly one instruction earlier, at the erase
+store itself (`0x40038a5c`, `moveb %d1,%a0@(0x59,%d2:l) ; addl %d4,%d0`), where the
+**pre-erase value has not yet been overwritten**:
+
+    fire only if  old #1[step][param] != 0xFF        (this param really was locked)
+      and if      every OTHER byte of #1[step] is 0xFF (it was the last one)
+
+A `FUNC`+`TRIG` placeholder fails the first test for every param -- its row holds no
+non-`0xFF` byte anywhere -- so it can never be deleted by an erase gesture. Multi-pass
+still falls out: erasing PTCH sees LEN still non-`0xFF` and does nothing; erasing LEN sees
+the rest already `0xFF` and fires.
+
+This also beats the alternative considered (a scratch flag set in the param loop and read
+at `0x40038af2`): that needed a third detour to clear the flag per track iteration, and
+leaked across calls if the row-not-empty path skipped the reader. The store-site design
+needs **no shared state at all**.
+
+Registers at `0x40038a5c`: `a0` = blob + pattern\*0x8ed8 + track\*0x91a + step\*32 (row
+base `a0+0x59`, TRAC = `a0 - d4`), `d2` = param, `d1` = 0xFF, `d4` = step\*32, `d7` =
+track, `a3` = step.
+
+Build: 296 B cave, 6 B detour, 250 bytes changed, EFT round-trip clean.
+
+### Test coverage added
+
+`tools/emu_triglock.py` now also runs case **C** against `ARTLTEST3` -- **real
+hardware-exported data** carrying a trigless lock with zero p-locks at step 6, i.e. exactly
+what `FUNC`+`TRIG` places. It erases a param that was never locked there and requires the
+flag to survive on both stock and patched. The previous build fails that test by
+construction; this is the regression that would otherwise have shipped.
