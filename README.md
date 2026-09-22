@@ -43,13 +43,14 @@ confirmed the Bug-1 fix.
 
 ## What this firmware does
 
-> **Branches.** The published **`main`** is the conservative line: the Bug-1 fix
-> + MUTE MODE `OT` / `OT+FX` only, at the exact patch that was flashed and
-> confirmed on hardware. **`wip`** is the working branch and carries everything
-> below. Bug 2, **QUANTIZE LIVE REC**, and the **SIDE-CHAIN COMPRESSOR** are
-> finished and hardware-confirmed on `wip`; **MUTE MODE**'s newer modes,
-> **DIRECT JUMP**, and **RELOAD FROM PROJECT** are still active work-in-progress
-> with real open bugs. Per-feature status is in the tables.
+> **Branches.** The published **`main`** carries the finished work: the Bug-1
+> manual-trig fix, the Bug-2 pattern-LED fix, **MUTE MODE** (all four modes),
+> **QUANTIZE LIVE REC**, the **SIDE-CHAIN COMPRESSOR**, and **trigless-lock
+> auto-remove** — every one of them flashed and confirmed on MKI hardware.
+> **`wip`** is the frontier: it carries all of the above plus the work that is
+> still in progress — **DIRECT JUMP**, **RELOAD FROM PROJECT**, and the
+> **part-change carryover** fix, each with real open bugs. Per-feature status is
+> in the tables below.
 
 ### Bug 1 — Plays-Free MIDI manual-trig stall  ·  **fixed, hardware-confirmed (MKI)**
 
