@@ -151,7 +151,7 @@ Which builds have run on real hardware and which are emulator-only is tracked in
 - **Octatrack KYOTI FW v1.0** — every mod above in one image, with all code caves
   and shared hooks de-conflicted, then round-tripped through the container tool
   (`elektron-firmware-tool`) with the checksums recalculated and verified.
-  → [`tools/build_merged.py`](tools/build_merged.py) ·
+  → *(combined build deferred — see [`reference/MERGE.md`](reference/MERGE.md))* ·
   write-up [`NOTES.md`](NOTES.md) "Session 45"
 
 See **[`BUILD_KYOTI.md`](BUILD_KYOTI.md)** for prerequisites, the one-time setup,
@@ -194,9 +194,8 @@ Never cut power during `UPDATING FLASH`. Full procedure and recovery net:
 | SIDE-CHAIN — DSP hooks | `build_sidechain2.py` / `build_sidechain3.py` | hooks emulator-verified (dsp56kEmu); the audio path is untested |
 | RELOAD FROM PROJECT | `build_reload2.py` | picker + SEQ worker emulator-verified end to end; the CF-card parse and the hold-event feel are a hardware test |
 | Empty-pattern LED fix | `build_pattern_led.py` | emulator only (stock repro + patched fix + no false positive) |
-| Part-params-carry-over fix | `build_partreapply.py` | emu-validated (clean A/B, `emu_partswitch.py --repro`); not yet folded into `build_merged.py`, not yet flashed |
+| Part-params-carry-over fix | `build_partreapply.py` | emu-validated (clean A/B, `emu_partswitch.py --repro`); not yet flashed; the combined build is deferred |
 | QUANTIZE LIVE REC toggle | `build_qlrec.py` | emulator only |
-| Octatrack KYOTI FW v1.0 (merged) | `build_merged.py` | composition emulator-verified; flash the per-feature passes first |
 
 ---
 

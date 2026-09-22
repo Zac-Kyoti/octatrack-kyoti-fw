@@ -267,7 +267,7 @@ touches exactly v3's cave + the one 4-byte record field, nothing else.
 `[PTN]`+`[YES]` flow is very likely equally dead on real hardware for the
 identical reason. It just hasn't been flash-tested yet (queued behind
 DIRECTJUMP). Worth the same kind of keymap-slot fix before it's ever flashed
-standalone or in `build_merged.py`.
+standalone (there is no combined build — see `reference/MERGE.md`).
 
 1. Hold **[PTN]** and tap **[YES]** → a transient **"DIRECT JUMP ON"** overlay
    (~0.7 s / ~68 frames), then **OFF** on the next chord. The SELECT PATTERN

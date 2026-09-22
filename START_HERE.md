@@ -37,7 +37,7 @@ published repo, `upstream` = mxldyn (fetch only, for `whatsnew.py`).
 | `NOTES.md` | the full chronological RE log; every finding, every session, every dead end |
 | `reference/kb/*.md` | **distilled knowledge base** — address map + file format + DSP + container + techniques, ours merged with external RE. Read the relevant one before a new patch |
 | `reference/EXTERNAL_RESEARCH.md` | index of the 6 external OT-RE repos + the sync/distill workflow (`tools/refs/`) |
-| `reference/MERGE.md` | **combining every final-scoped mod into one firmware** — cave allocation, detour inventory, the `[YES]` trampoline, shared-state table. `tools/build_merged.py` + `tools/emu_merged.py`. No-flash prep (Session 45) |
+| `reference/MERGE.md` | **combining every final-scoped mod into one firmware** — cave allocation, detour inventory, the `[YES]` trampoline, shared-state table. The combined build is **deferred and deliberately not buildable** until every feature is shippable; this doc is what it will be rebuilt from |
 | `README.md` | what the firmware is, the feature list + per-feature HW status, repo layout, lineage |
 | `BUILD_KYOTI.md` | roll-your-own build guide (every `build_*.py`, prerequisites, the reproducible patch) |
 | `COVERAGE.md` | what firmware subsystems are mapped vs untouched; the DSP-is-a-separate-blob caveat |
@@ -205,13 +205,13 @@ persistence (Session 22). **`tools/emu_rtos.py`** wraps octabam's full-firmware 
 (runs the real scheduler/tasks/CF/LOAD-PROJECT against our image — M6a/M6b verified,
 Session 23) — the tool for the p-lock backlog below.
 
-**Combined firmware (Session 45, no-flash):** `tools/build_merged.py` composes all five
-final-scoped mods (Bug-1 + MUTE MODE + **DIRECT JUMP v3** + SIDECHAIN3 + RELOAD2) into
-`out/OCTATRACK_OS1.40C_KYOTI_ALL.{syx,bin}` — caves auto-packed, the one shared handler
-(`[YES]` @ `0x4005e4c8`) resolved by a trampoline (RELOAD2 outer → `dj_toggle` chain,
-`patch_reload2.s` `.ifdef MERGE`). `tools/emu_merged.py` ALL GOOD. **Not flashed** —
-flash the per-feature builds first (order below), then the combined image. Full map +
-open decisions: `reference/MERGE.md`.
+**Combined firmware — deferred, deliberately not buildable.** There is no single
+"everything" image and no `build_merged.py`: shipping one while DIRECT JUMP, RELOAD
+FROM PROJECT and the part-change carryover fix are unfinished would quietly include
+them. Flash the per-feature builds one at a time (`BUILD_KYOTI.md`, `FLASHING.md`).
+The full allocation map, detour inventory and the `[YES]`-trampoline design are kept
+current in `reference/MERGE.md`, which is what the combined build will be
+reconstructed from when the remaining work lands.
 
 **DIRECT JUMP v3 (Session 45):** `build_directjump_v3.py` / `--defsym DJ_V3=1` — the
 confirmation toast is `FUN_4005a2b8(text, dur)`, the OS's own self-timing notification
@@ -229,7 +229,7 @@ the runtime dispatch straight to it. `tools/emu_directjump_v4.py` runs the *real
 slot on the v3 image (reproducing the HW failure), the live slot → `dj_toggle` on v4,
 and that `jsr`-ing that live slot actually runs the toggle end to end (re-checksum +
 toast fire + `DJ_MODE` flips). **Now the preferred build — v1/v2/v3 kept for reference
-but should not be flashed again.** `build_merged.py` still wires `DJ_V3` (the old, dead
+but should not be flashed again.** The withdrawn merge tooling still wired `DJ_V3` (the old, dead
 combo) — needs bumping to `DJ_KEYMAP` before the merge is touched again (not done yet;
 RELOAD2's `rl_yes` likely needs the identical fix first, since it shares the same
 detour).
@@ -255,9 +255,10 @@ to `TRK_PART`/`TRK_BANK` consistency across all 8 tracks. Along the way, fixed a
 pre-existing harness bug in `emu_partswitch.py`: `press_key_live(KEY_STOP)` never
 actually stopped the transport, which made the first validation pass look like a
 no-op on both stock and patched images — replaced with a direct
-`0x800065b8` poke. NEXT: add `patch_partreapply` to `build_merged.py` (checked against
-`MERGE.md` — orthogonal to all seven existing mods, no shared globals or detour
-collisions, should be mechanical), then an HW pass once the MKI is back. All the
+`0x800065b8` poke. NEXT: an HW pass once the MKI is back. (`patch_partreapply` was checked against
+`MERGE.md` and is orthogonal to every other mod — no shared globals, no detour
+collisions — so folding it into a combined build will be mechanical whenever that
+build is revived; the combined build itself is deferred and not currently buildable.) All the
 emulator tooling from this session is safely in `tools/` (not scratchpad) —
 `emu_partswitch.py`, `diff_flex_static.py`, `check_reccache_causation.py`,
 `scan_parts.py`, `patch_partreapply.s`, `build_partreapply.py`.

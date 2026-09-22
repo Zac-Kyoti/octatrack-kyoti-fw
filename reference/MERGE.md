@@ -1,16 +1,51 @@
 # MERGE.md — combining every final-scoped mod into one firmware
 
-**Status: no-flash merge prep (2026-09-10, `wip`).** `tools/build_merged.py`
-composes all seven and `tools/emu_merged.py` verifies the integration points. The
-combined image is **not hardware-tested**; the per-feature HW passes in `FLASHING.md`
-come first, in order, then this.
+**Status: DEFERRED (2026-09-21). There is deliberately no combined build.**
+`tools/build_merged.py` and `tools/emu_merged.py` have been **withdrawn** — a
+single combined image must not be buildable while DIRECT JUMP, RELOAD FROM PROJECT
+and the part-change carryover fix are still unfinished, because the obvious way to
+produce "the Kyoti firmware" would quietly ship them.
 
-This doc is the authoritative allocation map. Update it whenever a cave address, a
-detour site, or a shared global changes.
+**This document is the reason the tooling could be withdrawn safely.** It is the
+authoritative allocation map — cave addresses, the full detour inventory, the shared
+`[YES]` handler and its trampoline, the shared-state table — and it is what the
+combined build will be reconstructed from when every feature is shippable. Keep it
+current: update it whenever a cave address, a detour site, or a shared global
+changes, even though nothing builds from it today.
+
+The withdrawn scripts are recoverable from git history (`tools/build_merged.py`,
+`tools/emu_merged.py`, last present at the commit that removed them).
 
 ---
 
-## The seven final-scoped mods
+## When this is revived — the deltas since the tooling was withdrawn
+
+The withdrawn `build_merged.py` composed **seven** mods, and that set is now wrong in
+three ways. Do not resurrect it unchanged:
+
+1. **Add trigless-lock auto-remove.** Finished and hardware-confirmed after the merge
+   tooling was written, so it was never in it. One 6-byte detour at `0x40038a5c`
+   (`moveb %d1,%a0@(0x59,%d2:l) ; addl %d4,%d0`), one cave, 296 B standalone at
+   `0x400d7200`. It touches `FUN_40038874` — the LIVE erase worker — which no other
+   mod goes near, and shares no global with any of them. Its builder also carries
+   `assert_no_branch_into`, which every future detour in this project should be run
+   through: it refuses a detour whose displaced bytes contain a branch target.
+2. **Drop DIRECT JUMP and RELOAD FROM PROJECT** unless they are finished by then.
+   Both are still WIP with real open bugs (DJ resets the playhead to step 1 on a
+   manual pattern change; RELOAD2 has fixes that were never reflashed).
+3. **The `[YES]` trampoline exists only because those two collide.** If either is
+   dropped, `0x4005e4c8` has a single owner and the whole `MERGE=1` chaining
+   mechanism — and `patch_reload2.s`'s `.ifdef MERGE` path, and `dj_toggle` being
+   reached by chain rather than by its own detour — becomes unnecessary. Do not carry
+   that complexity forward without the collision that justifies it.
+
+Also note the cave map below was packed for the seven-mod set. Adding trigless-lock
+and removing two large caves (DIRECT JUMP 490 B, RELOAD2 1512 B) changes every address
+after the first removal, so re-pack from scratch rather than editing the table by hand.
+
+---
+
+## The seven final-scoped mods (the withdrawn tooling's set — see the deltas above)
 
 Only the *scoped* build of each — not the intermediates (`RELOAD2` not `RELOAD`,
 `SIDECHAIN3` not `SIDECHAIN`/`2`, DIRECT JUMP **v3** — see "DIRECT JUMP: use v3").
@@ -19,7 +54,7 @@ Only the *scoped* build of each — not the intermediates (`RELOAD2` not `RELOAD
 |---|---|---|
 | Bug-1 MIDI manual-trig fix | `build_trigscale_only.py` | `patch_trigscale.s` |
 | Bug-2 pattern-LED "only p-locks → empty" fix | `build_pattern_led.py` | `patch_pattern_led.s` |
-| MUTE MODE — `OT` / `OT+FX` / `DT` | `build_mutemode_dt.py` | `patch_softmute.s` + `patch_mutemode.s` (`DT_MODE=1`) |
+| MUTE MODE — now `OT` / `OTFX` / `OTFX-T` / `DT-T` (four values since addendum 14) | `build_mutemode_dt.py` | `patch_softmute.s` + `patch_mutemode.s` (`DT_MODE=1`) |
 | DIRECT JUMP — `[PTN]`+`[YES]` | `build_directjump_v3.py` (**v3**) | `patch_directjump.s` (`DJ_V3=1`) |
 | SIDE-CHAIN compressor | `build_sidechain3.py` | `patch_sidechain.s` + `patch_sc_dsp3.asm` + `sc_tables.py` |
 | RELOAD FROM PROJECT — hold `[PTN]` | `build_reload2.py` | `patch_reload2.s` |
@@ -30,7 +65,8 @@ row (`0x800000ac`) — no menu surgery, no defsym, two `jmp` detours (`0x4006177
 [PLAY] press, `0x4004883a` [REC] release) and one cave, none of it shared with the
 other six. Added to the merge in S48 (needed `FREE_START` lowered).
 
-Combined build: **`build_merged.py`** → `out/OCTATRACK_OS1.40C_KYOTI_ALL.{syx,bin}`.
+Combined build: **withdrawn** — see the status note at the top. The per-feature builds
+in `BUILD_KYOTI.md` are the only supported way to flash today, one feature at a time.
 
 ---
 
@@ -59,7 +95,7 @@ Combined build: **`build_merged.py`** → `out/OCTATRACK_OS1.40C_KYOTI_ALL.{syx,
 
 ---
 
-## ColdFire cave allocation (as `build_merged.py` packs it)
+## ColdFire cave allocation (as the withdrawn `build_merged.py` packed it)
 
 Free zone `0x400d6500 … 0x400d7c3c` (~5.8 KB). Packed from the bottom;
 `patch_trigscale` pinned at `0x400d7b00` so its bytes match `build_trigscale_only.py`,
@@ -79,9 +115,11 @@ and the relocated PERSONALIZE menu arrays go after it.
 | PERSONALIZE menu arrays ×3 (17 entries) | `0x400d7b40` | 204 B | relocated from `0x400b2a34/74/c0`; **placed after trigscale** (S47 -- RELOAD2 grew) |
 | — free — | `0x400d7c0c` | 48 B | |
 
-Addresses shift if any cave's size changes — `build_merged.py` re-packs and re-asserts
-every run (disjoint, inside the zone, every displaced-byte guard). Do not hand-copy
-these into another tool; read them from a build run.
+Addresses shift if any cave's size changes — the merged builder re-packed and
+re-asserted every run (disjoint, inside the zone, every displaced-byte guard). This
+table is therefore a **record of one packing**, not a specification: when the combined
+build is rebuilt, re-pack from scratch and let the tool assert the result. Do not
+hand-copy these addresses into another tool.
 
 ### Outside the free zone (SIDE-CHAIN only, no other mod touches these)
 
@@ -101,6 +139,7 @@ these into another tool; read them from a build run.
 | `0x4009a464` | Bug-2 | `cave` | jmp (6) | `move.l d2,-(sp) ; move.l 8(sp),d0` (cave replays both, then either returns 1 or `jmp 0x4009a46a` into the stock body) |
 | `0x40061778` | QLREC | `qlr_play` | jmp (6) | `jsr 0x4009b5c0` ([PLAY] press; cave replays it on the stock path, resumes `0x4006177e`) |
 | `0x4004883a` | QLREC | `qlr_recrel` | jmp (6) | `clr.l 0x460d1726` ([REC] release; cave replays it, then clears its own counter) |
+| `0x40038a5c` | TRIGLESS-LOCK AUTO-REMOVE | `cave` | jsr (6) | `moveb %d1,%a0@(0x59,%d2:l) ; addl %d4,%d0` (cave replays both; fires only when the erased param was really locked and every other param in the row is already `0xFF`) |
 | `0x40004dc6` | MUTE MODE | `pre` | jmp (6) | `move.l 0x80000008,d5` |
 | `0x40005178` | MUTE MODE | `pre_v` | jmp (8) | `lea -0xc(sp),sp` … |
 | `0x400a4006` | DIRECT JUMP | `dj_a` | jsr (6) | `tst.b (0x8000667e).l` |
@@ -212,27 +251,25 @@ line until v3 has a hardware pass; `build_merged.py` takes v3.
 
 The combined image is the shipping build, so it carries its own branding, **not** the
 `140C_KYOTI` used by the per-feature test images. Boot splash and **SYSTEM STATUS → OS
-VERSION** must both read **`KYOTI_V1.0`** (exactly 10 chars — the ELEK version field cap;
-`build_merged.py` errors if it overflows). `build_merged.py` defaults to it; the optional
-CLI arg still overrides for a one-off. Bump on a real release (`KYOTI_V1.1`, …); keep the
-per-feature builds on `140C_KYOTI` so a flash log makes it obvious which image is on the unit.
+VERSION** must both read **`KYOTI_V1.0`** — exactly 10 chars, which is the ELEK version
+field cap, so a revived builder must *error* rather than truncate if it overflows.
+Bump on a real release (`KYOTI_V1.1`, …); keep the per-feature builds on
+`140C_KYOTI` so a flash log makes it obvious which image is on the unit.
 
-## Build & verify
+## Build & verify — *what the withdrawn tooling did, and what a revived build must do*
 
-```
-python3 tools/build_directjump.py        # v1 stub -- emu_merged / v3 diff against it
-python3 tools/build_merged.py            # -> out/OCTATRACK_OS1.40C_KYOTI_ALL.{syx,bin}, OS VERSION = KYOTI_V1.0
-python3 tools/emu_merged.py              # STATIC + DYNAMIC, expect "ALL GOOD"
-```
+There is no combined build today (see the status note at the top), so nothing here is
+runnable. It is recorded because these are the checks the combined image needs, and
+re-deriving them from scratch would be expensive.
 
-`build_merged.py` asserts: cave layout disjoint + inside the zone; every displaced-byte
+The builder asserted: cave layout disjoint + inside the zone; every displaced-byte
 guard; no two detours at one site; Bug-1 bytes identical to `build_trigscale_only.py`;
 every change is one a standalone feature also makes (bar relocated caves / detours /
 the four SIDE-CHAIN descriptor pointer slots, which track `patch_sidechain`'s address);
 round-trip + checksum through Elektron's tool. The SIDE-CHAIN DSP bytes are
 byte-identical to `build_sidechain3.py`.
 
-`emu_merged.py` also asserts the Bug-2 detour (`0x4009a464` → `patch_pattern_led:cave`,
+The emulator pass also asserted the Bug-2 detour (`0x4009a464` → `patch_pattern_led:cave`,
 cave ends `jmp 0x4009a46a`) and the two QLREC detours (`0x40061778` / `0x4004883a` →
 `patch_qlrec:qlr_play` / `qlr_recrel`). `tools/emu_pattern_led.py --image out/mainos_merged.bin`
 re-runs the full Bug-2 case set against the relocated cave in the combined image
