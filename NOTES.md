@@ -24536,6 +24536,51 @@ project file, load it with a STOCK 1.40C image in the emulator, and confirm noth
 the behaviour is unchanged from the build already on the unit (audio path byte-identical); only
 the menu/persistence plumbing changed, so a reflash is only needed to pick that up.
 
+### ARTLTEST6: the cave never ran at all — and the RAM/disk mapping that proves it
+
+Log area in `ARTLTEST6` came back **entirely 0xFF**. Before trusting that, the log's
+RAM<->disk mapping was verified independently against a real export: for every
+(pattern,track) sampled including the (15,7) the log lives in, RAM `TRAC(pat,trk)` equals
+disk `trac_off(pat,trk)+9` across the whole `0x91a` block (the disk block carries a
+`"TRAC"` magic header, which is the +9). So the channel is addressed correctly.
+
+**`FUN_40042158`'s tail was never entered once** — not even for the two p-lock WRITES that
+created the trigless lock on that firmware. It is therefore not on the LIVE-REC editing
+path at all; it is most likely the grid-rec writer (hold a trig, turn a knob). Calling it
+directly in the emulator "worked" and meant nothing.
+
+v1 also could not distinguish "the cave never ran" from "the user flashed the wrong
+image" — both read as all-0xFF. That ambiguity was a defect in the instrument.
+
+### v2 — measure the message stream instead of guessing the handler
+
+`tools/patch_triglock_diag.s` v2, two detours into one cave (builder resolves entry points
+from the linked ELF's symbol table, so reordering the source cannot mis-aim a detour):
+
+| site | 6 stock bytes | what it does |
+|---|---|---|
+| `0x40061ce2` `caveA` | `1012 5380 7180` (`moveb %a2@,%d0 ; subql #1,%d0 ; mvzb`) | the sys dispatcher's opcode decode — **every** UI message passes here; writes a `"KYOTI"` beacon + a per-opcode histogram |
+| `0x400426fc` `caveB` | `1230 3800 8081` | the candidate fix + why-it-rejected codes, unchanged |
+
+The beacon removes v1's ambiguity: a log without `"KYOTI"` means the wrong firmware, full
+stop, and can never be misread as "the instrumented code didn't run".
+
+With the routing table already decoded from `0x40061cfa`, the opcode histogram **names the
+handler with no hypothesis required** — which is the entire point after three builds whose
+"validation" consisted of driving the assumed target with the assumed arguments.
+
+Emulator check of the instrument (`ARTLTEST1`): beacon `b'KYOTI'` build 2; opcodes seen
+during a real project load `[(9,1),(17,1),(20,2),(21,2),(43,16),(50,1),(51,1)]`; `caveB`
+entries 1 -> reason 4, entries 2 -> reason 7 with `TRIGLESS` cleared.
+
+**A regression the emulator caught before shipping**: `.Lbump` takes its counter address in
+`a0`, which is also `caveB`'s live bitmap base, so the entry-count call destroyed it and
+every call rejected at guard 1. Stashed across the call. This is the second instrument bug
+found by validating the instrument itself; doing that is now non-optional for this thread.
+
+Counters: `0xFF` = never written, `0xFF -> 1` on first use, saturate at `0xFE`.
+Reader: `tools/read_triglock_log.py` (v2 layout, annotates each opcode with its handler).
+
 ## Session 80 continued (4) (2026-09-21, `wip`) — RELOAD2: root-caused the ~1 s stall + sequencer restart. Every reload was followed by a FULL whole-bank reload from the card
 
 **Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (3)"),
@@ -24643,3 +24688,101 @@ Still open: the `G_KIND` / `RELOAD BUSY` root cause (both leading hypotheses now
 dead), the arrow glitches (mechanism measured in "(3)": LEFT/RIGHT share handlers
 with DOWN/UP *and* auto-repeat), and the list UI (stock's 12-entry table at
 `0x400beb72`, renderer still unlocated).
+
+## Session 79, continued an eighteenth time (2026-09-21) — HARDWARE REGRESSION: shipped a
+build that broke the user's MKI. Root-caused, reproduced, fixed, and a fail-safe guard
+added. The test gap that let it through is the important part of this entry.
+
+**The user flashed the build from the previous entry and it was unusable**: sequencer
+transport visually frozen, audio reduced to very short clicks in time with the programmed
+trigs, LED step 4 yellow / step 9 flashing red, across a 3-pattern DJTESTxxx project.
+Reverted to stock 1.40C.
+
+### Root cause: a latent `move.b` bug my STEP_IN_PAT fix turned catastrophic
+
+`dj_pertrack_fix`'s `dpf_normal` branch (the `SCALE_MODE == 0`, pattern-level-scale path)
+read:
+
+```
+dpf_normal:
+    moveq   #0,%d1
+    move.w  #0x8e54,%d1        | d1 = 0x00008e54
+    move.b  (%a1,%d1.l),%d1    | move.b writes ONLY the low 8 bits
+```
+
+`%d1` was used as BOTH the 0x8e54 offset and the destination. `move.b` into a data
+register leaves bits 8-31 intact, so `%d1` came out as `0x8e00|scaleByte` rather than the
+scale index, and the next line -- `move.l (%a0,%d1.l*4),%d1` -- read roughly `0x8e02*4`
+bytes PAST the end of `LEN_TBL` and used whatever it found as this track's length.
+
+That mis-indexing was **pre-existing** (it only ever fed `REFILL_TBL`, a fire-gate
+counter). What made it fatal is that the previous entry's fix started feeding the same
+garbage into `STEP_IN_PAT[t]` -- the counter whose zero directly gates trig firing. A
+length larger than the real wrap length makes the counter wrap EVERY tick, so every trig
+fires continuously and the step position never advances: exactly the clicks + frozen
+transport the user reported.
+
+Whether the out-of-bounds read is harmless or fatal is pure data-dependent luck (the bogus
+address varies with each pattern's own scale byte): in the emulator it came back <= 0 and
+the `tst.l/ble` guard skipped the write silently; on the user's hardware it did not.
+
+### Why two "successful" validations missed it  [the actual lesson]
+
+**Both validation runs targeted `SCALE_MODE == 1` patterns, so the broken branch never
+executed once.** `DEMO_PROJECT` bank 1 patterns 1-4 are all `scale_mode=1`, and the
+DJTESTxxx run deliberately targeted pattern index 0 -- also `scale_mode=1`. The one
+project axis I had just gone to the trouble of obtaining a real hardware export for, I
+then only ever exercised on one side of its own branch. Reproduced the failure afterwards
+in seconds by aiming at a `scale_mode=0` pattern (`--start-pattern 5 --pattern-delta 1`,
+target index 6 in DEMO bank 1): **22 of 64 slots differ -- WORSE than stock's own 20/64**,
+with the hook's write absent at the commit frame because the `<= 0` guard had swallowed it.
+
+### The fix, and a fail-safe guard
+
+1. Use a separate scratch register for the offset so the destination is genuinely
+   zero-extended (`%d2` is dead after `%a0` is computed at dpf_loop's top -- checked).
+2. **Bounds-guard the index before it is used or stored.** `LEN_TBL` (0x400aba50) has
+   exactly TWELVE real entries -- `[0..11] = 3,4,6,8,12,24,48,96,48,24,12,6`; `[12]` is 0
+   and `[13+]` is an unrelated table (2646000, the per-step increment constant). Anything
+   outside 0..11 is not a scale index, so the hook now leaves that track entirely alone --
+   including NOT writing `TRK_SCALE_IX`, since stock's own wrap check reads that cache and
+   a bogus index there would corrupt stock too. Guard first, write second.
+
+### Validation -- BOTH branches this time  [MEASURED]
+
+```
+                          scale_mode=0 target      scale_mode=1 target
+stock DIRECT JUMP              20/64                     20/64
+shipped (broken) build         22/64  <-- REGRESSION       3/64
+fixed + guarded                 4/64                       3/64, ticks 6/12
+```
+
+### Also audited, and cleared
+
+- **Hook D (`dj_scaleix_fix`)** has the same `move.b`-into-a-dirty-register shape, but its
+  destination write is also byte-sized (`move.b %d1,SCALE_IX`), so the dirty upper bits are
+  never used. Safe, unchanged.
+- **Hook E (`dj_abstick`)** correctly replays its displaced `move.b %d0,STEP` and preserves
+  d0/d1.
+- **The scratch globals are genuinely free**: scanned the stock image for absolute-long
+  references to 0x80006a30-0x80006a5f -- **zero** hits (the patched image has our 4 + 3,
+  confirming the scan works). So `G_ABSTICK`/`G_JUST_COMMITTED` are not aliasing stock
+  state, and Hook F cannot be firing spuriously with DIRECT JUMP off.
+
+### OPEN — do not flash again until this is answered
+
+**It is not yet established that the above was the user's actual failure.** Hook F only
+runs on a real DIRECT JUMP commit, so if DIRECT JUMP was OFF when the unit misbehaved,
+this bug cannot be the cause and something unconditional is still unaccounted for. Asked
+the user; awaiting the answer. The three unconditional-path audits above are what exists
+so far in that direction.
+
+### Process change this thread should keep
+
+"Validated" now has to mean every branch of the hook actually executed, not just a passing
+end-to-end number on one configuration. A green comparison on a code path that never ran
+is worth nothing, and this cost the user a bad flash to learn.
+
+Logs: `/tmp/dj_repro2.log` (reproduction, 22/64), `/tmp/dj_fix_sm0.log` /
+`/tmp/dj_guard_sm0.log` (fixed + guarded, 4/64), `/tmp/dj_guard_sm1.log` (no regression,
+3/64).

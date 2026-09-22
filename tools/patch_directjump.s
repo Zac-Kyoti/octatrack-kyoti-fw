@@ -676,9 +676,24 @@ dpf_loop:
     move.b  0x51(%a0),%d1               | per-track scale index (SCALE_MODE != 0)
     bra.b   dpf_gotidx
 dpf_normal:
+|   Session 79 ("continued an eighteenth time") -- HARDWARE REGRESSION, root cause:
+|   this used to be `moveq #0,%d1 ; move.w #0x8e54,%d1 ; move.b (%a1,%d1.l),%d1`, i.e. it
+|   reused %d1 as BOTH the 0x8e54 offset and the destination. `move.b` into a data register
+|   writes only the low 8 bits, so %d1 came out as 0x8e00|scaleByte instead of the scale
+|   index -- and the LEN_TBL lookup below then read ~0x8e02*4 bytes PAST the table, i.e.
+|   garbage, as this track's length. Whether that garbage is <=0 (caught by the guard
+|   below, fix silently skipped) or >0 (used as a real length) is pure data-dependent luck:
+|   in the emulator it came out <=0, on the user's own hardware it did not, and
+|   `G_ABSTICK mod garbage` then landed a value larger than the real wrap length in
+|   STEP_IN_PAT[t] -- so the counter wrapped EVERY tick, firing every trig continuously
+|   (audible as very short clicks) with the step position frozen. Only reachable when
+|   SCALE_MODE == 0; both validation runs happened to target SCALE_MODE == 1 patterns,
+|   which is exactly why this shipped. Use a separate scratch register for the offset so
+|   the destination is genuinely zero-extended.
+    moveq   #0,%d2
+    move.w  #0x8e54,%d2                 | d2 = offset only -- NOT the destination
     moveq   #0,%d1
-    move.w  #0x8e54,%d1
-    move.b  (%a1,%d1.l),%d1             | pattern-default scale index (SCALE_MODE == 0)
+    move.b  (%a1,%d2.l),%d1             | pattern-default scale index (SCALE_MODE == 0)
 dpf_gotidx:
 |   Session 79 (NOTES.md, "continued a seventeenth time"): d1 holds this track's scale
 |   index for the incoming pattern right here, chosen by the SAME SCALE_MODE test stock
@@ -694,6 +709,16 @@ dpf_gotidx:
 |   scale index; this is its per-track counterpart, and the long-open Session 15 #4 gap.
 |   Costs nothing extra: the value is already computed, and %a0 is reloaded on the very
 |   next line anyway.
+|   FAIL-SAFE BOUNDS GUARD (Session 79, "continued an eighteenth time"). LEN_TBL at
+|   0x400aba50 has exactly TWELVE real entries -- [0..11] = 3,4,6,8,12,24,48,96,48,24,12,6;
+|   [12] is 0 and [13+] is an unrelated table (2646000, the per-step increment constant).
+|   The regression that reached hardware came from indexing this table out of bounds and
+|   using whatever came back as a track length. Anything outside 0..11 is therefore not a
+|   scale index at all, and the only safe action is to leave this track completely alone --
+|   including NOT writing TRK_SCALE_IX, since stock's own wrap check reads that cache and a
+|   bogus index there would corrupt stock too. Guard first, write second.
+    cmpi.l  #11,%d1
+    bhi.b   dpf_skip                    | not a real scale index -> touch nothing
     lea     TRK_SCALE_IX,%a0
     move.b  %d1,(%a0,%d6.l)             | TRK_SCALE_IX[t] = the INCOMING pattern's index
     lea     0x400aba50,%a0
