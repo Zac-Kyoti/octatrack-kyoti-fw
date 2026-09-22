@@ -75,6 +75,8 @@ def main(argv):
                     help="value to force into D7 at 0x400a4834 (-1 = observe only)")
     ap.add_argument("--pre", type=int, default=1200)
     ap.add_argument("--post", type=int, default=900)
+    ap.add_argument("--set-abstick", type=int, default=-1,
+                    help="poke G_ABSTICK to this before cueing, to probe the overflow bound")
     ap.add_argument("--tree", default="out/_emu_d7inj")
     a = ap.parse_args(argv)
 
@@ -141,6 +143,13 @@ def main(argv):
     t = rt.frame_count + a.pre
     while rt.frame_count < t:
         rt.run(ms=60)
+    if a.set_abstick >= 0:
+        # NEXT_STEP is stored with `move.w D0w,(A0)` at 0x400a4916 and read back
+        # SIGN-EXTENDED by `mvs.w (A0),D1` at 0x400a4950, so the first divide's quotient
+        # -- which equals G_ABSTICK -- must fit in a SIGNED WORD. Past 32767 it goes
+        # negative and the per-track modulo is wrong. Poke the counter to probe that
+        # bound directly instead of emulating an hour of playback.
+        rt.uc.mem_write(0x80006A46, a.set_abstick.to_bytes(4, 'big'))
     rt.uc.mem_write(PEND_BANK, bytes([final_bank]))
     rt.uc.mem_write(PEND_PAT, bytes([a.to_pattern]))
     t = rt.frame_count + a.post

@@ -26423,3 +26423,63 @@ records: 26 B stride, [0]=code [2..5]=press [6..9]=release [10..13]=hold
 **Risk to respect: a push without a matching pop wedges the keyboard.** Any
 implementation must have the real-key harness proving push/pop balance across
 EVERY exit path — YES-execute, NO-cancel, BUSY-toast — before it is flashed.
+
+## Session 79, continued a thirty-first time — AR research consolidated into `reference/AR_DIRECT_JUMP.md`; 16-bit position bound MEASURED
+
+### `reference/AR_DIRECT_JUMP.md` (new, canonical, kept in BOTH repos)
+
+At the user's direction, the entirety of the AR DIRECT JUMP reverse engineering and its
+mapping onto the OT now lives in one document, copied verbatim to
+`ar-kyoti-fw/AR_DIRECT_JUMP.md` so neither repo depends on the other being at hand. Contents:
+AR's request path, countdown and commit (including the two 13-track rebuild loops and the full
+eight-array inventory Sessions 1-7 missed); the OT equivalent at `0x400a4884`; a full **AR <->
+OT mapping table**; what the port turned out to be; the three repair hooks and why two were
+harmful; the 16-bit bound; AR-side open items; and the methodology hazards.
+
+**Headline, restated for the record:** AR and OT have the **same architecture**. Both rebuild
+every per-track variable at commit from one master position, dividing by that track's own
+ticks-per-step and wrapping to that track's own length. OT's machinery was already present and
+already correct -- it had simply never been handed a non-zero offset, because `0x80006628` is 0
+at a natural boundary and nothing ever set it. So there was nothing to port: DIRECT JUMP is
+"supply the offset the existing AR-equivalent code already expects".
+
+Two real differences survive the mapping: AR's pattern-pointer write is atomic (two adjacent
+instructions) where OT's `ACT_PAT`/`ACT_BANK` are 12 bytes apart; and AR commits from its own
+per-tick function where OT's rebuild lives inside the pattern-boundary body.
+
+### Reverse switch direction -- 16/16
+
+DJTESTxxx pattern 0 -> 1 (into the `SCALE_MODE = 0` pattern), armed, `G_ABSTICK = 26`,
+`D7 = 156`: all 16 tracks match the model. Track 1 shows `STEP = 9`, `CNTDN = 3` -- the
+designed scale-difference deferral (cont.27), not a fault.
+
+### MEASURED: 16-bit position bound -- a real must-fix limitation
+
+`NEXT_STEP[t]` is stored with `move.w` (`0x400a4916`) and read back **sign-extended** with
+`mvs.w` (`0x400a4950`). The first divide's quotient equals `G_ABSTICK` when a track's
+resolution matches the master's, so `G_ABSTICK` must fit a **signed word**.
+
+Probed directly by poking the counter (`--set-abstick`, rather than emulating an hour of
+playback): `G_ABSTICK = 40002` -> `D7 = 240012` -> `NEXT_STEP = -14`, `STEP = 242` on a
+16-step pattern. Garbage, and badly so.
+
+Bound ~= **32767 master steps**, i.e. roughly **68 minutes of continuous transport** at
+120 BPM with 16th steps. Hook H must reduce `G_ABSTICK` before storing it. **The reduction
+modulus is open work**: it has to be a common multiple of the per-track lengths in play or
+per-track positions shift, and the fastest-track ratio also has to keep the quotient inside a
+signed word -- those two constraints pull against each other and I do not yet have a
+construction that satisfies both for arbitrary length/scale combinations.
+
+AR does not have this failure mode, because its dividend is the bounded
+`masterStep mod patternLen`, not an unbounded absolute counter -- a direct consequence of AR
+committing from its own per-tick function instead of reusing a boundary body. **That is the
+one place where AR's architecture is genuinely better than OT's, and it is the thing this
+port has not solved.**
+
+### Hook D fixture hunt -- bank 0 exhausted
+
+Scanned all 16 patterns of DJTESTxxx bank 0: every one has `+0x8e52 == +0x8e54 == 2`, so none
+can distinguish Hook D's unconditional `+0x8e54` read from stock's `SCALE_MODE`-dependent
+`+0x8e52`. Pattern 0 is the only `SCALE_MODE = 1` pattern and carries the per-track spread
+(`SCALE=[2,0,2,2,2,2,2,2]`, `LEN=[16,16,12,16,...]`). Rescan of the refreshed export, other
+banks, in progress.

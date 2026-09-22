@@ -117,6 +117,8 @@ def main(argv):
     ap.add_argument("--pattern", type=int, default=None)
     ap.add_argument("--frames", type=int, default=1400)
     ap.add_argument("--tree", default="out/_emu_seqact")
+    ap.add_argument("--scan-patterns", type=int, default=0,
+                    help="dump header fields for the first N patterns and exit")
     a = ap.parse_args(argv)
 
     if not pathlib.Path(a.image).exists():
@@ -174,6 +176,33 @@ def main(argv):
 
     print(f"image   {a.image}")
     print(f"project {a.project}  bank={final_bank} pattern={pat}")
+    if a.scan_patterns:
+        # Looking for a pattern with SCALE_MODE=1 AND +0x8e52 != +0x8e54 -- the only
+        # case that can distinguish Hook D's unconditional +0x8e54 read from stock's
+        # own master-scale convention (cont.23/cont.30).
+        rd = lambda ad, n=1: bytes(rt.uc.mem_read(ad, n))
+        print(f"\n=== pattern header scan, bank {final_bank} ===")
+        print("  pat  +8e52  +8e53(LEN)  +8e54(SCALE)  +8e55(MODE)   note")
+        for q in range(a.scan_patterns):
+            b = BLOB_BASE + final_bank * BANK_STRIDE + q * PAT_STRIDE
+            try:
+                v52, v53, v54, v55 = (rd(b + o)[0] for o in (0x8E52, 0x8E53, 0x8E54, 0x8E55))
+            except Exception:
+                continue
+            note = ""
+            if v55 and v52 != v54:
+                note = "<<< SCALE_MODE=1 and 8e52 != 8e54 -- distinguishes Hook D"
+            elif v55:
+                note = "per-track mode"
+            print(f"  {q:3d}  {v52:5d}  {v53:10d}  {v54:12d}  {v55:10d}   {note}")
+        # also report per-track scale spread
+        for q in range(a.scan_patterns):
+            b = BLOB_BASE + final_bank * BANK_STRIDE + q * PAT_STRIDE
+            sc = [rd(b + t * TRK_STRIDE + 0x51)[0] for t in range(8)]
+            ln = [rd(b + t * TRK_STRIDE + 0x50)[0] for t in range(8)]
+            if len(set(sc)) > 1 or len(set(ln)) > 1:
+                print(f"  pat {q}: per-track SCALE={sc} LEN={ln}")
+        return 0
     dump_pattern(rt, final_bank, pat)
     sample()
     rt.start_transport_live()
