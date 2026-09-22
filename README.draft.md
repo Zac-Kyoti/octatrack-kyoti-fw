@@ -132,6 +132,19 @@ Which builds have run on real hardware and which are emulator-only is tracked in
   → [`tools/build_qlrec.py`](tools/build_qlrec.py) ·
   write-up [`NOTES.md`](NOTES.md) "Session 46", "Session 50", "Session 51/51-bis/51-ter"
 
+- **Erase empty trigless locks** — a trigless lock (a step carrying parameter
+  locks but no audible trig) left lit on the trig row forever once its last
+  remaining lock was erased, even though it was now inert. The handler had been
+  mis-identified for about fifty sessions; the real path (`opcode 8` →
+  `FUN_40041af4` → `FUN_40038874`) has no `linkw`, which is why function-boundary
+  scans kept missing it. The fix sits on the erase store itself, so a
+  deliberately empty trigless lock placed with `FUNC`+`TRIG` is never mistaken
+  for one that just lost its last lock. **Fixed, hardware-confirmed** (MKI,
+  2026-09-21): multi-pass erase, last-lock removal, ordinary trigs, and
+  `FUNC`+`TRIG` placeholders all check out.
+  → [`tools/build_triglock.py`](tools/build_triglock.py) ·
+  write-up [`NOTES.md`](NOTES.md) "Session 13", "Session 78"
+
 ### Bugfixes
 
 - **MIDI Plays-Free trig fix** — a Plays-Free MIDI track with trig quantize
@@ -149,19 +162,6 @@ Which builds have run on real hardware and which are emulator-only is tracked in
   2026-09-13, no regression.
   → [`tools/build_pattern_led.py`](tools/build_pattern_led.py) ·
   write-up [`NOTES.md`](NOTES.md) "Session 48"
-
-- **Erase empty trigless locks** — a trigless lock (a step carrying parameter
-  locks but no audible trig) left lit on the trig row forever once its last
-  remaining lock was erased, even though it was now inert. The handler had been
-  mis-identified for about fifty sessions; the real path (`opcode 8` →
-  `FUN_40041af4` → `FUN_40038874`) has no `linkw`, which is why function-boundary
-  scans kept missing it. The fix sits on the erase store itself, so a
-  deliberately empty trigless lock placed with `FUNC`+`TRIG` is never mistaken
-  for one that just lost its last lock. **Fixed, hardware-confirmed** (MKI,
-  2026-09-21): multi-pass erase, last-lock removal, ordinary trigs, and
-  `FUNC`+`TRIG` placeholders all check out.
-  → [`tools/build_triglock.py`](tools/build_triglock.py) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 13", "Session 78"
 
 - **Part-change carryover fix** *(partial — the reported bug is still open)* —
   after a pattern-triggered Part change, stale per-track state from the old
