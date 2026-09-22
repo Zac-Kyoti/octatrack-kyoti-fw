@@ -24535,3 +24535,111 @@ project file, load it with a STOCK 1.40C image in the emulator, and confirm noth
 `out/mainos_mutemode_dt.bin` = `mainos_otfx_v10.bin`. All build guards pass. NOT flashed --
 the behaviour is unchanged from the build already on the unit (audio path byte-identical); only
 the menu/persistence plumbing changed, so a reflash is only needed to pick that up.
+
+## Session 80 continued (4) (2026-09-21, `wip`) — RELOAD2: root-caused the ~1 s stall + sequencer restart. Every reload was followed by a FULL whole-bank reload from the card
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (3)"),
+appended after whatever concurrent entries landed in between.
+
+Hardware first confirmed the previous entry's work: `[BANK]`+`[YES]` operates
+cleanly, the SELECT BANK toast no longer flashes under the picker, a plain
+`[BANK]` tap still shows it on release, and `[PTN]` is stock. User: "All of the
+changes that were just made seem to be operating cleanly."
+
+### The finding: the type-0x14 job IS stock's RELOAD BANK, and its doneFn reloads the whole bank regardless of what our worker did
+
+Measured with the new `tools/diag_reload2_deser.py` on the real storage task —
+one TRK SEQ reload, then keep running instead of halting:
+
+```
+rl_job -> parse_pattern (our 1 slice) -> JOB14_EXIT -> job_doneFn
+  -> 0x400a69e0 -> WHOLE_BANK_DESER (0x4008ded0, from 0x40090730)
+  -> PUSH_LAYER 0x400d0bc4 ("RELOADING BANK") -> parse_pattern x16 -> POP_LAYER
+```
+
+**16 pattern parses straight off the card, after our slice copy, every time.**
+That is issue #2 in full: the "just under a second" pause and the sequencer
+restart the user reported. It also means TRK SEQ was only *nominally* per-track
+— the whole bank reverted a moment later too, so the careful slice was mostly
+theatre on hardware.
+
+**Why no test ever caught this**: `emu_reload.py`'s `cmd_trk` hooks `0x4008ded0`,
+calls it "the residual whole-bank deser", and **stops the emulator the instant it
+is entered**. `--trk` has reported `deser_seen=True` on every run for sessions.
+The halt is fine for measuring the slice but it meant nothing in the suite had
+ever observed the tail. On hardware nothing halts it. A flag sitting in our own
+test output was naming the bug the whole time.
+
+### TWO WRONG TURNS, both caught by measurement rather than reading
+
+**(1) The obvious call site was the wrong one.** doneFn `0x40023bf4` opens with
+`bsr.w 0x40022e04` ; `jsr 0x40080844` (`0x40023c00`/`0x40023c04`), and
+`0x40080844` *looks* like the reload — the `0x400d0bc4` overlay push/pop sit at
+`0x4008092c` / `0x4008086a`, numerically right inside it. Detouring `0x40023c04`
+(one-shot flag, `rl_own`) changed **nothing**: the trace came back byte-identical
+with our hook entered and the flag consumed. The counters gave it away —
+`0x40022e04` and `0x40080844` each ran **twice**, and the reload is in the SECOND
+pair, off the SUCCESS path:
+
+```
+0x40023c0e  bge.s 0x40023c62        ; result >= 0
+0x40023c62  mvs.w 0x460bd910,d0     ; the bank mask (FUN_40022778 stashes it at buf-2)
+0x40023c68  move.l d0,-(sp) ; pea 0x100f8378
+0x40023c70  bsr.w 0x40023b68        ; <-- THE reload
+```
+
+**"Numerically near `0x40080844`" is not "inside `0x40080844`"** — the same
+reasoning error as this session's retracted `FUN_400238a4` xref claim, and it
+cost a full emulator run. `rl_done` now sits at `0x40023c62` and, when the
+one-shot is set, jumps straight to doneFn's epilogue (`0x40023c76`) so
+`0x40023b68` never runs. (The displaced `mvs.w` is re-implemented as `move.w` +
+`ext.l` — `mvs` is ColdFire-only and there is no reason to depend on it.)
+
+**(2) Suppressing the reload alone BROKE the feature, silently.** With the reload
+gone, the next run reported `LIVE copy: STILL SCRIBBLED -- reload would be
+inaudible`. Our worker writes only the **cold blob** (`0x400e21e0…`); stock's
+whole-bank reload was what refilled the downstream **live cache** at
+`0x1001614e`. Correct data in the blob, stale bytes under the playhead. Had this
+been shipped on the trace alone, TRK SEQ would have done nothing audible.
+
+Fix, already documented in our own NOTES (Session 27 thread) and re-verified
+against the disassembly rather than trusted: **`FUN_4000faf0(bank)`**, stock's
+"make bank current" — `memcpy(0x1001614e, blob + bank*0x9b340, 0x8ed80)` plus
+parts → `0x100a4ece`. RAM→RAM, no card access, so it costs a few ms rather than
+the ~1 s the card read did, and it is safe for exactly this use: it copies all 16
+slabs but only the reloaded one differs. Direction is correct — the cold blob is
+the working store (p-lock edits land there), the live cache is downstream.
+`rl_job` now calls it at `rlj_setflag`, on all three kinds.
+
+### Validation
+
+`diag_reload2_deser.py` final state: trace is `rl_job -> parse_pattern(1) ->
+JOB14_EXIT -> job_doneFn -> rl_done`, **no deserialiser, no 16 parses, no overlay
+push/pop**, layer balance 0, `G_KIND` 0, **cold blob REVERTED and LIVE copy
+REVERTED**. `--combo` **ALL GOOD 19/19**, `emu_reload2_keymap.py` **ALL GOOD**,
+`diag_bank_window.py` **ALL GOOD** (stock + patched). 8 detours, 1364 B vs stock.
+
+### Two hypotheses DIED here — record them so they are not re-run
+
+- **Keymap-layer imbalance is NOT why `[YES]` goes dead.** Measured push/pop
+  balance is **0** across a full reload, before and after the fix. The
+  `0x400d0bc4` overlay's push and pop both live inside the suppressed subtree, so
+  skipping it leaves the stack balanced rather than stranding a layer.
+- **A single clean reload does NOT reproduce the stuck `G_KIND`.** It reads 0
+  afterwards on every run. `RELOAD BUSY` therefore needs some *other* trigger —
+  repeated/rapid use, a second job type interleaving, or a path where `rl_job`'s
+  `rlj_ours` branch is never taken. Not found yet; do not assume the reload tail
+  explains it, because it does not.
+
+### Status
+
+**NOT yet flashed.** Next hardware pass: does the ~1 s stall disappear, does the
+sequencer stop restarting, is the reload still audible, and — the new one worth
+checking deliberately — **edit a DIFFERENT track, then TRK SEQ the addressed one,
+and confirm the other track's edit now survives** (before this fix it would not
+have, since the whole bank was being reloaded behind the slice).
+
+Still open: the `G_KIND` / `RELOAD BUSY` root cause (both leading hypotheses now
+dead), the arrow glitches (mechanism measured in "(3)": LEFT/RIGHT share handlers
+with DOWN/UP *and* auto-repeat), and the list UI (stock's 12-entry table at
+`0x400beb72`, renderer still unlocated).

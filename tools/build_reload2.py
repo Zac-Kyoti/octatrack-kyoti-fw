@@ -153,7 +153,13 @@ PATCHES = [
       # BANK" (0x400b7302) has exactly one use -- the call we suppress -- and
       # nothing in the image branches into either displaced range (scanned).
       (0x4007af42, "rl_bank_press", "487a04c442a7", 6, "jmp"),   # press tail: pea 0x4007b408(pc) ; clr.l -(sp)
-      (0x4007b3e0, "rl_bank_rel", "7002b0b9460e73c6", 8, "jmp")]),  # release: moveq #2,d0 ; cmp.l 0x460e73c6,d0
+      (0x4007b3e0, "rl_bank_rel", "7002b0b9460e73c6", 8, "jmp"),  # release: moveq #2,d0 ; cmp.l 0x460e73c6,d0
+      # Session 80 continued (4): the type-0x14 doneFn's SUCCESS path, which is
+      # what re-reads all 16 patterns of the bank after our slice copy (measured
+      # by diag_reload2_deser.py -- and NOT the `jsr 0x40080844` two lines above
+      # it, which was tried first and changed nothing). Gated on a one-shot flag
+      # rl_job sets, so a genuine stock RELOAD BANK is never suppressed.
+      (0x40023c62, "rl_done", "71f9460bd910", 6, "jmp")]),          # doneFn success: mvs.w 0x460bd910,d0
 ]
 
 # Session 80 continued (2): the [BANK]-held keymap overlay layer.

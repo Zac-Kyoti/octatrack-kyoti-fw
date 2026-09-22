@@ -194,6 +194,14 @@
 |   [YES] handler @ 0x4005e4c8.  Detour replaces `move.l 4(sp),d1 ; move.l 8(sp),d0` (8 B).
     .equ YES_RESUME,0x4005e4d0
 
+|   Session 80 continued (4): the type-0x14 doneFn's SUCCESS path.
+    .equ LIVE_REFRESH, 0x4000faf0       | FUN_4000faf0(bank) "make bank current":
+                                        | memcpy(0x1001614e, blob+bank*0x9b340, 0x8ed80)
+                                        | + parts -> 0x100a4ece. RAM->RAM, no card.
+    .equ MASK_SAVED,   0x460bd910       | the bank mask, stashed by FUN_40022778 at buf-2
+    .equ DONE_RESUME,  0x40023c68       | resume after the displaced mvs.w (move.l d0,-(sp))
+    .equ DONE_EPILOG,  0x40023c76       | doneFn epilogue: move.l (sp)+,d2 ; movea.l (sp)+,a2 ; rts
+
     .equ JOB_POST,  0x40022778          | FUN_40022778(mask) -> post the type-0x14 storage job
     .equ JOB14_EXIT,0x400858a8          | 0x14 case: tst.l d0 ; ... ; done-dance ; -> dequeue loop
     .equ JOB14_ORIG,0x4008586c          | 0x14 case: resume after the displaced 2 insns
@@ -626,6 +634,56 @@ rl_fmt_mtrk:
     .asciz "MT%d SEQ"
     .align 2
 
+| ===== suppress the stock WHOLE-BANK reload our own job would otherwise cause =====
+| Session 80 continued (4). MEASURED by tools/diag_reload2_deser.py on the real
+| storage task -- this is not a static read:
+|
+|   rl_job -> parse_pattern (our 1 slice) -> JOB14_EXIT -> job_doneFn
+|     -> 0x400a69e0 -> WHOLE_BANK_DESER (from 0x40090730)
+|     -> PUSH_LAYER 0x400d0bc4 ("RELOADING BANK") -> parse_pattern x16 -> POP_LAYER
+|
+| The type-0x14 job IS stock's RELOAD BANK, and its doneFn (0x40023bf4) performs
+| the real reload: 16 pattern parses straight off the card, no matter what our
+| worker did. So every RELOAD2 action was followed by a full bank reload -- the
+| "just under a second" stall and the sequencer restart the user reported (issue
+| #2), and the reason the per-track slice was only nominally per-track:
+| everything else in the bank reverted a moment later too.
+|
+| ** FINDING THE RIGHT CALL TOOK TWO TRIES -- the first was wrong. ** doneFn
+| opens with `bsr.w 0x40022e04` ; `jsr 0x40080844` (0x40023c00/0x40023c04), and
+| 0x40080844 looks like "reload the bank" -- the 0x400d0bc4 overlay push/pop sit
+| at 0x4008092c / 0x4008086a, numerically right inside it. Detouring that site
+| changed NOTHING: the trace came back byte-identical, with our hook entered and
+| the flag consumed. The counters gave it away -- 0x40022e04 and 0x40080844 each
+| ran TWICE, and the reload is in the SECOND pair, reached from the SUCCESS path:
+|
+|   0x40023c0e  bge.s 0x40023c62          ; result >= 0
+|   0x40023c62  mvs.w 0x460bd910,d0       ; the bank mask (stashed at buf-2)
+|   0x40023c68  move.l d0,-(sp) ; pea 0x100f8378
+|   0x40023c70  bsr.w 0x40023b68          ; <-- THE reload
+|
+| "Numerically near 0x40080844" is not "inside 0x40080844", and that assumption
+| cost a full emulator run. Suppress the success path instead: with the flag set,
+| jump straight to doneFn's own epilogue, so 0x40023b68 never runs.
+|
+| The 0x400d0bc4 overlay's push AND pop both live inside the suppressed subtree
+| (measured: balance 0), so skipping it leaves the keymap layer stack balanced --
+| the layer is simply never pushed.
+|
+| ** The flag is a ONE-SHOT, set only by rl_job on the path that handled OUR job,
+| so a genuine stock RELOAD BANK the user asks for is never suppressed. **
+
+    .global rl_done
+rl_done:
+    tst.b   rl_own
+    bne.b   rld_skip
+    move.w  MASK_SAVED,%d0             | displaced (mvs.w 0x460bd910,d0), as
+    ext.l   %d0                        | plain m68k -- no ColdFire mvs needed
+    jmp     DONE_RESUME
+rld_skip:
+    clr.b   rl_own                     | one-shot: consume it
+    jmp     DONE_EPILOG                | skip the whole-bank reload entirely
+
 | ================= the SEQ worker -- jmp detour @ the type-0x14 case 0x40085864 =================
 | replaces 8 bytes: move.l %a2,%fp@(-650) ; move.l %a2@(4),%sp@-
 |
@@ -652,6 +710,10 @@ rlj_ours:
     move.l  %d0,rl_kind                | stash the kind across the FUN_4008cebc calls
     clr.b   G_KIND                     | consume now -- a re-entrant real RELOAD BANK
                                        | must NOT see it set
+|   Session 80 continued (4): claim the ONE stock whole-bank reload that this
+|   job's completion would otherwise perform. See rl_done.
+    moveq   #1,%d0
+    move.b  %d0,rl_own
     move.w  CKSUM,%d0
     move.w  %d0,rl_cksum
 
@@ -785,6 +847,26 @@ rlj_trk_copy:
     lea     12(%sp),%sp
 
 rlj_setflag:
+|   Session 80 continued (4): refresh the LIVE cache from the cold blob.
+|   MEASURED: our worker writes only the cold blob (0x400e21e0...). Stock's
+|   whole-bank reload -- the one rl_done now suppresses -- was what refilled the
+|   downstream live cache at 0x1001614e, so with it gone the slice landed in the
+|   blob while playback kept reading stale bytes ("LIVE copy: STILL SCRIBBLED"
+|   in diag_reload2_deser.py). Suppressing the reload without this would have
+|   made every reload inaudible.
+|   FUN_4000faf0(bank) is stock's own "make bank current": memcpy(0x1001614e,
+|   blob + bank*0x9b340, 0x8ed80) + the parts region -> 0x100a4ece. It is
+|   RAM->RAM, no card access, so it costs none of the ~1 s the card read did,
+|   and NOTES.md (Session 27 thread) already records it as safe to call for
+|   exactly this purpose: it copies all 16 slabs, but only the reloaded one
+|   differs. Direction matters and is correct -- the cold blob is the working
+|   store (p-lock edits land there) and the live cache is downstream of it.
+    moveq   #0,%d0
+    move.b  CUR_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     LIVE_REFRESH
+    addq.l  #4,%sp
+
     move.l  %d5,%d0
     move.b  ACT_PAT,%d1
     cmp.b   %d1,%d0
@@ -875,6 +957,10 @@ rlo_zero:
     .align 2
 rl_kind:
     .space 4
+rl_own:
+    .space 4                           | Session 80 continued (4): one-shot "the
+                                       | next stock whole-bank reload is ours to
+                                       | suppress" flag. See rl_done.
 rl_asgn:
     .space 4
 rl_cksum:
