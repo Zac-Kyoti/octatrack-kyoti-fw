@@ -25674,3 +25674,64 @@ hardware-exported data** carrying a trigless lock with zero p-locks at step 6, i
 what `FUNC`+`TRIG` places. It erases a param that was never locked there and requires the
 flag to survive on both stock and patched. The previous build fails that test by
 construction; this is the regression that would otherwise have shipped.
+
+## Session 79, continued a twenty-fifth time — first DJ-ON run; TWO corrections, one of them to cont.23
+
+`tools/diag_dj_commit.py` (new) performs a real mid-pattern pattern change against
+`DJTESTxxx` and records per-track `STEP` / ticks / `CNTDN_TBL` / `NEXT_STEP` / `PAIR` /
+`SCALE`, plus `G_ARMED`, `ACT_PAT`, and rebuild-loop execution count. First run with
+`DJ_MODE = 1`. Results below; the run did NOT test DIRECT JUMP, for a reason worth recording.
+
+### CORRECTION to cont.23 — `0x80006628`'s meaning is NOT established
+
+cont.23 (commit `78b1c40`) stated `0x80006628` (long) = "master pattern length in STEPS",
+hence `D7 = LEN_TBL[masterScale] * masterSteps` = whole-pattern ticks. That was an
+**inference from the write-source chain** (`0x400a40bc` copies `*(long)0x80006630` into it,
+right after the `ACT_PAT`/`ACT_BANK` commit) and was **never measured at runtime**. Measured
+now: `0x80006628` reads **0** at every sample across a full run, while `NEXT_STEP[t]` reads
+**2** — and with `D7 = LEN_TBL[2] * 0 = 0` the loop would compute `NEXT_STEP = ceil(0/6) = 0`.
+The two are inconsistent, so the "pattern length in steps" reading is wrong, or the value is
+transient (a countdown reloaded from `0x80006630` and decremented to 0 would fit, and would
+also fit `BAR_CTR` being its low word).
+
+**The one-hook design in cont.23 rests on `D7`'s units, so that design is provisional until
+this is settled.** What survives unaffected is the structural finding: the rebuild loop's
+only position input is `D7`, and it already performs the per-track divide by each track's own
+ticks-per-step. `diag_dj_commit.py` now hooks `0x400a4834` to capture the actual `D7`
+register plus both globals at the instant `D7` is finished being built; run in progress.
+
+This is the same failure mode as the `G_ABSTICK` detour and the flashed regression: a
+plausible chain of static reads, written down as fact without a runtime check. Flagging it
+before it propagates into a patch this time.
+
+### CORRECTION — `rt.seq_select_live()` cannot arm DIRECT JUMP
+
+Hook A arms only when a pattern is **cued**: `PEND_PAT (0x800065c0) != -1` and differs from
+`ACT_PAT`/`ACT_BANK`. `seq_select_live()` calls `0x400a1030(bank, pattern)`, which writes
+`ACT_PAT`/`ACT_BANK` **directly** and never cues. Measured: `G_ARMED` stayed **0** for the
+entire run, so the run exercised a plain pattern change with the feature merely enabled, not
+a DIRECT JUMP. `ACT_PAT` did go 0 -> 1 and the rebuild loop ran 8 times (one commit), so the
+observation path works — it was pointed at the wrong event.
+
+Any DJ-on test must cue `PEND_BANK 0x800065bf` / `PEND_PAT 0x800065c0` instead. The tool now
+does that; poking the cue bytes mirrors what tapping a pattern during playback does, the same
+class of shortcut as poking `DJ_MODE`.
+
+**This also means every prior "DJ_MODE=1" dynamic run in this thread needs its arming path
+checked before its conclusions are trusted** — if `G_ARMED` was never set, the run measured
+stock behaviour with the feature nominally on.
+
+### Incidental measurements (stock, DJTESTxxx pattern 0 -> 1)
+
+- `CNTDN_TBL[t] == 255` (= -1 signed) is the **idle / no-delay** state, for all 16 tracks.
+  Consistent with both readers: the decrement at `0x400a4bc0`-`0x400a4bc6` does `blt` -> skip
+  when negative, and the per-tick test at `0x400a3cfc` uses `bge`, so negative falls through
+  to the scale refresh. A commit must therefore restore -1, not 0, where "no delay" is meant.
+- Switching into a `SCALE_MODE == 0` pattern correctly rewrites `SCALE[1]` from 0 to 2: the
+  per-track `+0x51` is ignored in uniform mode, as the branch at `0x400a3d0e` requires.
+- `NEXT_STEP[t] = 2`, `PAIR[t] = 0` for all 16 tracks after the commit.
+
+### Status
+
+No patch source changed. Outstanding: `D7`'s units (measurement in flight), a genuine DJ-on
+run via the cue path, and the `SCALE_MODE == 0` stock-vs-patched diff (also in flight).
