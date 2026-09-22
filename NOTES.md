@@ -27493,3 +27493,58 @@ differ between patterns, and when a track's multiplier differs from the master's
 **This is now a genuine specification fork, not a bug**, and it is the user's to settle:
 match AR exactly (simpler, bounded by construction, no absolute counter needed at all), or
 keep the stated "as if never switched away" semantics, which is what this build does.
+
+## Session 79, continued a thirty-ninth time — validation complete on the master-cycle build; READY TO FLASH
+
+Image `out/mainos_directjump_v4.bin` (`ec0a28aa...`), 1087 bytes changed, 0 unexpected outside
+the cave, manual-trig bytes identical to `build_trigscale_only.py`, cave within budget.
+Artifacts: `out/OCTATRACK_OS1.40C_DIRECTJUMP_V4.syx` (MIDI DIN) and
+`out/OCTATRACK_DIRECTJUMP_V4.bin` (CF card). Revert target present at
+`downloads/extracted/OCTATRACK_OS1.40C.syx`.
+
+### DJ-ON — 16/16 on both master-scale branches
+
+| fixture | master | `D7` | T0 (16,1x) | T1 (16,2x) | T2 (12,1x) | T3 (7,1x) | T4 (16,1/2x) |
+|---------|--------|------|-----|-----|-----|-----|-----|
+| A07 | LEN 16, SCALE 1x -> 96-tick cycle | 60 | 10 | 4 | 10 | 3 | 5 |
+| A08 | LEN 16, SCALE 2x -> 48-tick cycle | 12 | 2 | 4 | 2 | 2 | 1 |
+
+A08's cycle correctly halves with the 2x master scale, matching the user's hardware
+description (MASTER LEN 64 at 2x plays 32 steps).
+
+### DJ-OFF — IDENTICAL on both, against THIS image
+
+| fixture | rebuild loop | result |
+|---------|--------------|--------|
+| A07 (pattern 6) | 8 | IDENTICAL, 38 samples |
+| A08 (pattern 7) | 16 | IDENTICAL, 38 samples |
+
+Comparing per-track STEP / ticks-within-step / ARMED / SCALE, master STEP, `SCALE_IX` and
+`BAR_CTR`, plus eight instruction-execution counts, with the liveness precondition cleared.
+
+**This was the gate that mattered most.** `dj_abstick` now runs different code on *every step
+tick* and is **not** gated on `DJ_MODE`, so it executes whether the feature is on or off. Both
+gates confirm it is inert.
+
+### Cumulative fixes this session, all measured
+
+1. `dj_c` wrong modulus -- used `LEN_TBL[scale]` (ticks-per-step) as a pattern length.
+2. `dj_c` overrode `D7` after stock built it and before the rebuild loop read it.
+3. Hook F (`dj_pertrack_fix`) same `LEN_TBL` misreading; clobbered 7 of 8 audio tracks while
+   MIDI kept the correct values -- audio/MIDI desync on every armed commit. Removed.
+4. Hook D (`dj_scaleix_fix`) read `+0x8e54` unconditionally where stock uses `+0x8e52` in
+   per-track mode -- Session 70's "plays past its own length" symptom living inside its own fix.
+5. `dj_c` read `G_ABSTICK` instead of Hook H's stored offset, splitting master from per-track
+   by 4 steps when the guard fired.
+6. No master-cycle reduction at all -- wrong for every track whose length differed from the
+   master length.
+7. `dj_abstick` counted master steps, not ticks, so the counter was not absolute time.
+
+### NOT validated
+
+- **Hardware. Nothing here has been heard.** All of the above is emulator-measured state.
+- The **specification fork** is unresolved: this build implements the user's stated
+  "as if never switched away" semantics, which is **not** what AR does (AR carries the playhead
+  index -- `0x405666e4` measured as wrapping, cont.38). The two coincide only when patterns
+  share a master length and master scale. The informative hardware comparison is patterns whose
+  **master lengths differ**.
