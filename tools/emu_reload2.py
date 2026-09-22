@@ -34,6 +34,9 @@ _ELF = ROOT / "out" / "patch_reload2.elf"
 
 erl.RELOAD_IMAGE = ROOT / "out" / "mainos_reload2.bin"
 erl.PATCHED_GSEL = 1        # patch_reload2 item 1 = PTN SEQ (item 0 is TRK SEQ)
+# Session 80 continued (6): this build's picker is UP/DOWN only -- rl_arr_a/b
+# test the keycode and require event==press. patch_reload.s has no such gate.
+erl.ARROW_UPDOWN_ONLY = True
 
 # the 3-item picker: (G_SEL, label, want_G_KIND, want_FUN_4004aab4_calls, want_seq_job_post)
 erl.COMBO_ITEMS = [

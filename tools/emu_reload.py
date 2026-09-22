@@ -794,6 +794,29 @@ def cmd_combo(rt):
     check(end == "rts" and g(G_SEL_A) == n - 1 and POPUP2_FN in calls,
           f"arrow A (prev) from 0: G_SEL->{g(G_SEL_A)} (want {n-1}) popup2={POPUP2_FN in calls}")
 
+    # --- UP/DOWN only: LEFT/RIGHT and non-press events must NOT move G_SEL ---
+    # Set by emu_reload2.py; patch_reload.s has no keycode/event gate, so this
+    # block is skipped for that build rather than failing it.
+    if globals().get("ARROW_UPDOWN_ONLY"):
+        # Both handlers are shared by two keycodes (UP 0x34 + RIGHT 0x21 ->
+        # rl_arr_a, DOWN 0x33 + LEFT 0x20 -> rl_arr_b) and are mapped for
+        # press AND release AND hold, with auto-repeat. Only UP/DOWN press may
+        # move the selection; everything else must be swallowed so the window
+        # neither steps twice per tap nor lets stock arrow nav move off it.
+        for fn, nm, code, ev, why in (
+                (rl_arr_a, "rl_arr_a", 0x21, 1, "RIGHT press"),
+                (rl_arr_b, "rl_arr_b", 0x20, 1, "LEFT press"),
+                (rl_arr_a, "rl_arr_a", 0x34, 0, "UP release"),
+                (rl_arr_b, "rl_arr_b", 0x33, 0, "DOWN release"),
+                (rl_arr_a, "rl_arr_a", 0x34, 2, "UP hold/auto-repeat"),
+                (rl_arr_b, "rl_arr_b", 0x33, 2, "DOWN hold/auto-repeat")):
+            reset_gates(menu=1)
+            rt.uc.mem_write(G_SEL_A, b"\x01")
+            end = _run_cave_fn(rt, fn, code, ev, [])
+            check(end == "rts" and g(G_SEL_A) == 1,
+                  f"{why} ({nm} code 0x{code:02x} ev{ev}): swallowed, "
+                  f"G_SEL stays 1 -> got {g(G_SEL_A)} end={end}")
+
     # --- arrows fall through untouched when the window is closed ---
     reset_gates(menu=0)
     end = _run_cave_fn(rt, rl_arr_a, 0x34, 1, [])

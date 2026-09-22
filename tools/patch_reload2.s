@@ -209,6 +209,22 @@
 |   arrow keys -- keycodes 0x34 (UP) / 0x21 (RIGHT) -> ARROW_A ; 0x33 (DOWN) /
 |   0x20 (LEFT) -> ARROW_B.  Verified against the 26-byte keymap tables
 |   (T1 0x400bfc10 / T2 0x400c01f4) + octabam MAINMENU.md sec 7 (HW-tested).
+|   Session 80 continued (6): the picker takes UP/DOWN ONLY (user's explicit
+|   request: "I don't want the left/right arrows to operate on the RELOAD2
+|   options selector at all. I just want up/down"). Both handlers are SHARED by
+|   two keycodes each (measured, see reference/kb/memory-map.md 0x46c7d8de), so
+|   the detours must test the code, not just the handler:
+|     UP 0x34 + RIGHT 0x21 -> 0x4004b970    DOWN 0x33 + LEFT 0x20 -> 0x400491a0
+|   They are also mapped for press AND release AND hold (with auto-repeat on all
+|   four keys), so the original detours moved the selection on the release too --
+|   one physical tap stepped it TWICE, plus once per repeat tick. --combo only
+|   ever drove event=1, so it never caught that. Both are now gated on
+|   event==press, and LEFT/RIGHT are swallowed while the picker is open so the
+|   window stays put rather than letting stock arrow navigation move off it
+|   (which is what "strange visual glitches and move away from the option
+|   window" was). Picker closed -> every arrow falls through to stock untouched.
+    .equ UP_CODE,       0x34
+    .equ DOWN_CODE,     0x33
     .equ ARROW_A_H,     0x4004b970      | UP / RIGHT handler
     .equ ARROW_A_RESUME,0x4004b978      | after `lea -12(sp),sp ; movem.l d2-d3/a2,(sp)`
     .equ ARROW_B_H,     0x400491a0      | DOWN / LEFT handler
@@ -532,13 +548,15 @@ rly_stock:
 | through -- behaviourally invisible.
 
     .global rl_arr_a
-rl_arr_a:                              | UP / RIGHT -- previous item (wrapping)
+rl_arr_a:                              | keycodes UP 0x34 / RIGHT 0x21
     tst.b   G_MENU
-    bne.b   raa_pick
-    lea     -12(%sp),%sp               | displaced original
-    movem.l %d2-%d3/%a2,(%sp)          | displaced original
-    jmp     ARROW_A_RESUME
-raa_pick:
+    beq.b   raa_stock                  | picker closed -> stock, untouched
+    moveq   #1,%d0
+    cmp.l   8(%sp),%d0                 | event == press ?
+    bne.b   raa_swallow                | release / auto-repeat hold -> swallow
+    moveq   #UP_CODE,%d0
+    cmp.l   4(%sp),%d0                 | this key is UP, not RIGHT ?
+    bne.b   raa_swallow                | RIGHT -> never touches the selection
     moveq   #0,%d0
     move.b  G_SEL,%d0
     subq.l  #1,%d0
@@ -547,16 +565,23 @@ raa_pick:
 raa_set:
     move.b  %d0,G_SEL
     jsr     rl_draw
+raa_swallow:
     rts                                | swallow (stack untouched on entry)
+raa_stock:
+    lea     -12(%sp),%sp               | displaced original
+    movem.l %d2-%d3/%a2,(%sp)          | displaced original
+    jmp     ARROW_A_RESUME
 
     .global rl_arr_b
-rl_arr_b:                              | DOWN / LEFT -- next item (wrapping)
+rl_arr_b:                              | keycodes DOWN 0x33 / LEFT 0x20
     tst.b   G_MENU
-    bne.b   rab_pick
-    move.l  %d2,-(%sp)                 | displaced original
-    movea.l %sp@(8),%a0                | displaced original
-    jmp     ARROW_B_RESUME
-rab_pick:
+    beq.b   rab_stock                  | picker closed -> stock, untouched
+    moveq   #1,%d0
+    cmp.l   8(%sp),%d0                 | event == press ?
+    bne.b   rab_swallow                | release / auto-repeat hold -> swallow
+    moveq   #DOWN_CODE,%d0
+    cmp.l   4(%sp),%d0                 | this key is DOWN, not LEFT ?
+    bne.b   rab_swallow                | LEFT -> never touches the selection
     moveq   #0,%d0
     move.b  G_SEL,%d0
     addq.l  #1,%d0
@@ -566,7 +591,12 @@ rab_pick:
 rab_set:
     move.b  %d0,G_SEL
     jsr     rl_draw
+rab_swallow:
     rts                                | swallow
+rab_stock:
+    move.l  %d2,-(%sp)                 | displaced original
+    movea.l %sp@(8),%a0                | displaced original
+    jmp     ARROW_B_RESUME
 
 | ---- rl_draw: (re)show the popup for G_SEL ----
 | clobbers only d0/a0 (POPUP2 preserves d2-d7/a2-a6 per ABI).
