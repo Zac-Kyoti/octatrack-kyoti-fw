@@ -25763,7 +25763,6 @@ Two durable artefacts beyond the feature:
 - `build_triglock.py`'s `assert_no_branch_into` -- refuses a detour whose displaced bytes
   contain a branch target. This hazard had never been checked by any build script here,
   and it silently produced a hanging image once.
-
 ## Session 79, continued a twenty-sixth time — corrections to cont.25 and cont.21/23; a second tool limitation found
 
 Three measured corrections, two of them to claims made earlier in this same session. Recording
@@ -25852,3 +25851,38 @@ No patch source changed. The cont.23 one-hook design is suspended pending `D7`'s
 Solid and unaffected: the eight/nine per-track arrays and their addresses, the two sibling
 per-tick loops, `LEN_TBL` as ticks-per-step, the `DJTESTxxx` fixture characterisation, the
 working harness, and DJ-off inertness on both scale branches.
+
+## Session 79 — promotion: six features declared final, `main` becomes the shipping branch
+
+User reports MUTE MODE hardware-tested and finalized today (2026-09-21), all four modes.
+That supersedes the README/BUILD_KYOTI status text, which still described the pre-addendum
+state: three modes, `OTFX` "not built", and the finite-AMP-RELEASE blip as an open bug.
+**The code was already committed** (`patch_mutemode.s` at HEAD carries `N_MODES 4` and the
+`OT / OTFX / OTFX-T / DT-T` menu through addendum 14); only the docs were stale. Checked
+for uncommitted MUTE MODE work before touching anything -- there was none.
+
+Doc corrections made in the same pass:
+- README's MUTE MODE section rewritten for the four modes, the derived menu index (one
+  persisted word, so menu and firmware cannot disagree), SOLO following the mode, and
+  `CUE MUTES TRK` staying a hard cut by decision.
+- The shipping MUTE MODE build is **`build_mutemode_dt.py`** (`--defsym DT_MODE=1`), not
+  `build_mutemode.py`, which is the older two-value `OT` / `OT+FX` image. An earlier edit
+  in this pass got that wrong and was corrected before commit -- `patch_mutemode.s` gates
+  `N_MODES` 4 vs 2 on `DT_MODE`.
+- The hardware-test tables still listed TRIGLESS-LOCK AUTO-REMOVE as "emulator only, never
+  flashed"; corrected.
+
+Final six, all hardware-confirmed on MKI: Bug-1 manual-trig fix, Bug-2 pattern-LED fix,
+MUTE MODE (four modes), QUANTIZE LIVE REC, SIDE-CHAIN COMPRESSOR (cross-core), and
+trigless-lock auto-remove. Still work-in-progress, staying on `wip`: DIRECT JUMP,
+RELOAD FROM PROJECT, and the part-change carryover fix.
+
+### Open, and NOT resolved by this promotion
+
+`tools/build_merged.py` -- the one-image combined build -- **does not compose the shipping
+set**. It currently includes DIRECT JUMP and RELOAD FROM PROJECT (both still WIP with open
+bugs) and does **not** include trigless-lock auto-remove. Producing a genuine "everything
+final in one image" therefore needs: add `patch_triglock`, drop `patch_directjump` and
+`patch_reload2`, re-pack the caves, and drop the `[YES]`-handler trampoline that exists
+only because DIRECT JUMP and RELOAD2 both want `0x4005e4c8`. That is a real change and the
+resulting image would want its own hardware pass before being called shippable.

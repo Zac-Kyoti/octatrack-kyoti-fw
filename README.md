@@ -76,44 +76,40 @@ reproduces the bug, patched lights the LED, a genuinely empty pattern still read
 empty. Write-up: [`NOTES.md`](NOTES.md) "Session 48". **Flashed to the MKI
 (2026-09-13) — confirmed working, no regression.**
 
-### MUTE MODE — a PERSONALIZE toggle for audio-track mute behaviour  ·  *active WIP, real bug open*
+### MUTE MODE — a PERSONALIZE toggle for audio-track mute behaviour  ·  **final, hardware-confirmed (MKI)**
 
-Off by default (`MUTE MODE = OT`). Stored in a battery-backed PERSONALIZE word,
-so a freshly flashed unit is stock until you opt in.
+Off by default (`MUTE MODE = OT`), so a freshly flashed unit is stock until you opt in.
+The choice lives in the checksummed `'ANDY'` battery-SRAM block, so it survives a power
+cycle.
 
-| mode | effect | build |
-|---|---|---|
-| **OT** | stock behaviour, byte-for-byte. | any |
-| **OT+FX** | *soft mute*: on mute the dry signal cuts fast and clean (like a per-track STOP), the track's FX inserts ring their delay/reverb tails out. On **`wip` this also extends to SOLO** — a track silenced because another track is soloed gets the same soft cut instead of the stock hard cut (softmute V7). **A muted track's trigs are supposed to make no sound — this specific part is a known, unfixed bug, see below.** | `build_mutemode.py` |
-| **DT** | pure *sequencer* mute, Digitakt-style: the voice that is already sounding keeps playing under its own AMP envelope, its FX ring, and only *new* trigs are suppressed — **also currently broken, see below.** | `build_mutemode_dt.py` |
+| mode | effect |
+|---|---|
+| **OT** | stock behaviour, byte-for-byte |
+| **OTFX** | hard dry cut, FX inserts ring their tails, and **the sequencer is left alone** — trigs keep firing and voices keep restarting underneath, so unmuting picks up exactly where the pattern would have been |
+| **OTFX-T** | the same dry cut and ringing FX tails, but a *trig*-mute: new trigs stay suppressed until you unmute |
+| **DT-T** | pure sequencer mute, Digitakt-style — a sounding voice rides out its own amp envelope and its FX ring, and only *new* trigs are suppressed |
 
-Sources: `tools/patch_mutemode.s`, `tools/patch_softmute.s` (V7 on this branch,
-`--defsym DT_MODE=1` for the DT build); emulators `tools/emu_mutemode.py`,
-`tools/emu_mute.py`, `tools/emu_solo.py`, `tools/emu_dt.py`; write-ups
-[`NOTES.md`](NOTES.md) "Session 9–12". The toggle also writes the checksummed
-`'ANDY'` battery-SRAM shadow so it survives a power cycle ("Session 19").
+Menu order is OT / OTFX / OTFX-T / DT-T, increasing "stickiness". That is deliberately not
+the internal GATE order: the modes are tested as a chain, so a mode's position in it is its
+per-frame instruction count, and reordering would silently cost `OTFX-T` its bit-identity
+with stock. **One** persisted word holds the mode and the menu index is derived from it, so
+the menu and the running firmware cannot disagree — an earlier two-word design did exactly
+that on a unit upgrading from an older build.
 
-**⚠️ KNOWN BUG, still open as of 2026-09-20 — do not flash expecting this fixed.**
-Session 57 found and fixed the original leak behind the 2026-09-13 flash reports:
-stock clamps a silenced track's second level word to 6144 instead of zeroing it, so
-a retrig on an already-muted track played back at full level through that still-open
-route. Fixed, flashed — and with **AMP RELEASE set to infinite**, `DT` mode is now
-**hardware-confirmed clean**. With a **finite** release, however, both `OT+FX` and
-`DT` still produce a real, once-per-cycle-ish blip/echo. The mechanism is now
-precisely characterized — a stock function transiently clears the mute-state byte
-around a trig, racing this project's own mute-cut hook — but the fix is **not yet
-built**. A separate, from-scratch MUTE MODE redesign (`build_mutemode_new.py`) was
-tried at the user's request and abandoned after hardware testing showed its other
-modes non-functional; it is not merged into anything this project ships. Full trail:
-[`NOTES.md`](NOTES.md) "Session 57" onward (many parts).
+Sources: `tools/patch_mutemode.s`, `tools/patch_softmute.s`; the four-mode image is
+`python3 tools/build_mutemode_dt.py` (both stubs assembled `--defsym DT_MODE=1`) —
+plain `build_mutemode.py` is the older two-value `OT` / `OT+FX` build; emulators `tools/emu_mutemode.py`, `tools/emu_mute.py`,
+`tools/emu_solo.py`, `tools/emu_dt.py`; write-ups [`NOTES.md`](NOTES.md) "Session 9–12"
+and "Session 57–58" (many parts).
 
-**A fourth mode is designed and reverse-engineered but not built** — `OTFX`:
-instant dry cut, FX tails ring, and unmute **resumes the sample at the playhead**
-(the current `OT+FX` and `DT` are *trig-mutes* — the track stays silent until the
-next trig). Landing it makes the menu `OT / OTFX / OTFX-T / DT-T`. The per-frame
-mute gate `FUN_40004db8` is fully disassembled; two DSP-behaviour unknowns
-remain, and the plan is to flash `DT` first to settle them. Write-up:
-[`NOTES.md`](NOTES.md) "Session 14".
+**SOLO follows MUTE MODE too.** A track silenced because another track is soloed takes the
+same treatment as a manual mute; stock's own hard-cut path was found to run unopposed here
+and is now closed off.
+
+**`CUE MUTES TRK` intentionally stays a hard cut** in every mode. That PERSONALIZE option
+ORs the cue bits into the mute positions after this project's hook runs, and is left
+untouched by design — a decision, not a gap.
+
 
 ### DIRECT JUMP — an Elektron-style immediate pattern change  ·  *active WIP, partly hardware-confirmed*
 
@@ -338,14 +334,12 @@ repeated pattern switch. Root cause still open. Write-up: [`NOTES.md`](NOTES.md)
 | Part-change carryover — recorder cache / scene-morph pieces | `build_partreapply.py` | flashed 2026-09-13, behaviorally safe; reports #2/#3 (recorder, REC SETUP) could not be reliably reproduced on stock, treat as unconfirmed |
 | ↳ report #1 (PICKUP→FLEX stuck loop) | `build_partreapply.py` | **fix does not address the real bug** — reproduces identically on stock and patched on a repeated pattern switch (good → good → bug); root cause still open, see `NOTES.md` "Session 50" |
 | **QUANTIZE LIVE REC** front-panel toggle | `build_qlrec.py` | original design hung the unit 2026-09-13; rewrite (periodic `dur>0` re-arm) **HW-confirmed**, no hang; double-tap timing, toast fade/instant-close, and label polarity **all HW-confirmed correct**; 2 cosmetic issues (textless-box flash, PERSONALIZE row not live-redrawing) parked, not chased further |
-| MUTE MODE menu + `OT+FX` soft **mute** mechanism (`main`) | `build_mutemode.py` | the Session-10 build (V6b, no SOLO extension) was flashed and confirmed on hardware |
-| ↳ the `'ANDY'`-shadow persistence (survives power cycle) | `build_mutemode.py` | emulator-verified, **not yet independently flashed** |
-| ↳ the **SOLO** extension (softmute V7) + **DT** sequencer-mute mode | `build_mutemode.py` / `build_mutemode_dt.py` | **active WIP.** Session 57 found+fixed the original level-clamp leak, flashed; `DT` is now **hardware-confirmed clean with AMP RELEASE set to infinite**. With a finite release, both `OT+FX` and `DT` still show a real once-per-cycle-ish blip/echo — root cause precisely characterized (a stock function races this project's mute-cut hook) but **not yet fixed**; see `NOTES.md` "Session 57" onward |
-| MUTE MODE 4th option (`OTFX` playhead-resume) | — | **reverse-engineered only**, not built |
+| **MUTE MODE** — all four modes (`OT` / `OTFX` / `OTFX-T` / `DT-T`), menu, SOLO handling | `build_mutemode_dt.py` | **confirmed, final** — flashed and hardware-tested 2026-09-21, MKI; all four modes and the derived menu index check out |
+| ↳ the `'ANDY'`-shadow persistence (survives power cycle) | `build_mutemode_dt.py` | **confirmed** — one persisted word, defaults verified on hardware |
 | **DIRECT JUMP** pattern-change mode | `build_directjump_v4.py` | **active WIP, partly hardware-confirmed** — toggle reachability and switch timing confirmed working on hardware (earlier `v1`–`v3` were dead on hardware, superseded); the playhead-preserving behaviour (currently resets to step 1) is root-caused but **not yet fixed** |
 | side-chain compressor (`KEY`/`KEY FLT`/`KEY GAIN`/`SC LISTEN`, cross-core) | `build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | **confirmed, final for now** — flashed 2026-09-20, MKI, "seems to be working well"; cross-core `KEY` (any of 8 tracks) included |
 | **RELOAD FROM PROJECT** — modal picker | `build_reload2.py` (TRK SEQ / PTN SEQ / PART + PTN SEQ) | **active WIP, partly hardware-confirmed** — first flash (2026-09-20) found 3 real bugs, 2 fixed (a `[PTN]`-held reachability issue and a permanent picker lockout) but **not yet reflashed**; the reload's own timing (audible gap / step-1 reset) and a real list-style picker UI are deferred |
-| **TRIGLESS-LOCK AUTO-REMOVE** | `build_triglock.py` | **emulator only** — built and clean 2026-09-20, never flashed |
+| **TRIGLESS-LOCK AUTO-REMOVE** | `build_triglock.py` | **confirmed, final** — flashed 2026-09-21, MKI; multi-pass erase, last-lock removal, ordinary trigs untouched, and `FUNC`+`TRIG` placeholders preserved |
 
 `OT` mode is byte-for-byte stock, and every mod is `OFF` by default. Everything
 above is validated primarily in a ColdFire emulator (Unicorn, real image bytes —
