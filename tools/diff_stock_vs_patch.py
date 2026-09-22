@@ -123,6 +123,11 @@ def main(argv):
                     help="default is long enough to cross a full 16-step pattern at 1x")
     ap.add_argument("--patched", default=str(PATCHED))
     ap.add_argument("--stock", default=str(STOCK))
+    # Two concurrent invocations sharing one staging tree collide with FileExistsError --
+    # a trap this repo already hit with the per-bank project scanners. Give every run its
+    # own prefix so a second comparison can be launched while the first is still going.
+    ap.add_argument("--tree-prefix", default="out/_emu_diff",
+                    help="staging tree prefix; use a distinct one per concurrent run")
     a = ap.parse_args(argv)
 
     for p in (a.patched, a.stock):
@@ -144,13 +149,13 @@ def main(argv):
     bar = "=" * 70
     print(f"{bar}\nSTOCK  {a.stock}\n{bar}")
     s = run_image(er, a.stock, a.project, a.bank, a.pattern, a.frames,
-                  "out/_emu_diff_stock")
+                  a.tree_prefix + "_stock")
     print(f"  bank={s['bank']} pattern={s['pat']} samples={len(s['trace'])} "
           f"tracks-with-movement={s['moved']}/16")
 
     print(f"\n{bar}\nPATCHED (DIRECT JUMP left OFF)  {a.patched}\n{bar}")
     p = run_image(er, a.patched, a.project, a.bank, a.pattern, a.frames,
-                  "out/_emu_diff_patched")
+                  a.tree_prefix + "_patched")
     print(f"  bank={p['bank']} pattern={p['pat']} samples={len(p['trace'])} "
           f"tracks-with-movement={p['moved']}/16")
 
