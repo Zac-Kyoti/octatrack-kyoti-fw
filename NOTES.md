@@ -25144,3 +25144,135 @@ mid-cycle" bug class rather than adding a seventh patch for it.
    real per-step activity and a stock-vs-patched diff over it is clean.
 
 No patch source was changed this session. Measurement only.
+
+## Session 79, continued a twenty-first time — the three open arrays answered, and stock turns out to ALREADY contain the AR-shaped per-track rebuild
+
+Continues the previous entry (commit `a072eaf`), which enumerated eight per-track arrays and
+left three without semantics: `ARMED 0x80006500`, `CNTDN_TBL 0x800065c3`, `PAIR 0x80006604`.
+New tools: `GhidraDirectJump48.java` (firmware-wide scan for sites touching a set of address
+ranges, catching cursor setups via scalar operands as well as resolved references),
+`GhidraDirectJump49.java` (instruction-coverage / gap measurement + raw-byte constant search),
+`GhidraDirectJump50.java` (forces disassembly of a range and prints it).
+
+### A methodology catch that nearly became another wrong claim
+
+`GhidraDirectJump48` found **no writer anywhere in the firmware** for `PAIR` — only the two
+cursor setups that read it. Writing that down as "PAIR is never written" was tempting and
+would have been **wrong**. The scan iterates *defined* instructions, and `NOTES.md` records
+an undecoded region inside `consumer_a6c0_a33f8`. `GhidraDirectJump49` measured it instead of
+recalling it: **86.6% of `0x400a1eea..0x400a4f20` was decoded, with six gaps, the largest
+`0x400a4568..0x400a4b9a` at 1586 bytes.** A raw-byte search of the gaps for the array base
+constants hit immediately:
+
+```
+HIT 400a485c  constant 80006604   (PAIR)
+HIT 400a4862  constant 800065e4   (NEXT_STEP)
+HIT 400a49e8  constant 80006614   (PAIR, MIDI half)
+HIT 400a49ee  constant 800065f4   (NEXT_STEP, MIDI half)
+```
+
+Six bytes apart — a `lea`/`lea` cursor-setup pair. The writer was in undecoded bytes the whole
+time. `GhidraDirectJump50` force-decoded the gap; **it is now disassembled and saved in the
+Ghidra project** (`ghidra_project.bak_pre_fullanalysis_s70/` remains as the fallback).
+Generalisable lesson: a firmware-wide "nothing references X" result is only as strong as the
+instruction coverage underneath it — measure the coverage before believing the absence.
+
+### The three arrays
+
+**`ARMED 0x80006500[t]`** — per-track active gate; the per-tick loop's top requires `== 1`.
+Written `= (blob[t][+0x54] == 0) ? 1 : 0` at `0x400a4c2e`, then forced to `1` at `0x400a4c3a`
+if bit `t` of mask `0x80006684` is set (that mask is the *deferred-arm* request, set at
+`0x400a2ac6` / `0x400a4060`, consumed and cleared at `0x400a4c4c`). Also driven by the
+per-track start routine below (`clr` `0x400a2a32`, `= 1` `0x400a2aac`).
+
+**`CNTDN_TBL 0x800065c3[t]`** — `= LEN_TBL[masterScale] − LEN_TBL[trackScale]`, floored at 0
+(`0x400a2aa6`) or at 1 (`0x400a49ca`). Decremented once per step at `0x400a4bc6`, and the
+pattern-boundary rebuild body runs for a track **only when its countdown reaches 0**. So this
+is the **per-track scale phase-alignment delay** — the mechanism that holds a differently
+scaled track in phase with the master. That makes it directly implicated in the
+differently-scaled-track desync this thread has been chasing, and it must be recomputed by
+any mid-pattern commit.
+
+**`PAIR 0x80006604[t]`** (2 bytes/track) — written at `0x400a4924` / `0x400a492a` (audio) and
+the MIDI twin. Value: `masterTicks − step*ticksPerStep`, i.e. the **sub-step tick phase**,
+with a negative-correction branch. Its **low** byte (big-endian word, `+1`) is copied to
+`0x800065d3[t]` on each step tick at `0x400a3d36`.
+
+**Ninth array found en route — `NEXT_STEP 0x800065e4[t]`** (2 bytes/track, audio
+`0x800065e4`, MIDI `0x800065f4`, tiling exactly into `PAIR` at `0x80006604`). Written
+`0x400a4916` as `ceil(masterTicks / ticksPerStep)`; its **low** byte seeds
+`STEP[t] (0x800064d0)` at `0x400a4be6`. Exactly one writer per half (`0x400a2a2a` audio,
+`0x400a36d0` MIDI) outside the commit loop.
+
+*(Correction to the previous entry: `0x400a3d36` and `0x400a4be6` read the `+1` byte of a
+big-endian word, which is the LOW byte, not the high byte as that entry said.)*
+
+### OT's per-track start routine — `0x400a29f0`–`0x400a2ad4`
+
+A single-track (`D5`) restart primitive, and the closest OT analogue of AR's queue-side setup:
+
+```
+STEP_PREV[t] = 0 ; STEP[t] = 0 ; TICKS_IN_STEP[t] = 0
+clear bit t of 0x80006626 ; NEXT_STEP[t] = 0            <-- always step 0
+ARMED[t] = 0
+TRK_SCALE_IX[t] = SCALE_MODE ? blob[t][+0x51] : pat[0x8e54]
+0x800065d3[t]  = max(0, LEN_TBL[trackScale] - LEN_TBL[masterScale])
+CNTDN_TBL[t]   = LEN_TBL[masterScale] - LEN_TBL[trackScale]
+if (CNTDN_TBL[t] <= 0) { CNTDN_TBL[t] = 0 ; ARMED[t] = 1 ; jsr 0x400a539c(t) }
+else                   { set bit t of 0x80006684 }      <-- defer the arm
+clear bit t of 0x80006680
+```
+
+The `clr.w D1w` at `0x400a2a26` feeding `NEXT_STEP[t] = 0` is precisely where a DIRECT JUMP
+position belongs.
+
+### THE HEADLINE: stock already contains AR's per-track rebuild
+
+Inside the formerly-undecoded gap, `0x400a4884`–`0x400a49e2` (audio, 8 tracks; MIDI twin from
+`0x400a49e6`) is a per-track loop that does exactly what AR's commit loop does:
+
+```
+D0 = SCALE_MODE ? blob[t][+0x51] : pat_default_scale      ; 0x400a4900 / 0x400a4906
+D1 = LEN_TBL[D0]                                          ; this track's TICKS PER STEP
+D0 = (D7 - 1) + D1
+divsl.l D1,D0:D0                                          ; 0x400a4912  quotient
+NEXT_STEP[t] = D0                                         ; 0x400a4916  = ceil(D7 / tps)
+D2 = D7 - D0*D1                                           ; sub-step phase
+PAIR[t] = D2  (+ D1 if negative)                          ; 0x400a4924 / 0x400a492a
+...
+CNTDN_TBL[t] = LEN_TBL-difference, floored at 1           ; 0x400a49c6 / 0x400a49ca
+```
+
+`D7` is set at `0x400a4812`/`0x400a4826` as `LEN_TBL[scale] * *(An)` — a **master tick
+quantity** (corroborating the earlier note that stock's boundary commit sets
+`D7 = LEN_TBL[newScale] * DAT_80006628`; the multiplier's exact identity is the next thing to
+pin down).
+
+**So the per-track divide-by-own-ticks-per-step, the per-track scale branch, and the
+quotient+remainder split that AR performs at commit are all already present in OT stock.**
+They were invisible for the whole project because they sat in bytes Ghidra never decoded.
+
+### What this does to the port
+
+The plan in the previous entry — write our own 16-track rebuild loop — is now the **wrong**
+plan. There is nothing to build. The correct framing:
+
+> DIRECT JUMP does not need new per-track machinery. It needs to reach stock's existing
+> rebuild loop with the right master position instead of a forced step 0.
+
+And note where `dj_c`'s displaced bytes sit: `0x400a4840` `clr.b D0` / `0x400a4842`
+`move.b D0,(0x800065b6)` — zeroing the **master STEP** 24 bytes before this loop's cursor
+setup at `0x400a485a`. The existing patch has been operating right on top of the machinery it
+needed, while hooks D/E/F repaired the damage downstream one array at a time.
+
+### Next
+
+1. Pin `D7`'s multiplier (`DAT_80006628`?) and confirm `D7`'s units, so "the right master
+   position" is a measured quantity rather than a guess. This is the last unknown standing
+   between here and a minimal patch.
+2. Re-scope the patch around feeding this loop, and plan to **delete** hooks rather than add.
+3. **Harness first, per the standing no-flash rule** — nothing here is buildable or
+   flashable until a test can observe playback. Taken up next.
+
+No patch source changed this session. Measurement only. Two Ghidra-project side effects: the
+1586-byte gap (and the smaller ranges probed) are now decoded and saved.
