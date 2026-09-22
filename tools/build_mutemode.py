@@ -2,15 +2,12 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-Stock 1.40C + the MIDI manual-trig fix + SOFT MUTE behind a PERSONALIZE toggle.
-
-This is the build that was flashed to an Octatrack MKI and confirmed working
-(Session 10).  The SOLO extension and the DT mode are NOT here -- they are
-emulator-verified only and live on the `wip/mute-mode` branch.
+TEST BUILD -- stock 1.40C + the MIDI manual-trig fix + SOFT MUTE, this time with a
+PERSONALIZE toggle instead of ALWAYS_ON.
 
   1. patch_trigscale  -- MIDI manual-trig stall fix.  Byte-identical detour + cave to
                          build_trigscale_only.py / build_softmute.py.
-  2. patch_softmute   -- SOFT MUTE (V6b) hooks, assembled *gated* (no ALWAYS_ON): both hooks
+  2. patch_softmute   -- SOFT MUTE (V6) hooks, assembled *gated* (no ALWAYS_ON): both hooks
                          run only when MUTE MODE == 1 ("OT+FX").  MUTE MODE == 0 ("OT") ->
                          the hooks fall straight through to the stock instant post-FX cut.
   3. patch_mutemode   -- the "MUTE MODE" PERSONALIZE entry (multi-value: OT / OT+FX), a
@@ -70,10 +67,12 @@ PATCHES = [
     ("patch_trigscale", 0x400d7b00, None,
      [(0x4009b6f2, "cave", "203c0000091a", 18)]),
     ("patch_softmute", 0x400d7400, None,                    # NB: no ALWAYS_ON -> gated
-     [(0x40004dc6, "pre",   "2a3980000008", 6),
-      (0x40005178, "pre_v", "4feffff448d7001c", 8)]),
+     [(0x40004dc6, "pre",       "2a3980000008", 6),
+      (0x40006844, "mt_trig",   "40c246fc2700", 6),
+      (0x4000f4dc, "mt_rebind", "254d0004254c0008", 8)]),
     ("patch_mutemode", 0x400d7600, None, []),               # menu stub, spliced in below
-    #  ^ gated patch_softmute V6b is ~230 B @0x400d7400; patch_mutemode starts at 0x400d7600
+    #  ^ gated patch_softmute V7 is ~330 B @0x400d7400 (ends ~0x400d7542); mutemode clears it
+
 ]
 
 # --- PERSONALIZE menu arrays (stock) ---

@@ -150,6 +150,17 @@ Part edit / dispatch: `GK_STOCK_MKI_PART_DISPATCH 0x40058a64` (the MKI PART-butt
 path — FUNC+MIDI / FUNC+BANK in Octakit), `part-edit-dispatch 0x40058a70`,
 `GK_STOCK_PART_EDIT_OPEN_CURRENT 0x4002dc9c`, `GK_STOCK_PART_MODAL_ACTIVE 0x4002dc3c`.
 
+Recording Setup menu / LOAD KIT (added `1760ac0`/`d1a9ef0`, 2026-09-12 —
+Octakit's own "stale ownership at a Kit/Pattern handoff" bugfix pair, not stock
+bugs, but adjacent territory to Session 49's Part-carryover family):
+`GK_STOCK_RECORDING_SETUP_CALLBACK 0x400b9e16`, `_CLOSE 0x4002ee88`, `_OBJECT
+0x460d10cc` (the live popup-object pointer), `GK_STOCK_RECORDING_EDIT_MENU_OPEN
+0x4003105c`, `GK_STOCK_MKI_RECORDING_SETUP_INPUT_MAP 0x400b9e36`,
+`GK_STOCK_PATTERN_KEY_REQUEST_RETURN 0x40056b6e`. Not consumed by
+`patch_partreapply` (that fix restores the recorder-cache *data* directly, not
+menu-ownership state) — keep on hand if a future report describes the Recording
+Setup *menu* itself staying attributed to the wrong track after a Part change.
+
 Menu / popup / text: `GK_STOCK_POPUP_CREATE 0x4005829c`, popup objects
 `0x46c7d34c` (stride `0x38`, 5 slots, active-bit 5), `GK_STOCK_SCROLLING_CALLBACK_MENU_OPEN
 0x4006d94c`, callback-menu state block at `0x460e5e28`, text editor open
@@ -179,6 +190,88 @@ aPLib depack routine), `GK_STOCK_EVENT_POINTER_PUSH 0x40000c3c`.
 - `firmware.json` patch sites are individually SHA-256-guarded against the stock
   bytes — an independent 598-point confirmation of the 1.40C image whose OS
   SHA-256 is `164f3122…` (the one we RE, MKI == MKII).
+
+---
+
+## The append-a-runtime architecture — escaping the code-cave limit
+
+> source: `refs/ems-octakit/runtime/{link.ld,loader.S}` + `firmware.json` patch
+> list + `README.md` @ `ec70dda` (2026-09-09). confidence: **C** — this is the
+> mechanism of a firmware mod that boots and runs on real MKI/MKII hardware;
+> **L** for our interpretation of the audio-page allocator constants.
+
+Octakit does **not** squeeze into `0x400d2000–0x400d8000` code caves. It reclaims
+a multi-megabyte contiguous slice of the **flex sample pool**, appends an
+aPLib-packed "runtime" blob to the OS image, and hooks boot to unpack it there.
+This is the load-bearing technique for anyone who needs more than a few KB of new
+ColdFire code.
+
+### 1. Carve the region — 4 two-byte constant patches in the audio-page allocator
+
+The flex/sample RAM is managed as fixed-size **"audio pages"** with a free list,
+built around `0x40096f80–0x40097130`. Octakit changes four count immediates:
+
+| patch | addr | new operand | role |
+|---|---|---|---|
+| `reserve-audio-page-free-list-tail` | `0x40096f82` | `0x36fa` @ `+2` | free-list length cap |
+| `shorten-audio-page-free-list-initializer` | `0x40096fac` | `0x36fb` @ `+2` | init loop bound |
+| `shorten-audio-page-arena-clear` | `0x40097008` | `0x2788` @ `+1` | arena zero-fill bound |
+| `cap-recorder-page-allocation` | `0x40097126` | `0x36fa` @ `+2` | recorder-buffer ceiling |
+
+That's the *entire* cost side. `README` (`ec70dda`): the carve is **18.4 s of
+16-bit / 12.3 s of 24-bit sample time = 3.6 % of the pool**, i.e. ≈ **3.1 MB**
+(`RUNTIME_END − RUNTIME_START = 0x46025de0 − 0x45d0dde0 = 0x318000`). Scales
+down — take 128–256 KB and the sample-time hit is well under a second.
+
+### 2. The reclaimed region (`link.ld`)
+
+| symbol | value | note |
+|---|---|---|
+| `RUNTIME_START` | `0x45d0dde0` | base, in the (now smaller) flex pool |
+| `RUNTIME_END` | `0x46025de0` | +`0x318000` |
+| cached↔uncached alias | `+0x08000000` | runtime is written via the uncached alias `0x4dd0dde0` |
+| `RUNTIME_CODE_BUDGET` | `0x25000` (≈148 KB; asserted ≤128 KB "allowance") | **ColdFire code** lives in the low part |
+| after code | `KIT_COUNT*0x18b2 = 0x18b200` canonical + `0x0c5900` spill + metadata/UI/IO… | Octakit's Kit *data* fills the rest |
+| `STAGE_ADDRESS` | `0x47fc7410` | transient unpack scratch near top of SDRAM (`< 0x47fe0000`, "128 KiB below SP") |
+
+### 3. The boot chain (`loader.S` + `firmware.json`)
+
+Container = **stock OS + appended `.early` loader (~160 B at `0x4010fdf0`, the OS
+tail) + appended `.stage` (a small anchor + the aPLib-packed runtime)**. ~73 KB
+appended total. ~10 guarded splices wire it in:
+
+| patch | addr | what |
+|---|---|---|
+| `stage-before-bank-init` | `0x4000050c` | earliest boot redirect (3 B) |
+| `install-early-stage-and-repair-wrapper` | `0x40020870` | `jsr 0x4010fdf0` (the appended loader) → `jsr 0x4000f97c` (auth) → `jsr` into runtime `0x45d1dc1c` |
+| `install-runtime-authentication-gate` | `0x4000f97c` | hash-verify the unpacked runtime |
+| `install-runtime-hash-helper` / `-repair-helper` | `0x40014418` / `0x400148d4` | hash + repair; both `lea 0x4dd0dde0` (uncached runtime) |
+| `install-post-clear-relocation-wrapper` / `relocate-after-alias-clear` | `0x40013304` / `0x40009822` | **re-unpack the runtime after the stock SDRAM-alias clear wipes it** — refs `0x4ffc7414` (stage), `0x400e0aca` (aPLib depack), `0x40014424` |
+| `install-instruction-cache-sync` | `0x4001f3e0` | I-cache flush after writing code |
+
+`loader.S`: `jsr GK_STOCK_BOOT_CONTINUE (0x40001e50)` → byte-copy stage to
+`STAGE_UNCACHED` → hash-check → `GK_STOCK_APLIB_DEPACK (0x400e0aca)` unpacks the
+runtime into `0x4dd0dde0` → hash-check → byte-copy a backup to `RUNTIME_END −
+size`. Magic words: stage sig `0x474b5832` ("GKX2"), runtime header `0x474b4133`
+("GKA3").
+
+### 4. What it gives you — and what it does NOT
+
+| | |
+|---|---|
+| ✅ **ColdFire code** | ~128 KB, linked as one blob with a real linker script — no hand-placed caves, no overlap asserts |
+| ✅ **ColdFire data / work RAM** | the rest of the 3.1 MB (or whatever you carve) — big buffers, tables, state |
+| ❌ **DSP program (P) memory** | untouched. The DSP FX budget (~2,724 words/payload) is a separate address space the DSP uploads; this region is ColdFire SDRAM the DSP never sees |
+| ❌ **DSP X/Y scratch** | likewise — the keybus / SVF-state / cross-core-ring problems are DSP-internal and unaffected |
+| cost | a slice of flex sample time (Octakit: 18.4 s; a KYOTI-sized carve: sub-second) + ~10 boot splices + the loader + an aPLib pack step + **its own hardware boot validation** |
+
+**For KYOTI:** this is the way out of the `0x400d7000` cave crunch for anything
+ColdFire — DIRECT JUMP, RELOAD FROM PROJECT (already scaled down for space), the
+MUTE-MODE menu surgery, the SIDE-CHAIN *menu* side. It does **nothing** for the
+DSP half of the side-chain compressor (program words, shared-Y keybus, cross-core
+race). Adopting it is a build-system change on the scale of "ship a bootloader
+extension," not a patch tweak — but Octakit's `link.ld` + `loader.S` +
+`patcher/` are a working reference to adapt.
 
 ## Kit-format constants (Octakit's own invention — informational)
 

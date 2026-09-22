@@ -84,6 +84,59 @@ handler with a delta → `--watch-mem` the sequenced-data RAM (`[0x46c82456] +
 pat*0x18b2`, near `+0x8f385`) to name the function that writes `0xFF` into the
 p-lock record. Then RE that one function statically.
 
+### octabam `tools/ot_emu` — the ColdFire PORT (C++), the audio-capable successor
+
+> source: `refs/octabam/docs/COLDFIRE_PORT.md` (2705 lines) + `COLDFIRE_WORKORDER.md`
+> @ `04b8512` (milestones O1–O12, 7–9 Sep 2026). confidence: **C** for what each
+> milestone gates; **out of scope to adopt** unless a WIP blocker needs it.
+
+`emu_rtos.py` (route A, Unicorn) is the **oracle** but costs ~120× real time, models
+no audio, and stops at the DSP host port. `ot_emu` is octabam's rewrite: a headless
+C++ Octatrack — Musashi ColdFire **V4e** (vendors `mc68k`, GPLv3; EMAC/`mov3q`/`mvs`
+`mvz` as trap-and-emulate over frozen opcode tables), the MCF5445x PIT/INTC/eDMA/ESAI,
+a CompactFlash image, and **both DSP56321 cores** (`dsp_host` folded in). ~39 M
+inst/s ≈ 4.5× slower than real time, every claim gated against route A.
+
+What it can do that route A / our `emu_rtos` cannot (as of O12):
+
+- **boot to the RTOS handoff** (O1, PC `0x40000e46`, agrees with route A);
+- **run the kernel + sequencer** with the cores live (O4/O6/O8) — the frame clock
+  is the DSP's bank word, not a timer;
+- **mount a card and `LOAD PROJECT`** (O7) — the mount needs a *delayed* INTRQ
+  (instantaneous hangs the firmware);
+- **render audio end-to-end** — ESAI input proven (O9), FLEX playback sample-exact
+  (O10), a trig → voice → DSP → read-back path (O9b), and the one-aux bus
+  **bit-identical to `dsp_host`** (O12);
+- **reproduce a hardware audio bug and find its cause** (O11: the one-aux return
+  never reached T8 because the stock dispatcher bumps `r7` **three times per
+  track**, the third unconditional after FX2 — the `dsp_host` model had two).
+
+Traps it establishes that bite our WIP work directly:
+
+- **`dsp_host` pokes `r6` directly, so a page-2 param looks live locally even when
+  the real unit publishes nothing** ("a slot can draw a knob and publish nothing",
+  `PARAM_PAGES.md`). Our `emu_sc_dsp3.py` seeds `.mem` and pokes — passing it is
+  **not** evidence the sidechain KEY/KEY FLT/KEY GAIN bytes reach `x:(r6+…)` on
+  hardware. The publish path is in `memory-map.md` "Parameter value → the engine".
+- **The part the emulated load applies is not the part that plays** — `ot_emu`'s
+  load applies bank 1 / part 1; transport start re-applies the *saved* bank's
+  pattern part and `0x4000c19c` rewrites the live lane from it. Cost octabam a
+  whole O9c session measuring a track whose FX2 was silently `SEND`. Any fixture
+  must write **every part of every bank** (`ot_project.py set-fx`, `stamp-slot`).
+- **A part saved under an older slot layout feeds the new layout its old bytes and
+  the sequencer stalls on the first play** — a 0–127 value sitting in what is now a
+  count-3 select is the "value ≥ count used as an index" trap in *stored* form, and
+  the schema cannot see stored data. After any change to a page-2 slot's
+  count/position/meaning (our sidechain adds slots to COMPRESSOR; MUTE MODE relocates
+  menu arrays), run `ot_project.py stamp-defaults` on the card before play.
+- **Never rewrite emulated code in place** (a rewritten trampoline keeps its first
+  translation in a long-running Unicorn) — relevant if we extend `emu_rtos` shims.
+
+To use it we'd vendor `mc68k` + build (`make emu-cf`), same posture as
+`vendor/dsp56300`. Worth it **only** if the Session-34 "LIVE-erase not tractable
+headless" wall actually needs a scheduler-plus-audio emulator; for static RE and
+the p-lock byte map, `emu_rtos` + `pattern-diff` still suffice.
+
 ### octabam `ot_project.py` — on-disk bank/project editor + differ
 
 `pattern-trig` (write a step trig on disk), **`pattern-diff <A> <B> <bank>`**
@@ -91,6 +144,27 @@ p-lock record. Then RE that one function statically.
 steps), `set_track_slot`, `set_machine_type`, `part-name`, `rigproj`/`stamp-defaults`.
 `pattern-diff` turns "which bit is a recorder trig / trigless lock" into a
 30-second hardware measurement — the Phase-0 lever for `file-format.md`'s p-lock map.
+
+### Disassembling `section_3_MAIN_OS.bin` — the image loads at `0x40000400`
+
+> source: `refs/octabam/tools/emu_bringup.py` (`BASE = ENTRY = 0x40000400`, "load
+> base = 0x40000000 + 0x400 header"); our Session 27.
+
+`out/raw/section_3_MAIN_OS.bin` byte 0 maps to **vaddr `0x40000400`**, not
+`0x40000000`. So `vaddr = file_offset + 0x40000400`. Disassemble with:
+
+```
+m68k-elf-objdump -D -b binary -m m68k:5407 --adjust-vma=0x40000400 \
+  --start-address=<vaddr> --stop-address=<vaddr> out/raw/section_3_MAIN_OS.bin
+```
+
+(`m68k-elf-*` is at `/opt/homebrew/bin/`.) Using `--adjust-vma=0x40000000` shifts
+every function label 0x400 low **and** disassembles the wrong 0x400 bytes at any
+given "vaddr" — it silently produces plausible-looking but wrong code (Session 26
+lost a session to it). RAM addresses (`0x46xxxxxx`, `0x8000xxxx`) and code
+immediates are read correctly regardless; only PC-space labels move. Cross-check
+against emulator memory: `rt.uc.mem_read(vaddr, 16)` must equal
+`file[vaddr - 0x40000400 : +16]`.
 
 ### Cave placement — the OS `.bss` tail is not free
 
@@ -103,6 +177,15 @@ threw a line-F exception. Their rule: caves live in **`0x400d2000..0x400d8000`**
 (`SAFE_CAVE_CEIL = 0x400d8000`). Our builds already assert `< 0x400d7c3c` and sit
 at `0x400d7400`+ — safely inside. Do not chase more cave space in the `0x4010xxxx`
 tail.
+
+**The real way past ~4 KB of cave: append a runtime.** ems-octakit reclaims a
+multi-MB slice of the flex sample pool (4 two-byte constant patches in the
+audio-page allocator, `0x40096f80–0x40097130`), appends an aPLib-packed blob to
+the OS image, and hooks boot (~10 guarded splices) to unpack ~128 KB of linked
+ColdFire code + MB of work RAM into it at `0x45d0dde0`. Hardware-proven. Full
+mechanism + addresses + the cost (Octakit: 18.4 s of sample time; a KYOTI-sized
+carve: sub-second) in [`octakit-abi.md`](octakit-abi.md) "The append-a-runtime
+architecture". It buys **ColdFire** space only — nothing for the DSP.
 
 ## octamax (upstream) — the pipeline we inherited
 
@@ -195,5 +278,47 @@ Same "bring your own OS, ship no binary" stance as us, but the patch set is a
   reserved regions" idea (above).
 
 Full address map from its `abi.inc` → [`kb/octakit-abi.md`](octakit-abi.md).
+
+## midisc — MIDI scene locks (1.40C, added 2026-09-16)
+
+> source: `refs/midisc/{docs/TECH.md,tools/midisc/*.py}` @ `eb8b4bc` · fetched
+> 2026-09-16 · **C** (HW-confirmed, shipping build `1.40MIDISC8`)
+
+Address map + the XF-morph/persistence design distilled into
+[`memory-map.md` "MIDI track scenes"](memory-map.md#midi-track-scenes--the-midisc-address-map-140c).
+Notes specific to *how it composes with other patches* (relevant since we
+already track the same kind of multi-patch composition question):
+
+- **Code caves on stock 1.40C**, reusable coordinates for anything targeting
+  the same OS build: `SAFE_CAVE 0x400D24D0..0x400D2CDC` (dirty/pack/unpack/
+  save/xf_mix/plock trampoline/morph), `VOICE_RELOAD_CAVE 0x400D2E84..0x2EA0`,
+  `CAVE2 0x400D2EE6..0x3020` (second zero gap after PLAYBACK string tables),
+  `CODE2 0x400D6500..0x6600`, `STUB 0x400D7600..0x7C48`, `PROJECT_CAVE
+  0x400E1EC4..0x2000`. **`CLEAR_CAVE` (`0x400C4302`) is UNSAFE for code** — a
+  stock pointer table at `0x400ba8fa` refs into it; midisc only puts filter-UI
+  data there, never Part-Clear logic. `SPARSE_CKPT_CAVE` (`0x400C1153`) is
+  *also* unsafe — it sits inside a data table, not a real zero pad; an earlier
+  midisc revision put code there and bricked on Part Reload. Cross-cave calls
+  go through fixed **sentinel addresses** (`SENT_PACK`, `SENT_UNPACK`, …)
+  patched post-link — the same "detour via a stable pointer, not a raw
+  address" idea as our own `SENT_*` cave-boundary calls.
+- **Composing with Octakit** (`refs/midisc/docs/TECH.md` "Compose with
+  Octakit", checked against `sambanks/octabam` modules `midi-scenes` /
+  `octakit` / `scenes-kits` and `emuyia/ems-octakit` pinned `ca3b527`): the
+  two patches both want `STOCK_APPLY` (`0x40009094`); midisc's answer is to
+  leave it **stock** and let Octakit own it alone, following along via
+  hold/dial/pad hooks + Part Save/Reload + an `AFTER_PROJECT_LOAD` seed
+  instead of body-hooking the shared entry point. General lesson for stacking
+  our own mods on top of someone else's patched region: **prefer hooking
+  the callers of a shared entry point over rewriting the entry point itself**
+  — it's what let two independently-developed patches share one hook site
+  without a merge conflict.
+- **`part_window` seam** (`SEAM_CAVE`, `0x400D46E2`): a small trampoline
+  (`IN d3=index → OUT a0=window, d1=stride`) that Octakit overrides to
+  redirect "part index" to "kit payload base" — a clean pattern for one patch
+  to let another patch redefine what "the current part" means, without
+  either patch hard-coding the other's layout.
+- **Do not force-push `main`** on this repo — octabam pins specific midisc
+  commits as a submodule; a rewritten history there breaks octabam's build.
 
 _(Extend as patterns recur.)_

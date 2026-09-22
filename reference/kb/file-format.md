@@ -213,6 +213,19 @@ touches the `+0x62`-equivalent RAM region (`[0x46c82456] + pat*0x18b2`, near
 The detour goes *after* the clear: if `record[step]` is all-`0xFF` and the step
 is a bare trigless lock, clear its mask bit. Conservative — keep on any doubt.
 
+> **octabam leads (2026-09-08, `COLDFIRE_PORT.md` O9b / `EMU.md`):**
+> a coverage diff of a trig-run vs a no-trig run names **`0x4000c42c–0x4000c5a0`
+> as "the p-lock applier"** (in the trig's 124-PC footprint, alongside an
+> armed-bitmask check at `0x4000bd14`) — distinct from our Session-39 chain
+> (`0x4009d1e8` step handler → `0x4000bad4` per-frame apply); cross-check it for
+> the `+0x4900`→`#1` commit. And octabam's **`emu_rtos.py` now runs the full
+> transport + sequencer end to end** with a card *freshly saved on the unit* +
+> `--poke-trig` + `--start` + `--internal-clock` (clears CLOCK-RECEIVE
+> `0x80000028` bit 0) — the "not tractable headless" wall of Session 34 predates
+> that maturity. Transport `FW_TRANSPORT 0x4009b964`, start case `0x4009c458`
+> (`state 0x800065b8 := 1`, phase inc `0x46107570 := tempo24<<4`, post to UI
+> queue `0x460d1664`); the STOP case is our remaining `+0x4900`→`#1` candidate.
+
 ---
 
 ## Firmware ↔ disk cross-reference
@@ -251,22 +264,170 @@ the on-disk map above **is** the RAM map — no repack. The param header
 | 3 | `0x46c7aa24` / `0x46c77c32` / `0x46c7a874` | same `[track*32]` shape | **scene** p-lock storage (step handler uses these for the `d2 == -1` master/scene case) |
 | 4 | `0x46c7bf2c` / `0x46c7d7d8` / `0x46c7e0de` | value `[param + heldStep*128]` / bitmap / per-param flag | **MIDI-track CC-lock** send queue — `FUN_40033e3c(track, param, value)` writes it (guard: `[0x8000003f + track]` must equal a held trig; `[0x46c76de0]` = the held list), `FUN_400409f4` sends each set bit as MIDI CC (`FUN_40010bc8` = serial TX ring) then clears it. **`emu_plock.py --call3e3c` (Session 25): `FUN_40033e3c` writes ONLY #4 — so it is NOT the audio p-lock writer.** The `[NO]`+knob path calls it with params `0x34–0x36` (`0x4005e164/e1a8/e1d2`). |
 
-Flow: **load** → `FUN_4009b220` fills #2 with `0xFF` (from boot `0x4001f95c` / project load
-`0x400238a8`), then the deserialiser populates #1; **pattern-enter** → copy loops at
-`0x4009b84c` / `0x4009c02c` splice #1/#3 → #2; **step** → step handler refreshes #2 from
-#1 for the current step; **save** → #1 → disk.
+Flow (Session 38 corrections):
+- **load** → `FUN_4009b220` fills #2 with `0xFF`, then the deserialiser populates #1
+  (TRAC chunk) and `+0x4900` (its own chunk — Session 37).
+- **pattern-enter / start-track** → `0x4009b842` / `0x4009c020` copy **#3 (SCENE)
+  `0x46c7aa24` → #2**, per track (32 B + second array + bitmap). NOT #1→#2.
+- **step** (playhead) → step handler `0x4009d1e8` per-param loop `0x4009d7dc`:
+  reads `#1[step][param]` (`0x91a` stride, `+0x59` — the `lea @(0x58,Xn);lea
+  @(1,An)`); `!= 0xFF` → writes it into **#2** unconditionally (no
+  `+0x4900`/`+0x48d8` check). Then **per-frame apply `0x4000bad4`** reads the
+  `#2` bitmap `0x46c75fa0` and applies to the engine. **Playback = `#1` → `#2`
+  → engine; `+0x4900` is nowhere in the chain (Session 39).**
+- **`+0x4900` → `#1` commit**: not found (S39). Not in edit (`0x4004ef54`) /
+  release (`0x4005fb44`) / save (`0x4008a740`) / pattern-enter / step-handler /
+  `0x4009da20` / frame-apply. `blob+0x4900` (`0x400e6ae0`) has 4 refs
+  image-wide, all in the LIVE cluster. The commit is on transport (STOP/PLAY,
+  `FW_TRANSPORT 0x4009b964`) / loop-wrap / a deferred task — untraced.
+- **LIVE edit** (`0x40041784`/`0x40041bc4`) → `+0x4900` + bitmaps only, **never #1**;
+  arms a bit in `0x46c7d344/d348`.
+- **p-lock-mode exit** (`~0x40062120`) → draw family + `0x400339d8` (LED from #1) +
+  `0x4009da20` (working set) + **`clrl 0x46c7d344/d348`** (arm bits). The
+  `+0x4900` → #1 **commit** rides here (not yet pinned to an instruction —
+  Session 39); today it is **add-only** (a LIVE erase's `0xFF` doesn't un-lock #1),
+  which is Session 13's bug.
+- **save** → #1 and `+0x4900` written as separate verbatim chunks (Session 37).
 
-**The `[TRIG]`-hold + knob → #1 writer is still not located (Session 25).** Ruled out:
-the encoder handler `0x4004eb24` (bit 0 writes the *Part* value `[0x46c82456]+part*6322+…`,
-bit 1 → `FUN_40033e3c` = the MIDI CC path #4). Neither touches #1/#2/#3 (`emu_plock.py`).
-Likely model: knob edits **#2** for the held step, and a commit-on-trig-release or
-commit-on-step copies #2 → #1[step]. Next: `emu_plock.py` with a trig-*release* + watch #1/#2.
+**The `[TRIG]`-hold + knob → #1 writer — LOCATED as `0x4004ef54` (Session 27); it
+writes a live-edit buffer `+0x4900`, not #1 directly.**
+
+*p-lock editor gate state* (Session 27, disassembled at the correct
+`--adjust-vma=0x40000400`; all in the `0x460d17xx` UI-scratch page):
+
+| addr | role |
+|---|---|
+| `0x460d172e` | **armed** flag (`u32`) — `!= 0` ⇒ a p-lock edit is in progress. Reader `0x40033d70`. Set `= 1` at `0x4005100c` (audio) / `0x4005167a`, cleared at `0x4005fbf2` / `0x40060196`. |
+| `0x460d174a` | **u16 held-step bitmap** (bit p ⇒ step `0x460d174c + p`). Set `\|= 1<<step` at `0x40050fb8`. |
+| `0x460d174c` | **u16** held-step base (`= basestep<<4`, `basestep = [0x460d1e04]`); reset when the bitmap goes 0. |
+| `0x460d1746` | offset of the held step's record, **stride 0x10/step** (`basestep<<4 + step`, `0x40050fd0`). |
+| `0x46c7d2e4` | per-step `\|= 1<<param` **locked bitmap** the knob writer maintains (`byte[step]`). Empty at rest. |
+| `0x100b14d0` | current **pattern** byte (confirmed — `mvzb` → `0x0a` = DISK_PAT). |
+
+Arm it from the harness: `call_as_main(0x40050f20, (step, 1))` — runs clean, sets
+all of the above for `step`.
+
+*The real handlers* (Session 27 — ⚠️ the image loads at vaddr `0x40000400`;
+disassemble with `m68k-elf-objdump -b binary -m m68k:5407 --adjust-vma=0x40000400`,
+never `0x40000000`. Session 26's fresh fn addresses are all 0x400 low):
+- **grid-rec trig chain**: keycodes `0x01..0x10` → `0x40060ce0(keycode@4,event@8)`
+  → (if `0x460d1736==0`) grid-rec trig dispatcher → event **1 (press) →
+  `0x40050f20`**, 2 (hold) → `0x400587d4`, 0 (release) → `0x4005fb44` +
+  `0x4003146c`. `0x40050f20(step, 1)` arms the editor: `0x460d172e = 1` (armed,
+  `0x4005100c`), `0x460d174a |= 1<<step` (u16 held bitmap, `0x40050fb8`),
+  `0x460d174c = basestep<<4` (u16, `basestep = [0x460d1e04]`),
+  `0x460d1746 = basestep<<4 + step`. Gate: `0x460d5db4 ∈ {0,3}`, `0x80000012==0`.
+- **p-lock knob-op dispatcher** = `~0x40062a00` (message handler, event struct in
+  `a2`: `a2@0` opcode, `a2@2` param/matchval, `a2@8` value). Each opcode: if
+  `0x460d172e != 0` (armed) → a p-lock op; elif `0x460d172a != 0` → a non-armed
+  sibling.
+  - **writer** `0x4004ef54(track@d7, matchval@fp, value@a2)` (from `0x40062a82`) —
+    ⚠️ arg0 is the **track** (`d7`, drives `d5 = track*0x8b0`, `1<<track`). Writes
+    `blob + pat*0x8ed8 + track*0x8b0 + step*0x20 + 0x4900 + 2` = value
+    (`0x4004f062`), `0x46c7d2e4[step] |= 1<<track` (`0x4004f09e`). Only the `+2`
+    byte; the record's `+0`/`+3`/`+4`/`+5` are the other 4 encoders of the page.
+  - **eraser** `0x4004f124(track, a2@2, a2@3)` (from `0x40062a1c`) — `st`→`0xFF`
+    into `+0`/`+3`/`+4`/`+5`.
+  - **op 3** `0x4004f5f8(track, a2@2, a2@3, a2+8)` (from `0x40062afc`).
+
+**`+0x4900` is the per-track LIVE-REC value buffer** (stride `track*0x8b0`,
+step `*0x20`). `emu_plock.py --s27`: for the saved DEMO it is all `0xFF` while #1
+holds every lock and `0x46c7d2e4` is zero — but that is because the DEMO was
+never LIVE-edited, so its `+0x4900` **on-disk chunk** is all-`0xFF` (Session 37).
+Other `+0x4900` byte writers: `0x4004f2a4` / `f3ac` / `f4d4` / `f830` (companion
+slots), `0x400505f4` / `0x40050b98` (grid-rec), `0x4005fdc6` (release).
+
+⚠️ **`+0x4900` is NOT repacked into `#1` on save** (Session 37 — refutes the
+earlier model). The **bank-record serialiser `~0x4008a740`** (p-lock section
+`0x4008ac20`–`0x4008b0d6`; `a5` = RAM pattern base, `d3` = file handle, checksum
+`0x460fab5c`) writes, per track:
+- **loop 1 / TRAC chunk**: `#1` (`a5 + 0x91a*trk + 0x59`, `0x800`) **verbatim,
+  unconditional** + aux (`+0x859`, `0x40`) + aux2 (`+0x89b`, `0x80`)
+- **loop 2 / a separate per-track chunk**: `+0x48d0`/`+0x48d8`/`+0x48e0`/`+0x48e8`
+  /`+0x48f0` (8 B each) + `+0x48f8..+0x48ff` (bytes) + **`+0x4900`**
+  (`a5 + 0x8b0*trk + 0x4900`, `0x800`) verbatim + `+0x5100` (`0x80`)
+
+So `#1` and `+0x4900` are stored **side by side**, each read straight from RAM;
+the working-view → `#1` merge is on **LOAD** or **pattern-enter**, not save
+(Session 38 to pin which). `emu_plock.py --save` is the harness (sentinel `0x77`
+in `#1` vs `0x33` in `+0x4900`; both reach disk, in different chunks).
+
+**`0x400339d8` rebuilds the UI "step has a lock" bitmaps** — zeroes
+`0x46c7d2e4[0..63]` + `0x46c7d48c[0..63]`, then for track 0–7 × step 0–63 ×
+byte 0–31: stored `#1` byte (`blob + pat*0x8ed8 + track*0x91a + step*0x20 +
+0x59`) `!= 0xFF` → `0x46c7d48c[step] |= 1<<track` (`0x40033a38`); live `+0x4900`
+byte `!= 0xFF` → `0x46c7d2e4[step] |= 1<<track` (`0x40033a4c`). So
+**`0x46c7d48c[step]` = bitmap of which tracks have a STORED p-lock on that step,
+`0x46c7d2e4[step]` = same for LIVE `+0x4900` edits** (Session 29, proved:
+`0x46c7d48c` bit `t` lights exactly #1's locked steps for track `t`). **The
+detour anchor.** ⚠️ it reads `[0x100b14d0]` for the pattern — the emu harness
+drifts that to 0 after a run-to-spin, re-assert before calling.
+
+`objdump` prints a brief-format `lea (d8,An,Xn)` disp as raw hex with no `0x`
+(so `lea %a0@(58,%d3:l)` = `0x58`), unlike a `(d16,An)` disp (signed decimal).
+
+**The LIVE-REC gesture (`[NO]`+knob live-erase — the trigless-lock feature's
+path)** is the `0x460d172a != 0` branch of `~0x40062a00`:
+`0x40041bc4(track, a2@2, a2@3, a2@4)` = LIVE write/erase (grid-rec's
+`0x4004ef54`/`0x4004f124` are the `0x460d172e`-armed siblings). `0x40041bc4`
+updates p-lock state across parallel views keyed
+`blob + bank*0x9b340 + pattern*0x8ed8 + track*{stride}`:
+`+0x48d8`/`+0x48e0` (2×u32 param bitmap, track stride `0x8b0`, `0x1001aa26`
+mirror) · `+0x4900` value records (bytes `+0/+1/+3/+4/+5` `st`'d `0xFF` on erase) ·
+`+0x2880` PART-payload (`0x458` track / `0x476c` pat / `0x4d9a0` bank, a 6-bit
+field at bits 7-12 of a u16) · `0x46c7d2e4[step] |= 1<<track` · dirty flags
+`[0x4017d512]`, `[0x100f8598]`. **It never checks "lock count → 0" and never
+touches a trig-type mask** — so the emptied trigless lock persists (Session 13's
+complaint). The step handler (`0x4009d740`+, per-param loop `0x4009d7dc`)
+consults a 64-bit param bitmap at **`TRAC + 0x0a`** + the `#1` values at
+`TRAC + 0x59`.
+
+**A pure p-lock trigless lock is DERIVED, not flagged** (Session 31,
+`emu_plock.py --trigless` — hand-clear a locked step's `TRAC+0x00` note bit on
+disk, reload): the step is then a trigless lock with **no other bit set**
+anywhere (`TRAC+0x08/0x10/0x18/0x0a`, `+0x48d8`, `+0x4900` all empty at load),
+and `0x46c7d48c[step]` (→ the dim-lock LED) lights **byte-identically** to the
+note+lock case. So **trigless lock ≡ `#1[step] != 0xFF && TRAC+0x00 bit clear`**.
+
+Revised model: **`#1` (`TRAC+0x59`) = the store** (deserialiser fills it on
+load); `TRAC+0x0a` / `+0x48d8` / `+0x4900` are runtime working views, **empty
+until an edit populates them lazily**. `0x40041bc4` (LIVE erase) clears the
+working views but **not `#1`** → the emptied lock survives in `#1`, the LED stays
+lit, re-serialises on save = Session 13's complaint.
+
+**Detour (Option B)**: hook `0x40041bc4` exit — erase that took the `(track,
+step)` working param-bitmap to 0 AND step is a pure trigless lock (`TRAC+0x00`
+and `+0x08/0x10/0x18` bits clear) → clear `#1[track][step]` (32 bytes → `0xFF`) +
+let `0x400339d8` refresh.
+
+**Detour core action VALIDATED** (Session 32, `emu_plock.py --trigless`): on the
+trigless bank, `#1 t1 step 4 := 32×0xFF` then `0x400339d8` → `0x46c7d48c[4]` goes
+`0x43 → 0x41` (track-1 bit cleared → LED off), step 0 and other tracks untouched.
+
+**The gap** (S33–34): `0x40041bc4` (LIVE erase) writes only `0x46c7d344` (arm
+bit) + `0x46c7d2e4[a3]`, never `#1`; and (S37) **save doesn't merge either** —
+`#1` and `+0x4900` are separate on-disk chunks (see above). So a LIVE-erase's
+clear of `+0x4900` *persists* across save/load on its own; the erased lock is
+almost certainly already gone for **playback**, and only the **LED**
+(`0x46c7d48c` ← `0x400339d8`, built purely from `#1 != 0xFF`) stays lit —
+exactly Session 13's "pure visual noise". The remaining question (S38): does
+the LOAD deserialiser / pattern-enter build the playback set (`#2`) with the
+working views masking `#1`? If yes → the fix is small: **(b) gate
+`0x400339d8`'s `0x46c7d48c` build on the step being live-present** (it already
+reads `+0x4900`). (a) hooking `0x40041bc4` to clear `#1` stays the fallback —
+`0x4009b290(track+8)` = `[0x80006500+track+8]` must be 1 to reach the erase
+body; the `0x4009b2d4` decode needs `0x46c775bc/759c[track+8]`, `0x800064e8+trk`,
+`0x46c775ce` — all unset headless.
+
+**Best path forward** = Session 13's original **Phase 0: HW export-and-diff** on
+the MKI (targeted test patterns → export → diff banks). Blocked on the MKI.
+`emu_plock.py --s34` is the headless-drive attempt (dead end, kept as a record).
 
 `0x8000004a` is the "what does a knob turn do" bitfield: bit 0 → write the Part-data
 value (encoder `0x4004eb24`); bit 1 → the CC-lock path.
 
-`emu_plock.py --watch --rec --trig N --knob D` drives the GRID-REC hold-trig + knob
-gesture and reports which PC wrote #1 (or #2/#4) — run it to name the writer/eraser.
+`emu_plock.py --s27` compares `+0x4900` vs #1 and arms via `0x40050f20`;
+`--watch --trig N --applyknob P V` arms then drives the `0x4004ef54` writer.
 
 ---
 

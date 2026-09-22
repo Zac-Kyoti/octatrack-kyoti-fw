@@ -25,3 +25,4 @@ reference/KB_REFRESH.md
 .playwright-mcp/
 __pycache__/
 *.pyc
+ghidra_project.bak*/

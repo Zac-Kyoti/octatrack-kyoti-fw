@@ -1,8 +1,10 @@
 # Resolved by tools/refs/sync.py — do not edit by hand.
 
 octamax = "7d9debcfdf7dbb1351066f6010d7f250d2b2ab28"  # README: hardware screenshots for slice playhead, 256 slots and arp sca
-elektron-firmware-tool = "065d18f4195793e61891e387813488ee59f6d1ca"  # elektron-firmware-tool: inspect and modify Elektron OS .syx files
+elektron-firmware-tool = "a5bce9a6af644386d900924082993a805e812874"  # device: rename section 2 from DSP to bootstrap
 OctaLib = "6e2438ebae7687ad50b43f098b19bc1de1b8f4b9"  # Merge pull request #9 from snugsound/feature/release-macos-0.1.1.0
-ems-octakit = "ca3b527304565e3bcb0d81f4e667b3cfc9b2f088"  # add octakit source and build tools
+ems-octakit = "92cf70b3a51c99aebd9bb65f12919bbcb6ea2ce3"  # save queued clone Kits without relinking source Patterns
 octa-bt-pt = "e970dd0f9841ce5f648c2a257342cb8a3a05b54a"  # added the ability to upload presets and some built-in presets that I l
-octabam = "47f6cc5023e65761e7dca94563f9710d9bf6bf4b"  # Merge pull request #128 from sambanks/rtos-max-seam
+octabam = "0ad97b9008f9a56a85a29e630687c2aa369c3c38"  # Merge pull request #253 from sambanks/selfname
+midisc = "eb8b4bc517364e952440f0df84fc147ce0cd27fa"  # Merge pull request #4 from bkkbrls-del/1.40MIDISC8
+dsp56300 = "46aa691da84a674fe843d406d36c89c7efcc8c01"  # Register analysis: MOVEP from an I/O address writes its destination re
