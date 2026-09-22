@@ -27331,3 +27331,85 @@ usage still within budget.
 
 - Re-run the DJ-OFF gates against this image (substantially larger patch).
 - Hardware verification -- nothing here has been heard.
+
+## Session 79, continued a thirty-seventh time — MEASURED: MASTER LENGTH resets every track. Our resume position is wrong; AR was right all along
+
+The user asked "is it that our OT implementation doesn't take master length into account or
+something?" It is exactly that. New tool `tools/diag_master_reset.py` settles it on **stock**,
+with no DIRECT JUMP involved, by watching the per-track STEP counters advance.
+
+### The measurement
+
+DJTEST2 A07, `SCALE_MODE = 1`, **MASTER LENGTH (+0x8e51) = 16**, master tps = 6, so the master
+cycle is 96 ticks:
+
+```
+T3 (LEN=7):   1 2 3 4 5 6 0 | 1 2 3 4 5 6 0 | 1 2 | 0 ...      7 + 7 + 2 = 16
+T2 (LEN=12):  1 ... 11 0 | 1 2 3 4 | 0 ...                     12 + 4   = 16
+T4 (LEN=16, 1/2x, tps=12): 1 ... 8 | 0 ...                     96 / 12  = 8 steps
+```
+
+Every track is cut off at the master boundary. T4 proves the cycle is in the **tick** domain,
+not the step domain: at half speed it only reaches 8 of its 16 steps inside the 96-tick cycle.
+
+### Consequence — the resume position formula is wrong
+
+Correct:
+
+```
+masterCycle = masterLen * tps_master          (ticks, from the INCOMING pattern)
+posInCycle  = absoluteTicks mod masterCycle
+pos_t       = (posInCycle / tps_t) mod len_t
+```
+
+That is **exactly** AR's `new_step = masterStep mod patternLen` followed by
+`new_step mod trackLen`. **AR's "double mod" is the master reset being respected, not a
+simplification.** Sessions cont.33-36 characterised it as AR solving a smaller problem; that
+was wrong and is retracted.
+
+Ours omits the master reduction entirely. At A07, absolute step 26 (156 ticks,
+`posInCycle` = 60):
+
+| track | correct | ours | |
+|-------|---------|------|---|
+| T0 (16, 1x) | 10 | 10 | agrees -- length == master length |
+| T2 (12, 1x) | **10** | 2 | WRONG |
+| T3 (7, 1x) | **3** | 5 | WRONG |
+| T4 (16, 1/2x) | **5** | 13 | WRONG |
+
+Three of five distinct configurations. Every earlier test passed because it only ever checked
+tracks whose length equalled the master length -- and because `diag_d7_inject.py`'s model
+carried the same omission as the patch, so model and firmware agreed with each other while
+both were wrong. **A model derived from the same misunderstanding as the code cannot catch the
+code's bug**; only the user's hardware knowledge did.
+
+### The overflow saga was self-inflicted
+
+With the master reduction, the stored offset is bounded by `masterLen` (<= 64) by
+construction, so `D7` cannot approach the 16-bit ceiling. The guard (cont.32), Hook T
+(cont.34) and the exact LCM reduction (cont.36) were all solving a problem created by our own
+omission. AR has no overflow because AR has no bug.
+
+### Spec, as the user has now stated it
+
+"Every **track within a pattern** behaves as if it had been silently playing all along at its
+own length", and **each pattern has its own master length**, which DIRECT JUMP must respect.
+Jumping to a pattern puts every track where it would be had the user never switched away from
+that pattern.
+
+### How this changes the code
+
+1. **Hook H**: reduce by the incoming pattern's master cycle instead of the LCM period. The
+   incoming pattern's fields are already what Hook H and stock's `D7` setup read (confirmed by
+   A08, where stock built `D7` from the target's `+0x8e52`).
+2. **Delete** `dj_div32` / `dj_gcd32` / `dj_foldcyc` and the LCM fold (~230 bytes) -- dead.
+3. **Keep Hook T**: no longer needed for range, but it defines the phase origin (transport
+   start), which the spec still requires.
+4. **NEW ISSUE, not yet addressed**: `G_ABSTICK` counts master **steps** at the *current*
+   pattern's rate (`dj_abstick` adds 1 per master step), so it is not absolute time. If two
+   patterns have different MASTER SCALE values, the counter conflates two rates and the model
+   is inexact across such a switch. Making it tick-accurate means adding
+   `LEN_TBL[SCALE_IX]` per step instead of 1. Exact whenever all patterns share a master
+   scale, which is the common case; worth fixing regardless.
+
+No code changed this session -- measurement only.
