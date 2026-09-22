@@ -27259,3 +27259,75 @@ hook after `D7` is built at `0x400a4834`), because reducing `G` instead requires
 `tps_master | P`, which is not guaranteed in per-track mode. And whatever is reduced, `dj_c`'s
 master step must stay consistent with it — this session's bug is exactly what happens when it
 does not.
+
+## Session 79, continued a thirty-sixth time — option (a) implemented: EXACT range reduction, the ~68-minute limit is gone
+
+### What Hook H now does
+
+At every armed commit:
+
+```
+P = LCM( tps_master * masterLen , tps_t * len_t  for all 16 tracks )
+M = P / tps_master
+stored offset = G_ABSTICK mod M
+```
+
+Every track's landing position `(G * tps_master / tps_t) mod len_t` is **periodic in G** with
+exactly that period, so this is an **identity, not an approximation** -- the positions are
+bit-identical to what the unreduced counter would produce.
+
+Two design points that make it correct rather than merely plausible:
+
+- **The master cycle is folded into the LCM.** That is what guarantees `tps_master | P`, which
+  makes reducing `G` by `P/tps_master` exactly equivalent to reducing `D7 = tps_master*G` by
+  `P` -- and it keeps `dj_c`'s master step consistent, which is the bug cont.35 caught.
+- **Uniform mode skips the per-track fold entirely**, because every track then uses the
+  pattern's own length and multiplier, which the master cycle already covers.
+
+New cave helpers: `dj_div32` (restoring shift-subtract; uses unsigned `bcs` rather than
+`dj_mod32`'s signed `blt` -- immaterial at our magnitudes, wrong in principle), `dj_gcd32`
+(Euclid, reusing `dj_mod32`), `dj_foldcyc` (folds one track's cycle; a bad multiplier index or
+zero length contributes nothing rather than poisoning the accumulator).
+
+The `P > 98301` ceiling and the zero fallback remain as a backstop for pathological length
+sets whose period will not fit.
+
+### MEASURED — periodicity is exact
+
+DJTEST2 A07 (`P = 4032`, `M = 672`), armed commit, per-track STEP for T0..T4:
+
+| preset `G_ABSTICK` | stored offset | `D7` | STEP T0..T4 |
+|--------------------|---------------|------|-------------|
+| 26 (28 at commit) | 28 | 168 | 12, 8, 4, 0, 14 |
+| 698 (700) — **+1 period** | **28** | 168 | **12, 8, 4, 0, 14** |
+| 1370 (1372) — **+2 periods** | **28** | 168 | **12, 8, 4, 0, 14** |
+| 40002 (40004) — far past the old bound | 356 | 2136 | 4, 8, 8, 6, 2 |
+
+Byte-identical across two full periods. And the 40004 row **computes** instead of falling back
+to 0; hand-checking each track against the unreduced counter confirms it is the same answer:
+`40004 mod 16 = 4`, `80008 mod 16 = 8`, `40004 mod 12 = 8`, `40004 mod 7 = 6`,
+`20002 mod 16 = 2` -- all five match.
+
+### Why AR never needed this (recorded for `AR_DIRECT_JUMP.md`)
+
+AR's dividend is `masterStep mod patternLen`, bounded by construction, and AR applies the same
+step number to every track -- it corrects the per-track *rate* going forward (the countdown
+reload array) but **not the landing phase** for a track's tempo multiplier. Two things the OT
+implementation does that AR's does not:
+
+1. **Absolute-time origin.** AR's input resets every pattern cycle, so after 20 steps of a
+   16-step pattern AR only knows "step 4"; switching to a 12-step pattern gives `4 mod 12 = 4`
+   where ours gives `20 mod 12 = 8`.
+2. **Per-track tempo-multiplier correction.** Ours computes `q_t = absTicks / tps_t` first, so
+   a 2x track lands on its own 52nd step, not on the master's 26th.
+
+So AR avoids the overflow by solving a smaller problem. The unbounded counter is the price of
+the richer semantics, and the periodicity identity is how that price gets paid in full.
+
+Build: 1234 bytes changed, 0 unexpected outside the cave, manual-trig bytes identical, cave
+usage still within budget.
+
+### Outstanding
+
+- Re-run the DJ-OFF gates against this image (substantially larger patch).
+- Hardware verification -- nothing here has been heard.

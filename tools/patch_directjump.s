@@ -182,6 +182,8 @@
     .equ CHAIN_ACT, 0x80006546
     .equ LEN_TBL,   0x400aba50          | [scaleIdx] -> pattern length (long)
     .equ PAT_SCALE, 0x400eb034          | [bank*0x9b340 + pat*0x8ed8] -> scale idx byte
+    .equ PAT_MLEN,  0x400eb031          | pattern +0x8e51 -- MASTER LENGTH in steps
+    .equ TRK_BLOB,  0x400e21e0          | pattern blob base (track records from +0)
     .equ PAT_MSCALE,0x400eb032          | pattern +0x8e52 -- MASTER scale when SCALE_MODE=1
     .equ PAT_SMODE, 0x400eb035          | pattern +0x8e55 -- SCALE_MODE flag
     .equ PAT_LEN,   0x400eb033          | same indexing -> pattern LENGTH in STEPS
@@ -499,52 +501,116 @@ dj_tstart:
     .global dj_d7
 dj_d7:
     tst.b   G_ARMED
-    beq.b   djd7_orig
-    lea     -12(%sp),%sp
-    movem.l %d1-%d2/%a1,(%sp)
-|   OVERFLOW GUARD (Session 79 cont.32). The rebuild loop stores the FIRST divide's
-|   quotient as a WORD (`move.w D0w,(A0)` @0x400a4916) and reads it back SIGN-EXTENDED
-|   (`mvs.w (A0),D1` @0x400a4950), so every per-track quotient must stay <= 32767.
-|   q_t = D7 / tps_t and the smallest tps in LEN_TBL is 3, so D7 <= 3*32767 = 98301 is
-|   sufficient for ANY combination of track scales in the incoming pattern.
-|   MEASURED without this guard (tools/diag_d7_inject.py --set-abstick 40002):
-|   D7 = 240012 -> NEXT_STEP = -14, STEP = 242 on a 16-step pattern. Silent garbage.
-|   G_ABSTICK is never reset (incremented only, at dj_abstick), so it accumulates from
-|   power-on -- the bound is ~68 minutes of CUMULATIVE transport, which is reachable in
-|   one session. Out of range -> store 0, which is exactly what stock puts there at a
-|   natural boundary: DIRECT JUMP degrades to restart-at-step-0 rather than jumping to a
-|   nonsense position. NOT a real fix -- see NOTES.md cont.31/32: the correct fix reduces
-|   G_ABSTICK by the LCM of the incoming pattern's per-track cycles, which is semantically
-|   neutral, and that construction is still open.
-    move.l  %d0,%d2                    | d2 = blob offset (D0 itself must survive -- the
-                                       | next stock instruction @0x400a4802 indexes with it)
+    beq.w   djd7_orig
+    lea     -40(%sp),%sp
+    movem.l %d0-%d7/%a1-%a2,(%sp)
+    move.l  %d0,%d6                    | d6 = pattern blob offset (caller's D0 -- preserved
+                                       | by the movem, and restored before we return)
+|   ---- EXACT RANGE REDUCTION (Session 79 cont.36) ----
+|   Every track's landing position is  (G * tps_master / tps_t) mod len_t, which is PERIODIC
+|   in G. Reducing G by that period changes nothing about where any track lands -- it is an
+|   identity, not an approximation. Working in ticks, the period is
+|       P = LCM( tps_master*masterLen , tps_t*len_t for every track )
+|   and the master cycle is included so dj_c's master step stays consistent too. Because
+|   tps_master*masterLen divides P, we have tps_master | P, so reducing G by M = P/tps_master
+|   is exactly equivalent to reducing D7 = tps_master*G by P.
+|   For DJTEST2 A07 (lengths 16/16/12/7/16, multipliers 1x/2x/1x/1x/1/2x) P = 4032 -> M = 672,
+|   worst-case quotient ~1344 against the 32767 ceiling: 24x headroom, and the ~68-minute
+|   limit disappears. Patterns whose P will not fit fall through to the zero fallback below.
+|   ---- master tempo multiplier -> d5, master length -> d4 ----
     lea     PAT_SMODE,%a1
-    tst.b   (%a1,%d2.l)                | SCALE_MODE
-    beq.b   djd7_uniform
-    lea     PAT_MSCALE,%a1             | per-track mode -> master scale at +0x8e52
-    bra.b   djd7_gotsc
-djd7_uniform:
-    lea     PAT_SCALE,%a1              | uniform mode  -> default scale at +0x8e54
-djd7_gotsc:
+    tst.b   (%a1,%d6.l)
+    beq.b   djd7_unif
+    lea     PAT_MSCALE,%a1             | per-track mode: MASTER SCALE (+0x8e52)
     moveq   #0,%d1
-    move.b  (%a1,%d2.l),%d1            | d1 = master scale index
+    move.b  (%a1,%d6.l),%d1
+    lea     PAT_MLEN,%a1               |                 MASTER LENGTH (+0x8e51)
+    moveq   #0,%d4
+    move.b  (%a1,%d6.l),%d4
+    bra.b   djd7_gotm
+djd7_unif:
+    lea     PAT_SCALE,%a1              | uniform mode: pattern multiplier (+0x8e54)
+    moveq   #0,%d1
+    move.b  (%a1,%d6.l),%d1
+    lea     PAT_LEN,%a1                |               pattern length (+0x8e53)
+    moveq   #0,%d4
+    move.b  (%a1,%d6.l),%d4
+djd7_gotm:
     cmpi.l  #11,%d1
-    bhi.b   djd7_zero                  | not a real scale index -> safe fallback
+    bhi.w   djd7_zero
     lea     LEN_TBL,%a1
-    move.l  (%a1,%d1.l*4),%d1          | d1 = master TICKS PER STEP
-    move.l  G_ABSTICK,%d2
-    cmpi.l  #32767,%d2
-    bhi.b   djd7_zero                  | cheap first bound; also catches a wrapped counter
-    muls.l  %d2,%d1                    | d1 = tps_master * G = the D7 stock will build
-    cmpi.l  #98301,%d1
-    bhi.b   djd7_zero
+    move.l  (%a1,%d1.l*4),%d5          | d5 = tps_master
+    tst.l   %d4
+    ble.w   djd7_zero
+    move.l  %d5,%d7
+    muls.l  %d4,%d7                    | d7 = P = tps_master * masterLen
+|   In uniform mode every track uses the pattern's own length and multiplier, which the
+|   master cycle above already covers -- so the per-track fold is only needed in per-track
+|   mode.
+    lea     PAT_SMODE,%a1
+    tst.b   (%a1,%d6.l)
+    beq.w   djd7_gotp
+|   ---- fold in each AUDIO track's own cycle ----
+    moveq   #0,%d0
+    movea.l %d0,%a2                    | a2 = track index (helpers clobber d0-d4, so the
+                                       | loop counter lives in an address register)
+djd7_al:
+    move.l  %a2,%d0
+    move.l  #0x91a,%d1
+    muls.l  %d1,%d0
+    add.l   %d6,%d0                    | d0 = blob offset + t*0x91a
+    lea     TRK_BLOB,%a1
+    moveq   #0,%d2
+    move.b  (0x50,%a1,%d0.l),%d2       | this track's LENGTH
+    moveq   #0,%d1
+    move.b  (0x51,%a1,%d0.l),%d1       | this track's TEMPO MULTIPLIER index
+    bsr     dj_foldcyc
+    addq.l  #1,%a2
+    move.l  %a2,%d0
+    cmpi.l  #8,%d0
+    blt.b   djd7_al
+|   ---- and each MIDI track's ----
+    moveq   #0,%d0
+    movea.l %d0,%a2
+djd7_ml:
+    move.l  %a2,%d0
+    move.l  #0x8b0,%d1
+    muls.l  %d1,%d0
+    add.l   %d6,%d0
+    add.l   #0x48f8,%d0                | d0 = blob offset + 0x48f8 + t*0x8b0
+    lea     TRK_BLOB,%a1
+    moveq   #0,%d2
+    move.b  (%a1,%d0.l),%d2            | MIDI track LENGTH  (+0)
+    moveq   #0,%d1
+    move.b  (0x1,%a1,%d0.l),%d1        | MIDI track MULTIPLIER (+1)
+    bsr     dj_foldcyc
+    addq.l  #1,%a2
+    move.l  %a2,%d0
+    cmpi.l  #8,%d0
+    blt.b   djd7_ml
+djd7_gotp:
+    tst.l   %d7
+    ble.b   djd7_zero
+    cmpi.l  #98301,%d7                 | P itself must leave D7 inside the signed-word
+    bhi.b   djd7_zero                  | quotient ceiling; pathological length sets do not
+|   ---- M = P / tps_master ; G' = G_ABSTICK mod M ----
+    move.l  %d7,%d0
+    move.l  %d5,%d1
+    bsr     dj_div32                   | d0 = M
+    tst.l   %d0
+    ble.b   djd7_zero
+    move.l  %d0,%d1                    | d1 = M
+    move.l  G_ABSTICK,%d0
+    bsr     dj_mod32                   | d0 = G mod M -- exact, positions unchanged
+    move.l  %d0,%d2
     bra.b   djd7_store
 djd7_zero:
-    moveq   #0,%d2
+    moveq   #0,%d2                     | unrepresentable -> 0 = restart at step 0, which is
+                                       | what stock puts here at a natural boundary
 djd7_store:
     move.l  %d2,MASTER_STEPS           | start offset (master steps) for stock's own rebuild
-    movem.l (%sp),%d1-%d2/%a1
-    lea     12(%sp),%sp
+    movem.l (%sp),%d0-%d7/%a1-%a2
+    lea     40(%sp),%sp
 djd7_orig:
     lea     0x400eb034,%a0             | displaced original
     rts
@@ -966,6 +1032,72 @@ dpf_done:
 | Same hand-rolled binary long division as djc_store above (neither divul.l nor divsl.l,
 | in any form, assembles under this toolchain's -mcpu=5407) -- factored out here since
 | dj_pertrack_fix needs it 8 times per commit instead of djc_store's one.
+| ---- unsigned 32-bit helpers for Hook H's range reduction (Session 79 cont.36) ----
+| dj_div32 : d0 = d0 / d1 (unsigned), clobbers d2-d4. Restoring shift-subtract, same shape
+|            as dj_mod32 below, but accumulating the quotient as well as the remainder.
+|            Uses bcs (unsigned) rather than dj_mod32's blt -- our operands are small enough
+|            that it never matters, but signed compares on a division are wrong in principle.
+dj_div32:
+    moveq   #0,%d2                     | remainder
+    moveq   #0,%d4                     | quotient
+    moveq   #32,%d3
+dj_div32_loop:
+    add.l   %d0,%d0                    | shift dividend left, MSB -> X
+    addx.l  %d2,%d2                    | remainder = remainder*2 + that bit
+    add.l   %d4,%d4                    | quotient <<= 1
+    cmp.l   %d1,%d2
+    bcs.b   dj_div32_skip              | remainder < divisor -> this quotient bit stays 0
+    sub.l   %d1,%d2
+    addq.l  #1,%d4
+dj_div32_skip:
+    subq.l  #1,%d3
+    bne.b   dj_div32_loop
+    move.l  %d4,%d0
+    rts
+
+| dj_gcd32 : d0 = gcd(d0, d1) by Euclid, clobbers d1-d4.
+dj_gcd32:
+    tst.l   %d1
+    beq.b   dj_gcd32_ret
+dj_gcd32_loop:
+    move.l  %d1,%d4                    | remember b
+    bsr     dj_mod32                   | d0 = a mod b   (dj_mod32 leaves d1 alone)
+    move.l  %d0,%d1                    | b' = a mod b
+    move.l  %d4,%d0                    | a' = b
+    tst.l   %d1
+    bne.b   dj_gcd32_loop
+dj_gcd32_ret:
+    rts
+
+| dj_foldcyc : fold one track's cycle into the period accumulator.
+|              in  d1 = tempo-multiplier index, d2 = track length, d7 = P so far
+|              out d7 = LCM(P, LEN_TBL[d1] * d2)
+|              A track with a bad index or zero length contributes nothing rather than
+|              poisoning the accumulator. Bails out by leaving P too large if it would
+|              overflow, which the caller's ceiling check then catches.
+dj_foldcyc:
+    cmpi.l  #11,%d1
+    bhi.b   dj_foldcyc_ret
+    tst.l   %d2
+    ble.b   dj_foldcyc_ret
+    move.l  %d2,-(%sp)
+    lea     LEN_TBL,%a1
+    move.l  (%a1,%d1.l*4),%d0
+    muls.l  (%sp)+,%d0                 | d0 = tps_t * len_t = this track's cycle in ticks
+    tst.l   %d0
+    ble.b   dj_foldcyc_ret
+    move.l  %d0,-(%sp)                 | keep the cycle
+    move.l  %d7,%d0
+    move.l  (%sp),%d1
+    bsr     dj_gcd32                   | d0 = gcd(P, cycle)
+    move.l  %d0,%d1
+    move.l  %d7,%d0
+    bsr     dj_div32                   | d0 = P / gcd
+    muls.l  (%sp)+,%d0                 | d0 = (P/gcd) * cycle = LCM
+    move.l  %d0,%d7
+dj_foldcyc_ret:
+    rts
+
 dj_mod32:
     moveq   #0,%d2
     moveq   #32,%d3
