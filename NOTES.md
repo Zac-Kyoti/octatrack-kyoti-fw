@@ -26144,3 +26144,85 @@ guards passed.
   the same arrays the rebuild loop now sets correctly.
 - `D7 = tps * G_ABSTICK` is a 32-bit `muls.l`; overflow past ~2^31/tps step-ticks is unverified.
 - Only one switch direction (1 -> 0) and one bank tested.
+
+## Session 79, continued a twenty-ninth time — Hook F removed; it was clobbering 7 of 8 audio tracks. Measurement-timing error caught
+
+### A measurement error in cont.28, caught and corrected
+
+cont.28 claimed 16/16 per-track correctness on the patched build. The snapshot was taken at
+`0x400a4d36` -- which is **Hook F's own detour site, i.e. its ENTRY**, before it writes. It
+measured stock's rebuild-loop output and never saw what Hook F then did to it. Adding a second
+snapshot at `0x400a4d3c` (the instruction after the 6-byte detour returns):
+
+```
+ t   STEP@loop  STEP@afterF  TICKS@afterF
+ 0..7   10 / 4        2            2       <<< CLOBBERED  (audio)
+ 8..15    10         10            0       (MIDI -- Hook F never touches 8..15)
+```
+
+So the cont.28 build was still broken, and worse than it looked: audio tracks landed on 2 while
+MIDI tracks landed on the correct 10, i.e. **it desynced audio against MIDI on every armed
+commit** -- an audible signature, and one that would have been blamed on something else.
+
+Lesson, and it is the same one as cont.25's `G_ARMED` sampling: a snapshot taken at a hook's
+*entry* measures the state before that hook, not after. Choose the observation point relative
+to the thing being measured, and say which side of it you are on.
+
+### Hook F carried the SAME `LEN_TBL` bug as `dj_c`
+
+`dj_pertrack_fix` computed, per audio track:
+
+```
+d1 = LEN_TBL[scaleIdx]        | comment calls it "this track's OWN trackLen"
+d0 = G_ABSTICK mod d1         | = G_ABSTICK mod TICKS-PER-STEP  = 26 mod 6 = 2
+0x800064d0[t] = d0            | per-track STEP array
+0x800064f0[t] = d0            | ticks-within-step array
+```
+
+Same misreading of `LEN_TBL` that cont.28 fixed in `dj_c`, in a second place. It wrote a
+tick-remainder into a step counter, and the identical value into the sub-step tick counter.
+That is also the mechanism of the flashed hardware regression (cont.20), surviving the
+`dpf_normal` bounds-guard fix because the guard bounded the index, not the semantics.
+
+**Removed** -- the detour entry is gone from `build_directjump_v4.py`. Its original purpose was
+repairing per-track state after a commit; Hook H now seeds stock's own rebuild loop so that
+state is correct when it is first written, and there is nothing left to repair.
+
+### Current build, measured
+
+Patched firmware, armed commit, DJTESTxxx pattern 1 -> 0 (`SCALE_MODE = 1`),
+`G_ABSTICK = 26` -> `0x80006628 = 26` -> `D7 = 156` ticks:
+
+| track | SCALE | LEN | tps | STEP | survives Hook F site | TICKS |
+|-------|-------|-----|-----|------|----------------------|-------|
+| 0, 3-15 | 2 | 16 | 6 | 10 | 10 | 0 |
+| 1 | 0 (2x) | 16 | 3 | 4 | 4 | 0 |
+| 2 | 2 | 12 | 6 | 2 | 2 | 0 |
+
+16/16, values survive, and `TICKS = 0` on every track (correct at a step boundary). Audio and
+MIDI now agree.
+
+Build: 899 bytes changed, 0 unexpected outside the cave, manual-trig bytes identical.
+
+### DJ-OFF regression gates -- PASS, but against the PREVIOUS build
+
+Both gates below were launched before Hook F was removed, so they validate the cont.28 image,
+not this one:
+
+| fixture | SCALE_MODE | rebuild loop | result |
+|---------|-----------|--------------|--------|
+| DJTESTxxx pattern 0 | 1 | 8 | IDENTICAL, 38 samples |
+| DJTESTxxx pattern 1 | 0 | 8 | IDENTICAL, 38 samples |
+
+Hook F was gated on `G_JUST_COMMITTED` (set only by `dj_c`, armed only), so it should have been
+inert with the feature off either way -- but that is an argument, not a measurement. **Re-run
+required against the current image before any flash.**
+
+### Still outstanding
+
+- Re-run both DJ-OFF gates on the current build.
+- Hook D (`dj_scaleix_fix`) not yet re-justified. It fixes a genuine stock staleness bug in the
+  master `SCALE_IX`, independent of position, so it probably stays -- but `dj_c` also writes
+  `SCALE_IX`, so the two may now be redundant. Unchecked.
+- `D7 = tps * G_ABSTICK` 32-bit `muls.l` overflow bound still unverified.
+- Only one switch direction (1 -> 0), one bank, one project.

@@ -125,7 +125,15 @@ PATCHES = [
       (0x400a4840, "dj_c", "420013c0800065b6", 8, "jsr"),
       (0x400a4220, "dj_scaleix_fix", "13c28000663d", 6, "jsr"),
       (0x400a3fe4, "dj_abstick", "13c0800065b6", 6, "jsr"),
-      (0x400a4d36, "dj_pertrack_fix", "4ab946107568", 6, "jsr"),
+      # Session 79 cont.29: Hook F (dj_pertrack_fix) REMOVED. It carried the same
+      # LEN_TBL misreading as dj_c -- it computed G_ABSTICK mod LEN_TBL[scale], i.e.
+      # mod TICKS-PER-STEP, and wrote that into BOTH the per-track STEP array
+      # (0x800064d0) and the ticks-within-step array (0x800064f0). Measured on this
+      # build: it clobbered 7 of 8 AUDIO tracks from the correct 10 down to 2, while
+      # the MIDI tracks (which it never touches) kept 10 -- i.e. it desynced audio
+      # against MIDI on every armed commit. Its original purpose (repairing per-track
+      # state after a commit) is now done correctly upstream by stock's own rebuild
+      # loop, seeded by Hook H. See NOTES.md Session 79 cont.28/29.
       # Session 79 cont.28 -- Hook H: seed stock's OWN per-track rebuild loop
       # (0x400a4884) with the absolute position instead of 0, by writing
       # 0x80006628 before D7 is built from it at 0x400a4812/0x400a4826. Model
