@@ -26226,3 +26226,57 @@ required against the current image before any flash.**
   `SCALE_IX`, so the two may now be redundant. Unchecked.
 - `D7 = tps * G_ABSTICK` 32-bit `muls.l` overflow bound still unverified.
 - Only one switch direction (1 -> 0), one bank, one project.
+
+## Session 79, continued a thirtieth time — DJ-OFF gates pass on the current build; gate blind spot closed; Hook D examined
+
+### DJ-OFF regression gates -- PASS on the CURRENT image (post-Hook-F-removal)
+
+| fixture | SCALE_MODE | rebuild loop | result |
+|---------|-----------|--------------|--------|
+| DJTESTxxx pattern 0 | 1 (per-track, incl. the 2x track) | 8 | IDENTICAL, 38 samples |
+| DJTESTxxx pattern 1 | 0 (uniform) | 8 | IDENTICAL, 38 samples |
+
+Both crossed a real pattern boundary (`0x400a4884` x8) and cleared the liveness precondition
+(16/16 tracks advancing, 856 loop executions).
+
+### Gate blind spot found and closed
+
+`diff_stock_vs_patch.py` compared the per-track SCALE array (`0x8000663e`) but **not** the
+master `SCALE_IX` (`0x8000663d`) -- which is precisely the byte Hook D (`dj_scaleix_fix`)
+writes, and Hook D is **unconditional**, not gated on `DJ_MODE`. So the gate would have
+reported IDENTICAL whatever Hook D did with the feature off. `BAR_CTR` (`0x800065b2`) was
+likewise uncompared, and Hook H seeds it indirectly as the low word of the long at
+`0x80006628`. Both added.
+
+Re-run with the widened comparison, DJTESTxxx pattern 0: still **IDENTICAL**. So Hook D does
+not change DJ-OFF behaviour on this fixture. The concern was worth testing and did not
+reproduce.
+
+### Hook D -- examined, not yet fully cleared
+
+`dj_scaleix_fix` @ `0x400a4220` replaces stock's `move.b D2b,(0x8000663d)` and does NOT replay
+it; it recomputes the ACTIVE pattern's scale and stores that instead. Two observations:
+
+1. Stock's `D2` at that point is **not a scale index** -- the nearest write is
+   `move.l D0,D2 ; addq.l #1,D2` (`0x400a419c`). So Hook D replaces stock's semantics rather
+   than un-staling a copy of the same quantity. Session 70's rationale (stock stores the
+   OUTGOING pattern's index) may still be right about the *symptom* while being wrong about
+   the mechanism; not resolved.
+2. It reads the scale from `PAT_SCALE` (`+0x8e54`) unconditionally, but cont.23 measured that
+   stock's own master-scale source is `+0x8e52` when `SCALE_MODE` is set and `+0x8e54` only
+   when it is clear. On DJTESTxxx both fields are 2, so no fixture here can distinguish them.
+   **A pattern with `SCALE_MODE = 1` and `+0x8e52 != +0x8e54` is needed to test this**, and
+   until then Hook D's field choice is unverified for per-track-scale patterns.
+
+Hook D stays for now -- it is measured inert with the feature off, and its Session 70
+justification (a real hardware symptom: a pattern playing past its own length) has not been
+withdrawn. But it is the last unconditional patch in the build and the only one whose source
+field is known to disagree with stock's own convention in a case we cannot currently exercise.
+
+### Still outstanding
+
+- Reverse switch direction (0 -> 1) and back-to-back switches -- Session 70's stale-`SCALE_IX`
+  symptom was specifically a *double-switch* phenomenon, so a single 1 -> 0 test does not
+  cover it.
+- `D7 = tps * G_ABSTICK` 32-bit `muls.l` overflow bound.
+- One bank, one project.

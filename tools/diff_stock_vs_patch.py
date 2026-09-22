@@ -49,6 +49,13 @@ TICKS_ARR = 0x800064F0         # per-track ticks elapsed within current step
 ARMED_ARR = 0x80006500
 SCALE_ARR = 0x8000663E         # per-track scale index
 MASTER_STEP = 0x800065B6
+# Session 79 cont.30: SCALE_IX and BAR_CTR were NOT compared, which is a hole exactly
+# where Hook D (dj_scaleix_fix) writes. Hook D is UNCONDITIONAL -- not gated on DJ_MODE --
+# so it can change stock behaviour with the feature off, and this gate would have reported
+# IDENTICAL regardless. Hook H also seeds BAR_CTR indirectly (it is the low word of the
+# long at 0x80006628), though only when armed.
+SCALE_IX = 0x8000663D          # master scale index -- Hook D's write target
+BAR_CTR = 0x800065B2
 
 PCS = [
     ("audio loop top", 0x400A3CD0),
@@ -99,6 +106,8 @@ def run_image(er, image, project, bank, pattern, frames, tree):
             bytes(rt.uc.mem_read(ARMED_ARR, 16)),
             bytes(rt.uc.mem_read(SCALE_ARR, 16)),
             rt.uc.mem_read(MASTER_STEP, 1)[0],
+            rt.uc.mem_read(SCALE_IX, 1)[0],
+            int.from_bytes(bytes(rt.uc.mem_read(BAR_CTR, 2)), 'big'),
         ))
 
     sample()
@@ -191,15 +200,17 @@ def main(argv):
             if st[k] != pt[k]:
                 first_bad = (i, k, st, pt)
                 break
-        if first_bad is None and st[5] != pt[5]:
-            first_bad = (i, 5, st, pt)
+        for k in (5, 6, 7):
+            if first_bad is None and st[k] != pt[k]:
+                first_bad = (i, k, st, pt)
         if first_bad:
             break
 
     if first_bad:
         ok_all = False
         i, k, st, pt = first_bad
-        label = names[k - 1] if k <= 4 else "master STEP"
+        label = (names[k - 1] if k <= 4 else
+                 {5: "master STEP", 6: "SCALE_IX", 7: "BAR_CTR"}[k])
         print(f"\n  FIRST DIVERGENCE at sample {i} (frame {st[0]}) in {label}:")
         if k <= 4:
             print(f"    stock   {st[k].hex()}")
@@ -210,7 +221,7 @@ def main(argv):
         else:
             print(f"    stock={st[5]}  patched={pt[5]}")
     else:
-        print(f"\n  per-track STEP/TICKS/ARMED/SCALE and master STEP: IDENTICAL "
+        print(f"\n  per-track STEP/TICKS/ARMED/SCALE, master STEP, SCALE_IX, BAR_CTR: IDENTICAL "
               f"across {n} samples")
 
     print("\n  RESULT: " + ("IDENTICAL -- patch is inert with the feature off"
