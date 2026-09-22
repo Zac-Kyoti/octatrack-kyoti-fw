@@ -25334,3 +25334,97 @@ substantive work from cont.21 — pin `D7`'s multiplier at `0x400a4812`/`0x400a4
 units, then re-scope the patch around feeding stock's existing rebuild loop
 (`0x400a4884`–`0x400a49e2`) with the right master position, deleting repair hooks rather
 than adding them.
+
+## Session 79, continued a twenty-third time — `D7` pinned; the minimal DIRECT JUMP falls out of it
+
+Closes the last unknown from cont.21. New tool `GhidraDirectJump51.java` (a re-aimed
+`GhidraDirectJump48`) plus range dumps of the three writer sites.
+
+### `D7` = total ticks in the master pattern
+
+Built at `0x400a47c4`–`0x400a4830`, immediately before stock's per-track rebuild loop:
+
+```
+D0 = ACT_PAT(0x800065be)*0x8ed8 + ACT_BANK(0x800065bd)*0x9b340     ; pattern blob offset
+if (*(0x400eb035 + D0))            ; pattern +0x8e55 = SCALE_MODE
+     D0 = *(0x400eb032 + D0)       ; pattern +0x8e52 = master scale  (per-track mode)
+else D0 = *(0x400eb034 + D0)       ; pattern +0x8e54 = master scale  (uniform mode)
+D7 = LEN_TBL[D0]                   ; master TICKS PER STEP
+D7 *= *(long)0x80006628            ; * master pattern length in STEPS
+BAR_CTR(0x800065b2) = *(word)0x8000662a
+master STEP(0x800065b6) = 0        ; 0x400a4842  <-- dj_c's displaced bytes
+```
+
+`0x400eb034 − 0x400e21e0 = 0x8e54` exactly, independently confirming the blob base
+`0x400e21e0`. The `+0x8e52` / `+0x8e54` split also confirms a comment already sitting in
+`tools/patch_directjump.s` (~line 568) about the per-step handler's scale source.
+
+**`0x80006628` (long) = master pattern length in STEPS.** Three writers — `0x400a0620`,
+`0x400a40bc`, `0x400a44ee` — all copying `*(long)0x80006630`. The `0x400a40bc` one sits
+directly after the pattern-change commit itself:
+
+```
+0x400a409e  ACT_PAT  = D1
+0x400a40aa  ACT_BANK = *(0x800065bf)
+0x400a40b0  D0 = *(long)0x80006630 ; 0x400a40b6  *(long)0x80006638 = D0
+0x400a40bc  *(long)0x80006628 = D0
+```
+
+So **`D7` is a tick quantity: `masterTicksPerStep × masterSteps` = the whole pattern's
+length in ticks.**
+
+Incidental but useful: `BAR_CTR` is loaded from `0x8000662a`, which is the **low word of the
+long at `0x80006628`**. That retro-explains the Session 79 `BAR_CTR` experiment
+(commit `951e2ed`) finding literally zero effect — `BAR_CTR` is a derived copy, and writing
+it changes nothing upstream. Also worth noting for the AR comparison: OT's `ACT_PAT` and
+`ACT_BANK` writes are 12 bytes apart at `0x400a409e` / `0x400a40aa`, i.e. **not** the
+same-instruction-pair atomic write AR uses (`DAT_40566754 = DAT_40566755` back to back).
+
+### What stock's rebuild loop therefore computes
+
+With `D7` = whole-pattern ticks, the loop at `0x400a4884`–`0x400a49e2` produces, per track:
+
+```
+NEXT_STEP[t] = ceil(D7 / tps_t)          ; = how many of THIS track's steps fit the pattern
+PAIR[t]      = D7 - NEXT_STEP[t]*tps_t   ; = leftover sub-step ticks
+CNTDN_TBL[t] = LEN_TBL-difference, floored at 1
+```
+
+i.e. at a pattern boundary it **primes every track for a restart**, correctly scaled to that
+track's own resolution.
+
+### The minimal DIRECT JUMP this implies
+
+The loop's only position input is `D7`. Feed it the *elapsed* timeline position instead of
+the whole pattern length and the very same code computes, per track, exactly what AR's
+commit computes — `position mod thisTrackLen` as a step index plus a sub-step phase —
+including the per-track scale branch and the phase-alignment countdown.
+
+> **DIRECT JUMP = run stock's existing rebuild loop with `D7` = elapsed ticks, and do not
+> zero the master STEP at `0x400a4842`.**
+
+That is one hook. It replaces hooks D/E/F and the per-track repairs, which exist only to
+undo the damage of running this loop with the wrong `D7` and a zeroed `STEP`. Note how close
+the existing patch already was: `dj_c`'s displaced bytes ARE the `master STEP = 0` at
+`0x400a4842`, 24 bytes before the loop's cursor setup at `0x400a485a`.
+
+### NOT yet established — do not build on these
+
+1. The elapsed-tick expression itself. Presumably
+   `masterStep * LEN_TBL[masterScale] + ticksWithinStep`, but that is **inferred, not
+   measured**, and inventing a position formula is the same error class as the invented
+   `G_ABSTICK`. Measure it against a running sequencer with `tools/diag_seq_activity.py`
+   before encoding it.
+2. Whether `D7` is live after the loop. It is consumed at `0x400a487a` (`D5 = D7 - 1`) and
+   by the MIDI twin; whether anything downstream of `0x400a49e2` reads it is unchecked. An
+   override must not corrupt a later consumer.
+3. Whether the loop has other boundary-only side effects that are wrong mid-pattern — the
+   "switch-required vs boundary-only" split is still unmade for this region.
+
+### Status
+
+No patch source changed. `out/mainos_directjump_v4.bin` was rebuilt and verified
+**byte-identical** (`d22f7694…`) to the image the cont.22 diff tested, so that diff's
+"IDENTICAL with DJ off" result applies to current source — but only on `OT DEMO`, which has
+all 16 tracks at `SCALE=2` and performs no pattern switch, so it exercises neither the
+`SCALE_MODE == 0` branch nor any DJ hook. A `DJTESTxxx`-based run is in progress.
