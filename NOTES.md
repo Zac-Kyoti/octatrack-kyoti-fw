@@ -26010,7 +26010,6 @@ the target is a ~36 KB read with no live-blob rewrite — and the file is
 fixed-stride (`0x16` header + `0x8EEC`/pattern, which our own test code already
 indexes arithmetically), so the worker could `fseek` straight to pattern P
 instead of parsing 0..P and discarding.
-
 ## Session 79, continued a twenty-seventh time — D7 model CONFIRMED by injection; the one-hook design is earned
 
 `tools/diag_d7_inject.py` (new) overrides the `D7` register at `0x400a4834` (after `D7` is
@@ -26082,7 +26081,6 @@ Verification step complete and positive. The one-hook design is now measured rat
 inferred. Remaining before a build: explain the patched-image `0/16`, then implement
 (`dj_c` sets `D7 = resumeStep * LEN_TBL[masterScale]`), then delete hooks D/E/F, then prove
 dynamically on both scale branches before any flash.
-
 ## Session 79, continued a twenty-eighth time — DIRECT JUMP WORKS IN THE EMULATOR: 16/16 per-track, including a 2x track and a 12-step track
 
 First time the feature has produced a correct per-track result. Two changes, both small.

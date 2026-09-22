@@ -60,7 +60,8 @@ TRK_STRIDE, MIDI_OFF, MIDI_STRIDE = 0x91A, 0x48F8, 0x8B0
 
 D7_PC = 0x400A4834          # D7 fully built, before the rebuild loop's cursor setup
 BOUNDARY_PC = 0x400A4BBC    # boundary body audio loop top (D7 loops done)
-AFTER_PC = 0x400A4D36       # after the boundary body's audio+MIDI loops
+AFTER_PC = 0x400A4D36       # Hook F's detour site = its ENTRY (before it writes)
+AFTER_F_PC = 0x400A4D3C     # the instruction after that 6-byte detour returns
 
 
 def main(argv):
@@ -101,7 +102,8 @@ def main(argv):
     rt.exact_clock()
     rt.uc.mem_write(DJ_MODE, (1 if a.dj else 0).to_bytes(4, "big"))
 
-    st = dict(d7=[], nxt=None, pair=None, step=None, cntdn=None, scale=None, injected=0)
+    st = dict(d7=[], nxt=None, pair=None, step=None, cntdn=None, scale=None, injected=0,
+              stepF=None, ticksF=None)
 
     def on_d7(u, addr, size, user):
         got = u.reg_read(er.eb.UC_M68K_REG_D7)
@@ -124,7 +126,16 @@ def main(argv):
 
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_d7, begin=D7_PC, end=D7_PC)
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_boundary, begin=BOUNDARY_PC, end=BOUNDARY_PC)
+    def on_after_f(u, addr, size, user):
+        # Hook F (dj_pertrack_fix) runs BETWEEN AFTER_PC and here and rewrites the same
+        # per-track arrays. Snapshotting only at its entry measures the rebuild loop's
+        # output and misses whatever Hook F then does to it.
+        if st["stepF"] is None and st["step"] is not None:
+            st["stepF"] = bytes(u.mem_read(STEP_ARR, 16))
+            st["ticksF"] = bytes(u.mem_read(0x800064F0, 16))
+
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_after, begin=AFTER_PC, end=AFTER_PC)
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_after_f, begin=AFTER_F_PC, end=AFTER_F_PC)
 
     rt.start_transport_live()
     t = rt.frame_count + a.pre
@@ -191,6 +202,16 @@ def main(argv):
               f" | {pr:5d} {str(e_pr):7s}{'' if okp else ' X'} |"
               f" {st['step'][i] if st['step'] else -1:4d}"
               f"  {st['cntdn'][i] if st['cntdn'] else -1:5d}")
+
+    if st["stepF"] is not None:
+        print("\n=== after Hook F (dj_pertrack_fix) has run ===")
+        print("  t  STEP@loop  STEP@afterF  TICKS@afterF")
+        for i in range(16):
+            mark = "" if st["step"][i] == st["stepF"][i] else "   <<< CLOBBERED"
+            print(f"  {i:2d}  {st['step'][i]:9d}  {st['stepF'][i]:11d}  "
+                  f"{st['ticksF'][i]:12d}{mark}")
+    else:
+        print("\n  (Hook F site not reached after the commit)")
 
     print(f"\n  tracks matching the model: {16 - bad}/16")
     if bad == 0:
