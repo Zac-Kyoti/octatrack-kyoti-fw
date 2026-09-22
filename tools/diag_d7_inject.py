@@ -77,6 +77,8 @@ def main(argv):
     ap.add_argument("--post", type=int, default=900)
     ap.add_argument("--set-abstick", type=int, default=-1,
                     help="poke G_ABSTICK to this before cueing, to probe the overflow bound")
+    ap.add_argument("--preset-abstick", type=int, default=-1,
+                    help="poke G_ABSTICK BEFORE transport start, to test Hook T's reset")
     ap.add_argument("--tree", default="out/_emu_d7inj")
     a = ap.parse_args(argv)
 
@@ -139,7 +141,19 @@ def main(argv):
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_after, begin=AFTER_PC, end=AFTER_PC)
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_after_f, begin=AFTER_F_PC, end=AFTER_F_PC)
 
+    if a.preset_abstick >= 0:
+        # Hook T (0x4009c3d4) should clear G_ABSTICK when TRANSPORT is set to 1. Poking a
+        # large value here, BEFORE the transport starts, is the only way to tell a working
+        # reset from a counter that simply had not accumulated yet: without the reset this
+        # value survives into the commit and blows the 16-bit bound.
+        rt.uc.mem_write(0x80006A46, a.preset_abstick.to_bytes(4, 'big'))
+        pre = int.from_bytes(bytes(rt.uc.mem_read(0x80006A46, 4)), 'big')
+        print(f'G_ABSTICK before transport start: {pre}')
     rt.start_transport_live()
+    if a.preset_abstick >= 0:
+        post = int.from_bytes(bytes(rt.uc.mem_read(0x80006A46, 4)), 'big')
+        print(f'G_ABSTICK after  transport start: {post}'
+              f"   ({'RESET by Hook T' if post < a.preset_abstick else 'NOT reset'})")
     t = rt.frame_count + a.pre
     while rt.frame_count < t:
         rt.run(ms=60)

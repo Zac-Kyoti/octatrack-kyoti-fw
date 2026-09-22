@@ -27123,3 +27123,65 @@ Build after both fixes: 983 bytes changed, 0 unexpected outside the cave, manual
 - Re-run DJ-OFF gates against the 983-byte image; Hook D is unconditional, so its change can
   affect DJ-OFF behaviour and the widened gate now compares `SCALE_IX`.
 - Overflow: still guarded, not fixed.
+
+## Session 79, continued a thirty-fourth time — option (c): Hook T resets `G_ABSTICK` at transport start
+
+The user chose to explore (c) -- can the overflow bound be sidestepped cheaply -- before (b)
+flash-and-listen and (a) the LCM reduction.
+
+### The site
+
+`0x4009c3d4` = `23c0800065b8` = `move.l %d0,(0x800065b8).l`, the store that sets
+`TRANSPORT = 1`, immediately after `moveq #1,D0` at `0x4009c3d2`. Unambiguously "the transport
+just started", and a clean 6-byte splice. (Ghidra mis-decodes this region by one word; the raw
+bytes were checked directly -- the same `.short`-garbling hazard already recorded for
+`mvs`/`mvz`/`divsl`.)
+
+`FUN_400a0570` was examined first and rejected: `0x400a05aa` skips its whole reset block when
+`TRANSPORT == 1`, so it is the "select bank/pattern **while stopped**" path, not transport
+start.
+
+### Hook T
+
+```
+dj_tstart:
+    clr.l   G_ABSTICK          | absolute tick origin = transport start
+    move.l  %d0,TRANSPORT_L    | displaced original, replayed verbatim
+    rts
+```
+
+Not gated on `DJ_MODE`: `G_ABSTICK` is our own scratch global that no stock code reads, so
+clearing it cannot change stock behaviour with the feature off -- the same reasoning that
+already leaves `dj_abstick`'s increment ungated. The store is replayed verbatim rather than
+assuming `D0 == 1`, so any other path into this instruction still behaves exactly as stock.
+
+### MEASURED
+
+```
+G_ABSTICK before transport start: 40002
+G_ABSTICK after  transport start: 0      (RESET by Hook T)
+```
+
+and the commit that follows computes normally: `D7 = 156`, A07 **16/16**. Poking the counter
+*before* start is the only test that distinguishes a working reset from a counter that simply
+had not accumulated yet -- the earlier run showing `G_ABSTICK = 26` proved nothing either way.
+
+### What this buys, stated honestly
+
+The 16-bit bound is **not removed**. It now applies **per continuous take** instead of since
+power-on: ~32767 master steps is ~68 minutes of *unbroken* transport at 120 BPM/16ths, and any
+stop/start resets it. That makes the limit very hard to reach in practice without making it
+impossible, and the Hook H guard still catches it safely if it ever is reached.
+
+It is also the semantically correct origin independently of the range benefit: the user's model
+is that every pattern behaves as if it had been playing silently *since the transport started*,
+not since the machine was switched on. Hook T is what the feature actually means; the range
+improvement is a consequence.
+
+(a) -- reducing `D7` by `LCM(tps_t * len_t)` -- remains the only complete fix and is still
+unimplemented. Concrete moduli computed for the current fixtures: all-16-steps-at-1x gives
+`P = 96`; **A07/A08 give `P = 4032`** (cycles 42, 48, 72, 96, 192 -- the 7-step track is what
+pushes it up), both comfortably inside the `98301` ceiling; a contrived set of coprime lengths
+gives `P = 4324320`, which exceeds it and would still need the guard.
+
+Build: 1001 bytes changed, 0 unexpected outside the cave, manual-trig bytes identical.

@@ -139,6 +139,10 @@ PATCHES = [
       # 0x80006628 before D7 is built from it at 0x400a4812/0x400a4826. Model
       # measured 16/16 in tools/diag_d7_inject.py (NOTES.md Session 79 cont.27).
       (0x400a47f6, "dj_d7", "41f9400eb034", 6, "jsr"),
+      # Session 79 cont.34 -- Hook T: reset G_ABSTICK when the transport starts, so the
+      # absolute counter has the origin the feature actually means (transport start, not
+      # power-on) and the 16-bit range applies per take rather than per session.
+      (0x4009c3d4, "dj_tstart", "23c0800065b8", 6, "jsr"),
       (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),
 ]
 
@@ -260,13 +264,15 @@ def main():
         ABSTICK_SITE = 0x400a3fe4
         PERTRACK_FIX_SITE = 0x400a4d36
         D7_SEED_SITE = 0x400a47f6
+        TSTART_SITE = 0x4009c3d4
         want = (v3_touched - set(range(o(STOCK_YES_HANDLER), o(STOCK_YES_HANDLER) + 8))) \
             | {i for i in range(ro + 2, ro + 6) if img[i] != stock[i]} \
             | {i for i in range(o(PTN_LAYER_REL), o(PTN_LAYER_REL) + 6) if img[i] != stock[i]} \
             | {i for i in range(o(SCALEIX_FIX_SITE), o(SCALEIX_FIX_SITE) + 6) if img[i] != stock[i]} \
             | {i for i in range(o(ABSTICK_SITE), o(ABSTICK_SITE) + 6) if img[i] != stock[i]} \
             | {i for i in range(o(PERTRACK_FIX_SITE), o(PERTRACK_FIX_SITE) + 6) if img[i] != stock[i]} \
-            | {i for i in range(o(D7_SEED_SITE), o(D7_SEED_SITE) + 6) if img[i] != stock[i]}
+            | {i for i in range(o(D7_SEED_SITE), o(D7_SEED_SITE) + 6) if img[i] != stock[i]} \
+            | {i for i in range(o(TSTART_SITE), o(TSTART_SITE) + 6) if img[i] != stock[i]}
         stray = [i for i in (v4_touched ^ want) if i not in cave]
         print(f"  vs mainos_directjump_v3.bin: v4 touches {len(v4_touched)} vs v3 {len(v3_touched)}; "
               f"{len(stray)} unexpected outside the cave")

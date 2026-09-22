@@ -121,6 +121,7 @@
 |   Session 70 (7th pass): word-aligned, in the documented-but-unclaimed gap between this
 |   block (0x80006a40-44, see patch_qlrec.s's own cross-reference comment) and RELOAD2's
 |   block (0x80006a50+).
+    .equ TRANSPORT_L, 0x800065b8        | long: 1 while the transport is running
     .equ MASTER_STEPS, 0x80006628       | long: START OFFSET in MASTER STEPS for stock's
                                         | own per-track rebuild loop (0x400a4884). D7 at
                                         | 0x400a4812/0x400a4826 is LEN_TBL[masterScale]
@@ -405,6 +406,37 @@ dj_b:
     rts
 djb_orig:
     move.l  #0x8e56,%d0               | displaced original
+    rts
+
+| ================= Hook T @ 0x4009c3d4 =================
+| detour replaces `move.l %d0,(0x800065b8).l` (6 B, bytes 23c0800065b8) -- the store that
+| sets TRANSPORT = 1, immediately after `moveq #1,D0` at 0x4009c3d2. Unambiguously "the
+| transport just started".
+|
+| Session 79 cont.34. G_ABSTICK was incremented at dj_abstick and cleared NOWHERE, so it
+| counted from power-on. Hook H turns it into DIRECT JUMP's resume offset, and the rebuild
+| loop stores that offset's quotient as a WORD read back sign-extended, so the usable range
+| is ~32767 master steps -- about 68 minutes at 120 BPM with 16th steps. Counting from
+| power-on made that reachable in one sitting; counting from transport start makes it
+| reachable only in a single unbroken 68-minute take.
+|
+| It is also the semantically correct origin. The user's model for the feature is that every
+| pattern behaves as if it had been playing silently since the transport started -- not since
+| the machine was switched on -- so resetting here is what the feature actually means, and
+| the range improvement is a consequence rather than the justification.
+|
+| Not gated on DJ_MODE: G_ABSTICK is our own scratch global that no stock code reads, so
+| clearing it cannot change stock behaviour with the feature off. dj_abstick's increment is
+| ungated for the same reason.
+|
+| The displaced store is replayed verbatim rather than assuming D0 == 1, so if any other
+| path reaches this instruction with a different value it still behaves exactly as stock.
+| (Clearing the counter on such a path would be harmless in any case.)
+
+    .global dj_tstart
+dj_tstart:
+    clr.l   G_ABSTICK                  | absolute tick origin = transport start
+    move.l  %d0,TRANSPORT_L            | displaced original
     rts
 
 | ================= Hook H @ 0x400a47f6 =================
