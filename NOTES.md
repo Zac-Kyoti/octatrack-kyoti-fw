@@ -26483,3 +26483,70 @@ can distinguish Hook D's unconditional `+0x8e54` read from stock's `SCALE_MODE`-
 `+0x8e52`. Pattern 0 is the only `SCALE_MODE = 1` pattern and carries the per-track spread
 (`SCALE=[2,0,2,2,2,2,2,2]`, `LEN=[16,16,12,16,...]`). Rescan of the refreshed export, other
 banks, in progress.
+
+## Session 79, continued a thirty-second time — overflow GUARD added (not a fix); Hook D fixture still absent
+
+### Guard in Hook H — silent garbage becomes graceful degradation
+
+cont.31 measured the 16-bit bound and established it is reachable in one session
+(`G_ABSTICK` is incremented at `dj_abstick` and **cleared nowhere**, so it accumulates from
+power-on). A correct fix needs a semantically-neutral reduction; that construction is still
+open. In the meantime the failure mode itself was unacceptable: a *silent* jump to a nonsense
+position.
+
+Hook H now computes the master ticks-per-step the same way stock does — `SCALE_MODE`
+(`+0x8e55`) selects `+0x8e52` or `+0x8e54`, then `LEN_TBL[that]` — and refuses to store an
+offset that would overflow:
+
+```
+if G_ABSTICK > 32767                 -> store 0     (also catches a wrapped counter)
+if tps_master * G_ABSTICK > 98301    -> store 0
+```
+
+`98301 = 3 * 32767`, and 3 is the smallest entry in `LEN_TBL`, so the bound is sufficient for
+**any** combination of track scales in the incoming pattern, not just the ones in the fixture.
+Storing 0 is exactly what stock puts there at a natural boundary, so DIRECT JUMP degrades to
+restart-at-step-0 rather than jumping somewhere meaningless.
+
+**Measured, both cases, patched firmware, armed commit, DJTESTxxx pattern 1 -> 0:**
+
+| case | `0x80006628` | `D7` | result |
+|------|--------------|------|--------|
+| `--set-abstick 40002` | 0 | 0 | all 16 tracks STEP 0 — graceful, was STEP 242 |
+| normal (`G_ABSTICK = 26`) | 26 | 156 | 16/16 unchanged: STEP 10 / 4 (2x track) / 2 (len-12 track) |
+
+Build: 964 bytes changed, 0 unexpected outside the cave, manual-trig bytes identical.
+
+**This is a guard, not a fix.** The feature still stops working correctly after ~68 minutes of
+cumulative transport; it just stops safely. The real fix reduces `G_ABSTICK` by the LCM of the
+incoming pattern's per-track cycles (`len_t * tps_t`, in ticks), which is exactly
+semantically neutral because the whole per-track position function is periodic with that
+period. Two obstacles, both open:
+
+1. The reduction must keep the fastest track's quotient inside a signed word, and for
+   pathological length combinations (coprime lengths across 16 tracks) the LCM itself can
+   exceed the representable range — in which case no reduction helps and the guard is the
+   only available behaviour.
+2. Computing an LCM over 16 tracks in the cave is ~50-80 ColdFire instructions plus a 32-bit
+   modulo; feasible, unwritten, and unvalidated.
+
+**AR does not have this problem at all**, because it divides `masterStep mod patternLen` --
+already bounded -- rather than an unbounded absolute counter. That remains the one genuine
+architectural advantage AR holds over OT's path (see `reference/AR_DIRECT_JUMP.md` §6).
+
+### Hook D fixture — exhausted what is available
+
+Scanned all 16 patterns of banks 0 and 1 of the refreshed `DJTESTxxx` export. Every pattern
+has `+0x8e52 == +0x8e54 == 2`; bank 0 pattern 0 is the only `SCALE_MODE = 1` pattern and
+carries the per-track spread (`SCALE=[2,0,2,2,2,2,2,2]`, `LEN=[16,16,12,16,16,16,16,16]`).
+So nothing available distinguishes Hook D's unconditional `+0x8e54` read from stock's
+`SCALE_MODE`-dependent `+0x8e52`. **What is needed is a pattern in PER TRACK scale mode whose
+MASTER SCALE differs from the pattern's default SCALE** — that is a setting in the OT's scale
+setup, not a per-track value, so it cannot be produced by editing track scales.
+
+### Status
+
+- DJ-OFF gates: PASS on both scale branches (needs re-running against this 964-byte image).
+- DJ-ON: 16/16 both switch directions, mixed scales and lengths.
+- Overflow: guarded, not fixed.
+- Hook D: measured inert with the feature off; its field choice remains unverified.

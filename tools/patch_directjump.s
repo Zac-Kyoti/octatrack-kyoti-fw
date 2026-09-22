@@ -181,6 +181,8 @@
     .equ CHAIN_ACT, 0x80006546
     .equ LEN_TBL,   0x400aba50          | [scaleIdx] -> pattern length (long)
     .equ PAT_SCALE, 0x400eb034          | [bank*0x9b340 + pat*0x8ed8] -> scale idx byte
+    .equ PAT_MSCALE,0x400eb032          | pattern +0x8e52 -- MASTER scale when SCALE_MODE=1
+    .equ PAT_SMODE, 0x400eb035          | pattern +0x8e55 -- SCALE_MODE flag
     .equ PAT_LEN,   0x400eb033          | same indexing -> pattern LENGTH in STEPS
                                         | (pattern +0x8e53). Session 79 cont.20: LEN_TBL
                                         | is TICKS PER STEP, not a length, so THIS is the
@@ -466,12 +468,51 @@ djb_orig:
 dj_d7:
     tst.b   G_ARMED
     beq.b   djd7_orig
-    lea     -4(%sp),%sp
-    movem.l %d1,(%sp)
-    move.l  G_ABSTICK,%d1
-    move.l  %d1,MASTER_STEPS           | start offset (master steps) for stock's own rebuild
-    movem.l (%sp),%d1
-    lea     4(%sp),%sp
+    lea     -12(%sp),%sp
+    movem.l %d1-%d2/%a1,(%sp)
+|   OVERFLOW GUARD (Session 79 cont.32). The rebuild loop stores the FIRST divide's
+|   quotient as a WORD (`move.w D0w,(A0)` @0x400a4916) and reads it back SIGN-EXTENDED
+|   (`mvs.w (A0),D1` @0x400a4950), so every per-track quotient must stay <= 32767.
+|   q_t = D7 / tps_t and the smallest tps in LEN_TBL is 3, so D7 <= 3*32767 = 98301 is
+|   sufficient for ANY combination of track scales in the incoming pattern.
+|   MEASURED without this guard (tools/diag_d7_inject.py --set-abstick 40002):
+|   D7 = 240012 -> NEXT_STEP = -14, STEP = 242 on a 16-step pattern. Silent garbage.
+|   G_ABSTICK is never reset (incremented only, at dj_abstick), so it accumulates from
+|   power-on -- the bound is ~68 minutes of CUMULATIVE transport, which is reachable in
+|   one session. Out of range -> store 0, which is exactly what stock puts there at a
+|   natural boundary: DIRECT JUMP degrades to restart-at-step-0 rather than jumping to a
+|   nonsense position. NOT a real fix -- see NOTES.md cont.31/32: the correct fix reduces
+|   G_ABSTICK by the LCM of the incoming pattern's per-track cycles, which is semantically
+|   neutral, and that construction is still open.
+    move.l  %d0,%d2                    | d2 = blob offset (D0 itself must survive -- the
+                                       | next stock instruction @0x400a4802 indexes with it)
+    lea     PAT_SMODE,%a1
+    tst.b   (%a1,%d2.l)                | SCALE_MODE
+    beq.b   djd7_uniform
+    lea     PAT_MSCALE,%a1             | per-track mode -> master scale at +0x8e52
+    bra.b   djd7_gotsc
+djd7_uniform:
+    lea     PAT_SCALE,%a1              | uniform mode  -> default scale at +0x8e54
+djd7_gotsc:
+    moveq   #0,%d1
+    move.b  (%a1,%d2.l),%d1            | d1 = master scale index
+    cmpi.l  #11,%d1
+    bhi.b   djd7_zero                  | not a real scale index -> safe fallback
+    lea     LEN_TBL,%a1
+    move.l  (%a1,%d1.l*4),%d1          | d1 = master TICKS PER STEP
+    move.l  G_ABSTICK,%d2
+    cmpi.l  #32767,%d2
+    bhi.b   djd7_zero                  | cheap first bound; also catches a wrapped counter
+    muls.l  %d2,%d1                    | d1 = tps_master * G = the D7 stock will build
+    cmpi.l  #98301,%d1
+    bhi.b   djd7_zero
+    bra.b   djd7_store
+djd7_zero:
+    moveq   #0,%d2
+djd7_store:
+    move.l  %d2,MASTER_STEPS           | start offset (master steps) for stock's own rebuild
+    movem.l (%sp),%d1-%d2/%a1
+    lea     12(%sp),%sp
 djd7_orig:
     lea     0x400eb034,%a0             | displaced original
     rts
