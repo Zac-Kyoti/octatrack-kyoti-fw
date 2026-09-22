@@ -25428,3 +25428,46 @@ No patch source changed. `out/mainos_directjump_v4.bin` was rebuilt and verified
 "IDENTICAL with DJ off" result applies to current source — but only on `OT DEMO`, which has
 all 16 tracks at `SCALE=2` and performs no pattern switch, so it exercises neither the
 `SCALE_MODE == 0` branch nor any DJ hook. A `DJTESTxxx`-based run is in progress.
+
+## Session 79, continued a twenty-fourth time — DJTESTxxx characterised: it covers BOTH scale branches
+
+`tools/diag_seq_activity.py` extended to read the pattern blob directly and print the
+pattern-level and per-track SCALE/LENGTH fields (`dump_pattern`). Motivation: `SCALE_MODE`
+(pattern `+0x8e55`) selects which sequencer branch runs, and the `SCALE_MODE == 0` branch is
+the one whose out-of-bounds `LEN_TBL` index caused the flashed regression — while *both*
+validations at the time happened to use `SCALE_MODE == 1` patterns, so it never executed
+once. Choosing a fixture deliberately, rather than hoping one covers the case, is the
+specific process fix for that.
+
+Blob addressing used: `0x400e21e0 + bank*0x9b340 + pat*0x8ed8`, audio track records stride
+`0x91a` (`+0x50` LENGTH, `+0x51` SCALE), MIDI from `+0x48f8` stride `0x8b0` (`+0` LENGTH,
+`+1` SCALE). Base independently confirmed by `0x400eb034 - 0x400e21e0 == 0x8e54` (cont.23).
+
+### `DJTESTxxx` (the user's hardware export), bank 0
+
+| pattern | `+0x8e52` | `+0x8e53` LEN | `+0x8e54` SCALE | `+0x8e55` SCALE_MODE |
+|---------|-----------|---------------|-----------------|----------------------|
+| 0       | 2         | 16            | 2               | **1 — per-track**    |
+| 1       | 2         | 16            | 2               | **0 — uniform**      |
+| 2       | 2         | 16            | 2               | **0 — uniform**      |
+
+Pattern 0 additionally has genuine per-track scale diversity: **track 1 at `SCALE=0`**
+(`LEN_TBL[0]` = 3 ticks/step = 2x) against `SCALE=2` (6 ticks = 1x) on the other fifteen.
+Observed live at 1492 frames: track 1 reached `STEP=9` through 9 distinct values while the
+1x tracks reached `STEP=5` through 6, with correspondingly fewer distinct sub-step tick
+values — i.e. the differently-scaled track demonstrably runs at its own rate in the emulator.
+
+So this one project exercises **both** branches and a differently-scaled track. It is the
+right fixture for this thread and should be the default for DIRECT JUMP work.
+
+`LEN_TBL` read live from emulator memory: `[3, 4, 6, 8, 12, 24, 48, 96, 48, 24, 12, 6]` —
+an independent confirmation of cont.20's Correction 1 (ticks-per-step, not pattern length),
+now measured from RAM rather than from the static image.
+
+### Status
+
+`OT DEMO` (cont.22's fixture) is uniformly `SCALE=2` and never switches pattern, so its
+"IDENTICAL with DJ off" result covers neither branch divergence nor any DJ hook. Runs against
+`DJTESTxxx` pattern 0 (`SCALE_MODE == 1`) and pattern 1 (`SCALE_MODE == 0`) are in progress.
+Still untested in all cases: the DJ-**on** path, since no run has yet performed a pattern
+switch (`stock rebuild loop 0x400a4884` executes 0 times in every run so far).

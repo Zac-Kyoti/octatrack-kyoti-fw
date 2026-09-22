@@ -57,6 +57,56 @@ SCALE_ARR = 0x8000663E
 MASTER_STEP = 0x800065B6
 TRANSPORT = 0x800065B8
 
+# Pattern blob addressing, all measured. The blob base is confirmed twice over:
+# stock's own D7 setup uses 0x400eb034 for the pattern-default scale, and
+# 0x400eb034 - 0x400e21e0 == 0x8e54 exactly (NOTES.md Session 79 cont.23).
+BLOB_BASE = 0x400E21E0
+BANK_STRIDE = 0x9B340
+PAT_STRIDE = 0x8ED8
+TRK_STRIDE = 0x91A          # audio track record stride; scale at +0x51, length at +0x50
+MIDI_OFF = 0x48F8           # MIDI records start here; stride 0x8b0, length +0, scale +1
+MIDI_STRIDE = 0x8B0
+MASTER_STEPS = 0x80006628   # long: master pattern length in STEPS (D7's multiplier)
+LEN_TBL = 0x400ABA50        # scale index -> TICKS PER STEP (3,4,6,8,12,24,48,96,...)
+
+
+def dump_pattern(rt, bank, pat):
+    """Print the pattern-level and per-track SCALE/LENGTH fields.
+
+    SCALE_MODE (+0x8e55) decides which branch of the sequencer runs, and the
+    SCALE_MODE==0 branch is the one whose out-of-bounds LEN_TBL index caused the
+    flashed hardware regression -- while both validations at the time happened to use
+    SCALE_MODE==1 patterns, so it never executed. Being able to see this per pattern is
+    the difference between choosing a fixture and hoping one covers the case.
+    """
+    base = BLOB_BASE + bank * BANK_STRIDE + pat * PAT_STRIDE
+    try:
+        rd = lambda a, n=1: bytes(rt.uc.mem_read(a, n))
+        p52, p53, p54, p55 = (rd(base + o)[0] for o in (0x8E52, 0x8E53, 0x8E54, 0x8E55))
+        tbl = [int.from_bytes(rd(LEN_TBL + 4 * i, 4), "big") for i in range(12)]
+        steps = int.from_bytes(rd(MASTER_STEPS, 4), "big")
+        mscale = p52 if p55 else p54
+        tps = tbl[mscale] if mscale < 12 else None
+        print(f"\n=== pattern blob bank={bank} pat={pat} (base {base:#x}) ===")
+        print(f"  +0x8e52 master scale (per-track mode) = {p52}")
+        print(f"  +0x8e53 default LENGTH               = {p53}")
+        print(f"  +0x8e54 default SCALE                = {p54}")
+        print(f"  +0x8e55 SCALE_MODE                   = {p55}"
+              f"   ({'PER-TRACK' if p55 else 'UNIFORM -- the regression branch'})")
+        print(f"  LEN_TBL[0..11] (ticks per step)      = {tbl}")
+        print(f"  master steps (0x80006628)            = {steps}")
+        if tps:
+            print(f"  => D7 = LEN_TBL[{mscale}] * {steps} = {tps * steps} ticks per pattern")
+        print("  t   LENGTH  SCALE   (per-track records)")
+        for t in range(8):
+            r = base + t * TRK_STRIDE
+            print(f"  {t:2d}  {rd(r + 0x50)[0]:6d}  {rd(r + 0x51)[0]:5d}")
+        for t in range(8):
+            r = base + MIDI_OFF + t * MIDI_STRIDE
+            print(f"  {t + 8:2d}  {rd(r)[0]:6d}  {rd(r + 1)[0]:5d}")
+    except Exception as e:                                   # noqa: BLE001
+        print(f"\n  (pattern blob unreadable at {base:#x}: {e})")
+
 
 def main(argv):
     ap = argparse.ArgumentParser()
@@ -124,6 +174,7 @@ def main(argv):
 
     print(f"image   {a.image}")
     print(f"project {a.project}  bank={final_bank} pattern={pat}")
+    dump_pattern(rt, final_bank, pat)
     sample()
     rt.start_transport_live()
     target = rt.frame_count + a.frames
