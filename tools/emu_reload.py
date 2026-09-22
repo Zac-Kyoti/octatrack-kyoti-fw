@@ -758,12 +758,18 @@ def cmd_combo(rt):
               f"BANK+YES release does nothing: end={end} G_MENU={g(G_MENU_A)} "
               f"popup2={POPUP2_FN in calls}")
 
-        # already open -> second BANK+YES must not re-open/redraw over itself
+        # Session 80 continued (6): already open -> [YES] must EXECUTE, not sit
+        # inert. While [BANK] is held the YES dispatch slot IS rl_bank_yes, so
+        # the natural "hold [BANK], tap [YES] twice" gesture used to have its
+        # second tap swallowed -- the "hardly ever executes" hardware report.
         reset_gates(menu=1)
+        rt.uc.mem_write(G_SEL_A, b"\x00")          # item 0 = TRK SEQ
+        rt.uc.mem_write(G_KIND_A, b"\x00")
         calls = []
         end = _run_cave_fn(rt, rl_bank_yes, 0x31, 1, calls)
-        check(end == "rts" and POPUP2_FN not in calls,
-              f"BANK+YES when already open is inert: end={end} popup2={POPUP2_FN in calls}")
+        check(end == "rts" and g(G_MENU_A) == 0 and g(G_KIND_A) == 3,
+              f"BANK+YES while [BANK] still held EXECUTES an open picker: "
+              f"end={end} G_MENU->{g(G_MENU_A)} G_KIND={g(G_KIND_A)} (want 3)")
     else:
         # --- legacy [PTN]-hold gesture (patch_reload.s) ---
         reset_gates()

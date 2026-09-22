@@ -307,10 +307,17 @@ rl_bank_yes:
     moveq   #1,%d1
     cmp.l   8(%sp),%d1                 | event == press ?
     bne.b   rby_rts
-    tst.b   G_MENU
-    bne.b   rby_rts                    | already open
     tst.l   POPUP
-    bne.b   rby_rts                    | a modal dialog is up
+    bne.b   rby_rts                    | a modal dialog is up -- never ours
+|   Session 80 continued (6): if the picker is ALREADY open, [YES] must EXECUTE
+|   it, not sit inert. This was the "[BANK]+[YES] hardly ever executes" report:
+|   while [BANK] is physically held the YES dispatch slot IS rl_bank_yes, so the
+|   natural gesture -- hold [BANK], tap [YES] to open, tap [YES] again to run it
+|   -- had its second tap swallowed, and the user had to release [BANK] first to
+|   reach the base-layer rl_yes. Nothing on screen said so. Executing here makes
+|   both gestures work: [YES] while still holding [BANK], or after releasing it.
+    tst.b   G_MENU
+    bne.b   rby_exec                   | already open -> execute the highlight
     tst.l   ARR_ACT
     bne.b   rby_rts                    | arranger
 
@@ -328,6 +335,9 @@ rl_bank_yes:
     clr.l   BANK_COMMIT
     jsr     rl_draw
 rby_rts:
+    rts
+rby_exec:
+    bsr.w   rl_yes_exec                | shared body: close, guard, arm, toast
     rts
 
 | ====== defer the SELECT BANK window from [BANK] press to [BANK] release ======
