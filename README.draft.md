@@ -107,9 +107,13 @@ Which builds have run on real hardware and which are emulator-only is tracked in
   "Session 77" (×3)
 
 - **RELOAD FROM PROJECT** — reload a single pattern, or a single track, from the
-  CF card without stopping playback and without the audio glitch that stock
-  whole-bank RELOAD causes. Hold `[PTN]` ~0.5 s for a sticky picker (`TRK SEQ` /
-  `PTN SEQ` / `PART + PTN SEQ`); `[YES]` runs it, `[NO]` cancels, no timeout.
+  CF card **without stopping the transport**. Stock can only reload a whole bank,
+  and doing so stops the sequencer; stock's RELOAD BANK is exactly this feature's
+  `PART + PTN SEQ`, so what is new is the finer granularity plus staying in time
+  with the master clock. (Earlier drafts said stock "glitches the audio" — wrong,
+  corrected on hardware: it just stops the transport.) Hold `[BANK]` and tap
+  `[YES]` for a sticky picker (`TRK SEQ` / `PTN SEQ` / `PART + PTN SEQ`); `[YES]`
+  runs it, `[NO]` cancels, no timeout.
   Adapted from the Digitone's RELOAD FROM PROJ. The first hardware flash
   (2026-09-20) found 3 real bugs — a `[PTN]`-held reachability issue (the same
   overlay problem DIRECT JUMP hit) and a permanent picker lockout are fixed but

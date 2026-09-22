@@ -185,9 +185,8 @@
     .equ YES_DISPATCH,   0x46c7dd76     | runtime dispatch table, YES press slot
                                         | = 0x46c7d8de + 0x31*24
     .equ BANK_SHOW,      0x4007af42     | press tail: pea onClose ; clr.l -(sp)  (6 B displaced)
-    .equ BANK_SHOW_RES,  0x4007af58     | resume after the suppressed jsr FUN_40059f8c
-    .equ BANK_REL,       0x4007b3e0     | [BANK] release handler (8 B displaced)
-    .equ BANK_REL_RES,   0x4007b3e8     | resume after moveq #2,d0 ; cmp.l BANK_SEL,d0
+    .equ BANK_PRESS_RES, 0x4007af48     | resume AFTER the 2 displaced insns -- stock's
+                                        | own SELECT BANK window show is left intact
     .equ BANK_TEARDOWN,  0x4007b408     | window onClose -> pops the overlay layer
     .equ BANK_TEXT,      0x400b7302     | "SELECT BANK"
     .equ BANK_SEL,       0x460e73c6     | trig handler sets it -> its own "bank N" toast is up
@@ -408,67 +407,37 @@ rby_exec:
 
     .global rl_bank_press
 rl_bank_press:
-|   Snapshot the YES dispatch slot BEFORE the overlay is pushed (the push is at
-|   0x4007af58, after our resume point), so rl_bank_rel can restore it. Guarded
-|   so a second press without an intervening release cannot save our own handler
-|   over the real one. d0 is scratch here: the stock code resumed at
-|   BANK_SHOW_RES only pushes constants and never reads d0.
+|   Session 80 continued (7): the WINDOW DEFERRAL IS REVERTED (user's call).
+|   Suppressing the press-time SELECT BANK window, and re-showing it from the
+|   release, was cosmetic -- it stopped the toast flashing under our picker --
+|   and it caused two real stock-function failures on hardware: [BANK] getting
+|   "stuck on" (trigs still opening "bank X: select ptn" after release, i.e. the
+|   overlay never torn down) and "stuck off" (a single tap no longer opening the
+|   dialog at all, i.e. the deferred window never drawn). Stock owns that
+|   lifecycle and is better at it than we are.
+|
+|   What REMAINS here is only the snapshot the delegate guard in rl_bank_yes
+|   needs: the YES dispatch slot as it was BEFORE the overlay push (which
+|   happens at 0x4007af58, after our resume point). Our poke into the layer's
+|   YES record outlives the layer, so rl_bank_yes must be able to hand the key
+|   back to whatever really owns it. Without this snapshot it would swallow
+|   [YES] instead, which is worse than the bug it fixes.
+|
+|   The two displaced instructions are replayed and control returns to stock's
+|   own window-show, so the press path is behaviourally stock again.
     move.l  YES_DISPATCH,%d0
     cmpi.l  #rl_bank_yes,%d0
     beq.b   rbp_nosave
     move.l  %d0,rl_yes_save
 rbp_nosave:
-    lea     -16(%sp),%sp               | the 4 window args we are NOT pushing
-    jmp     BANK_SHOW_RES              | skip the jsr; layer push still happens
+    pea     BANK_TEARDOWN              | displaced: pea (0x4007b408,pc)
+    clr.l   -(%sp)                     | displaced
+    jmp     BANK_PRESS_RES             | -> stock: pea 0xf0 ; pea "SELECT BANK" ; show
 
-| Release side: decide which of the three exits runs, then fall into the stock
-| release logic unchanged. Exactly one teardown must happen on every path.
-|
-|   BANK_SEL != 0   a trig already picked a bank, so the trig handler's own
-|                   "bank N" toast (0x4007b2b0) is up carrying the SAME onClose
-|                   -- it owns the teardown. Show nothing, tear nothing down.
-|   G_MENU != 0     our picker is up: this press was a RELOAD gesture. Swallow
-|                   the window completely and pop the layer right now, which is
-|                   precisely what stock [PTN] does on its own swallow path.
-|   otherwise       a plain [BANK] tap: show the window HERE, with stock's own
-|                   args and onClose, so the layer is torn down when it closes.
-|
-| Ordering note: the window is shown BEFORE the stock decision runs, which is
-| safe because that decision only reaches the dismiss routine 0x40056a70 when
-| BANK_COMMIT == 0, and BANK_COMMIT is non-zero on exactly the plain-tap path
-| (press sets it). The swallow path DOES hit 0x40056a70 -- harmless, and already
-| hardware-proven, since the shipped build takes it on every release and the
-| picker survives.
-
-    .global rl_bank_rel
-rl_bank_rel:
-|   ** Do NOT write YES_DISPATCH back here. ** That was tried and MEASURED to
-|   make things worse: after one direct write to the runtime table, the next
-|   [BANK] press no longer applied our record at all (slot stayed at the
-|   underlying handler with the layer LINKED), the gesture stopped working
-|   entirely (rl_job+0, bank_yes+0), and the layer stack began unwinding
-|   (depth 3 -> 2 -> 1 across iterations). The table is owned by the rebuild;
-|   poking it desyncs the layer machinery. rl_bank_yes delegates instead.
-    tst.l   BANK_SEL
-    bne.b   rbr_stock                  | trig's own toast owns the teardown
-    tst.b   G_MENU
-    bne.b   rbr_swallow
-
-    pea     BANK_TEARDOWN              | stock's own 4 args, moved here verbatim
-    clr.l   -(%sp)
-    pea     0xf0
-    pea     BANK_TEXT
-    jsr     SHOW_WIN
-    lea     16(%sp),%sp
-    bra.b   rbr_stock
-
-rbr_swallow:
-    jsr     BANK_TEARDOWN              | pop the layer now, show nothing
-
-rbr_stock:
-    moveq   #2,%d0                     | displaced
-    cmp.l   BANK_SEL,%d0               | displaced
-    jmp     BANK_REL_RES
+| Release side: NOTHING. rl_bank_rel is gone with the deferral -- [BANK] release
+| is byte-for-byte stock again, so stock's own window/overlay teardown runs
+| exactly as designed. (The old three-route handler is preserved in git history;
+| do not resurrect it without a hardware story for the stuck-on/stuck-off bugs.)
 
 | ================= [NO] -- close the window  (@ 0x4005e25c) =================
 | Detour replaces 6 bytes: move.l 8(%sp),%d0 ; beq.s 0x4005e276

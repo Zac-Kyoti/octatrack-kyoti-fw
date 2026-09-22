@@ -26280,3 +26280,146 @@ field is known to disagree with stock's own convention in a case we cannot curre
   cover it.
 - `D7 = tps * G_ABSTICK` 32-bit `muls.l` overflow bound.
 - One bank, one project.
+
+## Session 80 continued (7) (2026-09-22, `wip`) — RELOAD2: window deferral REVERTED; two long-standing factual errors corrected; arrows swapped again
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (6)").
+
+### CORRECTION 1 — stock RELOAD BANK does NOT glitch the audio. It STOPS THE TRANSPORT.
+
+User, on hardware: *"Reload Bank (from the PROJECT menu) also loads fine. But as
+we know, it stops the sequencer (this is the behavior of stock — our notes which
+say it 'glitches' the audio are not correct — it just stops the transport)."*
+
+This claim has been repeated across `README.md`, `readme.draft.md` and this file
+since the feature was first described, and it is wrong. Both READMEs are fixed.
+
+### CORRECTION 2 — the feature's actual definition (user's framing, worth holding onto)
+
+*"The stock Reload Bank function is exactly the same as the PART + PTN SEQ that
+we are trying to build, excepting that we are trying to get ours to work in time
+with the master clock and without needing to stop the transport."*
+
+So the data operation is **not** the novel part — stock already does it. What
+RELOAD2 adds is (a) finer granularity (one track / one pattern rather than a
+whole bank) and (b) **seamlessness**: in time with the master clock, transport
+never stopped. That reframes the ~1 s "stall + restart" measured in "(4)": it is
+very plausibly stock's own transport STOP/START riding along with the whole-bank
+reload, not an I/O cost. The seamlessness target is suppressing that stop — a
+different problem from the one "(4)"'s reverted fix attacked.
+
+### CF-contention theory: DEAD
+
+"(6)" proposed that `RELOAD BUSY` correlated with the audio engine streaming
+samples off the card, starving the storage task. User retracted the supporting
+observation: **STATIC and FLEX reload identically**, and stock RELOAD BANK works
+while running. The apparent correlation was an artifact of the overall
+bugginess (notably [BANK] sticking on/off). Do not revive this.
+
+### The [BANK] window deferral is REVERTED (user's call)
+
+Hardware, on the "(6)" build:
+- *"Occasionally the stock BANK function will get 'stuck' on, such that pressing
+  a trig will bring up ... 'bank X: select ptn'"* — the overlay never torn down.
+- *"The stock Bank function often also gets 'stuck' off, such that a single tap
+  no longer opens the bank select dialog."* — the deferred window never drawn.
+
+Both live in the release path "(3)" added. The deferral was **cosmetic** (it
+stopped the SELECT BANK toast flashing under our picker) and it cost two real
+stock-function failures. `rl_bank_rel` is **deleted**; `[BANK]` release is
+byte-for-byte stock again, so stock's own window/overlay lifecycle runs as
+designed. Detour count 8 → 7; image 1362 → **1295 B**.
+
+**What is deliberately KEPT**: the `rl_bank_press` detour at `0x4007af42`, now
+doing *only* the YES-dispatch-slot snapshot into `rl_yes_save`, then replaying
+its two displaced instructions and returning to stock's own window-show
+(`BANK_PRESS_RES` `0x4007af48`). `rl_bank_yes`'s delegate guard from "(6)" needs
+that snapshot: our poke into the [BANK] layer's YES record outlives the layer, so
+when `[BANK]` is not physically held the handler must hand the key back to
+whatever really owns it. **Without the snapshot it would swallow `[YES]` instead
+— worse than the bug it fixes.** Verified: `rl_yes_save` holds the pre-push slot
+value, and the press path is otherwise stock.
+
+### CORRECTION 3 — the arrow pairs, again (and why "(6)" got it wrong)
+
+Hardware: *"The arrow keys L/R work, but U/D do not. This should be reversed."*
+So:
+  `0x4004b970` (`0x34` + `0x21`) = **LEFT/RIGHT**
+  `0x400491a0` (`0x33` + `0x20`) = **UP/DOWN**
+— the opposite of "(6)", and the opposite of the original KB pairing too.
+
+**Root cause of the error: I inferred something the user never said.** The "(6)"
+report stated only that ARROW DOWN did not work. I read that as "UP works" and
+used it to anchor `0x34` = UP; the anchor was false, so the whole derivation
+inverted. Two hardware cycles were spent on this.
+
+`rl_arr_b` now owns both vertical directions (`0x33` → prev, `0x20` → next),
+gated on `event == press`; `rl_arr_a` swallows LEFT/RIGHT while the picker is
+open so stock arrow navigation cannot move off the window. Picker closed → both
+fall through untouched. **Which of `0x33`/`0x20` is UP vs DOWN is still
+unverified** — the `0x400491a0` wrapper never examines the keycode, so nothing in
+the firmware distinguishes them; if the picker steps the wrong way, swap those
+two `.equ` lines and nothing else.
+
+### Validation
+
+`--combo` **27/27**, `emu_reload2_keymap.py` **ALL GOOD**, `diag_bank_window.py`
+**ALL GOOD** (its `--patched` section rewritten to assert the press path is
+behaviourally STOCK again, plus that the snapshot lands), `--stress` **ALL GOOD**,
+`--trk` **ALL GOOD**. 1295 B vs stock, 7 detours.
+
+### Still open (unchanged)
+
+`RELOAD BUSY` — still not reproduced in any harness; `G_KIND` settles to 0 every
+time, including on the real key path, and it does not clear by waiting on
+hardware. Both proposed mechanisms are now dead (storage-task-busy, CF
+contention). The ~1 s stall / transport stop, and the list UI, also remain.
+
+### ⚠️ The revert exposes the REAL cause of "hardly ever executes" — and it is architectural
+
+Running the reverted build on the real key path (`diag_reload2_realkey.py`)
+reproduces the user's #1 symptom directly:
+
+```
+it1  [BANK] press        YES=0x400d7400  depth=3  BANKlayer=LINKED
+it1  [YES] (open)        YES=0x400815d8  depth=2  BANKlayer=popped   <-- overlay dies HERE
+it1  [YES] (execute)     rl_job+0  parse+0  bank_yes+1               <-- reload never runs
+it2/it3                  rl_job+0  parse+0  bank_yes+0   G_MENU stuck 1
+```
+
+**Mechanism.** With stock's press-time SELECT BANK window restored, `rl_draw` ->
+`FUN_4005a0e0` **closes any existing popup first** (`tst.l 0x460d1e64` -> `bsr
+0x40056bc0`). Closing stock's bank window fires its `onClose` `0x4007b408`, which
+**pops the [BANK] overlay**. So the instant our picker draws, `[YES]` stops
+routing to `rl_bank_yes`. That is why the deferral build "felt much better" — it
+avoided this by never showing the press window.
+
+**And a second, deeper problem.** After the overlay pops, `[YES]` goes to
+whatever the current UI context uses. In the emulator that is **`0x400815d8`**,
+which appears exactly once image-wide: as a **keymap record pointer at
+`0x400d0e8a`**, i.e. a record in ANOTHER overlay layer. Our `rl_yes` detour lives
+at `0x4005e4c8` (the base-layer handler) and is therefore **shadowed entirely in
+that context**. The "sticky picker answered after release" design only works when
+the active YES handler happens to be the one we detour — which is very plausibly
+the real meaning of "works most of the time".
+
+**Both are the same design flaw: our picker is a modal window that does not own
+its own key routing.** It borrows slots in other people's layers (hence the
+Session 60 dead-hook workarounds, the `[PTN]`/`[BANK]` record pokes, and the
+context dependence).
+
+**The principled fix — NOT yet built, user decision pending:** when the picker
+opens, push OUR OWN keymap layer mapping YES/NO/UP/DOWN to our handlers, and pop
+it when it closes. That is exactly what stock does for its own modal windows, and
+it would make the picker answerable in any UI context, immune to the [BANK]
+overlay's lifetime, and free of every record poke.
+
+Layer format is understood and buildable (measured from `0x400cff14`):
+```
+struct: +0x00 next-link   +0x04 records_begin   +0x20 records_end
+records: 26 B stride, [0]=code [2..5]=press [6..9]=release [10..13]=hold
+         (verified: record 17 = YES at 0x400d00ee = our poke target; 19 records)
+```
+**Risk to respect: a push without a matching pop wedges the keyboard.** Any
+implementation must have the real-key harness proving push/pop balance across
+EVERY exit path — YES-execute, NO-cancel, BUSY-toast — before it is flashed.

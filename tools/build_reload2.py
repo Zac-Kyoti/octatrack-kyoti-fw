@@ -152,8 +152,13 @@ PATCHES = [
       # site lives in) and 0x4007b408 (the teardown) have ZERO xrefs, "SELECT
       # BANK" (0x400b7302) has exactly one use -- the call we suppress -- and
       # nothing in the image branches into either displaced range (scanned).
-      (0x4007af42, "rl_bank_press", "487a04c442a7", 6, "jmp"),   # press tail: pea 0x4007b408(pc) ; clr.l -(sp)
-      (0x4007b3e0, "rl_bank_rel", "7002b0b9460e73c6", 8, "jmp")]),  # release: moveq #2,d0 ; cmp.l 0x460e73c6,d0
+      # Session 80 continued (7): the SELECT BANK window deferral is REVERTED --
+      # it caused [BANK] to stick on (overlay never torn down) and off (window
+      # never drawn) on hardware. The rl_bank_rel detour is GONE and [BANK]
+      # release is byte-for-byte stock. This press detour now ONLY snapshots the
+      # YES dispatch slot for rl_bank_yes's delegate guard, then returns to
+      # stock's own window-show.
+      (0x4007af42, "rl_bank_press", "487a04c442a7", 6, "jmp")]),   # press tail: pea 0x4007b408(pc) ; clr.l -(sp)
       # Session 80 continued (5): the rl_done detour @0x40023c62 and rl_job's
       # FUN_4000faf0 live-cache refresh are BACKED OUT here -- see patch_reload2.s.
       # They are the only two changes in the flash that broke stock [BANK] and

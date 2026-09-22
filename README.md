@@ -169,11 +169,16 @@ shipping. Write-up: [`NOTES.md`](NOTES.md) "Session 17" (+ continued 1–8) →
 ### RELOAD FROM PROJECT — reload a pattern from the CF card without stopping playback  ·  *active WIP, partly hardware-confirmed*
 
 Stock 1.40C can only reload from the card at whole-**bank** granularity, and doing
-so glitches the audio. This adds a per-pattern reload, seamlessly. Adapted from
-the Digitone's RELOAD FROM PROJ.
+so **stops the transport**. (An earlier version of these notes said it "glitches
+the audio" — that is wrong, and was corrected on hardware: stock simply stops the
+sequencer.) Stock's RELOAD BANK is in fact exactly the `PART + PTN SEQ` operation
+this feature offers; what is being added is finer granularity plus doing it *in
+time with the master clock, without stopping the transport*. Adapted from the
+Digitone's RELOAD FROM PROJ.
 
-**Hold `[PTN]` ~0.5 s** (while the sequencer is playing) opens a picker window —
-the OS's own hold event, the same one `[PAGE]`-hold uses; a quick `[PTN]` tap is
+**Hold `[BANK]` and tap `[YES]`** opens a picker window (the gesture moved off
+`[PTN]`, which was triple-booked; `[PTN]` is byte-for-byte stock in this build) —
+a quick `[BANK]` tap is
 unchanged. The **arrow keys** move the highlight; **`[YES]`** executes it and
 closes the window; **`[NO]`** closes it and runs nothing. Like every stock menu
 it has **no timeout** — it stays until you answer it. While it is open
