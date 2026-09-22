@@ -261,10 +261,74 @@ def run_patched(rl_bank_yes):
     check("release returns cleanly", ok)
 
 
+def layer_depth(uc):
+    """How many layers are linked into the layer list, and how many of them are
+    the [BANK] overlay. A stranded (or double-popped) overlay is the thing that
+    would break stock [BANK] entirely, by leaving the dispatch table overridden."""
+    n = struct.unpack(">I", uc.mem_read(LAYER_HEAD, 4))[0]
+    depth, banks = 0, 0
+    for _ in range(64):
+        if n == 0 or n < 0x40000000:
+            break
+        depth += 1
+        if n == BANK_LAYER:
+            banks += 1
+        try:
+            n = struct.unpack(">I", uc.mem_read(n, 4))[0]
+        except UcError:
+            break
+    return depth, banks
+
+
+def bank_slot(uc):
+    return struct.unpack(">I", uc.mem_read(DISPATCH_BASE + BANK_CODE * 24, 4))[0]
+
+
+def run_stress(label, path, rl_bank_yes=None):
+    """Repeated real gestures. The user reports that after a few reload attempts
+    stock [BANK] single-press stops working ENTIRELY -- which is what a corrupted
+    or overridden dispatch table looks like. Single gestures all passed; this
+    drives SEQUENCES, and compares against stock rather than judging in a vacuum."""
+    print(f"\n##### STRESS: {label} #####")
+    uc = mk(path)
+    call(uc, PUSH_LAYER, [BASE_LAYER_SEL])
+    d0, b0 = layer_depth(uc)
+    print(f"   baseline: depth={d0} bank_layers={b0} BANK slot=0x{bank_slot(uc):08x}")
+
+    def gesture(name, open_picker=False, trig=False):
+        call(uc, BANK_PRESS, [BANK_CODE, 1])
+        if trig:
+            uc.mem_write(BANK_SEL, b"\x00\x00\x00\x01")
+        if open_picker:
+            uc.mem_write(G_MENU, b"\x01")
+            uc.mem_write(BANK_COMMIT, b"\x00\x00\x00\x00")
+        call(uc, BANK_REL, [BANK_CODE, 0])
+        d, b = layer_depth(uc)
+        print(f"   {name:<34} depth={d} bank_layers={b} "
+              f"BANK=0x{bank_slot(uc):08x} YES=0x{yes_slot(uc):08x}")
+        return d, b
+
+    # Five plain taps in a row. On stock each tap shows the window whose onClose
+    # pops the layer; nothing here lets that timeout fire, which is exactly the
+    # real-world case of tapping faster than the toast expires.
+    for i in range(5):
+        gesture(f"plain tap #{i+1}")
+    # Then reload-style gestures (picker open at release -> our swallow path).
+    for i in range(3):
+        gesture(f"reload gesture #{i+1}", open_picker=True)
+        uc.mem_write(G_MENU, b"\x00")          # as rl_yes_exec would on execute
+    d, b = gesture("tap after reload gestures")
+    check(f"[{label}] BANK dispatch slot still the stock handler",
+          bank_slot(uc) == BANK_PRESS, hex(bank_slot(uc)))
+    check(f"[{label}] [BANK] overlay not stacked up (<=1 instance)", b <= 1, f"{b} copies")
+    return d, b
+
+
 def main():
     args = sys.argv[1:]
-    do_stock = "--stock" in args or not args
-    do_patched = "--patched" in args or not args
+    stress = "--stress" in args
+    do_stock = ("--stock" in args or not args) and not stress
+    do_patched = ("--patched" in args or not args) and not stress
     if do_stock:
         if not STOCK.exists():
             sys.exit(f"missing {STOCK}")
@@ -278,6 +342,15 @@ def main():
         syms = {p[2]: int(p[0], 16) for p in (l.split() for l in nm.splitlines())
                 if len(p) == 3}
         run_patched(syms["rl_bank_yes"])
+
+    if stress:
+        run_stress("STOCK", STOCK)
+        import subprocess
+        nm = subprocess.run(["m68k-elf-nm", str(ROOT / "out/patch_reload2.elf")],
+                            capture_output=True, text=True).stdout
+        syms = {q[2]: int(q[0], 16) for q in (l.split() for l in nm.splitlines())
+                if len(q) == 3}
+        run_stress("PATCHED", PATCHED, syms["rl_bank_yes"])
 
     print("\n" + ("ALL GOOD" if not FAILED else f"FAILED: {FAILED}"))
     sys.exit(1 if FAILED else 0)

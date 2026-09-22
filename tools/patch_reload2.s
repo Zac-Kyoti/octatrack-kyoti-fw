@@ -673,6 +673,18 @@ rl_fmt_mtrk:
 | ** The flag is a ONE-SHOT, set only by rl_job on the path that handled OUR job,
 | so a genuine stock RELOAD BANK the user asks for is never suppressed. **
 
+| ** BACKED OUT of the default build in Session 80 continued (5). **
+| Hardware: the flash carrying rl_done + the LIVE_REFRESH call broke things badly
+| -- [BANK]+[YES] "hardly ever executes", [YES] "almost always" gives RELOAD
+| BUSY, and **stock [BANK] single-press stops working entirely after a few
+| reload attempts**. The immediately PREVIOUS flash (same file minus these two
+| changes) was hardware-confirmed clean, so one of them is the cause. Skipping
+| 0x40023b68 evidently drops bookkeeping the job/window machinery needs -- the
+| emulator measured the layer stack staying balanced and G_KIND clearing on a
+| SINGLE reload, so whatever accumulates does so across REPEATED use, which no
+| test here covers yet. Do not re-enable without a multi-reload test.
+| Assemble with --defsym RL_DONE=1 to bring it back for investigation.
+    .ifdef RL_DONE
     .global rl_done
 rl_done:
     tst.b   rl_own
@@ -683,6 +695,7 @@ rl_done:
 rld_skip:
     clr.b   rl_own                     | one-shot: consume it
     jmp     DONE_EPILOG                | skip the whole-bank reload entirely
+    .endif
 
 | ================= the SEQ worker -- jmp detour @ the type-0x14 case 0x40085864 =================
 | replaces 8 bytes: move.l %a2,%fp@(-650) ; move.l %a2@(4),%sp@-
@@ -710,10 +723,9 @@ rlj_ours:
     move.l  %d0,rl_kind                | stash the kind across the FUN_4008cebc calls
     clr.b   G_KIND                     | consume now -- a re-entrant real RELOAD BANK
                                        | must NOT see it set
-|   Session 80 continued (4): claim the ONE stock whole-bank reload that this
-|   job's completion would otherwise perform. See rl_done.
-    moveq   #1,%d0
-    move.b  %d0,rl_own
+|   Session 80 continued (4)/(5): rl_own claimed the stock whole-bank reload for
+|   rl_done to suppress. Both are BACKED OUT -- the flag is left unset so the
+|   (now undetoured) rl_done code can never fire. See the rl_done block.
     move.w  CKSUM,%d0
     move.w  %d0,rl_cksum
 
@@ -861,12 +873,12 @@ rlj_setflag:
 |   exactly this purpose: it copies all 16 slabs, but only the reloaded one
 |   differs. Direction matters and is correct -- the cold blob is the working
 |   store (p-lock edits land there) and the live cache is downstream of it.
-    moveq   #0,%d0
-    move.b  CUR_BANK,%d0
-    move.l  %d0,-(%sp)
-    jsr     LIVE_REFRESH
-    addq.l  #4,%sp
-
+|   ** BACKED OUT in Session 80 continued (5) along with rl_done -- see the
+|   rl_done block below for why. The call was:
+|       moveq #0,%d0 ; move.b CUR_BANK,%d0 ; move.l %d0,-(%sp)
+|       jsr LIVE_REFRESH ; addq.l #4,%sp
+|   It is only needed WITH the rl_done suppression (without it, stock's own
+|   whole-bank reload refills the live cache), so the two stand or fall together. **
     move.l  %d5,%d0
     move.b  ACT_PAT,%d1
     cmp.b   %d1,%d0
@@ -957,10 +969,13 @@ rlo_zero:
     .align 2
 rl_kind:
     .space 4
+    .ifdef RL_DONE
 rl_own:
     .space 4                           | Session 80 continued (4): one-shot "the
                                        | next stock whole-bank reload is ours to
-                                       | suppress" flag. See rl_done.
+                                       | suppress" flag. See rl_done. Backed out
+                                       | of the default build in "(5)".
+    .endif
 rl_asgn:
     .space 4
 rl_cksum:

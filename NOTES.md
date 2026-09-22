@@ -24920,3 +24920,88 @@ because its only dynamic instrument never plays anything.
    another flash.
 4. Carried over untouched: group-7 residue; MIDI-track counterpart at 0x400a3dd2;
    `DAT_46104cf4`; `FUN_4000ae12`'s caller.
+
+## Session 80 continued (5) (2026-09-21, `wip`) — RELOAD2: "(4)" FAILED ON HARDWARE and is BACKED OUT. The bug accumulates across repeated use, which no test here covers
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (4)").
+
+### Hardware report — "(4)" made the unit materially worse
+
+Flashed the "(4)" build (`rl_done` suppressing stock's whole-bank reload +
+`rl_job` calling `FUN_4000faf0` to refresh the live cache). User:
+
+- `[BANK]`+`[YES]` **hardly ever executes**;
+- when it does open and shows `TRK SEQ`, `[YES]` **almost always** gives
+  `RELOAD BUSY`;
+- **stock `[BANK]` single-press stops working ENTIRELY after messing with the
+  reload function a few times.**
+
+That third symptom is a **stock-feature regression**, and the most diagnostic
+thing in the report: it *degrades with use*.
+
+### The timeline is what identified the culprit — not my reasoning
+
+My first instinct was to blame the `[BANK]` window deferral from "(3)", since it
+is the only code touching `[BANK]` release. **Wrong**: the user had already
+hardware-confirmed "(3)" clean ("all of the changes that were just made seem to
+be operating cleanly"). The regression appeared in the very next flash, whose
+*only* content was "(4)"'s two changes. So the deferral is exonerated and one of
+those two is the cause. They stand or fall together — `FUN_4000faf0` is needed
+only *because* `rl_done` removes stock's own live-cache refresh.
+
+**Both are now BACKED OUT.** `rl_done` and `rl_own` sit behind
+`.ifdef RL_DONE` (assemble with `--defsym RL_DONE=1` to resurrect for
+investigation) and the `LIVE_REFRESH` call is commented out in `rl_job`. The
+default build is **1306 B vs stock — byte-for-byte the "(3)" image the user
+confirmed good**; the only diffs vs commit `f729df3` are `.equ` symbols (which
+emit nothing) and the guarded block. `--trk` **ALL GOOD** again with
+`deser_seen=True` (stock's reload is back), `--combo`, `emu_reload2_keymap.py`
+and `diag_bank_window.py` all **ALL GOOD**.
+
+### Why the emulator passed a build that fails on hardware
+
+The "(4)" tests measured **one** reload. On a single reload everything really is
+correct: layer push/pop balance 0, `G_KIND` back to 0, cold blob and live copy
+both reverted, no deserialiser, no 16 parses. **I validated the thing I had
+built a test for, not the thing the user actually does with the feature.** The
+hardware phrase "after a few times" is the whole finding: state accumulates
+across repeated reloads and nothing in this repo's test suite drives more than
+one.
+
+Leading explanation (NOT proven): skipping `0x40023b68` drops bookkeeping the
+job/window machinery needs, and the debt only becomes visible after it has built
+up — a wedged popup/window state would explain all three symptoms at once,
+because `rl_bank_yes` bails on `POPUP != 0` (combo won't open), a wedged window
+system means the deferred SELECT BANK never draws (stock `[BANK]` looks dead),
+and a wedged storage/job path means `G_KIND` is never consumed (`RELOAD BUSY`).
+
+### Hypotheses KILLED this round — do not re-run them
+
+- **Keymap-layer imbalance is not it.** New `--stress` mode in
+  `diag_bank_window.py` drives 5 plain taps + 3 reload gestures + a tap, on
+  stock AND patched: depth stays 2 / one `[BANK]` overlay instance, and the BANK
+  dispatch slot stays `0x4007af80` throughout. Pushing an already-linked layer
+  is idempotent, so stranding by repeated presses cannot happen.
+- **`FUN_4000faf0` does not clobber our scratch.** Full decode of its seven
+  copies: destinations are `0x1001614e`, `0x100a4ece`, `0x100b145e`,
+  `0x100ab196`, `0x100b145f`, `0x100b1463`, `0x100f8598`. **None** touch
+  `0x80006a50..55` (`G_KIND`/`G_MENU`/`G_SEL`/`G_TRK`/`G_TMIDI`).
+- (From "(4)", still standing) a single clean reload never leaves `G_KIND` set.
+
+### What is still TRUE from "(4)"
+
+The root cause of issue #2 stands and is worth keeping: **the type-0x14 job IS
+stock's RELOAD BANK, and its doneFn re-reads all 16 patterns of the bank off the
+card after our slice copy** (`0x40023c62` → `bsr.w 0x40023b68`), which is the
+~1 s stall, the sequencer restart, and why TRK SEQ was only nominally per-track.
+`tools/diag_reload2_deser.py` measures it. What is *not* solved is how to
+suppress it without wedging the machinery.
+
+### The gate for any future attempt
+
+**A multi-reload test must exist and pass before this is flashed again.** Drive
+at least 3–5 consecutive reloads in `diag_reload2_deser.py` and assert, after
+each: `G_KIND` returns to 0, `POPUP` (`0x460e5cd0`) returns to 0, layer depth
+returns to baseline, and the `[BANK]`/`[YES]` dispatch slots return to their
+expected handlers. If any of those drifts monotonically across iterations, that
+is the bug. Single-reload green is now known to be worthless as evidence here.
