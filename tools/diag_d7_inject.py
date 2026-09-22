@@ -175,6 +175,8 @@ def main(argv):
     tbl = [int.from_bytes(rd(LEN_TBL + 4 * i, 4), "big") for i in range(12)]
     base = BLOB + final_bank * BANK_STRIDE + a.to_pattern * PAT_STRIDE
     smode = rd(base + 0x8E55, 1)[0]
+    mlen = rd(base + 0x8E51, 1)[0] if smode else rd(base + 0x8E53, 1)[0]
+    mscale = rd(base + 0x8E52, 1)[0] if smode else rd(base + 0x8E54, 1)[0]
     dflt_len, dflt_scale = rd(base + 0x8E53, 1)[0], rd(base + 0x8E54, 1)[0]
 
     def track_fields(i):
@@ -192,6 +194,16 @@ def main(argv):
           f"   injections applied={st['injected']}")
     print(f"target pattern: SCALE_MODE={smode} default LEN={dflt_len} SCALE={dflt_scale}")
     print(f"LEN_TBL={tbl}")
+    # Session 79 cont.38: MASTER LENGTH resets every track (measured on stock), so the
+    # resume offset must be reduced into the incoming pattern's master cycle first. The
+    # earlier model omitted this and therefore agreed with the patch while both were wrong.
+    tpsm = tbl[mscale] if mscale < 12 else 0
+    cyc = mlen * tpsm
+    gab = int.from_bytes(rd(0x80006A46, 4), "big")
+    if cyc:
+        exp_off = (gab % cyc) // tpsm
+        print(f"MASTER LEN={mlen} master tps={tpsm} -> cycle={cyc} ticks;"
+              f"  G_ABSTICK(ticks)={gab} -> expected offset={exp_off}, expected D7={exp_off*tpsm}")
 
     print("\n=== D7 observed at 0x400a4834 ===")
     for fr, got, mult in st["d7"][:8]:

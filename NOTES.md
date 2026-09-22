@@ -27413,3 +27413,83 @@ that pattern.
    scale, which is the common case; worth fixing regardless.
 
 No code changed this session -- measurement only.
+
+## Session 79, continued a thirty-eighth time — master-cycle reduction implemented; AR's master step MEASURED as bounded
+
+### The fix
+
+Hook H now reduces into the **incoming pattern's** master cycle:
+
+```
+cycleTicks = masterLen * tps_master        (SCALE_MODE ? +0x8e51/+0x8e52 : +0x8e53/+0x8e54)
+posTicks   = G_ABSTICK mod cycleTicks
+offset     = posTicks / tps_master         (stock multiplies this back up to rebuild D7)
+```
+
+`dj_abstick` now counts **ticks** rather than master steps (`+= LEN_TBL[SCALE_IX]` instead of
+`+= 1`). A master step is a per-pattern number of ticks, so the old counter advanced at
+different real-time rates depending on which pattern was playing and was therefore not
+absolute time at all.
+
+`dj_gcd32` / `dj_foldcyc` and the cont.36 LCM fold are **deleted** -- the offset is now bounded
+by `masterLen` by construction, so the overflow they addressed cannot occur. `dj_div32` and
+`dj_mod32` are retained (the reduction needs both). Build 1087 bytes, down from 1234.
+
+### MEASURED — DJTEST2 A07, armed commit
+
+`G_ABSTICK = 156` ticks, master cycle `16 * 6 = 96`, so `posTicks = 60`, `offset = 10`,
+`D7 = 60`:
+
+| track | LEN | MULT | now | before (cont.36) | correct |
+|-------|-----|------|-----|------------------|---------|
+| T0 | 16 | 1x | 10 | 10 | 10 |
+| T1 | 16 | 2x | 4 | 4 | 4 |
+| T2 | **12** | 1x | **10** | 2 | 10 |
+| T3 | **7** | 1x | **3** | 5 | 3 |
+| T4 | 16 | **1/2x** | **5** | 13 | 5 |
+
+16/16 against the corrected model. `diag_d7_inject.py`'s model was fixed in the same pass --
+it had carried the identical omission, which is why it had been agreeing with a wrong patch.
+
+(Cosmetic: the tool's header line reads `G_ABSTICK` at end-of-run rather than at the commit,
+so the "expected" figures it prints there refer to a later moment. The per-track comparison
+uses the observed commit-time `D7` and is correct.)
+
+### AR's master step is BOUNDED — traced, not inferred
+
+The one fact everything rested on. `0x40099b8a`-`0x40099ba6` in `FUN_4009905c`:
+
+```
+40099b8a  D1 = masterStep (0x405666e4)
+40099b92  0x405666e8 = D1            ; previous
+40099b98  D1 += 1
+40099b9a  cmp.l D0,D3   /  bge -> skip
+40099ba0  cmp.l D3,D0   /  bgt -> skip
+40099ba4  D1 -= A0                   ; WRAP
+40099ba6  masterStep = D1
+```
+
+It wraps. So `0x405666e4` is a **position within the current pattern**, not a free-running
+counter, and AR's DIRECT JUMP means **"carry the playhead index into the new pattern, wrapped
+to its length"** -- not "as if the new pattern had been playing all along".
+
+This retracts the guess in cont.30/33 that AR's counter might be absolute, and it also means
+the user's description of AR's behaviour ("the position they would be had the user never
+switched away") does not match AR's arithmetic in general -- **only in the common case where
+all patterns share a master length and master scale, where the two rules coincide exactly.**
+
+### Therefore: OT and AR now differ, deliberately
+
+| | AR | OT (this build) |
+|---|---|---|
+| input | current playhead index, bounded by the pattern | absolute ticks since transport start |
+| reduction | `mod newPatternLen` | `mod (masterLen * tps_master)` of the incoming pattern |
+| per track | `mod trackLen` | `(posTicks / tps_t) mod trackLen` |
+| rate-corrects per-track multiplier | no | yes |
+
+They agree whenever patterns share master length and scale. They diverge when master lengths
+differ between patterns, and when a track's multiplier differs from the master's.
+
+**This is now a genuine specification fork, not a bug**, and it is the user's to settle:
+match AR exactly (simpler, bounded by construction, no absolute counter needed at all), or
+keep the stated "as if never switched away" semantics, which is what this build does.
