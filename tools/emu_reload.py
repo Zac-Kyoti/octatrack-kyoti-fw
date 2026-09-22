@@ -708,7 +708,16 @@ def cmd_combo(rt):
         rt.uc.mem_write(a, b"\x4e\x75")
     rt.uc.ctl_flush_tb()
 
-    def reset_gates(actpat=7, menu=0, sel=0, running=1):
+    BANK_HELD_FLAG = 0x46C7DD56   # is_key_held([BANK]) = 0x46c7d8ee + 0x2f*24
+    STOCK_YES_H = 0x4005E4C8      # base-layer YES handler (which rl_yes detours)
+
+    def reset_gates(actpat=7, menu=0, sel=0, running=1, bank_held=1):
+        # bank_held models the real dispatch state: rl_bank_yes is only ever
+        # REACHED because the [BANK] overlay redirects the YES slot to it, and
+        # it now delegates when [BANK] is not physically held (its poke outlives
+        # the layer -- see patch_reload2.s). Driving it with the flag clear was
+        # never a realistic gesture; tests that want that path set it to 0.
+        rt.uc.mem_write(BANK_HELD_FLAG, struct.pack(">I", bank_held))
         rt.uc.mem_write(0x460e5cd0, struct.pack(">I", 0))   # no popup
         rt.uc.mem_write(0x460d1aec, struct.pack(">I", 0))   # no arranger
         rt.uc.mem_write(0x800065b8, struct.pack(">I", running))  # transport
@@ -758,6 +767,29 @@ def cmd_combo(rt):
               f"BANK+YES release does nothing: end={end} G_MENU={g(G_MENU_A)} "
               f"popup2={POPUP2_FN in calls}")
 
+        # Session 80 continued (6): [BANK] NOT held -> rl_bank_yes must be
+        # TRANSPARENT. Its poke into the [BANK] layer's YES record outlives the
+        # layer (measured on the real dispatcher: the pop restores the NO slot
+        # but not this one), so it keeps being reached with no [BANK] down. It
+        # must then delegate to whatever owned the slot before the overlay, NOT
+        # open the picker -- otherwise [YES] alone opens it forever after, and
+        # stock [YES] is gone.
+        reset_gates(menu=0, bank_held=0)
+        rt.uc.mem_write(_sym("rl_yes_save"), struct.pack(">I", 0))
+        calls = []
+        end = _run_cave_fn(rt, rl_bank_yes, 0x31, 1, calls)
+        check(end == "rts" and g(G_MENU_A) == 0 and POPUP2_FN not in calls,
+              f"[BANK] not held, nothing saved: picker must NOT open -> "
+              f"G_MENU={g(G_MENU_A)} popup2={POPUP2_FN in calls}")
+
+        reset_gates(menu=0, bank_held=0)
+        rt.uc.mem_write(_sym("rl_yes_save"), struct.pack(">I", STOCK_YES_H))
+        calls = []
+        end = _run_cave_fn(rt, rl_bank_yes, 0x31, 1, calls)
+        check(g(G_MENU_A) == 0 and POPUP2_FN not in calls,
+              f"[BANK] not held: delegates to the saved handler instead of "
+              f"opening -> end={end} G_MENU={g(G_MENU_A)}")
+
         # Session 80 continued (6): already open -> [YES] must EXECUTE, not sit
         # inert. While [BANK] is held the YES dispatch slot IS rl_bank_yes, so
         # the natural "hold [BANK], tap [YES] twice" gesture used to have its
@@ -790,15 +822,15 @@ def cmd_combo(rt):
     reset_gates(menu=1, sel=0)
     for step in range(n + 1):
         calls = []
-        end = _run_cave_fn(rt, rl_arr_b, 0x33, 1, calls)
+        end = _run_cave_fn(rt, rl_arr_a, 0x21, 1, calls)   # DOWN = 0x21
         want = (step + 1) % n
         check(end == "rts" and g(G_SEL_A) == want and POPUP2_FN in calls,
-              f"arrow B (next) {step}: G_SEL->{g(G_SEL_A)} (want {want}) popup2={POPUP2_FN in calls}")
+              f"DOWN 0x21 (next) {step}: G_SEL->{g(G_SEL_A)} (want {want}) popup2={POPUP2_FN in calls}")
     reset_gates(menu=1, sel=0)
     calls = []
     end = _run_cave_fn(rt, rl_arr_a, 0x34, 1, calls)
     check(end == "rts" and g(G_SEL_A) == n - 1 and POPUP2_FN in calls,
-          f"arrow A (prev) from 0: G_SEL->{g(G_SEL_A)} (want {n-1}) popup2={POPUP2_FN in calls}")
+          f"UP 0x34 (prev) from 0: G_SEL->{g(G_SEL_A)} (want {n-1}) popup2={POPUP2_FN in calls}")
 
     # --- UP/DOWN only: LEFT/RIGHT and non-press events must NOT move G_SEL ---
     # Set by emu_reload2.py; patch_reload.s has no keycode/event gate, so this
@@ -809,13 +841,16 @@ def cmd_combo(rt):
         # press AND release AND hold, with auto-repeat. Only UP/DOWN press may
         # move the selection; everything else must be swallowed so the window
         # neither steps twice per tap nor lets stock arrow nav move off it.
+        # Corrected mapping (hardware-derived, Session 80 continued (6)):
+        # 0x4004b970 = UP 0x34 + DOWN 0x21 (vertical); 0x400491a0 = LEFT 0x20 +
+        # RIGHT 0x33 (horizontal, swallowed wholesale while the picker is open).
         for fn, nm, code, ev, why in (
-                (rl_arr_a, "rl_arr_a", 0x21, 1, "RIGHT press"),
+                (rl_arr_b, "rl_arr_b", 0x33, 1, "RIGHT press"),
                 (rl_arr_b, "rl_arr_b", 0x20, 1, "LEFT press"),
                 (rl_arr_a, "rl_arr_a", 0x34, 0, "UP release"),
-                (rl_arr_b, "rl_arr_b", 0x33, 0, "DOWN release"),
+                (rl_arr_a, "rl_arr_a", 0x21, 0, "DOWN release"),
                 (rl_arr_a, "rl_arr_a", 0x34, 2, "UP hold/auto-repeat"),
-                (rl_arr_b, "rl_arr_b", 0x33, 2, "DOWN hold/auto-repeat")):
+                (rl_arr_a, "rl_arr_a", 0x21, 2, "DOWN hold/auto-repeat")):
             reset_gates(menu=1)
             rt.uc.mem_write(G_SEL_A, b"\x01")
             end = _run_cave_fn(rt, fn, code, ev, [])

@@ -167,6 +167,23 @@
 |       (its release calls teardown 0x40043418 directly when 0x460d173e is set).
 |   So the window may NOT simply be suppressed: something must still run teardown
 |   exactly once, or the [BANK] overlay strands on the dispatch table forever.
+|   Session 80 continued (6): MEASURED through the real key dispatcher
+|   (tools/diag_reload2_realkey.py, set_key_state 0x40031734 -> the runtime
+|   table). After [BANK] release the overlay layer IS correctly popped
+|   (BANKlayer=popped) and the NO slot IS restored (0x4007b25c -> the underlying
+|   handler) -- but the YES slot KEEPS pointing at rl_bank_yes. The asymmetry
+|   names the cause: NO's record has a non-NULL press in stock, YES's is NULL,
+|   and the pop's table rebuild does not restore a slot that was NULL in stock.
+|   Our poke therefore OUTLIVES the layer, and [YES] on its own then opens the
+|   reload picker for the rest of the session -- confirmed: "[YES] alone ->
+|   G_MENU=1" with no [BANK] held, and stock [YES] is gone.
+|   So save the slot's pre-push value and put it back on release ourselves
+|   rather than trusting the rebuild. Restoring it to the UNDERLYING handler is
+|   also exactly what the sticky picker wants: that handler is 0x4005e4c8, which
+|   rl_yes detours and which answers an open picker after [BANK] is released.
+    .equ BANK_HELD_FLAG, 0x46c7dd56     | is_key_held([BANK]) = 0x46c7d8ee + 0x2f*24
+    .equ YES_DISPATCH,   0x46c7dd76     | runtime dispatch table, YES press slot
+                                        | = 0x46c7d8de + 0x31*24
     .equ BANK_SHOW,      0x4007af42     | press tail: pea onClose ; clr.l -(sp)  (6 B displaced)
     .equ BANK_SHOW_RES,  0x4007af58     | resume after the suppressed jsr FUN_40059f8c
     .equ BANK_REL,       0x4007b3e0     | [BANK] release handler (8 B displaced)
@@ -212,9 +229,21 @@
 |   Session 80 continued (6): the picker takes UP/DOWN ONLY (user's explicit
 |   request: "I don't want the left/right arrows to operate on the RELOAD2
 |   options selector at all. I just want up/down"). Both handlers are SHARED by
-|   two keycodes each (measured, see reference/kb/memory-map.md 0x46c7d8de), so
-|   the detours must test the code, not just the handler:
-|     UP 0x34 + RIGHT 0x21 -> 0x4004b970    DOWN 0x33 + LEFT 0x20 -> 0x400491a0
+|   two keycodes each, so the detours must test the code, not just the handler.
+|
+|   ** KB CORRECTION, hardware-derived. ** reference/kb/memory-map.md said
+|   UP 0x34 + RIGHT 0x21 -> 0x4004b970 and DOWN 0x33 + LEFT 0x20 -> 0x400491a0
+|   (confidence C, cross-checked against octabam -- which is MKII-oriented; this
+|   project is MKI-only). That pairing is WRONG. A build gating 0x4004b970 on
+|   0x34 and 0x400491a0 on 0x33 was flashed: UP worked, **DOWN did not**. If the
+|   KB pairing held, 0x33 IS down and the gate would have passed it, so the
+|   report falsifies it. The correct pairing is the one the handlers' own shape
+|   implies anyway:
+|     0x4004b970 = UP 0x34 + DOWN 0x21   -- the VERTICAL pair, which is exactly
+|                  why stock special-cases its two codes at 0x4004b9d6
+|     0x400491a0 = LEFT 0x20 + RIGHT 0x33 -- horizontal; this wrapper never even
+|                  examines the keycode, treating both identically
+|   So rl_arr_a owns both vertical directions and rl_arr_b owns neither.
 |   They are also mapped for press AND release AND hold (with auto-repeat on all
 |   four keys), so the original detours moved the selection on the release too --
 |   one physical tap stepped it TWICE, plus once per repeat tick. --combo only
@@ -224,7 +253,7 @@
 |   (which is what "strange visual glitches and move away from the option
 |   window" was). Picker closed -> every arrow falls through to stock untouched.
     .equ UP_CODE,       0x34
-    .equ DOWN_CODE,     0x33
+    .equ DOWN_CODE,     0x21           | NOT 0x33 -- see the correction note above
     .equ ARROW_A_H,     0x4004b970      | UP / RIGHT handler
     .equ ARROW_A_RESUME,0x4004b978      | after `lea -12(sp),sp ; movem.l d2-d3/a2,(sp)`
     .equ ARROW_B_H,     0x400491a0      | DOWN / LEFT handler
@@ -304,6 +333,21 @@
 
     .global rl_bank_yes
 rl_bank_yes:
+|   Our poke into the [BANK] layer's YES record OUTLIVES the layer: measured
+|   through the real dispatcher, the pop's rebuild restores the NO slot (whose
+|   stock press is non-NULL) but leaves this slot pointing at us (stock press was
+|   NULL). So rl_bank_yes keeps being reached with no [BANK] held, and [YES]
+|   alone would open the picker forever after -- confirmed on the real key path.
+|   Fix WITHOUT touching the dispatch table (see rl_bank_rel for why): if [BANK]
+|   is not physically held, delegate to whatever handler owned the slot before
+|   the overlay pushed. is_key_held is record+16, i.e. 0x46c7d8ee + code*24.
+    move.l  BANK_HELD_FLAG,%d1
+    bne.b   rby_held
+    move.l  rl_yes_save,%d1
+    beq.b   rby_rts                    | nothing saved -> behave as stock's NULL
+    movea.l %d1,%a0
+    jmp     (%a0)                      | tail-call: same (code@4, event@8) frame
+rby_held:
     moveq   #1,%d1
     cmp.l   8(%sp),%d1                 | event == press ?
     bne.b   rby_rts
@@ -354,6 +398,16 @@ rby_exec:
 
     .global rl_bank_press
 rl_bank_press:
+|   Snapshot the YES dispatch slot BEFORE the overlay is pushed (the push is at
+|   0x4007af58, after our resume point), so rl_bank_rel can restore it. Guarded
+|   so a second press without an intervening release cannot save our own handler
+|   over the real one. d0 is scratch here: the stock code resumed at
+|   BANK_SHOW_RES only pushes constants and never reads d0.
+    move.l  YES_DISPATCH,%d0
+    cmpi.l  #rl_bank_yes,%d0
+    beq.b   rbp_nosave
+    move.l  %d0,rl_yes_save
+rbp_nosave:
     lea     -16(%sp),%sp               | the 4 window args we are NOT pushing
     jmp     BANK_SHOW_RES              | skip the jsr; layer push still happens
 
@@ -378,6 +432,13 @@ rl_bank_press:
 
     .global rl_bank_rel
 rl_bank_rel:
+|   ** Do NOT write YES_DISPATCH back here. ** That was tried and MEASURED to
+|   make things worse: after one direct write to the runtime table, the next
+|   [BANK] press no longer applied our record at all (slot stayed at the
+|   underlying handler with the layer LINKED), the gesture stopped working
+|   entirely (rl_job+0, bank_yes+0), and the layer stack began unwinding
+|   (depth 3 -> 2 -> 1 across iterations). The table is owned by the rebuild;
+|   poking it desyncs the layer machinery. rl_bank_yes delegates instead.
     tst.l   BANK_SEL
     bne.b   rbr_stock                  | trig's own toast owns the teardown
     tst.b   G_MENU
@@ -558,15 +619,27 @@ rly_stock:
 | through -- behaviourally invisible.
 
     .global rl_arr_a
-rl_arr_a:                              | keycodes UP 0x34 / RIGHT 0x21
+rl_arr_a:                              | keycodes UP 0x34 / DOWN 0x21 -- BOTH vertical
     tst.b   G_MENU
     beq.b   raa_stock                  | picker closed -> stock, untouched
     moveq   #1,%d0
     cmp.l   8(%sp),%d0                 | event == press ?
     bne.b   raa_swallow                | release / auto-repeat hold -> swallow
     moveq   #UP_CODE,%d0
-    cmp.l   4(%sp),%d0                 | this key is UP, not RIGHT ?
-    bne.b   raa_swallow                | RIGHT -> never touches the selection
+    cmp.l   4(%sp),%d0
+    beq.b   raa_prev
+    moveq   #DOWN_CODE,%d0
+    cmp.l   4(%sp),%d0
+    bne.b   raa_swallow                | neither -> swallow
+|   DOWN: next item (wrapping)
+    moveq   #0,%d0
+    move.b  G_SEL,%d0
+    addq.l  #1,%d0
+    cmpi.l  #N_ITEMS,%d0
+    bcs.b   raa_set
+    moveq   #0,%d0
+    bra.b   raa_set
+raa_prev:                              | UP: previous item (wrapping)
     moveq   #0,%d0
     move.b  G_SEL,%d0
     subq.l  #1,%d0
@@ -583,26 +656,13 @@ raa_stock:
     jmp     ARROW_A_RESUME
 
     .global rl_arr_b
-rl_arr_b:                              | keycodes DOWN 0x33 / LEFT 0x20
+rl_arr_b:                              | keycodes LEFT 0x20 / RIGHT 0x33 -- horizontal
     tst.b   G_MENU
     beq.b   rab_stock                  | picker closed -> stock, untouched
-    moveq   #1,%d0
-    cmp.l   8(%sp),%d0                 | event == press ?
-    bne.b   rab_swallow                | release / auto-repeat hold -> swallow
-    moveq   #DOWN_CODE,%d0
-    cmp.l   4(%sp),%d0                 | this key is DOWN, not LEFT ?
-    bne.b   rab_swallow                | LEFT -> never touches the selection
-    moveq   #0,%d0
-    move.b  G_SEL,%d0
-    addq.l  #1,%d0
-    cmpi.l  #N_ITEMS,%d0
-    bcs.b   rab_set
-    moveq   #0,%d0
-rab_set:
-    move.b  %d0,G_SEL
-    jsr     rl_draw
-rab_swallow:
-    rts                                | swallow
+    rts                                | picker open -> swallow. LEFT/RIGHT must
+                                       | never move the selection (user's request)
+                                       | and must not reach stock either, or its
+                                       | own arrow nav moves off our window.
 rab_stock:
     move.l  %d2,-(%sp)                 | displaced original
     movea.l %sp@(8),%a0                | displaced original
@@ -1009,6 +1069,9 @@ rlo_zero:
     .align 2
 rl_kind:
     .space 4
+rl_yes_save:
+    .space 4                           | YES dispatch slot as it was before the
+                                        | [BANK] overlay push; 0 = nothing saved
     .ifdef RL_DONE
 rl_own:
     .space 4                           | Session 80 continued (4): one-shot "the

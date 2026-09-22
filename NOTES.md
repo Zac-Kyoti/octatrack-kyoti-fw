@@ -25886,3 +25886,127 @@ final in one image" therefore needs: add `patch_triglock`, drop `patch_directjum
 `patch_reload2`, re-pack the caves, and drop the `[YES]`-handler trampoline that exists
 only because DIRECT JUMP and RELOAD2 both want `0x4005e4c8`. That is a real change and the
 resulting image would want its own hardware pass before being called shippable.
+
+## Session 80 continued (6) (2026-09-21, `wip`) — RELOAD2: the real key path is testable at last, and it found a bug present since `[BANK]`+`[YES]` shipped
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (5)").
+
+### The gap that mattered: nothing had ever driven the REAL key path
+
+Every test in this repo reaches the reload by calling `rl_arm_trk` directly.
+`emu_reload.py`'s own `cmd_trk` explains why — driving the full `rl_yes` "opens a
+scheduling window in which the posted worker starts *inside* `call_as_main` and
+the borrowed idle slot never cleanly returns to `MAIN_SPIN`". The workaround was
+adopted years-deep and never revisited, so the dispatch table, `rl_bank_yes`,
+`rl_yes_exec`'s real popup close, and `[BANK]` release had **never** been
+exercised together.
+
+`tools/diag_reload2_realkey.py` (new) closes that gap by driving **`set_key_state`
+`0x40031734`** — the sole per-key dispatcher, verified here to read
+`(code@4, event@8)`, bounds-check the code and index the 24-byte-stride table at
+`0x46c7d8de` before calling the record's handler. Driving *it* rather than a
+handler is what makes this the real path; octabam's own `press_key_live` calls
+handlers directly with a different signature (`action(edge)`) and would skip the
+table entirely.
+
+**The feared scheduling obstacle never materialised.** The gesture runs clean.
+That workaround was more conservative than necessary, and the real path has been
+testable all along.
+
+### The bug: our `[BANK]`-layer poke OUTLIVES the layer
+
+Measured, three iterations, after `[BANK]` release:
+
+```
+[BANK] release   YES=0x400d7400  NO=0x40081304  depth=2  BANKlayer=popped
+[YES] alone   -> G_MENU=1        ** picker opens with no [BANK] held **
+```
+
+The overlay **is** popped correctly, and the rebuild **does** restore the NO slot
+(`0x4007b25c` → the underlying handler) — but the YES slot keeps pointing at
+`rl_bank_yes`. The asymmetry names the cause: **NO's record has a non-NULL press
+in stock; YES's is NULL, and we poked a non-NULL value into it. The pop's rebuild
+does not restore a slot that was NULL in stock.**
+
+Consequence on hardware: from the first `[BANK]` press onward, `[YES]` alone
+opens the RELOAD picker and stock `[YES]` is gone. Because an open picker's
+`[YES]` *executes*, stray `[YES]` presses can fire reloads. **This has been in
+every build since `[BANK]`+`[YES]` shipped, including ones the user called
+"operating cleanly"** — it needed the real dispatch path to become visible.
+
+`[NO]` is affected in the mirror image: while stale it reaches the overlay's own
+`0x4007b25c`, which knows nothing of our picker, so the picker is uncancellable.
+That is what made iteration 2 of the first run read as nonsense — the probe's
+`[NO]` had failed to close the picker and every subsequent state was shifted.
+
+### TWO WRONG FIXES BEFORE THE RIGHT ONE
+
+1. **"The slot is never restored"** — right symptom, wrong reason. I measured
+   layer *depth*, not *identity*; depth returning to baseline does not prove OUR
+   overlay popped.
+2. **"The overlay is stranded"** — also wrong, and it revived a theory I had
+   already declared dead. The identity check killed both in one run:
+   `BANKlayer=popped` while `YES=0x400d7400`.
+3. **Writing the saved value back into the dispatch table — MEASURED HARMFUL,
+   do not retry.** After one direct write: the next `[BANK]` press no longer
+   applied our record at all (slot stayed at the underlying handler with the
+   layer LINKED), the gesture went completely dead (`rl_job+0`, `bank_yes+0`),
+   and the layer stack began unwinding (`depth 3 → 2 → 1`). **The runtime table
+   is owned by the rebuild; poking it desyncs the layer machinery.** It looks
+   like the obvious fix, so the source now carries a note saying so.
+
+### The fix that works: be transparent, never touch the table
+
+`rl_bank_yes` now gates on the per-key HELD flag (`is_key_held([BANK])` =
+record+16 = `0x46c7d8ee + 0x2f*24` = `0x46c7dd56`). When `[BANK]` is not
+physically down it **delegates** — a tail `jmp` to whatever handler owned the
+slot before the overlay pushed (snapshotted by `rl_bank_press`, which runs before
+the push at `0x4007af58`), with the same `(code@4, event@8)` frame. Nothing is
+written to the dispatch table.
+
+Verified on the real path, 3/3 iterations: `[YES] alone -> G_MENU=0` (no picker),
+while the gesture still works every time (`bank_yes+2`, `rl_job+1`, `parse+17`,
+`G_KIND` settles 0).
+
+### BOTH lightweight harnesses were lying, in the same way
+
+`--combo` and `emu_reload2_keymap.py` both failed once the gate existed, because
+**they call handlers directly and the per-key held flag is set by `set_key_state`,
+not by the handler**. Neither modeled it. This is not tests-bent-to-fit-code: the
+real-key harness proves the flag *is* set on the real path, and driving
+`rl_bank_yes` with it clear was never a gesture a user could perform. Both
+harnesses now set it, with a comment saying why, and `--combo` gained two checks
+for the delegate path itself (nothing-saved → must not open; saved handler →
+delegates).
+
+### Also fixed this session
+
+- **Picker is UP/DOWN only, press only** (user's request). Both arrow handlers are
+  shared by two keycodes AND mapped for press/release/hold with auto-repeat, so
+  the old detours stepped the selection TWICE per physical tap plus once per
+  repeat tick. `--combo` only ever drove event=1, which is why it never showed.
+- **`[YES]` executes an already-open picker** while `[BANK]` is still held — the
+  "hardly ever executes" report. The natural gesture (hold `[BANK]`, tap `[YES]`
+  twice) had its second tap swallowed because the YES slot IS `rl_bank_yes` while
+  `[BANK]` is down.
+- **KB CORRECTION (hardware-derived): DOWN is `0x21`, not `0x33`.** See the
+  memory-map entry; the old pairing came from octabam (MKII-oriented) and the
+  user's "ARROW DOWN does not work" report falsified it.
+
+### Still open
+
+`RELOAD BUSY` is **not reproduced** — `G_KIND` settles to 0 on every iteration of
+every harness, including the real key path, and the user reports it does not
+clear by waiting (which already killed the "storage task merely busy" theory).
+The `[YES]`-alone bug is a plausible *contributor* on hardware (a stray reload
+leaves `G_KIND` busy for the next deliberate one) but that is NOT established.
+Also open: the ~1 s stall (root cause solid, fix reverted in "(5)"), and the list
+UI.
+
+**User's framing to hold onto**: TRK SEQ needs one track's sequence data, PTN SEQ
+one pattern's, PART + PTN SEQ that plus the linked Part. **None needs the bank.**
+One pattern is `0x8EEC` = 36,588 B on disk (real `bank01.strd` = 636,113 B), so
+the target is a ~36 KB read with no live-blob rewrite — and the file is
+fixed-stride (`0x16` header + `0x8EEC`/pattern, which our own test code already
+indexes arithmetically), so the worker could `fseek` straight to pattern P
+instead of parsing 0..P and discarding.

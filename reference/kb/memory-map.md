@@ -232,11 +232,22 @@ adds `0x1c..0x1f`); selector structs `{table_ptr, 0x400c085a}` at `0x400c090c` /
 | param-page | `0x22–0x26` | `FUN_4005578c` (via `0x400a7280={0,2,1,3,4}`) | **PAGE** | `0x1b` | `FUN_4004ffc4` |
 | MKII MAIN MENU | `0x1c` | `0x40064d78` → `FUN_40064c18` | **YES** | `0x31` | `0x4005e4c8` |
 | **arrow UP** | `0x34` | `0x4004b970` | **NO** | `0x32` | `0x4005e25c` |
-| **arrow RIGHT** | `0x21` | `0x4004b970` (same as UP) | **arrow DOWN** | `0x33` | `0x400491a0` |
-| **arrow LEFT** | `0x20` | `0x400491a0` (same as DOWN) | | | |
+| **arrow DOWN** | `0x21` | `0x4004b970` (same as UP) | **arrow RIGHT** | `0x33` | `0x400491a0` |
+| **arrow LEFT** | `0x20` | `0x400491a0` (same as RIGHT) | | | |
 
-Arrows (Session 43, confidence C — decoded from the keymap + cross-checked vs octabam
-MAINMENU.md §7, HW-tested there): **UP `0x34` / RIGHT `0x21` share `0x4004b970`**;
+Arrows — **CORRECTED Session 80 continued (6), hardware-derived; the previous pairing
+(Session 43, confidence C, cross-checked against octabam MAINMENU.md §7 — which is
+MKII-oriented, while this project is MKI-only) was WRONG.** It claimed UP `0x34` /
+RIGHT `0x21` share `0x4004b970` and DOWN `0x33` / LEFT `0x20` share `0x400491a0`. A
+RELOAD2 build gating `0x4004b970` on `0x34` and `0x400491a0` on `0x33` was flashed:
+**UP worked, DOWN did not** — which falsifies the old pairing, since under it `0x33`
+is DOWN and that gate passed `0x33`. The true pairing also matches the handlers' own
+shape: **UP `0x34` / DOWN `0x21` share `0x4004b970`** (the VERTICAL pair, which is why
+stock special-cases its two codes at `0x4004b9d6`), and **RIGHT `0x33` / LEFT `0x20`
+share `0x400491a0`** (horizontal — that wrapper never examines the keycode at all,
+treating both identically). Which of `0x33`/`0x20` is left vs right is still unverified
+and does not matter to any current patch. Original (wrong) note retained for context:
+**UP `0x34` / RIGHT `0x21` share `0x4004b970`**;
 **DOWN `0x33` / LEFT `0x20` share `0x400491a0`** (a wrapper — arg==press &&
 `0x80000012`==0 && `0x8000004b`==3 → `0x460d17aa=1; jmp 0x4007c404`, else arranger →
 `0x40049114`, else `rts`). `0x40049114` is the list-cursor mover: `0x460d16e4` cursor,
