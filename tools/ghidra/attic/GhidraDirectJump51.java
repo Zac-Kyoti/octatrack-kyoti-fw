@@ -36,8 +36,8 @@ public class GhidraDirectJump51 extends GhidraScript {
 
   public void run() throws Exception {
     List<Range> ranges = Arrays.asList(
-        new Range("MULT  0x80006628 (long)", 0x80006628L, 0x8000662aL),
-        new Range("BARSRC 0x8000662a (word)", 0x8000662aL, 0x8000662cL));
+        new Range("NEXT_STEP 0x800065e4[16x2]", 0x800065e4L, 0x80006604L),
+        new Range("PAIR      0x80006604[16x2]", 0x80006604L, 0x80006624L));
 
     // hits[rangeName] -> list of "pc  instruction   [how]   (function)"
     LinkedHashMap<String, List<String>> hits = new LinkedHashMap<>();

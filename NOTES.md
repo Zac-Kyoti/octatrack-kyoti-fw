@@ -25763,3 +25763,92 @@ Two durable artefacts beyond the feature:
 - `build_triglock.py`'s `assert_no_branch_into` -- refuses a detour whose displaced bytes
   contain a branch target. This hazard had never been checked by any build script here,
   and it silently produced a hanging image once.
+
+## Session 79, continued a twenty-sixth time — corrections to cont.25 and cont.21/23; a second tool limitation found
+
+Three measured corrections, two of them to claims made earlier in this same session. Recording
+them promptly because the last two entries each contained an inference that a later measurement
+overturned, and the pattern (plausible reading asserted from an instrument that could not
+support it) is the same one that produced `G_ABSTICK` and the flashed regression.
+
+### RETRACTION — cont.25's "the DIRECT JUMP path never armed"
+
+cont.25 concluded the DJ path did not run, on the evidence that `G_ARMED` read 0 in every
+sample. **That evidence was worthless.** `G_ARMED` is a one-tick flag: `dj_a` sets it at
+`dja_armstep` on tick 1 and `dj_c` clears it on tick 2 (`patch_directjump.s` line 449), while
+the sampler reads every ~166 frames ~= 3 ticks. It would miss the flag essentially always.
+
+Measured properly, by counting the detour sites themselves (`DJ_MODE = 1`, DJTESTxxx
+pattern 0 -> 1, cued via `PEND_PAT`):
+
+```
+dj_abstick 0x400a3fe4    55        dj_b       0x400a42fa    10
+dj_a       0x400a4006    55        dj_c       0x400a4840     1
+dj_scaleix 0x400a4220    10        dj_pertrk  0x400a4d36   220
+```
+
+The DIRECT JUMP code **is** executing — `dj_a` every step tick, `dj_c` once at the commit.
+What remains true from cont.25 is only the code-level point that `rt.seq_select_live()` writes
+`ACT_PAT`/`ACT_BANK` directly and never cues `PEND_PAT`, so it cannot arm; but the measurement
+offered in support of it did not show that.
+
+Open and being measured: every observed write to the scratch globals is `G_ARMED = 0` +
+`G_PCPAT = 0xff`, i.e. `dja_disarm`, ~2 writes per `dj_a` call across all 55 calls — so Hook A
+appears to disarm on *every* tick even after a cue. `diag_dj_commit.py` now captures Hook A's
+five gate inputs (`DJ_MODE` long, `ARR_ACT`, `CHAIN_ACT`, `PEND_PAT/BANK`, `ACT_PAT/BANK`) at
+entry so the disarm reason is measured rather than guessed.
+
+### CORRECTION to cont.23 — `D7` is 0 at the commit; "whole-pattern ticks" refuted
+
+Measured at `0x400a4834`, the instant `D7` is finished being built:
+
+```
+frame 1437   D7 = 0   *(long)0x80006628 = 0   *(long)0x80006630 = 0   masterSTEP = 0
+```
+
+A 16-step pattern at 6 ticks/step would give 96. So cont.23's reading is wrong, and with it the
+"feed the loop elapsed ticks" formulation of the one-hook design. The structural finding stands
+(the rebuild loop is the right place to intervene, and it already divides per track by that
+track's own ticks-per-step); the specific mechanism does not, and must not be built on.
+
+### CORRECTION to cont.21/23 — the rebuild loop does TWO divides per track
+
+cont.21 described `0x400a4912` as "the" computation. It is the first of two, and
+**`NEXT_STEP[t]` is written twice per iteration**:
+
+```
+0x400a4912  divsl.l D1,D0:D0     ; D1 = LEN_TBL[trackScale] = ticks per step
+0x400a4916  move.w D0w,(A0)      ; NEXT_STEP[t] = first quotient
+...
+0x400a4950  mvs.w (A0),D1        ; read that quotient back as the dividend
+0x400a4952  tst.b (0x1,A4,D0)    ; SCALE_MODE
+0x400a4966  mvs.b (0x0,A5,D0),D0 ;   set -> per-track LENGTH   (blob +0x50)
+0x400a4972  mvs.b (0x1,A6,D0),D0 ;   clear -> default LENGTH   (pattern +0x8e53)
+0x400a4976  divsl.l D0,D2:D1     ; quotient-so-far / trackLENGTH
+0x400a497a  move.w D2w,(A0)      ; NEXT_STEP[t] = REMAINDER  <-- the surviving value
+```
+
+So the loop's real output is `NEXT_STEP[t] = (D7-derived step count) mod trackLength`, a genuine
+per-track modulo against **length**, with the ticks-per-step divide only the first stage. This is
+closer to AR's commit than cont.21 realised, and it means the per-track LENGTH field (`+0x50` /
+`+0x8e53`) participates — which cont.21 had not established.
+
+With `D7 = 0` both stages yield 0, yet `NEXT_STEP` sampled 2 at the end of the run, so at least
+one further writer or a later pass is unaccounted for. Not resolved; do not assume.
+
+### TOOL LIMITATION — `GhidraDirectJump48/51` under-reports writers
+
+Re-running the `NEXT_STEP`/`PAIR` scan *after* the 1586-byte gap was decoded still reported only
+`0x400a2a2a` and `0x400a36d0`, even though the decode plainly shows `move.w D0w,(A0)` stores to
+`NEXT_STEP` at `0x400a4916` and `0x400a497a`. Cause: the scan classifies writes from Ghidra's
+*resolved* references, which exist for absolute and inferred-pointer operands but not for plain
+register-indirect `(An)` stores. **Writer counts from that tool are a lower bound, not a census.**
+This is the second distinct way that scan has under-reported (cont.21's was instruction
+coverage); both times the missing writer was the one that mattered.
+
+### Status
+
+No patch source changed. The cont.23 one-hook design is suspended pending `D7`'s real semantics.
+Solid and unaffected: the eight/nine per-track arrays and their addresses, the two sibling
+per-tick loops, `LEN_TBL` as ticks-per-step, the `DJTESTxxx` fixture characterisation, the
+working harness, and DJ-off inertness on both scale branches.

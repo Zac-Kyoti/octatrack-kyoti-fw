@@ -129,6 +129,49 @@ def main(argv):
     # *(long)0x80006628 = "pattern length in ticks", but sampling 0x80006628 from the main
     # loop reads 0 while NEXT_STEP reads 2 -- inconsistent with a static length. Capture the
     # actual register and both globals at the instant D7 is finished being built.
+    # G_ARMED is a ONE-TICK flag: dj_a sets it to -1 on tick 1 (dja_armstep) and dj_c clears
+    # it on tick 2. Sampling it from the main loop every ~166 frames (~3 ticks) will miss it
+    # essentially always -- which is exactly the mistake that produced cont.25's claim that
+    # the DJ path never armed. Watch the WRITES, and count the detour sites, instead.
+    armed_writes = []
+
+    def on_armed_write(u, access, addr, size, value, user):
+        armed_writes.append((round(rt.frame_count), addr, size, value))
+    rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_armed_write,
+                   begin=0x80006A40, end=0x80006A4B)
+
+    # The six DIRECT JUMP detour sites, from tools/build_directjump_v4.py.
+    hook_sites = {
+        "dj_abstick 0x400a3fe4": 0x400A3FE4,
+        "dj_a       0x400a4006": 0x400A4006,
+        "dj_scaleix 0x400a4220": 0x400A4220,
+        "dj_b       0x400a42fa": 0x400A42FA,
+        "dj_c       0x400a4840": 0x400A4840,
+        "dj_pertrk  0x400a4d36": 0x400A4D36,
+    }
+    hook_counts = {k: 0 for k in hook_sites}
+
+    def mkh(name):
+        def cb(u, addr, size, user):
+            hook_counts[name] += 1
+        return cb
+
+    for name, pc in hook_sites.items():
+        rt.uc.hook_add(er.eb.UC_HOOK_CODE, mkh(name), begin=pc, end=pc)
+
+    # Hook A runs every step tick but was measured taking dja_disarm every single time.
+    # Capture its five gate inputs AT ENTRY so the disarm reason is measured, not guessed:
+    #   DJ_MODE(long)==0 | ARR_ACT!=0 | CHAIN_ACT!=0 | PEND_PAT==-1 | PEND==ACT
+    ARR_ACT, CHAIN_ACT = 0x460D1AEC, 0x80006546
+    gates = []
+
+    def on_dja(u, addr, size, user):
+        rd = lambda ad, n: int.from_bytes(bytes(u.mem_read(ad, n)), "big")
+        gates.append((round(rt.frame_count), rd(DJ_MODE, 4), rd(ARR_ACT, 4),
+                      rd(CHAIN_ACT, 4), rd(PEND_PAT, 1), rd(PEND_BANK, 1),
+                      rd(ACT_PAT, 1), rd(ACT_BANK, 1)))
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_dja, begin=0x400A4006, end=0x400A4006)
+
     d7log = []
 
     def on_d7(u, addr, size, user):
@@ -206,6 +249,41 @@ def main(argv):
         print(f"  {i:2d}  {last['scale'][i]:5d} {last['armed'][i]:5d} "
               f"{last['step'][i]:4d} {last['ticks'][i]:5d} {last['cntdn'][i]:5d}  "
               f"{nx:9d}  {pr:5d}")
+
+    print("\n=== DIRECT JUMP detour sites reached ===")
+    for name in hook_sites:
+        print(f"  {name:24s} {hook_counts[name]:8d}")
+
+    print(f"\n=== writes to the patch's scratch globals 0x80006a40..4b "
+          f"({len(armed_writes)} total) ===")
+    print("  G_ARMED 0x80006a40 | G_STEP ..41 | G_PCPAT ..42 | G_ABSTICK ..46 | "
+          "G_JUST_COMMITTED ..4a")
+    for fr, ad, sz, val in armed_writes[:24]:
+        if ad == 0x80006A46:            # G_ABSTICK ticks every step; not interesting here
+            continue
+        print(f"  frame {fr:6d}  [{ad:#010x}] size={sz} <- {val & 0xFFFFFFFF:#x}")
+    nz = [w for w in armed_writes if w[1] != 0x80006A46]
+    print(f"  ({len(nz)} writes outside G_ABSTICK)")
+    if not nz:
+        print("  NONE -- the DIRECT JUMP arm/commit path did not run at all.")
+
+    print("\n=== Hook A gate inputs at entry (why it arms or disarms) ===")
+    print("   frame   DJ_MODE     ARR_ACT   CHAIN_ACT  PEND(b,p)  ACT(b,p)   verdict")
+    for fr, dj, arr, ch, pp, pb, ap, ab in gates:
+        if dj == 0:
+            why = "DISARM: DJ_MODE==0"
+        elif arr:
+            why = "DISARM: arranger active"
+        elif ch:
+            why = "DISARM: chain active"
+        elif pp == 0xFF:
+            why = "DISARM: nothing cued"
+        elif pp == ap and pb == ab:
+            why = "DISARM: cue == active"
+        else:
+            why = "ARM"
+        print(f"  {fr:6d}  {dj:#010x} {arr:#010x} {ch:#010x}   "
+              f"({pb},{pp})     ({ab},{ap})    {why}")
 
     print("\n=== D7 at formation (0x400a4834) -- settles D7's units by measurement ===")
     if not d7log:
