@@ -26652,3 +26652,78 @@ the [BANK] overlay rather than inside it.
 
 Still open, unchanged: `RELOAD BUSY`'s root cause (not reproduced in any
 harness), the ~1 s stall / stock transport stop, and the list UI.
+
+## Session 79, continued a thirty-third time — DJTEST2 lands; pattern header FULLY MAPPED; MASTER LENGTH found; Hook D confirmed wrong and fixed
+
+The user corrected my terminology twice (there is no "master tempo multiplier"; MASTER SCALE
+does affect perceived playback, dividing how many steps play before the master reset) and then
+built `DJTEST2` to spec: eight patterns, each probe varying exactly one setting. That turned
+several open questions into single-variable measurements.
+
+### Pattern header, fully mapped (measured, single-variable diffs)
+
+| offset | field | how established |
+|--------|-------|-----------------|
+| `+0x8e51` | **MASTER LENGTH** (steps before all tracks reset) | A04 vs A05 differ in exactly ONE byte: `16 -> 32` |
+| `+0x8e52` | **MASTER SCALE** (`LEN_TBL` index) — used when `SCALE_MODE = 1` | A06/A08 read 0 (2x) against `+0x8e54` = 2 |
+| `+0x8e53` | pattern LENGTH — used when `SCALE_MODE = 0` | A03 (LEN 8) reads 8 |
+| `+0x8e54` | pattern TEMPO MULTIPLIER — used when `SCALE_MODE = 0` | A02 (MULT 2x) reads 0 |
+| `+0x8e55` | `SCALE_MODE` flag | A01-A03 read 0, A04-A08 read 1 |
+
+New tool `tools/diag_pattern_diff.py` diffs two loaded pattern blobs out of emulator RAM. A04
+vs A05 produced **exactly one differing byte**, which is what made MASTER LENGTH unambiguous.
+The user's own description of MASTER SCALE (MASTER LEN 64 at 2x plays 32 steps) is arithmetically
+consistent with `LEN_TBL`: `64 * 3 ticks = 192`, and tracks at 1x consume 6 ticks/step, so 32
+steps are heard. Firmware and hardware behaviour agree exactly.
+
+### `0x80006628` is NOT the master length — settled
+
+It reads **0** at a natural boundary on A07, which contains a **7-step** track. If it held
+MASTER LENGTH (16), that track would land at `16 mod 7 = 2`; it lands at 0, and all 16 tracks
+match the model. So it is a start offset that stock leaves at zero, and **Hook H's semantics
+are correct**. This is the fixture that could distinguish the two readings, and it did.
+
+### A07 — 16/16, including both previously untested cases
+
+Patched build, armed commit, `G_ABSTICK = 26` -> `D7 = 156`:
+
+| track | LEN | MULT | tps | STEP | derivation |
+|-------|-----|------|-----|------|------------|
+| T0 | 16 | 1x | 6 | 10 | 26 mod 16 |
+| T1 | 16 | 2x | 3 | 4 | 52 mod 16 |
+| T2 | 12 | 1x | 6 | 2 | 26 mod 12 |
+| **T3** | **7** | 1x | 6 | **5** | 26 mod 7 — the coprime case |
+| **T4** | 16 | **1/2x** | **12** | **13** | 156/12 = 13 — slower than 1x |
+
+Both cases that had never been exercised now work.
+
+### A08 (MASTER SCALE 2x) — stock uses `+0x8e52`, and that exposes Hook D
+
+`D7 = 78 = 3 * 26`, i.e. stock built it from `LEN_TBL[+0x8e52] = 3`, not from `+0x8e54`. All 16
+`NEXT_STEP` values match the model.
+
+**Hook D (`dj_scaleix_fix`) was reading `+0x8e54` unconditionally** and writing that into
+`SCALE_IX`. On A08 that leaves the master wrap check believing 6 ticks/step while the pattern
+actually runs at 3 — **Session 70's original "pattern plays past its own length" symptom, still
+present inside the fix that was written to cure it.** Now reads `+0x8e52` when `SCALE_MODE` is
+set, matching stock's own D7 source exactly.
+
+This is the third hook found to carry a wrong field or wrong table reading (`dj_c` x2, Hook F,
+now Hook D). All four were invisible until a fixture existed that could separate the fields.
+
+### Tool bug, not a firmware bug
+
+A08's `PAIR` for T4 came out 6 where my model said -6. Stock's negative-correction branch
+(`0x400a4926 bge` / `0x400a4928 add.l D1,D0`) adds `tps` back when the remainder is negative,
+so the stored value is always >= 0. `diag_d7_inject.py`'s model omitted that. A08 is the first
+fixture where `D7` is not a multiple of a track's `tps`, which is what exposed it. Model fixed;
+**the firmware was right**.
+
+Build after both fixes: 983 bytes changed, 0 unexpected outside the cave, manual-trig identical.
+
+### Outstanding
+
+- Re-verify A07/A08 after the Hook D fix (running).
+- Re-run DJ-OFF gates against the 983-byte image; Hook D is unconditional, so its change can
+  affect DJ-OFF behaviour and the widened gate now compares `SCALE_IX`.
+- Overflow: still guarded, not fixed.

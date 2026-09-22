@@ -200,7 +200,14 @@ def main(argv):
         pr = int.from_bytes(st["pair"][2 * i:2 * i + 2], "big", signed=True)
         if tps and ln:
             q = int((d7 - 1 + tps) / tps)        # ColdFire divsl truncates toward zero
-            e_nx, e_pr = q % ln, d7 - q * tps
+            e_nx = q % ln
+            # 0x400a4920 computes D7 - q*tps, then 0x400a4926 `bge` / 0x400a4928
+            # `add.l D1,D0` adds tps back when that came out negative, so the stored
+            # PAIR is always >= 0. A08 (MASTER SCALE 2x + a 1/2x track) is the first
+            # fixture where D7 is not a multiple of tps, which is what exposed this.
+            e_pr = d7 - q * tps
+            if e_pr < 0:
+                e_pr += tps
         else:
             e_nx = e_pr = None
         okn = (e_nx is None) or (nx == e_nx)

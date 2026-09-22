@@ -742,8 +742,23 @@ dj_scaleix_fix:
     move.l  #0x9b340,%d2
     muls.l  %d2,%d1                    | d1 = bank * 0x9b340
     add.l   %d1,%d0
-    lea     PAT_SCALE,%a0
-    move.b  (%a0,%d0.l),%d1            | d1 = the ACTIVE pattern's own scale index, fresh
+|   Session 79 cont.33: this used to read PAT_SCALE (+0x8e54) unconditionally. Measured on
+|   the DJTEST2 fixture, which was built specifically to separate the two fields: stock's own
+|   D7 setup at 0x400a4802-0x400a4826 selects +0x8e52 (MASTER SCALE) when SCALE_MODE is set
+|   and +0x8e54 (the pattern TEMPO MULTIPLIER) only when it is clear. DJTEST2 A08 has
+|   +0x8e52 = 0 (2x) against +0x8e54 = 2 (1x), and stock built D7 = 78 = 3 * 26 from the
+|   MASTER SCALE -- so writing +0x8e54 into SCALE_IX left the master wrap check using 6
+|   ticks/step where the pattern actually runs at 3. That is Session 70's original
+|   "pattern plays past its own length" symptom, still present in the fix meant to cure it.
+    lea     PAT_SMODE,%a0
+    tst.b   (%a0,%d0.l)                | SCALE_MODE
+    beq.b   djs_uniform
+    lea     PAT_MSCALE,%a0             | per-track mode -> MASTER SCALE at +0x8e52
+    bra.b   djs_got
+djs_uniform:
+    lea     PAT_SCALE,%a0              | uniform mode  -> pattern multiplier at +0x8e54
+djs_got:
+    move.b  (%a0,%d0.l),%d1            | d1 = the scale index stock's own D7 code would use
     move.b  %d1,SCALE_IX
     movem.l (%sp),%d0-%d2/%a0
     lea     16(%sp),%sp
