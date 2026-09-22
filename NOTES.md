@@ -26550,3 +26550,105 @@ setup, not a per-track value, so it cannot be produced by editing track scales.
 - DJ-ON: 16/16 both switch directions, mixed scales and lengths.
 - Overflow: guarded, not fixed.
 - Hook D: measured inert with the feature off; its field choice remains unverified.
+## Session 80 continued (8) (2026-09-22, `wip`) — RELOAD2: the picker owns its own keymap layer
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (7)").
+
+### The redesign
+
+Every routing bug this feature has had traces to one root cause: the picker
+borrowed key slots in OTHER layers ([PTN]'s held layer, then [BANK]'s) instead
+of owning its own. "(7)" measured the concrete failure mode of that: opening the
+picker closes stock's SELECT BANK window, whose `onClose` pops the [BANK]
+overlay, so `[YES]` stops routing to us mid-gesture, and afterward `[YES]` goes
+to whatever the current UI context uses — which can shadow our detour entirely.
+
+Fix: the picker now pushes its OWN keymap layer on open and pops it on close,
+exactly like stock's own modal windows.
+
+### Layer format, measured from the real firmware (not re-derived by inference)
+
+```
+struct  +0x00 next-link (push clears; PUSH_LAYER/POP_LAYER both walk this
+              as a singly-linked list rooted at 0x460d165c)
+        +0x04 records begin
+        +0x08 second records ptr (0 = none, as the [BANK] layer has)
+        +0x10 push writes -1 here -- the struct MUST be writable, so it lives
+              in the cave, not a read-only table
+records 26 B stride: +0 code, +2 press, +6 release, +0xa hold, +0x16 delay,
+        +0x18 repeat. Loop ends on a record whose CODE BYTE IS 0xff
+        (`mvs.b (a2),d0 ; moveq #-1,d1 ; cmp.l d0,d1`) -- terminator mandatory.
+```
+
+Confirmed via `objdump` on the actual rebuild routine (`0x4003125c`): it clears
+EVERY keycode's runtime-table record before walking the (still-linked) layers,
+UNLESS that code's own "currently held" flag is set — so a layer only overrides
+the keys it lists, and the walk is correct modal-overlay semantics.
+
+### A scare that turned out to be my own test bug, not firmware
+
+First real-key run (`diag_reload2_realkey.py`, gesture = BANK press → YES press
+→ YES press → BANK release, **no release between the two YES presses**) showed
+the YES dispatch slot STUCK at our own handler even after the layer reported
+unlinked — and every subsequent `[YES]` press silently fired a full reload,
+headless (`G_MENU` never returned to 1), forever. Reported to the user as a
+confirmed regression at the time.
+
+**It was a test bug.** Pressing `[YES]` twice with no release in between is a
+gesture no physical button can produce. `objdump` of `set_key_state`
+(`0x40031734`) shows it maintains its own per-key "currently held" bookkeeping
+on press and release, and the rebuild (above) explicitly skips clearing a held
+code's slot — my synthetic gesture never gave that bookkeeping the release event
+a real tap always generates, so the slot never got the chance to reset. Fixed
+the harness to send `[YES] release` between taps (a real "tap twice" gesture is
+press-release-press-release) and the "bug" disappeared completely: three
+iterations, byte-identical, YES slot correctly reverts to the pre-existing
+handler (`0x400815d8`) every time, layer cleanly unlinked, nothing carries over.
+
+**Lesson, stated plainly because it nearly caused a bad call**: I told the user
+not to flash based on this, which was the right call given the evidence at the
+time, but the evidence itself was an artifact of an unrealistic gesture. Always
+model release events for momentary keys before trusting a "stuck" reading.
+
+### Validation (all on the ACTUAL layer redesign, post test-fix)
+
+- `diag_reload2_realkey.py`, 5 consecutive full gestures, real `set_key_state`
+  dispatch: **byte-identical every iteration** — BANK/YES/NO dispatch slots,
+  layer depth, `G_MENU`, `G_KIND`, worker firing (`rl_job+1 parse+17` each).
+  This is the exact "works once, breaks on repeat" failure class that burned
+  the previous redesign attempt; it holds here.
+- `diag_reload2_realkey.py --no-cancel` (new): the `[NO]` path runs different
+  code (`rl_no_exec`) than execute and needed its own proof, not an inference
+  from YES being clean. **PASS** — layer pops, YES slot reverts, depth settles
+  at baseline.
+- `--combo` **27/27** including 6 new push/pop-balance checks (open pushes;
+  execute pops; cancel pops; the RELOAD BUSY toast exit STILL pops even with a
+  job in flight; push is idempotent; pop is idempotent).
+- `emu_reload2_keymap.py`, `diag_bank_window.py` (incl. `--stress`), `--trk`:
+  **ALL GOOD**.
+
+### Implementation notes
+
+- `rl_push_layer` / `rl_pop_layer` are idempotent on `rl_layer_on`, so a
+  double-open can't double-push and a double-close can't double-pop.
+- The pop lives inside the SHARED `rl_yes_exec` / `rl_no_exec` close bodies, so
+  every exit — execute, cancel, and the RELOAD BUSY toast (`G_KIND` still set)
+  — goes through the same call. This is what the BUSY-exit `--combo` check
+  proves: a busy toast still releases the keys.
+- `patch_trigscale`'s cave moved `0x400d7b00` → `0x400d7bf0` (62 B, ends
+  `0x400d7c2e`, still inside `FREE_END` `0x400d7c3c`) to make room; the build
+  asserts non-overlap and the free zone, so a bad move fails loudly.
+
+### Status
+
+1485 B vs stock (blob is 1982 B / cave ceiling raised by the trigscale move).
+**Not yet flashed** — this is a mechanism replacement, and the last one that
+looked clean in isolated tests failed on repeated real-world use, so before
+recommending a flash it also needs the multi-reload gate from "(4)"/"(5)"
+re-run on this build (5+ consecutive TRK SEQ reloads via `rl_arm_trk`, not just
+the picker-open/close cycle above) and, ideally, the `[BANK]`+trig / trig-picks-
+a-bank interaction re-checked now that the picker's own layer sits alongside
+the [BANK] overlay rather than inside it.
+
+Still open, unchanged: `RELOAD BUSY`'s root cause (not reproduced in any
+harness), the ~1 s stall / stock transport stop, and the list UI.

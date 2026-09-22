@@ -181,6 +181,8 @@
 |   rather than trusting the rebuild. Restoring it to the UNDERLYING handler is
 |   also exactly what the sticky picker wants: that handler is 0x4005e4c8, which
 |   rl_yes detours and which answers an open picker after [BANK] is released.
+    .equ LAYER_PUSH,     0x40031494     | FUN_40031494(struct) -> link + rebuild
+    .equ LAYER_POP,      0x4003146c     | (struct) -> unlink + rebuild
     .equ BANK_HELD_FLAG, 0x46c7dd56     | is_key_held([BANK]) = 0x46c7d8ee + 0x2f*24
     .equ YES_DISPATCH,   0x46c7dd76     | runtime dispatch table, YES press slot
                                         | = 0x46c7d8de + 0x31*24
@@ -377,6 +379,7 @@ rby_held:
     moveq   #1,%d0
     move.b  %d0,G_MENU                 | open
     clr.b   G_SEL                      | default = item 0 (TRK SEQ) -- [YES] straight away
+    jsr     rl_push_layer              | the picker owns its keys from here on
 |   Suppress what the [BANK] RELEASE would otherwise do. Release (0x4007b3e0)
 |   reads: if 0x460e73c6 == 2 -> 0x40056a70 ; else if 0x460e73c2 == 0 ->
 |   0x40056a70 ; else set 0x460e73bc = 1 and -> 0x40031200. Clearing
@@ -472,6 +475,7 @@ rl_no_exec:
     lea     -16(%sp),%sp
     movem.l %d0-%d1/%a0-%a1,(%sp)
     jsr     CLOSE_CB
+    jsr     rl_pop_layer               | give the keys back
     movem.l (%sp),%d0-%d1/%a0-%a1
     lea     16(%sp),%sp
     rts
@@ -506,6 +510,8 @@ rl_yes_exec:
     lea     -16(%sp),%sp
     movem.l %d0-%d1/%a0-%a1,(%sp)
     jsr     CLOSE_CB                   | dismiss the 0x460d1e64 popup
+    jsr     rl_pop_layer               | give the keys back -- this body is on
+                                       | EVERY exit: execute, and the BUSY toast
     movem.l (%sp),%d0-%d1/%a0-%a1
     lea     16(%sp),%sp
 
@@ -646,6 +652,112 @@ rab_stock:
     move.l  %d2,-(%sp)                 | displaced original
     movea.l %sp@(8),%a0                | displaced original
     jmp     ARROW_B_RESUME
+
+| ============ the picker's OWN keymap layer (Session 80 continued (8)) ============
+| WHY: until now the picker borrowed slots in OTHER layers -- the [PTN] and
+| [BANK] overlay records -- which is the root of every routing bug this feature
+| has had. Measured on the real key path: opening the picker closes stock's
+| SELECT BANK window, whose onClose 0x4007b408 POPS the [BANK] overlay, so [YES]
+| stopped routing to us mid-gesture; and after that pop [YES] goes to whatever
+| the current UI context uses (0x400815d8 in the emulator -- a record in yet
+| another layer), which SHADOWS our rl_yes detour at 0x4005e4c8 entirely. That
+| is what "works most of the time" really meant: it worked only when the active
+| YES handler happened to be the one we detour.
+|
+| A modal window must own its key routing, which is exactly what stock does.
+| So the picker now pushes its OWN layer and pops it on close.
+|
+| Layer format, MEASURED (do not re-derive):
+|   struct  +0x00 next-link (push clears it)   +0x04 records begin
+|           +0x08 second records ptr (0 = none, as the [BANK] layer has)
+|           +0x10 scratch -- FUN_40031494 writes -1 there, so the struct MUST
+|                 live in writable memory (our cave is)
+|   records 26 B stride: +0 code, +1 pad, +2 press, +6 release, +0xa hold,
+|           +0x12 a further slot field, +0x16 hold delay, +0x18 repeat.
+|   The rebuild CLEARS the whole dispatch table then walks layers head->tail, so
+|   a layer only overrides the keys it lists -- correct modal-overlay semantics.
+|   The record loop ends on a record whose code byte is 0xff (`mvs.b (a2),d0 ;
+|   moveq #-1,d1 ; cmp.l d0,d1`), so THE TERMINATOR IS MANDATORY.
+|
+| ** A push without a matching pop wedges the keyboard. ** rl_layer_on makes the
+| pair idempotent, push happens only where the picker opens, and the pop sits in
+| the shared rl_yes_exec / rl_no_exec close bodies so EVERY exit path -- execute,
+| cancel, and the RELOAD BUSY toast -- goes through it.
+
+    .global rl_push_layer
+rl_push_layer:
+    tst.b   rl_layer_on
+    bne.b   rpl_done
+    moveq   #1,%d0
+    move.b  %d0,rl_layer_on
+    pea     rl_layer
+    jsr     LAYER_PUSH
+    addq.l  #4,%sp
+rpl_done:
+    rts
+
+    .global rl_pop_layer
+rl_pop_layer:
+    tst.b   rl_layer_on
+    beq.b   rpo_done
+    clr.b   rl_layer_on
+    pea     rl_layer
+    jsr     LAYER_POP
+    addq.l  #4,%sp
+rpo_done:
+    rts
+
+| Our layer's own handlers. Each record names one keycode, so no code test is
+| needed -- only the event, since press/release/hold all reach the same handler.
+rl_lay_yes:
+    moveq   #1,%d0
+    cmp.l   8(%sp),%d0
+    bne.b   rly_l_out
+    bsr.w   rl_yes_exec
+rly_l_out:
+    rts
+
+rl_lay_no:
+    moveq   #1,%d0
+    cmp.l   8(%sp),%d0
+    bne.b   rln_l_out
+    bsr.w   rl_no_exec
+rln_l_out:
+    rts
+
+rl_lay_up:                             | previous item (wrapping)
+    moveq   #1,%d0
+    cmp.l   8(%sp),%d0
+    bne.b   rlu_l_out
+    moveq   #0,%d0
+    move.b  G_SEL,%d0
+    subq.l  #1,%d0
+    bpl.b   rlu_set
+    moveq   #N_ITEMS-1,%d0
+rlu_set:
+    move.b  %d0,G_SEL
+    jsr     rl_draw
+rlu_l_out:
+    rts
+
+rl_lay_dn:                             | next item (wrapping)
+    moveq   #1,%d0
+    cmp.l   8(%sp),%d0
+    bne.b   rld_l_out
+    moveq   #0,%d0
+    move.b  G_SEL,%d0
+    addq.l  #1,%d0
+    cmpi.l  #N_ITEMS,%d0
+    bcs.b   rld_set
+    moveq   #0,%d0
+rld_set:
+    move.b  %d0,G_SEL
+    jsr     rl_draw
+rld_l_out:
+    rts
+
+rl_lay_swallow:                        | LEFT/RIGHT: never move the selection,
+    rts                                | and never reach stock's arrow nav
 
 | ---- rl_draw: (re)show the popup for G_SEL ----
 | clobbers only d0/a0 (POPUP2 preserves d2-d7/a2-a6 per ABI).
@@ -1049,7 +1161,47 @@ rlo_zero:
 rl_kind:
     .space 4
 rl_yes_save:
-    .space 4                           | YES dispatch slot as it was before the
+    .space 4
+|   The picker's own keymap layer (see the block by rl_push_layer). The struct
+|   is WRITTEN by the firmware (push clears +0 and puts -1 at +0x10), so it lives
+|   here in the cave, not in a read-only table.
+    .align 2
+rl_layer:
+    .long   0                          | +0x00 next-link (push clears)
+    .long   rl_layer_recs              | +0x04 records begin
+    .long   0                          | +0x08 second records ptr -- none
+    .long   0                          | +0x0c
+    .long   0                          | +0x10 push writes -1 here
+    .long   0                          | +0x14 (push/pop/rebuild touch nothing
+                                       |        above +0x10 for this layer shape)
+rl_layer_on:
+    .space 4                           | 1 = our layer is linked (push/pop guard)
+
+|   26-byte records, ascending by keycode. Only these keys are overridden; the
+|   rebuild leaves every other slot to the layers underneath.
+    .macro  RLREC code, press
+    .byte   \code, 0
+    .long   \press
+    .long   0                          | release -> swallow
+    .long   0                          | hold    -> swallow
+    .long   0
+    .long   0
+    .word   0                          | hold delay
+    .word   0                          | repeat interval
+    .endm
+
+    .align 2
+rl_layer_recs:
+    RLREC   0x20, rl_lay_dn            | DOWN  -> next
+    RLREC   0x21, rl_lay_swallow       | (L/R pair with 0x34)
+    RLREC   0x31, rl_lay_yes           | YES   -> execute
+    RLREC   0x32, rl_lay_no            | NO    -> cancel
+    RLREC   0x33, rl_lay_up            | UP    -> previous
+    RLREC   0x34, rl_lay_swallow       | (L/R pair with 0x21)
+    .byte   0xff, 0                    | TERMINATOR -- mandatory. The loop reads
+                                       | only the code byte before exiting, so no
+                                       | full 26-byte record is needed here.
+                           | YES dispatch slot as it was before the
                                         | [BANK] overlay push; 0 = nothing saved
     .ifdef RL_DONE
 rl_own:

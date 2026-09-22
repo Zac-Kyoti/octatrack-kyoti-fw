@@ -74,6 +74,7 @@ POPUP = 0x460E5CD0
 POPUP_HANDLE = 0x460D1E64
 PARSEPAT = 0x4008CEBC
 BANK_LAYER = 0x400CFF14       # the [BANK]-held overlay layer struct
+OUR_LAYER = None              # our picker's own layer struct (resolved at runtime)
 NO_SLOT = DISPATCH_BASE + 0x32 * 24
 BANK_LAYER_NO = 0x4007B25C    # that layer's own NO handler -- knows nothing of our picker
 
@@ -90,21 +91,28 @@ def layer_walk(uc):
     and those have completely different fixes."""
     n = u32(uc, LAYER_HEAD)
     d, bank = 0, False
+    ours = False
     for _ in range(64):
         if n == 0 or n < 0x40000000:
             break
         d += 1
         if n == BANK_LAYER:
             bank = True
+        if OUR_LAYER is not None and n == OUR_LAYER:
+            ours = True
         try:
             n = u32(uc, n)
         except Exception:
             break
-    return d, bank
+    return d, bank, ours
 
 
 def layer_depth(uc):
     return layer_walk(uc)[0]
+
+
+def ours_linked(uc):
+    return layer_walk(uc)[2]
 
 
 def main():
@@ -112,6 +120,9 @@ def main():
     erl.OUR_IMAGE = erl.RELOAD_IMAGE
     rl_job = erl2._sym("rl_job")
     rl_bank_yes = erl2._sym("rl_bank_yes")
+    global OUR_LAYER
+    OUR_LAYER = erl2._sym("rl_layer")
+    print(f"our picker layer struct = 0x{OUR_LAYER:08x}")
 
     rt = erl.boot_and_load()
     T, P = 3, 0
@@ -161,10 +172,22 @@ def main():
     for i in range(1, iters + 1):
         print(f"--- iteration {i} ---")
         before = dict(counts)
+        # Session 80 continued (8): a real "tap YES twice while holding BANK"
+        # gesture is press-RELEASE-press-RELEASE, not press-press. The first
+        # version of this harness sent [YES] press, [YES] press with NO release
+        # between them -- a gesture no physical key can produce -- and that is
+        # suspected to be why the dispatch table's YES slot looked "stuck": the
+        # firmware's own held-key bookkeeping (set_key_state links/unlinks each
+        # code's runtime record on a per-key "held" list on press/release; see
+        # NOTES.md for the disassembly) never got the release that would let it
+        # settle between taps. Test the REAL gesture before concluding anything
+        # about firmware behaviour.
         steps = [
             (BANK_CODE, PRESS, "[BANK] press"),
             (YES_CODE, PRESS, "[YES] press (open picker)"),
+            (YES_CODE, RELEASE, "[YES] release"),
             (YES_CODE, PRESS, "[YES] press (execute)"),
+            (YES_CODE, RELEASE, "[YES] release"),
             (BANK_CODE, RELEASE, "[BANK] release"),
         ]
         errs = []
@@ -172,10 +195,11 @@ def main():
             e = key(code, ev, label)
             gm = rt.uc.mem_read(erl.G_MENU_A, 1)[0]
             gk = rt.uc.mem_read(erl.G_KIND, 1)[0]
-            dep, bank_linked = layer_walk(rt.uc)
+            dep, bank_linked, mine = layer_walk(rt.uc)
             print(f"   {label:<28} G_MENU={gm} G_KIND={gk} "
                   f"YES=0x{u32(rt.uc, YES_SLOT):08x} NO=0x{u32(rt.uc, NO_SLOT):08x} "
-                  f"depth={dep} BANKlayer={'LINKED' if bank_linked else 'popped'}"
+                  f"depth={dep} BANK={'L' if bank_linked else '-'} "
+                  f"OURlayer={'LINKED' if mine else 'unlinked'}"
                   + (f"   !! {e}" if e else ""))
             if e:
                 errs.append(e)
@@ -216,7 +240,10 @@ def main():
         # feature feel erratic. Test it the only way that settles it: press
         # [YES] with no [BANK] held and see whether the picker opens.
         ys, ns = u32(rt.uc, YES_SLOT), u32(rt.uc, NO_SLOT)
-        dep, bank_linked = layer_walk(rt.uc)
+        dep, bank_linked, mine = layer_walk(rt.uc)
+        if mine:
+            print("   ** OUR LAYER IS STILL LINKED AFTER THE GESTURE -- a push "
+                  "without a matching pop. This WEDGES THE KEYBOARD on hardware. **")
         print(f"   after release: YES=0x{ys:08x} NO=0x{ns:08x} depth={dep} "
               f"BANKlayer={'LINKED -- STRANDED' if bank_linked else 'popped'}")
         if bank_linked:
@@ -244,5 +271,66 @@ def main():
                       "(some other gate refused), so this is not the bug.")
 
 
+def test_no_cancel():
+    """Session 80 continued (8): the [NO] cancel path through REAL dispatch.
+    The execute path is covered by main()'s iterations; this covers the other
+    exit rl_yes_exec's shared pop-layer logic does NOT run through -- rl_no_exec
+    has its own call to rl_pop_layer, a separate code path that needs its own
+    proof, not an inference from the YES path being clean."""
+    erl.OUR_IMAGE = erl.RELOAD_IMAGE
+    rl_job = erl2._sym("rl_job")
+    global OUR_LAYER
+    OUR_LAYER = erl2._sym("rl_layer")
+
+    rt = erl.boot_and_load()
+    T, P = 3, 0
+    curbank = rt.uc.mem_read(er.CUR_BANK, 1)[0]
+    rt.seq_select_live(curbank, P)
+    rt.frame = True
+    rt.next_frame = rt.sample + er.FRAME_PERIOD
+    rt.exact_clock()
+    rt.internal_clock()
+    rt.press_play_live()
+    rt.run(ms=250)
+
+    rt.uc.mem_write(erl.TOAST_FN, b"\x4e\x75")
+    rt.uc.ctl_flush_tb()
+    rt.uc.mem_write(erl.TRANSPORT, struct.pack(">I", 1))
+    rt.uc.mem_write(0x800065BE, bytes([P]))
+    rt.uc.mem_write(erl.CUR_TRACK_G, bytes([T]))
+    rt.uc.mem_write(erl.MIDI_MODE_G, b"\x00")
+
+    base_depth = layer_depth(rt.uc)
+    print(f"baseline: depth={base_depth}\n")
+
+    def key(code, event, label):
+        rt.run(until=lambda r: r.pc == er.MAIN_SPIN)
+        rt.call_as_main(SET_KEY_STATE, args=(code, event), budget=2_000_000)
+        dep, bank_linked, mine = layer_walk(rt.uc)
+        print(f"   {label:<24} G_MENU={rt.uc.mem_read(erl.G_MENU_A,1)[0]} "
+              f"YES=0x{u32(rt.uc, YES_SLOT):08x} depth={dep} "
+              f"OURlayer={'LINKED' if mine else 'unlinked'}")
+        return dep, mine
+
+    print("--- [NO] cancel gesture: BANK press -> YES (open) -> release -> NO -> release -> BANK release ---")
+    key(BANK_CODE, PRESS, "[BANK] press")
+    key(YES_CODE, PRESS, "[YES] press (open)")
+    key(YES_CODE, RELEASE, "[YES] release")
+    dep, mine = key(NO_CODE, PRESS, "[NO] press (cancel)")
+    key(NO_CODE, RELEASE, "[NO] release")
+    dep, mine = key(BANK_CODE, RELEASE, "[BANK] release")
+
+    if mine:
+        print("\n** FAIL: our layer is still linked after [NO] cancel. Push/pop "
+              "imbalance on the cancel path. **")
+    elif dep != base_depth:
+        print(f"\n** FAIL: depth {dep} != baseline {base_depth} after cancel. **")
+    else:
+        print("\nPASS: [NO] cancel pops our layer cleanly; depth back to baseline.")
+
+
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == "--no-cancel":
+        test_no_cancel()
+    else:
+        main()

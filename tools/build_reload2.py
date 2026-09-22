@@ -135,7 +135,11 @@ VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_KYOTI"
 
 # (source, load addr, defsym, [(detour site, symbol, expected bytes, len, kind)])
 PATCHES = [
-    ("patch_trigscale", 0x400d7b00, None,
+    # Session 80 continued (8): moved 0x400d7b00 -> 0x400d7bf0 (62 B, ends
+    # 0x400d7c2e, still inside FREE_END 0x400d7c3c) so patch_reload2 has room for
+    # the picker's own keymap layer. The build asserts non-overlap and the free
+    # zone, so a bad move fails loudly rather than silently corrupting.
+    ("patch_trigscale", 0x400d7bf0, None,
      [(0x4009b6f2, "cave", "203c0000091a", 18, "jmp")]),
     ("patch_reload2", 0x400d7400, None,
      # Session 80 continued (2): the rl_ptn detour @0x4005a044 is GONE -- the entry

@@ -767,6 +767,61 @@ def cmd_combo(rt):
               f"BANK+YES release does nothing: end={end} G_MENU={g(G_MENU_A)} "
               f"popup2={POPUP2_FN in calls}")
 
+        # Session 80 continued (8): the picker now pushes its OWN keymap layer,
+        # and a push without a matching pop WEDGES THE KEYBOARD. Assert the
+        # flag discipline across EVERY exit path. (The real push/pop are
+        # firmware calls stubbed by this harness, so this checks the pairing
+        # logic; diag_reload2_realkey.py proves the real link/unlink.)
+        try:
+            LAYER_ON = _sym("rl_layer_on")
+            rl_yes_exec_sym = _sym("rl_yes_exec")
+            rl_no_exec_sym = _sym("rl_no_exec")
+            rl_push_layer_sym = _sym("rl_push_layer")
+            rl_pop_layer_sym = _sym("rl_pop_layer")
+        except KeyError:
+            LAYER_ON = None
+        if LAYER_ON is not None:
+            def layer_on():
+                return int.from_bytes(rt.uc.mem_read(LAYER_ON, 1), "big")
+
+            reset_gates(menu=0)
+            rt.uc.mem_write(LAYER_ON, b"\x00")
+            _run_cave_fn(rt, rl_bank_yes, 0x31, 1, [])
+            check(g(G_MENU_A) == 1 and layer_on() == 1,
+                  f"open pushes our layer: G_MENU={g(G_MENU_A)} layer_on={layer_on()}")
+
+            # exit 1: [YES] executes
+            rt.uc.mem_write(G_KIND_A, b"\x00")
+            _run_cave_fn(rt, rl_yes_exec_sym, 0x31, 1, [])
+            check(layer_on() == 0, f"execute pops our layer: layer_on={layer_on()}")
+
+            # exit 2: [NO] cancels
+            reset_gates(menu=0)
+            rt.uc.mem_write(LAYER_ON, b"\x00")
+            _run_cave_fn(rt, rl_bank_yes, 0x31, 1, [])
+            _run_cave_fn(rt, rl_no_exec_sym, 0x32, 1, [])
+            check(layer_on() == 0, f"cancel pops our layer: layer_on={layer_on()}")
+
+            # exit 3: the RELOAD BUSY toast (G_KIND stuck) must still pop
+            reset_gates(menu=0)
+            rt.uc.mem_write(LAYER_ON, b"\x00")
+            _run_cave_fn(rt, rl_bank_yes, 0x31, 1, [])
+            rt.uc.mem_write(G_KIND_A, b"\x03")          # a job still in flight
+            _run_cave_fn(rt, rl_yes_exec_sym, 0x31, 1, [])
+            check(layer_on() == 0 and g(G_KIND_A) == 3,
+                  f"BUSY exit still pops our layer: layer_on={layer_on()} "
+                  f"G_KIND={g(G_KIND_A)}")
+
+            # double open must not double-push
+            reset_gates(menu=0)
+            rt.uc.mem_write(LAYER_ON, b"\x00")
+            _run_cave_fn(rt, rl_bank_yes, 0x31, 1, [])
+            _run_cave_fn(rt, rl_push_layer_sym, 0, 0, [])
+            check(layer_on() == 1, f"push is idempotent: layer_on={layer_on()}")
+            _run_cave_fn(rt, rl_pop_layer_sym, 0, 0, [])
+            _run_cave_fn(rt, rl_pop_layer_sym, 0, 0, [])
+            check(layer_on() == 0, f"pop is idempotent: layer_on={layer_on()}")
+
         # Session 80 continued (6): [BANK] NOT held -> rl_bank_yes must be
         # TRANSPARENT. Its poke into the [BANK] layer's YES record outlives the
         # layer (measured on the real dispatcher: the pop restores the NO slot
