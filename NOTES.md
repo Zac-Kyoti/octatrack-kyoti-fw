@@ -26082,3 +26082,67 @@ Verification step complete and positive. The one-hook design is now measured rat
 inferred. Remaining before a build: explain the patched-image `0/16`, then implement
 (`dj_c` sets `D7 = resumeStep * LEN_TBL[masterScale]`), then delete hooks D/E/F, then prove
 dynamically on both scale branches before any flash.
+
+## Session 79, continued a twenty-eighth time — DIRECT JUMP WORKS IN THE EMULATOR: 16/16 per-track, including a 2x track and a 12-step track
+
+First time the feature has produced a correct per-track result. Two changes, both small.
+
+### Hook H @ `0x400a47f6` (new) -- seed stock's own rebuild instead of repairing after it
+
+Replaces `lea (0x400eb034).l,%a0` (6 B, `41f9400eb034`). If `G_ARMED`, writes
+`0x80006628 = G_ABSTICK` and falls through to the displaced `lea`. Site chosen because
+`0x80006628` is READ at `0x400a4812`/`0x400a4826` to build `D7`, and this is the last 6-byte
+instruction on the commit path before both. `D0` (the pattern-blob offset, indexed by the very
+next instruction at `0x400a4802`) is preserved; only `D1` is touched, saved and restored.
+
+`G_ABSTICK`, not `G_STEP` -- per Hook C's own Session 70 note, once `STEP` has wrapped against
+the outgoing length the elapsed information is gone and no later modulo recovers it.
+
+### `dj_c` -- TWO bugs found and fixed
+
+**1. Wrong modulus.** It computed `d1 = LEN_TBL[scaleIdx]` and called it `newLen`. cont.20
+measured `LEN_TBL` as a **ticks-per-step** table, not a length table. So the resume step was
+`absoluteTicks mod 6` -- a number in 0..5, unrelated to any musical position. Measured:
+`G_ABSTICK = 26` gave `STEP = 2`. Now reads the pattern's real LENGTH field
+(`PAT_LEN 0x400eb033` = pattern `+0x8e53`).
+
+**This is cont.20's Correction 1 having been silently baked into the patch all along.** The
+table was misread, the misreading propagated into `dj_c`, and nothing caught it because no test
+ever checked a per-track position.
+
+**2. `D7` override.** `dj_c` set `D7 = resumeStep * LEN_TBL[scale]` at `0x400a4840` -- i.e.
+*after* stock builds `D7` at `0x400a4812`/`0x400a4826` and *before* the rebuild loop reads it at
+`0x400a4884`. It silently replaced the correct absolute offset with a small wrong one on every
+armed commit. Measured with both present: `D7 = 156` at `0x400a4834`, `12` by the time the loop
+ran. Removed; Hook H owns `D7` now.
+
+That also explains cont.27's unexplained `0/16` on the patched image: every value there was
+consistent with `D7 = 12`, so tracks 1 and 2 "matching" was coincidence.
+
+### Result -- patched firmware, armed commit, DJTESTxxx pattern 1 -> 0 (`SCALE_MODE = 1`)
+
+`G_ABSTICK = 26` steps, `0x80006628 = 26`, `D7 = 156` ticks. **16/16 tracks match the model:**
+
+| track | SCALE | LEN | tps | STEP | derivation |
+|-------|-------|-----|-----|------|------------|
+| 0, 3-15 | 2 | 16 | 6 | **10** | 156/6 = 26 steps, 26 mod 16 |
+| 1 | **0 (2x)** | 16 | **3** | **4** | 156/3 = **52** steps, 52 mod 16 |
+| 2 | 2 | **12** | 6 | **2** | 26 mod 12 |
+
+Exactly the user's stated model: every pattern behaves as if it had been playing silently the
+whole time at its own length. The 2x track has genuinely advanced 52 of its own steps; the
+12-step track wrapped against 12. Coherent across differing scales AND differing lengths, which
+is the case this thread has never once got right.
+
+Build: 904 bytes changed, 0 unexpected outside the cave, manual-trig bytes identical, all
+guards passed.
+
+### NOT yet done -- do not flash on this entry alone
+
+- DJ-OFF regression gate (`diff_stock_vs_patch.py`) has not been re-run against this build, on
+  either scale branch. Required before any flash.
+- Hooks D/E/F are still present and still doing per-track repairs that should now be redundant
+  or harmful. They have not been removed or re-justified. `dj_pertrack_fix` in particular writes
+  the same arrays the rebuild loop now sets correctly.
+- `D7 = tps * G_ABSTICK` is a 32-bit `muls.l`; overflow past ~2^31/tps step-ticks is unverified.
+- Only one switch direction (1 -> 0) and one bank tested.

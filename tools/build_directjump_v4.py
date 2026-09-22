@@ -126,6 +126,11 @@ PATCHES = [
       (0x400a4220, "dj_scaleix_fix", "13c28000663d", 6, "jsr"),
       (0x400a3fe4, "dj_abstick", "13c0800065b6", 6, "jsr"),
       (0x400a4d36, "dj_pertrack_fix", "4ab946107568", 6, "jsr"),
+      # Session 79 cont.28 -- Hook H: seed stock's OWN per-track rebuild loop
+      # (0x400a4884) with the absolute position instead of 0, by writing
+      # 0x80006628 before D7 is built from it at 0x400a4812/0x400a4826. Model
+      # measured 16/16 in tools/diag_d7_inject.py (NOTES.md Session 79 cont.27).
+      (0x400a47f6, "dj_d7", "41f9400eb034", 6, "jsr"),
       (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),
 ]
 
@@ -246,12 +251,14 @@ def main():
         SCALEIX_FIX_SITE = 0x400a4220
         ABSTICK_SITE = 0x400a3fe4
         PERTRACK_FIX_SITE = 0x400a4d36
+        D7_SEED_SITE = 0x400a47f6
         want = (v3_touched - set(range(o(STOCK_YES_HANDLER), o(STOCK_YES_HANDLER) + 8))) \
             | {i for i in range(ro + 2, ro + 6) if img[i] != stock[i]} \
             | {i for i in range(o(PTN_LAYER_REL), o(PTN_LAYER_REL) + 6) if img[i] != stock[i]} \
             | {i for i in range(o(SCALEIX_FIX_SITE), o(SCALEIX_FIX_SITE) + 6) if img[i] != stock[i]} \
             | {i for i in range(o(ABSTICK_SITE), o(ABSTICK_SITE) + 6) if img[i] != stock[i]} \
-            | {i for i in range(o(PERTRACK_FIX_SITE), o(PERTRACK_FIX_SITE) + 6) if img[i] != stock[i]}
+            | {i for i in range(o(PERTRACK_FIX_SITE), o(PERTRACK_FIX_SITE) + 6) if img[i] != stock[i]} \
+            | {i for i in range(o(D7_SEED_SITE), o(D7_SEED_SITE) + 6) if img[i] != stock[i]}
         stray = [i for i in (v4_touched ^ want) if i not in cave]
         print(f"  vs mainos_directjump_v3.bin: v4 touches {len(v4_touched)} vs v3 {len(v3_touched)}; "
               f"{len(stray)} unexpected outside the cave")
