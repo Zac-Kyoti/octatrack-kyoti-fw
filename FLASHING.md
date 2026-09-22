@@ -486,7 +486,7 @@ PERSONALIZE entry.
 > patterns both flip 0→1, an empty pattern stays 0 (no false positive), normal
 > trig patterns unaffected. `NOTES.md` "Session 48".
 
-### 4.9  Part params carry over after a pattern→Part change  (`build_partreapply.py` — flashed; report #1's fix does NOT address the real bug; see below)
+### 4.9  Part params carry over after a pattern→Part change  (`build_partreapply.py` — report #1 ROOT-CAUSED AND FIXED in emu, NOT yet flashed; see below)
 
 Was scoped from three Elektronauts reports for a pattern change that also
 switches to a different Part: (1) a track that was **PICKUP** on the old Part
@@ -503,32 +503,47 @@ tweak. Version stays `1.40C` — no PERSONALIZE entry, always on.
   or the patched build. Treat those two as **unconfirmed** — the emulator
   evidence for them (below) proves a code-level mechanism exists, not that
   it's what real users actually hit.
-- **Report #1 reproduces, but the fix's mechanism does not address it.**
+- **Report #1 reproduces on stock, and as of 2026-09-22 it is ROOT-CAUSED
+  and FIXED in the emulator — but that fix has NOT been flashed yet.**
   Precise repro: track 1 = **PICKUP** on Part A (silent), **FLEX** + a
   different sample on Part B. Pattern-A → pattern-B: plays the *correct*
   FLEX sample. Back to pattern-A: fine. Pattern-A → pattern-B **again**:
   **wrong** — track 1 now plays Part A's old PICKUP content under the FLEX
-  machine. This good→good→bug pattern is **identical on stock and on this
-  patched build** — the kill-bit / slot-mirror mechanism this fix adds does
-  not change the outcome either way. The real cause is very likely resolved
-  DSP-side at the moment of trigger, not in the ColdFire Part-change handler
-  this fix detours. **Root cause is still open** — see `NOTES.md` "Session
-  50" for the full investigation (including a `emu_partswitch.py --repeat`
-  round-trip probe that ruled out the kill-bit/mirror/voice-struct-header
-  going stale as the explanation).
+  machine, and stays wrong on every later pass (a one-way latch).
+  Root cause: the voice dispatch reads the sample **slot** it hands the
+  resolver from a per-track pre-image at `0x8000082f + track*0x48`, byte 0.
+  Stock seeds that byte from the Part only when a track **enters** PICKUP
+  (`FUN_40001f18`, called from `FUN_400972fc`) and **never when it leaves**,
+  so the PICKUP slot `128+track` survives into the new FLEX machine and the
+  resolver binds the PICKUP sample faithfully. Pass 1 is clean only because
+  the field is still 0; the return to PICKUP sets it, and nothing ever
+  clears it — hence the latch. FLEX is affected and STATIC is not because
+  FLEX and PICKUP share one arena and one table, differing only in slot.
+  **The 2026-09-13 flashed build did not fix this**: stock's own
+  entering-PICKUP arm does the kill bit *and* the re-seed together
+  (`0x400973b4`-`0x400973e0`), and that build replicated only the kill bit.
+  The current source adds the missing re-seed. Full write-up: `NOTES.md`
+  "Session 81".
 
-The build stays safe to run — it's behaviorally identical to stock for the
-case that matters, and the recorder-cache-refresh / scene-morph-retrigger
-pieces are orthogonal to this finding — but don't expect it to fix the
-PICKUP→FLEX symptom on a repeated pattern switch.
+**The build on the unit right now (flashed 2026-09-13) predates the fix** and
+is behaviorally identical to stock for report #1 — don't expect the version
+you may already have flashed to fix the PICKUP→FLEX symptom. Rebuild from
+the current source to get it.
 
 1. Set up 2 patterns linked to 2 different Parts. Track 1: Part A = **PICKUP**
    (not currently playing), Part B = **FLEX** with a sample loaded, STARTS
    SILENT off.
 2. Switch pattern A → B → A → B again (a 4-step round trip, not a single
    switch) and trig track 1 after each arrival at B.
-   - Both stock and this build: the **first** A→B is correct; the **second**
-     A→B plays Part A's old PICKUP content instead of Part B's FLEX sample.
+   - Stock and the 2026-09-13 build: the **first** A→B is correct; the
+     **second** A→B plays Part A's old PICKUP content instead of Part B's
+     FLEX sample, and so does every pass after it.
+   - **A build from the current source is expected to play Part B's FLEX
+     sample on every pass, including the second and later.** This is the
+     prediction to test — it is emulator-validated only (the emulator cannot
+     render this track's audio), so treat the hardware run as the real check.
+     If the second pass is still wrong, report it as a FAILED prediction
+     rather than assuming the fix partially worked.
 3. Reports #2/#3: try the recorder SRC/RLEN and REC SETUP scenarios from the
    original write-up, but don't assume a discrepancy is present — it wasn't
    reproducible in this session's testing.

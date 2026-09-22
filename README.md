@@ -323,13 +323,24 @@ from an absent one. The LED is already wrong for that case today, patched or not
 Three Elektronauts reports, one family: a pattern change that links a different
 Part runs only a partial stock re-apply, so stale Part-2 state can leak into the
 newly-linked Part. `tools/patch_partreapply.s`, `python3 tools/build_partreapply.py`
-→ `1.40C` (stock-transparent). Flashed 2026-09-13: the recorder-cache and
-scene-morph pieces are behaviorally safe, though reports #2/#3 (recorder, REC
-SETUP) could not be reliably reproduced on stock and are treated as unconfirmed.
-**The originally reported #1 bug — a FLEX track stuck playing an old PICKUP
-loop — is NOT fixed**: it reproduces identically on stock and patched on a
-repeated pattern switch. Root cause still open. Write-up: [`NOTES.md`](NOTES.md)
-"Session 49" + "Session 50".
+→ `1.40C` (stock-transparent).
+
+**Report #1 (a FLEX track stuck playing an old PICKUP loop) is now root-caused and
+fixed in the emulator — awaiting a hardware test.** The voice dispatch reads the
+sample slot it hands the resolver from a per-track pre-image (`0x8000082f +
+track*0x48`, byte 0). Stock seeds that byte from the Part only when a track *enters*
+PICKUP and never when it *leaves*, so the PICKUP slot (`128+track`) survives into the
+new FLEX machine and the resolver faithfully binds the PICKUP sample. That also
+explains the one-way latch the hardware showed (first switch clean, every later one
+broken) and why FLEX is affected while STATIC is not — FLEX and PICKUP share one
+arena and one table, differing only in slot number. Stock's own entering-PICKUP arm
+does the kill bit *and* a re-seed call together; the 2026-09-13 build replicated only
+the kill bit, which is why it changed nothing. The fix adds the missing re-seed.
+
+Reports #2/#3 (recorder, REC SETUP) could not be reliably reproduced on stock and
+are still treated as unconfirmed; the recorder-cache and scene-morph pieces were
+flashed 2026-09-13 and are behaviorally safe. Write-up: [`NOTES.md`](NOTES.md)
+"Session 49", "Session 50", "Session 81".
 
 ### Hardware-test status — read before you flash
 
@@ -338,7 +349,7 @@ repeated pattern switch. Root cause still open. Write-up: [`NOTES.md`](NOTES.md)
 | Bug 1 manual-trig fix | all | **confirmed** — flashed 2026-08-28, stall gone, no regression |
 | Bug 2 p-lock-only pattern shows empty | `build_pattern_led.py` | **confirmed** — flashed 2026-09-13, grid LED lights correctly, no regression |
 | Part-change carryover — recorder cache / scene-morph pieces | `build_partreapply.py` | flashed 2026-09-13, behaviorally safe; reports #2/#3 (recorder, REC SETUP) could not be reliably reproduced on stock, treat as unconfirmed |
-| ↳ report #1 (PICKUP→FLEX stuck loop) | `build_partreapply.py` | **fix does not address the real bug** — reproduces identically on stock and patched on a repeated pattern switch (good → good → bug); root cause still open, see `NOTES.md` "Session 50" |
+| ↳ report #1 (PICKUP→FLEX stuck loop) | `build_partreapply.py` | **root-caused and fixed, emulator-validated, NOT yet flashed** — stale slot in the per-track pre-image (`0x8000082f + track*0x48`); stock re-seeds it entering PICKUP but never leaving. Stock/patched A/B clean in emu; the 2026-09-13 build did NOT fix it (kill bit copied, re-seed omitted). See `NOTES.md` "Session 81" |
 | **QUANTIZE LIVE REC** front-panel toggle | `build_qlrec.py` | original design hung the unit 2026-09-13; rewrite (periodic `dur>0` re-arm) **HW-confirmed**, no hang; double-tap timing, toast fade/instant-close, and label polarity **all HW-confirmed correct**; 2 cosmetic issues (textless-box flash, PERSONALIZE row not live-redrawing) parked, not chased further |
 | **MUTE MODE** — all four modes (`OT` / `OTFX` / `OTFX-T` / `DT-T`), menu, SOLO handling | `build_mutemode_dt.py` | **confirmed, final** — flashed and hardware-tested 2026-09-21, MKI; all four modes and the derived menu index check out |
 | ↳ the `'ANDY'`-shadow persistence (survives power cycle) | `build_mutemode_dt.py` | **confirmed** — one persisted word, defaults verified on hardware |

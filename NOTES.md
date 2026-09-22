@@ -26144,7 +26144,6 @@ guards passed.
   the same arrays the rebuild loop now sets correctly.
 - `D7 = tps * G_ABSTICK` is a 32-bit `muls.l`; overflow past ~2^31/tps step-ticks is unverified.
 - Only one switch direction (1 -> 0) and one bank tested.
-
 ## Session 79, continued a twenty-ninth time — Hook F removed; it was clobbering 7 of 8 audio tracks. Measurement-timing error caught
 
 ### A measurement error in cont.28, caught and corrected
@@ -26226,7 +26225,6 @@ required against the current image before any flash.**
   `SCALE_IX`, so the two may now be redundant. Unchecked.
 - `D7 = tps * G_ABSTICK` 32-bit `muls.l` overflow bound still unverified.
 - Only one switch direction (1 -> 0), one bank, one project.
-
 ## Session 79, continued a thirtieth time — DJ-OFF gates pass on the current build; gate blind spot closed; Hook D examined
 
 ### DJ-OFF regression gates -- PASS on the CURRENT image (post-Hook-F-removal)
@@ -26423,7 +26421,6 @@ records: 26 B stride, [0]=code [2..5]=press [6..9]=release [10..13]=hold
 **Risk to respect: a push without a matching pop wedges the keyboard.** Any
 implementation must have the real-key harness proving push/pop balance across
 EVERY exit path — YES-execute, NO-cancel, BUSY-toast — before it is flashed.
-
 ## Session 79, continued a thirty-first time — AR research consolidated into `reference/AR_DIRECT_JUMP.md`; 16-bit position bound MEASURED
 
 ### `reference/AR_DIRECT_JUMP.md` (new, canonical, kept in BOTH repos)
@@ -26483,7 +26480,6 @@ can distinguish Hook D's unconditional `+0x8e54` read from stock's `SCALE_MODE`-
 `+0x8e52`. Pattern 0 is the only `SCALE_MODE = 1` pattern and carries the per-track spread
 (`SCALE=[2,0,2,2,2,2,2,2]`, `LEN=[16,16,12,16,...]`). Rescan of the refreshed export, other
 banks, in progress.
-
 ## Session 79, continued a thirty-second time — overflow GUARD added (not a fix); Hook D fixture still absent
 
 ### Guard in Hook H — silent garbage becomes graceful degradation
@@ -26550,6 +26546,199 @@ setup, not a per-track value, so it cannot be produced by editing track scales.
 - DJ-ON: 16/16 both switch directions, mixed scales and lengths.
 - Overflow: guarded, not fixed.
 - Hook D: measured inert with the feature off; its field choice remains unverified.
+
+## Session 81 (2026-09-22, `wip`) — PARTREAPPLY report #1 resumed: the real per-trig resolver NAMED, and a measured PICKUP-ownership state leak (but it is NOT the good→good→bug latch)
+
+Resumed the report #1 thread left open by Session 50 ("fix does not address the real
+bug; root cause still open"). Nothing had touched it since — Sessions 51-80 went to
+QLREC/DT/DIRECTJUMP/RELOAD2/MUTE MODE.
+
+**Docs TODO from Session 50 was already done.** Session 50's NEXT flagged that
+README/FLASHING.md still carried the superseded "clean A/B" framing. Commit `13338da3`
+(2026-09-20) already rewrote both (README "Part-change carryover" + FLASHING.md §4.9)
+to the good→good→bug latch framing, report #1 unfixed, #2/#3 unconfirmed. No doc work
+needed; the TODO just never got struck off because that commit didn't say "partreapply".
+
+### FOUND: `FUN_4000f450` is the real per-trig sample resolver (open since Session 49)
+
+Session 49 ruled out `FUN_40005030` and wrongly guessed `FUN_4009d1e8`; the HANDOFF has
+carried "the real per-trig resolver is still unidentified" ever since. It is
+**`FUN_4000f450`**, and the Session-49 tangent had already been standing inside it
+(the "large, not-yet-fully-mapped function spanning roughly 0x4000f000-0x4000f900+,
+true entry point not yet found" — the entry is `0x4000f450`).
+
+- **CORRECTION to the first draft of this entry: it is NOT "sole caller `0x4000421c`".**
+  That direct `jsr 0x4000f450.l` at `0x4000421c` is real but was not the path taken in
+  any run here. The live path is an **indirect dispatch through a per-machine-type
+  function-pointer table at `0x400d6454`**: `a1 = 0x400d6454`, `a0 = *(a1 + type*4)`,
+  `jsr (a0)` at `0x4000d49c` (observed return address `0x4000d49e`). A literal-address
+  grep for `jsr 0x4000f450` cannot see this call — the lesson from the earlier
+  `0x46c7ff3e` hunt (hook the address, don't guess the range) applies to CALLERS too.
+- **The type table names the whole mechanism** (dumped from the image):
+  `[0] STATIC → 0x4000f450`, `[1] FLEX → 0x4000f450`, `[2] THRU → 0x400043f4`,
+  `[3] NEIGHBOR → 0x4000463c`, `[4] PICKUP → 0x4000f450`. **STATIC, FLEX and PICKUP all
+  dispatch into the same resolver**, which then picks the arena internally — the
+  cleanest possible statement of why PICKUP and FLEX can contaminate each other and
+  THRU/NEIGHBOR cannot.
+- Calling convention, read off a live run (`--repeat --own-poke --resolver`) rather
+  than a desynced linear disassembly: `FUN_4000f450(track, slot, flags=0xc0)`. arg1 is
+  the track index — confirmed three independent ways: `a2 = 0x800049d8 + track*0xA8`
+  at `0x4000f484`; observed `a1 = base + arg1*0x48`; observed `a3 = 0x400d61d0 + arg1*4`.
+  `flags=0xc0` comes from `ori.l #0xc0,d0` at `0x4000d48a`.
+- **Which tracks reach it, measured:** exactly 4 calls in the whole round trip — tracks
+  1, 3, 4, 5, all during the FIRST switch, all in task `main` (not `sys`). **Track 0
+  (T1) never reaches the resolver at all**, which is the same "T1 never sounds in the
+  emulator" ceiling reported below, now confirmed at the resolver itself.
+- **It is where STATIC and FLEX part company**: `0x4000f496 tst.l d0` → `d0 == 0` takes
+  `STATIC_ARENA 0x100d5b30` (`0x4000f4b4`) with table `0x46c90a78`; `d0 != 0` takes
+  `FLEX_ARENA 0x100b14f0` (`0x4000f4d8`) with table `0x46c922c4`. Stride `0x448` = 1096
+  = `ARENA_STRIDE` in both branches.
+- This is the structural reason report #1's second reporter narrowed it to **"only when
+  the new machine is FLEX — STATIC on the same switch works correctly"**: PICKUP slots
+  are addressed as `FLEX_ARENA + (128+track)*1096`, i.e. **inside the FLEX arena**, so a
+  stale slot resolves to PICKUP content under FLEX and cannot under STATIC. No previous
+  hypothesis in this thread explained that asymmetry.
+
+### MEASURED: PICKUP ownership is claimed automatically and NEVER released by a Part change
+
+Static (cheap `grep` of the 4-byte address literal over the raw image, then targeted r2
+— 12 literal hits on `0x400d7c4c`; Session 49 had only examined 6):
+
+- **Claim** `0x4000f7d0`, inside the resolver, reached only via `0x4000f7ca bge` failing —
+  i.e. **only when the owner is negative**. Once non-negative, every later PICKUP setup
+  takes the "already owned" path at `0x4000f7e2`, which bails out at three separate
+  conditions (`btst` enable bit; `d4 == d1` already-owner; `tst.b 0x2(a6)`).
+- **Set-up** `FUN_40097204`: per track, machine byte == 4 → set `0x46c7ff3e` bit
+  (`0x40097250`) + ownership machinery; **else branch `0x40097276` clears ONLY the flag
+  bit and does nothing else.** No release, no voice reset.
+- **Release** exists at `0x400a112c` and `0x400a148a` — both inside the one function
+  `FUN_400a10c8`, behind `tst.l 0x800065b8` (transport stopped) and `0x46c7a9fe`. Its 21
+  callers do not include the pattern-change dispatch cases (`0x400620fe`/`0x400621a6`).
+
+Emulator, `tools/emu_partswitch.py --repeat` extended with the ownership registers it
+never sampled (`PICKUP_OWNER 0x400d7c4c`, `PICKUP_ENABLE 0x461054ec`, `PICKUP_CFG
+0x461054f0`, `PICKUP_SKIP 0x46c7ff3e`, `voice+0x14`) plus `watch_mem` on all of them:
+
+1. **Plain `--repeat` (no ownership poke) is STRUCTURALLY BLIND** — `PICKUP_OWNER` reads
+   `0xffffffff` at every snapshot and `voice[T1]+0x14` never becomes 4, so the claim site
+   never executed and the ownership machinery was never engaged. A machine-type byte poke
+   makes the firmware *think* a track is PICKUP without making it a live PICKUP voice.
+   **This is the same precondition failure that defeated `diff_flex_static.py` three times
+   in Session 49** — and it means the 2026-09-13 `--repeat` "byte-identical" null result
+   says nothing about ownership either (it never read these addresses at all).
+2. **`--repeat --own-poke`** (new flag: fabricates the minimal owned state — `owner=T1`,
+   `voice[T1]+0x14=4`, enable bit — which is what the report's own precondition, a PICKUP
+   track "already linked to a sample", looks like): across the full
+   P1→P5→P1→P5 round trip, **224 writes to the skip flag and ZERO writes to
+   `PICKUP_OWNER` / `PICKUP_ENABLE` / `PICKUP_CFG`.** Only writer PCs are `0x40097250`
+   (set ×10) and `0x40097276` (clear ×214), both in `FUN_40097204`, both flag-only.
+   Owner stays `0`, enable stays `0x1`, and **`voice[T1]+0x14` stays `4` (PICKUP) at both
+   arrivals at P5 where the Part says the track is FLEX.**
+
+**So the state leak is real and causally measured**: once the PICKUP buffer is owned,
+a pattern→Part change moving that track off PICKUP clears one flag bit and leaves the
+ownership singleton, the enable bit, and the voice's own machine byte all stale. Part
+data and voice state disagree, permanently. `0x4000d3b4` (ungated by machine type)
+keeps publishing `voice[owner]+0x44` into `0x461054f4` — the pointer the resolver reads
+on its already-owned path — so the staleness does propagate.
+
+### HONEST LIMIT: this leak is NOT the good→good→bug latch, and this harness cannot find it
+
+The ownership state is **identical at arrival #1 and arrival #2** — equally stale at the
+arrival that sounds CORRECT on hardware and the one that sounds WRONG. So stale ownership
+alone cannot be the differentiator between the two passes.
+
+Worse, and more important for future sessions: **`--repeat` cannot in principle find the
+latch.** T1 never sounds in the emulator at all (voice struct is zeros apart from
+`+0x0c..0x0f`; no trig ever lands). The emulator never produces the good-vs-bug difference
+in the first place, so "arrival #1 == arrival #2" is the expected output whether or not the
+bug exists. **Diffing arrival #1 against arrival #2 in this harness is a dead end — do not
+spend another run on it.** Same instrument-blindness class as the rest of this thread.
+
+### NEXT
+
+1. **The leak is worth fixing on its own merits, independent of report #1** — it is a
+   measured stock inconsistency (Part says FLEX, voice says PICKUP, buffer still owned),
+   and stock already contains the canonical release sequence to reuse
+   (`0x400a1124`-`0x400a112c`: `clr.l 0x461054f0` / `move.l #-1,0x400d7c4c`). Cheap,
+   in the same detour PARTREAPPLY already owns. Would need its own HW test — and note it
+   is NOT predicted to fix report #1's latch, so do not test it against that repro and
+   conclude anything.
+2. **Report #1's latch needs an instrument that can see a sounding voice.** The ColdFire
+   emulator is ruled out for this specific question. Options: hardware memory dump at
+   trig time on both arrivals, or driving the resolver `FUN_4000f450` directly
+   (`call_as_main`) with the two arrival states and diffing which arena entry it resolves —
+   now possible for the first time since the resolver is finally named.
+3. Reports #2/#3 remain unconfirmed on stock (Session 50) — unchanged.
+
+Tooling: `tools/emu_partswitch.py` gained the ownership registers in `--repeat`'s snapshot,
+`watch_mem` on all four, and the `--own-poke` flag. Kept in `tools/`, not scratchpad.
+
+### Session 81 continued — the ownership leak FIXED (emu A/B clean, NOT flashed), and the resolver's real dispatch found
+
+**BUILD: `patch_partreapply` step 2b — release the PICKUP ownership singleton.**
+Added to the existing per-track arm that already detects `oldType==4 && newType!=4`:
+when the voice is STILL configured as PICKUP (`voice+0x14 == 4`), `jsr FUN_40006820(track)`.
+
+Design note — this is Elektron's own mechanism, not a hand-rolled store. Stock's
+`FUN_40097204` PICKUP arm calls `FUN_40006820(track)` when the voice is **not yet** set
+up as PICKUP (`voice+0x14 != 4`); the exact mirror is to call it when the voice is
+**still** set up as PICKUP but the machine no longer is. `FUN_40006820` resets the voice
+and calls `FUN_4000672C`, which rebuilds the enable mask from the live machine bytes and
+then either releases the singleton (`owner = -1`, clear cfg) or **transfers** it to
+another still-PICKUP track. Release-or-transfer, handled correctly by stock code.
+Gated on `voice+0x14 == 4` so it is a no-op when nothing is stale.
+
+**Emu A/B (`--repeat --own-poke`, stock vs `--patched`), clean:**
+
+| | stock | patched |
+|---|---|---|
+| writes to `PICKUP_OWNER` across the round trip | **0** | **1** (`0xffffffff` at `0x400067e4`) |
+| writes to `PICKUP_ENABLE` | 0 | 1 (`0x0` at `0x400067a0`) |
+| writes to `PICKUP_CFG` | 0 | 1 (`0x0` at `0x400067ea`) |
+| owner at arrival #1 / #2 | `0` / `0` (stale) | `-1` / `-1` (released) |
+
+All three patched writes issue from **inside stock's own `FUN_4000672C`** — the PCs are
+exactly the release path read statically — and they fire at precisely the moment T1
+leaves PICKUP. Boot line identical to stock (`trap #0 RTOS handoff`, the normal one);
+no faults, no exceptions.
+
+**Idempotent, verified:** exactly ONE owner write in a four-switch round trip. On the
+later passes `FUN_4000672C` bails at its own `owner == track` test (owner is already -1),
+so the fix cannot thrash.
+
+**Known residual, deliberately not chased:** `voice+0x14` stays `4` after the release —
+stock's release path does not clear the voice's own machine byte. Ownership, enable mask
+and cfg are all correctly released; only that byte lags. It is harmless for the claim
+lifecycle (the next claim goes through the resolver) but it means "voice+0x14 == 4" is
+NOT a reliable "this track is PICKUP" oracle after a release. Do not build a later probe
+on that assumption.
+
+**Status: built, emu-validated, NOT flashed.** `out/OCTATRACK_PARTREAPPLY.bin` /
+`OCTATRACK_OS1.40C_PARTREAPPLY.syx`, version still 1.40C, cave grew 142 B -> 270 B at
+`0x400d7000`, same 6 B detour at `0x40062216`. Three loop branches had to widen to `.w`
+(the added block pushed them out of byte range). **No merged-build impact**:
+`patch_partreapply` was never added to `build_merged.py`'s stub list (Session 49's NEXT
+#1 was never done), so the cave growth cannot collide with the allocation table.
+
+**Hardware-test warning, important:** this fixes the measured *state leak*. It is NOT
+predicted to fix report #1's good→good→bug latch — the leak is identical at both
+arrivals. Do NOT test it against that repro and conclude anything from a negative; test
+it by checking that a PICKUP track's buffer ownership is correctly handed over/released
+when that track switches to FLEX (e.g. a second track set to PICKUP should be able to
+take the buffer afterwards, which on stock it cannot).
+
+### NEXT (updated)
+
+1. HW test the ownership release per the warning above — its own repro, not report #1's.
+2. Report #1's latch: the resolver is now named AND its calling convention is measured
+   (`FUN_4000f450(track, slot, flags=0xc0)`), so the previously-impossible experiment is
+   now available — `call_as_main(FUN_4000f450, (0, slot, 0xc0))` at arrival #1 vs
+   arrival #2 with read-hooks on the three arena entries, which sidesteps "T1 never
+   sounds" entirely by driving the resolver directly instead of waiting for a trig.
+   That is the single highest-value next step on this thread.
+3. Reports #2/#3 remain unconfirmed on stock (Session 50) — unchanged.
+
 ## Session 80 continued (8) (2026-09-22, `wip`) — RELOAD2: the picker owns its own keymap layer
 
 **Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (7)").
@@ -26653,6 +26842,213 @@ the [BANK] overlay rather than inside it.
 Still open, unchanged: `RELOAD BUSY`'s root cause (not reproduced in any
 harness), the ~1 s stall / stock transport stop, and the list UI.
 
+### Session 81 continued (2) — the resolver DRIVEN directly: binding model pinned, and the resolver is INNOCENT. One intra-session misreading retracted.
+
+New `--drive` mode on `emu_partswitch.py --repeat`: calls `FUN_4000f450` via
+`call_as_main` at each arrival instead of waiting for a trig T1 never gets.
+`call_as_main` is the faithful context here — the real dispatch was observed running
+in task `main`, which is exactly what `call_as_main` borrows.
+
+**BINDING MODEL, pinned (measured, then reproduced arithmetically):** the resolver binds
+a voice by writing two pointers:
+
+```
+voice[track]+0x04 = TABLE + slot*44      FLEX/PICKUP: 0x46c922c4   STATIC: 0x46c90a78
+voice[track]+0x08 = ARENA + slot*1096    FLEX/PICKUP: 0x100b14f0   STATIC: 0x100d5b30
+```
+
+Verified both ways: slot 2 (FLEX) -> `0x46c9231c` / `0x100b1d80`; slot 128 (PICKUP,
+`128+T`) -> `0x46c938c4` / `0x100d38f0`. Every observed write matched the formula.
+It does NOT read the arena entry contents (arena read-hooks fired zero times in every
+call) — it resolves an ADDRESS, it does not inspect the sample. `voice+0x90` is a
+per-voice resolve counter (its low byte `+0x93` increments once per call).
+
+**This is the mechanical statement of report #1's FLEX-vs-STATIC asymmetry:** FLEX and
+PICKUP share BOTH the `0x46c922c4` table and `FLEX_ARENA`, differing only in the slot
+number (a PICKUP track uses `128+track`), so a wrong slot silently yields a valid-looking
+PICKUP binding under a FLEX machine. STATIC resolves through two different tables and
+cannot be contaminated by a slot from the FLEX/PICKUP space.
+
+**RESULT: the resolver re-binds CORRECTLY every time. It is not the latch.**
+Drove the full hardware-shaped sequence in one boot —
+`FLEX(slot 2)` -> `PICKUP(slot 128)` -> `FLEX(slot 2)`:
+
+| drive point | slot | resulting +0x04 / +0x08 | correct? |
+|---|---|---|---|
+| ARRIVAL #1 | 2 | `0x46c9231c` / `0x100b1d80` | yes |
+| BACK AT P1 | 128 | `0x46c938c4` / `0x100d38f0` | yes |
+| ARRIVAL #2 | 2 | `0x46c9231c` / `0x100b1d80` | **yes** |
+
+The second FLEX pass, immediately after a genuine PICKUP binding, re-pointed the voice
+straight back at the FLEX entry. Given `(track, slot, flags)` the resolver does the right
+thing unconditionally.
+
+**RETRACTION (made and caught inside this same session — do not carry the wrong version
+forward).** The first `--drive` run (no P1 drive) showed arrival #1 = 12 voice writes with
+a full pointer delta and arrival #2 = 8 writes with NO delta, and that was read here as
+"the resolver skips the re-bind on the second pass". **That reading was wrong.** Arrival
+#2 showed no delta only because nothing had moved the pointer in between, so the correct
+value was already in place and re-writing it produced no visible change. The 12-vs-8
+write count is first-ever-bind initialisation, not a skip — the P1 PICKUP bind also does
+8 writes and re-binds perfectly. Adding the P1 drive (so the pointer genuinely moves to
+PICKUP in between) settled it. **Lesson, same family as the rest of this thread: a
+"no change" delta is not evidence of "did nothing" when the expected value was already
+there — diff against a state you have first perturbed.**
+
+**Where report #1's latch must therefore live.** The resolver is exonerated, so it is one
+of:
+1. **The `slot` argument is wrong on the second pass** (upstream hands it `128+track`
+   instead of the Part's FLEX slot) — the resolver would then bind the PICKUP entry
+   faithfully and the symptom follows exactly. **Strongest candidate**, and it puts
+   `SLOT_MIRROR` (`0x100a519c`) / `FUN_400972fc` — the things the original fix already
+   touched — back in frame for a different reason than the kill-bit theory.
+2. **The resolver is never CALLED for T1 on the second pass** (something upstream skips
+   the dispatch).
+3. Genuinely downstream/DSP-side.
+
+**NEXT:** pin where arg2 (`slot`) comes from at the call site. At `0x4000d492` the caller
+does `movea.l 0xac(a7),a1` and then, through an instruction r2 mis-decodes at
+`0x4000d496` (`7191`), loads `d0` from that pointer before pushing it as arg2 — so arg2
+is a byte read through a per-track structure, NOT computed from the Part blob directly.
+Identify that structure and check what it holds for T1 on the second pass. Do it by
+hooking reads at `0x4000d496` in a live run (hook the address, don't trust the linear
+disassembly) — the technique that has worked every time on this thread and the linear
+read the one that has not.
+
+Side observation, unexplained, flagged not guessed: on STOCK, driving the resolver moved
+`PICKUP_OWNER` from `0` to `-1` between arrivals (`PICKUP_ENABLE` `1` -> `0`) — a release
+the passive stock run never showed. So the resolver itself performs ownership
+housekeeping. Which internal path does it is NOT established; do not assume it is the
+`0x4000f7e2` already-owned branch without measuring.
+
+### Session 81 continued (3) — ROOT CAUSE FOR REPORT #1, MEASURED: the resolver's `slot` argument comes from a per-track pre-image that is updated when a track ENTERS PICKUP and never when it LEAVES
+
+**The `slot` the resolver binds is read from `PREIMG_A + track*0x48` (`0x8000082f + track*0x48`),
+byte 0.** Established without guessing:
+
+- At the resolver entry the trace recorded `a1` = `0x80000877` / `0x80000907` /
+  `0x8000094f` / `0x80000997` for tracks 1 / 3 / 4 / 5. All four equal
+  `0x8000082f + track*0x48` exactly.
+- Dumping that structure per track gives byte 0 = `02` / `0a` / `09` / `15` for tracks
+  1 / 3 / 4 / 5 — **identical to the `arg2` values those same calls passed.** Four
+  independent confirmations that byte 0 is the slot field.
+- `0x8000082f` is already known in this project as `PREIMG_A`, one of **`FUN_40009094`'s
+  per-track pre-image regions** — and `FUN_40009094` is precisely what a pattern-driven
+  Part change never calls (Session 49's original root cause).
+
+**T1's slot field across the round trip — this IS report #1:**
+
+| point | T1 machine | pre-image slot (byte 0) | Part's actual slot |
+|---|---|---|---|
+| initial P1 | PICKUP | `00` | — |
+| ARRIVAL #1 at P5 | FLEX | `00` | 2 |
+| back at P1 | PICKUP | **`80`** (128) | 128 — correct |
+| ARRIVAL #2 at P5 | FLEX | **`80`** (128) | 2 — **STALE** |
+
+At arrival #2 the dispatch hands the resolver `slot = 128` while the Part says the track
+is FLEX on slot 2. The resolver then does exactly what it is supposed to and binds
+`FLEX_ARENA + 128*1096 = 0x100d38f0` — **the PICKUP entry, under a FLEX machine.** That
+is the reported symptom, reproduced from measured state rather than inferred.
+
+**And it explains the good→good→bug LATCH exactly**, which no previous hypothesis in this
+thread did:
+- Pass 1 is fine because the pre-image slot is still `00` — T1 has not yet been through a
+  PICKUP entry, so there is no PICKUP slot to leak.
+- Returning to P1 sets the slot to `80` **correctly** — entering PICKUP updates it.
+- Pass 2 leaves PICKUP and **nothing updates the slot back**, so `80` survives into the
+  FLEX machine, and survives every subsequent pass. One-way latch, exactly as the user
+  measured on hardware (3rd, 4th, ... all broken).
+
+**The asymmetry is the same shape as the ownership bug already fixed this session:
+entering PICKUP writes the field, leaving PICKUP does not.** Two instances of one
+"claim but never release" pattern, in two different fields.
+
+**This also explains why Session 49's fix missed.** Its read of the mechanism — that
+`FUN_400972fc` does the work on the way INTO PICKUP and nothing does it on the way out —
+was RIGHT. It simply wrote the wrong field: kill-bit (`0x8000184c`) and `SLOT_MIRROR`
+(`0x100a519c`), neither of which is what the dispatch actually reads. The field that
+matters is `PREIMG_A + track*0x48` byte 0.
+
+**NOT YET CONFIRMED — do not write the fix until it is:** which code writes the `80`.
+`FUN_400972fc` is the obvious candidate (it is the PICKUP-entry rebind, and it already
+writes the forced `128+track` into `SLOT_MIRROR`), but that is an inference from shape,
+not a measurement, and this thread has been wrong exactly this way before. A
+`watch_mem(PREIMG_A + T*0x48, 1)` run is in flight to name the writer PC. Only once the
+writer is named is the fix well-posed (most likely: on the leaving-PICKUP transition,
+write the new Part's slot for that machine type into byte 0 — the value already computed
+at `slot_addr(newPart, track, newType)`).
+
+### Session 81 continued (4) — REPORT #1 FIXED (emu A/B clean, NOT flashed). Writer named, chain closed end to end.
+
+**Writer named causally, and it is NOT `FUN_400972fc`** (that was the shape-based guess;
+checking it was worth it). `watch_mem(PREIMG_A + T*0x48, 1)` on stock: **exactly one
+write in the entire round trip** — value `0x80`, from PC `0x400020fa`, during the
+P5→P1 switch (entering PICKUP). The instruction is
+`move.b (a0),(a1,d1.l)` with `a1 = 0x8000082f` (PREIMG_A) and `a0` computed from the
+Part blob as `slot_addr(part, track, machine_type)` — i.e. "copy this track's slot for
+its current machine type out of the Part". It lives in **`FUN_40001f18(bank, part, track)`**
+(entry confirmed: 6 callers, prologue `a5=bank`, `a6=part`, `d6=track`, multiplied by
+`BANK_STRIDE 0x9b340` and `PART_STRIDE 0x18b2` respectively).
+
+**One of those 6 callers is at `0x400973da` — inside `FUN_400972fc`.** And stock's own
+notPICKUP→PICKUP arm there does the kill bit and this re-seed **as a pair**:
+
+```
+0x400973b4  moveq #1,d0 / lsl.l d4,d0
+0x400973b8  move.b 0x8000184c,d1 / or / move.b d0,0x8000184c    <- KILL BIT
+0x400973c8  move.l d4,-(a7)          ; track
+0x400973d0  move.l d0,-(a7)          ; part  (0x100b14cf)
+0x400973d8  move.l d0,-(a7)          ; bank  (0x100b14ce)
+0x400973da  jsr 0x40001f18                                      <- RE-SEED
+0x400973e0  lea 0xc(a7),a7
+```
+
+**Session 49 replicated the kill bit and omitted the re-seed — and the re-seed is the
+half that carries the slot.** That is the whole reason the flashed fix changed nothing
+on hardware. Not a wrong theory of the bug; a half-copied idiom.
+
+**BUILD: step 2c** — in the same `oldType==4 && newType!=4` arm,
+`jsr FUN_40001f18(bank, newPart, track)`, argument order copied verbatim from stock's
+own call site (push track, part, bank; bank closest to the jsr; pop 12). `BANK_MIR`
+(`0x100b14ce`) added as an equate — the byte before `NEWPART_MIR`, the pair stock reads.
+
+**Emu A/B on T1's pre-image slot byte (`0x8000082f`), stock vs patched:**
+
+| point | T1 machine | stock | patched | Part's slot |
+|---|---|---|---|---|
+| initial P1 | PICKUP | `00` | `00` | — |
+| ARRIVAL #1 | FLEX | `00` | **`02`** | 2 |
+| back at P1 | PICKUP | `80` | `80` | 128 |
+| ARRIVAL #2 | FLEX | **`80` (BUG)** | **`02`** | 2 |
+
+The stale `0x80` at arrival #2 is gone. Writes to the field go from **1 on stock to 6 on
+patched**, from two PCs: `0x400020fa` (my `FUN_40001f18` call) and `0x400092c2` — the
+latter inside `FUN_40009094`, i.e. the patch's own step-4 stopped-transport Part apply.
+Both write the SAME value at every point, so the two paths agree rather than fight.
+Side benefit: this **measures** the long-assumed claim that `PREIMG_A` is
+`FUN_40009094`'s per-track pre-image region — previously only a comment.
+
+The whole record re-seeds, not just byte 0 (arrival #1 patched reads
+`02 01 00 00 00 01 40 00 05 00 03 0a` vs stock `00 01 01 00 01 01 40 00 10 12 00 00`).
+
+**Chain now closed end to end, every link measured:**
+1. dispatch reads `slot` from `PREIMG_A + track*0x48` byte 0 (4/4 tracks confirmed);
+2. only `FUN_40001f18` seeds that byte (write-watch: 1 write, 1 PC, on stock);
+3. stock calls it entering PICKUP, never leaving → `128+track` survives into FLEX;
+4. the resolver faithfully binds `FLEX_ARENA + slot*1096` → the PICKUP entry
+   (resolver exonerated separately by the `--drive` runs);
+5. patched, the slot tracks the Part at every arrival → the resolver binds
+   `FLEX_ARENA + 2*1096 = 0x100b1d80`, the correct FLEX entry.
+
+**WHAT IS AND IS NOT PROVEN.** The ColdFire-side chain is fixed end to end in the
+emulator. **The audible symptom is NOT proven gone** — this emulator cannot render audio
+for this track (T1 never sounds; that ceiling is unchanged and is why the bug took so
+long to find). Hardware flash + the user's own 4-switch repro is the only thing that can
+close it. Predicted hardware result: P1→P2→P1→P2 now correct on the second and every
+subsequent pass.
+
+**Status:** built, emu-validated, **NOT flashed**. Cave 270 B → 306 B at `0x400d7000`,
+same 6 B detour, version still 1.40C, no merged-build impact.
 ## Session 79, continued a thirty-third time — DJTEST2 lands; pattern header FULLY MAPPED; MASTER LENGTH found; Hook D confirmed wrong and fixed
 
 The user corrected my terminology twice (there is no "master tempo multiplier"; MASTER SCALE

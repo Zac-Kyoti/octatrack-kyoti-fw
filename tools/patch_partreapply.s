@@ -35,6 +35,21 @@
 |      re-trigger bit) -- exactly what FUN_400972fc's own notPICKUP->PICKUP arm already
 |      does for the reverse transition; nothing does it for this one. This is the one
 |      genuinely new piece; narrowly scoped to the exact transition report #1 describes.
+|   2c. Per track, same arm: jsr FUN_40001f18(bank, newPart, track) -- THE ACTUAL FIX
+|      FOR REPORT #1. The dispatch reads the sample SLOT it passes the resolver from
+|      PREIMG_A + track*0x48 byte 0; that byte is seeded from the Part blob only by
+|      FUN_40001f18, which stock calls on the way INTO PICKUP and never on the way out,
+|      so the PICKUP slot (128+track) survives into the new FLEX machine and the
+|      resolver faithfully binds the PICKUP arena entry. Stock's own notPICKUP->PICKUP
+|      arm does kill-bit AND this re-seed together (0x400973b4-0x400973e0); Session 49
+|      copied the kill bit and omitted the re-seed. Measured, NOTES.md "Session 81".
+|   2b. Per track, same arm, when the voice is still set up as PICKUP (voice+0x14==4):
+|      jsr FUN_40006820(track) -- stock's own "reset voice + release/transfer the PICKUP
+|      ownership singleton" helper. Nothing in stock releases 0x400d7c4c when a track
+|      leaves PICKUP (measured, NOTES.md "Session 81"); this completes the symmetry with
+|      FUN_40097204's PICKUP arm. NOTE: this is a fix for a separately-measured state
+|      leak, NOT for report #1's good->good->bug latch -- the leak is identical at both
+|      arrivals, so do not test it against that repro and conclude anything.
 |   3. Once: retrigger the crossfader scene morph (move.l #-1,0x400c0c44 ; jsr
 |      FUN_4003f1b4) so the new Part's scenes apply now instead of waiting for the next
 |      fader touch.
@@ -53,6 +68,9 @@
 |   FUN_40009094(bank,part)    -- 2 long stack args (each a zero-extended byte), bank
 |                                 closest to jsr: push part, push bank, jsr, pop 8
 |   FUN_4003f1b4()             -- no arguments
+|   FUN_40001f18(bank,part,track) -- 3 long stack args, bank closest to jsr; convention
+|                                 copied verbatim from stock's own call at 0x400973c8:
+|                                 push track, push part, push bank, jsr, pop 12
 |
 | Detour (6 B @ 0x40062216, "jsr" kind -- displaced instruction IS itself a jsr, so the
 | cave replays it verbatim then rts, resuming at 0x4006221c via the return address the
@@ -69,6 +87,13 @@
     .equ  KILLBIT,     0x8000184c        | per-track voice-kill/re-trigger bitmap (byte)
     .equ  MORPH_GUARD, 0x400c0c44        | crossfader-morph dedup guard (long); -1 = "stale, re-run"
     .equ  TRANSPORT,   0x800065b8        | sequencer running flag (long); 0 = stopped
+    .equ  BANK_MIR,     0x100b14ce        | mirror of the applied BANK index (byte); the
+                                          | byte before NEWPART_MIR -- this is the pair
+                                          | stock's own FUN_400972fc call site reads
+    .equ  FUN_PREIMG_SEED, 0x40001f18     | stock: seed per-track engine pre-image from a Part
+    .equ  VOICE_BASE,   0x800049d8        | per-track voice struct base
+    .equ  VOICE_STRIDE, 0xA8
+    .equ  FUN_PICKUPRESET, 0x40006820     | stock: reset voice + release/transfer PICKUP ownership
     .equ  FUN_MEMCPY,    0x40020898
     .equ  FUN_PARTAPPLY, 0x40009094
     .equ  FUN_MORPH,     0x4003f1b4
@@ -99,7 +124,7 @@ cave:
     move.b  -9(%fp,%d2.l),%d3            | d3 = oldType[track] (buffered by the loop above)
     extb.l  %d3
     cmpi.l  #4,%d3
-    bne.b   .Lkill_next                  | oldType != PICKUP -> no transition of interest
+    bne.w   .Lkill_next                  | oldType != PICKUP -> no transition of interest
 
     clr.l   %d0
     move.b  NEWPART_MIR,%d0
@@ -112,7 +137,7 @@ cave:
     move.b  (%a0),%d0                    | d0 = newType[track]
     extb.l  %d0
     cmpi.l  #4,%d0
-    beq.b   .Lkill_next                  | newType == PICKUP too -> not this transition
+    beq.w   .Lkill_next                  | newType == PICKUP too -> not this transition
 
     moveq   #1,%d0
     lsl.l   %d2,%d0                      | d0 = 1<<track
@@ -120,10 +145,70 @@ cave:
     or.l    %d1,%d0
     move.b  %d0,KILLBIT
 
+    | ---- 2c: re-seed the per-track pre-image from the NEW Part (Session 81) ----
+    | THE ACTUAL FIX FOR REPORT #1. The voice dispatch reads the sample SLOT it
+    | hands the resolver from PREIMG_A + track*0x48 byte 0 (measured: a1 at the
+    | resolver entry == 0x8000082f + track*0x48 for tracks 1/3/4/5, and byte 0
+    | there == the arg2 those same calls passed, 4/4 exact). That byte is seeded
+    | from the Part blob by FUN_40001f18(bank, part, track) at 0x400020fa
+    | (`move.b (a0),(a1,d1.l)`) -- and across a full round trip it is written
+    | EXACTLY ONCE, on the transition INTO PICKUP, never on the way out.
+    | Result, measured on stock: T1's slot reads 0x80 (the PICKUP slot 128+T)
+    | while the new Part says FLEX slot 2, so the resolver faithfully binds
+    | FLEX_ARENA + 128*1096 = 0x100d38f0 -- the PICKUP entry under a FLEX
+    | machine. That is report #1, and the one-way latch too: pass 1 is clean
+    | because the field is still 0, the return to PICKUP sets it to 0x80
+    | correctly, and nothing ever sets it back.
+    | Stock's OWN notPICKUP->PICKUP arm in FUN_400972fc does kill-bit AND this
+    | re-seed together (0x400973b4-0x400973e0). Session 49's fix replicated the
+    | kill bit and omitted the re-seed; this adds the missing half, same call,
+    | same argument order (push track, part, bank -- bank closest to the jsr).
+    clr.l   %d0
+    move.b  %d2,%d0
+    move.l  %d0,-(%sp)                   | track
+    clr.l   %d0
+    move.b  NEWPART_MIR,%d0
+    move.l  %d0,-(%sp)                   | part
+    clr.l   %d0
+    move.b  BANK_MIR,%d0
+    move.l  %d0,-(%sp)                   | bank
+    jsr     FUN_PREIMG_SEED              | 0x40001f18(bank, part, track)
+    lea     12(%sp),%sp
+
+    | ---- 2b: release the PICKUP ownership singleton (Session 81) ----
+    | PICKUP is one GLOBAL capture buffer with a single owner track
+    | (0x400d7c4c, -1 = unclaimed), not a per-track arena slot. FUN_40097204
+    | claims it whenever a track's machine byte becomes 4, but its else branch
+    | (0x40097276) clears ONLY the skip-flag bit -- nothing releases ownership
+    | when a track leaves PICKUP. Measured on stock (emu_partswitch.py --repeat
+    | --own-poke): across a full P1->P5->P1->P5 round trip, 224 writes to the
+    | skip flag and ZERO to the owner / enable mask / cfg word; owner stays the
+    | departed track and voice+0x14 stays 4 (PICKUP) while the Part says FLEX.
+    | Complete the symmetry using Elektron's own routine: stock's PICKUP arm
+    | calls FUN_40006820(track) when the voice is NOT yet set up as PICKUP
+    | (voice+0x14 != 4); the mirror is to call it when the voice is STILL set up
+    | as PICKUP but the machine no longer is. FUN_40006820 resets the voice and
+    | calls FUN_4000672C, which rebuilds the enable mask from the live machine
+    | bytes and either releases the singleton (owner = -1, clr cfg) or transfers
+    | it to another still-PICKUP track -- release-or-transfer, correctly.
+    | Gated on voice+0x14 == 4 so it is a no-op when nothing is stale.
+    move.l  #VOICE_STRIDE,%d0
+    move.l  %d2,%d1
+    muls.l  %d0,%d1
+    movea.l #VOICE_BASE,%a0
+    adda.l  %d1,%a0
+    move.b  20(%a0),%d0                  | voice[track]+0x14 (the voice's own machine byte)
+    extb.l  %d0
+    cmpi.l  #4,%d0
+    bne.b   .Lkill_next                  | voice isn't a PICKUP voice -> nothing to release
+    move.l  %d2,-(%sp)
+    jsr     FUN_PICKUPRESET              | 0x40006820(track) -- saves/restores d2, a2
+    addq.l  #4,%sp
+
 .Lkill_next:
     addq.l  #1,%d2
     cmpi.l  #8,%d2
-    bne.b   .Lkill_loop
+    bne.w   .Lkill_loop
 
     | ---- 3: once -- retrigger the crossfader scene morph ----
     moveq   #-1,%d0
