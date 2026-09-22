@@ -252,8 +252,18 @@
 |   window stays put rather than letting stock arrow navigation move off it
 |   (which is what "strange visual glitches and move away from the option
 |   window" was). Picker closed -> every arrow falls through to stock untouched.
-    .equ UP_CODE,       0x34
-    .equ DOWN_CODE,     0x21           | NOT 0x33 -- see the correction note above
+|   ** CORRECTED AGAIN, Session 80 continued (7). ** Hardware: "the arrow keys
+|   L/R work, but U/D do not. This should be reversed." So 0x4004b970 (0x34 +
+|   0x21) is the LEFT/RIGHT pair and 0x400491a0 (0x33 + 0x20) is UP/DOWN -- the
+|   opposite of "(6)". My "(6)" reasoning rested on an INFERENCE I had no right
+|   to make: the user reported only that DOWN did not work, and I read that as
+|   "UP works" to anchor 0x34 = UP. It did not say that.
+|   Which of 0x33 / 0x20 is UP vs DOWN is still unverified -- the 0x400491a0
+|   wrapper never examines the keycode, so nothing in the firmware distinguishes
+|   them. 0x33 is assigned prev/UP here; if the picker steps the wrong way, swap
+|   these two lines and nothing else.
+    .equ UP_CODE,       0x33
+    .equ DOWN_CODE,     0x20
     .equ ARROW_A_H,     0x4004b970      | UP / RIGHT handler
     .equ ARROW_A_RESUME,0x4004b978      | after `lea -12(sp),sp ; movem.l d2-d3/a2,(sp)`
     .equ ARROW_B_H,     0x400491a0      | DOWN / LEFT handler
@@ -619,50 +629,50 @@ rly_stock:
 | through -- behaviourally invisible.
 
     .global rl_arr_a
-rl_arr_a:                              | keycodes UP 0x34 / DOWN 0x21 -- BOTH vertical
+rl_arr_a:                              | codes 0x34 / 0x21 -- the LEFT/RIGHT pair
     tst.b   G_MENU
     beq.b   raa_stock                  | picker closed -> stock, untouched
-    moveq   #1,%d0
-    cmp.l   8(%sp),%d0                 | event == press ?
-    bne.b   raa_swallow                | release / auto-repeat hold -> swallow
-    moveq   #UP_CODE,%d0
-    cmp.l   4(%sp),%d0
-    beq.b   raa_prev
-    moveq   #DOWN_CODE,%d0
-    cmp.l   4(%sp),%d0
-    bne.b   raa_swallow                | neither -> swallow
-|   DOWN: next item (wrapping)
-    moveq   #0,%d0
-    move.b  G_SEL,%d0
-    addq.l  #1,%d0
-    cmpi.l  #N_ITEMS,%d0
-    bcs.b   raa_set
-    moveq   #0,%d0
-    bra.b   raa_set
-raa_prev:                              | UP: previous item (wrapping)
-    moveq   #0,%d0
-    move.b  G_SEL,%d0
-    subq.l  #1,%d0
-    bpl.b   raa_set
-    moveq   #N_ITEMS-1,%d0
-raa_set:
-    move.b  %d0,G_SEL
-    jsr     rl_draw
-raa_swallow:
-    rts                                | swallow (stack untouched on entry)
+    rts                                | picker open -> swallow. LEFT/RIGHT must
+                                       | never move the selection (user request)
+                                       | and must not reach stock either, or its
+                                       | own arrow nav moves off our window.
 raa_stock:
     lea     -12(%sp),%sp               | displaced original
     movem.l %d2-%d3/%a2,(%sp)          | displaced original
     jmp     ARROW_A_RESUME
 
     .global rl_arr_b
-rl_arr_b:                              | keycodes LEFT 0x20 / RIGHT 0x33 -- horizontal
+rl_arr_b:                              | codes 0x33 / 0x20 -- the UP/DOWN pair
     tst.b   G_MENU
     beq.b   rab_stock                  | picker closed -> stock, untouched
-    rts                                | picker open -> swallow. LEFT/RIGHT must
-                                       | never move the selection (user's request)
-                                       | and must not reach stock either, or its
-                                       | own arrow nav moves off our window.
+    moveq   #1,%d0
+    cmp.l   8(%sp),%d0                 | event == press ?
+    bne.b   rab_swallow                | release / auto-repeat hold -> swallow
+    moveq   #UP_CODE,%d0
+    cmp.l   4(%sp),%d0
+    beq.b   rab_prev
+    moveq   #DOWN_CODE,%d0
+    cmp.l   4(%sp),%d0
+    bne.b   rab_swallow
+|   DOWN: next item (wrapping)
+    moveq   #0,%d0
+    move.b  G_SEL,%d0
+    addq.l  #1,%d0
+    cmpi.l  #N_ITEMS,%d0
+    bcs.b   rab_set
+    moveq   #0,%d0
+    bra.b   rab_set
+rab_prev:                              | UP: previous item (wrapping)
+    moveq   #0,%d0
+    move.b  G_SEL,%d0
+    subq.l  #1,%d0
+    bpl.b   rab_set
+    moveq   #N_ITEMS-1,%d0
+rab_set:
+    move.b  %d0,G_SEL
+    jsr     rl_draw
+rab_swallow:
+    rts                                | swallow
 rab_stock:
     move.l  %d2,-(%sp)                 | displaced original
     movea.l %sp@(8),%a0                | displaced original

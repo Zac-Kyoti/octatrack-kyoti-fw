@@ -822,15 +822,15 @@ def cmd_combo(rt):
     reset_gates(menu=1, sel=0)
     for step in range(n + 1):
         calls = []
-        end = _run_cave_fn(rt, rl_arr_a, 0x21, 1, calls)   # DOWN = 0x21
+        end = _run_cave_fn(rt, rl_arr_b, 0x20, 1, calls)   # DOWN = 0x20
         want = (step + 1) % n
         check(end == "rts" and g(G_SEL_A) == want and POPUP2_FN in calls,
-              f"DOWN 0x21 (next) {step}: G_SEL->{g(G_SEL_A)} (want {want}) popup2={POPUP2_FN in calls}")
+              f"DOWN 0x20 (next) {step}: G_SEL->{g(G_SEL_A)} (want {want}) popup2={POPUP2_FN in calls}")
     reset_gates(menu=1, sel=0)
     calls = []
-    end = _run_cave_fn(rt, rl_arr_a, 0x34, 1, calls)
+    end = _run_cave_fn(rt, rl_arr_b, 0x33, 1, calls)
     check(end == "rts" and g(G_SEL_A) == n - 1 and POPUP2_FN in calls,
-          f"UP 0x34 (prev) from 0: G_SEL->{g(G_SEL_A)} (want {n-1}) popup2={POPUP2_FN in calls}")
+          f"UP 0x33 (prev) from 0: G_SEL->{g(G_SEL_A)} (want {n-1}) popup2={POPUP2_FN in calls}")
 
     # --- UP/DOWN only: LEFT/RIGHT and non-press events must NOT move G_SEL ---
     # Set by emu_reload2.py; patch_reload.s has no keycode/event gate, so this
@@ -844,13 +844,15 @@ def cmd_combo(rt):
         # Corrected mapping (hardware-derived, Session 80 continued (6)):
         # 0x4004b970 = UP 0x34 + DOWN 0x21 (vertical); 0x400491a0 = LEFT 0x20 +
         # RIGHT 0x33 (horizontal, swallowed wholesale while the picker is open).
+        # Corrected AGAIN (hardware, Session 80 continued (7)): 0x4004b970 =
+        # LEFT/RIGHT (0x34 + 0x21), 0x400491a0 = UP/DOWN (0x33 + 0x20).
         for fn, nm, code, ev, why in (
-                (rl_arr_b, "rl_arr_b", 0x33, 1, "RIGHT press"),
-                (rl_arr_b, "rl_arr_b", 0x20, 1, "LEFT press"),
-                (rl_arr_a, "rl_arr_a", 0x34, 0, "UP release"),
-                (rl_arr_a, "rl_arr_a", 0x21, 0, "DOWN release"),
-                (rl_arr_a, "rl_arr_a", 0x34, 2, "UP hold/auto-repeat"),
-                (rl_arr_a, "rl_arr_a", 0x21, 2, "DOWN hold/auto-repeat")):
+                (rl_arr_a, "rl_arr_a", 0x34, 1, "LEFT/RIGHT press (a)"),
+                (rl_arr_a, "rl_arr_a", 0x21, 1, "LEFT/RIGHT press (b)"),
+                (rl_arr_b, "rl_arr_b", 0x33, 0, "UP release"),
+                (rl_arr_b, "rl_arr_b", 0x20, 0, "DOWN release"),
+                (rl_arr_b, "rl_arr_b", 0x33, 2, "UP hold/auto-repeat"),
+                (rl_arr_b, "rl_arr_b", 0x20, 2, "DOWN hold/auto-repeat")):
             reset_gates(menu=1)
             rt.uc.mem_write(G_SEL_A, b"\x01")
             end = _run_cave_fn(rt, fn, code, ev, [])
@@ -861,10 +863,10 @@ def cmd_combo(rt):
     # --- arrows fall through untouched when the window is closed ---
     reset_gates(menu=0)
     end = _run_cave_fn(rt, rl_arr_a, 0x34, 1, [])
-    check(end == "ARROW_A_RESUME(fell through)", f"arrow A closed -> {end}")
+    check(end == "ARROW_A_RESUME(fell through)", f"arrow A (L/R) closed -> {end}")
     reset_gates(menu=0)
     end = _run_cave_fn(rt, rl_arr_b, 0x33, 1, [])
-    check(end == "ARROW_B_RESUME(fell through)", f"arrow B closed -> {end}")
+    check(end == "ARROW_B_RESUME(fell through)", f"arrow B (U/D) closed -> {end}")
 
     # --- [YES] executes + closes, per selection ---
     for sel, name, want_kind, want_n_parts, want_seqpost in COMBO_ITEMS:
