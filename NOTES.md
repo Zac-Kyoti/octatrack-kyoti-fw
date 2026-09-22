@@ -26010,3 +26010,75 @@ the target is a ~36 KB read with no live-blob rewrite — and the file is
 fixed-stride (`0x16` header + `0x8EEC`/pattern, which our own test code already
 indexes arithmetically), so the worker could `fseek` straight to pattern P
 instead of parsing 0..P and discarding.
+
+## Session 79, continued a twenty-seventh time — D7 model CONFIRMED by injection; the one-hook design is earned
+
+`tools/diag_d7_inject.py` (new) overrides the `D7` register at `0x400a4834` (after `D7` is
+built, before the rebuild loop reads it) and compares the per-track arrays the loop actually
+produces against the model. No firmware bytes touched -- an emulator register poke, so the
+hypothesis is tested without committing to a patch. cont.23 died of being asserted from a
+static chain without a runtime check; this is that check.
+
+Model under test (from cont.26's decode):
+
+```
+tps_t        = LEN_TBL[scale_t]
+q            = (D7 - 1 + tps_t) / tps_t        0x400a4912, signed, truncating
+NEXT_STEP[t] = q mod length_t                  0x400a4976 remainder, stored 0x400a497a
+PAIR[t]      = D7 - q*tps_t                    0x400a4920, stored 0x400a4924
+```
+
+### Result 1 — stock, natural boundary, no injection: **16/16 match**
+
+`D7 = 0`, `*(long)0x80006628 = 0` at frame 5112. All 16 tracks: `NEXT_STEP = 0`, `PAIR = 0`.
+Confirms both the model and that `0x80006628` is normally **0** -- so it is a *start offset*,
+not a pattern length. cont.23's reading stays refuted; cont.26's decode is validated.
+
+### Result 2 — stock, `D7 = 48` injected, switching INTO the per-track-scale pattern: **16/16 match**
+
+Target pattern `SCALE_MODE = 1`, so per-track fields are live:
+
+| track | SCALE | LEN | tps | NEXT_STEP | model | STEP |
+|-------|-------|-----|-----|-----------|-------|------|
+| 0, 3-15 | 2 | 16 | 6 | 8 | 8 | 8 |
+| 1 | **0** | 16 | **3** | **0** | 0 | 0 |
+| 2 | 2 | **12** | 6 | 8 | 8 | 8 |
+
+Track 1 at 2x: 48 ticks / 3 = 16 steps = a full cycle of its 16-step length, so it lands back
+at 0 while the 1x tracks sit at 8 -- musically correct, not a desync. Track 2 carries a
+*different length* (12) and still lands correctly. **A non-zero `D7` distributes coherently
+across both differing scales and differing lengths**, which is precisely AR's commit
+semantics, performed by OT's own existing code.
+
+Since `D7 = LEN_TBL[masterScale] * *(long)0x80006628`, that global is in **master steps**: to
+resume at master step N, set it to N.
+
+### CORRECTION to an overclaim made earlier this session
+
+An earlier reading of the patched run called `STEP[1] = 9` against `2` elsewhere "the
+differently-scaled-track desync reproduced". **Wrong.** Stock shows the same structure
+(`STEP[1] = 15` against `0`), because `CNTDN[1] = 3 = LEN_TBL[2] - LEN_TBL[0] = 6 - 3` -- the
+designed scale-difference phase delay from cont.21. A differently-scaled track defers its
+rebuild by exactly that delay. It is correct stock behaviour, not a fault.
+
+### OPEN — the current patch breaks this very mechanism
+
+The same observation run against `out/mainos_directjump_v4.bin` with an armed DJ commit gave
+`NEXT_STEP = 2` for all 16 tracks where the model (and stock) give **0** -- **0/16**. So the
+existing patch perturbs the per-track rebuild it should be driving. Not yet explained, and it
+is an argument for the redesign removing hooks D/E/F rather than adding to them. Do not build
+without accounting for it.
+
+### The hook site
+
+`dj_c` already sits at `0x400a4840` -- **after** `D7` is formed (`0x400a4812` / `0x400a4826`)
+and **before** the rebuild loop's cursor setup (`0x400a485a`) and body (`0x400a4884`). It is
+already in exactly the right place in the instruction stream; it needs to set `D7` as well as
+the master `STEP`.
+
+### Status
+
+Verification step complete and positive. The one-hook design is now measured rather than
+inferred. Remaining before a build: explain the patched-image `0/16`, then implement
+(`dj_c` sets `D7 = resumeStep * LEN_TBL[masterScale]`), then delete hooks D/E/F, then prove
+dynamically on both scale branches before any flash.
