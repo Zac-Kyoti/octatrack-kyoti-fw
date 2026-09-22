@@ -26,7 +26,7 @@
 
 > Welcome Elektron fans. I'm Zac Kyoti, a musician and music tech hacker located
 > on the US west coast. This repo contains knowledge and tools that may be used
-> to build your own unofficial Octatrack KYOTI firmware.
+> to research and explore modifications to the Octatrack stock firmware.
 >
 > **Design Philosophy:** KYOTI firmware is designed as a set of features, QOL
 > improvements, and bugfixes, not available in the factory firmware, which can be
@@ -64,54 +64,73 @@ Which builds have run on real hardware and which are emulator-only is tracked in
 
 ### Extended Features
 
-- **MUTE MODE** — a PERSONALIZE choice for how audio-track mute behaves: `OT`
-  (stock), `OT+FX` (*soft mute*: the dry signal cuts clean while the track's FX
-  inserts ring their tails out, and the same soft cut applies to SOLO), or `DT`
-  (Digitakt-style sequencer mute: a sounding voice finishes under its own AMP
-  envelope, only new trigs are suppressed). A fourth mode, `OTFX` (instant cut +
-  playhead-resume unmute), is reverse-engineered but not yet built.
-  → [`tools/build_mutemode.py`](tools/build_mutemode.py) ·
-  [`tools/build_mutemode_dt.py`](tools/build_mutemode_dt.py) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 9–14"
+- **MUTE MODE** — a PERSONALIZE choice for how audio-track mute behaves, now
+  **four hardware-confirmed modes**: `OT` (stock, byte-for-byte), `OTFX` (hard
+  dry cut with FX inserts ringing their tails while the sequencer is left
+  alone, so unmuting picks up exactly where the pattern would have been),
+  `OTFX-T` (the same dry cut and ringing tails, but a *trig*-mute — new trigs
+  stay suppressed until you unmute), and `DT-T` (pure sequencer mute,
+  Digitakt-style: a sounding voice rides out its own amp envelope and FX ring,
+  only new trigs are suppressed). SOLO gets the same treatment as a manual
+  mute; `CUE MUTES TRK` intentionally stays a hard cut in every mode. One
+  persisted word in the `'ANDY'` battery-SRAM block holds the mode, so it
+  survives a power cycle.
+  → [`tools/build_mutemode_dt.py`](tools/build_mutemode_dt.py) ·
+  write-up [`NOTES.md`](NOTES.md) "Session 9–12", "Session 57–58"
 
 - **DIRECT JUMP** — an optional immediate pattern change, toggled with `[PTN]` +
   `[YES]`: a manually cued pattern switches on the next step tick instead of
-  quantizing to the end of the current one, keeps the playhead step position, and
-  loads the new Part at once. The arranger and pattern chains are untouched.
-  → [`tools/build_directjump.py`](tools/build_directjump.py) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 15, 21, 35"
+  quantizing to the end of the current one, loads the new Part at once, and
+  sends the MIDI Program Change ~1 step early. The arranger and pattern chains
+  are untouched. The toggle's reachability and switch timing are
+  **hardware-confirmed** (`v4` fixed a stock overlay that swallowed the
+  toggle's dispatch while `[PTN]` was held — `v1`–`v3` were dead on hardware).
+  **Still open:** it currently restarts the new pattern at step 1 instead of
+  keeping the playhead position; root-caused but not yet fixed.
+  → [`tools/build_directjump_v4.py`](tools/build_directjump_v4.py) ·
+  write-up [`NOTES.md`](NOTES.md) "Session 15, 21, 35" → "Session 60–79"
 
 - **SIDE-CHAIN COMPRESSOR** — an external key input for the stock DynamiX
   COMPRESSOR: a `KEY` parameter (plus `KEY FLT` / `KEY GAIN` / `SC LISTEN`) on the
-  effect's page 2 picks one of the eight audio tracks to drive the compression,
-  keying even when that track is muted. Scoped to the same DSP core; SPATIALIZER
-  is donated for the code space. This is a DSP56300 job, built in stages.
+  effect's page 2 picks any of the eight audio tracks to drive the compression,
+  keying even when that track is muted — reaching **any of the 8 tracks**, not
+  just the four sharing the compressor's own DSP core, via a cross-core
+  generation-counter/shared-window mechanism. SPATIALIZER is donated for the
+  code space. This is a DSP56300 job, built in stages, and is
+  **hardware-confirmed on MKI (2026-09-20)**, single-core and cross-core both.
+  A very mild HP↔OFF filter-pop remains, filed as research-only — it does not
+  block shipping.
   → [`tools/build_sidechain.py`](tools/build_sidechain.py) (menu) ·
   [`tools/build_sidechain2.py`](tools/build_sidechain2.py) (+ DSP) ·
   [`tools/build_sidechain3.py`](tools/build_sidechain3.py) (+ filter / gain /
-  listen) · write-up [`NOTES.md`](NOTES.md) "Session 17, 36"
+  listen / cross-core) · write-up [`NOTES.md`](NOTES.md) "Session 17" (+1–8) →
+  "Session 77" (×3)
 
 - **RELOAD FROM PROJECT** — reload a single pattern, or a single track, from the
   CF card without stopping playback and without the audio glitch that stock
-  whole-bank RELOAD causes. Hold `[PTN]` for a sticky picker (`TRK SEQ` /
+  whole-bank RELOAD causes. Hold `[PTN]` ~0.5 s for a sticky picker (`TRK SEQ` /
   `PTN SEQ` / `PART + PTN SEQ`); `[YES]` runs it, `[NO]` cancels, no timeout.
-  Adapted from the Digitone's RELOAD FROM PROJ.
+  Adapted from the Digitone's RELOAD FROM PROJ. The first hardware flash
+  (2026-09-20) found 3 real bugs — a `[PTN]`-held reachability issue (the same
+  overlay problem DIRECT JUMP hit) and a permanent picker lockout are fixed but
+  **not yet reflashed**; the reload's own timing (an audible gap and a reset to
+  step 1) and a proper list-style picker UI are deferred.
   → [`tools/build_reload2.py`](tools/build_reload2.py) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 42–44, 47"
+  write-up [`NOTES.md`](NOTES.md) "Session 42–44, 47" → "Session 80"
 
 ### QOL Enhancements
 
 - **QUANTIZE LIVE REC toggle** — a front-panel shortcut for the all-or-nothing
   QUANTIZE LIVE REC setting that otherwise lives only in PERSONALIZE: hold
-  `[REC]`, tap `[PLAY]` twice, with an on/off toast. The first `[REC]` + `[PLAY]`
-  still starts live recording exactly as on stock.
+  `[REC]`, tap `[PLAY]` twice close together, with an on/off toast that closes
+  instantly on release. The first `[REC]` + `[PLAY]` still starts live recording
+  exactly as on stock. **Hardware-confirmed** after a rewrite: the original
+  design flashed and hung the unit (a one-shot toast call tail-jumped into a
+  modal window/overlay stack); the fix re-arms a self-timing toast every few
+  ticks instead, HW-confirmed with no hang. Two cosmetic issues are parked, not
+  chased further.
   → [`tools/build_qlrec.py`](tools/build_qlrec.py) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 46"
-
-- **Erase empty trigless locks** *(scoped — not yet built)* — when a live-record
-  erase (`[NO]` + knob) clears a step's last parameter lock, automatically drop
-  the now-purposeless trigless lock too.
-  → write-up [`NOTES.md`](NOTES.md) "Session 13, 39"
+  write-up [`NOTES.md`](NOTES.md) "Session 46", "Session 50", "Session 51/51-bis/51-ter"
 
 ### Bugfixes
 
@@ -126,32 +145,51 @@ Which builds have run on real hardware and which are emulator-only is tracked in
   a MIDI track, or trigless locks on an audio track, with no trig anywhere) showed
   as an unused slot, its grid LED unlit under `[PTN]`. The stock "does this
   pattern have content" predicate (`FUN_4009a464`) scanned each track's trig masks
-  but never its p-lock arrays.
+  but never its p-lock arrays. **Fixed, hardware-confirmed** — flashed to the MKI
+  2026-09-13, no regression.
   → [`tools/build_pattern_led.py`](tools/build_pattern_led.py) ·
   write-up [`NOTES.md`](NOTES.md) "Session 48"
 
-- **Part-params-carry-over fix** *(emu-validated, not yet flashed)* — after a
-  pattern-triggered Part change, stale per-track state from the old Part could
-  leak into the new one: three Elektronauts reports describe a PICKUP machine
-  still playing its old pickup loop after switching to a non-PICKUP one, a
-  recorder track's SRC/RLEN carrying over, and a REC SETUP tweak leaking across
-  Parts. Root cause: the pattern-change handler (`0x400621a6`) only ran a light
-  per-track rebind (`FUN_400972fc`), never Elektron's own full Part-apply
-  (`FUN_40009094`). `tools/patch_partreapply.s` closes all three: an always-on
-  recorder-cache restore, a per-track PICKUP kill-bit, and a scene-morph
-  retrigger, gated behind a stopped-transport call into `FUN_40009094`. Clean
-  emu A/B (`tools/emu_partswitch.py --repro` stock vs `--patched`) confirms the
-  PICKUP kill bitmap and the recorder cache both land correctly. Not yet folded
-  into the comprehensive build, not yet on hardware.
+- **Erase empty trigless locks** — a trigless lock (a step carrying parameter
+  locks but no audible trig) left lit on the trig row forever once its last
+  remaining lock was erased, even though it was now inert. The handler had been
+  mis-identified for about fifty sessions; the real path (`opcode 8` →
+  `FUN_40041af4` → `FUN_40038874`) has no `linkw`, which is why function-boundary
+  scans kept missing it. The fix sits on the erase store itself, so a
+  deliberately empty trigless lock placed with `FUNC`+`TRIG` is never mistaken
+  for one that just lost its last lock. **Fixed, hardware-confirmed** (MKI,
+  2026-09-21): multi-pass erase, last-lock removal, ordinary trigs, and
+  `FUNC`+`TRIG` placeholders all check out.
+  → [`tools/build_triglock.py`](tools/build_triglock.py) ·
+  write-up [`NOTES.md`](NOTES.md) "Session 13", "Session 78"
+
+- **Part-change carryover fix** *(partial — the reported bug is still open)* —
+  after a pattern-triggered Part change, stale per-track state from the old
+  Part could leak into the new one: three Elektronauts reports describe a
+  PICKUP machine still playing its old pickup loop after switching to a
+  non-PICKUP one, a recorder track's SRC/RLEN carrying over, and a REC SETUP
+  tweak leaking across Parts. Root cause: the pattern-change handler never ran
+  Elektron's own full Part-apply (`FUN_40009094`). `tools/patch_partreapply.s`
+  was flashed 2026-09-13: the recorder-cache and scene-morph pieces are
+  behaviorally safe on hardware, though reports #2/#3 (recorder, REC SETUP)
+  could not be reliably reproduced on stock and are treated as unconfirmed.
+  **The originally reported #1 bug — a FLEX track stuck playing an old PICKUP
+  loop — is NOT fixed:** it reproduces identically on stock and patched on a
+  repeated pattern switch. Root cause still open.
   → [`tools/build_partreapply.py`](tools/build_partreapply.py) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 49"
+  write-up [`NOTES.md`](NOTES.md) "Session 49", "Session 50"
 
 ### Comprehensive KYOTI Octatrack Firmware build
 
-- **Octatrack KYOTI FW v1.0** — every mod above in one image, with all code caves
-  and shared hooks de-conflicted, then round-tripped through the container tool
-  (`elektron-firmware-tool`) with the checksums recalculated and verified.
-  → *(combined build deferred — see [`reference/MERGE.md`](reference/MERGE.md))* ·
+- **Octatrack KYOTI FW v1.0** *(deliberately withdrawn — no combined build
+  today)* — every finished mod in one image, with all code caves and shared
+  hooks de-conflicted, then round-tripped through the container tool
+  (`elektron-firmware-tool`) with the checksums recalculated and verified. The
+  build tooling was withdrawn so a single combined image can't quietly ship
+  DIRECT JUMP, RELOAD FROM PROJECT, or the part-change carryover fix while
+  they're still unfinished; it will be reconstructed from the allocation map
+  once every feature is shippable.
+  → *(see [`reference/MERGE.md`](reference/MERGE.md))* ·
   write-up [`NOTES.md`](NOTES.md) "Session 45"
 
 See **[`BUILD_KYOTI.md`](BUILD_KYOTI.md)** for prerequisites, the one-time setup,
@@ -185,17 +223,16 @@ Never cut power during `UPDATING FLASH`. Full procedure and recovery net:
 | element | build | status (Octatrack MKI) |
 |---|---|---|
 | MIDI Plays-Free trig fix | all | **confirmed** — flashed 2026-08-28, stall gone, no regression |
-| MUTE MODE menu + `OT+FX` soft mute | `build_mutemode.py` | **confirmed** — the Session-10 build was flashed and works |
-| ↳ `'ANDY'`-shadow persistence + the SOLO extension (V7) | `build_mutemode.py` | emulator only |
-| `DT` sequencer-mute mode | `build_mutemode_dt.py` | emulator only |
-| `OTFX` playhead-resume mode | — | reverse-engineered, not built |
-| DIRECT JUMP | `build_directjump.py` | emulator only (stub-level) |
-| SIDE-CHAIN — `KEY` menu + formatter | `build_sidechain.py` / `build_sidechain3.py` | emulator only |
-| SIDE-CHAIN — DSP hooks | `build_sidechain2.py` / `build_sidechain3.py` | hooks emulator-verified (dsp56kEmu); the audio path is untested |
-| RELOAD FROM PROJECT | `build_reload2.py` | picker + SEQ worker emulator-verified end to end; the CF-card parse and the hold-event feel are a hardware test |
-| Empty-pattern LED fix | `build_pattern_led.py` | emulator only (stock repro + patched fix + no false positive) |
-| Part-params-carry-over fix | `build_partreapply.py` | emu-validated (clean A/B, `emu_partswitch.py --repro`); not yet flashed; the combined build is deferred |
-| QUANTIZE LIVE REC toggle | `build_qlrec.py` | emulator only |
+| MUTE MODE — all four modes (`OT` / `OTFX` / `OTFX-T` / `DT-T`), menu, SOLO handling | `build_mutemode_dt.py` | **confirmed, final** — flashed and hardware-tested 2026-09-21, MKI |
+| ↳ `'ANDY'`-shadow persistence (survives power cycle) | `build_mutemode_dt.py` | **confirmed** — one persisted word, defaults verified on hardware |
+| DIRECT JUMP pattern-change mode | `build_directjump_v4.py` | **active WIP, partly hardware-confirmed** — toggle reachability and switch timing confirmed; playhead-preserving behaviour (currently resets to step 1) is root-caused but not yet fixed |
+| SIDE-CHAIN COMPRESSOR (`KEY`/`KEY FLT`/`KEY GAIN`/`SC LISTEN`, cross-core) | `build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | **confirmed, final for now** — flashed 2026-09-20, MKI, single-core and cross-core both |
+| RELOAD FROM PROJECT — modal picker | `build_reload2.py` (TRK SEQ / PTN SEQ / PART + PTN SEQ) | **active WIP, partly hardware-confirmed** — first flash (2026-09-20) found 3 real bugs, 2 fixed but not yet reflashed; reload timing and a real list-style picker UI are deferred |
+| Empty-pattern LED fix | `build_pattern_led.py` | **confirmed** — flashed 2026-09-13, grid LED lights correctly, no regression |
+| Erase empty trigless locks | `build_triglock.py` | **confirmed, final** — flashed 2026-09-21, MKI; multi-pass erase, last-lock removal, ordinary trigs, and `FUNC`+`TRIG` placeholders all preserved |
+| Part-change carryover — recorder cache / scene-morph pieces | `build_partreapply.py` | flashed 2026-09-13, behaviorally safe; reports #2/#3 (recorder, REC SETUP) could not be reliably reproduced on stock, treat as unconfirmed |
+| ↳ report #1 (PICKUP→FLEX stuck loop) | `build_partreapply.py` | **fix does not address the real bug** — reproduces identically on stock and patched on a repeated pattern switch; root cause still open |
+| QUANTIZE LIVE REC toggle | `build_qlrec.py` | **confirmed** — original design hung the unit 2026-09-13; rewrite (periodic re-arm) HW-confirmed, no hang; 2 cosmetic issues parked, not chased further |
 
 ---
 
