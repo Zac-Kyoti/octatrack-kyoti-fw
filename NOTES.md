@@ -25005,3 +25005,142 @@ each: `G_KIND` returns to 0, `POPUP` (`0x460e5cd0`) returns to 0, layer depth
 returns to baseline, and the `[BANK]`/`[YES]` dispatch slots return to their
 expected handlers. If any of those drifts monotonically across iterations, that
 is the bug. Single-reload green is now known to be worthless as evidence here.
+
+## Session 79, continued a twentieth time — OT's complete per-track state vector enumerated; TWO long-standing misreadings corrected
+
+Follow-on from the AR-side breakthrough (`ar-kyoti-fw` Session 8, commit `4afd3c3`), which
+retracted "AR's DIRECT JUMP commit writes one variable" and established the real invariant:
+**rewrite the whole per-track state vector from one master position; never patch it.** AR
+does this in two unconditional loops over its 13 tracks, rebuilding eight parallel arrays.
+The OT-side question that made portable was: *how many arrays does OT have?* Guessing that
+number is precisely what produced the flashed regression, so it was measured.
+
+Tool: `tools/ghidra/attic/GhidraDirectJump47.java` — dumps a range with Ghidra's own
+`getResultObjects()` plus the reference manager's read/write reference types, so writes are
+classified by the decompiler rather than by eyeballing mnemonics, and branch targets are
+printed so loop back-edges are measured, not assumed.
+
+### Loop structure (measured)
+
+Two structurally identical sibling loops inside `consumer_a6c0_a33f8`, plus a mirror block:
+
+| loop | top | bottom (back-edge) | index | trip |
+|------|-----|--------------------|-------|------|
+| AUDIO | `0x400a3cd0` | `0x400a3dc8` `bne.w 0x400a3cd0` | `D3` = 0..7 | 8 |
+| MIDI  | `0x400a3df6` | `0x400a3ee2` `bne.w 0x400a3df6` | `D3` = 8..15 | 8 |
+| `0x46c7xxxx` mirror | `0x400a3ee6` | — | — | — |
+
+Per-track cursors advance at each loop's bottom (`0x400a3db0`–`0x400a3dc0`,
+`0x400a3ecc`–`0x400a3eda`). Audio blob cursor `A2` strides `0x91a` from `blob+0x50`; MIDI
+cursor `A3` strides `0x8b0` from `blob+0x48f8` — which independently corroborates
+`patch_trigscale`'s MIDI addressing (`MIDI_STRIDE 0x8b0`, `MIDI_SCALE_OFF 0x48f9`).
+
+### The complete per-track state vector — EIGHT arrays, 16 entries each
+
+Every array is **audio 0..7 immediately followed by MIDI 8..15** (MIDI base = audio base +
+8 entries, verified for all eight), and they tile contiguously. Geometry is self-proving,
+exactly as AR's 13-entry tiling was:
+
+| base (16 entries) | stride | role | written at |
+|---|---|---|---|
+| `0x800064d0` | 1 | **per-track STEP** (was called `REFILL_TBL`) | `++` `0x400a3d78`, `clr` `0x400a3d94` |
+| `0x800064e0` | 1 | previous STEP (snapshot before `++`) | `0x400a3d6e` |
+| `0x800064f0` | 1 | **ticks-elapsed-within-current-step** (was called `STEP_IN_PAT`) | `++` `0x400a3ce2`, `clr` on wrap `0x400a3cf6` |
+| `0x80006500` | 1 | ARMED / active gate (loop top requires `== 1`) | `clr` `0x400a3dac` |
+| `0x800065c3` | 1 | `CNTDN_TBL` — **read only in this loop** (`tst.b (0xf3,ptr)`), armed elsewhere | — |
+| `0x800065d3` | 1 | `= PAIR[t].hi` | `0x400a3d36` |
+| `0x80006604` | **2** | 2-byte-per-track pair, source for the above | (written elsewhere) |
+| `0x8000663e` | 1 | `TRK_SCALE_IX` — per-track scale index | `0x400a3d08` / `0x400a3d0e` |
+
+Plus two shared 16-bit masks, one bit per track 0..15: `0x80006624` (set, `0x400a3d42`) and
+`0x80006626` (cleared, `0x400a3d28`). Plus per-track mirrors of `ACT_PAT`/`ACT_BANK` into
+`0x46c77b89[t]` / `0x46c769b0[t]` (`0x400a3d56` / `0x400a3d66`), which the block at
+`0x400a3ee6`+ then shuffles through a `0x46c7xxxx` shift-register of previous values.
+
+**OT has eight per-track arrays — the same count as AR.** The port is structurally
+symmetric; there is no extra OT complexity to invent machinery for.
+
+### CORRECTION 1 (major): `LEN_TBL 0x400aba50` is TICKS-PER-STEP, not pattern length
+
+This project has treated `LEN_TBL` as a scale-index → *pattern length* table for many
+sessions. It is not. Contents `3,4,6,8,12,24,48,96,...`; taking 6 ticks = 1x, the
+multipliers are:
+
+```
+3 -> 2x    4 -> 3/2x   6 -> 1x    8 -> 3/4x
+12 -> 1/2x  24 -> 1/4x  48 -> 1/8x  96 -> 1/16x
+```
+
+That is **exactly the Octatrack's per-track SCALE list**, in order. It is also the same
+table AR uses for the same purpose (`0x401a8ff0` = `3,4,6,8,12,24,48`). Decisive.
+
+Consequences, all confirmed by the loop body:
+
+- `0x800064f0[t]` counts **ticks within the current step** and wraps at
+  `LEN_TBL[TRK_SCALE_IX[t]]`. The whole rest of the loop body runs only on that wrap —
+  i.e. once per *step*, at that track's own rate. It is not a step-within-pattern counter.
+- `0x800064d0[t]` is the real **per-track step position**, incremented once per step and
+  compared against the per-track LENGTH byte, then reset. It is the true analogue of AR's
+  `0x40566720[t]`, and `0x800064e0[t]` is the analogue of AR's `0x4056673a[t]` ("step−1").
+
+Pattern-blob fields, now unambiguous: pattern `+0x8e53` = default LENGTH, `+0x8e54` =
+default SCALE, `+0x8e55` = `SCALE_MODE` flag; per audio track `+0x50` = LENGTH, `+0x51` =
+SCALE (MIDI: `+0x48f8` / `+0x48f9`).
+
+### CORRECTION 2: `0x400a536c` is a track-cycle-complete callback, not a per-trig fire
+
+`tools/diff_stock_vs_patch.py` labels `0x400a536c` `TRIG_FIRE`. Measured gating: it is
+reached only when `0x800064d0[t] + 1 >= trackLength`, i.e. **once per track per full cycle
+of that track's length** — a wrap/restart callback. Any "fires" metric built on it counts
+track wraps, not trigs. This partly explains the emulator's `total-fires=0`: the harness may
+have been counting a rare event under a misleading name. Retarget before relying on it.
+
+### This mechanically explains the flashed hardware regression
+
+The `dpf_normal` out-of-bounds read put garbage into `0x800064f0[t]`. That is the
+**ticks-within-step** counter whose wrap gates the entire loop body. A garbage value ≥ the
+tick threshold makes it wrap on *every* tick, so every track ran its step body every tick:
+continuous retriggering (the "short clicks in time with the trigs") while the visible step
+position never advanced coherently (the frozen transport). The symptom is now accounted for
+exactly, not by analogy.
+
+It also shows why both validations missed it: they targeted `SCALE_MODE == 1` patterns, so
+the broken branch never executed, and the emulator's only correctness metric was built on
+`0x400a536c`, which Correction 2 shows was measuring the wrong event.
+
+### The port, now fully specified
+
+AR-shaped commit, one unconditional loop, replacing the six repair hooks:
+
+```
+scaleMode = newPattern[0x8e55]
+new_step  = <master step position>                 ; 0 for DIRECT START
+for t in 0..15:
+    scale = scaleMode ? blob[t][+0x51] : newPattern[0x8e54]
+    len   = scaleMode ? blob[t][+0x50] : newPattern[0x8e53]
+    0x8000663e[t] = scale                          ; TRK_SCALE_IX
+    0x800064d0[t] = new_step mod len               ; STEP
+    0x800064e0[t] = (that) - 1                     ; STEP_PREV
+    0x800064f0[t] = 0                              ; restart the tick-within-step counter
+    ; 0x80006500[t] ARMED, 0x800065c3[t] CNTDN, 0x80006604[t] PAIR: semantics still open
+```
+
+Note AR's dividend is its **master step counter** (`0x405666e4`), not an absolute tick —
+so the invented `G_ABSTICK` is probably unnecessary; OT's own master `STEP` (`0x800065b6`)
+is the direct analogue. And because this rebuilds state directly, Hook A's mid-cycle
+`clr DAT_800065b6` fake-step-0 is no longer needed: the commit need not enter stock's
+pattern-boundary body at all, which removes the entire "stock invariant violated
+mid-cycle" bug class rather than adding a seventh patch for it.
+
+### Still open before any build
+
+1. Semantics of the three remaining arrays: `0x80006500` (ARMED), `0x800065c3`
+   (`CNTDN_TBL`, written outside this loop — find where), `0x80006604` (2-byte pair).
+   AR writes all of its eight; OT's commit must too, or justify skipping each.
+2. Where to commit from — a per-tick step-boundary site, AR's `FUN_4009905c` analogue —
+   rather than inside the pattern-boundary body.
+3. **The emulator still cannot demonstrate playback.** With Correction 2, the existing
+   fires metric is also mislabelled. No build should be flashed until a harness observes
+   real per-step activity and a stock-vs-patched diff over it is clean.
+
+No patch source was changed this session. Measurement only.
