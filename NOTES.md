@@ -25276,3 +25276,61 @@ needed, while hooks D/E/F repaired the damage downstream one array at a time.
 
 No patch source changed this session. Measurement only. Two Ghidra-project side effects: the
 1586-byte gap (and the smaller ranges probed) are now decoded and saved.
+
+## Session 79, continued a twenty-second time — the harness was never broken; the METRIC was. Emulator runs the sequencer fine
+
+The standing belief since Session 79's middle stretch was that the emulator "never fires a
+trig" (`total-fires=0`, `TRANSPORT=0`) and therefore no build's playback correctness had ever
+been testable — treated as a blocking precondition for any further work. That belief is now
+**retracted**.
+
+Session 79 cont.20 (commit `a072eaf`) had already measured that `0x400a536c` — the
+instruction the fires metric watched, named `TRIG_FIRE` in `tools/diff_stock_vs_patch.py` —
+is reached only when a track's step counter completes a **full cycle of its length**. At
+default settings that is ~96 ticks apart, so a short run legitimately observes zero, and the
+whole "the emulator can't play" conclusion was an artefact of counting a rare event under a
+misleading name.
+
+New tool `tools/diag_seq_activity.py` measures depth-of-execution along the per-track path
+instead of guessing. Against stock `section_3_MAIN_OS.bin` + the `OT DEMO` project, 1493
+frames:
+
+```
+audio loop top      0x400a3cd0    208      MIDI loop top       0x400a3df6    208
+ARMED gate passed   0x400a3cda    208      stock rebuild loop  0x400a4884      0
+TICKS_IN_STEP++     0x400a3ce2    208      master STEP cleared 0x400a4842      0
+step boundary(wrap) 0x400a3cf6     32      track-wrap callback 0x400a3d98      0
+STEP++              0x400a3d78     32
+```
+
+All 16 tracks: `ARMED=1`, `SCALE=2` (`LEN_TBL[2]` = 6 ticks = 1x — consistent with cont.20's
+Correction 1), STEP advanced through 6 distinct values, tick counter through 3.
+**16/16 tracks advancing.** The sequencer runs.
+
+`0x400a3d98` = 0 is exactly the predicted consequence of Correction 2 — the run simply never
+reached a full track cycle. Note `TRANSPORT (0x800065b8)` reads 0 while the sequencer is
+demonstrably advancing, so that flag is not an "is playing" indicator either; runs were being
+judged by two separate misleading signals at once.
+
+### `tools/diff_stock_vs_patch.py` rewritten
+
+Now compares what the sequencer actually does rather than a rare callback: the per-track
+`STEP` / ticks-within-step / `ARMED` / `SCALE` arrays (16 entries each) sampled on a fixed
+schedule, plus master `STEP`, plus execution counts at the eight named per-track path
+instructions — reporting the first diverging sample, and which tracks differ.
+
+Crucially it now checks **liveness as a hard precondition, before any comparison**: if the
+per-track loop never executed, or no per-track counter ever moved, it reports `FAILED` and
+exits 2 rather than "IDENTICAL". Both previous revisions of this script could return a
+green result from a run in which nothing happened, which is the specific failure mode that
+let the regression reach hardware. Default `--frames` raised to 6000, long enough to cross a
+full 16-step pattern at 1x.
+
+### Status
+
+The no-flash rule stands, but its stated blocker is gone: emulator-based validation of
+playback is possible **now**, and was all along. What remains before a build is the
+substantive work from cont.21 — pin `D7`'s multiplier at `0x400a4812`/`0x400a4826` and its
+units, then re-scope the patch around feeding stock's existing rebuild loop
+(`0x400a4884`–`0x400a49e2`) with the right master position, deleting repair hooks rather
+than adding them.
