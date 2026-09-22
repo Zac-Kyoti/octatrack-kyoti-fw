@@ -24786,3 +24786,137 @@ is worth nothing, and this cost the user a bad flash to learn.
 Logs: `/tmp/dj_repro2.log` (reproduction, 22/64), `/tmp/dj_fix_sm0.log` /
 `/tmp/dj_guard_sm0.log` (fixed + guarded, 4/64), `/tmp/dj_guard_sm1.log` (no regression,
 3/64).
+
+### ARTLTEST7 — the whole p-lock cluster is uninvolved. Measured.
+
+Beacon `KYOTI` present, so the diagnostic firmware definitely ran. Opcodes observed
+across the create-two-locks + erase-both gesture:
+
+    1 x90   5 x254(sat)   8 x185   9 x1   17 x14   18 x2
+    20 x25  21 x25        24 x5    43 x122  50 x1  51 x1
+
+**None of 64 / 65 / 66 / 70 / 74.** So `FUN_40041bc4`, `FUN_40041784`, `FUN_40042158`,
+`FUN_4004f124`, `FUN_4004ef54` -- the entire `0x40062xxx` p-lock cluster this thread has
+chased since Session 26, and the subject of all three builds -- is **not on the LIVE
+`[NO]`+knob path at all**. `FUN_40042158`'s cave again never ran.
+
+Handlers of the opcodes that DO occur:
+
+| op | case | op | case | op | case |
+|---|---|---|---|---|---|
+| 1 | `0x40061dac` | 9 | `0x40061f5e` | 21 | `0x40062288` |
+| 5 | `0x40061e8e` | 17 | `0x400620ec` | 24 | `0x4006234e` |
+| 8 | `0x40061ed4` | 18 | `0x400622c6` | 43 | `0x40062454` |
+| 20 | `0x400621a6` | 50 | `0x4006241c` | 51 | `0x40062480` |
+
+### v3 — stop decompiling candidates, watch the data and name the culprit
+
+Twelve candidate cases is still twelve guesses. v3 instead **watches the bytes that must
+change** and records which message was in flight when they did.
+
+`caveA` now keeps a shadow of `#1[step 6][param 0..3]` (`0x400e22f9`) and `TRAC+0x10`'s
+step-0..7 byte (`0x400e21f7`) -- bank 1 / pattern 1 / track 1 -- and on every dispatched
+message compares them. A difference means the PREVIOUS message's handler did it, so it
+appends `{opcode, which byte, old, new}` to an 8-deep ring and bumps a **culprit
+histogram** indexed by that opcode. Log grew to `0x150`: shadow `+0x20`, prev opcode
+`+0x25`, change count `+0x26`, ring `+0x28`, culprit histogram `+0x100`.
+
+Validated end to end, not just in RAM: emulator run -> log bytes spliced into a real
+bank file at the disk offset -> `tools/read_triglock_log.py` decodes it. With a forced
+change attributed to a posted opcode-21 message:
+
+    opcode 255 changed #1[step6][param0]  0xff -> 0x30     (the loader, before any message)
+    opcode 255 changed #1[step6][param2]  0xff -> 0x4e
+    opcode 255 changed TRAC+0x10 steps0-7 0xff -> 0x40
+    opcode  21 changed #1[step6][param0]  0x30 -> 0xff     (synthetic, forced here)
+    opcode  21 changed #1[step6][param2]  0x4e -> 0xff
+    opcode  21 changed TRAC+0x10 steps0-7 0x40 -> 0x00
+    CULPRIT HISTOGRAM: opcode 21 x3
+
+One reader bug found doing that: the cave indexes the culprit histogram **by the opcode
+itself** (1-based), while the reader printed `i+1`, reporting opcode 22 for 21. Fixed.
+Third instrument bug caught by validating the instrument -- the pattern is now the rule,
+not the exception, for this thread.
+
+**Constraint for the hardware run**: the watched addresses are hardcoded to bank 1 /
+pattern 1 / track 1, step 7. The test must use exactly that placement or the log records
+nothing.
+
+## Session 79, continued a nineteenth time (2026-09-21) — the validation basis for this
+whole thread is far weaker than previous entries claimed: **the emulator never fires a
+single trig.** Reported broken on hardware with DIRECT JUMP both ON and OFF, so the
+previous entry's fix cannot be the (only) cause. Two real bugs fixed; DJ-OFF cause NOT
+found. Recommend staying on stock.
+
+### The correction that matters most
+
+`emu_directjump_dynamic.py`'s own logs, every run this session, say:
+
+```
+pre-switch : ... fires-so-far=0 TRANSPORT=0 tick_count=28
+post-switch: ... total-fires=0
+after start: TRANSPORT@0x800065b8=0 ...
+```
+
+**Zero trig fires, TRANSPORT reads 0, and master STEP advances only 1->2 across 700
+frames.** The harness exercises the tick/scheduling machinery and the `DAT_80001904`
+phase-anchor tables -- which are real and do move -- but it never exercises the trig/voice
+path at all. So "validated: 3/64 slots match ground truth" NEVER meant "the sequencer
+still plays correctly." Every "validated" and "dynamically proven" claim in the last
+several entries should be read as scoped strictly to that one table. That gap is exactly
+how a change looked perfect here and destroyed playback on hardware, and previous entries
+(mine included) overstated it.
+
+### Bug 1 (fixed, previous entry): `dpf_normal` OOB LEN_TBL index -- DIRECT JUMP ON only
+
+`dj_pertrack_fix` only runs on a real DJ commit (`G_JUST_COMMITTED`, set solely by `dj_c`'s
+armed path). **The user reports the failure with DIRECT JUMP OFF as well, so this bug
+cannot be the whole story.**
+
+### Bug 2 (fixed here): `dj_c` replayed only ONE of its TWO displaced instructions
+
+The 8 displaced bytes at `0x400a4840` are `4200` = `clr.b %d0` followed by
+`13c0 800065b6` = `move.b %d0,STEP`. Stock therefore leaves **D0 == 0**. The non-armed
+(DJ OFF) path replayed only the STEP write, leaving D0 dirty on every commit regardless of
+DJ state. Stock code immediately after reads D6 and then reloads registers, so D0 looks
+dead -- but that is disassembly-reading, not proof, and this is an unconditional deviation
+from stock either way. Now replays both instructions exactly.
+
+### Audited and cleared (all unconditional paths)
+
+- **Hook D** (`dj_scaleix_fix`): same `move.b`-into-dirty-register shape, but its
+  destination write is byte-sized, so the dirty upper bits are never used. Safe.
+- **Hook E** (`dj_abstick`): correctly replays `move.b %d0,STEP`, preserves d0/d1.
+- **Scratch globals**: scanned the STOCK image for absolute-long references to
+  `0x80006a30-0x80006a5f` -- zero hits (patched image has our 4+3, proving the scan works).
+  `G_ABSTICK`/`G_JUST_COMMITTED` are not aliasing stock state.
+
+### New tool, and its own first result was vacuous
+
+`tools/diff_stock_vs_patch.py` -- attaches the SAME project to the stock MAIN_OS section
+and to the patched one, DJ left OFF, and diffs trig fires + STEP/STEP_IN_PAT. This is the
+test that should have existed before any flash. **Its first version forgot to start the
+transport and "passed" with 0 fires in both runs**; fixed to call
+`start_transport_live()`. It still reports IDENTICAL -- but that is currently
+uninformative for the same reason as everything else: no trigs fire in the emulator even
+with the transport started.
+
+### Status: DO NOT FLASH. Cause of the DJ-OFF failure is NOT established.
+
+Two real bugs found and fixed, neither proven to be the user's failure. The honest
+position is that this thread cannot currently tell whether a build plays correctly,
+because its only dynamic instrument never plays anything.
+
+### NEXT — in this order, before any further hardware attempt
+
+1. **Make the emulator actually fire trigs.** Nothing else in this thread is trustworthy
+   until "does the sequencer still play?" is a question the harness can answer. Note
+   `tools/diag_echo_newcallers.py` DID observe real gated trig activity against the
+   `MMTESTDT` fixture ("0 pass / 12-60 silence ... matching 3 trigs x N pattern loops"),
+   so the capability exists in this repo -- port that fixture/approach into
+   `diff_stock_vs_patch.py` and make a non-zero fire count a hard precondition of the test.
+2. Then re-run the stock-vs-patched DJ-OFF differential and let it actually mean something.
+3. Only then consider narrowing the patch (e.g. shipping the master-step fixes alone) or
+   another flash.
+4. Carried over untouched: group-7 residue; MIDI-track counterpart at 0x400a3dd2;
+   `DAT_46104cf4`; `FUN_4000ae12`'s caller.

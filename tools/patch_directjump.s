@@ -434,7 +434,16 @@ djb_orig:
 dj_c:
     tst.b   G_ARMED
     bne.b   djc_fix
-    clr.b   STEP
+|   Session 79 ("continued a nineteenth time"): the 8 displaced bytes here are TWO stock
+|   instructions -- `clr.b %d0` (0x4200) THEN `move.b %d0,STEP` (0x13c0 800065b6) -- so
+|   stock leaves D0 == 0 on the way out. This path replayed only the STEP write and left D0
+|   holding whatever it had, a real (if probably harmless) deviation from stock on EVERY
+|   commit, DIRECT JUMP on or off: the stock code immediately after reads D6 and then
+|   reloads registers, so D0 looks dead there, but "looks dead in the disassembly I could
+|   read" is exactly the standard of evidence that has burned this thread before. Replay
+|   both instructions exactly and the question stops mattering.
+    clr.b   %d0                         | displaced original #1 (stock leaves D0 = 0)
+    move.b  %d0,STEP                    | displaced original #2 (STEP = D0 = 0)
     rts
 djc_fix:
     clr.b   G_ARMED
