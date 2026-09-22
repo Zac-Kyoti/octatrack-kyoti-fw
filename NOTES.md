@@ -25674,7 +25674,6 @@ hardware-exported data** carrying a trigless lock with zero p-locks at step 6, i
 what `FUNC`+`TRIG` places. It erases a param that was never locked there and requires the
 flag to survive on both stock and patched. The previous build fails that test by
 construction; this is the regression that would otherwise have shipped.
-
 ## Session 79, continued a twenty-fifth time — first DJ-ON run; TWO corrections, one of them to cont.23
 
 `tools/diag_dj_commit.py` (new) performs a real mid-pattern pattern change against
@@ -25735,3 +25734,32 @@ stock behaviour with the feature nominally on.
 
 No patch source changed. Outstanding: `D7`'s units (measurement in flight), a genuine DJ-on
 run via the cue path, and the `SCALE_MODE == 0` stock-vs-patched diff (also in flight).
+
+### FINISHED — hardware-confirmed (MKI, 2026-09-21)
+
+User flashed the erase-store build (`0x40038a5c`) and confirmed it works, including the
+case that forced the redesign: a `FUNC`+`TRIG` empty trigless lock survives a `[NO]`+knob
+erase aimed at an unrelated parameter. **Feature closed.**
+
+Final shape: one 6-byte detour on `FUN_40038874`'s per-param erase store, 296 B cave,
+`1.40C` stock-transparent. Fires only when the erased param really was locked and every
+other param in the row is already clear -- so multi-pass, placeholder preservation, and
+"never a global sweep" all fall out of stock's own data rather than any state of ours.
+
+What this thread cost, recorded so it is not repeated: **four builds, three of them aimed
+at code that never runs during the gesture.** The root error was Session 30's untested
+assumption that `FUN_40041bc4` is the LIVE erase handler, which then went unchallenged
+through ten continuations of Session 78 while every "validation" drove that assumed target
+with assumed arguments -- a procedure that can only ever confirm itself. The thread turned
+the moment the firmware was made to report what it actually did, on the user's own unit,
+through a channel (the bank blob, serialised by a project save) that carries the trace back
+off the machine.
+
+Two durable artefacts beyond the feature:
+- `tools/patch_triglock_diag.s` + `tools/read_triglock_log.py` -- a reusable
+  trace-on-hardware harness (beacon, per-opcode histogram, watched-byte culprit
+  attribution). Any future "function X handles gesture Y" claim in this project can be
+  settled with it instead of argued.
+- `build_triglock.py`'s `assert_no_branch_into` -- refuses a detour whose displaced bytes
+  contain a branch target. This hazard had never been checked by any build script here,
+  and it silently produced a hanging image once.

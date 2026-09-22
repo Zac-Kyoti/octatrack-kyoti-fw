@@ -602,7 +602,7 @@ hold **[REC]**, tap **[PLAY]** twice, close together.
 > (refinement, `G_PEND` bug fix, `MAX_GAP` correction). **Hardware-confirmed
 > in full** except the two parked cosmetic items above.
 
-### 4.11  Auto-remove an emptied trigless lock  (`build_triglock.py` — **retargeted onto the traced handler, emu-validated, NOT YET FLASHED**)
+### 4.11  Auto-remove an emptied trigless lock  (`build_triglock.py` — **HARDWARE-CONFIRMED, FINAL** — MKI, 2026-09-21)
 
 > **Three earlier TRIGLOCK builds were aimed at the wrong code entirely** and did nothing.
 > If any of them is on the unit, flash stock `1.40C` first

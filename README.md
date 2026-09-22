@@ -279,7 +279,7 @@ time you open the menu). Write-up: [`NOTES.md`](NOTES.md) "Session 46"
 51/51-bis/51-ter" (refinement pass, logic-bug fix, tuning correction). **All
 of the above is HW-confirmed** except the two parked cosmetic items.
 
-### TRIGLESS-LOCK AUTO-REMOVE — drop an emptied trigless lock  ·  *core behaviour hardware-confirmed; placeholder refinement emulator-clean, not yet flashed*
+### TRIGLESS-LOCK AUTO-REMOVE — drop an emptied trigless lock  ·  **fixed, hardware-confirmed (MKI)**
 
 A **trigless lock** is a step that carries parameter locks but no audible trig. Erase
 its last remaining lock and stock leaves it lit on the trig row forever — the step is
@@ -306,8 +306,10 @@ otherwise have silently removed placeholders the playhead crossed.
 
 `tools/patch_triglock.s`, `python3 tools/build_triglock.py` → `1.40C` (stock-transparent,
 one hunk + cave). Validated against **real hardware-exported projects**, stock vs patched,
-including a real `FUNC`+`TRIG`-style empty placeholder. Write-up: [`NOTES.md`](NOTES.md)
-"Session 13" + "Session 78" (continued, many parts).
+including a real `FUNC`+`TRIG`-style empty placeholder, then **confirmed on hardware
+(MKI, 2026-09-21)**: multi-pass erase, last-lock removal, ordinary trigs untouched, and
+`FUNC`+`TRIG` placeholders left alone. Write-up: [`NOTES.md`](NOTES.md) "Session 13" +
+"Session 78" (continued, many parts).
 
 **Known ambiguity, pre-existing in stock:** a parameter whose legal range includes 255
 stores as the same `0xFF` that means "not locked", so stock itself cannot tell such a lock
