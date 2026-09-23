@@ -107,7 +107,50 @@ to some other layer/context. This mismatch is a plausible contributor to the
 inconsistent arrow behaviour in hardware report #8, and it is moot in the
 redesign (no arrows involved).
 
-## Unsaved-Part handling (spec gap, user invited suggestions)
+## The Part half of #2 — STOCK ALREADY DOES ALL OF IT (measured, Session 85)
+
+The user described stock's behaviour exactly: a never-saved Part toasts
+**`SAVE PART FIRST!`** on a reload attempt; once saved, that never reappears —
+dirty reloads to the saved version with a `PART %d RELOADED` toast, clean does
+nothing at all. So do not reimplement any of it. Stock's Part RELOAD lives at
+`0x4005e042` and decodes as:
+
+```
+4005e042:  movel #0x95048,%d0          ; DIRTY_BLOB_OFF (same constant patch_partreapply.s pins)
+4005e048:  moveal 0x46c82456,%a0       ; BLOB_PTR
+4005e04e:  mvzb  %a0@(0,%d0:l),%d0     ; the PERSISTED per-Part dirty bitmask
+4005e052:  btst  %d1,%d0               ; d1 = part index
+4005e054:  beqw  0x4005e0e2            ; bit CLEAR -> bail, do nothing, no toast
+4005e058:  movel %d1,%sp@-
+4005e05a:  jsr   0x4004aab4            ; <-- THE PART RELOAD
+4005e070:  tstl  %d0                   ; its RETURN VALUE
+4005e072:  beqs  0x4005e090            ;   0  -> "SAVE PART FIRST!"  (never saved)
+4005e080:  pea   0x400b41aa            ;  !0  -> "PART %d RELOADED"
+4005e0a4:  jsr   0x4005a2b8            ; TOAST(buf, 0x18)
+```
+
+**Three things fall out of this, all of which the redesign should use:**
+
+1. **`FUN_40049aab4`… i.e. `0x4004aab4(part)` is the whole operation**, and it
+   **returns the never-saved answer itself**: `0` = never saved (stock then says
+   `SAVE PART FIRST!`), non-zero = reloaded. So the "handle it gracefully" case
+   needs no detection logic of ours at all — call it and branch on `d0`.
+   Note `PARTRELD_FN = 0x4004aab4` is ALREADY pinned in `tools/emu_reload.py`, and
+   the RELOAD2 suite asserts it is called **zero** times. The redesign inverts
+   that expectation: #2 must call it exactly once.
+2. **Stock gates the whole thing on the persisted dirty bit** (`blob + 0x95048`,
+   bit = part index): clear → do nothing, no toast. That is the user's "clean
+   (nothing happens, no toast)". Mirror it, or simply let `0x4004aab4` be the
+   single source of truth.
+3. **Toast duration is `0x18` (24)**, not the `0x44` (68) the RELOAD2 code uses.
+   That answers "0.5 s or less / whatever is OT standard" — `0x18` IS the OT
+   standard for this family of messages. Use it.
+
+Relevant strings, for toasts that should read like stock:
+`0x400b4190` `PARTS SAVED` · `0x400b419c` `PART %d SAVED` ·
+`0x400b41aa` `PART %d RELOADED` · `0x400b41bb` `SAVE PART FIRST!`
+
+## Unsaved-Part handling — RESOLVED by the above
 
 If `[BANK]`+`[TRACK]` runs while the pattern's Part has **unsaved edits**,
 applying the saved Part silently discards them — and Part edits are not covered
@@ -117,13 +160,21 @@ by the sequencer's UNDO.
 closed) pins `PART_DIRTY_RAM = 0x100b145e`, a per-Part edited/unsaved bitmask
 (persisted copy at `blob + 0x95048`). A single bit test.
 
-**Recommended policy**: if the active Part is dirty, **reload the sequence and
-SKIP the Part**, with a distinct toast (`TRK SEQ RELOADED / PART UNSAVED`).
-Rationale: one predictable behaviour per state, clearly announced, and never
-destroys unsaved work. Explicitly NOT a two-press confirm idiom — conditional
-multi-press behaviour is what made the old design "hard to understand what is
-happening where and when" (hardware report #8). A force-override can be added
-later if wanted.
+**My first recommendation here was WRONG and the user corrected it.** I had
+conflated "dirty" with "never saved" and proposed skipping the Part when dirty.
+The user's actual requirement: **a saved Part SHOULD replace a dirty Part** —
+that is the entire point of the operation. The only special case is a Part that
+has **never been saved**, which must execute gracefully: no change to the Part,
+slightly different toast.
+
+**Resolved policy**, using stock's own semantics via `0x4004aab4`:
+- Part never saved → it returns 0 → leave the Part alone, toast that says so
+  (stock's own wording is `SAVE PART FIRST!`).
+- Part dirty → it reloads to the saved version → toast `TRK SEQ + PART RELOADED`.
+- Part clean → nothing to do (stock's own gate on the persisted dirty bit).
+
+No dirty-flag logic of our own, no two-press confirm, no new detection. The
+sequence reload happens either way; only the Part half varies.
 
 ## ⚠️ Known-hard piece: deferring SELECT BANK to release
 
