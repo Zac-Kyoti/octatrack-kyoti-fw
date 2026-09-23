@@ -167,21 +167,29 @@ Which builds have run on real hardware and which are emulator-only is tracked in
   → [`tools/build_pattern_led.py`](tools/build_pattern_led.py) ·
   write-up [`NOTES.md`](NOTES.md) "Session 48"
 
-- **Part-change carryover fix** *(partial — the reported bug is still open)* —
-  after a pattern-triggered Part change, stale per-track state from the old
-  Part could leak into the new one: three Elektronauts reports describe a
-  PICKUP machine still playing its old pickup loop after switching to a
-  non-PICKUP one, a recorder track's SRC/RLEN carrying over, and a REC SETUP
-  tweak leaking across Parts. Root cause: the pattern-change handler never ran
-  Elektron's own full Part-apply (`FUN_40009094`). `tools/patch_partreapply.s`
-  was flashed 2026-09-13: the recorder-cache and scene-morph pieces are
-  behaviorally safe on hardware, though reports #2/#3 (recorder, REC SETUP)
-  could not be reliably reproduced on stock and are treated as unconfirmed.
-  **The originally reported #1 bug — a FLEX track stuck playing an old PICKUP
-  loop — is NOT fixed:** it reproduces identically on stock and patched on a
-  repeated pattern switch. Root cause still open.
+- **Part-change carryover fix** — after a pattern-triggered Part change, stale
+  per-track state from the old Part could leak into the new one. Three
+  Elektronauts reports drove the investigation; two are fixed and
+  hardware-confirmed:
+  - **Report #1 (PICKUP→FLEX stuck loop)** — a track left as PICKUP on one Part,
+    then switched to a Part where it's FLEX, kept playing the old Part's pickup
+    loop, and once it broke it stayed broken on every later pass (a one-way
+    latch). Root cause: the voice dispatch reads the sample slot it hands the
+    resolver from a per-track pre-image that stock re-seeds only when a track
+    *enters* PICKUP, never when it leaves — so the PICKUP slot survives into the
+    new FLEX machine. **Fixed, hardware-confirmed** (MKI, 2026-09-22): the
+    round trip now plays the correct sample on every pass.
+  - **Spurious Part-edited flag** — found while testing #1: a pattern switch
+    into a PICKUP track marked that Part edited/unsaved even when nothing
+    changed (stock behaviour, not introduced by this fix). **Fixed,
+    hardware-confirmed** (MKI, 2026-09-23) with a snapshot-and-restore detour
+    that preserves a genuine edit made before the switch.
+  - Reports #2/#3 (a recorder track's SRC/RLEN carrying over; a REC SETUP tweak
+    leaking across Parts) could never be reliably reproduced on stock and
+    remain unconfirmed. The recorder-cache and scene-morph mechanisms this fix
+    also addresses are behaviorally safe on hardware regardless.
   → [`tools/build_partreapply.py`](tools/build_partreapply.py) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 49", "Session 50"
+  write-up [`NOTES.md`](NOTES.md) "Session 49", "Session 50", "Session 81"
 
 ### Comprehensive KYOTI Octatrack Firmware build
 
@@ -190,9 +198,11 @@ Which builds have run on real hardware and which are emulator-only is tracked in
   hooks de-conflicted, then round-tripped through the container tool
   (`elektron-firmware-tool`) with the checksums recalculated and verified. The
   build tooling was withdrawn so a single combined image can't quietly ship
-  DIRECT JUMP, RELOAD FROM PROJECT, or the part-change carryover fix while
-  they're still unfinished; it will be reconstructed from the allocation map
-  once every feature is shippable.
+  DIRECT JUMP or RELOAD FROM PROJECT while they're still unfinished; it will
+  be reconstructed from the allocation map once every feature is shippable.
+  (The part-change carryover fix is finished as of Session 81, but
+  `patch_partreapply` was never added to the combined build's stub list —
+  still pending, mechanical.)
   → *(see [`reference/MERGE.md`](reference/MERGE.md))* ·
   write-up [`NOTES.md`](NOTES.md) "Session 45"
 
@@ -235,7 +245,8 @@ Never cut power during `UPDATING FLASH`. Full procedure and recovery net:
 | Empty-pattern LED fix | `build_pattern_led.py` | **confirmed** — flashed 2026-09-13, grid LED lights correctly, no regression |
 | Erase empty trigless locks | `build_triglock.py` | **confirmed, final** — flashed 2026-09-21, MKI; multi-pass erase, last-lock removal, ordinary trigs, and `FUNC`+`TRIG` placeholders all preserved |
 | Part-change carryover — recorder cache / scene-morph pieces | `build_partreapply.py` | flashed 2026-09-13, behaviorally safe; reports #2/#3 (recorder, REC SETUP) could not be reliably reproduced on stock, treat as unconfirmed |
-| ↳ report #1 (PICKUP→FLEX stuck loop) | `build_partreapply.py` | **fix does not address the real bug** — reproduces identically on stock and patched on a repeated pattern switch; root cause still open |
+| ↳ report #1 (PICKUP→FLEX stuck loop) | `build_partreapply.py` | **confirmed fixed** — flashed 2026-09-22, MKI; the round trip now plays the correct sample on every pass, latch gone |
+| ↳ spurious Part-edited flag on entering PICKUP | `build_partreapply.py` | **confirmed fixed** — flashed 2026-09-23, MKI; a genuine edit made before the switch still shows correctly afterward |
 | QUANTIZE LIVE REC toggle | `build_qlrec.py` | **confirmed** — original design hung the unit 2026-09-13; rewrite (periodic re-arm) HW-confirmed, no hang; 2 cosmetic issues parked, not chased further |
 
 ---
