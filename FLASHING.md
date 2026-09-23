@@ -486,7 +486,7 @@ PERSONALIZE entry.
 > patterns both flip 0→1, an empty pattern stays 0 (no false positive), normal
 > trig patterns unaffected. `NOTES.md` "Session 48".
 
-### 4.9  Part params carry over after a pattern→Part change  (`build_partreapply.py` — report #1 ROOT-CAUSED AND FIXED in emu, NOT yet flashed; see below)
+### 4.9  Part params carry over after a pattern→Part change  (`build_partreapply.py` — report #1 FIXED, hardware-confirmed MKI 2026-09-22; one open regression candidate, see below)
 
 Was scoped from three Elektronauts reports for a pattern change that also
 switches to a different Part: (1) a track that was **PICKUP** on the old Part
@@ -503,8 +503,8 @@ tweak. Version stays `1.40C` — no PERSONALIZE entry, always on.
   or the patched build. Treat those two as **unconfirmed** — the emulator
   evidence for them (below) proves a code-level mechanism exists, not that
   it's what real users actually hit.
-- **Report #1 reproduces on stock, and as of 2026-09-22 it is ROOT-CAUSED
-  and FIXED in the emulator — but that fix has NOT been flashed yet.**
+- **Report #1 is FIXED and hardware-confirmed (MKI, 2026-09-22).** The 4-pass
+  round trip below now plays the new Part's FLEX sample on every pass.
   Precise repro: track 1 = **PICKUP** on Part A (silent), **FLEX** + a
   different sample on Part B. Pattern-A → pattern-B: plays the *correct*
   FLEX sample. Back to pattern-A: fine. Pattern-A → pattern-B **again**:
@@ -538,15 +538,17 @@ the current source to get it.
    - Stock and the 2026-09-13 build: the **first** A→B is correct; the
      **second** A→B plays Part A's old PICKUP content instead of Part B's
      FLEX sample, and so does every pass after it.
-   - **A build from the current source is expected to play Part B's FLEX
-     sample on every pass, including the second and later.** This is the
-     prediction to test — it is emulator-validated only (the emulator cannot
-     render this track's audio), so treat the hardware run as the real check.
-     If the second pass is still wrong, report it as a FAILED prediction
-     rather than assuming the fix partially worked.
+   - **A build from the current source plays Part B's FLEX sample on every
+     pass, including the second and later — confirmed on MKI, 2026-09-22.**
 3. Reports #2/#3: try the recorder SRC/RLEN and REC SETUP scenarios from the
    original write-up, but don't assume a discrepancy is present — it wasn't
    reproducible in this session's testing.
+4. **Open regression candidate (2026-09-22):** after P1→P2→P1, check whether
+   Part 1 reads as *edited/unsaved* in the PART menu even though nothing
+   changed it. This was seen on the 2026-09-22 build. It is NOT yet known
+   whether stock does the same — the entering-PICKUP path is stock's own —
+   so if you have a stock or pre-2026-09-22 image handy, run the same round
+   trip on it before assuming this build introduced it.
 
 > Emulator evidence: `emu_partswitch.py --repro` vs `--repro --patched` shows
 > a clean stock-vs-patched A/B for the recorder-cache / `TRK_PART` / scene /

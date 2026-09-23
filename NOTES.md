@@ -27821,3 +27821,45 @@ results cannot tell you this, by construction.
 2. `RELOAD BUSY` — root cause still unfound; ask the user about frequency on
    this build before investigating further.
 3. The list UI — cosmetic, lowest priority.
+
+### Session 81 continued (5) — HARDWARE: report #1 CONFIRMED FIXED (MKI, 2026-09-22). One new regression candidate.
+
+**Flashed and tested on the MKI. Report #1 PASSES.** The 4-pass round trip
+(P1→P2→P1→P2→P2→P2, trigging T1 at each arrival) now plays the new Part's FLEX sample
+on **every** pass, including the second and later — the good→good→bug latch is gone.
+The prediction made before the flash held exactly.
+
+This closes a thread open since Session 49 and flashed-and-failed at Session 50. The
+fix that mattered was step 2c: `jsr FUN_40001f18(bank, newPart, track)` on the
+leaving-PICKUP arm — the half of stock's own entering-PICKUP idiom
+(`0x400973b4`-`0x400973e0`) that the 2026-09-13 build omitted.
+
+Test 2 (regression check on normal PICKUP use) also passed: pickup recording arms,
+records and loops normally, and hands over to another track correctly.
+
+**NEW, OPEN — "Part reads as edited after the round trip."** User report:
+> P1/Part1 with a PICKUP machine on T1 → P2/Part2 with a FLEX machine on T1 → back to
+> P1. At the moment of the switch back to P1, **Part 1 shows as edited (unsaved)** even
+> though Part 1 was previously saved and nothing changed it.
+
+**NOT YET ATTRIBUTED — do not assume this build introduced it.** The switch that
+triggers it (P2→P1) is the **entering**-PICKUP transition, which is *stock's own*
+`FUN_400972fc` arm — this patch's added arm fires on the **leaving** transition
+(`oldType==4 && newType!=4`), i.e. on P1→P2, not on the switch the user names. So there
+are two live possibilities and they have very different consequences:
+
+1. **Stock behaviour**, surfaced only because report #1's fix now makes this round trip
+   worth doing. Then it is a separate stock bug, not a regression.
+2. **A regression from this patch.** The cave runs on EVERY Part change, not just the
+   PICKUP arm: step 1 (recorder memcpy into `REC_CACHE`), step 3 (scene-morph
+   retrigger), and step 4 (`FUN_40009094(bank,part)` whenever the transport is stopped)
+   all fire on P2→P1 too. Step 4 is the strongest suspect — a full Part apply is
+   exactly the kind of thing that could mark a Part as touched — followed by step 1,
+   which writes the recorder UI cache that a dirty-check might compare against.
+
+**NEXT:** find the per-Part "edited" flag, then watch it across P1→P5→P1 in the
+emulator on **stock vs patched**. That settles attribution without spending a flash
+cycle, and if it is ours it names which of the four steps sets it. Do NOT guess which
+step from shape alone — that error has been made three times on this thread already
+(`FUN_400972fc` for the slot writer, `FUN_40005030` and `FUN_4009d1e8` for the
+resolver) and each time the measurement said otherwise.

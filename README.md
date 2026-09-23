@@ -325,8 +325,8 @@ Part runs only a partial stock re-apply, so stale Part-2 state can leak into the
 newly-linked Part. `tools/patch_partreapply.s`, `python3 tools/build_partreapply.py`
 → `1.40C` (stock-transparent).
 
-**Report #1 (a FLEX track stuck playing an old PICKUP loop) is now root-caused and
-fixed in the emulator — awaiting a hardware test.** The voice dispatch reads the
+**Report #1 (a FLEX track stuck playing an old PICKUP loop) is fixed and
+hardware-confirmed (MKI, 2026-09-22).** The voice dispatch reads the
 sample slot it hands the resolver from a per-track pre-image (`0x8000082f +
 track*0x48`, byte 0). Stock seeds that byte from the Part only when a track *enters*
 PICKUP and never when it *leaves*, so the PICKUP slot (`128+track`) survives into the
@@ -336,6 +336,11 @@ broken) and why FLEX is affected while STATIC is not — FLEX and PICKUP share o
 arena and one table, differing only in slot number. Stock's own entering-PICKUP arm
 does the kill bit *and* a re-seed call together; the 2026-09-13 build replicated only
 the kill bit, which is why it changed nothing. The fix adds the missing re-seed.
+
+**One open regression candidate (2026-09-22):** after a P1→P2→P1 round trip across
+this transition, Part 1 reads as *edited/unsaved* even though nothing changed it.
+Not yet attributed — it may be stock behaviour on the entering-PICKUP path rather
+than something this fix introduced; under investigation.
 
 Reports #2/#3 (recorder, REC SETUP) could not be reliably reproduced on stock and
 are still treated as unconfirmed; the recorder-cache and scene-morph pieces were
@@ -349,7 +354,7 @@ flashed 2026-09-13 and are behaviorally safe. Write-up: [`NOTES.md`](NOTES.md)
 | Bug 1 manual-trig fix | all | **confirmed** — flashed 2026-08-28, stall gone, no regression |
 | Bug 2 p-lock-only pattern shows empty | `build_pattern_led.py` | **confirmed** — flashed 2026-09-13, grid LED lights correctly, no regression |
 | Part-change carryover — recorder cache / scene-morph pieces | `build_partreapply.py` | flashed 2026-09-13, behaviorally safe; reports #2/#3 (recorder, REC SETUP) could not be reliably reproduced on stock, treat as unconfirmed |
-| ↳ report #1 (PICKUP→FLEX stuck loop) | `build_partreapply.py` | **root-caused and fixed, emulator-validated, NOT yet flashed** — stale slot in the per-track pre-image (`0x8000082f + track*0x48`); stock re-seeds it entering PICKUP but never leaving. Stock/patched A/B clean in emu; the 2026-09-13 build did NOT fix it (kill bit copied, re-seed omitted). See `NOTES.md` "Session 81" |
+| ↳ report #1 (PICKUP→FLEX stuck loop) | `build_partreapply.py` | **confirmed fixed** — flashed 2026-09-22, MKI; the 4-pass round trip now plays the FLEX sample on every pass. Stale slot in the per-track pre-image (`0x8000082f + track*0x48`); stock re-seeds it entering PICKUP but never leaving. The 2026-09-13 build did NOT fix it (kill bit copied, re-seed omitted). See `NOTES.md` "Session 81" |
 | **QUANTIZE LIVE REC** front-panel toggle | `build_qlrec.py` | original design hung the unit 2026-09-13; rewrite (periodic `dur>0` re-arm) **HW-confirmed**, no hang; double-tap timing, toast fade/instant-close, and label polarity **all HW-confirmed correct**; 2 cosmetic issues (textless-box flash, PERSONALIZE row not live-redrawing) parked, not chased further |
 | **MUTE MODE** — all four modes (`OT` / `OTFX` / `OTFX-T` / `DT-T`), menu, SOLO handling | `build_mutemode_dt.py` | **confirmed, final** — flashed and hardware-tested 2026-09-21, MKI; all four modes and the derived menu index check out |
 | ↳ the `'ANDY'`-shadow persistence (survives power cycle) | `build_mutemode_dt.py` | **confirmed** — one persisted word, defaults verified on hardware |
