@@ -28183,3 +28183,66 @@ and the list renderer select a font at all, is the first RE step there.
    `[YES]`-alone family from "(6)"/"(9)"; keep watching rather than closing.
 3. The list UI — now **blocked on cave space** (8 B free) and on locating font
    `F4`.
+
+### Session 81 continued (6) — "Part reads as edited after the round trip" ATTRIBUTED: it is STOCK, not a regression from this patch
+
+**The per-Part "edited/unsaved" state is a BITMASK, one bit per Part, kept in two
+places:** `blob + 0x95048` (persisted) and `0x100b145e` (RAM mirror). SAVE PART
+(`FUN_4004a908`) clears this Part's bit in both, at `0x4004a968` / `0x4004a974` — which
+is how the flag was found (go at a dirty flag through whatever CLEARS it; 395 sites
+reference the RAM mirror, so searching for setters is useless).
+
+**Measured, stock vs patched, sequentially (see the methodology warning below):**
+
+| | stock | patched |
+|---|---|---|
+| writes to `0x100b145e` | 1 | 1 |
+| writer PC | `0x40097388` | `0x40097388` |
+| after initial P1 | `0x00` | `0x00` |
+| ARRIVAL #1 (P5) | `0x00` | `0x00` |
+| **back at P1** | **`0x01`** | **`0x01`** |
+| ARRIVAL #2 (P5) | `0x01` | `0x01` |
+
+**Byte-identical. This patch's four cave steps add ZERO writes to the flag.** The bit is
+set by `FUN_400972fc` at `0x40097388` (+ the persisted copy at `0x4009737c`) — stock
+code on the entering-PICKUP path, which this patch does not touch (its added arm fires
+on the *leaving* transition). The user's report — Part 1 reads edited on the switch
+BACK to P1 — lands exactly on the stock write, at exactly the measured moment.
+
+**Mechanism (structure measured; one operand uncertain, flagged).** Inside
+`FUN_400972fc`, gated at `0x40097336` on `newType == 4 (PICKUP)`: the routine force-writes
+the Part's stored PICKUP slot byte (`blob + part*0x18b2 + track*5 + 0x8f04e`) to
+`128+track` (`d2 = track + (-128)`, whose low byte is `0x80+track`), mirrors it into
+`SLOT_MIRROR 0x100a519c`, and **only then** sets the Part-dirty bit. There is a compare
+with a conditional skip at `0x4009735e` immediately before, so the dirty-set is NOT
+unconditional — it fires only when that write actually changes something. **The exact
+operands of that compare are NOT established**: r2's linear decode desyncs at
+`0x40097358`/`0x4009735a`, and this thread has been burned three times by trusting a
+desynced read. Treat "it only dirties when the stored slot differs" as the shape, not
+as a pinned fact.
+
+So stock *does* modify stored Part data during a pattern change (normalising the PICKUP
+slot) and marks the Part edited because of it. Defensible from Elektron's side — it did
+write to the Part — but surprising to a user who changed nothing.
+
+**METHODOLOGY WARNING — a mistake made and caught here.** The first attempt ran the
+stock and patched probes IN PARALLEL. They share one staging tree
+(`out/_emu_rtos_tree` under octabam), so they raced: the patched run died in
+`stage_project`, and the stock run — though it exited 0 and produced full output — was
+executing while another process deleted and recreated that tree, so it was NOT a valid
+result either. This is exactly octabam's own documented trap ("a result taken while
+another build was running is not a result"). **Run these probes sequentially.**
+A second confound was caught in the same pass: the harness's own setup pokes left
+Part 0 already reading dirty (`0x01`) at every snapshot, which made the first
+measurement meaningless for a report about a *saved* Part going dirty. The harness now
+clears both copies of the flag after setup (`clear-dirty` line in the output) so the
+round trip starts from a genuinely saved Part.
+
+**If it is ever to be fixed:** this patch's detour (`0x40062216`) runs at the TAIL of the
+"select Part P" handler, i.e. AFTER the `FUN_400972fc` ×8 loop has already set the bit,
+so the prior value is gone by the time our cave runs. Clearing the bit there would be
+WRONG — it would also wipe a genuine edit the user made before switching patterns. A
+correct fix needs a SECOND detour at the head of the handler to snapshot
+`0x100b145e` + `blob+0x95048`, with the existing cave restoring them. Modest work, one
+more hook site. Not attempted; not obviously worth it, since the underlying write to the
+Part's stored slot byte is real and arguably should be flagged.

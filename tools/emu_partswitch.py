@@ -170,6 +170,13 @@ PICKUP_ENABLE = 0x461054ec        # per-track PICKUP enable bitmask
 PICKUP_CFG = 0x461054f0           # written beside the claim/release
 PICKUP_SKIP = 0x46c7ff3e          # per-track "machine is PICKUP" flag byte
 
+# Per-Part "edited / unsaved" flag: a BITMASK, one bit per part, kept in two
+# places -- blob+0x95048 (persisted) and 0x100b145e (RAM mirror). SAVE PART
+# (FUN_4004a908) clears this part's bit in both at 0x4004a968/0x4004a974.
+# FUN_400972fc SETS it at 0x4009737c/0x40097388, before its own machine-type
+# check -- so stock touches it on the Part-change path too.
+PART_DIRTY = 0x100b145e
+
 SLOT_MIRROR = 0x100a519c          # FUN_400972fc writes the forced PICKUP slot here [+d3]
 FUN_400972fc_ENTRY = FUN_400972fc
 PREIMG_A = 0x8000082f            # FUN_40009094 per-track pre-image regions
@@ -303,6 +310,16 @@ def cmd_probe(rt, poke_pickup):
         print(f"    morph guard 0x400c0c44     = {u32(rt, MORPH_GUARD):#010x}   fader 0x460d16c8 = {u32(rt, FADER_POS):#010x}")
 
     # --- P1 (Part 0), transport running --------------------------------
+    # Simulate "this Part was saved": clear the per-Part edited bitmask in BOTH
+    # places before the round trip. Without this the harness's own blob pokes
+    # leave Part 0 already reading dirty (0x01) at every snapshot, which makes
+    # the measurement useless for the user's report -- their Part IS saved and
+    # goes dirty during the round trip.
+    rt.uc.mem_write(PART_DIRTY, b"\x00")
+    rt.uc.mem_write(blob + 0x95048, b"\x00")
+    print(f"\nclear-dirty : PART_DIRTY(0x100b145e)=0, blob+0x95048(={blob + 0x95048:#x})=0 "
+          f"-- simulating a saved Part before the round trip")
+
     rt.seq_select_live(curbank, 0)
     rt.internal_clock()
     rt.frame = True
@@ -415,6 +432,7 @@ def cmd_repeat(rt, own_poke=False, resolver=False, drive=False):
             "PICKUP_ENABLE 0x461054ec": f"{u32(rt, PICKUP_ENABLE):#010x}",
             "PICKUP_CFG 0x461054f0": f"{u32(rt, PICKUP_CFG):#010x}",
             "PICKUP_SKIP 0x46c7ff3e": f"{u8(rt, PICKUP_SKIP):#04x}",
+            "PART_DIRTY 0x100b145e": f"{u8(rt, PART_DIRTY):#04x}",
             f"voice[T{T+1}]+0x14 (mach)": f"{u8(rt, vb + 0x14):#04x}",
         }
 
@@ -451,6 +469,7 @@ def cmd_repeat(rt, own_poke=False, resolver=False, drive=False):
     rt.watch_mem(PICKUP_ENABLE, 8)        # 0x461054ec + 0x461054f0, adjacent
     rt.watch_mem(PICKUP_SKIP, 1)
     rt.watch_mem(PREIMG_A + T * 0x48, 1)   # the resolver's slot source, T1
+    rt.watch_mem(PART_DIRTY, 1)            # per-Part edited/unsaved bitmask
     n_pc = 0
     n_mw = 0
 
@@ -473,7 +492,7 @@ def cmd_repeat(rt, own_poke=False, resolver=False, drive=False):
 
     names = {PICKUP_OWNER: "PICKUP_OWNER", PICKUP_ENABLE: "PICKUP_ENABLE",
              PICKUP_CFG: "PICKUP_CFG", PICKUP_SKIP: "PICKUP_SKIP",
-             PREIMG_A + T * 0x48: "PREIMG_SLOT[T1]"}
+             PREIMG_A + T * 0x48: "PREIMG_SLOT[T1]", PART_DIRTY: "PART_DIRTY"}
 
     # --- drive the resolver directly (Session 81) -------------------------
     # T1 never sounds in the emulator, so it never reaches FUN_4000f450 on its
@@ -548,6 +567,16 @@ def cmd_repeat(rt, own_poke=False, resolver=False, drive=False):
             print(f"    MEM-W  {names.get(addr, hex(addr))} [{addr:#x}] <- {val:#x} "
                   f"({size}B) at pc {pc:#x}")
         n_mw = len(rt.mem_writes)
+
+    # Simulate "this Part was saved": clear the per-Part edited bitmask in BOTH
+    # places before the round trip. Without this the harness's own blob pokes
+    # leave Part 0 already reading dirty (0x01) at every snapshot, which makes
+    # the measurement useless for the user's report -- their Part IS saved and
+    # goes dirty during the round trip.
+    rt.uc.mem_write(PART_DIRTY, b"\x00")
+    rt.uc.mem_write(blob + 0x95048, b"\x00")
+    print(f"\nclear-dirty : PART_DIRTY(0x100b145e)=0, blob+0x95048(={blob + 0x95048:#x})=0 "
+          f"-- simulating a saved Part before the round trip")
 
     rt.seq_select_live(curbank, 0)
     rt.internal_clock()
