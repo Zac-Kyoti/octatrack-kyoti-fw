@@ -337,10 +337,14 @@ arena and one table, differing only in slot number. Stock's own entering-PICKUP 
 does the kill bit *and* a re-seed call together; the 2026-09-13 build replicated only
 the kill bit, which is why it changed nothing. The fix adds the missing re-seed.
 
-**One open regression candidate (2026-09-22):** after a P1→P2→P1 round trip across
-this transition, Part 1 reads as *edited/unsaved* even though nothing changed it.
-Not yet attributed — it may be stock behaviour on the entering-PICKUP path rather
-than something this fix introduced; under investigation.
+**A second, related stock bug was found and fixed the same way: a pattern change
+into a PICKUP track spuriously marks its Part edited/unsaved, even when nothing
+changed.** Attributed to stock's own entering-PICKUP path (measured identical on
+stock and the first patched build, so not something this fix introduced), then
+fixed with a second detour that snapshots the Part's edited state before the
+switch and restores it after — restoring the *whole* byte, so a genuine edit made
+before the switch survives untouched. Hardware-confirmed (MKI, 2026-09-23): the
+spurious mark is gone, and a real edit on another Part still shows correctly.
 
 Reports #2/#3 (recorder, REC SETUP) could not be reliably reproduced on stock and
 are still treated as unconfirmed; the recorder-cache and scene-morph pieces were
@@ -355,6 +359,7 @@ flashed 2026-09-13 and are behaviorally safe. Write-up: [`NOTES.md`](NOTES.md)
 | Bug 2 p-lock-only pattern shows empty | `build_pattern_led.py` | **confirmed** — flashed 2026-09-13, grid LED lights correctly, no regression |
 | Part-change carryover — recorder cache / scene-morph pieces | `build_partreapply.py` | flashed 2026-09-13, behaviorally safe; reports #2/#3 (recorder, REC SETUP) could not be reliably reproduced on stock, treat as unconfirmed |
 | ↳ report #1 (PICKUP→FLEX stuck loop) | `build_partreapply.py` | **confirmed fixed** — flashed 2026-09-22, MKI; the 4-pass round trip now plays the FLEX sample on every pass. Stale slot in the per-track pre-image (`0x8000082f + track*0x48`); stock re-seeds it entering PICKUP but never leaving. The 2026-09-13 build did NOT fix it (kill bit copied, re-seed omitted). See `NOTES.md` "Session 81" |
+| ↳ spurious Part-edited flag on entering PICKUP | `build_partreapply.py` | **confirmed fixed** — flashed 2026-09-23, MKI; a pattern switch into a PICKUP track no longer marks its Part unsaved, and a genuine edit made before the switch still shows correctly. Found while testing report #1; stock bug, not a regression. See `NOTES.md` "Session 81" |
 | **QUANTIZE LIVE REC** front-panel toggle | `build_qlrec.py` | original design hung the unit 2026-09-13; rewrite (periodic `dur>0` re-arm) **HW-confirmed**, no hang; double-tap timing, toast fade/instant-close, and label polarity **all HW-confirmed correct**; 2 cosmetic issues (textless-box flash, PERSONALIZE row not live-redrawing) parked, not chased further |
 | **MUTE MODE** — all four modes (`OT` / `OTFX` / `OTFX-T` / `DT-T`), menu, SOLO handling | `build_mutemode_dt.py` | **confirmed, final** — flashed and hardware-tested 2026-09-21, MKI; all four modes and the derived menu index check out |
 | ↳ the `'ANDY'`-shadow persistence (survives power cycle) | `build_mutemode_dt.py` | **confirmed** — one persisted word, defaults verified on hardware |

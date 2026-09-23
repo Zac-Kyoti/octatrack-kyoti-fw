@@ -28613,3 +28613,25 @@ index arithmetic.
 this does not stream sample audio, so it says nothing about STATIC-machine
 playback, which does read the card continuously. This result is specifically
 about SEQUENCE data (trigs/p-locks/scenes), not sample audio.
+
+### Session 81 continued (8) — HARDWARE: dirty-flag fix CONFIRMED (MKI, 2026-09-23). PARTREAPPLY thread closed.
+
+**Both tests passed on hardware.** P1(PICKUP)→P2(FLEX)→P1 no longer marks Part 1
+edited. A genuine edit made to a different Part before the same round trip still shows
+that Part as edited afterward — the restore preserves a real edit exactly as designed.
+
+This closes the PARTREAPPLY thread opened at Session 49: report #1 (PICKUP→FLEX stuck
+loop, the one with a solid repro) is fixed and hardware-confirmed; the spurious
+Part-edited flag found while testing it is fixed and hardware-confirmed; reports #2/#3
+remain unconfirmed on stock (unchanged since Session 50, not chased further — no clean
+repro was ever found for either). README/FLASHING.md updated to reflect closure.
+
+Three sub-threads over this session, each following the same discipline of measuring
+rather than guessing from shape: the ownership-singleton leak (fixed, its own repro,
+separate from report #1), report #1 itself (root-caused via a directly-driven resolver
+after three wrong shape-based guesses were checked and ruled out), and the dirty-flag
+regression risk (attributed to stock via a careful A/B, then fixed without losing a
+real edit, catching a self-introduced argument-corruption bug in the fix's own first
+draft before it ever reached hardware). All of it in `tools/patch_partreapply.s` /
+`tools/build_partreapply.py` / `tools/emu_partswitch.py`, cave now 402 B across two
+detours, version stays `1.40C`.

@@ -486,7 +486,7 @@ PERSONALIZE entry.
 > patterns both flip 0→1, an empty pattern stays 0 (no false positive), normal
 > trig patterns unaffected. `NOTES.md` "Session 48".
 
-### 4.9  Part params carry over after a pattern→Part change  (`build_partreapply.py` — report #1 FIXED, hardware-confirmed MKI 2026-09-22; one open regression candidate, see below)
+### 4.9  Part params carry over after a pattern→Part change  (`build_partreapply.py` — report #1 FIXED and a second stock bug (spurious Part-edited flag) FIXED, both hardware-confirmed MKI 2026-09-22/23)
 
 Was scoped from three Elektronauts reports for a pattern change that also
 switches to a different Part: (1) a track that was **PICKUP** on the old Part
@@ -543,12 +543,14 @@ the current source to get it.
 3. Reports #2/#3: try the recorder SRC/RLEN and REC SETUP scenarios from the
    original write-up, but don't assume a discrepancy is present — it wasn't
    reproducible in this session's testing.
-4. **Open regression candidate (2026-09-22):** after P1→P2→P1, check whether
-   Part 1 reads as *edited/unsaved* in the PART menu even though nothing
-   changed it. This was seen on the 2026-09-22 build. It is NOT yet known
-   whether stock does the same — the entering-PICKUP path is stock's own —
-   so if you have a stock or pre-2026-09-22 image handy, run the same round
-   trip on it before assuming this build introduced it.
+4. **Second bug, found and fixed — hardware-confirmed (MKI, 2026-09-23):** stock
+   itself marks a Part edited/unsaved on a switch into a PICKUP track, even when
+   nothing changed (attributed to stock's own entering-PICKUP path — measured
+   identical on stock and the first patched build). Fixed with a second detour
+   that snapshots the Part's edited-state bytes before the switch and restores
+   them after, so a genuine edit made before the round trip is not lost. Check:
+   P1→P2→P1 no longer marks Part 1 edited; a real edit made to a *different*
+   Part beforehand still shows edited afterward — both confirmed on hardware.
 
 > Emulator evidence: `emu_partswitch.py --repro` vs `--repro --patched` shows
 > a clean stock-vs-patched A/B for the recorder-cache / `TRK_PART` / scene /
