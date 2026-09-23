@@ -315,10 +315,17 @@ def cmd_probe(rt, poke_pickup):
     # leave Part 0 already reading dirty (0x01) at every snapshot, which makes
     # the measurement useless for the user's report -- their Part IS saved and
     # goes dirty during the round trip.
-    rt.uc.mem_write(PART_DIRTY, b"\x00")
-    rt.uc.mem_write(blob + 0x95048, b"\x00")
-    print(f"\nclear-dirty : PART_DIRTY(0x100b145e)=0, blob+0x95048(={blob + 0x95048:#x})=0 "
-          f"-- simulating a saved Part before the round trip")
+    # Seed 0x02 = "Part 1 is SAVED (bit 0 clear), Part 2 has a GENUINE unsaved
+    # edit (bit 1 set)". This tests both halves at once:
+    #   * does the round trip spuriously set bit 0?   (the reported bug)
+    #   * does the fix wipe bit 1 while suppressing it? (must NOT)
+    # stock expectation  : 0x02 -> 0x03  (bit 0 added spuriously)
+    # patched expectation: 0x02 -> 0x02  (bit 0 suppressed, bit 1 preserved)
+    rt.uc.mem_write(PART_DIRTY, b"\x02")
+    rt.uc.mem_write(blob + 0x95048, b"\x02")
+    print(f"\nseed-dirty  : PART_DIRTY(0x100b145e)=0x02, blob+0x95048(={blob + 0x95048:#x})=0x02")
+    print("              bit0 (Part 1) CLEAR = saved;  bit1 (Part 2) SET = a genuine edit")
+    print("              stock -> expect 0x03;  patched -> expect 0x02 (bit1 must survive)")
 
     rt.seq_select_live(curbank, 0)
     rt.internal_clock()
@@ -573,10 +580,17 @@ def cmd_repeat(rt, own_poke=False, resolver=False, drive=False):
     # leave Part 0 already reading dirty (0x01) at every snapshot, which makes
     # the measurement useless for the user's report -- their Part IS saved and
     # goes dirty during the round trip.
-    rt.uc.mem_write(PART_DIRTY, b"\x00")
-    rt.uc.mem_write(blob + 0x95048, b"\x00")
-    print(f"\nclear-dirty : PART_DIRTY(0x100b145e)=0, blob+0x95048(={blob + 0x95048:#x})=0 "
-          f"-- simulating a saved Part before the round trip")
+    # Seed 0x02 = "Part 1 is SAVED (bit 0 clear), Part 2 has a GENUINE unsaved
+    # edit (bit 1 set)". This tests both halves at once:
+    #   * does the round trip spuriously set bit 0?   (the reported bug)
+    #   * does the fix wipe bit 1 while suppressing it? (must NOT)
+    # stock expectation  : 0x02 -> 0x03  (bit 0 added spuriously)
+    # patched expectation: 0x02 -> 0x02  (bit 0 suppressed, bit 1 preserved)
+    rt.uc.mem_write(PART_DIRTY, b"\x02")
+    rt.uc.mem_write(blob + 0x95048, b"\x02")
+    print(f"\nseed-dirty  : PART_DIRTY(0x100b145e)=0x02, blob+0x95048(={blob + 0x95048:#x})=0x02")
+    print("              bit0 (Part 1) CLEAR = saved;  bit1 (Part 2) SET = a genuine edit")
+    print("              stock -> expect 0x03;  patched -> expect 0x02 (bit1 must survive)")
 
     rt.seq_select_live(curbank, 0)
     rt.internal_clock()

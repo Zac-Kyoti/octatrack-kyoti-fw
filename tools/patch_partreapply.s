@@ -90,6 +90,8 @@
     .equ  BANK_MIR,     0x100b14ce        | mirror of the applied BANK index (byte); the
                                           | byte before NEWPART_MIR -- this is the pair
                                           | stock's own FUN_400972fc call site reads
+    .equ  PART_DIRTY_RAM, 0x100b145e      | per-Part "edited/unsaved" bitmask, RAM mirror
+    .equ  DIRTY_BLOB_OFF, 0x95048         | ...and its persisted copy, at blob+this
     .equ  FUN_PREIMG_SEED, 0x40001f18     | stock: seed per-track engine pre-image from a Part
     .equ  VOICE_BASE,   0x800049d8        | per-track voice struct base
     .equ  VOICE_STRIDE, 0xA8
@@ -229,7 +231,78 @@ cave:
     lea     8(%sp),%sp
 
 .Ldone:
+    | ---- 2d: restore the per-Part "edited" bitmask snapshotted by cave2 ----
+    | Stock's FUN_400972fc entering-PICKUP arm force-writes the Part's stored
+    | PICKUP slot byte to 128+track and, when that write changes the stored
+    | value, marks the Part EDITED (0x4009737c persisted / 0x40097388 RAM).
+    | So switching INTO a pattern whose Part has a PICKUP machine leaves that
+    | Part reading unsaved although the user changed nothing. Measured
+    | identical on stock and patched, so this is stock behaviour, not ours.
+    | cave2 snapshots both copies at the HEAD of this handler, before the
+    | FUN_400972fc x8 loop; we put them back here, at the tail. Restoring the
+    | WHOLE byte is deliberate and is what preserves a genuine edit: a bit
+    | already set on entry was in the snapshot and goes back set; only bits
+    | the handler itself set are undone. Nothing legitimately dirties a Part
+    | during a pattern change, so there is nothing else to lose.
+    | NOTE, deliberately NOT undone: stock's write to the Part's stored slot
+    | byte itself. That value IS what a PICKUP machine needs (128+track), and
+    | reverting it would break the binding this patch exists to fix. So the
+    | Part's stored data really can differ from disk while reading clean --
+    | benign, because the value stock writes is always the same one, but it is
+    | a real narrowing of what "clean" means here.
+    lea     dirty_save_ram:l,%a1
+    move.b  (%a1),%d0
+    move.b  %d0,PART_DIRTY_RAM
+    lea     dirty_save_blob:l,%a1
+    move.b  (%a1),%d0
+    movea.l BLOB_PTR,%a0
+    adda.l  #DIRTY_BLOB_OFF,%a0
+    move.b  %d0,(%a0)
+
     movem.l (%sp),%d0-%d7/%a0-%a6
     lea     60(%sp),%sp
     jsr     CONT                         | replay the displaced instruction verbatim
     rts                                  | resume at 0x4006221c via the site's own return address
+
+| ===========================================================================
+| cave2 -- HEAD of the same "select Part P" handler, spliced over the
+| machine-type memcpy at 0x400621da (`jsr 0x40020898`, a "jsr kind" detour:
+| replay it verbatim, then rts back to 0x400621e0 on the site's own pushed
+| return address). Runs BEFORE the FUN_400972fc x8 loop, so it sees the
+| per-Part edited bitmask as it was before stock touches it.
+| ===========================================================================
+    .global cave2
+cave2:
+    lea     -60(%sp),%sp
+    movem.l %d0-%d7/%a0-%a6,(%sp)
+
+    move.b  PART_DIRTY_RAM,%d0
+    lea     dirty_save_ram:l,%a1
+    move.b  %d0,(%a1)
+
+    movea.l BLOB_PTR,%a0
+    adda.l  #DIRTY_BLOB_OFF,%a0
+    move.b  (%a0),%d0
+    lea     dirty_save_blob:l,%a1
+    move.b  %d0,(%a1)
+
+    movem.l (%sp),%d0-%d7/%a0-%a6
+    lea     60(%sp),%sp
+    | TAIL-CALL replay, not `jsr; rts`: FUN_MEMCPY takes 3 stack args (dst,src,len)
+    | already pushed by the detour SITE before `jsr <cave2>` fired, and its own
+    | rts must pop THEIR return address (0x400621e0) directly. A nested
+    | `jsr FUN_MEMCPY; rts` -- cave1's CONT idiom, copied here by mistake --
+    | pushes an EXTRA return address that shifts every fixed-offset arg read
+    | inside FUN_MEMCPY by 4 bytes, corrupting dst/src/len. Measured: hangs
+    | (`FW_SEQ_SELECT` / `call_as_main` never returns) rather than crashing
+    | outright, on the very first Part-changing switch. CONT's replay in cave1
+    | gets away with jsr+rts only because CONT takes ZERO stack args -- every
+    | OTHER patch in this repo tail-jumps for exactly this reason (`jmp`, not
+    | `jsr ...; rts`); this should have too.
+    jmp     FUN_MEMCPY
+
+    .align 2
+dirty_save_ram:
+    .space 1
+dirty_save_blob:
+    .space 1

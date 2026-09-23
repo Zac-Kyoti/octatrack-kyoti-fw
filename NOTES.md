@@ -28397,3 +28397,70 @@ tick-domain correctness and grid drift, so a silently corrupted absolute-tick
 counter is worth ruling out there before more measurement. RELOAD2's own scratch
 (`0x80006a50..55`) does not collide with DIRECT JUMP's — but MERGE needs a real
 scratch allocation map rather than per-feature `.equ`s.
+
+### Session 81 continued (7) — the dirty-flag fix: BUILT, self-caught bug FIXED, emu-validated clean. NOT yet flashed.
+
+**Built the two-detour fix** (per user directive: don't lose a genuine edit made before
+switching). `cave2`, a second detour at the HEAD of the "select Part P" handler
+(`0x400621da`, the machine-type memcpy site — same "jsr kind" idiom as the existing
+tail detour), snapshots both copies of the per-Part edited bitmask
+(`0x100b145e` + `blob+0x95048`) into cave-local scratch before `FUN_400972fc`'s x8 loop
+runs. Step 2d, added to the existing tail cave, restores both copies after. Restoring
+the WHOLE byte (not just clearing a bit) is what preserves a real edit: a bit already
+set on entry was captured and goes back set; only bits the handler itself set during
+the pattern change get undone.
+
+**Caught and fixed a real bug in this session's own first attempt, before it reached
+hardware.** `cave2`'s tail replayed the displaced instruction (`jsr FUN_MEMCPY`) with
+`jsr FUN_MEMCPY; rts` — copied from the existing tail cave's `jsr CONT; rts` idiom.
+That idiom only works for `CONT` (`0x400326a0`) because CONT takes ZERO stack
+arguments (confirmed: it just dereferences a state pointer, no args). `FUN_MEMCPY`
+takes THREE stack args (dst, src, len), already pushed by the site before `jsr <cave2>`
+fires — the nested `jsr` pushes an EXTRA return address on top of them, shifting every
+fixed-offset argument read inside `FUN_MEMCPY` by 4 bytes. Measured consequence: not a
+crash but a HANG — `seq_select_live` / `FW_SEQ_SELECT` never returned to `MAIN_SPIN`
+within a 4,000,000-step `call_as_main` budget, on the very first Part-changing switch.
+On hardware, a memcpy given a garbage length and garbage src/dst pointers is exactly
+the class of thing that could corrupt state or crash the unit — this was caught before
+any flash, which is the point of validating in emu first.
+
+**Root cause of the mistake:** every OTHER patch in this repo uses `jmp <target>`
+(a tail call) to replay a displaced instruction, precisely so the replayed function's
+own `rts` pops the ORIGINAL caller's return address directly, with no extra frame and
+no argument-offset corruption. Cave1's `jsr CONT; rts` was already an exception to that
+idiom, quietly safe only because CONT is 0-arg — and this session copied that exception
+as if it were the rule. **Fixed**: `cave2` now ends `jmp FUN_MEMCPY` (no trailing `rts`,
+now dead code, removed). Verified via `m68k-elf-objdump` before and after — the fixed
+version places dst/src/len at their original stack offsets.
+
+**Emu A/B, stock vs patched, run SEQUENTIALLY (never in parallel — see the Session 81
+continued (6) trap), seeded `0x02` (bit 1 = a genuine unsaved edit on a different
+Part) per the same methodology as continued (6):**
+
+| | stock | patched |
+|---|---|---|
+| after initial P1 | `0x02` | `0x02` |
+| ARRIVAL #1 (P5) | `0x02` | `0x02` |
+| back at P1 | `0x03` (spurious) | `0x02` (suppressed) |
+| ARRIVAL #2 (P5) | `0x03` | `0x02` |
+
+No hang, exit 0 both runs. Bit 1 (the simulated genuine edit) survives untouched on
+patched throughout — confirms the restore does not clobber a real edit. Report #1's own
+fix re-verified unaffected in the same run: T1's pre-image slot still tracks the Part
+correctly at every arrival (`02`/`02`/`80`/`02`).
+
+**Known narrowing, already documented in the patch source, restated here:** stock's
+write to the Part's stored PICKUP slot byte itself (the `128+track` normalisation) is
+deliberately NOT undone — reverting it would break report #1's fix, which depends on
+that value. So the Part's stored bytes can differ from what was last saved to disk while
+the edited flag reads clean. Benign in practice (stock always writes the same value),
+but a real narrowing of what "clean" means, worth remembering if this area is revisited.
+
+**Status: built, emu-validated clean, NOT flashed.** Cave 402 B (2 detours, 6 B each),
+version still `1.40C`. `build_partreapply.py` now splices two detour sites; both
+guarded with the same stock-bytes assertion as the original.
+
+**NEXT:** hardware test — the P1→P2→P1 round trip should no longer mark Part 1 edited,
+and a genuine edit made to a different Part before the round trip should still show
+edited afterward. If confirmed, this closes the last open item from this session's
+PARTREAPPLY work.
