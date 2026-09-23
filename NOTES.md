@@ -28635,3 +28635,124 @@ real edit, catching a self-introduced argument-corruption bug in the fix's own f
 draft before it ever reached hardware). All of it in `tools/patch_partreapply.s` /
 `tools/build_partreapply.py` / `tools/emu_partswitch.py`, cave now 402 B across two
 detours, version stays `1.40C`.
+## Session 84 (2026-09-23, `wip`) — DIRECT JUMP: the per-track SCALE cache was never refreshed at commit. A gap in the Session 83 AR port, found by hardware in one test
+
+Hardware report on the Session 83 AR-port build: two patterns of equal master length and
+scale switch cleanly — that part is **confirmed working on the MKI** — but give a track a
+**different SCALE on the target pattern** and two symptoms return:
+
+1. the fractional-step symptom (a switch can leave a pattern "between steps"), and
+2. a permanent step-count offset — with one pattern at 2x, the user expects pattern 2's
+   step 1 to fall on pattern 1's step 1 or step 9, and pattern 1's step 1 always on
+   pattern 2's step 1. It does not.
+
+### Root cause — the live per-track scale cache
+
+`TRK_SCALE_IX` (`0x8000663e[t]`, MIDI twin `0x80006646[m]`) is the **live** per-track scale
+index. The per-track wrap check at `0x400a3cee` compares each track's tick counter against
+`LEN_TBL[TRK_SCALE_IX[t]]`, so this cache is what sets each track's real tick **rate**.
+
+Stock refreshes it only **lazily**, at `0x400a3d08` / `0x400a3d0e`, reached only when a
+track's tick counter wraps. An image-wide scan finds writers ONLY at `0x4009b6e6` (sequencer
+init), `0x400a292a` / `0x400a2970`, and `0x400a3cb4` (that lazy per-tick loop). **The commit
+path `0x400a4884..0x400a4be6` never writes it.**
+
+So after a **mid-pattern** commit every track keeps running at the OUTGOING pattern's
+ticks-per-step until it next wraps — a wrong rate for up to a full track cycle, which reads
+as landing between steps and leaves a permanent offset once the track wraps and picks up the
+right rate. Both symptoms, one cause.
+
+Stock is fine at a natural boundary because every track has just wrapped there, so the lazy
+refresh has already run for all of them. Only a mid-pattern commit exposes it — which is
+DIRECT JUMP's entire purpose.
+
+Note stock's own rebuild loop reads the per-track scale **correctly** for its own math at
+`0x400a4900` (`SCALE_MODE ? blob[t][+0x51] : pattern[+0x8e54]`), so `NEXT_STEP`, `PAIR` and
+`CNTDN_TBL` are all computed against the right scale. **That is exactly why the landing
+POSITION looked right in every earlier test while the playback RATE did not.**
+
+### This is a gap in the Session 83 port, not a new bug
+
+AR's commit rebuilds `0x40566775[t]` — "per-track resolution index" — for all 13 tracks. It
+is **row 5 of the per-track inventory table in `reference/AR_DIRECT_JUMP.md`**, a document
+written in this project. Session 83 ported AR's POSITION and missed its RESOLUTION CACHE.
+It is also the per-track twin of the master `SCALE_IX` staleness `dj_c` has corrected since
+Session 70 — the same bug one level down, sitting immediately next to the code that fixes it.
+
+### MEASURED — `tools/diag_trkscale.py` (new), on the flashed Session 83 image
+
+DJTEST2 bank 0, patterns 0 and 1 (uniform mode: all-tracks 1x vs all-tracks 2x — a real
+hardware-exported fixture for exactly this):
+
+```
+0 -> 1   TRK_SCALE_IX audio: got [2]*8  want [0]*8      ** STALE, 8/8
+         TRK_SCALE_IX MIDI : got [2]*8  want [0]*8      ** STALE, 8/8
+1 -> 0   stale the other way, 16/16
+```
+
+16/16 wrong in both directions: cache says tps 6 where the pattern says tps 3.
+
+### Why every earlier test passed — the fixture never had the condition
+
+```
+pattern   t0      t1      t2      t3      t4      ...
+  A07     16/2/6  16/0/3  12/2/6  7/2/6   16/4/12
+  A08     16/2/6  16/0/3  12/2/6  7/2/6   16/4/12    <- IDENTICAL per-track scales
+```
+
+Every sweep in Sessions 82 and 83 switched A07↔A08. The cache was therefore never stale in
+any of them, and the 6/6 phase results were green with this bug untouched behind them.
+Session 83's commit message did record "per-track scale differences: NOT covered" — writing
+the caveat down is not the same as building the fixture, and the hardware found it in one
+test. **Standing lesson: when a known-uncovered case is named, build the fixture in the same
+session or the green result will be read as broader than it is.**
+
+### The fix
+
+In `dj_c`, immediately after the master `SCALE_IX` correction: rewrite `TRK_SCALE_IX[0..7]`
+and `MIDI_SCALE_IX[0..7]` from the incoming pattern's own scale bytes, using stock's own
+addressing read off `0x400a48d4`-`0x400a4906` — `patOff = pat*0x8ed8 + bank*0x9b340` (already
+in `d0`), `SCALE_MODE` at `PAT_SMODE+patOff` selecting each track's own byte
+(`TRK_BLOB+0x51 + patOff + t*0x91a`, MIDI `TRK_BLOB+0x48f8+1 + patOff + m*0x8b0`) against the
+pattern default at `PAT_SCALE+patOff`.
+
+Gated on an armed commit, so DJ-OFF stays byte-identical.
+
+Build: 802 B cave, 791 bytes changed, 0 unexpected outside the cave, manual-trig bytes
+identical, container round-trips.
+
+### MEASURED — after the fix
+
+| fixture | mode | result |
+|---|---|---|
+| 0 -> 1 | uniform, 1x -> 2x | 16/16 match the incoming pattern |
+| 1 -> 0 | uniform, 2x -> 1x | 16/16 match |
+| 6 -> 7 | **per-track**, audio idx `[2,0,2,2,4,2,2,2]` | 16/16 match |
+
+The 6→7 case is the one that matters for the addressing: it exercises the per-track branch
+with **distinct** values per track (T1 = idx 0, T4 = idx 4, rest idx 2), so it proves the
+`0x91a` stride and `+0x51` offset are right rather than merely that a uniform fill works.
+
+Also re-run against this image:
+- grid lock + playhead continuity on the **0 -> 1 differing-scale pair** (a pair no earlier
+  sweep had ever used): 3/3 phases LOCKED + CONTINUOUS.
+- DJ-OFF (`diff_stock_vs_patch.py`): IDENTICAL.
+
+### NOT validated
+
+- **Hardware.** Nothing in this session has been heard.
+- **Differing MASTER LENGTHs** between two patterns — still unbuilt as a fixture, and still
+  the case where AR's `mod newLen` actually bites. Named again here deliberately; per the
+  lesson above, it should be built before the next green result is quoted as coverage.
+- **MIDI tracks with distinct per-track scales.** The 6→7 fixture's MIDI tracks are all
+  idx 2, so the MIDI branch is exercised only with uniform values.
+- Per-track sub-step phase at a mid-cycle commit (`0x800064f0[t]` zeroed for all tracks at
+  `0x400a4bf0`) — still open from Session 82.
+
+### Tooling note
+
+The first launch of the verification runs died instantly: `set -- $pair` was used to unpack
+pattern pairs, but **zsh does not word-split unquoted parameters** the way bash does, so
+`$1` became the literal string `"0 1"` and argparse rejected it. The failure was visible only
+because the status check compared "logs with a verdict" against "processes still alive" and
+the two disagreed. Worth keeping that pairing in any status check.

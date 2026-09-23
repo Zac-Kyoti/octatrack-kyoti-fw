@@ -217,6 +217,12 @@
     .equ PAT_SCALE, 0x400eb034          | [bank*0x9b340 + pat*0x8ed8] -> scale idx byte
     .equ PAT_MLEN,  0x400eb031          | pattern +0x8e51 -- MASTER LENGTH in steps
     .equ TRK_BLOB,  0x400e21e0          | pattern blob base (track records from +0)
+    .equ TRK_SCALE_SRC, 0x400e2231      | TRK_BLOB + 0x51 -- audio track t's SCALE byte is
+                                        | at TRK_SCALE_SRC + patOff + t*0x91a
+    .equ MIDI_SCALE_SRC, 0x400e6ad9     | TRK_BLOB + 0x48f8 + 1 -- MIDI track m's SCALE byte
+                                        | is at MIDI_SCALE_SRC + patOff + m*0x8b0
+    .equ MIDI_SCALE_IX, 0x80006646      | live per-track scale cache, MIDI twin of
+                                        | TRK_SCALE_IX (counter 0x80006508, loop 0x400a3dd2)
     .equ PAT_MSCALE,0x400eb032          | pattern +0x8e52 -- MASTER scale when SCALE_MODE=1
     .equ PAT_SMODE, 0x400eb035          | pattern +0x8e55 -- SCALE_MODE flag
     .equ PAT_LEN,   0x400eb033          | same indexing -> pattern LENGTH in STEPS
@@ -671,6 +677,85 @@ djc_gotscale:
 |   scale index (before the LEN_TBL indirection overwrites d1) back into the live register,
 |   undoing stock's stale write.
     move.b  %d1,SCALE_IX
+|   ---- Session 84: refresh the LIVE PER-TRACK scale cache, all 16 tracks ----
+|   HARDWARE REPORT on the Session 83 AR-port build: two patterns of equal master length and
+|   scale switch cleanly, but give a track a DIFFERENT SCALE on the target pattern and both a
+|   fractional-step symptom and a permanent step-count offset come back.
+|
+|   `TRK_SCALE_IX` (0x8000663e[t], MIDI twin 0x80006646[m]) is the LIVE per-track scale
+|   index, and the per-track wrap check at 0x400a3cee compares that track's tick counter
+|   against LEN_TBL[TRK_SCALE_IX[t]] -- so it is what sets each track's real tick RATE.
+|   Stock refreshes it only LAZILY, at 0x400a3d08/0x400a3d0e, reached only when a track's
+|   tick counter wraps. An image-wide scan finds writers ONLY at 0x4009b6e6 (init),
+|   0x400a292a / 0x400a2970 and 0x400a3cb4 (that lazy loop): the commit path
+|   0x400a4884..0x400a4be6 NEVER writes it. So after a MID-PATTERN commit every track keeps
+|   running at the OUTGOING pattern's ticks-per-step until it next wraps.
+|
+|   MEASURED (tools/diag_trkscale.py, DJTEST2 bank 0, patterns 0 <-> 1, which are
+|   all-tracks-1x and all-tracks-2x): after committing 0 -> 1 the cache read idx 2 (tps 6)
+|   on all 8 audio AND all 8 MIDI tracks where the pattern says idx 0 (tps 3); the reverse
+|   switch was stale the other way. 16/16 wrong in both directions.
+|
+|   Stock's own rebuild loop reads the per-track scale CORRECTLY for its own math at
+|   0x400a4900 (SCALE_MODE ? blob[t][+0x51] : pattern[+0x8e54]), so NEXT_STEP / PAIR /
+|   CNTDN_TBL are all computed against the right scale -- which is exactly why the landing
+|   POSITION looked right in every earlier test while the playback RATE did not.
+|
+|   A gap in the Session 83 AR port, not a new bug: AR's commit rebuilds 0x40566775[t],
+|   "per-track resolution index", for all 13 tracks (AR_DIRECT_JUMP.md 2, inventory row 5).
+|   Session 83 ported AR's POSITION and missed its RESOLUTION CACHE. It is also the
+|   per-track twin of the master SCALE_IX staleness corrected on the line above.
+|
+|   Why every earlier test passed: DJTEST2 A07 and A08 have IDENTICAL per-track scales, so
+|   the cache was never stale in any of them. The 6/6 phase sweeps were green and this bug
+|   sat untouched behind them.
+|
+|   Gated on an armed commit (we are past `tst.b G_ARMED`), which is correct and keeps
+|   DJ-OFF byte-identical: at a NATURAL pattern boundary every track has just wrapped, so
+|   stock's lazy refresh has already run for all of them and nothing is stale.
+|
+|   Addressing is stock's own, read off 0x400a48d4-0x400a4906: patOff = pat*0x8ed8 +
+|   bank*0x9b340 (already in d0 here); SCALE_MODE at PAT_SMODE+patOff selects between each
+|   track's own byte and the pattern default at PAT_SCALE+patOff.
+    move.l  %d0,%d3                     | d3 = patOff (d0 becomes scratch below)
+    lea     PAT_SMODE,%a0
+    tst.b   (%a0,%d3.l)
+    bne.b   djc_ts_pertrack
+    lea     PAT_SCALE,%a0               | uniform: every track takes the pattern default
+    move.b  (%a0,%d3.l),%d0
+    lea     TRK_SCALE_IX,%a0
+    lea     MIDI_SCALE_IX,%a1
+    moveq   #7,%d1
+djc_ts_unif:
+    move.b  %d0,(%a0,%d1.l)
+    move.b  %d0,(%a1,%d1.l)
+    subq.l  #1,%d1
+    bpl.b   djc_ts_unif
+    bra.b   djc_ts_done
+djc_ts_pertrack:
+    moveq   #0,%d1                      | audio: track index 0..7
+    move.l  %d3,%d2                     | d2 = patOff + t*0x91a
+    lea     TRK_SCALE_IX,%a0
+    lea     TRK_SCALE_SRC,%a1
+djc_ts_aloop:
+    move.b  (%a1,%d2.l),%d0
+    move.b  %d0,(%a0,%d1.l)
+    add.l   #0x91a,%d2
+    addq.l  #1,%d1
+    cmpi.l  #8,%d1
+    bne.b   djc_ts_aloop
+    moveq   #0,%d1                      | MIDI: track index 0..7
+    move.l  %d3,%d2                     | d2 = patOff + m*0x8b0
+    lea     MIDI_SCALE_IX,%a0
+    lea     MIDI_SCALE_SRC,%a1
+djc_ts_mloop:
+    move.b  (%a1,%d2.l),%d0
+    move.b  %d0,(%a0,%d1.l)
+    add.l   #0x8b0,%d2
+    addq.l  #1,%d1
+    cmpi.l  #8,%d1
+    bne.b   djc_ts_mloop
+djc_ts_done:
 |   Session 82: the resume-position computation that used to live here is GONE, and with
 |   it the whole hand-rolled 32-bit division (djc_divloop) and the PAT_LEN lookup that fed
 |   it. It wrote its result into 0x800065b6 -- which MEASUREMENT (tools/diag_tick_domain.py)
