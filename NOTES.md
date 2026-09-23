@@ -28756,3 +28756,132 @@ pattern pairs, but **zsh does not word-split unquoted parameters** the way bash 
 `$1` became the literal string `"0 1"` and argparse rejected it. The failure was visible only
 because the status check compared "logs with a verdict" against "processes still alive" and
 the two disagreed. Worth keeping that pairing in any status check.
+
+## Session 84 (2026-09-23, `wip`) — RELOAD2: hardware report #7 — BUSY gets a recovery path; the crash stays UNEXPLAINED and is labelled as such
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "(9)" → "81" →
+"82 — RELOAD2" → "83"). Note the long-standing heading collision: the DIRECT JUMP
+thread also has "Session 82"/"Session 84" entries.
+
+### Hardware report #7 (the Session 83 suppression build, flashed)
+
+**Confirmed GOOD, and it retires the biggest risk of that build:**
+- The **~1 s stall is better** — the whole-bank suppression works on hardware.
+- **Stock `[BANK]` single-press did NOT break.** That was "(5)"'s third symptom
+  and the one Session 83 flagged as having no independent explanation, i.e. the
+  reason the retry might have been wrong. It held. The misattribution argument
+  for re-enabling `rl_done` is now supported by hardware, not just reasoning.
+
+**Still broken:**
+1. `RELOAD BUSY` still appears after editing the sequence with the transport
+   running. So the suppression cutting card reads 6852 → 354 did NOT fix it, and
+   storage-task contention alone was not the whole story.
+2. **No recovery**: "just tapping YES after seeing the BUSY message once, just
+   brings up the BUSY message again" — the feature is bricked until reboot.
+3. **A FULL CRASH** (no exception message, LEDs frozen, no controls): in the
+   BUSY-locked state, pressing arrow UP/DOWN locks the whole unit.
+
+### Three of my own hypotheses, killed by measurement this session
+
+New tool `tools/diag_reload2_busycrash.py` models the locked state directly (set
+G_KIND, then drive the real gesture through `set_key_state`), so none of this
+needed the clobber's root cause.
+
+- **"`rl_draw`'s unchecked table index is the crash" — WRONG.** With the picker
+  CLOSED, `G_SEL=200` plus arrows produces no fault: arrows never reach `rl_draw`
+  when `G_MENU` is 0. The code agrees — `rl_yes_exec` clears `G_MENU`, calls
+  `CLOSE_CB` and pops our layer on **every** exit including BUSY. The user's
+  "closed, I think" was the decisive detail.
+- **"…and it is a hard-lock mechanism" — OVERSTATED.** Measured with the picker
+  OPEN (`--arrows-open --gsel 200`): the index really does go out of range (UP
+  takes 200 → 199, because that path's `subq.l #1 ; bpl` leaves an out-of-range
+  value out of range), but the whole reachable index range stays **inside our own
+  cave** (max `rl_menu_tbl+1020` = `0x400d6c6e` < cave end), so the READ is always
+  mapped and never faults. Only the *value* dereferenced afterwards is arbitrary.
+  A real latent wild-pointer bug; not a crash mechanism, and not this crash.
+- **"the BUSY path's unstubbed `TOAST` does it" — WRONG.** This was a genuine
+  blind spot worth checking: **every RELOAD2 harness stubs `FUN_4005a2b8` to
+  `rts`**, so the one firmware call unique to the BUSY path had never executed in
+  any test. `--real-toast` runs it for real: no fault.
+
+### The fixes (built, 2186 B of 5884, 1668 B vs stock, 10 detours)
+
+1. **BUSY RECOVERY** in `rl_yes_exec` — the important one. The first refusal for a
+   given `G_KIND` value toasts BUSY and remembers the value in new scratch byte
+   `rl_busy_seen`; if the user presses again and `G_KIND` is **still that same
+   value**, the job owning it is never coming, so clear it and arm this request.
+   `ryx_ok` clears `rl_busy_seen` on every successful arm, so a later genuine BUSY
+   still gets its own first refusal. Bounded, cannot deadlock, needs no theory
+   about why the job was lost. This is the same lesson Session 80 continued
+   already applied to `rl_ptn` ("a stuck flag can never again permanently lock out
+   the feature"); this guard was the one place it was never applied.
+   **Why an unchanged value is safe to call stale**: `rl_job` clears `G_KIND` at
+   its own entry "within a frame or two", while two deliberate human presses are
+   orders of magnitude further apart. **Residual risk, stated**: if a post IS
+   still unread in `FUN_40022778`'s single scratch buffer, arming again posts
+   twice. In the observed failure mode BUSY persists across many presses, so
+   nothing is pending — but this is a MITIGATION, not a cure.
+2. **`G_SEL` clamp** in `rl_draw` (the single choke point every redraw passes,
+   with write-back so the state stops being wrong) and in `rl_yes_exec` before
+   `G_SEL` becomes `G_KIND`.
+3. **Kind validation in `rl_job`** — the sleeper. The dispatch has cases for 3
+   (TRK) and 1 (PTN SEQ) and sent **everything else** down the PART+PTN path, so a
+   garbage `G_KIND` would have run a full slab copy plus a Part apply **and**
+   claimed (via `rl_own`) a stock whole-bank reload the user asked for. Now:
+   out-of-range → hand the job to stock AND clear the flag, self-healing the
+   guard. `d0` is saved/restored because `JOB14_ORIG` is stock code.
+
+### The crash: NOT EXPLAINED. Do not let a later session think it was.
+
+Five configurations tried (stubbed toast, real toast, out-of-range `G_SEL` with
+the picker closed and open, full gesture then arrows) — **all clean**. The unit's
+state after BUSY is exactly what the code predicts (`G_MENU` 0, layer popped,
+arrows routed to stock), so nothing of ours is obviously in the arrow path.
+
+The recovery fix makes the crash's **precondition** transient instead of
+permanent, so it should be much harder to reach. That is mitigation by removing
+the state, not a fix for the lock. **The mechanism is still unknown.**
+
+### Harness gap CLOSED (standing user instruction)
+
+The user gave a standing instruction this session: **do not ask permission to
+make harness/emulation edits when they serve accurate emulation or a defensible
+bug fix.** Saved to memory. Motivation: every dead end this session and last
+traced to the harness not modelling something real — a poked transport flag, a
+frozen step engine, no CF streaming, `TOAST` stubbed, and "editing" done by
+poking memory instead of running firmware edit code.
+
+New tool `tools/diag_seq_edit_io.py` makes the FIRMWARE edit a sequence. Critical
+design point: **the liveness gate is on the edit itself** — it refuses to report
+any scratch verdict unless firmware actually changed the pattern store. v1 did
+exactly that (reported ABORT, no conclusion drawn) because none of its input
+strategies edited; the earlier `diag_scratch_clobber.py` had reported "0 writes"
+as if it meant something, when zero writes *including our own* was the tell.
+v2 stops guessing: it reads the live dispatch table (`0x46c7d8de`, 24-B stride)
+per trig keycode and counts handler entries, and diffs the **entire** cold blob
+(0x9b340) and live copy (0x8ed80) rather than a guessed offset window — so
+"wrong keycodes" and "right keycodes, wrong UI mode (grid-record)" separate
+cleanly. `press_rec_live()` is suspect for this purpose: octabam's own docstring
+says `KEY_REC` "starts the transport exactly like PLAY", which is not what the
+OT's `[REC]` button does.
+
+**The scratch-clobber theory is therefore still OPEN — neither confirmed nor
+ruled out.** Note the "these globals are genuinely free" verdict rests on an
+ABSOLUTE-LONG-only scan of 0x80006a30..0x80006a5f, which cannot see
+register-indirect writes — the same blind spot that already forced an xref
+retraction in this thread.
+
+### Regressions — all green on the fixed build
+
+- `diag_reload2_busycrash.py --recovery` — **PASS**, `G_KIND` 3 → 0 on the
+  second deliberate gesture.
+- `emu_reload2.py --combo` — ALL GOOD
+- `emu_reload2.py --trk` — ALL GOOD, `deser_seen=False`, exactly 1x
+  `FUN_4008cebc` (suppression intact under the new guards)
+- `diag_reload2_repeat.py 6` — **6/6 clean**, `parse 1` per iteration
+- `diag_reload2_realkey.py --arrows` — PASS
+
+### Status
+
+**Not flashed.** Watch on hardware: whether BUSY now recovers on a second
+gesture (the target), and whether the arrow crash still happens at all.

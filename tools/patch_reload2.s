@@ -553,11 +553,49 @@ rl_yes_exec:
 |   so a stuck G_KIND is an observable, reportable symptom, not a mystery.
     tst.b   G_KIND
     beq.b   ryx_ok
+|   Session 84 -- RECOVERY. Hardware report #7: once BUSY appears, "tapping YES
+|   again just brings up the BUSY message again", i.e. the feature is bricked
+|   until reboot. That is the same design flaw Session 80 continued already fixed
+|   for rl_ptn ("a stuck flag can never again permanently lock out the feature");
+|   this guard is the one place it was never applied.
+|
+|   Rule: the FIRST refusal for a given G_KIND value toasts BUSY and remembers
+|   the value. If the user presses again and G_KIND is STILL that same value, the
+|   job that owns it is never coming -- treat it as stale, clear it, and arm this
+|   request instead. Bounded, cannot deadlock, and needs no theory about why the
+|   job was lost.
+|
+|   Why an unchanged value is safe to call stale: rl_job clears G_KIND at its own
+|   entry, "normally within a frame or two", while two deliberate human key
+|   presses are orders of magnitude further apart. So a genuinely in-flight job
+|   will have cleared it long before the second press arrives. ** The residual
+|   risk is real and worth stating: if a post IS still sitting unread in
+|   FUN_40022778's single scratch buffer (0x460bd912), arming again posts a second
+|   time. In the observed failure mode BUSY persists across many presses, so
+|   nothing is pending to corrupt -- but this is a mitigation, not a cure, and the
+|   underlying job loss is still unexplained. **
+    move.b  G_KIND,%d0
+    cmp.b   rl_busy_seen,%d0
+    beq.b   ryx_stale
+    move.b  %d0,rl_busy_seen           | first refusal: remember, then toast
     lea     rl_msg_busy,%a0
     bra.w   rly_show
+ryx_stale:
+    clr.b   G_KIND                     | stale -- reclaim the feature
 ryx_ok:
+    clr.b   rl_busy_seen               | a successful arm resets the memory, so a
+                                       | later genuine BUSY still gets its own
+                                       | first refusal rather than an instant override
     moveq   #0,%d2
     move.b  G_SEL,%d2                  | 0 TRK SEQ / 1 PTN SEQ / 2 PART + PTN SEQ
+|   Session 84: clamp before this becomes G_KIND -- rly_ptn writes d2 straight in,
+|   and rl_job would then dispatch on a kind it has no case for (anything not 3
+|   and not 1 falls into the PART+PTN path).
+    cmpi.l  #N_ITEMS,%d2
+    bcs.b   ryx_sel_ok
+    moveq   #0,%d2
+    move.b  %d2,G_SEL
+ryx_sel_ok:
 
     tst.l   %d2
     bne.b   rly_ptn
@@ -844,6 +882,21 @@ rl_lay_swallow:                        | LEFT/RIGHT: never move the selection,
 rl_draw:
     moveq   #0,%d0
     move.b  G_SEL,%d0
+|   Session 84: clamp. G_SEL is a byte and rl_menu_tbl has N_ITEMS entries, so an
+|   out-of-range G_SEL indexed up to rl_menu_tbl+1020 and handed POPUP2 whatever
+|   4 bytes it found there AS A STRING POINTER. Measured (diag_reload2_busycrash
+|   --arrows-open --gsel 200): the index really does go out of range -- UP takes
+|   200 to 199, because that path's `subq.l #1 ; bpl` leaves an out-of-range
+|   value out of range instead of wrapping it. It did not fault in that run only
+|   because the whole reachable index range stays inside our own cave, so the
+|   READ is always mapped; the VALUE dereferenced afterwards is still arbitrary.
+|   Clamp here rather than in each arrow path: rl_draw is the single choke point
+|   every redraw passes through. Repair G_SEL too, so the state stops being wrong.
+    cmpi.l  #N_ITEMS,%d0
+    bcs.b   rld_sel_ok
+    moveq   #0,%d0
+    move.b  %d0,G_SEL
+rld_sel_ok:
     lea     rl_menu_tbl,%a0
     move.l  (%a0,%d0.l*4),%a0
     move.l  %a0,-(%sp)
@@ -1006,10 +1059,28 @@ rld_skip:
     .global rl_job
 rl_job:
     move.l  %a2,-650(%fp)              | displaced #1 -- stash msg for both exit paths
-    tst.b   G_KIND
-    bne.b   rlj_ours
+|   Session 84: validate the kind, do not just test for non-zero. The dispatch
+|   below has cases for 3 (TRK) and 1 (PTN SEQ) and sends EVERYTHING ELSE down the
+|   PART+PTN path, so a G_KIND of, say, 200 would run a full slab copy plus a Part
+|   apply -- and would also claim (via rl_own) a stock whole-bank reload the user
+|   asked for. Out-of-range means the flag is not a request we made, so hand the
+|   job to stock AND clear it, which self-heals the BUSY guard at the same time.
+|   d0 is saved/restored because JOB14_ORIG is stock code we must not surprise;
+|   only the two displaced instructions may touch registers here.
+    move.l  %d0,-(%sp)
+    moveq   #0,%d0
+    move.b  G_KIND,%d0
+    beq.b   rlj_notours                | 0 = genuinely not ours
+    cmpi.l  #3,%d0
+    bls.b   rlj_isours                 | 1..3 = a request we made
+    clr.b   G_KIND                     | garbage -> drop it, let stock have the job
+rlj_notours:
+    move.l  (%sp)+,%d0
     move.l  %a2@(4),-(%sp)            | displaced #2
     jmp     JOB14_ORIG                | not ours -> stock: jsr 0x40084094
+rlj_isours:
+    move.l  (%sp)+,%d0
+    bra.w   rlj_ours                   | .w: rlj_ours is out of byte-branch range
 
 rlj_ours:
     lea     -40(%sp),%sp
@@ -1305,7 +1376,11 @@ rl_layer_on:
 |   costs no cave space. See rl_closecb_hook for why it has to exist.
 rl_redraw:
     .space 1                           | 1 = inside our own rl_draw -> POPUP2
-    .space 2                           | pad, keeps the following .align 2 stable
+|   Session 84: the G_KIND value we last refused with a BUSY toast. 0 = none.
+|   See the recovery block in rl_yes_exec.
+rl_busy_seen:
+    .space 1
+    .space 1                           | pad, keeps the following .align 2 stable
 
 |   26-byte records, ascending by keycode. Only these keys are overridden; the
 |   rebuild leaves every other slot to the layers underneath.
