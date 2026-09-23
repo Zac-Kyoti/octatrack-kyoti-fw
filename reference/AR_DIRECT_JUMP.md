@@ -291,6 +291,42 @@ AR committing from its own per-tick function rather than reusing a boundary body
 3. **Semantics of AR's `0`/`-1` per-track arrays** (`0x4056672d`, `0x405667ba`). OT's port
    does not need them, but the symmetry is unexplained.
 
+## 7b. Session 82 correction — OT's tick domain, and the one thing AR does that OT was not
+
+The OT column of §4 carried a mislabelling that invalidated the timing (not the position)
+half of the port.
+
+| address | the table used to say | what it is, **MEASURED** (`tools/diag_tick_domain.py`) |
+|---|---|---|
+| `0x800065b6` | master step | master **ticks-within-step**, wraps at `LEN_TBL[SCALE_IX]` (values observed: 0..5 with tps 6) |
+| `0x800064f0[t]` | per-track step-in-pattern | per-track **ticks-within-step**, wraps at `LEN_TBL[TRK_SCALE_IX[t]]` |
+| `0x800065b2` ("BAR_CTR") | bar / loop-repetition counter | the real master **STEP** counter, `++` once per master step at `0x400a423a` |
+
+The enclosing handler runs once per **clock tick** (ISR at `0x400a1e0c`), not once per step.
+The step body at `0x400a4220` is gated on `0x800065b6 == 0`.
+
+So the AR↔OT row that actually mattered is this one, and it was inverted:
+
+| | AR | OT (before Session 82) |
+|---|---|---|
+| how the commit reaches a step boundary | counts `DAT_405667e4` down **to** the boundary and commits there | zeroed the tick-phase counter to **move** the boundary to the current tick |
+
+AR's per-track countdown reloads (`0x405667c7[t] = ticksPerStep[res_t] - 1`) are full
+reloads, and they are correct *because* the commit lands on a boundary. Nothing in AR's
+request or commit path writes the tick phase at all.
+
+**The AR timing invariant, stated alongside the state-vector one in §2:**
+
+> Wait for the tick-domain boundary. Never move it.
+
+OT now does the same: Hook A arms and returns, Hook B bypasses the CHAIN-AFTER gate while
+armed, and the commit lands on stock's own next step boundary. `dj_c` no longer writes a
+step index into the tick counter, and `dj_abstick` counts 1 per clock tick.
+
+Also corrected: the `0x800065b2` seeding at `0x400a483a` (from `0x8000662a`, the low word of
+the long Hook H writes) is **not** the inert side effect §5 assumed — it is how the master
+step position itself resumes, the direct analogue of AR's `0x405666e4 = new_step`.
+
 ## 8. Methodology hazards recorded along the way
 
 - **Ghidra's printed operand order for ColdFire `divsl.l` is unreliable.** Read the extension

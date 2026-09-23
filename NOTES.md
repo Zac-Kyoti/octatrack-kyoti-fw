@@ -27123,7 +27123,6 @@ Build after both fixes: 983 bytes changed, 0 unexpected outside the cave, manual
 - Re-run DJ-OFF gates against the 983-byte image; Hook D is unconditional, so its change can
   affect DJ-OFF behaviour and the widened gate now compares `SCALE_IX`.
 - Overflow: still guarded, not fixed.
-
 ## Session 79, continued a thirty-fourth time — option (c): Hook T resets `G_ABSTICK` at transport start
 
 The user chose to explore (c) -- can the overflow bound be sidestepped cheaply -- before (b)
@@ -27185,7 +27184,6 @@ pushes it up), both comfortably inside the `98301` ceiling; a contrived set of c
 gives `P = 4324320`, which exceeds it and would still need the guard.
 
 Build: 1001 bytes changed, 0 unexpected outside the cave, manual-trig bytes identical.
-
 ## Session 79, continued a thirty-fifth time — `dj_c` must read Hook H's stored offset, not `G_ABSTICK` (found by a user question about timing)
 
 The user asked whether the overflow fallback would make master timing jump or stall. Checking
@@ -27259,7 +27257,6 @@ hook after `D7` is built at `0x400a4834`), because reducing `G` instead requires
 `tps_master | P`, which is not guaranteed in per-track mode. And whatever is reduced, `dj_c`'s
 master step must stay consistent with it — this session's bug is exactly what happens when it
 does not.
-
 ## Session 79, continued a thirty-sixth time — option (a) implemented: EXACT range reduction, the ~68-minute limit is gone
 
 ### What Hook H now does
@@ -27331,7 +27328,6 @@ usage still within budget.
 
 - Re-run the DJ-OFF gates against this image (substantially larger patch).
 - Hardware verification -- nothing here has been heard.
-
 ## Session 79, continued a thirty-seventh time — MEASURED: MASTER LENGTH resets every track. Our resume position is wrong; AR was right all along
 
 The user asked "is it that our OT implementation doesn't take master length into account or
@@ -27413,7 +27409,6 @@ that pattern.
    scale, which is the common case; worth fixing regardless.
 
 No code changed this session -- measurement only.
-
 ## Session 79, continued a thirty-eighth time — master-cycle reduction implemented; AR's master step MEASURED as bounded
 
 ### The fix
@@ -27493,7 +27488,6 @@ differ between patterns, and when a track's multiplier differs from the master's
 **This is now a genuine specification fork, not a bug**, and it is the user's to settle:
 match AR exactly (simpler, bounded by construction, no absolute counter needed at all), or
 keep the stated "as if never switched away" semantics, which is what this build does.
-
 ## Session 79, continued a thirty-ninth time — validation complete on the master-cycle build; READY TO FLASH
 
 Image `out/mainos_directjump_v4.bin` (`ec0a28aa...`), 1087 bytes changed, 0 unexpected outside
@@ -27548,6 +27542,7 @@ gates confirm it is inert.
   index -- `0x405666e4` measured as wrapping, cont.38). The two coincide only when patterns
   share a master length and master scale. The informative hardware comparison is patterns whose
   **master lengths differ**.
+
 ## Session 80 continued (9) (2026-09-22, `wip`) — RELOAD2: fixed the "still primed after walking away" bug; UNDO-instead-of-CLEAR confirmed as an INHERITED STOCK QUIRK, not ours
 
 **Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (8)").
@@ -27821,6 +27816,172 @@ results cannot tell you this, by construction.
 2. `RELOAD BUSY` — root cause still unfound; ask the user about frequency on
    this build before investigating further.
 3. The list UI — cosmetic, lowest priority.
+## Session 82 (2026-09-22, `wip`) — DIRECT JUMP: the grid-drift bug. `0x800065b6` is NOT the master step, and the sequencer body runs per CLOCK TICK
+
+First hardware report on the flashed master-cycle build (cont.39): **switching patterns
+decouples the new pattern from the master clock by a FRACTION of a step, the fraction
+depending on when the change was executed.** The user's own qualification is the key to it:
+the new pattern lands on the *correct step* — positions are fine — it is the *phase* that
+moves. So Hook H's per-track rebuild was right all along and the defect is purely temporal.
+
+### The premise that was wrong for fifty sessions
+
+`patch_directjump.s` has said since Session 15 that the block at `0x400a3fdc` "runs every
+step tick" and that `DAT_800065b6` is the master **step**, wrapping at the pattern length.
+The disassembly it wraps against says otherwise:
+
+```
+400a3fdc  moveb 0x800065b6,d0 ; addq #1,d0 ; moveb d0,0x800065b6
+400a3fec  mvsb  0x8000663d,d1                    ; SCALE_IX
+400a3ff2  lea   0x400aba50,a0                    ; LEN_TBL
+400a3ff8  cmp.l (a0,d1.l*4),d0 ; blt -> keep     ; else 0x800065b6 = 0
+```
+
+`LEN_TBL` was measured in cont.20 as a **TICKS-PER-STEP** table (`3,4,6,8,12,24,48,96,...`).
+A step counter cannot wrap at 6. cont.20 corrected the table and never revisited what the
+counter wrapping against it therefore *is*.
+
+**MEASURED** — `tools/diag_tick_domain.py` (new), stock image, DJTEST2 A07, no patch:
+
+```
+SCALE_IX=2  LEN_TBL[SCALE_IX]=6
+values 0x800065b6 takes: [0, 1, 2, 3, 4, 5]
+0x400a3fdc executions = 24 ; 0x400a3d78 (per-track step advance) = 34
+first events: tick tick trkadv | tick tick tick trkadv x7 | tick tick tick trkadv | ...
+```
+
+The 2x track's step advances every 3 ticks, the seven 1x tracks every 6, batched. So:
+
+| address | what it really is |
+|---|---|
+| `0x800065b6` | master **ticks-within-step**, wraps at `LEN_TBL[SCALE_IX]` |
+| `0x800064f0[t]` | per-track **ticks-within-step**, wraps at `LEN_TBL[TRK_SCALE_IX[t]]` (`0x400a3cee`) — the `.equ` calling it `STEP_IN_PAT` is a misnomer |
+| `0x800065b2` | the real master **STEP** counter (word, `++` at `0x400a423a`, once per step) — the array previously called `BAR_CTR` |
+| the body at `0x400a4220` | gated on `0x800065b6 == 0`, i.e. **once per master step** |
+| the block at `0x400a413e` | gated on `0x800065b6 == 2` — the PC send, at tick 2 *within a step*, and additionally gated on `(0x800065b2 + 1) mod chainLen == 0` (`0x400a41aa`) |
+
+The whole per-step handler is reached from the ISR at `0x400a1e0c` (`movew #0x2700,%sr`,
+saves `d0-fp`), once per clock tick.
+
+### Three separate defects, all downstream of that one premise
+
+1. **Hook A's `clr.b STEP`** (`dja_commit`). Zeroing the tick phase to "force the step==0
+   body this tick" runs at an arbitrary *clock* tick. It did not merely commit early: the
+   same counter is the phase of every subsequent step, so the grid was re-anchored to the
+   instant of the key press. **This is the reported symptom, exactly.**
+2. **`dj_c` writing a resume STEP into `0x800065b6`.** A step index (0..63) into a counter
+   that wraps at ticks-per-step (6): the wrap check fired on the very next clock tick, so
+   the first step after every armed commit was ONE TICK long instead of six. A second,
+   independent grid break.
+3. **`dj_abstick`'s cont.38 `+= LEN_TBL[SCALE_IX]`.** cont.38 reasoned "this runs once per
+   master step, and a master step is a per-pattern number of ticks". On a per-clock-tick
+   hook that counts `tps` ticks per tick — 6x fast at 1x and by a *different* factor per
+   pattern, which is precisely the error cont.38 was written to remove. The original `+= 1`
+   was already absolute time. **cont.38's counter change is retracted.**
+
+### How AR keeps it locked — the point of comparison
+
+`FUN_4009905c` waits on `DAT_405667e4`, a countdown to the next step/resolution boundary,
+and commits **there**. Nothing on AR's request or commit path writes the tick phase; the
+per-track countdown reloads it rebuilds (`0x405667c7[t] = ticksPerStep[res_t] - 1`) are full
+reloads, valid precisely because the commit lands on a boundary. **Arm, wait, commit on the
+grid — never move the grid.** That is the whole discipline, and it is what OT's Hook A was
+doing the opposite of.
+
+### The fix
+
+- **Hook A** — arm only. Stock's step body runs every master step regardless, and Hook B
+  already bypasses the CHAIN-AFTER gate while armed, so staying armed commits at the next
+  natural boundary. `clr.b STEP` deleted.
+- **`dj_c`** — resume-step computation and the hand-rolled 32-bit division (`djc_divloop`)
+  deleted; replays stock's `clr.b d0 ; move.b d0,STEP` on both paths. The master position
+  was never this counter's job: Hook H's offset in `0x80006628` builds `D7`, and stock seeds
+  `0x800065b2` (the real step counter) from its low word `0x8000662a` at `0x400a483a`, one
+  instruction before `dj_c` runs. The SCALE_IX stale-index correction is kept — a real
+  latent stock bug, unrelated to phase.
+- **`dj_abstick`** — back to `+= 1`. Hook H's `cycleTicks`/`posTicks` arithmetic unchanged
+  and correct against a true tick counter.
+
+Build: 1044 B cave (was 1087), 1008 bytes changed, 0 unexpected outside the cave, manual-trig
+bytes identical to `build_trigscale_only.py`, container round-trips.
+
+### A SECOND defect, found BY the fix — `dj_c` read the wrong scale field
+
+With the grid locked, the boundary trace showed the first step of the incoming pattern still
+running at the OUTGOING pattern's rate (one 6-tick gap before the 3-tick gaps began). Cause:
+`dj_c` read `PAT_SCALE` (+0x8e54) **unconditionally**, where stock's own `D7` setup
+(`0x400a4802`-`0x400a4826`) selects +0x8e52 (MASTER SCALE) when `SCALE_MODE` is set. cont.33
+found this exact bug in Hook D, fixed it there, and left it in Hook C — where it survived
+because nothing had ever measured the tick RATE after a commit. DJTEST2 A08 exists precisely
+to separate the two fields (+0x8e52 = 0 -> 2x/3 ticks, +0x8e54 = 2 -> 1x/6 ticks), so the
+commit wrote index 2 and Hook D healed it one step later. `dj_c` now branches on
+`SCALE_MODE` exactly as Hooks D and H already do.
+
+Rebuild: 1064 B cave, 1027 bytes changed, 0 unexpected outside the cave, manual-trig bytes
+identical, container round-trips.
+
+### MEASURED — `tools/diag_grid_lock.py` (new), WITH A FAILING CONTROL
+
+The test nothing before it performed: record the absolute clock-tick index of every master
+step boundary across an armed commit and look at the gaps. The change is cued at a CHOSEN
+sub-step phase, so the fraction is controllable — sweeping the phase is the test.
+
+**Control = `ec0a28aa...`, rebuilt from `HEAD` — byte-identical to the image cont.39 marked
+READY TO FLASH, i.e. exactly what is on the user's hardware.** Without it a LOCKED result
+would prove nothing; this thread has produced vacuous greens before (cont.22's empty run,
+cont.29's snapshot-before-the-hook, cont.37's model carrying the code's own omission).
+
+DJTEST2, A07 (tps 6) -> A08 (tps 3, 2x master scale). Gaps around the commit:
+
+| cue phase | CONTROL (flashed build) | FIXED build |
+|---|---|---|
+| 0 | — | `6,6,6,6,6,6,6, 3,3,3…` commit @48 |
+| 1 | `6,6,6, **3,1**, 3,3…` — **1-tick step** | `6,6,6,6,6,6,6, 3,3,3…` commit @48 |
+| 2 | — | `6,6,6,6,6,6,6, 3,3,3…` commit @48 |
+| 3 | `6,6, **5,4**, 3,3…` — **5- then 4-tick**, boundary @41 on neither grid | `6,6,6,6,6,6, 3,3,3…` commit @42 |
+| 4 | — | `6,6,6,6,6,6, 3,3,3…` commit @42 |
+| 5 | `6,6,6, **2**, 3,3…` — **2-tick step** | `6,6,6,6,6,6, 3,3,3…` commit @42 |
+
+The control's fractional gap is **1, 2, or 5-and-4 ticks purely as a function of cue phase**,
+and the shift is PERMANENT: phase 5's later boundaries land at 44, 47, 50, 53 (≡ 2 mod 3) and
+phase 1's at 46, 49, 52 (≡ 1 mod 3), where the incoming pattern's own grid is 45, 48, 51.
+**That is the user's hardware report reproduced exactly.**
+
+The fixed build: every gap is a whole step on one grid or the other at all six phases, the
+rate changes exactly once (at the commit boundary), and every boundary stays on a multiple of
+3 aligned to the original grid. Phases 0/1/2 give byte-identical boundary lists to each other,
+as do 3/4/5 — the residual difference is only WHICH step boundary the cue landed before, i.e.
+the intended one-step quantisation.
+
+A checker bug was fixed in the same pass: the first version compared every gap against the
+end-of-run `tps` and so flagged the outgoing pattern's own legitimate 6-tick steps as "moved".
+When two patterns differ in MASTER SCALE the gap sequence is SUPPOSED to change; what must
+never appear is a gap that is neither rate. It now judges on that, and additionally reports
+the rate-change points.
+
+### DJ-OFF regression gate — PASSED
+
+`tools/diff_stock_vs_patch.py` against this build: IDENTICAL across 38 samples, 16/16 tracks
+with movement in both runs, and every instruction execution count matching (audio loop top
+856/856, `TICKS_IN_STEP++` 856/856, step boundary 136/136, `STEP++` 136/136, stock rebuild
+loop 0/0). Per-track STEP/TICKS/ARMED/SCALE, master counter, `SCALE_IX` and `BAR_CTR` all
+identical. With the feature off the patch is inert. This is the gate whose absence let the
+cont.18 hardware regression ship.
+
+### NOT validated
+
+- **Hardware.** Nothing in this session has been heard.
+- **Per-track sub-step phase across a mid-pattern commit.** The commit tail zeroes
+  `0x800064f0[t]` for all tracks at `0x400a4bf0`. At a natural *pattern* boundary that is
+  correct (the master-length reset re-phases everything anyway, cont.37). At a DIRECT JUMP
+  commit mid-cycle, a track whose ticks-per-step differs from the master's may be mid-step
+  — a 1/2x track (tps 12) under master tps 6 is at tick 6 of 12 on every other master step
+  boundary — and zeroing it restarts that track's step early. Stock's rebuild loop does
+  compute a sub-step phase (`PAIR[t] = D7 - q*tps_t`, `0x400a4920`); whether it reaches
+  `0x800064f0[t]` is unchecked. **This is the next thing to look at**, and it is invisible
+  until the master grid is locked, which it now is.
+- The **specification fork** from cont.38 (absolute-time semantics vs AR's playhead-carry)
+  is still open and still the user's to settle.
 
 ### Session 81 continued (5) — HARDWARE: report #1 CONFIRMED FIXED (MKI, 2026-09-22). One new regression candidate.
 

@@ -142,7 +142,25 @@
     .equ ACT_BANK,  0x800065bd
     .equ PEND_PAT,  0x800065c0
     .equ PEND_BANK, 0x800065bf
-    .equ STEP,      0x800065b6
+    .equ STEP,      0x800065b6      | *** NOT a step counter. *** Session 82, MEASURED
+                                    | (tools/diag_tick_domain.py): this is the master
+                                    | TICKS-WITHIN-STEP counter -- it is incremented once
+                                    | per CLOCK TICK at 0x400a3fdc and wrapped to 0 at
+                                    | 0x400a3ffc against LEN_TBL[SCALE_IX], i.e. against
+                                    | TICKS PER STEP (3..96), so it only ever holds
+                                    | 0..tps-1 (observed 0..5 at tps 6). The step body at
+                                    | 0x400a4220 is gated on it being 0 and the PC block
+                                    | at 0x400a413e on it being 2. The real master STEP
+                                    | counter is MASTER_STEP below. The name is kept only
+                                    | because the displaced stock instructions reference
+                                    | it; do NOT write a step index here -- that is what
+                                    | unstuck the grid from the master clock on hardware.
+    .equ MASTER_STEP, 0x800065b2     | the actual master STEP index (word), ++ once per
+                                    | master step at 0x400a423a, previous value kept at
+                                    | 0x800065b4. Seeded at every switch commit from
+                                    | 0x8000662a (MASTER_STEPS' low word) at 0x400a483a --
+                                    | which is how an armed DIRECT JUMP resumes the master
+                                    | position. Same role as AR's 0x405666e4.
     .equ TRK_SCALE_IX, 0x8000663e       | LIVE per-track scale index, 1 byte per track
                                         | (stride 1, measured: 0x400a3dbc addq.l #1,A3 in
                                         | the per-track loop). The step-counter wrap check
@@ -157,14 +175,32 @@
                                         | (An identical MIDI-track pair exists at
                                         | 0x80006646 / counter 0x80006508, 0x400a3dd2
                                         | onward -- untouched: no measured symptom.)
-    .equ STEP_IN_PAT, 0x800064f0        | per-track step-within-pattern counter, 1 byte per
-                                        | track. Stock: ++ at 0x400a3ce2 every step tick,
-                                        | wrapped to 0 at 0x400a3cf6 on reaching the track's
-                                        | length, and force-reset to 0 for all 8 tracks by
-                                        | the switch-commit tail at 0x400a4bf0. Reading 0 is
-                                        | the sole gate (0x400a2d28) for DAT_80001904's
-                                        | table-arm write -- see dj_pertrack_fix.
-    .equ BAR_CTR,   0x800065b2          | "which bar/loop repetition" counter (word),
+    .equ TICKS_IN_STEP, 0x800064f0      | per-track TICKS-WITHIN-STEP counter, 1 byte per
+                                        | track. Session 82 correction: the old name
+                                        | STEP_IN_PAT was wrong. Stock ++'s it at 0x400a3ce2
+                                        | every CLOCK TICK and wraps it at 0x400a3cf6
+                                        | against LEN_TBL[TRK_SCALE_IX[t]] -- that track's
+                                        | TICKS PER STEP, not its length. Only on that wrap
+                                        | does the track's real step index (the byte at
+                                        | sp@(152), ++ at 0x400a3d78) advance and get
+                                        | wrapped against the track's LENGTH at 0x400a3d8c.
+                                        | Force-reset to 0 for all 8 tracks by the
+                                        | switch-commit tail at 0x400a4bf0 -- harmless at a
+                                        | natural boundary, but it re-phases any track whose
+                                        | tps differs from the master's when a DIRECT JUMP
+                                        | commits mid-cycle. OPEN, see NOTES Session 82.
+                                        | Reading 0 is the sole gate (0x400a2d28) for
+                                        | DAT_80001904's table-arm write.
+    .equ STEP_IN_PAT, 0x800064f0        | the pre-Session-82 (wrong) name, kept only so the
+                                        | unbuilt dj_pertrack_fix below still assembles.
+    .equ BAR_CTR,   0x800065b2          | == MASTER_STEP above; Session 82 measured this as
+                                        | the master STEP counter, not a bar counter. The
+                                        | "bar" reading came from 0x400a4264-0x400a42a0,
+                                        | which merely masks it against tables at
+                                        | 0x400abae4/0x400abacc and tests step mod 3 to
+                                        | derive beat flags. Old comment kept below for the
+                                        | history it records:
+                                        | "which bar/loop repetition" counter (word),
                                         | Session 79 (NOTES.md): copied from 0x8000662a
                                         | (the pending switch's own "loop region start",
                                         | normally 0) at every switch commit, stock,
@@ -324,31 +360,32 @@ dtk_done:
     .global dj_abstick
 dj_abstick:
     move.b  %d0,STEP                   | displaced original (d0 must stay unclobbered)
-|   Session 79 cont.38: count TICKS, not master steps. This runs once per master step, but a
-|   master step is LEN_TBL[SCALE_IX] ticks and that rate is per-PATTERN -- so incrementing by
-|   1 made the counter advance at different real-time rates depending on which pattern was
-|   playing, i.e. it was not absolute time at all. Adding the current ticks-per-step makes it
-|   rate-independent, which is what "as if it had been playing all along" requires.
-|   ColdFire has no `movem -(An)`: lea a frame and movem into it (same idiom as dj_a). D0 is
-|   now used as scratch, so it is saved and restored along with D1/A0 -- the caller re-uses
-|   D0 at 0x400a3fea/3ff8, which is why the displaced store comes first.
-    lea     -12(%sp),%sp
-    movem.l %d0-%d1/%a0,(%sp)
-    moveq   #0,%d0
-    move.b  SCALE_IX,%d0
-    cmpi.l  #11,%d0
-    bhi.b   dja_tick1
-    lea     LEN_TBL,%a0
-    move.l  (%a0,%d0.l*4),%d0          | ticks per master step, this pattern
-    bra.b   dja_tickadd
-dja_tick1:
-    moveq   #1,%d0                     | unreadable scale index -> degrade, never stall
-dja_tickadd:
+|   Session 82: back to a flat `+= 1`, and this time it is the measured truth rather than a
+|   guess either way.
+|
+|   cont.38 changed this to `+= LEN_TBL[SCALE_IX]` on the reasoning that the hook "runs once
+|   per master step, and a master step is a per-pattern number of ticks". The premise was
+|   false: tools/diag_tick_domain.py measures this site executing once per CLOCK TICK (the
+|   counter it displaces, 0x800065b6, only ever holds 0..tps-1 -- it is ticks-within-step,
+|   not a step index). One increment per clock tick already IS absolute time, at a rate no
+|   pattern's scale can change. The cont.38 version therefore counted tps ticks per tick --
+|   6x fast at 1x, and by a DIFFERENT factor per pattern, which is precisely the error it was
+|   written to remove.
+|
+|   Hook H's arithmetic is unchanged and is correct against this counter: cycleTicks and
+|   posTicks are both real ticks, and dividing posTicks by tps_master yields master steps.
+|
+|   Deliberately NOT gated on DJ_MODE -- the counter must reflect true elapsed ticks whenever
+|   DIRECT JUMP is next armed, not only while it happens to be on. Only D1 is used now, so
+|   the frame is smaller than cont.38's; D0 still must survive (the caller re-uses it at
+|   0x400a3fea/3ff8), which is why the displaced store comes first.
+    lea     -4(%sp),%sp
+    move.l  %d1,(%sp)
     move.l  G_ABSTICK,%d1
-    add.l   %d0,%d1
+    addq.l  #1,%d1
     move.l  %d1,G_ABSTICK
-    movem.l (%sp),%d0-%d1/%a0
-    lea     12(%sp),%sp
+    move.l  (%sp),%d1
+    lea     4(%sp),%sp
     rts
 
 | ================= Hook A @ 0x400a4006 =================
@@ -399,14 +436,32 @@ dja_real:
     addq.l  #8,%sp
 dja_armstep:
     move.b  STEP,%d0
-    move.b  %d0,G_STEP                 | always keep the resume step fresh
-    tst.b   G_ARMED
-    bne.b   dja_commit
+    move.b  %d0,G_STEP                 | diagnostic only: the TICK-within-step at arm time
+|   Session 82: ARM ONLY. Never force the step body.
+|
+|   This function runs once per CLOCK TICK, not once per master step -- MEASURED
+|   (tools/diag_tick_domain.py, stock, DJTEST2 A07): 0x800065b6 takes only the values
+|   0..5 with LEN_TBL[SCALE_IX] == 6, and the per-track step advance at 0x400a3d78 fires
+|   once every 6 of these for a 1x track and once every 3 for the 2x track. So
+|   0x800065b6 is the master TICKS-WITHIN-STEP counter (wrapping at ticks-per-step), the
+|   step body at 0x400a4220 is gated on it being 0, and the Program Change block at
+|   0x400a413e is gated on it being 2.
+|
+|   The old code here cleared it to force the step body to run on THIS tick -- i.e. at
+|   whatever sub-step instant the pattern change happened to be requested. That did not
+|   just commit early: it moved the grid, because the very same counter is the phase of
+|   every subsequent step. Reported on hardware as patterns drifting off the master clock
+|   by a FRACTION of a step, the fraction depending on when the change was pressed.
+|
+|   AR never does this. `FUN_4009905c` counts `DAT_405667e4` down to the next
+|   step/resolution boundary and commits THERE; nothing in its path writes the tick
+|   phase. Arming and waiting is the whole of AR's timing discipline.
+|
+|   Stock's step body runs every master step anyway, and Hook B already bypasses the
+|   CHAIN-AFTER gate whenever we are armed -- so simply staying armed commits on the next
+|   natural step boundary, which is exactly AR's rule, with the grid untouched.
     moveq   #-1,%d0
-    move.b  %d0,G_ARMED                | tick 1: arm only (1 step of PC lead)
-    bra.b   dja_ret
-dja_commit:
-    clr.b   STEP                       | tick 2: force the step==0 body this tick
+    move.b  %d0,G_ARMED                | arm; the next natural step boundary commits
 dja_ret:
     movem.l (%sp),%d0-%d7/%a0-%a6
     lea     60(%sp),%sp
@@ -652,7 +707,26 @@ djc_fix:
     move.l  #0x9b340,%d2
     muls.l  %d2,%d1                    | d1 = bank * 0x9b340
     add.l   %d1,%d0
-    lea     PAT_SCALE,%a0
+|   Session 82: branch on SCALE_MODE, exactly as dj_scaleix_fix (Hook D) already does and as
+|   stock's own D7 setup does at 0x400a4802-0x400a4826. This hook read PAT_SCALE (+0x8e54)
+|   UNCONDITIONALLY -- cont.33 found and fixed that bug in Hook D and left the identical bug
+|   here, where it survived because nothing measured the tick RATE after a commit until
+|   tools/diag_grid_lock.py.
+|
+|   MEASURED (grid_lock, DJTEST2 A07 -> A08, whose fields were chosen to separate the two:
+|   +0x8e52 = 0 (2x, tps 3) against +0x8e54 = 2 (1x, tps 6)): the commit wrote index 2, so
+|   the master wrap check ran the FIRST step of the incoming pattern at 6 ticks instead of 3,
+|   and Hook D then healed it on the next step body. One step at the outgoing pattern's rate
+|   after every jump between patterns of differing MASTER SCALE -- visible in the boundary
+|   trace as a single 6-tick gap before the 3-tick gaps begin.
+    lea     PAT_SMODE,%a0
+    tst.b   (%a0,%d0.l)                | SCALE_MODE
+    beq.b   djc_uniform
+    lea     PAT_MSCALE,%a0             | per-track mode -> MASTER SCALE at +0x8e52
+    bra.b   djc_gotscale
+djc_uniform:
+    lea     PAT_SCALE,%a0              | uniform mode  -> pattern multiplier at +0x8e54
+djc_gotscale:
     moveq   #0,%d1
     move.b  (%a0,%d0.l),%d1            | d1 = scale index (of the pattern that's NOW active)
 |   Session 70 (4th pass, hardware bug): stock's own commit-tail (0x400a4220, unmodified,
@@ -673,63 +747,29 @@ djc_fix:
 |   scale index (before the LEN_TBL indirection overwrites d1) back into the live register,
 |   undoing stock's stale write.
     move.b  %d1,SCALE_IX
-|   Session 79 cont.28: this USED to be `LEN_TBL[scaleIdx]`, on the belief that LEN_TBL
-|   maps a scale index to a pattern length. cont.20 measured that it does not -- it is a
-|   TICKS-PER-STEP table (3,4,6,8,12,24,48,96,... = the OT's 2x/1.5x/1x/0.75x/... scale
-|   list, and the same table AR uses for the same purpose). So the modulus below was 6,
-|   not 16, and the resume step came out as `absoluteTicks mod 6` -- a value in 0..5,
-|   unrelated to any musical position. Measured on the emulator (cont.28): G_ABSTICK=26
-|   gave STEP=2 and D7=12. Use the pattern's real LENGTH field instead.
-    lea     PAT_LEN,%a0
-    moveq   #0,%d1
-    move.b  (%a0,%d0.l),%d1           | d1 = master pattern LENGTH in steps
-|   Session 70 (7th pass): STILL wrong on real hardware after the SCALE_IX fix -- the
-|   user's own report reframed the whole feature. `G_STEP` (the OUTGOING pattern's master
-|   step, bounded 0..outgoingLen-1) is the WRONG source for the resume position entirely,
-|   not just imprecise: once STEP has wrapped even once against the outgoing pattern's own
-|   length, the "how many ticks total have elapsed" information is GONE -- modulo against
-|   a DIFFERENT (incoming) length afterward does not recover it. The user's own worked
-|   example (16-step pattern <-> 8-step pattern, several rapid switches) makes the actually
-|   -wanted model explicit: every pattern behaves as if it had been silently, continuously
-|   playing in the background the whole time since transport start, at ITS OWN length --
-|   switching just changes which one you're listening to. That is exactly `absoluteTicks
-|   mod newLen`, using a counter that NEVER resets on a switch -- not the outgoing
-|   pattern's own bounded position re-wrapped. `G_ABSTICK` (new, see its own .equ comment)
-|   is that counter; Hook E below increments it unconditionally every step tick, completely
-|   independent of DIRECT JUMP's own arm/commit state. Neither `divul.l`/`divsl.l` form
-|   assembles under this toolchain's `-mcpu=5407` (tried both the Dr:Dq and the Dr==Dq
-|   quotient-only syntax stock's OWN code uses elsewhere -- GAS rejects both here as
-|   "needs 68020..."), so this is a hand-rolled 32-iteration binary long division
-|   (shift-and-subtract, standard restoring-division shape) instead -- bounded, fixed
-|   cost regardless of how large G_ABSTICK has grown. D3 clobbered here is safe: the
-|   per-track loop right after dj_c returns reloads it fresh (ACT_BANK) before ever
-|   reading it, confirmed by inspection of the code between dj_c's `rts` and that reload.
-|   Session 79 cont.35: read the offset HOOK H ACTUALLY STORED, not G_ABSTICK directly.
-|   Hook H (0x400a47f6) runs earlier on this same commit path and may have substituted 0
-|   for an out-of-range counter. Taking G_ABSTICK here regardless made the master step
-|   disagree with every per-track step in exactly that case -- MEASURED: with the counter
-|   forced past the bound, the per-track arrays all held 0 while the master held 4, a
-|   four-step split that would make the master wrap early and produce one short bar. That
-|   is the same master-vs-per-track disagreement class that caused the original desync.
-|   Reading MASTER_STEPS makes the two consistent by construction: identical to G_ABSTICK
-|   in the normal case, and 0 whenever Hook H's guard fired.
-    move.l  MASTER_STEPS,%d0           | d0 = the offset Hook H stored (master steps)
-    tst.l   %d1
-    ble.b   djc_store                 | guard: bad length -> just use the raw tick count
-    moveq   #0,%d2                     | d2 = remainder accumulator
-    moveq   #32,%d3                    | d3 = bit counter
-djc_divloop:
-    add.l   %d0,%d0                    | shift dividend left 1; MSB -> X (carry)
-    addx.l  %d2,%d2                    | d2 = d2*2 + that carry bit
-    cmp.l   %d1,%d2
-    blt.b   djc_divskip
-    sub.l   %d1,%d2                    | remainder >= newLen -> subtract (this bit is a 1)
-djc_divskip:
-    subq.l  #1,%d3
-    bne.b   djc_divloop
-    move.l  %d2,%d0                    | d0 = resumeStep = absoluteTicks mod newLen
-djc_store:
-    move.b  %d0,STEP                   | master step (resumeStep, already wrapped to newLen)
+|   Session 82: the resume-position computation that used to live here is GONE, and with
+|   it the whole hand-rolled 32-bit division (djc_divloop) and the PAT_LEN lookup that fed
+|   it. It wrote its result into 0x800065b6 -- which MEASUREMENT (tools/diag_tick_domain.py)
+|   shows is not a master STEP counter at all but the master TICKS-WITHIN-STEP counter,
+|   range 0..LEN_TBL[SCALE_IX]-1. Writing a step index (0..63) into a counter that wraps at
+|   ticks-per-step (typically 6) meant the wrap check at 0x400a3ff8 fired on the very next
+|   clock tick, so the first step after every armed commit was ONE TICK long instead of six:
+|   a second, independent way the grid came unstuck from the master clock.
+|
+|   The resume position was never this counter's job anyway. Hook H (0x400a47f6) supplies it
+|   as a master-step offset in 0x80006628, from which stock builds D7 and its own per-track
+|   rebuild loop derives every track's position -- AND from whose low word (0x8000662a) stock
+|   seeds the real master step counter BAR_CTR (0x800065b2) at 0x400a483a, one instruction
+|   before this hook runs. 0x800065b2 is measured incrementing once per master step at
+|   0x400a423a, so that seeding is what actually resumes the master position. Stock's own
+|   `STEP = 0` here is a tick-phase reset that is a no-op at a step boundary -- which, now
+|   that Hook A only arms and never forces, is the only place an armed commit can land.
+|
+|   So: replay stock exactly on both paths. The SCALE_IX correction above stays -- it fixes a
+|   real latent stock bug (stale scale index for one cycle after a commit) and is unrelated
+|   to the tick phase.
+    clr.b   %d0                        | displaced original #1 (stock leaves D0 = 0)
+    move.b  %d0,STEP                   | displaced original #2 -- tick phase, 0 at a boundary
 |   Session 70 (3rd pass): raw D7=resumeStep only nudges the REAL fire-gate counter
 |   (0x800064d0/8[t], "REFILL_TBL") coarsely -- confirmed dynamically that REFILL_TBL is
 |   reloaded every step from the QUOTIENT array (0x800065e4/f4[t] low byte), computed by
