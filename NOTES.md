@@ -28885,3 +28885,83 @@ retraction in this thread.
 
 **Not flashed.** Watch on hardware: whether BUSY now recovers on a second
 gesture (the target), and whether the arrow crash still happens at all.
+
+## Session 84 continued — the harness CAN edit at last, and sequence editing is EXONERATED
+
+Follows "Session 84 — RELOAD2: hardware report #7". The editing harness took
+three passes; each failed loudly rather than producing a plausible pass, which is
+what made the gate findable.
+
+### The three passes
+
+1. **v1** watched a guessed window (trig-mask bytes in the cold blob) and saw
+   nothing. Its edit-liveness gate **refused to report a scratch verdict**. That
+   refusal is the whole value: the earlier `diag_scratch_clobber.py` had reported
+   "0 writes to 0x80006a50..55" as if it meant something, when zero writes
+   *including our own* was the tell that no edit had happened.
+2. **v2** stopped guessing: read the live dispatch table (`0x46c7d8de`, 24-B
+   stride) per trig keycode and hooked the real handler, and diffed the **entire**
+   cold blob (`0x9b340`) and live copy (`0x8ed80`) instead of an offset window.
+   Result: all 16 trig codes dispatch to ONE handler `0x40060ce0`,
+   `handlers-fired=192`, **zero bytes changed**. So the keys dispatch fine and the
+   blocker is UI mode — exactly the alternative v2's abort text was written to
+   distinguish.
+3. **v3**: `objdump` on that handler (used first, per this thread's own lesson)
+   found the gate immediately:
+
+```
+40060ce0:  movel %sp@(4),%d1          ; keycode
+40060ce4:  movel %sp@(8),%d0          ; event
+40060ce8:  tstl  0x460d1736           ; <-- the mode gate
+40060cee:  beqs  0x40060cf4           ; flag 0  -> jmp 0x400501d8
+40060cf0:  braw  0x40060b58           ; flag !0 -> the other route
+```
+
+`0x460d1736` reads **0** in the loaded project, so every previous attempt took
+the `0x400501d8` route, which does not touch pattern data (consistent with it
+being the live-play route rather than the step-toggle route).
+
+### MEASURED: with the mode flag set, the firmware really edits
+
+```
+strategy                   handlers-fired  blob-bytes  live-bytes  scratch-writes
+plain trigs                     192            0           0            0
+REC then trigs                  192            0           0            0
+mode=1 then trigs               192            2           1            0
+mode=1 + REC then trigs         192            1           1            0
+
+EDIT LIVENESS OK -- 5 byte(s) of pattern store changed by firmware
+scratch 0x80006a50..55: 0 write(s)
+```
+
+So `0x460d1736` is the trig-key mode selector, and setting it is how this harness
+drives real firmware sequence editing. **New capability, documented in
+`tools/diag_seq_edit_io.py`.**
+
+### The verdict, and its limits
+
+**Sequence editing does NOT clobber RELOAD2's scratch.** For the first time this
+is a defensible negative rather than a vacuous one: the gate proves firmware
+edit code actually ran and changed the pattern store, and our scratch took zero
+writes while it did.
+
+**Limits, stated honestly**: only 5 bytes changed, i.e. a few trig toggles. This
+exercises the trig-toggle edit path, not p-lock editing, live recording with a
+real recorder machine, note edits, or the recorder path. So trig editing is
+exonerated; the scratch-clobber theory is **substantially weakened but not fully
+closed for every edit type**.
+
+### What this means for issue #2
+
+The leading remaining theory for what leaves `G_KIND` set — stock code writing
+our scratch during editing — is now off the table for trig editing, which is what
+report #7 described ("after editing the sequence"). Combined with Session 83
+killing the playback-clobber and `RELOAD_NOW` theories, and the suppression
+cutting card reads 6852 -> 354 without fixing BUSY, **the root cause of the stuck
+`G_KIND` remains unknown.** That is precisely why Session 84's fix is a recovery
+path rather than a cure, and it should stay labelled that way.
+
+Still-live possibilities, none yet tested: a post genuinely lost in
+`FUN_40022778`'s single scratch message buffer (`0x460bd912`); a clobber from an
+edit type this harness does not yet drive; or the storage task declining the job
+under real CF streaming, which no harness here can model.

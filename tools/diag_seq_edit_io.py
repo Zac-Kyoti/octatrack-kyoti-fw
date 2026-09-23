@@ -107,6 +107,16 @@ def main(argv):
     # keycodes might not be dispatching at all. So: verify dispatch directly, and
     # diff the WHOLE of both stores rather than trusting an offset guess.
     DISPATCH_BASE = 0x46C7D8DE
+    # Session 84, third pass -- MEASURED with objdump on the trig handler itself.
+    # All 16 trig keycodes dispatch to ONE handler, 0x40060ce0, which opens:
+    #     40060ce8  tstl 0x460d1736
+    #     40060cee  beqs 0x40060cf4      ; flag 0  -> jmp 0x400501d8
+    #     40060cf0  braw 0x40060b58      ; flag !0 -> a different route
+    # v2 measured handlers-fired=192 with ZERO bytes changed, i.e. the keys
+    # dispatch fine and the zero path does not edit the pattern (consistent with
+    # it being the live-play route). So the mode flag is the blocker, exactly as
+    # v2's abort message predicted. Drive the other route by setting it.
+    TRIG_MODE = 0x460D1736
     LIVE = 0x1001614E
     LIVE_LEN = 0x8ED80
 
@@ -184,6 +194,18 @@ def main(argv):
         "REC then trigs", lambda: (rt.press_rec_live(), trigs(a.trigs)))
     results["REC again then trigs"] = strategy(
         "REC again then trigs", lambda: (rt.press_rec_live(), trigs(a.trigs)))
+
+    def set_mode(v):
+        rt.uc.mem_write(TRIG_MODE, struct.pack(">I", v))
+
+    print(f"    (trig-mode flag 0x{TRIG_MODE:08x} reads "
+          f"{struct.unpack('>I', rt.uc.mem_read(TRIG_MODE, 4))[0]:#010x})")
+    results["mode=1 then trigs"] = strategy(
+        "mode=1 then trigs", lambda: (set_mode(1), trigs(a.trigs)))
+    results["mode=1 + REC then trigs"] = strategy(
+        "mode=1 + REC then trigs",
+        lambda: (set_mode(1), rt.press_rec_live(), trigs(a.trigs)))
+    set_mode(0)
 
     total_edits = sum(v[0] for v in results.values())
     print(f"\n  trig handlers that ever fired: "
