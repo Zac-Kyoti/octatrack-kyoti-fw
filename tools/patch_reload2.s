@@ -183,6 +183,8 @@
 |   rl_yes detours and which answers an open picker after [BANK] is released.
     .equ LAYER_PUSH,     0x40031494     | FUN_40031494(struct) -> link + rebuild
     .equ LAYER_POP,      0x4003146c     | (struct) -> unlink + rebuild
+    .equ CLOSECB_RESUME, 0x40056bc6     | resume after the displaced tst.l 0x460d1e64
+                                        | (lands exactly on CLOSE_CB's own beqs)
     .equ BANK_HELD_FLAG, 0x46c7dd56     | is_key_held([BANK]) = 0x46c7d8ee + 0x2f*24
     .equ YES_DISPATCH,   0x46c7dd76     | runtime dispatch table, YES press slot
                                         | = 0x46c7d8de + 0x31*24
@@ -428,6 +430,30 @@ rl_bank_press:
 |
 |   The two displaced instructions are replayed and control returns to stock's
 |   own window-show, so the press path is behaviourally stock again.
+|
+|   MEASURED BUG, Session 80 continued (9), via diag_reload2_realkey.py
+|   --walk-away with call-level tracing (not inferred): the guard below ONLY
+|   skipped re-saving when the slot was ALREADY rl_bank_yes. It did not account
+|   for the slot holding OUR OWN layer's handler (rl_lay_yes) -- exactly what
+|   happens if the user re-presses [BANK] while our picker is still open
+|   (walk-away: BANK+YES opens the picker, user taps [BANK] again instead of
+|   answering). At that instant the slot holds rl_lay_yes, the compare against
+|   rl_bank_yes fails, and this OVERWRITES rl_yes_save with our own handler.
+|   Later, with [BANK] released, rl_bank_yes correctly takes its "not held ->
+|   delegate" path -- and delegates to the CORRUPTED value, which unconditionally
+|   executes a reload on the very next, unrelated [YES] press. The trace proved
+|   it directly: ['rl_bank_yes','rl_lay_yes','rl_yes_exec'] all fire on that
+|   later press.
+|
+|   Fix: never snapshot while OUR OWN layer is linked (rl_layer_on). Whatever is
+|   in the slot at that moment is inherently ours or [BANK]'s dynamic overlay,
+|   never the true underlying handler the delegate path exists to preserve.
+|   Under normal single-tap dynamics rl_bank_press only fires once per physical
+|   press edge ([BANK] does not auto-repeat -- delay 0x1e, repeat 0, per
+|   memory-map.md), so this guard only changes behaviour in exactly the
+|   anomalous re-press-while-open case being fixed here.
+    tst.b   rl_layer_on
+    bne.b   rbp_nosave
     move.l  YES_DISPATCH,%d0
     cmpi.l  #rl_bank_yes,%d0
     beq.b   rbp_nosave
@@ -652,6 +678,49 @@ rab_stock:
     move.l  %d2,-(%sp)                 | displaced original
     movea.l %sp@(8),%a0                | displaced original
     jmp     ARROW_B_RESUME
+
+| === CLOSE_CB hook -- unprime the reload when ANYTHING else closes a popup ===
+| Session 80 continued (9). Hardware: open the picker (BANK+YES), then walk away
+| via an UNRELATED gesture (a quick BANK or PTN tap) -- the picker box visually
+| disappears, but a later [YES] STILL executes the reload. Measured why via
+| objdump on POPUP2 (0x4005a0e0, our rl_draw's own popup call): it registers
+| CLOSE_CB (0x40056bc0) as ITS popup's onClose --
+|     pea %pc@(0x40056bc0) ; ... ; jsr 0x4005829c   (the popup creator)
+| CLOSE_CB is the SAME generic teardown BANK's/PTN's own popup-show calls to
+| dismiss whatever is CURRENTLY showing before drawing their own (the shared
+| single-popup-slot convention, handle 0x460d1e64). So when the user taps BANK
+| or PTN, its own popup-show tears down OUR popup via this exact routine -- but
+| CLOSE_CB is a stock, generic routine with no idea our reload exists, so
+| nothing pops our layer or clears G_MENU. State stays primed; box vanishes.
+|
+| Fix: hook CLOSE_CB's own entry. This is the single choke point EVERY teardown
+| of the shared popup slot passes through -- ours (already called explicitly
+| from rl_yes_exec/rl_no_exec) AND every other feature's, direct call or
+| indirect through a stored callback pointer, all land here. Gated strictly on
+| rl_layer_on (set ONLY by our own rl_push_layer), so it is a no-op for every
+| unrelated popup dismissal -- zero blast radius on anything else that uses
+| CLOSE_CB, including in a merged build.
+|
+| Displaces CLOSE_CB's own first instruction, `tstl 0x460d1e64` (6 B, exactly
+| one jmp's worth, no partial-instruction risk). That instruction is register-
+| independent (a fixed-address test) and CLOSE_CB's callers already brace for
+| d0/d1/a0/a1 to be clobbered (rl_yes_exec/rl_no_exec explicitly save/restore
+| those around their own jsr CLOSE_CB) -- d2-d7/a2-a6 must NOT be touched, and
+| rl_pop_layer's own chain (LAYER_POP -> the rebuild at 0x4003125c) is safe
+| because the rebuild's own prologue (`moveml d2/a2-fp,sp@`) explicitly saves
+| and restores exactly those registers itself.
+
+    .global rl_closecb_hook
+rl_closecb_hook:
+    tst.b   rl_layer_on
+    beq.b   rcc_skip
+    clr.b   G_MENU                     | unprime -- a later [YES]/[NO] must not
+                                       | silently act on a picker the user can
+                                       | no longer see
+    jsr     rl_pop_layer               | give the keys back
+rcc_skip:
+    tst.l   0x460d1e64                 | displaced original instruction
+    jmp     CLOSECB_RESUME
 
 | ============ the picker's OWN keymap layer (Session 80 continued (8)) ============
 | WHY: until now the picker borrowed slots in OTHER layers -- the [PTN] and

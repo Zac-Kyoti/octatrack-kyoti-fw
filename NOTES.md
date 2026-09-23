@@ -27548,3 +27548,143 @@ gates confirm it is inert.
   index -- `0x405666e4` measured as wrapping, cont.38). The two coincide only when patterns
   share a master length and master scale. The informative hardware comparison is patterns whose
   **master lengths differ**.
+## Session 80 continued (9) (2026-09-22, `wip`) — RELOAD2: fixed the "still primed after walking away" bug; UNDO-instead-of-CLEAR confirmed as an INHERITED STOCK QUIRK, not ours
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (8)").
+
+### Hardware report #4, two new findings
+
+1. **The picker stays primed after visually going away.** Open the picker
+   (BANK+YES), then walk away via an unrelated gesture (a quick BANK or PTN tap)
+   instead of answering YES/NO. The picker box disappears, but a LATER,
+   unrelated `[YES]` press still fires the reload.
+2. After a reload, `FUNC+PLAY` (Clear) shows **"UNDO TRACK TRIGS"** instead of
+   **"CLEAR TRACK TRIGS"**, as if the OS thinks there's a pending undo the user
+   never created.
+
+### Bug #1, root-caused and FIXED
+
+Measured via `objdump` (not guessed) on `FUN_4005a0e0` (`POPUP2`, our `rl_draw`'s
+own popup call): it registers the GENERIC `CLOSE_CB` (`0x40056bc0`) as its own
+popup's `onClose`. `CLOSE_CB` is the SAME teardown BANK's/PTN's own popup-show
+calls to dismiss whatever is currently showing (shared single-popup-slot
+convention, handle `0x460d1e64`). So tapping BANK or PTN tears down OUR popup
+via this generic routine — which has no idea our reload exists, so nothing pops
+our layer or clears `G_MENU`. Visually gone; state stays primed.
+
+**Fix**: hook `CLOSE_CB`'s own entry (`rl_closecb_hook`, displaces its first
+instruction `tstl 0x460d1e64`, exactly 6 B). This is the single choke point
+every popup teardown passes through — ours and everyone else's, direct call or
+indirect through a stored callback pointer. Gated strictly on `rl_layer_on`
+(set only by our own `rl_push_layer`), so it's a no-op for every unrelated
+popup dismissal, including in a merged build.
+
+**That fix alone was not enough — a SECOND, independent bug in `rl_bank_press`
+surfaced immediately, and it took real call-tracing to find, not inference.**
+`diag_reload2_realkey.py --walk-away` (new) reproduces the exact gesture through
+`set_key_state`. The `[PTN]` case passed clean immediately. The `[BANK]` case
+kept firing a reload anyway, and the FIRST TWO explanations I proposed for it
+were WRONG (recorded so they aren't retried): "the slot never got restored" and
+"maybe the rebuild doesn't clear held keys" — both refuted by adding call-level
+tracing and just reading what actually happened:
+
+```
+"quick [BANK] tap (walk away)"  calls: [rl_bank_press, rl_closecb_hook, rl_pop_layer]
+                                 YES slot: 0x400d7682(ours) -> 0x400d7400(rl_bank_yes)
+"[BANK] release"                calls: []   YES slot still: 0x400d7400
+"[YES] press (unrelated)"       calls: [rl_bank_yes, rl_lay_yes, rl_yes_exec]  <- fires
+```
+
+`rl_bank_press`'s snapshot guard (added in "(6)" for the delegate mechanism)
+only skipped re-saving when the slot was ALREADY `rl_bank_yes`. It never
+accounted for the slot holding OUR OWN layer's handler (`rl_lay_yes`) — exactly
+what's in the slot when the user re-presses `[BANK]` while our picker is STILL
+open. The guard's compare failed, so it OVERWROTE `rl_yes_save` with our own
+handler. Later, `[BANK]` released, `rl_bank_yes` correctly takes its "not held
+→ delegate" path — and delegates to the now-corrupted value, which
+unconditionally executes on the very next press.
+
+**Fix**: never snapshot while `rl_layer_on` is set. Anything in the slot at
+that moment is inherently ours or `[BANK]`'s dynamic overlay, never the true
+underlying handler the delegate exists to preserve. `[BANK]` doesn't
+auto-repeat (delay `0x1e`, repeat `0`), so this only changes behaviour in
+exactly the anomalous re-press-while-open case.
+
+**Validated after the fix**: both `--walk-away` cases (BANK, PTN) PASS —
+`rl_job_calls` stays 0 on the later unrelated `[YES]`. `--combo` ALL GOOD,
+`emu_reload2_keymap.py` ALL GOOD, `diag_bank_window.py --stress` ALL GOOD,
+`--trk` ALL GOOD, and 5 consecutive full real-key gestures byte-identical
+(`diag_reload2_realkey.py 5`).
+
+### Bug #2 — CONFIRMED as an inherited stock quirk, NOT introduced by our patch
+
+Traced the decision point by objdump: the Clear handler calls
+`jsr 0x4002a4dc(g1@0x100b14cc, g2@0x100b14d0, kind=0xa)` — nonzero → show
+"UNDO", do nothing; zero → perform the clear, mark undo available via
+`jsr 0x40039df4`, show "CLEAR". The mark function computes its target address
+using OUR OWN worker's exact stride constants (`0x91a`=TRAC_A, `0x8ed8`
+=PATSTRIDE) into the `0x1001xxxx` region neighbouring the live pattern cache.
+
+Two of my OWN test-harness bugs were caught and fixed BEFORE trusting any
+result from this investigation (both now documented in `diag_reload2_undo.py`
+as cautionary comments, since both are mistakes already made and fixed once
+elsewhere this session):
+1. `ctl_flush_tb()` was called BEFORE the write-watch hook was registered.
+   Unicorn does not retroactively re-instrument already-cached translation
+   blocks for a new hook, so this silently produced a false "0 writes" result.
+2. The drain loop only checked `G_KIND == 0` — the EXACT documented gotcha
+   from "(4)": `G_KIND` clears at `rl_job`'s entry, long before stock's
+   downstream whole-bank reload (the only place writes could plausibly happen)
+   finishes. Fixed to drain until the pattern parser has fired its full
+   expected count (17: 1 ours + 16 stock's).
+
+With both fixed, the direct measurement is unambiguous: **10,157 writes** land
+in the watched region (`0x10010000`-`0x10020000`) during one reload, spanning
+`0x1001614e`..`0x1001fffe`, and **2,583 of them land within `0x2000` bytes of
+the undo-mark base** (`0x100169a7`). Stock's whole-bank reload machinery — which
+our worker's job still triggers as a side effect (the un-suppressed doneFn from
+"(4)"/"(5)") — writes broadly across the exact memory neighbourhood the
+Clear/Undo system operates in.
+
+The query itself (with `g1=7, g2=0`, whatever those widely-referenced globals
+actually represent — never fully identified, 1004 and 484 xrefs respectively,
+too broad to resolve by reading) still read "CLEAR" after our reload. That was
+NOT treated as a disproof — it far more likely means the query was checking the
+wrong bank/part index, not that nothing happened.
+
+**Settled definitively by the user on hardware, not by further RE**: plain
+STOCK RELOAD BANK (PROJECT menu, no patch involved), with trigs present,
+followed by FUNC+PLAY, **ALSO shows "UNDO" instead of "CLEAR".** This is a
+pre-existing stock quirk inherited via the whole-bank reload machinery our
+worker's job still triggers — not something our patch introduces. No fix is
+owed here specifically; it is the SAME symptom family as the ~1 s stall (both
+are consequences of triggering stock's full whole-bank RELOAD BANK for a
+narrow, single-track operation that doesn't need it), and the eventual real fix
+for one is very likely the fix for both.
+
+### Status
+
+1523 B vs stock, 9 detours. **Not yet flashed.** Regressions all green (see
+above). The layer redesign from "(8)" plus both "(9)" fixes are ready for a
+hardware pass focused specifically on the walk-away scenario and general
+BANK+YES reliability.
+
+### What's still open, ranked by leverage
+
+1. **The ~1 s stall / stock transport stop and bug #2 above are the SAME root
+   cause**: our job still triggers stock's full whole-bank RELOAD BANK. The
+   "(4)"/"(5)" thread already found and reverted a naive fix (skip the call
+   at `0x40023c62`) because it broke `[BANK]`/`[YES]` badly. The multi-reload
+   gate built in "(6)" (`diag_reload2_repeat.py`) exists specifically to
+   qualify any retry before it goes near hardware — a single-reload pass is
+   KNOWN to be worthless evidence here, that's exactly how "(4)" passed review
+   and then failed on repeated real-world use.
+2. `RELOAD BUSY` — root cause still not found. Ruled out this session/recent
+   ones: storage-task-busy-with-CF-streaming (user retracted the STATIC/FLEX
+   observation), a single clean reload leaving `G_KIND` stuck (never
+   reproduced, `G_KIND` always settles to 0). The `[YES]`-alone-fires-a-reload
+   family of bugs (fixed in "(6)" and now "(9)") were plausible contributors
+   but never proven to be THE cause; with those now fixed, whether BUSY
+   improves is itself a data point for the next session.
+3. The list UI (stock's 12-entry table at `0x400beb72`, renderer still
+   unlocated) — lowest priority, cosmetic.

@@ -329,8 +329,168 @@ def test_no_cancel():
         print("\nPASS: [NO] cancel pops our layer cleanly; depth back to baseline.")
 
 
+def test_trig_while_open():
+    """Session 80 continued (8), follow-up: once our picker opens, the [BANK]
+    overlay is popped (closing stock's SELECT BANK window does that -- see the
+    main docstring). So a trig press while BANK is still physically held and our
+    picker is open no longer reaches BANK's own 'pick a bank' record (0x4007b2fc)
+    -- it falls through to whatever is below our layer. This measures exactly
+    what a trig press does in that state: does it disturb our picker (G_SEL,
+    G_MENU) or reach something unexpected, rather than assuming either."""
+    erl.OUR_IMAGE = erl.RELOAD_IMAGE
+    global OUR_LAYER
+    OUR_LAYER = erl2._sym("rl_layer")
+
+    rt = erl.boot_and_load()
+    T, P = 3, 0
+    curbank = rt.uc.mem_read(er.CUR_BANK, 1)[0]
+    rt.seq_select_live(curbank, P)
+    rt.frame = True
+    rt.next_frame = rt.sample + er.FRAME_PERIOD
+    rt.exact_clock()
+    rt.internal_clock()
+    rt.press_play_live()
+    rt.run(ms=250)
+
+    rt.uc.mem_write(erl.TOAST_FN, b"\x4e\x75")
+    rt.uc.ctl_flush_tb()
+    rt.uc.mem_write(erl.TRANSPORT, struct.pack(">I", 1))
+    rt.uc.mem_write(0x800065BE, bytes([P]))
+    rt.uc.mem_write(erl.CUR_TRACK_G, bytes([T]))
+    rt.uc.mem_write(erl.MIDI_MODE_G, b"\x00")
+
+    def key(code, event, label):
+        rt.run(until=lambda r: r.pc == er.MAIN_SPIN)
+        rt.call_as_main(SET_KEY_STATE, args=(code, event), budget=2_000_000)
+        dep, bank_linked, mine = layer_walk(rt.uc)
+        gs = rt.uc.mem_read(erl.G_SEL_A, 1)[0]
+        gm = rt.uc.mem_read(erl.G_MENU_A, 1)[0]
+        print(f"   {label:<28} G_MENU={gm} G_SEL={gs} depth={dep} "
+              f"BANK={'L' if bank_linked else '-'} OURlayer={'L' if mine else '-'}")
+
+    print("--- trig press while [BANK] held + our picker open ---")
+    key(BANK_CODE, PRESS, "[BANK] press")
+    key(YES_CODE, PRESS, "[YES] press (open)")
+    key(YES_CODE, RELEASE, "[YES] release")
+    key(0x03, PRESS, "trig 3 press (while picker open)")
+    key(0x03, RELEASE, "trig 3 release")
+    key(YES_CODE, PRESS, "[YES] press (does it still execute?)")
+    key(YES_CODE, RELEASE, "[YES] release")
+    key(BANK_CODE, RELEASE, "[BANK] release")
+    print("\nRead the trace: does the trig disturb G_SEL/G_MENU, and does [YES]\n"
+          "still execute correctly afterward?")
+
+
+def test_walk_away():
+    """Session 80 continued (9): the exact hardware report -- open the picker
+    (BANK+YES), then walk away via an UNRELATED gesture (a quick BANK tap, which
+    shows SELECT BANK, or a PTN tap, which shows SELECT PATTERN) instead of
+    answering YES/NO. Both close the shared popup slot via CLOSE_CB, which our
+    new hook uses to unprime the reload. Verify: after walking away, G_MENU is 0
+    and our layer is unlinked, so a LATER unrelated [YES] press does NOT fire a
+    reload."""
+    erl.OUR_IMAGE = erl.RELOAD_IMAGE
+    rl_job = erl2._sym("rl_job")
+    global OUR_LAYER
+    OUR_LAYER = erl2._sym("rl_layer")
+
+    rt = erl.boot_and_load()
+    T, P = 3, 0
+    curbank = rt.uc.mem_read(er.CUR_BANK, 1)[0]
+    rt.seq_select_live(curbank, P)
+    rt.frame = True
+    rt.next_frame = rt.sample + er.FRAME_PERIOD
+    rt.exact_clock()
+    rt.internal_clock()
+    rt.press_play_live()
+    rt.run(ms=250)
+
+    job_count = [0]
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, lambda u, a, s, x: job_count.__setitem__(0, job_count[0] + 1),
+                    begin=rl_job, end=rl_job)
+    rt.uc.mem_write(erl.TOAST_FN, b"\x4e\x75")
+    rt.uc.ctl_flush_tb()
+    rt.uc.mem_write(erl.TRANSPORT, struct.pack(">I", 1))
+    rt.uc.mem_write(0x800065BE, bytes([P]))
+    rt.uc.mem_write(erl.CUR_TRACK_G, bytes([T]))
+    rt.uc.mem_write(erl.MIDI_MODE_G, b"\x00")
+
+    def key(code, event, label):
+        rt.run(until=lambda r: r.pc == er.MAIN_SPIN)
+        rt.call_as_main(SET_KEY_STATE, args=(code, event), budget=2_000_000)
+        dep, bank_linked, mine = layer_walk(rt.uc)
+        gm = rt.uc.mem_read(erl.G_MENU_A, 1)[0]
+        print(f"   {label:<32} G_MENU={gm} depth={dep} "
+              f"OURlayer={'LINKED' if mine else 'unlinked'} rl_job_calls={job_count[0]}")
+        return gm, mine
+
+    PTN_CODE = 0x2E
+    # Fine-grained call trace -- the walk-away BANK case is expected to reveal
+    # the actual mechanism rather than a hypothesis. Trace every entry to the
+    # functions that could plausibly route YES back to an execute.
+    names = {}
+    for nm in ("rl_bank_yes", "rl_lay_yes", "rl_yes_exec", "rl_bank_press",
+               "rl_closecb_hook", "rl_push_layer", "rl_pop_layer"):
+        try:
+            names[erl2._sym(nm)] = nm
+        except KeyError:
+            pass
+    trace = []
+
+    def mk(nm):
+        def cb(u, ad, sz, x):
+            entry = nm
+            if nm == "rl_bank_press":
+                # log rl_yes_save's value AFTER this call (it may have just
+                # written it) -- read on the NEXT instruction fetch instead is
+                # awkward, so just log the pre-call value here and post-call
+                # value at the next hook opportunity.
+                pass
+            trace.append(entry)
+        return cb
+
+    for a, nm in names.items():
+        rt.uc.hook_add(er.eb.UC_HOOK_CODE, mk(nm), begin=a, end=a)
+
+    for walk_code, walk_name in ((BANK_CODE, "[BANK]"), (PTN_CODE, "[PTN]")):
+        print(f"\n--- walk away via a quick {walk_name} tap, then press [YES] ---")
+        trace.clear()
+        key(BANK_CODE, PRESS, "[BANK] press")
+        print(f"      calls: {trace}"); trace.clear()
+        key(YES_CODE, PRESS, "[YES] press (open picker)")
+        print(f"      calls: {trace}"); trace.clear()
+        key(YES_CODE, RELEASE, "[YES] release")
+        print(f"      calls: {trace}"); trace.clear()
+        key(BANK_CODE, RELEASE, "[BANK] release (picker stays open -- sticky)")
+        print(f"      calls: {trace}"); trace.clear()
+        ys_before = u32(rt.uc, YES_SLOT)
+        key(walk_code, PRESS, f"quick {walk_name} tap (walk away)")
+        print(f"      calls: {trace}  YES slot: 0x{ys_before:08x} -> 0x{u32(rt.uc, YES_SLOT):08x}")
+        trace.clear()
+        gm, mine = key(walk_code, RELEASE, f"{walk_name} release")
+        print(f"      calls: {trace}  YES slot now: 0x{u32(rt.uc, YES_SLOT):08x}")
+        trace.clear()
+        before = job_count[0]
+        ys_pre_yes = u32(rt.uc, YES_SLOT)
+        key(YES_CODE, PRESS, "[YES] press (unrelated -- must NOT reload)")
+        print(f"      calls: {trace}  YES slot AT PRESS TIME was: 0x{ys_pre_yes:08x}")
+        trace.clear()
+        key(YES_CODE, RELEASE, "[YES] release")
+        print(f"      calls: {trace}"); trace.clear()
+        fired = job_count[0] > before
+        if gm != 0 or mine or fired:
+            print(f"   ** FAIL: G_MENU={gm} OURlayer={mine} fired={fired} "
+                  "-- the reload is still primed after walking away. **")
+        else:
+            print("   PASS: walking away unprimed the reload; the later [YES] did nothing.")
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--no-cancel":
         test_no_cancel()
+    elif len(sys.argv) > 1 and sys.argv[1] == "--trig":
+        test_trig_while_open()
+    elif len(sys.argv) > 1 and sys.argv[1] == "--walk-away":
+        test_walk_away()
     else:
         main()

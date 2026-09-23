@@ -156,6 +156,10 @@ PATCHES = [
       # site lives in) and 0x4007b408 (the teardown) have ZERO xrefs, "SELECT
       # BANK" (0x400b7302) has exactly one use -- the call we suppress -- and
       # nothing in the image branches into either displaced range (scanned).
+      # Session 80 continued (9): CLOSE_CB's own entry -- unprime the reload
+      # (clear G_MENU, pop our layer) whenever ANYTHING closes the shared popup
+      # slot, not just our own [YES]/[NO]. See rl_closecb_hook's own comment.
+      (0x40056bc0, "rl_closecb_hook", "4ab9460d1e64", 6, "jmp"),   # tst.l 0x460d1e64
       # Session 80 continued (7): the SELECT BANK window deferral is REVERTED --
       # it caused [BANK] to stick on (overlay never torn down) and off (window
       # never drawn) on hardware. The rl_bank_rel detour is GONE and [BANK]
