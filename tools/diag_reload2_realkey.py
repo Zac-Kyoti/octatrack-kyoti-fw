@@ -48,6 +48,7 @@ very scheduling problem the old comment describes, and knowing exactly which
 step trips it is itself the finding.
 
 Usage:   python3 tools/diag_reload2_realkey.py [iterations]    (default 3)
+         python3 tools/diag_reload2_realkey.py --arrows      (hardware report #5)
 (Slow -- full-RTOS boot + a real card load. Background it.)
 """
 import pathlib
@@ -485,6 +486,121 @@ def test_walk_away():
             print("   PASS: walking away unprimed the reload; the later [YES] did nothing.")
 
 
+def test_arrows():
+    """Session 82, hardware report #5: after BANK+YES opens the picker, the UP or
+    DOWN arrow works EXACTLY ONCE, and then the arrows AND [YES] AND [NO] are all
+    dead (the box stays on screen; only a BANK/PTN tap escapes).
+
+    All three keys dying together is the signature of our keymap layer being gone
+    rather than of an arrow bug, so this drives arrows through the REAL dispatcher
+    and measures layer linkage + G_MENU after EVERY press, which is exactly what
+    `emu_reload2.py --combo` structurally cannot see: it calls rl_arr_b/rl_lay_dn
+    directly, and in direct-call mode our layer was never really pushed, so the
+    CLOSE_CB hook that Session 80 continued (9) added is inert there.
+
+    Hypothesis under test: rl_draw's own POPUP2 call dismisses the CURRENTLY
+    showing popup before drawing the new one, and since (9) our popup's onClose
+    IS CLOSE_CB -- so our own redraw enters rl_closecb_hook with rl_layer_on set
+    and the hook, which exists to catch the user walking AWAY, tears our own
+    picker down mid-redraw. That predicts: first arrow moves G_SEL and then
+    G_MENU drops to 0 with our layer unlinked; every later key is dead."""
+    erl.OUR_IMAGE = erl.RELOAD_IMAGE
+    rl_job = erl2._sym("rl_job")
+    global OUR_LAYER
+    OUR_LAYER = erl2._sym("rl_layer")
+
+    rt = erl.boot_and_load()
+    T, P = 3, 0
+    curbank = rt.uc.mem_read(er.CUR_BANK, 1)[0]
+    rt.seq_select_live(curbank, P)
+    rt.frame = True
+    rt.next_frame = rt.sample + er.FRAME_PERIOD
+    rt.exact_clock()
+    rt.internal_clock()
+    rt.press_play_live()
+    rt.run(ms=250)
+
+    job_count = [0]
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, lambda u, a, s, x: job_count.__setitem__(0, job_count[0] + 1),
+                   begin=rl_job, end=rl_job)
+    rt.uc.mem_write(erl.TOAST_FN, b"\x4e\x75")
+    rt.uc.mem_write(erl.TRANSPORT, struct.pack(">I", 1))
+    rt.uc.mem_write(0x800065BE, bytes([P]))
+    rt.uc.mem_write(erl.CUR_TRACK_G, bytes([T]))
+    rt.uc.mem_write(erl.MIDI_MODE_G, b"\x00")
+
+    names = {}
+    for nm in ("rl_bank_yes", "rl_lay_yes", "rl_lay_up", "rl_lay_dn", "rl_yes_exec",
+               "rl_draw", "rl_closecb_hook", "rl_push_layer", "rl_pop_layer"):
+        try:
+            names[erl2._sym(nm)] = nm
+        except KeyError:
+            pass
+    trace = []
+    for a, nm in names.items():
+        rt.uc.hook_add(er.eb.UC_HOOK_CODE,
+                       (lambda n: (lambda u, ad, sz, x: trace.append(n)))(nm), begin=a, end=a)
+    # Session 80 continued (9)'s own lesson: flush AFTER hook_add, never before.
+    rt.uc.ctl_flush_tb()
+
+    def key(code, event, label):
+        trace.clear()
+        rt.run(until=lambda r: r.pc == er.MAIN_SPIN)
+        rt.call_as_main(SET_KEY_STATE, args=(code, event), budget=2_000_000)
+        dep, _bank, mine = layer_walk(rt.uc)
+        gm = rt.uc.mem_read(erl.G_MENU_A, 1)[0]
+        sel = rt.uc.mem_read(erl.G_SEL_A, 1)[0]
+        print(f"   {label:<34} G_MENU={gm} G_SEL={sel} depth={dep} "
+              f"OURlayer={'LINKED' if mine else 'unlinked'} "
+              f"YES={u32(rt.uc, YES_SLOT):#010x} jobs={job_count[0]}")
+        if trace:
+            print(f"      calls: {trace}")
+        return gm, sel, mine
+
+    UP_CODE, DOWN_CODE = 0x33, 0x20
+    print("--- open the picker, then work the arrows repeatedly ---")
+    key(BANK_CODE, PRESS, "[BANK] press")
+    key(YES_CODE, PRESS, "[YES] press (open picker)")
+    key(YES_CODE, RELEASE, "[YES] release")
+    gm, sel0, mine = key(BANK_CODE, RELEASE, "[BANK] release (sticky)")
+    if gm != 1 or not mine:
+        print(f"   ** ABORT: picker did not open cleanly (G_MENU={gm} ours={mine}) **")
+        return False
+
+    fails = []
+    # Four arrow taps. The selection must advance every time, and G_MENU/our layer
+    # must survive every one. N_ITEMS is 3, so DOWN from 2 wraps to 0.
+    seq = [(DOWN_CODE, "DOWN"), (DOWN_CODE, "DOWN"), (UP_CODE, "UP"), (DOWN_CODE, "DOWN")]
+    prev = sel0
+    for i, (code, nm) in enumerate(seq, 1):
+        gm, sel, mine = key(code, PRESS, f"{nm} press #{i}")
+        key(code, RELEASE, f"{nm} release #{i}")
+        want = (prev + 1) % 3 if nm == "DOWN" else (prev - 1) % 3
+        if gm != 1 or not mine:
+            fails.append(f"arrow #{i} ({nm}): picker torn down mid-redraw "
+                         f"(G_MENU={gm}, our layer {'LINKED' if mine else 'UNLINKED'})")
+        if sel != want:
+            fails.append(f"arrow #{i} ({nm}): G_SEL {prev} -> {sel}, wanted {want}")
+        prev = sel
+
+    # And [YES] must still execute after all that arrowing.
+    before = job_count[0]
+    key(YES_CODE, PRESS, "[YES] press (execute)")
+    key(YES_CODE, RELEASE, "[YES] release")
+    if job_count[0] <= before:
+        fails.append("[YES] after arrowing did not execute a reload")
+
+    print()
+    if fails:
+        for f in fails:
+            print(f"   ** FAIL: {f} **")
+        print("   REPRODUCED the hardware report." if len(fails) > 1 else "   FAIL")
+        return False
+    print("   PASS: arrows work repeatedly, the picker survives every redraw, "
+          "and [YES] still executes.")
+    return True
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--no-cancel":
         test_no_cancel()
@@ -492,5 +608,7 @@ if __name__ == "__main__":
         test_trig_while_open()
     elif len(sys.argv) > 1 and sys.argv[1] == "--walk-away":
         test_walk_away()
+    elif len(sys.argv) > 1 and sys.argv[1] == "--arrows":
+        sys.exit(0 if test_arrows() else 1)
     else:
         main()

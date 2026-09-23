@@ -1,4 +1,4 @@
-# RELOAD2 handoff — continue from Session 81
+# RELOAD2 handoff — continue from Session 82
 
 Paste this whole file as your opening prompt in the new session.
 
@@ -7,8 +7,12 @@ Paste this whole file as your opening prompt in the new session.
 We are continuing RELOAD2 work on the Octatrack Kyoti firmware project
 (`~/Documents/octatrack-kyoti-fw/`, branch `wip`). Read `START_HERE.md` first
 (its RELOAD2 row has the full session-by-session history), then
-`NOTES.md` "Session 81" (the most recent entry, at the end of the file — grep
-`^## Session 80 continued` and `^## Session 81` for the full thread).
+`NOTES.md` "Session 82 — RELOAD2: hardware report #5" (grep
+`^## Session 82 .* RELOAD2` — **note the collision: the DIRECT JUMP thread also
+has a "Session 82" entry, and it sits EARLIER in the file**, so a bare
+`^## Session 82` grep returns both and the first hit is not this one). For the
+full thread: `^## Session 80 continued`, `^## Session 81`, and that RELOAD2
+Session 82 entry.
 
 ## What RELOAD2 is
 
@@ -46,14 +50,23 @@ check `sys.exit()`ing *after* `mainos_reload2.bin` was written but *before* the
 were three sessions stale. The check is now relocation-aware and all four
 artifacts regenerate together. Details: `NOTES.md` "Session 81".
 
-**This build has never been flashed, and now there is a current image to flash.**
-That's the immediate next step: build (`python3 tools/build_reload2.py` — it
-should print `manual-trig fix vs build_trigscale_only.py: identical (cave
-relocated 0x400d7b00 -> 0x400d7bf0)` and then a `=== wrap ===` section), confirm
-the regression suite is still green, then ask the user to flash and report back —
-particularly on the walk-away scenario and general `[BANK]`+`[YES]` reliability,
-since that's what session (9) specifically fixed and it's untested on real
-hardware.
+Session 82 flashed that image. **Hardware confirmed (8) and (9): walk-away and
+`[BANK]`+`[YES]` reliability both pass, and `RELOAD BUSY` was never seen once**
+— strong (not conclusive) evidence that open issue #2 was the
+`[YES]`-alone-fires-a-reload family fixed in "(6)"/"(9)". One regression came
+back and is now fixed: the arrows worked **exactly once**, then arrows + `[YES]`
++ `[NO]` all died together, because `rl_draw`'s own POPUP2 call tears down the
+currently-showing popup by calling `CLOSE_CB` **directly** — and since (9) that
+is *our* walk-away hook, so our own redraw unprimed our own picker. Fixed with an
+`rl_redraw` re-entrancy flag; new test `diag_reload2_realkey.py --arrows`
+reproduced it first and passes now. Details: `NOTES.md` "Session 82".
+
+**The current build (1543 B, 9 detours) has NOT been flashed.** That's the
+immediate next step: build (`python3 tools/build_reload2.py` — it should print
+`manual-trig fix vs build_trigscale_only.py: identical (cave relocated
+0x400d7b00 -> 0x400d7bfc)` and then a `=== wrap ===` section), confirm the
+regression suite is green, then ask the user to flash and report back —
+particularly on **the arrows**, since that is what this build fixes.
 
 ## Open issues, ranked by leverage
 
@@ -96,6 +109,13 @@ hardware.
    reference (not a code reference — that gesture is taken by something else).
    Stock's 12-entry list-table renderer lives near `0x400beb72`; never located
    precisely. Lowest priority, purely cosmetic.
+
+   **USER REQUIREMENT (stated Session 82): the three-option picker window must
+   use the system font `F4`.** Recorded verbatim — which font resource/table
+   `F4` names in this firmware has NOT been located yet, and no assumption
+   should be made about it. Locating `F4` (and how POPUP2 / the list renderer
+   select a font at all) is the first RE step whenever this item is picked up;
+   do not guess a font pointer.
 
 ## Hard-won lessons from this thread (read before touching the code)
 
@@ -144,6 +164,16 @@ re-derive or re-learn these:
   conclusion. When a report names one specific symptom, fix exactly that and
   verify the rest — don't assume the unstated parts.
 
+- **Cave space is the binding constraint now — check it BEFORE designing.**
+  Measured free zone: stock is zero `0x400d7400..0x400d7c3b` and `0xff` from
+  `0x400d7c3c` (= `FREE_END`). `patch_trigscale` (62 B) now sits at the very top,
+  `0x400d7bfc`, and **cannot move again**, so `patch_reload2`'s hard ceiling is
+  **2044 B — and it is at 2036. Eight bytes left.** The cave address is also an
+  ALIGNMENT constraint, not just an offset: `0x400d7bfe` was tried first and the
+  source's own `.align` padded the blob 62 -> 64 B and tripped the free-zone
+  assert. Keep it 4-byte aligned. **The list UI cannot fit** — it needs a second
+  cave or another free region surveyed first.
+
 - **A green suite does not mean a current flashable image.** `build_reload2.py`
   writes `out/mainos_reload2.bin` (what every emulator tool loads) *before* its
   validation checks, and wraps the `.syx`/CF-card images *after* them. A check
@@ -175,10 +205,14 @@ re-derive or re-learn these:
   layer mechanism (still direct-call for the driving side).
 - `diag_bank_window.py` [`--stress`] — the `[BANK]` popup/layer lifecycle,
   measured against real stock behavior.
-- `diag_reload2_realkey.py [N | --no-cancel | --trig | --walk-away]` — drives
+- `diag_reload2_realkey.py [N | --no-cancel | --trig | --walk-away | --arrows]` — drives
   the REAL `set_key_state` dispatcher, the only harness that has ever caught
   the routing-class bugs in this thread. Use this first for anything involving
-  key gestures.
+  key gestures. `--arrows` (Session 82) opens the picker and drives four arrow
+  taps plus a final `[YES]`, checking `G_MENU`, `G_SEL`, layer linkage and the
+  live YES dispatch slot after every key — `--combo` cannot see arrow bugs of
+  this class at all, because it calls the arrow handlers directly with no layer
+  ever pushed, which leaves the `CLOSE_CB` hook inert.
 - `diag_reload2_repeat.py [N]` — the multi-reload gate for the worker/job path
   (direct `rl_arm_trk` calls, N consecutive, checks for state drift).
 - `diag_reload2_deser.py` — traces the storage-task job path past the point

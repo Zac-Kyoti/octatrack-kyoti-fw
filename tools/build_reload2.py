@@ -135,11 +135,19 @@ VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_KYOTI"
 
 # (source, load addr, defsym, [(detour site, symbol, expected bytes, len, kind)])
 PATCHES = [
-    # Session 80 continued (8): moved 0x400d7b00 -> 0x400d7bf0 (62 B, ends
-    # 0x400d7c2e, still inside FREE_END 0x400d7c3c) so patch_reload2 has room for
-    # the picker's own keymap layer. The build asserts non-overlap and the free
-    # zone, so a bad move fails loudly rather than silently corrupting.
-    ("patch_trigscale", 0x400d7bf0, None,
+    # Session 80 continued (8): moved 0x400d7b00 -> 0x400d7bf0 (62 B) so
+    # patch_reload2 had room for the picker's own keymap layer.
+    # Session 82: moved again, 0x400d7bf0 -> 0x400d7bfc, for the rl_draw redraw
+    # guard (hardware report #5). This is the TOP of the free zone: the address
+    # must stay 4-BYTE ALIGNED or the source's own `.align` pads the blob from 62
+    # to 64 B and the free-zone assert trips (0x400d7bfe was tried first and did
+    # exactly that -- a useful reminder that the cave address is an alignment
+    # constraint, not just an offset). 62 B at 0x400d7bfc ends 0x400d7c3a, inside
+    # FREE_END 0x400d7c3c (measured: stock is zero from 0x400d7400 to 0x400d7c3b
+    # and 0xff from 0x400d7c3c). patch_reload2's ceiling is therefore
+    # 0x400d7bfc - 0x400d7400 = 2044 B; further growth must come out of its own
+    # footprint, since this cannot move up again.
+    ("patch_trigscale", 0x400d7bfc, None,
      [(0x4009b6f2, "cave", "203c0000091a", 18, "jmp")]),
     ("patch_reload2", 0x400d7400, None,
      # Session 80 continued (2): the rl_ptn detour @0x4005a044 is GONE -- the entry

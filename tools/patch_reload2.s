@@ -712,6 +712,16 @@ rab_stock:
 
     .global rl_closecb_hook
 rl_closecb_hook:
+|   Session 82 (hardware report #5): OUR OWN rl_draw redraw reaches here too --
+|   see the note in rl_draw. Without this first test the arrows worked exactly
+|   once and then the arrows AND [YES] AND [NO] were all dead together (the
+|   signature of the layer being gone, not of an arrow bug), with the box still
+|   on screen because POPUP2 drew the new one right after tearing ours down.
+|   Reproduced through real dispatch by diag_reload2_realkey.py --arrows;
+|   emu_reload2.py --combo could not see it, because it calls rl_lay_dn directly
+|   with no layer ever really pushed, which makes this hook inert there.
+    tst.b   rl_redraw
+    bne.b   rcc_skip                   | our own redraw, not a walk-away
     tst.b   rl_layer_on
     beq.b   rcc_skip
     clr.b   G_MENU                     | unprime -- a later [YES]/[NO] must not
@@ -837,7 +847,17 @@ rl_draw:
     lea     rl_menu_tbl,%a0
     move.l  (%a0,%d0.l*4),%a0
     move.l  %a0,-(%sp)
+|   Session 82: POPUP2 dismisses the CURRENTLY showing popup before drawing the
+|   new one, by calling CLOSE_CB DIRECTLY (measured, 0x4005a0ee:
+|   `tstl 0x460d1e64 ; beqs ; jsr %pc@(0x40056bc0)`). On the OPEN path that slot
+|   is empty so the beqs skips it -- but on a REDRAW the handle in it is OUR OWN
+|   picker's, so our own rl_draw walks straight into rl_closecb_hook, which
+|   exists to detect the user walking AWAY and duly tore our picker down
+|   mid-redraw. Flag the window so the hook knows this teardown is ours.
+    moveq   #1,%d0
+    move.b  %d0,rl_redraw
     jsr     POPUP2                     | FUN_4005a0e0(text)
+    clr.b   rl_redraw
     addq.l  #4,%sp
     rts
 
@@ -1244,7 +1264,13 @@ rl_layer:
     .long   0                          | +0x14 (push/pop/rebuild touch nothing
                                        |        above +0x10 for this layer shape)
 rl_layer_on:
-    .space 4                           | 1 = our layer is linked (push/pop guard)
+    .space 1                           | 1 = our layer is linked (push/pop guard)
+|   Session 82: re-entrancy guard for our OWN redraw. Carved out of the three
+|   spare bytes rl_layer_on never used (every access to it is a byte op), so this
+|   costs no cave space. See rl_closecb_hook for why it has to exist.
+rl_redraw:
+    .space 1                           | 1 = inside our own rl_draw -> POPUP2
+    .space 2                           | pad, keeps the following .align 2 stable
 
 |   26-byte records, ascending by keycode. Only these keys are overridden; the
 |   rebuild leaves every other slot to the layers underneath.

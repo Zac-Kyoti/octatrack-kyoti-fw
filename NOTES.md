@@ -27863,3 +27863,162 @@ cycle, and if it is ours it names which of the four steps sets it. Do NOT guess 
 step from shape alone — that error has been made three times on this thread already
 (`FUN_400972fc` for the slot writer, `FUN_40005030` and `FUN_4009d1e8` for the
 resolver) and each time the measurement said otherwise.
+
+## Session 82 (2026-09-22, `wip`) — RELOAD2: hardware report #5 — the arrows worked exactly once, because our own redraw walked into our own walk-away hook
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (9)"
+→ "Session 81").
+
+### Hardware report #5
+
+The Session 81 image was flashed. **Good news first, and it is substantial:**
+
+- Walk-away (both routes), and general `[BANK]`+`[YES]` reliability — **all
+  passed**, so Session 80 continued (8)'s own-keymap-layer redesign and (9)'s
+  two fixes are hardware-confirmed.
+- **`RELOAD BUSY` was never seen once.** That is open issue #2, whose root cause
+  has been chased unsuccessfully for several sessions. The standing suspicion —
+  that the `[YES]`-alone-fires-a-reload family fixed in "(6)" and "(9)" was
+  feeding it — now has real evidence behind it. **Recorded as strong evidence,
+  NOT as closed**: one session without a symptom that used to appear "most of
+  the time" is a good sign, not a proof, and the underlying whole-bank-reload
+  machinery is still triggered on every reload.
+
+**One regression:** after `[BANK]`+`[YES]` opens the picker, UP or DOWN works
+**exactly once**, and then the arrows **and** `[YES]` **and** `[NO]` are all
+dead together. The box stays on screen. Only a `[BANK]` or `[PTN]` tap escapes.
+
+### Root cause — we walked into our own trap
+
+All three key classes dying *together* is the signature of the keymap layer
+being gone, not of an arrow bug — so this was never an arrow problem.
+
+`objdump` on POPUP2 (`0x4005a0e0`), which `rl_draw` calls, gives it outright:
+
+```
+4005a0e6:  tstl  0x460d1e64           | a popup already showing?
+4005a0ec:  beqs  0x4005a0f2           | no  -> skip
+4005a0ee:  jsr   %pc@(0x40056bc0)     | yes -> CLOSE_CB, DIRECTLY
+...
+4005a104:  pea   %pc@(0x40056bc0)     | register CLOSE_CB as the NEW popup's onClose
+4005a11c:  jsr   %pc@(0x4005829c)     | create it
+4005a120:  movel %d0,0x460d1e64       | store the handle
+```
+
+POPUP2 dismisses whatever is currently showing **before** drawing the new one,
+and it does so by calling `CLOSE_CB` **directly** — not through a stored
+callback pointer. Session 80 continued (9) hooked `CLOSE_CB` precisely because
+it is the one choke point every teardown passes through; that is still the right
+hook, but it is now also on our own redraw path:
+
+- **Opening** the picker: `0x460d1e64` is empty (stock's SELECT BANK is a
+  *window*, not this shared popup slot), the `beqs` skips the call, our hook is
+  never entered. The picker opens fine — which is exactly why every previous
+  test passed.
+- **Redrawing** on an arrow: the handle in that slot is **our own picker's**, so
+  `rl_draw` → POPUP2 → `jsr CLOSE_CB` → `rl_closecb_hook`, which sees
+  `rl_layer_on` set, concludes the user walked away, clears `G_MENU` and pops our
+  layer. POPUP2 *then* draws the new box. Highlight moved once; everything dead;
+  box still visible.
+
+### Why the existing suite could not see it
+
+`emu_reload2.py --combo` drives arrows by calling `rl_lay_dn`/`rl_arr_b`
+**directly**, and in direct-call mode our layer is never really pushed, so
+`rl_layer_on` is clear and the `CLOSE_CB` hook is **inert**. The bug is
+structurally invisible there. This is the same blind spot the thread has now hit
+three separate times; the standing rule held again — only real `set_key_state`
+dispatch finds routing-class bugs.
+
+New tool mode: **`diag_reload2_realkey.py --arrows`**. It opens the picker
+through real dispatch, then drives four arrow taps (full press/release pairs)
+and a final `[YES]`, measuring `G_MENU`, `G_SEL`, layer linkage and the live YES
+dispatch slot after **every** key. Before the fix it reproduced the hardware
+report exactly:
+
+```
+DOWN press #1   G_MENU=0 G_SEL=1  OURlayer=unlinked  YES=0x400815d8
+   calls: ['rl_lay_dn', 'rl_draw', 'rl_closecb_hook', 'rl_pop_layer', ...]
+DOWN press #2   G_MENU=0 G_SEL=1  OURlayer=unlinked   (dead)
+[YES]           did not execute
+```
+
+`G_SEL` moves once, the layer unlinks mid-redraw, and the YES slot falls back
+from ours (`0x400d7688`) to the ambient handler (`0x400815d8`) — the exact
+shadowing (8) diagnosed.
+
+### The fix
+
+A re-entrancy flag, `rl_redraw`, set around `rl_draw`'s POPUP2 call and tested
+first in `rl_closecb_hook`. Five instructions.
+
+Two deliberate choices:
+
+- **A dedicated flag, not "temporarily clear `rl_layer_on`".** Clearing
+  `rl_layer_on` would have worked and needed no hook change (6 bytes cheaper),
+  but its failure mode is far worse: if POPUP2 ever failed to return, a stuck
+  `rl_layer_on = 0` would make the matching `rl_pop_layer` skip, and this file's
+  own warning is that *a push without a matching pop wedges the keyboard*. A
+  stuck `rl_redraw` merely disables walk-away detection. Prefer the benign
+  failure.
+- **The flag costs no cave space.** Every access to `rl_layer_on` is a byte op
+  while it was declared `.space 4`, so `rl_redraw` was carved out of its unused
+  padding.
+
+### Cave space is now the binding constraint — read before adding anything
+
+The fix needed 20 bytes and did not fit. `patch_trigscale` moved
+`0x400d7bf0 -> 0x400d7bfc`, and it **cannot move again**:
+
+- Measured free zone: stock is zero `0x400d7400..0x400d7c3b`, `0xff` from
+  `0x400d7c3c` (= `FREE_END`, confirmed correct). 2108 B total.
+- `patch_trigscale` 62 B at `0x400d7bfc` ends `0x400d7c39` — the top.
+- **`patch_reload2`'s hard ceiling is therefore 2044 B. It is currently 2036.
+  Eight bytes of headroom remain.**
+
+**The cave address is an alignment constraint, not just an offset.**
+`0x400d7bfe` was tried first: it is even but not 4-byte aligned, so the source's
+own `.align` padded the 62 B blob to 64 B and the free-zone assert tripped.
+Keep it 4-byte aligned.
+
+The list UI (open issue #3) **will not fit in 8 bytes**. That work needs a second
+cave or a different free region located first — that survey is now a prerequisite
+for it, not an afterthought.
+
+### User requirement recorded
+
+**The three-option picker window must use the system font `F4`** (user, this
+session). Recorded verbatim in `reference/handoffs/RELOAD2_HANDOFF.md` against
+issue #3. Which font resource/table `F4` names in this firmware has **not** been
+located, and no assumption should be made about it; finding `F4`, and how POPUP2
+and the list renderer select a font at all, is the first RE step there.
+
+### Regressions — all green on the fixed build (1543 B, 9 detours)
+
+- `diag_reload2_realkey.py --arrows` — **PASS** (new). `G_SEL` 0→1→2→1→2 with
+  correct wrapping, layer `LINKED` and `G_MENU=1` across every tap, YES slot
+  stable at `0x400d768e`, and `[YES]` still executes (`jobs=1`). The hook is
+  still entered twice per redraw and now correctly skips — no `rl_pop_layer`.
+- `diag_reload2_realkey.py --walk-away` — **PASS** both routes. The guard is set
+  only inside `rl_draw`, so genuine walk-aways still trip the hook: (9)'s fix is
+  intact, which was the main risk of this change.
+- `emu_reload2.py --combo` — ALL GOOD
+- `emu_reload2_keymap.py` — ALL GOOD
+- `diag_bank_window.py --stress` — ALL GOOD
+- `diag_reload2_realkey.py 5` — **green**, all 5 cycles byte-identical:
+  `G_KIND=0 POPUP=0 handle=0 depth=2 BANK=0x4007af80` (stock handler restored),
+  our layer unlinked, `rl_job+1` / `bank_yes+1` per cycle, no drift
+
+### Status
+
+**Not yet flashed.** Ready for a hardware pass on the arrows specifically.
+
+### Open issues
+
+1. The ~1 s stall / stock transport stop — unchanged; our job still triggers
+   stock's full whole-bank RELOAD BANK. Retry still gated on
+   `diag_reload2_repeat.py` plus real-dispatch driving.
+2. `RELOAD BUSY` — **no longer observed on hardware.** Strong evidence it was the
+   `[YES]`-alone family from "(6)"/"(9)"; keep watching rather than closing.
+3. The list UI — now **blocked on cave space** (8 B free) and on locating font
+   `F4`.
