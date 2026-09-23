@@ -27688,3 +27688,136 @@ BANK+YES reliability.
    improves is itself a data point for the next session.
 3. The list UI (stock's 12-entry table at `0x400beb72`, renderer still
    unlocated) — lowest priority, cosmetic.
+
+## Session 81 (2026-09-22, `wip`) — RELOAD2: the build had been silently refusing to produce a flashable image for three sessions
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (9)").
+Picked up from `reference/handoffs/RELOAD2_HANDOFF.md`, whose stated next step
+was "build, confirm the regression suite, then flash". Step one failed, and the
+reason mattered more than the fix.
+
+### The finding
+
+`python3 tools/build_reload2.py` aborts with `MANUAL-TRIG FIX DIVERGED`. It had
+been doing so since commit `83ce678` (Session 80 continued (8)), and nobody
+noticed, because the abort happens **after** `OUT.write_bytes(...)` and
+**before** the `.syx`/CF-card wrap.
+
+That split is the whole story:
+
+- `out/mainos_reload2.bin` — written **before** the abort. This is the file every
+  emulator tool loads (`emu_reload2.py`, `diag_bank_window.py`, the realkey
+  diags). So sessions (8) and (9) ran their regressions against the correct,
+  current image and their "all green" results were **genuine**.
+- `out/OCTATRACK_OS1.40C_RELOAD2.syx` and `out/OCTATRACK_RELOAD2.bin` — produced
+  by the wrap step, which never ran. Both were still dated **09-22 00:09**,
+  predating `97d388a` (00:32), `83ce678` (01:48) and `11e6fb3` (22:12).
+
+So the only files a human could actually flash were **three sessions stale** —
+missing (7)'s window-deferral revert, (8)'s own-keymap-layer redesign, and both
+of (9)'s walk-away fixes — while every test in the suite reported green. Had the
+handoff's "flash it" step been followed as written, the hardware report would
+have described a build nobody in this thread has worked on since Session 80
+continued (6), and the resulting confusion would have been charged to the
+feature rather than to the toolchain.
+
+### Why the check was wrong
+
+The check compared our image against `out/mainos_trigscale_only.bin` at
+**absolute byte offsets**:
+
+```python
+tsh = [i for i, (x, y) in enumerate(zip(stock, tsb)) if x != y]
+ok  = all(img[i] == tsb[i] for i in tsh)
+```
+
+Session 80 continued (8) moved the trigscale cave `0x400d7b00 -> 0x400d7bf0` to
+make room for the picker's own keymap layer — a deliberate, documented,
+asserted-safe relocation. An absolute-offset comparison cannot express that. The
+"divergence" was exactly two things, both pure relocation:
+
+- the detour at `0x4009b6f2`: `jmp 0x400d7b00` vs `jmp 0x400d7bf0` — one byte,
+  the jmp target's low byte;
+- the 62-byte cave body, present at `0x400d7b00` in the reference and at
+  `0x400d7bf0` in ours.
+
+Verified directly: the cave bodies are **byte-identical** under relocation, and
+the freshly assembled `out/patch_trigscale.bin` matches what we place. The
+manual-trig fix was never actually diverging.
+
+**A mapping trap worth recording**: the MAIN_OS section base is `0x40000400`,
+not `0x40000000`. Indexing `section_3_MAIN_OS.bin` with `BASE = 0x40000000`
+puts every address `0x400` low, which made the reference detour look like it
+sat at `0x4009b2f2` while our build reported `0x4009b6f2` — briefly looking
+like the two builds patched *different sites*. They do not. Same site.
+
+### The fix
+
+`tools/build_reload2.py`'s check is now relocation-aware. It reads the
+reference's own detour to discover where *that* build put its cave, then asserts
+the things that actually matter:
+
+- our detour is `jmp <our cave>` + the right nop padding;
+- the reference's detour padding matches;
+- the **cave body** is byte-identical between the two placements (so if
+  relocation ever did change the emitted code, this still fails loudly);
+- the reference image touches nothing outside its own detour + cave.
+
+It now prints `identical (cave relocated 0x400d7b00 -> 0x400d7bf0)` and the wrap
+runs. All four artifacts regenerate together.
+
+**Swept the sibling builds**: `build_reload2.py` is the **only** script that
+relocates trigscale. The other thirteen (`build_directjump{,_v2,_v3,_v4}.py`,
+`build_mutemode{,_dt}.py`, `build_sidechain{,2,3}.py`, `build_qlrec.py`,
+`build_softmute.py`, `build_relstate_shadow.py`, `build_reload.py`) all still
+place it at `0x400d7b00`, so their
+identical absolute-offset checks remain correct and were left alone. (Noted for
+the MERGE thread, not acted on here: `build_merged.py` is not present on `wip`
+— last seen at `18ad62a` — and if it is ever restored it composes RELOAD2 under
+a different cave layout, so it would hit this same class of check.)
+
+### Regression state — image byte-identical to `11e6fb3`
+
+My change is entirely downstream of `OUT.write_bytes`, so `mainos_reload2.bin`
+is unchanged: still **1523 B vs stock, 9 detours**. Verified in the shipped
+image directly: all 7 RELOAD2 detours plus trigscale resolve to their cave
+symbols, the BANK-layer YES press slot reads `0x400d7400` (`rl_bank_yes`), and
+all three `[PTN]` sites are byte-for-byte stock.
+
+- `emu_reload2.py --combo` — **ALL GOOD**
+- `emu_reload2_keymap.py` — **ALL GOOD**
+- `diag_bank_window.py --stress` — **ALL GOOD** (5 taps + 3 reload gestures,
+  depth and both dispatch slots never drift, on stock and patched)
+- `diag_reload2_realkey.py --walk-away` — **PASS** on both routes (BANK-tap and
+  PTN-tap walk-away; the later unrelated `[YES]` does nothing)
+- `diag_reload2_realkey.py 5` — **green**, all 5 cycles byte-identical:
+  `G_KIND=0 POPUP=0 handle=0 depth=2 BANK=0x4007af80` (stock handler restored),
+  our layer unlinked, `rl_job+1` / `bank_yes+1` per cycle, no drift
+
+### Status
+
+**Ready to flash, and this time there is a current image to flash.** The
+hardware pass should still focus on what (9) fixed and hardware has never seen:
+the walk-away scenario and general `[BANK]`+`[YES]` reliability. The free data
+point from the handoff is still worth collecting: **is `RELOAD BUSY` less
+frequent on this build?** The `[YES]`-alone-fires-a-reload bugs fixed in (6) and
+(9) were plausible contributors but never proven to be the cause.
+
+### Lesson for this thread
+
+Add to the thread's standing list: **a build script that validates after it
+writes its primary artifact, but before it writes its shippable one, can fail
+loudly and still look green.** Every test in the suite reads the pre-abort file.
+When a handoff says "build, test, flash", check the **mtime of the thing you
+would actually flash** against the commits it is supposed to contain — the test
+results cannot tell you this, by construction.
+
+### Open issues (unchanged, ranked)
+
+1. The ~1 s stall / stock transport stop — our job still triggers stock's full
+   whole-bank RELOAD BANK. Same root cause as the inherited UNDO-vs-CLEAR quirk.
+   Any retry is still gated on `diag_reload2_repeat.py` (5+ consecutive) plus
+   real-dispatch driving, per (5)'s hard-won rule.
+2. `RELOAD BUSY` — root cause still unfound; ask the user about frequency on
+   this build before investigating further.
+3. The list UI — cosmetic, lowest priority.

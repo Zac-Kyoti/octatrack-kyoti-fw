@@ -224,11 +224,12 @@ def main():
     def o(a):
         return a - BASE
 
-    syms, spans = {}, []
+    syms, spans, placed = {}, [], {}
     print("=== assemble + detour ===")
     for name, at, defsym, detours in PATCHES:
         blob, s = assemble(name, at, defsym)
         syms[name] = s
+        placed[name] = (at, blob)
         co = o(at)
         if any(img[co:co + len(blob)]):
             sys.exit(f"cave 0x{at:08x} ({name}) not free: {bytes(img[co:co+16]).hex()}")
@@ -274,13 +275,41 @@ def main():
     changed = sum(1 for a, b in zip(stock, img) if a != b)
     print(f"\n  {OUT.name}: {changed} bytes changed vs stock")
 
+    # Cross-check the manual-trig fix against the standalone build.  The two builds place
+    # the trigscale cave at DIFFERENT addresses -- build_trigscale_only.py uses 0x400d7b00,
+    # while here it sits at 0x400d7bf0 because patch_reload2's cave grew over that address
+    # in Session 80 continued (8) -- so comparing bytes at absolute offsets is meaningless.
+    # It reports a "divergence" that is nothing but the relocation, and because the check
+    # sys.exit()s BEFORE the .syx wrap below, from commit 83ce678 until Session 80
+    # continued (10) every build aborted and the last flashable image on disk silently
+    # stayed three sessions stale.  Relocation-aware check instead: same cave BODY, same
+    # detour shape, and the reference image touching nothing beyond its own detour + cave.
     ts = ROOT / "out/mainos_trigscale_only.bin"
     if ts.exists():
         tsb = ts.read_bytes()
-        tsh = [i for i, (x, y) in enumerate(zip(stock, tsb)) if x != y]
-        ok = all(img[i] == tsb[i] for i in tsh)
-        print(f"  manual-trig fix bytes identical to build_trigscale_only.py: {ok}")
-        if not ok:
+        at, blob = placed["patch_trigscale"]
+        site, _, _, n, _ = PATCHES[0][3][0]
+        so, pad = o(site), b"\x4e\x71" * ((n - 6) // 2)
+        ref_detour = bytes(tsb[so:so + n])
+        if ref_detour[:2] != b"\x4e\xf9":
+            sys.exit(f"  reference trigscale detour 0x{site:08x} is not a jmp: {ref_detour.hex()}")
+        ref_at = int.from_bytes(ref_detour[2:6], "big")
+        bad = []
+        if bytes(img[so:so + n]) != jmp(at) + pad:
+            bad.append(f"our detour 0x{site:08x} is not `jmp 0x{at:08x}` + nops")
+        if ref_detour[6:] != pad:
+            bad.append("reference detour padding differs")
+        if bytes(tsb[o(ref_at):o(ref_at) + len(blob)]) != blob:
+            bad.append(f"cave body differs: ours @0x{at:08x} vs reference @0x{ref_at:08x} "
+                       "(relocation is not supposed to change the code)")
+        ref_changed = {i for i, (x, y) in enumerate(zip(stock, tsb)) if x != y}
+        if not ref_changed <= set(range(so, so + n)) | set(range(o(ref_at), o(ref_at) + len(blob))):
+            bad.append("reference image changes bytes outside its own detour + cave")
+        print("  manual-trig fix vs build_trigscale_only.py: "
+              + (f"identical (cave relocated 0x{ref_at:08x} -> 0x{at:08x})" if not bad else "DIVERGED"))
+        for b in bad:
+            print(f"    - {b}")
+        if bad:
             sys.exit("  MANUAL-TRIG FIX DIVERGED")
 
     if not EFT.exists() or not STOCK_SYX.exists():

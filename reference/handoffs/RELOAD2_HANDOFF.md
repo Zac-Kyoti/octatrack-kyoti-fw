@@ -1,4 +1,4 @@
-# RELOAD2 handoff — continue from Session 80 continued (9)
+# RELOAD2 handoff — continue from Session 81
 
 Paste this whole file as your opening prompt in the new session.
 
@@ -7,9 +7,8 @@ Paste this whole file as your opening prompt in the new session.
 We are continuing RELOAD2 work on the Octatrack Kyoti firmware project
 (`~/Documents/octatrack-kyoti-fw/`, branch `wip`). Read `START_HERE.md` first
 (its RELOAD2 row has the full session-by-session history), then
-`NOTES.md` "Session 80 continued (9)" (the most recent entry, at the end of the
-file — grep `^## Session 80 continued` for the full thread). The latest commit
-is `11e6fb3`.
+`NOTES.md` "Session 81" (the most recent entry, at the end of the file — grep
+`^## Session 80 continued` and `^## Session 81` for the full thread).
 
 ## What RELOAD2 is
 
@@ -39,11 +38,22 @@ issue (it's not ours). Full regression suite is green:
 consecutive full gestures through real `set_key_state` dispatch
 (`diag_reload2_realkey.py 5`) all byte-identical.
 
-**This build has never been flashed.** That's the immediate next step once you
-pick this up: build (`python3 tools/build_reload2.py`), confirm the regression
-suite is still green, then ask the user to flash and report back — particularly
-on the walk-away scenario and general `[BANK]`+`[YES]` reliability, since
-that's what session (9) specifically fixed and it's untested on real hardware.
+Session 81 then found that **the build had been refusing to produce a flashable
+image since commit `83ce678`** — a relocation-blind `MANUAL-TRIG FIX DIVERGED`
+check `sys.exit()`ing *after* `mainos_reload2.bin` was written but *before* the
+`.syx`/CF-card wrap. Every emulator tool loads the pre-abort file, so (8)'s and
+(9)'s green regressions were real, but the only actually-flashable files on disk
+were three sessions stale. The check is now relocation-aware and all four
+artifacts regenerate together. Details: `NOTES.md` "Session 81".
+
+**This build has never been flashed, and now there is a current image to flash.**
+That's the immediate next step: build (`python3 tools/build_reload2.py` — it
+should print `manual-trig fix vs build_trigscale_only.py: identical (cave
+relocated 0x400d7b00 -> 0x400d7bf0)` and then a `=== wrap ===` section), confirm
+the regression suite is still green, then ask the user to flash and report back —
+particularly on the walk-away scenario and general `[BANK]`+`[YES]` reliability,
+since that's what session (9) specifically fixed and it's untested on real
+hardware.
 
 ## Open issues, ranked by leverage
 
@@ -133,6 +143,20 @@ re-derive or re-learn these:
   read as implying "UP works," and that unstated inference anchored a wrong
   conclusion. When a report names one specific symptom, fix exactly that and
   verify the rest — don't assume the unstated parts.
+
+- **A green suite does not mean a current flashable image.** `build_reload2.py`
+  writes `out/mainos_reload2.bin` (what every emulator tool loads) *before* its
+  validation checks, and wraps the `.syx`/CF-card images *after* them. A check
+  that fails therefore leaves the tests passing on fresh bytes while the only
+  files a human can flash stay stale — silently, for three sessions, in Session
+  81's case. When a handoff says "build, test, flash", check the **mtime of the
+  artifact you would actually flash** against the commits it should contain.
+  The test results cannot tell you this, by construction.
+
+- **The MAIN_OS section base is `0x40000400`, not `0x40000000`.** Indexing
+  `out/raw/section_3_MAIN_OS.bin` with the wrong base shifts every address by
+  `0x400` and makes two builds patching the same site look like they patch
+  different ones.
 
 - **Unicorn test-harness gotchas, both cost real time this session:**
   `ctl_flush_tb()` must be called AFTER `hook_add`, not before — cached
