@@ -146,6 +146,12 @@ PATCHES = [
       # word at 0x400a483a, so the metronome and the patterns get the same number by
       # construction. See NOTES.md Session 83.
       (0x400a47f6, "dj_d7", "41f9400eb034", 6, "jsr"),
+      # Session 85 -- Hook P: AR's per-track loop (0x4009927c-0x400992d2) written directly
+      # over stock's rebuild output. Stock computes position in the TICK domain and so
+      # rescales it by the ratio of the two master scales; AR divides new_step by the
+      # track's LENGTH and nothing else. 0x400a4d36 is the common per-tick exit, reached
+      # after the commit body's tail, and is gated on G_JUST_COMMITTED.
+      (0x400a4d36, "dj_pertrack", "4ab946107568", 6, "jsr"),
       # Session 83: Hook T (dj_tstart @0x4009c3d4) REMOVED -- it existed only to reset
       # G_ABSTICK at transport start. No counter of ours survives, so the site is stock.
       (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),

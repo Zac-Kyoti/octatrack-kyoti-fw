@@ -28965,3 +28965,122 @@ Still-live possibilities, none yet tested: a post genuinely lost in
 `FUN_40022778`'s single scratch message buffer (`0x460bd912`); a clobber from an
 edit type this harness does not yet drive; or the storage task declining the job
 under real CF streaming, which no harness here can model.
+## Session 85 (2026-09-23, `wip`) — DIRECT JUMP: ported AR's arithmetic verbatim; the prose spec is RETIRED
+
+Two hardware reports in a row on builds that each implemented a different reading of the same
+English sentence. **User's instruction: eliminate "as if it had been playing all along" —
+"not specific enough, and you keep getting hung up on it" — and make the OT port as close to
+identical to AR as possible.** Both done.
+
+### The specification is arithmetic now, and only arithmetic
+
+```
+new_step = masterStep mod newMasterLen        AR FUN_4009905c @0x40099274
+pos_t    = new_step mod trackLen_t            AR              @0x400992b6, per track
+```
+
+The track's RESOLUTION never enters the position. On AR it sets only the track's rate, via
+the countdown reload at `0x400991f0`. Read straight off `ar-kyoti-fw/out/fun4009905c_listing.txt`,
+with the `divsl.l` extension words decoded (`0x2800` → D2 dividend / D0 remainder;
+`0x7802` → D7 dividend / D2 remainder) rather than trusting Ghidra's printed operand order.
+
+**This is NOT elapsed-time alignment**, and the difference is not academic — worked on the
+user's own fixture, two 16-step patterns, p1 master 1x (96-tick cycle), p2 master 2x (48):
+
+| jump at p1 step | AR's rule → p2 step | a free-running p2 would be at |
+|---|---|---|
+| 4 | **4** | 8 |
+| 8 | **8** | 0 |
+
+They coincide only when the master scales match — which is exactly why every equal-scale test
+passed and every differing-scale test failed, across three flashed builds.
+
+### Why the Session 83/84 approach could never work
+
+Session 83 seeded `0x80006628` and let stock's rebuild loop do the rest. But stock computes
+position in the **tick** domain:
+
+```
+0x400a4912  q     = ceil(D7 / tps_t)        D7 = LEN_TBL[masterScale_NEW] * 0x80006628
+0x400a4976  pos_t = q mod len_t
+```
+
+Handing it AR's step index means `tps_NEW * new_step` ticks where that index had meant
+`tps_OLD * new_step` ticks in the outgoing pattern — **the position is rescaled by the ratio
+of the two master scales on every switch.** Exactly the hardware symptom.
+
+It is not correctable through `0x80006628`: undoing the conversion needs
+`new_step * tps_t / tps_master`, a PER-TRACK quantity, and that global is a single value.
+**Stock's loop structurally cannot express AR's rule.** Session 84's per-track scale-cache
+fix was a real bug fix sitting next to this one, and could not have changed the symptom.
+
+### The port
+
+- **Hook H** `0x400a47f6` — AR's line 1, one modulo: `0x80006628 = 0x800065b2 mod newMasterLen`.
+  Stock seeds `0x800065b2` back from its low word at `0x400a483a`, which is AR's own
+  `0x400992d4 move.w D0w,(0x405666e4)`.
+- **Hook P** `0x400a4d36` (new) — AR's per-track loop, written **over** stock's rebuild output,
+  after both rebuild loops and the tail that seeds `STEP_ARR` at `0x400a4be6`. Gated on
+  `G_JUST_COMMITTED`, so ordinary ticks and DJ-OFF are untouched.
+
+| AR | OT | value |
+|---|---|---|
+| `0x40566720[t]` | `0x800064d0[t]` | `new_step mod trackLen_t` |
+| `0x4056673a[t]` | `0x800064e0[t]` | that − 1 |
+| `0x4056672d[t]` | `0x800064f0[t]` | `0` |
+| `0x40566775[t]` | `0x8000663e[t]` | track scale index (written by `dj_c`, Session 84) |
+
+**One deliberate deviation.** AR's `0x405667c7[t] = ticksPerStep-1` is NOT copied into OT's
+`CNTDN_TBL 0x800065c3[t]`. The §4 mapping pairs them, but Session 79 measured OT's as a
+one-shot trig arm (`0xff` idle → `1` at commit → `0` → fires → `0xff`), not a per-step
+reload; writing a reload value there would arm a spurious trig. OT's real equivalent of AR's
+per-track rate state is the pair (`TRK_SCALE_IX[t]`, ticks-within-step) and both are written.
+
+### MEASURED — `tools/diag_resume_pos.py` (new)
+
+Captures `masterStep` at Hook H's site before the commit clobbers it, snapshots all 16
+per-track STEP values after Hook P, and compares against AR's rule computed independently in
+Python from the pattern blob.
+
+| fixture | result |
+|---|---|
+| A07 → A08 (per-track mode, master 1x → 2x) | **16/16** |
+| A08 → A07 (reverse) | **16/16** |
+| 0 → 1 (uniform, 1x → 2x) | 16/16 — but see below |
+
+The discriminating rows, where AR's answer differs from what stock's loop produces:
+
+| fixture | track | AR wants | stock gives | got |
+|---|---|---|---|---|
+| 6→7 | T3 (len **7**) | `8 mod 7` = **1** | 4 | **1** |
+| 6→7 | T2 (len **12**) | **8** | 4 | **8** |
+| 7→6 | T4 (tps **12**) | **15** | 8 | **15** |
+| 7→6 | T2 (len 12) | `15 mod 12` = **3** | 7 | **3** |
+
+`0 → 1` proves nothing on its own: both patterns are uniform mode and stock's tick answer
+(`24/3 = 8`) coincides with AR's (`8 mod 16`). **Only the per-track-mode pair can distinguish
+the two rules.** Do not quote the uniform fixture as evidence for either.
+
+Regression, same image: grid lock + playhead continuity on 6→7, phases 0/3/5 — all LOCKED +
+CONTINUOUS. DJ-OFF (`diff_stock_vs_patch.py`) IDENTICAL.
+
+Build: 1002 B cave, 965 bytes changed, 0 unexpected outside the cave, manual-trig bytes
+identical, container round-trips.
+
+### A measurement bug that reported 15/16 FAIL on correct code
+
+The first run of `diag_resume_pos.py` hooked `0x400a4d36` for its snapshot — which in this
+build **is Hook P's own `jsr`**. A Unicorn code hook fires before the instruction executes, so
+it measured stock's output and reported the port broken. Snapshot moved to `0x400a4d3c`, the
+address the `jsr` returns to.
+
+This is hazard #5 in `AR_DIRECT_JUMP.md` §8, written after Session 79 cont.29 lost time to the
+identical mistake in the opposite direction (a false PASS while Hook F was corrupting tracks).
+**Standing rule: never snapshot at a detour site; snapshot at the return address.**
+
+### NOT validated
+
+- **Hardware.** Nothing in this session has been heard.
+- Differing MASTER LENGTHs between two patterns — still no fixture.
+- Per-track sub-step phase at a mid-cycle commit (`0x800064f0[t]`), open since Session 82 —
+  though Hook P now zeroes it explicitly, which is AR's `clr.b (A4)+`.

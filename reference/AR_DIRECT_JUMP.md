@@ -220,7 +220,7 @@ and nothing ever set it otherwise.
 Implemented as **Hook H** at `0x400a47f6` (6 bytes, replaces `lea 0x400eb034,A0`): when armed,
 `0x80006628 = G_ABSTICK`. Then `D7 = LEN_TBL[masterScale] × G_ABSTICK` = absolute ticks, and
 per track `NEXT_STEP[t] = (absTicks / tps_t) mod length_t` — exactly the user's stated model:
-*every pattern behaves as if it had been playing silently the whole time at its own length.*
+AR's `new_step = masterStep mod newPatternLen`, then `pos_t = new_step mod trackLen_t` per track.
 
 `G_ABSTICK` and not the outgoing master step, because once `STEP` has wrapped against the
 outgoing pattern's length the elapsed information is gone and no later modulo recovers it.
@@ -326,6 +326,57 @@ step index into the tick counter, and `dj_abstick` counts 1 per clock tick.
 Also corrected: the `0x800065b2` seeding at `0x400a483a` (from `0x8000662a`, the low word of
 the long Hook H writes) is **not** the inert side effect §5 assumed — it is how the master
 step position itself resumes, the direct analogue of AR's `0x405666e4 = new_step`.
+
+## 7c. Session 85 — the phrase "as if it had been playing all along" is RETIRED
+
+It is not a specification. It is ambiguous exactly where the two candidate rules differ, and
+it repeatedly steered this port wrong — three flashed builds, each implementing a different
+reading of it. **The specification is AR's arithmetic, stated as arithmetic:**
+
+```
+new_step = masterStep mod newPatternLen          ; AR 0x40099274
+pos_t    = new_step mod trackLen_t               ; AR 0x400992b6, per track
+```
+
+`masterStep` is AR's bounded playhead `DAT_405666e4`; OT's is `0x800065b2`, measured to be
+bounded the same way. **The track's resolution never enters the position** — it sets only the
+track's rate, via the countdown reload AR writes at `0x400991f0`.
+
+What this rule is NOT: it is not "the position the pattern would be at had it been running
+all along". Those coincide only when the patterns share a master scale. Worked example, two
+16-step patterns, p1 master 1x (96-tick cycle), p2 master 2x (48-tick cycle):
+
+| jump at p1 step | AR's rule → p2 step | a free-running p2 would be at |
+|---|---|---|
+| 4 | **4** | 8 |
+| 8 | **8** | 0 |
+
+AR carries the index. Anything that reasons in elapsed ticks is a different machine's
+behaviour, and this document should not be read as endorsing it.
+
+### Consequence for OT: stock's rebuild loop cannot be used for position
+
+OT computes per-track position in the TICK domain (`q = ceil(D7/tps_t)` at `0x400a4912`,
+`D7 = LEN_TBL[masterScale] * 0x80006628`). Handing it AR's step index means
+`tps_NEW * new_step` ticks where the index had meant `tps_OLD * new_step` ticks, so the
+position is rescaled by the ratio of the two master scales. It is not correctable through
+`0x80006628`, which is one global where the correction would need to be per-track.
+
+So the OT port writes the per-track arrays directly, after stock's loops have run
+(Hook P, `0x400a4d36`):
+
+| AR | OT | value |
+|---|---|---|
+| `0x40566720[t]` | `0x800064d0[t]` | `new_step mod trackLen_t` |
+| `0x4056673a[t]` | `0x800064e0[t]` | that − 1 |
+| `0x4056672d[t]` | `0x800064f0[t]` | `0` |
+| `0x40566775[t]` | `0x8000663e[t]` | the track's scale index (written by `dj_c`) |
+
+One deliberate deviation: AR's `0x405667c7[t] = ticksPerStep-1` is **not** copied to OT's
+`CNTDN_TBL 0x800065c3[t]`. The mapping table below pairs them, but Session 79 measured OT's
+as a one-shot trig arm (`0xff` idle → `1` at commit → `0` → fires → `0xff`), not a per-step
+reload; writing a reload value there would arm a spurious trig. OT's real equivalent of AR's
+per-track rate state is the pair (`TRK_SCALE_IX[t]`, ticks-within-step), and both are written.
 
 ## 8. Methodology hazards recorded along the way
 

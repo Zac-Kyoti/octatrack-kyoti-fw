@@ -222,6 +222,18 @@
     .equ MIDI_SCALE_SRC, 0x400e6ad9     | TRK_BLOB + 0x48f8 + 1 -- MIDI track m's SCALE byte
                                         | is at MIDI_SCALE_SRC + patOff + m*0x8b0
     .equ MIDI_SCALE_IX, 0x80006646      | live per-track scale cache, MIDI twin of
+    .equ G_PATOFF,  0x80006a46          | pattern blob offset, stashed by dj_c for Hook P
+                                        | (the word freed when Session 83 deleted G_ABSTICK)
+    .equ TRK_LEN_SRC,  0x400e2230       | TRK_BLOB + 0x50 -- audio track t's LENGTH byte is
+                                        | at TRK_LEN_SRC + patOff + t*0x91a
+    .equ MIDI_LEN_SRC, 0x400e6ad8       | TRK_BLOB + 0x48f8 -- MIDI track m's LENGTH byte is
+                                        | at MIDI_LEN_SRC + patOff + m*0x8b0
+    .equ STEP_ARR,  0x800064d0          | per-track STEP, 16 wide (audio 0-7, MIDI 8-15).
+                                        | AR's 0x40566720. Incremented at 0x400a3d78 and
+                                        | wrapped against the track's LENGTH at 0x400a3d8c.
+    .equ PREV_ARR,  0x800064e0          | per-track previous STEP. AR's 0x4056673a (step-1).
+                                        | = STEP_ARR + 16, confirmed by the per-tick loop's
+                                        | own struct offsets (+16 prev, +243 CNTDN_TBL).
                                         | TRK_SCALE_IX (counter 0x80006508, loop 0x400a3dd2)
     .equ PAT_MSCALE,0x400eb032          | pattern +0x8e52 -- MASTER scale when SCALE_MODE=1
     .equ PAT_SMODE, 0x400eb035          | pattern +0x8e55 -- SCALE_MODE flag
@@ -472,78 +484,43 @@ djb_orig:
 | `G_ABSTICK` at transport start. With the playhead read straight from stock's own
 | `0x800065b2` there is no counter of ours to zero, and the site is stock again.
 
-| ================= Hook H @ 0x400a47f6 -- THE WHOLE FEATURE =================
+| ================= Hook H @ 0x400a47f6 -- AR's position, line 1 =================
 | detour replaces `lea (0x400eb034).l,%a0` (6 B, bytes 41f9400eb034).
 |
-| Session 83: PORTED FROM ANALOG RYTM, replacing the absolute-time model outright.
+| Session 85. Implements AR `FUN_4009905c` @0x4009925a-0x40099278 verbatim:
 |
-| ---- why the old model was wrong ----
-| OT has exactly ONE position counter and we had built a SECOND one. `0x800065b2` (the word
-| incremented once per master step at 0x400a423a) is what the whole machine runs on:
-|     metronome / beat+bar flags   0x400a4264-0x400a42ca, masking it against 1,3,7,15,31,
-|                                  63,127,255 (0x400abae4) and 1,3,7,15,31,63 (0x400abacc),
-|                                  plus a `mod 3` test at 0x400a4292
-|     CHAIN-AFTER switch point     0x400a4352, masterStep mod chainLen == 0
-|     stock's Program Change lead  0x400a41aa, (masterStep + 1) mod chainLen == 0
-| `G_ABSTICK` was a parallel counter on a different hook with a different origin. We derived
-| the resume position from OURS, and stock then reseeded 0x800065b2 from 0x8000662a -- the
-| low word of the very long this hook writes -- so every commit YANKED THE METRONOME to
-| wherever our separate counter happened to be. The two agreed only by coincidence, a
-| different coincidence each switch. Reported on hardware exactly so: "no matter when a
-| switch occurs both should be on step X; they are not, and they get offset relative to the
-| steady 1 2 3 4 of the metronome. Each switch offsets to a different step."
+|     40099262  D2 = mvz.w (0x405666e4)         ; masterStep, bounded playhead
+|     40099268  D1 = mvs.w (A0 + 0x14eb3)       ; the pattern's LENGTH (word)
+|     40099274  divsl.l D1,D0:D2                ; ext 0x2800 -> D2 dividend, D0 remainder
+|                                               ; => D0 = masterStep mod patternLen
 |
-| AR cannot have this bug, and the reason is structural, not clever: it has one counter and
-| the commit derives the new position from that same counter.
-|
-| ---- AR's model, measured (ar-kyoti-fw/MECHANISM.md 5, AR_DIRECT_JUMP.md 2) ----
-|     new_step = DIRECT START ? 0 : (masterStep mod newPatternLen)     ; 0x40099252-0x4009927a
-|     pos_t    = new_step mod trackLen_t                               ; 0x4009927c-0x400992d2
-| where AR's masterStep `DAT_405666e4` is BOUNDED -- it wraps at the pattern length
-| (0x40099b8a-0x40099ba6).
-|
-| ---- OT's equivalent, MEASURED (tools/diag_playhead.py, stock) ----
-| `0x800065b2` cycles 1,2,...,15,0,1,... with MASTER LENGTH 16 -- range 0..15, period 16,
-| confirmed on DJTEST2 A07 (tps 6) AND A08 (tps 3), so the period is in STEPS and is the
-| master length, not an artefact of one scale. It is the direct analogue of AR's
-| `DAT_405666e4`: a bounded playhead index.
-|
-| So the port is one modulo:
+| OT equivalent, one line:
 |
 |     0x80006628 = 0x800065b2 mod newMasterLen
 |
-| Stock does everything else. It multiplies that up into D7 at 0x400a4812/0x400a4826, its
-| own rebuild loop at 0x400a4884 distributes it per track against each track's own length,
-| and it reseeds 0x800065b2 itself from our low word at 0x400a483a -- which now feeds the
-| metronome THE SAME NUMBER the patterns got, by construction. One counter again.
+| `0x800065b2` is OT's bounded playhead, MEASURED (tools/diag_playhead.py) cycling
+| 1,2,...,15,0,1,... with MASTER LENGTH 16 on both master scales -- the direct analogue of
+| AR's `DAT_405666e4`. Stock seeds `0x800065b2` back from this value's low word at
+| 0x400a483a, which is AR's own `0x400992d4  move.w D0w,(0x405666e4)`.
 |
-| Site: 0x80006628 is read at 0x400a4812/0x400a4826 and 0x800065b2 is reseeded at
-| 0x400a483a, so this hook must land before both. 0x400a47f6 is the last 6-byte instruction
-| on the commit path that does. D0 holds the pattern-blob offset here (built
-| 0x400a47c4-0x400a47e4) and is indexed by the very next instruction at 0x400a4802, so it
-| MUST survive. Flags are free: the displaced `lea` sets none.
+| The per-track positions do NOT come from here. Stock's rebuild loop would derive them in
+| the TICK domain (`q = ceil(D7/tps_t)`, 0x400a4912), which is not what AR does; Hook P at
+| 0x400a4d36 overwrites them afterwards with AR's own step-domain rule. See Hook P.
 |
-| DELETED with this change, all of it scaffolding for the second clock: `G_ABSTICK`, Hook E
-| (`dj_abstick` @0x400a3fe4), Hook T (`dj_tstart` @0x4009c3d4), the master-cycle tick
-| reduction, and the `dj_div32`/`dj_mod32` long-division helpers. Both operands here are
-| bounded by the master length (<= 64), so a subtract loop is exact and terminates fast.
-|
-| Difference from AR that remains, and is deliberate: stock's rebuild loop divides by each
-| track's OWN ticks-per-step, so a track at a different multiplier gets rate-corrected where
-| AR's flat `new_step mod trackLen` would not. That is OT machinery we would have to replace
-| the loop to remove. Everything running at the master rate is AR-exact.
+| Site: 0x80006628 is read at 0x400a4812/0x400a4826 and 0x800065b2 reseeded at 0x400a483a,
+| so this must land before both; 0x400a47f6 is the last 6-byte instruction that does. D0
+| holds the pattern-blob offset and is indexed by the very next instruction at 0x400a4802 --
+| it MUST survive. Flags are free: the displaced `lea` sets none.
 
     .global dj_d7
 dj_d7:
     tst.b   G_ARMED
     beq.b   djd7_orig
-    lea     -20(%sp),%sp
-    movem.l %d0-%d3/%a1,(%sp)
-    move.l  %d0,%d3                    | d3 = pattern blob offset (caller's D0, preserved by
-                                       | the movem and restored before we return)
-|   ---- newMasterLen -> d1 ----
+    lea     -16(%sp),%sp
+    movem.l %d0-%d2/%a1,(%sp)
+    move.l  %d0,%d2                    | d2 = pattern blob offset (caller's D0)
     lea     PAT_SMODE,%a1
-    tst.b   (%a1,%d3.l)                | SCALE_MODE
+    tst.b   (%a1,%d2.l)
     beq.b   djd7_unif
     lea     PAT_MLEN,%a1               | per-track mode -> MASTER LENGTH (+0x8e51)
     bra.b   djd7_gotlen
@@ -551,25 +528,21 @@ djd7_unif:
     lea     PAT_LEN,%a1                | uniform mode  -> pattern LENGTH (+0x8e53)
 djd7_gotlen:
     moveq   #0,%d1
-    move.b  (%a1,%d3.l),%d1
-    tst.l   %d1
-    ble.b   djd7_zero                  | unreadable length -> restart at 0, exactly as stock
-                                       | leaves 0x80006628 at a natural boundary
-|   ---- d0 = masterStep mod newMasterLen ----
+    move.b  (%a1,%d2.l),%d1
     moveq   #0,%d0
-    move.w  MASTER_STEP,%d0            | the LIVE playhead; stock reseeds it from our low
-                                       | word at 0x400a483a, i.e. AFTER this hook
+    move.w  MASTER_STEP,%d0            | the bounded playhead
+    tst.l   %d1
+    ble.b   djd7_store                 | unreadable length -> leave the raw index; Hook P
+                                       | reduces per track against each track's own length
 djd7_mod:
     cmp.l   %d1,%d0
-    blt.b   djd7_store                 | already < newMasterLen -> done
-    sub.l   %d1,%d0
+    blt.b   djd7_store
+    sub.l   %d1,%d0                    | operands are both <= 64, so this is a few passes
     bra.b   djd7_mod
-djd7_zero:
-    moveq   #0,%d0
 djd7_store:
-    move.l  %d0,MASTER_STEPS           | resume position, in master steps
-    movem.l (%sp),%d0-%d3/%a1
-    lea     20(%sp),%sp
+    move.l  %d0,MASTER_STEPS           | = AR's new_step
+    movem.l (%sp),%d0-%d2/%a1
+    lea     16(%sp),%sp
 djd7_orig:
     lea     0x400eb034,%a0             | displaced original
     rts
@@ -718,6 +691,7 @@ djc_gotscale:
 |   bank*0x9b340 (already in d0 here); SCALE_MODE at PAT_SMODE+patOff selects between each
 |   track's own byte and the pattern default at PAT_SCALE+patOff.
     move.l  %d0,%d3                     | d3 = patOff (d0 becomes scratch below)
+    move.l  %d0,G_PATOFF                | Hook P (0x400a4d36) needs it too
     lea     PAT_SMODE,%a0
     tst.b   (%a0,%d3.l)
     bne.b   djc_ts_pertrack
@@ -903,6 +877,115 @@ djs_got:
 | armed commit). It is removed outright now rather than left as unbuilt source, because it
 | referenced `G_ABSTICK`: dead code depending on a counter nothing maintains is a trap for
 | a later session. The full account is in NOTES.md Session 79 cont.29 and Session 83.
+
+| ================= Hook P @ 0x400a4d36 -- AR's position, loop 2 =================
+| detour replaces `tst.l (0x46107568).l` (6 B, bytes 4ab946107568), the common per-tick exit
+| point, reached both by the early-out branches at 0x400a3f9c / 0x400a3fd8 and by falling out
+| of the commit body's own tail loop at 0x400a4d32. Gated on G_JUST_COMMITTED (set by dj_c),
+| so it does nothing on an ordinary tick.
+|
+| Session 85. This is AR `FUN_4009905c` @0x4009927c-0x400992d2, the per-track loop:
+|
+|     400992ae  D3 = mvs.b (0x2c5,A1)        ; THIS track's LENGTH
+|     400992b2  D7 = D0                      ; new_step
+|     400992b6  divsl.l D3,D2:D7             ; ext 0x7802 -> D7 dividend, D2 remainder
+|     400992be  *(A6)++ = D2                 ; 0x40566720[t] = new_step mod trackLen
+|     400992c0  D3 = D2 - 1
+|     400992c4  *(A5)++ = D3                 ; 0x4056673a[t]
+|     400992c6  clr.b (A4)+                  ; 0x4056672d[t] = 0
+|
+| AR divides by the track's LENGTH and by nothing else. The per-track resolution never
+| enters the position -- it only sets the track's RATE, through the countdown reload written
+| by AR's earlier loop at 0x400991f0.
+|
+| ---- why this must overwrite stock rather than seed it ----
+| OT's own rebuild loop computes position in the TICK domain:
+|     0x400a4912  q     = ceil(D7 / tps_t)        D7 = LEN_TBL[masterScale_NEW] * 0x80006628
+|     0x400a4976  pos_t = q mod len_t
+| Feeding it AR's step index means `tps_NEW * new_step` ticks where that index had meant
+| `tps_OLD * new_step` ticks in the outgoing pattern, so the position is rescaled by the
+| ratio of the two master scales on every switch -- MEASURED as the hardware symptom "the
+| step count gets offset; each switch offsets to a different step". It cannot be corrected
+| through 0x80006628 either: that would need `new_step * tps_t / tps_master`, a PER-TRACK
+| quantity, and 0x80006628 is a single global. Stock's loop structurally cannot express AR's
+| rule, so the only faithful port overwrites its output. That is what this hook does, after
+| both the audio and MIDI rebuild loops and the tail that seeds STEP_ARR at 0x400a4be6.
+|
+| ---- one deliberate deviation, and its reason ----
+| AR's commit also writes its per-track countdown reload `0x405667c7[t] = ticksPerStep-1`
+| (loop 1, 0x400991de). The mapping table pairs that with OT's `CNTDN_TBL 0x800065c3[t]`,
+| but they are NOT the same kind of object: Session 79 measured OT's CNTDN_TBL as a ONE-SHOT
+| arm (0xff idle -> 1 at commit -> 0 -> fires -> 0xff), not a per-step reload. OT's actual
+| equivalent of AR's per-track rate state is the pair (TRK_SCALE_IX[t], ticks-within-step),
+| and BOTH are written -- the scale cache by dj_c, the tick counter to 0 here, which is
+| AR's `clr.b (A4)+`. Writing ticksPerStep-1 into OT's CNTDN_TBL would arm a spurious trig
+| fire. Stock's own rebuild already sets CNTDN_TBL from the incoming pattern's scale, so it
+| is left alone.
+
+    .global dj_pertrack
+dj_pertrack:
+    tst.b   G_JUST_COMMITTED
+    beq.w   djp_orig
+    clr.b   G_JUST_COMMITTED
+    lea     -36(%sp),%sp
+    movem.l %d0-%d6/%a0-%a1,(%sp)
+    move.l  G_PATOFF,%d5               | d5 = patOff, stashed by dj_c on this same commit
+    moveq   #0,%d4
+    move.w  MASTER_STEP,%d4            | d4 = new_step (stock seeded it from Hook H's value
+                                       | at 0x400a483a -- AR's own 0x400992d4)
+    lea     PAT_SMODE,%a0
+    tst.b   (%a0,%d5.l)
+    sne     %d6                        | d6 = per-track mode?
+    moveq   #0,%d3                     | d3 = track index, 0..15 (audio 0-7, MIDI 8-15)
+djp_loop:
+    tst.b   %d6
+    beq.b   djp_unif
+    cmpi.l  #8,%d3
+    bge.b   djp_midi
+    move.l  #0x91a,%d0
+    muls.l  %d3,%d0
+    add.l   %d5,%d0
+    lea     TRK_LEN_SRC,%a0
+    bra.b   djp_gotlen
+djp_midi:
+    move.l  %d3,%d0
+    subq.l  #8,%d0
+    move.l  #0x8b0,%d1
+    muls.l  %d1,%d0
+    add.l   %d5,%d0
+    lea     MIDI_LEN_SRC,%a0
+    bra.b   djp_gotlen
+djp_unif:
+    move.l  %d5,%d0
+    lea     PAT_LEN,%a0                | uniform mode: every track uses the pattern LENGTH
+djp_gotlen:
+    moveq   #0,%d1
+    move.b  (%a0,%d0.l),%d1            | d1 = this track's LENGTH
+    move.l  %d4,%d0                    | d0 = new_step
+    tst.l   %d1
+    ble.b   djp_store                  | unreadable length -> store the index unreduced
+djp_mod:
+    cmp.l   %d1,%d0
+    blt.b   djp_store
+    sub.l   %d1,%d0                    | new_step and LENGTH are both <= 64
+    bra.b   djp_mod
+djp_store:
+    lea     STEP_ARR,%a0
+    move.b  %d0,(%a0,%d3.l)            | AR 0x400992be : STEP[t] = new_step mod trackLen
+    move.l  %d0,%d2
+    subq.l  #1,%d2
+    lea     PREV_ARR,%a0
+    move.b  %d2,(%a0,%d3.l)            | AR 0x400992c4 : PREV[t] = that - 1
+    lea     TICKS_IN_STEP,%a0
+    clr.b   (%a0,%d3.l)                | AR 0x400992c6 : ticks-within-step = 0
+    addq.l  #1,%d3
+    cmpi.l  #16,%d3
+    bne.b   djp_loop
+    movem.l (%sp),%d0-%d6/%a0-%a1
+    lea     36(%sp),%sp
+djp_orig:
+    tst.l   0x46107568                 | displaced original (sets Z for the caller's bne.w)
+    rts
 
     .ifdef DJ_KEYMAP
 | ================= [PTN] release -- close the toast almost immediately =================
