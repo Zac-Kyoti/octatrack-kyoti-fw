@@ -1,4 +1,4 @@
-# RELOAD2 handoff — continue from Session 82
+# RELOAD2 handoff — continue from Session 83
 
 Paste this whole file as your opening prompt in the new session.
 
@@ -69,6 +69,18 @@ regression suite is green, then ask the user to flash and report back —
 particularly on **the arrows**, since that is what this build fixes.
 
 ## Open issues, ranked by leverage
+
+0. **FLASH THE CURRENT BUILD AND REPORT.** Session 83 re-enabled the whole-bank
+   suppression (`rl_done` + the `FUN_4000faf0` live refresh) that "(5)" backed
+   out, on the argument that two of "(5)"'s three symptoms have since been traced
+   to independent bugs fixed in "(6)"/"(8)"/"(9)". Measured effect: card reads per
+   reload **6852 -> 354**, parses **17 -> 1**, `deser_seen=False`. Full suite green
+   including the "(5)" gate (`diag_reload2_repeat.py` 6/6). **The emulator cannot
+   confirm this fixes RELOAD BUSY — it does not stream audio.** On hardware watch:
+   RELOAD BUSY with the transport running (the target); the ~1 s stall; and
+   especially **stock `[BANK]` single-press after several reloads**, which is
+   "(5)"'s third symptom and the one with NO independent explanation. If that
+   returns, back this out again — the misattribution argument is then wrong.
 
 1. **The ~1 s stall / stock transport stop.** Root cause is solid and has been
    for several sessions: our worker's job still triggers stock's *full*
@@ -164,15 +176,26 @@ re-derive or re-learn these:
   conclusion. When a report names one specific symptom, fix exactly that and
   verify the rest — don't assume the unstated parts.
 
-- **Cave space is the binding constraint now — check it BEFORE designing.**
-  Measured free zone: stock is zero `0x400d7400..0x400d7c3b` and `0xff` from
-  `0x400d7c3c` (= `FREE_END`). `patch_trigscale` (62 B) now sits at the very top,
-  `0x400d7bfc`, and **cannot move again**, so `patch_reload2`'s hard ceiling is
-  **2044 B — and it is at 2036. Eight bytes left.** The cave address is also an
-  ALIGNMENT constraint, not just an offset: `0x400d7bfe` was tried first and the
-  source's own `.align` padded the blob 62 -> 64 B and tripped the free-zone
-  assert. Keep it 4-byte aligned. **The list UI cannot fit** — it needs a second
-  cave or another free region surveyed first.
+- **A byte-level relocation proof is necessary but NOT sufficient.** Session 83
+  moved the cave and proved it a pure relocation (every differing byte an exact
+  `-0xf00` self-address shift, zero unexplained) — and `--combo` still broke,
+  because `emu_reload.py`'s single-stepper hardcoded `0x400d7400 <= pc <
+  0x400d8000` as "this is our code" and treated everything else as a firmware
+  call to stub out. Our own first instruction fell outside it and every handler
+  returned inert, which looks exactly like a firmware regression. Assumptions
+  about where our code lives can live OUTSIDE the build, where it cannot see
+  them. After any cave move, grep the tools for hardcoded `0x400d` addresses.
+
+- **Cave space is NO LONGER the binding constraint** (Session 82 said it was;
+  that was wrong).
+  The contiguous zero run is `0x400d64da..0x400d7c3b`, so the base moved to
+  `FREE_START = 0x400d6500` in Session 83 (`build_merged.py` had already used
+  that address since S48). `patch_trigscale` (62 B) sits at the top, `0x400d7bfc`,
+  and cannot move up again, so `patch_reload2`'s ceiling is
+  `0x400d7bfc - 0x400d6500` = **5884 B; it is at 2098, leaving 3786 free.** The
+  F4 list UI fits. The cave address is also an ALIGNMENT constraint, not just an
+  offset: `0x400d7bfe` was tried and the source's own `.align` padded the blob
+  62 -> 64 B and tripped the free-zone assert. Keep it 4-byte aligned.
 
 - **A green suite does not mean a current flashable image.** `build_reload2.py`
   writes `out/mainos_reload2.bin` (what every emulator tool loads) *before* its

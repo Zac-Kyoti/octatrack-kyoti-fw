@@ -28464,3 +28464,109 @@ guarded with the same stock-bytes assertion as the original.
 and a genuine edit made to a different Part before the round trip should still show
 edited afterward. If confirmed, this closes the last open item from this session's
 PARTREAPPLY work.
+
+## Session 83 continued — issue #1 ATTACKED: the whole-bank reload is suppressed again, and this time it is measured
+
+The user chose "attack issue #1 (the real cure)" over mitigating RELOAD BUSY.
+
+### Cave move first — and Session 82's "binding constraint" was WRONG
+
+`patch_reload2`'s base moved `0x400d7400` -> `0x400d6500` (`FREE_START`, new
+constant, now asserted at both ends). Session 82 reported 2036 B against a
+2044 B ceiling and called cave space the binding constraint. **That was a false
+constraint and I should have checked before reporting it**: the contiguous zero
+run containing the cave starts at `0x400d64da`, and `build_merged.py` had
+already lowered its own FREE_START to `0x400d6500` back in Session 48. Budget is
+now **5884 B** (2098 used, 3786 free) — the F4 list UI fits comfortably.
+
+**The move was proven a pure relocation before anything was layered on top**:
+all 19 differing bytes in the cave body are 32-bit self-address words shifted by
+exactly `-0xf00`, **zero unexplained**, the old cave region restored byte-for-
+byte to stock, every detour target shifted by the same delta.
+
+### ...and the byte-level proof was still not enough
+
+`--combo` then failed on six checks with YES/NO doing nothing at all
+(`end=rts G_MENU->1 close=False post=False`) — which reads exactly like a
+firmware regression. It was not. `emu_reload.py`'s single-stepper hardcoded
+
+```python
+if not (0x400d7400 <= pc < 0x400d8000):   # -> "a stubbed firmware fn: skip it"
+```
+
+so once the cave moved to `0x400d6500`, **our own first instruction fell outside
+the window and every handler was skipped as if it were an external call.**
+Replaced with `OUR_CODE_LO/HI` spanning the whole free zone, with a comment
+tying them to `FREE_START`/`FREE_END`.
+
+**Lesson worth keeping: a byte-level relocation proof is necessary and not
+sufficient.** Assumptions about where our code lives were encoded *outside* the
+build, in a tool. Anything that hardcodes a cave address is invalidated by a
+move, and the build cannot see it.
+
+### The fix, restored
+
+- `rl_done` detour @ `0x40023c62` (doneFn's SUCCESS path, `mvs.w 0x460bd910,d0`,
+  6 B, immediately before the `bsr.w 0x40023b68` that re-reads 16 patterns).
+- `rl_own` set in `rl_job` on the path that has already established the job is
+  ours — one-shot, so a genuine user-requested RELOAD BANK is never suppressed.
+- `FUN_4000faf0(bank)` live-cache refresh restored in `rlj_setflag`. The two
+  stand or fall together: without the refresh the slice lands in the cold blob
+  while playback keeps reading stale bytes.
+
+10 detours, 2098 B, 1601 B changed vs stock.
+
+### Why this retry is not a blind repeat of "(4)"/"(5)"
+
+"(5)" condemned this change on three hardware symptoms. Two of them have since
+been traced to **independent** causes and fixed separately: "(6)" fixed `[YES]`
+being swallowed while `[BANK]` was still held — that IS the "hardly ever
+executes" report — and "(8)"/"(9)" fixed the layer-routing and walk-away bugs
+that left the picker primed and the YES slot shadowed. Those confounders were
+present in **both** flashes "(5)" compared, and they are exactly the kind of bug
+that worsens with repeated use, which is how "(5)" reasoned. So "only these two
+changes differed" is much weaker evidence than it looked.
+
+**The third symptom — stock `[BANK]` single-press dying after a few reload
+attempts — has NO independent explanation.** It is the one to watch on hardware.
+If it returns, this goes back out and the misattribution argument is wrong.
+
+### What the suppression is measurably worth
+
+| measure | before | after |
+|---|---|---|
+| buffered card reads per reload | 6852 | **354** |
+| pattern parses per reload | 17 | **1** |
+| deserialiser | ran | **`deser_seen=False`** |
+
+### Regressions — the "(5)" gate and the full suite, all green
+
+- `diag_reload2_repeat.py 6` — **6/6 clean**, no drift in `G_KIND`, `POPUP`,
+  layer depth or the BANK/YES dispatch slots. This is the gate "(5)" mandated.
+- `diag_reload2_transport.py --iters 8` — **8/8 clean** with the sequencer
+  genuinely running; card reads 6852 -> 354.
+- `emu_reload2.py --trk` — **ALL GOOD**, `deser_seen=False`, exactly 1x
+  `FUN_4008cebc`; track 3 reverts, other 7 audio + all 8 MIDI untouched,
+  Part-link byte and bystander pattern untouched, `RELOAD_NOW` fired+consumed,
+  transport still running.
+- `diag_reload2_realkey.py 5` — 5/5 clean, `parse+1` per cycle (was `parse+17`).
+- `emu_reload2.py --combo` — ALL GOOD (after the harness-window fix).
+- `diag_reload2_realkey.py --arrows` — PASS.
+- `diag_reload2_realkey.py --walk-away` — PASS on **both** routes (BANK and PTN;
+  an earlier `tail -8` had truncated the BANK verdict, so it was re-run rather
+  than assumed).
+- `emu_reload2_keymap.py`, `diag_bank_window.py --stress` — ALL GOOD.
+
+### Status, stated honestly
+
+**Not flashed.** The emulator still cannot stream audio, so it **cannot confirm
+this fixes RELOAD BUSY** — only hardware can. What is proven here is that the
+mechanism we believe causes it is gone: 6852 card reads per reload competing
+with playback for the storage task, now 354. That is a mechanical argument, not
+a measurement of the symptom.
+
+Watch on hardware: RELOAD BUSY with the transport running (the target); the
+~1 s stall and sequencer restart (should also improve — same root cause); the
+UNDO-instead-of-CLEAR quirk (same family, though it is inherited from stock and
+reproduces on plain stock RELOAD BANK); and **stock `[BANK]` single-press after
+several reloads** — "(5)"'s unexplained third symptom.

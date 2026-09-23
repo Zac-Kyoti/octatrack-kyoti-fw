@@ -133,6 +133,16 @@ OUT_BIN = ROOT / "out/OCTATRACK_RELOAD2.bin"
 
 VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_KYOTI"
 
+# Session 83: the cave base moved 0x400d7400 -> 0x400d6500. Session 82 reported
+# patch_reload2 at 2036 B against a 2044 B ceiling and called cave space the
+# binding constraint -- that was a FALSE constraint. The contiguous zero run
+# containing this cave starts at 0x400d64da, i.e. 3878 B BELOW the old base, and
+# build_merged.py (Session 48) had already lowered its own FREE_START to
+# 0x400d6500 for exactly this reason ("the whole 0x400d64da..0x400d7c3c span is
+# zero in stock"). Verified again here: stock is zero across 0x400d6500..0x400d73ff.
+# Budget is now 0x400d7bfc - 0x400d6500 = 5884 B instead of 2044.
+FREE_START = 0x400d6500
+
 # (source, load addr, defsym, [(detour site, symbol, expected bytes, len, kind)])
 PATCHES = [
     # Session 80 continued (8): moved 0x400d7b00 -> 0x400d7bf0 (62 B) so
@@ -149,7 +159,7 @@ PATCHES = [
     # footprint, since this cannot move up again.
     ("patch_trigscale", 0x400d7bfc, None,
      [(0x4009b6f2, "cave", "203c0000091a", 18, "jmp")]),
-    ("patch_reload2", 0x400d7400, None,
+    ("patch_reload2", FREE_START, "RL_DONE=1",
      # Session 80 continued (2): the rl_ptn detour @0x4005a044 is GONE -- the entry
      # gesture moved from [PTN]-hold to [BANK]+[YES] (see patch_reload2.s). [PTN] is
      # now byte-for-byte stock again as far as this build is concerned.
@@ -174,11 +184,15 @@ PATCHES = [
       # release is byte-for-byte stock. This press detour now ONLY snapshots the
       # YES dispatch slot for rl_bank_yes's delegate guard, then returns to
       # stock's own window-show.
-      (0x4007af42, "rl_bank_press", "487a04c442a7", 6, "jmp")]),   # press tail: pea 0x4007b408(pc) ; clr.l -(sp)
-      # Session 80 continued (5): the rl_done detour @0x40023c62 and rl_job's
-      # FUN_4000faf0 live-cache refresh are BACKED OUT here -- see patch_reload2.s.
-      # They are the only two changes in the flash that broke stock [BANK] and
-      # wedged the reload, and the build before them was hardware-confirmed clean.
+      (0x4007af42, "rl_bank_press", "487a04c442a7", 6, "jmp"),    # press tail: pea 0x4007b408(pc) ; clr.l -(sp)
+      # Session 83: RE-ENABLED (backed out in "(5)"). See the long retry rationale
+      # on the rl_done block in patch_reload2.s -- two of "(5)"'s three hardware
+      # symptoms have since been traced to independent bugs fixed in
+      # "(6)"/"(8)"/"(9)", so the evidence against rl_done itself is much weaker
+      # than it appeared. This is doneFn's SUCCESS path: 0x40023c62 is
+      # `mvs.w 0x460bd910,d0` (71f9 460b d910), 6 B, immediately before the
+      # `bsr.w 0x40023b68` that performs the 16-pattern whole-bank re-read.
+      (0x40023c62, "rl_done", "71f9460bd910", 6, "jmp")]),
 ]
 
 # Session 80 continued (2): the [BANK]-held keymap overlay layer.
@@ -275,6 +289,8 @@ def main():
     for (a1, b1, n1), (a2, b2, n2) in zip(spans, spans[1:]):
         if b1 > a2:
             sys.exit(f"cave overlap: {n1} 0x{a1:x}..0x{b1:x} / {n2} 0x{a2:x}..0x{b2:x}")
+    if spans[0][0] < FREE_START:
+        sys.exit(f"cave starts below the free zone (0x{spans[0][0]:x} < 0x{FREE_START:x})")
     if spans[-1][1] > FREE_END:
         sys.exit(f"cave runs past the free zone end (0x{spans[-1][1]:x} > 0x{FREE_END:x})")
     print("  no overlaps; all within the free cave")

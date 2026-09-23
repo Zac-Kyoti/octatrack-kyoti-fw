@@ -627,6 +627,16 @@ def cmd_trk(rt):
     return ok
 
 
+# Session 83: the window this single-stepper uses to tell OUR cave code from
+# firmware it should stub out. It was hardcoded to 0x400d7400..0x400d8000, which
+# silently broke the moment patch_reload2's cave moved to 0x400d6500 -- our own
+# first instruction fell outside it, was treated as "a stubbed firmware fn", and
+# EVERY handler returned inert (`--combo` reported YES/NO doing nothing at all,
+# which looks exactly like a firmware regression and is not one).
+# It is now the whole free zone, so any placement inside the cave works. Keep
+# these in step with build_reload2.py's FREE_START / FREE_END.
+OUR_CODE_LO, OUR_CODE_HI = 0x400d6500, 0x400d7c3c
+
 G_KIND_A, G_PAT_A, G_MENU_A, G_SEL_A = 0x80006a50, 0x80006a51, 0x80006a52, 0x80006a53
 POPUP2_FN, CLOSE_FN, POST_FN, PARTRELD_FN = 0x4005a0e0, 0x40056bc0, 0x40022778, 0x4004aab4
 REFRESH_FNS = (0x4004d948, 0x40032208, 0x4004d640, 0x400486cc, 0x4006dbe8, 0x40077b00, 0x4002f2f8)
@@ -664,7 +674,7 @@ def _run_cave_fn(rt, addr, keycode, event, calls, budget=4000):
             return "rts"
         if pc in _END_PCS:
             return _END_PCS[pc]
-        if not (0x400d7400 <= pc < 0x400d8000):
+        if not (OUR_CODE_LO <= pc < OUR_CODE_HI):
             calls.append(pc)
             # a stubbed firmware fn: skip it (as if it rts'd)
             sp = rt.uc.reg_read(eb.UC_M68K_REG_A7)

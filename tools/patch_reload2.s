@@ -953,7 +953,26 @@ rl_fmt_mtrk:
 | ** The flag is a ONE-SHOT, set only by rl_job on the path that handled OUR job,
 | so a genuine stock RELOAD BANK the user asks for is never suppressed. **
 
-| ** BACKED OUT of the default build in Session 80 continued (5). **
+| ** BACKED OUT in Session 80 continued (5); RE-ENABLED in Session 83. **
+|
+| Session 83 rationale for the retry -- this is NOT a blind repeat. "(5)"'s three
+| hardware symptoms were: [BANK]+[YES] "hardly ever executes", [YES] "almost
+| always" RELOAD BUSY, and stock [BANK] dying after a few attempts. The first two
+| are now known to have had INDEPENDENT causes that have since been found and
+| fixed on their own: "(6)" fixed [YES] being swallowed while [BANK] was still
+| held (that IS the "hardly ever executes" report), and "(8)"/"(9)" fixed the
+| layer-routing and walk-away bugs that left the picker primed and the YES slot
+| shadowed. So the build "(5)" condemned carried at least two confounders that no
+| longer exist, and the evidence that rl_done itself was the culprit -- "the
+| previous flash was clean and only these two changes were added" -- is much
+| weaker than it looked, because those confounders were present in BOTH flashes
+| and are exactly the kind of bug that worsens with repeated use.
+| Session 83 additionally measured what this suppression is worth: ONE reload
+| costs 6852 buffered card reads (diag_reload2_transport.py), essentially all of
+| it this whole-bank re-read.
+| The "(5)" gate still applies and is not optional: diag_reload2_repeat.py driving
+| 5+ consecutive reloads, plus real set_key_state dispatch. A single clean reload
+| remains worthless evidence here.
 | Hardware: the flash carrying rl_done + the LIVE_REFRESH call broke things badly
 | -- [BANK]+[YES] "hardly ever executes", [YES] "almost always" gives RELOAD
 | BUSY, and **stock [BANK] single-press stops working entirely after a few
@@ -1003,9 +1022,14 @@ rlj_ours:
     move.l  %d0,rl_kind                | stash the kind across the FUN_4008cebc calls
     clr.b   G_KIND                     | consume now -- a re-entrant real RELOAD BANK
                                        | must NOT see it set
-|   Session 80 continued (4)/(5): rl_own claimed the stock whole-bank reload for
-|   rl_done to suppress. Both are BACKED OUT -- the flag is left unset so the
-|   (now undetoured) rl_done code can never fire. See the rl_done block.
+|   Session 83: RESTORED (see the rl_done block for the full retry rationale).
+|   Claim the whole-bank reload that THIS job's doneFn is about to perform, so
+|   rl_done suppresses that one and only that one. One-shot, set only here, on
+|   the path that has already established the job is ours.
+    .ifdef RL_DONE
+    moveq   #1,%d0
+    move.b  %d0,rl_own
+    .endif
     move.w  CKSUM,%d0
     move.w  %d0,rl_cksum
 
@@ -1139,6 +1163,17 @@ rlj_trk_copy:
     lea     12(%sp),%sp
 
 rlj_setflag:
+    .ifdef RL_DONE
+|   Session 83: RESTORED together with rl_done -- the two stand or fall together.
+|   Without the suppression, stock's own whole-bank reload refills the live cache;
+|   with it, nothing does, and the slice lands in the cold blob while playback
+|   keeps reading stale bytes (measured in "(4)" as "LIVE copy: STILL SCRIBBLED").
+    moveq   #0,%d0
+    move.b  CUR_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     LIVE_REFRESH               | FUN_4000faf0(bank): RAM->RAM, no card
+    addq.l  #4,%sp
+    .endif
 |   Session 80 continued (4): refresh the LIVE cache from the cold blob.
 |   MEASURED: our worker writes only the cold blob (0x400e21e0...). Stock's
 |   whole-bank reload -- the one rl_done now suppresses -- was what refilled the
