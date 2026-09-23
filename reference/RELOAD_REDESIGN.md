@@ -100,13 +100,6 @@ hardware that `[PTN]`+`[TRACK]` does nothing observable**, so overriding it is
 agreed. (Releasing `[PTN]` afterwards still raises SELECT PATTERN, as stock does
 — that is the part spec #1 must suppress.)
 
-**Correction worth recording**: the live arrow handlers in the default context
-are `0x40081610` (UP `0x33` + DOWN `0x20`) and `0x40081798` (L/R `0x21`/`0x34`) —
-NOT the `0x4004b970` / `0x400491a0` that `patch_reload2.s` detours. Those belong
-to some other layer/context. This mismatch is a plausible contributor to the
-inconsistent arrow behaviour in hardware report #8, and it is moot in the
-redesign (no arrows involved).
-
 ## The Part half of #2 — STOCK ALREADY DOES ALL OF IT (measured, Session 85)
 
 The user described stock's behaviour exactly: a never-saved Part toasts
@@ -224,3 +217,58 @@ With the picker gone there is no modal state to wedge, and the intended policy i
 re-post. Both posts are the same job type and bank mask, so a double post is
 benign, the user never sees BUSY, and a second press always retries instead of
 being refused. This does not fix a lost post — it makes one harmless.
+
+## Implementation plan — both detour sites measured (Session 85)
+
+**Calling convention, confirmed at both sites**: `handler(keycode @ sp+4,
+event @ sp+8)`. Both handlers open with `movel %d2,%sp@-`, after which the
+keycode is at `sp@(8)` and the event at `sp@(12)` — which is how each derives its
+own track index. Event `1` = press. Track index = keycode − `0x10`.
+
+### Detour A — `[PTN]` + `[TRACK]` → `0x40083dc4`
+
+**Reachable ONLY via this chord.** All 8 references to `0x40083dc4` are exactly
+the 8 `[PTN]`-overlay track slots (`0x400bf124` … `0x400bf1da`), so arriving here
+*is* the gesture — **no held-flag test needed at all.**
+
+Displaced prologue is exactly 6 bytes, so a 6-byte `jmp` fits with no padding:
+
+```
+40083dc4:  2f02            movel %d2,%sp@-        ; 2 B
+40083dc6:  242f 0008       movel %sp@(8),%d2      ; 4 B   -> resume at 0x40083dca
+```
+
+Behaviour: on press, arm a TRK SEQ reload for `keycode-0x10`, mark PTN-release
+suppression, toast `TRK SEQ RELOADED` (duration `0x18`), and swallow. On any
+other event, replay the two displaced instructions and `jmp 0x40083dca`.
+
+### Detour B — `[BANK]` + `[TRACK]` → `0x40040250`
+
+`[BANK]` does **not** override track keys, so the chord lands on the ordinary base
+track handler. Same 6-byte prologue shape, same fit:
+
+```
+40040250:  2f02            movel %d2,%sp@-        ; 2 B
+40040252:  222f 0008       movel %sp@(8),%d1      ; 4 B   -> resume at 0x40040256
+```
+
+Behaviour: test the BANK held-flag `0x46c7dd56`. Not held → replay displaced and
+`jmp 0x40040256` (ordinary track select, untouched). Held + press → arm TRK SEQ
+for `keycode-0x10`, then `jsr 0x4004aab4(part)` for the Part half and branch on
+its return (`0` → `SAVE PART FIRST!`, else `TRK SEQ + PART RELOADED`), mark
+BANK-release suppression, swallow.
+
+**Note the asymmetry and why it is good**: A needs no held test because the PTN
+overlay routes the chord to a private handler; B needs one because BANK leaves
+track keys on the base handler. Neither requires poking a keymap layer record —
+the mechanism that caused the DIRECT JUMP collision and several routing bugs in
+the picker era.
+
+### Still to design
+
+- **PTN-release suppression** (stock opens SELECT PATTERN on *release*).
+- **BANK press→release deferral + suppression** — the known-hard piece, built last
+  and separately, behind the `--stress`-shaped gate.
+- Reuse unchanged: `rl_job`'s TRK SEQ slice path, `rl_arm_trk`, and the whole-bank
+  suppression (`rl_done` + the `FUN_4000faf0` live refresh).
+- Toast duration `0x18`, not RELOAD2's `0x44`.
