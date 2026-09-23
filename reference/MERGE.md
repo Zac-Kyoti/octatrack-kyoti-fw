@@ -208,12 +208,41 @@ separate `DJ_V3` overlay switch.)
 | Concern | MUTE MODE | DIRECT JUMP | RELOAD2 | QLREC | Verdict |
 |---|---|---|---|---|---|
 | runtime setting word | `0x800000dc` | `0x800000d8` | — | `0x800000ac` (stock — QLREC only flips it) | distinct; `0xac` is in the stock `0x64` restore span already |
-| SRAM shadow | `0x100fff6c` | `0x100fff68` | — | `0x100fff3c` (stock) | distinct |
-| `pea 0x64→0x70` ×3 | yes | yes | no | no (`0xac` < `0xd3`, in the stock span) | identical write, idempotent |
+| SRAM shadow | `0x100fff6c` | **none (Session 83)** | — | `0x100fff3c` (stock) | DIRECT JUMP no longer persists |
+| `pea 0x64→0x70` ×3 | yes | **no (Session 83)** | no | no (`0xac` < `0xd3`, in the stock span) | ⚠️ **see the hazard below** |
 | scratch RAM globals | `0x80006c66` | `0x80006a40–44` | `0x80006a50–55` | `0x80006a5c` / `0x80006a60` | disjoint |
 | `[PTN]` flags | — | reads `0x460d1742` | detours PTN handler, replays prologue on non-hold | — | stock still sets `0x460d1742`; both set `PTN_USED 0x460d173e` |
 | menu surgery | owns it | none | none | none | only MUTE MODE |
 | `[REC] held` `0x460d1726` | — | — | — | detours the release path, replays `clr.l` | stock still sets it on press |
+
+### ⚠️ MERGE HAZARD — DIRECT JUMP's power-on default (Session 83)
+
+The user's requirement: **DIRECT JUMP is a performance feature and must come up OFF on every
+power-on.** It is never saved, per project or otherwise.
+
+Standalone this is free. `kb/memory-map.md`: `FUN_4000f938` re-images the DSP shared-RAM
+window from ROM (`0x401086f4` → `0x80000000`, `0x3e88` B) at every boot, and the ROM seed for
+`DJ_MODE` at `0x401087cc` is `00000000` — asserted by `build_directjump_v4.py`. Stock's ANDY
+restore is `memcpy(0x80000070, 0x100fff00, 0x64)`, covering `0x80000070..0x800000d3`, so it
+does **not** reach `DJ_MODE` at `0x800000d8`. The shadow write and the `0x64→0x70` widening
+are both removed, and the stale `1` left in battery SRAM by pre-Session-83 builds is inert.
+
+**But MUTE MODE still needs that widening** — its own word is `0x800000dc`, offset `0x6c`.
+A merged build that widens the restore to `0x70` for MUTE MODE will also restore offset
+`0x68`, and DIRECT JUMP would start persisting again from a shadow nothing maintains —
+i.e. it could come up **ON**, which is exactly what the user does not want.
+
+Before merging the two, do one of:
+
+1. **Move `DJ_MODE` outside `0x80000070..0x800000df`** to another word inside the boot
+   re-image span whose ROM seed is zero (verify the seed, the way the build already does).
+   Cleanest — keeps the "OFF at power-on" guarantee structural. Note every free word in
+   `0x70..0xdf` is inside the widened span, so it must move out of that range entirely.
+2. Have the merged build **zero `DJ_MODE` after the restore**, which needs a boot-only hook
+   site; all three restore sites are shared with save/validate paths (they recompute the
+   checksum then copy), so hooking one would also fire on an ordinary settings write.
+
+Option 1 is preferred. Do not simply re-add the shadow: that reintroduces persistence.
 
 **Gesture split:** quick `[PTN]`+`[YES]` = DIRECT JUMP toggle; `[PTN]` **hold** =
 RELOAD picker. Confirm the hold feel on hardware (HW unknown, `FLASHING.md` §4.7).

@@ -72,8 +72,8 @@
 |     switch body derives from D7 resumes at the playhead; clear the arm flag
 
     .equ DJ_MODE,   0x800000d8          | state word (0 = OFF/stock, 1 = ON)
-    .equ SH_DJ,     0x100fff68          | its 'ANDY' battery-SRAM shadow
-    .equ CKSUM,     0x4001f23c          | FUN_4001f23c -- recompute the ANDY block checksum
+|   Session 83: SH_DJ (0x100fff68) and CKSUM (0x4001f23c) are GONE -- DIRECT JUMP no longer
+|   persists. See dj_toggle for why the power-on default is 0 without them.
     .equ PTN_MODE,  0x460d1742          | 1 = [PTN] currently held (set by FUN_4005a044 press)
     .equ PTN_USED,  0x460d173e          | !=0 on [PTN] release -> the chooser does NOT open
     .equ POPUP,     0x460e5cd0          | !=0 = a modal popup is up (skip our combo then)
@@ -128,13 +128,10 @@
                                         | * this. Normally 0 -> every track restarts at
                                         | step 0. Its low word (0x8000662a) is BAR_CTR's
                                         | source at 0x400a483a. See Hook H.
-    .equ G_ABSTICK, 0x80006a46          | absolute step-tick counter (long) since transport
-                                        | started -- NEVER reset or wrapped by a pattern
-                                        | switch, unlike DAT_800065b6 (which is bounded to
-                                        | the CURRENTLY ACTIVE pattern's own length and so
-                                        | has already lost the information needed to resume
-                                        | a DIFFERENT-length pattern correctly once it has
-                                        | wrapped even once)
+|   Session 83: G_ABSTICK (was 0x80006a46) is GONE. It was a second position counter running
+|   alongside stock's own 0x800065b2, and deriving the resume position from it while the
+|   metronome ran from 0x800065b2 is what made every switch land on a different step. The AR
+|   port reads 0x800065b2 directly -- see Hook H. Do not reintroduce a private counter here.
     .equ G_JUST_COMMITTED, 0x80006a4a   | one-shot: dj_c sets this; Hook F (below) consumes
                                         | it once, after BOTH per-track loops have finished
                                         | for this tick, then clears it
@@ -272,8 +269,27 @@ dj_toggle:
     eori.l  #1,%d0
     andi.l  #1,%d0
     move.l  %d0,DJ_MODE
-    move.l  %d0,SH_DJ                  | battery-SRAM shadow
-    jsr     CKSUM                      | re-checksum the ANDY block (bypasses the menu path)
+|   Session 83: NO battery-SRAM shadow, NO re-checksum. DIRECT JUMP is a performance
+|   feature -- the user turns it on when it is wanted and it must come up OFF on every
+|   power-on, never remembered per project or per session.
+|
+|   That is stock's own behaviour for this address, not something we add. kb/memory-map.md:
+|   `FUN_4000f938` (sole caller 0x40000512) re-images the DSP shared-RAM window from ROM at
+|   boot -- 0x401086f4 -> 0x80000000, 0x3e88 bytes -- then zero-fills to 0x80004000. DJ_MODE
+|   at 0x800000d8 is offset 0xd8, inside that span, and the ROM seed at 0x401087cc reads
+|   00000000 (verified against the stock image). So every power-on writes 0 here.
+|
+|   The only thing that could override that was OUR OWN patch: stock's ANDY restore is
+|   `memcpy(0x80000070, 0x100fff00, 0x64)`, covering 0x80000070..0x800000d3 -- it does NOT
+|   reach 0x800000d8. build_directjump_v4.py used to widen it to 0x70 at all three restore
+|   sites precisely so this word WOULD be restored. That widening is removed, so the stale
+|   shadow value in battery SRAM from earlier builds is now inert: nothing reads it.
+|
+|   ** MERGE HAZARD ** -- MUTE MODE's own shadow is at 0x800000dc (offset 0x6c) and DOES
+|   need the 0x70 widening. Any build that combines the two (build_merged.py) will therefore
+|   restore offset 0x68 as well and DIRECT JUMP would start persisting again. If DIRECT JUMP
+|   is ever merged with MUTE MODE, DJ_MODE must move outside 0x80000070..0x800000df first.
+|   Recorded in reference/MERGE.md.
 
     move.l  DJ_MODE,%d0
     lea     dj_msg_off,%a0
@@ -347,46 +363,9 @@ dtk_done:
     rts
     .endif
 
-| ================= Hook E @ 0x400a3fe4 =================
-| detour replaces `move.b %d0,(0x800065b6).l` (6 B) -- the STORE half of the UNCONDITIONAL
-| per-tick master-step increment (`0x400a3fdc: moveb STEP,d0 ; addq#1,d0 ; moveb d0,STEP`),
-| which runs every step tick regardless of DIRECT JUMP mode, before hook A even gets
-| control. Session 70 (7th pass): replays the displaced store (d0 must survive unclobbered
-| -- the caller re-uses it at 0x400a3fea/3ff8 for the wrap check) then unconditionally bumps
-| `G_ABSTICK`. Deliberately NOT gated on `DJ_MODE` -- the counter needs to reflect true
-| elapsed ticks whenever DIRECT JUMP is next armed, not just while it happens to be on;
-| the cost is one extra long add per tick, always.
-
-    .global dj_abstick
-dj_abstick:
-    move.b  %d0,STEP                   | displaced original (d0 must stay unclobbered)
-|   Session 82: back to a flat `+= 1`, and this time it is the measured truth rather than a
-|   guess either way.
-|
-|   cont.38 changed this to `+= LEN_TBL[SCALE_IX]` on the reasoning that the hook "runs once
-|   per master step, and a master step is a per-pattern number of ticks". The premise was
-|   false: tools/diag_tick_domain.py measures this site executing once per CLOCK TICK (the
-|   counter it displaces, 0x800065b6, only ever holds 0..tps-1 -- it is ticks-within-step,
-|   not a step index). One increment per clock tick already IS absolute time, at a rate no
-|   pattern's scale can change. The cont.38 version therefore counted tps ticks per tick --
-|   6x fast at 1x, and by a DIFFERENT factor per pattern, which is precisely the error it was
-|   written to remove.
-|
-|   Hook H's arithmetic is unchanged and is correct against this counter: cycleTicks and
-|   posTicks are both real ticks, and dividing posTicks by tps_master yields master steps.
-|
-|   Deliberately NOT gated on DJ_MODE -- the counter must reflect true elapsed ticks whenever
-|   DIRECT JUMP is next armed, not only while it happens to be on. Only D1 is used now, so
-|   the frame is smaller than cont.38's; D0 still must survive (the caller re-uses it at
-|   0x400a3fea/3ff8), which is why the displaced store comes first.
-    lea     -4(%sp),%sp
-    move.l  %d1,(%sp)
-    move.l  G_ABSTICK,%d1
-    addq.l  #1,%d1
-    move.l  %d1,G_ABSTICK
-    move.l  (%sp),%d1
-    lea     4(%sp),%sp
-    rts
+| Hook E (`dj_abstick` @0x400a3fe4) DELETED in Session 83 -- it maintained
+| `G_ABSTICK`, the parallel position counter the AR port removes. The site is stock
+| again. See Hook H's comment for the full reasoning.
 
 | ================= Hook A @ 0x400a4006 =================
 | detour replaces `tst.b (0x8000667e).l` (6 B).  Runs every step tick.  The step engine
@@ -483,167 +462,112 @@ djb_orig:
     move.l  #0x8e56,%d0               | displaced original
     rts
 
-| ================= Hook T @ 0x4009c3d4 =================
-| detour replaces `move.l %d0,(0x800065b8).l` (6 B, bytes 23c0800065b8) -- the store that
-| sets TRANSPORT = 1, immediately after `moveq #1,D0` at 0x4009c3d2. Unambiguously "the
-| transport just started".
-|
-| Session 79 cont.34. G_ABSTICK was incremented at dj_abstick and cleared NOWHERE, so it
-| counted from power-on. Hook H turns it into DIRECT JUMP's resume offset, and the rebuild
-| loop stores that offset's quotient as a WORD read back sign-extended, so the usable range
-| is ~32767 master steps -- about 68 minutes at 120 BPM with 16th steps. Counting from
-| power-on made that reachable in one sitting; counting from transport start makes it
-| reachable only in a single unbroken 68-minute take.
-|
-| It is also the semantically correct origin. The user's model for the feature is that every
-| pattern behaves as if it had been playing silently since the transport started -- not since
-| the machine was switched on -- so resetting here is what the feature actually means, and
-| the range improvement is a consequence rather than the justification.
-|
-| Not gated on DJ_MODE: G_ABSTICK is our own scratch global that no stock code reads, so
-| clearing it cannot change stock behaviour with the feature off. dj_abstick's increment is
-| ungated for the same reason.
-|
-| The displaced store is replayed verbatim rather than assuming D0 == 1, so if any other
-| path reaches this instruction with a different value it still behaves exactly as stock.
-| (Clearing the counter on such a path would be harmless in any case.)
+| Hook T (`dj_tstart` @0x4009c3d4) DELETED in Session 83 -- it existed only to reset
+| `G_ABSTICK` at transport start. With the playhead read straight from stock's own
+| `0x800065b2` there is no counter of ours to zero, and the site is stock again.
 
-    .global dj_tstart
-dj_tstart:
-    clr.l   G_ABSTICK                  | absolute tick origin = transport start
-    move.l  %d0,TRANSPORT_L            | displaced original
-    rts
-
-| ================= Hook H @ 0x400a47f6 =================
+| ================= Hook H @ 0x400a47f6 -- THE WHOLE FEATURE =================
 | detour replaces `lea (0x400eb034).l,%a0` (6 B, bytes 41f9400eb034).
 |
-| Session 79 (cont.21/26/27). The whole thread up to here treated DIRECT JUMP as something
-| that must REBUILD per-track state after the fact -- hence Hooks D/E/F, each repairing one
-| per-track global that the commit had left stale. That was backwards. Stock already
-| contains AR's per-track rebuild, at 0x400a4884-0x400a49e2 (audio) and its MIDI twin from
-| 0x400a49e6, inside a 1586-byte region Ghidra had never decoded (cont.21). Per track it
-| does, using that track's OWN scale and OWN length:
+| Session 83: PORTED FROM ANALOG RYTM, replacing the absolute-time model outright.
 |
-|     tps_t        = LEN_TBL[scale_t]                        ticks per step
-|     q            = (D7 - 1 + tps_t) / tps_t                0x400a4912
-|     NEXT_STEP[t] = q mod length_t                          0x400a4976, stored 0x400a497a
-|     PAIR[t]      = D7 - q*tps_t                            0x400a4920, stored 0x400a4924
+| ---- why the old model was wrong ----
+| OT has exactly ONE position counter and we had built a SECOND one. `0x800065b2` (the word
+| incremented once per master step at 0x400a423a) is what the whole machine runs on:
+|     metronome / beat+bar flags   0x400a4264-0x400a42ca, masking it against 1,3,7,15,31,
+|                                  63,127,255 (0x400abae4) and 1,3,7,15,31,63 (0x400abacc),
+|                                  plus a `mod 3` test at 0x400a4292
+|     CHAIN-AFTER switch point     0x400a4352, masterStep mod chainLen == 0
+|     stock's Program Change lead  0x400a41aa, (masterStep + 1) mod chainLen == 0
+| `G_ABSTICK` was a parallel counter on a different hook with a different origin. We derived
+| the resume position from OURS, and stock then reseeded 0x800065b2 from 0x8000662a -- the
+| low word of the very long this hook writes -- so every commit YANKED THE METRONOME to
+| wherever our separate counter happened to be. The two agreed only by coincidence, a
+| different coincidence each switch. Reported on hardware exactly so: "no matter when a
+| switch occurs both should be on step X; they are not, and they get offset relative to the
+| steady 1 2 3 4 of the metronome. Each switch offsets to a different step."
 |
-| and the boundary body then seeds STEP[t] from NEXT_STEP[t] at 0x400a4be6. Its ONLY
-| position input is D7, built at 0x400a4812/0x400a4826 as
-| `LEN_TBL[masterScale] * *(long)0x80006628` -- so 0x80006628 is a START OFFSET IN MASTER
-| STEPS, and it is normally 0, which is why every commit restarts every track at step 0.
+| AR cannot have this bug, and the reason is structural, not clever: it has one counter and
+| the commit derives the new position from that same counter.
 |
-| MEASURED, not inferred (cont.27, tools/diag_d7_inject.py, which overrides the D7 register
-| in the emulator and compares the arrays the loop actually produces against that model):
-|   - stock, natural boundary, D7 = 0            -> 16/16 tracks match (all zero)
-|   - stock, D7 = 48 forced, switching INTO the SCALE_MODE=1 pattern -> 16/16 match, with
-|     tps=6/len=16 tracks landing on 8, the SCALE=0 (tps=3) track landing on 0 because
-|     48/3 = 16 steps is a full cycle of its length, and the LEN=12 track landing on 8.
-| So a non-zero D7 distributes coherently across BOTH differing scales and differing
-| lengths. cont.23's earlier reading of 0x80006628 as "pattern length" was refuted by the
-| same measurement and must not be reintroduced.
+| ---- AR's model, measured (ar-kyoti-fw/MECHANISM.md 5, AR_DIRECT_JUMP.md 2) ----
+|     new_step = DIRECT START ? 0 : (masterStep mod newPatternLen)     ; 0x40099252-0x4009927a
+|     pos_t    = new_step mod trackLen_t                               ; 0x4009927c-0x400992d2
+| where AR's masterStep `DAT_405666e4` is BOUNDED -- it wraps at the pattern length
+| (0x40099b8a-0x40099ba6).
 |
-| Therefore DIRECT JUMP needs no per-track machinery of its own: give the loop the right
-| offset and stock does the rest. The right offset is G_ABSTICK, not G_STEP -- see Hook C's
-| own Session 70 (7th pass) comment: once STEP has wrapped against the outgoing pattern's
-| length the elapsed-time information is gone, and modulo against a different length cannot
-| recover it. G_ABSTICK never resets, so
-|     D7 = LEN_TBL[masterScale] * G_ABSTICK  = absolute ticks
-|     NEXT_STEP[t] = (absTicks / tps_t) mod length_t
-| which is exactly the user's stated model: every pattern behaves as if it had been playing
-| silently the whole time at ITS OWN length, and switching only changes which one you hear.
+| ---- OT's equivalent, MEASURED (tools/diag_playhead.py, stock) ----
+| `0x800065b2` cycles 1,2,...,15,0,1,... with MASTER LENGTH 16 -- range 0..15, period 16,
+| confirmed on DJTEST2 A07 (tps 6) AND A08 (tps 3), so the period is in STEPS and is the
+| master length, not an artefact of one scale. It is the direct analogue of AR's
+| `DAT_405666e4`: a bounded playhead index.
 |
-| Site choice: 0x80006628 is READ at 0x400a4812/0x400a4826, so the write must land before
-| them; 0x400a47f6 is the last 6-byte instruction on the commit path that precedes both.
-| D0 holds the pattern-blob offset here (built 0x400a47c4-0x400a47e4) and is indexed by the
-| very next instruction at 0x400a4802 -- it MUST survive, so only D1 is used, saved and
-| restored. Flags are free: the displaced `lea` sets none and 0x400a4802 sets its own.
-| Gated on G_ARMED so natural boundaries keep 0x80006628 exactly as stock leaves it.
+| So the port is one modulo:
 |
-| Side effect to keep in view: BAR_CTR is loaded at 0x400a483a from 0x8000662a, the LOW
-| WORD of this same long (cont.23), so an armed commit now also seeds BAR_CTR from
-| G_ABSTICK's low word instead of 0. Session 79's BAR_CTR experiment (951e2ed) measured
-| overriding BAR_CTR as having literally no effect, so this is expected to be inert, but it
-| is a deliberate change and not an accident.
+|     0x80006628 = 0x800065b2 mod newMasterLen
 |
-| Bound not yet checked: D7 = tps * G_ABSTICK is a 32-bit muls.l, so it overflows once
-| G_ABSTICK exceeds ~2^31/tps (~357M step-ticks at tps=6). Long before that matters in
-| practice, but it is unverified and must not be assumed harmless.
+| Stock does everything else. It multiplies that up into D7 at 0x400a4812/0x400a4826, its
+| own rebuild loop at 0x400a4884 distributes it per track against each track's own length,
+| and it reseeds 0x800065b2 itself from our low word at 0x400a483a -- which now feeds the
+| metronome THE SAME NUMBER the patterns got, by construction. One counter again.
+|
+| Site: 0x80006628 is read at 0x400a4812/0x400a4826 and 0x800065b2 is reseeded at
+| 0x400a483a, so this hook must land before both. 0x400a47f6 is the last 6-byte instruction
+| on the commit path that does. D0 holds the pattern-blob offset here (built
+| 0x400a47c4-0x400a47e4) and is indexed by the very next instruction at 0x400a4802, so it
+| MUST survive. Flags are free: the displaced `lea` sets none.
+|
+| DELETED with this change, all of it scaffolding for the second clock: `G_ABSTICK`, Hook E
+| (`dj_abstick` @0x400a3fe4), Hook T (`dj_tstart` @0x4009c3d4), the master-cycle tick
+| reduction, and the `dj_div32`/`dj_mod32` long-division helpers. Both operands here are
+| bounded by the master length (<= 64), so a subtract loop is exact and terminates fast.
+|
+| Difference from AR that remains, and is deliberate: stock's rebuild loop divides by each
+| track's OWN ticks-per-step, so a track at a different multiplier gets rate-corrected where
+| AR's flat `new_step mod trackLen` would not. That is OT machinery we would have to replace
+| the loop to remove. Everything running at the master rate is AR-exact.
 
     .global dj_d7
 dj_d7:
     tst.b   G_ARMED
-    beq.w   djd7_orig
-    lea     -40(%sp),%sp
-    movem.l %d0-%d7/%a1-%a2,(%sp)
-    move.l  %d0,%d6                    | d6 = pattern blob offset (caller's D0 -- preserved
-                                       | by the movem, and restored before we return)
-|   ---- REDUCE INTO THE INCOMING PATTERN'S MASTER CYCLE (Session 79 cont.38) ----
-|   MEASURED on stock (tools/diag_master_reset.py): MASTER LENGTH resets EVERY track to step
-|   1, in the tick domain. A 7-step track under master 16 plays 7, 7, then 2 and is cut off;
-|   a 1/2x track reaches only 8 of its 16 steps inside a 96-tick master cycle. So a track's
-|   behaviour is periodic in the MASTER cycle, not in its own length, and the resume position
-|   is fully determined by position within that cycle:
-|       cycleTicks = masterLen * tps_master          (of the INCOMING pattern)
-|       posTicks   = G_ABSTICK mod cycleTicks
-|       offset     = posTicks / tps_master           (stock wants master steps)
-|   The previous version fed the raw counter and was wrong for every track whose length did
-|   not equal the master length -- at DJTEST2 A07 it put the 12-step track on 2 (should be
-|   10), the 7-step track on 5 (should be 3) and the 1/2x track on 13 (should be 5). The
-|   cont.36 LCM reduction was solving an overflow that only existed because of this omission:
-|   the offset here is bounded by masterLen, so D7 cannot approach the 16-bit ceiling.
-|   ---- master tempo multiplier -> d5, master length -> d4 ----
+    beq.b   djd7_orig
+    lea     -20(%sp),%sp
+    movem.l %d0-%d3/%a1,(%sp)
+    move.l  %d0,%d3                    | d3 = pattern blob offset (caller's D0, preserved by
+                                       | the movem and restored before we return)
+|   ---- newMasterLen -> d1 ----
     lea     PAT_SMODE,%a1
-    tst.b   (%a1,%d6.l)
+    tst.b   (%a1,%d3.l)                | SCALE_MODE
     beq.b   djd7_unif
-    lea     PAT_MSCALE,%a1             | per-track mode: MASTER SCALE (+0x8e52)
-    moveq   #0,%d1
-    move.b  (%a1,%d6.l),%d1
-    lea     PAT_MLEN,%a1               |                 MASTER LENGTH (+0x8e51)
-    moveq   #0,%d4
-    move.b  (%a1,%d6.l),%d4
-    bra.b   djd7_gotm
+    lea     PAT_MLEN,%a1               | per-track mode -> MASTER LENGTH (+0x8e51)
+    bra.b   djd7_gotlen
 djd7_unif:
-    lea     PAT_SCALE,%a1              | uniform mode: pattern multiplier (+0x8e54)
+    lea     PAT_LEN,%a1                | uniform mode  -> pattern LENGTH (+0x8e53)
+djd7_gotlen:
     moveq   #0,%d1
-    move.b  (%a1,%d6.l),%d1
-    lea     PAT_LEN,%a1                |               pattern length (+0x8e53)
-    moveq   #0,%d4
-    move.b  (%a1,%d6.l),%d4
-djd7_gotm:
-    cmpi.l  #11,%d1
-    bhi.b   djd7_zero
-    lea     LEN_TBL,%a1
-    move.l  (%a1,%d1.l*4),%d5          | d5 = tps_master
-    tst.l   %d4
-    ble.b   djd7_zero
-    tst.l   %d5
-    ble.b   djd7_zero
-|   cycleTicks = masterLen * tps_master
-    move.l  %d5,%d7
-    muls.l  %d4,%d7                    | d7 = cycleTicks
-    ble.b   djd7_zero
-|   posTicks = G_ABSTICK mod cycleTicks
-    move.l  G_ABSTICK,%d0
-    move.l  %d7,%d1
-    bsr     dj_mod32                   | d0 = posTicks  (< cycleTicks, so bounded)
-|   offset = posTicks / tps_master, in master steps -- what stock multiplies back up by
-|   tps_master to rebuild D7.
-    move.l  %d5,%d1
-    bsr     dj_div32                   | d0 = offset
-    move.l  %d0,%d2
-    bra.b   djd7_store
+    move.b  (%a1,%d3.l),%d1
+    tst.l   %d1
+    ble.b   djd7_zero                  | unreadable length -> restart at 0, exactly as stock
+                                       | leaves 0x80006628 at a natural boundary
+|   ---- d0 = masterStep mod newMasterLen ----
+    moveq   #0,%d0
+    move.w  MASTER_STEP,%d0            | the LIVE playhead; stock reseeds it from our low
+                                       | word at 0x400a483a, i.e. AFTER this hook
+djd7_mod:
+    cmp.l   %d1,%d0
+    blt.b   djd7_store                 | already < newMasterLen -> done
+    sub.l   %d1,%d0
+    bra.b   djd7_mod
 djd7_zero:
-    moveq   #0,%d2                     | unrepresentable -> 0 = restart at step 0, which is
-                                       | what stock puts here at a natural boundary
+    moveq   #0,%d0
 djd7_store:
-    move.l  %d2,MASTER_STEPS           | start offset (master steps) for stock's own rebuild
-    movem.l (%sp),%d0-%d7/%a1-%a2
-    lea     40(%sp),%sp
+    move.l  %d0,MASTER_STEPS           | resume position, in master steps
+    movem.l (%sp),%d0-%d3/%a1
+    lea     20(%sp),%sp
 djd7_orig:
     lea     0x400eb034,%a0             | displaced original
     rts
+
 
 | ================= Hook C @ 0x400a4840 =================
 | detour replaces `clr.b %d0 ; move.b %d0,(0x800065b6).l` (8 B) -> jsr dj_c + nop.
@@ -886,204 +810,14 @@ djs_got:
     lea     16(%sp),%sp
     rts
 
-| ================= Hook F @ 0x400a4d36 =================
-| Session 70 (9th pass, HARDWARE BUG confirmed via a targeted test, not just theory):
-| the shared-D7 trick (djc_store, above) only produces the correct resume position for
-| tracks whose OWN length matches the pattern's default -- confirmed dynamically: gave a
-| genuinely per-track-scaled track (its own length 8, inside a 16-step pattern) a
-| quotient of 16 -- a nonsensical value bigger than the track's own length, bearing no
-| relation to real elapsed time for that track at all. This is Session 15's item #4,
-| finally confirmed as a real bug (this project spent Sessions 70.6-70.8 assuming it was
-| a secondary, lower-priority gap; the user's own hardware reports -- cumulative drift,
-| restarts tied to switch timing -- are fully consistent with this, once you have a track
-| whose own SCALE genuinely differs from its pattern's default).
-|
-| Fix: after BOTH per-track loops (audio 0x400a4bb6-4c62, MIDI 0x400a4c82-4d32) have
-| fully run for this tick -- this is the very next instruction stock executes afterward,
-| confirmed via disassembly -- recompute each AUDIO track's OWN correct resume position
-| independently (G_ABSTICK mod that track's OWN length, not the pattern's) and overwrite
-| REFILL_TBL directly, one final time, undoing whatever the shared-D7 mechanism seeded.
-| Gated on G_JUST_COMMITTED (set once by dj_c) so this only overrides REFILL_TBL on the
-| exact tick a switch commits -- every ordinary tick is left alone, so the fast
-| dispatcher's own subsequent increments aren't fought.
-|
-| MIDI tracks (8-15) NOT covered this pass -- confirmed via stock disassembly that their
-| own per-track-scale-override table lives at a different absolute base (0x400e6adc, not
-| BLOB-relative like audio's TRAC+0x51) which hasn't been mapped with the same confidence
-| yet. Flagged as the one remaining known gap.
-|
-| detour replaces `tst.l (0x46107568).l` (6 B) -- replayed as the LAST instruction before
-| rts so its flags are exactly what the caller's very next `bne.w` expects; every register
-| this hook uses is saved/restored around the fixed work (D6 as the loop counter is
-| deliberately NOT among the registers `dj_mod32` clobbers, so it survives the bsr calls
-| untouched).
-
-    .global dj_pertrack_fix
-dj_pertrack_fix:
-    tst.b   G_JUST_COMMITTED
-    beq.w   dpf_done
-    clr.b   G_JUST_COMMITTED
-    lea     -60(%sp),%sp
-    movem.l %d0-%d7/%a0-%a6,(%sp)
-    moveq   #0,%d6                      | d6 = track index t (0..7, audio only)
-dpf_loop:
-    moveq   #0,%d0
-    move.b  ACT_PAT,%d0
-    move.l  #0x8ed8,%d1
-    muls.l  %d1,%d0
-    moveq   #0,%d1
-    move.b  ACT_BANK,%d1
-    move.l  #0x9b340,%d2
-    muls.l  %d2,%d1
-    add.l   %d1,%d0                     | d0 = bank*0x9b340 + pat*0x8ed8 (pattern block)
-    lea     0x400e21e0,%a1
-    adda.l  %d0,%a1                     | a1 = this pattern's own block base
-    move.l  %d6,%d2
-    move.l  #0x91a,%d1
-    muls.l  %d1,%d2                     | d2 = t * 0x91a (this track's offset within it)
-    lea     0x400e21e0,%a0
-    adda.l  %d0,%a0
-    adda.l  %d2,%a0                     | a0 = this track's own TRAC block base
-|   0x8e54/0x8e55 exceed the +-32767 range a plain d16(An) displacement can encode --
-|   same indexed-addressing idiom stock's own code uses for these exact offsets
-|   (an immediate loaded into a data register, then (An,Dn.L) with zero base
-|   displacement) instead of a d16(An) form.
-    moveq   #0,%d1
-    move.w  #0x8e55,%d1
-    tst.b   (%a1,%d1.l)                 | SCALE_MODE (pattern-level, from a1)
-    beq.b   dpf_normal
-    moveq   #0,%d1
-    move.b  0x51(%a0),%d1               | per-track scale index (SCALE_MODE != 0)
-    bra.b   dpf_gotidx
-dpf_normal:
-|   Session 79 ("continued an eighteenth time") -- HARDWARE REGRESSION, root cause:
-|   this used to be `moveq #0,%d1 ; move.w #0x8e54,%d1 ; move.b (%a1,%d1.l),%d1`, i.e. it
-|   reused %d1 as BOTH the 0x8e54 offset and the destination. `move.b` into a data register
-|   writes only the low 8 bits, so %d1 came out as 0x8e00|scaleByte instead of the scale
-|   index -- and the LEN_TBL lookup below then read ~0x8e02*4 bytes PAST the table, i.e.
-|   garbage, as this track's length. Whether that garbage is <=0 (caught by the guard
-|   below, fix silently skipped) or >0 (used as a real length) is pure data-dependent luck:
-|   in the emulator it came out <=0, on the user's own hardware it did not, and
-|   `G_ABSTICK mod garbage` then landed a value larger than the real wrap length in
-|   STEP_IN_PAT[t] -- so the counter wrapped EVERY tick, firing every trig continuously
-|   (audible as very short clicks) with the step position frozen. Only reachable when
-|   SCALE_MODE == 0; both validation runs happened to target SCALE_MODE == 1 patterns,
-|   which is exactly why this shipped. Use a separate scratch register for the offset so
-|   the destination is genuinely zero-extended.
-    moveq   #0,%d2
-    move.w  #0x8e54,%d2                 | d2 = offset only -- NOT the destination
-    moveq   #0,%d1
-    move.b  (%a1,%d2.l),%d1             | pattern-default scale index (SCALE_MODE == 0)
-dpf_gotidx:
-|   Session 79 (NOTES.md, "continued a seventeenth time"): d1 holds this track's scale
-|   index for the incoming pattern right here, chosen by the SAME SCALE_MODE test stock
-|   itself uses -- for the one instant before the LEN_TBL lookup below overwrites it with
-|   the length. That index is exactly what the step-counter wrap check reads live out of
-|   TRK_SCALE_IX[t] (0x400a3ce6/0x400a3cee), and stock only reloads that cache AFTER a
-|   wrap, so a mid-pattern DIRECT JUMP commit leaves the OUTGOING pattern's index in place
-|   for one full cycle: measured on the user's own DJTESTxxx export, a track at trackLen 3
-|   ran 6 ticks after the commit (wrapping at frame 805 instead of 633), missed one
-|   DAT_80001904 anchor write, then self-corrected once stock's own post-wrap reload
-|   finally ran. Refresh it here instead of waiting for that wrap -- same principle as
-|   Hook D (dj_scaleix_fix), which already undoes the identical staleness for the MASTER
-|   scale index; this is its per-track counterpart, and the long-open Session 15 #4 gap.
-|   Costs nothing extra: the value is already computed, and %a0 is reloaded on the very
-|   next line anyway.
-|   FAIL-SAFE BOUNDS GUARD (Session 79, "continued an eighteenth time"). LEN_TBL at
-|   0x400aba50 has exactly TWELVE real entries -- [0..11] = 3,4,6,8,12,24,48,96,48,24,12,6;
-|   [12] is 0 and [13+] is an unrelated table (2646000, the per-step increment constant).
-|   The regression that reached hardware came from indexing this table out of bounds and
-|   using whatever came back as a track length. Anything outside 0..11 is therefore not a
-|   scale index at all, and the only safe action is to leave this track completely alone --
-|   including NOT writing TRK_SCALE_IX, since stock's own wrap check reads that cache and a
-|   bogus index there would corrupt stock too. Guard first, write second.
-    cmpi.l  #11,%d1
-    bhi.b   dpf_skip                    | not a real scale index -> touch nothing
-    lea     TRK_SCALE_IX,%a0
-    move.b  %d1,(%a0,%d6.l)             | TRK_SCALE_IX[t] = the INCOMING pattern's index
-    lea     0x400aba50,%a0
-    move.l  (%a0,%d1.l*4),%d1           | d1 = this track's OWN trackLen
-    move.l  G_ABSTICK,%d0                | d0 = absolute tick count
-    tst.l   %d1
-    ble.b   dpf_skip                    | guard: bad length -> leave REFILL_TBL alone
-    bsr     dj_mod32                    | d0 = G_ABSTICK mod trackLen[t]
-    lea     0x800064d0,%a0
-    move.b  %d0,(%a0,%d6.l)             | REFILL_TBL[t] = this track's own correct position
-|   Session 79 (NOTES.md, "continued a fifteenth time"): STEP_IN_PAT (0x800064f0[t]) is the
-|   per-track step-within-pattern counter -- stock increments it once per step tick at
-|   0x400a3ce2 and wraps it to 0 at 0x400a3cf6 on reaching the track's length. Reading 0
-|   ("we are at step 0") is the ONLY thing that makes the DAT_80001904 table-arm write
-|   run: measured, the write path's last gate is `tst.b (A0) ; bne.w 0x400a3574` at
-|   0x400a2d28/0x400a2d2a with A0 == 0x800064f0+t (same-run trace diff, tick 9 vs tick 10,
-|   both step boundaries). Stock's commit tail resets this counter to 0 for every track at
-|   0x400a4bf0 -- correct for an ORDINARY switch, which only ever commits at a loop
-|   boundary where the counter was wrapping to 0 anyway, but DIRECT JUMP commits
-|   mid-pattern, so the reset PERMANENTLY re-phases it (measured: ground truth reads 0 at
-|   ticks 6/12/18, a DIRECT JUMP run at 6/9/15 -- three ticks early, forever, never
-|   resyncing). That is the whole "extra out-of-cycle table-arm write + permanent cadence
-|   shift" symptom this thread has chased since Session 70's 13th pass; Hooks G/G2 below
-|   could only suppress the one visible write, never the phase. Fix: this hook already runs
-|   AFTER 0x400a4bf0 on the same commit (measured by write order at frame 461) and has
-|   already computed exactly the right value -- `G_ABSTICK mod trackLen[t]`, which lands at
-|   3 here, matching ground truth's own counter at that instant, because Hook E's
-|   G_ABSTICK increment (0x400a3fe4) has already happened by this point in the tick. So
-|   just store the SAME d0 to STEP_IN_PAT[t] as well, undoing stock's reset-to-0 with the
-|   "as if this pattern had been playing continuously all along" position -- the identical
-|   principle dj_c already applies to STEP and D7, and the Analog Rytm's own
-|   fresh-per-request recompute invariant (ar-kyoti-fw/MECHANISM.md).
-    lea     STEP_IN_PAT,%a0
-    move.b  %d0,(%a0,%d6.l)             | STEP_IN_PAT[t] = same correct position
-dpf_skip:
-    addq.l  #1,%d6
-    cmpi.l  #8,%d6
-    blt.w   dpf_loop
-    movem.l (%sp),%d0-%d7/%a0-%a6
-    lea     60(%sp),%sp
-dpf_done:
-    tst.l   0x46107568                  | displaced original (sets Z for the caller's bne.w)
-    rts
-
-| d0 = d0 mod d1 (both unsigned 32-bit); clobbers d2,d3; preserves d1 and everything else.
-| Same hand-rolled binary long division as djc_store above (neither divul.l nor divsl.l,
-| in any form, assembles under this toolchain's -mcpu=5407) -- factored out here since
-| dj_pertrack_fix needs it 8 times per commit instead of djc_store's one.
-| ---- unsigned 32-bit helpers for Hook H's range reduction (Session 79 cont.36) ----
-| dj_div32 : d0 = d0 / d1 (unsigned), clobbers d2-d4. Restoring shift-subtract, same shape
-|            as dj_mod32 below, but accumulating the quotient as well as the remainder.
-|            Uses bcs (unsigned) rather than dj_mod32's blt -- our operands are small enough
-|            that it never matters, but signed compares on a division are wrong in principle.
-dj_div32:
-    moveq   #0,%d2                     | remainder
-    moveq   #0,%d4                     | quotient
-    moveq   #32,%d3
-dj_div32_loop:
-    add.l   %d0,%d0                    | shift dividend left, MSB -> X
-    addx.l  %d2,%d2                    | remainder = remainder*2 + that bit
-    add.l   %d4,%d4                    | quotient <<= 1
-    cmp.l   %d1,%d2
-    bcs.b   dj_div32_skip              | remainder < divisor -> this quotient bit stays 0
-    sub.l   %d1,%d2
-    addq.l  #1,%d4
-dj_div32_skip:
-    subq.l  #1,%d3
-    bne.b   dj_div32_loop
-    move.l  %d4,%d0
-    rts
-
-dj_mod32:
-    moveq   #0,%d2
-    moveq   #32,%d3
-dj_mod32_loop:
-    add.l   %d0,%d0
-    addx.l  %d2,%d2
-    cmp.l   %d1,%d2
-    blt.b   dj_mod32_skip
-    sub.l   %d1,%d2
-dj_mod32_skip:
-    subq.l  #1,%d3
-    bne.b   dj_mod32_loop
-    move.l  %d2,%d0
-    rts
+| Hook F (`dj_pertrack_fix` @0x400a4d36) DELETED in Session 83, together with the
+| `dj_div32` / `dj_mod32` long-division helpers that only it and the old tick-domain Hook H
+| used. It had already been unhooked in Session 79 cont.29 after being measured clobbering
+| 7 of 8 audio tracks (it computed `G_ABSTICK mod LEN_TBL[scale]`, i.e. modulo
+| TICKS-PER-STEP, and wrote it into the per-track STEP array -- audio/MIDI desync on every
+| armed commit). It is removed outright now rather than left as unbuilt source, because it
+| referenced `G_ABSTICK`: dead code depending on a counter nothing maintains is a trap for
+| a later session. The full account is in NOTES.md Session 79 cont.29 and Session 83.
 
     .ifdef DJ_KEYMAP
 | ================= [PTN] release -- close the toast almost immediately =================

@@ -37,12 +37,16 @@ STOCK = ROOT / "out" / "raw" / "section_3_MAIN_OS.bin"
 DJ_MODE = 0x800000D8
 TICK_CTR = 0x800065B6          # master ticks-within-step
 SCALE_IX = 0x8000663D
-BAR_CTR = 0x800065B2           # master STEP counter (word, ++ at 0x400a423a)
+MASTER_STEP = 0x800065B2       # master STEP counter (word, ++ at 0x400a423a); measured in
+                               # Session 83 as a BOUNDED playhead (range 0..len-1), the
+                               # direct analogue of AR's DAT_405666e4, and the source the
+                               # metronome/beat flags are derived from at 0x400a4264-42ca
 ACT_PAT, ACT_BANK = 0x800065BE, 0x800065BD
 PEND_PAT, PEND_BANK = 0x800065C0, 0x800065BF
 LEN_TBL = 0x400ABA50
 TICK_PC = 0x400A3FDC           # the 0x800065b6 increment -- once per clock tick
 STEP_PC = 0x400A4220           # first instruction of the step body -- once per master step
+BLOB, BANK_STRIDE, PAT_STRIDE = 0x400E21E0, 0x9B340, 0x8ED8
 
 
 def run_one(er, a, phase, quiet=False):
@@ -60,7 +64,7 @@ def run_one(er, a, phase, quiet=False):
     rt.exact_clock()
     rt.uc.mem_write(DJ_MODE, (1 if a.dj else 0).to_bytes(4, "big"))
 
-    st = dict(tick=0, bounds=[], commit=None, cued=None, acts=[])
+    st = dict(tick=0, bounds=[], msteps=[], commit=None, cued=None, acts=[])
 
     def on_tick(u, addr, size, user):
         st["tick"] += 1
@@ -78,6 +82,10 @@ def run_one(er, a, phase, quiet=False):
 
     def on_step(u, addr, size, user):
         st["bounds"].append(st["tick"])
+        # Session 83: the POSITION half of the test. The metronome's 1-2-3-4 is derived from
+        # this same counter, so "does the pattern land where the metronome says" is exactly
+        # "does this counter step by 1 across the commit, like any other step".
+        st["msteps"].append(int.from_bytes(bytes(u.mem_read(MASTER_STEP, 2)), "big"))
 
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_tick, begin=TICK_PC, end=TICK_PC)
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_step, begin=STEP_PC, end=STEP_PC)
@@ -90,9 +98,13 @@ def run_one(er, a, phase, quiet=False):
     rd = lambda ad, n: bytes(rt.uc.mem_read(ad, n))
     tbl = [int.from_bytes(rd(LEN_TBL + 4 * i, 4), "big") for i in range(12)]
     tps = tbl[rd(SCALE_IX, 1)[0]] if rd(SCALE_IX, 1)[0] < 12 else None
+    tbase = BLOB + bank * BANK_STRIDE + a.to_pattern * PAT_STRIDE
+    smode = rd(tbase + 0x8E55, 1)[0]
+    mlen = rd(tbase + 0x8E51, 1)[0] if smode else rd(tbase + 0x8E53, 1)[0]
     gaps = [b - aa for aa, b in zip(st["bounds"], st["bounds"][1:])]
     return dict(tps=tps, bounds=st["bounds"], gaps=gaps, commit=st["commit"],
-                cued=st["cued"], acts=st["acts"], ticks=st["tick"])
+                cued=st["cued"], acts=st["acts"], ticks=st["tick"],
+                msteps=st["msteps"], mlen=mlen)
 
 
 def main(argv):
@@ -151,11 +163,36 @@ def main(argv):
         changes = [(bounds[i], gaps[i - 1], g)
                    for i, g in enumerate(gaps) if i and g != gaps[i - 1]]
         print(f"  rate changes: {changes}  (expect exactly one, at the commit boundary)")
-        verdicts.append((ph, not bad, res["commit"]))
+        # --- POSITION: the playhead must advance by exactly one step across every
+        # boundary, the commit included. A jump here IS the drift against the metronome.
+        ms = res["msteps"]
+        # Period comes from the INCOMING pattern's MASTER LENGTH, read from the blob -- not
+        # from max(ms). Inferring it from the data made a short run (which never reaches the
+        # wrap) compute a bogus period and then "pass" against it.
+        period = res["mlen"]
+        skips = [] if not period else [
+            (res["bounds"][i], ms[i - 1], ms[i])
+            for i in range(1, len(ms)) if (ms[i - 1] + 1) % period != ms[i]]
+        committed = len(res["acts"]) > 1
+        print(f"  incoming MASTER LENGTH={period}   committed={committed}")
+        print(f"  master step 0x800065b2 at each boundary: {ms[:26]}")
+        if not committed or res["cued"] is None:
+            print("  ** NO SWITCH COMMITTED IN THIS RUN -- result proves nothing. "
+                  "Increase --frames or lower --pre.")
+            verdicts.append((ph, False, res["commit"]))
+            continue
+        if skips:
+            print(f"  ** PLAYHEAD JUMPED at {skips[:6]} (period {period}) -- "
+                  f"the pattern will not agree with the metronome")
+        else:
+            print(f"  PLAYHEAD CONTINUOUS: +1 per boundary across the commit "
+                  f"(period {period})")
+        verdicts.append((ph, not bad and not skips, res["commit"]))
 
     print("\n=== verdict ===")
     for ph, okk, commit in verdicts:
-        print(f"  phase {ph}: {'LOCKED' if okk else 'MOVED '}  (commit at tick {commit})")
+        print(f"  phase {ph}: {'GRID LOCKED + PLAYHEAD CONTINUOUS' if okk else 'FAIL'}"
+              f"  (commit at tick {commit})")
     return 0 if all(v[1] for v in verdicts) else 1
 
 

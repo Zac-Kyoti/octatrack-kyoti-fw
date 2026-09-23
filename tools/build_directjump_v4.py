@@ -124,7 +124,10 @@ PATCHES = [
       (0x400a42fa, "dj_b", "203c00008e56",     6, "jsr"),
       (0x400a4840, "dj_c", "420013c0800065b6", 8, "jsr"),
       (0x400a4220, "dj_scaleix_fix", "13c28000663d", 6, "jsr"),
-      (0x400a3fe4, "dj_abstick", "13c0800065b6", 6, "jsr"),
+      # Session 83: Hook E (dj_abstick @0x400a3fe4) REMOVED -- it maintained G_ABSTICK,
+      # a SECOND position counter running alongside stock's own 0x800065b2. Deriving the
+      # resume position from it while the metronome ran from 0x800065b2 is what made every
+      # switch land on a different step and drift against the beat. The site is stock again.
       # Session 79 cont.29: Hook F (dj_pertrack_fix) REMOVED. It carried the same
       # LEN_TBL misreading as dj_c -- it computed G_ABSTICK mod LEN_TBL[scale], i.e.
       # mod TICKS-PER-STEP, and wrote that into BOTH the per-track STEP array
@@ -134,15 +137,17 @@ PATCHES = [
       # against MIDI on every armed commit. Its original purpose (repairing per-track
       # state after a commit) is now done correctly upstream by stock's own rebuild
       # loop, seeded by Hook H. See NOTES.md Session 79 cont.28/29.
-      # Session 79 cont.28 -- Hook H: seed stock's OWN per-track rebuild loop
-      # (0x400a4884) with the absolute position instead of 0, by writing
-      # 0x80006628 before D7 is built from it at 0x400a4812/0x400a4826. Model
-      # measured 16/16 in tools/diag_d7_inject.py (NOTES.md Session 79 cont.27).
+      # Hook H -- THE WHOLE FEATURE after the Session 83 AR port. Seeds stock's own
+      # per-track rebuild loop (0x400a4884) by writing 0x80006628 before D7 is built from
+      # it at 0x400a4812/0x400a4826, with ONE value: 0x800065b2 mod newMasterLen, i.e. AR's
+      # `new_step = masterStep mod newPatternLen`. 0x800065b2 measured as a bounded playhead
+      # (tools/diag_playhead.py: range 0..15, period 16 = MASTER LENGTH, both master scales),
+      # the direct analogue of AR's DAT_405666e4. Stock then reseeds 0x800065b2 from our low
+      # word at 0x400a483a, so the metronome and the patterns get the same number by
+      # construction. See NOTES.md Session 83.
       (0x400a47f6, "dj_d7", "41f9400eb034", 6, "jsr"),
-      # Session 79 cont.34 -- Hook T: reset G_ABSTICK when the transport starts, so the
-      # absolute counter has the origin the feature actually means (transport start, not
-      # power-on) and the 16-bit range applies per take rather than per session.
-      (0x4009c3d4, "dj_tstart", "23c0800065b8", 6, "jsr"),
+      # Session 83: Hook T (dj_tstart @0x4009c3d4) REMOVED -- it existed only to reset
+      # G_ABSTICK at transport start. No counter of ours survives, so the site is stock.
       (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),
 ]
 
@@ -154,6 +159,7 @@ STOCK_YES_HANDLER = 0x4005e4c8
 PTN_LAYER_REL = 0x40043418      # FUN_40043418 entry -- dj_ptnrel's detour site (Session 61)
 
 RESTORE_SITES = (0x4001f322, 0x4001f3be, 0x4001fb24)
+DJ_MODE_ADDR = 0x800000D8      # must match patch_directjump.s's .equ DJ_MODE
 FREE_END = 0x400d7c3c
 
 
@@ -221,13 +227,36 @@ def main():
     if bytes(img[yo:yo + 8]) != bytes.fromhex("222f0004202f0008"):
         sys.exit("stock YES handler 0x4005e4c8 was modified -- v4 must not detour it")
 
-    print("\n=== PERSONALIZE persistence ===")
+    # Session 83: DIRECT JUMP no longer persists -- it is a performance feature and must come
+    # up OFF on every power-on. This block used to WIDEN the ANDY restore from 0x64 to 0x70 at
+    # all three sites so DJ_MODE (0x800000d8, offset 0x68) would be restored from battery SRAM.
+    # That widening is removed; what remains is the opposite -- an assertion that the restore
+    # is still stock, i.e. that nothing writes DJ_MODE at boot except stock's own DSP-RAM
+    # re-image, whose ROM seed for this word is verified to be zero just below.
+    print("\n=== power-on default: DIRECT JUMP must come up OFF ===")
     for site in RESTORE_SITES:
         so = o(site)
         if bytes(img[so:so + 4]) != b"\x48\x78\x00\x64":
-            sys.exit(f"restore-length pea 0x{site:08x}: {bytes(img[so:so+4]).hex()} != 48780064")
-        img[so + 3] = 0x70
-        print(f"  restore 0x{site:08x}  pea 0x64 -> pea 0x70")
+            sys.exit(f"restore-length pea 0x{site:08x}: {bytes(img[so:so+4]).hex()} != 48780064 "
+                     "-- the ANDY restore must stay stock so it never reaches DJ_MODE")
+        print(f"  restore 0x{site:08x}  pea 0x64 LEFT STOCK "
+              f"(covers 0x80000070..0x800000d3; DJ_MODE 0x800000d8 is outside)")
+
+    # kb/memory-map.md: FUN_4000f938 re-images 0x80000000 from ROM 0x401086f4 (0x3e88 B) at
+    # every boot, then zero-fills to 0x80004000. DJ_MODE is inside that span, so its power-on
+    # value is a fixed byte in this very image -- assert it, do not assume it.
+    DSP_ROM_IMAGE, DSP_WINDOW, REIMAGE_LEN = 0x401086F4, 0x80000000, 0x3E88
+    dj_off = DJ_MODE_ADDR - DSP_WINDOW
+    if dj_off >= REIMAGE_LEN:
+        sys.exit(f"DJ_MODE offset 0x{dj_off:x} is outside the 0x{REIMAGE_LEN:x}-byte boot "
+                 "re-image -- its power-on value would be undefined")
+    seed_at = DSP_ROM_IMAGE + dj_off
+    seed = bytes(img[o(seed_at):o(seed_at) + 4])
+    if seed != b"\x00\x00\x00\x00":
+        sys.exit(f"boot ROM seed for DJ_MODE at 0x{seed_at:08x} is {seed.hex()}, not 00000000 "
+                 "-- DIRECT JUMP would not come up OFF")
+    print(f"  boot ROM seed 0x{seed_at:08x} = {seed.hex()}  -> DJ_MODE forced to 0 every "
+          f"power-on by stock's own FUN_4000f938")
 
     spans.sort()
     for (a1, b1, n1), (a2, b2, n2) in zip(spans, spans[1:]):
@@ -265,7 +294,15 @@ def main():
         PERTRACK_FIX_SITE = 0x400a4d36
         D7_SEED_SITE = 0x400a47f6
         TSTART_SITE = 0x4009c3d4
-        want = (v3_touched - set(range(o(STOCK_YES_HANDLER), o(STOCK_YES_HANDLER) + 8))) \
+        # Session 83: v3 widened the ANDY restore (pea 0x64 -> 0x70) at all three sites so
+        # DIRECT JUMP would persist. v4 leaves those bytes stock, so they are bytes v3
+        # touched and v4 deliberately does not -- drop them from `want` or they read as
+        # strays. Verified to be exactly 0x4001f325 / 0x4001f3c1 / 0x4001fb27, the low byte
+        # of each pea operand.
+        restore_len_bytes = {o(site) + 3 for site in RESTORE_SITES}
+        want = (v3_touched
+                - set(range(o(STOCK_YES_HANDLER), o(STOCK_YES_HANDLER) + 8))
+                - restore_len_bytes) \
             | {i for i in range(ro + 2, ro + 6) if img[i] != stock[i]} \
             | {i for i in range(o(PTN_LAYER_REL), o(PTN_LAYER_REL) + 6) if img[i] != stock[i]} \
             | {i for i in range(o(SCALEIX_FIX_SITE), o(SCALEIX_FIX_SITE) + 6) if img[i] != stock[i]} \
