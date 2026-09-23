@@ -28570,3 +28570,46 @@ Watch on hardware: RELOAD BUSY with the transport running (the target); the
 UNDO-instead-of-CLEAR quirk (same family, though it is inherited from stock and
 reproduces on plain stock RELOAD BANK); and **stock `[BANK]` single-press after
 several reloads** — "(5)"'s unexplained third symptom.
+
+## Session 83 continued (2) — architecture question answered: pattern switch is RAM-only, measured
+
+The user asked, at general-architecture level: when the OT executes a pattern
+switch, is sequence data read from the CF card, or from somewhere else (RAM)?
+
+Answer, and it matters beyond just satisfying curiosity — it's the standing
+assumption behind DIRECT JUMP's whole design (tick/step arithmetic only, no I/O
+anywhere near `dj_c`) and behind why RELOAD2's card read is expensive relative
+to ordinary playback:
+
+**RAM. Sequence data for a whole bank (all 16 patterns) is resident once the
+bank is current; pattern switch is an index change into data already in
+memory, never a card access.** Documented layout (`reference/upstream-notes.md`
+"Two-level scene storage"): a cold blob at `0x400e21e0` (bank stride `0x9b340`,
+the working store p-lock edits land in) and a live working copy at `0x1001614e`
+indexed by pattern (`+ pattern*0x18b2`) that playback/crossfader actually read.
+`FUN_4000faf0(bank)` bridges the two -- documented as RAM->RAM, no card access
+-- and is exactly the "make bank current" call RELOAD2's own fix restores as
+its live-cache refresh (this session, above).
+
+New `tools/diag_pattern_switch_io.py` measures it directly rather than trusting
+the documentation alone -- FOPEN/FREAD/PARSEPAT (the card path) and MKCURRENT
+(`FUN_4000faf0`) across three real events with the transport running:
+
+```
+phase                         card-path activity
+  1. idle playback             FOPEN=0  FREAD=0  PARSEPAT=0  MKCURRENT=0
+  2. pattern switch 0->1       FOPEN=0  FREAD=0  PARSEPAT=0  MKCURRENT=0
+  3. bank switch 0->1          FOPEN=0  FREAD=0  PARSEPAT=0  MKCURRENT=1
+```
+
+Pattern switch: zero card-path hits. Bank switch: one `MKCURRENT` call (the
+RAM->RAM copy), still zero `FOPEN`/`FREAD`/`PARSEPAT`. So even changing banks
+does not touch the card in this harness -- consistent with the model that the
+CF card is only read at project/bank LOAD time (or on an explicit RELOAD BANK /
+RELOAD2 request); everything downstream, pattern switch included, is RAM
+index arithmetic.
+
+**Caveat carried over from `diag_reload2_transport.py`, same harness limit**:
+this does not stream sample audio, so it says nothing about STATIC-machine
+playback, which does read the card continuously. This result is specifically
+about SEQUENCE data (trigs/p-locks/scenes), not sample audio.
