@@ -28246,3 +28246,154 @@ correct fix needs a SECOND detour at the head of the handler to snapshot
 `0x100b145e` + `blob+0x95048`, with the existing cave restoring them. Modest work, one
 more hook site. Not attempted; not obviously worth it, since the underlying write to the
 Part's stored slot byte is real and arguably should be flagged.
+
+## Session 83 (2026-09-23, `wip`) — RELOAD2: the RELOAD BUSY hunt gets a real transport at last, and the emulator is ruled OUT as a venue for it
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "(9)" → "81" →
+"82 — RELOAD2"). Note the heading collision: the DIRECT JUMP thread also has a
+"Session 82", earlier in this file.
+
+### Hardware report #6
+
+The Session 82 image was flashed. **Arrow regression confirmed FIXED.** New,
+and the sharpest discriminator open issue #2 has ever had:
+
+> RELOAD BUSY after reloading a TRK SEQ once (no issue the first time), **IF the
+> transport is running**. No RELOAD BUSY if the transport is stopped.
+
+Follow-ups from the user: the BUSY is "transient", but a third, fourth, fifth
+`[BANK]`+`[YES]` still gives BUSY; and the first reload, with the transport
+running, **does** audibly take effect (timing/sync is still wrong — that is
+issue #1, not this).
+
+### The methodological finding: every RELOAD2 test faked the transport
+
+`BUSY` has exactly one source — `tst.b G_KIND ; bne -> toast` in `rl_yes_exec`
+— and that path bails **before** arming. Our code writes `G_KIND` only in the
+arm path, and only `rl_job`'s entry clears it. So a BUSY press means `G_KIND`
+was left set by an earlier armed-but-never-serviced request.
+
+To test that, the transport has to actually run. It never has:
+
+- Every RELOAD2 harness does `rt.press_play_live()` and then **pokes**
+  `TRANSPORT`/`0x800065b8` to 1. `emu_reload.boot_and_load()` attaches with only
+  `tick=True`, omitting the `ips` / `pit_clock_hz` / `quantum` / `step_quantum`
+  arguments that let the PIT drive the step engine. Result: flag set, sequencer
+  **frozen**.
+- `diag_seq_activity.py` gets a genuinely stepping sequencer (16/16 tracks) via
+  those attach arguments **plus `rt.start_transport_live()`** — a real transport
+  start, not a poke.
+
+`rlj_setflag`'s `tst.l RUNNING` branch (arm `RELOAD_NOW` 0x46c8028a, polled once
+per STEP at 0x400a2530) is the only transport-conditional code we have, and it
+had **never executed with real steps underneath it**. That is precisely why
+`diag_reload2_realkey.py 5` reported five byte-identical cycles while hardware
+fails on the second reload.
+
+New tool: **`tools/diag_reload2_transport.py`** — real PIT-driven stepping AND a
+real `start_transport_live()`, driving N reload gestures through `set_key_state`
+and recording, per gesture: `G_KIND` as `rl_yes_exec` sees it, BUSY yes/no,
+`rl_job` entries, `FUN_40022778` posts, `RELOAD_NOW` writes, and FREAD counts.
+It has a **liveness gate that aborts rather than reporting** if the step engine
+is not advancing — which immediately earned its keep by catching my own first
+version, where I had omitted `start_transport_live()` and the sequencer was
+frozen. A frozen-sequencer "green" would have been exactly the kind of vacuous
+result this thread keeps getting burned by.
+
+### Two of this session's own hypotheses, measured and KILLED
+
+With the sequencer genuinely running and `RUNNING` set:
+
+```
+liveness: distinct per-track STEP/TICK snapshots = 4  -> sequencer RUNNING
+          0x800065b8 reads 0x00000001 after a REAL transport start
+ it  G_KIND@exec  BUSY?  rl_job  posts  G_KIND after  RELOAD_NOW  freads
+  1..8          0     no       1      1             0      [1, 0]    6852
+```
+
+- **`0x800065b8` IS the real transport flag** — it reads 1 after a real start.
+  (`diag_seq_activity`'s trailing `TRANSPORT=0` print led me to doubt this
+  mid-session; that was wrong and is corrected here.)
+- **`RELOAD_NOW` is healthy**: armed by us and **consumed** (`[1, 0]`) by the
+  step engine on every single reload. The Session 80 continued (2) comment
+  calling this an unproven hypothesis can now be marked measured-good.
+- **The running sequencer does NOT clobber `G_KIND`.** Eight consecutive
+  reloads, `G_KIND` 0 at every press, one `rl_job` per post. The
+  "stock playback code scribbles on 0x80006a50" theory is dead for every path
+  this harness exercises.
+
+### The decisive negative: the emulator CANNOT host this bug
+
+```
+streaming: buffered card reads (FREAD 0x40016564) during PURE PLAYBACK,
+           no reload issued = 0
+```
+
+Zero. The FREAD hook works — **each reload performs 6852 card reads** (our
+`.strd` read plus the 17 pattern parses, i.e. issue #1's whole-bank side effect
+made numerically visible for the first time). But playback itself reads the card
+**not at all**: this harness does not stream audio.
+
+So a storage-task-contention bug is **structurally unreachable here**, and the
+eight clean iterations above say nothing whatsoever about the hardware symptom.
+Recorded in the tool's own docstring so no future session mistakes a green run
+for a fix. **Do not "validate" a RELOAD BUSY fix in the emulator until the
+harness streams audio.**
+
+### Status of the "ruled out" mark on storage-task contention
+
+The handoff lists storage-task-busy-while-CF-streams as ruled out, "do not
+re-investigate without new evidence". **That mark is lifted.** It was retracted
+on the STATIC-vs-FLEX observation (the user's own retraction: the two reload
+identically), which is a *different claim* from transport-running-vs-stopped.
+Report #6 is independent evidence, and it now fits contention better than
+anything else: stopped transport = no streaming = free storage task = unlimited
+clean reloads; running transport = streaming + our own 6852-read reload
+competing for the same task.
+
+### Cave space — SOLVED, and it was a false constraint
+
+Session 82 reported `patch_reload2` at 2036 B against a 2044 B ceiling. Surveyed
+the whole MAIN_OS section for free space:
+
+```
+0x401087e4..0x4010c314   15153 B
+0x4010cdd1..0x4010fdef   12319 B
+0x400d64da..0x400d7c3b    5986 B   <-- contains our cave; extends 3878 B BELOW it
+0x400d24d0..0x400d2cdf    2064 B
+```
+
+Our cave starts at `0x400d7400`, but the contiguous zero run starts at
+`0x400d64da`. **`build_merged.py` (Session 48) already lowered its FREE_START to
+`0x400d6500` for exactly this reason**, documenting "the whole
+0x400d64da..0x400d7c3c span is zero in stock" — independent corroboration from
+another build. Moving `patch_reload2`'s base `0x400d7400` -> `0x400d6500` gives
+`0x400d7bfc - 0x400d6500` = **5884 B**, versus 2044 today. The list UI and any
+recovery logic both fit comfortably. Not yet done.
+
+### Where issue #2 stands
+
+`G_KIND` is a **one-shot request flag with no recovery path**: if a posted job is
+ever lost, the feature is bricked until reboot and the only symptom is BUSY
+forever. Session 80 continued already applied exactly this lesson once — it is
+why `rl_ptn` no longer gates opening the picker on `G_KIND` ("a stuck flag can
+never again permanently lock out the feature"). `rl_yes_exec`'s guard is the last
+place that rule was not applied, and report #6 is what happens as a result.
+
+A staleness timeout (if `G_KIND` has been set for more than N frames, treat it as
+stale, clear, arm fresh) is mechanism-independent and cannot deadlock. Its known
+cost: if the original job was merely slow rather than lost, two jobs exist for
+one request, and the second finds `G_KIND == 0` and falls through to a full stock
+RELOAD BANK — heavy (the ~1 s stall) but not corrupting. That trade is clearly
+better than a bricked feature, but it is a **mitigation, not a cure**, and with
+the emulator ruled out it can only be qualified on hardware.
+
+### Also flagged (DIRECT JUMP thread, not acted on)
+
+`tools/patch_directjump.s`, uncommitted: `G_TOAST` (`0x80006a44`, written
+`move.l`) and `G_ABSTICK` (`0x80006a46`, written `move.l`) **overlap on
+`0x80006a46..47`**. Each corrupts the other. That thread's Session 82 is about
+tick-domain correctness and grid drift, so a silently corrupted absolute-tick
+counter is worth ruling out there before more measurement. RELOAD2's own scratch
+(`0x80006a50..55`) does not collide with DIRECT JUMP's — but MERGE needs a real
+scratch allocation map rather than per-feature `.equ`s.
