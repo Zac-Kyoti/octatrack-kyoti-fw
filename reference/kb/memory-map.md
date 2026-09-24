@@ -116,6 +116,56 @@ from the tag: `+0x09, +0x11, +0x19, +0x21, +0x29, +0x31, +0x39, +0x41`.
 (default `0xAA`); `0x4009d3d6` gates a per-step byte into a timing calc. Per-track
 flag word: `0x46c7a6c0`.
 
+### Pattern SCALE / LENGTH trailer — and the `SCALE_MODE` fork
+
+> source: our own RE, derived **independently by two threads** (DIRECT JUMP Session 79
+> cont.33; RELOAD Session 89) and corroborated a third way by stock's own load-time
+> clamp `FUN_4009a670`. confidence: **C**.
+
+Pattern slab = `0x400e21e0 + bank*0x9b340 + pattern*0x8ed8`. Its trailer carries the
+scale/length fields, **outside every track record**:
+
+| slab off | abs (bank 0, pat 0) | field | clamp in `FUN_4009a670` |
+|---|---|---|---|
+| `+0x8e51` | `0x400eb031` | MASTER LENGTH, steps | — |
+| `+0x8e52` | `0x400eb032` | MASTER SCALE index | ≤ 6 |
+| `+0x8e53` | `0x400eb033` | pattern LENGTH, steps | 2 … 64 (`0x4009aada`) |
+| `+0x8e54` | `0x400eb034` | pattern SCALE index | 0 … 6 (`0x4009ab06`) |
+| `+0x8e55` | `0x400eb035` | **`SCALE_MODE`**: 0 = NORMAL, ≠0 = PER TRACK | ≥ 0 |
+| `+0x8e57` | `0x400eb037` | pattern → Part link, `[0..3]` | — |
+
+A track's **own** length / scale live *inside* its record at `+0x50` / `+0x51`
+(audio: `0x400e2230` / `0x400e2231` + patOff + `t*0x91a`; MIDI: `0x400e6ad8` /
+`0x400e6ad9` + patOff + `m*0x8b0`).
+
+**⚠️ The fork that has now bitten two separate features.** Which byte governs depends
+on `SCALE_MODE`, and reading one unconditionally is wrong half the time:
+
+| | NORMAL (`+0x8e55` == 0) | PER TRACK (`+0x8e55` != 0) |
+|---|---|---|
+| a track's length | pattern `+0x8e53` (shared by all 8) | the track's own `+0x50` |
+| a track's scale | pattern `+0x8e54` (shared) | the track's own `+0x51` |
+| master length | pattern `+0x8e53` | MASTER `+0x8e51` |
+| master scale | pattern `+0x8e54` | MASTER `+0x8e52` |
+
+Stock's own selector is visible twice: the step engine's re-home at `0x400a2720`
+(`tstb` the flag, then `+0x8e52` vs `+0x8e54` into `SCALE_IX 0x8000663d`), and the
+switch-commit D7 setup at `0x400a4802`–`0x400a4826`.
+
+Both failures were the same shape:
+- **DIRECT JUMP** read `+0x8e54` unconditionally, so after a jump between patterns of
+  differing MASTER SCALE the master wrap check used the wrong ticks/step — the
+  "pattern plays past its own length" symptom. Fixed by gating on `SCALE_MODE`
+  (`patch_directjump.s`, five sites); fixture DJTEST2 A08 was built to separate
+  `+0x8e52` from `+0x8e54`.
+- **RELOAD** copied only the track slice, so a per-track reload restored `+0x50`/`+0x51`
+  and therefore worked in PER TRACK mode, but never restored `+0x8e53`/`+0x8e54` and so
+  silently ignored the saved step count in NORMAL mode.
+
+> **Terminology bridge.** The OT UI (and the RELOAD sources) say **NORMAL** / **PER
+> TRACK**; `patch_directjump.s` says **uniform** / **per-track** for the same flag.
+> Grepping for one term will not find the other — search `PAT_SMODE` or `0x8e55`.
+
 ## Pattern change / cue / Parts  (Session 15 — DIRECT JUMP)
 
 | Addr | Conf | What | Source |
