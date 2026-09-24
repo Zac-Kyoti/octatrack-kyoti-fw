@@ -213,12 +213,18 @@ string.
 7. Regression: the manual-trig fix still works; other tracks unaffected.
 
 ### 4.3  DIRECT JUMP  (`build_directjump_v4.py` — **hardware-confirmed at 1x scales**, MKI 2026-09-23; non-1x scales are a known open problem)
-> **⚠️ Read this before flashing.** Everything below is confirmed **only with 1x
-> track scales and a 1x master scale.** Setting either a track scale or the master
-> scale to anything other than 1x produces unexpected results — that is the entire
-> remaining problem on this feature and it is the next thread
-> (`reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md`). If you use non-1x scales,
-> either leave DIRECT JUMP off or do not flash this yet.
+> **⚠️ Read this before flashing.** The **1x** behaviour below is hardware-confirmed
+> (2026-09-23). **Non-1x track and master scales were broken, were root-caused and
+> fixed on 2026-09-24, and that fix has NOT been on hardware** — Hook P was reading
+> the master step once and using it as every track's step index, which is only
+> correct when master and track share a ticks-per-step. The fix is bit-identical to
+> the confirmed build at 1x, so flashing it should not risk the baseline, but the
+> non-1x behaviour itself is unverified: **treat §4.3 step 10 as the thing to test.**
+>
+> **Also still open, and NOT explained by that fix:** a report that which steps get
+> visited depends on what trigs are on the grid, and that the LEDs and the audio
+> disagree about the position. No measured write path reads trig data, so this is a
+> separate mechanism. If you see it, it is a known unknown, not a new regression.
 >
 > **`v1`–`v3` are dead on hardware and must not be reflashed.** Holding `[PTN]`
 > pushes a stock UI overlay whose `[YES]` record has a NULL press handler, which
@@ -250,10 +256,18 @@ string.
 6. Turn it **OFF** → manual pattern changes are stock again (end-of-pattern
    quantised, restart at step 1).
 7. **[PTN] tapped alone** (no `[YES]`) still opens SELECT PATTERN normally.
+8. **Non-1x scales — the unverified part.** Set a **track scale** to something
+   other than 1x (say 2x on one track, 1x on the rest) and repeat step 4; then set
+   the **master scale** to 2x and repeat again. Each track must land on its own
+   correct step and stay in master time, exactly as the 1x case does. This is the
+   2026-09-24 fix and it has never been heard on hardware.
+9. Watch for the open report while you are there: do the **LEDs and the audio agree**
+   about where the playhead is, and does changing *which trigs are on the grid* change
+   which steps get visited? Both would be the unexplained issue in the callout above.
 
-> Still not validated, beyond the non-1x problem: two patterns with differing
-> MASTER LENGTHs (no fixture), and per-track sub-step phase at a mid-cycle commit.
-> Detail: `NOTES.md` "Session 60"–"Session 87".
+> Still not validated: the non-1x fix on hardware (above), two patterns with
+> differing MASTER LENGTHs (no fixture), and per-track sub-step phase at a mid-cycle
+> commit. Detail: `NOTES.md` "Session 60"–"Session 88".
 
 ### 4.4  Side-chain compressor  (`build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` — **HARDWARE-CONFIRMED, FINAL**, MKI 2026-09-20, single-core and cross-core both)
 

@@ -166,18 +166,33 @@ and **this is the baseline to not regress**: tracks and patterns stay in master 
 through a switch, patterns land on the correct step, mixed track lengths in one
 pattern work together (7 / 12 / 16), MASTER LENGTH is respected including `INF`.
 
-**Open:** all of that holds only at **1x track scales and a 1x master scale**. The
-standing hypothesis — stock rebuilds position in the **tick** domain, Hook P overrides
-it in the **step** domain, and the two agree only at 1x, while `CNTDN_TBL` and
-`NEXT_STEP` are left holding stock's now-inconsistent tick-domain values — plus the
-exact AR regions to re-read and the single most load-bearing unverified claim in the
-thread (whether `CNTDN_TBL` is a one-shot trig arm or a per-step rate reload) are all
-written up in **`reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md`**. Read it first.
+**Non-1x scales: root-caused and FIXED (Session 88), not yet flashed.** Hook P read
+`MASTER_STEP` once and used that single value as `new_step` for all 16 tracks, but
+`STEP_ARR[t]` must hold the *track's* step index — equal only when
+`tps_master == tps_track`, i.e. only at 1x. The fix changes the hook's **input**, not
+its job: it reads `NEXT_STEP[t]` (`ceil(D7 / tps_t)`), the per-track quantity stock's
+own rebuild already computed at `0x400a4916`, and still supplies the modulo-track-length
+that is the only reason the hook exists. At 1x with equal lengths it is bit-identical to
+the confirmed build, so the baseline is preserved **by construction**. Measured PRE/POST
+on four fixtures; DJ-OFF byte-identical to stock across 38 samples with the scratch block
+poisoned.
+
+> **Retired:** the handoff's section 5 asked whether `CNTDN_TBL` (`0x800065c3[t]`) is a
+> one-shot trig arm or AR's per-track rate reload. Re-derived from `0x400a4992`-`0x400a49ca`:
+> `CNTDN_TBL[t] = max(1, tps_master + 1 - tps_t)`. Both prior claims describe the same
+> array, it degenerates to 1 whenever the master is at least as fast as the track, and it
+> equals the 1x control in the failing case — so it never explained the symptom, and
+> section 4's pairing with AR's `0x405667c7` is wrong. Session 85 was right not to write it.
+> **`reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md` is stale on this point.**
+
+**Still open, and NOT explained by that fix:** a hardware report that the steps visited
+depend on which trigs are on the grid, and that the LEDs and the audio disagree about
+position. No measured write path reads trig data, so it is a separate mechanism.
 
 The position rule is AR's own commit arithmetic ported verbatim
 (`reference/AR_DIRECT_JUMP.md`); the prose spec is retired. The mode deliberately does
 not persist — OFF on every power-on. Detail: `NOTES.md` "Session 15" + "Session 21" +
-"Session 35" → "Session 60"–"Session 87".
+"Session 35" → "Session 60"–"Session 88".
 
 ### RELOAD FROM PROJECT — RELOAD3, first flash green, follow-ups unflashed
 

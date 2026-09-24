@@ -75,11 +75,19 @@ newest state.
   — a performance feature comes up OFF on every power-on. The position rule is
   the Analog Rytm's own commit arithmetic, ported instruction for instruction
   after three flashed builds each implemented a different reading of an English
-  sentence. **Hardware-confirmed (MKI, 2026-09-23)**: master time held through
-  switches, correct landing step, mixed track lengths (7/12/16) in one pattern,
-  MASTER LENGTH respected including `INF`. **Still open:** all of that holds only
-  at **1x track scales and a 1x master scale** — set either to anything else and
-  the result is unexpected. That is the whole remaining thread.
+  sentence. **Hardware-confirmed at 1x (MKI, 2026-09-23)**: master time held
+  through switches, correct landing step, mixed track lengths (7/12/16) in one
+  pattern, MASTER LENGTH respected including `INF`.
+  **Non-1x scales — root-caused and fixed, not yet flashed.** Hook P read the
+  master step once and used that one value as every track's step index; the two
+  are equal only when the master and the track run at the same ticks-per-step,
+  which is exactly why 1x worked and nothing else did. The fix changes the hook's
+  *input*, not its job: it now reads the per-track quantity stock's own rebuild
+  already computed. At 1x it is bit-identical to the confirmed build, so the
+  baseline is preserved by construction rather than by testing. Emulator-validated
+  on four fixtures with the feature off proven byte-identical to stock — but **not
+  on hardware yet**, and it does not explain a separate open report that the steps
+  visited depend on which trigs are on the grid, and that LEDs and audio disagree.
   → [`tools/build_directjump_v4.py`](tools/build_directjump_v4.py) ·
   handoff [`reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md`](reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md) ·
   write-up [`NOTES.md`](NOTES.md) "Session 15, 21, 35" → "Session 60–87"
@@ -267,7 +275,7 @@ Never cut power during `UPDATING FLASH`. Full procedure and recovery net:
 | MIDI Plays-Free trig fix | all | **confirmed** — flashed 2026-08-28, stall gone, no regression |
 | MUTE MODE — all four modes (`OT` / `OTFX` / `OTFX-T` / `DT-T`), menu, SOLO handling | `build_mutemode_dt.py` | **confirmed, final** — flashed and hardware-tested 2026-09-21, MKI |
 | ↳ `'ANDY'`-shadow persistence (survives power cycle) | `build_mutemode_dt.py` | **confirmed** — one persisted word, defaults verified on hardware |
-| DIRECT JUMP pattern-change mode | `build_directjump_v4.py` | **confirmed at 1x, active WIP beyond it** — flashed 2026-09-23: master time held through switches, correct landing step, mixed track lengths (7/12/16), MASTER LENGTH respected incl. `INF`. Confirmed **only** with 1x track scales and a 1x master scale; anything else is unexpected and is the open thread |
+| DIRECT JUMP pattern-change mode | `build_directjump_v4.py` | **confirmed at 1x; the non-1x fix is unflashed** — flashed 2026-09-23: master time held through switches, correct landing step, mixed track lengths (7/12/16), MASTER LENGTH respected incl. `INF`, all at 1x. Non-1x scales were root-caused and fixed 2026-09-24 (Hook P was using the master step as every track's step index); emulator-validated, bit-identical to the confirmed build at 1x, **not yet on hardware**. A separate report — visited steps depending on the trigs present, LEDs and audio disagreeing — is unexplained and still open |
 | SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | **confirmed, final** — flashed 2026-09-20, MKI, single-core and cross-core both. Donor is SPRING REVERB (pulled from the FX2 list); SPATIALIZER untouched |
 | RELOAD FROM PROJECT — two direct chords | `build_reload3.py` (`[PTN]`/`[BANK]` + `[TRACK n]`) | **active WIP, flashed twice, both green** — 2026-09-23 both chords execute with no conflicts; 2026-09-24 reloads confirmed "quick and on-time". **Not yet reflashed:** the transport/metronome fix, SELECT BANK on the `[BANK]` release, and the titled self-dismissing message card. All-tracks and whole-bank variants deferred |
 | Empty-pattern LED fix | `build_pattern_led.py` | **confirmed** — flashed 2026-09-13, grid LED lights correctly, no regression |
