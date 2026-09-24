@@ -72,7 +72,15 @@ SET_KEY_STATE = 0x40031734
 BANK_CODE, YES_CODE = 0x2F, 0x31
 PRESS, RELEASE = 1, 0
 STEP_ARR, TICKS_ARR = 0x800064D0, 0x800064F0
-MASTER_STEP = 0x800065B6
+# ** Session 86 CORRECTION. ** This used to be called MASTER_STEP. It is NOT the
+# master step: DIRECT JUMP's Session 82 MEASURED 0x800065b6 as the TICKS-WITHIN-STEP
+# counter (it only ever takes the values 0..LEN_TBL[SCALE_IX]-1) and 0x800065b2 as the
+# bounded master PLAYHEAD. The old name is why this harness's "step movement" readings
+# were really tick readings. Both are exported now; use PLAYHEAD for anything about
+# musical position or phase, and see tools/diag_reload3_timing.py.
+TICKS_IN_STEP = 0x800065B6
+PLAYHEAD = 0x800065B2
+MASTER_STEP = TICKS_IN_STEP   # retained so existing call sites still resolve
 RUNNING = 0x800065B8
 RELOAD_NOW = 0x46C8028A
 POST_FN = 0x40022778

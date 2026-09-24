@@ -379,6 +379,48 @@
                                         | layer, and calling this directly pops the layer
                                         | and restores the YES slot. Exactly one teardown
                                         | must run on every path.
+|   ---- Session 86: SELECT BANK moves from the PRESS to the RELEASE ----
+|   Hardware report #9 item 2: "A BANK tap still brings up SELECT BANK countdown on
+|   press, not release. I want it on release, like PTN does."
+|   MEASURED layout (do not re-derive by reading):
+|     0x4007af80  the [BANK] PRESS handler. Computes BANK_COMMIT = (0x460e73bc == 0)
+|                 -- so it is a TOGGLE -- then `bras 0x4007af30`.
+|     0x4007af30  a SHARED tail, reached from that bras and NOTHING ELSE (grepped the
+|                 whole image). It clears BANK_SEL / 0x460e73b8 / 0x460e73bc, shows
+|                 the window (SHOW_WIN, dur 0xf0, onClose 0x4007b408), pushes the
+|                 [BANK] overlay layer, makes two more UI calls, then
+|                 `lea 28(sp),sp ; rts` -- it cleans up exactly what it pushed.
+|     0x4007b3e0  the RELEASE handler: BANK_SEL==2 or BANK_COMMIT==0 -> dismiss
+|                 (0x40056a70), else commit (0x460e73bc=1 then 0x40031200, which is
+|                 just 0x460d1e4c=1 -- a popup-CONFIRM flag, NOT a bank change).
+|                 That commit is what makes stock's window STICKY after the release.
+|   So the whole gesture is: press shows, release makes it stick, next tap dismisses.
+|   Time-shifting only the SHOW preserves that state machine exactly, and two measured
+|   facts make it safe rather than hopeful:
+|     * LAYER_PUSH (0x40031494) is IDEMPOTENT -- it rts's if the struct is already the
+|       list head (0x400314b4) or anywhere in the list (0x400314b8), so replaying the
+|       tail can never double-link the overlay.
+|     * LAYER_POP (0x4003146c) walks the list and simply finds nothing if the struct
+|       was never linked, so a teardown on a window that never opened is harmless.
+|   ** Session 80 continued (3)/(7) tried this and it failed on hardware. The
+|   difference now is that the previous attempt carried the picker, its own keymap
+|   layer and a poked YES slot; this build pokes no layer record at all, so the only
+|   moving part left is the show itself. Still the riskiest item in this build. **
+    .equ BANK_LAYER,     0x400cff14     | the [BANK] overlay keymap layer struct
+    .equ BANK_UI_A,      0x4007e760     | the two UI calls the press tail makes AFTER
+    .equ BANK_UI_A_ARG,  0x400cff28     | LAYER_PUSH; BANK_WIN_CLOSE pairs them with
+    .equ BANK_UI_B,      0x4007e998     | 0x4007e81c.
+|   ** Checked, because the opening tap calls BANK_UI_A TWICE -- once in our press
+|   replication and once when the release replays the tail -- while 0x4007e81c runs only
+|   once in the teardown. That is safe: 0x4007e760 is the SAME idempotent linked-list
+|   push shape as LAYER_PUSH, on head 0x460e7624. It early-exits to 0x4007e810 when the
+|   struct is already the head (0x4007e780) or already in the list (0x4007e788), so the
+|   second call is a no-op, and 0x4007e81c's single unlink is therefore correctly paired.
+|   Every list this deferral touches is idempotent-push / safe-pop; that is what makes
+|   replaying stock's tail legitimate rather than lucky. **
+    .equ BANK_SHOW_TAIL, 0x4007af30     | stock's own show sequence, replayed on release
+    .equ BANK_REL_RES,   0x4007b3e8     | release handler, past the 2 displaced insns
+                                        | (lands on its own beq, so the cmp must stand)
     .equ TOAST_DUR,      0x18           | stock's duration for this toast family
                                         | (0x4005e09c). RELOAD2 used 0x44; this is the
                                         | "OT standard" the spec asks for.
@@ -437,18 +479,28 @@ r3b_try_bank:
     move.l  %d0,-(%sp)
     jsr     PART_RELOAD
     addq.l  #4,%sp
-|   Dismiss SELECT BANK before saying anything. Two reasons, not one: the window
-|   opened on [BANK] press so it would otherwise sit under our message, and
-|   MLNOTIFY refuses to draw at all while a popup is up. This is the measured
-|   teardown that owns the [BANK] layer, so it also pops that layer cleanly.
     move.l  %d0,-(%sp)                 | PART_RELOAD's verdict must survive the call
-    jsr     BANK_WIN_CLOSE
+    moveq   #1,%d0
+    move.b  %d0,rl3_bank_used          | claim the [BANK] release: rl3_bank_rel swallows
+                                       | it AND runs the overlay teardown there, so the
+                                       | teardown happens exactly once, on the release.
+|   Session 86: no BANK_WIN_CLOSE here any more. With the window deferred, the chord has
+|   no window up at all -- which is also why MLNOTIFY below can draw: it bails out
+|   entirely while 0x460e5cd0 is non-zero, and now that flag is clear.
     move.l  (%sp)+,%d0
     tst.l   %d0
     beq.b   r3b_unsaved
-|   Part reloaded to its saved version -- single line is enough.
-    lea     rl3_msg_trkpart,%a0
-    bsr.w   rl3_toast
+|   Part reloaded to its saved version. TWO lines, at the user's request (hardware
+|   report #9 item 1): the split is "TRK SEQ + PART" / "RELOADED", which also buys
+|   back the spaces around the + that the 21-char single-line width budget had
+|   forced out -- each line is now well inside the box width.
+    clr.l   -(%sp)
+    clr.l   -(%sp)
+    pea     rl3_lines_trkpart
+    pea     2
+    pea     rl3_title
+    jsr     MLNOTIFY                   | FUN_4006d57c(title, 2, lines, 0, 0)
+    lea     20(%sp),%sp
     bra.b   r3b_done
 r3b_unsaved:
 |   Never saved: the SEQUENCE still reloaded, so saying only "SAVE PART FIRST!"
@@ -462,11 +514,11 @@ r3b_unsaved:
     jsr     MLNOTIFY                   | FUN_4006d57c(title, 2, lines, 0, 0)
     lea     20(%sp),%sp
 r3b_done:
-|   Route [BANK] release down stock's own dismiss path instead of the commit path.
-|   HARDWARE-CONFIRMED in Session 80 continued (3). NOTE: SELECT BANK still opens on
-|   [BANK] PRESS in this build, so it flashes before the chord completes -- deferring
-|   it to release is deliberately a SEPARATE, later step (it failed on hardware once,
-|   Session 80 continued (3)/(7); see reference/RELOAD_REDESIGN.md).
+|   Belt and braces for the release. rl3_bank_used above is what actually swallows it;
+|   clearing BANK_COMMIT means that even if that flag were somehow missed, the release
+|   takes stock's DISMISS path rather than showing a window (rl3_bank_rel only shows
+|   when BANK_COMMIT is set). Session 86: SELECT BANK no longer opens on the PRESS at
+|   all, so there is nothing left to flash before the chord completes.
     clr.l   BANK_COMMIT
     rts
 r3b_stock:
@@ -493,6 +545,92 @@ rl3_toast:
     addq.l  #8,%sp
     rts
 
+| ============ SELECT BANK: shown on RELEASE, not on PRESS ============
+| Gate spliced into stock's shared show tail at 0x4007af42. A [BANK] PRESS reaches it
+| with the gate CLOSED and simply returns, so no window and no overlay layer. The
+| release below opens the gate for exactly one pass and then calls the very same tail,
+| so what the user sees is stock's own window, stock's own duration, stock's own
+| teardown -- just one event later. Displaces 6 B: pea %pc@(0x4007b408) ; clr.l -(%sp)
+    .global rl3_bank_show
+rl3_bank_show:
+    tst.b   rl3_showing
+    bne.b   r3s_do
+|   ===== PRESS: defer the WINDOW, but still push the overlay LAYER. =====
+|   ** This is the whole reason the Session 80 attempt failed, and it is not a
+|   cosmetic detail. ** The [BANK] overlay is what remaps the 16 TRIG keys to
+|   bank-select while [BANK] is held -- that IS the "hold [BANK], tap a trig to pick a
+|   bank" gesture. Skipping the tail wholesale (which is what deferring the window
+|   naively does) leaves the trigs on their BASE handler 0x40060ce0, so holding [BANK]
+|   and tapping a trig would EDIT THE SEQUENCE instead of changing bank -- silent and
+|   destructive.
+|   Stock [PTN] is the existence proof for the shape the user asked for: its press
+|   pushes its overlay and shows NOTHING, and SELECT PATTERN appears on the release.
+|   So mirror that exactly -- push the layer, skip only SHOW_WIN.
+|   Nothing has been pushed on the stack at this point (the tail's three clears push
+|   nothing and the handler has no prologue), so we replicate the tail's post-window
+|   remainder with balanced cleanup of our own and return.
+    pea     BANK_LAYER
+    jsr     LAYER_PUSH                 | idempotent (0x400314b4/0x400314b8), so the
+    addq.l  #4,%sp                     | release's replay of the tail cannot double-link
+    pea     BANK_UI_A_ARG
+    jsr     BANK_UI_A
+    addq.l  #4,%sp
+    clr.l   -(%sp)
+    jsr     BANK_UI_B
+    addq.l  #4,%sp
+    rts
+r3s_do:
+    clr.b   rl3_showing                | one-shot -- re-close behind us immediately
+    pea     BANK_TEARDOWN              | displaced (was pc-relative; same value)
+    clr.l   -(%sp)                     | displaced
+    jmp     BANK_PRESS_RES
+
+| [BANK] RELEASE. Displaces 8 B: moveq #2,%d0 ; cmp.l 0x460e73c6,%d0
+|
+| ** This is not an invented shape -- it is stock [PTN]'s own release, transplanted. **
+| Stock's [PTN] release (0x4005a084..0x4005a0ca) reads:
+|     tstl 0x460d173e          | was the gesture consumed?
+|     bnes -> 0x4005a0be       |   yes: clrl PTN_MODE ; jsr 0x40043418  <- teardown
+|                              |        called DIRECTLY, and NO window is shown
+|     ...                      |   no:  pea 0x40043418 (teardown as onClose)
+|     jsr 0x40059f8c           |        SHOW_WIN -- i.e. the window opens on the RELEASE
+| So stock already does, for [PTN], exactly the two things this build needs for [BANK]:
+| the show lives on the release, and the consumed path calls the teardown itself rather
+| than relying on a window that was never opened. Every branch below is that same
+| structure with [BANK]'s own teardown (BANK_WIN_CLOSE) substituted. That is also why
+| the user's "like PTN does" was the right instinct: the mechanism was already there.
+    .global rl3_bank_rel
+rl3_bank_rel:
+    tst.b   rl3_bank_used
+    beq.b   r3r_notours
+    clr.b   rl3_bank_used              | our chord owned this gesture: swallow it whole
+|   No window was ever shown, so nothing else will pop the overlay the press pushed.
+|   Do it here -- this is the same measured teardown, and it balances BANK_UI_A.
+    jsr     BANK_WIN_CLOSE
+    rts                                | -- no SELECT BANK, no countdown, nothing
+r3r_notours:
+    tst.l   BANK_COMMIT
+    bne.b   r3r_show
+|   Toggle-OFF tap: no window of ours to open. But the PRESS pushed the overlay, and
+|   with no window there is no onClose to pop it -- so pop it here unless a popup IS
+|   up, in which case stock's own dismiss below will run onClose and do it.
+    tst.l   POPUP
+    bne.b   r3r_stock
+    jsr     BANK_WIN_CLOSE             | the measured teardown: pops the layer and
+    bra.b   r3r_stock                  | balances BANK_UI_A with 0x4007e81c
+r3r_show:
+    moveq   #1,%d0
+    move.b  %d0,rl3_showing            | open the gate for exactly one pass
+    jsr     BANK_SHOW_TAIL             | jsr, not bsr: the tail is ~0x27000 away, far
+                                       | outside bsr.w range. It ends lea 28(sp),sp/rts
+                                       | and cleans up exactly its own pushes. From here
+                                       | the WINDOW owns the layer again, as in stock.
+r3r_stock:
+    moveq   #2,%d0                     | displaced #1
+    cmp.l   BANK_SEL,%d0               | displaced #2 -- must stand, BANK_REL_RES is
+                                       | stock's own beq on this very compare
+    jmp     BANK_REL_RES
+
     .align 2
 rl3_msg_trk:
     .asciz "TRK SEQ RELOADED"
@@ -502,8 +640,12 @@ rl3_msg_trk:
 |   (0x40012f30 then `addil #15,%d0`), so over-long text is clipped at the screen
 |   edge rather than wrapped. The spec's "TRK SEQ + PART RELOADED" was 23; this
 |   drops the spaces around the + to fit.
-rl3_msg_trkpart:
-    .asciz "TRK SEQ+PART RELOADED"
+|   Session 86: split across two lines, so the spaces around the + come back.
+rl3_msg_trkpart_1:
+    .asciz "TRK SEQ + PART"
+    .align 2
+rl3_msg_trkpart_2:
+    .asciz "RELOADED"
     .align 2
 rl3_title:
     .asciz "RELOAD"
@@ -516,6 +658,11 @@ rl3_msg_empty:
 rl3_lines_unsaved:
     .long   rl3_msg_trk                | "TRK SEQ RELOADED"   -- what DID happen
     .long   STOCK_SAVEFIRST            | "SAVE PART FIRST!"   -- stock's own wording
+    .long   rl3_msg_empty
+    .align 2
+rl3_lines_trkpart:
+    .long   rl3_msg_trkpart_1          | "TRK SEQ + PART"
+    .long   rl3_msg_trkpart_2          | "RELOADED"
     .long   rl3_msg_empty
     .align 2
 
@@ -858,37 +1005,33 @@ rlj_setflag:
 |       jsr LIVE_REFRESH ; addq.l #4,%sp
 |   It is only needed WITH the rl_done suppression (without it, stock's own
 |   whole-bank reload refills the live cache), so the two stand or fall together. **
-    move.l  %d5,%d0
-    move.b  ACT_PAT,%d1
-    cmp.b   %d1,%d0
-    bne.b   rlj_ok
-|   Session 80 continued (2): HARDWARE REGRESSION FIX. Dropping rl_ptn's RUNNING
-|   gate (so the picker opens while stopped, as asked) exposed this: executing a
-|   reload with the transport STOPPED starts playback, jerkily. The claim in the
-|   previous commit that RUNNING "was never actually load-bearing" was an
-|   INFERENCE, and hardware falsified it -- the gate was suppressing a real
-|   downstream behaviour, not just guarding the UI.
+|   ===== Session 86: RELOAD_NOW IS NEVER ARMED. =====
+|   Hardware report #9 item 3: "Reloading restarts the track sequence from step 1,
+|   AND the internal (master) metronome is also restarted." MEASURED root cause --
+|   the flag at 0x46c8028a is polled once per step at 0x400a2530 and the block it
+|   gates is stock's WHOLE-BANK re-home, which is POSITIONAL, not just a cache
+|   refresh. In that block:
+|     0x400a26fe  movew #0,0x800065b4    | previous master step
+|     0x400a2704  movew #0,0x800065b2    | THE MASTER PLAYHEAD -> sequence restart
+|     0x400a2658  moveb LEN_TBL[..]-1,0x800065b6  | ticks-within-step -> wrap next tick
+|     0x400a27e2  movel #1,0x800065b8    | RUNNING = 1 -- this is ALSO the old
+|                                        | "reload while stopped starts playback" bug,
+|                                        | which the RUNNING gate here was papering over
+|   0x800065b2 is DIRECT JUMP's MASTER_STEP / BAR_CTR -- measured there as the bounded
+|   master playhead -- and the metronome's beat flags are derived from it by masking
+|   against 0x400abae4 / 0x400abacc (0x400a4264..0x400a42a0). So zeroing it restarts
+|   the sequence AND the metronome from one write: two symptoms, one cause.
 |
-|   RELOAD_NOW (0x46c8028a) is the stock "reload now" flag FUN_400a1eea polls
-|   once per STEP (0x400a2530). With the transport stopped there are no step
-|   ticks to consume it, so arming it while stopped is at best pointless and is
-|   the most plausible way our reload reaches into the transport's own machinery
-|   (** HYPOTHESIS, not proven -- the exact start mechanism was not traced; this
-|   needs the hardware re-test to confirm or falsify **). The slab copy itself
-|   has ALREADY happened by this point regardless, so a stopped-transport reload
-|   still fully updates the data; the step engine reads the patched slab on the
-|   next PLAY the same way it would have anyway. Ask for a screen refresh instead
-|   of poking the sequencer.
-    tst.l   RUNNING
-    beq.b   rlj_stopped
-    moveq   #1,%d0
-    move.l  %d0,RELOAD_NOW
-    bra.b   rlj_ok
-rlj_stopped:
-    moveq   #1,%d0
-    move.l  %d0,RDRAW                  | redraw only -- never arm the step engine
-                                       | while it isn't ticking
-
+|   Nothing in that block is needed here, which is why dropping it costs nothing:
+|     * trig data -- our worker writes the cold blob and the LIVE_REFRESH above copies
+|       blob -> live cache, so both consumers already see the new bytes.
+|     * per-track scale/length -- stock re-reads it from the blob on EVERY wrap
+|       (0x400a3d08 `moveb %a2@(1),%a3@` -> TRK_SCALE_IX[t], DIRECT JUMP's own
+|       finding), so a changed step count self-heals within one cycle, in time.
+|   So ask for a screen refresh and touch the transport on NO path at all -- the same
+|   conclusion DIRECT JUMP reached the hard way: keep time by READING the clock, never
+|   by reseeding it. ACT_PAT / RUNNING are no longer consulted: there is nothing left
+|   to gate, because we no longer do anything that could disturb the transport.
 rlj_ok:
     moveq   #1,%d0
 rlj_exit:
@@ -956,6 +1099,13 @@ rl_kind:
 rl_own:
     .space 4
     .endif
+|   Session 86: both are one-shot handshake bytes between the [BANK] key handlers.
+|   rl3_showing  -- open for exactly one pass through stock's show tail
+|   rl3_bank_used -- "our chord consumed this [BANK] gesture, swallow the release"
+rl3_showing:
+    .space 2
+rl3_bank_used:
+    .space 2
 rl_asgn:
     .space 4
 rl_cksum:

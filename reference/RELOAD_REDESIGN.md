@@ -272,3 +272,141 @@ the picker era.
 - Reuse unchanged: `rl_job`'s TRK SEQ slice path, `rl_arm_trk`, and the whole-bank
   suppression (`rl_done` + the `FUN_4000faf0` live refresh).
 - Toast duration `0x18`, not RELOAD2's `0x44`.
+
+---
+
+# Session 86 — hardware report #9, and the clock finding
+
+First RELOAD3 flash: **both chords execute, no conflicts.** The chord design is
+confirmed on hardware. Three follow-ups, all now built.
+
+## Item 3 (the real bug) — a reload must not re-home the transport
+
+`rl_job` armed `RELOAD_NOW` (`0x46c8028a`) whenever the reloaded pattern was the
+active one and the transport was running. That flag is polled once per step at
+`0x400a2530`, and **the block it gates is stock's whole-bank re-home, which is
+positional, not a cache refresh**:
+
+| site | write | effect |
+|---|---|---|
+| `0x400a26fe` | `0x800065b4 = 0` | previous master step |
+| `0x400a2704` | **`0x800065b2 = 0`** | **master playhead → the sequence restarts** |
+| `0x400a2658` | `0x800065b6 = LEN_TBL[..]-1` | ticks-within-step → wraps next tick |
+| `0x400a27e2` | `0x800065b8 = 1` | `RUNNING` — the old "reload while stopped starts playback" bug, same block |
+
+`0x800065b2` is DIRECT JUMP's `MASTER_STEP` / `BAR_CTR`, measured there as the
+bounded master playhead; the metronome's beat flags are derived from it by masking
+against `0x400abae4` / `0x400abacc` (`0x400a4264..0x400a42a0`). **One write, both
+reported symptoms.**
+
+Dropping the arm costs nothing, measured rather than assumed:
+
+- **trig data** — the worker writes the cold blob and `LIVE_REFRESH` copies
+  blob → live cache, so both consumers see the new bytes already.
+- **per-track scale/length** — stock re-reads it from the blob on *every wrap*
+  (`0x400a3d08  moveb %a2@(1),%a3@` → `TRK_SCALE_IX[t]`), so a changed step count
+  self-heals within one cycle, in time.
+
+`RELOAD_NOW` is therefore armed on **no path**, and the `ACT_PAT`/`RUNNING` gates go
+with it. Harness: `tools/diag_reload3_timing.py`.
+
+> **Naming trap.** `diag_reload2_transport.py` called `0x800065b6` "MASTER_STEP".
+> Wrong, and corrected there in Session 86: `0x800065b6` is ticks-within-step,
+> `0x800065b2` is the playhead. A timing test on `0x800065b6` measures the wrong word.
+
+## Item 2 — the known-hard piece, now attempted with the state machine decoded
+
+The section above ("⚠️ Known-hard piece") can be read alongside this. What made the
+retry tractable is that the whole machine is now measured:
+
+- `0x4007af80` **press** — `BANK_COMMIT = (0x460e73bc == 0)`, i.e. a **toggle**, then
+  `bras 0x4007af30`.
+- `0x4007af30` — a **shared tail**, reached from that `bras` and **nothing else in the
+  image**. Clears `BANK_SEL`/`0x460e73b8`/`0x460e73bc`, `SHOW_WIN` (dur `0xf0`,
+  onClose `0x4007b408`), `LAYER_PUSH`, two more UI calls, then `lea 28(sp),sp ; rts`.
+- `0x4007b3e0` **release** — `BANK_SEL==2` or `BANK_COMMIT==0` → dismiss
+  (`0x40056a70`); else commit (`0x460e73bc=1`, then `0x40031200`, which is merely
+  `0x460d1e4c=1` — a popup **confirm** flag, *not* a bank change). That commit is what
+  makes the window sticky after release.
+
+So: press shows, release sticks, next tap dismisses. **Time-shifting only the show
+preserves that exactly**, and two measured facts make it safe rather than hopeful:
+
+- `LAYER_PUSH` (`0x40031494`) is **idempotent** — `rts` if the struct is already the
+  head (`0x400314b4`) or anywhere in the list (`0x400314b8`). Replay cannot double-link.
+- `LAYER_POP` (`0x4003146c`) finds nothing if the struct was never linked, so a
+  teardown for a window that never opened is harmless.
+
+Implementation: a **one-shot gate** spliced into the tail at `0x4007af42` (a press
+returns without showing) plus the release handler at `0x4007b3e0`, which opens the
+gate for one pass and calls **stock's own tail** — so the window, its duration and its
+teardown are all stock's, one event later. The gate is what makes replay possible:
+without it, calling the tail would hit our own detour and short-circuit.
+
+The chord claims the release outright (`rl3_bank_used`), so `[BANK]`+`[TRACK]` shows
+nothing on either event, and `BANK_WIN_CLOSE` is now **conditional** on a popup being
+up (normally there is none; MLNOTIFY bails while `0x460e5cd0` is non-zero).
+
+### The trap: the overlay layer, not just the window
+
+Deferring the show by skipping stock's whole press tail is **wrong**. `LAYER_PUSH`
+lives in that tail, and the `[BANK]` overlay is what remaps the 16 TRIG keys to
+bank-select while `[BANK]` is held — the "hold `[BANK]`, tap a trig" gesture. Skip it
+and the trigs stay on base handler `0x40060ce0`, so that gesture would **edit the
+sequence instead of changing bank**. Silent and destructive, and invisible to any
+"did the window appear?" test. Very likely why Session 80's attempt was rejected.
+
+Correct shape (and it is stock `[PTN]`'s own): **push the layer on the press, defer
+only `SHOW_WIN`.** Teardown then has to be accounted for on every release path, since
+stock's layer is owned by the window's onClose:
+
+| release path | teardown |
+|---|---|
+| chord consumed (`rl3_bank_used`) | `BANK_WIN_CLOSE` (no window ever existed) |
+| opening tap (`BANK_COMMIT != 0`) | show the window; it owns the layer from there |
+| toggle-off, popup up | stock's dismiss runs onClose |
+| toggle-off, no popup | `BANK_WIN_CLOSE` |
+
+`BANK_WIN_CLOSE` is the right teardown rather than a bare `LAYER_POP` because it also
+balances the press tail's `0x4007e760` with its own `0x4007e81c`.
+
+### It is stock `[PTN]`'s own release, transplanted
+
+Stock's `[PTN]` release (`0x4005a084..0x4005a0ca`) already does both things this needs:
+
+```
+tstl 0x460d173e      ; consumed?
+bnes -> 0x4005a0be   ;   yes: clrl PTN_MODE ; jsr 0x40043418  <- teardown called
+                     ;        DIRECTLY, and no window is shown
+pea  0x40043418      ;   no:  teardown as the window's onClose
+jsr  0x40059f8c      ;        SHOW_WIN -- the window opens on the RELEASE
+```
+
+The show lives on the release, and the consumed path calls the teardown itself rather
+than relying on a window that was never opened. Every `rl3_bank_rel` branch is that
+same structure with `BANK_WIN_CLOSE` substituted — which is why "like PTN does" was
+the right instinct: the mechanism was already in the firmware.
+
+**This still deserves suspicion**: Session 80 continued (3)/(7) tried a deferral and
+hardware rejected it. The difference is that that build also carried the picker, its
+own keymap layer and a poked YES slot; here the only moving part is the show. That is
+a reason to retry, not evidence of success. Harness:
+`tools/diag_reload3_bankdefer.py` — press shows zero, release shows exactly once (its
+own positive control), the layer list never grows across repeated taps, the toggle
+still toggles, the chord is silent.
+
+## Item 1 — two-line box
+
+`MLNOTIFY` was already wired for the never-saved case, so the saved case joins it:
+`TRK SEQ + PART` / `RELOADED`, which also restores the spaces around the `+` that the
+21-char single-line budget had forced out.
+
+## Status
+
+Six detours (was four), `patch_reload3` 1454 B @ `0x400d6500` of a 2044 B ceiling.
+Session 85's deferred boundary checks closed green: tracks 1 and 8 each revert only
+themselves, so `subi.l #0x10` is right at both ends of the range.
+
+> **Harness note.** `er.stage_project` stages into one shared
+> `out/_emu_rtos_tree/<set>/<project>`, so parallel RELOAD3 diags race and one dies in
+> `mkdir`. Run the suite sequentially.

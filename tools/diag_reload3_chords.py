@@ -68,6 +68,11 @@ def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--iters", type=int, default=5)
     ap.add_argument("--track", type=int, default=3)
+    ap.add_argument("--data", action="store_true",
+                    help="data-level check: scribble ALL 16 tracks, drive the chord, and "
+                         "verify ONLY the pressed track reverted. RELOAD2's --trk proves "
+                         "the worker writes the right saved bytes, but it drives the old "
+                         "CUR_TRACK entry -- this proves the CHORD targets the right track.")
     a = ap.parse_args(argv)
 
     erl.OUR_IMAGE = ROOT / "out" / "mainos_reload3.bin"
@@ -208,7 +213,11 @@ def main(argv):
 
     # ---------- 3. [BANK] + [TRACK n], both PART_RELOAD outcomes ----------
     save = bytes(rt.uc.mem_read(PART_RELOAD, 4))
-    for ret, label, want_ml, want_toast in ((1, "Part SAVED -> single toast", 0, 1),
+    # Session 86 item 1: the saved-Part branch moved from a single-line toast to the
+    # same two-line MLNOTIFY box as the never-saved branch ("TRK SEQ + PART" /
+    # "RELOADED" vs "TRK SEQ RELOADED" / "SAVE PART FIRST!"). Both outcomes now use
+    # the box and neither uses rl3_toast, so both expect ml==1, toast==0.
+    for ret, label, want_ml, want_toast in ((1, "Part SAVED -> two-line box", 1, 0),
                                             (0, "Part NEVER SAVED -> two-line box", 1, 0)):
         print(f"\n--- [BANK] + [TRACK {a.track+1}] : {label} ---")
         # force PART_RELOAD's verdict so neither branch depends on the project
@@ -233,6 +242,54 @@ def main(argv):
             f"toast calls = {d['toast']} (want {'>=1' if want_toast else '0'})")
     rt.uc.mem_write(PART_RELOAD, save)
     rt.uc.ctl_flush_tb()
+
+    # ---------- 4. data-level: only the pressed track may revert ----------
+    if a.data:
+        MIDI_BASE, MTRA = 0x48D0, 0x8B0
+        blob = erl.BANK_BLOB + bank * erl.BANK_STRIDE
+        pP = blob + P * erl.PAT_STRIDE
+
+        def aud(t):
+            return pP + t * erl.TRAC_STRIDE
+
+        def mid(t):
+            return pP + MIDI_BASE + t * MTRA
+
+        def scribble():
+            # a recognisable pattern in every audio and MIDI track region
+            for t in range(8):
+                rt.uc.mem_write(aud(t), bytes([0x5A ^ t]) * 0x40)
+                rt.uc.mem_write(mid(t), bytes([0xA5 ^ t]) * 0x40)
+
+        def still_scribbled(t, midi=False):
+            want = bytes([(0xA5 if midi else 0x5A) ^ t]) * 0x40
+            return bytes(rt.uc.mem_read(mid(t) if midi else aud(t), 0x40)) == want
+
+        for label, mods in (("[PTN]", (PTN_CODE,)), ("[BANK]", (BANK_CODE,))):
+            n = a.track
+            print(f"\n--- data: {label} + [TRACK {n+1}] must revert ONLY track {n+1} ---")
+            scribble()
+            b = snap()
+            for m in mods:
+                key(m, PRESS)
+            drain(4)
+            key(TRACK0 + n, PRESS); key(TRACK0 + n, RELEASE)
+            for m in mods:
+                key(m, RELEASE)
+            # drain on the worker actually having run, not on a fixed time
+            for _ in range(120):
+                rt.run(ms=60)
+                if C["rl_job"] > b["rl_job"] and rt.uc.mem_read(G_KIND, 1)[0] == 0:
+                    break
+            drain(20)
+            chk(not still_scribbled(n),
+                f"audio track {n+1} WAS overwritten by the reload")
+            others = [t for t in range(8) if t != n and not still_scribbled(t)]
+            chk(not others,
+                f"the other 7 audio tracks untouched (clobbered: {[x+1 for x in others]})")
+            m_bad = [t for t in range(8) if not still_scribbled(t, midi=True)]
+            chk(not m_bad,
+                f"all 8 MIDI tracks untouched (clobbered: {[x+1 for x in m_bad]})")
 
     print()
     if fails:

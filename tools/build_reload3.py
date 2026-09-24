@@ -160,11 +160,24 @@ PATCHES = [
     ("patch_trigscale", 0x400d7bfc, None,
      [(0x4009b6f2, "cave", "203c0000091a", 18, "jmp")]),
     ("patch_reload3", FREE_START, "RL_DONE=1",
-     # Session 85 redesign -- FOUR detours; RELOAD2 had ten. Neither chord site
+     # Session 85 redesign + Session 86's two [BANK]-deferral sites -- SIX
+     # detours; RELOAD2 had ten. Neither chord site
      # pokes a keymap layer record, the mechanism behind the DIRECT JUMP slot
      # collision and several picker-era routing bugs. Both open with the same
      # 6-byte prologue, so a 6-byte jmp fits each with no padding.
-     [(0x40083dc4, "rl3_ptn_trk", "2f02242f0008", 6, "jmp"),
+     [(0x4007af42, "rl3_bank_show", "487a04c442a7", 6, "jmp"),
+      # Session 86 item 2: SELECT BANK moves from the PRESS to the RELEASE.
+      # This site is inside stock's SHARED show tail (0x4007af30), which is reached
+      # from the [BANK] press handler's `bras` at 0x4007af98 and from NOTHING else
+      # in the image. Displaces pea %pc@(0x4007b408) ; clr.l -(sp). The gate is a
+      # one-shot: a press returns without showing, and the release handler below
+      # opens it for exactly one pass and calls the same tail, so the window, its
+      # duration and its teardown are all stock's own.
+      (0x4007b3e0, "rl3_bank_rel", "7002b0b9460e73c6", 8, "jmp"),
+      # [BANK] RELEASE handler: moveq #2,d0 ; cmp.l 0x460e73c6,d0 (8 B -> jmp+nop).
+      # The cmp must be replayed, because the resume point 0x4007b3e8 is stock's
+      # own beq on it.
+      (0x40083dc4, "rl3_ptn_trk", "2f02242f0008", 6, "jmp"),
       # [PTN]-overlay TRACK handler: move.l d2,-(sp) ; move.l 8(sp),d2.
       # All 8 references to it are the 8 [PTN] overlay track slots
       # (0x400bf124..0x400bf1da), so arriving there IS [PTN]+[TRACK].
@@ -263,8 +276,11 @@ def main():
                        (0x4005a044, "[PTN] key handler"),
                        (0x400bf0be, "[PTN]-layer YES record"),
                        (0x400bf0a4, "[PTN]-layer NO record"),
-                       (0x4007af80, "[BANK] key handler"),
-                       (0x4007b3e0, "[BANK] release handler")):
+                       (0x4007af80, "[BANK] key handler")):
+        # Session 86: 0x4007b3e0 ([BANK] release) is DELIBERATELY detoured now
+        # (rl3_bank_rel), so it is no longer in this list. 0x4007af80 STAYS: we
+        # splice its shared show TAIL at 0x4007af42, never the handler entry, so
+        # the dispatch table still points at stock code for the [BANK] press.
         a = o(addr)
         if bytes(img[a:a + 8]) != bytes(stock[a:a + 8]):
             sys.exit(f"{what} 0x{addr:08x} was modified -- this build must poke no layer records")
@@ -344,12 +360,17 @@ def main():
 
     print(f"\n  {OUT_SYX.name}  (MIDI DIN)  +  {OUT_BIN.name}  (CF card)")
     print(f"  version screen / SYSTEM STATUS -> OS VERSION will read:  {VERSTR}")
-    print("  Hold [BANK], tap [YES]   ->  picker window (sticky, no timeout), TRK SEQ highlighted")
-    print("    (works whether the transport is running or stopped)")
-    print("  arrows                   ->  TRK SEQ / PTN SEQ / PART + PTN SEQ")
-    print("  [YES]                    ->  execute the highlight + close")
-    print("  [NO]                     ->  close the window, execute nothing")
-    print("  [PTN] is left completely stock by this build -- PTN+YES belongs to DIRECT JUMP.")
+    print("  [PTN]  + [TRACK n]  ->  reload track n's CF-saved sequence. Part untouched.")
+    print("                          toast: TRK SEQ RELOADED")
+    print("  [BANK] + [TRACK n]  ->  the same, PLUS re-apply the saved Part from RAM.")
+    print("                          two-line box: TRK SEQ + PART / RELOADED")
+    print("                          never-saved Part: TRK SEQ RELOADED / SAVE PART FIRST!")
+    print("                          (the sequence still reloads -- only the Part does not)")
+    print("  SELECT BANK now opens on the [BANK] RELEASE, not the press, so neither")
+    print("    chord flashes a window. A plain [BANK] tap still toggles it as stock does.")
+    print("  Reloads NEVER touch the transport: the playhead and the internal metronome")
+    print("    keep their phase (RELOAD_NOW is not armed on any path).")
+    print("  Deferred to later, by the user's own scoping: all-tracks and whole-bank reload.")
     print("  Revert = flash downloads/extracted/OCTATRACK_OS1.40C.syx")
 
 
