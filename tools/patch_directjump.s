@@ -535,11 +535,11 @@ dj_d7:
     move.l  %d0,%d2                    | d2 = pattern blob offset (caller's D0)
     lea     PAT_SMODE,%a1
     tst.b   (%a1,%d2.l)
-    beq.b   djd7_unif
+    beq.b   djd7_normal
     lea     PAT_MLEN,%a1               | per-track mode -> MASTER LENGTH (+0x8e51)
     bra.b   djd7_gotlen
-djd7_unif:
-    lea     PAT_LEN,%a1                | uniform mode  -> pattern LENGTH (+0x8e53)
+djd7_normal:
+    lea     PAT_LEN,%a1                | NORMAL mode   -> pattern LENGTH (+0x8e53)
 djd7_gotlen:
     moveq   #0,%d1
     move.b  (%a1,%d2.l),%d1
@@ -638,11 +638,11 @@ djc_fix:
 |   trace as a single 6-tick gap before the 3-tick gaps begin.
     lea     PAT_SMODE,%a0
     tst.b   (%a0,%d0.l)                | SCALE_MODE
-    beq.b   djc_uniform
+    beq.b   djc_normal
     lea     PAT_MSCALE,%a0             | per-track mode -> MASTER SCALE at +0x8e52
     bra.b   djc_gotscale
-djc_uniform:
-    lea     PAT_SCALE,%a0              | uniform mode  -> pattern multiplier at +0x8e54
+djc_normal:
+    lea     PAT_SCALE,%a0              | NORMAL mode   -> pattern multiplier at +0x8e54
 djc_gotscale:
     moveq   #0,%d1
     move.b  (%a0,%d0.l),%d1            | d1 = scale index (of the pattern that's NOW active)
@@ -708,16 +708,16 @@ djc_gotscale:
     lea     PAT_SMODE,%a0
     tst.b   (%a0,%d3.l)
     bne.b   djc_ts_pertrack
-    lea     PAT_SCALE,%a0               | uniform: every track takes the pattern default
+    lea     PAT_SCALE,%a0               | NORMAL: every track takes the pattern default
     move.b  (%a0,%d3.l),%d0
     lea     TRK_SCALE_IX,%a0
     lea     MIDI_SCALE_IX,%a1
     moveq   #7,%d1
-djc_ts_unif:
+djc_ts_normal:
     move.b  %d0,(%a0,%d1.l)
     move.b  %d0,(%a1,%d1.l)
     subq.l  #1,%d1
-    bpl.b   djc_ts_unif
+    bpl.b   djc_ts_normal
     bra.b   djc_ts_done
 djc_ts_pertrack:
     moveq   #0,%d1                      | audio: track index 0..7
@@ -870,11 +870,11 @@ dj_scaleix_fix:
 |   "pattern plays past its own length" symptom, still present in the fix meant to cure it.
     lea     PAT_SMODE,%a0
     tst.b   (%a0,%d0.l)                | SCALE_MODE
-    beq.b   djs_uniform
+    beq.b   djs_normal
     lea     PAT_MSCALE,%a0             | per-track mode -> MASTER SCALE at +0x8e52
     bra.b   djs_got
-djs_uniform:
-    lea     PAT_SCALE,%a0              | uniform mode  -> pattern multiplier at +0x8e54
+djs_normal:
+    lea     PAT_SCALE,%a0              | NORMAL mode   -> pattern multiplier at +0x8e54
 djs_got:
     move.b  (%a0,%d0.l),%d1            | d1 = the scale index stock's own D7 code would use
     move.b  %d1,SCALE_IX
@@ -1007,7 +1007,7 @@ dj_pertrack:
     moveq   #0,%d3                     | d3 = track index, 0..15 (audio 0-7, MIDI 8-15)
 djp_loop:
     tst.b   %d6
-    beq.b   djp_unif
+    beq.b   djp_normal
     cmpi.l  #8,%d3
     bge.b   djp_midi
     move.l  #0x91a,%d0
@@ -1023,9 +1023,9 @@ djp_midi:
     add.l   %d5,%d0
     lea     MIDI_LEN_SRC,%a0
     bra.b   djp_gotlen
-djp_unif:
+djp_normal:
     move.l  %d5,%d0
-    lea     PAT_LEN,%a0                | uniform mode: every track uses the pattern LENGTH
+    lea     PAT_LEN,%a0                | NORMAL mode: every track uses the pattern LENGTH
 djp_gotlen:
     moveq   #0,%d1
     move.b  (%a0,%d0.l),%d1            | d1 = this track's LENGTH

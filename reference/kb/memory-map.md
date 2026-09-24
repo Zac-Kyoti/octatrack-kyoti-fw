@@ -131,8 +131,15 @@ scale/length fields, **outside every track record**:
 | `+0x8e52` | `0x400eb032` | MASTER SCALE index | ≤ 6 |
 | `+0x8e53` | `0x400eb033` | pattern LENGTH, steps | 2 … 64 (`0x4009aada`) |
 | `+0x8e54` | `0x400eb034` | pattern SCALE index | 0 … 6 (`0x4009ab06`) |
-| `+0x8e55` | `0x400eb035` | **`SCALE_MODE`**: 0 = NORMAL, ≠0 = PER TRACK | ≥ 0 |
+| `+0x8e55` | `0x400eb035` | **`SCALE_MODE`** — see the two modes below | ≥ 0 |
 | `+0x8e57` | `0x400eb037` | pattern → Part link, `[0..3]` | — |
+
+**The two modes.** Always name them by the flag value, never by an invented adjective:
+
+| `SCALE_MODE` (`+0x8e55`) | name to use |
+|---|---|
+| `== 0` | **NORMAL** |
+| `!= 0` | **PER TRACK** (or per-track) |
 
 A track's **own** length / scale live *inside* its record at `+0x50` / `+0x51`
 (audio: `0x400e2230` / `0x400e2231` + patOff + `t*0x91a`; MIDI: `0x400e6ad8` /
@@ -141,7 +148,7 @@ A track's **own** length / scale live *inside* its record at `+0x50` / `+0x51`
 **⚠️ The fork that has now bitten two separate features.** Which byte governs depends
 on `SCALE_MODE`, and reading one unconditionally is wrong half the time:
 
-| | NORMAL (`+0x8e55` == 0) | PER TRACK (`+0x8e55` != 0) |
+| | **NORMAL** (`SCALE_MODE == 0`) | **PER TRACK** (`SCALE_MODE != 0`) |
 |---|---|---|
 | a track's length | pattern `+0x8e53` (shared by all 8) | the track's own `+0x50` |
 | a track's scale | pattern `+0x8e54` (shared) | the track's own `+0x51` |
@@ -162,9 +169,13 @@ Both failures were the same shape:
   and therefore worked in PER TRACK mode, but never restored `+0x8e53`/`+0x8e54` and so
   silently ignored the saved step count in NORMAL mode.
 
-> **Terminology bridge.** The OT UI (and the RELOAD sources) say **NORMAL** / **PER
-> TRACK**; `patch_directjump.s` says **uniform** / **per-track** for the same flag.
-> Grepping for one term will not find the other — search `PAT_SMODE` or `0x8e55`.
+> **Terminology.** The two modes are **NORMAL** (`SCALE_MODE == 0`) and **PER TRACK**
+> (`SCALE_MODE != 0`) — the device's own names, and the only ones to use in new work.
+> `patch_directjump.s` currently writes `unif` / `djd7_unif` / "uniform mode" in its
+> comments and labels for the `== 0` case; that word is an invention, not OT
+> terminology, and should be read as **NORMAL**. It is kept in this note only so that
+> grepping the existing source finds this entry — search `PAT_SMODE` or `0x8e55`, which
+> appear in both threads.
 
 ## Pattern change / cue / Parts  (Session 15 — DIRECT JUMP)
 
