@@ -29084,3 +29084,219 @@ identical mistake in the opposite direction (a false PASS while Hook F was corru
 - Differing MASTER LENGTHs between two patterns — still no fixture.
 - Per-track sub-step phase at a mid-cycle commit (`0x800064f0[t]`), open since Session 82 —
   though Hook P now zeroes it explicitly, which is AR's `clr.b (A4)+`.
+
+## Session 85 (2026-09-23, `wip`) — RELOAD redesigned: the picker is gone, two direct chords, 4 detours
+
+Hardware report #8: "Very inconsistent. hard to understand what is happening where
+and when… I think this design has gotten way too convoluted." Also from that
+report: the reload itself now happens quickly (the Session 83 suppression working),
+BUSY still appears after editing with the transport running, an arrow press after
+BUSY "engages TRK SEQ", and repeated `[YES]` sometimes toasts "T1 SEQ".
+
+**"T1 SEQ" was our own success toast** — `sprintf("T%d SEQ", track+1)` from
+`rly_toast`. So the Session 84 BUSY recovery WAS firing and the reload WAS
+executing; the message was just cryptic. Worth recording as a UX failure, not a
+logic one.
+
+### Why a redesign rather than another fix
+
+Bug tally by location across this whole thread:
+
+| where | bugs |
+|---|---|
+| picker / keymap / popup machinery | dead YES/NO hooks; `[PTN]` triple-booked; poke colliding with DIRECT JUMP; SELECT BANK flashing (fixed then reverted); arrows double-stepping; arrow pairing wrong **twice**; `[YES]` swallowed while `[BANK]` held; borrowed layers → own layer; walk-away leaving it primed; snapshot corruption; redraw tripping its own walk-away hook; unbounded `G_SEL`; inconsistent BUSY/arrow behaviour |
+| the worker that does the reload | **none** — `--trk` passed throughout |
+
+~13 bugs, all in one place. A modal window here costs its own keymap layer, a
+share of stock's single popup slot, walk-away detection and redraw-vs-teardown
+interaction. Delete the picker.
+
+### The design (user spec)
+
+- **`[PTN]` + `[TRACK n]`** → reload track n's CF-saved sequence, Part untouched,
+  toast `TRK SEQ RELOADED`. `[PTN]` release must not raise SELECT PATTERN.
+- **`[BANK]` + `[TRACK n]`** → the same plus the Part **from RAM** (the saved Part
+  currently associated with the pattern), toast `TRK SEQ+PART RELOADED`.
+
+Deferred by the user: all-tracks and whole-bank variants.
+
+### Measured facts that shaped it (tools/diag_keymap_dump.py, new)
+
+- **TRACK buttons = keycodes `0x10..0x17`**, family of 8, handler `0x40040250`.
+  Trigs are `0x00..0x0f` → `0x40060ce0`.
+- **Per-key is-held array `0x46c7d8ee`**, 24-B stride — validated because BANK
+  computes to `0x46c7dd56`, exactly what `patch_reload2.s` already pinned. PTN =
+  **`0x46c7dd3e`**.
+- **`[BANK]`+`[TRACK]` is FREE** — the `[BANK]` overlay covers only trigs, NO and
+  the NULL YES slot.
+- **`[PTN]`+`[TRACK]` IS mapped in stock** (all 8 track slots → `0x40083dc4`), but
+  the user confirmed on hardware it does nothing observable, so overriding it is
+  agreed.
+- **The `[PTN]` OVERLAY NEVER REDIRECTS THE TRACK KEYS.** Measured: the live
+  dispatch slot stays on the base handler through press, 20 frames of hold, AND an
+  explicit hold event — while PTN's held-flag *is* set. So `0x40083dc4` is
+  unreachable in practice and the chord goes through the **base handler's
+  held-flag test**, the mechanism that already worked for `[BANK]`. The
+  `0x40083dc4` detour is kept as insurance for contexts not exercised; both routes
+  share one body.
+
+### Stock does the hard parts — found, not reimplemented
+
+- **SELECT PATTERN suppression needs no detour.** `0x460d173e` is stock's own "a
+  `[PTN]`-held action consumed the gesture" flag; its release path does
+  `tstl 0x460d173e ; bne → skip the window` (`0x4005a088`), and stock writes `-1`
+  there at `0x40056b44`. We write the same value.
+- **The Part half is stock's own routine.** `0x4005e042` decodes as: gate on the
+  persisted per-Part dirty bit (`blob + 0x95048`) → `jsr 0x4004aab4(part)` →
+  **branch on its return** (`0` = never saved → `SAVE PART FIRST!`, else
+  `PART %d RELOADED`) → `TOAST(buf, 0x18)`. So the never-saved case needs no
+  detection logic of ours, and `0x18` is the OT-standard toast duration (RELOAD2
+  used `0x44`).
+- **Two lines in one box**: `FUN_4006d57c(title, nlines, lines[], 0, 0)` is titled
+  and **self-dismissing** (40-frame countdown at `0x460e5e20`, height `7*n+27`) —
+  what stock uses for "THIS BANK HAS NEVER / BEEN SAVED! / NOTHING TO RELOAD!".
+  It **refuses to draw while a popup is up** (`tstl 0x460e5cd0`), so the `[BANK]`
+  chord dismisses SELECT BANK first via its own measured teardown `0x4007b408`
+  (which also pops the layer that window owns). That incidentally lands most of the
+  `[BANK]`-window work and demotes the press→release deferral from prerequisite to
+  cosmetic.
+
+### User corrections this session, both of which changed the code
+
+1. **Unsaved Part**: I had conflated "dirty" with "never saved" and proposed
+   skipping the Part when dirty. **Wrong** — a saved Part SHOULD replace a dirty
+   Part, that is the point; only a *never-saved* Part is special.
+2. **`SAVE PART FIRST!` alone is misleading** in a compound operation, because the
+   sequence DID reload. Hence the two-line box showing both facts.
+3. Also: stop bringing up the arrow-handler finding — it belongs to the abandoned
+   picker design. Trimmed from the spec.
+
+### Result
+
+| | RELOAD2 | RELOAD3 |
+|---|---|---|
+| detours | 10 | **4** |
+| cave bytes | 2186 | **1360** |
+| changed vs stock | 1668 | **1016** |
+| keymap records poked | 1 | **0** |
+
+The build now *asserts* it pokes nothing: every `[PTN]`/`[BANK]` handler and
+overlay record byte-for-byte stock, and all 8 `[PTN]`-overlay TRACK slots still
+pointing at the handler we detour rather than at us.
+
+Carried over verbatim because it is proven: `rl_job`'s per-track slice,
+`rl_arm_trk` (given a new `rl3_arm_n` entry that takes the track index in d0),
+`rl_openstrd`, and the whole-bank suppression (`rl_done` + `FUN_4000faf0`) that
+cut a reload from 6852 card reads to 354.
+
+### Tests — `tools/diag_reload3_chords.py`, all green
+
+Through real `set_key_state`, 5 iterations:
+- plain `[TRACK]` with no modifier arms nothing and reaches stock's own track
+  select — the regression that matters most, since we detour that handler
+- `G_TRK` equals the **button pressed**, not `CUR_TRACK`
+- `PTN_CONSUMED` set; SELECT PATTERN never shown (asserted against stock's own
+  show site `0x40059f8c`, zero calls)
+- `[BANK]`: `PART_RELOAD` once, SELECT BANK dismissed, `BANK_COMMIT` cleared
+- **both Part branches forced with a stub**, so neither depends on whether the test
+  project's Part happens to be saved
+- `--data`: scribble all 16 track regions, drive each chord, verify **only** the
+  pressed track reverted (other 7 audio + all 8 MIDI untouched), draining on the
+  worker having actually run rather than a fixed delay
+
+Removed a test artifact of my own: a synthetic `event=2` HOLD hung `call_as_main`
+and is not a gesture a physical key can produce — same class of mistake this thread
+already recorded with an unmatched press.
+
+### Still open
+
+- `[BANK]` press→release deferral for SELECT BANK (cosmetic now; failed on hardware
+  once, see `reference/RELOAD_REDESIGN.md`).
+- **The stuck-`G_KIND` root cause is still unknown** — but the redesign has no
+  modal state and no BUSY concept, so a lost post no longer wedges a UI.
+## Session 86 (2026-09-23, `wip`) — DIRECT JUMP: HARDWARE LOCKUP from an uninitialised gate flag, and the DJ-OFF gate that could never have caught it
+
+**Flashed Session 85 and it locked the unit up.** User: "Crash upon starting transport. With
+all 16 steps on one track filled with trigs, starting transport produces extremely fast
+triggers, sounds almost double or quadruple time, then crashes fully after a short duration,
+no controls operational." **DIRECT JUMP was OFF.**
+
+### Root cause — a new global in a block stock does not clear
+
+`kb/memory-map.md` already records it: `FUN_4000f938` re-images the DSP shared-RAM window
+from ROM (`0x401086f4` -> `0x80000000`, `0x3e88` B) at every boot, then zero-fills only as far
+as `0x80004000`.
+
+```
+DJ_MODE           0x800000d8   inside the re-image     -> deterministic 0 at boot
+G_ARMED           0x80006a40   beyond BOTH             -> GARBAGE at power-on
+G_JUST_COMMITTED  0x80006a4a   beyond BOTH             -> GARBAGE at power-on
+G_PATOFF          0x80006a46   beyond BOTH             -> GARBAGE at power-on
+```
+
+Session 85's Hook P (`0x400a4d36`, the common per-tick exit) was gated on
+`G_JUST_COMMITTED` **alone**, with no `DJ_MODE` check. With a garbage flag it ran on the
+first tick, computed `TRK_LEN_SRC + G_PATOFF` from a second garbage global, read a length
+byte from a wild address, and wrote nonsense into all 16 per-track position arrays. Fast
+triggers, then a fault.
+
+**`G_ARMED` is in the same block and has been safe for dozens of sessions only because
+`dj_a` clears it on its disarm path on every tick before anything reads it.** The rule was
+already known and already in use; a new global was added to the block without it.
+
+### Fix — three layers
+
+1. **Hook P gates on `DJ_MODE` first.** That word is inside the boot re-image and
+   `build_directjump_v4.py` already asserts its ROM seed at `0x401087cc` is `00000000`, so it
+   is genuinely deterministic at power-on. With the feature off the hook cannot execute.
+2. **`dj_a`'s disarm path clears `G_JUST_COMMITTED` every tick**, the same discipline that
+   has always protected `G_ARMED`.
+3. **`G_PATOFF` deleted.** Hook P recomputes `patOff` from the live `ACT_PAT`/`ACT_BANK`, the
+   way `dj_c` does, so no uninitialised global is trusted at all.
+
+### The bigger failure — the gate was structurally blind
+
+`tools/diff_stock_vs_patch.py` reported **IDENTICAL** on the build that locked up the unit.
+**Unicorn zero-fills memory**, so every uninitialised global reads 0 in the emulator and a
+hook gated on one can never fire there. The gate could not see this class of bug — and could
+never have seen it, for **every build it has ever passed**.
+
+It now **poisons our scratch block (`0x80006a40..0x80006a60`) with `0xAA` before the
+transport starts**, patched run only, on by default (`--no-poison` to disable). A fault
+during the patched run is now reported as `RESULT: FAILED` with the diagnosis rather than
+raising a traceback — otherwise the next reader takes a crashed gate for a broken tool and
+re-runs it with the check disabled.
+
+### MEASURED — failing control, passing fix
+
+| image | poisoned DJ-OFF gate |
+|---|---|
+| S85 `d0f1d931...` (the build that crashed the MKI) | **`UC_ERR_READ_UNMAPPED` -> RESULT: FAILED** |
+| S86 `6038fb1f...` (this fix) | **IDENTICAL -- inert with the feature off** |
+
+The control faulting is the point: the emulator now reproduces the hardware lockup from a
+cold-boot memory state, which it previously could not do at all.
+
+Re-verified on the fixed image, unchanged from Session 85:
+
+| check | result |
+|---|---|
+| `diag_resume_pos` A07 -> A08 | 16/16 match AR's `new_step mod trackLen` |
+| `diag_resume_pos` A08 -> A07 | 16/16 |
+| `diag_grid_lock` 6->7 phases 0, 3 | GRID LOCKED + PLAYHEAD CONTINUOUS |
+
+Build: 1044 B cave, 994 bytes changed, 0 unexpected outside the cave, manual-trig bytes
+identical, container round-trips.
+
+### STANDING RULES added
+
+1. **Any global in `0x80006a40..` is garbage at power-on.** Gate on something inside the boot
+   re-image (`DJ_MODE`), or clear it unconditionally from a hook that runs every tick, or
+   recompute instead of stashing. Never rely on it being zero because the emulator says so.
+2. **A green emulator gate is only as strong as the memory state it started from.** Unicorn's
+   zero-fill is a convenience, not a model of the machine.
+
+### NOT validated
+
+- **Hardware.** This fix has not been flashed.
+- Differing MASTER LENGTHs between two patterns — still no fixture.

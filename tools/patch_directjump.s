@@ -222,8 +222,8 @@
     .equ MIDI_SCALE_SRC, 0x400e6ad9     | TRK_BLOB + 0x48f8 + 1 -- MIDI track m's SCALE byte
                                         | is at MIDI_SCALE_SRC + patOff + m*0x8b0
     .equ MIDI_SCALE_IX, 0x80006646      | live per-track scale cache, MIDI twin of
-    .equ G_PATOFF,  0x80006a46          | pattern blob offset, stashed by dj_c for Hook P
-                                        | (the word freed when Session 83 deleted G_ABSTICK)
+|   Session 86: G_PATOFF is GONE. It lived at 0x80006a46, outside the boot re-image AND the
+|   zero-fill, so it was garbage at power-on -- see Hook P. Hook P recomputes the offset.
     .equ TRK_LEN_SRC,  0x400e2230       | TRK_BLOB + 0x50 -- audio track t's LENGTH byte is
                                         | at TRK_LEN_SRC + patOff + t*0x91a
     .equ MIDI_LEN_SRC, 0x400e6ad8       | TRK_BLOB + 0x48f8 -- MIDI track m's LENGTH byte is
@@ -414,6 +414,11 @@ dj_a:
     bne.b   dja_real
 dja_disarm:
     clr.b   G_ARMED                    | 0 = idle
+    clr.b   G_JUST_COMMITTED           | Session 86: this block (0x80006a40+) is outside the
+                                       | boot re-image AND the zero-fill, so every global in
+                                       | it is garbage at power-on. G_ARMED has always been
+                                       | cleared here; G_JUST_COMMITTED now is too, so Hook P
+                                       | can never see an uninitialised flag.
     moveq   #-1,%d1
     move.b  %d1,G_PCPAT                | 0xff = "no PC sent yet"
     bra.b   dja_ret
@@ -691,7 +696,6 @@ djc_gotscale:
 |   bank*0x9b340 (already in d0 here); SCALE_MODE at PAT_SMODE+patOff selects between each
 |   track's own byte and the pattern default at PAT_SCALE+patOff.
     move.l  %d0,%d3                     | d3 = patOff (d0 becomes scratch below)
-    move.l  %d0,G_PATOFF                | Hook P (0x400a4d36) needs it too
     lea     PAT_SMODE,%a0
     tst.b   (%a0,%d3.l)
     bne.b   djc_ts_pertrack
@@ -924,12 +928,45 @@ djs_got:
 
     .global dj_pertrack
 dj_pertrack:
+|   Session 86 -- HARDWARE CRASH FIX. This hook used to be gated on G_JUST_COMMITTED alone.
+|   That byte lives at 0x80006a4a, and kb/memory-map.md's own boot description says why that
+|   is fatal: FUN_4000f938 re-images 0x80000000 from ROM for 0x3e88 bytes and then zero-fills
+|   only as far as 0x80004000. 0x80006a4a is beyond BOTH, so it holds GARBAGE at power-on --
+|   as does G_PATOFF at 0x80006a46. With a non-zero garbage flag this hook ran on the very
+|   first tick, indexed a length byte at TRK_LEN_SRC + garbage (a wild address), and wrote
+|   nonsense into all 16 per-track position arrays. Reported on hardware as extremely fast
+|   triggers followed by a full lockup, with the feature OFF.
+|
+|   G_ARMED (0x80006a40) is in the same uninitialised region and has always been safe only
+|   because dj_a clears it on its disarm path on every tick before anything reads it. Any
+|   NEW global in this block needs the same treatment or an explicit gate -- it is not
+|   enough that the code which sets it is correct.
+|
+|   Two fixes, belt and braces:
+|     * gate on DJ_MODE first. That word is at 0x800000d8, inside the boot re-image, ROM
+|       seed verified 00000000 by build_directjump_v4.py -- so it IS deterministic at
+|       power-on, and with the feature off this hook now cannot execute at all.
+|     * dj_a's disarm path clears G_JUST_COMMITTED every tick (see there), so by the time
+|       any commit can occur the flag has a known value.
+|   And the stashed G_PATOFF is gone: patOff is recomputed here from the live ACT_BANK /
+|   ACT_PAT, the same way dj_c does it, so there is no uninitialised global left to trust.
+    tst.l   DJ_MODE
+    beq.w   djp_orig
     tst.b   G_JUST_COMMITTED
     beq.w   djp_orig
     clr.b   G_JUST_COMMITTED
     lea     -36(%sp),%sp
     movem.l %d0-%d6/%a0-%a1,(%sp)
-    move.l  G_PATOFF,%d5               | d5 = patOff, stashed by dj_c on this same commit
+|   patOff = ACT_PAT*0x8ed8 + ACT_BANK*0x9b340, recomputed, never stashed
+    moveq   #0,%d5
+    move.b  ACT_PAT,%d5
+    move.l  #0x8ed8,%d0
+    muls.l  %d0,%d5
+    moveq   #0,%d0
+    move.b  ACT_BANK,%d0
+    move.l  #0x9b340,%d1
+    muls.l  %d1,%d0
+    add.l   %d0,%d5                    | d5 = patOff
     moveq   #0,%d4
     move.w  MASTER_STEP,%d4            | d4 = new_step (stock seeded it from Hook H's value
                                        | at 0x400a483a -- AR's own 0x400992d4)

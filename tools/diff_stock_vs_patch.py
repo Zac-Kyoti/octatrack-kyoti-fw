@@ -48,6 +48,9 @@ STEP_ARR = 0x800064D0          # per-track STEP position
 TICKS_ARR = 0x800064F0         # per-track ticks elapsed within current step
 ARMED_ARR = 0x80006500
 SCALE_ARR = 0x8000663E         # per-track scale index
+# Our scratch block. Outside the boot re-image (0x80000000 + 0x3e88) AND outside the
+# zero-fill (to 0x80004000), therefore UNINITIALISED at power-on on real hardware.
+SCRATCH_LO, SCRATCH_HI = 0x80006A40, 0x80006A60
 MASTER_STEP = 0x800065B6
 # Session 79 cont.30: SCALE_IX and BAR_CTR were NOT compared, which is a hole exactly
 # where Hook D (dj_scaleix_fix) writes. Hook D is UNCONDITIONAL -- not gated on DJ_MODE --
@@ -69,7 +72,7 @@ PCS = [
 ]
 
 
-def run_image(er, image, project, bank, pattern, frames, tree):
+def run_image(er, image, project, bank, pattern, frames, tree, poison=False):
     card, staged = er.stage_project(project, "OCTABAM", None, tree=tree)
     r, rt = er.attach(str(image), card, ips=3990.0, pit_clock_hz=264e6,
                       quantum=4096, step_quantum=32, tick=True)
@@ -110,6 +113,21 @@ def run_image(er, image, project, bank, pattern, frames, tree):
             int.from_bytes(bytes(rt.uc.mem_read(BAR_CTR, 2)), 'big'),
         ))
 
+    # Session 86: POISON the patch's own scratch block before the transport starts.
+    #
+    # This gate reported IDENTICAL on a build that locked the Octatrack up on hardware
+    # within seconds of pressing PLAY, with DIRECT JUMP OFF. The reason it could not see it:
+    # Unicorn zero-fills memory, so every uninitialised global reads 0 in the emulator and
+    # a hook gated on one never fires. Real hardware does not. kb/memory-map.md:
+    # FUN_4000f938 re-images 0x80000000 from ROM for 0x3e88 bytes then zero-fills only to
+    # 0x80004000 -- so 0x80006a40.. is beyond BOTH and holds whatever was there at power-on.
+    #
+    # Filling it with 0xAA makes the emulator model that, and turns "the patch is inert with
+    # the feature off" into a claim that survives a cold boot. Applied to the PATCHED run
+    # only: these addresses are ours, stock neither reads nor writes them, so poisoning the
+    # stock run would prove nothing and only risks confusing the baseline.
+    if poison:
+        rt.uc.mem_write(SCRATCH_LO, bytes([0xAA]) * (SCRATCH_HI - SCRATCH_LO))
     sample()
     rt.start_transport_live()
     target = rt.frame_count + frames
@@ -131,6 +149,12 @@ def main(argv):
     ap.add_argument("--frames", type=int, default=6000,
                     help="default is long enough to cross a full 16-step pattern at 1x")
     ap.add_argument("--patched", default=str(PATCHED))
+    ap.add_argument("--no-poison", action="store_true",
+                    help="do NOT pre-fill our scratch block with 0xAA before the transport "
+                         "starts. Poisoning is ON by default: Unicorn zero-fills memory, so "
+                         "without it every uninitialised global reads 0 and a hook gated on "
+                         "one can never fire -- which is exactly how this gate passed a "
+                         "build that locked up real hardware seconds after PLAY.")
     ap.add_argument("--stock", default=str(STOCK))
     # Two concurrent invocations sharing one staging tree collide with FileExistsError --
     # a trap this repo already hit with the per-bank project scanners. Give every run its
@@ -162,9 +186,28 @@ def main(argv):
     print(f"  bank={s['bank']} pattern={s['pat']} samples={len(s['trace'])} "
           f"tracks-with-movement={s['moved']}/16")
 
-    print(f"\n{bar}\nPATCHED (DIRECT JUMP left OFF)  {a.patched}\n{bar}")
-    p = run_image(er, a.patched, a.project, a.bank, a.pattern, a.frames,
-                  a.tree_prefix + "_patched")
+    label = "PATCHED (DIRECT JUMP left OFF"
+    label += ", scratch POISONED 0xAA)" if not a.no_poison else ")"
+    print(f"\n{bar}\n{label}  {a.patched}\n{bar}")
+    try:
+        p = run_image(er, a.patched, a.project, a.bank, a.pattern, a.frames,
+                      a.tree_prefix + "_patched", poison=not a.no_poison)
+    except Exception as exc:
+        # Session 86: a fault during the PATCHED run IS the result, not a tooling error.
+        # The build that locked up real hardware raises UC_ERR_READ_UNMAPPED here under
+        # poisoning -- the wild-address read its uninitialised gate flag let through.
+        # Report it as a failure rather than a traceback, or the next person reads a crashed
+        # gate as "the tool is broken" and re-runs it with --no-poison.
+        print(f"\n  ** THE PATCHED IMAGE FAULTED: {type(exc).__name__}: {exc}")
+        print("  ** With the feature OFF and the scratch block poisoned, the patch executed "
+              "and faulted.")
+        print("  ** This is the cold-boot failure mode: globals at 0x80006a40.. are NOT "
+              "cleared by stock's boot\n  ** (re-image covers 0x80000000+0x3e88, zero-fill "
+              "stops at 0x80004000), so any hook gated\n  ** on one of them can fire on the "
+              "first tick with garbage. Gate it on DJ_MODE, which IS\n  ** deterministic at "
+              "boot, and clear the flag from dj_a every tick.")
+        print("\n  RESULT: FAILED -- patch is NOT inert with the feature off")
+        return 1
     print(f"  bank={p['bank']} pattern={p['pat']} samples={len(p['trace'])} "
           f"tracks-with-movement={p['moved']}/16")
 
