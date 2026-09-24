@@ -7,7 +7,7 @@ RELOAD FROM PROJECT -- scaled-down / SEQ-focused variant (NOTES.md "Session 43"
 
 A trimmed sibling of build_reload.py.  build_reload.py (SEQ / ALL PARTS / WHOLE
 PATTERN, patch_reload.s) still builds.  This one builds a SEPARATE image from
-patch_reload2.s:
+patch_reload3.s:
 
   stock 1.40C + the MIDI manual-trig fix + a stay-open 3-item picker window.
 
@@ -53,12 +53,12 @@ patch_reload2.s:
   0x4005e25c detours are kept, unchanged -- they're what answers the picker
   once [PTN] has been released, the documented no-timeout common case.  Arrow
   keys have no record in that layer's table at all, so they were never affected.
-  Full RE + design rationale: patch_reload2.s's own header comment; dynamic
+  Full RE + design rationale: patch_reload3.s's own header comment; dynamic
   proof against the real stock layer-push code: emu_reload2_keymap.py.
 
   1. patch_trigscale  -- MIDI manual-trig stall fix.  Byte-identical detour + cave
                          to build_trigscale_only.py / build_reload.py.
-  2. patch_reload2    -- six detours:
+  2. patch_reload3    -- six detours:
        rl_ptn   @0x4005a044  PTN key handler FUN_4005a044.  event 2 (HOLD) +
                              gates (playing, no arranger, no popup, no reload
                              queued) -> open the window (bare-text popup
@@ -115,8 +115,8 @@ patch_reload2.s:
     - that FUN_4005a044 is only the PTN key handler (all its globals are PTN's).
 
 Usage:   python3 tools/build_reload2.py [VERSTR]      (default VERSTR = "140C_KYOTI")
-Outputs: out/mainos_reload2.bin, out/elek_reload2.bin,
-         out/OCTATRACK_OS1.40C_RELOAD2.syx, out/OCTATRACK_RELOAD2.bin
+Outputs: out/mainos_reload3.bin, out/elek_reload3.bin,
+         out/OCTATRACK_OS1.40C_RELOAD3.syx, out/OCTATRACK_RELOAD3.bin
 """
 import os, pathlib, subprocess, sys
 
@@ -126,15 +126,15 @@ ROOT = HERE.parent
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
 STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
-OUT = ROOT / "out/mainos_reload2.bin"
-ELEK = ROOT / "out/elek_reload2.bin"
-OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_RELOAD2.syx"
-OUT_BIN = ROOT / "out/OCTATRACK_RELOAD2.bin"
+OUT = ROOT / "out/mainos_reload3.bin"
+ELEK = ROOT / "out/elek_reload3.bin"
+OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_RELOAD3.syx"
+OUT_BIN = ROOT / "out/OCTATRACK_RELOAD3.bin"
 
 VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_KYOTI"
 
 # Session 83: the cave base moved 0x400d7400 -> 0x400d6500. Session 82 reported
-# patch_reload2 at 2036 B against a 2044 B ceiling and called cave space the
+# patch_reload3 at 2036 B against a 2044 B ceiling and called cave space the
 # binding constraint -- that was a FALSE constraint. The contiguous zero run
 # containing this cave starts at 0x400d64da, i.e. 3878 B BELOW the old base, and
 # build_merged.py (Session 48) had already lowered its own FREE_START to
@@ -146,7 +146,7 @@ FREE_START = 0x400d6500
 # (source, load addr, defsym, [(detour site, symbol, expected bytes, len, kind)])
 PATCHES = [
     # Session 80 continued (8): moved 0x400d7b00 -> 0x400d7bf0 (62 B) so
-    # patch_reload2 had room for the picker's own keymap layer.
+    # patch_reload3 had room for the picker's own keymap layer.
     # Session 82: moved again, 0x400d7bf0 -> 0x400d7bfc, for the rl_draw redraw
     # guard (hardware report #5). This is the TOP of the free zone: the address
     # must stay 4-BYTE ALIGNED or the source's own `.align` pads the blob from 62
@@ -154,44 +154,41 @@ PATCHES = [
     # exactly that -- a useful reminder that the cave address is an alignment
     # constraint, not just an offset). 62 B at 0x400d7bfc ends 0x400d7c3a, inside
     # FREE_END 0x400d7c3c (measured: stock is zero from 0x400d7400 to 0x400d7c3b
-    # and 0xff from 0x400d7c3c). patch_reload2's ceiling is therefore
+    # and 0xff from 0x400d7c3c). patch_reload3's ceiling is therefore
     # 0x400d7bfc - 0x400d7400 = 2044 B; further growth must come out of its own
     # footprint, since this cannot move up again.
     ("patch_trigscale", 0x400d7bfc, None,
      [(0x4009b6f2, "cave", "203c0000091a", 18, "jmp")]),
-    ("patch_reload2", FREE_START, "RL_DONE=1",
-     # Session 80 continued (2): the rl_ptn detour @0x4005a044 is GONE -- the entry
-     # gesture moved from [PTN]-hold to [BANK]+[YES] (see patch_reload2.s). [PTN] is
-     # now byte-for-byte stock again as far as this build is concerned.
-     [(0x4005e25c, "rl_no", "202f00086714", 6, "jmp"),         # NO handler: move.l 8(sp),d0 ; beq.s 0x4005e276
-      (0x4005e4c8, "rl_yes", "222f0004202f0008", 8, "jmp"),    # YES handler: move.l 4(sp),d1 ; move.l 8(sp),d0
-      (0x4004b970, "rl_arr_a", "4feffff448d7040c", 8, "jmp"),  # UP/RIGHT handler: lea -12(sp),sp ; movem.l d2-d3/a2,(sp)
-      (0x400491a0, "rl_arr_b", "2f02206f0008", 6, "jmp"),      # DOWN/LEFT handler: move.l d2,-(sp) ; movea.l 8(sp),a0
-      (0x40085864, "rl_job", "2d4afd762f2a0004", 8, "jmp"),    # 0x14 case: move.l a2,-650(fp) ; move.l 4(a2),-(sp)
-      # Session 80 continued (3): move stock's SELECT BANK window from [BANK]
-      # press to [BANK] release, so a [BANK]+[YES] reload never flashes it.
-      # Both sites are private to [BANK]: 0x4007af30 (the press tail this first
-      # site lives in) and 0x4007b408 (the teardown) have ZERO xrefs, "SELECT
-      # BANK" (0x400b7302) has exactly one use -- the call we suppress -- and
-      # nothing in the image branches into either displaced range (scanned).
-      # Session 80 continued (9): CLOSE_CB's own entry -- unprime the reload
-      # (clear G_MENU, pop our layer) whenever ANYTHING closes the shared popup
-      # slot, not just our own [YES]/[NO]. See rl_closecb_hook's own comment.
-      (0x40056bc0, "rl_closecb_hook", "4ab9460d1e64", 6, "jmp"),   # tst.l 0x460d1e64
-      # Session 80 continued (7): the SELECT BANK window deferral is REVERTED --
-      # it caused [BANK] to stick on (overlay never torn down) and off (window
-      # never drawn) on hardware. The rl_bank_rel detour is GONE and [BANK]
-      # release is byte-for-byte stock. This press detour now ONLY snapshots the
-      # YES dispatch slot for rl_bank_yes's delegate guard, then returns to
-      # stock's own window-show.
-      (0x4007af42, "rl_bank_press", "487a04c442a7", 6, "jmp"),    # press tail: pea 0x4007b408(pc) ; clr.l -(sp)
-      # Session 83: RE-ENABLED (backed out in "(5)"). See the long retry rationale
-      # on the rl_done block in patch_reload2.s -- two of "(5)"'s three hardware
-      # symptoms have since been traced to independent bugs fixed in
-      # "(6)"/"(8)"/"(9)", so the evidence against rl_done itself is much weaker
-      # than it appeared. This is doneFn's SUCCESS path: 0x40023c62 is
-      # `mvs.w 0x460bd910,d0` (71f9 460b d910), 6 B, immediately before the
-      # `bsr.w 0x40023b68` that performs the 16-pattern whole-bank re-read.
+    ("patch_reload3", FREE_START, "RL_DONE=1",
+     # Session 85 redesign + Session 86's two [BANK]-deferral sites -- SIX
+     # detours; RELOAD2 had ten. Neither chord site
+     # pokes a keymap layer record, the mechanism behind the DIRECT JUMP slot
+     # collision and several picker-era routing bugs. Both open with the same
+     # 6-byte prologue, so a 6-byte jmp fits each with no padding.
+     [(0x4007af42, "rl3_bank_show", "487a04c442a7", 6, "jmp"),
+      # Session 86 item 2: SELECT BANK moves from the PRESS to the RELEASE.
+      # This site is inside stock's SHARED show tail (0x4007af30), which is reached
+      # from the [BANK] press handler's `bras` at 0x4007af98 and from NOTHING else
+      # in the image. Displaces pea %pc@(0x4007b408) ; clr.l -(sp). The gate is a
+      # one-shot: a press returns without showing, and the release handler below
+      # opens it for exactly one pass and calls the same tail, so the window, its
+      # duration and its teardown are all stock's own.
+      (0x4007b3e0, "rl3_bank_rel", "7002b0b9460e73c6", 8, "jmp"),
+      # [BANK] RELEASE handler: moveq #2,d0 ; cmp.l 0x460e73c6,d0 (8 B -> jmp+nop).
+      # The cmp must be replayed, because the resume point 0x4007b3e8 is stock's
+      # own beq on it.
+      (0x40083dc4, "rl3_ptn_trk", "2f02242f0008", 6, "jmp"),
+      # [PTN]-overlay TRACK handler: move.l d2,-(sp) ; move.l 8(sp),d2.
+      # All 8 references to it are the 8 [PTN] overlay track slots
+      # (0x400bf124..0x400bf1da), so arriving there IS [PTN]+[TRACK].
+      (0x40040250, "rl3_bank_trk", "2f02222f0008", 6, "jmp"),
+      # Base TRACK handler: move.l d2,-(sp) ; move.l 8(sp),d1.  [BANK] does NOT
+      # override track keys, so [BANK]+[TRACK] lands here; the handler tests the
+      # BANK held-flag and otherwise replays into stock's own track select.
+      (0x40085864, "rl_job", "2d4afd762f2a0004", 8, "jmp"),    # 0x14 case -- worker, unchanged
+      # Session 83, carried over: doneFn's SUCCESS path, 6 B, immediately before
+      # the `bsr.w 0x40023b68` that re-reads all 16 patterns. This is the
+      # suppression that cut a reload from 6852 card reads to 354.
       (0x40023c62, "rl_done", "71f9460bd910", 6, "jmp")]),
 ]
 
@@ -268,22 +265,34 @@ def main():
             img[do:do + n] = branch + b"\x4e\x71" * ((n - 6) // 2)
             print(f"    0x{site:08x} -> {name}:{sym} 0x{s[sym]:08x}  ({kind}, {n} B)")
 
-    print("\n=== [BANK]-held keymap layer: YES press slot -> rl_bank_yes ===")
-    rsyms = syms["patch_reload2"]
-    yo = o(BANK_LAYER_YES)
-    if bytes(img[yo:yo + 26]) != BANK_LAYER_YES_STOCK:
-        sys.exit(f"BANK-layer YES record 0x{BANK_LAYER_YES:08x} unexpected: {bytes(img[yo:yo+26]).hex()}")
-    img[yo + 2:yo + 6] = rsyms["rl_bank_yes"].to_bytes(4, "big")
-    print(f"  0x{BANK_LAYER_YES + 2:08x}  press NULL -> rl_bank_yes 0x{rsyms['rl_bank_yes']:08x}")
-
-    # [PTN] must now be untouched by this build (the gesture moved to [BANK]+[YES]).
-    for addr, what in ((0x4005a044, "PTN key handler"),
-                       (0x400bf0be, "PTN-layer YES record"),
-                       (0x400bf0a4, "PTN-layer NO record")):
+    # Session 85: this build pokes NO keymap layer record at all. RELOAD2 poked
+    # rl_bank_yes into the [BANK] overlay's NULL YES slot, and earlier builds poked
+    # the [PTN] overlay -- that mechanism caused the DIRECT JUMP slot collision and
+    # several routing bugs. The chord design reaches both gestures by detouring
+    # ordinary key handlers instead, so assert every overlay record is untouched.
+    print("\n=== keymap overlays must be byte-for-byte stock ===")
+    for addr, what in ((0x400d00ee, "[BANK]-layer YES record"),
+                       (0x400d00d4, "[BANK]-layer NO record"),
+                       (0x4005a044, "[PTN] key handler"),
+                       (0x400bf0be, "[PTN]-layer YES record"),
+                       (0x400bf0a4, "[PTN]-layer NO record"),
+                       (0x4007af80, "[BANK] key handler")):
+        # Session 86: 0x4007b3e0 ([BANK] release) is DELIBERATELY detoured now
+        # (rl3_bank_rel), so it is no longer in this list. 0x4007af80 STAYS: we
+        # splice its shared show TAIL at 0x4007af42, never the handler entry, so
+        # the dispatch table still points at stock code for the [BANK] press.
         a = o(addr)
         if bytes(img[a:a + 8]) != bytes(stock[a:a + 8]):
-            sys.exit(f"{what} 0x{addr:08x} was modified -- [PTN] must be left stock now")
-    print("  [PTN] handler + both [PTN]-layer records verified untouched (stock)")
+            sys.exit(f"{what} 0x{addr:08x} was modified -- this build must poke no layer records")
+    print("  all [PTN]/[BANK] handlers and overlay records verified untouched")
+    # the 8 [PTN]-overlay TRACK slots must still point at the handler we detour,
+    # not at us -- we detour the handler, we do not repoint the records.
+    for i in range(8):
+        rec = 0x400bf122 + i * 26
+        a = o(rec + 2)
+        if int.from_bytes(bytes(img[a:a + 4]), "big") != 0x40083dc4:
+            sys.exit(f"[PTN]-overlay TRACK slot {i} (0x{rec:08x}) no longer points at 0x40083dc4")
+    print("  all 8 [PTN]-overlay TRACK slots still point at 0x40083dc4 (we detour it, not them)")
 
     spans.sort()
     for (a1, b1, n1), (a2, b2, n2) in zip(spans, spans[1:]):
@@ -301,7 +310,7 @@ def main():
 
     # Cross-check the manual-trig fix against the standalone build.  The two builds place
     # the trigscale cave at DIFFERENT addresses -- build_trigscale_only.py uses 0x400d7b00,
-    # while here it sits at 0x400d7bf0 because patch_reload2's cave grew over that address
+    # while here it sits at 0x400d7bf0 because patch_reload3's cave grew over that address
     # in Session 80 continued (8) -- so comparing bytes at absolute offsets is meaningless.
     # It reports a "divergence" that is nothing but the relocation, and because the check
     # sys.exit()s BEFORE the .syx wrap below, from commit 83ce678 until Session 80
@@ -351,12 +360,17 @@ def main():
 
     print(f"\n  {OUT_SYX.name}  (MIDI DIN)  +  {OUT_BIN.name}  (CF card)")
     print(f"  version screen / SYSTEM STATUS -> OS VERSION will read:  {VERSTR}")
-    print("  Hold [BANK], tap [YES]   ->  picker window (sticky, no timeout), TRK SEQ highlighted")
-    print("    (works whether the transport is running or stopped)")
-    print("  arrows                   ->  TRK SEQ / PTN SEQ / PART + PTN SEQ")
-    print("  [YES]                    ->  execute the highlight + close")
-    print("  [NO]                     ->  close the window, execute nothing")
-    print("  [PTN] is left completely stock by this build -- PTN+YES belongs to DIRECT JUMP.")
+    print("  [PTN]  + [TRACK n]  ->  reload track n's CF-saved sequence. Part untouched.")
+    print("                          toast: TRK SEQ RELOADED")
+    print("  [BANK] + [TRACK n]  ->  the same, PLUS re-apply the saved Part from RAM.")
+    print("                          two-line box: TRK SEQ + PART / RELOADED")
+    print("                          never-saved Part: TRK SEQ RELOADED / SAVE PART FIRST!")
+    print("                          (the sequence still reloads -- only the Part does not)")
+    print("  SELECT BANK now opens on the [BANK] RELEASE, not the press, so neither")
+    print("    chord flashes a window. A plain [BANK] tap still toggles it as stock does.")
+    print("  Reloads NEVER touch the transport: the playhead and the internal metronome")
+    print("    keep their phase (RELOAD_NOW is not armed on any path).")
+    print("  Deferred to later, by the user's own scoping: all-tracks and whole-bank reload.")
     print("  Revert = flash downloads/extracted/OCTATRACK_OS1.40C.syx")
 
 

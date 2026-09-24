@@ -212,53 +212,46 @@ def patched_press(uc):
     return call(uc, BANK_PRESS, [BANK_CODE, 1])
 
 
-def run_patched(rl_bank_yes):
-    print("\n##### PATCHED -- window deferred to release #####")
+def run_patched(rl_bank_yes, syms):
+    """Session 80 continued (7): the window DEFERRAL IS REVERTED. These checks
+    now assert the press path is behaviourally STOCK again -- the window shows on
+    press, the layer is pushed, and [BANK] release is untouched -- while the one
+    thing we still do there (snapshotting the YES dispatch slot for rl_bank_yes's
+    delegate guard) happens correctly."""
+    print("\n##### PATCHED -- deferral reverted; press path must be stock again #####")
 
-    print("\n-- press: window suppressed, layer still pushed --")
+    print("\n-- press: stock window STILL shown, layer pushed, slot snapshotted --")
     uc = mk(PATCHED)
-    log, bal, ok = patched_press(uc)
+    call(uc, PUSH_LAYER, [BASE_LAYER_SEL])
+    pre = yes_slot(uc)
+    log, bal, ok = call(uc, BANK_PRESS, [BANK_CODE, 1])
     print(f"      press  -> {log}")
-    check("press shows NO window", not shown(log))
-    check("press STILL pushes the overlay layer", "PUSH_LAYER" in log and layer_live(uc))
-    check("press returns with the stack balanced (the lea -16(sp) reservation)",
-          bal and ok, "A7 restored" if bal else "A7 MISMATCH")
-    check("YES slot now resolves to rl_bank_yes", yes_slot(uc) == rl_bank_yes,
-          hex(yes_slot(uc)))
-
-    print("\n-- release, plain tap: the deferred window appears HERE --")
-    log, bal, ok = call(uc, BANK_REL, [BANK_CODE, 0])
-    print(f"      release-> {log}")
     w = shown(log)
-    check("release shows the SELECT BANK window", bool(w), w[0] if w else "")
+    check("press SHOWS the SELECT BANK window again (deferral reverted)", bool(w),
+          w[0] if w else "")
     check("...with stock's own text + onClose",
           bool(w) and f"0x{BANK_TEXT:08x}" in w[0] and f"0x{BANK_TEARDOWN:08x}" in w[0])
-    check("layer still live (the window owns it, as on stock)", layer_live(uc))
-    check("release returns cleanly", ok)
-
-    print("\n-- release during a RELOAD gesture: swallowed entirely --")
-    uc = mk(PATCHED)
-    patched_press(uc)
-    uc.mem_write(G_MENU, b"\x01")                 # our picker is open
-    uc.mem_write(BANK_COMMIT, b"\x00\x00\x00\x00")  # rl_bank_yes clears it
-    log, bal, ok = call(uc, BANK_REL, [BANK_CODE, 0])
-    print(f"      release-> {log}")
-    check("NO window is shown", not shown(log))
-    check("teardown runs, layer popped now", "POP_LAYER" in log and not layer_live(uc))
-    check("YES slot restored to stock after teardown", yes_slot(uc) == STOCK_YES_HANDLER,
+    check("press pushes the overlay layer", "PUSH_LAYER" in log and layer_live(uc))
+    check("press returns with the stack balanced", bal and ok,
+          "A7 restored" if bal else "A7 MISMATCH")
+    check("YES slot now resolves to rl_bank_yes", yes_slot(uc) == rl_bank_yes,
           hex(yes_slot(uc)))
-    check("release returns cleanly", ok)
+    saved = struct.unpack(">I", uc.mem_read(syms["rl_yes_save"], 4))[0]
+    check("rl_yes_save holds the PRE-push slot (the delegate guard needs it)",
+          saved == pre, f"saved=0x{saved:08x} pre=0x{pre:08x}")
 
-    print("\n-- release after a trig picked a bank: trig's own toast owns teardown --")
-    uc = mk(PATCHED)
-    patched_press(uc)
-    uc.mem_write(BANK_SEL, b"\x00\x00\x00\x01")   # trig handler sets this
+    print("\n-- release: byte-for-byte stock, so stock's own teardown owns it --")
     log, bal, ok = call(uc, BANK_REL, [BANK_CODE, 0])
     print(f"      release-> {log}")
-    check("NO second window shown", not shown(log))
-    check("NO teardown here (the trig toast carries it)",
+    check("release shows no window of its own", not shown(log))
+    check("release pops nothing (the window owns the layer, as on stock)",
           "POP_LAYER" not in log and layer_live(uc))
     check("release returns cleanly", ok)
+
+    print("\n-- the window's onClose still tears down cleanly --")
+    log, _, _ = call(uc, BANK_TEARDOWN, [])
+    print(f"      onClose-> {log}")
+    check("teardown pops the layer", "POP_LAYER" in log and not layer_live(uc))
 
 
 def layer_depth(uc):
@@ -341,7 +334,7 @@ def main():
                             capture_output=True, text=True).stdout
         syms = {p[2]: int(p[0], 16) for p in (l.split() for l in nm.splitlines())
                 if len(p) == 3}
-        run_patched(syms["rl_bank_yes"])
+        run_patched(syms["rl_bank_yes"], syms)
 
     if stress:
         run_stress("STOCK", STOCK)

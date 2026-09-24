@@ -26,6 +26,11 @@ OUT = ROOT / "out/mainos_partreapply.bin"
 CAVE_AT = 0x400d7000
 DETOUR_AT = 0x40062216
 DETOUR_EXPECT = bytes.fromhex("4eb9400326a0")     # jsr 0x400326a0
+# Second detour, HEAD of the same "select Part P" handler: the machine-type
+# memcpy, spliced so cave2 can snapshot the per-Part edited bitmask BEFORE
+# stock's FUN_400972fc x8 loop dirties it. Same "jsr kind" as the tail detour.
+DETOUR2_AT = 0x400621da
+DETOUR2_EXPECT = bytes.fromhex("4eb940020898")    # jsr 0x40020898
 
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
@@ -42,19 +47,28 @@ def assemble():
                     "out/patch_partreapply.o"], check=True, cwd=ROOT, capture_output=True)
     subprocess.run(["m68k-elf-objcopy", "-O", "binary", "out/patch_partreapply.elf",
                     "out/patch_partreapply.bin"], check=True, cwd=ROOT)
-    return (ROOT / "out/patch_partreapply.bin").read_bytes()
+    nm = subprocess.run(["m68k-elf-nm", "out/patch_partreapply.elf"],
+                        capture_output=True, text=True, cwd=ROOT).stdout
+    syms = {p[2]: int(p[0], 16) for p in (l.split() for l in nm.splitlines()) if len(p) == 3}
+    return (ROOT / "out/patch_partreapply.bin").read_bytes(), syms
 
 
 def main():
     if not STOCK_SECT.exists():
         sys.exit(f"missing {STOCK_SECT} -- run ./fetch-os.sh and ./analyze.sh first")
     img = bytearray(STOCK_SECT.read_bytes())
-    cave = assemble()
+    cave, syms = assemble()
 
     do = DETOUR_AT - BASE
     if bytes(img[do:do + len(DETOUR_EXPECT)]) != DETOUR_EXPECT:
         sys.exit(f"detour site 0x{DETOUR_AT:08x} unexpected: {bytes(img[do:do+6]).hex()} "
                  f"(wrong firmware, or already patched)")
+    d2o = DETOUR2_AT - BASE
+    if bytes(img[d2o:d2o + len(DETOUR2_EXPECT)]) != DETOUR2_EXPECT:
+        sys.exit(f"detour2 site 0x{DETOUR2_AT:08x} unexpected: {bytes(img[d2o:d2o+6]).hex()} "
+                 f"(wrong firmware, or already patched)")
+    if "cave2" not in syms:
+        sys.exit("cave2 symbol missing from the linked patch")
     co = CAVE_AT - BASE
     if any(img[co:co + len(cave)]):
         sys.exit(f"cave at 0x{CAVE_AT:08x} is not free: {bytes(img[co:co+16]).hex()}")
@@ -62,13 +76,15 @@ def main():
     # detour: jsr <cave>  (6 B, exactly replaces the displaced `jsr 0x400326a0`;
     # the cave replays it verbatim then rts, so the caller sees no difference in shape)
     img[do:do + 6] = b"\x4e\xb9" + CAVE_AT.to_bytes(4, "big")
+    img[d2o:d2o + 6] = b"\x4e\xb9" + syms["cave2"].to_bytes(4, "big")
     img[co:co + len(cave)] = cave
 
     OUT.write_bytes(bytes(img))
     stock = STOCK_SECT.read_bytes()
     changed = sum(1 for a, b in zip(stock, img) if a != b)
-    print(f"{OUT}: {len(img):,} bytes, {changed} changed vs stock ({len(cave)} B cave + 6 B detour)")
-    print(f"  detour  0x{DETOUR_AT:08x}  jsr 0x{CAVE_AT:08x}")
+    print(f"{OUT}: {len(img):,} bytes, {changed} changed vs stock ({len(cave)} B cave + 2x6 B detours)")
+    print(f"  detour  0x{DETOUR_AT:08x}  jsr 0x{CAVE_AT:08x}   (tail)")
+    print(f"  detour2 0x{DETOUR2_AT:08x}  jsr 0x{syms['cave2']:08x}   (head, dirty-flag snapshot)")
     print(f"  cave    0x{CAVE_AT:08x}  {len(cave)} B")
 
     if not EFT.exists() or not STOCK_SYX.exists():

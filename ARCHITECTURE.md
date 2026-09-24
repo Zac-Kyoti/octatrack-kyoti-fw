@@ -193,13 +193,31 @@ resolve with that base). Image data/BSS ~`0x400bxxxx`.
 | `string_func_map.py` | function→UI-strings map (619 functions) |
 | `disasm.sh` | radare2 with correct arch/base (m68k BE @ 0x40000400) |
 | `Ghidra*.java` | headless decompilation scripts (Ghidra 12, Coldfire language) |
+| `build_*.py` | the guarded binary-patch builders, one per feature, plus `build_bugbuilds.py` for the composites — see [`BUILD_KYOTI.md`](BUILD_KYOTI.md) |
+| `patch_*.s` / `patch_sc_dsp3.asm` | the ColdFire and DSP56300 patch sources each builder assembles into a code cave |
+| `emu_*.py` | Unicorn emulators running the real image bytes, one per feature; `emu_rtos.py` wraps a full-firmware run (real scheduler, tasks, CF card) |
+| `diag_*.py` | targeted measurement harnesses — the tools that settle "what does stock actually do here", usually against real hardware-exported projects |
+| `dsp56300_xcore/` | a dual-core DSP56300 host used to validate the cross-core side-chain under lock-step and timing-skew fuzzing |
+| `refs/sync.py`, `refs/whatsnew.py` | clone + track the external Octatrack-RE repos distilled into `reference/kb/` |
 
 ---
 
 ## 9. Open fronts
 
-- **Sequencer clock**: the periodic source that dispatches the trig-processor `FUN_400977cc`
-  (by pointer, according to machine type) — internal tempo clock or MIDI clock (0xF8).
-- DSP program load: where the blob that `FUN_40001d4c` uploads comes from (an OS section?).
-- Remaining ATA handlers; large functions the ColdFire decompiler does not lift (read in ASM).
-- Extract the vector table (`0x400` preamble, not in this section) for the ISR map.
+Two of the original four are closed:
+
+- ~~**Sequencer clock**~~ ✅ — the audio frame ISR (`0x4000aad0`) drives it through a
+  `2³¹/tempo` phase accumulator and wakes the sequencer task via a kernel queue. The step
+  engine below it is mapped too: the per-clock-tick body reached from `0x400a1e0c`,
+  `LEN_TBL` as a **ticks-per-step** table, `0x800065b6` as master ticks-within-step and
+  `0x800065b2` as the master step, and the pattern commit at `0x400a44d0` with its
+  per-track rebuild tail.
+- ~~**DSP program load**~~ ✅ — located and extracted (`out/dsp_region.bin`, DSP56300,
+  ~188 KB), with **two payloads**: A serves tracks 5–8, B serves tracks 1–4. The module
+  dispatch table is mapped and individual modules have been replaced in place.
+- **Remaining ATA handlers**; large functions the ColdFire decompiler does not lift (read
+  in ASM). Note that "corruption" in the notes means Ghidra failing to decompile a dense
+  function, not damaged data.
+- **Extract the vector table** (`0x400` preamble, not in this section) for the ISR map.
+- **The signal plane.** 16 of the 17 effects and all of timestretch remain untouched DSP
+  code; see [`COVERAGE.md`](COVERAGE.md) for the full matrix.

@@ -81,6 +81,19 @@ FUN_40009094 = 0x40009094            # per-track Part -> engine apply
 FUN_4002b654 = 0x4002b654            # kind-4 deferred Part-apply handler
 FUN_400972fc = 0x400972fc            # PICKUP-only voice rebind
 FUN_400a0570 = 0x400a0570            # the cue-pattern choke point (every pattern change)
+# The real per-trig sample resolver (Session 81; open since Session 49, which ruled
+# out FUN_40005030 and wrongly guessed FUN_4009d1e8). Picks STATIC_ARENA (0x4000f4b4)
+# vs FLEX_ARENA (0x4000f4d8), stride 0x448, and carries the PICKUP ownership claim
+# at 0x4000f7d0.
+#   Reached by INDIRECT dispatch through the per-machine-type function-pointer table
+#   at 0x400d6454 -- `a0 = *(0x400d6454 + type*4)` then `jsr (a0)` at 0x4000d49c.
+#   Table: [0]STATIC and [1]FLEX and [4]PICKUP all -> 0x4000f450; [2]THRU -> 0x400043f4;
+#   [3]NEIGHBOR -> 0x4000463c. (There is also a direct `jsr 0x4000f450.l` at 0x4000421c,
+#   but that is NOT the path any observed run took -- a literal-address grep finds only
+#   that one and misses the real dispatch.)
+#   Convention, measured off a live run: FUN_4000f450(track, slot, flags=0xc0), stack
+#   at entry [ret][arg1=track][arg2=slot][arg3=0xc0].
+FUN_4000f450 = 0x4000f450
 
 MT = {0: "STATIC", 1: "FLEX", 2: "THRU", 3: "NEIGH", 4: "PICKUP"}
 
@@ -141,6 +154,28 @@ def show(tag, w):
             continue
         print(f"    {k:24} = {v if not isinstance(v, int) else hex(v) if v > 9 else v}")
 
+
+# --- PICKUP ownership singleton (Session 51) ------------------------------
+# PICKUP is NOT a per-track arena slot like FLEX/STATIC: it is one global
+# capture buffer with a single owner track at a time.
+#   PICKUP_OWNER   -1 == unclaimed.  Claimed at 0x4000f7d0, but ONLY on the
+#                  `owner < 0` branch -- once non-negative the claim path is
+#                  never taken again (0x4000f7ca bge -> "already owned").
+#                  Released to -1 only at 0x400a112c / 0x400a148a.
+#   PICKUP_SKIP    FUN_40097204 sets bit<<track when the track's machine byte
+#                  == 4, and on the else branch clears ONLY this bit -- it
+#                  performs no ownership release.
+PICKUP_OWNER = 0x400d7c4c
+PICKUP_ENABLE = 0x461054ec        # per-track PICKUP enable bitmask
+PICKUP_CFG = 0x461054f0           # written beside the claim/release
+PICKUP_SKIP = 0x46c7ff3e          # per-track "machine is PICKUP" flag byte
+
+# Per-Part "edited / unsaved" flag: a BITMASK, one bit per part, kept in two
+# places -- blob+0x95048 (persisted) and 0x100b145e (RAM mirror). SAVE PART
+# (FUN_4004a908) clears this part's bit in both at 0x4004a968/0x4004a974.
+# FUN_400972fc SETS it at 0x4009737c/0x40097388, before its own machine-type
+# check -- so stock touches it on the Part-change path too.
+PART_DIRTY = 0x100b145e
 
 SLOT_MIRROR = 0x100a519c          # FUN_400972fc writes the forced PICKUP slot here [+d3]
 FUN_400972fc_ENTRY = FUN_400972fc
@@ -275,6 +310,23 @@ def cmd_probe(rt, poke_pickup):
         print(f"    morph guard 0x400c0c44     = {u32(rt, MORPH_GUARD):#010x}   fader 0x460d16c8 = {u32(rt, FADER_POS):#010x}")
 
     # --- P1 (Part 0), transport running --------------------------------
+    # Simulate "this Part was saved": clear the per-Part edited bitmask in BOTH
+    # places before the round trip. Without this the harness's own blob pokes
+    # leave Part 0 already reading dirty (0x01) at every snapshot, which makes
+    # the measurement useless for the user's report -- their Part IS saved and
+    # goes dirty during the round trip.
+    # Seed 0x02 = "Part 1 is SAVED (bit 0 clear), Part 2 has a GENUINE unsaved
+    # edit (bit 1 set)". This tests both halves at once:
+    #   * does the round trip spuriously set bit 0?   (the reported bug)
+    #   * does the fix wipe bit 1 while suppressing it? (must NOT)
+    # stock expectation  : 0x02 -> 0x03  (bit 0 added spuriously)
+    # patched expectation: 0x02 -> 0x02  (bit 0 suppressed, bit 1 preserved)
+    rt.uc.mem_write(PART_DIRTY, b"\x02")
+    rt.uc.mem_write(blob + 0x95048, b"\x02")
+    print(f"\nseed-dirty  : PART_DIRTY(0x100b145e)=0x02, blob+0x95048(={blob + 0x95048:#x})=0x02")
+    print("              bit0 (Part 1) CLEAR = saved;  bit1 (Part 2) SET = a genuine edit")
+    print("              stock -> expect 0x03;  patched -> expect 0x02 (bit1 must survive)")
+
     rt.seq_select_live(curbank, 0)
     rt.internal_clock()
     rt.frame = True
@@ -341,7 +393,12 @@ def cmd_probe(rt, poke_pickup):
     return True
 
 
-def cmd_repeat(rt):
+FLEX_ARENA = 0x100b14f0
+STATIC_ARENA = 0x100d5b30
+ARENA_STRIDE = 1096
+
+
+def cmd_repeat(rt, own_poke=False, resolver=False, drive=False):
     """HW finding (2026-09-13, real MKI, PARTREAPPLY flashed): P1(Part0 T1=PICKUP,
     silent) -> P5(Part1 T1=FLEX, sample B) sounds correct the FIRST time; jump back
     to P1 then forward to P5 AGAIN and T1 now plays Part0's PICKUP content (sample A)
@@ -371,6 +428,21 @@ def cmd_repeat(rt):
     vb = VOICE_BASE + T * VOICE_STRIDE
     sm1 = SLOT_MIRROR + 1 * 6322 + T * 5
 
+    def own(tag=None):
+        """The PICKUP ownership singleton + its companions. The 2026-09-13
+        --repeat run snapshotted only the voice struct / SLOT_MIRROR /
+        KILL_BIT and reported 'byte-identical' -- it never read THESE, so
+        that null result says nothing about ownership going stale."""
+        o = u32(rt, PICKUP_OWNER)
+        return {
+            "PICKUP_OWNER 0x400d7c4c": f"{o:#010x} ({'unclaimed' if o == 0xffffffff else f'track {o}'})",
+            "PICKUP_ENABLE 0x461054ec": f"{u32(rt, PICKUP_ENABLE):#010x}",
+            "PICKUP_CFG 0x461054f0": f"{u32(rt, PICKUP_CFG):#010x}",
+            "PICKUP_SKIP 0x46c7ff3e": f"{u8(rt, PICKUP_SKIP):#04x}",
+            "PART_DIRTY 0x100b145e": f"{u8(rt, PART_DIRTY):#04x}",
+            f"voice[T{T+1}]+0x14 (mach)": f"{u8(rt, vb + 0x14):#04x}",
+        }
+
     def snap(tag):
         v = rd(rt, vb, 0x50)
         print(f"\n  {tag}")
@@ -378,13 +450,118 @@ def cmd_repeat(rt):
         print(f"    SLOT_MIRROR Part1[T]     = {rd(rt, sm1, 5).hex(' ')}")
         print(f"    KILL_BIT 0x8000184c      = {u8(rt, KILL_BIT):#04x}")
         print(f"    applied bank/part        = {u8(rt, APPLIED_BANK)}/{u8(rt, APPLIED_PART)}")
-        return v
+        o = own()
+        for k, val in o.items():
+            print(f"    {k:<26} = {val}")
+        # The resolver's `slot` argument is read from here: measured
+        # a1 == PREIMG_A + track*0x48 at the resolver entry for tracks
+        # 1/3/4/5 (slots 2/0xa/9/0x15), all four exact. PREIMG_A is one of
+        # FUN_40009094's per-track pre-image regions -- and FUN_40009094 is
+        # exactly what a pattern->Part change never calls.
+        print(f"    PREIMG_A per-track (slot source, {PREIMG_A:#x} + track*0x48):")
+        for t in range(8):
+            row = rd(rt, PREIMG_A + t * 0x48, 12)
+            print(f"      T{t+1} {PREIMG_A + t*0x48:#010x}: {row.hex(' ')}")
+        return v, o
 
-    rt.watch_pc([FUN_400972fc_ENTRY, FUN_40009094, FUN_4002b654])
+    watch = [FUN_400972fc_ENTRY, FUN_40009094, FUN_4002b654]
+    if resolver:
+        # watch_pc dumps [sp: ret arg1 arg2 arg3 ...] at the entry, before the
+        # callee's own `lea -0x3c(a7)` -- so this reads the resolver's calling
+        # convention off a live run instead of off a desynced linear disassembly,
+        # and says which tracks actually reach it.
+        watch.append(FUN_4000f450)
+    rt.watch_pc(watch)
+    rt.watch_mem(PICKUP_OWNER, 4)
+    rt.watch_mem(PICKUP_ENABLE, 8)        # 0x461054ec + 0x461054f0, adjacent
+    rt.watch_mem(PICKUP_SKIP, 1)
+    rt.watch_mem(PREIMG_A + T * 0x48, 1)   # the resolver's slot source, T1
+    rt.watch_mem(PART_DIRTY, 1)            # per-Part edited/unsaved bitmask
     n_pc = 0
+    n_mw = 0
+
+    if own_poke:
+        # The plain --repeat run (2026-09-22) showed PICKUP_OWNER never leaves
+        # -1 and voice+0x14 never becomes 4: a machine-byte poke alone never
+        # engages the ownership machinery, so that run could not exercise the
+        # claim/release asymmetry at all (same blind spot as Session 49's
+        # diff_flex_static.py). On hardware the report's precondition -- a
+        # PICKUP track "already linked to a sample" -- means the buffer IS
+        # owned. Fabricate that minimal state, then ask the ONE question this
+        # settles: does anything on the pattern-change path ever release it?
+        rt.uc.mem_write(PICKUP_OWNER, struct.pack(">I", T))
+        rt.uc.mem_write(vb + 0x14, bytes([4]))
+        rt.uc.mem_write(PICKUP_ENABLE, struct.pack(">I", 1 << T))
+        print(f"\nown-poke   : PICKUP_OWNER={T} (T{T+1} owns the buffer), "
+              f"voice[T{T+1}]+0x14=4, PICKUP_ENABLE={1 << T:#x}")
+        print("             FABRICATED state -- what a used PICKUP track looks like.")
+        print("             Question under test: does a Part change ever release it?")
+
+    names = {PICKUP_OWNER: "PICKUP_OWNER", PICKUP_ENABLE: "PICKUP_ENABLE",
+             PICKUP_CFG: "PICKUP_CFG", PICKUP_SKIP: "PICKUP_SKIP",
+             PREIMG_A + T * 0x48: "PREIMG_SLOT[T1]", PART_DIRTY: "PART_DIRTY"}
+
+    # --- drive the resolver directly (Session 81) -------------------------
+    # T1 never sounds in the emulator, so it never reaches FUN_4000f450 on its
+    # own and no arrival#1-vs-#2 diff of passive state can ever show the latch.
+    # Now that the resolver is named AND its convention is measured off a live
+    # run -- FUN_4000f450(track, slot, flags=0xc0) -- drive it directly instead
+    # of waiting for a trig. call_as_main is the faithful context here: the real
+    # dispatch was observed running in task `main` (cur=0x46c7ae84).
+    arena_reads = {}
+    voice_writes = []
+
+    def _install_drive_hooks(slot):
+        ent = {
+            "PICKUP_entry": FLEX_ARENA + (128 + T) * ARENA_STRIDE,
+            "FLEX_entry": FLEX_ARENA + slot * ARENA_STRIDE,
+            "STATIC_entry": STATIC_ARENA + slot * ARENA_STRIDE,
+        }
+
+        def mk(name):
+            def h(u, acc, addr, size, val, user):
+                arena_reads.setdefault(name, []).append(
+                    (u.reg_read(er.eb.UC_M68K_REG_PC), addr))
+            return h
+
+        for nm, base in ent.items():
+            rt.uc.hook_add(er.eb.UC_HOOK_MEM_READ, mk(nm),
+                           begin=base, end=base + ARENA_STRIDE - 1)
+
+        def vw(u, acc, addr, size, val, user):
+            voice_writes.append((u.reg_read(er.eb.UC_M68K_REG_PC), addr, size, val))
+
+        rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, vw,
+                       begin=vb, end=vb + VOICE_STRIDE - 1)
+        rt.uc.ctl_flush_tb()
+        print(f"drive      : arena entries  PICKUP={ent['PICKUP_entry']:#x}  "
+              f"FLEX(slot {slot})={ent['FLEX_entry']:#x}  STATIC={ent['STATIC_entry']:#x}")
+        return ent
+
+    def drive(tag, slot):
+        arena_reads.clear()
+        voice_writes.clear()
+        rt.run(until=lambda r: r.pc == er.MAIN_SPIN)
+        pre = rd(rt, vb, VOICE_STRIDE)
+        try:
+            d0 = rt.call_as_main(FUN_4000f450, (T, slot, 0xc0))
+        except Exception as e:                         # noqa: BLE001 - diagnostic
+            print(f"\n  DRIVE {tag}: call FAILED -- {type(e).__name__}: {e}")
+            return None
+        post = rd(rt, vb, VOICE_STRIDE)
+        hit = {k: len(v) for k, v in sorted(arena_reads.items())}
+        vd = [(i, pre[i], post[i]) for i in range(VOICE_STRIDE) if pre[i] != post[i]]
+        print(f"\n  DRIVE {tag}: FUN_4000f450(track={T}, slot={slot}, 0xc0) -> d0={d0:#x}")
+        print(f"    arena entry reads  : {hit if hit else 'NONE'}")
+        print(f"    voice[T] writes    : {len(voice_writes)}")
+        if vd:
+            print("    voice bytes changed: " +
+                  " ".join(f"+{i:#04x}:{a:#04x}->{b:#04x}" for i, a, b in vd[:16]))
+        return {"d0": d0, "reads": hit,
+                "voice_delta": tuple(vd), "nwrites": len(voice_writes)}
 
     def switch(bank, pat, tag):
-        nonlocal n_pc
+        nonlocal n_pc, n_mw
         rt.uc.mem_write(0x800065b8, b"\x00\x00\x00\x00")
         rt.run(until=lambda r: r.pc == er.MAIN_SPIN)
         sb, sp = rt.seq_select_live(bank, pat)
@@ -393,6 +570,27 @@ def cmd_repeat(rt):
         for s, line in rt.pc_hits[n_pc:]:
             print(f"    PC-HIT {line}")
         n_pc = len(rt.pc_hits)
+        for s, task, pc, addr, size, val in rt.mem_writes[n_mw:]:
+            print(f"    MEM-W  {names.get(addr, hex(addr))} [{addr:#x}] <- {val:#x} "
+                  f"({size}B) at pc {pc:#x}")
+        n_mw = len(rt.mem_writes)
+
+    # Simulate "this Part was saved": clear the per-Part edited bitmask in BOTH
+    # places before the round trip. Without this the harness's own blob pokes
+    # leave Part 0 already reading dirty (0x01) at every snapshot, which makes
+    # the measurement useless for the user's report -- their Part IS saved and
+    # goes dirty during the round trip.
+    # Seed 0x02 = "Part 1 is SAVED (bit 0 clear), Part 2 has a GENUINE unsaved
+    # edit (bit 1 set)". This tests both halves at once:
+    #   * does the round trip spuriously set bit 0?   (the reported bug)
+    #   * does the fix wipe bit 1 while suppressing it? (must NOT)
+    # stock expectation  : 0x02 -> 0x03  (bit 0 added spuriously)
+    # patched expectation: 0x02 -> 0x02  (bit 0 suppressed, bit 1 preserved)
+    rt.uc.mem_write(PART_DIRTY, b"\x02")
+    rt.uc.mem_write(blob + 0x95048, b"\x02")
+    print(f"\nseed-dirty  : PART_DIRTY(0x100b145e)=0x02, blob+0x95048(={blob + 0x95048:#x})=0x02")
+    print("              bit0 (Part 1) CLEAR = saved;  bit1 (Part 2) SET = a genuine edit")
+    print("              stock -> expect 0x03;  patched -> expect 0x02 (bit1 must survive)")
 
     rt.seq_select_live(curbank, 0)
     rt.internal_clock()
@@ -404,14 +602,30 @@ def cmd_repeat(rt):
     rt.run(ms=8000, until=lambda r: r.frame_count >= tgt)
     snap("after initial P1 (Part0, T1=PICKUP)")
 
+    dslot = u8(rt, slot_addr(1, T, 1))
+    if drive:
+        _install_drive_hooks(dslot)
+    d1r = d2r = None
+
     switch(curbank, 4, "P1->P5 #1 (Part0->Part1, T1 PICKUP->FLEX)")
-    v1 = snap("ARRIVAL #1 at P5 (Part1, T1=FLEX)")
+    v1, o1 = snap("ARRIVAL #1 at P5 (Part1, T1=FLEX)")
+    if drive:
+        d1r = drive("ARRIVAL #1", dslot)
 
     switch(curbank, 0, "P5->P1 (Part1->Part0, T1 FLEX->PICKUP)")
     snap("back at P1 (Part0, T1=PICKUP)")
+    if drive:
+        # Resolve T1 as PICKUP here, the way a real trig at P1 would. Without
+        # this the voice keeps arrival #1's FLEX binding, so the run can only
+        # show the re-bind SKIP and never the wrong CONTENT the skip lets
+        # through. Expected stale binding if the skip bites at arrival #2:
+        # +0x04=0x46c938c4, +0x08=0x100d38f0 (FLEX_ARENA + (128+T)*1096).
+        drive("BACK AT P1 (as PICKUP, slot 128+T)", 128 + T)
 
     switch(curbank, 4, "P1->P5 #2 (Part0->Part1, T1 PICKUP->FLEX AGAIN)")
-    v2 = snap("ARRIVAL #2 at P5 (Part1, T1=FLEX)")
+    v2, o2 = snap("ARRIVAL #2 at P5 (Part1, T1=FLEX)")
+    if drive:
+        d2r = drive("ARRIVAL #2", dslot)
 
     print(f"\n===== DIFF: arrival #1 vs arrival #2 at P5, voice[T{T+1}] +0..+0x50 =====")
     diffs = [(i, v1[i], v2[i]) for i in range(len(v1)) if v1[i] != v2[i]]
@@ -420,6 +634,23 @@ def cmd_repeat(rt):
     else:
         for i, a, b in diffs:
             print(f"    +{i:#04x}: arrival#1={a:#04x}  arrival#2={b:#04x}")
+
+    if drive and d1r and d2r:
+        print("\n===== DIFF: arrival #1 vs arrival #2, RESOLVER driven directly =====")
+        if d1r == d2r:
+            print("  (identical -- the resolver resolves T1 the SAME way on both passes)")
+        else:
+            for k in d1r:
+                if d1r[k] != d2r[k]:
+                    print(f"    {k:<12} arrival#1={d1r[k]}\n    {'':<12} arrival#2={d2r[k]}")
+
+    print(f"\n===== DIFF: arrival #1 vs arrival #2, PICKUP ownership singleton =====")
+    odiff = [(k, o1[k], o2[k]) for k in o1 if o1[k] != o2[k]]
+    if not odiff:
+        print("  (identical -- ownership state is NOT what differs on the second pass)")
+    else:
+        for k, a, b in odiff:
+            print(f"    {k:<26} arrival#1={a}   arrival#2={b}")
     return True
 
 
@@ -431,6 +662,15 @@ def main(argv):
     ap.add_argument("--repeat", action="store_true",
                     help="HW finding follow-up: P1->P5->P1->P5 round trip, diff the voice "
                          "struct between the first and second arrival at P5")
+    ap.add_argument("--drive", action="store_true",
+                    help="with --repeat: call FUN_4000f450 directly at each arrival and "
+                         "diff which arena entry it resolves T1 to")
+    ap.add_argument("--resolver", action="store_true",
+                    help="with --repeat: also trace FUN_4000f450 (the per-trig sample "
+                         "resolver) -- args + which tracks reach it")
+    ap.add_argument("--own-poke", action="store_true",
+                    help="with --repeat: fabricate a CLAIMED PICKUP buffer (owner=T1) first, "
+                         "then test whether the pattern->Part change ever releases it")
     ap.add_argument("--patched", action="store_true",
                     help="boot out/mainos_partreapply.bin (tools/build_partreapply.py) instead of stock")
     ap.add_argument("--image", help="explicit MAIN OS section to boot (e.g. out/mainos_merged.bin)")
@@ -456,7 +696,7 @@ def main(argv):
           f"final_bank={final_bank} ({elapsed:.0f} ms)")
 
     if a.repeat:
-        cmd_repeat(rt)
+        cmd_repeat(rt, own_poke=a.own_poke, resolver=a.resolver, drive=a.drive)
     else:
         cmd_probe(rt, poke_pickup=a.repro)
 

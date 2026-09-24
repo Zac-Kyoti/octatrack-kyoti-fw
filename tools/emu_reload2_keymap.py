@@ -58,7 +58,8 @@ FUN_BANK_PRESS = 0x4007af80       # BANK key handler (real, unmodified). Session
                                   # continued (2): the entry gesture moved [PTN]-hold
                                   # -> [BANK]+[YES], so this drives the BANK layer now.
 BANK_CODE = 0x2f
-BANK_HELD = 0x460e73c2            # BANK's own held/commit flag (press + hold both set it)
+BANK_HELD = 0x460e73c2
+BANK_HELD_KEY = 0x46c7dd56        # is_key_held([BANK]) = 0x46c7d8ee + 0x2f*24            # BANK's own held/commit flag (press + hold both set it)
 BANK_LAYER_NO_STOCK = 0x4007b25c  # the BANK layer's own NO press handler -- we do NOT
                                   # poke it, so it must stay exactly this
 FUN_PUSH_LAYER = 0x40031494       # push a layer struct + trigger the table rebuild
@@ -155,6 +156,13 @@ def push_and_hold(uc):
     check("after base layer: NO dispatch slot = stock handler", no0 == STOCK_NO_HANDLER, hex(no0))
 
     call(uc, FUN_BANK_PRESS, [BANK_CODE, 1])  # event=1 (press); pushes 0x400cff14 + rebuild
+    # The per-key HELD flag (record+16) is set by the dispatcher set_key_state
+    # 0x40031734, NOT by the handler -- and this harness calls the handler
+    # directly, so it must set it itself. rl_bank_yes now gates on it (its poke
+    # into the layer's YES record outlives the layer, so it must be transparent
+    # when [BANK] is not actually down). Confirmed set on the real path in
+    # tools/diag_reload2_realkey.py, which drives set_key_state properly.
+    uc.mem_write(BANK_HELD_KEY, struct.pack(">I", 1))
     held = struct.unpack(">I", uc.mem_read(BANK_HELD, 4))[0]
     check("BANK held-flag (0x460e73c2) set by the real press", held != 0, held)
 

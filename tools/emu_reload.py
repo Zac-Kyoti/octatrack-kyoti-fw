@@ -627,6 +627,16 @@ def cmd_trk(rt):
     return ok
 
 
+# Session 83: the window this single-stepper uses to tell OUR cave code from
+# firmware it should stub out. It was hardcoded to 0x400d7400..0x400d8000, which
+# silently broke the moment patch_reload2's cave moved to 0x400d6500 -- our own
+# first instruction fell outside it, was treated as "a stubbed firmware fn", and
+# EVERY handler returned inert (`--combo` reported YES/NO doing nothing at all,
+# which looks exactly like a firmware regression and is not one).
+# It is now the whole free zone, so any placement inside the cave works. Keep
+# these in step with build_reload2.py's FREE_START / FREE_END.
+OUR_CODE_LO, OUR_CODE_HI = 0x400d6500, 0x400d7c3c
+
 G_KIND_A, G_PAT_A, G_MENU_A, G_SEL_A = 0x80006a50, 0x80006a51, 0x80006a52, 0x80006a53
 POPUP2_FN, CLOSE_FN, POST_FN, PARTRELD_FN = 0x4005a0e0, 0x40056bc0, 0x40022778, 0x4004aab4
 REFRESH_FNS = (0x4004d948, 0x40032208, 0x4004d640, 0x400486cc, 0x4006dbe8, 0x40077b00, 0x4002f2f8)
@@ -664,7 +674,7 @@ def _run_cave_fn(rt, addr, keycode, event, calls, budget=4000):
             return "rts"
         if pc in _END_PCS:
             return _END_PCS[pc]
-        if not (0x400d7400 <= pc < 0x400d8000):
+        if not (OUR_CODE_LO <= pc < OUR_CODE_HI):
             calls.append(pc)
             # a stubbed firmware fn: skip it (as if it rts'd)
             sp = rt.uc.reg_read(eb.UC_M68K_REG_A7)
@@ -708,7 +718,16 @@ def cmd_combo(rt):
         rt.uc.mem_write(a, b"\x4e\x75")
     rt.uc.ctl_flush_tb()
 
-    def reset_gates(actpat=7, menu=0, sel=0, running=1):
+    BANK_HELD_FLAG = 0x46C7DD56   # is_key_held([BANK]) = 0x46c7d8ee + 0x2f*24
+    STOCK_YES_H = 0x4005E4C8      # base-layer YES handler (which rl_yes detours)
+
+    def reset_gates(actpat=7, menu=0, sel=0, running=1, bank_held=1):
+        # bank_held models the real dispatch state: rl_bank_yes is only ever
+        # REACHED because the [BANK] overlay redirects the YES slot to it, and
+        # it now delegates when [BANK] is not physically held (its poke outlives
+        # the layer -- see patch_reload2.s). Driving it with the flag clear was
+        # never a realistic gesture; tests that want that path set it to 0.
+        rt.uc.mem_write(BANK_HELD_FLAG, struct.pack(">I", bank_held))
         rt.uc.mem_write(0x460e5cd0, struct.pack(">I", 0))   # no popup
         rt.uc.mem_write(0x460d1aec, struct.pack(">I", 0))   # no arranger
         rt.uc.mem_write(0x800065b8, struct.pack(">I", running))  # transport
@@ -758,6 +777,84 @@ def cmd_combo(rt):
               f"BANK+YES release does nothing: end={end} G_MENU={g(G_MENU_A)} "
               f"popup2={POPUP2_FN in calls}")
 
+        # Session 80 continued (8): the picker now pushes its OWN keymap layer,
+        # and a push without a matching pop WEDGES THE KEYBOARD. Assert the
+        # flag discipline across EVERY exit path. (The real push/pop are
+        # firmware calls stubbed by this harness, so this checks the pairing
+        # logic; diag_reload2_realkey.py proves the real link/unlink.)
+        try:
+            LAYER_ON = _sym("rl_layer_on")
+            rl_yes_exec_sym = _sym("rl_yes_exec")
+            rl_no_exec_sym = _sym("rl_no_exec")
+            rl_push_layer_sym = _sym("rl_push_layer")
+            rl_pop_layer_sym = _sym("rl_pop_layer")
+        except KeyError:
+            LAYER_ON = None
+        if LAYER_ON is not None:
+            def layer_on():
+                return int.from_bytes(rt.uc.mem_read(LAYER_ON, 1), "big")
+
+            reset_gates(menu=0)
+            rt.uc.mem_write(LAYER_ON, b"\x00")
+            _run_cave_fn(rt, rl_bank_yes, 0x31, 1, [])
+            check(g(G_MENU_A) == 1 and layer_on() == 1,
+                  f"open pushes our layer: G_MENU={g(G_MENU_A)} layer_on={layer_on()}")
+
+            # exit 1: [YES] executes
+            rt.uc.mem_write(G_KIND_A, b"\x00")
+            _run_cave_fn(rt, rl_yes_exec_sym, 0x31, 1, [])
+            check(layer_on() == 0, f"execute pops our layer: layer_on={layer_on()}")
+
+            # exit 2: [NO] cancels
+            reset_gates(menu=0)
+            rt.uc.mem_write(LAYER_ON, b"\x00")
+            _run_cave_fn(rt, rl_bank_yes, 0x31, 1, [])
+            _run_cave_fn(rt, rl_no_exec_sym, 0x32, 1, [])
+            check(layer_on() == 0, f"cancel pops our layer: layer_on={layer_on()}")
+
+            # exit 3: the RELOAD BUSY toast (G_KIND stuck) must still pop
+            reset_gates(menu=0)
+            rt.uc.mem_write(LAYER_ON, b"\x00")
+            _run_cave_fn(rt, rl_bank_yes, 0x31, 1, [])
+            rt.uc.mem_write(G_KIND_A, b"\x03")          # a job still in flight
+            _run_cave_fn(rt, rl_yes_exec_sym, 0x31, 1, [])
+            check(layer_on() == 0 and g(G_KIND_A) == 3,
+                  f"BUSY exit still pops our layer: layer_on={layer_on()} "
+                  f"G_KIND={g(G_KIND_A)}")
+
+            # double open must not double-push
+            reset_gates(menu=0)
+            rt.uc.mem_write(LAYER_ON, b"\x00")
+            _run_cave_fn(rt, rl_bank_yes, 0x31, 1, [])
+            _run_cave_fn(rt, rl_push_layer_sym, 0, 0, [])
+            check(layer_on() == 1, f"push is idempotent: layer_on={layer_on()}")
+            _run_cave_fn(rt, rl_pop_layer_sym, 0, 0, [])
+            _run_cave_fn(rt, rl_pop_layer_sym, 0, 0, [])
+            check(layer_on() == 0, f"pop is idempotent: layer_on={layer_on()}")
+
+        # Session 80 continued (6): [BANK] NOT held -> rl_bank_yes must be
+        # TRANSPARENT. Its poke into the [BANK] layer's YES record outlives the
+        # layer (measured on the real dispatcher: the pop restores the NO slot
+        # but not this one), so it keeps being reached with no [BANK] down. It
+        # must then delegate to whatever owned the slot before the overlay, NOT
+        # open the picker -- otherwise [YES] alone opens it forever after, and
+        # stock [YES] is gone.
+        reset_gates(menu=0, bank_held=0)
+        rt.uc.mem_write(_sym("rl_yes_save"), struct.pack(">I", 0))
+        calls = []
+        end = _run_cave_fn(rt, rl_bank_yes, 0x31, 1, calls)
+        check(end == "rts" and g(G_MENU_A) == 0 and POPUP2_FN not in calls,
+              f"[BANK] not held, nothing saved: picker must NOT open -> "
+              f"G_MENU={g(G_MENU_A)} popup2={POPUP2_FN in calls}")
+
+        reset_gates(menu=0, bank_held=0)
+        rt.uc.mem_write(_sym("rl_yes_save"), struct.pack(">I", STOCK_YES_H))
+        calls = []
+        end = _run_cave_fn(rt, rl_bank_yes, 0x31, 1, calls)
+        check(g(G_MENU_A) == 0 and POPUP2_FN not in calls,
+              f"[BANK] not held: delegates to the saved handler instead of "
+              f"opening -> end={end} G_MENU={g(G_MENU_A)}")
+
         # Session 80 continued (6): already open -> [YES] must EXECUTE, not sit
         # inert. While [BANK] is held the YES dispatch slot IS rl_bank_yes, so
         # the natural "hold [BANK], tap [YES] twice" gesture used to have its
@@ -790,15 +887,15 @@ def cmd_combo(rt):
     reset_gates(menu=1, sel=0)
     for step in range(n + 1):
         calls = []
-        end = _run_cave_fn(rt, rl_arr_b, 0x33, 1, calls)
+        end = _run_cave_fn(rt, rl_arr_b, 0x20, 1, calls)   # DOWN = 0x20
         want = (step + 1) % n
         check(end == "rts" and g(G_SEL_A) == want and POPUP2_FN in calls,
-              f"arrow B (next) {step}: G_SEL->{g(G_SEL_A)} (want {want}) popup2={POPUP2_FN in calls}")
+              f"DOWN 0x20 (next) {step}: G_SEL->{g(G_SEL_A)} (want {want}) popup2={POPUP2_FN in calls}")
     reset_gates(menu=1, sel=0)
     calls = []
-    end = _run_cave_fn(rt, rl_arr_a, 0x34, 1, calls)
+    end = _run_cave_fn(rt, rl_arr_b, 0x33, 1, calls)
     check(end == "rts" and g(G_SEL_A) == n - 1 and POPUP2_FN in calls,
-          f"arrow A (prev) from 0: G_SEL->{g(G_SEL_A)} (want {n-1}) popup2={POPUP2_FN in calls}")
+          f"UP 0x33 (prev) from 0: G_SEL->{g(G_SEL_A)} (want {n-1}) popup2={POPUP2_FN in calls}")
 
     # --- UP/DOWN only: LEFT/RIGHT and non-press events must NOT move G_SEL ---
     # Set by emu_reload2.py; patch_reload.s has no keycode/event gate, so this
@@ -809,13 +906,18 @@ def cmd_combo(rt):
         # press AND release AND hold, with auto-repeat. Only UP/DOWN press may
         # move the selection; everything else must be swallowed so the window
         # neither steps twice per tap nor lets stock arrow nav move off it.
+        # Corrected mapping (hardware-derived, Session 80 continued (6)):
+        # 0x4004b970 = UP 0x34 + DOWN 0x21 (vertical); 0x400491a0 = LEFT 0x20 +
+        # RIGHT 0x33 (horizontal, swallowed wholesale while the picker is open).
+        # Corrected AGAIN (hardware, Session 80 continued (7)): 0x4004b970 =
+        # LEFT/RIGHT (0x34 + 0x21), 0x400491a0 = UP/DOWN (0x33 + 0x20).
         for fn, nm, code, ev, why in (
-                (rl_arr_a, "rl_arr_a", 0x21, 1, "RIGHT press"),
-                (rl_arr_b, "rl_arr_b", 0x20, 1, "LEFT press"),
-                (rl_arr_a, "rl_arr_a", 0x34, 0, "UP release"),
-                (rl_arr_b, "rl_arr_b", 0x33, 0, "DOWN release"),
-                (rl_arr_a, "rl_arr_a", 0x34, 2, "UP hold/auto-repeat"),
-                (rl_arr_b, "rl_arr_b", 0x33, 2, "DOWN hold/auto-repeat")):
+                (rl_arr_a, "rl_arr_a", 0x34, 1, "LEFT/RIGHT press (a)"),
+                (rl_arr_a, "rl_arr_a", 0x21, 1, "LEFT/RIGHT press (b)"),
+                (rl_arr_b, "rl_arr_b", 0x33, 0, "UP release"),
+                (rl_arr_b, "rl_arr_b", 0x20, 0, "DOWN release"),
+                (rl_arr_b, "rl_arr_b", 0x33, 2, "UP hold/auto-repeat"),
+                (rl_arr_b, "rl_arr_b", 0x20, 2, "DOWN hold/auto-repeat")):
             reset_gates(menu=1)
             rt.uc.mem_write(G_SEL_A, b"\x01")
             end = _run_cave_fn(rt, fn, code, ev, [])
@@ -826,10 +928,10 @@ def cmd_combo(rt):
     # --- arrows fall through untouched when the window is closed ---
     reset_gates(menu=0)
     end = _run_cave_fn(rt, rl_arr_a, 0x34, 1, [])
-    check(end == "ARROW_A_RESUME(fell through)", f"arrow A closed -> {end}")
+    check(end == "ARROW_A_RESUME(fell through)", f"arrow A (L/R) closed -> {end}")
     reset_gates(menu=0)
     end = _run_cave_fn(rt, rl_arr_b, 0x33, 1, [])
-    check(end == "ARROW_B_RESUME(fell through)", f"arrow B closed -> {end}")
+    check(end == "ARROW_B_RESUME(fell through)", f"arrow B (U/D) closed -> {end}")
 
     # --- [YES] executes + closes, per selection ---
     for sel, name, want_kind, want_n_parts, want_seqpost in COMBO_ITEMS:

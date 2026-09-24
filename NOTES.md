@@ -25886,3 +25886,3929 @@ final in one image" therefore needs: add `patch_triglock`, drop `patch_directjum
 `patch_reload2`, re-pack the caves, and drop the `[YES]`-handler trampoline that exists
 only because DIRECT JUMP and RELOAD2 both want `0x4005e4c8`. That is a real change and the
 resulting image would want its own hardware pass before being called shippable.
+
+## Session 80 continued (6) (2026-09-21, `wip`) — RELOAD2: the real key path is testable at last, and it found a bug present since `[BANK]`+`[YES]` shipped
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (5)").
+
+### The gap that mattered: nothing had ever driven the REAL key path
+
+Every test in this repo reaches the reload by calling `rl_arm_trk` directly.
+`emu_reload.py`'s own `cmd_trk` explains why — driving the full `rl_yes` "opens a
+scheduling window in which the posted worker starts *inside* `call_as_main` and
+the borrowed idle slot never cleanly returns to `MAIN_SPIN`". The workaround was
+adopted years-deep and never revisited, so the dispatch table, `rl_bank_yes`,
+`rl_yes_exec`'s real popup close, and `[BANK]` release had **never** been
+exercised together.
+
+`tools/diag_reload2_realkey.py` (new) closes that gap by driving **`set_key_state`
+`0x40031734`** — the sole per-key dispatcher, verified here to read
+`(code@4, event@8)`, bounds-check the code and index the 24-byte-stride table at
+`0x46c7d8de` before calling the record's handler. Driving *it* rather than a
+handler is what makes this the real path; octabam's own `press_key_live` calls
+handlers directly with a different signature (`action(edge)`) and would skip the
+table entirely.
+
+**The feared scheduling obstacle never materialised.** The gesture runs clean.
+That workaround was more conservative than necessary, and the real path has been
+testable all along.
+
+### The bug: our `[BANK]`-layer poke OUTLIVES the layer
+
+Measured, three iterations, after `[BANK]` release:
+
+```
+[BANK] release   YES=0x400d7400  NO=0x40081304  depth=2  BANKlayer=popped
+[YES] alone   -> G_MENU=1        ** picker opens with no [BANK] held **
+```
+
+The overlay **is** popped correctly, and the rebuild **does** restore the NO slot
+(`0x4007b25c` → the underlying handler) — but the YES slot keeps pointing at
+`rl_bank_yes`. The asymmetry names the cause: **NO's record has a non-NULL press
+in stock; YES's is NULL, and we poked a non-NULL value into it. The pop's rebuild
+does not restore a slot that was NULL in stock.**
+
+Consequence on hardware: from the first `[BANK]` press onward, `[YES]` alone
+opens the RELOAD picker and stock `[YES]` is gone. Because an open picker's
+`[YES]` *executes*, stray `[YES]` presses can fire reloads. **This has been in
+every build since `[BANK]`+`[YES]` shipped, including ones the user called
+"operating cleanly"** — it needed the real dispatch path to become visible.
+
+`[NO]` is affected in the mirror image: while stale it reaches the overlay's own
+`0x4007b25c`, which knows nothing of our picker, so the picker is uncancellable.
+That is what made iteration 2 of the first run read as nonsense — the probe's
+`[NO]` had failed to close the picker and every subsequent state was shifted.
+
+### TWO WRONG FIXES BEFORE THE RIGHT ONE
+
+1. **"The slot is never restored"** — right symptom, wrong reason. I measured
+   layer *depth*, not *identity*; depth returning to baseline does not prove OUR
+   overlay popped.
+2. **"The overlay is stranded"** — also wrong, and it revived a theory I had
+   already declared dead. The identity check killed both in one run:
+   `BANKlayer=popped` while `YES=0x400d7400`.
+3. **Writing the saved value back into the dispatch table — MEASURED HARMFUL,
+   do not retry.** After one direct write: the next `[BANK]` press no longer
+   applied our record at all (slot stayed at the underlying handler with the
+   layer LINKED), the gesture went completely dead (`rl_job+0`, `bank_yes+0`),
+   and the layer stack began unwinding (`depth 3 → 2 → 1`). **The runtime table
+   is owned by the rebuild; poking it desyncs the layer machinery.** It looks
+   like the obvious fix, so the source now carries a note saying so.
+
+### The fix that works: be transparent, never touch the table
+
+`rl_bank_yes` now gates on the per-key HELD flag (`is_key_held([BANK])` =
+record+16 = `0x46c7d8ee + 0x2f*24` = `0x46c7dd56`). When `[BANK]` is not
+physically down it **delegates** — a tail `jmp` to whatever handler owned the
+slot before the overlay pushed (snapshotted by `rl_bank_press`, which runs before
+the push at `0x4007af58`), with the same `(code@4, event@8)` frame. Nothing is
+written to the dispatch table.
+
+Verified on the real path, 3/3 iterations: `[YES] alone -> G_MENU=0` (no picker),
+while the gesture still works every time (`bank_yes+2`, `rl_job+1`, `parse+17`,
+`G_KIND` settles 0).
+
+### BOTH lightweight harnesses were lying, in the same way
+
+`--combo` and `emu_reload2_keymap.py` both failed once the gate existed, because
+**they call handlers directly and the per-key held flag is set by `set_key_state`,
+not by the handler**. Neither modeled it. This is not tests-bent-to-fit-code: the
+real-key harness proves the flag *is* set on the real path, and driving
+`rl_bank_yes` with it clear was never a gesture a user could perform. Both
+harnesses now set it, with a comment saying why, and `--combo` gained two checks
+for the delegate path itself (nothing-saved → must not open; saved handler →
+delegates).
+
+### Also fixed this session
+
+- **Picker is UP/DOWN only, press only** (user's request). Both arrow handlers are
+  shared by two keycodes AND mapped for press/release/hold with auto-repeat, so
+  the old detours stepped the selection TWICE per physical tap plus once per
+  repeat tick. `--combo` only ever drove event=1, which is why it never showed.
+- **`[YES]` executes an already-open picker** while `[BANK]` is still held — the
+  "hardly ever executes" report. The natural gesture (hold `[BANK]`, tap `[YES]`
+  twice) had its second tap swallowed because the YES slot IS `rl_bank_yes` while
+  `[BANK]` is down.
+- **KB CORRECTION (hardware-derived): DOWN is `0x21`, not `0x33`.** See the
+  memory-map entry; the old pairing came from octabam (MKII-oriented) and the
+  user's "ARROW DOWN does not work" report falsified it.
+
+### Still open
+
+`RELOAD BUSY` is **not reproduced** — `G_KIND` settles to 0 on every iteration of
+every harness, including the real key path, and the user reports it does not
+clear by waiting (which already killed the "storage task merely busy" theory).
+The `[YES]`-alone bug is a plausible *contributor* on hardware (a stray reload
+leaves `G_KIND` busy for the next deliberate one) but that is NOT established.
+Also open: the ~1 s stall (root cause solid, fix reverted in "(5)"), and the list
+UI.
+
+**User's framing to hold onto**: TRK SEQ needs one track's sequence data, PTN SEQ
+one pattern's, PART + PTN SEQ that plus the linked Part. **None needs the bank.**
+One pattern is `0x8EEC` = 36,588 B on disk (real `bank01.strd` = 636,113 B), so
+the target is a ~36 KB read with no live-blob rewrite — and the file is
+fixed-stride (`0x16` header + `0x8EEC`/pattern, which our own test code already
+indexes arithmetically), so the worker could `fseek` straight to pattern P
+instead of parsing 0..P and discarding.
+## Session 79, continued a twenty-seventh time — D7 model CONFIRMED by injection; the one-hook design is earned
+
+`tools/diag_d7_inject.py` (new) overrides the `D7` register at `0x400a4834` (after `D7` is
+built, before the rebuild loop reads it) and compares the per-track arrays the loop actually
+produces against the model. No firmware bytes touched -- an emulator register poke, so the
+hypothesis is tested without committing to a patch. cont.23 died of being asserted from a
+static chain without a runtime check; this is that check.
+
+Model under test (from cont.26's decode):
+
+```
+tps_t        = LEN_TBL[scale_t]
+q            = (D7 - 1 + tps_t) / tps_t        0x400a4912, signed, truncating
+NEXT_STEP[t] = q mod length_t                  0x400a4976 remainder, stored 0x400a497a
+PAIR[t]      = D7 - q*tps_t                    0x400a4920, stored 0x400a4924
+```
+
+### Result 1 — stock, natural boundary, no injection: **16/16 match**
+
+`D7 = 0`, `*(long)0x80006628 = 0` at frame 5112. All 16 tracks: `NEXT_STEP = 0`, `PAIR = 0`.
+Confirms both the model and that `0x80006628` is normally **0** -- so it is a *start offset*,
+not a pattern length. cont.23's reading stays refuted; cont.26's decode is validated.
+
+### Result 2 — stock, `D7 = 48` injected, switching INTO the per-track-scale pattern: **16/16 match**
+
+Target pattern `SCALE_MODE = 1`, so per-track fields are live:
+
+| track | SCALE | LEN | tps | NEXT_STEP | model | STEP |
+|-------|-------|-----|-----|-----------|-------|------|
+| 0, 3-15 | 2 | 16 | 6 | 8 | 8 | 8 |
+| 1 | **0** | 16 | **3** | **0** | 0 | 0 |
+| 2 | 2 | **12** | 6 | 8 | 8 | 8 |
+
+Track 1 at 2x: 48 ticks / 3 = 16 steps = a full cycle of its 16-step length, so it lands back
+at 0 while the 1x tracks sit at 8 -- musically correct, not a desync. Track 2 carries a
+*different length* (12) and still lands correctly. **A non-zero `D7` distributes coherently
+across both differing scales and differing lengths**, which is precisely AR's commit
+semantics, performed by OT's own existing code.
+
+Since `D7 = LEN_TBL[masterScale] * *(long)0x80006628`, that global is in **master steps**: to
+resume at master step N, set it to N.
+
+### CORRECTION to an overclaim made earlier this session
+
+An earlier reading of the patched run called `STEP[1] = 9` against `2` elsewhere "the
+differently-scaled-track desync reproduced". **Wrong.** Stock shows the same structure
+(`STEP[1] = 15` against `0`), because `CNTDN[1] = 3 = LEN_TBL[2] - LEN_TBL[0] = 6 - 3` -- the
+designed scale-difference phase delay from cont.21. A differently-scaled track defers its
+rebuild by exactly that delay. It is correct stock behaviour, not a fault.
+
+### OPEN — the current patch breaks this very mechanism
+
+The same observation run against `out/mainos_directjump_v4.bin` with an armed DJ commit gave
+`NEXT_STEP = 2` for all 16 tracks where the model (and stock) give **0** -- **0/16**. So the
+existing patch perturbs the per-track rebuild it should be driving. Not yet explained, and it
+is an argument for the redesign removing hooks D/E/F rather than adding to them. Do not build
+without accounting for it.
+
+### The hook site
+
+`dj_c` already sits at `0x400a4840` -- **after** `D7` is formed (`0x400a4812` / `0x400a4826`)
+and **before** the rebuild loop's cursor setup (`0x400a485a`) and body (`0x400a4884`). It is
+already in exactly the right place in the instruction stream; it needs to set `D7` as well as
+the master `STEP`.
+
+### Status
+
+Verification step complete and positive. The one-hook design is now measured rather than
+inferred. Remaining before a build: explain the patched-image `0/16`, then implement
+(`dj_c` sets `D7 = resumeStep * LEN_TBL[masterScale]`), then delete hooks D/E/F, then prove
+dynamically on both scale branches before any flash.
+## Session 79, continued a twenty-eighth time — DIRECT JUMP WORKS IN THE EMULATOR: 16/16 per-track, including a 2x track and a 12-step track
+
+First time the feature has produced a correct per-track result. Two changes, both small.
+
+### Hook H @ `0x400a47f6` (new) -- seed stock's own rebuild instead of repairing after it
+
+Replaces `lea (0x400eb034).l,%a0` (6 B, `41f9400eb034`). If `G_ARMED`, writes
+`0x80006628 = G_ABSTICK` and falls through to the displaced `lea`. Site chosen because
+`0x80006628` is READ at `0x400a4812`/`0x400a4826` to build `D7`, and this is the last 6-byte
+instruction on the commit path before both. `D0` (the pattern-blob offset, indexed by the very
+next instruction at `0x400a4802`) is preserved; only `D1` is touched, saved and restored.
+
+`G_ABSTICK`, not `G_STEP` -- per Hook C's own Session 70 note, once `STEP` has wrapped against
+the outgoing length the elapsed information is gone and no later modulo recovers it.
+
+### `dj_c` -- TWO bugs found and fixed
+
+**1. Wrong modulus.** It computed `d1 = LEN_TBL[scaleIdx]` and called it `newLen`. cont.20
+measured `LEN_TBL` as a **ticks-per-step** table, not a length table. So the resume step was
+`absoluteTicks mod 6` -- a number in 0..5, unrelated to any musical position. Measured:
+`G_ABSTICK = 26` gave `STEP = 2`. Now reads the pattern's real LENGTH field
+(`PAT_LEN 0x400eb033` = pattern `+0x8e53`).
+
+**This is cont.20's Correction 1 having been silently baked into the patch all along.** The
+table was misread, the misreading propagated into `dj_c`, and nothing caught it because no test
+ever checked a per-track position.
+
+**2. `D7` override.** `dj_c` set `D7 = resumeStep * LEN_TBL[scale]` at `0x400a4840` -- i.e.
+*after* stock builds `D7` at `0x400a4812`/`0x400a4826` and *before* the rebuild loop reads it at
+`0x400a4884`. It silently replaced the correct absolute offset with a small wrong one on every
+armed commit. Measured with both present: `D7 = 156` at `0x400a4834`, `12` by the time the loop
+ran. Removed; Hook H owns `D7` now.
+
+That also explains cont.27's unexplained `0/16` on the patched image: every value there was
+consistent with `D7 = 12`, so tracks 1 and 2 "matching" was coincidence.
+
+### Result -- patched firmware, armed commit, DJTESTxxx pattern 1 -> 0 (`SCALE_MODE = 1`)
+
+`G_ABSTICK = 26` steps, `0x80006628 = 26`, `D7 = 156` ticks. **16/16 tracks match the model:**
+
+| track | SCALE | LEN | tps | STEP | derivation |
+|-------|-------|-----|-----|------|------------|
+| 0, 3-15 | 2 | 16 | 6 | **10** | 156/6 = 26 steps, 26 mod 16 |
+| 1 | **0 (2x)** | 16 | **3** | **4** | 156/3 = **52** steps, 52 mod 16 |
+| 2 | 2 | **12** | 6 | **2** | 26 mod 12 |
+
+Exactly the user's stated model: every pattern behaves as if it had been playing silently the
+whole time at its own length. The 2x track has genuinely advanced 52 of its own steps; the
+12-step track wrapped against 12. Coherent across differing scales AND differing lengths, which
+is the case this thread has never once got right.
+
+Build: 904 bytes changed, 0 unexpected outside the cave, manual-trig bytes identical, all
+guards passed.
+
+### NOT yet done -- do not flash on this entry alone
+
+- DJ-OFF regression gate (`diff_stock_vs_patch.py`) has not been re-run against this build, on
+  either scale branch. Required before any flash.
+- Hooks D/E/F are still present and still doing per-track repairs that should now be redundant
+  or harmful. They have not been removed or re-justified. `dj_pertrack_fix` in particular writes
+  the same arrays the rebuild loop now sets correctly.
+- `D7 = tps * G_ABSTICK` is a 32-bit `muls.l`; overflow past ~2^31/tps step-ticks is unverified.
+- Only one switch direction (1 -> 0) and one bank tested.
+## Session 79, continued a twenty-ninth time — Hook F removed; it was clobbering 7 of 8 audio tracks. Measurement-timing error caught
+
+### A measurement error in cont.28, caught and corrected
+
+cont.28 claimed 16/16 per-track correctness on the patched build. The snapshot was taken at
+`0x400a4d36` -- which is **Hook F's own detour site, i.e. its ENTRY**, before it writes. It
+measured stock's rebuild-loop output and never saw what Hook F then did to it. Adding a second
+snapshot at `0x400a4d3c` (the instruction after the 6-byte detour returns):
+
+```
+ t   STEP@loop  STEP@afterF  TICKS@afterF
+ 0..7   10 / 4        2            2       <<< CLOBBERED  (audio)
+ 8..15    10         10            0       (MIDI -- Hook F never touches 8..15)
+```
+
+So the cont.28 build was still broken, and worse than it looked: audio tracks landed on 2 while
+MIDI tracks landed on the correct 10, i.e. **it desynced audio against MIDI on every armed
+commit** -- an audible signature, and one that would have been blamed on something else.
+
+Lesson, and it is the same one as cont.25's `G_ARMED` sampling: a snapshot taken at a hook's
+*entry* measures the state before that hook, not after. Choose the observation point relative
+to the thing being measured, and say which side of it you are on.
+
+### Hook F carried the SAME `LEN_TBL` bug as `dj_c`
+
+`dj_pertrack_fix` computed, per audio track:
+
+```
+d1 = LEN_TBL[scaleIdx]        | comment calls it "this track's OWN trackLen"
+d0 = G_ABSTICK mod d1         | = G_ABSTICK mod TICKS-PER-STEP  = 26 mod 6 = 2
+0x800064d0[t] = d0            | per-track STEP array
+0x800064f0[t] = d0            | ticks-within-step array
+```
+
+Same misreading of `LEN_TBL` that cont.28 fixed in `dj_c`, in a second place. It wrote a
+tick-remainder into a step counter, and the identical value into the sub-step tick counter.
+That is also the mechanism of the flashed hardware regression (cont.20), surviving the
+`dpf_normal` bounds-guard fix because the guard bounded the index, not the semantics.
+
+**Removed** -- the detour entry is gone from `build_directjump_v4.py`. Its original purpose was
+repairing per-track state after a commit; Hook H now seeds stock's own rebuild loop so that
+state is correct when it is first written, and there is nothing left to repair.
+
+### Current build, measured
+
+Patched firmware, armed commit, DJTESTxxx pattern 1 -> 0 (`SCALE_MODE = 1`),
+`G_ABSTICK = 26` -> `0x80006628 = 26` -> `D7 = 156` ticks:
+
+| track | SCALE | LEN | tps | STEP | survives Hook F site | TICKS |
+|-------|-------|-----|-----|------|----------------------|-------|
+| 0, 3-15 | 2 | 16 | 6 | 10 | 10 | 0 |
+| 1 | 0 (2x) | 16 | 3 | 4 | 4 | 0 |
+| 2 | 2 | 12 | 6 | 2 | 2 | 0 |
+
+16/16, values survive, and `TICKS = 0` on every track (correct at a step boundary). Audio and
+MIDI now agree.
+
+Build: 899 bytes changed, 0 unexpected outside the cave, manual-trig bytes identical.
+
+### DJ-OFF regression gates -- PASS, but against the PREVIOUS build
+
+Both gates below were launched before Hook F was removed, so they validate the cont.28 image,
+not this one:
+
+| fixture | SCALE_MODE | rebuild loop | result |
+|---------|-----------|--------------|--------|
+| DJTESTxxx pattern 0 | 1 | 8 | IDENTICAL, 38 samples |
+| DJTESTxxx pattern 1 | 0 | 8 | IDENTICAL, 38 samples |
+
+Hook F was gated on `G_JUST_COMMITTED` (set only by `dj_c`, armed only), so it should have been
+inert with the feature off either way -- but that is an argument, not a measurement. **Re-run
+required against the current image before any flash.**
+
+### Still outstanding
+
+- Re-run both DJ-OFF gates on the current build.
+- Hook D (`dj_scaleix_fix`) not yet re-justified. It fixes a genuine stock staleness bug in the
+  master `SCALE_IX`, independent of position, so it probably stays -- but `dj_c` also writes
+  `SCALE_IX`, so the two may now be redundant. Unchecked.
+- `D7 = tps * G_ABSTICK` 32-bit `muls.l` overflow bound still unverified.
+- Only one switch direction (1 -> 0), one bank, one project.
+## Session 79, continued a thirtieth time — DJ-OFF gates pass on the current build; gate blind spot closed; Hook D examined
+
+### DJ-OFF regression gates -- PASS on the CURRENT image (post-Hook-F-removal)
+
+| fixture | SCALE_MODE | rebuild loop | result |
+|---------|-----------|--------------|--------|
+| DJTESTxxx pattern 0 | 1 (per-track, incl. the 2x track) | 8 | IDENTICAL, 38 samples |
+| DJTESTxxx pattern 1 | 0 (uniform) | 8 | IDENTICAL, 38 samples |
+
+Both crossed a real pattern boundary (`0x400a4884` x8) and cleared the liveness precondition
+(16/16 tracks advancing, 856 loop executions).
+
+### Gate blind spot found and closed
+
+`diff_stock_vs_patch.py` compared the per-track SCALE array (`0x8000663e`) but **not** the
+master `SCALE_IX` (`0x8000663d`) -- which is precisely the byte Hook D (`dj_scaleix_fix`)
+writes, and Hook D is **unconditional**, not gated on `DJ_MODE`. So the gate would have
+reported IDENTICAL whatever Hook D did with the feature off. `BAR_CTR` (`0x800065b2`) was
+likewise uncompared, and Hook H seeds it indirectly as the low word of the long at
+`0x80006628`. Both added.
+
+Re-run with the widened comparison, DJTESTxxx pattern 0: still **IDENTICAL**. So Hook D does
+not change DJ-OFF behaviour on this fixture. The concern was worth testing and did not
+reproduce.
+
+### Hook D -- examined, not yet fully cleared
+
+`dj_scaleix_fix` @ `0x400a4220` replaces stock's `move.b D2b,(0x8000663d)` and does NOT replay
+it; it recomputes the ACTIVE pattern's scale and stores that instead. Two observations:
+
+1. Stock's `D2` at that point is **not a scale index** -- the nearest write is
+   `move.l D0,D2 ; addq.l #1,D2` (`0x400a419c`). So Hook D replaces stock's semantics rather
+   than un-staling a copy of the same quantity. Session 70's rationale (stock stores the
+   OUTGOING pattern's index) may still be right about the *symptom* while being wrong about
+   the mechanism; not resolved.
+2. It reads the scale from `PAT_SCALE` (`+0x8e54`) unconditionally, but cont.23 measured that
+   stock's own master-scale source is `+0x8e52` when `SCALE_MODE` is set and `+0x8e54` only
+   when it is clear. On DJTESTxxx both fields are 2, so no fixture here can distinguish them.
+   **A pattern with `SCALE_MODE = 1` and `+0x8e52 != +0x8e54` is needed to test this**, and
+   until then Hook D's field choice is unverified for per-track-scale patterns.
+
+Hook D stays for now -- it is measured inert with the feature off, and its Session 70
+justification (a real hardware symptom: a pattern playing past its own length) has not been
+withdrawn. But it is the last unconditional patch in the build and the only one whose source
+field is known to disagree with stock's own convention in a case we cannot currently exercise.
+
+### Still outstanding
+
+- Reverse switch direction (0 -> 1) and back-to-back switches -- Session 70's stale-`SCALE_IX`
+  symptom was specifically a *double-switch* phenomenon, so a single 1 -> 0 test does not
+  cover it.
+- `D7 = tps * G_ABSTICK` 32-bit `muls.l` overflow bound.
+- One bank, one project.
+
+## Session 80 continued (7) (2026-09-22, `wip`) — RELOAD2: window deferral REVERTED; two long-standing factual errors corrected; arrows swapped again
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (6)").
+
+### CORRECTION 1 — stock RELOAD BANK does NOT glitch the audio. It STOPS THE TRANSPORT.
+
+User, on hardware: *"Reload Bank (from the PROJECT menu) also loads fine. But as
+we know, it stops the sequencer (this is the behavior of stock — our notes which
+say it 'glitches' the audio are not correct — it just stops the transport)."*
+
+This claim has been repeated across `README.md`, `readme.draft.md` and this file
+since the feature was first described, and it is wrong. Both READMEs are fixed.
+
+### CORRECTION 2 — the feature's actual definition (user's framing, worth holding onto)
+
+*"The stock Reload Bank function is exactly the same as the PART + PTN SEQ that
+we are trying to build, excepting that we are trying to get ours to work in time
+with the master clock and without needing to stop the transport."*
+
+So the data operation is **not** the novel part — stock already does it. What
+RELOAD2 adds is (a) finer granularity (one track / one pattern rather than a
+whole bank) and (b) **seamlessness**: in time with the master clock, transport
+never stopped. That reframes the ~1 s "stall + restart" measured in "(4)": it is
+very plausibly stock's own transport STOP/START riding along with the whole-bank
+reload, not an I/O cost. The seamlessness target is suppressing that stop — a
+different problem from the one "(4)"'s reverted fix attacked.
+
+### CF-contention theory: DEAD
+
+"(6)" proposed that `RELOAD BUSY` correlated with the audio engine streaming
+samples off the card, starving the storage task. User retracted the supporting
+observation: **STATIC and FLEX reload identically**, and stock RELOAD BANK works
+while running. The apparent correlation was an artifact of the overall
+bugginess (notably [BANK] sticking on/off). Do not revive this.
+
+### The [BANK] window deferral is REVERTED (user's call)
+
+Hardware, on the "(6)" build:
+- *"Occasionally the stock BANK function will get 'stuck' on, such that pressing
+  a trig will bring up ... 'bank X: select ptn'"* — the overlay never torn down.
+- *"The stock Bank function often also gets 'stuck' off, such that a single tap
+  no longer opens the bank select dialog."* — the deferred window never drawn.
+
+Both live in the release path "(3)" added. The deferral was **cosmetic** (it
+stopped the SELECT BANK toast flashing under our picker) and it cost two real
+stock-function failures. `rl_bank_rel` is **deleted**; `[BANK]` release is
+byte-for-byte stock again, so stock's own window/overlay lifecycle runs as
+designed. Detour count 8 → 7; image 1362 → **1295 B**.
+
+**What is deliberately KEPT**: the `rl_bank_press` detour at `0x4007af42`, now
+doing *only* the YES-dispatch-slot snapshot into `rl_yes_save`, then replaying
+its two displaced instructions and returning to stock's own window-show
+(`BANK_PRESS_RES` `0x4007af48`). `rl_bank_yes`'s delegate guard from "(6)" needs
+that snapshot: our poke into the [BANK] layer's YES record outlives the layer, so
+when `[BANK]` is not physically held the handler must hand the key back to
+whatever really owns it. **Without the snapshot it would swallow `[YES]` instead
+— worse than the bug it fixes.** Verified: `rl_yes_save` holds the pre-push slot
+value, and the press path is otherwise stock.
+
+### CORRECTION 3 — the arrow pairs, again (and why "(6)" got it wrong)
+
+Hardware: *"The arrow keys L/R work, but U/D do not. This should be reversed."*
+So:
+  `0x4004b970` (`0x34` + `0x21`) = **LEFT/RIGHT**
+  `0x400491a0` (`0x33` + `0x20`) = **UP/DOWN**
+— the opposite of "(6)", and the opposite of the original KB pairing too.
+
+**Root cause of the error: I inferred something the user never said.** The "(6)"
+report stated only that ARROW DOWN did not work. I read that as "UP works" and
+used it to anchor `0x34` = UP; the anchor was false, so the whole derivation
+inverted. Two hardware cycles were spent on this.
+
+`rl_arr_b` now owns both vertical directions (`0x33` → prev, `0x20` → next),
+gated on `event == press`; `rl_arr_a` swallows LEFT/RIGHT while the picker is
+open so stock arrow navigation cannot move off the window. Picker closed → both
+fall through untouched. **Which of `0x33`/`0x20` is UP vs DOWN is still
+unverified** — the `0x400491a0` wrapper never examines the keycode, so nothing in
+the firmware distinguishes them; if the picker steps the wrong way, swap those
+two `.equ` lines and nothing else.
+
+### Validation
+
+`--combo` **27/27**, `emu_reload2_keymap.py` **ALL GOOD**, `diag_bank_window.py`
+**ALL GOOD** (its `--patched` section rewritten to assert the press path is
+behaviourally STOCK again, plus that the snapshot lands), `--stress` **ALL GOOD**,
+`--trk` **ALL GOOD**. 1295 B vs stock, 7 detours.
+
+### Still open (unchanged)
+
+`RELOAD BUSY` — still not reproduced in any harness; `G_KIND` settles to 0 every
+time, including on the real key path, and it does not clear by waiting on
+hardware. Both proposed mechanisms are now dead (storage-task-busy, CF
+contention). The ~1 s stall / transport stop, and the list UI, also remain.
+
+### ⚠️ The revert exposes the REAL cause of "hardly ever executes" — and it is architectural
+
+Running the reverted build on the real key path (`diag_reload2_realkey.py`)
+reproduces the user's #1 symptom directly:
+
+```
+it1  [BANK] press        YES=0x400d7400  depth=3  BANKlayer=LINKED
+it1  [YES] (open)        YES=0x400815d8  depth=2  BANKlayer=popped   <-- overlay dies HERE
+it1  [YES] (execute)     rl_job+0  parse+0  bank_yes+1               <-- reload never runs
+it2/it3                  rl_job+0  parse+0  bank_yes+0   G_MENU stuck 1
+```
+
+**Mechanism.** With stock's press-time SELECT BANK window restored, `rl_draw` ->
+`FUN_4005a0e0` **closes any existing popup first** (`tst.l 0x460d1e64` -> `bsr
+0x40056bc0`). Closing stock's bank window fires its `onClose` `0x4007b408`, which
+**pops the [BANK] overlay**. So the instant our picker draws, `[YES]` stops
+routing to `rl_bank_yes`. That is why the deferral build "felt much better" — it
+avoided this by never showing the press window.
+
+**And a second, deeper problem.** After the overlay pops, `[YES]` goes to
+whatever the current UI context uses. In the emulator that is **`0x400815d8`**,
+which appears exactly once image-wide: as a **keymap record pointer at
+`0x400d0e8a`**, i.e. a record in ANOTHER overlay layer. Our `rl_yes` detour lives
+at `0x4005e4c8` (the base-layer handler) and is therefore **shadowed entirely in
+that context**. The "sticky picker answered after release" design only works when
+the active YES handler happens to be the one we detour — which is very plausibly
+the real meaning of "works most of the time".
+
+**Both are the same design flaw: our picker is a modal window that does not own
+its own key routing.** It borrows slots in other people's layers (hence the
+Session 60 dead-hook workarounds, the `[PTN]`/`[BANK]` record pokes, and the
+context dependence).
+
+**The principled fix — NOT yet built, user decision pending:** when the picker
+opens, push OUR OWN keymap layer mapping YES/NO/UP/DOWN to our handlers, and pop
+it when it closes. That is exactly what stock does for its own modal windows, and
+it would make the picker answerable in any UI context, immune to the [BANK]
+overlay's lifetime, and free of every record poke.
+
+Layer format is understood and buildable (measured from `0x400cff14`):
+```
+struct: +0x00 next-link   +0x04 records_begin   +0x20 records_end
+records: 26 B stride, [0]=code [2..5]=press [6..9]=release [10..13]=hold
+         (verified: record 17 = YES at 0x400d00ee = our poke target; 19 records)
+```
+**Risk to respect: a push without a matching pop wedges the keyboard.** Any
+implementation must have the real-key harness proving push/pop balance across
+EVERY exit path — YES-execute, NO-cancel, BUSY-toast — before it is flashed.
+## Session 79, continued a thirty-first time — AR research consolidated into `reference/AR_DIRECT_JUMP.md`; 16-bit position bound MEASURED
+
+### `reference/AR_DIRECT_JUMP.md` (new, canonical, kept in BOTH repos)
+
+At the user's direction, the entirety of the AR DIRECT JUMP reverse engineering and its
+mapping onto the OT now lives in one document, copied verbatim to
+`ar-kyoti-fw/AR_DIRECT_JUMP.md` so neither repo depends on the other being at hand. Contents:
+AR's request path, countdown and commit (including the two 13-track rebuild loops and the full
+eight-array inventory Sessions 1-7 missed); the OT equivalent at `0x400a4884`; a full **AR <->
+OT mapping table**; what the port turned out to be; the three repair hooks and why two were
+harmful; the 16-bit bound; AR-side open items; and the methodology hazards.
+
+**Headline, restated for the record:** AR and OT have the **same architecture**. Both rebuild
+every per-track variable at commit from one master position, dividing by that track's own
+ticks-per-step and wrapping to that track's own length. OT's machinery was already present and
+already correct -- it had simply never been handed a non-zero offset, because `0x80006628` is 0
+at a natural boundary and nothing ever set it. So there was nothing to port: DIRECT JUMP is
+"supply the offset the existing AR-equivalent code already expects".
+
+Two real differences survive the mapping: AR's pattern-pointer write is atomic (two adjacent
+instructions) where OT's `ACT_PAT`/`ACT_BANK` are 12 bytes apart; and AR commits from its own
+per-tick function where OT's rebuild lives inside the pattern-boundary body.
+
+### Reverse switch direction -- 16/16
+
+DJTESTxxx pattern 0 -> 1 (into the `SCALE_MODE = 0` pattern), armed, `G_ABSTICK = 26`,
+`D7 = 156`: all 16 tracks match the model. Track 1 shows `STEP = 9`, `CNTDN = 3` -- the
+designed scale-difference deferral (cont.27), not a fault.
+
+### MEASURED: 16-bit position bound -- a real must-fix limitation
+
+`NEXT_STEP[t]` is stored with `move.w` (`0x400a4916`) and read back **sign-extended** with
+`mvs.w` (`0x400a4950`). The first divide's quotient equals `G_ABSTICK` when a track's
+resolution matches the master's, so `G_ABSTICK` must fit a **signed word**.
+
+Probed directly by poking the counter (`--set-abstick`, rather than emulating an hour of
+playback): `G_ABSTICK = 40002` -> `D7 = 240012` -> `NEXT_STEP = -14`, `STEP = 242` on a
+16-step pattern. Garbage, and badly so.
+
+Bound ~= **32767 master steps**, i.e. roughly **68 minutes of continuous transport** at
+120 BPM with 16th steps. Hook H must reduce `G_ABSTICK` before storing it. **The reduction
+modulus is open work**: it has to be a common multiple of the per-track lengths in play or
+per-track positions shift, and the fastest-track ratio also has to keep the quotient inside a
+signed word -- those two constraints pull against each other and I do not yet have a
+construction that satisfies both for arbitrary length/scale combinations.
+
+AR does not have this failure mode, because its dividend is the bounded
+`masterStep mod patternLen`, not an unbounded absolute counter -- a direct consequence of AR
+committing from its own per-tick function instead of reusing a boundary body. **That is the
+one place where AR's architecture is genuinely better than OT's, and it is the thing this
+port has not solved.**
+
+### Hook D fixture hunt -- bank 0 exhausted
+
+Scanned all 16 patterns of DJTESTxxx bank 0: every one has `+0x8e52 == +0x8e54 == 2`, so none
+can distinguish Hook D's unconditional `+0x8e54` read from stock's `SCALE_MODE`-dependent
+`+0x8e52`. Pattern 0 is the only `SCALE_MODE = 1` pattern and carries the per-track spread
+(`SCALE=[2,0,2,2,2,2,2,2]`, `LEN=[16,16,12,16,...]`). Rescan of the refreshed export, other
+banks, in progress.
+## Session 79, continued a thirty-second time — overflow GUARD added (not a fix); Hook D fixture still absent
+
+### Guard in Hook H — silent garbage becomes graceful degradation
+
+cont.31 measured the 16-bit bound and established it is reachable in one session
+(`G_ABSTICK` is incremented at `dj_abstick` and **cleared nowhere**, so it accumulates from
+power-on). A correct fix needs a semantically-neutral reduction; that construction is still
+open. In the meantime the failure mode itself was unacceptable: a *silent* jump to a nonsense
+position.
+
+Hook H now computes the master ticks-per-step the same way stock does — `SCALE_MODE`
+(`+0x8e55`) selects `+0x8e52` or `+0x8e54`, then `LEN_TBL[that]` — and refuses to store an
+offset that would overflow:
+
+```
+if G_ABSTICK > 32767                 -> store 0     (also catches a wrapped counter)
+if tps_master * G_ABSTICK > 98301    -> store 0
+```
+
+`98301 = 3 * 32767`, and 3 is the smallest entry in `LEN_TBL`, so the bound is sufficient for
+**any** combination of track scales in the incoming pattern, not just the ones in the fixture.
+Storing 0 is exactly what stock puts there at a natural boundary, so DIRECT JUMP degrades to
+restart-at-step-0 rather than jumping somewhere meaningless.
+
+**Measured, both cases, patched firmware, armed commit, DJTESTxxx pattern 1 -> 0:**
+
+| case | `0x80006628` | `D7` | result |
+|------|--------------|------|--------|
+| `--set-abstick 40002` | 0 | 0 | all 16 tracks STEP 0 — graceful, was STEP 242 |
+| normal (`G_ABSTICK = 26`) | 26 | 156 | 16/16 unchanged: STEP 10 / 4 (2x track) / 2 (len-12 track) |
+
+Build: 964 bytes changed, 0 unexpected outside the cave, manual-trig bytes identical.
+
+**This is a guard, not a fix.** The feature still stops working correctly after ~68 minutes of
+cumulative transport; it just stops safely. The real fix reduces `G_ABSTICK` by the LCM of the
+incoming pattern's per-track cycles (`len_t * tps_t`, in ticks), which is exactly
+semantically neutral because the whole per-track position function is periodic with that
+period. Two obstacles, both open:
+
+1. The reduction must keep the fastest track's quotient inside a signed word, and for
+   pathological length combinations (coprime lengths across 16 tracks) the LCM itself can
+   exceed the representable range — in which case no reduction helps and the guard is the
+   only available behaviour.
+2. Computing an LCM over 16 tracks in the cave is ~50-80 ColdFire instructions plus a 32-bit
+   modulo; feasible, unwritten, and unvalidated.
+
+**AR does not have this problem at all**, because it divides `masterStep mod patternLen` --
+already bounded -- rather than an unbounded absolute counter. That remains the one genuine
+architectural advantage AR holds over OT's path (see `reference/AR_DIRECT_JUMP.md` §6).
+
+### Hook D fixture — exhausted what is available
+
+Scanned all 16 patterns of banks 0 and 1 of the refreshed `DJTESTxxx` export. Every pattern
+has `+0x8e52 == +0x8e54 == 2`; bank 0 pattern 0 is the only `SCALE_MODE = 1` pattern and
+carries the per-track spread (`SCALE=[2,0,2,2,2,2,2,2]`, `LEN=[16,16,12,16,16,16,16,16]`).
+So nothing available distinguishes Hook D's unconditional `+0x8e54` read from stock's
+`SCALE_MODE`-dependent `+0x8e52`. **What is needed is a pattern in PER TRACK scale mode whose
+MASTER SCALE differs from the pattern's default SCALE** — that is a setting in the OT's scale
+setup, not a per-track value, so it cannot be produced by editing track scales.
+
+### Status
+
+- DJ-OFF gates: PASS on both scale branches (needs re-running against this 964-byte image).
+- DJ-ON: 16/16 both switch directions, mixed scales and lengths.
+- Overflow: guarded, not fixed.
+- Hook D: measured inert with the feature off; its field choice remains unverified.
+
+## Session 81 (2026-09-22, `wip`) — PARTREAPPLY report #1 resumed: the real per-trig resolver NAMED, and a measured PICKUP-ownership state leak (but it is NOT the good→good→bug latch)
+
+Resumed the report #1 thread left open by Session 50 ("fix does not address the real
+bug; root cause still open"). Nothing had touched it since — Sessions 51-80 went to
+QLREC/DT/DIRECTJUMP/RELOAD2/MUTE MODE.
+
+**Docs TODO from Session 50 was already done.** Session 50's NEXT flagged that
+README/FLASHING.md still carried the superseded "clean A/B" framing. Commit `13338da3`
+(2026-09-20) already rewrote both (README "Part-change carryover" + FLASHING.md §4.9)
+to the good→good→bug latch framing, report #1 unfixed, #2/#3 unconfirmed. No doc work
+needed; the TODO just never got struck off because that commit didn't say "partreapply".
+
+### FOUND: `FUN_4000f450` is the real per-trig sample resolver (open since Session 49)
+
+Session 49 ruled out `FUN_40005030` and wrongly guessed `FUN_4009d1e8`; the HANDOFF has
+carried "the real per-trig resolver is still unidentified" ever since. It is
+**`FUN_4000f450`**, and the Session-49 tangent had already been standing inside it
+(the "large, not-yet-fully-mapped function spanning roughly 0x4000f000-0x4000f900+,
+true entry point not yet found" — the entry is `0x4000f450`).
+
+- **CORRECTION to the first draft of this entry: it is NOT "sole caller `0x4000421c`".**
+  That direct `jsr 0x4000f450.l` at `0x4000421c` is real but was not the path taken in
+  any run here. The live path is an **indirect dispatch through a per-machine-type
+  function-pointer table at `0x400d6454`**: `a1 = 0x400d6454`, `a0 = *(a1 + type*4)`,
+  `jsr (a0)` at `0x4000d49c` (observed return address `0x4000d49e`). A literal-address
+  grep for `jsr 0x4000f450` cannot see this call — the lesson from the earlier
+  `0x46c7ff3e` hunt (hook the address, don't guess the range) applies to CALLERS too.
+- **The type table names the whole mechanism** (dumped from the image):
+  `[0] STATIC → 0x4000f450`, `[1] FLEX → 0x4000f450`, `[2] THRU → 0x400043f4`,
+  `[3] NEIGHBOR → 0x4000463c`, `[4] PICKUP → 0x4000f450`. **STATIC, FLEX and PICKUP all
+  dispatch into the same resolver**, which then picks the arena internally — the
+  cleanest possible statement of why PICKUP and FLEX can contaminate each other and
+  THRU/NEIGHBOR cannot.
+- Calling convention, read off a live run (`--repeat --own-poke --resolver`) rather
+  than a desynced linear disassembly: `FUN_4000f450(track, slot, flags=0xc0)`. arg1 is
+  the track index — confirmed three independent ways: `a2 = 0x800049d8 + track*0xA8`
+  at `0x4000f484`; observed `a1 = base + arg1*0x48`; observed `a3 = 0x400d61d0 + arg1*4`.
+  `flags=0xc0` comes from `ori.l #0xc0,d0` at `0x4000d48a`.
+- **Which tracks reach it, measured:** exactly 4 calls in the whole round trip — tracks
+  1, 3, 4, 5, all during the FIRST switch, all in task `main` (not `sys`). **Track 0
+  (T1) never reaches the resolver at all**, which is the same "T1 never sounds in the
+  emulator" ceiling reported below, now confirmed at the resolver itself.
+- **It is where STATIC and FLEX part company**: `0x4000f496 tst.l d0` → `d0 == 0` takes
+  `STATIC_ARENA 0x100d5b30` (`0x4000f4b4`) with table `0x46c90a78`; `d0 != 0` takes
+  `FLEX_ARENA 0x100b14f0` (`0x4000f4d8`) with table `0x46c922c4`. Stride `0x448` = 1096
+  = `ARENA_STRIDE` in both branches.
+- This is the structural reason report #1's second reporter narrowed it to **"only when
+  the new machine is FLEX — STATIC on the same switch works correctly"**: PICKUP slots
+  are addressed as `FLEX_ARENA + (128+track)*1096`, i.e. **inside the FLEX arena**, so a
+  stale slot resolves to PICKUP content under FLEX and cannot under STATIC. No previous
+  hypothesis in this thread explained that asymmetry.
+
+### MEASURED: PICKUP ownership is claimed automatically and NEVER released by a Part change
+
+Static (cheap `grep` of the 4-byte address literal over the raw image, then targeted r2
+— 12 literal hits on `0x400d7c4c`; Session 49 had only examined 6):
+
+- **Claim** `0x4000f7d0`, inside the resolver, reached only via `0x4000f7ca bge` failing —
+  i.e. **only when the owner is negative**. Once non-negative, every later PICKUP setup
+  takes the "already owned" path at `0x4000f7e2`, which bails out at three separate
+  conditions (`btst` enable bit; `d4 == d1` already-owner; `tst.b 0x2(a6)`).
+- **Set-up** `FUN_40097204`: per track, machine byte == 4 → set `0x46c7ff3e` bit
+  (`0x40097250`) + ownership machinery; **else branch `0x40097276` clears ONLY the flag
+  bit and does nothing else.** No release, no voice reset.
+- **Release** exists at `0x400a112c` and `0x400a148a` — both inside the one function
+  `FUN_400a10c8`, behind `tst.l 0x800065b8` (transport stopped) and `0x46c7a9fe`. Its 21
+  callers do not include the pattern-change dispatch cases (`0x400620fe`/`0x400621a6`).
+
+Emulator, `tools/emu_partswitch.py --repeat` extended with the ownership registers it
+never sampled (`PICKUP_OWNER 0x400d7c4c`, `PICKUP_ENABLE 0x461054ec`, `PICKUP_CFG
+0x461054f0`, `PICKUP_SKIP 0x46c7ff3e`, `voice+0x14`) plus `watch_mem` on all of them:
+
+1. **Plain `--repeat` (no ownership poke) is STRUCTURALLY BLIND** — `PICKUP_OWNER` reads
+   `0xffffffff` at every snapshot and `voice[T1]+0x14` never becomes 4, so the claim site
+   never executed and the ownership machinery was never engaged. A machine-type byte poke
+   makes the firmware *think* a track is PICKUP without making it a live PICKUP voice.
+   **This is the same precondition failure that defeated `diff_flex_static.py` three times
+   in Session 49** — and it means the 2026-09-13 `--repeat` "byte-identical" null result
+   says nothing about ownership either (it never read these addresses at all).
+2. **`--repeat --own-poke`** (new flag: fabricates the minimal owned state — `owner=T1`,
+   `voice[T1]+0x14=4`, enable bit — which is what the report's own precondition, a PICKUP
+   track "already linked to a sample", looks like): across the full
+   P1→P5→P1→P5 round trip, **224 writes to the skip flag and ZERO writes to
+   `PICKUP_OWNER` / `PICKUP_ENABLE` / `PICKUP_CFG`.** Only writer PCs are `0x40097250`
+   (set ×10) and `0x40097276` (clear ×214), both in `FUN_40097204`, both flag-only.
+   Owner stays `0`, enable stays `0x1`, and **`voice[T1]+0x14` stays `4` (PICKUP) at both
+   arrivals at P5 where the Part says the track is FLEX.**
+
+**So the state leak is real and causally measured**: once the PICKUP buffer is owned,
+a pattern→Part change moving that track off PICKUP clears one flag bit and leaves the
+ownership singleton, the enable bit, and the voice's own machine byte all stale. Part
+data and voice state disagree, permanently. `0x4000d3b4` (ungated by machine type)
+keeps publishing `voice[owner]+0x44` into `0x461054f4` — the pointer the resolver reads
+on its already-owned path — so the staleness does propagate.
+
+### HONEST LIMIT: this leak is NOT the good→good→bug latch, and this harness cannot find it
+
+The ownership state is **identical at arrival #1 and arrival #2** — equally stale at the
+arrival that sounds CORRECT on hardware and the one that sounds WRONG. So stale ownership
+alone cannot be the differentiator between the two passes.
+
+Worse, and more important for future sessions: **`--repeat` cannot in principle find the
+latch.** T1 never sounds in the emulator at all (voice struct is zeros apart from
+`+0x0c..0x0f`; no trig ever lands). The emulator never produces the good-vs-bug difference
+in the first place, so "arrival #1 == arrival #2" is the expected output whether or not the
+bug exists. **Diffing arrival #1 against arrival #2 in this harness is a dead end — do not
+spend another run on it.** Same instrument-blindness class as the rest of this thread.
+
+### NEXT
+
+1. **The leak is worth fixing on its own merits, independent of report #1** — it is a
+   measured stock inconsistency (Part says FLEX, voice says PICKUP, buffer still owned),
+   and stock already contains the canonical release sequence to reuse
+   (`0x400a1124`-`0x400a112c`: `clr.l 0x461054f0` / `move.l #-1,0x400d7c4c`). Cheap,
+   in the same detour PARTREAPPLY already owns. Would need its own HW test — and note it
+   is NOT predicted to fix report #1's latch, so do not test it against that repro and
+   conclude anything.
+2. **Report #1's latch needs an instrument that can see a sounding voice.** The ColdFire
+   emulator is ruled out for this specific question. Options: hardware memory dump at
+   trig time on both arrivals, or driving the resolver `FUN_4000f450` directly
+   (`call_as_main`) with the two arrival states and diffing which arena entry it resolves —
+   now possible for the first time since the resolver is finally named.
+3. Reports #2/#3 remain unconfirmed on stock (Session 50) — unchanged.
+
+Tooling: `tools/emu_partswitch.py` gained the ownership registers in `--repeat`'s snapshot,
+`watch_mem` on all four, and the `--own-poke` flag. Kept in `tools/`, not scratchpad.
+
+### Session 81 continued — the ownership leak FIXED (emu A/B clean, NOT flashed), and the resolver's real dispatch found
+
+**BUILD: `patch_partreapply` step 2b — release the PICKUP ownership singleton.**
+Added to the existing per-track arm that already detects `oldType==4 && newType!=4`:
+when the voice is STILL configured as PICKUP (`voice+0x14 == 4`), `jsr FUN_40006820(track)`.
+
+Design note — this is Elektron's own mechanism, not a hand-rolled store. Stock's
+`FUN_40097204` PICKUP arm calls `FUN_40006820(track)` when the voice is **not yet** set
+up as PICKUP (`voice+0x14 != 4`); the exact mirror is to call it when the voice is
+**still** set up as PICKUP but the machine no longer is. `FUN_40006820` resets the voice
+and calls `FUN_4000672C`, which rebuilds the enable mask from the live machine bytes and
+then either releases the singleton (`owner = -1`, clear cfg) or **transfers** it to
+another still-PICKUP track. Release-or-transfer, handled correctly by stock code.
+Gated on `voice+0x14 == 4` so it is a no-op when nothing is stale.
+
+**Emu A/B (`--repeat --own-poke`, stock vs `--patched`), clean:**
+
+| | stock | patched |
+|---|---|---|
+| writes to `PICKUP_OWNER` across the round trip | **0** | **1** (`0xffffffff` at `0x400067e4`) |
+| writes to `PICKUP_ENABLE` | 0 | 1 (`0x0` at `0x400067a0`) |
+| writes to `PICKUP_CFG` | 0 | 1 (`0x0` at `0x400067ea`) |
+| owner at arrival #1 / #2 | `0` / `0` (stale) | `-1` / `-1` (released) |
+
+All three patched writes issue from **inside stock's own `FUN_4000672C`** — the PCs are
+exactly the release path read statically — and they fire at precisely the moment T1
+leaves PICKUP. Boot line identical to stock (`trap #0 RTOS handoff`, the normal one);
+no faults, no exceptions.
+
+**Idempotent, verified:** exactly ONE owner write in a four-switch round trip. On the
+later passes `FUN_4000672C` bails at its own `owner == track` test (owner is already -1),
+so the fix cannot thrash.
+
+**Known residual, deliberately not chased:** `voice+0x14` stays `4` after the release —
+stock's release path does not clear the voice's own machine byte. Ownership, enable mask
+and cfg are all correctly released; only that byte lags. It is harmless for the claim
+lifecycle (the next claim goes through the resolver) but it means "voice+0x14 == 4" is
+NOT a reliable "this track is PICKUP" oracle after a release. Do not build a later probe
+on that assumption.
+
+**Status: built, emu-validated, NOT flashed.** `out/OCTATRACK_PARTREAPPLY.bin` /
+`OCTATRACK_OS1.40C_PARTREAPPLY.syx`, version still 1.40C, cave grew 142 B -> 270 B at
+`0x400d7000`, same 6 B detour at `0x40062216`. Three loop branches had to widen to `.w`
+(the added block pushed them out of byte range). **No merged-build impact**:
+`patch_partreapply` was never added to `build_merged.py`'s stub list (Session 49's NEXT
+#1 was never done), so the cave growth cannot collide with the allocation table.
+
+**Hardware-test warning, important:** this fixes the measured *state leak*. It is NOT
+predicted to fix report #1's good→good→bug latch — the leak is identical at both
+arrivals. Do NOT test it against that repro and conclude anything from a negative; test
+it by checking that a PICKUP track's buffer ownership is correctly handed over/released
+when that track switches to FLEX (e.g. a second track set to PICKUP should be able to
+take the buffer afterwards, which on stock it cannot).
+
+### NEXT (updated)
+
+1. HW test the ownership release per the warning above — its own repro, not report #1's.
+2. Report #1's latch: the resolver is now named AND its calling convention is measured
+   (`FUN_4000f450(track, slot, flags=0xc0)`), so the previously-impossible experiment is
+   now available — `call_as_main(FUN_4000f450, (0, slot, 0xc0))` at arrival #1 vs
+   arrival #2 with read-hooks on the three arena entries, which sidesteps "T1 never
+   sounds" entirely by driving the resolver directly instead of waiting for a trig.
+   That is the single highest-value next step on this thread.
+3. Reports #2/#3 remain unconfirmed on stock (Session 50) — unchanged.
+
+## Session 80 continued (8) (2026-09-22, `wip`) — RELOAD2: the picker owns its own keymap layer
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (7)").
+
+### The redesign
+
+Every routing bug this feature has had traces to one root cause: the picker
+borrowed key slots in OTHER layers ([PTN]'s held layer, then [BANK]'s) instead
+of owning its own. "(7)" measured the concrete failure mode of that: opening the
+picker closes stock's SELECT BANK window, whose `onClose` pops the [BANK]
+overlay, so `[YES]` stops routing to us mid-gesture, and afterward `[YES]` goes
+to whatever the current UI context uses — which can shadow our detour entirely.
+
+Fix: the picker now pushes its OWN keymap layer on open and pops it on close,
+exactly like stock's own modal windows.
+
+### Layer format, measured from the real firmware (not re-derived by inference)
+
+```
+struct  +0x00 next-link (push clears; PUSH_LAYER/POP_LAYER both walk this
+              as a singly-linked list rooted at 0x460d165c)
+        +0x04 records begin
+        +0x08 second records ptr (0 = none, as the [BANK] layer has)
+        +0x10 push writes -1 here -- the struct MUST be writable, so it lives
+              in the cave, not a read-only table
+records 26 B stride: +0 code, +2 press, +6 release, +0xa hold, +0x16 delay,
+        +0x18 repeat. Loop ends on a record whose CODE BYTE IS 0xff
+        (`mvs.b (a2),d0 ; moveq #-1,d1 ; cmp.l d0,d1`) -- terminator mandatory.
+```
+
+Confirmed via `objdump` on the actual rebuild routine (`0x4003125c`): it clears
+EVERY keycode's runtime-table record before walking the (still-linked) layers,
+UNLESS that code's own "currently held" flag is set — so a layer only overrides
+the keys it lists, and the walk is correct modal-overlay semantics.
+
+### A scare that turned out to be my own test bug, not firmware
+
+First real-key run (`diag_reload2_realkey.py`, gesture = BANK press → YES press
+→ YES press → BANK release, **no release between the two YES presses**) showed
+the YES dispatch slot STUCK at our own handler even after the layer reported
+unlinked — and every subsequent `[YES]` press silently fired a full reload,
+headless (`G_MENU` never returned to 1), forever. Reported to the user as a
+confirmed regression at the time.
+
+**It was a test bug.** Pressing `[YES]` twice with no release in between is a
+gesture no physical button can produce. `objdump` of `set_key_state`
+(`0x40031734`) shows it maintains its own per-key "currently held" bookkeeping
+on press and release, and the rebuild (above) explicitly skips clearing a held
+code's slot — my synthetic gesture never gave that bookkeeping the release event
+a real tap always generates, so the slot never got the chance to reset. Fixed
+the harness to send `[YES] release` between taps (a real "tap twice" gesture is
+press-release-press-release) and the "bug" disappeared completely: three
+iterations, byte-identical, YES slot correctly reverts to the pre-existing
+handler (`0x400815d8`) every time, layer cleanly unlinked, nothing carries over.
+
+**Lesson, stated plainly because it nearly caused a bad call**: I told the user
+not to flash based on this, which was the right call given the evidence at the
+time, but the evidence itself was an artifact of an unrealistic gesture. Always
+model release events for momentary keys before trusting a "stuck" reading.
+
+### Validation (all on the ACTUAL layer redesign, post test-fix)
+
+- `diag_reload2_realkey.py`, 5 consecutive full gestures, real `set_key_state`
+  dispatch: **byte-identical every iteration** — BANK/YES/NO dispatch slots,
+  layer depth, `G_MENU`, `G_KIND`, worker firing (`rl_job+1 parse+17` each).
+  This is the exact "works once, breaks on repeat" failure class that burned
+  the previous redesign attempt; it holds here.
+- `diag_reload2_realkey.py --no-cancel` (new): the `[NO]` path runs different
+  code (`rl_no_exec`) than execute and needed its own proof, not an inference
+  from YES being clean. **PASS** — layer pops, YES slot reverts, depth settles
+  at baseline.
+- `--combo` **27/27** including 6 new push/pop-balance checks (open pushes;
+  execute pops; cancel pops; the RELOAD BUSY toast exit STILL pops even with a
+  job in flight; push is idempotent; pop is idempotent).
+- `emu_reload2_keymap.py`, `diag_bank_window.py` (incl. `--stress`), `--trk`:
+  **ALL GOOD**.
+
+### Implementation notes
+
+- `rl_push_layer` / `rl_pop_layer` are idempotent on `rl_layer_on`, so a
+  double-open can't double-push and a double-close can't double-pop.
+- The pop lives inside the SHARED `rl_yes_exec` / `rl_no_exec` close bodies, so
+  every exit — execute, cancel, and the RELOAD BUSY toast (`G_KIND` still set)
+  — goes through the same call. This is what the BUSY-exit `--combo` check
+  proves: a busy toast still releases the keys.
+- `patch_trigscale`'s cave moved `0x400d7b00` → `0x400d7bf0` (62 B, ends
+  `0x400d7c2e`, still inside `FREE_END` `0x400d7c3c`) to make room; the build
+  asserts non-overlap and the free zone, so a bad move fails loudly.
+
+### Status
+
+1485 B vs stock (blob is 1982 B / cave ceiling raised by the trigscale move).
+**Not yet flashed** — this is a mechanism replacement, and the last one that
+looked clean in isolated tests failed on repeated real-world use, so before
+recommending a flash it also needs the multi-reload gate from "(4)"/"(5)"
+re-run on this build (5+ consecutive TRK SEQ reloads via `rl_arm_trk`, not just
+the picker-open/close cycle above) and, ideally, the `[BANK]`+trig / trig-picks-
+a-bank interaction re-checked now that the picker's own layer sits alongside
+the [BANK] overlay rather than inside it.
+
+Still open, unchanged: `RELOAD BUSY`'s root cause (not reproduced in any
+harness), the ~1 s stall / stock transport stop, and the list UI.
+
+### Session 81 continued (2) — the resolver DRIVEN directly: binding model pinned, and the resolver is INNOCENT. One intra-session misreading retracted.
+
+New `--drive` mode on `emu_partswitch.py --repeat`: calls `FUN_4000f450` via
+`call_as_main` at each arrival instead of waiting for a trig T1 never gets.
+`call_as_main` is the faithful context here — the real dispatch was observed running
+in task `main`, which is exactly what `call_as_main` borrows.
+
+**BINDING MODEL, pinned (measured, then reproduced arithmetically):** the resolver binds
+a voice by writing two pointers:
+
+```
+voice[track]+0x04 = TABLE + slot*44      FLEX/PICKUP: 0x46c922c4   STATIC: 0x46c90a78
+voice[track]+0x08 = ARENA + slot*1096    FLEX/PICKUP: 0x100b14f0   STATIC: 0x100d5b30
+```
+
+Verified both ways: slot 2 (FLEX) -> `0x46c9231c` / `0x100b1d80`; slot 128 (PICKUP,
+`128+T`) -> `0x46c938c4` / `0x100d38f0`. Every observed write matched the formula.
+It does NOT read the arena entry contents (arena read-hooks fired zero times in every
+call) — it resolves an ADDRESS, it does not inspect the sample. `voice+0x90` is a
+per-voice resolve counter (its low byte `+0x93` increments once per call).
+
+**This is the mechanical statement of report #1's FLEX-vs-STATIC asymmetry:** FLEX and
+PICKUP share BOTH the `0x46c922c4` table and `FLEX_ARENA`, differing only in the slot
+number (a PICKUP track uses `128+track`), so a wrong slot silently yields a valid-looking
+PICKUP binding under a FLEX machine. STATIC resolves through two different tables and
+cannot be contaminated by a slot from the FLEX/PICKUP space.
+
+**RESULT: the resolver re-binds CORRECTLY every time. It is not the latch.**
+Drove the full hardware-shaped sequence in one boot —
+`FLEX(slot 2)` -> `PICKUP(slot 128)` -> `FLEX(slot 2)`:
+
+| drive point | slot | resulting +0x04 / +0x08 | correct? |
+|---|---|---|---|
+| ARRIVAL #1 | 2 | `0x46c9231c` / `0x100b1d80` | yes |
+| BACK AT P1 | 128 | `0x46c938c4` / `0x100d38f0` | yes |
+| ARRIVAL #2 | 2 | `0x46c9231c` / `0x100b1d80` | **yes** |
+
+The second FLEX pass, immediately after a genuine PICKUP binding, re-pointed the voice
+straight back at the FLEX entry. Given `(track, slot, flags)` the resolver does the right
+thing unconditionally.
+
+**RETRACTION (made and caught inside this same session — do not carry the wrong version
+forward).** The first `--drive` run (no P1 drive) showed arrival #1 = 12 voice writes with
+a full pointer delta and arrival #2 = 8 writes with NO delta, and that was read here as
+"the resolver skips the re-bind on the second pass". **That reading was wrong.** Arrival
+#2 showed no delta only because nothing had moved the pointer in between, so the correct
+value was already in place and re-writing it produced no visible change. The 12-vs-8
+write count is first-ever-bind initialisation, not a skip — the P1 PICKUP bind also does
+8 writes and re-binds perfectly. Adding the P1 drive (so the pointer genuinely moves to
+PICKUP in between) settled it. **Lesson, same family as the rest of this thread: a
+"no change" delta is not evidence of "did nothing" when the expected value was already
+there — diff against a state you have first perturbed.**
+
+**Where report #1's latch must therefore live.** The resolver is exonerated, so it is one
+of:
+1. **The `slot` argument is wrong on the second pass** (upstream hands it `128+track`
+   instead of the Part's FLEX slot) — the resolver would then bind the PICKUP entry
+   faithfully and the symptom follows exactly. **Strongest candidate**, and it puts
+   `SLOT_MIRROR` (`0x100a519c`) / `FUN_400972fc` — the things the original fix already
+   touched — back in frame for a different reason than the kill-bit theory.
+2. **The resolver is never CALLED for T1 on the second pass** (something upstream skips
+   the dispatch).
+3. Genuinely downstream/DSP-side.
+
+**NEXT:** pin where arg2 (`slot`) comes from at the call site. At `0x4000d492` the caller
+does `movea.l 0xac(a7),a1` and then, through an instruction r2 mis-decodes at
+`0x4000d496` (`7191`), loads `d0` from that pointer before pushing it as arg2 — so arg2
+is a byte read through a per-track structure, NOT computed from the Part blob directly.
+Identify that structure and check what it holds for T1 on the second pass. Do it by
+hooking reads at `0x4000d496` in a live run (hook the address, don't trust the linear
+disassembly) — the technique that has worked every time on this thread and the linear
+read the one that has not.
+
+Side observation, unexplained, flagged not guessed: on STOCK, driving the resolver moved
+`PICKUP_OWNER` from `0` to `-1` between arrivals (`PICKUP_ENABLE` `1` -> `0`) — a release
+the passive stock run never showed. So the resolver itself performs ownership
+housekeeping. Which internal path does it is NOT established; do not assume it is the
+`0x4000f7e2` already-owned branch without measuring.
+
+### Session 81 continued (3) — ROOT CAUSE FOR REPORT #1, MEASURED: the resolver's `slot` argument comes from a per-track pre-image that is updated when a track ENTERS PICKUP and never when it LEAVES
+
+**The `slot` the resolver binds is read from `PREIMG_A + track*0x48` (`0x8000082f + track*0x48`),
+byte 0.** Established without guessing:
+
+- At the resolver entry the trace recorded `a1` = `0x80000877` / `0x80000907` /
+  `0x8000094f` / `0x80000997` for tracks 1 / 3 / 4 / 5. All four equal
+  `0x8000082f + track*0x48` exactly.
+- Dumping that structure per track gives byte 0 = `02` / `0a` / `09` / `15` for tracks
+  1 / 3 / 4 / 5 — **identical to the `arg2` values those same calls passed.** Four
+  independent confirmations that byte 0 is the slot field.
+- `0x8000082f` is already known in this project as `PREIMG_A`, one of **`FUN_40009094`'s
+  per-track pre-image regions** — and `FUN_40009094` is precisely what a pattern-driven
+  Part change never calls (Session 49's original root cause).
+
+**T1's slot field across the round trip — this IS report #1:**
+
+| point | T1 machine | pre-image slot (byte 0) | Part's actual slot |
+|---|---|---|---|
+| initial P1 | PICKUP | `00` | — |
+| ARRIVAL #1 at P5 | FLEX | `00` | 2 |
+| back at P1 | PICKUP | **`80`** (128) | 128 — correct |
+| ARRIVAL #2 at P5 | FLEX | **`80`** (128) | 2 — **STALE** |
+
+At arrival #2 the dispatch hands the resolver `slot = 128` while the Part says the track
+is FLEX on slot 2. The resolver then does exactly what it is supposed to and binds
+`FLEX_ARENA + 128*1096 = 0x100d38f0` — **the PICKUP entry, under a FLEX machine.** That
+is the reported symptom, reproduced from measured state rather than inferred.
+
+**And it explains the good→good→bug LATCH exactly**, which no previous hypothesis in this
+thread did:
+- Pass 1 is fine because the pre-image slot is still `00` — T1 has not yet been through a
+  PICKUP entry, so there is no PICKUP slot to leak.
+- Returning to P1 sets the slot to `80` **correctly** — entering PICKUP updates it.
+- Pass 2 leaves PICKUP and **nothing updates the slot back**, so `80` survives into the
+  FLEX machine, and survives every subsequent pass. One-way latch, exactly as the user
+  measured on hardware (3rd, 4th, ... all broken).
+
+**The asymmetry is the same shape as the ownership bug already fixed this session:
+entering PICKUP writes the field, leaving PICKUP does not.** Two instances of one
+"claim but never release" pattern, in two different fields.
+
+**This also explains why Session 49's fix missed.** Its read of the mechanism — that
+`FUN_400972fc` does the work on the way INTO PICKUP and nothing does it on the way out —
+was RIGHT. It simply wrote the wrong field: kill-bit (`0x8000184c`) and `SLOT_MIRROR`
+(`0x100a519c`), neither of which is what the dispatch actually reads. The field that
+matters is `PREIMG_A + track*0x48` byte 0.
+
+**NOT YET CONFIRMED — do not write the fix until it is:** which code writes the `80`.
+`FUN_400972fc` is the obvious candidate (it is the PICKUP-entry rebind, and it already
+writes the forced `128+track` into `SLOT_MIRROR`), but that is an inference from shape,
+not a measurement, and this thread has been wrong exactly this way before. A
+`watch_mem(PREIMG_A + T*0x48, 1)` run is in flight to name the writer PC. Only once the
+writer is named is the fix well-posed (most likely: on the leaving-PICKUP transition,
+write the new Part's slot for that machine type into byte 0 — the value already computed
+at `slot_addr(newPart, track, newType)`).
+
+### Session 81 continued (4) — REPORT #1 FIXED (emu A/B clean, NOT flashed). Writer named, chain closed end to end.
+
+**Writer named causally, and it is NOT `FUN_400972fc`** (that was the shape-based guess;
+checking it was worth it). `watch_mem(PREIMG_A + T*0x48, 1)` on stock: **exactly one
+write in the entire round trip** — value `0x80`, from PC `0x400020fa`, during the
+P5→P1 switch (entering PICKUP). The instruction is
+`move.b (a0),(a1,d1.l)` with `a1 = 0x8000082f` (PREIMG_A) and `a0` computed from the
+Part blob as `slot_addr(part, track, machine_type)` — i.e. "copy this track's slot for
+its current machine type out of the Part". It lives in **`FUN_40001f18(bank, part, track)`**
+(entry confirmed: 6 callers, prologue `a5=bank`, `a6=part`, `d6=track`, multiplied by
+`BANK_STRIDE 0x9b340` and `PART_STRIDE 0x18b2` respectively).
+
+**One of those 6 callers is at `0x400973da` — inside `FUN_400972fc`.** And stock's own
+notPICKUP→PICKUP arm there does the kill bit and this re-seed **as a pair**:
+
+```
+0x400973b4  moveq #1,d0 / lsl.l d4,d0
+0x400973b8  move.b 0x8000184c,d1 / or / move.b d0,0x8000184c    <- KILL BIT
+0x400973c8  move.l d4,-(a7)          ; track
+0x400973d0  move.l d0,-(a7)          ; part  (0x100b14cf)
+0x400973d8  move.l d0,-(a7)          ; bank  (0x100b14ce)
+0x400973da  jsr 0x40001f18                                      <- RE-SEED
+0x400973e0  lea 0xc(a7),a7
+```
+
+**Session 49 replicated the kill bit and omitted the re-seed — and the re-seed is the
+half that carries the slot.** That is the whole reason the flashed fix changed nothing
+on hardware. Not a wrong theory of the bug; a half-copied idiom.
+
+**BUILD: step 2c** — in the same `oldType==4 && newType!=4` arm,
+`jsr FUN_40001f18(bank, newPart, track)`, argument order copied verbatim from stock's
+own call site (push track, part, bank; bank closest to the jsr; pop 12). `BANK_MIR`
+(`0x100b14ce`) added as an equate — the byte before `NEWPART_MIR`, the pair stock reads.
+
+**Emu A/B on T1's pre-image slot byte (`0x8000082f`), stock vs patched:**
+
+| point | T1 machine | stock | patched | Part's slot |
+|---|---|---|---|---|
+| initial P1 | PICKUP | `00` | `00` | — |
+| ARRIVAL #1 | FLEX | `00` | **`02`** | 2 |
+| back at P1 | PICKUP | `80` | `80` | 128 |
+| ARRIVAL #2 | FLEX | **`80` (BUG)** | **`02`** | 2 |
+
+The stale `0x80` at arrival #2 is gone. Writes to the field go from **1 on stock to 6 on
+patched**, from two PCs: `0x400020fa` (my `FUN_40001f18` call) and `0x400092c2` — the
+latter inside `FUN_40009094`, i.e. the patch's own step-4 stopped-transport Part apply.
+Both write the SAME value at every point, so the two paths agree rather than fight.
+Side benefit: this **measures** the long-assumed claim that `PREIMG_A` is
+`FUN_40009094`'s per-track pre-image region — previously only a comment.
+
+The whole record re-seeds, not just byte 0 (arrival #1 patched reads
+`02 01 00 00 00 01 40 00 05 00 03 0a` vs stock `00 01 01 00 01 01 40 00 10 12 00 00`).
+
+**Chain now closed end to end, every link measured:**
+1. dispatch reads `slot` from `PREIMG_A + track*0x48` byte 0 (4/4 tracks confirmed);
+2. only `FUN_40001f18` seeds that byte (write-watch: 1 write, 1 PC, on stock);
+3. stock calls it entering PICKUP, never leaving → `128+track` survives into FLEX;
+4. the resolver faithfully binds `FLEX_ARENA + slot*1096` → the PICKUP entry
+   (resolver exonerated separately by the `--drive` runs);
+5. patched, the slot tracks the Part at every arrival → the resolver binds
+   `FLEX_ARENA + 2*1096 = 0x100b1d80`, the correct FLEX entry.
+
+**WHAT IS AND IS NOT PROVEN.** The ColdFire-side chain is fixed end to end in the
+emulator. **The audible symptom is NOT proven gone** — this emulator cannot render audio
+for this track (T1 never sounds; that ceiling is unchanged and is why the bug took so
+long to find). Hardware flash + the user's own 4-switch repro is the only thing that can
+close it. Predicted hardware result: P1→P2→P1→P2 now correct on the second and every
+subsequent pass.
+
+**Status:** built, emu-validated, **NOT flashed**. Cave 270 B → 306 B at `0x400d7000`,
+same 6 B detour, version still 1.40C, no merged-build impact.
+## Session 79, continued a thirty-third time — DJTEST2 lands; pattern header FULLY MAPPED; MASTER LENGTH found; Hook D confirmed wrong and fixed
+
+The user corrected my terminology twice (there is no "master tempo multiplier"; MASTER SCALE
+does affect perceived playback, dividing how many steps play before the master reset) and then
+built `DJTEST2` to spec: eight patterns, each probe varying exactly one setting. That turned
+several open questions into single-variable measurements.
+
+### Pattern header, fully mapped (measured, single-variable diffs)
+
+| offset | field | how established |
+|--------|-------|-----------------|
+| `+0x8e51` | **MASTER LENGTH** (steps before all tracks reset) | A04 vs A05 differ in exactly ONE byte: `16 -> 32` |
+| `+0x8e52` | **MASTER SCALE** (`LEN_TBL` index) — used when `SCALE_MODE = 1` | A06/A08 read 0 (2x) against `+0x8e54` = 2 |
+| `+0x8e53` | pattern LENGTH — used when `SCALE_MODE = 0` | A03 (LEN 8) reads 8 |
+| `+0x8e54` | pattern TEMPO MULTIPLIER — used when `SCALE_MODE = 0` | A02 (MULT 2x) reads 0 |
+| `+0x8e55` | `SCALE_MODE` flag | A01-A03 read 0, A04-A08 read 1 |
+
+New tool `tools/diag_pattern_diff.py` diffs two loaded pattern blobs out of emulator RAM. A04
+vs A05 produced **exactly one differing byte**, which is what made MASTER LENGTH unambiguous.
+The user's own description of MASTER SCALE (MASTER LEN 64 at 2x plays 32 steps) is arithmetically
+consistent with `LEN_TBL`: `64 * 3 ticks = 192`, and tracks at 1x consume 6 ticks/step, so 32
+steps are heard. Firmware and hardware behaviour agree exactly.
+
+### `0x80006628` is NOT the master length — settled
+
+It reads **0** at a natural boundary on A07, which contains a **7-step** track. If it held
+MASTER LENGTH (16), that track would land at `16 mod 7 = 2`; it lands at 0, and all 16 tracks
+match the model. So it is a start offset that stock leaves at zero, and **Hook H's semantics
+are correct**. This is the fixture that could distinguish the two readings, and it did.
+
+### A07 — 16/16, including both previously untested cases
+
+Patched build, armed commit, `G_ABSTICK = 26` -> `D7 = 156`:
+
+| track | LEN | MULT | tps | STEP | derivation |
+|-------|-----|------|-----|------|------------|
+| T0 | 16 | 1x | 6 | 10 | 26 mod 16 |
+| T1 | 16 | 2x | 3 | 4 | 52 mod 16 |
+| T2 | 12 | 1x | 6 | 2 | 26 mod 12 |
+| **T3** | **7** | 1x | 6 | **5** | 26 mod 7 — the coprime case |
+| **T4** | 16 | **1/2x** | **12** | **13** | 156/12 = 13 — slower than 1x |
+
+Both cases that had never been exercised now work.
+
+### A08 (MASTER SCALE 2x) — stock uses `+0x8e52`, and that exposes Hook D
+
+`D7 = 78 = 3 * 26`, i.e. stock built it from `LEN_TBL[+0x8e52] = 3`, not from `+0x8e54`. All 16
+`NEXT_STEP` values match the model.
+
+**Hook D (`dj_scaleix_fix`) was reading `+0x8e54` unconditionally** and writing that into
+`SCALE_IX`. On A08 that leaves the master wrap check believing 6 ticks/step while the pattern
+actually runs at 3 — **Session 70's original "pattern plays past its own length" symptom, still
+present inside the fix that was written to cure it.** Now reads `+0x8e52` when `SCALE_MODE` is
+set, matching stock's own D7 source exactly.
+
+This is the third hook found to carry a wrong field or wrong table reading (`dj_c` x2, Hook F,
+now Hook D). All four were invisible until a fixture existed that could separate the fields.
+
+### Tool bug, not a firmware bug
+
+A08's `PAIR` for T4 came out 6 where my model said -6. Stock's negative-correction branch
+(`0x400a4926 bge` / `0x400a4928 add.l D1,D0`) adds `tps` back when the remainder is negative,
+so the stored value is always >= 0. `diag_d7_inject.py`'s model omitted that. A08 is the first
+fixture where `D7` is not a multiple of a track's `tps`, which is what exposed it. Model fixed;
+**the firmware was right**.
+
+Build after both fixes: 983 bytes changed, 0 unexpected outside the cave, manual-trig identical.
+
+### Outstanding
+
+- Re-verify A07/A08 after the Hook D fix (running).
+- Re-run DJ-OFF gates against the 983-byte image; Hook D is unconditional, so its change can
+  affect DJ-OFF behaviour and the widened gate now compares `SCALE_IX`.
+- Overflow: still guarded, not fixed.
+## Session 79, continued a thirty-fourth time — option (c): Hook T resets `G_ABSTICK` at transport start
+
+The user chose to explore (c) -- can the overflow bound be sidestepped cheaply -- before (b)
+flash-and-listen and (a) the LCM reduction.
+
+### The site
+
+`0x4009c3d4` = `23c0800065b8` = `move.l %d0,(0x800065b8).l`, the store that sets
+`TRANSPORT = 1`, immediately after `moveq #1,D0` at `0x4009c3d2`. Unambiguously "the transport
+just started", and a clean 6-byte splice. (Ghidra mis-decodes this region by one word; the raw
+bytes were checked directly -- the same `.short`-garbling hazard already recorded for
+`mvs`/`mvz`/`divsl`.)
+
+`FUN_400a0570` was examined first and rejected: `0x400a05aa` skips its whole reset block when
+`TRANSPORT == 1`, so it is the "select bank/pattern **while stopped**" path, not transport
+start.
+
+### Hook T
+
+```
+dj_tstart:
+    clr.l   G_ABSTICK          | absolute tick origin = transport start
+    move.l  %d0,TRANSPORT_L    | displaced original, replayed verbatim
+    rts
+```
+
+Not gated on `DJ_MODE`: `G_ABSTICK` is our own scratch global that no stock code reads, so
+clearing it cannot change stock behaviour with the feature off -- the same reasoning that
+already leaves `dj_abstick`'s increment ungated. The store is replayed verbatim rather than
+assuming `D0 == 1`, so any other path into this instruction still behaves exactly as stock.
+
+### MEASURED
+
+```
+G_ABSTICK before transport start: 40002
+G_ABSTICK after  transport start: 0      (RESET by Hook T)
+```
+
+and the commit that follows computes normally: `D7 = 156`, A07 **16/16**. Poking the counter
+*before* start is the only test that distinguishes a working reset from a counter that simply
+had not accumulated yet -- the earlier run showing `G_ABSTICK = 26` proved nothing either way.
+
+### What this buys, stated honestly
+
+The 16-bit bound is **not removed**. It now applies **per continuous take** instead of since
+power-on: ~32767 master steps is ~68 minutes of *unbroken* transport at 120 BPM/16ths, and any
+stop/start resets it. That makes the limit very hard to reach in practice without making it
+impossible, and the Hook H guard still catches it safely if it ever is reached.
+
+It is also the semantically correct origin independently of the range benefit: the user's model
+is that every pattern behaves as if it had been playing silently *since the transport started*,
+not since the machine was switched on. Hook T is what the feature actually means; the range
+improvement is a consequence.
+
+(a) -- reducing `D7` by `LCM(tps_t * len_t)` -- remains the only complete fix and is still
+unimplemented. Concrete moduli computed for the current fixtures: all-16-steps-at-1x gives
+`P = 96`; **A07/A08 give `P = 4032`** (cycles 42, 48, 72, 96, 192 -- the 7-step track is what
+pushes it up), both comfortably inside the `98301` ceiling; a contrived set of coprime lengths
+gives `P = 4324320`, which exceeds it and would still need the guard.
+
+Build: 1001 bytes changed, 0 unexpected outside the cave, manual-trig bytes identical.
+## Session 79, continued a thirty-fifth time — `dj_c` must read Hook H's stored offset, not `G_ABSTICK` (found by a user question about timing)
+
+The user asked whether the overflow fallback would make master timing jump or stall. Checking
+rather than answering from the design exposed a real inconsistency.
+
+`dj_c` computed the master step as `G_ABSTICK mod patternLength`, independently of Hook H's
+guard. When the guard fires, Hook H stores 0 (so every per-track array lands on step 0) but
+`dj_c` still derived the master step from the raw counter. **Measured**, counter forced past
+the bound, DJTEST2 A07:
+
+| | master STEP | per-track STEP |
+|---|---|---|
+| normal | 10 | 10 |
+| guard fired, before fix | **4** | **0** |
+
+A four-step split between the master and every track — the same master-vs-per-track
+disagreement class that caused the original desync, and it would have made the master wrap
+early and produce **one short bar** at the next master boundary.
+
+Fixed: `dj_c` now reads `MASTER_STEPS` (`0x80006628`), the value Hook H actually stored. Hook H
+runs earlier on the same commit path (`0x400a47f6` < `0x400a4840`), so the value is fresh, and
+the two are consistent by construction — identical to `G_ABSTICK` normally, 0 whenever the
+guard fired. Re-measured: guard case master 0 / tracks 0, normal case master 10 / tracks 10,
+both 16/16.
+
+### Answers recorded, since they will be asked again
+
+- **The fallback only applies with DIRECT JUMP ON.** Hook H writes only when `G_ARMED` is set.
+  With the feature off nothing reads `G_ABSTICK`; the counter still ticks and still resets, but
+  it is inert. This is what the DJ-OFF gates verify.
+- **Nothing happens *at* the limit.** There is no timer and no event; playback continues
+  indefinitely. The counter merely becomes unrepresentable, which matters only at the *next*
+  jump.
+- **What a jump past the limit sounds like:** every track lands on its own step 1 — i.e. the
+  jump behaves as DIRECT START. Not noise, not a wrong position.
+- **Timing does not stall or lurch.** The commit fires at the same step boundary regardless;
+  the offset only changes *where* tracks land, not *when*. Same step rate, no dropped or extra
+  tick. (Before this fix there WOULD have been one short bar — see above.)
+- **It persists until the transport is stopped and restarted.** Toggling DIRECT JUMP off/on
+  does **not** reset the counter: the only two writes to `G_ABSTICK` are `dj_abstick`'s
+  increment and Hook T's clear at transport start.
+
+### Why AR does not have this problem — the honest answer
+
+AR's dividend is `masterStep mod patternLen`: the current position *within the current
+pattern*, bounded by construction. AR's DIRECT JUMP means "land at the same step index, wrapped
+into the new pattern's length". **It never uses elapsed absolute time.**
+
+The OT feature as specified by the user is a strictly larger thing: *every pattern behaves as
+if it had been playing silently all along at its own length*. That genuinely requires absolute
+elapsed time, because `(G mod L1) mod L2 != G mod L2` unless `L2 | L1` — so for non-nested
+lengths (16 -> 12, or anything involving the 7-step track) AR's cheaper formulation gives a
+different, less musical answer.
+
+**So AR avoids the overflow by solving a smaller problem, not by being better engineered
+here.** There is no avoidance to port; the bound is the price of the richer semantics.
+
+### What CAN be done — and it is exact, not an approximation
+
+The per-track landing position `(G * tps_master / tps_t) mod len_t` is **periodic in G**, with
+period `P / tps_master` where `P = LCM(tps_t * len_t)`. Reducing the counter by that period
+changes **nothing** about where any track lands.
+
+For A07: `P = 4032` ticks -> period 672 master steps -> worst-case quotient ~1344 against the
+32767 ceiling, **24x headroom**. The limit disappears for any pattern whose `P` is
+representable, which is every realistic one. Contrived coprime length sets (`P = 4324320`)
+still need the guard.
+
+Implementation note for whoever picks this up: reduce in the TICK domain (`D7 mod P`, via a
+hook after `D7` is built at `0x400a4834`), because reducing `G` instead requires
+`tps_master | P`, which is not guaranteed in per-track mode. And whatever is reduced, `dj_c`'s
+master step must stay consistent with it — this session's bug is exactly what happens when it
+does not.
+## Session 79, continued a thirty-sixth time — option (a) implemented: EXACT range reduction, the ~68-minute limit is gone
+
+### What Hook H now does
+
+At every armed commit:
+
+```
+P = LCM( tps_master * masterLen , tps_t * len_t  for all 16 tracks )
+M = P / tps_master
+stored offset = G_ABSTICK mod M
+```
+
+Every track's landing position `(G * tps_master / tps_t) mod len_t` is **periodic in G** with
+exactly that period, so this is an **identity, not an approximation** -- the positions are
+bit-identical to what the unreduced counter would produce.
+
+Two design points that make it correct rather than merely plausible:
+
+- **The master cycle is folded into the LCM.** That is what guarantees `tps_master | P`, which
+  makes reducing `G` by `P/tps_master` exactly equivalent to reducing `D7 = tps_master*G` by
+  `P` -- and it keeps `dj_c`'s master step consistent, which is the bug cont.35 caught.
+- **Uniform mode skips the per-track fold entirely**, because every track then uses the
+  pattern's own length and multiplier, which the master cycle already covers.
+
+New cave helpers: `dj_div32` (restoring shift-subtract; uses unsigned `bcs` rather than
+`dj_mod32`'s signed `blt` -- immaterial at our magnitudes, wrong in principle), `dj_gcd32`
+(Euclid, reusing `dj_mod32`), `dj_foldcyc` (folds one track's cycle; a bad multiplier index or
+zero length contributes nothing rather than poisoning the accumulator).
+
+The `P > 98301` ceiling and the zero fallback remain as a backstop for pathological length
+sets whose period will not fit.
+
+### MEASURED — periodicity is exact
+
+DJTEST2 A07 (`P = 4032`, `M = 672`), armed commit, per-track STEP for T0..T4:
+
+| preset `G_ABSTICK` | stored offset | `D7` | STEP T0..T4 |
+|--------------------|---------------|------|-------------|
+| 26 (28 at commit) | 28 | 168 | 12, 8, 4, 0, 14 |
+| 698 (700) — **+1 period** | **28** | 168 | **12, 8, 4, 0, 14** |
+| 1370 (1372) — **+2 periods** | **28** | 168 | **12, 8, 4, 0, 14** |
+| 40002 (40004) — far past the old bound | 356 | 2136 | 4, 8, 8, 6, 2 |
+
+Byte-identical across two full periods. And the 40004 row **computes** instead of falling back
+to 0; hand-checking each track against the unreduced counter confirms it is the same answer:
+`40004 mod 16 = 4`, `80008 mod 16 = 8`, `40004 mod 12 = 8`, `40004 mod 7 = 6`,
+`20002 mod 16 = 2` -- all five match.
+
+### Why AR never needed this (recorded for `AR_DIRECT_JUMP.md`)
+
+AR's dividend is `masterStep mod patternLen`, bounded by construction, and AR applies the same
+step number to every track -- it corrects the per-track *rate* going forward (the countdown
+reload array) but **not the landing phase** for a track's tempo multiplier. Two things the OT
+implementation does that AR's does not:
+
+1. **Absolute-time origin.** AR's input resets every pattern cycle, so after 20 steps of a
+   16-step pattern AR only knows "step 4"; switching to a 12-step pattern gives `4 mod 12 = 4`
+   where ours gives `20 mod 12 = 8`.
+2. **Per-track tempo-multiplier correction.** Ours computes `q_t = absTicks / tps_t` first, so
+   a 2x track lands on its own 52nd step, not on the master's 26th.
+
+So AR avoids the overflow by solving a smaller problem. The unbounded counter is the price of
+the richer semantics, and the periodicity identity is how that price gets paid in full.
+
+Build: 1234 bytes changed, 0 unexpected outside the cave, manual-trig bytes identical, cave
+usage still within budget.
+
+### Outstanding
+
+- Re-run the DJ-OFF gates against this image (substantially larger patch).
+- Hardware verification -- nothing here has been heard.
+## Session 79, continued a thirty-seventh time — MEASURED: MASTER LENGTH resets every track. Our resume position is wrong; AR was right all along
+
+The user asked "is it that our OT implementation doesn't take master length into account or
+something?" It is exactly that. New tool `tools/diag_master_reset.py` settles it on **stock**,
+with no DIRECT JUMP involved, by watching the per-track STEP counters advance.
+
+### The measurement
+
+DJTEST2 A07, `SCALE_MODE = 1`, **MASTER LENGTH (+0x8e51) = 16**, master tps = 6, so the master
+cycle is 96 ticks:
+
+```
+T3 (LEN=7):   1 2 3 4 5 6 0 | 1 2 3 4 5 6 0 | 1 2 | 0 ...      7 + 7 + 2 = 16
+T2 (LEN=12):  1 ... 11 0 | 1 2 3 4 | 0 ...                     12 + 4   = 16
+T4 (LEN=16, 1/2x, tps=12): 1 ... 8 | 0 ...                     96 / 12  = 8 steps
+```
+
+Every track is cut off at the master boundary. T4 proves the cycle is in the **tick** domain,
+not the step domain: at half speed it only reaches 8 of its 16 steps inside the 96-tick cycle.
+
+### Consequence — the resume position formula is wrong
+
+Correct:
+
+```
+masterCycle = masterLen * tps_master          (ticks, from the INCOMING pattern)
+posInCycle  = absoluteTicks mod masterCycle
+pos_t       = (posInCycle / tps_t) mod len_t
+```
+
+That is **exactly** AR's `new_step = masterStep mod patternLen` followed by
+`new_step mod trackLen`. **AR's "double mod" is the master reset being respected, not a
+simplification.** Sessions cont.33-36 characterised it as AR solving a smaller problem; that
+was wrong and is retracted.
+
+Ours omits the master reduction entirely. At A07, absolute step 26 (156 ticks,
+`posInCycle` = 60):
+
+| track | correct | ours | |
+|-------|---------|------|---|
+| T0 (16, 1x) | 10 | 10 | agrees -- length == master length |
+| T2 (12, 1x) | **10** | 2 | WRONG |
+| T3 (7, 1x) | **3** | 5 | WRONG |
+| T4 (16, 1/2x) | **5** | 13 | WRONG |
+
+Three of five distinct configurations. Every earlier test passed because it only ever checked
+tracks whose length equalled the master length -- and because `diag_d7_inject.py`'s model
+carried the same omission as the patch, so model and firmware agreed with each other while
+both were wrong. **A model derived from the same misunderstanding as the code cannot catch the
+code's bug**; only the user's hardware knowledge did.
+
+### The overflow saga was self-inflicted
+
+With the master reduction, the stored offset is bounded by `masterLen` (<= 64) by
+construction, so `D7` cannot approach the 16-bit ceiling. The guard (cont.32), Hook T
+(cont.34) and the exact LCM reduction (cont.36) were all solving a problem created by our own
+omission. AR has no overflow because AR has no bug.
+
+### Spec, as the user has now stated it
+
+"Every **track within a pattern** behaves as if it had been silently playing all along at its
+own length", and **each pattern has its own master length**, which DIRECT JUMP must respect.
+Jumping to a pattern puts every track where it would be had the user never switched away from
+that pattern.
+
+### How this changes the code
+
+1. **Hook H**: reduce by the incoming pattern's master cycle instead of the LCM period. The
+   incoming pattern's fields are already what Hook H and stock's `D7` setup read (confirmed by
+   A08, where stock built `D7` from the target's `+0x8e52`).
+2. **Delete** `dj_div32` / `dj_gcd32` / `dj_foldcyc` and the LCM fold (~230 bytes) -- dead.
+3. **Keep Hook T**: no longer needed for range, but it defines the phase origin (transport
+   start), which the spec still requires.
+4. **NEW ISSUE, not yet addressed**: `G_ABSTICK` counts master **steps** at the *current*
+   pattern's rate (`dj_abstick` adds 1 per master step), so it is not absolute time. If two
+   patterns have different MASTER SCALE values, the counter conflates two rates and the model
+   is inexact across such a switch. Making it tick-accurate means adding
+   `LEN_TBL[SCALE_IX]` per step instead of 1. Exact whenever all patterns share a master
+   scale, which is the common case; worth fixing regardless.
+
+No code changed this session -- measurement only.
+## Session 79, continued a thirty-eighth time — master-cycle reduction implemented; AR's master step MEASURED as bounded
+
+### The fix
+
+Hook H now reduces into the **incoming pattern's** master cycle:
+
+```
+cycleTicks = masterLen * tps_master        (SCALE_MODE ? +0x8e51/+0x8e52 : +0x8e53/+0x8e54)
+posTicks   = G_ABSTICK mod cycleTicks
+offset     = posTicks / tps_master         (stock multiplies this back up to rebuild D7)
+```
+
+`dj_abstick` now counts **ticks** rather than master steps (`+= LEN_TBL[SCALE_IX]` instead of
+`+= 1`). A master step is a per-pattern number of ticks, so the old counter advanced at
+different real-time rates depending on which pattern was playing and was therefore not
+absolute time at all.
+
+`dj_gcd32` / `dj_foldcyc` and the cont.36 LCM fold are **deleted** -- the offset is now bounded
+by `masterLen` by construction, so the overflow they addressed cannot occur. `dj_div32` and
+`dj_mod32` are retained (the reduction needs both). Build 1087 bytes, down from 1234.
+
+### MEASURED — DJTEST2 A07, armed commit
+
+`G_ABSTICK = 156` ticks, master cycle `16 * 6 = 96`, so `posTicks = 60`, `offset = 10`,
+`D7 = 60`:
+
+| track | LEN | MULT | now | before (cont.36) | correct |
+|-------|-----|------|-----|------------------|---------|
+| T0 | 16 | 1x | 10 | 10 | 10 |
+| T1 | 16 | 2x | 4 | 4 | 4 |
+| T2 | **12** | 1x | **10** | 2 | 10 |
+| T3 | **7** | 1x | **3** | 5 | 3 |
+| T4 | 16 | **1/2x** | **5** | 13 | 5 |
+
+16/16 against the corrected model. `diag_d7_inject.py`'s model was fixed in the same pass --
+it had carried the identical omission, which is why it had been agreeing with a wrong patch.
+
+(Cosmetic: the tool's header line reads `G_ABSTICK` at end-of-run rather than at the commit,
+so the "expected" figures it prints there refer to a later moment. The per-track comparison
+uses the observed commit-time `D7` and is correct.)
+
+### AR's master step is BOUNDED — traced, not inferred
+
+The one fact everything rested on. `0x40099b8a`-`0x40099ba6` in `FUN_4009905c`:
+
+```
+40099b8a  D1 = masterStep (0x405666e4)
+40099b92  0x405666e8 = D1            ; previous
+40099b98  D1 += 1
+40099b9a  cmp.l D0,D3   /  bge -> skip
+40099ba0  cmp.l D3,D0   /  bgt -> skip
+40099ba4  D1 -= A0                   ; WRAP
+40099ba6  masterStep = D1
+```
+
+It wraps. So `0x405666e4` is a **position within the current pattern**, not a free-running
+counter, and AR's DIRECT JUMP means **"carry the playhead index into the new pattern, wrapped
+to its length"** -- not "as if the new pattern had been playing all along".
+
+This retracts the guess in cont.30/33 that AR's counter might be absolute, and it also means
+the user's description of AR's behaviour ("the position they would be had the user never
+switched away") does not match AR's arithmetic in general -- **only in the common case where
+all patterns share a master length and master scale, where the two rules coincide exactly.**
+
+### Therefore: OT and AR now differ, deliberately
+
+| | AR | OT (this build) |
+|---|---|---|
+| input | current playhead index, bounded by the pattern | absolute ticks since transport start |
+| reduction | `mod newPatternLen` | `mod (masterLen * tps_master)` of the incoming pattern |
+| per track | `mod trackLen` | `(posTicks / tps_t) mod trackLen` |
+| rate-corrects per-track multiplier | no | yes |
+
+They agree whenever patterns share master length and scale. They diverge when master lengths
+differ between patterns, and when a track's multiplier differs from the master's.
+
+**This is now a genuine specification fork, not a bug**, and it is the user's to settle:
+match AR exactly (simpler, bounded by construction, no absolute counter needed at all), or
+keep the stated "as if never switched away" semantics, which is what this build does.
+## Session 79, continued a thirty-ninth time — validation complete on the master-cycle build; READY TO FLASH
+
+Image `out/mainos_directjump_v4.bin` (`ec0a28aa...`), 1087 bytes changed, 0 unexpected outside
+the cave, manual-trig bytes identical to `build_trigscale_only.py`, cave within budget.
+Artifacts: `out/OCTATRACK_OS1.40C_DIRECTJUMP_V4.syx` (MIDI DIN) and
+`out/OCTATRACK_DIRECTJUMP_V4.bin` (CF card). Revert target present at
+`downloads/extracted/OCTATRACK_OS1.40C.syx`.
+
+### DJ-ON — 16/16 on both master-scale branches
+
+| fixture | master | `D7` | T0 (16,1x) | T1 (16,2x) | T2 (12,1x) | T3 (7,1x) | T4 (16,1/2x) |
+|---------|--------|------|-----|-----|-----|-----|-----|
+| A07 | LEN 16, SCALE 1x -> 96-tick cycle | 60 | 10 | 4 | 10 | 3 | 5 |
+| A08 | LEN 16, SCALE 2x -> 48-tick cycle | 12 | 2 | 4 | 2 | 2 | 1 |
+
+A08's cycle correctly halves with the 2x master scale, matching the user's hardware
+description (MASTER LEN 64 at 2x plays 32 steps).
+
+### DJ-OFF — IDENTICAL on both, against THIS image
+
+| fixture | rebuild loop | result |
+|---------|--------------|--------|
+| A07 (pattern 6) | 8 | IDENTICAL, 38 samples |
+| A08 (pattern 7) | 16 | IDENTICAL, 38 samples |
+
+Comparing per-track STEP / ticks-within-step / ARMED / SCALE, master STEP, `SCALE_IX` and
+`BAR_CTR`, plus eight instruction-execution counts, with the liveness precondition cleared.
+
+**This was the gate that mattered most.** `dj_abstick` now runs different code on *every step
+tick* and is **not** gated on `DJ_MODE`, so it executes whether the feature is on or off. Both
+gates confirm it is inert.
+
+### Cumulative fixes this session, all measured
+
+1. `dj_c` wrong modulus -- used `LEN_TBL[scale]` (ticks-per-step) as a pattern length.
+2. `dj_c` overrode `D7` after stock built it and before the rebuild loop read it.
+3. Hook F (`dj_pertrack_fix`) same `LEN_TBL` misreading; clobbered 7 of 8 audio tracks while
+   MIDI kept the correct values -- audio/MIDI desync on every armed commit. Removed.
+4. Hook D (`dj_scaleix_fix`) read `+0x8e54` unconditionally where stock uses `+0x8e52` in
+   per-track mode -- Session 70's "plays past its own length" symptom living inside its own fix.
+5. `dj_c` read `G_ABSTICK` instead of Hook H's stored offset, splitting master from per-track
+   by 4 steps when the guard fired.
+6. No master-cycle reduction at all -- wrong for every track whose length differed from the
+   master length.
+7. `dj_abstick` counted master steps, not ticks, so the counter was not absolute time.
+
+### NOT validated
+
+- **Hardware. Nothing here has been heard.** All of the above is emulator-measured state.
+- The **specification fork** is unresolved: this build implements the user's stated
+  "as if never switched away" semantics, which is **not** what AR does (AR carries the playhead
+  index -- `0x405666e4` measured as wrapping, cont.38). The two coincide only when patterns
+  share a master length and master scale. The informative hardware comparison is patterns whose
+  **master lengths differ**.
+
+## Session 80 continued (9) (2026-09-22, `wip`) — RELOAD2: fixed the "still primed after walking away" bug; UNDO-instead-of-CLEAR confirmed as an INHERITED STOCK QUIRK, not ours
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (8)").
+
+### Hardware report #4, two new findings
+
+1. **The picker stays primed after visually going away.** Open the picker
+   (BANK+YES), then walk away via an unrelated gesture (a quick BANK or PTN tap)
+   instead of answering YES/NO. The picker box disappears, but a LATER,
+   unrelated `[YES]` press still fires the reload.
+2. After a reload, `FUNC+PLAY` (Clear) shows **"UNDO TRACK TRIGS"** instead of
+   **"CLEAR TRACK TRIGS"**, as if the OS thinks there's a pending undo the user
+   never created.
+
+### Bug #1, root-caused and FIXED
+
+Measured via `objdump` (not guessed) on `FUN_4005a0e0` (`POPUP2`, our `rl_draw`'s
+own popup call): it registers the GENERIC `CLOSE_CB` (`0x40056bc0`) as its own
+popup's `onClose`. `CLOSE_CB` is the SAME teardown BANK's/PTN's own popup-show
+calls to dismiss whatever is currently showing (shared single-popup-slot
+convention, handle `0x460d1e64`). So tapping BANK or PTN tears down OUR popup
+via this generic routine — which has no idea our reload exists, so nothing pops
+our layer or clears `G_MENU`. Visually gone; state stays primed.
+
+**Fix**: hook `CLOSE_CB`'s own entry (`rl_closecb_hook`, displaces its first
+instruction `tstl 0x460d1e64`, exactly 6 B). This is the single choke point
+every popup teardown passes through — ours and everyone else's, direct call or
+indirect through a stored callback pointer. Gated strictly on `rl_layer_on`
+(set only by our own `rl_push_layer`), so it's a no-op for every unrelated
+popup dismissal, including in a merged build.
+
+**That fix alone was not enough — a SECOND, independent bug in `rl_bank_press`
+surfaced immediately, and it took real call-tracing to find, not inference.**
+`diag_reload2_realkey.py --walk-away` (new) reproduces the exact gesture through
+`set_key_state`. The `[PTN]` case passed clean immediately. The `[BANK]` case
+kept firing a reload anyway, and the FIRST TWO explanations I proposed for it
+were WRONG (recorded so they aren't retried): "the slot never got restored" and
+"maybe the rebuild doesn't clear held keys" — both refuted by adding call-level
+tracing and just reading what actually happened:
+
+```
+"quick [BANK] tap (walk away)"  calls: [rl_bank_press, rl_closecb_hook, rl_pop_layer]
+                                 YES slot: 0x400d7682(ours) -> 0x400d7400(rl_bank_yes)
+"[BANK] release"                calls: []   YES slot still: 0x400d7400
+"[YES] press (unrelated)"       calls: [rl_bank_yes, rl_lay_yes, rl_yes_exec]  <- fires
+```
+
+`rl_bank_press`'s snapshot guard (added in "(6)" for the delegate mechanism)
+only skipped re-saving when the slot was ALREADY `rl_bank_yes`. It never
+accounted for the slot holding OUR OWN layer's handler (`rl_lay_yes`) — exactly
+what's in the slot when the user re-presses `[BANK]` while our picker is STILL
+open. The guard's compare failed, so it OVERWROTE `rl_yes_save` with our own
+handler. Later, `[BANK]` released, `rl_bank_yes` correctly takes its "not held
+→ delegate" path — and delegates to the now-corrupted value, which
+unconditionally executes on the very next press.
+
+**Fix**: never snapshot while `rl_layer_on` is set. Anything in the slot at
+that moment is inherently ours or `[BANK]`'s dynamic overlay, never the true
+underlying handler the delegate exists to preserve. `[BANK]` doesn't
+auto-repeat (delay `0x1e`, repeat `0`), so this only changes behaviour in
+exactly the anomalous re-press-while-open case.
+
+**Validated after the fix**: both `--walk-away` cases (BANK, PTN) PASS —
+`rl_job_calls` stays 0 on the later unrelated `[YES]`. `--combo` ALL GOOD,
+`emu_reload2_keymap.py` ALL GOOD, `diag_bank_window.py --stress` ALL GOOD,
+`--trk` ALL GOOD, and 5 consecutive full real-key gestures byte-identical
+(`diag_reload2_realkey.py 5`).
+
+### Bug #2 — CONFIRMED as an inherited stock quirk, NOT introduced by our patch
+
+Traced the decision point by objdump: the Clear handler calls
+`jsr 0x4002a4dc(g1@0x100b14cc, g2@0x100b14d0, kind=0xa)` — nonzero → show
+"UNDO", do nothing; zero → perform the clear, mark undo available via
+`jsr 0x40039df4`, show "CLEAR". The mark function computes its target address
+using OUR OWN worker's exact stride constants (`0x91a`=TRAC_A, `0x8ed8`
+=PATSTRIDE) into the `0x1001xxxx` region neighbouring the live pattern cache.
+
+Two of my OWN test-harness bugs were caught and fixed BEFORE trusting any
+result from this investigation (both now documented in `diag_reload2_undo.py`
+as cautionary comments, since both are mistakes already made and fixed once
+elsewhere this session):
+1. `ctl_flush_tb()` was called BEFORE the write-watch hook was registered.
+   Unicorn does not retroactively re-instrument already-cached translation
+   blocks for a new hook, so this silently produced a false "0 writes" result.
+2. The drain loop only checked `G_KIND == 0` — the EXACT documented gotcha
+   from "(4)": `G_KIND` clears at `rl_job`'s entry, long before stock's
+   downstream whole-bank reload (the only place writes could plausibly happen)
+   finishes. Fixed to drain until the pattern parser has fired its full
+   expected count (17: 1 ours + 16 stock's).
+
+With both fixed, the direct measurement is unambiguous: **10,157 writes** land
+in the watched region (`0x10010000`-`0x10020000`) during one reload, spanning
+`0x1001614e`..`0x1001fffe`, and **2,583 of them land within `0x2000` bytes of
+the undo-mark base** (`0x100169a7`). Stock's whole-bank reload machinery — which
+our worker's job still triggers as a side effect (the un-suppressed doneFn from
+"(4)"/"(5)") — writes broadly across the exact memory neighbourhood the
+Clear/Undo system operates in.
+
+The query itself (with `g1=7, g2=0`, whatever those widely-referenced globals
+actually represent — never fully identified, 1004 and 484 xrefs respectively,
+too broad to resolve by reading) still read "CLEAR" after our reload. That was
+NOT treated as a disproof — it far more likely means the query was checking the
+wrong bank/part index, not that nothing happened.
+
+**Settled definitively by the user on hardware, not by further RE**: plain
+STOCK RELOAD BANK (PROJECT menu, no patch involved), with trigs present,
+followed by FUNC+PLAY, **ALSO shows "UNDO" instead of "CLEAR".** This is a
+pre-existing stock quirk inherited via the whole-bank reload machinery our
+worker's job still triggers — not something our patch introduces. No fix is
+owed here specifically; it is the SAME symptom family as the ~1 s stall (both
+are consequences of triggering stock's full whole-bank RELOAD BANK for a
+narrow, single-track operation that doesn't need it), and the eventual real fix
+for one is very likely the fix for both.
+
+### Status
+
+1523 B vs stock, 9 detours. **Not yet flashed.** Regressions all green (see
+above). The layer redesign from "(8)" plus both "(9)" fixes are ready for a
+hardware pass focused specifically on the walk-away scenario and general
+BANK+YES reliability.
+
+### What's still open, ranked by leverage
+
+1. **The ~1 s stall / stock transport stop and bug #2 above are the SAME root
+   cause**: our job still triggers stock's full whole-bank RELOAD BANK. The
+   "(4)"/"(5)" thread already found and reverted a naive fix (skip the call
+   at `0x40023c62`) because it broke `[BANK]`/`[YES]` badly. The multi-reload
+   gate built in "(6)" (`diag_reload2_repeat.py`) exists specifically to
+   qualify any retry before it goes near hardware — a single-reload pass is
+   KNOWN to be worthless evidence here, that's exactly how "(4)" passed review
+   and then failed on repeated real-world use.
+2. `RELOAD BUSY` — root cause still not found. Ruled out this session/recent
+   ones: storage-task-busy-with-CF-streaming (user retracted the STATIC/FLEX
+   observation), a single clean reload leaving `G_KIND` stuck (never
+   reproduced, `G_KIND` always settles to 0). The `[YES]`-alone-fires-a-reload
+   family of bugs (fixed in "(6)" and now "(9)") were plausible contributors
+   but never proven to be THE cause; with those now fixed, whether BUSY
+   improves is itself a data point for the next session.
+3. The list UI (stock's 12-entry table at `0x400beb72`, renderer still
+   unlocated) — lowest priority, cosmetic.
+
+## Session 81 (2026-09-22, `wip`) — RELOAD2: the build had been silently refusing to produce a flashable image for three sessions
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (9)").
+Picked up from `reference/handoffs/RELOAD2_HANDOFF.md`, whose stated next step
+was "build, confirm the regression suite, then flash". Step one failed, and the
+reason mattered more than the fix.
+
+### The finding
+
+`python3 tools/build_reload2.py` aborts with `MANUAL-TRIG FIX DIVERGED`. It had
+been doing so since commit `83ce678` (Session 80 continued (8)), and nobody
+noticed, because the abort happens **after** `OUT.write_bytes(...)` and
+**before** the `.syx`/CF-card wrap.
+
+That split is the whole story:
+
+- `out/mainos_reload2.bin` — written **before** the abort. This is the file every
+  emulator tool loads (`emu_reload2.py`, `diag_bank_window.py`, the realkey
+  diags). So sessions (8) and (9) ran their regressions against the correct,
+  current image and their "all green" results were **genuine**.
+- `out/OCTATRACK_OS1.40C_RELOAD2.syx` and `out/OCTATRACK_RELOAD2.bin` — produced
+  by the wrap step, which never ran. Both were still dated **09-22 00:09**,
+  predating `97d388a` (00:32), `83ce678` (01:48) and `11e6fb3` (22:12).
+
+So the only files a human could actually flash were **three sessions stale** —
+missing (7)'s window-deferral revert, (8)'s own-keymap-layer redesign, and both
+of (9)'s walk-away fixes — while every test in the suite reported green. Had the
+handoff's "flash it" step been followed as written, the hardware report would
+have described a build nobody in this thread has worked on since Session 80
+continued (6), and the resulting confusion would have been charged to the
+feature rather than to the toolchain.
+
+### Why the check was wrong
+
+The check compared our image against `out/mainos_trigscale_only.bin` at
+**absolute byte offsets**:
+
+```python
+tsh = [i for i, (x, y) in enumerate(zip(stock, tsb)) if x != y]
+ok  = all(img[i] == tsb[i] for i in tsh)
+```
+
+Session 80 continued (8) moved the trigscale cave `0x400d7b00 -> 0x400d7bf0` to
+make room for the picker's own keymap layer — a deliberate, documented,
+asserted-safe relocation. An absolute-offset comparison cannot express that. The
+"divergence" was exactly two things, both pure relocation:
+
+- the detour at `0x4009b6f2`: `jmp 0x400d7b00` vs `jmp 0x400d7bf0` — one byte,
+  the jmp target's low byte;
+- the 62-byte cave body, present at `0x400d7b00` in the reference and at
+  `0x400d7bf0` in ours.
+
+Verified directly: the cave bodies are **byte-identical** under relocation, and
+the freshly assembled `out/patch_trigscale.bin` matches what we place. The
+manual-trig fix was never actually diverging.
+
+**A mapping trap worth recording**: the MAIN_OS section base is `0x40000400`,
+not `0x40000000`. Indexing `section_3_MAIN_OS.bin` with `BASE = 0x40000000`
+puts every address `0x400` low, which made the reference detour look like it
+sat at `0x4009b2f2` while our build reported `0x4009b6f2` — briefly looking
+like the two builds patched *different sites*. They do not. Same site.
+
+### The fix
+
+`tools/build_reload2.py`'s check is now relocation-aware. It reads the
+reference's own detour to discover where *that* build put its cave, then asserts
+the things that actually matter:
+
+- our detour is `jmp <our cave>` + the right nop padding;
+- the reference's detour padding matches;
+- the **cave body** is byte-identical between the two placements (so if
+  relocation ever did change the emitted code, this still fails loudly);
+- the reference image touches nothing outside its own detour + cave.
+
+It now prints `identical (cave relocated 0x400d7b00 -> 0x400d7bf0)` and the wrap
+runs. All four artifacts regenerate together.
+
+**Swept the sibling builds**: `build_reload2.py` is the **only** script that
+relocates trigscale. The other thirteen (`build_directjump{,_v2,_v3,_v4}.py`,
+`build_mutemode{,_dt}.py`, `build_sidechain{,2,3}.py`, `build_qlrec.py`,
+`build_softmute.py`, `build_relstate_shadow.py`, `build_reload.py`) all still
+place it at `0x400d7b00`, so their
+identical absolute-offset checks remain correct and were left alone. (Noted for
+the MERGE thread, not acted on here: `build_merged.py` is not present on `wip`
+— last seen at `18ad62a` — and if it is ever restored it composes RELOAD2 under
+a different cave layout, so it would hit this same class of check.)
+
+### Regression state — image byte-identical to `11e6fb3`
+
+My change is entirely downstream of `OUT.write_bytes`, so `mainos_reload2.bin`
+is unchanged: still **1523 B vs stock, 9 detours**. Verified in the shipped
+image directly: all 7 RELOAD2 detours plus trigscale resolve to their cave
+symbols, the BANK-layer YES press slot reads `0x400d7400` (`rl_bank_yes`), and
+all three `[PTN]` sites are byte-for-byte stock.
+
+- `emu_reload2.py --combo` — **ALL GOOD**
+- `emu_reload2_keymap.py` — **ALL GOOD**
+- `diag_bank_window.py --stress` — **ALL GOOD** (5 taps + 3 reload gestures,
+  depth and both dispatch slots never drift, on stock and patched)
+- `diag_reload2_realkey.py --walk-away` — **PASS** on both routes (BANK-tap and
+  PTN-tap walk-away; the later unrelated `[YES]` does nothing)
+- `diag_reload2_realkey.py 5` — **green**, all 5 cycles byte-identical:
+  `G_KIND=0 POPUP=0 handle=0 depth=2 BANK=0x4007af80` (stock handler restored),
+  our layer unlinked, `rl_job+1` / `bank_yes+1` per cycle, no drift
+
+### Status
+
+**Ready to flash, and this time there is a current image to flash.** The
+hardware pass should still focus on what (9) fixed and hardware has never seen:
+the walk-away scenario and general `[BANK]`+`[YES]` reliability. The free data
+point from the handoff is still worth collecting: **is `RELOAD BUSY` less
+frequent on this build?** The `[YES]`-alone-fires-a-reload bugs fixed in (6) and
+(9) were plausible contributors but never proven to be the cause.
+
+### Lesson for this thread
+
+Add to the thread's standing list: **a build script that validates after it
+writes its primary artifact, but before it writes its shippable one, can fail
+loudly and still look green.** Every test in the suite reads the pre-abort file.
+When a handoff says "build, test, flash", check the **mtime of the thing you
+would actually flash** against the commits it is supposed to contain — the test
+results cannot tell you this, by construction.
+
+### Open issues (unchanged, ranked)
+
+1. The ~1 s stall / stock transport stop — our job still triggers stock's full
+   whole-bank RELOAD BANK. Same root cause as the inherited UNDO-vs-CLEAR quirk.
+   Any retry is still gated on `diag_reload2_repeat.py` (5+ consecutive) plus
+   real-dispatch driving, per (5)'s hard-won rule.
+2. `RELOAD BUSY` — root cause still unfound; ask the user about frequency on
+   this build before investigating further.
+3. The list UI — cosmetic, lowest priority.
+## Session 82 (2026-09-22, `wip`) — DIRECT JUMP: the grid-drift bug. `0x800065b6` is NOT the master step, and the sequencer body runs per CLOCK TICK
+
+First hardware report on the flashed master-cycle build (cont.39): **switching patterns
+decouples the new pattern from the master clock by a FRACTION of a step, the fraction
+depending on when the change was executed.** The user's own qualification is the key to it:
+the new pattern lands on the *correct step* — positions are fine — it is the *phase* that
+moves. So Hook H's per-track rebuild was right all along and the defect is purely temporal.
+
+### The premise that was wrong for fifty sessions
+
+`patch_directjump.s` has said since Session 15 that the block at `0x400a3fdc` "runs every
+step tick" and that `DAT_800065b6` is the master **step**, wrapping at the pattern length.
+The disassembly it wraps against says otherwise:
+
+```
+400a3fdc  moveb 0x800065b6,d0 ; addq #1,d0 ; moveb d0,0x800065b6
+400a3fec  mvsb  0x8000663d,d1                    ; SCALE_IX
+400a3ff2  lea   0x400aba50,a0                    ; LEN_TBL
+400a3ff8  cmp.l (a0,d1.l*4),d0 ; blt -> keep     ; else 0x800065b6 = 0
+```
+
+`LEN_TBL` was measured in cont.20 as a **TICKS-PER-STEP** table (`3,4,6,8,12,24,48,96,...`).
+A step counter cannot wrap at 6. cont.20 corrected the table and never revisited what the
+counter wrapping against it therefore *is*.
+
+**MEASURED** — `tools/diag_tick_domain.py` (new), stock image, DJTEST2 A07, no patch:
+
+```
+SCALE_IX=2  LEN_TBL[SCALE_IX]=6
+values 0x800065b6 takes: [0, 1, 2, 3, 4, 5]
+0x400a3fdc executions = 24 ; 0x400a3d78 (per-track step advance) = 34
+first events: tick tick trkadv | tick tick tick trkadv x7 | tick tick tick trkadv | ...
+```
+
+The 2x track's step advances every 3 ticks, the seven 1x tracks every 6, batched. So:
+
+| address | what it really is |
+|---|---|
+| `0x800065b6` | master **ticks-within-step**, wraps at `LEN_TBL[SCALE_IX]` |
+| `0x800064f0[t]` | per-track **ticks-within-step**, wraps at `LEN_TBL[TRK_SCALE_IX[t]]` (`0x400a3cee`) — the `.equ` calling it `STEP_IN_PAT` is a misnomer |
+| `0x800065b2` | the real master **STEP** counter (word, `++` at `0x400a423a`, once per step) — the array previously called `BAR_CTR` |
+| the body at `0x400a4220` | gated on `0x800065b6 == 0`, i.e. **once per master step** |
+| the block at `0x400a413e` | gated on `0x800065b6 == 2` — the PC send, at tick 2 *within a step*, and additionally gated on `(0x800065b2 + 1) mod chainLen == 0` (`0x400a41aa`) |
+
+The whole per-step handler is reached from the ISR at `0x400a1e0c` (`movew #0x2700,%sr`,
+saves `d0-fp`), once per clock tick.
+
+### Three separate defects, all downstream of that one premise
+
+1. **Hook A's `clr.b STEP`** (`dja_commit`). Zeroing the tick phase to "force the step==0
+   body this tick" runs at an arbitrary *clock* tick. It did not merely commit early: the
+   same counter is the phase of every subsequent step, so the grid was re-anchored to the
+   instant of the key press. **This is the reported symptom, exactly.**
+2. **`dj_c` writing a resume STEP into `0x800065b6`.** A step index (0..63) into a counter
+   that wraps at ticks-per-step (6): the wrap check fired on the very next clock tick, so
+   the first step after every armed commit was ONE TICK long instead of six. A second,
+   independent grid break.
+3. **`dj_abstick`'s cont.38 `+= LEN_TBL[SCALE_IX]`.** cont.38 reasoned "this runs once per
+   master step, and a master step is a per-pattern number of ticks". On a per-clock-tick
+   hook that counts `tps` ticks per tick — 6x fast at 1x and by a *different* factor per
+   pattern, which is precisely the error cont.38 was written to remove. The original `+= 1`
+   was already absolute time. **cont.38's counter change is retracted.**
+
+### How AR keeps it locked — the point of comparison
+
+`FUN_4009905c` waits on `DAT_405667e4`, a countdown to the next step/resolution boundary,
+and commits **there**. Nothing on AR's request or commit path writes the tick phase; the
+per-track countdown reloads it rebuilds (`0x405667c7[t] = ticksPerStep[res_t] - 1`) are full
+reloads, valid precisely because the commit lands on a boundary. **Arm, wait, commit on the
+grid — never move the grid.** That is the whole discipline, and it is what OT's Hook A was
+doing the opposite of.
+
+### The fix
+
+- **Hook A** — arm only. Stock's step body runs every master step regardless, and Hook B
+  already bypasses the CHAIN-AFTER gate while armed, so staying armed commits at the next
+  natural boundary. `clr.b STEP` deleted.
+- **`dj_c`** — resume-step computation and the hand-rolled 32-bit division (`djc_divloop`)
+  deleted; replays stock's `clr.b d0 ; move.b d0,STEP` on both paths. The master position
+  was never this counter's job: Hook H's offset in `0x80006628` builds `D7`, and stock seeds
+  `0x800065b2` (the real step counter) from its low word `0x8000662a` at `0x400a483a`, one
+  instruction before `dj_c` runs. The SCALE_IX stale-index correction is kept — a real
+  latent stock bug, unrelated to phase.
+- **`dj_abstick`** — back to `+= 1`. Hook H's `cycleTicks`/`posTicks` arithmetic unchanged
+  and correct against a true tick counter.
+
+Build: 1044 B cave (was 1087), 1008 bytes changed, 0 unexpected outside the cave, manual-trig
+bytes identical to `build_trigscale_only.py`, container round-trips.
+
+### A SECOND defect, found BY the fix — `dj_c` read the wrong scale field
+
+With the grid locked, the boundary trace showed the first step of the incoming pattern still
+running at the OUTGOING pattern's rate (one 6-tick gap before the 3-tick gaps began). Cause:
+`dj_c` read `PAT_SCALE` (+0x8e54) **unconditionally**, where stock's own `D7` setup
+(`0x400a4802`-`0x400a4826`) selects +0x8e52 (MASTER SCALE) when `SCALE_MODE` is set. cont.33
+found this exact bug in Hook D, fixed it there, and left it in Hook C — where it survived
+because nothing had ever measured the tick RATE after a commit. DJTEST2 A08 exists precisely
+to separate the two fields (+0x8e52 = 0 -> 2x/3 ticks, +0x8e54 = 2 -> 1x/6 ticks), so the
+commit wrote index 2 and Hook D healed it one step later. `dj_c` now branches on
+`SCALE_MODE` exactly as Hooks D and H already do.
+
+Rebuild: 1064 B cave, 1027 bytes changed, 0 unexpected outside the cave, manual-trig bytes
+identical, container round-trips.
+
+### MEASURED — `tools/diag_grid_lock.py` (new), WITH A FAILING CONTROL
+
+The test nothing before it performed: record the absolute clock-tick index of every master
+step boundary across an armed commit and look at the gaps. The change is cued at a CHOSEN
+sub-step phase, so the fraction is controllable — sweeping the phase is the test.
+
+**Control = `ec0a28aa...`, rebuilt from `HEAD` — byte-identical to the image cont.39 marked
+READY TO FLASH, i.e. exactly what is on the user's hardware.** Without it a LOCKED result
+would prove nothing; this thread has produced vacuous greens before (cont.22's empty run,
+cont.29's snapshot-before-the-hook, cont.37's model carrying the code's own omission).
+
+DJTEST2, A07 (tps 6) -> A08 (tps 3, 2x master scale). Gaps around the commit:
+
+| cue phase | CONTROL (flashed build) | FIXED build |
+|---|---|---|
+| 0 | — | `6,6,6,6,6,6,6, 3,3,3…` commit @48 |
+| 1 | `6,6,6, **3,1**, 3,3…` — **1-tick step** | `6,6,6,6,6,6,6, 3,3,3…` commit @48 |
+| 2 | — | `6,6,6,6,6,6,6, 3,3,3…` commit @48 |
+| 3 | `6,6, **5,4**, 3,3…` — **5- then 4-tick**, boundary @41 on neither grid | `6,6,6,6,6,6, 3,3,3…` commit @42 |
+| 4 | — | `6,6,6,6,6,6, 3,3,3…` commit @42 |
+| 5 | `6,6,6, **2**, 3,3…` — **2-tick step** | `6,6,6,6,6,6, 3,3,3…` commit @42 |
+
+The control's fractional gap is **1, 2, or 5-and-4 ticks purely as a function of cue phase**,
+and the shift is PERMANENT: phase 5's later boundaries land at 44, 47, 50, 53 (≡ 2 mod 3) and
+phase 1's at 46, 49, 52 (≡ 1 mod 3), where the incoming pattern's own grid is 45, 48, 51.
+**That is the user's hardware report reproduced exactly.**
+
+The fixed build: every gap is a whole step on one grid or the other at all six phases, the
+rate changes exactly once (at the commit boundary), and every boundary stays on a multiple of
+3 aligned to the original grid. Phases 0/1/2 give byte-identical boundary lists to each other,
+as do 3/4/5 — the residual difference is only WHICH step boundary the cue landed before, i.e.
+the intended one-step quantisation.
+
+A checker bug was fixed in the same pass: the first version compared every gap against the
+end-of-run `tps` and so flagged the outgoing pattern's own legitimate 6-tick steps as "moved".
+When two patterns differ in MASTER SCALE the gap sequence is SUPPOSED to change; what must
+never appear is a gap that is neither rate. It now judges on that, and additionally reports
+the rate-change points.
+
+### DJ-OFF regression gate — PASSED
+
+`tools/diff_stock_vs_patch.py` against this build: IDENTICAL across 38 samples, 16/16 tracks
+with movement in both runs, and every instruction execution count matching (audio loop top
+856/856, `TICKS_IN_STEP++` 856/856, step boundary 136/136, `STEP++` 136/136, stock rebuild
+loop 0/0). Per-track STEP/TICKS/ARMED/SCALE, master counter, `SCALE_IX` and `BAR_CTR` all
+identical. With the feature off the patch is inert. This is the gate whose absence let the
+cont.18 hardware regression ship.
+
+### NOT validated
+
+- **Hardware.** Nothing in this session has been heard.
+- **Per-track sub-step phase across a mid-pattern commit.** The commit tail zeroes
+  `0x800064f0[t]` for all tracks at `0x400a4bf0`. At a natural *pattern* boundary that is
+  correct (the master-length reset re-phases everything anyway, cont.37). At a DIRECT JUMP
+  commit mid-cycle, a track whose ticks-per-step differs from the master's may be mid-step
+  — a 1/2x track (tps 12) under master tps 6 is at tick 6 of 12 on every other master step
+  boundary — and zeroing it restarts that track's step early. Stock's rebuild loop does
+  compute a sub-step phase (`PAIR[t] = D7 - q*tps_t`, `0x400a4920`); whether it reaches
+  `0x800064f0[t]` is unchecked. **This is the next thing to look at**, and it is invisible
+  until the master grid is locked, which it now is.
+- The **specification fork** from cont.38 (absolute-time semantics vs AR's playhead-carry)
+  is still open and still the user's to settle.
+
+### Session 81 continued (5) — HARDWARE: report #1 CONFIRMED FIXED (MKI, 2026-09-22). One new regression candidate.
+
+**Flashed and tested on the MKI. Report #1 PASSES.** The 4-pass round trip
+(P1→P2→P1→P2→P2→P2, trigging T1 at each arrival) now plays the new Part's FLEX sample
+on **every** pass, including the second and later — the good→good→bug latch is gone.
+The prediction made before the flash held exactly.
+
+This closes a thread open since Session 49 and flashed-and-failed at Session 50. The
+fix that mattered was step 2c: `jsr FUN_40001f18(bank, newPart, track)` on the
+leaving-PICKUP arm — the half of stock's own entering-PICKUP idiom
+(`0x400973b4`-`0x400973e0`) that the 2026-09-13 build omitted.
+
+Test 2 (regression check on normal PICKUP use) also passed: pickup recording arms,
+records and loops normally, and hands over to another track correctly.
+
+**NEW, OPEN — "Part reads as edited after the round trip."** User report:
+> P1/Part1 with a PICKUP machine on T1 → P2/Part2 with a FLEX machine on T1 → back to
+> P1. At the moment of the switch back to P1, **Part 1 shows as edited (unsaved)** even
+> though Part 1 was previously saved and nothing changed it.
+
+**NOT YET ATTRIBUTED — do not assume this build introduced it.** The switch that
+triggers it (P2→P1) is the **entering**-PICKUP transition, which is *stock's own*
+`FUN_400972fc` arm — this patch's added arm fires on the **leaving** transition
+(`oldType==4 && newType!=4`), i.e. on P1→P2, not on the switch the user names. So there
+are two live possibilities and they have very different consequences:
+
+1. **Stock behaviour**, surfaced only because report #1's fix now makes this round trip
+   worth doing. Then it is a separate stock bug, not a regression.
+2. **A regression from this patch.** The cave runs on EVERY Part change, not just the
+   PICKUP arm: step 1 (recorder memcpy into `REC_CACHE`), step 3 (scene-morph
+   retrigger), and step 4 (`FUN_40009094(bank,part)` whenever the transport is stopped)
+   all fire on P2→P1 too. Step 4 is the strongest suspect — a full Part apply is
+   exactly the kind of thing that could mark a Part as touched — followed by step 1,
+   which writes the recorder UI cache that a dirty-check might compare against.
+
+**NEXT:** find the per-Part "edited" flag, then watch it across P1→P5→P1 in the
+emulator on **stock vs patched**. That settles attribution without spending a flash
+cycle, and if it is ours it names which of the four steps sets it. Do NOT guess which
+step from shape alone — that error has been made three times on this thread already
+(`FUN_400972fc` for the slot writer, `FUN_40005030` and `FUN_4009d1e8` for the
+resolver) and each time the measurement said otherwise.
+
+## Session 82 (2026-09-22, `wip`) — RELOAD2: hardware report #5 — the arrows worked exactly once, because our own redraw walked into our own walk-away hook
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "continued (9)"
+→ "Session 81").
+
+### Hardware report #5
+
+The Session 81 image was flashed. **Good news first, and it is substantial:**
+
+- Walk-away (both routes), and general `[BANK]`+`[YES]` reliability — **all
+  passed**, so Session 80 continued (8)'s own-keymap-layer redesign and (9)'s
+  two fixes are hardware-confirmed.
+- **`RELOAD BUSY` was never seen once.** That is open issue #2, whose root cause
+  has been chased unsuccessfully for several sessions. The standing suspicion —
+  that the `[YES]`-alone-fires-a-reload family fixed in "(6)" and "(9)" was
+  feeding it — now has real evidence behind it. **Recorded as strong evidence,
+  NOT as closed**: one session without a symptom that used to appear "most of
+  the time" is a good sign, not a proof, and the underlying whole-bank-reload
+  machinery is still triggered on every reload.
+
+**One regression:** after `[BANK]`+`[YES]` opens the picker, UP or DOWN works
+**exactly once**, and then the arrows **and** `[YES]` **and** `[NO]` are all
+dead together. The box stays on screen. Only a `[BANK]` or `[PTN]` tap escapes.
+
+### Root cause — we walked into our own trap
+
+All three key classes dying *together* is the signature of the keymap layer
+being gone, not of an arrow bug — so this was never an arrow problem.
+
+`objdump` on POPUP2 (`0x4005a0e0`), which `rl_draw` calls, gives it outright:
+
+```
+4005a0e6:  tstl  0x460d1e64           | a popup already showing?
+4005a0ec:  beqs  0x4005a0f2           | no  -> skip
+4005a0ee:  jsr   %pc@(0x40056bc0)     | yes -> CLOSE_CB, DIRECTLY
+...
+4005a104:  pea   %pc@(0x40056bc0)     | register CLOSE_CB as the NEW popup's onClose
+4005a11c:  jsr   %pc@(0x4005829c)     | create it
+4005a120:  movel %d0,0x460d1e64       | store the handle
+```
+
+POPUP2 dismisses whatever is currently showing **before** drawing the new one,
+and it does so by calling `CLOSE_CB` **directly** — not through a stored
+callback pointer. Session 80 continued (9) hooked `CLOSE_CB` precisely because
+it is the one choke point every teardown passes through; that is still the right
+hook, but it is now also on our own redraw path:
+
+- **Opening** the picker: `0x460d1e64` is empty (stock's SELECT BANK is a
+  *window*, not this shared popup slot), the `beqs` skips the call, our hook is
+  never entered. The picker opens fine — which is exactly why every previous
+  test passed.
+- **Redrawing** on an arrow: the handle in that slot is **our own picker's**, so
+  `rl_draw` → POPUP2 → `jsr CLOSE_CB` → `rl_closecb_hook`, which sees
+  `rl_layer_on` set, concludes the user walked away, clears `G_MENU` and pops our
+  layer. POPUP2 *then* draws the new box. Highlight moved once; everything dead;
+  box still visible.
+
+### Why the existing suite could not see it
+
+`emu_reload2.py --combo` drives arrows by calling `rl_lay_dn`/`rl_arr_b`
+**directly**, and in direct-call mode our layer is never really pushed, so
+`rl_layer_on` is clear and the `CLOSE_CB` hook is **inert**. The bug is
+structurally invisible there. This is the same blind spot the thread has now hit
+three separate times; the standing rule held again — only real `set_key_state`
+dispatch finds routing-class bugs.
+
+New tool mode: **`diag_reload2_realkey.py --arrows`**. It opens the picker
+through real dispatch, then drives four arrow taps (full press/release pairs)
+and a final `[YES]`, measuring `G_MENU`, `G_SEL`, layer linkage and the live YES
+dispatch slot after **every** key. Before the fix it reproduced the hardware
+report exactly:
+
+```
+DOWN press #1   G_MENU=0 G_SEL=1  OURlayer=unlinked  YES=0x400815d8
+   calls: ['rl_lay_dn', 'rl_draw', 'rl_closecb_hook', 'rl_pop_layer', ...]
+DOWN press #2   G_MENU=0 G_SEL=1  OURlayer=unlinked   (dead)
+[YES]           did not execute
+```
+
+`G_SEL` moves once, the layer unlinks mid-redraw, and the YES slot falls back
+from ours (`0x400d7688`) to the ambient handler (`0x400815d8`) — the exact
+shadowing (8) diagnosed.
+
+### The fix
+
+A re-entrancy flag, `rl_redraw`, set around `rl_draw`'s POPUP2 call and tested
+first in `rl_closecb_hook`. Five instructions.
+
+Two deliberate choices:
+
+- **A dedicated flag, not "temporarily clear `rl_layer_on`".** Clearing
+  `rl_layer_on` would have worked and needed no hook change (6 bytes cheaper),
+  but its failure mode is far worse: if POPUP2 ever failed to return, a stuck
+  `rl_layer_on = 0` would make the matching `rl_pop_layer` skip, and this file's
+  own warning is that *a push without a matching pop wedges the keyboard*. A
+  stuck `rl_redraw` merely disables walk-away detection. Prefer the benign
+  failure.
+- **The flag costs no cave space.** Every access to `rl_layer_on` is a byte op
+  while it was declared `.space 4`, so `rl_redraw` was carved out of its unused
+  padding.
+
+### Cave space is now the binding constraint — read before adding anything
+
+The fix needed 20 bytes and did not fit. `patch_trigscale` moved
+`0x400d7bf0 -> 0x400d7bfc`, and it **cannot move again**:
+
+- Measured free zone: stock is zero `0x400d7400..0x400d7c3b`, `0xff` from
+  `0x400d7c3c` (= `FREE_END`, confirmed correct). 2108 B total.
+- `patch_trigscale` 62 B at `0x400d7bfc` ends `0x400d7c39` — the top.
+- **`patch_reload2`'s hard ceiling is therefore 2044 B. It is currently 2036.
+  Eight bytes of headroom remain.**
+
+**The cave address is an alignment constraint, not just an offset.**
+`0x400d7bfe` was tried first: it is even but not 4-byte aligned, so the source's
+own `.align` padded the 62 B blob to 64 B and the free-zone assert tripped.
+Keep it 4-byte aligned.
+
+The list UI (open issue #3) **will not fit in 8 bytes**. That work needs a second
+cave or a different free region located first — that survey is now a prerequisite
+for it, not an afterthought.
+
+### User requirement recorded
+
+**The three-option picker window must use the system font `F4`** (user, this
+session). Recorded verbatim in `reference/handoffs/RELOAD2_HANDOFF.md` against
+issue #3. Which font resource/table `F4` names in this firmware has **not** been
+located, and no assumption should be made about it; finding `F4`, and how POPUP2
+and the list renderer select a font at all, is the first RE step there.
+
+### Regressions — all green on the fixed build (1543 B, 9 detours)
+
+- `diag_reload2_realkey.py --arrows` — **PASS** (new). `G_SEL` 0→1→2→1→2 with
+  correct wrapping, layer `LINKED` and `G_MENU=1` across every tap, YES slot
+  stable at `0x400d768e`, and `[YES]` still executes (`jobs=1`). The hook is
+  still entered twice per redraw and now correctly skips — no `rl_pop_layer`.
+- `diag_reload2_realkey.py --walk-away` — **PASS** both routes. The guard is set
+  only inside `rl_draw`, so genuine walk-aways still trip the hook: (9)'s fix is
+  intact, which was the main risk of this change.
+- `emu_reload2.py --combo` — ALL GOOD
+- `emu_reload2_keymap.py` — ALL GOOD
+- `diag_bank_window.py --stress` — ALL GOOD
+- `diag_reload2_realkey.py 5` — **green**, all 5 cycles byte-identical:
+  `G_KIND=0 POPUP=0 handle=0 depth=2 BANK=0x4007af80` (stock handler restored),
+  our layer unlinked, `rl_job+1` / `bank_yes+1` per cycle, no drift
+
+### Status
+
+**Not yet flashed.** Ready for a hardware pass on the arrows specifically.
+
+### Open issues
+
+1. The ~1 s stall / stock transport stop — unchanged; our job still triggers
+   stock's full whole-bank RELOAD BANK. Retry still gated on
+   `diag_reload2_repeat.py` plus real-dispatch driving.
+2. `RELOAD BUSY` — **no longer observed on hardware.** Strong evidence it was the
+   `[YES]`-alone family from "(6)"/"(9)"; keep watching rather than closing.
+3. The list UI — now **blocked on cave space** (8 B free) and on locating font
+   `F4`.
+
+### Session 81 continued (6) — "Part reads as edited after the round trip" ATTRIBUTED: it is STOCK, not a regression from this patch
+
+**The per-Part "edited/unsaved" state is a BITMASK, one bit per Part, kept in two
+places:** `blob + 0x95048` (persisted) and `0x100b145e` (RAM mirror). SAVE PART
+(`FUN_4004a908`) clears this Part's bit in both, at `0x4004a968` / `0x4004a974` — which
+is how the flag was found (go at a dirty flag through whatever CLEARS it; 395 sites
+reference the RAM mirror, so searching for setters is useless).
+
+**Measured, stock vs patched, sequentially (see the methodology warning below):**
+
+| | stock | patched |
+|---|---|---|
+| writes to `0x100b145e` | 1 | 1 |
+| writer PC | `0x40097388` | `0x40097388` |
+| after initial P1 | `0x00` | `0x00` |
+| ARRIVAL #1 (P5) | `0x00` | `0x00` |
+| **back at P1** | **`0x01`** | **`0x01`** |
+| ARRIVAL #2 (P5) | `0x01` | `0x01` |
+
+**Byte-identical. This patch's four cave steps add ZERO writes to the flag.** The bit is
+set by `FUN_400972fc` at `0x40097388` (+ the persisted copy at `0x4009737c`) — stock
+code on the entering-PICKUP path, which this patch does not touch (its added arm fires
+on the *leaving* transition). The user's report — Part 1 reads edited on the switch
+BACK to P1 — lands exactly on the stock write, at exactly the measured moment.
+
+**Mechanism (structure measured; one operand uncertain, flagged).** Inside
+`FUN_400972fc`, gated at `0x40097336` on `newType == 4 (PICKUP)`: the routine force-writes
+the Part's stored PICKUP slot byte (`blob + part*0x18b2 + track*5 + 0x8f04e`) to
+`128+track` (`d2 = track + (-128)`, whose low byte is `0x80+track`), mirrors it into
+`SLOT_MIRROR 0x100a519c`, and **only then** sets the Part-dirty bit. There is a compare
+with a conditional skip at `0x4009735e` immediately before, so the dirty-set is NOT
+unconditional — it fires only when that write actually changes something. **The exact
+operands of that compare are NOT established**: r2's linear decode desyncs at
+`0x40097358`/`0x4009735a`, and this thread has been burned three times by trusting a
+desynced read. Treat "it only dirties when the stored slot differs" as the shape, not
+as a pinned fact.
+
+So stock *does* modify stored Part data during a pattern change (normalising the PICKUP
+slot) and marks the Part edited because of it. Defensible from Elektron's side — it did
+write to the Part — but surprising to a user who changed nothing.
+
+**METHODOLOGY WARNING — a mistake made and caught here.** The first attempt ran the
+stock and patched probes IN PARALLEL. They share one staging tree
+(`out/_emu_rtos_tree` under octabam), so they raced: the patched run died in
+`stage_project`, and the stock run — though it exited 0 and produced full output — was
+executing while another process deleted and recreated that tree, so it was NOT a valid
+result either. This is exactly octabam's own documented trap ("a result taken while
+another build was running is not a result"). **Run these probes sequentially.**
+A second confound was caught in the same pass: the harness's own setup pokes left
+Part 0 already reading dirty (`0x01`) at every snapshot, which made the first
+measurement meaningless for a report about a *saved* Part going dirty. The harness now
+clears both copies of the flag after setup (`clear-dirty` line in the output) so the
+round trip starts from a genuinely saved Part.
+
+**If it is ever to be fixed:** this patch's detour (`0x40062216`) runs at the TAIL of the
+"select Part P" handler, i.e. AFTER the `FUN_400972fc` ×8 loop has already set the bit,
+so the prior value is gone by the time our cave runs. Clearing the bit there would be
+WRONG — it would also wipe a genuine edit the user made before switching patterns. A
+correct fix needs a SECOND detour at the head of the handler to snapshot
+`0x100b145e` + `blob+0x95048`, with the existing cave restoring them. Modest work, one
+more hook site. Not attempted; not obviously worth it, since the underlying write to the
+Part's stored slot byte is real and arguably should be flagged.
+
+## Session 83 (2026-09-23, `wip`) — RELOAD2: the RELOAD BUSY hunt gets a real transport at last, and the emulator is ruled OUT as a venue for it
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "(9)" → "81" →
+"82 — RELOAD2"). Note the heading collision: the DIRECT JUMP thread also has a
+"Session 82", earlier in this file.
+
+### Hardware report #6
+
+The Session 82 image was flashed. **Arrow regression confirmed FIXED.** New,
+and the sharpest discriminator open issue #2 has ever had:
+
+> RELOAD BUSY after reloading a TRK SEQ once (no issue the first time), **IF the
+> transport is running**. No RELOAD BUSY if the transport is stopped.
+
+Follow-ups from the user: the BUSY is "transient", but a third, fourth, fifth
+`[BANK]`+`[YES]` still gives BUSY; and the first reload, with the transport
+running, **does** audibly take effect (timing/sync is still wrong — that is
+issue #1, not this).
+
+### The methodological finding: every RELOAD2 test faked the transport
+
+`BUSY` has exactly one source — `tst.b G_KIND ; bne -> toast` in `rl_yes_exec`
+— and that path bails **before** arming. Our code writes `G_KIND` only in the
+arm path, and only `rl_job`'s entry clears it. So a BUSY press means `G_KIND`
+was left set by an earlier armed-but-never-serviced request.
+
+To test that, the transport has to actually run. It never has:
+
+- Every RELOAD2 harness does `rt.press_play_live()` and then **pokes**
+  `TRANSPORT`/`0x800065b8` to 1. `emu_reload.boot_and_load()` attaches with only
+  `tick=True`, omitting the `ips` / `pit_clock_hz` / `quantum` / `step_quantum`
+  arguments that let the PIT drive the step engine. Result: flag set, sequencer
+  **frozen**.
+- `diag_seq_activity.py` gets a genuinely stepping sequencer (16/16 tracks) via
+  those attach arguments **plus `rt.start_transport_live()`** — a real transport
+  start, not a poke.
+
+`rlj_setflag`'s `tst.l RUNNING` branch (arm `RELOAD_NOW` 0x46c8028a, polled once
+per STEP at 0x400a2530) is the only transport-conditional code we have, and it
+had **never executed with real steps underneath it**. That is precisely why
+`diag_reload2_realkey.py 5` reported five byte-identical cycles while hardware
+fails on the second reload.
+
+New tool: **`tools/diag_reload2_transport.py`** — real PIT-driven stepping AND a
+real `start_transport_live()`, driving N reload gestures through `set_key_state`
+and recording, per gesture: `G_KIND` as `rl_yes_exec` sees it, BUSY yes/no,
+`rl_job` entries, `FUN_40022778` posts, `RELOAD_NOW` writes, and FREAD counts.
+It has a **liveness gate that aborts rather than reporting** if the step engine
+is not advancing — which immediately earned its keep by catching my own first
+version, where I had omitted `start_transport_live()` and the sequencer was
+frozen. A frozen-sequencer "green" would have been exactly the kind of vacuous
+result this thread keeps getting burned by.
+
+### Two of this session's own hypotheses, measured and KILLED
+
+With the sequencer genuinely running and `RUNNING` set:
+
+```
+liveness: distinct per-track STEP/TICK snapshots = 4  -> sequencer RUNNING
+          0x800065b8 reads 0x00000001 after a REAL transport start
+ it  G_KIND@exec  BUSY?  rl_job  posts  G_KIND after  RELOAD_NOW  freads
+  1..8          0     no       1      1             0      [1, 0]    6852
+```
+
+- **`0x800065b8` IS the real transport flag** — it reads 1 after a real start.
+  (`diag_seq_activity`'s trailing `TRANSPORT=0` print led me to doubt this
+  mid-session; that was wrong and is corrected here.)
+- **`RELOAD_NOW` is healthy**: armed by us and **consumed** (`[1, 0]`) by the
+  step engine on every single reload. The Session 80 continued (2) comment
+  calling this an unproven hypothesis can now be marked measured-good.
+- **The running sequencer does NOT clobber `G_KIND`.** Eight consecutive
+  reloads, `G_KIND` 0 at every press, one `rl_job` per post. The
+  "stock playback code scribbles on 0x80006a50" theory is dead for every path
+  this harness exercises.
+
+### The decisive negative: the emulator CANNOT host this bug
+
+```
+streaming: buffered card reads (FREAD 0x40016564) during PURE PLAYBACK,
+           no reload issued = 0
+```
+
+Zero. The FREAD hook works — **each reload performs 6852 card reads** (our
+`.strd` read plus the 17 pattern parses, i.e. issue #1's whole-bank side effect
+made numerically visible for the first time). But playback itself reads the card
+**not at all**: this harness does not stream audio.
+
+So a storage-task-contention bug is **structurally unreachable here**, and the
+eight clean iterations above say nothing whatsoever about the hardware symptom.
+Recorded in the tool's own docstring so no future session mistakes a green run
+for a fix. **Do not "validate" a RELOAD BUSY fix in the emulator until the
+harness streams audio.**
+
+### Status of the "ruled out" mark on storage-task contention
+
+The handoff lists storage-task-busy-while-CF-streams as ruled out, "do not
+re-investigate without new evidence". **That mark is lifted.** It was retracted
+on the STATIC-vs-FLEX observation (the user's own retraction: the two reload
+identically), which is a *different claim* from transport-running-vs-stopped.
+Report #6 is independent evidence, and it now fits contention better than
+anything else: stopped transport = no streaming = free storage task = unlimited
+clean reloads; running transport = streaming + our own 6852-read reload
+competing for the same task.
+
+### Cave space — SOLVED, and it was a false constraint
+
+Session 82 reported `patch_reload2` at 2036 B against a 2044 B ceiling. Surveyed
+the whole MAIN_OS section for free space:
+
+```
+0x401087e4..0x4010c314   15153 B
+0x4010cdd1..0x4010fdef   12319 B
+0x400d64da..0x400d7c3b    5986 B   <-- contains our cave; extends 3878 B BELOW it
+0x400d24d0..0x400d2cdf    2064 B
+```
+
+Our cave starts at `0x400d7400`, but the contiguous zero run starts at
+`0x400d64da`. **`build_merged.py` (Session 48) already lowered its FREE_START to
+`0x400d6500` for exactly this reason**, documenting "the whole
+0x400d64da..0x400d7c3c span is zero in stock" — independent corroboration from
+another build. Moving `patch_reload2`'s base `0x400d7400` -> `0x400d6500` gives
+`0x400d7bfc - 0x400d6500` = **5884 B**, versus 2044 today. The list UI and any
+recovery logic both fit comfortably. Not yet done.
+
+### Where issue #2 stands
+
+`G_KIND` is a **one-shot request flag with no recovery path**: if a posted job is
+ever lost, the feature is bricked until reboot and the only symptom is BUSY
+forever. Session 80 continued already applied exactly this lesson once — it is
+why `rl_ptn` no longer gates opening the picker on `G_KIND` ("a stuck flag can
+never again permanently lock out the feature"). `rl_yes_exec`'s guard is the last
+place that rule was not applied, and report #6 is what happens as a result.
+
+A staleness timeout (if `G_KIND` has been set for more than N frames, treat it as
+stale, clear, arm fresh) is mechanism-independent and cannot deadlock. Its known
+cost: if the original job was merely slow rather than lost, two jobs exist for
+one request, and the second finds `G_KIND == 0` and falls through to a full stock
+RELOAD BANK — heavy (the ~1 s stall) but not corrupting. That trade is clearly
+better than a bricked feature, but it is a **mitigation, not a cure**, and with
+the emulator ruled out it can only be qualified on hardware.
+
+### Also flagged (DIRECT JUMP thread, not acted on)
+
+`tools/patch_directjump.s`, uncommitted: `G_TOAST` (`0x80006a44`, written
+`move.l`) and `G_ABSTICK` (`0x80006a46`, written `move.l`) **overlap on
+`0x80006a46..47`**. Each corrupts the other. That thread's Session 82 is about
+tick-domain correctness and grid drift, so a silently corrupted absolute-tick
+counter is worth ruling out there before more measurement. RELOAD2's own scratch
+(`0x80006a50..55`) does not collide with DIRECT JUMP's — but MERGE needs a real
+scratch allocation map rather than per-feature `.equ`s.
+
+### Session 81 continued (7) — the dirty-flag fix: BUILT, self-caught bug FIXED, emu-validated clean. NOT yet flashed.
+
+**Built the two-detour fix** (per user directive: don't lose a genuine edit made before
+switching). `cave2`, a second detour at the HEAD of the "select Part P" handler
+(`0x400621da`, the machine-type memcpy site — same "jsr kind" idiom as the existing
+tail detour), snapshots both copies of the per-Part edited bitmask
+(`0x100b145e` + `blob+0x95048`) into cave-local scratch before `FUN_400972fc`'s x8 loop
+runs. Step 2d, added to the existing tail cave, restores both copies after. Restoring
+the WHOLE byte (not just clearing a bit) is what preserves a real edit: a bit already
+set on entry was captured and goes back set; only bits the handler itself set during
+the pattern change get undone.
+
+**Caught and fixed a real bug in this session's own first attempt, before it reached
+hardware.** `cave2`'s tail replayed the displaced instruction (`jsr FUN_MEMCPY`) with
+`jsr FUN_MEMCPY; rts` — copied from the existing tail cave's `jsr CONT; rts` idiom.
+That idiom only works for `CONT` (`0x400326a0`) because CONT takes ZERO stack
+arguments (confirmed: it just dereferences a state pointer, no args). `FUN_MEMCPY`
+takes THREE stack args (dst, src, len), already pushed by the site before `jsr <cave2>`
+fires — the nested `jsr` pushes an EXTRA return address on top of them, shifting every
+fixed-offset argument read inside `FUN_MEMCPY` by 4 bytes. Measured consequence: not a
+crash but a HANG — `seq_select_live` / `FW_SEQ_SELECT` never returned to `MAIN_SPIN`
+within a 4,000,000-step `call_as_main` budget, on the very first Part-changing switch.
+On hardware, a memcpy given a garbage length and garbage src/dst pointers is exactly
+the class of thing that could corrupt state or crash the unit — this was caught before
+any flash, which is the point of validating in emu first.
+
+**Root cause of the mistake:** every OTHER patch in this repo uses `jmp <target>`
+(a tail call) to replay a displaced instruction, precisely so the replayed function's
+own `rts` pops the ORIGINAL caller's return address directly, with no extra frame and
+no argument-offset corruption. Cave1's `jsr CONT; rts` was already an exception to that
+idiom, quietly safe only because CONT is 0-arg — and this session copied that exception
+as if it were the rule. **Fixed**: `cave2` now ends `jmp FUN_MEMCPY` (no trailing `rts`,
+now dead code, removed). Verified via `m68k-elf-objdump` before and after — the fixed
+version places dst/src/len at their original stack offsets.
+
+**Emu A/B, stock vs patched, run SEQUENTIALLY (never in parallel — see the Session 81
+continued (6) trap), seeded `0x02` (bit 1 = a genuine unsaved edit on a different
+Part) per the same methodology as continued (6):**
+
+| | stock | patched |
+|---|---|---|
+| after initial P1 | `0x02` | `0x02` |
+| ARRIVAL #1 (P5) | `0x02` | `0x02` |
+| back at P1 | `0x03` (spurious) | `0x02` (suppressed) |
+| ARRIVAL #2 (P5) | `0x03` | `0x02` |
+
+No hang, exit 0 both runs. Bit 1 (the simulated genuine edit) survives untouched on
+patched throughout — confirms the restore does not clobber a real edit. Report #1's own
+fix re-verified unaffected in the same run: T1's pre-image slot still tracks the Part
+correctly at every arrival (`02`/`02`/`80`/`02`).
+
+**Known narrowing, already documented in the patch source, restated here:** stock's
+write to the Part's stored PICKUP slot byte itself (the `128+track` normalisation) is
+deliberately NOT undone — reverting it would break report #1's fix, which depends on
+that value. So the Part's stored bytes can differ from what was last saved to disk while
+the edited flag reads clean. Benign in practice (stock always writes the same value),
+but a real narrowing of what "clean" means, worth remembering if this area is revisited.
+
+**Status: built, emu-validated clean, NOT flashed.** Cave 402 B (2 detours, 6 B each),
+version still `1.40C`. `build_partreapply.py` now splices two detour sites; both
+guarded with the same stock-bytes assertion as the original.
+
+**NEXT:** hardware test — the P1→P2→P1 round trip should no longer mark Part 1 edited,
+and a genuine edit made to a different Part before the round trip should still show
+edited afterward. If confirmed, this closes the last open item from this session's
+PARTREAPPLY work.
+
+## Session 83 continued — issue #1 ATTACKED: the whole-bank reload is suppressed again, and this time it is measured
+
+The user chose "attack issue #1 (the real cure)" over mitigating RELOAD BUSY.
+
+### Cave move first — and Session 82's "binding constraint" was WRONG
+
+`patch_reload2`'s base moved `0x400d7400` -> `0x400d6500` (`FREE_START`, new
+constant, now asserted at both ends). Session 82 reported 2036 B against a
+2044 B ceiling and called cave space the binding constraint. **That was a false
+constraint and I should have checked before reporting it**: the contiguous zero
+run containing the cave starts at `0x400d64da`, and `build_merged.py` had
+already lowered its own FREE_START to `0x400d6500` back in Session 48. Budget is
+now **5884 B** (2098 used, 3786 free) — the F4 list UI fits comfortably.
+
+**The move was proven a pure relocation before anything was layered on top**:
+all 19 differing bytes in the cave body are 32-bit self-address words shifted by
+exactly `-0xf00`, **zero unexplained**, the old cave region restored byte-for-
+byte to stock, every detour target shifted by the same delta.
+
+### ...and the byte-level proof was still not enough
+
+`--combo` then failed on six checks with YES/NO doing nothing at all
+(`end=rts G_MENU->1 close=False post=False`) — which reads exactly like a
+firmware regression. It was not. `emu_reload.py`'s single-stepper hardcoded
+
+```python
+if not (0x400d7400 <= pc < 0x400d8000):   # -> "a stubbed firmware fn: skip it"
+```
+
+so once the cave moved to `0x400d6500`, **our own first instruction fell outside
+the window and every handler was skipped as if it were an external call.**
+Replaced with `OUR_CODE_LO/HI` spanning the whole free zone, with a comment
+tying them to `FREE_START`/`FREE_END`.
+
+**Lesson worth keeping: a byte-level relocation proof is necessary and not
+sufficient.** Assumptions about where our code lives were encoded *outside* the
+build, in a tool. Anything that hardcodes a cave address is invalidated by a
+move, and the build cannot see it.
+
+### The fix, restored
+
+- `rl_done` detour @ `0x40023c62` (doneFn's SUCCESS path, `mvs.w 0x460bd910,d0`,
+  6 B, immediately before the `bsr.w 0x40023b68` that re-reads 16 patterns).
+- `rl_own` set in `rl_job` on the path that has already established the job is
+  ours — one-shot, so a genuine user-requested RELOAD BANK is never suppressed.
+- `FUN_4000faf0(bank)` live-cache refresh restored in `rlj_setflag`. The two
+  stand or fall together: without the refresh the slice lands in the cold blob
+  while playback keeps reading stale bytes.
+
+10 detours, 2098 B, 1601 B changed vs stock.
+
+### Why this retry is not a blind repeat of "(4)"/"(5)"
+
+"(5)" condemned this change on three hardware symptoms. Two of them have since
+been traced to **independent** causes and fixed separately: "(6)" fixed `[YES]`
+being swallowed while `[BANK]` was still held — that IS the "hardly ever
+executes" report — and "(8)"/"(9)" fixed the layer-routing and walk-away bugs
+that left the picker primed and the YES slot shadowed. Those confounders were
+present in **both** flashes "(5)" compared, and they are exactly the kind of bug
+that worsens with repeated use, which is how "(5)" reasoned. So "only these two
+changes differed" is much weaker evidence than it looked.
+
+**The third symptom — stock `[BANK]` single-press dying after a few reload
+attempts — has NO independent explanation.** It is the one to watch on hardware.
+If it returns, this goes back out and the misattribution argument is wrong.
+
+### What the suppression is measurably worth
+
+| measure | before | after |
+|---|---|---|
+| buffered card reads per reload | 6852 | **354** |
+| pattern parses per reload | 17 | **1** |
+| deserialiser | ran | **`deser_seen=False`** |
+
+### Regressions — the "(5)" gate and the full suite, all green
+
+- `diag_reload2_repeat.py 6` — **6/6 clean**, no drift in `G_KIND`, `POPUP`,
+  layer depth or the BANK/YES dispatch slots. This is the gate "(5)" mandated.
+- `diag_reload2_transport.py --iters 8` — **8/8 clean** with the sequencer
+  genuinely running; card reads 6852 -> 354.
+- `emu_reload2.py --trk` — **ALL GOOD**, `deser_seen=False`, exactly 1x
+  `FUN_4008cebc`; track 3 reverts, other 7 audio + all 8 MIDI untouched,
+  Part-link byte and bystander pattern untouched, `RELOAD_NOW` fired+consumed,
+  transport still running.
+- `diag_reload2_realkey.py 5` — 5/5 clean, `parse+1` per cycle (was `parse+17`).
+- `emu_reload2.py --combo` — ALL GOOD (after the harness-window fix).
+- `diag_reload2_realkey.py --arrows` — PASS.
+- `diag_reload2_realkey.py --walk-away` — PASS on **both** routes (BANK and PTN;
+  an earlier `tail -8` had truncated the BANK verdict, so it was re-run rather
+  than assumed).
+- `emu_reload2_keymap.py`, `diag_bank_window.py --stress` — ALL GOOD.
+
+### Status, stated honestly
+
+**Not flashed.** The emulator still cannot stream audio, so it **cannot confirm
+this fixes RELOAD BUSY** — only hardware can. What is proven here is that the
+mechanism we believe causes it is gone: 6852 card reads per reload competing
+with playback for the storage task, now 354. That is a mechanical argument, not
+a measurement of the symptom.
+
+Watch on hardware: RELOAD BUSY with the transport running (the target); the
+~1 s stall and sequencer restart (should also improve — same root cause); the
+UNDO-instead-of-CLEAR quirk (same family, though it is inherited from stock and
+reproduces on plain stock RELOAD BANK); and **stock `[BANK]` single-press after
+several reloads** — "(5)"'s unexplained third symptom.
+
+## Session 83 continued (2) — architecture question answered: pattern switch is RAM-only, measured
+
+The user asked, at general-architecture level: when the OT executes a pattern
+switch, is sequence data read from the CF card, or from somewhere else (RAM)?
+
+Answer, and it matters beyond just satisfying curiosity — it's the standing
+assumption behind DIRECT JUMP's whole design (tick/step arithmetic only, no I/O
+anywhere near `dj_c`) and behind why RELOAD2's card read is expensive relative
+to ordinary playback:
+
+**RAM. Sequence data for a whole bank (all 16 patterns) is resident once the
+bank is current; pattern switch is an index change into data already in
+memory, never a card access.** Documented layout (`reference/upstream-notes.md`
+"Two-level scene storage"): a cold blob at `0x400e21e0` (bank stride `0x9b340`,
+the working store p-lock edits land in) and a live working copy at `0x1001614e`
+indexed by pattern (`+ pattern*0x18b2`) that playback/crossfader actually read.
+`FUN_4000faf0(bank)` bridges the two -- documented as RAM->RAM, no card access
+-- and is exactly the "make bank current" call RELOAD2's own fix restores as
+its live-cache refresh (this session, above).
+
+New `tools/diag_pattern_switch_io.py` measures it directly rather than trusting
+the documentation alone -- FOPEN/FREAD/PARSEPAT (the card path) and MKCURRENT
+(`FUN_4000faf0`) across three real events with the transport running:
+
+```
+phase                         card-path activity
+  1. idle playback             FOPEN=0  FREAD=0  PARSEPAT=0  MKCURRENT=0
+  2. pattern switch 0->1       FOPEN=0  FREAD=0  PARSEPAT=0  MKCURRENT=0
+  3. bank switch 0->1          FOPEN=0  FREAD=0  PARSEPAT=0  MKCURRENT=1
+```
+
+Pattern switch: zero card-path hits. Bank switch: one `MKCURRENT` call (the
+RAM->RAM copy), still zero `FOPEN`/`FREAD`/`PARSEPAT`. So even changing banks
+does not touch the card in this harness -- consistent with the model that the
+CF card is only read at project/bank LOAD time (or on an explicit RELOAD BANK /
+RELOAD2 request); everything downstream, pattern switch included, is RAM
+index arithmetic.
+
+**Caveat carried over from `diag_reload2_transport.py`, same harness limit**:
+this does not stream sample audio, so it says nothing about STATIC-machine
+playback, which does read the card continuously. This result is specifically
+about SEQUENCE data (trigs/p-locks/scenes), not sample audio.
+
+### Session 81 continued (8) — HARDWARE: dirty-flag fix CONFIRMED (MKI, 2026-09-23). PARTREAPPLY thread closed.
+
+**Both tests passed on hardware.** P1(PICKUP)→P2(FLEX)→P1 no longer marks Part 1
+edited. A genuine edit made to a different Part before the same round trip still shows
+that Part as edited afterward — the restore preserves a real edit exactly as designed.
+
+This closes the PARTREAPPLY thread opened at Session 49: report #1 (PICKUP→FLEX stuck
+loop, the one with a solid repro) is fixed and hardware-confirmed; the spurious
+Part-edited flag found while testing it is fixed and hardware-confirmed; reports #2/#3
+remain unconfirmed on stock (unchanged since Session 50, not chased further — no clean
+repro was ever found for either). README/FLASHING.md updated to reflect closure.
+
+Three sub-threads over this session, each following the same discipline of measuring
+rather than guessing from shape: the ownership-singleton leak (fixed, its own repro,
+separate from report #1), report #1 itself (root-caused via a directly-driven resolver
+after three wrong shape-based guesses were checked and ruled out), and the dirty-flag
+regression risk (attributed to stock via a careful A/B, then fixed without losing a
+real edit, catching a self-introduced argument-corruption bug in the fix's own first
+draft before it ever reached hardware). All of it in `tools/patch_partreapply.s` /
+`tools/build_partreapply.py` / `tools/emu_partswitch.py`, cave now 402 B across two
+detours, version stays `1.40C`.
+## Session 84 (2026-09-23, `wip`) — DIRECT JUMP: the per-track SCALE cache was never refreshed at commit. A gap in the Session 83 AR port, found by hardware in one test
+
+Hardware report on the Session 83 AR-port build: two patterns of equal master length and
+scale switch cleanly — that part is **confirmed working on the MKI** — but give a track a
+**different SCALE on the target pattern** and two symptoms return:
+
+1. the fractional-step symptom (a switch can leave a pattern "between steps"), and
+2. a permanent step-count offset — with one pattern at 2x, the user expects pattern 2's
+   step 1 to fall on pattern 1's step 1 or step 9, and pattern 1's step 1 always on
+   pattern 2's step 1. It does not.
+
+### Root cause — the live per-track scale cache
+
+`TRK_SCALE_IX` (`0x8000663e[t]`, MIDI twin `0x80006646[m]`) is the **live** per-track scale
+index. The per-track wrap check at `0x400a3cee` compares each track's tick counter against
+`LEN_TBL[TRK_SCALE_IX[t]]`, so this cache is what sets each track's real tick **rate**.
+
+Stock refreshes it only **lazily**, at `0x400a3d08` / `0x400a3d0e`, reached only when a
+track's tick counter wraps. An image-wide scan finds writers ONLY at `0x4009b6e6` (sequencer
+init), `0x400a292a` / `0x400a2970`, and `0x400a3cb4` (that lazy per-tick loop). **The commit
+path `0x400a4884..0x400a4be6` never writes it.**
+
+So after a **mid-pattern** commit every track keeps running at the OUTGOING pattern's
+ticks-per-step until it next wraps — a wrong rate for up to a full track cycle, which reads
+as landing between steps and leaves a permanent offset once the track wraps and picks up the
+right rate. Both symptoms, one cause.
+
+Stock is fine at a natural boundary because every track has just wrapped there, so the lazy
+refresh has already run for all of them. Only a mid-pattern commit exposes it — which is
+DIRECT JUMP's entire purpose.
+
+Note stock's own rebuild loop reads the per-track scale **correctly** for its own math at
+`0x400a4900` (`SCALE_MODE ? blob[t][+0x51] : pattern[+0x8e54]`), so `NEXT_STEP`, `PAIR` and
+`CNTDN_TBL` are all computed against the right scale. **That is exactly why the landing
+POSITION looked right in every earlier test while the playback RATE did not.**
+
+### This is a gap in the Session 83 port, not a new bug
+
+AR's commit rebuilds `0x40566775[t]` — "per-track resolution index" — for all 13 tracks. It
+is **row 5 of the per-track inventory table in `reference/AR_DIRECT_JUMP.md`**, a document
+written in this project. Session 83 ported AR's POSITION and missed its RESOLUTION CACHE.
+It is also the per-track twin of the master `SCALE_IX` staleness `dj_c` has corrected since
+Session 70 — the same bug one level down, sitting immediately next to the code that fixes it.
+
+### MEASURED — `tools/diag_trkscale.py` (new), on the flashed Session 83 image
+
+DJTEST2 bank 0, patterns 0 and 1 (uniform mode: all-tracks 1x vs all-tracks 2x — a real
+hardware-exported fixture for exactly this):
+
+```
+0 -> 1   TRK_SCALE_IX audio: got [2]*8  want [0]*8      ** STALE, 8/8
+         TRK_SCALE_IX MIDI : got [2]*8  want [0]*8      ** STALE, 8/8
+1 -> 0   stale the other way, 16/16
+```
+
+16/16 wrong in both directions: cache says tps 6 where the pattern says tps 3.
+
+### Why every earlier test passed — the fixture never had the condition
+
+```
+pattern   t0      t1      t2      t3      t4      ...
+  A07     16/2/6  16/0/3  12/2/6  7/2/6   16/4/12
+  A08     16/2/6  16/0/3  12/2/6  7/2/6   16/4/12    <- IDENTICAL per-track scales
+```
+
+Every sweep in Sessions 82 and 83 switched A07↔A08. The cache was therefore never stale in
+any of them, and the 6/6 phase results were green with this bug untouched behind them.
+Session 83's commit message did record "per-track scale differences: NOT covered" — writing
+the caveat down is not the same as building the fixture, and the hardware found it in one
+test. **Standing lesson: when a known-uncovered case is named, build the fixture in the same
+session or the green result will be read as broader than it is.**
+
+### The fix
+
+In `dj_c`, immediately after the master `SCALE_IX` correction: rewrite `TRK_SCALE_IX[0..7]`
+and `MIDI_SCALE_IX[0..7]` from the incoming pattern's own scale bytes, using stock's own
+addressing read off `0x400a48d4`-`0x400a4906` — `patOff = pat*0x8ed8 + bank*0x9b340` (already
+in `d0`), `SCALE_MODE` at `PAT_SMODE+patOff` selecting each track's own byte
+(`TRK_BLOB+0x51 + patOff + t*0x91a`, MIDI `TRK_BLOB+0x48f8+1 + patOff + m*0x8b0`) against the
+pattern default at `PAT_SCALE+patOff`.
+
+Gated on an armed commit, so DJ-OFF stays byte-identical.
+
+Build: 802 B cave, 791 bytes changed, 0 unexpected outside the cave, manual-trig bytes
+identical, container round-trips.
+
+### MEASURED — after the fix
+
+| fixture | mode | result |
+|---|---|---|
+| 0 -> 1 | uniform, 1x -> 2x | 16/16 match the incoming pattern |
+| 1 -> 0 | uniform, 2x -> 1x | 16/16 match |
+| 6 -> 7 | **per-track**, audio idx `[2,0,2,2,4,2,2,2]` | 16/16 match |
+
+The 6→7 case is the one that matters for the addressing: it exercises the per-track branch
+with **distinct** values per track (T1 = idx 0, T4 = idx 4, rest idx 2), so it proves the
+`0x91a` stride and `+0x51` offset are right rather than merely that a uniform fill works.
+
+Also re-run against this image:
+- grid lock + playhead continuity on the **0 -> 1 differing-scale pair** (a pair no earlier
+  sweep had ever used): 3/3 phases LOCKED + CONTINUOUS.
+- DJ-OFF (`diff_stock_vs_patch.py`): IDENTICAL.
+
+### NOT validated
+
+- **Hardware.** Nothing in this session has been heard.
+- **Differing MASTER LENGTHs** between two patterns — still unbuilt as a fixture, and still
+  the case where AR's `mod newLen` actually bites. Named again here deliberately; per the
+  lesson above, it should be built before the next green result is quoted as coverage.
+- **MIDI tracks with distinct per-track scales.** The 6→7 fixture's MIDI tracks are all
+  idx 2, so the MIDI branch is exercised only with uniform values.
+- Per-track sub-step phase at a mid-cycle commit (`0x800064f0[t]` zeroed for all tracks at
+  `0x400a4bf0`) — still open from Session 82.
+
+### Tooling note
+
+The first launch of the verification runs died instantly: `set -- $pair` was used to unpack
+pattern pairs, but **zsh does not word-split unquoted parameters** the way bash does, so
+`$1` became the literal string `"0 1"` and argparse rejected it. The failure was visible only
+because the status check compared "logs with a verdict" against "processes still alive" and
+the two disagreed. Worth keeping that pairing in any status check.
+
+## Session 84 (2026-09-23, `wip`) — RELOAD2: hardware report #7 — BUSY gets a recovery path; the crash stays UNEXPLAINED and is labelled as such
+
+**Housekeeping**: continues the RELOAD2 thread ("Session 80" → "(9)" → "81" →
+"82 — RELOAD2" → "83"). Note the long-standing heading collision: the DIRECT JUMP
+thread also has "Session 82"/"Session 84" entries.
+
+### Hardware report #7 (the Session 83 suppression build, flashed)
+
+**Confirmed GOOD, and it retires the biggest risk of that build:**
+- The **~1 s stall is better** — the whole-bank suppression works on hardware.
+- **Stock `[BANK]` single-press did NOT break.** That was "(5)"'s third symptom
+  and the one Session 83 flagged as having no independent explanation, i.e. the
+  reason the retry might have been wrong. It held. The misattribution argument
+  for re-enabling `rl_done` is now supported by hardware, not just reasoning.
+
+**Still broken:**
+1. `RELOAD BUSY` still appears after editing the sequence with the transport
+   running. So the suppression cutting card reads 6852 → 354 did NOT fix it, and
+   storage-task contention alone was not the whole story.
+2. **No recovery**: "just tapping YES after seeing the BUSY message once, just
+   brings up the BUSY message again" — the feature is bricked until reboot.
+3. **A FULL CRASH** (no exception message, LEDs frozen, no controls): in the
+   BUSY-locked state, pressing arrow UP/DOWN locks the whole unit.
+
+### Three of my own hypotheses, killed by measurement this session
+
+New tool `tools/diag_reload2_busycrash.py` models the locked state directly (set
+G_KIND, then drive the real gesture through `set_key_state`), so none of this
+needed the clobber's root cause.
+
+- **"`rl_draw`'s unchecked table index is the crash" — WRONG.** With the picker
+  CLOSED, `G_SEL=200` plus arrows produces no fault: arrows never reach `rl_draw`
+  when `G_MENU` is 0. The code agrees — `rl_yes_exec` clears `G_MENU`, calls
+  `CLOSE_CB` and pops our layer on **every** exit including BUSY. The user's
+  "closed, I think" was the decisive detail.
+- **"…and it is a hard-lock mechanism" — OVERSTATED.** Measured with the picker
+  OPEN (`--arrows-open --gsel 200`): the index really does go out of range (UP
+  takes 200 → 199, because that path's `subq.l #1 ; bpl` leaves an out-of-range
+  value out of range), but the whole reachable index range stays **inside our own
+  cave** (max `rl_menu_tbl+1020` = `0x400d6c6e` < cave end), so the READ is always
+  mapped and never faults. Only the *value* dereferenced afterwards is arbitrary.
+  A real latent wild-pointer bug; not a crash mechanism, and not this crash.
+- **"the BUSY path's unstubbed `TOAST` does it" — WRONG.** This was a genuine
+  blind spot worth checking: **every RELOAD2 harness stubs `FUN_4005a2b8` to
+  `rts`**, so the one firmware call unique to the BUSY path had never executed in
+  any test. `--real-toast` runs it for real: no fault.
+
+### The fixes (built, 2186 B of 5884, 1668 B vs stock, 10 detours)
+
+1. **BUSY RECOVERY** in `rl_yes_exec` — the important one. The first refusal for a
+   given `G_KIND` value toasts BUSY and remembers the value in new scratch byte
+   `rl_busy_seen`; if the user presses again and `G_KIND` is **still that same
+   value**, the job owning it is never coming, so clear it and arm this request.
+   `ryx_ok` clears `rl_busy_seen` on every successful arm, so a later genuine BUSY
+   still gets its own first refusal. Bounded, cannot deadlock, needs no theory
+   about why the job was lost. This is the same lesson Session 80 continued
+   already applied to `rl_ptn` ("a stuck flag can never again permanently lock out
+   the feature"); this guard was the one place it was never applied.
+   **Why an unchanged value is safe to call stale**: `rl_job` clears `G_KIND` at
+   its own entry "within a frame or two", while two deliberate human presses are
+   orders of magnitude further apart. **Residual risk, stated**: if a post IS
+   still unread in `FUN_40022778`'s single scratch buffer, arming again posts
+   twice. In the observed failure mode BUSY persists across many presses, so
+   nothing is pending — but this is a MITIGATION, not a cure.
+2. **`G_SEL` clamp** in `rl_draw` (the single choke point every redraw passes,
+   with write-back so the state stops being wrong) and in `rl_yes_exec` before
+   `G_SEL` becomes `G_KIND`.
+3. **Kind validation in `rl_job`** — the sleeper. The dispatch has cases for 3
+   (TRK) and 1 (PTN SEQ) and sent **everything else** down the PART+PTN path, so a
+   garbage `G_KIND` would have run a full slab copy plus a Part apply **and**
+   claimed (via `rl_own`) a stock whole-bank reload the user asked for. Now:
+   out-of-range → hand the job to stock AND clear the flag, self-healing the
+   guard. `d0` is saved/restored because `JOB14_ORIG` is stock code.
+
+### The crash: NOT EXPLAINED. Do not let a later session think it was.
+
+Five configurations tried (stubbed toast, real toast, out-of-range `G_SEL` with
+the picker closed and open, full gesture then arrows) — **all clean**. The unit's
+state after BUSY is exactly what the code predicts (`G_MENU` 0, layer popped,
+arrows routed to stock), so nothing of ours is obviously in the arrow path.
+
+The recovery fix makes the crash's **precondition** transient instead of
+permanent, so it should be much harder to reach. That is mitigation by removing
+the state, not a fix for the lock. **The mechanism is still unknown.**
+
+### Harness gap CLOSED (standing user instruction)
+
+The user gave a standing instruction this session: **do not ask permission to
+make harness/emulation edits when they serve accurate emulation or a defensible
+bug fix.** Saved to memory. Motivation: every dead end this session and last
+traced to the harness not modelling something real — a poked transport flag, a
+frozen step engine, no CF streaming, `TOAST` stubbed, and "editing" done by
+poking memory instead of running firmware edit code.
+
+New tool `tools/diag_seq_edit_io.py` makes the FIRMWARE edit a sequence. Critical
+design point: **the liveness gate is on the edit itself** — it refuses to report
+any scratch verdict unless firmware actually changed the pattern store. v1 did
+exactly that (reported ABORT, no conclusion drawn) because none of its input
+strategies edited; the earlier `diag_scratch_clobber.py` had reported "0 writes"
+as if it meant something, when zero writes *including our own* was the tell.
+v2 stops guessing: it reads the live dispatch table (`0x46c7d8de`, 24-B stride)
+per trig keycode and counts handler entries, and diffs the **entire** cold blob
+(0x9b340) and live copy (0x8ed80) rather than a guessed offset window — so
+"wrong keycodes" and "right keycodes, wrong UI mode (grid-record)" separate
+cleanly. `press_rec_live()` is suspect for this purpose: octabam's own docstring
+says `KEY_REC` "starts the transport exactly like PLAY", which is not what the
+OT's `[REC]` button does.
+
+**The scratch-clobber theory is therefore still OPEN — neither confirmed nor
+ruled out.** Note the "these globals are genuinely free" verdict rests on an
+ABSOLUTE-LONG-only scan of 0x80006a30..0x80006a5f, which cannot see
+register-indirect writes — the same blind spot that already forced an xref
+retraction in this thread.
+
+### Regressions — all green on the fixed build
+
+- `diag_reload2_busycrash.py --recovery` — **PASS**, `G_KIND` 3 → 0 on the
+  second deliberate gesture.
+- `emu_reload2.py --combo` — ALL GOOD
+- `emu_reload2.py --trk` — ALL GOOD, `deser_seen=False`, exactly 1x
+  `FUN_4008cebc` (suppression intact under the new guards)
+- `diag_reload2_repeat.py 6` — **6/6 clean**, `parse 1` per iteration
+- `diag_reload2_realkey.py --arrows` — PASS
+
+### Status
+
+**Not flashed.** Watch on hardware: whether BUSY now recovers on a second
+gesture (the target), and whether the arrow crash still happens at all.
+
+## Session 84 continued — the harness CAN edit at last, and sequence editing is EXONERATED
+
+Follows "Session 84 — RELOAD2: hardware report #7". The editing harness took
+three passes; each failed loudly rather than producing a plausible pass, which is
+what made the gate findable.
+
+### The three passes
+
+1. **v1** watched a guessed window (trig-mask bytes in the cold blob) and saw
+   nothing. Its edit-liveness gate **refused to report a scratch verdict**. That
+   refusal is the whole value: the earlier `diag_scratch_clobber.py` had reported
+   "0 writes to 0x80006a50..55" as if it meant something, when zero writes
+   *including our own* was the tell that no edit had happened.
+2. **v2** stopped guessing: read the live dispatch table (`0x46c7d8de`, 24-B
+   stride) per trig keycode and hooked the real handler, and diffed the **entire**
+   cold blob (`0x9b340`) and live copy (`0x8ed80`) instead of an offset window.
+   Result: all 16 trig codes dispatch to ONE handler `0x40060ce0`,
+   `handlers-fired=192`, **zero bytes changed**. So the keys dispatch fine and the
+   blocker is UI mode — exactly the alternative v2's abort text was written to
+   distinguish.
+3. **v3**: `objdump` on that handler (used first, per this thread's own lesson)
+   found the gate immediately:
+
+```
+40060ce0:  movel %sp@(4),%d1          ; keycode
+40060ce4:  movel %sp@(8),%d0          ; event
+40060ce8:  tstl  0x460d1736           ; <-- the mode gate
+40060cee:  beqs  0x40060cf4           ; flag 0  -> jmp 0x400501d8
+40060cf0:  braw  0x40060b58           ; flag !0 -> the other route
+```
+
+`0x460d1736` reads **0** in the loaded project, so every previous attempt took
+the `0x400501d8` route, which does not touch pattern data (consistent with it
+being the live-play route rather than the step-toggle route).
+
+### MEASURED: with the mode flag set, the firmware really edits
+
+```
+strategy                   handlers-fired  blob-bytes  live-bytes  scratch-writes
+plain trigs                     192            0           0            0
+REC then trigs                  192            0           0            0
+mode=1 then trigs               192            2           1            0
+mode=1 + REC then trigs         192            1           1            0
+
+EDIT LIVENESS OK -- 5 byte(s) of pattern store changed by firmware
+scratch 0x80006a50..55: 0 write(s)
+```
+
+So `0x460d1736` is the trig-key mode selector, and setting it is how this harness
+drives real firmware sequence editing. **New capability, documented in
+`tools/diag_seq_edit_io.py`.**
+
+### The verdict, and its limits
+
+**Sequence editing does NOT clobber RELOAD2's scratch.** For the first time this
+is a defensible negative rather than a vacuous one: the gate proves firmware
+edit code actually ran and changed the pattern store, and our scratch took zero
+writes while it did.
+
+**Limits, stated honestly**: only 5 bytes changed, i.e. a few trig toggles. This
+exercises the trig-toggle edit path, not p-lock editing, live recording with a
+real recorder machine, note edits, or the recorder path. So trig editing is
+exonerated; the scratch-clobber theory is **substantially weakened but not fully
+closed for every edit type**.
+
+### What this means for issue #2
+
+The leading remaining theory for what leaves `G_KIND` set — stock code writing
+our scratch during editing — is now off the table for trig editing, which is what
+report #7 described ("after editing the sequence"). Combined with Session 83
+killing the playback-clobber and `RELOAD_NOW` theories, and the suppression
+cutting card reads 6852 -> 354 without fixing BUSY, **the root cause of the stuck
+`G_KIND` remains unknown.** That is precisely why Session 84's fix is a recovery
+path rather than a cure, and it should stay labelled that way.
+
+Still-live possibilities, none yet tested: a post genuinely lost in
+`FUN_40022778`'s single scratch message buffer (`0x460bd912`); a clobber from an
+edit type this harness does not yet drive; or the storage task declining the job
+under real CF streaming, which no harness here can model.
+## Session 85 (2026-09-23, `wip`) — DIRECT JUMP: ported AR's arithmetic verbatim; the prose spec is RETIRED
+
+Two hardware reports in a row on builds that each implemented a different reading of the same
+English sentence. **User's instruction: eliminate "as if it had been playing all along" —
+"not specific enough, and you keep getting hung up on it" — and make the OT port as close to
+identical to AR as possible.** Both done.
+
+### The specification is arithmetic now, and only arithmetic
+
+```
+new_step = masterStep mod newMasterLen        AR FUN_4009905c @0x40099274
+pos_t    = new_step mod trackLen_t            AR              @0x400992b6, per track
+```
+
+The track's RESOLUTION never enters the position. On AR it sets only the track's rate, via
+the countdown reload at `0x400991f0`. Read straight off `ar-kyoti-fw/out/fun4009905c_listing.txt`,
+with the `divsl.l` extension words decoded (`0x2800` → D2 dividend / D0 remainder;
+`0x7802` → D7 dividend / D2 remainder) rather than trusting Ghidra's printed operand order.
+
+**This is NOT elapsed-time alignment**, and the difference is not academic — worked on the
+user's own fixture, two 16-step patterns, p1 master 1x (96-tick cycle), p2 master 2x (48):
+
+| jump at p1 step | AR's rule → p2 step | a free-running p2 would be at |
+|---|---|---|
+| 4 | **4** | 8 |
+| 8 | **8** | 0 |
+
+They coincide only when the master scales match — which is exactly why every equal-scale test
+passed and every differing-scale test failed, across three flashed builds.
+
+### Why the Session 83/84 approach could never work
+
+Session 83 seeded `0x80006628` and let stock's rebuild loop do the rest. But stock computes
+position in the **tick** domain:
+
+```
+0x400a4912  q     = ceil(D7 / tps_t)        D7 = LEN_TBL[masterScale_NEW] * 0x80006628
+0x400a4976  pos_t = q mod len_t
+```
+
+Handing it AR's step index means `tps_NEW * new_step` ticks where that index had meant
+`tps_OLD * new_step` ticks in the outgoing pattern — **the position is rescaled by the ratio
+of the two master scales on every switch.** Exactly the hardware symptom.
+
+It is not correctable through `0x80006628`: undoing the conversion needs
+`new_step * tps_t / tps_master`, a PER-TRACK quantity, and that global is a single value.
+**Stock's loop structurally cannot express AR's rule.** Session 84's per-track scale-cache
+fix was a real bug fix sitting next to this one, and could not have changed the symptom.
+
+### The port
+
+- **Hook H** `0x400a47f6` — AR's line 1, one modulo: `0x80006628 = 0x800065b2 mod newMasterLen`.
+  Stock seeds `0x800065b2` back from its low word at `0x400a483a`, which is AR's own
+  `0x400992d4 move.w D0w,(0x405666e4)`.
+- **Hook P** `0x400a4d36` (new) — AR's per-track loop, written **over** stock's rebuild output,
+  after both rebuild loops and the tail that seeds `STEP_ARR` at `0x400a4be6`. Gated on
+  `G_JUST_COMMITTED`, so ordinary ticks and DJ-OFF are untouched.
+
+| AR | OT | value |
+|---|---|---|
+| `0x40566720[t]` | `0x800064d0[t]` | `new_step mod trackLen_t` |
+| `0x4056673a[t]` | `0x800064e0[t]` | that − 1 |
+| `0x4056672d[t]` | `0x800064f0[t]` | `0` |
+| `0x40566775[t]` | `0x8000663e[t]` | track scale index (written by `dj_c`, Session 84) |
+
+**One deliberate deviation.** AR's `0x405667c7[t] = ticksPerStep-1` is NOT copied into OT's
+`CNTDN_TBL 0x800065c3[t]`. The §4 mapping pairs them, but Session 79 measured OT's as a
+one-shot trig arm (`0xff` idle → `1` at commit → `0` → fires → `0xff`), not a per-step
+reload; writing a reload value there would arm a spurious trig. OT's real equivalent of AR's
+per-track rate state is the pair (`TRK_SCALE_IX[t]`, ticks-within-step) and both are written.
+
+### MEASURED — `tools/diag_resume_pos.py` (new)
+
+Captures `masterStep` at Hook H's site before the commit clobbers it, snapshots all 16
+per-track STEP values after Hook P, and compares against AR's rule computed independently in
+Python from the pattern blob.
+
+| fixture | result |
+|---|---|
+| A07 → A08 (per-track mode, master 1x → 2x) | **16/16** |
+| A08 → A07 (reverse) | **16/16** |
+| 0 → 1 (uniform, 1x → 2x) | 16/16 — but see below |
+
+The discriminating rows, where AR's answer differs from what stock's loop produces:
+
+| fixture | track | AR wants | stock gives | got |
+|---|---|---|---|---|
+| 6→7 | T3 (len **7**) | `8 mod 7` = **1** | 4 | **1** |
+| 6→7 | T2 (len **12**) | **8** | 4 | **8** |
+| 7→6 | T4 (tps **12**) | **15** | 8 | **15** |
+| 7→6 | T2 (len 12) | `15 mod 12` = **3** | 7 | **3** |
+
+`0 → 1` proves nothing on its own: both patterns are uniform mode and stock's tick answer
+(`24/3 = 8`) coincides with AR's (`8 mod 16`). **Only the per-track-mode pair can distinguish
+the two rules.** Do not quote the uniform fixture as evidence for either.
+
+Regression, same image: grid lock + playhead continuity on 6→7, phases 0/3/5 — all LOCKED +
+CONTINUOUS. DJ-OFF (`diff_stock_vs_patch.py`) IDENTICAL.
+
+Build: 1002 B cave, 965 bytes changed, 0 unexpected outside the cave, manual-trig bytes
+identical, container round-trips.
+
+### A measurement bug that reported 15/16 FAIL on correct code
+
+The first run of `diag_resume_pos.py` hooked `0x400a4d36` for its snapshot — which in this
+build **is Hook P's own `jsr`**. A Unicorn code hook fires before the instruction executes, so
+it measured stock's output and reported the port broken. Snapshot moved to `0x400a4d3c`, the
+address the `jsr` returns to.
+
+This is hazard #5 in `AR_DIRECT_JUMP.md` §8, written after Session 79 cont.29 lost time to the
+identical mistake in the opposite direction (a false PASS while Hook F was corrupting tracks).
+**Standing rule: never snapshot at a detour site; snapshot at the return address.**
+
+### NOT validated
+
+- **Hardware.** Nothing in this session has been heard.
+- Differing MASTER LENGTHs between two patterns — still no fixture.
+- Per-track sub-step phase at a mid-cycle commit (`0x800064f0[t]`), open since Session 82 —
+  though Hook P now zeroes it explicitly, which is AR's `clr.b (A4)+`.
+
+## Session 85 (2026-09-23, `wip`) — RELOAD redesigned: the picker is gone, two direct chords, 4 detours
+
+Hardware report #8: "Very inconsistent. hard to understand what is happening where
+and when… I think this design has gotten way too convoluted." Also from that
+report: the reload itself now happens quickly (the Session 83 suppression working),
+BUSY still appears after editing with the transport running, an arrow press after
+BUSY "engages TRK SEQ", and repeated `[YES]` sometimes toasts "T1 SEQ".
+
+**"T1 SEQ" was our own success toast** — `sprintf("T%d SEQ", track+1)` from
+`rly_toast`. So the Session 84 BUSY recovery WAS firing and the reload WAS
+executing; the message was just cryptic. Worth recording as a UX failure, not a
+logic one.
+
+### Why a redesign rather than another fix
+
+Bug tally by location across this whole thread:
+
+| where | bugs |
+|---|---|
+| picker / keymap / popup machinery | dead YES/NO hooks; `[PTN]` triple-booked; poke colliding with DIRECT JUMP; SELECT BANK flashing (fixed then reverted); arrows double-stepping; arrow pairing wrong **twice**; `[YES]` swallowed while `[BANK]` held; borrowed layers → own layer; walk-away leaving it primed; snapshot corruption; redraw tripping its own walk-away hook; unbounded `G_SEL`; inconsistent BUSY/arrow behaviour |
+| the worker that does the reload | **none** — `--trk` passed throughout |
+
+~13 bugs, all in one place. A modal window here costs its own keymap layer, a
+share of stock's single popup slot, walk-away detection and redraw-vs-teardown
+interaction. Delete the picker.
+
+### The design (user spec)
+
+- **`[PTN]` + `[TRACK n]`** → reload track n's CF-saved sequence, Part untouched,
+  toast `TRK SEQ RELOADED`. `[PTN]` release must not raise SELECT PATTERN.
+- **`[BANK]` + `[TRACK n]`** → the same plus the Part **from RAM** (the saved Part
+  currently associated with the pattern), toast `TRK SEQ+PART RELOADED`.
+
+Deferred by the user: all-tracks and whole-bank variants.
+
+### Measured facts that shaped it (tools/diag_keymap_dump.py, new)
+
+- **TRACK buttons = keycodes `0x10..0x17`**, family of 8, handler `0x40040250`.
+  Trigs are `0x00..0x0f` → `0x40060ce0`.
+- **Per-key is-held array `0x46c7d8ee`**, 24-B stride — validated because BANK
+  computes to `0x46c7dd56`, exactly what `patch_reload2.s` already pinned. PTN =
+  **`0x46c7dd3e`**.
+- **`[BANK]`+`[TRACK]` is FREE** — the `[BANK]` overlay covers only trigs, NO and
+  the NULL YES slot.
+- **`[PTN]`+`[TRACK]` IS mapped in stock** (all 8 track slots → `0x40083dc4`), but
+  the user confirmed on hardware it does nothing observable, so overriding it is
+  agreed.
+- **The `[PTN]` OVERLAY NEVER REDIRECTS THE TRACK KEYS.** Measured: the live
+  dispatch slot stays on the base handler through press, 20 frames of hold, AND an
+  explicit hold event — while PTN's held-flag *is* set. So `0x40083dc4` is
+  unreachable in practice and the chord goes through the **base handler's
+  held-flag test**, the mechanism that already worked for `[BANK]`. The
+  `0x40083dc4` detour is kept as insurance for contexts not exercised; both routes
+  share one body.
+
+### Stock does the hard parts — found, not reimplemented
+
+- **SELECT PATTERN suppression needs no detour.** `0x460d173e` is stock's own "a
+  `[PTN]`-held action consumed the gesture" flag; its release path does
+  `tstl 0x460d173e ; bne → skip the window` (`0x4005a088`), and stock writes `-1`
+  there at `0x40056b44`. We write the same value.
+- **The Part half is stock's own routine.** `0x4005e042` decodes as: gate on the
+  persisted per-Part dirty bit (`blob + 0x95048`) → `jsr 0x4004aab4(part)` →
+  **branch on its return** (`0` = never saved → `SAVE PART FIRST!`, else
+  `PART %d RELOADED`) → `TOAST(buf, 0x18)`. So the never-saved case needs no
+  detection logic of ours, and `0x18` is the OT-standard toast duration (RELOAD2
+  used `0x44`).
+- **Two lines in one box**: `FUN_4006d57c(title, nlines, lines[], 0, 0)` is titled
+  and **self-dismissing** (40-frame countdown at `0x460e5e20`, height `7*n+27`) —
+  what stock uses for "THIS BANK HAS NEVER / BEEN SAVED! / NOTHING TO RELOAD!".
+  It **refuses to draw while a popup is up** (`tstl 0x460e5cd0`), so the `[BANK]`
+  chord dismisses SELECT BANK first via its own measured teardown `0x4007b408`
+  (which also pops the layer that window owns). That incidentally lands most of the
+  `[BANK]`-window work and demotes the press→release deferral from prerequisite to
+  cosmetic.
+
+### User corrections this session, both of which changed the code
+
+1. **Unsaved Part**: I had conflated "dirty" with "never saved" and proposed
+   skipping the Part when dirty. **Wrong** — a saved Part SHOULD replace a dirty
+   Part, that is the point; only a *never-saved* Part is special.
+2. **`SAVE PART FIRST!` alone is misleading** in a compound operation, because the
+   sequence DID reload. Hence the two-line box showing both facts.
+3. Also: stop bringing up the arrow-handler finding — it belongs to the abandoned
+   picker design. Trimmed from the spec.
+
+### Result
+
+| | RELOAD2 | RELOAD3 |
+|---|---|---|
+| detours | 10 | **4** |
+| cave bytes | 2186 | **1360** |
+| changed vs stock | 1668 | **1016** |
+| keymap records poked | 1 | **0** |
+
+The build now *asserts* it pokes nothing: every `[PTN]`/`[BANK]` handler and
+overlay record byte-for-byte stock, and all 8 `[PTN]`-overlay TRACK slots still
+pointing at the handler we detour rather than at us.
+
+Carried over verbatim because it is proven: `rl_job`'s per-track slice,
+`rl_arm_trk` (given a new `rl3_arm_n` entry that takes the track index in d0),
+`rl_openstrd`, and the whole-bank suppression (`rl_done` + `FUN_4000faf0`) that
+cut a reload from 6852 card reads to 354.
+
+### Tests — `tools/diag_reload3_chords.py`, all green
+
+Through real `set_key_state`, 5 iterations:
+- plain `[TRACK]` with no modifier arms nothing and reaches stock's own track
+  select — the regression that matters most, since we detour that handler
+- `G_TRK` equals the **button pressed**, not `CUR_TRACK`
+- `PTN_CONSUMED` set; SELECT PATTERN never shown (asserted against stock's own
+  show site `0x40059f8c`, zero calls)
+- `[BANK]`: `PART_RELOAD` once, SELECT BANK dismissed, `BANK_COMMIT` cleared
+- **both Part branches forced with a stub**, so neither depends on whether the test
+  project's Part happens to be saved
+- `--data`: scribble all 16 track regions, drive each chord, verify **only** the
+  pressed track reverted (other 7 audio + all 8 MIDI untouched), draining on the
+  worker having actually run rather than a fixed delay
+
+Removed a test artifact of my own: a synthetic `event=2` HOLD hung `call_as_main`
+and is not a gesture a physical key can produce — same class of mistake this thread
+already recorded with an unmatched press.
+
+### Still open
+
+- `[BANK]` press→release deferral for SELECT BANK (cosmetic now; failed on hardware
+  once, see `reference/RELOAD_REDESIGN.md`).
+- **The stuck-`G_KIND` root cause is still unknown** — but the redesign has no
+  modal state and no BUSY concept, so a lost post no longer wedges a UI.
+## Session 86 (2026-09-23, `wip`) — DIRECT JUMP: HARDWARE LOCKUP from an uninitialised gate flag, and the DJ-OFF gate that could never have caught it
+
+**Flashed Session 85 and it locked the unit up.** User: "Crash upon starting transport. With
+all 16 steps on one track filled with trigs, starting transport produces extremely fast
+triggers, sounds almost double or quadruple time, then crashes fully after a short duration,
+no controls operational." **DIRECT JUMP was OFF.**
+
+### Root cause — a new global in a block stock does not clear
+
+`kb/memory-map.md` already records it: `FUN_4000f938` re-images the DSP shared-RAM window
+from ROM (`0x401086f4` -> `0x80000000`, `0x3e88` B) at every boot, then zero-fills only as far
+as `0x80004000`.
+
+```
+DJ_MODE           0x800000d8   inside the re-image     -> deterministic 0 at boot
+G_ARMED           0x80006a40   beyond BOTH             -> GARBAGE at power-on
+G_JUST_COMMITTED  0x80006a4a   beyond BOTH             -> GARBAGE at power-on
+G_PATOFF          0x80006a46   beyond BOTH             -> GARBAGE at power-on
+```
+
+Session 85's Hook P (`0x400a4d36`, the common per-tick exit) was gated on
+`G_JUST_COMMITTED` **alone**, with no `DJ_MODE` check. With a garbage flag it ran on the
+first tick, computed `TRK_LEN_SRC + G_PATOFF` from a second garbage global, read a length
+byte from a wild address, and wrote nonsense into all 16 per-track position arrays. Fast
+triggers, then a fault.
+
+**`G_ARMED` is in the same block and has been safe for dozens of sessions only because
+`dj_a` clears it on its disarm path on every tick before anything reads it.** The rule was
+already known and already in use; a new global was added to the block without it.
+
+### Fix — three layers
+
+1. **Hook P gates on `DJ_MODE` first.** That word is inside the boot re-image and
+   `build_directjump_v4.py` already asserts its ROM seed at `0x401087cc` is `00000000`, so it
+   is genuinely deterministic at power-on. With the feature off the hook cannot execute.
+2. **`dj_a`'s disarm path clears `G_JUST_COMMITTED` every tick**, the same discipline that
+   has always protected `G_ARMED`.
+3. **`G_PATOFF` deleted.** Hook P recomputes `patOff` from the live `ACT_PAT`/`ACT_BANK`, the
+   way `dj_c` does, so no uninitialised global is trusted at all.
+
+### The bigger failure — the gate was structurally blind
+
+`tools/diff_stock_vs_patch.py` reported **IDENTICAL** on the build that locked up the unit.
+**Unicorn zero-fills memory**, so every uninitialised global reads 0 in the emulator and a
+hook gated on one can never fire there. The gate could not see this class of bug — and could
+never have seen it, for **every build it has ever passed**.
+
+It now **poisons our scratch block (`0x80006a40..0x80006a60`) with `0xAA` before the
+transport starts**, patched run only, on by default (`--no-poison` to disable). A fault
+during the patched run is now reported as `RESULT: FAILED` with the diagnosis rather than
+raising a traceback — otherwise the next reader takes a crashed gate for a broken tool and
+re-runs it with the check disabled.
+
+### MEASURED — failing control, passing fix
+
+| image | poisoned DJ-OFF gate |
+|---|---|
+| S85 `d0f1d931...` (the build that crashed the MKI) | **`UC_ERR_READ_UNMAPPED` -> RESULT: FAILED** |
+| S86 `6038fb1f...` (this fix) | **IDENTICAL -- inert with the feature off** |
+
+The control faulting is the point: the emulator now reproduces the hardware lockup from a
+cold-boot memory state, which it previously could not do at all.
+
+Re-verified on the fixed image, unchanged from Session 85:
+
+| check | result |
+|---|---|
+| `diag_resume_pos` A07 -> A08 | 16/16 match AR's `new_step mod trackLen` |
+| `diag_resume_pos` A08 -> A07 | 16/16 |
+| `diag_grid_lock` 6->7 phases 0, 3 | GRID LOCKED + PLAYHEAD CONTINUOUS |
+
+Build: 1044 B cave, 994 bytes changed, 0 unexpected outside the cave, manual-trig bytes
+identical, container round-trips.
+
+### STANDING RULES added
+
+1. **Any global in `0x80006a40..` is garbage at power-on.** Gate on something inside the boot
+   re-image (`DJ_MODE`), or clear it unconditionally from a hook that runs every tick, or
+   recompute instead of stashing. Never rely on it being zero because the emulator says so.
+2. **A green emulator gate is only as strong as the memory state it started from.** Unicorn's
+   zero-fill is a convenience, not a model of the machine.
+
+### NOT validated
+
+- **Hardware.** This fix has not been flashed.
+- Differing MASTER LENGTHs between two patterns — still no fixture.
+
+## Session 86 (2026-09-23, `wip`) — RELOAD3: a reload no longer touches the clock; SELECT BANK moves to the release
+
+Hardware report #9, on the first RELOAD3 flash. **Both chords execute, no
+conflicts** — the redesign works. Three items:
+
+1. split `TRK SEQ+PART RELOADED` into two lines, `TRK SEQ + PART` / `RELOADED`
+2. a `[BANK]` tap still opens SELECT BANK on the **press**; want it on the release,
+   "like PTN does"
+3. **new bug** — "Reloading restarts the track sequence from step 1, AND the internal
+   (master) metronome is also restarted. The track, pattern, and the internal
+   metronome should remain in undisturbed time while any reload occurs."
+
+### Item 3 — root cause: `RELOAD_NOW` was never a cache refresh, it is a re-home
+
+`rl_job` armed `RELOAD_NOW` (`0x46c8028a`). The step engine polls it once per step
+at `0x400a2530`, and the block it gates (`0x400a253a..0x400a28b4`) is stock's
+**whole-bank re-home**, which is positional:
+
+| site | write | effect |
+|---|---|---|
+| `0x400a26fe` | `0x800065b4 = 0` | previous master step |
+| `0x400a2704` | **`0x800065b2 = 0`** | **the master playhead → sequence restarts** |
+| `0x400a2658` | `0x800065b6 = LEN_TBL[..]-1` | ticks-within-step → wraps next tick |
+| `0x400a27e2` | `0x800065b8 = 1` | `RUNNING` — *also the old "reload while stopped starts playback" bug* |
+
+`0x800065b2` is DIRECT JUMP's `MASTER_STEP` / `BAR_CTR`, measured **there** as the
+bounded master playhead, and the metronome's beat flags are derived from it by
+masking against `0x400abae4` / `0x400abacc` (`0x400a4264..0x400a42a0`). So **one
+write explains both reported symptoms**: sequence restart and metronome restart.
+
+The user's own pointer — "if you need to look at DIRECT JUMP to inform keeping
+things in time, please do" — is what shortened this. DIRECT JUMP had already mapped
+this exact territory and already paid for the lesson: *keep time by reading the
+clock, never by reseeding it.*
+
+**Dropping the arm costs nothing**, and that is measured rather than assumed:
+
+- trig data — our worker writes the cold blob and `LIVE_REFRESH` copies
+  blob → live cache, so both consumers already see the new bytes.
+- per-track scale/length — stock re-reads it from the blob on **every wrap**
+  (`0x400a3d08  moveb %a2@(1),%a3@` → `TRK_SCALE_IX[t]`, DIRECT JUMP's own
+  finding), so a changed step count self-heals within one cycle, in time.
+
+So `RELOAD_NOW` is armed on **no path**, and the `ACT_PAT` / `RUNNING` gates around
+it are gone with it — there is nothing left to gate.
+
+**`tools/diag_reload3_timing.py` (new).** Real PIT-driven transport. Asserts the
+re-home block is entered zero times (hook on `0x400a253a`, the first instruction
+*inside* it), that nothing writes non-zero to `RELOAD_NOW`, and that the playhead's
+forward progress across a reload matches a quiet control window. Two liveness gates,
+and it refuses to report if either is unmet: the sequencer must actually be stepping,
+and — `diag_scratch_clobber`'s lesson from Session 84 — it pokes `RELOAD_NOW=1`
+itself at the end and requires the counter to move, so a zero above is a measurement
+and not a dead hook.
+
+> **Naming trap, do not repeat.** `diag_reload2_transport.py` calls `0x800065b6`
+> "MASTER_STEP". It is not. DIRECT JUMP's Session 82 measured `0x800065b6` as
+> ticks-within-step and `0x800065b2` as the playhead. A timing test watching
+> `0x800065b6` watches the wrong word.
+
+### Item 2 — SELECT BANK deferred to the release (the piece that failed once before)
+
+Measured layout, all of it:
+
+- `0x4007af80` **press**: `BANK_COMMIT = (0x460e73bc == 0)` — so it is a **toggle** —
+  then `bras 0x4007af30`.
+- `0x4007af30` a **shared tail**, reached from that `bras` and **nothing else in the
+  image** (grepped). Clears `BANK_SEL`/`0x460e73b8`/`0x460e73bc`, `SHOW_WIN`
+  (dur `0xf0`, onClose `0x4007b408`), `LAYER_PUSH`, two more UI calls, then
+  `lea 28(sp),sp ; rts` — it cleans up exactly what it pushed.
+- `0x4007b3e0` **release**: `BANK_SEL==2` or `BANK_COMMIT==0` → dismiss
+  (`0x40056a70`), else commit (`0x460e73bc=1` then `0x40031200`, which is just
+  `0x460d1e4c=1`, a popup-**confirm** flag, not a bank change). That commit is what
+  makes stock's window sticky after the release.
+
+So the gesture is: press shows, release makes it stick, next tap dismisses.
+**Time-shifting only the show preserves that machine exactly**, and two measured
+facts make it safe rather than hopeful:
+
+- `LAYER_PUSH` (`0x40031494`) is **idempotent** — it `rts`'s if the struct is already
+  the list head (`0x400314b4`) or anywhere in the list (`0x400314b8`), so replaying
+  the tail cannot double-link the overlay.
+- `LAYER_POP` (`0x4003146c`) walks the list and finds nothing if the struct was never
+  linked, so a teardown for a window that never opened is harmless.
+
+Two detours: a **one-shot gate** spliced into the tail at `0x4007af42` (a press
+returns without showing) and the release handler at `0x4007b3e0` (opens the gate for
+exactly one pass and calls **stock's own tail**, so the window, its duration and its
+teardown are all stock's). The gate is what makes replay possible at all — without
+it, calling the tail would hit our own detour and short-circuit.
+
+The chord now claims the release outright (`rl3_bank_used`), so `[BANK]`+`[TRACK]`
+shows nothing on either event. `BANK_WIN_CLOSE` became **conditional** on a popup
+actually being up: normally there is no window to tear down, and MLNOTIFY can draw
+either way (it bails while `0x460e5cd0` is non-zero).
+
+**Why retry something hardware rejected in Session 80 continued (3)/(7):** that build
+also carried the picker, its own keymap layer and a poked YES slot. Here the only
+moving part is the show. That is an argument for retrying, **not** evidence it works
+— hence `tools/diag_reload3_bankdefer.py` (new), which asserts press shows zero,
+release shows exactly once (its own positive control, so the zero is a real
+measurement), the layer list never grows across repeated taps, the toggle still
+toggles, and the chord is silent on both events.
+
+### Item 1 — two-line box for the Part case
+
+`MLNOTIFY` was already wired for the never-saved case, so the saved case just joins
+it: `rl3_lines_trkpart` = `TRK SEQ + PART` / `RELOADED`. This also buys back the
+spaces around the `+` that the 21-char single-line width budget had forced out.
+
+
+#### The trap in item 2, and probably why Session 80's attempt was rejected
+
+My first cut deferred the show by skipping stock's whole press tail. That is wrong,
+and the bug is silent and destructive rather than cosmetic:
+
+**The `[BANK]` overlay layer is what remaps the 16 TRIG keys to bank-select while
+`[BANK]` is held** — that *is* the "hold `[BANK]`, tap a trig to pick a bank" gesture.
+`LAYER_PUSH` lives in that same tail, after `SHOW_WIN`. Skip the tail and the trigs
+stay on their base handler `0x40060ce0`, so **hold-`[BANK]`+trig would EDIT THE
+SEQUENCE instead of changing bank.**
+
+That is the most plausible reading of the Session 80 continued (3)/(7) hardware
+rejection, and it is worth stating because the failure mode is invisible to every
+"did the window appear?" test — which is exactly what the first version of
+`diag_reload3_bankdefer.py` was.
+
+Stock `[PTN]` is the existence proof of the shape the user actually asked for: its
+press pushes its overlay and shows **nothing**; SELECT PATTERN appears on the release.
+So the correct deferral is **push the layer on the press, defer only `SHOW_WIN`**.
+
+That moves the teardown question: stock's layer is owned by the window's onClose, so a
+press that pushes without showing has nothing to pop it. Every release path now
+accounts for it exactly once —
+
+| release path | layer teardown |
+|---|---|
+| our chord consumed it (`rl3_bank_used`) | `BANK_WIN_CLOSE` here (no window ever existed) |
+| opening tap (`BANK_COMMIT != 0`) | show the window; from there it owns the layer, as stock |
+| toggle-off tap, popup up | stock's dismiss runs onClose |
+| toggle-off tap, no popup | `BANK_WIN_CLOSE` here |
+
+`BANK_WIN_CLOSE` also balances the press tail's `0x4007e760` against its own
+`0x4007e81c`, which is why it is the right teardown rather than a bare `LAYER_POP`.
+
+`diag_reload3_bankdefer.py` now asserts the thing that matters: **with `[BANK]` held,
+trig 1's dispatch slot must not be `0x40060ce0`.**
+
+#### It is stock `[PTN]`'s own release, transplanted — which is why "like PTN does" was right
+
+Stock's `[PTN]` release (`0x4005a084..0x4005a0ca`) already does *both* things the
+`[BANK]` deferral needs:
+
+```
+tstl 0x460d173e      ; gesture consumed?
+bnes -> 0x4005a0be   ;   yes: clrl PTN_MODE ; jsr 0x40043418  <- teardown called
+                     ;        DIRECTLY, and NO window is shown
+pea  0x40043418      ;   no:  teardown as the window's onClose
+jsr  0x40059f8c      ;        SHOW_WIN -- the window opens on the RELEASE
+```
+
+The show is on the release, and the consumed path calls the teardown itself rather than
+relying on a window that was never opened. Every `rl3_bank_rel` branch is that structure
+with `BANK_WIN_CLOSE` substituted. Worth recording because it reframes item 2: not a new
+mechanism bolted on, but stock's existing one applied to the other key — and it is the
+reason the user's "like PTN does" pointed at something real rather than cosmetic.
+
+#### Harness lesson: `stage_project` is not concurrency-safe
+
+`er.stage_project` stages into a single shared `out/_emu_rtos_tree/<set>/<project>`, so
+two RELOAD3 diags started in parallel race and one dies in `mkdir`. Several confusing
+runs this session were that, not the firmware. Run the suite sequentially.
+
+### Build
+
+Six detours (was four). `patch_reload3` 1500 B @ `0x400d6500`, ceiling 2044 B.
+1169 bytes changed vs stock. Boundary checks from Session 85 closed out green:
+tracks 1 and 8 both revert only themselves, so the `subi.l #0x10` keycode→index
+math is right at both ends.
+## Session 87 (2026-09-23, `wip`) — DIRECT JUMP: doubled-trig regression FIXED. **HARDWARE-CONFIRMED WORKING AT 1x SCALES.** Non-1x scales are the remaining thread
+
+### HARDWARE REPORT — what now works (flashed, MKI, image `0657157f...`)
+
+**This is the hard-won baseline. Do not regress it.**
+
+- **Tracks and patterns stay in master time through DIRECT JUMP switches.**
+- **Patterns land on the correct step between switches.**
+- **Different track LENGTHS work well together** (7, 12, 16 in one pattern).
+- **MASTER LENGTH is respected**, including **`INF` (infinite)**.
+- The doubled-trig regression from Session 86 is **gone**.
+
+**The standing constraint: all of the above is confirmed only with 1x TRACK scales and a 1x
+MASTER scale.** Setting either a track scale or the master scale to anything other than 1x
+produces unexpected results. That is the entire remaining problem, and it is the next thread.
+
+### The doubling regression, root-caused
+
+Report: with DJ ON, existing trigs sounded DOUBLED, the double drifting slightly every
+pattern cycle; straight 16 steps at 1x, no scales; **doubling began the instant the feature
+was enabled**, and pattern switching itself was in time.
+
+Bisecting everything added since the last audible build (Session 84) leaves **only Hook P** —
+Hook H's diff across those commits is register-allocation churn around the same AR rule.
+
+And in a uniform 16-step 1x pattern, Hook P's POSITION arithmetic is identical to stock's:
+
+```
+stock:   q = ceil(6*new_step / 6) = new_step ;  pos = new_step mod 16
+Hook P:  pos = new_step mod 16
+```
+
+So `STEP_ARR` was already correct, and the only things that actually changed state were the
+two EXTRA writes Hook P was doing alongside it.
+
+**`PREV_ARR[t] = pos - 1` (`0x800064e0`) was the culprit.** MEASURED statically:
+
+- **Stock's commit tail never writes it.** The tail loop `0x400a4bbc`-`0x400a4d32` writes
+  `STEP_ARR[i]` at `0x400a4be6` and zeroes ticks-within-step at `0x400a4bf0`, and its bound
+  `cmpal #0x800065d3` is `CNTDN_TBL + 16` — **one loop covering all 16 tracks, audio AND
+  MIDI**. PREV is deliberately left alone across a commit.
+- **It has live readers outside this path**: `0x4009b2c2`, `0x4009f496`, `0x400a2370`,
+  `0x400a2690`, `0x400a2920`, `0x400a2966` — several in the `0x400a2xxx` voice/trig dispatch
+  region.
+- **Stock's only writer** is the per-tick loop at `0x400a3d6e` (`moveb %a1@,%a1@(16)`), which
+  copies the CURRENT step before incrementing — so PREV always holds a valid step index.
+  Writing `pos - 1` puts **`0xFF`** there whenever `pos == 0`, a value stock's own code can
+  never produce, straight into the voice dispatcher's input.
+
+`TICKS_IN_STEP` was removed as redundant: stock's tail already zeroes all 16 with the same
+value before Hook P runs.
+
+Hook P now writes **`STEP_ARR` and nothing else**, verified in the built image — the cave
+contains exactly one per-track array reference (`lea 0x800064d0`), none to `0x800064e0` or
+`0x800064f0`.
+
+### The mistake, and it was a repeat
+
+This is the **same class of error already recorded for `CNTDN_TBL` in Session 85**: §4's
+AR↔OT mapping table pairs arrays **by role**, and that was treated as licence to copy AR's
+writes element-wise. **AR's per-track state vector is not element-wise portable onto OT.**
+Only the POSITION is. The `CNTDN_TBL` case was caught by reasoning; the `PREV` case shipped
+and had to be caught by ear on hardware.
+
+> **RULE: before copying any AR per-track write onto its OT counterpart, measure OT's own
+> writers and readers of that array first.** Role-equivalence in the mapping table is not
+> semantic equivalence.
+
+Build: 1020 B cave, 975 bytes changed, 0 unexpected outside the cave, manual-trig bytes
+identical, container round-trips.
+
+### Why non-1x scales are still broken — the standing hypothesis for the next session
+
+Not yet investigated, stated so the next session starts from something rather than nothing:
+
+OT's stock rebuild loop computes per-track position in the **TICK domain**
+(`q = ceil(D7 / tps_t)` at `0x400a4912`, `D7 = LEN_TBL[masterScale] * 0x80006628`). Hook P
+overrides the result with AR's **step-domain** `new_step mod trackLen_t`. At 1x everywhere
+those two agree exactly — which is precisely why 1x works and nothing else does.
+
+When any scale is non-1x they disagree, and **Hook P only overrides `STEP_ARR`**. Everything
+else stock derived from its tick-domain answer is left in place and is now inconsistent with
+the position — specifically `CNTDN_TBL[t]` (`0x800065c3`) and `NEXT_STEP[t]`
+(`0x800065e4`). That inconsistency is the prime suspect.
+
+AR does not have this problem because its commit rebuilds the per-track **rate** state too:
+loop 1 at `0x400991de`-`0x40099202` writes `0x405667c7[t] = ticksPerStep[res_t] - 1`, and the
+resolution-cache loop at `0x400992e2`-`0x40099314` writes `0x40566775[t]`. On OT the
+resolution cache **is** handled (`dj_c` refreshes `TRK_SCALE_IX`, Session 84) but the
+countdown reload deliberately is **not** — Session 85 left `CNTDN_TBL` alone on the strength
+of a Session 79 measurement calling it a one-shot trig arm rather than a per-step reload.
+**That measurement is now the single most load-bearing unverified claim in this thread and
+should be re-derived first.**
+
+### NOT validated
+
+- Non-1x track scales, non-1x master scale — **the open thread**.
+- Two patterns with differing MASTER LENGTHs — still no fixture.
+- Per-track sub-step phase at a mid-cycle commit (`0x800064f0[t]` zeroed for all 16 by
+  stock's tail at `0x400a4bf0`), open since Session 82 — likely entangled with the non-1x
+  problem, since it only bites when a track's tps differs from the master's.
+
+## Session 88 (2026-09-24, `wip`) — DIRECT JUMP / non-1x scales: `CNTDN_TBL` RESOLVED (and it is not the bug); DIRECT JUMP measured INERT at 2x master scale
+
+### The handoff's #1 hypothesis is dead, and Session 85 was right
+
+`DIRECTJUMP_SCALES_HANDOFF.md` §5 called this "the single most load-bearing unverified claim
+in this thread": Session 79 measured `CNTDN_TBL 0x800065c3[t]` as a one-shot trig arm, §4's
+mapping table pairs it with AR's per-track RATE reload `0x405667c7[t]`, and "both cannot be
+right". **Both are right.** Re-derived from the bytes (`0x400a4992`-`0x400a49ca`, decoded
+from a true instruction boundary — a linear sweep started mid-instruction first produced two
+phantom `bne`s, which are actually the low halves of the address literal `0x80006626`):
+
+```
+0x800065d3[t] = max(0, tps_t - tps_master)
+CNTDN_TBL[t]  = max(1, tps_master + 1 - tps_t)      ; floored at 1 (0x400a49ca)
+```
+
+and the commit tail (`0x400a4bbc`-`0x400a4bf0`):
+
+```
+CNTDN_TBL[t] <  0  -> skip the decrement        (0xff = idle sentinel)
+else               -> CNTDN_TBL[t] -= 1
+CNTDN_TBL[t] != 0  -> skip the ENTIRE body (STEP_ARR write, wrap callback, TICKS zero)
+```
+
+So it is a **commit-time phase-alignment delay**, written once per commit and counted down —
+not a per-step rate reload. It degenerates to `1` whenever the master is at least as fast as
+the track, which is every case Session 79 looked at, hence "one-shot arm". It exceeds 1 only
+when the master is SLOWER than the track (master 1/2x tps 12 vs track 1x tps 6 -> 7).
+
+**In the reported failing case it is identical to the 1x control**: master 2x (tps 3) vs
+track 1x (tps 6) gives `max(1, 3+1-6) = 1`; the 1x control gives `max(1, 6+1-6) = 1`.
+It therefore cannot explain the non-1x symptom, and **§4's mapping of it onto AR's
+`0x405667c7` is wrong**. Session 85's refusal to write it was correct. Do not "fix" it.
+
+### OT's real per-track rate mechanism — found, and it is not a countdown
+
+The per-track loop at `0x400a3cd0` runs **once per CLOCK TICK** (not per master step):
+
+```
+0x400a3cd0  ARMED[t] != 1                              -> skip track
+0x400a3ce0  TICKS_IN_STEP[t] += 1
+0x400a3cee  TICKS_IN_STEP[t] < LEN_TBL[TRK_SCALE_IX[t]] -> skip      <-- THE RATE GATE
+0x400a3cf6  TICKS_IN_STEP[t] = 0
+0x400a3d78  STEP_ARR[t] += 1          (wrapped at track length, 0x400a3d8e/0x400a3d94)
+```
+
+A track advances when its own tick count reaches **its own** ticks-per-step. `TRK_SCALE_IX[t]`
+(`0x8000663e`) is the ONLY thing that sets a track's rate; the master scale never enters this
+loop. The master's own rate is separate: `TICK_CTR 0x800065b6` wraps at `LEN_TBL[SCALE_IX]`
+(`0x400a3fdc`-`0x400a4000`), so `SCALE_IX 0x8000663d` alone sets the master step rate.
+
+Corollary: AR reloads a per-track tick countdown; OT counts up to a per-track threshold and
+additionally has a one-step "hold" mask (`0x80006626`, set at commit when `PAIR[t] > 0`,
+consumed at `0x400a3d12`). These are structurally different solutions to the same problem,
+which is the third time this thread has been bitten by element-wise AR->OT porting.
+
+### MEASURED: DIRECT JUMP is INERT at 2x master scale with no switch
+
+Fixture: the user's own `~/Desktop/DJMAST2` pattern index 1 — `SMODE=1, MLEN=16, MSCALE=0`
+(2x, tps 3), all tracks len 16 scale idx 2 (1x, tps 6), one trig on step 1. Field-identical
+to DJTEST2 A06. New tools: `tools/diag_master_scale.py` (dumps the PATTERN-LEVEL master
+fields `+0x8e51/52/53/54/55`, which `scan_dj_project_lengths.py` never printed — the gap that
+let the MASTER SCALE vs pattern-multiplier confusion persist), `tools/diag_master_scale_run.py`,
+`tools/diag_step_writers.py`.
+
+Three configurations — stock image, patched DJ OFF, patched DJ ON — over ~3.7 master cycles:
+
+```
+stock          : cycle N = 1,2,3,4,5,6,7,8,9   (consecutive)
+patched DJ OFF : cycle N = 1,2,3,4,5,6,7,8,9   IDENTICAL
+patched DJ ON  : cycle N = 1,2,3,4,5,6,7,8,9   IDENTICAL
+master-cycle wraps at ticks 46, 94, 142        (period 48 = MLEN 16 * tps 3, correct)
+```
+
+**DIRECT JUMP changes nothing here.** Hook D (the only DJ_MODE-ungated hook) was suspected
+because stock's instruction at its detour site is `move.b %d2,0x8000663d` — a SCALE_IX write
+guarded by `TICK_CTR == 0` at `0x400a421a`, i.e. once per master step — and on this fixture
+`PAT_MSCALE`(+0x8e52)=0 differs from `PAT_SCALE`(+0x8e54)=2. **Measurement exonerates it.**
+
+### The genuine OT-vs-AR divergence that WAS found
+
+`tools/diag_step_writers.py` (a MEM_WRITE hook, so S87 rule 1 does not apply) identifies every
+writer of track 0's state:
+
+```
+t45  pc=0x400a4be6 -> step 1      (master wrap resets position)
+t47  pc=0x400a3d78 -> step 2      ... +1 every 6 ticks ...
+t89  pc=0x400a3d78 -> step 9
+t93  pc=0x400a4be6 -> step 1
+```
+
+Step 1 is held for 2 ticks and step 9 for 4, the other seven for 6 each (2 + 7*6 + 4 = 48).
+**The track's step grid is not phase-aligned to the master cycle**, so each master cycle
+contains NINE partial steps rather than AR's eight clean ones. This is present in the STOCK
+image with DIRECT JUMP absent entirely.
+
+### NOT reproduced, and the open question
+
+Hardware (MKI, DJ ON) reports that the visited steps **depend on what trigs are on the grid**:
+no trigs -> 1..8 nominal; trig on 1 -> 1,3,4,7,9,10,11,12; trig on 2 -> 1,2,5,6,9,11,12,13;
+trigs on 2,3 -> 1,2,5,7,8,11,13,14. Position depending on CONTENT means something on the
+trig/voice path writes the per-track position — but `diag_step_writers.py` on the real project
+with the real trig shows only the two legitimate writers above, and the sequence stays
+consecutive. **The emulator does not reproduce the symptom.**
+
+Most likely because the emulator does not exercise the voice/trig-fire path the way hardware
+does (no samples, audio engine not driven). That is a hypothesis, not a measurement.
+
+**The decisive next datum is a hardware control the user has not yet run: does the
+trig-dependent sequence also occur with DIRECT JUMP OFF?** Every emulator measurement here
+says it must. If it does, DIRECT JUMP is innocent, and matching AR at non-1x master scale is a
+new and much larger feature (changing stock OT's master-wrap phase behaviour), not a
+regression fix. Nothing should be built until that is answered.
+
+### Status
+
+No patch source changed. Nothing built, nothing flashed. The 1x baseline (`16df386`) is
+untouched.
+
+### Session 88 continued — ROOT CAUSE MEASURED: Hook P writes the position in the MASTER-STEP domain
+
+The two "no switch" conclusions above were **measuring the wrong thing**, and the reason is
+the trap NOTES.md already records: `seq_select_live()` never cues, so Hook A
+(`PEND_PAT != -1` AND `!= ACT_PAT`) never arms and every hook takes its DJ-OFF path. Sampling
+`G_ARMED` once per tick is *also* a false negative — dj_a arms at `0x400a4006` and dj_c clears
+it at `0x400a4840`, both inside one tick. New tool `tools/diag_dj_hooks.py` counts **hook
+entries from the cave** (symbols read from `out/patch_directjump_v4.elf`, so they cannot drift
+from the built image) and cues `PEND_PAT`/`PEND_BANK` properly. First run that is not void:
+
+```
+dja_real  x1   -> DIRECT JUMP REALLY ARMED
+djp_store x16  -> Hook P wrote all 16 per-track positions
+```
+
+With a real armed jump, DJMAST2 pattern 0 (1x master) -> pattern 1 (2x master, tracks 1x):
+
+```
+t30 pc=0x400a4be6 -> step 4      ; stock's commit tail  (0-based 3)
+t30 pc=0x400d77c2 -> step 7      ; HOOK P overrides it  (0-based 6)   <-- djp_store
+```
+
+**0-based 3 vs 6 — exactly a factor of 2, which is `tps_master / tps_track` = 3/6.**
+
+Stock's tail seeds `STEP_ARR[t]` from `NEXT_STEP[t] = ceil(D7 / tps_t)` where
+`D7 = tps_master * masterStepOffset` — i.e. master TICKS divided by the TRACK's ticks-per-step,
+which is the track's own step index, in the track's rate domain. Hook P instead writes
+`MASTER_STEP mod trackLen_t` — the MASTER's step index. The two agree **only when
+`tps_master == tps_track`**, which is exactly and only the 1x case. That is why the Session 87
+baseline works at 1x and nothing else does, and it is measured now rather than reasoned.
+
+Visible downstream: the transition cycle runs the track to step 12 where the un-jumped
+control reaches 9.
+
+**Hook P cannot simply be deleted.** Stock writes the low byte of `NEXT_STEP[t]` WITHOUT
+reducing it modulo the track length, so Hook P is what makes mixed track LENGTHS (7/12/16)
+land correctly — a confirmed part of the 1x baseline.
+
+**Proposed fix (minimal, not yet built):** keep Hook P's modulo, change only its INPUT — take
+stock's own `NEXT_STEP[t]` (word, audio `0x800065e4 + 2t`, MIDI `0x800065f4 + 2m`), already
+computed in the correct rate domain by stock's own arithmetic, and write
+`NEXT_STEP[t] mod trackLen_t`. At 1x with equal lengths this is bit-identical to what Hook P
+writes today, so the hard-won baseline is preserved by construction; at non-1x it inherits
+stock's correct per-track rate domain for free. This also retires the AR->OT porting hazard:
+the quantity comes from OT's own commit, not from AR's `new_step`.
+
+### STILL UNEXPLAINED
+
+The hardware report that the visited steps depend on WHAT TRIGS ARE ON THE GRID, and that the
+LEDs and the AUDIO disagree (trigs on 1,2,3 -> LEDs 1,3,5,6,9,11,12,13 but only steps 1 and 2
+sound). Nothing in the measured write path reads trig data, and the emulator shows no
+trig-content dependence at all. The position error above is real and measured, but it does not
+by itself explain the trig-content coupling. Do not assume one fix covers both.
+
+### Session 88 — the fix, BUILT and VALIDATED (not flashed)
+
+`tools/patch_directjump.s`, Hook P (`dj_pertrack`) only. Two changes:
+
+1. The per-commit `move.w MASTER_STEP,%d4` is gone. Each track now reads its own
+   `NEXT_STEP[t]` — word at `0x800065e4 + 2t`, one contiguous 16-entry array (audio at
+   `0x800065e4+2t`, MIDI at `0x800065f4+2(t-8)` are the same array; it tiles into `PAIR` at
+   `0x80006604`). Stock's own rebuild wrote it at `0x400a4916` as `ceil(D7 / tps_t)`, already
+   in the TRACK's rate domain.
+2. The repeated-subtraction modulo is replaced by `remu.l %d1,%d2:%d0`. The old loop
+   documented an assumption — "new_step and LENGTH are both <= 64" — that held only while the
+   input was `MASTER_STEP`. `NEXT_STEP[t]` can reach ~2048 (master 1/8x tps 96, master len 64,
+   track 2x tps 3), which would have been thousands of iterations per track inside a commit
+   tick. `remu.l` assembles to `4c41 0002`, the unsigned twin of the `divsl.l` (`4c41 0800`)
+   stock itself executes at `0x400a4912`, so the instruction is known present on this CPU; the
+   existing `tst.l %d1 / ble` guard makes divide-by-zero unreachable.
+
+Build: 979 bytes changed (was 975), **0 unexpected outside the cave**, manual-trig bytes
+identical, container round-trips, and the image REBUILDS BYTE-IDENTICALLY from the source —
+checked because the S88 source was briefly lost to a backup-restore and had to be re-applied.
+
+Validation, PRE (`out/mainos_dj_v4_PRE.bin`) vs S88 (`out/mainos_dj_v4_S88.bin`), every run a
+REAL armed commit (`PEND_PAT`/`PEND_BANK` cued; `dja_real` x1, `djp_store` x16 confirmed):
+
+| fixture | stock tail | Hook P PRE | Hook P S88 | verdict |
+|---|---|---|---|---|
+| DJMAST2 2->3, uniform 1x | — | 7 | 7 | **identical, 30 writes** |
+| DJTEST2 0->2, 1x, pattern len 16->8 | — | 7 | 7 | **identical, 34 writes** |
+| DJMAST2 0->1, master 1x -> 2x | 4 | **7** | **4** | **FIXED** |
+| DJTEST2 6->7 (A07->A08), per-track scales | 4 | **7** | **4** | **FIXED** |
+
+Downstream on the 2x fixture, the transition cycle now continues `4,5,6,7,8,9` from stock's
+value instead of jumping to `7,8,9,10,11,12`.
+
+`diff_stock_vs_patch.py` with the feature OFF and the scratch block poisoned `0xAA`:
+**IDENTICAL** across 38 samples, all 8 named instruction counters equal,
+**16/16 tracks with movement** (so the gate was not vacuous).
+
+### A methodology failure this session, recorded because it nearly shipped a false PASS
+
+The first validation batch reported "IDENTICAL" for both 1x fixtures. **Three of its four runs
+had crashed**: PRE and S88 were launched in parallel into the SAME staging tree
+(`out/_emu_sw_p{pattern}_{dj}_{stock}`, which did not include the image name) and raced on
+`mkdir`. The comparison was diffing two empty sections. This is precisely the empty-green
+failure mode `diff_stock_vs_patch.py`'s own docstring was written about, reproduced in a new
+tool four sessions later. Fixed two ways: the tree name now includes image + project +
+pattern, and the tool returns FAILED if zero `STEP[0]` writes were observed.
+
+Note also that the raw PRE/S88 diff shows one benign difference — the store PC moved
+`0x400d77c2 -> 0x400d77c8` because the cave code changed size. Compare WRITTEN VALUES, not PCs.
+
+### What this does and does not fix
+
+Fixes: the measured landing-position error at any non-1x track or master scale.
+Does NOT explain: the hardware report that visited steps depend on WHAT TRIGS ARE ON THE GRID,
+and that LEDs and audio disagree. No measured write path reads trig data. **Do not assume the
+flash resolves that**; it is a separate, still-unexplained mechanism.

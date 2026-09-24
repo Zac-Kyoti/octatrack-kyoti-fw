@@ -9,21 +9,22 @@ build is byte-for-byte reproducible from the stock file.
 > bootloader recovery path. Static analysis is harmless; writing to hardware is
 > not. The author runs these on an Octatrack **MKI** he owns.
 
-> **Branch:** **`main`** carries the finished, hardware-confirmed features — the
+> **Branch:** **`main`** carries six finished, hardware-confirmed features — the
 > Bug-1 manual-trig fix (`build_trigscale_only.py`), the Bug-2 pattern-LED fix
 > (`build_pattern_led.py`), **MUTE MODE** (`build_mutemode_dt.py`, all four modes),
 > **QUANTIZE LIVE REC** (`build_qlrec.py`), the **SIDE-CHAIN COMPRESSOR**
 > (`build_sidechain3.py`) and **trigless-lock auto-remove** (`build_triglock.py`)
-> — all flashed, working, no open issues. `wip` is the frontier and carries these
-> plus the unfinished work. **Still active work-in-progress:**
-> **DIRECT JUMP** (`build_directjump_v4.py` — the toggle itself is hardware-confirmed
-> reachable and crash-free, but a playhead-reset bug is still open), **RELOAD FROM
-> PROJECT** (`build_reload2.py` — first hardware pass found 3 bugs, 2 are fixed but not
-> yet reflashed), and the **part-change carryover fix** (`build_partreapply.py` — flashed
-> but does not fix the originally reported bug). Everything else listed below is
-> hardware-confirmed and final. See *Hardware-test status* below for exact per-item state.
-> Earlier, superseded builds of these same features are no longer listed here —
-they're historical only; see `NOTES.md`.
+> — all flashed, working, no open issues. `wip` is the frontier: those six plus a
+> **seventh finished one**, the **part-change carryover fix**
+> (`build_partreapply.py`, hardware-confirmed 2026-09-22/23 but not yet promoted to
+> `main`), the **Bugbuild** composites (`build_bugbuilds.py`), and the two threads
+> still in progress. **Still active work-in-progress:** **DIRECT JUMP**
+> (`build_directjump_v4.py` — hardware-confirmed at 1x track and master scales; the
+> non-1x fix is built and emulator-validated but not yet flashed) and **RELOAD FROM PROJECT**
+> (`build_reload3.py` — the chord redesign, first flash green, three follow-up
+> fixes built but not yet reflashed). See *Hardware-test status* below for exact
+> per-item state. Earlier, superseded builds of these same features are no longer
+> listed here — they're historical only; see `NOTES.md`.
 
 ## What you get
 
@@ -32,13 +33,13 @@ they're historical only; see `NOTES.md`.
 | `python3 tools/build_trigscale_only.py` | `1.40C` (unchanged) | **Bug 1 fix only** — the Plays-Free MIDI manual-trig stall — on otherwise-stock 1.40C. **Hardware-confirmed, final.** |
 | `python3 tools/build_pattern_led.py` | `1.40C` (unchanged) | **Bug 2 fix only** — a pattern whose only content is p-locks (MIDI-track locks, or audio trigless locks) no longer reads as an empty slot; its grid LED lights under `[PTN]`. On otherwise-stock 1.40C. **Hardware-confirmed, final.** |
 | `python3 tools/build_qlrec.py` | `140C_KYOTI` | Bug 1 fix + **QUANTIZE LIVE REC** front-panel toggle: hold `[REC]`, tap `[PLAY]` twice to flip the PERSONALIZE row (with an on/off toast); the first `[REC]`+`[PLAY]` still starts live recording. **Hardware-confirmed, final** (two purely cosmetic issues parked, see below) |
-| `python3 tools/build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | `140C_KYOTI` | Bug 1 fix + the full **SIDE-CHAIN COMPRESSOR** (`KEY` reaching any of the 8 tracks, `KFLT`, `KGAIN`, `SC LISTEN`/`MON`), donor now SPRING REVERB. **Hardware-confirmed, final** — see below |
+| `python3 tools/build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | `140C_KYOTI` | Bug 1 fix + the full **SIDE-CHAIN COMPRESSOR** on the COMPRESSOR's page 2: `KEY` (any of the 8 tracks), `KFLT` (declicked one-pole, below centre LP / above centre HP / centre off), `KGN` (declick-smoothed key trim) and `MON` (audition the filtered key). The DSP code space is donated by **SPRING REVERB**, pulled from the FX2 list; SPATIALIZER is untouched. **Hardware-confirmed, final** — see below |
 | `python3 tools/build_mutemode_dt.py` | `140C_KYOTI` | Bug 1 fix + **MUTE MODE**, all four values: `OT` (stock, byte-for-byte) / `OTFX` (hard dry cut, FX tails ring, sequencer untouched — unmuting resumes at the playhead) / `OTFX-T` (same cut, but new trigs stay suppressed) / `DT-T` (pure sequencer mute, Digitakt-style). SOLO follows the selected mode. **This is the shipping MUTE MODE build.** |
 | `python3 tools/build_mutemode.py` | `140C_KYOTI` | the same toggle built with two values only (`OT` / `OT+FX`) — the original baseline, kept for comparison; prefer `build_mutemode_dt.py` |
-| *(a fourth mode `OTFX` — instant cut + FX tails + **playhead-resume** unmute — is reverse-engineered but **not built**; NOTES "Session 14")* | — | — |
-| `python3 tools/build_directjump_v4.py` | `140C_KYOTI` | Bug 1 fix + a **DIRECT JUMP** toggle (`[PTN]` + `[YES]`, transient overlay): a manually cued pattern switches on the next step tick, loads the new Part at once (arranger/chain untouched). *Active WIP — the toggle itself is hardware-confirmed reachable and crash-free; the "keeps playhead position" behaviour is not yet fixed (it currently restarts at step 1), see below* |
-| `python3 tools/build_reload2.py` | `140C_KYOTI` | Bug 1 fix + **RELOAD FROM PROJECT** (SEQ-focused): **hold `[PTN]`** opens a sticky picker (opens on `TRK SEQ`; arrows to `PTN SEQ` / `PART + PTN SEQ`), `[YES]` executes + closes / `[NO]` cancels, no timeout. `TRK SEQ` = the one currently-addressed track (audio or MIDI); `PTN SEQ` = the whole pattern, Part assignment preserved; `PART + PTN SEQ` = whole pattern incl. the Part link + apply that Part. From the card's last SAVE BANK, **without stopping playback**. *Active WIP — first hardware pass found 3 bugs; 2 are fixed but not yet reflashed, see below* |
-| `python3 tools/build_partreapply.py` | `1.40C` (unchanged) | **Part-change carryover fix** — after a pattern change that links a different Part, forces the full stock Part-reapply path (recorder record, scene morph, `TRK_PART`/`TRK_BANK` consistency) instead of the stock code's partial one. On otherwise-stock 1.40C. *Active WIP — flashed and behaviorally safe, but the fix does not address the originally reported PICKUP→FLEX stuck-loop bug; see below* |
+| `python3 tools/build_directjump_v4.py` | `140C_KYOTI` | Bug 1 fix + a **DIRECT JUMP** toggle (`[PTN]` + `[YES]`, transient overlay, deliberately not persisted — OFF on every power-on): a manually cued pattern switches on the next step tick and **keeps playing in master time** (`masterStep mod newMasterLen`, each track `that mod trackLen`), loads the new Part at once, sends the Program Change ~1 step early; arranger and chains untouched. *Hardware-confirmed at 1x track and master scales; the non-1x fix is built and emulator-validated but unflashed — see below* |
+| `python3 tools/build_reload3.py` | `140C_KYOTI` | Bug 1 fix + **RELOAD FROM PROJECT**, as two direct chords — no picker, no modal window, no timeout. **`[PTN]` + `[TRACK n]`** reloads that track's card-saved sequence with the Part untouched; **`[BANK]` + `[TRACK n]`** does the same and re-applies the saved Part (from RAM, via stock's own reload-part routine). From the card's last SAVE BANK, **without touching the transport**. *Active WIP — first flash green; three follow-up fixes built but not yet reflashed, see below* |
+| `python3 tools/build_partreapply.py` | `1.40C` (unchanged) | **Part-change carryover fix** — after a pattern change that links a different Part, forces the full stock Part-reapply path (recorder record, scene morph, `TRK_PART`/`TRK_BANK` consistency) instead of the stock code's partial one, **re-seeds the per-track sample slot a track leaving PICKUP would otherwise keep**, and stops a pattern switch into a PICKUP track from spuriously marking its Part unsaved. On otherwise-stock 1.40C. **Hardware-confirmed, final** — see below |
+| `python3 tools/build_bugbuilds.py` | per-image (`BUG_MUTEDT`, `BUG_QLREC`, `BUG_SC3X`, `BUG_TRIGLK`) | **Each finished feature, with all three bug fixes folded in** — MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS and TRIGLOCK, each composed with PARTREAPPLY + PATTERNLED + PLAYSFREEFIX. Writes **only** to `out/Bugbuilds/`, so the standalone per-feature images above are left alone. Composes onto the finished feature image rather than re-deriving it, with an interlock proof asserted on every run. *Not flashed — every ingredient is individually confirmed, the composites are not* |
 | `python3 tools/build_triglock.py` | `1.40C` (unchanged) | **Auto-remove an emptied trigless lock** — a LIVE-REC `[NO]`+knob erase that clears a step's last p-lock now also drops the now-purposeless trigless lock, instead of leaving it lit on the trig row indefinitely. An empty trigless lock placed deliberately with `FUNC`+`TRIG` is left alone. On otherwise-stock 1.40C. **Hardware-confirmed, final.** |
 
 All mods are **OFF by default** (`MUTE MODE = OT`; `KEY = OFF`, stored per Part).
@@ -59,10 +60,11 @@ cross-reference. See [`CREDITS.md`](CREDITS.md).
 | Bug 2 p-lock-only pattern shows empty (`build_pattern_led.py`) | **hardware-confirmed, final** — flashed 2026-09-13, grid LED lights correctly, no regression. Full-firmware `emu_pattern_led.py` also passes |
 | **QUANTIZE LIVE REC** toggle (`build_qlrec.py`) | **hardware-confirmed, final** — an early design hung the unit (2026-09-13), root-caused and rewritten, reflashed with no hang; double-tap timing, toast fade/close and label polarity all HW-confirmed correct. Two purely cosmetic issues (a brief textless-box flash, PERSONALIZE row not live-redrawing) are parked, not chased further |
 | **MUTE MODE** — all four modes (`OT` / `OTFX` / `OTFX-T` / `DT-T`), the menu, SOLO handling and `'ANDY'` persistence (`build_mutemode_dt.py`) | **hardware-confirmed, final** — flashed and tested 2026-09-21 on MKI; one persisted word with the menu index derived from it, so menu and firmware cannot disagree |
-| **DIRECT JUMP** (`build_directjump_v4.py`) | **active WIP, partly hardware-confirmed.** Flashed repeatedly; a crash bug was found and fixed, and the toggle itself — reachability and the fast (~1-step) switch timing — is now **hardware-confirmed working**. **Still open: with DIRECT JUMP on, a manual pattern change restarts the new pattern at step 1** instead of keeping the playhead position. Root cause was mechanically proven 2026-09-20; the fix has not yet been built or flashed. Earlier `v1`–`v3` builds are dead on hardware (the toggle never reached the handler at all) and are no longer listed here |
-| **SIDE-CHAIN COMPRESSOR**, incl. cross-core `KEY` (`build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS`) | **hardware-confirmed, final for now** — flashed 2026-09-20, MKI, works well. `KEY` reaches any of the 8 tracks (not just same-core siblings); `KFLT`/`KGAIN`/`SC LISTEN` all confirmed. Earlier `build_sidechain.py`/`build_sidechain2.py` were intermediate stages and are no longer listed here |
-| **RELOAD FROM PROJECT** picker + SEQ worker (`build_reload2.py`) | **active WIP, partly hardware-confirmed.** First-ever flash (2026-09-20) found 3 real bugs: the `[PTN]`-held YES/NO handlers could be unreachable while still physically holding `[PTN]` (fixed and dynamically verified), a `RUNNING`-transport gate that wasn't actually load-bearing (dropped), and a case where the picker could stop opening at all after one use (fixed by removing the flawed gate rather than chasing its root cause). **Not yet reflashed with these fixes.** A real seamless-timing fix (an audible gap / step-1 reset on reload) and a proper list-style picker UI are deferred. The earlier 3-item `build_reload.py` predates this hardening and is no longer listed here |
-| **Part-change carryover fix** (`build_partreapply.py`) | **active WIP, partly hardware-confirmed.** Flashed 2026-09-13: the recorder-cache and scene-morph pieces are behaviorally safe (though reports #2/#3 could not be reliably reproduced on stock, so treat as unconfirmed); **the originally reported #1 bug (PICKUP→FLEX stuck loop) is NOT fixed** — it reproduces identically on stock and patched. Root cause still open, see `NOTES.md` "Session 50" |
+| **DIRECT JUMP** (`build_directjump_v4.py`) | **hardware-confirmed at 1x scales; active WIP beyond them.** Flashed 2026-09-23 on the MKI: tracks and patterns stay in **master time** through a switch, patterns land on the **correct step**, mixed track lengths in one pattern work together (7 / 12 / 16), and **MASTER LENGTH is respected including `INF`**. This is the hard-won baseline — do not regress it. **All of that is confirmed only with 1x track scales and a 1x master scale.** Non-1x was root-caused and fixed 2026-09-24 — Hook P read the master step once and used it as every track's step index, which is correct only when master and track share a ticks-per-step; it now reads the per-track value stock's own rebuild already computed. Bit-identical to the confirmed build at 1x, emulator-validated on four fixtures, **not yet flashed**. Separately open and unexplained by that fix: a report that the visited steps depend on which trigs are on the grid and that LEDs and audio disagree. Two hardware faults were found and fixed getting here: a transport-start **lockup** from a hook gated on a global that lives beyond the boot zero-fill (garbage at power-on; the emulator zero-fills, so it could never have caught it), and **doubled trigs** from writing a per-track "previous step" array that stock's commit tail deliberately leaves alone. Earlier `v1`–`v3` builds are dead on hardware (the toggle never reached the handler at all) and are no longer listed here |
+| **SIDE-CHAIN COMPRESSOR**, incl. cross-core `KEY` (`build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS`) | **hardware-confirmed, final** — flashed 2026-09-20, MKI, works well, single-core and cross-core both. `KEY` reaches any of the 8 tracks (not just same-core siblings); `KFLT` / `KGN` / `MON` all confirmed. The donor is **SPRING REVERB** (FX2-exclusive, pulled from the FX2 chooser and null-stubbed for older projects that still reference it by id) — **SPATIALIZER is untouched** and stays a normal selectable effect; an earlier stage donated SPATIALIZER instead, ran out of slack, and was reverted. A very mild HP↔OFF filter pop remains, filed as research-only; it does not block shipping. Earlier `build_sidechain.py`/`build_sidechain2.py` were intermediate stages and are no longer listed here |
+| **RELOAD FROM PROJECT** — two direct chords (`build_reload3.py`) | **active WIP, first flash green.** The modal picker was deleted in Session 85: across the whole thread the bug tally was ~13 hardware bugs in the picker / keymap / popup machinery and **none** in the worker that does the reload, so the UI went and the chords replaced it (10 detours → 6, and the build now asserts it pokes no keymap record at all). Flashed 2026-09-23: **both chords execute, no conflicts.** Three follow-ups came back from that flash and are built and diagnostic-verified but **not yet reflashed** — a reload was restarting the track sequence *and* the internal metronome (it armed stock's whole-bank *re-home*, which zeroes the master playhead the metronome derives from; that arm is now on no path), SELECT BANK moved to the `[BANK]` **release** to match `[PTN]`'s own gesture, and the Part toast became a two-line box. All-tracks and whole-bank variants are deferred by the user. `build_reload2.py` (the picker) and `build_reload.py` (the original) are superseded and kept only for rollback and reference |
+| **Part-change carryover fix** (`build_partreapply.py`) | **hardware-confirmed, final** — the thread is closed. Report #1 (a FLEX track stuck playing an old PICKUP loop) is **fixed, confirmed on MKI 2026-09-22**: the voice dispatch reads the sample slot from a per-track pre-image that stock re-seeds only when a track *enters* PICKUP and never when it leaves, so the PICKUP slot survived into the new FLEX machine — the 2026-09-13 build copied stock's kill bit but omitted the re-seed, which is why it changed nothing. A second stock bug found while testing it (a pattern switch into a PICKUP track spuriously marking that Part edited/unsaved) is **fixed, confirmed 2026-09-23**, restoring the whole byte so a genuine edit made before the switch survives. Reports #2/#3 (recorder SRC/RLEN, REC SETUP) could never be reliably reproduced on stock and remain unconfirmed; the recorder-cache and scene-morph pieces are behaviorally safe regardless. This is the one finished feature still on `wip` only — `main` carries the older, pre-Session-81 build. See `NOTES.md` "Session 81" |
+| **Bugbuild composites** (`build_bugbuilds.py` → `out/Bugbuilds/`) | **not flashed.** Each base feature and each bug fix is individually hardware-confirmed in the rows above, but no composite image has been on hardware. What is proven is the composition: every run asserts each cave region all-zero before use, exact stock bytes at every detour site, no branch into a detour site, and a byte-level check that the composite's delta against stock is exactly the *disjoint union* of the feature's own delta and the three fixes' own, with no unattributed bytes. All four images report clean and pass `emu_pattern_led`. `--with-wip` will fold the fixes into DIRECT JUMP and RELOAD3 the same way once those are finished |
 | **Auto-remove an emptied trigless lock** (`build_triglock.py`) | **hardware-confirmed, final** (MKI, 2026-09-21). The handler was found by tracing the gesture on the unit after three builds aimed at the wrong code did nothing. The detour sits on the erase store so a deliberate `FUNC`+`TRIG` empty placeholder is not deleted by an unrelated `[NO]`+knob; emulator-validated 8/8 against real exports, then confirmed on hardware |
 
 The ColdFire emulator (Unicorn, real image bytes) proves control-flow and the
@@ -108,10 +110,19 @@ re-run `./analyze.sh`.
 ## Build
 
 ```sh
-python3 tools/build_qlrec.py                  # -> out/OCTATRACK_*QLREC.{syx,bin}
+python3 tools/build_qlrec.py                  # one feature -> out/OCTATRACK_*QLREC.{syx,bin}
 # or build_pattern_led.py / build_sidechain3.py (also finished + hardware-confirmed),
 # or any other build command from the table above
+
+python3 tools/build_bugbuilds.py              # each finished feature + all 3 bug fixes
+                                              #   -> out/Bugbuilds/ (the images above are untouched)
 ```
+
+There is deliberately **no single all-in-one image**: `tools/build_merged.py` is
+withdrawn so a combined build cannot quietly ship an unfinished feature.
+[`reference/MERGE.md`](reference/MERGE.md) is the authoritative allocation map it
+will be rebuilt from, and it stages the merge as `KYOTI_V1.0` (the seven finished
+mods, nothing to resolve) then `KYOTI_V1.1` (+ DIRECT JUMP and RELOAD3).
 
 Every build is a **guarded binary patch**: it asserts the stock bytes at each
 splice site, checks the code caves are free / non-overlapping / inside the free
@@ -121,7 +132,7 @@ aborts before writing if anything is off — a wrong stock file, an already-patc
 image, or a checksum mismatch.
 
 Pass a custom version string as the first argument if you want
-(`python3 tools/build_mutemode.py MY_BUILD`), but the Kyoti builds default to
+(`python3 tools/build_mutemode_dt.py MY_BUILD`), but the Kyoti builds default to
 `140C_KYOTI` and that is what appears on the boot splash and SYSTEM STATUS.
 
 ## The reproducible patch (no assembler needed)
@@ -130,8 +141,9 @@ Pass a custom version string as the first argument if you want
 expected original bytes + replacement bytes) and applies it with
 `sysex/apply_patch.py` — no cross-assembler required. See
 [`sysex/README.md`](sysex/README.md). Everything else — the Bug-2 pattern-LED fix,
-MUTE MODE, DIRECT JUMP, side-chain, RELOAD FROM PROJECT, QUANTIZE LIVE REC — is
-build-from-source only.
+MUTE MODE, DIRECT JUMP, side-chain, RELOAD FROM PROJECT, QUANTIZE LIVE REC,
+trigless-lock auto-remove and the part-change carryover fix — is build-from-source
+only.
 
 ## Flashing
 

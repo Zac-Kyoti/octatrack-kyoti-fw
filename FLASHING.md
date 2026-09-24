@@ -3,8 +3,13 @@
 How to flash an OT Kyoti FW image onto your Octatrack, with a full safety net.
 
 > **The behaviour changes are OFF by default.** Straight after flashing, the unit
-> behaves like stock firmware apart from the one always-on bug fix below. MUTE
-> MODE is switched on from PERSONALIZE; DIRECT JUMP from a front-panel chord.
+> behaves like stock firmware apart from the always-on bug fixes. MUTE MODE and
+> QUANTIZE LIVE REC live in PERSONALIZE (QUANTIZE LIVE REC also gets a front-panel
+> shortcut); DIRECT JUMP is a front-panel chord and comes up OFF on every power-on.
+> RELOAD FROM PROJECT adds two chords that do nothing until you press them. The
+> three bug fixes — the MIDI Plays-Free trig stall, the p-lock-only pattern LED,
+> and the Part-change carryover — are always on, since a bug fix has nothing to
+> opt into.
 
 > **Octatrack MKI or MKII.** Elektron ships one OS 1.40C image for both units and
 > the reverse engineering / builds here apply to both; the boot `0x46c8d18c`
@@ -161,307 +166,250 @@ string.
 > Emulator evidence: `tools/emu_trigbug.py` (`--drift`). On the repro bank the
 > corrupted scale index goes 255 → a valid 2 after the patch.
 
-### 4.2  MUTE MODE  (`build_mutemode.py` — `OT`/basic `OT+FX` cut hardware-confirmed; the trig-attack blip on `OT+FX` is a KNOWN, UNFIXED bug — see below before flashing)
+### 4.2  MUTE MODE  (`build_mutemode_dt.py` — **HARDWARE-CONFIRMED, FINAL**, all four modes, MKI 2026-09-21)
 
-> **⚠️ Current status (2026-09-14): the trig-attack blip described below is NOT fixed.
-> Do not flash expecting it to be gone.** History: the Session-10 build (softmute V6b)
-> was flashed and confirmed working for the basic cut. V7 (adds SOLO) was first flashed
-> 2026-09-13 and found the blip. Session 52's `pre_v` hook was believed to fix it
-> (isolation-revalidated, described below as fixed) but flashing it changed nothing —
-> `pre_v` was root-caused as targeting dead code entirely and removed. Session 53/53-bis
-> built two replacements, `mt_trig` and `mt_rebind` (still in `patch_softmute.s`), each
-> individually proven correct by direct CPU-side and dynamic instrumentation — **also
-> flashed, also zero hardware effect.** Session 55 finally found why, using a genuinely
-> DSP-capable emulator (not just CPU-side): both hooks fire and gate exactly as designed
-> for a track's first-ever trig, but a **second trig on a track that was already
-> muted while playing** — the actual bug scenario — reaches neither hook at all, and
-> the DSP-fed voice content restarts in full, byte-identical to unmuted. Root cause is
-> narrowed to a specific, not-yet-fully-disassembled code path (`FUN_4000f450`'s reuse
-> branch, `0x4000f526` onward — see `NOTES.md` "Session 55 continued") but the actual
-> fix has not been written yet. Do not re-flash any `build_mutemode*.py` output
-> expecting this specific symptom to be resolved.
+> **History worth knowing before you read old notes.** For about a dozen sessions
+> this feature had a hardware-only bug: a trig-attack blip on an already-muted
+> track, and a DT mode that "did nothing at all". Three separate fixes (`pre_v`,
+> then `mt_trig`/`mt_rebind`) each passed CPU-side emulation and each changed
+> nothing on hardware. Session 55 found why with a DSP-capable emulator: the hooks
+> fire correctly for a track's *first* trig, but a second trig on a track already
+> muted while playing reached neither. Sessions 57–58 root-caused and closed it,
+> and the SOLO path (which stock's own hard cut was running unopposed) with it.
+> **All four modes are now confirmed on hardware.** `build_mutemode.py` is the
+> older two-value `OT` / `OT+FX` build, kept for comparison — do not flash it
+> expecting the four-mode menu.
 
-1. **PROJECT → PERSONALIZE**, scroll to **MUTE MODE**. It cycles `OT` / `OT+FX`
-   (and `DT` on the `build_mutemode_dt.py` build). Default `OT`. The 15/16 stock
-   entries above must still show their own values.
-2. Set **`OT+FX`**. Put a **delay or reverb** on an audio track, obvious tail.
-3. Play the track, then **FUNC + [that track's key]** (also try the MIXER menu /
-   QUICK MUTE — same code path):
-   - **`OT`:** dead silence instantly — dry *and* the FX tail (stock).
-   - **`OT+FX`:** the dry cuts fast and clean; the delay repeats / reverb tail
-     **ring out**. A muted track's sequencer trigs make no sound — **specifically
-     re-check this: the previous flash left a short attack blip on every trig of a
-     muted STATIC or FLEX track; confirm it is now fully gone**, not just shortened.
-     Unmute returns the track on its next trig.
-4. **Persistence:** power-cycle the unit — MUTE MODE stays where you left it
-   (the setter writes the `'ANDY'` battery-SRAM shadow — "Session 19"). An EMPTY
-   RESET clears it to factory.
-5. Regression: the manual-trig fix still works; other tracks unaffected;
-   in `OT` mode SOLO is a stock hard cut.
+1. **PROJECT → PERSONALIZE**, scroll to **MUTE MODE**. It cycles
+   **`OT` / `OTFX` / `OTFX-T` / `DT-T`**, in that order, default **`OT`**. The
+   15/16 stock entries above must still show their own values. The menu index is
+   *derived* from the one persisted word, so the menu and the running firmware
+   cannot disagree.
+2. Put a **delay or reverb** insert on an audio track, obvious tail. Play it, then
+   **FUNC + [that track's key]** (also try the MIXER menu / QUICK MUTE — same code
+   path):
+   - **`OT`** — dead silence instantly, dry *and* FX tail. Byte-for-byte stock.
+   - **`OTFX`** — the dry cuts fast and clean, the FX insert **rings its tail**,
+     and the **sequencer is left alone**: trigs keep firing and voices keep
+     restarting underneath, so unmuting picks up exactly where the pattern would
+     have been. No attack blip.
+   - **`OTFX-T`** — the same dry cut and ringing tail, but a **trig-mute**: new
+     trigs stay suppressed until you unmute.
+   - **`DT-T`** — pure sequencer mute, Digitakt-style: a sounding voice rides out
+     its **own AMP envelope** and its FX ring, and only *new* trigs are suppressed.
+3. **The specific thing that used to be broken:** in `OTFX-T` and `DT-T`, a new
+   sequencer trig on a track that is **already muted while playing** must produce
+   **no sound at all** — not even a blip. This is the case three earlier builds
+   failed.
+4. **SOLO follows the selected mode.** With a delay/reverb on two tracks, solo one:
+   in `OTFX`/`OTFX-T`/`DT-T` the non-soloed tracks get the same treatment as a
+   manual mute (dry stops, FX rings); in `OT` solo is the stock instant cut.
+   Soloing a track that is already muted plays it (solo overrides mute).
+5. **`CUE MUTES TRK` intentionally stays a hard cut in every mode** — that
+   PERSONALIZE option ORs the cue bits in after this project's hook runs, and is
+   left untouched by design. Not a bug.
+6. **Persistence:** power-cycle — MUTE MODE stays where you left it (one word in
+   the `'ANDY'` battery-SRAM shadow). An EMPTY RESET clears it to factory.
+7. Regression: the manual-trig fix still works; other tracks unaffected.
 
-### 4.3  MUTE MODE `OT+FX` for SOLO  (`wip` `build_mutemode.py`, softmute V7 — flashed 2026-09-13 alongside the `pre_v` bug above, fix not yet reflashed)
-
-With **`OT+FX`** selected and a delay/reverb on two tracks:
-
-1. **SOLO** one track (SOLO mode + its key). The non-soloed tracks' **dry stops**
-   fast, but their **FX inserts ring** their tails; their trigs are silent (no
-   attack blip, same re-check as §4.2); releasing solo resumes them from the next
-   trig.
-2. In **`OT`** mode, solo is the stock instant cut of everything else.
-3. Solo a track that is **already muted** → it plays (solo overrides mute).
-
-### 4.4  DT mode  (`build_mutemode_dt.py` — flashed 2026-09-13, "does nothing at all"; STILL UNFIXED — see below before flashing)
-
-> **⚠️ Current status (2026-09-14): still unfixed, same root cause as §4.2.** The
-> first-ever hardware flash of DT mode showed no audible effect from muting whatsoever.
-> DT relies on the same trig-suppression mechanism as `OT+FX` (it has no separate
-> dry-cut). Same history as §4.2's callout: `pre_v` (Session 52) targeted dead code and
-> was removed; `mt_trig`/`mt_rebind` (Session 53/53-bis, still in `patch_softmute.s`)
-> are individually correct but don't reach the actual retrigger path (Session 55). Do
-> not re-flash expecting DT to suppress a new trig on an already-muted track yet.
-
-Set **MUTE MODE = DT**. DT is a pure sequencer mute: a voice that is already
-sounding keeps playing under its own AMP envelope; only new trigs are suppressed.
-
-1. A one-shot sample, mid-playback, muted → it **follows its own AMP RELEASE**
-   (not the `OT+FX` fast declick).
-2. A **LOOP** sample with long HOLD/REL, muted → it keeps sounding indefinitely
-   while muted; unmute is seamless.
-3. **The core thing that was broken: while held, new sequencer trigs on a muted
-   STATIC or FLEX track must produce NO sound at all** (not even a blip) — confirm
-   this specifically, since this is exactly what "did nothing" before.
-4. Solo behaves like the mute (sounding voices ride out).
-5. Switch **DT → OT+FX** live while a muted voice is ringing — it should adopt the
-   `OT+FX` behaviour on the next mute.
-
-### 4.5  DIRECT JUMP  (`build_directjump_v4.py` — v1/v2/v3 FLASHED 2026-09-14/15, DID NOTHING; root cause found, v4 fixes it, NOT yet reflashed — see below, READ BEFORE FLASHING)
-
-**⚠️ DIRECTJUMP_V3 was flashed and had NO effect whatsoever** — no toast, no
-toggle, the combo did literally nothing, on a unit otherwise working normally.
-**Root cause found (NOTES.md "Session 60"), and it's stock, structural
-behaviour, not a bug in any patch here**: holding **[PTN]** unconditionally
-pushes a small stock UI overlay layer (`0x400bf0f2`) whose own `[YES]` record
-has a NULL press handler. The runtime key-dispatch table entry for `[YES]`
-gets overwritten with that NULL for as long as `[PTN]` is held — v1/v2/v3 all
-detour the *stock* `[YES]` handler (`0x4005e4c8`), which that NULLed table
-entry never reaches. **This is genuinely dead code while the chord is being
-held**, confirmed by running the real, unmodified firmware's own layer-push
-code under emulation (`tools/emu_directjump_v4.py`), not just by reasoning
-about the disassembly.
-
-**Fix (`build_directjump_v4.py`, `patch_directjump.s` `--defsym DJ_KEYMAP=1`)**:
-no detour on `0x4005e4c8` at all. The build instead writes `dj_toggle`'s
-address directly into that overlay layer's own `[YES]` record, so the exact
-same stock rebuild that used to zero the runtime dispatch slot now points it
-at our toggle. Verified two ways: (1) `tools/emu_directjump_v4.py` runs the
-real `FUN_4005a044` ([PTN] press) + the real layer-push/table-rebuild code
-against both the v3 image (reproduces the dead slot) and the v4 image
-(dispatch slot → `dj_toggle`, then actually `jsr`s it and confirms the toggle,
-re-checksum, and toast all fire) — the closest thing to a hardware round-trip
-this project's emulator harnesses do; (2) a byte-diff assertion that v4
-touches exactly v3's cave + the one 4-byte record field, nothing else.
-
-**⚠️ Likely shared root cause, NOT yet fixed**: `patch_reload2.s`'s `rl_yes`
-(the `RELOAD FROM PROJECT` `[PTN]`-hold picker's `[YES]` confirm) detours the
-*same* `0x4005e4c8` behind the *same* `PTN_MODE` gate — so RELOAD2's
-`[PTN]`+`[YES]` flow is very likely equally dead on real hardware for the
-identical reason. It just hasn't been flash-tested yet (queued behind
-DIRECTJUMP). Worth the same kind of keymap-slot fix before it's ever flashed
-standalone or in `build_merged.py`.
+### 4.3  DIRECT JUMP  (`build_directjump_v4.py` — **hardware-confirmed at 1x scales**, MKI 2026-09-23; non-1x scales are a known open problem)
+> **⚠️ Read this before flashing.** The **1x** behaviour below is hardware-confirmed
+> (2026-09-23). **Non-1x track and master scales were broken, were root-caused and
+> fixed on 2026-09-24, and that fix has NOT been on hardware** — Hook P was reading
+> the master step once and using it as every track's step index, which is only
+> correct when master and track share a ticks-per-step. The fix is bit-identical to
+> the confirmed build at 1x, so flashing it should not risk the baseline, but the
+> non-1x behaviour itself is unverified: **treat §4.3 step 10 as the thing to test.**
+>
+> **Also still open, and NOT explained by that fix:** a report that which steps get
+> visited depends on what trigs are on the grid, and that the LEDs and the audio
+> disagree about the position. No measured write path reads trig data, so this is a
+> separate mechanism. If you see it, it is a known unknown, not a new regression.
+>
+> **`v1`–`v3` are dead on hardware and must not be reflashed.** Holding `[PTN]`
+> pushes a stock UI overlay whose `[YES]` record has a NULL press handler, which
+> overwrites the runtime dispatch slot for as long as `[PTN]` is held — so their
+> detour on the stock `[YES]` handler (`0x4005e4c8`) was genuinely unreachable.
+> `v4` writes `dj_toggle` straight into that overlay's own `[YES]` record instead.
+> Two other hardware faults were found and fixed along the way: a **lockup at
+> transport start** (a hook gated on a global living beyond the boot zero-fill, so
+> garbage at power-on) and **doubled trigs** (writing a per-track "previous step"
+> array that stock's commit tail deliberately leaves alone).
 
 1. Hold **[PTN]** and tap **[YES]** → a transient **"DIRECT JUMP ON"** overlay
-   (~0.7 s / ~68 frames), then **OFF** on the next chord. The SELECT PATTERN
-   chooser must not pop on the [PTN] release.
-2. With DIRECT JUMP **ON**, play a pattern and manually cue another (different
-   Part): it should switch on the **next step tick**, keep the **step position**
-   (modulo the new pattern's length), and load the new Part at once. A MIDI
-   Program Change goes out ~1 step early.
-3. The **arranger** and **pattern chains** must be unchanged (DIRECT JUMP bails
+   (~0.7 s), then **OFF** on the next chord. The SELECT PATTERN chooser must not
+   pop on the `[PTN]` release.
+2. **It does not persist.** Power-cycle → DIRECT JUMP is **OFF** again. That is
+   deliberate: it is a performance toggle.
+3. With DIRECT JUMP **ON**, play a pattern and manually cue another (different
+   Part): it switches on the **next step tick**, loads the new Part at once, and a
+   MIDI Program Change goes out ~1 step early.
+4. **The behaviour to verify, all at 1x:**
+   - tracks and patterns stay in **master time** through the switch — check
+     against the metronome, it must not drift or re-anchor to your keypress;
+   - the new pattern lands on the **correct step**;
+   - **mixed track lengths** in one pattern work together — try 7, 12 and 16;
+   - **MASTER LENGTH is respected**, including **`INF`**;
+   - existing trigs sound **once**, not doubled.
+5. The **arranger** and **pattern chains** must be unchanged (DIRECT JUMP bails
    when the arranger is running or a chain is active).
-4. Turn it **OFF** → manual pattern changes are stock (end-of-pattern quantised,
-   restart at step 1).
-5. **[PTN] tapped alone** (no [YES]) still opens SELECT PATTERN normally —
-   v4 doesn't touch that path.
+6. Turn it **OFF** → manual pattern changes are stock again (end-of-pattern
+   quantised, restart at step 1).
+7. **[PTN] tapped alone** (no `[YES]`) still opens SELECT PATTERN normally.
+8. **Non-1x scales — the unverified part.** Set a **track scale** to something
+   other than 1x (say 2x on one track, 1x on the rest) and repeat step 4; then set
+   the **master scale** to 2x and repeat again. Each track must land on its own
+   correct step and stay in master time, exactly as the 1x case does. This is the
+   2026-09-24 fix and it has never been heard on hardware.
+9. Watch for the open report while you are there: do the **LEDs and the audio agree**
+   about where the playhead is, and does changing *which trigs are on the grid* change
+   which steps get visited? Both would be the unexplained issue in the callout above.
 
-> Five further hardware-only unknowns are in `NOTES.md` "Session 15 continued" /
-> "Session 21 continued"; `DJ_TOAST_DUR` (default 0x44, ~68 frames) may need one
-> tweak after a HW listen. v1/v2/v3 (`build_directjump.py`/`_v2`/`_v3.py`) are
-> kept for reference but should not be reflashed — they reproduce the dead combo.
+> Still not validated: the non-1x fix on hardware (above), two patterns with
+> differing MASTER LENGTHs (no fixture), and per-track sub-step phase at a mid-cycle
+> commit. Detail: `NOTES.md` "Session 60"–"Session 88".
 
-### 4.6  Side-chain compressor  (`build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` — **HARDWARE CONFIRMED, SHIPPING, MKI, 2026-09-20. User considers this build final for now.**)
+### 4.4  Side-chain compressor  (`build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` — **HARDWARE-CONFIRMED, FINAL**, MKI 2026-09-20, single-core and cross-core both)
 
-> **Current state (2026-09-20, supersedes everything below in this section):**
-> `KEY FLT` is a **one-pole** tracker (LP/HP/OFF), not the 2-pole Chamberlin
-> SVF this section's own body text describes — that redesign landed Session
-> 76 and made the whole q=1-vs-q=2 resonance question below moot (a single
-> real pole can't resonate at all). `KEY` is now a **list-style chooser**
-> (matching LFO TRIG's own UI) reaching **any of the 8 tracks** flat
-> (`T1`..`T8`), not just this track's own 4 same-core siblings — the
-> cross-core reach (a per-core generation counter + a shared-DSP-window
-> publish/foreign-read mechanism, `NOTES.md` "Session 77" ×3) was flashed
-> today and the user reports it "seems to be working well": no crash, no
-> transport regression, cross-core `KEY` audible and correct. `KEY GAIN` and
-> `SC LISTEN`/`MON` are unchanged from what's described below. The build to
-> flash going forward is `out/OCTATRACK_OS1.40C_SIDECHAIN3_CROSS.syx`, not a
-> plain `SIDECHAIN3` (that name no longer gets built — `build_sidechain3.py`
-> itself now produces the CROSS output, since the value semantics genuinely
-> changed). The rest of this section is the historical trail that reached
-> the *single-core* feature-complete state (Session 55–65) — still useful
-> for the register-discipline / transport-safety history, superseded on the
-> filter design and the `KEY` range.
+> **What this section used to be.** It carried a long historical trail — a 2-pole
+> Chamberlin SVF with a `q=1` vs `q=2` damping question, a SPATIALIZER donor, an
+> FX1 chooser-highlight bug, and a `SIDECHAIN3` image name. All four are obsolete:
+> the filter was redesigned as a **one-pole** (a single real pole cannot resonate,
+> so the damping question is moot), the donor is now **SPRING REVERB**, the chooser
+> bug is fixed, and the only image built is `OCTATRACK_SIDECHAIN3_CROSS`. The trail
+> lives in `NOTES.md` "Session 17" (+1–8) → "Session 77" (×3).
 
-`SIDECHAIN3` **donates SPATIALIZER** for DSP code space and removes it from the
-FX1/FX2 choosers; a legacy project using SPATIALIZER shows "SPAT" and passes
-audio through.
+Adds four parameters to the **COMPRESSOR** effect's **page 2**, next to `RMS`:
 
-1. On a track with a **COMPRESSOR**, page 2 now has **`KEY`** (after the `RMS`
-   gap), then `KFLT`, `KGN`, `MON`. `KEY` = `OFF` / `T1..T4` or `T5..T8` for that
-   track's DSP core.
-2. Trigger the key track and the compressor track together → the compressor
-   ducks in time with the key, even when the key track is muted. **Confirmed
-   working 2026-09-14** — needs page-1 threshold/ratio/attack/release tuned by
-   ear first (the compressor's own gain-computation chain is untouched by any
-   of this project's fixes).
-3. `KEY = OFF` → the compressor keys off its own input (stock).
-4. **`KFLT` (LP/OFF/HP 2-pole SVF) — damping changed `q=1` -> `q=2` 2026-09-15,
-   NOT YET HARDWARE-TESTED.** `KFLT` sits BEFORE the compressor's own
-   detector, so this filter shapes both SC LISTEN's audio AND the signal that
-   actually drives gain reduction. `q=1` (the prior value) is proven
-   UNDERdamped — complex/resonant poles at the upper end of the cutoff
-   range — confirmed both by a hardware report (audible ringing on a kick,
-   tracking KFLT position, worse away from OFF) and independently by solving
-   this loop's own characteristic equation. `q=2` is proven to give REAL
-   (non-oscillatory) poles for **every one of the 32 FTAB entries**, not just
-   spot-checked ones (NOTES.md Session 65 has the full derivation and the
-   worst-case margin). Should now roll off cleanly in whichever direction,
-   at the existing slope, with **no resonant peak/ring anywhere in its
-   range** — that is the specific thing to listen for on this flash. `KGN`
-   (±24 dB into the detector) unaffected, still sounds noticeably better as
-   of the Session 55 dirty-state fix.
-5. **`MON` (SC LISTEN, monitor the processed key) — transport-safe as of
-   2026-09-15 (Sessions 59/61).** No ringing at `KFLT` `OFF` was already
-   hardware-confirmed (Session 63) before the q=2 change above; that
-   confirmation stands (OFF bypasses KEY FLT entirely, untouched by this
-   fix). What's newly at stake on this flash is whether KFLT itself, now
-   non-resonant by construction, actually sounds clean through its full
-   range — Session 63's "it's just normal filter resonance" verdict was
-   correct about the CAUSE but overturned on functional grounds (a resonant
-   sidechain key source is a real defect, not just an audition quirk); this
-   flash is the fix for that, not a re-confirmation of something already closed.
+    KEY     OFF / T1..T8 -- which track drives the compression. Any of the 8,
+                            flat, not just this track's own DSP-core siblings.
+    KFLT    one-pole filter on the key signal: below centre = LP, above = HP,
+            centre = off. Sits BEFORE the detector, so it shapes both what MON
+            auditions and what actually drives gain reduction.
+    KGN     key trim into the detector, declick-smoothed, bipolar, centre = unity.
+    MON     audition the filtered key signal instead of the track.
 
-The sequencer-transport regression this build caused on its first two flashes
-(PLAY not starting playback, cycling step LEDs instead) is fixed and
-**hardware-confirmed healthy** as of the 2026-09-15 flash — two independent
-causes, a register-clobber bug (Session 59) and an uninitialized-Y-memory-slot
-hazard in the `moncommit` hook (Session 61). Not touched by the q=2 change
-(same `moncommit`/`scdet` register discipline, one extra `sub` inside KEY
-FLT's own loop only) — no reason to expect a transport regression from this
-flash, but confirm PLAY is healthy first anyway, as always with this build.
+**What it costs:** **SPRING REVERB** is removed from the **FX2** chooser (15 → 14
+entries) to donate its DSP code space, and its descriptor is null-stubbed so an
+older project that still references it by id stays safe. **SPATIALIZER is
+untouched** and remains a normal selectable effect.
 
-> HW test plans: `NOTES.md` "Session 17 continued (8)" and "Session 36"; the
-> full MON/KFLT investigation trail is Sessions 55/57/58/59/61/63/65 (58 is
-> the dispatcher-level redesign, 59 is the register-clobber transport fix, 61
-> is the uninitialized-Y-slot transport fix, 63 diagnosed the ringing as
-> ordinary filter resonance — correct diagnosis, but the user overturned the
-> "not a bug" conclusion on functional grounds, since this filter also feeds
-> the compressor's detector — 65 is the q=2 fix making KEY FLT provably
-> non-resonant everywhere in its range).
-> Power-cycle after the flash before judging audio — an OS upgrade doesn't clear
-> the DSP state RAM (see §6 (a-bis)).
+1. **Boot check** — the FX2 chooser has **14** entries and no SPRING REVERB; the
+   **FX1** chooser is untouched. SPATIALIZER is present and selectable in both.
+   Every other effect must highlight **the effect you actually picked** (an earlier
+   build had FX1's id→position table one slot out past the removed effect).
+2. Put a **kick on T1**, and a **pad + COMPRESSOR on T2**. On T2's FX page 2 set
+   **`KEY = T1`** → the pad **ducks on every kick**. Sweep `THRS`/`RAT` to confirm
+   it is the compressor responding, not something else.
+3. **`KEY = OFF`** → the compressor keys off its own input again (stock behaviour).
+4. **Mute T1** → the pad **must keep ducking**. Keying is deliberately independent
+   of the mute state.
+5. **Cross-core** — the tracks are split across two DSP cores (1–4 and 5–8). Put
+   the compressor on a track in **one** core and set `KEY` to a track in the
+   **other** (e.g. compressor on T2, `KEY = T5`): ducking must be identical in feel
+   and timing to a same-core pair. This is the part that needed a per-core
+   generation counter and a shared DSP window; it is confirmed, but it is the first
+   thing to re-check on any rebuild.
+6. **`KFLT`** — sweep it. It should roll off cleanly in either direction with **no
+   resonant peak or ring anywhere in its range**. With `KFLT` left of centre the
+   compressor stops responding to the key's highs; right of centre, to its lows.
+7. **`KGN`** — trim the key into the detector; more gain, more ducking. It should
+   move smoothly, with no zipper noise or clicks.
+8. **`MON = ON`** → you hear the filtered key signal itself. Useful for dialling
+   `KFLT` by ear. Turn it back off.
+9. **Regression:** the transport must be unaffected (start/stop/record), other
+   effects unchanged, and no crash or audio dropout after several minutes with a
+   cross-core `KEY` active.
 
-#### 4.6b  Chooser-highlight bug — RESOLVED 2026-09-14, fixed in `build_sidechain3.py`
-
-**Was**: only in the Effect 1 chooser, selecting COMB highlighted COMPRESSOR (the
-entry below); selecting COMPRESSOR highlighted LOFI; selecting LOFI highlighted
-nothing. No other entry affected, and confirmed NOT reproducible on stock firmware
-(ruling out the earlier "copy action" theory — see NOTES.md Session 55 for that
-now-superseded trail).
-
-**Root cause (NOTES.md Session 56)**: FX1 and FX2 each have their OWN, separate
-id->position table for chooser cursor placement — `0x400d60d0` (FX1) and
-`0x400d6150` (FX2, what the build scripts call `ID2POS`) — sitting back to back in
-ColdFire data with byte-identical stock values, which is exactly why this was missed
-the first time (Session 55 rebuilt only `0x400d6150` when removing SPATIALIZER from
-the choosers). FX1's copy was left stale, one position too high for every id past
-SPATIALIZER's old slot — matching the symptom exactly, including the total breakdown
-at LOFI (whose stale position, 10, doesn't exist in FX1's new 10-entry list at all).
-
-**Fixed**: `build_sidechain2.py`/`build_sidechain3.py` now rebuild both tables
-identically. Rebuilt, independently re-verified by reading both tables back out of
-the finished binary. **NOT yet reflashed** — flash the current
-`out/OCTATRACK_OS1.40C_SIDECHAIN3.syx` and confirm COMB/COMPRESSOR/LOFI all
-highlight correctly in the FX1 chooser now.
-
-### 4.7  RELOAD FROM PROJECT  (`build_reload.py` / `build_reload2.py` — emulator only, never flashed)
-
-> Two images. `build_reload2.py` (the SEQ-focused one) = a 3-item picker
-> **`TRK SEQ`** / **`PTN SEQ`** / **`PART + PTN SEQ`**, window opens on `TRK SEQ`.
-> `build_reload.py` = a 3-item picker **`PTN SEQ`** / **`ALL PARTS`** (all 4
-> Parts, stock RELOAD PART x4) / **`PARTS + PTN SEQ`**.  For `build_reload.py`
-> substitute `ALL PARTS` where a step below says `TRK SEQ`, and `PARTS + PTN SEQ`
-> where it says `PART + PTN SEQ`.  Check the `PART + PTN SEQ` label isn't clipped.
+> **Known open, deliberately left alone:** a very mild pop when `KFLT` crosses
+> between **HP and OFF** — three separate hardware-tested declick designs each
+> failed or regressed, so do not re-attempt without a fundamentally different
+> approach (`NOTES.md` Session 76's trail). Also filed as research-only: a slight
+> "graininess" at very low `ATK`/`REL` on a busy key. Neither blocks use.
 >
-> **Session 44 HW checks (both builds):** does holding `[PTN]` ~0.5 s feel right,
-> and does a quick tap still open SELECT PATTERN?  Do the arrow keys — and a
-> `[TRACK]` key press — reach the picker while the `FUN_4005a0e0` popup is up (if
-> not, the fallback is a hook in the event dispatcher `FUN_40061b60`)?
+> Not emulable, so this list is genuinely hardware-only: `dsp_host` cannot run the
+> stock compressor end to end, so the *gain-reduction response* to `KEY`/`KFLT`/
+> `KGN` is only ever verified by ear. The emulators verify the data transforms
+> feeding it, which is a different claim.
+### 4.5  RELOAD FROM PROJECT  (`build_reload3.py` — **first hardware flash green**, MKI 2026-09-23; three follow-up fixes built but not yet reflashed)
 
-**Hold `[PTN]` ~0.5 s** (while the sequencer is **playing**) opens a picker
-**window** — the OS's own hold event, the same one `[PAGE]`-hold uses.
-`build_reload2.py`:
+> **The picker is gone.** RELOAD3 replaced the modal window with two direct
+> chords. `build_reload2.py` (the `[BANK]`+`[YES]` 3-item picker) and
+> `build_reload.py` (the original) are **superseded** and kept only for rollback —
+> do not flash them. Across the whole thread the bug tally was ~13 hardware bugs in
+> the picker / keymap / popup machinery and **none** in the worker that does the
+> reload, which is what drove the redesign.
+>
+> **Flashed twice, both green.** 2026-09-23: both chords execute, no conflicts.
+> 2026-09-24: reloads are "quick and on-time". **What has NOT been on hardware
+> yet:** the reload no longer restarting the sequence and the internal metronome,
+> SELECT BANK moving to the `[BANK]` release, and the message box rebuilt as a
+> **titled, centred, self-dismissing card** (stock's `MLNOTIFY` could not do it —
+> it is a blocking dialog that pushes its own keymap layer, has no duration
+> argument, and hardcodes every line to x=4). Those are built and
+> diagnostic-verified only.
 
-    TRK SEQ        -- sequence data of the ONE currently-addressed track (audio
-                      track on the audio pages, MIDI track on the MIDI pages):
-                      trigs, recorder trigs, trigless trigs/locks, swing/slide,
-                      micro-timing, trig conditions, its step count.  Nothing else.
-    PTN SEQ        -- the whole active pattern's sequence data.  The pattern's
-                      Part ASSIGNMENT is preserved.
-    PART + PTN SEQ -- PTN SEQ including the Part link, then that saved Part is
-                      applied to the engine (FUN_40009094).
+The two gestures, both reading from the CF card's last **SAVE BANK** snapshot,
+neither stopping or disturbing the transport:
 
-A quick `[PTN]` tap is unchanged (SELECT PATTERN). The window is a **sticky menu
-with no timeout** — the **arrow keys** move the highlight; `[YES]` executes it
-and closes the window; `[NO]` closes it and runs nothing. While it is open
-`[YES]`/`[NO]` do only picker things. All reloads are from the CF card's last
-**SAVE BANK** snapshot and do **not** stop playback: the SEQ work rides the
-storage task and re-homes through the sequencer's own no-stop reload path.
+    [PTN]  + [TRACK n]   reload track n's saved sequence. The Part does not change.
+                         Audio or MIDI track. Everything for that track: regular
+                         and recorder trigs, trigless trigs, trigless locks and
+                         their locked values, swing/slide, micro-timing, trig
+                         conditions, its step count. The other 7 tracks, the
+                         pattern length/scale and the pattern->Part link are left
+                         alone. Card: RELOAD FROM PROJ / TRK SEQ / RELOADED.
+
+    [BANK] + [TRACK n]   the same, plus re-apply the saved Part -- from RAM, not
+                         the card: the saved copy of the Part currently associated
+                         with the pattern. Card: RELOAD FROM PROJ / TRK SEQ + PART
+                         / RELOADED.  A never-saved Part instead gets
+                         TRK SEQ RELOADED / SAVE PART FIRST! -- stock's own
+                         wording, and the sequence still reloaded.
 
 Setup: a project on the card with **at least one SAVE BANK** done. Pick a bank,
-**SAVE BANK** it, then note pattern N's trigs + a Part's filter/level.
+**SAVE BANK** it, then note pattern N's trigs.
 
 1. Play pattern N. On **track 3** edit some trigs / a p-lock. On **track 5** edit
    different trigs. Do **not** SAVE BANK again.
-2. Select **track 3**.  Hold `[PTN]` ~0.5 s -> window opens on **`TRK SEQ`**.
-   Release `[PTN]` -- the window stays; the SELECT PATTERN chooser must **not**
-   pop on release.  A *quick* `[PTN]` tap must still open SELECT PATTERN.
-3. `[YES]` -> within ~1 s **track 3** reverts, **no audible gap**; **track 5's
-   edits are still there**; toast reads `T3 SEQ`; window closes.
-4. Repeat on a **MIDI** track (be on the MIDI pages) -> toast reads `MT<n> SEQ`;
-   only that MIDI track reverts.
-5. Re-edit.  Hold `[PTN]`, **arrow** to **`PTN SEQ`**, `[YES]` -> the whole
-   pattern's sequence reverts; any Part you tweaked is untouched.
-6. **Re-assign** pattern N to a different Part.  Hold `[PTN]`, arrow to
-   **`PART + PTN SEQ`**, `[YES]` -> the pattern comes back on its **saved** Part.
-7. Switch to a **different pattern** you also edited -- its edits must still be
-   there (only the pattern/track you reloaded reverts).
-8. On a bank **never** SAVE BANK'd, any item shows the stock **"THIS BANK HAS
-   NEVER BEEN SAVED! NOTHING TO RELOAD!"** dialog.
-9. Open the window and leave it -- it **stays open** (no timeout); `[NO]` closes.
-10. Sequencer **stopped** -> holding `[PTN]` does nothing extra.
+2. **`[PTN]` + `[TRACK 3]`** → track 3 reverts; **track 5's edits are still
+   there**; a card reading `RELOAD FROM PROJ` / `TRK SEQ` / `RELOADED` appears. The
+   SELECT PATTERN chooser must **not** pop on the `[PTN]` release.
+3. **The card must dismiss itself** in about half a second, with **no `OK` prompt
+   to answer and no countdown dots**. If it sits there waiting for a keypress, that
+   is the exact regression this design removed — the emulator cannot drive the
+   popup tick, so this is hardware-only.
+4. **The timing is the point** — during and after the reload, the track, the
+   pattern and the **internal metronome** must all stay in undisturbed time. No
+   restart to step 1, no metronome jump, no audible gap. This is the fix that has
+   not yet been on hardware; test it deliberately.
+5. Repeat on a **MIDI** track → only that MIDI track reverts.
+6. Try **track 1** and **track 8** specifically — the keycode→index arithmetic is
+   right at both ends, but it is worth confirming on the unit.
+7. **`[BANK]` + `[TRACK n]`** → the same, and the Part is restored too. The
+   `[BANK]` release must **not** raise SELECT BANK after the chord.
+8. **A plain `[TRACK]` tap with no modifier must still just select the track** —
+   that handler is detoured, so this is the regression that matters most.
+9. **A plain `[BANK]` tap** must still open SELECT BANK — now on the **release**,
+   matching how `[PTN]` behaves. Tap again to dismiss. And **hold `[BANK]` + tap a
+   trig** must still pick a bank, *not* edit the sequence: that overlay layer is
+   pushed on the press, and breaking it is the silent failure mode this design was
+   most at risk of.
+10. On a bank **never** SAVE BANK'd, you get stock's own **"THIS BANK HAS NEVER
+   BEEN SAVED! NOTHING TO RELOAD!"**. With a **never-saved Part**, the `[BANK]`
+   chord reports that too, alongside the sequence result — the sequence still
+   reloaded.
+11. Reload the **same track repeatedly**, 5+ times, and confirm nothing
+    accumulates — no wedged UI, no lost gesture. (The old picker's failure mode was
+    "works once, then never again".)
 
-> **If it misbehaves:** the risk is a storage-task hang (a save/load or the
-> reload appears to freeze).  Power-cycle -- it recovers.  Reflash stock 1.40C
-> (§5) to fully revert.  The worker writes only pattern N's live slab (`TRK SEQ`:
-> only one track's region within it), never disk.
-> emu-validated: `emu_reload.py` / `emu_reload2.py` `--combo` (the modal picker),
-> `--patched` (the whole-pattern SEQ worker end to end), `--trk` (the per-track
-> slice touches nothing else).  Not exercised on real hardware: whether an arrow
-> or `[TRACK]` key reaches the picker while the popup is up (fallback: a hook in
-> `FUN_40061b60`); `FUN_4008cebc` vs a real card; `FUN_40009094` from the storage
-> task while playing (part LED/name refresh); the SEQ discard loop for pattern
-> > 0; timing.  Details: `NOTES.md` "Session 42"–"44" + "Session 47".
-
-### 4.8  Bug 2 — pattern with only p-locks reads as empty  (`build_pattern_led.py` — hardware-confirmed, MKI 2026-09-13)
+> **If it misbehaves:** the risk is a storage-task hang (a save/load or the reload
+> appears to freeze). Power-cycle — it recovers. Reflash stock 1.40C (§5) to fully
+> revert. The worker writes only the live blob, never disk. Still hardware-only:
+> the parse against a real CF card, and the reload's seamless-timing *feel*.
+> Detail: `NOTES.md` "Session 42"–"44" + "Session 47" + "Session 80"–"Session 86";
+> spec `reference/RELOAD_REDESIGN.md`.
+### 4.6  Bug 2 — pattern with only p-locks reads as empty  (`build_pattern_led.py` — hardware-confirmed, MKI 2026-09-13)
 
 Fixes: a pattern whose only content is p-locks — MIDI-track p-locks, or an
 audio trigless lock — used to show its `[PTN]` grid LED unlit ("no pattern
@@ -486,7 +434,7 @@ PERSONALIZE entry.
 > patterns both flip 0→1, an empty pattern stays 0 (no false positive), normal
 > trig patterns unaffected. `NOTES.md` "Session 48".
 
-### 4.9  Part params carry over after a pattern→Part change  (`build_partreapply.py` — flashed; report #1's fix does NOT address the real bug; see below)
+### 4.7  Part params carry over after a pattern→Part change  (`build_partreapply.py` — report #1 FIXED and a second stock bug (spurious Part-edited flag) FIXED, both hardware-confirmed MKI 2026-09-22/23)
 
 Was scoped from three Elektronauts reports for a pattern change that also
 switches to a different Part: (1) a track that was **PICKUP** on the old Part
@@ -503,35 +451,54 @@ tweak. Version stays `1.40C` — no PERSONALIZE entry, always on.
   or the patched build. Treat those two as **unconfirmed** — the emulator
   evidence for them (below) proves a code-level mechanism exists, not that
   it's what real users actually hit.
-- **Report #1 reproduces, but the fix's mechanism does not address it.**
+- **Report #1 is FIXED and hardware-confirmed (MKI, 2026-09-22).** The 4-pass
+  round trip below now plays the new Part's FLEX sample on every pass.
   Precise repro: track 1 = **PICKUP** on Part A (silent), **FLEX** + a
   different sample on Part B. Pattern-A → pattern-B: plays the *correct*
   FLEX sample. Back to pattern-A: fine. Pattern-A → pattern-B **again**:
   **wrong** — track 1 now plays Part A's old PICKUP content under the FLEX
-  machine. This good→good→bug pattern is **identical on stock and on this
-  patched build** — the kill-bit / slot-mirror mechanism this fix adds does
-  not change the outcome either way. The real cause is very likely resolved
-  DSP-side at the moment of trigger, not in the ColdFire Part-change handler
-  this fix detours. **Root cause is still open** — see `NOTES.md` "Session
-  50" for the full investigation (including a `emu_partswitch.py --repeat`
-  round-trip probe that ruled out the kill-bit/mirror/voice-struct-header
-  going stale as the explanation).
+  machine, and stays wrong on every later pass (a one-way latch).
+  Root cause: the voice dispatch reads the sample **slot** it hands the
+  resolver from a per-track pre-image at `0x8000082f + track*0x48`, byte 0.
+  Stock seeds that byte from the Part only when a track **enters** PICKUP
+  (`FUN_40001f18`, called from `FUN_400972fc`) and **never when it leaves**,
+  so the PICKUP slot `128+track` survives into the new FLEX machine and the
+  resolver binds the PICKUP sample faithfully. Pass 1 is clean only because
+  the field is still 0; the return to PICKUP sets it, and nothing ever
+  clears it — hence the latch. FLEX is affected and STATIC is not because
+  FLEX and PICKUP share one arena and one table, differing only in slot.
+  **The 2026-09-13 flashed build did not fix this**: stock's own
+  entering-PICKUP arm does the kill bit *and* the re-seed together
+  (`0x400973b4`-`0x400973e0`), and that build replicated only the kill bit.
+  The current source adds the missing re-seed. Full write-up: `NOTES.md`
+  "Session 81".
 
-The build stays safe to run — it's behaviorally identical to stock for the
-case that matters, and the recorder-cache-refresh / scene-morph-retrigger
-pieces are orthogonal to this finding — but don't expect it to fix the
-PICKUP→FLEX symptom on a repeated pattern switch.
+**The build on the unit right now (flashed 2026-09-13) predates the fix** and
+is behaviorally identical to stock for report #1 — don't expect the version
+you may already have flashed to fix the PICKUP→FLEX symptom. Rebuild from
+the current source to get it.
 
 1. Set up 2 patterns linked to 2 different Parts. Track 1: Part A = **PICKUP**
    (not currently playing), Part B = **FLEX** with a sample loaded, STARTS
    SILENT off.
 2. Switch pattern A → B → A → B again (a 4-step round trip, not a single
    switch) and trig track 1 after each arrival at B.
-   - Both stock and this build: the **first** A→B is correct; the **second**
-     A→B plays Part A's old PICKUP content instead of Part B's FLEX sample.
+   - Stock and the 2026-09-13 build: the **first** A→B is correct; the
+     **second** A→B plays Part A's old PICKUP content instead of Part B's
+     FLEX sample, and so does every pass after it.
+   - **A build from the current source plays Part B's FLEX sample on every
+     pass, including the second and later — confirmed on MKI, 2026-09-22.**
 3. Reports #2/#3: try the recorder SRC/RLEN and REC SETUP scenarios from the
    original write-up, but don't assume a discrepancy is present — it wasn't
    reproducible in this session's testing.
+4. **Second bug, found and fixed — hardware-confirmed (MKI, 2026-09-23):** stock
+   itself marks a Part edited/unsaved on a switch into a PICKUP track, even when
+   nothing changed (attributed to stock's own entering-PICKUP path — measured
+   identical on stock and the first patched build). Fixed with a second detour
+   that snapshots the Part's edited-state bytes before the switch and restores
+   them after, so a genuine edit made before the round trip is not lost. Check:
+   P1→P2→P1 no longer marks Part 1 edited; a real edit made to a *different*
+   Part beforehand still shows edited afterward — both confirmed on hardware.
 
 > Emulator evidence: `emu_partswitch.py --repro` vs `--repro --patched` shows
 > a clean stock-vs-patched A/B for the recorder-cache / `TRK_PART` / scene /
@@ -541,7 +508,7 @@ PICKUP→FLEX symptom on a repeated pattern switch.
 > hardware to observe. `NOTES.md` "Session 49", "Session 49 — HANDOFF", and
 > "Session 50" (the hardware pass that found this).
 
-### 4.10  QUANTIZE LIVE REC front-panel toggle  (`build_qlrec.py` — hardware-confirmed, MKI 2026-09-13; two cosmetic issues parked)
+### 4.8  QUANTIZE LIVE REC front-panel toggle  (`build_qlrec.py` — hardware-confirmed, MKI 2026-09-13; two cosmetic issues parked)
 
 > **History: the original (Session 46) design HUNG the unit** when flashed —
 > a one-shot "persistent" (`dur=0`) toast that never closed, freezing the
@@ -602,7 +569,7 @@ hold **[REC]**, tap **[PLAY]** twice, close together.
 > (refinement, `G_PEND` bug fix, `MAX_GAP` correction). **Hardware-confirmed
 > in full** except the two parked cosmetic items above.
 
-### 4.11  Auto-remove an emptied trigless lock  (`build_triglock.py` — **HARDWARE-CONFIRMED, FINAL** — MKI, 2026-09-21)
+### 4.9  Auto-remove an emptied trigless lock  (`build_triglock.py` — **HARDWARE-CONFIRMED, FINAL** — MKI, 2026-09-21)
 
 > **Three earlier TRIGLOCK builds were aimed at the wrong code entirely** and did nothing.
 > If any of them is on the unit, flash stock `1.40C` first
@@ -755,11 +722,13 @@ tied to it):
 
 - This firmware is **modified by you, for your own unit, for study purposes.** It
   is not official Elektron firmware and has no support from them.
-- Most patches are **validated in a ColdFire emulator** (Unicorn, real image
-  bytes) — control flow and DSP frame-word edits, not the audio engine. The
-  side-chain DSP runs in dsp56kEmu. **Only the Bug-1 fix and the `OT+FX` soft-mute
-  mechanism have run on hardware.** Treat emulator-green as necessary, not
-  sufficient, and go in with the recovery net ready (§1, §6).
+- Every patch is **validated in a ColdFire emulator** (Unicorn, real image bytes)
+  — control flow and DSP frame-word edits, not the audio engine; the side-chain DSP
+  runs in dsp56kEmu. That is necessary, not sufficient: this project has shipped
+  emulator-green builds that locked the unit up, did nothing at all, or doubled
+  every trig. **What has actually been on hardware is listed per feature in §4 and
+  in `README.md`'s hardware-test status table** — read one of them before you
+  flash, and go in with the recovery net ready (§1, §6).
 - The only truly delicate moment is **"UPDATING FLASH"**: don't cut power there.
 - Residual risk of a *hard* (unrecoverable) brick: very low — the rescue
   bootloader is not touched in a normal OS update.
@@ -779,18 +748,22 @@ OCTATRACK_*.bin                   CF-card OS UPGRADE transport (faster)
 
 | build command | version | contents |
 |---|---|---|
-| `python3 tools/build_trigscale_only.py` | `1.40C` | Bug-1 fix only, on otherwise-stock 1.40C |
-| `python3 tools/build_mutemode.py` | `140C_KYOTI` | Bug-1 fix + MUTE MODE `OT` / `OT+FX` |
-| `python3 tools/build_mutemode_dt.py` | `140C_KYOTI` | + the third mode `DT` |
-| `python3 tools/build_softmute.py` | `140C_KYOTI` | Bug-1 fix + soft mute **always on**, no menu |
-| `python3 tools/build_directjump.py` | `140C_KYOTI` | Bug-1 fix + DIRECT JUMP (`[PTN]`+`[YES]`) |
-| `python3 tools/build_directjump_v2.py` | `140C_KYOTI` | DIRECT JUMP with the box-free toast overlay |
-| `python3 tools/build_sidechain.py` | `140C_KYOTI` | Bug-1 fix + the COMPRESSOR `KEY` menu param (DSP inert) |
-| `python3 tools/build_sidechain2.py` | `140C_KYOTI` | + the side-chain DSP hooks (SPATIALIZER donated) |
-| `python3 tools/build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | `140C_KYOTI` | + `KEY FLT` / `KEY GAIN` / `SC LISTEN` in the DSP, `KEY` reaching any of the 8 tracks (cross-core) — **hardware-confirmed, shipping** |
-| `python3 tools/build_pattern_led.py` | `1.40C` | Bug 2 fix only: p-lock-only pattern lights the grid LED |
+| `python3 tools/build_trigscale_only.py` | `1.40C` | Bug-1 fix only (MIDI Plays-Free trig stall), on otherwise-stock 1.40C |
+| `python3 tools/build_pattern_led.py` | `1.40C` | Bug-2 fix only: a p-lock-only pattern lights its grid LED |
 | `python3 tools/build_partreapply.py` | `1.40C` | fix only: Part params fully re-apply on a pattern→Part change |
+| `python3 tools/build_mutemode_dt.py` | `140C_KYOTI` | Bug-1 fix + **MUTE MODE**, all four modes (`OT` / `OTFX` / `OTFX-T` / `DT-T`) — the shipping MUTE MODE build |
 | `python3 tools/build_qlrec.py` | `140C_KYOTI` | Bug-1 fix + QUANTIZE LIVE REC front-panel toggle |
+| `python3 tools/build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | `140C_KYOTI` | Bug-1 fix + the full **SIDE-CHAIN COMPRESSOR** (`KEY` / `KFLT` / `KGN` / `MON`, `KEY` reaching any of the 8 tracks, cross-core) |
+| `python3 tools/build_triglock.py` | `1.40C` | fix only: auto-remove an emptied trigless lock |
+| `python3 tools/build_directjump_v4.py` | `140C_KYOTI` | Bug-1 fix + **DIRECT JUMP** (`[PTN]`+`[YES]`) — *confirmed at 1x scales only* |
+| `python3 tools/build_reload3.py` | `140C_KYOTI` | Bug-1 fix + **RELOAD FROM PROJECT**, two chords (`[PTN]`/`[BANK]` + `[TRACK n]`) — *follow-up fixes unflashed* |
+| `python3 tools/build_bugbuilds.py` | per-image | each finished feature **with all three bug fixes folded in** → `out/Bugbuilds/` |
+
+Superseded, kept only for rollback and reference — **do not flash**:
+`build_mutemode.py` / `build_mutemode_new.py` / `build_softmute.py` (pre-four-mode),
+`build_directjump.py` / `_v2` / `_v3` (dead on hardware),
+`build_reload.py` / `build_reload2.py` (the picker designs),
+`build_sidechain.py` / `build_sidechain2.py` (intermediate stages).
 
 | File | What it is |
 |---|---|

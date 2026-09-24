@@ -7,8 +7,10 @@ script that applies it to **your own** copy of the official Elektron OS.
 No Elektron binary is redistributed here. You download the stock OS yourself; the
 script produces a `.syx` byte-identical to the reference build. This is the
 "fast path" for the one always-on change (the Plays-Free MIDI manual-trig fix)
-that needs no cross-assembler. The MUTE MODE, DIRECT JUMP and side-chain work is
-build-from-source only — see [`../BUILD_KYOTI.md`](../BUILD_KYOTI.md).
+that needs no cross-assembler. Every other mod — MUTE MODE, QUANTIZE LIVE REC, the
+side-chain compressor, trigless-lock auto-remove, the pattern-LED and part-change
+carryover fixes, DIRECT JUMP and RELOAD FROM PROJECT — is build-from-source only;
+see [`../BUILD_KYOTI.md`](../BUILD_KYOTI.md).
 
 | JSON | contents | size vs stock |
 |---|---|---|

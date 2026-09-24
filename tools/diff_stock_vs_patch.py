@@ -48,7 +48,18 @@ STEP_ARR = 0x800064D0          # per-track STEP position
 TICKS_ARR = 0x800064F0         # per-track ticks elapsed within current step
 ARMED_ARR = 0x80006500
 SCALE_ARR = 0x8000663E         # per-track scale index
+# Our scratch block. Outside the boot re-image (0x80000000 + 0x3e88) AND outside the
+# zero-fill (to 0x80004000), therefore UNINITIALISED at power-on on real hardware.
+SCRATCH_LO, SCRATCH_HI = 0x80006A40, 0x80006A60
+DJ_MODE = 0x800000D8
 MASTER_STEP = 0x800065B6
+# Session 79 cont.30: SCALE_IX and BAR_CTR were NOT compared, which is a hole exactly
+# where Hook D (dj_scaleix_fix) writes. Hook D is UNCONDITIONAL -- not gated on DJ_MODE --
+# so it can change stock behaviour with the feature off, and this gate would have reported
+# IDENTICAL regardless. Hook H also seeds BAR_CTR indirectly (it is the low word of the
+# long at 0x80006628), though only when armed.
+SCALE_IX = 0x8000663D          # master scale index -- Hook D's write target
+BAR_CTR = 0x800065B2
 
 PCS = [
     ("audio loop top", 0x400A3CD0),
@@ -62,7 +73,8 @@ PCS = [
 ]
 
 
-def run_image(er, image, project, bank, pattern, frames, tree):
+def run_image(er, image, project, bank, pattern, frames, tree, poison=False,
+              dj_on=False):
     card, staged = er.stage_project(project, "OCTABAM", None, tree=tree)
     r, rt = er.attach(str(image), card, ips=3990.0, pit_clock_hz=264e6,
                       quantum=4096, step_quantum=32, tick=True)
@@ -99,8 +111,33 @@ def run_image(er, image, project, bank, pattern, frames, tree):
             bytes(rt.uc.mem_read(ARMED_ARR, 16)),
             bytes(rt.uc.mem_read(SCALE_ARR, 16)),
             rt.uc.mem_read(MASTER_STEP, 1)[0],
+            rt.uc.mem_read(SCALE_IX, 1)[0],
+            int.from_bytes(bytes(rt.uc.mem_read(BAR_CTR, 2)), 'big'),
         ))
 
+    # Session 86: POISON the patch's own scratch block before the transport starts.
+    #
+    # This gate reported IDENTICAL on a build that locked the Octatrack up on hardware
+    # within seconds of pressing PLAY, with DIRECT JUMP OFF. The reason it could not see it:
+    # Unicorn zero-fills memory, so every uninitialised global reads 0 in the emulator and
+    # a hook gated on one never fires. Real hardware does not. kb/memory-map.md:
+    # FUN_4000f938 re-images 0x80000000 from ROM for 0x3e88 bytes then zero-fills only to
+    # 0x80004000 -- so 0x80006a40.. is beyond BOTH and holds whatever was there at power-on.
+    #
+    # Filling it with 0xAA makes the emulator model that, and turns "the patch is inert with
+    # the feature off" into a claim that survives a cold boot. Applied to the PATCHED run
+    # only: these addresses are ours, stock neither reads nor writes them, so poisoning the
+    # stock run would prove nothing and only risks confusing the baseline.
+    if poison:
+        rt.uc.mem_write(SCRATCH_LO, bytes([0xAA]) * (SCRATCH_HI - SCRATCH_LO))
+    # Session 87: DIRECT JUMP ON, but with NO pattern change ever cued. The user's report is
+    # "turning DJ on makes a doubled sound of existing trigs" -- i.e. merely ENABLING the
+    # feature changes playback, with no switch involved. Nothing in the patch is supposed to
+    # do anything until a switch is cued and committed, so DJ-ON-idle must be just as
+    # identical to stock as DJ-OFF is. Every gate so far only ever tested DJ OFF, or DJ ON
+    # *with* a switch -- this combination has never been measured.
+    if dj_on:
+        rt.uc.mem_write(DJ_MODE, (1).to_bytes(4, "big"))
     sample()
     rt.start_transport_live()
     target = rt.frame_count + frames
@@ -122,6 +159,16 @@ def main(argv):
     ap.add_argument("--frames", type=int, default=6000,
                     help="default is long enough to cross a full 16-step pattern at 1x")
     ap.add_argument("--patched", default=str(PATCHED))
+    ap.add_argument("--dj-on", action="store_true",
+                    help="run the PATCHED image with DIRECT JUMP enabled but never cue a "
+                         "pattern change. The patch must still be inert: nothing should act "
+                         "until a switch is committed.")
+    ap.add_argument("--no-poison", action="store_true",
+                    help="do NOT pre-fill our scratch block with 0xAA before the transport "
+                         "starts. Poisoning is ON by default: Unicorn zero-fills memory, so "
+                         "without it every uninitialised global reads 0 and a hook gated on "
+                         "one can never fire -- which is exactly how this gate passed a "
+                         "build that locked up real hardware seconds after PLAY.")
     ap.add_argument("--stock", default=str(STOCK))
     # Two concurrent invocations sharing one staging tree collide with FileExistsError --
     # a trap this repo already hit with the per-bank project scanners. Give every run its
@@ -153,9 +200,30 @@ def main(argv):
     print(f"  bank={s['bank']} pattern={s['pat']} samples={len(s['trace'])} "
           f"tracks-with-movement={s['moved']}/16")
 
-    print(f"\n{bar}\nPATCHED (DIRECT JUMP left OFF)  {a.patched}\n{bar}")
-    p = run_image(er, a.patched, a.project, a.bank, a.pattern, a.frames,
-                  a.tree_prefix + "_patched")
+    label = "PATCHED (DIRECT JUMP ON, no switch cued" if a.dj_on else \
+            "PATCHED (DIRECT JUMP left OFF"
+    label += ", scratch POISONED 0xAA)" if not a.no_poison else ")"
+    print(f"\n{bar}\n{label}  {a.patched}\n{bar}")
+    try:
+        p = run_image(er, a.patched, a.project, a.bank, a.pattern, a.frames,
+                          a.tree_prefix + "_patched", poison=not a.no_poison,
+                      dj_on=a.dj_on)
+    except Exception as exc:
+        # Session 86: a fault during the PATCHED run IS the result, not a tooling error.
+        # The build that locked up real hardware raises UC_ERR_READ_UNMAPPED here under
+        # poisoning -- the wild-address read its uninitialised gate flag let through.
+        # Report it as a failure rather than a traceback, or the next person reads a crashed
+        # gate as "the tool is broken" and re-runs it with --no-poison.
+        print(f"\n  ** THE PATCHED IMAGE FAULTED: {type(exc).__name__}: {exc}")
+        print("  ** With the feature OFF and the scratch block poisoned, the patch executed "
+              "and faulted.")
+        print("  ** This is the cold-boot failure mode: globals at 0x80006a40.. are NOT "
+              "cleared by stock's boot\n  ** (re-image covers 0x80000000+0x3e88, zero-fill "
+              "stops at 0x80004000), so any hook gated\n  ** on one of them can fire on the "
+              "first tick with garbage. Gate it on DJ_MODE, which IS\n  ** deterministic at "
+              "boot, and clear the flag from dj_a every tick.")
+        print("\n  RESULT: FAILED -- patch is NOT inert with the feature off")
+        return 1
     print(f"  bank={p['bank']} pattern={p['pat']} samples={len(p['trace'])} "
           f"tracks-with-movement={p['moved']}/16")
 
@@ -191,15 +259,17 @@ def main(argv):
             if st[k] != pt[k]:
                 first_bad = (i, k, st, pt)
                 break
-        if first_bad is None and st[5] != pt[5]:
-            first_bad = (i, 5, st, pt)
+        for k in (5, 6, 7):
+            if first_bad is None and st[k] != pt[k]:
+                first_bad = (i, k, st, pt)
         if first_bad:
             break
 
     if first_bad:
         ok_all = False
         i, k, st, pt = first_bad
-        label = names[k - 1] if k <= 4 else "master STEP"
+        label = (names[k - 1] if k <= 4 else
+                 {5: "master STEP", 6: "SCALE_IX", 7: "BAR_CTR"}[k])
         print(f"\n  FIRST DIVERGENCE at sample {i} (frame {st[0]}) in {label}:")
         if k <= 4:
             print(f"    stock   {st[k].hex()}")
@@ -210,7 +280,7 @@ def main(argv):
         else:
             print(f"    stock={st[5]}  patched={pt[5]}")
     else:
-        print(f"\n  per-track STEP/TICKS/ARMED/SCALE and master STEP: IDENTICAL "
+        print(f"\n  per-track STEP/TICKS/ARMED/SCALE, master STEP, SCALE_IX, BAR_CTR: IDENTICAL "
               f"across {n} samples")
 
     print("\n  RESULT: " + ("IDENTICAL -- patch is inert with the feature off"

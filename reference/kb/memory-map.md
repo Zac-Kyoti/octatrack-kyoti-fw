@@ -116,6 +116,56 @@ from the tag: `+0x09, +0x11, +0x19, +0x21, +0x29, +0x31, +0x39, +0x41`.
 (default `0xAA`); `0x4009d3d6` gates a per-step byte into a timing calc. Per-track
 flag word: `0x46c7a6c0`.
 
+### Pattern SCALE / LENGTH trailer — and the `SCALE_MODE` fork
+
+> source: our own RE, derived **independently by two threads** (DIRECT JUMP Session 79
+> cont.33; RELOAD Session 89) and corroborated a third way by stock's own load-time
+> clamp `FUN_4009a670`. confidence: **C**.
+
+Pattern slab = `0x400e21e0 + bank*0x9b340 + pattern*0x8ed8`. Its trailer carries the
+scale/length fields, **outside every track record**:
+
+| slab off | abs (bank 0, pat 0) | field | clamp in `FUN_4009a670` |
+|---|---|---|---|
+| `+0x8e51` | `0x400eb031` | MASTER LENGTH, steps | — |
+| `+0x8e52` | `0x400eb032` | MASTER SCALE index | ≤ 6 |
+| `+0x8e53` | `0x400eb033` | pattern LENGTH, steps | 2 … 64 (`0x4009aada`) |
+| `+0x8e54` | `0x400eb034` | pattern SCALE index | 0 … 6 (`0x4009ab06`) |
+| `+0x8e55` | `0x400eb035` | **`SCALE_MODE`**: 0 = NORMAL, ≠0 = PER TRACK | ≥ 0 |
+| `+0x8e57` | `0x400eb037` | pattern → Part link, `[0..3]` | — |
+
+A track's **own** length / scale live *inside* its record at `+0x50` / `+0x51`
+(audio: `0x400e2230` / `0x400e2231` + patOff + `t*0x91a`; MIDI: `0x400e6ad8` /
+`0x400e6ad9` + patOff + `m*0x8b0`).
+
+**⚠️ The fork that has now bitten two separate features.** Which byte governs depends
+on `SCALE_MODE`, and reading one unconditionally is wrong half the time:
+
+| | NORMAL (`+0x8e55` == 0) | PER TRACK (`+0x8e55` != 0) |
+|---|---|---|
+| a track's length | pattern `+0x8e53` (shared by all 8) | the track's own `+0x50` |
+| a track's scale | pattern `+0x8e54` (shared) | the track's own `+0x51` |
+| master length | pattern `+0x8e53` | MASTER `+0x8e51` |
+| master scale | pattern `+0x8e54` | MASTER `+0x8e52` |
+
+Stock's own selector is visible twice: the step engine's re-home at `0x400a2720`
+(`tstb` the flag, then `+0x8e52` vs `+0x8e54` into `SCALE_IX 0x8000663d`), and the
+switch-commit D7 setup at `0x400a4802`–`0x400a4826`.
+
+Both failures were the same shape:
+- **DIRECT JUMP** read `+0x8e54` unconditionally, so after a jump between patterns of
+  differing MASTER SCALE the master wrap check used the wrong ticks/step — the
+  "pattern plays past its own length" symptom. Fixed by gating on `SCALE_MODE`
+  (`patch_directjump.s`, five sites); fixture DJTEST2 A08 was built to separate
+  `+0x8e52` from `+0x8e54`.
+- **RELOAD** copied only the track slice, so a per-track reload restored `+0x50`/`+0x51`
+  and therefore worked in PER TRACK mode, but never restored `+0x8e53`/`+0x8e54` and so
+  silently ignored the saved step count in NORMAL mode.
+
+> **Terminology bridge.** The OT UI (and the RELOAD sources) say **NORMAL** / **PER
+> TRACK**; `patch_directjump.s` says **uniform** / **per-track** for the same flag.
+> Grepping for one term will not find the other — search `PAT_SMODE` or `0x8e55`.
+
 ## Pattern change / cue / Parts  (Session 15 — DIRECT JUMP)
 
 | Addr | Conf | What | Source |
@@ -232,11 +282,22 @@ adds `0x1c..0x1f`); selector structs `{table_ptr, 0x400c085a}` at `0x400c090c` /
 | param-page | `0x22–0x26` | `FUN_4005578c` (via `0x400a7280={0,2,1,3,4}`) | **PAGE** | `0x1b` | `FUN_4004ffc4` |
 | MKII MAIN MENU | `0x1c` | `0x40064d78` → `FUN_40064c18` | **YES** | `0x31` | `0x4005e4c8` |
 | **arrow UP** | `0x34` | `0x4004b970` | **NO** | `0x32` | `0x4005e25c` |
-| **arrow RIGHT** | `0x21` | `0x4004b970` (same as UP) | **arrow DOWN** | `0x33` | `0x400491a0` |
-| **arrow LEFT** | `0x20` | `0x400491a0` (same as DOWN) | | | |
+| **arrow DOWN** | `0x21` | `0x4004b970` (same as UP) | **arrow RIGHT** | `0x33` | `0x400491a0` |
+| **arrow LEFT** | `0x20` | `0x400491a0` (same as RIGHT) | | | |
 
-Arrows (Session 43, confidence C — decoded from the keymap + cross-checked vs octabam
-MAINMENU.md §7, HW-tested there): **UP `0x34` / RIGHT `0x21` share `0x4004b970`**;
+Arrows — **CORRECTED Session 80 continued (6), hardware-derived; the previous pairing
+(Session 43, confidence C, cross-checked against octabam MAINMENU.md §7 — which is
+MKII-oriented, while this project is MKI-only) was WRONG.** It claimed UP `0x34` /
+RIGHT `0x21` share `0x4004b970` and DOWN `0x33` / LEFT `0x20` share `0x400491a0`. A
+RELOAD2 build gating `0x4004b970` on `0x34` and `0x400491a0` on `0x33` was flashed:
+**UP worked, DOWN did not** — which falsifies the old pairing, since under it `0x33`
+is DOWN and that gate passed `0x33`. The true pairing also matches the handlers' own
+shape: **UP `0x34` / DOWN `0x21` share `0x4004b970`** (the VERTICAL pair, which is why
+stock special-cases its two codes at `0x4004b9d6`), and **RIGHT `0x33` / LEFT `0x20`
+share `0x400491a0`** (horizontal — that wrapper never examines the keycode at all,
+treating both identically). Which of `0x33`/`0x20` is left vs right is still unverified
+and does not matter to any current patch. Original (wrong) note retained for context:
+**UP `0x34` / RIGHT `0x21` share `0x4004b970`**;
 **DOWN `0x33` / LEFT `0x20` share `0x400491a0`** (a wrapper — arg==press &&
 `0x80000012`==0 && `0x8000004b`==3 → `0x460d17aa=1; jmp 0x4007c404`, else arranger →
 `0x40049114`, else `rts`). `0x40049114` is the list-cursor mover: `0x460d16e4` cursor,
