@@ -29581,3 +29581,234 @@ should be re-derived first.**
 - Per-track sub-step phase at a mid-cycle commit (`0x800064f0[t]` zeroed for all 16 by
   stock's tail at `0x400a4bf0`), open since Session 82 — likely entangled with the non-1x
   problem, since it only bites when a track's tps differs from the master's.
+
+## Session 88 (2026-09-24, `wip`) — DIRECT JUMP / non-1x scales: `CNTDN_TBL` RESOLVED (and it is not the bug); DIRECT JUMP measured INERT at 2x master scale
+
+### The handoff's #1 hypothesis is dead, and Session 85 was right
+
+`DIRECTJUMP_SCALES_HANDOFF.md` §5 called this "the single most load-bearing unverified claim
+in this thread": Session 79 measured `CNTDN_TBL 0x800065c3[t]` as a one-shot trig arm, §4's
+mapping table pairs it with AR's per-track RATE reload `0x405667c7[t]`, and "both cannot be
+right". **Both are right.** Re-derived from the bytes (`0x400a4992`-`0x400a49ca`, decoded
+from a true instruction boundary — a linear sweep started mid-instruction first produced two
+phantom `bne`s, which are actually the low halves of the address literal `0x80006626`):
+
+```
+0x800065d3[t] = max(0, tps_t - tps_master)
+CNTDN_TBL[t]  = max(1, tps_master + 1 - tps_t)      ; floored at 1 (0x400a49ca)
+```
+
+and the commit tail (`0x400a4bbc`-`0x400a4bf0`):
+
+```
+CNTDN_TBL[t] <  0  -> skip the decrement        (0xff = idle sentinel)
+else               -> CNTDN_TBL[t] -= 1
+CNTDN_TBL[t] != 0  -> skip the ENTIRE body (STEP_ARR write, wrap callback, TICKS zero)
+```
+
+So it is a **commit-time phase-alignment delay**, written once per commit and counted down —
+not a per-step rate reload. It degenerates to `1` whenever the master is at least as fast as
+the track, which is every case Session 79 looked at, hence "one-shot arm". It exceeds 1 only
+when the master is SLOWER than the track (master 1/2x tps 12 vs track 1x tps 6 -> 7).
+
+**In the reported failing case it is identical to the 1x control**: master 2x (tps 3) vs
+track 1x (tps 6) gives `max(1, 3+1-6) = 1`; the 1x control gives `max(1, 6+1-6) = 1`.
+It therefore cannot explain the non-1x symptom, and **§4's mapping of it onto AR's
+`0x405667c7` is wrong**. Session 85's refusal to write it was correct. Do not "fix" it.
+
+### OT's real per-track rate mechanism — found, and it is not a countdown
+
+The per-track loop at `0x400a3cd0` runs **once per CLOCK TICK** (not per master step):
+
+```
+0x400a3cd0  ARMED[t] != 1                              -> skip track
+0x400a3ce0  TICKS_IN_STEP[t] += 1
+0x400a3cee  TICKS_IN_STEP[t] < LEN_TBL[TRK_SCALE_IX[t]] -> skip      <-- THE RATE GATE
+0x400a3cf6  TICKS_IN_STEP[t] = 0
+0x400a3d78  STEP_ARR[t] += 1          (wrapped at track length, 0x400a3d8e/0x400a3d94)
+```
+
+A track advances when its own tick count reaches **its own** ticks-per-step. `TRK_SCALE_IX[t]`
+(`0x8000663e`) is the ONLY thing that sets a track's rate; the master scale never enters this
+loop. The master's own rate is separate: `TICK_CTR 0x800065b6` wraps at `LEN_TBL[SCALE_IX]`
+(`0x400a3fdc`-`0x400a4000`), so `SCALE_IX 0x8000663d` alone sets the master step rate.
+
+Corollary: AR reloads a per-track tick countdown; OT counts up to a per-track threshold and
+additionally has a one-step "hold" mask (`0x80006626`, set at commit when `PAIR[t] > 0`,
+consumed at `0x400a3d12`). These are structurally different solutions to the same problem,
+which is the third time this thread has been bitten by element-wise AR->OT porting.
+
+### MEASURED: DIRECT JUMP is INERT at 2x master scale with no switch
+
+Fixture: the user's own `~/Desktop/DJMAST2` pattern index 1 — `SMODE=1, MLEN=16, MSCALE=0`
+(2x, tps 3), all tracks len 16 scale idx 2 (1x, tps 6), one trig on step 1. Field-identical
+to DJTEST2 A06. New tools: `tools/diag_master_scale.py` (dumps the PATTERN-LEVEL master
+fields `+0x8e51/52/53/54/55`, which `scan_dj_project_lengths.py` never printed — the gap that
+let the MASTER SCALE vs pattern-multiplier confusion persist), `tools/diag_master_scale_run.py`,
+`tools/diag_step_writers.py`.
+
+Three configurations — stock image, patched DJ OFF, patched DJ ON — over ~3.7 master cycles:
+
+```
+stock          : cycle N = 1,2,3,4,5,6,7,8,9   (consecutive)
+patched DJ OFF : cycle N = 1,2,3,4,5,6,7,8,9   IDENTICAL
+patched DJ ON  : cycle N = 1,2,3,4,5,6,7,8,9   IDENTICAL
+master-cycle wraps at ticks 46, 94, 142        (period 48 = MLEN 16 * tps 3, correct)
+```
+
+**DIRECT JUMP changes nothing here.** Hook D (the only DJ_MODE-ungated hook) was suspected
+because stock's instruction at its detour site is `move.b %d2,0x8000663d` — a SCALE_IX write
+guarded by `TICK_CTR == 0` at `0x400a421a`, i.e. once per master step — and on this fixture
+`PAT_MSCALE`(+0x8e52)=0 differs from `PAT_SCALE`(+0x8e54)=2. **Measurement exonerates it.**
+
+### The genuine OT-vs-AR divergence that WAS found
+
+`tools/diag_step_writers.py` (a MEM_WRITE hook, so S87 rule 1 does not apply) identifies every
+writer of track 0's state:
+
+```
+t45  pc=0x400a4be6 -> step 1      (master wrap resets position)
+t47  pc=0x400a3d78 -> step 2      ... +1 every 6 ticks ...
+t89  pc=0x400a3d78 -> step 9
+t93  pc=0x400a4be6 -> step 1
+```
+
+Step 1 is held for 2 ticks and step 9 for 4, the other seven for 6 each (2 + 7*6 + 4 = 48).
+**The track's step grid is not phase-aligned to the master cycle**, so each master cycle
+contains NINE partial steps rather than AR's eight clean ones. This is present in the STOCK
+image with DIRECT JUMP absent entirely.
+
+### NOT reproduced, and the open question
+
+Hardware (MKI, DJ ON) reports that the visited steps **depend on what trigs are on the grid**:
+no trigs -> 1..8 nominal; trig on 1 -> 1,3,4,7,9,10,11,12; trig on 2 -> 1,2,5,6,9,11,12,13;
+trigs on 2,3 -> 1,2,5,7,8,11,13,14. Position depending on CONTENT means something on the
+trig/voice path writes the per-track position — but `diag_step_writers.py` on the real project
+with the real trig shows only the two legitimate writers above, and the sequence stays
+consecutive. **The emulator does not reproduce the symptom.**
+
+Most likely because the emulator does not exercise the voice/trig-fire path the way hardware
+does (no samples, audio engine not driven). That is a hypothesis, not a measurement.
+
+**The decisive next datum is a hardware control the user has not yet run: does the
+trig-dependent sequence also occur with DIRECT JUMP OFF?** Every emulator measurement here
+says it must. If it does, DIRECT JUMP is innocent, and matching AR at non-1x master scale is a
+new and much larger feature (changing stock OT's master-wrap phase behaviour), not a
+regression fix. Nothing should be built until that is answered.
+
+### Status
+
+No patch source changed. Nothing built, nothing flashed. The 1x baseline (`16df386`) is
+untouched.
+
+### Session 88 continued — ROOT CAUSE MEASURED: Hook P writes the position in the MASTER-STEP domain
+
+The two "no switch" conclusions above were **measuring the wrong thing**, and the reason is
+the trap NOTES.md already records: `seq_select_live()` never cues, so Hook A
+(`PEND_PAT != -1` AND `!= ACT_PAT`) never arms and every hook takes its DJ-OFF path. Sampling
+`G_ARMED` once per tick is *also* a false negative — dj_a arms at `0x400a4006` and dj_c clears
+it at `0x400a4840`, both inside one tick. New tool `tools/diag_dj_hooks.py` counts **hook
+entries from the cave** (symbols read from `out/patch_directjump_v4.elf`, so they cannot drift
+from the built image) and cues `PEND_PAT`/`PEND_BANK` properly. First run that is not void:
+
+```
+dja_real  x1   -> DIRECT JUMP REALLY ARMED
+djp_store x16  -> Hook P wrote all 16 per-track positions
+```
+
+With a real armed jump, DJMAST2 pattern 0 (1x master) -> pattern 1 (2x master, tracks 1x):
+
+```
+t30 pc=0x400a4be6 -> step 4      ; stock's commit tail  (0-based 3)
+t30 pc=0x400d77c2 -> step 7      ; HOOK P overrides it  (0-based 6)   <-- djp_store
+```
+
+**0-based 3 vs 6 — exactly a factor of 2, which is `tps_master / tps_track` = 3/6.**
+
+Stock's tail seeds `STEP_ARR[t]` from `NEXT_STEP[t] = ceil(D7 / tps_t)` where
+`D7 = tps_master * masterStepOffset` — i.e. master TICKS divided by the TRACK's ticks-per-step,
+which is the track's own step index, in the track's rate domain. Hook P instead writes
+`MASTER_STEP mod trackLen_t` — the MASTER's step index. The two agree **only when
+`tps_master == tps_track`**, which is exactly and only the 1x case. That is why the Session 87
+baseline works at 1x and nothing else does, and it is measured now rather than reasoned.
+
+Visible downstream: the transition cycle runs the track to step 12 where the un-jumped
+control reaches 9.
+
+**Hook P cannot simply be deleted.** Stock writes the low byte of `NEXT_STEP[t]` WITHOUT
+reducing it modulo the track length, so Hook P is what makes mixed track LENGTHS (7/12/16)
+land correctly — a confirmed part of the 1x baseline.
+
+**Proposed fix (minimal, not yet built):** keep Hook P's modulo, change only its INPUT — take
+stock's own `NEXT_STEP[t]` (word, audio `0x800065e4 + 2t`, MIDI `0x800065f4 + 2m`), already
+computed in the correct rate domain by stock's own arithmetic, and write
+`NEXT_STEP[t] mod trackLen_t`. At 1x with equal lengths this is bit-identical to what Hook P
+writes today, so the hard-won baseline is preserved by construction; at non-1x it inherits
+stock's correct per-track rate domain for free. This also retires the AR->OT porting hazard:
+the quantity comes from OT's own commit, not from AR's `new_step`.
+
+### STILL UNEXPLAINED
+
+The hardware report that the visited steps depend on WHAT TRIGS ARE ON THE GRID, and that the
+LEDs and the AUDIO disagree (trigs on 1,2,3 -> LEDs 1,3,5,6,9,11,12,13 but only steps 1 and 2
+sound). Nothing in the measured write path reads trig data, and the emulator shows no
+trig-content dependence at all. The position error above is real and measured, but it does not
+by itself explain the trig-content coupling. Do not assume one fix covers both.
+
+### Session 88 — the fix, BUILT and VALIDATED (not flashed)
+
+`tools/patch_directjump.s`, Hook P (`dj_pertrack`) only. Two changes:
+
+1. The per-commit `move.w MASTER_STEP,%d4` is gone. Each track now reads its own
+   `NEXT_STEP[t]` — word at `0x800065e4 + 2t`, one contiguous 16-entry array (audio at
+   `0x800065e4+2t`, MIDI at `0x800065f4+2(t-8)` are the same array; it tiles into `PAIR` at
+   `0x80006604`). Stock's own rebuild wrote it at `0x400a4916` as `ceil(D7 / tps_t)`, already
+   in the TRACK's rate domain.
+2. The repeated-subtraction modulo is replaced by `remu.l %d1,%d2:%d0`. The old loop
+   documented an assumption — "new_step and LENGTH are both <= 64" — that held only while the
+   input was `MASTER_STEP`. `NEXT_STEP[t]` can reach ~2048 (master 1/8x tps 96, master len 64,
+   track 2x tps 3), which would have been thousands of iterations per track inside a commit
+   tick. `remu.l` assembles to `4c41 0002`, the unsigned twin of the `divsl.l` (`4c41 0800`)
+   stock itself executes at `0x400a4912`, so the instruction is known present on this CPU; the
+   existing `tst.l %d1 / ble` guard makes divide-by-zero unreachable.
+
+Build: 979 bytes changed (was 975), **0 unexpected outside the cave**, manual-trig bytes
+identical, container round-trips, and the image REBUILDS BYTE-IDENTICALLY from the source —
+checked because the S88 source was briefly lost to a backup-restore and had to be re-applied.
+
+Validation, PRE (`out/mainos_dj_v4_PRE.bin`) vs S88 (`out/mainos_dj_v4_S88.bin`), every run a
+REAL armed commit (`PEND_PAT`/`PEND_BANK` cued; `dja_real` x1, `djp_store` x16 confirmed):
+
+| fixture | stock tail | Hook P PRE | Hook P S88 | verdict |
+|---|---|---|---|---|
+| DJMAST2 2->3, uniform 1x | — | 7 | 7 | **identical, 30 writes** |
+| DJTEST2 0->2, 1x, pattern len 16->8 | — | 7 | 7 | **identical, 34 writes** |
+| DJMAST2 0->1, master 1x -> 2x | 4 | **7** | **4** | **FIXED** |
+| DJTEST2 6->7 (A07->A08), per-track scales | 4 | **7** | **4** | **FIXED** |
+
+Downstream on the 2x fixture, the transition cycle now continues `4,5,6,7,8,9` from stock's
+value instead of jumping to `7,8,9,10,11,12`.
+
+`diff_stock_vs_patch.py` with the feature OFF and the scratch block poisoned `0xAA`:
+**IDENTICAL** across 38 samples, all 8 named instruction counters equal,
+**16/16 tracks with movement** (so the gate was not vacuous).
+
+### A methodology failure this session, recorded because it nearly shipped a false PASS
+
+The first validation batch reported "IDENTICAL" for both 1x fixtures. **Three of its four runs
+had crashed**: PRE and S88 were launched in parallel into the SAME staging tree
+(`out/_emu_sw_p{pattern}_{dj}_{stock}`, which did not include the image name) and raced on
+`mkdir`. The comparison was diffing two empty sections. This is precisely the empty-green
+failure mode `diff_stock_vs_patch.py`'s own docstring was written about, reproduced in a new
+tool four sessions later. Fixed two ways: the tree name now includes image + project +
+pattern, and the tool returns FAILED if zero `STEP[0]` writes were observed.
+
+Note also that the raw PRE/S88 diff shows one benign difference — the store PC moved
+`0x400d77c2 -> 0x400d77c8` because the cave code changed size. Compare WRITTEN VALUES, not PCs.
+
+### What this does and does not fix
+
+Fixes: the measured landing-position error at any non-1x track or master scale.
+Does NOT explain: the hardware report that visited steps depend on WHAT TRIGS ARE ON THE GRID,
+and that LEDs and audio disagree. No measured write path reads trig data. **Do not assume the
+flash resolves that**; it is a separate, still-unexplained mechanism.
