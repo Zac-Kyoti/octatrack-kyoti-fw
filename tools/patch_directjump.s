@@ -231,9 +231,10 @@
     .equ STEP_ARR,  0x800064d0          | per-track STEP, 16 wide (audio 0-7, MIDI 8-15).
                                         | AR's 0x40566720. Incremented at 0x400a3d78 and
                                         | wrapped against the track's LENGTH at 0x400a3d8c.
-    .equ PREV_ARR,  0x800064e0          | per-track previous STEP. AR's 0x4056673a (step-1).
-                                        | = STEP_ARR + 16, confirmed by the per-tick loop's
-                                        | own struct offsets (+16 prev, +243 CNTDN_TBL).
+|   PREV_ARR (0x800064e0, = STEP_ARR + 16) is deliberately NOT defined as a writable target.
+|   Session 87 measured that stock's commit never writes it and that it has live readers in
+|   the voice/trig region; writing it is what caused the doubled-trig regression. Do not
+|   reintroduce a write here without measuring those readers first.
                                         | TRK_SCALE_IX (counter 0x80006508, loop 0x400a3dd2)
     .equ PAT_MSCALE,0x400eb032          | pattern +0x8e52 -- MASTER scale when SCALE_MODE=1
     .equ PAT_SMODE, 0x400eb035          | pattern +0x8e55 -- SCALE_MODE flag
@@ -1009,12 +1010,37 @@ djp_mod:
 djp_store:
     lea     STEP_ARR,%a0
     move.b  %d0,(%a0,%d3.l)            | AR 0x400992be : STEP[t] = new_step mod trackLen
-    move.l  %d0,%d2
-    subq.l  #1,%d2
-    lea     PREV_ARR,%a0
-    move.b  %d2,(%a0,%d3.l)            | AR 0x400992c4 : PREV[t] = that - 1
-    lea     TICKS_IN_STEP,%a0
-    clr.b   (%a0,%d3.l)                | AR 0x400992c6 : ticks-within-step = 0
+|   Session 87 -- HARDWARE REGRESSION FIX. This used to also write PREV_ARR[t] = pos-1
+|   (AR 0x400992c4) and clear TICKS_IN_STEP[t] (AR 0x400992c6). Both are removed.
+|
+|   Reported: with DIRECT JUMP ON, existing trigs sound DOUBLED, the double drifting slightly
+|   every pattern cycle; straight 16 steps at 1x, no scales, doubling starts the instant the
+|   feature is enabled. A bisect of everything added since the last audible build leaves only
+|   this hook, and in a uniform 16-step 1x pattern its position arithmetic is IDENTICAL to
+|   stock's own (stock: q = ceil(6*new_step/6) = new_step, pos = new_step mod 16; this hook:
+|   new_step mod 16). So STEP_ARR was already correct and these two extra writes were the
+|   only thing that actually changed anything.
+|
+|   PREV_ARR (0x800064e0) is the one that matters. MEASURED, statically:
+|     * stock's commit tail NEVER writes it. The tail loop 0x400a4bbc-0x400a4d32 writes
+|       STEP_ARR[i] at 0x400a4be6 and zeroes ticks-within-step at 0x400a4bf0, and its bound
+|       `cmpal #0x800065d3` is CNTDN_TBL+16, so that single loop already covers all 16
+|       tracks -- audio AND MIDI. PREV is deliberately left alone across a commit.
+|     * it has live readers outside this path: 0x4009b2c2, 0x4009f496, 0x400a2370,
+|       0x400a2690, 0x400a2920, 0x400a2966 -- several in the 0x400a2xxx voice/trig dispatch
+|       region.
+|     * stock's only writer is the per-tick loop at 0x400a3d6e (`moveb %a1@,%a1@(16)`),
+|       which copies the CURRENT step before incrementing -- so PREV always holds a valid
+|       step index. Writing pos-1 puts 0xFF there whenever pos == 0, a value stock's own
+|       code can never produce.
+|
+|   TICKS_IN_STEP is removed as simply redundant: stock's tail zeroes it for all 16 at
+|   0x400a4bf0 before this hook runs, with the same value.
+|
+|   This is the same class of deviation already recorded for CNTDN_TBL: section 4's AR<->OT
+|   mapping pairs the arrays by role, but their OT SEMANTICS differ, so copying AR's write
+|   verbatim is wrong. AR's per-track vector is not element-wise portable -- only the
+|   POSITION is, which is what this hook now writes and nothing else.
     addq.l  #1,%d3
     cmpi.l  #16,%d3
     bne.b   djp_loop

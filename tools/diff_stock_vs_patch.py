@@ -51,6 +51,7 @@ SCALE_ARR = 0x8000663E         # per-track scale index
 # Our scratch block. Outside the boot re-image (0x80000000 + 0x3e88) AND outside the
 # zero-fill (to 0x80004000), therefore UNINITIALISED at power-on on real hardware.
 SCRATCH_LO, SCRATCH_HI = 0x80006A40, 0x80006A60
+DJ_MODE = 0x800000D8
 MASTER_STEP = 0x800065B6
 # Session 79 cont.30: SCALE_IX and BAR_CTR were NOT compared, which is a hole exactly
 # where Hook D (dj_scaleix_fix) writes. Hook D is UNCONDITIONAL -- not gated on DJ_MODE --
@@ -72,7 +73,8 @@ PCS = [
 ]
 
 
-def run_image(er, image, project, bank, pattern, frames, tree, poison=False):
+def run_image(er, image, project, bank, pattern, frames, tree, poison=False,
+              dj_on=False):
     card, staged = er.stage_project(project, "OCTABAM", None, tree=tree)
     r, rt = er.attach(str(image), card, ips=3990.0, pit_clock_hz=264e6,
                       quantum=4096, step_quantum=32, tick=True)
@@ -128,6 +130,14 @@ def run_image(er, image, project, bank, pattern, frames, tree, poison=False):
     # stock run would prove nothing and only risks confusing the baseline.
     if poison:
         rt.uc.mem_write(SCRATCH_LO, bytes([0xAA]) * (SCRATCH_HI - SCRATCH_LO))
+    # Session 87: DIRECT JUMP ON, but with NO pattern change ever cued. The user's report is
+    # "turning DJ on makes a doubled sound of existing trigs" -- i.e. merely ENABLING the
+    # feature changes playback, with no switch involved. Nothing in the patch is supposed to
+    # do anything until a switch is cued and committed, so DJ-ON-idle must be just as
+    # identical to stock as DJ-OFF is. Every gate so far only ever tested DJ OFF, or DJ ON
+    # *with* a switch -- this combination has never been measured.
+    if dj_on:
+        rt.uc.mem_write(DJ_MODE, (1).to_bytes(4, "big"))
     sample()
     rt.start_transport_live()
     target = rt.frame_count + frames
@@ -149,6 +159,10 @@ def main(argv):
     ap.add_argument("--frames", type=int, default=6000,
                     help="default is long enough to cross a full 16-step pattern at 1x")
     ap.add_argument("--patched", default=str(PATCHED))
+    ap.add_argument("--dj-on", action="store_true",
+                    help="run the PATCHED image with DIRECT JUMP enabled but never cue a "
+                         "pattern change. The patch must still be inert: nothing should act "
+                         "until a switch is committed.")
     ap.add_argument("--no-poison", action="store_true",
                     help="do NOT pre-fill our scratch block with 0xAA before the transport "
                          "starts. Poisoning is ON by default: Unicorn zero-fills memory, so "
@@ -186,12 +200,14 @@ def main(argv):
     print(f"  bank={s['bank']} pattern={s['pat']} samples={len(s['trace'])} "
           f"tracks-with-movement={s['moved']}/16")
 
-    label = "PATCHED (DIRECT JUMP left OFF"
+    label = "PATCHED (DIRECT JUMP ON, no switch cued" if a.dj_on else \
+            "PATCHED (DIRECT JUMP left OFF"
     label += ", scratch POISONED 0xAA)" if not a.no_poison else ")"
     print(f"\n{bar}\n{label}  {a.patched}\n{bar}")
     try:
         p = run_image(er, a.patched, a.project, a.bank, a.pattern, a.frames,
-                      a.tree_prefix + "_patched", poison=not a.no_poison)
+                          a.tree_prefix + "_patched", poison=not a.no_poison,
+                      dj_on=a.dj_on)
     except Exception as exc:
         # Session 86: a fault during the PATCHED run IS the result, not a tooling error.
         # The build that locked up real hardware raises UC_ERR_READ_UNMAPPED here under

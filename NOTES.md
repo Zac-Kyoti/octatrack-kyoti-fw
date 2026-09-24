@@ -29300,3 +29300,284 @@ identical, container round-trips.
 
 - **Hardware.** This fix has not been flashed.
 - Differing MASTER LENGTHs between two patterns — still no fixture.
+
+## Session 86 (2026-09-23, `wip`) — RELOAD3: a reload no longer touches the clock; SELECT BANK moves to the release
+
+Hardware report #9, on the first RELOAD3 flash. **Both chords execute, no
+conflicts** — the redesign works. Three items:
+
+1. split `TRK SEQ+PART RELOADED` into two lines, `TRK SEQ + PART` / `RELOADED`
+2. a `[BANK]` tap still opens SELECT BANK on the **press**; want it on the release,
+   "like PTN does"
+3. **new bug** — "Reloading restarts the track sequence from step 1, AND the internal
+   (master) metronome is also restarted. The track, pattern, and the internal
+   metronome should remain in undisturbed time while any reload occurs."
+
+### Item 3 — root cause: `RELOAD_NOW` was never a cache refresh, it is a re-home
+
+`rl_job` armed `RELOAD_NOW` (`0x46c8028a`). The step engine polls it once per step
+at `0x400a2530`, and the block it gates (`0x400a253a..0x400a28b4`) is stock's
+**whole-bank re-home**, which is positional:
+
+| site | write | effect |
+|---|---|---|
+| `0x400a26fe` | `0x800065b4 = 0` | previous master step |
+| `0x400a2704` | **`0x800065b2 = 0`** | **the master playhead → sequence restarts** |
+| `0x400a2658` | `0x800065b6 = LEN_TBL[..]-1` | ticks-within-step → wraps next tick |
+| `0x400a27e2` | `0x800065b8 = 1` | `RUNNING` — *also the old "reload while stopped starts playback" bug* |
+
+`0x800065b2` is DIRECT JUMP's `MASTER_STEP` / `BAR_CTR`, measured **there** as the
+bounded master playhead, and the metronome's beat flags are derived from it by
+masking against `0x400abae4` / `0x400abacc` (`0x400a4264..0x400a42a0`). So **one
+write explains both reported symptoms**: sequence restart and metronome restart.
+
+The user's own pointer — "if you need to look at DIRECT JUMP to inform keeping
+things in time, please do" — is what shortened this. DIRECT JUMP had already mapped
+this exact territory and already paid for the lesson: *keep time by reading the
+clock, never by reseeding it.*
+
+**Dropping the arm costs nothing**, and that is measured rather than assumed:
+
+- trig data — our worker writes the cold blob and `LIVE_REFRESH` copies
+  blob → live cache, so both consumers already see the new bytes.
+- per-track scale/length — stock re-reads it from the blob on **every wrap**
+  (`0x400a3d08  moveb %a2@(1),%a3@` → `TRK_SCALE_IX[t]`, DIRECT JUMP's own
+  finding), so a changed step count self-heals within one cycle, in time.
+
+So `RELOAD_NOW` is armed on **no path**, and the `ACT_PAT` / `RUNNING` gates around
+it are gone with it — there is nothing left to gate.
+
+**`tools/diag_reload3_timing.py` (new).** Real PIT-driven transport. Asserts the
+re-home block is entered zero times (hook on `0x400a253a`, the first instruction
+*inside* it), that nothing writes non-zero to `RELOAD_NOW`, and that the playhead's
+forward progress across a reload matches a quiet control window. Two liveness gates,
+and it refuses to report if either is unmet: the sequencer must actually be stepping,
+and — `diag_scratch_clobber`'s lesson from Session 84 — it pokes `RELOAD_NOW=1`
+itself at the end and requires the counter to move, so a zero above is a measurement
+and not a dead hook.
+
+> **Naming trap, do not repeat.** `diag_reload2_transport.py` calls `0x800065b6`
+> "MASTER_STEP". It is not. DIRECT JUMP's Session 82 measured `0x800065b6` as
+> ticks-within-step and `0x800065b2` as the playhead. A timing test watching
+> `0x800065b6` watches the wrong word.
+
+### Item 2 — SELECT BANK deferred to the release (the piece that failed once before)
+
+Measured layout, all of it:
+
+- `0x4007af80` **press**: `BANK_COMMIT = (0x460e73bc == 0)` — so it is a **toggle** —
+  then `bras 0x4007af30`.
+- `0x4007af30` a **shared tail**, reached from that `bras` and **nothing else in the
+  image** (grepped). Clears `BANK_SEL`/`0x460e73b8`/`0x460e73bc`, `SHOW_WIN`
+  (dur `0xf0`, onClose `0x4007b408`), `LAYER_PUSH`, two more UI calls, then
+  `lea 28(sp),sp ; rts` — it cleans up exactly what it pushed.
+- `0x4007b3e0` **release**: `BANK_SEL==2` or `BANK_COMMIT==0` → dismiss
+  (`0x40056a70`), else commit (`0x460e73bc=1` then `0x40031200`, which is just
+  `0x460d1e4c=1`, a popup-**confirm** flag, not a bank change). That commit is what
+  makes stock's window sticky after the release.
+
+So the gesture is: press shows, release makes it stick, next tap dismisses.
+**Time-shifting only the show preserves that machine exactly**, and two measured
+facts make it safe rather than hopeful:
+
+- `LAYER_PUSH` (`0x40031494`) is **idempotent** — it `rts`'s if the struct is already
+  the list head (`0x400314b4`) or anywhere in the list (`0x400314b8`), so replaying
+  the tail cannot double-link the overlay.
+- `LAYER_POP` (`0x4003146c`) walks the list and finds nothing if the struct was never
+  linked, so a teardown for a window that never opened is harmless.
+
+Two detours: a **one-shot gate** spliced into the tail at `0x4007af42` (a press
+returns without showing) and the release handler at `0x4007b3e0` (opens the gate for
+exactly one pass and calls **stock's own tail**, so the window, its duration and its
+teardown are all stock's). The gate is what makes replay possible at all — without
+it, calling the tail would hit our own detour and short-circuit.
+
+The chord now claims the release outright (`rl3_bank_used`), so `[BANK]`+`[TRACK]`
+shows nothing on either event. `BANK_WIN_CLOSE` became **conditional** on a popup
+actually being up: normally there is no window to tear down, and MLNOTIFY can draw
+either way (it bails while `0x460e5cd0` is non-zero).
+
+**Why retry something hardware rejected in Session 80 continued (3)/(7):** that build
+also carried the picker, its own keymap layer and a poked YES slot. Here the only
+moving part is the show. That is an argument for retrying, **not** evidence it works
+— hence `tools/diag_reload3_bankdefer.py` (new), which asserts press shows zero,
+release shows exactly once (its own positive control, so the zero is a real
+measurement), the layer list never grows across repeated taps, the toggle still
+toggles, and the chord is silent on both events.
+
+### Item 1 — two-line box for the Part case
+
+`MLNOTIFY` was already wired for the never-saved case, so the saved case just joins
+it: `rl3_lines_trkpart` = `TRK SEQ + PART` / `RELOADED`. This also buys back the
+spaces around the `+` that the 21-char single-line width budget had forced out.
+
+
+#### The trap in item 2, and probably why Session 80's attempt was rejected
+
+My first cut deferred the show by skipping stock's whole press tail. That is wrong,
+and the bug is silent and destructive rather than cosmetic:
+
+**The `[BANK]` overlay layer is what remaps the 16 TRIG keys to bank-select while
+`[BANK]` is held** — that *is* the "hold `[BANK]`, tap a trig to pick a bank" gesture.
+`LAYER_PUSH` lives in that same tail, after `SHOW_WIN`. Skip the tail and the trigs
+stay on their base handler `0x40060ce0`, so **hold-`[BANK]`+trig would EDIT THE
+SEQUENCE instead of changing bank.**
+
+That is the most plausible reading of the Session 80 continued (3)/(7) hardware
+rejection, and it is worth stating because the failure mode is invisible to every
+"did the window appear?" test — which is exactly what the first version of
+`diag_reload3_bankdefer.py` was.
+
+Stock `[PTN]` is the existence proof of the shape the user actually asked for: its
+press pushes its overlay and shows **nothing**; SELECT PATTERN appears on the release.
+So the correct deferral is **push the layer on the press, defer only `SHOW_WIN`**.
+
+That moves the teardown question: stock's layer is owned by the window's onClose, so a
+press that pushes without showing has nothing to pop it. Every release path now
+accounts for it exactly once —
+
+| release path | layer teardown |
+|---|---|
+| our chord consumed it (`rl3_bank_used`) | `BANK_WIN_CLOSE` here (no window ever existed) |
+| opening tap (`BANK_COMMIT != 0`) | show the window; from there it owns the layer, as stock |
+| toggle-off tap, popup up | stock's dismiss runs onClose |
+| toggle-off tap, no popup | `BANK_WIN_CLOSE` here |
+
+`BANK_WIN_CLOSE` also balances the press tail's `0x4007e760` against its own
+`0x4007e81c`, which is why it is the right teardown rather than a bare `LAYER_POP`.
+
+`diag_reload3_bankdefer.py` now asserts the thing that matters: **with `[BANK]` held,
+trig 1's dispatch slot must not be `0x40060ce0`.**
+
+#### It is stock `[PTN]`'s own release, transplanted — which is why "like PTN does" was right
+
+Stock's `[PTN]` release (`0x4005a084..0x4005a0ca`) already does *both* things the
+`[BANK]` deferral needs:
+
+```
+tstl 0x460d173e      ; gesture consumed?
+bnes -> 0x4005a0be   ;   yes: clrl PTN_MODE ; jsr 0x40043418  <- teardown called
+                     ;        DIRECTLY, and NO window is shown
+pea  0x40043418      ;   no:  teardown as the window's onClose
+jsr  0x40059f8c      ;        SHOW_WIN -- the window opens on the RELEASE
+```
+
+The show is on the release, and the consumed path calls the teardown itself rather than
+relying on a window that was never opened. Every `rl3_bank_rel` branch is that structure
+with `BANK_WIN_CLOSE` substituted. Worth recording because it reframes item 2: not a new
+mechanism bolted on, but stock's existing one applied to the other key — and it is the
+reason the user's "like PTN does" pointed at something real rather than cosmetic.
+
+#### Harness lesson: `stage_project` is not concurrency-safe
+
+`er.stage_project` stages into a single shared `out/_emu_rtos_tree/<set>/<project>`, so
+two RELOAD3 diags started in parallel race and one dies in `mkdir`. Several confusing
+runs this session were that, not the firmware. Run the suite sequentially.
+
+### Build
+
+Six detours (was four). `patch_reload3` 1500 B @ `0x400d6500`, ceiling 2044 B.
+1169 bytes changed vs stock. Boundary checks from Session 85 closed out green:
+tracks 1 and 8 both revert only themselves, so the `subi.l #0x10` keycode→index
+math is right at both ends.
+## Session 87 (2026-09-23, `wip`) — DIRECT JUMP: doubled-trig regression FIXED. **HARDWARE-CONFIRMED WORKING AT 1x SCALES.** Non-1x scales are the remaining thread
+
+### HARDWARE REPORT — what now works (flashed, MKI, image `0657157f...`)
+
+**This is the hard-won baseline. Do not regress it.**
+
+- **Tracks and patterns stay in master time through DIRECT JUMP switches.**
+- **Patterns land on the correct step between switches.**
+- **Different track LENGTHS work well together** (7, 12, 16 in one pattern).
+- **MASTER LENGTH is respected**, including **`INF` (infinite)**.
+- The doubled-trig regression from Session 86 is **gone**.
+
+**The standing constraint: all of the above is confirmed only with 1x TRACK scales and a 1x
+MASTER scale.** Setting either a track scale or the master scale to anything other than 1x
+produces unexpected results. That is the entire remaining problem, and it is the next thread.
+
+### The doubling regression, root-caused
+
+Report: with DJ ON, existing trigs sounded DOUBLED, the double drifting slightly every
+pattern cycle; straight 16 steps at 1x, no scales; **doubling began the instant the feature
+was enabled**, and pattern switching itself was in time.
+
+Bisecting everything added since the last audible build (Session 84) leaves **only Hook P** —
+Hook H's diff across those commits is register-allocation churn around the same AR rule.
+
+And in a uniform 16-step 1x pattern, Hook P's POSITION arithmetic is identical to stock's:
+
+```
+stock:   q = ceil(6*new_step / 6) = new_step ;  pos = new_step mod 16
+Hook P:  pos = new_step mod 16
+```
+
+So `STEP_ARR` was already correct, and the only things that actually changed state were the
+two EXTRA writes Hook P was doing alongside it.
+
+**`PREV_ARR[t] = pos - 1` (`0x800064e0`) was the culprit.** MEASURED statically:
+
+- **Stock's commit tail never writes it.** The tail loop `0x400a4bbc`-`0x400a4d32` writes
+  `STEP_ARR[i]` at `0x400a4be6` and zeroes ticks-within-step at `0x400a4bf0`, and its bound
+  `cmpal #0x800065d3` is `CNTDN_TBL + 16` — **one loop covering all 16 tracks, audio AND
+  MIDI**. PREV is deliberately left alone across a commit.
+- **It has live readers outside this path**: `0x4009b2c2`, `0x4009f496`, `0x400a2370`,
+  `0x400a2690`, `0x400a2920`, `0x400a2966` — several in the `0x400a2xxx` voice/trig dispatch
+  region.
+- **Stock's only writer** is the per-tick loop at `0x400a3d6e` (`moveb %a1@,%a1@(16)`), which
+  copies the CURRENT step before incrementing — so PREV always holds a valid step index.
+  Writing `pos - 1` puts **`0xFF`** there whenever `pos == 0`, a value stock's own code can
+  never produce, straight into the voice dispatcher's input.
+
+`TICKS_IN_STEP` was removed as redundant: stock's tail already zeroes all 16 with the same
+value before Hook P runs.
+
+Hook P now writes **`STEP_ARR` and nothing else**, verified in the built image — the cave
+contains exactly one per-track array reference (`lea 0x800064d0`), none to `0x800064e0` or
+`0x800064f0`.
+
+### The mistake, and it was a repeat
+
+This is the **same class of error already recorded for `CNTDN_TBL` in Session 85**: §4's
+AR↔OT mapping table pairs arrays **by role**, and that was treated as licence to copy AR's
+writes element-wise. **AR's per-track state vector is not element-wise portable onto OT.**
+Only the POSITION is. The `CNTDN_TBL` case was caught by reasoning; the `PREV` case shipped
+and had to be caught by ear on hardware.
+
+> **RULE: before copying any AR per-track write onto its OT counterpart, measure OT's own
+> writers and readers of that array first.** Role-equivalence in the mapping table is not
+> semantic equivalence.
+
+Build: 1020 B cave, 975 bytes changed, 0 unexpected outside the cave, manual-trig bytes
+identical, container round-trips.
+
+### Why non-1x scales are still broken — the standing hypothesis for the next session
+
+Not yet investigated, stated so the next session starts from something rather than nothing:
+
+OT's stock rebuild loop computes per-track position in the **TICK domain**
+(`q = ceil(D7 / tps_t)` at `0x400a4912`, `D7 = LEN_TBL[masterScale] * 0x80006628`). Hook P
+overrides the result with AR's **step-domain** `new_step mod trackLen_t`. At 1x everywhere
+those two agree exactly — which is precisely why 1x works and nothing else does.
+
+When any scale is non-1x they disagree, and **Hook P only overrides `STEP_ARR`**. Everything
+else stock derived from its tick-domain answer is left in place and is now inconsistent with
+the position — specifically `CNTDN_TBL[t]` (`0x800065c3`) and `NEXT_STEP[t]`
+(`0x800065e4`). That inconsistency is the prime suspect.
+
+AR does not have this problem because its commit rebuilds the per-track **rate** state too:
+loop 1 at `0x400991de`-`0x40099202` writes `0x405667c7[t] = ticksPerStep[res_t] - 1`, and the
+resolution-cache loop at `0x400992e2`-`0x40099314` writes `0x40566775[t]`. On OT the
+resolution cache **is** handled (`dj_c` refreshes `TRK_SCALE_IX`, Session 84) but the
+countdown reload deliberately is **not** — Session 85 left `CNTDN_TBL` alone on the strength
+of a Session 79 measurement calling it a one-shot trig arm rather than a per-step reload.
+**That measurement is now the single most load-bearing unverified claim in this thread and
+should be re-derived first.**
+
+### NOT validated
+
+- Non-1x track scales, non-1x master scale — **the open thread**.
+- Two patterns with differing MASTER LENGTHs — still no fixture.
+- Per-track sub-step phase at a mid-cycle commit (`0x800064f0[t]` zeroed for all 16 by
+  stock's tail at `0x400a4bf0`), open since Session 82 — likely entangled with the non-1x
+  problem, since it only bites when a track's tps differs from the master's.
