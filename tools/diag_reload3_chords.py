@@ -57,6 +57,10 @@ PART_RELOAD = 0x4004AAB4
 BANK_WIN_CLOSE = 0x4007B408
 MLNOTIFY = 0x4006D57C
 TOAST = 0x4005A2B8
+LAYER_PUSH = 0x40031494
+OK_LAYER = 0x400CDFF8        # MLNOTIFY's OK-prompt keymap layer
+WIN_SLOT = 0x460D1E5C        # the countdown-owned popup slot the card uses
+CD_SEGS = 0x460D1E54
 TRK_BASE_RES = 0x40040256    # stock track-select path, just past our detour
 DISPATCH = 0x46C7D8DE        # runtime dispatch table, 24-B stride
 HELD = 0x46C7D8EE            # per-key is-held array, same stride
@@ -104,7 +108,7 @@ def main(argv):
     sym = {p[2]: int(p[0], 16) for p in (l.split() for l in nm.splitlines()) if len(p) == 3}
 
     C = {k: 0 for k in ("rl_job", "selpat", "partreld", "bankclose", "ml", "toast",
-                        "stocktrk", "arm")}
+                        "stocktrk", "arm", "card", "oklayer")}
 
     def hook(addr, key):
         rt.uc.hook_add(er.eb.UC_HOOK_CODE,
@@ -117,6 +121,16 @@ def main(argv):
     hook(BANK_WIN_CLOSE, "bankclose")
     hook(MLNOTIFY, "ml")
     hook(TOAST, "toast")
+    hook(sym["rl3_card"], "card")
+    # Session 88: the "OK" prompt IS this keymap layer push. MLNOTIFY pushed
+    # 0x400cdff8 at 0x4006d722 and that is what made the box wait for a key. The new
+    # card pushes no layer at all, so this counter must stay at zero -- it is the
+    # only direct evidence that there is no OK prompt to answer.
+    def on_push(u, ad, sz, x):
+        sp = u.reg_read(er.eb.UC_M68K_REG_A7)
+        if struct.unpack(">I", u.mem_read(sp + 4, 4))[0] == OK_LAYER:
+            C["oklayer"] += 1
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_push, begin=LAYER_PUSH, end=LAYER_PUSH)
     hook(TRK_BASE_RES, "stocktrk")
     hook(sym["rl3_arm_n"], "arm")
     rt.uc.ctl_flush_tb()
@@ -205,6 +219,10 @@ def main(argv):
             chk(consumed != 0, f"PTN_CONSUMED set ({consumed:#010x})")
             chk(d["selpat"] == 0, f"SELECT PATTERN NOT shown on release (x{d['selpat']})")
             chk(d["partreld"] == 0, f"Part NOT touched (PART_RELOAD x{d['partreld']})")
+            chk(d["card"] == 1, f"the card was drawn once (x{d['card']})")
+            chk(d["toast"] == 0,
+                f"the old block toast is gone (x{d['toast']}) -- item 4")
+            chk(d["oklayer"] == 0, f"no OK prompt (x{d['oklayer']})")
             chk(d["rl_job"] == 1, f"the worker ran once (x{d['rl_job']})")
         print(f"   it{it}: arm={d['arm']} job={d['rl_job']} G_TRK={trk} midi={tmidi} "
               f"selpat={d['selpat']} partreld={d['partreld']} G_KIND={rt.uc.mem_read(G_KIND,1)[0]}")
@@ -213,12 +231,11 @@ def main(argv):
 
     # ---------- 3. [BANK] + [TRACK n], both PART_RELOAD outcomes ----------
     save = bytes(rt.uc.mem_read(PART_RELOAD, 4))
-    # Session 86 item 1: the saved-Part branch moved from a single-line toast to the
-    # same two-line MLNOTIFY box as the never-saved branch ("TRK SEQ + PART" /
-    # "RELOADED" vs "TRK SEQ RELOADED" / "SAVE PART FIRST!"). Both outcomes now use
-    # the box and neither uses rl3_toast, so both expect ml==1, toast==0.
-    for ret, label, want_ml, want_toast in ((1, "Part SAVED -> two-line box", 1, 0),
-                                            (0, "Part NEVER SAVED -> two-line box", 1, 0)):
+    # Session 88: BOTH branches now draw our own self-dismissing card (rl3_card).
+    # MLNOTIFY and the block TOAST are gone from every path, so both must read zero --
+    # MLNOTIFY in particular, because it is the thing that had the OK prompt.
+    for ret, label in ((1, "Part SAVED -> self-dismissing card"),
+                       (0, "Part NEVER SAVED -> self-dismissing card")):
         print(f"\n--- [BANK] + [TRACK {a.track+1}] : {label} ---")
         # force PART_RELOAD's verdict so neither branch depends on the project
         rt.uc.mem_write(PART_RELOAD, bytes([0x70, ret, 0x4E, 0x75]))   # moveq #ret,d0 ; rts
@@ -237,9 +254,13 @@ def main(argv):
         chk(d["partreld"] == 1, f"PART_RELOAD called once (x{d['partreld']})")
         chk(d["bankclose"] >= 1, f"SELECT BANK dismissed (x{d['bankclose']})")
         chk(commit == 0, f"BANK_COMMIT cleared ({commit:#010x})")
-        chk(d["ml"] == want_ml, f"two-line box calls = {d['ml']} (want {want_ml})")
-        chk(d["toast"] >= want_toast if want_toast else d["toast"] == 0,
-            f"toast calls = {d['toast']} (want {'>=1' if want_toast else '0'})")
+        chk(d["card"] == 1, f"the card was drawn once (x{d['card']})")
+        chk(d["ml"] == 0, f"MLNOTIFY never used (x{d['ml']}) -- no OK dialog")
+        chk(d["toast"] == 0, f"the block toast never used (x{d['toast']})")
+        chk(d["oklayer"] == 0,
+            f"no OK-prompt keymap layer pushed (x{d['oklayer']}) -- nothing to answer")
+        chk(u32(CD_SEGS) != 0,
+            f"the self-dismiss countdown is armed (CD_SEGS={u32(CD_SEGS)})")
     rt.uc.mem_write(PART_RELOAD, save)
     rt.uc.ctl_flush_tb()
 

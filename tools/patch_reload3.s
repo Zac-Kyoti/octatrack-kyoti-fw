@@ -406,6 +406,56 @@
 |   difference now is that the previous attempt carried the picker, its own keymap
 |   layer and a poked YES slot; this build pokes no layer record at all, so the only
 |   moving part left is the show itself. Still the riskiest item in this build. **
+|   ---- Session 88: our own titled, centered, SELF-DISMISSING card ----
+|   Hardware report #10 asked for four things on the notification box: title
+|   "RELOAD FROM PROJ", the second line CENTRED, NO "OK" prompt to dismiss, and the
+|   same card style for the plain TRK SEQ message instead of the big block toast.
+|
+|   MLNOTIFY (0x4006d57c) cannot do it and is dropped. Decoded, it is a BLOCKING
+|   dialog by construction:
+|     * it pushes keymap layer 0x400cdff8 (0x4006d722) -- that IS the "OK" prompt's
+|       input handler, so the box waits for a key by design
+|     * it has NO duration argument anywhere. (An earlier comment in this file claimed
+|       0x460e5e20 was "a 40-frame countdown". WRONG, and the hardware report is what
+|       exposed it: 0x460e5e20 is the box WIDTH accumulator -- seeded to 40 at
+|       0x4006d596, then max'd against each measured line width + 9 and clamped to 128.
+|       0x460e5e24 is the height, 7*nlines+27 clamped to [34,64].)
+|     * its body renderer 0x4006d128 draws every line with x hardcoded to 4
+|       (0x4006d170) -- that is exactly the left-justification the user is reporting.
+|
+|   So build the card directly out of the same primitives MLNOTIFY uses, on the OTHER
+|   popup slot -- the one SHOW_WIN uses -- because that slot already owns stock's
+|   countdown and never pushes a keymap layer. Result: no OK prompt exists to press,
+|   the dismiss is stock's own timer, and every line is centred because we pass a
+|   computed x instead of 4. Width/height formulas, body font and line spacing are all
+|   copied from MLNOTIFY so the box keeps the proportions the user already approved.
+    .equ WIN_NEW,        0x4005829c     | (w,h,x,y,style,onClose) -> handle.
+                                        | style 4 = the CARD look MLNOTIFY uses;
+                                        | style 0xa = the block toast SHOW_WIN uses.
+    .equ WIN_TITLE,      0x40057c84     | (handle, text, flag) -- the title bar
+    .equ WIN_CLEAR,      0x400356a8     | (winptr) -- clear the interior
+    .equ DRAWTEXT,       0x40012bd8     | (font, winptr, x, y, len, text)
+    .equ TEXTW,          0x40012f30     | (font, maxlen, text) -> pixel width
+    .equ FONT_BODY,      0x400ba876     | the font MLNOTIFY measures AND draws with
+    .equ WIN_SLOT,       0x460d1e5c     | the countdown-owned popup handle
+    .equ WIN_ONCLOSE,    0x460d1e60     | called after the countdown dismisses it
+    .equ CD_CUR,         0x460d1e50     | ticks left in this segment
+    .equ CD_RELOAD,      0x460d1e58     | reload value for CD_CUR
+    .equ CD_SEGS,        0x460d1e54     | segments left == number of countdown dots.
+                                        | We set it to 1: one segment, therefore no
+                                        | dots, and the expiry dismisses directly.
+    .equ CD_FLAG,        0x460d1e4c     | tick gate: ZERO = countdown disabled
+    .equ CD_TICK,        0x40056ab8     | the gate + tick entry (NOT 0x40056ac0, which
+                                        | is past the gate -- hook the gate, not the body)
+    .equ WIN_DISMISS,    0x40056a70     | tears the slot down + calls WIN_ONCLOSE
+|   NOT called, on purpose -- this is the dot drawer. Kept documented so a future
+|   session does not "helpfully" add it back and reintroduce the countdown dots.
+    .equ WIN_REFRESH,    0x40037cc8     | draws the countdown dots (y 7..11)
+    .equ CARD_STYLE,     4
+    .equ CARD_DUR,       0x18           | ticks the card stays up (~0.5 s). Goes into
+                                        | CD_CUR whole, since CD_SEGS is 1. SELECT BANK
+                                        | uses 0xf0 across 4 segments for its
+                                        | several-second countdown -- same units.
     .equ BANK_LAYER,     0x400cff14     | the [BANK] overlay keymap layer struct
     .equ BANK_UI_A,      0x4007e760     | the two UI calls the press tail makes AFTER
     .equ BANK_UI_A_ARG,  0x400cff28     | LAYER_PUSH; BANK_WIN_CLOSE pairs them with
@@ -494,25 +544,17 @@ r3b_try_bank:
 |   report #9 item 1): the split is "TRK SEQ + PART" / "RELOADED", which also buys
 |   back the spaces around the + that the 21-char single-line width budget had
 |   forced out -- each line is now well inside the box width.
-    clr.l   -(%sp)
-    clr.l   -(%sp)
-    pea     rl3_lines_trkpart
-    pea     2
-    pea     rl3_title
-    jsr     MLNOTIFY                   | FUN_4006d57c(title, 2, lines, 0, 0)
-    lea     20(%sp),%sp
+    lea     rl3_lines_trkpart,%a0
+    moveq   #2,%d0
+    bsr.w   rl3_show
     bra.b   r3b_done
 r3b_unsaved:
 |   Never saved: the SEQUENCE still reloaded, so saying only "SAVE PART FIRST!"
 |   (stock's wording) would wrongly imply nothing happened. Two lines instead, so
 |   both facts are visible at once.
-    clr.l   -(%sp)
-    clr.l   -(%sp)
-    pea     rl3_lines_unsaved
-    pea     2
-    pea     rl3_title
-    jsr     MLNOTIFY                   | FUN_4006d57c(title, 2, lines, 0, 0)
-    lea     20(%sp),%sp
+    lea     rl3_lines_unsaved,%a0
+    moveq   #2,%d0
+    bsr.w   rl3_show
 r3b_done:
 |   Belt and braces for the release. rl3_bank_used above is what actually swallows it;
 |   clearing BANK_COMMIT means that even if that flag were somehow missed, the release
@@ -534,15 +576,181 @@ rl3_do_ptn:
     jsr     rl3_arm_n                  | arm TRK SEQ for that track and post the job
     move.l  #-1,%d0
     move.l  %d0,PTN_CONSUMED           | same value stock writes at 0x40056b44
-    lea     rl3_msg_trk,%a0
-    bra.w   rl3_toast                  | tail-call: its rts returns to our caller
+|   Session 88 item 4: this used to be the big block TOAST (FUN_4005a2b8). It is now
+|   the same card as the [BANK] message, at the user's request, so both reload
+|   messages look alike.
+    lea     rl3_lines_trk,%a0
+    moveq   #2,%d0
+    bra.w   rl3_show                   | tail-call: its rts returns to our caller
 
-| ---- rl3_toast: a0 = NUL-terminated text. Arg order copied from stock 0x4005e09c ----
-rl3_toast:
-    pea     TOAST_DUR
+| ---- rl3_card(title, nlines, lines[]) -- titled, centred, self-dismissing ----
+| Replaces BOTH the old rl3_toast (the block toast) and MLNOTIFY (the OK dialog), so
+| every RELOAD message is now the same card. No keymap layer is pushed anywhere in
+| here, which is precisely why there is no "OK" to answer.
+rl3_card:
+    lea     -40(%sp),%sp
+    movem.l %d2-%d7/%a2-%a5,(%sp)      | 40 B saved; ret at 40(sp), args at 44/48/52
+    move.l  44(%sp),%a5                | a5 = title (0 = no title bar)
+    move.l  48(%sp),%d7                | d7 = nlines
+    move.l  52(%sp),%a4                | a4 = lines[]
+|   Something already in this slot would be leaked, so dismiss it first -- exactly
+|   what SHOW_WIN does at its own head (0x40059fa4).
+    tst.l   WIN_SLOT
+    beq.b   rc_noprev
+    jsr     WIN_DISMISS
+rc_noprev:
+|   --- width: MLNOTIFY's formula. max(40, each measured width + 9), capped at 128 ---
+    moveq   #40,%d6
+    move.l  %a5,%d0
+    beq.b   rc_wlines
+    move.l  %a5,%a0
+    bsr.w   rc_measure
+    addq.l  #4,%d0                     | title sits in a bar; a little more slack
+    addq.l  #5,%d0
+    cmp.l   %d6,%d0
+    ble.b   rc_wlines
+    move.l  %d0,%d6
+rc_wlines:
+    moveq   #0,%d5
+rc_wloop:
+    cmp.l   %d7,%d5
+    bge.b   rc_wdone
+    move.l  %d5,%d0
+    lsl.l   #2,%d0
+    move.l  (%a4,%d0.l),%a0
+    bsr.w   rc_measure
+    addq.l  #4,%d0
+    addq.l  #5,%d0                     | +9 total, as MLNOTIFY does
+    cmp.l   %d6,%d0
+    ble.b   rc_wnext
+    move.l  %d0,%d6
+rc_wnext:
+    addq.l  #1,%d5
+    bra.b   rc_wloop
+rc_wdone:
+    cmpi.l  #128,%d6
+    ble.b   rc_wok
+    move.l  #128,%d6
+rc_wok:
+|   --- height: 7*nlines + 27, clamped [34,64] -- MLNOTIFY's formula ---
+    move.l  %d7,%d0
+    lsl.l   #3,%d0
+    sub.l   %d7,%d0
+    addi.l  #27,%d0
+    cmpi.l  #34,%d0
+    bge.b   rc_h1
+    moveq   #34,%d0
+rc_h1:
+    cmpi.l  #64,%d0
+    ble.b   rc_h2
+    moveq   #64,%d0
+rc_h2:
+    move.l  %d0,%d4                    | d4 = height
+|   --- create the window: style 4 = card, onClose = stock's own dismiss ---
+    pea     WIN_DISMISS
+    pea     CARD_STYLE
+    clr.l   -(%sp)
+    clr.l   -(%sp)
+    move.l  %d4,-(%sp)
+    move.l  %d6,-(%sp)
+    jsr     WIN_NEW
+    lea     24(%sp),%sp
+    tst.l   %d0
+    beq.w   rc_out                     | no window slot free -- say nothing, don't fault
+    move.l  %d0,WIN_SLOT
+    move.l  %d0,%a3
+    move.l  %a3,%d3
+    addi.l  #36,%d3                    | d3 = winptr (handle+36), as MLNOTIFY uses
+    move.l  %d3,-(%sp)
+    jsr     WIN_CLEAR
+    addq.l  #4,%sp
+    move.l  %a5,%d0
+    beq.b   rc_notitle
+    clr.l   -(%sp)
+    move.l  %a5,-(%sp)
+    move.l  %a3,-(%sp)
+    jsr     WIN_TITLE                  | the title bar, y = height-10
+    lea     12(%sp),%sp
+rc_notitle:
+|   --- the body lines, each CENTRED. y counts UP from the bottom, so line 0 (the
+|   --- highest y) lands on top, matching MLNOTIFY's own ordering.
+    move.l  %d4,%d5
+    subi.l  #17,%d5                    | y = height-17, then -7 per line
+    moveq   #0,%d2
+rc_dloop:
+    cmp.l   %d7,%d2
+    bge.b   rc_ddone
+    move.l  %d2,%d0
+    lsl.l   #2,%d0
+    move.l  (%a4,%d0.l),%a2            | a2 = lines[i]
+    move.l  %a2,%a0
+    bsr.w   rc_measure                 | d0 = raw pixel width
+    move.l  %d6,%d1
+    sub.l   %d0,%d1
+    bpl.b   rc_xok
+    moveq   #0,%d1                     | wider than the box -- clamp to the left edge
+rc_xok:
+    asr.l   #1,%d1                     | x = (boxwidth - textwidth) / 2
+    move.l  %a2,-(%sp)
+    move.l  #-1,-(%sp)
+    move.l  %d5,-(%sp)
+    move.l  %d1,-(%sp)
+    move.l  %d3,-(%sp)
+    pea     FONT_BODY
+    jsr     DRAWTEXT
+    lea     24(%sp),%sp
+    addq.l  #1,%d2
+    subi.l  #7,%d5
+    bra.b   rc_dloop
+rc_ddone:
+|   --- arm stock's countdown: it is what dismisses the card, with no key involved ---
+|   ** ONE SEGMENT, and WIN_REFRESH is deliberately NOT called. ** That is what keeps
+|   the countdown DOTS off the card -- hardware report #10: "I'd rather not have
+|   countdown dots anywhere. These are instantly executed functions." A progress
+|   indicator would imply something is still pending, which is wrong here.
+|   MEASURED: 0x40037cc8 is the only thing that draws those dots, and it has exactly
+|   two callers -- SHOW_WIN's tail (0x4005a034, which we do not use) and the tick at
+|   0x40056aea. The tick only reaches it when CD_SEGS is STILL non-zero after being
+|   decremented (0x40056ae2 bne). With CD_SEGS = 1 the single segment expires straight
+|   into the dismiss at 0x40056ae4 instead, so the dot routine is never entered at all.
+|   CD_CUR therefore carries the whole duration rather than a quarter of it.
+    clr.l   WIN_ONCLOSE
+    move.l  #CARD_DUR,%d0
+    move.l  %d0,CD_RELOAD
+    move.l  %d0,CD_CUR
+    moveq   #1,%d0
+    move.l  %d0,CD_SEGS                | exactly one segment -> no dots, just a dismiss
+|   ** CD_FLAG MUST BE NON-ZERO or the countdown never runs at all. ** The tick is
+|   gated on it: 0x40056ab8 `tstl 0x460d1e4c` / 0x40056abe `beq -> rts`, and only then
+|   does the body at 0x40056ac0 decrement anything. An earlier version of this code
+|   CLEARED the flag, which would have left the card up forever on hardware -- i.e.
+|   exactly the stuck box the report asked us to get rid of. The emulator cannot catch
+|   this (its harness never drives the tick at all, stock SELECT BANK included, which
+|   is why diag_reload3_card.py gates that assertion on a stock control); static
+|   reading of the gate is what found it.
+    move.l  %d0,CD_FLAG                | 1 = countdown armed and running
+    move.l  %d0,RDRAW                  | d0 is still 1
+rc_out:
+    movem.l (%sp),%d2-%d7/%a2-%a5
+    lea     40(%sp),%sp
+    rts
+
+| a0 = text -> d0 = pixel width. Clobbers d0/d1/a0/a1 only.
+rc_measure:
     move.l  %a0,-(%sp)
-    jsr     TOAST                      | FUN_4005a2b8(text, dur)
-    addq.l  #8,%sp
+    move.l  #-1,-(%sp)
+    pea     FONT_BODY
+    jsr     TEXTW                      | FUN_40012f30(font, maxlen, text)
+    lea     12(%sp),%sp
+    rts
+
+| ---- rl3_show: a0 = lines[], d0 = nlines. Always titled "RELOAD FROM PROJ". ----
+rl3_show:
+    move.l  %a0,-(%sp)
+    move.l  %d0,-(%sp)
+    pea     rl3_title
+    jsr     rl3_card
+    lea     12(%sp),%sp
     rts
 
 | ============ SELECT BANK: shown on RELEASE, not on PRESS ============
@@ -647,23 +855,35 @@ rl3_msg_trkpart_1:
 rl3_msg_trkpart_2:
     .asciz "RELOADED"
     .align 2
+|   Session 88 item 1: the card's title bar, was "RELOAD".
 rl3_title:
-    .asciz "RELOAD"
+    .asciz "RELOAD FROM PROJ"
+    .align 2
+rl3_msg_reloaded:
+    .asciz "RELOADED"
+    .align 2
+rl3_msg_trkonly:
+    .asciz "TRK SEQ"
     .align 2
 rl3_msg_empty:
     .asciz ""
     .align 2
 |   MLNOTIFY's line array. Stock's own groups carry an empty-string terminator
 |   after the lines (0x400b44b5), so mirror that shape.
+|   rl3_card takes an explicit line count, so these no longer need stock's
+|   empty-string terminator. Every line is centred by the drawing code.
 rl3_lines_unsaved:
     .long   rl3_msg_trk                | "TRK SEQ RELOADED"   -- what DID happen
     .long   STOCK_SAVEFIRST            | "SAVE PART FIRST!"   -- stock's own wording
-    .long   rl3_msg_empty
     .align 2
 rl3_lines_trkpart:
     .long   rl3_msg_trkpart_1          | "TRK SEQ + PART"
     .long   rl3_msg_trkpart_2          | "RELOADED"
-    .long   rl3_msg_empty
+    .align 2
+|   Session 88 item 4: the plain TRK SEQ message, split to mirror the [BANK] card.
+rl3_lines_trk:
+    .long   rl3_msg_trkonly            | "TRK SEQ"
+    .long   rl3_msg_reloaded           | "RELOADED"
     .align 2
 
 | ---- rl_arm_trk: arm a TRK SEQ reload of the currently-addressed track ----

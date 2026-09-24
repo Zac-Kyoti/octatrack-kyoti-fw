@@ -410,3 +410,115 @@ themselves, so `subi.l #0x10` is right at both ends of the range.
 > **Harness note.** `er.stage_project` stages into one shared
 > `out/_emu_rtos_tree/<set>/<project>`, so parallel RELOAD3 diags race and one dies in
 > `mkdir`. Run the suite sequentially.
+
+---
+
+# Session 88 — the message box: titled card, centred, self-dismissing, no dots
+
+Hardware report #10, after the Session 86 flash confirmed reloads happen "quick and
+on-time" (item 3 verified on hardware). Four asks, all about presentation:
+
+1. title `RELOAD FROM PROJ`, not `RELOAD`
+2. the second line **centred**, not left-justified
+3. **no "OK" prompt** — a ~0.5 s self-dismiss is enough
+4. the plain `TRK SEQ` message should use the same card, not the big block toast
+
+…then, on seeing the first cut: **no countdown dots anywhere** — "these are instantly
+executed functions", so a progress indicator is semantically wrong.
+
+## MLNOTIFY cannot do any of it, and one of my own notes was wrong
+
+`FUN_4006d57c` is a **blocking dialog by construction**:
+
+- it **pushes keymap layer `0x400cdff8`** (`0x4006d722`). That push *is* the OK prompt —
+  the box waits for a key because it installed a key handler.
+- it has **no duration argument at all**.
+- its body renderer `0x4006d128` draws every line with **x hardcoded to 4**
+  (`0x4006d170`) — exactly the left-justification reported.
+
+> ⚠️ **A prior comment in `patch_reload3.s` claimed `0x460e5e20` was "a 40-frame
+> countdown at 0x460e5e20, so it goes away on its own". That was WRONG**, and the
+> hardware report is what exposed it. `0x460e5e20` is the box **WIDTH** accumulator:
+> seeded to 40 at `0x4006d596`, max'd against each measured line width + 9, capped at
+> 128. `0x460e5e24` is the height, `7*nlines + 27` clamped to `[34,64]`. The box never
+> self-dismissed; nobody had tested it without pressing OK.
+
+## The build: our own card on the other popup slot
+
+`rl3_card(title, nlines, lines[])` uses the same primitives MLNOTIFY does, but on the
+popup slot `SHOW_WIN` owns (`0x460d1e5c`) — that slot already has stock's countdown and
+**never pushes a keymap layer**, so there is no OK prompt to answer by construction.
+
+| piece | call | note |
+|---|---|---|
+| create | `0x4005829c(w,h,0,0,**4**,0x40056a70)` | style **4** = the card look; `0xa` is the block toast |
+| clear | `0x400356a8(winptr)` | as MLNOTIFY does |
+| title | `0x40057c84(handle, text, 0)` | the title bar |
+| lines | `0x40012bd8(font, winptr, **x**, y, -1, text)` | **x = (boxwidth − textwidth)/2** instead of 4 → centred |
+| dismiss | `CD_CUR`/`CD_RELOAD` = `0x18`, `CD_SEGS` = **1**, `CD_FLAG` = **1** | stock's own timer |
+
+Width/height formulas, body font (`0x400ba876`) and the 7-pixel line pitch are copied
+from MLNOTIFY so the box keeps proportions already approved on hardware. y counts **up**
+from the bottom, so `lines[0]` (higher y) lands on top, matching MLNOTIFY's ordering.
+
+## No dots — and why CD_SEGS = 1 is the mechanism
+
+The dots come only from `0x40037cc8`, which has exactly two reachable callers: SHOW_WIN's
+tail (unused here) and the tick at `0x40056aea`. That tick reaches it **only while
+`CD_SEGS` is still non-zero after being decremented** (`0x40056ae2 bne`). So with
+`CD_SEGS = 1` the single segment expires straight into the dismiss at `0x40056ae4` and
+the dot routine is never entered. `CD_CUR` therefore carries the whole duration rather
+than a quarter. Verified: **zero references to `0x40037cc8` in the blob.**
+
+## ⚠️ The bug the emulator could not have caught
+
+The tick is **gated on `CD_FLAG`**:
+
+```
+40056ab8  tstl 0x460d1e4c      ; CD_FLAG
+40056abe  beqs 0x40056afc      ; ZERO -> return; the countdown NEVER runs
+40056ac0  ...tick body...
+```
+
+An earlier version of `rl3_card` **cleared** `CD_FLAG`. On hardware that card would have
+sat there forever needing a keypress — reproducing the exact stuck box this change
+exists to remove. Static reading of the gate found it; the emulator could not, because
+**it does not drive the popup tick at all.**
+
+## Harness honesty: the self-dismiss is UNMEASURABLE here
+
+`diag_reload3_card.py` first reported "the card NEVER dismissed on its own". That was a
+**false failure**. A stock control settles it: tapping `[BANK]` opens stock's own
+SELECT BANK countdown window, and **it does not count down in this harness either** —
+`CD_TICK` fires zero times for both. So the tool now runs that control and reports
+UNMEASURABLE rather than failing, and says explicitly that this is **not evidence of
+success either**.
+
+Two further traps this tool hit, recorded so they are not repeated:
+- hook the gate `0x40056ab8`, **not** `0x40056ac0` — the latter is past the gate, so it
+  cannot distinguish "tick never ran" from "gate sent it home".
+- the `DRAWTEXT` hook is global: it also sees the status bar (y=1) and stock's title
+  draw (x=4). Filter to the **cave address range**; `min/max` over all ELF symbols spans
+  the whole address map (they include absolute equates like `0x80006a55`) and filters
+  nothing.
+- do not assume line 1 is the longer line. It is for `TRK SEQ + PART`/`RELOADED` but not
+  for `TRK SEQ`/`RELOADED`, and hardcoding it produced a false centring failure.
+
+## Verified in the emulator (both chords)
+
+Measured from the real draw calls:
+
+```
+BANK: 'TRK SEQ + PART' (x=9)   'RELOADED' (x=19)    box width 70
+PTN:  'TRK SEQ' (x=22)         'RELOADED' (x=19)    box width 70
+```
+
+The longer line sits further left in **both** directions — which is what makes it real
+centring rather than a coincidence of one card's line lengths. Also: MLNOTIFY never
+called, OK layer never pushed, dot routine never entered, block toast gone from the PTN
+path, `CD_FLAG` non-zero, and a **second reload draws immediately** (the old dialog
+blocked that until OK was pressed).
+
+**Needs hardware:** the self-dismiss actually firing, and the visual layout (spacing,
+title rendering, whether `TRK SEQ` / `RELOADED` reads better than one line). Cave is at
+1870 B of the 2044 B ceiling — 174 B headroom.
