@@ -1,6 +1,8 @@
 # MERGE.md — combining every final-scoped mod into one firmware
 
-**Status: READY TO BUILD, in two stages (re-scanned 2026-09-23, Session 86).**
+**Status: READY TO BUILD, in two stages (re-scanned 2026-09-23, Session 86; the two
+WIP mods' state and `patch_directjump`'s measured size refreshed 2026-09-24 after
+Session 87).**
 There is still deliberately no combined build on disk — `tools/build_merged.py` and
 `tools/emu_merged.py` remain withdrawn (recoverable from `068fbb5^`). This document is
 the authoritative allocation map they will be reconstructed from: cave addresses, the
@@ -34,7 +36,7 @@ also the right build boundary, because it is exactly the cut that removes both b
 | | contents | conflicts to resolve | headroom |
 |---|---|---|---|
 | **`KYOTI_V1.0`** | the **seven finished, hardware-confirmed mods** | **none** — mechanical repack only | 3196 B (53 %) |
-| **`KYOTI_V1.1`** | + DIRECT JUMP v4 + RELOAD3 | blockers **B1** and **B2** below | 652 B (11 %) |
+| **`KYOTI_V1.1`** | + DIRECT JUMP v4 + RELOAD3 | blockers **B1** and **B2** below | 676 B (11 %) |
 
 Build V1.0 first and flash it. It is a genuinely conflict-free composition of work that
 is already signed off on hardware, it is the thing that can ship, and it de-risks V1.1 by
@@ -67,8 +69,8 @@ and RELOAD2 and lacked these two. **Do not resurrect its mod table.**
 
 | Mod | Build | cave | state |
 |---|---|---|---|
-| DIRECT JUMP — `[PTN]`+`[YES]` | `build_directjump_v4.py` (**v4**, not v3) | 1044 B | toggle + switch timing HW-confirmed; playhead resets to step 1, root-caused, unfixed |
-| RELOAD FROM PROJECT — direct chords | `build_reload3.py` (**v3**, not v2) | 1500 B | chord redesign green through real dispatch in emu; never flashed |
+| DIRECT JUMP — `[PTN]`+`[YES]` | `build_directjump_v4.py` (**v4**, not v3) | 1020 B | **HW-confirmed at 1x** (Session 87): master time held through switches, correct landing step, mixed track lengths, MASTER LENGTH incl. `INF`. Open: any non-1x track or master scale |
+| RELOAD FROM PROJECT — direct chords | `build_reload3.py` (**v3**, not v2) | 1500 B | **first flash green** (Session 86): both chords execute, no conflicts. Three follow-ups built + diag-verified, not yet reflashed |
 
 **`build_directjump_v3.py` is superseded.** This document used to say "DIRECT JUMP: use
 v3". That is wrong now: v1–v3 were dead on hardware and v4 is the line. v4 is not a
@@ -111,13 +113,19 @@ and V1.1* and the free span stays contiguous below it.
 
 | Cave | Addr | Size |
 |---|---|---|
-| `patch_directjump` (`DJ_V3=1,DJ_KEYMAP=1`) | `0x400d6f80` | 1044 B |
-| `patch_reload3` | `0x400d7394` | 1500 B |
-| — free — | `0x400d7970` | **652 B** |
+| `patch_directjump` (`DJ_V3=1,DJ_KEYMAP=1`) | `0x400d6f80` | 1020 B |
+| `patch_reload3` | `0x400d737c` | 1500 B |
+| — free — | `0x400d7958` | **676 B** |
 | `patch_trigscale` | `0x400d7bfc` | 62 B **pinned** |
 
-⚠️ **11 % headroom is thin, and both WIP mods are still growing** (DIRECT JUMP grew from
-490 B to 1044 B over v3→v4; RELOAD went 1512 B → 1500 B only by dropping a whole picker).
+⚠️ **11 % headroom is thin, and both WIP mods are still moving** (DIRECT JUMP grew from
+490 B to 1044 B over v3→v4, then back to **1020 B measured 2026-09-24** as Session 87
+removed Hook P's two extra per-track writes; RELOAD went 1512 B → 1500 B only by dropping
+a whole picker, then stayed at 1500 B when Session 86 took it from four detours to six).
+Re-measure both before packing — these are the numbers a builder run printed at
+**commit `18824ad`**, not estimates, and they have each changed more than once. They
+are the *committed* sizes: an in-progress working tree can differ, so measure the tree
+you intend to pack from.
 If V1.1 overflows, the next-largest stock zero runs are **`0x400d24d0` (2064 B)** and
 `0x400d2ee6` (314 B) — usable, but a second zone means the builder must pack multiple
 spans, so treat it as a real change, not a one-line bump.
@@ -385,8 +393,12 @@ pattern change, Part change during a soft-mute tail, and QLREC's tick sharing
    checklist on the combined image (they are all individually signed off, so this is a
    regression pass, not a discovery pass), plus the two adjacency cases above:
    Part change during a soft-mute tail, and QLREC double-tap during an OTFX tail.
-2. Finish DIRECT JUMP (playhead reset) and RELOAD3 (never flashed), and flash each
-   **standalone** first — `build_directjump_v4.py` and `build_reload3.py`, not v3/reload2.
+2. Finish DIRECT JUMP (**non-1x track and master scales** — the 1x behaviour is already
+   HW-confirmed and is the baseline not to regress; see
+   `reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md`) and RELOAD3 (**reflash** — the first
+   flash was green, but the three Session 86 follow-ups have not been on hardware), and
+   flash each **standalone** first — `build_directjump_v4.py` and `build_reload3.py`, not
+   v3/reload2.
 3. Resolve **B1** (relocate `DJ_MODE`, with the watchpoint proof) and **B2** (scope
    RELOAD3's overlay assertion; merged builder owns the table).
 4. **Build and flash `KYOTI_V1.1`**, and test the gesture split: `[PTN]`+`[YES]` vs

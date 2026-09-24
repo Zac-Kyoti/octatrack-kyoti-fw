@@ -43,14 +43,16 @@ confirmed the Bug-1 fix.
 
 ## What this firmware does
 
-> **Branches.** The published **`main`** carries the finished work: the Bug-1
-> manual-trig fix, the Bug-2 pattern-LED fix, **MUTE MODE** (all four modes),
-> **QUANTIZE LIVE REC**, the **SIDE-CHAIN COMPRESSOR**, and **trigless-lock
-> auto-remove** — every one of them flashed and confirmed on MKI hardware.
-> **`wip`** is the frontier: it carries all of the above plus the work that is
-> still in progress — **DIRECT JUMP**, **RELOAD FROM PROJECT**, and the
-> **part-change carryover** fix, each with real open bugs. Per-feature status is
-> in the tables below.
+> **Branches.** The published **`main`** carries six finished features, every one
+> flashed and confirmed on MKI hardware: the Bug-1 manual-trig fix, the Bug-2
+> pattern-LED fix, **MUTE MODE** (all four modes), **QUANTIZE LIVE REC**, the
+> **SIDE-CHAIN COMPRESSOR**, and **trigless-lock auto-remove**. **`wip`** is the
+> frontier: all of those, plus a **seventh finished one** — the **part-change
+> carryover** fix, hardware-confirmed 2026-09-22/23 but not yet promoted to
+> `main` — plus the **Bugbuilds** composites, and the two threads still in
+> progress: **DIRECT JUMP** (hardware-confirmed at 1x scales; non-1x scales are
+> the open problem) and **RELOAD FROM PROJECT** (RELOAD3, first flash green,
+> follow-up fixes unflashed). Per-feature status is in the tables below.
 
 ### Bug 1 — Plays-Free MIDI manual-trig stall  ·  **fixed, hardware-confirmed (MKI)**
 
@@ -112,122 +114,166 @@ ORs the cue bits into the mute positions after this project's hook runs, and is 
 untouched by design — a decision, not a gap.
 
 
-### DIRECT JUMP — an Elektron-style immediate pattern change  ·  *active WIP, partly hardware-confirmed*
+### DIRECT JUMP — an Elektron-style immediate pattern change  ·  *hardware-confirmed at 1x scales; non-1x is the open thread*
 
 Toggled by **`[PTN]` + `[YES]`** (a transient "DIRECT JUMP ON/OFF" overlay), no
-PERSONALIZE entry. When on, manually cueing a new pattern:
+PERSONALIZE entry. It **deliberately does not persist** — it is a performance
+feature, so the unit comes up with it OFF on every power-on (Session 83; the
+change was purely subtractive, and the build asserts the ROM seed behind
+`DJ_MODE` really is zero). When on, manually cueing a new pattern:
 
 - switches on the **next step tick** instead of quantising to the end of the
   current pattern,
-- keeps the **playhead step position** (the new pattern resumes where the old
-  one was, modulo its length) rather than restarting at step 1 — **still open,
-  see below**,
+- **stays in master time** — the new pattern resumes at
+  `masterStep mod newMasterLen`, and each track at `that mod trackLen`, rather
+  than restarting at step 1,
 - loads the new **Part immediately**,
 - sends the MIDI Program Change ~1 step early.
 
-The arranger and pattern chains are untouched. Current build:
-`python3 tools/build_directjump_v4.py` → `140C_KYOTI` (`tools/patch_directjump.s`
-+ a `[PTN]`-held keymap fix). The toggle's **reachability and switch timing are
-hardware-confirmed**: earlier `v1`–`v3` builds were dead on hardware — the stock
-`[PTN]`-held overlay swallowed `[YES]`'s dispatch the whole time it was held, so
-the detour never ran at all — until `v4` fixed it by writing the toggle straight
-into that overlay's own `[YES]` slot. A crash found along the way
-(`EXCEPTION VEC:04`) was also root-caused and fixed. **Still open:** with DIRECT
-JUMP on, a manual pattern change currently restarts the new pattern at step 1
-instead of keeping the playhead position; the root cause was mechanically proven
-2026-09-20 (a spurious extra write into the sequencer's table-arm state on
-commit), but the fix is not yet built or flashed. Write-up:
-[`NOTES.md`](NOTES.md) "Session 15" + "Session 21" + "Session 35" → "Session 60"
-through "Session 79" (many parts); emulator `tools/emu_directjump.py` /
-`tools/emu_directjump_v4.py` / `tools/emu_directjump_dynamic.py`.
+The arranger and pattern chains are untouched. That position rule is not
+invented here: it is the Analog Rytm's own commit arithmetic, ported instruction
+for instruction after three flashed builds had each implemented a different
+reading of an English sentence (`reference/AR_DIRECT_JUMP.md`; the prose spec is
+retired). It is **not** elapsed-time alignment — the two coincide only when the
+two patterns' master scales match, which is exactly why every equal-scale test
+used to pass and every differing-scale one used to fail.
 
-### SIDE-CHAIN COMPRESSOR — external key input for the stock DynamiX compressor  ·  **hardware-confirmed, shipping**
+Current build: `python3 tools/build_directjump_v4.py` → `140C_KYOTI`
+(`tools/patch_directjump.s` + a `[PTN]`-held keymap fix). `v1`–`v3` are
+superseded — they were dead on hardware, because the stock `[PTN]`-held overlay
+swallowed `[YES]`'s dispatch the whole time it was held, until `v4` wrote the
+toggle straight into that overlay's own `[YES]` slot.
 
-Adds `KEY` / `KEY FLT` / `KEY GAIN` / `SC LISTEN` to the COMPRESSOR effect's
-page 2: pick any of the eight audio tracks to *drive* the compression on the
-track the compressor sits on (classic kick-ducks-the-pad), and it keeps keying
-even when the key track is muted. `KEY` reaches **any of the 8 tracks**, flat
-(`T1`..`T8`) — not just the four tracks that share the compressor's own DSP
-core, since the cross-core extension (below) shipped 2026-09-20.
+**Hardware-confirmed (MKI, 2026-09-23, Session 87)**, and this is the baseline
+not to regress: tracks and patterns stay in master time through a DIRECT JUMP
+switch, patterns land on the correct step between switches, mixed track lengths
+in one pattern work together (7 / 12 / 16), and **MASTER LENGTH is respected,
+including `INF`**.
 
-This is a DSP56300 job, not ColdFire. Built in stages:
+**The standing constraint:** all of that is confirmed only with **1x track scales
+and a 1x master scale**. Setting either to anything else produces unexpected
+results. That is the entire remaining problem, and the next thread — the standing
+hypothesis (stock rebuilds position in the *tick* domain while the ported rule is
+in the *step* domain, and they agree only at 1x) and the exact regions to
+re-derive are written up in
+[`reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md`](reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md).
 
-| build | contents | state |
-|---|---|---|
-| `build_sidechain.py` | the `KEY` menu parameter only; the DSP is untouched, so it does nothing audible | menu + dynamic `T1..T8` formatter **emulator-verified** |
-| `build_sidechain2.py` | + the DSP hooks: every track publishes its pre-FX block to a shared ring, and the compressor's detector reads the chosen track's ring. **SPATIALIZER is donated** for the code space and removed from the FX menu. | hooks **emulator-verified** under dsp56kEmu |
-| `build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | + `KEY GAIN` (declick-smoothed) + `KEY FLT` (one-pole LP/HP/OFF, declicked) + `SC LISTEN`/`MON`, all over a donated SPRING REVERB; **plus cross-core `KEY`** — a per-core generation counter and a shared-window (`Y:0x30000-0x3FFFF`) publish/foreign-read mechanism (adapted from octabam's own XBUS cross-core bus design) let the compressor key off any of the 8 tracks, not just its own core's 4 | **HARDWARE CONFIRMED on MKI, 2026-09-20** — single-core and cross-core both. Emulator-verified first: `emu_sc_dsp3.py` (same-core), `emu_sc_dsp3_xcore.py` (generation counter + cross-core addressing), and a genuine dual-core run under `tools/dsp56300_xcore`'s `dsp_host_xcore` (lock-step + timing-skew fuzz) |
+Two hardware faults were found and fixed on the way there, both worth recording:
+a **lockup** at transport start caused by gating a hook on a global that lives
+beyond the boot zero-fill and so held garbage at power-on (the emulator could
+never have caught it — Unicorn zero-fills memory, so the gate now poisons that
+scratch block before every patched run), and **doubled trigs** caused by writing
+a per-track "previous step" array that stock's commit tail deliberately leaves
+alone, feeding `0xFF` into the voice dispatcher. Write-up: [`NOTES.md`](NOTES.md)
+"Session 15" + "Session 21" + "Session 35" → "Session 60" through "Session 87"
+(many parts); emulators and diagnostics `tools/emu_directjump*.py`,
+`tools/diag_resume_pos.py`, `tools/diff_stock_vs_patch.py`.
+
+### SIDE-CHAIN COMPRESSOR — external key input for the stock DynamiX compressor  ·  **hardware-confirmed, final**
+
+Adds `KEY` / `KFLT` / `KGN` / `MON` to the COMPRESSOR effect's page 2: pick any
+of the eight audio tracks to *drive* the compression on the track the compressor
+sits on (classic kick-ducks-the-pad), and it keeps keying even when the key track
+is muted. `KEY` reaches **any of the 8 tracks**, flat (`T1`..`T8`) — not just the
+four that share the compressor's own DSP core. `KGN` trims the key
+(declick-smoothed), `KFLT` is a declicked one-pole filter (below centre LP, above
+centre HP, centre = off), and `MON` auditions the filtered key signal instead of
+the track.
+
+This is a DSP56300 job, not ColdFire, and it is one build:
+
+```sh
+python3 tools/build_sidechain3.py    # -> out/OCTATRACK_SIDECHAIN3_CROSS.{syx,bin}
+```
+
+**Hardware-confirmed on MKI, 2026-09-20 — single-core and cross-core both.**
+Every track publishes its pre-FX block to a shared ring and the compressor's
+detector reads the chosen track's ring; reaching *across* cores adds a per-core
+generation counter and a shared-window (`Y:0x30000-0x3FFFF`) publish/foreign-read
+mechanism, adapted from octabam's own XBUS cross-core bus design. Emulator-
+verified before it was ever flashed: `emu_sc_dsp3.py` (same-core),
+`emu_sc_dsp3_xcore.py` (generation counter + cross-core addressing), and a
+genuine dual-core run under `tools/dsp56300_xcore`'s `dsp_host_xcore` (lock-step
+plus timing-skew fuzz).
+
+**What it costs:** the DSP code space is donated by **SPRING REVERB**, an
+FX2-exclusive effect, which is pulled from the FX2 chooser (15 → 14 entries) and
+null-stubbed so an older project still referencing it by id stays safe.
+**SPATIALIZER is untouched** and remains a normal selectable effect — an earlier
+stage of this work donated SPATIALIZER instead, ran out of slack, and was
+reverted.
 
 A very mild HP↔OFF filter pop remains (three declick designs tried and
-reverted — see `NOTES.md` Session 76's trail); low-ATK/REL "graininess" on a
-busy key is filed as research-only, no fix attempted. Neither blocks
-shipping. Write-up: [`NOTES.md`](NOTES.md) "Session 17" (+ continued 1–8) →
-"Session 77" (×3, the cross-core work); DSP source `tools/patch_sc_dsp.asm` /
-`patch_sc_dsp3.asm`; emulators `tools/emu_sidechain.py`, `tools/emu_sc_dsp.py`,
-`tools/emu_sc_dsp3.py`, `tools/emu_sc_dsp3_xcore.py`.
+reverted — see `NOTES.md` Session 76's trail); low-ATK/REL "graininess" on a busy
+key is filed as research-only, no fix attempted. Neither blocks shipping.
+Write-up: [`NOTES.md`](NOTES.md) "Session 17" (+ continued 1–8) → "Session 77"
+(×3, the cross-core work); sources `tools/patch_sidechain.s`,
+`tools/patch_sc_dsp3.asm`, `tools/sc_tables.py`.
 
-### RELOAD FROM PROJECT — reload a pattern from the CF card without stopping playback  ·  *active WIP, partly hardware-confirmed*
+### RELOAD FROM PROJECT — reload a track's sequence from the card, in time  ·  *active WIP; first flash green, follow-up fixes unflashed*
 
 Stock 1.40C can only reload from the card at whole-**bank** granularity, and doing
 so **stops the transport**. (An earlier version of these notes said it "glitches
 the audio" — that is wrong, and was corrected on hardware: stock simply stops the
-sequencer.) Stock's RELOAD BANK is in fact exactly the `PART + PTN SEQ` operation
-this feature offers; what is being added is finer granularity plus doing it *in
-time with the master clock, without stopping the transport*. Adapted from the
-Digitone's RELOAD FROM PROJ.
+sequencer.) What this adds is finer granularity, and doing it *in time with the
+master clock, without touching the transport at all*. Adapted from the Digitone's
+RELOAD FROM PROJ.
 
-**Hold `[BANK]` and tap `[YES]`** opens a picker window (the gesture moved off
-`[PTN]`, which was triple-booked; `[PTN]` is byte-for-byte stock in this build) —
-a quick `[BANK]` tap is
-unchanged. The **arrow keys** move the highlight; **`[YES]`** executes it and
-closes the window; **`[NO]`** closes it and runs nothing. Like every stock menu
-it has **no timeout** — it stays until you answer it. While it is open
-`[YES]`/`[NO]` act only on the picker. All items reload from the card's last
-**SAVE BANK** snapshot:
+**The picker is gone** (Session 85). Two direct chords — no modal window, no
+keymap layer of ours, no arrows, no timeout, no BUSY state:
 
-Current build (`tools/patch_reload2.s`, `python3 tools/build_reload2.py` →
-`OCTATRACK_OS1.40C_RELOAD2.{syx,bin}`) — the window opens with **TRK SEQ**
-highlighted, so `[PTN]`-hold then `[YES]` is a complete gesture:
-
-| item | what it does |
+| chord | what it does |
 |---|---|
-| **TRK SEQ** | the sequence data of the **one currently-addressed track** — audio track if you are on the audio pages, MIDI track if on the MIDI pages. Everything for that track (regular + recorder trigs, trigless trigs, trigless locks and their locked values, swing/slide, micro-timing, trig conditions, its step count). The other 7 tracks, the pattern length/scale, and the pattern→Part link are all left alone. |
-| **PTN SEQ** | the whole active pattern's sequence data — all 8 audio + all 8 MIDI tracks + length + scale. The pattern's Part **assignment is preserved** (a sequence reload never re-points the pattern at a different Part). |
-| **PART + PTN SEQ** | faithful restore: PTN SEQ *including* the Part link, then that saved Part is made current on the engine. The pattern comes back exactly as the card has it. |
+| **`[PTN]` + `[TRACK n]`** | reload track *n*'s card-saved sequence — audio or MIDI. Everything for that track: regular and recorder trigs, trigless trigs, trigless locks and their locked values, swing/slide, micro-timing, trig conditions, its step count. The other 7 tracks, the pattern length/scale and the pattern→Part link are left alone. **The Part does not change.** Toast `TRK SEQ RELOADED`, and the `[PTN]` release does not raise SELECT PATTERN. |
+| **`[BANK]` + `[TRACK n]`** | the same, plus re-apply the saved **Part** — from **RAM, not the card**: the saved copy of the Part currently associated with the pattern, so a Part you saved this session is what comes back. That half is stock's own reload-part routine, so a never-saved Part gets stock's own verdict rather than logic of ours. Two-line toast `TRK SEQ + PART` / `RELOADED`, or the never-saved box alongside the sequence result. |
 
-An earlier 3-item build (**PTN SEQ** / **ALL PARTS** / **PARTS + PTN SEQ**, no
-per-track option) predates the hardening below and isn't maintained going
-forward — historical only, see `NOTES.md`.
+The sequence always comes from the card's last **SAVE BANK** snapshot
+(`bankNN.strd`). An async job on the storage task parses the target out of it
+with the firmware's own per-pattern chunk parser, copies it into the live blob,
+and refreshes the live cache. No other pattern, no other bank, no disk write, no
+confirmation prompt.
 
-An async job on the storage task parses the target pattern from `bankNN.strd`
-with the firmware's own per-pattern chunk parser, copies it into the live blob, and
-fires the sequencer's own no-stop reload flag. No other pattern, no other bank, no
-disk write. Guards are the stock ones: a never-saved bank shows *"THIS BANK HAS
-NEVER BEEN SAVED! NOTHING TO RELOAD!"*. No confirmation prompt.
+**Why a redesign rather than another fix.** Across the whole RELOAD thread the
+bug tally was lopsided: ~13 hardware bugs in the picker / keymap / popup
+machinery, and **none** in the worker that actually does the reload. Deleting the
+modal UI took the build from 10 detours and 2186 cave bytes to 6 and 1500, and it
+now *asserts* that it pokes no keymap record at all — every `[PTN]`/`[BANK]`
+handler and overlay record is byte-for-byte stock.
 
-Six hooks (the `[PTN]` key handler for the hold, the `[NO]` and `[YES]` handlers,
-two arrow key handlers, and the storage task's bank-reload case). **First hardware
-flash (2026-09-20) found 3 real bugs**: the `[YES]`/`[NO]` handlers could be
-unreachable while still physically holding `[PTN]` (the same overlay issue DIRECT
-JUMP hit — fixed and dynamically verified against the real keymap code); a
-`RUNNING`-transport gate that turned out not to be load-bearing (dropped, so the
-picker now works whether the transport is running or stopped); and a case where,
-after one successful reload, holding `[PTN]` again stopped opening the picker at
-all with no recovery (fixed by removing the flawed gate rather than chasing its
-exact root cause). **These fixes are built and emulator-verified but not yet
-reflashed.** A real fix for the reload's own timing (an audible gap and a reset to
-step 1 rather than the playhead position — comparable in scope to DIRECT JUMP's own
-playhead work) and a proper multi-item list-style picker UI are both deferred.
-Write-up: [`NOTES.md`](NOTES.md) "Session 42"–"44" + "Session 47" + "Session 80"
-(+ continued); emulator `tools/emu_reload.py` / `emu_reload2.py` — `--combo` (the
-whole picker, single-stepped), `--patched` (the whole-pattern SEQ worker end to
-end), and `--trk` (per-track slice: only the addressed track reverts) pass. Still
-hardware-only: the parse against a real CF card, `FUN_40009094` from the storage
-task while playing, and the reload's seamless-timing feel.
+**A reload does not touch the clock.** The first RELOAD3 flash restarted both the
+track sequence and the internal metronome; the cause was arming stock's
+`RELOAD_NOW` flag, which gates a whole-bank **re-home** — a positional operation
+that zeroes the master playhead, the same word the metronome's beat flags derive
+from. One write explained both symptoms. `RELOAD_NOW` is now armed on no path,
+and dropping it costs nothing: the worker's own live-cache refresh already keeps
+both trig-data consumers current, and stock re-reads per-track scale from the
+blob on every wrap, so a changed step count self-heals within one cycle, in time.
 
-A **power move** — hold `[PTN]` + tap a `[TRACK]` key for immediate per-track
-reload, no picker — is scoped but not built (the chord is free; it needs a
-track-key-handler hook).
+**SELECT BANK moved to the `[BANK]` release**, matching `[PTN]`'s own gesture
+shape, and neither chord shows a window on either event. The press still pushes
+the `[BANK]` overlay layer, silently — that layer is what remaps the 16 trig keys
+to bank-select while `[BANK]` is held, and deferring it along with the window
+would have quietly turned hold-`[BANK]`+trig into sequence editing.
+
+Carried over from RELOAD2 because it is proven: the per-track worker slice, the
+`.strd` open, and the whole-bank suppression that cut a reload from **6852
+buffered card reads to 354**.
+
+Build: `python3 tools/build_reload3.py` → `OCTATRACK_OS1.40C_RELOAD3.{syx,bin}`
+(`tools/patch_reload3.s`, 6 detours, 1500 B cave). **First hardware flash
+(2026-09-23): both chords execute, no conflicts** — the redesign works. Three
+follow-ups came back from that flash (the transport/metronome restart, the
+`[BANK]`-release deferral, the two-line Part toast); all three are built and
+diagnostic-verified but **not yet reflashed**. Deferred by the user: all-tracks
+and whole-bank variants. Still unknown: the root cause of the old stuck-`G_KIND`,
+though the redesign leaves no modal state for a lost post to wedge. `RELOAD2`
+(the 3-item `[BANK]`+`[YES]` picker) and `RELOAD` (the original) are superseded
+and kept only for rollback and reference. Spec and measurements:
+[`reference/RELOAD_REDESIGN.md`](reference/RELOAD_REDESIGN.md); write-up
+[`NOTES.md`](NOTES.md) "Session 42"–"44" + "Session 47" + "Session 80"–"Session
+86" (many parts); diagnostics `tools/diag_reload3_chords.py`,
+`diag_reload3_timing.py`, `diag_reload3_bankdefer.py`, and the RELOAD2-era
+`emu_reload2.py`.
 
 ### QUANTIZE LIVE REC — a front-panel toggle for the live-record quantize  ·  *hardware-confirmed; two cosmetic issues parked*
 
@@ -318,12 +364,14 @@ stores as the same `0xFF` that means "not locked", so stock itself cannot tell s
 from an absent one. The LED is already wrong for that case today, patched or not.
 
 
-### Part-change carryover — Part params leaking across a pattern→Part change  ·  *active WIP, partly hardware-confirmed*
+### Part-change carryover — Part params leaking across a pattern→Part change  ·  **2 of 3 reports fixed, hardware-confirmed (MKI)**
 
 Three Elektronauts reports, one family: a pattern change that links a different
 Part runs only a partial stock re-apply, so stale Part-2 state can leak into the
 newly-linked Part. `tools/patch_partreapply.s`, `python3 tools/build_partreapply.py`
-→ `1.40C` (stock-transparent).
+→ `1.40C` (stock-transparent). The thread is **closed**: the two reports that could
+be reproduced are fixed and hardware-confirmed. This is the one finished feature
+that lives on `wip` only — `main` still carries the older, pre-Session-81 build.
 
 **Report #1 (a FLEX track stuck playing an old PICKUP loop) is fixed and
 hardware-confirmed (MKI, 2026-09-22).** The voice dispatch reads the
@@ -351,6 +399,41 @@ are still treated as unconfirmed; the recorder-cache and scene-morph pieces were
 flashed 2026-09-13 and are behaviorally safe. Write-up: [`NOTES.md`](NOTES.md)
 "Session 49", "Session 50", "Session 81".
 
+### Composite builds — the bug fixes folded in, and the staged all-in-one
+
+Two ways to combine, both on `wip`.
+
+**Bugbuilds** (`python3 tools/build_bugbuilds.py`) folds all three bug fixes into
+each finished *feature* image — MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS and TRIGLOCK,
+each plus PARTREAPPLY + PATTERNLED + PLAYSFREEFIX — writing only to
+`out/Bugbuilds/`, so the standalone per-feature images are left untouched. It
+composes *onto* the finished feature image rather than re-deriving it: SIDE-CHAIN
+in particular is never rebuilt, so its DSP payloads, COMPRESSOR descriptor and FX2
+chooser edits pass through unchanged and its cave keeps its address. Cave placement
+is automatic, and every run asserts an interlock proof on every image — each cave
+region all-zero before use, every detour site still holding exact stock bytes, no
+branch into a detour site, and a byte-level compositionality check: the composite's
+delta against stock is exactly the *disjoint union* of the feature's own delta and
+the three fixes' own, with no unattributed bytes. All four images report clean.
+`--with-wip` will fold the fixes into DIRECT JUMP and RELOAD3 the same way once
+those are finished.
+
+**The single all-in-one image is staged, not built.** `tools/build_merged.py`
+stays withdrawn on purpose, so one combined image cannot quietly ship an unfinished
+feature; [`reference/MERGE.md`](reference/MERGE.md) is the authoritative allocation
+map it will be rebuilt from, re-scanned against true stock on 2026-09-23. That
+re-scan found the merge got substantially *simpler*: all 27 detour sites across all
+nine mods are distinct with zero byte overlap, the free zone is one contiguous
+5986-byte run, and the old `[YES]`-handler collision is **gone** — DIRECT JUMP v4
+reaches its toggle through the `[PTN]` keymap overlay and RELOAD3 deleted its
+picker, so neither detours `0x4005e4c8` any more (the `[YES]` trampoline and the
+`MERGE=1` chaining mechanism are obsolete). Hence two stages:
+
+| | contents | to resolve | headroom |
+|---|---|---|---|
+| **`KYOTI_V1.0`** | the seven finished, hardware-confirmed mods | none — mechanical repack only | 3196 B (53 %) |
+| **`KYOTI_V1.1`** | + DIRECT JUMP v4 + RELOAD3 | two builder-assertion conflicts, both DIRECT-JUMP-vs-someone-else | 652 B (11 %) |
+
 ### Hardware-test status — read before you flash
 
 | element | build | on-hardware status (Octatrack MKI) |
@@ -363,12 +446,14 @@ flashed 2026-09-13 and are behaviorally safe. Write-up: [`NOTES.md`](NOTES.md)
 | **QUANTIZE LIVE REC** front-panel toggle | `build_qlrec.py` | original design hung the unit 2026-09-13; rewrite (periodic `dur>0` re-arm) **HW-confirmed**, no hang; double-tap timing, toast fade/instant-close, and label polarity **all HW-confirmed correct**; 2 cosmetic issues (textless-box flash, PERSONALIZE row not live-redrawing) parked, not chased further |
 | **MUTE MODE** — all four modes (`OT` / `OTFX` / `OTFX-T` / `DT-T`), menu, SOLO handling | `build_mutemode_dt.py` | **confirmed, final** — flashed and hardware-tested 2026-09-21, MKI; all four modes and the derived menu index check out |
 | ↳ the `'ANDY'`-shadow persistence (survives power cycle) | `build_mutemode_dt.py` | **confirmed** — one persisted word, defaults verified on hardware |
-| **DIRECT JUMP** pattern-change mode | `build_directjump_v4.py` | **active WIP, partly hardware-confirmed** — toggle reachability and switch timing confirmed working on hardware (earlier `v1`–`v3` were dead on hardware, superseded); the playhead-preserving behaviour (currently resets to step 1) is root-caused but **not yet fixed** |
-| side-chain compressor (`KEY`/`KEY FLT`/`KEY GAIN`/`SC LISTEN`, cross-core) | `build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | **confirmed, final for now** — flashed 2026-09-20, MKI, "seems to be working well"; cross-core `KEY` (any of 8 tracks) included |
-| **RELOAD FROM PROJECT** — modal picker | `build_reload2.py` (TRK SEQ / PTN SEQ / PART + PTN SEQ) | **active WIP, partly hardware-confirmed** — first flash (2026-09-20) found 3 real bugs, 2 fixed (a `[PTN]`-held reachability issue and a permanent picker lockout) but **not yet reflashed**; the reload's own timing (audible gap / step-1 reset) and a real list-style picker UI are deferred |
+| **DIRECT JUMP** pattern-change mode | `build_directjump_v4.py` | **confirmed at 1x, active WIP beyond it** — flashed 2026-09-23, MKI: master time held through switches, correct landing step, mixed track lengths (7/12/16), MASTER LENGTH respected incl. `INF`, no doubled trigs. **Only with 1x track scales and a 1x master scale**; anything else is unexpected and is the open thread. Earlier `v1`–`v3` were dead on hardware, superseded |
+| side-chain compressor (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | **confirmed, final** — flashed 2026-09-20, MKI, "seems to be working well"; cross-core `KEY` (any of 8 tracks) included. Donor is SPRING REVERB (pulled from the FX2 list); SPATIALIZER untouched |
+| **RELOAD FROM PROJECT** — two direct chords | `build_reload3.py` (`[PTN]`/`[BANK]` + `[TRACK n]`) | **active WIP, first flash green** — flashed 2026-09-23, MKI: both chords execute, no conflicts. Three follow-ups from that flash (reload restarting the sequence + metronome, SELECT BANK on the `[BANK]` release, two-line Part toast) are built and diagnostic-verified but **not yet reflashed**. All-tracks and whole-bank variants deferred |
 | **TRIGLESS-LOCK AUTO-REMOVE** | `build_triglock.py` | **confirmed, final** — flashed 2026-09-21, MKI; multi-pass erase, last-lock removal, ordinary trigs untouched, and `FUNC`+`TRIG` placeholders preserved |
+| Bugbuild composites (feature + all 3 bug fixes) | `build_bugbuilds.py` → `out/Bugbuilds/` | **not flashed.** Each base feature and each bug fix is individually hardware-confirmed above, and every composite carries a per-run interlock proof (disjoint deltas, stock bytes at every detour site) plus an `emu_pattern_led` pass — but no composite image has been on hardware yet |
 
-`OT` mode is byte-for-byte stock, and every mod is `OFF` by default. Everything
+`OT` mode is byte-for-byte stock, and every mod is `OFF` by default — DIRECT JUMP
+additionally does not persist, so it is OFF again after any power cycle. Everything
 above is validated primarily in a ColdFire emulator (Unicorn, real image bytes —
 RELOAD in a full-firmware emulator with a mounted card) and the side-chain DSP in
 dsp56kEmu — control-flow and frame-word edits, not a guarantee of how anything
@@ -442,7 +527,7 @@ Elektron ships a ZIP with **two transports of the same OS** — a `.bin` and a
 ```
 START_HERE.md        onboarding + current frontier (read first)
 README.md            this — what the firmware is, and lineage
-BUILD_KYOTI.md       roll-your-own build guide (Bug 1 & 2 fixes, MUTE MODE, DIRECT JUMP, side-chain, RELOAD, QUANTIZE LIVE REC)
+BUILD_KYOTI.md       roll-your-own build guide (every build_*.py, prerequisites, version strings)
 CREDITS.md           lineage and acknowledgements
 ARCHITECTURE.md      consolidated architecture (hardware, OS, memory map, container)
 COVERAGE.md          what firmware subsystems are mapped vs untouched
@@ -450,7 +535,9 @@ NOTES.md             the full chronological reverse-engineering log
 FLASHING.md          safe-flashing guide + bootloader recovery net (read before flashing)
 
 reference/kb/         distilled knowledge base (address map, formats, DSP) — ours + external RE
-reference/            EXTERNAL_RESEARCH.md (the mined prior-art repos + workflow), UPSTREAM_INBOX.md
+reference/            MERGE.md (the all-in-one allocation map), AR_DIRECT_JUMP.md, RELOAD_REDESIGN.md,
+                      EXTERNAL_RESEARCH.md (the mined prior-art repos + workflow), UPSTREAM_INBOX.md
+reference/handoffs/   per-thread handoffs for the work still open (DIRECT JUMP scales, RELOAD2)
 reference/upstream-notes.md   inherited octamax mod-design notes (not part of this firmware)
 refs/                MANIFEST.{toml,lock} tracked; the clone cache under it is git-ignored
 sysex/               the Bug-1 fix as JSON hunks + a no-assembler applier
@@ -482,7 +569,8 @@ See **[`BUILD_KYOTI.md`](BUILD_KYOTI.md)** for the full walkthrough. In short:
 
 ```sh
 ./fetch-os.sh && ./analyze.sh && ./setup.sh   # one-time: bring your own OS 1.40C + tools
-python3 tools/build_qlrec.py                  # -> out/OCTATRACK_*QLREC.{syx,bin}
+python3 tools/build_qlrec.py                  # one feature -> out/OCTATRACK_*QLREC.{syx,bin}
+python3 tools/build_bugbuilds.py              # each finished feature + all 3 bug fixes -> out/Bugbuilds/
 ```
 
 Every build is a guarded binary patch: it asserts the stock bytes at each splice,
