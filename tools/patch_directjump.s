@@ -228,6 +228,12 @@
                                         | at TRK_LEN_SRC + patOff + t*0x91a
     .equ MIDI_LEN_SRC, 0x400e6ad8       | TRK_BLOB + 0x48f8 -- MIDI track m's LENGTH byte is
                                         | at MIDI_LEN_SRC + patOff + m*0x8b0
+    .equ TICK_CTR,  0x800065b6          | alias of STEP below, under its MEASURED name:
+                                        | master TICKS-WITHIN-STEP, wrapping at
+                                        | LEN_TBL[SCALE_IX] (Session 82). Named here because
+                                        | dj_d7's tick conversion reads it as a tick count,
+                                        | and calling it STEP there would invite exactly the
+                                        | unit error that conversion exists to fix.
     .equ MASTER_STEPS2, 0x80006638      | Session 89: the STOCK-PAIRED COMPANION of
                                         | MASTER_STEPS (0x80006628). Stock writes the two
                                         | together, same value, at all three of its own
@@ -530,9 +536,10 @@ djb_orig:
     .global dj_d7
 dj_d7:
     tst.b   G_ARMED
-    beq.b   djd7_orig
-    lea     -16(%sp),%sp
-    movem.l %d0-%d2/%a1,(%sp)
+    beq.w   djd7_orig                  | .w: the Session 89 tick-conversion block below put
+                                       | djd7_orig out of 8-bit branch range
+    lea     -24(%sp),%sp
+    movem.l %d0-%d4/%a1,(%sp)
     move.l  %d0,%d2                    | d2 = pattern blob offset (caller's D0)
     lea     PAT_SMODE,%a1
     tst.b   (%a1,%d2.l)
@@ -543,9 +550,73 @@ djd7_normal:
     lea     PAT_LEN,%a1                | NORMAL mode   -> pattern LENGTH (+0x8e53)
 djd7_gotlen:
     moveq   #0,%d1
-    move.b  (%a1,%d2.l),%d1
+    move.b  (%a1,%d2.l),%d1            | d1 = the INCOMING pattern's length, in STEPS
+|   ---- Session 89: convert through TIME, not through a step COUNT ----
+|   A master STEP is not a fixed amount of time -- it is LEN_TBL[masterScale] ticks, so it
+|   is 6 ticks in a 1x pattern and 3 in a 2x one. Carrying MASTER_STEP across a commit that
+|   also changes the MASTER SCALE is therefore a UNIT ERROR: it is exactly right when the
+|   two scales match (which is the whole 1x baseline) and wrong in proportion to the
+|   mismatch otherwise, with a residue that depends on where in the bar the switch landed.
+|   Reported as "totally dependent on the user's pattern switch cadence".
+|
+|   The user's spec, which this implements: both patterns share ONE timebase, each wrapping
+|   at its own cycle length, so a switch is transparent. With two 16-step tracks and the
+|   second pattern at master 2x, pattern 1 step 1 must coincide with pattern 2 step 1, and
+|   pattern 2 step 1 with pattern 1 step 1 OR 9 (pattern 2's cycle is 48 ticks, pattern 1's
+|   is 96, so it comes round twice as often).
+|
+|       ticks   = MASTER_STEP * tps_out + TICK_CTR
+|       newStep = (ticks / tps_in) mod newMasterLen
+|
+|   At 1x, tps_out == tps_in and (ms * tps)/tps == ms, so this is ARITHMETICALLY IDENTICAL
+|   to the old `MASTER_STEP mod newMasterLen` -- the baseline is preserved by identity, not
+|   by testing.
+|
+|   MEASURED at this site (tools/diag_hookh_inputs.py, four armed commits): SCALE_IX still
+|   holds the OUTGOING master's scale, ACT_PAT is ALREADY the incoming pattern, TICK_CTR is
+|   always 0 (the step body is gated on it), and the order within the tick is
+|   HookD(0x400a4220) -> ACT_PAT=PEND(0x400a44d0) -> HookH(0x400a47f6).
+|
+|   Division is a subtraction loop, deliberately: it introduces no instruction form stock
+|   does not already use here. Worst case is masterLen 64 * tps 96 / 3 = 2048 iterations,
+|   a few tens of microseconds on a 264 MHz part; the ordinary case (16 * 6 / 3) is 32.
+    moveq   #0,%d4
+    move.b  SCALE_IX,%d4               | the OUTGOING master's scale index
+    lea     LEN_TBL,%a1
+    move.l  (%a1,%d4.l*4),%d4          | d4 = tps_out
     moveq   #0,%d0
-    move.w  MASTER_STEP,%d0            | the bounded playhead
+    move.w  MASTER_STEP,%d0            | the bounded playhead, in OUTGOING master steps
+    muls.l  %d4,%d0                    | d0 = ticks elapsed in this master cycle
+    moveq   #0,%d4
+    move.b  TICK_CTR,%d4
+    add.l   %d4,%d0                    | + sub-step ticks (measured 0 here, added for safety)
+|   d3 = tps_in, the INCOMING master's ticks-per-step, chosen the same way stock's own D7
+|   setup at 0x400a4802-0x400a4826 chooses it: MASTER SCALE in PER TRACK mode, the pattern
+|   multiplier in NORMAL mode.
+    lea     PAT_SMODE,%a1
+    tst.b   (%a1,%d2.l)
+    beq.b   djd7_tps_normal
+    lea     PAT_MSCALE,%a1
+    bra.b   djd7_tps_got
+djd7_tps_normal:
+    lea     PAT_SCALE,%a1
+djd7_tps_got:
+    moveq   #0,%d3
+    move.b  (%a1,%d2.l),%d3
+    lea     LEN_TBL,%a1
+    move.l  (%a1,%d3.l*4),%d3          | d3 = tps_in
+    moveq   #0,%d4                     | d4 = quotient
+    tst.l   %d3
+    ble.b   djd7_lenchk                | unreadable scale -> leave the tick count alone
+djd7_div:
+    cmp.l   %d3,%d0
+    blt.b   djd7_divdone
+    sub.l   %d3,%d0
+    addq.l  #1,%d4
+    bra.b   djd7_div
+djd7_divdone:
+    move.l  %d4,%d0                    | d0 = newStep, in INCOMING master steps
+djd7_lenchk:
     tst.l   %d1
     ble.b   djd7_store                 | INF / unreadable length -> leave the raw index
                                        | unwrapped; stock's own rebuild reduces it per track
@@ -561,10 +632,10 @@ djd7_store:
 |   the reader at 0x4009da88 EXECUTED WHILE STALE, twice per commit, seeing 0. One code path
 |   was told "start at master step 8" and another "start at 0". Stock never allows that:
 |   every one of its own writes sets the pair. So set both, exactly as stock does.
-    move.l  %d0,MASTER_STEPS           | = AR's new_step
+    move.l  %d0,MASTER_STEPS           | = AR's new_step, now in the INCOMING master's steps
     move.l  %d0,MASTER_STEPS2          | stock writes these two as a PAIR -- never one alone
-    movem.l (%sp),%d0-%d2/%a1
-    lea     16(%sp),%sp
+    movem.l (%sp),%d0-%d4/%a1
+    lea     24(%sp),%sp
 djd7_orig:
     lea     0x400eb034,%a0             | displaced original
     rts

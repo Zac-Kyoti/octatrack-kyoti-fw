@@ -101,7 +101,15 @@ def main(argv):
     def on_write(u, access, addr, size, value, user):
         pc = u.reg_read(er.eb.UC_M68K_REG_PC)
         who = "CAVE(ours)" if CAVE_LO <= pc < CAVE_HI else "stock"
-        st["w"].append((st["tick"], "A 0x28" if addr == A else "B 0x38", pc, who, value))
+        # Unicorn's hook end is INCLUSIVE, so a begin=X,end=X+4 range also catches X+4 --
+        # 0x8000662c for the A range. Label by the ACTUAL address, never by "not A".
+        if addr == A:
+            nm = "A 0x28"
+        elif addr == B:
+            nm = "B 0x38"
+        else:
+            nm = f"other {hex(addr)}"
+        st["w"].append((st["tick"], nm, pc, who, value))
 
     def on_read(u, addr, size, user):
         vb = int.from_bytes(bytes(u.mem_read(B, 4)), "big")
@@ -109,8 +117,8 @@ def main(argv):
         st["reads"].append((st["tick"], addr, va, vb))
 
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_tick, begin=TICK_PC, end=TICK_PC)
-    rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_write, begin=A, end=A + 4)
-    rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_write, begin=B, end=B + 4)
+    rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_write, begin=A, end=A + 3)
+    rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_write, begin=B, end=B + 3)
     for pc in READERS:
         rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_read, begin=pc, end=pc)
     rt.start_transport_live()
