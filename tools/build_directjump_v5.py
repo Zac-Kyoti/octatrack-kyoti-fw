@@ -146,12 +146,36 @@ PATCHES = [
       # word at 0x400a483a, so the metronome and the patterns get the same number by
       # construction. See NOTES.md Session 83.
       (0x400a47f6, "dj_d7", "41f9400eb034", 6, "jsr"),
-      # Session 85 -- Hook P: AR's per-track loop (0x4009927c-0x400992d2) written directly
-      # over stock's rebuild output. Stock computes position in the TICK domain and so
-      # rescales it by the ratio of the two master scales; AR divides new_step by the
-      # track's LENGTH and nothing else. 0x400a4d36 is the common per-tick exit, reached
-      # after the commit body's tail, and is gated on G_JUST_COMMITTED.
-      (0x400a4d36, "dj_pertrack", "4ab946107568", 6, "jsr"),
+      # Session 89 -- Hook P (dj_pertrack @0x400a4d36) REMOVED; the site is left STOCK.
+      # Session 85 added it to write AR's per-track position over stock's rebuild output, on
+      # the stated grounds that "stock writes the low byte of NEXT_STEP[t] WITHOUT reducing
+      # it modulo the track length". That premise is FALSE. Stock's rebuild reduces it at
+      # 0x400a4976 (`remsl %d0,%d2,%d1`, d0 = the track's own LENGTH from blob +0x50, or
+      # PAT_LEN in NORMAL mode) and stores the reduced value straight back at 0x400a497a.
+      # So stock already produces exactly what Hook P was written to supply:
+      # ceil(D7 / tps_t) mod trackLen_t -- per-track rate domain, length-reduced.
+      #
+      # MEASURED (tools/diag_commit_phase.py on the GOLD S87 image, DJTEST2 A08 -> A07, a
+      # real armed commit). Every STEP_ARR writer at the commit tick:
+      #   0x400a4be6 [stock, audio] tracks 0,2,3,4,5,6,7 -> 11,11,4,6,11,11,11
+      #   0x400a4cb0 [stock, MIDI ] tracks 8..15         -> 11 each
+      #   0x400d77c2 [Hook P      ] ALL 16               -> 11 each except track 3 -> 4
+      # Stock covers all sixteen tracks and is per-track correct (track 3 LEN 7 -> 4;
+      # track 4 tps 12 -> 6). Hook P's writes are byte-IDENTICAL to stock's everywhere
+      # except that it FLATTENS track 4's correct 6 to the master-domain 11, and forces
+      # track 1 -- which stock deliberately deferred via CNTDN_TBL = max(1, tps_master + 1
+      # - tps_t) = 4 -- to reposition immediately.
+      #
+      # At 1x every track has tps == tps_master, so every Hook P write equals stock's and
+      # the hook is a measured no-op: that is why the Session 87 baseline is 1x-only.
+      # Removing it therefore cannot change 1x behaviour, and at non-1x it restores stock's
+      # own per-track values and stock's own phase-alignment deferral.
+      #
+      # NOTE this also removes the need for AR-fidelity here. AR flattens to the master step
+      # domain exactly as Hook P did (AR 0x400992b2-0x400992be, new_step unchanged per
+      # track), and the user confirmed on real AR hardware that a mid-cycle jump with a 2x
+      # track produces an audible LURCH -- an extra trig at a desynchronised step -- before
+      # settling. Stock OT's per-track answer is better than AR's here, so we keep it.
       # Session 83: Hook T (dj_tstart @0x4009c3d4) REMOVED -- it existed only to reset
       # G_ABSTICK at transport start. No counter of ours survives, so the site is stock.
       (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),
@@ -332,7 +356,19 @@ def main():
         gb = gold.read_bytes()
         cave = set(range(o(0x400d7400), o(0x400d7c3c)))
         diff = {i for i in range(len(img)) if img[i] != gb[i]}
-        outside = sorted(i for i in diff if i not in cave)
+        # A detour site legitimately differs from gold when a hook is ADDED or REMOVED, so
+        # allow the declared sites; anything else outside the cave is a genuine stray.
+        sites = set()
+        for _n, _a, _d, _dets in PATCHES:
+            for _site, _sym, _exp, _len, _kind in _dets:
+                sites |= set(range(o(_site), o(_site) + _len))
+        for _site in (0x400a4d36,):   # Session 89: Hook P removed -- site restored to stock
+            sites |= set(range(o(_site), o(_site) + 6))
+        outside = sorted(i for i in diff if i not in cave and i not in sites)
+        at_sites = sorted(i for i in diff if i in sites)
+        if at_sites:
+            print(f"  (of those, {len(at_sites)} are at DECLARED DETOUR SITES -- intended: "
+                  f"{sorted({hex(BASE + (i & ~1)) for i in at_sites})[:6]})")
         gsha = hashlib.sha256(gb).hexdigest()[:16]
         print(f"  vs GOLD_S87 ({gsha}): {len(diff)} bytes differ, "
               f"{len(outside)} of them OUTSIDE the cave")

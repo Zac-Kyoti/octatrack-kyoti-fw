@@ -29882,3 +29882,85 @@ REVERTED but its measurements stand: the `CNTDN_TBL` formula, the per-tick rate 
 `0x400a3cee`, the master rate at `LEN_TBL[SCALE_IX]`, and the measured fact that Hook P wrote
 `MASTER_STEP` where the track's own index belongs. That last one is still a real defect in the
 gold build — it is simply not fixed by substituting `NEXT_STEP[t]`.
+
+## Session 89 (2026-09-24, `wip`) — V5: Hook P REMOVED. Stock already computed the right answer
+
+### The premise Hook P was built on is false
+
+Session 85 added Hook P to write AR's per-track position over stock's rebuild output, on the
+stated grounds that stock seeds `STEP_ARR[t]` from `NEXT_STEP[t]`'s low byte **without**
+reducing it modulo the track length. Disassembled at `0x400a4976`:
+
+```
+400a4950  d1 = NEXT_STEP[t]              ; = ceil(D7 / tps_t)
+400a4958-72  d0 = this track's LENGTH    ; blob +0x50, or PAT_LEN in NORMAL mode
+400a4976  remsl %d0,%d2,%d1              ; d2 = d1 mod LENGTH
+400a497a  move.w %d2,(a0)                ; NEXT_STEP[t] = the reduced value, stored back
+```
+
+Stock already produces exactly the quantity Hook P exists to supply: `ceil(D7 / tps_t) mod
+trackLen_t` — per-track rate domain, length-reduced. Hook P is redundant at best.
+
+### MEASURED on the GOLD image (tools/diag_commit_phase.py, real armed commits)
+
+Every `STEP_ARR` writer at the commit tick, DJTEST2 A08 -> A07:
+
+```
+0x400a4be6 [stock, audio]  tracks 0,2,3,4,5,6,7 -> 11,11,4,6,11,11,11
+0x400a4cb0 [stock, MIDI ]  tracks 8..15         -> 11 each
+0x400d77c2 [Hook P      ]  ALL 16               -> 11 each, except track 3 -> 4
+```
+
+Stock covers **all sixteen** tracks (the MIDI twin at `0x400a4cb0` — an earlier note here
+claiming MIDI was uncovered was an artefact of filtering on the audio PC only) and is
+per-track correct: track 3 (LEN 7) -> 4, track 4 (tps 12) -> 6. Hook P's writes are
+byte-identical to stock's everywhere **except** that it flattens track 4's correct 6 to the
+master-domain 11, and forces track 1 — which stock deliberately deferred via
+`CNTDN_TBL = max(1, tps_master + 1 - tps_t) = 4` — to reposition immediately.
+
+Forward direction A07 -> A08 shows the corruption at its plainest. Stock computes 3, 6, 3, 3,
+2, ... for tracks at tps 6, 3, 6, 6, 12 — inversely proportional to ticks-per-step, which is
+the correct musical answer. **Hook P overwrote every one of them with 6.**
+
+At 1x every track has `tps_t == tps_master`, so every Hook P write equals stock's and the
+hook is a **measured** no-op. That is precisely why the Session 87 baseline is 1x-only.
+
+### AR is NOT the target here
+
+AR flattens to the master-step domain exactly as Hook P did — confirmed in AR's own code
+(`0x400992b2`-`0x400992be`: `new_step` goes into the per-track divide unchanged, only the
+track's LENGTH divides it; the track's resolution never enters) and corroborated on the
+user's real AR hardware: a 2x track loops twice per master cycle, yet a mid-cycle DIRECT JUMP
+with a 2x track produces an audible **LURCH** — an extra trig at a desynchronised/fractional
+step — before the track settles onto its correct step. **Stock OT's per-track answer is
+better than AR's.** Keep stock's; do not port AR's here. This is the first place in the
+project where OT should deliberately diverge from AR.
+
+### The change
+
+`tools/build_directjump_v5.py`: the `0x400a4d36` detour is removed; the site is left stock.
+Nothing is added, no new instruction forms are introduced, and `dj_pertrack` remains in the
+cave as dead code so the image diff stays minimal.
+
+Build: 970 bytes changed (gold: 975). **5 bytes differ from gold, all at the declared Hook P
+detour site, 0 elsewhere** — the cave is byte-identical to gold. The V5 gold gate was
+extended to allow declared detour sites (a hook added or removed legitimately changes them)
+while still refusing any other out-of-cave divergence; it caught this change on the first
+build, which is what it is for.
+
+### Validation (V5 vs GOLD, every run a real armed commit)
+
+| fixture | result |
+|---|---|
+| DJMAST2 2->3, uniform 1x | per-track state IDENTICAL; only change is Hook P's write disappearing, and it wrote the same value stock did |
+| DJTEST2 A07->A08 | stock's per-track 3/6/3/3/2 now SURVIVE (gold flattened all to 6) |
+| DJTEST2 A08->A07 | track 4 keeps 6 (gold: 11); track 3 keeps 4; track 1 stays deferred by stock's own CNTDN |
+| `diff_stock_vs_patch.py`, feature OFF, scratch poisoned | IDENTICAL across 38 samples, all 8 counters equal |
+
+### A prediction worth testing on hardware
+
+Session 88's regression showed trig-content dependence appearing at 1x exactly when Hook P
+began writing wrong step values, and AR shows no trig-content dependence at all (user tested).
+If that inference is right, removing Hook P should remove the trig-content dependence at
+non-1x too. **This is a prediction, not a measurement** — the emulator has never reproduced
+that symptom, and it was green for Session 88's build as well. Hardware remains the only gate.
