@@ -30710,3 +30710,104 @@ as `d5b84fb` on branch `emu/map-audio-sdram`. Also: two Unicorn instances runnin
 desynchronise the wall-clock-derived PIT and produce spurious boot faults, so emulator runs
 from parallel sessions must be serialised — results taken under contention are not
 trustworthy.
+
+## Sessions 94-96 (2026-09-25, `wip`) — QLREC: the gate shut because a private scratch word does NOT survive on hardware. **WORKING, hardware-confirmed.** The patch now keeps no state at all
+
+Session 93 fixed the crash but the flip never fired: *"The key combo brings up the
+initial QLREC state toast. Subsequent presses of PLAY while REC is held are not
+switching the feature on and off."* Then, decisively: *"The toast reappears when
+pressing play second, third, etc time. Fast triple tap doesn't do anything."*
+
+### What the evidence eliminated, in order
+
+The gate was `G_OWN == MAGIC && NOTIF_H != 0 && NOTIF_T > 0`. Each candidate was killed
+with evidence, not argument:
+
+| candidate | how it died |
+|---|---|
+| the cave assembled wrong | disassembled `out/patch_qlrec.elf` — the gate is exactly as written |
+| `qlr_play` runs twice per tap (press + release) | **PLAY's keymap record has press `0x40061778`, release slot `0`.** REC's has the same handler in *both* slots, which is why REC tests `sp@(8)` and PLAY does not. Read from the table, not inferred |
+| stock's live-rec mode-enter tears down the toast | `tools/diag_qlrec_gate.py` part C: handle and countdown both survive `FUN_4007e998(4)` unchanged |
+| something else clears the gate words | swept every reference to `0x460d1e70`/`0x460d1e6c` in the whole image — only the notification family and `FUN_40056c28` |
+| stock writes our scratch | **0 static references** into `0x80006a00..0x80006ac0`; no literal for those addresses anywhere in the image |
+| the window is too short | the user's *fast triple tap*: nothing runs between taps 2 and 3 but the OS |
+| a keymap layer swallows later taps | `tools/diag_qlrec_keys.py` drove the literal gesture through `set_key_state` (the sole per-key dispatcher) in the real firmware: `qlr_play` entered on all 3 taps, **taps 2 and 3 both flipped**, PLAY's runtime slot never left `0x40061778` |
+
+So the emulator reproduced **complete success** while hardware did not flip at all.
+
+### Session 94 — drop `NOTIF_T > 0`
+
+It was redundant: `FUN_40056c28` counts `NOTIF_T` down and at zero `bra`s straight into
+`FUN_40056bec`, which clears `NOTIF_H` (`FUN_40055db4`, `clrl %a2@` at `0x40055dd8`). So
+"countdown running" and "handle set" are the same fact. It was also **the only gate word
+no test could ever exercise** — `NOTIF_T` sat frozen at its initial value for 12 s of
+emulated time in every probe, because route A never services the UI tick — and the only
+one resting on the unverified `f_bus = CPU/2` step. Not the bug, but it had to go.
+
+### Session 95 — the actual root cause: **our scratch word does not survive on hardware**
+
+Built `tools/build_qlrec_diag.py` (`--defsym QLR_DIAG=1`), which names the failing
+condition on screen instead of silently re-showing the setting. Hardware answered
+immediately and unambiguously:
+
+> **"I only get the toast QLR DIAG: OWN. additional PLAY presses just show this same toast."**
+
+`G_OWN` (`0x80006a60`) was **not** the magic even on the press right after we wrote it.
+The word does not survive between key presses on the unit — while it persists perfectly
+in the emulator, which does not run the DSP/audio path for real. `0x80006a60` is inside
+the **DSP shared-RAM window**, and the unit was live-recording at the time.
+
+**Fix: keep no state at all.** The gate is now the OS's own handle, alone:
+
+```
+tst.l 0x460d1e70      | non-zero == a toast is on screen == a press flips
+```
+
+which is also the user's spec verbatim, needs no RAM of ours, and cannot be corrupted by
+anything we do not control. **Trade-off, deliberate and asserted in the harness:** with no
+ownership word, *any* toast on screen arms the flip, stock's included. Stock issues no
+notification on the live-rec path (checked), so it is rare, and the toast then shows the
+new value — visible rather than silent. `qlr_recrel` closing the toast on `[REC]` release
+is what stops a leftover toast arming an instant flip at the start of the next gesture.
+
+**Hardware: "Flashed. Works."**
+
+### Session 96 — 1.0 s
+
+`LIVE_DUR` `0x30` → `0x3c` (48 → 60 ticks) on the user's feel-test: *"increase the toast
+time to 1s, I think it might feel a little better."* Worth recording as evidence: `0x30`
+landing as usable-but-slightly-short is **independent corroboration of the `f_bus = CPU/2`
+step** — at 264 MHz the tick would be 120 Hz and `0x30` a 0.4 s flash, which is not what
+it looked like on the unit.
+
+### ⚠️ This is bigger than QLREC — DIRECT JUMP and RELOAD3 keep state in the same block
+
+`0x80006a60` proved unreliable under live audio. Its immediate neighbours are **DIRECT
+JUMP `0x80006a40-4a`** (`G_ARMED`, `G_PATOFF`, `G_JUST_COMMITTED`) and **RELOAD3
+`0x80006a50-55`**. Both features are marked hardware-confirmed — but DIRECT JUMP re-arms
+its flag every gesture and clears it on every tick, so a clobber there would be
+*invisible rather than absent*. **Not tested, not claimed broken** — flagged, because
+"a static scan shows no references" is exactly the reasoning that justified `0x80006a60`,
+and `kb/caves.md` already says that is necessary and not sufficient. The rule earns a
+sharper form: **a static scan cannot tell you whether RAM is written at runtime, and
+neither can our emulator while it does not run the DSP path.** The only instrument that
+settled it was a diagnostic build on the unit.
+
+### State of the code
+
+- Cave **176 B**, two detours (both key handlers), **zero scratch** — down from 358 B and
+  five scratch words at the start of this arc. 233 B changed vs stock.
+- `tools/emu_qlrec.py`: 60 checks, ALL GOOD, including — the reported bug as an explicit
+  case; the Session 93 guard that the retired `0x400522ca` hook appears nowhere; a guard
+  that the cave references **no** `0x8000xxxx` address except stock's own `QLR`
+  (scanned at even offsets — m68k operands are 2-byte aligned, and an unaligned scan
+  trips over `eori.l #1,%d0`'s immediate); and the accepted "any toast arms the flip"
+  trade-off asserted as a choice.
+- `tools/build_qlrec_diag.py` kept — it is the only tool that has ever settled one of
+  these. ⚠️ It writes the **same** `out/patch_qlrec.{o,elf,bin}` as the shipping builder,
+  so `emu_qlrec.py` now refuses to grade a stale diagnostic build as if it were shipping.
+- New: `tools/diag_qlrec_gate.py` (what NOTIFY really sets; does mode-enter kill it),
+  `tools/diag_qlrec_live.py` (our cave in the real firmware), `tools/diag_qlrec_keys.py`
+  (the literal gesture through the real dispatcher). Two of the three had verdict lines
+  that cried wolf on first run (`final == 0` after an even number of flips; `< 4` entries
+  for 3 taps) — both corrected; **read their per-step tables, not their summary lines.**

@@ -259,7 +259,6 @@ Verified numerically on 2026-09-23 against stock. Sorted by address.
 | `0x40040250` | RELOAD3 | `rl3_bank_trk` | jmp (6) | |
 | `0x40043418` | DIRECT JUMP | `dj_ptnrel` | jmp (6) | `[PTN]` release |
 | `0x4004883a` | QLREC | `qlr_recrel` | jmp (6) | `[REC]` release |
-| `0x400522ca` | QLREC | `qlr_tick` | jsr (6) | **per-control-frame re-arm — new since this doc was written** |
 | `0x40061778` | QLREC | `qlr_play` | jmp (6) | `[PLAY]` press |
 | `0x400621da` | PARTREAPPLY | head | jsr (6) | dirty-flag snapshot |
 | `0x40062216` | PARTREAPPLY | tail | jsr (6) | 54 B after the head; same function, same owner |
@@ -389,9 +388,24 @@ standalone `build_reload3.py`.
 | `CUR_BANK 0x80000002` | — | — | — | — | reads | — | reads | read-only, fine |
 | `ARR_ACT 0x460d1aec` | — | — | — | — | — | reads | reads | arranger guard, fine |
 
-**The scratch block is tight but clean:** DJ `0x6a40–4a`, RELOAD3 `0x6a50–55`, QLREC
-`0x6a5c–73`. QLREC now runs to `0x80006a73` (it used to be recorded as just two bytes at
-`0x6a5c`/`0x6a60`) — 8 bytes of slack to DJ's block below and none above. **Any new mod
+**The scratch block: QLREC has LEFT it entirely.** DJ `0x6a40–4a`, RELOAD3 `0x6a50–55`,
+QLREC **none**. Sessions 94-96 removed QLREC's last private word after hardware proved it
+does not hold: `0x80006a60` read back as *not* the value we had just written, on the very
+next key press, while persisting indefinitely in the emulator. `0x80006a5c–0x80006a73` is
+released.
+
+⚠️ **Two problems with this block, not one.**
+1. It is **beyond the boot zero-fill** (`FUN_4000f938` zeroes only to `0x80004000`), so
+   every word is garbage at power-on — the DIRECT JUMP lockup of Session 87.
+2. **It is not reliably ours at runtime.** It sits in the DSP shared-RAM window, and
+   under live audio a word there was clobbered between two key presses. A static scan
+   finds **0 references** into `0x80006a00..0x80006ac0` — and that scan was clean while
+   the RAM was being overwritten. See `kb/caves.md`.
+
+**DJ and RELOAD3 still keep state here and are untested against (2).** DIRECT JUMP
+re-arms its flag every gesture and clears it every tick, so a clobber would be invisible
+rather than absent. Not claimed broken — flagged. The safe pattern, proven on hardware by
+QLREC, is **keep no private state: read what the OS already maintains.** **Any new mod
 must claim scratch from a fresh region, not by guessing a gap here.**
 
 **Two adjacency notes, neither a conflict:**
@@ -405,7 +419,13 @@ must claim scratch from a fresh region, not by guessing a gap here.**
 - QLREC's `qlr_tick` (`0x400522ca`) sits inside `FUN_40052200` — the per-control-frame
   handler that also decrements the **soft-mute release counter**. No byte conflict (MUTE
   MODE detours none of that function), but MUTE MODE and QLREC now share a frame handler.
-  Test *"hold `[REC]`, double-tap `[PLAY]` while an OTFX mute tail is ringing"*.
+  ✅ **RESOLVED, Session 93: QLREC no longer touches that frame handler at all.** Its
+  `0x400522ca` detour was deleted after it crashed hardware — the hook reaches the kernel
+  post `FUN_40000c3c` (task wake + ready-list poke) from the engine frame context. MUTE
+  MODE now has `FUN_40052200` to itself, and there is no QLREC/MUTE-MODE adjacency case
+  left to test. ⚠️ **General rule from that crash: `0x400522ca` is not a safe site for any
+  UI- or kernel-facing call.** Current DIRECT JUMP (v4/v5) does not splice it; only the
+  dead v2 does.
 
 ---
 
@@ -479,7 +499,13 @@ pattern change, Part change during a soft-mute tail, and QLREC's tick sharing
 1. **Build and flash `KYOTI_V1.0`** — the seven finished mods. Re-run each feature's HW
    checklist on the combined image (they are all individually signed off, so this is a
    regression pass, not a discovery pass), plus the two adjacency cases above:
-   Part change during a soft-mute tail, and QLREC double-tap during an OTFX tail.
+   and a Part change during a soft-mute tail.
+   ✅ **QLREC is no longer a blocker** — hardware-confirmed working 2026-09-25 after the
+   rewrite (cave 176 B, two key-handler detours, zero scratch). ⚠️ But **do not ship the
+   pre-Session-93 QLREC**: the `0x400522ca` tick hook crash was latent in the Session 51
+   build this document once treated as finished. Any composite must be rebuilt from the
+   current `build_qlrec.py`. The QLREC/MUTE-MODE frame-handler adjacency case is gone
+   (above) — QLREC no longer touches `FUN_40052200` at all.
 2. Finish DIRECT JUMP (**flash the Session 88 non-1x fix** — the 1x behaviour is already
    HW-confirmed and is the baseline not to regress; one report is still unexplained) and
    RELOAD3 (**reflash** — the transport fix, the `[BANK]`-release deferral and the message

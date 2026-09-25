@@ -142,16 +142,19 @@ newest state.
 ### QOL Enhancements
 
 - **QUANTIZE LIVE REC toggle** — a front-panel shortcut for the all-or-nothing
-  QUANTIZE LIVE REC setting that otherwise lives only in PERSONALIZE: hold
-  `[REC]`, tap `[PLAY]` twice close together, with an on/off toast that closes
-  instantly on release. The first `[REC]` + `[PLAY]` still starts live recording
-  exactly as on stock. **Hardware-confirmed** after a rewrite: the original
-  design flashed and hung the unit (a one-shot toast call tail-jumped into a
-  modal window/overlay stack); the fix re-arms a self-timing toast every few
-  ticks instead, HW-confirmed with no hang. Two cosmetic issues are parked, not
-  chased further.
+  QUANTIZE LIVE REC setting that otherwise lives only in PERSONALIZE. Hold
+  `[REC]` and tap `[PLAY]`: a toast shows the **current** setting. Tap `[PLAY]`
+  again **while that toast is up** and the setting inverts, with the toast
+  re-opening on the new value; tap again and it inverts back. Once the toast has
+  gone (1 s), the next tap only shows the setting again. The first `[REC]` +
+  `[PLAY]` still starts live recording exactly as on stock, and the toast closes
+  instantly when `[REC]` is released. **Hardware-confirmed.** The flip window
+  *is* the toast, because both are the same thing — stock's own notification
+  handle. The patch deliberately keeps **no state of its own**: an earlier
+  version's single scratch word turned out not to survive between key presses on
+  real hardware, which no amount of static analysis or emulation had caught.
   → [`tools/build_qlrec.py`](tools/build_qlrec.py) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 46", "Session 50", "Session 51/51-bis/51-ter"
+  write-up [`NOTES.md`](NOTES.md) "Session 46", "Session 50", "Session 51", "Sessions 92-96"
 
 - **Erase empty trigless locks** — a trigless lock (a step carrying parameter
   locks but no audible trig) left lit on the trig row forever once its last

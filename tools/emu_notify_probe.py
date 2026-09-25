@@ -7,10 +7,10 @@ notification on a MODAL WINDOW/OVERLAY STACK -- a linked list headed at
 `0x460d165c` -- instead of the passive banner we assumed, which is why the
 original QLREC toast (dur=0) hung a real MKI. The rewrite in patch_qlrec.s
 never calls NOTIFY with dur<=0 anymore; it periodically re-arms a short
-`dur=REARM_DUR` (0x30) self-timing call instead.
+a single `dur=LIVE_DUR` self-timing call (read from patch_qlrec.s, currently 0x30).
 
 This script calls the REAL FUN_4005a2b8 in the full-firmware emulator with
-`dur=REARM_DUR` (exactly what the rewritten cave now uses) and checks the ONE
+`dur=LIVE_DUR` (exactly what the rewritten cave now uses) and checks the ONE
 thing that matters: the modal list head `0x460d165c` stays untouched -- i.e.
 this call never takes the dur<=0 branch that caused the hang. For contrast it
 also runs the known-hang shape (`dur=0`) again in a fresh boot, to show the
@@ -52,7 +52,20 @@ MODAL_INSERT = 0x40031494   # the linked-list-insert fn dur<=0 tail-jumps into -
                             #  so watching PC hits here is a direct, unconditional test, unlike checking
                             #  the list head 0x460d165c after the fact -- that head is ALREADY non-null
                             #  at boot from something unrelated, so insertion-at-tail never visibly moves it)
-REARM_DUR = 0x20           # tools/patch_qlrec.s REARM_DUR -- what the rewritten cave actually uses (Session 51: was 0x30)
+def _live_dur():
+    """Read LIVE_DUR out of patch_qlrec.s so this probe cannot drift from the image."""
+    import re
+    src = (ROOT / "tools/patch_qlrec.s").read_text()
+    m = re.search(r"^\s*\.equ\s+LIVE_DUR,\s*(0x[0-9a-fA-F]+|\d+)", src, re.M)
+    if not m:
+        sys.exit("could not find `.equ LIVE_DUR` in tools/patch_qlrec.s")
+    return int(m.group(1), 0)
+
+
+# Session 93: the cave makes exactly ONE NOTIFY call, with dur = LIVE_DUR (0x30
+# = 0.800 s at the 1/60 s UI tick).  The periodic re-arm -- and the qlr_tick
+# detour that drove it -- are gone; that hook crashed the unit.
+LIVE_DUR = _live_dur()
 DJ_TOAST_DUR = 0x44        # DIRECT JUMP v3's known-good self-timing dur, for a second reference point
 
 
@@ -103,13 +116,13 @@ def main():
     print("\n--- reference: known-good shape, dur=0x44 (DIRECT JUMP v3's dur) ---")
     dj_touched = probe("dur=0x44 (DIRECT JUMP v3 reference)", DJ_TOAST_DUR)
 
-    print(f"\n--- THE ACTUAL FIX: dur=REARM_DUR={REARM_DUR:#x} (what patch_qlrec.s now uses) ---")
-    fix_touched = probe("dur=REARM_DUR (Session 51 rewrite)", REARM_DUR)
+    print(f"\n--- THE ACTUAL FIX: dur=LIVE_DUR={LIVE_DUR:#x} (what patch_qlrec.s now uses) ---")
+    fix_touched = probe("dur=LIVE_DUR (Session 93)", LIVE_DUR)
 
     print("\n=== VERDICT ===")
     print(f"  dur=0        reached modal-insert fn: {hang_touched}   (expected True -- this is what hung)")
     print(f"  dur=0x44     reached modal-insert fn: {dj_touched}   (expected False -- known-safe reference)")
-    print(f"  dur=REARM_DUR(0x30) reached it:       {fix_touched}   (MUST be False for the fix to be safe)")
+    print(f"  dur=LIVE_DUR({LIVE_DUR:#x}) reached it:       {fix_touched}   (MUST be False for the fix to be safe)")
     if fix_touched is False and hang_touched is True and dj_touched is False:
         print("\n  PASS: the rewritten toast never executes the modal-insert path; dur=0 demonstrably does.")
     else:

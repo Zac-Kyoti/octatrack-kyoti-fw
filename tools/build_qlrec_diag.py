@@ -2,6 +2,24 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
+QUANTIZE LIVE REC -- DIAGNOSTIC build (QLR_DIAG=1).
+
+Identical to build_qlrec.py except that when the flip gate is SHUT the toast
+names WHICH condition failed instead of silently re-showing the setting:
+
+  "QLR DIAG: OWN"       G_OWN != MAGIC   (our scratch word did not survive)
+  "QLR DIAG: NO TOAST"  0x460d1e70 == 0  (the OS closed the toast)
+  "QLR DIAG: T=0"       0x460d1e6c <= 0  (its countdown ran out)
+  "QUANT LIVE REC ON/OFF"  the gate was OPEN and the value flipped
+
+Hold [REC] and tap [PLAY] a few times; the second and later taps report the
+gate. If a tap shows NO new toast at all, the press is not reaching our
+detour -- a keymap/dispatch problem, not a gate problem.
+
+This is a THROWAWAY diagnostic, not a candidate build.
+
+Original description follows.
+
 QUANTIZE LIVE REC front-panel toggle.
 
   [REC] held + [PLAY]                   opens a "QUANT LIVE REC ON/OFF" toast
@@ -55,12 +73,12 @@ ROOT = HERE.parent
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
 STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
-OUT = ROOT / "out/mainos_qlrec.bin"
-ELEK = ROOT / "out/elek_qlrec.bin"
-OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_QLREC.syx"
-OUT_BIN = ROOT / "out/OCTATRACK_QLREC.bin"
+OUT = ROOT / "out/mainos_qlrec_diag.bin"
+ELEK = ROOT / "out/elek_qlrec_diag.bin"
+OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_QLREC_DIAG.syx"
+OUT_BIN = ROOT / "out/OCTATRACK_QLREC_DIAG.bin"
 
-VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_KYOTI"
+VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_DIAG"
 
 # The toast's life == the window in which a [PLAY] press flips, because they
 # are the same thing: the OS's own notification countdown (0x460d1e6c).  The
@@ -72,7 +90,7 @@ LIVE_DUR = int(sys.argv[2], 0) if len(sys.argv) > 2 else None
 if LIVE_DUR is not None and LIVE_DUR <= 0:
     sys.exit("LIVE_DUR must be > 0 -- dur <= 0 takes FUN_4005a2b8's modal path, "
              "which hung a real MKI (NOTES Session 50)")
-_QLR_DEFSYM = f"LIVE_DUR={LIVE_DUR}" if LIVE_DUR is not None else None
+_QLR_DEFSYM = "QLR_DIAG=1" + (f",LIVE_DUR={LIVE_DUR}" if LIVE_DUR is not None else "")
 
 PATCHES = [
     ("patch_trigscale", 0x400d7b00, None,

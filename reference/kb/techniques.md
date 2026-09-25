@@ -53,6 +53,16 @@ loop (`lea 0x4f502c10,%a0` + `moveml`, 0xac480 iterations x 16 B, ~10.8 MB) that
 executed under our harness — so `0x4f000000..0x50000000`, the external audio-sample SDRAM
 bank, had to be mapped in `tools/emu_reload.py`. Nothing in our own patches changed.
 
+⚠️ **Route A needed the same map and nobody noticed for a day** (C, ours, Session 92):
+`refs/octabam/tools/emu/emu_rtos.py` faulted on that zero-fill before creating a single
+task, so the **M6a gate had been failing outright** since the sync, and `--load-project`
+hit the same wall lower down at `0x4ece3000` (ATA sectors DMA'd into the bank). Its
+`on_unmapped` now grows a page at a time inside `0x49000000..0x50000000` and faults
+loudly elsewhere; the diff is checked in as
+`tools/refs/local-patches/octabam-emu-samplebank-map.patch`. **A `sync.py --update
+octabam` resets that clone** — if route A starts failing its gate again after a sync,
+`git apply` that patch inside `refs/octabam/` before suspecting anything else.
+
 **The operating rule:** after an octabam sync, re-run a known-good scenario first. A result
 that changes after a sync is not automatically a regression in our patch — suspect the
 emulator's new (usually better) arithmetic before suspecting the feature. Corollary: **an

@@ -278,3 +278,29 @@ separates those two failure modes before a flash.
 - The append-a-runtime architecture in detail → [`octakit-abi.md`](octakit-abi.md).
 - Free *scratch words* (single words of work RAM for feature state, a different
   problem from code caves) → [`memory-map.md`](memory-map.md) "Free scratch words".
+
+
+## Scratch RAM: `0x80006a40+` is not safe under live audio (C, ours, Sessions 94-96)
+
+The cave discussion above is about **code** space. The same "a static scan is necessary
+and not sufficient" rule applies to the **data** scratch every mod keeps at
+`0x80006a40+`, and it has now been caught failing on hardware.
+
+QLREC kept a single 32-bit magic at **`0x80006a60`** to mark "the toast on screen is
+ours". On a real MKI, a diagnostic build reported the word as **already not the magic on
+the very next key press** after writing it. In route A it persisted indefinitely — the
+emulator does not run the DSP/audio path, and the unit was live-recording. The block is
+inside the **DSP shared-RAM window** (`FUN_4000f938` re-images `0x80000000..0x80003e88`
+from ROM and zero-fills only to `0x80004000`; kernel globals live at
+`0x800068d8..0x80006903`, immediately below).
+
+- **0 static references** into `0x80006a00..0x80006ac0` anywhere in the image, and no
+  literal for those addresses. The scan was clean and the RAM was still not ours.
+- **The fix that worked: keep no private state.** Read what the OS already maintains —
+  for a notification, the handle `0x460d1e70` (set by `FUN_4005a2b8`, cleared by
+  `FUN_40056bec` via `FUN_40055db4`). QLREC's cave went from 5 scratch words to none.
+- ⚠️ **Still keeping state there, untested:** DIRECT JUMP `0x80006a40-4a`, RELOAD3
+  `0x80006a50-55`. DIRECT JUMP re-arms its flag every gesture and clears it every tick,
+  so a clobber would be invisible rather than absent.
+- **Only a diagnostic build on the unit settles this.** Nothing static, and nothing in
+  route A, can.
