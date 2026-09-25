@@ -178,6 +178,9 @@ PATCHES = [
       # settling. Stock OT's per-track answer is better than AR's here, so we keep it.
       # Session 83: Hook T (dj_tstart @0x4009c3d4) REMOVED -- it existed only to reset
       # G_ABSTICK at transport start. No counter of ours survives, so the site is stock.
+      # Session 89 -- Hook Q: suppress the sub-step PHASE CARRY at an armed commit. Same
+      # site and same displaced bytes the removed Hook P used. See patch_directjump.s.
+      (0x400a4d36, "dj_phase", "4ab946107568", 6, "jsr"),
       (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),
 ]
 
