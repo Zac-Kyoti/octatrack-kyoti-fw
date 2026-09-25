@@ -35,7 +35,8 @@ init to next-module boundary), so SPATIALIZER is now fully RESTORED as a
 selectable effect (nothing here touches it any more) and SPRING REVERB gets
 the same "null dispatch -> shared generic empty-FX stub" backward-compat
 treatment SPATIALIZER used to get, for any older project that still
-references it by id. Cave + tables must fit within SPRING REVERB's 1063-word
+references it by id -- audibly a silent passthrough, and (since Session 91)
+a NONE page in the UI too. Cave + tables must fit within SPRING REVERB's 1063-word
 P region in each payload (currently ~230 + 48, i.e. still nowhere near full).
 
 Session 77 (cross-core SIDECHAIN, NOTES.md): KEY widened 0..4 -> 0..8 (any
@@ -188,10 +189,23 @@ SC_SRC = ROOT / "tools/patch_sc_dsp3.asm"
 DONOR_WORDS = 1063
 NOP = 0x000000
 
-FX2_LIST, FX2_LEN = 0x400d6090, 15
-ID2POS = 0x400d6150       # FX2's own id->position table (FX1 has a separate copy, untouched here)
-SPRING_P = 0x400d5726 + 0x38
-SPRING_POS = 13
+# ---------------- the donated (removed) effect, in ONE place ---------------
+# Retargeting this build at a different donor means changing only these two:
+# the chooser rebuild and the "old projects see NONE" redirect below are both
+# derived from them and handle either bus.
+DONOR_ID = 0x15                     # SPRING REVERB
+DONOR_P = 0x400d5726 + 0x38         # its descriptor pointer, as the tables store it
+NONE_P = 0x400d45e0 + 0x38          # the NONE page's descriptor pointer
+
+# Each FX bus has its OWN copy of all three tables. Rebuilding FX2's and
+# leaving FX1's stale is the Session 56 chooser-highlight bug.
+#   lst    -- chooser entries, NUL-terminated; absent = not offered
+#   id2pos -- u32[id] -> cursor position (0 = NONE's row)
+#   id2e   -- u32[id] -> parameter-page descriptor (NONE_P = the NONE page)
+FX_BUSES = (
+    dict(tag="FX1", lst=0x400d6060, id2pos=0x400d60d0, id2e=0x400d5f58),
+    dict(tag="FX2", lst=0x400d6090, id2pos=0x400d6150, id2e=0x400d5fdc),
+)
 
 
 def w3(v):
@@ -456,25 +470,33 @@ def main():
         # effect assigned here" passthrough). Any older project's pattern
         # that still references SPRING REVERB by id gets exactly the same
         # graceful silent-passthrough behaviour those already get.
+        # (DONOR_ID here, not a second literal, so the id this nulls in the DSP
+        # can never drift from the id the ColdFire tables hide below -- a drift
+        # would silently null one effect's module while the UI hid another's.)
         xt = dsp_xtable_fileoff(img, d["va"], d["ln"], 0x215)
-        ini_off, prc_off = xt + 0x15 * 3, xt + (0x20 + 0x15) * 3
+        ini_off, prc_off = xt + DONOR_ID * 3, xt + (0x20 + DONOR_ID) * 3
         assert rd3(img, ini_off) == d["cave_org"] and rd3(img, prc_off) == d["spring_proc"], \
-            f"payload {tag} disp entry 0x15: {rd3(img,ini_off):06x} {rd3(img,prc_off):06x}"
+            f"payload {tag} disp entry 0x{DONOR_ID:02x}: {rd3(img,ini_off):06x} {rd3(img,prc_off):06x}"
         img[ini_off:ini_off + 3] = w3(d["stub_init"])
         img[prc_off:prc_off + 3] = w3(d["stub_proc"])
-        print(f"    X:0x215[0x15] -> null stub (SPRING REVERB -> passthrough)")
+        print(f"    X:0x215[0x{DONOR_ID:02x}] -> null stub (donor -> passthrough)")
 
-    # ---------------- hide SPRING REVERB from the FX2 chooser --------------
-    # SPRING REVERB is FX2-exclusive (reverbs never appear on FX1, hardware
-    # menu restriction -- reference/kb/memory-map.md), confirmed directly
-    # against stock: it's absent from FX1_LIST entirely. So unlike the old
-    # SPATIALIZER donor swap (which needed BOTH FX1_LIST/FX1_ID2POS and
-    # FX2_LIST/ID2POS rebuilt -- the Session 56 "chooser highlights the wrong
-    # effect" bug came from missing FX1's own separate id->position table),
-    # this only ever touches FX2_LIST/ID2POS. SPATIALIZER itself needs no
-    # code here at all any more -- it's fully restored simply by no longer
-    # being removed.
-    print("\n=== ColdFire: remove SPRING REVERB from FX2 chooser ===")
+    # -------- hide the donated effect from the choosers AND the UI ---------
+    # Stock's own convention for "this effect is not available on this bus"
+    # is all three tables, not just the list -- dumping stock shows DELAY and
+    # the 3 reverbs (FX2-exclusive) carrying exactly this shape on FX1:
+    # absent from the list, id2pos 0, id2e -> NONE_P.
+    #
+    # id2e is the one that decides what an OLD project sees. Every
+    # id->descriptor resolution in the OS -- page render, the 12-char name
+    # field at the bottom of FX page 1, chooser highlight staging, p-lock/CC
+    # naming -- goes through these two tables via the same
+    # `lea TBL,%a0; move %a0@(0,%d0:l:4)` idiom (all 14 sites checked; there
+    # is no scan-the-descriptor-table-by-id fallback anywhere). So pointing
+    # the donated id at NONE_P is what makes a project that still stores it
+    # load the NONE page: no knobs, no labels, "NONE" in the name field,
+    # matching the silent passthrough its DSP dispatch entry already got.
+    print("\n=== ColdFire: remove the donated effect from the FX choosers ===")
 
     def u32(a):
         return int.from_bytes(img[o(a):o(a) + 4], "big")
@@ -482,21 +504,37 @@ def main():
     def wr32(a, v):
         img[o(a):o(a) + 4] = v.to_bytes(4, "big")
 
-    entries = [u32(FX2_LIST + i * 4) for i in range(FX2_LEN)]
-    assert u32(FX2_LIST + FX2_LEN * 4) == 0, "FX2 terminator"
-    assert entries[SPRING_POS] == SPRING_P, f"FX2[{SPRING_POS}] != SPRING REVERB"
-    new = entries[:SPRING_POS] + entries[SPRING_POS + 1:]
-    for i, v in enumerate(new):
-        wr32(FX2_LIST + i * 4, v)
-    wr32(FX2_LIST + len(new) * 4, 0)
-    print(f"  FX2: {FX2_LEN} -> {len(new)} entries")
-    wr32(ID2POS + 0x15 * 4, 0)
-    for idv in range(0x20):
-        pos = u32(ID2POS + idv * 4)
-        if idv != 0x15 and pos > SPRING_POS:
-            wr32(ID2POS + idv * 4, pos - 1)
-    print("  ID2POS rebuilt (id 0x15 -> 0); FX1_LIST/FX1_ID2POS untouched "
-          "(SPRING REVERB was never on FX1, SPATIALIZER is no longer removed)")
+    def read_list(base):
+        entries = []
+        while (v := u32(base + len(entries) * 4)):
+            entries.append(v)
+            assert len(entries) < 0x20, f"no terminator in list at 0x{base:08x}"
+        return entries
+
+    for bus in FX_BUSES:
+        entries = read_list(bus["lst"])
+        if DONOR_P in entries:
+            pos = entries.index(DONOR_P)
+            del entries[pos]
+            for i, v in enumerate(entries):
+                wr32(bus["lst"] + i * 4, v)
+            wr32(bus["lst"] + len(entries) * 4, 0)
+            wr32(bus["id2pos"] + DONOR_ID * 4, 0)
+            for idv in range(0x20):
+                p = u32(bus["id2pos"] + idv * 4)
+                if idv != DONOR_ID and p > pos:
+                    wr32(bus["id2pos"] + idv * 4, p - 1)
+            print(f"  {bus['tag']}: dropped position {pos}, "
+                  f"{len(entries) + 1} -> {len(entries)} entries; id2pos rebuilt")
+        else:
+            print(f"  {bus['tag']}: donor was never offered on this bus, list untouched")
+        assert u32(bus["id2pos"] + DONOR_ID * 4) == 0, \
+            f"{bus['tag']} id2pos[0x{DONOR_ID:02x}] should land on NONE's row"
+        cur = u32(bus["id2e"] + DONOR_ID * 4)
+        assert cur in (DONOR_P, NONE_P), \
+            f"{bus['tag']} id2e[0x{DONOR_ID:02x}] = 0x{cur:08x}, expected the donor or NONE"
+        wr32(bus["id2e"] + DONOR_ID * 4, NONE_P)
+        print(f"    id2e[0x{DONOR_ID:02x}] -> NONE (old projects load the NONE page)")
 
     OUT.write_bytes(bytes(img))
     changed = sum(1 for a, b in zip(stock, img) if a != b)
@@ -528,7 +566,8 @@ def main():
     print("        Kick on T1, pad+COMPRESSOR on T2, KEY=T1 -> pad ducks. KFLT left =")
     print("        low-pass the key (isolate the thump); KGAIN drives a quiet key;")
     print("        MON = ON auditions the filtered key. SPATIALIZER is back as a normal")
-    print("        selectable effect; SPRING REVERB now passes through instead.")
+    print("        selectable effect; SPRING REVERB now passes through instead, and an")
+    print("        old project that still uses it loads a NONE page (no knobs/labels).")
     print("  Revert = flash downloads/extracted/OCTATRACK_OS1.40C.syx")
 
 

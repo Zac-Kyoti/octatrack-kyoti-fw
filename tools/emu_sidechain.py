@@ -6,8 +6,10 @@ Validate the side-chain page-2 formatters (patch_sidechain.s) under Unicorn.
 
   key_fmt   -- COMPRESSOR page-2 A-array callback  void fmt(char *buf, int value):
     value 0        -> "OFF"
-    value 1..4     -> "T<n>",  n = coreBase + value - 1
-                      coreBase = 1  when current track (0x100b14cc) is 0..3, else 5
+    value 1..8     -> "T<value>"  -- a FLAT picker over all 8 tracks, the same
+                      on every track. (Pre-Session-77 it was 1..4 relative to
+                      the current track's own DSP core, `coreBase + value - 1`;
+                      cross-core SIDECHAIN retired that.)
   kfilt_fmt -- KEY FLT (step-3 scaffolding):
     value < 64 -> "LP"   value 64 -> "OFF"   value > 64 -> "HP"
 
@@ -20,10 +22,13 @@ from unicorn import *
 from unicorn.m68k_const import *
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-# sidechain3 carries both formatters; fall back to sidechain (step 1) for key_fmt only
-_IMGP = ROOT / "out/mainos_sidechain3.bin"
-if not _IMGP.exists():
-    _IMGP = ROOT / "out/mainos_sidechain.bin"
+# sidechain3 carries both formatters; fall back to sidechain (step 1) for key_fmt only.
+# Session 77 renamed sidechain3's output to *_cross -- try that first.
+for _cand in ("out/mainos_sidechain3_cross.bin", "out/mainos_sidechain3.bin",
+              "out/mainos_sidechain.bin"):
+    _IMGP = ROOT / _cand
+    if _IMGP.exists():
+        break
 IMG = _IMGP.read_bytes()
 BASE = 0x40000400
 _nm = subprocess.run(["m68k-elf-nm", str(ROOT / "out/patch_sidechain.elf")],
@@ -117,20 +122,18 @@ def main():
         got = run(t, 0)
         check(f"track {t+1}, value 0", got == "OFF", f'got "{got}"')
 
-    # value 1..4 -> T1..T4 on the low core, T5..T8 on the high core
+    # value 1..8 -> T1..T8, identical on every track (flat picker)
     for t in range(8):
-        base = 1 if t < 4 else 5
-        for v in range(1, 5):
+        for v in range(1, 9):
             got = run(t, v)
-            exp = f"T{base + v - 1}"
+            exp = f"T{v}"
             check(f"track {t+1}, value {v}", got == exp, f'got "{got}", exp "{exp}"')
 
-    # a compressor on T3 can only ever show OFF / T1 / T2 / T3 / T4
-    seen = {run(2, v) for v in range(5)}
-    check("T3 chooser set == {OFF,T1,T2,T3,T4}", seen == {"OFF", "T1", "T2", "T3", "T4"}, str(sorted(seen)))
-    # a compressor on T6 can only ever show OFF / T5 / T6 / T7 / T8
-    seen = {run(5, v) for v in range(5)}
-    check("T6 chooser set == {OFF,T5,T6,T7,T8}", seen == {"OFF", "T5", "T6", "T7", "T8"}, str(sorted(seen)))
+    # every track offers the same OFF / T1..T8 set
+    full = {"OFF"} | {f"T{v}" for v in range(1, 9)}
+    for t in (2, 5):
+        seen = {run(t, v) for v in range(9)}
+        check(f"T{t+1} chooser set == {{OFF,T1..T8}}", seen == full, str(sorted(seen)))
 
     if KFILT_FMT:
         print(f"\nKEY FLT formatter -- kfilt_fmt @ 0x{KFILT_FMT:08x}")

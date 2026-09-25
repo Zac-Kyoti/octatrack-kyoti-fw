@@ -1021,6 +1021,43 @@ Stock FX1 = FILTER, FX2 = DELAY; FX-default assignment via `lea` operands
 > sparse (`04 05 08 0c 0d 10 11 12 13 14 15 16 18 19 1c`); the gaps are the place
 > to look when asking whether an effect can be *added*.
 
+### Which effects a bus offers: **three** tables per bus, not one
+
+> source: own image (`section_3_MAIN_OS.bin`), NOTES.md Session 91 (2026-09-25).
+> confidence: **C** — tables dumped directly, all 14 consumer sites disassembled.
+
+Each FX bus carries its **own private copy** of all three. Rebuilding one bus's
+and leaving the other's stale is the Session 56 chooser-highlight bug; touching
+the first two and not `ID2E` is what leaves a removed effect still drawing its
+own page.
+
+| table | FX1 | FX2 | contents |
+|---|---|---|---|
+| `LIST` | `0x400d6060` (11) | `0x400d6090` (15) | chooser rows, `u32` `E+0x38`, NUL-terminated |
+| `ID2POS` | `0x400d60d0` | `0x400d6150` | `u32[id]` → cursor position (`0` = NONE's row) |
+| **`ID2E`** | **`0x400d5f58`** | **`0x400d5fdc`** | `u32[id]` → **parameter-page descriptor** `E+0x38` (32 entries) |
+
+**`ID2E` is the whole id→descriptor mechanism.** All 14 consumer sites (7 per
+bus — page render, the 12-char name field, chooser highlight staging via
+`FUN_400326d4`, p-lock/CC naming) use the identical idiom `lea TBL,%a0;
+move %a0@(0,%d0:l:4)` with `%d0` = the id read from Part storage
+(`+0x8ed80` FX1 / `+0x8ed88` FX2). FX1 sites: `0x400023f6 0x40031eaa 0x40037b32
+0x4003ac28 0x4003c026 0x40052798 0x40059c48`; FX2 sites: the same functions at
+`0x40002408 0x40031eca 0x40037796 0x4003aa20 0x4003c050 0x4005252a 0x40059ab8`.
+**There is no scan-the-descriptor-table-by-id fallback anywhere** — so `ID2E`
+alone decides what a stored id draws.
+
+**Stock's own "not available on this bus" convention** is all three at once:
+absent from `LIST`, `ID2POS[id] = 0`, `ID2E[id] = NONE's P (0x400d4618)`. The
+FX2-exclusive effects carry exactly this shape in FX1's tables (DELAY `0x08`,
+PLATE `0x14`, SPRING `0x15`, DARK `0x16`), and MULTIBCOMP `0x19` carries it on
+**both** — which is why a stock unit cannot show those pages on that bus.
+⇒ **When a build donates an effect's DSP module, write `NONE_P` into that id's
+`ID2E` entry on both buses.** An old project that still stores the id then loads
+the NONE page (no knobs, `---` labels, `NONE` in the name field), matching the
+silent passthrough its nulled DSP dispatch entry already gives. Costs nothing —
+it is a data poke, not code.
+
 **Non-FX entries** (octabam, ids all 0): 0–4 = the 5 machine types (PLAYBACK, one
 page each — 0/1 = FLEX/STATIC, 2 = THRU `INAB/INCD`, 3 = NEIGHBOR (no params),
 4 = PICKUP); 5 = LFO (audio); 6 = AMP; 7 = MIXER / main+cue routing (**bespoke
