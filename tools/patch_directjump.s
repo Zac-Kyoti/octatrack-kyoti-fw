@@ -228,13 +228,15 @@
                                         | at TRK_LEN_SRC + patOff + t*0x91a
     .equ MIDI_LEN_SRC, 0x400e6ad8       | TRK_BLOB + 0x48f8 -- MIDI track m's LENGTH byte is
                                         | at MIDI_LEN_SRC + patOff + m*0x8b0
-    .equ HOLD_MASK, 0x80006626          | Session 89: per-track "hold this step" bitmask, one
-                                        | WORD covering all 16 tracks. Stock SETS bit t at
-                                        | commit when PAIR[t] != 0 -- audio 0x400a4984-8c,
-                                        | MIDI twin 0x400a4b1a-22 -- and the per-tick loop
-                                        | CONSUMES it at 0x400a3d12, copying PAIR's low byte
-                                        | into 0x800065d3[t] at 0x400a3d36 and skipping that
-                                        | track's advance for one step. See dj_phase.
+    .equ MASTER_STEPS2, 0x80006638      | Session 89: the STOCK-PAIRED COMPANION of
+                                        | MASTER_STEPS (0x80006628). Stock writes the two
+                                        | together, same value, at all three of its own
+                                        | sites: 0x400a0622/28, 0x400a40b8/be and
+                                        | 0x400a44ea/f0. It has live readers of its own --
+                                        | 0x4009be88 seeds MASTER_STEP (0x800065b2) from it,
+                                        | and 0x4009da88 multiplies it by ticks-per-step.
+                                        | Found by reading timhastie/octatrick's direct-jump
+                                        | module, which writes both; we wrote only 0x28.
     .equ STEP_ARR,  0x800064d0          | per-track STEP, 16 wide (audio 0-7, MIDI 8-15).
                                         | AR's 0x40566720. Incremented at 0x400a3d78 and
                                         | wrapped against the track's LENGTH at 0x400a3d8c.
@@ -545,15 +547,22 @@ djd7_gotlen:
     moveq   #0,%d0
     move.w  MASTER_STEP,%d0            | the bounded playhead
     tst.l   %d1
-    ble.b   djd7_store                 | unreadable length -> leave the raw index; Hook P
-                                       | reduces per track against each track's own length
+    ble.b   djd7_store                 | INF / unreadable length -> leave the raw index
+                                       | unwrapped; stock's own rebuild reduces it per track
+                                       | against each track's length at 0x400a4976
 djd7_mod:
     cmp.l   %d1,%d0
     blt.b   djd7_store
     sub.l   %d1,%d0                    | operands are both <= 64, so this is a few passes
     bra.b   djd7_mod
 djd7_store:
+|   MEASURED (tools/diag_startoffset.py, V5 image, DJMAST2 0 <-> 1, four armed commits):
+|   writing only 0x80006628 left 0x80006638 at 0 while 0x80006628 read 8, 9, 2 and 4 -- and
+|   the reader at 0x4009da88 EXECUTED WHILE STALE, twice per commit, seeing 0. One code path
+|   was told "start at master step 8" and another "start at 0". Stock never allows that:
+|   every one of its own writes sets the pair. So set both, exactly as stock does.
     move.l  %d0,MASTER_STEPS           | = AR's new_step
+    move.l  %d0,MASTER_STEPS2          | stock writes these two as a PAIR -- never one alone
     movem.l (%sp),%d0-%d2/%a1
     lea     16(%sp),%sp
 djd7_orig:
@@ -1100,52 +1109,6 @@ djp_orig:
 | stock per-frame tick @0x40056c28 already reads, closing the toast via NOTIFY_CLOSE
 | from the OS's own safe context one frame later, never called by us directly) is
 | unchanged and was never the problem.
-| ================= Hook Q @ 0x400a4d36 -- suppress the sub-step PHASE CARRY =================
-| Session 89. Same detour site and same displaced instruction the removed Hook P used
-| (`tst.l (0x46107568).l`, 6 B, 4ab946107568): the common per-tick exit, reached after the
-| commit body's tail. Gated on DJ_MODE and on G_JUST_COMMITTED (set by dj_c), so it does
-| nothing on an ordinary tick and nothing at all with the feature off.
-|
-| THE BUG, MEASURED (tools/diag_pair_phase.py, V5 image, DJMAST2 pattern 0 <-> 1, eight real
-| armed commits):
-|
-|     t42..t201 (seven): PAIR[0]=0  holdmask writes=0   -> CLEAN
-|     t255:              PAIR[0]=3  holdmask writes=16  -> FRACTIONAL
-|     0x400a3d36 hold CONSUME: x8, first at t257
-|
-| PAIR[t] (0x80006604, written 0x400a4924/0x400a492a) is the track's SUB-STEP TICK PHASE at
-| the commit instant. Stock's hold machinery exists to CARRY that phase across the commit,
-| which is right at a natural pattern boundary -- there the phase is always 0, so it is a
-| no-op. At a mid-cycle DIRECT JUMP that also changes the MASTER SCALE it bakes in a
-| permanent sub-step offset: a track at tps 6 with PAIR = 3 is half a step out, carried
-| forever, with nothing to correct it. That is the "step-fractional after switch" report.
-|
-| WHY THIS IS INVISIBLE AT 1x, and therefore why removing it cannot touch the Session 87
-| baseline: at 1x tps_master == tps_track, so D7 = tps_master * masterStepOffset is always an
-| exact multiple of the track's ticks-per-step and PAIR is ALWAYS 0. The mask is never set,
-| so clearing it is a no-op. The bug structurally requires a master/track rate mismatch.
-|
-| Clearing the whole WORD covers audio and MIDI together (bits 0-15). Every track then lands
-| on a step boundary at the new master's grid, using the per-track-correct position stock
-| computes at 0x400a4976 and V5 preserves now that Hook P is gone. This is AR's hard re-phase
-| in spirit, but with OT's better per-track position instead of AR's master-flattened one --
-| AR lurches here, user-confirmed on real AR hardware.
-|
-| No registers are saved because none are used: tst and clr touch only the condition codes,
-| and the displaced `tst.l` runs LAST on every path, so the Z flag the caller's bne.w reads
-| is always the one stock would have set.
-    .global dj_phase
-dj_phase:
-    tst.l   DJ_MODE
-    beq.b   djph_orig                  | feature off -> stock, byte for byte
-    tst.b   G_JUST_COMMITTED
-    beq.b   djph_orig                  | ordinary tick -> stock
-    clr.b   G_JUST_COMMITTED           | one-shot, same consume Hook P performed
-    clr.w   HOLD_MASK                  | no track resumes mid-step
-djph_orig:
-    tst.l   0x46107568                 | displaced original (sets Z for the caller's bne.w)
-    rts
-
     .global dj_ptnrel
 dj_ptnrel:
     tst.l   NOTIFY_HANDLE               | 0x460d1e70 -- is a toast actually open?
