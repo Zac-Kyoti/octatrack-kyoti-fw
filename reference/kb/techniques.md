@@ -39,6 +39,25 @@ into `memory-map.md` "UI / menu"; the rest listed there under "To import next".
 octabam also gives the full `FUN_4006d57c` confirm-popup signature we use for
 PERSONALIZE entries.
 
+### WARNING: our emulator's fidelity is coupled to the `refs/octabam` clone
+
+`tools/emu_rtos.py` runs octabam's script from **inside `refs/octabam/`**, against a
+patched Unicorn built into that clone's `.venv`. **`sync.py --update octabam` therefore
+updates our emulator**, silently.
+
+Demonstrated 2026-09-24: the sync pulled octabam **PR #360** ("Unicorn EMAC: fix
+MAC-with-load decode — Rx source, phantom dual, MASK reset"), which octabam derived from
+**markandrus/octemu**'s report of three MAC-with-load decode defects in Unicorn's vendored
+QEMU. The now-*more correct* EMAC changed a boot-time branch, reaching a stock zero-fill
+loop (`lea 0x4f502c10,%a0` + `moveml`, 0xac480 iterations x 16 B, ~10.8 MB) that had never
+executed under our harness — so `0x4f000000..0x50000000`, the external audio-sample SDRAM
+bank, had to be mapped in `tools/emu_reload.py`. Nothing in our own patches changed.
+
+**The operating rule:** after an octabam sync, re-run a known-good scenario first. A result
+that changes after a sync is not automatically a regression in our patch — suspect the
+emulator's new (usually better) arithmetic before suspecting the feature. Corollary: **an
+emulator "green" from before a sync is not evidence for a build after it.**
+
 ### octabam `emu_rtos.py` — full-firmware emulator (route A)
 
 > source: `refs/octabam/docs/RTOS_FORK.md` @ `47f6cc5` (2026-09-07)
@@ -322,3 +341,157 @@ already track the same kind of multi-patch composition question):
   commits as a submodule; a rewritten history there breaks octabam's build.
 
 _(Extend as patterns recur.)_
+
+---
+
+## New methods adopted from the 2026-09-24 ingest
+
+### The canary test — the gate our emulator diff cannot replace
+
+> source: `refs/octalab/docs/CAVES.md` @ `e0dc56d`. confidence: **C**.
+
+Our pre-flash gate (`emu_check.py` lineage, and now full-firmware emulation) proves
+**the patch does what we meant**. It does **not** prove **the bytes we chose stay
+ours** across a real session. Those are different questions, and the second one has
+bricked two projects.
+
+Before anything ships in a *new* region, on hardware: fill it with `0xA5` (or a 32-bit
+counter, so a partial overwrite is visible) → flash → **use the unit normally for a full
+session** (load a project, record, change patterns, save, power cycle, load again) →
+dump and compare byte for byte. Survives → record the date and what was exercised.
+Modified → it is live data; drop the claim.
+
+Full ledger, the ranges already proven live, and the contested-cave ownership table:
+**[`caves.md`](caves.md)** (new this session).
+
+### Boot the patched image and walk the structure out of RAM
+
+> source: `refs/octalab/docs/CAVES.md` @ `e0dc56d`, on octabam's
+> `tools/verify_menushortcut.py`. confidence: **C**.
+
+octabam's menu verifier **boots the patched image and walks the menu out of RAM using
+the firmware's own layout** (`CONTROL_DESC 0x400cbd54`, count `+0x00`, rows ptr `+0x18`,
+24-byte records). octalab's verdict on its own brick: *"MENUPROBE's crash was the cave
+and nothing else — the record layout it wrote was right."*
+
+The generalisation worth adopting: **a static byte-diff cannot distinguish "wrong
+layout" from "right layout in the wrong place".** A RAM-side walk of the structure the
+patch builds, under emulation, separates them before a flash. We already run full-firmware
+emulation for behaviour; this is the same tool pointed at *data structure validity*.
+
+### Declare each mod's byte range and assert non-overlap at build time
+
+> source: `refs/octalab/docs/CAVES.md` @ `e0dc56d`, lifting octabam's `tools/remix/ledger.py`.
+
+octalab has every module declare its sub-range in a `manifest` and **the build refuses
+to place two overlapping modules**. The reason to automate rather than eyeball it:
+silently overlapping machine code is *the* one class of bug that yields **a unit that
+boots and then misbehaves** — no crash, and nothing an image diff flags.
+
+`build_merged.py` composes 7 mods and tracks `FREE_START`; an explicit per-mod range
+declaration plus an overlap assertion is the cheap version of the same guarantee.
+→ `reference/MERGE.md`.
+
+### Persisting feature state in the PROJECT file, not the battery block
+
+> source: `refs/midisc/tools/midisc/memory_map.py` + `docs/TECH.md` @ `63ca127`. confidence: **C**.
+
+Our only persistence mechanism so far is the `'ANDY'` battery-SRAM shadow (octamax
+`c78ff70`, ported in Session 19) — which is **global**, one value for the unit.
+
+midisc 8.2 does the other thing: a **project-scoped** setting. Its CC-filter flags are a
+**packed byte at `0x460CA680`** (CLIP + 0xC80) with bits 0/1/2 = CC48/55/56, persisted
+under a **project key `MIDISC_CC_FILT`** via load/save trampolines in two D-region pads
+(`0x400D347E..CF`, 81 B; `0x400D352D..6F`, 66 B).
+
+**When to reach for which:** battery block = a unit-wide preference (our PERSONALIZE
+toggles). Project key = state that should travel with the project and differ between
+projects. The second is the right shape for anything per-set.
+
+⚠️ midisc records that **`PERSONALIZE A8/D8/DC` did not survive on hardware** for this
+purpose — "do not claim". And their persist caves **bricked Project Save** in an earlier
+revision (`PERSIST_PLAN.md`); the CC-filter feature is `ENABLE_MIDI_CTRL_FILTER = False`
+and **on hold** in 8.2 for that reason. Treat project-file persistence as a real but
+**unproven-for-us** route, and read their `PERSIST_PLAN.md` before attempting it.
+
+### Two bug classes to check our own patches against
+
+> source: `refs/midisc/docs/TECH.md` @ `63ca127` (the 8.1 → 8.2 deltas). confidence: **C** — these are shipped-and-fixed bugs, not speculation.
+
+Both are shapes our patches can take, so they are worth a grep, not just a read.
+
+1. **The missing per-track stride.** midisc 8.1's `xf_mix` LFO lock probes indexed
+   `MSC[scene] + param` and **omitted `track*32`** — so **MIDI track 1's locks affected
+   other tracks' LFO flats.** Fixed in 8.2 to `track*32 + param`. Any of our code that
+   indexes a per-track array must carry the track stride; a bug here is silent and
+   cross-talks between tracks rather than crashing.
+2. **Clobbering the live encoder value on the write path.** 8.1 ran
+   `build_voice_reload_d2` after `xf_mix`, overwriting the dialled `d2` from stored
+   state before stock's `CC_TX` — so **unlocked params went silent / stuck**. 8.2 keeps
+   the encoder's `d2` and leaves the reload cave in the image, unused. The rule: on a
+   write path, the value the user is currently turning wins over any stored copy.
+
+### Instruction-profile numbers for stock 1.40C — where the CPU time actually goes
+
+> source: `refs/octamad/docs/firmware/STOCK_PROFILE.md` @ `ccb11fb` (branch
+> `origin/poly-machine`), Jannik Aßfalg / repeat98, 23 Sep 2026. confidence: **L** —
+> emulated instruction counts on one fixture, explicitly **not** cycles.
+
+Exclusive **instructions per 16-sample frame**, on an 8×FLEX 120 BPM fixture (DELAY on
+T1–T7, PLATE REV on T8 — *not* a no-effects fixture):
+
+| CPU scope | insns/frame | share |
+|---|---:|---:|
+| Frame / control ISR | 10,719.9 | 26.21 % |
+| Eight-track delay | 7,664.5 | 18.74 % |
+| Sample analysis | 5,642.5 | 13.80 % |
+| Voice renderer | 5,605.3 | 13.70 % |
+| Correlation search | 2,195.9 | 5.37 % |
+
+Verified extents (we re-checked the first against our own image — `0x4000d9ae` is the
+`rte`): **frame ISR `0x4000aad0..0x4000d9b0`**, **voice rendering
+`0x40007960..0x40008f82`**.
+
+⚠️ **Read the caveats before quoting any of this.** These are *instructions*, not cycles
+or utilisation; the emulated cadence (3,990 CPU insns/sample, 4,160 DSP) is assumed;
+caches, bus contention and physical deadlines are not modelled faithfully enough for a
+headroom claim — **do not convert with the hardware clock.** No hardware was flashed or
+measured. Useful as a **relative** map of where cost sits when we judge whether a hook
+is affordable, and nothing more.
+
+Also from the same doc: **`FUN_4000c8a4` is not a function boundary** — it points inside
+the frame ISR, even inside an operand at that exact address. Our
+`tools/patch_partreapply.s` names it; see the correction in
+[`memory-map.md`](memory-map.md) "Kernel / RTOS scheduler".
+
+### Distributing a patch as a span diff — the midisc-patcher format
+
+> source: `refs/midisc-patcher/patch.json` + `patcher.js` @ `1ce2245` · fetched 2026-09-24.
+> confidence: **C** (read the shipped artefact).
+
+`FLASHING.md` already takes the right posture — the user brings their own official OS and we
+never redistribute an Elektron binary. midisc-patcher is that posture **as a single data
+file**, and the format is worth copying because it is almost trivially small:
+
+| field | value in theirs | why it matters |
+|---|---|---|
+| `stockSha256` | `164f3122…` | verifies the user supplied the right input **before** patching. Same image we and every tracked upstream use. |
+| `mainOsSize` | `1112560` | second, cheap input check — byte-identical to our `out/raw/section_3_MAIN_OS.bin` |
+| `patchedSha256` | `70df682f…` | **verifies the rebuild** — the user's output either matches bit-for-bit or the build is wrong |
+| `spans` | 549 × `{offset, data}` (base64) | the entire patch as a byte-span diff |
+| `name` / `splash` / `base` / `source` | `1.40MIDISC8.1` / `1.40MDIS81` / `1.40C` | provenance, and the splash string to expect on the unit |
+
+Two things we do not currently give the user, both nearly free:
+
+1. **A `patchedSha256` reproducibility gate.** Our builds are guarded splices that assert the
+   stock bytes they overwrite, so a wrong input fails loudly — but we do not publish the
+   expected *output* hash, so a user cannot confirm their rebuild matches ours. One line in
+   each `build_*.py`.
+2. **A single-file patch artefact.** `{stockSha256, patchedSha256, mainOsSize, spans[]}` is
+   emittable from any of our builds (diff patched vs stock, coalesce runs) and is
+   redistributable — it contains only *our* bytes, never Elektron's. That is the same
+   licence-safe reasoning that keeps `refs/` out of git.
+
+⚠️ Their browser patcher does the assembly client-side; we do **not** need the browser half to
+adopt the format. The value is the manifest + the two hashes, not the UI.
+

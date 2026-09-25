@@ -64,6 +64,94 @@ any combined build: **TRIGLESS-LOCK AUTO-REMOVE** and **PARTREAPPLY**. The withd
 `build_merged.py` composed seven mods, but not the same seven — it carried DIRECT JUMP
 and RELOAD2 and lacked these two. **Do not resurrect its mod table.**
 
+### Audit of the finished set against the 2026-09-24 KB ingest
+
+*Asked and answered 2026-09-24: does the new external research change the approach to any
+finished build, and does anything need revisiting? **Verdict: no mod needs to be rebuilt or
+reflashed.** Two get a sharper root-cause statement, two were positively validated by
+independent evidence, and one merge blocker is unchanged. Every check below was run against
+our own image or by assembling the shipping build — not inferred from an upstream's label.*
+
+| Mod | New evidence bearing on it | Verdict |
+|---|---|---|
+| Bug-1 MIDI manual-trig | none | **no change** |
+| Bug-2 pattern-LED | stock's predicate `FUN_4009a464` skips exactly `+0x10..0x17`, the trigless-lock mask | **no change; root cause sharpens** — see below |
+| MUTE MODE | its hooks sit inside the frame ISR (level 5); PIT0 is level 1 | **validated** — the MACSR race it feared is impossible; see below |
+| SIDE-CHAIN | `fx1_disallowed_effects` = DELAY, PLATE, SPRING, DARK (HW-confirmed upstream) | **no change**, but note it below |
+| QUANTIZE LIVE REC | `0x4009b5c0` is `bank_reload_gate_read` and the gate is **wider than a byte** | **no change** — we only replay the `jsr`; see below |
+| TRIGLESS-LOCK AUTO-REMOVE | p-lock store `0x4004f5f8`, step-record parameter map | **no change** |
+| PARTREAPPLY | the part-apply family: `0x40009094` is the only variant that restarts the audio engine | **validated — our design was right for reasons we did not have at the time** |
+
+**PARTREAPPLY — validated, and the reasoning is now evidenced.** The patch calls
+`FUN_40009094(bank, part)` **only when the transport is stopped** (`0x800065b8 == 0`), and
+documents its convention as "2 long stack args, bank closest to jsr". Both are now
+independently confirmed: our own disassembly of all three part-apply siblings gives
+`(bank, part)` (and shows octemu's `apply_part(part, pattern)` label is wrong), and octalab
+measured `0x40029a4c(src,part) → 0x40009094(bank,part)` on a MKI. More importantly, the new
+finding explains *why* the transport gate matters: `0x40009094` is the **only** variant that
+republishes tempo (`0x80001814/18/1c`, `0x80001824` — the recorder doc's own tempo chain),
+**re-arms the audio eDMA TCD0/TCD1 chain**, re-unmasks INTC0, and posts a kernel queue
+message. Calling that mid-playback would re-arm the audio DMA under a running sequencer. The
+patch's own comment called this "avoid racing whatever jump-avoidance property its timing
+has" — a hunch that is now a mechanism. **Keep the gate.**
+⚠️ One documentation-only correction: the patch's header comment attributes the playing-case
+catch-up to "`FUN_4000c8a4`", which **is not a function boundary** (it points inside the frame
+ISR, at an operand). The *premise* is right — the frame ISR does re-stage machine params and
+scene data per frame (`0x4000cae8` copier, `scene_morph_frame 0x4000c202`,
+`scene_level_morph 0x4000cc60`) — only the label is wrong. No code change.
+
+**MUTE MODE — the MACSR hazard it was built around cannot happen.** `kb/memory-map.md` long
+carried an unresolved worry that adding cycles to the level chain could let a PIT0 tick
+preempt a `MACSR=0x60` window and corrupt EMAC results. Settled 2026-09-24: every level-chain
+site is inside the DSP frame ISR (`0x4000aad0..0x4000d9b0`), which runs at **interrupt level
+5** (`ICR1 = 5` at `0x4001fc30`) and masks its own source at entry; **PIT0 runs at level 1**
+(`ICR43 = 1` at `0x400005e2`). Level 1 cannot preempt level 5. octemu independently places
+`patch_softmute`'s own `0x4000d49e` site "inside frame_isr". **The only things that can
+interrupt it are the two level-6 sources** (MIDI IN `0x400106ec`, serial link `0x400109bc`) —
+so if the hardware silence regression ever returns, *that* is the surface to examine, not the
+scheduler. No change to the build; a real reduction in its risk surface.
+
+**Bug-2 pattern-LED — fix unchanged, root cause sharpened.** Verified the stock predicate by
+disassembly: per audio track it ORs `+0x00,+0x04,+0x08,+0x0c` then `+0x18,+0x1c,+0x20,+0x24,
++0x28,+0x2c,+0x30,+0x34`, and MIDI `MTRA-8,-4,+0,+4`. It therefore **skips precisely
+`+0x10..0x17`** — the 64-bit mask octabam reads as the *trigless-lock* mask
+(`tools/hw/ot_bank.py`, "exactly the locked steps without a trig"). So stock does not merely
+"ignore p-locks": it omits the one mask that records the content in question.
+A **cheaper fix exists** — OR in `+0x10`/`+0x14` instead of scanning 16 × 0x800 B of lock
+array. **Deliberately not adopted:** (a) nordseele lowered that mask's label to 🟡 on
+22 Sep 2026 while octabam holds ✅, and our fix reads the lock arrays themselves, so it is
+correct *whichever way that dispute lands*; (b) the reported bug was MIDI-track p-locks and
+the MIDI side's scan covers only 16 bytes — whether MIDI has an equivalent mask is unmapped;
+(c) the current fix is hardware-confirmed. Record the alternative, keep the ground truth.
+
+**QUANTIZE LIVE REC — no bug, and the detour site is corroborated.** octemu warns that
+`bank_reload_gate` (`0x46c77bf6`) is wider than a byte and must be tested as a full word.
+`patch_qlrec` never interprets it: it treats `jsr 0x4009b5c0` purely as the **displaced
+instruction** to replay before `jmp 0x4006177e`, where stock's own `tst.l %d0` reads the full
+32-bit return. octemu independently confirms `0x4009b5c0` is the gate accessor that
+`play_button` (`0x40061778`) calls first — exactly the patch's own reading of its detour site.
+
+**SIDE-CHAIN — no change, one thing to know.** It pulls SPRING REVERB to donate DSP space.
+Upstream now records `fx1_disallowed_effects` = **DELAY, PLATE, SPRING, DARK**, "confirmed on
+real hardware" — i.e. SPRING was never selectable as FX1 anyway, which is mild independent
+support for it being the cheapest donor. No action.
+
+**`0x800000d4` — checked, and it does not affect any shipped mod.** Assembled
+`patch_softmute` exactly as `build_mutemode_dt.py` does (`DT_MODE=1`): **970 B with no
+reference to `0x800000d4` or `0xd5`**; only the diagnostic `OTFX_PROBE=1` build (986 B)
+contains them. The `0x800000d4` mentions in `patch_mutemode.s` are **comments** about the
+restore-span widening; its state word is `0x800000dc`. The B1 merge blocker below
+(`DJ_MODE` at `0x800000d8` riding the widened restore) is **unchanged and still open** — it
+was never about `0xd4`.
+
+**Cave collisions with other projects — for combined images only.** Our `KYOTI_V1.0`
+allocation (`0x400d64dc`–`0x400d7c3a`) lies entirely inside the "classic cave", which is
+good (it is the only region with a hardware record) and also means we overlap **octalab's
+`LAB_MENU`** (`0x400d64e0..0x400d6671`, inside our `patch_sidechain` + `patch_softmute`),
+**octabam's list cave** (`0x400d6b00`, inside our `patch_partreapply`), and **standalone
+1.40MIDISC** (`0x400d6500..0x400d7c48`, nearly all of ours). **No action for our own builds** —
+this only rules out naively merging an image with those projects. → `kb/caves.md` §2.
+
 ### The two WIP mods (the `KYOTI_V1.1` delta)
 
 | Mod | Build | cave | state |

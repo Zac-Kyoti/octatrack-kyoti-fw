@@ -52,6 +52,29 @@ timestretch are still untouched.
 | System/service: Test mode, Card tools, Personalize, Empty reset (18.1-18.5) | ⬜ | Untouched |
 | Metronome (8.6.6) | ⬜ | Click track. Untouched |
 
+## Newly-mapped territory from the 2026-09-24 ingest
+
+Two subsystems this matrix had no entry for now have an address-level starting point
+(see `reference/kb/memory-map.md`):
+
+- **The ARRANGER** — previously unmapped entirely. The arrangement lives in battery
+  NVRAM at `0x10000004` (pointer at `0x10000000`): header `+18` = row count, rows at
+  `+20`, **22 B each, 48 cap**, with row type / pattern byte / repeat / scene A,B /
+  OF / Ln attributed. `arranger_goto 0x4004a5c0` calls **the same
+  `seq_goto_pattern 0x400a0570`** the pattern-change path uses, so it inherits that
+  path's light part-apply. On-card as `arr01..arr08.work`/`.strd`, 11,336 B,
+  `FORM`/`DPS1`/`ARRA`.
+- **Trig conditions / FILL** — the A:B cycle counters are 16 × u32 at `0x46107918`
+  (audio 0-7, MIDI 8-15), advanced by `0x400a536c` on a track step wrap; per-track
+  pending FILL is 16 × u8 at `0x46107969`, promoted at the next pattern boundary.
+
+Also now covered at address level: **scene locks + crossfader morph** (store geometry via
+`scene_param_get 0x40031f44`, the frame-ISR morph pair `0x4000c202`/`0x4000cc60`, endpoints
+`0x80000ed4`), **input-map registration as a layer stack** (`0x40031494`), the **FS vtable**
+(`0x46c823fa`) and its recursive walker (`0x40090a14`), and the **RTOS's callable
+primitives** (queue post/receive, mutex, task create) — the last of which makes "hand work
+to the engine task" a supported option for a feature rather than a guess.
+
 ## Summary
 
 - **Done thoroughly (✅)**: ~5 subsystems — the system "plumbing" (boot, kernel, storage,

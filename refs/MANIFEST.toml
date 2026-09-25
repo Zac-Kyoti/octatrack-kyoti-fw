@@ -71,3 +71,68 @@ branch = "dsp56300"
 pin    = "HEAD"
 side   = "dsp"
 use    = "THE canonical DSP56300 CPU/DSP core emulator + disassembler (GPLv3) — the actual upstream octabam vendors into vendor/dsp56300 at a hand-pinned commit (scripts/setup.sh DSP56300_PIN), not at tip. NOTE: this repo's active branch is 'dsp56300', NOT 'main' (main is stale, last commit 2026-05-25) — whatsnew/sync must track 'dsp56300'. Track directly to see how stale octabam's vendored pin is and to mine opcode/CCR-flag semantics ourselves. Added 2026-09-16."
+
+[repo.octalab]
+url    = "https://github.com/nordseele/octalab.git"
+branch = "main"
+pin    = "HEAD"
+side   = "coldfire"
+use    = "nordseele's findings-only notes repo (MIT; renamed from 'octalab-notes' — that name still redirects). THE closest match to this project: creative helper functions added to stock OS 1.40C, built and tested on an **Octatrack MKI**, same as us. Publishes no source/firmware — docs/ only: FS layer + slot loading, Parts, the card's files, step records and lock stores, the input layer, menus, the platform reserve on hardware, groove-pool (.otg) file format. octabam's own CONTRIBUTIONS.md credits this as its single largest external ColdFire-side ingest (13 Sep + 23 Sep 2026). Added 2026-09-24."
+
+[repo.octemu]
+url    = "https://github.com/markandrus/octemu.git"
+branch = "main"
+pin    = "HEAD"
+side   = "tooling"
+use    = "markandrus's QEMU-based Octatrack emulator (ColdFire MCF54455 + dsp56300 + SDL2) with an emulated front panel, CF-card image and NVRAM — a second, independent emulation route to compare ours against. Mine `re/*.syms` (~768 ColdFire + ~150 DSP symbol names) against reference/kb/memory-map.md, and his three ColdFire customisations (RECEIVE machine generalising NEIGHBOR; USB-MIDI completing the stock partial implementation; USB-Audio UAC2 16-ch post-FX tap incl. the CF-card-payload trick for code that will not fit the image). Own sources MIT; binaries are NOT redistributable (mixed licenses). Added 2026-09-24."
+
+[repo.midisc-patcher]
+url    = "https://github.com/bkkbrls-del/midisc-patcher.git"
+branch = "main"
+pin    = "HEAD"
+side   = "tooling"
+use    = "bkkbrls-del's browser-side patcher: the user supplies their OWN stock OS 1.40C and the page builds 1.40MIDISC8.1 locally. Mined for the DISTRIBUTION pattern (ship a patch recipe, never an Elektron image) that this project's FLASHING.md already follows by hand, and for its region/relocation table shape. Added 2026-09-24."
+
+[repo.octamad]
+url    = "https://github.com/repeat98/octamad.git"
+branch = "main"
+pin    = "HEAD"
+side   = "coldfire"
+use    = "Jannik Assfalg (repeat98)'s octabam fork. Tracked not as a mod but because octabam's CONTRIBUTIONS.md records that his STOCK_PROFILE.md (a ColdFire instruction profile of the STOCK firmware: frame ISR, delay, sample analysis, voice-renderer extents), his 'stock-analysis-fast' module and his '--work-profile' counter 'were not sent' upstream — i.e. that material exists only here. Also the origin of the EMAC integer-vs-fractional ACCext finding and 'FUN_4000c8a4 is not a function boundary'. Added 2026-09-24."
+
+[repo.octamachine]
+url    = "https://github.com/repeat98/octamachine.git"
+branch = "main"
+pin    = "HEAD"
+side   = "coldfire"
+use    = "repeat98's attempt to run Machinedrum UW OS 1.63 on Octatrack hardware. The Machinedrum half is out of scope; tracked ONLY for docs/BOOT_FEASIBILITY.md + docs/COMPATIBILITY_MATRIX.md, which enumerate the Octatrack's own ColdFire/DSP/memory/peripheral requirements from the host side — an independent cross-check of our boot + platform-reserve figures. Added 2026-09-24."
+
+# ---------------------------------------------------------------------------
+# Deliberately NOT tracked — reviewed 2026-09-24. `tools/refs/contributors.sh`
+# will keep surfacing these; this block is the answer, so nobody re-triages them.
+#
+# Aliases of repos already above (GitHub redirects the old name):
+#   nordseele/octalab-notes      -> nordseele/octalab      (renamed)
+#   emuyia/ems-octakit-firmware  -> emuyia/ems-octakit     (renamed)
+#
+# Forks of tracked repos — contributions land in the upstream we already track,
+# so tracking the fork duplicates it. (octamad is the documented EXCEPTION: it
+# carries material octabam records as never sent upstream.)
+#   sambanks/midisc-fork, sambanks/midisc  (stale at 1.40MIDISC5 vs bkkbrls-del's 8.2)
+#   sambanks/dsp56300, repeat98/octamad's own upstream mirror
+#
+# Out of scope — Elektron RE, but NOT the Octatrack or the Analog Rytm. Noted so
+# the judgement is on record; revisit only if one starts stating OT/AR facts:
+#   emuyia/ems-machinedrum-firmware, emuyia/ems-monomachine-firmware
+#   joelanders/mc68k-md-mm, joelanders/gearmulator-md-mm, dsp56300/mc68k
+#       (MC68331 emulators for the MD/MM — a different CPU from the OT's ColdFire)
+#   dsp56300/gearmulator  (pulls dsp56300/dsp56300 in as a submodule, which we track
+#       directly; the rest is JUCE plugin UI + unrelated synth emulation)
+#
+# Analog Rytm: no firmware-RE repo exists publicly as of 2026-09-24. The AR-side
+# candidates are SysEx/data-structure libraries, not ColdFire RE, and belong to the
+# sibling project (~/Documents/ar-kyoti-fw, which has no refs/ pipeline of its own):
+#   bsp2/libanalogrytm       (portable SysEx library — AR pattern/kit/sound structs)
+#   alisomay/rytm-rs, rytm-sys  (unofficial SDK for AR firmware 1.70)
+# Our own AR work (MAIN OS 1.73) remains the only ColdFire-level AR RE we know of.
+# ---------------------------------------------------------------------------

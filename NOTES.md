@@ -29964,3 +29964,314 @@ began writing wrong step values, and AR shows no trig-content dependence at all 
 If that inference is right, removing Hook P should remove the trig-content dependence at
 non-1x too. **This is a prediction, not a measurement** — the emulator has never reproduced
 that symptom, and it was green for Session 88's build as well. Hardware remains the only gate.
+
+---
+
+## Session 90 (2026-09-24, `wip`) — KB ingest: 4 upstreams moved, 5 new repos, 3 new contributors. **Two open threads closed by it.**
+
+> **⚠️ NUMBERING COLLISION — reconcile before committing.** A *concurrent* session was
+> working in this repo while this one ran (it committed `95812d9` "DIRECT JUMP V5: remove
+> Hook P" at 20:25 and edited `tools/emu_reload.py` at 20:34), and its own comment header
+> also labels its work **"Session 90"**. This entry is the **KB-ingest** Session 90; the
+> emulator/SDRAM-mapping work in `tools/emu_reload.py` is the other one. Renumber one of
+> them — this entry has no dependents yet, so it is the cheaper one to move.
+>
+> The two are causally linked, which is worth preserving whichever way they are numbered:
+> **this session's `octabam` sync is what forced that emulator change** (see "Workflow
+> retooling" below and `kb/techniques.md` "our emulator's fidelity is coupled to the
+> `refs/octabam` clone").
+
+A full `pull-research` pass — the first since 2026-09-16 — plus a contributor sweep the
+user asked for ("look at all contributors' githubs … integrate into our KB and retool our
+workflow"). Nothing was flashed. Two long-standing open questions were **closed** as a
+side effect, both verified against our own image rather than taken on an upstream's word.
+
+### What moved, and the two new discovery passes
+
+`whatsnew.py`: **octabam +397**, **dsp56300 +31**, **midisc +6**, **ems-octakit +2**;
+octamax / OctaLib / elektron-firmware-tool / octa-bt-pt unchanged.
+
+`whatsnew.py` cannot see two things, and both hid real material:
+
+1. **New repos on contributors' accounts** — it only reads `MANIFEST.toml`. A `gh` sweep
+   of the 11 accounts found `bkkbrls-del/midisc-patcher`, `repeat98/octamachine`,
+   `repeat98/octamad`, `nordseele/octalab`, `markandrus/octemu`.
+2. **Contributors credited *inside* upstream docs.** `refs/octabam/docs/firmware/CONTRIBUTIONS.md`
+   (new upstream, 22 Sep — the ecosystem's dated credit ledger) names **nordseele** and
+   **markandrus**, neither of whom we tracked. It is now the first file to read on an
+   octabam sync.
+
+Both passes are automated as `tools/refs/contributors.sh`. Manifest is **13 repos**, with a
+"deliberately NOT tracked" block at the bottom (aliases, forks of tracked repos, and
+Elektron-but-not-OT/AR work) so candidates are not re-triaged every sweep.
+
+### CLOSED #1 — the MACSR/EMAC preemption hazard is not a hazard
+
+`kb/memory-map.md` carried a long "**Not yet resolved**: which task calls this copier
+function at all, or whether it's even preemptible in practice (needs dynamic tracing)".
+Answer: **no task at all, and the scheduler cannot touch it.**
+
+| fact | how |
+|---|---|
+| frame ISR spans `0x4000aad0..0x4000d9b0` | repeat98's `STOCK_PROFILE.md`; **verified here** — `0x4000d9ae` is the `rte` |
+| all 8 MACSR sites + the 3 scene/record sites are inside it | arithmetic on the above; octemu independently annotates 3 of them "inside frame_isr" |
+| frame ISR = interrupt **level 5** | **verified here** — `0x4001fc2e: moveq #5` → `0x4001fc30: moveb %d0,0xfc048041` (INTC0 ICR1) |
+| frame ISR masks its own source at entry | **verified here** — `0x4000aada: moveb #1,0xfc04801c` (SIMR) |
+| PIT0 time-slice = interrupt **level 1** | **verified here** — `0x400005e2: moveb #1,0xfc04c06b` (INTC1 ICR43) |
+
+Level 1 cannot preempt level 5. **The scheduler provably cannot land inside the
+`MACSR=0x60` window**, so "adding cycles to the level chain opens a cross-task EMAC race"
+is retired. The residual surface is exactly the two **level-6** sources — MIDI IN
+(`0x400106ec`) and the serial link (`0x400109bc`) — a bounded read, not a tracing project.
+
+Scanning every `ICR` write in the image also produced the **full 11-row interrupt-level
+table**, which neither octabam nor octemu carries. The scheduler turns out to be the
+*lowest*-priority interrupt in the machine.
+
+Also: **`FUN_4000c8a4` is not a function boundary** (it points inside this ISR, at an
+operand). `tools/patch_partreapply.s` names it — worth a look before that patch is revised.
+
+### CLOSED #2 — the Session 49 Part-carryover root cause, now evidenced
+
+S49's handoff called the PICKUP-unstick piece "UNVERIFIED/suspect, proposed by analogy".
+octemu's symbol file pointed at `seq_goto_pattern`; disassembling from there settled it.
+
+Stock has **three** part-apply routines sharing a prologue (publish bytes
+`0x80001828/29`, clear `0x46c7d6d4..d7d4`, index `param_snapshot_base` at
+`part*0x18b2 + bank*0x9b340`). Diffing their absolute-write and `jsr` sets mechanically:
+
+| | `0x40009094` = `STOCK_APPLY` | `0x40009848` | `0x40009e00` |
+|---|---|---|---|
+| size | 1,970 B | 2,378 B | **914 B** |
+| scene table `0x800010e4..e7` | — | ✅ | ✅ |
+| **tempo republish** `0x80001814/18/1c`, `0x80001824` | ✅ | — | — |
+| **audio eDMA re-arm** TCD0/TCD1 CSR + TCD6/7 | ✅ | — | — |
+| **INTC0 re-unmask** CIMR + 3 ICRs | ✅ | — | — |
+| kernel `queue_post` | ✅ | — | — |
+
+**`FUN_40009094` is the only variant that restarts the audio engine.** And
+`seq_goto_pattern` (`0x400a0570`) reads the pattern→Part link at slab `+0x8e57`
+(`0x400a05e8`, confirmed against our own trailer table) then calls the **light**
+`0x40009e00`. So S49's hypothesis — "the pattern-change path never runs `FUN_40009094`" —
+is **confirmed literally true**, and the carry-over is an *enumerated delta*, not a missing
+call. Independently corroborated on a **MKI** by octalab: the stock part setter
+`0x40029a4c(src, part)` re-applies via `0x40009094(bank, part)`, which is also what copies
+scenes A/B into `0x80000ed4`.
+
+**Consequence for the fix:** it should add only the part of the delta a given symptom needs
+— calling the heavy variant from the pattern-change path would re-arm eDMA and post a queue
+message mid-change, plausibly worse than the bug. `diff_flex_static.py` is still the right
+instrument; it now has a list of what to look for.
+
+⚠️ Argument order is **`(bank, part)`**, verified three ways. **octemu's
+`apply_part(part, pattern)` label is wrong** — an example of why a borrowed symbol gets
+checked before it is marked **C**.
+
+### nordseele/octalab — the most valuable single ingest, and the one that saves us money
+
+Findings-only (MIT), stock **OS 1.40C**, **built and tested on an Octatrack MKI** — the
+only upstream on our exact hardware *and* OS. New `reference/kb/caves.md` is built from it:
+
+- **The tail of the image is NOT free space.** `0x401087e4..0x4010c315` (15,153 B) and
+  `0x4010cdd1..0x4010fdf0` (12,319 B) hold zeros with **zero static references** — and are
+  **written at runtime**. A build that put a menu table in the first raised **`VEC:03` at
+  `0x40064abc`** on hardware; because the patched screen was the one containing OS UPGRADE,
+  recovery was **MIDI-only, about an hour of SysEx**. The rule: *no static references* means
+  nothing is **known** to point at a region, not that nothing writes it.
+- **The classic cave `0x400d64da..0x400d7c3c` is contested five ways and effectively full**
+  — octamax (everything), octabam `0x400d6b00`, standalone 1.40MIDISC, octalab (69 B left),
+  **and us** (`CODE2`, `STUB`, `FREE_START` at `0x400d6500`). Our V1.1 ~5 % headroom is
+  headroom in the most contested region in the ecosystem.
+- **The canary protocol** — fill with `0xA5`, flash, use the unit for a full session, dump
+  and compare — is the gate our emulator diff cannot substitute for. Our gate proves the
+  patch does what we meant; it does not prove our bytes stay ours.
+- **The append-a-runtime route is MKI-proven** (octabam's DRAM loader ran on a MKI, 11 Sep),
+  which matters because octabam's own tests are all MKII. That is the answer when the cave
+  runs out — not a new cave in the tail.
+
+Plus, all MKI-verified and folded in: **a Part lives three times** (working / saved / SRAM
+copy at `0x100a4ece`) and **a bank-only write is lost at the next boot**; **input maps are
+layers** (`0x40031494`, keys `0x46c7d8de+code*0x18`, encoders `0x46c7dede+enc*0x14`,
+last-map-wins, `-1` passes through, a null encoder handler *swallows*) plus the stuck-held-trig
+hazard (`0x460d174a`) — which is the mechanism behind our own RELOAD3 picker trouble; the
+callable SETUP-window draw primitives (relevant to S87's card); trig **step records** (64 × 32 B
+from `TRAC+0x59`, sample lock = byte 31) — the other half of the S48 pattern-LED bug's data
+model; and **master length is a u16 at `+0x8e50` with `−1` = INF**, which our byte-wise
+reading at `+0x8e51` would misread as 255.
+
+### For the live DIRECT JUMP non-1x thread
+
+octemu supplies the tick arithmetic we were missing (not yet applied — input to the next
+attempt, not a fix): **`seq_scale_table 0x400aba50`** = ticks/step by scale byte
+`{3,4,6,8,12,24,48,96}`, index 2 = 1x = 6; **`seq_quant_length_table 0x400d80dc`** = 17
+chain/change quantise lengths; the three **wrap comparands** `0x400a3cee`/`0x400a3e14`/`0x400a3ff8`;
+**step phase = ticks × 2,646,000 at `0x400a42d0`**; `0x800065b2` confirmed as the master-step
+counter (the domain S88's Hook P wrote into); and **`seq_pattern_commit 0x400a44a0`** as the
+pattern-change quantisation point.
+
+### Safety fixes to our own KB
+
+- **`0x800000d4` — re-examined, and my first pass overstated it.** midisc 8.2 says
+  "Never 0x800000D4 (OS refs)" and our `MERGE.md` says it "is referenced once in stock",
+  so the note initially went in as "NOT free". Then I swept the whole image myself:
+  **zero absolute-long references to any word in `0x800000d4..df`** — including
+  `0x800000dc`, which MUTE MODE *ships* on. That is the tell: `0x80000070` is the
+  PERSONALIZE block base and stock reaches its settings by **base + displacement**, so an
+  absolute-long scan cannot see any of them and **proves nothing either way** — which is
+  what MERGE.md's own B1 text says about `0x800000f8`. What *does* settle the PERSONALIZE
+  question: stock's boot restore is `memcpy` length **`0x64`**, ending at `0x800000d3`,
+  one byte short of `0xd4` — so `0xd4` is not a stock setting. `memory-map.md` now records
+  all four sources, the method artefact, and the emulator-watchpoint test that would
+  actually settle it. **MERGE.md's "referenced once" claim is unsubstantiated — do not
+  propagate it as fact.** Prefer `0x800000d8` anyway, because `0xd4`/`0xd5` are already
+  `patch_softmute`'s `OTFX_PROBE` diagnostic words.
+- **Verified the probe words never ship:** assembled `patch_softmute` exactly as
+  `build_mutemode_dt.py` does (`DT_MODE=1`) — 970 B, **no reference to `0x800000d4` or
+  `0xd5`**; the diagnostic `OTFX_PROBE=1` build is 986 B and does contain them. The
+  `0x800000d4` references in `patch_mutemode.s` are **comments** about the restore-span
+  widening; its actual state is `0x800000dc`.
+- **Three more never-safe-for-code addresses** from midisc 8.2 (`0x400C14D5` beside our
+  known `0x400C1153`; table zero-gaps `0x400EC8BC`, `0x400E6E5B`), and two *new safe*
+  D-region pads (`0x400D347E..CF` 81 B, `0x400D352D..6F` 66 B).
+- **Citations that moved:** octabam **deleted** `docs/firmware/RTOS_FORK.md` and
+  `COLDFIRE_PORT.md` on 22 Sep, reorganising them into `KERNEL.md` + siblings. Our
+  commit-pinned citations stay accurate *at their pin*, so they were kept and given a
+  "where it lives now" pointer rather than rewritten.
+
+### Workflow retooling
+
+- `tools/refs/contributors.sh` — new; the two discovery passes above.
+- `tools/refs/sync.py` **hardened**: a clone with local edits used to abort the *entire*
+  run (it did, this session — our own poke2 probe in octabam's emulator). It now saves the
+  diff to `tools/refs/local-patches/<repo>-local.patch`, resets, and continues; and a repo
+  that fails keeps its **previous** lock line while the others proceed.
+- `pull-research` SKILL.md: added the discovery step, "diff by **file**, not by commit, on
+  a fast mover", "upstream reorganises — check `--name-status` for deletions", "material can
+  live off `main`" (repeat98's profile is only on `origin/poly-machine`), and **step 4b:
+  verify a load-bearing borrowed claim against our own image** before marking it **C**.
+- New `reference/kb/caves.md`; `kb/README.md` indexes it and now carries the
+  verify-before-you-trust rule.
+- **Documented a coupling nobody had written down: `sync.py --update octabam` updates
+  OUR emulator**, because `tools/emu_rtos.py` runs octabam's script from inside that
+  clone against a Unicorn patched in its `.venv`. This session's sync pulled octabam
+  PR #360 (Unicorn EMAC MAC-with-load decode — Rx source, phantom dual, MASK reset),
+  itself derived from **markandrus/octemu**'s findings; the more-correct EMAC changed a
+  boot branch, reached a stock ~10.8 MB zero-fill at `0x4f502c10` that had never run in
+  our harness, and required mapping `0x4f000000..0x50000000` (the external audio-sample
+  SDRAM bank) in `tools/emu_reload.py`. Nothing in our patches changed. New rule, in
+  both the skill and `kb/techniques.md`: **after an octabam sync, re-run a known-good
+  scenario first — and an emulator "green" from before a sync is not evidence for a
+  build after it.** This is also the first time a new contributor's work improved our
+  own tooling within hours of being tracked.
+
+### Still open (logged in `reference/UPSTREAM_INBOX.md` as Pending)
+
+**12 octabam firmware docs unread** — `PARAM_PAGES.md` (537 L) and `RECORDER.md` are the
+two most likely to bear on S49. **~690 of octemu's 768 ColdFire symbols unmined**, plus his
+**USB-Audio CF-card-payload trick** for code that will not fit the image — a real
+alternative to the cave ceiling. `octamachine`'s two host-side platform docs, and
+`midisc-patcher`'s `patch.json`, unread.
+
+### Session 90 continued — pending items cleared, and the finished set audited
+
+**All five pending items from the morning pass are closed.** Two by distilling them, one by
+reading it and confirming it is out of scope, two by mining them in a more useful direction.
+
+**octabam's unread firmware docs.** `PARAM_PAGES.md` §5g and `RECORDER.md` were the two
+flagged as most likely to bear on S49, and both did:
+- **Step-record parameter semantics**: byte *k* = scene parameter *k* (PLAYBACK 0-5, LFO 6-11,
+  AMP 12-17, FX1 18-23, FX2 24-29, byte 31 sample lock). The **trig word** is
+  `TRAC + 0x89a + (s−1)*2` — bits 15-13 trig count−1, 12-7 micro-timing ±23, 6-0 condition —
+  and ⚠️ **in the bank FILE it sits one byte earlier (`+0x899`)**, a RAM/file skew any tool
+  reading both must respect. Stores: sample lock `0x40040ee0`, p-lock `0x4004f5f8` (which
+  **returns early unless a trig key is down**).
+- **The recorder has three storage tiers** — bank `+0x8f382+part*6322+track*12`, SRAM
+  `0x100a54d0+…`, and a **published tier `0x80000cf4+track*12+page*96` refreshed per frame
+  from `0x80000c94`**. That is the S49 "recorder SRC/RLEN carries over" mechanism, and it says
+  the bug is a *publish* problem rather than a storage one — consistent with our own causal
+  proof in `check_reccache_causation.py`.
+- **The tempo chain `0x4000ca94..cabc`** (`1814→181c`, `1818→1824`, `d1 = 0x80000000 ÷ [181c]
+  → 1820`) explains *why* `FUN_40009094` writes exactly those four tempo words: the heavy
+  part-apply re-runs the tempo derivation, the light variants don't.
+- A pleasing reconciliation: octabam's QREC/QPL ladder at `0x400d80e0` "with an `0xFFFFFFFF`
+  sentinel before" **is** octemu's `seq_quant_length_table 0x400d80dc` "17 longs, first −1".
+  One table, read from opposite ends, shared by QREC/QPL *and* chain-quantise.
+
+The other ten octabam docs were reviewed for scope and carry nothing bearing on a current
+thread — logged as reviewed rather than left as "unread".
+
+**octemu's remaining symbols**, swept against every address our 8 patches touch (the useful
+direction, rather than reading 690 lines): `bank_reload_gate_read` corroborates `patch_qlrec`'s
+detour site; `0x4000d49e` independently places `patch_softmute` inside the frame ISR
+(supporting the MACSR closure); **`sample_heap_base = 0x40a955e0`** arrives with an arithmetic
+proof that it is exactly where the 16 resident bank blobs end
+(`0x400e21e0 + 16 × 0x9b340 = 0x40a955e0`) — the same address octalab reports octabam's
+MKI-proven DRAM loader depacking into, so two routes converge on one number. And a real trap:
+**`0x400e21e0` has two identities** — DSP first-stage bootstrap in the **image file**, bank
+blob base at **runtime**. Patching the image there would corrupt the DSP loader. (Our
+`patch_pattern_led` reads it at runtime, as stock itself does at `0x4009a486`.)
+
+**octemu's CF-card payload trick** — the item flagged as a possible answer to our 5 % V1.1
+headroom, and it is a good one. The payload lives on the card, a ~400 B trampoline in image
+slack hooks `fs_card_detect_poll`, and stage 2 installs the rest at runtime into flex-heap
+pages taken out of the firmware's own free list. **Its failure mode is benign**: no card file
+means stock behaviour, and recovery is hold-`NO`-at-boot or delete the file — no reflash, no
+SysEx. Better risk profile than append-a-runtime, which costs sample memory permanently.
+☠ It also carries **hardware-measured** SDRAM verdicts worth never re-deriving: `0x48001000`
+is wrong (writes past ~`0x48003000` **destroy image code**), `0x48010000` corrupts the
+exception screen itself, `0x49000000` is clean for 256 KB.
+
+**octamachine** — read, and **confirmed out of scope**. It is MCF5206E / Machinedrum
+territory (Gearmulator's MD memory map, MAME's `elektronmono.cpp`); the only Octatrack-side
+sentence restates octemu's board setup. Nothing for us. Closed, not deferred.
+
+**midisc-patcher** — `patch.json` is `{stockSha256 164f3122…, patchedSha256, mainOsSize
+1112560, spans[549] {offset, data}}`. Two cheap things we could adopt: a **`patchedSha256`
+rebuild-reproducibility gate** (our guarded splices catch a wrong *input*, but we publish no
+expected *output* hash, so a user can't confirm their rebuild matches ours), and a
+single-file redistributable span diff — which contains only our bytes, never Elektron's.
+
+### The audit: does any of this change a finished build?
+
+**No. No mod needs rebuilding or reflashing.** Full per-mod table in `reference/MERGE.md`
+"Audit of the finished set". The results worth stating here:
+
+- **PARTREAPPLY is validated, and its design was right for reasons we did not have.** It calls
+  `FUN_40009094` **only when the transport is stopped**, and its comment justified that as
+  "avoid racing whatever jump-avoidance property its timing has" — a hunch. It is now a
+  mechanism: that is the only variant that **re-arms the audio eDMA TCD0/TCD1 chain** and
+  republishes tempo, so calling it under a running sequencer would re-arm audio DMA mid-play.
+  Its `(bank, part)` convention is confirmed three ways; octemu's label is the wrong one.
+  Only fix needed is a comment: `FUN_4000c8a4` is not a function boundary (the premise is
+  right, the label isn't).
+- **MUTE MODE is validated and its risk surface shrank.** The MACSR preemption hazard the
+  whole hook-12 investigation worried about **cannot happen** (frame ISR level 5, PIT0 level
+  1). octemu independently places `patch_softmute`'s `0x4000d49e` inside the frame ISR. If the
+  hardware silence regression ever returns, the surface to examine is the **two level-6
+  sources** (MIDI IN, serial link), not the scheduler.
+- **Bug-2 pattern-LED: fix unchanged, root cause sharper.** Disassembly confirms stock's
+  predicate ORs `+0x00..0x0f` then `+0x18..0x37` — it **skips exactly `+0x10..0x17`**, the
+  mask octabam reads as trigless-locks. So stock doesn't merely ignore p-locks; it omits the
+  one mask recording them. A **cheaper fix exists** (OR in `+0x10`) and is **deliberately not
+  adopted**: that mask's label is disputed upstream (nordseele 🟡 vs octabam ✅), the MIDI
+  side's equivalent is unmapped, and our lock-array scan is correct either way. Ground truth
+  beats a cheaper read of a contested label.
+- **QLREC: no bug.** octemu warns `bank_reload_gate` must be tested as a full word; we never
+  interpret it — we replay the `jsr` and let stock's own `tst.l %d0` do the test.
+- **`0x800000d4` affects no shipped mod** — proven by assembling the shipping softmute
+  (`DT_MODE=1`, 970 B, no reference) versus the diagnostic (`OTFX_PROBE=1`, 986 B, present).
+- **Cave overlaps**: our V1.0 allocation overlaps octalab's `LAB_MENU`, octabam's list cave and
+  standalone 1.40MIDISC. **No action for our builds** — it only rules out naively merging an
+  image with those projects.
+- The **B1 merge blocker is unchanged and still open** (`DJ_MODE` at `0x800000d8` riding MUTE
+  MODE's widened restore) — it was never about `0xd4`.
+
+### Making this get used, not just stored
+
+`CLAUDE.md` is the only file auto-loaded every session, so the three rules that would
+otherwise be relearned the hard way now live there as hard constraints: **read
+`kb/caves.md` before naming any cave address** (with the counter-intuitive part stated
+inline — 27 KB of zeros with zero static refs is still written at runtime); **a borrowed
+address or signature is a claim, verify it against our own image** (with the objdump
+one-liner); and **`sync.py --update octabam` silently changes our emulator**, so a green
+from before a sync is not evidence for a build after it.

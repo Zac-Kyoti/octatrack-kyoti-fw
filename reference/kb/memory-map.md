@@ -26,6 +26,15 @@ Confidence: **C**onfirmed (HW or real decompile) · **L**ikely (emu/inference) �
 ## Kernel / RTOS scheduler
 
 > source: `refs/octabam/docs/RTOS_FORK.md` §2 @ `2f241e1` (2026-09-06), read byte-exact from the image. confidence: **C** for the addresses, **L/❓** for a few task rows. Our `COVERAGE.md` marks this untouched — this is the first map of it.
+>
+> **⚠️ Citation moved upstream (2026-09-22).** `docs/RTOS_FORK.md` and
+> `docs/COLDFIRE_PORT.md` **no longer exist at octabam's tip** — that material was
+> reorganised into `docs/firmware/KERNEL.md` (+ `PANEL.md`, `STORAGE.md`,
+> `RECORDER.md`, `LFO.md`, `LEVEL_LAW.md`, `COLDFIRE_DELAY.md`, `REPITCH.md`), and
+> the original logs are reachable only from git history:
+> `git -C refs/octabam show 3ceba41:docs/history/RTOS_FORK.md`. The commit-pinned
+> citations throughout this file remain accurate *at their pinned commit* — but to
+> read the current version of any RTOS claim, go to `docs/firmware/KERNEL.md`.
 
 | Addr | Conf | What |
 |---|---|---|
@@ -69,16 +78,258 @@ pass — every remaining track/ping this invocation still has to do, not just on
 change that adds cycles to one of the four level-chain loops (100+ combined hits/frame)
 shifts how close this function runs to the tick boundary and is a plausible way to open
 that window on a build that never opens it stock — a race a short/synthetic emulator
-scenario may never get scheduled into. **Not yet resolved**: which task calls this
-copier function at all, or whether it's even preemptible in practice (needs dynamic
-tracing, `emu_rtos.py`, not more static reading — see `NOTES.md` "Session 58 continued
-yet again, part 5"). (source: `refs/octabam` `CLAUDE.md` "MACSR S/U IS BIT 6..." +
+scenario may never get scheduled into. **✅ RESOLVED 2026-09-24 — "no task, and the scheduler
+cannot preempt it."** Three independent upstream sources place this whole span inside
+the **DSP frame ISR**, and the decisive numbers were verified against our own image
+this session:
+
+- **The frame ISR extends `0x4000aad0 .. 0x4000d9b0`** and ends in an `rte` —
+  verified locally: `0x4000d9ae: rte`. (source: `refs/octamad/docs/firmware/STOCK_PROFILE.md`
+  @ `ccb11fb`, branch `origin/poly-machine`, 23 Sep 2026 — Jannik Aßfalg / repeat98.)
+  **Every** MACSR site above — `0x4000cae8`, `0x4000ccae/cd22/cd64/ce40/ced0`,
+  `0x4000cf60`, `0x4000d3ae` — falls inside it. There is no "calling task": this is
+  interrupt context. octemu independently annotates `0x4000c202`, `0x4000cc60` and
+  `0x4000d12c` as "inside frame_isr" (`refs/octemu/re/coldfire.syms` @ `6a9ff68`).
+- **The frame ISR runs at interrupt level 5** — verified locally:
+  `0x4001fc2e: moveq #5,%d0` → `0x4001fc30: moveb %d0,0xfc048041` (INTC0 ICR1 = 5).
+  It also masks its own source at entry: `0x4000aada: moveb #1,0xfc04801c` (INTC0 SIMR).
+- **The PIT0 time-slice runs at interrupt level 1** — verified locally:
+  `0x400005e2: moveb #1,0xfc04c06b` (INTC1 ICR43 = 1), unmasked at
+  `0x400005ea: moveb #43,0xfc04c01d` (CIMR).
+
+On ColdFire/68k an exception sets the SR mask to the interrupting level, and only a
+**higher** level can interrupt. Level 1 cannot preempt level 5 — **the scheduler
+provably cannot land inside the MACSR=0x60 window**, so the hazard as originally
+written (a PIT0 tick pausing the level chain while another *task* touches the EMAC)
+**cannot happen.**
+
+**What remains, now narrow and specific:** only sources at **level 6 or 7** can
+interrupt the frame ISR. Per octabam's vector table those are UART0 RX / MIDI IN
+(INTC0 source 26, `0x400106ec`) and the serial link (source 27, `0x400109bc`) — both
+confirmed level 6 locally (`0xfc04805a`/`0xfc04805b` ← 6) — plus the level-7 halt
+path (`0x4001fca0`), which never returns. **The open question is therefore only:
+does the MIDI-IN or serial-link ISR touch the EMAC?** A small bounded read, not a
+dynamic-tracing project. Until it is done, "adding cycles to the level chain" is
+**not** a scheduler race; the original worry is retired.
+
+⚠️ `FUN_4000c8a4`, which several older notes and `tools/patch_partreapply.s` name as
+a function, **is not a function boundary** — it points *inside* this ISR, and at that
+exact address inside an operand (same `STOCK_PROFILE.md` source). Do not treat it as
+a callable entry. (source: `refs/octabam` `CLAUDE.md` "MACSR S/U IS BIT 6..." +
 `docs/firmware/KERNEL.md` "Emulator facts", pulled 2026-09-16 at `f77d5d7`; octabam's own
 ColdFire port had this exact S/U bit wrong for this exact function once, "every voice
 rendered silent" — O9b, 8 Sep 2026 — independent confirmation this specific code is
 unusually easy to mismodel.) See
 `NOTES.md` "Session 58 continued yet again, part 4" for the mute-mode incident this
 was pulled to explain.
+
+## Interrupt levels — the full verified table (new 2026-09-24)
+
+> source: our own disassembly this session (every `ICR` write in the image, located
+> by scanning for `0xfc048041`/`0xfc04801d` and their siblings), cross-read against
+> `refs/octabam/docs/firmware/KERNEL.md` @ `111fd76` and
+> `refs/octemu/re/coldfire.syms` @ `6a9ff68`. confidence: **C** — each level is a
+> literal `moveq #N` feeding a `moveb` into that source's ICR.
+
+Neither octabam's nor octemu's tables carry the interrupt **levels**; they matter
+because on ColdFire only a *higher* level preempts, which is what settles every
+"can X interrupt Y?" question (see the MACSR resolution above).
+
+| ICR write site | register | source | **level** | handler / what |
+|---|---|---|---:|---|
+| `0x4001fc30` | `0xfc048041` | INTC0 1 | **5** | DSP frame ISR `0x4000aad0` (masks itself at entry via SIMR `0xfc04801c`) |
+| `0x4001f824` | `0xfc048047` | INTC0 7 | **7** | halt / panic path `0x4001fca0` (`bras .`, never returns) |
+| `0x400160ce` | `0xfc048056` | INTC0 22 | **3** | ATA |
+| `0x400110b6` | `0xfc04805a` | INTC0 26 | **6** | UART0 RX — **MIDI IN** `0x400106ec` |
+| `0x40010fb2` | `0xfc04805b` | INTC0 27 | **6** | serial link `0x400109bc` |
+| `0x40010d76` | `0xfc04805c` | INTC0 28 | **4** | serial block `0x40010b88` |
+| `0x4004048a` | `0xfc048061` | INTC0 33 | **3** | ❓ `0x40055cb8` |
+| `0x40040454` | `0xfc048062` | INTC0 34 | **1** | ❓ `0x400409f4` |
+| `0x40092f18` | `0xfc048064` | INTC0 36 | **4** | MIDI framer `0x40092bf4` |
+| `0x40092694` | `0xfc048065` | INTC0 37 | **4** | ❓ `0x4009228c` |
+| `0x400005e2` | `0xfc04c06b` | INTC1 43 | **1** | **PIT0 — the 5.0 ms time-slice** `0x40000550` |
+
+**The two facts that follow immediately:**
+
+1. **The scheduler is the lowest-priority interrupt in the machine** (level 1). It
+   cannot preempt *any* audio, MIDI, serial or storage ISR. Every "is my hook
+   racing the scheduler?" worry inside an ISR is answered *no* by this table alone.
+2. **MIDI IN and the serial link (level 6) are the only things that can interrupt
+   the frame ISR.** They are the entire remaining preemption surface for
+   frame-ISR-resident code.
+
+⚠️ Unmasking convention: the firmware **never writes IMRH/IMRL**. It unmasks through
+`CIMR` (INTC base `+0x1d`, value = source number; `0x40` = all) and sets `ICRn` at
+`+0x40+n`. A `CIMR` write must also clear `IMRL`'s MASKALL bit. (source: octabam
+`KERNEL.md`, marked 🟡 there.)
+
+## Kernel primitives — the callable RTOS API (new 2026-09-24)
+
+> source: `refs/octabam/docs/firmware/KERNEL.md` @ `111fd76` (read byte-exact from the
+> image), cross-checked against `refs/octemu/re/coldfire.syms` @ `6a9ff68`. confidence:
+> **C** for the addresses; see the noted disagreements.
+
+Useful to us for a specific reason: several of our features want to *hand work to a
+task* rather than do it inside a hook. `k_queue_post` is how stock does that, and it
+has 149 call sites — a well-worn path.
+
+| Addr | primitive | notes |
+|---|---|---|
+| `0x400005fc` | `task_create(tcb, entry, prio, stack, size)` | a new task's saved context is an exception frame on its own stack: `[0x407c][SR 0x2000][entry PC]` with the exit thunk under it (`0x4000061c`–`0x40000626`) |
+| `0x4000063c` | `make_ready(tcb)` | raises the top pointer; does **not** force a switch |
+| `0x4000068c` | `unlink(tcb)` | |
+| `0x40000818` | `event_wait(event)` | |
+| `0x40000888` | `event_signal` | ⚠️ octemu names `sem_post = 0x400008b0` instead — 40 bytes apart; likely two entries of the same facility. Unresolved. |
+| `0x400008ea` | `signal / reschedule` | sets INTFRCH bit 11 of INTC1 (`0xfc04c010`) → source 43 → the scheduler. Lands once the primitive restores the caller's SR. |
+| `0x400007a4` | `counting_wait` | traps at `0x40000810` |
+| `0x40000bd4` | `queue_init` | |
+| `0x40000c3c` | **`queue_post(queue, msg)`** | ring at `queue+0x14`, mask `+0x10`, head/wridx `+0x18`, count `+0x04`; wakes the waiter at `+0x0c`. IPL7-masked. **136 `jsr` + 13 `jmp` = 149 sites** (octemu's count). |
+| `0x40000d1a` | `queue_receive` | ⚠️ octemu says the entry is `0x40000d00` and describes it as spinning on count `+0x04` around the wait primitive `0x40000818`. `0x40000d00` is the likelier function head; `0x40000d1a` is plausibly the post-prologue label. |
+| `0x400006e4` | `task_exit` | octemu: clears its own TCB runnable flag `+76` and blocks forever |
+| `0x400009e4` | `mutex_init` | |
+| `0x400009f4` | **`mutex_lock`** | owner TCB `+0`, waiter list `+4`/`+8`, chained through `TCB+0x50`; contended take traps at `0x40000a78`. octemu: masks to IPL7, **45 `jsr` sites**. |
+| `0x40000a94` | `mutex_trylock` | |
+| `0x40000ab4` | `mutex_unlock` | hands to the first waiter; traps if that waiter outranks the top pointer |
+| `0x40010db0` / `0x40010d90` | serial-link driver's wrappers over the mutex | |
+| `0x40000d50(vec, fn)` | `vector_install` | writes `[VBR + 4·vec]`; **VBR = `0x40000000`** |
+
+**TCB, extended:** our table above stops at `+0x4c` (ready flag). Add **`+0x50` =
+the lock waiter chain** (octabam; octemu corroborates as "TCB +76/+80" = `+0x4c`/`+0x50`).
+
+**Task table, extended with TCB and stack addresses** (octabam measured these with a
+hook on `task_create`; we previously had only the entry points):
+
+| prio | TCB | entry | stack (+size) | what |
+|---:|---|---|---|---|
+| 6 | `0x46c7fb0c` | `0x40005540` | `0x46c7ea20` +0x1000 | MIDI / voice mailbox |
+| 5 | `0x460bcc2c` | `0x4001ee30` | `0x460bc42c` +0x800 | storage (FAT/ATA) |
+| 4 | `0x460d4f80` | `0x4005593c` | `0x460d4780` +0x800 | key-repeat timer |
+| 3 | `0x460d59d4` | `0x40056c40` | `0x460d51d4` +0x800 | **UI** — `queue_receive(UI_QUEUE)` |
+| 2 | `0x460fab80` | `0x40091d18` | `0x460fabd4` +0x2000 | ❓ |
+| 2 | `0x460ffd44` | `0x400921c4` | `0x460fdd44` +0x2000 | ❓ |
+| 2 | `0x460e0e38` | `0x4009203c` | `0x460dee38` +0x2000 | ❓ (ping-pongs with sys) |
+| 1 | `0x460ddde4` | `0x4008445c` | `0x460d9de4` +0x4000 | **engine** — 46-opcode dispatcher, queue **`0x460d17ce`**; **RELOAD BANK = types `0x14` and `6`** |
+| 1 | `0x46105508` | `0x40098a5c` | `0x4610555c` +0x2000 | ❓ |
+| 1 | `0x46c7bed8` | `0x40061a94` | `0x460d6de4` +0x2000 | sys: serial + SPI start-up, then creates storage, UI, p3 |
+| 0 | `0x46c7ae84` | `0x4001f834` | top `0x46c7becc` | main: init list, then `bras .` at `0x4001fc9c` = **idle** |
+
+**⚠️ `RELOAD BANK` is engine-task opcodes `0x14` and `6` on queue `0x460d17ce`** — the
+mechanism our RELOAD2/RELOAD3 features sit on top of. Worth reading before the next
+revision of `tools/patch_reload3.s`.
+
+**Handoff detail:** at the `trap #0` at PC `0x40000e46` only `main` is ready; the
+current TCB `0x46c7ae30` is the pre-multitasking context, saved once and never
+resumed. First switch is the first tick (sample 8,812 under octabam's route A).
+
+**Time-slice numbers:** PIT0 `0xfc080000`, prescaler 2¹¹ (PCSR `0x0b36` at init,
+`0x0b3f` on every switch), PMR `264,000,000 / 409,600 − 1 = 643` → **5.0 ms per tick
+= 220.5 samples = 13.8 audio frames**. PIT1 `0xfc084000` (PCSR `0x0b3a`, PMR 2014) is
+the storage layer's delay timer (`0x40020c7c`).
+⚠️ octemu's `coldfire.syms` calls the PIT0 tick "10 ms". octabam's arithmetic above is
+shown in full and checks out; **prefer 5.0 ms**, and note octemu may be describing a
+different PCSR state.
+
+## The part-apply family — `0x40009094` vs `0x40009848` vs `0x40009e00` (new 2026-09-24)
+
+> source: **our own disassembly this session** (`m68k-elf-objdump -m m68k:cfv4e`,
+> extents walked to the first `rts`, absolute-write and `jsr` sets diffed
+> mechanically), prompted by `refs/octemu/re/coldfire.syms` @ `6a9ff68` and
+> **independently corroborated on hardware** by
+> `refs/octalab/docs/FINDINGS.md` @ `e0dc56d` ("A part lives three times", MKI,
+> 12 Sep 2026). confidence: **C**.
+
+**This is the Session 49 answer.** The S49 hypothesis was "the pattern-change path
+never runs `FUN_40009094`". That is now **confirmed literally true** — and the reason
+is that stock has **three** part-apply routines, and the pattern-change path takes the
+lightest one.
+
+All three share a prologue: write the publish bytes `0x80001828` / `0x80001829`, clear
+the 0x100-byte block `0x46c7d6d4..0x46c7d7d4` in a 16-byte-stride loop, then index
+`param_snapshot_base` (`0x40170f60`) at **`part*0x18b2 (6322) + bank*0x9b340 (635712)`**.
+
+| | `0x40009094` — `STOCK_APPLY` | `0x40009848` | `0x40009e00` |
+|---|---|---|---|
+| size | **1,970 B**, 596 insns | 2,378 B, 756 insns | **914 B**, 271 insns |
+| publish bytes `0x80001828/29` | ✅ | ✅ | ✅ |
+| `0x400d64ba` / `0x400d64bc` | ✅ | ✅ | ✅ |
+| scene table `0x800010e4..e7` | — | ✅ | ✅ |
+| **tempo republish** `0x80001814`, `0x80001818`, `0x8000181c`, `0x80001824` | ✅ | — | — |
+| **eDMA TCD re-arm** — `0xfc04501e` (TCD0.CSR), `0xfc04503e` (TCD1.CSR), plus TCD6/7 at `0xfc0450c0..fe` | ✅ | — | — |
+| **INTC0 re-unmask** — CIMR `0xfc04801d`, ICR `0xfc048048/49/4f` | ✅ | — | — |
+| `jsr` targets | `queue_post 0x40000c3c`, `memcpy 0x40020898`, `0x40020950`, `0x4009ec70` | `memcpy 0x40020898` | **none** |
+
+`0xfc045000` is the **eDMA TCD array** (32 B/channel); TCD0/TCD1 CSRs are, in octemu's
+words, "the measured audio-chain arms". So:
+
+> **`FUN_40009094` is the only variant that restarts the audio engine.** It
+> republishes tempo, re-arms the audio eDMA chain, re-unmasks the interrupt sources
+> and posts a message to a kernel queue. The other two only move parameter bytes.
+
+**Who calls which:**
+
+- **`seq_goto_pattern` (`0x400a0570`) → `0x40009e00`.** Verified: at `0x400a05e2`
+  `lea 0x400eb036,%a0`; at `0x400a05e8` `mvsb %a0@(1,%d0:l),%d0` reads slab
+  **`+0x8e57`** — the pattern→Part link already in our trailer table — then
+  `0x400a05f0: jsr 0x40009e00` with `(bank, part)`. **The pattern-change path applies
+  a Part using the variant that never restarts the engine.**
+- **`0x40029a4c(src, part)` → `0x40009094(bank, part)`.** octalab, on a MKI: the stock
+  part setter "writes both [bank and SRAM copy], sets the part-edited bits
+  (`bank + 0x95048`, `0x100b145e`) and the dirty flags, and **re-applies the current
+  part to the engine with `0x40009094(bank, part)`** — which also copies scenes A/B
+  (indexes at `part + 0x10/0x11`) into the live copy `0x80000ed4`: a scene written
+  this way plays at once."
+
+**⚠️ Argument order: `(bank, part)`.** Verified three ways — our disassembly of all
+three prologues (arg1 × `0x9b340` = the bank stride, arg2 × `0x18b2` = the part
+stride), the `seq_goto_pattern` call site pushing `%d0` (part) then `%d4` (bank), and
+octalab's hardware-derived `0x40009094(bank, part)`. **octemu's `coldfire.syms`
+labels `par_apply_part = 0x40009848` as `apply_part(part, pattern)` — that signature
+is wrong** (and inconsistent with octemu's own `param_snapshot_base` stride note in
+the same file). Do not copy it.
+
+**What this means for the S49 bug family** (PICKUP→FLEX plays the old pickup loop;
+recorder SRC/RLEN carries over; REC SETUP last-tweak leaks): the carry-over is
+explained by the *delta* in the table above, not by a missing call. A fix does **not**
+have to call the heavy `0x40009094` from the pattern-change path (which would
+re-arm eDMA and post a queue message mid-pattern-change — plausibly worse than the
+bug). It has to add **only the part of the delta the symptom needs**. The delta is now
+enumerated, which is what the S49 handoff was missing. `tools/diff_flex_static.py`
+remains the right instrument; this table tells it what to look for.
+
+## A Part lives three times — and a bank-only write is lost at reboot (new 2026-09-24)
+
+> source: `refs/octalab/docs/FINDINGS.md` @ `e0dc56d` · fetched 2026-09-24.
+> confidence: **C** — measured on an **Octatrack MKI**, 12 Sep 2026.
+
+A Part (`0x18b2` = 6,322 bytes) exists in **three** places:
+
+| copy | address | notes |
+|---|---|---|
+| bank's **working** part | `bank + 0x8ed80 + part*0x18b2` | |
+| bank's **saved** part | `bank + 0x9504a + part*0x18b2` | |
+| **SRAM copy** | `0x100a4ece + part*0x18b2` | **the one the unit comes back with after a power cycle**, synced to the card or not. (Patterns have theirs at `0x1001614e`.) |
+
+octemu corroborates the last two independently as `pd_live_working_part_base = 0x100a4ece`
+and `pd_live_saved_part_base = 0x100ab196` (both "64 B == nvram.bin[…]").
+
+**⚠️ The trap, measured on hardware:** the stock parameter writer `0x40054cd8` writes
+**the bank *and* the SRAM copy**. **A direct write to the bank alone is lost at the
+next boot** — octalab measured exactly this: randomised scenes gone, the scene
+selector kept. Any patch of ours that writes part data must write both, or go through
+`0x40029a4c(src, part)`, which does both plus the dirty bits plus the engine re-apply.
+
+Related NVRAM part model (octemu `coldfire.syms` @ `6a9ff68`, confidence **C**):
+
+| Addr | What |
+|---|---|
+| `0x100b145e` | live part-**dirty** bitmask, one byte |
+| `0x100b145f` | live per-part **saved** flags, 4 B |
+| `0x100b1463` | the four live part **names**, 7 B each (`ONE TWO THREE FOUR`) |
+| `0x100b14cf` | **current part** index 0..3 (mirror `0x80000003`) |
+| `0x100b14d0` | **current pattern** index 0..15 (mirror `0x80000004`) |
+| `0x4004a908` | `save_part(n)` — working→saved in blob *and* live image, sets the saved flag |
+| `0x4004aab4` | `reload_part(n)` — **no-op unless the saved-exists flag is set** |
+| `0x40020898` | `memcpy(dst, src, n)` — the primitive every blob/live/part copy goes through |
 
 ## Sequencer clock / tick
 
@@ -176,6 +427,219 @@ Both failures were the same shape:
 > terminology, and should be read as **NORMAL**. It is kept in this note only so that
 > grepping the existing source finds this entry — search `PAT_SMODE` or `0x8e55`, which
 > appear in both threads.
+
+### The scale tables — ticks/step and quantise lengths (new 2026-09-24)
+
+> source: `refs/octemu/re/coldfire.syms` @ `6a9ff68` · fetched 2026-09-24.
+> confidence: **C** for the table contents and addresses (octemu ships an emulator
+> that runs on them); **L** for our reading of what they imply for DIRECT JUMP.
+
+**These two tables are the missing numbers for the open DIRECT JUMP non-1x thread**
+(`reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md`). We had the `SCALE_MODE` fork and
+the trailer bytes; we did not have the tick arithmetic they index into.
+
+| Addr | size | What |
+|---|---:|---|
+| `0x400aba50` | 0x20 | **`seq_scale_table` — MIDI-clock ticks per step, by scale byte 0..6: `{3, 4, 6, 8, 12, 24, 48, 96}`.** Index **2 = 1x = 6 ticks**. |
+| `0x400d80dc` | 0x44 | **`seq_quant_length_table` — chain/change quantise lengths in steps, 17 longs: `{-1, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256}`.** Indexed by the pattern chain-quant byte (slab `+0x8e56`) or the project default at `0x8000004e`. |
+
+Consumers octemu names, and why each matters to us:
+
+| Addr | What |
+|---|---|
+| `0x400a3cee`, `0x400a3e14`, `0x400a3ff8` | the **wrap comparands** — the three sites that compare against a scale-derived length |
+| `0x400a42d0` | **step phase**: the ticks/step value `× 2,646,000` |
+| `0x800065b2` | **`seq_master_step_addr`** — the pattern-level step counter, **u16**; observed advancing `0x000a → 0x000d` during PLAY |
+| `0x400a44a0` | **`seq_pattern_commit`** — "where a pending pattern becomes current": copies `0x800065be → 0x800065c1` and `0x800065bd → 0x800065c2`. **The pattern-change quantisation point.** |
+| `0x4009a846` | `seq_pattern_validator` — clamps per-step fields, returns a repair count |
+| `0x4009aa4a` | `seq_trailer_validator` — returns a repair count |
+| `0x4009abdc` | `seq_trailer_init` — **the source of the trailer defaults** |
+| `0x4009c550` | `seq_tempo_publish()` — copies project or per-pattern tempo into `0x80001814`/`0x80001818` under IPL 7 (the same pair `FUN_40009094` writes, above) |
+| `0x4009c708` | `set_tempo(raw)` — clamps to **720..7200** |
+| `0x4009c7c4` | `set_tempo(bpm, tenths)` — `remsl #10`, the UI entry to the 720..7200 raw scale |
+| `0x80000024` | `0` = one project tempo, nonzero = **per-pattern** tempo |
+| `0x8000004e` | project default chain-quant index into `0x400d80dc` |
+
+**Why this bears on our S88 regression.** Our note records that Hook P "wrote the
+position in the MASTER-step domain", and the S88 fix was reverted because it broke the
+1x baseline. `0x800065b2` is confirmed as *the* master-step counter and
+`0x400aba50[scale]` is the exact ticks/step multiplier, with `× 2,646,000` at
+`0x400a42d0` converting to step phase. Any domain conversion should be written against
+these three facts rather than re-derived — and the three wrap comparands
+(`0x400a3cee`/`0x400a3e14`/`0x400a3ff8`) are the sites to audit for which domain each
+one is actually comparing in. **Not yet applied to the patch** — this is the input to
+the next attempt, not a fix.
+
+⚠️ **Master length is a u16, and `-1` means INF.** octalab reads the scale page
+(`0x40047d08`) as: `pattern + 0x8e55` scale mode (0 normal, 1 per track), `+0x8e53`
+length, `+0x8e54` scale in normal mode, per-track `TRAC + 0x50`/`+0x51`, and
+**`pattern + 0x8e50` the master length — a short, with `−1` = INF**. Our trailer table
+above lists MASTER LENGTH as a *byte* at `+0x8e51`. Big-endian, the low byte of a u16 at
+`+0x8e50` **is** `+0x8e51`, so both readings are consistent — but the field is 16-bit
+and has an **INF sentinel** our byte-wise reading would misread as 255. Treat
+`+0x8e50` as `u16` from now on. (source: `refs/octalab/docs/FINDINGS.md` @ `e0dc56d`,
+marked 🟡 "code read" there; our own two threads derived the byte view independently.)
+
+Also new, same source (confidence **C**, octemu):
+
+| Addr | What |
+|---|---|
+| `0x46107918` | **16 × u32 pattern-repetition counters** (audio 0-7, MIDI 8-15) — the **A:B trig-condition cycle counts**. Increment once per pattern cycle under PLAY, cleared on STOP. |
+| `0x400a536c` | `advance_pattern_cycle(track)` — increments the above and latches pending FILL; called from the seq ISR at `0x400a3d98`/`0x400a3eb4` on a track step wrap |
+| `0x46107969` | 16 × u8 per-track **pending FILL**, promoted to latched at the next pattern boundary (bound pinned by `cmpal #0x46107979` at `0x400a5490`) |
+| `0x4009a670` | `seq_track_hdr_validator` — per-track header sanitiser: clamps LENGTH `+80` to **2..64** (`0x4009a698`–`0x4009a6b2`), then SCALE `+81` to **0..6** (`0x4009a6b4`–`0x4009a6ce`); strides `lea %a1@(2330)` for 8 tracks. Independent confirmation of our `0x91a` track stride and the clamp ranges. |
+| `0x46c77bf6` | **`bank_reload_gate`** — PLAY is refused with a WAIT modal while this is zero. ⚠️ **WIDER than a byte**: reads as u32 `0x100` with the low bytes 0 on a booted, play-ready unit, **so test the full word, not byte 0.** |
+| `0x4009b5c0` | `bank_reload_gate_read` — `movel bank_reload_gate,%d0; rts`, the 32-bit gate accessor; `play_button` (`0x40061778`) calls it first, and a zero gate posts the literal `WAIT` string at `0x400b68c2` |
+
+⚠️ Note the adjacency: our KB labels **`0x4009b5c8`** as `FW_START_TRACK`. octemu puts
+an 8-byte accessor at `0x4009b5c0` — i.e. `0x4009b5c0 + 8 = 0x4009b5c8`. These are
+consistent (two adjacent functions), **not** a contradiction; but a hook placed by
+counting backwards from `FW_START_TRACK` would land inside the gate accessor.
+
+### Step records, trig words and the lock stores (new 2026-09-24)
+
+> source: `refs/octabam/docs/firmware/PARAM_PAGES.md` §5g @ `111fd76` (crediting octalab,
+> MKI, 13 Sep 2026) · fetched 2026-09-24. confidence: **C** except as marked.
+
+The **parameter semantics** of the 64 × 32-byte step records (layout in
+[`file-format.md`](file-format.md)): byte *k* is the p-lock of **scene parameter *k***:
+
+| bytes | parameters |
+|---|---|
+| 0..5 | PLAYBACK |
+| 6..11 | LFO |
+| 12..17 | AMP |
+| 18..23 | FX1 |
+| 24..29 | FX2 |
+| 31 | **sample lock** |
+
+`0xff` = not locked. Full address `bank + p*0x8ed8 + t*0x91a + 0x78 + (s−1)*0x20`.
+
+| Addr | What |
+|---|---|
+| `TRAC + 0x89a + (s−1)*2` | **the trig word** — bits **15-13** trig count − 1, **12-7** micro-timing ±23, **6-0** condition. Labels at `0x400b2588`. ⚠️ **In the bank FILE it is one byte earlier (`+0x899`)** — a RAM/file offset skew to respect in any tool that reads both. |
+| `0x40040ee0(slot)` | **sample-lock store** — steps from `0x460d174a`, page base `0x460d174c`; writes the bank byte **plus the `0x1001614e` copy**, dirty flags, and bitmaps via `0x400339d8` → `0x46c7d48c[step]`. Works when called from outside the picker (octalab, HW). |
+| `0x4004f5f8(track, param, value)` | **p-lock store** — **returns early unless a trig key is down** (`FUN_4003171c`). Dirty flags `bank+0x9b332` / `0x100f8598` / `0x40027e00`; refresh `0x4009da20`. |
+| `0x400526e4` | descriptor defaults: page-1 at `desc + 0x5e`, page-2 at `desc + 0x64` |
+
+⚠️ **Contested label:** the `+0x10` step mask. octabam reads it ✅ as the *trigless-lock*
+mask ("exactly the locked steps without a trig", four patterns byte-diffed); **nordseele
+lowered their own label for it to 🟡 on 22 Sep 2026.** This matters to us because stock's
+pattern-content predicate `FUN_4009a464` **skips exactly `+0x10..0x17`** (verified here by
+disassembly: it ORs `+0x00..0x0f` then `+0x18..0x37`) — which is the sharpened root cause of
+our Bug-2 pattern-LED fix. Our fix scans the lock **arrays** rather than that mask, so it is
+correct whichever way the dispute lands. See `reference/MERGE.md` "Audit of the finished set".
+
+**Part payload offsets** (from `part = bank + 0x8ed80 + part*0x18b2`) — corroborates and
+extends the `param_snapshot_base` sub-blocks below:
+
+| offset | field |
+|---|---|
+| `+0x22 + track` | machine type |
+| `+0x2a + track*30 + machine*6` | PLAYBACK page 1 |
+| `+0x11a + track*24 + page*6` | LFO / AMP / FX1 / FX2 page 1 |
+| `+0x2f2 + track*30` | LFO PMTR ×3, then WAVE ×3 |
+| `+0x662 + (scene*8 + track)*0x20` | scene locks |
+
+LFO destinations 0..29 use the scene-byte numbering above.
+🟡 `fx1_disallowed_effects` = **DELAY, PLATE, SPRING, DARK** ("confirmed on real hardware",
+Bryan T via octabam) — relevant to SIDE-CHAIN, which donates SPRING REVERB's DSP space.
+
+### The track recorders — three storage tiers and the tempo chain (new 2026-09-24)
+
+> source: `refs/octabam/docs/firmware/RECORDER.md` @ `111fd76` (Bryan T's five sessions,
+> re-read against octabam's image) · fetched 2026-09-24. confidence: **C** for the control
+> path, 🟡 for the tiers as marked there.
+
+**This is the mechanism behind the Session 49 report "recorder SRC/RLEN carries over".**
+🟡 Three tiers hold the same recorder settings:
+
+| tier | address |
+|---|---|
+| bank | `+0x8f382 + part*6322 + track*12`, via `[0x46c82456]` |
+| SRAM | `0x100a54d0 + …` |
+| **published** | `0x80000cf4 + track*12 + page*96` — **refreshed per frame from `0x80000c94`** |
+
+So a stale recorder setting after a Part change is a *publish* problem, not a storage one —
+consistent with our own causal proof (`tools/check_reccache_causation.py`).
+
+| Addr | What |
+|---|---|
+| `0x400d3c74` | recorder page descriptor (entry 8): `INAB INCD RLEN TRIG SRC3 LOOP / FIN FOUT AB QREC QPL CD`; defaults at `+0x96`, min `+0xa2`, count `+0xd2`, formatter `+0x11a` → `0x4003b18c` |
+| `0x400d80e0` | **QREC/QPL ladder**, 16 entries `{1,2,3,4,6,8,12,16,24,32,48,64,96,128,192,256}`, with an `0xFFFFFFFF` sentinel immediately before — i.e. **the same table octemu names `seq_quant_length_table` at `0x400d80dc` ("17 longs, first = −1")**. Two independent readings of one table from opposite ends; it serves **both** QREC/QPL and chain/change quantise. |
+| `0x400d8120` | one-hot class table, 17 entries |
+| `0x4000ca94..cabc` | **the tempo chain**, publisher call `0x4000cac2`: `1814→181c`, `1818→1824`, `d1 = 0x80000000 ÷ [181c] → 1820` |
+| `0x80001814` | **BPM × 24** (clamped 720..7200) — corroborates octemu's `set_tempo(raw)` clamp |
+| `0x80001820` | **`−2³¹ / tempo24`** (negative; `4c42 1801` is `DIVS.L`, which objdump prints as `remsl`) |
+| `0x400ab63a` | FIN/FOUT step ladder, `992250 × L`, 113 entries |
+| `0x4006e3b2` | RLEN conversion — `(raw+1) × 63504000`, `remul` by `[0x80001814] << 2`, floor 64 |
+| `0x40005ff0` | recorder **arm caller** — gate `[0x100b14cf]*6322 + [0x46c82456] + track + 0x8eda2 == 4`; nets to `round(table[FOUT] / tempo24)`. ❓ why the PICKUP arm reads the FOUT slot is open upstream. |
+| `0x40005178` | **QREC scheduler** — staged `0x800018be/de`, immediate `0x46c7e9fa`, comparator `0x4000b308`, class mask `[0x46c7fe94]` |
+| `0x100b14f0 + id*1096` | the 136-entry object arena; **recorder buffers are ids 128–135**, control records `0x46c922c4 + id*44`, **armed by opcode `0x25`** on the engine queue |
+
+**Why `FUN_40009094` writes four tempo words** (see "The part-apply family" above): those are
+exactly this chain's inputs and outputs — `0x80001814`/`0x80001818` in, `0x8000181c`/`0x80001824`
+out. The heavy part-apply re-runs the tempo derivation; the light variants do not.
+
+Recorder lengths are 44.1 kHz samples; RLEN raw+1 is sequencer steps (`661500 / BPM` samples
+per 16th); the 64 floor is four frames. ❌ Upstream retraction worth noting because it matches
+our own KB: `0x80000003` / `0x100b14cf` are the current **PART**, not pattern; `[0x80000004]`
+is the pattern.
+
+### Scene locks and the crossfader morph — the address set (new 2026-09-24)
+
+> source: `refs/octemu/re/coldfire.syms` @ `6a9ff68` · fetched 2026-09-24.
+> confidence: **C** (octemu's emulator runs on these), **L** for our S49 relevance note.
+
+Relevant to the S49 "scene-morph / scene-data gaps" the handoff marks as SOLID — these
+give the store geometry explicitly.
+
+| Addr | What |
+|---|---|
+| `0x40031f44` | **`scene_param_get(scene)`** — resolves the scene p-lock block as `bank_base(0x46c82456) + cur_part(0x100b14cf)*6322 + (scene*8 + track)*32 + 0x8f3e2`. **`0xff` = "not locked in this scene"**. Two aux arrays follow at `+0x903e2` and `+0x903eb`. |
+| `0x40034a44` | `scene_ab_state_builder` — per-track loop; on a hit seeds scene A/B selection `(0,1)` with a lock-present flag, else `(15,15)` cleared |
+| `0x400339d8` | `scene_lock_collect` — builds two per-track 64-byte **presence masks** (`0x46c7d48c`, `0x46c7d2e4`) by scanning the active pattern's scene p-lock rows at `0x46c82456 + cur_pattern(0x100b14d0)*0x8ed8`, 32 params/row, ORing a per-track bit where the value != `0xff` |
+| `0x4000c202` | `scene_morph_frame` — **inside the frame ISR**; packs 32 (A,B) byte pairs per track into `0x80000ed4 + track*64`. Scene A/B indices come from the snapshot byte at `0x4017122a + track`. |
+| `0x80000ed4` | per-track 64 B = 32 `(sceneA, sceneB)` pairs — the crossfade endpoints. **This is the same `0x80000ed4` `0x40009094` copies scenes A/B into** (octalab, MKI) — the two findings meet here. |
+| `0x4000cc60` | `scene_level_morph` — **inside the frame ISR**; EMAC `msacw` crossfade of the A/B LEVEL pairs by the crossfader coefficients (`0x80003c60`) into `0x80000c80` and `0x800010d4`. Gated by `0x80000006` (morph enable) and `0x80000007` (a full-scale `0x7f00` bypass fill). |
+| `0x80000c80` | per-track scene/crossfader level, `+ t*2` — **a volume-curve INDEX** (`curve[0] == 0`), not a level |
+| `0x40170f60` | `param_snapshot_base` — live per-track parameter snapshot; record stride `part*0x18b2 + bank*0x9b340`. Sub-blocks: `+0x10` machine/SRC values (written by the part-apply family at `0x40009e1c`), `+0x22` machine-id + flags, `+0x2a` the block the frame publisher copies to voice wb, `+0x11a`, `+0x1da` |
+
+### The arrangement — a data model we had not mapped at all (new 2026-09-24)
+
+> source: `refs/octemu/re/coldfire.syms` @ `6a9ff68` · fetched 2026-09-24. confidence: **C**.
+
+Entirely new territory for this project (`COVERAGE.md` has no arranger entry).
+
+`arranger_object = 0x10000004` — **the arrangement lives in battery NVRAM**, with a
+pointer to it at `0x10000000`. Header `+16` u16 (reads 1), **`+18` u16 row count**;
+rows at `+20`, **22 bytes each, 48 cap**.
+
+| row field | meaning |
+|---|---|
+| `+0` | row **TYPE** — 0 = pattern row; turning the PAT column below A01 selects specials (2 displays `REM:`) |
+| `+1` | pattern byte, `bank<<4 | pat` (A02 → `0x01`, measured) |
+| `+2` | repeat — display `REP` = byte + 1 |
+| `+8` / `+9` | scene A / B (`0xff` = none; byte = display − 1) |
+| `+10` | u16 `OF` start offset |
+| `+12` | u16 `Ln` row length in steps (default `0x10` = displayed 016) |
+| `+3..7`, `+14..21` | not yet attributed (M column, loop target/count for LOOP rows) |
+
+`arranger_goto = 0x4004a5c0` reads the selected row and calls **`seq_goto_pattern`
+(`0x400a0570`)** — so the arranger drives the *same* pattern-change path documented
+above, and therefore inherits the same light-part-apply behaviour (`0x40009e00`). It
+writes chain/loop scratch `0x80006908` and `0x800066a4` (repeat) and sets bit 3 of
+`0x80006904` (arranger-changed). Per-pattern tempo/length come from the trailer region
+`0x400eb038 + pattern*0x8ed8`.
+
+**Persistence:** `arr01..arr08.work` / `.strd` on the card — **11,336 B**, a
+`FORM`/`DPS1`/`ARRA` container, one file per arrangement slot. (Compare our `.strd`
+handling in RELOAD2/3 — same `.work`/`.strd` pairing convention.)
+
+**Editing path** (useful for a future feature): `ARR` → `YES` opens the ARRANGEMENT
+EDITOR; `FUNC+DOWN` inserts a row (`arranger_row_editor` increments the count with
+`movew a2@(18)`); LEFT/RIGHT pick the column; **ENC7 — the LEVEL knob, encoder index 6
+— changes the value.**
 
 ## Pattern change / cue / Parts  (Session 15 — DIRECT JUMP)
 
@@ -336,6 +800,54 @@ release → opens SELECT PATTERN (`FUN_40059f8c(0x400b484e, 0xf0, 1, 0x40043418)
 | `0x46c7d8de` | C | runtime key-state table, stride **24**, one record per keycode ≤ 63, populated from the T1/T2 keymap by `set_key_state 0x40031734` (the sole per-key dispatcher: `set_key_state(code,event)` → calls the record's press/release handler with `(code@4, event@8)`). Record `+16` = held flag → `is_key_held(code)` = `FUN_4003171c` = `*(u32*)(0x46c7d8ee + code*24)`. `+8` (u16, from the keymap `flags` field) = hold/repeat delay. **CORRECTED (Session 80 continued (3), measured by walking T1 `0x400bfc10` / T2 `0x400c01f4` in 26-byte strides — the two tables are identical here):** the earlier claim that this is `0` for trig / track / PLAY / REC / PTN / BANK is **wrong**, and it conflated two distinct fields. Record `[22..23]` = **hold delay**, `[24..25]` = **repeat interval**; they are independent. Measured: trigs `0x00-0x0f` delay `0x10`; track keys `0x10-0x17` and `0x22-0x26` delay `0x1e`; **PTN (keycode `0x2e`, not `0x1c`) delay `0x1e`**; **BANK `0x2f` delay `0x1e`** — all with repeat `0`. Only `YES 0x31` / `NO 0x32` have delay `0` (and hold handler NULL). Repeat is nonzero **only** for the arrows: **UP `0x34` and RIGHT `0x21` share handler `0x4004b970` with delay/repeat `0x1e`/`0x1e`; DOWN `0x33` and LEFT `0x20` share handler `0x400491a0` with `0x0f`/`0x04`** — so LEFT/RIGHT are not distinct keys to a handler *and* they auto-repeat, which any detour on those two handlers must expect. |
 | `0x80000000` | C | current audio track (byte; UI mirror `0x100b14cc`). `0x80000012 != 0` = MIDI mode (page resolution adds +8). FUNC is **not** a plain keymap record — its held-flag was not located (Session 21). |
 | `_DAT_460e5cd0` | C | `!= 0` ⇒ a `FUN_4006d57c` dialog is open (that ctor bails on it at entry). Gate a new global combo on `== 0`. |
+
+### Input maps — screens own keys and knobs in LAYERS (new 2026-09-24)
+
+> source: `refs/octalab/docs/FINDINGS.md` + `INPUT.md` @ `e0dc56d` · fetched
+> 2026-09-24. confidence: **C** — "Run on a MKI", same hardware as us.
+
+The keymap tables above are the *stock static* layer. On top of them, **a screen owns
+keys and knobs by registering an input map, and maps are a stack**:
+
+| Addr | What |
+|---|---|
+| `0x40031494` | **register an input map** (the `off` / unregister entry is `0x4003146c`) |
+| `0x46c7d8de + code*0x18` | the live **keys** table, rebuilt by every registration |
+| `0x46c7dede + enc*0x14` | the live **encoders** table, rebuilt by every registration |
+
+Rules, all MKI-verified:
+
+- **The last map registered wins.** Every registration rebuilds both RAM tables.
+- **A key field of `-1` lets the layer below through** — the pass-through idiom.
+- **An encoder listed with a null handler is *swallowed*** — this is exactly how a
+  popup locks the knobs over the page behind it.
+- An encoder handler is called as `(encoder, delta)`.
+- **Encoders: A..F = 0..5, LEVEL = 6.** Their **press** codes are `0x38..0x3e`.
+- Arrows `0x33 0x20 0x34 0x21`, ENTER `0x31`, EXIT `0x32` — the same set our
+  hardware-corrected table above carries (independent corroboration of the set; octalab
+  does not disambiguate which arrow is which, so our Session-80 pairing stands).
+- Taking a map off returns the tables to stock.
+
+**⚠️ The hazard that matches our own RELOAD3 picker/overlay experience.** Holding a trig
+registers the stock trig-held input map *over any other*. If a map is left behind and
+**swallows the trig's release**, `0x460d174a` stays set and **the trig is held for
+good** — REC then offers TRIG COPY and the sequencer will not stop. Related state:
+grid recording is `0x460d1736 != 0` (the trig-key dispatcher is `0x40060ce0`, which our
+table above already names). The LOCK picker's steps come from
+`0x460d174a`/`0x460d174c`.
+
+This is the mechanism behind "a picker that must be dismissed cleanly". Our RELOAD3
+work replaced a picker with two direct chords; if any future overlay registers a map,
+**unregistering it on every exit path is not optional.**
+
+**Callable SETUP-window drawing primitives** — the frame, the dotted 3 × 2 grid and
+centred text, usable for a page of one's own: `0x400570b8`, `0x40011a58`, `0x40012004`,
+`0x40013904`; the eight font records at `0x400ba812..`. (Directly relevant to the S87
+RELOAD3 "titled, centred, self-dismissing card".)
+
+**Stock audio-editor entry, for chord features:** `[BANK]` ignores held trigs; stock
+`[TRACK]+[BANK]` opens the audio editor via `0x4006de34(type, slot)` + `0x4006e160()`;
+the bookkeeping that keeps a held trig in place after an edit is `FUN_4004f5f8`'s.
 
 ### Transient overlay primitives
 
@@ -562,6 +1074,45 @@ selector `0x800000e0` (35 refs — never widen the restore past `0xdf`).
 Whole-image scan for each (Session 20): `0x800000a8`, `0x800000d8` — **0 ColdFire
 refs**; `0x800000d4` — 0 (its two matches are inside the appended DSP payloads,
 not code); `0x800000b4` — **5 real refs in the menu code, taken**.
+
+> **⚠️ `0x800000d4` — three sources, and the disagreement is a METHOD artefact. Read
+> this before using it, but do not treat it as proven-taken.** Re-examined 2026-09-24:
+>
+> | source | says | method |
+> |---|---|---|
+> | this file, Session 20 | **0 ColdFire refs** | absolute-long scan |
+> | our own sweep, 2026-09-24 | **0 refs to any of `0x800000d4..df`** — including `0x800000dc`, which MUTE MODE ships on | absolute-long scan of the whole image |
+> | `reference/MERGE.md` (B1 note) | "`0x800000d4` **is** referenced once in stock" | **unstated** |
+> | `refs/midisc/.../memory_map.py` @ `63ca127` | "Never 0x800000D4 (OS refs)" | unstated (another project's judgement about its own build) |
+>
+> **The decisive structural fact:** `0x80000070` is the base of the PERSONALIZE block and
+> stock reaches its settings by **base + displacement**, so an absolute-long scan cannot
+> see *any* of them — which is why our sweep finds zero references even to words stock
+> certainly does use. The sweep is therefore **inconclusive, not exonerating**, and
+> MERGE.md's own B1 text says exactly this about `0x800000f8`.
+>
+> **But stock's own restore length settles the PERSONALIZE question:** the boot restore is
+> `memcpy` length **`0x64`**, covering `0x80000070..0x800000d3` — it **stops one byte short
+> of `0x800000d4`**. So `0x800000d4` is *not* one of stock's PERSONALIZE settings. For it
+> to be taken, stock would have to use it for something unrelated, for which there is no
+> evidence in two scans.
+>
+> **Practical guidance:** `0x800000d4` is *probably* free; MERGE.md's "referenced once"
+> claim is **unsubstantiated and contradicted by our own sweep** — do not propagate it as
+> fact. Still **prefer `0x800000d8`** for new state, simply because `0xd4`/`0xd5` are
+> already spoken for as `patch_softmute`'s `OTFX_PROBE` diagnostic words (verified
+> 2026-09-24: the shipping 970-byte `DT_MODE=1` build contains **no** reference to either;
+> only the 986-byte diagnostic build does). **To settle it properly**, use the method
+> MERGE.md prescribes for `0x800000f8`: an emulator read/write watchpoint across a stock
+> boot plus a few minutes of ordinary operation. Until someone runs that, treat every word
+> in `0x80000070..0x800000df` as "reachable by displacement, so a scan proves nothing".
+>
+> ⚠️ **The live consequence is the one MERGE.md B1 already names**, and it is not about
+> `0xd4`: MUTE MODE widens the restore `0x64` → `0x70`, so a **merged** build would also
+> restore `DJ_MODE` (`0x800000d8`) from battery SRAM `0x100fff68` — a word nothing
+> maintains — and **DIRECT JUMP could come up ON**. That is a real merge blocker with a
+> resolution already chosen (move `DJ_MODE` out of the span); it is unaffected by how the
+> `0xd4` question lands.
 
 | Addr | shadow | Status |
 |---|---|---|

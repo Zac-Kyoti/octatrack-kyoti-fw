@@ -452,3 +452,86 @@ value (encoder `0x4004eb24`); bit 1 → the CC-lock path.
 - Best remaining lever for the p-lock model: the Phase-0 `pattern-diff` pass
   (needs the MKI) + locating the LIVE-REC erase handler (needs `emu_rtos` or
   Ghidra).
+
+---
+
+## Additions from octalab (MKI-verified) — 2026-09-24
+
+> source: `refs/octalab/docs/{FINDINGS,TRIGS,PROJECT_FILE,FS_LAYER,SLOT_LOADING}.md`
+> @ `e0dc56d` · fetched 2026-09-24. confidence: **C** unless marked.
+
+### Trigs: the step records, and where a sample lock lives
+
+The four placeable trig types each own **one 64-bit step mask**. After the masks, each
+track holds **64 step records of 32 bytes**, starting at `TRAC + 0x59`. **The sample
+lock is byte 31** of a step record:
+
+```
+bank + pattern*0x8ed8 + track*0x91a + 0x78 + (step-1)*0x20      ; 0xff = none
+```
+
+The stock store is **`0x40040ee0(slot)`** — the LOCK picker's callback. It takes its
+steps from `0x460d174a`/`0x460d174c` and **also writes a second copy at `0x1001614e`**
+(the pattern's SRAM twin — see "A Part lives three times" in
+[`memory-map.md`](memory-map.md); patterns have the same dual-write requirement as
+Parts). **Called from outside the picker it works on hardware.**
+
+⚠️ *create random locks* is a stock slice-editor function, but octalab's handler pairing
+**by position was wrong** — marked ❌ in their own notes. Do not reuse that pairing.
+
+**Why this matters to us:** our S48 stock-bug fix (a pattern whose only content is
+p-locks read as empty, because `FUN_4009a464` scans only trig masks) is precisely a
+"the masks are not the whole story" bug. This is the layout of the *other* half — the
+64 × 32 B step records that hold the lock data the masks do not describe.
+
+### A sample slot on the card
+
+- **`PATH=` is stored bare.**
+- **The length in bars is computed from the file** and **must never be copied from
+  another slot.**
+- Half the state lives in **`markers.work`**.
+- Verified end to end: 32 slots written from the host, then loaded, previewed and
+  trigged on the unit.
+
+⚠️ **CRLF trap:** these project files are CRLF, and a regex `^KEY=.*$` **eats the
+`\r`**. Anchor on `[^\r\n]*` instead. (Relevant to any of our tooling that parses
+`project.work` / `markers.work` by line.)
+
+### Loading a sample into a slot — `ot_static_slot_load` is only half of it
+
+Its one caller is the **storage-job dispatcher**, which follows it with a post-load and
+**two refreshes**. Without them a slot displays its name and size, shows **no BPM**, and
+will **neither preview nor trig**. A refused load stamps a per-slot status record
+rendered as `ERROR: <reason> : <name>`, which **clearing the name does not undo**.
+Extension codes: **`-0x10` = no extension at all** (a directory name), distinct from
+**`-0x1e` = a wrong one**.
+
+### The filesystem layer
+
+- The **23-slot FS vtable at `0x46c823fa`**, with three implementations (octalab
+  documents which one the unit actually runs).
+- **`0x40090a14` — a recursive tree walker with a per-entry callback**, already called
+  by the stock sample-load path. Reusable.
+- ⚠️ **Trap:** the walker enumerates a **whole directory before** invoking the
+  callback, so the entry register holds the **last** entry, not the current one.
+- A FAT directory record's **first cluster is the long at `+0x11e`** (octabam
+  `CONTRIBUTIONS.md` credits this to octalab, 23 Sep 2026).
+
+### The recorder reserve, and the WAV save object
+
+🟡 **Emulator, one configuration — not a hardware measurement of every reserve
+setting.** In an emulated OS 1.40C project each of **eight recorder buffers held 460
+blocks of `0x1800` bytes = 2,826,240 B = 16.0 s** of 16-bit stereo at 44.1 kHz.
+
+✅ The stock **WAV writer `0x40024168`** reads its **kind and object from RAM globals
+`0x460be9e8` and `0x460be9ec`**. octalab's CAPTURE originally omitted these on one save
+path and **wrote header-only WAVs**; setting them before each storage job produced real
+audio on the MKI (21 Sep 2026). **Any feature of ours that triggers a stock WAV save
+must set both first.**
+
+### The arrangement files
+
+`arr01..arr08.work` / `.strd`, **11,336 B**, a `FORM`/`DPS1`/`ARRA` container — one file
+per arrangement slot. Same `.work`/`.strd` pairing our RELOAD2/RELOAD3 work relies on.
+Structure of the in-NVRAM object → [`memory-map.md`](memory-map.md) "The arrangement".
+

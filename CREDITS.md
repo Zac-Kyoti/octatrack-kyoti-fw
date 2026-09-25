@@ -61,6 +61,42 @@ no binary" approach — worth reading alongside this repo:
   reusable part-save persistence + composition pattern, distilled into
   `reference/kb/memory-map.md` and `reference/kb/techniques.md`. Already
   vendored by octabam as a submodule (`modules/midi-scenes`).
+  Its companion **[midisc-patcher](https://github.com/bkkbrls-del/midisc-patcher)**
+  (added 2026-09-24) does the patching **in the browser** from the user's own stock
+  OS — the automated form of the "ship a recipe, never a binary" posture
+  [`FLASHING.md`](FLASHING.md) takes by hand.
+- **[nordseele/octalab](https://github.com/nordseele/octalab)** (octalab, by
+  **nordseele**) — added 2026-09-24. Creative helper functions (a groove pool after
+  Ableton's, CAPTURE, GENERATOR, workflow shortcuts) added to stock **OS 1.40C**,
+  **built and tested on an Octatrack MKI** — the same OS *and the same hardware
+  revision* as this project, which no other upstream can claim. It publishes
+  findings only (MIT), not firmware or source, and its
+  [`docs/CAVES.md`](https://github.com/nordseele/octalab/blob/main/docs/CAVES.md)
+  is the reason this project now has a cave ledger: it establishes **on hardware,
+  at the cost of a MIDI-only recovery**, that the 27 KB of zeros at the tail of the
+  image are written at runtime and cannot hold code. Distilled into
+  [`reference/kb/caves.md`](reference/kb/caves.md),
+  `reference/kb/memory-map.md`, `reference/kb/file-format.md` and
+  `reference/kb/techniques.md`.
+- **[markandrus/octemu](https://github.com/markandrus/octemu)** (octemu, by
+  **markandrus**) — added 2026-09-24. A **QEMU-based Octatrack emulator** (ColdFire
+  MCF54455 + dsp56300 + SDL2) with an emulated front panel, CF card and NVRAM, plus
+  three ColdFire firmware customisations (a RECEIVE machine generalising NEIGHBOR;
+  USB-MIDI completing a partial stock implementation; a UAC2 16-channel USB-Audio
+  tap). Its `re/coldfire.syms` — 768 annotated ColdFire symbols — is an independent
+  naming of much of the image and is distilled into
+  `reference/kb/memory-map.md`. Own sources MIT; **its binaries combine
+  incompatible licences and may not be redistributed** — build your own.
+- **[repeat98/octamad](https://github.com/repeat98/octamad)** and
+  **[repeat98/octamachine](https://github.com/repeat98/octamachine)**
+  (**Jannik Aßfalg / repeat98**) — added 2026-09-24. Jannik contributes to octabam
+  directly (Tape Echo, the ColdFire delay-routine protocol, the EMAC integer-vs-
+  fractional `ACCext` finding); `octamad` additionally carries his stock-firmware
+  **instruction profile** (`docs/STOCK_PROFILE.md`, branch `poly-machine`), which
+  octabam records as never sent upstream and which is distilled into
+  `reference/kb/techniques.md`. `octamachine` is a feasibility study for running
+  Machinedrum firmware on Octatrack hardware — out of scope here except for its
+  host-side statement of the Octatrack's own platform requirements.
 
 ## The DSP56300 emulator core
 

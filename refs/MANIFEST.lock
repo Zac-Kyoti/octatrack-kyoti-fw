@@ -3,8 +3,13 @@
 octamax = "7d9debcfdf7dbb1351066f6010d7f250d2b2ab28"  # README: hardware screenshots for slice playhead, 256 slots and arp sca
 elektron-firmware-tool = "a5bce9a6af644386d900924082993a805e812874"  # device: rename section 2 from DSP to bootstrap
 OctaLib = "6e2438ebae7687ad50b43f098b19bc1de1b8f4b9"  # Merge pull request #9 from snugsound/feature/release-macos-0.1.1.0
-ems-octakit = "92cf70b3a51c99aebd9bb65f12919bbcb6ea2ce3"  # save queued clone Kits without relinking source Patterns
+ems-octakit = "c6d3f3927b13fda0cf03711157237b837acdb1f9"  # add more feature descriptions
 octa-bt-pt = "e970dd0f9841ce5f648c2a257342cb8a3a05b54a"  # added the ability to upload presets and some built-in presets that I l
-octabam = "0ad97b9008f9a56a85a29e630687c2aa369c3c38"  # Merge pull request #253 from sambanks/selfname
-midisc = "eb8b4bc517364e952440f0df84fc147ce0cd27fa"  # Merge pull request #4 from bkkbrls-del/1.40MIDISC8
-dsp56300 = "46aa691da84a674fe843d406d36c89c7efcc8c01"  # Register analysis: MOVEP from an I/O address writes its destination re
+octabam = "111fd76977344146cb92e8cfea4375cdd5853319"  # Merge pull request #408 from sambanks/padfix
+midisc = "63ca127bc99638602957f2b05747f8ed3bd9ba52"  # Merge pull request #6 from bkkbrls-del/midisc82-gas
+dsp56300 = "2afc1c4fe274e945556c12641d0c7535ccdda4b3"  # ESAI: even slot interrupts, and the flags behind them
+octalab = "e0dc56ddbb42bf1d69cb0f6b992b5843b04c8c18"  # Clarify stock behavior versus OCTALAB shortcuts
+octemu = "6a9ff68d045e81dd0027c83ac35b26bbcc55bdf5"  # feat: UAC2 PoC
+midisc-patcher = "1ce22456a01dc149d598d2b3808b8a6b36c82e41"  # patcher: freeze clean 1.40MIDISC8.1 (splash 1.40MDIS81).
+octamad = "0980fb57fa7390fad96cba645c655074a9111052"  # Merge remote-tracking branch 'origin/codex/euclidean-filter'
+octamachine = "5184aa20cada2a949354874f77c58b3e440a84eb"  # WP-07: document memory and MMIO contract (#13)
