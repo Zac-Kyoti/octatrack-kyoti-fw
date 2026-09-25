@@ -158,7 +158,26 @@
     .equ ARR_ACT,   0x460d1aec          | arranger active
     .equ RUNNING,   0x800065b8          | transport state -- LONGWORD (=1 playing)
     .equ ACT_PAT,   0x800065be          | sequencer's active pattern (byte)
-    .equ CUR_BANK,  0x80000002
+|   ===== Session 92: PLAY_BANK is ACT_PAT's partner; CUR_BANK is NOT. =====
+|   Hardware report #14: "the sequence data does not always reload reliably. Most of the
+|   time it does. Occasionally the toast will show 'reloaded', but the sequence is not
+|   actually restored."  The reload was aimed with a MISMATCHED (bank, pattern) pair.
+|   MEASURED -- all three writers of 0x800065bd set it in the same breath as ACT_PAT:
+|       0x400a05f6  the direct goto          65bd=bank, 65be=pattern, + queued mirrors
+|       0x400a40aa  the boundary latch       gated on BOTH queued values being != -1
+|       0x400a44dc  the second latch site    identically gated
+|   so (PLAY_BANK, ACT_PAT) always describes ONE pattern -- the one being played -- and
+|   both move only when the sequencer says so. CUR_BANK (0x80000002) has no such pairing:
+|   it is written at 0x400622b8 (a UI path, alongside LIVE_REFRESH and the cached blob
+|   base 0x46c82456) and at 0x40087d26 (clamped 0..15, project load). Pairing it with
+|   ACT_PAT could name a slab that nothing is reading -- so the .strd was read, the slab
+|   was rewritten, LIVE_REFRESH ran, our success toast appeared, and not one byte of what
+|   the user could hear had changed. Intermittent exactly as reported: harmless while you
+|   stay in one bank.
+|   Every reload-TARGETING site below uses PLAY_BANK. CUR_BANK is deliberately left
+|   defined but unused, so a future site cannot reach for it by habit.
+    .equ PLAY_BANK, 0x800065bd          | the bank being PLAYED -- pair this with ACT_PAT
+    .equ CUR_BANK,  0x80000002          | UI-side bank; NOT ACT_PAT's partner (see above)
     .equ CUR_PART,  0x80000003          | the Part the sounding pattern is assigned to (byte)
     .equ CUR_TRACK, 0x80000000          | UI-selected track (byte 0..7 ; mirror 0x100b14cc)
     .equ MIDI_MODE, 0x80000012          | != 0 -> the MIDI pages are up (track index means MIDI track)
@@ -955,7 +974,7 @@ rat_aud:
     moveq   #3,%d0
     move.b  %d0,G_KIND
     moveq   #0,%d0
-    move.b  CUR_BANK,%d0
+    move.b  PLAY_BANK,%d0              | the bank ACT_PAT above belongs to, not CUR_BANK
     moveq   #1,%d1
     lsl.l   %d0,%d1
     move.l  %d1,-(%sp)
@@ -1176,7 +1195,7 @@ rlj_ploop:
     addq.l  #4,%sp
 
     moveq   #0,%d0
-    move.b  CUR_BANK,%d0
+    move.b  PLAY_BANK,%d0              | must be the same bank d5's pattern belongs to
     move.l  #BANKSTRIDE,%d1
     muls.l  %d1,%d0
     move.l  #BLOB,%a4
@@ -1227,7 +1246,7 @@ rlj_faithful:
     andi.l  #3,%d3                     | saved Part 0..3
     move.b  %d3,CUR_PART               | 0x80000003 = current-part mirror
     moveq   #0,%d0
-    move.b  CUR_BANK,%d0
+    move.b  PLAY_BANK,%d0              | the Part belongs to the PLAYING bank's pattern
     move.l  %d3,-(%sp)                 | part  (rightmost arg)
     move.l  %d0,-(%sp)                 | bank
     jsr     PARTAPPLY                  | FUN_40009094(bank, savedPart)
@@ -1327,7 +1346,7 @@ rlj_setflag:
 |   with it, nothing does, and the slice lands in the cold blob while playback
 |   keeps reading stale bytes (measured in "(4)" as "LIVE copy: STILL SCRIBBLED").
     moveq   #0,%d0
-    move.b  CUR_BANK,%d0
+    move.b  PLAY_BANK,%d0              | refresh the live cache of the bank we just wrote
     move.l  %d0,-(%sp)
     jsr     LIVE_REFRESH               | FUN_4000faf0(bank): RAM->RAM, no card
     addq.l  #4,%sp
@@ -1407,7 +1426,7 @@ rl_openstrd:
     addq.l  #8,%sp
 
     moveq   #0,%d1
-    move.b  CUR_BANK,%d1
+    move.b  PLAY_BANK,%d1              | read the file for the bank we are going to write
     addq.l  #1,%d1
     move.l  %d1,-(%sp)                 | bank number (1-based)
     move.l  %d0,-(%sp)                 | project dir

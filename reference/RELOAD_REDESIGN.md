@@ -601,10 +601,41 @@ report #14 item 1 shows they were performing bank+pattern picks in the same sess
 Fix: `PLAY_BANK = 0x800065bd` at all four targeting sites. `CUR_BANK` is left defined but
 unused, with the reasoning in a comment, so a future site cannot reach for it by habit.
 
-`tools/diag_reload3_whichbank.py` measures it: it drives a real performance bank change
-through the per-key dispatcher (not by poking memory), reports whether the two variables
-diverge, and then asserts the decisive thing — that the worker writes the slab the
-sequencer reads, and no other.
+### MEASURED, and the fix verified by A/B
+
+`tools/diag_reload3_bankvar.py` settles the mechanism. It creates divergence directly
+(CUR_BANK poked to 2, PLAY_BANK left at 0) and reports which slab the worker writes:
+
+| build | BLOB writes | verdict |
+|---|---|---|
+| before the fix | `((2,0), 2332)` | follows **CUR_BANK** -- a slab the sequencer is NOT reading |
+| after the fix  | `((0,0), 2330)` | follows **PLAY_BANK** -- the slab the sequencer reads |
+
+Same test, same divergence, opposite result -- and it still wrote ~2.3 KB either way, so
+the fix cannot have passed by breaking the reload. That is report #14 item 1's symptom
+reproduced on demand: the `.strd` is read, a slab is rewritten, LIVE_REFRESH runs, the
+toast says RELOADED, and not one byte of what the user hears changed.
+
+** What is NOT proven: that hardware ever reaches the divergent state. ** The divergence
+here is POKED, because reaching it honestly needs a queued bank change to survive to a
+pattern boundary, and at 121-143x slower than realtime that is ~30 min of wall clock per
+run. `tools/diag_reload3_whichbank.py` does it the honest way -- drives a real bank change
+through the per-key dispatcher and waits for the latch -- and has never completed; it is
+kept because its gates are right, including the one that caught its own first version
+concluding "CUR_BANK tracked the change" while blind.
+
+So this is a real defect that produces exactly the reported symptom, NOT yet a proof that
+it is THE cause of the intermittent failures. If hardware rarely diverges, the fix is
+harmless and the next suspect is storage-task contention while audio streams off the card
+-- the standing unsolved question in this thread, which no harness here can model.
+
+The fix stands on its own regardless: taking the bank from CUR_BANK and the pattern from
+ACT_PAT is incoherent by construction, and the worker already trusts ACT_PAT, so trusting
+ACT_PAT's own partner is strictly more correct.
+
+Regression-checked on the fixed build: `diag_reload3_toast.py` (the `[BANK]`+`[TRACK]`
+chord, the path carrying the changed `PARTAPPLY` site) and `diag_reload3_bankpick.py`
+(item 2) both pass.
 
 ## A latent hazard found on the way, NOT yet fixed
 
