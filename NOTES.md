@@ -29812,3 +29812,73 @@ Fixes: the measured landing-position error at any non-1x track or master scale.
 Does NOT explain: the hardware report that visited steps depend on WHAT TRIGS ARE ON THE GRID,
 and that LEDs and audio disagree. No measured write path reads trig data. **Do not assume the
 flash resolves that**; it is a separate, still-unexplained mechanism.
+
+## Session 88 — REVERTED. The Hook P fix was flashed and BROKE the 1x baseline
+
+### Hardware report on commit `91f2f15`
+
+Flashed. **DIRECT JUMP broken entirely, including at 1x.** With all tracks and the master at
+1x, engaging DJ makes the playhead erratic, and **the step playback pattern depends on which
+trigs are entered on which steps.**
+
+That last detail is the most important measurement this thread has produced, and it was
+bought at the cost of a hardware regression:
+
+> **Trig-content dependence is the SIGNATURE of Hook P writing a wrong STEP_ARR value.**
+
+Before Session 88 that signature appeared only at non-1x scales. Session 88 changed Hook P's
+input so it wrote wrong values at 1x too — and the signature appeared at 1x. Same cause, same
+fingerprint. So the original non-1x symptom the user reported (visited steps depending on
+trig content, LEDs and audio disagreeing) is almost certainly Hook P writing a bad position,
+not a separate display-path mystery as Session 88 concluded. **`NEXT_STEP[t]` was simply the
+wrong source.** Why it is wrong is NOT known and must be measured, not guessed, next time.
+
+### The rollback
+
+Working tree restored by reverse-applying `91f2f15`'s change to `tools/patch_directjump.s`
+only (`git show 91f2f15 -- <file> | git apply -R --3way`), so the concurrent session's label
+rename in `50c49f1` survives. Verified: the only remaining difference from `16df386` in that
+file is that rename.
+
+Rebuilt and **verified by hash**: `out/mainos_directjump_v4.bin` = `0657157f610fca4e...`,
+byte-exact to the image recorded as hardware-confirmed in the handoff and Session 87, 975
+bytes changed. Preserved as `out/GOLD_S87_*` with `GOLD_S87_SHA256.txt` and a README.
+
+**All future DIRECT JUMP builds go to V5** (`tools/build_directjump_v5.py`, outputs
+`*_v5.bin` / `*_V5.syx`). V4 is now frozen as the gold artifact. The V5 script carries a new
+gate: it diffs every build against `GOLD_S87_mainos_directjump.bin`, prints how many bytes
+differ and how many fall outside the cave, and **refuses to build if any byte outside the
+cave differs from gold.** A no-change run reports BYTE-IDENTICAL, which is how the rollback
+was confirmed.
+
+### The methodological finding, which is the real cost of this session
+
+**The emulator is not a sufficient gate for Hook P changes.** Session 88's change passed
+everything this project has:
+
+- both 1x fixtures byte-identical across 30 and 34 STEP writes, on REAL armed commits
+  (`dja_real` x1, `djp_store` x16 verified from the cave);
+- both non-1x fixtures showing Hook P move from 7 to stock's 4;
+- `diff_stock_vs_patch.py` IDENTICAL with the feature off, scratch poisoned `0xAA`, 38
+  samples, 16/16 tracks moving;
+- 979 bytes, 0 unexpected outside the cave, reproducible build.
+
+And it still broke the unit at 1x. Every one of those gates watched the value Hook P writes
+on ONE commit in a short run. None of them watched what the machine does over minutes, with
+trigs firing, with the voice path live — which is exactly where the trig-content dependence
+lives and exactly what the emulator does not drive.
+
+**Rule for the restart: a Hook P change must be proven on hardware before it is believed,
+and the cheapest way to do that is the on-hardware trace harness this project already has**
+(`tools/patch_triglock_diag.s` + `tools/read_triglock_log.py`, Session 78 — beacon,
+per-opcode histogram, watched-byte culprit, trace carried off the unit in a saved bank blob).
+That harness turned the trig-lock thread for exactly this reason: it made the firmware report
+what it actually did on the user's own machine. Point it at `STEP_ARR[t]` and its writers.
+
+### Status
+
+Rolled back, gold preserved and hash-verified, V5 build path created. Session 88's fix is
+REVERTED but its measurements stand: the `CNTDN_TBL` formula, the per-tick rate gate at
+`0x400a3cee`, the master rate at `LEN_TBL[SCALE_IX]`, and the measured fact that Hook P wrote
+`MASTER_STEP` where the track's own index belongs. That last one is still a real defect in the
+gold build — it is simply not fixed by substituting `NEXT_STEP[t]`.

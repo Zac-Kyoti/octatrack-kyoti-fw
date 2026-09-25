@@ -228,14 +228,6 @@
                                         | at TRK_LEN_SRC + patOff + t*0x91a
     .equ MIDI_LEN_SRC, 0x400e6ad8       | TRK_BLOB + 0x48f8 -- MIDI track m's LENGTH byte is
                                         | at MIDI_LEN_SRC + patOff + m*0x8b0
-    .equ NEXT_STEP, 0x800065e4          | Session 88: stock's per-track step index, ONE WORD
-                                        | per track, 16 wide and CONTIGUOUS -- audio 0-7 at
-                                        | 0x800065e4+2t and MIDI 8-15 at 0x800065f4+2(t-8)
-                                        | are the same array (it tiles into PAIR at
-                                        | 0x80006604, measured S79 cont.21). Written by
-                                        | stock's own rebuild at 0x400a4916 as
-                                        | ceil(D7 / tps_t) -- the TRACK's step index, in the
-                                        | TRACK's rate domain. See Hook P.
     .equ STEP_ARR,  0x800064d0          | per-track STEP, 16 wide (audio 0-7, MIDI 8-15).
                                         | AR's 0x40566720. Incremented at 0x400a3d78 and
                                         | wrapped against the track's LENGTH at 0x400a3d8c.
@@ -976,31 +968,9 @@ dj_pertrack:
     move.l  #0x9b340,%d1
     muls.l  %d1,%d0
     add.l   %d0,%d5                    | d5 = patOff
-|   Session 88 -- NON-1x SCALE FIX. This used to read MASTER_STEP once here and use that
-|   single value as `new_step` for all 16 tracks (AR's 0x400992d4). MEASURED as the root
-|   cause of every non-1x failure: MASTER_STEP is the MASTER's step index, but STEP_ARR[t]
-|   must hold the TRACK's. They are equal only when tps_master == tps_track, i.e. only at 1x.
-|
-|   tools/diag_dj_hooks.py, DJMAST2 pattern 0 (1x master) -> 1 (2x master, tracks 1x), a
-|   real armed commit (dja_real x1, djp_store x16) -- both writes land on tick 30:
-|       t30 pc=0x400a4be6 -> step 4   ; stock's tail   (0-based 3)  CORRECT
-|       t30 pc=0x400d77c2 -> step 7   ; this hook      (0-based 6)  2x TOO FAR
-|   3 vs 6 is exactly tps_master/tps_track = 3/6.
-|
-|   The fix is to change this hook's INPUT, not its job. Stock's own rebuild already computed
-|   the right quantity per track at 0x400a4916 -- NEXT_STEP[t] = ceil(D7 / tps_t), master
-|   TICKS divided by the TRACK's ticks-per-step -- and stock's tail seeds STEP_ARR[t] from its
-|   low byte at 0x400a4be6 WITHOUT reducing it modulo the track length. That missing modulo is
-|   the only thing this hook exists to supply (it is what makes mixed track LENGTHS 7/12/16
-|   land correctly, a confirmed part of the Session 87 baseline), so the hook must stay.
-|
-|   Reading NEXT_STEP[t] per track instead of MASTER_STEP once:
-|     * at 1x with equal lengths it is bit-identical to the old behaviour, so the hard-won
-|       baseline is preserved BY CONSTRUCTION, not merely by testing;
-|     * at non-1x it inherits stock's correct per-track rate domain for free;
-|     * and it retires the AR->OT porting hazard that has bitten this thread three times
-|       (PREV_ARR, CNTDN_TBL, and this): the value now comes from OT's OWN commit rather
-|       than from AR's step-domain new_step.
+    moveq   #0,%d4
+    move.w  MASTER_STEP,%d4            | d4 = new_step (stock seeded it from Hook H's value
+                                       | at 0x400a483a -- AR's own 0x400992d4)
     lea     PAT_SMODE,%a0
     tst.b   (%a0,%d5.l)
     sne     %d6                        | d6 = per-track mode?
@@ -1029,27 +999,17 @@ djp_normal:
 djp_gotlen:
     moveq   #0,%d1
     move.b  (%a0,%d0.l),%d1            | d1 = this track's LENGTH
-|   d0 = NEXT_STEP[t], stock's own per-track step index (word per track, contiguous 16).
-    move.l  %d3,%d0
-    add.l   %d0,%d0                    | d0 = 2*t
-    lea     NEXT_STEP,%a1
-    moveq   #0,%d2
-    move.w  (%a1,%d0.l),%d2            | d2 = ceil(D7 / tps_t), already in the TRACK's domain
-    move.l  %d2,%d0
+    move.l  %d4,%d0                    | d0 = new_step
     tst.l   %d1
     ble.b   djp_store                  | unreadable length -> store the index unreduced
-|   Hardware modulo, not repeated subtraction. The old sub loop assumed "new_step and LENGTH
-|   are both <= 64", which held only while the input was MASTER_STEP; NEXT_STEP[t] is
-|   ceil(D7/tps_t) and can reach ~2048 (master 1/8x tps 96, len 64, track 2x tps 3), so a
-|   subtraction loop would run thousands of iterations per track inside a commit tick.
-|   remu.l is the unsigned twin of the divsl.l stock itself uses at 0x400a4912, so the
-|   instruction is known present on this CPU. d1 > 0 is guaranteed by the tst/ble above,
-|   so this cannot divide by zero.
-    remu.l  %d1,%d2:%d0                | d2 = NEXT_STEP[t] mod LENGTH, d0 = quotient
-    move.l  %d2,%d0
+djp_mod:
+    cmp.l   %d1,%d0
+    blt.b   djp_store
+    sub.l   %d1,%d0                    | new_step and LENGTH are both <= 64
+    bra.b   djp_mod
 djp_store:
     lea     STEP_ARR,%a0
-    move.b  %d0,(%a0,%d3.l)            | STEP[t] = NEXT_STEP[t] mod trackLen
+    move.b  %d0,(%a0,%d3.l)            | AR 0x400992be : STEP[t] = new_step mod trackLen
 |   Session 87 -- HARDWARE REGRESSION FIX. This used to also write PREV_ARR[t] = pos-1
 |   (AR 0x400992c4) and clear TICKS_IN_STEP[t] (AR 0x400992c6). Both are removed.
 |
