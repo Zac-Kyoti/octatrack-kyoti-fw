@@ -30345,3 +30345,368 @@ NONE" behaviour and leaves old projects untouched until the user commits.
 superseded SPATIALIZER donor and were deliberately left alone; `build_merged.py`'s own
 donor-swap pass (flagged since Session 76) is still outstanding and will need this same
 `ID2E` line when it happens.
+
+## Session 92 (2026-09-25, `wip`) — QLREC: the double-tap becomes a **toast-gated** gesture; and route A's emulator boots again
+
+**User request, verbatim in intent:** "I no longer want the action to be executed by
+double taps. I want REC + PLAY to initially open the toast, which should display the
+current quantize live rec setting. I want a subsequent tap of PLAY, while REC is still
+held, to switch QLREC to the inverse setting. A subsequent tap inverses it again. The
+toast should be present for 0.8s, and it being displayed is what should allow for a
+setting switch to occur. If the toast disappears, tapping PLAY while holding REC should
+just make the toast show what the current setting is."
+
+### The redesign — one rule, and it is visible
+
+Sessions 46–51 built this as a genuine DOUBLE TAP: two `[PLAY]` presses inside a
+`MAX_GAP` pairing window flipped the setting, and the toast only appeared *after*
+something had already changed. Three pieces of state (`G_CNT` parity, `G_WINDOW`,
+`G_PEND`) existed to implement a window whose **only** externally visible signal was the
+flip itself — which is exactly why Sessions 51 / 51-bis / 51-ter each burned a hardware
+round chasing a window nobody could see.
+
+The new rule collapses all of that:
+
+> a `[PLAY]` press with `[REC]` held flips QUANTIZE LIVE REC **if and only if the toast
+> is on screen at that moment**; otherwise it opens the toast on the current setting.
+
+`G_WINDOW`, `G_PEND` and `MAX_GAP` are **gone**. One word, `G_LIVE` (`0x80006a6c`,
+reusing the old `G_WINDOW` slot), is *both* the toast's remaining lifetime *and* the flip
+window, so the two cannot drift apart by construction, and the user can see the window
+they are tapping into. Session 51's `G_PEND` byte at `0x80006a70` is retired; the
+harness now asserts this patch never writes it.
+
+### What each routine does now
+
+- **`qlr_play`** (detour `0x40061778`): REC not held → stock. REC held and
+  (`G_ARM` && `G_LIVE > 0`) → flip `0x800000ac` + shadow `0x100fff3c` + `jsr CKSUM`,
+  then fall through. Either way it (re)opens the toast on the *current* value,
+  `G_LIVE := LIVE_TICKS`, `G_ARM := 1`. **Both halves of "the toast is up" must hold** —
+  a stale `G_LIVE` with `G_ARM` clear, or vice versa, can never authorise a flip.
+  Press **#1** of each hold is still passed through to stock, because `[REC]`+`[PLAY]`
+  is stock's *start LIVE RECORDING* gesture; later presses are swallowed, as before.
+  Verified by disassembly that stock's REC-held branch (`0x40061798` →
+  `0x400617a0..0x40061816`) issues **no notification of its own**, so our toast survives
+  that pass-through — the only `NOTIFY` on that path is `0x40061782`, the "no project"
+  toast taken when `PROJ_GATE` returns 0, where stock replacing our toast is correct.
+- **`qlr_tick`** (detour `0x400522ca`) now owns the toast's whole life: while `G_ARM`,
+  count `G_LIVE` down; at 0 → `NOTIFY_CLOSE`, clear `G_ARM`/`G_LIVE` (**this is what
+  shuts the flip window**); otherwise refresh every `REARM_INTERVAL` frames as before.
+  Expiry wins over a refresh due on the same tick.
+- **`qlr_recrel`** (detour `0x4004883a`) additionally clears `G_LIVE`, so no stale
+  window survives a hold.
+
+**The Session 50 invariant is untouched:** `NOTIFY` is still only ever called with
+`dur = REARM_DUR > 0`. `dur <= 0` tail-jumps into `FUN_40031494`, the modal window /
+overlay stack that hung a real MKI. What changed is only *how long the re-arming goes
+on* — `LIVE_TICKS` frames, not "until `[REC]` is released".
+
+One incidental hardening: `qlr_tick`'s refresh path now saves `d0-d1/a0-a1` **before**
+resetting `G_RTICKS` rather than after, so the detour is genuinely register-transparent
+and the harness can assert it. (Disassembly confirms `d0/d1/a0/a1` really are dead at
+`0x400522d0` — it reloads `d2`, `a4`, `a3` and then reads `d0` from `(a2)` — and the
+Session 50/51 build that clobbered `d0` here flashed fine. The reorder costs nothing.)
+
+`tools/emu_qlrec.py` rewritten for the new semantics: 60 checks including two end-to-end
+tick sequences (a press opens the toast for exactly `LIVE_TICKS` ticks then closes; a
+press halfway through flips *and* restarts the full life), the `G_ARM`/`G_LIVE`
+both-halves rule, register transparency across `NOTIFY` and `NOTIFY_CLOSE`, the retired
+`G_PEND` canary, and the `REARM_DUR > 0` / `REARM_DUR > REARM_INTERVAL` /
+`LIVE_TICKS > REARM_INTERVAL` invariants. **ALL GOOD.** Constants are parsed out of
+`patch_qlrec.s` so the harness and the image cannot disagree.
+
+Cave: `patch_qlrec` **352 B** @ `0x400d7400` (was 358 B — the pairing machine cost more
+than the countdown that replaced it). 391 B changed vs stock.
+
+### `LIVE_TICKS` — what 0.8 s costs, and what is actually known
+
+`LIVE_TICKS` is in `qlr_tick` frames, i.e. entries to the `0x400522ca` site inside
+`FUN_40052200`. **That site's real-world rate has never been measured**, and this session
+did not settle it either (see below). What *is* known, and it brackets the answer:
+
+- The site is the stock **SOFT MUTE release watchdog** tick: `FUN_40008f84` writes
+  `0x2d` (45) to `relparam_46c7dfba[t]` and `0x400522de..e6` decrements it, force-freeing
+  a voice still in release state 2. NOTES Session 9 already flagged `45 × frame period`
+  as "likely tens–low hundreds of ms" — unmeasured.
+- Hardware feedback on the *old* `MAX_GAP`: `0x10` (16 frames) was a landable fast
+  double-tap and `0x08` (8 frames) was "WAY too fast to execute". That puts 16 frames at
+  roughly 150–250 ms, i.e. the site somewhere near **65–110 Hz**, and 0.8 s at roughly
+  **50–90 frames**.
+
+Intersecting those puts the site around **67–110 Hz**, so 0.8 s is **~54–88 frames**.
+`LIVE_TICKS` ships at **`0x44` (68)**, the centre of that band, explicitly labelled as an
+estimate and overridable in one argument:
+`python3 tools/build_qlrec.py 140C_KYOTI 0xNN`. Because the toast and the window are the
+same constant, a wrong value cannot make the gesture *behave* wrong — only feel longer or
+shorter than 0.8 s. This is the one number to move after a hardware eyeball.
+
+### Route A's full-firmware emulator boots again (and what it still cannot reach)
+
+Chasing that rate turned up a real breakage. Since the Session 90 octabam sync (PR #360,
+the more-correct Unicorn EMAC), **route A's M6a gate had been failing outright**: the new
+boot branch reaches a stock ~10.8 MB zero-fill at `0x4f502c10` in the external
+audio-sample SDRAM bank, which `refs/octabam/tools/emu/emu_rtos.py` never mapped, so it
+died with `UC_ERR_WRITE_UNMAPPED` before creating a single task. `--load-project` then hit
+the same wall lower down at `0x4ece3000` (ATA sectors DMA'd into the same bank).
+
+Fixed with a local patch to that clone: `on_unmapped` now grows a page at a time inside
+`0x49000000..0x50000000` and faults loudly everywhere else. The diff is checked in as
+**`tools/refs/local-patches/octabam-emu-samplebank-map.patch`** — ⚠️ a `sync.py --update
+octabam` **resets the clone**, so if route A starts failing its gate again after a sync,
+re-apply that patch (`git apply` inside `refs/octabam/`) before assuming anything else
+broke. **M6a gate: PASS** again, and `--load-project` runs 6.2 s of
+emulated time clean. Session 90's own rule earned its keep here — an emulator "green"
+from before a sync is not evidence for anything after it, and this one had been quietly
+red.
+
+What it still does **not** give us: `0x400522ca` is entered **0 times** in a 1.5 s bare
+boot, a 3 s bare boot, a 6.2 s `--load-project` run, **and a 4000-frame
+`--sequencer --internal-clock` run with the transport actually running** — and so is
+`0x40052200` itself, plus the UI task's own tick sites (`0x40056c28`, the `FUN_4005a2b8`
+toast countdown, and `0x40056ab8`). Route A boots, loads and sequences, but it does not
+put the unit into the UI/engine state where those periodic ticks fire, so the frame rate
+stays unmeasured. Worth recording as a known limit of route A rather than re-attempting:
+`FUN_40052200` is reached only through a **computed switch** (its one call site
+`0x40061e8e` has no static branch or table reference anywhere in the image), so finding
+the event that drives it is its own RE task, not a flag. (The site definitely
+*does* tick on hardware: Sessions 50/51 flashed a build whose toast was kept alive purely
+by re-arming from it.)
+
+Two facts worth keeping from the same dig:
+- **`FUN_4005a2b8`'s `dur` is a different clock from `qlr_tick`'s.** `dur` is stored at
+  `0x460d1e6c` and decremented by `0x40056c28`, which is called from `0x40056c40` — and
+  `0x40056c40` is a **task entry point**, created at `0x4004040e` (prio 3, stack
+  `0x460d51d4`+`0x800`, TCB `0x460d59d4`) and driven by message type 1 on queue
+  `0x460d1664`. So `REARM_DUR`/`DJ_TOAST_DUR` and `LIVE_TICKS`/`TOAST_FRAMES` are counted
+  by two different tickers; they cannot be converted into each other by assumption.
+- Stock's own `dur` values, tallied across all `FUN_4005a2b8` call sites: **87×`0x30`**,
+  7×`0x60`, 3×`0x44`, 2×`0x5a`. `0x30` is stock's house style for a toast.
+
+### Status
+
+**Full-firmware re-check of the Session 50 hang invariant against this exact rebuild**
+(`tools/emu_notify_probe.py`, three separate boots + LOAD PROJECTs on
+`out/mainos_qlrec.bin`): `dur=0` **does** execute the modal-insert fn `0x40031494`
+(`d0=0xffffffff`), `dur=0x44` does **not**, and `dur=REARM_DUR=0x20` — what the cave
+actually passes — does **not** (`d0=0x1`). **PASS.** The probe was also hardcoding
+`REARM_DUR = 0x20` and printing a stale `0x30` in its verdict line; it now parses the
+`.equ` out of `patch_qlrec.s`, like `emu_qlrec.py` does, so neither harness can drift
+from the image.
+
+**Built, isolation-validated, NOT FLASHED.** This supersedes the "hardware-confirmed,
+final" status QLREC carried since Session 51-ter — the *gesture* is new and unflashed,
+while the persistence, label polarity, `dur > 0` safety and the stock live-rec
+pass-through are all unchanged from the confirmed build. `README.md`, `BUILD_KYOTI.md`
+and `build_bugbuilds.py`'s blurb updated to match.
+
+## Session 93 (2026-09-25, `wip`) — QLREC CRASHED THE UNIT. Root-caused: the `0x400522ca` "per-control-frame" hook is a kernel-post context, and the note that called it a safe frame tick was wrong
+
+**Hardware report on the Session 92 flash:** "Badly broken. A few executions of the
+function will result in a full machine crash, non operational controls, and a loud
+persistent high frequency crackling. I also noticed that the function is not working as I
+speced it: The setting is changing when REC is still held and PLAY is pressed after the
+toast has disappeared."
+
+Two symptoms, one root cause, and the cause is a premise this project has carried since
+Session 21.
+
+### `FUN_40000c3c` is the kernel POST/WAKE, not a draw call
+
+`qlr_tick` (our detour of `0x400522ca`, inside `FUN_40052200`) called `NOTIFY` and
+`NOTIFY_CLOSE`. Both bottom out in **`FUN_40000c3c`**, which disassembles as the kernel's
+message-post:
+
+```
+40000c3c:  movew %sr,%d1          ; save IPL
+40000c44:  movew #0x2700,%sr      ; mask interrupts
+40000c54:  movel %a2@,%a0@(0,%d0:l:4)   ; ring write  (base +0x14, idx +0x18, mask +0x10)
+40000c62:  addql #1,%a1@(4)             ; count++
+40000c76:  moveal %a1@(12),%a2          ; a task is blocked on this queue...
+40000c7e:  movel %d0,%a2@(76)           ; ...mark it runnable
+40000c8e:  movel %a0,0x800068d8         ; poke the ready-list head
+```
+
+Waking a task and touching the ready list **from inside the engine's frame handler** is
+what produced the reported failure: frozen panel plus a persistent high-frequency crackle
+is the audio path never being serviced again. `FUN_40056bec` reaches it at `0x40056c1a`;
+`FUN_4005a2b8` reaches it through its own `NOTIFY_CLOSE` call at `0x4005a2cc` and through
+`FUN_40057008`.
+
+### The same hook explains the logic bug
+
+`G_ARM`/`G_LIVE` were decremented **only** in `qlr_tick`. That site fires rarely — Session
+92's own emulator evidence said so plainly (**0 entries** across a bare boot, a
+`--load-project` run and a 4000-frame `--sequencer` run) and I misread it as "route A
+can't reach it" instead of "the premise is wrong". With the hook not firing, the window
+never closed, so every later press flipped. Exactly as reported.
+
+### ⚠️ The crash was already latent in the "hardware-confirmed, final" Session 51 build
+
+Sessions 50/51 called `NOTIFY` from the same hook. They survived because `G_ARM` was only
+set **after a successful double-tap flip** — and those double-taps frequently failed to
+register, which is what every round of `MAX_GAP` feedback was about. Session 92 armed the
+hook on **every** press, which turned a rare latent crash into a reproducible one. So:
+
+- The Session 51 QLREC image (`main`, and the `build_bugbuilds.py` composite) carries a
+  **rare hard-crash**, not a clean feature. Its "hardware-confirmed, final" status was
+  never justified by the evidence — it was confirmed *not to hang at flash time*, which
+  is a much weaker claim.
+- The **`0x400522ca` site is not a safe place to call anything UI- or kernel-facing.**
+  NOTES Session 21 (`dj_tick2`) called it a "per-control-frame handler" that "ticks every
+  frame, playing or stopped"; that is the claim that needs retracting. Current DIRECT JUMP
+  (`v4`/`v5`) does **not** splice it — only the dead `v2` does, and RELOAD3 already deleted
+  `rl_tick`. So QLREC was the only live user, and now there are none.
+
+### The fix — ask the OS, tick nothing
+
+`qlr_tick` and its detour are **deleted**. "Is the toast on screen?" is read from stock's
+own notification state, maintained by the UI task where that kernel post is legal:
+
+| word | meaning |
+|---|---|
+| `NOTIF_H` `0x460d1e70` | window handle. Set by `FUN_4005a2b8`; cleared by `FUN_40056bec` via `FUN_40055db4` (`clrl %a2@` at `0x40055dd8`). Non-zero ⇔ a toast is up |
+| `NOTIF_T` `0x460d1e6c` | remaining duration. Counted down by `FUN_40056c28`, which at zero `bra`s straight into `FUN_40056bec` — the OS closes it itself |
+
+A press flips iff `G_OWN == MAGIC && NOTIF_H != 0 && NOTIF_T > 0`. The build now carries an
+`ASSERT_STOCK` list proving `0x400522ca` is left byte-for-byte stock, and the harness
+refuses a cave that exports `qlr_tick` or contains the site's address at all.
+
+### 0.8 s is now derived, not guessed: it is exactly `0x30`
+
+`NOTIF_T` is decremented by `FUN_40056c28` ← the UI task `FUN_40056c40` on message type 1
+(the byte at `0x400a727a`) from queue `0x460d1664` ← posted by the **DTIM1 interrupt
+handler at `0x40055cb8`** (ends in `rte`, clears DTER at `0xfc074003`) through a
+divide-by-2 prescaler at `0x400c0cf0` (reloaded with 2 at `0x40055cf4`).
+
+DTIM1 is programmed once at `0x40040498`: `DTRR (0xfc074004) = 68750`,
+`DTMR (0xfc074000) = 0x001d` → `RST=1, CLK=2 (bus clock ÷16), FRR=1, ORRI=1, PS=0`.
+
+```
+DTIM1 period = (68750+1) × 16 / f_bus
+  f_bus = CPU/2 = 132 MHz  ->  8.3335 ms = 119.998 Hz
+  UI tick = every 2nd irq  ->  16.667 ms =  59.999 Hz
+  0.8 s = 48 = 0x30
+```
+
+Cross-check: `0x30` is **stock's own house value**, at 87 of its `FUN_4005a2b8` call sites
+(then 7× `0x60`, 3× `0x44`, 2× `0x5a`). At `f_bus = 264 MHz` the tick would be 120 Hz and
+stock's `0x30` a 0.4 s toast — implausibly brief for "PART n RELOADED", which is why
+`f_bus = CPU/2` is taken as correct. **This also gives the project a real unit for every
+`FUN_4005a2b8` `dur` it has ever guessed at** (`DJ_TOAST_DUR 0x44` = 1.13 s, RELOAD2's
+dwell likewise). On hardware a QLREC toast and a stock toast should now be the same
+length — if they are not, this derivation is wrong.
+
+### Two further hardening changes that fell out of it
+
+- **The press counter is gone.** "Does this press start live recording?" is now read from
+  stock's own `LIVE_REC 0x460d172a`, exactly as stock tests it at `0x400617a0`; stock's
+  "already recording" arm `0x400618bc` is a bare `rts`, so swallowing that case is
+  behaviourally identical. Session 92's private `G_CNT` lived beyond the boot zero-fill
+  (`FUN_4000f938` zeroes only to `0x80004000`) and so held **garbage at power-on**, able to
+  swallow the first live-rec start of a session — the same trap that locked up DIRECT JUMP
+  in Session 87.
+- **`G_OWN` is a 32-bit magic (`'QLR1'`), not a boolean**, for the same reason. Garbage
+  cannot plausibly impersonate it, and even if it did it cannot cause a spurious flip,
+  because a flip also requires the OS's own `NOTIF_H`/`NOTIF_T` to agree.
+
+Scratch shrinks to **one longword** (`G_OWN 0x80006a60`). `G_CNT`/`G_RTICKS`/`G_LASTMSG`/
+`G_LIVE`/`G_PEND` are all retired; the harness canaries them and asserts this patch never
+writes them. Cave **208 B** (was 352); **279 B** changed vs stock (was 391); two detours,
+both key handlers.
+
+`tools/emu_qlrec.py` rewritten: 60 checks, **ALL GOOD** — including the reported bug as an
+explicit case (a press after the OS closed the toast must not flip, whether the handle
+cleared, the countdown hit 0, or went negative), a full sequence in which the window shuts
+with **no tick of ours ever running**, power-on-garbage cases for `G_OWN`, ownership
+(a stock toast must not authorise a flip), and the regression guard that the retired hook
+address appears nowhere in the cave.
+
+### Status
+
+**Full-firmware re-check against this rebuild** (`tools/emu_notify_probe.py`, three
+separate boots + LOAD PROJECTs on `out/mainos_qlrec.bin`): `dur=0` **does** execute the
+modal-insert fn `0x40031494` (`d0=0xffffffff`); `dur=0x44` does **not**; and
+`dur=LIVE_DUR=0x30` — the single call this build now makes — does **not** (`d0=0x1`,
+handle `0x46c7d384`). **PASS.** The probe was still keyed to the deleted `REARM_DUR` and
+now reads `LIVE_DUR` from `patch_qlrec.s`.
+
+**Image diff audited run by run:** 279 bytes in 29 contiguous runs, every one attributed
+to `qlr_play`'s detour, `qlr_recrel`'s detour, the `patch_qlrec` cave, or Bug-1's
+`patch_trigscale` detour + cave — **zero unattributed bytes**, and `0x400522ca` confirmed
+identical to stock (`45f946c7dfba`). `build_bugbuilds.py` recomposes clean (QLREC
+composite 752 B, DISJOINT / ALL PRESERVED / NO STRAYS).
+
+**Swept for the same hazard elsewhere:** the only other splicer of `0x400522ca` is the
+dead `build_directjump_v2.py`; current DIRECT JUMP (`v4`/`v5`) explicitly does not splice
+it, and RELOAD3 deleted `rl_tick` in Session 82. With QLREC's hook gone there are **no
+live users of that site left**.
+
+Both lessons are now in **CLAUDE.md** so every session gets them: never call a UI/kernel
+primitive from an engine frame hook (and distrust "per-frame tick" labels), and
+"hardware-confirmed" must name *what* was confirmed — this feature carried
+"hardware-confirmed, final" for six sessions while holding a latent crash, because what
+was really confirmed was only "it did not hang during that flash".
+
+**Built, isolation-validated, NOT FLASHED.**
+
+## Session 89 continued — the non-1x PHASE bug ROOT-CAUSED: stock carries the sub-step phase across a commit
+
+Hardware on V5: tests 1 (1x baseline) and 2 (master 2x, no switch) PASS — Hook P's removal
+fixed both the erratic playhead and the trig-content dependence. Remaining: switching between
+a 1x-master and a 2x-master pattern leaves the sequence "step-fractional", *usually* but not
+always, never recovering, in both directions.
+
+### MEASURED (tools/diag_pair_phase.py, V5 image, DJMAST2 pattern 0 <-> 1, 8 real commits)
+
+```
+commit t 42..t201 (7 of them): PAIR[0]=0  holdmask writes=0   -> CLEAN
+commit t 255:                  PAIR[0]=3  holdmask writes=16  -> FRACTIONAL
+0x400a3d36 hold CONSUME: x8, first at t257 (two ticks after the fractional commit)
+```
+
+`PAIR[t]` (`0x80006604`, written `0x400a4924`/`0x400a492a`) is the track's **sub-step tick
+phase** at the commit instant — the raw write is `-3` (0xfffffffd) and stock's
+negative-correction branch stores `+3`. When it is non-zero stock sets bit t of the hold mask
+`0x80006626`, and the per-tick loop consumes that bit at `0x400a3d12`, copying PAIR's low
+byte into `0x800065d3[t]` at `0x400a3d36` and **skipping that track's advance for one step**.
+
+That machinery exists to *carry the track's existing phase across the commit*. At a natural
+pattern boundary the phase is always 0, so it is a no-op. At a mid-cycle DIRECT JUMP that
+also changes the MASTER SCALE it bakes in a permanent sub-step offset: track tps 6 with
+`PAIR = 3` is exactly half a step, carried forever, with nothing to correct it.
+
+### Why this was invisible for seven sessions
+
+At 1x, `tps_master == tps_track`, so `D7 = tps_master * masterStepOffset` is always an exact
+multiple of the track's ticks-per-step. **`PAIR` is therefore always 0 at 1x**, the hold bit
+is never set, and the bug cannot occur. It requires a master/track ticks-per-step mismatch,
+i.e. exactly the non-1x case.
+
+With master 2x it is 0 or 3 according to the parity of the master step the commit lands on —
+so a clean landing is possible but uncommon, which is precisely the user's revised report
+("most of the time fractional, occasionally maybe clean").
+
+### Candidate fix (NOT built)
+
+At an **armed DJ commit only**, suppress the phase carry — clear the hold mask `0x80006626`
+so no track resumes mid-step — letting every track land on a step boundary at the new
+master's grid, using the per-track-correct position stock already computes and V5 now
+preserves. Gated on the armed commit, so DJ-OFF and natural boundaries are untouched; and
+provably inert at 1x, where the mask is never set.
+
+This is AR's hard re-phase in spirit but with OT's better per-track position rather than AR's
+master-flattened one, so it should land clean where AR (user-confirmed on hardware) lurches.
+
+Still to establish before building: the exact site where the AUDIO hold bits are set (the
+MIDI twin is disassembled at `0x400a4b12`-`0x400a4b22`; the audio twin is near `0x400a497c`),
+and a hook point that cannot affect the un-armed path.
+
+### Emulator note
+
+`refs/octabam` needed `tools/emu/emu_rtos.py` to map the audio-sample SDRAM bank at
+`0x4f000000` (16 MB) or no image boots at all — A/B tested, HEAD fails `UC_ERR_WRITE_UNMAPPED`
+at `gate_m6a()`. That change existed only in the working tree on a detached HEAD; committed
+as `d5b84fb` on branch `emu/map-audio-sdram`. Also: two Unicorn instances running at once
+desynchronise the wall-clock-derived PIT and produce spurious boot faults, so emulator runs
+from parallel sessions must be serialised — results taken under contention are not
+trustworthy.
