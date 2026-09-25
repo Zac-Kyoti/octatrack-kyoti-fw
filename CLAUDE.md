@@ -45,6 +45,12 @@ not, so treat what's below as the guaranteed minimum, then go read them.**
   a Unicorn patched in that clone's `.venv`. After any octabam sync, re-run a
   known-good scenario before trusting a new result — and **an emulator "green"
   from before a sync is not evidence for a build after it.**
+  **The clone also needs a local patch to boot our images at all**:
+  `tools/refs/local-patches/octabam-emu-samplebank-map.patch` (the external
+  audio-sample SDRAM bank; without it boot dies `UC_ERR_WRITE_UNMAPPED` in
+  `gate_m6a`). A sync un-applies it — `sync.py` now prints the re-apply command,
+  and `tools/refs/local-patches/README.md` explains why the lock still pins the
+  upstream commit rather than the local one.
 
 - **Hardware = Octatrack MKI only. No MKII.** Stock 1.40C is one image for
   both; the boot probe `0x46c8d18c` adapts it (MKI shows 15 PERSONALIZE

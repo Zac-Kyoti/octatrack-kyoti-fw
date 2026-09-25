@@ -73,6 +73,41 @@ def sync_one(name: str, meta: dict[str, str], *, update: bool) -> tuple[str, str
             print(f"  ! local edits in refs/{name} saved -> {patch.relative_to(REFS_DIR.parent)}")
         git("reset", "--hard", "--quiet", "HEAD", cwd=dest)
 
+    # ===== Session 92: the dirty-check above is NOT ENOUGH, and the gap is a trap. =====
+    # It only sees UNCOMMITTED edits. A local fix that was COMMITTED -- e.g. onto a
+    # branch, which is the careful thing to do and exactly what someone does when they
+    # notice their work is "one git checkout away from being lost" -- leaves a CLEAN
+    # working tree, sails past the check above, and is then silently un-applied by the
+    # detach below. The commit is not deleted (its branch ref survives), so nothing
+    # LOOKS lost; the clone simply stops carrying the fix, and whatever depended on it
+    # breaks in a way that points nowhere near here.
+    # This is not hypothetical: refs/octabam commit d5b84fb (branch emu/map-audio-sdram)
+    # is REQUIRED for the emulator to boot this repo's firmware images at all -- without
+    # it, boot dies with UC_ERR_WRITE_UNMAPPED inside gate_m6a -- and it was committed
+    # onto a branch for exactly that "don't lose it" reason. So being more careful with
+    # your work made it MORE likely to be dropped here. Close the gap: export any commit
+    # that is not reachable from the target as a patch too, and say so loudly.
+    extra = subprocess.run(
+        ["git", "log", "--oneline", f"{target}..HEAD"],
+        cwd=dest, capture_output=True, text=True,
+    ).stdout.strip()
+    if extra:
+        PATCH_DIR.mkdir(parents=True, exist_ok=True)
+        cpatch = PATCH_DIR / f"{name}-local-commits.patch"
+        cdiff = subprocess.run(["git", "diff", target, "HEAD"], cwd=dest,
+                               capture_output=True, text=True).stdout
+        if cdiff.strip():
+            cpatch.write_text(cdiff)
+        n = len(extra.splitlines())
+        print(f"  ! refs/{name}: {n} local commit(s) NOT in {target} -- the checkout "
+              f"below will un-apply them:")
+        for line in extra.splitlines():
+            print(f"      {line}")
+        print(f"    saved as -> {cpatch.relative_to(REFS_DIR.parent)}")
+        print(f"    RE-APPLY with:  git -C refs/{name} apply "
+              f"{cpatch.relative_to(REFS_DIR.parent)}")
+        print(f"    (or keep them:  git -C refs/{name} checkout <branch>)")
+
     git("checkout", "--quiet", "--detach", target, cwd=dest)
     head = git("rev-parse", "HEAD", cwd=dest)
     subject = git("log", "-1", "--format=%s", cwd=dest)
