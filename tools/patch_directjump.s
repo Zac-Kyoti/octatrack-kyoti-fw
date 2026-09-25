@@ -228,6 +228,18 @@
                                         | at TRK_LEN_SRC + patOff + t*0x91a
     .equ MIDI_LEN_SRC, 0x400e6ad8       | TRK_BLOB + 0x48f8 -- MIDI track m's LENGTH byte is
                                         | at MIDI_LEN_SRC + patOff + m*0x8b0
+    .equ PAIR_ARR,  0x80006604          | per-track SUB-STEP TICK PHASE, one WORD per track,
+                                        | 16 wide and contiguous (NEXT_STEP at 0x800065e4
+                                        | + 32 tiles into it). Stock's rebuild writes it at
+                                        | 0x400a4924/0x400a492a as D7 mod tps_t.
+    .equ CATCHUP,   0x800065d3          | per-track byte. Stock's rebuild sets it at
+                                        | 0x400a49aa to max(0, tps_t - tps_master), and the
+                                        | per-tick code COPIES it into TICKS_IN_STEP[t] at
+                                        | 0x400a354a whenever CNTDN_TBL[t] == 0 -- i.e. it
+                                        | SHORTENS each track's first step after a commit so
+                                        | the track advances in lockstep with the master for
+                                        | one step. At 1x that is max(0, 6-6) = 0, a no-op.
+                                        | See dj_phase3.
     .equ TICK_CTR,  0x800065b6          | alias of STEP below, under its MEASURED name:
                                         | master TICKS-WITHIN-STEP, wrapping at
                                         | LEN_TBL[SCALE_IX] (Session 82). Named here because
@@ -1180,6 +1192,65 @@ djp_orig:
 | stock per-frame tick @0x40056c28 already reads, closing the toast via NOTIFY_CLOSE
 | from the OS's own safe context one frame later, never called by us directly) is
 | unchanged and was never the problem.
+| ========= Hook S @ 0x400a4d36 -- correct the per-track CATCH-UP phase =========
+| Session 89. Detour site and displaced instruction are the ones Hook P used.
+| Gated on DJ_MODE and G_JUST_COMMITTED (set by dj_c).
+|
+| MEASURED (tools/diag_track_phase_trace.py, V5.3 image, DJMAST2 0 -> 1). Every write to
+| track 0's tick counter across the commit at t42:
+|
+|     t42 STEP [0] pc=0x400a4be6 = 0    stock's tail sets the position
+|     t42 TICKS[0] pc=0x400a4bf0 = 0    stock's tail zeroes the phase
+|     t42 TICKS[0] pc=0x400a354a = 3    <-- and this puts 3 back
+|     t42 TICKS[0] pc=0x400a3ce2 = 4    per-tick increment
+|
+| The counter then reaches tps_t at t44 instead of t47: the track's step grid moves 3 ticks
+| and STAYS moved. Across six switches the advance ticks flip between congruence classes
+| [5] and [2] mod 6, in BOTH directions -- the "fractional relative to the metronome"
+| report.
+|
+| 0x400a354a is `move.b (a2),(a1)` with a2 = CATCHUP cursor and a1 = TICKS_IN_STEP cursor,
+| gated on `tst.b CNTDN_TBL[t]` at 0x400a353e (cursors resolved from the prologue's stack
+| slots at 0x400a290c/0x400a293e/0x400a295c). So stock deliberately pre-loads the track's
+| tick counter with max(0, tps_t - tps_master) to make it advance with the master for one
+| step. That is invisible at 1x, where the term is max(0, 6-6) = 0.
+|
+| At a mid-cycle DIRECT JUMP it is wrong: the track should resume at the sub-step phase
+| ABSOLUTE TIME puts it at, which is exactly D7 mod tps_t -- the value stock already
+| computed into PAIR[t]. So correct the SOURCE and let stock's own copy carry it through.
+|
+| Hook R (the previous attempt) wrote PAIR straight into TICKS_IN_STEP from this same site
+| and had no effect, because 0x400a354a runs LATER in the tick and overwrote it. Writing
+| CATCHUP instead puts the value upstream of that copy.
+|
+| INERT AT 1x BY ARITHMETIC: at 1x, tps_t == tps_master, so PAIR[t] is always 0 AND
+| CATCHUP is already max(0, 0) = 0. The write is a no-op and the Session 87 baseline cannot
+| be affected.
+    .global dj_phase3
+dj_phase3:
+    tst.l   DJ_MODE
+    beq.w   djs3_orig
+    tst.b   G_JUST_COMMITTED
+    beq.w   djs3_orig
+    clr.b   G_JUST_COMMITTED           | one-shot, as Hook P consumed it
+    lea     -16(%sp),%sp
+    movem.l %d0-%d1/%a0-%a1,(%sp)
+    lea     PAIR_ARR,%a0               | word per track
+    lea     CATCHUP,%a1                | byte per track
+    moveq   #0,%d0
+djs3_loop:
+    move.b  1(%a0),%d1                 | LOW byte of the big-endian PAIR word = D7 mod tps_t
+    move.b  %d1,(%a1,%d0.l)            | CATCHUP[t] = the true sub-step phase
+    addq.l  #2,%a0
+    addq.l  #1,%d0
+    cmpi.l  #16,%d0
+    blt.b   djs3_loop
+    movem.l (%sp),%d0-%d1/%a0-%a1
+    lea     16(%sp),%sp
+djs3_orig:
+    tst.l   0x46107568                 | displaced original (sets Z for the caller's bne.w)
+    rts
+
     .global dj_ptnrel
 dj_ptnrel:
     tst.l   NOTIFY_HANDLE               | 0x460d1e70 -- is a toast actually open?
