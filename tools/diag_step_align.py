@@ -53,6 +53,8 @@ def main(argv):
     ap.add_argument("--cue-at", type=int, default=40)
     ap.add_argument("--ticks", type=int, default=200)
     ap.add_argument("--track", type=int, default=0)
+    ap.add_argument("--jumps", type=int, default=6)
+    ap.add_argument("--gap", type=int, default=53)
     ap.add_argument("--image", default=str(V5))
     a = ap.parse_args(argv)
 
@@ -82,14 +84,17 @@ def main(argv):
     rt.uc.mem_write(DJ_MODE, (1).to_bytes(4, "big"))
     rt.uc.mem_write(SCRATCH_LO, bytes([0xAA]) * (SCRATCH_HI - SCRATCH_LO))
 
-    st = dict(tick=0, cued=None, commit=None, adv=[], six=[])
+    st = dict(tick=0, cued=None, commit=None, adv=[], six=[], njump=0, commits=[])
+    targets = [a.to_pattern, a.pattern]
 
     def on_tick(u, addr, size, user):
         st["tick"] += 1
-        if st["cued"] is None and st["tick"] >= a.cue_at:
+        if st["njump"] < a.jumps and st["tick"] >= a.cue_at + st["njump"] * a.gap:
             u.mem_write(PEND_BANK, bytes([bank]))
-            u.mem_write(PEND_PAT, bytes([a.to_pattern]))
-            st["cued"] = st["tick"]
+            u.mem_write(PEND_PAT, bytes([targets[st["njump"] % 2]]))
+            st["njump"] += 1
+            if st["cued"] is None:
+                st["cued"] = st["tick"]
         s = bytes(u.mem_read(SCALE_IX, 1))[0]
         if not st["six"] or st["six"][-1][1] != s:
             st["six"].append((st["tick"], s))
@@ -102,8 +107,11 @@ def main(argv):
         if pc == ADVANCE_PC:
             ms = int.from_bytes(bytes(u.mem_read(0x800065B2, 2)), "big")
             st["adv"].append((st["tick"], tc, value & 0xFF, ms))
-        elif pc == TAIL_PC and st["commit"] is None:
-            st["commit"] = st["tick"]
+        elif pc == TAIL_PC:
+            if st["commit"] is None:
+                st["commit"] = st["tick"]
+            if not st["commits"] or st["commits"][-1] != st["tick"]:
+                st["commits"].append(st["tick"])
 
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_tick, begin=TICK_PC, end=TICK_PC)
     rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_write, begin=STEP_ARR + a.track,
@@ -132,6 +140,34 @@ def main(argv):
         mark = "  <-- COMMIT was here" if ct and tk == ct else ""
         when = "before" if ct and tk < ct else "after "
         print(f"   t{tk:4d}  TICK_CTR={tc:2d}  MASTER_STEP={ms:3d}  step={v:3d}  [{when}]{mark}")
+    # THE question: is each track advance on the same absolute-tick grid throughout?
+    # A track at tps N must advance at ticks congruent mod N. If the congruence class
+    # CHANGES at a commit, that commit re-phased the track off absolute time -- which is
+    # the "fractional relative to the metronome" report.
+    tps_t = 6
+    print(f"\n  advance ticks mod {tps_t}, segmented by commit "
+          f"(commits at {st['commits']}):")
+    # Label each segment by the commit that OPENS it, not the one that closes it. The
+    # previous form pushed the accumulated list when it saw the FIRST advance past a
+    # commit, so every row was labelled with the commit that came after its contents.
+    import bisect
+    buckets = {}
+    for tk, _tc, _v, _m in st["adv"]:
+        k = bisect.bisect_right(st["commits"], tk)
+        buckets.setdefault(k, []).append(tk)
+    segs = [((st["commits"][k - 1] if k else None), buckets[k]) for k in sorted(buckets)]
+    prev_class = None
+    for after_commit, ticks in segs:
+        if not ticks:
+            continue
+        classes = sorted({t % tps_t for t in ticks})
+        tag = "before 1st" if after_commit is None else f"after t{after_commit}"
+        shift = ""
+        if prev_class is not None and classes != prev_class:
+            shift = f"   <-- RE-PHASED (was {prev_class}, now {classes})"
+        print(f"    {tag:>12}: ticks {ticks[:6]}{'...' if len(ticks) > 6 else ''} "
+              f"-> mod {tps_t} = {classes}{shift}")
+        prev_class = classes
     if ct:
         pre = [tc for tk, tc, _v, _m in st["adv"] if tk < ct]
         post = [tc for tk, tc, _v, _m in st["adv"] if tk > ct]
