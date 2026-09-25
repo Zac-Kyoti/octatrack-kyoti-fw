@@ -818,6 +818,37 @@ rl3_bank_rel:
     jsr     BANK_WIN_CLOSE
     rts                                | -- no SELECT BANK, no countdown, nothing
 r3r_notours:
+|   ===== Hardware report #14: a pick during the hold must cancel the release show. =====
+|   Gesture: hold [BANK], tap a trig to pick a bank, tap a trig to pick a pattern,
+|   release [BANK] -- and SELECT BANK appeared with its countdown. Obviously wrong: the
+|   prompt asks for something the user has already supplied, and it lands on top of the
+|   window the pick itself put up.
+|   MEASURED at the [BANK]-overlay trig handler 0x4007b2fc. BANK_SEL is that gesture's
+|   own progress counter, and it is the only state that distinguishes "nothing picked"
+|   from "picked":
+|       0  nothing picked yet   -- the show tail 0x4007af30 clears it on every press
+|       1  a BANK was picked    -- set at 0x4007b276, together with BANK_COMMIT=1 at
+|                                  0x4007b33c, and a "SELECT PATTERN IN BANK x" window
+|                                  of its own (SHOW_WIN at 0x4007b2b0, onClose 0x4007b408)
+|       2  a PATTERN was picked -- set at 0x4007b3d2 at the end of the pattern branch
+|   Stock's release (0x4007b3e0) opens with exactly this test -- cmpl BANK_SEL,#2 then
+|   beq to DISMISS -- BEFORE it looks at BANK_COMMIT. Our release inverted that order, so
+|   BANK_COMMIT (set by the pick itself, or by the hold handler at 0x4007af24) sent us to
+|   r3r_show and the pick was never noticed. Restoring stock's ordering is the whole fix.
+|
+|   Both non-zero values want stock's own tail, which is why this branches there rather
+|   than handling them:
+|     * 2 -> our displaced compare below succeeds and BANK_REL_RES's beq takes the
+|            DISMISS path (0x40056a70), closing the pick's window and running ITS onClose
+|            (0x4007b408) -- the same teardown, so the overlay is popped exactly once.
+|     * 1 -> falls past the compare to stock's BANK_COMMIT test, which sets the sticky
+|            flag and keeps the overlay live so a pattern can still be picked after the
+|            release. That is stock's untimed window, unchanged.
+|   Note this also covers the un-reported half: releasing after picking only a bank would
+|   have drawn SELECT BANK over "SELECT PATTERN IN BANK x". Both are gone with one test.
+    tst.l   BANK_SEL
+    bne.b   r3r_stock                  | something was picked during the hold: stock's
+                                       | own release logic already does the right thing
     tst.l   BANK_COMMIT
     bne.b   r3r_show
 |   ===== Session 91: this guard used to test the WRONG VARIABLE. =====

@@ -522,3 +522,97 @@ blocked that until OK was pressed).
 **Needs hardware:** the self-dismiss actually firing, and the visual layout (spacing,
 title rendering, whether `TRK SEQ` / `RELOADED` reads better than one line). Cave is at
 1870 B of the 2044 B ceiling — 174 B headroom.
+
+# Session 92 — hardware report #14: the pattern-pick toast, and a mismatched bank
+
+Two items, both from one flash of `f497786`.
+
+## Item 1 — a pick during the hold must cancel the release show
+
+> "when holding bank > select a bank trig > select a pattern trig > release bank, the
+> 'select bank' toast with countdown appears. I don't want this — selecting a pattern
+> should disable the on-release bank behavior."
+
+**Root cause: we inverted stock's own test order.** Stock's `[BANK]` release
+(`0x4007b3e0`) opens with `cmpl 0x460e73c6,#2 ; beq -> DISMISS` *before* it looks at
+`BANK_COMMIT`. Session 86's release handler tested `BANK_COMMIT` first, so it never
+reached the question "was something already picked?".
+
+`0x460e73c6` (`BANK_SEL`) is that gesture's progress counter, measured at the
+`[BANK]`-overlay trig handler `0x4007b2fc`:
+
+| value | meaning | set at |
+|---|---|---|
+| 0 | nothing picked yet | the show tail `0x4007af30` clears it on every press |
+| 1 | a BANK was picked | `0x4007b276`, with `BANK_COMMIT=1` at `0x4007b33c` and a "SELECT PATTERN IN BANK x" window of its own (`SHOW_WIN` at `0x4007b2b0`, onClose `0x4007b408`) |
+| 2 | a PATTERN was picked | `0x4007b3d2`, end of the pattern branch |
+
+`BANK_SEL == 2` cannot be reached without passing through 1 (`0x4007b304` gates the
+pattern branch on `BANK_SEL != 0`), so a pick always means a window is up.
+
+**The fix is one test, and both non-zero values then want stock's own tail:**
+
+* `2` → our displaced compare succeeds, `BANK_REL_RES`'s `beq` takes DISMISS
+  (`0x40056a70`), which closes the pick's window and runs *its* onClose `0x4007b408` —
+  the same teardown, so the overlay pops exactly once.
+* `1` → falls past the compare to stock's `BANK_COMMIT` test, which sets the sticky flag
+  and keeps the overlay live so a pattern can still be picked after release. Stock's
+  untimed window, unchanged.
+
+This also closes an **un-reported** half: releasing after picking only a bank would have
+drawn SELECT BANK over "SELECT PATTERN IN BANK x".
+
+Layer arithmetic is undisturbed: our silent press pushes `0x400cff14` once, the trig
+handler pushes it again (`LAYER_PUSH` is idempotent — stock itself double-pushes here),
+and one teardown pops. Same for `BANK_UI_A` / `0x4007e81c`.
+
+## Item 2 — the reload was aimed with a MISMATCHED (bank, pattern) pair
+
+> "parts always reload well. However, the sequence data does not always reload reliably.
+> Most of the time it does. Occasionally the toast will show 'reloaded', but the sequence
+> is not actually restored."
+
+**There are two "current bank" variables and we used the wrong one.** The worker took the
+PATTERN from `ACT_PAT` (`0x800065be`) but the BANK from `CUR_BANK` (`0x80000002`), in four
+places: the `.strd` filename (`rl_openstrd`), the cold-blob slab pointer (`rlj_ours`), the
+Part apply (`rlj_faithful`) and `LIVE_REFRESH` (`rlj_setflag`).
+
+`ACT_PAT`'s actual partner is `0x800065bd`. **All three of its writers set it in the same
+breath as `ACT_PAT`:**
+
+```
+0x400a05f6   the direct goto        65bd=bank, 65be=pattern, + the queued mirrors
+0x400a40aa   the boundary latch     gated on BOTH queued values being != -1
+0x400a44dc   the second latch site  identically gated
+```
+
+So `(0x800065bd, 0x800065be)` always describes **one** pattern — the one being played —
+and both move only when the sequencer says so. `CUR_BANK` has no such pairing: it is
+written at `0x400622b8` (a UI path, alongside `LIVE_REFRESH` and the cached blob base
+`0x46c82456`) and at `0x40087d26` (clamped 0..15, project load). Neither writer is in the
+performance bank-change path (`0x4007b37c → 0x400a1030`).
+
+Pair them wrongly and the worker reads one bank's `.strd`, rewrites that bank's slab,
+refreshes that bank's live cache, sets `rl_own`, and our toast says RELOADED — while the
+sequencer keeps reading a slab nobody touched. **Intermittent exactly as reported:
+harmless while you stay in one bank, wrong right after you leave it.** The user's own
+report #14 item 1 shows they were performing bank+pattern picks in the same session.
+
+Fix: `PLAY_BANK = 0x800065bd` at all four targeting sites. `CUR_BANK` is left defined but
+unused, with the reasoning in a comment, so a future site cannot reach for it by habit.
+
+`tools/diag_reload3_whichbank.py` measures it: it drives a real performance bank change
+through the per-key dispatcher (not by poking memory), reports whether the two variables
+diverge, and then asserts the decisive thing — that the worker writes the slab the
+sequencer reads, and no other.
+
+## A latent hazard found on the way, NOT yet fixed
+
+`SCRATCH` (`0x460aff60`) is `OPEN_BUF + 0x7000`, and `OPEN_BUF` (`0x460a8f60`) is a
+**stock** buffer. All 14 stock users of it pass size `0x10000` (e.g. `0x4008fbde`,
+`0x400916d4`), so our 0x8ed8-byte pattern scratch sits 28 KB **inside** stock's own 64 KB
+read window. Our source asserts it is "idle while we hold the task"; that is an
+assumption, not a measurement, and this session did not settle it — the diag reports which
+PCs write there during the job but cannot prove absence under real card contention. Worth
+resolving before the next feature leans on that region.
+

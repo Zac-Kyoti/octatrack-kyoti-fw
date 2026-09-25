@@ -111,31 +111,40 @@ import emu_card as ec            # noqa: E402
 # all -- if something DOES rely on finding a true boundary, this will surface as a HANG
 # again, in which case the real fix is RE'ing the actual installed size, not memory-map
 # guesswork).
-_SDRAM_LO, _SDRAM_HI = 0x48000000, 0x50000000   # generous outer bound for the fault hook;
-                                                # pages are mapped lazily, only on actual
-                                                # access, never speculatively
-_PAGE = 0x10000                                 # 64 KB granule
-_orig_attach = er.attach
-
-
-def _sdram_fault(uc, access, address, size, value, user_data):
-    if not (_SDRAM_LO <= address < _SDRAM_HI):
-        return False                            # not ours -- a real bug, let it fault
-    base = address & ~(_PAGE - 1)
-    try:
-        uc.mem_map(base, _PAGE)
-    except Exception:
-        pass                                    # already mapped by a racing callback
-    return True                                 # retry the faulting instruction
-
-
-def _attach_with_sdram(*a, **kw):
-    r, rt = _orig_attach(*a, **kw)
-    rt.uc.hook_add(er.eb.UC_HOOK_MEM_UNMAPPED, _sdram_fault)
-    return r, rt
-
-
-er.attach = _attach_with_sdram
+# ** Session 92: THIS WORKAROUND IS RETIRED -- octabam owns it now. **
+# The lazy pager that used to live here (0x48000000..0x50000000, 64 KB granule, hung on
+# er.attach) is GONE, deliberately. refs/octabam commit d5b84fb (branch
+# emu/map-audio-sdram, 2026-09-25 03:33) added the same mechanism to the shared base
+# module itself -- tools/emu/emu_rtos.py:754, inside Rtos's own on_unmapped, window
+# 0x49000000..0x50000000 at a 4 KB granule -- with an A/B test showing the pre-fix
+# emu_rtos.py cannot boot our images at all (UC_ERR_WRITE_UNMAPPED inside gate_m6a).
+# That makes upstream's the source of truth, and ours redundant.
+#
+# ** Keeping BOTH was not merely redundant, it HUNG. ** Two pagers, overlapping ranges,
+# mismatched granules, and ours installed SECOND (after _orig_attach returned, so
+# octabam's is registered first and wins each fault):
+#   * octabam maps a 4 KB page, e.g. [0x49003000, +0x1000) for a fault at 0x49003xxx.
+#   * a later fault at 0x49005000 reaching ours 64 KB-aligns to 0x49000000 and calls
+#     mem_map(0x49000000, 0x10000) -- which OVERLAPS that 4 KB page, so Unicorn raises
+#     UcError.
+#   * the old code swallowed it (`except Exception: pass`) and returned True anyway,
+#     telling Unicorn "handled, retry" while 0x49005000 was still unmapped. The
+#     instruction re-faults on the same gap, forever.
+# Signature: 100% CPU, no forward progress, and NO RSS growth -- which is how it differs
+# from the earlier flat-96 MB pre-map hang, where RSS climbed. Two runs of
+# diag_reload3_whichbank.py died this way and had to be killed by hand; a third,
+# instrumented run logged ZERO faults in our own hook (octabam's had already taken them)
+# and completed cleanly, which is what gave the mechanism away.
+#
+# Also note the range: ours started 16 MB lower (0x48000000) than octabam's, covering
+# nothing any RE in this repo has shown to be touched -- the two real accesses are the
+# boot zero-fill at 0x4f502c10 and the mount DMA at 0x4ece3000, both inside octabam's
+# window. That extra span was pure liability: it silently auto-mapped stray accesses that
+# SHOULD fault loudly, which is exactly what octabam's own comment says it wants to keep.
+#
+# If a future access below 0x49000000 genuinely needs backing, widen the window in
+# octabam's emu_rtos.py where the one implementation lives -- do not re-add a second
+# pager here.
 
 # --- blob geometry (NOTES.md "Session 42" RE) --------------------------------
 BANK_BLOB = er.BANK_BLOB               # 0x400e21e0
