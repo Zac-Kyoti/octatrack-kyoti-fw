@@ -813,6 +813,71 @@ release → opens SELECT PATTERN (`FUN_40059f8c(0x400b484e, 0xf0, 1, 0x40043418)
 | `0x80000000` | C | current audio track (byte; UI mirror `0x100b14cc`). `0x80000012 != 0` = MIDI mode (page resolution adds +8). FUNC is **not** a plain keymap record — its held-flag was not located (Session 21). |
 | `_DAT_460e5cd0` | C | `!= 0` ⇒ a `FUN_4006d57c` dialog is open (that ctor bails on it at entry). Gate a new global combo on `== 0`. |
 
+### `[PTN]` vs `[BANK]` — why one *looks* like it fires on release (new 2026-09-25)
+
+> source: our own disassembly of the keymap records and all four handlers. The PTN state
+> machine and its `0x460d1742` encoding are **octamax's** (`refs/octamax/NOTES.md` L1333-1336:
+> "0 normal, 1 key held, 2 SELECT window open"); the BANK-side state triple and the
+> isomorphism below are new here. confidence: **C**.
+
+**The premise "PTN executes on release, BANK executes on press" does not survive the
+disassembly — both act on both edges.** The keymap records differ only in *shape*:
+
+| key | code | press | release | hold | flags |
+|---|---|---|---|---|---|
+| PTN | `0x2e` | `0x4005a044` | `0x4005a044` | `0x4005a044` | `0x001e` |
+| BANK | `0x2f` | `0x4007af80` | `0x4007b3e0` | `0x4007af24` | `0x001e` |
+
+PTN registers **one** handler for all three events and branches on `event` (`sp@(8)`:
+1 press / 0 release / 2 hold); BANK registers **three**. Same flags word, so hold/repeat
+config is identical — the difference is entirely in the handlers.
+
+**They are near-isomorphic state machines:**
+
+| role | PTN | BANK |
+|---|---|---|
+| state (0 normal / 1 held / 2 SELECT window open) | `0x460d1742` | `0x460e73c6` |
+| "tap eligible" — armed on press, re-armed on hold | `0x460d1ab2` (`0x4005a05c`, hold `0x4005a0d4`) | `0x460e73c2` (`0x4007af8c`, hold `0x4007af26`) |
+| "consumed / latched" | `0x460d173e` | `0x460e73bc` |
+| **press** | arm tap-eligible, **clear consumed**, enter the pattern view (`0x4004346c`) | clear state, arm tap-eligible, **open the SELECT window and push an input-map layer** |
+| **hold** | tap-eligible := 1 | tap-eligible := 1 |
+| **release** | consumed **or** not-eligible → close (`0x40043418`); else **latch**: state := 2 + open the sticky window (`0x40059f8c`) | state == 2 **or** not-eligible → `0x40056a70`; else set the latch flag + `0x40031200` |
+
+Both call the **same window-open helper** `0x40059f8c(title, 0xf0, flag, onClose)` — PTN from
+its release path (title `0x400b484e`, onClose `0x40043418`), BANK from its press path (title
+`0x400b7302`, onClose `0x4007b408`) — and both reach `0x40056a70` on the dismiss path.
+
+**Why the release edge is load-bearing for both:** `0x460d173e` is set to `-1` by the
+**pattern-selection routine** (`0x40056b2c`, at `0x40056b44`) — i.e. by the act of actually
+picking a pattern while the key is down. So "was I used as a modifier, or merely tapped?"
+is **only knowable at release**. That decision is what the release handler exists for, in
+both keys. It cannot be moved to press.
+
+**The one real asymmetry, and the good reason for it:** BANK's press pushes an **input-map
+layer** (`0x40031494(0x400cff14)`, records at `0x400cff34`) and its `onClose` callback
+`0x4007b408` pops it (`0x4003146c` at `0x4007b40e`). PTN does not use a layer at all. BANK
+*must* grab the keys on the press edge, because the whole point is that the trig keys mean
+something different while BANK is held — octalab's "**`[BANK]` ignores held trigs**" is that
+layer suppressing whatever the trig keys meant before (grid recording, a held trig). A layer
+pushed at release would be pushed after the chord it exists to interpret.
+
+**So the perception is a side-effect asymmetry, not a timing one:** BANK's press-edge work is
+externally visible (a screen appears, the keys change meaning), while PTN's press-edge work is
+internal bookkeeping and its visible commitment (the latched SELECT window) lands on release.
+In **neither** key does the key itself select anything — the subsequent trig press does.
+
+⚠️ **Consequence for moving work to the BANK release edge** (what RELOAD3 does): safe in
+principle, because stock already runs a real decision there. The hazard is **not** timing, it
+is the layer lifecycle — the pop lives in the `onClose` callback, **not** in the release
+handler, so any path that bypasses `0x4007b408` strands the layer on the dispatch table. That
+is exactly octalab's documented stuck-trig failure mode (a left-behind map swallowing the
+trig release leaves `0x460d174a` set, the trig held for good). `tools/patch_reload3.s`
+already tracks this ("exactly once, or the `[BANK]` overlay strands on the dispatch table
+forever"). Its header line "`[BANK]` release `0x4007b3e0` pops it (`0x4003146c` @
+`0x4007b40e`)" is loose — `0x4007b40e` is inside the `onClose` callback `0x4007b408`, not in
+the release handler; the same file's later note ("`[BANK]` RELEASE pops NOTHING — zero
+teardown calls, layer still live") is the accurate one.
+
 ### Input maps — screens own keys and knobs in LAYERS (new 2026-09-24)
 
 > source: `refs/octalab/docs/FINDINGS.md` + `INPUT.md` @ `e0dc56d` · fetched
