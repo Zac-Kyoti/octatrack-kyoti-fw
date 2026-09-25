@@ -77,6 +77,66 @@ import toolpath                  # noqa: E402
 import emu_rtos as er            # noqa: E402
 import emu_card as ec            # noqa: E402
 
+# ================= Session 90: the external audio-sample SDRAM bank =================
+# refs/octabam was synced upstream mid-session (git checkout to origin/main, timestamped
+# alongside the EMAC-decode patch that added _emac_macload_selftest -- see
+# scripts/build_unicorn.sh). Rebuilding the patched Unicorn to pass that new self-test
+# (a real fix: MAC-with-load's Rx-from-extension-word / dual / MASK decode) changed EMAC
+# results during boot, which changed a branch, which now takes a code path that WAS
+# there all along but the old, buggy EMAC's wrong arithmetic apparently steered around:
+# stock's own boot-time zero-fill of what is almost certainly the external audio-sample
+# SDRAM bank (`lea 0x4f502c10,%a0` then a `moveml d1-d4,%a0@` loop, 0xac480 iterations),
+# and later project MOUNT writing sample data through a real RTOS pointer
+# (0x46c8c594) into the same bank at 0x4ece3000 -- both inside a span nothing in this
+# repo's memory map had ever needed before.
+#
+# ** First attempt PRE-MAPPED a flat 96 MB block (0x4a000000..0x50000000) up front, and
+# that HUNG -- a chord test that normally finishes in under a minute was still running
+# 20+ minutes later with climbing RSS. Root cause, inferred rather than pre-empted: a
+# flat "always succeeds" mapping is exactly the wrong shape if any code here does
+# RAM-size AUTODETECTION by probing writability at increasing addresses until one
+# doesn't land (real ColdFire memory controllers alias past the true installed size
+# rather than faulting) -- a flat map has no such boundary, so a probe like that would
+# never terminate, or would believe far more RAM exists than the size any later loop
+# bound expects. Mapping "just enough, eagerly" cannot rule that out without knowing the
+# true installed size, which is not something this thread has RE'd. **
+#
+# Mapping ON DEMAND, one page at a time, sidesteps the question entirely: nothing here
+# claims to know the bank's real size or aliasing behaviour, so nothing here can
+# accidentally feed a size-detection loop a wrong answer. Whatever code touches this
+# bank gets real, zero-initialised backing memory for exactly the pages it asks for --
+# neither more (no speculative capacity to misdetect) nor a step-function like a huge
+# pre-map (no reason to expect that shape interacts differently with detection logic
+# than real hardware's own aliasing does, since nothing here exercises size detection at
+# all -- if something DOES rely on finding a true boundary, this will surface as a HANG
+# again, in which case the real fix is RE'ing the actual installed size, not memory-map
+# guesswork).
+_SDRAM_LO, _SDRAM_HI = 0x48000000, 0x50000000   # generous outer bound for the fault hook;
+                                                # pages are mapped lazily, only on actual
+                                                # access, never speculatively
+_PAGE = 0x10000                                 # 64 KB granule
+_orig_attach = er.attach
+
+
+def _sdram_fault(uc, access, address, size, value, user_data):
+    if not (_SDRAM_LO <= address < _SDRAM_HI):
+        return False                            # not ours -- a real bug, let it fault
+    base = address & ~(_PAGE - 1)
+    try:
+        uc.mem_map(base, _PAGE)
+    except Exception:
+        pass                                    # already mapped by a racing callback
+    return True                                 # retry the faulting instruction
+
+
+def _attach_with_sdram(*a, **kw):
+    r, rt = _orig_attach(*a, **kw)
+    rt.uc.hook_add(er.eb.UC_HOOK_MEM_UNMAPPED, _sdram_fault)
+    return r, rt
+
+
+er.attach = _attach_with_sdram
+
 # --- blob geometry (NOTES.md "Session 42" RE) --------------------------------
 BANK_BLOB = er.BANK_BLOB               # 0x400e21e0
 BANK_STRIDE = er.BANK_STRIDE           # 0x9b340

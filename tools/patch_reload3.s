@@ -213,6 +213,13 @@
     .equ BANK_PRESS_RES, 0x4007af48     | resume AFTER the 2 displaced insns -- stock's
                                         | own SELECT BANK window show is left intact
     .equ BANK_TEARDOWN,  0x4007b408     | window onClose -> pops the overlay layer
+|   Session 91: the SHOW_WIN popup slot and the onClose pointer stock's own dismiss
+|   follows. MEASURED writers: 0x460d1e5c is written ONLY at 0x40059fe4 and 0x460d1e60
+|   ONLY at 0x4005a006 -- both inside SHOW_WIN. So stock's dismiss (0x40056a70) runs an
+|   onClose only if a window was actually SHOWN through SHOW_WIN; it bails at 0x40056a76
+|   otherwise. This is what the POPUP guard below used to get wrong.
+    .equ WIN_SLOT,       0x460d1e5c     | the SHOW_WIN popup handle
+    .equ WIN_ONCLOSE,    0x460d1e60     | the onClose 0x40056a70 jumps to, if any
     .equ BANK_TEXT,      0x400b7302     | "SELECT BANK"
     .equ BANK_SEL,       0x460e73c6     | trig handler sets it -> its own "bank N" toast is up
     .equ SHOW_WIN,       0x40059f8c     | FUN_40059f8c(text, dur, flag, onClose)
@@ -316,6 +323,18 @@
     .equ MIDI_BASE,  0x48d0             | MIDI region base (= 8 * 0x91a)
     .equ TRAC_M,     0x8b0              | MIDI track stride (MIDI track t at slab + 0x48d0 + t*0x8b0)
     .equ PAT_PART,   0x8e57             | pattern->Part link, 1 byte [0..3]
+|   Session 89 -- the pattern-level scale trailer. Offsets CONFIRMED against stock's own
+|   load-time clamp FUN_4009a670: +0x8e53 is clamped to 2..64 (a STEP COUNT, 0x4009aada)
+|   and +0x8e54 to 0..6 (a SCALE INDEX, 0x4009ab06); +0x8e55 is the scale-MODE flag the
+|   step engine tests at 0x400a2720 to decide whether per-track scale applies.
+    .equ PAT_LEN,    0x8e53             | pattern LENGTH in steps (governs in NORMAL mode)
+    .equ PAT_SCALE,  0x8e54             | pattern SCALE index    (governs in NORMAL mode)
+    .equ PAT_SMODE,  0x8e55             | 0 = NORMAL, != 0 = PER TRACK
+|   The LIVE master-scale cache. ** Not refreshed per wrap. ** Stock writes it only from
+|   transport start/stop (0x4009beec/0x4009bf54), the whole-bank re-home
+|   (0x400a272e/0x400a2764) and the pattern-switch commit tail (0x400a4220). In NORMAL
+|   mode it is sourced from +0x8e54, in PER TRACK mode from the MASTER scale +0x8e52.
+    .equ SCALE_IX,   0x8000663d         | live MASTER scale index (byte)
 
     .equ N_ITEMS,     3
 
@@ -406,56 +425,43 @@
 |   difference now is that the previous attempt carried the picker, its own keymap
 |   layer and a poked YES slot; this build pokes no layer record at all, so the only
 |   moving part left is the show itself. Still the riskiest item in this build. **
-|   ---- Session 88: our own titled, centered, SELF-DISMISSING card ----
-|   Hardware report #10 asked for four things on the notification box: title
-|   "RELOAD FROM PROJ", the second line CENTRED, NO "OK" prompt to dismiss, and the
-|   same card style for the plain TRK SEQ message instead of the big block toast.
+|   ---- Session 89: a TALLER, MULTI-LINE version of stock's own BLOCK toast ----
+|   Report #11 reverted Session 88's card: "I want the toasts to NOT be in cards. I want
+|   them to be in the form of the previously used larger block toasts. But we need
+|   1) TRK SEQ + PART, RELOADED and 2) TRK SEQ RELOADED, SAVE PART FIRST! each on two
+|   lines (enlarge toast vertical size)."
 |
-|   MLNOTIFY (0x4006d57c) cannot do it and is dropped. Decoded, it is a BLOCKING
-|   dialog by construction:
-|     * it pushes keymap layer 0x400cdff8 (0x4006d722) -- that IS the "OK" prompt's
-|       input handler, so the box waits for a key by design
-|     * it has NO duration argument anywhere. (An earlier comment in this file claimed
-|       0x460e5e20 was "a 40-frame countdown". WRONG, and the hardware report is what
-|       exposed it: 0x460e5e20 is the box WIDTH accumulator -- seeded to 40 at
-|       0x4006d596, then max'd against each measured line width + 9 and clamped to 128.
-|       0x460e5e24 is the height, 7*nlines+27 clamped to [34,64].)
-|     * its body renderer 0x4006d128 draws every line with x hardcoded to 4
-|       (0x4006d170) -- that is exactly the left-justification the user is reporting.
+|   Decoded stock TOAST (FUN_4005a2b8) -- the block toast in question:
+|     width  = measured text width + 15          (0x4005a2f2)
+|     height = 0x12                              (0x4005a2ee)
+|     style  = 0xa   <- the BLOCK look. 4 is the card look Session 88 used.
+|     slot     0x460d1e70, its OWN, separate from SHOW_WIN's 0x460d1e5c
+|     countdown 0x460d1e6c = dur                 (0x4005a328)
+|     dismiss  0x40056bec                        (also its onClose)
+|     one line, centred at y = height-11, drawn by FUN_40057008
 |
-|   So build the card directly out of the same primitives MLNOTIFY uses, on the OTHER
-|   popup slot -- the one SHOW_WIN uses -- because that slot already owns stock's
-|   countdown and never pushes a keymap layer. Result: no OK prompt exists to press,
-|   the dismiss is stock's own timer, and every line is centred because we pass a
-|   computed x instead of 4. Width/height formulas, body font and line spacing are all
-|   copied from MLNOTIFY so the box keeps the proportions the user already approved.
-    .equ WIN_NEW,        0x4005829c     | (w,h,x,y,style,onClose) -> handle.
-                                        | style 4 = the CARD look MLNOTIFY uses;
-                                        | style 0xa = the block toast SHOW_WIN uses.
-    .equ WIN_TITLE,      0x40057c84     | (handle, text, flag) -- the title bar
-    .equ WIN_CLEAR,      0x400356a8     | (winptr) -- clear the interior
+|   Two measured properties of that slot matter, and both are why this is the safer
+|   mechanism of the two:
+|     * its tick (0x40056c28) reads the countdown DIRECTLY -- `tstl 0x460d1e6c ; beq
+|       rts` -- with NO enabling flag. The SHOW_WIN slot's tick is gated on CD_FLAG at
+|       0x40056abe, and clearing that by mistake is exactly what would have left Session
+|       88's card on screen forever. No such trap exists here.
+|     * the countdown DOTS come from 0x40037cc8, which reads the SHOW_WIN slot ONLY.
+|       Nothing on the toast path can reach it, so a block toast cannot show dots --
+|       which is what report #11 also asked for ("not have countdown dots anywhere").
+|   Stock has no multi-line block toast to borrow: the only other 0x4005a2b8-alike
+|   (0x4005a160) is a sprintf wrapper with the same 0x12 height and a single line.
+    .equ TOAST_SLOT,     0x460d1e70     | the toast's own window handle
+    .equ TOAST_CD,       0x460d1e6c     | its countdown; set it and it self-dismisses
+    .equ TOAST_DISMISS,  0x40056bec     | tears the toast down (also its onClose)
+    .equ TOAST_H1,       0x12           | stock's height for ONE line
+    .equ TOAST_STYLE,    0xa            | the BLOCK look (4 would be the card)
+    .equ FONT_TOAST,     0x400ba862     | the font stock measures AND draws the toast in
+    .equ WIN_NEW,        0x4005829c     | (w,h,x,y,style,onClose) -> handle
+    .equ WIN_DRAW1,      0x40057008     | (handle, text, top, font): clears the window
+                                        | and centres `text` at y = height-11
     .equ DRAWTEXT,       0x40012bd8     | (font, winptr, x, y, len, text)
     .equ TEXTW,          0x40012f30     | (font, maxlen, text) -> pixel width
-    .equ FONT_BODY,      0x400ba876     | the font MLNOTIFY measures AND draws with
-    .equ WIN_SLOT,       0x460d1e5c     | the countdown-owned popup handle
-    .equ WIN_ONCLOSE,    0x460d1e60     | called after the countdown dismisses it
-    .equ CD_CUR,         0x460d1e50     | ticks left in this segment
-    .equ CD_RELOAD,      0x460d1e58     | reload value for CD_CUR
-    .equ CD_SEGS,        0x460d1e54     | segments left == number of countdown dots.
-                                        | We set it to 1: one segment, therefore no
-                                        | dots, and the expiry dismisses directly.
-    .equ CD_FLAG,        0x460d1e4c     | tick gate: ZERO = countdown disabled
-    .equ CD_TICK,        0x40056ab8     | the gate + tick entry (NOT 0x40056ac0, which
-                                        | is past the gate -- hook the gate, not the body)
-    .equ WIN_DISMISS,    0x40056a70     | tears the slot down + calls WIN_ONCLOSE
-|   NOT called, on purpose -- this is the dot drawer. Kept documented so a future
-|   session does not "helpfully" add it back and reintroduce the countdown dots.
-    .equ WIN_REFRESH,    0x40037cc8     | draws the countdown dots (y 7..11)
-    .equ CARD_STYLE,     4
-    .equ CARD_DUR,       0x18           | ticks the card stays up (~0.5 s). Goes into
-                                        | CD_CUR whole, since CD_SEGS is 1. SELECT BANK
-                                        | uses 0xf0 across 4 segments for its
-                                        | several-second countdown -- same units.
     .equ BANK_LAYER,     0x400cff14     | the [BANK] overlay keymap layer struct
     .equ BANK_UI_A,      0x4007e760     | the two UI calls the press tail makes AFTER
     .equ BANK_UI_A_ARG,  0x400cff28     | LAYER_PUSH; BANK_WIN_CLOSE pairs them with
@@ -471,7 +477,16 @@
     .equ BANK_SHOW_TAIL, 0x4007af30     | stock's own show sequence, replayed on release
     .equ BANK_REL_RES,   0x4007b3e8     | release handler, past the 2 displaced insns
                                         | (lands on its own beq, so the cmp must stand)
-    .equ TOAST_DUR,      0x18           | stock's duration for this toast family
+|   Session 90, hardware report #13: "the toasts need to be visible a little longer.
+|   Whatever the next higher value used in stock OT is (still less than 1 second)."
+|   MEASURED across every stock FUN_4005a2b8 call site: 0x30 x87, 0x44 x3, 0x5a x2,
+|   0x60 x7, 0x78 x1. So 0x30 is not merely the next value up from our 0x18 -- it is
+|   stock's overwhelmingly standard toast duration. (0x18 was never a stock value at
+|   all; an earlier note in this file claimed it was "stock's duration for this
+|   family", which the measurement disproves.) At the UI tick rate 0x30 lands close to
+|   0.8 s, inside the "less than 1 second" the report asks for; the next stock step up,
+|   0x44, would be past it.
+    .equ TOAST_DUR,      0x30           | 48 ticks -- stock's standard toast duration
                                         | (0x4005e09c). RELOAD2 used 0x44; this is the
                                         | "OT standard" the spec asks for.
 
@@ -545,16 +560,14 @@ r3b_try_bank:
 |   back the spaces around the + that the 21-char single-line width budget had
 |   forced out -- each line is now well inside the box width.
     lea     rl3_lines_trkpart,%a0
-    moveq   #2,%d0
-    bsr.w   rl3_show
+    bsr.w   rl3_show2                  | "TRK SEQ + PART" / "RELOADED"
     bra.b   r3b_done
 r3b_unsaved:
 |   Never saved: the SEQUENCE still reloaded, so saying only "SAVE PART FIRST!"
 |   (stock's wording) would wrongly imply nothing happened. Two lines instead, so
 |   both facts are visible at once.
     lea     rl3_lines_unsaved,%a0
-    moveq   #2,%d0
-    bsr.w   rl3_show
+    bsr.w   rl3_show2                  | "TRK SEQ RELOADED" / "SAVE PART FIRST!"
 r3b_done:
 |   Belt and braces for the release. rl3_bank_used above is what actually swallows it;
 |   clearing BANK_COMMIT means that even if that flag were somehow missed, the release
@@ -579,76 +592,75 @@ rl3_do_ptn:
 |   Session 88 item 4: this used to be the big block TOAST (FUN_4005a2b8). It is now
 |   the same card as the [BANK] message, at the user's request, so both reload
 |   messages look alike.
-    lea     rl3_lines_trk,%a0
-    moveq   #2,%d0
-    bra.w   rl3_show                   | tail-call: its rts returns to our caller
+    lea     rl3_msg_trk,%a0
+    bra.w   rl3_toast                  | tail-call: its rts returns to our caller
 
-| ---- rl3_card(title, nlines, lines[]) -- titled, centred, self-dismissing ----
-| Replaces BOTH the old rl3_toast (the block toast) and MLNOTIFY (the OK dialog), so
-| every RELOAD message is now the same card. No keymap layer is pushed anywhere in
-| here, which is precisely why there is no "OK" to answer.
-rl3_card:
+| ---- rl3_toast(text) -- stock's own single-line BLOCK toast, unchanged ----
+| Report #11 reverted the card: "I want them to be in the form of the previously used
+| larger block toasts." For a one-line message that is literally stock's own call, so
+| use it directly rather than reimplementing it.
+rl3_toast:
+    pea     TOAST_DUR
+    move.l  %a0,-(%sp)
+    jsr     TOAST                      | FUN_4005a2b8(text, dur)
+    addq.l  #8,%sp
+    rts
+
+| ---- rl3_toast2(lines[], nlines) -- the SAME block toast, but taller, multi-line ----
+| Stock has no multi-line block toast (checked: the only other 0x4005a2b8-alike at
+| 0x4005a160 is a sprintf wrapper with the same 0x12 height and one line), so this
+| rebuilds it from the parts stock's own toast uses, changing only the height and the
+| number of centred lines:
+|
+|   stock TOAST  : WIN_NEW(textw+15, 0x12,            0,0, 0xa, TOAST_DISMISS)
+|   rl3_toast2   : WIN_NEW(maxw+15,  0x12 + 7*(n-1),  0,0, 0xa, TOAST_DISMISS)
+|
+| Same style (0xa = the block look), same font, same margin, same slot (0x460d1e70),
+| same dismiss, same countdown. The LAST line is drawn by stock's own WIN_DRAW1, which
+| clears the window and centres the text at y = height-11 -- i.e. exactly where a
+| one-line toast puts it -- and earlier lines are stacked 7 px above with the same
+| centring maths. So a 1-line call is indistinguishable from stock, and a 2-line call
+| is stock's toast grown upward by one row.
+| No OK prompt (no keymap layer is pushed) and no countdown dots (those belong to the
+| SHOW_WIN slot's 0x40037cc8, which is never involved here).
+rl3_toast2:
     lea     -40(%sp),%sp
-    movem.l %d2-%d7/%a2-%a5,(%sp)      | 40 B saved; ret at 40(sp), args at 44/48/52
-    move.l  44(%sp),%a5                | a5 = title (0 = no title bar)
+    movem.l %d2-%d7/%a2-%a5,(%sp)      | 40 B saved; ret at 40(sp), args at 44/48
+    move.l  44(%sp),%a4                | a4 = lines[]
     move.l  48(%sp),%d7                | d7 = nlines
-    move.l  52(%sp),%a4                | a4 = lines[]
-|   Something already in this slot would be leaked, so dismiss it first -- exactly
-|   what SHOW_WIN does at its own head (0x40059fa4).
-    tst.l   WIN_SLOT
-    beq.b   rc_noprev
-    jsr     WIN_DISMISS
-rc_noprev:
-|   --- width: MLNOTIFY's formula. max(40, each measured width + 9), capped at 128 ---
-    moveq   #40,%d6
-    move.l  %a5,%d0
-    beq.b   rc_wlines
-    move.l  %a5,%a0
-    bsr.w   rc_measure
-    addq.l  #4,%d0                     | title sits in a bar; a little more slack
-    addq.l  #5,%d0
-    cmp.l   %d6,%d0
-    ble.b   rc_wlines
-    move.l  %d0,%d6
-rc_wlines:
+|   Replace a toast already on screen, exactly as stock TOAST does at 0x4005a2c4.
+    tst.l   TOAST_SLOT
+    beq.b   rt2_noprev
+    jsr     TOAST_DISMISS
+rt2_noprev:
+|   --- width = widest line + 15 (stock's own margin, 0x4005a2f2) ---
+    moveq   #0,%d6
     moveq   #0,%d5
-rc_wloop:
+rt2_wloop:
     cmp.l   %d7,%d5
-    bge.b   rc_wdone
+    bge.b   rt2_wdone
     move.l  %d5,%d0
     lsl.l   #2,%d0
     move.l  (%a4,%d0.l),%a0
-    bsr.w   rc_measure
-    addq.l  #4,%d0
-    addq.l  #5,%d0                     | +9 total, as MLNOTIFY does
+    bsr.w   rt2_measure
     cmp.l   %d6,%d0
-    ble.b   rc_wnext
+    ble.b   rt2_wnext
     move.l  %d0,%d6
-rc_wnext:
+rt2_wnext:
     addq.l  #1,%d5
-    bra.b   rc_wloop
-rc_wdone:
-    cmpi.l  #128,%d6
-    ble.b   rc_wok
-    move.l  #128,%d6
-rc_wok:
-|   --- height: 7*nlines + 27, clamped [34,64] -- MLNOTIFY's formula ---
+    bra.b   rt2_wloop
+rt2_wdone:
+    addi.l  #15,%d6
+|   --- height = 0x12 + 7*(n-1): stock's height, one extra row per extra line ---
     move.l  %d7,%d0
+    subq.l  #1,%d0
+    move.l  %d0,%d1
     lsl.l   #3,%d0
-    sub.l   %d7,%d0
-    addi.l  #27,%d0
-    cmpi.l  #34,%d0
-    bge.b   rc_h1
-    moveq   #34,%d0
-rc_h1:
-    cmpi.l  #64,%d0
-    ble.b   rc_h2
-    moveq   #64,%d0
-rc_h2:
+    sub.l   %d1,%d0                    | 7*(n-1)
+    addi.l  #TOAST_H1,%d0
     move.l  %d0,%d4                    | d4 = height
-|   --- create the window: style 4 = card, onClose = stock's own dismiss ---
-    pea     WIN_DISMISS
-    pea     CARD_STYLE
+    pea     TOAST_DISMISS
+    pea     TOAST_STYLE
     clr.l   -(%sp)
     clr.l   -(%sp)
     move.l  %d4,-(%sp)
@@ -656,101 +668,90 @@ rc_h2:
     jsr     WIN_NEW
     lea     24(%sp),%sp
     tst.l   %d0
-    beq.w   rc_out                     | no window slot free -- say nothing, don't fault
-    move.l  %d0,WIN_SLOT
-    move.l  %d0,%a3
-    move.l  %a3,%d3
-    addi.l  #36,%d3                    | d3 = winptr (handle+36), as MLNOTIFY uses
-    move.l  %d3,-(%sp)
-    jsr     WIN_CLEAR
-    addq.l  #4,%sp
-    move.l  %a5,%d0
-    beq.b   rc_notitle
+    beq.w   rt2_out                    | no slot free -- say nothing rather than fault
+    move.l  %d0,TOAST_SLOT
+    move.l  %d0,%a3                    | a3 = handle
+|   --- line 0 through stock's own path: clears the box and centres it at y = h-11 ---
+|   ** Line ORDER. y counts UP from the bottom, so line 0 must take the HIGHEST y. **
+|   That is settled by stock's own three-line message, whose reading order is fixed --
+|   "THIS BANK HAS NEVER" / "BEEN SAVED!" / "NOTHING TO RELOAD!" (0x40023c20): MLNOTIFY
+|   draws line i at H-17-7i, so line 0 has the greatest y and is the top line. An
+|   earlier version of this routine drew line 0 LAST, at the lowest y, which would have
+|   printed "RELOADED" above "TRK SEQ + PART".
+|   So line 0 goes at h-11 -- exactly where a one-line toast puts its text -- and each
+|   later line sits 7 px lower. For n=1 that is stock's geometry unchanged.
+    pea     FONT_TOAST
     clr.l   -(%sp)
-    move.l  %a5,-(%sp)
+    move.l  (%a4),-(%sp)               | lines[0]
     move.l  %a3,-(%sp)
-    jsr     WIN_TITLE                  | the title bar, y = height-10
-    lea     12(%sp),%sp
-rc_notitle:
-|   --- the body lines, each CENTRED. y counts UP from the bottom, so line 0 (the
-|   --- highest y) lands on top, matching MLNOTIFY's own ordering.
-    move.l  %d4,%d5
-    subi.l  #17,%d5                    | y = height-17, then -7 per line
-    moveq   #0,%d2
-rc_dloop:
+    jsr     WIN_DRAW1                  | FUN_40057008(handle, text, 0, font)
+    lea     16(%sp),%sp
+|   --- lines 1..n-1, each 7 px lower, same centring maths ---
+    move.l  %a3,%d3
+    addi.l  #36,%d3                    | d3 = winptr, as stock passes to DRAWTEXT
+    moveq   #1,%d2
+rt2_dloop:
     cmp.l   %d7,%d2
-    bge.b   rc_ddone
+    bge.w   rt2_done                   | n==1 -> nothing extra to draw
     move.l  %d2,%d0
     lsl.l   #2,%d0
-    move.l  (%a4,%d0.l),%a2            | a2 = lines[i]
+    move.l  (%a4,%d0.l),%a2
     move.l  %a2,%a0
-    bsr.w   rc_measure                 | d0 = raw pixel width
+    bsr.w   rt2_measure
     move.l  %d6,%d1
     sub.l   %d0,%d1
-    bpl.b   rc_xok
-    moveq   #0,%d1                     | wider than the box -- clamp to the left edge
-rc_xok:
-    asr.l   #1,%d1                     | x = (boxwidth - textwidth) / 2
+    bpl.b   rt2_xok
+    moveq   #0,%d1                     | wider than the box -- clamp left
+rt2_xok:
+    asr.l   #1,%d1                     | x = (boxwidth - textwidth)/2  -> centred
+    move.l  %d2,%d0
+    move.l  %d0,%d5
+    lsl.l   #3,%d0
+    sub.l   %d5,%d0                    | 7*i
+    move.l  %d4,%d5
+    subi.l  #11,%d5
+    sub.l   %d0,%d5                    | y = height-11 - 7*i  (line 0 highest, so on top)
     move.l  %a2,-(%sp)
     move.l  #-1,-(%sp)
     move.l  %d5,-(%sp)
     move.l  %d1,-(%sp)
     move.l  %d3,-(%sp)
-    pea     FONT_BODY
-    jsr     DRAWTEXT
+    pea     FONT_TOAST
+    jsr     DRAWTEXT                   | FUN_40012bd8(font, winptr, x, y, len, text)
     lea     24(%sp),%sp
     addq.l  #1,%d2
-    subi.l  #7,%d5
-    bra.b   rc_dloop
-rc_ddone:
-|   --- arm stock's countdown: it is what dismisses the card, with no key involved ---
-|   ** ONE SEGMENT, and WIN_REFRESH is deliberately NOT called. ** That is what keeps
-|   the countdown DOTS off the card -- hardware report #10: "I'd rather not have
-|   countdown dots anywhere. These are instantly executed functions." A progress
-|   indicator would imply something is still pending, which is wrong here.
-|   MEASURED: 0x40037cc8 is the only thing that draws those dots, and it has exactly
-|   two callers -- SHOW_WIN's tail (0x4005a034, which we do not use) and the tick at
-|   0x40056aea. The tick only reaches it when CD_SEGS is STILL non-zero after being
-|   decremented (0x40056ae2 bne). With CD_SEGS = 1 the single segment expires straight
-|   into the dismiss at 0x40056ae4 instead, so the dot routine is never entered at all.
-|   CD_CUR therefore carries the whole duration rather than a quarter of it.
-    clr.l   WIN_ONCLOSE
-    move.l  #CARD_DUR,%d0
-    move.l  %d0,CD_RELOAD
-    move.l  %d0,CD_CUR
+    bra.w   rt2_dloop
+rt2_done:
     moveq   #1,%d0
-    move.l  %d0,CD_SEGS                | exactly one segment -> no dots, just a dismiss
-|   ** CD_FLAG MUST BE NON-ZERO or the countdown never runs at all. ** The tick is
-|   gated on it: 0x40056ab8 `tstl 0x460d1e4c` / 0x40056abe `beq -> rts`, and only then
-|   does the body at 0x40056ac0 decrement anything. An earlier version of this code
-|   CLEARED the flag, which would have left the card up forever on hardware -- i.e.
-|   exactly the stuck box the report asked us to get rid of. The emulator cannot catch
-|   this (its harness never drives the tick at all, stock SELECT BANK included, which
-|   is why diag_reload3_card.py gates that assertion on a stock control); static
-|   reading of the gate is what found it.
-    move.l  %d0,CD_FLAG                | 1 = countdown armed and running
-    move.l  %d0,RDRAW                  | d0 is still 1
-rc_out:
+    move.l  %d0,RDRAW
+    move.l  #TOAST_DUR,%d0
+    move.l  %d0,TOAST_CD               | stock's toast countdown. NO gate flag on this
+                                       | one (0x40056c28 tests it directly), and no
+                                       | dots -- unlike the SHOW_WIN slot's timer.
+rt2_out:
     movem.l (%sp),%d2-%d7/%a2-%a5
     lea     40(%sp),%sp
     rts
 
-| a0 = text -> d0 = pixel width. Clobbers d0/d1/a0/a1 only.
-rc_measure:
+| a0 = text -> d0 = raw pixel width. Clobbers d0/d1/a0/a1 only.
+rt2_measure:
     move.l  %a0,-(%sp)
     move.l  #-1,-(%sp)
-    pea     FONT_BODY
+    pea     FONT_TOAST
     jsr     TEXTW                      | FUN_40012f30(font, maxlen, text)
     lea     12(%sp),%sp
     rts
 
-| ---- rl3_show: a0 = lines[], d0 = nlines. Always titled "RELOAD FROM PROJ". ----
-rl3_show:
-    move.l  %a0,-(%sp)
-    move.l  %d0,-(%sp)
-    pea     rl3_title
-    jsr     rl3_card
-    lea     12(%sp),%sp
+| ---- rl3_show2: a0 = lines[], always 2 lines ----
+| ** Push order matters and got it wrong once. ** rl3_toast2's first argument is
+| lines[], so lines[] must be pushed LAST (it ends up at the lower address). Pushing
+| a0 first put the literal 2 in a4 and a pointer in the line COUNT, which faulted
+| immediately (UC_ERR_READ_UNMAPPED, caught by diag_reload3_toast.py).
+rl3_show2:
+    pea     2                          | nlines  (second arg -> higher address)
+    move.l  %a0,-(%sp)                 | lines[] (first arg  -> lower address)
+    jsr     rl3_toast2
+    addq.l  #8,%sp
     rts
 
 | ============ SELECT BANK: shown on RELEASE, not on PRESS ============
@@ -819,11 +820,34 @@ rl3_bank_rel:
 r3r_notours:
     tst.l   BANK_COMMIT
     bne.b   r3r_show
-|   Toggle-OFF tap: no window of ours to open. But the PRESS pushed the overlay, and
-|   with no window there is no onClose to pop it -- so pop it here unless a popup IS
-|   up, in which case stock's own dismiss below will run onClose and do it.
-    tst.l   POPUP
-    bne.b   r3r_stock
+|   ===== Session 91: this guard used to test the WRONG VARIABLE. =====
+|   Toggle-OFF tap: no window of ours to open, but the PRESS pushed the [BANK] trig
+|   overlay, so somebody has to pop it. The old code skipped its own teardown whenever
+|   POPUP (0x460e5cd0) was non-zero, "because stock's own dismiss will run onClose".
+|   Both halves of that were wrong:
+|     * POPUP is MLNOTIFY's OWN handle. It says nothing about whether stock's dismiss
+|       will run an onClose -- that depends on the SHOW_WIN slot, a different subsystem.
+|     * stock's dismiss (0x40056a70) bails immediately at 0x40056a76 when WIN_SLOT is
+|       zero, and WIN_SLOT/WIN_ONCLOSE are written ONLY inside SHOW_WIN (0x40059fe4 /
+|       0x4005a006). Our press deliberately shows no window, so in the case the guard
+|       was aimed at, nothing called the teardown at all and the overlay stranded --
+|       leaving the trig keys meaning "pick a bank" until something else rebuilt the
+|       keymap. That is octalab's documented failure mode.
+|   ** And it IS reachable, which I first argued it was not. ** The near-miss argument
+|   was "BANK_COMMIT==0 implies 0x460e73bc was set, which implies a window had been
+|   shown, so WIN_SLOT would be non-zero anyway". Wrong: 0x460e73bc has a writer at
+|   0x4007b2b6, in the bank-select/trig handler, with no SHOW_WIN involved -- so the
+|   sticky flag can be set with the slot empty. Measured, not reasoned.
+|
+|   So test what actually decides it: is a window in the slot, and is ITS onClose our
+|   teardown? Only then may we leave the job to stock and avoid a double teardown
+|   (0x4007e81c would otherwise run twice against one 0x4007e760).
+    move.l  WIN_SLOT,%d0
+    beq.b   r3r_pop                    | nothing in the slot -> nobody else will do it
+    move.l  #BANK_TEARDOWN,%d0
+    cmp.l   WIN_ONCLOSE,%d0
+    beq.b   r3r_stock                  | stock's dismiss will run OUR teardown -> let it
+r3r_pop:
     jsr     BANK_WIN_CLOSE             | the measured teardown: pops the layer and
     bra.b   r3r_stock                  | balances BANK_UI_A with 0x4007e81c
 r3r_show:
@@ -855,16 +879,8 @@ rl3_msg_trkpart_1:
 rl3_msg_trkpart_2:
     .asciz "RELOADED"
     .align 2
-|   Session 88 item 1: the card's title bar, was "RELOAD".
-rl3_title:
-    .asciz "RELOAD FROM PROJ"
-    .align 2
-rl3_msg_reloaded:
-    .asciz "RELOADED"
-    .align 2
-rl3_msg_trkonly:
-    .asciz "TRK SEQ"
-    .align 2
+|   Session 89: the card is gone, so its title bar string and the split
+|   "TRK SEQ"/"RELOADED" pair go with it -- that message is a one-line toast again.
 rl3_msg_empty:
     .asciz ""
     .align 2
@@ -879,11 +895,6 @@ rl3_lines_unsaved:
 rl3_lines_trkpart:
     .long   rl3_msg_trkpart_1          | "TRK SEQ + PART"
     .long   rl3_msg_trkpart_2          | "RELOADED"
-    .align 2
-|   Session 88 item 4: the plain TRK SEQ message, split to mirror the [BANK] card.
-rl3_lines_trk:
-    .long   rl3_msg_trkonly            | "TRK SEQ"
-    .long   rl3_msg_reloaded           | "RELOADED"
     .align 2
 
 | ---- rl_arm_trk: arm a TRK SEQ reload of the currently-addressed track ----
@@ -1053,13 +1064,44 @@ rlj_ours:
     move.l  %d0,rl_kind                | stash the kind across the FUN_4008cebc calls
     clr.b   G_KIND                     | consume now -- a re-entrant real RELOAD BANK
                                        | must NOT see it set
-|   Session 83: RESTORED (see the rl_done block for the full retry rationale).
-|   Claim the whole-bank reload that THIS job's doneFn is about to perform, so
-|   rl_done suppresses that one and only that one. One-shot, set only here, on
-|   the path that has already established the job is ours.
+|   ===== Session 90: rl_own is CLEARED here and SET only on success. =====
+|   Hardware report #13: "the sequence data does not always reload reliably... I also
+|   encountered an odd bug at one point: the sequence data was reloaded as empty, and
+|   from that point on, any reload action would not bring back the CF card-saved
+|   sequence. In fact, in that state, even the OT's stock 'Reload current bank' from the
+|   project menu, would not bring back the saved sequence data. Reloading the project
+|   did restore it."
+|
+|   That last sentence is the diagnosis. rl_own USED TO BE SET HERE -- before the file
+|   was even opened -- but stock's doneFn only reaches rl_done on its SUCCESS path
+|   (0x40023c0e `bge.s 0x40023c62`). So whenever our job failed (FOPEN, FREAD or
+|   PARSEPAT), the flag was never consumed and STAYED SET. The next type-0x14 job from
+|   ANY source then hit rl_done, saw the stale flag, and skipped the whole-bank reload --
+|   including the user's own stock RELOAD CURRENT BANK, which is exactly the reported
+|   "even stock reload won't bring it back". Reloading the PROJECT does not go through
+|   that doneFn at all, which is why only that recovered it. And because each new chord
+|   re-set the flag, the state persisted rather than costing just one reload.
+|
+|   ** CORRECTED, from a wrong first-draft claim in this comment and in
+|   diag_reload3_ownleak.py's own header: a failed job does NOT make stock's whole-bank
+|   reload run as a fallback. ** doneFn's branch at 0x40023c0e tests OUR job's own result
+|   code and reaches 0x40023c62 (the whole-bank reload) only when it is >= 0; on failure
+|   it shows a stock error toast instead (-12 -> "THIS BANK HAS NEVER BEEN SAVED!",
+|   else a generic one) and never falls through. That is correct on stock's part: the
+|   reload at 0x40023b68 would read the SAME bank file we just failed to read, so it
+|   could not have helped.
+|
+|   Clearing it here kills any stale flag; setting it only at rlj_setflag (after the copy
+|   has actually happened) means a failure now affects ONLY the reload it happened on --
+|   the user sees a normal stock error message and nothing changes, exactly as if this
+|   patch did not exist for that one attempt. What it no longer does is contaminate the
+|   NEXT job: before this fix, a single failure left rl_own stuck forever, silently
+|   disabling every reload after it -- including the user's own stock RELOAD CURRENT
+|   BANK -- until a project reload cleared it. That contamination is gone; a genuinely
+|   empty or unreliable copy on any GIVEN attempt is a separate, still-open question
+|   (see below).
     .ifdef RL_DONE
-    moveq   #1,%d0
-    move.b  %d0,rl_own
+    clr.b   rl_own
     .endif
     move.w  CKSUM,%d0
     move.w  %d0,rl_cksum
@@ -1193,8 +1235,62 @@ rlj_trk_copy:
     jsr     FWMEMCPY
     lea     12(%sp),%sp
 
+|   ===== Session 89: NORMAL scale mode needs the PATTERN length too =====
+|   Hardware report #12: "in NORMAL mode (not per track) reloads are not respecting the
+|   pattern length that was set in the CF-saved version (ie, if the CF-saved version is
+|   16 steps, and the user sets the active track to 12 steps and reloads, the track
+|   remains at 12 steps). Per Track mode does not have this problem."
+|
+|   The asymmetry names the cause exactly. A track's own length/scale live INSIDE its
+|   record, at +0x50 / +0x51 of the 0x91a slice just copied -- so in PER TRACK mode the
+|   reload restores them for free, which is why that mode was already correct. In NORMAL
+|   mode the step count is not a track field at all: it is the PATTERN's, at slab
+|   +0x8e53 (scale at +0x8e54), outside every track slice, so nothing restored it.
+|
+|   ** The scope consequence is inherent, not a shortcut: in NORMAL mode the length is a
+|   PATTERN-level property shared by all 8 tracks, so restoring it restores it for the
+|   whole pattern. There is no per-track length in that mode -- that is what NORMAL mode
+|   means -- so "this track's saved step count" and "the pattern's saved step count" are
+|   the same thing here. **
+|   The LIVE flag is consulted, because it is what governs playback right now.
+    move.l  %a4,%a0
+    add.l   #PAT_SMODE,%a0
+    tst.b   (%a0)
+    bne.b   rlj_trk_done               | PER TRACK -> already restored inside the slice
+    move.l  #SCRATCH,%a1
+    add.l   #PAT_LEN,%a1               | saved length, saved scale at +1
+    move.l  %a4,%a0
+    add.l   #PAT_LEN,%a0
+    move.b  (%a1),%d0
+    move.b  %d0,(%a0)                  | pattern LENGTH (+0x8e53)
+    move.b  1(%a1),%d0
+    move.b  %d0,1(%a0)                 | pattern SCALE  (+0x8e54)
+|   ===== carried over from the DIRECT JUMP thread's own scars =====
+|   Restoring the blob byte is not enough for the SCALE: SCALE_IX (0x8000663d) is a LIVE
+|   cache that stock refreshes only on a transport cycle, the whole-bank re-home, or a
+|   pattern-switch commit -- and Session 86 deliberately stopped arming the re-home, so
+|   nothing here would have refreshed it. The restored rate would then not take effect
+|   until the user happened to stop/start or change pattern. This is exactly the class of
+|   bug DIRECT JUMP paid for twice (its Session 84 per-track SCALE cache gap, and its
+|   Session 79 cont.33 master-scale read); the per-TRACK cache is fine because stock does
+|   re-read that one on every wrap (0x400a3d08), but the MASTER one it does not.
+|
+|   ** Written ONLY when it actually differs. ** DIRECT JUMP measured that poking this
+|   mid-cycle re-phases the master for one step, and report #9 asked for reloads to leave
+|   time undisturbed -- so the common case (the user changed only the LENGTH, not the
+|   scale) must touch nothing at all. d0 still holds the saved scale here.
+    move.b  SCALE_IX,%d1
+    cmp.b   %d1,%d0
+    beq.b   rlj_trk_done
+    move.b  %d0,SCALE_IX               | the saved rate genuinely differs -> apply it
+rlj_trk_done:
+
 rlj_setflag:
     .ifdef RL_DONE
+|   Session 90: the copy has succeeded, so the whole-bank reload this job's doneFn is
+|   about to perform IS redundant -- claim it now, and only now.
+    moveq   #1,%d0
+    move.b  %d0,rl_own
 |   Session 83: RESTORED together with rl_done -- the two stand or fall together.
 |   Without the suppression, stock's own whole-bank reload refills the live cache;
 |   with it, nothing does, and the slice lands in the cold blob while playback
