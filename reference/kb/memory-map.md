@@ -243,6 +243,18 @@ never runs `FUN_40009094`". That is now **confirmed literally true** — and the
 is that stock has **three** part-apply routines, and the pattern-change path takes the
 lightest one.
 
+> **Prior art, to be fair about what is new here.** The three addresses were already
+> named upstream, and ems-octakit's naming even encodes the caller mapping:
+> `GK_STOCK_ENGINE_PART_LOAD` = `0x40009094`,
+> **`GK_STOCK_ENGINE_PATTERN_PART_LOAD` = `0x40009e00`**,
+> `GK_STOCK_ENGINE_SAVED_PART_RELOAD` = `0x40009848` (`refs/ems-octakit/runtime/abi.inc`
+> @ `c6d3f39`). octabam's `emu_rtos.py` separately describes `0x40009e00` as
+> "non-blocking (plain stores)", which is consistent with it being the light variant.
+> **What is new below is the enumerated behavioural delta** — which of the three
+> republishes tempo, re-arms the audio eDMA chain, re-unmasks INTC0 and posts a kernel
+> queue message — **and the causal link to the S49 bug family.** Neither appears
+> upstream; nor does anyone there treat the difference as a bug source.
+
 All three share a prologue: write the publish bytes `0x80001828` / `0x80001829`, clear
 the 0x100-byte block `0x46c7d6d4..0x46c7d7d4` in a 16-byte-stride loop, then index
 `param_snapshot_base` (`0x40170f60`) at **`part*0x18b2 (6322) + bank*0x9b340 (635712)`**.
