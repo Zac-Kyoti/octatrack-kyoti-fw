@@ -155,13 +155,14 @@ ems-octakit's `abi.inc` ~500-address map → `kb/octakit-abi.md`, the keymap/key
 ## 6. Current frontier — UPDATE THIS EACH SESSION
 
 **As of 2026-09-25, on `wip` (Session 99).** `main` is no longer meaningfully behind on
-finished work: RELOAD3 (final) and QLREC's stateless rewrite were promoted there on
-2026-09-25, and it already had PARTREAPPLY and the Bugbuild tooling.
+finished work: RELOAD3 (final), QLREC's stateless rewrite and SIDECHAIN3's UI fix
+(final) were promoted there on 2026-09-25, and it already had PARTREAPPLY and the
+Bugbuild tooling.
 
 **What this branch has that `main` does not:** the open **DIRECT JUMP** thread
-(`build_directjump_v5.py` and its diagnostics), **SIDECHAIN3**'s UI fix, the external-RE
+(`build_directjump_v5.py` and its diagnostics), the external-RE
 **knowledge-base ingest** (`reference/kb/caves.md`, the enlarged `memory-map.md` /
-`techniques.md`, `refs/` local patches), NOTES Sessions 89-91 / 97 / 99, and three extra
+`techniques.md`, `refs/` local patches), NOTES Sessions 89-90 / 97 / 99, and three extra
 `CLAUDE.md` hard constraints that go with that KB material.
 
 > ⚠️ **Three claims that sat here until 2026-09-25 were stale**, having survived the

@@ -30336,7 +30336,11 @@ the Session 56 "rebuilt one bus, forgot the other" failure is gone by constructi
   red harness is worthless, so the path now prefers `_cross` and the expectations were
   rewritten to the flat semantics the build actually implements.
 
-**NOT flashed.** `out/OCTATRACK_OS1.40C_SIDECHAIN3_CROSS.syx` rebuilt. Note the
+**Hardware-confirmed, final.** `out/OCTATRACK_OS1.40C_SIDECHAIN3_CROSS.syx` was
+rebuilt, then flashed on the MKI: the user confirmed it working and has declared the
+fix finished (2026-09-25). The confirmation is for the intended behaviour described
+above -- a project still using the donated effect loads as NONE in the UI; the
+user's exact on-unit observation was not recorded at the time. Note the
 stored id is *displayed* as NONE, not rewritten in the project file — pick anything in
 the chooser and the slot is permanently reassigned, which is the intended "load as
 NONE" behaviour and leaves old projects untouched until the user commits.
