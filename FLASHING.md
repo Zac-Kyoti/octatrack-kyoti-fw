@@ -509,66 +509,81 @@ the current source to get it.
 > hardware to observe. `NOTES.md` "Session 49", "Session 49 — HANDOFF", and
 > "Session 50" (the hardware pass that found this).
 
-### 4.8  QUANTIZE LIVE REC front-panel toggle  (`build_qlrec.py` — hardware-confirmed, MKI 2026-09-13; two cosmetic issues parked)
+### 4.8  QUANTIZE LIVE REC front-panel toggle  (`build_qlrec.py` — **hardware-confirmed working**, MKI 2026-09-25; two cosmetic issues parked)
 
-> **History: the original (Session 46) design HUNG the unit** when flashed —
-> a one-shot "persistent" (`dur=0`) toast that never closed, freezing the
-> whole panel while the sequencer kept running (recovered cleanly with a
-> power-cycle). Root cause, confirmed by real disassembly (`NOTES.md`
-> "Session 50"): `dur<=0` registers the notification on a modal window stack
-> that the OS's key dispatch almost certainly routes all input to. **The
-> Session 50 rewrite** (a periodically re-armed `dur>0`, self-timing call
-> instead of one persistent `dur<=0` call) was flashed and confirmed not to
-> hang. Six real-use refinements followed (Session 51); one of those
-> (double-tap timing) needed two more RE passes (Session 51-bis/-ter) after a
-> real logic bug (`G_PEND`) and a wrong-direction tuning guess (`MAX_GAP`)
-> were found and corrected. **All of that is now HW-confirmed working**:
-> pairing-window timing, toast fade/instant-close, and the ON/OFF label
-> polarity. Two purely cosmetic issues are parked, not chased further: a
-> rare self-clearing textless-box flash after the toast closes, and the
-> PERSONALIZE menu not live-redrawing the row you're already looking at
-> (the stored value itself is always correct).
+> **History: three flashes, three different failures.** Worth reading before
+> touching this patch, because two of them were caused by reasoning that looked
+> sound and was checked in.
+>
+> 1. **HUNG the unit** (Session 46 design, flashed 2026-09-13). A "persistent"
+>    `dur<=0` toast that never closed, freezing the panel while the sequencer kept
+>    running; a power-cycle recovered it. `dur<=0` tail-jumps into the modal
+>    window/overlay stack the OS routes input to.
+> 2. **CRASHED the unit** (flashed 2026-09-25): dead controls plus a loud
+>    persistent HF crackle. The toast's life was being counted by a detour of
+>    `0x400522ca`, called a safe "per-control-frame tick" in our own notes since
+>    Session 21. It is not: that is the **engine frame handler**, and both
+>    `FUN_4005a2b8` (notify) and `FUN_40056bec` (close) bottom out in
+>    `FUN_40000c3c`, the **kernel post/wake**, which marks a blocked task runnable
+>    and pokes the ready-list head. Legal from a key handler, not from there. ⚠️
+>    **That crash was already latent in the Session 51 build this document used to
+>    call "hardware-confirmed, final"** — it armed the hook only after a successful
+>    double-tap, so it was rare, not absent. The detour is deleted and the build now
+>    asserts `0x400522ca` stays byte-for-byte stock.
+> 3. **Never flipped at all** (the rewrite after that). Its one private scratch word
+>    at `0x80006a60` does not survive between key presses on the unit, while
+>    persisting indefinitely in the emulator, which does not run the DSP/audio path.
+>    A diagnostic build that named the failing condition **on screen**
+>    (`build_qlrec_diag.py`) settled it in one flash, after static analysis and
+>    emulation had both reported success.
+>
+> **The shipping patch keeps no state of its own.** The flip window *is* the toast,
+> because both are the same thing: stock's own notification handle `0x460d1e70`.
+> 176 B, two detours, zero scratch. Two cosmetic issues are parked, not chased: a
+> rare self-clearing textless-box flash after the toast closes, and the PERSONALIZE
+> row not live-redrawing while you are looking at it (the stored value is always
+> correct).
 
 A Digitone-style front-panel toggle for the PERSONALIZE **QUANTIZE LIVE REC**
 row (the all-or-nothing live-record quantize — not the per-track TRIG QUANT):
-hold **[REC]**, tap **[PLAY]** twice, close together.
+hold **[REC]** and tap **[PLAY]**, then tap **[PLAY]** again while the toast is up.
 
-1. Hold **[REC]**, tap **[PLAY]** — starts live rec as normal (stock,
-   unchanged).
-2. Still holding **[REC]**, tap **[PLAY]** again **fairly quickly** — a toast
-   reads **"QUANT LIVE REC ON"** (or **OFF**) and the PERSONALIZE value flips;
-   the transport is untouched (no live-rec start/stop from this tap). The
-   label matches what **PROJECT → PERSONALIZE → QUANTIZE LIVE REC** shows
-   checked/unchecked.
-3. Double-tap pairing window (`MAX_GAP = 0x10`): a too-slow 2nd tap is
-   discarded (no flip) and starts a fresh pairing attempt; a fast pair flips
-   on the 2nd tap; a fast 3rd tap right after a successful pair does NOT
-   fire again. **HW-confirmed correct.**
-4. The toast shows while `[REC]` is held (periodically refreshed
-   underneath, no visible flicker) and closes instantly the moment you
-   release `[REC]`. **HW-confirmed correct.**
-5. Known, parked, cosmetic-only: an occasional small textless square flash
-   right after a toast closes (self-clears); the PERSONALIZE row not
-   visually updating while you're looking directly at it (re-opening the
-   menu always shows the correct value). Neither affects the stored value or
-   panel responsiveness — not being chased further unless it starts to
-   matter.
-6. A 3rd/4th fast `[PLAY]` pair while still holding `[REC]` toggles again
-   (cycles on/off/on); releasing `[REC]` always clears the internal state.
+1. Hold **[REC]**, tap **[PLAY]** — starts live rec as normal (stock, unchanged),
+   and a toast shows the **current** QUANTIZE LIVE REC setting.
+2. Still holding **[REC]**, tap **[PLAY]** again **while that toast is still on
+   screen** — the setting inverts and the toast re-opens on the new value. Tap
+   again, still within the toast, and it inverts back. The transport is untouched
+   by these taps.
+3. **Let the toast go (1 s) and tap again** — it only *shows* the setting, no flip.
+   The window and the toast are the same object, so what you see is the gate.
+4. The label must match what **PROJECT → PERSONALIZE → QUANTIZE LIVE REC** shows,
+   and the toast must close instantly the moment you release **[REC]**.
+5. **The gesture is deliberately not exclusive:** with no state of its own, *any*
+   toast on screen arms the flip, stock's included. Stock issues no notification on
+   the live-rec path, so this is rare, and when it happens the toast shows the new
+   value rather than changing it silently. Accepted trade-off, asserted in the
+   harness — not a bug to report.
+6. **Watch for the two failures this patch has had on hardware** (§history above):
+   the panel going dead or an HF crackle (the crash), and a tap that shows the toast
+   but never inverts the value (the gate). Either means stop and re-read the history
+   note, not retune a timing constant.
 7. The PERSONALIZE value survives a power cycle.
-8. The panel stays fully responsive throughout, including while the toast is
-   showing and right after it closes.
+8. The panel stays fully responsive throughout, including while the toast is showing
+   and right after it closes. `LIVE_DUR` (`python3 tools/build_qlrec.py [VERSTR]
+   [LIVE_DUR]`, default `0x3c`) is the toast's life *and* the flip window, in units
+   of 1/60 s — so `0x3c` is 1.000 s and stock's own house value `0x30` is 0.8 s.
 
-> Emulator evidence: `emu_qlrec.py --patched` — isolation, ALL GOOD including
-> the pairing-window logic (fast pair flips, slow pair discards-and-resets,
-> `G_PEND` regression coverage, instant-close-on-release, correct label).
-> `tools/emu_notify_probe.py` — full-firmware, real function bodies: `dur=0`
-> reaches the modal-insert function that caused the original hang;
-> `dur=REARM_DUR` (what this build actually uses) and DIRECT JUMP v3's
-> known-safe `0x44` both do not. `NOTES.md` "Session 46" (original design),
-> "Session 50" (the hang, root cause, rewrite), "Session 51/51-bis/51-ter"
-> (refinement, `G_PEND` bug fix, `MAX_GAP` correction). **Hardware-confirmed
-> in full** except the two parked cosmetic items above.
+> Emulator evidence, and what it is worth: `emu_qlrec.py` — 60 checks, ALL GOOD,
+> including the reported bug as an explicit case, a guard that the retired
+> `0x400522ca` hook appears nowhere in the image, and a guard that the cave
+> references no `0x8000xxxx` address except stock's own setting word. **All three of
+> this patch's hardware failures happened while the emulator was green**, which is
+> the standing lesson: route A proves the logic, never the machine.
+> `tools/emu_notify_probe.py` — full-firmware, real function bodies: `dur=0` reaches
+> the modal-insert function behind the original hang; the durations this build uses
+> do not. `NOTES.md` "Session 46" (original design), "Session 50" (the hang),
+> "Session 51" (refinements), "Sessions 92-96" (the crash, the dead gate, and the
+> stateless rewrite that works).
 
 ### 4.9  Auto-remove an emptied trigless lock  (`build_triglock.py` — **HARDWARE-CONFIRMED, FINAL** — MKI, 2026-09-21)
 
@@ -753,7 +768,7 @@ OCTATRACK_*.bin                   CF-card OS UPGRADE transport (faster)
 | `python3 tools/build_pattern_led.py` | `1.40C` | Bug-2 fix only: a p-lock-only pattern lights its grid LED |
 | `python3 tools/build_partreapply.py` | `1.40C` | fix only: Part params fully re-apply on a pattern→Part change |
 | `python3 tools/build_mutemode_dt.py` | `140C_KYOTI` | Bug-1 fix + **MUTE MODE**, all four modes (`OT` / `OTFX` / `OTFX-T` / `DT-T`) — the shipping MUTE MODE build |
-| `python3 tools/build_qlrec.py` | `140C_KYOTI` | Bug-1 fix + QUANTIZE LIVE REC front-panel toggle |
+| `python3 tools/build_qlrec.py [VERSTR] [LIVE_DUR]` | `140C_KYOTI` | Bug-1 fix + QUANTIZE LIVE REC front-panel toggle, toast-gated — **hardware-confirmed working** (2026-09-25) |
 | `python3 tools/build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | `140C_KYOTI` | Bug-1 fix + the full **SIDE-CHAIN COMPRESSOR** (`KEY` / `KFLT` / `KGN` / `MON`, `KEY` reaching any of the 8 tracks, cross-core) |
 | `python3 tools/build_triglock.py` | `1.40C` | fix only: auto-remove an emptied trigless lock |
 | `python3 tools/build_directjump_v4.py` | `140C_KYOTI` | Bug-1 fix + **DIRECT JUMP** (`[PTN]`+`[YES]`) — *confirmed at 1x scales only* |

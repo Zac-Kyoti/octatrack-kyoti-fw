@@ -47,7 +47,7 @@ proving the repacked builder before the two hard cases are added.
 
 Only the *scoped* build of each — not the intermediates. Sizes below are **measured**, by
 running each builder on 2026-09-23; several are far larger than the numbers this document
-used to carry (`patch_softmute` 368 B → **970 B**, `patch_qlrec` 194 B → **358 B**).
+used to carry (`patch_softmute` 368 B → **970 B**, `patch_qlrec` 194 B → **358 B**, since cut to **176 B**).
 
 | Mod | Standalone build | Sources | cave | HW |
 |---|---|---|---|---|
@@ -55,7 +55,7 @@ used to carry (`patch_softmute` 368 B → **970 B**, `patch_qlrec` 194 B → **3
 | Bug-2 pattern-LED "only p-locks → empty" | `build_pattern_led.py` | `patch_pattern_led.s` | 142 B | confirmed |
 | MUTE MODE — `OT` / `OTFX` / `OTFX-T` / `DT-T` | `build_mutemode_dt.py` | `patch_softmute.s` + `patch_mutemode.s` (`DT_MODE=1`) | 970 + 208 + 204 B | confirmed |
 | SIDE-CHAIN compressor (cross-core) | `build_sidechain3.py` | `patch_sidechain.s` + `patch_sc_dsp3.asm` + `sc_tables.py` | 134 B (+ DSP) | confirmed |
-| QUANTIZE LIVE REC — `[REC]` + `[PLAY]`×2 | `build_qlrec.py` | `patch_qlrec.s` | 358 B | confirmed |
+| QUANTIZE LIVE REC — `[REC]` + `[PLAY]`, toast-gated | `build_qlrec.py` | `patch_qlrec.s` | **176 B** | confirmed working 2026-09-25 |
 | TRIGLESS-LOCK AUTO-REMOVE | `build_triglock.py` | `patch_triglock.s` | 296 B | confirmed |
 | Part-change carryover (PARTREAPPLY) | `build_partreapply.py` | `patch_partreapply.s` | 402 B | confirmed |
 
@@ -190,7 +190,7 @@ and V1.1* and the free span stays contiguous below it.
 | PERSONALIZE array — setters (17×4) | `0x400d6a88` | 68 B |
 | `patch_partreapply` | `0x400d6acc` | 402 B |
 | `patch_pattern_led` | `0x400d6c60` | 142 B |
-| `patch_qlrec` | `0x400d6cf0` | 358 B |
+| `patch_qlrec` | `0x400d6cf0` | **176 B** (was 358 B before the Sessions 94-96 rewrite; the freed 182 B is not reflected in the rows below) |
 | `patch_triglock` | `0x400d6e58` | 296 B |
 | — free — | `0x400d6f80` | **3196 B** |
 | `patch_trigscale` | `0x400d7bfc` | 62 B **pinned** |
@@ -378,7 +378,7 @@ standalone `build_reload3.py`.
 | PERSONALIZE word | `0x800000dc` | — | `0x800000ac` (stock) | — | — | `0x800000d8` | — | ⚠️ **B1** |
 | SRAM shadow | `0x100fff6c` | — | `0x100fff3c` (stock) | — | — | **none** | — | disjoint |
 | `pea 0x64→0x70` ×3 | **yes** | no | no (`0xac` already in span) | no | no | **must stay stock** | no | ⚠️ **B1** |
-| private scratch | `0x80006c66` | — | `0x80006a5c–0x80006a73` | — | — | `0x80006a40–0x80006a4a` | **none** — own cave since Session 98 | **disjoint** |
+| private scratch | `0x80006c66` | — | **none** — own handle-gated since Sessions 94-96 | — | — | `0x80006a40–0x80006a4a` | **none** — own cave since Session 98 | **disjoint** |
 | keymap overlay | — | — | — | — | — | writes YES `0x400bf0c0` | asserts stock | ⚠️ **B2** |
 | menu surgery | owns it | — | — | — | — | — | — | single owner |
 | FX chooser / DSP | — | owns it | — | — | — | — | — | single owner |
@@ -388,10 +388,21 @@ standalone `build_reload3.py`.
 | `CUR_BANK 0x80000002` | — | — | — | — | reads | — | reads | read-only, fine |
 | `ARR_ACT 0x460d1aec` | — | — | — | — | — | reads | reads | arranger guard, fine |
 
-**The scratch block: QLREC has LEFT it entirely.** DJ `0x6a40–4a` is the only user left. RELOAD3 (`0x6a50–55`) moved into its own cave in Session 98, after hardware showed the unit overwrote its request bytes between a key chord and the job that read them, so it reloaded the wrong track. QLREC **none**. Sessions 94-96 removed QLREC's last private word after hardware proved it
-does not hold: `0x80006a60` read back as *not* the value we had just written, on the very
-next key press, while persisting indefinitely in the emulator. `0x80006a5c–0x80006a73` is
-released.
+**The scratch block: QLREC and RELOAD3 have both LEFT it.** DJ `0x6a40–4a` is the only
+user left; `0x6a50–55` (RELOAD3) and `0x6a5c–73` (QLREC) are released.
+
+Both gave theirs up for the same reason, found the same way — a diagnostic build that
+reported the value on screen, after static analysis and the emulator had both said fine:
+
+* **QLREC, Sessions 94-96.** `0x80006a60` read back as *not* the value just written, on the
+  very next key press, while persisting indefinitely in the emulator.
+* **RELOAD3, Session 98.** The request bytes at `0x80006a54-55` were overwritten between the
+  key chord and the storage job that read them, so the reload hit the wrong (MIDI) track and
+  its own verify passed on that slice.
+
+**Neither feature keeps any state in this block now**, and the rule earned twice is that a
+static "no references" scan cannot tell you whether RAM is written at runtime — and neither
+can route A, while it does not run the DSP/audio path.
 
 ⚠️ **Two problems with this block, not one.**
 1. It is **beyond the boot zero-fill** (`FUN_4000f938` zeroes only to `0x80004000`), so

@@ -203,8 +203,12 @@ def main():
     print("  setting.  Tap [PLAY] again WHILE THAT TOAST IS UP -> the setting inverts")
     print("  and the toast re-opens on the new value; again inverts it back.  Once the")
     print("  toast has gone, the next tap only shows the setting again.  The toast is a")
-    print(f"  single dur>0 notification ({'default 0x30' if LIVE_DUR is None else hex(LIVE_DUR)}"
-          " = 0.800 s at the 1/60 s UI tick) and")
+    # Session 96 raised the default 0x30 -> 0x3c on the user's feel-test; this line
+    # still said "default 0x30 ... 0.800 s" long after the patch shipped 0x3c, so derive
+    # both the value and the seconds from LIVE_DUR instead of restating them.
+    _dur = 0x3c if LIVE_DUR is None else LIVE_DUR       # patch_qlrec.s .ifndef default
+    print(f"  single dur>0 notification ({'default ' if LIVE_DUR is None else ''}{_dur:#x}"
+          f" = {_dur / 60:.3f} s at the 1/60 s UI tick) and")
     print("  closes instantly when [REC] is released.  Whether a press flips is read from")
     print("  the OS's OWN toast state -- this build ticks nothing of its own.")
     print("  PERSONALIZE row + power-cycle persistence unchanged.")

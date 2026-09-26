@@ -218,10 +218,12 @@ newest state.
 
 ### Comprehensive KYOTI Octatrack Firmware build
 
-- **Bugbuilds — every finished feature, with all three bug fixes folded in.**
-  MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK and RELOAD3, each composed with
-  PARTREAPPLY + PATTERNLED + PLAYSFREEFIX, written to `out/Bugbuilds/` so the
-  standalone per-feature images are left alone. Each composite is built *onto*
+- **Bugbuilds — each finished feature gets its OWN image, with all three bug fixes
+  folded into it.** One composite per feature: MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS,
+  TRIGLOCK and RELOAD3, each built as *that feature* + PARTREAPPLY + PATTERNLED +
+  PLAYSFREEFIX, written to `out/Bugbuilds/` so the standalone per-feature images are
+  left alone. The features are never combined with each other — only the three bug
+  fixes are folded in, which is why there are five images and not one. Each composite is built *onto*
   the finished feature image rather than re-derived (SIDE-CHAIN's DSP payloads
   and descriptor edits pass through untouched), with cave placement automatic and
   an interlock proof asserted on every run: caves all-zero before use, exact stock
@@ -289,7 +291,7 @@ Never cut power during `UPDATING FLASH`. Full procedure and recovery net:
 | Part-change carryover — recorder cache / scene-morph pieces | `build_partreapply.py` | flashed 2026-09-13, behaviorally safe; reports #2/#3 (recorder, REC SETUP) could not be reliably reproduced on stock, treat as unconfirmed |
 | ↳ report #1 (PICKUP→FLEX stuck loop) | `build_partreapply.py` | **confirmed fixed** — flashed 2026-09-22, MKI; the round trip now plays the correct sample on every pass, latch gone |
 | ↳ spurious Part-edited flag on entering PICKUP | `build_partreapply.py` | **confirmed fixed** — flashed 2026-09-23, MKI; a genuine edit made before the switch still shows correctly afterward |
-| QUANTIZE LIVE REC toggle | `build_qlrec.py` | **confirmed** — original design hung the unit 2026-09-13; rewrite (periodic re-arm) HW-confirmed, no hang; 2 cosmetic issues parked, not chased further |
+| QUANTIZE LIVE REC toggle | `build_qlrec.py` | **confirmed working** — flashed 2026-09-25, MKI: the toast shows the setting and a second `[PLAY]` while it is up inverts it. Three earlier flashes each failed differently and are worth knowing: a `dur<=0` toast **hung** the unit (2026-09-13); its replacement counted the toast's life from a detour of `0x400522ca` and **crashed** the unit (dead controls, persistent HF crackle) because that site is the engine frame handler and the notification calls bottom out in the kernel post/wake; the rewrite after that never flipped, because its one private scratch word at `0x80006a60` does not survive between key presses on the unit. The shipping patch keeps **no state at all** — the gate is stock's own toast handle. 176 B, two detours. 2 cosmetic issues parked |
 | Bugbuild composites (feature + all 3 bug fixes) | `build_bugbuilds.py` → `out/Bugbuilds/` | **not flashed** — every ingredient is individually confirmed above and each composite carries a per-run interlock proof, but no composite image has been on hardware |
 
 ---
