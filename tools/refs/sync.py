@@ -21,6 +21,9 @@ from pathlib import Path
 
 from _manifest import REFS_DIR, LOCK, MANIFEST, load
 
+# Durable home for local edits found in a (disposable) clone — see sync_one().
+PATCH_DIR = REFS_DIR.parent / "tools" / "refs" / "local-patches"
+
 
 def git(*args: str, cwd: Path | None = None) -> str:
     return subprocess.run(
@@ -50,6 +53,61 @@ def sync_one(name: str, meta: dict[str, str], *, update: bool) -> tuple[str, str
         print(f"  (branch fallback -> {branch})")
 
     target = f"origin/{branch}" if (update or pin == "HEAD") else pin
+
+    # A clone is a disposable cache, but we do sometimes edit one (e.g. adding a
+    # probe to octabam's emulator). Such an edit blocks `checkout` and used to abort
+    # the WHOLE run, leaving later repos unsynced and the lock untouched. Preserve
+    # the diff as a durable patch under tools/refs/local-patches/ (outside refs/, so
+    # it survives a cache wipe and is committable), then reset and continue.
+    dirty = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        cwd=dest, capture_output=True, text=True,
+    ).stdout.strip()
+    if dirty:
+        PATCH_DIR.mkdir(parents=True, exist_ok=True)
+        patch = PATCH_DIR / f"{name}-local.patch"
+        diff = subprocess.run(["git", "diff", "HEAD"], cwd=dest,
+                              capture_output=True, text=True).stdout
+        if diff.strip():
+            patch.write_text(diff)
+            print(f"  ! local edits in refs/{name} saved -> {patch.relative_to(REFS_DIR.parent)}")
+        git("reset", "--hard", "--quiet", "HEAD", cwd=dest)
+
+    # ===== Session 92: the dirty-check above is NOT ENOUGH, and the gap is a trap. =====
+    # It only sees UNCOMMITTED edits. A local fix that was COMMITTED -- e.g. onto a
+    # branch, which is the careful thing to do and exactly what someone does when they
+    # notice their work is "one git checkout away from being lost" -- leaves a CLEAN
+    # working tree, sails past the check above, and is then silently un-applied by the
+    # detach below. The commit is not deleted (its branch ref survives), so nothing
+    # LOOKS lost; the clone simply stops carrying the fix, and whatever depended on it
+    # breaks in a way that points nowhere near here.
+    # This is not hypothetical: refs/octabam commit d5b84fb (branch emu/map-audio-sdram)
+    # is REQUIRED for the emulator to boot this repo's firmware images at all -- without
+    # it, boot dies with UC_ERR_WRITE_UNMAPPED inside gate_m6a -- and it was committed
+    # onto a branch for exactly that "don't lose it" reason. So being more careful with
+    # your work made it MORE likely to be dropped here. Close the gap: export any commit
+    # that is not reachable from the target as a patch too, and say so loudly.
+    extra = subprocess.run(
+        ["git", "log", "--oneline", f"{target}..HEAD"],
+        cwd=dest, capture_output=True, text=True,
+    ).stdout.strip()
+    if extra:
+        PATCH_DIR.mkdir(parents=True, exist_ok=True)
+        cpatch = PATCH_DIR / f"{name}-local-commits.patch"
+        cdiff = subprocess.run(["git", "diff", target, "HEAD"], cwd=dest,
+                               capture_output=True, text=True).stdout
+        if cdiff.strip():
+            cpatch.write_text(cdiff)
+        n = len(extra.splitlines())
+        print(f"  ! refs/{name}: {n} local commit(s) NOT in {target} -- the checkout "
+              f"below will un-apply them:")
+        for line in extra.splitlines():
+            print(f"      {line}")
+        print(f"    saved as -> {cpatch.relative_to(REFS_DIR.parent)}")
+        print(f"    RE-APPLY with:  git -C refs/{name} apply "
+              f"{cpatch.relative_to(REFS_DIR.parent)}")
+        print(f"    (or keep them:  git -C refs/{name} checkout <branch>)")
+
     git("checkout", "--quiet", "--detach", target, cwd=dest)
     head = git("rev-parse", "HEAD", cwd=dest)
     subject = git("log", "-1", "--format=%s", cwd=dest)
@@ -67,6 +125,7 @@ def main(argv: list[str]) -> int:
             return 2
 
     REFS_DIR.mkdir(exist_ok=True)
+    failed: list[str] = []
     # No timestamp in the lock body — it is tracked, and a time-only diff on every
     # sync is noise. The wall-clock goes to refs/.last-sync (gitignored) instead.
     lock_lines = [
@@ -80,13 +139,28 @@ def main(argv: list[str]) -> int:
                 lock_lines.append(prev)
             continue
         print(f"[{name}]")
-        head, subject = sync_one(name, meta, update=update)
+        try:
+            head, subject = sync_one(name, meta, update=update)
+        except subprocess.CalledProcessError as exc:
+            # Keep the old lock line: the rule is never to advance a repo's lock past
+            # material nobody looked at, and a failed sync looked at nothing.
+            failed.append(name)
+            err = (exc.stderr or "").strip().splitlines()
+            print(f"  !! FAILED ({' '.join(exc.cmd)}): {err[-1] if err else exc}")
+            prev = _prev_lock_line(name)
+            if prev:
+                lock_lines.append(prev)
+            continue
         lock_lines.append(f'{name} = "{head}"  # {subject[:70]}')
 
     LOCK.write_text("\n".join(lock_lines) + "\n")
     stamp = _dt.datetime.now().isoformat(timespec="seconds")
     (REFS_DIR / ".last-sync").write_text(stamp + "\n")
     print(f"\nwrote {LOCK.relative_to(REFS_DIR.parent)}  ({stamp})")
+    if failed:
+        print(f"!! {len(failed)} repo(s) FAILED and kept their previous lock line: "
+              f"{', '.join(failed)}")
+        return 1
     return 0
 
 

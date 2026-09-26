@@ -29,8 +29,9 @@ along the per-track path. All addresses measured -- see NOTES.md Session 79 cont
 A run that produces no sequencer activity is reported as FAILED, never as identical.
 
 Usage:
-  python3 tools/diff_stock_vs_patch.py [--project DIR] [--bank N] [--pattern N]
-                                       [--frames N] [--patched IMG] [--stock IMG]
+  python3 tools/diff_stock_vs_patch.py --patched IMG [--project DIR] [--bank N]
+                                       [--pattern N] [--frames N] [--stock IMG]
+  (--patched is REQUIRED since Session 97: its old default silently gated the v4 image.)
 """
 import argparse
 import os
@@ -158,7 +159,13 @@ def main(argv):
     ap.add_argument("--pattern", type=int, default=None)
     ap.add_argument("--frames", type=int, default=6000,
                     help="default is long enough to cross a full 16-step pattern at 1x")
-    ap.add_argument("--patched", default=str(PATCHED))
+    # Session 97: REQUIRED, no default. The old default silently pointed at the v4 image
+    # and produced a vacuous "IDENTICAL" for a V5 build -- a gate that cannot fail proves
+    # nothing. Name the image you are gating, every time.
+    ap.add_argument("--patched", required=True, type=lambda p: str(pathlib.Path(p).resolve()),
+                    help="the image under test (e.g. out/mainos_directjump_v5.bin); "
+                         "resolved to absolute HERE because the harness chdirs into "
+                         "refs/octabam before reading it")
     ap.add_argument("--dj-on", action="store_true",
                     help="run the PATCHED image with DIRECT JUMP enabled but never cue a "
                          "pattern change. The patch must still be inert: nothing should act "

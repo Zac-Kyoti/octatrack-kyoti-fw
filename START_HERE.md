@@ -132,8 +132,9 @@ each other. Not flashed; the composition itself is proven by a per-run
 interlock proof. There is deliberately **no single all-in-one image**:
 `tools/build_merged.py` stays withdrawn so a combined build cannot quietly ship an
 unfinished feature. `reference/MERGE.md` is the authoritative allocation map it will
-be rebuilt from, and stages the merge as `KYOTI_V1.0` (the seven finished mods,
-nothing to resolve) then `KYOTI_V1.1` (+ DIRECT JUMP + RELOAD3).
+be rebuilt from, and stages the merge as `KYOTI_V1.0` (the seven mods finished when
+it was written, nothing to resolve) then `KYOTI_V1.1` (+ DIRECT JUMP + RELOAD3; RELOAD3
+has since been confirmed final, the map not yet re-cut).
 
 **Not a shipped fix:** the MIDI LFO SETUP knobs sending CC on the twin audio channel
 (the item older notes called "Bug 2", before that number was reused for the
@@ -156,74 +157,68 @@ ems-octakit's `abi.inc` ~500-address map → `kb/octakit-abi.md`, the keymap/key
 
 ## 6. Current frontier — UPDATE THIS EACH SESSION
 
-**As of 2026-09-25, on `main` (this branch).** Everything finished is here, including
-the three things promoted on 2026-09-25: **RELOAD3** (final, hardware-confirmed),
-**QLREC**'s stateless rewrite (which removes the `0x400522ca` hook that crashed a unit),
-and **SIDECHAIN3**'s UI fix (a donated effect loads as NONE; hardware-confirmed, final).
+**As of 2026-09-26 (Session 102 committed; a Session 103 experiment is uncommitted in
+the working tree).** Every finished feature is here, and so is the one open thread.
+RELOAD3, QLREC's stateless rewrite and SIDECHAIN3's UI fix were the last promotions
+(2026-09-25).
 
-**The Bugbuild tooling is on this branch and runs here.** `tools/build_bugbuilds.py`
-plus every feature builder and bug-fix patch it needs; a full run on this tree produces
-all five composites — MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK, RELOAD3, each with
-PARTREAPPLY + PATTERNLED + PLAYSFREEFIX folded in — each passing its interlock proof
-("DISJOINT, ALL PRESERVED, NO STRAYS"), no problems flagged. It needs the gitignored
-`refs/` clones and `vendor/dsp56300` present, which is an environment dependency, not a
-branch one. PARTREAPPLY is also current here (byte-identical to `wip`).
+**One thread is open (DIRECT JUMP). Everything else in §5 is finished, RELOAD3 included.**
+DIRECT JUMP's builder is WIP-gated (see §5) so a visitor cannot build it by accident.
 
-> ⚠️ **Three claims that used to sit here were stale and are corrected above**, having
-> survived the 2026-09-24 merge that made them false: that `main` lacked PARTREAPPLY's
-> Session 81 build, that it lacked Bugbuilds "entirely", and that it "still carries the
-> withdrawn `build_merged.py`" — which exists on **neither** branch. Re-verify this
-> section against the tree rather than trusting it; that is what it is for.
-
-**What is on `wip` and not here:** the DIRECT JUMP V5.x thread (the one open feature),
-the external-RE knowledge-base ingest (`reference/kb/caves.md` and the enlarged
-`memory-map.md` / `techniques.md`), the `refs/` local-patch set, and NOTES
-Sessions 89-90 / 97 / 99. `wip`'s `CLAUDE.md` also carries three extra hard constraints
-that belong with that KB material (cave selection, borrowed addresses, octabam syncs).
+> Check this section against the tree before trusting it — it has gone stale before
+> (2026-09-25: three claims about `main` that a merge had already made false).
 
 **One thread is open (DIRECT JUMP). Everything else in §5 is finished, RELOAD3 included.**
 
 ### DIRECT JUMP — hardware-confirmed at 1x; non-1x scales are the whole remaining problem
 
-> ⚠️ **This subsection stops at Session 88 and its "FIXED, not yet flashed" claim below did
-> not survive hardware** (the Hook P change was flashed and broke the 1x baseline, and was
-> reverted; Sessions 89-99 on `wip` went a different way). The code is on `wip` only.
-> **For this thread's real state read `wip`** — its `START_HERE.md`, `NOTES.md` Sessions
-> 89-99, and `reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md`. Left as written rather than
-> half-updated from another branch.
+`build_directjump_v5.py` (v1–v4 superseded). **Baseline to not regress**, flashed
+2026-09-23 at 1x scales: tracks and patterns stay in master time through a switch,
+patterns land on the correct step, mixed track lengths in one pattern work together
+(7 / 12 / 16), MASTER LENGTH is respected including `INF`.
 
-`build_directjump_v4.py` (v1–v3 are dead on hardware, superseded). Flashed 2026-09-23,
-and **this is the baseline to not regress**: tracks and patterns stay in master time
-through a switch, patterns land on the correct step, mixed track lengths in one
-pattern work together (7 / 12 / 16), MASTER LENGTH is respected including `INF`.
+**Non-1x scales — how the thread got here.**
 
-**Non-1x scales: root-caused and FIXED (Session 88), not yet flashed.** Hook P read
-`MASTER_STEP` once and used that single value as `new_step` for all 16 tracks, but
-`STEP_ARR[t]` must hold the *track's* step index — equal only when
-`tps_master == tps_track`, i.e. only at 1x. The fix changes the hook's **input**, not
-its job: it reads `NEXT_STEP[t]` (`ceil(D7 / tps_t)`), the per-track quantity stock's
-own rebuild already computed at `0x400a4916`, and still supplies the modulo-track-length
-that is the only reason the hook exists. At 1x with equal lengths it is bit-identical to
-the confirmed build, so the baseline is preserved **by construction**. Measured PRE/POST
-on four fixtures; DJ-OFF byte-identical to stock across 38 samples with the scratch block
-poisoned.
+1. *Session 88 (Hook P, per-track step index).* Correct on paper, **flashed, and broke
+   the 1x baseline; reverted.** The step-index theory was not the audible bug.
+2. *Sessions 97–99 (V5.5).* The stock commit tail destroys each track's sub-step tick
+   counter, so a track on a different ticks-per-step than the master lands mid-step.
+   V5.5 preserved the counter by suppression (Hooks Z/X). **Hardware-rejected.** The
+   emulator could not provoke the failure; a diagnostic build's on-screen toast
+   (`A Z X Y P R`) measured it on the unit instead.
+3. *Session 100 (V5.7).* The toast proved two holes: the mod-reduce sat at a site the
+   unit runs for only some tracks (moved into Hook Z), and commits land mid-master-step
+   (the master tick counter is now seeded with the remainder). Still fractional.
+4. *Session 101 (V5.8).* The audible observable was found — the scheduled fire-timestamp
+   table, `tools/diag_tablearm_phase.py` — and the bug reproduced in the emulator: the
+   half-step flip originates at **natural pattern wraps**, which re-enter the commit body
+   and re-phase 1x tracks under a 2x master. V5.8 preserves through wraps too. **On the
+   unit: a large improvement** — fractional is now confined to the landing interval and
+   heals at the cycle restart.
+5. *Session 102 (V5.9).* The `V5_8D2` toast showed the residual is **not** the
+   master-remainder case (N1 of A6). It also named a new symptom present since V5.8: a
+   spurious trig once per cycle on the 2x track, half a step off-grid — the tail's
+   reposition fire and the track's own advance fire, exclusive in stock only because
+   stock zeroes the counter, both running under the wrap-preserve. V5.9's Hook W cut
+   that conditionally; the suppression path is unreachable in the emulator, so hardware
+   decides. **Session 103 (uncommitted) is replacing Hook W with a Hook V** that defers
+   each track's whole apply to its own step boundary — read the working tree and
+   `NOTES.md` before assuming which is current.
 
-> **Retired:** the handoff's section 5 asked whether `CNTDN_TBL` (`0x800065c3[t]`) is a
-> one-shot trig arm or AR's per-track rate reload. Re-derived from `0x400a4992`-`0x400a49ca`:
-> `CNTDN_TBL[t] = max(1, tps_master + 1 - tps_t)`. Both prior claims describe the same
-> array, it degenerates to 1 whenever the master is at least as fast as the track, and it
-> equals the 1x control in the failing case — so it never explained the symptom, and
-> section 4's pairing with AR's `0x405667c7` is wrong. Session 85 was right not to write it.
-> **`reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md` is stale on this point.**
+**Method lessons, hard-won:** the emulator judges STEP advances, which was the wrong
+observable — trust the fire-timestamp table. Diagnostic builds with an on-screen toast
+beat further static analysis (also how RELOAD3 and QLREC were cracked). Do not keep
+state in `0x80006a40..0x80006abf`. MIDI twin sites of the patched blocks
+(`0x400a4cb0` area) are still unpatched — audio-only coverage.
 
-**Still open, and NOT explained by that fix:** a hardware report that the steps visited
-depend on which trigs are on the grid, and that the LEDs and the audio disagree about
-position. No measured write path reads trig data, so it is a separate mechanism.
+**Still open from earlier:** a report that the visited steps depend on which trigs are
+on the grid, and that LEDs and audio disagree about position.
 
-The position rule is AR's own commit arithmetic ported verbatim
-(`reference/AR_DIRECT_JUMP.md`); the prose spec is retired. The mode deliberately does
-not persist — OFF on every power-on. Detail: `NOTES.md` "Session 15" + "Session 21" +
-"Session 35" → "Session 60"–"Session 88".
+The position rule is the Analog Rytm's own commit arithmetic (`reference/AR_DIRECT_JUMP.md`,
+incl. its §9 re-review). The mode deliberately does not persist — OFF on every power-on.
+Handoff: `reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md` (the older
+`DIRECTJUMP_SCALES_HANDOFF.md` is stale — its `CNTDN_TBL` section 5 was retired).
+Detail: `NOTES.md` "Session 15" + "Session 21" + "Session 35", then "Session 60"–"Session 102".
 
 ### RELOAD FROM PROJECT — RELOAD3, FINAL (hardware-confirmed 2026-09-25)
 

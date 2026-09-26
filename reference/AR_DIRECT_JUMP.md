@@ -393,3 +393,53 @@ per-track rate state is the pair (`TRK_SCALE_IX[t]`, ticks-within-step), and bot
   produced a false "16/16 correct" result while Hook F was still clobbering audio tracks.
 - **A one-tick flag cannot be observed by sampling every few ticks.** `G_ARMED` is set and
   cleared on consecutive ticks; sampling it produced a false "the DJ path never armed".
+
+## 9. Session 2026-09-26 review — the anti-fractional mechanism, found and measured
+
+Prompted by the OT thread: OT's DIRECT JUMP still left tracks step-fractional after
+master-scale switches, while AR demonstrably never does. Re-disassembly answered why,
+and falsified two statements above.
+
+**Corrections:**
+- §2's inventory line for `0x405666e6` ("master ticks-per-step − 1") is WRONG. It is the
+  LIVE master ticks-within-step counter — incremented once per tick at `0x40099962`,
+  wrapped at `0x40099974` against `ticksPerStep[0x40566774]`, and the step body is gated
+  on it reading 0 (`0x4009998c`). Direct analogue of OT's `0x800065b6`.
+- §7b's "nothing in AR's request or commit path writes the tick phase at all" is WRONG.
+  The commit writes it deliberately — see below.
+
+**The mechanism (all measured, load base 0x40000400):**
+
+1. Request-time quantizer (tail of the queue-write path, `0x4009a618`–`0x4009a6b8`):
+   from the current absolute tick it computes the position within the CURRENT pattern's
+   full cycle (`len × tps`, `0x4009a66c`–`0x4009a678`), splits it into whole steps and a
+   sub-step tick remainder (`0x4009a67e`–`0x4009a688`), rounds UP to the next step
+   boundary with wrap (`0x4009a68e`–`0x4009a696`), and stores BOTH:
+   `0x405667f4` (word) = target step, `0x405667f6` (byte) = SUB-STEP REMAINDER.
+   Neither global was recorded anywhere in this document before.
+
+2. Commit (three parallel consumer sites: `0x400978da`/`0x40097910`,
+   `0x4009831c`/`0x40098352`, `0x40098746`/`0x40098734` — one per jump variant):
+   `0x405666e4` (master step) is seeded from the target step, and
+   **`0x405666e6` (master tick phase) is seeded from the stored remainder**
+   (`0x40097910`: `moveb (0x405667f6),(0x405666e6)`), the countdown `0x405667e4` is
+   cleared, and the per-track rebuild of §2 then derives all 13 tracks from that one
+   (step, phase) anchor.
+
+**The AR anti-fractional invariant, now complete:**
+
+> The jump carries a (target step, sub-step remainder) PAIR. The commit writes both
+> into the master position, and every per-track value is rebuilt from that single
+> anchor. The remainder is a first-class quantity — it is never discarded, so the
+> master grid never loses sub-step time across a master-scale change, and no consumer
+> is left anchored to a different instant than any other.
+
+The audible cost (user-confirmed on hardware): the full per-track rebuild produces the
+occasional spurious trig at the jump — position lurches; the grid does not.
+
+**OT consequence:** OT V5.7's `dj_mrem` master-seed is the same mechanism in the same
+role-of-register (live master ticks-within-step) with the same quantity-role (sub-step
+remainder at the commit). The structural differences that remain: AR computes the
+remainder at REQUEST time from the absolute tick reduced into the outgoing cycle and
+carries it; OT V5.7 computes it at COMMIT time inside Hook H's division. And AR rebuilds
+every per-track value from the anchor, preserving nothing.

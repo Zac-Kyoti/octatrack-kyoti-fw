@@ -1,0 +1,362 @@
+diff --git a/tools/emu/ot_emu/main.cpp b/tools/emu/ot_emu/main.cpp
+index 6608b7d..e32418f 100644
+--- a/tools/emu/ot_emu/main.cpp
++++ b/tools/emu/ot_emu/main.cpp
+@@ -11,6 +11,7 @@
+ // vendored Musashi is ColdFire V2 and this firmware is V4e. That report is
+ // the work list for the ISA half of the port, one opcode at a time.
+ #include <cstdio>
++#include <cctype>
+ #include <map>
+ #include <memory>
+ #include <cstdlib>
+@@ -118,6 +119,7 @@ int main(int _argc, char** _argv)
+ 	std::string lcd;			// the panel's 1-bpp plane (0x46c7e0ea, 1024 B) to FILE whenever it has changed, at most once per 2M instructions; tools/emu/lcd_view.py draws it
+ 	std::string memDump;		// O10.21: "addr,len=path[;...]" -- ColdFire memory ranges, raw bytes, to FILE at the very end (peeks only support one word, pre-sequencer; this is a range, post-run)
+ 	std::string cardOut;		// the card image as the firmware left it, to FILE at the very end (the load's WRITEs: emu_card.extract_image reads it back)
++	std::string stepsPath;		// Kyoti local: a STEP LIST executed after the load, at main's spin -- one verb per line (see runSteps below). Implies --mount.
+ 
+ 	for(int i = 1; i < _argc; ++i)
+ 	{
+@@ -185,6 +187,7 @@ int main(int _argc, char** _argv)
+ 		else if(a == "--poke" && i + 1 < _argc)		pokeAfterLoad = _argv[++i];
+ 		else if(a == "--poke-early" && i + 1 < _argc)	pokeEarly = _argv[++i];
+ 		else if(a == "--call" && i + 1 < _argc)		callSpec = _argv[++i];
++		else if(a == "--steps" && i + 1 < _argc)	stepsPath = _argv[++i];
+ 		else if(a == "--call-at" && i + 1 < _argc)	callAt = std::atoi(_argv[++i]);
+ 		else if(a == "--midi" && i + 1 < _argc)		midiFile = _argv[++i];
+ 		else if(a == "--live" && i + 1 < _argc)		livePath = _argv[++i];
+@@ -198,13 +201,23 @@ int main(int _argc, char** _argv)
+ 		{
+ 			std::printf("usage: ot_emu [--image FILE] [--max N] [--periph] [--profile]\n"
+ 			"              [--golden FILE] [--ms N]\n"
++			"              [--steps FILE]   a step list run after the load at main's spin:\n"
++			"                               ptr/set NAME=ADDR, spin, call TARGET[,ARG..],\n"
++			"                               poke ADDR=HEXBYTES, copy DST=SRC,LEN,\n"
++			"                               peek ADDR,LEN, echo TEXT -- and the transport:\n"
++			"                               frame on|off, iclock, seq BANK,PAT, transport,\n"
++			"                               triglog, trigs, coverage, frames N [A,L=HEX].\n"
++			"                               ADDR is HEX, NAME, NAME+HEX or NAME-HEX. Each\n"
++			"                               line prints one `step ` record for the caller to\n"
++			"                               parse; implies --mount. Details at the step\n"
++			"                               executor in main.cpp\n"
+ 			"              [--usb-host SOCKET] [--usb-notify FILE] [--usb-fs]   the USB device controller + a scripted host (usb.h)\n");
+ 			return 2;
+ 		}
+ 	}
+ 
+-	if(sequencer || !livePath.empty())
+-		mount = true;			// M6c needs the card mounted and the project loaded; so does a panel
++	if(sequencer || !livePath.empty() || !stepsPath.empty())
++		mount = true;			// M6c needs the card mounted and the project loaded; so does a panel or a step list
+ 
+ 	const auto img = readFile(image);
+ 	if(img.empty())
+@@ -701,6 +714,307 @@ int main(int _argc, char** _argv)
+ 			if(!callSpec.empty() && callAt < 0)
+ 				doCall();
+ 
++			// -- a scripted STEP LIST, after the load (Kyoti local) ----------
++			// Why: a diagnostic is rarely ONE call.  Route A's Python drivers
++			// interleave `run(until=main spin)`, `call_as_main`, pokes and
++			// reads dozens of times per test, and paid route A's whole
++			// per-instruction tax to do it.  This runs the same sequence
++			// natively, in one process, on one load.
++			//
++			//   ptr  NAME=ADDR        bind NAME to the 32-bit word AT ADDR
++			//   set  NAME=VALUE       bind NAME to a literal
++			//   spin                  run to main's spin (what callAsMain needs)
++			//   call TARGET[,ARG..]   callAsMain; prints d0
++			//   poke ADDR=HEXBYTES    write those bytes (even length, no 0x)
++			//   copy DST=SRC,LEN      guest-to-guest memcpy (seed an arena entry
++			//                         from another without a round trip to the host)
++			//   peek ADDR,LEN         print LEN bytes as hex
++			//   echo TEXT             a label, passed through
++			//
++			// ... and the transport, so a whole multi-phase diagnostic is one run:
++			//   frame on|off          the 16-sample DSP frame clock
++			//   iclock                clear CLOCK RECEIVE (run off the internal clock)
++			//   seq BANK,PAT          seqSelectLive -- select a bank and pattern
++			//   transport             startTransportLive
++			//   triglog               installTrigLog (then `trigs` prints it)
++			//   trigs                 print the per-track live-nibble trig log
++			//   coverage              every PC from HERE on -> --coverage FILE
++			//   frames N [A,L=HEX]    run N more frames, or stop early once L bytes
++			//                         at A equal HEX -- a bind phase with a ceiling
++			//
++			// ADDR/ARG/VALUE is HEX, NAME, NAME+HEX or NAME-HEX.  Every line
++			// prints one `step ` record, so the caller parses stdout and owns
++			// the assertions -- this side stays dumb on purpose.
++			if(!stepsPath.empty())
++			{
++				std::map<std::string, uint32_t> vars;
++				const auto trim = [](std::string t)
++				{
++					while(!t.empty() && std::isspace(static_cast<unsigned char>(t.front()))) t.erase(t.begin());
++					while(!t.empty() && std::isspace(static_cast<unsigned char>(t.back())))  t.pop_back();
++					return t;
++				};
++				const auto resolve = [&](const std::string& _raw) -> uint32_t
++				{
++					const auto t = trim(_raw);
++					if(t.empty())
++						return 0;
++					const auto op = t.find_first_of("+-", 1);
++					const auto base = trim(t.substr(0, op == std::string::npos ? t.size() : op));
++					const auto it = vars.find(base);
++					auto v = it != vars.end() ? it->second
++					                          : static_cast<uint32_t>(std::strtoul(base.c_str(), nullptr, 0));
++					if(op != std::string::npos)
++					{
++						const auto off = static_cast<uint32_t>(std::strtoul(t.c_str() + op + 1, nullptr, 0));
++						v = t[op] == '+' ? v + off : v - off;
++					}
++					return v;
++				};
++				std::ifstream f(stepsPath);
++				if(!f)
++				{
++					std::printf("steps      : cannot read %s\n", stepsPath.c_str());
++					return 1;
++				}
++				std::printf("steps      : %s\n", stepsPath.c_str());
++				std::string line;
++				size_t lineno = 0, failed = 0;
++				while(std::getline(f, line))
++				{
++					++lineno;
++					const auto l = trim(line);
++					if(l.empty() || l[0] == '#')
++						continue;
++					const auto sp = l.find_first_of(" \t");
++					const auto verb = l.substr(0, sp);
++					const auto rest = trim(sp == std::string::npos ? std::string() : l.substr(sp));
++					if(verb == "echo")
++						std::printf("step echo   : %s\n", rest.c_str());
++					else if(verb == "spin")
++					{
++						const auto rs = rtos.runToMainSpin();
++						if(rs != ot::Rtos::Stop::Gate) { ++failed;
++							std::printf("step spin   : DID NOT PARK -- %s\n", rtos.why().c_str()); }
++						else
++							std::printf("step spin   : ok\n");
++					}
++					else if(verb == "ptr" || verb == "set")
++					{
++						const auto eq = rest.find('=');
++						if(eq == std::string::npos) { ++failed;
++							std::printf("step %s    : line %zu has no '=' -- '%s'\n", verb.c_str(), lineno, l.c_str()); }
++						else
++						{
++							const auto name = trim(rest.substr(0, eq));
++							const auto addr = resolve(rest.substr(eq + 1));
++							const auto v = verb == "ptr" ? m.peek32(addr) : addr;
++							vars[name] = v;
++							std::printf("step %s    : %s = %#x\n", verb.c_str(), name.c_str(), v);
++						}
++					}
++					else if(verb == "call")
++					{
++						std::vector<uint32_t> args;
++						uint32_t target = 0;
++						size_t q = 0, k = 0;
++						while(q <= rest.size())
++						{
++							auto e = rest.find(',', q); if(e == std::string::npos) e = rest.size();
++							const auto v = resolve(rest.substr(q, e - q));
++							if(k++ == 0) target = v; else args.push_back(v);
++							q = e + 1;
++						}
++						uint32_t d0 = 0;
++						if(rtos.callAsMain(target, args, d0, 200000000))
++							std::printf("step call   : %#x -> d0 = %#x\n", target, d0);
++						else
++						{
++							++failed;
++							std::printf("step call   : %#x DID NOT RETURN -- %s\n", target, rtos.why().c_str());
++						}
++					}
++					else if(verb == "poke")
++					{
++						const auto eq = rest.find('=');
++						if(eq == std::string::npos)
++						{
++							++failed;
++							std::printf("step poke   : line %zu has no '=' -- '%s'\n", lineno, l.c_str());
++						}
++						else
++						{
++							const auto addr = resolve(rest.substr(0, eq));
++							const auto hex = trim(rest.substr(eq + 1));
++							if(hex.size() % 2)
++							{
++								++failed;
++								std::printf("step poke   : line %zu has an odd hex digit count (%zu)\n", lineno, hex.size());
++							}
++							else
++							{
++								size_t n = 0;
++								for(size_t k2 = 0; k2 + 2 <= hex.size(); k2 += 2)
++									m.write8(addr + n++, static_cast<uint8_t>(std::strtoul(hex.substr(k2, 2).c_str(), nullptr, 16)));
++								std::printf("step poke   : %#x <- %zu byte%s\n", addr, n, n == 1 ? "" : "s");
++							}
++						}
++					}
++					else if(verb == "peek")
++					{
++						const auto c = rest.find(',');
++						const auto addr = resolve(rest.substr(0, c));
++						const auto len = c == std::string::npos ? 1u : std::max(1u, resolve(rest.substr(c + 1)));
++						std::string out;
++						char b[4];
++						for(uint32_t k2 = 0; k2 < len && k2 < 4096; ++k2)
++						{
++							std::snprintf(b, sizeof b, "%02x", m.read8(addr + k2));
++							out += b;
++						}
++						std::printf("step peek   : %#x : %s\n", addr, out.c_str());
++					}
++					else if(verb == "copy")
++					{
++						const auto eq = rest.find('=');
++						const auto c = rest.find(',', eq == std::string::npos ? 0 : eq);
++						if(eq == std::string::npos || c == std::string::npos)
++						{
++							++failed;
++							std::printf("step copy   : line %zu wants DST=SRC,LEN -- '%s'\n", lineno, l.c_str());
++						}
++						else
++						{
++							const auto dst = resolve(rest.substr(0, eq));
++							const auto src = resolve(rest.substr(eq + 1, c - eq - 1));
++							const auto len = resolve(rest.substr(c + 1));
++							uint32_t nz = 0;
++							for(uint32_t k2 = 0; k2 < len; ++k2)
++							{
++								const auto b = m.read8(src + k2);
++								if(b) ++nz;
++								m.write8(dst + k2, b);
++							}
++							std::printf("step copy   : %#x <- %#x, %u byte%s (%u nonzero)\n",
++								dst, src, len, len == 1 ? "" : "s", nz);
++						}
++					}
++					else if(verb == "frame")
++					{
++						const auto on = rest != "off";
++						rtos.setFrame(on);
++						std::printf("step frame  : DSP frame clock %s\n", on ? "ON" : "off");
++					}
++					else if(verb == "iclock")
++						std::printf("step iclock : %#04x -> clock receive cleared\n", rtos.internalClock());
++					else if(verb == "triglog")
++					{
++						rtos.installTrigLog();
++						std::printf("step triglog: installed\n");
++					}
++					else if(verb == "coverage")
++					{
++						m.setProfile(1);
++						std::printf("step covrge : every PC from here on\n");
++					}
++					else if(verb == "seq")
++					{
++						const auto c = rest.find(',');
++						const auto bank = resolve(rest.substr(0, c));
++						const auto pat = c == std::string::npos ? 0u : resolve(rest.substr(c + 1));
++						const auto sel = rtos.seqSelectLive(bank, pat);
++						std::printf("step seq    : bank %u pattern %u -> selected bank %u pattern %u\n",
++							bank, pat, sel.first, sel.second);
++					}
++					else if(verb == "transport")
++					{
++						if(rtos.startTransportLive())
++							std::printf("step trnsprt: started\n");
++						else
++						{
++							++failed;
++							std::printf("step trnsprt: FAILED -- %s\n", rtos.why().c_str());
++						}
++					}
++					else if(verb == "trigs")
++					{
++						std::printf("step trigs  : %zu live-nibble write(s)\n", rtos.liveNibbleLog().size());
++						size_t shown = 0;
++						for(const auto& t : rtos.liveNibbleLog())
++						{
++							if(shown++ >= 24) { std::printf("step trigs  : ... and more\n"); break; }
++							std::printf("step trigs  :   frame %llu index %u value %#04x pc %#x\n",
++								static_cast<unsigned long long>(t.frame), t.index, t.value, t.pc);
++						}
++					}
++					else if(verb == "frames")
++					{
++						// `frames N` or `frames N ADDR,LEN=HEX` -- the second form is a
++						// bind phase: run up to N frames, but stop as soon as LEN bytes
++						// at ADDR equal HEX. The caller then asserts on the `matched`
++						// field rather than trusting a fixed frame budget (route A's
++						// diff_flex_static.py was invalidated twice by exactly that).
++						std::istringstream is(rest);
++						std::string ntok, watchtok;
++						is >> ntok >> watchtok;
++						const uint64_t n = resolve(ntok);
++						uint32_t waddr = 0, wlen = 0;
++						std::vector<uint8_t> want;
++						if(!watchtok.empty())
++						{
++							const auto c = watchtok.find(',');
++							const auto eq = watchtok.find('=');
++							if(c == std::string::npos || eq == std::string::npos || eq < c)
++							{
++								++failed;
++								std::printf("step frames : line %zu wants ADDR,LEN=HEX -- '%s'\n", lineno, watchtok.c_str());
++							}
++							else
++							{
++								waddr = resolve(watchtok.substr(0, c));
++								wlen = resolve(watchtok.substr(c + 1, eq - c - 1));
++								const auto hex = watchtok.substr(eq + 1);
++								for(size_t k2 = 0; k2 + 2 <= hex.size(); k2 += 2)
++									want.push_back(static_cast<uint8_t>(std::strtoul(hex.substr(k2, 2).c_str(), nullptr, 16)));
++								if(want.size() != wlen)
++								{
++									++failed;
++									std::printf("step frames : line %zu -- LEN %u but %zu hex byte(s)\n", lineno, wlen, want.size());
++									wlen = 0;
++								}
++							}
++						}
++						const auto matches = [&]
++						{
++							if(!wlen) return false;
++							for(uint32_t k2 = 0; k2 < wlen; ++k2)
++								if(m.read8(waddr + k2) != want[k2]) return false;
++							return true;
++						};
++						const auto f0 = rtos.frameCount();
++						const auto target = f0 + n;
++						const auto budgetMs = static_cast<double>(n) * ot::g_framePeriod / ot::g_sampleHz * 1000.0 * 5 + 2000.0;
++						const auto rs = rtos.runUntil(budgetMs, [&] { return rtos.frameCount() >= target || matches(); });
++						const bool hit = matches();
++						std::printf("step frames : %llu frame(s) of %llu%s -- %s%s\n",
++							static_cast<unsigned long long>(rtos.frameCount() - f0),
++							static_cast<unsigned long long>(n),
++							wlen ? (hit ? ", WATCH MATCHED" : ", watch never matched") : "",
++							rs == ot::Rtos::Stop::Gate ? "ok" : rtos.why().c_str(),
++							rs == ot::Rtos::Stop::Gate ? "" : " (ENDED EARLY)");
++						if(rs != ot::Rtos::Stop::Gate)
++							++failed;
++					}
++					else
++					{
++						++failed;
++						std::printf("step ?      : unknown verb '%s' on line %zu\n", verb.c_str(), lineno);
++					}
++				}
++				std::printf("steps      : %zu line%s executed, %zu problem%s\n",
++					lineno, lineno == 1 ? "" : "s", failed, failed == 1 ? "" : "s");
++			}
++
+ 			// -- live input: the panel link and MIDI IN from a FIFO ------------
+ 			// The poll runs every 256 stepped or skipped instructions and reads
+ 			// the FIFO at most every 10 ms of wall time; a line is applied the

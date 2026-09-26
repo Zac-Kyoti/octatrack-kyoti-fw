@@ -161,3 +161,37 @@ with two patterns of differing MASTER LENGTH.** Ask the user to export one.
 4. **Name the uncovered case *and build the fixture*.** S83 wrote "per-track scale
    differences: NOT covered" and moved on; hardware found it in one test.
 5. **AR↔OT array mapping is by role, not semantics.** See §5.
+
+---
+
+## Addendum — 2026-09-24 (Session 90 KB ingest): the tick arithmetic, supplied
+
+The 2026-09-24 upstream ingest turned up the scale tables this thread had been
+re-deriving. **None of it is applied yet** — this is input to the next attempt, not a
+fix, and the hardware gate is unchanged.
+
+| Addr | What |
+|---|---|
+| `0x400aba50` | **ticks per step by scale byte 0..6 — `{3, 4, 6, 8, 12, 24, 48, 96}`**, index **2 = 1x = 6 ticks** |
+| `0x400d80dc` | chain/change **quantise lengths** in steps, 17 longs `{-1,1,2,3,4,6,8,12,16,24,32,48,64,96,128,192,256}`; indexed by slab `+0x8e56` or project default `0x8000004e` |
+| `0x400a3cee`, `0x400a3e14`, `0x400a3ff8` | **the three wrap comparands** — the sites to audit for *which domain each one compares in* |
+| `0x400a42d0` | **step phase = ticks/step × 2,646,000** |
+| `0x800065b2` | confirmed as **the master-step counter** (u16) — the domain S88's Hook P wrote into |
+| `0x400a44a0` | `seq_pattern_commit` — the pattern-change **quantisation point** (`0x800065be→0x65c1`, `0x800065bd→0x65c2`) |
+
+> source: `refs/octemu/re/coldfire.syms` @ `6a9ff68` (markandrus) · fetched 2026-09-24.
+> confidence **C** for the tables; **L** for the relevance reading here.
+
+⚠️ **Also from this ingest, and it affects this thread directly:** octalab reads the
+scale page (`0x40047d08`) as taking **master length from `pattern + 0x8e50` as a
+*short*, with `−1` = INF**. Our trailer table records MASTER LENGTH as a byte at
+`+0x8e51`. Big-endian these are consistent (`+0x8e51` is the low byte of the u16 at
+`+0x8e50`) — but the field is **16-bit with an INF sentinel**, which a byte-wise read
+sees as 255. Any master-wrap arithmetic in this thread should treat `+0x8e50` as `u16`.
+
+Suggested next step, given V5 removed Hook P and stock already computes the right
+answer at 1x: audit the three wrap comparands above against `0x400aba50[scale]` and
+`0x400a42d0`'s ×2,646,000 to establish, per site, whether it compares in master-step or
+track-step domain — rather than inferring the domain from symptoms. See
+`kb/memory-map.md` "The scale tables".
+

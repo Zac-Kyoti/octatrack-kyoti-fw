@@ -11,9 +11,9 @@ not, so treat what's below as the guaranteed minimum, then go read them.**
    from 2026-07; do not read top-to-bottom). `grep -nE '^## ' NOTES.md` for
    the index.
 3. **`reference/kb/*.md`** — the distilled external-RE knowledge base
-   (address map, file format, DSP, container, techniques). Check the file
-   relevant to what you're touching before proposing anything; each fact
-   carries its own source attribution.
+   (address map, file format, DSP, container, techniques, **caves**). Check
+   the file relevant to what you're touching before proposing anything; each
+   fact carries its own source attribution.
 4. **`reference/EXTERNAL_RESEARCH.md`** / **`reference/UPSTREAM_INBOX.md`** —
    what's tracked from the other Octatrack RE projects and what's pending
    distillation. `.claude/skills/pull-research/` is the one-command way to
@@ -40,6 +40,37 @@ descriptive, and this section is the policy.
 
 ## Hard constraints (do not relearn these the hard way)
 
+- **Choosing an address for new code? Read `reference/kb/caves.md` FIRST.**
+  Not "if it seems relevant" — always, before naming a cave address. Two
+  projects have bricked units into MIDI-only recovery getting this wrong, and
+  the trap is counter-intuitive: **27 KB of zeros at the tail of the image
+  (`0x401087e4..`, `0x4010cdd1..`) has ZERO static references and is still
+  written at runtime.** A static scan showing "no references" is *necessary and
+  not sufficient* — only a canary run settles it. The 6 KB cave we build in is
+  contested by four other projects and is effectively full; when it runs out
+  the answers are in that file (append-a-runtime, or a CF-card payload), not a
+  new region.
+- **A borrowed address or signature is a claim, not a fact — verify it against
+  our own image before relying on it.** Every upstream we track cites the same
+  MAIN OS (`section_3_MAIN_OS.bin`, sha256 `164f3122…`), so their addresses are
+  directly comparable *and* sometimes wrong: on 2026-09-24 a borrowed function
+  signature was wrong (`apply_part(part, pattern)`; it is `(bank, part)`) and a
+  "this word is referenced in stock" warning turned out to be unsubstantiated.
+  Thirty seconds of `m68k-elf-objdump -D -b binary -m m68k:cfv4e -EB
+  --adjust-vma=0x40000400 --start-address=… out/raw/section_3_MAIN_OS.bin` is
+  the difference. Mark a fact **C** on our own reading, not on someone's label.
+- **`sync.py --update octabam` silently changes OUR emulator.**
+  `tools/emu_rtos.py` runs octabam's script from inside `refs/octabam/` against
+  a Unicorn patched in that clone's `.venv`. After any octabam sync, re-run a
+  known-good scenario before trusting a new result — and **an emulator "green"
+  from before a sync is not evidence for a build after it.**
+  **The clone also needs a local patch to boot our images at all**:
+  `tools/refs/local-patches/octabam-emu-samplebank-map.patch` (the external
+  audio-sample SDRAM bank; without it boot dies `UC_ERR_WRITE_UNMAPPED` in
+  `gate_m6a`). A sync un-applies it — `sync.py` now prints the re-apply command,
+  and `tools/refs/local-patches/README.md` explains why the lock still pins the
+  upstream commit rather than the local one.
+
 - **Never call a UI or kernel primitive from an engine/frame hook — and do not
   trust a note calling a site a "per-frame tick".** `0x400522ca`
   (`FUN_40052200`) crashed a real MKI on 2026-09-25: dead controls plus a loud
@@ -47,34 +78,40 @@ descriptive, and this section is the policy.
   (NOTIFY) and `FUN_40056bec` (close) both bottom out in **`FUN_40000c3c`, the
   kernel post/wake** — it masks to `0x2700`, marks a blocked task runnable and
   pokes the ready-list head `0x800068d8`. That is legal from a **key handler**,
-  not from the engine frame path. **If you need "has N seconds passed", read the
-  OS's own state** (`0x460d1e70` handle / `0x460d1e6c` countdown for a toast)
-  instead of counting ticks yourself. NOTES "Session 93".
+  not from the engine frame path. The same hook also fires far too rarely to
+  drive a countdown (route A: 0 entries across a bare boot, a `--load-project`
+  run and a 4000-frame `--sequencer` run), so anything timed from it never
+  expires. **If you need "has N seconds passed", read the OS's own state**
+  (`0x460d1e70` handle / `0x460d1e6c` countdown for a toast) instead of
+  counting ticks yourself. NOTES "Session 93".
 - **"Hardware-confirmed" must name what was confirmed.** QLREC carried
   "hardware-confirmed, final" for six sessions while containing the latent
   crash above: what was actually confirmed was *it did not hang during that
   flash*. A rare crash and a clean feature look identical at flash time. Write
   the specific observation into the status line, not the conclusion.
+
 - **Scratch RAM at `0x80006a40+` is NOT reliable under live audio, and our
   emulator cannot tell you.** QLREC kept one magic longword at `0x80006a60`;
   on hardware it was already gone by the *next key press* (a diagnostic build
-  reported it on screen), while it persisted perfectly in the emulator, which
-  does not run the DSP/audio path for real. The block sits in the **DSP
-  shared-RAM window**, and a static "no references" scan says nothing about
-  runtime writes. **Proven twice:** RELOAD3's request bytes at `0x80006a54-55`
-  were overwritten between a key chord and the storage job that read them, so it
-  reloaded the wrong (MIDI) track and still reported success (Session 98).
+  reported it on screen), while it persisted perfectly in route A — which does
+  not run the DSP/audio path for real. The block sits in the **DSP shared-RAM
+  window**. A static "no references" scan says nothing about runtime writes
+  (`kb/caves.md` says as much about the image tail; it is just as true here).
   **Prefer keeping no private state at all** — read the state the OS already
-  maintains. Both features now keep theirs in their own cave.
-  ⚠️ DIRECT JUMP (`0x80006a40-4a`, `wip`) still keeps state there; its flag is
+  maintains (for a toast: the handle `0x460d1e70`). **Proven a second time
+  (Session 98): RELOAD3's request bytes at `0x80006a54-55` were overwritten on
+  the unit between the chord and the worker — it reloaded MIDI track 6 instead
+  of audio track 1 and said RELOADED.** RELOAD3 now keeps them in its cave, and
+  `build_reload3.py` refuses any reference into `0x80006a40..0x80006abf`.
+  ⚠️ DIRECT JUMP (`0x80006a40-4a`) still keeps state there; its flag is
   re-armed every tick so a clobber would be invisible rather than absent.
   NOTES "Sessions 94-96", "Session 98".
 - **When hardware and the emulator disagree, build a diagnostic, don't reason.**
-  Both of these were settled by a build whose on-screen message *named* the
-  failing condition, after theories that survived static analysis and emulation.
-  The emulator's blind spots (no UI tick, no real DSP path) are exactly where the
-  bugs lived, so "emulator ALL GOOD" is evidence about the logic, never about the
-  machine. Say which one you mean.
+  Three flashes of this one were spent on theories that all survived static
+  analysis and emulation; a build whose toast *named* the failing condition
+  settled it on the first try. The emulator's blind spots (no UI tick, no real
+  DSP path) are exactly where the bugs lived, so "emulator ALL GOOD" is evidence
+  about the logic, never about the machine. Say which one you mean.
 
 - **Hardware = Octatrack MKI only. No MKII.** Stock 1.40C is one image for
   both; the boot probe `0x46c8d18c` adapts it (MKI shows 15 PERSONALIZE

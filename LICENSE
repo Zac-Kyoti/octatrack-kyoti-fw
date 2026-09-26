@@ -31,9 +31,9 @@ WHAT IT DOES NOT COVER
      design).
 
   3. Patches to third-party tools, and everything fetched at build time. The
-     *.patch files under tools/ (for example tools/elektron-firmware-tool.patch
-     and tools/dsp56300_xcore/vendor.patch) modify other projects' code and stay
-     under the license of the project they modify.
+     *.patch files under tools/ (for example tools/elektron-firmware-tool.patch,
+     tools/dsp56300_xcore/vendor.patch and tools/refs/local-patches/) modify
+     other projects' code and stay under the license of the project they modify.
      Anything fetched into vendor/ or refs/ keeps its own license (for example
      dsp56300/dsp56300 is GPLv3, and octabam is MIT). Neither directory is
      tracked here beyond its manifests.

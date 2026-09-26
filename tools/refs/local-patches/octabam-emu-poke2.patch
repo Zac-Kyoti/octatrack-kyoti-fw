@@ -1,0 +1,50 @@
+diff --git a/tools/emu/ot_emu/main.cpp b/tools/emu/ot_emu/main.cpp
+index efb9bf5..97f4f2e 100644
+--- a/tools/emu/ot_emu/main.cpp
++++ b/tools/emu/ot_emu/main.cpp
+@@ -112,6 +112,8 @@ int main(int _argc, char** _argv)
+ 	std::string livePath;		// a FIFO (or file) of panel events, read while the RTOS runs: "key <code> down|up", "enc <n> <delta>", "pot <0..255>", "midi <hex>...", "quit" -- tools/emu/lcd_view.py --panel writes it
+ 	std::string midiFile;		// with --sequencer: MIDI IN bytes onto UART0, one event per line: "<frames after the transport start> <hex byte>..." (e.g. "20 B0 28 7F" = CC 40 to 127 on channel 1) or "pre <hex byte>..." before the transport start ("pre C0 10" = program change 16 while stopped)
+ 	int pokeAtFrame = -1;		// mute-while-playing test: apply pokeAfterLoad this many frames INTO the sequencer run instead of before it (-1 = old behaviour, immediately after the load)
++	std::string poke2;			// a SECOND timed poke -- the UNMUTE half of a mute/unmute test
++	int poke2AtFrame = -1;
+ 	int mainLevel = -1;			// O9b: post sys command 4 (SET MAIN LEVEL) with this level after the load; -1 = don't (the emulated load never does, and every voice then renders at gain zero)
+ 	std::string lcd;			// the panel's 1-bpp plane (0x46c7e0ea, 1024 B) to FILE whenever it has changed, at most once per 2M instructions; tools/emu/lcd_view.py draws it
+ 	std::string memDump;		// O10.21: "addr,len=path[;...]" -- ColdFire memory ranges, raw bytes, to FILE at the very end (peeks only support one word, pre-sequencer; this is a range, post-run)
+@@ -189,6 +191,8 @@ int main(int _argc, char** _argv)
+ 		else if(a == "--live" && i + 1 < _argc)		livePath = _argv[++i];
+ 		else if(a == "--fast" && i + 1 < _argc)		fastEvery = std::strtoull(_argv[++i], nullptr, 0);
+ 		else if(a == "--poke-at-frame" && i + 1 < _argc)	pokeAtFrame = std::atoi(_argv[++i]);
++		else if(a == "--poke2" && i + 1 < _argc)		poke2 = _argv[++i];
++		else if(a == "--poke2-at-frame" && i + 1 < _argc)	poke2AtFrame = std::atoi(_argv[++i]);
+ 		else if(a == "--frame-timer")				frameTimer = true;
+ 		else
+ 		{
+@@ -891,7 +895,7 @@ int main(int _argc, char** _argv)
+ 				// while first, not muted at the same instant as its first
+ 				// trig). The frame engine keeps going underneath all of them,
+ 				// as on the unit.
+-				enum class ActKind { Call, Midi, Poke, PokeTrig };
++				enum class ActKind { Call, Midi, Poke, Poke2, PokeTrig };
+ 				struct Action { uint64_t frame; ActKind kind; std::vector<uint8_t> bytes; };
+ 				std::vector<Action> actions;
+ 				if(!callSpec.empty() && callAt >= 0)
+@@ -901,6 +905,8 @@ int main(int _argc, char** _argv)
+ 						actions.push_back({ev.frame, ActKind::Midi, ev.bytes});
+ 				if(!pokeAfterLoad.empty() && pokeAtFrame >= 0)
+ 					actions.push_back({static_cast<uint64_t>(pokeAtFrame), ActKind::Poke, {}});
++				if(!poke2.empty() && poke2AtFrame >= 0)
++					actions.push_back({static_cast<uint64_t>(poke2AtFrame), ActKind::Poke2, {}});
+ 				if(pokeTrig && pokeTrigAtFrame >= 0)
+ 					actions.push_back({static_cast<uint64_t>(pokeTrigAtFrame), ActKind::PokeTrig, {}});
+ 				std::stable_sort(actions.begin(), actions.end(), [](const Action& x, const Action& y) { return x.frame < y.frame; });
+@@ -926,6 +932,9 @@ int main(int _argc, char** _argv)
+ 					case ActKind::Poke:
+ 						pokeBytes(pokeAfterLoad, ("mid-run, after frame " + std::to_string(act.frame)).c_str());
+ 						break;
++					case ActKind::Poke2:
++						pokeBytes(poke2, ("mid-run #2, after frame " + std::to_string(act.frame)).c_str());
++						break;
+ 					case ActKind::PokeTrig:
+ 						std::printf("poke trig  : track 1 step %d -> mask byte 7 = %#04x (mid-run, after frame %llu)\n",
+ 							pokeTrig, rtos.pokeTrig(static_cast<uint32_t>(pokeTrig)),

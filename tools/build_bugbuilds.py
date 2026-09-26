@@ -77,7 +77,7 @@ BUGFIX = {
 #   wip=True is skipped unless --with-wip is passed.  DIRECT JUMP is not finished (see
 #   reference/MERGE.md); RELOAD3 was finished on 2026-09-25 and is now a normal feature
 #   above.  NOTE: the DIRECTJUMP_V4 entry below targets the superseded v4 builder --
-#   DIRECT JUMP is now build_directjump_v5.py on the `wip` branch (outputs mainos_directjump_v5.bin), and
+#   DIRECT JUMP is now build_directjump_v5.py (outputs mainos_directjump_v5.bin), and
 #   re-pointing it needs the cave layout re-checked against V5's larger cave first.
 FEATURES = {
     "MUTEMODE_DT": ("build_mutemode_dt.py", "out/mainos_mutemode_dt.bin", "BUG_MUTEDT", False,

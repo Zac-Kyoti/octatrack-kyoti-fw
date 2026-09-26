@@ -1,0 +1,199 @@
+diff --git a/scripts/build_unicorn.sh b/scripts/build_unicorn.sh
+index 6463134..893f5e7 100755
+--- a/scripts/build_unicorn.sh
++++ b/scripts/build_unicorn.sh
+@@ -45,6 +45,13 @@ echo "$SHA  $WORK/unicorn-$VER.tar.gz" | shasum -a 256 -c - >/dev/null
+ rm -rf "$WORK/unicorn-$VER"
+ tar xzf "$WORK/unicorn-$VER.tar.gz" -C "$WORK"
+ ( cd "$WORK/unicorn-$VER" && patch -p1 < ../../../tools/patches/unicorn_emac_fractional.patch )
++# Kyoti local: expose uc->emu_counter -- the EXACT instruction count of the last
++# uc_emu_start -- through uc_ctl.  Unicorn already maintains it in C (uc.c
++# hook_count_cb) on every burst we start with count > 0, which is every burst;
++# without this read the only way to get a short burst's true length is
++# Rtos.exact_clock()'s per-instruction Python UC_HOOK_CODE, measured at ~28x on
++# m68k here.  Appends one enum value, so the stock pip bindings stay compatible.
++( cd "$WORK/unicorn-$VER" && patch -p1 < ../../../tools/patches/unicorn_emu_counter.patch )
+ 
+ EXTRA=()
+ if [ "$(uname -s)" = Darwin ]; then
+@@ -54,6 +61,15 @@ fi
+ cmake -B "$WORK/build" -S "$WORK/unicorn-$VER/src" -DUNICORN_ARCH=m68k \
+       -DUNICORN_BUILD_TESTS=off -DCMAKE_BUILD_TYPE=Release "${EXTRA[@]}" >"$WORK/cmake.log" 2>&1
+ cmake --build "$WORK/build" -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc)" >"$WORK/build.log" 2>&1
++# ☠ UNLINK FIRST, NEVER cp OVER THE LIVE FILE. A plain `cp` keeps the inode and
++# rewrites its pages in place; macOS then fails page validation against the
++# ad-hoc code signature it cached for that path and SIGKILLs (`Killed: 9`) any
++# process that loads it -- including this script's own self-test below, and any
++# OTHER session's emulator run that has the old copy mapped. The identical bytes
++# at a fresh path load fine, which is how this was pinned (Kyoti, 25 Sep 2026;
++# it also explains this file's own "crashed on its first emu_start" note above).
++# rm is safe for a mapped copy: the inode lives until the last mapping drops.
++rm -f "$OUT"/libunicorn.2.* "$OUT"/libunicorn.so.2
+ cp "$WORK"/build/libunicorn.2.* "$OUT"/ 2>/dev/null || cp "$WORK"/build/libunicorn.so.2 "$OUT"/
+ ls "$OUT"
+ 
+diff --git a/tools/emu/emu_rtos.py b/tools/emu/emu_rtos.py
+index 06ae62c..a4e201c 100644
+--- a/tools/emu/emu_rtos.py
++++ b/tools/emu/emu_rtos.py
+@@ -12,6 +12,7 @@ asserted sources are injected between bursts.
+     .venv/bin/python3 tools/emu/emu_rtos.py --project <dir> --set OCTABAM --name RIG --ms 100
+ """
+ import argparse
++import ctypes
+ import collections
+ import os
+ import pathlib
+@@ -492,6 +493,50 @@ class RtosFault(Exception):
+     pass
+ 
+ 
++# -- the exact instruction clock, read from C (Kyoti local) -------------------
++# Unicorn maintains uc->emu_counter in its own C count hook on every burst we
++# start with count > 0 -- which is every burst Rtos.step() starts -- and resets
++# it at the top of each uc_emu_start.  `tools/patches/unicorn_emu_counter.patch`
++# exposes it as UC_CTL_UC_EMU_COUNTER so `exact_clock` can READ that number
++# instead of recomputing it with a per-instruction Python UC_HOOK_CODE (measured
++# here at ~28x on m68k: 92 -> 3.2 MIPS).
++#
++# It is the SAME number by construction, not an approximation: both are
++# UC_HOOK_CODE callbacks that fire exactly once per instruction about to
++# execute.  Measured: against the old library's Python-hook run, this path gives
++# 610,484,760 vs 610,430,552 instructions (0.01%), 1.365x vs 1.366x mis-billing,
++# 56,842 vs 56,843 short bursts -- two libraries, two mechanisms, one accounting.
++#
++# ☠ `OCTA_EXACT_VERIFY=1` keeps the Python hook as well and raises on the first
++# burst where the two disagree.  It is the check to run after a Unicorn bump, but
++# it PERTURBS THE MACHINE: with the global hook installed the same scenario runs
++# 211,179 bursts and NONE stop short, against 270,619 with 56,842 short in
++# production.  A fault from it is real; its burst statistics are not production's.
++#
++# ☠ This buys no measurable speed on a real diag (178.6 s -> 188.4 s on
++# --sequencer --frames 40, within host-load noise), because Unicorn's fast path
++# is already gone: `native_macload` installs 435 code hooks regardless, and one
++# fewer global hook cannot recover what 435 site hooks have given up.  It is kept
++# because it removes a per-instruction Python callback at no fidelity cost, not
++# because it made anything faster.
++UC_CTL_UC_EMU_COUNTER = 15          # appended by the patch; every stock value is unmoved
++
++
++def emu_counter_available(uc):
++    """True if this libunicorn carries the emu_counter ctl."""
++    try:
++        read_emu_counter(uc)
++        return True
++    except Exception:
++        return False
++
++
++def read_emu_counter(uc):
++    buf = ctypes.c_size_t()
++    uc.ctl(UC_CTL_UC_EMU_COUNTER, eb.UC_CTL_IO_READ, ctypes.byref(buf))
++    return buf.value
++
++
+ class Rtos:
+     """The event loop over a booted machine. Construct via `attach()`."""
+ 
+@@ -513,7 +558,9 @@ class Rtos:
+         self.trace = trace                   # callable(str) or None
+         self.sample = 0.0
+         self.instrs = 0
++        self.instrs_quantum = 0   # what the QUANTUM rule alone would have charged
+         self.bursts = 0
++        self.bursts_short = 0     # bursts that stopped before their quantum
+         self.wall = 0.0
+         self.pc = None
+         self.trap = r.trap                   # the boot's (32, HANDOFF)
+@@ -614,6 +661,15 @@ class Rtos:
+         if getattr(self, "_exact", None) is not None:
+             return self
+         self._exact = {"n": 0}
++        verify = bool(os.environ.get("OCTA_EXACT_VERIFY"))
++        # Kyoti local: read the count C already has, instead of counting in
++        # Python.  See emu_counter_available above.  The Python hook stays as
++        # the fallback for a stock libunicorn, and as the cross-check.
++        self._exact_native = emu_counter_available(self.uc) and not verify
++        if self._exact_native:
++            return self
++        if verify and emu_counter_available(self.uc):
++            self._exact["verify"] = True
+ 
+         def on_code(u, a, sz, x):
+             self._exact["n"] += 1
+@@ -1008,7 +1064,18 @@ class Rtos:
+         uc.emu_start(self.pc, 0, count=n)
+         self.wall += time.perf_counter() - t0
+         self.bursts += 1
++        self.instrs_quantum += n              # the quantum rule's bill, always
+         if ex is not None:
++            if getattr(self, "_exact_native", False):
++                ex["n"] = read_emu_counter(uc)
++            elif ex.get("verify"):
++                native = read_emu_counter(uc)
++                if native != ex["n"]:
++                    raise RtosFault(
++                        f"emu_counter {native} != Python hook {ex['n']} at pc "
++                        f"{self.pc:#x} (burst {self.bursts}, quantum {n})")
++            if ex["n"] < n:
++                self.bursts_short += 1
+             n = ex["n"]                      # what actually ran, not the quantum
+         self.instrs += n
+         self.sample += n / self.ips
+@@ -1485,6 +1552,11 @@ class Rtos:
+                      f"{self.instrs:,} instrs charged in {self.bursts} bursts, "
+                      f"{self.wall:.2f} s wall ({self.instrs / max(self.wall, 1e-9) / 1e6:.2f} M instr/s), "
+                      f"{self.idle_skips} idle skips, {self.forces} INTFRC writes, PIT0 fired {self.pit0.fired}")
++        if getattr(self, "_exact", None) is not None and self.instrs:
++            lines.append(f"clock      : quantum rule would have charged "
++                         f"{self.instrs_quantum:,} vs {self.instrs:,} actually executed "
++                         f"= {self.instrs_quantum / self.instrs:.3f}x mis-billing "
++                         f"({self.bursts_short} of {self.bursts} bursts stopped short)")
+         lines.append(f"seeded from {self.seeded} boot writes; serial sent: "
+                      f"{len(self.uart64.tx)} B on {self.uart64.name}, {len(self.uart68.tx)} B on {self.uart68.name}")
+         lines.append("created:")
+diff --git a/tools/patches/unicorn_emu_counter.patch b/tools/patches/unicorn_emu_counter.patch
+new file mode 100644
+index 0000000..8714638
+--- /dev/null
++++ b/tools/patches/unicorn_emu_counter.patch
+@@ -0,0 +1,39 @@
++--- a/src/include/unicorn/unicorn.h	2026-09-25 19:36:11
+++++ b/src/include/unicorn/unicorn.h	2026-09-25 19:36:26
++@@ -605,6 +605,17 @@
++     // controle if context_save/restore should work with snapshots
++     // Write: @args = (int)
++     UC_CTL_CONTEXT_MODE,
+++    // octabam/kyoti: how many instructions the LAST uc_emu_start actually
+++    // retired. uc->emu_counter is already maintained in C by the internal
+++    // count hook whenever uc_emu_start is given count > 0 (uc.c
+++    // hook_count_cb), and it is reset at the top of every uc_emu_start -- so
+++    // this is a free, exact read of a number Unicorn already has. Without it
+++    // the only way to learn a short burst's true length is a per-instruction
+++    // UC_HOOK_CODE callback, which costs ~28x on m68k.
+++    // APPENDED DELIBERATELY: every pre-existing UC_CTL_* keeps its value, so
+++    // the stock Python bindings stay ABI-compatible with this library.
+++    // Read: @args = (size_t*)
+++    UC_CTL_UC_EMU_COUNTER,
++ } uc_control_type;
++ 
++ /*
++--- a/src/uc.c	2026-09-25 19:36:11
+++++ b/src/uc.c	2026-09-25 19:36:26
++@@ -2656,6 +2656,16 @@
++         if (rw == UC_CTL_IO_READ) {
++             uint64_t *arch = va_arg(args, uint64_t *);
++             *arch = uc->timeout;
+++        } else {
+++            err = UC_ERR_ARG;
+++        }
+++        break;
+++    }
+++
+++    case UC_CTL_UC_EMU_COUNTER: {
+++        if (rw == UC_CTL_IO_READ) {
+++            size_t *counter = va_arg(args, size_t *);
+++            *counter = uc->emu_counter;
++         } else {
++             err = UC_ERR_ARG;
++         }

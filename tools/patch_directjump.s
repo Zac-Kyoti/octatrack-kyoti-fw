@@ -228,14 +228,33 @@
                                         | at TRK_LEN_SRC + patOff + t*0x91a
     .equ MIDI_LEN_SRC, 0x400e6ad8       | TRK_BLOB + 0x48f8 -- MIDI track m's LENGTH byte is
                                         | at MIDI_LEN_SRC + patOff + m*0x8b0
-    .equ NEXT_STEP, 0x800065e4          | Session 88: stock's per-track step index, ONE WORD
-                                        | per track, 16 wide and CONTIGUOUS -- audio 0-7 at
-                                        | 0x800065e4+2t and MIDI 8-15 at 0x800065f4+2(t-8)
-                                        | are the same array (it tiles into PAIR at
-                                        | 0x80006604, measured S79 cont.21). Written by
-                                        | stock's own rebuild at 0x400a4916 as
-                                        | ceil(D7 / tps_t) -- the TRACK's step index, in the
-                                        | TRACK's rate domain. See Hook P.
+    .equ PAIR_ARR,  0x80006604          | per-track SUB-STEP TICK PHASE, one WORD per track,
+                                        | 16 wide and contiguous (NEXT_STEP at 0x800065e4
+                                        | + 32 tiles into it). Stock's rebuild writes it at
+                                        | 0x400a4924/0x400a492a as D7 mod tps_t.
+    .equ CATCHUP,   0x800065d3          | per-track byte. Stock's rebuild sets it at
+                                        | 0x400a49aa to max(0, tps_t - tps_master), and the
+                                        | per-tick code COPIES it into TICKS_IN_STEP[t] at
+                                        | 0x400a354a whenever CNTDN_TBL[t] == 0 -- i.e. it
+                                        | SHORTENS each track's first step after a commit so
+                                        | the track advances in lockstep with the master for
+                                        | one step. At 1x that is max(0, 6-6) = 0, a no-op.
+                                        | See dj_phase3.
+    .equ TICK_CTR,  0x800065b6          | alias of STEP below, under its MEASURED name:
+                                        | master TICKS-WITHIN-STEP, wrapping at
+                                        | LEN_TBL[SCALE_IX] (Session 82). Named here because
+                                        | dj_d7's tick conversion reads it as a tick count,
+                                        | and calling it STEP there would invite exactly the
+                                        | unit error that conversion exists to fix.
+    .equ MASTER_STEPS2, 0x80006638      | Session 89: the STOCK-PAIRED COMPANION of
+                                        | MASTER_STEPS (0x80006628). Stock writes the two
+                                        | together, same value, at all three of its own
+                                        | sites: 0x400a0622/28, 0x400a40b8/be and
+                                        | 0x400a44ea/f0. It has live readers of its own --
+                                        | 0x4009be88 seeds MASTER_STEP (0x800065b2) from it,
+                                        | and 0x4009da88 multiplies it by ticks-per-step.
+                                        | Found by reading timhastie/octatrick's direct-jump
+                                        | module, which writes both; we wrote only 0x28.
     .equ STEP_ARR,  0x800064d0          | per-track STEP, 16 wide (audio 0-7, MIDI 8-15).
                                         | AR's 0x40566720. Incremented at 0x400a3d78 and
                                         | wrapped against the track's LENGTH at 0x400a3d8c.
@@ -251,7 +270,16 @@
                                         | is TICKS PER STEP, not a length, so THIS is the
                                         | modulus a master step position needs.
     .equ PC_SEND,   0x4009e884          | FUN_4009e884(bank, pat) -> Bank Sel CC + PC
+    .equ SPRINTF,   0x40013a08          | varargs sprintf (link a6) -- Session 17's key_fmt
+                                        | used it via tail-jmp; diag toast calls it direct
     .equ SW_LABEL,  0x400a43a0          | "switch confirmed" label inside the step==0 body
+    .equ CNTDN_TBL, 0x800065c3          | per-track commit countdown, 16 wide. The tail
+                                        | decrements it at 0x400a4bc4 and applies THAT
+                                        | track's reposition (STEP_ARR write + tick-counter
+                                        | zero) only on the tick it reaches 0 -- so a
+                                        | commit is applied PER TRACK, up to tps_master
+                                        | ticks after dj_c ran. Hooks Z/X key off cursors
+                                        | derived from it. Session 97.
 
     .text
 
@@ -324,6 +352,54 @@ dj_toggle:
     beq.b   djt_show
     lea     dj_msg_on,%a0
 djt_show:
+    .ifdef DJ_DIAG
+|   Session 98 diagnostic: the toggle toast reports the phase-fix counters instead of
+|   ON/OFF, then resets them. Key-handler context, so sprintf + NOTIFY are both legal
+|   here (CLAUDE.md: never from the engine frame path). Read protocol:
+|     A = armed commits (djc_fix entries)      Z = Hook Z preserve-path entries
+|     X = Hook X preserve-path entries         Y = 0x400a355e copies (third writer)
+|     P = last byte the third writer copied    R = last Hook H master remainder
+|   Expected if the fix executes: Z == X == 16*A. X << 16*A -> arm/consume path broken
+|   on hardware. Y > 0 with P != 0 -> the third writer re-phases after our fix.
+|   R != 0 -> the master grid itself re-anchors off the absolute bar (Hook H discards
+|   this remainder; stock zeroes the master tick counter at the commit).
+    moveq   #0,%d0
+    move.w  dj_cnt_m,%d0
+    move.l  %d0,-(%sp)                 | M
+    moveq   #0,%d0
+    move.b  dj_cnt_rem,%d0
+    move.l  %d0,-(%sp)                 | R
+    moveq   #0,%d0
+    move.w  dj_cnt_n,%d0
+    move.l  %d0,-(%sp)                 | N (P dropped from display: Y0/P0 across three
+                                       | hardware sessions; dj_diagy still records it)
+    moveq   #0,%d0
+    move.w  dj_cnt_w,%d0
+    move.l  %d0,-(%sp)                 | W (Y dropped: dead across 4 HW sessions)
+    moveq   #0,%d0
+    move.w  dj_cnt_x,%d0
+    move.l  %d0,-(%sp)                 | X
+    moveq   #0,%d0
+    move.w  dj_cnt_z,%d0
+    move.l  %d0,-(%sp)                 | Z
+    moveq   #0,%d0
+    move.w  dj_cnt_arm,%d0
+    move.l  %d0,-(%sp)                 | A
+    pea     dj_diag_fmt
+    pea     dj_diag_buf
+    jsr     SPRINTF                    | 0x40013a08, varargs, ints as longs
+    lea     36(%sp),%sp
+    clr.w   dj_cnt_arm
+    clr.w   dj_cnt_z
+    clr.w   dj_cnt_x
+    clr.w   dj_cnt_y
+    clr.w   dj_cnt_w
+    clr.w   dj_cnt_m
+    clr.w   dj_cnt_n
+    clr.b   dj_cnt_pair
+    clr.b   dj_cnt_rem
+    lea     dj_diag_buf,%a0
+    .endif
     .ifdef DJ_V3
     pea     DJ_TOAST_DUR               | dur (frames)
     move.l  %a0,-(%sp)                 | text
@@ -529,34 +605,127 @@ djb_orig:
     .global dj_d7
 dj_d7:
     tst.b   G_ARMED
-    beq.b   djd7_orig
-    lea     -16(%sp),%sp
-    movem.l %d0-%d2/%a1,(%sp)
+    beq.w   djd7_orig                  | .w: the Session 89 tick-conversion block below put
+                                       | djd7_orig out of 8-bit branch range
+    lea     -24(%sp),%sp
+    movem.l %d0-%d4/%a1,(%sp)
+    clr.b   dj_mrem                    | Session 100: one-shot; stays 0 unless the
+                                       | division below actually yields a remainder
     move.l  %d0,%d2                    | d2 = pattern blob offset (caller's D0)
     lea     PAT_SMODE,%a1
     tst.b   (%a1,%d2.l)
-    beq.b   djd7_unif
+    beq.b   djd7_normal
     lea     PAT_MLEN,%a1               | per-track mode -> MASTER LENGTH (+0x8e51)
     bra.b   djd7_gotlen
-djd7_unif:
-    lea     PAT_LEN,%a1                | uniform mode  -> pattern LENGTH (+0x8e53)
+djd7_normal:
+    lea     PAT_LEN,%a1                | NORMAL mode   -> pattern LENGTH (+0x8e53)
 djd7_gotlen:
     moveq   #0,%d1
-    move.b  (%a1,%d2.l),%d1
+    move.b  (%a1,%d2.l),%d1            | d1 = the INCOMING pattern's length, in STEPS
+|   ---- Session 89: convert through TIME, not through a step COUNT ----
+|   A master STEP is not a fixed amount of time -- it is LEN_TBL[masterScale] ticks, so it
+|   is 6 ticks in a 1x pattern and 3 in a 2x one. Carrying MASTER_STEP across a commit that
+|   also changes the MASTER SCALE is therefore a UNIT ERROR: it is exactly right when the
+|   two scales match (which is the whole 1x baseline) and wrong in proportion to the
+|   mismatch otherwise, with a residue that depends on where in the bar the switch landed.
+|   Reported as "totally dependent on the user's pattern switch cadence".
+|
+|   The user's spec, which this implements: both patterns share ONE timebase, each wrapping
+|   at its own cycle length, so a switch is transparent. With two 16-step tracks and the
+|   second pattern at master 2x, pattern 1 step 1 must coincide with pattern 2 step 1, and
+|   pattern 2 step 1 with pattern 1 step 1 OR 9 (pattern 2's cycle is 48 ticks, pattern 1's
+|   is 96, so it comes round twice as often).
+|
+|       ticks   = MASTER_STEP * tps_out + TICK_CTR
+|       newStep = (ticks / tps_in) mod newMasterLen
+|
+|   At 1x, tps_out == tps_in and (ms * tps)/tps == ms, so this is ARITHMETICALLY IDENTICAL
+|   to the old `MASTER_STEP mod newMasterLen` -- the baseline is preserved by identity, not
+|   by testing.
+|
+|   MEASURED at this site (tools/diag_hookh_inputs.py, four armed commits): SCALE_IX still
+|   holds the OUTGOING master's scale, ACT_PAT is ALREADY the incoming pattern, TICK_CTR is
+|   always 0 (the step body is gated on it), and the order within the tick is
+|   HookD(0x400a4220) -> ACT_PAT=PEND(0x400a44d0) -> HookH(0x400a47f6).
+|
+|   Division is a subtraction loop, deliberately: it introduces no instruction form stock
+|   does not already use here. Worst case is masterLen 64 * tps 96 / 3 = 2048 iterations,
+|   a few tens of microseconds on a 264 MHz part; the ordinary case (16 * 6 / 3) is 32.
+    moveq   #0,%d4
+    move.b  SCALE_IX,%d4               | the OUTGOING master's scale index
+    lea     LEN_TBL,%a1
+    move.l  (%a1,%d4.l*4),%d4          | d4 = tps_out
     moveq   #0,%d0
-    move.w  MASTER_STEP,%d0            | the bounded playhead
+    move.w  MASTER_STEP,%d0            | the bounded playhead, in OUTGOING master steps
+    muls.l  %d4,%d0                    | d0 = ticks elapsed in this master cycle
+    moveq   #0,%d4
+    move.b  TICK_CTR,%d4
+    add.l   %d4,%d0                    | + sub-step ticks (measured 0 here, added for safety)
+|   d3 = tps_in, the INCOMING master's ticks-per-step, chosen the same way stock's own D7
+|   setup at 0x400a4802-0x400a4826 chooses it: MASTER SCALE in PER TRACK mode, the pattern
+|   multiplier in NORMAL mode.
+    lea     PAT_SMODE,%a1
+    tst.b   (%a1,%d2.l)
+    beq.b   djd7_tps_normal
+    lea     PAT_MSCALE,%a1
+    bra.b   djd7_tps_got
+djd7_tps_normal:
+    lea     PAT_SCALE,%a1
+djd7_tps_got:
+    moveq   #0,%d3
+    move.b  (%a1,%d2.l),%d3
+    lea     LEN_TBL,%a1
+    move.l  (%a1,%d3.l*4),%d3          | d3 = tps_in
+    moveq   #0,%d4                     | d4 = quotient
+    tst.l   %d3
+    ble.b   djd7_lenchk                | unreadable scale -> leave the tick count alone
+djd7_div:
+    cmp.l   %d3,%d0
+    blt.b   djd7_divdone
+    sub.l   %d3,%d0
+    addq.l  #1,%d4
+    bra.b   djd7_div
+djd7_divdone:
+    .ifdef DJ_DIAG
+    tst.l   %d0
+    beq.b   djd7_nzdone
+    move.l  %d4,-(%sp)                 | d4 = the quotient, still needed below
+    move.w  dj_cnt_n,%d4
+    addq.l  #1,%d4                     | N: commits whose seed was NONZERO
+    move.w  %d4,dj_cnt_n
+    move.l  (%sp)+,%d4
+djd7_nzdone:
+    .endif
+    move.b  %d0,dj_mrem                | d0 = ticks mod tps_in, the SUB-STEP REMAINDER.
+                                       | Session 100 (hardware, diag R=4 on real runs):
+                                       | commits DO land mid-master-step on the unit, so
+                                       | discarding this while stock zeroes the master
+                                       | tick counter re-anchors the whole incoming grid
+                                       | r ticks late. dj_c now SEEDS the counter with it.
+    .ifdef DJ_DIAG
+    move.b  %d0,dj_cnt_rem             | R in the toast = the same value
+    .endif
+    move.l  %d4,%d0                    | d0 = newStep, in INCOMING master steps
+djd7_lenchk:
     tst.l   %d1
-    ble.b   djd7_store                 | unreadable length -> leave the raw index; Hook P
-                                       | reduces per track against each track's own length
+    ble.b   djd7_store                 | INF / unreadable length -> leave the raw index
+                                       | unwrapped; stock's own rebuild reduces it per track
+                                       | against each track's length at 0x400a4976
 djd7_mod:
     cmp.l   %d1,%d0
     blt.b   djd7_store
     sub.l   %d1,%d0                    | operands are both <= 64, so this is a few passes
     bra.b   djd7_mod
 djd7_store:
-    move.l  %d0,MASTER_STEPS           | = AR's new_step
-    movem.l (%sp),%d0-%d2/%a1
-    lea     16(%sp),%sp
+|   MEASURED (tools/diag_startoffset.py, V5 image, DJMAST2 0 <-> 1, four armed commits):
+|   writing only 0x80006628 left 0x80006638 at 0 while 0x80006628 read 8, 9, 2 and 4 -- and
+|   the reader at 0x4009da88 EXECUTED WHILE STALE, twice per commit, seeing 0. One code path
+|   was told "start at master step 8" and another "start at 0". Stock never allows that:
+|   every one of its own writes sets the pair. So set both, exactly as stock does.
+    move.l  %d0,MASTER_STEPS           | = AR's new_step, now in the INCOMING master's steps
+    move.l  %d0,MASTER_STEPS2          | stock writes these two as a PAIR -- never one alone
+    movem.l (%sp),%d0-%d4/%a1
+    lea     24(%sp),%sp
 djd7_orig:
     lea     0x400eb034,%a0             | displaced original
     rts
@@ -609,6 +778,25 @@ dj_c:
 |   reloads registers, so D0 looks dead there, but "looks dead in the disassembly I could
 |   read" is exactly the standard of evidence that has burned this thread before. Replay
 |   both instructions exactly and the question stops mattering.
+|   Session 101 (measured, tools/diag_tablearm_phase.py): the audible fire-time table
+|   DAT_80001904 follows the TRACK grid, and the class flip that is the fractional
+|   symptom originates at the NATURAL master-cycle WRAP -- the wrap re-runs this same
+|   commit body and its tail re-phases 1x tracks under a 2x master (CATCHUP copy = 3).
+|   The armed-commit preserve then carried that wrong phase forever. So while DIRECT
+|   JUMP is ON, the preserve now covers EVERY commit, wraps included; at 1x every
+|   counter is 0 at a wrap and the preserve is arithmetically inert. DJ OFF keeps the
+|   old hygiene clear, and the hooks themselves are DJ_MODE-gated anyway.
+    tst.l   DJ_MODE
+    beq.b   djc_stock_clear
+    moveq   #-1,%d0
+    move.w  %d0,dj_keep_pend            | DJ ON: preserve through natural wraps too
+    move.w  %d0,dj_keep_pend2
+    bra.b   djc_stock_replay
+djc_stock_clear:
+    clr.w   dj_keep_pend                | stale-bit hygiene (transport stopped inside a
+                                        | previous commit's apply window)
+    clr.w   dj_keep_pend2
+djc_stock_replay:
     clr.b   %d0                         | displaced original #1 (stock leaves D0 = 0)
     move.b  %d0,STEP                    | displaced original #2 (STEP = D0 = 0)
     rts
@@ -638,11 +826,11 @@ djc_fix:
 |   trace as a single 6-tick gap before the 3-tick gaps begin.
     lea     PAT_SMODE,%a0
     tst.b   (%a0,%d0.l)                | SCALE_MODE
-    beq.b   djc_uniform
+    beq.b   djc_normal
     lea     PAT_MSCALE,%a0             | per-track mode -> MASTER SCALE at +0x8e52
     bra.b   djc_gotscale
-djc_uniform:
-    lea     PAT_SCALE,%a0              | uniform mode  -> pattern multiplier at +0x8e54
+djc_normal:
+    lea     PAT_SCALE,%a0              | NORMAL mode   -> pattern multiplier at +0x8e54
 djc_gotscale:
     moveq   #0,%d1
     move.b  (%a0,%d0.l),%d1            | d1 = scale index (of the pattern that's NOW active)
@@ -708,16 +896,16 @@ djc_gotscale:
     lea     PAT_SMODE,%a0
     tst.b   (%a0,%d3.l)
     bne.b   djc_ts_pertrack
-    lea     PAT_SCALE,%a0               | uniform: every track takes the pattern default
+    lea     PAT_SCALE,%a0               | NORMAL: every track takes the pattern default
     move.b  (%a0,%d3.l),%d0
     lea     TRK_SCALE_IX,%a0
     lea     MIDI_SCALE_IX,%a1
     moveq   #7,%d1
-djc_ts_unif:
+djc_ts_normal:
     move.b  %d0,(%a0,%d1.l)
     move.b  %d0,(%a1,%d1.l)
     subq.l  #1,%d1
-    bpl.b   djc_ts_unif
+    bpl.b   djc_ts_normal
     bra.b   djc_ts_done
 djc_ts_pertrack:
     moveq   #0,%d1                      | audio: track index 0..7
@@ -764,8 +952,14 @@ djc_ts_done:
 |   So: replay stock exactly on both paths. The SCALE_IX correction above stays -- it fixes a
 |   real latent stock bug (stale scale index for one cycle after a commit) and is unrelated
 |   to the tick phase.
-    clr.b   %d0                        | displaced original #1 (stock leaves D0 = 0)
-    move.b  %d0,STEP                   | displaced original #2 -- tick phase, 0 at a boundary
+|   Session 100: stock's own commit writes 0 here -- a tick-phase reset that is a no-op
+|   only when the commit sits exactly on the incoming grid. Hardware (diag R=4) proved it
+|   often does not. Seed the counter with Hook H's remainder instead: the first incoming
+|   master step is shortened by r, so the next wrap lands ON the absolute boundary. r is
+|   structurally 0 at 1x and at clean commits, where this byte-equals stock's write.
+    moveq   #0,%d0
+    move.b  dj_mrem,%d0                | 0 <= r < tps_in by construction (division loop)
+    move.b  %d0,STEP                   | was: displaced `clr.b %d0 ; move.b %d0,STEP`
 |   Session 70 (3rd pass): raw D7=resumeStep only nudges the REAL fire-gate counter
 |   (0x800064d0/8[t], "REFILL_TBL") coarsely -- confirmed dynamically that REFILL_TBL is
 |   reloaded every step from the QUOTIENT array (0x800065e4/f4[t] low byte), computed by
@@ -801,6 +995,19 @@ djc_ts_done:
 |   as the timing match against this session's own Hooks-G-suppressed re-test). Not
 |   re-attempted this pass; the `dj_quot32` helper this fix used has been removed along
 |   with it (dead code, nothing else called it).
+|   ---- Session 97: arm the per-track tick-counter PRESERVE (Hooks Z/X below) ----
+|   One bit per track. Each track's bit is consumed at that track's OWN apply tick (the
+|   commit tail is CNTDN-deferred per track, see CNTDN_TBL above), which a single one-shot
+|   flag like G_JUST_COMMITTED cannot cover -- dj_a's idle path would clear it on the very
+|   next tick, before any deferred track applies.
+    moveq   #-1,%d0
+    move.w  %d0,dj_keep_pend            | all 16 tracks: preserve across this armed commit
+    move.w  %d0,dj_keep_pend2
+    .ifdef DJ_DIAG
+    move.w  dj_cnt_arm,%d0             | d0 is reloaded by the moveq below
+    addq.l  #1,%d0
+    move.w  %d0,dj_cnt_arm
+    .endif
     moveq   #1,%d0
     move.b  %d0,G_JUST_COMMITTED        | tell Hook F a real commit happened this tick
     rts
@@ -870,11 +1077,11 @@ dj_scaleix_fix:
 |   "pattern plays past its own length" symptom, still present in the fix meant to cure it.
     lea     PAT_SMODE,%a0
     tst.b   (%a0,%d0.l)                | SCALE_MODE
-    beq.b   djs_uniform
+    beq.b   djs_normal
     lea     PAT_MSCALE,%a0             | per-track mode -> MASTER SCALE at +0x8e52
     bra.b   djs_got
-djs_uniform:
-    lea     PAT_SCALE,%a0              | uniform mode  -> pattern multiplier at +0x8e54
+djs_normal:
+    lea     PAT_SCALE,%a0              | NORMAL mode   -> pattern multiplier at +0x8e54
 djs_got:
     move.b  (%a0,%d0.l),%d1            | d1 = the scale index stock's own D7 code would use
     move.b  %d1,SCALE_IX
@@ -976,38 +1183,16 @@ dj_pertrack:
     move.l  #0x9b340,%d1
     muls.l  %d1,%d0
     add.l   %d0,%d5                    | d5 = patOff
-|   Session 88 -- NON-1x SCALE FIX. This used to read MASTER_STEP once here and use that
-|   single value as `new_step` for all 16 tracks (AR's 0x400992d4). MEASURED as the root
-|   cause of every non-1x failure: MASTER_STEP is the MASTER's step index, but STEP_ARR[t]
-|   must hold the TRACK's. They are equal only when tps_master == tps_track, i.e. only at 1x.
-|
-|   tools/diag_dj_hooks.py, DJMAST2 pattern 0 (1x master) -> 1 (2x master, tracks 1x), a
-|   real armed commit (dja_real x1, djp_store x16) -- both writes land on tick 30:
-|       t30 pc=0x400a4be6 -> step 4   ; stock's tail   (0-based 3)  CORRECT
-|       t30 pc=0x400d77c2 -> step 7   ; this hook      (0-based 6)  2x TOO FAR
-|   3 vs 6 is exactly tps_master/tps_track = 3/6.
-|
-|   The fix is to change this hook's INPUT, not its job. Stock's own rebuild already computed
-|   the right quantity per track at 0x400a4916 -- NEXT_STEP[t] = ceil(D7 / tps_t), master
-|   TICKS divided by the TRACK's ticks-per-step -- and stock's tail seeds STEP_ARR[t] from its
-|   low byte at 0x400a4be6 WITHOUT reducing it modulo the track length. That missing modulo is
-|   the only thing this hook exists to supply (it is what makes mixed track LENGTHS 7/12/16
-|   land correctly, a confirmed part of the Session 87 baseline), so the hook must stay.
-|
-|   Reading NEXT_STEP[t] per track instead of MASTER_STEP once:
-|     * at 1x with equal lengths it is bit-identical to the old behaviour, so the hard-won
-|       baseline is preserved BY CONSTRUCTION, not merely by testing;
-|     * at non-1x it inherits stock's correct per-track rate domain for free;
-|     * and it retires the AR->OT porting hazard that has bitten this thread three times
-|       (PREV_ARR, CNTDN_TBL, and this): the value now comes from OT's OWN commit rather
-|       than from AR's step-domain new_step.
+    moveq   #0,%d4
+    move.w  MASTER_STEP,%d4            | d4 = new_step (stock seeded it from Hook H's value
+                                       | at 0x400a483a -- AR's own 0x400992d4)
     lea     PAT_SMODE,%a0
     tst.b   (%a0,%d5.l)
     sne     %d6                        | d6 = per-track mode?
     moveq   #0,%d3                     | d3 = track index, 0..15 (audio 0-7, MIDI 8-15)
 djp_loop:
     tst.b   %d6
-    beq.b   djp_unif
+    beq.b   djp_normal
     cmpi.l  #8,%d3
     bge.b   djp_midi
     move.l  #0x91a,%d0
@@ -1023,33 +1208,23 @@ djp_midi:
     add.l   %d5,%d0
     lea     MIDI_LEN_SRC,%a0
     bra.b   djp_gotlen
-djp_unif:
+djp_normal:
     move.l  %d5,%d0
-    lea     PAT_LEN,%a0                | uniform mode: every track uses the pattern LENGTH
+    lea     PAT_LEN,%a0                | NORMAL mode: every track uses the pattern LENGTH
 djp_gotlen:
     moveq   #0,%d1
     move.b  (%a0,%d0.l),%d1            | d1 = this track's LENGTH
-|   d0 = NEXT_STEP[t], stock's own per-track step index (word per track, contiguous 16).
-    move.l  %d3,%d0
-    add.l   %d0,%d0                    | d0 = 2*t
-    lea     NEXT_STEP,%a1
-    moveq   #0,%d2
-    move.w  (%a1,%d0.l),%d2            | d2 = ceil(D7 / tps_t), already in the TRACK's domain
-    move.l  %d2,%d0
+    move.l  %d4,%d0                    | d0 = new_step
     tst.l   %d1
     ble.b   djp_store                  | unreadable length -> store the index unreduced
-|   Hardware modulo, not repeated subtraction. The old sub loop assumed "new_step and LENGTH
-|   are both <= 64", which held only while the input was MASTER_STEP; NEXT_STEP[t] is
-|   ceil(D7/tps_t) and can reach ~2048 (master 1/8x tps 96, len 64, track 2x tps 3), so a
-|   subtraction loop would run thousands of iterations per track inside a commit tick.
-|   remu.l is the unsigned twin of the divsl.l stock itself uses at 0x400a4912, so the
-|   instruction is known present on this CPU. d1 > 0 is guaranteed by the tst/ble above,
-|   so this cannot divide by zero.
-    remu.l  %d1,%d2:%d0                | d2 = NEXT_STEP[t] mod LENGTH, d0 = quotient
-    move.l  %d2,%d0
+djp_mod:
+    cmp.l   %d1,%d0
+    blt.b   djp_store
+    sub.l   %d1,%d0                    | new_step and LENGTH are both <= 64
+    bra.b   djp_mod
 djp_store:
     lea     STEP_ARR,%a0
-    move.b  %d0,(%a0,%d3.l)            | STEP[t] = NEXT_STEP[t] mod trackLen
+    move.b  %d0,(%a0,%d3.l)            | AR 0x400992be : STEP[t] = new_step mod trackLen
 |   Session 87 -- HARDWARE REGRESSION FIX. This used to also write PREV_ARR[t] = pos-1
 |   (AR 0x400992c4) and clear TICKS_IN_STEP[t] (AR 0x400992c6). Both are removed.
 |
@@ -1089,6 +1264,280 @@ djp_store:
 djp_orig:
     tst.l   0x46107568                 | displaced original (sets Z for the caller's bne.w)
     rts
+
+| ========= Session 97: PRESERVE the per-track tick counter across an armed commit =========
+| The handoff's §3 spec (reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md): at a commit the
+| track's counter must hold (C - A) mod tps_t -- which is exactly what the free-running
+| counter already holds. No stock quantity equals it, so nothing is computed: the two stock
+| writes that destroy it are suppressed instead.
+|
+| Stock destroys it twice, BOTH within the track's own apply tick (measured order, Session 89
+| trace at t42: 0x400a4be6 -> 0x400a4bf0 -> 0x400a354a -> 0x400a3ce2):
+|
+|   0x400a4bf0  TICKS_IN_STEP[t] = 0           the tail's CNTDN==0 body       -> Hook Z
+|   0x400a354a  TICKS_IN_STEP[t] = CATCHUP[t]  per-tick pass, CNTDN[t]==0     -> Hook X
+|
+| The apply tick is PER TRACK (CNTDN-deferred, up to tps_master ticks after dj_c), so the
+| arm state is a per-track bit mask, set for all 16 by djc_fix and consumed bit-by-bit by
+| Hook X. Because zero and copy land in the SAME tick per track, Hook Z tests its track's
+| bit without consuming and Hook X consumes it -- no snapshot buffer is needed at all: the
+| counter itself carries the value between the two sites.
+|
+| The one arithmetic wrinkle: dj_c refreshes TRK_SCALE_IX at the COMMIT tick (Session 84),
+| so from there the wrap check at 0x400a3cee runs against the NEW tps. A counter preserved
+| across a shrink (tps 6 -> 3) can therefore sit at 3..5, which would advance late once and
+| shift the grid permanently. Hook X reduces the preserved counter mod the track's new tps
+| (identity in every other case, including all of 1x) -- that IS the handoff's REQUIRED
+| value, (C - A) mod tps_t, with C - A supplied by the counter itself.
+|
+| Scratch discipline (CLAUDE.md, Sessions 94-96): the mask lives in THIS CAVE, not in the
+| 0x80006a40+ DSP-shared-RAM window that ate QLREC's magic word under live audio. A cave
+| word is ordinary program SDRAM, and its power-on value is the image byte itself -- 0,
+| asserted by the build -- so it is deterministic at boot with no clearing code needed.
+|
+| Both hooks replay stock EXACTLY when DJ_MODE is 0 or no preserve is pending, and their
+| displaced instructions read the tick function's stack frame -- inside a jsr'd hook every
+| stock %sp offset is +4 for our own return address.
+
+| ---- Hook Z @ 0x400a4bea (10 B: 4200 206f00a4 1140ff2d) ----
+| clr.b %d0 ; moveal %sp@(164),%a0 ; moveb %d0,%a0@(-211)   [a0 = CNTDN cursor, -211 ->
+| 0x800064f0 + t]. Pending -> skip only the store; d0/a0 leave holding stock's values.
+    .global dj_keepz
+dj_keepz:
+    clr.b   %d0                        | displaced #1 (stock leaves D0 = 0 here)
+    moveal  %sp@(168),%a0              | displaced #2, +4: a0 = &CNTDN_TBL[t]
+    tst.l   DJ_MODE
+    beq.w   dkz_zero                   | .w: the consume + DIAG counters grew this path
+    tst.w   dj_keep_pend
+    beq.w   dkz_zero                   | no armed commit in flight -> stock
+    lea     -16(%sp),%sp
+    movem.l %d1-%d3/%a1,(%sp)
+    move.l  %a0,%d1
+    sub.l   #CNTDN_TBL,%d1             | t = cursor - table base
+    cmpi.l  #16,%d1
+    bcc.b   dkz_restore                | not a slot this model covers -> stock
+    move.w  dj_keep_pend,%d2
+    btst    %d1,%d2                    | this track pending?
+    beq.b   dkz_restore
+|   Session 103b: CONSUME here. The apply is running NOW, so Hook V must stop re-arming
+|   CNTDN for this track (the first Hook V gate chain caught the failure: unconsumed
+|   bits made the tail re-apply and re-fire EVERY 6 TICKS after a deferred commit).
+|   Hook X gets its own mask below, set alongside this one, because it still needs a
+|   flag LATER this same tick.
+    moveq   #1,%d3
+    lsl.l   %d1,%d3
+    not.l   %d3
+    and.l   %d2,%d3
+    move.w  %d3,dj_keep_pend
+|   ---- Session 100: REDUCE IN PLACE, here, at the one site hardware proved fires for
+|   every audio track on every commit (diag: Z = 8*A exactly, X = a timing-dependent
+|   minority). V5.5 kept the mod-reduce in Hook X, so the tracks whose 0x400a354a copy
+|   never came entered a shrunken tps with an UNREDUCED counter (3..5 under tps 3),
+|   advanced late once, and shifted permanently -- the surviving hardware symptom, and
+|   why it was "usually, occasionally clean" (counter 0..2 = clean). The reduce is
+|   (C - A) mod tps_t, identity whenever the scale did not shrink; the stock zero write
+|   is still skipped.
+    lea     TRK_SCALE_IX,%a1           | audio 0-7 @0x8000663e, MIDI 8-15 contiguous
+    moveq   #0,%d2
+    move.b  (%a1,%d1.l),%d2
+    lea     LEN_TBL,%a1
+    move.l  (%a1,%d2.l*4),%d2          | d2 = this track's NEW tps (dj_c refreshed the
+    ble.b   dkz_count                  | cache at commit); unreadable -> leave counter
+    moveq   #0,%d3
+    move.b  %a0@(-211),%d3             | the preserved free-running counter
+    cmp.l   %d2,%d3
+    blt.b   dkz_count                  | already < tps -> preserve untouched
+dkz_mod:
+    sub.l   %d2,%d3
+    cmp.l   %d2,%d3
+    bge.b   dkz_mod
+    move.b  %d3,%a0@(-211)             | counter mod tps_t -- the REQUIRED value
+    .ifdef DJ_DIAG
+    move.w  dj_cnt_m,%d3               | M: reduces that actually changed a counter
+    addq.l  #1,%d3
+    move.w  %d3,dj_cnt_m
+    .endif
+dkz_count:
+    .ifdef DJ_DIAG
+    move.w  dj_cnt_z,%d2               | d2 is frame-saved on this path (CF has no
+    addq.l  #1,%d2                     | memory-destination addq)
+    move.w  %d2,dj_cnt_z
+    .endif
+    movem.l (%sp),%d1-%d3/%a1
+    lea     16(%sp),%sp
+    rts                                | PRESERVE: the stock zero write never happens
+dkz_restore:
+    movem.l (%sp),%d1-%d3/%a1
+    lea     16(%sp),%sp
+dkz_zero:
+    move.b  %d0,%a0@(-211)             | displaced #3: TICKS_IN_STEP[t] = 0 (stock)
+    rts
+
+| ---- Hook X @ 0x400a3542 (10 B: 226f0094 246f00ac 1292) ----
+| moveal %sp@(148),%a1 ; moveal %sp@(172),%a2 ; moveb %a2@,%a1@   [a1 = TICKS_IN_STEP
+| cursor, a2 = CATCHUP cursor]. Runs only on the CNTDN[t]==0 fallthrough at 0x400a353e.
+| a1/a2 must leave loaded on every path -- the 0x80006624-gated copy at 0x400a3556 reloads
+| its own, but faithfulness costs nothing.
+    .global dj_keepx
+dj_keepx:
+    moveal  %sp@(152),%a1              | displaced #1, +4: a1 = &TICKS_IN_STEP[t]
+    moveal  %sp@(176),%a2              | displaced #2, +4: a2 = &CATCHUP[t]
+    tst.l   DJ_MODE
+    beq.b   dkx_stock
+    tst.w   dj_keep_pend
+    beq.b   dkx_stock
+    lea     -16(%sp),%sp
+    movem.l %d0-%d2/%a0,(%sp)
+    move.l  %a1,%d1
+    sub.l   #TICKS_IN_STEP,%d1         | t = cursor - table base
+    cmpi.l  #16,%d1
+    bcc.b   dkx_restore
+    move.w  dj_keep_pend2,%d2          | Session 103b: X's OWN mask -- Z consumed the
+    btst    %d1,%d2                    | apply-mask earlier this tick
+    beq.b   dkx_restore
+    moveq   #1,%d0                     | consume bit t
+    lsl.l   %d1,%d0
+    not.l   %d0
+    and.l   %d2,%d0
+    move.w  %d0,dj_keep_pend2
+    .ifdef DJ_DIAG
+    move.w  dj_cnt_x,%d2               | d2 frame-saved; reassigned below anyway
+    addq.l  #1,%d2
+    move.w  %d2,dj_cnt_x
+    .endif
+    lea     TRK_SCALE_IX,%a0           | audio 0-7 @0x8000663e, MIDI 8-15 contiguous at +8
+    moveq   #0,%d2
+    move.b  (%a0,%d1.l),%d2
+    lea     LEN_TBL,%a0
+    move.l  (%a0,%d2.l*4),%d2          | d2 = this track's NEW ticks-per-step (dj_c
+    ble.b   dkx_done                   | refreshed the cache at commit); unreadable ->
+                                       | leave the preserved counter untouched
+    moveq   #0,%d0
+    move.b  %a1@,%d0                   | the preserved free-running counter = C - A
+dkx_mod:
+    cmp.l   %d2,%d0
+    blt.b   dkx_write
+    sub.l   %d2,%d0                    | counter <= 95, tps >= 3: a few passes at most
+    bra.b   dkx_mod
+dkx_write:
+    move.b  %d0,%a1@                   | (C - A) mod tps_t -- the REQUIRED value
+dkx_done:
+    movem.l (%sp),%d0-%d2/%a0
+    lea     16(%sp),%sp
+    rts
+dkx_restore:
+    movem.l (%sp),%d0-%d2/%a0
+    lea     16(%sp),%sp
+dkx_stock:
+    move.b  %a2@,%a1@                  | displaced #3: TICKS_IN_STEP[t] = CATCHUP[t]
+    rts
+
+| ---- Hook V @ 0x400a4bb6 (6 B: 49f9 400a 536c) -- Session 103 ----
+| Hook W (0x400a4bdc, V5.9/V5.10) is GONE -- its site is stock again. Suppressing the
+| reposition fire was wrong at wraps (missing step-1 trig every cycle, user-confirmed)
+| and firing it late was wrong too (the half-step spurious). The correct discipline is
+| AR's, applied PER TRACK: defer the whole apply to the track's own preserved boundary.
+| Stock already owns the deferral mechanism -- CNTDN. While a preserve is pending and
+| the track's counter is mid-step, this hook rewrites CNTDN[t] = tps_t - counter[t]
+| every tick (recomputation converges in lockstep with the tail's own decrement), so
+| stock's tail applies the reposition -- STEP write AND fire -- exactly on the tick the
+| counter wraps: no duplicate, no missing trig, no lurch, at wraps and armed commits
+| alike. Runs between the rebuilds and the tail (displaces the tail's own a4 load).
+| Off-by-one, derived then emulator-checked: tail decrements THEN tests, so apply tick
+| = T + v - 1; the wrap tick has pre-increment counter tps-1; v = tps - c lands on it.
+| At the apply tick Hook Z still skips the zero (counter tps-1 wraps naturally to 0
+| late-tick) and Hook X still consumes/suppresses the CATCHUP copy. A track whose
+| landing step carries content on BOTH fire gates may fire twice within the SAME tick
+| (identical schedule slot) -- accepted, watch on hardware.
+    .global dj_keepv
+dj_keepv:
+    lea     0x400a536c,%a4             | displaced original (the tail's fire-fn pointer)
+    tst.l   DJ_MODE
+    beq.w   dkv_done
+    tst.w   dj_keep_pend
+    beq.w   dkv_done
+    lea     -20(%sp),%sp
+    movem.l %d0-%d3/%a0,(%sp)
+    moveq   #0,%d0                     | t
+    move.w  dj_keep_pend,%d1
+dkv_loop:
+    btst    %d0,%d1
+    beq.b   dkv_next
+    lea     TICKS_IN_STEP,%a0
+    tst.b   (%a0,%d0.l)
+    beq.b   dkv_next                   | aligned track: stock's own CNTDN stands
+    lea     TRK_SCALE_IX,%a0
+    moveq   #0,%d2
+    move.b  (%a0,%d0.l),%d2
+    lea     LEN_TBL,%a0
+    move.l  (%a0,%d2.l*4),%d2          | tps_t
+    ble.b   dkv_next
+    lea     TICKS_IN_STEP,%a0
+    moveq   #0,%d3
+    move.b  (%a0,%d0.l),%d3
+    sub.l   %d3,%d2                    | v = tps_t - counter
+    ble.b   dkv_next                   | counter >= tps (stale): leave stock alone
+    lea     CNTDN_TBL,%a0
+    move.b  %d2,(%a0,%d0.l)            | defer this track's apply to its own boundary
+    .ifdef DJ_DIAG
+    move.w  dj_cnt_w,%d2
+    addq.l  #1,%d2
+    move.w  %d2,dj_cnt_w               | W now counts Hook V's CNTDN alignments
+    .endif
+dkv_next:
+    addq.l  #1,%d0
+    cmpi.l  #16,%d0
+    blt.b   dkv_loop
+    movem.l (%sp),%d0-%d3/%a0
+    lea     20(%sp),%sp
+dkv_done:
+    rts
+
+    .align  2
+    .global dj_keep_pend
+dj_keep_pend:
+    .word   0                          | bit t = apply pending: Hook V re-arms CNTDN,
+                                       | Hook Z skips the zero. CONSUMED BY Z at the
+                                       | apply. In-cave on purpose -- see block comment.
+    .global dj_keep_pend2
+dj_keep_pend2:
+    .word   0                          | bit t = Hook X's CATCHUP-copy suppression,
+                                       | consumed by X when its gate fires (stale bits
+                                       | are re-set at every preserved event and are
+                                       | inert with DJ off).
+    .global dj_mrem
+dj_mrem:
+    .byte   0                          | Hook H's last reseed remainder (ticks mod
+                                       | tps_in); dj_c seeds the master tick counter
+                                       | with it at the armed commit. Cave-resident,
+                                       | image byte 0 at power-on.
+    .align  2
+
+    .ifdef DJ_DIAG
+| Session 102: the dj_diagy observer on 0x400a355e is REMOVED (cave space for Hook W).
+| Y read 0 across four hardware sessions and every emulator run; the third-writer
+| lead is closed. Its detour is dropped from the build; dj_cnt_y/pair stay allocated
+| so older notes' field names still resolve, but the toast no longer shows them.
+    .endif
+
+    .ifdef DJ_DIAG
+    .align  2
+dj_cnt_arm: .word 0                    | A: armed commits (djc_fix entries)
+dj_cnt_z:   .word 0                    | Z: Hook Z preserve-path entries
+dj_cnt_x:   .word 0                    | X: Hook X preserve-path entries
+dj_cnt_y:   .word 0                    | Y: third-writer executions
+dj_cnt_m:   .word 0                    | M: Hook Z reduces that CHANGED a counter
+dj_cnt_n:   .word 0                    | N: commits with a NONZERO master-remainder seed
+dj_cnt_w:   .word 0                    | W: off-grid reposition fires suppressed (Hook W)
+dj_cnt_pair: .byte 0                   | P: last byte the third writer copied
+dj_cnt_rem:  .byte 0                   | R: last Hook H master-reseed remainder
+dj_diag_fmt:
+    .asciz  "A%d Z%d X%d W%d N%d R%d M%d"
+    .align 2
+dj_diag_buf:
+    .space  48                         | worst case "A65535 Z65535 X65535 Y65535 P255
+                                       | R255" = 38 chars + NUL
+    .endif
 
     .ifdef DJ_KEYMAP
 | ================= [PTN] release -- close the toast almost immediately =================
@@ -1133,6 +1582,45 @@ djp_orig:
 | stock per-frame tick @0x40056c28 already reads, closing the toast via NOTIFY_CLOSE
 | from the OS's own safe context one frame later, never called by us directly) is
 | unchanged and was never the problem.
+| ========= Hook S @ 0x400a4d36 -- correct the per-track CATCH-UP phase =========
+| Session 89. Detour site and displaced instruction are the ones Hook P used.
+| Gated on DJ_MODE and G_JUST_COMMITTED (set by dj_c).
+|
+| MEASURED (tools/diag_track_phase_trace.py, V5.3 image, DJMAST2 0 -> 1). Every write to
+| track 0's tick counter across the commit at t42:
+|
+|     t42 STEP [0] pc=0x400a4be6 = 0    stock's tail sets the position
+|     t42 TICKS[0] pc=0x400a4bf0 = 0    stock's tail zeroes the phase
+|     t42 TICKS[0] pc=0x400a354a = 3    <-- and this puts 3 back
+|     t42 TICKS[0] pc=0x400a3ce2 = 4    per-tick increment
+|
+| The counter then reaches tps_t at t44 instead of t47: the track's step grid moves 3 ticks
+| and STAYS moved. Across six switches the advance ticks flip between congruence classes
+| [5] and [2] mod 6, in BOTH directions -- the "fractional relative to the metronome"
+| report.
+|
+| 0x400a354a is `move.b (a2),(a1)` with a2 = CATCHUP cursor and a1 = TICKS_IN_STEP cursor,
+| gated on `tst.b CNTDN_TBL[t]` at 0x400a353e (cursors resolved from the prologue's stack
+| slots at 0x400a290c/0x400a293e/0x400a295c). So stock deliberately pre-loads the track's
+| tick counter with max(0, tps_t - tps_master) to make it advance with the master for one
+| step. That is invisible at 1x, where the term is max(0, 6-6) = 0.
+|
+| At a mid-cycle DIRECT JUMP it is wrong: the track should resume at the sub-step phase
+| ABSOLUTE TIME puts it at, which is exactly D7 mod tps_t -- the value stock already
+| computed into PAIR[t]. So correct the SOURCE and let stock's own copy carry it through.
+|
+| Hook R (the previous attempt) wrote PAIR straight into TICKS_IN_STEP from this same site
+| and had no effect, because 0x400a354a runs LATER in the tick and overwrote it. Writing
+| CATCHUP instead puts the value upstream of that copy.
+|
+| INERT AT 1x BY ARITHMETIC: at 1x, tps_t == tps_master, so PAIR[t] is always 0 AND
+| CATCHUP is already max(0, 0) = 0. The write is a no-op and the Session 87 baseline cannot
+| be affected.
+| Session 101: dj_phase3's CODE is deleted (the cave overran patch_trigscale's home at
+| 0x400d7b00 once the diag counters grew). The comment above stays as the record of dead
+| end 3; the detour was removed in Session 97 and diag_phase_correlate.py already prints
+| "Hook S ABSENT" when the symbol is missing.
+
     .global dj_ptnrel
 dj_ptnrel:
     tst.l   NOTIFY_HANDLE               | 0x460d1e70 -- is a toast actually open?

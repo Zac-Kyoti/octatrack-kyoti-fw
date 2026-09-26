@@ -1,0 +1,26 @@
+diff --git a/tools/emu/emu_rtos.py b/tools/emu/emu_rtos.py
+index 80a8b88..06ae62c 100644
+--- a/tools/emu/emu_rtos.py
++++ b/tools/emu/emu_rtos.py
+@@ -752,6 +752,21 @@ class Rtos:
+         uc.hook_add(eb.UC_HOOK_CODE, on_idle, begin=MAIN_SPIN, end=MAIN_SPIN)
+ 
+         def on_unmapped(u, access, addr, size, value, user):
++            # Kyoti local: grow the external audio-sample SDRAM bank a page at a
++            # time instead of faulting.  Post-PR#360 the more-correct EMAC takes
++            # a boot branch that reaches a stock ~10.8 MB zero-fill at
++            # 0x4f502c10, and --load-project then DMAs card sectors into the
++            # same bank (0x4ece3000) -- both are real, and route A mapped
++            # neither, so the M6a gate and every --load-project run died here
++            # (our NOTES Session 90; tools/emu_reload.py grows pages the same
++            # way).  Restricted to this window so a stray write anywhere else
++            # still faults loudly.
++            if 0x49000000 <= addr < 0x50000000:
++                try:
++                    u.mem_map(addr & ~0xFFF, 0x1000)
++                    return True
++                except eb.UcError:
++                    pass
+             self.unmapped = (access, addr, size, u.reg_read(eb.UC_M68K_REG_PC))
+             return False
+         uc.hook_add(eb.UC_HOOK_MEM_READ_UNMAPPED | eb.UC_HOOK_MEM_WRITE_UNMAPPED, on_unmapped)

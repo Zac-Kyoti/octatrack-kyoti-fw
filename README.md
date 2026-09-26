@@ -69,9 +69,11 @@ ingest are there only. Each branch's own `START_HERE.md` §6 describes that bran
   every power-on.
   **Still in development — the one unfinished feature.** Confirmed on hardware at
   1x scales. Under a master scale other than 1x a switch can land on a fractional
-  step; that work continues on the `wip` branch.
-  → [`tools/build_directjump_v4.py`](tools/build_directjump_v4.py) ·
-  handoff [`reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md`](reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md)
+  step, and a 2x track can play a spurious off-grid trig once per cycle. Successive
+  V5.x builds have closed causes a diagnostic build measured on the unit and made a
+  large improvement on hardware; the remainder is still being worked.
+  → [`tools/build_directjump_v5.py`](tools/build_directjump_v5.py) ·
+  handoff [`reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md`](reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md)
 
 - **SIDE-CHAIN COMPRESSOR** — an external key input for the stock DynamiX
   COMPRESSOR, on the effect's **page 2**:
@@ -188,8 +190,8 @@ All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit
 | MIDI Plays-Free trig fix | all | **confirmed** 2026-08-28 |
 | MUTE MODE — all four modes, menu, SOLO | `build_mutemode_dt.py` | **confirmed, final** 2026-09-21 |
 | ↳ mode survives a power cycle | `build_mutemode_dt.py` | **confirmed** |
-| DIRECT JUMP — 1x scales | `build_directjump_v4.py` | **confirmed** 2026-09-23 |
-| ↳ master scales other than 1x | `build_directjump_v4.py` | **open** — in progress on `wip` |
+| DIRECT JUMP — 1x scales | `build_directjump_v5.py` | **confirmed** 2026-09-23 |
+| ↳ master scales other than 1x | `build_directjump_v5.py` | **open** — improved on hardware by V5.8; the residual is still being worked |
 | SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` | **confirmed, final** 2026-09-20 |
 | ↳ a project still using the donated effect loads as NONE | `build_sidechain3.py` | **confirmed, final** 2026-09-25 |
 | RELOAD FROM PROJECT — both chords | `build_reload3.py` | **confirmed, final** 2026-09-25 |

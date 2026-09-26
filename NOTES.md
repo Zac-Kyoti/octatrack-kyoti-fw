@@ -29788,6 +29788,469 @@ Does NOT explain: the hardware report that visited steps depend on WHAT TRIGS AR
 and that LEDs and audio disagree. No measured write path reads trig data. **Do not assume the
 flash resolves that**; it is a separate, still-unexplained mechanism.
 
+## Session 88 — REVERTED. The Hook P fix was flashed and BROKE the 1x baseline
+
+### Hardware report on commit `91f2f15`
+
+Flashed. **DIRECT JUMP broken entirely, including at 1x.** With all tracks and the master at
+1x, engaging DJ makes the playhead erratic, and **the step playback pattern depends on which
+trigs are entered on which steps.**
+
+That last detail is the most important measurement this thread has produced, and it was
+bought at the cost of a hardware regression:
+
+> **Trig-content dependence is the SIGNATURE of Hook P writing a wrong STEP_ARR value.**
+
+Before Session 88 that signature appeared only at non-1x scales. Session 88 changed Hook P's
+input so it wrote wrong values at 1x too — and the signature appeared at 1x. Same cause, same
+fingerprint. So the original non-1x symptom the user reported (visited steps depending on
+trig content, LEDs and audio disagreeing) is almost certainly Hook P writing a bad position,
+not a separate display-path mystery as Session 88 concluded. **`NEXT_STEP[t]` was simply the
+wrong source.** Why it is wrong is NOT known and must be measured, not guessed, next time.
+
+### The rollback
+
+Working tree restored by reverse-applying `91f2f15`'s change to `tools/patch_directjump.s`
+only (`git show 91f2f15 -- <file> | git apply -R --3way`), so the concurrent session's label
+rename in `50c49f1` survives. Verified: the only remaining difference from `16df386` in that
+file is that rename.
+
+Rebuilt and **verified by hash**: `out/mainos_directjump_v4.bin` = `0657157f610fca4e...`,
+byte-exact to the image recorded as hardware-confirmed in the handoff and Session 87, 975
+bytes changed. Preserved as `out/GOLD_S87_*` with `GOLD_S87_SHA256.txt` and a README.
+
+**All future DIRECT JUMP builds go to V5** (`tools/build_directjump_v5.py`, outputs
+`*_v5.bin` / `*_V5.syx`). V4 is now frozen as the gold artifact. The V5 script carries a new
+gate: it diffs every build against `GOLD_S87_mainos_directjump.bin`, prints how many bytes
+differ and how many fall outside the cave, and **refuses to build if any byte outside the
+cave differs from gold.** A no-change run reports BYTE-IDENTICAL, which is how the rollback
+was confirmed.
+
+### The methodological finding, which is the real cost of this session
+
+**The emulator is not a sufficient gate for Hook P changes.** Session 88's change passed
+everything this project has:
+
+- both 1x fixtures byte-identical across 30 and 34 STEP writes, on REAL armed commits
+  (`dja_real` x1, `djp_store` x16 verified from the cave);
+- both non-1x fixtures showing Hook P move from 7 to stock's 4;
+- `diff_stock_vs_patch.py` IDENTICAL with the feature off, scratch poisoned `0xAA`, 38
+  samples, 16/16 tracks moving;
+- 979 bytes, 0 unexpected outside the cave, reproducible build.
+
+And it still broke the unit at 1x. Every one of those gates watched the value Hook P writes
+on ONE commit in a short run. None of them watched what the machine does over minutes, with
+trigs firing, with the voice path live — which is exactly where the trig-content dependence
+lives and exactly what the emulator does not drive.
+
+**Rule for the restart: a Hook P change must be proven on hardware before it is believed,
+and the cheapest way to do that is the on-hardware trace harness this project already has**
+(`tools/patch_triglock_diag.s` + `tools/read_triglock_log.py`, Session 78 — beacon,
+per-opcode histogram, watched-byte culprit, trace carried off the unit in a saved bank blob).
+That harness turned the trig-lock thread for exactly this reason: it made the firmware report
+what it actually did on the user's own machine. Point it at `STEP_ARR[t]` and its writers.
+
+### Status
+
+Rolled back, gold preserved and hash-verified, V5 build path created. Session 88's fix is
+REVERTED but its measurements stand: the `CNTDN_TBL` formula, the per-tick rate gate at
+`0x400a3cee`, the master rate at `LEN_TBL[SCALE_IX]`, and the measured fact that Hook P wrote
+`MASTER_STEP` where the track's own index belongs. That last one is still a real defect in the
+gold build — it is simply not fixed by substituting `NEXT_STEP[t]`.
+
+## Session 89 (2026-09-24, `wip`) — V5: Hook P REMOVED. Stock already computed the right answer
+
+### The premise Hook P was built on is false
+
+Session 85 added Hook P to write AR's per-track position over stock's rebuild output, on the
+stated grounds that stock seeds `STEP_ARR[t]` from `NEXT_STEP[t]`'s low byte **without**
+reducing it modulo the track length. Disassembled at `0x400a4976`:
+
+```
+400a4950  d1 = NEXT_STEP[t]              ; = ceil(D7 / tps_t)
+400a4958-72  d0 = this track's LENGTH    ; blob +0x50, or PAT_LEN in NORMAL mode
+400a4976  remsl %d0,%d2,%d1              ; d2 = d1 mod LENGTH
+400a497a  move.w %d2,(a0)                ; NEXT_STEP[t] = the reduced value, stored back
+```
+
+Stock already produces exactly the quantity Hook P exists to supply: `ceil(D7 / tps_t) mod
+trackLen_t` — per-track rate domain, length-reduced. Hook P is redundant at best.
+
+### MEASURED on the GOLD image (tools/diag_commit_phase.py, real armed commits)
+
+Every `STEP_ARR` writer at the commit tick, DJTEST2 A08 -> A07:
+
+```
+0x400a4be6 [stock, audio]  tracks 0,2,3,4,5,6,7 -> 11,11,4,6,11,11,11
+0x400a4cb0 [stock, MIDI ]  tracks 8..15         -> 11 each
+0x400d77c2 [Hook P      ]  ALL 16               -> 11 each, except track 3 -> 4
+```
+
+Stock covers **all sixteen** tracks (the MIDI twin at `0x400a4cb0` — an earlier note here
+claiming MIDI was uncovered was an artefact of filtering on the audio PC only) and is
+per-track correct: track 3 (LEN 7) -> 4, track 4 (tps 12) -> 6. Hook P's writes are
+byte-identical to stock's everywhere **except** that it flattens track 4's correct 6 to the
+master-domain 11, and forces track 1 — which stock deliberately deferred via
+`CNTDN_TBL = max(1, tps_master + 1 - tps_t) = 4` — to reposition immediately.
+
+Forward direction A07 -> A08 shows the corruption at its plainest. Stock computes 3, 6, 3, 3,
+2, ... for tracks at tps 6, 3, 6, 6, 12 — inversely proportional to ticks-per-step, which is
+the correct musical answer. **Hook P overwrote every one of them with 6.**
+
+At 1x every track has `tps_t == tps_master`, so every Hook P write equals stock's and the
+hook is a **measured** no-op. That is precisely why the Session 87 baseline is 1x-only.
+
+### AR is NOT the target here
+
+AR flattens to the master-step domain exactly as Hook P did — confirmed in AR's own code
+(`0x400992b2`-`0x400992be`: `new_step` goes into the per-track divide unchanged, only the
+track's LENGTH divides it; the track's resolution never enters) and corroborated on the
+user's real AR hardware: a 2x track loops twice per master cycle, yet a mid-cycle DIRECT JUMP
+with a 2x track produces an audible **LURCH** — an extra trig at a desynchronised/fractional
+step — before the track settles onto its correct step. **Stock OT's per-track answer is
+better than AR's.** Keep stock's; do not port AR's here. This is the first place in the
+project where OT should deliberately diverge from AR.
+
+### The change
+
+`tools/build_directjump_v5.py`: the `0x400a4d36` detour is removed; the site is left stock.
+Nothing is added, no new instruction forms are introduced, and `dj_pertrack` remains in the
+cave as dead code so the image diff stays minimal.
+
+Build: 970 bytes changed (gold: 975). **5 bytes differ from gold, all at the declared Hook P
+detour site, 0 elsewhere** — the cave is byte-identical to gold. The V5 gold gate was
+extended to allow declared detour sites (a hook added or removed legitimately changes them)
+while still refusing any other out-of-cave divergence; it caught this change on the first
+build, which is what it is for.
+
+### Validation (V5 vs GOLD, every run a real armed commit)
+
+| fixture | result |
+|---|---|
+| DJMAST2 2->3, uniform 1x | per-track state IDENTICAL; only change is Hook P's write disappearing, and it wrote the same value stock did |
+| DJTEST2 A07->A08 | stock's per-track 3/6/3/3/2 now SURVIVE (gold flattened all to 6) |
+| DJTEST2 A08->A07 | track 4 keeps 6 (gold: 11); track 3 keeps 4; track 1 stays deferred by stock's own CNTDN |
+| `diff_stock_vs_patch.py`, feature OFF, scratch poisoned | IDENTICAL across 38 samples, all 8 counters equal |
+
+### A prediction worth testing on hardware
+
+Session 88's regression showed trig-content dependence appearing at 1x exactly when Hook P
+began writing wrong step values, and AR shows no trig-content dependence at all (user tested).
+If that inference is right, removing Hook P should remove the trig-content dependence at
+non-1x too. **This is a prediction, not a measurement** — the emulator has never reproduced
+that symptom, and it was green for Session 88's build as well. Hardware remains the only gate.
+
+---
+
+## Session 90 (2026-09-24, `wip`) — KB ingest: 4 upstreams moved, 5 new repos, 3 new contributors. **Two open threads closed by it.**
+
+> **⚠️ NUMBERING COLLISION — reconcile before committing.** A *concurrent* session was
+> working in this repo while this one ran (it committed `95812d9` "DIRECT JUMP V5: remove
+> Hook P" at 20:25 and edited `tools/emu_reload.py` at 20:34), and its own comment header
+> also labels its work **"Session 90"**. This entry is the **KB-ingest** Session 90; the
+> emulator/SDRAM-mapping work in `tools/emu_reload.py` is the other one. Renumber one of
+> them — this entry has no dependents yet, so it is the cheaper one to move.
+>
+> The two are causally linked, which is worth preserving whichever way they are numbered:
+> **this session's `octabam` sync is what forced that emulator change** (see "Workflow
+> retooling" below and `kb/techniques.md` "our emulator's fidelity is coupled to the
+> `refs/octabam` clone").
+
+A full `pull-research` pass — the first since 2026-09-16 — plus a contributor sweep the
+user asked for ("look at all contributors' githubs … integrate into our KB and retool our
+workflow"). Nothing was flashed. Two long-standing open questions were **closed** as a
+side effect, both verified against our own image rather than taken on an upstream's word.
+
+### What moved, and the two new discovery passes
+
+`whatsnew.py`: **octabam +397**, **dsp56300 +31**, **midisc +6**, **ems-octakit +2**;
+octamax / OctaLib / elektron-firmware-tool / octa-bt-pt unchanged.
+
+`whatsnew.py` cannot see two things, and both hid real material:
+
+1. **New repos on contributors' accounts** — it only reads `MANIFEST.toml`. A `gh` sweep
+   of the 11 accounts found `bkkbrls-del/midisc-patcher`, `repeat98/octamachine`,
+   `repeat98/octamad`, `nordseele/octalab`, `markandrus/octemu`.
+2. **Contributors credited *inside* upstream docs.** `refs/octabam/docs/firmware/CONTRIBUTIONS.md`
+   (new upstream, 22 Sep — the ecosystem's dated credit ledger) names **nordseele** and
+   **markandrus**, neither of whom we tracked. It is now the first file to read on an
+   octabam sync.
+
+Both passes are automated as `tools/refs/contributors.sh`. Manifest is **13 repos**, with a
+"deliberately NOT tracked" block at the bottom (aliases, forks of tracked repos, and
+Elektron-but-not-OT/AR work) so candidates are not re-triaged every sweep.
+
+### CLOSED #1 — the MACSR/EMAC preemption hazard is not a hazard
+
+`kb/memory-map.md` carried a long "**Not yet resolved**: which task calls this copier
+function at all, or whether it's even preemptible in practice (needs dynamic tracing)".
+Answer: **no task at all, and the scheduler cannot touch it.**
+
+| fact | how |
+|---|---|
+| frame ISR spans `0x4000aad0..0x4000d9b0` | repeat98's `STOCK_PROFILE.md`; **verified here** — `0x4000d9ae` is the `rte` |
+| all 8 MACSR sites + the 3 scene/record sites are inside it | arithmetic on the above; octemu independently annotates 3 of them "inside frame_isr" |
+| frame ISR = interrupt **level 5** | **verified here** — `0x4001fc2e: moveq #5` → `0x4001fc30: moveb %d0,0xfc048041` (INTC0 ICR1) |
+| frame ISR masks its own source at entry | **verified here** — `0x4000aada: moveb #1,0xfc04801c` (SIMR) |
+| PIT0 time-slice = interrupt **level 1** | **verified here** — `0x400005e2: moveb #1,0xfc04c06b` (INTC1 ICR43) |
+
+Level 1 cannot preempt level 5. **The scheduler provably cannot land inside the
+`MACSR=0x60` window**, so "adding cycles to the level chain opens a cross-task EMAC race"
+is retired. The residual surface is exactly the two **level-6** sources — MIDI IN
+(`0x400106ec`) and the serial link (`0x400109bc`) — a bounded read, not a tracing project.
+
+Scanning every `ICR` write in the image also produced the **full 11-row interrupt-level
+table**, which neither octabam nor octemu carries. The scheduler turns out to be the
+*lowest*-priority interrupt in the machine.
+
+Also: **`FUN_4000c8a4` is not a function boundary** (it points inside this ISR, at an
+operand). `tools/patch_partreapply.s` names it — worth a look before that patch is revised.
+
+### CLOSED #2 — the Session 49 Part-carryover root cause, now evidenced
+
+S49's handoff called the PICKUP-unstick piece "UNVERIFIED/suspect, proposed by analogy".
+octemu's symbol file pointed at `seq_goto_pattern`; disassembling from there settled it.
+
+Stock has **three** part-apply routines sharing a prologue (publish bytes
+`0x80001828/29`, clear `0x46c7d6d4..d7d4`, index `param_snapshot_base` at
+`part*0x18b2 + bank*0x9b340`). Diffing their absolute-write and `jsr` sets mechanically:
+
+| | `0x40009094` = `STOCK_APPLY` | `0x40009848` | `0x40009e00` |
+|---|---|---|---|
+| size | 1,970 B | 2,378 B | **914 B** |
+| scene table `0x800010e4..e7` | — | ✅ | ✅ |
+| **tempo republish** `0x80001814/18/1c`, `0x80001824` | ✅ | — | — |
+| **audio eDMA re-arm** TCD0/TCD1 CSR + TCD6/7 | ✅ | — | — |
+| **INTC0 re-unmask** CIMR + 3 ICRs | ✅ | — | — |
+| kernel `queue_post` | ✅ | — | — |
+
+**`FUN_40009094` is the only variant that restarts the audio engine.** And
+`seq_goto_pattern` (`0x400a0570`) reads the pattern→Part link at slab `+0x8e57`
+(`0x400a05e8`, confirmed against our own trailer table) then calls the **light**
+`0x40009e00`. So S49's hypothesis — "the pattern-change path never runs `FUN_40009094`" —
+is **confirmed literally true**, and the carry-over is an *enumerated delta*, not a missing
+call. Independently corroborated on a **MKI** by octalab: the stock part setter
+`0x40029a4c(src, part)` re-applies via `0x40009094(bank, part)`, which is also what copies
+scenes A/B into `0x80000ed4`.
+
+**Consequence for the fix:** it should add only the part of the delta a given symptom needs
+— calling the heavy variant from the pattern-change path would re-arm eDMA and post a queue
+message mid-change, plausibly worse than the bug. `diff_flex_static.py` is still the right
+instrument; it now has a list of what to look for.
+
+⚠️ Argument order is **`(bank, part)`**, verified three ways. **octemu's
+`apply_part(part, pattern)` label is wrong** — an example of why a borrowed symbol gets
+checked before it is marked **C**.
+
+### nordseele/octalab — the most valuable single ingest, and the one that saves us money
+
+Findings-only (MIT), stock **OS 1.40C**, **built and tested on an Octatrack MKI** — the
+only upstream on our exact hardware *and* OS. New `reference/kb/caves.md` is built from it:
+
+- **The tail of the image is NOT free space.** `0x401087e4..0x4010c315` (15,153 B) and
+  `0x4010cdd1..0x4010fdf0` (12,319 B) hold zeros with **zero static references** — and are
+  **written at runtime**. A build that put a menu table in the first raised **`VEC:03` at
+  `0x40064abc`** on hardware; because the patched screen was the one containing OS UPGRADE,
+  recovery was **MIDI-only, about an hour of SysEx**. The rule: *no static references* means
+  nothing is **known** to point at a region, not that nothing writes it.
+- **The classic cave `0x400d64da..0x400d7c3c` is contested five ways and effectively full**
+  — octamax (everything), octabam `0x400d6b00`, standalone 1.40MIDISC, octalab (69 B left),
+  **and us** (`CODE2`, `STUB`, `FREE_START` at `0x400d6500`). Our V1.1 ~5 % headroom is
+  headroom in the most contested region in the ecosystem.
+- **The canary protocol** — fill with `0xA5`, flash, use the unit for a full session, dump
+  and compare — is the gate our emulator diff cannot substitute for. Our gate proves the
+  patch does what we meant; it does not prove our bytes stay ours.
+- **The append-a-runtime route is MKI-proven** (octabam's DRAM loader ran on a MKI, 11 Sep),
+  which matters because octabam's own tests are all MKII. That is the answer when the cave
+  runs out — not a new cave in the tail.
+
+Plus, all MKI-verified and folded in: **a Part lives three times** (working / saved / SRAM
+copy at `0x100a4ece`) and **a bank-only write is lost at the next boot**; **input maps are
+layers** (`0x40031494`, keys `0x46c7d8de+code*0x18`, encoders `0x46c7dede+enc*0x14`,
+last-map-wins, `-1` passes through, a null encoder handler *swallows*) plus the stuck-held-trig
+hazard (`0x460d174a`) — which is the mechanism behind our own RELOAD3 picker trouble; the
+callable SETUP-window draw primitives (relevant to S87's card); trig **step records** (64 × 32 B
+from `TRAC+0x59`, sample lock = byte 31) — the other half of the S48 pattern-LED bug's data
+model; and **master length is a u16 at `+0x8e50` with `−1` = INF**, which our byte-wise
+reading at `+0x8e51` would misread as 255.
+
+### For the live DIRECT JUMP non-1x thread
+
+octemu supplies the tick arithmetic we were missing (not yet applied — input to the next
+attempt, not a fix): **`seq_scale_table 0x400aba50`** = ticks/step by scale byte
+`{3,4,6,8,12,24,48,96}`, index 2 = 1x = 6; **`seq_quant_length_table 0x400d80dc`** = 17
+chain/change quantise lengths; the three **wrap comparands** `0x400a3cee`/`0x400a3e14`/`0x400a3ff8`;
+**step phase = ticks × 2,646,000 at `0x400a42d0`**; `0x800065b2` confirmed as the master-step
+counter (the domain S88's Hook P wrote into); and **`seq_pattern_commit 0x400a44a0`** as the
+pattern-change quantisation point.
+
+### Safety fixes to our own KB
+
+- **`0x800000d4` — re-examined, and my first pass overstated it.** midisc 8.2 says
+  "Never 0x800000D4 (OS refs)" and our `MERGE.md` says it "is referenced once in stock",
+  so the note initially went in as "NOT free". Then I swept the whole image myself:
+  **zero absolute-long references to any word in `0x800000d4..df`** — including
+  `0x800000dc`, which MUTE MODE *ships* on. That is the tell: `0x80000070` is the
+  PERSONALIZE block base and stock reaches its settings by **base + displacement**, so an
+  absolute-long scan cannot see any of them and **proves nothing either way** — which is
+  what MERGE.md's own B1 text says about `0x800000f8`. What *does* settle the PERSONALIZE
+  question: stock's boot restore is `memcpy` length **`0x64`**, ending at `0x800000d3`,
+  one byte short of `0xd4` — so `0xd4` is not a stock setting. `memory-map.md` now records
+  all four sources, the method artefact, and the emulator-watchpoint test that would
+  actually settle it. **MERGE.md's "referenced once" claim is unsubstantiated — do not
+  propagate it as fact.** Prefer `0x800000d8` anyway, because `0xd4`/`0xd5` are already
+  `patch_softmute`'s `OTFX_PROBE` diagnostic words.
+- **Verified the probe words never ship:** assembled `patch_softmute` exactly as
+  `build_mutemode_dt.py` does (`DT_MODE=1`) — 970 B, **no reference to `0x800000d4` or
+  `0xd5`**; the diagnostic `OTFX_PROBE=1` build is 986 B and does contain them. The
+  `0x800000d4` references in `patch_mutemode.s` are **comments** about the restore-span
+  widening; its actual state is `0x800000dc`.
+- **Three more never-safe-for-code addresses** from midisc 8.2 (`0x400C14D5` beside our
+  known `0x400C1153`; table zero-gaps `0x400EC8BC`, `0x400E6E5B`), and two *new safe*
+  D-region pads (`0x400D347E..CF` 81 B, `0x400D352D..6F` 66 B).
+- **Citations that moved:** octabam **deleted** `docs/firmware/RTOS_FORK.md` and
+  `COLDFIRE_PORT.md` on 22 Sep, reorganising them into `KERNEL.md` + siblings. Our
+  commit-pinned citations stay accurate *at their pin*, so they were kept and given a
+  "where it lives now" pointer rather than rewritten.
+
+### Workflow retooling
+
+- `tools/refs/contributors.sh` — new; the two discovery passes above.
+- `tools/refs/sync.py` **hardened**: a clone with local edits used to abort the *entire*
+  run (it did, this session — our own poke2 probe in octabam's emulator). It now saves the
+  diff to `tools/refs/local-patches/<repo>-local.patch`, resets, and continues; and a repo
+  that fails keeps its **previous** lock line while the others proceed.
+- `pull-research` SKILL.md: added the discovery step, "diff by **file**, not by commit, on
+  a fast mover", "upstream reorganises — check `--name-status` for deletions", "material can
+  live off `main`" (repeat98's profile is only on `origin/poly-machine`), and **step 4b:
+  verify a load-bearing borrowed claim against our own image** before marking it **C**.
+- New `reference/kb/caves.md`; `kb/README.md` indexes it and now carries the
+  verify-before-you-trust rule.
+- **Documented a coupling nobody had written down: `sync.py --update octabam` updates
+  OUR emulator**, because `tools/emu_rtos.py` runs octabam's script from inside that
+  clone against a Unicorn patched in its `.venv`. This session's sync pulled octabam
+  PR #360 (Unicorn EMAC MAC-with-load decode — Rx source, phantom dual, MASK reset),
+  itself derived from **markandrus/octemu**'s findings; the more-correct EMAC changed a
+  boot branch, reached a stock ~10.8 MB zero-fill at `0x4f502c10` that had never run in
+  our harness, and required mapping `0x4f000000..0x50000000` (the external audio-sample
+  SDRAM bank) in `tools/emu_reload.py`. Nothing in our patches changed. New rule, in
+  both the skill and `kb/techniques.md`: **after an octabam sync, re-run a known-good
+  scenario first — and an emulator "green" from before a sync is not evidence for a
+  build after it.** This is also the first time a new contributor's work improved our
+  own tooling within hours of being tracked.
+
+### Still open (logged in `reference/UPSTREAM_INBOX.md` as Pending)
+
+**12 octabam firmware docs unread** — `PARAM_PAGES.md` (537 L) and `RECORDER.md` are the
+two most likely to bear on S49. **~690 of octemu's 768 ColdFire symbols unmined**, plus his
+**USB-Audio CF-card-payload trick** for code that will not fit the image — a real
+alternative to the cave ceiling. `octamachine`'s two host-side platform docs, and
+`midisc-patcher`'s `patch.json`, unread.
+
+### Session 90 continued — pending items cleared, and the finished set audited
+
+**All five pending items from the morning pass are closed.** Two by distilling them, one by
+reading it and confirming it is out of scope, two by mining them in a more useful direction.
+
+**octabam's unread firmware docs.** `PARAM_PAGES.md` §5g and `RECORDER.md` were the two
+flagged as most likely to bear on S49, and both did:
+- **Step-record parameter semantics**: byte *k* = scene parameter *k* (PLAYBACK 0-5, LFO 6-11,
+  AMP 12-17, FX1 18-23, FX2 24-29, byte 31 sample lock). The **trig word** is
+  `TRAC + 0x89a + (s−1)*2` — bits 15-13 trig count−1, 12-7 micro-timing ±23, 6-0 condition —
+  and ⚠️ **in the bank FILE it sits one byte earlier (`+0x899`)**, a RAM/file skew any tool
+  reading both must respect. Stores: sample lock `0x40040ee0`, p-lock `0x4004f5f8` (which
+  **returns early unless a trig key is down**).
+- **The recorder has three storage tiers** — bank `+0x8f382+part*6322+track*12`, SRAM
+  `0x100a54d0+…`, and a **published tier `0x80000cf4+track*12+page*96` refreshed per frame
+  from `0x80000c94`**. That is the S49 "recorder SRC/RLEN carries over" mechanism, and it says
+  the bug is a *publish* problem rather than a storage one — consistent with our own causal
+  proof in `check_reccache_causation.py`.
+- **The tempo chain `0x4000ca94..cabc`** (`1814→181c`, `1818→1824`, `d1 = 0x80000000 ÷ [181c]
+  → 1820`) explains *why* `FUN_40009094` writes exactly those four tempo words: the heavy
+  part-apply re-runs the tempo derivation, the light variants don't.
+- A pleasing reconciliation: octabam's QREC/QPL ladder at `0x400d80e0` "with an `0xFFFFFFFF`
+  sentinel before" **is** octemu's `seq_quant_length_table 0x400d80dc` "17 longs, first −1".
+  One table, read from opposite ends, shared by QREC/QPL *and* chain-quantise.
+
+The other ten octabam docs were reviewed for scope and carry nothing bearing on a current
+thread — logged as reviewed rather than left as "unread".
+
+**octemu's remaining symbols**, swept against every address our 8 patches touch (the useful
+direction, rather than reading 690 lines): `bank_reload_gate_read` corroborates `patch_qlrec`'s
+detour site; `0x4000d49e` independently places `patch_softmute` inside the frame ISR
+(supporting the MACSR closure); **`sample_heap_base = 0x40a955e0`** arrives with an arithmetic
+proof that it is exactly where the 16 resident bank blobs end
+(`0x400e21e0 + 16 × 0x9b340 = 0x40a955e0`) — the same address octalab reports octabam's
+MKI-proven DRAM loader depacking into, so two routes converge on one number. And a real trap:
+**`0x400e21e0` has two identities** — DSP first-stage bootstrap in the **image file**, bank
+blob base at **runtime**. Patching the image there would corrupt the DSP loader. (Our
+`patch_pattern_led` reads it at runtime, as stock itself does at `0x4009a486`.)
+
+**octemu's CF-card payload trick** — the item flagged as a possible answer to our 5 % V1.1
+headroom, and it is a good one. The payload lives on the card, a ~400 B trampoline in image
+slack hooks `fs_card_detect_poll`, and stage 2 installs the rest at runtime into flex-heap
+pages taken out of the firmware's own free list. **Its failure mode is benign**: no card file
+means stock behaviour, and recovery is hold-`NO`-at-boot or delete the file — no reflash, no
+SysEx. Better risk profile than append-a-runtime, which costs sample memory permanently.
+☠ It also carries **hardware-measured** SDRAM verdicts worth never re-deriving: `0x48001000`
+is wrong (writes past ~`0x48003000` **destroy image code**), `0x48010000` corrupts the
+exception screen itself, `0x49000000` is clean for 256 KB.
+
+**octamachine** — read, and **confirmed out of scope**. It is MCF5206E / Machinedrum
+territory (Gearmulator's MD memory map, MAME's `elektronmono.cpp`); the only Octatrack-side
+sentence restates octemu's board setup. Nothing for us. Closed, not deferred.
+
+**midisc-patcher** — `patch.json` is `{stockSha256 164f3122…, patchedSha256, mainOsSize
+1112560, spans[549] {offset, data}}`. Two cheap things we could adopt: a **`patchedSha256`
+rebuild-reproducibility gate** (our guarded splices catch a wrong *input*, but we publish no
+expected *output* hash, so a user can't confirm their rebuild matches ours), and a
+single-file redistributable span diff — which contains only our bytes, never Elektron's.
+
+### The audit: does any of this change a finished build?
+
+**No. No mod needs rebuilding or reflashing.** Full per-mod table in `reference/MERGE.md`
+"Audit of the finished set". The results worth stating here:
+
+- **PARTREAPPLY is validated, and its design was right for reasons we did not have.** It calls
+  `FUN_40009094` **only when the transport is stopped**, and its comment justified that as
+  "avoid racing whatever jump-avoidance property its timing has" — a hunch. It is now a
+  mechanism: that is the only variant that **re-arms the audio eDMA TCD0/TCD1 chain** and
+  republishes tempo, so calling it under a running sequencer would re-arm audio DMA mid-play.
+  Its `(bank, part)` convention is confirmed three ways; octemu's label is the wrong one.
+  Only fix needed is a comment: `FUN_4000c8a4` is not a function boundary (the premise is
+  right, the label isn't).
+- **MUTE MODE is validated and its risk surface shrank.** The MACSR preemption hazard the
+  whole hook-12 investigation worried about **cannot happen** (frame ISR level 5, PIT0 level
+  1). octemu independently places `patch_softmute`'s `0x4000d49e` inside the frame ISR. If the
+  hardware silence regression ever returns, the surface to examine is the **two level-6
+  sources** (MIDI IN, serial link), not the scheduler.
+- **Bug-2 pattern-LED: fix unchanged, root cause sharper.** Disassembly confirms stock's
+  predicate ORs `+0x00..0x0f` then `+0x18..0x37` — it **skips exactly `+0x10..0x17`**, the
+  mask octabam reads as trigless-locks. So stock doesn't merely ignore p-locks; it omits the
+  one mask recording them. A **cheaper fix exists** (OR in `+0x10`) and is **deliberately not
+  adopted**: that mask's label is disputed upstream (nordseele 🟡 vs octabam ✅), the MIDI
+  side's equivalent is unmapped, and our lock-array scan is correct either way. Ground truth
+  beats a cheaper read of a contested label.
+- **QLREC: no bug.** octemu warns `bank_reload_gate` must be tested as a full word; we never
+  interpret it — we replay the `jsr` and let stock's own `tst.l %d0` do the test.
+- **`0x800000d4` affects no shipped mod** — proven by assembling the shipping softmute
+  (`DT_MODE=1`, 970 B, no reference) versus the diagnostic (`OTFX_PROBE=1`, 986 B, present).
+- **Cave overlaps**: our V1.0 allocation overlaps octalab's `LAB_MENU`, octabam's list cave and
+  standalone 1.40MIDISC. **No action for our builds** — it only rules out naively merging an
+  image with those projects.
+- The **B1 merge blocker is unchanged and still open** (`DJ_MODE` at `0x800000d8` riding MUTE
+  MODE's widened restore) — it was never about `0xd4`.
+
+### Making this get used, not just stored
+
+`CLAUDE.md` is the only file auto-loaded every session, so the three rules that would
+otherwise be relearned the hard way now live there as hard constraints: **read
+`kb/caves.md` before naming any cave address** (with the counter-intuitive part stated
+inline — 27 KB of zeros with zero static refs is still written at runtime); **a borrowed
+address or signature is a claim, verify it against our own image** (with the objdump
+one-liner); and **`sync.py --update octabam` silently changes our emulator**, so a green
+from before a sync is not evidence for a build after it.
+
 ## Session 91 (2026-09-25, `wip`) — SIDECHAIN3: a donated effect now loads as NONE in the UI, not just silently in the DSP. Found the id→descriptor tables (two of them)
 
 Ask: a project that still uses the effect whose DSP module we donated should load
@@ -30165,6 +30628,68 @@ was really confirmed was only "it did not hang during that flash".
 
 **Built, isolation-validated, NOT FLASHED.**
 
+## Session 89 continued — the non-1x PHASE bug ROOT-CAUSED: stock carries the sub-step phase across a commit
+
+Hardware on V5: tests 1 (1x baseline) and 2 (master 2x, no switch) PASS — Hook P's removal
+fixed both the erratic playhead and the trig-content dependence. Remaining: switching between
+a 1x-master and a 2x-master pattern leaves the sequence "step-fractional", *usually* but not
+always, never recovering, in both directions.
+
+### MEASURED (tools/diag_pair_phase.py, V5 image, DJMAST2 pattern 0 <-> 1, 8 real commits)
+
+```
+commit t 42..t201 (7 of them): PAIR[0]=0  holdmask writes=0   -> CLEAN
+commit t 255:                  PAIR[0]=3  holdmask writes=16  -> FRACTIONAL
+0x400a3d36 hold CONSUME: x8, first at t257 (two ticks after the fractional commit)
+```
+
+`PAIR[t]` (`0x80006604`, written `0x400a4924`/`0x400a492a`) is the track's **sub-step tick
+phase** at the commit instant — the raw write is `-3` (0xfffffffd) and stock's
+negative-correction branch stores `+3`. When it is non-zero stock sets bit t of the hold mask
+`0x80006626`, and the per-tick loop consumes that bit at `0x400a3d12`, copying PAIR's low
+byte into `0x800065d3[t]` at `0x400a3d36` and **skipping that track's advance for one step**.
+
+That machinery exists to *carry the track's existing phase across the commit*. At a natural
+pattern boundary the phase is always 0, so it is a no-op. At a mid-cycle DIRECT JUMP that
+also changes the MASTER SCALE it bakes in a permanent sub-step offset: track tps 6 with
+`PAIR = 3` is exactly half a step, carried forever, with nothing to correct it.
+
+### Why this was invisible for seven sessions
+
+At 1x, `tps_master == tps_track`, so `D7 = tps_master * masterStepOffset` is always an exact
+multiple of the track's ticks-per-step. **`PAIR` is therefore always 0 at 1x**, the hold bit
+is never set, and the bug cannot occur. It requires a master/track ticks-per-step mismatch,
+i.e. exactly the non-1x case.
+
+With master 2x it is 0 or 3 according to the parity of the master step the commit lands on —
+so a clean landing is possible but uncommon, which is precisely the user's revised report
+("most of the time fractional, occasionally maybe clean").
+
+### Candidate fix (NOT built)
+
+At an **armed DJ commit only**, suppress the phase carry — clear the hold mask `0x80006626`
+so no track resumes mid-step — letting every track land on a step boundary at the new
+master's grid, using the per-track-correct position stock already computes and V5 now
+preserves. Gated on the armed commit, so DJ-OFF and natural boundaries are untouched; and
+provably inert at 1x, where the mask is never set.
+
+This is AR's hard re-phase in spirit but with OT's better per-track position rather than AR's
+master-flattened one, so it should land clean where AR (user-confirmed on hardware) lurches.
+
+Still to establish before building: the exact site where the AUDIO hold bits are set (the
+MIDI twin is disassembled at `0x400a4b12`-`0x400a4b22`; the audio twin is near `0x400a497c`),
+and a hook point that cannot affect the un-armed path.
+
+### Emulator note
+
+`refs/octabam` needed `tools/emu/emu_rtos.py` to map the audio-sample SDRAM bank at
+`0x4f000000` (16 MB) or no image boots at all — A/B tested, HEAD fails `UC_ERR_WRITE_UNMAPPED`
+at `gate_m6a()`. That change existed only in the working tree on a detached HEAD; committed
+as `d5b84fb` on branch `emu/map-audio-sdram`. Also: two Unicorn instances running at once
+desynchronise the wall-clock-derived PIT and produce spurious boot faults, so emulator runs
+from parallel sessions must be serialised — results taken under contention are not
+trustworthy.
+
 ## Sessions 94-96 (2026-09-25, `wip`) — QLREC: the gate shut because a private scratch word does NOT survive on hardware. **WORKING, hardware-confirmed.** The patch now keeps no state at all
 
 Session 93 fixed the crash but the flip never fired: *"The key combo brings up the
@@ -30266,9 +30791,108 @@ settled it was a diagnostic build on the unit.
   that cried wolf on first run (`final == 0` after an even number of flips; `< 4` entries
   for 3 taps) — both corrected; **read their per-step tables, not their summary lines.**
 
-> **QLREC's sessions above are promoted from `wip` with the fix itself.** They are the record of three hardware failures (a hang, a crash, a dead gate) and are the reason for the `0x400522ca` and scratch-RAM rules in CLAUDE.md. Sessions 89-91 and 97 (DIRECT JUMP, the KB ingest, SIDECHAIN3) remain on `wip` only.
+## Session 97 (2026-09-25, `wip`) — DIRECT JUMP V5.5: the non-1x sub-step PHASE fix, built as PRESERVE-not-compute. Oracle-clean at armed commits, 1x untouched
 
-> **Note for readers of this branch.** `main`'s NOTES.md ends at Session 88. Sessions 89-97 (DIRECT JUMP, the KB ingest, SIDECHAIN3's UI fix, QLREC) live on `wip` and are referred to below by number only. The RELOAD3 work of Sessions 89-93 was recorded in the comments of `tools/patch_reload3.s`; this entry is its close-out.
+Continues the handoff `reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md` (read it first;
+§3's derivation is the whole spec). Hook S (dead end 3) removed; two new hooks preserve
+each track's free-running tick counter across an armed commit instead of computing any
+replacement value.
+
+### What today's disassembly added to the handoff's picture
+
+1. **The commit tail is CNTDN-deferred PER TRACK.** `0x400a4bc0-4bcc`: the tail decrements
+   `CNTDN_TBL[t]` (0x800065c3) every tick and runs its reposition body (STEP_ARR write +
+   tick-counter zero) only on the tick it reaches 0. So "the commit" applies to each track
+   at its own tick, up to tps_master ticks after dj_c. This kills the one-shot
+   G_JUST_COMMITTED gating style for this fix (dj_a's idle path clears it the very next
+   tick, before any deferred track applies) — the arm state must be a per-track bit.
+2. **Both destroying writes land in the SAME tick per track** (S89's t42 trace:
+   0x400a4be6 → 0x400a4bf0 → 0x400a354a → 0x400a3ce2). CNTDN==0 gates both the tail body
+   AND the per-tick copy at 0x400a353e, and the next tail pass takes CNTDN to 0xff (the
+   0x400a4bc2 `blts` skips only negatives), so the copy fires exactly once. Consequence:
+   **no snapshot buffer is needed at all** — suppress the zero, and the counter itself
+   carries the value to the second site.
+3. **There is a THIRD copy machine.** The hold-consume path (0x400a3d12-3d48, d3 = track)
+   that skips one advance (dead end 1's ceil→floor compensation) also writes
+   CATCHUP[t] = PAIR low byte at 0x400a3d36 and sets bit t of **0x80006624**; the copy at
+   0x400a355e (gated on that mask at 0x400a3552, bit cleared after use) then loads PAIR
+   into the counter one tick after the track's first wrap. Unfired in today's fixtures
+   (PAIR read 0 at every commit) — WATCH ITEM, see below.
+4. Detour windows verified branch-target-free (±32K PC-relative scan + image-wide
+   absolute-operand scan): 0x400a3542 (10 B), 0x400a4bea (10 B), and — pre-cleared for
+   the watch item — 0x400a3556 (10 B).
+
+### The build (V5.5, `e3e5d232…`, NOT flashed)
+
+- **Hook Z @0x400a4bea** (displaces `clr.b %d0 ; moveal %sp@(164),%a0 ; move.b
+  %d0,%a0@(-211)`): DJ_MODE on + this track's `dj_keep_pend` bit set → skip only the
+  store. Tests the bit WITHOUT consuming (Hook X, later the same tick, consumes it).
+- **Hook X @0x400a3542** (displaces the two cursor loads + `move.b (%a2),(%a1)`): pending
+  → consume bit t and reduce the preserved counter **mod LEN_TBL[TRK_SCALE_IX[t]]**
+  instead of copying CATCHUP. The mod matters because dj_c refreshes the scale cache AT
+  the commit (Session 84), so the wrap check runs at the NEW tps immediately: a counter
+  preserved across a shrink (6→3) could sit at 3..5 and advance late once, shifting the
+  grid permanently. `(C−A) mod tps_t` is the handoff's REQUIRED value verbatim, with
+  `C−A` supplied by the counter itself. Identity at 1x and all non-shrinking scales.
+- Track index derived from stock's own cursor (a1 − 0x800064f0, bounds-checked; NOT from
+  a loop register), so the hook inherits stock's per-track semantics for all 16 slots.
+- **`dj_keep_pend` (16-bit mask) lives in the cave** (0x400d791e), not 0x80006a40+ —
+  Sessions 94-96 proved that window unreliable under live audio, and a cave word's
+  power-on value is the image byte itself (0). Set 0xFFFF in djc_fix; cleared on dj_c's
+  natural path. Stale-bit edge (transport stopped inside the ≤tps_master-tick apply
+  window): at most one suppressed zero+copy on a later natural wrap for those tracks,
+  self-healing at the next commit.
+- Inside a jsr'd hook every displaced %sp offset is **+4** for our return address
+  (164→168, 148→152, 172→176) — the dj_ptnrel Session-63 lesson applied in advance.
+- Hook S removed; dj_phase3 stays as dead cave code; 0x400a4d36 is stock again. Gold
+  gate: 1006 bytes differ from GOLD_S87, **0 outside the cave**; manual-trig fix
+  byte-identical; blob 1424 B ends 0x400d798f, clear of trigscale at 0x400d7b00.
+
+### MEASURED (tools/diag_phase_correlate.py, V5.5)
+
+| fixture | result |
+|---|---|
+| DJMAST2 0↔1 (master 1x↔2x) | **re-phased? = no on ALL FIVE armed commits** (t42/93/147/201/255), both directions — the §7 pass criterion. t90/t189 still YES = NATURAL master-cycle wraps, §6's separate stock behaviour (t189 even snaps our correctly-preserved phase back to the master grid at a 1x wrap) |
+| DJMAST2 2↔3 (uniform 1x) | class [5] at all 7 commits, armed and natural, zero re-phasing — 1x baseline untouched |
+
+Report-reading note: the `0x400a354a wrote` column reads `--` on this build BY
+CONSTRUCTION — the stock-path copy now executes at the cave PC (`dkx_stock`), so the
+oracle's pc==0x354a filter can never match. The verdict rests on the advance congruence
+classes, which are PC-independent.
+
+### WATCH ITEM (not patched — zero evidence in these fixtures)
+
+If hardware still shows fractional steps at ARMED commits, the suspect is the third copy
+machine (finding 3): detour 0x400a3556 (`266f0094 2c6f00ac 1696`, window pre-verified)
+with a second pending mask, suppressing ONLY the 0x400a355e copy once per armed commit
+per track. Do NOT clear the hold mask itself — dead end 1 stands (the skip is stock's
+position compensation). Residual wobble WITHIN one non-1x pattern (no switching) is §6
+(natural-wrap re-phasing), stock behaviour, user reports it as nominal — leave it.
+
+### Environment note + the feature-OFF gate
+
+All emulator runs serialised (pgrep-guarded); refs/octabam confirmed on `d5b84fb`
+`emu/map-audio-sdram` before the first run.
+
+**feature-OFF gate (tools/diff_stock_vs_patch.py, V5.5 vs stock, DJ OFF, scratch
+poisoned 0xAA): RESULT IDENTICAL** — all 8 instruction counters equal (audio/MIDI loop
+tops 856, increments 856, wraps 136, STEP++ 136, track-wrap 8, rebuild 8) and per-track
+STEP/TICKS/ARMED/SCALE + master STEP/SCALE_IX/BAR_CTR identical across 38 samples.
+
+Two tool lessons from getting that gate to actually gate:
+1. `--patched` had a silent DEFAULT pointing at the **v4** image — the first "IDENTICAL"
+   of the evening was a vacuous pass that never loaded V5.5 at all (spotted only in the
+   report's file path line). The flag is now REQUIRED. A gate that cannot fail proves
+   nothing — and a gate aimed at the wrong image cannot fail.
+2. The tool `chdir`s into refs/octabam before reading the image, so a relative
+   `--patched` path dies with FileNotFoundError — which the tool then dressed up in its
+   canned "cold-boot failure mode" diagnosis, a completely wrong steer. `--patched` is
+   now resolved to absolute at parse time. When that tool reports a fault, check the
+   exception class before believing the prose.
+
+Emulator caveat, as always (CLAUDE.md): three green gates are evidence about the LOGIC.
+Session 88 passed every gate here and still broke the unit. V5.5 is NOT FLASHED;
+hardware decides, and the flash decision is the user's.
 
 ## Session 98 (2026-09-25, `wip`) — RELOAD3: the §4 diagnostic toast is BUILT — hex bytes + indices on screen, emulator-gated, awaiting one flash
 
@@ -30343,6 +30967,96 @@ More hardware W values on failure: `0045`, `004F`, `003F` (plus `005B`). Track 3
 flag always non-zero, values vary — so the "0x55 content" explanation is not supported;
 only "the bytes are overwritten" is. The fix is indifferent to the value.
 
+## Session 99 (2026-09-25, `wip`) — V5.5 FLASHED: hardware says NO CHANGE. The thread moves to a diagnostic build; the emulator is formally out of its depth here
+
+### The hardware verdict (user, on the unit, V5.5 `e3e5d232`)
+
+Pattern switches still leave the new pattern in fractional step-time in the two-track /
+two-pattern, 1x↔2x-master test case. **Discriminating detail: per-track LENGTHS and
+per-track SCALES (multipliers) all hold time against the metronome — the fractional
+offsets appear ONLY when a master scale other than 1x is involved.** The 1x baseline is
+intact. So V5.5 regressed nothing and fixed nothing.
+
+### Why this does NOT falsify Session 97's root cause — and why no more emulator runs
+
+Two attempts to provoke the failure in the emulator on V5.5 (standard + shifted cue
+schedule, `--cue-at 43 --gap 50 --ticks 500`) both came back armed-clean with **PAIR = 0
+at every single commit** — the emulator's cue path lands commits only at whole-step
+resume offsets, so the machinery that carries a NON-ZERO sub-step phase (hold mask →
+CATCHUP=PAIR at 0x400a3d36 → 0x80006624 bit → the THIRD writer 0x400a355e) has never
+executed in any Session 97/99 fixture. On hardware the user presses at arbitrary times.
+Additionally the emulator re-phases track 0 at every natural master-cycle wrap of a 2x
+pattern ([5]↔[2] flips at t90/t189 in every run) — while the user reports a single 2x
+pattern as NOMINAL on hardware. Emulator and unit disagree in both directions on this
+thread; per CLAUDE.md, build a diagnostic, don't reason.
+
+### The instrument: DJ_DIAG build (`DJ_DIAG=1 python3 tools/build_directjump_v5.py`)
+
+V5.5 plus counters, zero behaviour change otherwise; outputs go to `*_v5diag` /
+`OCTATRACK_*_V5DIAG.*`, OS VERSION reads **140C_KDIAG**, toast dwell 0x88.
+
+- `A` armed commits (djc_fix), `Z` Hook Z preserve entries, `X` Hook X preserve entries
+  (expect **Z == X == 16·A** if the fix executes on hardware),
+- `Y` executions of the third writer at 0x400a355e via a PURE OBSERVER detour at
+  0x400a3556 (10 B, window verified branch-target-free in S97), `P` = last byte it
+  copied (CATCHUP[t] = PAIR at that point),
+- `R` = the last Hook H reseed REMAINDER (`ticks mod tps_in`, captured from the division
+  loop's own d0) — nonzero means the master grid itself re-anchored off the absolute bar
+  at that commit, stock zeroing the master tick counter right after.
+
+**[PTN]+[YES] prints `A.. Z.. X.. Y.. P.. R..` and RESETS the counters** — so: toggle ON
+(baseline zeros), run the test switches, toggle OFF and read the exact interval.
+Counters live in the cave; power-on value is the image byte (0).
+
+Readings → next move:
+- `X < 16·A` (or 0): the arm/consume path itself fails on the unit (G_ARMED at
+  0x80006a40 is in the window Session 98 proved clobber-prone — RELOAD3's request bytes
+  were overwritten there ON HARDWARE) → move G_ARMED into the cave.
+- `Y > 0, P != 0`: the third writer re-phases after our fix → detour 0x400a3556 for
+  real (suppress the copy once per armed commit per track, second cave mask; leave the
+  hold-skip alone, dead end 1 stands).
+- `R != 0` on fractional switches: the MASTER grid re-anchors off-bar — matches the
+  user's "only master scales break" observation; fix is in the master domain (seed the
+  master tick counter with the remainder instead of letting stock zero it), a NEW
+  sub-thread.
+
+### Validation of the instrument itself
+
+- `tools/emu_djdiag.py` (new, raw-Unicorn synthetic-call harness modelled on
+  emu_directjump_v4.py): drives the REAL dj_toggle in the v5diag image, firmware's own
+  sprintf (0x40013a08) runs for real → NOTIFY receives dj_diag_buf, buffer reads exactly
+  `A2 Z32 X32 Y1 P3 R7` from seeded counters, all six counters reset, DJ_MODE still
+  toggles. ALL GOOD.
+- Mainline V5.5 rebuilt after all .s edits: byte-identical `e3e5d232` (all diag code is
+  `.ifdef DJ_DIAG`).
+- Full-RTOS parity run of the diag image (result spliced in below).
+- ColdFire lesson re-learned: **no memory-destination `addq`, and register `addq` is
+  `.l` only** — the assembler catches it, four counters routed through dead/saved
+  registers.
+- `diag_phase_correlate.py` now pairs the cave-symbol ELF to `--image` (the diag build's
+  cave layout differs; the old hardcoded V5 elf would have made the armed? column lie).
+
+- Full-RTOS parity: `diag_phase_correlate --image out/mainos_directjump_v5diag.bin`
+  reproduces the mainline V5.5 run EXACTLY — same commits [42,90,93,147,189,201,255],
+  armed rows all `re-phased? no`, naturals YES, with the armed? column now read from the
+  correctly-paired diag ELF (djc_fix 0x400d76a0). The observer does not perturb the
+  behaviour it measures.
+- Same chdir trap as Session 97, second tool: `--image` is now resolved absolute in
+  diag_phase_correlate.py too (a relative path died at attach after os.chdir(octabam)).
+
+### Flash protocol (user)
+
+Flash `out/V5_5D_OCTATRACK_OS1.40C_DIRECTJUMP_V5DIAG.syx` (or the `.bin` twin; OS
+VERSION must read **140C_KDIAG**). Then:
+1. [PTN]+[YES] → DJ ON; the toast should read all zeros (`A0 Z0 X0 Y0 P0 R0`).
+2. Run the failing test exactly as before (1x↔2x master switches), COUNTING the jumps.
+3. [PTN]+[YES] → DJ OFF; report the toast line.
+Reading: A should equal the jump count; healthy fix = Z and X both 16·A. X well short of
+16·A → the arm/consume path fails on hardware (move G_ARMED to the cave next). Y > 0
+with P ≠ 0 → the third writer fires (suppress the 0x400a355e copy next). R ≠ 0 → the
+master grid re-anchored off the bar (master-domain fix next). Multiple non-nominal
+readings are possible; the counters were designed so one flash separates them.
+
 ### Session 98 — RELOAD3 IS FINAL. User: "All issues resolved." Promoted to `main`
 
 After flashing the fixed build the user reported: *"Flashed. All issues resolved. RELOAD3
@@ -30373,3 +31087,600 @@ sections, and QLREC's stateless rewrite.
 `0x400522ca`, the site that crashed a real MKI on 2026-09-25 (Session 93), and `main`'s
 README still calls that feature hardware-confirmed. The fix (`0b595ed`) is on `wip` only.
 Promoting it is a separate decision.
+
+## Session 100 (2026-09-25, `wip`) — the diag toast came back and NAMED the hole: V5.5's mod-reduce lived at a site hardware rarely runs. V5.6 moves it to the site hardware always runs
+
+### The readings (user, five switches per run, 140C_KDIAG)
+
+`A5 Z40 X16 Y0 P0 R0`; across repeated 5-switch runs X and R vary (X sometimes > 16,
+R sometimes nonzero), and R has read 0 on runs whose switches were audibly fractional.
+
+### What each number established
+
+- `Y0 P0` every run: the third writer (0x400a355e) NEVER fires on the unit. That
+  hypothesis is dead on hardware evidence.
+- `R0` on fractional runs: the Hook H reseed remainder is not necessary for the
+  symptom — the master-reanchor hypothesis dies as the cause. (R nonzero on SOME runs
+  also shows commits DO land mid-master-step on hardware, where the emulator's
+  TICK_CTR always read 0 at Hook H — one more emulator divergence, noted.)
+- `Z40 = 8·A` exactly, every run: Hook Z fires for all 8 AUDIO tracks at every armed
+  commit, deterministically. (Also confirms the tail's CNTDN body covers audio only —
+  the MIDI twin block near 0x400a4cb0 has its own, still-unpatched, writes.)
+- `X16 ≪ 16·A = 80`, and NONDETERMINISTIC: the 0x400a354a CATCHUP copy fires for only
+  a timing-dependent minority of tracks on hardware. The emulator showed it firing for
+  track 0 at EVERY commit — which is exactly why V5.5 measured clean there.
+
+### The hole
+
+V5.5 placed the mod-reduce (counter mod new tps) inside Hook X. Every track whose copy
+never fires kept its counter UNREDUCED across a tps shrink: entering the 2x grid with
+counter 3..5 under tps 3 advances late once and shifts the grid permanently. Counter
+0..2 = clean — reproducing "usually fractional, occasionally clean". Preserve then
+faithfully carries the offset through subsequent switches in both directions, matching
+"never self-correcting, both directions".
+
+### Second reading: R4 — commits land MID-MASTER-STEP on the unit
+
+Follow-up runs read `R4` (twice, 4- and 7-switch runs). R is the remainder Hook H's own
+division produces; 4 mod 6 is unreachable if commits sat on outgoing step boundaries,
+so on hardware the master tick counter is NOT always 0 at the commit — directly
+contradicting the emulator's measurement at this site ("TICK_CTR always 0 at Hook H").
+Consequence: Hook H floors the resume step, the remainder is discarded, and stock's own
+commit then zeroes the master tick counter — the entire incoming grid re-anchors r
+ticks late against the shared timebase on every such commit. A second, independent,
+hardware-proven fractional source, in the MASTER domain — matching the user's "only
+master scales other than 1x break".
+
+### V5.7 candidate (mainline `83a551c8`, diag `116d1678`) — both proven holes closed
+
+1. **Reduce moved into Hook Z** — the site the readings prove runs for every audio
+   track at every commit (Z = 8·A). Hook X is unchanged (suppress + consume + a
+   now-redundant idempotent reduce when it fires). Diag counter `M` = reduces that
+   actually CHANGED a counter; toast is now `A Z X Y P R M`.
+2. **Master remainder seeded, not discarded**: dj_d7 stashes `ticks mod tps_in` into
+   the cave (`dj_mrem`, cleared at entry, one-shot), and dj_c's armed path writes IT
+   into the master tick counter where stock writes 0 — the first incoming master step
+   is shortened by r so the next wrap lands ON the absolute boundary. r is structurally
+   0 at 1x and at clean commits, where the write byte-equals stock's own; the seed site
+   is the exact instruction stock uses (Session 82's "never force this counter" lesson
+   does not apply: that was a step INDEX at arm time; this is the correct unit, at the
+   commit, replacing stock's own write).
+
+Bundling justification (normally one variable at a time): both mechanisms are
+independently hardware-measured, both are the same spec violation (every grid must stay
+on the one absolute timebase), and the diag counters keep attribution — M engages the
+track fix, R shows what the master seed received.
+
+`emu_djdiag.py` re-passes with M (exact string, resets, toggle intact). Emulator gate
+results spliced below — with the standing caveat that the emulator never opens this
+hole (its copies always fire), so these runs are REGRESSION evidence only; the unit
+decides the fix.
+
+### V5.7 emulator gates (regression + one positive surprise)
+
+| gate | result |
+|---|---|
+| DJMAST2 0↔1 | re-phased? = **no on all five armed commits** — and the commit ticks themselves moved vs the V5.5 run (147→150, 189→186, 255→252): the MASTER SEED FIRED, r=3, at real 2x→1x commits. My "the emulator can't produce remainders" claim was wrong for the r=3 case (an odd outgoing 2x master step gives ticks ≡ 3 mod 6 with the tick counter at 0; only r=4 needs a mid-step commit). So the seed path is emulator-EXERCISED, not merely inert: grid re-anchored correctly, no re-phase — and the natural wrap at t186 ALSO stopped re-phasing (V5.5's t189 wrap snapped the track back; with the master correctly anchored the wrap's CATCHUP became consistent). §6 may partially heal downstream of this fix. t90 (first wrap, before any seed engaged) still re-phases = §6 stock behaviour, still open. |
+| DJMAST2 2↔3 (uniform 1x) | class [5] at all 7 commits, armed and natural — baseline untouched |
+| feature-OFF, scratch poisoned | IDENTICAL — all 8 counters + 38 samples equal stock |
+
+Standing caveat: emulator green = logic evidence. The unit decides; the toast keeps the
+attribution (`M` = track-reduce engagements, `R` = what the master seed received).
+
+## Session 101 (2026-09-25, `wip`) — WHY route A is slow, measured: the cost is structural. octabam's C++ port ported a diag at 11x, plus a `cp`-over-a-live-dylib bug that fakes a broken build
+
+Started from a question about other developers "testing in real time" and whether
+markandrus/octemu's merge into octabam gave us anything. It did not — but the answer
+was already in `refs/`, unused.
+
+### The premise, corrected
+
+**octemu is not a repackaging of octabam's emulator.** It is markandrus's independent
+QEMU-based emulator (patched QEMU ColdFire MCF54455 + dsp56300 + SDL2). What octabam
+merged from octemu is the **firmware mods** (USB MIDI, USB AUDIO) as modules, not the
+emulator. And the "GUI" is not octemu-only: octabam already ships one —
+`ot_emu --lcd out/lcd.bin --live out/panel.fifo` + `tools/emu/lcd_view.py --panel`.
+
+### Where route A's 121-143x actually goes (measured, not reasoned)
+
+Microbenchmarked Unicorn 2.1.4 m68k TCG on this M4, on the EMAC-patched build our
+harness actually loads:
+
+| configuration | throughput |
+|---|---|
+| no hooks | **154-252 MIPS** |
+| bursts of 4096 (our `quantum`) | 90.7 vs 91.8 — **free** |
+| bursts of 32 (`step_quantum`) | 21 MIPS (4.3x) |
+| + global `UC_HOOK_MEM_WRITE` | 21 MIPS (**7.3x**) |
+| + global per-instruction `UC_HOOK_CODE` | 3.2 MIPS (**28x**) |
+| a load through a Python `mmio_map` callback | 9 MIPS (**28x**) |
+
+**The CPU core is faster than the OT's own ColdFire** (~176 MIPS in octabam's model).
+The burst model is free. Every bit of the slowdown is harness tax, in two callbacks.
+
+### ⚠️ THE LESSON: route A cannot be micro-optimised into speed
+
+Unicorn's fast path is lost as soon as **any** code hook covers executing code, and
+route A installs **435** of them at the EMAC macload sites regardless of anything we
+do. So removing one more global hook cannot recover a fast path that 435 site hooks
+have already given up. Measured end to end: the write-hook fix returned **16%** against
+a 7.3x microbenchmark, and the exact-clock fix returned **nothing** (178.6 s → 188.4 s,
+within host-load noise). **Route A's cost is structural** — hook-instrumented emulation
+driving a Python-side machine model. Reach for the C++ port, not a faster route A.
+
+### What was built (3 local patches, `tools/refs/local-patches/`)
+
+1. **`octabam-emu-writehook.patch`** — `boot()` installed an **unbounded**
+   `UC_HOOK_MEM_WRITE` whose Python lambda fires on every store in the address space,
+   and never removed it, so it rode through every RTOS run. Its only two readers are
+   boot's own stall loop and `_run_until`. Now boot `hook_del`s it on the way out and
+   `_run_until` installs its own lazily, at the first mid-way burst — `writes` is a
+   delta across a 4-entry window that decides nothing until full, so the delta over
+   bursts 2..4 is bit-identical. **`emu_pattern_led.py` 217.9 s → 183.8 s, output
+   byte-identical.**
+2. **`octabam-emu-exact-clock-native.patch`** — `exact_clock()` counted retired
+   instructions with a global per-instruction Python hook, **recomputing a number
+   Unicorn already keeps in C**: `uc->emu_counter`, maintained by its own internal
+   count hook on every burst started with `count > 0`, which is every burst `step()`
+   starts. Adds `tools/patches/unicorn_emu_counter.patch` (one **appended** `uc_ctl`
+   enum value — every stock value unmoved, so the stock pip bindings stay compatible —
+   plus one read case) and reads it. Also adds `instrs_quantum`/`bursts_short` so the
+   clock's mis-billing is reported rather than assumed.
+3. **`octabam-ot-emu-steps.patch`** — `--steps FILE` for the C++ port: a line-oriented
+   step list run after the load at main's spin. `ptr`/`set`/`spin`/`call`/`poke`/`copy`/
+   `peek`/`echo`, plus the transport — `frame on|off`, `iclock`, `seq BANK,PAT`,
+   `transport`, `triglog`, `trigs`, `coverage`, and `frames N [ADDR,LEN=HEX]` (run N
+   frames **or** stop early once memory matches: a bind phase with a ceiling). The
+   caller parses `step ` records and owns the assertions, so the C++ stays dumb.
+
+### The port: `tools/port_pattern_led.py` — 11x, and it agrees
+
+`emu_pattern_led.py` ported to `ot_emu`. Same image, same card (`stage_card.py` calls
+route A's own `stage_project`, so the staging is identical).
+
+| | route A | ot_emu |
+|---|---|---|
+| stock | 183.8 s | **16.7 s** |
+| patched | 190.0 s | **16.4 s** |
+| `blob` | `0x400e21e0` | `0x400e21e0` |
+| assertions | 6/6 | 6/6, identical |
+
+Verified purely additive: with no `--steps`, ot_emu's boot and sequencer paths print
+byte-identical numbers (same 8235 boot writes, 22596 instr/frame, gate PASS). Our
+`out/mainos_*.bin` is already `--os`/`--image` input shape (1,112,560 B), so all 53
+build artifacts are drop-in.
+
+### ☠ NEW TRAP: `build_unicorn.sh` installed the library with `cp` OVER THE LIVE FILE
+
+That keeps the inode and rewrites its pages in place; macOS then fails page validation
+against the ad-hoc signature it cached for that path and **SIGKILLs (`Killed: 9`, shell
+exit 137)** any process that loads it — including the script's own EMAC self-test. **It
+presents exactly as "my patch broke the build":** a full A/B here wrongly convicted the
+`emu_counter` patch before the *identical bytes at a fresh path* loaded fine. Fixed with
+`rm -f` before the `cp` — `rm` is the SAFE order, the inode lives until the last mapping
+drops. This is very likely what this file's own pre-existing note about "an x86_64 build
+that crashed on its first `emu_start`" was really describing.
+
+**Second half of the trap: `refs/octabam` and its one `libunicorn.2.dylib` are shared
+by every Claude session open on this repo.** Another session was mid-`diag_reload3_*`
+run during these rebuilds and the user saw Python failures in other chats. Before
+rebuilding the library, check `pgrep -f 'tools/(diag_|emu_|port_)'`, or point
+`LIBUNICORN_PATH` at a private dir and never touch the shared one.
+
+### Clock mis-billing: `exact_clock` IS load-bearing, and the verify mode LIES about it
+
+Three runs of `--sequencer --internal-clock --frames 40`:
+
+| run | libunicorn | counter | wall | mis-billing | short bursts |
+|---|---|---|---|---|---|
+| baseline | old | Python hook | 178.6 s | 1.366x | 56,843 of 270,588 |
+| `OCTA_EXACT_VERIFY=1` | new | both | 194.7 s | 1.000x | **0** of 211,179 |
+| production | new | `uc_ctl` read | 188.4 s | 1.365x | 56,842 of 270,619 |
+
+Baseline and production agree to four significant figures — 610,430,552 vs 610,484,760
+instructions (0.01%), 1.366x vs 1.365x, 56,843 vs 56,842 short bursts — across **two
+different libraries and two different counting mechanisms**. That cross-run agreement,
+not the verify mode, is the proof the swap is exact.
+
+**☠ `OCTA_EXACT_VERIFY=1` perturbs what it measures**: with the global Python hook
+installed the same scenario runs 211,179 bursts and **not one stops short**, against
+270,619 with 56,842 short in production. A fault from it is real; its burst statistics
+are an artefact. (An earlier reading of this session blamed the library for that
+difference and withdrew the 1.366x figure — both wrong; the production run reproduced
+1.365x and the variable is the hook, not the library.)
+
+An idea to gate `exact_clock` on `self.frame` was **wrong twice over**: all 63
+transport diags set `rt.frame = True` by attribute (so a `frame=True` grep finds 0),
+and the correction is needed regardless.
+
+### ⚠️ MISTAKE TO NOT REPEAT: re-ran a thread Session 81 had already closed
+
+Offered and then took "port a second diag to unblock the stalled Session-49
+differential" as the next step. **Session 49 was not stalled — Session 81 closed it**
+and PARTREAPPLY is hardware-confirmed final (report #1 fixed on MKI 2026-09-22; the
+mechanism is the per-track pre-image `PREIMG_A 0x8000082f` re-seeded by
+`FUN_40001f18(bank, part, track)`, which stock pairs with the kill bit only on its
+notPICKUP→PICKUP arm). The Session 49 handoff line still read "re-run
+`diff_flex_static.py` is the single most important next step", and Sessions 51-80 went
+elsewhere, so a superseded pointer looked like the live frontier. **The standing rule
+already covered this and was not followed: grep NOTES for a thread's keywords across
+ALL sessions before acting on any handoff line.** `tools/port_diff_flex_static.py` was
+written, run, and then **deleted** at the user's instruction.
+
+Two harness facts from that wasted run, true but not news (both consistent with Session
+81, since the arena entry was never the piece that mattered): poking a track's machine
+byte to PICKUP silences the track outright — it never trigs in 3000 frames, voice stays
+`active=0/SETTINGS=0`, and **seeding its arena entry with a byte copy of a genuinely
+loaded entry does not rescue it**; and the factory OT DEMO has **no loaded STATIC
+sample at all** (census of `0x100b0000+0x60000`: 24 `../AUDIO/` path strings, all 24 on
+the FLEX lattice slots 0-23, zero off it, so `STATIC_ARENA 0x100d5b30` is genuinely
+empty rather than a wrong constant; every track of every Part is machine type 1 except
+track 8). Untouched, track 1 trigs at frames 1379/2757 and binds to `0x100b14f0`
+(ACDRUM.WAV).
+
+### Not done / not proven
+
+- No firmware image changed this session. **Nothing flashed, nothing to flash.**
+- All four local patches (including the pre-existing required `samplebank-map`) apply
+  cleanly in order to a clean pin `111fd76`, tested in a throwaway worktree with both
+  Python files parsing afterwards.
+- octemu itself was **not built** (`make qemu` ~10-15 min, ~1.2 GB in `vendor/`, and
+  its binaries are not redistributable). Worth building for what only it does: real
+  audio, `--mk1` panel, `wait_text` OCR / `wait_lamp` LED walk assertions, a gdbstub
+  with a ready-made Python RSP client, and `tests/canary.py` for the cave ceiling.
+
+## Session 58 continued yet again, part 19 (2026-09-25, `wip`) -- MUTE MODE: "a FIRST flash comes
+up in `OT`" was built, emulator-verified, then **ROLLED BACK and PARKED the same day at the user's
+request**. MUTEMODE_DT is back to the flashed/confirmed 2026-09-21 build, byte-for-byte. The
+underlying gap it fixed is REAL and now documented as a known limitation, not a fix.
+
+⚠️ **READ THIS FIRST, the rest of the entry is the parked design.** The shipping MUTEMODE_DT is
+the 2026-09-21 hardware-confirmed build. The patch below is **not in it**. It lives in
+[`tools/parked/`](tools/parked/README.md) (`mutemode_firstflash_OT.s`, its test, and the exact
+build-tool diff) with revival steps. Rollback verified byte-exact: all six MUTEMODE_DT artifacts
+(standalone `.bin`/`.syx`/mainos + the three Bugbuild ones) hash **identically** to the copies
+taken before any of this was written, `0x4001fb1a` holds stock bytes again, `0x400d7a00..40` is
+zero again, and the image boots to the RTOS handoff with M6a PASS. The other four features'
+Bugbuild artifacts were never touched (all 15 hashes match).
+
+**KNOWN LIMITATION carried forward (this is the part that matters):** the shipping build does
+**not** come up in `OT` after a re-flash. A unit that ran an earlier MUTE MODE build has a VALID
+`'ANDY'` block, so the boot restore copies that build's stored mode back into `0x800000dc` and the
+first boot lands in OTFX-T / DT-T / OTFX. Addendum 14's "defaults verified" only ever covered a
+unit with NO battery data (checksum fails -> defaults path -> 0). Measured, not assumed: the parked
+test reports 23 failures against the shipping image, incl. *"GATE 1 -> runtime `0x800000dc` restored
+as 1"*. Workaround for a test unit: set the mode by hand in PERSONALIZE after flashing.
+
+**Original request (superseded):** rebuild the final MUTEMODE_DT build, its build tool and its
+Bugbuild so that MUTE MODE defaults to `OT` on the initial flash. **Follow-up, same day:** *"roll
+back to the previous build version. I changed my mind... I want to return to the previous,
+flashed/confirmed finalized build"* -- done, with the material renamed and parked.
+
+### What was actually wrong with "defaults to OT"
+
+Addendum 14's "defaults verified" booted with NO battery data: the checksum fails, stock's boot
+function takes the defaults path (`0x4001f298`, zero-fills the block), GATE = 0. True, and not the case
+that matters. A unit that ran an EARLIER build has a VALID `'ANDY'` block whose shadow
+(`0x100fff6c`) still holds that build's GATE. Stock sees a good checksum, takes no reset path, and
+the boot restore (`memcpy(0x80000070, 0x100fff00, 0x70)` at `0x4001fb24`, length widened 0x64 -> 0x70
+by this build) copies the stale mode straight into RAM. So the first boot of the new build came up in
+whatever the previous one left (OTFX-T / DT-T / OTFX). Reproduced, not assumed: the new
+`tools/emu_firstflash.py` run against the PRE-change image fails 23 checks, including "GATE 1 -> RUNTIME
+0x800000dc restored as 0" (it is restored as 1).
+
+### Two facts about the boot path that shaped the fix  [read from the binary + a boot under ot_emu]
+
+1. **The power-up restore is `0x4001fb24`, not `0x4001f340`.** Watching the three restore sites
+   through a boot: `0x4001f298` (defaults) -> `0x4001f322` -> `0x4001fb24` fire; the "validate"
+   function `0x4001f340` does not (its callers are `0x4004abf0` / `0x4006233a`, a later settings
+   reload). The boot function checksums the block, calls defaults if it fails, checks the version
+   word (`0x100fff0e`, 36), then ALWAYS reaches `0x4001fb24`.
+2. **A checksum mismatch at boot is expensive.** That path clears `0x10000000..0x100fff00` and runs
+   defaults. Any code that edits the block must re-seal it with the OS's own routine
+   (`0x4001f23c`, no args, clobbers only d0/d1/a0 -- the one the PERSONALIZE key handler runs after every
+   setter). That is what `patch_firstflash` does; it does not roll its own.
+
+### The fix: `tools/patch_firstflash.s` (54 B cave at `0x400d7a00`, one 10-byte detour)
+
+A tag longword at shadow `0x100fff70` = "this block has been through a build carrying this patch".
+`0x100fff70` is deliberately OUTSIDE the 0x70-byte restore window (no runtime alias) and outside
+everything stock addresses absolutely (a whole-image scan: stock never names `0x100fff64+`).
+
+```
+first_flash:                        ; detour at 0x4001fb1a, just before the boot restore
+    move.l  SH_TAG,%d0              ; 0x100fff70
+    cmpi.l  #TAG_MAGIC,%d0          ; 'MMDT'
+    beq.b   ff_done                 ; tagged: a normal boot costs one load, one compare, one branch
+    clr.l   SH_GATE                 ; 0x100fff6c -> OT
+    move.l  #TAG_MAGIC,%d0
+    move.l  %d0,SH_TAG
+    jsr     0x4001f23c              ; re-seal the ANDY checksum (covers both words)
+ff_done:
+    pea 1 ; jsr 0x4000fd34          ; the 10 displaced bytes, replayed exactly
+    jmp 0x4001fb24                  ; the stock restore now copies GATE = 0 into RAM
+```
+
+d3 (the "defaults ran" flag tested at `0x4001fb62`) and a2 are untouched. The detour window's only
+branch target is its first byte (`0x4001faf0 bnes 0x4001fb1a`); `build_mutemode_dt.py` now REFUSES any
+detour longer than 6 B if a relative branch (build_bugbuilds's scan) or an absolute address inside the
+image lands in its middle. ColdFire has no `move #imm,abs.l` -- the first assemble failed on it; go
+through a register.
+
+**Semantics, stated plainly:** the reset happens ONCE per unit (per `TAG_MAGIC`), on the first boot of
+a build carrying this patch; after that the user's own choice persists exactly as before, across
+power cycles AND re-flashes of this build. A unit with no battery data takes the same branch
+harmlessly (GATE already 0). To force another reset in a later build, change `TAG_MAGIC`. If a reset on
+EVERY new flash is wanted instead, derive the tag from a build stamp -- not done; ask.
+
+### Verification  [what each thing does and does not show]
+
+- **Byte diff vs the previous MUTEMODE_DT build: exactly 62 bytes** -- the 10-byte detour at
+  `0x4001fb1a` and the 54-byte cave. Nothing else moves: `patch_softmute` (the whole audio path), the
+  menu, the arrays, the restore-length patches are byte-identical to the hardware-confirmed build. Same
+  62 bytes, same addresses, in the Bugbuild.
+- **`tools/emu_firstflash.py` -- ALL CHECKS PASSED on both images.** Runs the REAL patched boot tail
+  (detour, cave, stock `0x4001f23c`, stock memcpy `0x40020898`, CFV4E CPU model) over seeded blocks
+  whose validity is judged by the ROM's own validator `0x4001f268` (self-checked: rejects a 1-byte flip):
+  stale GATE 1/2/3 with no tag -> shadow AND runtime GATE 0, tag set, checksum valid, every other block
+  byte untouched, d3 preserved, exactly one re-seal; tagged blocks with GATE 0..3 -> BYTE-IDENTICAL, no
+  re-seal; 5 non-matching tag values (all-ones, `0xdeadbeef`, one bit off, ...) -> reset; blank-battery
+  block -> stays 0; and reset -> pick OTFX -> three further boots -> OTFX persists.
+- **Whole-image boot under `ot_emu` (both images):** reaches the RTOS handoff, M6a gate PASS; the
+  watch on `0x4001fb1a` / `0x400d7a00` / `0x4001f23c` shows detour -> cave -> re-seal on the real
+  power-up path; the dumped block afterwards has tag `0x4d4d4454`, shadow GATE 0, checksum VALID
+  (recomputed independently), runtime `0x800000dc` = 0.
+- **Bugbuilds:** interlock proof `feature 1233 B + bug fixes 545 B -> composite 1706 B, DISJOINT, ALL
+  PRESERVED, NO STRAYS`; every OTHER Bugbuild's `.syx`/`.bin` hashes are unchanged (12 of 15 files
+  identical before/after; only the three MUTEMODE_DT files differ).
+
+**NOT verified, so do not read this as hardware-confirmed:** the unit test starts at `0x4001fb1a` with
+hand-set registers, and `ot_emu` only boots a BLANK battery block (there is no way to pre-seed SRAM
+before boot there), so the stale-VALID-block case is proven on the real code path but not through a real
+power-up; the emulator has no real battery SRAM, and CLAUDE.md's standing rule applies (emulator green is
+evidence about the logic, not the machine). This is new code in the BOOT path of a build that had been
+"confirmed, final".
+
+### Artifacts (`out/` is gitignored -- rebuild with `python3 tools/build_mutemode_dt.py` then
+### `python3 tools/build_bugbuilds.py --no-rebuild`)
+
+```
+out/OCTATRACK_OS1.40C_MUTEMODE_DT.syx / out/OCTATRACK_MUTEMODE_DT.bin       version 140C_KYOTI
+out/Bugbuilds/OCTATRACK_OS1.40C_MUTEMODE_DT_BUGFIX.syx / ..._BUGFIX.bin      version BUG_MUTEDT
+```
+
+### If it is flashed: what to look for
+
+1. First boot, PERSONALIZE -> MUTE MODE reads `OT` even if the unit last ran DT-T/OTFX-T/OTFX.
+2. Pick another mode, power-cycle: it is STILL that mode (the tag must not re-fire).
+3. Re-flash the same build: the mode still persists (by design). The reset cannot be re-tested on the
+   same unit without bumping `TAG_MAGIC`.
+4. Any boot oddity, a mode that never persists, or PERSONALIZE settings resetting at power-up: that is
+   this patch until proven otherwise -- revert by flashing `downloads/extracted/OCTATRACK_OS1.40C.syx`
+   or the previous MUTEMODE_DT image, and report it. (Worst credible failure: a bad re-seal makes the
+   next boot take the defaults path and reset PERSONALIZE; the seal is the OS's own routine and the
+   test checks it with the ROM validator.)
+
+### ROLLBACK (same day, at the user's request) -- what the tree actually looks like now
+
+| file | state |
+|---|---|
+| `tools/build_mutemode_dt.py` | **reverted** to committed (the confirmed build's tooling) |
+| `tools/patch_mutemode.s` | **reverted** (my comment removed) |
+| `START_HERE.md` | **reverted** (the "first flash now comes up in OT" row removed) |
+| `README.md` | never needed reverting -- another session's README prune (`2a895a4`) landed over it while this was in progress |
+| `tools/parked/mutemode_firstflash_OT.s` | the cave, renamed from `tools/patch_firstflash.s` |
+| `tools/parked/mutemode_firstflash_OT_test.py` | the test, renamed from `tools/emu_firstflash.py` |
+| `tools/parked/mutemode_firstflash_OT_buildtool.diff` | the exact `build_mutemode_dt.py` diff, so revival is `git apply` |
+| `tools/parked/README.md` | new directory + its own README: this project's own shelved-by-decision work, as distinct from `tools/attic/`'s inherited octamax sources |
+
+Rebuilt after reverting and compared against copies taken BEFORE any edit: **all six MUTEMODE_DT
+artifacts byte-identical**, all 15 Bugbuild artifacts byte-identical, `0x4001fb1a` = stock
+`487800014eb94000fd34`, cave region zero, `pea 0x70` restore-length patch still in place (MUTE MODE
+persistence unaffected), PERSONALIZE arrays intact, boot reaches the handoff with M6a PASS and the
+watch on `0x400d7a00` never fires.
+
+**Two things from this work worth keeping even though the feature is parked** (both in the parked
+README, repeated here because they are general):
+
+1. **The power-up ANDY restore is `0x4001fb24`, not `0x4001f340`.** Watched through a real boot:
+   `0x4001f298` (defaults) -> `0x4001f322` -> `0x4001fb24` fire; "validate" `0x4001f340` does NOT --
+   its callers (`0x4004abf0`, `0x4006233a`) are a later settings reload. A patch aimed at
+   `0x4001f340` would never run at power-up.
+2. **A detour-guard worth lifting on its own merits.** The parked diff also adds a check to
+   `build_mutemode_dt.py` refusing any detour displacing >6 B if a relative branch (via
+   `build_bugbuilds.assert_no_branch_into`) or an absolute address anywhere in the image lands
+   INSIDE the displaced bytes. It applies to the existing 8-byte detours (`mt_rebind`,
+   `fresh_bind`) and is unrelated to first-flash; it was reverted only because it arrived in the
+   same change. Worth adding to the builders separately.
+
+Also worth recording: ColdFire has no `move #imm,abs.l` (`move.l #TAG_MAGIC,SH_TAG` ->
+"operands mismatch"); go through a register.
+
+Net effect on the shipping builds: **none** -- MUTEMODE_DT and its Bugbuild are bit-identical to
+the 2026-09-21 hardware-confirmed images. Committed with the parked material, so the rollback and
+the shelved design are both recoverable from history.
+
+## Session 101 (2026-09-26, `wip`) — the audible observable found (fire-time table), the bug REPRODUCED in-emulator, root cause reattributed to the WRAP, and V5.8 holds the grid
+
+### V5.7 hardware: still fractional; M0 legitimate (per-track mode — track tps never
+shrinks, nothing to reduce). So the counter we preserve was protected and the sound was
+still wrong → the audible timing lives elsewhere.
+
+### Instrument 1: tools/diag_fire_phase.py — negative, useful
+
+FUN_400a536c entries for track 0 occur ONLY at cycle wraps (t90/t186) — it is the
+REPOSITION callback, not the trig dispatch. 32 entries total across 400 ticks.
+
+### Instrument 2: tools/diag_tablearm_phase.py — THE observable
+
+DAT_80001904 (8 tracks × 8 step-group ints) holds scheduled fire TIMESTAMPS (writer
+0x400a2e18: sample clock 0x4610757c + tempo-table offsets). Watching write instants,
+classes mod tps, per commit segment:
+
+- **V5.7: tracks 0-6 flip [0]→[3] and never return — the audible fractional state,
+  IN THE EMULATOR, for the first time.** The STEP-advance oracle stayed class-stable
+  through the same run: every gate since Session 89 judged the wrong observable.
+- **V5.5 control: same flip** — matches hardware's "V5.7 no better than V5.5".
+- Cross-reading with the ADV column: the flip ORIGINATES AT THE NATURAL WRAP (t90,
+  ADV [5]→[2]; the table follows the track grid one tick behind). The wrap re-runs the
+  commit body; its tail re-phases 1x tracks under a 2x master (CATCHUP = 6−3 = 3).
+  **§6 was never a separate thread — it is the audible bug.** The armed-commit preserve
+  (V5.5+) then carried the wrap-corrupted phase through every subsequent commit,
+  which is exactly "never self-correcting". On hardware the wrap copies fire only
+  sporadically (the Session 100 X-starvation applies at wraps too), hence "usually
+  fractional, occasionally clean" and a single 2x pattern sounding nominal.
+
+### The AR answer (user asked; full record = AR_DIRECT_JUMP.md §9, both repos)
+
+AR carries a (target step `0x405667f4`, sub-step remainder `0x405667f6`) pair from
+request to commit, seeds BOTH the master step and the LIVE master tick-phase
+`0x405666e6` (mislabelled in §2 until now; per-tick ++ at 0x40099962, wrap at
+0x40099974), then rebuilds all 13 tracks from that single anchor. The remainder is
+never discarded; no consumer is left on a different anchor. V5.7's dj_mrem is the same
+mechanism in the same role — the OT bug was never the master seed, it was the wrap.
+
+### V5.8 (mainline `285fadb8`, diag `27257715` = 140C_KDIAG)
+
+ONE change: while DJ_MODE is ON, dj_c's UNARMED path (natural wraps re-enter the same
+commit body) now sets `dj_keep_pend = 0xFFFF` instead of clearing it — the preserve
+covers wraps too. DJ OFF keeps the hygiene clear; at 1x every counter is 0 at a wrap,
+so the preserve is arithmetically inert there. dj_phase3's dead code deleted (cave
+space; blob 1718 B ends 0x400d7ab5, clear of trigscale at 0x400d7b00).
+
+Gates: table-arm 0↔1 — tracks 1/2/5/6 class [0] in EVERY segment; tracks 0/3 transient
+commit-window [0,3] only (the landing step legitimately schedules from the commit
+instant); track 4's mixed read is a known modulus artifact (scale-mismatched track,
+classes computed mod 6 against its own 12-tick grid — refine the tool later). Uniform
+1x: [5] at all 7 commits. Feature-OFF diff: IDENTICAL. emu_djdiag: ALL GOOD.
+
+Behavioral note for the user: with DJ ON, natural wraps of a non-1x-master pattern no
+longer re-phase tracks (that alternation was stock; DJ OFF = stock everywhere).
+
+### Session 101 continued — V5.8 hardware: fractional CONFINED to the landing interval, heals at the cycle restart. Emulator now clean even at odd-boundary commits; instrument upgraded
+
+HW (V5.8, user): switches still often land fractional, but the sequence LOCKS BACK at
+the next cycle start — the wrap-preserve works, corruption no longer survives a cycle.
+Toast `A5 Z120 X112 Y0 P0 R0 M0`: Z=8×15 events (mask now set at wraps too), X near-full,
+hold path still dead, R last-value uninformative AGAIN.
+
+Emulator: the per-writer upgrade of diag_tablearm_phase.py (class COUNTS per writer PC
++ --dump-track) showed the earlier "mixed [0,3]" segments were largely LEGITIMATE
+odd-step 2x content on tracks 3/4 (their 0x400a42f6 writes at 3 mod 6 = trigs on odd
+2x steps — correct music, a modulus-reading trap for this tool). A provocation run
+landing the 2x→1x armed commit at t99 ≡ 3 mod 6 (cue 45, gap 52) came out CLEAN: the
+schedulers held class 0 straight through (…96, [99], 102, 108…), only the single
+commit-instant landing write at [3]; the dj_mrem seed re-anchored the master exactly
+as designed. **V5.8 is clean in-emulator even in the r=3 case. The hardware residual
+lives in states the emulator cannot reach** (the R4 reading proved mid-step commits
+exist on the unit; the emulated step body commits only at TICK_CTR==0).
+
+Next flash = data: `V5_8D2` (`977aa336`, logic byte-identical to V5.8, mainline
+untouched at `285fadb8`): toast now `A Z X Y N R M`, where **N = cumulative count of
+commits whose master-remainder seed was NONZERO** (P dropped from display — Y0/P0
+across three hardware sessions; dj_diagy still records it). Branch on the reading:
+- fractional switches with **N=0** → the landing-interval residual is NOT the
+  master-remainder case at all → next instrument records the commit tick's own
+  grid offset (TICK_CTR at commit, min/max).
+- fractional switches with **N>0** → seeds engage but do not cure on hardware →
+  something later re-writes the master phase on the unit (a writer the emulator
+  never exercises); next instrument watches post-seed writes to 0x800065b6.
+
+## Session 102 (2026-09-26, `wip`) — the once-per-cycle spurious trig: the tail's reposition fire duplicating under the wrap-preserve. V5.9 = conditional cut, measured at runtime
+
+### Hardware V5_8D2 (user)
+
+Same landing-interval behaviour, PLUS (present since V5.8): the 2x track fires a
+spurious trig once per cycle, exactly half a step off a programmed trig, audibly
+off-grid. Toast `A6 Z136 X128 Y0 N1 R3 M0`: **N1 of A6** — most fractional switches
+carried a ZERO master-remainder seed, so the landing residual is NOT the remainder
+case (that branch is settled). Y0 for the fourth session running.
+
+### The spurious-trig mechanism
+
+The commit tail conditionally fires the reposition call (`push d3 / jsr (a4=0x400a536c)
+/ addq` at 0x400a4bdc-0x4be1) when a track's CNTDN expires. Stock zeroes the tick
+counter in the same body, making the reposition fire and the track's own advance-path
+fire (0x400a3d98) mutually exclusive. **Under V5.8's wrap-preserve both can run each
+cycle**: the preserved track fires on its own grid AND the tail fires at CNTDN expiry —
+a fixed off-grid offset after the wrap. Once per cycle, half a step off: the report.
+The emulator cannot show the duplicate (fixture content + only-boundary commits), so
+V5.9 makes the cut CONDITIONAL and self-measuring rather than instrumenting first.
+
+### V5.9 (mainline `e46cc4b2`, diag `2bcbac11`)
+
+**Hook W @0x400a4bdc** (6 B): when DJ is on and the track's preserve bit is set (Hook X
+has not consumed it yet at this point in the tick), the reposition fire is kept if the
+preserved counter reads 0 (on-grid — every case the emulator produces) and SUPPRESSED
+only when the counter is mid-step, i.e. only when the fire is provably off-grid. Diag
+counter **W** counts the suppressions; toast is now `A Z X W N R M` (Y dropped — dead
+across four hardware sessions; the dj_diagy observer and its detour removed, freeing
+the cave; diag blob 1772 B, 20 B under the trigscale boundary).
+
+Build-gate note: the v3 comparator caught the undeclared Hook W site exactly as
+designed (`v4 DIVERGED from v3 outside the cave` at 0x400a4bdc) — KEEPW_SITE added.
+
+### Gates
+
+Fire oracle: wrap fires still single and class [0] (the counter==0 path keeps them);
+ADV [5] steady everywhere. Table-arm with the odd-boundary cue schedule: schedulers
+class 0 throughout. Uniform 1x: clean. Feature-OFF poisoned-scratch diff: IDENTICAL.
+emu_djdiag: ALL GOOD. The suppression path itself is UNREACHABLE in the emulator —
+hardware (the toast's W and the user's ears) decides, as always.
+
+### Predictions for the flash
+
+Spurious per-cycle trig GONE, W growing ≈ once per cycle on the affected track. The
+landing-interval fractional may also improve (the off-grid landing fire at armed
+commits is suppressed by the same cut). If the spurious persists with W=0, the
+hypothesis is dead at zero cost; if fractional persists with the spurious gone, the
+landing-interval scheduler is next, with fresh hardware numbers.
+
+## Session 103 (2026-09-26, `wip`) — the per-cycle anomaly forced the real design: defer each track's apply to its own boundary (Hook V). Hook W retired after one hardware round
+
+### V5_9D hardware + the user's clarification
+
+2x→1x unchanged (fractional one cycle, locks at restart). 1x→2x: spurious OR MISSING
+trig, always step 1 — and the clarification that mattered: **it repeats every cycle**
+(per-wrap, not per-switch). Toast `A5 Z72 X16 W32 N2 R3 M0`. Also NEW and serious: once
+any fractional state occurred with DJ ON, turning DJ OFF leaves ALL patterns fractional
+until transport restart — a latched master-phase shift vs the absolute tempo grid.
+OPEN; the prime suspect is a wrong `dj_mrem` seed at a hardware-only commit state; the
+next hardware reading should note whether N incremented when the latch was created.
+
+### Hook W post-mortem (one hardware round, retired)
+
+Suppressing the reposition fire is wrong at wraps (missing step-1 trig every cycle) and
+firing it late is wrong too (the half-step spurious). A step whose start is already
+past has no third option — UNLESS the whole apply moves. That is the real design:
+
+### Hook V @0x400a4bb6 (displaces the tail's own `lea 0x400a536c,%a4`)
+
+While a preserve is pending and the track's counter is mid-step:
+`CNTDN[t] = tps_t − counter[t]`, recomputed every tick (converges in lockstep with the
+tail's own decrement; apply tick = T+v−1 = the tick the counter wraps). Stock's tail
+then performs the WHOLE apply — STEP write and reposition fire — on the track's own
+boundary: no duplicate, no missing trig, no half-step lurch, at wraps and armed commits
+alike. Hook W removed (0x400a4bdc stock again); the intermediate armed-exception build
+(`fddf1db8`) was discarded unshipped.
+
+### The gate chain earned its keep TWICE
+
+1. First Hook V chain: **infinite re-apply** — pending bits were only consumed on Hook
+   X's conditional path, so Hook V re-armed CNTDN forever and the tail re-applied and
+   RE-FIRED EVERY 6 TICKS after a deferred commit (fires t101,107,113…). Fixed by
+   splitting the mask: `dj_keep_pend` is consumed by Hook Z AT the apply (stopping V),
+   `dj_keep_pend2` (new) by Hook X later the same tick; both set at every preserved
+   event, cleared on the DJ-OFF path.
+2. The v3 comparator had already caught Hook W's undeclared site in Session 102.
+
+### V5.10 (mainline `ab8a41bb`, diag `78a995b8` = 140C_KDIAG)
+
+Gates: fire oracle — track 0 fires [90, 186, 203]: two wraps + ONE deferred landing
+fire, landing exactly on the track's advance class ([5]) — the design visible in data;
+no re-fires. Table-arm schedulers class 0 throughout (odd-boundary cue schedule).
+Uniform 1x clean. Feature-OFF diff IDENTICAL. emu_djdiag ALL GOOD.
+
+Build plumbing: the diag blob outgrew 0x700 B, so **under DJ_DIAG only** the trigscale
+cave moves to 0x400d7bc0 (identity check reported-not-enforced there; the mainline
+keeps 0x400d7b00 and full enforcement). Two dkz branches widened to .w. Diag toast's W
+now counts Hook V's CNTDN alignments (grows per tick while an apply is pending).
