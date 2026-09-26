@@ -40,220 +40,122 @@ produce a modified image, byte-for-byte reproducibly from *your* copy. No Elektr
 binary is included or distributed. Every mod is **off by default** — a freshly
 flashed unit is indistinguishable from stock until you opt in.
 
-Which builds have run on real hardware and which are emulator-only is tracked in
+Which builds have run on real hardware is tracked in
 [Hardware-test status](#hardware-test-status) — **read it before you flash.**
 
-**Branches.** `main` is the published line and carries everything finished, including
-RELOAD3, QLREC's stateless rewrite, the part-change carryover fix, SIDECHAIN3's UI
-fix and the Bugbuild tooling. `wip` is the active frontier: the DIRECT JUMP thread and
-the external-RE knowledge-base ingest are there only. Each branch's own `START_HERE.md`
-§6 describes that branch.
+**Branches.** `main` is the published line and carries everything finished. `wip`
+is the active frontier: the DIRECT JUMP thread and the external-RE knowledge-base
+ingest are there only. Each branch's own `START_HERE.md` §6 describes that branch.
 
 ### Extended Features
 
-- **MUTE MODE** — a PERSONALIZE choice for how audio-track mute behaves, now
-  **four hardware-confirmed modes**: `OT` (stock, byte-for-byte), `OTFX` (hard
-  dry cut with FX inserts ringing their tails while the sequencer is left
-  alone, so unmuting picks up exactly where the pattern would have been),
-  `OTFX-T` (the same dry cut and ringing tails, but a *trig*-mute — new trigs
-  stay suppressed until you unmute), and `DT-T` (pure sequencer mute,
-  Digitakt-style: a sounding voice rides out its own amp envelope and FX ring,
-  only new trigs are suppressed). SOLO gets the same treatment as a manual
-  mute; `CUE MUTES TRK` intentionally stays a hard cut in every mode. One
-  persisted word in the `'ANDY'` battery-SRAM block holds the mode, so it
-  survives a power cycle.
-  → [`tools/build_mutemode_dt.py`](tools/build_mutemode_dt.py) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 9–12", "Session 57–58"
+- **MUTE MODE** — choose how an audio track's mute behaves, in PERSONALIZE:
+  - `OT` — stock, byte-for-byte
+  - `OTFX` — hard dry cut, but FX inserts ring their tails and the sequencer keeps
+    running underneath, so unmuting picks up where the pattern would have been
+  - `OTFX-T` — the same cut and ringing tails, and new trigs stay suppressed until
+    you unmute
+  - `DT-T` — Digitakt-style: a sounding voice rides out its own amp envelope and FX
+    ring, and only new trigs are suppressed
 
-- **DIRECT JUMP** — an optional immediate pattern change, toggled with `[PTN]` +
-  `[YES]`: a manually cued pattern switches on the next step tick instead of
-  quantizing to the end of the current one, **keeps playing in master time**
-  (the new pattern resumes at `masterStep mod newMasterLen`, each track at
-  `that mod trackLen`, rather than restarting at step 1), loads the new Part at
-  once, and sends the MIDI Program Change ~1 step early. The arranger and
-  pattern chains are untouched, and the toggle deliberately does **not** persist
-  — a performance feature comes up OFF on every power-on. The position rule is
-  the Analog Rytm's own commit arithmetic, ported instruction for instruction
-  after three flashed builds each implemented a different reading of an English
-  sentence. **Hardware-confirmed at 1x (MKI, 2026-09-23)**: master time held
-  through switches, correct landing step, mixed track lengths (7/12/16) in one
-  pattern, MASTER LENGTH respected including `INF`.
-  **Non-1x scales — root-caused and fixed, not yet flashed.** Hook P read the
-  master step once and used that one value as every track's step index; the two
-  are equal only when the master and the track run at the same ticks-per-step,
-  which is exactly why 1x worked and nothing else did. The fix changes the hook's
-  *input*, not its job: it now reads the per-track quantity stock's own rebuild
-  already computed. At 1x it is bit-identical to the confirmed build, so the
-  baseline is preserved by construction rather than by testing. Emulator-validated
-  on four fixtures with the feature off proven byte-identical to stock — but **not
-  on hardware yet**, and it does not explain a separate open report that the steps
-  visited depend on which trigs are on the grid, and that LEDs and audio disagree.
+  SOLO follows the same rule as a manual mute; `CUE MUTES TRK` stays a hard cut in
+  every mode. Your choice is held in battery-backed SRAM, so it survives a power
+  cycle.
+  → [`tools/build_mutemode_dt.py`](tools/build_mutemode_dt.py)
+
+- **DIRECT JUMP** — an optional immediate pattern change, toggled with **`[PTN]` +
+  `[YES]`**. A manually cued pattern switches on the next step tick instead of
+  waiting out the current one, and **keeps playing in master time** rather than
+  restarting at step 1. It loads the new Part at once and sends the MIDI Program
+  Change ~1 step early. The arranger and pattern chains are untouched, and the
+  toggle deliberately does not persist — a performance feature comes up OFF on
+  every power-on.
+  **Still in development — the one unfinished feature.** Confirmed on hardware at
+  1x scales. Under a master scale other than 1x a switch can land on a fractional
+  step; that work continues on the `wip` branch.
   → [`tools/build_directjump_v4.py`](tools/build_directjump_v4.py) ·
-  handoff [`reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md`](reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 15, 21, 35" → "Session 60–87"
+  handoff [`reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md`](reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md)
 
 - **SIDE-CHAIN COMPRESSOR** — an external key input for the stock DynamiX
-  COMPRESSOR: `KEY` on the effect's page 2 picks any of the eight audio tracks to
-  drive the compression, keying even when that track is muted, and reaching **any
-  of the 8 tracks** — not just the four sharing the compressor's own DSP core —
-  via a cross-core generation-counter / shared-window mechanism. Alongside it,
-  `KGN` trims the key (declick-smoothed), `KFLT` is a declicked one-pole filter
-  (below centre LP, above centre HP, centre off), and `MON` auditions the
-  filtered key. This is a DSP56300 job; the code space is donated by **SPRING
-  REVERB**, an FX2-exclusive effect pulled from the FX2 list and null-stubbed for
-  older projects — **SPATIALIZER is untouched** and stays a normal selectable
-  effect. A project that still uses SPRING REVERB loads as **NONE** in the UI —
-  NONE's page, no knobs, `NONE` in the name field — instead of drawing SPRING's own
-  page over a silent DSP slot. Stock already marks an effect unavailable on a bus
-  this way, and the fix finishes that convention: a 2-byte data change in the FX2
-  bus's id→descriptor table (FX1's already pointed at NONE), no new code.
-  **Hardware-confirmed on MKI (2026-09-20)**, single-core and cross-core both; the
-  UI fix was flashed and confirmed working later, and is **final**. A very mild
-  HP↔OFF filter-pop remains, filed as research-only; it does not block shipping.
-  → [`tools/build_sidechain3.py`](tools/build_sidechain3.py) →
-  `OCTATRACK_SIDECHAIN3_CROSS` · write-up [`NOTES.md`](NOTES.md) "Session 17"
-  (+1–8) → "Session 77" (×3) → "Session 91" (UI fix)
+  COMPRESSOR, on the effect's **page 2**:
+  - `KEY` — which of the eight audio tracks drives the compression; it keys even
+    when that track is muted, and reaches any of the 8, not just the four sharing
+    the compressor's own DSP core
+  - `KGN` — trims the key signal
+  - `KFLT` — filters the key: below centre low-pass, above centre high-pass,
+    centre off
+  - `MON` — auditions the filtered key
 
-- **RELOAD FROM PROJECT** — reload a single track's sequence from the CF card
-  **without touching the transport**. Stock can only reload a whole bank, and
-  doing so stops the sequencer; what is new is the finer granularity plus staying
-  in time with the master clock. Adapted from the Digitone's RELOAD FROM PROJ.
-  Two direct chords — no modal window, no arrows, no timeout, no BUSY state:
-  **`[PTN]` + `[TRACK n]`** reloads that track's card-saved sequence with the Part
-  untouched, and **`[BANK]` + `[TRACK n]`** does the same plus re-applies the
-  saved Part (from RAM — the saved copy of the Part currently associated with the
-  pattern, using stock's own reload-part routine, so a never-saved Part gets
-  stock's own verdict). It reloads the pattern that is *playing*, on an audio or a
-  MIDI track, and never restarts the sequence or the internal metronome. The
-  result is shown when the reload has actually **finished**, as a stock-style block
-  toast: `TRK SEQ RELOADED`, or two lines for `[BANK]` (`TRK SEQ + PART` /
-  `RELOADED`, or `TRK SEQ RELOADED` / `SAVE PART FIRST!` when the Part was never
-  saved). A built-in check re-reads the restored trigs and shows `SEQ RELOAD LOST`
-  / `NOT RESTORED!` if they did not land. SELECT BANK now opens on the `[BANK]`
-  release, matching how `[PTN]` behaves. Deleting the picker was right by the bug
-  tally: ~13 hardware bugs in the picker/keymap/popup machinery, **none** in the
-  worker that does the reload; 10 detours became 6, and the build asserts it pokes
-  no keymap record at all.
-  **Final — hardware-confirmed on MKI, 2026-09-25.** What was confirmed: the last
-  bug, the sequence *sometimes* not coming back while the toast still said
-  RELOADED, was traced on the unit with an on-screen diagnostic build. The reload
-  had read its own request (which track, audio or MIDI) from a RAM block the unit
-  overwrites, so it sometimes reloaded a different, MIDI, track and then checked
-  what it had written. The request now lives in the patch's own memory, and the
-  user reported every reload issue resolved. Earlier flashes (2026-09-23/24)
-  confirmed both chords and reloads "quick and on-time". All-tracks and
-  whole-bank variants are deferred by the user.
+  The DSP code space comes from **SPRING REVERB**, which is removed from the FX2
+  effect list. A project that still has it in a slot loads as **NONE** — NONE's
+  page, no knobs, `NONE` in the name field.
+  → [`tools/build_sidechain3.py`](tools/build_sidechain3.py) →
+  `OCTATRACK_SIDECHAIN3_CROSS`
+
+- **RELOAD FROM PROJECT** — reload one track's sequence from the CF card **without
+  stopping the transport**. Stock can only reload a whole bank, and doing so stops
+  the sequencer. Two direct chords, no modal window and no timeout:
+  - **`[PTN]` + `[TRACK n]`** — reload that track's card-saved sequence, Part
+    untouched
+  - **`[BANK]` + `[TRACK n]`** — the same, and re-apply the saved Part
+
+  It reloads the pattern that is *playing*, on an audio or a MIDI track, and never
+  restarts the sequence or the internal metronome. A stock-style toast confirms when
+  the reload has **finished** — and says so if the trigs did not land.
   → [`tools/build_reload3.py`](tools/build_reload3.py) ·
-  spec [`reference/RELOAD_REDESIGN.md`](reference/RELOAD_REDESIGN.md) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 42–44, 47" → "Session 80–98"
+  spec [`reference/RELOAD_REDESIGN.md`](reference/RELOAD_REDESIGN.md)
 
 ### QOL Enhancements
 
-- **QUANTIZE LIVE REC toggle** — a front-panel shortcut for the all-or-nothing
-  QUANTIZE LIVE REC setting that otherwise lives only in PERSONALIZE. Hold
-  `[REC]` and tap `[PLAY]`: a toast shows the **current** setting. Tap `[PLAY]`
-  again **while that toast is up** and the setting inverts, with the toast
-  re-opening on the new value; tap again and it inverts back. Once the toast has
-  gone (1 s), the next tap only shows the setting again. The first `[REC]` +
-  `[PLAY]` still starts live recording exactly as on stock, and the toast closes
-  instantly when `[REC]` is released. **Hardware-confirmed.** The flip window
-  *is* the toast, because both are the same thing — stock's own notification
-  handle. The patch deliberately keeps **no state of its own**: an earlier
-  version's single scratch word turned out not to survive between key presses on
-  real hardware, which no amount of static analysis or emulation had caught.
-  → [`tools/build_qlrec.py`](tools/build_qlrec.py) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 46", "Session 50", "Session 51", "Sessions 92-96"
+- **QUANTIZE LIVE REC toggle** — reach the QUANTIZE LIVE REC setting from the front
+  panel instead of PERSONALIZE. Hold **`[REC]`** and tap **`[PLAY]`**: a toast shows
+  the current setting. Tap `[PLAY]` again **while that toast is up** to invert it;
+  tap again to invert it back. Once the toast has gone (1 s), the next tap just shows
+  the setting again. The first `[REC]` + `[PLAY]` still starts live recording exactly
+  as on stock.
+  → [`tools/build_qlrec.py`](tools/build_qlrec.py)
 
-- **Erase empty trigless locks** — a trigless lock (a step carrying parameter
-  locks but no audible trig) left lit on the trig row forever once its last
-  remaining lock was erased, even though it was now inert. The handler had been
-  mis-identified for about fifty sessions; the real path (`opcode 8` →
-  `FUN_40041af4` → `FUN_40038874`) has no `linkw`, which is why function-boundary
-  scans kept missing it. The fix sits on the erase store itself, so a
-  deliberately empty trigless lock placed with `FUNC`+`TRIG` is never mistaken
-  for one that just lost its last lock. **Fixed, hardware-confirmed** (MKI,
-  2026-09-21): multi-pass erase, last-lock removal, ordinary trigs, and
-  `FUNC`+`TRIG` placeholders all check out.
-  → [`tools/build_triglock.py`](tools/build_triglock.py) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 13", "Session 78"
+- **Erase empty trigless locks** — a trigless lock (a step with parameter locks but
+  no audible trig) used to stay lit on the trig row forever once you erased its last
+  remaining lock, even though it was now inert. It now disappears. A deliberately
+  empty trigless lock placed with `FUNC` + `TRIG` is left alone.
+  → [`tools/build_triglock.py`](tools/build_triglock.py)
 
 ### Bugfixes
 
-- **MIDI Plays-Free trig fix** — a Plays-Free MIDI track with trig quantize
-  *Direct* and pattern scale *Per Track* stalled after its first step on a manual
-  trig (`FUN_4009b5c8` seeded the per-track scale index with the *audio*-track
-  stride for MIDI tracks). Fixed with a 6-byte detour into a code cave.
-  → [`tools/build_trigscale_only.py`](tools/build_trigscale_only.py) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 5–7"
+- **MIDI Plays-Free trig fix** — a Plays-Free MIDI track with trig quantize *Direct*
+  and pattern scale *Per Track* stalled after its first step on a manual trig.
+  → [`tools/build_trigscale_only.py`](tools/build_trigscale_only.py)
 
-- **Empty-pattern LED fix** — a pattern whose only content is parameter locks (on
-  a MIDI track, or trigless locks on an audio track, with no trig anywhere) showed
-  as an unused slot, its grid LED unlit under `[PTN]`. The stock "does this
-  pattern have content" predicate (`FUN_4009a464`) scanned each track's trig masks
-  but never its p-lock arrays. **Fixed, hardware-confirmed** — flashed to the MKI
-  2026-09-13, no regression.
-  → [`tools/build_pattern_led.py`](tools/build_pattern_led.py) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 48"
+- **Empty-pattern LED fix** — a pattern whose only content is parameter locks (on a
+  MIDI track, or trigless locks on an audio track, with no trig anywhere) showed as
+  an unused slot, its grid LED unlit under `[PTN]`.
+  → [`tools/build_pattern_led.py`](tools/build_pattern_led.py)
 
 - **Part-change carryover fix** — after a pattern-triggered Part change, stale
-  per-track state from the old Part could leak into the new one. Three
-  Elektronauts reports drove the investigation; the two that could be reproduced
-  are fixed and hardware-confirmed, and the thread is closed. This is the one
-  finished feature that lives on `wip` only — `main` still carries the older,
-  pre-Session-81 build:
-  - **Report #1 (PICKUP→FLEX stuck loop)** — a track left as PICKUP on one Part,
-    then switched to a Part where it's FLEX, kept playing the old Part's pickup
-    loop, and once it broke it stayed broken on every later pass (a one-way
-    latch). Root cause: the voice dispatch reads the sample slot it hands the
-    resolver from a per-track pre-image that stock re-seeds only when a track
-    *enters* PICKUP, never when it leaves — so the PICKUP slot survives into the
-    new FLEX machine. **Fixed, hardware-confirmed** (MKI, 2026-09-22): the
-    round trip now plays the correct sample on every pass.
-  - **Spurious Part-edited flag** — found while testing #1: a pattern switch
-    into a PICKUP track marked that Part edited/unsaved even when nothing
-    changed (stock behaviour, not introduced by this fix). **Fixed,
-    hardware-confirmed** (MKI, 2026-09-23) with a snapshot-and-restore detour
-    that preserves a genuine edit made before the switch.
-  - Reports #2/#3 (a recorder track's SRC/RLEN carrying over; a REC SETUP tweak
-    leaking across Parts) could never be reliably reproduced on stock and
-    remain unconfirmed. The recorder-cache and scene-morph mechanisms this fix
-    also addresses are behaviorally safe on hardware regardless.
-  → [`tools/build_partreapply.py`](tools/build_partreapply.py) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 49", "Session 50", "Session 81"
+  per-track state from the old Part could leak into the new one. Two reproducible
+  cases are fixed: a track leaving PICKUP for FLEX kept playing the old Part's
+  pickup loop, and a pattern switch into a PICKUP track marked that Part
+  edited/unsaved when nothing had changed.
+  → [`tools/build_partreapply.py`](tools/build_partreapply.py)
 
 ### Comprehensive KYOTI Octatrack Firmware build
 
-- **Bugbuilds — each finished feature gets its OWN image, with all three bug fixes
-  folded into it.** One composite per feature: MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS,
-  TRIGLOCK and RELOAD3, each built as *that feature* + PARTREAPPLY + PATTERNLED +
-  PLAYSFREEFIX, written to `out/Bugbuilds/` so the standalone per-feature images are
-  left alone. The features are never combined with each other — only the three bug
-  fixes are folded in, which is why there are five images and not one. Each composite is built *onto*
-  the finished feature image rather than re-derived (SIDE-CHAIN's DSP payloads
-  and descriptor edits pass through untouched), with cave placement automatic and
-  an interlock proof asserted on every run: caves all-zero before use, exact stock
-  bytes at every detour site, no branch into a detour site, and a byte-level check
-  that the composite's delta vs stock is exactly the *disjoint* union of the
-  feature's delta and the bug fixes' own. All four report clean. Not yet flashed —
-  every ingredient is individually hardware-confirmed, the composites are not.
+- **Bugbuilds** — one image per finished feature, with all three bug fixes folded
+  in: MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK and RELOAD3, each as *that
+  feature* + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX. Written to `out/Bugbuilds/`,
+  so the standalone per-feature images are left alone. The features are never
+  combined with each other, which is why there are five images and not one. Every
+  run asserts the composite's changes are exactly the disjoint union of the
+  feature's and the bug fixes' own.
   → [`tools/build_bugbuilds.py`](tools/build_bugbuilds.py)
 
 - **Octatrack KYOTI FW v1.0 / v1.1** *(staged; the single all-in-one image is
-  deliberately not buildable yet)* — `tools/build_merged.py` stays withdrawn so a
-  combined image cannot quietly ship an unfinished feature.
-  [`reference/MERGE.md`](reference/MERGE.md) is the authoritative allocation map
-  it will be rebuilt from, re-scanned against true stock 2026-09-23: all 27 detour
-  sites across all nine mods are distinct with zero byte overlap, the free zone is
-  one contiguous 5986-byte run, and the old `[YES]`-handler collision is **gone**
-  (DIRECT JUMP v4 reaches its toggle through the `[PTN]` keymap overlay, RELOAD3
-  deleted its picker, so neither detours `0x4005e4c8` any more). Hence two stages:
-  **`KYOTI_V1.0`** = the seven finished, hardware-confirmed mods, with nothing to
-  resolve and 53 % headroom; **`KYOTI_V1.1`** = + DIRECT JUMP v4 + RELOAD3, about 1 %
-  headroom now that RELOAD3 is final (234 B larger than when this was measured), behind two builder-assertion conflicts (both DIRECT-JUMP-vs-someone-
-  else: the `'ANDY'` restore width it asserts stays stock while MUTE MODE widens
-  it, and the `[PTN]`-overlay `[YES]` record it writes while RELOAD3 asserts that
-  overlay is byte-for-byte stock).
-  → write-up [`NOTES.md`](NOTES.md) "Session 45", "Session 86"
+  deliberately not buildable yet, so a combined image cannot quietly ship an
+  unfinished feature)* — **`KYOTI_V1.0`** is the seven finished, hardware-confirmed
+  mods; **`KYOTI_V1.1`** adds DIRECT JUMP and RELOAD3 and is held behind two
+  builder-assertion conflicts. [`reference/MERGE.md`](reference/MERGE.md) is the
+  allocation map it will be built from.
 
 See **[`BUILD_KYOTI.md`](BUILD_KYOTI.md)** for prerequisites, the one-time setup,
 every build variant, and the version strings.
@@ -269,35 +171,42 @@ harmless; *writing* a non-official OS to real hardware is not. Nothing here is
 endorsed by, supported by, or affiliated with Elektron. If in doubt, don't flash
 — just read, disassemble, and learn.
 
-Elektron ships **one OS 1.40C image for the Octatrack MKI and MKII**; the boot
-`0x46c8d18c` probe adapts the unit-specific details. All hardware testing in this
-project is on an Octatrack **MKI** the author owns — including the flash that
-confirmed the MIDI Plays-Free fix.
+Elektron ships **one OS 1.40C image for the Octatrack MKI and MKII**, and the boot
+probe adapts the unit-specific details. All hardware testing in this project is on
+an Octatrack **MKI** the author owns; nothing here has been tested on an MKII.
 
 The emulators (Unicorn for the ColdFire, on real image bytes; dsp56kEmu for the
 DSP) prove control-flow and the frame-word edits, not how anything *sounds* on the
-unit. Keep the official `.syx` on hand — `[FUNC]` + power on → `[TRIG 3]` recovers
-the unit even from a bad OS, because an OS update never touches the bootloader.
-Never cut power during `UPDATING FLASH`. Full procedure and recovery net:
-**[`FLASHING.md`](FLASHING.md)**.
+unit. Keep the official `.syx` on hand — **`[FUNC]` + power on → `[TRIG 3]`**
+recovers the unit even from a bad OS, because an OS update never touches the
+bootloader. Never cut power during `UPDATING FLASH`. Full procedure and recovery
+net: **[`FLASHING.md`](FLASHING.md)**.
 
 ### Hardware-test status
 
-| element | build | status (Octatrack MKI) |
+All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit.
+
+| element | build | status |
 |---|---|---|
-| MIDI Plays-Free trig fix | all | **confirmed** — flashed 2026-08-28, stall gone, no regression |
-| MUTE MODE — all four modes (`OT` / `OTFX` / `OTFX-T` / `DT-T`), menu, SOLO handling | `build_mutemode_dt.py` | **confirmed, final** — flashed and hardware-tested 2026-09-21, MKI |
-| ↳ `'ANDY'`-shadow persistence (survives power cycle) | `build_mutemode_dt.py` | **confirmed** — one persisted word, defaults verified on hardware |
-| DIRECT JUMP pattern-change mode | `build_directjump_v4.py` | **confirmed at 1x; the non-1x fix is unflashed** — flashed 2026-09-23: master time held through switches, correct landing step, mixed track lengths (7/12/16), MASTER LENGTH respected incl. `INF`, all at 1x. Non-1x scales were root-caused and fixed 2026-09-24 (Hook P was using the master step as every track's step index); emulator-validated, bit-identical to the confirmed build at 1x, **not yet on hardware**. A separate report — visited steps depending on the trigs present, LEDs and audio disagreeing — is unexplained and still open |
-| SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | **confirmed, final** — flashed 2026-09-20, MKI, single-core and cross-core both. Donor is SPRING REVERB (pulled from the FX2 list); SPATIALIZER untouched. **UI fix** — a project still using the donated effect loads as NONE in the UI instead of drawing SPRING's page — flashed and confirmed working on the MKI, declared final 2026-09-25 |
-| RELOAD FROM PROJECT — two direct chords | `build_reload3.py` (`[PTN]`/`[BANK]` + `[TRACK n]`) | **confirmed, final** — flashed 2026-09-25, MKI: the intermittent failure where the toast said RELOADED but the edited sequence kept playing no longer occurs, and the user reports no RELOAD issue remaining. Root cause, found with an on-screen diagnostic build: the reload's own request bytes lived in a RAM block the unit overwrites, so it sometimes reloaded a different (MIDI) track; they now live in the patch's own memory. Earlier flashes 2026-09-23/24 confirmed both chords and reloads "quick and on-time". All-tracks and whole-bank variants deferred |
-| Empty-pattern LED fix | `build_pattern_led.py` | **confirmed** — flashed 2026-09-13, grid LED lights correctly, no regression |
-| Erase empty trigless locks | `build_triglock.py` | **confirmed, final** — flashed 2026-09-21, MKI; multi-pass erase, last-lock removal, ordinary trigs, and `FUNC`+`TRIG` placeholders all preserved |
-| Part-change carryover — recorder cache / scene-morph pieces | `build_partreapply.py` | flashed 2026-09-13, behaviorally safe; reports #2/#3 (recorder, REC SETUP) could not be reliably reproduced on stock, treat as unconfirmed |
-| ↳ report #1 (PICKUP→FLEX stuck loop) | `build_partreapply.py` | **confirmed fixed** — flashed 2026-09-22, MKI; the round trip now plays the correct sample on every pass, latch gone |
-| ↳ spurious Part-edited flag on entering PICKUP | `build_partreapply.py` | **confirmed fixed** — flashed 2026-09-23, MKI; a genuine edit made before the switch still shows correctly afterward |
-| QUANTIZE LIVE REC toggle | `build_qlrec.py` | **confirmed working** — flashed 2026-09-25, MKI: the toast shows the setting and a second `[PLAY]` while it is up inverts it. Three earlier flashes each failed differently and are worth knowing: a `dur<=0` toast **hung** the unit (2026-09-13); its replacement counted the toast's life from a detour of `0x400522ca` and **crashed** the unit (dead controls, persistent HF crackle) because that site is the engine frame handler and the notification calls bottom out in the kernel post/wake; the rewrite after that never flipped, because its one private scratch word at `0x80006a60` does not survive between key presses on the unit. The shipping patch keeps **no state at all** — the gate is stock's own toast handle. 176 B, two detours. 2 cosmetic issues parked |
-| Bugbuild composites (feature + all 3 bug fixes) | `build_bugbuilds.py` → `out/Bugbuilds/` | **not flashed** — every ingredient is individually confirmed above and each composite carries a per-run interlock proof, but no composite image has been on hardware |
+| MIDI Plays-Free trig fix | all | **confirmed** 2026-08-28 |
+| MUTE MODE — all four modes, menu, SOLO | `build_mutemode_dt.py` | **confirmed, final** 2026-09-21 |
+| ↳ mode survives a power cycle | `build_mutemode_dt.py` | **confirmed** |
+| DIRECT JUMP — 1x scales | `build_directjump_v4.py` | **confirmed** 2026-09-23 |
+| ↳ master scales other than 1x | `build_directjump_v4.py` | **open** — in progress on `wip` |
+| SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` | **confirmed, final** 2026-09-20 |
+| ↳ a project still using the donated effect loads as NONE | `build_sidechain3.py` | **confirmed, final** 2026-09-25 |
+| RELOAD FROM PROJECT — both chords | `build_reload3.py` | **confirmed, final** 2026-09-25 |
+| Empty-pattern LED fix | `build_pattern_led.py` | **confirmed** 2026-09-13 |
+| Erase empty trigless locks | `build_triglock.py` | **confirmed, final** 2026-09-21 |
+| Part-change carryover — PICKUP→FLEX stuck loop | `build_partreapply.py` | **confirmed** 2026-09-22 |
+| ↳ spurious Part-edited flag on entering PICKUP | `build_partreapply.py` | **confirmed** 2026-09-23 |
+| ↳ recorder SRC/RLEN and REC SETUP carryover | `build_partreapply.py` | unconfirmed — never reproducible on stock |
+| QUANTIZE LIVE REC toggle | `build_qlrec.py` | **confirmed** 2026-09-25 |
+| Bugbuild composites | `build_bugbuilds.py` | **not flashed** — every ingredient above is confirmed, no composite has been on hardware |
+
+Exactly what was tested on each flash, and the failures along the way, are in
+[`BUILD_KYOTI.md`](BUILD_KYOTI.md)'s own hardware-test table and
+[`NOTES.md`](NOTES.md).
 
 ---
 
@@ -306,58 +215,44 @@ Never cut power during `UPDATING FLASH`. Full procedure and recovery net:
 Verified against the official **OS 1.40C** — from the firmware's own checksums,
 byte-exact decompilation, or direct disassembly. This is the reverse-engineering
 foundation the mods are built on. Consolidated write-ups:
-[`ARCHITECTURE.md`](ARCHITECTURE.md); the address-keyed knowledge base:
-[`reference/kb/`](reference/kb/); chronological log: [`NOTES.md`](NOTES.md);
-mapped-vs-untouched: [`COVERAGE.md`](COVERAGE.md).
+[`ARCHITECTURE.md`](ARCHITECTURE.md) · address-keyed knowledge base
+[`reference/kb/`](reference/kb/) · chronological log [`NOTES.md`](NOTES.md) ·
+mapped-vs-untouched [`COVERAGE.md`](COVERAGE.md).
 
-### Hardware
-- **CPU:** Freescale/NXP **ColdFire** (likely MCF5445x, 32-bit, big-endian,
-  ~266 MHz) — a 68000-family core, *not* ARM. The firmware drives the on-chip ATA
-  controller in the MBAR region (`0xFC04_51xx`) characteristic of the MCF5445x.
-- **Audio DSP:** Freescale **DSP56721** (two cores — tracks 1–4 / 5–8), confirmed
-  by the 24-bit word size the boot loader uses uploading the DSP program 3 bytes
-  at a time.
-- **Storage:** **CompactFlash** (FAT16/32) over the ColdFire's on-chip ATA
-  controller, reached through the FlexBus.
+**Hardware.** The CPU is a Freescale/NXP **ColdFire** (likely MCF5445x, 32-bit,
+big-endian, ~266 MHz) — a 68000-family core, *not* ARM. Audio is a Freescale
+**DSP56721**, two cores, tracks 1–4 and 5–8. Storage is **CompactFlash**
+(FAT16/32) over the ColdFire's on-chip ATA controller, reached through the FlexBus.
 
-### Firmware format and update chain
-Elektron ships a ZIP with **two transports of the same OS** — a `.bin` and a
-`.syx` — both wrapping the same compressed container:
+**Firmware format and update chain.** Elektron ships a ZIP with two transports of
+the same OS, both wrapping the same compressed container:
 
 ```
 .bin  = [ELUP hdr][seed] + XOR-feedback( [len] + ELEK( aPLib( MAIN OS ) ) ) + checksum
 .syx  = SysEx 7-bit(              ELEK( aPLib( MAIN OS ) )              )
 ```
 
-- **ELUP layer** (`.bin` only): XOR obfuscation with feedback plus an additive
-  checksum. Reimplemented in `tools/make_bin.py` / `tools/bin_decode.py`,
-  validated by regenerating Elektron's own official `.bin` byte-for-byte.
-- **ELEK layer:** a proprietary container whose payload is compressed with
-  **aPLib**; it decompresses to the **MAIN OS** (1,112,560 bytes, base
-  `0x40000400`).
-- **No cryptographic signature** on any layer — the OS is analyzable and, with
-  recalculated checksums, rebuildable. That is *why* the format can be repacked;
-  it is not a security bypass.
-- The updater validates the OS (`FUN_4007f748`) with explicit error codes:
-  `-2` not a valid OS · `-3` length · `-4` checksum · `-5` version string
-  `<"0156"` · `-6` no downgrade. (`-5` is a version floor, not a unit-model gate.)
+The ELUP layer (`.bin` only) is XOR obfuscation with feedback plus an additive
+checksum, reimplemented in `tools/make_bin.py` and validated by regenerating
+Elektron's own official `.bin` byte-for-byte. The ELEK layer is a proprietary
+container whose aPLib-compressed payload decompresses to the **MAIN OS**
+(1,112,560 bytes, base `0x40000400`). There is **no cryptographic signature** on
+any layer, which is *why* the format can be repacked with recalculated checksums —
+it is not a security bypass.
 
-### Operating system
-- A **proprietary preemptive microkernel** (banner `ElektronOctatrack DPS-1` —
-  not MQX/ThreadX/VxWorks). Task Control Blocks, per-priority ready queues,
-  context switch via `TRAP #0`, blocking message queues, a time slice driven by
-  the ColdFire PIT timer (`0xFC08_0000`).
-- The same message-queue pattern unifies the firmware: the ATA "async queues" and
-  the audio "voice mailboxes" *are* kernel message queues.
+**Operating system.** A proprietary preemptive microkernel (banner
+`ElektronOctatrack DPS-1` — not MQX/ThreadX/VxWorks): Task Control Blocks,
+per-priority ready queues, context switch via `TRAP #0`, blocking message queues,
+and a time slice driven by the ColdFire PIT timer. The same message-queue pattern
+unifies the firmware — the ATA "async queues" and the audio "voice mailboxes" *are*
+kernel message queues.
 
-### Audio engine and sequencer
-- 8 track voices in the `0x80000000` shared-RAM window (base `0x800049d8`,
-  stride `0xA8`).
-- Control path: a sequencer trig writes a voice mailbox → a control-rate frame
-  builder assembles a parameter frame into a **double buffer** → handshake to the
-  **DSP56721** over MMIO at `0x20000000`, which does the real-time synthesis.
-- Work split: **ColdFire = control** (RTOS, sequencer, parameter assembly);
-  **DSP = signal** (playback, time-stretch, filters, FX).
+**Audio engine and sequencer.** Eight track voices sit in the `0x80000000`
+shared-RAM window. A sequencer trig writes a voice mailbox; a control-rate frame
+builder assembles a parameter frame into a **double buffer** and hands it to the
+DSP56721 over MMIO, which does the real-time synthesis. The split is **ColdFire =
+control** (RTOS, sequencer, parameter assembly) and **DSP = signal** (playback,
+time-stretch, filters, FX).
 
 ---
 
@@ -365,25 +260,21 @@ Elektron ships a ZIP with **two transports of the same OS** — a `.bin` and a
 
 ```
 START_HERE.md        onboarding + current frontier (read first)
-README.md            this — what the firmware is, and lineage
-BUILD_KYOTI.md       roll-your-own build guide (every build_*.py, prerequisites, version strings)
+README.md            this file
+BUILD_KYOTI.md       build guide: every build_*.py, prerequisites, version strings
+FLASHING.md          safe-flashing guide + bootloader recovery (read before flashing)
 CREDITS.md           lineage and acknowledgements
 ARCHITECTURE.md      consolidated architecture (hardware, OS, memory map, container)
 COVERAGE.md          what firmware subsystems are mapped vs untouched
 NOTES.md             the full chronological reverse-engineering log
-FLASHING.md          safe-flashing guide + bootloader recovery net (read before flashing)
 
-reference/kb/         distilled knowledge base (address map, formats, DSP) — ours + external RE
-reference/            MERGE.md (the all-in-one allocation map), AR_DIRECT_JUMP.md, RELOAD_REDESIGN.md,
-                      EXTERNAL_RESEARCH.md (mined prior-art repos + workflow), UPSTREAM_INBOX.md
-reference/handoffs/   per-thread handoffs for the work still open (DIRECT JUMP scales; RELOAD3's failing-reload thread, now resolved)
-reference/upstream-notes.md   inherited octamax mod-design notes (not part of this firmware)
-refs/                MANIFEST.{toml,lock} tracked; the clone cache under it is git-ignored
+reference/kb/        distilled knowledge base (addresses, formats, DSP, code caves)
+reference/           MERGE.md allocation map, per-feature specs, external-RE index
+reference/handoffs/  per-thread handoffs for the work still open
+tools/               build scripts, ColdFire patch sources, emulators, packers
+tools/attic/         inherited octamax patch sources — RE cross-reference, not built
 sysex/               the MIDI Plays-Free fix as JSON hunks + a no-assembler applier
-tools/               build scripts, ColdFire patch sources, Unicorn + DSP56300 emulators, packers
-tools/attic/         inherited octamax mod patch sources — kept for RE cross-reference, not built here
-tools/refs/          sync.py / whatsnew.py — clone + track the external-RE repos
-tools/ghidra/        Ghidra headless helpers; attic/ = one-shot probe scripts (provenance)
+refs/                external-RE repo manifest; the clone cache under it is git-ignored
 fetch-os.sh          download + extract the official OS
 analyze.sh           entropy + binwalk + strings + container unpack -> out/
 setup.sh             clone/patch/build elektron-firmware-tool into vendor/
@@ -392,10 +283,9 @@ disasm.sh            radare2 disassembly (m68k BE, base wired)
 
 Downloaded Elektron binaries and generated images (`downloads/`, `out/`,
 `vendor/*.bin`, `*.syx`, `*.bin`) are **git-ignored on purpose**. Maxolydian's own
-octamax behaviour mods (lazy Part transitions, no BANK/PTN countdown, arp
-key-scales, LED/encoder "dirty" indicators, boot branding) are **not** part of any
-KYOTI build; their patch sources are kept in [`tools/attic/`](tools/attic/) for
-reverse-engineering cross-reference (see [`CREDITS.md`](CREDITS.md)).
+octamax behaviour mods are **not** part of any KYOTI build; their patch sources are
+kept in [`tools/attic/`](tools/attic/) for reverse-engineering cross-reference (see
+[`CREDITS.md`](CREDITS.md)).
 
 ---
 
