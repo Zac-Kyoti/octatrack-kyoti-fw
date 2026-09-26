@@ -30337,10 +30337,10 @@ the Session 56 "rebuilt one bus, forgot the other" failure is gone by constructi
   rewritten to the flat semantics the build actually implements.
 
 **Hardware-confirmed, final.** `out/OCTATRACK_OS1.40C_SIDECHAIN3_CROSS.syx` was
-rebuilt, then flashed on the MKI: the user confirmed it working and has declared the
-fix finished (2026-09-25). The confirmation is for the intended behaviour described
-above -- a project still using the donated effect loads as NONE in the UI; the
-user's exact on-unit observation was not recorded at the time. Note the
+rebuilt, then flashed on the MKI. **What the user observed on the unit: a project
+previously saved with SPRING REVERB in an FX slot gracefully defaults to NONE, with
+no knobs** -- which is exactly the intended behaviour above. Declared done by the
+user, 2026-09-25. Note the
 stored id is *displayed* as NONE, not rewritten in the project file — pick anything in
 the chooser and the slot is permanently reassigned, which is the intended "load as
 NONE" behaviour and leaves old projects untouched until the user commits.
