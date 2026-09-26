@@ -63,6 +63,12 @@ reachable on hardware.
      DOES set correctly), is what broke "no discernible change in sound" between two
      identically-triggered patterns.  Fix: dj_c no longer touches D7 at all.
 
+  V5.5 (Session 97): the non-1x sub-step PHASE fix. Hook S removed (dead end 3 of the
+  handoff, reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md); Hooks Z (0x400a4bea) + X
+  (0x400a3542) added -- PRESERVE each track's free-running tick counter across an armed
+  commit instead of letting stock zero it and reload it with CATCHUP. Details at the
+  PATCHES entries below and in patch_directjump.s "Session 97".
+
 ----- v3's notes, unchanged -----
 
   v1 (build_directjump.py)   FUN_40059f8c -- the SELECT-BANK/PATTERN timed window:
@@ -178,8 +184,25 @@ PATCHES = [
       # settling. Stock OT's per-track answer is better than AR's here, so we keep it.
       # Session 83: Hook T (dj_tstart @0x4009c3d4) REMOVED -- it existed only to reset
       # G_ABSTICK at transport start. No counter of ours survives, so the site is stock.
-      # Session 89 -- Hook S: correct the per-track CATCH-UP phase at an armed commit.
-      (0x400a4d36, "dj_phase3", "4ab946107568", 6, "jsr"),
+      # Session 97 -- Hook S (dj_phase3 @0x400a4d36) REMOVED; the site is stock again.
+      # It wrote PAIR into CATCHUP, which fixes only the commits where PAIR happens to
+      # equal the required phase (handoff §5 dead end 3). The handoff's §3 derivation
+      # stands: NO stock quantity equals the required counter value, so V5.5 PRESERVES
+      # the counter instead of computing a replacement:
+      #
+      # Hook Z: the commit tail's per-track zero (0x400a4bf0, inside the CNTDN==0 body).
+      # Displaces clr.b %d0 / moveal %sp@(164),%a0 / move.b %d0,%a0@(-211) -- when the
+      # track's dj_keep_pend bit is set the store is skipped, everything else replayed.
+      (0x400a4bea, "dj_keepz", "4200206f00a41140ff2d", 10, "jsr"),
+      # Hook X: the per-tick CATCHUP copy (0x400a354a, gated on CNTDN[t]==0 at
+      # 0x400a353e). Displaces the two cursor loads + move.b (a2),(a1). Pending ->
+      # consume the bit and reduce the PRESERVED counter mod the track's new tps
+      # (identity at 1x and whenever the scale did not shrink) instead of copying.
+      # Both writes land in the SAME tick per track (Session 89 trace), so the counter
+      # itself carries the value from Z to X -- no snapshot buffer, no 0x80006a40+
+      # scratch (Sessions 94-96: that window is not reliable under live audio). The
+      # 16-bit arm mask lives in the cave (dj_keep_pend), image-initialised to 0.
+      (0x400a3542, "dj_keepx", "226f0094246f00ac1292", 10, "jsr"),
       (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),
 ]
 
@@ -326,6 +349,8 @@ def main():
         PERTRACK_FIX_SITE = 0x400a4d36
         D7_SEED_SITE = 0x400a47f6
         TSTART_SITE = 0x4009c3d4
+        KEEPZ_SITE = 0x400a4bea       # Session 97, 10 B
+        KEEPX_SITE = 0x400a3542       # Session 97, 10 B
         # Session 83: v3 widened the ANDY restore (pea 0x64 -> 0x70) at all three sites so
         # DIRECT JUMP would persist. v4 leaves those bytes stock, so they are bytes v3
         # touched and v4 deliberately does not -- drop them from `want` or they read as
@@ -341,7 +366,9 @@ def main():
             | {i for i in range(o(ABSTICK_SITE), o(ABSTICK_SITE) + 6) if img[i] != stock[i]} \
             | {i for i in range(o(PERTRACK_FIX_SITE), o(PERTRACK_FIX_SITE) + 6) if img[i] != stock[i]} \
             | {i for i in range(o(D7_SEED_SITE), o(D7_SEED_SITE) + 6) if img[i] != stock[i]} \
-            | {i for i in range(o(TSTART_SITE), o(TSTART_SITE) + 6) if img[i] != stock[i]}
+            | {i for i in range(o(TSTART_SITE), o(TSTART_SITE) + 6) if img[i] != stock[i]} \
+            | {i for i in range(o(KEEPZ_SITE), o(KEEPZ_SITE) + 10) if img[i] != stock[i]} \
+            | {i for i in range(o(KEEPX_SITE), o(KEEPX_SITE) + 10) if img[i] != stock[i]}
         stray = [i for i in (v4_touched ^ want) if i not in cave]
         print(f"  vs mainos_directjump_v3.bin: v4 touches {len(v4_touched)} vs v3 {len(v3_touched)}; "
               f"{len(stray)} unexpected outside the cave")

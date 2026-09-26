@@ -30811,3 +30811,156 @@ settled it was a diagnostic build on the unit.
   (the literal gesture through the real dispatcher). Two of the three had verdict lines
   that cried wolf on first run (`final == 0` after an even number of flips; `< 4` entries
   for 3 taps) — both corrected; **read their per-step tables, not their summary lines.**
+
+## Session 97 (2026-09-25, `wip`) — DIRECT JUMP V5.5: the non-1x sub-step PHASE fix, built as PRESERVE-not-compute. Oracle-clean at armed commits, 1x untouched
+
+Continues the handoff `reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md` (read it first;
+§3's derivation is the whole spec). Hook S (dead end 3) removed; two new hooks preserve
+each track's free-running tick counter across an armed commit instead of computing any
+replacement value.
+
+### What today's disassembly added to the handoff's picture
+
+1. **The commit tail is CNTDN-deferred PER TRACK.** `0x400a4bc0-4bcc`: the tail decrements
+   `CNTDN_TBL[t]` (0x800065c3) every tick and runs its reposition body (STEP_ARR write +
+   tick-counter zero) only on the tick it reaches 0. So "the commit" applies to each track
+   at its own tick, up to tps_master ticks after dj_c. This kills the one-shot
+   G_JUST_COMMITTED gating style for this fix (dj_a's idle path clears it the very next
+   tick, before any deferred track applies) — the arm state must be a per-track bit.
+2. **Both destroying writes land in the SAME tick per track** (S89's t42 trace:
+   0x400a4be6 → 0x400a4bf0 → 0x400a354a → 0x400a3ce2). CNTDN==0 gates both the tail body
+   AND the per-tick copy at 0x400a353e, and the next tail pass takes CNTDN to 0xff (the
+   0x400a4bc2 `blts` skips only negatives), so the copy fires exactly once. Consequence:
+   **no snapshot buffer is needed at all** — suppress the zero, and the counter itself
+   carries the value to the second site.
+3. **There is a THIRD copy machine.** The hold-consume path (0x400a3d12-3d48, d3 = track)
+   that skips one advance (dead end 1's ceil→floor compensation) also writes
+   CATCHUP[t] = PAIR low byte at 0x400a3d36 and sets bit t of **0x80006624**; the copy at
+   0x400a355e (gated on that mask at 0x400a3552, bit cleared after use) then loads PAIR
+   into the counter one tick after the track's first wrap. Unfired in today's fixtures
+   (PAIR read 0 at every commit) — WATCH ITEM, see below.
+4. Detour windows verified branch-target-free (±32K PC-relative scan + image-wide
+   absolute-operand scan): 0x400a3542 (10 B), 0x400a4bea (10 B), and — pre-cleared for
+   the watch item — 0x400a3556 (10 B).
+
+### The build (V5.5, `e3e5d232…`, NOT flashed)
+
+- **Hook Z @0x400a4bea** (displaces `clr.b %d0 ; moveal %sp@(164),%a0 ; move.b
+  %d0,%a0@(-211)`): DJ_MODE on + this track's `dj_keep_pend` bit set → skip only the
+  store. Tests the bit WITHOUT consuming (Hook X, later the same tick, consumes it).
+- **Hook X @0x400a3542** (displaces the two cursor loads + `move.b (%a2),(%a1)`): pending
+  → consume bit t and reduce the preserved counter **mod LEN_TBL[TRK_SCALE_IX[t]]**
+  instead of copying CATCHUP. The mod matters because dj_c refreshes the scale cache AT
+  the commit (Session 84), so the wrap check runs at the NEW tps immediately: a counter
+  preserved across a shrink (6→3) could sit at 3..5 and advance late once, shifting the
+  grid permanently. `(C−A) mod tps_t` is the handoff's REQUIRED value verbatim, with
+  `C−A` supplied by the counter itself. Identity at 1x and all non-shrinking scales.
+- Track index derived from stock's own cursor (a1 − 0x800064f0, bounds-checked; NOT from
+  a loop register), so the hook inherits stock's per-track semantics for all 16 slots.
+- **`dj_keep_pend` (16-bit mask) lives in the cave** (0x400d791e), not 0x80006a40+ —
+  Sessions 94-96 proved that window unreliable under live audio, and a cave word's
+  power-on value is the image byte itself (0). Set 0xFFFF in djc_fix; cleared on dj_c's
+  natural path. Stale-bit edge (transport stopped inside the ≤tps_master-tick apply
+  window): at most one suppressed zero+copy on a later natural wrap for those tracks,
+  self-healing at the next commit.
+- Inside a jsr'd hook every displaced %sp offset is **+4** for our return address
+  (164→168, 148→152, 172→176) — the dj_ptnrel Session-63 lesson applied in advance.
+- Hook S removed; dj_phase3 stays as dead cave code; 0x400a4d36 is stock again. Gold
+  gate: 1006 bytes differ from GOLD_S87, **0 outside the cave**; manual-trig fix
+  byte-identical; blob 1424 B ends 0x400d798f, clear of trigscale at 0x400d7b00.
+
+### MEASURED (tools/diag_phase_correlate.py, V5.5)
+
+| fixture | result |
+|---|---|
+| DJMAST2 0↔1 (master 1x↔2x) | **re-phased? = no on ALL FIVE armed commits** (t42/93/147/201/255), both directions — the §7 pass criterion. t90/t189 still YES = NATURAL master-cycle wraps, §6's separate stock behaviour (t189 even snaps our correctly-preserved phase back to the master grid at a 1x wrap) |
+| DJMAST2 2↔3 (uniform 1x) | class [5] at all 7 commits, armed and natural, zero re-phasing — 1x baseline untouched |
+
+Report-reading note: the `0x400a354a wrote` column reads `--` on this build BY
+CONSTRUCTION — the stock-path copy now executes at the cave PC (`dkx_stock`), so the
+oracle's pc==0x354a filter can never match. The verdict rests on the advance congruence
+classes, which are PC-independent.
+
+### WATCH ITEM (not patched — zero evidence in these fixtures)
+
+If hardware still shows fractional steps at ARMED commits, the suspect is the third copy
+machine (finding 3): detour 0x400a3556 (`266f0094 2c6f00ac 1696`, window pre-verified)
+with a second pending mask, suppressing ONLY the 0x400a355e copy once per armed commit
+per track. Do NOT clear the hold mask itself — dead end 1 stands (the skip is stock's
+position compensation). Residual wobble WITHIN one non-1x pattern (no switching) is §6
+(natural-wrap re-phasing), stock behaviour, user reports it as nominal — leave it.
+
+### Environment note + the feature-OFF gate
+
+All emulator runs serialised (pgrep-guarded); refs/octabam confirmed on `d5b84fb`
+`emu/map-audio-sdram` before the first run.
+
+**feature-OFF gate (tools/diff_stock_vs_patch.py, V5.5 vs stock, DJ OFF, scratch
+poisoned 0xAA): RESULT IDENTICAL** — all 8 instruction counters equal (audio/MIDI loop
+tops 856, increments 856, wraps 136, STEP++ 136, track-wrap 8, rebuild 8) and per-track
+STEP/TICKS/ARMED/SCALE + master STEP/SCALE_IX/BAR_CTR identical across 38 samples.
+
+Two tool lessons from getting that gate to actually gate:
+1. `--patched` had a silent DEFAULT pointing at the **v4** image — the first "IDENTICAL"
+   of the evening was a vacuous pass that never loaded V5.5 at all (spotted only in the
+   report's file path line). The flag is now REQUIRED. A gate that cannot fail proves
+   nothing — and a gate aimed at the wrong image cannot fail.
+2. The tool `chdir`s into refs/octabam before reading the image, so a relative
+   `--patched` path dies with FileNotFoundError — which the tool then dressed up in its
+   canned "cold-boot failure mode" diagnosis, a completely wrong steer. `--patched` is
+   now resolved to absolute at parse time. When that tool reports a fault, check the
+   exception class before believing the prose.
+
+Emulator caveat, as always (CLAUDE.md): three green gates are evidence about the LOGIC.
+Session 88 passed every gate here and still broke the unit. V5.5 is NOT FLASHED;
+hardware decides, and the flash decision is the user's.
+
+## Session 98 (2026-09-25, `wip`) — RELOAD3: the §4 diagnostic toast is BUILT — hex bytes + indices on screen, emulator-gated, awaiting one flash
+
+Scope: `reference/handoffs/RELOAD3_SEQFAIL_HANDOFF.md` only — `[PTN]+[TRACK n]` frequently
+leaves the edited sequence playing while the toast says RELOADED and the self-verify stays
+silent. Everything else in RELOAD3 untouched.
+
+**Built:** `tools/build_reload3.py --diag` → `--defsym RL_DIAG=1` on the same
+`patch_reload3.s`. All four messages are replaced by a 4-line block toast (6 s):
+`P <live before copy> S <snapshot>` / `L <live at doneFn> K <0x1001614e cache>` /
+`C bptm W bptm D bp` (chord-time vs worker-time vs doneFn-time bank/pat/trk/midi) /
+`Mn Vn Kn R rr` (message, verify result, G_KIND as read, last PARSEPAT return). Captures
+are written into the cave at the moment each value is read; the copy, verify, SCRATCH,
+OPEN_BUF and `0x80006a50+` scratch are exactly the flashed build's. The non-diag build
+still hashes `e823222f…`/`915c476b…` (checked after the edits). Diag: `.syx a627a7fb…`,
+`.bin 3f37367c…`, cave 2824 B `0x400d6500..0x400d7007`. Separate `_diag` output files so
+`cave_syms.py`'s default ELF stays the shipping one (the trap `build_qlrec_diag.py` fell
+into). Handoff §9 has the decoding table and the on-unit protocol.
+
+**Why the `P` line.** It is what makes one flash decisive without the user needing to know
+the hex of the edited pattern: `P==S==L` is hypothesis (A) — SCRATCH held the edited data
+and both copy and verify were vacuous; `P!=S==L` is (C) — landed where the verify looks,
+playback reads elsewhere. And line 2 catches something the handoff did not list: the
+worker's targeting inputs `G_PAT/G_TRK/G_TMIDI` live at `0x80006a51-55`, the scratch block
+Sessions 94-96 proved clobbered on hardware for QLREC. A wrong `G_TRK`/`G_TMIDI` reloads
+the wrong slice, the verify passes on that slice, the toast says RELOADED and track n is
+untouched — the reported shape exactly. Not claimed as the cause; the toast will say.
+
+**Two assembler lessons (cheap, recorded so they are not paid twice):** ColdFire has no
+byte shifts (`lsr.b` rejected; zero-extend then `lsr.l`), and a MOVE whose source needs an
+extension word (absolute, d16) cannot take an absolute/d16 destination on ISA_A — route
+through a data register. And the `beq.b rld_noverify` in `rld_skip` went out of byte
+range once the captures were inserted (`.w` now).
+
+**Emulator gate** `tools/diag_reload3_diagtoast.py` — one boot, three scenarios: clean
+(expect `P 00000000`, `S=L=K=`saved, `C==W==D`, `M1 V1 K3`, LED on); wrong-track (`G_TRK`
+poked between chord and worker, gated on `rl_job` not yet entered → line 2 must show
+`C.trk != W.trk` with `V1` and the target track still empty); scratch-clobber (memcpy
+source masks zeroed just before FWMEMCPY from our worker → `P=S=L=K=00000000` with `V1`,
+the vacuous-verify signature). Result: **ALL GOOD, 47 checks** (second run; the
+first run's wrong-track scenario failed its OWN gate — `rl_job x1, G_KIND=0` after the
+key calls, i.e. the storage task drains the job inside `call_as_main`'s spin, so a poke
+after the keys is too late; the injection now lives in the `rl_job` entry hook. Build
+unchanged between runs.) Toasts seen: clean `S=L=K=00000001` with `P 00000000`, `C 0030 W
+0030`; wrong-track `C 0030 W 0040` with `V1` and the target untouched; scratch-clobber
+`P=S=L=K=00000000` with `V1`, LED off. Every row of handoff §9's decoding table is a shape
+the toast has actually produced.
+
+**Not done, deliberately:** no fix, no commit, no theory past the table in handoff §9.
+Hardware decides.

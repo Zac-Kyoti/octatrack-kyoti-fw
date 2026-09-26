@@ -271,6 +271,13 @@
                                         | modulus a master step position needs.
     .equ PC_SEND,   0x4009e884          | FUN_4009e884(bank, pat) -> Bank Sel CC + PC
     .equ SW_LABEL,  0x400a43a0          | "switch confirmed" label inside the step==0 body
+    .equ CNTDN_TBL, 0x800065c3          | per-track commit countdown, 16 wide. The tail
+                                        | decrements it at 0x400a4bc4 and applies THAT
+                                        | track's reposition (STEP_ARR write + tick-counter
+                                        | zero) only on the tick it reaches 0 -- so a
+                                        | commit is applied PER TRACK, up to tps_master
+                                        | ticks after dj_c ran. Hooks Z/X key off cursors
+                                        | derived from it. Session 97.
 
     .text
 
@@ -700,6 +707,10 @@ dj_c:
 |   reloads registers, so D0 looks dead there, but "looks dead in the disassembly I could
 |   read" is exactly the standard of evidence that has burned this thread before. Replay
 |   both instructions exactly and the question stops mattering.
+    clr.w   dj_keep_pend                | stale-bit hygiene: a NATURAL commit voids any
+                                        | leftover preserve bits (possible only if the
+                                        | transport was stopped inside a previous armed
+                                        | commit's <= tps_master-tick apply window)
     clr.b   %d0                         | displaced original #1 (stock leaves D0 = 0)
     move.b  %d0,STEP                    | displaced original #2 (STEP = D0 = 0)
     rts
@@ -892,6 +903,13 @@ djc_ts_done:
 |   as the timing match against this session's own Hooks-G-suppressed re-test). Not
 |   re-attempted this pass; the `dj_quot32` helper this fix used has been removed along
 |   with it (dead code, nothing else called it).
+|   ---- Session 97: arm the per-track tick-counter PRESERVE (Hooks Z/X below) ----
+|   One bit per track. Each track's bit is consumed at that track's OWN apply tick (the
+|   commit tail is CNTDN-deferred per track, see CNTDN_TBL above), which a single one-shot
+|   flag like G_JUST_COMMITTED cannot cover -- dj_a's idle path would clear it on the very
+|   next tick, before any deferred track applies.
+    moveq   #-1,%d0
+    move.w  %d0,dj_keep_pend            | all 16 tracks: preserve across this armed commit
     moveq   #1,%d0
     move.b  %d0,G_JUST_COMMITTED        | tell Hook F a real commit happened this tick
     rts
@@ -1148,6 +1166,130 @@ djp_store:
 djp_orig:
     tst.l   0x46107568                 | displaced original (sets Z for the caller's bne.w)
     rts
+
+| ========= Session 97: PRESERVE the per-track tick counter across an armed commit =========
+| The handoff's §3 spec (reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md): at a commit the
+| track's counter must hold (C - A) mod tps_t -- which is exactly what the free-running
+| counter already holds. No stock quantity equals it, so nothing is computed: the two stock
+| writes that destroy it are suppressed instead.
+|
+| Stock destroys it twice, BOTH within the track's own apply tick (measured order, Session 89
+| trace at t42: 0x400a4be6 -> 0x400a4bf0 -> 0x400a354a -> 0x400a3ce2):
+|
+|   0x400a4bf0  TICKS_IN_STEP[t] = 0           the tail's CNTDN==0 body       -> Hook Z
+|   0x400a354a  TICKS_IN_STEP[t] = CATCHUP[t]  per-tick pass, CNTDN[t]==0     -> Hook X
+|
+| The apply tick is PER TRACK (CNTDN-deferred, up to tps_master ticks after dj_c), so the
+| arm state is a per-track bit mask, set for all 16 by djc_fix and consumed bit-by-bit by
+| Hook X. Because zero and copy land in the SAME tick per track, Hook Z tests its track's
+| bit without consuming and Hook X consumes it -- no snapshot buffer is needed at all: the
+| counter itself carries the value between the two sites.
+|
+| The one arithmetic wrinkle: dj_c refreshes TRK_SCALE_IX at the COMMIT tick (Session 84),
+| so from there the wrap check at 0x400a3cee runs against the NEW tps. A counter preserved
+| across a shrink (tps 6 -> 3) can therefore sit at 3..5, which would advance late once and
+| shift the grid permanently. Hook X reduces the preserved counter mod the track's new tps
+| (identity in every other case, including all of 1x) -- that IS the handoff's REQUIRED
+| value, (C - A) mod tps_t, with C - A supplied by the counter itself.
+|
+| Scratch discipline (CLAUDE.md, Sessions 94-96): the mask lives in THIS CAVE, not in the
+| 0x80006a40+ DSP-shared-RAM window that ate QLREC's magic word under live audio. A cave
+| word is ordinary program SDRAM, and its power-on value is the image byte itself -- 0,
+| asserted by the build -- so it is deterministic at boot with no clearing code needed.
+|
+| Both hooks replay stock EXACTLY when DJ_MODE is 0 or no preserve is pending, and their
+| displaced instructions read the tick function's stack frame -- inside a jsr'd hook every
+| stock %sp offset is +4 for our own return address.
+
+| ---- Hook Z @ 0x400a4bea (10 B: 4200 206f00a4 1140ff2d) ----
+| clr.b %d0 ; moveal %sp@(164),%a0 ; moveb %d0,%a0@(-211)   [a0 = CNTDN cursor, -211 ->
+| 0x800064f0 + t]. Pending -> skip only the store; d0/a0 leave holding stock's values.
+    .global dj_keepz
+dj_keepz:
+    clr.b   %d0                        | displaced #1 (stock leaves D0 = 0 here)
+    moveal  %sp@(168),%a0              | displaced #2, +4: a0 = &CNTDN_TBL[t]
+    tst.l   DJ_MODE
+    beq.b   dkz_zero
+    tst.w   dj_keep_pend
+    beq.b   dkz_zero                   | no armed commit in flight -> stock
+    lea     -8(%sp),%sp
+    movem.l %d1-%d2,(%sp)
+    move.l  %a0,%d1
+    sub.l   #CNTDN_TBL,%d1             | t = cursor - table base
+    cmpi.l  #16,%d1
+    bcc.b   dkz_restore                | not a slot this model covers -> stock
+    move.w  dj_keep_pend,%d2
+    btst    %d1,%d2                    | this track pending? (NOT consumed here --
+    beq.b   dkz_restore                | Hook X, later this same tick, consumes it)
+    movem.l (%sp),%d1-%d2
+    lea     8(%sp),%sp
+    rts                                | PRESERVE: the zero write never happens
+dkz_restore:
+    movem.l (%sp),%d1-%d2
+    lea     8(%sp),%sp
+dkz_zero:
+    move.b  %d0,%a0@(-211)             | displaced #3: TICKS_IN_STEP[t] = 0 (stock)
+    rts
+
+| ---- Hook X @ 0x400a3542 (10 B: 226f0094 246f00ac 1292) ----
+| moveal %sp@(148),%a1 ; moveal %sp@(172),%a2 ; moveb %a2@,%a1@   [a1 = TICKS_IN_STEP
+| cursor, a2 = CATCHUP cursor]. Runs only on the CNTDN[t]==0 fallthrough at 0x400a353e.
+| a1/a2 must leave loaded on every path -- the 0x80006624-gated copy at 0x400a3556 reloads
+| its own, but faithfulness costs nothing.
+    .global dj_keepx
+dj_keepx:
+    moveal  %sp@(152),%a1              | displaced #1, +4: a1 = &TICKS_IN_STEP[t]
+    moveal  %sp@(176),%a2              | displaced #2, +4: a2 = &CATCHUP[t]
+    tst.l   DJ_MODE
+    beq.b   dkx_stock
+    tst.w   dj_keep_pend
+    beq.b   dkx_stock
+    lea     -16(%sp),%sp
+    movem.l %d0-%d2/%a0,(%sp)
+    move.l  %a1,%d1
+    sub.l   #TICKS_IN_STEP,%d1         | t = cursor - table base
+    cmpi.l  #16,%d1
+    bcc.b   dkx_restore
+    move.w  dj_keep_pend,%d2
+    btst    %d1,%d2
+    beq.b   dkx_restore
+    moveq   #1,%d0                     | consume bit t: this track's commit is applied
+    lsl.l   %d1,%d0
+    not.l   %d0
+    and.l   %d2,%d0
+    move.w  %d0,dj_keep_pend
+    lea     TRK_SCALE_IX,%a0           | audio 0-7 @0x8000663e, MIDI 8-15 contiguous at +8
+    moveq   #0,%d2
+    move.b  (%a0,%d1.l),%d2
+    lea     LEN_TBL,%a0
+    move.l  (%a0,%d2.l*4),%d2          | d2 = this track's NEW ticks-per-step (dj_c
+    ble.b   dkx_done                   | refreshed the cache at commit); unreadable ->
+                                       | leave the preserved counter untouched
+    moveq   #0,%d0
+    move.b  %a1@,%d0                   | the preserved free-running counter = C - A
+dkx_mod:
+    cmp.l   %d2,%d0
+    blt.b   dkx_write
+    sub.l   %d2,%d0                    | counter <= 95, tps >= 3: a few passes at most
+    bra.b   dkx_mod
+dkx_write:
+    move.b  %d0,%a1@                   | (C - A) mod tps_t -- the REQUIRED value
+dkx_done:
+    movem.l (%sp),%d0-%d2/%a0
+    lea     16(%sp),%sp
+    rts
+dkx_restore:
+    movem.l (%sp),%d0-%d2/%a0
+    lea     16(%sp),%sp
+dkx_stock:
+    move.b  %a2@,%a1@                  | displaced #3: TICKS_IN_STEP[t] = CATCHUP[t]
+    rts
+
+    .align  2
+    .global dj_keep_pend
+dj_keep_pend:
+    .word   0                          | bit t = preserve track t at its apply tick.
+                                       | In-cave on purpose -- see the block comment.
 
     .ifdef DJ_KEYMAP
 | ================= [PTN] release -- close the toast almost immediately =================

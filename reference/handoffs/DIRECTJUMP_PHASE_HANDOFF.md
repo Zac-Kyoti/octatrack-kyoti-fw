@@ -2,6 +2,21 @@
 
 Written at the end of Session 89. Read this before touching DIRECT JUMP again.
 
+> **SESSION 97 UPDATE — §3's fix is BUILT (V5.5, `e3e5d232…`, NOT flashed) and
+> oracle-clean**: `re-phased? = no` on every armed commit in DJMAST2 0↔1, and zero
+> re-phasing anywhere at uniform 1x. Built as *suppression*, not snapshot/restore: the
+> commit tail turned out to be CNTDN-deferred per track, with both destroying writes in
+> the same tick per track, so Hook Z (0x400a4bea) skips the zero and Hook X (0x400a3542)
+> consumes a per-track cave-resident arm bit (`dj_keep_pend`, 0x400d791e — NOT
+> 0x80006a40+) and reduces the preserved counter mod the track's new tps. §4's snapshot
+> buffer and restore-site question are OBSOLETE. A third destroying write was found
+> (hold-consume → 0x80006624 bit → 0x400a355e copies PAIR into the counter at first
+> wrap+1); it never fired in the fixtures (PAIR=0 throughout) and is the designated
+> suspect if hardware still shows fractional steps at armed commits — its detour window
+> 0x400a3556 is pre-verified. §6 (natural-wrap re-phasing) remains open and is now the
+> ONLY re-phasing source left at non-1x in the emulator. Full detail: NOTES.md
+> Session 97.
+
 ---
 
 ## 1. State, and what is on the unit
@@ -13,7 +28,8 @@ Written at the end of Session 89. Read this before touching DIRECT JUMP again.
 | `V5_1_*` | `34fec20c` | **DO NOT FLASH** — hardware-rejected. |
 | `V5_2_*` | `6d09452b` | + `0x80006638` pairing. Commit `6e22cc1`. |
 | `V5_3_*` | `8cb167ae` | **ON THE UNIT.** + time-domain conversion. Commit `0e2726c`. |
-| `V5_4_*` | — | + Hook S (PAIR→CATCHUP). PARTIAL. Commit `deb8d12`. Tree is here. |
+| `V5_4_*` | `77809aca` | + Hook S (PAIR→CATCHUP). PARTIAL. Commit `deb8d12`. |
+| `V5_5_*` | `e3e5d232` | − Hook S, + Hooks Z/X (preserve). Oracle-clean. Session 97. Tree is here. |
 
 Hashes in `out/BUILDS_SHA256.txt`, provenance in `out/BUILDS_README.txt`. The `V4`/`V5`
 *names* get reused by builds; the hashes do not. Never overwrite `GOLD_S87_*`.
