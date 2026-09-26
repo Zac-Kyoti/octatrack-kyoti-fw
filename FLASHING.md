@@ -331,7 +331,7 @@ untouched** and remains a normal selectable effect.
 > stock compressor end to end, so the *gain-reduction response* to `KEY`/`KFLT`/
 > `KGN` is only ever verified by ear. The emulators verify the data transforms
 > feeding it, which is a different claim.
-### 4.5  RELOAD FROM PROJECT  (`build_reload3.py` — **first hardware flash green**, MKI 2026-09-23; three follow-up fixes built but not yet reflashed)
+### 4.5  RELOAD FROM PROJECT  (`build_reload3.py` — **hardware-confirmed, final**, MKI 2026-09-25)
 
 > **The picker is gone.** RELOAD3 replaced the modal window with two direct
 > chords. `build_reload2.py` (the `[BANK]`+`[YES]` 3-item picker) and
@@ -340,14 +340,15 @@ untouched** and remains a normal selectable effect.
 > the picker / keymap / popup machinery and **none** in the worker that does the
 > reload, which is what drove the redesign.
 >
-> **Flashed twice, both green.** 2026-09-23: both chords execute, no conflicts.
-> 2026-09-24: reloads are "quick and on-time". **What has NOT been on hardware
-> yet:** the reload no longer restarting the sequence and the internal metronome,
-> SELECT BANK moving to the `[BANK]` release, and the message box rebuilt as a
-> **titled, centred, self-dismissing card** (stock's `MLNOTIFY` could not do it —
-> it is a blocking dialog that pushes its own keymap layer, has no duration
-> argument, and hardcodes every line to x=4). Those are built and
-> diagnostic-verified only.
+> **Final.** Flashed 2026-09-23 and 2026-09-24 (both chords execute; reloads "quick and
+> on-time"), and again 2026-09-25 after the last bug was fixed: the sequence sometimes
+> did not come back while the toast still said RELOADED. An on-screen diagnostic build
+> (`build_reload3.py --diag`) showed the reload had read its own request -- which
+> track, audio or MIDI -- from a RAM block the unit overwrites, so it reloaded a
+> different (MIDI) track. The request now lives in the patch's own memory and the user
+> reported every reload issue resolved. The message is drawn when the reload has
+> **finished**, not when the chord is recognised, and is a stock-style block toast (a
+> titled card was tried and rejected).
 
 The two gestures, both reading from the CF card's last **SAVE BANK** snapshot,
 neither stopping or disturbing the transport:
@@ -358,11 +359,11 @@ neither stopping or disturbing the transport:
                          their locked values, swing/slide, micro-timing, trig
                          conditions, its step count. The other 7 tracks, the
                          pattern length/scale and the pattern->Part link are left
-                         alone. Card: RELOAD FROM PROJ / TRK SEQ / RELOADED.
+                         alone. Toast: TRK SEQ RELOADED.
 
     [BANK] + [TRACK n]   the same, plus re-apply the saved Part -- from RAM, not
                          the card: the saved copy of the Part currently associated
-                         with the pattern. Card: RELOAD FROM PROJ / TRK SEQ + PART
+                         with the pattern. Two-line toast: TRK SEQ + PART
                          / RELOADED.  A never-saved Part instead gets
                          TRK SEQ RELOADED / SAVE PART FIRST! -- stock's own
                          wording, and the sequence still reloaded.
@@ -373,16 +374,16 @@ Setup: a project on the card with **at least one SAVE BANK** done. Pick a bank,
 1. Play pattern N. On **track 3** edit some trigs / a p-lock. On **track 5** edit
    different trigs. Do **not** SAVE BANK again.
 2. **`[PTN]` + `[TRACK 3]`** → track 3 reverts; **track 5's edits are still
-   there**; a card reading `RELOAD FROM PROJ` / `TRK SEQ` / `RELOADED` appears. The
+   there**; the toast `TRK SEQ RELOADED` appears. The
    SELECT PATTERN chooser must **not** pop on the `[PTN]` release.
-3. **The card must dismiss itself** in about half a second, with **no `OK` prompt
+3. **The toast must dismiss itself** in about a second, with **no `OK` prompt
    to answer and no countdown dots**. If it sits there waiting for a keypress, that
    is the exact regression this design removed — the emulator cannot drive the
    popup tick, so this is hardware-only.
 4. **The timing is the point** — during and after the reload, the track, the
    pattern and the **internal metronome** must all stay in undisturbed time. No
-   restart to step 1, no metronome jump, no audible gap. This is the fix that has
-   not yet been on hardware; test it deliberately.
+   restart to step 1, no metronome jump, no audible gap. This is
+   a regression check; test it deliberately.
 5. Repeat on a **MIDI** track → only that MIDI track reverts.
 6. Try **track 1** and **track 8** specifically — the keycode→index arithmetic is
    right at both ends, but it is worth confirming on the unit.
@@ -407,7 +408,7 @@ Setup: a project on the card with **at least one SAVE BANK** done. Pick a bank,
 > appears to freeze). Power-cycle — it recovers. Reflash stock 1.40C (§5) to fully
 > revert. The worker writes only the live blob, never disk. Still hardware-only:
 > the parse against a real CF card, and the reload's seamless-timing *feel*.
-> Detail: `NOTES.md` "Session 42"–"44" + "Session 47" + "Session 80"–"Session 86";
+> Detail: `NOTES.md` "Session 42"–"44" + "Session 47" + "Session 80"–"Session 98";
 > spec `reference/RELOAD_REDESIGN.md`.
 ### 4.6  Bug 2 — pattern with only p-locks reads as empty  (`build_pattern_led.py` — hardware-confirmed, MKI 2026-09-13)
 
@@ -756,7 +757,7 @@ OCTATRACK_*.bin                   CF-card OS UPGRADE transport (faster)
 | `python3 tools/build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | `140C_KYOTI` | Bug-1 fix + the full **SIDE-CHAIN COMPRESSOR** (`KEY` / `KFLT` / `KGN` / `MON`, `KEY` reaching any of the 8 tracks, cross-core) |
 | `python3 tools/build_triglock.py` | `1.40C` | fix only: auto-remove an emptied trigless lock |
 | `python3 tools/build_directjump_v4.py` | `140C_KYOTI` | Bug-1 fix + **DIRECT JUMP** (`[PTN]`+`[YES]`) — *confirmed at 1x scales only* |
-| `python3 tools/build_reload3.py` | `140C_KYOTI` | Bug-1 fix + **RELOAD FROM PROJECT**, two chords (`[PTN]`/`[BANK]` + `[TRACK n]`) — *follow-up fixes unflashed* |
+| `python3 tools/build_reload3.py` | `140C_KYOTI` | Bug-1 fix + **RELOAD FROM PROJECT**, two chords (`[PTN]`/`[BANK]` + `[TRACK n]`) — **hardware-confirmed, final** (2026-09-25) |
 | `python3 tools/build_bugbuilds.py` | per-image | each finished feature **with all three bug fixes folded in** → `out/Bugbuilds/` |
 
 Superseded, kept only for rollback and reference — **do not flash**:

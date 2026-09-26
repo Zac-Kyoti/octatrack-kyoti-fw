@@ -35,7 +35,7 @@ also the right build boundary, because it is exactly the cut that removes both b
 | | contents | conflicts to resolve | headroom |
 |---|---|---|---|
 | **`KYOTI_V1.0`** | the **seven finished, hardware-confirmed mods** | **none** — mechanical repack only | 3196 B (53 %) |
-| **`KYOTI_V1.1`** | + DIRECT JUMP v4 + RELOAD3 | blockers **B1** and **B2** below | **298 B (5 %)** |
+| **`KYOTI_V1.1`** | + DIRECT JUMP v4 + RELOAD3 | blockers **B1** and **B2** below | **≈ 64 B (1 %)** — derived, see the update below |
 
 Build V1.0 first and flash it. It is a genuinely conflict-free composition of work that
 is already signed off on hardware, it is the thing that can ship, and it de-risks V1.1 by
@@ -69,7 +69,7 @@ and RELOAD2 and lacked these two. **Do not resurrect its mod table.**
 | Mod | Build | cave | state |
 |---|---|---|---|
 | DIRECT JUMP — `[PTN]`+`[YES]` | `build_directjump_v4.py` (**v4**, not v3) | **1026 B** | **HW-confirmed at 1x** (Session 87). Non-1x root-caused and fixed Session 88, bit-identical to the confirmed build at 1x, **unflashed**. One unexplained report still open (visited steps vs trigs present; LEDs vs audio) |
-| RELOAD FROM PROJECT — direct chords | `build_reload3.py` (**v3**, not v2) | **1870 B** | Flashed twice, both green (Sessions 86, 88). The transport fix, the `[BANK]`-release deferral and the titled self-dismissing message card are **unflashed** |
+| RELOAD FROM PROJECT — direct chords | `build_reload3.py` (**v3**, not v2) | **2104 B** | **FINAL — HW-confirmed 2026-09-25.** Grew from 1870 B: two-line block toasts, the live self-verify, the playing-bank fix, and the request bytes moved into the cave |
 
 **`build_directjump_v3.py` is superseded.** This document used to say "DIRECT JUMP: use
 v3". That is wrong now: v1–v3 were dead on hardware and v4 is the line. v4 is not a
@@ -113,11 +113,11 @@ and V1.1* and the free span stays contiguous below it.
 | Cave | Addr | Size |
 |---|---|---|
 | `patch_directjump` (`DJ_V3=1,DJ_KEYMAP=1`) | `0x400d6f80` | 1026 B |
-| `patch_reload3` | `0x400d7384` | 1870 B |
-| — free — | `0x400d7ad2` | **298 B** |
+| `patch_reload3` | `0x400d7384` | **2104 B** (final; was 1870 B) |
+| — free — | `0x400d7bbc` | **64 B** (derived) |
 | `patch_trigscale` | `0x400d7bfc` | 62 B **pinned** |
 
-⚠️ **5 % headroom, and shrinking fast.** Both WIP mods move every session, and the
+**Update 2026-09-25 — RELOAD3 is final at 2104 B (+234 B vs the 1870 B above), so V1.1's free run is ≈ 64 B (298 − 234). This is derived arithmetic, not a builder run: the merged builder is withdrawn. RELOAD3 alone into V1.0 fits with ≈ 1092 B to spare (3196 − 2104), also derived.** ⚠️ **5 % headroom, and shrinking fast.** Both WIP mods move every session, and the
 trend is the wrong way: at `18824ad` this table read 1020 + 1500 = 676 B free; five
 commits later, at `91f2f15`, it reads 1026 + 1870 = **298 B**. RELOAD3 alone took 370 B
 in one session (the titled message card, Session 88). At this rate V1.1 overflows the
@@ -291,7 +291,7 @@ standalone `build_reload3.py`.
 | PERSONALIZE word | `0x800000dc` | — | `0x800000ac` (stock) | — | — | `0x800000d8` | — | ⚠️ **B1** |
 | SRAM shadow | `0x100fff6c` | — | `0x100fff3c` (stock) | — | — | **none** | — | disjoint |
 | `pea 0x64→0x70` ×3 | **yes** | no | no (`0xac` already in span) | no | no | **must stay stock** | no | ⚠️ **B1** |
-| private scratch | `0x80006c66` | — | `0x80006a5c–0x80006a73` | — | — | `0x80006a40–0x80006a4a` | `0x80006a50–0x80006a55` | **disjoint** |
+| private scratch | `0x80006c66` | — | `0x80006a5c–0x80006a73` | — | — | `0x80006a40–0x80006a4a` | **none** — own cave since Session 98 | **disjoint** |
 | keymap overlay | — | — | — | — | — | writes YES `0x400bf0c0` | asserts stock | ⚠️ **B2** |
 | menu surgery | owns it | — | — | — | — | — | — | single owner |
 | FX chooser / DSP | — | owns it | — | — | — | — | — | single owner |
@@ -301,8 +301,8 @@ standalone `build_reload3.py`.
 | `CUR_BANK 0x80000002` | — | — | — | — | reads | — | reads | read-only, fine |
 | `ARR_ACT 0x460d1aec` | — | — | — | — | — | reads | reads | arranger guard, fine |
 
-**The scratch block is tight but clean:** DJ `0x6a40–4a`, RELOAD3 `0x6a50–55`, QLREC
-`0x6a5c–73`. QLREC now runs to `0x80006a73` (it used to be recorded as just two bytes at
+**The scratch block is tight but clean:** DJ `0x6a40–4a`, QLREC
+`0x6a5c–73`. (RELOAD3 used to sit at `0x6a50–55` and no longer does: on hardware the unit overwrote those bytes between a key chord and the job that read them, so the reload sometimes hit the wrong track — Session 98. It keeps its request in its own cave now.) QLREC now runs to `0x80006a73` (it used to be recorded as just two bytes at
 `0x6a5c`/`0x6a60`) — 8 bytes of slack to DJ's block below and none above. **Any new mod
 must claim scratch from a fresh region, not by guessing a gap here.**
 
@@ -394,9 +394,8 @@ pattern change, Part change during a soft-mute tail, and QLREC's tick sharing
    Part change during a soft-mute tail, and QLREC double-tap during an OTFX tail.
 2. Finish DIRECT JUMP (**flash the Session 88 non-1x fix** — the 1x behaviour is already
    HW-confirmed and is the baseline not to regress; one report is still unexplained) and
-   RELOAD3 (**reflash** — the transport fix, the `[BANK]`-release deferral and the message
-   card have not been on hardware), and flash each **standalone** first —
-   `build_directjump_v4.py` and `build_reload3.py`, not v3/reload2.
+   flash it **standalone** first — `build_directjump_v4.py`, not v3. RELOAD3 is finished
+   (final, hardware-confirmed 2026-09-25) and no longer gates the merge.
    Note `reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md` is now **stale**: its section 5
    `CNTDN_TBL` question was answered in Session 88 (`max(1, tps_master + 1 - tps_t)`), and
    its section 4 pairing with AR's `0x405667c7` is wrong.
@@ -411,10 +410,10 @@ pattern change, Part change during a soft-mute tail, and QLREC's tick sharing
 - **Whether the merge ships at all** vs staying a per-feature menu of builds — the
   combined image is the harder thing to support (one HW regression sinks all seven).
   Staging V1.0/V1.1 reduces but does not remove this.
-- **Whether V1.1 should carry both WIP features or just one.** DIRECT JUMP owns both
-  blockers; RELOAD3 alone would merge into V1.0 with no conflict at all once it is
-  finished and flashed. If DIRECT JUMP stays unfinished, ship RELOAD3 as V1.1 and hold
-  DIRECT JUMP for V1.2.
+- **Whether V1.1 should carry both features or just RELOAD3.** DIRECT JUMP owns both
+  blockers; RELOAD3 is now finished and flashed and would merge into V1.0 with no
+  conflict at all (≈ 1092 B to spare, derived). If DIRECT JUMP stays unfinished, ship
+  RELOAD3 as V1.1 and hold DIRECT JUMP for V1.2.
 - **Retiring the superseded builders.** `build_directjump{,_v2,_v3}.py`,
   `build_reload{,2}.py`, `build_mutemode{,_new}.py`, `build_sidechain{,2}.py` and
   `build_softmute.py` are all superseded by a later scoped build. Keeping them is

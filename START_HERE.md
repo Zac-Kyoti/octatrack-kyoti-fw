@@ -154,10 +154,11 @@ ems-octakit's `abi.inc` ~500-address map → `kb/octakit-abi.md`, the keymap/key
 ## 6. Current frontier — UPDATE THIS EACH SESSION
 
 **As of 2026-09-24, Session 87, on `wip` (`18824ad`).** `main` is behind: it lacks
-PARTREAPPLY's Session 81 build, RELOAD3 and Bugbuilds entirely, and still carries the
+PARTREAPPLY's Session 81 build and Bugbuilds entirely (RELOAD3 is final and IS on `main`
+as of 2026-09-25), and still carries the
 withdrawn `build_merged.py`.
 
-**Two threads are open. Everything else in §5 is finished.**
+**One thread is open (DIRECT JUMP). Everything else in §5 is finished, RELOAD3 included.**
 
 ### DIRECT JUMP — hardware-confirmed at 1x; non-1x scales are the whole remaining problem
 
@@ -194,24 +195,26 @@ The position rule is AR's own commit arithmetic ported verbatim
 not persist — OFF on every power-on. Detail: `NOTES.md` "Session 15" + "Session 21" +
 "Session 35" → "Session 60"–"Session 88".
 
-### RELOAD FROM PROJECT — RELOAD3, first flash green, follow-ups unflashed
+### RELOAD FROM PROJECT — RELOAD3, FINAL (hardware-confirmed 2026-09-25)
 
-`build_reload3.py`. The picker is gone (Session 85): two direct chords, **`[PTN]` +
-`[TRACK n]`** (track sequence from the card, Part untouched) and **`[BANK]` +
-`[TRACK n]`** (the same plus re-apply the saved Part from RAM). No modal window, no
-keymap layer of ours, no arrows, no timeout, no BUSY state — the bug tally across the
-whole thread was ~13 in the picker/keymap/popup machinery and **none** in the worker.
+`build_reload3.py`. Two direct chords: **`[PTN]` + `[TRACK n]`** (track sequence from
+the card, Part untouched) and **`[BANK]` + `[TRACK n]`** (the same plus re-apply the
+saved Part from RAM). No modal window, no keymap layer of ours, no timeout. It reloads
+the *playing* pattern, never restarts the sequence or the metronome, and reports when
+the job has actually finished — with a built-in check (`SEQ RELOAD LOST`) if the trigs
+did not land.
 
-Flashed 2026-09-23: **both chords execute, no conflicts.** Three follow-ups from that
-flash are built and diagnostic-verified but **not yet reflashed** — the reload no
-longer restarts the sequence or the metronome (it had armed stock's whole-bank
-*re-home*, which zeroes the master playhead the metronome derives from), SELECT BANK
-moved to the `[BANK]` release, and the Part toast became a two-line box.
-
-Deferred by the user: all-tracks and whole-bank variants. Still unknown: the root
-cause of the old stuck-`G_KIND`, though the redesign leaves no modal state for a lost
-post to wedge. Spec and measurements: `reference/RELOAD_REDESIGN.md`; detail:
-`NOTES.md` "Session 42"–"44" + "Session 47" + "Session 80"–"Session 86".
+The last open bug — the sequence intermittently not restored while the toast said
+RELOADED — was root-caused on the unit with `build_reload3.py --diag`, whose toast prints
+the request as armed and as read by the worker. The request bytes lived at
+`0x80006a50-55`, a RAM block the unit overwrites, so the worker sometimes reloaded a
+different (MIDI) track and then verified that. They now live in the patch's own cave, and
+the build refuses any reference into `0x80006a40..0x80006abf`. The user reported every
+issue resolved. **Do not keep state in that block** (`kb/caves.md` and CLAUDE.md on `wip`;
+NOTES "Session 98"). Deferred by the user: all-tracks and whole-bank variants. Handoff:
+`reference/handoffs/RELOAD3_SEQFAIL_HANDOFF.md`. Spec and measurements:
+`reference/RELOAD_REDESIGN.md`; detail: `NOTES.md` "Session 42"–"44" + "Session 47" +
+"Session 80"–"Session 98".
 
 ### Blockers on the staged merge
 

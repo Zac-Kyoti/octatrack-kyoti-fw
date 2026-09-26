@@ -144,12 +144,20 @@
 | ("apply a Part by event"), which parts-switching during playback already uses.
 |
 | ---- state (volatile scratch, no persistence needed -- one-shot actions) ----
-    .equ G_KIND,    0x80006a50          | worker request: 0 idle / 1 PTN SEQ / 2 PART+PTN SEQ / 3 TRK SEQ
-    .equ G_PAT,     0x80006a51          | pattern to reload (byte)
-    .equ G_MENU,    0x80006a52          | 1 = the picker window is open
-    .equ G_SEL,     0x80006a53          | highlighted item: 0 TRK SEQ / 1 PTN SEQ / 2 PART + PTN SEQ
-    .equ G_TRK,     0x80006a54          | TRK SEQ: track index 0..7
-    .equ G_TMIDI,   0x80006a55          | TRK SEQ: 0 = audio track, 1 = MIDI track
+|   ===== Session 98: the request bytes live IN THE CAVE now, not at 0x80006a50-55. =====
+|   HARDWARE-PROVEN, by the RL3DG diagnostic toast (handoff section 10): with trigs on steps
+|   1,3,...,15 the chord armed track 1 / audio (C 0000) and the worker read track 6 / MIDI
+|   back from 0x80006a54-55 (W 005B). It reloaded MIDI track 6, the verify checked that
+|   slice and passed, and the toast said RELOADED while the edited track kept playing.
+|   The block is inside the DSP shared-RAM window and is overwritten at runtime on the unit
+|   (the same finding QLREC paid for, Sessions 94-96); the emulator never overwrites it.
+|   The value followed the pattern content (0x55 mask bytes, 0x55 & 7 = 5), which is why a
+|   single-trig test on track 1 read back zeros = track 1 and looked correct by accident.
+|   G_KIND being clobbered was just as possible: a stray 1..3 would have hijacked the next
+|   stock RELOAD BANK job. All six bytes are now labels in this cave's data (see rl_kind),
+|   the region rl_own / rl_msg / rl_vsnap already live in and that the RL3DG toast proved
+|   survives on hardware. build_reload3.py asserts no 0x80006a40..0x80006abf reference
+|   remains in the blob. G_MENU / G_SEL are picker-era and unused, and are gone.
 
 |   ---- stock symbols ----
     .equ PTN_USED,  0x460d173e          | set 1 to suppress SELECT PATTERN on [PTN] release
@@ -158,7 +166,26 @@
     .equ ARR_ACT,   0x460d1aec          | arranger active
     .equ RUNNING,   0x800065b8          | transport state -- LONGWORD (=1 playing)
     .equ ACT_PAT,   0x800065be          | sequencer's active pattern (byte)
-    .equ CUR_BANK,  0x80000002
+|   ===== Session 92: PLAY_BANK is ACT_PAT's partner; CUR_BANK is NOT. =====
+|   Hardware report #14: "the sequence data does not always reload reliably. Most of the
+|   time it does. Occasionally the toast will show 'reloaded', but the sequence is not
+|   actually restored."  The reload was aimed with a MISMATCHED (bank, pattern) pair.
+|   MEASURED -- all three writers of 0x800065bd set it in the same breath as ACT_PAT:
+|       0x400a05f6  the direct goto          65bd=bank, 65be=pattern, + queued mirrors
+|       0x400a40aa  the boundary latch       gated on BOTH queued values being != -1
+|       0x400a44dc  the second latch site    identically gated
+|   so (PLAY_BANK, ACT_PAT) always describes ONE pattern -- the one being played -- and
+|   both move only when the sequencer says so. CUR_BANK (0x80000002) has no such pairing:
+|   it is written at 0x400622b8 (a UI path, alongside LIVE_REFRESH and the cached blob
+|   base 0x46c82456) and at 0x40087d26 (clamped 0..15, project load). Pairing it with
+|   ACT_PAT could name a slab that nothing is reading -- so the .strd was read, the slab
+|   was rewritten, LIVE_REFRESH ran, our success toast appeared, and not one byte of what
+|   the user could hear had changed. Intermittent exactly as reported: harmless while you
+|   stay in one bank.
+|   Every reload-TARGETING site below uses PLAY_BANK. CUR_BANK is deliberately left
+|   defined but unused, so a future site cannot reach for it by habit.
+    .equ PLAY_BANK, 0x800065bd          | the bank being PLAYED -- pair this with ACT_PAT
+    .equ CUR_BANK,  0x80000002          | UI-side bank; NOT ACT_PAT's partner (see above)
     .equ CUR_PART,  0x80000003          | the Part the sounding pattern is assigned to (byte)
     .equ CUR_TRACK, 0x80000000          | UI-selected track (byte 0..7 ; mirror 0x100b14cc)
     .equ MIDI_MODE, 0x80000012          | != 0 -> the MIDI pages are up (track index means MIDI track)
@@ -168,6 +195,37 @@
     .equ TOAST,     0x4005a2b8          | FUN_4005a2b8(text, dur) -- the "PART %d RELOADED" toast
     .equ PARTAPPLY, 0x40009094          | FUN_40009094(bank, part) -- apply a Part by event (parts-switch path)
     .equ RDRAW,     0x46c7c72c          | screen redraw dirty flag (set to 1)
+|   ===== Session 98: the DIAG build (--defsym RL_DIAG=1, tools/build_reload3.py --diag) =====
+|   reference/handoffs/RELOAD3_SEQFAIL_HANDOFF.md section 4. On hardware a [PTN]+[TRACK n]
+|   reload frequently leaves the EDITED sequence playing while the toast says RELOADED and
+|   the self-verify in rl_done stays silent. Every intermediate the harness can measure
+|   passes, so the only instrument left is the toast itself: this build replaces every
+|   success message with four lines of the raw bytes and indices the worker actually used,
+|   captured into OUR CAVE at the moment each was read (never into SCRATCH, which is inside
+|   stock's 64 KB OPEN_BUF window and is one of the suspects).
+|   NOTHING UNDER TEST MOVES: SCRATCH, OPEN_BUF, the 0x80006a50 scratch bytes, the job flow
+|   and the verify are exactly the flashed build's. Only cave-side captures are added.
+|     line 0  P pppppppp S ssssssss   P = live slab bytes BEFORE the copy (= what was
+|                                     playing / edited), S = rl_vsnap (SCRATCH after copy)
+|     line 1  L llllllll K kkkkkkkk   L = live slab at doneFn (what the verify compared),
+|                                     K = the 0x1001614e live-cache copy at doneFn
+|     line 2  C bptm W bptm D bp      bank/pattern/track/midi as the CHORD armed them, as
+|                                     the WORKER read them from 0x80006a5x, and PLAY_BANK/
+|                                     ACT_PAT as DONEFN saw them. One hex digit each.
+|     line 3  Mn Vn Kn R rr           M = message code armed (1 TRK/2 TRK+PART/3 SAVE
+|                                     FIRST/4 LOST), V = verify (0 not armed/1 pass/2
+|                                     fail), K = G_KIND as the worker read it, R = low
+|                                     byte of the LAST PARSEPAT return.
+|   Reading it (section 4 of the handoff):  P==S==L -> SCRATCH held the edited data and
+|   both copy and verify were vacuous (hypothesis A).  P!=S, S==L -> the copy landed in
+|   the blob the verify reads; playback reads elsewhere (C).  C!=W -> the 0x80006a5x
+|   scratch was clobbered between chord and worker (kb/caves.md, Sessions 94-96).  Two
+|   chords in a row with no edit in between: toast 1's L vs toast 2's P settles (B).
+    .ifdef RL_DIAG
+    .equ LIVE_CACHE, 0x1001614e         | LIVE_REFRESH's destination: bank's 16 slabs
+    .equ DIAG_DUR,   0x168              | 6 s at the measured ~60 Hz tick -- long enough
+                                        | to read four lines of hex; diag build only
+    .endif
 
 |   ---- [BANK]-held overlay layer (Session 80 continued (2)) ----
 |   [BANK] press 0x4007af80 pushes layer struct 0x400cff14 (records @ 0x400cff34)
@@ -213,6 +271,13 @@
     .equ BANK_PRESS_RES, 0x4007af48     | resume AFTER the 2 displaced insns -- stock's
                                         | own SELECT BANK window show is left intact
     .equ BANK_TEARDOWN,  0x4007b408     | window onClose -> pops the overlay layer
+|   Session 91: the SHOW_WIN popup slot and the onClose pointer stock's own dismiss
+|   follows. MEASURED writers: 0x460d1e5c is written ONLY at 0x40059fe4 and 0x460d1e60
+|   ONLY at 0x4005a006 -- both inside SHOW_WIN. So stock's dismiss (0x40056a70) runs an
+|   onClose only if a window was actually SHOWN through SHOW_WIN; it bails at 0x40056a76
+|   otherwise. This is what the POPUP guard below used to get wrong.
+    .equ WIN_SLOT,       0x460d1e5c     | the SHOW_WIN popup handle
+    .equ WIN_ONCLOSE,    0x460d1e60     | the onClose 0x40056a70 jumps to, if any
     .equ BANK_TEXT,      0x400b7302     | "SELECT BANK"
     .equ BANK_SEL,       0x460e73c6     | trig handler sets it -> its own "bank N" toast is up
     .equ SHOW_WIN,       0x40059f8c     | FUN_40059f8c(text, dur, flag, onClose)
@@ -316,6 +381,18 @@
     .equ MIDI_BASE,  0x48d0             | MIDI region base (= 8 * 0x91a)
     .equ TRAC_M,     0x8b0              | MIDI track stride (MIDI track t at slab + 0x48d0 + t*0x8b0)
     .equ PAT_PART,   0x8e57             | pattern->Part link, 1 byte [0..3]
+|   Session 89 -- the pattern-level scale trailer. Offsets CONFIRMED against stock's own
+|   load-time clamp FUN_4009a670: +0x8e53 is clamped to 2..64 (a STEP COUNT, 0x4009aada)
+|   and +0x8e54 to 0..6 (a SCALE INDEX, 0x4009ab06); +0x8e55 is the scale-MODE flag the
+|   step engine tests at 0x400a2720 to decide whether per-track scale applies.
+    .equ PAT_LEN,    0x8e53             | pattern LENGTH in steps (governs in NORMAL mode)
+    .equ PAT_SCALE,  0x8e54             | pattern SCALE index    (governs in NORMAL mode)
+    .equ PAT_SMODE,  0x8e55             | 0 = NORMAL, != 0 = PER TRACK
+|   The LIVE master-scale cache. ** Not refreshed per wrap. ** Stock writes it only from
+|   transport start/stop (0x4009beec/0x4009bf54), the whole-bank re-home
+|   (0x400a272e/0x400a2764) and the pattern-switch commit tail (0x400a4220). In NORMAL
+|   mode it is sourced from +0x8e54, in PER TRACK mode from the MASTER scale +0x8e52.
+    .equ SCALE_IX,   0x8000663d         | live MASTER scale index (byte)
 
     .equ N_ITEMS,     3
 
@@ -406,56 +483,43 @@
 |   difference now is that the previous attempt carried the picker, its own keymap
 |   layer and a poked YES slot; this build pokes no layer record at all, so the only
 |   moving part left is the show itself. Still the riskiest item in this build. **
-|   ---- Session 88: our own titled, centered, SELF-DISMISSING card ----
-|   Hardware report #10 asked for four things on the notification box: title
-|   "RELOAD FROM PROJ", the second line CENTRED, NO "OK" prompt to dismiss, and the
-|   same card style for the plain TRK SEQ message instead of the big block toast.
+|   ---- Session 89: a TALLER, MULTI-LINE version of stock's own BLOCK toast ----
+|   Report #11 reverted Session 88's card: "I want the toasts to NOT be in cards. I want
+|   them to be in the form of the previously used larger block toasts. But we need
+|   1) TRK SEQ + PART, RELOADED and 2) TRK SEQ RELOADED, SAVE PART FIRST! each on two
+|   lines (enlarge toast vertical size)."
 |
-|   MLNOTIFY (0x4006d57c) cannot do it and is dropped. Decoded, it is a BLOCKING
-|   dialog by construction:
-|     * it pushes keymap layer 0x400cdff8 (0x4006d722) -- that IS the "OK" prompt's
-|       input handler, so the box waits for a key by design
-|     * it has NO duration argument anywhere. (An earlier comment in this file claimed
-|       0x460e5e20 was "a 40-frame countdown". WRONG, and the hardware report is what
-|       exposed it: 0x460e5e20 is the box WIDTH accumulator -- seeded to 40 at
-|       0x4006d596, then max'd against each measured line width + 9 and clamped to 128.
-|       0x460e5e24 is the height, 7*nlines+27 clamped to [34,64].)
-|     * its body renderer 0x4006d128 draws every line with x hardcoded to 4
-|       (0x4006d170) -- that is exactly the left-justification the user is reporting.
+|   Decoded stock TOAST (FUN_4005a2b8) -- the block toast in question:
+|     width  = measured text width + 15          (0x4005a2f2)
+|     height = 0x12                              (0x4005a2ee)
+|     style  = 0xa   <- the BLOCK look. 4 is the card look Session 88 used.
+|     slot     0x460d1e70, its OWN, separate from SHOW_WIN's 0x460d1e5c
+|     countdown 0x460d1e6c = dur                 (0x4005a328)
+|     dismiss  0x40056bec                        (also its onClose)
+|     one line, centred at y = height-11, drawn by FUN_40057008
 |
-|   So build the card directly out of the same primitives MLNOTIFY uses, on the OTHER
-|   popup slot -- the one SHOW_WIN uses -- because that slot already owns stock's
-|   countdown and never pushes a keymap layer. Result: no OK prompt exists to press,
-|   the dismiss is stock's own timer, and every line is centred because we pass a
-|   computed x instead of 4. Width/height formulas, body font and line spacing are all
-|   copied from MLNOTIFY so the box keeps the proportions the user already approved.
-    .equ WIN_NEW,        0x4005829c     | (w,h,x,y,style,onClose) -> handle.
-                                        | style 4 = the CARD look MLNOTIFY uses;
-                                        | style 0xa = the block toast SHOW_WIN uses.
-    .equ WIN_TITLE,      0x40057c84     | (handle, text, flag) -- the title bar
-    .equ WIN_CLEAR,      0x400356a8     | (winptr) -- clear the interior
+|   Two measured properties of that slot matter, and both are why this is the safer
+|   mechanism of the two:
+|     * its tick (0x40056c28) reads the countdown DIRECTLY -- `tstl 0x460d1e6c ; beq
+|       rts` -- with NO enabling flag. The SHOW_WIN slot's tick is gated on CD_FLAG at
+|       0x40056abe, and clearing that by mistake is exactly what would have left Session
+|       88's card on screen forever. No such trap exists here.
+|     * the countdown DOTS come from 0x40037cc8, which reads the SHOW_WIN slot ONLY.
+|       Nothing on the toast path can reach it, so a block toast cannot show dots --
+|       which is what report #11 also asked for ("not have countdown dots anywhere").
+|   Stock has no multi-line block toast to borrow: the only other 0x4005a2b8-alike
+|   (0x4005a160) is a sprintf wrapper with the same 0x12 height and a single line.
+    .equ TOAST_SLOT,     0x460d1e70     | the toast's own window handle
+    .equ TOAST_CD,       0x460d1e6c     | its countdown; set it and it self-dismisses
+    .equ TOAST_DISMISS,  0x40056bec     | tears the toast down (also its onClose)
+    .equ TOAST_H1,       0x12           | stock's height for ONE line
+    .equ TOAST_STYLE,    0xa            | the BLOCK look (4 would be the card)
+    .equ FONT_TOAST,     0x400ba862     | the font stock measures AND draws the toast in
+    .equ WIN_NEW,        0x4005829c     | (w,h,x,y,style,onClose) -> handle
+    .equ WIN_DRAW1,      0x40057008     | (handle, text, top, font): clears the window
+                                        | and centres `text` at y = height-11
     .equ DRAWTEXT,       0x40012bd8     | (font, winptr, x, y, len, text)
     .equ TEXTW,          0x40012f30     | (font, maxlen, text) -> pixel width
-    .equ FONT_BODY,      0x400ba876     | the font MLNOTIFY measures AND draws with
-    .equ WIN_SLOT,       0x460d1e5c     | the countdown-owned popup handle
-    .equ WIN_ONCLOSE,    0x460d1e60     | called after the countdown dismisses it
-    .equ CD_CUR,         0x460d1e50     | ticks left in this segment
-    .equ CD_RELOAD,      0x460d1e58     | reload value for CD_CUR
-    .equ CD_SEGS,        0x460d1e54     | segments left == number of countdown dots.
-                                        | We set it to 1: one segment, therefore no
-                                        | dots, and the expiry dismisses directly.
-    .equ CD_FLAG,        0x460d1e4c     | tick gate: ZERO = countdown disabled
-    .equ CD_TICK,        0x40056ab8     | the gate + tick entry (NOT 0x40056ac0, which
-                                        | is past the gate -- hook the gate, not the body)
-    .equ WIN_DISMISS,    0x40056a70     | tears the slot down + calls WIN_ONCLOSE
-|   NOT called, on purpose -- this is the dot drawer. Kept documented so a future
-|   session does not "helpfully" add it back and reintroduce the countdown dots.
-    .equ WIN_REFRESH,    0x40037cc8     | draws the countdown dots (y 7..11)
-    .equ CARD_STYLE,     4
-    .equ CARD_DUR,       0x18           | ticks the card stays up (~0.5 s). Goes into
-                                        | CD_CUR whole, since CD_SEGS is 1. SELECT BANK
-                                        | uses 0xf0 across 4 segments for its
-                                        | several-second countdown -- same units.
     .equ BANK_LAYER,     0x400cff14     | the [BANK] overlay keymap layer struct
     .equ BANK_UI_A,      0x4007e760     | the two UI calls the press tail makes AFTER
     .equ BANK_UI_A_ARG,  0x400cff28     | LAYER_PUSH; BANK_WIN_CLOSE pairs them with
@@ -471,7 +535,16 @@
     .equ BANK_SHOW_TAIL, 0x4007af30     | stock's own show sequence, replayed on release
     .equ BANK_REL_RES,   0x4007b3e8     | release handler, past the 2 displaced insns
                                         | (lands on its own beq, so the cmp must stand)
-    .equ TOAST_DUR,      0x18           | stock's duration for this toast family
+|   Session 90, hardware report #13: "the toasts need to be visible a little longer.
+|   Whatever the next higher value used in stock OT is (still less than 1 second)."
+|   MEASURED across every stock FUN_4005a2b8 call site: 0x30 x87, 0x44 x3, 0x5a x2,
+|   0x60 x7, 0x78 x1. So 0x30 is not merely the next value up from our 0x18 -- it is
+|   stock's overwhelmingly standard toast duration. (0x18 was never a stock value at
+|   all; an earlier note in this file claimed it was "stock's duration for this
+|   family", which the measurement disproves.) At the UI tick rate 0x30 lands close to
+|   0.8 s, inside the "less than 1 second" the report asks for; the next stock step up,
+|   0x44, would be past it.
+    .equ TOAST_DUR,      0x30           | 48 ticks -- stock's standard toast duration
                                         | (0x4005e09c). RELOAD2 used 0x44; this is the
                                         | "OT standard" the spec asks for.
 
@@ -519,17 +592,46 @@ rl3_bank_trk:
 r3b_try_bank:
     tst.l   BANK_HELD_FLAG
     beq.w   r3b_stock                  | neither modifier -> ordinary track select
+|   ===== Session 93 (2nd pass): rl_msg MUST be armed BEFORE the job is posted. =====
+|   ** A race I introduced when the message moved to completion, caught by
+|   diag_reload3_honest.py. ** The old order was:
+|       jsr rl3_arm_n     <- POSTS the storage job
+|       jsr PART_RELOAD   <- stock routine; can block, so the scheduler can run
+|       move.b %d0,rl_msg <- armed only here
+|   If the job drains and doneFn reaches rl_done while PART_RELOAD is still in progress,
+|   rl_done reads rl_msg == 0, draws NOTHING, and the write above then strands rl_msg at 2
+|   for the rest of time. Measured exactly that: settled=True, rl_done entered=1,
+|   rl_msg=2 left uncleared, 0 messages drawn.
+|   So do the PART half FIRST -- it needs no job -- arm the message from its verdict, and
+|   post the sequence job last. The track index is stashed on the stack because
+|   PART_RELOAD returns its verdict in d0 and d2 still belongs to stock's caller on this
+|   path (we rts, we do not fall through to r3b_stock).
     moveq   #0,%d0
-    move.b  7(%sp),%d0
+    move.b  7(%sp),%d0                 | read the keycode BEFORE pushing anything
     subi.l  #0x10,%d0
-    jsr     rl3_arm_n                  | --- the SEQUENCE half ---
+    move.l  %d0,-(%sp)                 | stash the track index across PART_RELOAD
 |   --- the PART half: stock's own routine, from RAM (the per-Part SAVED copy) ---
     moveq   #0,%d0
     move.b  CUR_PART,%d0               | the Part the sounding pattern is assigned to
     move.l  %d0,-(%sp)
     jsr     PART_RELOAD
     addq.l  #4,%sp
-    move.l  %d0,-(%sp)                 | PART_RELOAD's verdict must survive the call
+    tst.l   %d0
+    beq.b   r3b_unsaved
+|   Part reloaded to its saved version. TWO lines, at the user's request (hardware
+|   report #9 item 1): the split is "TRK SEQ + PART" / "RELOADED", which also buys
+|   back the spaces around the + that the 21-char single-line width budget had
+|   forced out -- each line is now well inside the box width.
+    moveq   #2,%d0
+    move.b  %d0,rl_msg                 | "TRK SEQ + PART" / "RELOADED", shown on SUCCESS
+    bra.b   r3b_armed
+r3b_unsaved:
+|   Never saved: the SEQUENCE still reloaded, so saying only "SAVE PART FIRST!"
+|   (stock's wording) would wrongly imply nothing happened. Two lines instead, so
+|   both facts are visible at once.
+    moveq   #3,%d0
+    move.b  %d0,rl_msg                 | "TRK SEQ RELOADED" / "SAVE PART FIRST!"
+r3b_armed:
     moveq   #1,%d0
     move.b  %d0,rl3_bank_used          | claim the [BANK] release: rl3_bank_rel swallows
                                        | it AND runs the overlay teardown there, so the
@@ -537,24 +639,8 @@ r3b_try_bank:
 |   Session 86: no BANK_WIN_CLOSE here any more. With the window deferred, the chord has
 |   no window up at all -- which is also why MLNOTIFY below can draw: it bails out
 |   entirely while 0x460e5cd0 is non-zero, and now that flag is clear.
-    move.l  (%sp)+,%d0
-    tst.l   %d0
-    beq.b   r3b_unsaved
-|   Part reloaded to its saved version. TWO lines, at the user's request (hardware
-|   report #9 item 1): the split is "TRK SEQ + PART" / "RELOADED", which also buys
-|   back the spaces around the + that the 21-char single-line width budget had
-|   forced out -- each line is now well inside the box width.
-    lea     rl3_lines_trkpart,%a0
-    moveq   #2,%d0
-    bsr.w   rl3_show
-    bra.b   r3b_done
-r3b_unsaved:
-|   Never saved: the SEQUENCE still reloaded, so saying only "SAVE PART FIRST!"
-|   (stock's wording) would wrongly imply nothing happened. Two lines instead, so
-|   both facts are visible at once.
-    lea     rl3_lines_unsaved,%a0
-    moveq   #2,%d0
-    bsr.w   rl3_show
+    move.l  (%sp)+,%d0                 | the stashed track index
+    jsr     rl3_arm_n                  | --- the SEQUENCE half: posts the job LAST ---
 r3b_done:
 |   Belt and braces for the release. rl3_bank_used above is what actually swallows it;
 |   clearing BANK_COMMIT means that even if that flag were somehow missed, the release
@@ -573,82 +659,89 @@ r3b_stock:
 | "gesture consumed" flag so stock's [PTN] release path skips SELECT PATTERN.
 rl3_do_ptn:
     subi.l  #0x10,%d0                  | TRACK keycodes are 0x10..0x17 -> index 0..7
+|   Session 93 (2nd pass): arm the message BEFORE posting, for the same reason as the
+|   [BANK] chord above -- once the job is posted, doneFn may reach rl_done at any moment,
+|   and anything written after the post can arrive too late to be shown. This chord won
+|   that race in every emulator run, which is exactly why it is worth fixing rather than
+|   trusting: the window is real either way.
+    move.l  %d0,-(%sp)                 | stash the track index
+    moveq   #1,%d0
+    move.b  %d0,rl_msg                 | "TRK SEQ RELOADED", shown on SUCCESS
+    move.l  (%sp)+,%d0
     jsr     rl3_arm_n                  | arm TRK SEQ for that track and post the job
     move.l  #-1,%d0
     move.l  %d0,PTN_CONSUMED           | same value stock writes at 0x40056b44
 |   Session 88 item 4: this used to be the big block TOAST (FUN_4005a2b8). It is now
 |   the same card as the [BANK] message, at the user's request, so both reload
 |   messages look alike.
-    lea     rl3_lines_trk,%a0
-    moveq   #2,%d0
-    bra.w   rl3_show                   | tail-call: its rts returns to our caller
+    rts                            | rl_msg was armed above, before the post
 
-| ---- rl3_card(title, nlines, lines[]) -- titled, centred, self-dismissing ----
-| Replaces BOTH the old rl3_toast (the block toast) and MLNOTIFY (the OK dialog), so
-| every RELOAD message is now the same card. No keymap layer is pushed anywhere in
-| here, which is precisely why there is no "OK" to answer.
-rl3_card:
+| ---- rl3_toast(text) -- stock's own single-line BLOCK toast, unchanged ----
+| Report #11 reverted the card: "I want them to be in the form of the previously used
+| larger block toasts." For a one-line message that is literally stock's own call, so
+| use it directly rather than reimplementing it.
+rl3_toast:
+    pea     TOAST_DUR
+    move.l  %a0,-(%sp)
+    jsr     TOAST                      | FUN_4005a2b8(text, dur)
+    addq.l  #8,%sp
+    rts
+
+| ---- rl3_toast2(lines[], nlines) -- the SAME block toast, but taller, multi-line ----
+| Stock has no multi-line block toast (checked: the only other 0x4005a2b8-alike at
+| 0x4005a160 is a sprintf wrapper with the same 0x12 height and one line), so this
+| rebuilds it from the parts stock's own toast uses, changing only the height and the
+| number of centred lines:
+|
+|   stock TOAST  : WIN_NEW(textw+15, 0x12,            0,0, 0xa, TOAST_DISMISS)
+|   rl3_toast2   : WIN_NEW(maxw+15,  0x12 + 7*(n-1),  0,0, 0xa, TOAST_DISMISS)
+|
+| Same style (0xa = the block look), same font, same margin, same slot (0x460d1e70),
+| same dismiss, same countdown. The LAST line is drawn by stock's own WIN_DRAW1, which
+| clears the window and centres the text at y = height-11 -- i.e. exactly where a
+| one-line toast puts it -- and earlier lines are stacked 7 px above with the same
+| centring maths. So a 1-line call is indistinguishable from stock, and a 2-line call
+| is stock's toast grown upward by one row.
+| No OK prompt (no keymap layer is pushed) and no countdown dots (those belong to the
+| SHOW_WIN slot's 0x40037cc8, which is never involved here).
+rl3_toast2:
     lea     -40(%sp),%sp
-    movem.l %d2-%d7/%a2-%a5,(%sp)      | 40 B saved; ret at 40(sp), args at 44/48/52
-    move.l  44(%sp),%a5                | a5 = title (0 = no title bar)
+    movem.l %d2-%d7/%a2-%a5,(%sp)      | 40 B saved; ret at 40(sp), args at 44/48
+    move.l  44(%sp),%a4                | a4 = lines[]
     move.l  48(%sp),%d7                | d7 = nlines
-    move.l  52(%sp),%a4                | a4 = lines[]
-|   Something already in this slot would be leaked, so dismiss it first -- exactly
-|   what SHOW_WIN does at its own head (0x40059fa4).
-    tst.l   WIN_SLOT
-    beq.b   rc_noprev
-    jsr     WIN_DISMISS
-rc_noprev:
-|   --- width: MLNOTIFY's formula. max(40, each measured width + 9), capped at 128 ---
-    moveq   #40,%d6
-    move.l  %a5,%d0
-    beq.b   rc_wlines
-    move.l  %a5,%a0
-    bsr.w   rc_measure
-    addq.l  #4,%d0                     | title sits in a bar; a little more slack
-    addq.l  #5,%d0
-    cmp.l   %d6,%d0
-    ble.b   rc_wlines
-    move.l  %d0,%d6
-rc_wlines:
+|   Replace a toast already on screen, exactly as stock TOAST does at 0x4005a2c4.
+    tst.l   TOAST_SLOT
+    beq.b   rt2_noprev
+    jsr     TOAST_DISMISS
+rt2_noprev:
+|   --- width = widest line + 15 (stock's own margin, 0x4005a2f2) ---
+    moveq   #0,%d6
     moveq   #0,%d5
-rc_wloop:
+rt2_wloop:
     cmp.l   %d7,%d5
-    bge.b   rc_wdone
+    bge.b   rt2_wdone
     move.l  %d5,%d0
     lsl.l   #2,%d0
     move.l  (%a4,%d0.l),%a0
-    bsr.w   rc_measure
-    addq.l  #4,%d0
-    addq.l  #5,%d0                     | +9 total, as MLNOTIFY does
+    bsr.w   rt2_measure
     cmp.l   %d6,%d0
-    ble.b   rc_wnext
+    ble.b   rt2_wnext
     move.l  %d0,%d6
-rc_wnext:
+rt2_wnext:
     addq.l  #1,%d5
-    bra.b   rc_wloop
-rc_wdone:
-    cmpi.l  #128,%d6
-    ble.b   rc_wok
-    move.l  #128,%d6
-rc_wok:
-|   --- height: 7*nlines + 27, clamped [34,64] -- MLNOTIFY's formula ---
+    bra.b   rt2_wloop
+rt2_wdone:
+    addi.l  #15,%d6
+|   --- height = 0x12 + 7*(n-1): stock's height, one extra row per extra line ---
     move.l  %d7,%d0
+    subq.l  #1,%d0
+    move.l  %d0,%d1
     lsl.l   #3,%d0
-    sub.l   %d7,%d0
-    addi.l  #27,%d0
-    cmpi.l  #34,%d0
-    bge.b   rc_h1
-    moveq   #34,%d0
-rc_h1:
-    cmpi.l  #64,%d0
-    ble.b   rc_h2
-    moveq   #64,%d0
-rc_h2:
+    sub.l   %d1,%d0                    | 7*(n-1)
+    addi.l  #TOAST_H1,%d0
     move.l  %d0,%d4                    | d4 = height
-|   --- create the window: style 4 = card, onClose = stock's own dismiss ---
-    pea     WIN_DISMISS
-    pea     CARD_STYLE
+    pea     TOAST_DISMISS
+    pea     TOAST_STYLE
     clr.l   -(%sp)
     clr.l   -(%sp)
     move.l  %d4,-(%sp)
@@ -656,101 +749,94 @@ rc_h2:
     jsr     WIN_NEW
     lea     24(%sp),%sp
     tst.l   %d0
-    beq.w   rc_out                     | no window slot free -- say nothing, don't fault
-    move.l  %d0,WIN_SLOT
-    move.l  %d0,%a3
-    move.l  %a3,%d3
-    addi.l  #36,%d3                    | d3 = winptr (handle+36), as MLNOTIFY uses
-    move.l  %d3,-(%sp)
-    jsr     WIN_CLEAR
-    addq.l  #4,%sp
-    move.l  %a5,%d0
-    beq.b   rc_notitle
+    beq.w   rt2_out                    | no slot free -- say nothing rather than fault
+    move.l  %d0,TOAST_SLOT
+    move.l  %d0,%a3                    | a3 = handle
+|   --- line 0 through stock's own path: clears the box and centres it at y = h-11 ---
+|   ** Line ORDER. y counts UP from the bottom, so line 0 must take the HIGHEST y. **
+|   That is settled by stock's own three-line message, whose reading order is fixed --
+|   "THIS BANK HAS NEVER" / "BEEN SAVED!" / "NOTHING TO RELOAD!" (0x40023c20): MLNOTIFY
+|   draws line i at H-17-7i, so line 0 has the greatest y and is the top line. An
+|   earlier version of this routine drew line 0 LAST, at the lowest y, which would have
+|   printed "RELOADED" above "TRK SEQ + PART".
+|   So line 0 goes at h-11 -- exactly where a one-line toast puts its text -- and each
+|   later line sits 7 px lower. For n=1 that is stock's geometry unchanged.
+    pea     FONT_TOAST
     clr.l   -(%sp)
-    move.l  %a5,-(%sp)
+    move.l  (%a4),-(%sp)               | lines[0]
     move.l  %a3,-(%sp)
-    jsr     WIN_TITLE                  | the title bar, y = height-10
-    lea     12(%sp),%sp
-rc_notitle:
-|   --- the body lines, each CENTRED. y counts UP from the bottom, so line 0 (the
-|   --- highest y) lands on top, matching MLNOTIFY's own ordering.
-    move.l  %d4,%d5
-    subi.l  #17,%d5                    | y = height-17, then -7 per line
-    moveq   #0,%d2
-rc_dloop:
+    jsr     WIN_DRAW1                  | FUN_40057008(handle, text, 0, font)
+    lea     16(%sp),%sp
+|   --- lines 1..n-1, each 7 px lower, same centring maths ---
+    move.l  %a3,%d3
+    addi.l  #36,%d3                    | d3 = winptr, as stock passes to DRAWTEXT
+    moveq   #1,%d2
+rt2_dloop:
     cmp.l   %d7,%d2
-    bge.b   rc_ddone
+    bge.w   rt2_done                   | n==1 -> nothing extra to draw
     move.l  %d2,%d0
     lsl.l   #2,%d0
-    move.l  (%a4,%d0.l),%a2            | a2 = lines[i]
+    move.l  (%a4,%d0.l),%a2
     move.l  %a2,%a0
-    bsr.w   rc_measure                 | d0 = raw pixel width
+    bsr.w   rt2_measure
     move.l  %d6,%d1
     sub.l   %d0,%d1
-    bpl.b   rc_xok
-    moveq   #0,%d1                     | wider than the box -- clamp to the left edge
-rc_xok:
-    asr.l   #1,%d1                     | x = (boxwidth - textwidth) / 2
+    bpl.b   rt2_xok
+    moveq   #0,%d1                     | wider than the box -- clamp left
+rt2_xok:
+    asr.l   #1,%d1                     | x = (boxwidth - textwidth)/2  -> centred
+    move.l  %d2,%d0
+    move.l  %d0,%d5
+    lsl.l   #3,%d0
+    sub.l   %d5,%d0                    | 7*i
+    move.l  %d4,%d5
+    subi.l  #11,%d5
+    sub.l   %d0,%d5                    | y = height-11 - 7*i  (line 0 highest, so on top)
     move.l  %a2,-(%sp)
     move.l  #-1,-(%sp)
     move.l  %d5,-(%sp)
     move.l  %d1,-(%sp)
     move.l  %d3,-(%sp)
-    pea     FONT_BODY
-    jsr     DRAWTEXT
+    pea     FONT_TOAST
+    jsr     DRAWTEXT                   | FUN_40012bd8(font, winptr, x, y, len, text)
     lea     24(%sp),%sp
     addq.l  #1,%d2
-    subi.l  #7,%d5
-    bra.b   rc_dloop
-rc_ddone:
-|   --- arm stock's countdown: it is what dismisses the card, with no key involved ---
-|   ** ONE SEGMENT, and WIN_REFRESH is deliberately NOT called. ** That is what keeps
-|   the countdown DOTS off the card -- hardware report #10: "I'd rather not have
-|   countdown dots anywhere. These are instantly executed functions." A progress
-|   indicator would imply something is still pending, which is wrong here.
-|   MEASURED: 0x40037cc8 is the only thing that draws those dots, and it has exactly
-|   two callers -- SHOW_WIN's tail (0x4005a034, which we do not use) and the tick at
-|   0x40056aea. The tick only reaches it when CD_SEGS is STILL non-zero after being
-|   decremented (0x40056ae2 bne). With CD_SEGS = 1 the single segment expires straight
-|   into the dismiss at 0x40056ae4 instead, so the dot routine is never entered at all.
-|   CD_CUR therefore carries the whole duration rather than a quarter of it.
-    clr.l   WIN_ONCLOSE
-    move.l  #CARD_DUR,%d0
-    move.l  %d0,CD_RELOAD
-    move.l  %d0,CD_CUR
+    bra.w   rt2_dloop
+rt2_done:
     moveq   #1,%d0
-    move.l  %d0,CD_SEGS                | exactly one segment -> no dots, just a dismiss
-|   ** CD_FLAG MUST BE NON-ZERO or the countdown never runs at all. ** The tick is
-|   gated on it: 0x40056ab8 `tstl 0x460d1e4c` / 0x40056abe `beq -> rts`, and only then
-|   does the body at 0x40056ac0 decrement anything. An earlier version of this code
-|   CLEARED the flag, which would have left the card up forever on hardware -- i.e.
-|   exactly the stuck box the report asked us to get rid of. The emulator cannot catch
-|   this (its harness never drives the tick at all, stock SELECT BANK included, which
-|   is why diag_reload3_card.py gates that assertion on a stock control); static
-|   reading of the gate is what found it.
-    move.l  %d0,CD_FLAG                | 1 = countdown armed and running
-    move.l  %d0,RDRAW                  | d0 is still 1
-rc_out:
+    move.l  %d0,RDRAW
+    .ifdef RL_DIAG
+    move.l  #DIAG_DUR,%d0              | diag build: hold the hex on screen for 6 s
+    .else
+    move.l  #TOAST_DUR,%d0
+    .endif
+    move.l  %d0,TOAST_CD               | stock's toast countdown. NO gate flag on this
+                                       | one (0x40056c28 tests it directly), and no
+                                       | dots -- unlike the SHOW_WIN slot's timer.
+rt2_out:
     movem.l (%sp),%d2-%d7/%a2-%a5
     lea     40(%sp),%sp
     rts
 
-| a0 = text -> d0 = pixel width. Clobbers d0/d1/a0/a1 only.
-rc_measure:
+| a0 = text -> d0 = raw pixel width. Clobbers d0/d1/a0/a1 only.
+rt2_measure:
     move.l  %a0,-(%sp)
     move.l  #-1,-(%sp)
-    pea     FONT_BODY
+    pea     FONT_TOAST
     jsr     TEXTW                      | FUN_40012f30(font, maxlen, text)
     lea     12(%sp),%sp
     rts
 
-| ---- rl3_show: a0 = lines[], d0 = nlines. Always titled "RELOAD FROM PROJ". ----
-rl3_show:
-    move.l  %a0,-(%sp)
-    move.l  %d0,-(%sp)
-    pea     rl3_title
-    jsr     rl3_card
-    lea     12(%sp),%sp
+| ---- rl3_show2: a0 = lines[], always 2 lines ----
+| ** Push order matters and got it wrong once. ** rl3_toast2's first argument is
+| lines[], so lines[] must be pushed LAST (it ends up at the lower address). Pushing
+| a0 first put the literal 2 in a4 and a pointer in the line COUNT, which faulted
+| immediately (UC_ERR_READ_UNMAPPED, caught by diag_reload3_toast.py).
+rl3_show2:
+    pea     2                          | nlines  (second arg -> higher address)
+    move.l  %a0,-(%sp)                 | lines[] (first arg  -> lower address)
+    jsr     rl3_toast2
+    addq.l  #8,%sp
     rts
 
 | ============ SELECT BANK: shown on RELEASE, not on PRESS ============
@@ -817,13 +903,67 @@ rl3_bank_rel:
     jsr     BANK_WIN_CLOSE
     rts                                | -- no SELECT BANK, no countdown, nothing
 r3r_notours:
+|   ===== Hardware report #14: a pick during the hold must cancel the release show. =====
+|   Gesture: hold [BANK], tap a trig to pick a bank, tap a trig to pick a pattern,
+|   release [BANK] -- and SELECT BANK appeared with its countdown. Obviously wrong: the
+|   prompt asks for something the user has already supplied, and it lands on top of the
+|   window the pick itself put up.
+|   MEASURED at the [BANK]-overlay trig handler 0x4007b2fc. BANK_SEL is that gesture's
+|   own progress counter, and it is the only state that distinguishes "nothing picked"
+|   from "picked":
+|       0  nothing picked yet   -- the show tail 0x4007af30 clears it on every press
+|       1  a BANK was picked    -- set at 0x4007b276, together with BANK_COMMIT=1 at
+|                                  0x4007b33c, and a "SELECT PATTERN IN BANK x" window
+|                                  of its own (SHOW_WIN at 0x4007b2b0, onClose 0x4007b408)
+|       2  a PATTERN was picked -- set at 0x4007b3d2 at the end of the pattern branch
+|   Stock's release (0x4007b3e0) opens with exactly this test -- cmpl BANK_SEL,#2 then
+|   beq to DISMISS -- BEFORE it looks at BANK_COMMIT. Our release inverted that order, so
+|   BANK_COMMIT (set by the pick itself, or by the hold handler at 0x4007af24) sent us to
+|   r3r_show and the pick was never noticed. Restoring stock's ordering is the whole fix.
+|
+|   Both non-zero values want stock's own tail, which is why this branches there rather
+|   than handling them:
+|     * 2 -> our displaced compare below succeeds and BANK_REL_RES's beq takes the
+|            DISMISS path (0x40056a70), closing the pick's window and running ITS onClose
+|            (0x4007b408) -- the same teardown, so the overlay is popped exactly once.
+|     * 1 -> falls past the compare to stock's BANK_COMMIT test, which sets the sticky
+|            flag and keeps the overlay live so a pattern can still be picked after the
+|            release. That is stock's untimed window, unchanged.
+|   Note this also covers the un-reported half: releasing after picking only a bank would
+|   have drawn SELECT BANK over "SELECT PATTERN IN BANK x". Both are gone with one test.
+    tst.l   BANK_SEL
+    bne.b   r3r_stock                  | something was picked during the hold: stock's
+                                       | own release logic already does the right thing
     tst.l   BANK_COMMIT
     bne.b   r3r_show
-|   Toggle-OFF tap: no window of ours to open. But the PRESS pushed the overlay, and
-|   with no window there is no onClose to pop it -- so pop it here unless a popup IS
-|   up, in which case stock's own dismiss below will run onClose and do it.
-    tst.l   POPUP
-    bne.b   r3r_stock
+|   ===== Session 91: this guard used to test the WRONG VARIABLE. =====
+|   Toggle-OFF tap: no window of ours to open, but the PRESS pushed the [BANK] trig
+|   overlay, so somebody has to pop it. The old code skipped its own teardown whenever
+|   POPUP (0x460e5cd0) was non-zero, "because stock's own dismiss will run onClose".
+|   Both halves of that were wrong:
+|     * POPUP is MLNOTIFY's OWN handle. It says nothing about whether stock's dismiss
+|       will run an onClose -- that depends on the SHOW_WIN slot, a different subsystem.
+|     * stock's dismiss (0x40056a70) bails immediately at 0x40056a76 when WIN_SLOT is
+|       zero, and WIN_SLOT/WIN_ONCLOSE are written ONLY inside SHOW_WIN (0x40059fe4 /
+|       0x4005a006). Our press deliberately shows no window, so in the case the guard
+|       was aimed at, nothing called the teardown at all and the overlay stranded --
+|       leaving the trig keys meaning "pick a bank" until something else rebuilt the
+|       keymap. That is octalab's documented failure mode.
+|   ** And it IS reachable, which I first argued it was not. ** The near-miss argument
+|   was "BANK_COMMIT==0 implies 0x460e73bc was set, which implies a window had been
+|   shown, so WIN_SLOT would be non-zero anyway". Wrong: 0x460e73bc has a writer at
+|   0x4007b2b6, in the bank-select/trig handler, with no SHOW_WIN involved -- so the
+|   sticky flag can be set with the slot empty. Measured, not reasoned.
+|
+|   So test what actually decides it: is a window in the slot, and is ITS onClose our
+|   teardown? Only then may we leave the job to stock and avoid a double teardown
+|   (0x4007e81c would otherwise run twice against one 0x4007e760).
+    move.l  WIN_SLOT,%d0
+    beq.b   r3r_pop                    | nothing in the slot -> nobody else will do it
+    move.l  #BANK_TEARDOWN,%d0
+    cmp.l   WIN_ONCLOSE,%d0
+    beq.b   r3r_stock                  | stock's dismiss will run OUR teardown -> let it
+r3r_pop:
     jsr     BANK_WIN_CLOSE             | the measured teardown: pops the layer and
     bra.b   r3r_stock                  | balances BANK_UI_A with 0x4007e81c
 r3r_show:
@@ -855,16 +995,8 @@ rl3_msg_trkpart_1:
 rl3_msg_trkpart_2:
     .asciz "RELOADED"
     .align 2
-|   Session 88 item 1: the card's title bar, was "RELOAD".
-rl3_title:
-    .asciz "RELOAD FROM PROJ"
-    .align 2
-rl3_msg_reloaded:
-    .asciz "RELOADED"
-    .align 2
-rl3_msg_trkonly:
-    .asciz "TRK SEQ"
-    .align 2
+|   Session 89: the card is gone, so its title bar string and the split
+|   "TRK SEQ"/"RELOADED" pair go with it -- that message is a one-line toast again.
 rl3_msg_empty:
     .asciz ""
     .align 2
@@ -872,6 +1004,17 @@ rl3_msg_empty:
 |   after the lines (0x400b44b5), so mirror that shape.
 |   rl3_card takes an explicit line count, so these no longer need stock's
 |   empty-string terminator. Every line is centred by the drawing code.
+|   Session 93: shown when the verify in rld_skip finds the copy did not hold. Two lines
+|   so it cannot be mistaken for the success message at a glance.
+rl3_lines_lost:
+    .long   rl3_msg_lost1
+    .long   rl3_msg_lost2
+rl3_msg_lost1:
+    .asciz  "SEQ RELOAD LOST"
+    .align 2
+rl3_msg_lost2:
+    .asciz  "NOT RESTORED!"
+    .align 2
 rl3_lines_unsaved:
     .long   rl3_msg_trk                | "TRK SEQ RELOADED"   -- what DID happen
     .long   STOCK_SAVEFIRST            | "SAVE PART FIRST!"   -- stock's own wording
@@ -879,11 +1022,6 @@ rl3_lines_unsaved:
 rl3_lines_trkpart:
     .long   rl3_msg_trkpart_1          | "TRK SEQ + PART"
     .long   rl3_msg_trkpart_2          | "RELOADED"
-    .align 2
-|   Session 88 item 4: the plain TRK SEQ message, split to mirror the [BANK] card.
-rl3_lines_trk:
-    .long   rl3_msg_trkonly            | "TRK SEQ"
-    .long   rl3_msg_reloaded           | "RELOADED"
     .align 2
 
 | ---- rl_arm_trk: arm a TRK SEQ reload of the currently-addressed track ----
@@ -902,18 +1040,30 @@ rl_arm_trk:
 rl3_arm_n:
     andi.l  #7,%d0
     move.b  %d0,G_TRK
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dc+2                | DIAG: track, as the chord armed it
+    .endif
     moveq   #0,%d0
     move.b  MIDI_MODE,%d0
     beq.b   rat_aud
     moveq   #1,%d0
 rat_aud:
     move.b  %d0,G_TMIDI
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dc+3                | DIAG: midi flag, as armed
+    .endif
     move.b  ACT_PAT,%d0
     move.b  %d0,G_PAT
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dc+1                | DIAG: pattern, as armed
+    .endif
     moveq   #3,%d0
     move.b  %d0,G_KIND
     moveq   #0,%d0
-    move.b  CUR_BANK,%d0
+    move.b  PLAY_BANK,%d0              | the bank ACT_PAT above belongs to, not CUR_BANK
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dc+0                | DIAG: bank, as armed
+    .endif
     moveq   #1,%d1
     lsl.l   %d0,%d1
     move.l  %d1,-(%sp)
@@ -1006,6 +1156,136 @@ rl_done:
     jmp     DONE_RESUME
 rld_skip:
     clr.b   rl_own                     | one-shot: consume it
+    .ifdef RL_DIAG
+    clr.b   rl_dv                      | DIAG: verify result 0 = not armed
+    .endif
+|   ===== verify the copy still holds, and SAY SO if it does not =====
+|   This runs in doneFn, after the worker. If the 16 trig-mask bytes at the destination
+|   no longer match what we parsed, the reload was undone (or never landed) and the user
+|   must not be told RELOADED. Overriding rl_msg to 4 makes the two cases visibly
+|   different ON HARDWARE, which is the only place this bug appears: every emulator run
+|   restores correctly (6/6 on the user's own empty->reload->LED test, 8/8 [PTN], 4/4
+|   [BANK]), and the harness cannot fail a card read, stream audio off the card, or drive
+|   the firmware's own edit path.
+    tst.b   rl_varm
+    beq.w   rld_noverify               | nothing stashed (kind 1/2) -> nothing to check
+|   Recompute the destination from the state the SEQUENCER is using RIGHT NOW, rather
+|   than trusting the pointer the worker used. If the worker aimed at a stale bank or
+|   pattern, the bytes IT wrote would match its own snapshot and a naive check would pass
+|   while the user still heard the edited sequence. Comparing against the live slab asks
+|   the question that actually matters: does what is playing now hold the CF-saved trigs?
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  #BANKSTRIDE,%d1
+    muls.l  %d1,%d0
+    move.l  #BLOB,%a0
+    add.l   %d0,%a0
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  #PATSTRIDE,%d1
+    muls.l  %d1,%d0
+    add.l   %d0,%a0
+    add.l   rl_voff,%a0                | a0 = the LIVE track record, as of now
+    .ifdef RL_DIAG
+|   DIAG: the four bytes the verify is about to compare, the same four in the live-cache
+|   copy LIVE_REFRESH filled, and the (bank, pattern) doneFn is using. a0 is preserved.
+    move.l  %a0,%d2                    | keep a0 intact for the verify below
+    lea     rl_dlive,%a1
+    move.b  (%a0)+,(%a1)+
+    move.b  (%a0)+,(%a1)+
+    move.b  (%a0)+,(%a1)+
+    move.b  (%a0)+,(%a1)+
+    move.l  %d2,%a0
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  #PATSTRIDE,%d1
+    muls.l  %d1,%d0
+    add.l   rl_voff,%d0
+    add.l   #LIVE_CACHE,%d0
+    move.l  %d0,%a1                    | a1 = the same record in the live cache
+    move.b  (%a1)+,%d0
+    move.b  %d0,rl_dcache
+    move.b  (%a1)+,%d0
+    move.b  %d0,rl_dcache+1
+    move.b  (%a1)+,%d0
+    move.b  %d0,rl_dcache+2
+    move.b  (%a1)+,%d0
+    move.b  %d0,rl_dcache+3
+    move.b  PLAY_BANK,%d0
+    move.b  %d0,rl_dd+0
+    move.b  ACT_PAT,%d0
+    move.b  %d0,rl_dd+1
+    moveq   #1,%d0
+    move.b  %d0,rl_dv                  | 1 = armed, assume pass; rld_vbad overrides
+    .endif
+    lea     rl_vsnap,%a1
+    moveq   #16,%d2
+rld_vloop:
+    move.b  (%a0)+,%d0
+    move.b  (%a1)+,%d1
+    cmp.b   %d1,%d0
+    bne.b   rld_vbad
+    subq.l  #1,%d2
+    bne.b   rld_vloop
+    bra.b   rld_noverify
+rld_vbad:
+    .ifdef RL_DIAG
+    moveq   #2,%d0
+    move.b  %d0,rl_dv                  | DIAG: 2 = the verify FAILED
+    .endif
+    moveq   #4,%d0
+    move.b  %d0,rl_msg                 | override -> "SEQ RELOAD LOST"
+rld_noverify:
+    clr.b   rl_varm                    | one-shot, like rl_own and rl_msg
+|   ===== Session 93: the message is shown HERE, not at chord time. =====
+|   Hardware report #14 item 1: "the toast will show 'reloaded', but the sequence is not
+|   actually restored." The toast was OPTIMISTIC BY CONSTRUCTION -- the key handler drew
+|   it the instant the chord was recognised, before the job had even been dequeued, so it
+|   could never reflect an outcome. It said RELOADED whatever happened.
+|   This point is reached ONLY on the success path: stock's doneFn tests our result code
+|   and, when it is negative, shows its OWN error toast and never gets here (0x40023c0e's
+|   bge is what gates it), and rl_own is set only by rlj_setflag after the copy has
+|   actually happened. So a message drawn here means the worker ran AND succeeded.
+|   That makes the two failure shapes distinguishable on hardware, which no test in this
+|   repo can do -- the harness cannot fail a card read, cannot stream audio off the card,
+|   and cannot drive the firmware's own edit path (measured: all four edit strategies
+|   from Session 84 still move zero bytes):
+|       no toast / stock's error  -> the worker FAILED  (card I/O, the open or the parse)
+|       toast but no change       -> the worker SUCCEEDED and something downstream lost it
+|   Register safety: DONE_EPILOG (0x40023c76) is only `movel (sp)+,d2 ; moveal (sp)+,a2 ;
+|   rts`, so it restores d2/a2 off the stack and cares about nothing else. The calls below
+|   are stack-balanced and touch only scratch registers, so jumping there afterwards is
+|   exactly as safe as jumping there directly.
+    moveq   #0,%d0
+    move.b  rl_msg,%d0
+    beq.b   rld_nomsg                  | 0 = nothing armed (not our chord) -> silent
+    clr.b   rl_msg                     | one-shot, like rl_own
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dm                  | DIAG: which message WOULD have been shown
+    bsr.w   rl3_diag_show              | ... and show the bytes instead, every time
+    bra.b   rld_nomsg
+    .endif
+    subq.l  #1,%d0
+    beq.b   rld_m_trk
+    subq.l  #1,%d0
+    beq.b   rld_m_trkpart
+    subq.l  #1,%d0
+    beq.b   rld_m_unsaved
+    lea     rl3_lines_lost,%a0         | 4 = the verify above FAILED
+    bsr.w   rl3_show2
+    bra.b   rld_nomsg
+rld_m_unsaved:
+    lea     rl3_lines_unsaved,%a0      | 3 = "TRK SEQ RELOADED" / "SAVE PART FIRST!"
+    bsr.w   rl3_show2
+    bra.b   rld_nomsg
+rld_m_trkpart:
+    lea     rl3_lines_trkpart,%a0      | 2 = "TRK SEQ + PART" / "RELOADED"
+    bsr.w   rl3_show2
+    bra.b   rld_nomsg
+rld_m_trk:
+    lea     rl3_msg_trk,%a0            | 1 = "TRK SEQ RELOADED" (one line)
+    jsr     rl3_toast
+rld_nomsg:
     jmp     DONE_EPILOG                | skip the whole-bank reload entirely
     .endif
 
@@ -1048,18 +1328,55 @@ rlj_ours:
 
     moveq   #0,%d5
     move.b  G_PAT,%d5                  | d5 = target pattern P
+    .ifdef RL_DIAG
+    move.b  %d5,rl_dw+1                | DIAG: pattern as the WORKER read it
+    .endif
     moveq   #0,%d0
     move.b  G_KIND,%d0
     move.l  %d0,rl_kind                | stash the kind across the FUN_4008cebc calls
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dk                  | DIAG: kind as the worker read it
+    .endif
     clr.b   G_KIND                     | consume now -- a re-entrant real RELOAD BANK
                                        | must NOT see it set
-|   Session 83: RESTORED (see the rl_done block for the full retry rationale).
-|   Claim the whole-bank reload that THIS job's doneFn is about to perform, so
-|   rl_done suppresses that one and only that one. One-shot, set only here, on
-|   the path that has already established the job is ours.
+|   ===== Session 90: rl_own is CLEARED here and SET only on success. =====
+|   Hardware report #13: "the sequence data does not always reload reliably... I also
+|   encountered an odd bug at one point: the sequence data was reloaded as empty, and
+|   from that point on, any reload action would not bring back the CF card-saved
+|   sequence. In fact, in that state, even the OT's stock 'Reload current bank' from the
+|   project menu, would not bring back the saved sequence data. Reloading the project
+|   did restore it."
+|
+|   That last sentence is the diagnosis. rl_own USED TO BE SET HERE -- before the file
+|   was even opened -- but stock's doneFn only reaches rl_done on its SUCCESS path
+|   (0x40023c0e `bge.s 0x40023c62`). So whenever our job failed (FOPEN, FREAD or
+|   PARSEPAT), the flag was never consumed and STAYED SET. The next type-0x14 job from
+|   ANY source then hit rl_done, saw the stale flag, and skipped the whole-bank reload --
+|   including the user's own stock RELOAD CURRENT BANK, which is exactly the reported
+|   "even stock reload won't bring it back". Reloading the PROJECT does not go through
+|   that doneFn at all, which is why only that recovered it. And because each new chord
+|   re-set the flag, the state persisted rather than costing just one reload.
+|
+|   ** CORRECTED, from a wrong first-draft claim in this comment and in
+|   diag_reload3_ownleak.py's own header: a failed job does NOT make stock's whole-bank
+|   reload run as a fallback. ** doneFn's branch at 0x40023c0e tests OUR job's own result
+|   code and reaches 0x40023c62 (the whole-bank reload) only when it is >= 0; on failure
+|   it shows a stock error toast instead (-12 -> "THIS BANK HAS NEVER BEEN SAVED!",
+|   else a generic one) and never falls through. That is correct on stock's part: the
+|   reload at 0x40023b68 would read the SAME bank file we just failed to read, so it
+|   could not have helped.
+|
+|   Clearing it here kills any stale flag; setting it only at rlj_setflag (after the copy
+|   has actually happened) means a failure now affects ONLY the reload it happened on --
+|   the user sees a normal stock error message and nothing changes, exactly as if this
+|   patch did not exist for that one attempt. What it no longer does is contaminate the
+|   NEXT job: before this fix, a single failure left rl_own stuck forever, silently
+|   disabling every reload after it -- including the user's own stock RELOAD CURRENT
+|   BANK -- until a project reload cleared it. That contamination is gone; a genuinely
+|   empty or unreliable copy on any GIVEN attempt is a separate, still-open question
+|   (see below).
     .ifdef RL_DONE
-    moveq   #1,%d0
-    move.b  %d0,rl_own
+    clr.b   rl_own
     .endif
     move.w  CKSUM,%d0
     move.w  %d0,rl_cksum
@@ -1092,6 +1409,9 @@ rlj_ploop:
     pea     rl_fh
     jsr     PARSEPAT                   | FUN_4008cebc(fh, SCRATCH, verWord)
     lea     12(%sp),%sp
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dr                  | DIAG: low byte of the last parse's return
+    .endif
     tst.l   %d0
     bmi.w   rlj_readfail
     addq.l  #1,%d4
@@ -1103,7 +1423,10 @@ rlj_ploop:
     addq.l  #4,%sp
 
     moveq   #0,%d0
-    move.b  CUR_BANK,%d0
+    move.b  PLAY_BANK,%d0              | must be the same bank d5's pattern belongs to
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dw+0                | DIAG: bank as the worker read it
+    .endif
     move.l  #BANKSTRIDE,%d1
     muls.l  %d1,%d0
     move.l  #BLOB,%a4
@@ -1154,7 +1477,7 @@ rlj_faithful:
     andi.l  #3,%d3                     | saved Part 0..3
     move.b  %d3,CUR_PART               | 0x80000003 = current-part mirror
     moveq   #0,%d0
-    move.b  CUR_BANK,%d0
+    move.b  PLAY_BANK,%d0              | the Part belongs to the PLAYING bank's pattern
     move.l  %d3,-(%sp)                 | part  (rightmost arg)
     move.l  %d0,-(%sp)                 | bank
     jsr     PARTAPPLY                  | FUN_40009094(bank, savedPart)
@@ -1169,6 +1492,11 @@ rlj_trk:
     moveq   #0,%d0
     move.b  G_TRK,%d0
     andi.l  #7,%d0
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dw+2                | DIAG: track as the worker read it
+    move.b  G_TMIDI,%d1
+    move.b  %d1,rl_dw+3                | DIAG: midi flag as the worker read it
+    .endif
     tst.b   G_TMIDI
     bne.b   rlj_trk_midi
     move.l  #TRAC_A,%d1
@@ -1190,17 +1518,129 @@ rlj_trk_copy:
     move.l  %a4,%d0
     add.l   %d2,%d0
     move.l  %d0,-(%sp)                 | dst = liveslab + off
+    .ifdef RL_DIAG
+    move.l  %d0,%a0                    | DIAG: the live record BEFORE the copy -- what
+    lea     rl_dpre,%a1                | was playing (the edited state). Bytewise: the
+    move.b  (%a0)+,(%a1)+              | slab is even-aligned but do not rely on it.
+    move.b  (%a0)+,(%a1)+
+    move.b  (%a0)+,(%a1)+
+    move.b  (%a0)+,(%a1)+
+    .endif
     jsr     FWMEMCPY
     lea     12(%sp),%sp
 
+|   ===== Session 93: snapshot what we just wrote, so rl_done can VERIFY it. =====
+|   Report #14 follow-up, and this is now a TIGHT question. The user flashed the build
+|   whose message is drawn only from rld_skip -- which needs rl_own, set only at
+|   rlj_setflag, i.e. AFTER this copy -- and still sees "TRK SEQ RELOADED" with the old
+|   sequence both lit on the grid AND audibly playing. So the worker ran, the file opened,
+|   every parse succeeded and this memcpy executed. Two possibilities remain, and they
+|   need opposite fixes:
+|       (a) the copy never stuck   -- the bytes here are not what we parsed
+|       (b) the copy was undone    -- they were, and something overwrote them afterwards
+|   The snapshot goes into OUR CAVE, deliberately NOT into SCRATCH: SCRATCH is
+|   OPEN_BUF + 0x7000 and every one of stock's 14 users of that buffer passes size
+|   0x10000 (e.g. 0x4008fbde, 0x400916d4), so on hardware -- where audio really does
+|   stream off the card -- stock file I/O can overwrite SCRATCH. Comparing against
+|   SCRATCH would confuse "the copy was undone" with "my reference was clobbered".
+    move.l  #SCRATCH,%a0
+    add.l   %d2,%a0
+    lea     rl_vsnap,%a1
+    moveq   #16,%d0
+rlj_snap:
+    move.b  (%a0)+,(%a1)+              | the 16 trig-mask bytes, offset 0..0x0f
+    subq.l  #1,%d0
+    bne.b   rlj_snap
+    move.l  %d2,rl_voff                | the in-slab OFFSET, not an absolute address --
+                                       | rl_done recomputes the slab from LIVE state, so a
+                                       | copy that went to the WRONG slab is caught too
+    moveq   #1,%d0
+    move.b  %d0,rl_varm                | "a verify is pending"
+
+|   ===== Session 89: NORMAL scale mode needs the PATTERN length too =====
+|   Hardware report #12: "in NORMAL mode (not per track) reloads are not respecting the
+|   pattern length that was set in the CF-saved version (ie, if the CF-saved version is
+|   16 steps, and the user sets the active track to 12 steps and reloads, the track
+|   remains at 12 steps). Per Track mode does not have this problem."
+|
+|   The asymmetry names the cause exactly. A track's own length/scale live INSIDE its
+|   record, at +0x50 / +0x51 of the 0x91a slice just copied -- so in PER TRACK mode the
+|   reload restores them for free, which is why that mode was already correct. In NORMAL
+|   mode the step count is not a track field at all: it is the PATTERN's, at slab
+|   +0x8e53 (scale at +0x8e54), outside every track slice, so nothing restored it.
+|
+|   ** The scope consequence is inherent, not a shortcut: in NORMAL mode the length is a
+|   PATTERN-level property shared by all 8 tracks, so restoring it restores it for the
+|   whole pattern. There is no per-track length in that mode -- that is what NORMAL mode
+|   means -- so "this track's saved step count" and "the pattern's saved step count" are
+|   the same thing here. **
+|   The LIVE flag is consulted, because it is what governs playback right now.
+    move.l  %a4,%a0
+    add.l   #PAT_SMODE,%a0
+    tst.b   (%a0)
+    bne.b   rlj_trk_done               | PER TRACK -> already restored inside the slice
+    move.l  #SCRATCH,%a1
+    add.l   #PAT_LEN,%a1               | saved length, saved scale at +1
+    move.l  %a4,%a0
+    add.l   #PAT_LEN,%a0
+    move.b  (%a1),%d0
+    move.b  %d0,(%a0)                  | pattern LENGTH (+0x8e53)
+    move.b  1(%a1),%d0
+    move.b  %d0,1(%a0)                 | pattern SCALE  (+0x8e54)
+|   ===== carried over from the DIRECT JUMP thread's own scars =====
+|   Restoring the blob byte is not enough for the SCALE: SCALE_IX (0x8000663d) is a LIVE
+|   cache that stock refreshes only on a transport cycle, the whole-bank re-home, or a
+|   pattern-switch commit -- and Session 86 deliberately stopped arming the re-home, so
+|   nothing here would have refreshed it. The restored rate would then not take effect
+|   until the user happened to stop/start or change pattern. This is exactly the class of
+|   bug DIRECT JUMP paid for twice (its Session 84 per-track SCALE cache gap, and its
+|   Session 79 cont.33 master-scale read); the per-TRACK cache is fine because stock does
+|   re-read that one on every wrap (0x400a3d08), but the MASTER one it does not.
+|
+|   ** Written ONLY when it actually differs. ** DIRECT JUMP measured that poking this
+|   mid-cycle re-phases the master for one step, and report #9 asked for reloads to leave
+|   time undisturbed -- so the common case (the user changed only the LENGTH, not the
+|   scale) must touch nothing at all. d0 still holds the saved scale here.
+    move.b  SCALE_IX,%d1
+    cmp.b   %d1,%d0
+    beq.b   rlj_trk_done
+    move.b  %d0,SCALE_IX               | the saved rate genuinely differs -> apply it
+rlj_trk_done:
+
+    .global rlj_setflag        | exported so tests can hook the real success point
 rlj_setflag:
+|   ===== Session 93: ask for a REDRAW here -- after the data has landed. =====
+|   ** This is the answer to report #14 item 1, and to the asymmetry the user spotted:
+|   "Parts always reload well. However, the sequence data does not always reload
+|   reliably ... the toast will show 'reloaded', but the sequence is not actually
+|   restored." **
+|   RDRAW (0x46c7c72c) is the screen-redraw dirty flag, and it was set in exactly two
+|   places, with the ORDERING being the whole bug:
+|     * the Part path (rlj_faithful) sets it INSIDE THE WORKER, right after PARTAPPLY --
+|       i.e. AFTER the data is applied. So the Part always repaints. Always worked.
+|     * the TOAST path (rt2_done) set it at CHORD time, in the key handler, BEFORE the
+|       async worker had copied anything. So the panel repainted showing the PRE-reload
+|       sequence, the copy landed a moment later, and nothing asked for another redraw.
+|     * the SEQUENCE success path set it NOWHERE.
+|   So the trigs were restored correctly every time -- measured repeatedly: 6/6 on the
+|   user's own empty->reload->LED test, 8/8 [PTN], 4/4 [BANK], and the engine reads the
+|   cold blob directly so the data is live immediately -- while the DISPLAY kept showing
+|   the old state until something else happened to dirty the screen. Hence "most of the
+|   time it does": most of the time something else repaints promptly.
+|   That is also why no amount of byte-comparing found it. The data path was never wrong.
+    moveq   #1,%d0
+    move.l  %d0,RDRAW                  | the sequence changed under the UI -- repaint it
     .ifdef RL_DONE
+|   Session 90: the copy has succeeded, so the whole-bank reload this job's doneFn is
+|   about to perform IS redundant -- claim it now, and only now.
+    moveq   #1,%d0
+    move.b  %d0,rl_own
 |   Session 83: RESTORED together with rl_done -- the two stand or fall together.
 |   Without the suppression, stock's own whole-bank reload refills the live cache;
 |   with it, nothing does, and the slice lands in the cold blob while playback
 |   keeps reading stale bytes (measured in "(4)" as "LIVE copy: STILL SCRIBBLED").
     moveq   #0,%d0
-    move.b  CUR_BANK,%d0
+    move.b  PLAY_BANK,%d0              | refresh the live cache of the bank we just wrote
     move.l  %d0,-(%sp)
     jsr     LIVE_REFRESH               | FUN_4000faf0(bank): RAM->RAM, no card
     addq.l  #4,%sp
@@ -1280,7 +1720,7 @@ rl_openstrd:
     addq.l  #8,%sp
 
     moveq   #0,%d1
-    move.b  CUR_BANK,%d1
+    move.b  PLAY_BANK,%d1              | read the file for the bank we are going to write
     addq.l  #1,%d1
     move.l  %d1,-(%sp)                 | bank number (1-based)
     move.l  %d0,-(%sp)                 | project dir
@@ -1311,6 +1751,17 @@ rlo_zero:
     .align 2
 rl_kind:
     .space 4
+|   Session 98: the chord -> worker request, moved here from 0x80006a50-55 (see the note
+|   where the old .equ lines were). Same meaning, same byte widths.
+G_KIND:
+    .space 1                           | 0 idle / 1 PTN SEQ / 2 PART+PTN SEQ / 3 TRK SEQ
+G_PAT:
+    .space 1                           | pattern to reload
+G_TRK:
+    .space 1                           | TRK SEQ: track index 0..7
+G_TMIDI:
+    .space 1                           | TRK SEQ: 0 audio / 1 MIDI
+    .global G_KIND, G_PAT, G_TRK, G_TMIDI
 |   Session 85: the .ifdef that used to open this block lived in a picker-era
 |   section that the redesign deletes, so it is re-opened here. rl_own is the
 |   one-shot "the next stock whole-bank reload is ours to suppress" flag that
@@ -1322,6 +1773,18 @@ rl_own:
 |   Session 86: both are one-shot handshake bytes between the [BANK] key handlers.
 |   rl3_showing  -- open for exactly one pass through stock's show tail
 |   rl3_bank_used -- "our chord consumed this [BANK] gesture, swallow the release"
+|   Session 93: which message the completed job should draw, set by the chord handler
+|   and consumed by rl_done. 0 none / 1 TRK SEQ / 2 TRK SEQ + PART / 3 SAVE PART FIRST.
+rl_msg:
+    .space 2
+|   Session 93: the verify pair -- a copy of the 16 trig-mask bytes we wrote, and where.
+|   In OUR cave on purpose: SCRATCH lives inside a stock 64 KB file buffer.
+rl_voff:
+    .space 4
+rl_varm:
+    .space 2
+rl_vsnap:
+    .space 16
 rl3_showing:
     .space 2
 rl3_bank_used:
@@ -1338,3 +1801,160 @@ rl_hdrbuf:
     .space 32
 rl_tbuf:
     .space 24
+
+    .ifdef RL_DIAG
+| ================= Session 98: the DIAG toast (see the RL_DIAG block near RDRAW) =================
+| Formats the captured bytes into rl_dtext (four 24-byte lines) and shows them through
+| rl3_toast2, the hardware-proven multi-line block toast. Called from rl_done (doneFn
+| context) exactly where the success message used to be drawn.
+    .text
+rl3_diag_show:
+    lea     -24(%sp),%sp
+    movem.l %d2-%d4/%a2-%a4,(%sp)
+|   ---- line 0: "P pppppppp S ssssssss" ----
+    lea     rl_dtext,%a2               | a2 = write cursor, one 24-byte slot per line
+    lea     dg_lP,%a1
+    bsr.w   dg_lit
+    lea     rl_dpre,%a1
+    moveq   #4,%d1
+    bsr.w   dg_hex
+    lea     dg_lS,%a1
+    bsr.w   dg_lit
+    lea     rl_vsnap,%a1
+    moveq   #4,%d1
+    bsr.w   dg_hex
+    clr.b   (%a2)
+|   ---- line 1: "L llllllll K kkkkkkkk" ----
+    lea     rl_dtext+24,%a2
+    lea     dg_lL,%a1
+    bsr.w   dg_lit
+    lea     rl_dlive,%a1
+    moveq   #4,%d1
+    bsr.w   dg_hex
+    lea     dg_lK,%a1
+    bsr.w   dg_lit
+    lea     rl_dcache,%a1
+    moveq   #4,%d1
+    bsr.w   dg_hex
+    clr.b   (%a2)
+|   ---- line 2: "C bptm W bptm D bp" ----
+    lea     rl_dtext+48,%a2
+    lea     dg_lC,%a1
+    bsr.w   dg_lit
+    lea     rl_dc,%a1
+    moveq   #4,%d1
+    bsr.w   dg_dig
+    lea     dg_lW,%a1
+    bsr.w   dg_lit
+    lea     rl_dw,%a1
+    moveq   #4,%d1
+    bsr.w   dg_dig
+    lea     dg_lD,%a1
+    bsr.w   dg_lit
+    lea     rl_dd,%a1
+    moveq   #2,%d1
+    bsr.w   dg_dig
+    clr.b   (%a2)
+|   ---- line 3: "Mn Vn Kn R rr" ----
+    lea     rl_dtext+72,%a2
+    lea     dg_lM,%a1
+    bsr.w   dg_lit
+    lea     rl_dm,%a1
+    moveq   #1,%d1
+    bsr.w   dg_dig
+    lea     dg_lV,%a1
+    bsr.w   dg_lit
+    lea     rl_dv,%a1
+    moveq   #1,%d1
+    bsr.w   dg_dig
+    lea     dg_lKk,%a1
+    bsr.w   dg_lit
+    lea     rl_dk,%a1
+    moveq   #1,%d1
+    bsr.w   dg_dig
+    lea     dg_lR,%a1
+    bsr.w   dg_lit
+    lea     rl_dr,%a1
+    moveq   #1,%d1
+    bsr.w   dg_hex
+    clr.b   (%a2)
+|   ---- show: same call shape as rl3_show2, four lines ----
+    pea     4                          | nlines  (pushed FIRST -> higher address)
+    pea     rl_dlines                  | lines[] (pushed LAST  -> first argument)
+    jsr     rl3_toast2
+    addq.l  #8,%sp
+    movem.l (%sp),%d2-%d4/%a2-%a4
+    lea     24(%sp),%sp
+    rts
+
+| a1 = asciz literal -> copied to (a2) without its NUL. Clobbers d0.
+dg_lit:
+    move.b  (%a1)+,%d0
+    beq.b   dg_lit_done
+    move.b  %d0,(%a2)+
+    bra.b   dg_lit
+dg_lit_done:
+    rts
+
+| a1 = bytes, d1 = count -> 2 hex chars each at (a2). Clobbers d0/d1.
+dg_hex:
+    moveq   #0,%d0
+    move.b  (%a1),%d0
+    lsr.l   #4,%d0                     | ColdFire has no byte shifts; d0 is zero-extended
+    bsr.b   dg_nib
+    move.b  (%a1)+,%d0
+    bsr.b   dg_nib
+    subq.l  #1,%d1
+    bne.b   dg_hex
+    rts
+
+| a1 = bytes, d1 = count -> ONE hex digit each (low nibble) at (a2). Clobbers d0/d1.
+dg_dig:
+    move.b  (%a1)+,%d0
+    bsr.b   dg_nib
+    subq.l  #1,%d1
+    bne.b   dg_dig
+    rts
+
+| d0 low nibble -> one hex character at (a2)+. Clobbers d0.
+dg_nib:
+    andi.l  #15,%d0
+    cmpi.l  #10,%d0
+    blt.b   dg_nib_d
+    addq.l  #7,%d0                     | 10..15 -> 'A'..'F'
+dg_nib_d:
+    addi.l  #'0',%d0
+    move.b  %d0,(%a2)+
+    rts
+
+dg_lP:  .asciz "P "
+dg_lS:  .asciz " S "
+dg_lL:  .asciz "L "
+dg_lK:  .asciz " K "
+dg_lC:  .asciz "C "
+dg_lW:  .asciz " W "
+dg_lD:  .asciz " D "
+dg_lM:  .asciz "M"
+dg_lV:  .asciz " V"
+dg_lKk: .asciz " K"
+dg_lR:  .asciz " R "
+    .align 2
+rl_dlines:
+    .long   rl_dtext
+    .long   rl_dtext+24
+    .long   rl_dtext+48
+    .long   rl_dtext+72
+| captures -- all written by the code paths marked DIAG above
+rl_dc:      .space 4                   | chord:  bank, pattern, track, midi
+rl_dw:      .space 4                   | worker: bank, pattern, track, midi
+rl_dd:      .space 2                   | doneFn: PLAY_BANK, ACT_PAT
+rl_dk:      .space 1                   | G_KIND as the worker read it
+rl_dr:      .space 1                   | last PARSEPAT return, low byte
+rl_dm:      .space 1                   | message code that would have been shown
+rl_dv:      .space 1                   | verify: 0 not armed / 1 pass / 2 fail
+    .align 2
+rl_dpre:    .space 4                   | live record, first 4 bytes, BEFORE the copy
+rl_dlive:   .space 4                   | live record at doneFn
+rl_dcache:  .space 4                   | live-cache record at doneFn
+rl_dtext:   .space 96                  | 4 lines x 24
+    .endif

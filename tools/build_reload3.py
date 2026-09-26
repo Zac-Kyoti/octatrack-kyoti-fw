@@ -114,9 +114,19 @@ patch_reload3.s:
       dispatcher FUN_40061b60;
     - that FUN_4005a044 is only the PTN key handler (all its globals are PTN's).
 
-Usage:   python3 tools/build_reload2.py [VERSTR]      (default VERSTR = "140C_KYOTI")
+Usage:   python3 tools/build_reload3.py [--diag] [VERSTR]   (default VERSTR = "140C_KYOTI")
 Outputs: out/mainos_reload3.bin, out/elek_reload3.bin,
          out/OCTATRACK_OS1.40C_RELOAD3.syx, out/OCTATRACK_RELOAD3.bin
+
+  --diag   Session 98 (reference/handoffs/RELOAD3_SEQFAIL_HANDOFF.md section 4): the
+           SAME patch assembled with --defsym RL_DIAG=1, so every success message is
+           replaced by four lines of the raw bytes and indices the worker used (see the
+           RL_DIAG block in patch_reload3.s). Nothing under test moves. Written to
+           SEPARATE files -- out/patch_reload3_diag.{o,elf,bin}, out/mainos_reload3_diag.bin,
+           out/OCTATRACK_OS1.40C_RELOAD3_DIAG.syx, out/OCTATRACK_RELOAD3_DIAG.bin -- so the
+           shipping build and cave_syms' default ELF are never overwritten by a
+           diagnostic (the trap build_qlrec_diag.py fell into). Default VERSTR
+           "140C_RL3DG". Emulator gate: tools/diag_reload3_diagtoast.py.
 """
 import os, pathlib, subprocess, sys
 
@@ -131,7 +141,17 @@ ELEK = ROOT / "out/elek_reload3.bin"
 OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_RELOAD3.syx"
 OUT_BIN = ROOT / "out/OCTATRACK_RELOAD3.bin"
 
-VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_KYOTI"
+DIAG = "--diag" in sys.argv
+_args = [a for a in sys.argv[1:] if a != "--diag"]
+VERSTR = _args[0] if _args else ("140C_RL3DG" if DIAG else "140C_KYOTI")
+if DIAG:
+    SFX = "_diag"
+    OUT = ROOT / "out/mainos_reload3_diag.bin"
+    ELEK = ROOT / "out/elek_reload3_diag.bin"
+    OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_RELOAD3_DIAG.syx"
+    OUT_BIN = ROOT / "out/OCTATRACK_RELOAD3_DIAG.bin"
+else:
+    SFX = ""
 
 # Session 83: the cave base moved 0x400d7400 -> 0x400d6500. Session 82 reported
 # patch_reload3 at 2036 B against a 2044 B ceiling and called cave space the
@@ -159,7 +179,7 @@ PATCHES = [
     # footprint, since this cannot move up again.
     ("patch_trigscale", 0x400d7bfc, None,
      [(0x4009b6f2, "cave", "203c0000091a", 18, "jmp")]),
-    ("patch_reload3", FREE_START, "RL_DONE=1",
+    ("patch_reload3", FREE_START, "RL_DONE=1" + (",RL_DIAG=1" if DIAG else ""),
      # Session 85 redesign + Session 86's two [BANK]-deferral sites -- SIX
      # detours; RELOAD2 had ten. Neither chord site
      # pokes a keymap layer record, the mechanism behind the DIRECT JUMP slot
@@ -220,18 +240,21 @@ def jsr(t):
 
 
 def assemble(name, at, defsym):
+    # --diag: the reload patch's outputs get a _diag suffix so the shipping ELF (which
+    # cave_syms.py reads by default) is never replaced by a diagnostic build.
+    out = name + (SFX if name == "patch_reload3" else "")
     aso = ["m68k-elf-as", "-mcpu=5407"]
     for d in (defsym.split(",") if defsym else []):
         aso += ["--defsym", d]
-    aso += ["-o", f"out/{name}.o", f"tools/{name}.s"]
+    aso += ["-o", f"out/{out}.o", f"tools/{name}.s"]
     subprocess.run(aso, check=True, cwd=ROOT)
-    subprocess.run(["m68k-elf-ld", f"-Ttext=0x{at:x}", "-o", f"out/{name}.elf", f"out/{name}.o"],
+    subprocess.run(["m68k-elf-ld", f"-Ttext=0x{at:x}", "-o", f"out/{out}.elf", f"out/{out}.o"],
                    check=True, cwd=ROOT, capture_output=True)
-    subprocess.run(["m68k-elf-objcopy", "-O", "binary", f"out/{name}.elf", f"out/{name}.bin"],
+    subprocess.run(["m68k-elf-objcopy", "-O", "binary", f"out/{out}.elf", f"out/{out}.bin"],
                    check=True, cwd=ROOT)
-    nm = subprocess.run(["m68k-elf-nm", f"out/{name}.elf"], capture_output=True, text=True).stdout
+    nm = subprocess.run(["m68k-elf-nm", f"out/{out}.elf"], capture_output=True, text=True).stdout
     syms = {p[2]: int(p[0], 16) for p in (l.split() for l in nm.splitlines()) if len(p) == 3}
-    return (ROOT / f"out/{name}.bin").read_bytes(), syms
+    return (ROOT / f"out/{out}.bin").read_bytes(), syms
 
 
 def main():
@@ -293,6 +316,18 @@ def main():
         if int.from_bytes(bytes(img[a:a + 4]), "big") != 0x40083dc4:
             sys.exit(f"[PTN]-overlay TRACK slot {i} (0x{rec:08x}) no longer points at 0x40083dc4")
     print("  all 8 [PTN]-overlay TRACK slots still point at 0x40083dc4 (we detour it, not them)")
+
+    # Session 98: the 0x80006a40..0x80006abf scratch block is overwritten on hardware
+    # (QLREC Sessions 94-96; RELOAD3's own request bytes, handoff section 10). The reload
+    # patch must not reference it at all. Scan every even offset for an absolute longword
+    # in that range (m68k operands are 2-byte aligned).
+    at, blob = placed["patch_reload3"]
+    hits = [at + i for i in range(0, len(blob) - 3, 2)
+            if 0x80006a40 <= int.from_bytes(blob[i:i + 4], "big") < 0x80006ac0]
+    if hits:
+        sys.exit("patch_reload3 still references the 0x80006a40+ scratch block at "
+                 + ", ".join(f"0x{h:08x}" for h in hits))
+    print("  patch_reload3 references nothing in 0x80006a40..0x80006abf")
 
     spans.sort()
     for (a1, b1, n1), (a2, b2, n2) in zip(spans, spans[1:]):
@@ -360,6 +395,11 @@ def main():
 
     print(f"\n  {OUT_SYX.name}  (MIDI DIN)  +  {OUT_BIN.name}  (CF card)")
     print(f"  version screen / SYSTEM STATUS -> OS VERSION will read:  {VERSTR}")
+    if DIAG:
+        print("  ** DIAGNOSTIC BUILD ** every reload message is replaced by four lines of hex:")
+        print("     P <live before copy> S <snapshot>   |  L <live at doneFn> K <live cache>")
+        print("     C bptm W bptm D bp (chord/worker/doneFn bank,pat,trk,midi)  |  Mn Vn Kn R rr")
+        print("     Read it with reference/handoffs/RELOAD3_SEQFAIL_HANDOFF.md section 4.")
     print("  [PTN]  + [TRACK n]  ->  reload track n's CF-saved sequence. Part untouched.")
     print("                          toast: TRK SEQ RELOADED")
     print("  [BANK] + [TRACK n]  ->  the same, PLUS re-apply the saved Part from RAM.")

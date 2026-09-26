@@ -29812,3 +29812,109 @@ Fixes: the measured landing-position error at any non-1x track or master scale.
 Does NOT explain: the hardware report that visited steps depend on WHAT TRIGS ARE ON THE GRID,
 and that LEDs and audio disagree. No measured write path reads trig data. **Do not assume the
 flash resolves that**; it is a separate, still-unexplained mechanism.
+
+> **Note for readers of this branch.** `main`'s NOTES.md ends at Session 88. Sessions 89-97 (DIRECT JUMP, the KB ingest, SIDECHAIN3's UI fix, QLREC) live on `wip` and are referred to below by number only. The RELOAD3 work of Sessions 89-93 was recorded in the comments of `tools/patch_reload3.s`; this entry is its close-out.
+
+## Session 98 (2026-09-25, `wip`) — RELOAD3: the §4 diagnostic toast is BUILT — hex bytes + indices on screen, emulator-gated, awaiting one flash
+
+Scope: `reference/handoffs/RELOAD3_SEQFAIL_HANDOFF.md` only — `[PTN]+[TRACK n]` frequently
+leaves the edited sequence playing while the toast says RELOADED and the self-verify stays
+silent. Everything else in RELOAD3 untouched.
+
+**Built:** `tools/build_reload3.py --diag` → `--defsym RL_DIAG=1` on the same
+`patch_reload3.s`. All four messages are replaced by a 4-line block toast (6 s):
+`P <live before copy> S <snapshot>` / `L <live at doneFn> K <0x1001614e cache>` /
+`C bptm W bptm D bp` (chord-time vs worker-time vs doneFn-time bank/pat/trk/midi) /
+`Mn Vn Kn R rr` (message, verify result, G_KIND as read, last PARSEPAT return). Captures
+are written into the cave at the moment each value is read; the copy, verify, SCRATCH,
+OPEN_BUF and `0x80006a50+` scratch are exactly the flashed build's. The non-diag build
+still hashes `e823222f…`/`915c476b…` (checked after the edits). Diag: `.syx a627a7fb…`,
+`.bin 3f37367c…`, cave 2824 B `0x400d6500..0x400d7007`. Separate `_diag` output files so
+`cave_syms.py`'s default ELF stays the shipping one (the trap `build_qlrec_diag.py` fell
+into). Handoff §9 has the decoding table and the on-unit protocol.
+
+**Why the `P` line.** It is what makes one flash decisive without the user needing to know
+the hex of the edited pattern: `P==S==L` is hypothesis (A) — SCRATCH held the edited data
+and both copy and verify were vacuous; `P!=S==L` is (C) — landed where the verify looks,
+playback reads elsewhere. And line 2 catches something the handoff did not list: the
+worker's targeting inputs `G_PAT/G_TRK/G_TMIDI` live at `0x80006a51-55`, the scratch block
+Sessions 94-96 proved clobbered on hardware for QLREC. A wrong `G_TRK`/`G_TMIDI` reloads
+the wrong slice, the verify passes on that slice, the toast says RELOADED and track n is
+untouched — the reported shape exactly. Not claimed as the cause; the toast will say.
+
+**Two assembler lessons (cheap, recorded so they are not paid twice):** ColdFire has no
+byte shifts (`lsr.b` rejected; zero-extend then `lsr.l`), and a MOVE whose source needs an
+extension word (absolute, d16) cannot take an absolute/d16 destination on ISA_A — route
+through a data register. And the `beq.b rld_noverify` in `rld_skip` went out of byte
+range once the captures were inserted (`.w` now).
+
+**Emulator gate** `tools/diag_reload3_diagtoast.py` — one boot, three scenarios: clean
+(expect `P 00000000`, `S=L=K=`saved, `C==W==D`, `M1 V1 K3`, LED on); wrong-track (`G_TRK`
+poked between chord and worker, gated on `rl_job` not yet entered → line 2 must show
+`C.trk != W.trk` with `V1` and the target track still empty); scratch-clobber (memcpy
+source masks zeroed just before FWMEMCPY from our worker → `P=S=L=K=00000000` with `V1`,
+the vacuous-verify signature). Result: **ALL GOOD, 47 checks** (second run; the
+first run's wrong-track scenario failed its OWN gate — `rl_job x1, G_KIND=0` after the
+key calls, i.e. the storage task drains the job inside `call_as_main`'s spin, so a poke
+after the keys is too late; the injection now lives in the `rl_job` entry hook. Build
+unchanged between runs.) Toasts seen: clean `S=L=K=00000001` with `P 00000000`, `C 0030 W
+0030`; wrong-track `C 0030 W 0040` with `V1` and the target untouched; scratch-clobber
+`P=S=L=K=00000000` with `V1`, LED off. Every row of handoff §9's decoding table is a shape
+the toast has actually produced.
+
+**Not done, deliberately:** no fix, no commit, no theory past the table in handoff §9.
+Hardware decides.
+
+### Session 98 — HARDWARE RESULT: the RL3DG toast named it
+
+Single trig on step 1: no repro. Trigs on 1,3,...,15: repro. Only difference in the hex:
+**W = `0000` on success, `005B` on failure** (C unchanged). The worker read G_TRK=5 and a
+non-zero G_TMIDI from `0x80006a54-55`, so it reloaded MIDI track 6 instead of audio track
+1, verified that slice, and toasted RELOADED. The request bytes in the `0x80006a50+`
+scratch block are overwritten on hardware between chord and worker — the same block
+Sessions 94-96 caught failing for QLREC. Content-dependent (`0x55` mask bytes, `& 7 = 5`),
+which is why the single-trig test hid it. Fix direction: move the request bytes into the
+cave. Details in handoff §10.
+
+### Session 98 — FIX BUILT: request bytes moved into the cave
+
+`G_KIND/G_PAT/G_TRK/G_TMIDI` are cave labels now; `G_MENU/G_SEL` dropped. Build guard:
+no reference into `0x80006a40..0x80006abf` (fires on 11 sites in the pre-fix source).
+Shipping `.syx 51e342ba…` / `.bin e83b2020…`; diag `.syx 89bb1bd1…` / `.bin 892d8db4…`.
+`diag_reload3_diagtoast.py` gained an `oldscratch` scenario that replays the unit's
+clobber (`03 07 55 55 55 5B` into `0x80006a50-55` from the `rl_job` entry hook); the same
+hook timing redirected the pre-fix build (`W 0040`, first gate run). Emulator: **ALL GOOD** (diag 61 checks incl. `oldscratch` → `C 0030 W 0030`, restored; shipping `diag_reload3_led.py -n 4` 4/4). Awaiting the hardware re-test.
+More hardware W values on failure: `0045`, `004F`, `003F` (plus `005B`). Track 3-5, MIDI
+flag always non-zero, values vary — so the "0x55 content" explanation is not supported;
+only "the bytes are overwritten" is. The fix is indifferent to the value.
+
+### Session 98 — RELOAD3 IS FINAL. User: "All issues resolved." Promoted to `main`
+
+After flashing the fixed build the user reported: *"Flashed. All issues resolved. RELOAD3
+may be considered the final build."* Recorded exactly, because CLAUDE.md asks that
+"hardware-confirmed" name what was confirmed:
+
+- **Established on the unit:** on failing reloads the worker's targeting differed from the
+  chord's (`W` `005B`, `0045`, `004F`, `003F` against `C` `0000`), and after the request
+  bytes moved into the cave the user sees no remaining RELOAD issue.
+- **Not established:** what writes `0x80006a54-55`, or why the value varies (the "0x55
+  mask bytes" idea did not survive the extra values); how many reloads were tried after the
+  fix; which of the two fixed images (diag or shipping, same fix) was the one flashed.
+
+**Docs brought to final:** README, BUILD_KYOTI, FLASHING §4.5, START_HERE §6, MERGE.md
+(RELOAD3 is 2104 B, was 1870 B; V1.1's free run is ≈ 64 B — *derived* as 298 − 234, no
+builder run, the merged builder is withdrawn; RELOAD3 alone into V1.0 leaves ≈ 1092 B),
+RELOAD_REDESIGN status banner, the handoff banner. `build_bugbuilds.py` no longer treats
+RELOAD3 as WIP: its composite (with PARTREAPPLY + PATTERNLED + PLAYSFREEFIX) builds with no
+problems flagged and 3568 B of cave left. Not flashed.
+
+**Promoted to `main` — RELOAD3 only, deliberately not a merge of `wip`:** `patch_reload3.s`,
+`build_reload3.py` (with `--diag` and the scratch-block guard), `cave_syms.py`, the
+`diag_reload3_*.py` harnesses, `emu_reload.py`, and the docs above. **Left on `wip`:** DIRECT
+JUMP V5.x, SIDECHAIN3's UI fix, the KB ingest (`kb/caves.md`), the CLAUDE.md hard-constraint
+sections, and QLREC's stateless rewrite.
+
+**⚠️ Found while doing this, not acted on:** `main` still carries the QLREC that hooks
+`0x400522ca`, the site that crashed a real MKI on 2026-09-25 (Session 93), and `main`'s
+README still calls that feature hardware-confirmed. The fix (`0b595ed`) is on `wip` only.
+Promoting it is a separate decision.

@@ -2,56 +2,48 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-diag_reload3_card -- the RELOAD card must dismiss ITSELF, with no key pressed.
+diag_reload3_toast -- the RELOAD messages are stock BLOCK toasts, one taller for 2 lines.
 
-Session 88, hardware report #10. The report asked for four things on the RELOAD
-message box: title "RELOAD FROM PROJ", the second line CENTRED, NO "OK" prompt, and
-the same card style for the plain TRK SEQ message instead of the block toast.
+Session 89, hardware report #11, which reverted Session 88's card:
+  "I want the toasts to NOT be in cards. I want them to be in the form of the
+   previously used larger block toasts. But we need 1) TRK SEQ + PART, RELOADED and
+   2) TRK SEQ RELOADED, SAVE PART FIRST! each on two lines (enlarge toast vertical
+   size)."
+plus, from report #10 and still standing: no OK prompt and no countdown dots anywhere.
 
-WHY MLNOTIFY HAD TO GO (decoded, not guessed)
-  * it PUSHES keymap layer 0x400cdff8 at 0x4006d722 -- that push IS the OK prompt,
-    so the box waits for a key by construction
-  * it has no duration argument at all. An earlier comment in patch_reload3.s claimed
-    0x460e5e20 was "a 40-frame countdown"; it is the box WIDTH accumulator (seeded 40
-    at 0x4006d596, max'd against each line width + 9, capped 128). The hardware report
-    is what exposed that error.
-  * its body renderer 0x4006d128 draws every line at x=4 hardcoded (0x4006d170) --
-    the left-justification the report describes.
+WHAT THE BLOCK TOAST IS (decoded from stock TOAST, FUN_4005a2b8)
+    width  = text width + 15   (0x4005a2f2)     height = 0x12       (0x4005a2ee)
+    style  = 0xa  <- the BLOCK look; 4 is the card look Session 88 wrongly used
+    slot     0x460d1e70   countdown 0x460d1e6c   dismiss 0x40056bec
+    one line, centred at y = height-11, drawn by FUN_40057008
 
-So rl3_card builds the same box out of the same primitives, but on the popup slot
-SHOW_WIN uses (0x460d1e5c), which owns stock's countdown and never pushes a layer.
+rl3_toast2 keeps every one of those and changes only the height
+(0x12 + 7*(n-1)) and the number of centred lines. So a 1-line call is stock's toast
+exactly, and a 2-line call is stock's toast grown upward by one row.
+
+WHY THIS SLOT IS THE SAFE ONE (both measured)
+  * its tick 0x40056c28 reads the countdown DIRECTLY (`tstl 0x460d1e6c ; beq rts`) with
+    NO enabling flag. The SHOW_WIN slot's tick is gated on CD_FLAG at 0x40056abe, and
+    clearing that by mistake is what would have left Session 88's card up forever.
+  * the countdown DOTS come from 0x40037cc8, which reads the SHOW_WIN slot ONLY, so
+    nothing on the toast path can draw them.
 
 WHAT IS ASSERTED
-  * CD_FLAG is left NON-ZERO. The tick is gated on it (0x40056ab8 tstl / 0x40056abe
-    beq), so a zero there means the card never dismisses at all -- the very stuck box
-    this change exists to remove. An earlier version of the patch cleared it.
-  * the card DISMISSES ON ITS OWN -- the window slot returns to 0 with NO key ever
-    delivered. ** GATED ON A STOCK CONTROL. ** This harness does not drive the popup
-    tick at all: measured, a stock SELECT BANK window does not count down here either,
-    and CD_TICK fires zero times for it. So when the control does not dismiss, this
-    tool reports the self-dismiss as UNMEASURABLE rather than failing -- a red X that
-    only means "the emulator has no timer" would be worse than no result, and the
-    first run of this tool produced exactly that misleading failure.
-  * no OK-prompt keymap layer (0x400cdff8) is ever pushed, and MLNOTIFY is never
-    called, on any path
-  * the countdown is armed, and the box survives a short while before going (i.e. it
-    is not dismissed instantly, which would look like a flicker)
-  * NO countdown dots are ever drawn (0x40037cc8 never entered). These are instant
-    actions, so a progress indicator would wrongly imply something is pending. The
-    mechanism: that routine's only reachable caller here is the tick at 0x40056aea,
-    which runs only while CD_SEGS is still non-zero AFTER being decremented -- so
-    CD_SEGS = 1 makes the single segment expire straight into the dismiss instead.
-  * back-to-back reloads both draw: the old dialog blocked the second one until OK was
-    pressed, so this is a real regression guard, not a formality
-  * every line is drawn CENTRED: we hook the text draw (0x40012bd8) and require the x
-    argument to differ from stock's hardcoded 4. NOTE the hook is global, so it also
-    sees the main screen's own text (status bar at y=1) and stock's title draw -- only
-    draws whose text pointer is one of OUR strings are body lines, so the filter below
-    is load-bearing, not cosmetic. Getting this wrong produced three false failures on
-    the first run of this tool.
+  * the 2-line messages use rl3_toast2 with style 0xa and height 0x12+7 = 0x19
+  * LINE ORDER: line 0 must sit ABOVE line 1. y counts up from the bottom (settled by
+    stock's own 3-line message, whose reading order is fixed), so line 0 must have the
+    GREATER y. An earlier version of the patch had this inverted, which would have
+    printed "RELOADED" above "TRK SEQ + PART".
+  * both lines CENTRED: x is computed, never stock's hardcoded 4, and the longer line
+    gets the smaller x
+  * MLNOTIFY never called and no OK-prompt keymap layer pushed
+  * the dot routine never entered
+  * the toast countdown is armed
+  * the single-line [PTN] message uses stock TOAST itself
+  * back-to-back reloads both draw
 
 Usage:
-  python3 tools/diag_reload3_card.py [--chord ptn|bank] [--track N]
+  python3 tools/diag_reload3_toast.py [--chord ptn|bank] [--track N]
 """
 import argparse
 import pathlib
@@ -70,21 +62,19 @@ PTN_CODE, BANK_CODE = 0x2E, 0x2F
 TRACK0 = 0x10
 PRESS, RELEASE = 1, 0
 
-WIN_SLOT   = 0x460D1E5C
-CD_CUR     = 0x460D1E50
-CD_SEGS    = 0x460D1E54
-LAYER_PUSH = 0x40031494
-OK_LAYER   = 0x400CDFF8
-MLNOTIFY   = 0x4006D57C
-TOAST      = 0x4005A2B8
-DRAWTEXT   = 0x40012BD8
-WIN_NEW    = 0x4005829C
-DOTS       = 0x40037CC8      # draws the countdown dots -- must NEVER run for our card
-CD_FLAG    = 0x460D1E4C      # tick GATE: zero => the countdown never runs at all
-CD_TICK    = 0x40056AB8      # the gate+tick entry. NOT 0x40056ac0: that is past the
-                             # gate, so hooking it cannot distinguish "tick never ran"
-                             # from "tick ran but the gate sent it home".
-G_KIND     = 0x80006A50
+TOAST       = 0x4005A2B8
+TOAST_SLOT  = 0x460D1E70
+TOAST_CD    = 0x460D1E6C
+MLNOTIFY    = 0x4006D57C
+LAYER_PUSH  = 0x40031494
+OK_LAYER    = 0x400CDFF8
+DOTS        = 0x40037CC8
+DRAWTEXT    = 0x40012BD8
+WIN_DRAW1   = 0x40057008
+WIN_NEW     = 0x4005829C
+G_KIND      = 0x80006A50
+CAVE_LO, CAVE_HI = 0x400D6500, 0x400D7000
+SAVEFIRST   = 0x400B41BB
 
 
 def main(argv):
@@ -106,31 +96,27 @@ def main(argv):
                       quantum=4096, step_quantum=32, tick=True)
     if not rt.gate_m6a()[0]:
         rt.run(ms=1000, until=lambda x: x.gate_m6a()[0])
-    mounted, posted, sb, bank, elapsed = rt.load_project_live(
-        "OCTABAM", staged, run_ms=6000, mount_ms=3000)
+    rt.load_project_live("OCTABAM", staged, run_ms=6000, mount_ms=3000)
     P = rt.uc.mem_read(er.CUR_PATTERN, 1)[0]
-    rt.seq_select_live(bank, P)
+    rt.seq_select_live(rt.uc.mem_read(0x80000002, 1)[0], P)
     rt.internal_clock()
     rt.frame = True
     rt.next_frame = rt.sample + er.FRAME_PERIOD
     rt.exact_clock()
-    print(f"load : bank={bank} pattern={P}")
+    print(f"load : pattern={P}")
 
     nm = subprocess.run(["m68k-elf-nm", "out/patch_reload3.elf"],
                         capture_output=True, text=True, cwd=ROOT).stdout
-    sym = {p[2]: int(p[0], 16) for p in (l.split() for l in nm.splitlines())
-           if len(p) == 3}
+    sym = {q[2]: int(q[0], 16) for q in (l.split() for l in nm.splitlines())
+           if len(q) == 3}
 
-    C = {"card": 0, "ml": 0, "toast": 0, "oklayer": 0, "winnew": 0, "dots": 0,
-         "tick": 0}
-    draws = []          # (x, y, textptr)
-    boxw = []
+    C = {"t2": 0, "toast": 0, "ml": 0, "oklayer": 0, "dots": 0}
+    wins, draws = [], []
 
     def bump(k):
         return lambda u, ad, sz, x: C.__setitem__(k, C[k] + 1)
-
-    for addr, k in ((sym["rl3_card"], "card"), (MLNOTIFY, "ml"), (TOAST, "toast"),
-                    (DOTS, "dots"), (CD_TICK, "tick")):
+    for addr, k in ((sym["rl3_toast2"], "t2"), (TOAST, "toast"),
+                    (MLNOTIFY, "ml"), (DOTS, "dots")):
         rt.uc.hook_add(er.eb.UC_HOOK_CODE, bump(k), begin=addr, end=addr)
 
     def on_push(u, ad, sz, x):
@@ -139,20 +125,25 @@ def main(argv):
             C["oklayer"] += 1
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_push, begin=LAYER_PUSH, end=LAYER_PUSH)
 
-    def on_winnew(u, ad, sz, x):
+    def on_win(u, ad, sz, x):
         sp = u.reg_read(er.eb.UC_M68K_REG_A7)
-        w = struct.unpack(">I", u.mem_read(sp + 4, 4))[0]
-        boxw.append(w)
-        C["winnew"] += 1
-    rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_winnew, begin=WIN_NEW, end=WIN_NEW)
+        w, h, _, _, style, _ = struct.unpack(">6I", u.mem_read(sp + 4, 24))
+        wins.append((w, h, style))
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_win, begin=WIN_NEW, end=WIN_NEW)
 
     def on_draw(u, ad, sz, x):
-        # DRAWTEXT(font, winptr, x, y, len, text) -- args at sp+4 .. sp+24
         sp = u.reg_read(er.eb.UC_M68K_REG_A7)
-        raw = u.mem_read(sp + 4, 24)
-        font, winptr, xx, yy, ln, txt = struct.unpack(">6I", raw)
+        font, winptr, xx, yy, ln, txt = struct.unpack(">6I", u.mem_read(sp + 4, 24))
         draws.append((xx, yy, txt))
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_draw, begin=DRAWTEXT, end=DRAWTEXT)
+
+    # WIN_DRAW1(handle, text, top, font) -- line 0 goes through here
+    d1 = []
+    def on_d1(u, ad, sz, x):
+        sp = u.reg_read(er.eb.UC_M68K_REG_A7)
+        h, text, top, font = struct.unpack(">4I", u.mem_read(sp + 4, 16))
+        d1.append(text)
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_d1, begin=WIN_DRAW1, end=WIN_DRAW1)
     rt.uc.ctl_flush_tb()
 
     rt.start_transport_live()
@@ -165,6 +156,15 @@ def main(argv):
 
     def u32(ad):
         return struct.unpack(">I", rt.uc.mem_read(ad, 4))[0]
+
+    def txt(ptr):
+        out = b""
+        while len(out) < 40:
+            c = rt.uc.mem_read(ptr + len(out), 1)
+            if c == b"\x00":
+                break
+            out += c
+        return out.decode("latin1")
 
     fails = []
 
@@ -184,116 +184,87 @@ def main(argv):
             if rt.uc.mem_read(G_KIND, 1)[0] == 0:
                 break
 
-    print(f"\n--- [{a.chord.upper()}] + [TRACK {a.track+1}] : the card must draw ---")
-    draws.clear(); boxw.clear()
+    two_line = (a.chord == "bank")
+    print(f"\n--- [{a.chord.upper()}] + [TRACK {a.track+1}] ---")
+    wins.clear(); draws.clear(); d1.clear()
     fire()
-    chk(C["card"] == 1, f"rl3_card ran once (x{C['card']})")
-    chk(C["ml"] == 0, f"MLNOTIFY never called (x{C['ml']}) -- the OK dialog is gone")
-    chk(C["toast"] == 0, f"the block toast never called (x{C['toast']})")
-    chk(C["oklayer"] == 0,
-        f"NO OK-prompt keymap layer pushed (x{C['oklayer']}) -- nothing to answer")
-    chk(u32(WIN_SLOT) != 0, f"the card window is up (slot={u32(WIN_SLOT):#x})")
-    chk(u32(CD_SEGS) != 0, f"self-dismiss countdown armed (segs={u32(CD_SEGS)})")
-    chk(C["dots"] == 0,
-        f"NO countdown dots drawn (0x40037cc8 x{C['dots']}) -- instant action, so no "
-        f"progress indicator")
 
-    # ---- centring: OUR body lines must not be at stock's hardcoded x=4 ----
-    # Our strings live in the cave; "SAVE PART FIRST!" is stock's own at 0x400b41bb.
-    # Only the CAVE range counts. sym also holds absolute equates (0x460d1e4c,
-    # 0x80006a55, ...), so min/max over sym.values() spans the whole address map and
-    # filters nothing -- that mistake made this check pass everything on its first run.
-    CAVE_LO, CAVE_HI = 0x400D6500, 0x400D7000
-    def ours(t):
-        return CAVE_LO <= t < CAVE_HI or t == 0x400B41BB   # + stock's SAVE PART FIRST!
-    body = [d for d in draws if ours(d[2])]
-    print(f"   all draws (x,y,text): {[(x, y, hex(t)) for x, y, t in draws]}")
-    print(f"   OUR body lines      : {[(x, y, hex(t)) for x, y, t in body]}")
-    print(f"   box width requested : {boxw}")
-    chk(len(body) == 2, f"both body lines drawn (n={len(body)})")
-    chk(bool(body) and all(d[0] != 4 for d in body),
-        f"every body line at a COMPUTED x, not stock's hardcoded 4 -- i.e. centred "
-        f"(x={[d[0] for d in body]})")
-    if body:
-        ys = [d[1] for d in body]
-        chk(len(set(ys)) == len(ys), f"each body line on its own row (y={ys})")
-        # Centring is x = (boxwidth - textwidth)/2, so the LONGER line must get the
-        # SMALLER x -- whichever line that happens to be. Do NOT assume line 1 is the
-        # longer one: it is for the [BANK] card ("TRK SEQ + PART" / "RELOADED") but not
-        # for the [PTN] one ("TRK SEQ" / "RELOADED"), and hardcoding that assumption
-        # produced a false failure that looked like a centring bug.
-        if len(body) == 2:
-            def txt(ptr):
-                out = b""
-                while len(out) < 40:
-                    c = rt.uc.mem_read(ptr + len(out), 1)
-                    if c == b"\x00":
-                        break
-                    out += c
-                return out.decode("latin1")
-            (x1, _, t1), (x2, _, t2) = body
-            s1, s2 = txt(t1), txt(t2)
-            print(f"   line texts: {s1!r} (x={x1})  {s2!r} (x={x2})")
-            longer_x, shorter_x = ((x1, x2) if len(s1) >= len(s2) else (x2, x1))
-            chk(longer_x <= shorter_x,
-                f"the LONGER line sits further left ({longer_x} <= {shorter_x}) -- "
-                f"which is what centring means, whichever line is longer")
+    chk(C["ml"] == 0, f"MLNOTIFY never called (x{C['ml']}) -- no card, no OK dialog")
+    chk(C["oklayer"] == 0, f"no OK-prompt keymap layer pushed (x{C['oklayer']})")
+    chk(C["dots"] == 0, f"NO countdown dots drawn (x{C['dots']})")
+    chk(u32(TOAST_SLOT) != 0, f"a toast is up (slot={u32(TOAST_SLOT):#x})")
+    chk(u32(TOAST_CD) != 0, f"the toast countdown is armed (cd={u32(TOAST_CD)})")
 
-    # ---- the countdown gate must be open, or nothing will ever dismiss it ----
-    chk(u32(CD_FLAG) != 0,
-        f"CD_FLAG is non-zero ({u32(CD_FLAG)}) -- the tick is gated on it at "
-        f"0x40056abe, so zero here would mean the card NEVER dismisses")
+    ours = [d for d in draws if CAVE_LO <= d[2] < CAVE_HI or d[2] == SAVEFIRST]
+    mine = [t for t in d1 if CAVE_LO <= t < CAVE_HI or t == SAVEFIRST]
+    print(f"   WIN_NEW (w,h,style): {wins}")
+    print(f"   line 0 via WIN_DRAW1: {[txt(t) for t in mine]}")
+    print(f"   extra lines (x,y,text): {[(x, y, txt(t)) for x, y, t in ours]}")
 
-    # ---- does it go away without a key? gated on a stock control ----
-    print("\n--- it must dismiss ITSELF: no key is delivered from here on ---")
-
-    def wait_gone(n=120):
-        for i in range(n):
-            rt.run(ms=20)
-            if u32(WIN_SLOT) == 0:
-                return i
-        return None
-
-    dots_before_control = C["dots"]
-    gone_after = wait_gone()
-    chk(dots_before_control == 0,
-        f"no dots drawn for OUR card across its whole lifetime "
-        f"(x{dots_before_control}) -- read BEFORE any stock control tap, which would "
-        f"draw stock's own dots and has done so in an earlier version of this test")
-    if gone_after is not None:
-        chk(True, f"the card dismissed ITSELF with no key pressed "
-                  f"(after ~{gone_after} x 20ms, ticks={C['tick']})")
+    if two_line:
+        chk(C["t2"] == 1, f"rl3_toast2 ran once (x{C['t2']})")
+        chk(C["toast"] == 0, f"stock 1-line TOAST not used for a 2-line message "
+                             f"(x{C['toast']})")
+        tw = [w for w in wins if w[2] == 0xA]
+        chk(bool(tw), f"a BLOCK-style window (style 0xa) was made: {wins}")
+        if tw:
+            w, h, st = tw[-1]
+            chk(h == 0x12 + 7,
+                f"height enlarged for two lines: {h} == 0x12+7 ({0x12+7})")
+            chk(st == 0xA, f"style is the BLOCK look 0xa (got {st:#x}), not the card 4")
+        # ** WIN_DRAW1 calls DRAWTEXT internally. ** So `ours` already holds BOTH
+        # lines -- line 0 via stock's path and line 1 via ours -- and counting the
+        # WIN_DRAW1 hook separately double-counts line 0. Use the DRAWTEXT list as the
+        # single source of truth and tell the lines apart by y: stock's path always
+        # draws at y = height-11.
+        h = tw[-1][1] if tw else 0x19
+        chk(len(ours) == 2, f"exactly two lines drawn (n={len(ours)}): "
+                            f"{[(x, y, txt(t)) for x, y, t in ours]}")
+        chk(len(mine) == 1 and txt(mine[0]) == txt(ours[0][2]) if (mine and ours)
+            else False,
+            "line 0 went through stock's own single-line path")
+        if len(ours) == 2:
+            top = [d for d in ours if d[1] == h - 11]
+            bot = [d for d in ours if d[1] != h - 11]
+            chk(len(top) == 1 and len(bot) == 1,
+                f"one line at stock's y={h-11} and one elsewhere "
+                f"(y={[d[1] for d in ours]})")
+            if top and bot:
+                (x0, y0, t0), (x1, y1, t1) = top[0], bot[0]
+                l0, l1 = txt(t0), txt(t1)
+                print(f"   layout: line0 {l0!r} y={y0} x={x0}   "
+                      f"line1 {l1!r} y={y1} x={x1}")
+                chk(y0 > y1,
+                    f"LINE ORDER: line 0 sits ABOVE line 1 ({y0} > {y1}) -- y counts "
+                    f"up from the bottom, so the first line needs the greater y")
+                chk(x0 != 4 and x1 != 4,
+                    f"both lines CENTRED at computed x ({x0}, {x1}), not stock's 4")
+                longer_x, shorter_x = ((x0, x1) if len(l0) >= len(l1) else (x1, x0))
+                chk(longer_x <= shorter_x,
+                    f"the LONGER line sits further left ({longer_x} <= {shorter_x})")
     else:
-        # Control: does STOCK's own countdown window dismiss in this harness?
-        print("   our card did not dismiss -- running the STOCK control to find out "
-              "whether this harness drives the countdown at all")
-        key(BANK_CODE, PRESS); key(BANK_CODE, RELEASE)
-        ctl_gone = wait_gone()
-        if ctl_gone is None:
-            print(f"   [SKIP] UNMEASURABLE HERE: stock SELECT BANK did not count down "
-                  f"either (CD_TICK fired x{C['tick']}). This harness does not drive "
-                  f"the popup tick, so neither result means anything. Not a failure -- "
-                  f"and not evidence of success either; verify on hardware.")
-        else:
-            chk(False, f"the card did NOT dismiss itself although stock's window DID "
-                       f"(control gone after {ctl_gone}) -- a real defect")
+        chk(C["toast"] == 1, f"stock's own block TOAST used once (x{C['toast']})")
+        chk(C["t2"] == 0, f"the 2-line path not used for a 1-line message (x{C['t2']})")
+        chk(len(mine) == 1, f"exactly one line drawn (n={len(mine)})")
+        if mine:
+            print(f"   text: {txt(mine[0])!r}")
 
-    # ---- a second reload must also draw (the OK dialog used to block this) ----
-    print("\n--- a second reload must draw too (the OK dialog blocked this) ---")
-    before = C["card"]
-    draws.clear()
+    # ---- repeatable ----
+    print("\n--- a second reload must draw too ---")
+    b2, bt = C["t2"], C["toast"]
     fire()
-    chk(C["card"] == before + 1, f"the card drew again (x{C['card'] - before})")
-    chk(u32(WIN_SLOT) != 0, "the second card is up")
-    chk(C["ml"] == 0 and C["oklayer"] == 0, "still no dialog and no OK prompt")
+    drew = (C["t2"] - b2) if two_line else (C["toast"] - bt)
+    chk(drew == 1, f"the message drew again (x{drew})")
+    chk(C["ml"] == 0 and C["oklayer"] == 0 and C["dots"] == 0,
+        "still no dialog, no OK prompt, no dots")
 
     print()
     if fails:
         for f in fails:
             print(f"   ** FAIL: {f} **")
         return 1
-    print("   ALL GOOD -- titled card, centred lines, no OK prompt, self-dismissing, "
-          "and repeatable.")
+    print("   ALL GOOD -- block toasts, taller for two lines, correct line order, "
+          "centred, no OK prompt, no dots.")
     return 0
 
 
