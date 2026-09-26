@@ -13,9 +13,11 @@ Running Claude on this Mac auto-loads the project memory
 digest of state. Treat it as the summary; this repo's docs are the detail.
 
 Local repo: `~/Documents/octatrack-kyoti-fw/` (was `~/Documents/octamax/` until
-2026-09-01). Published as <https://github.com/Zac-Kyoti/octatrack-kyoti-fw>; began
-as a fork of `mxldyn/octamax`, derived from it since. Remotes: `origin` = the
-published repo, `upstream` = mxldyn (fetch only, for `whatsnew.py`).
+2026-09-01). Published as <https://github.com/Zac-Kyoti/octatrack-kyoti-fw>. It is an
+independent project, **not** a fork in any sense that matters: none of octamax's code
+is in a build, only its concepts (credit lives in `CREDITS.md` and one README line —
+keep it there). Remotes: `origin` = the published repo, `upstream` = mxldyn (fetch
+only, for `whatsnew.py`).
 
 ## 1. Read order for a new chat
 
@@ -104,11 +106,11 @@ published repo, `upstream` = mxldyn (fetch only, for `whatsnew.py`).
 
 ## 5. Shipped / in-flight work
 
-Two branches. **`main`** is the shipping line: the six finished, hardware-confirmed
-features plus the shared knowledge base. **`wip`** (this) is the active frontier —
-those six, plus a seventh finished feature not yet promoted, the Bugbuild
-composites, and the two threads still open. Octamax's current state is tracked via
-`refs/octamax/` (see `reference/EXTERNAL_RESEARCH.md`), not a mirrored branch.
+Two branches. **`main`** (this) is the shipping line: every finished, hardware-confirmed
+feature (including RELOAD3, PARTREAPPLY and the Bugbuild tooling). **`wip`** is `main`
+plus the one open thread, DIRECT JUMP, and the external-RE knowledge-base ingest.
+Upstream RE repos are tracked via `refs/` (see `reference/EXTERNAL_RESEARCH.md`), not
+a mirrored branch.
 
 **Finished and hardware-confirmed on the MKI** (per-feature detail and flash dates:
 `README.md` → *Hardware-test status*, and `BUILD_KYOTI.md`):
@@ -138,10 +140,10 @@ nothing to resolve) then `KYOTI_V1.1` (+ DIRECT JUMP + RELOAD3).
 pattern-LED fix) — emulation says it is **likely already fixed in stock 1.40C**,
 awaiting a hardware check. `tools/emu_lfocc.py`.
 
-**Not part of any build:** Maxolydian's own octamax behaviour mods (branding, no
-BANK/PTN countdown, lazy Part transitions, arp key-scales, LED dirty indicators).
-Patch sources kept for RE cross-reference in `tools/attic/`; design notes in
-`reference/upstream-notes.md`; credit in `CREDITS.md`.
+**Not part of any build:** the third-party reference patch sources in `tools/attic/`
+(branding, no BANK/PTN countdown, lazy Part transitions, arp key-scales, LED dirty
+indicators). Kept for RE cross-reference; design notes in `reference/upstream-notes.md`;
+credit in `CREDITS.md`.
 
 **External-RE knowledge base** — `reference/kb/*.md`, the address-keyed distillate of
 the 6 prior-art repos (octabam DSP map + kernel/RTOS + step-mask map, OctaLib file

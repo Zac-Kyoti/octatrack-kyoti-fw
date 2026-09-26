@@ -44,7 +44,7 @@ thread on demand and distil the finding into `kb/` with the URL + retrieval date
 
 | Repo | Side | Mine it for |
 |---|---|---|
-| [mxldyn/octamax](https://github.com/mxldyn/octamax) | ColdFire | Upstream of this fork. Container/update-chain analysis, the patch/build pipeline, PERSONALIZE-menu map, first behaviour mods. **2026-09: OCTAMAX 2.x** — `c78ff70` the `'ANDY'` battery-SRAM persistence mechanism (→ our Session 19), `emu_check.py` pre-flash gate, dual-256 sample slots (`DUAL256.md`, not adopted), **`DESIGN_SLICEVIEW.md` SLICE PLAYHEAD** — voice-struct field map + screen primitives + the periodic-repaint tick distilled 2026-09-08 → [`kb/memory-map.md`](kb/memory-map.md). |
+| [mxldyn/octamax](https://github.com/mxldyn/octamax) | ColdFire | Prior art (concepts only; none of its code is in a build). Container/update-chain analysis, the patch/build pipeline, PERSONALIZE-menu map, first behaviour mods. **2026-09: OCTAMAX 2.x** — `c78ff70` the `'ANDY'` battery-SRAM persistence mechanism (→ our Session 19), `emu_check.py` pre-flash gate, dual-256 sample slots (`DUAL256.md`, not adopted), **`DESIGN_SLICEVIEW.md` SLICE PLAYHEAD** — voice-struct field map + screen primitives + the periodic-repaint tick distilled 2026-09-08 → [`kb/memory-map.md`](kb/memory-map.md). |
 | [mischa85/elektron-firmware-tool](https://github.com/mischa85/elektron-firmware-tool) | tooling | ELEK container pack/unpack, aPLib, `.bin`/`.syx` transports. Vendored separately in `vendor/`; kb needs the format notes + any format fixes. **2026-09-08 (`a5bce9a`):** ELEK version field is a fixed 10-byte right-justified field at `0x08` (not `0x0D`); aPLib offset-bias underflow is deliberate; `--emit-container`. → [`kb/container-format.md`](kb/container-format.md) |
 | [snugsound/OctaLib](https://github.com/snugsound/OctaLib) | file-format | on-CF project/bank/part/arrangement struct layouts. Directly feeds the unmapped per-step trig / p-lock / sample-lock model (NOTES Session 13 backlog). → [`kb/file-format.md`](kb/file-format.md) |
 | [emuyia/ems-octakit](https://github.com/emuyia/ems-octakit) | file-format + ColdFire | Swaps 4 Parts/Bank for 256 Kits/Project. **Open-sourced 2026-09** (commit `ca3b527`): `runtime/abi.inc` = ~500 named stock addresses (`GK_STOCK_*`); `runtime/firmware.json` = 598 SHA-guarded patch sites + 411 relocate ops; 62 `.S` modules + a Rust patcher. **`link.ld` + `loader.S` = the append-a-runtime architecture** (reclaim flex-pool RAM, append an aPLib-packed ~128 KB ColdFire runtime, boot-hook it in) — the way past the ~4 KB code-cave limit. **`8ded517` (2026-09-12):** MIT-licensed now; five more named addresses around the Recording Setup menu / LOAD KIT handoff (own-runtime bugfixes, not stock bugs). → [`kb/octakit-abi.md`](kb/octakit-abi.md), [`kb/file-format.md`](kb/file-format.md), [`kb/techniques.md`](kb/techniques.md) |
@@ -56,7 +56,7 @@ thread on demand and distil the finding into `kb/` with the URL + retrieval date
 ## Licence posture
 
 Each repo keeps its own terms. octamax **and ems-octakit** ship no `LICENSE`
-(this fork exists under GitHub's ToS, educational use only, per `CREDITS.md`;
+(the `tools/attic/` reference copies exist under GitHub's ToS, educational use only, per `CREDITS.md`;
 ems-octakit takes the same "provide your own official OS, contains no official
 code or assets" stance). octabam / octa-bt-pt each carry their own — check
 `refs/<name>/LICENSE` before quoting more than a fact. We store **findings and
