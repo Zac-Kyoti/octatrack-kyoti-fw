@@ -139,8 +139,14 @@ if DIAG and len(sys.argv) <= 2:
 
 DEFSYM = f"DJ_V3=1,DJ_KEYMAP=1,DJ_TOAST_DUR=0x{TOAST_DUR:x}" + (",DJ_DIAG=1" if DIAG else "")
 
+# Session 103: the DIAG build's cave outgrew 0x700 bytes, so trigscale moves up inside
+# the free zone for the DIAG variant only (0x400d7bc0 + 62 B ends well before FREE_END).
+# The mainline keeps 0x400d7b00 and its byte-identity check against
+# build_trigscale_only.py; the DIAG variant's relocated fix is the same code at a
+# different cave, so that check is reported, not enforced, under DIAG.
+TRIGSCALE_AT = 0x400d7bc0 if DIAG else 0x400d7b00
 PATCHES = [
-    ("patch_trigscale", 0x400d7b00, None,
+    ("patch_trigscale", TRIGSCALE_AT, None,
      [(0x4009b6f2, "cave", "203c0000091a", 18, "jmp")]),
     ("patch_directjump", 0x400d7400, DEFSYM,
      [(0x400a4006, "dj_a", "4a398000667e",     6, "jsr"),
@@ -220,9 +226,10 @@ PATCHES = [
       # scratch (Sessions 94-96: that window is not reliable under live audio). The
       # 16-bit arm mask lives in the cave (dj_keep_pend), image-initialised to 0.
       (0x400a3542, "dj_keepx", "226f0094246f00ac1292", 10, "jsr"),
-      # Session 102 -- Hook W: the tail's reposition-fire call, suppressed only when
-      # the preserved counter is mid-step at fire time (the off-grid duplicate).
-      (0x400a4bdc, "dj_keepw", "2f034e94588f", 6, "jsr"),
+      # Session 103 -- Hook V replaces Hook W (0x400a4bdc back to stock): while a
+      # preserve is pending, CNTDN[t] = tps_t - counter[t] every tick, deferring each
+      # track's whole apply (STEP write AND reposition fire) to its own boundary.
+      (0x400a4bb6, "dj_keepv", "49f9400a536c", 6, "jsr"),
       (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),
 ]
 # Session 102: the DIAG-only dj_diagy observer detour is gone (Y dead everywhere;
@@ -374,7 +381,8 @@ def main():
         TSTART_SITE = 0x4009c3d4
         KEEPZ_SITE = 0x400a4bea       # Session 97, 10 B
         KEEPX_SITE = 0x400a3542       # Session 97, 10 B
-        KEEPW_SITE = 0x400a4bdc      # Session 102, 6 B
+        KEEPW_SITE = 0x400a4bdc      # Session 102, 6 B -- REMOVED in 103, back to stock
+        KEEPV_SITE = 0x400a4bb6     # Session 103, 6 B
         # Session 83: v3 widened the ANDY restore (pea 0x64 -> 0x70) at all three sites so
         # DIRECT JUMP would persist. v4 leaves those bytes stock, so they are bytes v3
         # touched and v4 deliberately does not -- drop them from `want` or they read as
@@ -394,7 +402,8 @@ def main():
             | {i for i in range(o(KEEPZ_SITE), o(KEEPZ_SITE) + 10) if img[i] != stock[i]} \
             | {i for i in range(o(KEEPX_SITE), o(KEEPX_SITE) + 10) if img[i] != stock[i]} \
             | {i for i in range(o(0x400a3556), o(0x400a3556) + 10) if img[i] != stock[i]} \
-            | {i for i in range(o(KEEPW_SITE), o(KEEPW_SITE) + 6) if img[i] != stock[i]}
+            | {i for i in range(o(KEEPW_SITE), o(KEEPW_SITE) + 6) if img[i] != stock[i]} \
+            | {i for i in range(o(KEEPV_SITE), o(KEEPV_SITE) + 6) if img[i] != stock[i]}
         stray = [i for i in (v4_touched ^ want) if i not in cave]
         print(f"  vs mainos_directjump_v3.bin: v4 touches {len(v4_touched)} vs v3 {len(v3_touched)}; "
               f"{len(stray)} unexpected outside the cave")
@@ -440,9 +449,12 @@ def main():
         tsb = ts.read_bytes()
         tsh = [i for i, (x, y) in enumerate(zip(stock, tsb)) if x != y]
         ok = all(img[i] == tsb[i] for i in tsh)
-        print(f"  manual-trig fix bytes identical to build_trigscale_only.py: {ok}")
-        if not ok:
-            sys.exit("  MANUAL-TRIG FIX DIVERGED")
+        if DIAG:
+            print(f"  manual-trig fix vs build_trigscale_only.py: {'identical' if ok else 'RELOCATED CAVE (expected under DJ_DIAG)'}")
+        else:
+            print(f"  manual-trig fix bytes identical to build_trigscale_only.py: {ok}")
+            if not ok:
+                sys.exit("  MANUAL-TRIG FIX DIVERGED")
 
     if not EFT.exists() or not STOCK_SYX.exists():
         print("\n  (EFT tool or stock syx missing -- skipping the .syx/.bin wrap)")

@@ -790,10 +790,12 @@ dj_c:
     beq.b   djc_stock_clear
     moveq   #-1,%d0
     move.w  %d0,dj_keep_pend            | DJ ON: preserve through natural wraps too
+    move.w  %d0,dj_keep_pend2
     bra.b   djc_stock_replay
 djc_stock_clear:
     clr.w   dj_keep_pend                | stale-bit hygiene (transport stopped inside a
                                         | previous commit's apply window)
+    clr.w   dj_keep_pend2
 djc_stock_replay:
     clr.b   %d0                         | displaced original #1 (stock leaves D0 = 0)
     move.b  %d0,STEP                    | displaced original #2 (STEP = D0 = 0)
@@ -1000,6 +1002,7 @@ djc_ts_done:
 |   next tick, before any deferred track applies.
     moveq   #-1,%d0
     move.w  %d0,dj_keep_pend            | all 16 tracks: preserve across this armed commit
+    move.w  %d0,dj_keep_pend2
     .ifdef DJ_DIAG
     move.w  dj_cnt_arm,%d0             | d0 is reloaded by the moveq below
     addq.l  #1,%d0
@@ -1304,9 +1307,9 @@ dj_keepz:
     clr.b   %d0                        | displaced #1 (stock leaves D0 = 0 here)
     moveal  %sp@(168),%a0              | displaced #2, +4: a0 = &CNTDN_TBL[t]
     tst.l   DJ_MODE
-    beq.b   dkz_zero
+    beq.w   dkz_zero                   | .w: the consume + DIAG counters grew this path
     tst.w   dj_keep_pend
-    beq.b   dkz_zero                   | no armed commit in flight -> stock
+    beq.w   dkz_zero                   | no armed commit in flight -> stock
     lea     -16(%sp),%sp
     movem.l %d1-%d3/%a1,(%sp)
     move.l  %a0,%d1
@@ -1314,8 +1317,18 @@ dj_keepz:
     cmpi.l  #16,%d1
     bcc.b   dkz_restore                | not a slot this model covers -> stock
     move.w  dj_keep_pend,%d2
-    btst    %d1,%d2                    | this track pending? (NOT consumed here --
-    beq.b   dkz_restore                | Hook X, when it fires, consumes it)
+    btst    %d1,%d2                    | this track pending?
+    beq.b   dkz_restore
+|   Session 103b: CONSUME here. The apply is running NOW, so Hook V must stop re-arming
+|   CNTDN for this track (the first Hook V gate chain caught the failure: unconsumed
+|   bits made the tail re-apply and re-fire EVERY 6 TICKS after a deferred commit).
+|   Hook X gets its own mask below, set alongside this one, because it still needs a
+|   flag LATER this same tick.
+    moveq   #1,%d3
+    lsl.l   %d1,%d3
+    not.l   %d3
+    and.l   %d2,%d3
+    move.w  %d3,dj_keep_pend
 |   ---- Session 100: REDUCE IN PLACE, here, at the one site hardware proved fires for
 |   every audio track on every commit (diag: Z = 8*A exactly, X = a timing-dependent
 |   minority). V5.5 kept the mod-reduce in Hook X, so the tracks whose 0x400a354a copy
@@ -1379,14 +1392,14 @@ dj_keepx:
     sub.l   #TICKS_IN_STEP,%d1         | t = cursor - table base
     cmpi.l  #16,%d1
     bcc.b   dkx_restore
-    move.w  dj_keep_pend,%d2
-    btst    %d1,%d2
+    move.w  dj_keep_pend2,%d2          | Session 103b: X's OWN mask -- Z consumed the
+    btst    %d1,%d2                    | apply-mask earlier this tick
     beq.b   dkx_restore
-    moveq   #1,%d0                     | consume bit t: this track's commit is applied
+    moveq   #1,%d0                     | consume bit t
     lsl.l   %d1,%d0
     not.l   %d0
     and.l   %d2,%d0
-    move.w  %d0,dj_keep_pend
+    move.w  %d0,dj_keep_pend2
     .ifdef DJ_DIAG
     move.w  dj_cnt_x,%d2               | d2 frame-saved; reassigned below anyway
     addq.l  #1,%d2
@@ -1419,43 +1432,79 @@ dkx_stock:
     move.b  %a2@,%a1@                  | displaced #3: TICKS_IN_STEP[t] = CATCHUP[t]
     rts
 
-| ---- Hook W @ 0x400a4bdc (6 B: 2f03 4e94 588f) -- Session 102 ----
-| Displaces the tail's conditional reposition-fire call: push d3 / jsr (a4) / addq
-| (a4 = FUN_400a536c, loaded at 0x400a4bb6; d3 = track; branches at 0x4bd6/0x4bda land
-| at 0x4be2, past this window). Under the preserve, the track fires its own trig at its
-| own boundary -- if the reposition fire ALSO runs while the preserved counter is
-| MID-STEP, it lands off-grid: the user's once-per-cycle spurious trig, half a step off
-| (stock never double-fires because stock zeroes the counter here). So: fire is kept
-| whenever the counter reads 0 (every case the emulator can produce), and suppressed
-| only when it is provably off-grid. Hook X has NOT consumed the bit yet at this point
-| in the tick (the copy site runs later), so the mask is valid here.
-    .global dj_keepw
-dj_keepw:
+| ---- Hook V @ 0x400a4bb6 (6 B: 49f9 400a 536c) -- Session 103 ----
+| Hook W (0x400a4bdc, V5.9/V5.10) is GONE -- its site is stock again. Suppressing the
+| reposition fire was wrong at wraps (missing step-1 trig every cycle, user-confirmed)
+| and firing it late was wrong too (the half-step spurious). The correct discipline is
+| AR's, applied PER TRACK: defer the whole apply to the track's own preserved boundary.
+| Stock already owns the deferral mechanism -- CNTDN. While a preserve is pending and
+| the track's counter is mid-step, this hook rewrites CNTDN[t] = tps_t - counter[t]
+| every tick (recomputation converges in lockstep with the tail's own decrement), so
+| stock's tail applies the reposition -- STEP write AND fire -- exactly on the tick the
+| counter wraps: no duplicate, no missing trig, no lurch, at wraps and armed commits
+| alike. Runs between the rebuilds and the tail (displaces the tail's own a4 load).
+| Off-by-one, derived then emulator-checked: tail decrements THEN tests, so apply tick
+| = T + v - 1; the wrap tick has pre-increment counter tps-1; v = tps - c lands on it.
+| At the apply tick Hook Z still skips the zero (counter tps-1 wraps naturally to 0
+| late-tick) and Hook X still consumes/suppresses the CATCHUP copy. A track whose
+| landing step carries content on BOTH fire gates may fire twice within the SAME tick
+| (identical schedule slot) -- accepted, watch on hardware.
+    .global dj_keepv
+dj_keepv:
+    lea     0x400a536c,%a4             | displaced original (the tail's fire-fn pointer)
     tst.l   DJ_MODE
-    beq.b   dkw_fire
-    move.w  dj_keep_pend,%d0           | d0/a0 are dead across this site: 0x400a536c's
-    btst    %d3,%d0                    | own clobbers are tolerated by stock right here,
-    beq.b   dkw_fire                   | and 0x4be2 reloads a0 immediately
+    beq.w   dkv_done
+    tst.w   dj_keep_pend
+    beq.w   dkv_done
+    lea     -20(%sp),%sp
+    movem.l %d0-%d3/%a0,(%sp)
+    moveq   #0,%d0                     | t
+    move.w  dj_keep_pend,%d1
+dkv_loop:
+    btst    %d0,%d1
+    beq.b   dkv_next
     lea     TICKS_IN_STEP,%a0
-    tst.b   (%a0,%d3.l)
-    beq.b   dkw_fire                   | counter == 0: on-grid reposition, keep it
+    tst.b   (%a0,%d0.l)
+    beq.b   dkv_next                   | aligned track: stock's own CNTDN stands
+    lea     TRK_SCALE_IX,%a0
+    moveq   #0,%d2
+    move.b  (%a0,%d0.l),%d2
+    lea     LEN_TBL,%a0
+    move.l  (%a0,%d2.l*4),%d2          | tps_t
+    ble.b   dkv_next
+    lea     TICKS_IN_STEP,%a0
+    moveq   #0,%d3
+    move.b  (%a0,%d0.l),%d3
+    sub.l   %d3,%d2                    | v = tps_t - counter
+    ble.b   dkv_next                   | counter >= tps (stale): leave stock alone
+    lea     CNTDN_TBL,%a0
+    move.b  %d2,(%a0,%d0.l)            | defer this track's apply to its own boundary
     .ifdef DJ_DIAG
-    move.w  dj_cnt_w,%d0
-    addq.l  #1,%d0
-    move.w  %d0,dj_cnt_w               | W: off-grid reposition fires suppressed
+    move.w  dj_cnt_w,%d2
+    addq.l  #1,%d2
+    move.w  %d2,dj_cnt_w               | W now counts Hook V's CNTDN alignments
     .endif
-    rts
-dkw_fire:
-    move.l  %d3,-(%sp)                 | displaced #1
-    jsr     0x400a536c                 | displaced #2 (was jsr (%a4), same target)
-    addq.l  #4,%sp                     | displaced #3
+dkv_next:
+    addq.l  #1,%d0
+    cmpi.l  #16,%d0
+    blt.b   dkv_loop
+    movem.l (%sp),%d0-%d3/%a0
+    lea     20(%sp),%sp
+dkv_done:
     rts
 
     .align  2
     .global dj_keep_pend
 dj_keep_pend:
-    .word   0                          | bit t = preserve track t at its apply tick.
-                                       | In-cave on purpose -- see the block comment.
+    .word   0                          | bit t = apply pending: Hook V re-arms CNTDN,
+                                       | Hook Z skips the zero. CONSUMED BY Z at the
+                                       | apply. In-cave on purpose -- see block comment.
+    .global dj_keep_pend2
+dj_keep_pend2:
+    .word   0                          | bit t = Hook X's CATCHUP-copy suppression,
+                                       | consumed by X when its gate fires (stale bits
+                                       | are re-set at every preserved event and are
+                                       | inert with DJ off).
     .global dj_mrem
 dj_mrem:
     .byte   0                          | Hook H's last reseed remainder (ticks mod

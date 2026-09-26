@@ -31634,3 +31634,53 @@ landing-interval fractional may also improve (the off-grid landing fire at armed
 commits is suppressed by the same cut). If the spurious persists with W=0, the
 hypothesis is dead at zero cost; if fractional persists with the spurious gone, the
 landing-interval scheduler is next, with fresh hardware numbers.
+
+## Session 103 (2026-09-26, `wip`) — the per-cycle anomaly forced the real design: defer each track's apply to its own boundary (Hook V). Hook W retired after one hardware round
+
+### V5_9D hardware + the user's clarification
+
+2x→1x unchanged (fractional one cycle, locks at restart). 1x→2x: spurious OR MISSING
+trig, always step 1 — and the clarification that mattered: **it repeats every cycle**
+(per-wrap, not per-switch). Toast `A5 Z72 X16 W32 N2 R3 M0`. Also NEW and serious: once
+any fractional state occurred with DJ ON, turning DJ OFF leaves ALL patterns fractional
+until transport restart — a latched master-phase shift vs the absolute tempo grid.
+OPEN; the prime suspect is a wrong `dj_mrem` seed at a hardware-only commit state; the
+next hardware reading should note whether N incremented when the latch was created.
+
+### Hook W post-mortem (one hardware round, retired)
+
+Suppressing the reposition fire is wrong at wraps (missing step-1 trig every cycle) and
+firing it late is wrong too (the half-step spurious). A step whose start is already
+past has no third option — UNLESS the whole apply moves. That is the real design:
+
+### Hook V @0x400a4bb6 (displaces the tail's own `lea 0x400a536c,%a4`)
+
+While a preserve is pending and the track's counter is mid-step:
+`CNTDN[t] = tps_t − counter[t]`, recomputed every tick (converges in lockstep with the
+tail's own decrement; apply tick = T+v−1 = the tick the counter wraps). Stock's tail
+then performs the WHOLE apply — STEP write and reposition fire — on the track's own
+boundary: no duplicate, no missing trig, no half-step lurch, at wraps and armed commits
+alike. Hook W removed (0x400a4bdc stock again); the intermediate armed-exception build
+(`fddf1db8`) was discarded unshipped.
+
+### The gate chain earned its keep TWICE
+
+1. First Hook V chain: **infinite re-apply** — pending bits were only consumed on Hook
+   X's conditional path, so Hook V re-armed CNTDN forever and the tail re-applied and
+   RE-FIRED EVERY 6 TICKS after a deferred commit (fires t101,107,113…). Fixed by
+   splitting the mask: `dj_keep_pend` is consumed by Hook Z AT the apply (stopping V),
+   `dj_keep_pend2` (new) by Hook X later the same tick; both set at every preserved
+   event, cleared on the DJ-OFF path.
+2. The v3 comparator had already caught Hook W's undeclared site in Session 102.
+
+### V5.10 (mainline `ab8a41bb`, diag `78a995b8` = 140C_KDIAG)
+
+Gates: fire oracle — track 0 fires [90, 186, 203]: two wraps + ONE deferred landing
+fire, landing exactly on the track's advance class ([5]) — the design visible in data;
+no re-fires. Table-arm schedulers class 0 throughout (odd-boundary cue schedule).
+Uniform 1x clean. Feature-OFF diff IDENTICAL. emu_djdiag ALL GOOD.
+
+Build plumbing: the diag blob outgrew 0x700 B, so **under DJ_DIAG only** the trigscale
+cave moves to 0x400d7bc0 (identity check reported-not-enforced there; the mainline
+keeps 0x400d7b00 and full enforcement). Two dkz branches widened to .w. Diag toast's W
+now counts Hook V's CNTDN alignments (grows per tick while an apply is pending).
