@@ -31499,3 +31499,59 @@ Also worth recording: ColdFire has no `move #imm,abs.l` (`move.l #TAG_MAGIC,SH_T
 Net effect on the shipping builds: **none** -- MUTEMODE_DT and its Bugbuild are bit-identical to
 the 2026-09-21 hardware-confirmed images. Committed with the parked material, so the rollback and
 the shelved design are both recoverable from history.
+
+## Session 101 (2026-09-26, `wip`) — the audible observable found (fire-time table), the bug REPRODUCED in-emulator, root cause reattributed to the WRAP, and V5.8 holds the grid
+
+### V5.7 hardware: still fractional; M0 legitimate (per-track mode — track tps never
+shrinks, nothing to reduce). So the counter we preserve was protected and the sound was
+still wrong → the audible timing lives elsewhere.
+
+### Instrument 1: tools/diag_fire_phase.py — negative, useful
+
+FUN_400a536c entries for track 0 occur ONLY at cycle wraps (t90/t186) — it is the
+REPOSITION callback, not the trig dispatch. 32 entries total across 400 ticks.
+
+### Instrument 2: tools/diag_tablearm_phase.py — THE observable
+
+DAT_80001904 (8 tracks × 8 step-group ints) holds scheduled fire TIMESTAMPS (writer
+0x400a2e18: sample clock 0x4610757c + tempo-table offsets). Watching write instants,
+classes mod tps, per commit segment:
+
+- **V5.7: tracks 0-6 flip [0]→[3] and never return — the audible fractional state,
+  IN THE EMULATOR, for the first time.** The STEP-advance oracle stayed class-stable
+  through the same run: every gate since Session 89 judged the wrong observable.
+- **V5.5 control: same flip** — matches hardware's "V5.7 no better than V5.5".
+- Cross-reading with the ADV column: the flip ORIGINATES AT THE NATURAL WRAP (t90,
+  ADV [5]→[2]; the table follows the track grid one tick behind). The wrap re-runs the
+  commit body; its tail re-phases 1x tracks under a 2x master (CATCHUP = 6−3 = 3).
+  **§6 was never a separate thread — it is the audible bug.** The armed-commit preserve
+  (V5.5+) then carried the wrap-corrupted phase through every subsequent commit,
+  which is exactly "never self-correcting". On hardware the wrap copies fire only
+  sporadically (the Session 100 X-starvation applies at wraps too), hence "usually
+  fractional, occasionally clean" and a single 2x pattern sounding nominal.
+
+### The AR answer (user asked; full record = AR_DIRECT_JUMP.md §9, both repos)
+
+AR carries a (target step `0x405667f4`, sub-step remainder `0x405667f6`) pair from
+request to commit, seeds BOTH the master step and the LIVE master tick-phase
+`0x405666e6` (mislabelled in §2 until now; per-tick ++ at 0x40099962, wrap at
+0x40099974), then rebuilds all 13 tracks from that single anchor. The remainder is
+never discarded; no consumer is left on a different anchor. V5.7's dj_mrem is the same
+mechanism in the same role — the OT bug was never the master seed, it was the wrap.
+
+### V5.8 (mainline `285fadb8`, diag `27257715` = 140C_KDIAG)
+
+ONE change: while DJ_MODE is ON, dj_c's UNARMED path (natural wraps re-enter the same
+commit body) now sets `dj_keep_pend = 0xFFFF` instead of clearing it — the preserve
+covers wraps too. DJ OFF keeps the hygiene clear; at 1x every counter is 0 at a wrap,
+so the preserve is arithmetically inert there. dj_phase3's dead code deleted (cave
+space; blob 1718 B ends 0x400d7ab5, clear of trigscale at 0x400d7b00).
+
+Gates: table-arm 0↔1 — tracks 1/2/5/6 class [0] in EVERY segment; tracks 0/3 transient
+commit-window [0,3] only (the landing step legitimately schedules from the commit
+instant); track 4's mixed read is a known modulus artifact (scale-mismatched track,
+classes computed mod 6 against its own 12-tick grid — refine the tool later). Uniform
+1x: [5] at all 7 commits. Feature-OFF diff: IDENTICAL. emu_djdiag: ALL GOOD.
+
+Behavioral note for the user: with DJ ON, natural wraps of a non-1x-master pattern no
+longer re-phase tracks (that alternation was stock; DJ OFF = stock everywhere).

@@ -765,10 +765,23 @@ dj_c:
 |   reloads registers, so D0 looks dead there, but "looks dead in the disassembly I could
 |   read" is exactly the standard of evidence that has burned this thread before. Replay
 |   both instructions exactly and the question stops mattering.
-    clr.w   dj_keep_pend                | stale-bit hygiene: a NATURAL commit voids any
-                                        | leftover preserve bits (possible only if the
-                                        | transport was stopped inside a previous armed
-                                        | commit's <= tps_master-tick apply window)
+|   Session 101 (measured, tools/diag_tablearm_phase.py): the audible fire-time table
+|   DAT_80001904 follows the TRACK grid, and the class flip that is the fractional
+|   symptom originates at the NATURAL master-cycle WRAP -- the wrap re-runs this same
+|   commit body and its tail re-phases 1x tracks under a 2x master (CATCHUP copy = 3).
+|   The armed-commit preserve then carried that wrong phase forever. So while DIRECT
+|   JUMP is ON, the preserve now covers EVERY commit, wraps included; at 1x every
+|   counter is 0 at a wrap and the preserve is arithmetically inert. DJ OFF keeps the
+|   old hygiene clear, and the hooks themselves are DJ_MODE-gated anyway.
+    tst.l   DJ_MODE
+    beq.b   djc_stock_clear
+    moveq   #-1,%d0
+    move.w  %d0,dj_keep_pend            | DJ ON: preserve through natural wraps too
+    bra.b   djc_stock_replay
+djc_stock_clear:
+    clr.w   dj_keep_pend                | stale-bit hygiene (transport stopped inside a
+                                        | previous commit's apply window)
+djc_stock_replay:
     clr.b   %d0                         | displaced original #1 (stock leaves D0 = 0)
     move.b  %d0,STEP                    | displaced original #2 (STEP = D0 = 0)
     rts
@@ -1521,30 +1534,10 @@ dj_diag_buf:
 | INERT AT 1x BY ARITHMETIC: at 1x, tps_t == tps_master, so PAIR[t] is always 0 AND
 | CATCHUP is already max(0, 0) = 0. The write is a no-op and the Session 87 baseline cannot
 | be affected.
-    .global dj_phase3
-dj_phase3:
-    tst.l   DJ_MODE
-    beq.w   djs3_orig
-    tst.b   G_JUST_COMMITTED
-    beq.w   djs3_orig
-    clr.b   G_JUST_COMMITTED           | one-shot, as Hook P consumed it
-    lea     -16(%sp),%sp
-    movem.l %d0-%d1/%a0-%a1,(%sp)
-    lea     PAIR_ARR,%a0               | word per track
-    lea     CATCHUP,%a1                | byte per track
-    moveq   #0,%d0
-djs3_loop:
-    move.b  1(%a0),%d1                 | LOW byte of the big-endian PAIR word = D7 mod tps_t
-    move.b  %d1,(%a1,%d0.l)            | CATCHUP[t] = the true sub-step phase
-    addq.l  #2,%a0
-    addq.l  #1,%d0
-    cmpi.l  #16,%d0
-    blt.b   djs3_loop
-    movem.l (%sp),%d0-%d1/%a0-%a1
-    lea     16(%sp),%sp
-djs3_orig:
-    tst.l   0x46107568                 | displaced original (sets Z for the caller's bne.w)
-    rts
+| Session 101: dj_phase3's CODE is deleted (the cave overran patch_trigscale's home at
+| 0x400d7b00 once the diag counters grew). The comment above stays as the record of dead
+| end 3; the detour was removed in Session 97 and diag_phase_correlate.py already prints
+| "Hook S ABSENT" when the symbol is missing.
 
     .global dj_ptnrel
 dj_ptnrel:
