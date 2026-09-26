@@ -1,92 +1,105 @@
-# RE coverage vs. firmware features (OS 1.40 manual)
+# RE coverage — what THIS project has mapped
 
-Cross-reference between what we have mapped/decompiled and the complete set of features
-per the official manual (146 pp.). Legend: ✅ done · 🟡 partial (structure found, not fully
-decompiled) · ⬜ untouched.
+**What this file is:** a map of **OT Kyoti FW's own** reverse-engineering coverage —
+which parts of OS 1.40C this project understands well enough to modify, and which are
+still dark — cross-referenced against the feature set in the official manual (146 pp.).
 
-## Key discovery that reframes the remaining work
+**What it is not:** a survey of Octatrack RE as a whole. Other projects have mapped
+things this one has not. Their findings, with per-fact attribution, live in
+[`reference/kb/`](reference/kb/), and the projects themselves are indexed in
+[`reference/EXTERNAL_RESEARCH.md`](reference/EXTERNAL_RESEARCH.md) and credited in
+[`CREDITS.md`](CREDITS.md). Where this project has absorbed such a finding without
+exercising it in a build, the row below says so — that distinction is the point.
 
-**The Octatrack's audio algorithms are NOT in the ColdFire binary.** The MAIN OS is the
-*control*: UI, sequencer, files, and the assembly of voice parameters. The *signal
-processing* — sample playback, **timestretch**, and the **17 effects** (filters, reverbs,
-delays, phaser…) — runs on the **DSP56xxx**, whose program is a **separate binary** that the
+**Scope:** the **ColdFire** control plane *and* the **DSP56300** signal plane, on OS
+1.40C, hardware **MKI**. (The scope rule the research-ingest tooling triages against
+now lives in [`CLAUDE.md`](CLAUDE.md), not here.)
+
+Legend:
+**✅ mapped and exercised** — substantially understood *and* relied on by a build
+here, with no major gap left ·
+**🟡 partial** — key addresses found and often exercised, but a named part is still
+missing ·
+**📖 borrowed** — known only from another project's work, distilled into `kb/`, never
+exercised here · **⬜ untouched**
+
+## Two planes, both in scope
+
+The MAIN OS is the **control plane**: UI, sequencer, files, and the assembly of voice
+parameters. The **signal processing** — sample playback, timestretch and the 17
+effects — runs on the **DSP56300**, whose program is a separate ~188 KB binary the
 ColdFire uploads at startup (`FUN_40001d4c`, 24-bit words).
 
-→ **That blob has since been located, extracted and worked on.** It is `out/dsp_region.bin`
-(DSP56300, ~188 KB), it carries **two payloads** — A for tracks 5–8, B for tracks 1–4 — and
-the project now has a working DSP56300 toolchain (`vendor/dsp56300/`), a module map, an
-emulator (dsp56kEmu) and a dual-core harness (`tools/dsp56300_xcore/`). One effect, the
-**DynamiX COMPRESSOR**, is fully reversed and has been *extended* on hardware (the side-chain
-`KEY` input). So "the audio is a separate project" is no longer the right framing: it is a
-second front in this one, opened but far from finished — 16 of the 17 effects and all of
-timestretch are still untouched.
+Both are in scope for this project. The DSP blob is extracted (`out/dsp_region.bin`),
+carries two payloads (A = tracks 5–8, B = tracks 1–4), and this repo has a working
+DSP56300 toolchain, a module map, an emulator and a dual-core harness. One effect, the
+**DynamiX COMPRESSOR**, is fully reversed and has been *extended on hardware* — the
+side-chain `KEY` input, which is shipped DSP56300 assembly. So the signal plane is a
+second front here, opened and load-bearing but far from finished: **16 of the 17
+effects and all of timestretch remain untouched.**
 
-## Coverage matrix by subsystem
+The honest asymmetry: this project understands the control plane well and the signal
+plane narrowly. Every behaviour mod except the side-chain compressor works by
+intercepting a control-side decision — which voice gets which sample, whether a trig
+fires, when a pattern commits, what the mute gate does — not by processing audio.
 
-| Subsystem (manual ch.) | Status | What we have / what's missing |
+## Coverage matrix
+
+| Subsystem (manual ch.) | Status | What this project has / what is missing |
 |---|---|---|
-| Hardware & boot | ✅ | ColdFire CPU, DSP boot, memory map. Missing: codec/DAC-ADC init, panel (encoders/buttons/LEDs), display driver |
-| OS format & update (8.5.2, ch.18) | ✅ | ELUP/ELEK/aPLib, checksum, validation, ATA write, MIDI upgrade. Complete |
-| Kernel / RTOS / scheduler | ✅ | Context switch, priority queues, PIT, TRAP #0. Missing: task list, allocator |
-| ATA/CF storage | ✅ | ATA stack (PIO/DMA), driver+vtable, registers. Missing: FAT layer (vtable `_DAT_46c82xxx`) |
-| File hierarchy: Sets/Projects/Audio Pool (ch.4,7,8) | 🟡 | Project settings serialization found; the rest missing (banks/parts/samples on disk) |
-| Audio engine (voices) | 🟡 | Data model (voice `0x800049d8`, mailboxes), frame builder, handoff to the DSP. Missing: voice parameter computation, envelopes, amp modulator |
-| Sample playback: FLEX vs STATIC | ⬜ | FLEX=RAM, STATIC=stream from CF. Not decompiled |
-| **Timestretch** (NORMAL/BEAT) | ⬜ | On the DSP (separate binary) |
-| **Effects — Appendix B (17 FX)** | 🟡 | All on the DSP. **DynamiX COMPRESSOR fully reversed** (param map `r6+$0..5` = ATK/REL/THRS/RAT/GAIN/MIX, `+$c` = RMS; detector tap at `x:(r0)+`) and extended with a side-chain `KEY` input, hardware-confirmed. SPRING REVERB's module bounds mapped (it is the donor). The DSP module/dispatch table is mapped. The other 15 FX and timestretch: untouched |
-| Machines — Appendix A (FLEX/STATIC/THRU/NEIGHBOR/PICKUP) | 🟡 | Dispatch by type found (`FUN_40097168`→0-4). **The FLEX/PICKUP sample-slot binding is mapped**: the per-track pre-image at `0x8000082f + track*0x48` byte 0 feeds the resolver, FLEX and PICKUP share one arena and one table and differ only by slot number — that is the Part-change carryover fix. Machine *logic* still not decompiled |
-| Track recorders / Pickup / sampling (ch.9) | 🟡 | The recorder **record/cache** in the Part is mapped and re-applied by the carryover fix; the PICKUP machine's slot ownership is mapped. The actual recording path into buffers is still only a passing glimpse ("ROTATING AUDIO") |
-| Sequencer: clock/tick | ✅ | **Sample-accurate**: clocked by the audio frame ISR (`0x4000aad0`), `2³¹/tempo` phase accumulator; wakes the seq task via a kernel queue |
-| Sequencer: trig → voice | 🟡 | `FUN_400977cc` maps trig→voice command. The per-tick step engine is mapped (ISR `0x400a1e0c` → per-clock-tick body; the commit at `0x400a44d0` and its per-track rebuild tail), as is the voice/trig dispatch region `0x400a2xxx` and the per-track step/prev-step arrays it reads |
-| Trig types / p-locks / sample locks (12.4-12.6) | 🟡 | **Substantially mapped.** The 16 per-pattern p-lock arrays (8 audio + 8 MIDI) and the trig-type layer are both read and written by this project's fixes: the content predicate `FUN_4009a464` (Bug 2), the stored-p-lock writer `FUN_40042158`, and the erase path `opcode 8` → `FUN_40041af4` → `FUN_40038874` (trigless-lock auto-remove). Sample locks still untouched |
-| Conditional locks / micro timing / fill / scales (12.12-12.15) | 🟡 | **Scales are mapped in depth** (DIRECT JUMP): `LEN_TBL` is ticks-per-step, `0x800065b6` is master ticks-within-step, `0x800065b2` the master step, per-track `TRK_SCALE_IX`/length/countdown arrays located, MASTER LENGTH found, and the tick-vs-step domain distinction is the open problem there. Trig conditions and micro-timing are located as per-track serialized fields (RELOAD copies them per track) but their *evaluation* is not decompiled; probability/fill untouched |
-| **Scenes & crossfader** (10.3) | ⬜ | Morphing of locked parameters. The OT's flagship feature. Essentially untouched — only the scene-morph *retrigger* entry point is used (by the carryover fix), not the morph itself |
+| Hardware & boot | ✅ | ColdFire CPU, DSP boot, memory map, the `'ANDY'` battery-SRAM block and its checksum (MUTE MODE persists a word there; the boot restore path `0x4001fb24` is mapped). Missing: codec/DAC-ADC init, panel scan, display driver |
+| OS format & update (8.5.2, ch.18) | ✅ | ELUP/ELEK/aPLib, checksums, validation, ATA write, MIDI upgrade. Complete — every build here round-trips through it |
+| Kernel / RTOS / scheduler | ✅ | Context switch, priority queues, PIT, `TRAP #0`, and the callable primitives (queue post/receive, mutex, task create). ⚠️ `FUN_40000c3c`, the post/wake, is why a UI call from a frame hook crashed a unit — see `CLAUDE.md`. Missing: full task list, allocator |
+| ATA/CF storage | ✅ | ATA stack (PIO/DMA), driver + vtable, registers; the FS vtable (`0x46c823fa`) and its recursive walker (`0x40090a14`) |
+| File hierarchy: Sets/Projects/Audio Pool (ch.4,7,8) | 🟡 | **RELOAD FROM PROJECT reads real pattern slabs off the card**: the bank `.work`/`.strd` pair, per-track sequence extents, and the Part copy associated with a pattern. Project settings serialization mapped. Missing: sample-pool bookkeeping, and writing (this project only reads) |
+| Audio engine (voices) | 🟡 | Voice data model (`0x800049d8`, stride `0xA8`), mailboxes, the control-rate frame builder and the DSP handoff — enough to gate and rebind voices. Missing: voice parameter computation, envelopes, amp modulator |
+| Sample playback: FLEX vs STATIC | 🟡 | The **sample-slot resolution** path is mapped and fixed (below); the playback engine itself is not decompiled. FLEX = RAM, STATIC = streamed from CF |
+| **Timestretch** (NORMAL/BEAT) | ⬜ | On the DSP. Untouched |
+| **Effects — Appendix B (17 FX)** | 🟡 | **DynamiX COMPRESSOR fully reversed and extended on hardware** (param map `r6+$0..5` = ATK/REL/THRS/RAT/GAIN/MIX, `+$c` = RMS, detector tap `x:(r0)+`; plus a cross-core key path). SPRING REVERB's module bounds mapped — it is the donor. The DSP module/dispatch table is mapped. **The FX UI tables are mapped too**: per bus, `LIST` (chooser rows), `ID2POS` (cursor) and `ID2E` (id → parameter-page descriptor, FX1 `0x400d5f58` / FX2 `0x400d5fdc`) — stock's own "unavailable on this bus" convention. The other 15 effects: untouched |
+| Machines — Appendix A (FLEX/STATIC/THRU/NEIGHBOR/PICKUP) | 🟡 | Dispatch by type (`FUN_40097168` → 0-4). **The FLEX/PICKUP slot binding is mapped and fixed**: the per-track pre-image `0x8000082f + track*0x48`, re-seeded by `FUN_40001f18(bank, part, track)`, which stock pairs with a kill bit only when a track *enters* PICKUP — that asymmetry was the Part-change carryover bug. Machine *logic* not decompiled |
+| Track recorders / Pickup / sampling (ch.9) | 🟡 | The recorder **record/cache** in the Part is mapped and re-applied by the carryover fix; PICKUP slot ownership mapped. The recording path into buffers is still only glimpsed |
+| Sequencer: clock / tick | ✅ | **Sample-accurate**: clocked by the audio frame ISR (`0x4000aad0`) via a `2³¹/tempo` phase accumulator, waking the seq task through a kernel queue |
+| Sequencer: trig → voice | 🟡 | `FUN_400977cc` maps trig → voice command; the per-tick step engine (ISR `0x400a1e0c`), the pattern commit (`0x400a44d0`) and its per-track rebuild tail, the dispatch region `0x400a2xxx`, and the per-track step/prev-step arrays are all mapped — this is DIRECT JUMP's territory |
+| Trig types / p-locks / sample locks (12.4-12.6) | 🟡 | **Substantially mapped and exercised from both sides.** The 16 per-pattern p-lock arrays (8 audio + 8 MIDI) and the trig-type layer are read *and written* by shipped fixes: the content predicate `FUN_4009a464` (empty-pattern LED), the stored-p-lock writer `FUN_40042158`, and the erase path `opcode 8` → `FUN_40041af4` → `FUN_40038874` (trigless-lock auto-remove). Sample locks untouched |
+| Pattern scales / conditional locks / micro timing / fill (12.12-12.15) | 🟡 | **Scales mapped in depth** (DIRECT JUMP): `LEN_TBL` ticks-per-step, master ticks-within-step `0x800065b6`, master step `0x800065b2`, per-track scale-index/length/countdown arrays, MASTER LENGTH, and the tick-vs-step domain distinction that is the open problem there. **Trig conditions / FILL** are located: the A:B cycle counters are 16 × u32 at `0x46107918`, advanced by `0x400a536c` on a track step wrap, and per-track pending FILL is 16 × u8 at `0x46107969`, promoted at the next pattern boundary (📖 borrowed, not exercised). Condition *evaluation* and micro-timing *application* are not decompiled |
+| **Scenes & crossfader** (10.3) | 🟡 | The scene-morph **retrigger entry point** is used by the carryover fix. Store geometry (`scene_param_get 0x40031f44`), the frame-ISR morph pair (`0x4000c202`/`0x4000cc60`) and the endpoint buffers (`0x80000ed4`) are mapped at address level (📖 borrowed). The morph *itself* — the OT's flagship feature — is not decompiled |
 | **LFO designer** / LFOs (11.4) | ⬜ | 3 LFOs per track, custom shapes. Untouched |
-| Arranger / song mode (ch.14) | ⬜ | Pattern chaining. Format in OctaLib; code not decompiled |
-| MIDI sequencer (ch.15) | ⬜ | 8 MIDI tracks, notes/CC, MIDI LFOs. MIDI state found; engine not |
-| MIDI I/O & sync (8.7) | ⬜ | MIDI parser, clock sync, transport, Turbo MIDI, CC control. Config found; UART/parser not |
-| Audio editor (ch.13) | ⬜ | Trim/slice/loop points/timestretch setup. Untouched |
-| Mixer / routing / audio crossfader (8.8, 11.6) | 🟡 | **The per-frame mute/solo/cue gate `FUN_40004db8` is fully mapped and hardware-confirmed as *the* gate** (that is MUTE MODE), along with the voice rebind/retrigger paths around it. Main/Cue levels, thru and the audio crossfader: untouched |
-| UI framework (menus, display, LEDs, encoders) | 🟡 | Considerably more than before: the dialog builder `FUN_4006d57c`, the self-timing notification `FUN_4005a2b8`, the modal window/overlay **stack** (`FUN_40031494` push / `0x4003146c` pop, both idempotent) and its single popup slot, the **keymap layer** system with per-key held-flags (`0x46c7d8ee`, 24-B stride) and per-overlay dispatch records, the PERSONALIZE menu arrays, and the `[PTN]`/`[BANK]` press/release window gestures. Display driver and encoder input: still untouched |
-| USB disk mode (8.5.1) | ⬜ | Untouched |
-| System/service: Test mode, Card tools, Personalize, Empty reset (18.1-18.5) | ⬜ | Untouched |
-| Metronome (8.6.6) | ⬜ | Click track. Untouched |
+| Arranger / song mode (ch.14) | 📖 | Not touched by any build here, but mapped at address level: the arrangement lives in battery NVRAM at `0x10000004` (pointer `0x10000000`), header `+18` = row count, rows at `+20`, **22 B each, 48 cap** (row type / pattern / repeat / scene A,B / OF / Ln); on-card as `arr01..arr08.work`/`.strd`, 11,336 B, `FORM`/`DPS1`/`ARRA`. `arranger_goto 0x4004a5c0` calls **the same `seq_goto_pattern 0x400a0570`** the pattern-change path uses, so it inherits that path's light part-apply |
+| MIDI sequencer (ch.15) | 🟡 | The 8 MIDI tracks' **stored** state is mapped and exercised — MIDI p-lock arrays (empty-pattern LED fix), per-track MIDI sequence reload (RELOAD), and the MIDI-vs-audio track distinction that caused a real bug. The MIDI *engine* (note/CC generation, MIDI LFOs) is not decompiled. ⚠️ the MIDI twin of the sequencer commit tail (`0x400a4cb0` area) is **unpatched** where DIRECT JUMP patches the audio one |
+| MIDI I/O & sync (8.7) | ⬜ | Parser, clock sync, transport, Turbo MIDI, CC control. Config found; UART/parser not |
+| Audio editor (ch.13) | ⬜ | Trim/slice/loop points, timestretch setup. Untouched |
+| Mixer / routing / audio crossfader (8.8, 11.6) | 🟡 | **The per-frame mute/solo/cue gate `FUN_40004db8` is fully mapped and hardware-confirmed as *the* gate** (MUTE MODE), with the voice rebind/retrigger paths around it and the per-track DSP frame words that carry level and trig state. Main/Cue levels, thru and the audio crossfader: untouched |
+| UI framework (menus, display, LEDs, encoders) | 🟡 | The dialog builder (`FUN_4006d57c`), the self-timing notification and its live handle (`FUN_4005a2b8`, handle `0x460d1e70`, countdown `0x460d1e6c` — this is QUANTIZE LIVE REC's gate), the modal window/overlay **stack** (`FUN_40031494` push / `0x4003146c` pop, idempotent) and its single popup slot, the **keymap layer** system with per-key held flags (`0x46c7d8ee`, 24-B stride) and per-overlay dispatch records, the PERSONALIZE menu arrays, and the `[PTN]`/`[BANK]` press/release window gestures. Display driver and encoder input: untouched |
+| USB disk mode (8.5.1) | ⬜ | Untouched here. `octemu` implements USB-MIDI and a USB-Audio tap (📖, `kb/`) |
+| System/service: Test mode, Card tools, Personalize, Empty reset (18.1-18.5) | 🟡 | PERSONALIZE's menu arrays and one of its settings (QUANTIZE LIVE REC) are mapped and driven from the front panel. Test mode, Card tools and Empty reset: untouched |
+| Metronome (8.6.6) | ⬜ | Untouched. The one datum: RELOAD is hardware-confirmed not to restart it, so whatever drives it is independent of the sequence reload path |
 
-## Summary
+## Verification coverage
 
-- **Done thoroughly (✅)**: ~5 subsystems — the system "plumbing" (boot, kernel, storage,
-  update, HW map) plus the sequencer clock. The scaffolding: we understand *how the machine
-  works*.
-- **Partial (🟡)**: ~11 — and the partial column is where the last year of work went. The
-  audio data model, the sequencer bridge and its per-tick step engine, p-locks and the
-  trig-type layer, pattern scales, the machine/sample-slot binding, the mute/solo gate, the
-  recorder record, the UI's window/keymap/popup machinery, the project format, and one DSP
-  effect. Most of these were opened *because a bug fix or a feature needed them*, which is
-  why the coverage is deep and narrow rather than broad.
-- **Untouched (⬜)**: ~8 — timestretch, 16 of the 17 effects, the playback engine, scenes and
-  the crossfader, LFOs and the LFO designer, the arranger, the MIDI subsystem, the audio
-  editor, USB disk mode.
+Distinct from firmware coverage, and worth stating because it bounds every claim above:
 
-**The honest shape of it:** this project understands the Octatrack's *control plane* well and
-its *signal plane* barely. Every behaviour mod here works by intercepting control-side
-decisions — which voice gets which sample, whether a trig fires, when a pattern commits, what
-the mute gate does — and none of them synthesize or process audio, with the single exception
-of the side-chain compressor's DSP work.
+- **Route A** (octabam's Unicorn ColdFire harness) boots our real patched images, mounts
+  a card, loads a project and runs the sequencer. It proves **control flow and logic**.
+- **`ot_emu`** (octabam's C++ ColdFire + DSP56300 port) renders real audio and runs
+  ~11x faster; `--steps` drives multi-phase diagnostics natively.
+- **dsp56kEmu** via `dsp_host` plus `tools/dsp56300_xcore/` covers the DSP side.
+- **Neither proves hardware behaviour.** Three separate bugs here were invisible to both
+  and only fell to an on-screen diagnostic build on the unit: scratch RAM at
+  `0x80006a40+` not surviving under live audio, a frame-hook UI call crashing the unit,
+  and DIRECT JUMP's non-1x phase error. "Emulator green" is evidence about the logic,
+  never about the machine.
 
-## Suggested priorities (highest value first)
+## Where the remaining value is (highest first)
 
-1. ~~Close out the sequencer clock~~ ✅ **DONE** — sample-accurate, frame ISR + phase
-   accumulator; the per-clock-tick step engine and the commit path are mapped too.
-2. ~~Locate and extract the DSP56xxx program~~ ✅ **DONE** — `out/dsp_region.bin`, DSP56300,
-   ~188 KB, two payloads (A = tracks 5–8, B = tracks 1–4). ~~Disassemble it~~ ✅ **DONE** —
-   toolchain in `vendor/dsp56300/`, module map distilled, dsp56kEmu + a dual-core harness in
-   `tools/dsp56300_xcore/`, and one effect (DynamiX COMPRESSOR) fully reversed and extended
-   on hardware. **Still open: the other 16 effects and timestretch.**
-3. **Sample playback engine** (ColdFire side): FLEX vs STATIC, how voices are fed to the DSP.
-   Partly opened by the machine/slot-binding work — the resolver and the per-track pre-image
-   are mapped, the playback itself is not.
-4. **Sequencer depth** — the remaining half: conditional-lock *evaluation*, micro-timing
-   *application*, sample locks, and scenes/crossfader morphing. P-locks, the trig-type layer
-   and pattern scales are already mapped.
-5. **MIDI subsystem** (parser, sync, MIDI seq) and the **display/encoder** half of the UI —
-   the menu/window/keymap half is now mapped.
+1. **DIRECT JUMP's non-1x scales** — the one unfinished feature, and the only open
+   thread. The non-1x work continues on `wip`; this branch carries the 1x-confirmed build.
+   See `reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md`.
+2. **Sample playback engine** — the resolver and per-track pre-image are mapped; the
+   playback itself is not. The natural next depth on the control side.
+3. **Scenes & crossfader morph** — address-level starting points exist (borrowed); this
+   is the OT's flagship feature and the largest untouched control-plane subsystem.
+4. **The other 16 DSP effects and timestretch** — the toolchain, the module map and one
+   worked example (COMPRESSOR) all exist, so the cost here is now effort, not access.
+5. **Sequencer depth** — conditional-lock *evaluation*, micro-timing *application*,
+   sample locks; and the **MIDI twin** of the commit tail that DIRECT JUMP leaves unpatched.
+6. **MIDI I/O** (parser, sync) and the **display/encoder** half of the UI.

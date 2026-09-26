@@ -19,6 +19,25 @@ not, so treat what's below as the guaranteed minimum, then go read them.**
    distillation. `.claude/skills/pull-research/` is the one-command way to
    check upstream and fold anything new into `kb/`.
 
+## Scope of this project
+
+**Both planes, on OS 1.40C, hardware MKI:** the **ColdFire** control plane *and* the
+**DSP56300** signal plane. This repo ships DSP56300 assembly — the SIDE-CHAIN
+COMPRESSOR's `KEY` input is hardware-confirmed — so the DSP is **not** out of scope,
+and any older note saying "ColdFire-only" or "the DSP side is out of scope per
+COVERAGE.md" predates that and is wrong.
+
+In practice the DSP is a **second front pursued when a feature or bug needs it**, which
+is how the side-chain happened. So when triaging an upstream repo's work:
+- **In scope:** DSP mechanisms, dispatch/module maps, the toolchain and emulator, the
+  level law and frame protocol, and any effect this project touches or might donate.
+- **Not for us** (say so explicitly rather than skipping silently): per-effect ear
+  tuning of effects this project does not ship, kit/slot schemes we have not adopted,
+  and synth emulation unrelated to the Octatrack.
+
+[`COVERAGE.md`](COVERAGE.md) is the map of what is actually mapped so far; it is
+descriptive, and this section is the policy.
+
 ## Hard constraints (do not relearn these the hard way)
 
 - **Never call a UI or kernel primitive from an engine/frame hook — and do not

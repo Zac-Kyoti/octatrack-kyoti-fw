@@ -49,12 +49,19 @@ repo's lock line pointing past a commit you have not actually looked at.**
    root) — most of these projects (octabam, ems-octakit, midisc) keep a
    running technical changelog that's faster to read than raw commits.
 
-4. **Triage against this project's actual scope** (`COVERAGE.md`): ColdFire-side
-   OS 1.40C behaviour on the **MKI**. A repo's own DSP-effect-tuning work,
-   256-slot/kit schemes we haven't adopted, or synth-emulation work unrelated
-   to the Octatrack (e.g. anything in `dsp56300/gearmulator` beyond the
-   `dsp56300` core submodule) is legitimately "not for us" — say so explicitly
-   rather than silently skipping it.
+4. **Triage against this project's actual scope** — the policy is `CLAUDE.md`
+   "Scope of this project", not `COVERAGE.md` (which is the descriptive map of
+   what is mapped so far). In short: OS 1.40C on the **MKI**, **both** the
+   ColdFire control plane and the **DSP56300 signal plane** — this repo ships DSP
+   assembly, so DSP mechanisms, module/dispatch maps, the toolchain, the emulator
+   and any effect we touch or might donate are all IN scope. Legitimately "not for
+   us": per-effect ear tuning of effects we do not ship, 256-slot/kit schemes we
+   haven't adopted, and synth emulation unrelated to the Octatrack (e.g. anything
+   in `dsp56300/gearmulator` beyond the `dsp56300` core submodule). Say so
+   explicitly rather than silently skipping it.
+   ⚠️ Entries in `UPSTREAM_INBOX.md` stamped "out of scope per COVERAGE.md" predate
+   this correction — octabam's DSP-effect passes among them. Re-triage one before
+   treating it as settled.
 
 5. **Distill what's relevant into the right `reference/kb/*.md` file(s).**
    Match the existing style in that file: dense prose/tables keyed by address,
