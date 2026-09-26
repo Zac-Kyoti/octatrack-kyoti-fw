@@ -1,23 +1,23 @@
 # Credits & lineage
 
-OT Kyoti FW **began as a fork of [`mxldyn/octamax`](https://github.com/mxldyn/octamax)**
-by Maxolydian and stands on a wider body of Octatrack reverse-engineering work.
-Nothing here would exist without the projects below.
+OT Kyoti FW is an independent project that stands on a wider body of Octatrack
+reverse-engineering work. Nothing here would exist without the projects below.
 
-## Direct lineage
+## Where the concepts came from
 
 - **[octamax](https://github.com/mxldyn/octamax)** — Maxolydian.
-  The workspace this project is built on: the container/update-chain analysis, the
-  reproducible guarded-patch/build pipeline, the code-cave detour method, the
-  PERSONALIZE-menu mapping, and the first round of behaviour mods (lazy Part
-  transitions, no BANK/PTN countdown, arp key scales, boot branding, LED dirty
-  indicators). Those mod patch sources and the bundle builder (`build.py`) are
-  kept in [`tools/attic/`](tools/attic/) for reverse-engineering
-  cross-reference — they are not part of any OT Kyoti FW build — and the design
-  notes are in [`reference/upstream-notes.md`](reference/upstream-notes.md).
-  octamax ships no `LICENSE` file; this project exists under GitHub's Terms of
-  Service and keeps octamax's stance — educational use only, no binaries
-  redistributed.
+  The project whose *ideas* this one started from: reading the container and
+  update chain, patching the OS image with guarded binary edits, using code-cave
+  detours, the PERSONALIZE-menu mapping, and the first round of behaviour mods
+  (lazy Part transitions, no BANK/PTN countdown, arp key scales, boot branding,
+  LED dirty indicators). **No octamax code is used in any OT Kyoti FW build** —
+  what carried over is the concepts. Octamax's own mod patch sources and bundle
+  builder (`build.py`) are kept in [`tools/attic/`](tools/attic/) for
+  reverse-engineering cross-reference only, and its design notes are in
+  [`reference/upstream-notes.md`](reference/upstream-notes.md).
+  octamax ships no `LICENSE` file; those reference copies are offered under
+  GitHub's Terms of Service, keeping octamax's stance — educational use only, no
+  binaries redistributed.
 
 ## The harness this project verifies against
 

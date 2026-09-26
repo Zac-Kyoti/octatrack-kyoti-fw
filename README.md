@@ -25,11 +25,8 @@
 >
 > The features list on the `main` branch will be updated as new builds roll out.
 
-Built on the method and infrastructure of
-[`mxldyn/octamax`](https://github.com/mxldyn/octamax) by Maxolydian — the
-container and update-chain analysis, the guarded binary-patch pipeline, the
-code-cave detour technique, and the flashing procedure. Full lineage and
-acknowledgements: [`CREDITS.md`](CREDITS.md).
+Influenced by the concepts of [`mxldyn/octamax`](https://github.com/mxldyn/octamax)
+by Maxolydian and other Octatrack RE projects — full credits in [`CREDITS.md`](CREDITS.md).
 
 ---
 
@@ -72,8 +69,9 @@ ingest are there only. Each branch's own `START_HERE.md` §6 describes that bran
   every power-on.
   **Still in development — the one unfinished feature.** Confirmed on hardware at
   1x scales. Under a master scale other than 1x a switch can land on a fractional
-  step; V5.7 closes the two causes a diagnostic build measured on the unit, and is
-  awaiting a flash.
+  step, and a 2x track can play a spurious off-grid trig once per cycle. Successive
+  V5.x builds have closed causes a diagnostic build measured on the unit and made a
+  large improvement on hardware; the remainder is still being worked.
   → [`tools/build_directjump_v5.py`](tools/build_directjump_v5.py) ·
   handoff [`reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md`](reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md)
 
@@ -193,7 +191,7 @@ All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit
 | MUTE MODE — all four modes, menu, SOLO | `build_mutemode_dt.py` | **confirmed, final** 2026-09-21 |
 | ↳ mode survives a power cycle | `build_mutemode_dt.py` | **confirmed** |
 | DIRECT JUMP — 1x scales | `build_directjump_v5.py` | **confirmed** 2026-09-23 |
-| ↳ master scales other than 1x | `build_directjump_v5.py` | **open** — V5.7 built, awaiting a flash |
+| ↳ master scales other than 1x | `build_directjump_v5.py` | **open** — improved on hardware by V5.8; residual still being worked on `wip` |
 | SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` | **confirmed, final** 2026-09-20 |
 | ↳ a project still using the donated effect loads as NONE | `build_sidechain3.py` | **confirmed, final** 2026-09-25 |
 | RELOAD FROM PROJECT — both chords | `build_reload3.py` | **confirmed, final** 2026-09-25 |
@@ -273,7 +271,7 @@ reference/kb/        distilled knowledge base (addresses, formats, DSP, code cav
 reference/           MERGE.md allocation map, per-feature specs, external-RE index
 reference/handoffs/  per-thread handoffs for the work still open
 tools/               build scripts, ColdFire patch sources, emulators, packers
-tools/attic/         inherited octamax patch sources — RE cross-reference, not built
+tools/attic/         third-party reference patch sources — RE cross-reference, not built
 sysex/               the MIDI Plays-Free fix as JSON hunks + a no-assembler applier
 refs/                external-RE repo manifest; the clone cache under it is git-ignored
 fetch-os.sh          download + extract the official OS
@@ -283,9 +281,8 @@ disasm.sh            radare2 disassembly (m68k BE, base wired)
 ```
 
 Downloaded Elektron binaries and generated images (`downloads/`, `out/`,
-`vendor/*.bin`, `*.syx`, `*.bin`) are **git-ignored on purpose**. Maxolydian's own
-octamax behaviour mods are **not** part of any KYOTI build; their patch sources are
-kept in [`tools/attic/`](tools/attic/) for reverse-engineering cross-reference (see
+`vendor/*.bin`, `*.syx`, `*.bin`) are **git-ignored on purpose**. The reference
+sources in [`tools/attic/`](tools/attic/) are **not** part of any KYOTI build (see
 [`CREDITS.md`](CREDITS.md)).
 
 ---
@@ -326,13 +323,12 @@ original bytes + replacement bytes); see [`sysex/README.md`](sysex/README.md).
 Original work in this repository (notes, scripts, patch sources, build tooling)
 is released under the **[MIT License](LICENSE)**. The exclusions are spelled out
 in the LICENSE file. In short: no Elektron firmware or manual is included or
-licensed, `tools/attic/` is inherited from octamax and keeps its own status, and
+licensed, `tools/attic/` holds third-party reference sources that keep their own status (see `CREDITS.md`), and
 third-party code fetched at build time keeps its own license. Code under
 GPL-family licenses is used as reference only, never copied in.
 
 ---
 
-*OT Kyoti FW is an independent, unofficial, educational project derived from
-`mxldyn/octamax`. "Elektron" and "Octatrack" are trademarks of Elektron Music
+*OT Kyoti FW is an independent, unofficial, educational project. "Elektron" and "Octatrack" are trademarks of Elektron Music
 Machines MAV AB, used here only to identify the hardware under study. Not
 affiliated with or endorsed by Elektron.*

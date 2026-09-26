@@ -13,9 +13,11 @@ Running Claude on this Mac auto-loads the project memory
 digest of state. Treat it as the summary; this repo's docs are the detail.
 
 Local repo: `~/Documents/octatrack-kyoti-fw/` (was `~/Documents/octamax/` until
-2026-09-01). Published as <https://github.com/Zac-Kyoti/octatrack-kyoti-fw>; began
-as a fork of `mxldyn/octamax`, derived from it since. Remotes: `origin` = the
-published repo, `upstream` = mxldyn (fetch only, for `whatsnew.py`).
+2026-09-01). Published as <https://github.com/Zac-Kyoti/octatrack-kyoti-fw>. It is an
+independent project, **not** a fork in any sense that matters: none of octamax's code
+is in a build, only its concepts (credit lives in `CREDITS.md` and one README line —
+keep it there). Remotes: `origin` = the published repo, `upstream` = mxldyn (fetch
+only, for `whatsnew.py`).
 
 ## 1. Read order for a new chat
 
@@ -104,11 +106,11 @@ published repo, `upstream` = mxldyn (fetch only, for `whatsnew.py`).
 
 ## 5. Shipped / in-flight work
 
-Two branches. **`main`** is the shipping line: the six finished, hardware-confirmed
-features plus the shared knowledge base. **`wip`** (this) is the active frontier —
-those six, plus a seventh finished feature not yet promoted, the Bugbuild
-composites, and the two threads still open. Octamax's current state is tracked via
-`refs/octamax/` (see `reference/EXTERNAL_RESEARCH.md`), not a mirrored branch.
+Two branches. **`main`** is the shipping line: every finished, hardware-confirmed
+feature (including RELOAD3, PARTREAPPLY and the Bugbuild tooling). **`wip`** (this) is
+`main` plus the one open thread, DIRECT JUMP, and the external-RE knowledge-base
+ingest. Upstream RE repos are tracked via `refs/` (see `reference/EXTERNAL_RESEARCH.md`),
+not a mirrored branch.
 
 **Finished and hardware-confirmed on the MKI** (per-feature detail and flash dates:
 `README.md` → *Hardware-test status*, and `BUILD_KYOTI.md`):
@@ -130,18 +132,19 @@ each other. Not flashed; the composition itself is proven by a per-run
 interlock proof. There is deliberately **no single all-in-one image**:
 `tools/build_merged.py` stays withdrawn so a combined build cannot quietly ship an
 unfinished feature. `reference/MERGE.md` is the authoritative allocation map it will
-be rebuilt from, and stages the merge as `KYOTI_V1.0` (the seven finished mods,
-nothing to resolve) then `KYOTI_V1.1` (+ DIRECT JUMP + RELOAD3).
+be rebuilt from, and stages the merge as `KYOTI_V1.0` (the seven mods finished when
+it was written, nothing to resolve) then `KYOTI_V1.1` (+ DIRECT JUMP + RELOAD3; RELOAD3
+has since been confirmed final, the map not yet re-cut).
 
 **Not a shipped fix:** the MIDI LFO SETUP knobs sending CC on the twin audio channel
 (the item older notes called "Bug 2", before that number was reused for the
 pattern-LED fix) — emulation says it is **likely already fixed in stock 1.40C**,
 awaiting a hardware check. `tools/emu_lfocc.py`.
 
-**Not part of any build:** Maxolydian's own octamax behaviour mods (branding, no
-BANK/PTN countdown, lazy Part transitions, arp key-scales, LED dirty indicators).
-Patch sources kept for RE cross-reference in `tools/attic/`; design notes in
-`reference/upstream-notes.md`; credit in `CREDITS.md`.
+**Not part of any build:** the third-party reference patch sources in `tools/attic/`
+(branding, no BANK/PTN countdown, lazy Part transitions, arp key-scales, LED dirty
+indicators). Kept for RE cross-reference; design notes in `reference/upstream-notes.md`;
+credit in `CREDITS.md`.
 
 **External-RE knowledge base** — `reference/kb/*.md`, the address-keyed distillate of
 the 6 prior-art repos (octabam DSP map + kernel/RTOS + step-mask map, OctaLib file
@@ -154,60 +157,71 @@ ems-octakit's `abi.inc` ~500-address map → `kb/octakit-abi.md`, the keymap/key
 
 ## 6. Current frontier — UPDATE THIS EACH SESSION
 
-**As of 2026-09-25, on `wip` (Session 99).** `main` is no longer meaningfully behind on
-finished work: RELOAD3 (final), QLREC's stateless rewrite and SIDECHAIN3's UI fix
-(final) were promoted there on 2026-09-25, and it already had PARTREAPPLY and the
-Bugbuild tooling.
+**As of 2026-09-26, on `wip` (Session 102 committed; a Session 103 experiment is
+uncommitted in the tree).** `main` is not behind on finished work: RELOAD3, QLREC's
+stateless rewrite and SIDECHAIN3's UI fix were promoted 2026-09-25, and it already had
+PARTREAPPLY and the Bugbuild tooling.
 
 **What this branch has that `main` does not:** the open **DIRECT JUMP** thread
 (`build_directjump_v5.py` and its diagnostics), the external-RE
 **knowledge-base ingest** (`reference/kb/caves.md`, the enlarged `memory-map.md` /
-`techniques.md`, `refs/` local patches), NOTES Sessions 89-90 / 97 / 99, and three extra
-`CLAUDE.md` hard constraints that go with that KB material.
+`techniques.md`, `refs/` local patches), the NOTES sessions for that work, and extra
+`CLAUDE.md` hard constraints that go with the KB material.
 
-> ⚠️ **Three claims that sat here until 2026-09-25 were stale**, having survived the
-> 2026-09-24 merge that made them false: that `main` lacked PARTREAPPLY's Session 81
-> build (the files are byte-identical on both branches), that it lacked Bugbuilds
-> "entirely" (`build_bugbuilds.py` runs there and produces all five composites), and
-> that it "still carries the withdrawn `build_merged.py`" (it exists on **neither**
-> branch). Check this section against the tree before trusting it.
+> Check this section against the tree before trusting it — it has gone stale before
+> (2026-09-25: three claims about `main` that a merge had already made false).
 
 **One thread is open (DIRECT JUMP). Everything else in §5 is finished, RELOAD3 included.**
 
 ### DIRECT JUMP — hardware-confirmed at 1x; non-1x scales are the whole remaining problem
 
-`build_directjump_v4.py` (v1–v3 are dead on hardware, superseded). Flashed 2026-09-23,
-and **this is the baseline to not regress**: tracks and patterns stay in master time
-through a switch, patterns land on the correct step, mixed track lengths in one
-pattern work together (7 / 12 / 16), MASTER LENGTH is respected including `INF`.
+`build_directjump_v5.py` (v1–v4 superseded). **Baseline to not regress**, flashed
+2026-09-23 at 1x scales: tracks and patterns stay in master time through a switch,
+patterns land on the correct step, mixed track lengths in one pattern work together
+(7 / 12 / 16), MASTER LENGTH is respected including `INF`.
 
-**Non-1x scales: root-caused and FIXED (Session 88), not yet flashed.** Hook P read
-`MASTER_STEP` once and used that single value as `new_step` for all 16 tracks, but
-`STEP_ARR[t]` must hold the *track's* step index — equal only when
-`tps_master == tps_track`, i.e. only at 1x. The fix changes the hook's **input**, not
-its job: it reads `NEXT_STEP[t]` (`ceil(D7 / tps_t)`), the per-track quantity stock's
-own rebuild already computed at `0x400a4916`, and still supplies the modulo-track-length
-that is the only reason the hook exists. At 1x with equal lengths it is bit-identical to
-the confirmed build, so the baseline is preserved **by construction**. Measured PRE/POST
-on four fixtures; DJ-OFF byte-identical to stock across 38 samples with the scratch block
-poisoned.
+**Non-1x scales — how the thread got here.**
 
-> **Retired:** the handoff's section 5 asked whether `CNTDN_TBL` (`0x800065c3[t]`) is a
-> one-shot trig arm or AR's per-track rate reload. Re-derived from `0x400a4992`-`0x400a49ca`:
-> `CNTDN_TBL[t] = max(1, tps_master + 1 - tps_t)`. Both prior claims describe the same
-> array, it degenerates to 1 whenever the master is at least as fast as the track, and it
-> equals the 1x control in the failing case — so it never explained the symptom, and
-> section 4's pairing with AR's `0x405667c7` is wrong. Session 85 was right not to write it.
-> **`reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md` is stale on this point.**
+1. *Session 88 (Hook P, per-track step index).* Correct on paper, **flashed, and broke
+   the 1x baseline; reverted.** The step-index theory was not the audible bug.
+2. *Sessions 97–99 (V5.5).* The stock commit tail destroys each track's sub-step tick
+   counter, so a track on a different ticks-per-step than the master lands mid-step.
+   V5.5 preserved the counter by suppression (Hooks Z/X). **Hardware-rejected.** The
+   emulator could not provoke the failure; a diagnostic build's on-screen toast
+   (`A Z X Y P R`) measured it on the unit instead.
+3. *Session 100 (V5.7).* The toast proved two holes: the mod-reduce sat at a site the
+   unit runs for only some tracks (moved into Hook Z), and commits land mid-master-step
+   (the master tick counter is now seeded with the remainder). Still fractional.
+4. *Session 101 (V5.8).* The audible observable was found — the scheduled fire-timestamp
+   table, `tools/diag_tablearm_phase.py` — and the bug reproduced in the emulator: the
+   half-step flip originates at **natural pattern wraps**, which re-enter the commit body
+   and re-phase 1x tracks under a 2x master. V5.8 preserves through wraps too. **On the
+   unit: a large improvement** — fractional is now confined to the landing interval and
+   heals at the cycle restart.
+5. *Session 102 (V5.9).* The `V5_8D2` toast showed the residual is **not** the
+   master-remainder case (N1 of A6). It also named a new symptom present since V5.8: a
+   spurious trig once per cycle on the 2x track, half a step off-grid — the tail's
+   reposition fire and the track's own advance fire, exclusive in stock only because
+   stock zeroes the counter, both running under the wrap-preserve. V5.9's Hook W cut
+   that conditionally; the suppression path is unreachable in the emulator, so hardware
+   decides. **Session 103 (uncommitted) is replacing Hook W with a Hook V** that defers
+   each track's whole apply to its own step boundary — read the working tree and
+   `NOTES.md` before assuming which is current.
 
-**Still open, and NOT explained by that fix:** a hardware report that the steps visited
-depend on which trigs are on the grid, and that the LEDs and the audio disagree about
-position. No measured write path reads trig data, so it is a separate mechanism.
+**Method lessons, hard-won:** the emulator judges STEP advances, which was the wrong
+observable — trust the fire-timestamp table. Diagnostic builds with an on-screen toast
+beat further static analysis (also how RELOAD3 and QLREC were cracked). Do not keep
+state in `0x80006a40..0x80006abf`. MIDI twin sites of the patched blocks
+(`0x400a4cb0` area) are still unpatched — audio-only coverage.
 
-The position rule is AR's own commit arithmetic ported verbatim
-(`reference/AR_DIRECT_JUMP.md`); the prose spec is retired. The mode deliberately does
-not persist — OFF on every power-on. Detail: `NOTES.md` "Session 15" + "Session 21" +
-"Session 35" → "Session 60"–"Session 88".
+**Still open from earlier:** a report that the visited steps depend on which trigs are
+on the grid, and that LEDs and audio disagree about position.
+
+The position rule is the Analog Rytm's own commit arithmetic (`reference/AR_DIRECT_JUMP.md`,
+incl. its §9 re-review). The mode deliberately does not persist — OFF on every power-on.
+Handoff: `reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md` (the older
+`DIRECTJUMP_SCALES_HANDOFF.md` is stale — its `CNTDN_TBL` section 5 was retired).
+Detail: `NOTES.md` "Session 15" + "Session 21" + "Session 35", then "Session 60"–"Session 102".
 
 ### RELOAD FROM PROJECT — RELOAD3, FINAL (hardware-confirmed 2026-09-25)
 
