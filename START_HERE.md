@@ -155,8 +155,9 @@ ems-octakit's `abi.inc` ~500-address map → `kb/octakit-abi.md`, the keymap/key
 ## 6. Current frontier — UPDATE THIS EACH SESSION
 
 **As of 2026-09-25, on `main` (this branch).** Everything finished is here, including
-the two features promoted on 2026-09-25: **RELOAD3** (final, hardware-confirmed) and
-**QLREC**'s stateless rewrite (which removes the `0x400522ca` hook that crashed a unit).
+the three things promoted on 2026-09-25: **RELOAD3** (final, hardware-confirmed),
+**QLREC**'s stateless rewrite (which removes the `0x400522ca` hook that crashed a unit),
+and **SIDECHAIN3**'s UI fix (a donated effect loads as NONE; hardware-confirmed, final).
 
 **The Bugbuild tooling is on this branch and runs here.** `tools/build_bugbuilds.py`
 plus every feature builder and bug-fix patch it needs; a full run on this tree produces
@@ -173,9 +174,9 @@ branch one. PARTREAPPLY is also current here (byte-identical to `wip`).
 > section against the tree rather than trusting it; that is what it is for.
 
 **What is on `wip` and not here:** the DIRECT JUMP V5.x thread (the one open feature),
-SIDECHAIN3's UI fix, the external-RE knowledge-base ingest (`reference/kb/caves.md` and
-the enlarged `memory-map.md` / `techniques.md`), the `refs/` local-patch set, and NOTES
-Sessions 89-91 / 97 / 99. `wip`'s `CLAUDE.md` also carries three extra hard constraints
+the external-RE knowledge-base ingest (`reference/kb/caves.md` and the enlarged
+`memory-map.md` / `techniques.md`), the `refs/` local-patch set, and NOTES
+Sessions 89-90 / 97 / 99. `wip`'s `CLAUDE.md` also carries three extra hard constraints
 that belong with that KB material (cave selection, borrowed addresses, octabam syncs).
 
 **One thread is open (DIRECT JUMP). Everything else in §5 is finished, RELOAD3 included.**

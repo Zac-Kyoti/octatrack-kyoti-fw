@@ -44,8 +44,8 @@ Which builds have run on real hardware and which are emulator-only is tracked in
 [Hardware-test status](#hardware-test-status) — **read it before you flash.**
 
 **Branches.** `main` is the published line and carries everything finished, including
-RELOAD3, QLREC's stateless rewrite, the part-change carryover fix and the Bugbuild
-tooling. `wip` is the active frontier: the DIRECT JUMP thread, SIDECHAIN3's UI fix and
+RELOAD3, QLREC's stateless rewrite, the part-change carryover fix, SIDECHAIN3's UI
+fix and the Bugbuild tooling. `wip` is the active frontier: the DIRECT JUMP thread and
 the external-RE knowledge-base ingest are there only. Each branch's own `START_HERE.md`
 §6 describes that branch.
 
@@ -102,12 +102,17 @@ the external-RE knowledge-base ingest are there only. Each branch's own `START_H
   filtered key. This is a DSP56300 job; the code space is donated by **SPRING
   REVERB**, an FX2-exclusive effect pulled from the FX2 list and null-stubbed for
   older projects — **SPATIALIZER is untouched** and stays a normal selectable
-  effect. **Hardware-confirmed on MKI (2026-09-20)**, single-core and cross-core
-  both. A very mild HP↔OFF filter-pop remains, filed as research-only; it does
-  not block shipping.
+  effect. A project that still uses SPRING REVERB loads as **NONE** in the UI —
+  NONE's page, no knobs, `NONE` in the name field — instead of drawing SPRING's own
+  page over a silent DSP slot. Stock already marks an effect unavailable on a bus
+  this way, and the fix finishes that convention: a 2-byte data change in the FX2
+  bus's id→descriptor table (FX1's already pointed at NONE), no new code.
+  **Hardware-confirmed on MKI (2026-09-20)**, single-core and cross-core both; the
+  UI fix was flashed and confirmed working later, and is **final**. A very mild
+  HP↔OFF filter-pop remains, filed as research-only; it does not block shipping.
   → [`tools/build_sidechain3.py`](tools/build_sidechain3.py) →
   `OCTATRACK_SIDECHAIN3_CROSS` · write-up [`NOTES.md`](NOTES.md) "Session 17"
-  (+1–8) → "Session 77" (×3)
+  (+1–8) → "Session 77" (×3) → "Session 91" (UI fix)
 
 - **RELOAD FROM PROJECT** — reload a single track's sequence from the CF card
   **without touching the transport**. Stock can only reload a whole bank, and
@@ -284,7 +289,7 @@ Never cut power during `UPDATING FLASH`. Full procedure and recovery net:
 | MUTE MODE — all four modes (`OT` / `OTFX` / `OTFX-T` / `DT-T`), menu, SOLO handling | `build_mutemode_dt.py` | **confirmed, final** — flashed and hardware-tested 2026-09-21, MKI |
 | ↳ `'ANDY'`-shadow persistence (survives power cycle) | `build_mutemode_dt.py` | **confirmed** — one persisted word, defaults verified on hardware |
 | DIRECT JUMP pattern-change mode | `build_directjump_v4.py` | **confirmed at 1x; the non-1x fix is unflashed** — flashed 2026-09-23: master time held through switches, correct landing step, mixed track lengths (7/12/16), MASTER LENGTH respected incl. `INF`, all at 1x. Non-1x scales were root-caused and fixed 2026-09-24 (Hook P was using the master step as every track's step index); emulator-validated, bit-identical to the confirmed build at 1x, **not yet on hardware**. A separate report — visited steps depending on the trigs present, LEDs and audio disagreeing — is unexplained and still open |
-| SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | **confirmed, final** — flashed 2026-09-20, MKI, single-core and cross-core both. Donor is SPRING REVERB (pulled from the FX2 list); SPATIALIZER untouched |
+| SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | **confirmed, final** — flashed 2026-09-20, MKI, single-core and cross-core both. Donor is SPRING REVERB (pulled from the FX2 list); SPATIALIZER untouched. **UI fix** — a project still using the donated effect loads as NONE in the UI instead of drawing SPRING's page — flashed and confirmed working on the MKI, declared final 2026-09-25 |
 | RELOAD FROM PROJECT — two direct chords | `build_reload3.py` (`[PTN]`/`[BANK]` + `[TRACK n]`) | **confirmed, final** — flashed 2026-09-25, MKI: the intermittent failure where the toast said RELOADED but the edited sequence kept playing no longer occurs, and the user reports no RELOAD issue remaining. Root cause, found with an on-screen diagnostic build: the reload's own request bytes lived in a RAM block the unit overwrites, so it sometimes reloaded a different (MIDI) track; they now live in the patch's own memory. Earlier flashes 2026-09-23/24 confirmed both chords and reloads "quick and on-time". All-tracks and whole-bank variants deferred |
 | Empty-pattern LED fix | `build_pattern_led.py` | **confirmed** — flashed 2026-09-13, grid LED lights correctly, no regression |
 | Erase empty trigless locks | `build_triglock.py` | **confirmed, final** — flashed 2026-09-21, MKI; multi-pass erase, last-lock removal, ordinary trigs, and `FUNC`+`TRIG` placeholders all preserved |

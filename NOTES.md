@@ -29813,6 +29813,80 @@ Does NOT explain: the hardware report that visited steps depend on WHAT TRIGS AR
 and that LEDs and audio disagree. No measured write path reads trig data. **Do not assume the
 flash resolves that**; it is a separate, still-unexplained mechanism.
 
+## Session 91 (2026-09-25, `wip`) — SIDECHAIN3: a donated effect now loads as NONE in the UI, not just silently in the DSP. Found the id→descriptor tables (two of them)
+
+Ask: a project that still uses the effect whose DSP module we donated should load
+**NONE** — NONE's defaults in the UI, no knobs, no labels, `NONE` in the 12-char name
+field at the bottom of FX page 1 — and the mechanism must be respectful of whichever
+effect a given build donates, not hardcoded to SPRING REVERB.
+
+### What was already right, and the one piece that wasn't
+
+The build already did two of the three things stock does for an unavailable effect:
+dropped it from the chooser `LIST` and pointed `ID2POS[0x15]` at row 0, which is why
+the picker already landed on NONE. What it never touched is the table that actually
+decides **what page gets drawn** for a stored id.
+
+**`ID2E`: `u32[id]` → parameter-page descriptor (`E+0x38`), 32 entries — and each bus
+has its own copy: FX1 `0x400d5f58`, FX2 `0x400d5fdc`.** Exactly the same two-copies
+trap as `FX1_ID2POS`/`ID2POS` in Session 56, sitting `0x84` apart. Found by dumping
+both and disassembling every consumer: 7 sites per bus (`lea TBL,%a0; move
+%a0@(0,%d0:l:4)`, `%d0` = the id read from Part storage `+0x8ed80`/`+0x8ed88`),
+covering page render, the name field, chooser highlight staging, p-lock/CC naming.
+Checked all 14 — **no scan-by-id fallback exists**, so this table alone decides it.
+
+**Stock already uses this as its own idiom.** FX1's copy maps DELAY `0x08`, PLATE
+`0x14`, SPRING `0x15` and DARK `0x16` → NONE's `P` (`0x400d4618`), which is the real
+mechanism behind "reverbs are FX2-exclusive"; MULTIBCOMP `0x19` is NONE on both buses.
+So the fix is not an invention, it is finishing the convention: **write `NONE_P` into
+the donated id's `ID2E` entry on both buses.** A data poke, zero cave words, no code.
+
+Evidence trail: the only static references to SPRING REVERB's descriptor in the whole
+image are `FX2_LIST[13]` and `FX2_ID2E[0x15]` (4-byte scan for `0x400d575e`). Remove
+both and nothing can reach that page.
+
+### Generalised, since the donor is a build choice
+
+`tools/build_sidechain3.py`'s removal block is now driven by one pair of constants
+(`DONOR_ID` / `DONOR_P`) over a two-entry `FX_BUSES` table (`lst` / `id2pos` / `id2e`
+per bus) instead of FX2-only constants. Per bus: if the donor is in that list, drop it
+and rebuild that bus's own `id2pos`; then, **always**, assert `id2e[DONOR_ID]` is
+either the donor or already NONE and write `NONE_P`. Retargeting the build at a
+different donor — including one that IS on FX1 — now needs only the two constants, and
+the Session 56 "rebuilt one bus, forgot the other" failure is gone by construction.
+
+### Verification
+
+- Rebuilt. Table regions of the new image are **byte-identical to a Python replay of
+  the old logic**, plus exactly the one intended entry: the whole UI change is 2 bytes
+  at `0x400d6032/33` (`0x400d575e` → `0x400d4618`; the pointers share their high half).
+- Read back out of the built image: both buses `id2e[0x15]` = NONE, `id2pos[0x15]` = 0,
+  FX2 list 15→14 entries with SPRING REV gone and DARK REV shifted up. **No other id
+  changed in either table** (all 62 other entries diffed against stock).
+- `emu_sc_dsp3.py --patched` ALL GOOD (DSP untouched, as expected).
+- `emu_sidechain.py` was **broken before this session and green after**, for two
+  unrelated pre-existing reasons, both fixed: it read `out/mainos_sidechain3.bin`, a
+  name Session 77 changed to `_cross`; and its `key_fmt` expectations still encoded the
+  pre-Session-77 per-core picker (`coreBase + value - 1`, T5..T8 on the high core) when
+  the shipped build has been a flat OFF + T1..T8 (count 9) since that session. Neither
+  was caused by this change — the 2 bytes are nowhere near the `key_fmt` cave — but a
+  red harness is worthless, so the path now prefers `_cross` and the expectations were
+  rewritten to the flat semantics the build actually implements.
+
+**Hardware-confirmed, final.** `out/OCTATRACK_OS1.40C_SIDECHAIN3_CROSS.syx` was
+rebuilt, then flashed on the MKI: the user confirmed it working and has declared the
+fix finished (2026-09-25). The confirmation is for the intended behaviour described
+above -- a project still using the donated effect loads as NONE in the UI; the
+user's exact on-unit observation was not recorded at the time. Note the
+stored id is *displayed* as NONE, not rewritten in the project file — pick anything in
+the chooser and the slot is permanently reassigned, which is the intended "load as
+NONE" behaviour and leaves old projects untouched until the user commits.
+
+`tools/build_sidechain2.py` and `tools/build_sidechain_diag.py` still carry the
+superseded SPATIALIZER donor and were deliberately left alone; `build_merged.py`'s own
+donor-swap pass (flagged since Session 76) is still outstanding and will need this same
+`ID2E` line when it happens.
+
 ## Session 92 (2026-09-25, `wip`) — QLREC: the double-tap becomes a **toast-gated** gesture; and route A's emulator boots again
 
 **User request, verbatim in intent:** "I no longer want the action to be executed by
