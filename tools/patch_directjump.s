@@ -364,6 +364,9 @@ djt_show:
 |   R != 0 -> the master grid itself re-anchors off the absolute bar (Hook H discards
 |   this remainder; stock zeroes the master tick counter at the commit).
     moveq   #0,%d0
+    move.w  dj_cnt_m,%d0
+    move.l  %d0,-(%sp)                 | M
+    moveq   #0,%d0
     move.b  dj_cnt_rem,%d0
     move.l  %d0,-(%sp)                 | R
     moveq   #0,%d0
@@ -384,11 +387,12 @@ djt_show:
     pea     dj_diag_fmt
     pea     dj_diag_buf
     jsr     SPRINTF                    | 0x40013a08, varargs, ints as longs
-    lea     32(%sp),%sp
+    lea     36(%sp),%sp
     clr.w   dj_cnt_arm
     clr.w   dj_cnt_z
     clr.w   dj_cnt_x
     clr.w   dj_cnt_y
+    clr.w   dj_cnt_m
     clr.b   dj_cnt_pair
     clr.b   dj_cnt_rem
     lea     dj_diag_buf,%a0
@@ -602,6 +606,8 @@ dj_d7:
                                        | djd7_orig out of 8-bit branch range
     lea     -24(%sp),%sp
     movem.l %d0-%d4/%a1,(%sp)
+    clr.b   dj_mrem                    | Session 100: one-shot; stays 0 unless the
+                                       | division below actually yields a remainder
     move.l  %d0,%d2                    | d2 = pattern blob offset (caller's D0)
     lea     PAT_SMODE,%a1
     tst.b   (%a1,%d2.l)
@@ -677,10 +683,14 @@ djd7_div:
     addq.l  #1,%d4
     bra.b   djd7_div
 djd7_divdone:
+    move.b  %d0,dj_mrem                | d0 = ticks mod tps_in, the SUB-STEP REMAINDER.
+                                       | Session 100 (hardware, diag R=4 on real runs):
+                                       | commits DO land mid-master-step on the unit, so
+                                       | discarding this while stock zeroes the master
+                                       | tick counter re-anchors the whole incoming grid
+                                       | r ticks late. dj_c now SEEDS the counter with it.
     .ifdef DJ_DIAG
-    move.b  %d0,dj_cnt_rem             | d0 = ticks mod tps_in, the SUB-STEP REMAINDER the
-                                       | reseed discards; nonzero means the master grid
-                                       | re-anchors off the absolute bar at this commit
+    move.b  %d0,dj_cnt_rem             | R in the toast = the same value
     .endif
     move.l  %d4,%d0                    | d0 = newStep, in INCOMING master steps
 djd7_lenchk:
@@ -914,8 +924,14 @@ djc_ts_done:
 |   So: replay stock exactly on both paths. The SCALE_IX correction above stays -- it fixes a
 |   real latent stock bug (stale scale index for one cycle after a commit) and is unrelated
 |   to the tick phase.
-    clr.b   %d0                        | displaced original #1 (stock leaves D0 = 0)
-    move.b  %d0,STEP                   | displaced original #2 -- tick phase, 0 at a boundary
+|   Session 100: stock's own commit writes 0 here -- a tick-phase reset that is a no-op
+|   only when the commit sits exactly on the incoming grid. Hardware (diag R=4) proved it
+|   often does not. Seed the counter with Hook H's remainder instead: the first incoming
+|   master step is shortened by r, so the next wrap lands ON the absolute boundary. r is
+|   structurally 0 at 1x and at clean commits, where this byte-equals stock's write.
+    moveq   #0,%d0
+    move.b  dj_mrem,%d0                | 0 <= r < tps_in by construction (division loop)
+    move.b  %d0,STEP                   | was: displaced `clr.b %d0 ; move.b %d0,STEP`
 |   Session 70 (3rd pass): raw D7=resumeStep only nudges the REAL fire-gate counter
 |   (0x800064d0/8[t], "REFILL_TBL") coarsely -- confirmed dynamically that REFILL_TBL is
 |   reloaded every step from the QUOTIENT array (0x800065e4/f4[t] low byte), computed by
@@ -1265,26 +1281,55 @@ dj_keepz:
     beq.b   dkz_zero
     tst.w   dj_keep_pend
     beq.b   dkz_zero                   | no armed commit in flight -> stock
-    lea     -8(%sp),%sp
-    movem.l %d1-%d2,(%sp)
+    lea     -16(%sp),%sp
+    movem.l %d1-%d3/%a1,(%sp)
     move.l  %a0,%d1
     sub.l   #CNTDN_TBL,%d1             | t = cursor - table base
     cmpi.l  #16,%d1
     bcc.b   dkz_restore                | not a slot this model covers -> stock
     move.w  dj_keep_pend,%d2
     btst    %d1,%d2                    | this track pending? (NOT consumed here --
-    beq.b   dkz_restore                | Hook X, later this same tick, consumes it)
+    beq.b   dkz_restore                | Hook X, when it fires, consumes it)
+|   ---- Session 100: REDUCE IN PLACE, here, at the one site hardware proved fires for
+|   every audio track on every commit (diag: Z = 8*A exactly, X = a timing-dependent
+|   minority). V5.5 kept the mod-reduce in Hook X, so the tracks whose 0x400a354a copy
+|   never came entered a shrunken tps with an UNREDUCED counter (3..5 under tps 3),
+|   advanced late once, and shifted permanently -- the surviving hardware symptom, and
+|   why it was "usually, occasionally clean" (counter 0..2 = clean). The reduce is
+|   (C - A) mod tps_t, identity whenever the scale did not shrink; the stock zero write
+|   is still skipped.
+    lea     TRK_SCALE_IX,%a1           | audio 0-7 @0x8000663e, MIDI 8-15 contiguous
+    moveq   #0,%d2
+    move.b  (%a1,%d1.l),%d2
+    lea     LEN_TBL,%a1
+    move.l  (%a1,%d2.l*4),%d2          | d2 = this track's NEW tps (dj_c refreshed the
+    ble.b   dkz_count                  | cache at commit); unreadable -> leave counter
+    moveq   #0,%d3
+    move.b  %a0@(-211),%d3             | the preserved free-running counter
+    cmp.l   %d2,%d3
+    blt.b   dkz_count                  | already < tps -> preserve untouched
+dkz_mod:
+    sub.l   %d2,%d3
+    cmp.l   %d2,%d3
+    bge.b   dkz_mod
+    move.b  %d3,%a0@(-211)             | counter mod tps_t -- the REQUIRED value
+    .ifdef DJ_DIAG
+    move.w  dj_cnt_m,%d3               | M: reduces that actually changed a counter
+    addq.l  #1,%d3
+    move.w  %d3,dj_cnt_m
+    .endif
+dkz_count:
     .ifdef DJ_DIAG
     move.w  dj_cnt_z,%d2               | d2 is frame-saved on this path (CF has no
     addq.l  #1,%d2                     | memory-destination addq)
     move.w  %d2,dj_cnt_z
     .endif
-    movem.l (%sp),%d1-%d2
-    lea     8(%sp),%sp
-    rts                                | PRESERVE: the zero write never happens
+    movem.l (%sp),%d1-%d3/%a1
+    lea     16(%sp),%sp
+    rts                                | PRESERVE: the stock zero write never happens
 dkz_restore:
-    movem.l (%sp),%d1-%d2
-    lea     8(%sp),%sp
+    movem.l (%sp),%d1-%d3/%a1
+    lea     16(%sp),%sp
 dkz_zero:
     move.b  %d0,%a0@(-211)             | displaced #3: TICKS_IN_STEP[t] = 0 (stock)
     rts
@@ -1353,6 +1398,13 @@ dkx_stock:
 dj_keep_pend:
     .word   0                          | bit t = preserve track t at its apply tick.
                                        | In-cave on purpose -- see the block comment.
+    .global dj_mrem
+dj_mrem:
+    .byte   0                          | Hook H's last reseed remainder (ticks mod
+                                       | tps_in); dj_c seeds the master tick counter
+                                       | with it at the armed commit. Cave-resident,
+                                       | image byte 0 at power-on.
+    .align  2
 
     .ifdef DJ_DIAG
 | ---- Session 98 diag: PURE OBSERVER on the third writer @ 0x400a3556 (10 B) ----
@@ -1381,10 +1433,11 @@ dj_cnt_arm: .word 0                    | A: armed commits (djc_fix entries)
 dj_cnt_z:   .word 0                    | Z: Hook Z preserve-path entries
 dj_cnt_x:   .word 0                    | X: Hook X preserve-path entries
 dj_cnt_y:   .word 0                    | Y: third-writer executions
+dj_cnt_m:   .word 0                    | M: Hook Z reduces that CHANGED a counter
 dj_cnt_pair: .byte 0                   | P: last byte the third writer copied
 dj_cnt_rem:  .byte 0                   | R: last Hook H master-reseed remainder
 dj_diag_fmt:
-    .asciz  "A%d Z%d X%d Y%d P%d R%d"
+    .asciz  "A%d Z%d X%d Y%d P%d R%d M%d"
     .align 2
 dj_diag_buf:
     .space  48                         | worst case "A65535 Z65535 X65535 Y65535 P255

@@ -38,7 +38,8 @@ Written at the end of Session 89. Read this before touching DIRECT JUMP again.
 | `V5_3_*` | `8cb167ae` | **ON THE UNIT.** + time-domain conversion. Commit `0e2726c`. |
 | `V5_4_*` | `77809aca` | + Hook S (PAIR→CATCHUP). PARTIAL. Commit `deb8d12`. |
 | `V5_5_*` | `e3e5d232` | − Hook S, + Hooks Z/X (preserve). Oracle-clean. **ON THE UNIT. HARDWARE: NO CHANGE in the failing case** (fractional step-time on master-scale switches persists; 1x baseline + per-track lengths/scales confirmed nominal). Session 97/98. |
-| `V5_5D_*` | `ab0d806f` | **THE NEXT FLASH.** Session 99 diagnostic: V5.5 + counters, zero behaviour change (parity-proven). [PTN]+[YES] toast prints `A Z X Y P R`; protocol + interpretation in NOTES.md Session 99. OS VERSION `140C_KDIAG`. |
+| `V5_5D_*` | `ab0d806f` | Session 99 diagnostic (V5.5 + counters). **FLASHED — readings `A5 Z40 X16 Y0 P0 R0` (X/R vary run-to-run; R=0 on fractional runs)**: third writer dead, master remainder not the cause, and the 0x400a354a copy fires for only a timing-dependent minority of tracks on hardware. NOTES Session 100. |
+| `V5_7_*` | `83a551c8` | Session 100: BOTH hardware-proven holes closed — mod-reduce moved INTO Hook Z (deterministic, Z=8·A), and dj_c seeds the master tick counter with Hook H's remainder (`dj_mrem`) instead of stock's zero (second reading R=4 proved commits land mid-master-step and the incoming grid re-anchored r ticks late). Diag twin `V5_7D_*` `116d1678`, toast `A Z X Y P R M`. |
 
 Hashes in `out/BUILDS_SHA256.txt`, provenance in `out/BUILDS_README.txt`. The `V4`/`V5`
 *names* get reused by builds; the hashes do not. Never overwrite `GOLD_S87_*`.

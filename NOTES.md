@@ -31109,6 +31109,85 @@ sections, and QLREC's stateless rewrite.
 README still calls that feature hardware-confirmed. The fix (`0b595ed`) is on `wip` only.
 Promoting it is a separate decision.
 
+## Session 100 (2026-09-25, `wip`) — the diag toast came back and NAMED the hole: V5.5's mod-reduce lived at a site hardware rarely runs. V5.6 moves it to the site hardware always runs
+
+### The readings (user, five switches per run, 140C_KDIAG)
+
+`A5 Z40 X16 Y0 P0 R0`; across repeated 5-switch runs X and R vary (X sometimes > 16,
+R sometimes nonzero), and R has read 0 on runs whose switches were audibly fractional.
+
+### What each number established
+
+- `Y0 P0` every run: the third writer (0x400a355e) NEVER fires on the unit. That
+  hypothesis is dead on hardware evidence.
+- `R0` on fractional runs: the Hook H reseed remainder is not necessary for the
+  symptom — the master-reanchor hypothesis dies as the cause. (R nonzero on SOME runs
+  also shows commits DO land mid-master-step on hardware, where the emulator's
+  TICK_CTR always read 0 at Hook H — one more emulator divergence, noted.)
+- `Z40 = 8·A` exactly, every run: Hook Z fires for all 8 AUDIO tracks at every armed
+  commit, deterministically. (Also confirms the tail's CNTDN body covers audio only —
+  the MIDI twin block near 0x400a4cb0 has its own, still-unpatched, writes.)
+- `X16 ≪ 16·A = 80`, and NONDETERMINISTIC: the 0x400a354a CATCHUP copy fires for only
+  a timing-dependent minority of tracks on hardware. The emulator showed it firing for
+  track 0 at EVERY commit — which is exactly why V5.5 measured clean there.
+
+### The hole
+
+V5.5 placed the mod-reduce (counter mod new tps) inside Hook X. Every track whose copy
+never fires kept its counter UNREDUCED across a tps shrink: entering the 2x grid with
+counter 3..5 under tps 3 advances late once and shifts the grid permanently. Counter
+0..2 = clean — reproducing "usually fractional, occasionally clean". Preserve then
+faithfully carries the offset through subsequent switches in both directions, matching
+"never self-correcting, both directions".
+
+### Second reading: R4 — commits land MID-MASTER-STEP on the unit
+
+Follow-up runs read `R4` (twice, 4- and 7-switch runs). R is the remainder Hook H's own
+division produces; 4 mod 6 is unreachable if commits sat on outgoing step boundaries,
+so on hardware the master tick counter is NOT always 0 at the commit — directly
+contradicting the emulator's measurement at this site ("TICK_CTR always 0 at Hook H").
+Consequence: Hook H floors the resume step, the remainder is discarded, and stock's own
+commit then zeroes the master tick counter — the entire incoming grid re-anchors r
+ticks late against the shared timebase on every such commit. A second, independent,
+hardware-proven fractional source, in the MASTER domain — matching the user's "only
+master scales other than 1x break".
+
+### V5.7 candidate (mainline `83a551c8`, diag `116d1678`) — both proven holes closed
+
+1. **Reduce moved into Hook Z** — the site the readings prove runs for every audio
+   track at every commit (Z = 8·A). Hook X is unchanged (suppress + consume + a
+   now-redundant idempotent reduce when it fires). Diag counter `M` = reduces that
+   actually CHANGED a counter; toast is now `A Z X Y P R M`.
+2. **Master remainder seeded, not discarded**: dj_d7 stashes `ticks mod tps_in` into
+   the cave (`dj_mrem`, cleared at entry, one-shot), and dj_c's armed path writes IT
+   into the master tick counter where stock writes 0 — the first incoming master step
+   is shortened by r so the next wrap lands ON the absolute boundary. r is structurally
+   0 at 1x and at clean commits, where the write byte-equals stock's own; the seed site
+   is the exact instruction stock uses (Session 82's "never force this counter" lesson
+   does not apply: that was a step INDEX at arm time; this is the correct unit, at the
+   commit, replacing stock's own write).
+
+Bundling justification (normally one variable at a time): both mechanisms are
+independently hardware-measured, both are the same spec violation (every grid must stay
+on the one absolute timebase), and the diag counters keep attribution — M engages the
+track fix, R shows what the master seed received.
+
+`emu_djdiag.py` re-passes with M (exact string, resets, toggle intact). Emulator gate
+results spliced below — with the standing caveat that the emulator never opens this
+hole (its copies always fire), so these runs are REGRESSION evidence only; the unit
+decides the fix.
+
+### V5.7 emulator gates (regression + one positive surprise)
+
+| gate | result |
+|---|---|
+| DJMAST2 0↔1 | re-phased? = **no on all five armed commits** — and the commit ticks themselves moved vs the V5.5 run (147→150, 189→186, 255→252): the MASTER SEED FIRED, r=3, at real 2x→1x commits. My "the emulator can't produce remainders" claim was wrong for the r=3 case (an odd outgoing 2x master step gives ticks ≡ 3 mod 6 with the tick counter at 0; only r=4 needs a mid-step commit). So the seed path is emulator-EXERCISED, not merely inert: grid re-anchored correctly, no re-phase — and the natural wrap at t186 ALSO stopped re-phasing (V5.5's t189 wrap snapped the track back; with the master correctly anchored the wrap's CATCHUP became consistent). §6 may partially heal downstream of this fix. t90 (first wrap, before any seed engaged) still re-phases = §6 stock behaviour, still open. |
+| DJMAST2 2↔3 (uniform 1x) | class [5] at all 7 commits, armed and natural — baseline untouched |
+| feature-OFF, scratch poisoned | IDENTICAL — all 8 counters + 38 samples equal stock |
+
+Standing caveat: emulator green = logic evidence. The unit decides; the toast keeps the
+attribution (`M` = track-reduce engagements, `R` = what the master seed received).
+
 ## Session 101 (2026-09-25, `wip`) — WHY route A is slow, measured: the cost is structural. octabam's C++ port ported a diag at 11x, plus a `cp`-over-a-live-dylib bug that fakes a broken build
 
 Started from a question about other developers "testing in real time" and whether

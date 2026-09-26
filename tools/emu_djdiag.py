@@ -41,9 +41,9 @@ NOTIFY = 0x4005a2b8
 DJ_MODE = 0x800000d8
 YES_CODE = 0x31
 
-SEED = dict(dj_cnt_arm=2, dj_cnt_z=32, dj_cnt_x=32, dj_cnt_y=1)
+SEED = dict(dj_cnt_arm=2, dj_cnt_z=32, dj_cnt_x=32, dj_cnt_y=1, dj_cnt_m=4)
 SEED_B = dict(dj_cnt_pair=3, dj_cnt_rem=7)
-WANT = "A2 Z32 X32 Y1 P3 R7"
+WANT = "A2 Z32 X32 Y1 P3 R7 M4"
 
 fails = []
 
