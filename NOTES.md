@@ -481,21 +481,18 @@ Two things session 3 part 4 could only infer from disassembly are now decompiler
   loop (`uVar20` = track 0..7, `0x8b0` = the confirmed per-track stride), itself gated by
   `DAT_800065b6 == 0` (a sub-step counter reset every full step — this block runs once per
   step, not every tick). Full excerpt in `out/ghidra/GhidraResolve26_session4.txt` (search
-  `0x48fe`), decompiled C:
-  ```c
-  if (DAT_800065b6 == '\0') {
-    cVar11 = puVar45[uVar20 * 0x8b0 + 0x48fe];      // DIRECT/quantize-index byte, this track
-    if (uVar20 * 0x8b0 == 0) {                       // TRACK 0 ONLY — different path, no skip-check
-      if (puVar45[CONCAT22(cVar11 >> 7,0x8e55)] == '\0') { iVar15 = (int)(char)puVar45[0x8e53]; }
-      else { iVar15 = (int)(char)puVar45[0x48f8]; }
-    } else {
-      if (cVar11 < 1) goto LAB_400a37f0;             // TRACKS 1-7 — DIRECT(-1) same as index-0: skip
-      iVar15 = *(int *)(&DAT_400d80dc + cVar11 * 4);  // else: quantize-index -> step-length table
-    }
-    if (0 < iVar15) { ... quantize-window / note-reschedule logic, gated on a step counter
-                          (_DAT_800065b2) modulo iVar15 ... }
-  }
-  LAB_400a37f0:
+  `0x48fe`), restated in our own notation:
+  ```
+  if sub_step_counter (DAT_800065b6) == 0:                 # once per step
+      q = quantize-index byte, blob +0x48fe, stride 0x8b0 per track    # DIRECT / quantize-index, this track
+      if track == 0:                                       # TRACK 0 ONLY -- different path, no skip-check
+          if pattern SCALE_MODE (+0x8e55) == 0: step_len = pattern byte +0x8e53
+          else:                                 step_len = pattern byte +0x48f8
+      else:                                                # TRACKS 1-7
+          if q < 1: skip the block                         # DIRECT(-1) same as index-0: skip
+          step_len = table_0x400d80dc[q]                   # quantize-index -> step-length table
+      if step_len > 0: ... quantize-window / note-reschedule logic, gated on a step counter
+                           (_DAT_800065b2) modulo step_len ...
   ```
   Two things worth chasing next session, in order of how cheap they are to check:
   1. **Track 0 is handled asymmetrically from tracks 1-7.** Tracks 1-7 skip this whole
@@ -675,27 +672,25 @@ MIDI header) — scale mode is stored per track-type, not at one canonical offse
 Simplified MIDI-track logic (full raw decompile in
 `out/ghidra/GhidraResolve31_session4.txt`):
 
-```c
-uVar4 = track - 8;
-if (_DAT_80000012 != 0) {                        // MIDI-mode gate (role TBD)
-  cVar1 = SCALE_MODE[track];                       // 0, 1, or 2 -- see open question below
-  if (isRelease) {                                 // param_2 == 0
-    if (cVar1 == 2) FUN_4009f3a4();                 // only value 2 does anything on release
-    return;                                          // 0 and 1: no-op on release
-  }
-  // isPress (param_2 == 1):
-  if (cVar1 == 1) {
-    if (FUN_4009b290(track) == 1)                    // "is this track already active?"
-      { FUN_4009f3a4(track); goto setKeyBit; }        // already active -> re-trigger path
-    // else falls through to FUN_4009b5c8(track) below (not yet active -> normal start)
-  } else if (cVar1 != 2) goto setKeyBit;             // cVar1==0: skip straight to setKeyBit
-  FUN_4009b5c8(track);                                // "normal" trig-start (not decompiled yet)
-  setKeyBit: _DAT_460d1794 |= (1 << track);
-  return;
-}
-/* _DAT_80000012 == 0: entirely different path -- direct MIDI note-on/off scheduling via
-   FUN_40005030/FUN_40042d1c/FUN_4004271c. Not the bug's precondition (PF+Direct+ScaleMode
-   presumably requires the _DAT_80000012 != 0 branch); not traced further this session. */
+```
+FUN_40044584(track, is_press):
+    if _DAT_80000012 != 0:                               # MIDI-mode gate (role TBD)
+        mode = SCALE_MODE[track]                         # 0, 1, or 2 -- see open question below
+        if is_release:                                   # arg 2 == 0
+            if mode == 2: FUN_4009f3a4()                 # only value 2 does anything on release
+            return                                       # 0 and 1: no-op on release
+        # press (arg 2 == 1):
+        if mode == 1:
+            if FUN_4009b290(track) == 1:                 # "is this track already active?"
+                FUN_4009f3a4(track); goto set_key_bit    # already active -> re-trigger path
+            # else fall through to FUN_4009b5c8(track) below (not yet active -> normal start)
+        elif mode != 2: goto set_key_bit                 # mode 0: skip straight to set_key_bit
+        FUN_4009b5c8(track)                              # "normal" trig-start (not decompiled yet)
+        set_key_bit: _DAT_460d1794 |= 1 << track
+        return
+    # _DAT_80000012 == 0: entirely different path -- direct MIDI note-on/off scheduling via
+    # FUN_40005030/FUN_40042d1c/FUN_4004271c. Not the bug's precondition (PF+Direct+ScaleMode
+    # presumably requires the _DAT_80000012 != 0 branch); not traced further this session.
 ```
 
 `FUN_4009b290(track)` is a one-line accessor: returns `DAT_80006500[track]` (the
@@ -892,26 +887,13 @@ on a long chain of `KEY_NAME` string compares within the `STATES` section: `RELO
 ...). This is very likely the parser for the project's saved/live-state text blob (separate
 from the binary bank-file format this project has focused on so far).
 
-The `MIDI_MODE` case, decompiled:
-```c
-iVar2 = FUN_40013e14(local_12d, s_MIDI_MODE_400b7e8b);   // strcmp against "MIDI_MODE"
-if (iVar2 == 0) {
-    ...
-    iVar2 = FUN_400144c4(puVar3);      // parse the value after '='
-    if (bVar10) {
-        if (iVar2 < 0) {
-            _DAT_100b14de = 0;
-            _DAT_80000012 = 0;
-        } else {
-            _DAT_100b14de = iVar2;
-            _DAT_80000012 = iVar2;
-            if (0 < iVar2) {            // clamp to boolean
-                _DAT_100b14de = 1;
-                _DAT_80000012 = _DAT_100b14de;
-            }
-        }
-    }
-}
+The `MIDI_MODE` case, restated from the decompile:
+```
+if token == "MIDI_MODE":                                 # FUN_40013e14 = strcmp
+    value = parse the text after '='                     # FUN_400144c4
+    if the parse succeeded:
+        if value < 0:  _DAT_100b14de = _DAT_80000012 = 0
+        else:          _DAT_100b14de = _DAT_80000012 = 1 if value > 0 else 0    # clamp to boolean
 ```
 So `DAT_80000012` is a **boolean project setting, loaded once from a `MIDI_MODE=` line in a
 text state/config blob**, clamped to 0 or 1. It is read (never written) everywhere else,
@@ -1001,11 +983,10 @@ version) rather than a bug.
 
 ### Also fully confirmed this round: `FUN_4009b290`
 
-```c
-uint FUN_4009b290(uint param_1) {
-  if ((int)param_1 < 0) return _DAT_800065b8;
-  return (uint)(byte)(&DAT_80006500)[param_1 & 0xf];
-}
+```
+FUN_4009b290(track):                                     # 0x4009b290
+    if track < 0: return _DAT_800065b8
+    return DAT_80006500[track & 0xf]                     # per-track active-state byte
 ```
 Simple active-state getter: `DAT_80006500[track]` per-track (the same array `FUN_4009b5c8`
 sets to 1 on activate and `FUN_4009f3a4`'s buggy branch sets to 0 on deactivate), or
@@ -1141,14 +1122,14 @@ full decompile + raw asm, `GhidraResolve37`).
 2. `FUN_400a1eea` (the per-step engine), inside its once-per-step quantize handler
    (`DAT_800065b6 == 0` gate), in the `_DAT_80006680` "soft (re)start at boundary" sub-block
    — with the **same SCALE_MODE gate**:
-   ```c
-   if (puVar45[0x8e55] == '\0')  *scaleoff = puVar45[0x8e54];               // Normal: pattern byte
-   else                          *scaleoff = puVar45[track*stride + 0x51/0x48f9];  // per-track byte
-   cVar = tbl[*scaleoff] - tbl[DAT_8000663d];      // tbl = DAT_400aba50[]
-   DAT_800065db/cb[track] = clamp(...);
-   if (tbl[DAT_8000663d] - tbl[*scaleoff] < 1) { DAT_80006508[track] = 1; FUN_400a539c(track); }  // REACTIVATE
-   else                                          _DAT_80006684 |= bit;                              // pending
-   _DAT_80006680 &= ~bit;
+   ```
+   if pattern SCALE_MODE (+0x8e55) == Normal:  scale_off = pattern byte (+0x8e54)
+   else:                                       scale_off = per-track byte at [track*stride + 0x51 / 0x48f9]
+   delta = tbl[scale_off] - tbl[DAT_8000663d]               # tbl = DAT_400aba50[]
+   DAT_800065db/cb[track] = clamp(delta)
+   if tbl[DAT_8000663d] - tbl[scale_off] < 1: DAT_80006508[track] = 1; FUN_400a539c(track)   # REACTIVATE
+   else:                                      _DAT_80006684 |= bit                            # pending
+   _DAT_80006680 &= ~bit
    ```
    (`DAT_8000663d` is a separate single byte one address below — a global "current/target
    scale offset". `DAT_400aba50` is a small translation table, same one part 2 flagged.)
@@ -1717,9 +1698,9 @@ pattern, `_DAT_46c82456` = live project blob base, pattern stride 0x18b2.
 ### Encoder-edit path — PARTLY MAPPED
 - Main UI event loop = **FUN_40061a94**. Param-page encoder turn = **case '?'** (event 0x40):
   ```
-  iVar17 = (pcVar6[2] % 6) + DAT_400a7280[pcVar6[2] / 6] * 6;   // <-- param-index remap table
-  uVar10 = DAT_80000000; if (_DAT_80000012 != 0) uVar10 += 8;   // MIDI mode -> track idx +8
-  FUN_40054cd8(uVar10, iVar17, delta);                          // apply
+  param_index = (slot % 6) + table_0x400a7280[slot / 6] * 6   # <-- param-index remap table; slot = event byte 2
+  track = DAT_80000000 (+8 if _DAT_80000012 != 0)              # MIDI mode -> track idx +8
+  FUN_40054cd8(track, param_index, delta)                      # apply
   ```
   `DAT_400a7280` (small per-page base table) NOT yet dumped — **next step**.
 - **FUN_40054cd8(track, paramIdx, value)** = generic param apply.
@@ -16402,23 +16383,18 @@ survives in `ghidra_project`, so this session's xrefs are Ghidra-resolved, not l
 matches). New scripts `tools/ghidra/attic/GhidraMute9.java` / `GhidraMute10.java`, dumps
 `out/ghidra/GhidraMute{9,10}_session58c12.txt`.
 
-**`FUN_40083ab4`'s full decompile** (r2's raw disassembly had hit an `invalid` opcode mid-
+**`FUN_40083ab4`'s full behaviour, restated in our own notation** (r2's raw disassembly had hit an `invalid` opcode mid-
 function last session and the manual reading past that point was wrong):
-```c
-void FUN_40083ab4(int param_1,int param_2)
-{
-  uVar1 = param_1 - 0x10;                    // uVar1 = 0-7 track index; param_1 = KEYCODE
-  FUN_40083208(uVar1);                       // mute-screen UI, gated on _DAT_460fab34 (usually 0 -> no-op)
-  if ((_DAT_460d10d0 != 0) || (_DAT_460d10d4 != 0)) goto LAB_40083b90;
-  if (uVar1 == DAT_100b14cc) {               // pressed track == currently UI-selected track
-    ... extra recorder/consolidate bookkeeping (FUN_40077a8c/FUN_4006dbcc/etc) ...
-  }
-  _DAT_460fab44 = -(_DAT_460fab40 != 0) + 1;
-LAB_40083b90:
-  _DAT_460fab40 = 1 << (uVar1 & 0x3f) | _DAT_460fab40;   // <-- BOTH paths converge HERE
-  if (param_2 == 1) { FUN_400836d8(); return; }           // <-- and BOTH apply the mute
-  return;
-}
+```
+FUN_40083ab4(keycode, is_press):                        # 0x40083ab4
+    track = keycode - 0x10                              # 0-7
+    FUN_40083208(track)                                 # mute-screen UI, gated on _DAT_460fab34 (usually 0 -> no-op)
+    if not (_DAT_460d10d0 or _DAT_460d10d4):
+        if track == DAT_100b14cc:                       # pressed track == currently UI-selected track
+            ... extra recorder/consolidate bookkeeping (FUN_40077a8c / FUN_4006dbcc / etc) ...
+        _DAT_460fab44 = 1 if _DAT_460fab40 == 0 else 0
+    _DAT_460fab40 |= 1 << track                         # <-- BOTH paths converge HERE
+    if is_press == 1: FUN_400836d8()                    # <-- and BOTH apply the mute
 ```
 **Both branches of the `tst.l 0x460d10d0`/`0x460d10d4` check converge on the exact same
 tail.** The mute bit always gets OR'd into `_DAT_460fab40` and `FUN_400836d8()` (the real
@@ -22953,12 +22929,11 @@ describe as "which params are locked on this step" -- inherited from Session 30'
 for that field ("+0x48d8 param bitmap ... 2xu32 'which params locked'"). Re-reading
 `FUN_40041bc4`'s own use of it, that label is wrong:
 
-```c
-iVar8 = (int)local_6;                      // local_6 = the STEP (established this session)
-FUN_400a6904(uVar3,uVar9,iVar8);           // test bit [STEP] of the 64-bit pair
-if ((extraout_D1 & 1) != 0) {
-    uVar14 = FUN_400a694c(0,1,iVar8);      // build a 64-bit mask for bit [STEP]
-    *(uint *)(&DAT_400e6ab8 + iVar13) = uVar3 & uVar4;   // clear bit [STEP]
+```
+step = the STEP (established this session)
+if bit [step] is set in the 64-bit pair (hi, lo):       # helper 0x400a6904 tests it
+    mask = 1 << step, as a 64-bit value                 # helper 0x400a694c builds it
+    per-(bank,pattern,track) pair &= ~mask              # clear bit [step]; store at 0x400e6ab8 + offset
 ```
 
 The bit index is the **step**, and the field is per `(bank, pattern, track)`. So it is

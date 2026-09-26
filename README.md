@@ -321,6 +321,15 @@ original bytes + replacement bytes); see [`sysex/README.md`](sysex/README.md).
 - Private and educational use is low-risk. Redistributing modified binaries is a
   different question; this repo deliberately redistributes **no** Elektron binary.
 
+## License
+
+Original work in this repository (notes, scripts, patch sources, build tooling)
+is released under the **[MIT License](LICENSE)**. The exclusions are spelled out
+in the LICENSE file. In short: no Elektron firmware or manual is included or
+licensed, `tools/attic/` is inherited from octamax and keeps its own status, and
+third-party code fetched at build time keeps its own license. Code under
+GPL-family licenses is used as reference only, never copied in.
+
 ---
 
 *OT Kyoti FW is an independent, unofficial, educational project derived from

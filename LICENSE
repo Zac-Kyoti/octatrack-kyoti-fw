@@ -50,12 +50,13 @@ field offsets, and behavioural descriptions) is stated as fact, and is claimed a
 no one's copyrightable expression.
 
 This repository does not include a disassembly or decompilation of the firmware
-as a whole, or wholesale listings of it. It does include short, hand-annotated
-excerpts of disassembly and decompiler-style pseudocode, mostly in NOTES.md, and
-a few two-instruction "displaced prologue" listings in reference/, quoted as
-evidence for individual findings or to document a patch site. To the extent that
-any such excerpt is Elektron's expression, it is not licensed by this file and
-remains subject to whatever rights Elektron holds in it. The patch sources in
+as a whole, or wholesale listings of it. It does include behavioural pseudocode
+restated in our own notation, a small number of closer excerpts of decompiler
+output (in NOTES.md), and a few two-instruction "displaced prologue" listings in
+reference/, quoted as evidence for individual findings or to document a patch
+site. To the extent that any such excerpt is Elektron's expression, it is not
+licensed by this file and remains subject to whatever rights Elektron holds in
+it. The patch sources in
 this repository are our own code and are covered by the MIT terms.
 
 "Elektron" and "Octatrack" are trademarks of Elektron Music Machines MAV AB, used
