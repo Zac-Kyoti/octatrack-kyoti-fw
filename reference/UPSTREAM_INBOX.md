@@ -5,6 +5,15 @@ folded into `reference/kb/`, move it to the "Distilled" section with the target
 file noted. This file is the hand-off point for the (optional) weekly scheduled
 agent that fetches the refs and appends new commits here.
 
+## ⚠️ Two entries below are stamped "out of scope per COVERAGE.md". That stamp is stale.
+
+DSP work is **in scope** for this project — it ships DSP56300 assembly (SIDECHAIN3),
+and `CLAUDE.md` "Scope of this project" is now the policy (`COVERAGE.md` is the
+descriptive map, not the gate). The affected entries are octabam's 2026-09-12
+DSP-effect pass and the 2026-09-24 `dsp56300` core commits. **Re-triage either before
+treating it as settled**; anything marked out of scope for being DSP is worth a second
+look.
+
 ## Format
 
 ```

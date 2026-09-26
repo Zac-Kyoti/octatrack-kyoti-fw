@@ -43,7 +43,7 @@ published repo, `upstream` = mxldyn (fetch only, for `whatsnew.py`).
 | `reference/RELOAD_REDESIGN.md` | the RELOAD3 chord design: why the picker went, the measured keymap facts, the Part-half semantics |
 | `README.md` | what the firmware is, the feature list + per-feature HW status, repo layout, lineage |
 | `BUILD_KYOTI.md` | roll-your-own build guide (every `build_*.py`, prerequisites, the reproducible patch) |
-| `COVERAGE.md` | what firmware subsystems are mapped vs untouched; the DSP-is-a-separate-blob caveat |
+| `COVERAGE.md` | **this project's own** RE coverage: what is mapped vs still dark, per manual chapter. Descriptive; the scope policy is in `CLAUDE.md` |
 | `ARCHITECTURE.md` | memory map, container format, boot/upgrade chain |
 | `FLASHING.md` | step-by-step flashing (MIDI + CF card) and the per-feature hardware test procedures |
 | `reference/upstream-notes.md` | inherited octamax mod-design notes (scenes, LED, lazy transitions, arp, bank paging) — kept for reference, **not** part of OT Kyoti FW |

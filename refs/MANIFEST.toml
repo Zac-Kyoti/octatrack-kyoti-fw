@@ -55,8 +55,8 @@ use    = "parameter-default patch tool (OS 1.40C). Locations of default-value ta
 url    = "https://github.com/sambanks/octabam.git"
 branch = "main"
 pin    = "HEAD"
-side   = "dsp"
-use    = "adds DSP56300 effects to the MKII by patching new DSP assembly + a Python build system. The DSP side COVERAGE.md flags as out of scope here; mapped, not patched."
+side   = "both"
+use    = "THE harness this project verifies against, and its largest external dependency: 98 of our 169 tools import it. Route A (emu_rtos/emu_bringup/emu_card, Unicorn + the EMAC patches) boots our real patched images; ot_emu is its C++ ColdFire+DSP56300 port (renders real audio, ~11x faster); dsp_host is its dsp56kEmu integration, and it vendors the dsp56300 core we build the DSP toolchain from. Its docs/firmware/ set (KERNEL, DSP, CHIP, LEVEL_LAW, COLDFIRE_DELAY) is a primary kb source. Its OWN goal is original DSP56300 effects for the MKII. NOTE: not 'DSP-only, out of scope' -- this project ships DSP56300 code (SIDECHAIN3), so its DSP work is in scope; see CREDITS.md and COVERAGE.md."
 
 [repo.midisc]
 url    = "https://github.com/bkkbrls-del/midisc.git"

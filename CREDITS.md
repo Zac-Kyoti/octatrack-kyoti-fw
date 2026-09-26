@@ -19,6 +19,42 @@ Nothing here would exist without the projects below.
   Service and keeps octamax's stance — educational use only, no binaries
   redistributed.
 
+## The harness this project verifies against
+
+- **[sambanks/octabam](https://github.com/sambanks/octabam)** (Octabam, by
+  **sambanks**) — **the single largest external dependency in this repo, and the
+  reason most of what is here could be validated at all.** Octabam's own goal is
+  original DSP56300 audio effects for the Octatrack MKII, but along the way it built
+  the Octatrack emulation stack this project runs on, and tracks it as a first-class
+  deliverable with its own documentation set. **98 of this project's 169 tools import
+  it** — every emulator-validated build, bug repro and diagnostic here goes through
+  it. Specifically:
+  - **Route A**, the Unicorn-based ColdFire harness (`emu_rtos.py`, `emu_bringup.py`,
+    `emu_card.py`) that boots our real patched image, mounts a CF card image, loads a
+    project and runs the sequencer. This is what "emulator-validated" means in every
+    build note in this repo, and it is octabam's code running from inside
+    `refs/octabam/`.
+  - Its **Unicorn EMAC patches** — without them the ColdFire's MAC unit decodes
+    wrongly and our images do not boot correctly. `scripts/build_unicorn.sh`.
+  - **`ot_emu`**, its independent C++ ColdFire + DSP56300 port, which renders real
+    audio and runs ~11x faster than route A. Our native diagnostics are built on it.
+  - **`dsp_host`**, its dsp56kEmu integration, and the pinned
+    **[dsp56300/dsp56300](https://github.com/dsp56300/dsp56300)** core it vendors into
+    `vendor/dsp56300` — the toolchain the SIDE-CHAIN COMPRESSOR was written and tested
+    with. Our `tools/dsp56300_xcore/` dual-core harness is a thin shim over it.
+  - Its **firmware documentation set** (`docs/firmware/KERNEL.md`, `DSP.md`,
+    `CHIP.md`, `LEVEL_LAW.md`, `COLDFIRE_DELAY.md` and siblings) — an independent
+    reading of the RTOS, the DSP protocol and the level law, distilled throughout
+    `reference/kb/`.
+
+  Octabam is also the closest thing this project has to a peer on method: the same
+  "bring your own official OS, patch it, redistribute no binary" stance, the same
+  guarded-build discipline, and a contributor ledger that credits its own upstreams
+  properly. **MIT** for its own code and documentation; that does not extend to
+  Elektron's firmware (not distributed there either) or to the repositories it
+  vendors as submodules, which keep their own terms — `dsp56300` in particular is
+  GPLv3, and `THIRD_PARTY.md` in octabam lists every transcribed DSP source.
+
 ## Tools this project builds on
 
 - **[mischa85/elektron-firmware-tool](https://github.com/mischa85/elektron-firmware-tool)**
@@ -34,14 +70,9 @@ Nothing here would exist without the projects below.
 ## Other Octatrack firmware-patching projects
 
 The same "bring your own official OS, patch it, roll your own image, redistribute
-no binary" approach — worth reading alongside this repo:
+no binary" approach — worth reading alongside this repo. (**octabam** belongs here
+too, and has its own section above.)
 
-- **[sambanks/octabam](https://github.com/sambanks/octabam)** (Octabam) — adds
-  original DSP audio effects to the Octatrack MKII by patching new **DSP56300
-  assembly** into the stock OS, with a Python build system that compiles curated
-  effect "remixes" into flashable images. This is the **DSP side** that
-  [`COVERAGE.md`](COVERAGE.md) flags as out of scope here — the natural companion
-  to the ColdFire-side work in this repo.
 - **[emuyia/ems-octakit](https://github.com/emuyia/ems-octakit)** (Octakit, by
   emuyia / junes) — a patcher for OS 1.40C that replaces the 4 Parts per Bank with
   **256 Kits per Project**. Open-sourced in 2026-09: its `runtime/abi.inc`
@@ -103,7 +134,8 @@ no binary" approach — worth reading alongside this repo:
 - **[dsp56300/dsp56300](https://github.com/dsp56300/dsp56300)** — added
   2026-09-16. The canonical, actively-developed Motorola/Freescale/NXP
   DSP56300-family emulator (GPLv3) — the actual upstream octabam vendors a
-  pinned commit of into `vendor/dsp56300`. Tracked directly (branch
+  pinned commit of into `vendor/dsp56300` — which is how this project gets it at
+  all. Tracked directly (branch
   `dsp56300`, the active branch — not `main`) so this project can check its
   own DSP56300 questions against current upstream instead of octabam's
   vendored snapshot. See `reference/kb/dsp56300.md` for the currency gap this
@@ -119,7 +151,9 @@ no binary" approach — worth reading alongside this repo:
 - **emuyia / junes** — the Octakit (`ems-octakit`) source release attributes a
   large slice of the OS 1.40C Part/Kit/Bank/scene/sequencer address map, folded
   into `reference/kb/octakit-abi.md`.
-- **Bryan_T** (`octa-bt-pt`), **sambanks** (`octabam`), **snugsound** (`OctaLib`),
+- **sambanks** (`octabam`) — beyond the harness above, octabam's firmware docs and
+  contributor ledger are a primary source throughout `reference/kb/`.
+- **Bryan_T** (`octa-bt-pt`), **snugsound** (`OctaLib`),
   **mischa85** (`elektron-firmware-tool`), **bkkbrls-del** (`midisc`) — the
   prior-art repos whose findings are distilled, with per-fact attribution, into
   `reference/kb/*.md` (see `reference/EXTERNAL_RESEARCH.md`).
