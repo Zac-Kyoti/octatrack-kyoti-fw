@@ -30988,6 +30988,96 @@ More hardware W values on failure: `0045`, `004F`, `003F` (plus `005B`). Track 3
 flag always non-zero, values vary — so the "0x55 content" explanation is not supported;
 only "the bytes are overwritten" is. The fix is indifferent to the value.
 
+## Session 99 (2026-09-25, `wip`) — V5.5 FLASHED: hardware says NO CHANGE. The thread moves to a diagnostic build; the emulator is formally out of its depth here
+
+### The hardware verdict (user, on the unit, V5.5 `e3e5d232`)
+
+Pattern switches still leave the new pattern in fractional step-time in the two-track /
+two-pattern, 1x↔2x-master test case. **Discriminating detail: per-track LENGTHS and
+per-track SCALES (multipliers) all hold time against the metronome — the fractional
+offsets appear ONLY when a master scale other than 1x is involved.** The 1x baseline is
+intact. So V5.5 regressed nothing and fixed nothing.
+
+### Why this does NOT falsify Session 97's root cause — and why no more emulator runs
+
+Two attempts to provoke the failure in the emulator on V5.5 (standard + shifted cue
+schedule, `--cue-at 43 --gap 50 --ticks 500`) both came back armed-clean with **PAIR = 0
+at every single commit** — the emulator's cue path lands commits only at whole-step
+resume offsets, so the machinery that carries a NON-ZERO sub-step phase (hold mask →
+CATCHUP=PAIR at 0x400a3d36 → 0x80006624 bit → the THIRD writer 0x400a355e) has never
+executed in any Session 97/99 fixture. On hardware the user presses at arbitrary times.
+Additionally the emulator re-phases track 0 at every natural master-cycle wrap of a 2x
+pattern ([5]↔[2] flips at t90/t189 in every run) — while the user reports a single 2x
+pattern as NOMINAL on hardware. Emulator and unit disagree in both directions on this
+thread; per CLAUDE.md, build a diagnostic, don't reason.
+
+### The instrument: DJ_DIAG build (`DJ_DIAG=1 python3 tools/build_directjump_v5.py`)
+
+V5.5 plus counters, zero behaviour change otherwise; outputs go to `*_v5diag` /
+`OCTATRACK_*_V5DIAG.*`, OS VERSION reads **140C_KDIAG**, toast dwell 0x88.
+
+- `A` armed commits (djc_fix), `Z` Hook Z preserve entries, `X` Hook X preserve entries
+  (expect **Z == X == 16·A** if the fix executes on hardware),
+- `Y` executions of the third writer at 0x400a355e via a PURE OBSERVER detour at
+  0x400a3556 (10 B, window verified branch-target-free in S97), `P` = last byte it
+  copied (CATCHUP[t] = PAIR at that point),
+- `R` = the last Hook H reseed REMAINDER (`ticks mod tps_in`, captured from the division
+  loop's own d0) — nonzero means the master grid itself re-anchored off the absolute bar
+  at that commit, stock zeroing the master tick counter right after.
+
+**[PTN]+[YES] prints `A.. Z.. X.. Y.. P.. R..` and RESETS the counters** — so: toggle ON
+(baseline zeros), run the test switches, toggle OFF and read the exact interval.
+Counters live in the cave; power-on value is the image byte (0).
+
+Readings → next move:
+- `X < 16·A` (or 0): the arm/consume path itself fails on the unit (G_ARMED at
+  0x80006a40 is in the window Session 98 proved clobber-prone — RELOAD3's request bytes
+  were overwritten there ON HARDWARE) → move G_ARMED into the cave.
+- `Y > 0, P != 0`: the third writer re-phases after our fix → detour 0x400a3556 for
+  real (suppress the copy once per armed commit per track, second cave mask; leave the
+  hold-skip alone, dead end 1 stands).
+- `R != 0` on fractional switches: the MASTER grid re-anchors off-bar — matches the
+  user's "only master scales break" observation; fix is in the master domain (seed the
+  master tick counter with the remainder instead of letting stock zero it), a NEW
+  sub-thread.
+
+### Validation of the instrument itself
+
+- `tools/emu_djdiag.py` (new, raw-Unicorn synthetic-call harness modelled on
+  emu_directjump_v4.py): drives the REAL dj_toggle in the v5diag image, firmware's own
+  sprintf (0x40013a08) runs for real → NOTIFY receives dj_diag_buf, buffer reads exactly
+  `A2 Z32 X32 Y1 P3 R7` from seeded counters, all six counters reset, DJ_MODE still
+  toggles. ALL GOOD.
+- Mainline V5.5 rebuilt after all .s edits: byte-identical `e3e5d232` (all diag code is
+  `.ifdef DJ_DIAG`).
+- Full-RTOS parity run of the diag image (result spliced in below).
+- ColdFire lesson re-learned: **no memory-destination `addq`, and register `addq` is
+  `.l` only** — the assembler catches it, four counters routed through dead/saved
+  registers.
+- `diag_phase_correlate.py` now pairs the cave-symbol ELF to `--image` (the diag build's
+  cave layout differs; the old hardcoded V5 elf would have made the armed? column lie).
+
+- Full-RTOS parity: `diag_phase_correlate --image out/mainos_directjump_v5diag.bin`
+  reproduces the mainline V5.5 run EXACTLY — same commits [42,90,93,147,189,201,255],
+  armed rows all `re-phased? no`, naturals YES, with the armed? column now read from the
+  correctly-paired diag ELF (djc_fix 0x400d76a0). The observer does not perturb the
+  behaviour it measures.
+- Same chdir trap as Session 97, second tool: `--image` is now resolved absolute in
+  diag_phase_correlate.py too (a relative path died at attach after os.chdir(octabam)).
+
+### Flash protocol (user)
+
+Flash `out/V5_5D_OCTATRACK_OS1.40C_DIRECTJUMP_V5DIAG.syx` (or the `.bin` twin; OS
+VERSION must read **140C_KDIAG**). Then:
+1. [PTN]+[YES] → DJ ON; the toast should read all zeros (`A0 Z0 X0 Y0 P0 R0`).
+2. Run the failing test exactly as before (1x↔2x master switches), COUNTING the jumps.
+3. [PTN]+[YES] → DJ OFF; report the toast line.
+Reading: A should equal the jump count; healthy fix = Z and X both 16·A. X well short of
+16·A → the arm/consume path fails on hardware (move G_ARMED to the cave next). Y > 0
+with P ≠ 0 → the third writer fires (suppress the 0x400a355e copy next). R ≠ 0 → the
+master grid re-anchored off the bar (master-domain fix next). Multiple non-nominal
+readings are possible; the counters were designed so one flash separates them.
+
 ### Session 98 — RELOAD3 IS FINAL. User: "All issues resolved." Promoted to `main`
 
 After flashing the fixed build the user reported: *"Flashed. All issues resolved. RELOAD3

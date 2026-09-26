@@ -57,8 +57,21 @@ def main(argv):
     ap.add_argument("--gap", type=int, default=53)
     ap.add_argument("--cue-at", type=int, default=40)
     ap.add_argument("--ticks", type=int, default=400)
-    ap.add_argument("--image", default=str(V5))
+    # resolved to absolute because attach() runs after os.chdir(OCTABAM) -- the same trap
+    # diff_stock_vs_patch.py hit in Session 97
+    ap.add_argument("--image", default=str(V5),
+                    type=lambda p: str(pathlib.Path(p).resolve()))
     a = ap.parse_args(argv)
+
+    # Session 99: pair the ELF to the image, or the cave-symbol hooks land at ANOTHER
+    # build's addresses and the armed? column silently lies (the diag build's cave
+    # layout differs from mainline V5's).
+    global ELF
+    cand = pathlib.Path(a.image).with_name(
+        "patch_directjump_" + pathlib.Path(a.image).stem.split("_")[-1] + ".elf")
+    if cand.exists():
+        ELF = cand
+    print(f"cave symbols from: {ELF.name}")
 
     ARMED_PC, HOOKS_PC = sym("djc_fix"), sym("djs3_loop")
     print(f"djc_fix=0x{ARMED_PC:x}  djs3_loop="

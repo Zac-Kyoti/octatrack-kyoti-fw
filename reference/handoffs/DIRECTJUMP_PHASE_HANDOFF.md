@@ -2,8 +2,16 @@
 
 Written at the end of Session 89. Read this before touching DIRECT JUMP again.
 
-> **SESSION 97 UPDATE — §3's fix is BUILT (V5.5, `e3e5d232…`, NOT flashed) and
-> oracle-clean**: `re-phased? = no` on every armed commit in DJMAST2 0↔1, and zero
+> **SESSION 97/98 UPDATE — §3's fix is BUILT (V5.5, `e3e5d232…`), oracle-clean, and
+> was FLASHED: HARDWARE REPORTS NO CHANGE in the failing case.** The user adds a
+> discriminating observation: per-track LENGTHS and SCALES (multipliers) all hold time
+> against the metronome; the fractional offsets appear ONLY when a master scale other
+> than 1x is involved — pointing at the MASTER domain (Hook H discards `ticks mod
+> tps_in` when reseeding the master position, and stock zeroes the master tick counter
+> at the commit), and/or at the third writer below, which the Session 97 emulator
+> fixtures NEVER EXERCISED (PAIR read 0 at every commit — a measured blind spot, not
+> evidence of absence). Emulator detail below stands as logic-evidence only:
+> `re-phased? = no` on every armed commit in DJMAST2 0↔1, and zero
 > re-phasing anywhere at uniform 1x. Built as *suppression*, not snapshot/restore: the
 > commit tail turned out to be CNTDN-deferred per track, with both destroying writes in
 > the same tick per track, so Hook Z (0x400a4bea) skips the zero and Hook X (0x400a3542)
@@ -29,7 +37,8 @@ Written at the end of Session 89. Read this before touching DIRECT JUMP again.
 | `V5_2_*` | `6d09452b` | + `0x80006638` pairing. Commit `6e22cc1`. |
 | `V5_3_*` | `8cb167ae` | **ON THE UNIT.** + time-domain conversion. Commit `0e2726c`. |
 | `V5_4_*` | `77809aca` | + Hook S (PAIR→CATCHUP). PARTIAL. Commit `deb8d12`. |
-| `V5_5_*` | `e3e5d232` | − Hook S, + Hooks Z/X (preserve). Oracle-clean. Session 97. Tree is here. |
+| `V5_5_*` | `e3e5d232` | − Hook S, + Hooks Z/X (preserve). Oracle-clean. **ON THE UNIT. HARDWARE: NO CHANGE in the failing case** (fractional step-time on master-scale switches persists; 1x baseline + per-track lengths/scales confirmed nominal). Session 97/98. |
+| `V5_5D_*` | `ab0d806f` | **THE NEXT FLASH.** Session 99 diagnostic: V5.5 + counters, zero behaviour change (parity-proven). [PTN]+[YES] toast prints `A Z X Y P R`; protocol + interpretation in NOTES.md Session 99. OS VERSION `140C_KDIAG`. |
 
 Hashes in `out/BUILDS_SHA256.txt`, provenance in `out/BUILDS_README.txt`. The `V4`/`V5`
 *names* get reused by builds; the hashes do not. Never overwrite `GOLD_S87_*`.

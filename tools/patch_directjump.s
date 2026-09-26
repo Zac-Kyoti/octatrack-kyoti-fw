@@ -270,6 +270,8 @@
                                         | is TICKS PER STEP, not a length, so THIS is the
                                         | modulus a master step position needs.
     .equ PC_SEND,   0x4009e884          | FUN_4009e884(bank, pat) -> Bank Sel CC + PC
+    .equ SPRINTF,   0x40013a08          | varargs sprintf (link a6) -- Session 17's key_fmt
+                                        | used it via tail-jmp; diag toast calls it direct
     .equ SW_LABEL,  0x400a43a0          | "switch confirmed" label inside the step==0 body
     .equ CNTDN_TBL, 0x800065c3          | per-track commit countdown, 16 wide. The tail
                                         | decrements it at 0x400a4bc4 and applies THAT
@@ -350,6 +352,47 @@ dj_toggle:
     beq.b   djt_show
     lea     dj_msg_on,%a0
 djt_show:
+    .ifdef DJ_DIAG
+|   Session 98 diagnostic: the toggle toast reports the phase-fix counters instead of
+|   ON/OFF, then resets them. Key-handler context, so sprintf + NOTIFY are both legal
+|   here (CLAUDE.md: never from the engine frame path). Read protocol:
+|     A = armed commits (djc_fix entries)      Z = Hook Z preserve-path entries
+|     X = Hook X preserve-path entries         Y = 0x400a355e copies (third writer)
+|     P = last byte the third writer copied    R = last Hook H master remainder
+|   Expected if the fix executes: Z == X == 16*A. X << 16*A -> arm/consume path broken
+|   on hardware. Y > 0 with P != 0 -> the third writer re-phases after our fix.
+|   R != 0 -> the master grid itself re-anchors off the absolute bar (Hook H discards
+|   this remainder; stock zeroes the master tick counter at the commit).
+    moveq   #0,%d0
+    move.b  dj_cnt_rem,%d0
+    move.l  %d0,-(%sp)                 | R
+    moveq   #0,%d0
+    move.b  dj_cnt_pair,%d0
+    move.l  %d0,-(%sp)                 | P
+    moveq   #0,%d0
+    move.w  dj_cnt_y,%d0
+    move.l  %d0,-(%sp)                 | Y
+    moveq   #0,%d0
+    move.w  dj_cnt_x,%d0
+    move.l  %d0,-(%sp)                 | X
+    moveq   #0,%d0
+    move.w  dj_cnt_z,%d0
+    move.l  %d0,-(%sp)                 | Z
+    moveq   #0,%d0
+    move.w  dj_cnt_arm,%d0
+    move.l  %d0,-(%sp)                 | A
+    pea     dj_diag_fmt
+    pea     dj_diag_buf
+    jsr     SPRINTF                    | 0x40013a08, varargs, ints as longs
+    lea     32(%sp),%sp
+    clr.w   dj_cnt_arm
+    clr.w   dj_cnt_z
+    clr.w   dj_cnt_x
+    clr.w   dj_cnt_y
+    clr.b   dj_cnt_pair
+    clr.b   dj_cnt_rem
+    lea     dj_diag_buf,%a0
+    .endif
     .ifdef DJ_V3
     pea     DJ_TOAST_DUR               | dur (frames)
     move.l  %a0,-(%sp)                 | text
@@ -634,6 +677,11 @@ djd7_div:
     addq.l  #1,%d4
     bra.b   djd7_div
 djd7_divdone:
+    .ifdef DJ_DIAG
+    move.b  %d0,dj_cnt_rem             | d0 = ticks mod tps_in, the SUB-STEP REMAINDER the
+                                       | reseed discards; nonzero means the master grid
+                                       | re-anchors off the absolute bar at this commit
+    .endif
     move.l  %d4,%d0                    | d0 = newStep, in INCOMING master steps
 djd7_lenchk:
     tst.l   %d1
@@ -910,6 +958,11 @@ djc_ts_done:
 |   next tick, before any deferred track applies.
     moveq   #-1,%d0
     move.w  %d0,dj_keep_pend            | all 16 tracks: preserve across this armed commit
+    .ifdef DJ_DIAG
+    move.w  dj_cnt_arm,%d0             | d0 is reloaded by the moveq below
+    addq.l  #1,%d0
+    move.w  %d0,dj_cnt_arm
+    .endif
     moveq   #1,%d0
     move.b  %d0,G_JUST_COMMITTED        | tell Hook F a real commit happened this tick
     rts
@@ -1221,6 +1274,11 @@ dj_keepz:
     move.w  dj_keep_pend,%d2
     btst    %d1,%d2                    | this track pending? (NOT consumed here --
     beq.b   dkz_restore                | Hook X, later this same tick, consumes it)
+    .ifdef DJ_DIAG
+    move.w  dj_cnt_z,%d2               | d2 is frame-saved on this path (CF has no
+    addq.l  #1,%d2                     | memory-destination addq)
+    move.w  %d2,dj_cnt_z
+    .endif
     movem.l (%sp),%d1-%d2
     lea     8(%sp),%sp
     rts                                | PRESERVE: the zero write never happens
@@ -1258,6 +1316,11 @@ dj_keepx:
     not.l   %d0
     and.l   %d2,%d0
     move.w  %d0,dj_keep_pend
+    .ifdef DJ_DIAG
+    move.w  dj_cnt_x,%d2               | d2 frame-saved; reassigned below anyway
+    addq.l  #1,%d2
+    move.w  %d2,dj_cnt_x
+    .endif
     lea     TRK_SCALE_IX,%a0           | audio 0-7 @0x8000663e, MIDI 8-15 contiguous at +8
     moveq   #0,%d2
     move.b  (%a0,%d1.l),%d2
@@ -1290,6 +1353,43 @@ dkx_stock:
 dj_keep_pend:
     .word   0                          | bit t = preserve track t at its apply tick.
                                        | In-cave on purpose -- see the block comment.
+
+    .ifdef DJ_DIAG
+| ---- Session 98 diag: PURE OBSERVER on the third writer @ 0x400a3556 (10 B) ----
+| Displaces `moveal %sp@(148),%a3 ; moveal %sp@(172),%fp ; moveb %fp@,%a3@` -- the
+| 0x80006624-gated delayed copy that loads PAIR into the tick counter one tick after a
+| hold-consume. Counts every execution and records the copied byte, then replays stock
+| EXACTLY. Changes no behaviour; exists so the toggle toast can say on hardware whether
+| this writer fires after our fix and with what value. Window pre-verified
+| branch-target-free (Session 97).
+    .global dj_diagy
+dj_diagy:
+    moveal  %sp@(152),%a3              | displaced #1, +4 for our return address
+    moveal  %sp@(176),%fp              | displaced #2, +4
+    move.l  %d0,-(%sp)                 | scratch (0x400a3560 moveq overwrites d0 four
+    move.w  dj_cnt_y,%d0               | instructions later, but save it anyway)
+    addq.l  #1,%d0
+    move.w  %d0,dj_cnt_y
+    move.b  %fp@,%d0
+    move.b  %d0,dj_cnt_pair            | record what it copies (CATCHUP[t] = PAIR here)
+    move.l  (%sp)+,%d0
+    move.b  %fp@,%a3@                  | displaced #3: the stock copy, unchanged
+    rts
+
+    .align  2
+dj_cnt_arm: .word 0                    | A: armed commits (djc_fix entries)
+dj_cnt_z:   .word 0                    | Z: Hook Z preserve-path entries
+dj_cnt_x:   .word 0                    | X: Hook X preserve-path entries
+dj_cnt_y:   .word 0                    | Y: third-writer executions
+dj_cnt_pair: .byte 0                   | P: last byte the third writer copied
+dj_cnt_rem:  .byte 0                   | R: last Hook H master-reseed remainder
+dj_diag_fmt:
+    .asciz  "A%d Z%d X%d Y%d P%d R%d"
+    .align 2
+dj_diag_buf:
+    .space  48                         | worst case "A65535 Z65535 X65535 Y65535 P255
+                                       | R255" = 38 chars + NUL
+    .endif
 
     .ifdef DJ_KEYMAP
 | ================= [PTN] release -- close the toast almost immediately =================

@@ -120,7 +120,24 @@ OUT_BIN = ROOT / "out/OCTATRACK_DIRECTJUMP_V5.bin"
 VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_KYOTI"
 TOAST_DUR = int(sys.argv[2], 0) if len(sys.argv) > 2 else 0x44
 
-DEFSYM = f"DJ_V3=1,DJ_KEYMAP=1,DJ_TOAST_DUR=0x{TOAST_DUR:x}"
+# Session 98: DJ_DIAG=1 in the environment builds the DIAGNOSTIC variant -- V5.5 plus
+# counters on Hooks Z/X/armed commits, the Hook H reseed remainder, and a PURE OBSERVER
+# on the third writer at 0x400a3556. The [PTN]+[YES] toast then prints
+# "A.. Z.. X.. Y.. P.. R.." and resets. Behaviour is otherwise V5.5's; outputs go to
+# *_v5diag names so the mainline artifacts are never clobbered.
+DIAG = os.environ.get("DJ_DIAG") == "1"
+if DIAG:
+    OUT = ROOT / "out/mainos_directjump_v5diag.bin"
+    ELEK = ROOT / "out/elek_directjump_v5diag.bin"
+    OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_DIRECTJUMP_V5DIAG.syx"
+    OUT_BIN = ROOT / "out/OCTATRACK_DIRECTJUMP_V5DIAG.bin"
+
+if DIAG and len(sys.argv) <= 1:
+    VERSTR = "140C_KDIAG"   # so SYSTEM STATUS names the diagnostic OS unmistakably
+if DIAG and len(sys.argv) <= 2:
+    TOAST_DUR = 0x88        # six numbers need longer on screen than ON/OFF does
+
+DEFSYM = f"DJ_V3=1,DJ_KEYMAP=1,DJ_TOAST_DUR=0x{TOAST_DUR:x}" + (",DJ_DIAG=1" if DIAG else "")
 
 PATCHES = [
     ("patch_trigscale", 0x400d7b00, None,
@@ -205,6 +222,9 @@ PATCHES = [
       (0x400a3542, "dj_keepx", "226f0094246f00ac1292", 10, "jsr"),
       (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),
 ]
+if DIAG:
+    # the pure observer on the third writer; window pre-verified branch-target-free
+    PATCHES[1][3].insert(-1, (0x400a3556, "dj_diagy", "266f00942c6f00ac1696", 10, "jsr"))
 
 # [PTN]-held keymap layer 0x400bf0f2, 26-byte record for YES (code 0x31): all-NULL in stock.
 # dj_toggle goes into its press field (+2).  Release (+6) / hold (+10) stay NULL.
@@ -326,7 +346,8 @@ def main():
     print(f"\n  {OUT.name}: {changed} bytes changed vs stock")
 
     for ext in ("bin", "elf"):
-        (ROOT / f"out/patch_directjump_v5.{ext}").write_bytes(
+        suffix = "v5diag" if DIAG else "v5"
+        (ROOT / f"out/patch_directjump_{suffix}.{ext}").write_bytes(
             (ROOT / f"out/patch_directjump.{ext}").read_bytes())
 
     # --- v4 = v3's byte set, minus the 0x4005e4c8 detour, plus the 4-byte slot poke and
@@ -368,7 +389,8 @@ def main():
             | {i for i in range(o(D7_SEED_SITE), o(D7_SEED_SITE) + 6) if img[i] != stock[i]} \
             | {i for i in range(o(TSTART_SITE), o(TSTART_SITE) + 6) if img[i] != stock[i]} \
             | {i for i in range(o(KEEPZ_SITE), o(KEEPZ_SITE) + 10) if img[i] != stock[i]} \
-            | {i for i in range(o(KEEPX_SITE), o(KEEPX_SITE) + 10) if img[i] != stock[i]}
+            | {i for i in range(o(KEEPX_SITE), o(KEEPX_SITE) + 10) if img[i] != stock[i]} \
+            | {i for i in range(o(0x400a3556), o(0x400a3556) + 10) if img[i] != stock[i]}
         stray = [i for i in (v4_touched ^ want) if i not in cave]
         print(f"  vs mainos_directjump_v3.bin: v4 touches {len(v4_touched)} vs v3 {len(v3_touched)}; "
               f"{len(stray)} unexpected outside the cave")
