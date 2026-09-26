@@ -31353,3 +31353,174 @@ track 8). Untouched, track 1 trigs at frames 1379/2757 and binds to `0x100b14f0`
   its binaries are not redistributable). Worth building for what only it does: real
   audio, `--mk1` panel, `wait_text` OCR / `wait_lamp` LED walk assertions, a gdbstub
   with a ready-made Python RSP client, and `tests/canary.py` for the cave ceiling.
+
+## Session 58 continued yet again, part 19 (2026-09-25, `wip`) -- MUTE MODE: "a FIRST flash comes
+up in `OT`" was built, emulator-verified, then **ROLLED BACK and PARKED the same day at the user's
+request**. MUTEMODE_DT is back to the flashed/confirmed 2026-09-21 build, byte-for-byte. The
+underlying gap it fixed is REAL and now documented as a known limitation, not a fix.
+
+⚠️ **READ THIS FIRST, the rest of the entry is the parked design.** The shipping MUTEMODE_DT is
+the 2026-09-21 hardware-confirmed build. The patch below is **not in it**. It lives in
+[`tools/parked/`](tools/parked/README.md) (`mutemode_firstflash_OT.s`, its test, and the exact
+build-tool diff) with revival steps. Rollback verified byte-exact: all six MUTEMODE_DT artifacts
+(standalone `.bin`/`.syx`/mainos + the three Bugbuild ones) hash **identically** to the copies
+taken before any of this was written, `0x4001fb1a` holds stock bytes again, `0x400d7a00..40` is
+zero again, and the image boots to the RTOS handoff with M6a PASS. The other four features'
+Bugbuild artifacts were never touched (all 15 hashes match).
+
+**KNOWN LIMITATION carried forward (this is the part that matters):** the shipping build does
+**not** come up in `OT` after a re-flash. A unit that ran an earlier MUTE MODE build has a VALID
+`'ANDY'` block, so the boot restore copies that build's stored mode back into `0x800000dc` and the
+first boot lands in OTFX-T / DT-T / OTFX. Addendum 14's "defaults verified" only ever covered a
+unit with NO battery data (checksum fails -> defaults path -> 0). Measured, not assumed: the parked
+test reports 23 failures against the shipping image, incl. *"GATE 1 -> runtime `0x800000dc` restored
+as 1"*. Workaround for a test unit: set the mode by hand in PERSONALIZE after flashing.
+
+**Original request (superseded):** rebuild the final MUTEMODE_DT build, its build tool and its
+Bugbuild so that MUTE MODE defaults to `OT` on the initial flash. **Follow-up, same day:** *"roll
+back to the previous build version. I changed my mind... I want to return to the previous,
+flashed/confirmed finalized build"* -- done, with the material renamed and parked.
+
+### What was actually wrong with "defaults to OT"
+
+Addendum 14's "defaults verified" booted with NO battery data: the checksum fails, stock's boot
+function takes the defaults path (`0x4001f298`, zero-fills the block), GATE = 0. True, and not the case
+that matters. A unit that ran an EARLIER build has a VALID `'ANDY'` block whose shadow
+(`0x100fff6c`) still holds that build's GATE. Stock sees a good checksum, takes no reset path, and
+the boot restore (`memcpy(0x80000070, 0x100fff00, 0x70)` at `0x4001fb24`, length widened 0x64 -> 0x70
+by this build) copies the stale mode straight into RAM. So the first boot of the new build came up in
+whatever the previous one left (OTFX-T / DT-T / OTFX). Reproduced, not assumed: the new
+`tools/emu_firstflash.py` run against the PRE-change image fails 23 checks, including "GATE 1 -> RUNTIME
+0x800000dc restored as 0" (it is restored as 1).
+
+### Two facts about the boot path that shaped the fix  [read from the binary + a boot under ot_emu]
+
+1. **The power-up restore is `0x4001fb24`, not `0x4001f340`.** Watching the three restore sites
+   through a boot: `0x4001f298` (defaults) -> `0x4001f322` -> `0x4001fb24` fire; the "validate"
+   function `0x4001f340` does not (its callers are `0x4004abf0` / `0x4006233a`, a later settings
+   reload). The boot function checksums the block, calls defaults if it fails, checks the version
+   word (`0x100fff0e`, 36), then ALWAYS reaches `0x4001fb24`.
+2. **A checksum mismatch at boot is expensive.** That path clears `0x10000000..0x100fff00` and runs
+   defaults. Any code that edits the block must re-seal it with the OS's own routine
+   (`0x4001f23c`, no args, clobbers only d0/d1/a0 -- the one the PERSONALIZE key handler runs after every
+   setter). That is what `patch_firstflash` does; it does not roll its own.
+
+### The fix: `tools/patch_firstflash.s` (54 B cave at `0x400d7a00`, one 10-byte detour)
+
+A tag longword at shadow `0x100fff70` = "this block has been through a build carrying this patch".
+`0x100fff70` is deliberately OUTSIDE the 0x70-byte restore window (no runtime alias) and outside
+everything stock addresses absolutely (a whole-image scan: stock never names `0x100fff64+`).
+
+```
+first_flash:                        ; detour at 0x4001fb1a, just before the boot restore
+    move.l  SH_TAG,%d0              ; 0x100fff70
+    cmpi.l  #TAG_MAGIC,%d0          ; 'MMDT'
+    beq.b   ff_done                 ; tagged: a normal boot costs one load, one compare, one branch
+    clr.l   SH_GATE                 ; 0x100fff6c -> OT
+    move.l  #TAG_MAGIC,%d0
+    move.l  %d0,SH_TAG
+    jsr     0x4001f23c              ; re-seal the ANDY checksum (covers both words)
+ff_done:
+    pea 1 ; jsr 0x4000fd34          ; the 10 displaced bytes, replayed exactly
+    jmp 0x4001fb24                  ; the stock restore now copies GATE = 0 into RAM
+```
+
+d3 (the "defaults ran" flag tested at `0x4001fb62`) and a2 are untouched. The detour window's only
+branch target is its first byte (`0x4001faf0 bnes 0x4001fb1a`); `build_mutemode_dt.py` now REFUSES any
+detour longer than 6 B if a relative branch (build_bugbuilds's scan) or an absolute address inside the
+image lands in its middle. ColdFire has no `move #imm,abs.l` -- the first assemble failed on it; go
+through a register.
+
+**Semantics, stated plainly:** the reset happens ONCE per unit (per `TAG_MAGIC`), on the first boot of
+a build carrying this patch; after that the user's own choice persists exactly as before, across
+power cycles AND re-flashes of this build. A unit with no battery data takes the same branch
+harmlessly (GATE already 0). To force another reset in a later build, change `TAG_MAGIC`. If a reset on
+EVERY new flash is wanted instead, derive the tag from a build stamp -- not done; ask.
+
+### Verification  [what each thing does and does not show]
+
+- **Byte diff vs the previous MUTEMODE_DT build: exactly 62 bytes** -- the 10-byte detour at
+  `0x4001fb1a` and the 54-byte cave. Nothing else moves: `patch_softmute` (the whole audio path), the
+  menu, the arrays, the restore-length patches are byte-identical to the hardware-confirmed build. Same
+  62 bytes, same addresses, in the Bugbuild.
+- **`tools/emu_firstflash.py` -- ALL CHECKS PASSED on both images.** Runs the REAL patched boot tail
+  (detour, cave, stock `0x4001f23c`, stock memcpy `0x40020898`, CFV4E CPU model) over seeded blocks
+  whose validity is judged by the ROM's own validator `0x4001f268` (self-checked: rejects a 1-byte flip):
+  stale GATE 1/2/3 with no tag -> shadow AND runtime GATE 0, tag set, checksum valid, every other block
+  byte untouched, d3 preserved, exactly one re-seal; tagged blocks with GATE 0..3 -> BYTE-IDENTICAL, no
+  re-seal; 5 non-matching tag values (all-ones, `0xdeadbeef`, one bit off, ...) -> reset; blank-battery
+  block -> stays 0; and reset -> pick OTFX -> three further boots -> OTFX persists.
+- **Whole-image boot under `ot_emu` (both images):** reaches the RTOS handoff, M6a gate PASS; the
+  watch on `0x4001fb1a` / `0x400d7a00` / `0x4001f23c` shows detour -> cave -> re-seal on the real
+  power-up path; the dumped block afterwards has tag `0x4d4d4454`, shadow GATE 0, checksum VALID
+  (recomputed independently), runtime `0x800000dc` = 0.
+- **Bugbuilds:** interlock proof `feature 1233 B + bug fixes 545 B -> composite 1706 B, DISJOINT, ALL
+  PRESERVED, NO STRAYS`; every OTHER Bugbuild's `.syx`/`.bin` hashes are unchanged (12 of 15 files
+  identical before/after; only the three MUTEMODE_DT files differ).
+
+**NOT verified, so do not read this as hardware-confirmed:** the unit test starts at `0x4001fb1a` with
+hand-set registers, and `ot_emu` only boots a BLANK battery block (there is no way to pre-seed SRAM
+before boot there), so the stale-VALID-block case is proven on the real code path but not through a real
+power-up; the emulator has no real battery SRAM, and CLAUDE.md's standing rule applies (emulator green is
+evidence about the logic, not the machine). This is new code in the BOOT path of a build that had been
+"confirmed, final".
+
+### Artifacts (`out/` is gitignored -- rebuild with `python3 tools/build_mutemode_dt.py` then
+### `python3 tools/build_bugbuilds.py --no-rebuild`)
+
+```
+out/OCTATRACK_OS1.40C_MUTEMODE_DT.syx / out/OCTATRACK_MUTEMODE_DT.bin       version 140C_KYOTI
+out/Bugbuilds/OCTATRACK_OS1.40C_MUTEMODE_DT_BUGFIX.syx / ..._BUGFIX.bin      version BUG_MUTEDT
+```
+
+### If it is flashed: what to look for
+
+1. First boot, PERSONALIZE -> MUTE MODE reads `OT` even if the unit last ran DT-T/OTFX-T/OTFX.
+2. Pick another mode, power-cycle: it is STILL that mode (the tag must not re-fire).
+3. Re-flash the same build: the mode still persists (by design). The reset cannot be re-tested on the
+   same unit without bumping `TAG_MAGIC`.
+4. Any boot oddity, a mode that never persists, or PERSONALIZE settings resetting at power-up: that is
+   this patch until proven otherwise -- revert by flashing `downloads/extracted/OCTATRACK_OS1.40C.syx`
+   or the previous MUTEMODE_DT image, and report it. (Worst credible failure: a bad re-seal makes the
+   next boot take the defaults path and reset PERSONALIZE; the seal is the OS's own routine and the
+   test checks it with the ROM validator.)
+
+### ROLLBACK (same day, at the user's request) -- what the tree actually looks like now
+
+| file | state |
+|---|---|
+| `tools/build_mutemode_dt.py` | **reverted** to committed (the confirmed build's tooling) |
+| `tools/patch_mutemode.s` | **reverted** (my comment removed) |
+| `START_HERE.md` | **reverted** (the "first flash now comes up in OT" row removed) |
+| `README.md` | never needed reverting -- another session's README prune (`2a895a4`) landed over it while this was in progress |
+| `tools/parked/mutemode_firstflash_OT.s` | the cave, renamed from `tools/patch_firstflash.s` |
+| `tools/parked/mutemode_firstflash_OT_test.py` | the test, renamed from `tools/emu_firstflash.py` |
+| `tools/parked/mutemode_firstflash_OT_buildtool.diff` | the exact `build_mutemode_dt.py` diff, so revival is `git apply` |
+| `tools/parked/README.md` | new directory + its own README: this project's own shelved-by-decision work, as distinct from `tools/attic/`'s inherited octamax sources |
+
+Rebuilt after reverting and compared against copies taken BEFORE any edit: **all six MUTEMODE_DT
+artifacts byte-identical**, all 15 Bugbuild artifacts byte-identical, `0x4001fb1a` = stock
+`487800014eb94000fd34`, cave region zero, `pea 0x70` restore-length patch still in place (MUTE MODE
+persistence unaffected), PERSONALIZE arrays intact, boot reaches the handoff with M6a PASS and the
+watch on `0x400d7a00` never fires.
+
+**Two things from this work worth keeping even though the feature is parked** (both in the parked
+README, repeated here because they are general):
+
+1. **The power-up ANDY restore is `0x4001fb24`, not `0x4001f340`.** Watched through a real boot:
+   `0x4001f298` (defaults) -> `0x4001f322` -> `0x4001fb24` fire; "validate" `0x4001f340` does NOT --
+   its callers (`0x4004abf0`, `0x4006233a`) are a later settings reload. A patch aimed at
+   `0x4001f340` would never run at power-up.
+2. **A detour-guard worth lifting on its own merits.** The parked diff also adds a check to
+   `build_mutemode_dt.py` refusing any detour displacing >6 B if a relative branch (via
+   `build_bugbuilds.assert_no_branch_into`) or an absolute address anywhere in the image lands
+   INSIDE the displaced bytes. It applies to the existing 8-byte detours (`mt_rebind`,
+   `fresh_bind`) and is unrelated to first-flash; it was reverted only because it arrived in the
+   same change. Worth adding to the builders separately.
+
+Also worth recording: ColdFire has no `move #imm,abs.l` (`move.l #TAG_MAGIC,SH_TAG` ->
+"operands mismatch"); go through a register.
+
+Net effect on the shipping builds: **none** -- MUTEMODE_DT and its Bugbuild are bit-identical to
+the 2026-09-21 hardware-confirmed images. Committed with the parked material, so the rollback and
+the shelved design are both recoverable from history.

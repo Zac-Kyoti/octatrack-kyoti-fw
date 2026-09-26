@@ -1,0 +1,74 @@
+diff --git a/tools/build_mutemode_dt.py b/tools/build_mutemode_dt.py
+index 5e139ec..763413e 100644
+--- a/tools/build_mutemode_dt.py
++++ b/tools/build_mutemode_dt.py
+@@ -26,9 +26,17 @@ Identical to build_mutemode.py except:
+   'ANDY'-shadow mechanism: patch_mutemode's setter writes 0x100fff6c and this build extends
+   the block restore pea 0x64 -> pea 0x70 at the 3 sites -- byte-identical to build_mutemode.py.
+ 
++  FIRST FLASH -> "OT" (patch_firstflash).  The restore above also brings back whatever mode an
++  EARLIER build left in battery SRAM, so re-flashing a test unit used to boot straight into a
++  stale OTFX-T / DT-T / OTFX.  patch_firstflash keeps a tag longword at 0x100fff70 and, at boot
++  just before the block is restored, resets the shadow GATE to 0 ("OT") the first time it does
++  not find the tag -- then sets the tag and re-seals the ANDY checksum.  After that the user's
++  own choice persists exactly as before.  One detour at 0x4001fb1a (10 B), one 54 B cave.
++
+ Usage:   python3 tools/build_mutemode_dt.py [VERSTR]        (default VERSTR = "140C_KYOTI")
+ """
+ import os, pathlib, subprocess, sys
++from build_bugbuilds import assert_no_branch_into
+ 
+ BASE = 0x40000400
+ HERE = pathlib.Path(__file__).parent
+@@ -175,6 +183,12 @@ PATCHES = [
+     # 0x80 further out again, same convention as part 8 and addendum 2. The three arrays
+     # below move by the same 0x80.
+     ("patch_mutemode", 0x400d7800, "DT_MODE=1", []),   # menu: OT / OTFX-T / DT-T / OTFX
++    # First flash -> OT.  Sits in the gap between the PERSONALIZE arrays (end 0x400d79e4) and
++    # patch_trigscale (0x400d7b00).  Detours the `pea 1 / jsr 0x4000fd34` immediately before the
++    # BOOT restore memcpy (0x4001fb24) -- the real power-up path; 0x4001f340 (validate) is not
++    # on it.  See tools/patch_firstflash.s for the full argument.
++    ("patch_firstflash", 0x400d7a00, None,
++     [(0x4001fb1a, "first_flash", "487800014eb94000fd34", 10)]),
+ ]
+ 
+ # --- PERSONALIZE menu arrays (stock) ---
+@@ -241,6 +255,17 @@ def main():
+             if bytes(img[do:do + len(exp)]) != exp:
+                 sys.exit(f"detour 0x{site:08x} ({name}:{sym}) unexpected: "
+                          f"{bytes(img[do:do+len(exp)]).hex()} != {exp.hex()}")
++            if n > 6:
++                # a detour that displaces >6 B must not have a branch ENTER its middle: the
++                # relative-branch scan is build_bugbuilds's, the absolute-address scan is here
++                # (a jsr/jmp/pea/lea abs.l naming an address inside the displaced bytes).
++                assert_no_branch_into(stock, site, n)
++                for k in range(1, n):
++                    pat = (site + k).to_bytes(4, "big")
++                    hit = stock.find(pat)
++                    if hit >= 0:
++                        sys.exit(f"detour 0x{site:08x} ({name}:{sym}): 0x{BASE + hit:08x} holds "
++                                 f"the absolute address 0x{site + k:08x}, inside the displaced bytes")
+             img[do:do + n] = jmp(s[sym]) + b"\x4e\x71" * ((n - 6) // 2)
+             print(f"    0x{site:08x} -> {name}:{sym} 0x{s[sym]:08x}  ({n} B)")
+ 
+@@ -329,7 +354,9 @@ def main():
+                    # moved to 0x400d78a0/7900/7960 to make room for patch_softmute's growth.
+                    (0x40068efe, 0x40068f02), (0x40068f0a, 0x40068f0e),
+                    (0x40069022, 0x40069026), (0x4006903e, 0x40069042),
+-                   (0x40069056, 0x4006905a)]
++                   (0x40069056, 0x4006905a),
++                   # first-flash -> OT: the cave, and its boot-path detour (10 B)
++                   (0x400d7a00, 0x400d7a40), (0x4001fb1a, 0x4001fb24)]
+         stray = [i for i in diff
+                  if not any(lo - BASE <= i < hi - BASE for lo, hi in allowed)]
+         print(f"  vs build_mutemode.py: {len(diff)} bytes differ, {len(stray)} outside the DT delta")
+@@ -354,7 +381,8 @@ def main():
+ 
+     print(f"\n  {OUT_SYX.name}  (MIDI DIN)  +  {OUT_BIN.name}  (CF card)")
+     print(f"  version screen / SYSTEM STATUS -> OS VERSION will read:  {VERSTR}")
+-    print("  PERSONALIZE -> MUTE MODE:  OT | OTFX | OTFX-T | DT-T.  Default OT.")
++    print("  PERSONALIZE -> MUTE MODE:  OT | OTFX | OTFX-T | DT-T.  Default OT -- a FIRST flash of")
++    print("  this build resets any mode an earlier build left behind to OT (then it persists).")
+     print("  Revert = flash downloads/extracted/OCTATRACK_OS1.40C.syx")
+ 
+ 
