@@ -38,8 +38,7 @@ acknowledgements: [`CREDITS.md`](CREDITS.md).
 You bring your own copy of the official **OS 1.40C**; the tools analyze it and
 produce a modified image, byte-for-byte reproducibly from *your* copy. No Elektron
 binary is included or distributed. Every mod is **off by default** — a freshly
-flashed unit is indistinguishable from stock until you opt in, and an OS upgrade
-resets PERSONALIZE.
+flashed unit is indistinguishable from stock until you opt in.
 
 Which builds have run on real hardware and which are emulator-only is tracked in
 [Hardware-test status](#hardware-test-status) — **read it before you flash.**
