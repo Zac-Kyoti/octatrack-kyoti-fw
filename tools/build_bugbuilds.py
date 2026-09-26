@@ -81,7 +81,9 @@ FEATURES = {
     "MUTEMODE_DT": ("build_mutemode_dt.py", "out/mainos_mutemode_dt.bin", "BUG_MUTEDT", False,
                     "PERSONALIZE -> MUTE MODE: OT | OTFX | OTFX-T | DT-T (default OT)."),
     "QLREC": ("build_qlrec.py", "out/mainos_qlrec.bin", "BUG_QLREC", False,
-              "Hold [REC], tap [PLAY] twice -> toggles QUANTIZE LIVE REC."),
+              "Hold [REC] + [PLAY] -> toast shows QUANTIZE LIVE REC; tap [PLAY] "
+              "again while it is up to invert it.  (Stateless rewrite after the "
+              "0x400522ca tick hook crashed hardware; hardware-confirmed 2026-09-25.)"),
     "SIDECHAIN3_CROSS": ("build_sidechain3.py", "out/mainos_sidechain3_cross.bin", "BUG_SC3X",
                          False, "COMPRESSOR FX page 2: KEY / KFLT / KGAIN / MON, cross-core."),
     "TRIGLOCK": ("build_triglock.py", "out/mainos_triglock.bin", "BUG_TRIGLK", False,

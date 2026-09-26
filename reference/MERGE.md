@@ -47,7 +47,7 @@ proving the repacked builder before the two hard cases are added.
 
 Only the *scoped* build of each — not the intermediates. Sizes below are **measured**, by
 running each builder on 2026-09-23; several are far larger than the numbers this document
-used to carry (`patch_softmute` 368 B → **970 B**, `patch_qlrec` 194 B → **358 B**).
+used to carry (`patch_softmute` 368 B → **970 B**, `patch_qlrec` 194 B → **358 B**, since cut to **176 B**).
 
 | Mod | Standalone build | Sources | cave | HW |
 |---|---|---|---|---|
@@ -55,7 +55,7 @@ used to carry (`patch_softmute` 368 B → **970 B**, `patch_qlrec` 194 B → **3
 | Bug-2 pattern-LED "only p-locks → empty" | `build_pattern_led.py` | `patch_pattern_led.s` | 142 B | confirmed |
 | MUTE MODE — `OT` / `OTFX` / `OTFX-T` / `DT-T` | `build_mutemode_dt.py` | `patch_softmute.s` + `patch_mutemode.s` (`DT_MODE=1`) | 970 + 208 + 204 B | confirmed |
 | SIDE-CHAIN compressor (cross-core) | `build_sidechain3.py` | `patch_sidechain.s` + `patch_sc_dsp3.asm` + `sc_tables.py` | 134 B (+ DSP) | confirmed |
-| QUANTIZE LIVE REC — `[REC]` + `[PLAY]`×2 | `build_qlrec.py` | `patch_qlrec.s` | 358 B | confirmed |
+| QUANTIZE LIVE REC — `[REC]` + `[PLAY]`, toast-gated | `build_qlrec.py` | `patch_qlrec.s` | **176 B** | confirmed working 2026-09-25 |
 | TRIGLESS-LOCK AUTO-REMOVE | `build_triglock.py` | `patch_triglock.s` | 296 B | confirmed |
 | Part-change carryover (PARTREAPPLY) | `build_partreapply.py` | `patch_partreapply.s` | 402 B | confirmed |
 
@@ -102,7 +102,7 @@ and V1.1* and the free span stays contiguous below it.
 | PERSONALIZE array — setters (17×4) | `0x400d6a88` | 68 B |
 | `patch_partreapply` | `0x400d6acc` | 402 B |
 | `patch_pattern_led` | `0x400d6c60` | 142 B |
-| `patch_qlrec` | `0x400d6cf0` | 358 B |
+| `patch_qlrec` | `0x400d6cf0` | **176 B** (was 358 B before the Sessions 94-96 rewrite; the freed 182 B is not reflected in the rows below) |
 | `patch_triglock` | `0x400d6e58` | 296 B |
 | — free — | `0x400d6f80` | **3196 B** |
 | `patch_trigscale` | `0x400d7bfc` | 62 B **pinned** |
@@ -171,7 +171,7 @@ Verified numerically on 2026-09-23 against stock. Sorted by address.
 | `0x40040250` | RELOAD3 | `rl3_bank_trk` | jmp (6) | |
 | `0x40043418` | DIRECT JUMP | `dj_ptnrel` | jmp (6) | `[PTN]` release |
 | `0x4004883a` | QLREC | `qlr_recrel` | jmp (6) | `[REC]` release |
-| `0x400522ca` | QLREC | `qlr_tick` | jsr (6) | **per-control-frame re-arm — new since this doc was written** |
+| ~~`0x400522ca`~~ | QLREC | ~~`qlr_tick`~~ | — | **RETIRED (Session 93): this detour CRASHED a real MKI.** `0x400522ca` is the engine frame handler; the notification calls it drove reach the kernel post/wake. The build now asserts this site stays byte-for-byte stock. Do not re-use it |
 | `0x40061778` | QLREC | `qlr_play` | jmp (6) | `[PLAY]` press |
 | `0x400621da` | PARTREAPPLY | head | jsr (6) | dirty-flag snapshot |
 | `0x40062216` | PARTREAPPLY | tail | jsr (6) | 54 B after the head; same function, same owner |
@@ -291,7 +291,7 @@ standalone `build_reload3.py`.
 | PERSONALIZE word | `0x800000dc` | — | `0x800000ac` (stock) | — | — | `0x800000d8` | — | ⚠️ **B1** |
 | SRAM shadow | `0x100fff6c` | — | `0x100fff3c` (stock) | — | — | **none** | — | disjoint |
 | `pea 0x64→0x70` ×3 | **yes** | no | no (`0xac` already in span) | no | no | **must stay stock** | no | ⚠️ **B1** |
-| private scratch | `0x80006c66` | — | `0x80006a5c–0x80006a73` | — | — | `0x80006a40–0x80006a4a` | **none** — own cave since Session 98 | **disjoint** |
+| private scratch | `0x80006c66` | — | **none** — own handle-gated since Sessions 94-96 | — | — | `0x80006a40–0x80006a4a` | **none** — own cave since Session 98 | **disjoint** |
 | keymap overlay | — | — | — | — | — | writes YES `0x400bf0c0` | asserts stock | ⚠️ **B2** |
 | menu surgery | owns it | — | — | — | — | — | — | single owner |
 | FX chooser / DSP | — | owns it | — | — | — | — | — | single owner |
@@ -301,10 +301,22 @@ standalone `build_reload3.py`.
 | `CUR_BANK 0x80000002` | — | — | — | — | reads | — | reads | read-only, fine |
 | `ARR_ACT 0x460d1aec` | — | — | — | — | — | reads | reads | arranger guard, fine |
 
-**The scratch block is tight but clean:** DJ `0x6a40–4a`, QLREC
-`0x6a5c–73`. (RELOAD3 used to sit at `0x6a50–55` and no longer does: on hardware the unit overwrote those bytes between a key chord and the job that read them, so the reload sometimes hit the wrong track — Session 98. It keeps its request in its own cave now.) QLREC now runs to `0x80006a73` (it used to be recorded as just two bytes at
-`0x6a5c`/`0x6a60`) — 8 bytes of slack to DJ's block below and none above. **Any new mod
-must claim scratch from a fresh region, not by guessing a gap here.**
+**The scratch block: QLREC and RELOAD3 have both LEFT it.** DJ `0x6a40–4a` is the only
+user left; `0x6a50–55` (RELOAD3) and `0x6a5c–73` (QLREC) are released.
+
+Both gave theirs up for the same reason, found the same way — a diagnostic build that
+reported the value on screen, after static analysis and the emulator had both said fine:
+
+* **QLREC, Sessions 94-96.** `0x80006a60` read back as *not* the value just written, on the
+  very next key press, while persisting indefinitely in the emulator.
+* **RELOAD3, Session 98.** The request bytes at `0x80006a54-55` were overwritten between the
+  key chord and the storage job that read them, so the reload hit the wrong (MIDI) track and
+  its own verify passed on that slice.
+
+**Neither feature keeps any state in this block now**, and the rule earned twice is that a
+static "no references" scan cannot tell you whether RAM is written at runtime — and neither
+can route A, while it does not run the DSP/audio path. **Any new mod must claim scratch from
+a fresh region, not by guessing a gap here.**
 
 **Two adjacency notes, neither a conflict:**
 
@@ -314,13 +326,16 @@ must claim scratch from a fresh region, not by guessing a gap here.**
   overlap. But soft-mute force-mutes voices and PARTREAPPLY kills/re-triggers them, so
   *"change Part while a track is soft-muted in OTFX/DT mode"* is a runtime case to test on
   the combined image.
-- QLREC's `qlr_tick` (`0x400522ca`) sits inside `FUN_40052200` — the per-control-frame
-  handler that also decrements the **soft-mute release counter**. No byte conflict (MUTE
-  MODE detours none of that function), but MUTE MODE and QLREC now share a frame handler.
-  Test *"hold `[REC]`, double-tap `[PLAY]` while an OTFX mute tail is ringing"*.
-
----
-
+- **QLREC no longer shares a frame handler with anything.** This document used to note
+  that `qlr_tick` (`0x400522ca`) sat inside `FUN_40052200` alongside MUTE MODE's
+  neighbours and called it adjacency, not conflict. That detour is **gone** — it crashed
+  a real MKI (Session 93), because `FUN_40052200` is the engine frame handler and the
+  notification calls it drove bottom out in the kernel post/wake `FUN_40000c3c`. QLREC's
+  two remaining detours are both **key handlers** (`0x40061778` `[PLAY]` press,
+  `0x4004883a` `[REC]` release), and the build asserts `0x400522ca` stays stock. Nothing
+  here needs re-testing for frame-handler sharing; the reason is that there is none.
+    
+    
 ## Version string — `KYOTI_V1.0`
 
 The combined image is the shipping build, so it carries its own branding, **not** the

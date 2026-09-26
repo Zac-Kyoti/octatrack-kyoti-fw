@@ -21,6 +21,42 @@ not, so treat what's below as the guaranteed minimum, then go read them.**
 
 ## Hard constraints (do not relearn these the hard way)
 
+- **Never call a UI or kernel primitive from an engine/frame hook — and do not
+  trust a note calling a site a "per-frame tick".** `0x400522ca`
+  (`FUN_40052200`) crashed a real MKI on 2026-09-25: dead controls plus a loud
+  persistent HF crackle, after QLREC drove a toast from it. `FUN_4005a2b8`
+  (NOTIFY) and `FUN_40056bec` (close) both bottom out in **`FUN_40000c3c`, the
+  kernel post/wake** — it masks to `0x2700`, marks a blocked task runnable and
+  pokes the ready-list head `0x800068d8`. That is legal from a **key handler**,
+  not from the engine frame path. **If you need "has N seconds passed", read the
+  OS's own state** (`0x460d1e70` handle / `0x460d1e6c` countdown for a toast)
+  instead of counting ticks yourself. NOTES "Session 93".
+- **"Hardware-confirmed" must name what was confirmed.** QLREC carried
+  "hardware-confirmed, final" for six sessions while containing the latent
+  crash above: what was actually confirmed was *it did not hang during that
+  flash*. A rare crash and a clean feature look identical at flash time. Write
+  the specific observation into the status line, not the conclusion.
+- **Scratch RAM at `0x80006a40+` is NOT reliable under live audio, and our
+  emulator cannot tell you.** QLREC kept one magic longword at `0x80006a60`;
+  on hardware it was already gone by the *next key press* (a diagnostic build
+  reported it on screen), while it persisted perfectly in the emulator, which
+  does not run the DSP/audio path for real. The block sits in the **DSP
+  shared-RAM window**, and a static "no references" scan says nothing about
+  runtime writes. **Proven twice:** RELOAD3's request bytes at `0x80006a54-55`
+  were overwritten between a key chord and the storage job that read them, so it
+  reloaded the wrong (MIDI) track and still reported success (Session 98).
+  **Prefer keeping no private state at all** — read the state the OS already
+  maintains. Both features now keep theirs in their own cave.
+  ⚠️ DIRECT JUMP (`0x80006a40-4a`, `wip`) still keeps state there; its flag is
+  re-armed every tick so a clobber would be invisible rather than absent.
+  NOTES "Sessions 94-96", "Session 98".
+- **When hardware and the emulator disagree, build a diagnostic, don't reason.**
+  Both of these were settled by a build whose on-screen message *named* the
+  failing condition, after theories that survived static analysis and emulation.
+  The emulator's blind spots (no UI tick, no real DSP path) are exactly where the
+  bugs lived, so "emulator ALL GOOD" is evidence about the logic, never about the
+  machine. Say which one you mean.
+
 - **Hardware = Octatrack MKI only. No MKII.** Stock 1.40C is one image for
   both; the boot probe `0x46c8d18c` adapts it (MKI shows 15 PERSONALIZE
   items, no `LED BRIGHTNESS`). Any older note saying "MKII" predates this
