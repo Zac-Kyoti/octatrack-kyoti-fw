@@ -123,10 +123,13 @@ descriptive, and this section is the policy.
   splice asserts the stock bytes it overwrites, asserts caves are free /
   non-overlapping / within the free zone, and round-trips through Elektron's
   own firmware tool.
-- **Two branches, different state**: `main` is stable/hardware-tested only;
-  `wip` is the active frontier. Check which one you're on — each branch's
-  own `START_HERE.md` "Current frontier" section reflects its own state, not
-  the other's.
+- **One branch (`main`), tiers instead of branches.** The `wip` branch was
+  retired 2026-09-26 — cherry-picking between the two produced duplicate
+  commits and conflict-heavy merges. Unfinished work lives here and is kept
+  out of a visitor's hands by `tools/kyoti_status.py`: a builder declares
+  FINAL / PREVIEW / WIP, and a WIP builder refuses to run without
+  `KYOTI_ALLOW_WIP=1`. **A new unfinished builder declares its tier.** Use a
+  short-lived topic branch for risky work, not a second long-lived one.
 - **macOS TCC**: `~/Documents` is protected; grant Full Disk Access to the
   actual running `claude` binary if a tool call fails with "Operation not
   permitted" on this path — see `START_HERE.md` §3 for the exact binary path.

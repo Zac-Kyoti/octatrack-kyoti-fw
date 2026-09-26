@@ -106,6 +106,17 @@ Outputs: out/mainos_directjump_v5.bin, out/elek_directjump_v5.bin,
 """
 import hashlib, os, pathlib, subprocess, sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from kyoti_status import status, WIP
+
+status(WIP, "DIRECT JUMP V5.x", """
+    The open thread: non-1x master scales.  The 1x baseline is confirmed, and each
+    V5.x iteration is a flash-and-measure step that may be reverted -- V5.5 was
+    hardware-rejected outright.  DJ_DIAG=1 builds the on-screen diagnostic variant,
+    which replaces the ON/OFF toast with run-time counters and is for measuring the
+    bug, not for playing.  build_directjump_v4.py is the confirmed-at-1x build.
+""")
+
 BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent

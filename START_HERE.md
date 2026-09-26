@@ -21,9 +21,9 @@ only, for `whatsnew.py`).
 
 ## 1. Read order for a new chat
 
-1. **This file** — §6 says which branch the current work is on (`main` vs `wip`).
-   Check out that branch before reading further; each branch's `START_HERE.md` / `NOTES.md`
-   reflects its own state.
+1. **This file** — §5 is the state of every build, §6 the current frontier. There is
+   **one branch** (`main`); it carries finished and unfinished work alike, and the
+   unfinished builders gate themselves (see §5).
 2. **`NOTES.md`** — the RE log. **Do not read top-to-bottom** (it starts at 2026-07 recon).
    Jump to the newest `## Session N` section and the most recent
    `### … STATE OF PLAY` / `### NEXT …` blocks. Section index: `grep -nE '^## ' NOTES.md`.
@@ -106,11 +106,19 @@ only, for `whatsnew.py`).
 
 ## 5. Shipped / in-flight work
 
-Two branches. **`main`** (this) is the shipping line: every finished, hardware-confirmed
-feature (including RELOAD3, PARTREAPPLY and the Bugbuild tooling). **`wip`** is `main`
-plus the one open thread, DIRECT JUMP, and the external-RE knowledge-base ingest.
-Upstream RE repos are tracked via `refs/` (see `reference/EXTERNAL_RESEARCH.md`), not
-a mirrored branch.
+**One branch.** `main` carries every build, finished or not, plus the KB and the
+diagnostics. The long-lived `wip` branch was retired on 2026-09-26: it had drifted 41/11
+commits from `main`, mostly the same changes under different SHAs from cherry-picking
+back and forth, and every sync cost a conflict-heavy merge. **Use short-lived topic
+branches** for anything risky and merge them here when they settle.
+
+What keeps unfinished work from being mistaken for shippable is `tools/kyoti_status.py`:
+each builder declares **FINAL**, **PREVIEW** or **WIP** and announces it on every run, and
+a **WIP** builder exits non-zero unless `KYOTI_ALLOW_WIP=1` is in the environment. Today
+DIRECT JUMP is the only non-FINAL feature — `build_directjump_v4.py` is PREVIEW
+(1x-confirmed), `build_directjump_v5.py` is WIP. When a tier changes, change the call and
+the README table together. Upstream RE repos are tracked via `refs/`
+(see `reference/EXTERNAL_RESEARCH.md`), not a mirrored branch.
 
 **Finished and hardware-confirmed on the MKI** (per-feature detail and flash dates:
 `README.md` → *Hardware-test status*, and `BUILD_KYOTI.md`):
@@ -123,7 +131,7 @@ a mirrored branch.
 | **QUANTIZE LIVE REC** — `[REC]` + `[PLAY]`, then `[PLAY]` again while the toast is up | `build_qlrec.py` | **confirmed working** (2026-09-25) after three instructive failures: a `dur<=0` toast hung the unit, a `0x400522ca` frame-handler detour crashed it, and a private scratch word at `0x80006a60` did not survive on the unit. Now keeps **no state at all** — the gate is stock's toast handle. 2 cosmetic issues parked |
 | **SIDE-CHAIN COMPRESSOR** — `KEY`/`KFLT`/`KGN`/`MON`, cross-core | `build_sidechain3.py` → `SIDECHAIN3_CROSS` | **confirmed, final** 2026-09-20, single-core and cross-core both |
 | **TRIGLESS-LOCK AUTO-REMOVE** | `build_triglock.py` | **confirmed, final** 2026-09-21 |
-| **Part-change carryover** — PICKUP→FLEX stuck loop + spurious Part-edited flag | `build_partreapply.py` | **confirmed** 2026-09-22/23, thread closed. On **both** branches — `main` and `wip` carry byte-identical builds |
+| **Part-change carryover** — PICKUP→FLEX stuck loop + spurious Part-edited flag | `build_partreapply.py` | **confirmed** 2026-09-22/23, thread closed |
 
 **Composites** — `build_bugbuilds.py` gives each finished feature its **own** image with
 all three bug fixes folded into it: MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK and
@@ -235,7 +243,7 @@ the request as armed and as read by the worker. The request bytes lived at
 `0x80006a50-55`, a RAM block the unit overwrites, so the worker sometimes reloaded a
 different (MIDI) track and then verified that. They now live in the patch's own cave, and
 the build refuses any reference into `0x80006a40..0x80006abf`. The user reported every
-issue resolved. **Do not keep state in that block** (`kb/caves.md` and CLAUDE.md on `wip`;
+issue resolved. **Do not keep state in that block** (`kb/caves.md`, CLAUDE.md,
 NOTES "Session 98"). Deferred by the user: all-tracks and whole-bank variants. Handoff:
 `reference/handoffs/RELOAD3_SEQFAIL_HANDOFF.md`. Spec and measurements:
 `reference/RELOAD_REDESIGN.md`; detail: `NOTES.md` "Session 42"–"44" + "Session 47" +

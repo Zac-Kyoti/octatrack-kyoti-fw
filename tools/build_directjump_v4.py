@@ -100,6 +100,16 @@ Outputs: out/mainos_directjump_v4.bin, out/elek_directjump_v4.bin,
 """
 import os, pathlib, subprocess, sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from kyoti_status import status, PREVIEW
+
+status(PREVIEW, "DIRECT JUMP v4", """
+    Confirmed on hardware at 1x track and master scales only: under any other
+    master scale a switch can land on a fractional step.  Superseded for
+    development by build_directjump_v5.py, and kept buildable because what it
+    does do, it does on the unit.
+""")
+
 BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent

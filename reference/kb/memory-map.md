@@ -1230,7 +1230,7 @@ not code); `0x800000b4` — **5 real refs in the menu code, taken**.
 
 | Addr | shadow | Status |
 |---|---|---|
-| `0x800000a8` | `0x100fff38` | free of any stock use, **but inside the stock `0x64` restore** → its value is overwritten from the shadow every boot. DIRECT JUMP (`wip`, Session 15) uses it as menu state and does **not** write the shadow, so its `ON` setting silently resets to `OFF` on a power cycle (same bug Session 19 fixed for `0xdc`). No aliasing / corruption — just non-persistence. Fix: move it to `0x800000d8` (below) and give it the Session-19 treatment. |
+| `0x800000a8` | `0x100fff38` | free of any stock use, **but inside the stock `0x64` restore** → its value is overwritten from the shadow every boot. DIRECT JUMP (Session 15) uses it as menu state and does **not** write the shadow, so its `ON` setting silently resets to `OFF` on a power cycle (same bug Session 19 fixed for `0xdc`). No aliasing / corruption — just non-persistence. Fix: move it to `0x800000d8` (below) and give it the Session-19 treatment. |
 | `0x800000d4` | `0x100fff64` | free; outside the stock `0x64` restore |
 | `0x800000d8` | `0x100fff68` | free; outside the stock `0x64` restore — **the slot to give DIRECT JUMP** (rides MUTE MODE's `0x70` extension) |
 | `0x800000dc` | `0x100fff6c` | **taken** — MUTE MODE / SOFT-MUTE GATE. Session 19: build extends the restore to `0x70` + the setter writes the shadow, so it persists. |

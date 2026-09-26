@@ -40,9 +40,19 @@ flashed unit is indistinguishable from stock until you opt in.
 Which builds have run on real hardware is tracked in
 [Hardware-test status](#hardware-test-status) — **read it before you flash.**
 
-**Branches.** `main` is the published line and carries everything finished. `wip`
-is the active frontier: the DIRECT JUMP thread and the external-RE knowledge-base
-ingest are there only. Each branch's own `START_HERE.md` §6 describes that branch.
+**One branch.** `main` carries everything — the finished features, the unfinished one,
+the research notes and the diagnostics. There is no separate work-in-progress branch to
+hunt through. Instead, **each builder tells you what tier it is in before it runs**:
+
+| tier | what it means | what the builder does |
+|---|---|---|
+| **FINAL** | flashed on the author's MKI and working | builds |
+| **PREVIEW** | incomplete, but safe to try and useful as far as it goes | says what is unfinished, then builds |
+| **WIP** | the author's own flash-and-measure loop; expected to be wrong | **refuses** unless you set `KYOTI_ALLOW_WIP=1` |
+
+Everything below is FINAL except **DIRECT JUMP**, which is PREVIEW at v4 and WIP at V5.x.
+The gate is a courtesy, not a lock — it is there so nobody flashes a diagnostic build by
+accident. `tools/kyoti_status.py` is all of it.
 
 ### Extended Features
 
@@ -72,7 +82,8 @@ ingest are there only. Each branch's own `START_HERE.md` §6 describes that bran
   step, and a 2x track can play a spurious off-grid trig once per cycle. Successive
   V5.x builds have closed causes a diagnostic build measured on the unit and made a
   large improvement on hardware; the remainder is still being worked.
-  → [`tools/build_directjump_v5.py`](tools/build_directjump_v5.py) ·
+  → **PREVIEW**, confirmed at 1x: [`tools/build_directjump_v4.py`](tools/build_directjump_v4.py) ·
+  **WIP**, the active thread: [`tools/build_directjump_v5.py`](tools/build_directjump_v5.py) ·
   handoff [`reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md`](reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md)
 
 - **SIDE-CHAIN COMPRESSOR** — an external key input for the stock DynamiX
@@ -190,8 +201,8 @@ All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit
 | MIDI Plays-Free trig fix | all | **confirmed** 2026-08-28 |
 | MUTE MODE — all four modes, menu, SOLO | `build_mutemode_dt.py` | **confirmed, final** 2026-09-21 |
 | ↳ mode survives a power cycle | `build_mutemode_dt.py` | **confirmed** |
-| DIRECT JUMP — 1x scales | `build_directjump_v5.py` | **confirmed** 2026-09-23 |
-| ↳ master scales other than 1x | `build_directjump_v5.py` | **open** — improved on hardware by V5.8; the residual is still being worked |
+| DIRECT JUMP — 1x scales | `build_directjump_v4.py` (PREVIEW) | **confirmed** 2026-09-23 |
+| ↳ master scales other than 1x | `build_directjump_v5.py` (WIP) | **open** — improved on hardware by V5.8; the residual is still being worked |
 | SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` | **confirmed, final** 2026-09-20 |
 | ↳ a project still using the donated effect loads as NONE | `build_sidechain3.py` | **confirmed, final** 2026-09-25 |
 | RELOAD FROM PROJECT — both chords | `build_reload3.py` | **confirmed, final** 2026-09-25 |
@@ -271,6 +282,7 @@ reference/kb/        distilled knowledge base (addresses, formats, DSP, code cav
 reference/           MERGE.md allocation map, per-feature specs, external-RE index
 reference/handoffs/  per-thread handoffs for the work still open
 tools/               build scripts, ColdFire patch sources, emulators, packers
+tools/kyoti_status.py  the FINAL / PREVIEW / WIP tier each builder declares
 tools/attic/         third-party reference patch sources — RE cross-reference, not built
 sysex/               the MIDI Plays-Free fix as JSON hunks + a no-assembler applier
 refs/                external-RE repo manifest; the clone cache under it is git-ignored
