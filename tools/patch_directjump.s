@@ -374,8 +374,8 @@ djt_show:
     move.l  %d0,-(%sp)                 | N (P dropped from display: Y0/P0 across three
                                        | hardware sessions; dj_diagy still records it)
     moveq   #0,%d0
-    move.w  dj_cnt_y,%d0
-    move.l  %d0,-(%sp)                 | Y
+    move.w  dj_cnt_w,%d0
+    move.l  %d0,-(%sp)                 | W (Y dropped: dead across 4 HW sessions)
     moveq   #0,%d0
     move.w  dj_cnt_x,%d0
     move.l  %d0,-(%sp)                 | X
@@ -393,6 +393,7 @@ djt_show:
     clr.w   dj_cnt_z
     clr.w   dj_cnt_x
     clr.w   dj_cnt_y
+    clr.w   dj_cnt_w
     clr.w   dj_cnt_m
     clr.w   dj_cnt_n
     clr.b   dj_cnt_pair
@@ -1418,6 +1419,38 @@ dkx_stock:
     move.b  %a2@,%a1@                  | displaced #3: TICKS_IN_STEP[t] = CATCHUP[t]
     rts
 
+| ---- Hook W @ 0x400a4bdc (6 B: 2f03 4e94 588f) -- Session 102 ----
+| Displaces the tail's conditional reposition-fire call: push d3 / jsr (a4) / addq
+| (a4 = FUN_400a536c, loaded at 0x400a4bb6; d3 = track; branches at 0x4bd6/0x4bda land
+| at 0x4be2, past this window). Under the preserve, the track fires its own trig at its
+| own boundary -- if the reposition fire ALSO runs while the preserved counter is
+| MID-STEP, it lands off-grid: the user's once-per-cycle spurious trig, half a step off
+| (stock never double-fires because stock zeroes the counter here). So: fire is kept
+| whenever the counter reads 0 (every case the emulator can produce), and suppressed
+| only when it is provably off-grid. Hook X has NOT consumed the bit yet at this point
+| in the tick (the copy site runs later), so the mask is valid here.
+    .global dj_keepw
+dj_keepw:
+    tst.l   DJ_MODE
+    beq.b   dkw_fire
+    move.w  dj_keep_pend,%d0           | d0/a0 are dead across this site: 0x400a536c's
+    btst    %d3,%d0                    | own clobbers are tolerated by stock right here,
+    beq.b   dkw_fire                   | and 0x4be2 reloads a0 immediately
+    lea     TICKS_IN_STEP,%a0
+    tst.b   (%a0,%d3.l)
+    beq.b   dkw_fire                   | counter == 0: on-grid reposition, keep it
+    .ifdef DJ_DIAG
+    move.w  dj_cnt_w,%d0
+    addq.l  #1,%d0
+    move.w  %d0,dj_cnt_w               | W: off-grid reposition fires suppressed
+    .endif
+    rts
+dkw_fire:
+    move.l  %d3,-(%sp)                 | displaced #1
+    jsr     0x400a536c                 | displaced #2 (was jsr (%a4), same target)
+    addq.l  #4,%sp                     | displaced #3
+    rts
+
     .align  2
     .global dj_keep_pend
 dj_keep_pend:
@@ -1432,27 +1465,13 @@ dj_mrem:
     .align  2
 
     .ifdef DJ_DIAG
-| ---- Session 98 diag: PURE OBSERVER on the third writer @ 0x400a3556 (10 B) ----
-| Displaces `moveal %sp@(148),%a3 ; moveal %sp@(172),%fp ; moveb %fp@,%a3@` -- the
-| 0x80006624-gated delayed copy that loads PAIR into the tick counter one tick after a
-| hold-consume. Counts every execution and records the copied byte, then replays stock
-| EXACTLY. Changes no behaviour; exists so the toggle toast can say on hardware whether
-| this writer fires after our fix and with what value. Window pre-verified
-| branch-target-free (Session 97).
-    .global dj_diagy
-dj_diagy:
-    moveal  %sp@(152),%a3              | displaced #1, +4 for our return address
-    moveal  %sp@(176),%fp              | displaced #2, +4
-    move.l  %d0,-(%sp)                 | scratch (0x400a3560 moveq overwrites d0 four
-    move.w  dj_cnt_y,%d0               | instructions later, but save it anyway)
-    addq.l  #1,%d0
-    move.w  %d0,dj_cnt_y
-    move.b  %fp@,%d0
-    move.b  %d0,dj_cnt_pair            | record what it copies (CATCHUP[t] = PAIR here)
-    move.l  (%sp)+,%d0
-    move.b  %fp@,%a3@                  | displaced #3: the stock copy, unchanged
-    rts
+| Session 102: the dj_diagy observer on 0x400a355e is REMOVED (cave space for Hook W).
+| Y read 0 across four hardware sessions and every emulator run; the third-writer
+| lead is closed. Its detour is dropped from the build; dj_cnt_y/pair stay allocated
+| so older notes' field names still resolve, but the toast no longer shows them.
+    .endif
 
+    .ifdef DJ_DIAG
     .align  2
 dj_cnt_arm: .word 0                    | A: armed commits (djc_fix entries)
 dj_cnt_z:   .word 0                    | Z: Hook Z preserve-path entries
@@ -1460,10 +1479,11 @@ dj_cnt_x:   .word 0                    | X: Hook X preserve-path entries
 dj_cnt_y:   .word 0                    | Y: third-writer executions
 dj_cnt_m:   .word 0                    | M: Hook Z reduces that CHANGED a counter
 dj_cnt_n:   .word 0                    | N: commits with a NONZERO master-remainder seed
+dj_cnt_w:   .word 0                    | W: off-grid reposition fires suppressed (Hook W)
 dj_cnt_pair: .byte 0                   | P: last byte the third writer copied
 dj_cnt_rem:  .byte 0                   | R: last Hook H master-reseed remainder
 dj_diag_fmt:
-    .asciz  "A%d Z%d X%d Y%d N%d R%d M%d"
+    .asciz  "A%d Z%d X%d W%d N%d R%d M%d"
     .align 2
 dj_diag_buf:
     .space  48                         | worst case "A65535 Z65535 X65535 Y65535 P255

@@ -31584,3 +31584,53 @@ across three hardware sessions; dj_diagy still records it). Branch on the readin
 - fractional switches with **N>0** → seeds engage but do not cure on hardware →
   something later re-writes the master phase on the unit (a writer the emulator
   never exercises); next instrument watches post-seed writes to 0x800065b6.
+
+## Session 102 (2026-09-26, `wip`) — the once-per-cycle spurious trig: the tail's reposition fire duplicating under the wrap-preserve. V5.9 = conditional cut, measured at runtime
+
+### Hardware V5_8D2 (user)
+
+Same landing-interval behaviour, PLUS (present since V5.8): the 2x track fires a
+spurious trig once per cycle, exactly half a step off a programmed trig, audibly
+off-grid. Toast `A6 Z136 X128 Y0 N1 R3 M0`: **N1 of A6** — most fractional switches
+carried a ZERO master-remainder seed, so the landing residual is NOT the remainder
+case (that branch is settled). Y0 for the fourth session running.
+
+### The spurious-trig mechanism
+
+The commit tail conditionally fires the reposition call (`push d3 / jsr (a4=0x400a536c)
+/ addq` at 0x400a4bdc-0x4be1) when a track's CNTDN expires. Stock zeroes the tick
+counter in the same body, making the reposition fire and the track's own advance-path
+fire (0x400a3d98) mutually exclusive. **Under V5.8's wrap-preserve both can run each
+cycle**: the preserved track fires on its own grid AND the tail fires at CNTDN expiry —
+a fixed off-grid offset after the wrap. Once per cycle, half a step off: the report.
+The emulator cannot show the duplicate (fixture content + only-boundary commits), so
+V5.9 makes the cut CONDITIONAL and self-measuring rather than instrumenting first.
+
+### V5.9 (mainline `e46cc4b2`, diag `2bcbac11`)
+
+**Hook W @0x400a4bdc** (6 B): when DJ is on and the track's preserve bit is set (Hook X
+has not consumed it yet at this point in the tick), the reposition fire is kept if the
+preserved counter reads 0 (on-grid — every case the emulator produces) and SUPPRESSED
+only when the counter is mid-step, i.e. only when the fire is provably off-grid. Diag
+counter **W** counts the suppressions; toast is now `A Z X W N R M` (Y dropped — dead
+across four hardware sessions; the dj_diagy observer and its detour removed, freeing
+the cave; diag blob 1772 B, 20 B under the trigscale boundary).
+
+Build-gate note: the v3 comparator caught the undeclared Hook W site exactly as
+designed (`v4 DIVERGED from v3 outside the cave` at 0x400a4bdc) — KEEPW_SITE added.
+
+### Gates
+
+Fire oracle: wrap fires still single and class [0] (the counter==0 path keeps them);
+ADV [5] steady everywhere. Table-arm with the odd-boundary cue schedule: schedulers
+class 0 throughout. Uniform 1x: clean. Feature-OFF poisoned-scratch diff: IDENTICAL.
+emu_djdiag: ALL GOOD. The suppression path itself is UNREACHABLE in the emulator —
+hardware (the toast's W and the user's ears) decides, as always.
+
+### Predictions for the flash
+
+Spurious per-cycle trig GONE, W growing ≈ once per cycle on the affected track. The
+landing-interval fractional may also improve (the off-grid landing fire at armed
+commits is suppressed by the same cut). If the spurious persists with W=0, the
+hypothesis is dead at zero cost; if fractional persists with the spurious gone, the
+landing-interval scheduler is next, with fresh hardware numbers.

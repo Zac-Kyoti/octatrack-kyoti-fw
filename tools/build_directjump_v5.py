@@ -220,11 +220,13 @@ PATCHES = [
       # scratch (Sessions 94-96: that window is not reliable under live audio). The
       # 16-bit arm mask lives in the cave (dj_keep_pend), image-initialised to 0.
       (0x400a3542, "dj_keepx", "226f0094246f00ac1292", 10, "jsr"),
+      # Session 102 -- Hook W: the tail's reposition-fire call, suppressed only when
+      # the preserved counter is mid-step at fire time (the off-grid duplicate).
+      (0x400a4bdc, "dj_keepw", "2f034e94588f", 6, "jsr"),
       (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),
 ]
-if DIAG:
-    # the pure observer on the third writer; window pre-verified branch-target-free
-    PATCHES[1][3].insert(-1, (0x400a3556, "dj_diagy", "266f00942c6f00ac1696", 10, "jsr"))
+# Session 102: the DIAG-only dj_diagy observer detour is gone (Y dead everywhere;
+# cave space reclaimed for Hook W, which is a MAINLINE hook).
 
 # [PTN]-held keymap layer 0x400bf0f2, 26-byte record for YES (code 0x31): all-NULL in stock.
 # dj_toggle goes into its press field (+2).  Release (+6) / hold (+10) stay NULL.
@@ -372,6 +374,7 @@ def main():
         TSTART_SITE = 0x4009c3d4
         KEEPZ_SITE = 0x400a4bea       # Session 97, 10 B
         KEEPX_SITE = 0x400a3542       # Session 97, 10 B
+        KEEPW_SITE = 0x400a4bdc      # Session 102, 6 B
         # Session 83: v3 widened the ANDY restore (pea 0x64 -> 0x70) at all three sites so
         # DIRECT JUMP would persist. v4 leaves those bytes stock, so they are bytes v3
         # touched and v4 deliberately does not -- drop them from `want` or they read as
@@ -390,7 +393,8 @@ def main():
             | {i for i in range(o(TSTART_SITE), o(TSTART_SITE) + 6) if img[i] != stock[i]} \
             | {i for i in range(o(KEEPZ_SITE), o(KEEPZ_SITE) + 10) if img[i] != stock[i]} \
             | {i for i in range(o(KEEPX_SITE), o(KEEPX_SITE) + 10) if img[i] != stock[i]} \
-            | {i for i in range(o(0x400a3556), o(0x400a3556) + 10) if img[i] != stock[i]}
+            | {i for i in range(o(0x400a3556), o(0x400a3556) + 10) if img[i] != stock[i]} \
+            | {i for i in range(o(KEEPW_SITE), o(KEEPW_SITE) + 6) if img[i] != stock[i]}
         stray = [i for i in (v4_touched ^ want) if i not in cave]
         print(f"  vs mainos_directjump_v3.bin: v4 touches {len(v4_touched)} vs v3 {len(v3_touched)}; "
               f"{len(stray)} unexpected outside the cave")
