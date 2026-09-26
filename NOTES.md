@@ -31108,3 +31108,165 @@ sections, and QLREC's stateless rewrite.
 `0x400522ca`, the site that crashed a real MKI on 2026-09-25 (Session 93), and `main`'s
 README still calls that feature hardware-confirmed. The fix (`0b595ed`) is on `wip` only.
 Promoting it is a separate decision.
+
+## Session 101 (2026-09-25, `wip`) — WHY route A is slow, measured: the cost is structural. octabam's C++ port ported a diag at 11x, plus a `cp`-over-a-live-dylib bug that fakes a broken build
+
+Started from a question about other developers "testing in real time" and whether
+markandrus/octemu's merge into octabam gave us anything. It did not — but the answer
+was already in `refs/`, unused.
+
+### The premise, corrected
+
+**octemu is not a repackaging of octabam's emulator.** It is markandrus's independent
+QEMU-based emulator (patched QEMU ColdFire MCF54455 + dsp56300 + SDL2). What octabam
+merged from octemu is the **firmware mods** (USB MIDI, USB AUDIO) as modules, not the
+emulator. And the "GUI" is not octemu-only: octabam already ships one —
+`ot_emu --lcd out/lcd.bin --live out/panel.fifo` + `tools/emu/lcd_view.py --panel`.
+
+### Where route A's 121-143x actually goes (measured, not reasoned)
+
+Microbenchmarked Unicorn 2.1.4 m68k TCG on this M4, on the EMAC-patched build our
+harness actually loads:
+
+| configuration | throughput |
+|---|---|
+| no hooks | **154-252 MIPS** |
+| bursts of 4096 (our `quantum`) | 90.7 vs 91.8 — **free** |
+| bursts of 32 (`step_quantum`) | 21 MIPS (4.3x) |
+| + global `UC_HOOK_MEM_WRITE` | 21 MIPS (**7.3x**) |
+| + global per-instruction `UC_HOOK_CODE` | 3.2 MIPS (**28x**) |
+| a load through a Python `mmio_map` callback | 9 MIPS (**28x**) |
+
+**The CPU core is faster than the OT's own ColdFire** (~176 MIPS in octabam's model).
+The burst model is free. Every bit of the slowdown is harness tax, in two callbacks.
+
+### ⚠️ THE LESSON: route A cannot be micro-optimised into speed
+
+Unicorn's fast path is lost as soon as **any** code hook covers executing code, and
+route A installs **435** of them at the EMAC macload sites regardless of anything we
+do. So removing one more global hook cannot recover a fast path that 435 site hooks
+have already given up. Measured end to end: the write-hook fix returned **16%** against
+a 7.3x microbenchmark, and the exact-clock fix returned **nothing** (178.6 s → 188.4 s,
+within host-load noise). **Route A's cost is structural** — hook-instrumented emulation
+driving a Python-side machine model. Reach for the C++ port, not a faster route A.
+
+### What was built (3 local patches, `tools/refs/local-patches/`)
+
+1. **`octabam-emu-writehook.patch`** — `boot()` installed an **unbounded**
+   `UC_HOOK_MEM_WRITE` whose Python lambda fires on every store in the address space,
+   and never removed it, so it rode through every RTOS run. Its only two readers are
+   boot's own stall loop and `_run_until`. Now boot `hook_del`s it on the way out and
+   `_run_until` installs its own lazily, at the first mid-way burst — `writes` is a
+   delta across a 4-entry window that decides nothing until full, so the delta over
+   bursts 2..4 is bit-identical. **`emu_pattern_led.py` 217.9 s → 183.8 s, output
+   byte-identical.**
+2. **`octabam-emu-exact-clock-native.patch`** — `exact_clock()` counted retired
+   instructions with a global per-instruction Python hook, **recomputing a number
+   Unicorn already keeps in C**: `uc->emu_counter`, maintained by its own internal
+   count hook on every burst started with `count > 0`, which is every burst `step()`
+   starts. Adds `tools/patches/unicorn_emu_counter.patch` (one **appended** `uc_ctl`
+   enum value — every stock value unmoved, so the stock pip bindings stay compatible —
+   plus one read case) and reads it. Also adds `instrs_quantum`/`bursts_short` so the
+   clock's mis-billing is reported rather than assumed.
+3. **`octabam-ot-emu-steps.patch`** — `--steps FILE` for the C++ port: a line-oriented
+   step list run after the load at main's spin. `ptr`/`set`/`spin`/`call`/`poke`/`copy`/
+   `peek`/`echo`, plus the transport — `frame on|off`, `iclock`, `seq BANK,PAT`,
+   `transport`, `triglog`, `trigs`, `coverage`, and `frames N [ADDR,LEN=HEX]` (run N
+   frames **or** stop early once memory matches: a bind phase with a ceiling). The
+   caller parses `step ` records and owns the assertions, so the C++ stays dumb.
+
+### The port: `tools/port_pattern_led.py` — 11x, and it agrees
+
+`emu_pattern_led.py` ported to `ot_emu`. Same image, same card (`stage_card.py` calls
+route A's own `stage_project`, so the staging is identical).
+
+| | route A | ot_emu |
+|---|---|---|
+| stock | 183.8 s | **16.7 s** |
+| patched | 190.0 s | **16.4 s** |
+| `blob` | `0x400e21e0` | `0x400e21e0` |
+| assertions | 6/6 | 6/6, identical |
+
+Verified purely additive: with no `--steps`, ot_emu's boot and sequencer paths print
+byte-identical numbers (same 8235 boot writes, 22596 instr/frame, gate PASS). Our
+`out/mainos_*.bin` is already `--os`/`--image` input shape (1,112,560 B), so all 53
+build artifacts are drop-in.
+
+### ☠ NEW TRAP: `build_unicorn.sh` installed the library with `cp` OVER THE LIVE FILE
+
+That keeps the inode and rewrites its pages in place; macOS then fails page validation
+against the ad-hoc signature it cached for that path and **SIGKILLs (`Killed: 9`, shell
+exit 137)** any process that loads it — including the script's own EMAC self-test. **It
+presents exactly as "my patch broke the build":** a full A/B here wrongly convicted the
+`emu_counter` patch before the *identical bytes at a fresh path* loaded fine. Fixed with
+`rm -f` before the `cp` — `rm` is the SAFE order, the inode lives until the last mapping
+drops. This is very likely what this file's own pre-existing note about "an x86_64 build
+that crashed on its first `emu_start`" was really describing.
+
+**Second half of the trap: `refs/octabam` and its one `libunicorn.2.dylib` are shared
+by every Claude session open on this repo.** Another session was mid-`diag_reload3_*`
+run during these rebuilds and the user saw Python failures in other chats. Before
+rebuilding the library, check `pgrep -f 'tools/(diag_|emu_|port_)'`, or point
+`LIBUNICORN_PATH` at a private dir and never touch the shared one.
+
+### Clock mis-billing: `exact_clock` IS load-bearing, and the verify mode LIES about it
+
+Three runs of `--sequencer --internal-clock --frames 40`:
+
+| run | libunicorn | counter | wall | mis-billing | short bursts |
+|---|---|---|---|---|---|
+| baseline | old | Python hook | 178.6 s | 1.366x | 56,843 of 270,588 |
+| `OCTA_EXACT_VERIFY=1` | new | both | 194.7 s | 1.000x | **0** of 211,179 |
+| production | new | `uc_ctl` read | 188.4 s | 1.365x | 56,842 of 270,619 |
+
+Baseline and production agree to four significant figures — 610,430,552 vs 610,484,760
+instructions (0.01%), 1.366x vs 1.365x, 56,843 vs 56,842 short bursts — across **two
+different libraries and two different counting mechanisms**. That cross-run agreement,
+not the verify mode, is the proof the swap is exact.
+
+**☠ `OCTA_EXACT_VERIFY=1` perturbs what it measures**: with the global Python hook
+installed the same scenario runs 211,179 bursts and **not one stops short**, against
+270,619 with 56,842 short in production. A fault from it is real; its burst statistics
+are an artefact. (An earlier reading of this session blamed the library for that
+difference and withdrew the 1.366x figure — both wrong; the production run reproduced
+1.365x and the variable is the hook, not the library.)
+
+An idea to gate `exact_clock` on `self.frame` was **wrong twice over**: all 63
+transport diags set `rt.frame = True` by attribute (so a `frame=True` grep finds 0),
+and the correction is needed regardless.
+
+### ⚠️ MISTAKE TO NOT REPEAT: re-ran a thread Session 81 had already closed
+
+Offered and then took "port a second diag to unblock the stalled Session-49
+differential" as the next step. **Session 49 was not stalled — Session 81 closed it**
+and PARTREAPPLY is hardware-confirmed final (report #1 fixed on MKI 2026-09-22; the
+mechanism is the per-track pre-image `PREIMG_A 0x8000082f` re-seeded by
+`FUN_40001f18(bank, part, track)`, which stock pairs with the kill bit only on its
+notPICKUP→PICKUP arm). The Session 49 handoff line still read "re-run
+`diff_flex_static.py` is the single most important next step", and Sessions 51-80 went
+elsewhere, so a superseded pointer looked like the live frontier. **The standing rule
+already covered this and was not followed: grep NOTES for a thread's keywords across
+ALL sessions before acting on any handoff line.** `tools/port_diff_flex_static.py` was
+written, run, and then **deleted** at the user's instruction.
+
+Two harness facts from that wasted run, true but not news (both consistent with Session
+81, since the arena entry was never the piece that mattered): poking a track's machine
+byte to PICKUP silences the track outright — it never trigs in 3000 frames, voice stays
+`active=0/SETTINGS=0`, and **seeding its arena entry with a byte copy of a genuinely
+loaded entry does not rescue it**; and the factory OT DEMO has **no loaded STATIC
+sample at all** (census of `0x100b0000+0x60000`: 24 `../AUDIO/` path strings, all 24 on
+the FLEX lattice slots 0-23, zero off it, so `STATIC_ARENA 0x100d5b30` is genuinely
+empty rather than a wrong constant; every track of every Part is machine type 1 except
+track 8). Untouched, track 1 trigs at frames 1379/2757 and binds to `0x100b14f0`
+(ACDRUM.WAV).
+
+### Not done / not proven
+
+- No firmware image changed this session. **Nothing flashed, nothing to flash.**
+- All four local patches (including the pre-existing required `samplebank-map`) apply
+  cleanly in order to a clean pin `111fd76`, tested in a throwaway worktree with both
+  Python files parsing afterwards.
+- octemu itself was **not built** (`make qemu` ~10-15 min, ~1.2 GB in `vendor/`, and
+  its binaries are not redistributable). Worth building for what only it does: real
+  audio, `--mk1` panel, `wait_text` OCR / `wait_lamp` LED walk assertions, a gdbstub
+  with a ready-made Python RSP client, and `tests/canary.py` for the cave ceiling.

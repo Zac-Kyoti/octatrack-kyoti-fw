@@ -1,0 +1,91 @@
+diff --git a/tools/emu/emu_bringup.py b/tools/emu/emu_bringup.py
+index afa6756..3ec94d0 100644
+--- a/tools/emu/emu_bringup.py
++++ b/tools/emu/emu_bringup.py
+@@ -370,9 +370,9 @@ def boot(image=None, count=BUDGET, on_draw=None):
+     # costs nothing, but a memset climbs it. Tells a bounded loop apart from a
+     # flag-poll when a stall is suspected.
+     st = {"wc": 0}
+-    mu.hook_add(UC_HOOK_MEM_WRITE,
++    _wc_hook = mu.hook_add(UC_HOOK_MEM_WRITE,
+                 lambda u, ac, ad, sz, v, x: st.update(wc=st["wc"] + 1))
+-    r._wc = st                     # _run_until reads it to tell a poll from slow progress
++    r._wc = st                     # boot's own loop, below; _run_until now owns its own
+ 
+     # -- burst execution ----------------------------------------------------
+     # A per-instruction Python hook over ~7M instructions costs ~16s; native
+@@ -408,6 +408,13 @@ def boot(image=None, count=BUDGET, on_draw=None):
+             else:
+                 stop["stuck"] = (pc, pc); break
+ 
++    # Kyoti local (NOTES Session 101): boot's loop is over, so the unbounded
++    # write counter comes OFF.  It is a Python callback on every store in the
++    # address space -- 154 -> 21 MIPS, a 7.3x tax -- and its only two readers
++    # are boot's loop above and `_run_until`, which now installs its own.
++    mu.hook_del(_wc_hook)
++    mu.ctl_flush_tb()
++    r._wc = None
+     r.uc = mu
+     mu.octa_boot = r            # lets _call see traps raised inside a detour
+     if r.trap:
+@@ -730,11 +737,33 @@ def _run_until(uc, pc, until, count=20_000_000):
+     budget = 8_000_000_000        # a bank load is ~1M instructions per sector
+     burst = min(count, 5_000_000)
+     window = collections.deque(maxlen=4)   # (pc, write count) per burst
++    # Kyoti local (NOTES Session 101): this used to read boot()'s process-wide
++    # write counter, which cost 7.3x for the whole run to serve a check that
++    # only fires after four mid-way bursts (20M instructions).  Install it here
++    # instead, at the first mid-way burst -- `writes` is a delta across the
++    # window and the window decides nothing until it holds four entries, so the
++    # delta over bursts 2..4 is bit-identical to what the old counter gave.
++    wcs = {"wc": 0}
++    wc_hook = None
++
++    def _wc_on():
++        nonlocal wc_hook
++        if wc_hook is None:
++            wc_hook = uc.hook_add(UC_HOOK_MEM_WRITE,
++                                  lambda u, ac, ad, sz, v, x: wcs.update(wc=wcs["wc"] + 1))
++            uc.ctl_flush_tb()
++
++    def _wc_off():
++        if wc_hook is not None:
++            uc.hook_del(wc_hook)
++            uc.ctl_flush_tb()
++
+     while budget > 0:
+         if r is not None:
+             r.trap = None
+         uc.emu_start(pc, until, count=burst)
+         if r is None:
++            _wc_off()
+             return None
+         npc = _isa_c_shim(uc, r) or _movem_shim(uc, r) or _emac_load_shim(uc, r)
+         if npc is not None:
+@@ -742,20 +771,24 @@ def _run_until(uc, pc, until, count=20_000_000):
+             continue
+         budget -= burst
+         if r.trap is not None:
++            _wc_off()
+             return r.trap          # (vector, pc) — a real exception
+         pc = uc.reg_read(UC_M68K_REG_PC)
+         if pc == until:
++            _wc_off()
+             return None            # clean stop
+         # the burst ran out mid-way. A PC pinned to one small window for four
+         # bursts (20M instructions) is a poll on a peripheral we answer
+         # wrongly, not progress: give up fast with the address.
+-        wc = r._wc["wc"] if hasattr(r, "_wc") else 0
+-        window.append((pc, wc))
++        window.append((pc, wcs["wc"]))
++        _wc_on()                   # from the next burst on, writes are counted
+         if len(window) == 4:
+             pcs = [w[0] for w in window]
+             writes = window[-1][1] - window[0][1]
+             if STALL_DETECT and max(pcs) - min(pcs) <= 64 and writes < 2000:
++                _wc_off()
+                 raise DetourStall(pc, until)
++    _wc_off()
+     raise DetourStall(pc, until, exhausted=True)
+ 
+ 
