@@ -44,6 +44,7 @@ def main(argv):
     ap.add_argument("--gap", type=int, default=53)
     ap.add_argument("--cue-at", type=int, default=40)
     ap.add_argument("--ticks", type=int, default=400)
+    ap.add_argument("--dump-track", type=int, default=-1)
     ap.add_argument("--image", default=str(V5),
                     type=lambda p: str(pathlib.Path(p).resolve()))
     a = ap.parse_args(argv)
@@ -87,7 +88,7 @@ def main(argv):
     def on_tbl(u, access, addr, size, value, user):
         pc = u.reg_read(er.eb.UC_M68K_REG_PC)
         trk = ((addr - TBL) // 4) % 8
-        st["writes"].append((st["tick"], trk))
+        st["writes"].append((st["tick"], trk, pc))
         st["pcs"][pc] = st["pcs"].get(pc, 0) + 1
 
     def on_commit(u, access, addr, size, value, user):
@@ -112,19 +113,29 @@ def main(argv):
     if not st["writes"]:
         print("NO TABLE-ARM WRITES OBSERVED")
         return 1
+    # Session 101 cont.: class SETS hid the shape ("one stray write at the commit" vs
+    # "fractional until the wrap" both print [0,3]); report per-writer-PC counts per
+    # class per segment instead, and dump raw (tick,pc) for --dump-track.
     for trk in range(8):
-        ticks = [t for t, k in st["writes"] if k == trk]
-        if not ticks:
+        evs = [(t, pc) for t, k, pc in st["writes"] if k == trk]
+        if not evs:
             continue
         tsc = bytes(rt.uc.mem_read(TRK_SCALE_IX + trk, 1))[0]
         tps = int.from_bytes(bytes(rt.uc.mem_read(LEN_TBL + 4 * tsc, 4)), "big")
         segs = {}
-        for tk in ticks:
-            segs.setdefault(bisect.bisect_right(st["commits"], tk), set()).add(tk % tps)
-        cls = {k: sorted(v) for k, v in sorted(segs.items())}
-        n = len(ticks)
-        flat = " ".join(f"s{k}:{v}" for k, v in cls.items())
-        print(f"track {trk} tps={tps} writes={n}  {flat}")
+        for tk, pc in evs:
+            seg = bisect.bisect_right(st["commits"], tk)
+            segs.setdefault(seg, {}).setdefault(pc, {})
+            segs[seg][pc][tk % tps] = segs[seg][pc].get(tk % tps, 0) + 1
+        print(f"track {trk} tps={tps} writes={len(evs)}")
+        for seg in sorted(segs):
+            parts = []
+            for pc in sorted(segs[seg]):
+                cc = ",".join(f"{c}x{n}" for c, n in sorted(segs[seg][pc].items()))
+                parts.append(f"{hex(pc)}[{cc}]")
+            print(f"   s{seg}: " + "  ".join(parts))
+        if trk == a.dump_track:
+            print(f"   raw: {[(t, hex(pc)) for t, pc in evs]}")
     return 0
 
 

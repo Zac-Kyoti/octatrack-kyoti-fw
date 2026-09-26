@@ -370,8 +370,9 @@ djt_show:
     move.b  dj_cnt_rem,%d0
     move.l  %d0,-(%sp)                 | R
     moveq   #0,%d0
-    move.b  dj_cnt_pair,%d0
-    move.l  %d0,-(%sp)                 | P
+    move.w  dj_cnt_n,%d0
+    move.l  %d0,-(%sp)                 | N (P dropped from display: Y0/P0 across three
+                                       | hardware sessions; dj_diagy still records it)
     moveq   #0,%d0
     move.w  dj_cnt_y,%d0
     move.l  %d0,-(%sp)                 | Y
@@ -393,6 +394,7 @@ djt_show:
     clr.w   dj_cnt_x
     clr.w   dj_cnt_y
     clr.w   dj_cnt_m
+    clr.w   dj_cnt_n
     clr.b   dj_cnt_pair
     clr.b   dj_cnt_rem
     lea     dj_diag_buf,%a0
@@ -683,6 +685,16 @@ djd7_div:
     addq.l  #1,%d4
     bra.b   djd7_div
 djd7_divdone:
+    .ifdef DJ_DIAG
+    tst.l   %d0
+    beq.b   djd7_nzdone
+    move.l  %d4,-(%sp)                 | d4 = the quotient, still needed below
+    move.w  dj_cnt_n,%d4
+    addq.l  #1,%d4                     | N: commits whose seed was NONZERO
+    move.w  %d4,dj_cnt_n
+    move.l  (%sp)+,%d4
+djd7_nzdone:
+    .endif
     move.b  %d0,dj_mrem                | d0 = ticks mod tps_in, the SUB-STEP REMAINDER.
                                        | Session 100 (hardware, diag R=4 on real runs):
                                        | commits DO land mid-master-step on the unit, so
@@ -1447,10 +1459,11 @@ dj_cnt_z:   .word 0                    | Z: Hook Z preserve-path entries
 dj_cnt_x:   .word 0                    | X: Hook X preserve-path entries
 dj_cnt_y:   .word 0                    | Y: third-writer executions
 dj_cnt_m:   .word 0                    | M: Hook Z reduces that CHANGED a counter
+dj_cnt_n:   .word 0                    | N: commits with a NONZERO master-remainder seed
 dj_cnt_pair: .byte 0                   | P: last byte the third writer copied
 dj_cnt_rem:  .byte 0                   | R: last Hook H master-reseed remainder
 dj_diag_fmt:
-    .asciz  "A%d Z%d X%d Y%d P%d R%d M%d"
+    .asciz  "A%d Z%d X%d Y%d N%d R%d M%d"
     .align 2
 dj_diag_buf:
     .space  48                         | worst case "A65535 Z65535 X65535 Y65535 P255

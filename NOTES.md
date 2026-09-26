@@ -31555,3 +31555,32 @@ classes computed mod 6 against its own 12-tick grid — refine the tool later). 
 
 Behavioral note for the user: with DJ ON, natural wraps of a non-1x-master pattern no
 longer re-phase tracks (that alternation was stock; DJ OFF = stock everywhere).
+
+### Session 101 continued — V5.8 hardware: fractional CONFINED to the landing interval, heals at the cycle restart. Emulator now clean even at odd-boundary commits; instrument upgraded
+
+HW (V5.8, user): switches still often land fractional, but the sequence LOCKS BACK at
+the next cycle start — the wrap-preserve works, corruption no longer survives a cycle.
+Toast `A5 Z120 X112 Y0 P0 R0 M0`: Z=8×15 events (mask now set at wraps too), X near-full,
+hold path still dead, R last-value uninformative AGAIN.
+
+Emulator: the per-writer upgrade of diag_tablearm_phase.py (class COUNTS per writer PC
++ --dump-track) showed the earlier "mixed [0,3]" segments were largely LEGITIMATE
+odd-step 2x content on tracks 3/4 (their 0x400a42f6 writes at 3 mod 6 = trigs on odd
+2x steps — correct music, a modulus-reading trap for this tool). A provocation run
+landing the 2x→1x armed commit at t99 ≡ 3 mod 6 (cue 45, gap 52) came out CLEAN: the
+schedulers held class 0 straight through (…96, [99], 102, 108…), only the single
+commit-instant landing write at [3]; the dj_mrem seed re-anchored the master exactly
+as designed. **V5.8 is clean in-emulator even in the r=3 case. The hardware residual
+lives in states the emulator cannot reach** (the R4 reading proved mid-step commits
+exist on the unit; the emulated step body commits only at TICK_CTR==0).
+
+Next flash = data: `V5_8D2` (`977aa336`, logic byte-identical to V5.8, mainline
+untouched at `285fadb8`): toast now `A Z X Y N R M`, where **N = cumulative count of
+commits whose master-remainder seed was NONZERO** (P dropped from display — Y0/P0
+across three hardware sessions; dj_diagy still records it). Branch on the reading:
+- fractional switches with **N=0** → the landing-interval residual is NOT the
+  master-remainder case at all → next instrument records the commit tick's own
+  grid offset (TICK_CTR at commit, min/max).
+- fractional switches with **N>0** → seeds engage but do not cure on hardware →
+  something later re-writes the master phase on the unit (a writer the emulator
+  never exercises); next instrument watches post-seed writes to 0x800065b6.
