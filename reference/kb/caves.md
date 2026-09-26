@@ -299,8 +299,15 @@ from ROM and zero-fills only to `0x80004000`; kernel globals live at
 - **The fix that worked: keep no private state.** Read what the OS already maintains —
   for a notification, the handle `0x460d1e70` (set by `FUN_4005a2b8`, cleared by
   `FUN_40056bec` via `FUN_40055db4`). QLREC's cave went from 5 scratch words to none.
-- ⚠️ **Still keeping state there, untested:** DIRECT JUMP `0x80006a40-4a`, RELOAD3
-  `0x80006a50-55`. DIRECT JUMP re-arms its flag every gesture and clears it every tick,
-  so a clobber would be invisible rather than absent.
+- **Second hardware proof (Session 98):** RELOAD3's request bytes `0x80006a54-55` were
+  overwritten on the unit between a key chord and the storage job that read them
+  (diagnostic toast: chord `0000`, worker `005B`; later `0045`, `004F`, `003F` — the values
+  vary, so what writes there is still unknown). RELOAD3 moved them into its own cave data;
+  the build now rejects any reference into `0x80006a40..0x80006abf`. **Cave data words do
+  survive**: in the same toast the chord-time capture, stored in cave data, was intact at
+  job completion while the copy in the scratch block was not.
+- ⚠️ **Still keeping state there, untested:** DIRECT JUMP `0x80006a40-4a`. It re-arms its
+  flag every gesture and clears it every tick, so a clobber would be invisible rather than
+  absent.
 - **Only a diagnostic build on the unit settles this.** Nothing static, and nothing in
   route A, can.

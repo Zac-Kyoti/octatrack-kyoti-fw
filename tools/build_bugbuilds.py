@@ -74,8 +74,8 @@ BUGFIX = {
 }
 
 # --- the feature bases: name -> (builder, base image, VERSTR, wip, blurb) -------------
-#   wip=True is skipped unless --with-wip is passed.  DIRECT JUMP and RELOAD are not
-#   finished (see reference/MERGE.md); they are wired up here so that folding the bug
+#   wip=True is skipped unless --with-wip is passed.  DIRECT JUMP is not
+#   finished (see reference/MERGE.md); RELOAD3 was finished on 2026-09-25; they are wired up here so that folding the bug
 #   fixes into them later is a one-flag operation, not a rewrite.
 FEATURES = {
     "MUTEMODE_DT": ("build_mutemode_dt.py", "out/mainos_mutemode_dt.bin", "BUG_MUTEDT", False,
@@ -88,11 +88,11 @@ FEATURES = {
                          False, "COMPRESSOR FX page 2: KEY / KFLT / KGAIN / MON, cross-core."),
     "TRIGLOCK": ("build_triglock.py", "out/mainos_triglock.bin", "BUG_TRIGLK", False,
                  "A trigless lock whose last param is LIVE-erased clears from the trig row."),
+    "RELOAD3": ("build_reload3.py", "out/mainos_reload3.bin", "BUG_RL3", False,
+                "[PTN]+[TRACK n] reload track n's saved sequence; [BANK]+[TRACK n] also re-applies the Part."),
     # --- not finished; build with --with-wip ---------------------------------------
     "DIRECTJUMP_V4": ("build_directjump_v4.py", "out/mainos_directjump_v4.bin", "BUG_DJV4",
                       True, "WIP: hold [PTN], tap [YES] -> DIRECT JUMP on/off."),
-    "RELOAD3": ("build_reload3.py", "out/mainos_reload3.bin", "BUG_RL3", True,
-                "WIP: [PTN]+[TRACK n] reload track n; [BANK]+[TRACK n] also re-applies Part."),
 }
 
 PROBLEMS = []

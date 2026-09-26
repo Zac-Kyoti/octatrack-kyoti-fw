@@ -45,8 +45,8 @@ Which builds have run on real hardware and which are emulator-only is tracked in
 [Hardware-test status](#hardware-test-status) — **read it before you flash.**
 
 **Branches.** `main` is the published line; `wip` is the active frontier, and it is
-currently ahead — the finished part-change carryover fix, RELOAD3 and the Bugbuild
-tooling are on `wip` only. If you are reading this on `main`, check `wip` for the
+currently ahead — the finished part-change carryover fix and the Bugbuild
+tooling are on `wip` only. RELOAD3 is final and is on `main`. If you are reading this on `main`, check `wip` for the
 newest state.
 
 ### Extended Features
@@ -112,32 +112,35 @@ newest state.
 - **RELOAD FROM PROJECT** — reload a single track's sequence from the CF card
   **without touching the transport**. Stock can only reload a whole bank, and
   doing so stops the sequencer; what is new is the finer granularity plus staying
-  in time with the master clock. (Earlier drafts said stock "glitches the audio" —
-  wrong, corrected on hardware: it just stops the transport.) Adapted from the
-  Digitone's RELOAD FROM PROJ. **The picker is gone** (Session 85) — two direct
-  chords, no modal window, no arrows, no timeout, no BUSY state:
+  in time with the master clock. Adapted from the Digitone's RELOAD FROM PROJ.
+  Two direct chords — no modal window, no arrows, no timeout, no BUSY state:
   **`[PTN]` + `[TRACK n]`** reloads that track's card-saved sequence with the Part
   untouched, and **`[BANK]` + `[TRACK n]`** does the same plus re-applies the
   saved Part (from RAM — the saved copy of the Part currently associated with the
   pattern, using stock's own reload-part routine, so a never-saved Part gets
-  stock's own verdict). Both report through one **titled, centred, self-dismissing
-  card** — `RELOAD FROM PROJ` over `TRK SEQ` / `RELOADED` or `TRK SEQ + PART` /
-  `RELOADED` — with no `OK` to answer. Deleting the modal UI was the right call by the bug tally:
-  ~13 hardware bugs in the picker/keymap/popup machinery, **none** in the worker
-  that does the reload — 10 detours became 6, and the build now asserts it pokes
-  no keymap record at all. A reload no longer restarts the sequence or the
-  internal metronome (it had been arming stock's whole-bank *re-home*, which
-  zeroes the master playhead the metronome derives from), and SELECT BANK moved
-  to the `[BANK]` release to match `[PTN]`'s own gesture. **First flash
-  (2026-09-23): both chords execute, no conflicts; a second (2026-09-24) confirmed
-  reloads are "quick and on-time"**, after which the message box was rebuilt as the
-  titled self-dismissing card above — stock's `MLNOTIFY` could not do it, being a
-  blocking dialog that pushes its own keymap layer and left-justifies every line.
-  Those presentation changes are **not yet reflashed**. All-tracks and whole-bank
-  variants are deferred.
+  stock's own verdict). It reloads the pattern that is *playing*, on an audio or a
+  MIDI track, and never restarts the sequence or the internal metronome. The
+  result is shown when the reload has actually **finished**, as a stock-style block
+  toast: `TRK SEQ RELOADED`, or two lines for `[BANK]` (`TRK SEQ + PART` /
+  `RELOADED`, or `TRK SEQ RELOADED` / `SAVE PART FIRST!` when the Part was never
+  saved). A built-in check re-reads the restored trigs and shows `SEQ RELOAD LOST`
+  / `NOT RESTORED!` if they did not land. SELECT BANK now opens on the `[BANK]`
+  release, matching how `[PTN]` behaves. Deleting the picker was right by the bug
+  tally: ~13 hardware bugs in the picker/keymap/popup machinery, **none** in the
+  worker that does the reload; 10 detours became 6, and the build asserts it pokes
+  no keymap record at all.
+  **Final — hardware-confirmed on MKI, 2026-09-25.** What was confirmed: the last
+  bug, the sequence *sometimes* not coming back while the toast still said
+  RELOADED, was traced on the unit with an on-screen diagnostic build. The reload
+  had read its own request (which track, audio or MIDI) from a RAM block the unit
+  overwrites, so it sometimes reloaded a different, MIDI, track and then checked
+  what it had written. The request now lives in the patch's own memory, and the
+  user reported every reload issue resolved. Earlier flashes (2026-09-23/24)
+  confirmed both chords and reloads "quick and on-time". All-tracks and
+  whole-bank variants are deferred by the user.
   → [`tools/build_reload3.py`](tools/build_reload3.py) ·
   spec [`reference/RELOAD_REDESIGN.md`](reference/RELOAD_REDESIGN.md) ·
-  write-up [`NOTES.md`](NOTES.md) "Session 42–44, 47" → "Session 80–86"
+  write-up [`NOTES.md`](NOTES.md) "Session 42–44, 47" → "Session 80–98"
 
 ### QOL Enhancements
 
@@ -216,7 +219,7 @@ newest state.
 ### Comprehensive KYOTI Octatrack Firmware build
 
 - **Bugbuilds — every finished feature, with all three bug fixes folded in.**
-  MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS and TRIGLOCK, each composed with
+  MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK and RELOAD3, each composed with
   PARTREAPPLY + PATTERNLED + PLAYSFREEFIX, written to `out/Bugbuilds/` so the
   standalone per-feature images are left alone. Each composite is built *onto*
   the finished feature image rather than re-derived (SIDE-CHAIN's DSP payloads
@@ -238,8 +241,8 @@ newest state.
   (DIRECT JUMP v4 reaches its toggle through the `[PTN]` keymap overlay, RELOAD3
   deleted its picker, so neither detours `0x4005e4c8` any more). Hence two stages:
   **`KYOTI_V1.0`** = the seven finished, hardware-confirmed mods, with nothing to
-  resolve and 53 % headroom; **`KYOTI_V1.1`** = + DIRECT JUMP v4 + RELOAD3, 11 %
-  headroom, behind two builder-assertion conflicts (both DIRECT-JUMP-vs-someone-
+  resolve and 53 % headroom; **`KYOTI_V1.1`** = + DIRECT JUMP v4 + RELOAD3, about 1 %
+  headroom now that RELOAD3 is final (234 B larger than when this was measured), behind two builder-assertion conflicts (both DIRECT-JUMP-vs-someone-
   else: the `'ANDY'` restore width it asserts stays stock while MUTE MODE widens
   it, and the `[PTN]`-overlay `[YES]` record it writes while RELOAD3 asserts that
   overlay is byte-for-byte stock).
@@ -280,7 +283,7 @@ Never cut power during `UPDATING FLASH`. Full procedure and recovery net:
 | ↳ `'ANDY'`-shadow persistence (survives power cycle) | `build_mutemode_dt.py` | **confirmed** — one persisted word, defaults verified on hardware |
 | DIRECT JUMP pattern-change mode | `build_directjump_v4.py` | **confirmed at 1x; the non-1x fix is unflashed** — flashed 2026-09-23: master time held through switches, correct landing step, mixed track lengths (7/12/16), MASTER LENGTH respected incl. `INF`, all at 1x. Non-1x scales were root-caused and fixed 2026-09-24 (Hook P was using the master step as every track's step index); emulator-validated, bit-identical to the confirmed build at 1x, **not yet on hardware**. A separate report — visited steps depending on the trigs present, LEDs and audio disagreeing — is unexplained and still open |
 | SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | **confirmed, final** — flashed 2026-09-20, MKI, single-core and cross-core both. Donor is SPRING REVERB (pulled from the FX2 list); SPATIALIZER untouched |
-| RELOAD FROM PROJECT — two direct chords | `build_reload3.py` (`[PTN]`/`[BANK]` + `[TRACK n]`) | **active WIP, flashed twice, both green** — 2026-09-23 both chords execute with no conflicts; 2026-09-24 reloads confirmed "quick and on-time". **Not yet reflashed:** the transport/metronome fix, SELECT BANK on the `[BANK]` release, and the titled self-dismissing message card. All-tracks and whole-bank variants deferred |
+| RELOAD FROM PROJECT — two direct chords | `build_reload3.py` (`[PTN]`/`[BANK]` + `[TRACK n]`) | **confirmed, final** — flashed 2026-09-25, MKI: the intermittent failure where the toast said RELOADED but the edited sequence kept playing no longer occurs, and the user reports no RELOAD issue remaining. Root cause, found with an on-screen diagnostic build: the reload's own request bytes lived in a RAM block the unit overwrites, so it sometimes reloaded a different (MIDI) track; they now live in the patch's own memory. Earlier flashes 2026-09-23/24 confirmed both chords and reloads "quick and on-time". All-tracks and whole-bank variants deferred |
 | Empty-pattern LED fix | `build_pattern_led.py` | **confirmed** — flashed 2026-09-13, grid LED lights correctly, no regression |
 | Erase empty trigless locks | `build_triglock.py` | **confirmed, final** — flashed 2026-09-21, MKI; multi-pass erase, last-lock removal, ordinary trigs, and `FUNC`+`TRIG` placeholders all preserved |
 | Part-change carryover — recorder cache / scene-morph pieces | `build_partreapply.py` | flashed 2026-09-13, behaviorally safe; reports #2/#3 (recorder, REC SETUP) could not be reliably reproduced on stock, treat as unconfirmed |
@@ -366,7 +369,7 @@ FLASHING.md          safe-flashing guide + bootloader recovery net (read before 
 reference/kb/         distilled knowledge base (address map, formats, DSP) — ours + external RE
 reference/            MERGE.md (the all-in-one allocation map), AR_DIRECT_JUMP.md, RELOAD_REDESIGN.md,
                       EXTERNAL_RESEARCH.md (mined prior-art repos + workflow), UPSTREAM_INBOX.md
-reference/handoffs/   per-thread handoffs for the work still open (DIRECT JUMP scales, RELOAD2)
+reference/handoffs/   per-thread handoffs for the work still open (DIRECT JUMP scales; RELOAD3's failing-reload thread, now resolved)
 reference/upstream-notes.md   inherited octamax mod-design notes (not part of this firmware)
 refs/                MANIFEST.{toml,lock} tracked; the clone cache under it is git-ignored
 sysex/               the MIDI Plays-Free fix as JSON hunks + a no-assembler applier

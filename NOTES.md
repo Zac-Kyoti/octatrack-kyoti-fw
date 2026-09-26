@@ -30964,3 +30964,57 @@ the toast has actually produced.
 
 **Not done, deliberately:** no fix, no commit, no theory past the table in handoff §9.
 Hardware decides.
+
+### Session 98 — HARDWARE RESULT: the RL3DG toast named it
+
+Single trig on step 1: no repro. Trigs on 1,3,...,15: repro. Only difference in the hex:
+**W = `0000` on success, `005B` on failure** (C unchanged). The worker read G_TRK=5 and a
+non-zero G_TMIDI from `0x80006a54-55`, so it reloaded MIDI track 6 instead of audio track
+1, verified that slice, and toasted RELOADED. The request bytes in the `0x80006a50+`
+scratch block are overwritten on hardware between chord and worker — the same block
+Sessions 94-96 caught failing for QLREC. Content-dependent (`0x55` mask bytes, `& 7 = 5`),
+which is why the single-trig test hid it. Fix direction: move the request bytes into the
+cave. Details in handoff §10.
+
+### Session 98 — FIX BUILT: request bytes moved into the cave
+
+`G_KIND/G_PAT/G_TRK/G_TMIDI` are cave labels now; `G_MENU/G_SEL` dropped. Build guard:
+no reference into `0x80006a40..0x80006abf` (fires on 11 sites in the pre-fix source).
+Shipping `.syx 51e342ba…` / `.bin e83b2020…`; diag `.syx 89bb1bd1…` / `.bin 892d8db4…`.
+`diag_reload3_diagtoast.py` gained an `oldscratch` scenario that replays the unit's
+clobber (`03 07 55 55 55 5B` into `0x80006a50-55` from the `rl_job` entry hook); the same
+hook timing redirected the pre-fix build (`W 0040`, first gate run). Emulator: **ALL GOOD** (diag 61 checks incl. `oldscratch` → `C 0030 W 0030`, restored; shipping `diag_reload3_led.py -n 4` 4/4). Awaiting the hardware re-test.
+More hardware W values on failure: `0045`, `004F`, `003F` (plus `005B`). Track 3-5, MIDI
+flag always non-zero, values vary — so the "0x55 content" explanation is not supported;
+only "the bytes are overwritten" is. The fix is indifferent to the value.
+
+### Session 98 — RELOAD3 IS FINAL. User: "All issues resolved." Promoted to `main`
+
+After flashing the fixed build the user reported: *"Flashed. All issues resolved. RELOAD3
+may be considered the final build."* Recorded exactly, because CLAUDE.md asks that
+"hardware-confirmed" name what was confirmed:
+
+- **Established on the unit:** on failing reloads the worker's targeting differed from the
+  chord's (`W` `005B`, `0045`, `004F`, `003F` against `C` `0000`), and after the request
+  bytes moved into the cave the user sees no remaining RELOAD issue.
+- **Not established:** what writes `0x80006a54-55`, or why the value varies (the "0x55
+  mask bytes" idea did not survive the extra values); how many reloads were tried after the
+  fix; which of the two fixed images (diag or shipping, same fix) was the one flashed.
+
+**Docs brought to final:** README, BUILD_KYOTI, FLASHING §4.5, START_HERE §6, MERGE.md
+(RELOAD3 is 2104 B, was 1870 B; V1.1's free run is ≈ 64 B — *derived* as 298 − 234, no
+builder run, the merged builder is withdrawn; RELOAD3 alone into V1.0 leaves ≈ 1092 B),
+RELOAD_REDESIGN status banner, the handoff banner. `build_bugbuilds.py` no longer treats
+RELOAD3 as WIP: its composite (with PARTREAPPLY + PATTERNLED + PLAYSFREEFIX) builds with no
+problems flagged and 3568 B of cave left. Not flashed.
+
+**Promoted to `main` — RELOAD3 only, deliberately not a merge of `wip`:** `patch_reload3.s`,
+`build_reload3.py` (with `--diag` and the scratch-block guard), `cave_syms.py`, the
+`diag_reload3_*.py` harnesses, `emu_reload.py`, and the docs above. **Left on `wip`:** DIRECT
+JUMP V5.x, SIDECHAIN3's UI fix, the KB ingest (`kb/caves.md`), the CLAUDE.md hard-constraint
+sections, and QLREC's stateless rewrite.
+
+**⚠️ Found while doing this, not acted on:** `main` still carries the QLREC that hooks
+`0x400522ca`, the site that crashed a real MKI on 2026-09-25 (Session 93), and `main`'s
+README still calls that feature hardware-confirmed. The fix (`0b595ed`) is on `wip` only.
+Promoting it is a separate decision.

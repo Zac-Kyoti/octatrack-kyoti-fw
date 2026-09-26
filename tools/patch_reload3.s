@@ -144,12 +144,20 @@
 | ("apply a Part by event"), which parts-switching during playback already uses.
 |
 | ---- state (volatile scratch, no persistence needed -- one-shot actions) ----
-    .equ G_KIND,    0x80006a50          | worker request: 0 idle / 1 PTN SEQ / 2 PART+PTN SEQ / 3 TRK SEQ
-    .equ G_PAT,     0x80006a51          | pattern to reload (byte)
-    .equ G_MENU,    0x80006a52          | 1 = the picker window is open
-    .equ G_SEL,     0x80006a53          | highlighted item: 0 TRK SEQ / 1 PTN SEQ / 2 PART + PTN SEQ
-    .equ G_TRK,     0x80006a54          | TRK SEQ: track index 0..7
-    .equ G_TMIDI,   0x80006a55          | TRK SEQ: 0 = audio track, 1 = MIDI track
+|   ===== Session 98: the request bytes live IN THE CAVE now, not at 0x80006a50-55. =====
+|   HARDWARE-PROVEN, by the RL3DG diagnostic toast (handoff section 10): with trigs on steps
+|   1,3,...,15 the chord armed track 1 / audio (C 0000) and the worker read track 6 / MIDI
+|   back from 0x80006a54-55 (W 005B). It reloaded MIDI track 6, the verify checked that
+|   slice and passed, and the toast said RELOADED while the edited track kept playing.
+|   The block is inside the DSP shared-RAM window and is overwritten at runtime on the unit
+|   (the same finding QLREC paid for, Sessions 94-96); the emulator never overwrites it.
+|   The value followed the pattern content (0x55 mask bytes, 0x55 & 7 = 5), which is why a
+|   single-trig test on track 1 read back zeros = track 1 and looked correct by accident.
+|   G_KIND being clobbered was just as possible: a stray 1..3 would have hijacked the next
+|   stock RELOAD BANK job. All six bytes are now labels in this cave's data (see rl_kind),
+|   the region rl_own / rl_msg / rl_vsnap already live in and that the RL3DG toast proved
+|   survives on hardware. build_reload3.py asserts no 0x80006a40..0x80006abf reference
+|   remains in the blob. G_MENU / G_SEL are picker-era and unused, and are gone.
 
 |   ---- stock symbols ----
     .equ PTN_USED,  0x460d173e          | set 1 to suppress SELECT PATTERN on [PTN] release
@@ -187,6 +195,37 @@
     .equ TOAST,     0x4005a2b8          | FUN_4005a2b8(text, dur) -- the "PART %d RELOADED" toast
     .equ PARTAPPLY, 0x40009094          | FUN_40009094(bank, part) -- apply a Part by event (parts-switch path)
     .equ RDRAW,     0x46c7c72c          | screen redraw dirty flag (set to 1)
+|   ===== Session 98: the DIAG build (--defsym RL_DIAG=1, tools/build_reload3.py --diag) =====
+|   reference/handoffs/RELOAD3_SEQFAIL_HANDOFF.md section 4. On hardware a [PTN]+[TRACK n]
+|   reload frequently leaves the EDITED sequence playing while the toast says RELOADED and
+|   the self-verify in rl_done stays silent. Every intermediate the harness can measure
+|   passes, so the only instrument left is the toast itself: this build replaces every
+|   success message with four lines of the raw bytes and indices the worker actually used,
+|   captured into OUR CAVE at the moment each was read (never into SCRATCH, which is inside
+|   stock's 64 KB OPEN_BUF window and is one of the suspects).
+|   NOTHING UNDER TEST MOVES: SCRATCH, OPEN_BUF, the 0x80006a50 scratch bytes, the job flow
+|   and the verify are exactly the flashed build's. Only cave-side captures are added.
+|     line 0  P pppppppp S ssssssss   P = live slab bytes BEFORE the copy (= what was
+|                                     playing / edited), S = rl_vsnap (SCRATCH after copy)
+|     line 1  L llllllll K kkkkkkkk   L = live slab at doneFn (what the verify compared),
+|                                     K = the 0x1001614e live-cache copy at doneFn
+|     line 2  C bptm W bptm D bp      bank/pattern/track/midi as the CHORD armed them, as
+|                                     the WORKER read them from 0x80006a5x, and PLAY_BANK/
+|                                     ACT_PAT as DONEFN saw them. One hex digit each.
+|     line 3  Mn Vn Kn R rr           M = message code armed (1 TRK/2 TRK+PART/3 SAVE
+|                                     FIRST/4 LOST), V = verify (0 not armed/1 pass/2
+|                                     fail), K = G_KIND as the worker read it, R = low
+|                                     byte of the LAST PARSEPAT return.
+|   Reading it (section 4 of the handoff):  P==S==L -> SCRATCH held the edited data and
+|   both copy and verify were vacuous (hypothesis A).  P!=S, S==L -> the copy landed in
+|   the blob the verify reads; playback reads elsewhere (C).  C!=W -> the 0x80006a5x
+|   scratch was clobbered between chord and worker (kb/caves.md, Sessions 94-96).  Two
+|   chords in a row with no edit in between: toast 1's L vs toast 2's P settles (B).
+    .ifdef RL_DIAG
+    .equ LIVE_CACHE, 0x1001614e         | LIVE_REFRESH's destination: bank's 16 slabs
+    .equ DIAG_DUR,   0x168              | 6 s at the measured ~60 Hz tick -- long enough
+                                        | to read four lines of hex; diag build only
+    .endif
 
 |   ---- [BANK]-held overlay layer (Session 80 continued (2)) ----
 |   [BANK] press 0x4007af80 pushes layer struct 0x400cff14 (records @ 0x400cff34)
@@ -766,7 +805,11 @@ rt2_xok:
 rt2_done:
     moveq   #1,%d0
     move.l  %d0,RDRAW
+    .ifdef RL_DIAG
+    move.l  #DIAG_DUR,%d0              | diag build: hold the hex on screen for 6 s
+    .else
     move.l  #TOAST_DUR,%d0
+    .endif
     move.l  %d0,TOAST_CD               | stock's toast countdown. NO gate flag on this
                                        | one (0x40056c28 tests it directly), and no
                                        | dots -- unlike the SHOW_WIN slot's timer.
@@ -997,18 +1040,30 @@ rl_arm_trk:
 rl3_arm_n:
     andi.l  #7,%d0
     move.b  %d0,G_TRK
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dc+2                | DIAG: track, as the chord armed it
+    .endif
     moveq   #0,%d0
     move.b  MIDI_MODE,%d0
     beq.b   rat_aud
     moveq   #1,%d0
 rat_aud:
     move.b  %d0,G_TMIDI
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dc+3                | DIAG: midi flag, as armed
+    .endif
     move.b  ACT_PAT,%d0
     move.b  %d0,G_PAT
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dc+1                | DIAG: pattern, as armed
+    .endif
     moveq   #3,%d0
     move.b  %d0,G_KIND
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0              | the bank ACT_PAT above belongs to, not CUR_BANK
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dc+0                | DIAG: bank, as armed
+    .endif
     moveq   #1,%d1
     lsl.l   %d0,%d1
     move.l  %d1,-(%sp)
@@ -1101,6 +1156,9 @@ rl_done:
     jmp     DONE_RESUME
 rld_skip:
     clr.b   rl_own                     | one-shot: consume it
+    .ifdef RL_DIAG
+    clr.b   rl_dv                      | DIAG: verify result 0 = not armed
+    .endif
 |   ===== verify the copy still holds, and SAY SO if it does not =====
 |   This runs in doneFn, after the worker. If the 16 trig-mask bytes at the destination
 |   no longer match what we parsed, the reload was undone (or never landed) and the user
@@ -1110,7 +1168,7 @@ rld_skip:
 |   [BANK]), and the harness cannot fail a card read, stream audio off the card, or drive
 |   the firmware's own edit path.
     tst.b   rl_varm
-    beq.b   rld_noverify               | nothing stashed (kind 1/2) -> nothing to check
+    beq.w   rld_noverify               | nothing stashed (kind 1/2) -> nothing to check
 |   Recompute the destination from the state the SEQUENCER is using RIGHT NOW, rather
 |   than trusting the pointer the worker used. If the worker aimed at a stale bank or
 |   pattern, the bytes IT wrote would match its own snapshot and a naive check would pass
@@ -1128,6 +1186,38 @@ rld_skip:
     muls.l  %d1,%d0
     add.l   %d0,%a0
     add.l   rl_voff,%a0                | a0 = the LIVE track record, as of now
+    .ifdef RL_DIAG
+|   DIAG: the four bytes the verify is about to compare, the same four in the live-cache
+|   copy LIVE_REFRESH filled, and the (bank, pattern) doneFn is using. a0 is preserved.
+    move.l  %a0,%d2                    | keep a0 intact for the verify below
+    lea     rl_dlive,%a1
+    move.b  (%a0)+,(%a1)+
+    move.b  (%a0)+,(%a1)+
+    move.b  (%a0)+,(%a1)+
+    move.b  (%a0)+,(%a1)+
+    move.l  %d2,%a0
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  #PATSTRIDE,%d1
+    muls.l  %d1,%d0
+    add.l   rl_voff,%d0
+    add.l   #LIVE_CACHE,%d0
+    move.l  %d0,%a1                    | a1 = the same record in the live cache
+    move.b  (%a1)+,%d0
+    move.b  %d0,rl_dcache
+    move.b  (%a1)+,%d0
+    move.b  %d0,rl_dcache+1
+    move.b  (%a1)+,%d0
+    move.b  %d0,rl_dcache+2
+    move.b  (%a1)+,%d0
+    move.b  %d0,rl_dcache+3
+    move.b  PLAY_BANK,%d0
+    move.b  %d0,rl_dd+0
+    move.b  ACT_PAT,%d0
+    move.b  %d0,rl_dd+1
+    moveq   #1,%d0
+    move.b  %d0,rl_dv                  | 1 = armed, assume pass; rld_vbad overrides
+    .endif
     lea     rl_vsnap,%a1
     moveq   #16,%d2
 rld_vloop:
@@ -1139,6 +1229,10 @@ rld_vloop:
     bne.b   rld_vloop
     bra.b   rld_noverify
 rld_vbad:
+    .ifdef RL_DIAG
+    moveq   #2,%d0
+    move.b  %d0,rl_dv                  | DIAG: 2 = the verify FAILED
+    .endif
     moveq   #4,%d0
     move.b  %d0,rl_msg                 | override -> "SEQ RELOAD LOST"
 rld_noverify:
@@ -1166,6 +1260,11 @@ rld_noverify:
     move.b  rl_msg,%d0
     beq.b   rld_nomsg                  | 0 = nothing armed (not our chord) -> silent
     clr.b   rl_msg                     | one-shot, like rl_own
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dm                  | DIAG: which message WOULD have been shown
+    bsr.w   rl3_diag_show              | ... and show the bytes instead, every time
+    bra.b   rld_nomsg
+    .endif
     subq.l  #1,%d0
     beq.b   rld_m_trk
     subq.l  #1,%d0
@@ -1229,9 +1328,15 @@ rlj_ours:
 
     moveq   #0,%d5
     move.b  G_PAT,%d5                  | d5 = target pattern P
+    .ifdef RL_DIAG
+    move.b  %d5,rl_dw+1                | DIAG: pattern as the WORKER read it
+    .endif
     moveq   #0,%d0
     move.b  G_KIND,%d0
     move.l  %d0,rl_kind                | stash the kind across the FUN_4008cebc calls
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dk                  | DIAG: kind as the worker read it
+    .endif
     clr.b   G_KIND                     | consume now -- a re-entrant real RELOAD BANK
                                        | must NOT see it set
 |   ===== Session 90: rl_own is CLEARED here and SET only on success. =====
@@ -1304,6 +1409,9 @@ rlj_ploop:
     pea     rl_fh
     jsr     PARSEPAT                   | FUN_4008cebc(fh, SCRATCH, verWord)
     lea     12(%sp),%sp
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dr                  | DIAG: low byte of the last parse's return
+    .endif
     tst.l   %d0
     bmi.w   rlj_readfail
     addq.l  #1,%d4
@@ -1316,6 +1424,9 @@ rlj_ploop:
 
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0              | must be the same bank d5's pattern belongs to
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dw+0                | DIAG: bank as the worker read it
+    .endif
     move.l  #BANKSTRIDE,%d1
     muls.l  %d1,%d0
     move.l  #BLOB,%a4
@@ -1381,6 +1492,11 @@ rlj_trk:
     moveq   #0,%d0
     move.b  G_TRK,%d0
     andi.l  #7,%d0
+    .ifdef RL_DIAG
+    move.b  %d0,rl_dw+2                | DIAG: track as the worker read it
+    move.b  G_TMIDI,%d1
+    move.b  %d1,rl_dw+3                | DIAG: midi flag as the worker read it
+    .endif
     tst.b   G_TMIDI
     bne.b   rlj_trk_midi
     move.l  #TRAC_A,%d1
@@ -1402,6 +1518,14 @@ rlj_trk_copy:
     move.l  %a4,%d0
     add.l   %d2,%d0
     move.l  %d0,-(%sp)                 | dst = liveslab + off
+    .ifdef RL_DIAG
+    move.l  %d0,%a0                    | DIAG: the live record BEFORE the copy -- what
+    lea     rl_dpre,%a1                | was playing (the edited state). Bytewise: the
+    move.b  (%a0)+,(%a1)+              | slab is even-aligned but do not rely on it.
+    move.b  (%a0)+,(%a1)+
+    move.b  (%a0)+,(%a1)+
+    move.b  (%a0)+,(%a1)+
+    .endif
     jsr     FWMEMCPY
     lea     12(%sp),%sp
 
@@ -1627,6 +1751,17 @@ rlo_zero:
     .align 2
 rl_kind:
     .space 4
+|   Session 98: the chord -> worker request, moved here from 0x80006a50-55 (see the note
+|   where the old .equ lines were). Same meaning, same byte widths.
+G_KIND:
+    .space 1                           | 0 idle / 1 PTN SEQ / 2 PART+PTN SEQ / 3 TRK SEQ
+G_PAT:
+    .space 1                           | pattern to reload
+G_TRK:
+    .space 1                           | TRK SEQ: track index 0..7
+G_TMIDI:
+    .space 1                           | TRK SEQ: 0 audio / 1 MIDI
+    .global G_KIND, G_PAT, G_TRK, G_TMIDI
 |   Session 85: the .ifdef that used to open this block lived in a picker-era
 |   section that the redesign deletes, so it is re-opened here. rl_own is the
 |   one-shot "the next stock whole-bank reload is ours to suppress" flag that
@@ -1666,3 +1801,160 @@ rl_hdrbuf:
     .space 32
 rl_tbuf:
     .space 24
+
+    .ifdef RL_DIAG
+| ================= Session 98: the DIAG toast (see the RL_DIAG block near RDRAW) =================
+| Formats the captured bytes into rl_dtext (four 24-byte lines) and shows them through
+| rl3_toast2, the hardware-proven multi-line block toast. Called from rl_done (doneFn
+| context) exactly where the success message used to be drawn.
+    .text
+rl3_diag_show:
+    lea     -24(%sp),%sp
+    movem.l %d2-%d4/%a2-%a4,(%sp)
+|   ---- line 0: "P pppppppp S ssssssss" ----
+    lea     rl_dtext,%a2               | a2 = write cursor, one 24-byte slot per line
+    lea     dg_lP,%a1
+    bsr.w   dg_lit
+    lea     rl_dpre,%a1
+    moveq   #4,%d1
+    bsr.w   dg_hex
+    lea     dg_lS,%a1
+    bsr.w   dg_lit
+    lea     rl_vsnap,%a1
+    moveq   #4,%d1
+    bsr.w   dg_hex
+    clr.b   (%a2)
+|   ---- line 1: "L llllllll K kkkkkkkk" ----
+    lea     rl_dtext+24,%a2
+    lea     dg_lL,%a1
+    bsr.w   dg_lit
+    lea     rl_dlive,%a1
+    moveq   #4,%d1
+    bsr.w   dg_hex
+    lea     dg_lK,%a1
+    bsr.w   dg_lit
+    lea     rl_dcache,%a1
+    moveq   #4,%d1
+    bsr.w   dg_hex
+    clr.b   (%a2)
+|   ---- line 2: "C bptm W bptm D bp" ----
+    lea     rl_dtext+48,%a2
+    lea     dg_lC,%a1
+    bsr.w   dg_lit
+    lea     rl_dc,%a1
+    moveq   #4,%d1
+    bsr.w   dg_dig
+    lea     dg_lW,%a1
+    bsr.w   dg_lit
+    lea     rl_dw,%a1
+    moveq   #4,%d1
+    bsr.w   dg_dig
+    lea     dg_lD,%a1
+    bsr.w   dg_lit
+    lea     rl_dd,%a1
+    moveq   #2,%d1
+    bsr.w   dg_dig
+    clr.b   (%a2)
+|   ---- line 3: "Mn Vn Kn R rr" ----
+    lea     rl_dtext+72,%a2
+    lea     dg_lM,%a1
+    bsr.w   dg_lit
+    lea     rl_dm,%a1
+    moveq   #1,%d1
+    bsr.w   dg_dig
+    lea     dg_lV,%a1
+    bsr.w   dg_lit
+    lea     rl_dv,%a1
+    moveq   #1,%d1
+    bsr.w   dg_dig
+    lea     dg_lKk,%a1
+    bsr.w   dg_lit
+    lea     rl_dk,%a1
+    moveq   #1,%d1
+    bsr.w   dg_dig
+    lea     dg_lR,%a1
+    bsr.w   dg_lit
+    lea     rl_dr,%a1
+    moveq   #1,%d1
+    bsr.w   dg_hex
+    clr.b   (%a2)
+|   ---- show: same call shape as rl3_show2, four lines ----
+    pea     4                          | nlines  (pushed FIRST -> higher address)
+    pea     rl_dlines                  | lines[] (pushed LAST  -> first argument)
+    jsr     rl3_toast2
+    addq.l  #8,%sp
+    movem.l (%sp),%d2-%d4/%a2-%a4
+    lea     24(%sp),%sp
+    rts
+
+| a1 = asciz literal -> copied to (a2) without its NUL. Clobbers d0.
+dg_lit:
+    move.b  (%a1)+,%d0
+    beq.b   dg_lit_done
+    move.b  %d0,(%a2)+
+    bra.b   dg_lit
+dg_lit_done:
+    rts
+
+| a1 = bytes, d1 = count -> 2 hex chars each at (a2). Clobbers d0/d1.
+dg_hex:
+    moveq   #0,%d0
+    move.b  (%a1),%d0
+    lsr.l   #4,%d0                     | ColdFire has no byte shifts; d0 is zero-extended
+    bsr.b   dg_nib
+    move.b  (%a1)+,%d0
+    bsr.b   dg_nib
+    subq.l  #1,%d1
+    bne.b   dg_hex
+    rts
+
+| a1 = bytes, d1 = count -> ONE hex digit each (low nibble) at (a2). Clobbers d0/d1.
+dg_dig:
+    move.b  (%a1)+,%d0
+    bsr.b   dg_nib
+    subq.l  #1,%d1
+    bne.b   dg_dig
+    rts
+
+| d0 low nibble -> one hex character at (a2)+. Clobbers d0.
+dg_nib:
+    andi.l  #15,%d0
+    cmpi.l  #10,%d0
+    blt.b   dg_nib_d
+    addq.l  #7,%d0                     | 10..15 -> 'A'..'F'
+dg_nib_d:
+    addi.l  #'0',%d0
+    move.b  %d0,(%a2)+
+    rts
+
+dg_lP:  .asciz "P "
+dg_lS:  .asciz " S "
+dg_lL:  .asciz "L "
+dg_lK:  .asciz " K "
+dg_lC:  .asciz "C "
+dg_lW:  .asciz " W "
+dg_lD:  .asciz " D "
+dg_lM:  .asciz "M"
+dg_lV:  .asciz " V"
+dg_lKk: .asciz " K"
+dg_lR:  .asciz " R "
+    .align 2
+rl_dlines:
+    .long   rl_dtext
+    .long   rl_dtext+24
+    .long   rl_dtext+48
+    .long   rl_dtext+72
+| captures -- all written by the code paths marked DIAG above
+rl_dc:      .space 4                   | chord:  bank, pattern, track, midi
+rl_dw:      .space 4                   | worker: bank, pattern, track, midi
+rl_dd:      .space 2                   | doneFn: PLAY_BANK, ACT_PAT
+rl_dk:      .space 1                   | G_KIND as the worker read it
+rl_dr:      .space 1                   | last PARSEPAT return, low byte
+rl_dm:      .space 1                   | message code that would have been shown
+rl_dv:      .space 1                   | verify: 0 not armed / 1 pass / 2 fail
+    .align 2
+rl_dpre:    .space 4                   | live record, first 4 bytes, BEFORE the copy
+rl_dlive:   .space 4                   | live record at doneFn
+rl_dcache:  .space 4                   | live-cache record at doneFn
+rl_dtext:   .space 96                  | 4 lines x 24
+    .endif
