@@ -44,10 +44,11 @@ resets PERSONALIZE.
 Which builds have run on real hardware and which are emulator-only is tracked in
 [Hardware-test status](#hardware-test-status) — **read it before you flash.**
 
-**Branches.** `main` is the published line; `wip` is the active frontier, and it is
-currently ahead — the finished part-change carryover fix and the Bugbuild
-tooling are on `wip` only. RELOAD3 is final and is on `main`. If you are reading this on `main`, check `wip` for the
-newest state.
+**Branches.** `main` is the published line and carries everything finished, including
+RELOAD3, QLREC's stateless rewrite, the part-change carryover fix and the Bugbuild
+tooling. `wip` is the active frontier: the DIRECT JUMP thread, SIDECHAIN3's UI fix and
+the external-RE knowledge-base ingest are there only. Each branch's own `START_HERE.md`
+§6 describes that branch.
 
 ### Extended Features
 

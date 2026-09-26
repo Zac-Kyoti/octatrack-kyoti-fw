@@ -121,11 +121,12 @@ composites, and the two threads still open. Octamax's current state is tracked v
 | **QUANTIZE LIVE REC** — `[REC]` + `[PLAY]`, then `[PLAY]` again while the toast is up | `build_qlrec.py` | **confirmed working** (2026-09-25) after three instructive failures: a `dur<=0` toast hung the unit, a `0x400522ca` frame-handler detour crashed it, and a private scratch word at `0x80006a60` did not survive on the unit. Now keeps **no state at all** — the gate is stock's toast handle. 2 cosmetic issues parked |
 | **SIDE-CHAIN COMPRESSOR** — `KEY`/`KFLT`/`KGN`/`MON`, cross-core | `build_sidechain3.py` → `SIDECHAIN3_CROSS` | **confirmed, final** 2026-09-20, single-core and cross-core both |
 | **TRIGLESS-LOCK AUTO-REMOVE** | `build_triglock.py` | **confirmed, final** 2026-09-21 |
-| **Part-change carryover** — PICKUP→FLEX stuck loop + spurious Part-edited flag | `build_partreapply.py` | **confirmed** 2026-09-22/23, thread closed. **`wip` only** — `main` still carries the older, pre-Session-81 build |
+| **Part-change carryover** — PICKUP→FLEX stuck loop + spurious Part-edited flag | `build_partreapply.py` | **confirmed** 2026-09-22/23, thread closed. On **both** branches — `main` and `wip` carry byte-identical builds |
 
-**Composites** — `build_bugbuilds.py` folds all three bug fixes into each finished
-feature image (MUTEMODE_DT / QLREC / SIDECHAIN3_CROSS / TRIGLOCK), writing only to
-`out/Bugbuilds/`. Not flashed; the composition itself is proven by a per-run
+**Composites** — `build_bugbuilds.py` gives each finished feature its **own** image with
+all three bug fixes folded into it: MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK and
+RELOAD3, five images, written only to `out/Bugbuilds/`. Features are never combined with
+each other. Not flashed; the composition itself is proven by a per-run
 interlock proof. There is deliberately **no single all-in-one image**:
 `tools/build_merged.py` stays withdrawn so a combined build cannot quietly ship an
 unfinished feature. `reference/MERGE.md` is the authoritative allocation map it will
@@ -153,10 +154,22 @@ ems-octakit's `abi.inc` ~500-address map → `kb/octakit-abi.md`, the keymap/key
 
 ## 6. Current frontier — UPDATE THIS EACH SESSION
 
-**As of 2026-09-24, Session 87, on `wip` (`18824ad`).** `main` is behind: it lacks
-PARTREAPPLY's Session 81 build and Bugbuilds entirely (RELOAD3 is final and IS on `main`
-as of 2026-09-25), and still carries the
-withdrawn `build_merged.py`.
+**As of 2026-09-25, on `wip` (Session 99).** `main` is no longer meaningfully behind on
+finished work: RELOAD3 (final) and QLREC's stateless rewrite were promoted there on
+2026-09-25, and it already had PARTREAPPLY and the Bugbuild tooling.
+
+**What this branch has that `main` does not:** the open **DIRECT JUMP** thread
+(`build_directjump_v5.py` and its diagnostics), **SIDECHAIN3**'s UI fix, the external-RE
+**knowledge-base ingest** (`reference/kb/caves.md`, the enlarged `memory-map.md` /
+`techniques.md`, `refs/` local patches), NOTES Sessions 89-91 / 97 / 99, and three extra
+`CLAUDE.md` hard constraints that go with that KB material.
+
+> ⚠️ **Three claims that sat here until 2026-09-25 were stale**, having survived the
+> 2026-09-24 merge that made them false: that `main` lacked PARTREAPPLY's Session 81
+> build (the files are byte-identical on both branches), that it lacked Bugbuilds
+> "entirely" (`build_bugbuilds.py` runs there and produces all five composites), and
+> that it "still carries the withdrawn `build_merged.py`" (it exists on **neither**
+> branch). Check this section against the tree before trusting it.
 
 **One thread is open (DIRECT JUMP). Everything else in §5 is finished, RELOAD3 included.**
 
