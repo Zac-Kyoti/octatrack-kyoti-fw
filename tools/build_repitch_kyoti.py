@@ -38,15 +38,16 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (gate 1, rev 2)", """
+status(WIP, "REPITCH KYOTI (gate 1, rev 3)", """
 Flash 1 (140C_RPK1 sha 4de57994): SETUP 7-value TSTR CONFIRMED ON HARDWARE;
-the QUANT cell did NOT appear -- the page-1 dial renderers never read the
-descriptor widget column (they resolve a record's +48 pointer, hardcoded
-knob when null). Rev 2 shims all four dial sites, keyed on the record's
-formatter == PTCH's. All 7 oracle contracts green (increment, resolver,
-guards, buckets, dial shims, ui-gate truth table). The three TSTR values
-still play identically (linear) by design; RPS9/RPSP character is gates 3/4.
-Unvalidated: the QUANT cell draw on hardware (rev 2's one new surface).
+QUANT cell missing (page-1 dial renderers bypass the descriptor widget
+column -- rev 2 shims all four dial sites, formatter-keyed). Rev 3, per the
+manual's AUTO contract: ATTR offers REPITCH/RPS9/RPSP (raw 4/5/6) and AUTO
+applies EACH SAMPLE'S OWN mode; the dial caption swaps PTCH<->QUAN at draw
+time. All 7 oracle contracts green (2100 repitch cases incl. AUTO carrying
+the sample's mode). The three TSTR values still play identically (linear)
+by design; RPS9/RPSP character is gates 3/4. Unvalidated on hardware: the
+QUANT cell + QUAN caption, ATTR's two new values, per-sample AUTO.
 """)
 
 BASE = 0x40000400

@@ -9,9 +9,10 @@
 |     6 RPSP   ZOH + 12-bit + ~26 kHz hold   -- DSP side NOT built yet (gate 4)
 | In gate 1 all three PLAY IDENTICALLY (linear): the voice renderer resolves
 | any of them to OFF and plays dry; only the increment carries the tempo.
-| The sample's own TIMESTRETCH attribute gains REPITCH (raw 4) after BEAT;
-| under SETUP AUTO it always resolves to RPCH, never RPS9/RPSP (user decision,
-| Session 106).
+| The sample's own TIMESTRETCH attribute gains REPITCH/RPS9/RPSP (raw 4/5/6)
+| after BEAT; under SETUP AUTO each sample's own setting applies, mode
+| included (Session 107 revision, matching the manual's AUTO contract;
+| supersedes Session 106's AUTO-always-RPCH).
 |
 | QUANT -- the reclaimed PTCH slot: on a repitch track the PTCH dial draws as
 | an 8-way ratio selector and the PTCH word (record +0, ui<<8, 64=neutral)
@@ -66,6 +67,8 @@
         .equ    SPRINTF, 0x40013a08
         .equ    KNOB, 0x400479b4        | the stock PTCH dial; value -1 draws its frame alone
         .equ    PTCH_FMT, 0x4003b4b0    | A[0] of STATIC/FLEX/PICKUP -- only playback slot 0 uses it
+        .equ    NAME_ST, 0x400d3032     | STATIC slot-0 caption 'PTCH', 6 B (E+0x4e)
+        .equ    NAME_FX, 0x400d31c4     | FLEX   slot-0 caption -- the image is SDRAM, writable
         .equ    TXT_MEASURE, 0x40012f30 | (font, -1, str) -> px width
         .equ    TXT_DRAW, 0x40012bd8    | (font, canvas, x, y, -1, str)
         .equ    FONT, 0x400ba876
@@ -115,10 +118,14 @@ rp_source:
         moveq   #TSTR_AUTO,%d1
         cmp.l   %d1,%d2
         bne     .rs_out
-        moveq   #RPCH,%d1
-        cmp.l   0x110(%a0),%d1          | the sample's own TSMODE
-        bne     .rs_out
-        moveq   #0,%d2                  | AUTO always resolves to RPCH
+        move.l  0x110(%a0),%d2          | AUTO: the sample's own TSMODE
+        moveq   #RPCH,%d1               | carries the mode (manual: each
+        cmp.l   %d1,%d2                 | sample its own setting)
+        blt     .rs_out
+        moveq   #RPSP,%d1
+        cmp.l   %d1,%d2
+        bgt     .rs_out
+        subi.l  #RPCH,%d2               | modeoff from the sample
 .rs_on:
         move.l  0x114(%a0),%d1          | the sample's BPMx24
         cmpi.l  #BPM24_MIN,%d1
@@ -356,9 +363,13 @@ rp_ui_gate:
         movea.l 8(%a0),%a0
         move.l  %a0,%d1
         beq.s   .ug_no
-        moveq   #RPCH,%d0
-        cmp.l   0x110(%a0),%d0
-        bne.s   .ug_no
+        move.l  0x110(%a0),%d0
+        moveq   #RPCH,%d1
+        cmp.l   %d1,%d0
+        blt.s   .ug_no
+        moveq   #RPSP,%d1
+        cmp.l   %d1,%d0
+        bgt.s   .ug_no
         move.l  0x114(%a0),%d1
         cmpi.l  #BPM24_MIN,%d1
         blt.s   .ug_no
@@ -430,8 +441,21 @@ quant_widget:
         bsr     rp_ui_gate
         tst.l   %d0
         bne.s   .qw_quant
+        move.l  #0x50544348,%d0         | 'PTCH': restore the caption
+        bsr.s   .qw_name
         jmp     (KNOB).l
+| the caption lives in the descriptor name table, which the page's text pass
+| reads on every redraw; writing it at widget-draw time renames the dial
+| (one redraw of lag at worst on a mode change)
+.qw_name:
+        move.l  %d0,(NAME_ST).l
+        move.l  %d0,(NAME_FX).l
+        clr.w   (NAME_ST+4).l
+        clr.w   (NAME_FX+4).l
+        rts
 .qw_quant:
+        move.l  #0x5155414e,%d0         | 'QUAN'
+        bsr.s   .qw_name
         move.l  28(%sp),-(%sp)          | canvas
         move.l  28(%sp),-(%sp)          | fmt
         move.l  28(%sp),-(%sp)          | flags
@@ -496,25 +520,40 @@ quant_widget:
 attr_label:
         moveq   #RPCH,%d1
         cmp.l   %d1,%d0
-        bne.s   .al_error
+        beq.s   .al_rpch
+        moveq   #5,%d1
+        cmp.l   %d1,%d0
+        beq.s   .al_rps9
+        moveq   #RPSP,%d1
+        cmp.l   %d1,%d0
+        beq.s   .al_rpsp
+        pea     (STR_ERROR).l
+        jmp     (0x4006e878).l
+.al_rpch:
         pea     .repitch(%pc)
         jmp     (0x4006e878).l
-.al_error:
-        pea     (STR_ERROR).l
+.al_rps9:
+        pea     .rps9(%pc)
+        jmp     (0x4006e878).l
+.al_rpsp:
+        pea     .rpsp(%pc)
         jmp     (0x4006e878).l
 .repitch:
         .asciz  "REPITCH"
+.rps9:
+        .asciz  "RPS9"
+.rpsp:
+        .asciz  "RPSP"
         .balign 2
 
 | 0x4006ee56, value up: stock steps 2 -> 3 and stops; 3 -> REPITCH is the top.
 attr_up:
         moveq   #2,%d1
-        cmp.l   %d0,%d1
-        beq.s   .au_step
-        moveq   #3,%d1
-        cmp.l   %d0,%d1
-        bne.s   .au_done
-.au_step:
+        cmp.l   %d1,%d0
+        blt.s   .au_done
+        moveq   #5,%d1
+        cmp.l   %d1,%d0
+        bgt.s   .au_done
         addq.l  #1,%d0
         move.l  %d0,272(%a0)
 .au_done:
@@ -530,12 +569,11 @@ attr_down:
         bra.s   .ad_done
 .ad_upper:
         moveq   #3,%d1
-        cmp.l   %d0,%d1
-        beq.s   .ad_step
-        moveq   #RPCH,%d1
-        cmp.l   %d0,%d1
-        bne.s   .ad_done
-.ad_step:
+        cmp.l   %d1,%d0
+        blt.s   .ad_done
+        moveq   #RPSP,%d1
+        cmp.l   %d1,%d0
+        bgt.s   .ad_done
         subq.l  #1,%d0
         move.l  %d0,272(%a0)
 .ad_done:

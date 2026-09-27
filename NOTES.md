@@ -32321,3 +32321,27 @@ engine hook" is about UI primitives from the engine FRAME path — the kernel po
 the tick ISR itself uses at `0x400a4566`, `0x400a3f8c`, `0x400a4dd8`.) Mainline sha256
 `723df02401fe3452…` (800 B cave, 753 bytes vs stock, 0 strays); DIAG `c2692debeff10d0d…`.
 Gates re-run on this image — result below.
+
+### Session 107 continued — rev 3: AUTO made congruent with the manual (per-sample modes) + the dial caption swaps PTCH↔QUAN
+
+User checked the OT manual's TSTR/AUTO contract ("each sample used in the
+track can then have its own individual time-stretch setting") against the
+build: the S106 AUTO-always-RPCH decision was NOT congruent — it flattened
+the per-sample vocabulary. **REVISED (supersedes S106): ATTR TIMESTRETCH now
+offers REPITCH / RPS9 / RPSP (raw 4/5/6, stepping 3↔4↔5↔6), and SETUP AUTO
+applies each sample's own mode** — rp_source takes modeoff from the sample's
+TSMODE under AUTO, re-resolved from the live binding every recompute, so
+sample locks switch character per trig once the DSP gates land. rp_ui_gate
+accepts TSMODE 4..6 under AUTO. Second user ask: **the dial caption now
+swaps** — quant_widget writes the descriptor name field (E+0x4e slot 0,
+STATIC `0x400d3032` / FLEX `0x400d31c4`, both verified `PTCH\0\0`; the image
+is SDRAM, writable at runtime — octabam's mode-rename precedent) with 'QUAN'
+on the quant path and restores 'PTCH' on the knob path; worst case one
+redraw of lag on a mode change. PICKUP's own PTCH caption untouched.
+
+**Rev 3 = flash-2 candidate: mainos `54ab3353…`, syx `3e88eedc…`** (1805 B
+changed, 0 strays, cave `0x400d6f80..0x400d7894` = 2324 B). Oracle 7/7 —
+repitch-family contract now 2100 cases (AUTO+RPS9 → tag 1 and AUTO+RPSP →
+tag 2 proven through the real builder), guards extended (TSMODE 5/6 without
+AUTO stay stock), gate truth table 13 cases. Hardware-new surfaces: the
+QUANT cell + QUAN caption, ATTR's two new values, per-sample AUTO.

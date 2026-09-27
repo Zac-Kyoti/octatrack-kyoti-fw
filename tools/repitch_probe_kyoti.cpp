@@ -181,7 +181,8 @@ int main(int argc, char** argv)
 		int bad = -1, n = 0;
 		bool ok = true;
 		struct Sel { unsigned tstr, tsmode, modeoff; };
-		const Sel sels[] = {{4, 2, 0}, {5, 2, 1}, {6, 2, 2}, {1, 4, 0}};
+		const Sel sels[] = {{4, 2, 0}, {5, 2, 1}, {6, 2, 2},
+		                    {1, 4, 0}, {1, 5, 1}, {1, 6, 2}};
 		for(auto sel : sels)
 			for(auto proj : projects) for(auto samp : sources)
 				for(auto ptch : ptchs) for(auto rate : rates) {
@@ -215,6 +216,8 @@ int main(int argc, char** argv)
 			{1, 6, 2, 7300, 2880, 0x4800, 0x7f00, 1},   // above range
 			{1, 0, 4, 2880, 2160, 0x4800, 0x7f00, 1},   // TSMODE 4 but SETUP OFF
 			{1, 2, 4, 2880, 2160, 0x4800, 0x7f00, 1},   // ... NORM
+			{1, 0, 5, 2880, 2160, 0x4800, 0x7f00, 1},   // TSMODE 5/6 without AUTO
+			{1, 3, 6, 2880, 2160, 0x4800, 0x7f00, 1},   // ... BEAT
 		};
 		for(const auto& g : guards) {
 			bool oks = true, okp = true;
@@ -322,6 +325,8 @@ int main(int argc, char** argv)
 				{2, 0, 1, true,  2, 2880, 0},   // OFF
 				{2, 2, 1, true,  4, 2880, 0},   // NORM ignores TSMODE
 				{2, 1, 1, true,  4, 2880, 1},   // AUTO + sample REPITCH
+				{2, 1, 1, true,  5, 2880, 1},   // AUTO + sample RPS9
+				{2, 1, 1, true,  6, 2880, 1},   // AUTO + sample RPSP
 				{2, 1, 1, true,  2, 2880, 0},   // AUTO + NORMAL sample
 				{2, 1, 1, false, 4, 2880, 0},   // AUTO unbound: conservative
 				{2, 1, 1, true,  4, 8000, 0},   // AUTO, tempo out of range
@@ -353,7 +358,8 @@ int main(int argc, char** argv)
 				ok &= good;
 				++n;
 			}
-			check("rp_ui_gate: 11-case display truth table", ok, bad);
+			std::printf("      (%d gate cases)\n", n);
+			check("rp_ui_gate: display truth table", ok, bad);
 		}
 	}
 
