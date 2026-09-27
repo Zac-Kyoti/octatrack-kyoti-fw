@@ -119,19 +119,28 @@ container.
 
 ## 4. Verify the flash and test each feature
 
-An OS upgrade **resets PERSONALIZE**, so any PERSONALIZE-gated feature (MUTE MODE)
-is off after a flash until you re-enable it. The Bug-1 fix is always on.
+**Test only what you built.** Each section below names the build it applies to — skip
+the ones whose build you did not flash. `MUTE MODE` and `QUANTIZE LIVE REC` are
+PERSONALIZE settings and start at their stock-equivalent value; `DIRECT JUMP` is a
+front-panel chord and comes up OFF on every power-on. The bug fixes in your image are
+always on and need nothing switched.
 
 ### 4.0  Boot check
 The startup screen and **SYSTEM → SYSTEM STATUS → OS VERSION** read `140C_KYOTI`
-(the field is fixed at 10 chars; `1.40C_KYOTI` at 11 does not fit). The
-`build_trigscale_only.py` fix-only build deliberately keeps the stock `1.40C`
-string.
+(the field is fixed at 10 chars; `1.40C_KYOTI` at 11 does not fit). The four
+bug-fix-only builds — `build_trigscale_only.py`, `build_pattern_led.py`,
+`build_partreapply.py` and `build_triglock.py` — deliberately keep the stock `1.40C`
+string, so on those the version is **not** how you tell the flash worked; use the
+feature test below instead.
 
-### 4.1  The MIDI manual-trig fix  (always on)
+### 4.1  The MIDI manual-trig fix  (`build_trigscale_only.py`, and folded into every feature build — **HARDWARE-CONFIRMED, FINAL**, MKI 2026-08-28)
 
-> **Hardware-confirmed (MKI, 2026-08-28.)** The fix-only build was flashed and the
-> stall below no longer happens. The steps below re-verify on your own unit.
+> **Skip this unless your image has it.** It is the whole of
+> `build_trigscale_only.py`, and it is folded into `build_qlrec.py`,
+> `build_mutemode_dt.py`, `build_sidechain3.py`, `build_reload3.py`, the DIRECT JUMP
+> builds and every Bugbuild. It is **not** in `build_pattern_led.py`,
+> `build_partreapply.py` or `build_triglock.py`, which are each one bug fix on
+> otherwise-stock 1.40C.
 
 1. On a **MIDI track**, set **PLAYBACK** so the track is **PLAYS FREE**.
 2. Set that MIDI track's **trig quantization to DIRECT**.
