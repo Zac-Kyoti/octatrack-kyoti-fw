@@ -786,6 +786,7 @@ dj_c:
 |   JUMP is ON, the preserve now covers EVERY commit, wraps included; at 1x every
 |   counter is 0 at a wrap and the preserve is arithmetically inert. DJ OFF keeps the
 |   old hygiene clear, and the hooks themselves are DJ_MODE-gated anyway.
+    .ifdef DJ_PRESERVE
     tst.l   DJ_MODE
     beq.b   djc_stock_clear
     moveq   #-1,%d0
@@ -797,6 +798,7 @@ djc_stock_clear:
                                         | previous commit's apply window)
     clr.w   dj_keep_pend2
 djc_stock_replay:
+    .endif
     clr.b   %d0                         | displaced original #1 (stock leaves D0 = 0)
     move.b  %d0,STEP                    | displaced original #2 (STEP = D0 = 0)
     rts
@@ -1000,9 +1002,11 @@ djc_ts_done:
 |   commit tail is CNTDN-deferred per track, see CNTDN_TBL above), which a single one-shot
 |   flag like G_JUST_COMMITTED cannot cover -- dj_a's idle path would clear it on the very
 |   next tick, before any deferred track applies.
+    .ifdef DJ_PRESERVE
     moveq   #-1,%d0
     move.w  %d0,dj_keep_pend            | all 16 tracks: preserve across this armed commit
     move.w  %d0,dj_keep_pend2
+    .endif
     .ifdef DJ_DIAG
     move.w  dj_cnt_arm,%d0             | d0 is reloaded by the moveq below
     addq.l  #1,%d0

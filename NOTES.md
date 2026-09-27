@@ -31684,3 +31684,51 @@ Build plumbing: the diag blob outgrew 0x700 B, so **under DJ_DIAG only** the tri
 cave moves to 0x400d7bc0 (identity check reported-not-enforced there; the mainline
 keeps 0x400d7b00 and full enforcement). Two dkz branches widened to .w. Diag toast's W
 now counts Hook V's CNTDN alignments (grows per tick while an apply is pending).
+
+## Session 104 (2026-09-26, `main`) — ROLLBACK. V5.10 regressed gold-confirmed 1x behaviour; V5.11 = the V5.3 line plus only the master-remainder seed
+
+### Hardware V5_10D (user) — the report that reset the thread
+
+Non-1x: progress confined to the 1x↔2x master case (fractional only when playback
+STARTS on the 2x pattern; still resets at the cycle; the spurious step-1 trig persists,
+now half a step EARLY, only when playback starts on 1x then switches to 2x; step 1 of the
+2x pattern silent after project reload / transport restart). Any master scale other than
+1x/2x "really screws things up". **REGRESSIONS FROM GOLD**: with NO scale multipliers, in
+NORMAL or PER-TRACK mode, differing track lengths (16 vs 7) — the 16-step track goes
+fractional on a switch and the 7-step track's LEDs run through 16 steps while audio
+plays 7. Gold (S87/V5.3) handled lengths, modes and track scales perfectly.
+Toast (start on 2x): `Z152 X24 W7608 N3 R3` and `Z88 X32 W3488 N0 R0` — cut off on screen.
+
+### Diagnosis from the toast alone
+
+W in the thousands = Hook V rewriting countdowns every tick for tracks whose pending
+bit is NEVER consumed — the audio tail applies (and Hook Z consumes) only 8 tracks;
+MIDI 8-15 and any audio track that misses the apply keep their bits forever, so V keeps
+forcing their CNTDN to zero: repeated re-applies, STEP rewrites, LEDs past a 7-step
+length, misfires. The per-track preserve/defer machinery (Hooks Z/X/V, two masks) only
+held together in the single fixture it was built against. It does not generalise to
+odd lengths, NORMAL mode, MIDI tracks or other scales — and it is now doing harm where
+gold was right.
+
+### V5.11 (mainline `9b6b27b5`, diag `12396a2e`)
+
+Hooks Z/X/V and both masks are OPT-IN (`DJ_PRESERVE=1`) and OFF. The mainline detour
+set is exactly V5.3's six (dj_a/b/c, scaleix, d7, ptnrel); the static diff vs the V5.3
+image is cave-only plus three shifted detour operands. The single behavioural addition
+kept from Sessions 97-103 is the **master-remainder seed** (`dj_mrem`): Hook H's
+`ticks mod tps_in` written into the master tick counter at the armed commit where
+stock writes 0. It is arithmetically a no-op at 1x (r=0 → the same byte stock writes)
+and AR does the identical thing (AR_DIRECT_JUMP.md §9), so it stays — and if the
+DJ-OFF-persistent latch reappears on V5.11, it is the only suspect left.
+
+Source is preserved for the redesign; the emulator oracles (fire, table-arm, per-writer
+counts) are the assets that survive. The non-1x thread restarts from AR's architecture —
+rebuild every per-track value from ONE time-true anchor — designed against gold as the
+untouchable baseline, with DJTEST2's odd lengths and DJMAST2's scales both as gates from
+day one. Also: the toast overflows the screen — any future diag variant needs fewer,
+smaller fields.
+
+Build plumbing this session (other session, commit 28fa30a): `wip` retired, build TIERS
+declared; `build_directjump_v5.py` is WIP-tier and refuses without `KYOTI_ALLOW_WIP=1`.
+
+REGRESSION_GATES_PLACEHOLDER

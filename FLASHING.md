@@ -295,8 +295,8 @@ older project that still references it by id stays safe.
 
 1. **Boot check** — the FX2 chooser has **14** entries and no SPRING REVERB; the
    **FX1** chooser is untouched. Every other effect must highlight **the effect you
-   actually picked** (an earlier
-   build had FX1's id→position table one slot out past the removed effect).
+   actually picked** (an earlier build had FX1's id→position table one slot out past
+   the removed effect).
 2. Put a **kick on T1**, and a **pad + COMPRESSOR on T2**. On T2's FX page 2 set
    **`KEY = T1`** → the pad **ducks on every kick**. Sweep `THRS`/`RAT` to confirm
    it is the compressor responding, not something else.

@@ -137,6 +137,7 @@ TOAST_DUR = int(sys.argv[2], 0) if len(sys.argv) > 2 else 0x44
 # "A.. Z.. X.. Y.. P.. R.." and resets. Behaviour is otherwise V5.5's; outputs go to
 # *_v5diag names so the mainline artifacts are never clobbered.
 DIAG = os.environ.get("DJ_DIAG") == "1"
+PRESERVE = os.environ.get("DJ_PRESERVE") == "1"   # Session 104: per-track hooks, off by default
 if DIAG:
     OUT = ROOT / "out/mainos_directjump_v5diag.bin"
     ELEK = ROOT / "out/elek_directjump_v5diag.bin"
@@ -148,7 +149,8 @@ if DIAG and len(sys.argv) <= 1:
 if DIAG and len(sys.argv) <= 2:
     TOAST_DUR = 0x88        # six numbers need longer on screen than ON/OFF does
 
-DEFSYM = f"DJ_V3=1,DJ_KEYMAP=1,DJ_TOAST_DUR=0x{TOAST_DUR:x}" + (",DJ_DIAG=1" if DIAG else "")
+DEFSYM = (f"DJ_V3=1,DJ_KEYMAP=1,DJ_TOAST_DUR=0x{TOAST_DUR:x}" + (",DJ_DIAG=1" if DIAG else "")
+          + (",DJ_PRESERVE=1" if PRESERVE else ""))
 
 # Session 103: the DIAG build's cave outgrew 0x700 bytes, so trigscale moves up inside
 # the free zone for the DIAG variant only (0x400d7bc0 + 62 B ends well before FREE_END).
@@ -227,7 +229,13 @@ PATCHES = [
       # Hook Z: the commit tail's per-track zero (0x400a4bf0, inside the CNTDN==0 body).
       # Displaces clr.b %d0 / moveal %sp@(164),%a0 / move.b %d0,%a0@(-211) -- when the
       # track's dj_keep_pend bit is set the store is skipped, everything else replayed.
-      (0x400a4bea, "dj_keepz", "4200206f00a41140ff2d", 10, "jsr"),
+      # Session 104 -- ROLLBACK. Hooks Z/X/V (the per-track preserve/defer machinery,
+      # Sessions 97-103) are OPT-IN via DJ_PRESERVE=1 and OFF by default: V5.10 regressed
+      # gold-confirmed 1x behaviour (odd track lengths, normal + per-track modes) because
+      # pending bits for tracks the audio tail never applies (MIDI 8-15 and more) were never
+      # consumed, so Hook V forced their countdowns every tick (toast W=7608). Mainline is
+      # now the gold/V5.3 line plus ONLY the master-remainder seed (dj_mrem), a no-op at 1x.
+      *([(0x400a4bea, "dj_keepz", "4200206f00a41140ff2d", 10, "jsr")] if PRESERVE else []),
       # Hook X: the per-tick CATCHUP copy (0x400a354a, gated on CNTDN[t]==0 at
       # 0x400a353e). Displaces the two cursor loads + move.b (a2),(a1). Pending ->
       # consume the bit and reduce the PRESERVED counter mod the track's new tps
@@ -236,11 +244,11 @@ PATCHES = [
       # itself carries the value from Z to X -- no snapshot buffer, no 0x80006a40+
       # scratch (Sessions 94-96: that window is not reliable under live audio). The
       # 16-bit arm mask lives in the cave (dj_keep_pend), image-initialised to 0.
-      (0x400a3542, "dj_keepx", "226f0094246f00ac1292", 10, "jsr"),
+      *([(0x400a3542, "dj_keepx", "226f0094246f00ac1292", 10, "jsr")] if PRESERVE else []),
       # Session 103 -- Hook V replaces Hook W (0x400a4bdc back to stock): while a
       # preserve is pending, CNTDN[t] = tps_t - counter[t] every tick, deferring each
       # track's whole apply (STEP write AND reposition fire) to its own boundary.
-      (0x400a4bb6, "dj_keepv", "49f9400a536c", 6, "jsr"),
+      *([(0x400a4bb6, "dj_keepv", "49f9400a536c", 6, "jsr")] if PRESERVE else []),
       (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),
 ]
 # Session 102: the DIAG-only dj_diagy observer detour is gone (Y dead everywhere;
