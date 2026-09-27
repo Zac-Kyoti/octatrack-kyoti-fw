@@ -443,3 +443,25 @@ remainder at the commit). The structural differences that remain: AR computes th
 remainder at REQUEST time from the absolute tick reduced into the outgoing cycle and
 carries it; OT V5.7 computes it at COMMIT time inside Hook H's division. And AR rebuilds
 every per-track value from the anchor, preserving nothing.
+
+## 10. Session 10 (2026-09-26) — §9 WITHDRAWN in part; the whole engine is now decompiled
+
+See `AR_SEQUENCER_ENGINE.md` (same directory; mirrored in the OT repo's `reference/`) for the
+tick ISR phase by phase. The corrections that bear on this document, in short:
+
+- The (target step `0x405667f4`, remainder `0x405667f6`) pair of §9 is written by
+  `FUN_4009a618` — reached only from MIDI Song Position / continue (`FUN_4009a7e8`,
+  `FUN_4009a9e0`) and pause (`FUN_4009a142`) — and consumed only by **transport start**
+  (`FUN_40098226` at `0x40098358`, and the src-44 ISR's deferred copy at `0x40097910`). The
+  three "parallel consumer sites" are the three transport-start landings. **The DIRECT JUMP
+  commit never reads the remainder**: its countdown (`tps[master_res] − master_tick_phase`,
+  `0x40099146`–`0x40099158`) lands it on a master step boundary by construction, and it writes
+  `master_tick_phase = tps − 1` itself (`0x4009921a` / `0x40099234`). §9's OT consequence —
+  that OT V5.7+'s `dj_mrem` seed "is the same mechanism in the same role" — is withdrawn.
+- `FUN_4009905c` is the tick **ISR** (`rte`, INTC0 src 57, forced from the clock-edge ISR
+  `FUN_40097838`), and the DJ commit is a phase inside it that runs *before* the per-track
+  scheduling loop and the advance loops of the same tick.
+- The wrap-change path (`0x40099c38`–`0x40099d9c`: ceil, remainder `0x4056679e`, hold mask
+  `0x405667b8`, catch-up `0x405667c7`, fire countdown `0x405667ba`) is byte-for-byte OT's
+  boundary body. AR uses it only at natural cycle wraps, never for a jump. §7 item 3 is
+  closed: `0x4056672d` = ticks-within-step, `0x405667ba` = fire countdown (−1 idle).

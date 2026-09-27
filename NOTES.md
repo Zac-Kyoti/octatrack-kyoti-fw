@@ -31768,3 +31768,78 @@ the user verifies lengths / NORMAL / PER-TRACK / track scales first.
   plus the redesign plan), FLASHING §4.3 and build table, MERGE.md, the
   DIRECTJUMP_PHASE_HANDOFF (a new §0 CURRENT STATE, stale "ON THE UNIT" and "current
   candidate" labels fixed), and DIRECTJUMP_SCALES_HANDOFF (marked stale).
+
+## Session 105 (2026-09-26, `main`) — GOLD RETRACTED; the Analog Rytm engine decompiled end to end; the DIRECT JUMP port restarts from AR's commit discipline
+
+### The retraction (user, hardware)
+
+`GOLD_S87_OCTATRACK_DIRECTJUMP.bin` re-flashed: step-fractional offsets reproduce at **1x,
+NORMAL mode, no scale of any kind, a plain 16-step vs 7-step pattern switch**. So the
+"hardware-confirmed at 1x" baseline that Sessions 88–104 measured every V5.x candidate
+against was never correct, and the fire-timestamp oracle never reproduced this case either.
+`GOLD_S87` and `V5_3` remain useful only as regression references for what they did NOT
+break; they are no longer a gate. `build_directjump_v5.py` stays WIP.
+
+### What was done instead (AR repo, Session 10 — `~/Documents/ar-kyoti-fw`)
+
+Full decompilation of AR's sequencer/timing engine, recorded in
+**`reference/AR_SEQUENCER_ENGINE.md`** (mirror of the AR repo's canonical copy) and
+`reference/AR_DIRECT_JUMP.md` §10. Headlines that change this thread:
+
+1. `FUN_4009905c` is AR's **tick ISR** (INTC0 src 57, forced from the clock-edge ISR src 44
+   exactly as OT forces src 32). Its phase order is the mechanism: advance *now* →
+   **pattern-change commits** → per-track trig scheduling (one step lookahead; fire time =
+   last tick of the step's window + microtiming) → per-track advance → master advance
+   (phase 2 picks the next pattern, phase 0 runs the wrap-change) → fire-countdown landings.
+2. **AR's DIRECT JUMP commit carries no sub-step remainder.** The request sets a flag; the
+   next tick computes `countdown = tps_master − master_tick_phase` (the next master step
+   boundary); at zero the commit rebuilds all 13 tracks synchronously (`step = new_step mod
+   len_t`, tick-in-step 0, `cntdn = tps_t − 1`, fire countdown −1, first-fire mask all set),
+   writes `master_tick_phase = tps_master − 1`, and lets the normal loops run: every track
+   fires `new_step` immediately and re-opens a full window; from the next tick the grid is
+   exact by construction.
+3. **The `(target step, remainder)` pair that AR_DIRECT_JUMP.md §9 attributed to the jump is
+   AR's pause / MIDI Song-Position mechanism** (written by `FUN_4009a618`/`FUN_4009a142`,
+   consumed only by transport start). **V5.7–V5.11's `dj_mrem` seed was built on that
+   mis-attribution and is withdrawn.** It was a byte-equal no-op at 1x, so it explains
+   nothing about the gold failure either way.
+4. **AR's wrap-change path is byte-for-byte OT's boundary body** (ceil → next step, remainder
+   → hold bit = one skipped advance, catch-up `tps_t − tps_master_old`, fire countdown
+   `max(1, tps_master_old + 1 − tps_t)` with a deferred landing). AR runs it only at natural
+   cycle wraps. **OT's port (Hook H writing `0x80006628` so the boundary body rebuilds from an
+   absolute offset) routed every jump through it.** That is the architectural error under
+   every version since Session 79 — gold included — and it is independent of the S89–S103
+   hooks that tried to repair its consequences.
+5. Neither machine fires a trig from the CPU: both post fire timestamps + event records into
+   the DSP-shared `0x8000…` region (AR: `0x8000aa5c` / `0x4273c990` / `0x8000681c`; OT:
+   `DAT_80001904` via `0x400a2e18`). Microtiming and swing are folded into the fire time at
+   schedule time on AR.
+
+### The port, restated (see AR_SEQUENCER_ENGINE.md §6)
+
+Do not re-enter the boundary body. Implement the AR commit as its own phase in OT's tick
+ISR, placed **before** the per-track trig scheduling of that tick: quantise to the next
+*master* step boundary from the live master tick counter (`0x800065b6`); at that tick write
+every per-track value directly (STEP `0x800064d0[t]` = `new_step mod len_t`, its −1 twin
+`0x800064e0[t]`, ticks-within-step `0x800064f0[t] = 0`, `TRK_SCALE_IX 0x8000663e[t]`, the
+CNTDN/PAIR/CATCHUP/hold state cleared — MIDI twins `0x80006646/0x80006508` included), set the
+master step (`0x800065b2`) and the master tick counter so stock's step body runs at the end
+of the same tick, and let stock's scheduling loop fire the landing step. Gates from day one:
+the user's 16↔7 NORMAL-mode case, DJTEST2 odd lengths, DJMAST2 scales, feature-OFF identity.
+
+### Measurements OT still owes before that build
+
+- The order of phases inside OT's tick ISR (`0x400a1e0c` → `consumer_a6c0_a33f8`): where the
+  per-track scheduler (`0x400a2e18` writer) runs relative to the step body at `0x400a4220` and
+  the boundary body at `0x400a4568`+. AR's correctness depends on commit-before-schedule.
+- OT's analogues of AR's first-fire mask (`0x405667d4`) and per-track fire countdown
+  (`0x405667ba`, distinct from the reload `0x405667c7`) — `CNTDN_TBL 0x800065c3` was measured
+  as a one-shot arm (S79) and may be the fire countdown, not the reload.
+- Whether OT's scheduler computes a step's event one step ahead the way AR's E does; if so,
+  the commit must also cancel the outgoing pattern's lookahead events (AR's dedupe at
+  `0x40099664`–`0x400996ee`).
+
+### Housekeeping
+
+Memory topic file updated first thing (gold retraction). Build tiers unchanged. No OT code
+touched this session — scope discipline: understand before patching.

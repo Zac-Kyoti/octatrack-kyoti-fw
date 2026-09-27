@@ -3,14 +3,31 @@
 Written at the end of Session 89; **current state rewritten Session 104 (2026-09-26)**.
 Read §0 first — everything after it is the history of how the thread got here.
 
-## 0. CURRENT STATE (Session 104) — read this, then NOTES.md Sessions 101-104
+## 0. CURRENT STATE (Session 105) — read this, then `reference/AR_SEQUENCER_ENGINE.md` §3 and §6, then NOTES.md Session 105
 
-**Baseline, hardware-confirmed:** the Session 87 GOLD image (`out/GOLD_S87_*`,
+**GOLD IS RETRACTED (2026-09-26, user, hardware).** `GOLD_S87` reproduces step-fractional
+playback at 1x, NORMAL mode, no scales, a 16-step ↔ 7-step switch. Nothing below that
+calls gold or V5.3 "correct" or "a gate" holds any more; they are regression references
+only. **Root cause, architectural:** every OT build since Session 79 committed a jump by
+re-entering the pattern-boundary body with an absolute offset (`0x80006628`) — AR's
+*wrap-change* path (ceil / remainder / hold / catch-up / deferred landing), which AR uses
+only at natural cycle wraps and never for a jump. AR's actual DIRECT JUMP commit is a
+separate phase of its tick ISR that runs before the per-track scheduling: countdown to
+the next master step boundary, synchronous rebuild of every track (step, tick 0,
+`cntdn = tps−1`, no hold, no catch-up), master phase set to `tps−1` so the step body runs
+the same tick. It carries **no sub-step remainder** — V5.7–V5.11's `dj_mrem` came from a
+mis-attribution (the remainder pair is AR's pause/Song-Position mechanism) and is
+withdrawn. The port restarts from `AR_SEQUENCER_ENGINE.md` §6; the OT measurements still
+owed are listed in NOTES.md Session 105.
+
+*(Session 104 text follows, kept as history.)*
+
+**Baseline, formerly believed hardware-confirmed:** the Session 87 GOLD image (`out/GOLD_S87_*`,
 sha256 `0657157f…`; rebuild from commit `16df386` with `build_directjump_v4.py`
 *there* — at HEAD that builder assembles today's shared `patch_directjump.s` and no
-longer reproduces gold, so it is SUPERSEDED). Correct at a 1x master scale for
+longer reproduces gold, so it is SUPERSEDED). Was thought correct at a 1x master scale for
 everything: master time, landing steps, odd track lengths, track scales, NORMAL and
-PER-TRACK modes, MASTER LENGTH incl. INF. **Never regress it.**
+PER-TRACK modes, MASTER LENGTH incl. INF. **Retracted in Session 105 — see above.**
 
 **Current line: V5.11** (`build_directjump_v5.py`, WIP tier — `KYOTI_ALLOW_WIP=1`;
 mainline `9b6b27b5`, diag twin `V5_11D` `12396a2e`) = gold's six detours + ONLY the
