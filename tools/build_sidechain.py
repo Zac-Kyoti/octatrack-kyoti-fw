@@ -40,6 +40,15 @@ Outputs: out/mainos_sidechain.bin, out/elek_sidechain.bin,
 """
 import os, pathlib, subprocess, sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from kyoti_status import status, SUPERSEDED
+
+status(SUPERSEDED, "SIDE-CHAIN, stage 1", """
+    An intermediate stage of the side-chain compressor: same-core KEY only, and it
+    donated SPATIALIZER, which ran out of code space.  build_sidechain3.py is the
+    hardware-confirmed build -- cross-core KEY, SPRING REVERB as the donor.
+""")
+
 BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent

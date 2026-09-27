@@ -34,6 +34,14 @@ OTFX / OTFX-T. Persists across power cycles like any other PERSONALIZE row.
 """
 import os, pathlib, subprocess, sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from kyoti_status import status, SUPERSEDED
+
+status(SUPERSEDED, "MUTE MODE, from-scratch redesign", """
+    An abandoned from-scratch redesign of MUTE MODE.  The shipping build is
+    build_mutemode_dt.py, which evolved from build_mutemode.py instead.
+""")
+
 BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent

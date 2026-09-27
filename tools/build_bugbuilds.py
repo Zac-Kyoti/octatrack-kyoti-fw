@@ -268,8 +268,11 @@ def main():
         if wip:
             flag(f"{name} is WIP -- see reference/MERGE.md; this image is NOT shippable")
         if rebuild:
+            # --with-wip is itself the opt-in, so carry it into the child: a WIP-tier
+            # builder (tools/kyoti_status.py) exits 2 without it.
+            env = dict(os.environ, KYOTI_ALLOW_WIP="1") if wip else None
             r = subprocess.run(["python3", f"tools/{builder}"], capture_output=True,
-                               text=True, cwd=ROOT)
+                               text=True, cwd=ROOT, env=env)
             if r.returncode != 0:
                 sys.exit(f"{name}: feature builder {builder} failed:\n{r.stdout}\n{r.stderr}")
         base = ROOT / basepath

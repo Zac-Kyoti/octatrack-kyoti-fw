@@ -29,6 +29,15 @@ Outputs: out/mainos_softmute.bin, out/elek_softmute.bin,
 """
 import os, pathlib, subprocess, sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from kyoti_status import status, SUPERSEDED
+
+status(SUPERSEDED, "SOFT MUTE, always on", """
+    SOFT MUTE (V6) with no menu -- the behaviour is always on, before MUTE MODE
+    existed as a PERSONALIZE choice.  build_mutemode_dt.py supersedes it: same cut,
+    selectable, and OT mode is byte-for-byte stock.
+""")
+
 BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent

@@ -28,6 +28,15 @@ Outputs: out/mainos_directjump_v2.bin, out/elek_directjump_v2.bin,
 """
 import os, pathlib, subprocess, sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from kyoti_status import status, SUPERSEDED
+
+status(SUPERSEDED, "DIRECT JUMP v2", """
+    Dead on hardware for the same reason as v1 (the [PTN] overlay swallows [YES]),
+    and it also splices 0x400522ca, the engine frame handler that later crashed a
+    real MKI from QLREC.  Use build_directjump_v4.py.
+""")
+
 BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent

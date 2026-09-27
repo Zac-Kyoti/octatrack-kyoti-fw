@@ -113,11 +113,16 @@ back and forth, and every sync cost a conflict-heavy merge. **Use short-lived to
 branches** for anything risky and merge them here when they settle.
 
 What keeps unfinished work from being mistaken for shippable is `tools/kyoti_status.py`:
-each builder declares **FINAL**, **PREVIEW** or **WIP** and announces it on every run, and
-a **WIP** builder exits non-zero unless `KYOTI_ALLOW_WIP=1` is in the environment. Today
-DIRECT JUMP is the only non-FINAL feature — `build_directjump_v4.py` is PREVIEW
-(1x-confirmed), `build_directjump_v5.py` is WIP. When a tier changes, change the call and
-the README table together. Upstream RE repos are tracked via `refs/`
+each builder declares **FINAL**, **PREVIEW**, **WIP** or **SUPERSEDED** and announces it on
+every run. A **WIP** builder exits 2 without `KYOTI_ALLOW_WIP=1`; a **SUPERSEDED** one exits
+2 without `KYOTI_ALLOW_SUPERSEDED=1` and names its replacement (deliberately two variables —
+"I know this is unfinished" should not also unlock "this was abandoned"). Today DIRECT JUMP
+is the only non-FINAL *feature* — `build_directjump_v4.py` PREVIEW, `build_directjump_v5.py`
+WIP — and eleven earlier-stage builders are SUPERSEDED (DJ v1-v3, `build_mutemode{,_new}.py`,
+`build_softmute.py`, `build_relstate_shadow.py`, `build_sidechain{,2}.py`,
+`build_reload{,2}.py`). **`build_bugbuilds.py --with-wip` passes `KYOTI_ALLOW_WIP=1` to the
+child builder itself**, so its own gate does not have to be worked around. When a tier
+changes, change the call and the README table together. Upstream RE repos are tracked via `refs/`
 (see `reference/EXTERNAL_RESEARCH.md`), not a mirrored branch.
 
 **Finished and hardware-confirmed on the MKI** (per-feature detail and flash dates:

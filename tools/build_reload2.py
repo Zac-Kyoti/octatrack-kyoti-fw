@@ -120,6 +120,15 @@ Outputs: out/mainos_reload2.bin, out/elek_reload2.bin,
 """
 import os, pathlib, subprocess, sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from kyoti_status import status, SUPERSEDED
+
+status(SUPERSEDED, "RELOAD FROM PROJECT, the picker", """
+    The modal-picker design, deleted in Session 85 after ~13 hardware bugs in the
+    picker / keymap / popup machinery -- none in the reload worker itself.
+    build_reload3.py replaces it with two direct chords and is hardware-confirmed.
+""")
+
 BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent

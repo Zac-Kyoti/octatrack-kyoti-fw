@@ -77,6 +77,15 @@ Outputs: out/mainos_reload.bin, out/elek_reload.bin,
 """
 import os, pathlib, subprocess, sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from kyoti_status import status, SUPERSEDED
+
+status(SUPERSEDED, "RELOAD FROM PROJECT, stage 1", """
+    The first RELOAD design.  build_reload3.py supersedes it: two direct chords, no
+    modal picker (the picker carried ~13 hardware bugs, none of them in the worker),
+    and hardware-confirmed final.
+""")
+
 BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent

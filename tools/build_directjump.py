@@ -36,6 +36,16 @@ Outputs: out/mainos_directjump.bin, out/elek_directjump.bin,
 """
 import os, pathlib, subprocess, sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from kyoti_status import status, SUPERSEDED
+
+status(SUPERSEDED, "DIRECT JUMP v1", """
+    Dead on hardware: v1-v3 detour the stock [YES] handler 0x4005e4c8, but the
+    [PTN]-held keymap overlay swallows [YES] before it ever gets there, so the
+    toggle never reached the handler on the unit.  build_directjump_v4.py writes
+    the overlay's own NULL press slot instead, and is the confirmed-at-1x build.
+""")
+
 BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent

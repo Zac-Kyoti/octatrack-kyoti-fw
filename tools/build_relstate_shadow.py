@@ -21,6 +21,15 @@ Usage:   python3 tools/build_relstate_shadow.py
 """
 import os, pathlib, subprocess, sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from kyoti_status import status, SUPERSEDED
+
+status(SUPERSEDED, "REL_STATE shadow experiment", """
+    An emulator-only experiment: build_mutemode_dt.py with hook 8's own detour
+    replaced by a REL_STATE/SHADOW cross-check.  Never a shipping build.  Its
+    reasoning is in patch_softmute.s's hook 13 header.
+""")
+
 BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent

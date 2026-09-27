@@ -49,6 +49,15 @@ Outputs: out/mainos_mutemode.bin, out/elek_mutemode.bin,
 """
 import os, pathlib, subprocess, sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from kyoti_status import status, SUPERSEDED
+
+status(SUPERSEDED, "MUTE MODE, two values", """
+    The original two-value baseline (OT / OT+FX).  build_mutemode_dt.py supersedes it
+    with all four modes (OT / OTFX / OTFX-T / DT-T), SOLO handling and persistence,
+    and is the hardware-confirmed shipping build.
+""")
+
 BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent

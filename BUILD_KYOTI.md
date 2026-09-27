@@ -19,13 +19,17 @@ build is byte-for-byte reproducible from the stock file.
 > - **WIP** — the author's own flash-and-measure loop, expected to be wrong and
 >   changing between commits. It **refuses to build** unless you set
 >   `KYOTI_ALLOW_WIP=1` in the environment.
+> - **SUPERSEDED** — a dead end or an earlier stage of something below, kept only so
+>   its reasoning stays readable. It **refuses to build** unless you set
+>   `KYOTI_ALLOW_SUPERSEDED=1`, and names what replaced it. Eleven builders are in
+>   this tier; none of them appear in the table below, and three of them never worked
+>   on hardware at all.
 >
 > Everything in the table below is **FINAL** except **DIRECT JUMP**: `v4` is PREVIEW
-> (hardware-confirmed at 1x scales) and `V5.x` is WIP (the non-1x thread). The gate
-> lives in `tools/kyoti_status.py`; it is a courtesy, not a lock, and exists so that
-> a diagnostic image does not get flashed by accident. See *Hardware-test status*
-> below for exact per-item state. Earlier, superseded builds of these same features
-> are no longer listed here — they're historical only; see `NOTES.md`.
+> (hardware-confirmed at 1x scales) and `V5.x` is WIP (the non-1x thread). The gates
+> live in `tools/kyoti_status.py`; they are a courtesy, not a lock, and exist so that
+> a diagnostic or abandoned image does not get flashed by accident. See *Hardware-test
+> status* below for exact per-item state.
 
 ## What you get
 

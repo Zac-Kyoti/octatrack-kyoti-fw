@@ -39,6 +39,15 @@ Outputs: out/mainos_directjump_v3.bin, out/elek_directjump_v3.bin,
 """
 import os, pathlib, subprocess, sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from kyoti_status import status, SUPERSEDED
+
+status(SUPERSEDED, "DIRECT JUMP v3", """
+    Dead on hardware for the same reason as v1: flashed 2026-09-14, no toast and no
+    toggle, because the [PTN]-held keymap overlay never dispatches [YES] to the
+    detoured handler.  Use build_directjump_v4.py.
+""")
+
 BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent

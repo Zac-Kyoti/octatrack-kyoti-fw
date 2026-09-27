@@ -127,9 +127,11 @@ descriptive, and this section is the policy.
   retired 2026-09-26 — cherry-picking between the two produced duplicate
   commits and conflict-heavy merges. Unfinished work lives here and is kept
   out of a visitor's hands by `tools/kyoti_status.py`: a builder declares
-  FINAL / PREVIEW / WIP, and a WIP builder refuses to run without
-  `KYOTI_ALLOW_WIP=1`. **A new unfinished builder declares its tier.** Use a
-  short-lived topic branch for risky work, not a second long-lived one.
+  FINAL / PREVIEW / WIP / SUPERSEDED, and a gated tier refuses to run without
+  `KYOTI_ALLOW_WIP=1` / `KYOTI_ALLOW_SUPERSEDED=1`. **A new unfinished builder
+  declares its tier, and superseding one means setting the old builder to
+  SUPERSEDED with a note naming its replacement.** Use a short-lived topic
+  branch for risky work, not a second long-lived one.
 - **macOS TCC**: `~/Documents` is protected; grant Full Disk Access to the
   actual running `claude` binary if a tool call fails with "Operation not
   permitted" on this path — see `START_HERE.md` §3 for the exact binary path.

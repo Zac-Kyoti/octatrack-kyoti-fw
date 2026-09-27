@@ -49,10 +49,14 @@ hunt through. Instead, **each builder tells you what tier it is in before it run
 | **FINAL** | flashed on the author's MKI and working | builds |
 | **PREVIEW** | incomplete, but safe to try and useful as far as it goes | says what is unfinished, then builds |
 | **WIP** | the author's own flash-and-measure loop; expected to be wrong | **refuses** unless you set `KYOTI_ALLOW_WIP=1` |
+| **SUPERSEDED** | a dead end or an intermediate stage, kept so its reasoning stays readable | **refuses** unless you set `KYOTI_ALLOW_SUPERSEDED=1`, and names what replaced it |
 
 Everything below is FINAL except **DIRECT JUMP**, which is PREVIEW at v4 and WIP at V5.x.
-The gate is a courtesy, not a lock — it is there so nobody flashes a diagnostic build by
-accident. `tools/kyoti_status.py` is all of it.
+`tools/` also holds eleven SUPERSEDED builders — earlier stages of MUTE MODE, the
+side-chain, RELOAD and DIRECT JUMP, three of which never worked on hardware at all. They
+stay because the reasoning and the measurements in them are worth reading, and they are
+gated so that browsing `tools/` cannot turn into flashing a dead end. The gates are a
+courtesy, not a lock; `tools/kyoti_status.py` is all of it.
 
 ### Extended Features
 
