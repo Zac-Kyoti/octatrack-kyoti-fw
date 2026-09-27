@@ -7,9 +7,9 @@ How to flash an OT Kyoti FW image onto your Octatrack, with a full safety net.
 > QUANTIZE LIVE REC live in PERSONALIZE (QUANTIZE LIVE REC also gets a front-panel
 > shortcut); DIRECT JUMP is a front-panel chord and comes up OFF on every power-on.
 > RELOAD FROM PROJECT adds two chords that do nothing until you press them. The
-> three bug fixes — the MIDI Plays-Free trig stall, the p-lock-only pattern LED,
-> and the Part-change carryover — are always on, since a bug fix has nothing to
-> opt into.
+> three bug fixes — Bug 1, the MIDI Plays-Free trig stall; Bug 2, the p-lock-only
+> pattern LED; and Bug 3, the Part-change carryover — are always on, since a bug fix
+> has nothing to opt into.
 
 > **Octatrack MKI or MKII.** Elektron ships one OS 1.40C image for both units and
 > the reverse engineering / builds here apply to both; the boot `0x46c8d18c`
@@ -426,7 +426,7 @@ PERSONALIZE entry.
 > patterns both flip 0→1, an empty pattern stays 0 (no false positive), normal
 > trig patterns unaffected. `NOTES.md` "Session 48".
 
-### 4.7  Part params carry over after a pattern→Part change  (`build_partreapply.py` — report #1 FIXED and a second stock bug (spurious Part-edited flag) FIXED, both hardware-confirmed MKI 2026-09-22/23)
+### 4.7  Bug 3 — Part params carry over after a pattern→Part change  (`build_partreapply.py` — report #1 FIXED and a second stock bug (spurious Part-edited flag) FIXED, both hardware-confirmed MKI 2026-09-22/23)
 
 Was scoped from three Elektronauts reports for a pattern change that also
 switches to a different Part: (1) a track that was **PICKUP** on the old Part
@@ -757,7 +757,7 @@ OCTATRACK_*.bin                   CF-card OS UPGRADE transport (faster)
 |---|---|---|
 | `python3 tools/build_trigscale_only.py` | `1.40C` | Bug-1 fix only (MIDI Plays-Free trig stall), on otherwise-stock 1.40C |
 | `python3 tools/build_pattern_led.py` | `1.40C` | Bug-2 fix only: a p-lock-only pattern lights its grid LED |
-| `python3 tools/build_partreapply.py` | `1.40C` | fix only: Part params fully re-apply on a pattern→Part change |
+| `python3 tools/build_partreapply.py` | `1.40C` | Bug-3 fix only: Part params fully re-apply on a pattern→Part change |
 | `python3 tools/build_mutemode_dt.py` | `140C_KYOTI` | Bug-1 fix + **MUTE MODE**, all four modes (`OT` / `OTFX` / `OTFX-T` / `DT-T`) — the shipping MUTE MODE build |
 | `python3 tools/build_qlrec.py [VERSTR] [LIVE_DUR]` | `140C_KYOTI` | Bug-1 fix + QUANTIZE LIVE REC front-panel toggle, toast-gated — **hardware-confirmed working** (2026-09-25) |
 | `python3 tools/build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | `140C_KYOTI` | Bug-1 fix + the full **SIDE-CHAIN COMPRESSOR** (`KEY` / `KFLT` / `KGN` / `MON`, `KEY` reaching any of the 8 tracks, cross-core) |

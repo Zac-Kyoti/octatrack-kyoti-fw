@@ -137,16 +137,16 @@ courtesy, not a lock; `tools/kyoti_status.py` is all of it.
 
 ### Bugfixes
 
-- **MIDI Plays-Free trig fix** — a Plays-Free MIDI track with trig quantize *Direct*
+- **Bug 1 — MIDI Plays-Free trig fix** — a Plays-Free MIDI track with trig quantize *Direct*
   and pattern scale *Per Track* stalled after its first step on a manual trig.
   → [`tools/build_trigscale_only.py`](tools/build_trigscale_only.py)
 
-- **Empty-pattern LED fix** — a pattern whose only content is parameter locks (on a
+- **Bug 2 — Empty-pattern LED fix** — a pattern whose only content is parameter locks (on a
   MIDI track, or trigless locks on an audio track, with no trig anywhere) showed as
   an unused slot, its grid LED unlit under `[PTN]`.
   → [`tools/build_pattern_led.py`](tools/build_pattern_led.py)
 
-- **Part-change carryover fix** — after a pattern-triggered Part change, stale
+- **Bug 3 — Part-change carryover** — after a pattern-triggered Part change, stale
   per-track state from the old Part could leak into the new one. Two reproducible
   cases are fixed: a track leaving PICKUP for FLEX kept playing the old Part's
   pickup loop, and a pattern switch into a PICKUP track marked that Part
@@ -202,7 +202,7 @@ All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit
 
 | element | build | status |
 |---|---|---|
-| MIDI Plays-Free trig fix | all | **confirmed** 2026-08-28 |
+| Bug 1 — MIDI Plays-Free trig fix | all | **confirmed** 2026-08-28 |
 | MUTE MODE — all four modes, menu, SOLO | `build_mutemode_dt.py` | **confirmed, final** 2026-09-21 |
 | ↳ mode survives a power cycle | `build_mutemode_dt.py` | **confirmed** |
 | DIRECT JUMP — 1x scales | `build_directjump_v4.py` (PREVIEW) | **confirmed** 2026-09-23 |
@@ -210,9 +210,9 @@ All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit
 | SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` | **confirmed, final** 2026-09-20 |
 | ↳ a project still using the donated effect loads as NONE | `build_sidechain3.py` | **confirmed, final** 2026-09-25 |
 | RELOAD FROM PROJECT — both chords | `build_reload3.py` | **confirmed, final** 2026-09-25 |
-| Empty-pattern LED fix | `build_pattern_led.py` | **confirmed** 2026-09-13 |
+| Bug 2 — Empty-pattern LED fix | `build_pattern_led.py` | **confirmed** 2026-09-13 |
 | Erase empty trigless locks | `build_triglock.py` | **confirmed, final** 2026-09-21 |
-| Part-change carryover — PICKUP→FLEX stuck loop | `build_partreapply.py` | **confirmed** 2026-09-22 |
+| Bug 3 — Part-change carryover: PICKUP→FLEX stuck loop | `build_partreapply.py` | **confirmed** 2026-09-22 |
 | ↳ spurious Part-edited flag on entering PICKUP | `build_partreapply.py` | **confirmed** 2026-09-23 |
 | ↳ recorder SRC/RLEN and REC SETUP carryover | `build_partreapply.py` | unconfirmed — never reproducible on stock |
 | QUANTIZE LIVE REC toggle | `build_qlrec.py` | **confirmed** 2026-09-25 |
