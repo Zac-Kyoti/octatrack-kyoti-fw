@@ -38,34 +38,42 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (gate 1, rev 6)", """
-Flash 5 held independence, locks, snap and the SETUP-driven swap. Rev 6
-fixes its two residuals with two newly-mapped stock mechanisms:
-(1) the knob's redraw mark is a LONG 0x14 at 0x46c7d244 + slot*20 + 4 --
-slot 0 is 0x46c7d248, NOT the byte at 0x46c7d245 rev 4 wrote -- and the
-caption + mark are now set from rp_swap (per frame, and directly from the
-ATTR editors) instead of at draw time, where a caption write is always one
-repaint late; (2) the descriptor's per-slot ENCODER STEP column (P+0x12a,
-handler(slot, delta, current) -> value, then stock clamps and stores) now
-points at quant_step on slot 0, so ONE DETENT IS ONE RATIO and stock keeps
-the clamping, the stores and its own redraw bookkeeping.
-All 9 oracle contracts green. Hardware-new: ATTR-driven caption/knob
-refresh without a page press, and the one-detent-per-ratio feel.
+status(WIP, "REPITCH KYOTI (gate 1, rev 6.1 + DIAG)", """
+Flash 6: tests 3 and 4 clean. Two items UNRESOLVED and now instrumented
+rather than guessed at again -- ATTR-driven refresh still needs a page
+press, and the knob speed did not change at all, which means quant_step is
+almost certainly never reaching its QUAN path (if it did, one detent would
+be one whole ratio). Both are hardware-only: the port has no UI thread.
+Rev 6.1 ships one certain fix -- the dial's 8 display stops now span the
+full arc (4 + idx*120/7), so 1/2 sits hard left and 2/1 hard right -- plus
+a DIAGNOSTIC variant:
+
+    KYOTI_ALLOW_WIP=1 RPK_DIAG=1 python3 tools/build_repitch_kyoti.py
+    -> out/OCTATRACK_OS1.40C_REPITCH_KYOTI_DIAG.syx, OS shows 140C_RPKD
+
+In the diag image the PTCH/QUAN cell's READOUT becomes four hex nibbles,
+[gate][SETUP TSTR][sample TSMODE][quant_step calls & 0xf], for the panel's
+track. Everything else (increment path, storage, locks) is unchanged.
+All 9 oracle contracts green on the mainline image.
 """)
 
 BASE = 0x40000400
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
-OUT = ROOT / "out/mainos_repitch_kyoti.bin"
+SUF = "_diag" if os.environ.get("RPK_DIAG") == "1" else ""
+OUT = ROOT / f"out/mainos_repitch_kyoti{SUF}.bin"
 CAVE_AT = 0x400d6f80
-CAVE_CEIL = 0x400d7b00          # bugbuilds' shared base; stay under it
+# bugbuilds' shared base -- the mainline build stays under it so it can be
+# folded in. The diagnostic never coexists with those, so it may run up to
+# patch_trigscale's pinned base (0x400d7bfc, MERGE.md).
+CAVE_CEIL = 0x400d7bfc if os.environ.get("RPK_DIAG") == "1" else 0x400d7b00
 PATCH_S = HERE / "patch_repitch_kyoti.s"
 
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
-ELEK = ROOT / "out/elek_repitch_kyoti.bin"
-OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_REPITCH_KYOTI.syx"
-OUT_BIN = ROOT / "out/OCTATRACK_REPITCH_KYOTI.bin"
-VERSTR = "140C_RPK1"
+ELEK = ROOT / f"out/elek_repitch_kyoti{SUF}.bin"
+OUT_SYX = ROOT / f"out/OCTATRACK_OS1.40C_REPITCH_KYOTI{SUF.upper()}.syx"
+OUT_BIN = ROOT / f"out/OCTATRACK_REPITCH_KYOTI{SUF.upper()}.bin"
+VERSTR = "140C_RPKD" if os.environ.get("RPK_DIAG") == "1" else "140C_RPK1"
 
 # --- the seven detours (site, displaced bytes, cave symbol) -----------------
 DETOURS = [
@@ -109,9 +117,15 @@ ICON_SHARED = 0x400C89A6                 # 5th long of every stock icon record
 FORBIDDEN = range(0x80006A40, 0x80006AC0)  # RELOAD3's proven-clobberable window
 
 
+DIAG = os.environ.get("RPK_DIAG") == "1"
+
+
 def assemble():
     o, elf, binf = ROOT/"out/patch_repitch_kyoti.o", ROOT/"out/patch_repitch_kyoti.elf", ROOT/"out/patch_repitch_kyoti.bin"
-    subprocess.run(["m68k-elf-as", "-mcpu=5407", "-o", str(o), str(PATCH_S)], check=True, cwd=ROOT)
+    cmd = ["m68k-elf-as", "-mcpu=5407"]
+    if DIAG:
+        cmd += ["--defsym", "RPK_DIAG=1"]
+    subprocess.run(cmd + ["-o", str(o), str(PATCH_S)], check=True, cwd=ROOT)
     subprocess.run(["m68k-elf-ld", f"-Ttext=0x{CAVE_AT:x}", "-o", str(elf), str(o)],
                    check=True, cwd=ROOT, capture_output=True)
     subprocess.run(["m68k-elf-objcopy", "-O", "binary", "--only-section=.text", str(elf), str(binf)],

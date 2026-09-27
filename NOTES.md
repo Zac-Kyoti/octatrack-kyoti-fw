@@ -32788,3 +32788,61 @@ A decoy worth recording: `voice+27` is tested in the renderer
 (`0x400081c6`, `0x4000830e`, `0x40008462`, `0x4000899e`, `0x40008a5a`) and
 cleared at trigger (`0x40008f5c`) — a DIFFERENT record from `lane+27`, most
 likely a per-trigger "already computed" latch, unrelated to RATE mode.
+
+### Session 108 continued (4) — flash 6: tests 3/4 clean; the other two INSTRUMENTED (rev 6.1 + DIAG build) after two blind rounds
+
+**Flash 6 (rev 6):** tests 3 and 4 clean, no issues. Two unresolved, and I am
+no longer guessing at them — both are UI-thread behaviour the port cannot
+reproduce, and each has now cost a hardware round to a wrong assumption.
+
+**(1) ATTR-driven refresh still needs a page press.** rp_refresh at
+`.au_done`/`.ad_done` demonstrably runs (the ATTR labels and stepping work),
+so the failure is downstream: either `rp_ui_gate` returns 0 in that context
+(e.g. `0x80000000` is not the panel track while the audio editor is open), or
+`quant_widget`'s own caption write overwrites the refreshed one with 'PTCH'
+because the gate reads 0 at draw time. Both are gate-input questions.
+
+**(2) Knob speed unchanged** — the decisive clue. If `quant_step` reached its
+QUAN path, one delta unit would be one whole ratio (7 detents end to end);
+the user reports pressed-knob "almost fast enough", i.e. indistinguishable
+from rev 5.1's stock stepping. So `quant_step` is tail-jumping to stock —
+same gate-returns-0 suspicion as (1) — or `P+0x12a` is not the column the
+PLAYBACK page's encoder actually consults. ⚠️ **The oracle cannot settle
+this: contract 8 builds the handler frame from my own assumed layout, so it
+is circular in exactly the way the 0-based settings bug was.** Recorded as a
+standing limitation of that contract.
+
+**Rev 6.1 — one certain fix + instrumentation.**
+- **Dial span (test 2's visual half, confirmed diagnosis):** the display
+  stops were zone *centres* on the stored 15-wide scale (19..124), so the
+  pointer never reached the arc's left end — the user saw the stop sitting at
+  the end of its zone's span rather than the start. Display stops are now
+  `4 + idx*120/7` = 4 21 38 55 72 89 106 124, spanning the dial fully.
+  **Storage is unchanged** (still 15-wide zone centres, what p-locks, scenes
+  and the engine read) — display and storage are deliberately different
+  scales now, so `quant_fmt` buckets on the DISPLAY scale
+  (`idx = ((v-4)*7+60)/120`) while `rk_bucket` keeps the stored scale.
+- **`RPK_DIAG=1` build variant** (`140C_RPKD`,
+  `out/OCTATRACK_OS1.40C_REPITCH_KYOTI_DIAG.syx`): the PTCH/QUAN cell's
+  readout becomes four hex nibbles
+  **`[gate][SETUP TSTR][sample TSMODE][quant_step calls & 0xf]`** for the
+  panel's track, sampled where the gate actually runs (`rk_dvals` written
+  inside `rp_ui_gate`; the counter bumped at `quant_step`'s QUAN path —
+  ColdFire has no `addq.b` to memory, hence the register round-trip). The
+  increment path, storage and locks are untouched; only the readout string
+  differs. Diag cave ceiling is raised to `0x400d7bfc` (trigscale's pinned
+  base) since a diagnostic never coexists with bugbuilds; the mainline build
+  still stops under `0x400d7b00`.
+
+**Builds:** mainline mainos `224dc374…` syx `f57e2f3b…` (2305 B, 0 strays,
+cave 2908 B); diag mainos `cc12db4f…` syx `a608a655…` (cave 3096 B). Oracle
+9/9 on the mainline.
+
+**What the four nibbles will settle, in one flash:** nibble 1 = 0 on an
+AUTO+ATTR-repitch track ⇒ the gate is the problem and nibble 2/3 say which
+input is wrong (SETUP TSTR not 1, or TSMODE not 4..6 ⇒ wrong settings
+record); nibble 1 = 1 while the caption still reads PTCH ⇒ the gate is fine
+and the caption write is being lost (draw-order or overwrite); nibble 4 not
+advancing while turning the knob ⇒ `quant_step` is never called ⇒ `P+0x12a`
+is not the PLAYBACK encoder's column and the speed fix needs a different
+lever.

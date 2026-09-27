@@ -371,6 +371,9 @@ rp_ui_gate:
         addi.l  #OFF_MACH,%d1
         moveq   #0,%d3
         move.b  (%a0,%d1.l),%d3         | machine
+.ifdef RPK_DIAG
+        move.b  %d3,(rk_dvals+1).l
+.endif
         moveq   #1,%d1
         cmp.l   %d1,%d3
         bhi     .ug_no                  | STATIC/FLEX only
@@ -398,6 +401,9 @@ rp_ui_gate:
         addi.l  #OFF_P2+TSTR_SLOT2,%d1
         moveq   #0,%d0
         move.b  (%a0,%d1.l),%d0         | SETUP TSTR, the Part's own copy
+.ifdef RPK_DIAG
+        move.b  %d0,(rk_dvals+2).l
+.endif
         moveq   #RPCH,%d1
         cmp.l   %d1,%d0
         blt.s   .ug_auto
@@ -410,6 +416,9 @@ rp_ui_gate:
         cmp.l   %d1,%d0
         bne.s   .ug_no
         move.l  0x110(%a1),%d0          | the sample's own TSMODE
+.ifdef RPK_DIAG
+        move.b  %d0,(rk_dvals+3).l
+.endif
         moveq   #RPCH,%d1
         cmp.l   %d1,%d0
         blt.s   .ug_no
@@ -427,6 +436,9 @@ rp_ui_gate:
 .ug_no:
         moveq   #0,%d0
 .ug_out:
+.ifdef RPK_DIAG
+        move.b  %d0,(rk_dvals).l
+.endif
         movem.l (%sp),%d1-%d3/%a0-%a1
         lea     20(%sp),%sp
         rts
@@ -596,6 +608,16 @@ quant_step:
         move.l  (%sp)+,%d1
         jmp     (STEP_PTCH).l
 .qs_quan:
+.ifdef RPK_DIAG
+        move.l  %d0,-(%sp)              | quant_step reached the QUAN path
+        move.l  %a0,-(%sp)              | (CF has no addq.b to memory)
+        lea     rk_dvals(%pc),%a0
+        move.b  4(%a0),%d0
+        addq.l  #1,%d0
+        move.b  %d0,4(%a0)
+        move.l  (%sp)+,%a0
+        move.l  (%sp)+,%d0
+.endif
         move.l  %d2,-(%sp)
         move.l  20(%sp),%d0             | current (arg 3, two pushes deep)
         bsr     rk_bucket               | -> zone 0..7
@@ -705,10 +727,16 @@ quant_widget:
         tst.l   %d0
         bmi.s   .qw_frame               | an empty cell keeps the bare frame
         bsr     rk_bucket
-        move.l  %d0,%d1                 | snap = 19 + 15*idx
-        lsl.l   #4,%d1
-        sub.l   %d0,%d1
-        moveq   #19,%d0
+        | DISPLAY position only: 8 stops spanning the dial's whole arc,
+        | 4 + idx*120/7 = 4 21 38 55 72 89 106 124, so 1/2 sits hard left
+        | and 2/1 hard right. The STORED value stays a 15-wide zone centre
+        | (rk_bucket's scale), which is what p-locks, scenes and the engine
+        | read -- display and storage are deliberately different scales.
+        moveq   #120,%d1
+        mulu.l  %d0,%d1
+        moveq   #7,%d0
+        divu.l  %d0,%d1
+        moveq   #4,%d0
         add.l   %d1,%d0
 .qw_frame:
         move.l  28(%sp),-(%sp)          | canvas
@@ -726,8 +754,26 @@ quant_widget:
 quant_fmt:
         move.l  8(%sp),%d0
         bmi.s   .qf_unk
-        bsr     rk_bucket
-        lsl.l   #2,%d0
+.ifdef RPK_DIAG
+        bsr     rp_diagstr              | diagnostic build: four nibbles
+        lea     rk_dbuf(%pc),%a0
+        move.l  %a0,8(%sp)
+        jmp     (SPRINTF).l
+.endif
+        | the display scale (4 + idx*120/7), not rk_bucket's stored scale
+        subq.l  #4,%d0
+        bpl.s   1f
+        moveq   #0,%d0
+1:      moveq   #7,%d1
+        mulu.l  %d1,%d0
+        addi.l  #60,%d0
+        moveq   #120,%d1
+        divu.l  %d1,%d0
+        moveq   #7,%d1
+        cmp.l   %d1,%d0
+        bls.s   2f
+        move.l  %d1,%d0
+2:      lsl.l   #2,%d0
         lea     .q_labels(%pc),%a0
         adda.l  %d0,%a0
         move.l  %a0,8(%sp)
@@ -749,6 +795,54 @@ quant_fmt:
 rp_prev:
         .byte   0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff
         .balign 2
+.ifdef RPK_DIAG
+| Diagnostic build only. The PTCH/QUAN cell's readout becomes four hex
+| nibbles: [gate][SETUP TSTR][sample TSMODE][quant_step calls & 0xf], read
+| for the panel's track at the moment the gate last ran. Nothing else
+| changes; the increment path is untouched.
+rk_dvals:
+        .byte   0,0,0,0,0
+        .balign 2
+rk_dbuf:
+        .byte   0,0,0,0,0
+        .balign 2
+rp_diagstr:
+        lea     -12(%sp),%sp
+        movem.l %d0-%d2,(%sp)
+        moveq   #0,%d1
+        move.b  (UI_TRACK).l,%d1
+        bsr     rp_ui_gate              | refresh rk_dvals for this track
+        lea     rk_dvals(%pc),%a0
+        lea     rk_dbuf(%pc),%a1
+        moveq   #0,%d2
+.ds_loop:
+        moveq   #0,%d0
+        move.b  (%a0,%d2.l),%d0
+        andi.l  #0xf,%d0
+        moveq   #9,%d1
+        cmp.l   %d1,%d0
+        ble.s   1f
+        addq.l  #7,%d0                  | 'A'..'F'
+1:      addi.l  #0x30,%d0
+        move.b  %d0,(%a1,%d2.l)
+        addq.l  #1,%d2
+        moveq   #3,%d1
+        cmp.l   %d1,%d2
+        ble.s   .ds_loop
+        moveq   #0,%d0
+        move.b  %d0,4(%a1)
+        move.b  (rk_dvals+4).l,%d0      | the step counter in nibble 4
+        andi.l  #0xf,%d0
+        moveq   #9,%d1
+        cmp.l   %d1,%d0
+        ble.s   2f
+        addq.l  #7,%d0
+2:      addi.l  #0x30,%d0
+        move.b  %d0,3(%a1)
+        movem.l (%sp),%d0-%d2
+        lea     12(%sp),%sp
+        rts
+.endif
 
 | Any part apply (heavy 0x40009094 -- the audio-engine-restarting one; light
 | 0x40009e00 -- seq_goto_pattern's) makes rp_prev meaningless: reset it so
