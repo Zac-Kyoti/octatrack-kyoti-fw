@@ -19,7 +19,8 @@
 //       refs/octabam/out/emu/dsp56300/asmjit/libasmjit.a \
 //       -o out/repitch_probe_kyoti
 // Run from the repo root:
-//   out/repitch_probe_kyoti out/raw/section_3_MAIN_OS.bin out/mainos_repitch_kyoti.bin
+//   out/repitch_probe_kyoti out/raw/section_3_MAIN_OS.bin out/mainos_repitch_kyoti.bin \
+//       [quant_widget_addr rp_ui_gate_addr]   (hex; from m68k-elf-nm, enables 6+7)
 #include <cstdio>
 #include <cstdint>
 #include <fstream>
@@ -139,7 +140,7 @@ void check(const char* what, bool ok, int detail = -1)
 
 int main(int argc, char** argv)
 {
-	if(argc != 3) { std::printf("usage: %s STOCK PATCHED\n", argv[0]); return 2; }
+	if(argc != 3 && argc != 5) { std::printf("usage: %s STOCK PATCHED [quant_widget rp_ui_gate]\n", argv[0]); return 2; }
 	Img stock, pat;
 	for(auto [img, path] : {std::pair{&stock, argv[1]}, {&pat, argv[2]}}) {
 		std::ifstream in(path, std::ios::binary);
@@ -255,6 +256,105 @@ int main(int argc, char** argv)
 			++n;
 		}
 		check("QUANT: all 17 bucket-boundary ui values land on the modelled ratio", ok, bad);
+	}
+
+	if(argc == 5) {
+		const uint32_t quantWidget = uint32_t(std::stoul(argv[3], nullptr, 16));
+		const uint32_t uiGate = uint32_t(std::stoul(argv[4], nullptr, 16));
+
+		// 6) the four page-1 dial shims: resolve record+48 (knob when null),
+		//    override with quant_widget exactly when record+0 is PTCH's
+		//    formatter; d1..d7/a1..a6 preserved.
+		{
+			constexpr uint32_t PTCH_FMT = 0x4003b4b0, KNOB = 0x400479b4;
+			struct Site { uint32_t at, ret; char rec; };
+			const Site sitesTab[] = {{0x40036698, 0x400366a6, 4},
+			                         {0x4003690c, 0x4003691a, 3},
+			                         {0x4003786a, 0x40037878, 3},
+			                         {0x40037c06, 0x40037c14, 3}};
+			bool ok = true;
+			int n = 0, bad = -1;
+			for(const auto& st : sitesTab)
+				for(uint32_t fmt : {PTCH_FMT, 0x4003b64cu})
+					for(uint32_t wid : {0u, 0x12345678u}) {
+						ot::Machine m(pat.image);
+						auto* cpu = m.getCpuState();
+						constexpr uint32_t rec = 0x47004000;
+						m.write32(rec, fmt);
+						m.write32(rec + 48, wid);
+						const uint32_t seeds[8] = {0x11111111, 0x22222222, 0x33333333, 0x44444444,
+						                           0x55555555, 0x66666666, 0x77777777, 0x88888888};
+						for(int r = 1; r < 8; ++r) {
+							m68k_set_reg(cpu, m68k_register_t(M68K_REG_D0 + r), seeds[r]);
+							if(r != 7) m68k_set_reg(cpu, m68k_register_t(M68K_REG_A0 + r),
+							                        r == st.rec ? rec : seeds[r]);
+						}
+						m68k_set_reg(cpu, M68K_REG_SP, stack);
+						m68k_set_reg(cpu, M68K_REG_PC, st.at);
+						unsigned steps = 0;
+						while(m.pc() != st.ret && steps++ < 40)
+							if(!m.step()) break;
+						const uint32_t a0 = m68k_get_reg(cpu, M68K_REG_A0);
+						const uint32_t wantA0 = fmt == PTCH_FMT ? quantWidget : (wid ? wid : KNOB);
+						bool good = m.pc() == st.ret && a0 == wantA0 &&
+						            m68k_get_reg(cpu, M68K_REG_SP) == stack;
+						for(int r = 1; r < 8 && good; ++r) {
+							good &= m68k_get_reg(cpu, m68k_register_t(M68K_REG_D0 + r)) == seeds[r];
+							if(r != 7 && r != st.rec)
+								good &= m68k_get_reg(cpu, m68k_register_t(M68K_REG_A0 + r)) == seeds[r];
+						}
+						if(!good && bad < 0) bad = n;
+						ok &= good;
+						++n;
+					}
+			check("dial shims: knob/record/quant resolution and register preservation", ok, bad);
+			std::printf("      (%d cases across 4 sites)\n", n);
+		}
+
+		// 7) rp_ui_gate truth table (display gating from the UI thread).
+		{
+			struct Case { uint8_t track, setup, machine; bool bind; uint32_t tsmode, bpm; int want; };
+			const Case cases[] = {
+				{2, 4, 1, true,  2, 2880, 1},   // RPCH, tempo fine
+				{2, 5, 1, false, 2, 2880, 1},   // RPS9, unbound: optimistic
+				{2, 6, 1, true,  2,  100, 0},   // RPSP, tempo veto
+				{2, 4, 4, true,  2, 2880, 0},   // pickup machine never QUANTs
+				{2, 0, 1, true,  2, 2880, 0},   // OFF
+				{2, 2, 1, true,  4, 2880, 0},   // NORM ignores TSMODE
+				{2, 1, 1, true,  4, 2880, 1},   // AUTO + sample REPITCH
+				{2, 1, 1, true,  2, 2880, 0},   // AUTO + NORMAL sample
+				{2, 1, 1, false, 4, 2880, 0},   // AUTO unbound: conservative
+				{2, 1, 1, true,  4, 8000, 0},   // AUTO, tempo out of range
+				{9, 4, 1, true,  2, 2880, 0},   // track out of range
+			};
+			bool ok = true;
+			int n = 0, bad = -1;
+			for(const auto& c : cases) {
+				ot::Machine m(pat.image);
+				auto* cpu = m.getCpuState();
+				m.write8(0x80000000, c.track);
+				const uint32_t t = c.track & 7;
+				m.write8(lanes + 48 * t + 28, c.setup);
+				m.write8(voices + 168 * t + 20, c.machine);
+				m.write32(voices + 168 * t + 8, c.bind ? settings : 0);
+				m.write32(settings + 0x110, c.tsmode);
+				m.write32(settings + 0x114, c.bpm);
+				m.write32(stack - 4, trampoline + 0x80);
+				for(unsigned i = 0; i < 8; i += 2) m.write16(trampoline + 0x80 + i, 0x4e71);
+				m68k_set_reg(cpu, M68K_REG_SP, stack - 4);
+				m68k_set_reg(cpu, M68K_REG_PC, uiGate);
+				unsigned steps = 0;
+				while(m.pc() != trampoline + 0x80 && steps++ < 120)
+					if(!m.step()) break;
+				const bool good = m.pc() == trampoline + 0x80 &&
+				                  m68k_get_reg(cpu, M68K_REG_D0) == uint32_t(c.want) &&
+				                  m68k_get_reg(cpu, M68K_REG_SP) == stack;
+				if(!good && bad < 0) bad = n;
+				ok &= good;
+				++n;
+			}
+			check("rp_ui_gate: 11-case display truth table", ok, bad);
+		}
 	}
 
 	std::printf("%d failure(s)\n", fails);

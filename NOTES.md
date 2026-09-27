@@ -32237,3 +32237,60 @@ label on the PTCH cell, AUTO from the widget's UI context) and hardware.
 clock chatter to stdout — ~2000 constructions = 1.3 MB of noise. Filter with
 `grep -v "read16@\|write16@\|updateClock@"` or redirect; the verdict lines are
 at the tail.
+
+## Session 107 (2026-09-27, `main`) — repitch-kyoti FLASH 1 RESULTS + the page-1 dial discovery; rev 2 BUILT, oracle 7/7
+
+**Hardware (user, 140C_RPK1 `4de57994…`):** SETUP page-2 TSTR switch with all
+7 values "looks and operates well" — the widget-body clone, glyphs, formatter
+and count pokes are HW-CONFIRMED. ATTR shows REPITCH only — BY DESIGN (AUTO →
+RPCH; RPS9/RPSP in ATTR would be dead values). **DEFECT: the PTCH cell did not
+become QUANT on repitch tracks** — the stock dial drew.
+
+**Root cause (RE'd, ✅):** the page-1 dial renderers NEVER read the descriptor
+widget column B. The knob `0x400479b4` is referenced from ELEVEN code sites
+(vs the select widgets: descriptor entries only). Four audio-side sites share
+one 14-byte shape: `move (48,aX),%a0; tst.l %a0; bne.s +6; lea knob,%a0` —
+a per-slot RECORD's widget pointer (+48), hardcoded-knob fallback when null;
+record +0 holds the slot's FORMATTER. Sites: `0x40036698` (record in a4),
+`0x4003690c`, `0x4003786a`, `0x40037c06` (a3). Displaced bytes verified
+byte-for-byte at all four. **Corollary: octabam's `verify_repitch_ui.py` claim
+"the PLAYBACK page drops exactly the PTCH dial" models page 1 through the
+descriptors and is WRONG on hardware — Octapitch v1.0's empty-PTCH-dial is
+almost certainly broken on their MKII too, invisibly (the word is neutralised,
+so the live-looking dial just does nothing audible). Worth reporting upstream.**
+
+**Rev 2 (`out/mainos_repitch_kyoti.bin` sha `190a76a2…`, syx `f0372fd7…`,
+1706 B changed, 0 strays, cave now `0x400d6f80..0x400d782c` = 2220 B):**
+
+- **Four dial shims** (`qdial1..4`): re-create the 14-byte resolve, then
+  override `a0 = quant_widget` exactly when record+0 == `0x4003b4b0` (PTCH's
+  formatter — used ONLY by STATIC/FLEX/PICKUP A[0], so the key is
+  page-agnostic and safe at shared sites). d0 is the only scratch (dead at
+  all four sites — reloaded right after the call). quant_widget still falls
+  back to the knob itself, so a false-positive site costs nothing.
+- **`rp_ui_gate`** replaces rp_source for DISPLAY gating (engagement gating in
+  rate_gate is untouched): the LANE's SETUP byte decides (4/5/6 → QUANT), a
+  bound sample's out-of-range tempo vetoes, an UNBOUND voice is optimistic
+  (the voice binding was the UI-thread suspect), AUTO still requires the
+  binding (conservative), PICKUP machine never QUANTs. Documented residual:
+  a repitch-mode track with a tempo-less sample shows QUANT while playing
+  stock-with-PTCH — accepted, the alternative reintroduces the binding
+  dependence.
+- **Empty-cell guard**: the dial renderers sign-extend the value (`mvs.b`);
+  a negative value now draws the bare frame only (stock's empty-cell look).
+- ColdFire gotcha for the file: `cmpi.l #imm,(%aX)` does not exist — CF cmpi
+  is data-register destination only.
+
+**Oracle now 7 contracts, 0 failures** (`tools/repitch_probe_kyoti.cpp`,
+optionally takes `quant_widget rp_ui_gate` cave addresses from nm): the
+original five, plus the dial shims (16 cases across all 4 sites, run FROM the
+detour sites in the patched image, register-preservation asserted) and an
+11-case `rp_ui_gate` truth table.
+
+**Engine-side note from flash 1:** QUANT was already LIVE in the engine (the
+pitch_gate capture is oracle-proven) — turning PTCH on a repitch track was
+already switching ratios in 15-detent steps; only the DISPLAY was missing.
+If flash 1's audio was checked, tempo-following + that knob behaviour is the
+expected signature. **Awaiting flash 2: the QUANT cell appearing is the one
+new surface; audio confirmation of tempo-following still pending from the
+user either way.**

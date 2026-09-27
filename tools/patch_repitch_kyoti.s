@@ -42,6 +42,10 @@
         .global tstr_resolve
         .global tstr_fmt
         .global quant_widget
+        .global qdial1
+        .global qdial2
+        .global qdial3
+        .global qdial4
         .global attr_label
         .global attr_up
         .global attr_down
@@ -61,6 +65,7 @@
         .equ    INC_MAX, 0x08000000     | 2x in the Q26 increment
         .equ    SPRINTF, 0x40013a08
         .equ    KNOB, 0x400479b4        | the stock PTCH dial; value -1 draws its frame alone
+        .equ    PTCH_FMT, 0x4003b4b0    | A[0] of STATIC/FLEX/PICKUP -- only playback slot 0 uses it
         .equ    TXT_MEASURE, 0x40012f30 | (font, -1, str) -> px width
         .equ    TXT_DRAW, 0x40012bd8    | (font, canvas, x, y, -1, str)
         .equ    FONT, 0x400ba876
@@ -299,13 +304,130 @@ tstr_fmt:
 .t6:    .asciz  "RPSP"
         .balign 2
 
-| PTCH's widget slot on STATIC/FLEX, args (x, y, index, value, flags, fmt,
-| canvas). Off a repitch track: the stock dial untouched. On one: the dial's
+| -> d0 = 1 when the PTCH cell should draw as QUANT for the UI track.
+| DISPLAY truth, distinct from rp_source's ENGAGEMENT truth: the lane's
+| SETUP byte decides (4..6), because the voice's sample binding is not
+| trustworthy from the UI thread while the track is idle. A bound sample
+| whose tempo is out of range vetoes (that track plays stock); an unbound
+| voice is optimistic. AUTO still needs the binding (conservative: the
+| stock dial until the sample's TSMODE is reachable). PICKUP never QUANTs.
+rp_ui_gate:
+        lea     -12(%sp),%sp
+        movem.l %d1-%d2/%a0,(%sp)
+        moveq   #0,%d0
+        move.b  (UI_TRACK).l,%d0
+        moveq   #7,%d1
+        cmp.l   %d1,%d0
+        bhi     .ug_no
+        move.l  %d0,%d2                 | track
+        moveq   #48,%d1
+        mulu.l  %d2,%d1
+        lea     (LANES).l,%a0
+        moveq   #0,%d0
+        move.b  28(%a0,%d1.l),%d0       | SETUP TSTR
+        move.l  #168,%d1
+        mulu.l  %d2,%d1
+        lea     (VOICES).l,%a0
+        adda.l  %d1,%a0                 | the track's voice
+        moveq   #PICKUP_M,%d1
+        cmp.b   20(%a0),%d1
+        beq     .ug_no
+        moveq   #RPCH,%d1
+        cmp.l   %d1,%d0
+        blt.s   .ug_auto
+        moveq   #RPSP,%d1
+        cmp.l   %d1,%d0
+        bgt.s   .ug_no
+        movea.l 8(%a0),%a0              | bound settings, or 0
+        move.l  %a0,%d1
+        beq.s   .ug_yes
+        move.l  0x114(%a0),%d1
+        cmpi.l  #BPM24_MIN,%d1
+        blt.s   .ug_no
+        cmpi.l  #BPM24_MAX,%d1
+        bgt.s   .ug_no
+.ug_yes:
+        moveq   #1,%d0
+        bra.s   .ug_out
+.ug_auto:
+        moveq   #TSTR_AUTO,%d1
+        cmp.l   %d1,%d0
+        bne.s   .ug_no
+        movea.l 8(%a0),%a0
+        move.l  %a0,%d1
+        beq.s   .ug_no
+        moveq   #RPCH,%d0
+        cmp.l   0x110(%a0),%d0
+        bne.s   .ug_no
+        move.l  0x114(%a0),%d1
+        cmpi.l  #BPM24_MIN,%d1
+        blt.s   .ug_no
+        cmpi.l  #BPM24_MAX,%d1
+        bgt.s   .ug_no
+        moveq   #1,%d0
+        bra.s   .ug_out
+.ug_no:
+        moveq   #0,%d0
+.ug_out:
+        movem.l (%sp),%d1-%d2/%a0
+        lea     12(%sp),%sp
+        rts
+
+| The page-1 dial renderers do NOT read the descriptor widget column: each
+| resolves a per-slot record's widget pointer (+48) and falls back to a
+| HARDCODED knob when it is null (found Session 107 after the first flash
+| drew the stock dial). Four sites, one shape; the shim re-creates the
+| resolve and overrides the result with quant_widget exactly when the
+| record's formatter (+0) is playback slot 0's -- page-agnostic, and
+| quant_widget itself falls back to the knob off a repitch track.
+qdial1:                                 | 0x40036698, record in a4
+        movea.l 48(%a4),%a0
+        tst.l   %a0
+        bne.s   1f
+        lea     (KNOB).l,%a0
+1:      move.l  (%a4),%d0            | d0 dead at every site: reloaded after the call
+        cmpi.l  #PTCH_FMT,%d0
+        bne.s   2f
+        lea     quant_widget,%a0
+2:      jmp     (0x400366a6).l
+qdial2:                                 | 0x4003690c, record in a3
+        movea.l 48(%a3),%a0
+        tst.l   %a0
+        bne.s   1f
+        lea     (KNOB).l,%a0
+1:      move.l  (%a3),%d0            | d0 dead at every site: reloaded after the call
+        cmpi.l  #PTCH_FMT,%d0
+        bne.s   2f
+        lea     quant_widget,%a0
+2:      jmp     (0x4003691a).l
+qdial3:                                 | 0x4003786a, record in a3
+        movea.l 48(%a3),%a0
+        tst.l   %a0
+        bne.s   1f
+        lea     (KNOB).l,%a0
+1:      move.l  (%a3),%d0            | d0 dead at every site: reloaded after the call
+        cmpi.l  #PTCH_FMT,%d0
+        bne.s   2f
+        lea     quant_widget,%a0
+2:      jmp     (0x40037878).l
+qdial4:                                 | 0x40037c06, record in a3
+        movea.l 48(%a3),%a0
+        tst.l   %a0
+        bne.s   1f
+        lea     (KNOB).l,%a0
+1:      move.l  (%a3),%d0            | d0 dead at every site: reloaded after the call
+        cmpi.l  #PTCH_FMT,%d0
+        bne.s   2f
+        lea     quant_widget,%a0
+2:      jmp     (0x40037c14).l
+
+| PTCH's widget, args (x, y, index, value, flags, fmt, canvas). Off a
+| repitch track (rp_ui_gate): the stock dial untouched. On one: the dial's
 | frame (value -1 draws chrome alone) with the QUANT ratio centred in it.
+| A negative value (an empty cell, sign-extended by the dial renderers)
+| keeps the bare frame.
 quant_widget:
-        moveq   #0,%d1
-        move.b  (UI_TRACK).l,%d1
-        bsr     rp_source
+        bsr     rp_ui_gate
         tst.l   %d0
         bne.s   .qw_quant
         jmp     (KNOB).l
@@ -326,6 +448,7 @@ quant_widget:
         move.l  24(%sp),%d3             | y
         move.l  44(%sp),%d4             | canvas
         move.l  32(%sp),%d0             | ui value
+        bmi.s   .qw_done                | empty cell: the bare frame only
         bsr     rk_bucket
         lsl.l   #2,%d0
         lea     .q_labels(%pc),%a2
@@ -350,6 +473,7 @@ quant_widget:
         pea     (FONT).l
         jsr     (TXT_DRAW).l
         lea     24(%sp),%sp
+.qw_done:
         movem.l (%sp),%d2-%d4/%a2
         lea     16(%sp),%sp
         rts

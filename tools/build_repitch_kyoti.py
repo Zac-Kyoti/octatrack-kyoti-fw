@@ -38,14 +38,15 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (gate 1)", """
-NEVER flashed. The increment builder and TSTR resolver are PROVEN in-emulator
-(tools/repitch_probe_kyoti.cpp on ot::Machine: 560 feature-off cases
-bit-identical to stock; 1400 repitch cases == the QUANT/fold/tag model;
-guards, resolver and bucket boundaries all green). The three TSTR values play
-identically (linear) by design in gate 1; RPS9/RPSP character is gates 3/4.
-Unvalidated surfaces: the SETUP page draw with 7 positions, the QUANT label
-draw on the PTCH cell, AUTO resolution from the widget's UI context.
+status(WIP, "REPITCH KYOTI (gate 1, rev 2)", """
+Flash 1 (140C_RPK1 sha 4de57994): SETUP 7-value TSTR CONFIRMED ON HARDWARE;
+the QUANT cell did NOT appear -- the page-1 dial renderers never read the
+descriptor widget column (they resolve a record's +48 pointer, hardcoded
+knob when null). Rev 2 shims all four dial sites, keyed on the record's
+formatter == PTCH's. All 7 oracle contracts green (increment, resolver,
+guards, buckets, dial shims, ui-gate truth table). The three TSTR values
+still play identically (linear) by design; RPS9/RPSP character is gates 3/4.
+Unvalidated: the QUANT cell draw on hardware (rev 2's one new surface).
 """)
 
 BASE = 0x40000400
@@ -71,6 +72,11 @@ DETOURS = [
     (0x4006E71C, "4879400b94f660000154", "attr_label"),
     (0x4006EE56, "7202b28066000094",     "attr_up"),
     (0x4006EF7C, "20280110b2806608",     "attr_down"),
+    # page-1 dial renderers: resolve widget from record+48, knob when null
+    (0x40036698, "206c00304a88660641f9400479b4", "qdial1"),
+    (0x4003690C, "206b00304a88660641f9400479b4", "qdial2"),
+    (0x4003786A, "206b00304a88660641f9400479b4", "qdial3"),
+    (0x40037C06, "206b00304a88660641f9400479b4", "qdial4"),
 ]
 
 # --- descriptor pokes (addr, stock long, new long or symbol) ----------------
