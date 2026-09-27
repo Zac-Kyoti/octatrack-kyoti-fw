@@ -16,7 +16,11 @@ our own image, and the ones that still need that check are flagged **[VERIFY]**.
 verified** — `tools/patch_repitch_kyoti.s` + `tools/build_repitch_kyoti.py` (WIP
 tier), image `out/mainos_repitch_kyoti.bin`, syx `140C_RPK1`. Cave
 `0x400d6f80..0x400d76fc` (1916 B), 7 detours + 8 descriptor pokes, 0 strays.
-**NOT emulated, NOT flashed.** User decisions folded in: modes are **RPCH /
+**NOT flashed.** The increment builder and resolver are **proven in-emulator**
+(`tools/repitch_probe_kyoti.cpp`, Musashi `ot::Machine` over the real firmware
+code: 560 feature-off cases bit-identical to stock, 1400 repitch cases equal
+to an independent QUANT/fold/tag model, guards + resolver + bucket edges
+green, SP balance checked every run). Unvalidated: the UI draws and hardware. User decisions folded in: modes are **RPCH /
 RPS9 / RPSP** (RPS9 was RP12 below), and **AUTO always resolves to RPCH**,
 never the character modes — ATTR offers only REPITCH (raw 4).
 Design deltas vs the scope as first written, all verified against the image:

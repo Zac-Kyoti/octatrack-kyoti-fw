@@ -39,11 +39,13 @@ sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
 status(WIP, "REPITCH KYOTI (gate 1)", """
-Built and statically verified only -- NEVER run under the emulator port and
-NEVER flashed. The three TSTR values play identically (linear) by design in
-gate 1; RPS9/RPSP character is DSP work staged for gates 3/4.
+NEVER flashed. The increment builder and TSTR resolver are PROVEN in-emulator
+(tools/repitch_probe_kyoti.cpp on ot::Machine: 560 feature-off cases
+bit-identical to stock; 1400 repitch cases == the QUANT/fold/tag model;
+guards, resolver and bucket boundaries all green). The three TSTR values play
+identically (linear) by design in gate 1; RPS9/RPSP character is gates 3/4.
 Unvalidated surfaces: the SETUP page draw with 7 positions, the QUANT label
-draw on the PTCH cell, AUTO resolution from the widget context.
+draw on the PTCH cell, AUTO resolution from the widget's UI context.
 """)
 
 BASE = 0x40000400

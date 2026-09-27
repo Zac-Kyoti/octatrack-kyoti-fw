@@ -32204,3 +32204,36 @@ increment-oracle approach to our harness (budget 30–40 min/run per the
 octabam-emu-slow rule); (2) first flash + the FLASHING checklist; (3) gate 2 =
 the DSP probe for the low-2-bit tag (the stock-collision question, scope §4);
 (4) gates 3/4 = RPS9/RPSP DSP kernels off the tag dispatch.
+
+### Session 106 continued (2) — the gate-1 ORACLE: increment + resolver PROVEN in-emulator, 0 failures
+
+`tools/repitch_probe_kyoti.cpp` — our own port of octabam's repitch probe
+scaffold (MIT; their `ot_repitch_stock_test` SKIPs our image by design: it
+requires TSTR count == 5) with THIS module's semantics as the reference model.
+Links refs/octabam's PREBUILT emu libs (`libot_machine.a` + Musashi + dsp56k;
+nothing in the shared tree rebuilt). Build line in the file header; binary
+`out/repitch_probe_kyoti`; run time ~2 s for ~2000 machine constructions.
+
+    out/repitch_probe_kyoti out/raw/section_3_MAIN_OS.bin out/mainos_repitch_kyoti.bin
+      [PASS] feature off: TSTR 0..3 increments bit-identical to stock   (560 cases)
+      [PASS] repitch family: increment == QUANT/fold/tag model over stock's dry neutral (1400)
+      [PASS] guards: PICKUP / tempo out of range / TSMODE without AUTO stay stock
+      [PASS] resolver: 4/5/6 behave as OFF register-for-register; 0..3 untouched
+      [PASS] QUANT: all 17 bucket-boundary ui values land on the modelled ratio
+      0 failure(s)
+
+What this proves: the whole d3 pipeline in situ through the firmware's own
+code — rate_gate's track derivation off CUR_STATE, rp_source's SETUP/AUTO/
+PICKUP/tempo resolution, pitch_gate's composed-word capture + bucket +
+neutralise, rate_hook's exact (proj*p)/(samp*q) with the integer-domain fold,
+the INC_MAX−4 ceiling and the 2-bit tag — register liveness and stack balance
+included (every run asserts SP returns to its mark). The fixture drives the
+builder with A6 = lane exactly as octabam's probe did (hardware-proven by
+Octapitch v1.0), which also confirms pitch_gate's `(%a6)` read = the record's
+PTCH word. Remaining unvalidated: the UI draws (7-position SETUP cell, QUANT
+label on the PTCH cell, AUTO from the widget's UI context) and hardware.
+
+⚠️ Harness gotcha for the next session: ot::Machine's constructor logs SIM/
+clock chatter to stdout — ~2000 constructions = 1.3 MB of noise. Filter with
+`grep -v "read16@\|write16@\|updateClock@"` or redirect; the verdict lines are
+at the tail.
