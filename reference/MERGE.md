@@ -207,6 +207,16 @@ and V1.1* and the free span stays contiguous below it.
 | `patch_trigscale` | `0x400d7bfc` | 62 B **pinned** |
 | — tail — | `0x400d7c3a` | 2 B |
 
+### ⚠️ Standalone-cave collision: `repitch_kyoti` vs `directjump_v6` (S107, 2026-09-27)
+
+The two ACTIVE WIP standalones overlap and can never be composed as built:
+`patch_repitch_kyoti` claims `0x400d6f80..` (1630 B as of rev 5) and `build_directjump_v6.py`
+claims `CAVE_DJ = 0x400d7400..0x400d774f` (848 B as of V6.4) — **478 B of overlap at
+`0x400d7400..0x400d75de`**. Each builder only verifies its range is free in the STOCK image,
+so neither notices the other. Flashing them one at a time is safe (separate images); any
+composite (a future V1.1+repitch pack, or a bugbuilds-style fold) must first move one cave.
+`build_bugbuilds.py`'s DISJOINT interlock would catch it if the two were ever fed to it.
+
 ### `KYOTI_V1.1` — identical up to `patch_triglock`, then
 
 | Cave | Addr | Size |

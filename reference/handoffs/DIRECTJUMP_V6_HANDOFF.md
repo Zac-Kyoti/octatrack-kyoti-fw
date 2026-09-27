@@ -19,14 +19,27 @@ handler has no code path to the byte the LED painter reads; the message that doe
 `{0x11, pattern}`, and stock's wrap-change posts it from a *second* template `0x400d816b`
 that the Session 106 scan never saw.
 
-Current build = **V6.3**, `tools/build_directjump_v6.py` (WIP tier, needs `KYOTI_ALLOW_WIP=1`):
+**V6.3 hardware 2026-09-27: LED fix CONFIRMED; 16↔7 NORMAL 1x CORRECT** (the one-step
+shift reproduces and is the recorded cross-machine characteristic — see
+`reference/AR_DJ_QUIRKS.md` item 1, refined with the user's DJ-OFF/PER-TRACK matrix). One
+new defect surfaced and was fixed the same session: **DJ ON was not persistent** — a cue
+arriving on a master boundary tick computed `LAND_CNTDN = 1`, the ARMED wait could never
+serve it (stock's same-tick decrement ran the zero-landing with the stale transport-start
+snapshot), Hook N never consumed, and `dj_state` wedged at ARMED — every later cue fell
+back to stock wrap cueing. Reproduced and cured in-emulator with `tools/diag_dj_wedge.py`
+(cues by master-tick phase; V6.3 = 2/4 landings, wedged; V6.4 = 4/4, clean). **V6.4** =
+one change in `dl_arm`: countdown == 1 → `bsr dl_commit` (a boundary-tick request lands
+that tick, AR's own rule). NOTES Session 107 continued (3).
+
+Current build = **V6.4**, `tools/build_directjump_v6.py` (WIP tier, needs `KYOTI_ALLOW_WIP=1`):
 
 | artifact | sha256 (first 16) |
 |---|---|
-| `out/mainos_directjump_v6.bin` (+ `OCTATRACK_OS1.40C_DIRECTJUMP_V6.syx` / `.bin`) | `ce7404b670986807` |
-| `out/mainos_directjump_v6diag.bin` (`140C_KDIAG`, `*_V6DIAG*`) | `75e3247d449b1982` |
+| `out/mainos_directjump_v6.bin` (+ `OCTATRACK_OS1.40C_DIRECTJUMP_V6.syx` / `.bin`) | `4a6c1b5e3fb8562c` |
+| `out/mainos_directjump_v6diag.bin` (`140C_KDIAG`, `*_V6DIAG*`) | `1ba196a674c74d0a` |
 
-Cave 832 B; 783 B vs stock; 0 bytes outside caves + declared sites.
+Cave 848 B; 792 B vs stock; 0 bytes outside caves + declared sites. AWAITING HARDWARE
+(persistence re-test: many switches, rapid/rhythmic cadences included).
 
 **All four gates pass** (§3): DJ-OFF identical, DJ-ON-idle identical, the 16↔7 NORMAL-mode
 oracle byte-for-byte the V6/V6.1/V6.2 result, and the new LED trace showing `0x100b14d0`

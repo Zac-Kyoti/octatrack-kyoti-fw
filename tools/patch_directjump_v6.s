@@ -267,11 +267,30 @@ dl_arm:
     move.b  TICK_CTR,%d0
     sub.l   %d0,%d1                    | 1..tps: ticks to the next master step boundary
     move.b  %d1,LAND_CNTDN             | AR D1; stock decrements it right after we return
-    moveq   #ST_ARMED,%d0
-    move.b  %d0,dj_state
     .ifdef DJ_DIAG
     addq.l  #1,dj_cnt_arm
     .endif
+|   V6.4 (Session 107): d1 == 1 means the request reached this hook ON a master boundary
+|   tick (TICK_CTR == tps-1).  AR's rule is "a request on a boundary tick lands that tick"
+|   (AR_SEQUENCER_ENGINE.md section 6, step 2) -- and the ARMED wait can never serve it: its
+|   `cmpi #1` runs on a LATER dj_land entry, but stock's decrement (right below us, same
+|   tick) takes the byte 1 -> 0 and runs the zero-landing NOW, consuming the transport-start
+|   snapshot dl_commit never filled (a stale re-land), skipping Hook N's LANDING consume
+|   (state reads ARMED there), and leaving dj_state WEDGED at ARMED for ever -- from then on
+|   every cue sees state != IDLE, never arms, and falls back to stock wrap cueing.
+|   HW-observed 2026-09-27 ("DJ ON not persistent: jumps at first, then switches cue
+|   again"): at 1x each switch has a 1-in-tps chance of hitting the boundary tick.
+|   So: when d1 == 1, commit NOW -- dl_commit fills the snapshot and sets ST_LANDING, the
+|   replayed byte (1) sends stock down its decrement into its landing body this same tick
+|   consuming OUR snapshot, and Hook N consumes LANDING.  Identical to the k >= 2 flow,
+|   one tick earlier.
+    cmpi.l  #1,%d1
+    bne.b   dl_arm2
+    bsr.w   dl_commit                  | boundary-tick request: land this very tick
+    bra.w   dl_done
+dl_arm2:
+    moveq   #ST_ARMED,%d0
+    move.b  %d0,dj_state
 dl_done:
     movem.l (%sp),%d0-%d7/%a0-%a6
     lea     60(%sp),%sp

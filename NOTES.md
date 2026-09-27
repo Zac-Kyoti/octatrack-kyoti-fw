@@ -32659,3 +32659,70 @@ increment for repitch tracks — a deliberate remap, not a bug fix.
 bugbuilds base). Oracle 7/7 with the swap-flag asserts and the 0-based
 fixture. Hardware-new: AUTO/boot captions (the 0-based fix), the snapped
 dial, the fresh-value redraw.
+
+## Session 107 continued (3, 2026-09-27, `main`) — V6.3 hardware: LED FIXED, 16↔7 CORRECT; the DJ-ON-persistence wedge root-caused same session; V6.4
+
+### Hardware (user, V6.3 `ce7404b6`)
+
+1. **LED: FIXED** — the switched-to pattern's LED goes red at the landing. (First flash attempt
+   was a wrong-file mix-up: the concurrent repitch session's image, `140C_RPK1`, which has no
+   DIRECT JUMP — its keymap slot 0x400bf0c0 is NULL. Discriminator that settled it: SYSTEM
+   STATUS → OS VERSION.)
+2. **16↔7 NORMAL 1x: CORRECT.** The one-step shift reproduces — and the user refined it into
+   the matrix now recorded in `reference/AR_DJ_QUIRKS.md` item 1: it occurs with **DJ OFF too**
+   (= bone-stock OT cued switching) and on stock AR; NORMAL/NORMAL shifts DJ ON and OFF;
+   PER-TRACK/PER-TRACK shifts **only with DJ ON** (stock per-track cueing preserves master
+   phase — so PER-TRACK + DJ ON is OUR deviation, not an inherited AR trait). Reframed by the
+   user as a *musically undesirable characteristic*, not a bug. The user's eventual design
+   goal (every track keeps its step-time position relative to the master metronome pulse, so
+   any cue or jump re-enters phase-locked) is recorded verbatim in the quirks file. Stretch.
+3. **NEW DEFECT: DJ ON not persistent** — jumps at first, then after a couple of switches the
+   cues revert to stock wrap-waiting.
+
+### The wedge (root-caused by reading dl_arm, then reproduced in-emulator)
+
+A cue reaching `dj_land` **on a master boundary tick** (`TICK_CTR == tps−1`) computes
+`LAND_CNTDN = 1` and went to ARMED — but the ARMED→commit branch (`cmpi #1`) only runs on a
+*later* hook entry, and stock's decrement (same tick, right below the hook) takes the byte
+1→0 and runs its zero-landing NOW with the **transport-start snapshot dl_commit never
+filled** (a stale re-land), skips Hook N's LANDING consume (state reads ARMED there), and
+leaves `dj_state` wedged at ARMED for ever. Every later cue sees state ≠ IDLE, never arms,
+falls back to stock cueing. At 1x: 1-in-6 chance per switch — "a couple of switches" is the
+expected survival time. The V6 design *said* "a request on a boundary tick lands that tick"
+(= AR's own rule, AR_SEQUENCER_ENGINE.md §6 step 2); the code just had no path to it.
+
+**New tool `tools/diag_dj_wedge.py`** — cues by master-tick *phase* (so a cue can be aimed
+exactly at the boundary tick), auto-locates `dj_state` per image (`7002 13c0` scan into the
+DJ cave), watches dj_state/LAND_CNTDN writes with writer PCs, and prints a verdict.
+
+| run | result |
+|---|---|
+| shipped V6.3 (`ce7404b6`), phases 1,4,1,1 | **WEDGED** — boundary-tick cue at t89: our arm writes 1 (`pc=0x400d7576`), stock decrements to 0 (`0x400a1f7e`), stale-snapshot landing fires, state stuck =1 to end of run; cues 3 and 4 never arm; the last is consumed by the natural WRAP at t228. Landings **2 of 4**. The hardware symptom, byte for byte. |
+| fixed V6.4 (`4a6c1b5e`), same phases | **CURED** — the same boundary-tick cue runs `dj_state 0→2→0` inside t89 (dl_commit called from dl_arm, stock lands with OUR snapshot, Hook N consumes). Landings **4 of 4**, final state 0. |
+
+### V6.4
+
+One change in `dl_arm`: after writing the countdown, `cmpi.l #1,%d1; beq → bsr dl_commit`
+(boundary-tick request lands this very tick); otherwise ARMED as before. Identical to the
+k≥2 flow, one tick earlier. Mainline `4a6c1b5e3fb8562c` (848 B cave, 792 B vs stock,
+0 strays), DIAG `1ba196a674c74d0a`. Emitted code verified by disassembly.
+
+Gates, all on V6.4: DJ-OFF **IDENTICAL**; DJ-ON-idle **IDENTICAL**; 16↔7 oracle
+`commits=[41, 78, 95, 149, 162, 203, 257]` byte-for-byte; LED trace — {0x11} posts + the
+`0x100b14d0` update at every landing (LED fix intact); wedge tool 4/4; bug-fold round-trip OK.
+
+### Shared-working-tree hazard (same day, recorded)
+
+Two sessions commit to this repo concurrently. The repitch session's rev-4 commit
+(`10173b3`) swept up this thread's then-uncommitted intermediate `.s` edit (`git add -A` in
+a shared tree); harmless this time (my `acc2399` superseded it) but **commit explicit paths
+in shared trees**. Also recorded in MERGE.md: the repitch cave (`0x400d6f80..`, 1630 B) and
+the DJ cave (`0x400d7400..0x400d774f`) **overlap by 478 B** — one-at-a-time flashing is
+fine, any composite must move a cave first.
+
+**NEXT: hardware, V6.4.** Flash `out/OCTATRACK_OS1.40C_DIRECTJUMP_V6.syx` (140C_KYOTI,
+mainline `4a6c1b5e`). Re-check: LED red at landing (regression), then persistence — many
+switches, deliberately including rapid/rhythmic ones; a boundary-tick cue now lands the same
+tick, so no switch cadence should revert to cueing. Then FLASHING §4.3 steps 1–9, then
+master scales (expected imperfect). DIAG twin `1ba196a674c74d0a` if anything misbehaves
+(toast A L R C T H G; A==L==switches when healthy).
