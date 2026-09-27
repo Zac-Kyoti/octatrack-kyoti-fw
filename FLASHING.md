@@ -14,16 +14,7 @@ How to flash an OT Kyoti FW image onto your Octatrack, with a full safety net.
 > **Octatrack MKI or MKII.** Elektron ships one OS 1.40C image for both units and
 > the reverse engineering / builds here apply to both; the boot `0x46c8d18c`
 > probe adapts the unit-specific details. All hardware testing in this project is
-> on a **MKI** the author owns — including the flash that confirmed the Bug-1 fix.
-
-> **The always-on bug fix (no PERSONALIZE switch):** a **Plays-Free MIDI track**
-> with **trig quantize = Direct** and the pattern's **scale = Per Track** used to
-> **stall after its first step** when manually triggered — step 1's note fired,
-> step 2's never did. Root cause: `FUN_4009b5c8` seeded the per-track scale index
-> using the *audio* track stride for MIDI tracks, corrupting the step-length
-> lookup. Audio tracks were never affected. It is a pure fix — it only changes
-> behaviour in that exact broken configuration. See `NOTES.md` "Session 5 part 3"
-> / "Session 6"; hardware-confirmed on a MKI 2026-08-28.
+> on a **MKI** the author owns.
 
 > **Guiding principle: learn how to recover BEFORE flashing.** A brick here is
 > *soft and recoverable* — the Startup Menu (bootloader) lives in a region that
