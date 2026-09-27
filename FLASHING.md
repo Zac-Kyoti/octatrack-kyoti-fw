@@ -771,7 +771,3 @@ Superseded, kept only for rollback and reference — **do not flash**:
 `build_directjump.py` / `_v2` / `_v3` (dead on hardware),
 `build_reload.py` / `build_reload2.py` (the picker designs),
 `build_sidechain.py` / `build_sidechain2.py` (intermediate stages).
-
-| File | What it is |
-|---|---|
-| `downloads/extracted/OCTATRACK_OS1.40C.syx` | **Official rescue OS** — for recovery or reverting. |
