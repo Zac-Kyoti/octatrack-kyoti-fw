@@ -176,7 +176,8 @@ def main(argv):
                          "without it every uninitialised global reads 0 and a hook gated on "
                          "one can never fire -- which is exactly how this gate passed a "
                          "build that locked up real hardware seconds after PLAY.")
-    ap.add_argument("--stock", default=str(STOCK))
+    ap.add_argument("--stock", default=str(STOCK),
+                    type=lambda p: str(pathlib.Path(p).resolve()))  # same chdir trap as --patched
     # Two concurrent invocations sharing one staging tree collide with FileExistsError --
     # a trap this repo already hit with the per-bank project scanners. Give every run its
     # own prefix so a second comparison can be launched while the first is still going.

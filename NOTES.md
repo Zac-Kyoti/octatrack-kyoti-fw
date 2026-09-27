@@ -31731,4 +31731,15 @@ smaller fields.
 Build plumbing this session (other session, commit 28fa30a): `wip` retired, build TIERS
 declared; `build_directjump_v5.py` is WIP-tier and refuses without `KYOTI_ALLOW_WIP=1`.
 
-REGRESSION_GATES_PLACEHOLDER
+### Gold-equivalence gates (V5.11 vs the V5.3 image, same emulator, same fixtures)
+
+| gate | result |
+|---|---|
+| DJMAST2 2↔3 (uniform 1x), V5.11 vs V5.3 | **IDENTICAL** commits, 0x354a writes, classes and re-phase verdicts (armed? column excluded — no V5.3 ELF to pair) |
+| DJ-ON idle, V5.11 vs V5.3 | IDENTICAL — 8 counters + 38 samples |
+| feature-OFF, V5.11 vs stock (DJTEST2) | IDENTICAL |
+| DJTEST2 A07↔A08 (MIXED master scales, not a 1x test) | differs from V5.3 ONLY where the master seed engages at 2x→1x commits: commit ticks shift ±3, and V5.11 re-phases LESS (class [2] held throughout vs V5.3 flipping [2]↔[5]) — the seed doing its job |
+
+Structural argument alongside: the only executed difference at 1x is `move.b dj_mrem,%d0`
+(dj_mrem = 0) where V5.3 has `clr.b %d0` — byte-equal writes. Hardware still decides;
+the user verifies lengths / NORMAL / PER-TRACK / track scales first.
