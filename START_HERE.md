@@ -117,8 +117,8 @@ each builder declares **FINAL**, **PREVIEW**, **WIP** or **SUPERSEDED** and anno
 every run. A **WIP** builder exits 2 without `KYOTI_ALLOW_WIP=1`; a **SUPERSEDED** one exits
 2 without `KYOTI_ALLOW_SUPERSEDED=1` and names its replacement (deliberately two variables —
 "I know this is unfinished" should not also unlock "this was abandoned"). Today DIRECT JUMP
-is the only non-FINAL *feature* — `build_directjump_v5.py` WIP (current line V5.11) — and
-twelve earlier-stage builders are SUPERSEDED (DJ v1-v4, `build_mutemode{,_new}.py`,
+is the only non-FINAL *feature* — `build_directjump_v6.py` WIP (Session 105) — and
+thirteen earlier-stage builders are SUPERSEDED (DJ v1-v5, `build_mutemode{,_new}.py`,
 `build_softmute.py`, `build_relstate_shadow.py`, `build_sidechain{,2}.py`,
 `build_reload{,2}.py`). **`build_bugbuilds.py --with-wip` passes `KYOTI_ALLOW_WIP=1` to the
 child builder itself**, so its own gate does not have to be worked around. When a tier
@@ -181,11 +181,16 @@ DIRECT JUMP's builder is WIP-gated (see §5) so a visitor cannot build it by acc
 > Check this section against the tree before trusting it — it has gone stale before
 > (2026-09-25: three claims about `main` that a merge had already made false).
 
-### DIRECT JUMP — hardware-confirmed at a 1x master scale; non-1x is the whole remaining problem
+### DIRECT JUMP — V6 (Session 105): AR's commit through stock's own landing; gold RETRACTED
 
-`build_directjump_v5.py`, current line **V5.11** (v1–v4 SUPERSEDED; v4 at HEAD no longer
-reproduces the gold image because it assembles today's shared `patch_directjump.s`).
-**Baseline to not regress = the Session 87 GOLD image** (`out/GOLD_S87_*`, sha256
+**Read `NOTES.md` "Session 105" and "Session 105 continued" first, then
+`reference/AR_SEQUENCER_ENGINE.md` §3/§6.** `build_directjump_v6.py` (WIP; v1–v5 SUPERSEDED)
+re-lands the sequencer through stock's own `0x80006687` landing path on the next master step
+boundary — two 6-byte hooks at `0x400a1f72` and `0x400a221c`, boundary body untouched.
+**Not flashed; emulator gates first.** Everything from here to the end of this section is the
+HISTORY of the V1–V5 line, kept because its dead ends are still the dead ends.
+
+**The former baseline, RETRACTED 2026-09-26 = the Session 87 GOLD image** (`out/GOLD_S87_*`, sha256
 `0657157f…`, rebuildable from commit `16df386`), flashed 2026-09-23: tracks and patterns
 stay in master time through a switch, patterns land on the correct step, mixed track
 lengths work together (7 / 12 / 16), track scales and NORMAL/PER-TRACK modes behave,
@@ -230,10 +235,13 @@ check is pending** — verify lengths / NORMAL / PER-TRACK / track scales first.
    Z/X/V, two masks) does not generalise beyond the fixture it was built against. It is
    now opt-in (`DJ_PRESERVE=1`) and OFF; V5.11 is the gold line + the master seed.
 
-**The way forward (not started):** redesign from AR's architecture — rebuild every
-per-track value from ONE time-true anchor, preserving nothing — with gold as the
-untouchable baseline and DJTEST2 (odd lengths, mixed scales) + DJMAST2 (master scales)
-as day-one emulator gates. The oracles below are what make that tractable.
+8. *Session 105 — the retraction and the rewrite.* The user re-flashed gold and got
+   fractional steps at 1x / NORMAL / 16↔7. The AR engine was decompiled end to end
+   (`reference/AR_SEQUENCER_ENGINE.md`): AR's DIRECT JUMP never touches the wrap-change
+   path every OT build had been re-entering; it counts down to the next master step
+   boundary and re-lands all tracks synchronously. OT has that landing as stock code
+   (`0x80006687`). V6 = arm it + fill its snapshot. `dj_mrem` withdrawn (the remainder pair
+   is AR's pause/Song-Position mechanism).
 
 **Method lessons, hard-won:** the emulator judges STEP advances, which was the wrong
 observable — trust the fire-timestamp table (`tools/diag_tablearm_phase.py`, per-writer

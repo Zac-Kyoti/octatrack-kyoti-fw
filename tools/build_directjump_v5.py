@@ -112,9 +112,16 @@ Outputs: out/mainos_directjump_v5.bin, out/elek_directjump_v5.bin,
 import hashlib, os, pathlib, subprocess, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from kyoti_status import status, WIP
+from kyoti_status import status, SUPERSEDED
 
-status(WIP, "DIRECT JUMP V5.x", """
+status(SUPERSEDED, "DIRECT JUMP V5.x", """
+    Replaced by build_directjump_v6.py (Session 105).  Every V1-V5 build, the
+    Session 87 "gold" image included, committed a jump by re-entering the pattern
+    boundary body through 0x80006628 -- the arranger's cycle-start step feeding AR's
+    WRAP-CHANGE algorithm; hardware retracted gold at 1x / NORMAL / 16<->7 steps.
+    V6 re-lands the sequencer through stock's own 0x80006687 path, which is AR's
+    DIRECT JUMP commit.  Kept for its history (NOTES Sessions 88-104).  Old note:
+
     Current line = V5.11 (Session 104): the hardware-confirmed Session 87 GOLD line
     plus ONLY the master-remainder seed, which is a byte-equal no-op at 1x.  It
     matches gold in every emulator gate but is NOT yet verified on hardware -- that

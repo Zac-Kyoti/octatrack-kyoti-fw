@@ -31944,3 +31944,53 @@ odd lengths — watch that `new_step mod len_t` lands the 7-step track where AR'
 0↔1 (master 1x↔2x: the landing tick is a boundary of the OUTGOING master; the incoming grid starts
 there with phase `tps_new − 1`, so a 2x pattern entered from 1x starts on its own boundary by
 construction). Then hardware.
+
+### Session 105 continued (2) — V6 BUILT and emulator-gated: the retraction case holds the grid
+
+**Build.** `tools/patch_directjump_v6.s` + `tools/build_directjump_v6.py` (WIP tier). Cave
+758 B at `0x400d7400` (+ the 62 B trig fix at `0x400d7b00`); 723 bytes vs stock, 0 outside
+caves + declared sites; trig-fix bytes identical to `build_trigscale_only.py`; mainos sha256
+`48684a91d7c420ce…`; SYX/BIN wrapped (`out/*DIRECTJUMP_V6*`). Detours: `0x400a1f72 dj_land`
+(jsr 6), `0x400a221c dj_nofa` (jsr 6), `0x40043418 dj_ptnrel` (jmp 6), keymap slot
+`0x400bf0c0`. **No state in `0x80006a40+`** (the build refuses any reference there; the
+three state bytes live in the cave). `build_bugbuilds.py --with-wip` composes
+`DIRECTJUMP_V6 + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX`: 1196 B composite, DISJOINT / ALL
+PRESERVED / NO STRAYS, 4620 B free, round-trip OK. `build_directjump_v4.py` and
+`build_directjump_v5.py` are SUPERSEDED (notes name V6); README / START_HERE / BUILD_KYOTI /
+FLASHING / MERGE.md updated (V1.1 fits the single zone again: ≈ +332 B derived).
+
+ColdFire lessons re-learned while assembling (for the next hook author): `cmpi` takes only a
+Dn destination; no memory-to-memory or immediate-to-memory `move.b` (stage through a Dn);
+displacements are 16-bit — pattern-blob offsets like `0x8e53` need an index register
+(`(%a2,%d7.l)`); `divu.l %dy,%dx` with a single register is the 32-bit quotient (objdump
+prints it as `remul`). Hook N (`dj_nofa`) is unsaved and uses D0 only because both of
+stock's branches reload D0 at `0x400a2230`.
+
+**Gates (all on `out/mainos_directjump_v6.bin`, emulator = refs/octabam emu_rtos).**
+
+| gate | result |
+|---|---|
+| `diff_stock_vs_patch.py --patched` (DJ OFF, scratch poisoned) | **IDENTICAL** — 856/856/856/136/136/1/856 instruction counts, 16/16 tracks moving, all per-track + master state identical over 38 samples |
+| same, `--dj-on` (DJ ON, nothing cued) | **IDENTICAL** — same counts, same state |
+| `diag_tablearm_phase.py --project DJTEST2 --pattern 3 --to-pattern 4 --len 7` (**the retraction case**: both patterns forced NORMAL, 16 ↔ 7 steps, 1x, 6 jumps) | **PASS.** commits `[41, 78, 95, 149, 162, 203, 257]` = the 5 landings (41/95/149/203/257, every one at tick ≡ 5 mod 6 = the master boundary tick, 1–3 ticks after the cue) + 2 natural wraps of the 7-step pattern (78, 162). Every 1x track (0–7): scheduler writes `0x400a2e18` at **class [0] in every segment**, plus exactly ONE class-5 write in each post-landing segment (s1/s3/s4/s6/s7) and none after the natural wraps — that single write is the landing's own immediate fire on the boundary tick (`ahead = 1`), whose fire time is the same instant the outgoing step was due. **The grid never moves**, through five jumps and two 7-step wraps. |
+| `diag_tablearm_phase.py --project DJTEST2 --pattern 6 --to-pattern 7` (A07 ↔ A08: A08 master 2x, track 1 at 2x, track 4 at 1/2x, track 3 = 7 steps) | as AR: 1x tracks hold [0] through a 1x→2x landing (s1 `[0x4,5x1]`) and are re-phased to [3] by the 2x pattern's **natural wrap** (s2 `[0x1,3x5]`: stock's §6 catch-up `6−3`), restored to [0] by the jump back to 1x when the landing tick is a 1x boundary (s3), and left at [3] after a landing from 2x on a 2x-only boundary (t200 ≡ 2 mod 6 → s7 `[2x1,3x9]`). Track 1 (tps 3) holds [0] throughout with its own `2x1` landing writes. Track 4 (tps 12) unreadable by this tool's modulus (S101 caveat). |
+| `diag_tablearm_phase.py --project DJMAST2 --pattern 0 --to-pattern 1` (master 1x ↔ 2x, tracks 1x) | identical shape to the previous row, commit for commit: landings from 1x clean; the 2x pattern's natural wrap re-phases the 1x tracks (stock); a landing *from* 2x on a non-1x boundary (t200) lands the 1x pattern half a step off. |
+
+**Reading.** At equal scales V6 is exact by construction and the oracle confirms it,
+including the user's 16↔7 case. At mixed master scales V6 behaves like AR's D2 (the
+landing is quantised to the OUTGOING master's boundary, which can be mid-step for the
+incoming scale) and inherits stock's own natural-wrap catch-up under a 2x master. Both are
+the design item recorded in the Session 105 reply to the user: quantise the landing to the
+lcm of the two tick grids (`0x400a1f72` owns the countdown, so this is ~120 B in `dl_arm`),
+and derive `new_step` in the incoming scale's tick domain when `tps_in ≠ tps_out`. The
+same-instant duplicate at the landing (old pattern's due event vs the landing fire, split
+only by microtiming) is the other recorded item: purge the outgoing pattern's pending slots
+in `dl_commit` using stock's own purge idiom (`0x400a2530`+ / `0x400a4408`–`0x400a44e0`).
+
+**Next: hardware.** Flash `out/OCTATRACK_OS1.40C_DIRECTJUMP_V6.syx` (or the CF `.bin`), DJ
+on with [PTN]+[YES], and test in this order: (1) the retraction case — 16-step ↔ 7-step
+patterns, NORMAL mode, 1x, several switches each way, listen against the metronome;
+(2) FLASHING §4.3 steps 1–9 (lengths, PER-TRACK, track scales, MASTER LENGTH incl. INF,
+MIDI tracks); (3) master scales — expected imperfect (AR's own limitation), note WHICH
+switch direction lurches. Also check: no MIDI START is sent on a jump (Hook N), and that
+the toast/toggle behave as before.

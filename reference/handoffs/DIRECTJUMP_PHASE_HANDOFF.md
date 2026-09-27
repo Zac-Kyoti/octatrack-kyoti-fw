@@ -29,8 +29,10 @@ one 6-byte detour at `0x400a1f72`** (arm: `0x80006687 = tps − TICK_CTR`; land:
 `0x80006638 = MASTER_STEP mod masterLen`, `0x80006516[t] = new_step mod len_t`, ticks 0)
 **+ one at `0x400a221c`** (no MIDI `0xFA` on a jump) + the existing UI pieces. Every V4/V5
 sequencer hook (`dj_a/b/c/d7/scaleix`, Z/X/V) is deleted; the boundary body stays stock.
-The builder does not exist yet — next session writes `patch_directjump_v6.s` /
-`build_directjump_v6.py` and runs the gate order given at the end of the NOTES block.
+**V6 is BUILT** (`tools/patch_directjump_v6.s`, `tools/build_directjump_v6.py`, WIP tier;
+mainos sha256 `48684a91d7c420ce…`, 758 B cave, 723 bytes vs stock, 0 strays; v4 and v5
+builders SUPERSEDED). V6 keeps NO state in `0x80006a40+` (its state bytes live in the
+cave). Gate results are recorded in NOTES.md "Session 105 continued (2)". Not flashed.
 
 *(Session 104 text follows, kept as history.)*
 

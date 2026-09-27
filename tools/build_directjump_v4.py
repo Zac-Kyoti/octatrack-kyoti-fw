@@ -104,8 +104,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from kyoti_status import status, SUPERSEDED
 
 status(SUPERSEDED, "DIRECT JUMP v4", """
-    Replaced by build_directjump_v5.py (V5.11, Session 104 = the hardware-confirmed
-    Session 87 GOLD line plus only the master-remainder seed).  This builder does
+    Replaced by build_directjump_v6.py (Session 105; the "gold" image this builder
+    once produced was RETRACTED on hardware -- step-fractional at 1x / NORMAL mode /
+    16<->7-step patterns).  Session 104 note: replaced by build_directjump_v5.py
+    (V5.11 = the Session 87 GOLD line plus only the master-remainder seed).  This builder does
     NOT reproduce the gold image any more: it assembles today's shared
     tools/patch_directjump.s, which has moved on since, so HEAD output differs from
     gold (sha256 0657157f...) in ~1080 bytes and was never flashed.  To get the

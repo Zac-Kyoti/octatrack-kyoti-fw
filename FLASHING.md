@@ -204,16 +204,15 @@ below instead.
    the `'ANDY'` battery-SRAM shadow). An EMPTY RESET clears it to factory.
 7. Regression: the manual-trig fix still works; other tracks unaffected.
 
-### 4.3  DIRECT JUMP  (`KYOTI_ALLOW_WIP=1 python3 tools/build_directjump_v5.py` — WIP; current line **V5.11**)
-> **⚠️ Read this before flashing.** The behaviour below at a **1x master scale** is
-> hardware-confirmed on the Session 87 gold image (2026-09-23). **V5.11** (2026-09-26)
-> is that gold line plus one master-clock seed that is a byte-equal no-op at 1x; it
-> matches gold in every emulator test but **has not yet been checked on hardware** —
-> verify steps 1-9 below (odd track lengths, NORMAL and PER-TRACK modes, track scales)
-> before anything else. **Master scales other than 1x are still broken** (a switch can
-> land on a fractional step): step 10 is expected to fail. To return to the confirmed
-> image, flash `out/GOLD_S87_*` or rebuild commit `16df386`.
-> `build_directjump_v4.py` is SUPERSEDED: at HEAD it no longer reproduces the gold image.
+### 4.3  DIRECT JUMP  (`KYOTI_ALLOW_WIP=1 python3 tools/build_directjump_v6.py` — WIP; **V6**, Session 105)
+> **⚠️ Read this before flashing.** V6 is a rewrite: the sequencer is re-landed through
+> stock's own landing path on the next master step boundary (AR's commit), with two 6-byte
+> hooks and nothing else in the sequencer touched. **It has not been on hardware.** The
+> previous line's "gold" image (Session 87) was **retracted** 2026-09-26 — fractional steps
+> at 1x, NORMAL mode, 16 ↔ 7-step patterns — so there is no confirmed DIRECT JUMP image to
+> return to; revert = stock. Test order on V6: the 16 ↔ 7 NORMAL-mode case first (the
+> retraction case), then steps 1-9 below, then step 10 (master scales — expected to be
+> imperfect: AR itself lurches there).
 >
 > **Also still open, and NOT explained by that fix:** a report that which steps get
 > visited depends on what trigs are on the grid, and that the LEDs and the audio

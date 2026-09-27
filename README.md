@@ -51,7 +51,7 @@ hunt through. Instead, **each builder tells you what tier it is in before it run
 | **WIP** | the author's own flash-and-measure loop; expected to be wrong | **refuses** unless you set `KYOTI_ALLOW_WIP=1` |
 | **SUPERSEDED** | a dead end or an intermediate stage, kept so its reasoning stays readable | **refuses** unless you set `KYOTI_ALLOW_SUPERSEDED=1`, and names what replaced it |
 
-Everything below is FINAL except **DIRECT JUMP**, which is WIP (`build_directjump_v5.py`).
+Everything below is FINAL except **DIRECT JUMP**, which is WIP (`build_directjump_v6.py`).
 `tools/` also holds twelve SUPERSEDED builders — earlier stages of MUTE MODE, the
 side-chain, RELOAD and DIRECT JUMP, three of which never worked on hardware at all. They
 stay because the reasoning and the measurements in them are worth reading, and they are
@@ -81,16 +81,17 @@ courtesy, not a lock; `tools/kyoti_status.py` is all of it.
   Change ~1 step early. The arranger and pattern chains are untouched, and the
   toggle deliberately does not persist — a performance feature comes up OFF on
   every power-on.
-  **Still in development — the one unfinished feature.** The behaviour confirmed on
-  hardware (2026-09-23) covers 1x master scales: master time held through switches,
-  correct landing steps, mixed track lengths, track scales, MASTER LENGTH incl. `INF`.
-  Under a master scale other than 1x a switch can land on a fractional step. The
-  current build, **V5.11**, is that confirmed baseline plus one master-clock
-  correction that changes nothing at 1x. It matches the baseline in every emulator
-  test and is awaiting its hardware check. An experimental series (V5.5–V5.10)
-  improved the non-1x case on the unit but regressed odd track lengths, and was
-  rolled back.
-  → **WIP**: [`tools/build_directjump_v5.py`](tools/build_directjump_v5.py) (V5.11) ·
+  **Still in development — the one unfinished feature.** On 2026-09-26 the build
+  that had been called hardware-confirmed at 1x was **retracted**: a plain 16-step ↔
+  7-step switch in NORMAL mode lands a fraction of a step off. The cause was
+  architectural — every build since Session 79 committed a jump by re-entering the
+  pattern-boundary body, which is the sequencer's *cycle-wrap* machinery. A full
+  decompilation of the Analog Rytm's sequencer engine (`reference/AR_SEQUENCER_ENGINE.md`)
+  showed AR's DIRECT JUMP re-lands every track synchronously on the next master step
+  boundary — and that the Octatrack already contains that exact landing as stock code.
+  **V6** (Session 105) uses it: two 6-byte hooks in the tick handler, nothing else in the
+  sequencer touched. Emulator gates first, then hardware; not flashed yet.
+  → **WIP**: [`tools/build_directjump_v6.py`](tools/build_directjump_v6.py) (V6) ·
   handoff [`reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md`](reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md)
 
 - **SIDE-CHAIN COMPRESSOR** — an external key input for the stock DynamiX
@@ -208,9 +209,9 @@ All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit
 | Bug 1 — MIDI Plays-Free trig fix | all | **confirmed** 2026-08-28 |
 | MUTE MODE — all four modes, menu, SOLO | `build_mutemode_dt.py` | **confirmed, final** 2026-09-21 |
 | ↳ mode survives a power cycle | `build_mutemode_dt.py` | **confirmed** |
-| DIRECT JUMP — 1x master scale | Session 87 gold image | **confirmed** 2026-09-23 |
-| ↳ V5.11 — the same baseline + a master-clock seed | `build_directjump_v5.py` (WIP) | **hardware check pending** |
-| ↳ master scales other than 1x | `build_directjump_v5.py` (WIP) | **open** — being redesigned (see the handoff) |
+| DIRECT JUMP — 1x master scale | Session 87 "gold" image | **RETRACTED** 2026-09-26 — fractional at 1x, NORMAL mode, 16 ↔ 7 steps |
+| ↳ V6 — AR's commit through stock's own landing | `build_directjump_v6.py` (WIP) | **emulator gates, then hardware — not flashed** |
+| ↳ master scales other than 1x | V6 | **open** — AR itself does not handle it gracefully; design notes in NOTES Session 105 |
 | SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` | **confirmed, final** 2026-09-20 |
 | ↳ a project still using the donated effect loads as NONE | `build_sidechain3.py` | **confirmed, final** 2026-09-25 |
 | RELOAD FROM PROJECT — both chords | `build_reload3.py` | **confirmed, final** 2026-09-25 |

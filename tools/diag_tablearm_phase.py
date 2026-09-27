@@ -27,6 +27,7 @@ V5 = ROOT / "out" / "mainos_directjump_v5.bin"
 DJ_MODE = 0x800000D8
 TICK_PC = 0x400A3FDC
 TAIL_PC = 0x400A4BE6
+LAND_PC = 0x400A20DE   # Session 105: V6 lands through stock's 0x80006687 path (STEP write here)
 TBL = 0x80001904
 TBL_END = TBL + 8 * 8 * 4
 STEP_ARR = 0x800064D0
@@ -47,6 +48,8 @@ def main(argv):
     ap.add_argument("--dump-track", type=int, default=-1)
     ap.add_argument("--image", default=str(V5),
                     type=lambda p: str(pathlib.Path(p).resolve()))
+    ap.add_argument("--len", type=int, default=0,
+                    help="Session 105: force the TO-pattern's NORMAL-mode length (+0x8e53) after load, e.g. 7")
     a = ap.parse_args(argv)
 
     os.chdir(OCTABAM)
@@ -73,6 +76,15 @@ def main(argv):
     rt.next_frame = rt.sample + er.FRAME_PERIOD
     rt.exact_clock()
     rt.uc.mem_write(DJ_MODE, (1).to_bytes(4, "big"))
+    if a.len:
+        # the user's retraction case: NORMAL mode on both patterns, 16 <-> a.len steps
+        for pat, ln in ((a.pattern, None), (a.to_pattern, a.len)):
+            blob = 0x400E21E0 + bank * 0x9B340 + pat * 0x8ED8
+            rt.uc.mem_write(blob + 0x8E55, b"\x00")          # SCALE MODE = NORMAL
+            if ln:
+                rt.uc.mem_write(blob + 0x8E53, bytes([ln]))
+            print(f"pattern {pat}: NORMAL mode, length "
+                  f"{bytes(rt.uc.mem_read(blob + 0x8E53, 1))[0]}")
     rt.uc.mem_write(SCRATCH_LO, bytes([0xAA]) * (SCRATCH_HI - SCRATCH_LO))
 
     st = dict(tick=0, njump=0, commits=[], writes=[], pcs={})
@@ -93,7 +105,7 @@ def main(argv):
 
     def on_commit(u, access, addr, size, value, user):
         pc = u.reg_read(er.eb.UC_M68K_REG_PC)
-        if pc == TAIL_PC and (not st["commits"] or st["commits"][-1] != st["tick"]):
+        if pc in (TAIL_PC, LAND_PC) and (not st["commits"] or st["commits"][-1] != st["tick"]):
             st["commits"].append(st["tick"])
 
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_tick, begin=TICK_PC, end=TICK_PC)
