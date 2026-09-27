@@ -12,7 +12,42 @@ our own image, and the ones that still need that check are flagged **[VERIFY]**.
 
 ## 0. CURRENT STATE — read this first
 
-**Status: scoped, not started.** No code, no builder, no cave allocation.
+**Status (updated Session 106, same day): GATE 1 IS BUILT and statically
+verified** — `tools/patch_repitch_kyoti.s` + `tools/build_repitch_kyoti.py` (WIP
+tier), image `out/mainos_repitch_kyoti.bin`, syx `140C_RPK1`. Cave
+`0x400d6f80..0x400d76fc` (1916 B), 7 detours + 8 descriptor pokes, 0 strays.
+**NOT emulated, NOT flashed.** User decisions folded in: modes are **RPCH /
+RPS9 / RPSP** (RPS9 was RP12 below), and **AUTO always resolves to RPCH**,
+never the character modes — ATTR offers only REPITCH (raw 4).
+Design deltas vs the scope as first written, all verified against the image:
+
+- **QUANT needs NO editor hook.** The PTCH slot edits a plain ui value
+  (min 4, count 121, default 64 = neutral; the record word is `ui<<8`) through
+  descriptor metadata — `E+0x00`'s `0x40038d94` is a *randomizer*, not the
+  edit path. QUANT is a read-side bucketing of ui (15-wide buckets, neutral
+  centred in 1/1), captured in `pitch_gate` from the *composed* word, so
+  **QUANT is p-lockable and scene-morphable for free**, legacy projects load
+  as 1/1, and leaving RPCH restores plain PTCH with whatever the knob holds.
+- The octave-fold runs in the 16-bit integer domain *before* any division
+  (`D <<= 1` while `N > 2D`), so the ratio stays exact; clamp is
+  `INC_MAX−4` so the 2-bit mode tag can never exceed stock's 2.0 ceiling
+  (16,128-case rational-reference grid: worst error 4 LSB of Q26).
+- The 7-position TSTR widget is the stock 5-position body (372 B,
+  position-independent — absolute jsr/lea only) cloned into the cave with two
+  words patched (bound `moveq #4→#6` at +0x54, icon-table lea at +0xe8);
+  glyphs keep stock's visual language (17×7 bordered box, dithered field,
+  clear cell at stride 2). Formatter ABI decoded: `fmt(buf, value)`,
+  tail-jump to sprintf `0x40013a08` with the label replacing `value` at
+  `8(%sp)`.
+- `d3` carries `bpm24 | modeoff<<16 | quant_idx<<24` from `rate_gate` through
+  `pitch_gate` to `rate_hook`; the finished increment's low 2 bits carry
+  modeoff (gate-2 pre-staging; the stock-collision question in §4 stands).
+
+Every `[VERIFY]` item below is now ✅ byte-verified (descriptor fields, widget
+family, icon tables, all 7 detour sites' displaced bytes). Remaining before
+PREVIEW: an emulator pass (page draw + increment oracle) and the first flash.
+
+The original scope follows, kept as written apart from the mode rename.
 
 The feature: extend octabam's REPITCH concept into a multi-mode tempo-following
 varispeed playback mode with a quantised ratio control.
@@ -104,13 +139,13 @@ it is expensive. §2 prices each one.
 | TSTR | raw | reconstruction | DSP cost | status |
 |---|---:|---|---:|---|
 | `RPCH` | 4 | stock 2-tap linear | **0 w** | baseline, exists in concept today |
-| `RP12` | 5 | linear + 12-bit truncate | ~4 w | **ship** — "S950/Akai" character |
+| `RPS9` | 5 | linear + 12-bit truncate | ~4 w | **ship** — "S950/Akai" character |
 | `RPSP` | 6 | ZOH + 12-bit + ~26 kHz hold | ~15–20 w | **ship** — "SP-1200" character |
 | ~~`RPHQ`~~ | — | 4-point Catmull-Rom | ~2.4× cycles | **CUT** — see below |
 
 `w` = DSP program words. 🟡 all three cost estimates.
 
-### `RP12` — linear + 12-bit. Ship it first.
+### `RPS9` — linear + 12-bit. Ship it first.
 
 The Akai S900/S950 **did** interpolate; that is exactly why detuning on an Akai does not
 sound like detuning on an SP-1200. So the correct S950 model is the interpolator already
@@ -166,7 +201,7 @@ Shape follows octabam's REPITCH so the module reads as a sibling, plus two new c
 
 ### TSTR enum 5 → 7
 
-`OFF AUTO NORM BEAT RPCH RP12 RPSP`, raw 0–6. Existing raw numbers untouched, so saved
+`OFF AUTO NORM BEAT RPCH RPS9 RPSP`, raw 0–6. Existing raw numbers untouched, so saved
 projects load unchanged; a project saved with a new mode stores 4/5/6, which a stock OS
 does not know (🟡 SETUP: blank value + granular playback; ATTR: `ERROR`).
 
@@ -332,14 +367,14 @@ result, not hand-copy addresses.
 2. **Prove the increment tag (§4).** A DSP probe that reads the low 2 bits and publishes
    them somewhere visible; octabam's `dsp/xmem_probe.asm` and `dsp/page2_probe.asm` are
    the idiom. Settle §4 here, or adopt the global-mode fallback knowingly.
-3. **`RP12`.** One mask. The smallest possible DSP change, immediately audible, and it
+3. **`RPS9`.** One mask. The smallest possible DSP change, immediately audible, and it
    proves the entire cross-chip chain end to end.
 4. **`RPSP`.** ZOH (branch to a copy loop, not an in-place `y0` zero) + hold counter.
 5. *Optional:* the 2-tap up-pitch pre-average from §2.
 
 ### Two recommendations against the obvious order
 
-- **`RP12` before `RPSP`**, even though SP-1200 is the mode actually wanted. It is a
+- **`RPS9` before `RPSP`**, even though SP-1200 is the mode actually wanted. It is a
   ~4-word change that validates the whole mode path; if the tag scheme is broken you
   find out for nearly nothing instead of after writing the hold logic.
 - **Do not bundle gate 1 behind the character work.** `QUANT` with no new modes is a

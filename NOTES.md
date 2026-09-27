@@ -32134,3 +32134,73 @@ DJ ON idle → IDENTICAL; `diag_tablearm_phase --len 7` (16↔7 NORMAL, 1x) → 
 class-5 landing write per jump — byte-for-byte the V6 result (the arm-gate change is
 unobservable in the emulator, whose stale byte is 0; it matters on hardware only).
 **NEXT: the user flashes V6.1 (or the DIAG variant first) and reports.**
+
+### Session 106 continued — repitch-kyoti GATE 1 BUILT (ColdFire complete), statically verified, NOT emulated, NOT flashed
+
+User decisions: three modes **RPCH / RPS9 / RPSP** (RPS9 = the linear+12-bit
+"S950" mode, renamed from the scope's RP12); **AUTO always resolves to RPCH**,
+so ATTR offers only REPITCH (raw 4) and the character modes are SETUP-only.
+
+**New files:** `tools/patch_repitch_kyoti.s` (logic, 898 B assembled) +
+`tools/build_repitch_kyoti.py` (WIP tier). Build: `out/mainos_repitch_kyoti.bin`
+(1380 B changed, 0 strays), syx `140C_RPK1`. Cave `0x400d6f80..0x400d76fc` =
+1916 B (logic 898 + widget clone 372 @`0x400d7304` + icons 644); claim recorded
+in MERGE.md. Detours (all displaced bytes byte-verified against our image
+first): `0x4000406a` rate_gate, `0x4000409e` pitch_gate, `0x40004100` rate_hook,
+`0x40007d96` tstr_resolve, `0x4006e71c/0x4006ee56/0x4006ef7c` ATTR label/up/down.
+Pokes: STATIC+FLEX TSTR count 4→7, TSTR formatter → cave, TSTR widget → 7-pos
+clone, PTCH widget → quant_widget (`0x400d30de/3270, 310e/32a0, 313e/32d0,
+3116/32a8`).
+
+**RE facts settled this session (all ✅ against our image), closing the scope's
+[VERIFY] items:**
+
+- The select-widget family is FOUR IDENTICAL 372 B BODIES at 0x174 spacing
+  (`0x40046f10/6d9c/6c28/6ab4` = 2/3/4/5 positions), position-independent
+  (absolute jsr/lea only). Bound = `moveq #N-1` at +0x54; icon table =
+  `lea` at +0xe8. Value past bound draws NOTHING (the octabam image-79
+  blank-cell failure mode, now understood at the instruction).
+- Widget arg contract: `(x, y, index, value, flags, formatter, canvas)` on the
+  stack; label = `formatter(buf, value)` into an 8-byte stack buffer at sp+40,
+  else `sprintf(buf, "%d", value)`; text centred at x+9 via measure
+  `0x40012f30(font,-1,str)` + draw `0x40012bd8(font,canvas,x,y,-1,str)`,
+  font `0x400ba876`.
+- Icons are 20 B RECORDS `{w=17, h=7, 1, pixel_ptr, 0x400c89a6}`; pixels are
+  17 column u32s, glyph in the TOP BYTE, bit7=row0. Stock's position glyphs =
+  bordered box + dither + a clear 5-col cell at the position. Our 7-position
+  set keeps the language at stride 2 (rendered from the built image, correct).
+- The stock TSTR formatter `0x4003b6a4` = memcpy of a 4-ptr string table
+  (`0x400a7e2e` → "OFF/AUTO/NORM/BEAT") + tail-jmp sprintf `0x40013a08` with
+  the string replacing `value` at `8(%sp)`; fallback `0x400b442a` "???".
+- **`E+0x00`'s six per-encoder pointers are RANDOMIZERS, not editors**
+  (`0x40038d94` = min + rand mod range via `0x400209d4`; STATIC has six 0s,
+  FLEX six pointers). The knob EDIT path is pure descriptor metadata — which
+  is why QUANT needs NO editor hook.
+- **PTCH slot metadata: min 4, count 121, default 64** (= neutral); the record
+  word at lane+0 is `ui<<8` (so "+60 = 2.0" = word 0x7C00, and RATE's
+  "applied below 0x7f00" = ui 127 neutral). This nails QUANT storage: bucket
+  ui into 8×15-wide zones from ui 12, neutral centred in 1/1 → legacy
+  projects load as 1/1, leaving RPCH leaves an ordinary PTCH value.
+
+**Design (details in the .s header):** `d3` = `bpm24 | modeoff<<16 |
+quant_idx<<24` (rate_gate packs bpm+mode via rp_source; pitch_gate captures
+the COMPOSED PTCH word — QUANT is therefore p-lockable/scene-morphable — and
+neutralises PTCH; rate_hook scales by `(proj*p)/(samp*q)` exactly, octave-folds
+in the INTEGER domain (`D<<=1` while `N>2D`) before any division, clamps to
+`INC_MAX−4` so the 2-bit mode tag (low bits = modeoff, gate-2 pre-staging)
+can never pass stock's 2.0 ceiling). The 0x80006a40..abf window is refused by
+the builder (RELOAD3's rule); the cave holds NO RAM state at all.
+
+**Validation state:** builder self-checks (site bytes, descriptor olds,
+cave-free, stray-byte accounting) + disassembly eyeball of every routine in
+the BUILT image + a 16,128-case rational-reference grid on the rate_hook
+algorithm (ceiling holds, tags exact, worst error 4 LSB of Q26) + glyphs
+rendered back from the image. **The emulator has NOT run this image; the
+SETUP page draw with 7 positions, the QUANT cell draw, and AUTO resolution
+from the widget are the unvalidated surfaces** (the WIP gate says so).
+
+**Next:** (1) emulator pass — port octabam's `verify_repitch_ui.py` /
+increment-oracle approach to our harness (budget 30–40 min/run per the
+octabam-emu-slow rule); (2) first flash + the FLASHING checklist; (3) gate 2 =
+the DSP probe for the low-2-bit tag (the stock-collision question, scope §4);
+(4) gates 3/4 = RPS9/RPSP DSP kernels off the tag dispatch.
