@@ -291,12 +291,11 @@ Adds four parameters to the **COMPRESSOR** effect's **page 2**, next to `RMS`:
 
 **What it costs:** **SPRING REVERB** is removed from the **FX2** chooser (15 → 14
 entries) to donate its DSP code space, and its descriptor is null-stubbed so an
-older project that still references it by id stays safe. **SPATIALIZER is
-untouched** and remains a normal selectable effect.
+older project that still references it by id stays safe.
 
 1. **Boot check** — the FX2 chooser has **14** entries and no SPRING REVERB; the
-   **FX1** chooser is untouched. SPATIALIZER is present and selectable in both.
-   Every other effect must highlight **the effect you actually picked** (an earlier
+   **FX1** chooser is untouched. Every other effect must highlight **the effect you
+   actually picked** (an earlier
    build had FX1's id→position table one slot out past the removed effect).
 2. Put a **kick on T1**, and a **pad + COMPRESSOR on T2**. On T2's FX page 2 set
    **`KEY = T1`** → the pad **ducks on every kick**. Sweep `THRS`/`RAT` to confirm
