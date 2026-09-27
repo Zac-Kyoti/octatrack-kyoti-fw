@@ -775,12 +775,3 @@ Superseded, kept only for rollback and reference — **do not flash**:
 | File | What it is |
 |---|---|
 | `downloads/extracted/OCTATRACK_OS1.40C.syx` | **Official rescue OS** — for recovery or reverting. |
-
-Reproducible one-shot for the Bug-1 fix (no assembler needed):
-
-```sh
-python3 sysex/apply_patch.py -i <your stock .syx> \
-    -p sysex/patches/playsfreefix-r1.json -o OCTATRACK_OS1.40C_PLAYSFREEFIX.syx
-```
-
-(Regenerate the JSON from a fresh build with `sysex/gen_patch_json.py`.)
