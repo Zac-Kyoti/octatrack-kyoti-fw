@@ -38,20 +38,19 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (gate 1, rev 4)", """
-Flash 2 (rev 3) confirmed on hardware: 7-value TSTR, QUAN cell + QUAN
-caption, ATTR's three values, per-sample AUTO, AND THE AUDIO -- tempo-
-following and closing polyrhythms verified by ear. Rev 4 answers the
-flash-2 punch list: QUAN is now a REAL DIAL (snapped to 8 positions, 1/1
-dead centre) with its own per-track storage rk_quan -- the PTCH parameter
-is never touched (independence proven in-emulator: 1200 cases x 2 words,
-bit-identical), edits intercepted at the page-1 knob editor 0x40055008,
-and the display gate resolves through the part/machine/slot tables so
-AUTO+ATTR updates immediately, no play/stop needed. All 7 oracle contracts
-green. QUAN is session-persistent (reboot -> 1/1), NOT saved in projects,
-and no longer p-lockable -- documented trades. Hardware-new surfaces: the
-dial position/readout, encoder feel (1 detent = 1 step), the redraw mark
-0x46c7d245, immediacy of the AUTO caption.
+status(WIP, "REPITCH KYOTI (gate 1, rev 5)", """
+Flash 3 punch list answered by an architecture change: QUAN is the PTCH
+slot's REAL parameter again (stock editor, p-locks, scene locks, project
+persistence all stock), independence is kept by a DOMAIN SWAP -- on a mode
+transition the slot's stored value trades places with a parked byte
+(NEIGHBOR's page-1 slot 0, saved but never applied) in the working DB and
+the SRAM part copy, live/lane following, dirty flags set. Part applies
+reset the bookkeeping (adopt, never swap), so part changes and project
+loads are safe. The display gate reads the Part DB (boot-valid), fixing
+the AUTO/boot caption lag. The dial is stock with a ratio readout;
+~15 detents sweep one ratio zone. All 7 oracle contracts green.
+Hardware-new surfaces: the swap on real TSTR/ATTR edits, boot captions,
+p-locked/scene-locked QUAN, save/load round trips.
 """)
 
 BASE = 0x40000400
@@ -82,8 +81,9 @@ DETOURS = [
     (0x4003690C, "206b00304a88660641f9400479b4", "qdial2"),
     (0x4003786A, "206b00304a88660641f9400479b4", "qdial3"),
     (0x40037C06, "206b00304a88660641f9400479b4", "qdial4"),
-    # the page-1 UI knob editor: slot-0 edits go to rk_quan on a QUAN track
-    (0x40055008, "4fefffd048d77cfc", "quant_edit"),
+    # part applies reset the swap bookkeeping: adopt, never swap, after these
+    (0x40009094, "4fefff9848d77cfc", "rp_apply1"),
+    (0x40009E00, "4fefffb448d77cfc", "rp_apply2"),
 ]
 
 # --- descriptor pokes (addr, stock long, new long or symbol) ----------------

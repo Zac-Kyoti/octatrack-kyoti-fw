@@ -1,26 +1,16 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Zac-Kyoti
 //
-// repitch-kyoti gate-1 oracle: the patched image's increment builder and
-// TSTR resolver run through the firmware's own code on ot::Machine, against
-// (a) the STOCK image case-for-case for every non-repitch path, and (b) an
-// independent C model of the QUANT/fold/tag semantics for the repitch paths.
+// repitch-kyoti gate-1 oracle, rev 5: the patched image's increment builder,
+// TSTR resolver, dial shims, Part-DB display gate and the domain swap, run
+// through the firmware's own code on ot::Machine (Musashi), against the
+// STOCK image case-for-case and an independent model.
 //
 // Scaffold ported from refs/octabam/tools/harness/repitch_probe.cpp (MIT,
-// Sam Banks); the expectations are this module's own (RPS9/RPSP, QUANT,
-// integer-domain octave fold, INC_MAX-4 ceiling, 2-bit mode tag).
+// Sam Banks). Build line: see NOTES.md Session 106 continued (2); binary
+// out/repitch_probe_kyoti.
 //
-// Build (links refs/octabam's PREBUILT libs; rebuilds nothing there):
-//   c++ -std=c++17 -O1 -I refs/octabam/tools/emu/ot_emu -I refs/octabam/vendor \
-//       -I refs/octabam/vendor/dsp56300/source tools/repitch_probe_kyoti.cpp \
-//       refs/octabam/out/emu/libot_machine.a refs/octabam/out/emu/mc68k/lib68kEmu.a \
-//       refs/octabam/out/emu/dsp56300/dsp56kEmu/libdsp56kEmu.a \
-//       refs/octabam/out/emu/dsp56300/dsp56kBase/libdsp56kBase.a \
-//       refs/octabam/out/emu/dsp56300/asmjit/libasmjit.a \
-//       -o out/repitch_probe_kyoti
-// Run from the repo root:
-//   out/repitch_probe_kyoti out/raw/section_3_MAIN_OS.bin out/mainos_repitch_kyoti.bin \
-//       [quant_widget_addr rp_ui_gate_addr]   (hex; from m68k-elf-nm, enables 6+7)
+//   out/repitch_probe_kyoti STOCK PATCHED [quant_widget rp_ui_gate rp_swap rp_prev]
 #include <cstdio>
 #include <cstdint>
 #include <fstream>
@@ -36,13 +26,14 @@ namespace
 constexpr uint32_t lanes = 0x80000510, voices = 0x800049d8, states = 0x80004898;
 constexpr uint32_t curState = 0x800062a4, projectTempo = 0x8000181c;
 constexpr uint32_t trampoline = 0x47000000, stack = 0x47100000, settings = 0x47200000;
+constexpr uint32_t dbBase = 0x47400000, dbPtr = 0x46c82456;
 constexpr uint32_t INC_MAX = 0x08000000;
 
 struct Img
 {
 	std::vector<uint8_t> image;
 
-	static bool runTo(ot::Machine& m, uint32_t site, uint32_t until, unsigned budget = 600)
+	static bool runTo(ot::Machine& m, uint32_t site, uint32_t until, unsigned budget = 800)
 	{
 		const uint8_t code[] = {0xa9, 0x3c, 0x00, 0x00, 0x00, 0x20, 0x4e, 0xf9,
 			uint8_t(site >> 24), uint8_t(site >> 16), uint8_t(site >> 8), uint8_t(site)};
@@ -57,12 +48,11 @@ struct Img
 
 	struct Rate { unsigned track, tstr, tsmode, source, project; uint16_t ptch, rate; uint8_t machine = 1; };
 
-	uint32_t increment(const Rate& r, bool& ok, uint32_t rkAddr = 0, unsigned idx = 0) const
+	uint32_t increment(const Rate& r, bool& ok) const
 	{
 		ot::Machine m(image);
 		auto* cpu = m.getCpuState();
 		const uint32_t state = states + 40 * r.track, lane = lanes + 48 * r.track;
-		if(rkAddr) m.write8(rkAddr, uint8_t(idx));
 		m.write32(curState, state);
 		m.write32(stack + 64, 0x10);
 		m.write16(lane, r.ptch);
@@ -118,7 +108,7 @@ struct Img
 	}
 };
 
-// ---- the independent model of gate 1's semantics --------------------------
+// ---- the independent model -------------------------------------------------
 const unsigned RP[8] = {1, 2, 3, 1, 5, 4, 3, 2}, RQ[8] = {2, 3, 4, 1, 4, 3, 2, 1};
 unsigned bucket(unsigned ui) { unsigned d = ui > 12 ? ui - 12 : 0; d /= 15; return d > 7 ? 7 : d; }
 uint32_t model(uint32_t neutralInc, unsigned proj, unsigned samp, unsigned idx, unsigned modeoff)
@@ -128,6 +118,21 @@ uint32_t model(uint32_t neutralInc, unsigned proj, unsigned samp, unsigned idx, 
 	uint64_t inc = (neutralInc / D) * N + (neutralInc % D) * N / D;
 	if(inc > INC_MAX - 4) inc = INC_MAX - 4;
 	return uint32_t((inc & ~3ull) | modeoff);
+}
+
+// the Part-DB fixture used by the gate and swap contracts
+void setPart(ot::Machine& m, unsigned t, uint8_t machine, uint8_t slot0,
+             uint8_t setup, uint8_t ptch, uint32_t tsmode, uint32_t bpm)
+{
+	m.write32(dbPtr, dbBase);
+	m.write8(0x80000003, 0);            // part 0
+	m.write8(dbBase + 0x8eda2 + t, machine);
+	m.write8(dbBase + 0x8f04a + t * 5 + (machine <= 1 ? machine : 0), slot0);
+	m.write8(dbBase + 0x8ef5a + t * 30 + machine * 6 + 4, setup);
+	m.write8(dbBase + 0x8edaa + t * 30 + machine * 6 + 0, ptch);
+	const uint32_t set = (machine == 0 ? 0x100d5b30u : 0x100b14f0u) + (slot0 + 1u) * 0x448;
+	m.write32(set + 0x110, tsmode);
+	m.write32(set + 0x114, bpm);
 }
 
 int fails = 0;
@@ -141,25 +146,22 @@ void check(const char* what, bool ok, int detail = -1)
 
 int main(int argc, char** argv)
 {
-	if(argc != 3 && argc != 6) { std::printf("usage: %s STOCK PATCHED [quant_widget rp_ui_gate rk_quan]\n", argv[0]); return 2; }
+	if(argc != 3 && argc != 7) { std::printf("usage: %s STOCK PATCHED [quant_widget rp_ui_gate rp_swap rp_prev]\n", argv[0]); return 2; }
 	Img stock, pat;
 	for(auto [img, path] : {std::pair{&stock, argv[1]}, {&pat, argv[2]}}) {
 		std::ifstream in(path, std::ios::binary);
 		if(!in) { std::printf("missing %s\n", path); return 2; }
 		img->image.assign(std::istreambuf_iterator<char>(in), {});
 	}
-	std::printf("repitch-kyoti gate-1 contracts (%zu / %zu bytes):\n",
+	std::printf("repitch-kyoti rev-5 contracts (%zu / %zu bytes):\n",
 	            stock.image.size(), pat.image.size());
 
-	const uint32_t rkQuan = argc == 6 ? uint32_t(std::stoul(argv[5], nullptr, 16)) : 0;
-	if(!rkQuan) std::printf("  (no rk_quan address: contracts 2 and 5 need all three symbols)\n");
 	const unsigned projects[] = {720, 2160, 2880, 3600, 7200};
 	const unsigned sources[] = {720, 1440, 2880, 4320, 7200};
-	const uint16_t ptchs[] = {0x0400, 0x2200, 0x3400, 0x4000, 0x4800, 0x5800, 0x7c00};
+	const uint16_t ptchs[] = {0x0400, 0x1B00, 0x2E00, 0x4000, 0x4C00, 0x6000, 0x7C00};
 	const uint16_t rates[] = {0x7f00, 0x3f00};
 
-	// 1) feature-off purity: TSTR 0..3, both machines, every PTCH/RATE --
-	//    the patched builder must be bit-identical to stock.
+	// 1) feature-off purity
 	{
 		int bad = -1, n = 0;
 		bool ok = true;
@@ -178,9 +180,8 @@ int main(int argc, char** argv)
 		std::printf("      (%d cases)\n", n);
 	}
 
-	// 2) repitch family: SETUP 4/5/6 and AUTO carrying the sample's mode,
-	//    the QUAN index from rk_quan[track] -- and the PTCH word must be
-	//    IRRELEVANT: two different words give bit-identical increments.
+	// 2) repitch family: the composed PTCH word's bucket drives the ratio
+	//    (QUAN = the slot's real parameter: p-locks and scenes included)
 	{
 		int bad = -1, n = 0;
 		bool ok = true;
@@ -189,41 +190,38 @@ int main(int argc, char** argv)
 		                    {1, 4, 0}, {1, 5, 1}, {1, 6, 2}};
 		for(auto sel : sels)
 			for(auto proj : projects) for(auto samp : sources)
-				for(unsigned idx = 0; idx < 8; ++idx) {
+				for(auto ptch : ptchs) {
 					Img::Rate rNeut{2, 0, 2, samp, proj, 0x4000, 0x7f00, 1};
-					bool oks = true, okA = true, okB = true;
+					Img::Rate rT{2, sel.tstr, sel.tsmode, samp, proj, ptch, 0x7f00, 1};
+					bool oks = true, okp = true;
 					const auto neutral = stock.increment(rNeut, oks);
-					Img::Rate rT{2, sel.tstr, sel.tsmode, samp, proj, 0x4800, 0x7f00, 1};
-					const auto a = pat.increment(rT, okA, rkQuan + 2, idx);
-					rT.ptch = 0x2200;
-					const auto b = pat.increment(rT, okB, rkQuan + 2, idx);
-					const auto want = model(neutral, proj, samp, idx, sel.modeoff);
-					if(!(oks && okA && okB && a == want && b == a) && bad < 0) {
+					const auto got = pat.increment(rT, okp);
+					const auto want = model(neutral, proj, samp, bucket(ptch >> 8), sel.modeoff);
+					if(!(oks && okp && got == want) && bad < 0) {
 						bad = n;
-						std::printf("      first divergence: tstr%u idx%u proj%u samp%u: got %08x/%08x want %08x\n",
-						            sel.tstr, idx, proj, samp, a, b, want);
+						std::printf("      first divergence: tstr%u proj%u samp%u ptch%04x: got %08x want %08x\n",
+						            sel.tstr, proj, samp, ptch, got, want);
 					}
-					ok &= oks && okA && okB && a == want && b == a;
+					ok &= oks && okp && got == want;
 					++n;
 				}
-		check("repitch family: rk_quan drives the ratio; the PTCH word is irrelevant", ok, bad);
-		std::printf("      (%d cases x 2 words)\n", n);
+		check("repitch family: bucket(composed word) drives the exact folded ratio", ok, bad);
+		std::printf("      (%d cases)\n", n);
 	}
 
-	// 3) the guards: PICKUP, out-of-range sample tempo, TSMODE 4 without AUTO
-	//    -- all identical to stock.
+	// 3) guards
 	{
 		bool ok = true;
 		int bad = -1, n = 0;
 		const Img::Rate guards[] = {
-			{1, 4, 2, 2880, 2880, 0x4800, 0x7f00, 4},   // PICKUP keeps grains
+			{1, 4, 2, 2880, 2880, 0x4800, 0x7f00, 4},
 			{1, 5, 2, 2880, 2880, 0x4800, 0x7f00, 4},
-			{1, 4, 2, 600, 2880, 0x4800, 0x7f00, 1},    // sample tempo below range
-			{1, 6, 2, 7300, 2880, 0x4800, 0x7f00, 1},   // above range
-			{1, 0, 4, 2880, 2160, 0x4800, 0x7f00, 1},   // TSMODE 4 but SETUP OFF
-			{1, 2, 4, 2880, 2160, 0x4800, 0x7f00, 1},   // ... NORM
-			{1, 0, 5, 2880, 2160, 0x4800, 0x7f00, 1},   // TSMODE 5/6 without AUTO
-			{1, 3, 6, 2880, 2160, 0x4800, 0x7f00, 1},   // ... BEAT
+			{1, 4, 2, 600, 2880, 0x4800, 0x7f00, 1},
+			{1, 6, 2, 7300, 2880, 0x4800, 0x7f00, 1},
+			{1, 0, 4, 2880, 2160, 0x4800, 0x7f00, 1},
+			{1, 2, 4, 2880, 2160, 0x4800, 0x7f00, 1},
+			{1, 0, 5, 2880, 2160, 0x4800, 0x7f00, 1},
+			{1, 3, 6, 2880, 2160, 0x4800, 0x7f00, 1},
 		};
 		for(const auto& g : guards) {
 			bool oks = true, okp = true;
@@ -235,8 +233,7 @@ int main(int argc, char** argv)
 		check("guards: PICKUP / tempo out of range / TSMODE without AUTO stay stock", ok, bad);
 	}
 
-	// 4) the resolver: patched values 4/5/6 must equal stock GIVEN 0,
-	//    register for register; 0..3 must equal stock given the same value.
+	// 4) the resolver
 	{
 		bool ok = true;
 		for(uint32_t v = 0; v <= 6; ++v)
@@ -249,70 +246,81 @@ int main(int argc, char** argv)
 		check("resolver: 4/5/6 behave as OFF register-for-register; 0..3 untouched", ok);
 	}
 
-	// 5) quant_edit at 0x40055008: on the PLAYBACK page, slot 0, QUAN in
-	//    force, the delta edits rk_quan (clamped) and stock's body is never
-	//    entered; anything else falls through to the displaced frame.
-	{
-		bool ok = true;
-		int bad = -1, n = 0;
-		struct Ed { unsigned slot; int delta; unsigned setup; uint8_t q0, want; bool hook; };
-		const Ed eds[] = {
-			{0, +1, 4, 3, 4, true},
-			{0, -1, 5, 4, 3, true},
-			{0, +20, 6, 3, 7, true},
-			{0, -20, 4, 5, 0, true},
-			{1, +1, 4, 3, 3, false},   // another slot: stock
-			{0, +1, 0, 3, 3, false},   // not a repitch mode: stock
-		};
-		for(const auto& e : eds) {
-			ot::Machine m(pat.image);
-			auto* cpu = m.getCpuState();
-			const unsigned t = 2;
-			m.write8(0x80000000, t);
-			m.write32(0x80000012, 0);
-			m.write32(0x800000e0, 0);
-			m.write8(0x80000eb4 + t, 1);            // FLEX
-			m.write8(0x8000082f + 72 * t, 5);       // slot 5
-			const uint32_t set = 0x100b14f0 + 5 * 0x448;
-			m.write32(set + 0x114, 2880);
-			m.write32(set + 0x110, 2);
-			m.write8(lanes + 48 * t + 28, uint8_t(e.setup));
-			m.write8(rkQuan + t, e.q0);
-			m.write8(0x80000810 + 72 * t, 0x55);    // live-byte canary
-			m.write32(stack - 12, trampoline + 0x80);  // return sentinel
-			m.write32(stack - 8, e.slot);
-			m.write32(stack - 4, uint32_t(e.delta));
-			for(unsigned i = 0; i < 8; i += 2) m.write16(trampoline + 0x80 + i, 0x4e71);
-			m68k_set_reg(cpu, M68K_REG_SP, stack - 12);
-			m68k_set_reg(cpu, M68K_REG_PC, 0x40055008);
-			unsigned steps = 0;
-			bool hooked = false, fell = false;
-			while(steps++ < 400) {
-				if(m.pc() == trampoline + 0x80) { hooked = true; break; }
-				if(m.pc() == 0x40055010) { fell = true; break; }
-				if(!m.step()) break;
-			}
-			bool good;
-			if(e.hook)
-				good = hooked && !fell && m.read8(rkQuan + t) == e.want &&
-				       m.read8(0x80000810 + 72 * t) == 0x55 &&
-				       m68k_get_reg(cpu, M68K_REG_SP) == stack - 8;   // rts popped the sentinel
-			else
-				good = fell && m.read8(rkQuan + t) == e.q0;
-			if(!good && bad < 0) bad = n;
-			ok &= good;
-			++n;
-		}
-		check("quant_edit: hook edits rk_quan only; everything else reaches stock", ok, bad);
-	}
-
-	if(argc == 6) {
+	if(argc == 7) {
 		const uint32_t quantWidget = uint32_t(std::stoul(argv[3], nullptr, 16));
 		const uint32_t uiGate = uint32_t(std::stoul(argv[4], nullptr, 16));
+		const uint32_t swapFn = uint32_t(std::stoul(argv[5], nullptr, 16));
+		const uint32_t prevTab = uint32_t(std::stoul(argv[6], nullptr, 16));
 
-		// 6) the four page-1 dial shims: resolve record+48 (knob when null),
-		//    override with quant_widget exactly when record+0 is PTCH's
-		//    formatter; d1..d7/a1..a6 preserved.
+		auto callD1 = [](ot::Machine& m, uint32_t fn, uint32_t track) {
+			auto* cpu = m.getCpuState();
+			m.write32(stack - 4, trampoline + 0x80);
+			for(unsigned i = 0; i < 8; i += 2) m.write16(trampoline + 0x80 + i, 0x4e71);
+			m68k_set_reg(cpu, M68K_REG_D1, track);
+			m68k_set_reg(cpu, M68K_REG_SP, stack - 4);
+			m68k_set_reg(cpu, M68K_REG_PC, fn);
+			unsigned steps = 0;
+			while(m.pc() != trampoline + 0x80 && steps++ < 400)
+				if(!m.step()) return false;
+			return m68k_get_reg(cpu, M68K_REG_SP) == stack;
+		};
+
+		// 5) rp_swap: adopt, park, restore, idempotence -- both DB and SRAM
+		//    copies, live/lane bytes, and the validity floor.
+		{
+			bool ok = true;
+			const unsigned t = 3;
+			ot::Machine m(pat.image);
+			if(m.write32(dbPtr, dbBase), m.read32(dbPtr) != dbBase) {
+				check("rp_swap: DB pointer region unmapped in the emulator", false);
+			} else {
+				setPart(m, t, 1, 6, 4, 70, 2, 2880);   // FLEX, RPCH, PTCH byte 70
+				const uint32_t act = dbBase + 0x8edaa + t * 30 + 1 * 6;
+				const uint32_t park = dbBase + 0x8edaa + t * 30 + 18;
+				const uint32_t sAct = 0x100a4ece - 0x8ed80 + 0x8edaa + t * 30 + 1 * 6;
+				const uint32_t sPark = 0x100a4ece - 0x8ed80 + 0x8edaa + t * 30 + 18;
+				m.write8(park, 0);                      // fresh project: parked empty
+				// (a) first sight adopts: nothing moves
+				ok &= callD1(m, swapFn, t);
+				ok &= m.read8(prevTab + t) == 1 && m.read8(act) == 70 && m.read8(park) == 0;
+				// (b) leave repitch: 70 parks; the empty park enters as 64
+				m.write8(dbBase + 0x8ef5a + t * 30 + 6 + 4, 0);   // SETUP -> OFF
+				ok &= callD1(m, swapFn, t);
+				ok &= m.read8(act) == 64 && m.read8(park) == 70;
+				ok &= m.read8(sAct) == 64 && m.read8(sPark) == 70;
+				ok &= m.read8(0x80000810 + 72 * t) == 64;
+				ok &= m.read16(lanes + 48 * t) == 0x4000;
+				ok &= (m.read32(dbBase + 0x95048) & 1) && m.read32(0x100f8598) == 1;
+				// (c) idempotence: same state, second call changes nothing
+				ok &= callD1(m, swapFn, t);
+				ok &= m.read8(act) == 64 && m.read8(park) == 70;
+				// (d) re-enter: QUAN comes back
+				m.write8(dbBase + 0x8ef5a + t * 30 + 6 + 4, 5);   // SETUP -> RPS9
+				ok &= callD1(m, swapFn, t);
+				ok &= m.read8(act) == 70 && m.read8(park) == 64;
+				ok &= m.read8(sAct) == 70 && m.read8(sPark) == 64;
+				ok &= m.read8(0x80000810 + 72 * t) == 70;
+				ok &= m.read16(lanes + 48 * t) == 70 << 8;
+				// (e) a part apply resets the bookkeeping to adopt
+				{
+					auto* cpu = m.getCpuState();
+					m68k_set_reg(cpu, M68K_REG_SP, stack);
+					m68k_set_reg(cpu, M68K_REG_PC, 0x40009e00);
+					unsigned steps = 0;
+					while(m.pc() != 0x40009e08 && steps++ < 40)
+						if(!m.step()) break;
+					ok &= m.pc() == 0x40009e08 &&
+					      m68k_get_reg(cpu, M68K_REG_SP) == stack - 76;
+					for(unsigned i = 0; i < 8; ++i) ok &= m.read8(prevTab + i) == 0xff;
+					// and the next poll adopts: no swap against the same data
+					ok &= callD1(m, swapFn, t);
+					ok &= m.read8(act) == 70 && m.read8(park) == 64;
+				}
+				check("rp_swap: adopt / park(+floor) / restore / forget-on-apply", ok);
+			}
+		}
+
+		// 6) the four page-1 dial shims (unchanged mechanics)
 		{
 			constexpr uint32_t PTCH_FMT = 0x4003b4b0, KNOB = 0x400479b4;
 			struct Site { uint32_t at, ret; char rec; };
@@ -359,55 +367,36 @@ int main(int argc, char** argv)
 			std::printf("      (%d cases across 4 sites)\n", n);
 		}
 
-		// 7) rp_ui_gate truth table -- resolved from the part/machine/slot
-		//    tables and the settings arrays, no voice binding involved.
+		// 7) rp_ui_gate truth table over the Part DB -- boot-shaped fixture
 		{
 			struct Case { uint8_t track, setup, machine, slot; uint32_t tsmode, bpm; int want; };
 			const Case cases[] = {
-				{2, 4, 0, 5, 2, 2880, 1},   // STATIC, RPCH, tempo fine
-				{2, 5, 1, 7, 2, 2880, 1},   // FLEX, RPS9
-				{2, 6, 1, 7, 2,  100, 0},   // tempo veto
-				{2, 4, 4, 5, 2, 2880, 0},   // PICKUP machine never QUANTs
-				{2, 4, 2, 5, 2, 2880, 0},   // THRU machine neither
-				{2, 0, 1, 5, 2, 2880, 0},   // OFF
-				{2, 2, 1, 5, 4, 2880, 0},   // NORM ignores TSMODE
-				{2, 1, 1, 5, 4, 2880, 1},   // AUTO + sample REPITCH, IMMEDIATE
-				{2, 1, 0, 5, 5, 2880, 1},   // AUTO + sample RPS9 on STATIC
-				{2, 1, 1, 5, 6, 8000, 0},   // AUTO + RPSP, tempo out of range
-				{2, 1, 1, 5, 2, 2880, 0},   // AUTO + NORMAL sample
-				{9, 4, 0, 5, 2, 2880, 0},   // track out of range
+				{2, 4, 0, 5, 2, 2880, 1},
+				{2, 5, 1, 7, 2, 2880, 1},
+				{2, 6, 1, 7, 2,  100, 0},
+				{2, 4, 4, 5, 2, 2880, 0},   // PICKUP machine
+				{2, 4, 2, 5, 2, 2880, 0},   // THRU machine
+				{2, 0, 1, 5, 2, 2880, 0},
+				{2, 2, 1, 5, 4, 2880, 0},
+				{2, 1, 1, 5, 4, 2880, 1},   // AUTO + REPITCH sample, from the DB alone
+				{2, 1, 0, 5, 5, 2880, 1},
+				{2, 1, 1, 5, 6, 8000, 0},
+				{2, 1, 1, 5, 2, 2880, 0},
+				{9, 4, 0, 5, 2, 2880, 0},
 			};
 			bool ok = true;
 			int n = 0, bad = -1;
 			for(const auto& c : cases) {
 				ot::Machine m(pat.image);
-				auto* cpu = m.getCpuState();
-				const uint32_t t = c.track & 7;
-				m.write32(0x800000e0, 0);
-				m.write8(0x80000eb4 + t, c.machine);
-				m.write8(0x8000082f + 72 * t, c.slot);
-				const uint32_t set = (c.machine == 0 ? 0x100d5b30u : 0x100b14f0u) + c.slot * 0x448;
-				m.write32(set + 0x110, c.tsmode);
-				m.write32(set + 0x114, c.bpm);
-				if(m.read32(set + 0x114) != c.bpm) { std::printf("  [FAIL] settings region unmapped in the emu\n"); ok = false; break; }
-				m.write8(lanes + 48 * t + 28, c.setup);
-				m68k_set_reg(cpu, M68K_REG_D1, c.track);
-				m.write32(stack - 4, trampoline + 0x80);
-				for(unsigned i = 0; i < 8; i += 2) m.write16(trampoline + 0x80 + i, 0x4e71);
-				m68k_set_reg(cpu, M68K_REG_SP, stack - 4);
-				m68k_set_reg(cpu, M68K_REG_PC, uiGate);
-				unsigned steps = 0;
-				while(m.pc() != trampoline + 0x80 && steps++ < 160)
-					if(!m.step()) break;
-				const bool good = m.pc() == trampoline + 0x80 &&
-				                  m68k_get_reg(cpu, M68K_REG_D0) == uint32_t(c.want) &&
-				                  m68k_get_reg(cpu, M68K_REG_SP) == stack;
+				setPart(m, c.track & 7, c.machine, c.slot, c.setup, 64, c.tsmode, c.bpm);
+				bool ran = callD1(m, uiGate, c.track);
+				const bool good = ran && m68k_get_reg(m.getCpuState(), M68K_REG_D0) == uint32_t(c.want);
 				if(!good && bad < 0) bad = n;
 				ok &= good;
 				++n;
 			}
 			std::printf("      (%d gate cases)\n", n);
-			check("rp_ui_gate: slot-table display truth, binding-free", ok, bad);
+			check("rp_ui_gate: Part-DB display truth, boot-valid", ok, bad);
 		}
 	}
 

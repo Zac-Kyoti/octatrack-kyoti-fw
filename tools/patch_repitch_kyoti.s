@@ -44,8 +44,9 @@
         .global tstr_fmt
         .global quant_widget
         .global quant_fmt
-        .global quant_edit
-        .global rk_quan
+        .global rp_swap
+        .global rp_apply1
+        .global rp_apply2
         .global qdial1
         .global qdial2
         .global qdial3
@@ -72,15 +73,27 @@
         .equ    PTCH_FMT, 0x4003b4b0    | A[0] of STATIC/FLEX/PICKUP -- only playback slot 0 uses it
         .equ    NAME_ST, 0x400d3032     | STATIC slot-0 caption 'PTCH', 6 B (E+0x4e)
         .equ    NAME_FX, 0x400d31c4     | FLEX   slot-0 caption -- the image is SDRAM, writable
-        .equ    CUR_PART, 0x800000e0    | the current part (long)
-        .equ    MACH_TAB, 0x80000eb4    | machine byte per [part*8 + track]
-        .equ    SLOT_TAB, 0x8000082f    | assigned sample slot byte per [track*72]
-        .equ    LIVE_PAGE, 0x460d1684   | page kind on screen (0 = PLAYBACK page 1)
-        .equ    MIDI_FLAG, 0x80000012   | 0x40055008's own first gate; nonzero is not our path
-        .equ    REDRAW_B, 0x46c7d245    | knob-redraw mark, slot 0 (0x46c7d244[2*slot+1])
         .equ    SET_STATIC, 0x100d5b30  | STATIC sample settings, stride 0x448 (STORAGE.md)
-        .equ    SET_FLEX, 0x100b14f0    | FLEX settings array
+        .equ    SET_FLEX, 0x100b14f0    | FLEX settings array (recorders above slot 128)
         .equ    SET_STRIDE, 0x448
+| the Part DB -- boot-authoritative, unlike the engine mirrors (0x80000eb4 /
+| 0x8000082f), which are stale until the transport first runs (flash 3)
+        .equ    DB_PTR, 0x46c82456      | -> the working bank blob
+        .equ    PART_B, 0x80000003      | current part (byte; MIDI.md's editors)
+        .equ    PART_STRIDE, 0x18b2
+        .equ    OFF_MACH, 0x8eda2       | + t: machine type (0 ST, 1 FL, 4 PU)
+        .equ    OFF_P1, 0x8edaa         | + t*30 + m*6 + slot: page-1 bytes
+        .equ    OFF_P2, 0x8ef5a         | + t*30 + m*6 + slot2: page-2 bytes
+        .equ    OFF_SLOT5, 0x8f04a      | + t*5 + m: 0-based sample slot byte
+        .equ    SHADOW_ADJ, 0x100a4ece-0x8ed80 | SRAM part copy, addressed with
+                                        | the same DB-relative offsets
+        .equ    LIVE_B, 0x80000810      | live param byte per [t*72 + flat]
+        .equ    DIRTY_PARTS, 0x95048    | DB-relative: |= 1<<part
+        .equ    DIRTY_SRAM, 0x100b145e  | |= 1<<part
+        .equ    DIRTY_DB2, 0x9b332      | DB-relative: = 1
+        .equ    DIRTY_GLOBAL, 0x100f8598
+        .equ    TSTR_SLOT2, 4           | page 2: LOOP SLIC LEN RATE TSTR TSNS
+        .equ    PARKED, 18              | NEIGHBOR's slot-0 byte: page-1 '---'
         .equ    TXT_MEASURE, 0x40012f30 | (font, -1, str) -> px width
         .equ    TXT_DRAW, 0x40012bd8    | (font, canvas, x, y, -1, str)
         .equ    FONT, 0x400ba876
@@ -181,16 +194,9 @@ rate_gate:
         subi.l  #STATES,%d1
         moveq   #40,%d3
         divu.l  %d3,%d1                 | the track
+        bsr     rp_swap                 | domain bookkeeping (also polled at draw)
         bsr     rp_source
         move.l  %d0,%d3                 | bpm | modeoff<<16 (0 = not repitch)
-        beq.s   .rg_rest
-        lea     rk_quan(%pc),%a0
-        moveq   #0,%d0
-        move.b  (%a0,%d1.l),%d0         | this track's QUAN index...
-        swap    %d0
-        lsl.l   #8,%d0
-        or.l    %d0,%d3                 | ...joins d3 at bits 24..26
-.rg_rest:
         movem.l (%sp),%d0-%d1/%a0
         lea     12(%sp),%sp
         btst    #4,67(%sp)              | displaced
@@ -204,13 +210,17 @@ rate_gate:
 | word the table path sees is neutral 0x4000. Stock path untouched.
 pitch_gate:
         tst.l   %d3
-        bne.s   .pg_neutral
+        bne.s   .pg_rp
         .word   0x71d6                  | displaced: mvz.w (%a6),%d0
         bra.s   .pg_cmp
-.pg_neutral:
-        move.l  #0x4000,%d0             | PTCH is not applied on a repitch
-                                        | track; QUAN lives in rk_quan, so
-                                        | the word stays the user's pitch
+.pg_rp:
+        .word   0x71d6                  | the composed word -- base value,
+        lsr.l   #8,%d0                  | p-locks and scenes included: QUAN
+        bsr     rk_bucket               | is a real page-1 parameter again
+        swap    %d0
+        lsl.l   #8,%d0
+        or.l    %d0,%d3                 | idx -> bits 24..26
+        move.l  #0x4000,%d0             | PTCH itself is not applied
 .pg_cmp:
         .word   0xa346                  | displaced: mov3q #1,%d6
         .word   0x0c40,0x4000           | displaced: cmpi.w #0x4000,%d0
@@ -327,15 +337,15 @@ tstr_fmt:
 .t6:    .asciz  "RPSP"
         .balign 2
 
-| d1 = track -> d0 = 1 when QUAN is in force for display and editing.
-| Resolved WITHOUT the voice binding (which exists only once the track has
-| played -- the rev-3 caption-on-STOP lag): machine from MACH_TAB[part*8+t],
-| the assigned sample slot from SLOT_TAB[t*72], its settings at
-| base + slot*0x448 (STORAGE.md bases, MKI; the same reads stock's
-| 0x40004ee4 / 0x40004f9c make). One rule: QUAN shows exactly when repitch
-| would engage -- SETUP 4/5/6, or AUTO with the sample's TSMODE 4/5/6, on a
-| STATIC/FLEX machine with the sample's tempo in range. AUTO is now
-| IMMEDIATE. Preserves everything but d0.
+| d1 = track -> d0 = 1 when QUAN is in force. BOOT-AUTHORITATIVE: resolved
+| from the Part DB (the engine mirrors 0x80000eb4 / 0x8000082f proved stale
+| until the transport first runs -- flash 3's caption-on-STOP). Chain, all
+| measured upstream (PARAM_PAGES.md / file-format.md / STORAGE.md):
+| DB = [DB_PTR], part = byte PART_B; machine = DB[part*0x18b2+0x8eda2+t];
+| SETUP TSTR = DB[..+0x8ef5a+t*30+m*6+4]; the sample slot byte (0-based,
+| +1 indexes the settings arrays) = DB[..+0x8f04a+t*5+m]; TSMODE/BPM at
+| settings +0x110/+0x114. QUAN shows exactly when repitch would engage.
+| Preserves everything but d0. Also the deciding truth for rp_swap.
 rp_ui_gate:
         lea     -20(%sp),%sp
         movem.l %d1-%d3/%a0-%a1,(%sp)
@@ -344,32 +354,44 @@ rp_ui_gate:
         moveq   #7,%d1
         cmp.l   %d1,%d2
         bhi     .ug_out
-        move.l  (CUR_PART).l,%d1
-        lsl.l   #3,%d1
-        add.l   %d2,%d1
-        lea     (MACH_TAB).l,%a0
-        moveq   #0,%d0
-        move.b  (%a0,%d1.l),%d0         | machine: 0 STATIC, 1 FLEX qualify
-        moveq   #1,%d1
-        cmp.l   %d1,%d0
-        bhi     .ug_no
-        lea     (SET_STATIC).l,%a0
-        tst.l   %d0
-        beq.s   1f
-        lea     (SET_FLEX).l,%a0
-1:      moveq   #72,%d1
-        mulu.l  %d2,%d1
-        lea     (SLOT_TAB).l,%a1
+        movea.l (DB_PTR).l,%a0
+        moveq   #0,%d1
+        move.b  (PART_B).l,%d1
+        move.l  #PART_STRIDE,%d0
+        mulu.l  %d1,%d0
+        adda.l  %d0,%a0                 | this part's block in the DB
+        move.l  %d2,%d1
+        addi.l  #OFF_MACH,%d1
         moveq   #0,%d3
-        move.b  (%a1,%d1.l),%d3         | the assigned sample slot
-        move.l  #SET_STRIDE,%d1
-        mulu.l  %d3,%d1
-        adda.l  %d1,%a0                 | the sample's settings record
-        moveq   #48,%d1
-        mulu.l  %d2,%d1
-        lea     (LANES).l,%a1
+        move.b  (%a0,%d1.l),%d3         | machine
+        moveq   #1,%d1
+        cmp.l   %d1,%d3
+        bhi     .ug_no                  | STATIC/FLEX only
+        lea     (SET_STATIC).l,%a1
+        tst.l   %d3
+        beq.s   1f
+        lea     (SET_FLEX).l,%a1
+1:      move.l  %d2,%d1
+        lsl.l   #2,%d1
+        add.l   %d2,%d1                 | t*5
+        add.l   %d3,%d1
+        addi.l  #OFF_SLOT5,%d1
         moveq   #0,%d0
-        move.b  28(%a1,%d1.l),%d0       | SETUP TSTR
+        move.b  (%a0,%d1.l),%d0         | the 0-based sample slot
+        addq.l  #1,%d0
+        move.l  #SET_STRIDE,%d1
+        mulu.l  %d0,%d1
+        adda.l  %d1,%a1                 | the sample's settings record
+        moveq   #30,%d1
+        mulu.l  %d2,%d1
+        move.l  %d3,%d0
+        lsl.l   #2,%d0
+        add.l   %d3,%d0
+        add.l   %d3,%d0                 | machine*6
+        add.l   %d0,%d1
+        addi.l  #OFF_P2+TSTR_SLOT2,%d1
+        moveq   #0,%d0
+        move.b  (%a0,%d1.l),%d0         | SETUP TSTR, the Part's own copy
         moveq   #RPCH,%d1
         cmp.l   %d1,%d0
         blt.s   .ug_auto
@@ -381,7 +403,7 @@ rp_ui_gate:
         moveq   #TSTR_AUTO,%d1
         cmp.l   %d1,%d0
         bne.s   .ug_no
-        move.l  0x110(%a0),%d0          | the sample's own TSMODE
+        move.l  0x110(%a1),%d0          | the sample's own TSMODE
         moveq   #RPCH,%d1
         cmp.l   %d1,%d0
         blt.s   .ug_no
@@ -389,7 +411,7 @@ rp_ui_gate:
         cmp.l   %d1,%d0
         bgt.s   .ug_no
 .ug_tempo:
-        move.l  0x114(%a0),%d1          | the sample's BPMx24
+        move.l  0x114(%a1),%d1          | the sample's BPMx24
         cmpi.l  #BPM24_MIN,%d1
         blt.s   .ug_no
         cmpi.l  #BPM24_MAX,%d1
@@ -401,6 +423,96 @@ rp_ui_gate:
 .ug_out:
         movem.l (%sp),%d1-%d3/%a0-%a1
         lea     20(%sp),%sp
+        rts
+
+| d1 = track. On a gate transition the PTCH slot's stored value trades
+| places with the PARKED byte -- NEIGHBOR's page-1 slot 0, a '---' param
+| stock saves with the project but never applies -- in the working DB AND
+| the SRAM part copy, and the live/lane bytes follow, with the writer's own
+| dirty flags so a project save carries both domains. First sight adopts
+| without swapping (a project saved in a repitch mode already holds QUAN in
+| the slot; TSTR is saved alongside, so the domains stay matched). A parked
+| value below the ui minimum (4: a fresh project) enters as 64 = 1/1.
+| Called per frame from rate_gate and at every dial draw. Preserves all.
+rp_swap:
+        lea     -32(%sp),%sp
+        movem.l %d0-%d5/%a0-%a1,(%sp)
+        move.l  %d1,%d2                 | track
+        bsr     rp_ui_gate
+        lea     rp_prev(%pc),%a0
+        moveq   #0,%d1
+        move.b  (%a0,%d2.l),%d1
+        cmp.l   %d1,%d0
+        beq     .sw_out
+        move.b  %d0,(%a0,%d2.l)
+        cmpi.l  #0xff,%d1
+        beq     .sw_out                 | first sight: adopt what is stored
+        movea.l (DB_PTR).l,%a0
+        moveq   #0,%d1
+        move.b  (PART_B).l,%d1
+        move.l  #PART_STRIDE,%d0
+        mulu.l  %d1,%d0
+        move.l  %d0,%d4                 | part*stride
+        adda.l  %d0,%a0                 | the part's block
+        move.l  %d2,%d1
+        addi.l  #OFF_MACH,%d1
+        moveq   #0,%d3
+        move.b  (%a0,%d1.l),%d3
+        moveq   #1,%d1
+        cmp.l   %d1,%d3
+        bhi     .sw_out                 | machine changed mid-flight: skip
+        moveq   #30,%d1
+        mulu.l  %d2,%d1
+        addi.l  #OFF_P1,%d1
+        move.l  %d1,%d5
+        addi.l  #PARKED,%d5             | d5 = parked offset (DB-relative)
+        move.l  %d3,%d0
+        lsl.l   #2,%d0
+        add.l   %d3,%d0
+        add.l   %d3,%d0
+        add.l   %d0,%d1                 | d1 = active offset (machine*6)
+        move.l  %d5,%d3                 | machine no longer needed
+        moveq   #0,%d0
+        move.b  (%a0,%d1.l),%d0         | the value leaving the slot
+        moveq   #0,%d5
+        move.b  (%a0,%d3.l),%d5         | the value entering it
+        cmpi.l  #4,%d5
+        bge.s   1f
+        moveq   #64,%d5                 | fresh park: 1/1
+1:      move.b  %d5,(%a0,%d1.l)
+        move.b  %d0,(%a0,%d3.l)
+        lea     (SHADOW_ADJ).l,%a1      | the SRAM part copy, same offsets
+        adda.l  %d4,%a1
+        move.b  %d5,(%a1,%d1.l)
+        move.b  %d0,(%a1,%d3.l)
+        moveq   #72,%d0
+        mulu.l  %d2,%d0
+        lea     (LIVE_B).l,%a1
+        move.b  %d5,(%a1,%d0.l)         | live byte, flat 0
+        moveq   #48,%d0
+        mulu.l  %d2,%d0
+        lea     (LANES).l,%a1
+        move.l  %d5,%d1
+        lsl.l   #8,%d1
+        move.w  %d1,(%a1,%d0.l)         | lane word = ui<<8
+        moveq   #0,%d0                  | the writer's own dirty flags
+        move.b  (PART_B).l,%d0
+        moveq   #1,%d1
+        lsl.l   %d0,%d1
+        movea.l (DB_PTR).l,%a0
+        adda.l  #DIRTY_PARTS,%a0
+        or.l    %d1,(%a0)
+        lea     (DIRTY_SRAM).l,%a0
+        or.l    %d1,(%a0)
+        movea.l (DB_PTR).l,%a0
+        adda.l  #DIRTY_DB2,%a0
+        moveq   #1,%d1
+        move.l  %d1,(%a0)
+        lea     (DIRTY_GLOBAL).l,%a0
+        move.l  %d1,(%a0)
+.sw_out:
+        movem.l (%sp),%d0-%d5/%a0-%a1
+        lea     32(%sp),%sp
         rts
 
 | The page-1 dial renderers do NOT read the descriptor widget column: each
@@ -453,14 +565,15 @@ qdial4:                                 | 0x40037c06, record in a3
 
 | PTCH's widget, args (x, y, index, value, flags, fmt, canvas). Off a
 | repitch track (rp_ui_gate): the stock dial untouched. On one: the SAME
-| dial, its position snapped to the 8 QUAN positions (19 + 15*idx, so 1/1
-| sits at 64 -- dead centre) and its readout printed by quant_fmt. The
-| caller's own value (the PTCH parameter) is ignored here: pitch and
-| quantize are independent.
+| dial with the SAME value -- QUAN is the slot's real parameter, edited by
+| the stock editor, p-lockable and scene-lockable -- and quant_fmt prints
+| the value's ratio bucket as the readout. The draw-time rp_swap poll
+| catches mode transitions made while the transport is stopped.
 quant_widget:
         moveq   #0,%d1
         move.b  (UI_TRACK).l,%d1
-        bsr     rp_ui_gate
+        bsr     rp_swap
+        bsr     rp_ui_gate              | d1 preserved by both
         tst.l   %d0
         bne.s   .qw_quant
         move.l  #0x50544348,%d0         | 'PTCH': restore the caption
@@ -468,7 +581,6 @@ quant_widget:
         jmp     (KNOB).l
 | the caption lives in the descriptor name table, which the page's text pass
 | reads on every redraw; writing it at widget-draw time renames the dial
-| (one redraw of lag at worst on a mode change)
 .qw_name:
         move.l  %d0,(NAME_ST).l
         move.l  %d0,(NAME_FX).l
@@ -481,15 +593,7 @@ quant_widget:
         move.l  28(%sp),-(%sp)          | canvas
         pea     (quant_fmt).l           | the ratio readout
         move.l  28(%sp),-(%sp)          | flags
-        lea     rk_quan(%pc),%a0
-        moveq   #0,%d0
-        move.b  (%a0,%d1.l),%d0         | d1 = the UI track, gate-preserved
-        move.l  %d0,%d1                 | snap = 19 + 15*idx
-        lsl.l   #4,%d1
-        sub.l   %d0,%d1
-        moveq   #19,%d0
-        add.l   %d1,%d0
-        move.l  %d0,-(%sp)              | value
+        move.l  28(%sp),-(%sp)          | value: the real parameter
         move.l  28(%sp),-(%sp)          | index
         move.l  28(%sp),-(%sp)          | y
         move.l  28(%sp),-(%sp)          | x
@@ -497,7 +601,7 @@ quant_widget:
         lea     28(%sp),%sp
         rts
 
-| fmt(buf, value): the knob's readout for a snapped QUAN value.
+| fmt(buf, value): a ui value's ratio bucket.
 quant_fmt:
         move.l  8(%sp),%d0
         bmi.s   .qf_unk
@@ -512,43 +616,6 @@ quant_fmt:
         move.l  %a0,8(%sp)
         jmp     (SPRINTF).l
 
-| 0x40055008 -- FUN_40055008(slot, delta), the UI knob editor for every
-| page-1 parameter (the near-copy of MIDI.md's generic writer). On the
-| PLAYBACK page, slot 0, audio mode, QUAN in force: the delta edits
-| rk_quan[track] (0..7) and RETURNS -- the PTCH parameter's Part store,
-| shadow and live byte are never touched, so pitch survives a round trip
-| through the repitch modes untouched. Everything else falls through to
-| stock (the displaced frame, then the body).
-quant_edit:
-        tst.l   (MIDI_FLAG).l
-        bne.s   .qe_stock
-        move.l  (LIVE_PAGE).l,%d0
-        bne.s   .qe_stock               | 0 = the PLAYBACK page
-        move.l  4(%sp),%d0
-        bne.s   .qe_stock               | slot 0 only
-        moveq   #0,%d1
-        move.b  (UI_TRACK).l,%d1
-        bsr     rp_ui_gate
-        tst.l   %d0
-        beq.s   .qe_stock
-        lea     rk_quan(%pc),%a0
-        moveq   #0,%d0
-        move.b  (%a0,%d1.l),%d0
-        add.l   8(%sp),%d0              | the encoder delta, sign and all
-        bpl.s   1f
-        moveq   #0,%d0
-1:      cmpi.l  #7,%d0
-        ble.s   2f
-        moveq   #7,%d0
-2:      move.b  %d0,(%a0,%d1.l)
-        moveq   #0x14,%d0
-        move.b  %d0,(REDRAW_B).l        | the knob-redraw mark (MIDI.md)
-        rts
-.qe_stock:
-        lea     -48(%sp),%sp            | displaced
-        movem.l %d2-%d7/%a2-%fp,(%sp)   | displaced
-        jmp     (0x40055010).l
-
 .q_labels:
         .ascii  "1/2\0"
         .ascii  "2/3\0"
@@ -558,9 +625,31 @@ quant_edit:
         .ascii  "4/3\0"
         .ascii  "3/2\0"
         .ascii  "2/1\0"
-rk_quan:
-        .byte   3,3,3,3,3,3,3,3         | per-track QUAN index: 1/1 at boot,
-        .balign 2                       | session-persistent, not in projects
+rp_prev:
+        .byte   0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff
+        .balign 2
+
+| Any part apply (heavy 0x40009094 -- the audio-engine-restarting one; light
+| 0x40009e00 -- seq_goto_pattern's) makes rp_prev meaningless: reset it so
+| the next poll ADOPTS the freshly applied state. Part changes and project
+| loads are therefore never treated as transitions -- only live in-part
+| edits (SETUP TSTR, ATTR under AUTO) swap the domains.
+rp_forget:
+        lea     rp_prev(%pc),%a0
+        moveq   #-1,%d0
+        move.l  %d0,(%a0)
+        move.l  %d0,4(%a0)
+        rts
+rp_apply1:
+        bsr.s   rp_forget
+        lea     -104(%sp),%sp           | displaced
+        movem.l %d2-%d7/%a2-%fp,(%sp)   | displaced
+        jmp     (0x4000909c).l
+rp_apply2:
+        bsr.s   rp_forget
+        lea     -76(%sp),%sp            | displaced
+        movem.l %d2-%d7/%a2-%fp,(%sp)   | displaced
+        jmp     (0x40009e08).l
 .rk_ratios:
         .byte   1,2, 2,3, 3,4, 1,1, 5,4, 4,3, 3,2, 2,1
         .balign 2

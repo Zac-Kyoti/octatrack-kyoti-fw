@@ -32560,3 +32560,64 @@ outgoing pattern's end. Then handoff §6 order: (1) the 16↔7 NORMAL 1x case ag
 metronome — expect AR-exact, i.e. the author's one-step shift MAY reproduce and that is the
 baseline, not a regression; (2) FLASHING §4.3 steps 1–9; (3) master scales (expected
 imperfect). A DIAG twin is built if the LED still misbehaves.
+
+### Session 108 continued — flash-3 punch list forced REV 5: QUAN = the real parameter + a DOMAIN SWAP; oracle 7/7
+
+**Flash 3 (rev 4) results:** PTCH round-trip ✓ (independence held); everything
+else on the punch list failed or was re-scoped by the user: QUAN must be a
+real knob (1/1 centred), must persist in the ACTIVE and SAVED project, must
+be p-lockable/scene-lockable ("QUAN is a Page 1 parameter"); the rev-4
+encoder hook double-failed on hardware (no repaint — the redraw-mark 🟡 was
+wrong or insufficient — and raw deltas ≠ ±1: values jumped, some unreachable);
+and the AUTO caption STILL lagged until play/stop.
+
+**Root causes:** (1) rev 4's private-storage design fought the firmware's
+parameter machinery — every requirement (locks, persistence, editor feel,
+redraw) re-derives exactly what stock already does for real parameters.
+(2) The rev-4 gate read the ENGINE MIRRORS (`0x80000eb4`, `0x8000082f`),
+which are STALE UNTIL THE TRANSPORT RUNS — the actual boot-lag mechanism.
+Meanwhile the ATTR editor provably writes the settings arrays directly
+(`0x4006da78`: STATIC `0x100d5b30`, FLEX `0x100b14f0`, `+slot*0x448`,
+slots 1-based there), so content was never the problem — indexing was.
+
+**REV 5 (flash-4 candidate: mainos `7a4ba40f…`, syx `62e4204b…`, 2087 B, 0
+strays, cave `0x400d6f80..0x400d79d8` = 2648 B, 10 detours + 4 shims + 8
+pokes):**
+
+- **QUAN = the PTCH slot's real parameter** in repitch mode: stock editor
+  (feel, acceleration, repaint), stock p-locks and scene locks (pitch_gate
+  captures the COMPOSED word again, bucketed to bits 24..26 of d3), stock
+  Part storage. quant_widget passes the true value through and swaps only
+  the formatter (`quant_fmt`: ratio readout) and the caption.
+- **Independence via the DOMAIN SWAP (`rp_swap`)**: on a gate transition the
+  slot's stored byte trades places with the PARKED byte — NEIGHBOR machine's
+  page-1 slot 0 (`OFF_P1 + t*30 + 18`), a `---` param stock saves but never
+  applies — in the WORKING DB and the SRAM part copy (`0x100a4ece +
+  part*0x18b2`, proven by the 0x2a/0x11a offset arithmetic against the
+  writer's shadow bases), with live byte, lane word and the writer's dirty
+  flags. Both domains persist in saved projects (TSTR is saved alongside, so
+  domains stay matched). A parked byte below ui-min 4 enters as 64 = 1/1
+  (fresh projects). Poll sites: rate_gate (playing) and the dial draw
+  (stopped).
+- **Forget-on-apply:** detours at BOTH part-apply entries (`0x40009094`
+  heavy / `0x40009e00` light, the Session 49/90 family) reset `rp_prev` to
+  0xff so the next poll ADOPTS — part changes and project loads are never
+  treated as transitions and can never corrupt (adopting is always safe).
+  PARTREAPPLY calls 0x40009094 and does not detour it: compatible.
+- **Boot-valid gate:** `rp_ui_gate` now reads the Part DB only — machine
+  `DB[part*0x18b2+0x8eda2+t]`, SETUP TSTR `[..+0x8ef5a+t*30+m*6+4]`, sample
+  slot `[..+0x8f04a+t*5+m]` (0-based; +1 indexes the settings arrays — the
+  file-format KB's "SLOT=129 = recorder R1" confirms 1-based array indexing),
+  TSMODE/BPM from the arrays. AUTO immediate, THRU/NEIGHBOR excluded.
+
+**Oracle 7/7** rewritten for rev 5: word-bucket engine contract (1050 cases),
+rp_swap lifecycle (adopt / park+floor / restore / idempotence /
+forget-on-apply through the real 0x40009e00 entry, DB+SRAM+live+lane all
+asserted), Part-DB gate truth (12 cases). Removed: the rev-4 editor-hook and
+rk_quan contracts.
+
+**Known residuals (documented):** ~15 detents sweep one ratio zone (stock
+121-position editor; a 1:1-detent feel would need the editor hook redone with
+measured delta semantics); switching STATIC↔FLEX while in a repitch mode
+leaves QUAN in the old machine's byte until the next transition (per-machine
+PTCH storage; rare, recoverable by knob).
