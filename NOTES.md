@@ -32127,3 +32127,10 @@ emulator zero-fills that RAM — its gates were not wrong, just blind to this (C
   hypothesis is enough.
 
 Gates for V6.1 (OFF/ON identity, 16↔7 oracle) re-run on the final image; result below.
+
+**V6.1 gates (final image `eb191b810fcaffff…`):** `diff_stock_vs_patch` DJ OFF → IDENTICAL;
+DJ ON idle → IDENTICAL; `diag_tablearm_phase --len 7` (16↔7 NORMAL, 1x) → commits
+`[41, 78, 95, 149, 162, 203, 257]`, every 1x track class [0] in every segment with the single
+class-5 landing write per jump — byte-for-byte the V6 result (the arm-gate change is
+unobservable in the emulator, whose stale byte is 0; it matters on hardware only).
+**NEXT: the user flashes V6.1 (or the DIAG variant first) and reports.**
