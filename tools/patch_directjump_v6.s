@@ -81,8 +81,8 @@
     .equ UI_QUEUE,  0x460d17ae          | the sequencer->UI message queue
     .equ MSG_BANKPAT, 0x400d8167        | message 0x15: {code, bank} -- stock's wrap-change post
     .equ MSG_BANKPAT_ARG, 0x400d8168
-    .equ MSG_PAT,     0x400d8164        | message 0x11: {code, pattern, 0} -- stock @0x400a40fc
-    .equ MSG_PAT_ARG, 0x400d8165
+    .equ MSG_PAT,     0x400d816b        | message 0x11: {code, pattern, 1} -- stock's WRAP-CHANGE
+    .equ MSG_PAT_ARG, 0x400d816c        |   post @0x400a4b9a.  NOT 0x400d8164 -- see dl_commit.
 
     .equ PAT_BASE,  0x400e21e0          | pattern blobs: + bank*0x9b340 + pat*0x8ed8
     .equ BANK_STRIDE, 0x9b340
@@ -394,11 +394,28 @@ dc_next:
 |       (0x80000002 / 0x100b14ce) and early-outs when the bank is unchanged.
 |
 |   So V6.2's {0x15, bank} post could never clear the yellow: that handler cannot reach
-|   0x100b14d0.  {0x11, pattern} is the message that can, and stock posts it with exactly
-|   this idiom from inside this same tick ISR at 0x400a40fc-0x400a4114 (and from
-|   FUN_400a0570 / candidate_400a10d2, the other two ACT_PAT writers).  The kernel post is
-|   stock-legal from the tick ISR; CLAUDE.md's rule is about UI PRIMITIVES from the engine
-|   FRAME path, which this is not.
+|   0x100b14d0.  {0x11, pattern} is the message that can.  The kernel post is stock-legal
+|   from the tick ISR; CLAUDE.md's rule is about UI PRIMITIVES from the engine FRAME path,
+|   which this is not.
+|
+|   CONFIRMED AT RUNTIME (tools/diag_led_pend.py, this session -- the handoff 2.3 experiment).
+|   Stock, DJ off, cue at t40 committing at its natural wrap t90:
+|       t90  ACT_PAT <- 4               pc=0x400a44d0     (the wrap swap)
+|       t90  POST 0x400d8167 15 00 14   ret=0x400a4568    ({0x15, bank})
+|       t90  POST 0x400d816b 11 04 01   ret=0x400a4b9a    ({0x11, pat})
+|       t90  0x100b14d0 <- 4            pc=0x4006210e     (handler case 0x10) -> LED goes red
+|   V6.2, DJ on, landings at t41 / t143: the {0x15} post ONLY, and 0x100b14d0 stays 3 for
+|   the whole run -- the reported defect, reproduced in the emulator.
+|
+|   TEMPLATE CHOICE MATTERS.  There are two {0x11} templates and they differ in byte 2,
+|   which the handler branches on: byte2 == 0 -> it also calls FUN_4009c550(), which
+|   re-applies the TEMPO (0x80001814/18, from the pattern's own +0x8e58 field when
+|   per-pattern tempo is enabled); byte2 != 0 -> it does not.
+|       0x400d8164 = {0x11, arg@0x400d8165, 0x00}  -- the UI / arranger / reset posters
+|       0x400d816b = {0x11, arg@0x400d816c, 0x01}  -- stock's WRAP-CHANGE poster
+|   A jump is a wrap-change analogue, not a UI pattern-set, so we use 0x400d816b and leave
+|   the tempo alone.  Posting 0x400d8164 here would re-apply tempo on every landing -- a
+|   deviation from stock that nothing asked for.
 |
 |   ORDER MATTERS: the bank message first.  Case 0x10's part-index refresh indexes the bank
 |   base pointer 0x46c82456, and that pointer is what case 0x14 rewrites when the bank

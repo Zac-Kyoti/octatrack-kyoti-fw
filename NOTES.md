@@ -32452,3 +32452,111 @@ frame (the sentinel pop) — assert `stack−8`, not `stack−12`.
 **Hardware-new surfaces for flash 3:** the dial position + readout, encoder
 feel (one detent per step), the redraw mark (dial repaint while turning),
 AUTO caption immediacy, and that PTCH round-trips untouched.
+
+## Session 107 continued (2026-09-27, `main`) — DIRECT JUMP V6.3: the LED defect ROOT-CAUSED, fixed, and reproduced-then-cured in the emulator
+
+### The author's restatement of the AR quirk (recorded first)
+
+Mid-session the author corrected `AR_DJ_QUIRKS.md` item 1: the 16-vs-7 NORMAL-mode symptom
+on the **AR** is **not** fractional / half-step timing but a **whole one-step SHIFT of the
+16-step pattern relative to the master (metronome) pulse** when switching from the 7-step
+pattern. Step *durations* are correct; the step *index* is off by one. Stock AR behaviour,
+and the **stretch goal**, not a blocker. Both repo copies updated; the old wording is marked
+WITHDRAWN. This also redirects the mechanism hypotheses: a whole-step offset implicates the
+step index the commit derives (`new_step = master_step mod patLen` — which side of the
+boundary `master_step` is read on), not tick phase.
+
+### Method note: my own addressing slip
+
+My first image scan assumed base `0x40000000`. The image base is **`0x40000400`** — already
+documented (`BASE` in `build_directjump_v6.py`, and CLAUDE.md's `--adjust-vma=0x40000400`).
+Every address in that first pass was 0x400 low. Caught by checking two known anchors
+(`0x400a1f72`'s displaced bytes, and the painter at `0x4007b182`) before trusting the scan.
+**Check an anchor before believing a scan** — Ghidra and the scan disagreeing by a constant
+is the signature.
+
+### What `0x100b14d0` is, and why V6.2 could never have worked
+
+`0x100b14d0` is the project-RAM twin of **`0x80000004`, the UI's "current pattern"**
+(`0x80000002` twins `0x100b14ce`, current bank). An **opcode-filtered** scan — match only
+absolute-long *destination* encodings instead of the 484 bare 4-byte occurrences — yields
+exactly **four** writers.
+
+The UI task's message dispatcher is **`FUN_40061a94`** (4618 B, **no callers** = a task entry
+point). It switches on **`msg[0] − 1`**:
+
+- **case `'\x10'` = message `0x11`**: `0x100b14d0 = 0x80000004 = msg[1]`, refresh part index
+  `0x100b14cf`, full repaint battery (`0x400620ec`–`0x4006211a`). If `msg[2] == 0` it *also*
+  calls `FUN_4009c550()`.
+- **case `'\x14'` = message `0x15`** (what V6.2 posted): writes **only** the bank pair, and
+  early-outs when the bank is unchanged. **No path to `0x100b14d0` exists.**
+
+So V6.2's failure was structural, not the guessed "handler early-outs on an unchanged bank".
+
+### The experiment (handoff §2.3, run) — `tools/diag_led_pend.py` (new)
+
+Per-tick sampling of the six predicate operands, a write hook over the whole neighbourhood
+(so a base-register write cannot hide from it, which no static scan can promise), and a hook
+on `FUN_40000c3c` logging every posted message body.
+
+**Stock, DJ off, cue t40 → natural wrap t90:**
+
+```
+t90  W ACT_PAT <- 4                  pc=0x400a44d0
+t90  POST 0x400d8167 body=15 00 14   ret=0x400a4568   {0x15, bank}
+t90  POST 0x400d816b body=11 04 01   ret=0x400a4b9a   {0x11, pattern}
+t90  W 0x100b14d0 <- 4               pc=0x4006210e    -> LED goes red
+```
+
+**V6.2, DJ on, landings t41/t143:** the `{0x15}` post only; `0x100b14d0` stays `3` all run.
+**The hardware defect, reproduced in the emulator.**
+
+**Why static analysis had missed it:** stock's wrap-change posts `{0x11}` from a **second
+template `0x400d816b`**, not the `0x400d8164` the handoff named — so a reference scan for
+`0x400d8164` finds the UI/arranger/reset posters and misses the wrap-change entirely. That is
+the whole reason the wrap-change looked like the one `ACT_PAT` writer that never announces
+itself. Both templates sit in the little table at `0x400d8160`.
+
+### V6.3 — and the template trap the trace caught
+
+`dl_commit` now ends with stock's wrap-change **pair** of posts, in stock's order (bank
+first: case `0x10`'s part-index refresh indexes the bank base pointer `0x46c82456`, which is
+what case `0x14` rewrites when the bank changes).
+
+**Template choice is load-bearing.** Two `{0x11}` templates differ in the byte the handler
+branches on:
+
+| template | bytes | arg | posted by | side effect |
+|---|---|---|---|---|
+| `0x400d8164` | `{0x11, arg, 0x00}` | `0x400d8165` | UI / arranger / ISR reset `0x400a40fc` | **calls `FUN_4009c550()`** |
+| `0x400d816b` | `{0x11, arg, 0x01}` | `0x400d816c` | **stock's wrap-change `0x400a4b9a`** | none |
+
+`FUN_4009c550` re-applies the **tempo** (`0x80001814/18`, from the pattern's `+0x8e58` field
+when per-pattern tempo is on). The first V6.3 build used `0x400d8164` and would have
+re-applied tempo on every landing — an unasked-for deviation from stock. Caught by reading
+the trace's **message bytes**, not just the template address. A jump is a wrap-change
+analogue, not a UI pattern-set: V6.3 uses `0x400d816b`.
+
+### Gates — all four pass
+
+| gate | result |
+|---|---|
+| `diff_stock_vs_patch --patched` (DJ OFF) | **IDENTICAL** — inert with the feature off |
+| same `--dj-on` (DJ ON, nothing cued) | **IDENTICAL** |
+| `diag_tablearm_phase --project DJTEST2 --pattern 3 --to-pattern 4 --len 7` (the retraction case) | **PASS** — `commits=[41, 78, 95, 149, 162, 203, 257]`, byte-for-byte the V6/V6.1/V6.2 result; every 1x track class `[0]` in every segment plus exactly one class-5 landing write per post-landing segment. (Reading note: the tool prints `CxN`, so `0x7` means **class 0, count 7** — not class 7.) |
+| `diag_led_pend` on V6.3 (**the fix, directly**) | **PASS** — at each landing (t41, t143) the cave posts `{0x15}` then `{0x11, pat, 01}` (ret `0x400d76f6`), and `0x100b14d0` is updated by the handler at `0x4006210e` on the following tick. The predicate `PEND_PAT == [0x100b14d0]` now holds from the landing on. |
+
+`build_bugbuilds.py --with-wip`: DISJOINT / ALL PRESERVED / NO STRAYS, round-trip OK.
+
+One-tick latency between the post and the handler (the UI task's next scheduling slot) —
+stock has the same property; ~5 ms, not perceptible.
+
+**Artifacts:** mainline `out/mainos_directjump_v6.bin` sha256 `ce7404b670986807…`
+(832 B cave, 783 B vs stock, 0 strays); DIAG twin `75e3247d449b1982…` (`140C_KDIAG`).
+
+**NEXT: hardware.** Flash `out/OCTATRACK_OS1.40C_DIRECTJUMP_V6.syx` (or the CF `.bin`),
+DJ on with `[PTN]`+`[YES]`. First check the LED goes **red at the landing**, not at the
+outgoing pattern's end. Then handoff §6 order: (1) the 16↔7 NORMAL 1x case against the
+metronome — expect AR-exact, i.e. the author's one-step shift MAY reproduce and that is the
+baseline, not a regression; (2) FLASHING §4.3 steps 1–9; (3) master scales (expected
+imperfect). A DIAG twin is built if the LED still misbehaves.

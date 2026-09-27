@@ -9,31 +9,36 @@ still correct about the architecture; everything about V1–V5 in it is history.
 
 ## 0. Where the work stands
 
-**The jump itself WORKS on hardware.** V6.1-DIAG flashed 2026-09-27; audio switches in
-DIRECT JUMP fashion, toast read **`A8 L8 R8 C0 T1 H0 G0`** (8 cues, each seen once while
-idle, 8 arms, 8 landings; stock's countdown byte 0, transport running, no chain, no
-arranger). The user's earlier "not engaging" report was the LED symptom below, not a
-failure to jump.
+**The jump itself WORKS on hardware.** V6.1-DIAG flashed 2026-09-27; toast read
+**`A8 L8 R8 C0 T1 H0 G0`** (8 cues, 8 arms, 8 landings).
 
-**The one open defect: the pattern LEDs still behave as if the switch were merely CUED.**
-With DJ ON, the switched-to pattern's LED turns *yellow* at the cue and only goes *red* when
-the outgoing pattern reaches its end. It should go red at the landing. V6.2 tried to fix
-this by posting stock's wrap-change UI message and **that did not work** (flashed; LEDs
-unchanged).
+**The LED defect is SOLVED in V6.3 (Session 107) — root-caused, reproduced in the emulator,
+fixed, and the fix confirmed in the emulator. AWAITING HARDWARE.** Full account in §2 and
+NOTES Session 107 (continued). One line: V6.2 posted the `{0x15, bank}` message, whose
+handler has no code path to the byte the LED painter reads; the message that does is
+`{0x11, pattern}`, and stock's wrap-change posts it from a *second* template `0x400d816b`
+that the Session 106 scan never saw.
 
-Current build = **V6.2**, `tools/build_directjump_v6.py` (WIP tier, needs
-`KYOTI_ALLOW_WIP=1`):
+Current build = **V6.3**, `tools/build_directjump_v6.py` (WIP tier, needs `KYOTI_ALLOW_WIP=1`):
 
 | artifact | sha256 (first 16) |
 |---|---|
-| `out/mainos_directjump_v6.bin` (+ `OCTATRACK_OS1.40C_DIRECTJUMP_V6.syx` / `.bin`) | `723df02401fe3452` |
-| `out/mainos_directjump_v6diag.bin` (`140C_KDIAG`, `*_V6DIAG*`) | `c2692debeff10d0d` |
+| `out/mainos_directjump_v6.bin` (+ `OCTATRACK_OS1.40C_DIRECTJUMP_V6.syx` / `.bin`) | `ce7404b670986807` |
+| `out/mainos_directjump_v6diag.bin` (`140C_KDIAG`, `*_V6DIAG*`) | `75e3247d449b1982` |
 
-Emulator gates re-run on every V6.x and all pass: DJ-OFF identical to stock, DJ-ON-idle
-identical to stock, and the 16↔7 NORMAL-mode oracle holds fire-time class `[0]` on every
-track through five landings and two wraps.
+Cave 832 B; 783 B vs stock; 0 bytes outside caves + declared sites.
 
----
+**All four gates pass** (§3): DJ-OFF identical, DJ-ON-idle identical, the 16↔7 NORMAL-mode
+oracle byte-for-byte the V6/V6.1/V6.2 result, and the new LED trace showing `0x100b14d0`
+updating at the landing. `build_bugbuilds.py --with-wip` composes DISJOINT / ALL PRESERVED /
+NO STRAYS.
+
+**What the user should do next:** flash V6.3, DJ on via `[PTN]`+`[YES]`, and check the
+switched-to pattern's LED turns **red at the landing** rather than at the outgoing pattern's
+end. Then §6's order. Note the author's Session 107 restatement of AR quirk 1: the 16-vs-7
+symptom is a **whole one-step shift against the master pulse**, not fractional timing, and it
+is the **stretch goal** — if the OT reproduces it, that is the AR-exact baseline, not a
+regression.
 
 ## 1. What V6 is (so you do not re-derive it)
 
@@ -64,74 +69,88 @@ stock.** State lives in the cave, never in `0x80006a40+`.
 
 ---
 
-## 2. The LED defect — what is measured, and what V6.2 got wrong
+## 2. The LED defect — SOLVED (Session 107), mechanism measured end to end
 
-### 2.1 V6.2's attempt (failed)
+**Status: root-caused, fixed in V6.3, emulator-confirmed, awaiting hardware.**
 
-Stock's wrap-change, right after its own `ACT ← PEND` swap at `0x400a44d0`, posts to the UI
-queue: `0x400d8168 = ACT_BANK; FUN_40000c3c(0x460d17ae, 0x400d8167)` (`0x400a4548`–
-`0x400a4566`). That message template is `{0x15, bank}` and it is the only image-wide post of
-it. `dl_commit` now ends with those same three instructions. **Flashed: no change to the
-LEDs.** So that message is not what clears the "cued" colour (plausibly its handler
-early-outs because the *bank* did not change).
+### 2.1 The predicate (unchanged from Session 106, re-verified)
 
-Leave the post in or take it out as you like — it is harmless and matches stock, but it is
-not the fix.
+`FUN_4007afe8` @ `0x4007b182` paints "cued" (yellow) while
+`PEND_PAT (0x800065c0) != [0x100b14d0]` and `PEND_BANK == [0x80000002]`.
 
-### 2.2 The actual predicate (MEASURED, disassembly, Session 106)
+### 2.2 What `0x100b14d0` actually is
 
-The PTN-page pattern-grid LED painter is **`FUN_4007afe8`** (its LED-bit calls and the
-`has_content` predicate at `0x4009a464` are already documented in
-`tools/patch_pattern_led.s`; the chain-view twin is `FUN_400353d4`, and `FUN_400418e0` also
-reads the same pair). At `0x4007b182`:
+`0x100b14d0` is the **project-RAM twin of `0x80000004`, the UI's "current pattern"**
+(`0x80000002` twins `0x100b14ce`, the current bank). An opcode-filtered image scan — match
+only absolute-long *destination* encodings, not the 484 bare 4-byte occurrences — gives it
+exactly **four** writers, and the two that matter write the pair together.
+
+The UI task's message dispatcher is **`FUN_40061a94`** (4618 B, **no callers** = a task
+entry point, callees spanning every UI subsystem). It switches on **`msg[0] − 1`**:
+
+| case | message | what it does to the pair |
+|---|---|---|
+| `'\x10'` | **`0x11`** | `0x100b14d0 = 0x80000004 = msg[1]`; refresh part index `0x100b14cf`; full repaint battery incl. `FUN_400418e0` (`0x400620ec`–`0x4006211a`). **If `msg[2] == 0` it ALSO calls `FUN_4009c550()`.** |
+| `'\x14'` | **`0x15`** | writes **only** the bank pair (`0x80000002` / `0x100b14ce`), and early-outs when the bank is unchanged; falls through to a repaint. **Cannot reach `0x100b14d0` on any path.** |
+
+**That is why V6.2 failed**: it posted `{0x15, bank}`, whose handler has no path to the
+pattern byte. Not (as guessed in Session 106) because the handler early-outed on an
+unchanged bank.
+
+### 2.3 The experiment (handoff §2.3 as written, run — `tools/diag_led_pend.py`)
+
+Per-tick sampling of `PEND_PAT / PEND_BANK / ACT_PAT / ACT_BANK / 0x100b14d0 / 0x80000002`,
+plus a write hook over the whole neighbourhood (so base-register writes cannot hide) and a
+hook on the kernel post `FUN_40000c3c` logging every message body. DJTEST2, pattern 3↔4.
+
+**Stock, DJ off, cue at t40, commits at its natural wrap t90:**
 
 ```
-4007b182  mvs.b  (0x800065c0),%d5     ; d5 = PEND_PAT   (sequencer's cued pattern)
-4007b188  mvz.b  (0x100b14d0),%d0     ; d0 = a UI/project-side pattern byte
-4007b18e  cmp.l  %d5,%d0
-4007b190  beq.s  0x4007b1e0           ; EQUAL -> skip the "cued" paint entirely
-4007b192  mvs.b  (0x800065bf),%d1     ; d1 = PEND_BANK
-4007b198  mvz.b  (0x80000002),%d0     ; d0 = current bank
-4007b19e  cmp.l  %d1,%d0
-4007b1a0  bne.s  0x4007b1e0           ; different bank -> skip
-          ... paints the CUED (yellow) LED for pattern d5 via 0x400135b0 / 0x400131a0 ...
+t90  W ACT_PAT  <- 4                    pc=0x400a44d0     the wrap swap
+t90  POST 0x400d8167  body=15 00 14     ret=0x400a4568    {0x15, bank}
+t90  POST 0x400d816b  body=11 04 01     ret=0x400a4b9a    {0x11, pattern}
+t90  W 0x100b14d0 <- 4                  pc=0x4006210e     handler case 0x10  -> LED goes red
+t90  W 0x100b14cf <- 0                  pc=0x40062148     part-index refresh
 ```
 
-So **"cued" is painted when `PEND_PAT != [0x100b14d0]` and `PEND_BANK == [0x80000002]`.**
-The comparison is *not* against `ACT_PAT`. V6's landing copies `PEND → ACT` and leaves
-`PEND_PAT` equal to the new pattern, so whether the LED goes red depends entirely on what
-`0x100b14d0` holds — and nothing in V6 updates it.
+**V6.2, DJ on, landings at t41 and t143:** the `{0x15}` post **only**; `0x100b14d0` stays `3`
+for the entire run. The reported hardware defect, reproduced in the emulator.
 
-`0x100b14d0` is in the live project/part RAM region (neighbours: `0x100b14cc` current audio
-track, `0x100b14cf` part index, `0x100b14d1` written by `FUN_400a013c` from `0x80006694`).
-A naive 4-byte image scan for `0x100b14d0` returns ~484 false hits — **do not** use that;
-find its writers with the Ghidra census instead (§4).
+**Why no static scan had found it:** stock's wrap-change posts `{0x11}` from a **second
+template, `0x400d816b`** — not the `0x400d8164` that §2.3 named. A scan for references to
+`0x400d8164` therefore finds the UI/arranger/reset posters and misses the wrap-change
+entirely, which is exactly what made the wrap-change look like the one `ACT_PAT` writer that
+does not announce itself. Both templates live in the little table at `0x400d8160`.
 
-### 2.3 The next step, stated as an experiment (not a theory)
+### 2.4 The fix (V6.3)
 
-Do this before writing any hook — the repo's own rule (CLAUDE.md) is to measure when
-hardware and reasoning disagree:
+`dl_commit` now ends with **stock's wrap-change pair of posts, in stock's order**:
 
-1. In the emulator, sample `PEND_PAT 0x800065c0`, `PEND_BANK 0x800065bf`, `ACT_PAT
-   0x800065be`, `ACT_BANK 0x800065bd`, `0x100b14d0` and `0x80000002` every tick across
-   **(a)** a stock DJ-off cued switch that commits at a natural wrap, and **(b)** a V6.2
-   landing. Diff the two traces at and after the commit tick.
-2. Whatever stock's wrap-change path makes true about `0x100b14d0` (directly, or via a
-   message handler that runs in the UI task), make the landing make true as well.
-   `tools/diag_tablearm_phase.py` is the nearest template for such a run (it boots a real
-   project, cues patterns from a tick hook and watches addresses).
-3. Candidates to check while you are in there, in order:
-   - the **`{0x11, pattern}`** message (template `0x400d8164`, argument byte `0x400d8165`),
-     which `FUN_400a0570`, `candidate_400a10d2` and the stop path post — i.e. stock's
-     "pattern changed, here it is" announce, as opposed to V6.2's bank message;
-   - a UI-task handler that copies `ACT_PAT → 0x100b14d0` on one of those messages (find it
-     by censusing writers of `0x100b14d0`);
-   - writing `0x100b14d0` from `dl_commit` directly — **last resort**: it is UI/project state
-     written from the tick ISR, so it can race the UI task. Prefer the message route.
-4. Whatever you choose, re-run the three gates in §3 and then have the user flash. The LED
-   is a UI-visible change, so a DIAG variant is cheap insurance if the first attempt misses.
+```
+move.b ACT_BANK,%d0 ; move.b %d0,0x400d8168 ; pea 0x400d8167 ; pea UI_QUEUE ; jsr KPOST
+move.b ACT_PAT ,%d0 ; move.b %d0,0x400d816c ; pea 0x400d816b ; pea UI_QUEUE ; jsr KPOST
+```
 
----
+Order is load-bearing: case `0x10`'s part-index refresh indexes the bank base pointer
+`0x46c82456`, which is what case `0x14` rewrites when the bank changes — so a bank-changing
+jump must land `{0x15}` before `{0x11}`.
+
+**Template choice is load-bearing too.** There are two `{0x11}` templates, differing in the
+byte the handler branches on:
+
+| template | bytes | arg byte | posted by | side effect |
+|---|---|---|---|---|
+| `0x400d8164` | `{0x11, arg, 0x00}` | `0x400d8165` | `FUN_400a0570`, `candidate_400a10d2`, the ISR reset path `0x400a40fc` | **also calls `FUN_4009c550()`** |
+| `0x400d816b` | `{0x11, arg, 0x01}` | `0x400d816c` | **stock's wrap-change `0x400a4b9a`** | none |
+
+`FUN_4009c550` re-applies the **tempo** (`0x80001814`/`0x80001818`, from the pattern's own
+`+0x8e58` field when per-pattern tempo is enabled). A jump is a wrap-change analogue, not a
+UI pattern-set, so V6.3 uses `0x400d816b` and leaves the tempo alone. The first V6.3 build
+used `0x400d8164` and would have re-applied tempo on every landing — an unasked-for
+deviation from stock; caught by reading the trace's message bytes, not the address alone.
+
+The kernel post from the tick ISR remains stock-legal (§5) — this is the same call, the same
+queue and the same two messages stock itself posts from this ISR.
 
 ## 3. Gates — run all three before asking for a flash
 
