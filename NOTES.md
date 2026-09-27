@@ -32345,3 +32345,9 @@ repitch-family contract now 2100 cases (AUTO+RPS9 → tag 1 and AUTO+RPSP →
 tag 2 proven through the real builder), guards extended (TSMODE 5/6 without
 AUTO stay stock), gate truth table 13 cases. Hardware-new surfaces: the
 QUANT cell + QUAN caption, ATTR's two new values, per-sample AUTO.
+
+**V6.2 gates (`723df02401fe3452…`):** DJ OFF → IDENTICAL; DJ ON idle → IDENTICAL; 16↔7 NORMAL
+oracle → commits `[41, 78, 95, 149, 162, 203, 257]`, every 1x track class [0] with the single
+class-5 landing write per jump — identical to V6/V6.1 (the UI post touches no sequencer
+state). **NEXT: the user flashes V6.2 — the switched-to LED must go red at the landing —
+then the 16↔7 case against the metronome, FLASHING §4.3 steps 1–9, then master scales.**
