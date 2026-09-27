@@ -132,11 +132,11 @@ changes, change the call and the README table together. Upstream RE repos are tr
 |---|---|---|
 | **Bug 1** — Plays-Free MIDI manual-trig stall | `build_trigscale_only.py` | **confirmed** 2026-08-28. Always-on, folded into every feature build |
 | **Bug 2** — a p-lock-only pattern reads as empty (grid LED unlit) | `build_pattern_led.py` | **confirmed** 2026-09-13 |
+| **Bug 3** — Part-change carryover: PICKUP→FLEX stuck loop + spurious Part-edited flag | `build_partreapply.py` | **confirmed** 2026-09-22/23, thread closed |
 | **MUTE MODE** — `OT` / `OTFX` / `OTFX-T` / `DT-T`, menu, SOLO, `'ANDY'` persistence | `build_mutemode_dt.py` | **confirmed, final** 2026-09-21. All four modes; one persisted word with the menu index derived from it |
 | **QUANTIZE LIVE REC** — `[REC]` + `[PLAY]`, then `[PLAY]` again while the toast is up | `build_qlrec.py` | **confirmed working** (2026-09-25) after three instructive failures: a `dur<=0` toast hung the unit, a `0x400522ca` frame-handler detour crashed it, and a private scratch word at `0x80006a60` did not survive on the unit. Now keeps **no state at all** — the gate is stock's toast handle. 2 cosmetic issues parked |
 | **SIDE-CHAIN COMPRESSOR** — `KEY`/`KFLT`/`KGN`/`MON`, cross-core | `build_sidechain3.py` → `SIDECHAIN3_CROSS` | **confirmed, final** 2026-09-20, single-core and cross-core both |
 | **TRIGLESS-LOCK AUTO-REMOVE** | `build_triglock.py` | **confirmed, final** 2026-09-21 |
-| **Part-change carryover** — PICKUP→FLEX stuck loop + spurious Part-edited flag | `build_partreapply.py` | **confirmed** 2026-09-22/23, thread closed |
 
 **Composites** — `build_bugbuilds.py` gives each finished feature its **own** image with
 all three bug fixes folded into it: MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK and
