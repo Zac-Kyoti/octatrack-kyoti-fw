@@ -32294,3 +32294,30 @@ If flash 1's audio was checked, tempo-following + that knob behaviour is the
 expected signature. **Awaiting flash 2: the QUANT cell appearing is the one
 new surface; audio confirmation of tempo-following still pending from the
 user either way.**
+
+### Session 106 continued — V6.1 DIAG on hardware: it jumps (A8 L8 R8 C0 T1 H0 G0); the LEDs don't follow. V6.2 posts stock's UI message
+
+**Hardware (user).** V6.1 DIAG: audio switches in DIRECT JUMP fashion; toast `A8 L8 R8 C0
+T1 H0 G0` — eight cues, each seen once while idle (R), armed (A) and landed (L); the
+countdown byte read 0; transport 1, no chain, no arranger. So the arm gate is healthy and
+the stale-byte hypothesis is not what blocked V6 — the user now believes V6 was jumping
+too and the LEDs misled the first reading. (V6.1's `bgt` is kept: it differs from V6 only
+when the byte is negative, which C0 says it was not — a harmless guard.) What IS wrong:
+the switched-to pattern's LED stays **yellow (cued)** until the old pattern's end and only
+then turns red, exactly as with DJ off.
+
+**Cause (static).** Stock's wrap-change, right after its `ACT <- PEND` swap (`0x400a44d0`),
+posts to the UI: `0x400d8168 = ACT_BANK; FUN_40000c3c(0x460d17ae, 0x400d8167)`
+(`0x400a4548`–`0x400a4566`; message template `0x400d8167` = `{0x15, bank}`; the only
+image-wide post of that message). The deferred-landing path V6 rides was written for
+transport start, whose task-context caller posts for itself, so it never posts — the UI
+never learns the pattern changed until the next natural wrap re-posts. Gold re-entered the
+wrap-change body and therefore posted for free.
+
+**V6.2.** `dl_commit` ends with the same three instructions stock uses (`0x400d8168 =
+ACT_BANK; pea 0x400d8167; pea 0x460d17ae; jsr 0x40000c3c`), from the same tick-ISR
+context as stock's own site. (CLAUDE.md's "never call a UI/kernel primitive from an
+engine hook" is about UI primitives from the engine FRAME path — the kernel post is what
+the tick ISR itself uses at `0x400a4566`, `0x400a3f8c`, `0x400a4dd8`.) Mainline sha256
+`723df02401fe3452…` (800 B cave, 753 bytes vs stock, 0 strays); DIAG `c2692debeff10d0d…`.
+Gates re-run on this image — result below.

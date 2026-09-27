@@ -77,6 +77,10 @@
     .equ MIDI_SEND, 0x8000002a          | byte: send MIDI transport (START/STOP/...)
     .equ PC_SEND,   0x4009e884          | FUN_4009e884(bank, pat): MIDI Program Change
     .equ SPRINTF,   0x40013a08          | varargs sprintf (DJ_DIAG toast only)
+    .equ KPOST,     0x40000c3c          | kernel post(queue, msg) -- see dl_commit
+    .equ UI_QUEUE,  0x460d17ae          | the sequencer->UI message queue
+    .equ MSG_BANKPAT, 0x400d8167        | message 0x15: {code, bank} -- stock's wrap-change post
+    .equ MSG_BANKPAT_ARG, 0x400d8168
 
     .equ PAT_BASE,  0x400e21e0          | pattern blobs: + bank*0x9b340 + pat*0x8ed8
     .equ BANK_STRIDE, 0x9b340
@@ -373,6 +377,21 @@ dc_next:
     clr.w   RESYNC80
     clr.w   RESYNC82
     clr.w   RESYNC84
+|   V6.2 (Session 106): tell the UI.  Stock's wrap-change, right after its own ACT<-PEND
+|   swap (0x400a44d0), does `0x400d8168 = ACT_BANK; FUN_40000c3c(0x460d17ae, 0x400d8167)`
+|   (0x400a4548-0x400a4566) -- the {0x15, bank} message that makes the pattern LEDs and
+|   the display take the new pattern.  The deferred-landing path we ride was written for
+|   transport start, whose task-context caller posts for itself, so it never posts; without
+|   this the switched-to LED stays yellow ("cued") until the old pattern's end (flashed V6.1
+|   DIAG, 2026-09-27: A8 L8 R8, audio jumping, LEDs not).  Same call, same message, same
+|   interrupt context as stock's own site -- the kernel post is stock-legal from the tick
+|   ISR (CLAUDE.md's rule is about UI primitives from the engine FRAME path).
+    move.b  ACT_BANK,%d0
+    move.b  %d0,MSG_BANKPAT_ARG
+    pea     MSG_BANKPAT
+    pea     UI_QUEUE
+    jsr     KPOST
+    addq.l  #8,%sp
     moveq   #ST_LANDING,%d0
     move.b  %d0,dj_state
     .ifdef DJ_DIAG
