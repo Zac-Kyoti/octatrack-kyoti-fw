@@ -31843,3 +31843,104 @@ the user's 16↔7 NORMAL-mode case, DJTEST2 odd lengths, DJMAST2 scales, feature
 
 Memory topic file updated first thing (gold retraction). Build tiers unchanged. No OT code
 touched this session — scope discipline: understand before patching.
+
+### Session 105 continued — the three OT measurements, and what they turned up: OT already contains AR's DIRECT JUMP landing
+
+Tooling: the AR repo's two generic Ghidra scripts copied here (`tools/ghidra/GhidraSeqCensus.java`,
+`GhidraDecompArgs.java`), run against `ghidra_project octamax`. Dumps: `out/ghidra/seq_decomp_session105.txt`
+(the tick ISR `FUN_400a1e0c` + `consumer_a6c0_a33f8` @ `0x400a1eea`, 10 628 B, listing complete to the
+`rte` at `0x400a4f16` — but the wrap-change `0x400a4568`–`0x400a4bdc` is STILL undefined in this
+project; Session 79's force-decode was never saved), `seq_census_session105.txt`, `misc_census_session105.txt`,
+`transport_decomp_session105.txt`, `preroll_decomp_session105.txt`.
+
+**Answer 1 — phase order.** OT's tick handler is AR's, phase for phase (same code lineage):
+
+| OT (`consumer_a6c0_a33f8`) | AR (`FUN_4009905c`) | what |
+|---|---|---|
+| `0x400a1eea`–`0x400a1f68` | A/B | ack `INTFRCH` bit 0 (src 32); tick gate `0x46107568 == 0`; MIDI-clock-out byte |
+| `0x400a1f2a`–`0x400a1f66` | C | MIDI CONTINUE countdown `0x800066d4` → `0xFB` |
+| **`0x400a1f72`–`0x400a222e`** | **D2** | **landing countdown `0x80006687`**: at 0 → `0x8000667e = 0`; `0x800065d3[t] = tps_t − 1` (16 tracks, audio `+0x51`/`0x91a`, MIDI `0x400e6ad9`/`0x8b0`); `0x800065b6 = tps_master − 1` (`0x400a2048`/`0x400a205e`); **`0x80006624 = 0xffff`** (`0x400a207e`); per track from the snapshot: `STEP 0x800064d0[t] = 0x80006516[t]` (word), `0x800064e0[t] = snap−1`, `0x800064f0[t] = 0x80006536[t]`, **`CNTDN 0x800065c3[t] = −1`** (`0x400a20e6`), display copies; `0x800065b2 = 0x8000663a` (`0x400a211e`, = low word of the long `0x80006638`); `0x8000663d` + per-track scale caches; `0x80006500[t] = 1` for enabled tracks; `0x800065b8 = 1`; MIDI `0xFA` if `0x8000002a` (`0x400a221c`–`0x400a222e`) |
+| `0x400a2230`–`0x400a2528` | D3 | count-in countdown `0x80006514` → zero landing, `0xFA` |
+| `0x400a2530`–`0x400a28d0` | — | immediate restart flag `0x46c8028a` → zero landing + purge of every fire table |
+| `0x400a2982`–`0x400a3626` (audio), `0x400a3628`–`0x400a3cc8` (MIDI) | E | per-track scheduling. Loop head at `tick==0`: per-track LENGTH-boundary resync masks `0x80006680/82` (PER-TRACK mode) — an OT extra. Then, hold bit `0x80006626` clear && `ARMED 0x80006500[t] == 1` && no stop pending: `pat = CNTDN[t] >= 0 ? prev (0x800065c1/c2) : cur`; `ahead = tps`; `if CNTDN == 0: ahead −= reload 0x800065d3[t]`; `if first-fire 0x80006624 bit: ahead −= reload`; `step_handler_confirmed(t, bank, pat, STEP[t], slot)` (`0x4009d1e8`; MIDI `0x4009cf4c`); **fire time `0x80001904[t + slot·8] = ahead·0x285ff0 + micro(0x46c7a830[t]) + sampleclk(0x4610757c) − 0x285ff0`** (`0x400a2e18`); dedupe identical to AR's (same-time kill when same pattern or CNTDN≠0, else kill later-than-boundary); `tick_in_step = reload` on `CNTDN==0` or first-fire (bit cleared) |
+| `0x400a3cd0`–`0x400a3f8c` | F | per-track advance with the hold-bit skip (`0x80006626` → `reload = PAIR[t].lo`, first-fire bit set) — the Session 79 loops |
+| `0x400a3fdc`–`0x400a4566`, then the undefined `0x400a4568`–`0x400a4bdc` | G | master advance; stop-pending; phase 2 = next-pattern decision (`0x400a412e`; arranger `FUN_4004a668`, PC out `FUN_4009e884`); phase 0 = master step `++` (`0x400a423a`), LED masks, MIDI-clock timestamps `0x80001904[0x3b+]`, cycle-end decision, purge, then the WRAP-CHANGE (prev←cur, cur←PEND, `0x80006638/28 = 0x80006630`, `0x8000662c = 0x80006634`, the ceil/PAIR/CATCHUP/CNTDN rebuild loops of AR_DIRECT_JUMP §3) |
+| `0x400a4ba0`–`0x400a4d34` | H | CNTDN expiry landings: `STEP[t] = NEXT_STEP 0x800065e4[t]` (word), tick 0, `FUN_400a536c` reposition callback, ARMED from the track's enable byte |
+| `0x400a4d36`–`0x400a4e78` | I | bar counter `0x80006511/12`, MIDI-clock 16th counters |
+| `0x400a4e7a`–`0x400a4f16` | J | `SR=0x2700`; slice tail: `0x46107568 = 0x285ff0` (audio-domain tick), `0x4610756c = 0xa17fc`, deadline `0x46107570`; `rte` |
+
+The **commit site precedes the scheduler** (D at `0x400a1f72` < E at `0x400a2982`), exactly AR's
+ordering. Tick unit: audio domain `0x285ff0` = 2 646 000 sub-units per tick (`44100 × 60`), MIDI-out
+domain `0x41a0` / `0x1068`.
+
+**Answer 2 — the analogues exist, one to one.** First-fire mask = `0x80006624` (AR `0x405667d4`); hold
+mask = `0x80006626` (AR `0x405667b8`); per-track fire countdown = `CNTDN_TBL 0x800065c3`, −1 idle (AR
+`0x405667ba`) — Session 79's "one-shot arm" reading was right; per-track reload = `0x800065d3`
+(AR `0x405667c7`; the `.equ` calling it `CATCHUP` describes only its wrap-change value); NEXT_STEP words
+`0x800065e4` (AR `0x40566784`); remainder words `PAIR 0x80006604` (AR `0x4056679e`); **landing snapshot**
+= `0x80006516[16]` words (step), `0x80006536[16]` bytes (tick), `0x8000663a` (master step, low word of
+`0x80006638`) — AR `0x405667f7` / `0x40566804` / `0x405667f4`; landing countdown `0x80006687` (AR
+`0x405666dc` + `0x405667e4`'s role), count-in `0x80006514` (AR `0x405667d6`), CONTINUE countdown
+`0x800066d4` (AR `0x40566814`).
+
+**Answer 3 — yes, one step ahead, and the dedupe is AR's.** Same `ahead − 1` multiplier, same three
+slots per track, same two dedupe rules. The old pattern's due event and the landing's immediate fire
+coincide at the boundary tick and the same-time rule kills the older one unless microtiming separates
+them — that is AR's user-confirmed "occasional spurious trig", and OT will have it too.
+
+**The snapshot's writer: `consumer_a6c0_9e374` @ `0x4009da20` (2020 B, ~50 UI callers)** = AR's
+`FUN_40099fd2` pre-roll: `T = 0x80006638 × tps_master`; per track not engaged: `pos = T mod
+(tps_t × len_t)`, `snap_step = ceil(pos / tps_t)`, `snap_tick = pos − snap_step·tps_t` (+`tps_t` if
+negative), plus the first event (slot −1) into `0x46c77b9a[t]` with offset `0x46c7a100[t]`. Consumed by
+the transport-start function `FUN_4009b964` (prologue `0x4009b964`, callers `0x4000a26a`/`0x4000a344`
+= the PLAY key handlers, `0x4000e53c`, `0x400617fa`, `0x40061894`, `0x400629e4`; Ghidra's
+`candidate_4009b9cc/bae2/bbcc/bd44` are fragments of it) — immediate variant fires the pre-rolled
+events itself — and by the ISR's `0x80006687` path (deferred variant, = AR D2's layout). The countdown
+value comes from the arranger position code `FUN_400a0734` (`DAT_80006688` = ticks to the next step
+boundary) via `FUN_400a0570(bank, pat, startStep, endStep, resumeStep)` → `0x80006630/28/38/2c/34`.
+So `0x80006628` — the "start offset" Hook H has been writing since Session 79 — is the arranger's
+CYCLE START step (AR `0x40566758`), and `0x80006638` the RESUME step.
+
+### The V6 design — AR's DIRECT JUMP through OT's own landing (no boundary-body hook at all)
+
+Everything sequencer-side that the V4/V5 line hooked (`dj_a` @`0x400a4006`, `dj_b` @`0x400a42fa`,
+`dj_c` @`0x400a4840`, `dj_d7` @`0x400a47f6`, `dj_scaleix_fix` @`0x400a4220`, Hooks Z/X/V) is deleted;
+the UI side (toggle, keymap, `dj_ptnrel`, toast, DJ_MODE persistence) stays. Three sequencer pieces:
+
+1. **Arm + land, one detour at `0x400a1f72`** (`1039 8000 6687` = `move.b (0x80006687).l,D0b`, 6 B,
+   inside phase D, runs every tick). Cave logic, DJ_MODE on and transport running only:
+   - not armed, `PEND_PAT != −1`, `PEND != ACT`, `0x80006687 == 0`: **arm** — `0x80006687 = LEN_TBL
+     [SCALE_IX 0x8000663d] − TICK_CTR 0x800065b6` (AR D1; stock's own decrement follows in the same
+     tick, so the landing tick is the one whose pre-advance phase is `tps − 1`, i.e. the next master
+     step boundary; a request on a boundary tick lands that tick).
+   - armed and `0x80006687 == 1` (this tick lands): `prev 0x800065c1/c2 = ACT`; `ACT = PEND`
+     (PEND left equal to ACT, exactly what the stock wrap-change leaves); `new_step = MASTER_STEP
+     0x800065b2 mod masterLen` (NORMAL: byte `+0x8e53`; PER-TRACK: word `+0x8e50`, skip if `< 2` /
+     INF); `0x80006638 = new_step` (long, so `0x8000663a` reads it); per track `0x80006516[t] =
+     new_step mod len_t` (NORMAL: `+0x8e53`; PER-TRACK: audio `+0x50 + t·0x91a`, MIDI `+0x48f8 +
+     (t−8)·0x8b0`), `0x80006536[t] = 0`; clear the hold mask `0x80006626` and the PER-TRACK resync
+     masks `0x80006680/82/84` for hygiene; set `dj_landing`. Then replay the displaced instruction.
+     Stock lands: reloads, `TICK_CTR = tps−1`, first-fire all, CNTDN −1, master step, scale caches,
+     ARMED — and phases E/F/G of the same tick fire `new_step` on every track, re-open full windows,
+     and run the master step body. AR D2, verbatim, by stock code.
+2. **Suppress the transport-start side effect, one detour at `0x400a221c`** (`4a39 8000 002a` =
+   `tst.b (0x8000002a).l`, 6 B): if `dj_landing`, clear it and force the "no MIDI send" branch so a
+   jump does not emit MIDI START `0xFA`. (`0x800065b8 = 1` is harmless — already 1.)
+3. **Request side**: unchanged in principle — the UI already writes `PEND_BANK/PAT` for a pattern
+   selected while playing; DIRECT JUMP just consumes it a step later instead of at the wrap. The
+   existing `dj_a` arming logic moves into piece 1; if a chain/arranger row is also queued
+   (`0x80006546`) the hook stays out of the way (leave that to stock).
+
+Why this is right where every earlier version was wrong: nothing touches the boundary body, the
+rebuild loops, `0x80006628`, `TICK_CTR` mid-step, or any per-track counter outside the one tick on
+which stock rewrites all of them anyway. Feature-OFF is byte-identical stock. MIDI tracks are
+covered by the same 16-entry landing loop, closing that open item. Expected residual = AR's
+(occasional same-instant duplicate resolved by microtiming).
+
+Gates for V6, in order: feature-OFF identity (`diff_stock_vs_patch.py --patched`); DJ-ON-idle
+identity; the user's 16↔7 NORMAL-mode case in the emulator with `diag_tablearm_phase.py`
+(fire-time classes must hold `[0]` through the jump on every track); DJTEST2 A07↔A08 (mixed scales,
+odd lengths — watch that `new_step mod len_t` lands the 7-step track where AR's rule says); DJMAST2
+0↔1 (master 1x↔2x: the landing tick is a boundary of the OUTGOING master; the incoming grid starts
+there with phase `tps_new − 1`, so a 2x pattern entered from 1x starts on its own boundary by
+construction). Then hardware.

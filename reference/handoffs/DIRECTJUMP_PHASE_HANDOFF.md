@@ -17,8 +17,20 @@ the next master step boundary, synchronous rebuild of every track (step, tick 0,
 `cntdn = tps−1`, no hold, no catch-up), master phase set to `tps−1` so the step body runs
 the same tick. It carries **no sub-step remainder** — V5.7–V5.11's `dj_mrem` came from a
 mis-attribution (the remainder pair is AR's pause/Song-Position mechanism) and is
-withdrawn. The port restarts from `AR_SEQUENCER_ENGINE.md` §6; the OT measurements still
-owed are listed in NOTES.md Session 105.
+withdrawn. The port restarts from `AR_SEQUENCER_ENGINE.md` §6.
+
+**Session 105 continued — the OT measurements are DONE and the design is fixed (NOTES.md
+"Session 105 continued", read the whole block).** OT's tick handler is AR's phase for phase,
+and it already contains AR's DIRECT JUMP landing: the countdown `0x80006687` path at
+`0x400a1f72`–`0x400a222e` rebuilds all 16 tracks from a snapshot (`0x80006516[t]` step words,
+`0x80006536[t]` ticks, `0x8000663a` master step), sets `TICK_CTR = tps−1`, the first-fire mask
+`0x80006624 = 0xffff` and `CNTDN = −1`, and runs BEFORE the scheduler (`0x400a2982`). **V6 =
+one 6-byte detour at `0x400a1f72`** (arm: `0x80006687 = tps − TICK_CTR`; land: swap ACT←PEND,
+`0x80006638 = MASTER_STEP mod masterLen`, `0x80006516[t] = new_step mod len_t`, ticks 0)
+**+ one at `0x400a221c`** (no MIDI `0xFA` on a jump) + the existing UI pieces. Every V4/V5
+sequencer hook (`dj_a/b/c/d7/scaleix`, Z/X/V) is deleted; the boundary body stays stock.
+The builder does not exist yet — next session writes `patch_directjump_v6.s` /
+`build_directjump_v6.py` and runs the gate order given at the end of the NOTES block.
 
 *(Session 104 text follows, kept as history.)*
 
