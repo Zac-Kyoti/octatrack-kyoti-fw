@@ -32726,3 +32726,65 @@ switches, deliberately including rapid/rhythmic ones; a boundary-tick cue now la
 tick, so no switch cadence should revert to cueing. Then FLASHING §4.3 steps 1–9, then
 master scales (expected imperfect). DIAG twin `1ba196a674c74d0a` if anything misbehaves
 (toast A L R C T H G; A==L==switches when healthy).
+
+### Session 108 continued (3) — flash 5: two residuals, two newly-mapped stock mechanisms; REV 6, oracle 9/9
+
+**Flash 5 (rev 5.1):** independence ✓, p-locks ✓, scene locks ✓, snap ✓,
+SETUP-driven knob swap ✓ (test 4 "still holds, nominal"). Two residuals, both
+now root-caused to stock mechanisms we had not mapped:
+
+**(a) ATTR edits never updated the knob (caption OR position) without a page
+press or transport cycle.** Two compounding causes:
+- The **redraw mark is a LONG `0x14` at `0x46c7d244 + slot*20 + 4`** — slot 0
+  is **`0x46c7d248`**. Measured at the UI editor's own tail (`0x4005543c`:
+  `lea %a0@(1,%d5:l:4),%a1` with `a0 = slot` ⇒ index `5*slot+1`, scaled by 4).
+  Rev 4's byte write to `0x46c7d245` was wrong in BOTH size and address —
+  that is why its repaint never happened.
+- A caption write from the widget is **one repaint late by construction**: the
+  page's text pass reads the descriptor name table BEFORE the widget pass
+  runs. Draw-time was the wrong place for it.
+  **Fix:** caption + mark now come from `rp_swap` on any gate change
+  (`.sw_seen`), which runs per frame from `rate_gate` AND directly from the
+  ATTR editors via the new `rp_refresh` (called at `.au_done`/`.ad_done`, so
+  every ATTR path refreshes; register-transparent). The widget still writes
+  the caption too, which covers track switches.
+- Oracle caught a REAL bug here: first sight (`rp_prev = 0xff`, i.e. after a
+  part apply or project load) skipped the refresh entirely, so a loaded
+  project could show a stale caption. First sight now refreshes the display
+  while still adopting (no swap).
+
+**(b) Dial far too slow (~105 detents end-to-end, press+turn included).**
+Found the mechanism: the descriptor has a **per-slot ENCODER STEP column at
+`P+0x12a`** (the fifth 12-entry array after min `+0x6a`, count `+0x9a`,
+formatter `+0xca`, widget `+0xfa`), called by the UI editor as
+`handler(slot, delta, current) -> new value` at `0x40055352..0x40055368`,
+after which stock clamps with the descriptor's own min/count and stores
+(`0x4005536a..0x4005538a`). STATIC/FLEX slot 0 is `0x40032d08`.
+**Fix:** poke slot 0 to `quant_step` (`0x400d3146` STATIC / `0x400d32d8`
+FLEX). Off a QUAN track it tail-jumps to `0x40032d08` untouched; on one it
+maps **one delta unit to one ratio zone** and returns a zone centre
+(`19 + 15*idx`), so the 8 ratios are 7 detents wide and acceleration scales
+naturally. Stock still clamps, stores to Part/shadow/live and does its own
+redraw bookkeeping — which is exactly why this is safer than rev 4's editor
+replacement.
+
+**REV 6 = flash-6 candidate: mainos `69fe0516…`, syx `d285ea30…`** (2280 B,
+0 strays, cave `0x400d6f80..0x400d7ab8` = 2872 B — **228 B left** under the
+bugbuilds base). **Oracle 9/9**: the seven from rev 5 plus `quant_step`
+(8 cases: one detent = one ratio, floor/ceiling hold, accelerated deltas,
+centres only, stock reached off-mode) and the caption/mark contract (both
+directions, name fields + the long mark asserted).
+
+**Also answered this session (RE, no code):** TSTR-mode RATE is two-valued on
+repitch tracks because the increment builder **skips the entire RATE block
+when the RATE mode byte is nonzero** (`0x400040d6: mvzb fp@(27),d1; bne
+0x40004100`) — RATE's magnitude is never even read in that mode, in stock
+either. So "making it continuous" would have to re-run the very same
+below-`0x7f00` table+MAC that RATE-mode-PITCH already runs, i.e. it would be
+bit-identical to what PITCH mode gives on a repitch track today (a live
+turntable nudge, multiplying the tempo-locked ratio). Nothing to build; the
+earlier "grain machinery" explanation was imprecise and is retracted.
+A decoy worth recording: `voice+27` is tested in the renderer
+(`0x400081c6`, `0x4000830e`, `0x40008462`, `0x4000899e`, `0x40008a5a`) and
+cleared at trigger (`0x40008f5c`) — a DIFFERENT record from `lane+27`, most
+likely a per-trigger "already computed" latch, unrelated to RATE mode.

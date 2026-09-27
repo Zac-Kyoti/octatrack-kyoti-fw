@@ -47,6 +47,9 @@
         .global rp_swap
         .global rp_apply1
         .global rp_apply2
+        .global rp_caption
+        .global quant_step
+        .global rp_refresh
         .global qdial1
         .global qdial2
         .global qdial3
@@ -94,6 +97,10 @@
         .equ    DIRTY_GLOBAL, 0x100f8598
         .equ    TSTR_SLOT2, 4           | page 2: LOOP SLIC LEN RATE TSTR TSNS
         .equ    PARKED, 18              | NEIGHBOR's slot-0 byte: page-1 '---'
+        .equ    REDRAW_L, 0x46c7d248    | slot 0's knob-redraw mark: a LONG 0x14 at
+                                        | 0x46c7d244 + slot*20 + 4, measured at the
+                                        | UI editor's own tail (0x4005543c)
+        .equ    STEP_PTCH, 0x40032d08   | stock slot-0 encoder-step handler
         .equ    TXT_MEASURE, 0x40012f30 | (font, -1, str) -> px width
         .equ    TXT_DRAW, 0x40012bd8    | (font, canvas, x, y, -1, str)
         .equ    FONT, 0x400ba876
@@ -445,7 +452,7 @@ rp_swap:
         beq     .sw_none
         move.b  %d0,(%a0,%d2.l)
         cmpi.l  #0xff,%d1
-        beq     .sw_none                | first sight: adopt what is stored
+        beq     .sw_adopt               | first sight: adopt what is stored
         movea.l (DB_PTR).l,%a0
         moveq   #0,%d1
         move.b  (PART_B).l,%d1
@@ -510,12 +517,103 @@ rp_swap:
         lea     (DIRTY_GLOBAL).l,%a0
         move.l  %d1,(%a0)
         moveq   #1,%d0                  | -> a swap happened this call
-        bra.s   .sw_out
+        bra.s   .sw_seen
+.sw_adopt:
+        moveq   #0,%d0                  | adopted, so no value substitution --
+        bra.s   .sw_seen                | but the caption still has to refresh
+                                        | (a project load or part apply lands
+                                        | here, and its display must be right)
 .sw_none:
         moveq   #0,%d0
 .sw_out:
         movem.l (%sp),%d1-%d5/%a0-%a1
         lea     28(%sp),%sp
+        rts
+
+| A gate change on the track the panel is showing: set the caption and the
+| dial's redraw mark HERE, not at draw time. A draw-time caption write is one
+| repaint late by construction -- the page's text pass reads the name table
+| before the widget pass runs -- which is why an ATTR edit needed a page
+| press. rp_swap runs per frame from rate_gate and directly from the ATTR
+| editors, so both are already right when the next repaint happens.
+.sw_seen:
+        move.l  %d0,-(%sp)
+        moveq   #0,%d1
+        move.b  (UI_TRACK).l,%d1
+        cmp.l   %d1,%d2                 | was this the panel's track?
+        bne.s   .sw_seen_out
+        move.l  %d2,%d1
+        bsr     rp_ui_gate
+        move.l  #0x50544348,%d1         | 'PTCH'
+        tst.l   %d0
+        beq.s   1f
+        move.l  #0x5155414e,%d1         | 'QUAN'
+1:      move.l  %d1,%d0
+        bsr     rp_caption
+        moveq   #0x14,%d0
+        move.l  %d0,(REDRAW_L).l        | repaint the dial
+.sw_seen_out:
+        move.l  (%sp)+,%d0
+        bra.s   .sw_out
+
+| d0 = a 4-char caption -> the descriptor name fields the page's text pass
+| reads (STATIC and FLEX slot 0). The image is SDRAM; octabam's mode-rename
+| cave writes this table the same way.
+rp_caption:
+        move.l  %d0,(NAME_ST).l
+        move.l  %d0,(NAME_FX).l
+        clr.w   (NAME_ST+4).l
+        clr.w   (NAME_FX+4).l
+        rts
+
+| Poll the panel track's gate and refresh the caption + dial mark. Called
+| from the ATTR editors, whose edits are otherwise invisible to the PLAYBACK
+| page until something else forces a repaint. Preserves every register.
+rp_refresh:
+        move.l  %d0,-(%sp)
+        move.l  %d1,-(%sp)
+        moveq   #0,%d1
+        move.b  (UI_TRACK).l,%d1
+        bsr     rp_swap
+        move.l  (%sp)+,%d1
+        move.l  (%sp)+,%d0
+        rts
+
+| P+0x12a slot 0 -- the per-slot ENCODER STEP handler the UI editor calls as
+| handler(slot, delta, current) -> new value, which it then clamps with the
+| descriptor's own min/count and stores (0x40055352..0x4005538a). Off a QUAN
+| track this tail-jumps to stock's. On one, ONE DETENT IS ONE RATIO: the
+| value walks the 8 zone centres (19 + 15*idx), so the whole set is 7 detents
+| wide instead of ~105, and stock still clamps, stores to Part/shadow/live
+| and does its own redraw bookkeeping.
+quant_step:
+        move.l  %d1,-(%sp)
+        moveq   #0,%d1
+        move.b  (UI_TRACK).l,%d1
+        bsr     rp_ui_gate
+        tst.l   %d0
+        bne.s   .qs_quan
+        move.l  (%sp)+,%d1
+        jmp     (STEP_PTCH).l
+.qs_quan:
+        move.l  %d2,-(%sp)
+        move.l  20(%sp),%d0             | current (arg 3, two pushes deep)
+        bsr     rk_bucket               | -> zone 0..7
+        move.l  16(%sp),%d1             | delta (arg 2)
+        add.l   %d1,%d0
+        bpl.s   1f
+        moveq   #0,%d0
+1:      moveq   #7,%d1
+        cmp.l   %d1,%d0
+        ble.s   2f
+        move.l  %d1,%d0
+2:      move.l  %d0,%d1                 | 19 + 15*zone
+        lsl.l   #4,%d1
+        sub.l   %d0,%d1
+        moveq   #19,%d0
+        add.l   %d1,%d0
+        move.l  (%sp)+,%d2
+        move.l  (%sp)+,%d1
         rts
 
 | The page-1 dial renderers do NOT read the descriptor widget column: each
@@ -586,7 +684,7 @@ quant_widget:
         tst.l   %d0
         bne.s   .qw_quant
         move.l  #0x50544348,%d0         | 'PTCH': restore the caption
-        bsr.s   .qw_name
+        bsr     rp_caption
         move.l  %a1,%d0
         bne.s   .qw_fresh
         jmp     (KNOB).l                | no swap: stock, untouched
@@ -595,17 +693,9 @@ quant_widget:
         move.b  (%a0),%d0               | the just-restored pitch
         movea.l 24(%sp),%a1             | with its own formatter
         bra.s   .qw_frame
-| the caption lives in the descriptor name table, which the page's text pass
-| reads on every redraw; writing it at widget-draw time renames the dial
-.qw_name:
-        move.l  %d0,(NAME_ST).l
-        move.l  %d0,(NAME_FX).l
-        clr.w   (NAME_ST+4).l
-        clr.w   (NAME_FX+4).l
-        rts
 .qw_quant:
         move.l  #0x5155414e,%d0         | 'QUAN'
-        bsr.s   .qw_name
+        bsr     rp_caption
         move.l  16(%sp),%d0             | the caller's value
         move.l  %a1,%d1
         beq.s   1f
@@ -728,6 +818,7 @@ attr_up:
         addq.l  #1,%d0
         move.l  %d0,272(%a0)
 .au_done:
+        bsr     rp_refresh              | the PLAYBACK dial follows at once
         jmp     (0x4006eef0).l
 
 | 0x4006ef7c, value down: stock steps 3 -> 2 -> 0; REPITCH -> 3 first.
@@ -748,4 +839,5 @@ attr_down:
         subq.l  #1,%d0
         move.l  %d0,272(%a0)
 .ad_done:
+        bsr     rp_refresh
         jmp     (0x4006f026).l

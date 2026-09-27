@@ -38,17 +38,19 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (gate 1, rev 5.1)", """
-Flash 4 confirmed the rev-5 core on hardware: QUAN/PTCH independence, the
-domain-swap memory, p-locks and scene locks. Rev 5.1 fixes flash 4's list:
-(1) AUTO+ATTR never showed QUAN -- the settings arrays are 0-BASED (the
-slot byte indexes them raw; the rev-5 +1 read the wrong record); (2) the
-QUAN dial now SNAPS to the 8 positions (display only -- the stored value
-stays the stock editor's, locks untouched); (3) after a mode swap the dial
-redraws with the fresh live byte instead of the caller's stale value, both
-directions. RATE-in-TSTR-mode acting two-valued on repitch tracks is
-expected (the stretch-domain rate rides machinery repitch bypasses; PITCH
-RATE mode is the continuous one). All 7 oracle contracts green.
+status(WIP, "REPITCH KYOTI (gate 1, rev 6)", """
+Flash 5 held independence, locks, snap and the SETUP-driven swap. Rev 6
+fixes its two residuals with two newly-mapped stock mechanisms:
+(1) the knob's redraw mark is a LONG 0x14 at 0x46c7d244 + slot*20 + 4 --
+slot 0 is 0x46c7d248, NOT the byte at 0x46c7d245 rev 4 wrote -- and the
+caption + mark are now set from rp_swap (per frame, and directly from the
+ATTR editors) instead of at draw time, where a caption write is always one
+repaint late; (2) the descriptor's per-slot ENCODER STEP column (P+0x12a,
+handler(slot, delta, current) -> value, then stock clamps and stores) now
+points at quant_step on slot 0, so ONE DETENT IS ONE RATIO and stock keeps
+the clamping, the stores and its own redraw bookkeeping.
+All 9 oracle contracts green. Hardware-new: ATTR-driven caption/knob
+refresh without a page press, and the one-detent-per-ratio feel.
 """)
 
 BASE = 0x40000400
@@ -95,6 +97,9 @@ POKES = [
     (0x400D32D0, 0x40046C28, "widget7",     "FLEX   TSTR widget -> 7-position clone"),
     (0x400D3116, KNOB,       "quant_widget","STATIC PTCH widget -> QUANT"),
     (0x400D32A8, KNOB,       "quant_widget","FLEX   PTCH widget -> QUANT"),
+    # P+0x12a slot 0: the encoder-step handler -- one detent, one ratio
+    (0x400D3146, 0x40032D08, "quant_step",  "STATIC PTCH step -> quant_step"),
+    (0x400D32D8, 0x40032D08, "quant_step",  "FLEX   PTCH step -> quant_step"),
 ]
 
 WIDGET_SRC, WIDGET_LEN = 0x40046AB4, 0x174

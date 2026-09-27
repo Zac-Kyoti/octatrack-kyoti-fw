@@ -146,7 +146,7 @@ void check(const char* what, bool ok, int detail = -1)
 
 int main(int argc, char** argv)
 {
-	if(argc != 3 && argc != 7) { std::printf("usage: %s STOCK PATCHED [quant_widget rp_ui_gate rp_swap rp_prev]\n", argv[0]); return 2; }
+	if(argc != 3 && argc != 9) { std::printf("usage: %s STOCK PATCHED [quant_widget rp_ui_gate rp_swap rp_prev quant_step rp_caption]\n", argv[0]); return 2; }
 	Img stock, pat;
 	for(auto [img, path] : {std::pair{&stock, argv[1]}, {&pat, argv[2]}}) {
 		std::ifstream in(path, std::ios::binary);
@@ -246,11 +246,14 @@ int main(int argc, char** argv)
 		check("resolver: 4/5/6 behave as OFF register-for-register; 0..3 untouched", ok);
 	}
 
-	if(argc == 7) {
+	if(argc == 9) {
 		const uint32_t quantWidget = uint32_t(std::stoul(argv[3], nullptr, 16));
 		const uint32_t uiGate = uint32_t(std::stoul(argv[4], nullptr, 16));
 		const uint32_t swapFn = uint32_t(std::stoul(argv[5], nullptr, 16));
 		const uint32_t prevTab = uint32_t(std::stoul(argv[6], nullptr, 16));
+		const uint32_t stepFn  = uint32_t(std::stoul(argv[7], nullptr, 16));
+		const uint32_t capFn   = uint32_t(std::stoul(argv[8], nullptr, 16));
+		(void)capFn;
 
 		auto callD1 = [](ot::Machine& m, uint32_t fn, uint32_t track) {
 			auto* cpu = m.getCpuState();
@@ -401,6 +404,107 @@ int main(int argc, char** argv)
 			}
 			std::printf("      (%d gate cases)\n", n);
 			check("rp_ui_gate: Part-DB display truth, boot-valid", ok, bad);
+		}
+	}
+
+	if(argc == 9) {
+		const uint32_t stepFn  = uint32_t(std::stoul(argv[7], nullptr, 16));
+		const uint32_t swapFn  = uint32_t(std::stoul(argv[5], nullptr, 16));
+		const uint32_t prevTab = uint32_t(std::stoul(argv[6], nullptr, 16));
+		// 8) quant_step: on a QUAN track one delta unit is one ratio zone and
+		//    the result is always a zone centre; off one, stock's handler runs.
+		{
+			constexpr uint32_t centres[8] = {19, 34, 49, 64, 79, 94, 109, 124};
+			struct Case { unsigned setup; uint32_t cur; int delta; int wantZone; bool quan; };
+			const Case cases[] = {
+				{4,  64,  +1, 4, true},   // 1/1 -> 5/4, one detent
+				{4,  64,  -1, 2, true},   // 1/1 -> 3/4
+				{5,  19,  -1, 0, true},   // floor holds at 1/2
+				{6, 124,  +1, 7, true},   // ceiling holds at 2/1
+				{4,  64,  +3, 6, true},   // accelerated turn: three zones
+				{4,  64, -10, 0, true},   // fast sweep clamps at the bottom
+				{4,  49,  +2, 4, true},   // from 3/4 up two
+				{0,  64,  +1, -1, false}, // not a repitch mode: stock handler
+			};
+			bool ok = true;
+			int n = 0, bad = -1;
+			for(const auto& c : cases) {
+				ot::Machine m(pat.image);
+				auto* cpu = m.getCpuState();
+				const unsigned t = 2;
+				m.write8(0x80000000, uint8_t(t));
+				setPart(m, t, 1, 6, uint8_t(c.setup), 64, 2, 2880);
+				// frame: ret, slot, delta, current
+				m.write32(stack - 16, trampoline + 0x80);
+				m.write32(stack - 12, 0);
+				m.write32(stack - 8, uint32_t(c.delta));
+				m.write32(stack - 4, c.cur);
+				for(unsigned i = 0; i < 8; i += 2) m.write16(trampoline + 0x80 + i, 0x4e71);
+				m68k_set_reg(cpu, M68K_REG_SP, stack - 16);
+				m68k_set_reg(cpu, M68K_REG_PC, stepFn);
+				unsigned steps = 0;
+				bool reachedStock = false, returned = false;
+				while(steps++ < 400) {
+					if(m.pc() == trampoline + 0x80) { returned = true; break; }
+					if(m.pc() == 0x40032d08) { reachedStock = true; break; }
+					if(!m.step()) break;
+				}
+				bool good;
+				if(c.quan)
+					good = returned && !reachedStock &&
+					       m68k_get_reg(cpu, M68K_REG_D0) == centres[c.wantZone] &&
+					       m68k_get_reg(cpu, M68K_REG_SP) == stack - 12;
+				else
+					good = reachedStock && !returned;
+				if(!good && bad < 0) {
+					bad = n;
+					std::printf("      case %d: returned=%d stock=%d d0=%u\n", n, returned,
+					            reachedStock, m68k_get_reg(cpu, M68K_REG_D0));
+				}
+				ok &= good;
+				++n;
+			}
+			check("quant_step: one delta = one ratio, centres only, stock off-mode", ok, bad);
+		}
+
+		// 9) a gate change on the panel's track sets the caption AND the
+		//    dial's redraw mark (long 0x14 at 0x46c7d248) -- the ATTR path.
+		{
+			bool ok = true;
+			const unsigned t = 4;
+			ot::Machine m(pat.image);
+			auto* cpu = m.getCpuState();
+			m.write8(0x80000000, uint8_t(t));
+			setPart(m, t, 1, 3, 4, 70, 2, 2880);   // repitch: gate 1
+			m.write32(0x400d3032, 0x50544348);     // seed captions to 'PTCH'
+			m.write32(0x400d31c4, 0x50544348);
+			m.write32(0x46c7d248, 0);
+			m.write8(prevTab + t, 0xff);           // first sight -> a change
+			m.write32(stack - 4, trampoline + 0x80);
+			for(unsigned i = 0; i < 8; i += 2) m.write16(trampoline + 0x80 + i, 0x4e71);
+			m68k_set_reg(cpu, M68K_REG_D1, t);
+			m68k_set_reg(cpu, M68K_REG_SP, stack - 4);
+			m68k_set_reg(cpu, M68K_REG_PC, swapFn);
+			unsigned steps = 0;
+			while(m.pc() != trampoline + 0x80 && steps++ < 500)
+				if(!m.step()) break;
+			ok &= m.pc() == trampoline + 0x80;
+			ok &= m.read32(0x400d3032) == 0x5155414e;   // 'QUAN'
+			ok &= m.read32(0x400d31c4) == 0x5155414e;
+			ok &= m.read16(0x400d3036) == 0 && m.read16(0x400d31c8) == 0;
+			ok &= m.read32(0x46c7d248) == 0x14;         // dial marked dirty
+			// and leaving the mode restores 'PTCH' and re-marks
+			m.write8(dbBase + 0x8ef5a + t * 30 + 6 + 4, 0);
+			m.write32(0x46c7d248, 0);
+			m.write32(stack - 4, trampoline + 0x80);
+			m68k_set_reg(cpu, M68K_REG_D1, t);
+			m68k_set_reg(cpu, M68K_REG_SP, stack - 4);
+			m68k_set_reg(cpu, M68K_REG_PC, swapFn);
+			steps = 0;
+			while(m.pc() != trampoline + 0x80 && steps++ < 500)
+				if(!m.step()) break;
+			ok &= m.read32(0x400d3032) == 0x50544348 && m.read32(0x46c7d248) == 0x14;
+			check("caption + dial redraw mark set on a gate change, both directions", ok);
 		}
 	}
 
