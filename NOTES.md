@@ -32351,3 +32351,49 @@ oracle → commits `[41, 78, 95, 149, 162, 203, 257]`, every 1x track class [0] 
 class-5 landing write per jump — identical to V6/V6.1 (the UI post touches no sequencer
 state). **NEXT: the user flashes V6.2 — the switched-to LED must go red at the landing —
 then the 16↔7 case against the metronome, FLASHING §4.3 steps 1–9, then master scales.**
+
+### Session 106 continued (2) — V6.2 flashed: LEDs still cue. The LED predicate MEASURED; V6.2's message route is the wrong lever
+
+**Hardware (user).** V6.2 (`723df024`) flashed: the switched-to pattern's LED still turns
+yellow at the cue and only goes red at the outgoing pattern's end. So stock's wrap-change UI
+post — `0x400d8168 = ACT_BANK; FUN_40000c3c(0x460d17ae, 0x400d8167)`, message `{0x15, bank}`,
+the only image-wide post of that template — is **not** what clears the cued colour (its
+handler plausibly early-outs when the bank has not changed). The post is left in (harmless,
+matches stock) but it is not the fix.
+
+**MEASURED — the predicate the painter actually uses.** The PTN-page pattern-grid LED
+painter is `FUN_4007afe8` (its LED-bit calls `0x400135b0`/`0x400131a0`/`0x400131c8` and the
+`has_content` gate `0x4009a464` are the ones `tools/patch_pattern_led.s` already documents;
+chain-view twin `FUN_400353d4`, plus `FUN_400418e0`). At `0x4007b182`:
+
+```
+4007b182  mvs.b (0x800065c0),%d5   | PEND_PAT
+4007b188  mvz.b (0x100b14d0),%d0   | a UI/project-side pattern byte
+4007b18e  cmp.l %d5,%d0
+4007b190  beq.s 0x4007b1e0         | EQUAL -> no "cued" paint
+4007b192  mvs.b (0x800065bf),%d1   | PEND_BANK
+4007b198  mvz.b (0x80000002),%d0   | current bank
+4007b19e  cmp.l %d1,%d0
+4007b1a0  bne.s 0x4007b1e0         | other bank -> no paint
+          <paint CUED for pattern d5>
+```
+
+So **cued is painted when `PEND_PAT != [0x100b14d0]` and `PEND_BANK == [0x80000002]`** — the
+comparison is against a UI/project byte, NOT against `ACT_PAT`. V6 leaves `PEND_PAT` equal to
+the newly active pattern and never touches `0x100b14d0`, so the colour depends entirely on
+that byte. `0x100b14d0` sits in live project/part RAM (`0x100b14cc` current audio track,
+`0x100b14cf` part index, `0x100b14d1` written by `FUN_400a013c`). ⚠️ A raw 4-byte image scan
+for `0x100b14d0` returns ~484 false hits — use the Ghidra census for its writers, not `grep`.
+
+**Next session's first move is an experiment, not a hook** (CLAUDE.md: measure when
+reasoning and hardware disagree): trace `PEND_PAT / PEND_BANK / ACT_PAT / ACT_BANK /
+0x100b14d0 / 0x80000002` per tick across (a) a stock DJ-off switch committing at a natural
+wrap and (b) a V6.2 landing, and diff at the commit tick. Then make the landing produce
+whatever stock's wrap-change makes true. Candidates in order: the `{0x11, pattern}` message
+(template `0x400d8164`, arg `0x400d8165`) that `FUN_400a0570`/the stop path post; a UI-task
+handler copying `ACT_PAT → 0x100b14d0`; and only as a last resort writing `0x100b14d0` from
+`dl_commit` (UI state from the ISR — races the UI task).
+
+**Full handoff written: `reference/handoffs/DIRECTJUMP_V6_HANDOFF.md`** (state, the V6
+mechanism, the LED evidence and experiment, the gate commands, the do-not-re-try list, the
+post-LED test order, and the three AR_DJ_QUIRKS deviations with their designed fixes).
