@@ -31994,3 +31994,95 @@ patterns, NORMAL mode, 1x, several switches each way, listen against the metrono
 MIDI tracks); (3) master scales — expected imperfect (AR's own limitation), note WHICH
 switch direction lurches. Also check: no MIDI START is sent on a jump (Hook N), and that
 the toast/toggle behave as before.
+
+---
+
+## Session 106 (2026-09-27, `main`) — repitch-kyoti SCOPED; the OT's sample interpolator settled (2-tap linear, on the DSP)
+
+**No build, no patch, no cave allocated.** This session answered a DSP question, settled a
+standing unknown in two inherited documents, and wrote a build scope. Full scope:
+[`reference/handoffs/REPITCH_KYOTI_SCOPE.md`](reference/handoffs/REPITCH_KYOTI_SCOPE.md) —
+read its §0, then §1.
+
+### The RE finding: where varispeed interpolation actually happens, and what it is ✅
+
+The question was which resampling algorithm the OT uses when a sample plays at a
+non-integer rate (raised by octabam's REPITCH module, which follows project tempo by
+playback speed). Both halves verified against our own image / payload this session:
+
+- **The ColdFire does format conversion only, 1:1, no interpolation.** The dispatch at
+  `0x40008752` (forward) / `0x400087b6` (reverse) is four straight-line copy loops —
+  16-bit mono duplicated to L/R, 16-bit stereo, 24-bit mono, 24-bit stereo — sequential
+  `move (a0)+` into 32-bit stereo words. No phase accumulator.
+- **The DSP voice playback engine `P:0x3a1` is a 2-tap linear interpolator** over a
+  128-word modulo ring (`m6 = $7f` at `P:0x3a9`), 24-bit fixed point, 56-bit accumulators.
+  `P:0x3fc–0x40a` pre-computes a (ring offset, fraction) pair per output sample from the
+  increment — the phase accumulator is `add x,a` at `P:0x406`, so **the fraction is
+  derived on the DSP, not supplied by the ColdFire.** The kernel at `P:0x40f–0x41a` reads
+  4 source words and writes 2 per iteration = one stereo output frame in 10 instructions,
+  computing `(1-f)·s[k] + f·s[k+2]` per channel on the interleaved pair. **No oversampling
+  and no pre-decimation filter**, so pitching up aliases; at the 2.0 clamp everything
+  above 11.025 kHz folds.
+
+Reproduce the DSP disassembly: `cd refs/octabam && python3 tools/build/dsp_disasm_all.py`
+→ `out/dsp/payload_A.asm`, module `P:0x003a1`.
+
+### Two inherited documents corrected
+
+- `refs/octabam/docs/firmware/DSP.md` marked "2-tap linear interpolator over a 128-word
+  ring" 🟡 (attributed to Bryan T, 30 Aug 2026). **Upgraded to ✅** — the kernel is the
+  evidence.
+- `refs/octabam/docs/TIMESTRETCH_PIPELINE.md:272` lists the interpolation method as
+  unknown and guesses it is "in the sample format dispatch loops" on the ColdFire.
+  **That guess is wrong** — the dispatch is a 1:1 copy. That document's addresses are also
+  0x400 low (it assumed load base `0x40000000`), so the dispatch it means is `0x40008752`.
+
+### The scope in one paragraph
+
+`repitch-kyoti` = tempo-following varispeed (octabam's REPITCH concept, our own module)
+with **three character modes** — `RPCH` stock linear / `RP12` linear + 12-bit ("S950") /
+`RPSP` zero-order hold + 12-bit + ~26 kHz ("SP-1200"), TSTR raw 4/5/6 — plus **`QUANT`**,
+an 8-position quantised ratio control (`1/2 2/3 3/4 1/1 5/4 4/3 3/2 2/1`) drawn on the
+**reclaimed PTCH slot**, which REPITCH already disables and draws empty. Every `QUANT`
+value is rational, so each gives a just interval *and* a polyrhythm that closes (p passes
+over q bars) rather than drifting. `QUANT` index stores in the unused PTCH word — no new
+project-file field.
+
+**A 4-point cubic "cleaner" mode is CUT**, on arithmetic: the measured inner loop is 10
+instructions per output frame reading 4 words; Catmull-Rom needs 8 words plus ~4 mults +
+4 adds per channel ⇒ 🟡 ~2.4× the voice-engine cycles × 8 tracks, with DSP headroom
+unmeasured in either repo. It also needs an extra ring frame, which changes the
+ColdFire↔DSP data contract. And the payoff points the wrong way: pitching *down* (the
+common REPITCH case) has no aliasing at all — cubic buys ~1.5 dB of droop at 10 kHz —
+while the audible problem is pitching *up*, which cubic does **not** fix (that needs a
+pre-decimation filter). Cheap substitute noted in the scope: a 2-tap boxcar pre-average
+when speed > 1, ~3 DSP instructions.
+
+### The open risk, and the build order it forces
+
+**The per-track mode channel** (scope §4). `P:0x3a1` serves all voices from one per-voice
+parameter block; a per-track mode needs a flag across the chip boundary. Cheapest
+proposal 🟡 = tag the low 2 bits of the Q26 increment (zero ABI change — the ColdFire
+already writes it to state `+36`, the DSP already reads it for `add x,a`; cost ≈ 0.03
+samples over a 10-second loop, inaudible, unverified). If that and the two fallbacks fail,
+the modes degrade to one global character — a real regression. **Settle it before writing
+mode code.** Build order: (1) ColdFire only, all modes resolving to linear — 80 % of the
+bytes, zero DSP risk, `QUANT` shippable on its own; (2) prove the increment tag with a DSP
+probe; (3) `RP12` (one mask, validates the whole chain for ~4 words); (4) `RPSP`.
+
+### Budget (from our own ledgers)
+
+ColdFire ≈ 975 B est., budget 1.2 kB. **Build against KYOTI_V1.0** — free run at
+`0x400d6f80` = 3196 B. V1.1 has 64–332 B and would need the second zone (`0x400d2ee6`,
+314 B + midisc's D-pads). DSP ≈ 25–30 words; `P:0x2000` is executable and HW-proven, and
+`P:0x3a1` itself has **no slack** (125 words), so the shape is jump-out/dispatch/jump-back.
+
+### Correction recorded (user, this session)
+
+The finalized sidechain build is **SIDECHAIN3_CROSS** and its DSP donor is **SPRING
+REVERB** (id `0x15`, FX2-exclusive, **1063 words**) — `tools/build_sidechain3.py`,
+`out/mainos_sidechain3_cross.bin`. ⚠️ `tools/patch_sc_dsp3.asm:226` still carries a stale
+`SPATIALIZER's 261w donor` comment from the superseded donor;
+`build_sidechain3.py:163` is the correct record ("the old SPATIALIZER donor"). That stale
+comment misled this session's first draft of the scope. **Do not size a DSP cave from it —
+consider deleting or annotating it.**
