@@ -2,6 +2,11 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
+DIRECT JUMP V5.x -- the current DIRECT JUMP builder.  Current line V5.11 (Session 104):
+the Session 87 gold line plus only the master-remainder seed.  Version-by-version
+history: NOTES.md Sessions 88-104 and reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md.
+(This file began as a copy of build_directjump_v4.py; v4's own history follows.)
+
 DIRECT JUMP v4 -- v3 (the FUN_4005a2b8 toast) with the [PTN]+[YES] toggle actually
 reachable on hardware.
 
@@ -110,11 +115,14 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from kyoti_status import status, WIP
 
 status(WIP, "DIRECT JUMP V5.x", """
-    The open thread: non-1x master scales.  The 1x baseline is confirmed, and each
-    V5.x iteration is a flash-and-measure step that may be reverted -- V5.5 was
-    hardware-rejected outright.  DJ_DIAG=1 builds the on-screen diagnostic variant,
-    which replaces the ON/OFF toast with run-time counters and is for measuring the
-    bug, not for playing.  build_directjump_v4.py is the confirmed-at-1x build.
+    Current line = V5.11 (Session 104): the hardware-confirmed Session 87 GOLD line
+    plus ONLY the master-remainder seed, which is a byte-equal no-op at 1x.  It
+    matches gold in every emulator gate but is NOT yet verified on hardware -- that
+    flash is pending.  Non-1x master scales are the open thread.  The per-track
+    preserve/defer hooks of Sessions 97-103 are behind DJ_PRESERVE=1 and OFF (V5.10
+    regressed gold at odd lengths).  DJ_DIAG=1 builds the on-screen diagnostic
+    variant (140C_KDIAG) -- for measuring, not for playing.  The v4 builder is
+    SUPERSEDED and no longer reproduces gold; see its own note.
 """)
 
 BASE = 0x40000400

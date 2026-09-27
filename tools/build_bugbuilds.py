@@ -76,9 +76,9 @@ BUGFIX = {
 # --- the feature bases: name -> (builder, base image, VERSTR, wip, blurb) -------------
 #   wip=True is skipped unless --with-wip is passed.  DIRECT JUMP is not finished (see
 #   reference/MERGE.md); RELOAD3 was finished on 2026-09-25 and is now a normal feature
-#   above.  NOTE: the DIRECTJUMP_V4 entry below targets the superseded v4 builder --
-#   DIRECT JUMP is now build_directjump_v5.py (outputs mainos_directjump_v5.bin), and
-#   re-pointing it needs the cave layout re-checked against V5's larger cave first.
+#   above.  Session 104: the DIRECT JUMP entry now targets build_directjump_v5.py (the
+#   v4 builder is SUPERSEDED and no longer reproduces the gold image).  Its bug-fix fold
+#   was re-checked against V5's cave by running this script with --with-wip.
 FEATURES = {
     "MUTEMODE_DT": ("build_mutemode_dt.py", "out/mainos_mutemode_dt.bin", "BUG_MUTEDT", False,
                     "PERSONALIZE -> MUTE MODE: OT | OTFX | OTFX-T | DT-T (default OT)."),
@@ -93,8 +93,8 @@ FEATURES = {
     "RELOAD3": ("build_reload3.py", "out/mainos_reload3.bin", "BUG_RL3", False,
                 "[PTN]+[TRACK n] reload track n's saved sequence; [BANK]+[TRACK n] also re-applies the Part."),
     # --- not finished; build with --with-wip ---------------------------------------
-    "DIRECTJUMP_V4": ("build_directjump_v4.py", "out/mainos_directjump_v4.bin", "BUG_DJV4",
-                      True, "WIP: hold [PTN], tap [YES] -> DIRECT JUMP on/off."),
+    "DIRECTJUMP_V5": ("build_directjump_v5.py", "out/mainos_directjump_v5.bin", "BUG_DJV5",
+                      True, "WIP: hold [PTN], tap [YES] -> DIRECT JUMP on/off (V5.11 line)."),
 }
 
 PROBLEMS = []

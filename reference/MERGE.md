@@ -14,7 +14,16 @@ changes, even though nothing builds from it today.
 the version of this document written at S48/S83, and *only* because DIRECT JUMP and
 RELOAD both moved off the sites that used to collide.
 
-- **The `[YES]` handler collision at `0x4005e4c8` is gone.** DIRECT JUMP **v4** reaches
+> **Update 2026-09-26 (Session 104):** DIRECT JUMP's line is now **V5.11**
+> (`build_directjump_v5.py`, WIP tier); `build_directjump_v4.py` is SUPERSEDED and no
+> longer reproduces the confirmed image. Everything below that says "DIRECT JUMP v4"
+> applies to V5.11 unchanged — same toggle route, same ANDY and boot-seed assertions,
+> same detour sites minus `dj_pertrack` — **except the cave size: V5.11's
+> `patch_directjump` blob is 1532 B, not 1026 B (+506 B).** That turns V1.1's derived
+> ≈ 64 B of free run into **≈ −442 B: V1.1 no longer fits the single zone** (derived,
+> not built). The second zone this document already calls "likely" is now required.
+
+- **The `[YES]` handler collision at `0x4005e4c8` is gone.** DIRECT JUMP **v4** (now V5.11) reaches
   its toggle through the `[PTN]`-held keymap overlay (`0x400bf0c0`), not a detour, and
   **RELOAD3** deleted the picker entirely in favour of direct chords. Neither touches
   `0x4005e4c8` any more. **The `[YES]` trampoline, the `MERGE=1` chaining mechanism and
@@ -35,7 +44,7 @@ also the right build boundary, because it is exactly the cut that removes both b
 | | contents | conflicts to resolve | headroom |
 |---|---|---|---|
 | **`KYOTI_V1.0`** | the **seven finished, hardware-confirmed mods** | **none** — mechanical repack only | 3196 B (53 %) |
-| **`KYOTI_V1.1`** | + DIRECT JUMP v4 + RELOAD3 | blockers **B1** and **B2** below | **≈ 64 B (1 %)** — derived, see the update below |
+| **`KYOTI_V1.1`** | + DIRECT JUMP (V5.11 line) + RELOAD3 | blockers **B1** and **B2** below | **≈ −442 B — does not fit** with V5.11's 1532 B cave (was ≈ 64 B with v4's 1026 B); derived, see the updates |
 
 Build V1.0 first and flash it. It is a genuinely conflict-free composition of work that
 is already signed off on hardware, it is the thing that can ship, and it de-risks V1.1 by
@@ -156,7 +165,7 @@ this only rules out naively merging an image with those projects. → `kb/caves.
 
 | Mod | Build | cave | state |
 |---|---|---|---|
-| DIRECT JUMP — `[PTN]`+`[YES]` | `build_directjump_v4.py` (**v4**, not v3) | **1026 B** | **HW-confirmed at 1x** (Session 87). Non-1x root-caused and fixed Session 88, bit-identical to the confirmed build at 1x, **unflashed**. One unexplained report still open (visited steps vs trigs present; LEDs vs audio) |
+| DIRECT JUMP — `[PTN]`+`[YES]` | `build_directjump_v5.py` (**V5.11**; v1–v4 superseded) | **1532 B** | The Session 87 gold image is **HW-confirmed at a 1x master scale**. V5.11 = that line + a master-clock seed (no-op at 1x), emulator-equivalent to it, **hardware check pending**. Non-1x master scales open (redesign pending). See `reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md` §0 |
 | RELOAD FROM PROJECT — direct chords | `build_reload3.py` (**v3**, not v2) | **2104 B** | **FINAL — HW-confirmed 2026-09-25.** Grew from 1870 B: two-line block toasts, the live self-verify, the playing-bank fix, and the request bytes moved into the cave |
 
 **`build_directjump_v3.py` is superseded.** This document used to say "DIRECT JUMP: use
@@ -270,11 +279,11 @@ Verified numerically on 2026-09-23 against stock. Sorted by address.
 | `0x4009a464` | Bug-2 | `cave` | jmp (6) | |
 | `0x4009b6f2` | Bug-1 | `cave` | jmp+6nop (18) | byte-identical in every build; the shared base |
 | `0x400a4006` | DIRECT JUMP | `dj_a` | jsr (6) | |
-| `0x400a4220` | DIRECT JUMP | `dj_scaleix_fix` | jsr (6) | v4 only |
+| `0x400a4220` | DIRECT JUMP | `dj_scaleix_fix` | jsr (6) | |
 | `0x400a42fa` | DIRECT JUMP | `dj_b` | jsr (6) | |
-| `0x400a47f6` | DIRECT JUMP | `dj_d7` | jsr (6) | v4 only |
+| `0x400a47f6` | DIRECT JUMP | `dj_d7` | jsr (6) | Hook H; V5.11 also stashes the master remainder here |
 | `0x400a4840` | DIRECT JUMP | `dj_c` | jsr (8) | |
-| `0x400a4d36` | DIRECT JUMP | `dj_pertrack` | jsr (6) | v4 only |
+| `0x400a4d36` | DIRECT JUMP | ~~`dj_pertrack`~~ | — | **stock in V5.11** (Hook P removed, Session 89) |
 
 **Removed since the last revision of this document:** MUTE MODE's `pre_v` @ `0x40005178`;
 RELOAD2's five sites (`0x4005a044`, `0x4005e25c`, `0x4005e4c8`, `0x4004b970`, `0x400491a0`)
@@ -286,8 +295,8 @@ RELOAD2's five sites (`0x4005a044`, `0x4005e25c`, `0x4005e4c8`, `0x4004b970`, `0
 |---|---|---|
 | PERSONALIZE menu ref repoints `0x40068efe`, `0x40068f0a`, `0x40069022`, `0x4006903e`, `0x40069056` | MUTE MODE | to the three relocated arrays |
 | PERSONALIZE count `0x40068fb2` (`moveq #15` → `#16`) | MUTE MODE | MUTE MODE spliced at row index 2 |
-| Restore length `pea 0x64` → `0x70` at `0x4001f322`, `0x4001f3be`, `0x4001fb24` | **MUTE MODE only** | ⚠️ **blocker B1** — DIRECT JUMP v4 now *requires these stay stock* |
-| `[PTN]`-overlay keymap YES record `0x400bf0c0` (press NULL → `dj_toggle`) | DIRECT JUMP v4 | ⚠️ **blocker B2** — RELOAD3 asserts the overlay is byte-for-byte stock |
+| Restore length `pea 0x64` → `0x70` at `0x4001f322`, `0x4001f3be`, `0x4001fb24` | **MUTE MODE only** | ⚠️ **blocker B1** — DIRECT JUMP (v4 and V5.11 alike) *requires these stay stock* |
+| `[PTN]`-overlay keymap YES record `0x400bf0c0` (press NULL → `dj_toggle`) | DIRECT JUMP (V5.11) | ⚠️ **blocker B2** — RELOAD3 asserts the overlay is byte-for-byte stock |
 | COMPRESSOR descriptor + FX2 chooser + DSP payloads | SIDE-CHAIN | see the table above |
 
 Only MUTE MODE does menu surgery. Only SIDE-CHAIN touches the FX chooser or the DSP.

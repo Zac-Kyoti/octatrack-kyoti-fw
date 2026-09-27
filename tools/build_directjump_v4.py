@@ -101,13 +101,16 @@ Outputs: out/mainos_directjump_v4.bin, out/elek_directjump_v4.bin,
 import os, pathlib, subprocess, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from kyoti_status import status, PREVIEW
+from kyoti_status import status, SUPERSEDED
 
-status(PREVIEW, "DIRECT JUMP v4", """
-    Confirmed on hardware at 1x track and master scales only: under any other
-    master scale a switch can land on a fractional step.  Superseded for
-    development by build_directjump_v5.py, and kept buildable because what it
-    does do, it does on the unit.
+status(SUPERSEDED, "DIRECT JUMP v4", """
+    Replaced by build_directjump_v5.py (V5.11, Session 104 = the hardware-confirmed
+    Session 87 GOLD line plus only the master-remainder seed).  This builder does
+    NOT reproduce the gold image any more: it assembles today's shared
+    tools/patch_directjump.s, which has moved on since, so HEAD output differs from
+    gold (sha256 0657157f...) in ~1080 bytes and was never flashed.  To get the
+    confirmed gold image, flash out/GOLD_S87_* if you have it, or rebuild it
+    exactly: `git worktree add /tmp/gold 16df386` and run THIS builder there.
 """)
 
 BASE = 0x40000400

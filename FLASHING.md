@@ -204,14 +204,16 @@ below instead.
    the `'ANDY'` battery-SRAM shadow). An EMPTY RESET clears it to factory.
 7. Regression: the manual-trig fix still works; other tracks unaffected.
 
-### 4.3  DIRECT JUMP  (`build_directjump_v4.py` — **hardware-confirmed at 1x scales**, MKI 2026-09-23; non-1x scales are a known open problem)
-> **⚠️ Read this before flashing.** The **1x** behaviour below is hardware-confirmed
-> (2026-09-23). **Non-1x track and master scales were broken, were root-caused and
-> fixed on 2026-09-24, and that fix has NOT been on hardware** — Hook P was reading
-> the master step once and using it as every track's step index, which is only
-> correct when master and track share a ticks-per-step. The fix is bit-identical to
-> the confirmed build at 1x, so flashing it should not risk the baseline, but the
-> non-1x behaviour itself is unverified: **treat §4.3 step 10 as the thing to test.**
+### 4.3  DIRECT JUMP  (`KYOTI_ALLOW_WIP=1 python3 tools/build_directjump_v5.py` — WIP; current line **V5.11**)
+> **⚠️ Read this before flashing.** The behaviour below at a **1x master scale** is
+> hardware-confirmed on the Session 87 gold image (2026-09-23). **V5.11** (2026-09-26)
+> is that gold line plus one master-clock seed that is a byte-equal no-op at 1x; it
+> matches gold in every emulator test but **has not yet been checked on hardware** —
+> verify steps 1-9 below (odd track lengths, NORMAL and PER-TRACK modes, track scales)
+> before anything else. **Master scales other than 1x are still broken** (a switch can
+> land on a fractional step): step 10 is expected to fail. To return to the confirmed
+> image, flash `out/GOLD_S87_*` or rebuild commit `16df386`.
+> `build_directjump_v4.py` is SUPERSEDED: at HEAD it no longer reproduces the gold image.
 >
 > **Also still open, and NOT explained by that fix:** a report that which steps get
 > visited depends on what trigs are on the grid, and that the LEDs and the audio
@@ -762,12 +764,13 @@ OCTATRACK_*.bin                   CF-card OS UPGRADE transport (faster)
 | `python3 tools/build_qlrec.py [VERSTR] [LIVE_DUR]` | `140C_KYOTI` | Bug-1 fix + QUANTIZE LIVE REC front-panel toggle, toast-gated — **hardware-confirmed working** (2026-09-25) |
 | `python3 tools/build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | `140C_KYOTI` | Bug-1 fix + the full **SIDE-CHAIN COMPRESSOR** (`KEY` / `KFLT` / `KGN` / `MON`, `KEY` reaching any of the 8 tracks, cross-core) |
 | `python3 tools/build_triglock.py` | `1.40C` | fix only: auto-remove an emptied trigless lock |
-| `python3 tools/build_directjump_v4.py` | `140C_KYOTI` | Bug-1 fix + **DIRECT JUMP** (`[PTN]`+`[YES]`) — *confirmed at 1x scales only* |
+| `KYOTI_ALLOW_WIP=1 python3 tools/build_directjump_v5.py` | `140C_KYOTI` | Bug-1 fix + **DIRECT JUMP** (`[PTN]`+`[YES]`), V5.11 — *WIP: gold line + master seed, hardware check pending; non-1x master scales open* |
 | `python3 tools/build_reload3.py` | `140C_KYOTI` | Bug-1 fix + **RELOAD FROM PROJECT**, two chords (`[PTN]`/`[BANK]` + `[TRACK n]`) — **hardware-confirmed, final** (2026-09-25) |
 | `python3 tools/build_bugbuilds.py` | per-image | each finished feature **with all three bug fixes folded in** → `out/Bugbuilds/` |
 
 Superseded, kept only for rollback and reference — **do not flash**:
 `build_mutemode.py` / `build_mutemode_new.py` / `build_softmute.py` (pre-four-mode),
-`build_directjump.py` / `_v2` / `_v3` (dead on hardware),
+`build_directjump.py` / `_v2` / `_v3` (dead on hardware), `build_directjump_v4.py` (the gold
+line's original builder; at HEAD it no longer reproduces gold — use commit `16df386`),
 `build_reload.py` / `build_reload2.py` (the picker designs),
 `build_sidechain.py` / `build_sidechain2.py` (intermediate stages).

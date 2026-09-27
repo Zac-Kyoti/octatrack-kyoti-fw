@@ -1,6 +1,10 @@
 # DIRECT JUMP — handoff: non-1x TRACK and MASTER scales
 
-Written at the end of Session 87. Read this before touching DIRECT JUMP again.
+> **STALE — history only (marked 2026-09-26, Session 104).** Superseded by
+> `reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md`, whose §0 is the current state. Its
+> `CNTDN_TBL` section 5 was retired long ago; do not act on this file.
+
+Written at the end of Session 87.
 
 ---
 

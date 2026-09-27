@@ -1,6 +1,50 @@
 # DIRECT JUMP — handoff: the non-1x sub-step PHASE bug
 
-Written at the end of Session 89. Read this before touching DIRECT JUMP again.
+Written at the end of Session 89; **current state rewritten Session 104 (2026-09-26)**.
+Read §0 first — everything after it is the history of how the thread got here.
+
+## 0. CURRENT STATE (Session 104) — read this, then NOTES.md Sessions 101-104
+
+**Baseline, hardware-confirmed:** the Session 87 GOLD image (`out/GOLD_S87_*`,
+sha256 `0657157f…`; rebuild from commit `16df386` with `build_directjump_v4.py`
+*there* — at HEAD that builder assembles today's shared `patch_directjump.s` and no
+longer reproduces gold, so it is SUPERSEDED). Correct at a 1x master scale for
+everything: master time, landing steps, odd track lengths, track scales, NORMAL and
+PER-TRACK modes, MASTER LENGTH incl. INF. **Never regress it.**
+
+**Current line: V5.11** (`build_directjump_v5.py`, WIP tier — `KYOTI_ALLOW_WIP=1`;
+mainline `9b6b27b5`, diag twin `V5_11D` `12396a2e`) = gold's six detours + ONLY the
+master-remainder seed (`dj_mrem`: Hook H's `ticks mod tps_in` written into the master
+tick counter at the armed commit where stock writes 0 — a byte-equal no-op at 1x, and
+AR's own mechanism, `reference/AR_DIRECT_JUMP.md` §9). Emulator: identical to V5.3 at
+uniform 1x, DJ-on-idle identical, feature-off identical. **Hardware check PENDING** —
+the user verifies lengths / NORMAL / PER-TRACK / track scales first.
+
+**Rolled back:** V5.5–V5.10's per-track preserve/defer machinery (Hooks Z/X/V, masks
+`dj_keep_pend`/`dj_keep_pend2`) — still in source behind `DJ_PRESERVE=1`, OFF. It
+improved 1x↔2x on the unit but never generalised, and V5.10 regressed gold at odd
+track lengths / NORMAL mode (toast `W=7608`: pending bits for tracks the audio tail
+never applies — MIDI 8-15 and more — were never consumed).
+
+**Open:**
+1. Non-1x master scales — to be REDESIGNED from AR's architecture: rebuild every
+   per-track value from ONE time-true anchor, preserve nothing. Gates from day one:
+   gold equivalence at 1x (diff vs `out/V5_3_*`), DJTEST2 (odd lengths, mixed scales),
+   DJMAST2 (master scales), and the fire-timestamp oracle.
+2. The DJ-OFF-persistent fractional latch (seen on V5.9/V5.10): if it recurs on V5.11
+   the seed is the only suspect left → build V5.11 minus the seed.
+3. MIDI twin sites of the patched blocks (`0x400a4cb0` area) — never covered.
+
+**Tools that survive:** `tools/diag_tablearm_phase.py` (THE audible observable —
+scheduled fire timestamps `DAT_80001904`, per-writer class counts), `diag_fire_phase.py`
+(`FUN_400a536c` = reposition callback, not trig dispatch), `diag_phase_correlate.py`
+(advances; the wrong observable on its own), `diff_stock_vs_patch.py` (`--patched`
+required; `--dj-on`; `--stock` any image), `emu_djdiag.py` (toast path). Diag toast
+`A Z X W N R M` overflows the screen at large counts — keep future toasts short.
+
+---
+
+## History (Sessions 89-103), oldest framing first
 
 > **SESSION 97/98 UPDATE — §3's fix is BUILT (V5.5, `e3e5d232…`), oracle-clean, and
 > was FLASHED: HARDWARE REPORTS NO CHANGE in the failing case.** The user adds a
@@ -35,14 +79,14 @@ Written at the end of Session 89. Read this before touching DIRECT JUMP again.
 | `V5_0_*` | `60230e02` | Hook P removed. Commit `95812d9`. |
 | `V5_1_*` | `34fec20c` | **DO NOT FLASH** — hardware-rejected. |
 | `V5_2_*` | `6d09452b` | + `0x80006638` pairing. Commit `6e22cc1`. |
-| `V5_3_*` | `8cb167ae` | **ON THE UNIT.** + time-domain conversion. Commit `0e2726c`. |
+| `V5_3_*` | `8cb167ae` | + time-domain conversion. Commit `0e2726c`. Hardware: 1x fine; the 2x position invariant held. The 1x gold-equivalence reference image for V5.11's gates. |
 | `V5_4_*` | `77809aca` | + Hook S (PAIR→CATCHUP). PARTIAL. Commit `deb8d12`. |
-| `V5_5_*` | `e3e5d232` | − Hook S, + Hooks Z/X (preserve). Oracle-clean. **ON THE UNIT. HARDWARE: NO CHANGE in the failing case** (fractional step-time on master-scale switches persists; 1x baseline + per-track lengths/scales confirmed nominal). Session 97/98. |
+| `V5_5_*` | `e3e5d232` | − Hook S, + Hooks Z/X (preserve). Oracle-clean. **HARDWARE: NO CHANGE in the failing case** (fractional step-time on master-scale switches persists; 1x baseline + per-track lengths/scales confirmed nominal). Session 97/98. |
 | `V5_5D_*` | `ab0d806f` | Session 99 diagnostic (V5.5 + counters). **FLASHED — readings `A5 Z40 X16 Y0 P0 R0` (X/R vary run-to-run; R=0 on fractional runs)**: third writer dead, master remainder not the cause, and the 0x400a354a copy fires for only a timing-dependent minority of tracks on hardware. NOTES Session 100. |
-| `V5_11_*` | `9b6b27b5` | **Session 104 — ROLLBACK, the current flash candidate.** V5.10 regressed gold-confirmed 1x behaviour (odd lengths, NORMAL/PER-TRACK): Hooks Z/X/V + masks are now OPT-IN (`DJ_PRESERVE=1`) and OFF; detour set == V5.3's six; only the master-remainder seed (`dj_mrem`, a byte-equal no-op at 1x, AR's own mechanism) is kept. Diag twin `V5_11D_*` `12396a2e`. **The non-1x thread restarts from AR's architecture (rebuild every per-track value from ONE time-true anchor) with gold + DJTEST2 odd lengths + DJMAST2 scales as day-one gates.** OPEN: DJ-OFF-persistent latch (seed is the sole remaining suspect). |
+| `V5_11_*` | `9b6b27b5` | **Session 104 — ROLLBACK, the current line (hardware check pending).** V5.10 regressed gold-confirmed 1x behaviour (odd lengths, NORMAL/PER-TRACK): Hooks Z/X/V + masks are now OPT-IN (`DJ_PRESERVE=1`) and OFF; detour set == V5.3's six; only the master-remainder seed (`dj_mrem`, a byte-equal no-op at 1x, AR's own mechanism) is kept. Diag twin `V5_11D_*` `12396a2e`. **The non-1x thread restarts from AR's architecture (rebuild every per-track value from ONE time-true anchor) with gold + DJTEST2 odd lengths + DJMAST2 scales as day-one gates.** OPEN: DJ-OFF-persistent latch (seed is the sole remaining suspect). |
 | `V5_10_*` | `ab8a41bb` | Session 103 — SUPERSEDED (hardware: regressed gold at odd lengths / NORMAL mode; W=7608). Hook V @0x400a4bb6: while a preserve is pending, `CNTDN[t] = tps_t − counter[t]` per tick, deferring each track's WHOLE apply (STEP write + reposition fire) onto its own boundary — no duplicate, no missing trig, no lurch, wraps and armed commits alike. Hook W retired (site stock); masks split (`dj_keep_pend` consumed by Z at the apply, `dj_keep_pend2` by X) after the gate chain caught an infinite re-apply. Diag twin `V5_10D_*` `78a995b8` (trigscale relocated to 0x400d7bc0 under DJ_DIAG only). **OPEN: the DJ-OFF-persistent fractional latch** — correlate with N on the next flash. |
-| `V5_9_*` | `e46cc4b2` | **Session 102 — the current flash candidate.** Hook W @0x400a4bdc: the tail's reposition fire is suppressed only when the preserved counter is mid-step at fire time (the once-per-cycle half-step spurious trig that appeared with V5.8's wrap-preserve; stock's zero made the two fire paths exclusive). Diag twin `V5_9D_*` `2bcbac11`, toast `A Z X W N R M`. |
-| `V5_8_*` | `285fadb8` | **Session 101 — THE WRAP FIX, the current flash candidate.** The audible observable is the fire-timestamp table DAT_80001904 (oracle: tools/diag_tablearm_phase.py); the fractional flip originates at NATURAL WRAPS (§6 = the audible bug, not a separate thread) and the preserve carried it forever. V5.8: preserve covers every commit incl. wraps while DJ is ON. Diag twin `V5_8D_*` `27257715`. |
+| `V5_9_*` | `e46cc4b2` | Session 102 — superseded. Hardware: missing/spurious step-1 trig every cycle (Hook W's suppression was wrong at wraps). Hook W @0x400a4bdc: the tail's reposition fire is suppressed only when the preserved counter is mid-step at fire time (the once-per-cycle half-step spurious trig that appeared with V5.8's wrap-preserve; stock's zero made the two fire paths exclusive). Diag twin `V5_9D_*` `2bcbac11`, toast `A Z X W N R M`. |
+| `V5_8_*` | `285fadb8` | Session 101 — THE WRAP FIX, superseded. Hardware: large 1x↔2x improvement (fractional confined to the landing interval, heals at cycle restart) but introduced the per-cycle spurious trig. The audible observable is the fire-timestamp table DAT_80001904 (oracle: tools/diag_tablearm_phase.py); the fractional flip originates at NATURAL WRAPS (§6 = the audible bug, not a separate thread) and the preserve carried it forever. V5.8: preserve covers every commit incl. wraps while DJ is ON. Diag twin `V5_8D_*` `27257715`. |
 | `V5_7_*` | `83a551c8` | Session 100: BOTH hardware-proven holes closed — mod-reduce moved INTO Hook Z (deterministic, Z=8·A), and dj_c seeds the master tick counter with Hook H's remainder (`dj_mrem`) instead of stock's zero (second reading R=4 proved commits land mid-master-step and the incoming grid re-anchored r ticks late). Diag twin `V5_7D_*` `116d1678`, toast `A Z X Y P R M`. |
 
 Hashes in `out/BUILDS_SHA256.txt`, provenance in `out/BUILDS_README.txt`. The `V4`/`V5`

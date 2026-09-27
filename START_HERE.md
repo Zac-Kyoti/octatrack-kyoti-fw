@@ -40,7 +40,7 @@ only, for `whatsnew.py`).
 | `reference/kb/*.md` | **distilled knowledge base** — address map + file format + DSP + container + techniques, ours merged with external RE. Read the relevant one before a new patch |
 | `reference/EXTERNAL_RESEARCH.md` | index of the 6 external OT-RE repos + the sync/distill workflow (`tools/refs/`) |
 | `reference/MERGE.md` | **combining every final-scoped mod into one firmware** — cave allocation, detour inventory, shared-state table, and the two remaining blockers. The combined build is **deliberately not buildable** until every feature is shippable; this doc is what it will be rebuilt from, and it stages the merge as `KYOTI_V1.0` / `KYOTI_V1.1` |
-| `reference/handoffs/*.md` | per-thread handoffs for work still open — read the relevant one **before** re-probing that thread (`DIRECTJUMP_SCALES_HANDOFF.md`, `RELOAD2_HANDOFF.md`) |
+| `reference/handoffs/*.md` | per-thread handoffs for work still open — read the relevant one **before** re-probing that thread (`DIRECTJUMP_PHASE_HANDOFF.md` — the current DIRECT JUMP one; `DIRECTJUMP_SCALES_HANDOFF.md` is stale, history only; `RELOAD2_HANDOFF.md`) |
 | `reference/AR_DIRECT_JUMP.md` | the Analog Rytm's own pattern-commit arithmetic, which DIRECT JUMP's position rule is ported from, plus its measurement hazards |
 | `reference/RELOAD_REDESIGN.md` | the RELOAD3 chord design: why the picker went, the measured keymap facts, the Part-half semantics |
 | `README.md` | what the firmware is, the feature list + per-feature HW status, repo layout, lineage |
@@ -117,8 +117,8 @@ each builder declares **FINAL**, **PREVIEW**, **WIP** or **SUPERSEDED** and anno
 every run. A **WIP** builder exits 2 without `KYOTI_ALLOW_WIP=1`; a **SUPERSEDED** one exits
 2 without `KYOTI_ALLOW_SUPERSEDED=1` and names its replacement (deliberately two variables —
 "I know this is unfinished" should not also unlock "this was abandoned"). Today DIRECT JUMP
-is the only non-FINAL *feature* — `build_directjump_v4.py` PREVIEW, `build_directjump_v5.py`
-WIP — and eleven earlier-stage builders are SUPERSEDED (DJ v1-v3, `build_mutemode{,_new}.py`,
+is the only non-FINAL *feature* — `build_directjump_v5.py` WIP (current line V5.11) — and
+twelve earlier-stage builders are SUPERSEDED (DJ v1-v4, `build_mutemode{,_new}.py`,
 `build_softmute.py`, `build_relstate_shadow.py`, `build_sidechain{,2}.py`,
 `build_reload{,2}.py`). **`build_bugbuilds.py --with-wip` passes `KYOTI_ALLOW_WIP=1` to the
 child builder itself**, so its own gate does not have to be worked around. When a tier
@@ -181,14 +181,19 @@ DIRECT JUMP's builder is WIP-gated (see §5) so a visitor cannot build it by acc
 > Check this section against the tree before trusting it — it has gone stale before
 > (2026-09-25: three claims about `main` that a merge had already made false).
 
-**One thread is open (DIRECT JUMP). Everything else in §5 is finished, RELOAD3 included.**
+### DIRECT JUMP — hardware-confirmed at a 1x master scale; non-1x is the whole remaining problem
 
-### DIRECT JUMP — hardware-confirmed at 1x; non-1x scales are the whole remaining problem
+`build_directjump_v5.py`, current line **V5.11** (v1–v4 SUPERSEDED; v4 at HEAD no longer
+reproduces the gold image because it assembles today's shared `patch_directjump.s`).
+**Baseline to not regress = the Session 87 GOLD image** (`out/GOLD_S87_*`, sha256
+`0657157f…`, rebuildable from commit `16df386`), flashed 2026-09-23: tracks and patterns
+stay in master time through a switch, patterns land on the correct step, mixed track
+lengths work together (7 / 12 / 16), track scales and NORMAL/PER-TRACK modes behave,
+MASTER LENGTH is respected including `INF` — all at a 1x master scale.
 
-`build_directjump_v5.py` (v1–v4 superseded). **Baseline to not regress**, flashed
-2026-09-23 at 1x scales: tracks and patterns stay in master time through a switch,
-patterns land on the correct step, mixed track lengths in one pattern work together
-(7 / 12 / 16), MASTER LENGTH is respected including `INF`.
+**V5.11 (Session 104) = gold + ONLY the master-remainder seed** (`dj_mrem`, a byte-equal
+no-op at 1x; AR's own mechanism). Emulator-identical to gold's line at 1x; **its hardware
+check is pending** — verify lengths / NORMAL / PER-TRACK / track scales first.
 
 **Non-1x scales — how the thread got here.**
 
@@ -214,12 +219,27 @@ patterns land on the correct step, mixed track lengths in one pattern work toget
    reposition fire and the track's own advance fire, exclusive in stock only because
    stock zeroes the counter, both running under the wrap-preserve. V5.9's Hook W cut
    that conditionally; the suppression path is unreachable in the emulator, so hardware
-   decides. **Session 103 (uncommitted) is replacing Hook W with a Hook V** that defers
-   each track's whole apply to its own step boundary — read the working tree and
-   `NOTES.md` before assuming which is current.
+   decides.
+6. *Session 103 (V5.10).* Hook W retired (suppressing that fire drops step 1's trig every
+   cycle; firing it late is the spurious); **Hook V** instead deferred each track's whole
+   apply to its own boundary via CNTDN. **Hardware: regressions from gold** — odd track
+   lengths (16 vs 7) at 1x went fractional and a 7-step track's LEDs ran 16 steps; toast
+   `W=7608` showed Hook V forcing countdowns every tick for tracks whose pending bit is
+   never consumed (MIDI 8-15 and more).
+7. *Session 104 (V5.11) — ROLLBACK.* The per-track preserve/defer machinery (Hooks
+   Z/X/V, two masks) does not generalise beyond the fixture it was built against. It is
+   now opt-in (`DJ_PRESERVE=1`) and OFF; V5.11 is the gold line + the master seed.
+
+**The way forward (not started):** redesign from AR's architecture — rebuild every
+per-track value from ONE time-true anchor, preserving nothing — with gold as the
+untouchable baseline and DJTEST2 (odd lengths, mixed scales) + DJMAST2 (master scales)
+as day-one emulator gates. The oracles below are what make that tractable.
 
 **Method lessons, hard-won:** the emulator judges STEP advances, which was the wrong
-observable — trust the fire-timestamp table. Diagnostic builds with an on-screen toast
+observable — trust the fire-timestamp table (`tools/diag_tablearm_phase.py`, per-writer
+class counts; `tools/diag_fire_phase.py` showed `FUN_400a536c` is the reposition
+callback, not the trig dispatch). A fix gated on one fixture is not a fix: gate every
+candidate on odd lengths and NORMAL mode too. Diagnostic builds with an on-screen toast
 beat further static analysis (also how RELOAD3 and QLREC were cracked). Do not keep
 state in `0x80006a40..0x80006abf`. MIDI twin sites of the patched blocks
 (`0x400a4cb0` area) are still unpatched — audio-only coverage.
@@ -231,7 +251,7 @@ The position rule is the Analog Rytm's own commit arithmetic (`reference/AR_DIRE
 incl. its §9 re-review). The mode deliberately does not persist — OFF on every power-on.
 Handoff: `reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md` (the older
 `DIRECTJUMP_SCALES_HANDOFF.md` is stale — its `CNTDN_TBL` section 5 was retired).
-Detail: `NOTES.md` "Session 15" + "Session 21" + "Session 35", then "Session 60"–"Session 102".
+Detail: `NOTES.md` "Session 15" + "Session 21" + "Session 35", then "Session 60"–"Session 104".
 
 ### RELOAD FROM PROJECT — RELOAD3, FINAL (hardware-confirmed 2026-09-25)
 

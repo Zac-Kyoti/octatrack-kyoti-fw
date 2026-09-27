@@ -31743,3 +31743,28 @@ declared; `build_directjump_v5.py` is WIP-tier and refuses without `KYOTI_ALLOW_
 Structural argument alongside: the only executed difference at 1x is `move.b dj_mrem,%d0`
 (dj_mrem = 0) where V5.3 has `clr.b %d0` — byte-equal writes. Hardware still decides;
 the user verifies lengths / NORMAL / PER-TRACK / track scales first.
+
+### Session 104 continued — `wip` fully retired; DJ docs brought to the V5.11 state
+
+- **Merge check:** `wip` (`d55865a`) and `origin/wip` were both ancestors of `main`;
+  `git rev-list main..wip` = 0 and `main..origin/wip` = 0. Nothing existed on `wip`
+  that `main` lacked, so there was nothing to merge. Both refs were then deleted, local
+  and remote. Restore if ever needed: `git branch wip d55865a`.
+- **`build_directjump_v4.py` → SUPERSEDED.** Measured: at HEAD it builds `439aa30a…`,
+  ~1080 bytes away from the gold image `0657157f…`. It is unchanged since `16df386`,
+  but it assembles the SHARED `tools/patch_directjump.s`, which has moved on. Every doc
+  that called v4 "the confirmed build" was wrong. The confirmed image is
+  `out/GOLD_S87_*`, or check out `16df386` and run this builder there.
+- **`build_directjump_v5.py`**: its status note and docstring now describe V5.11 (gold
+  line + master seed, hardware check pending). It stays WIP until that check.
+- **`build_bugbuilds.py`**: `DIRECTJUMP_V4` → `DIRECTJUMP_V5`. Verified with `--with-wip`:
+  V5.11 + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX composes DISJOINT / ALL PRESERVED /
+  NO STRAYS, 3844 B of cave free, round-trip OK. The only flagged item is the intended
+  "WIP, not shippable".
+- **MERGE.md, derived:** V5.11's `patch_directjump` blob is **1532 B**, versus v4's
+  1026 B. V1.1's single-zone free run goes from ≈ 64 B to **≈ −442 B**. V1.1 needs the
+  second cave zone.
+- Docs updated: README, BUILD_KYOTI, START_HERE (DJ section now ends at Session 104
+  plus the redesign plan), FLASHING §4.3 and build table, MERGE.md, the
+  DIRECTJUMP_PHASE_HANDOFF (a new §0 CURRENT STATE, stale "ON THE UNIT" and "current
+  candidate" labels fixed), and DIRECTJUMP_SCALES_HANDOFF (marked stale).
