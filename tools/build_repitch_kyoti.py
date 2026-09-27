@@ -38,16 +38,20 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (gate 1, rev 3)", """
-Flash 1 (140C_RPK1 sha 4de57994): SETUP 7-value TSTR CONFIRMED ON HARDWARE;
-QUANT cell missing (page-1 dial renderers bypass the descriptor widget
-column -- rev 2 shims all four dial sites, formatter-keyed). Rev 3, per the
-manual's AUTO contract: ATTR offers REPITCH/RPS9/RPSP (raw 4/5/6) and AUTO
-applies EACH SAMPLE'S OWN mode; the dial caption swaps PTCH<->QUAN at draw
-time. All 7 oracle contracts green (2100 repitch cases incl. AUTO carrying
-the sample's mode). The three TSTR values still play identically (linear)
-by design; RPS9/RPSP character is gates 3/4. Unvalidated on hardware: the
-QUANT cell + QUAN caption, ATTR's two new values, per-sample AUTO.
+status(WIP, "REPITCH KYOTI (gate 1, rev 4)", """
+Flash 2 (rev 3) confirmed on hardware: 7-value TSTR, QUAN cell + QUAN
+caption, ATTR's three values, per-sample AUTO, AND THE AUDIO -- tempo-
+following and closing polyrhythms verified by ear. Rev 4 answers the
+flash-2 punch list: QUAN is now a REAL DIAL (snapped to 8 positions, 1/1
+dead centre) with its own per-track storage rk_quan -- the PTCH parameter
+is never touched (independence proven in-emulator: 1200 cases x 2 words,
+bit-identical), edits intercepted at the page-1 knob editor 0x40055008,
+and the display gate resolves through the part/machine/slot tables so
+AUTO+ATTR updates immediately, no play/stop needed. All 7 oracle contracts
+green. QUAN is session-persistent (reboot -> 1/1), NOT saved in projects,
+and no longer p-lockable -- documented trades. Hardware-new surfaces: the
+dial position/readout, encoder feel (1 detent = 1 step), the redraw mark
+0x46c7d245, immediacy of the AUTO caption.
 """)
 
 BASE = 0x40000400
@@ -78,6 +82,8 @@ DETOURS = [
     (0x4003690C, "206b00304a88660641f9400479b4", "qdial2"),
     (0x4003786A, "206b00304a88660641f9400479b4", "qdial3"),
     (0x40037C06, "206b00304a88660641f9400479b4", "qdial4"),
+    # the page-1 UI knob editor: slot-0 edits go to rk_quan on a QUAN track
+    (0x40055008, "4fefffd048d77cfc", "quant_edit"),
 ]
 
 # --- descriptor pokes (addr, stock long, new long or symbol) ----------------

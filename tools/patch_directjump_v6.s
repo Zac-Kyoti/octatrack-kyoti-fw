@@ -81,6 +81,8 @@
     .equ UI_QUEUE,  0x460d17ae          | the sequencer->UI message queue
     .equ MSG_BANKPAT, 0x400d8167        | message 0x15: {code, bank} -- stock's wrap-change post
     .equ MSG_BANKPAT_ARG, 0x400d8168
+    .equ MSG_PAT,     0x400d8164        | message 0x11: {code, pattern, 0} -- stock @0x400a40fc
+    .equ MSG_PAT_ARG, 0x400d8165
 
     .equ PAT_BASE,  0x400e21e0          | pattern blobs: + bank*0x9b340 + pat*0x8ed8
     .equ BANK_STRIDE, 0x9b340
@@ -377,18 +379,40 @@ dc_next:
     clr.w   RESYNC80
     clr.w   RESYNC82
     clr.w   RESYNC84
-|   V6.2 (Session 106): tell the UI.  Stock's wrap-change, right after its own ACT<-PEND
-|   swap (0x400a44d0), does `0x400d8168 = ACT_BANK; FUN_40000c3c(0x460d17ae, 0x400d8167)`
-|   (0x400a4548-0x400a4566) -- the {0x15, bank} message that makes the pattern LEDs and
-|   the display take the new pattern.  The deferred-landing path we ride was written for
-|   transport start, whose task-context caller posts for itself, so it never posts; without
-|   this the switched-to LED stays yellow ("cued") until the old pattern's end (flashed V6.1
-|   DIAG, 2026-09-27: A8 L8 R8, audio jumping, LEDs not).  Same call, same message, same
-|   interrupt context as stock's own site -- the kernel post is stock-legal from the tick
-|   ISR (CLAUDE.md's rule is about UI primitives from the engine FRAME path).
+|   V6.3 (Session 107): tell the UI -- and tell it the PATTERN, which is what the LED
+|   predicate actually reads.  MEASURED this session (Ghidra + opcode-filtered image scan;
+|   image base is 0x40000400, NOT 0x40000000 -- anchors 0x400a1f72 / the painter confirm it):
+|
+|     * The PTN-page painter FUN_4007afe8 @0x4007b182 paints "cued" (yellow) while
+|       PEND_PAT != [0x100b14d0] && PEND_BANK == [0x80000002].
+|     * 0x100b14d0 has exactly FOUR writers image-wide, and it is the project-RAM twin of
+|       0x80000004 (the UI's "current pattern"); 0x80000002 twins 0x100b14ce (current bank).
+|     * The UI task's message dispatcher is FUN_40061a94 (4618 B, no callers = a task entry);
+|       it switches on msg[0]-1.  Case 0x10 == message 0x11 does
+|       `0x100b14d0 = 0x80000004 = msg[1]`, refreshes the part index 0x100b14cf and repaints
+|       (@0x400620ec-0x4006211a).  Case 0x14 == message 0x15 writes ONLY the bank pair
+|       (0x80000002 / 0x100b14ce) and early-outs when the bank is unchanged.
+|
+|   So V6.2's {0x15, bank} post could never clear the yellow: that handler cannot reach
+|   0x100b14d0.  {0x11, pattern} is the message that can, and stock posts it with exactly
+|   this idiom from inside this same tick ISR at 0x400a40fc-0x400a4114 (and from
+|   FUN_400a0570 / candidate_400a10d2, the other two ACT_PAT writers).  The kernel post is
+|   stock-legal from the tick ISR; CLAUDE.md's rule is about UI PRIMITIVES from the engine
+|   FRAME path, which this is not.
+|
+|   ORDER MATTERS: the bank message first.  Case 0x10's part-index refresh indexes the bank
+|   base pointer 0x46c82456, and that pointer is what case 0x14 rewrites when the bank
+|   changes -- so a bank-changing jump must land {0x15} before {0x11} or the part index is
+|   read out of the old bank.
     move.b  ACT_BANK,%d0
     move.b  %d0,MSG_BANKPAT_ARG
     pea     MSG_BANKPAT
+    pea     UI_QUEUE
+    jsr     KPOST
+    addq.l  #8,%sp
+    move.b  ACT_PAT,%d0
+    move.b  %d0,MSG_PAT_ARG
+    pea     MSG_PAT
     pea     UI_QUEUE
     jsr     KPOST
     addq.l  #8,%sp

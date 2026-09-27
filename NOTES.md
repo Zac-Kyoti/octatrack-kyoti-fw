@@ -32397,3 +32397,58 @@ handler copying `ACT_PAT → 0x100b14d0`; and only as a last resort writing `0x1
 **Full handoff written: `reference/handoffs/DIRECTJUMP_V6_HANDOFF.md`** (state, the V6
 mechanism, the LED evidence and experiment, the gate commands, the do-not-re-try list, the
 post-LED test order, and the three AR_DJ_QUIRKS deviations with their designed fixes).
+
+## Session 108 (2026-09-27, `main`) — repitch-kyoti FLASH 2 CONFIRMED (incl. AUDIO); rev 4 = independent QUAN storage, real dial, immediate AUTO
+
+**Flash 2 (rev 3, `54ab3353…`) hardware results (user):** all four checks
+POSITIVE — 7-value TSTR, QUAN cell + caption swap, ATTR's three values,
+per-sample AUTO, **and the audio: tempo-following varispeed confirmed by ear,
+polyrhythms close**. The engine thread of this module is now hardware-proven
+end to end. Three punch-list items, all addressed in rev 4:
+
+1. **"QUAN needs a knob, 1/1 centred" + "pitch and quan must be independent" +
+   "modes must remember the quantize setting":** the shared-PTCH-word storage
+   was the root defect (editing QUAN wrote the PTCH tiers: Part store, shadow,
+   live byte — so leaving repitch changed pitch, and any lane-level swap would
+   lose to a part reload). Rev 4: **QUAN owns per-track cave storage
+   `rk_quan[8]`** (init 3 = 1/1, session-persistent, reboot → 1/1, NOT in
+   projects — flagged trade), and the **page-1 UI knob editor `0x40055008`**
+   (`FUN_40055008(slot, delta)`, the near-copy of MIDI.md's ✅ generic writer
+   `0x40054cd8`) is detoured: on the PLAYBACK page (`0x460d1684 == 0`), slot 0,
+   audio mode (`0x80000012 == 0` 🟡), QUAN in force → the delta edits
+   `rk_quan[track]` (one detent = one step, clamped 0..7) and RETURNS — stock's
+   stores never run, so **PTCH survives repitch round trips untouched** (oracle:
+   1200 cases × 2 PTCH words bit-identical; live-byte canary asserted in the
+   editor contract). Redraw via the CC path's documented mark
+   `0x46c7d244[2*slot+1] = 0x14` → `0x46c7d245` (🟡 scale assumed bytes).
+   quant_widget now passes the stock dial a **snapped value 19 + 15·idx**
+   (1/1 = 64 = dead centre ✓ user ask) with `quant_fmt` as the formatter, so
+   the real dial draws with a ratio readout; the caller's PTCH value is
+   ignored. P-locks/scenes on PTCH are inert on repitch tracks (PTCH is
+   neutralised; QUAN is not lockable) — documented trade vs rev 3.
+
+2. **"AUTO+ATTR should update the caption immediately" (was: on STOP):** the
+   rev-3 gate read the VOICE's bound settings (`voices+8`), which exist only
+   once the track has played. Rev 4's `rp_ui_gate` resolves **binding-free**
+   from stock's own tables (decoded from `0x40004ee4`/`0x40004f9c`, the
+   slot-changed refresh pair): part `0x800000e0`, machine
+   `0x80000eb4[part*8+t]` (0 STATIC / 1 FLEX / 4 PICKUP), assigned slot
+   `0x8000082f[t*72]` (the 72-stride live block, consistent with MIDI.md's ✅
+   `0x80000810[track*72+flat]`), settings = `0x100d5b30` (STATIC) /
+   `0x100b14f0` (FLEX) `+ slot*0x448` (STORAGE.md ✅ bases; also found the
+   recorder settings at `0x100d38f0` = STATIC−8×0x448). One rule: QUAN shows
+   exactly when repitch would engage. AUTO is immediate; THRU/NEIGHBOR/PICKUP
+   machines never QUANt. rate_gate now packs the QUAN index from `rk_quan`
+   itself; pitch_gate reverts to a pure neutraliser.
+
+**Rev 4 = flash-3 candidate: mainos `2ceb9882…`, syx `07f6d187…`** (1876 B, 0
+strays, cave `0x400d6f80..0x400d78e0` = 2400 B, 8 detours + 4 dial shims + 8
+pokes). **Oracle 7/7** (contract 2 = rk_quan-driven + PTCH-irrelevance;
+contract 5 = quant_edit hook/fallthrough with live-byte canary; contract 7 =
+binding-free gate, 12 cases, settings arrays confirmed mapped in the emu).
+Probe gotcha fixed: after the hook's `rts` the SP sits +4 above the seeded
+frame (the sentinel pop) — assert `stack−8`, not `stack−12`.
+
+**Hardware-new surfaces for flash 3:** the dial position + readout, encoder
+feel (one detent per step), the redraw mark (dial repaint while turning),
+AUTO caption immediacy, and that PTCH round-trips untouched.

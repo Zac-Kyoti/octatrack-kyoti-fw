@@ -57,11 +57,12 @@ struct Img
 
 	struct Rate { unsigned track, tstr, tsmode, source, project; uint16_t ptch, rate; uint8_t machine = 1; };
 
-	uint32_t increment(const Rate& r, bool& ok) const
+	uint32_t increment(const Rate& r, bool& ok, uint32_t rkAddr = 0, unsigned idx = 0) const
 	{
 		ot::Machine m(image);
 		auto* cpu = m.getCpuState();
 		const uint32_t state = states + 40 * r.track, lane = lanes + 48 * r.track;
+		if(rkAddr) m.write8(rkAddr, uint8_t(idx));
 		m.write32(curState, state);
 		m.write32(stack + 64, 0x10);
 		m.write16(lane, r.ptch);
@@ -140,7 +141,7 @@ void check(const char* what, bool ok, int detail = -1)
 
 int main(int argc, char** argv)
 {
-	if(argc != 3 && argc != 5) { std::printf("usage: %s STOCK PATCHED [quant_widget rp_ui_gate]\n", argv[0]); return 2; }
+	if(argc != 3 && argc != 6) { std::printf("usage: %s STOCK PATCHED [quant_widget rp_ui_gate rk_quan]\n", argv[0]); return 2; }
 	Img stock, pat;
 	for(auto [img, path] : {std::pair{&stock, argv[1]}, {&pat, argv[2]}}) {
 		std::ifstream in(path, std::ios::binary);
@@ -150,6 +151,8 @@ int main(int argc, char** argv)
 	std::printf("repitch-kyoti gate-1 contracts (%zu / %zu bytes):\n",
 	            stock.image.size(), pat.image.size());
 
+	const uint32_t rkQuan = argc == 6 ? uint32_t(std::stoul(argv[5], nullptr, 16)) : 0;
+	if(!rkQuan) std::printf("  (no rk_quan address: contracts 2 and 5 need all three symbols)\n");
 	const unsigned projects[] = {720, 2160, 2880, 3600, 7200};
 	const unsigned sources[] = {720, 1440, 2880, 4320, 7200};
 	const uint16_t ptchs[] = {0x0400, 0x2200, 0x3400, 0x4000, 0x4800, 0x5800, 0x7c00};
@@ -175,8 +178,9 @@ int main(int argc, char** argv)
 		std::printf("      (%d cases)\n", n);
 	}
 
-	// 2) repitch family: SETUP 4/5/6 and AUTO+TSMODE4, in-range tempo --
-	//    increment == model(stock neutral-PTCH dry increment).
+	// 2) repitch family: SETUP 4/5/6 and AUTO carrying the sample's mode,
+	//    the QUAN index from rk_quan[track] -- and the PTCH word must be
+	//    IRRELEVANT: two different words give bit-identical increments.
 	{
 		int bad = -1, n = 0;
 		bool ok = true;
@@ -185,23 +189,25 @@ int main(int argc, char** argv)
 		                    {1, 4, 0}, {1, 5, 1}, {1, 6, 2}};
 		for(auto sel : sels)
 			for(auto proj : projects) for(auto samp : sources)
-				for(auto ptch : ptchs) for(auto rate : rates) {
-					Img::Rate rNeut{2, 0, 2, samp, proj, 0x4000, rate, 1};
-					Img::Rate rTest{2, sel.tstr, sel.tsmode, samp, proj, ptch, rate, 1};
-					bool oks = true, okp = true;
+				for(unsigned idx = 0; idx < 8; ++idx) {
+					Img::Rate rNeut{2, 0, 2, samp, proj, 0x4000, 0x7f00, 1};
+					bool oks = true, okA = true, okB = true;
 					const auto neutral = stock.increment(rNeut, oks);
-					const auto got = pat.increment(rTest, okp);
-					const auto want = model(neutral, proj, samp, bucket(ptch >> 8), sel.modeoff);
-					if(!(oks && okp && got == want) && bad < 0) {
+					Img::Rate rT{2, sel.tstr, sel.tsmode, samp, proj, 0x4800, 0x7f00, 1};
+					const auto a = pat.increment(rT, okA, rkQuan + 2, idx);
+					rT.ptch = 0x2200;
+					const auto b = pat.increment(rT, okB, rkQuan + 2, idx);
+					const auto want = model(neutral, proj, samp, idx, sel.modeoff);
+					if(!(oks && okA && okB && a == want && b == a) && bad < 0) {
 						bad = n;
-						std::printf("      first divergence: tstr%u proj%u samp%u ptch%04x rate%04x: got %08x want %08x (neutral %08x)\n",
-						            sel.tstr, proj, samp, ptch, rate, got, want, neutral);
+						std::printf("      first divergence: tstr%u idx%u proj%u samp%u: got %08x/%08x want %08x\n",
+						            sel.tstr, idx, proj, samp, a, b, want);
 					}
-					ok &= oks && okp && got == want;
+					ok &= oks && okA && okB && a == want && b == a;
 					++n;
 				}
-		check("repitch family: increment == QUANT/fold/tag model over stock's dry neutral", ok, bad);
-		std::printf("      (%d cases)\n", n);
+		check("repitch family: rk_quan drives the ratio; the PTCH word is irrelevant", ok, bad);
+		std::printf("      (%d cases x 2 words)\n", n);
 	}
 
 	// 3) the guards: PICKUP, out-of-range sample tempo, TSMODE 4 without AUTO
@@ -243,25 +249,64 @@ int main(int argc, char** argv)
 		check("resolver: 4/5/6 behave as OFF register-for-register; 0..3 untouched", ok);
 	}
 
-	// 5) QUANT sweep: every ui bucket boundary lands on the model's ratio.
+	// 5) quant_edit at 0x40055008: on the PLAYBACK page, slot 0, QUAN in
+	//    force, the delta edits rk_quan (clamped) and stock's body is never
+	//    entered; anything else falls through to the displaced frame.
 	{
 		bool ok = true;
 		int bad = -1, n = 0;
-		for(unsigned ui : {4u, 26u, 27u, 41u, 42u, 56u, 57u, 64u, 71u, 72u, 86u, 87u, 101u, 102u, 116u, 117u, 124u}) {
-			Img::Rate rNeut{3, 0, 2, 2880, 2160, 0x4000, 0x7f00, 1};
-			Img::Rate rTest{3, 4, 2, 2880, 2160, uint16_t(ui << 8), 0x7f00, 1};
-			bool oks = true, okp = true;
-			const auto neutral = stock.increment(rNeut, oks);
-			const auto got = pat.increment(rTest, okp);
-			const auto want = model(neutral, 2160, 2880, bucket(ui), 0);
-			if(!(oks && okp && got == want) && bad < 0) bad = n;
-			ok &= oks && okp && got == want;
+		struct Ed { unsigned slot; int delta; unsigned setup; uint8_t q0, want; bool hook; };
+		const Ed eds[] = {
+			{0, +1, 4, 3, 4, true},
+			{0, -1, 5, 4, 3, true},
+			{0, +20, 6, 3, 7, true},
+			{0, -20, 4, 5, 0, true},
+			{1, +1, 4, 3, 3, false},   // another slot: stock
+			{0, +1, 0, 3, 3, false},   // not a repitch mode: stock
+		};
+		for(const auto& e : eds) {
+			ot::Machine m(pat.image);
+			auto* cpu = m.getCpuState();
+			const unsigned t = 2;
+			m.write8(0x80000000, t);
+			m.write32(0x80000012, 0);
+			m.write32(0x800000e0, 0);
+			m.write8(0x80000eb4 + t, 1);            // FLEX
+			m.write8(0x8000082f + 72 * t, 5);       // slot 5
+			const uint32_t set = 0x100b14f0 + 5 * 0x448;
+			m.write32(set + 0x114, 2880);
+			m.write32(set + 0x110, 2);
+			m.write8(lanes + 48 * t + 28, uint8_t(e.setup));
+			m.write8(rkQuan + t, e.q0);
+			m.write8(0x80000810 + 72 * t, 0x55);    // live-byte canary
+			m.write32(stack - 12, trampoline + 0x80);  // return sentinel
+			m.write32(stack - 8, e.slot);
+			m.write32(stack - 4, uint32_t(e.delta));
+			for(unsigned i = 0; i < 8; i += 2) m.write16(trampoline + 0x80 + i, 0x4e71);
+			m68k_set_reg(cpu, M68K_REG_SP, stack - 12);
+			m68k_set_reg(cpu, M68K_REG_PC, 0x40055008);
+			unsigned steps = 0;
+			bool hooked = false, fell = false;
+			while(steps++ < 400) {
+				if(m.pc() == trampoline + 0x80) { hooked = true; break; }
+				if(m.pc() == 0x40055010) { fell = true; break; }
+				if(!m.step()) break;
+			}
+			bool good;
+			if(e.hook)
+				good = hooked && !fell && m.read8(rkQuan + t) == e.want &&
+				       m.read8(0x80000810 + 72 * t) == 0x55 &&
+				       m68k_get_reg(cpu, M68K_REG_SP) == stack - 8;   // rts popped the sentinel
+			else
+				good = fell && m.read8(rkQuan + t) == e.q0;
+			if(!good && bad < 0) bad = n;
+			ok &= good;
 			++n;
 		}
-		check("QUANT: all 17 bucket-boundary ui values land on the modelled ratio", ok, bad);
+		check("quant_edit: hook edits rk_quan only; everything else reaches stock", ok, bad);
 	}
 
-	if(argc == 5) {
+	if(argc == 6) {
 		const uint32_t quantWidget = uint32_t(std::stoul(argv[3], nullptr, 16));
 		const uint32_t uiGate = uint32_t(std::stoul(argv[4], nullptr, 16));
 
@@ -314,42 +359,45 @@ int main(int argc, char** argv)
 			std::printf("      (%d cases across 4 sites)\n", n);
 		}
 
-		// 7) rp_ui_gate truth table (display gating from the UI thread).
+		// 7) rp_ui_gate truth table -- resolved from the part/machine/slot
+		//    tables and the settings arrays, no voice binding involved.
 		{
-			struct Case { uint8_t track, setup, machine; bool bind; uint32_t tsmode, bpm; int want; };
+			struct Case { uint8_t track, setup, machine, slot; uint32_t tsmode, bpm; int want; };
 			const Case cases[] = {
-				{2, 4, 1, true,  2, 2880, 1},   // RPCH, tempo fine
-				{2, 5, 1, false, 2, 2880, 1},   // RPS9, unbound: optimistic
-				{2, 6, 1, true,  2,  100, 0},   // RPSP, tempo veto
-				{2, 4, 4, true,  2, 2880, 0},   // pickup machine never QUANTs
-				{2, 0, 1, true,  2, 2880, 0},   // OFF
-				{2, 2, 1, true,  4, 2880, 0},   // NORM ignores TSMODE
-				{2, 1, 1, true,  4, 2880, 1},   // AUTO + sample REPITCH
-				{2, 1, 1, true,  5, 2880, 1},   // AUTO + sample RPS9
-				{2, 1, 1, true,  6, 2880, 1},   // AUTO + sample RPSP
-				{2, 1, 1, true,  2, 2880, 0},   // AUTO + NORMAL sample
-				{2, 1, 1, false, 4, 2880, 0},   // AUTO unbound: conservative
-				{2, 1, 1, true,  4, 8000, 0},   // AUTO, tempo out of range
-				{9, 4, 1, true,  2, 2880, 0},   // track out of range
+				{2, 4, 0, 5, 2, 2880, 1},   // STATIC, RPCH, tempo fine
+				{2, 5, 1, 7, 2, 2880, 1},   // FLEX, RPS9
+				{2, 6, 1, 7, 2,  100, 0},   // tempo veto
+				{2, 4, 4, 5, 2, 2880, 0},   // PICKUP machine never QUANTs
+				{2, 4, 2, 5, 2, 2880, 0},   // THRU machine neither
+				{2, 0, 1, 5, 2, 2880, 0},   // OFF
+				{2, 2, 1, 5, 4, 2880, 0},   // NORM ignores TSMODE
+				{2, 1, 1, 5, 4, 2880, 1},   // AUTO + sample REPITCH, IMMEDIATE
+				{2, 1, 0, 5, 5, 2880, 1},   // AUTO + sample RPS9 on STATIC
+				{2, 1, 1, 5, 6, 8000, 0},   // AUTO + RPSP, tempo out of range
+				{2, 1, 1, 5, 2, 2880, 0},   // AUTO + NORMAL sample
+				{9, 4, 0, 5, 2, 2880, 0},   // track out of range
 			};
 			bool ok = true;
 			int n = 0, bad = -1;
 			for(const auto& c : cases) {
 				ot::Machine m(pat.image);
 				auto* cpu = m.getCpuState();
-				m.write8(0x80000000, c.track);
 				const uint32_t t = c.track & 7;
+				m.write32(0x800000e0, 0);
+				m.write8(0x80000eb4 + t, c.machine);
+				m.write8(0x8000082f + 72 * t, c.slot);
+				const uint32_t set = (c.machine == 0 ? 0x100d5b30u : 0x100b14f0u) + c.slot * 0x448;
+				m.write32(set + 0x110, c.tsmode);
+				m.write32(set + 0x114, c.bpm);
+				if(m.read32(set + 0x114) != c.bpm) { std::printf("  [FAIL] settings region unmapped in the emu\n"); ok = false; break; }
 				m.write8(lanes + 48 * t + 28, c.setup);
-				m.write8(voices + 168 * t + 20, c.machine);
-				m.write32(voices + 168 * t + 8, c.bind ? settings : 0);
-				m.write32(settings + 0x110, c.tsmode);
-				m.write32(settings + 0x114, c.bpm);
+				m68k_set_reg(cpu, M68K_REG_D1, c.track);
 				m.write32(stack - 4, trampoline + 0x80);
 				for(unsigned i = 0; i < 8; i += 2) m.write16(trampoline + 0x80 + i, 0x4e71);
 				m68k_set_reg(cpu, M68K_REG_SP, stack - 4);
 				m68k_set_reg(cpu, M68K_REG_PC, uiGate);
 				unsigned steps = 0;
-				while(m.pc() != trampoline + 0x80 && steps++ < 120)
+				while(m.pc() != trampoline + 0x80 && steps++ < 160)
 					if(!m.step()) break;
 				const bool good = m.pc() == trampoline + 0x80 &&
 				                  m68k_get_reg(cpu, M68K_REG_D0) == uint32_t(c.want) &&
@@ -359,7 +407,7 @@ int main(int argc, char** argv)
 				++n;
 			}
 			std::printf("      (%d gate cases)\n", n);
-			check("rp_ui_gate: display truth table", ok, bad);
+			check("rp_ui_gate: slot-table display truth, binding-free", ok, bad);
 		}
 	}
 

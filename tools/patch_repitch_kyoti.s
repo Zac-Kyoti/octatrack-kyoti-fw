@@ -43,6 +43,9 @@
         .global tstr_resolve
         .global tstr_fmt
         .global quant_widget
+        .global quant_fmt
+        .global quant_edit
+        .global rk_quan
         .global qdial1
         .global qdial2
         .global qdial3
@@ -69,6 +72,15 @@
         .equ    PTCH_FMT, 0x4003b4b0    | A[0] of STATIC/FLEX/PICKUP -- only playback slot 0 uses it
         .equ    NAME_ST, 0x400d3032     | STATIC slot-0 caption 'PTCH', 6 B (E+0x4e)
         .equ    NAME_FX, 0x400d31c4     | FLEX   slot-0 caption -- the image is SDRAM, writable
+        .equ    CUR_PART, 0x800000e0    | the current part (long)
+        .equ    MACH_TAB, 0x80000eb4    | machine byte per [part*8 + track]
+        .equ    SLOT_TAB, 0x8000082f    | assigned sample slot byte per [track*72]
+        .equ    LIVE_PAGE, 0x460d1684   | page kind on screen (0 = PLAYBACK page 1)
+        .equ    MIDI_FLAG, 0x80000012   | 0x40055008's own first gate; nonzero is not our path
+        .equ    REDRAW_B, 0x46c7d245    | knob-redraw mark, slot 0 (0x46c7d244[2*slot+1])
+        .equ    SET_STATIC, 0x100d5b30  | STATIC sample settings, stride 0x448 (STORAGE.md)
+        .equ    SET_FLEX, 0x100b14f0    | FLEX settings array
+        .equ    SET_STRIDE, 0x448
         .equ    TXT_MEASURE, 0x40012f30 | (font, -1, str) -> px width
         .equ    TXT_DRAW, 0x40012bd8    | (font, canvas, x, y, -1, str)
         .equ    FONT, 0x400ba876
@@ -163,16 +175,24 @@ rk_bucket:
 | track's packed word to the two hooks below. Then the displaced
 | `btst #4,67(sp); bne` (the per-frame recompute flag).
 rate_gate:
-        lea     -8(%sp),%sp
-        movem.l %d0-%d1,(%sp)
+        lea     -12(%sp),%sp
+        movem.l %d0-%d1/%a0,(%sp)
         move.l  (CUR_STATE).l,%d1
         subi.l  #STATES,%d1
         moveq   #40,%d3
         divu.l  %d3,%d1                 | the track
         bsr     rp_source
         move.l  %d0,%d3                 | bpm | modeoff<<16 (0 = not repitch)
-        movem.l (%sp),%d0-%d1
-        lea     8(%sp),%sp
+        beq.s   .rg_rest
+        lea     rk_quan(%pc),%a0
+        moveq   #0,%d0
+        move.b  (%a0,%d1.l),%d0         | this track's QUAN index...
+        swap    %d0
+        lsl.l   #8,%d0
+        or.l    %d0,%d3                 | ...joins d3 at bits 24..26
+.rg_rest:
+        movem.l (%sp),%d0-%d1/%a0
+        lea     12(%sp),%sp
         btst    #4,67(%sp)              | displaced
         bne.s   .rg_compute
         jmp     (0x40004072).l
@@ -184,17 +204,13 @@ rate_gate:
 | word the table path sees is neutral 0x4000. Stock path untouched.
 pitch_gate:
         tst.l   %d3
-        bne.s   .pg_rp
+        bne.s   .pg_neutral
         .word   0x71d6                  | displaced: mvz.w (%a6),%d0
         bra.s   .pg_cmp
-.pg_rp:
-        .word   0x71d6                  | the composed word, for QUANT
-        lsr.l   #8,%d0                  | ui 4..124
-        bsr     rk_bucket
-        swap    %d0                     | idx<<16
-        lsl.l   #8,%d0                  | idx<<24
-        or.l    %d0,%d3
-        move.l  #0x4000,%d0             | PTCH is not applied
+.pg_neutral:
+        move.l  #0x4000,%d0             | PTCH is not applied on a repitch
+                                        | track; QUAN lives in rk_quan, so
+                                        | the word stays the user's pitch
 .pg_cmp:
         .word   0xa346                  | displaced: mov3q #1,%d6
         .word   0x0c40,0x4000           | displaced: cmpi.w #0x4000,%d0
@@ -311,66 +327,69 @@ tstr_fmt:
 .t6:    .asciz  "RPSP"
         .balign 2
 
-| -> d0 = 1 when the PTCH cell should draw as QUANT for the UI track.
-| DISPLAY truth, distinct from rp_source's ENGAGEMENT truth: the lane's
-| SETUP byte decides (4..6), because the voice's sample binding is not
-| trustworthy from the UI thread while the track is idle. A bound sample
-| whose tempo is out of range vetoes (that track plays stock); an unbound
-| voice is optimistic. AUTO still needs the binding (conservative: the
-| stock dial until the sample's TSMODE is reachable). PICKUP never QUANTs.
+| d1 = track -> d0 = 1 when QUAN is in force for display and editing.
+| Resolved WITHOUT the voice binding (which exists only once the track has
+| played -- the rev-3 caption-on-STOP lag): machine from MACH_TAB[part*8+t],
+| the assigned sample slot from SLOT_TAB[t*72], its settings at
+| base + slot*0x448 (STORAGE.md bases, MKI; the same reads stock's
+| 0x40004ee4 / 0x40004f9c make). One rule: QUAN shows exactly when repitch
+| would engage -- SETUP 4/5/6, or AUTO with the sample's TSMODE 4/5/6, on a
+| STATIC/FLEX machine with the sample's tempo in range. AUTO is now
+| IMMEDIATE. Preserves everything but d0.
 rp_ui_gate:
-        lea     -12(%sp),%sp
-        movem.l %d1-%d2/%a0,(%sp)
+        lea     -20(%sp),%sp
+        movem.l %d1-%d3/%a0-%a1,(%sp)
+        move.l  %d1,%d2                 | track
         moveq   #0,%d0
-        move.b  (UI_TRACK).l,%d0
         moveq   #7,%d1
+        cmp.l   %d1,%d2
+        bhi     .ug_out
+        move.l  (CUR_PART).l,%d1
+        lsl.l   #3,%d1
+        add.l   %d2,%d1
+        lea     (MACH_TAB).l,%a0
+        moveq   #0,%d0
+        move.b  (%a0,%d1.l),%d0         | machine: 0 STATIC, 1 FLEX qualify
+        moveq   #1,%d1
         cmp.l   %d1,%d0
         bhi     .ug_no
-        move.l  %d0,%d2                 | track
+        lea     (SET_STATIC).l,%a0
+        tst.l   %d0
+        beq.s   1f
+        lea     (SET_FLEX).l,%a0
+1:      moveq   #72,%d1
+        mulu.l  %d2,%d1
+        lea     (SLOT_TAB).l,%a1
+        moveq   #0,%d3
+        move.b  (%a1,%d1.l),%d3         | the assigned sample slot
+        move.l  #SET_STRIDE,%d1
+        mulu.l  %d3,%d1
+        adda.l  %d1,%a0                 | the sample's settings record
         moveq   #48,%d1
         mulu.l  %d2,%d1
-        lea     (LANES).l,%a0
+        lea     (LANES).l,%a1
         moveq   #0,%d0
-        move.b  28(%a0,%d1.l),%d0       | SETUP TSTR
-        move.l  #168,%d1
-        mulu.l  %d2,%d1
-        lea     (VOICES).l,%a0
-        adda.l  %d1,%a0                 | the track's voice
-        moveq   #PICKUP_M,%d1
-        cmp.b   20(%a0),%d1
-        beq     .ug_no
+        move.b  28(%a1,%d1.l),%d0       | SETUP TSTR
         moveq   #RPCH,%d1
         cmp.l   %d1,%d0
         blt.s   .ug_auto
         moveq   #RPSP,%d1
         cmp.l   %d1,%d0
         bgt.s   .ug_no
-        movea.l 8(%a0),%a0              | bound settings, or 0
-        move.l  %a0,%d1
-        beq.s   .ug_yes
-        move.l  0x114(%a0),%d1
-        cmpi.l  #BPM24_MIN,%d1
-        blt.s   .ug_no
-        cmpi.l  #BPM24_MAX,%d1
-        bgt.s   .ug_no
-.ug_yes:
-        moveq   #1,%d0
-        bra.s   .ug_out
+        bra.s   .ug_tempo
 .ug_auto:
         moveq   #TSTR_AUTO,%d1
         cmp.l   %d1,%d0
         bne.s   .ug_no
-        movea.l 8(%a0),%a0
-        move.l  %a0,%d1
-        beq.s   .ug_no
-        move.l  0x110(%a0),%d0
+        move.l  0x110(%a0),%d0          | the sample's own TSMODE
         moveq   #RPCH,%d1
         cmp.l   %d1,%d0
         blt.s   .ug_no
         moveq   #RPSP,%d1
         cmp.l   %d1,%d0
         bgt.s   .ug_no
-        move.l  0x114(%a0),%d1
+.ug_tempo:
+        move.l  0x114(%a0),%d1          | the sample's BPMx24
         cmpi.l  #BPM24_MIN,%d1
         blt.s   .ug_no
         cmpi.l  #BPM24_MAX,%d1
@@ -380,8 +399,8 @@ rp_ui_gate:
 .ug_no:
         moveq   #0,%d0
 .ug_out:
-        movem.l (%sp),%d1-%d2/%a0
-        lea     12(%sp),%sp
+        movem.l (%sp),%d1-%d3/%a0-%a1
+        lea     20(%sp),%sp
         rts
 
 | The page-1 dial renderers do NOT read the descriptor widget column: each
@@ -433,11 +452,14 @@ qdial4:                                 | 0x40037c06, record in a3
 2:      jmp     (0x40037c14).l
 
 | PTCH's widget, args (x, y, index, value, flags, fmt, canvas). Off a
-| repitch track (rp_ui_gate): the stock dial untouched. On one: the dial's
-| frame (value -1 draws chrome alone) with the QUANT ratio centred in it.
-| A negative value (an empty cell, sign-extended by the dial renderers)
-| keeps the bare frame.
+| repitch track (rp_ui_gate): the stock dial untouched. On one: the SAME
+| dial, its position snapped to the 8 QUAN positions (19 + 15*idx, so 1/1
+| sits at 64 -- dead centre) and its readout printed by quant_fmt. The
+| caller's own value (the PTCH parameter) is ignored here: pitch and
+| quantize are independent.
 quant_widget:
+        moveq   #0,%d1
+        move.b  (UI_TRACK).l,%d1
         bsr     rp_ui_gate
         tst.l   %d0
         bne.s   .qw_quant
@@ -457,50 +479,76 @@ quant_widget:
         move.l  #0x5155414e,%d0         | 'QUAN'
         bsr.s   .qw_name
         move.l  28(%sp),-(%sp)          | canvas
-        move.l  28(%sp),-(%sp)          | fmt
+        pea     (quant_fmt).l           | the ratio readout
         move.l  28(%sp),-(%sp)          | flags
-        moveq   #-1,%d0
-        move.l  %d0,-(%sp)              | value -1: frame alone
+        lea     rk_quan(%pc),%a0
+        moveq   #0,%d0
+        move.b  (%a0,%d1.l),%d0         | d1 = the UI track, gate-preserved
+        move.l  %d0,%d1                 | snap = 19 + 15*idx
+        lsl.l   #4,%d1
+        sub.l   %d0,%d1
+        moveq   #19,%d0
+        add.l   %d1,%d0
+        move.l  %d0,-(%sp)              | value
         move.l  28(%sp),-(%sp)          | index
         move.l  28(%sp),-(%sp)          | y
         move.l  28(%sp),-(%sp)          | x
         jsr     (KNOB).l
         lea     28(%sp),%sp
-        lea     -16(%sp),%sp
-        movem.l %d2-%d4/%a2,(%sp)
-        move.l  20(%sp),%d2             | x
-        move.l  24(%sp),%d3             | y
-        move.l  44(%sp),%d4             | canvas
-        move.l  32(%sp),%d0             | ui value
-        bmi.s   .qw_done                | empty cell: the bare frame only
+        rts
+
+| fmt(buf, value): the knob's readout for a snapped QUAN value.
+quant_fmt:
+        move.l  8(%sp),%d0
+        bmi.s   .qf_unk
         bsr     rk_bucket
         lsl.l   #2,%d0
-        lea     .q_labels(%pc),%a2
-        adda.l  %d0,%a2                 | the 4-byte label
-        move.l  %a2,-(%sp)
-        moveq   #-1,%d0
-        move.l  %d0,-(%sp)
-        pea     (FONT).l
-        jsr     (TXT_MEASURE).l         | -> d0 = px width
-        lea     12(%sp),%sp
-        lsr.l   #1,%d0
-        addq.l  #8,%d2
-        addq.l  #1,%d2                  | cell centre x+9
-        sub.l   %d0,%d2
-        move.l  %a2,-(%sp)
-        moveq   #-1,%d0
-        move.l  %d0,-(%sp)
-        addq.l  #1,%d3
-        move.l  %d3,-(%sp)              | y+1
-        move.l  %d2,-(%sp)
-        move.l  %d4,-(%sp)
-        pea     (FONT).l
-        jsr     (TXT_DRAW).l
-        lea     24(%sp),%sp
-.qw_done:
-        movem.l (%sp),%d2-%d4/%a2
-        lea     16(%sp),%sp
+        lea     .q_labels(%pc),%a0
+        adda.l  %d0,%a0
+        move.l  %a0,8(%sp)
+        jmp     (SPRINTF).l
+.qf_unk:
+        lea     (STR_UNK).l,%a0
+        move.l  %a0,8(%sp)
+        jmp     (SPRINTF).l
+
+| 0x40055008 -- FUN_40055008(slot, delta), the UI knob editor for every
+| page-1 parameter (the near-copy of MIDI.md's generic writer). On the
+| PLAYBACK page, slot 0, audio mode, QUAN in force: the delta edits
+| rk_quan[track] (0..7) and RETURNS -- the PTCH parameter's Part store,
+| shadow and live byte are never touched, so pitch survives a round trip
+| through the repitch modes untouched. Everything else falls through to
+| stock (the displaced frame, then the body).
+quant_edit:
+        tst.l   (MIDI_FLAG).l
+        bne.s   .qe_stock
+        move.l  (LIVE_PAGE).l,%d0
+        bne.s   .qe_stock               | 0 = the PLAYBACK page
+        move.l  4(%sp),%d0
+        bne.s   .qe_stock               | slot 0 only
+        moveq   #0,%d1
+        move.b  (UI_TRACK).l,%d1
+        bsr     rp_ui_gate
+        tst.l   %d0
+        beq.s   .qe_stock
+        lea     rk_quan(%pc),%a0
+        moveq   #0,%d0
+        move.b  (%a0,%d1.l),%d0
+        add.l   8(%sp),%d0              | the encoder delta, sign and all
+        bpl.s   1f
+        moveq   #0,%d0
+1:      cmpi.l  #7,%d0
+        ble.s   2f
+        moveq   #7,%d0
+2:      move.b  %d0,(%a0,%d1.l)
+        moveq   #0x14,%d0
+        move.b  %d0,(REDRAW_B).l        | the knob-redraw mark (MIDI.md)
         rts
+.qe_stock:
+        lea     -48(%sp),%sp            | displaced
+        movem.l %d2-%d7/%a2-%fp,(%sp)   | displaced
+        jmp     (0x40055010).l
+
 .q_labels:
         .ascii  "1/2\0"
         .ascii  "2/3\0"
@@ -510,6 +558,9 @@ quant_widget:
         .ascii  "4/3\0"
         .ascii  "3/2\0"
         .ascii  "2/1\0"
+rk_quan:
+        .byte   3,3,3,3,3,3,3,3         | per-track QUAN index: 1/1 at boot,
+        .balign 2                       | session-persistent, not in projects
 .rk_ratios:
         .byte   1,2, 2,3, 3,4, 1,1, 5,4, 4,3, 3,2, 2,1
         .balign 2
