@@ -21,8 +21,13 @@ tier), image `out/mainos_repitch_kyoti.bin`, syx `140C_RPK1`. Cave
 code: 560 feature-off cases bit-identical to stock, 1400 repitch cases equal
 to an independent QUANT/fold/tag model, guards + resolver + bucket edges
 green, SP balance checked every run). Unvalidated: the UI draws and hardware. User decisions folded in: modes are **RPCH /
-RPS9 / RPSP** (RPS9 was RP12 below), and **AUTO always resolves to RPCH**,
-never the character modes — ATTR offers only REPITCH (raw 4).
+RPS9 / RPSP** (RPS9 was RP12 below). **AUTO semantics revised twice:** the
+S106 AUTO-always-RPCH decision was superseded in S107 after checking the
+manual's contract — **ATTR offers REPITCH/RPS9/RPSP (raw 4/5/6) and AUTO
+applies each sample's own mode**, re-resolved live from the binding. Flash 1
+also exposed that page-1 dial renderers bypass the descriptor widget column
+(four hardcoded sites, shimmed, formatter-keyed) and the dial caption now
+swaps PTCH↔QUAN at draw time via the descriptor name field.
 Design deltas vs the scope as first written, all verified against the image:
 
 - **QUANT needs NO editor hook.** The PTCH slot edits a plain ui value
