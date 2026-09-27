@@ -53,6 +53,20 @@ OUT_BIN = ROOT / "out/OCTATRACK_DIRECTJUMP_V6.bin"
 VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_KYOTI"
 TOAST_DUR = int(sys.argv[2], 0) if len(sys.argv) > 2 else 0x44
 
+# Session 106: DJ_DIAG=1 builds the DIAGNOSTIC variant (140C_KDIAG, *_V6DIAG files): the
+# [PTN]+[YES] toast prints the hook's counters / raw sequencer bytes instead of ON/OFF.
+# Logic is otherwise V6.1's; the mainline artifacts are never clobbered.
+DIAG = os.environ.get("DJ_DIAG") == "1"
+if DIAG:
+    OUT = ROOT / "out/mainos_directjump_v6diag.bin"
+    ELEK = ROOT / "out/elek_directjump_v6diag.bin"
+    OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_DIRECTJUMP_V6DIAG.syx"
+    OUT_BIN = ROOT / "out/OCTATRACK_DIRECTJUMP_V6DIAG.bin"
+    if len(sys.argv) <= 1:
+        VERSTR = "140C_KDIAG"
+    if len(sys.argv) <= 2:
+        TOAST_DUR = 0x88
+
 CAVE_DJ = 0x400d7400
 CAVE_TRIGSCALE = 0x400d7b00
 FREE_END = 0x400d7c3c
@@ -60,7 +74,7 @@ FREE_END = 0x400d7c3c
 PATCHES = [
     ("patch_trigscale", CAVE_TRIGSCALE, None,
      [(0x4009b6f2, "cave", "203c0000091a", 18, "jmp")]),
-    ("patch_directjump_v6", CAVE_DJ, f"DJ_TOAST_DUR=0x{TOAST_DUR:x}",
+    ("patch_directjump_v6", CAVE_DJ, f"DJ_TOAST_DUR=0x{TOAST_DUR:x}" + (",DJ_DIAG=1" if DIAG else ""),
      [(0x400a1f72, "dj_land", "103980006687", 6, "jsr"),   # move.b (0x80006687).l,%d0
       (0x400a221c, "dj_nofa", "4a398000002a", 6, "jsr"),   # tst.b (0x8000002a).l
       (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),
@@ -190,9 +204,10 @@ def main():
 
     OUT.write_bytes(bytes(img))
     print(f"  {OUT.name}: sha256 {hashlib.sha256(bytes(img)).hexdigest()[:16]}")
-    for ext in ("bin", "elf"):
-        (ROOT / f"out/patch_directjump_v6.{ext}").write_bytes(
-            (ROOT / f"out/patch_directjump_v6.{ext}").read_bytes())
+    if DIAG:
+        for ext in ("bin", "elf"):
+            (ROOT / f"out/patch_directjump_v6diag.{ext}").write_bytes(
+                (ROOT / f"out/patch_directjump_v6.{ext}").read_bytes())
 
     if not EFT.exists() or not STOCK_SYX.exists():
         print("\n  (EFT tool or stock syx missing -- skipping the .syx/.bin wrap)")

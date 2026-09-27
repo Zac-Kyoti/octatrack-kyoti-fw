@@ -76,6 +76,7 @@
     .equ RESYNC84,  0x80006684
     .equ MIDI_SEND, 0x8000002a          | byte: send MIDI transport (START/STOP/...)
     .equ PC_SEND,   0x4009e884          | FUN_4009e884(bank, pat): MIDI Program Change
+    .equ SPRINTF,   0x40013a08          | varargs sprintf (DJ_DIAG toast only)
 
     .equ PAT_BASE,  0x400e21e0          | pattern blobs: + bank*0x9b340 + pat*0x8ed8
     .equ BANK_STRIDE, 0x9b340
@@ -100,14 +101,14 @@
 dj_toggle:
     moveq   #1,%d0
     cmp.l   8(%sp),%d0                 | press only
-    bne.b   djt_stock
+    bne.w   djt_stock
     move.l  PTN_MODE,%d0
     subq.l  #1,%d0
-    bne.b   djt_stock                  | [PTN] not held
+    bne.w   djt_stock                  | [PTN] not held
     tst.l   ARR_ACT
-    bne.b   djt_stock                  | arranger up -> don't shadow arranger-YES
+    bne.w   djt_stock                  | arranger up -> don't shadow arranger-YES
     tst.l   POPUP
-    bne.b   djt_stock
+    bne.w   djt_stock
     move.l  DJ_MODE,%d0
     eori.l  #1,%d0
     andi.l  #1,%d0
@@ -118,6 +119,40 @@ dj_toggle:
     beq.b   djt_show
     lea     dj_msg_on,%a0
 djt_show:
+    .ifdef DJ_DIAG
+|   V6.1 diagnostic (Session 106): instead of ON/OFF the toast prints the hook's own
+|   view of the sequencer and resets the counters.  Key-handler context: sprintf and
+|   NOTIFY are legal here (never from the engine path).  Fields:
+|     A = arms   L = landings   R = ticks a cued pattern was seen while idle
+|     C = raw 0x80006687 byte (signed) at the last tick   T = TRANSPORT_L low byte
+|     H = CHAIN_ACT low byte   G = ARR_ACT low byte
+|   Expected on a working jump: A == L == number of switches, R small.  R > 0 with A == 0
+|   -> the arm gate refuses: read C/T/H/G.  R == 0 -> PEND never differs from ACT here.
+    moveq   #0,%d0
+    move.b  dj_obs_g,%d0
+    move.l  %d0,-(%sp)
+    moveq   #0,%d0
+    move.b  dj_obs_h,%d0
+    move.l  %d0,-(%sp)
+    moveq   #0,%d0
+    move.b  dj_obs_t,%d0
+    move.l  %d0,-(%sp)
+    move.b  dj_obs_c,%d0
+    ext.w   %d0
+    ext.l   %d0
+    move.l  %d0,-(%sp)                 | C printed SIGNED: a stale byte >= 0x80 reads negative
+    move.l  dj_cnt_req,-(%sp)
+    move.l  dj_cnt_land,-(%sp)
+    move.l  dj_cnt_arm,-(%sp)
+    pea     dj_diag_fmt
+    pea     dj_diag_buf
+    jsr     SPRINTF
+    lea     36(%sp),%sp
+    clr.l   dj_cnt_arm
+    clr.l   dj_cnt_land
+    clr.l   dj_cnt_req
+    lea     dj_diag_buf,%a0
+    .endif
     pea     DJ_TOAST_DUR
     move.l  %a0,-(%sp)
     jsr     NOTIFY
@@ -143,6 +178,16 @@ dj_msg_off:
 dj_land:
     lea     -60(%sp),%sp
     movem.l %d0-%d7/%a0-%a6,(%sp)
+    .ifdef DJ_DIAG
+    move.b  LAND_CNTDN,%d0
+    move.b  %d0,dj_obs_c
+    move.b  TRANSPORT_L+3,%d0
+    move.b  %d0,dj_obs_t
+    move.b  CHAIN_ACT+3,%d0
+    move.b  %d0,dj_obs_h
+    move.b  ARR_ACT+3,%d0
+    move.b  %d0,dj_obs_g
+    .endif
     tst.l   DJ_MODE
     beq.w   dl_off
     moveq   #1,%d0
@@ -183,6 +228,9 @@ dl_idle:
     cmp.b   ACT_BANK,%d0
     beq.b   dl_clear                   | cued == active: nothing to do
 dl_real:
+    .ifdef DJ_DIAG
+    addq.l  #1,dj_cnt_req
+    .endif
 |   MIDI Program Change once per distinct cued pattern (what every DJ build since v1 did)
     move.b  PEND_PAT,%d0
     cmp.b   dj_pcpat,%d0
@@ -197,8 +245,14 @@ dl_real:
     jsr     PC_SEND
     addq.l  #8,%sp
 dl_arm:
+|   V6.1 (Session 106): only a POSITIVE countdown means stock has a landing pending.  The
+|   PLAY path seeds this byte from 0x80006688 (0x4009bb2a), which the arranger writes with a
+|   raw word's low byte (0x400a0e6e) and nothing clears at boot; the ISR counts it down only
+|   while positive (`ble.w` at 0x400a1f78).  A stale byte >= 0x80 therefore sits there for
+|   ever on hardware -- V6's `bne` never armed (flashed 2026-09-27: toast ON, no jump).  The
+|   emulator zero-fills that RAM, which is why its gate passed.
     tst.b   LAND_CNTDN
-    bne.b   dl_done                    | stock's own landing pending -> stay out of its way
+    bgt.w   dl_done                    | stock's own landing pending -> stay out of its way
     moveq   #0,%d0
     move.b  SCALE_IX,%d0
     lea     LEN_TBL,%a0
@@ -209,6 +263,9 @@ dl_arm:
     move.b  %d1,LAND_CNTDN             | AR D1; stock decrements it right after we return
     moveq   #ST_ARMED,%d0
     move.b  %d0,dj_state
+    .ifdef DJ_DIAG
+    addq.l  #1,dj_cnt_arm
+    .endif
 dl_done:
     movem.l (%sp),%d0-%d7/%a0-%a6
     lea     60(%sp),%sp
@@ -318,6 +375,9 @@ dc_next:
     clr.w   RESYNC84
     moveq   #ST_LANDING,%d0
     move.b  %d0,dj_state
+    .ifdef DJ_DIAG
+    addq.l  #1,dj_cnt_land
+    .endif
     rts
 
 | ================= Hook N @ 0x400a221c -- no MIDI START on a jump =================
@@ -355,3 +415,18 @@ dj_state:  .byte ST_IDLE               | 0 idle / 1 armed (we own LAND_CNTDN) / 
 dj_pcpat:  .byte -1                    | cued pattern the PC was last sent for
 dj_zero:   .byte 0                     | constant 0 for Hook N's flag trick
     .byte 0
+    .ifdef DJ_DIAG
+    .align 2
+dj_cnt_arm:  .long 0
+dj_cnt_land: .long 0
+dj_cnt_req:  .long 0
+dj_obs_c:    .byte 0
+dj_obs_t:    .byte 0
+dj_obs_h:    .byte 0
+dj_obs_g:    .byte 0
+dj_diag_fmt:
+    .asciz  "A%d L%d R%d C%d T%d H%d G%d"
+    .align 2
+dj_diag_buf:
+    .space  64
+    .endif

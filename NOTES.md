@@ -32086,3 +32086,44 @@ REVERB** (id `0x15`, FX2-exclusive, **1063 words**) — `tools/build_sidechain3.
 `build_sidechain3.py:163` is the correct record ("the old SPATIALIZER donor"). That stale
 comment misled this session's first draft of the scope. **Do not size a DSP cave from it —
 consider deleting or annotating it.**
+
+## Session 106 (2026-09-27, `main`) — V6 flashed: toast ON, no jump. V6.1 = arm on a non-positive countdown + a DJ_DIAG toast; AR_DJ_QUIRKS.md opened
+
+### Hardware (user)
+
+V6 (`48684a91`) flashed. `[PTN]+[YES]` shows the "DIRECT JUMP ON" toast, but a cued
+pattern does not jump — nothing more could be tested. Also reported, on the AR MKI: in
+NORMAL scale mode with tracks of 16 and 7 steps, certain cadences of DIRECT JUMP switches
+leave the 16-step track exactly half a step off — **stock AR behaviour**, recorded as item
+1 of the new `reference/AR_DJ_QUIRKS.md` (canonical in the AR repo). Rule from the user:
+reach AR-exact behaviour on the OT first; deviate later, one item at a time.
+
+### The one static hardware/emulator difference in V6's arm path
+
+`dl_arm` refused to arm while `0x80006687` (stock's landing countdown) was non-zero
+(`tst.b; bne`). On hardware that byte is seeded at PLAY: `0x4009bb2a move.b (0x80006688),
+(0x80006687)` (taken when `0x80006688 != 0`, `0x4009ba44`), and `0x80006688` is written
+by the arranger position code with the low byte of a raw word (`0x400a0e6e move.w %a5,%d0;
+move.b %d0,(0x80006688)`) and at `0x400a100a` — never cleared at boot (it is above the
+`0x80004000` zero-fill). The ISR counts the byte down only while it is POSITIVE (`ble.w`
+at `0x400a1f78`), so a stale value ≥ 0x80 sits there for ever and V6 never arms. The
+emulator zero-fills that RAM — its gates were not wrong, just blind to this (CLAUDE.md:
+"when hardware and the emulator disagree, build a diagnostic").
+
+### V6.1
+
+- `dl_arm`: `tst.b LAND_CNTDN; bgt.w dl_done` — only a positive countdown is stock's;
+  anything else is overwritten by our `tps − TICK_CTR`. Mainline sha256
+  `eb191b810fcaffff…` (768 B cave, 723 bytes vs stock, 0 strays). Bug-fold unaffected.
+- `DJ_DIAG=1` variant (`140C_KDIAG`, `out/*DIRECTJUMP_V6DIAG*`, sha256 `b682c08f339d695c…`,
+  1028 B cave): the `[PTN]+[YES]` toast prints `A L R C T H G` and resets — **A** arms,
+  **L** landings, **R** ticks a cued pattern was seen while idle, **C** the raw `0x80006687`
+  byte at the last tick (signed), **T** `TRANSPORT_L` low byte, **H** `CHAIN_ACT` low byte,
+  **G** `ARR_ACT` low byte. Read: A == L == switches → working; R > 0, A == 0 → the arm
+  gate refuses, C/T/H/G say why; R == 0 → the cue never reaches `PEND != ACT` in this hook
+  (then the request path itself needs a look).
+- Protocol: flash the DIAG variant, DJ ON (toast zeros the counters), play, cue 3-4
+  switches, DJ OFF (toast prints). Or flash the mainline first if the stale-byte
+  hypothesis is enough.
+
+Gates for V6.1 (OFF/ON identity, 16↔7 oracle) re-run on the final image; result below.

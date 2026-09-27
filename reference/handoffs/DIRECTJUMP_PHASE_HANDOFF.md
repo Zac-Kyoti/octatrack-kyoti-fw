@@ -32,7 +32,13 @@ sequencer hook (`dj_a/b/c/d7/scaleix`, Z/X/V) is deleted; the boundary body stay
 **V6 is BUILT** (`tools/patch_directjump_v6.s`, `tools/build_directjump_v6.py`, WIP tier;
 mainos sha256 `48684a91d7c420ce…`, 758 B cave, 723 bytes vs stock, 0 strays; v4 and v5
 builders SUPERSEDED). V6 keeps NO state in `0x80006a40+` (its state bytes live in the
-cave). Gate results are recorded in NOTES.md "Session 105 continued (2)". Not flashed.
+cave). Gate results are recorded in NOTES.md "Session 105 continued (2)".
+**Session 106: V6 flashed — toast ON but no jump.** Cause found statically: the arm gate
+refused while stock's countdown byte `0x80006687` was non-zero, and on hardware that byte
+is seeded from a never-cleared RAM byte (`0x80006688`), possibly negative, which the ISR
+never counts down. **V6.1** arms unless the byte is positive (sha `eb191b810fcaffff…`) and
+adds a `DJ_DIAG=1` toast (`A L R C T H G`, NOTES Session 106). `reference/AR_DJ_QUIRKS.md`
+is the record of AR behaviours to deviate from later (item 1: AR's own 16/7 half-step).
 
 *(Session 104 text follows, kept as history.)*
 
