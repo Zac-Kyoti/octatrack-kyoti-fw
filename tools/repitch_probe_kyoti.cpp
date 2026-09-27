@@ -130,7 +130,7 @@ void setPart(ot::Machine& m, unsigned t, uint8_t machine, uint8_t slot0,
 	m.write8(dbBase + 0x8f04a + t * 5 + (machine <= 1 ? machine : 0), slot0);
 	m.write8(dbBase + 0x8ef5a + t * 30 + machine * 6 + 4, setup);
 	m.write8(dbBase + 0x8edaa + t * 30 + machine * 6 + 0, ptch);
-	const uint32_t set = (machine == 0 ? 0x100d5b30u : 0x100b14f0u) + (slot0 + 1u) * 0x448;
+	const uint32_t set = (machine == 0 ? 0x100d5b30u : 0x100b14f0u) + slot0 * 0x448u;   // 0-based, the mirror's own convention
 	m.write32(set + 0x110, tsmode);
 	m.write32(set + 0x114, bpm);
 }
@@ -280,12 +280,15 @@ int main(int argc, char** argv)
 				const uint32_t sAct = 0x100a4ece - 0x8ed80 + 0x8edaa + t * 30 + 1 * 6;
 				const uint32_t sPark = 0x100a4ece - 0x8ed80 + 0x8edaa + t * 30 + 18;
 				m.write8(park, 0);                      // fresh project: parked empty
-				// (a) first sight adopts: nothing moves
+				auto* scpu = m.getCpuState();
+				// (a) first sight adopts: nothing moves, flag 0
 				ok &= callD1(m, swapFn, t);
+				ok &= m68k_get_reg(scpu, M68K_REG_D0) == 0;
 				ok &= m.read8(prevTab + t) == 1 && m.read8(act) == 70 && m.read8(park) == 0;
 				// (b) leave repitch: 70 parks; the empty park enters as 64
 				m.write8(dbBase + 0x8ef5a + t * 30 + 6 + 4, 0);   // SETUP -> OFF
 				ok &= callD1(m, swapFn, t);
+				ok &= m68k_get_reg(scpu, M68K_REG_D0) == 1;   // swapped
 				ok &= m.read8(act) == 64 && m.read8(park) == 70;
 				ok &= m.read8(sAct) == 64 && m.read8(sPark) == 70;
 				ok &= m.read8(0x80000810 + 72 * t) == 64;
@@ -293,6 +296,7 @@ int main(int argc, char** argv)
 				ok &= (m.read32(dbBase + 0x95048) & 1) && m.read32(0x100f8598) == 1;
 				// (c) idempotence: same state, second call changes nothing
 				ok &= callD1(m, swapFn, t);
+				ok &= m68k_get_reg(scpu, M68K_REG_D0) == 0;
 				ok &= m.read8(act) == 64 && m.read8(park) == 70;
 				// (d) re-enter: QUAN comes back
 				m.write8(dbBase + 0x8ef5a + t * 30 + 6 + 4, 5);   // SETUP -> RPS9

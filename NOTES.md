@@ -32621,3 +32621,41 @@ rk_quan contracts.
 measured delta semantics); switching STATIC↔FLEX while in a repitch mode
 leaves QUAN in the old machine's byte until the next transition (per-machine
 PTCH storage; rare, recoverable by knob).
+
+### Session 108 continued (2) — flash 4: the rev-5 CORE CONFIRMED (independence, swap memory, locks); rev 5.1 fixes the three residuals
+
+**Flash 4 (rev 5) hardware:** QUAN/PTCH memory independence ✓, p-locks ✓,
+scene locks ✓, SETUP-driven knob swap ✓ — the domain-swap architecture holds
+on the unit. Three defects + one question:
+
+1. **AUTO+ATTR never showed QUAN** (regression vs the on-STOP lag): the
+   settings arrays are **0-BASED** — the Part slot byte indexes them RAW,
+   exactly as the engine mirror did in rev 4 (which worked post-play). The
+   rev-5 `+1` ("SLOT=129 = R1" misread: the FILE field is 1-based, byte 128
+   = FLEX array record 128) read the wrong record, so AUTO's TSMODE never
+   matched. One-instruction fix; the oracle missed it because the fixture
+   shared the +1 convention — de-circularized (fixture now writes at
+   `slot*0x448` raw).
+2. **QUAN dial snaps** to the 8 positions now — display only: quant_widget
+   buckets the value and passes `19+15*idx` to the dial; the STORED value
+   stays the stock editor's continuous ui, so locks/scenes are untouched.
+3. **Stale dial after a mode change until page re-entry:** the caller
+   fetches the cell value BEFORE the widget's swap poll runs. `rp_swap` now
+   returns "swapped on this call" (d0), and the widget rebuilds the dial
+   frame with the fresh live byte in exactly that case — both directions,
+   each path keeping its own formatter. Normal draws still use the caller's
+   value (lock display preserved).
+
+**RATE question answered (expected behaviour):** with RATE mode = TSTR, the
+in-between rate values act through the granular machinery, which a repitch
+track bypasses (resolved to OFF) — only the direction survives. RATE mode =
+PITCH is the continuous, tape-style control and is fully live on repitch
+tracks (`rate applied below 0x7f00 when the mode byte is 0`, octabam ✅).
+Option, if ever wanted: rate_hook could map TSTR-mode RATE onto the
+increment for repitch tracks — a deliberate remap, not a bug fix.
+
+**Rev 5.1 = flash-5 candidate: mainos `29c60799…`, syx `e2092b10…`** (2140 B,
+0 strays, cave `0x400d6f80..0x400d7a18` = 2712 B — 232 B left under the
+bugbuilds base). Oracle 7/7 with the swap-flag asserts and the 0-based
+fixture. Hardware-new: AUTO/boot captions (the 0-based fix), the snapped
+dial, the fresh-value redraw.

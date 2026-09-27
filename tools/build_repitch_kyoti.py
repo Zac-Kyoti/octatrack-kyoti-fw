@@ -38,19 +38,17 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (gate 1, rev 5)", """
-Flash 3 punch list answered by an architecture change: QUAN is the PTCH
-slot's REAL parameter again (stock editor, p-locks, scene locks, project
-persistence all stock), independence is kept by a DOMAIN SWAP -- on a mode
-transition the slot's stored value trades places with a parked byte
-(NEIGHBOR's page-1 slot 0, saved but never applied) in the working DB and
-the SRAM part copy, live/lane following, dirty flags set. Part applies
-reset the bookkeeping (adopt, never swap), so part changes and project
-loads are safe. The display gate reads the Part DB (boot-valid), fixing
-the AUTO/boot caption lag. The dial is stock with a ratio readout;
-~15 detents sweep one ratio zone. All 7 oracle contracts green.
-Hardware-new surfaces: the swap on real TSTR/ATTR edits, boot captions,
-p-locked/scene-locked QUAN, save/load round trips.
+status(WIP, "REPITCH KYOTI (gate 1, rev 5.1)", """
+Flash 4 confirmed the rev-5 core on hardware: QUAN/PTCH independence, the
+domain-swap memory, p-locks and scene locks. Rev 5.1 fixes flash 4's list:
+(1) AUTO+ATTR never showed QUAN -- the settings arrays are 0-BASED (the
+slot byte indexes them raw; the rev-5 +1 read the wrong record); (2) the
+QUAN dial now SNAPS to the 8 positions (display only -- the stored value
+stays the stock editor's, locks untouched); (3) after a mode swap the dial
+redraws with the fresh live byte instead of the caller's stale value, both
+directions. RATE-in-TSTR-mode acting two-valued on repitch tracks is
+expected (the stretch-domain rate rides machinery repitch bypasses; PITCH
+RATE mode is the continuous one). All 7 oracle contracts green.
 """)
 
 BASE = 0x40000400

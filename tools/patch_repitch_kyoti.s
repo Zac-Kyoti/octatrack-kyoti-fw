@@ -377,11 +377,10 @@ rp_ui_gate:
         add.l   %d3,%d1
         addi.l  #OFF_SLOT5,%d1
         moveq   #0,%d0
-        move.b  (%a0,%d1.l),%d0         | the 0-based sample slot
-        addq.l  #1,%d0
-        move.l  #SET_STRIDE,%d1
-        mulu.l  %d0,%d1
-        adda.l  %d1,%a1                 | the sample's settings record
+        move.b  (%a0,%d1.l),%d0         | the sample slot byte, used RAW:
+        move.l  #SET_STRIDE,%d1         | the arrays are 0-based (slot byte
+        mulu.l  %d0,%d1                 | 128 = recorder R1 = FLEX record
+        adda.l  %d1,%a1                 | 128; flash-4 falsified the +1)
         moveq   #30,%d1
         mulu.l  %d2,%d1
         move.l  %d3,%d0
@@ -435,18 +434,18 @@ rp_ui_gate:
 | value below the ui minimum (4: a fresh project) enters as 64 = 1/1.
 | Called per frame from rate_gate and at every dial draw. Preserves all.
 rp_swap:
-        lea     -32(%sp),%sp
-        movem.l %d0-%d5/%a0-%a1,(%sp)
+        lea     -28(%sp),%sp
+        movem.l %d1-%d5/%a0-%a1,(%sp)
         move.l  %d1,%d2                 | track
         bsr     rp_ui_gate
         lea     rp_prev(%pc),%a0
         moveq   #0,%d1
         move.b  (%a0,%d2.l),%d1
         cmp.l   %d1,%d0
-        beq     .sw_out
+        beq     .sw_none
         move.b  %d0,(%a0,%d2.l)
         cmpi.l  #0xff,%d1
-        beq     .sw_out                 | first sight: adopt what is stored
+        beq     .sw_none                | first sight: adopt what is stored
         movea.l (DB_PTR).l,%a0
         moveq   #0,%d1
         move.b  (PART_B).l,%d1
@@ -460,7 +459,7 @@ rp_swap:
         move.b  (%a0,%d1.l),%d3
         moveq   #1,%d1
         cmp.l   %d1,%d3
-        bhi     .sw_out                 | machine changed mid-flight: skip
+        bhi     .sw_none                | machine changed mid-flight: skip
         moveq   #30,%d1
         mulu.l  %d2,%d1
         addi.l  #OFF_P1,%d1
@@ -510,9 +509,13 @@ rp_swap:
         move.l  %d1,(%a0)
         lea     (DIRTY_GLOBAL).l,%a0
         move.l  %d1,(%a0)
+        moveq   #1,%d0                  | -> a swap happened this call
+        bra.s   .sw_out
+.sw_none:
+        moveq   #0,%d0
 .sw_out:
-        movem.l (%sp),%d0-%d5/%a0-%a1
-        lea     32(%sp),%sp
+        movem.l (%sp),%d1-%d5/%a0-%a1
+        lea     28(%sp),%sp
         rts
 
 | The page-1 dial renderers do NOT read the descriptor widget column: each
@@ -564,21 +567,34 @@ qdial4:                                 | 0x40037c06, record in a3
 2:      jmp     (0x40037c14).l
 
 | PTCH's widget, args (x, y, index, value, flags, fmt, canvas). Off a
-| repitch track (rp_ui_gate): the stock dial untouched. On one: the SAME
-| dial with the SAME value -- QUAN is the slot's real parameter, edited by
-| the stock editor, p-lockable and scene-lockable -- and quant_fmt prints
-| the value's ratio bucket as the readout. The draw-time rp_swap poll
-| catches mode transitions made while the transport is stopped.
+| repitch track: the stock dial -- rebuilt with the fresh live byte when
+| this very draw performed the swap (the caller fetched its value before
+| the poll ran). On a repitch track: the dial SNAPPED to the 8 QUAN
+| positions (19 + 15*idx; 1/1 = 64, dead centre) with quant_fmt as the
+| readout -- display only, the stored value stays the stock editor's, so
+| p-locks and scene locks are untouched.
 quant_widget:
         moveq   #0,%d1
         move.b  (UI_TRACK).l,%d1
-        bsr     rp_swap
-        bsr     rp_ui_gate              | d1 preserved by both
+        bsr     rp_swap                 | d0 = swapped on this draw?
+        movea.l %d0,%a1                 | the flag
+        moveq   #72,%d0
+        mulu.l  %d1,%d0
+        lea     (LIVE_B).l,%a0
+        adda.l  %d0,%a0                 | -> this track's live PTCH byte
+        bsr     rp_ui_gate              | a0/a1/d1 preserved
         tst.l   %d0
         bne.s   .qw_quant
         move.l  #0x50544348,%d0         | 'PTCH': restore the caption
         bsr.s   .qw_name
-        jmp     (KNOB).l
+        move.l  %a1,%d0
+        bne.s   .qw_fresh
+        jmp     (KNOB).l                | no swap: stock, untouched
+.qw_fresh:
+        moveq   #0,%d0
+        move.b  (%a0),%d0               | the just-restored pitch
+        movea.l 24(%sp),%a1             | with its own formatter
+        bra.s   .qw_frame
 | the caption lives in the descriptor name table, which the page's text pass
 | reads on every redraw; writing it at widget-draw time renames the dial
 .qw_name:
@@ -590,10 +606,25 @@ quant_widget:
 .qw_quant:
         move.l  #0x5155414e,%d0         | 'QUAN'
         bsr.s   .qw_name
+        move.l  16(%sp),%d0             | the caller's value
+        move.l  %a1,%d1
+        beq.s   1f
+        moveq   #0,%d0
+        move.b  (%a0),%d0               | swapped: the fresh QUAN value
+1:      lea     (quant_fmt).l,%a1       | the ratio readout
+        tst.l   %d0
+        bmi.s   .qw_frame               | an empty cell keeps the bare frame
+        bsr     rk_bucket
+        move.l  %d0,%d1                 | snap = 19 + 15*idx
+        lsl.l   #4,%d1
+        sub.l   %d0,%d1
+        moveq   #19,%d0
+        add.l   %d1,%d0
+.qw_frame:
         move.l  28(%sp),-(%sp)          | canvas
-        pea     (quant_fmt).l           | the ratio readout
+        move.l  %a1,-(%sp)              | the path's formatter
         move.l  28(%sp),-(%sp)          | flags
-        move.l  28(%sp),-(%sp)          | value: the real parameter
+        move.l  %d0,-(%sp)              | value
         move.l  28(%sp),-(%sp)          | index
         move.l  28(%sp),-(%sp)          | y
         move.l  28(%sp),-(%sp)          | x
