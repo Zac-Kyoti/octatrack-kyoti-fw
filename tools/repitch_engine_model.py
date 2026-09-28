@@ -2,14 +2,14 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-repitch-kyoti rev 12: the "virtual sampler" engine, as a float reference model.
+repitch-kyoti rev 13: the "virtual sampler" engine, as a float reference model.
 
 The ground truth the DSP code (tools/patch_repitch_dsp.asm) must match, and
 the single place its tables are designed (tools/repitch_dsp_src.py imports
 fir_q23() and appends the tables to the DSP cave as data). Sources and
 reasoning: reference/handoffs/REPITCH_FIDELITY_SCOPE.md; the OT-side
 measurements behind the plumbing: NOTES Session 110; rev 12's tonal
-correction: NOTES Session 111.
+correction and rev 13's band-limited render: NOTES Session 111.
 
   RPSP (E-mu SP-1200)   stored samples on a fixed 26.04 kHz grid; a fixed
                         26.04 kHz output clock steps through them by the pitch
@@ -43,12 +43,17 @@ position p_i advancing by the increment r. The engine only READS the ring:
   * RPSP: output i is the staircase averaged over [i-1, i) (a box: cheap, and
     it keeps a 26 kHz staircase from folding at 44.1 kHz); a tick at time
     i-1+u stores 12-bit(ADC at p_{i-1} + u*r - PSP*phi - c - 1), phi being the SP's
-    accumulator fraction so repeats/skips land on its 26.04 kHz grid. The
-    box is our renderer, not the SP: its sinc(f/44100) droop is folded out
-    of RPSP's ADC kernel (so kernel x box = the SP's record filter).
+    accumulator fraction so repeats/skips land on its 26.04 kHz grid.
+    Rev 13 renders the staircase through a BAND-LIMITED kernel (RENDER, the
+    converter a real SP is recorded through) instead of rev 11/12's box, whose
+    6-8 dB of rejection at 26-31 kHz let the staircase's images above 22 kHz
+    fold back into the audible band. Each tick spreads its step over the next
+    L outputs (a ring of residuals); the render's own passband response is
+    folded out of RPSP's ADC kernel (kernel x render = the SP's record filter).
 
 Tempo lock is untouched: the engine never changes where the OT reads.
 """
+import functools
 import math
 
 import numpy as np
@@ -183,21 +188,97 @@ def sp_channel_filter(ch=SP_CHANNEL):
 #         at 0.4 x FS_AKAI = 16 kHz, over the whole band.
 #   RPSP  12 taps: FLAT to 10 kHz, then a 7-pole (42 dB/oct, E-mu's "on the
 #         order of 42 dB per octave") Butterworth shape through the transition
-#         -- its 10.86 kHz corner puts it 1.2 dB down at 10 kHz -- and >= 40 dB
+#         (rev 13: corner 10.95 kHz, weight 0.7 -- the overall response lands
+#         within 1.5 dB of the estimated real SP out 7/8 to 15 kHz) and >= 40 dB
 #         of rejection from 17.5 kHz (everything the 26 kHz grid would fold
-#         into the audible band). Divided throughout by the box render's
-#         sinc(f/44100) droop, which the real SP does not have.
+#         into the audible band). Divided throughout by the render's passband
+#         response (rev 12: the box's sinc(f/44100) droop), which the real SP
+#         does not have.
 # (rev 11: Kaiser-windowed sinc, 16 taps @ 13 kHz / 8 taps @ 11 kHz; RPSP's 8
 # taps rolled off 2-3 dB early and the box's droop stacked on top.)
+# Rev 13 stores only rows 0,2,..,14 and 15 of each table (PACKED_ROWS): the DSP
+# rebuilds the odd rows 1..13 as the average of their neighbours (<= -54 dB
+# from the designed rows, 0-20 kHz) and every mirror row, which frees 196 P words.
 PHASES = 32
 FIR = {MODE_RPS9: dict(taps=16),
-       MODE_RPSP: dict(taps=12, flat=10000.0, stop=17500.0, w_trans=0.3, w_stop=30.0,
-                       poles=7, corner=10860.0)}
+       MODE_RPSP: dict(taps=12, flat=10000.0, stop=17500.0, w_trans=0.7, w_stop=30.0,
+                       poles=7, corner=10950.0)}
+
+
+PACKED_ROWS = (0, 2, 4, 6, 8, 10, 12, 14, 15)
 
 
 def box_droop(f):
-    """The RPSP renderer's box (the staircase averaged over one 44.1 kHz period)."""
+    """Rev 11/12's RPSP renderer: the staircase averaged over one 44.1 kHz
+    period. Kept for comparison; rev 13 renders through RENDER."""
     return np.sinc(np.asarray(f) / SR)
+
+
+# ------------------------------------------------------------ RPSP render
+# The staircase's 44.1 kHz render. A kernel g over the last L output periods,
+# piecewise constant in 1/R-sample pieces and symmetric (linear phase, delay
+# L/2), designed by least squares on its continuous spectrum: flat to `flat`,
+# rejecting from `stop` (26.04 kHz = the first staircase image of DC) up to the
+# pieces' own Nyquist (R x 22.05 kHz; weight w_stop to 130 kHz, w_hi above --
+# without it the pieces alternate wildly). Its running integral Gc is then
+# EXACTLY piecewise linear on a 1/R grid, so a (L*R+1)-point table read with
+# linear interpolation gives the exact weight at any tick time -- no timing
+# jitter (a plain phase table's would be as loud as the fold it removes).
+# 10 taps: 18 kHz -1.2 dB, 20 kHz -4.8, 21 kHz -7.6; everything from 26 kHz
+# down >= 42 dB (the box: 6-8 dB at 26-31 kHz). Latency L/2 = 5 samples.
+RENDER = dict(L=10, R=16, flat=19000.0, stop=26040.0, w_stop=30.0, w_hi=3.0, fmax=352800.0)
+
+
+@functools.lru_cache(maxsize=None)
+def render_kernel():
+    """g: (L*R,) piece heights, sum(g)/R = 1, g symmetric."""
+    L, R = RENDER["L"], RENDER["R"]
+    f = np.linspace(0.0, RENDER["fmax"], 8000)
+    w = 2 * math.pi * f / SR
+    half = L * R // 2
+    tc = (np.arange(half) + 0.5) / R - L / 2                 # piece centres, delay removed
+    A = 2 * np.cos(np.outer(w, tc)) * (np.sinc(w / (2 * math.pi * R)) / R)[:, None]
+    want = np.where(f <= RENDER["flat"], 1.0, 0.0)
+    wt = np.where(f <= RENDER["flat"], 1.0, np.where(
+        f >= RENDER["stop"], np.where(f <= 130000.0, RENDER["w_stop"], RENDER["w_hi"]), 0.0))
+    Aw, Dw = A * wt[:, None], want * wt
+    c = np.full(half, 2.0 / R)
+    kkt = np.block([[2 * Aw.T @ Aw, c[:, None]], [c[None, :], np.zeros((1, 1))]])
+    gh = np.linalg.solve(kkt, np.concatenate([2 * Aw.T @ Dw, [1.0]]))[:half]
+    return np.concatenate([gh, gh[::-1]])
+
+
+def render_response(f):
+    """|G(f)| of the render (the continuous-time kernel g)."""
+    L, R = RENDER["L"], RENDER["R"]
+    g = render_kernel()
+    t = (np.arange(L * R) + 0.5) / R
+    w = 2 * math.pi * np.asarray(f, dtype=float) / SR
+    return np.abs((np.exp(-1j * np.outer(w, t)) @ g) * np.sinc(w / (2 * math.pi * R)) / R)
+
+
+def render_gc():
+    """Gc[k] = the running integral of g at k/R samples, k = 0..L*R (0 .. 1)."""
+    R = RENDER["R"]
+    return np.concatenate([[0.0], np.cumsum(render_kernel()) / R])
+
+
+def render_q23():
+    """The table as the DSP holds it: T[k] = -Gc[k]/2 in Q23, k = 0..L*R, made
+    exactly antisymmetric (T[LR-k] = -1/2 - T[k], Gc's own symmetry), so only
+    k = 0..LR/2 is stored; and D[k] = T[k+1] - T[k]. A tick at u (0..1) gives
+    tap m (output i+m) the weight -Gc(L-1-m+u) = 2 x (T + frac x D) at
+    k = (L-1-m)R + floor(uR)."""
+    L, R = RENDER["L"], RENDER["R"]
+    n = L * R
+    gc = render_gc()
+    T = np.zeros(n + 1, dtype=np.int64)
+    for k in range(n // 2 + 1):
+        T[k] = int(round(-gc[k] / 2 * (1 << 23)))
+    T[n // 2] = -(1 << 21)
+    for k in range(n // 2 + 1):
+        T[n - k] = -(1 << 22) - T[k]
+    return T, np.diff(T)
 
 
 def fir_target(mode, f):
@@ -207,7 +288,7 @@ def fir_target(mode, f):
         return 1 / np.sqrt(1 + (f / (0.4 * FS_AKAI)) ** 12), np.ones_like(f)
     d = FIR[mode]
     shape = 1 / np.sqrt(1 + (f / d["corner"]) ** (2 * d["poles"]))
-    want = np.where(f <= d["flat"], 1.0, np.where(f >= d["stop"], 0.0, shape)) / box_droop(f)
+    want = np.where(f <= d["flat"], 1.0, np.where(f >= d["stop"], 0.0, shape)) / render_response(f)
     w = np.where(f <= d["flat"], 1.0, np.where(f >= d["stop"], d["w_stop"], d["w_trans"]))
     return want, w
 
@@ -243,16 +324,29 @@ def fir_response(tab, ph, f):
     return np.abs(np.exp(2j * math.pi * np.asarray(f, dtype=float)[:, None] / SR * d[None, :]) @ tab[ph])
 
 
-def fir_q23(mode):
-    """The table as the DSP holds it: Q23, each row's rounding error folded
-    into its largest tap so the DC gain stays exactly 1 (row 31-ph gets the
-    same fold, mirrored, so the table stays mirror-symmetric)."""
-    tab = fir_table(mode)
-    q = np.round(tab * (1 << 23)).astype(np.int64)
-    for ph in range(PHASES // 2):
-        row = q[ph]
+def fir_packed(mode):
+    """The rows the DSP stores (PACKED_ROWS), Q23, each row's rounding error
+    folded into its largest tap so its DC gain is exactly 1."""
+    q = np.round(fir_table(mode) * (1 << 23)).astype(np.int64)
+    rows = []
+    for ph in PACKED_ROWS:
+        row = q[ph].copy()
         row[np.argmax(row)] += (1 << 23) - row.sum()
-        q[PHASES - 1 - ph] = row[::-1]
+        rows.append(row)
+    return np.array(rows)
+
+
+def fir_q23(mode):
+    """The table as the DSP holds it after zqinit's expansion: the stored rows,
+    row 31-ph = row ph reversed, and each odd row 1..13 = floor((row ph-1 +
+    row ph+1) / 2), word for word, as the DSP computes it."""
+    packed = fir_packed(mode)
+    q = np.zeros((PHASES, packed.shape[1]), dtype=np.int64)
+    for ph, row in zip(PACKED_ROWS, packed):
+        q[ph], q[PHASES - 1 - ph] = row, row[::-1]
+    for ph in range(1, 14, 2):
+        q[ph] = (q[ph - 1] + q[ph + 1]) >> 1
+        q[PHASES - 1 - ph] = q[ph][::-1]
     return q
 
 
@@ -315,10 +409,19 @@ class Engine:
         self.phi = 0.0            # SP: accumulator fraction
         self.held = np.zeros(2)   # SP: the staircase's current step
         self.prev = None          # SP: (ring frame, fraction) of the previous output sample
+        self.gc = render_gc()     # SP: the render's step response on its 1/R grid
+        self.acc = np.zeros((RENDER["L"], 2))   # SP: residuals owed to the next L outputs
 
     def fill(self, start, frames):
         for j, fr in enumerate(frames):
             self.ring[(start + j) % self.RING] = fr
+
+    def step_weights(self, u):
+        """Tap m: -Gc(L-1-m+u), the residual a step at u leaves in output i+m."""
+        L, R = RENDER["L"], RENDER["R"]
+        x = (L - 1 - np.arange(L) + u) * R
+        k = np.floor(x).astype(int)
+        return -(self.gc[k] + (x - k) * (self.gc[k + 1] - self.gc[k]))
 
     def adc(self, pos):
         """The virtual ADC at ring position pos (frames, float): the record
@@ -345,18 +448,18 @@ class Engine:
             if self.prev is None:
                 self.prev = (k, f)
             pk, pf = self.prev
-            acc = np.zeros(2); last = 0.0
-            while self.tau < 1.0:
+            while self.tau < 1.0:              # PSP > 1: at most one tick per interval
                 u = self.tau
-                acc += self.held * (u - last)
                 self.phi = (self.phi + r) % 1.0
                 pos = pk + pf + u * r - PSP_LAG * self.phi
-                self.held = q12(self.adc(pos - self.c - 1))
-                last = u
+                new = q12(self.adc(pos - self.c - 1))
+                self.acc += np.outer(self.step_weights(u), new - self.held)
+                self.held = new
                 self.tau += PSP_TICK
-            acc += self.held * (1.0 - last)
             self.tau -= 1.0
-            out.append(self.post(acc))       # PSP > 1: at most one tick per interval
+            out.append(self.post(self.held + self.acc[0]))
+            self.acc = np.roll(self.acc, -1, axis=0)
+            self.acc[-1] = 0.0
             self.prev = (k, f)
         return np.array(out)
 
@@ -378,6 +481,8 @@ class DspExact:
         self.tau = self.phi = 0
         self.held = np.zeros(2, dtype=np.int64)
         self.prev = None
+        self.T, self.D = render_q23()
+        self.acc = np.zeros((RENDER["L"], 2), dtype=np.int64)  # residuals / 4, Q23
 
     @staticmethod
     def lim(v):
@@ -417,12 +522,21 @@ class DspExact:
                 ur = (u * (rfrac >> 1) * 2) >> 23
                 pos = (pk << 24) + pf + ur - lag + (2 * u if rint else 0) - (c["SPC2"] << 24)
                 new = self.adc(pos >> 24, (pos & 0xFFFFFF) >> 19)
-                box = new + ((u * (self.held - new)) >> 23)    # old for u, new for 1 - u
+                dh = (new - self.held) >> 1                    # the step / 2 (exact: 12-bit values)
                 self.held = new
+                L, R = RENDER["L"], RENDER["R"]
+                j, fr = u >> 19, (u & 0x7FFFF) << 4             # u x R: table index, fraction (Q23)
+                for mm in range(L):
+                    kk = (L - 1 - mm) * R + j
+                    w = int(self.T[kk]) + ((int(self.D[kk]) * fr) >> 23)       # weight / 2
+                    for ch in (0, 1):
+                        self.acc[mm, ch] = self.lim(int(self.acc[mm, ch]) + ((w * int(dh[ch])) >> 23))
             else:
                 self.tau -= one
-                box = self.held
-            out.append([self.lim(int(box[0])), self.lim(int(box[1]))])   # raw output 7/8: no filter
+            o = [self.lim(4 * int(self.acc[0, ch]) + int(self.held[ch])) for ch in (0, 1)]
+            self.acc = np.roll(self.acc, -1, axis=0)
+            self.acc[-1] = 0
+            out.append(o)                                      # raw output 7/8: no filter
             self.prev = (k, f)
         return np.array(out)
 
@@ -462,10 +576,10 @@ REPORT_F = np.array([1e3, 5e3, 8e3, 10e3, 12e3, 13e3, 14e3, 15e3, 16e3, 18e3, 20
 
 
 def response_report(quantised=True):
-    """The virtual-ADC responses at 1/1 against their targets, as printed by
-    this module and by tools/repitch_dsp_engine_check.py. 'worst' is the
-    worst phase in the direction that matters (least gain in the passband,
-    most in the stopband); at 1/1 RPSP's ticks visit every phase."""
+    """The virtual-ADC responses at 1/1 against their targets, and RPSP's
+    render, as printed by this module and by tools/repitch_dsp_engine_check.py.
+    'worst' is the worst phase in the direction that matters (least gain in the
+    passband, most in the stopband); at 1/1 RPSP's ticks visit every phase."""
     f = REPORT_F
     lines = []
 
@@ -485,18 +599,27 @@ def response_report(quantised=True):
             lines.append(f"  max |kernel - target| to 18 kHz, any phase: "
                          f"{np.abs(db - want)[:, f <= 18e3].max():.2f} dB")
         else:
-            kb = db + 20 * np.log10(box_droop(f))
+            ren = 20 * np.log10(render_response(f))
+            kb = db + ren
             zoh = 20 * np.log10(np.sinc(f / FS_SP))
-            lines.append(f"{name}: {tab.shape[1]}-tap kernel x box render, at 1/1 (targets: >= -0.5 dB @8k, "
+            lines.append(f"{name}: render ({RENDER['L']} taps, band-limited) vs rev 12's box, and the fold "
+                         f"sources it must reject (the staircase's images from 26.04 kHz up)")
+            lines.append(row("render", ren))
+            lines.append(row("box (rev 11/12)", 20 * np.log10(box_droop(f))))
+            for lo, hi in ((26.04e3, 45e3), (45e3, 130e3)):
+                g = np.linspace(lo, hi, 600)
+                lines.append(f"  worst {lo/1e3:g}-{hi/1e3:g} kHz: render {20*np.log10(render_response(g)).max():6.1f} dB,"
+                             f" box {20*np.log10(np.abs(box_droop(g))).max():6.1f} dB")
+            lines.append(f"{name}: {tab.shape[1]}-tap kernel x render, at 1/1 (targets: >= -0.5 dB @8k, "
                          f">= -1.5 @10k, <= -40 from 18k)")
-            lines.append(row("kernel x box, phase 0", kb[0]))
-            lines.append(row("kernel x box, worst phase", np.where(f >= 17.5e3, kb.max(0), kb.min(0))))
+            lines.append(row("kernel x render, phase 0", kb[0]))
+            lines.append(row("kernel x render, worst phase", np.where(f >= 17.5e3, kb.max(0), kb.min(0))))
             g = np.linspace(18e3, SR / 2, 200)
-            rej = max(20 * np.log10(fir_response(tab, ph, g) * box_droop(g)).max() for ph in range(PHASES))
+            rej = max(20 * np.log10(fir_response(tab, ph, g) * render_response(g)).max() for ph in range(PHASES))
             lines.append(f"  worst rejection 18-22.05 kHz, any phase: {rej:.1f} dB")
             tot = kb.mean(0) + zoh
-            lines.append(f"{name} overall (kernel x box x the 26.04 kHz staircase's droop), mean of phases:")
-            lines.append(row("rev 12", tot))
+            lines.append(f"{name} overall (kernel x render x the 26.04 kHz staircase's droop), mean of phases:")
+            lines.append(row("rev 13", tot))
             rf = np.array(list(REAL_SP78))
             lines.append(row("real SP-1200 out 7/8 (est.)", list(REAL_SP78.values()), rf))
     return "\n".join(lines)

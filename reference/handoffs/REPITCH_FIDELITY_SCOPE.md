@@ -1,6 +1,6 @@
 # repitch-kyoti — fidelity scope: making RPS9 and RPSP behave like the real machines
 
-Written Session 109 (2026-09-28). **Rev 11 implements it; rev 12 corrects its tone — see the status sections.** This scope follows the
+Written Session 109 (2026-09-28). **Rev 11 implements it; rev 12 corrects its tone; rev 13 fixes RPSP's render — see the status sections.** This scope follows the
 shipped rev 10 (`eb8f022`: RPCH / RPS9 / RPSP, hardware-confirmed working) and the
 listening render that showed how little RPS9 changes (`tools/repitch_dsp_listen.py`).
 It supersedes `REPITCH_KYOTI_SCOPE.md` §2's machine descriptions, which were wrong
@@ -12,6 +12,21 @@ engineering inference; says how), ❓ **not documented anywhere we found**, 📎
 source (forum, press), used only where flagged.
 
 ---
+
+## ⏩ Implementation status — rev 13 BUILT (Session 111 cont., 2026-09-28): RPSP's band-limited render
+
+**Built, verified in emulation, NOT flashed** (rev 12 kept as a separate file for an
+A/B). Rev 12 = rev 11 without the output filter; that exposed the box render's
+folded images (a staircase at 26.04 kHz averaged per 44.1 kHz period rejects its
+images above 22 kHz by only 6–8 dB, so they fold to 18.06k − f: −23…−35 dB on tones).
+Rev 13 renders the staircase through a 10-sample band-limited kernel (flat to 19 kHz,
+18k −1.2 / 20k −4.8 / 21k −7.6 dB, ≥ 42 dB from 26 kHz; exact at any tick time via a
+161-point table of its step response). Folds now −50…−85 dB on tones, −44…−47 dB on
+drums/hats; residual: 0–4 kHz content's images between 22 and 26 kHz fold to
+18–22 kHz at ≲ −34 dB. Cost: RPSP 125–137 DSP instructions/sample (rev 12: 68–73,
+rev 11: 114); latency +4.5 samples (RPSP at 1/1: 11.85 samples = 269 µs). To fit, the
+virtual-ADC tables are stored as 9 of 32 rows (≤ −54 dB from the designed rows);
+cave 671 words; Y now `$A00-$F40`. Detail: NOTES "Session 111 continued".
 
 ## ⏩ Implementation status — rev 12 BUILT (Session 111, 2026-09-28): the tonal correction
 

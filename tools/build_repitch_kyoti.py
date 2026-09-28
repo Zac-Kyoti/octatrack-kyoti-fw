@@ -38,27 +38,28 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (rev 12: RPS9 + RPSP tonal correction)", """
-REV 12 = A TONAL CORRECTION of rev 11's virtual samplers (NOTES Session 111;
-reference/handoffs/REPITCH_FIDELITY_SCOPE.md). RPS9 = Akai S900/S950: the
-source band-limited as a 40 kHz Akai sample would be (the MF6CN-50 record
-filter, 6th-order Butterworth @ 16 kHz = the S900's maximum bandwidth) and
-stored at 12 bits, pitched cleanly (16-tap least-squares "virtual ADC").
-RPSP = E-mu SP-1200 heard on its RAW outputs 7/8: a fixed 26.04 kHz clock
-stepping through a 26.04 kHz grid by repeat/skip, 12-bit, a staircase, no
-output filter; its 12-tap record filter is flat to 10 kHz with a steep
-42 dB/oct-style cutoff and the box render's droop folded out. Both run on
-both DSP cores from a 674-word cave in SPRING REVERB's tail (hooked at each
-voice engine's kernel prologue, A P:0x40b / B P:0x20e, as rev 10/11); tables
-and state in Y:$A00-$DFF (free on stock; SIDECHAIN3 keeps $800-$9FF). RPCH
-is stock. *** THIS IMAGE REMOVES SPRING REVERB *** (Session 109 decision) --
-neutered byte-identically to SIDECHAIN3_CROSS; the cave leaves that
-builder's 388 words free, so a merged build remains possible.
+status(WIP, "REPITCH KYOTI (rev 13: RPSP band-limited render)", """
+REV 13 = rev 12 + RPSP's staircase rendered through a BAND-LIMITED kernel
+(NOTES Session 111; reference/handoffs/REPITCH_FIDELITY_SCOPE.md) instead of
+rev 11/12's box, which let the staircase's images above 22 kHz fold back
+into the audible band (-23 to -35 dB on tones; the box rejects them by only
+6-8 dB, the new 10-tap render by >= 42). RPS9 = Akai S900/S950 at a virtual
+40 kHz (MF6CN-50 shape @ 16 kHz), 12-bit, pitched cleanly. RPSP = E-mu
+SP-1200 on its raw outputs 7/8: fixed 26.04 kHz clock, repeat/skip on its
+grid, 12-bit, 12-tap record filter (flat to 10 kHz, 42 dB/oct-style cutoff).
+The virtual-ADC tables are stored as 9 of 32 rows and rebuilt at first use.
+Both run on both DSP cores from a 671-word cave in SPRING REVERB's tail
+(hooked at each voice engine's kernel prologue, A P:0x40b / B P:0x20e);
+state and tables in Y:$A00-$F40 (free on stock; SIDECHAIN3 keeps
+$800-$9FF). RPCH is stock. *** THIS IMAGE REMOVES SPRING REVERB ***
+(Session 109 decision) -- neutered byte-identically to SIDECHAIN3_CROSS; the
+cave leaves that builder's 388 words free, so a merged build remains possible.
 Proven in emulation: DSP 80/80 bit-exact against the model's integer twin on
 both cores + mode switch away/back (python3 tools/repitch_dsp_engine_check.py);
-ColdFire unchanged from rev 10 (hardware: "everything works"); rev 11 is
-on hardware and working, rev 12 NOT yet flashed.
+ColdFire unchanged from rev 10 (hardware: "everything works"); rev 11 is on
+hardware and working; rev 12 and rev 13 NOT yet flashed.
 """)
+
 
 
 
@@ -78,7 +79,7 @@ STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 ELEK = ROOT / f"out/elek_repitch_kyoti{SUF}.bin"
 OUT_SYX = ROOT / f"out/OCTATRACK_OS1.40C_REPITCH_KYOTI{SUF.upper()}.syx"
 OUT_BIN = ROOT / f"out/OCTATRACK_REPITCH_KYOTI{SUF.upper()}.bin"
-VERSTR = "140C_RPKD" if os.environ.get("RPK_DIAG") == "1" else "140C_RPK1"
+VERSTR = "140C_RPKD" if os.environ.get("RPK_DIAG") == "1" else "140C_RPK13"   # rev 13 (rev 11/12: 140C_RPK1)
 
 # --- the seven detours (site, displaced bytes, cave symbol) -----------------
 DETOURS = [
@@ -182,7 +183,7 @@ SPRING_SIG = [0x22ee00, 0x0140c0, 0x000040]    # spring's init, the sidechain's 
 
 
 def dsp_assemble(org):
-    """The rev-12 engine: constants + patch_repitch_dsp.asm + tables, through
+    """The rev-13 engine: constants + patch_repitch_dsp.asm + tables, through
     tools/dsp_xasm.py (every word disassembled back and checked)."""
     import dsp_xasm
     import repitch_dsp_src

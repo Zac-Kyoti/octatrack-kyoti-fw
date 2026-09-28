@@ -33592,3 +33592,107 @@ DSP cave 674 w (A `P:0x13d7`, B `P:0x1197`); cave bytes in the image = the check
 ones; rebuild reproducible. **NOT flashed.** No listening pack (user's instruction).
 Not done, by instruction: SP ch 1–2 SSM2044, sweepable RPS9 filter, selectable SP
 channel, user-facing Akai bandwidth.
+
+## Session 111 continued (2026-09-28, `main`) — repitch-kyoti rev 13: RPSP's band-limited render; 80/80 bit-exact; built, NOT flashed (rev 12 kept for an A/B)
+
+**Why.** With rev 12's output filter gone, the box render's folded images became
+audible: averaging the 26.04 kHz staircase over each 44.1 kHz period rejects its
+images above 22.05 kHz by only 6–8 dB (26–31 kHz), so they fold to 18.06k − f.
+Measured on RPSP rev 12 (exact split of the render into legitimate < 22.05 kHz and
+folded parts, 1/64-sample grid): drum loop fold −29 dB vs the output (−18 dB vs the
+real 12–18 kHz content), hats −23, a bright 220 Hz tone −35 dB overall but +17 dB
+ABOVE the real content in 12–18 kHz (its top octave was mostly fold); pure tones
+1/3/5/8 kHz → fold at 17.06/15.06/13.06/10.06 kHz = −35/−27/−25/−23 dB. A real SP
+has none of it: its images are ultrasonic analog and the recording converter's
+filter removes them. User asked for rev 13 after the trade-offs were laid out.
+
+**The render.** Output = ∫ staircase(t)·g(i − t) dt with g a 10-sample, linear-phase
+kernel, piecewise constant in 1/16-sample pieces, least-squares designed on its
+continuous spectrum: flat to 19 kHz, weight 30 from 26.04 kHz to 130 kHz and 3 up to
+the pieces' own Nyquist (352.8 kHz — without that band the solve is ill-conditioned:
+Gc swung to ±3000). Its running integral Gc is then exactly piecewise linear on the
+1/16 grid, so a 161-point table read with linear interpolation gives the exact
+weight at any tick time. (A plain phase table was rejected: its 1/64-sample timing
+jitter is as loud as the fold. Unit-interval polynomial residuals only reached
+−15…−34 dB.) Per tick the step (new − old)/2 is spread over this and the next 9
+outputs through a residual ring; output = current step + 4 × its ring slot (ring
+holds residual/4: a full-scale step and the kernel's overshoot need the headroom).
+
+| | 13 k | 16 k | 18 k | 20 k | 21 k | 22 k | worst 26–45 k | worst 45–130 k |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| render (rev 13) | +0.3 | +0.5 | −1.2 | −4.8 | −7.6 | −11.1 | **−42.3** | −66.0 |
+| box (rev 11/12) | −1.3 | −2.0 | −2.5 | −3.2 | −3.5 | −3.9 | −5.7 | −13.3 |
+
+Correction owed and given to the user: my pre-build "55–68 dB" for an 8-tap render
+came from 5 spot frequencies that missed the ripple peaks; the worst case is ~40 dB
+for 8 taps, so rev 13 uses 10 (≥ 42 dB, and a better 18–21 kHz than 8 taps).
+
+**Fold after (model, same split):** drum −47 dB vs output (−62 vs real top), hats −44,
+bright tone −56 overall (−31 vs its real top instead of +17); tones: the main fold
+components −85/−57/−57/−50 dB (1/3/5/8 kHz, from −35/−27/−25/−23). What remains:
+images of 0–4 kHz content that fall between 22.05 and 26.04 kHz (the render's
+transition band) fold to 18–22 kHz, e.g. a 3 kHz tone's image at 23.04 kHz → −34 dB
+at 21.06 kHz (rev 12: ≈ −22). Checked NOT to be the ADC's 32-phase grid (1024 phases
+change nothing at 1/3 kHz; that grid shows at −43…−49 dB for 5–8 kHz tones).
+
+**Kernel retune:** RPSP's ADC target now divides by the render's response instead of
+the box's; transition weight 0.3 → 0.7, corner 10.86 → 10.95 kHz. At 1/1: kernel ×
+render 8k +0.2, 10k −1.5 (worst phase), 18–22 kHz −64.8 dB; overall (× staircase
+droop) 5k −0.6, 8k −1.1, 10k −3.7, 12k −8.9, 13k −12.9, 15k −25.8 vs the real SP
+out 7/8 estimate −0.5/−1.5/−3.4/−9.4/−14.4/−26.4 (within 1.5 dB).
+
+**Room: tables packed.** Each virtual-ADC table stores rows 0,2,..,14,15 (9 of 32);
+`zqexp` rebuilds odd rows 1..13 as floor((row−1 + row+1)/2) and rows 16..31 as the
+mirror (one backward copy). Worst deviation from the designed rows ≤ −54.6 dB (RPS9)
+/ −61 dB (RPSP), 0–20 kHz; `model.fir_q23` builds the table the same way, word for
+word. The render stores T[0..80] (T = −Gc/2, antisymmetric: T[160−k] = −½ − T[k]);
+zqinit rebuilds T and D = ΔT as (T, D) pairs at Y:$E00–$F40. zqinit/zqexp use no
+nested DO (outer loops count in b) so the hardware stack goes no deeper than the
+output loop's FIR already does. Trap hit (CLAUDE.md lists it): `move #<8,b` is
+LEFT-aligned — the counter started at $080000 and ran away; use `#>`.
+
+**Layout:** RPSP slot ($20 words at Y:$A00 + x:$418): residual ring 0..19 (L,R
+interleaved, m7 = 19 modulo addressing, so it must start the 32-aligned slot), then
+TAG/TAU/PHI/HL/HR/PKF/PF/RW at +20..+27; slot tag $5A5A04; table tag $A7F; SPTAB
+$A80, R9TAB $C00, BTAB $E00–$F40. r5 is borrowed as the FIR row / render-table
+pointer during a tick (saved in n6), r7 is the ring pointer (the pass count moves to
+n1 before the DO), m7 saved/restored in n7. Cave: 671 words (338 code + 333 data;
+rev 12: 674 = 226 + 448). RPSP state tags from rev 12 force a clean slot.
+
+**Cost:** probe RPSP 122–124 instr/sample (rev 12: 65–68, rev 11: 114), RPS9 57.7
+(unchanged); full firmware per playing pass RPSP 2005–2193 = 125–137/sample, RPS9 935,
+RPCH 8. One-time table expansion: first pass up to 5905 instructions. My pre-build
+estimate was +20/sample; the actual is ≈ +57 (10 taps × 7 instructions per tick,
+× 0.59 ticks/output, + the per-output ring read).
+
+**Latency (RPSP):** the render's delay is L/2 = 5 samples (box: 0.5) → +4.5 samples
+= +102 µs vs rev 12; measured in the model 11.847 samples at 1/1 (predicted 11.85)
+and 18.693 at 1/2. RPS9 unchanged (8/ratio samples); RPCH 0.
+
+**Hot material:** the render's step response overshoots (Gibbs, up to ~9% of a
+step) and the DSP saturates at full scale, as it must; on a hot drum loop 0.011% of
+samples clip (the twin-vs-float gap of −55…−77 dBFS in the check is exactly this; at
+half level it is −120 dBFS).
+
+**Verification (all PASS):** `repitch_dsp_engine_check.py` 80/80 bit-exact (both
+cores), mode switch 8/8; model render == direct convolution with g (to the analysis
+grid's 1/64-sample tick quantization); full firmware (`ot_emu`, MMTESTDT, the recipe
+in Session 111 above): 4000 frames per mode, engine on every playing pass, core 1
+Y:$A7F = TAGVAL `4c0045`, slot tag `5a5a04`, ring live, BTAB ends T[159]/D[159]/T[160]
+= c003fd/fffc03/c00000 (consistent), levels = RPCH (−26.53 vs −26.50 dBFS RMS), no
+frame-boundary clicks (1.024), RPCH and RPS9 sample-identical to rev 12; RPSP vs rev 12
+on that material: 15–18 kHz −24.8 dB, 8–10 kHz −11.9 (fold removed — the test sample
+has little real top end), 12–13 kHz +2.4.
+
+**Builds (both NOT flashed; rev 11 is what's on the unit):**
+- rev 13: `out/OCTATRACK_OS1.40C_REPITCH_KYOTI.syx` = `out/OCTATRACK_OS1.40C_REPITCH_KYOTI_REV13.syx`,
+  sha256 `571565e937dd2efadd3a85dc3a959a57282f2e221f066c5c6810cfa2b4500643` (mainos
+  `cf655b3911e0c9e6…`, CF `.bin` `b632bb8506fe24d8…`); OS VERSION string now
+  **`140C_RPK13`** (builder `VERSTR`; rev 11/12 show `140C_RPK1`).
+- rev 12, rebuilt from `db76906` in a throwaway worktree, byte-identical:
+  `out/OCTATRACK_OS1.40C_REPITCH_KYOTI_REV12.syx` sha256 `11c47180…`.
+
+**Channel 1–2 as a later goal still fits:** outputs 7/8 are the machine up to its DAC,
+and channels 1–2 are that same staircase through the SSM2044 dynamic filter — an
+added stage on this engine, not a different engine (it would also remove most of what
+rev 13's render removes, so the render matters most for 7/8).
