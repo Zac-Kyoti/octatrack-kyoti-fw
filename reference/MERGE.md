@@ -203,7 +203,7 @@ and V1.1* and the free span stays contiguous below it.
 | `patch_pattern_led` | `0x400d6c60` | 142 B |
 | `patch_qlrec` | `0x400d6cf0` | **176 B** (was 358 B before the Sessions 94-96 rewrite; the freed 182 B is not reflected in the rows below) |
 | `patch_triglock` | `0x400d6e58` | 296 B |
-| — free — | `0x400d6f80` | **3196 B** — ⚠️ `patch_repitch_kyoti` (WIP, S106-108) claims `0x400d6f80..0x400d7ab8` = **2872 B** of this run in its standalone build, plus detours at `0x40009094`/`0x40009e00` (part applies — PARTREAPPLY calls, does not detour, the former: compatible); a V1.0+repitch pack has ≈ 1280 B left, and V1.1's staging below overlaps it outright |
+| — free — | `0x400d6f80` | **3196 B** — ⚠️ `patch_repitch_kyoti` (WIP, S106-108) claims `0x400d6f80..0x400d7b00` = **2944 B — EXACTLY FULL, zero bytes of headroom** of this run in its standalone build, plus detours at `0x40009094`/`0x40009e00` (part applies — PARTREAPPLY calls, does not detour, the former: compatible); a V1.0+repitch pack has ≈ 1280 B left, and V1.1's staging below overlaps it outright |
 | `patch_trigscale` | `0x400d7bfc` | 62 B **pinned** |
 | — tail — | `0x400d7c3a` | 2 B |
 

@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <vector>
 #include "machine.h"
@@ -411,60 +412,83 @@ int main(int argc, char** argv)
 		const uint32_t stepFn  = uint32_t(std::stoul(argv[7], nullptr, 16));
 		const uint32_t swapFn  = uint32_t(std::stoul(argv[5], nullptr, 16));
 		const uint32_t prevTab = uint32_t(std::stoul(argv[6], nullptr, 16));
-		// 8) quant_step: on a QUAN track one delta unit is one ratio zone and
-		//    the result is always a zone centre; off one, stock's handler runs.
+		// 8) quant_step: a single detent is a FINE move -- QS_FINE=3 of them
+		//    advance one ratio, the tally persisting across calls -- while a
+		//    bigger delta passes through proportionally. Results are always
+		//    zone centres; off a repitch track stock's handler runs.
 		{
 			constexpr uint32_t centres[8] = {19, 34, 49, 64, 79, 94, 109, 124};
-			struct Case { unsigned setup; uint32_t cur; int delta; int wantZone; bool quan; };
-			const Case cases[] = {
-				{4,  64,  +1, 4, true},   // 1/1 -> 5/4, one detent
-				{4,  64,  -1, 2, true},   // 1/1 -> 3/4
-				{5,  19,  -1, 0, true},   // floor holds at 1/2
-				{6, 124,  +1, 7, true},   // ceiling holds at 2/1
-				{4,  64,  +3, 6, true},   // accelerated turn: three zones
-				{4,  64, -10, 0, true},   // fast sweep clamps at the bottom
-				{4,  49,  +2, 4, true},   // from 3/4 up two
-				{0,  64,  +1, -1, false}, // not a repitch mode: stock handler
-			};
-			bool ok = true;
-			int n = 0, bad = -1;
-			for(const auto& c : cases) {
-				ot::Machine m(pat.image);
+			auto step = [&](ot::Machine& m, uint32_t cur, int delta, bool& ran) {
 				auto* cpu = m.getCpuState();
-				const unsigned t = 2;
-				m.write8(0x80000000, uint8_t(t));
-				setPart(m, t, 1, 6, uint8_t(c.setup), 64, 2, 2880);
-				// frame: ret, slot, delta, current
 				m.write32(stack - 16, trampoline + 0x80);
 				m.write32(stack - 12, 0);
-				m.write32(stack - 8, uint32_t(c.delta));
-				m.write32(stack - 4, c.cur);
+				m.write32(stack - 8, uint32_t(delta));
+				m.write32(stack - 4, cur);
 				for(unsigned i = 0; i < 8; i += 2) m.write16(trampoline + 0x80 + i, 0x4e71);
 				m68k_set_reg(cpu, M68K_REG_SP, stack - 16);
 				m68k_set_reg(cpu, M68K_REG_PC, stepFn);
-				unsigned steps = 0;
-				bool reachedStock = false, returned = false;
-				while(steps++ < 400) {
-					if(m.pc() == trampoline + 0x80) { returned = true; break; }
-					if(m.pc() == 0x40032d08) { reachedStock = true; break; }
+				unsigned n = 0;
+				ran = false;
+				while(n++ < 400) {
+					if(m.pc() == trampoline + 0x80) { ran = true; break; }
+					if(m.pc() == 0x40032d08) break;   // fell through to stock
 					if(!m.step()) break;
 				}
-				bool good;
-				if(c.quan)
-					good = returned && !reachedStock &&
-					       m68k_get_reg(cpu, M68K_REG_D0) == centres[c.wantZone] &&
-					       m68k_get_reg(cpu, M68K_REG_SP) == stack - 12;
-				else
-					good = reachedStock && !returned;
-				if(!good && bad < 0) {
-					bad = n;
-					std::printf("      case %d: returned=%d stock=%d d0=%u\n", n, returned,
-					            reachedStock, m68k_get_reg(cpu, M68K_REG_D0));
-				}
-				ok &= good;
-				++n;
+				return m68k_get_reg(cpu, M68K_REG_D0);
+			};
+			auto fresh = [&](unsigned setup) {
+				auto m = std::make_unique<ot::Machine>(pat.image);
+				m->write8(0x80000000, 2);
+				setPart(*m, 2, 1, 6, uint8_t(setup), 64, 2, 2880);
+				return m;
+			};
+			bool ok = true;
+			// three single detents up = exactly one ratio, and not before
+			{
+				auto m = fresh(4);
+				bool ran = false;
+				ok &= step(*m, 64, +1, ran) == centres[3] && ran;   // 1st: holds
+				ok &= step(*m, 64, +1, ran) == centres[3] && ran;   // 2nd: holds
+				ok &= step(*m, 64, +1, ran) == centres[4] && ran;   // 3rd: advances
+				ok &= step(*m, 72, +1, ran) == centres[4] && ran;   // tally reset
 			}
-			check("quant_step: one delta = one ratio, centres only, stock off-mode", ok, bad);
+			// three down = one ratio down
+			{
+				auto m = fresh(5);
+				bool ran = false;
+				step(*m, 64, -1, ran); step(*m, 64, -1, ran);
+				ok &= step(*m, 64, -1, ran) == centres[2] && ran;
+			}
+			// reversing cancels the tally instead of stepping
+			{
+				auto m = fresh(4);
+				bool ran = false;
+				step(*m, 64, +1, ran); step(*m, 64, +1, ran);
+				ok &= step(*m, 64, -1, ran) == centres[3] && ran;
+			}
+			// a coarse delta passes straight through, and voids the tally
+			{
+				auto m = fresh(6);
+				bool ran = false;
+				step(*m, 64, +1, ran);
+				ok &= step(*m, 64, +3, ran) == centres[6] && ran;
+				ok &= step(*m, 64, +1, ran) == centres[3] && ran;   // tally was voided
+			}
+			// floor and ceiling hold
+			{
+				auto m = fresh(4);
+				bool ran = false;
+				ok &= step(*m, 19, -9, ran) == centres[0] && ran;
+				ok &= step(*m, 124, +9, ran) == centres[7] && ran;
+			}
+			// off a repitch track stock's handler is reached
+			{
+				auto m = fresh(0);
+				bool ran = false;
+				step(*m, 64, +1, ran);
+				ok &= !ran;
+			}
+			check("quant_step: 3 fine detents per ratio, coarse proportional, centres only", ok);
 		}
 
 		// 9) a gate change on the panel's track sets the caption AND the
@@ -491,8 +515,10 @@ int main(int argc, char** argv)
 			ok &= m.pc() == trampoline + 0x80;
 			ok &= m.read32(0x400d3032) == 0x5155414e;   // 'QUAN'
 			ok &= m.read32(0x400d31c4) == 0x5155414e;
-			ok &= m.read16(0x400d3036) == 0 && m.read16(0x400d31c8) == 0;
-			ok &= m.read32(0x46c7d248) == 0x14;         // dial marked dirty
+			ok &= m.read16(0x400d3036) == 0 && m.read16(0x400d31c8) == 0;   // field tail still NUL
+			// the 0x14 value-popup mark must NOT be set: writing it from a
+			// mode switch popped a value the user never dialled (flash 8)
+			ok &= m.read32(0x46c7d248) == 0;
 			// and leaving the mode restores 'PTCH' and re-marks
 			m.write8(dbBase + 0x8ef5a + t * 30 + 6 + 4, 0);
 			m.write32(0x46c7d248, 0);
@@ -503,8 +529,8 @@ int main(int argc, char** argv)
 			steps = 0;
 			while(m.pc() != trampoline + 0x80 && steps++ < 500)
 				if(!m.step()) break;
-			ok &= m.read32(0x400d3032) == 0x50544348 && m.read32(0x46c7d248) == 0x14;
-			check("caption + dial redraw mark set on a gate change, both directions", ok);
+			ok &= m.read32(0x400d3032) == 0x50544348 && m.read32(0x46c7d248) == 0;
+			check("caption set on a gate change, both directions, and NO value popup", ok);
 		}
 	}
 

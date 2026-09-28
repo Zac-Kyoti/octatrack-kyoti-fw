@@ -101,6 +101,7 @@
                                         | 0x46c7d244 + slot*20 + 4, measured at the
                                         | UI editor's own tail (0x4005543c)
         .equ    STEP_PTCH, 0x40032d08   | stock slot-0 encoder-step handler
+        .equ    QS_FINE, 3              | single detents per ratio (feel knob)
         .equ    TXT_MEASURE, 0x40012f30 | (font, -1, str) -> px width
         .equ    TXT_DRAW, 0x40012bd8    | (font, canvas, x, y, -1, str)
         .equ    FONT, 0x400ba876
@@ -517,14 +518,15 @@ rp_swap:
         move.b  (PART_B).l,%d0
         moveq   #1,%d1
         lsl.l   %d0,%d1
-        movea.l (DB_PTR).l,%a0
-        adda.l  #DIRTY_PARTS,%a0
+        movea.l (DB_PTR).l,%a1          | one DB load, reused: CF lea takes only
+        movea.l %a1,%a0                 | a 16-bit displacement, so the big
+        adda.l  #DIRTY_PARTS,%a0        | DB-relative offsets need adda.l
         or.l    %d1,(%a0)
         lea     (DIRTY_SRAM).l,%a0
         or.l    %d1,(%a0)
-        movea.l (DB_PTR).l,%a0
-        adda.l  #DIRTY_DB2,%a0
         moveq   #1,%d1
+        movea.l %a1,%a0
+        adda.l  #DIRTY_DB2,%a0
         move.l  %d1,(%a0)
         lea     (DIRTY_GLOBAL).l,%a0
         move.l  %d1,(%a0)
@@ -562,8 +564,11 @@ rp_swap:
         move.l  #0x5155414e,%d1         | 'QUAN'
 1:      move.l  %d1,%d0
         bsr     rp_caption
-        moveq   #0x14,%d0
-        move.l  %d0,(REDRAW_L).l        | repaint the dial
+        | NO redraw mark here. 0x14 at 0x46c7d244+slot*20+4 is what the UI
+        | editor writes to SHOW a parameter's value under the knob with its
+        | fade -- correct when the user turned it, wrong for a mode switch,
+        | where it popped a value nobody dialled and sat there (flash 8).
+        | The caption alone is enough: leaving page 2 for page 1 repaints.
 .sw_seen_out:
         move.l  (%sp)+,%d0
         bra.s   .sw_out
@@ -572,11 +577,9 @@ rp_swap:
 | reads (STATIC and FLEX slot 0). The image is SDRAM; octabam's mode-rename
 | cave writes this table the same way.
 rp_caption:
-        move.l  %d0,(NAME_ST).l
-        move.l  %d0,(NAME_FX).l
-        clr.w   (NAME_ST+4).l
-        clr.w   (NAME_FX+4).l
-        rts
+        move.l  %d0,(NAME_ST).l         | 4 chars; bytes 4..5 of the field are
+        move.l  %d0,(NAME_FX).l         | already 0 in stock ('PTCH\0\0') and
+        rts                             | nothing here ever writes them
 
 | Poll the panel track's gate and refresh the caption + dial mark. Called
 | from the ATTR editors, whose edits are otherwise invisible to the PLAYBACK
@@ -631,7 +634,43 @@ quant_step:
         move.l  20(%sp),%d0             | current (arg 3, two pushes deep)
         bsr     rk_bucket               | -> zone 0..7
         move.l  16(%sp),%d1             | delta (arg 2)
+        | A single detent (|delta| = 1) is a FINE move: accumulate and advance
+        | one ratio every QS_FINE of them, so the 8 ratios are ~21 detents
+        | wide rather than 7. Anything bigger is the accelerated / pressed
+        | turn and passes straight through, which is the speed the user
+        | called fine. QS_FINE is the one number to change for feel.
+        move.l  %d1,%d2
+        bpl.s   .qs_absok
+        neg.l   %d2
+.qs_absok:
+        subq.l  #1,%d2
+        bne.s   .qs_coarse
+        move.b  (rk_acc).l,%d2
+        extb.l  %d2
+        add.l   %d1,%d2                 | signed detent accumulator
+        move.l  %d2,%d1
+        bpl.s   .qs_accok
+        neg.l   %d1
+.qs_accok:
+        cmpi.l  #QS_FINE,%d1
+        blt.s   .qs_hold
+        tst.l   %d2
+        bmi.s   .qs_down
+        addq.l  #1,%d0
+        bra.s   .qs_zeroacc
+.qs_down:
+        subq.l  #1,%d0
+.qs_zeroacc:
+        moveq   #0,%d2
+.qs_hold:
+        move.b  %d2,(rk_acc).l
+        bra.s   .qs_clamp
+.qs_coarse:
         add.l   %d1,%d0
+        moveq   #0,%d1
+        move.b  %d1,(rk_acc).l          | a coarse move voids the fine tally
+.qs_clamp:
+        tst.l   %d0
         bpl.s   1f
         moveq   #0,%d0
 1:      moveq   #7,%d1
@@ -777,12 +816,8 @@ quant_fmt:
         mulu.l  %d1,%d0
         addi.l  #60,%d0
         moveq   #120,%d1
-        divu.l  %d1,%d0
-        moveq   #7,%d1
-        cmp.l   %d1,%d0
-        bls.s   2f
-        move.l  %d1,%d0
-2:      lsl.l   #2,%d0
+        divu.l  %d1,%d0                 | 4..124 in, 0..7 out: no clamp needed
+        lsl.l   #2,%d0
         lea     .q_labels(%pc),%a0
         adda.l  %d0,%a0
         move.l  %a0,8(%sp)
@@ -803,6 +838,9 @@ quant_fmt:
         .ascii  "2/1\0"
 rp_prev:
         .byte   0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff
+        .balign 2
+rk_acc:
+        .byte   0                       | fine-detent tally, signed
         .balign 2
 .ifdef RPK_DIAG
 | Diagnostic build only. The PTCH/QUAN cell's readout becomes four hex

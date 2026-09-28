@@ -32894,3 +32894,53 @@ entry and displays it as the readout's four digits (`----` until first call).
 other consumer. Hex printer rewritten as a clean 4-digit unroll (the first
 attempt was muddled and never built). Mainline image byte-identical with
 `RPK_DIAG` unset (`224dc374…`), oracle 9/9.
+
+### Session 108 continued (6) — flash 8: quant_step's return DOES reach storage (flash 7's reading was misleading); REV 7 fixes the popup + the feel. Cave now EXACTLY FULL
+
+**Flash 8 (rev 6.1/6.2 mainline `224dc374`) was the informative one.** The user
+flashed the NON-diag image and reported the knob **too fast** — where flash 7
+had reported it unchanged. Nothing about `quant_step` differs between those
+two images (only the display snap and, diag-only, instrumentation), so
+**flash 7's "speed unchanged" was a misreading, not a mechanism**: the poke
+works, the editor does call `quant_step`, and its return *is* clamped and
+stored. The whole "the counter's caller is not the storing site" investigation
+(rev 6.2's caller-latch diag) is therefore **moot** — no further diagnosis
+needed, and the caller-latch instrumentation stays only as a diag-only
+facility. Lesson worth keeping: a "no change" report is weak evidence; two
+reports of *different* speeds on images that differ only cosmetically points
+at the observation, not the code.
+
+**Item 1 — the spurious value popup.** Switching TSTR on page 2 made page 1
+show the PTCH/QUAN **value** under the knob, and it sat there until the knob
+was moved. Cause: `0x14` at `0x46c7d244 + slot*20 + 4` is not merely a
+"repaint" mark — it is what the UI editor writes to **display a parameter's
+value with its fade** (hence 20 = a countdown). Correct when the user turned
+the knob; wrong for a mode switch. **The write is removed**; the caption
+(written early from `rp_swap`) is enough, since leaving page 2 for page 1
+repaints anyway. Contract 9 now asserts the mark stays **0**.
+
+**Item 2 — the feel.** `QS_FINE = 3`: a single detent (`|delta| == 1`) is a
+fine move that accumulates in `rk_acc` (signed) and advances one ratio every
+third detent (~21 detents across all 8 values, between flash 7's ~105 and
+flash 8's 7); a larger delta — the accelerated/pressed turn, which the user
+called fine — passes through proportionally and voids the tally. Reversing
+direction cancels the tally rather than stepping. **`QS_FINE` is the single
+constant to change for feel.**
+
+**⚠️ THE COLDFIRE CAVE IS NOW EXACTLY FULL: `0x400d6f80..0x400d7b00` = 2944 B,
+ZERO bytes under the bugbuilds shared base.** Fitting rev 7 needed 20 B of
+genuine trimming, all of it redundancy rather than boundary-creep:
+- `rp_caption`'s two `clr.w` were always dead — every caption is 4 chars and
+  stock's field is `'PTCH\0\0'`, so bytes 4..5 are already 0 (12 B).
+- `quant_fmt`'s upper clamp cannot fire: it only ever sees display values this
+  module generated, 4..124 → 0..7 (8 B).
+- One DB pointer load reused for both DB-relative dirty flags (2 B). ⚠️ CF
+  `lea` takes only a 16-bit displacement, so big DB-relative offsets need
+  `movea.l`+`adda.l`, not `lea off(%aN)`.
+**Any further ColdFire work on this module needs the second zone**
+(`0x400d2ee6`, 314 B + midisc's D-pads) — see MERGE.md and `kb/caves.md`.
+
+**Rev 7 = flash-9 candidate: mainos `fc3171cc…`, syx `75d8cdcd…`** (2335 B
+changed, 0 strays). Oracle 9/9, with contract 8 rewritten for the accumulator
+(three fine detents per ratio, coarse proportional, reversal cancels, floor
+and ceiling hold, stock reached off-mode).

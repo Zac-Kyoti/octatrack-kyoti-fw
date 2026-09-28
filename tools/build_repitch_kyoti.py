@@ -38,24 +38,22 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (gate 1, rev 6.2 + DIAG)", """
-Flash 7 SETTLED the gate: it reads 1 on hardware for SETUP RPCH/RPS9 and for
-AUTO, and the ATTR-driven PTCH->QUAN refresh now works -- items 1 and 3 are
-CLOSED. The dial also spans its full arc now. One item remains, and it is a
-feel request rather than a defect: the knob still walks one ui unit per
-detent, even though quant_step demonstrably reaches its QUAN path (the
-flash-7 counter advanced). So quant_step's RETURN is not what the storing
-editor uses. Nine call sites read the P+0x12a column; the diag build now
-latches and displays the low word of quant_step's CALLER so the responsible
-one can be named instead of guessed at.
-
-    KYOTI_ALLOW_WIP=1 RPK_DIAG=1 python3 tools/build_repitch_kyoti.py
-    -> out/OCTATRACK_OS1.40C_REPITCH_KYOTI_DIAG.syx, OS shows 140C_RPKD
-
-The PTCH/QUAN readout shows four hex digits: quant_step's last caller,
-or '----' before it has ever run. 0x536a or 0x514e would be the UI editor's
-own two sites; anything else names a different consumer. The mainline image
-is byte-identical with RPK_DIAG unset.
+status(WIP, "REPITCH KYOTI (gate 1, rev 7)", """
+Flash 8 confirmed quant_step's return DOES reach storage (the knob got fast,
+not unchanged -- flash 7's "unchanged" reading was wrong), so no further
+caller diagnosis is needed. Rev 7 answers flash 8's two items:
+(1) the spurious value popup after a page-2 TSTR switch -- the 0x14 mark at
+0x46c7d244+slot*20+4 is what the editor writes to SHOW a value with its
+fade, so writing it from a mode switch popped a value nobody dialled; the
+write is gone and the caption alone drives the change;
+(2) a single detent is now a FINE move -- QS_FINE=3 of them advance one
+ratio (~21 detents across the 8 values) while a bigger, accelerated/pressed
+delta still passes through proportionally, which is the speed the user
+called fine. QS_FINE is the one constant to change for feel.
+All 9 oracle contracts green.
+*** The ColdFire cave is now EXACTLY FULL: 0x400d6f80..0x400d7b00, zero
+bytes under the bugbuilds base. Any further ColdFire work needs the second
+zone (MERGE.md, reference/kb/caves.md). ***
 """)
 
 BASE = 0x40000400
