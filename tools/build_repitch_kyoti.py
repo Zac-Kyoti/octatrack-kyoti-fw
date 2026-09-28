@@ -38,23 +38,28 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (rev 11: RPS9 + RPSP as virtual samplers)", """
-REV 11 = THE FIDELITY ENGINE (reference/handoffs/REPITCH_FIDELITY_SCOPE.md,
-NOTES Session 110). RPS9 = Akai S900/S950: the source band-limited by the
-Akai's record filter (6th-order @ 12.8 kHz = a 32 kHz sample) and stored at
-12 bits, pitched cleanly (16-tap polyphase "virtual ADC"). RPSP = E-mu SP-1200:
-a fixed 26.04 kHz clock stepping through a 26.04 kHz grid by repeat/skip,
-12-bit, a staircase, then output channel 5's filter. Both run on both DSP
-cores from a ~670-word cave in SPRING REVERB's tail (hooked at each voice
-engine's kernel prologue, A P:0x40b / B P:0x20e, as rev 10); tables live in
-Y:$A00-$DFF (free on stock; SIDECHAIN3 keeps $800-$9FF). RPCH is stock.
-*** THIS IMAGE REMOVES SPRING REVERB *** (Session 109 decision) -- neutered
-byte-identically to SIDECHAIN3_CROSS; the cave leaves that builder's 388
-words free, so a merged build remains possible.
+status(WIP, "REPITCH KYOTI (rev 12: RPS9 + RPSP tonal correction)", """
+REV 12 = A TONAL CORRECTION of rev 11's virtual samplers (NOTES Session 111;
+reference/handoffs/REPITCH_FIDELITY_SCOPE.md). RPS9 = Akai S900/S950: the
+source band-limited as a 40 kHz Akai sample would be (the MF6CN-50 record
+filter, 6th-order Butterworth @ 16 kHz = the S900's maximum bandwidth) and
+stored at 12 bits, pitched cleanly (16-tap least-squares "virtual ADC").
+RPSP = E-mu SP-1200 heard on its RAW outputs 7/8: a fixed 26.04 kHz clock
+stepping through a 26.04 kHz grid by repeat/skip, 12-bit, a staircase, no
+output filter; its 12-tap record filter is flat to 10 kHz with a steep
+42 dB/oct-style cutoff and the box render's droop folded out. Both run on
+both DSP cores from a 674-word cave in SPRING REVERB's tail (hooked at each
+voice engine's kernel prologue, A P:0x40b / B P:0x20e, as rev 10/11); tables
+and state in Y:$A00-$DFF (free on stock; SIDECHAIN3 keeps $800-$9FF). RPCH
+is stock. *** THIS IMAGE REMOVES SPRING REVERB *** (Session 109 decision) --
+neutered byte-identically to SIDECHAIN3_CROSS; the cave leaves that
+builder's 388 words free, so a merged build remains possible.
 Proven in emulation: DSP 80/80 bit-exact against the model's integer twin on
-both cores (python3 tools/repitch_dsp_engine_check.py); ColdFire unchanged
-from rev 10 (hardware: "everything works").
+both cores + mode switch away/back (python3 tools/repitch_dsp_engine_check.py);
+ColdFire unchanged from rev 10 (hardware: "everything works"); rev 11 is
+on hardware and working, rev 12 NOT yet flashed.
 """)
+
 
 
 BASE = 0x40000400
@@ -177,7 +182,7 @@ SPRING_SIG = [0x22ee00, 0x0140c0, 0x000040]    # spring's init, the sidechain's 
 
 
 def dsp_assemble(org):
-    """The rev-11 engine: constants + patch_repitch_dsp.asm + tables, through
+    """The rev-12 engine: constants + patch_repitch_dsp.asm + tables, through
     tools/dsp_xasm.py (every word disassembled back and checked)."""
     import dsp_xasm
     import repitch_dsp_src

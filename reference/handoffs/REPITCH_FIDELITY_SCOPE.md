@@ -1,6 +1,6 @@
 # repitch-kyoti — fidelity scope: making RPS9 and RPSP behave like the real machines
 
-Written Session 109 (2026-09-28). **Rev 11 implements it — see the status section.** This scope follows the
+Written Session 109 (2026-09-28). **Rev 11 implements it; rev 12 corrects its tone — see the status sections.** This scope follows the
 shipped rev 10 (`eb8f022`: RPCH / RPS9 / RPSP, hardware-confirmed working) and the
 listening render that showed how little RPS9 changes (`tools/repitch_dsp_listen.py`).
 It supersedes `REPITCH_KYOTI_SCOPE.md` §2's machine descriptions, which were wrong
@@ -13,9 +13,44 @@ source (forum, press), used only where flagged.
 
 ---
 
+## ⏩ Implementation status — rev 12 BUILT (Session 111, 2026-09-28): the tonal correction
+
+**Built, verified in emulation, NOT yet flashed.** Rev 11 is on the user's MKI and
+working, but by ear both modes were duller than rev 10 and RPSP duller than the
+other modes. Measured against rev 11's own model that was partly by design (RPS9's
+32 kHz virtual rate) and partly a fault (RPSP: an 8-tap record kernel rolling off
+2–3 dB early, the box render's sinc(f/44100) droop stacked on top, and channel 5's
+filter removing the staircase images above 13 kHz). Rev 12 changes exactly three
+things (NOTES "Session 111"):
+
+- **RPSP is heard as the raw outputs 7/8** — no output filter (Q2 answered: 7/8,
+  the community's usual "dirtiest drums" choice; ch 3–6 stay modelled in
+  `tools/repitch_engine_model.py` for a future selectable channel). The DSP's
+  filter stage is gone and RPSP got cheaper.
+- **RPSP's virtual ADC = 12 taps, least squares** (no windowed sinc): flat to
+  10 kHz, a 7-pole (42 dB/oct, E-mu's own description) shape through the transition,
+  ≥ 40 dB rejection from 17.5 kHz, and the box's droop folded out. At 1/1:
+  kernel × box 8 kHz +0.3 dB, 10 kHz −1.4 (worst phase), 18–22 kHz −59.5 dB; overall
+  (× the real 26.04 kHz staircase droop) 5k −0.6, 8k −1.1, 10k −3.5, 12k −9.0,
+  13k −13.2, 15k −25.6 against the estimated real SP out 7/8 row −0.5 / −1.5 / −3.4 /
+  −9.4 / −14.4 / −26.4.
+- **RPS9 records at a virtual 40 kHz** (16 kHz bandwidth, the S900's maximum;
+  Q1 answered for now: 40 kHz fixed): 16 taps fitted by least squares to the
+  MF6CN-50's 6th-order Butterworth at 16 kHz, within 0.15 dB of it to 18 kHz on
+  every phase. (Akai's fixed 18 kHz 2-pole after the MF6CN-50 is not modelled.)
+
+Everything else is rev 11's. Cost (full firmware, per playing pass): RPSP 1086–1174
+instructions = 68–73 per sample (rev 11: 1823 = 114), RPS9 935 = 58 (rev 11: 936).
+Cave 674 of 675 words. **Known and now audible:** the box render folds the
+staircase's images above 22 kHz back into the band (a 3 kHz tone at 1/1 leaves a
+−27 dB component at 15.06 kHz; 5 kHz → −25 dB at 13.06 kHz). Rev 11's channel 5
+filter masked this by 6–16 dB; a real SP recorded at 44.1 kHz does not have it.
+A band-limited step render is the fix, and needs cave space rev 12 does not have.
+
 ## ⏩ Implementation status — rev 11 BUILT (Session 110, 2026-09-28)
 
-**Built, verified in emulation, not yet flashed.** Gate 0 was answered in
+**Built, verified in emulation; flashed and working on the MKI (reported before
+Session 111). Superseded in tone by rev 12 above.** Gate 0 was answered in
 `ot_emu` against the real firmware and octabam's hardware measurements, and
 tiers 1–2 of both modes were built in one engine. What changed from the plan below,
 and why (details: NOTES "Session 110"):

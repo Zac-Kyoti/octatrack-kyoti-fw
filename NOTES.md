@@ -33479,3 +33479,116 @@ sha256 `647f3d215cf222647e8f42a5faa14c29c899e5243bb067ed1affe9e8e6511b79`
 (mainos `52c6b1ad…`), 6223 B changed, 0 strays; DSP cave 667 w on each core
 (A `P:0x13de`, B `P:0x119e`). ColdFire identical to rev 10. **NOT flashed.**
 Listening pack: `out/listen/` (`python3 tools/repitch_dsp_listen.py`).
+
+## Session 111 (2026-09-28, `main`) — repitch-kyoti rev 12: tonal correction of RPS9/RPSP (raw SP outs 7/8, least-squares kernels, Akai @ 40 kHz); 80/80 bit-exact; built, NOT flashed
+
+User: rev 11 (`88a4651`) is flashed and working on the MKI; by ear RPS9 and RPSP
+are both duller than rev 10, RPSP also duller than the other modes. Goal: iconic
+and as objectively good as possible — thumpy but tight, warm to the degree people
+expect; no bass boost or saturation (neither machine does it). Three changes,
+exactly as specified; everything else is rev 11 (12-bit, SP 26.04 kHz tick/phase
+grid, exact QUAN ratios, ≤1 tick per output, c+1 read-behind, stale-state resync,
+Y:`$A00-$DFF`, ColdFire unchanged).
+
+**Why it was dull (measured on rev 11's own model):** RPS9 by design (32 kHz
+virtual rate: 10k −0.7, 12k −3.4, 13k −6.0, 15k −15 dB). RPSP by fault, three
+stacked losses: (a) the 8-tap Kaiser kernel rolled off early (8k −1.9, 10k −4.3)
+where the 4-pole it stood in for is flat; (b) the box render's sinc(f/44100) droop,
+which the SP does not have; (c) channel 5's output filter removing the staircase
+images above 13 kHz. RPSP at 1/1 was 2.5–5 dB darker at 8–12 kHz than a real SP's
+raw outputs 7/8.
+
+**1. RPSP → raw outputs 7/8.** Model `SP_CHANNEL = 7`; the ch 3–6 designs stay in
+`repitch_engine_model.py` (future selectable channel). Removed from the DSP path:
+`zqpost`, the PCOEF copy (X:`$E0-$E4` no longer used), the S_POST* state words
+(state 15 → 7 words), `DspExact.post`, `repitch_dsp_src.post_coefs`.
+
+**2. RPSP virtual ADC = 12 taps, weighted least squares per phase** (numpy KKT
+solve, exact unity DC per row; rows 16–31 = rows 15–0 reversed, so the table stays
+mirror-symmetric for `zqinit`/`half_table`). Target = kernel × box: flat (1/box) to
+10 kHz; transition 10–17.5 kHz shaped like a 7-pole (42 dB/oct — E-mu's "on the
+order of 42 dB per octave") Butterworth at 10.86 kHz, weight 0.3; zero from
+17.5 kHz, weight 30. Searched 8/10/12 taps: 8 cannot reach 40 dB (−33 at best);
+10 meets the hard targets but lands 2.7–3 dB off the real-SP row at 12–15 kHz;
+12 meets them with margin and tracks the row within ~1.2 dB. At 1/1:
+
+| kHz | 1 | 5 | 8 | 10 | 12 | 13 | 14 | 15 | 16 | 18 | 20 | 22 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| kernel × box, phase 0 | −0.0 | −0.1 | +0.3 | −1.2 | −5.4 | −8.9 | −13.6 | −20.0 | −28.7 | −69.1 | −66.4 | −68.5 |
+| kernel × box, worst phase | −0.1 | −0.1 | +0.3 | −1.4 | −5.9 | −9.5 | −14.3 | −20.4 | −28.8 | −69.1 | −66.4 | −68.5 |
+| **overall** (× 26.04 kHz staircase droop), mean of phases | −0.1 | −0.6 | −1.1 | −3.5 | −9.0 | −13.2 | −18.6 | −25.6 | −35.0 | −82 | −79 | −90 |
+| real SP out 7/8 (est., the target) | | −0.5 | −1.5 | −3.4 | −9.4 | −14.4 | | −26.4 | | | | |
+| rev 11 overall (ch 5) | | −1.4 | −3.9 | −8.1 | −16.6 | −22.4 | | −36.3 | | | | |
+
+Worst rejection 18–22.05 kHz over all phases: −59.5 dB (target ≥ 40).
+
+**3. RPS9 at a virtual 40 kHz** (`FS_AKAI = 40000`, bandwidth 16 kHz = the S900's
+maximum). 16 taps, least squares against the MF6CN-50's magnitude (6th-order
+Butterworth @ 16 kHz), uniform weight over 0–22.05 kHz; within 0.15 dB of it to
+18 kHz on every phase. (Akai's fixed 18 kHz 2-pole after the MF6CN-50 is not
+modelled — it was not asked for; it would add ≈ −1 dB at 13 kHz, −2 at 16.)
+
+| kHz | 1 | 5 | 8 | 10 | 12 | 13 | 14 | 15 | 16 | 18 | 20 | 22 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| target (Butterworth-6 @ 16k) | −0.0 | −0.0 | −0.0 | −0.0 | −0.1 | −0.3 | −0.8 | −1.6 | −3.0 | −7.1 | −11.9 | −16.7 |
+| kernel, phase 0 | +0.0 | −0.0 | +0.0 | −0.0 | −0.1 | −0.3 | −0.8 | −1.7 | −3.0 | −7.0 | −12.2 | −15.5 |
+| kernel, phase 15 | +0.0 | −0.1 | +0.1 | −0.1 | −0.2 | −0.3 | −0.7 | −1.7 | −3.2 | −7.0 | −11.5 | −39.2 |
+| rev 11 (12.8 kHz) | | | | −0.7 | −3.4 | −6.0 | | −15 | | | | |
+
+**DSP / layout.** Y: state `$A00+x:$418` (7 of each `$20` slot), table tag `$A7F`,
+RPSP table `$A80-$BFF` (32 × 12), RPS9 `$C00-$DFF`. State tag `$5A5A03` (rev 11's
+`…02` forces a clean state if old state survives a reflash). The RPSP row is
+phase × 12 (×8 + ×4; `repitch_dsp_src` asserts 12/16 taps). Cave: 674 words (226
+code + 448 data) against the 675 limit — rev 11's code had to shrink by 13 words to
+fit 64 more table words: shared m1/y1 setup hoisted out of both mode paths and m1
+restored once at `zqdone`, two `tst`s after `and` dropped (Z comes from a1; a2/a0
+clear), first-use init branches into the resync store, `zqinit` lets r1 run on from
+the SP half-table into the RPS9 one (they are adjacent in P). One word left.
+
+**Cost.** Probe (40 cases each): RPS9 57.7 instr/sample, RPSP 65.3–67.6 (median
+67.6). Full firmware (`--dsp-stopwatch 1:20e:210`, per playing 16-sample pass):
+RPCH 8 (was 9: one `tst` fewer), RPS9 935 = 58.4/sample (rev 11 936), RPSP
+1086–1174 = 68–73/sample (rev 11 1823 = 114) — RPSP now costs about what RPS9 does.
+
+**Verification (all PASS):**
+- `python3 tools/repitch_dsp_engine_check.py`: **80/80 bit-exact** vs the twin
+  (4 signals × 5 ratios × 2 modes × 2 cores, undelivered frames poisoned); twin vs
+  float design −144…−150 dBFS (RPSP), −318 (RPS9). The check now also runs the
+  **mode switch away and back** itself (RK_MODE_SWITCH=40, drum, 0.75/1.5, both
+  modes, both cores: **8/8** — engine passes bit-exact with a twin that skipped the
+  RPCH passes; the RPCH passes match a 2-tap interpolator to −137 dBFS, i.e. stock
+  ran, not us; 0.75 exercises the stale resync, 1.5's 960-frame gap is ≡ 0 mod 64
+  and needs none) and prints the response tables above.
+- Full firmware, `ot_emu` (shared binary, not rebuilt), MMTESTDT card, `--set
+  MMTESTDT --project test --sequencer --internal-clock --dsp --main-level 64 --frames
+  4000`, TSTR set in the part (`0x4017113e` = 4/5/6) + BPM24 `0x0b40` at +0x114 of
+  settings slots 0–15 in both blocks: 4000 frames each; engine on exactly 1 pass in 8
+  (= every playing pass; the stopwatch mean says so); `--dsp-peek` core 1: table tag
+  `6b3e9d` at Y:`$A7F`, RPSP state tag `5a5a03`, RPS9 table expanded at `$C00`;
+  levels = RPCH (RMS −26.50/−26.50/−26.52 dBFS); no frame-boundary clicks (|d²| per
+  phase mod 16, max/median 1.02 RPS9 / 1.015 RPSP / 1.02 RPCH); **RPCH sample-identical
+  to rev 11's capture**. Band power, rev 12 vs rev 11 same mode (S110's captures):
+  RPS9 +1.7 (10–12k), +3.4 (12–13k), +5.1 (13–15k), +4.0 (15–18k); RPSP +1.9 (5–10k),
+  −1.1/−1.5 (10–13k: less aliasing, the new kernel rejects 13–17 kHz source harder),
+  +5.5 (13–15k), +14.6 (15–18k), +19 (18–22k: the staircase images, now unfiltered).
+- Float models, white noise at 1/1, band power vs the source — rev 11 → rev 12:
+  RPS9 10–12k −1.7 → −0.1, 12–13k −4.6 → −0.2, 13–15k −9.3 → −0.9, 15–18k −22 → −3.7;
+  RPSP 5–8k −2.4 → −0.7, 8–10k −5.5 → −2.0, 10–12k −11.0 → −5.5, 12–13k −17 → −9.3,
+  13–15k −22 → −9.9 (images), 15–18k −27 → −9.1 (images).
+
+**Known, now audible: the box render's folded images.** Averaging the 26 kHz
+staircase over each 44.1 kHz period folds its images above 22.05 kHz back down
+(image at 26.04k+f → 18.06k−f). RPSP tone at 1/1, relative to the tone: 1 kHz →
+−35 dB at 17.06 kHz, 3 kHz → −27 dB at 15.06, 5 kHz → −25 dB at 13.06 (the true
+in-band image at 21.04 kHz is −16, real ≈ −12.4). Rev 11's ch 5 filter hid these by
+6–16 dB; a real SP recorded at 44.1 kHz has none of them. Not new code — rev 11's
+renderer — but a candidate next fix (band-limited step, e.g. a short polyphase
+BLEP at each tick), which needs cave space (1 word left).
+
+**Build (rev 12, WIP tier):** `out/OCTATRACK_OS1.40C_REPITCH_KYOTI.syx` sha256
+`11c47180558c6373715f2b15d2171b0d544ed990a654515b17b2a40ef381d6d6` (mainos
+`1260888354ab76c1…`, CF-card `.bin` `7fc8484ac52b8e0c…`), 6281 B changed, 0 strays;
+DSP cave 674 w (A `P:0x13d7`, B `P:0x1197`); cave bytes in the image = the checked
+ones; rebuild reproducible. **NOT flashed.** No listening pack (user's instruction).
+Not done, by instruction: SP ch 1–2 SSM2044, sweepable RPS9 filter, selectable SP
+channel, user-facing Akai bandwidth.

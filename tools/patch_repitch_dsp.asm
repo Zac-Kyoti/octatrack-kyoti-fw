@@ -1,7 +1,7 @@
 ; SPDX-License-Identifier: MIT
 ; SPDX-FileCopyrightText: 2026 Zac-Kyoti
 ; ===========================================================================
-; repitch-kyoti rev 11 -- DSP side: the "virtual sampler" behind RPS9 / RPSP.
+; repitch-kyoti rev 12 -- DSP side: the "virtual sampler" behind RPS9 / RPSP.
 ; Model (the ground truth this must match): tools/repitch_engine_model.py.
 ; Scope: reference/handoffs/REPITCH_FIDELITY_SCOPE.md. Plumbing: NOTES
 ; Session 110. Assembled by tools/dsp_xasm.py (NOT plain dsp_asm: this uses
@@ -30,14 +30,15 @@
 ;
 ; MEMORY (Y:$795..$FFF is free on stock on both cores -- octabam, measured on
 ; hardware; SIDECHAIN3 takes $800-$9ff):
-;   Y:STBASE + x:$418   per-track RPSP state (24 words)
+;   Y:STBASE + x:$418   per-track RPSP state (S_SIZE words of a $20 slot)
 ;   Y:TABTAG            table tag; != TAGVAL => expand the tables (once/core)
-;   Y:SPTAB, Y:R9TAB    the virtual-ADC tables, 32 phases each
-;   X:PCOEF             the SP output filter's coefficients, copied per pass
-;                       (X:$20-$ff is stock's per-call scratch)
+;   Y:SPTAB, Y:R9TAB    the virtual-ADC tables, 32 phases each (12 / 16 taps)
+;
+; RPSP is heard as the SP-1200's raw outputs 7/8 since rev 12: no output
+; filter (rev 11 ran channel 5's here, zqpost).
 ;
 ; REGISTERS. Uses a, b, x0, x1, y0, y1, r1, r4, r6, r7, m1 (saved and
-; restored), n1, n2, n4, n5, n7. Leaves r0, r2, m6 alone; advances r3 by two
+; restored), n1, n2, n4. Leaves r0, r2, m6 alone; advances r3 by two
 ; words per output. m1 is $7f only while r1 walks the ring: an XY dual move
 ; needs its X pointer in r0-r3, and the ring's own modulo register is m6.
 ;
@@ -52,16 +53,12 @@ S_HL    equ     3       ; SP: current staircase step, L
 S_HR    equ     4
 S_PKF   equ     5       ; SP: previous output's ring frame (0..63)
 S_PF    equ     6       ; SP: previous output's fraction, Q24
-S_POSTL equ     7       ; SP: output filter state, L (4 words)
-S_POSTR equ     11      ; SP: output filter state, R (4 words)
-S_SIZE  equ     15
-S_DPOST equ     S_POSTR-S_POSTL
+S_SIZE  equ     7
 
 zqrp:
         clr     a
         move    y:>$40,a1
-        and     #<3,a
-        tst     a
+        and     #<3,a                   ; (Z from a1; a2 and a0 are clear)
         beq     zqstk                   ; RPCH: stock, untouched
         move    a1,n1                   ; n1 = mode
         move    y:>TABTAG,a
@@ -69,6 +66,9 @@ zqrp:
         beq     zqtok
         bsr     zqinit                  ; first use on this core (or a new build)
 zqtok:
+        move    m1,n4                   ; restored at zqdone
+        move    #$7f,m1
+        move    #>$fff000,y1            ; the 12-bit mask, both modes
         move    n1,a
         cmp     #<2,a
         beq     zqsp
@@ -77,9 +77,6 @@ zqtok:
 ; output i = 12-bit(virtual ADC at p_i - c - 1): a 16-tap polyphase kernel over
 ; ring frames k_i-2c-1 .. k_i, all delivered. (NOT k_i+1: at a zero fraction
 ; the OT does not deliver it -- the stock kernel weights it 0. Measured.)
-        move    m1,n4
-        move    #$7f,m1
-        move    #>$fff000,y1
         do      r7,zq9e
         move    x:(r5),a                ; a1 = ring word offset of k_i
         sub     #<R9SW,a                ; first tap = k_i - 2c - 1 frames
@@ -111,7 +108,6 @@ zq9f:
         and     y1,b
         move    b1,x:(r3)+
 zq9e:
-        move    n4,m1
         bra     zqdone
 
 ; ============================================================ RPSP (SP-1200)
@@ -119,16 +115,11 @@ zq9e:
 ; 1.69 output samples, so an interval holds at most one tick: at u the step
 ; changes from old to new and the average is new + u*(old - new).
 zqsp:
-        move    x:>$418,x0
-        move    #>STBASE,a
-        add     x0,a
+        move    x:>$418,a
+        add     #>STBASE,a
         move    a1,r4                   ; this track's state block
-        add     #<S_POSTL,a
-        move    a1,n5                   ; its output filter state, L
-        add     #<S_DPOST,a
-        move    a1,n7                   ; ... and R
-        move    y:(r4),b
         move    #>TAGSP,x1
+        move    y:(r4),b
         cmp     x1,b
         beq     zqsok
         clr     b                       ; stale or first use: clean state
@@ -137,11 +128,7 @@ zqsp:
         move    b,y:(r6)+
 zqsz:
         move    x1,y:(r4)
-        move    x:(r5),b                ; "previous output" = this pass's first
-        asr     b
-        move    b1,y:(r4+S_PKF)
-        move    y:(r5),b
-        move    b1,y:(r4+S_PF)
+        bra     zqsrs                   ; "previous output" = this pass's first
 zqsok:
         move    x:(r5),a                ; resync "previous" if this pass does not
         asr     a                       ; continue it: ring positions advance
@@ -152,20 +139,13 @@ zqsok:
         move    x0,a
         cmp     #<2,a
         ble     zqsnj
+zqsrs:
         move    x:(r5),b
         asr     b
         move    b1,y:(r4+S_PKF)
         move    y:(r5),b
         move    b1,y:(r4+S_PF)
 zqsnj:
-        move    #>zqdpc,r1              ; the output filter's coefficients -> X
-        move    #>PCOEF,r6
-        do      #PCN,zqsc
-        movem   p:(r1)+,x0
-        move    x0,x:(r6)+
-zqsc:
-        move    m1,n4
-        move    #$7f,m1
         do      r7,zqoe
         move    y:(r4+S_TAU),a
         move    #>$100000,x0
@@ -200,8 +180,7 @@ zqtk:
         sub     b,a
         move    x:>$40,b                ; + u*int(r) (0 or 1): only bit 0 -- on the unit
         and     #<1,b                   ; x:$40 reads $c1 at 1.0x (the table builder
-        tst     b                       ; masks it too), measured in ot_emu
-        beq     zqri
+        beq     zqri                    ; masks it too), measured in ot_emu
         clr     b
         move    x0,b0
         asl     b
@@ -214,7 +193,10 @@ zqri:
         sub     #<SPC2,a                ; first tap = floor(pos) - 2c - 1
         move    a0,b
         lsr     #19,b                   ; phase 0..31
-        lsl     #3,b                    ; x 8 taps
+        lsl     #2,b                    ; x 12 taps = x4 + x8
+        move    b1,x1
+        lsl     #1,b
+        add     x1,b
         add     #>SPTAB,b
         move    b1,r7
         asl     a                       ; frames -> words
@@ -232,7 +214,6 @@ zqri:
 zqsf:
         mac     y0,x0,a
         mac     x1,y0,b
-        move    #>$fff000,y1
         move    a,x0                    ; the new step, 12 bits
         move    x0,a
         and     y1,a
@@ -250,58 +231,23 @@ zqsf:
         move    b1,x1
         mac     y0,x0,b
         mac     -x1,x0,b
-; ---- the output channel's filter, then out
+; ---- out, as the raw outputs 7/8 (no output filter)
 zqout:
-        move    n5,r6
-        move    #>PCOEF,r1
-        bsr     zqpost
         move    a,x:(r3)+
-        move    b,a
-        move    n7,r6
-        move    #>PCOEF,r1
-        bsr     zqpost
-        move    a,x:(r3)+
+        move    b,x:(r3)+
         move    x:(r5),a                ; this output becomes "previous"
         asr     a
         move    a1,y:(r4+S_PKF)
         move    y:(r5)+,a
         move    a1,y:(r4+S_PF)
 zqoe:
-        move    n4,m1
 
 zqdone:
+        move    n4,m1
         move    #$0,r7                  ; the stock kernel's `do r7` skips
 zqstk:
         move    x:(r5),n6               ; displaced from the hook site
         move    y:(r5)+,a
-        rts
-
-; ---------------------------------------------------------------------------
-; zqpost: the SP output channel's filter, one channel, one sample.
-; in: a = input; r1 -> X coefficients (b0/2, -a1/2) the real pole with its
-; zero at Nyquist, then (b0/2, -a1/2, -a2/2) the all-pole pair (run second:
-; it peaks ~1.7x near 10 kHz, and first it would clip before being tamed);
-; r6 -> Y state (x1, y1, y1, y2). out: a. b untouched. Coefficients are
-; halved (|a1| can exceed 1) and each section's result doubled with asl.
-zqpost:
-        move    a,x0                                    ; section 1: b0(x + x1) - a1 y1
-        move    x:(r1)+,x1      y:(r6)+,y0              ; b0/2, x1
-        mpy     x1,x0,a         y:(r6)-,y1              ; y1
-        mac     x1,y0,a         x:(r1)+,x1              ; -a1/2
-        mac     y1,x1,a
-        asl     a
-        move    x0,y:(r6)+
-        move    a,x0
-        move    x0,y:(r6)+
-        move    x:(r1)+,x1      y:(r6)+,y0              ; section 2: all-pole; b0/2, y1
-        mpy     x1,x0,a         x:(r1)+,x1      y:(r6)-,y1      ; -a1/2, y2
-        mac     x1,y0,a         x:(r1)+,x1              ; -a2/2
-        mac     y1,x1,a
-        asl     a
-        move    a,x0
-        move    x0,y:(r6)+
-        move    y0,y:(r6)+
-        move    x0,a
         rts
 
 ; ---------------------------------------------------------------------------
@@ -318,8 +264,7 @@ zqinit:
         move    x0,y:(r4)+
         move    x0,y:(r7)-
 zqi1:
-        move    #>zqdr9,r1
-        move    #>R9TAB,r4
+        move    #>R9TAB,r4              ; r1 is at zqdr9 already: it follows zqdsp
         move    #>R9END,r7
         do      #R9HALF,zqi2
         movem   p:(r1)+,x0

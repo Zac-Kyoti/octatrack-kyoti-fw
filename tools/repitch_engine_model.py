@@ -2,24 +2,26 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-repitch-kyoti rev 11: the "virtual sampler" engine, as a float reference model.
+repitch-kyoti rev 12: the "virtual sampler" engine, as a float reference model.
 
 The ground truth the DSP code (tools/patch_repitch_dsp.asm) must match, and
-the single place its tables are designed (the builder imports fir_q23() and
-sp_channel_filter() and appends them to the DSP cave as data). Sources and
+the single place its tables are designed (tools/repitch_dsp_src.py imports
+fir_q23() and appends the tables to the DSP cave as data). Sources and
 reasoning: reference/handoffs/REPITCH_FIDELITY_SCOPE.md; the OT-side
-measurements behind the plumbing: NOTES Session 110.
+measurements behind the plumbing: NOTES Session 110; rev 12's tonal
+correction: NOTES Session 111.
 
   RPSP (E-mu SP-1200)   stored samples on a fixed 26.04 kHz grid; a fixed
                         26.04 kHz output clock steps through them by the pitch
                         ratio (repeat/skip: a phase accumulator); 12-bit; the
-                        DAC output is a staircase; then an output channel's
-                        filter (ch 5's by default).
+                        DAC output is a staircase, heard as on the raw outputs
+                        7/8 (rev 12: no output filter; the ch 3-6 designs stay
+                        below for a future selectable channel).
   RPS9 (Akai S900/950)  each voice's DAC clock runs at (recording rate x ratio)
                         into a steep filter that follows that clock and removes
                         the staircase's images, so what leaves the machine is
                         the source band-limited by the RECORD filter (6th order
-                        at 0.4 x FS_AKAI), stored at 12 bits, pitched cleanly.
+                        at 0.4 x FS_AKAI = 16 kHz), stored at 12 bits, pitched cleanly.
                         That is what RPS9 reproduces. (Emulating the clock
                         literally at 44.1 kHz folds the staircase's ultrasonic
                         images into the audible band -- -25 dB at 18 kHz for a
@@ -41,8 +43,9 @@ position p_i advancing by the increment r. The engine only READS the ring:
   * RPSP: output i is the staircase averaged over [i-1, i) (a box: cheap, and
     it keeps a 26 kHz staircase from folding at 44.1 kHz); a tick at time
     i-1+u stores 12-bit(ADC at p_{i-1} + u*r - PSP*phi - c - 1), phi being the SP's
-    accumulator fraction so repeats/skips land on its 26.04 kHz grid; then the
-    output channel's filter.
+    accumulator fraction so repeats/skips land on its 26.04 kHz grid. The
+    box is our renderer, not the SP: its sinc(f/44100) droop is folded out
+    of RPSP's ADC kernel (so kernel x box = the SP's record filter).
 
 Tempo lock is untouched: the engine never changes where the OT reads.
 """
@@ -52,14 +55,16 @@ import numpy as np
 
 SR = 44100.0
 FS_SP = 20e6 / 768                 # 26,041.67 Hz: E-mu's 20 MHz crystal / 768
-FS_AKAI = 32000.0                  # the virtual recording rate for RPS9: bandwidth 0.4 x = 12.8 kHz
+FS_AKAI = 40000.0                  # the virtual recording rate for RPS9: bandwidth 0.4 x = 16 kHz (the S900's maximum)
 PSP = SR / FS_SP                   # 1.69344 output samples per SP tick = source frames per SP grid step
 # the DSP's fixed-point copies (tools/repitch_dsp_src.py), used by the model
 # when it is checked against the DSP: the tick period is Q20, the lag Q23/2
 PSP_TICK = round(PSP * (1 << 20)) / (1 << 20)
 PSP_LAG = round(PSP / 2 * (1 << 23)) * 2 / (1 << 23)
 MODE_RPS9, MODE_RPSP = 1, 2
-SP_CHANNEL = 5                     # which SP-1200 output channel's filter RPSP uses (3..6, or 7 = none)
+SP_CHANNEL = 7                     # which SP-1200 output RPSP is heard on: 7 (= 8) raw, no filter.
+                                   # The DSP has no output-filter stage since rev 12; 3..6 are
+                                   # modelled below (sp_channel_filter) for a future selectable channel
 
 
 # ---------------------------------------------------------------- filter design
@@ -171,39 +176,89 @@ def sp_channel_filter(ch=SP_CHANNEL):
 # record filter and the fractional-position read in one. Evaluated only where a
 # stored sample is needed (each 26 kHz SP tick; each RPS9 output), so its cost
 # does not grow with the pitch ratio, and the ring is never modified.
+#
+# Rev 12: both kernels are least-squares designs (numpy only), one per
+# fractional phase, each with an exact unity DC gain:
+#   RPS9  16 taps fitted to the MF6CN-50's magnitude, a 6th-order Butterworth
+#         at 0.4 x FS_AKAI = 16 kHz, over the whole band.
+#   RPSP  12 taps: FLAT to 10 kHz, then a 7-pole (42 dB/oct, E-mu's "on the
+#         order of 42 dB per octave") Butterworth shape through the transition
+#         -- its 10.86 kHz corner puts it 1.2 dB down at 10 kHz -- and >= 40 dB
+#         of rejection from 17.5 kHz (everything the 26 kHz grid would fold
+#         into the audible band). Divided throughout by the box render's
+#         sinc(f/44100) droop, which the real SP does not have.
+# (rev 11: Kaiser-windowed sinc, 16 taps @ 13 kHz / 8 taps @ 11 kHz; RPSP's 8
+# taps rolled off 2-3 dB early and the box's droop stacked on top.)
 PHASES = 32
-FIR = {MODE_RPS9: dict(taps=16, fc=13000.0, beta=6.0),   # ~ the MF6CN-50: 6th-order Butterworth @ 0.4 x 32 kHz
-       MODE_RPSP: dict(taps=8, fc=11000.0, beta=4.0)}    # ~ 4th-order @ 11 kHz (E-mu: ~42 dB/oct, < 13 kHz)
+FIR = {MODE_RPS9: dict(taps=16),
+       MODE_RPSP: dict(taps=12, flat=10000.0, stop=17500.0, w_trans=0.3, w_stop=30.0,
+                       poles=7, corner=10860.0)}
+
+
+def box_droop(f):
+    """The RPSP renderer's box (the staircase averaged over one 44.1 kHz period)."""
+    return np.sinc(np.asarray(f) / SR)
+
+
+def fir_target(mode, f):
+    """What each phase of the kernel is fitted to: (desired magnitude, weight)."""
+    f = np.asarray(f, dtype=float)
+    if mode == MODE_RPS9:
+        return 1 / np.sqrt(1 + (f / (0.4 * FS_AKAI)) ** 12), np.ones_like(f)
+    d = FIR[mode]
+    shape = 1 / np.sqrt(1 + (f / d["corner"]) ** (2 * d["poles"]))
+    want = np.where(f <= d["flat"], 1.0, np.where(f >= d["stop"], 0.0, shape)) / box_droop(f)
+    w = np.where(f <= d["flat"], 1.0, np.where(f >= d["stop"], d["w_stop"], d["w_trans"]))
+    return want, w
 
 
 def fir_table(mode):
-    """[PHASES][taps] Kaiser-windowed sinc, unity DC per phase. Row ph serves
+    """[PHASES][taps], designed by weighted least squares on a dense grid, one
+    row per fractional phase, each with sum = 1 (a KKT solve). Row ph serves
     fractions in [ph/32, (ph+1)/32) and is designed for the middle of that
-    range. Tap t reads ring frame k - c + t (k = floor(position), c = taps/2 - 1).
-    Rows are mirror images: row 31-ph is row ph reversed."""
-    n, fc, beta = FIR[mode]["taps"], FIR[mode]["fc"], FIR[mode]["beta"]
+    range. Tap t reads ring frame k - c + t (k = floor(position), c = taps/2 - 1),
+    i.e. sits at t - c - frac from the position read. Rows 16..31 are rows
+    15..0 reversed (the mirror problem has the mirrored solution; building them
+    that way makes the symmetry exact, which the DSP's table expansion needs)."""
+    n = FIR[mode]["taps"]
     c = n // 2 - 1
+    f = np.linspace(0.0, SR / 2, 1500)
+    want, w = fir_target(mode, f)
     tab = np.zeros((PHASES, n))
-    for ph in range(PHASES):
-        x = np.arange(n) - c - (ph + 0.5) / PHASES
-        w = np.i0(beta * np.sqrt(np.clip(1 - (x / (n / 2)) ** 2, 0, 1))) / np.i0(beta)
-        h = np.sinc(2 * fc / SR * x) * w
-        tab[ph] = h / h.sum()
+    for ph in range(PHASES // 2):
+        d = np.arange(n) - c - (ph + 0.5) / PHASES
+        A = np.exp(2j * math.pi * f[:, None] / SR * d[None, :])
+        Aw = np.vstack([A.real * w[:, None], A.imag * w[:, None]])
+        Dw = np.concatenate([want * w, np.zeros_like(want)])
+        kkt = np.block([[2 * Aw.T @ Aw, np.ones((n, 1))], [np.ones((1, n)), np.zeros((1, 1))]])
+        tab[ph] = np.linalg.solve(kkt, np.concatenate([2 * Aw.T @ Dw, [1.0]]))[:n]
+        tab[PHASES - 1 - ph] = tab[ph][::-1]
     return tab
+
+
+def fir_response(tab, ph, f):
+    """|H| of row ph at frequencies f (the fractional delay removed)."""
+    n = tab.shape[1]
+    d = np.arange(n) - (n // 2 - 1) - (ph + 0.5) / PHASES
+    return np.abs(np.exp(2j * math.pi * np.asarray(f, dtype=float)[:, None] / SR * d[None, :]) @ tab[ph])
 
 
 def fir_q23(mode):
     """The table as the DSP holds it: Q23, each row's rounding error folded
-    into its largest tap so the DC gain stays exactly 1."""
+    into its largest tap so the DC gain stays exactly 1 (row 31-ph gets the
+    same fold, mirrored, so the table stays mirror-symmetric)."""
     tab = fir_table(mode)
     q = np.round(tab * (1 << 23)).astype(np.int64)
-    for row in q:
+    for ph in range(PHASES // 2):
+        row = q[ph]
         row[np.argmax(row)] += (1 << 23) - row.sum()
+        q[PHASES - 1 - ph] = row[::-1]
     return q
 
 
 def design_post(mode):
-    """SP: the chosen output channel's filter. Akai: none (see the header)."""
+    """SP: the chosen output channel's filter (none for 7/8, rev 12's choice,
+    and the only one the DSP implements). Akai: none (see the header)."""
     return sp_channel_filter() if mode == MODE_RPSP else []
 
 
@@ -314,15 +369,12 @@ class DspExact:
     Samples are 24-bit ints (Q23); `consts` is repitch_dsp_src.constants()[0]."""
     RING = 64
 
-    def __init__(self, mode, consts, post_words, fir_rows):
+    def __init__(self, mode, consts, fir_rows):
         self.mode, self.c = mode, consts
         self.ring = np.zeros((self.RING, 2), dtype=np.int64)
         self.fir = np.array(fir_rows, dtype=np.int64)          # [32][taps], Q23 signed
         self.taps = self.fir.shape[1]
         self.cc = self.taps // 2 - 1
-        pw = [w - (1 << 24) if w & 0x800000 else w for w in post_words]
-        self.post_c = pw
-        self.post_s = np.zeros((2, 4), dtype=np.int64)
         self.tau = self.phi = 0
         self.held = np.zeros(2, dtype=np.int64)
         self.prev = None
@@ -339,17 +391,6 @@ class DspExact:
         idx = [(first + t) % self.RING for t in range(self.taps)]
         s = self.fir[ph] @ self.ring[idx]                      # exact: sum of Q23 x Q23
         return np.array([self.lim(v >> 23) & ~0xFFF for v in s], dtype=np.int64)
-
-    def post(self, x, ch):
-        c, s = self.post_c, self.post_s[ch]
-        b0, ma1 = c[0], c[1]                                  # b0 (x + x1) - a1 y1
-        y = self.lim((b0 * x + b0 * s[0] + ma1 * s[1]) >> 22)
-        s[0], s[1] = x, y
-        x = y
-        b0, ma1, ma2 = c[2:5]                                 # all-pole: b0 x - a1 y1 - a2 y2
-        y = self.lim((b0 * x + ma1 * s[2] + ma2 * s[3]) >> 22)
-        s[3], s[2] = s[2], y
-        return y
 
     def render(self, table, rint, rfrac):
         """table: [(ring frame, fraction Q24)]; rint/rfrac: the increment as
@@ -381,7 +422,7 @@ class DspExact:
             else:
                 self.tau -= one
                 box = self.held
-            out.append([self.post(int(box[0]), 0), self.post(int(box[1]), 1)])
+            out.append([self.lim(int(box[0])), self.lim(int(box[1]))])   # raw output 7/8: no filter
             self.prev = (k, f)
         return np.array(out)
 
@@ -413,14 +454,57 @@ def run(mode, src, r, block=16):
     return np.concatenate(out)
 
 
+# the targets rev 12 was designed to (NOTES Session 111): RPSP overall at 1/1
+# should land near a real SP-1200's raw outputs 7/8 (estimated: E-mu's steep
+# anti-alias filter x the 26.04 kHz staircase's droop, no output filter)
+REAL_SP78 = {5e3: -0.5, 8e3: -1.5, 10e3: -3.4, 12e3: -9.4, 13e3: -14.4, 15e3: -26.4}
+REPORT_F = np.array([1e3, 5e3, 8e3, 10e3, 12e3, 13e3, 14e3, 15e3, 16e3, 18e3, 20e3, 22e3])
+
+
+def response_report(quantised=True):
+    """The virtual-ADC responses at 1/1 against their targets, as printed by
+    this module and by tools/repitch_dsp_engine_check.py. 'worst' is the
+    worst phase in the direction that matters (least gain in the passband,
+    most in the stopband); at 1/1 RPSP's ticks visit every phase."""
+    f = REPORT_F
+    lines = []
+
+    def row(label, v, fs=f):
+        return f"  {label:<28}" + " ".join(f"{x/1e3:g}k {y:+6.1f}" for x, y in zip(fs, v))
+
+    for mode, name in ((MODE_RPS9, "RPS9"), (MODE_RPSP, "RPSP")):
+        tab = fir_q23(mode) / float(1 << 23) if quantised else fir_table(mode)
+        db = np.array([20 * np.log10(np.maximum(fir_response(tab, ph, f), 1e-9)) for ph in range(PHASES)])
+        if mode == MODE_RPS9:
+            want = 20 * np.log10(fir_target(mode, f)[0])
+            lines.append(f"{name}: {tab.shape[1]}-tap kernel vs the MF6CN-50 shape (6th-order Butterworth @ "
+                         f"{0.4 * FS_AKAI / 1e3:g} kHz), at 1/1")
+            lines.append(row("target", want))
+            lines.append(row("kernel, phase 0", db[0]))
+            lines.append(row("kernel, phase 15", db[15]))
+            lines.append(f"  max |kernel - target| to 18 kHz, any phase: "
+                         f"{np.abs(db - want)[:, f <= 18e3].max():.2f} dB")
+        else:
+            kb = db + 20 * np.log10(box_droop(f))
+            zoh = 20 * np.log10(np.sinc(f / FS_SP))
+            lines.append(f"{name}: {tab.shape[1]}-tap kernel x box render, at 1/1 (targets: >= -0.5 dB @8k, "
+                         f">= -1.5 @10k, <= -40 from 18k)")
+            lines.append(row("kernel x box, phase 0", kb[0]))
+            lines.append(row("kernel x box, worst phase", np.where(f >= 17.5e3, kb.max(0), kb.min(0))))
+            g = np.linspace(18e3, SR / 2, 200)
+            rej = max(20 * np.log10(fir_response(tab, ph, g) * box_droop(g)).max() for ph in range(PHASES))
+            lines.append(f"  worst rejection 18-22.05 kHz, any phase: {rej:.1f} dB")
+            tot = kb.mean(0) + zoh
+            lines.append(f"{name} overall (kernel x box x the 26.04 kHz staircase's droop), mean of phases:")
+            lines.append(row("rev 12", tot))
+            rf = np.array(list(REAL_SP78))
+            lines.append(row("real SP-1200 out 7/8 (est.)", list(REAL_SP78.values()), rf))
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     f = np.array([1e3, 5e3, 8e3, 10e3, 12.8e3, 14e3, 16e3, 18e3, 20e3])
     for ch in (3, 4, 5, 6):
         h = 20 * np.log10(np.abs(response(sp_channel_filter(ch), f)))
-        print(f"SP ch{ch} post: " + " ".join(f"{x/1e3:g}k {v:+.1f}" for x, v in zip(f, h)))
-    for mode in (MODE_RPS9, MODE_RPSP):
-        tab = fir_table(mode); n = tab.shape[1]; c = n // 2 - 1
-        for ph in (0, 15):
-            x = np.arange(n) - c - (ph + 0.5) / PHASES
-            h = np.abs(np.sum(tab[ph][None, :] * np.exp(-2j * np.pi * f[:, None] / SR * x[None, :]), axis=1))
-            print(f"ADC mode {mode} phase {ph:2d}: " + " ".join(f"{x/1e3:g}k {v:+.1f}" for x, v in zip(f, 20 * np.log10(h))))
+        print(f"SP ch{ch} post (not used since rev 12): " + " ".join(f"{x/1e3:g}k {v:+.1f}" for x, v in zip(f, h)))
+    print(response_report())
