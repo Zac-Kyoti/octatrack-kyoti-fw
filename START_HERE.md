@@ -205,8 +205,9 @@ never-switched reference, state and live events with content) and `tools/model_r
 SUPERSEDED) is kept as the hardware-good **OT↔AR parity build**. **V7.0.1** (not yet on
 hardware) replays stock's switch hand-off at the landing — V7.0 skipped it, so a jump never
 changed the Part, applied START SILENT or reset trig conditions — and keeps Program Change on the
-pattern that actually plays through re-cues and cancels. Not yet on hardware: MIDI tracks, and
-V7.0.1's Part / Program Change behaviour. Parked by the user: cued-switch policy (design doc §6a); V7.1 mid-window landing (not
+pattern that actually plays through re-cues and cancels. V7.0.1's Part change is
+hardware-confirmed (2026-09-28); not yet on hardware: MIDI tracks and Program Change on re-cues
+(both emulator-verified). Parked by the user: cued-switch policy (design doc §6a); V7.1 mid-window landing (not
 recommended). Everything from here to the end of this section is the HISTORY of the V1–V5
 line, kept because its dead ends are still the dead ends.
 

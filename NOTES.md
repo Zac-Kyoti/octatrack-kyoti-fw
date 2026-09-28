@@ -33365,3 +33365,15 @@ bug-fold composes V7 without opt-in; README / START_HERE / BUILD_KYOTI / FLASHIN
 CLAUDE.md / MERGE / kb (caves, techniques, memory-map) / handoff banners / REPITCH scope row / AR
 mirrors updated. **Push held until the author confirms V7.0.1's Part and Program Change on
 hardware** (FLASHING §4.3 steps 10–11).
+
+### Session 108 continued (3) — V7.0.1 HARDWARE-CONFIRMED; shipped
+
+The author flashed V7.0.1 (`fac16421de73c3aa`, 140C_KDJ7): **(1) jumping between patterns on
+different Parts — the new Part takes over on the jump: GOOD. (3) the earlier checks re-run (16↔7
+vs the metronome, master 1x↔2x, rapid switching): GOOD.** (2) Program Change on fast re-cues:
+not tested on hardware (emulator-verified). Still untested on hardware: MIDI tracks; START SILENT
+and the trig-condition reset (emulator-equal to stock, not separately exercised).
+HEAD rebuilt before pushing: mainline `fac16421de73c3aa` and DIAG `06238e064edab520` reproduce
+the flashed images exactly. DIRECT JUMP V7.0.1 is FINAL and pushed together with the pending
+repitch-kyoti commits (the author's choice — the two threads' commits are interleaved on `main`).
+The concurrent-session framework added alongside is described in CLAUDE.md "Concurrent sessions".

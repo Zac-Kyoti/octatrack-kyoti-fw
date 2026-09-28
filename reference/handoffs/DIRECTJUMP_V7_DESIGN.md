@@ -1,7 +1,8 @@
 # DIRECT JUMP V7 — design (Session 107/108, 2026-09-27)
 
-> **STATUS: V7.0.1 built and emulator-verified, awaiting hardware** (`build_directjump_v7.py`,
-> `140C_KDJ7`, mainos `fac16421de73c3aa`, cave `0x400d7000`). V7.0 (`bd39dfc6`) was
+> **STATUS: FINAL — V7.0.1 hardware-confirmed 2026-09-28** (`build_directjump_v7.py`,
+> `140C_KDJ7`, mainos `fac16421de73c3aa`, cave `0x400d7000`): timing and the Part change on a
+> jump confirmed on the unit; Program Change on re-cues and MIDI tracks emulator-verified only. V7.0 (`bd39dfc6`) was
 > hardware-confirmed for timing; the ship check then found it never changed the Part on a jump
 > (§8) — V7.0.1 fixes that and Program Change on re-cues. Scope: DIRECT JUMP ON only (DJ OFF = stock). Not yet on
 > hardware: MIDI tracks. Parked: cued-switch policy (§6a), V7.1 mid-window landing (not

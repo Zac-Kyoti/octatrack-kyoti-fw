@@ -204,7 +204,7 @@ below instead.
    the `'ANDY'` battery-SRAM shadow). An EMPTY RESET clears it to factory.
 7. Regression: the manual-trig fix still works; other tracks unaffected.
 
-### 4.3  DIRECT JUMP  (`python3 tools/build_directjump_v7.py` — V7.0.1; timing **HARDWARE-CONFIRMED** MKI 2026-09-27, Part / Program Change fixes pending)
+### 4.3  DIRECT JUMP  (`python3 tools/build_directjump_v7.py` — V7.0.1, **HARDWARE-CONFIRMED, FINAL**, MKI 2026-09-27/28; Program Change on re-cues not yet tested on hardware)
 > **What V7 does.** A cued pattern takes over on the next step and lands **exactly where it
 > would be had it been playing since START** — every track, whatever its length, track
 > scale, master length or master scale — so it is never shifted by a step and never a
@@ -257,8 +257,10 @@ below instead.
 > rapid switching, plus the toggle / LED / persistence behaviour carried over from V6.4.
 > Emulator-proven but not separately exercised on hardware: PER-TRACK patterns with mixed
 > lengths and 2x…1/4x track scales. **MASTER LENGTH `INF` has no jump exercised yet**
-> (position model only). MIDI tracks: pending (step 9). V7.0.1's Part and Program Change fixes: emulator-verified,
-> hardware pending (steps 10–11). Not exercised anywhere:
+> (position model only). MIDI tracks: pending (step 9). V7.0.1: the Part change (step 10) is hardware-confirmed
+> 2026-09-28 together with a re-run of the checks above; START SILENT and the trig-condition
+> reset are emulator-verified against stock; Program Change on re-cues (step 11) is
+> emulator-verified, not yet tested on hardware. Not exercised anywhere:
 > MIDI Song Position Pointer relocation under external sync, pause/continue, and whether
 > cycle-counting trig conditions (1:2, A:B) should follow "since START" (they follow stock's
 > own counters). An old report from the V1–V5 line — visited steps depending on the trigs

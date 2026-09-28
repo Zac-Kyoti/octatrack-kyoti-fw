@@ -38,9 +38,9 @@ from kyoti_status import status, FINAL
 
 status(FINAL, "DIRECT JUMP V7", """
 Clock-locked DIRECT JUMP V7.0.1: a jump lands the new pattern exactly where it would be had
-it played since START (timing hardware-confirmed 2026-09-27), and hands the switch to the
-engines as stock does (Part, START SILENT, trig-condition reset) with Program Change always
-naming the pattern that plays -- emulator-verified, hardware test pending.
+it played since START, and changes the Part as a stock pattern switch does.  Hardware-confirmed
+2026-09-27/28 (timing, Part change).  Emulator-verified only: Program Change on fast re-cues,
+START SILENT, trig-condition reset, MIDI tracks.
 """)
 
 BASE = 0x40000400

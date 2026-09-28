@@ -180,7 +180,7 @@ this only rules out naively merging an image with those projects. → `kb/caves.
 
 | Mod | Build | cave | state |
 |---|---|---|---|
-| DIRECT JUMP — `[PTN]`+`[YES]` | `build_directjump_v7.py` (**V7**; v1–v6 superseded, V6.4 = OT↔AR parity) | **1980 B** (V7.0.1, at `0x400d7000`) | **Timing HW-confirmed 2026-09-27 (V7.0); V7.0.1's Part / Program Change fixes HW-pending.** Clock-locked jumps: lands the new pattern where it would be had it played since START. Hooks at `0x400a1f72` + `0x400a221c` (+ `dj_ptnrel`), same as V6. See `NOTES.md` Session 108 |
+| DIRECT JUMP — `[PTN]`+`[YES]` | `build_directjump_v7.py` (**V7**; v1–v6 superseded, V6.4 = OT↔AR parity) | **1980 B** (V7.0.1, at `0x400d7000`) | **FINAL — HW-confirmed 2026-09-27/28** (timing; Part change on a jump). Program Change on re-cues emulator-verified. Clock-locked jumps: lands the new pattern where it would be had it played since START. Hooks at `0x400a1f72` + `0x400a221c` (+ `dj_ptnrel`), same as V6. See `NOTES.md` Session 108 |
 | RELOAD FROM PROJECT — direct chords | `build_reload3.py` (**v3**, not v2) | **2104 B** | **FINAL — HW-confirmed 2026-09-25.** Grew from 1870 B: two-line block toasts, the live self-verify, the playing-bank fix, and the request bytes moved into the cave |
 
 **`build_directjump_v3.py` is superseded.** This document used to say "DIRECT JUMP: use

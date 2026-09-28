@@ -221,7 +221,9 @@ All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit
 | ↳ PER-TRACK patterns with mixed lengths and 2x…1/4x track scales | `build_directjump_v7.py` | emulator-proven (reference-lock matrix); not separately exercised on hardware |
 | ↳ MASTER LENGTH `INF` | `build_directjump_v7.py` | position model verified; **no jump exercised yet** (emulator or hardware) |
 | ↳ MIDI tracks | `build_directjump_v7.py` | emulator-locked (every run); **not yet on hardware** |
-| ↳ V7.0.1: Part change, START SILENT and trig-condition reset on a jump; Program Change on fast re-cues | `build_directjump_v7.py` | emulator-verified against stock value for value; **hardware test pending** |
+| ↳ V7.0.1: the Part changes on a jump (V7.0 never changed it); the V7.0 checks re-run on V7.0.1 | `build_directjump_v7.py` | **confirmed** 2026-09-28 |
+| ↳ V7.0.1: START SILENT and trig-condition (1:2, A:B) reset on a jump | `build_directjump_v7.py` | emulator-verified against stock value for value; not separately exercised on hardware |
+| ↳ V7.0.1: Program Change on fast re-cues (always ends on the pattern that plays) | `build_directjump_v7.py` | emulator-verified; **not yet tested on hardware** |
 | ↳ V6.4 — the OT↔AR parity build (AR's own behaviour, shifts included) | `build_directjump_v6.py` (SUPERSEDED) | **confirmed** 2026-09-27 |
 | ↳ Session 87 "gold" image | — | **RETRACTED** 2026-09-26 — fractional at 1x, NORMAL mode, 16 ↔ 7 steps |
 | SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` | **confirmed, final** 2026-09-20 |
