@@ -1,0 +1,29 @@
+# Thread ownership map -- read by tools/githooks/commit-msg.
+#
+# Several Claude sessions work on this repo at once (see CLAUDE.md "Concurrent sessions").
+# Each [thread] lists the files that belong to it (fnmatch globs, repo-relative). A commit may
+# touch ONE thread's files plus any number of shared files (anything not listed here: README,
+# NOTES, MERGE, CLAUDE.md, reference/kb/*, ...). A commit that mixes two threads' files is
+# refused -- that is exactly what a repo-wide `git add -A` in a shared checkout produces, and
+# it happened twice on 2026-09-27 (10173b3, eb8f022).
+#
+# Add a new thread's files here BEFORE its first commit. First match wins.
+
+[directjump]
+tools/*directjump*
+tools/emu_djdiag.py
+tools/diag_dj_*.py
+tools/*reflock*.py
+tools/diag_led_pend.py
+tools/diag_tablearm_phase.py
+tools/diag_fire_phase.py
+tools/scan_dj_project_lengths.py
+tools/ghidra/attic/GhidraDirectJump*.java
+reference/handoffs/DIRECTJUMP_*
+reference/AR_*.md
+reference/OT_SEQUENCER_BUGS.md
+
+[repitch]
+tools/*repitch*
+tools/sp1200_filter_response.py
+reference/handoffs/REPITCH_*

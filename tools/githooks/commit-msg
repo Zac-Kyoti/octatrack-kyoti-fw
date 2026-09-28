@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+"""
+commit-msg guard for concurrent sessions (CLAUDE.md "Concurrent sessions").
+
+Refuses a commit whose staged files belong to MORE THAN ONE thread of
+tools/githooks/threads.txt, or to a thread other than the one named by a
+`Thread: <name>` line in the message. Prints a reminder when shared files are
+staged: no tool can tell whose hunk is whose inside a shared file, so the
+committer must check `git diff --cached <file>` shows only their own edits.
+
+Override (on purpose only): KYOTI_ALLOW_MIXED=1 git commit ...
+Enable once per clone (all worktrees share it): git config core.hooksPath tools/githooks
+Fails OPEN on its own errors: a bug here must never block every commit.
+"""
+import fnmatch
+import os
+import pathlib
+import re
+import subprocess
+import sys
+
+
+def main(msg_file):
+    root = pathlib.Path(subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                                       capture_output=True, text=True, check=True).stdout.strip())
+    staged = [l for l in subprocess.run(["git", "diff", "--cached", "--name-only", "-z"],
+                                        capture_output=True, text=True, check=True, cwd=root
+                                        ).stdout.split("\0") if l]
+    threads, cur = {}, None
+    for line in (root / "tools/githooks/threads.txt").read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = re.fullmatch(r"\[(.+)\]", line)
+        if m:
+            cur = m.group(1)
+            threads[cur] = []
+        elif cur:
+            threads[cur].append(line)
+
+    def owner(path):
+        for t, globs in threads.items():
+            if any(fnmatch.fnmatch(path, g) for g in globs):
+                return t
+        return None
+
+    by_thread, shared = {}, []
+    for f in staged:
+        o = owner(f)
+        (by_thread.setdefault(o, []) if o else shared).append(f)
+
+    msg = pathlib.Path(msg_file).read_text()
+    declared = re.search(r"^Thread:\s*(\S+)\s*$", msg, re.M)
+    declared = declared.group(1) if declared else None
+
+    problems = []
+    if len(by_thread) > 1:
+        problems.append("this commit mixes files of " + " and ".join(sorted(by_thread)) + ".")
+    if declared and set(by_thread) - {declared}:
+        problems.append(f"the message says 'Thread: {declared}' but it stages files of "
+                        + ", ".join(sorted(set(by_thread) - {declared})) + ".")
+
+    if problems and os.environ.get("KYOTI_ALLOW_MIXED") != "1":
+        print("\n  COMMIT REFUSED (tools/githooks/commit-msg): " + " ".join(problems), file=sys.stderr)
+        for t, fs in sorted(by_thread.items()):
+            print(f"    [{t}] " + ", ".join(fs[:8]) + (" ..." if len(fs) > 8 else ""), file=sys.stderr)
+        print("\n  Another session shares this checkout: its uncommitted edits are not yours to commit.\n"
+              "  Unstage them (git restore --staged <file>) and commit only the paths you changed.\n"
+              "  If mixing is genuinely intended: KYOTI_ALLOW_MIXED=1 git commit ...\n", file=sys.stderr)
+        return 1
+    if shared:
+        print("  commit-msg: shared files staged -- check `git diff --cached <file>` holds ONLY your "
+              "edits: " + ", ".join(shared[:10]) + (" ..." if len(shared) > 10 else ""), file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1]))
+    except Exception as e:                      # fail open, loudly
+        print(f"  commit-msg guard skipped (internal error: {e})", file=sys.stderr)
+        sys.exit(0)

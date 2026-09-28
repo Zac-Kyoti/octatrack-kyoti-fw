@@ -155,13 +155,40 @@ built and waiting.
   declares its tier, and superseding one means setting the old builder to
   SUPERSEDED with a note naming its replacement.** Use a short-lived topic
   branch for risky work, not a second long-lived one.
-- **Several sessions share this working tree — commit EXPLICIT PATHS, never `git add -A` /
-  `git commit -a`.** Two sessions (DIRECT JUMP and repitch-kyoti) work in this same checkout;
-  twice on 2026-09-27 a repo-wide add swept the other session's uncommitted, unverified edits
-  into an unrelated commit (`10173b3`, `eb8f022`). Stage only the files you changed, and check
-  `git status` for files you did not touch before committing.
+- **Several sessions work on this repo at once — read "Concurrent sessions" below before
+  your first edit or commit.**
 - **macOS TCC**: `~/Documents` is protected; grant Full Disk Access to the
   actual running `claude` binary if a tool call fails with "Operation not
   permitted" on this path — see `START_HERE.md` §3 for the exact binary path.
+
+## Concurrent sessions
+
+Since 2026-09-27 two Claude sessions (DIRECT JUMP and repitch-kyoti) have worked on this repo
+in parallel. Sharing ONE checkout, a repo-wide add in either session committed the other's
+unfinished, unverified edits into an unrelated commit — twice (`10173b3`, `eb8f022`). Rules:
+
+1. **One worktree per session (preferred).** `tools/worktree.sh new <thread>` makes
+   `../octatrack-kyoti-fw-<thread>` on branch `<thread>` with its **own `out/`** (so builds and
+   flash files can't be confused between sessions), sharing `refs/`, `vendor/`, `downloads/`,
+   `ghidra_project/` and `out/raw/` by symlink — builds there are byte-identical (tested).
+   Work and commit there; `tools/worktree.sh publish` rebases onto `origin/main` and pushes to
+   `main`; `tools/worktree.sh status` lists everything. A session that finds another one
+   already active in the primary checkout moves to a worktree before editing.
+2. **Commit explicit paths — never `git add -A` / `git commit -a`** — and check `git status`
+   for files you did not touch.
+3. **Thread ownership** is declared in `tools/githooks/threads.txt`. The commit-msg guard
+   (`git config core.hooksPath tools/githooks`, once per clone; worktrees share it) refuses a
+   commit that mixes two threads' files, or that stages another thread's files under a
+   `Thread: <name>` line. Replayed on history it refuses both sweeping commits. Register a new
+   thread's files there **before** its first commit. Editing another thread's file on purpose
+   (e.g. a number it quotes from yours) is fine: commit it on its own with `Thread: <owner>`, or
+   `KYOTI_ALLOW_MIXED=1` when mixing is genuinely intended.
+4. **Shared files** (README, NOTES, MERGE, START_HERE, CLAUDE.md, `reference/kb/*`, …) cannot be
+   attributed per hunk: edit and commit them in one step, and check that
+   `git diff --cached <file>` holds only your edits. NOTES.md is union-merged
+   (`.gitattributes`), so concurrent session entries rebase without conflict (tested).
+5. **Publishing:** `git fetch` first; `main` only moves forward — rebase onto `origin/main`,
+   never force-push, never rewrite another session's commits. Checkouts on `main` update with
+   `git pull --rebase --autostash`.
 
 Full detail, toolchain entry points, and the current frontier: `START_HERE.md`.

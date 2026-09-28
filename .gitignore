@@ -19,6 +19,12 @@ refs/*
 !refs/MANIFEST.toml
 !refs/MANIFEST.lock
 
+# --- Worktrees (tools/worktree.sh): each thread worktree SYMLINKS these shared inputs; the
+# directory patterns above end in '/', which does not match a symlink, so name them again ---
+/vendor
+/downloads
+/ghidra_project
+
 # --- Local ---
 reference/KB_REFRESH.md
 .DS_Store

@@ -118,6 +118,8 @@ commits from `main`, mostly the same changes under different SHAs from cherry-pi
 back and forth, and every sync cost a conflict-heavy merge. **Use short-lived topic
 branches** for anything risky and merge them here when they settle.
 
+**Several sessions may be working at once** — `CLAUDE.md` "Concurrent sessions": one git worktree per session (`tools/worktree.sh`), explicit-path commits, and a commit guard driven by the thread-ownership map `tools/githooks/threads.txt`.
+
 What keeps unfinished work from being mistaken for shippable is `tools/kyoti_status.py`:
 each builder declares **FINAL**, **PREVIEW**, **WIP** or **SUPERSEDED** and announces it on
 every run. A **WIP** builder exits 2 without `KYOTI_ALLOW_WIP=1`; a **SUPERSEDED** one exits
