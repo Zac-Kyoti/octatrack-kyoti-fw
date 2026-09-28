@@ -33217,3 +33217,21 @@ standalone taking spring reverb itself, or a different donor.
 **Rev 9 mainline (flashable, ColdFire only): mainos `d9389296…`, syx
 `70cba8b7…`** (2331 B, 0 strays, ColdFire cave `0x400d6f80..0x400d7af4`,
 12 B left). ColdFire oracle 10/10.
+
+### Session 108 continued — V7.0 HARDWARE-CONFIRMED
+
+The author flashed V7.0 (`bd39dfc6`, 140C_KDJ7): **"working very well, as expected — the true DJ
+gold standard."** Checklist results: 16↔7 NORMAL vs the metronome, master 1x↔2x, swing /
+microtiming track, rapid switching — all good. **Still untested on HW: MIDI tracks** (author
+will check later; no problems expected — MIDI tracks share the audio tracks' landing loop and
+their positions were state-locked in every emulator run).
+
+The slow-track landing wait (V7.0 lands only where every incoming track is at a step start) is
+"not very noticeable, musical enough" in practice.
+
+**V7.1 (mid-window landing) — NOT RECOMMENDED, parked.** It is not a tweak: landing a slow track
+mid-step means synthesising scheduler state stock's landing never produces (the pending event the
+reference scheduled before the switch, plus counters stock's first-fire path overwrites) — the
+per-track reasoned-state class that sank V1–V5 — and it adds branches to the proven landing and
+purge, so the whole matrix and hardware would have to be re-proven, for a benefit the author does
+not need. V7.0 stays the DIRECT JUMP; any V7.1 would be a separate build, V7.0 always reflashable.

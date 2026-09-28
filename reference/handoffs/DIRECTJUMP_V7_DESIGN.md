@@ -126,7 +126,9 @@ Order of work, each step gated by the previous:
    master 1x↔2x, NORMAL 7 → 3/4x+3/2x+1/4x tracks — ALL PASS** (state locked from the tick
    after each landing; live events with content identical at every tick). Details: NOTES
    Session 108.
-5. Hardware.
+5. Hardware. **V7.0 HARDWARE-CONFIRMED 2026-09-27** ("the true DJ gold standard"): 16↔7 vs the
+   metronome, master 1x↔2x, swing/microtiming, rapid switching all good; MIDI tracks not yet
+   tested on HW. V7.1 (mid-window landing) parked as NOT RECOMMENDED — NOTES Session 108 cont.
 
 ## 6a. PARKED by the author (2026-09-27) — cued-switch behaviour, revisit later
 
