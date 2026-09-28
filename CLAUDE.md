@@ -38,6 +38,29 @@ is how the side-chain happened. So when triaging an upstream repo's work:
 [`COVERAGE.md`](COVERAGE.md) is the map of what is actually mapped so far; it is
 descriptive, and this section is the policy.
 
+## Always say, explicitly, when a build exists and what to flash
+
+If a session ends a turn having produced a build (ran a `build_*.py`, even a
+diagnostic variant) — or if the right next step is for the user to flash
+something, whether or not this turn built it — **say so in plain, unmissable
+words**, not implied by mentioning a filename in passing. State:
+
+- **Whether a new build exists this turn**, yes or no.
+- **The exact file to flash** (`out/OCTATRACK_OS1.40C_..._....syx`) with its
+  sha256, so it's unambiguous which of possibly several candidates (mainline
+  vs. diag, rev N vs. rev N+1) is meant.
+- **Whether the user has already flashed it** — don't assume; multiple
+  candidates in flight (e.g. a diag build and a mainline build with unrelated
+  fixes) make "flashed" ambiguous unless the specific file is named.
+- If nothing needs flashing this turn (pure RE, a doc update, a build that
+  failed), say that too, briefly — "no build this turn" — rather than leaving
+  it to be inferred from the absence of a syx filename.
+
+This came up 2026-09-27 (Session 108): several builds (mainline + diag,
+across multiple revisions) were in flight in one thread and it stopped being
+obvious which one the user had actually flashed versus which one was newly
+built and waiting.
+
 ## Hard constraints (do not relearn these the hard way)
 
 - **Choosing an address for new code? Read `reference/kb/caves.md` FIRST.**
