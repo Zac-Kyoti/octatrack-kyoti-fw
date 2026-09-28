@@ -28,6 +28,13 @@ PEND_BANK, PEND_PAT = 0x800065BF, 0x800065C0
 ACT_PAT = 0x800065BE
 PART_APPLY = {0x40009E00: "LIGHT part apply 0x40009e00", 0x40009094: "FULL part apply 0x40009094"}
 PART_BYTES = {0x100B14CF: "UI_PART(0x100b14cf)", 0x80000003: "CUR_PART(0x80000003)"}
+# Session 108 (V7.0.1): stock's real-switch hand-off to the engines, logged value by value so
+# stock and V7 can be compared directly (0x400a4568-0x400a4856).
+HANDOFF = {0x46C7FA80: ("A_FLAGS", 4), 0x800019E4: ("A_TIME", 4), 0x46C7FF40: ("A_BANK", 1),
+           0x46C7FF62: ("A_PART", 1), 0x46C7A120: ("M_FLAGS", 4), 0x46C76AA6: ("M_TIME1", 4),
+           0x46C76A22: ("M_FLAG", 4), 0x46C76AAA: ("M_TIME2", 4), 0x46C7A850: ("M_BANK", 1),
+           0x46C7A934: ("M_PART", 1)}
+COND_RESET = 0x400A539C
 
 
 def main(argv):
@@ -100,6 +107,31 @@ def main(argv):
     for ad in PART_BYTES:
         rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_w, begin=ad, end=ad)
     rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_act, begin=ACT_PAT, end=ACT_PAT)
+
+    def on_ho(u, access, addr, size, value, user):
+        pc = u.reg_read(er.eb.UC_M68K_REG_PC)
+        if 0x400A1E0C <= pc < 0x400A5000 or 0x400D6000 <= pc < 0x400D8000:   # the switch itself
+            nm, _ = HANDOFF[addr]
+            sclk = int.from_bytes(bytes(u.mem_read(0x4610757C, 4)), "big")
+            mclk = int.from_bytes(bytes(u.mem_read(0x46107564, 4)), "big")
+            v = value & ((1 << (8 * size)) - 1)
+            rel = ""
+            if nm == "A_TIME":
+                rel = f" (sclk{(v - sclk) & 0xffffffff if v >= sclk else -((sclk - v) & 0xffffffff):+d})"
+            if nm.startswith("M_TIME"):
+                d = (v - mclk + (1 << 31)) % (1 << 32) - (1 << 31)
+                rel = f" (mclk{d:+d})"
+            st["log"].append(f"t{st['tick']:<4} HANDOFF {nm} <- {v:#x}{rel} pc={pc:#x}")
+
+    def on_reset(u, addr, size, user):
+        sp = u.reg_read(er.eb.UC_M68K_REG_A7)
+        arg = int.from_bytes(bytes(u.mem_read(sp + 4, 4)), "big")
+        ret = int.from_bytes(bytes(u.mem_read(sp, 4)), "big")
+        st["log"].append(f"t{st['tick']:<4} CALL cond-trig reset 0x400a539c({arg:#x}) from {ret:#x}")
+
+    for ad, (nm, sz) in HANDOFF.items():
+        rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_ho, begin=ad, end=ad)
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_reset, begin=COND_RESET, end=COND_RESET)
     rt.start_transport_live()
     spins = 0
     while st["tick"] < a.ticks and spins < 90:

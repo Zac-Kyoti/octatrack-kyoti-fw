@@ -85,8 +85,12 @@ courtesy, not a lock; `tools/kyoti_status.py` is all of it.
   pattern's still-pending trigs are dropped at the jump, so the new pattern's first trig
   always wins. Jumping *into* a pattern with slow tracks (1/2x, 1/4x) waits until every
   track reaches a step start, up to about two or four steps. The MIDI Program Change goes
-  out as soon as you cue; no MIDI START is sent. The arranger and pattern chains are
-  untouched, and with DIRECT JUMP OFF pattern changes are stock.
+  out as soon as you cue; re-cue before the jump lands and the new pattern's Program Change
+  follows, cue back to the playing pattern and its Program Change is re-sent, so the last one
+  your gear receives always names what the OT plays. No MIDI START is sent. On the jump the
+  OT changes the Part, applies each track's START SILENT and restarts trig conditions exactly
+  as a stock pattern change does (stock's own Part change, not a full reload). The arranger
+  and pattern chains are untouched, and with DIRECT JUMP OFF pattern changes are stock.
   This deliberately improves on the Analog Rytm's DIRECT JUMP, which places the new
   pattern relative to the *outgoing* one and so lands shifted or fractional whenever
   lengths or scales differ. The previous build, V6.4, reproduces AR's behaviour exactly and
@@ -217,6 +221,7 @@ All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit
 | ↳ PER-TRACK patterns with mixed lengths and 2x…1/4x track scales | `build_directjump_v7.py` | emulator-proven (reference-lock matrix); not separately exercised on hardware |
 | ↳ MASTER LENGTH `INF` | `build_directjump_v7.py` | position model verified; **no jump exercised yet** (emulator or hardware) |
 | ↳ MIDI tracks | `build_directjump_v7.py` | emulator-locked (every run); **not yet on hardware** |
+| ↳ V7.0.1: Part change, START SILENT and trig-condition reset on a jump; Program Change on fast re-cues | `build_directjump_v7.py` | emulator-verified against stock value for value; **hardware test pending** |
 | ↳ V6.4 — the OT↔AR parity build (AR's own behaviour, shifts included) | `build_directjump_v6.py` (SUPERSEDED) | **confirmed** 2026-09-27 |
 | ↳ Session 87 "gold" image | — | **RETRACTED** 2026-09-26 — fractional at 1x, NORMAL mode, 16 ↔ 7 steps |
 | SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` | **confirmed, final** 2026-09-20 |

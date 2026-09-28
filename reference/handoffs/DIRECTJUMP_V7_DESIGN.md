@@ -1,5 +1,12 @@
 # DIRECT JUMP V7 — design (Session 107/108, 2026-09-27)
 
+> **STATUS: V7.0.1 built and emulator-verified, awaiting hardware** (`build_directjump_v7.py`,
+> `140C_KDJ7`, mainos `fac16421de73c3aa`, cave `0x400d7000`). V7.0 (`bd39dfc6`) was
+> hardware-confirmed for timing; the ship check then found it never changed the Part on a jump
+> (§8) — V7.0.1 fixes that and Program Change on re-cues. Scope: DIRECT JUMP ON only (DJ OFF = stock). Not yet on
+> hardware: MIDI tracks. Parked: cued-switch policy (§6a), V7.1 mid-window landing (not
+> recommended). V6.4 (`build_directjump_v6.py`, SUPERSEDED) is the OT↔AR parity build.
+
 V6 is now the **OT↔AR parity build** (V6.4, `4a6c1b5e3fb8562c`, hardware-confirmed: instant
 jumps, persistent, LEDs correct, behaviour matching stock AR — including AR's faults). V7 is
 the first deliberate deviation from AR. This document is the contract V7 is built and graded
@@ -176,3 +183,43 @@ Two decisions the author parked, to think about before any cued-switch work:
   chains/arranger (which assume restarts) out of it — so both models can be A/B'd by ear.
 - **Cave**: the DJ cave (`0x400d7400..`, budget to `0x400d7b00`) overlaps the repitch cave by
   478 B already (MERGE.md); V7 will grow it.
+
+## 8. V7.0.1 — stock's switch hand-off, and Program Change that follows re-cues (2026-09-27/28)
+
+**Found by the pre-ship check, not by hardware:** jumping into a pattern on another Part set the
+UI's current Part but the engine never applied it (`tools/diag_dj_part.py`, pattern 4 poked to
+Part 3). Stock's wrap-change, on a REAL switch (`d6`: PEND ≠ ACT, `0x400a432a`–`0x400a4350`),
+does a whole hand-off between its `{0x15}` and `{0x11}` posts that V7.0 — which never enters the
+wrap-change — skipped entirely:
+
+| stock (`0x400a4568`–`0x400a4856`) | what it is |
+|---|---|
+| post `{0x14, part}` (template `0x400d8169`, arg `0x400d816a` = blob `+0x8e57`) | UI "select Part P" (dispatcher case `0x13`, `0x400621a6` — where PARTREAPPLY hooks) |
+| `0x46c7fa80` = 1\|2\|bits 8–15 | audio engine flags; track bits = START SILENT (track byte +3 = 1, or −1 with `0x8000004f`) |
+| `0x800019e4` = sclk + `a3` | when it takes effect (`a3` = one master step: stock switches a step ahead) |
+| `0x46c7ff40` / `0x46c7ff62` | bank / Part → the engine's light Part apply `0x40009e00` from `0x4000b1dc` |
+| `0x46c7a120` = 3\|bits; `0x46c76aa6` / `0x46c76a22` / `0x46c76aaa`; `0x46c7a850` / `0x46c7a934` | the MIDI engine's twin (times in the MIDI clock domain, settings-dependent offsets) |
+| `FUN_400a539c(−1)` | reset A:B cycle counters / pending FILL for all tracks |
+
+V7.0.1 replays exactly this at the landing (`dj_handoff`), with every time = "now" because V7's
+landing sounds the new pattern's first step immediately. **Measured against stock, value for
+value**: flags 3/3, bank 0, Part 2, the reset call, both UI Part writes, and the light Part apply
+from the SAME engine site `0x4000b1dc` (stock stamps +6 ticks = one master step; V7.0.1 now).
+Stock never uses the full apply `0x40009094` for a pattern switch; neither does V7.
+
+**Program Change (measured, `pc_*` runs).** V7 sends PC with stock's own sender
+`FUN_4009e884(bank, pat)` the moment it first sees a cue (early warning for external gear).
+V7.0 left gear on the wrong program when the cue changed during the landing wait (cue 4 then 5:
+PC(4), 5 landed; cue 3 then back to 5: PC(3), 3 never played, and 5 re-landed onto itself).
+V7.0.1: the ARMED state re-checks the cue every tick and, if it changed, takes the countdown back
+and handles the new cue on the same tick (a new pattern re-arms with its own PC; the playing
+pattern cancels the jump and re-sends its PC; a −1 can never reach the landing); the latch
+compares bank too. Measured after: PC(4), PC(5), 5 lands; PC(3), PC(5), no landing. A cue in
+the outgoing pattern's last step still yields a same-tick duplicate PC (ours + stock's
+next-pattern decision) — accepted: **stock itself re-sends the current PC at every cycle end**
+(`0x400a4214`), and the timing lock holds in that race (graded PASS).
+
+**Gates on `fac16421`:** timing matrix 5/5 PASS (16↔7 four cue phases, A07↔A08, DJMAST2, mixed
+3/4x/3/2x/1/4x, master length INF), last-step race PASS, DJ-OFF and DJ-ON-idle IDENTICAL,
+bug-fold DISJOINT / ALL PRESERVED / NO STRAYS. Cave moved to `0x400d7000` (zero in stock, inside
+the vetted zone) for room: 1980 B mainline, 2240 B DIAG.

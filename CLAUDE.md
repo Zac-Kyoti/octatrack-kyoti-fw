@@ -155,6 +155,11 @@ built and waiting.
   declares its tier, and superseding one means setting the old builder to
   SUPERSEDED with a note naming its replacement.** Use a short-lived topic
   branch for risky work, not a second long-lived one.
+- **Several sessions share this working tree — commit EXPLICIT PATHS, never `git add -A` /
+  `git commit -a`.** Two sessions (DIRECT JUMP and repitch-kyoti) work in this same checkout;
+  twice on 2026-09-27 a repo-wide add swept the other session's uncommitted, unverified edits
+  into an unrelated commit (`10173b3`, `eb8f022`). Stage only the files you changed, and check
+  `git status` for files you did not touch before committing.
 - **macOS TCC**: `~/Documents` is protected; grant Full Disk Access to the
   actual running `claude` binary if a tool call fails with "Operation not
   permitted" on this path — see `START_HERE.md` §3 for the exact binary path.

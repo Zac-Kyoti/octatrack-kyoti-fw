@@ -55,6 +55,7 @@ EV_TABLES = {  # kind: (times base, mask base)
 }
 BUILDER_A, BUILDER_A_RET = 0x4009D1E8, 0x400A2D82   # step_handler_confirmed, audio E call
 BUILDER_M, BUILDER_M_RET = 0x4009CF4C, 0x400A39CA   # MIDI twin
+PC_SEND = 0x4009E884        # stock's MIDI Program Change sender (bank, pattern)
 
 SCALARS = {  # name: (addr, size)
     "act_bank": (0x800065BD, 1), "act_pat": (0x800065BE, 1),
@@ -131,7 +132,7 @@ def main(argv):
     rt.exact_clock()
     rt.uc.mem_write(DJ_MODE, (1 if a.dj else 0).to_bytes(4, "big"))
 
-    st = dict(tick=0, states=[], fires=[], commits=[], cues=[], calls=[])
+    st = dict(tick=0, states=[], fires=[], commits=[], cues=[], calls=[], pcs=[])
     pend = list(switches)
 
     def rd(u, addr, n):
@@ -164,6 +165,11 @@ def main(argv):
         st["calls"].append([st["tick"], "a" if addr == BUILDER_A else "m",
                             sx(w[1]), sx(w[2]), sx(w[3]), sx(w[4]), sx(w[5])])
 
+    def on_pc(u, addr, size, user):
+        sp = u.reg_read(er.eb.UC_M68K_REG_A7)
+        w = [int.from_bytes(bytes(u.mem_read(sp + 4 * i, 4)), "big") for i in range(3)]
+        st["pcs"].append([st["tick"], w[1], w[2], w[0]])   # tick, bank, pattern, return address
+
     def on_fire(u, access, addr, size, value, user):
         pc = u.reg_read(er.eb.UC_M68K_REG_PC)
         st["fires"].append([st["tick"], (addr - FIRE_TBL) // 4, value & 0xFFFFFFFF, pc])
@@ -177,6 +183,7 @@ def main(argv):
     rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_fire, begin=FIRE_TBL, end=FIRE_END - 1)
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_builder, begin=BUILDER_A, end=BUILDER_A)
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_builder, begin=BUILDER_M, end=BUILDER_M)
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_pc, begin=PC_SEND, end=PC_SEND)
     rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_commit, begin=STEP_ARR, end=STEP_ARR)
     rt.start_transport_live()
     spins = 0
@@ -194,9 +201,11 @@ def main(argv):
         out = ROOT / out
     out.write_text(json.dumps(dict(meta=meta, cues=st["cues"], commits=st["commits"],
                                    states=st["states"], fires=st["fires"],
-                                   calls=st["calls"])))
+                                   calls=st["calls"], pcs=st["pcs"])))
     print(f"wrote {out}: ticks={st['tick']} cues={st['cues']} commits={st['commits']} "
           f"fires={len(st['fires'])}")
+    print("program changes (tick, bank, pattern, from):",
+          [(pt, b, pp, hex(r)) for pt, b, pp, r in st["pcs"]])
     return 0
 
 

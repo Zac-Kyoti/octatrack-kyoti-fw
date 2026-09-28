@@ -204,7 +204,7 @@ below instead.
    the `'ANDY'` battery-SRAM shadow). An EMPTY RESET clears it to factory.
 7. Regression: the manual-trig fix still works; other tracks unaffected.
 
-### 4.3  DIRECT JUMP  (`python3 tools/build_directjump_v7.py` — **HARDWARE-CONFIRMED, FINAL**, V7, MKI 2026-09-27)
+### 4.3  DIRECT JUMP  (`python3 tools/build_directjump_v7.py` — V7.0.1; timing **HARDWARE-CONFIRMED** MKI 2026-09-27, Part / Program Change fixes pending)
 > **What V7 does.** A cued pattern takes over on the next step and lands **exactly where it
 > would be had it been playing since START** — every track, whatever its length, track
 > scale, master length or master scale — so it is never shifted by a step and never a
@@ -245,12 +245,20 @@ below instead.
 8. **[PTN] tapped alone** (no `[YES]`) still opens SELECT PATTERN normally.
 9. **MIDI tracks** — *not yet confirmed on hardware.* Jump into a pattern whose MIDI track
    sequences a synth: its notes must land on the same pulses as the audio tracks.
+10. **Parts** (V7.0.1) — two patterns assigned to **different Parts**, with audibly different
+    machines/samples: jump between them. The new Part must take over **on the jump** (V7.0
+    and V6.4 never changed it). Also: a track with START SILENT set goes quiet on the jump as
+    it does on a stock pattern change, and a 1:2 / A:B trig condition restarts its count.
+11. **Program Change on fast switching** (V7.0.1) — with a synth following the OT's PC:
+    cue B then quickly C → the synth ends on C; cue B then straight back to the playing
+    pattern → the synth returns to the playing pattern's program and the OT does not jump.
 
 > Hardware-confirmed 2026-09-27: the 16 ↔ 7 case, master 1x ↔ 2x, swing / microtiming and
 > rapid switching, plus the toggle / LED / persistence behaviour carried over from V6.4.
 > Emulator-proven but not separately exercised on hardware: PER-TRACK patterns with mixed
 > lengths and 2x…1/4x track scales. **MASTER LENGTH `INF` has no jump exercised yet**
-> (position model only). MIDI tracks: pending (step 9). Not exercised anywhere:
+> (position model only). MIDI tracks: pending (step 9). V7.0.1's Part and Program Change fixes: emulator-verified,
+> hardware pending (steps 10–11). Not exercised anywhere:
 > MIDI Song Position Pointer relocation under external sync, pause/continue, and whether
 > cycle-counting trig conditions (1:2, A:B) should follow "since START" (they follow stock's
 > own counters). An old report from the V1–V5 line — visited steps depending on the trigs
@@ -757,7 +765,7 @@ OCTATRACK_*.bin                   CF-card OS UPGRADE transport (faster)
 | `python3 tools/build_qlrec.py [VERSTR] [LIVE_DUR]` | `140C_KYOTI` | Bug-1 fix + QUANTIZE LIVE REC front-panel toggle, toast-gated — **hardware-confirmed working** (2026-09-25) |
 | `python3 tools/build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | `140C_KYOTI` | Bug-1 fix + the full **SIDE-CHAIN COMPRESSOR** (`KEY` / `KFLT` / `KGN` / `MON`, `KEY` reaching any of the 8 tracks, cross-core) |
 | `python3 tools/build_triglock.py` | `1.40C` | fix only: auto-remove an emptied trigless lock |
-| `python3 tools/build_directjump_v7.py` | `140C_KDJ7` | Bug-1 fix + **DIRECT JUMP V7** (`[PTN]`+`[YES]`): clock-locked jumps — **hardware-confirmed, final** (2026-09-27) |
+| `python3 tools/build_directjump_v7.py` | `140C_KDJ7` | Bug-1 fix + **DIRECT JUMP V7.0.1** (`[PTN]`+`[YES]`): clock-locked jumps (timing **hardware-confirmed** 2026-09-27) + stock's Part / START SILENT / trig-condition hand-off and Program Change that follows re-cues (hardware pending) |
 | `python3 tools/build_reload3.py` | `140C_KYOTI` | Bug-1 fix + **RELOAD FROM PROJECT**, two chords (`[PTN]`/`[BANK]` + `[TRACK n]`) — **hardware-confirmed, final** (2026-09-25) |
 | `python3 tools/build_bugbuilds.py` | per-image | each finished feature **with all three bug fixes folded in** → `out/Bugbuilds/` |
 

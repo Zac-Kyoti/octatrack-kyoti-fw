@@ -1,5 +1,10 @@
 # DIRECT JUMP — handoff: non-1x TRACK and MASTER scales
 
+> **HISTORY — DIRECT JUMP shipped as V7 (FINAL, hardware-confirmed 2026-09-27).** This
+> handoff describes an abandoned line (V1–V5, re-entering the pattern-boundary body). Start at
+> `reference/handoffs/DIRECTJUMP_V7_DESIGN.md` and `NOTES.md` Session 108 instead; the dead ends
+> recorded here are still dead ends.
+
 > **STALE — history only (marked 2026-09-26, Session 104).** Superseded by
 > `reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md`, whose §0 is the current state. Its
 > `CNTDN_TBL` section 5 was retired long ago; do not act on this file.

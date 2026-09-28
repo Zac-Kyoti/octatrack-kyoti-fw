@@ -33328,3 +33328,40 @@ was lost, only filed under the wrong message. History left as is: it's shared wi
 live session and later DJ commits sit on top. From now on, explicit paths only.
 
 No build this turn.
+
+### Session 108 continued (2) — the ship check found the Part gap: V7.0.1 (stock's switch hand-off + Program Change that follows re-cues)
+
+The author asked to push and ship. Before pushing, a check on a claim the old README carried
+("loads the new Part at once") found it false for V6/V7: **a jump never changed the Part.**
+`tools/diag_dj_part.py` (new): pattern 4 poked to Part 3, one switch. Stock cued switch: UI Part
+set by both handlers, then the engine's LIGHT Part apply `0x40009e00` from `0x4000b1dc` six ticks
+later. V7.0 jump: UI Part set (via `{0x11}`), **no apply ever**. Cause: stock's wrap-change hands
+the switch to the engines — `{0x14, part}` post, audio/MIDI flag words with START-SILENT track
+bits, effective times, bank/Part bytes, and `FUN_400a539c(−1)` (the trig-condition reset) — and
+V7 never enters the wrap-change. Full table in the design doc §8 and `kb/memory-map.md`.
+(Correction to an earlier reply: conditional trigs did NOT "behave as stock" after a V6/V7.0 jump —
+stock resets their cycle counters on every switch; V7.0.1 now does too.)
+
+**V7.0.1** replays the hand-off at the landing with every time = now; the user confirmed the
+design question "same method as stock?" — yes: stock's lazy Part change through stock's own
+handler and engine site (never the full `0x40009094`). Measured value-for-value equal to stock.
+
+**Program Change** (user asked how it works under fast switching). Measured on V7.0 (`pc_*`
+runs, new `--pcs` logging in `diag_reflock.py`): re-cue during the landing wait → PC for the
+first cue, the second lands; cue away and back → PC for a pattern that never plays AND a spurious
+self-landing; last-step cue → same-tick duplicate PC (ours + stock's next-pattern decision).
+Stock re-sends the current PC at every cycle end regardless (measured). V7.0.1: ARMED re-checks
+the cue each tick (re-arm with the new PC / cancel + re-send the playing pattern's PC / never
+lands a −1), latch on bank too; duplicate accepted. Also measured: the last-step race does NOT
+break the timing lock (stock's wrap-change does not re-run after the landing) — graded PASS.
+
+**Gates on `fac16421de73c3aa`** (140C_KDJ7; DIAG `06238e064edab520`): timing matrix 5/5 PASS incl.
+master length INF (now emulator-proven), last-step race PASS, Part hand-off = stock, PC behaviour
+as designed, DJ-OFF / DJ-ON-idle IDENTICAL, bug-fold clean. Cave moved to `0x400d7000` (1980 B;
+V1.1 derived ≈ −888 B in one zone; repitch overlap 1788 B — MERGE.md updated).
+
+**Ship pass done alongside** (not pushed): V7 builder → FINAL, V6 → SUPERSEDED (parity build),
+bug-fold composes V7 without opt-in; README / START_HERE / BUILD_KYOTI / FLASHING / COVERAGE /
+CLAUDE.md / MERGE / kb (caves, techniques, memory-map) / handoff banners / REPITCH scope row / AR
+mirrors updated. **Push held until the author confirms V7.0.1's Part and Program Change on
+hardware** (FLASHING §4.3 steps 10–11).

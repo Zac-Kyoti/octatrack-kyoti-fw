@@ -154,7 +154,7 @@ interlock proof. There is deliberately **no single all-in-one image**:
 unfinished feature. `reference/MERGE.md` is the authoritative allocation map it will
 be rebuilt from, and stages the merge as `KYOTI_V1.0` (the seven mods finished when
 it was written, nothing to resolve) then `KYOTI_V1.1` (+ DIRECT JUMP V7 + RELOAD3, both final now;
-with V7's 1514 B cave V1.1 no longer fits one free zone — ≈ −422 B, derived — so the map
+with V7.0.1's 1980 B cave V1.1 no longer fits one free zone — ≈ −888 B, derived — so the map
 needs a second zone before it can be re-cut).
 
 **Not a shipped fix:** the MIDI LFO SETUP knobs sending CC on the twin audio channel
@@ -202,8 +202,11 @@ is at a step start, purges the outgoing pattern's pending trigs (the first incom
 and fixes up `reload`. Graded by `tools/diag_reflock.py` + `cmp_reflock.py` (equality with a
 never-switched reference, state and live events with content) and `tools/model_reflock.py`
 (the position model, exact on 10 references). **V6.4** (`build_directjump_v6.py`,
-SUPERSEDED) is kept as the hardware-good **OT↔AR parity build**. Not yet on hardware: MIDI
-tracks. Parked by the user: cued-switch policy (design doc §6a); V7.1 mid-window landing (not
+SUPERSEDED) is kept as the hardware-good **OT↔AR parity build**. **V7.0.1** (not yet on
+hardware) replays stock's switch hand-off at the landing — V7.0 skipped it, so a jump never
+changed the Part, applied START SILENT or reset trig conditions — and keeps Program Change on the
+pattern that actually plays through re-cues and cancels. Not yet on hardware: MIDI tracks, and
+V7.0.1's Part / Program Change behaviour. Parked by the user: cued-switch policy (design doc §6a); V7.1 mid-window landing (not
 recommended). Everything from here to the end of this section is the HISTORY of the V1–V5
 line, kept because its dead ends are still the dead ends.
 
@@ -311,7 +314,7 @@ toggle route and power-on guarantees:
 - **B2** — DIRECT JUMP (v4 through V7) writes the `[PTN]`-overlay `[YES]` record, while
   RELOAD3 asserts that overlay is byte-for-byte stock.
 
-Plus a packing problem new with V7: its 1514 B cave puts V1.1 at ≈ −422 B in the single free
+Plus a packing problem new with V7: its 1980 B cave (V7.0.1) puts V1.1 at ≈ −888 B in the single free
 zone (derived) — a second cave zone is needed (`reference/kb/caves.md`).
 
 `KYOTI_V1.0` (the seven finished mods) has neither problem and is buildable as soon as

@@ -473,6 +473,16 @@ Both failures were the same shape:
   the track's LIVE scale** instead of reloading it.
 - **Absolute tick index**: a counter incremented once per running tick in the phase-D hook
   equals the phase-G sample index exactly (`DJ_TOFS = 0`, measured).
+- **Stock's pattern-switch hand-off to the engines** (wrap-change `0x400a4568`–`0x400a4856`,
+  real switch only): `{0x14, part}` UI post (template `0x400d8169`; the pattern's Part is blob
+  `+0x8e57`); audio `0x46c7fa80` flags (1\|2 + START-SILENT track bits 8–15 from track byte +3),
+  `0x800019e4` effective time, `0x46c7ff40`/`0x46c7ff62` bank/Part → light Part apply
+  `0x40009e00` from `0x4000b1dc`; MIDI twin `0x46c7a120`, `0x46c76aa6`/`0x46c76a22`/`0x46c76aaa`,
+  `0x46c7a850`/`0x46c7a934`; `FUN_400a539c(−1)` resets A:B cycle counters `0x46107918` / pending
+  FILL `0x46107969` / `0x46107959` / `0x46107979`. Stock stamps the time one master step ahead.
+- **Program Change**: stock's only caller of `FUN_4009e884(bank, pattern)` is the next-pattern
+  decision `0x400a4210`, which fires at **every** cycle end (re-sending the current pattern's PC
+  when nothing is cued) — measured.
 
 ### The scale tables — ticks/step and quantise lengths (new 2026-09-24)
 

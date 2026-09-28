@@ -45,6 +45,10 @@ Details: NOTES.md Sessions 5, 48–49, 105–108; `reference/handoffs/DIRECTJUMP
 - Tracks faster than the master finish their step tps_M − tps_t ticks past each master wrap
   (stock's deferred landing) — by design, on-grid.
 - The metronome never drifts (phase I `0x80006511/12`, independent of the pattern).
+- Stock re-sends the current pattern's MIDI Program Change at every cycle end (next-pattern
+  decision `0x400a4210`), not only when the pattern changes — measured; behaviour, not a bug.
+- A stock pattern switch changes the Part with the LIGHT apply `0x40009e00` (engine hand-off),
+  never the full `0x40009094` — which is exactly why Bug 3 exists.
 
 ## G. Not investigated
 - Chains: no chain-specific bug measured; they switch at the outgoing end, so should inherit

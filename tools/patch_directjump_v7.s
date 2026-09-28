@@ -1,5 +1,5 @@
 | =========================================================================================
-| DIRECT JUMP V7.0 (Session 107/108, 2026-09-27) -- CLOCK-LOCKED LANDING.
+| DIRECT JUMP V7.0.1 (Session 108, 2026-09-27) -- CLOCK-LOCKED LANDING + stock's switch hand-off.
 | V6.4 (patch_directjump_v6.s, frozen) is the OT<->AR PARITY build. V7 changes ONE input of
 | V6's hardware-proven landing: WHERE the incoming pattern lands.  V6/AR derive it from the
 | OUTGOING pattern's master counter (0x800065b2, which wraps with that pattern) -> whole-step
@@ -101,6 +101,22 @@
     .equ UI_QUEUE,  0x460d17ae          | the sequencer->UI message queue
     .equ MSG_BANKPAT, 0x400d8167        | message 0x15: {code, bank} -- stock's wrap-change post
     .equ MSG_BANKPAT_ARG, 0x400d8168
+    .equ MSG_PART,    0x400d8169        | message 0x14: {code, part} -- stock's wrap-change post @0x400a459a
+    .equ MSG_PART_ARG,0x400d816a        |   (V7.0.1: V7.0 never posted it -> the Part never changed on a jump)
+    .equ P_PART,      0x8e57            | pattern blob: the pattern's Part (stock reads 0x400eb036+off+1)
+    .equ T_SILENT,    3                 | track record +3 (audio +0x53, MIDI +0x48fb): START SILENT (1 / -1 = default)
+    .equ SILENT_DEF,  0x8000004f        | the default START SILENT is used when a track's byte is -1
+    .equ ENG_AFLAGS,  0x46c7fa80        | audio engine pattern-change flags (bit0|bit1 + track bits 8..15)
+    .equ ENG_ATIME,   0x800019e4        | audio engine: when the switch takes effect (sample clock)
+    .equ ENG_ABANK,   0x46c7ff40        | audio engine: bank to apply
+    .equ ENG_APART,   0x46c7ff62        | audio engine: Part to apply (-> light Part apply 0x40009e00)
+    .equ ENG_MFLAGS,  0x46c7a120        | MIDI engine pattern-change flags (3 + track bits 8..15)
+    .equ ENG_MTIME1,  0x46c76aa6        | MIDI engine switch times (MIDI clock domain)
+    .equ ENG_MFLAG,   0x46c76a22
+    .equ ENG_MTIME2,  0x46c76aaa
+    .equ ENG_MBANK,   0x46c7a850
+    .equ ENG_MPART,   0x46c7a934
+    .equ COND_RESET,  0x400a539c        | FUN_400a539c(track | -1): reset A:B cycle counters / pending FILL
     .equ MSG_PAT,     0x400d816b        | message 0x11: {code, pattern, 1} -- stock's WRAP-CHANGE
     .equ MSG_PAT_ARG, 0x400d816c        |   post @0x400a4b9a.  NOT 0x400d8164 -- see dl_commit.
 
@@ -259,6 +275,21 @@ dt_done:
 dl_notfix:
     cmpi.b  #ST_ARMED,%d0
     bne.w   dl_done                    | LANDING is consumed by Hook N; nothing here
+|   V7.0.1: the cue changed while we wait (re-cue, cue back to the playing pattern, or -1)?
+|   Take our countdown back and handle the new cue on this same tick.  Measured before the fix
+|   (pc_v701_fast): cue 4 then 5 -> PC(4) sent, 5 landed; cue 3 then back to 5 -> PC(3) sent,
+|   3 never played, and 5 re-landed onto itself.  The landing never copies a stale or -1 cue.
+    move.b  PEND_PAT,%d0
+    cmp.b   dj_armpat,%d0
+    bne.b   da_recue
+    move.b  PEND_BANK,%d0
+    cmp.b   dj_armbank,%d0
+    beq.b   da_same
+da_recue:
+    clr.b   LAND_CNTDN                 | ours: stock then sees 0 and does not land
+    clr.b   dj_state
+    bra.w   dl_idle
+da_same:
     move.b  LAND_CNTDN,%d0
     cmpi.b  #1,%d0
     bne.w   dl_done                    | still counting (stock decrements below us)
@@ -284,7 +315,29 @@ dl_idle:
     bne.b   dl_real
     move.b  PEND_BANK,%d0
     cmp.b   ACT_BANK,%d0
-    beq.b   dl_clear                   | cued == active: nothing to do
+    bne.b   dl_real
+|   cued == active.  V7.0.1: if our last Program Change named a pattern that is NOT playing (a
+|   cue was cancelled back to the playing pattern), re-send the playing pattern's so external
+|   gear follows what the OT actually plays.  After a normal landing the last PC IS the playing
+|   pattern, so nothing is sent; dl_clear then resets the latch.
+    move.b  dj_pcpat,%d0
+    cmpi.b  #-1,%d0
+    beq.w   dl_clear
+    cmp.b   ACT_PAT,%d0
+    bne.b   dl_pcfix
+    move.b  dj_pcbank,%d0
+    cmp.b   ACT_BANK,%d0
+    beq.w   dl_clear
+dl_pcfix:
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  %d0,-(%sp)
+    moveq   #0,%d0
+    move.b  ACT_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     PC_SEND
+    addq.l  #8,%sp
+    bra.w   dl_clear
 dl_real:
     .ifdef DJ_DIAG
     addq.l  #1,dj_cnt_req
@@ -292,8 +345,15 @@ dl_real:
 |   MIDI Program Change once per distinct cued pattern (what every DJ build since v1 did)
     move.b  PEND_PAT,%d0
     cmp.b   dj_pcpat,%d0
-    beq.b   dl_arm
+    bne.b   dl_pcsend
+    move.b  PEND_BANK,%d0
+    cmp.b   dj_pcbank,%d0
+    beq.b   dl_arm                     | V7.0.1: latch on pattern AND bank
+dl_pcsend:
+    move.b  PEND_PAT,%d0
     move.b  %d0,dj_pcpat
+    move.b  PEND_BANK,%d0
+    move.b  %d0,dj_pcbank
     moveq   #0,%d0
     move.b  PEND_PAT,%d0
     move.l  %d0,-(%sp)
@@ -341,6 +401,10 @@ da_next:
     blt.b   da_scan
     bra.w   dl_done                    | (unreachable: L <= 96) -- retry next tick
 da_found:
+    move.b  PEND_PAT,%d0               | V7.0.1: what this arm is for (re-cue detection)
+    move.b  %d0,dj_armpat
+    move.b  PEND_BANK,%d0
+    move.b  %d0,dj_armbank
     move.l  %d6,%d1
     addq.l  #1,%d1                     | k = offset + 1: stock decrements below us
     move.b  %d1,LAND_CNTDN
@@ -487,6 +551,7 @@ dc_store:
     pea     UI_QUEUE
     jsr     KPOST
     addq.l  #8,%sp
+    bsr.w   dj_handoff                 | V7.0.1: the rest of stock's real-switch hand-off
     move.b  ACT_PAT,%d0
     move.b  %d0,MSG_PAT_ARG
     pea     MSG_PAT
@@ -531,6 +596,107 @@ dpr_done:
     jmp     PTN_LAYER_REL_RESUME        | the stack (see V4's dj_ptnrel history)
 
 | ================= cave state =================
+
+| ================= V7.0.1: stock's real-switch hand-off, replayed at the landing ============
+| Stock's wrap-change, on a REAL switch (d6: PEND != ACT), does all of this between its {0x15}
+| and {0x11} posts (0x400a4568-0x400a4856).  V7.0 skipped the wrap-change and with it every one
+| of these -- measured: a jump into a pattern on another Part set the UI's current Part but the
+| engine never applied it (stock: light Part apply 0x40009e00 from 0x4000b1dc, on time).  Times:
+| stock stamps "now + one master step" because it switches one step ahead of the audible
+| switch; V7's landing sounds the new pattern's first step NOW, so every time here is "now".
+| a2 = the ACT (incoming) pattern blob, preserved by the caller (KPOST keeps a2).
+dj_handoff:
+|   {0x14, part} -- the UI side of the Part change (dispatcher case 0x13)
+    move.l  #P_PART,%d1
+    move.b  (%a2,%d1.l),%d0
+    move.b  %d0,MSG_PART_ARG
+    pea     MSG_PART
+    pea     UI_QUEUE
+    jsr     KPOST
+    addq.l  #8,%sp
+|   audio engine: flags = bit0 | bit1 | START-SILENT tracks (bits 8..15), 0x400a45a8-0x400a463a
+    moveq   #3,%d4
+    move.l  #A_LEN+T_SILENT,%d3        | audio track 0 record +3 (= +0x53)
+    move.l  #A_STRIDE,%d6
+    bsr.w   ho_bits
+    move.l  %d4,ENG_AFLAGS
+    move.l  SCLK,%d0                   | stock: a3 + sclk; V7 switches now
+    move.l  %d0,ENG_ATIME
+    move.b  ACT_BANK,%d0
+    move.b  %d0,ENG_ABANK
+    move.l  #P_PART,%d1
+    move.b  (%a2,%d1.l),%d0
+    move.b  %d0,ENG_APART
+|   MIDI engine: flags = 3 | START-SILENT tracks, 0x400a469e-0x400a4708
+    moveq   #3,%d4
+    move.l  #M_LEN+T_SILENT,%d3        | MIDI track 0 record +3 (= +0x48fb)
+    move.l  #M_STRIDE,%d6
+    bsr.w   ho_bits
+    move.l  %d4,ENG_MFLAGS
+|   MIDI switch times, 0x400a470a-0x400a47b2 (d5 = 0): the offsets depend on the MIDI clock
+|   settings exactly as in stock
+    moveq   #0,%d5                     | d5 = 1: the "fast" branch
+    tst.b   0x80001860
+    bne.b   ho_mt
+    move.b  0x80000028,%d0
+    btst    #0,%d0                     | (ColdFire: no byte AND)
+    beq.b   ho_mt
+    tst.l   0x46104ca8
+    beq.b   ho_mt
+    moveq   #1,%d5
+ho_mt:
+    move.l  MCLK,%d0
+    tst.l   %d5
+    bne.b   ho_mt1
+    addi.l  #12600,%d0
+ho_mt1:
+    move.l  %d0,ENG_MTIME1
+    moveq   #1,%d0
+    move.l  %d0,ENG_MFLAG
+    move.l  MCLK,%d0
+    tst.l   %d5
+    beq.b   ho_mt2
+    subi.l  #16800,%d0
+    bra.b   ho_mt3
+ho_mt2:
+    subi.l  #4200,%d0
+ho_mt3:
+    move.l  %d0,ENG_MTIME2
+    move.b  ACT_BANK,%d0
+    move.b  %d0,ENG_MBANK
+    move.l  #P_PART,%d1
+    move.b  (%a2,%d1.l),%d0
+    move.b  %d0,ENG_MPART
+|   conditional trigs start fresh, as on every stock switch (0x400a484c-0x400a4856)
+    pea     -1
+    jsr     COND_RESET
+    addq.l  #4,%sp
+    rts
+
+| ho_bits: OR (1 << (t+8)) into d4 for each of 8 tracks whose START SILENT byte is 1, or -1
+| with the default set.  d3 = offset of track 0's byte in the blob, d6 = record stride.
+ho_bits:
+    moveq   #8,%d5
+ho_lp:
+    move.b  (%a2,%d3.l),%d0
+    beq.b   ho_nx
+    cmpi.b  #1,%d0
+    beq.b   ho_set
+    cmpi.b  #-1,%d0
+    bne.b   ho_nx
+    tst.b   SILENT_DEF
+    beq.b   ho_nx
+ho_set:
+    moveq   #1,%d0
+    lsl.l   %d5,%d0
+    or.l    %d0,%d4
+ho_nx:
+    add.l   %d6,%d3
+    addq.l  #1,%d5
+    moveq   #16,%d0
+    cmp.l   %d5,%d0
+    bne.b   ho_lp
+    rts
 
 | ================= V7 helpers (all called from dj_land's saved-register context) ==========
 | dj_blob: d0 = bank, d1 = pattern -> a2 = pattern blob
@@ -752,7 +918,9 @@ fx_store:
 dj_state:  .byte ST_IDLE               | 0 idle / 1 armed (we own LAND_CNTDN) / 2 landing / 3 fixup
 dj_pcpat:  .byte -1                    | cued pattern the PC was last sent for
 dj_zero:   .byte 0                     | constant 0 for Hook N's flag trick
-    .byte 0
+dj_pcbank: .byte -1                    | V7.0.1: bank the last PC was sent for
+dj_armpat: .byte -1                    | V7.0.1: the cue this arm is for
+dj_armbank: .byte -1
     .align 2
 dj_T:      .long 0                     | V7: running clock ticks since START (0 while stopped)
 dj_tland:  .long 0                     | V7: t of the last landing

@@ -37,8 +37,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from kyoti_status import status, FINAL
 
 status(FINAL, "DIRECT JUMP V7", """
-Clock-locked DIRECT JUMP: a jump lands the new pattern exactly where it would be had it
-played since START.  Hardware-confirmed 2026-09-27 (MIDI tracks: emulator-locked only).
+Clock-locked DIRECT JUMP V7.0.1: a jump lands the new pattern exactly where it would be had
+it played since START (timing hardware-confirmed 2026-09-27), and hands the switch to the
+engines as stock does (Part, START SILENT, trig-condition reset) with Program Change always
+naming the pattern that plays -- emulator-verified, hardware test pending.
 """)
 
 BASE = 0x40000400
@@ -69,7 +71,7 @@ if DIAG:
     if len(sys.argv) <= 2:
         TOAST_DUR = 0x88
 
-CAVE_DJ = 0x400d7400
+CAVE_DJ = 0x400d7000     # V7.0.1: moved down from 0x400d7400 (the hand-off needs room; zero in stock, vetted zone)
 CAVE_TRIGSCALE = 0x400d7b00
 FREE_END = 0x400d7c3c
 

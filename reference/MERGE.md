@@ -19,9 +19,11 @@ RELOAD both moved off the sites that used to collide.
 > build). V7 keeps V6's exact route — same `[PTN]`-overlay toggle record `0x400bf0c0`, same ANDY
 > and boot-seed assertions, same three detours (`0x400a1f72` `dj_land`, `0x400a221c` `dj_nofa`,
 > `0x40043418` `dj_ptnrel`), still NO hook in the pattern-boundary body — so **blockers B1 and
-> B2 below are unchanged**. What changes is size: the V7 cave is **1514 B** (V6: 758 B).
-> **V1.1 no longer fits the single free zone: DJ 1514 + RELOAD3 2104 = 3618 B vs 3196 B free
-> → ≈ −422 B (derived, not built). A second cave zone is required** (`kb/caves.md`; the image
+> B2 below are unchanged**. What changes is size: the V7.0.1 cave is **1980 B** at
+> `0x400d7000` (V7.0: 1514 B; V6: 758 B) — V7.0.1 replays stock's switch hand-off (Part,
+> START SILENT, trig-condition reset) and tracks Program Change across re-cues.
+> **V1.1 no longer fits the single free zone: DJ 1980 + RELOAD3 2104 = 4084 B vs 3196 B free
+> → ≈ −888 B (derived, not built). A second cave zone is required** (`kb/caves.md`; the image
 > tail is NOT free space). Both V1.1 mods are now FINAL, so the V1.1 boundary is purely a
 > packing problem plus B1/B2.
 
@@ -57,7 +59,7 @@ also the right build boundary, because it is exactly the cut that removes both b
 | | contents | conflicts to resolve | headroom |
 |---|---|---|---|
 | **`KYOTI_V1.0`** | the **seven finished, hardware-confirmed mods** | **none** — mechanical repack only | 3196 B (53 %) |
-| **`KYOTI_V1.1`** | + DIRECT JUMP (**V7**, FINAL) + RELOAD3 (FINAL) | blockers **B1** and **B2** below | **≈ −422 B — does NOT fit one zone** with V7's 1514 B cave (V6's 758 B gave ≈ +332 B); derived — needs a second cave zone |
+| **`KYOTI_V1.1`** | + DIRECT JUMP (**V7.0.1**) + RELOAD3 (FINAL) | blockers **B1** and **B2** below | **≈ −888 B — does NOT fit one zone** with V7.0.1's 1980 B cave (V6's 758 B gave ≈ +332 B); derived — needs a second cave zone |
 
 Build V1.0 first and flash it. It is a genuinely conflict-free composition of work that
 is already signed off on hardware, it is the thing that can ship, and it de-risks V1.1 by
@@ -178,7 +180,7 @@ this only rules out naively merging an image with those projects. → `kb/caves.
 
 | Mod | Build | cave | state |
 |---|---|---|---|
-| DIRECT JUMP — `[PTN]`+`[YES]` | `build_directjump_v7.py` (**V7**; v1–v6 superseded, V6.4 = OT↔AR parity) | **1514 B** | **FINAL — HW-confirmed 2026-09-27.** Clock-locked jumps: lands the new pattern where it would be had it played since START. Hooks at `0x400a1f72` + `0x400a221c` (+ `dj_ptnrel`), same as V6. See `NOTES.md` Session 108 |
+| DIRECT JUMP — `[PTN]`+`[YES]` | `build_directjump_v7.py` (**V7**; v1–v6 superseded, V6.4 = OT↔AR parity) | **1980 B** (V7.0.1, at `0x400d7000`) | **Timing HW-confirmed 2026-09-27 (V7.0); V7.0.1's Part / Program Change fixes HW-pending.** Clock-locked jumps: lands the new pattern where it would be had it played since START. Hooks at `0x400a1f72` + `0x400a221c` (+ `dj_ptnrel`), same as V6. See `NOTES.md` Session 108 |
 | RELOAD FROM PROJECT — direct chords | `build_reload3.py` (**v3**, not v2) | **2104 B** | **FINAL — HW-confirmed 2026-09-25.** Grew from 1870 B: two-line block toasts, the live self-verify, the playing-bank fix, and the request bytes moved into the cave |
 
 **`build_directjump_v3.py` is superseded.** This document used to say "DIRECT JUMP: use
@@ -221,17 +223,17 @@ and V1.1* and the free span stays contiguous below it.
 ### ⚠️ Standalone-cave collision: `repitch_kyoti` vs `directjump_v7` (S107–108, 2026-09-27)
 
 The two standalone builds overlap and can never be composed as built: `patch_repitch_kyoti`
-claims `0x400d6f80..0x400d76fc` (1916 B at rev 9) and `build_directjump_v7.py` claims
-`CAVE_DJ = 0x400d7400..0x400d79e9` (1514 B) — **764 B of overlap at `0x400d7400..0x400d76fc`**
-(it was 478 B against V6.4's 848 B). Each builder only verifies its range is free in the STOCK
+claims `0x400d6f80..0x400d76fc` (1916 B at rev 9) and `build_directjump_v7.py` (V7.0.1) claims
+`CAVE_DJ = 0x400d7000..0x400d77bb` (1980 B) — **1788 B of overlap at `0x400d7000..0x400d76fc`**
+(478 B against V6.4, 764 B against V7.0 at `0x400d7400`). Each builder only verifies its range is free in the STOCK
 image, so neither notices the other. Flashing them one at a time is safe (separate images); any
 composite must first move one cave. `build_bugbuilds.py`'s DISJOINT interlock would catch it if
 the two were ever fed to it.
 
 ### `KYOTI_V1.1` — identical up to `patch_triglock`, then
 
-> *Sizes in this table are the v4-era staging (DIRECT JUMP 1026 B). With V7 (1514 B) the
-> derived free run is ≈ −422 B — see the Session 108 update at the top.*
+> *Sizes in this table are the v4-era staging (DIRECT JUMP 1026 B). With V7.0.1 (1980 B) the
+> derived free run is ≈ −888 B — see the Session 108 update at the top.*
 
 | Cave | Addr | Size |
 |---|---|---|
@@ -567,9 +569,10 @@ pattern change, Part change during a soft-mute tail, and QLREC's tick sharing
   combined image is the harder thing to support (one HW regression sinks all seven).
   Staging V1.0/V1.1 reduces but does not remove this.
 - **Whether V1.1 should carry both features or just RELOAD3.** DIRECT JUMP owns both
-  blockers; RELOAD3 is now finished and flashed and would merge into V1.0 with no
-  conflict at all (≈ 1092 B to spare, derived). If DIRECT JUMP stays unfinished, ship
-  RELOAD3 as V1.1 and hold DIRECT JUMP for V1.2.
+  blockers; RELOAD3 is finished and flashed and would merge into V1.0 with no conflict at
+  all (≈ 1092 B to spare, derived). DIRECT JUMP V7 is finished too (2026-09-27), but with its
+  1980 B cave (V7.0.1) the pair no longer fits one zone (≈ −888 B). Options: RELOAD3 as V1.1 and DIRECT
+  JUMP in V1.2 once a second cave zone is proven, or both in V1.1 with that zone.
 - **Retiring the superseded builders.** `build_directjump{,_v2,_v3}.py`,
   `build_reload{,2}.py`, `build_mutemode{,_new}.py`, `build_sidechain{,2}.py` and
   `build_softmute.py` are all superseded by a later scoped build. Keeping them is

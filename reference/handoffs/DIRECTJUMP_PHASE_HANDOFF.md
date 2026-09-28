@@ -1,5 +1,10 @@
 # DIRECT JUMP — handoff: the non-1x sub-step PHASE bug
 
+> **HISTORY — DIRECT JUMP shipped as V7 (FINAL, hardware-confirmed 2026-09-27).** This
+> handoff describes an abandoned line (V1–V5, re-entering the pattern-boundary body). Start at
+> `reference/handoffs/DIRECTJUMP_V7_DESIGN.md` and `NOTES.md` Session 108 instead; the dead ends
+> recorded here are still dead ends.
+
 Written at the end of Session 89; **current state rewritten Session 104 (2026-09-26)**.
 Read §0 first — everything after it is the history of how the thread got here.
 
