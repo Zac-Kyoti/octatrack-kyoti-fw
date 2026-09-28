@@ -100,11 +100,21 @@ What changes:
 
 Order of work, each step gated by the previous:
 
-1. **Validate the oracle**: it must PASS REF-vs-REF and must FAIL V6.4 and stock on the
-   author's 16↔7 case with a whole-step shift — i.e. it sees what the ears heard and what every
-   earlier gate missed. (In flight.)
+1. **Validate the oracle** — DONE (Session 107/108). REF-vs-REF: PASS (both references, all
+   ticks, fire tables equal). V6.4 on the 16↔7 fixture (start 7-step, jumps at t100/190/280):
+   pre-switch segment LOCKED; every post-landing segment a **perfect whole-step time shift**
+   of the reference (100% of ticks match at d = +12/−12/+24 ticks = +2/−2/+4 steps — no
+   fractional part), plus extra fire events at each landing tick (AR quirk 2). The run's
+   master step after the first landing is 3 = the OUTGOING 7-step pattern's position since its
+   wrap; the reference says 1 — §2's mechanism, measured. Stock DJ OFF: every post-cue segment
+   a perfect whole-step shift too (−5/−2/−3 steps). The oracle sees what the author heard.
 2. **Model first**: a Python `ref_state(pattern, T)` that reproduces the engine's own REF
    traces exactly, across NORMAL/PER-TRACK, every scale, odd lengths, master length incl. INF.
+   `tools/model_reflock.py`. Measured convention (sample point = phase-G entry of ISR t, t=1
+   the first running tick): track `step = (⌊t/tps_t⌋+1) mod len_t`, `ticks = t mod tps_t`;
+   master `m_step = (⌊(t−1)/tps_M⌋+1) mod mlen`, `m_tick = (t−1) mod tps_M` (tracks lead the
+   master by one tick inside the ISR: F advances before G). **PASS on NORMAL 16 and NORMAL 7,
+   all 16 tracks, all 382 ticks.** PER-TRACK / scale references in flight.
 3. Only then ColdFire: `T`, the reference snapshot, mid-window counters, the purge.
 4. Matrix: NORMAL 16↔7 1x; NORMAL 1x↔2x/3/4x patterns; PER-TRACK mixed lengths + scales (incl.
    1/2x, 3/4x, 3/2x); master length INF and odd; MIDI tracks; cues aimed at every master-tick
@@ -123,7 +133,18 @@ Order of work, each step gated by the previous:
   incoming trig on that track, as with any stock pattern change.
 - **External sync edges**: a MIDI Song Position Pointer relocates the clock origin; `T` must
   follow it (later).
-- **Non-DJ cues**: the same landing could make ordinary cued switches phase-locked too (the
-  author's longer-term wish). Out of V7's first scope; the machinery is identical.
+- **Non-DJ cues — a choice, not a replacement** (discussed with the author 2026-09-27). The
+  same landing, fired at the outgoing pattern's end instead of the next step, makes ordinary
+  cued switches clock-locked too; the oracle already shows stock cueing failing the lock by the
+  same whole-step shifts (5, 2, 3 steps on the 16↔7 fixture). But this IS a change to the
+  sequencer's DNA: stock is **phrase-relative** (a switch restarts the pattern at its step 1 —
+  the near-universal convention; identical to clock-relative whenever lengths/scales nest, e.g.
+  all-16/32/64 patterns cued at their ends) while V7 is **clock-relative** (Ableton's "legato"
+  launch). Restart-on-switch looks deliberate (predictable downbeats for intros, fills,
+  intentional odd-length phrases); the fractional states under mismatched master scales look
+  like an unexamined side effect; stock PER-TRACK mode's CHANGE/master-length quantisation is
+  already clock-relative in spirit. Plan: prove V7 on DIRECT JUMP first, then offer "lock" for
+  cued switches as a separate explicit setting with stock restart as the default, keeping
+  chains/arranger (which assume restarts) out of it — so both models can be A/B'd by ear.
 - **Cave**: the DJ cave (`0x400d7400..`, budget to `0x400d7b00`) overlaps the repitch cave by
   478 B already (MERGE.md); V7 will grow it.
