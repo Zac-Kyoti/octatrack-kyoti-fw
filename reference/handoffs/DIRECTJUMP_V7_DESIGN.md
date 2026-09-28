@@ -225,3 +225,18 @@ next-pattern decision) — accepted: **stock itself re-sends the current PC at e
 3/4x/3/2x/1/4x, master length INF), last-step race PASS, DJ-OFF and DJ-ON-idle IDENTICAL,
 bug-fold DISJOINT / ALL PRESERVED / NO STRAYS. Cave moved to `0x400d7000` (zero in stock, inside
 the vetted zone) for room: 1980 B mainline, 2240 B DIAG.
+
+## 9. The Bugbuild — V7.0.1 + the three bug fixes (2026-09-28)
+
+`build_bugbuilds.py` → `out/Bugbuilds/OCTATRACK_OS1.40C_DIRECTJUMP_V7_BUGFIX.syx` (`BUG_DJV7`,
+syx sha256 `e09654af…`, mainos `26c098a4…`): the unchanged V7.0.1 image (`fac16421`, which
+already carries PLAYSFREEFIX) + PARTREAPPLY at `0x400d64dc` + PATTERNLED at `0x400d6670`.
+Interlock: feature 1720 B + bug fixes 545 B → 2193 B, DISJOINT / ALL PRESERVED / NO STRAYS.
+
+The one real interaction: V7.0.1's hand-off posts `{0x14, part}`, whose UI case is exactly where
+PARTREAPPLY hooks (`0x400621da` / `0x40062216`). Emulator on the composite: the Part-change trace
+is identical to standalone V7.0.1 (same hand-off writes, cond-trig reset, LIGHT Part apply);
+Program Change on fast re-cues identical; timing matrix PASS (16↔7 four cue phases, A07↔A08,
+DJMAST2, mixed track scales, master length INF), plus a 16↔7 run where every jump changes Part —
+PASS, and tick-for-tick identical engine state to standalone V7.0.1 on the same run.
+**Not flashed.**

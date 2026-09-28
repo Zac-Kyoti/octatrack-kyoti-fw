@@ -21,17 +21,21 @@ is never re-derived: its DSP payloads, COMPRESSOR descriptor and FX2 chooser edi
 through untouched, and its cave stays at its own address so the descriptor's formatter
 pointers stay valid.
 
-PLAYSFREEFIX (patch_trigscale) is already present in MUTEMODE_DT, QLREC and
-SIDECHAIN3_CROSS; only TRIGLOCK needs it added.  It is placed at 0x400d7b00 in all four,
-so every Bugbuild carries it at the same address the standalone builds use.
+PLAYSFREEFIX (patch_trigscale) is already present in MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS,
+RELOAD3 and DIRECTJUMP_V7 (each feature builder carries its own copy); only TRIGLOCK needs it
+added.  Every copy is the current tools/patch_trigscale.s -- RELOAD3's sits at 0x400d7bfc,
+the rest at 0x400d7b00, the address the standalone builds use.
 
-Cave layout is identical in all four images:
+Cave layout, where each fix is placed if that space is free in the base (it is in all but
+RELOAD3, whose own cave starts at 0x400d6500, so the allocator moves the two fixes up):
 
-    patch_partreapply   0x400d64dc   402 B
-    patch_pattern_led   0x400d6670   142 B
-    patch_trigscale     0x400d7b00    62 B   (TRIGLOCK only -- the other three have it)
+    patch_partreapply   0x400d64dc   402 B   (RELOAD3: 0x400d6c10)
+    patch_pattern_led   0x400d6670   142 B   (RELOAD3: 0x400d6da4)
+    patch_trigscale     0x400d7b00    62 B   (added to TRIGLOCK only -- the others carry it)
 
 Verification (every image, every run):
+  * the feature's builder declares tier FINAL (a SUPERSEDED base is refused), and is re-run
+    first so the base is built from the current source (--no-rebuild skips that);
   * each cave region is all-zero in the base before it is written;
   * each detour site still holds the exact stock bytes (proves no feature took it first);
   * assert_no_branch_into on every detour site (build_triglock.py's guard, promoted here);
@@ -78,8 +82,8 @@ BUGFIX = {
 # --- the feature bases: name -> (builder, base image, VERSTR, wip, blurb) -------------
 #   wip=True is skipped unless --with-wip is passed.  RELOAD3 was finished on 2026-09-25
 #   and DIRECT JUMP V7 on 2026-09-27 (Session 108, hardware-confirmed); both are normal
-#   features.  V4, V5 and V6.4 are SUPERSEDED (V6.4 = the OT<->AR parity build).  V7's
-#   cave (0x400d7400..) was checked DISJOINT from the bug-fix caves by this script.
+#   features.  V4, V5 and V6.4 are SUPERSEDED (V6.4 = the OT<->AR parity build).  V7.0.1's
+#   cave (0x400d7000..0x400d77bb) composes DISJOINT with the bug-fix caves (2026-09-28).
 FEATURES = {
     "MUTEMODE_DT": ("build_mutemode_dt.py", "out/mainos_mutemode_dt.bin", "BUG_MUTEDT", False,
                     "PERSONALIZE -> MUTE MODE: OT | OTFX | OTFX-T | DT-T (default OT)."),
@@ -94,7 +98,7 @@ FEATURES = {
     "RELOAD3": ("build_reload3.py", "out/mainos_reload3.bin", "BUG_RL3", False,
                 "[PTN]+[TRACK n] reload track n's saved sequence; [BANK]+[TRACK n] also re-applies the Part."),
     "DIRECTJUMP_V7": ("build_directjump_v7.py", "out/mainos_directjump_v7.bin", "BUG_DJV7",
-                      False, "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7, clock-locked jumps)."),
+                      False, "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.0.1, clock-locked jumps)."),
     # --- not finished; build with --with-wip ---------------------------------------
     # (none at present: DIRECT JUMP V7 shipped 2026-09-27; V6.4 is SUPERSEDED)
 }
@@ -253,6 +257,15 @@ def wrap(mainos, name, verstr, blurb):
     print(f"           {blurb}")
 
 
+def declared_tier(builder):
+    """The tier a builder declares via tools/kyoti_status.status(), or FINAL if it predates
+    the tier system (every builder that does not call status() is a finished feature)."""
+    import re
+    m = re.search(r"^status\((FINAL|PREVIEW|WIP|SUPERSEDED)\b",
+                  (ROOT / "tools" / builder).read_text(), re.M)
+    return m.group(1) if m else "FINAL"
+
+
 def main():
     rebuild = "--no-rebuild" not in sys.argv
     with_wip = "--with-wip" in sys.argv
@@ -267,6 +280,12 @@ def main():
             print(f"---- {name}: WIP, skipped (pass --with-wip to build it)\n")
             continue
         print(f"════════════ {name} + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX ════════════")
+        # A composite must sit on the CURRENT finished feature: a builder that has since been
+        # marked WIP or SUPERSEDED means FEATURES points at a stale base (name the successor).
+        tier = declared_tier(builder)
+        if not wip and tier != "FINAL":
+            sys.exit(f"{name}: {builder} declares {tier}, not FINAL -- point FEATURES at the "
+                     f"builder that replaced it")
         if wip:
             flag(f"{name} is WIP -- see reference/MERGE.md; this image is NOT shippable")
         if rebuild:

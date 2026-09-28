@@ -156,12 +156,14 @@ courtesy, not a lock; `tools/kyoti_status.py` is all of it.
 ### Comprehensive KYOTI Octatrack Firmware build
 
 - **Bugbuilds** — one image per finished feature, with all three bug fixes folded
-  in: MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK and RELOAD3, each as *that
-  feature* + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX. Written to `out/Bugbuilds/`,
-  so the standalone per-feature images are left alone. The features are never
-  combined with each other, which is why there are five images and not one. Every
-  run asserts the composite's changes are exactly the disjoint union of the
-  feature's and the bug fixes' own.
+  in: MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK, RELOAD3 and DIRECTJUMP_V7, each
+  as *that feature* + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX. Written to
+  `out/Bugbuilds/`, so the standalone per-feature images are left alone. The features
+  are never combined with each other, which is why there are six images and not one.
+  Every run rebuilds each feature from its current FINAL builder (and refuses one that
+  has been superseded), then asserts the composite's changes are exactly the disjoint
+  union of the feature's and the bug fixes' own, with every bug fix byte-equal to its
+  current source.
   → [`tools/build_bugbuilds.py`](tools/build_bugbuilds.py)
 
 - **Octatrack KYOTI FW v1.0 / v1.1** *(staged; the single all-in-one image is

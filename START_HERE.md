@@ -148,8 +148,8 @@ changes, change the call and the README table together. Upstream RE repos are tr
 | **TRIGLESS-LOCK AUTO-REMOVE** | `build_triglock.py` | **confirmed, final** 2026-09-21 |
 
 **Composites** — `build_bugbuilds.py` gives each finished feature its **own** image with
-all three bug fixes folded into it: MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK and
-RELOAD3, five images, written only to `out/Bugbuilds/`. Features are never combined with
+all three bug fixes folded into it: MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK,
+RELOAD3 and DIRECTJUMP_V7, six images, written only to `out/Bugbuilds/`. Features are never combined with
 each other. Not flashed; the composition itself is proven by a per-run
 interlock proof. There is deliberately **no single all-in-one image**:
 `tools/build_merged.py` stays withdrawn so a combined build cannot quietly ship an
