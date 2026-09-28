@@ -45,6 +45,16 @@ FIRE_TBL, FIRE_END = 0x80001904, 0x80001904 + 8 * 8 * 4
 PEND_BANK, PEND_PAT = 0x800065BF, 0x800065C0
 STEP_ARR = 0x800064D0
 LAND_PC, TAIL_PC = 0x400A20DE, 0x400A4BE6
+# Pending-event model (stock's own purge at 0x400a43b6-0x400a4464 defines "cancelled":
+# it clears the record long and the slot bit in the track's mask; the time is untouched).
+# Three slots per track, index = track + slot*8, times are sample-clock values.
+EV_TABLES = {  # kind: (times base, mask base)
+    "a": (0x80001904, 0x46C7FE44),   # audio, primary (writer 0x400a2e18)
+    "b": (0x80001984, 0x46C7FE8C),   # audio, secondary table (same purge loop)
+    "m": (0x46C76A26, 0x46C77BE2),   # MIDI tracks 8-15 (as 0-7 here)
+}
+BUILDER_A, BUILDER_A_RET = 0x4009D1E8, 0x400A2D82   # step_handler_confirmed, audio E call
+BUILDER_M, BUILDER_M_RET = 0x4009CF4C, 0x400A39CA   # MIDI twin
 
 SCALARS = {  # name: (addr, size)
     "act_bank": (0x800065BD, 1), "act_pat": (0x800065BE, 1),
@@ -67,6 +77,12 @@ def main(argv):
     ap.add_argument("--start", type=int, required=True)
     ap.add_argument("--switch", action="append", default=[], help="T:PATTERN, cue written at tick T")
     ap.add_argument("--normal-len", action="append", default=[], help="PATTERN=LEN (forces NORMAL mode)")
+    ap.add_argument("--setb", action="append", default=[],
+                    help="PATTERN:OFFSET=VAL -- poke one pattern-blob byte after load (hex ok), e.g. 6:0x8e52=3")
+    ap.add_argument("--setw", action="append", default=[],
+                    help="PATTERN:OFFSET=VAL -- poke one pattern-blob word, e.g. 6:0x8e50=-1 (INF)")
+    ap.add_argument("--extra", action="append", default=[],
+                    help="NAME=ADDR:SIZE -- also record this address every tick (e.g. a cave counter)")
     ap.add_argument("--dj", type=int, default=1)
     ap.add_argument("--ticks", type=int, default=300)
     ap.add_argument("--tag", default="")
@@ -96,6 +112,18 @@ def main(argv):
         blob = 0x400E21E0 + bank * 0x9B340 + pat * 0x8ED8
         rt.uc.mem_write(blob + 0x8E55, b"\x00")
         rt.uc.mem_write(blob + 0x8E53, bytes([ln]))
+    pokes = []
+    for spec, width in [(s, 1) for s in a.setb] + [(s, 2) for s in a.setw]:
+        pat, rest = spec.split(":", 1)
+        off, val = rest.split("=")
+        blob = 0x400E21E0 + bank * 0x9B340 + int(pat) * 0x8ED8
+        v = int(val, 0) & ((1 << (8 * width)) - 1)
+        rt.uc.mem_write(blob + int(off, 0), v.to_bytes(width, "big"))
+        pokes.append([int(pat), int(off, 0), width, v])
+    for spec in a.extra:
+        nm, rest = spec.split("=")
+        ad, sz = rest.split(":")
+        SCALARS[nm] = (int(ad, 0), int(sz))
     rt.seq_select_live(bank, a.start)
     rt.internal_clock()
     rt.frame = True
@@ -103,7 +131,7 @@ def main(argv):
     rt.exact_clock()
     rt.uc.mem_write(DJ_MODE, (1 if a.dj else 0).to_bytes(4, "big"))
 
-    st = dict(tick=0, states=[], fires=[], commits=[], cues=[])
+    st = dict(tick=0, states=[], fires=[], commits=[], cues=[], calls=[])
     pend = list(switches)
 
     def rd(u, addr, n):
@@ -114,6 +142,10 @@ def main(argv):
         s = {k: rd(u, ad, n) for k, (ad, n) in SCALARS.items()}
         for k, base in ARRAYS.items():
             s[k] = list(bytes(u.mem_read(base, 16)))
+        for kind, (tb, mb) in EV_TABLES.items():
+            raw = bytes(u.mem_read(tb, 3 * 8 * 4))
+            s["ev_" + kind] = [int.from_bytes(raw[i * 4:i * 4 + 4], "big") for i in range(24)]
+            s["mask_" + kind] = list(bytes(u.mem_read(mb, 8)))
         s["t"] = st["tick"]
         st["states"].append(s)
         while pend and pend[0][0] == st["tick"]:
@@ -121,6 +153,16 @@ def main(argv):
             u.mem_write(PEND_BANK, bytes([bank]))
             u.mem_write(PEND_PAT, bytes([p]))
             st["cues"].append([st["tick"], p])
+
+    def on_builder(u, addr, size, user):
+        sp = u.reg_read(er.eb.UC_M68K_REG_A7)
+        w = [int.from_bytes(bytes(u.mem_read(sp + 4 * i, 4)), "big") for i in range(6)]
+        ret = w[0]
+        if ret not in (BUILDER_A_RET, BUILDER_M_RET):
+            return
+        sx = lambda v: v - (1 << 32) if v & 0x80000000 else v
+        st["calls"].append([st["tick"], "a" if addr == BUILDER_A else "m",
+                            sx(w[1]), sx(w[2]), sx(w[3]), sx(w[4]), sx(w[5])])
 
     def on_fire(u, access, addr, size, value, user):
         pc = u.reg_read(er.eb.UC_M68K_REG_PC)
@@ -133,6 +175,8 @@ def main(argv):
 
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_tick, begin=TICK_PC, end=TICK_PC)
     rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_fire, begin=FIRE_TBL, end=FIRE_END - 1)
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_builder, begin=BUILDER_A, end=BUILDER_A)
+    rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_builder, begin=BUILDER_M, end=BUILDER_M)
     rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_commit, begin=STEP_ARR, end=STEP_ARR)
     rt.start_transport_live()
     spins = 0
@@ -144,12 +188,13 @@ def main(argv):
             break
 
     meta = dict(image=a.image, project=a.project, start=a.start, switches=switches,
-                normal_len=lens, dj=a.dj, bank=bank, ticks=st["tick"])
+                normal_len=lens, pokes=pokes, dj=a.dj, bank=bank, ticks=st["tick"])
     out = pathlib.Path(a.out)
     if not out.is_absolute():
         out = ROOT / out
     out.write_text(json.dumps(dict(meta=meta, cues=st["cues"], commits=st["commits"],
-                                   states=st["states"], fires=st["fires"])))
+                                   states=st["states"], fires=st["fires"],
+                                   calls=st["calls"])))
     print(f"wrote {out}: ticks={st['tick']} cues={st['cues']} commits={st['commits']} "
           f"fires={len(st['fires'])}")
     return 0

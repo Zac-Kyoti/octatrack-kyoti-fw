@@ -17,10 +17,13 @@ For every segment of RUN during which ACT_PAT == P and a reference for P was giv
   * SHIFT   : when not locked, the tick offset d that best explains the segment
               (RUN(t) == REF(t+d) for per-track STEP+TICKS): d = +6 at 1x = "one step late"
               = the author's audible step-shift.  Reported in ticks and in steps.
-  * FIRES   : (track, fire-tick) events written into the audible fire table 0x80001904
-              for fire times inside the segment, RUN vs REF (slots ignored).  EXTRA = RUN
-              plays something the reference does not (e.g. the outgoing pattern's pending
-              event -- the primacy rule says it must be purged); MISSING = the reverse.
+  * PENDING : what will actually SOUND.  Per tick, every live event (slot bit set in the
+              track's mask -- stock's own cancellation rule, 0x400a43b6) in the two audio
+              tables and the MIDI table, as (table, track, fire-tick, pattern, step), the
+              content taken from the event builder's own arguments.  RUN vs REF at every
+              tick of the segment.  EXTRA = RUN will play something the reference will not
+              (e.g. the outgoing pattern's leftover -- primacy says purge it); MISSING = the
+              reverse.  A landing that fires the right tick with the wrong step shows here.
 """
 import collections
 import json
@@ -54,6 +57,33 @@ def fire_events(d, t0, t1):
     return ev
 
 
+def pending(d):
+    """tick -> frozenset of live events (kind, trk, fire_tick, pat, step)."""
+    calls = sorted(d.get("calls", []))
+    content, ci, out = {}, 0, {}
+    for s in d["states"]:
+        t = s["t"]
+        while ci < len(calls) and calls[ci][0] <= t:
+            ct, kind, trk, bank, pat, step, slot = calls[ci]
+            content[(kind, trk % 8, slot)] = (pat, step)
+            ci += 1
+        ev = set()
+        for kind in ("a", "b", "m"):
+            if "ev_" + kind not in s:
+                continue
+            for trk in range(8):
+                for slot in range(3):
+                    if not (s["mask_" + kind][trk] >> slot) & 1:
+                        continue
+                    rel = (s["ev_" + kind][trk + 8 * slot] - s["sclk"]) & 0xFFFFFFFF
+                    if rel & 0x80000000:
+                        rel -= 1 << 32
+                    c = content.get(("a" if kind == "b" else kind, trk, slot), (None, None))
+                    ev.add((kind, trk, round(t + rel / TICK_UNITS, 2)) + c)
+        out[t] = frozenset(ev)
+    return out
+
+
 def vec(s, keys_arr, keys_scl):
     return tuple(tuple(s[k]) for k in keys_arr) + tuple(s[k] for k in keys_scl)
 
@@ -78,6 +108,8 @@ def main(argv):
     segs.append((cur, t0, ts[-1] + 1))
 
     worst = "PASS"
+    run_pend = pending(run)
+    ref_pend = {k: pending(r) for k, r in refs.items()}
     for pat, a, b in segs:
         ref = refs.get(pat)
         print(f"\n-- segment pattern {pat}  ticks [{a},{b})  ({b - a} ticks)")
@@ -127,14 +159,28 @@ def main(argv):
             d, sc, n = best
             tag = "IN PHASE" if d == 0 else f"SHIFTED {d:+d} ticks = {d / tps:+.2f} steps at 1x"
             print(f"   SHIFT : best fit d={d:+d} ({sc:.0%} of {n} ticks match) -> {tag}")
-        rf, ff = fire_events(run, a, b), fire_events(ref, a, b)
-        extra, missing = rf - ff, ff - rf
-        print(f"   FIRES : run {sum(rf.values())} ref {sum(ff.values())}  extra {sum(extra.values())}  missing {sum(missing.values())}")
-        for tag_, c in (("extra", extra), ("missing", missing)):
-            if c:
-                print(f"           {tag_}: {sorted(c.elements())[:10]}{' ...' if sum(c.values()) > 10 else ''}")
-        if extra or missing:
-            worst = "FAIL"
+        if run["states"] and "ev_a" in run["states"][0] and "ev_a" in ref["states"][0]:
+            rp = ref_pend[pat]
+            bad_t = [t for t in range(a, b) if t in rp and run_pend.get(t) != rp[t]]
+            extra = set().union(*[run_pend[t] - rp[t] for t in bad_t]) if bad_t else set()
+            missing = set().union(*[rp[t] - run_pend[t] for t in bad_t]) if bad_t else set()
+            if not bad_t:
+                print(f"   PENDING: IDENTICAL at every tick of the segment (what will sound, with content)")
+            else:
+                print(f"   PENDING: {len(bad_t)} ticks differ (first t{bad_t[0]}, last t{bad_t[-1]}); "
+                      f"distinct extra {len(extra)} missing {len(missing)}")
+                for tag_, c in (("extra", extra), ("missing", missing)):
+                    if c:
+                        print(f"           {tag_}: {sorted(c, key=lambda e: (e[2], e[0], e[1]))[:8]}"
+                              f"{' ...' if len(c) > 8 else ''}")
+                worst = "FAIL"
+        else:
+            rf, ff = fire_events(run, a, b), fire_events(ref, a, b)
+            extra, missing = rf - ff, ff - rf
+            print(f"   FIRES (legacy, written events): run {sum(rf.values())} ref {sum(ff.values())}  "
+                  f"extra {sum(extra.values())}  missing {sum(missing.values())}")
+            if extra or missing:
+                worst = "FAIL"
     print(f"\nVERDICT: {worst}")
     return 0 if worst == "PASS" else 1
 

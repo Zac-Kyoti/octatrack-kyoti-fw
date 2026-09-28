@@ -12,8 +12,20 @@ the master's from SCALE_IX, lengths from where each counter wraps in the trace i
 The model under test (measured on the 1x NORMAL references, sample point = phase-G
 entry of the ISR counted t = 1, 2, ... from the first running tick):
 
-    track  t : step  = (floor(t / tps_t) + 1) mod len_t      ticks = t mod tps_t
     master   : mstep = (floor((t-1) / tps_M) + 1) mod mlen   mtick = (t-1) mod tps_M
+    track  t : t'    = ((t + tps_M - 1) mod (mlen * tps_M)) - (tps_M - 1)
+               step  = (floor(t' / tps_t) + 1) mod len_t      ticks = t' mod tps_t
+
+Fast tracks (tps_t < tps_M) do NOT snap at the master wrap: stock's wrap-change defers
+their landing by a per-track countdown, so for t' in [-(tps_M-1), -tps_t] they keep
+free-running their previous cycle (t' + C).  Measured on rl_x_scl (3/2x track, 2 ticks)
+and rl_x_ml7 (2x track, 3 ticks).  V7's landings are at t' >= 0, outside this window.
+
+t' is the time within the current MASTER CYCLE: in PER-TRACK mode the master length
+restarts every track (measured on DJTEST2 A07/A08 and DJMAST2 1: a 12-step track snaps to
+step 0 at the 16-step master's wrap).  In NORMAL mode every track shares the master's
+length, so t' only removes whole track cycles and the formula reduces to
+step = (floor(t/tps)+1) mod len.
 
 A reference whose engine does something else (PER-TRACK master-length resets, slower
 tracks restarting mid-step, INF) shows up here as a mismatch -- that is the point: the
@@ -52,17 +64,24 @@ def main(argv):
             tps = LEN_TBL[s0["trk_scale"][trk]]
             ln = infer_len([s["step"][trk] for s in S])
             bad = []
+            C = mlen * tpsM if mlen else None
             for s in S:
                 t = s["t"]
-                exp_step = (t // tps + 1) % ln if ln else (t // tps + 1)
-                if s["ticks"][trk] != t % tps or (ln and s["step"][trk] != exp_step):
+                tl = ((t + tpsM - 1) % C) - (tpsM - 1) if C else t
+                if C and tps < tpsM and t > C - tpsM and -(tpsM - 1) <= tl <= -tps:
+                    tl += C                    # fast track: deferred landing, previous cycle runs on
+                exp_step = (tl // tps + 1) % ln if ln else (tl // tps + 1)
+                if s["ticks"][trk] != tl % tps or (ln and s["step"][trk] != exp_step):
                     bad.append(t)
             tag = "MODEL OK" if not bad else f"{len(bad)} mismatches, first t{bad[0]}"
             if bad:
                 s = next(x for x in S if x["t"] == bad[0])
                 t = s["t"]
+                tl = ((t + tpsM - 1) % C) - (tpsM - 1) if C else t
+                if C and tps < tpsM and t > C - tpsM and -(tpsM - 1) <= tl <= -tps:
+                    tl += C
                 tag += (f"  (engine step={s['step'][trk]} ticks={s['ticks'][trk]}; model "
-                        f"step={(t // tps + 1) % ln if ln else '?'} ticks={t % tps})")
+                        f"step={(tl // tps + 1) % ln if ln else '?'} ticks={tl % tps})")
             print(f"   trk{trk:<2} tps={tps:<3} len={ln if ln else '?':<3}: {tag}"
                   + ("" if ln else "  (no wrap in trace: step only checked for ticks)"))
             worst |= bool(bad)
