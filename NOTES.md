@@ -33113,3 +33113,107 @@ START-LOCK; odd-meter 12-step "3/4 bar" wants STOCK).
 
 **NEXT: hardware.** Flash `out/OCTATRACK_OS1.40C_DIRECTJUMP_V7.syx` (140C_KDJ7). Then V7.1 =
 mid-window landing to remove the slow-track latency, designed from oracle measurements.
+
+## Session 109 (2026-09-27, `main`) — rev 9: ATTR refresh restored; gate 2 PROVEN; the RPS9/RPSP DSP kernel PROVEN on both cores in emulation; placement blocked on a donor decision
+
+**Flash 10 (rev 8):** everything good except a regression — under SETUP AUTO,
+an ATTR TIMESTRETCH change no longer flipped the knob until a page press /
+transport cycle. Cause: rev 7 removed the knob's `0x14` "value changed" mark
+everywhere (to cure the stuck popup after page-2 TSTR switches), which also
+removed what made an ATTR edit repaint — returning from the audio editor is
+**not** a full page redraw. **Fix: the mark comes from `rp_refresh` (the ATTR
+path) only, unconditionally** (the per-frame `rate_gate` poll can consume the
+gate transition first; an ATTR TIMESTRETCH edit is a rare deliberate act, so
+one ordinary pop-and-fade on return is the right trade). Page-2 stays
+mark-free. Every stock editor writes this same mark after a store
+(`0x40039510`, `0x4005543c`, ...), so this makes an ATTR edit look exactly
+like a knob edit. **Oracle contract 10** locks it in.
+
+### Gate 2 (the scope's #1 risk) — PROVEN statically, end to end
+- `rate_hook` leaves the tagged increment in `d0` (its restore list excludes
+  it); stock then stores that same `d0` to `state+36` **and** to the DSP
+  voice-command record's `+8` (`0x40004104` / `0x40004116`).
+- The idle record `{0, 0, 0x04000000, 0}` must decode to exactly 1.0 on the
+  DSP, which holds **only** for right-justified hi16:lo16 packing; with it the
+  voice engine's rebuild (`P:0x3bd asr #16`, `P:0x3bf asr #10`) is a **net
+  `>>2`**: Q26 in, Q24 out, **bits 0-1 discarded**. The rev-1..8 tag position
+  was therefore unreadable on the DSP.
+- ⇒ **the mode moves to Q26 bits 2-3**, which land in the Q24 fraction LSBs
+  at the **fixed address `y:$40`** (`l:$40` = this voice's increment, stored
+  once at `P:0x3c6` and unchanged through the table build and kernel).
+- **One increment per voice** serves all its segments (`P:0x3fc` loads `x`
+  once; the segment loop refreshes only phase and count).
+- **Collision hazard found and closed.** Stock increments have arbitrary low
+  bits (PTCH +1 st = 1.0594631…), so a stock track would read as RPS9/RPSP by
+  chance. **All five increment writers audited:** four store the literal
+  `0x04000000` (`0x40004028` idle, `0x40004448`, `0x4000468c`, `0x40004804`);
+  the only variable one is the builder at `0x40004116`, fed by `rate_hook`'s
+  `d0`. So `rate_hook` now **clears bits 2-3 on every increment** before any
+  tagging ⇒ the channel is collision-free **by construction**. Honest cost:
+  stock tracks are no longer bit-identical to stock — they differ in exactly
+  increment bits 2-3 (≤ 12·2⁻²⁶ relative, inaudible). Oracle contracts 1 and 3
+  restated precisely to that: *stock with only bits 2-3 cleared*.
+
+### The DSP kernel — `tools/patch_repitch_dsp.asm` (27 words), PROVEN
+Voice engine: payload A `P:0x3a1`, payload B `P:0x1a4`, **identical code
+relocated by `0x1fd`** (two DSP cores). Exact tail layout: `P:0x40f do
+r7,>$41b` (LA `0x41a`), **`P:0x41b` = NOP** = the outer per-voice `do #2`'s
+closing instruction (branches illegal there), `P:0x41c` = after the outer loop
+(once per call). ⇒ per-voice work must hook **before** the kernel.
+- **Hook A `P:0x40b` / B `P:0x20e`**: `move x:(r5),n6` / `move y:(r5)+,a`
+  (76e500 5edd00) displaced to the cave tail, replaced by `bsr_long`.
+- **mode = `y:$40 & 3`**, loaded into a *cleared* `a1` (`move y:,a` would
+  sign-extend into `a2` and break `tst`).
+- **RPS9 & RPSP: truncate the 128-word source ring to 12 bits**
+  (`and #$fff000`), walking `r6` under stock `m6=$7f` so it returns to its
+  start. The faithful model: the S950/SP-1200 **stored** 12-bit samples.
+- **RPSP: zero the `r7`-entry fraction table at `y:$80`** ⇒ the **untouched**
+  stock kernel computes `L0·1 + L1·0` = exact zero-order hold.
+- **The stock kernel is never modified**; relies on stock's own `r7 ≥ 1`
+  (stock's `do r7` is unguarded); uses only a, b, x1, r1 (all reloaded by
+  stock before next use).
+
+**Oracle: `tools/repitch_dsp_check.py` → `tools/repitch_dsp_probe.cpp`** runs
+the **real stock kernel** on our vendored `dsp56kEmu`, from the hook to the
+closing NOP, unpatched and patched, both payloads, n ∈ {1, 5, 64} × 3 modes.
+Reference = **stock itself on transformed input** (no hand model of DSP
+arithmetic): RPCH ≡ stock; RPS9 ≡ stock on the 12-bit ring; RPSP ≡ stock on
+the 12-bit ring with zeroed fractions **and** ≡ q12(L0), q12(R0) directly.
+Also checks ring + table side effects and the carried registers r0 r2 r3 r4
+r5 r7 m6 + stack. **22/22 PASS on both cores.** Every case forces a first
+entry at ring offset `0x7e`, so the wrap is exercised.
+
+**Four toolchain traps found this session (all recorded in the sources):**
+1. **`dsp_asm` label lookup matches on PREFIX**: with an entry label `rpd`,
+   `beq rpd9` assembled as `beq -$69` (backwards to a forward label) and was
+   rejected. `rpd9` itself was fine once `rpd` was gone — no label may be a
+   prefix of another.
+2. **`dsp_asm`'s `bsr >$1000` takes `$1000` as a literal DISPLACEMENT**, not a
+   target (`[0d1080, 001000]` vs `bsr_long`'s correct `[0d1080, 000bf5]` from
+   `0x40b`). Hooks use `build_sidechain3.bsr_long`, the convention
+   SIDECHAIN3_CROSS's hardware-confirmed hooks use. (Label-targeted branches
+   *inside* the cave assemble correctly: displacement = target − site.)
+3. **dsp56kEmu ignores a POKED `m6`** — its address-generation mode is cached.
+   RPS9/RPSP failed until the probe set `m6` by **executing** stock's own
+   `move #$7f,m6` (057fa6) in a prelude; the cave was never wrong. Worse, the
+   earlier RPCH "passes" were weaker than they looked (both sides read the
+   same unwrapped words). Anything testing modulo addressing must set `m`
+   registers by instruction.
+4. **Short absolute `jmp $40b` → `0c040b`**; `jmp >$abs` / `jmp <$abs` are
+   rejected by `dsp_asm`.
+
+### Placement — BLOCKED on a user decision
+octabam's measured ledger (`CHIP.md` §4): **"free pool elsewhere: none"**;
+more space means taking a stock effect's whole module. **`P:0x2000` is ruled
+out** — it is past the configured program RAM ("payload A's P code ends at
+`0x01fdf`, 33 words short of `0x2000`… the wall by a setting, not silicon"),
+and executing there **hung three times** in octabam's bring-up. My scope
+leaned on it; that was wrong. **The SPRING REVERB donor** (1063 words) holds
+SIDECHAIN3_CROSS's 388 (340 code + 16 gain + 32 filter) ⇒ **675 words free**
+at its tail — the cave needs 27. Options put to the user: merged on top of
+SIDECHAIN3_CROSS (zero extra cost; spring is already the sidechain's donor),
+standalone taking spring reverb itself, or a different donor.
+
+**Rev 9 mainline (flashable, ColdFire only): mainos `d9389296…`, syx
+`70cba8b7…`** (2331 B, 0 strays, ColdFire cave `0x400d6f80..0x400d7af4`,
+12 B left). ColdFire oracle 10/10.

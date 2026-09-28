@@ -243,6 +243,15 @@ pitch_gate:
 rate_hook:
         .word   0xa1c0                  | displaced: movclr.l %acc0,%d0 (V4e)
         asr.l   %d6,%d0                 | displaced
+        | Bits 2-3 are the DSP mode channel (see .rh_tag), so they are cleared
+        | on EVERY increment this builder emits, tagged or not. Otherwise a
+        | stock track -- PTCH +1 st is 1.0594631..., low bits arbitrary --
+        | would read as RPS9/RPSP on the DSP by chance. The four other
+        | increment writers (0x40004028/0x40004448/0x4000468c/0x40004804) all
+        | store the literal 0x04000000, so with this every increment reaching
+        | the DSP has bits 2-3 == 0 unless a repitch track tagged it.
+        | Cost to stock tracks: <= 12*2^-26 of the increment, inaudible.
+        andi.l  #0xfffffff3,%d0
         tst.l   %d3
         beq     .rh_store
         lea     -20(%sp),%sp

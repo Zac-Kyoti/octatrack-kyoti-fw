@@ -38,19 +38,15 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (gate 1, rev 8)", """
-Flash 9's feel was right; its remaining complaint -- 1/1 no longer centred,
-3 stops left of it and 4 right -- was the RATIO LIST, not the dial: 5/4
-(+386c) had no mirror at -386c. Rev 8 adds 4/5, making the nine values
-pitch-symmetric about 1/1, which lands 1/1 on stop 64: the dial's exact
-centre AND stock's own neutral PTCH value. Stops are 4 + 15*idx
-(4 19 34 49 64 79 94 109 124), one scale for display and storage, so the
-dual-scale hack from rev 6.1 is gone -- which recovered enough bytes to pay
-for the extra ratio and then some. QS_FINE=3 feel unchanged.
-All 9 oracle contracts green.
-*** Cave 0x400d6f80..0x400d7ae4, 28 B under the bugbuilds base. ***
-NOTE: a project saved with a NON-1/1 QUAN shifts one ratio, since the stop
-scale moved; 1/1 (the default, and stop 64) is unaffected.
+status(WIP, "REPITCH KYOTI (rev 9: ColdFire complete; DSP proven, not installed)", """
+This image restores the ATTR-driven PTCH<->QUAN refresh (a rev-7 regression)
+and carries the final mode channel: the mode rides Q26 bits 2-3 of the
+increment, and bits 2-3 are cleared on EVERY increment, so the DSP can never
+misread a stock track. RPS9/RPSP still SOUND like RPCH here -- the DSP half
+(tools/patch_repitch_dsp.asm, 27 words) is proven on both cores in
+emulation (tools/repitch_dsp_check.py) but not installed: it needs a donor
+module, which is a user decision (no free DSP program memory exists).
+ColdFire oracle 10/10.
 """)
 
 BASE = 0x40000400
