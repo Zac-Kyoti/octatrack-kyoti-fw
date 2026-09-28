@@ -204,63 +204,57 @@ below instead.
    the `'ANDY'` battery-SRAM shadow). An EMPTY RESET clears it to factory.
 7. Regression: the manual-trig fix still works; other tracks unaffected.
 
-### 4.3  DIRECT JUMP  (`KYOTI_ALLOW_WIP=1 python3 tools/build_directjump_v6.py` — WIP; **V6**, Session 105)
-> **⚠️ Read this before flashing.** V6 is a rewrite: the sequencer is re-landed through
-> stock's own landing path on the next master step boundary (AR's commit), with two 6-byte
-> hooks and nothing else in the sequencer touched. **It has not been on hardware.** The
-> previous line's "gold" image (Session 87) was **retracted** 2026-09-26 — fractional steps
-> at 1x, NORMAL mode, 16 ↔ 7-step patterns — so there is no confirmed DIRECT JUMP image to
-> return to; revert = stock. Test order on V6: the 16 ↔ 7 NORMAL-mode case first (the
-> retraction case), then steps 1-9 below, then step 10 (master scales — expected to be
-> imperfect: AR itself lurches there).
+### 4.3  DIRECT JUMP  (`python3 tools/build_directjump_v7.py` — **HARDWARE-CONFIRMED, FINAL**, V7, MKI 2026-09-27)
+> **What V7 does.** A cued pattern takes over on the next step and lands **exactly where it
+> would be had it been playing since START** — every track, whatever its length, track
+> scale, master length or master scale — so it is never shifted by a step and never a
+> fraction of a step off against the master clock (internal or external MIDI clock).
+> The outgoing pattern's pending trigs are dropped at the jump (the new pattern's first
+> trig always wins). Jumping *into* a pattern with slow tracks (1/2x, 1/4x) waits until
+> every track reaches a step start — up to about two or four steps. OS VERSION reads
+> **`140C_KDJ7`** (diag variant `140C_KDJ7D`).
 >
-> **Also still open, and NOT explained by that fix:** a report that which steps get
-> visited depends on what trigs are on the grid, and that the LEDs and the audio
-> disagree about the position. No measured write path reads trig data, so this is a
-> separate mechanism. If you see it, it is a known unknown, not a new regression.
->
-> **`v1`–`v3` are dead on hardware and must not be reflashed.** Holding `[PTN]`
-> pushes a stock UI overlay whose `[YES]` record has a NULL press handler, which
-> overwrites the runtime dispatch slot for as long as `[PTN]` is held — so their
-> detour on the stock `[YES]` handler (`0x4005e4c8`) was genuinely unreachable.
-> `v4` writes `dj_toggle` straight into that overlay's own `[YES]` record instead.
-> Two other hardware faults were found and fixed along the way: a **lockup at
-> transport start** (a hook gated on a global living beyond the boot zero-fill, so
-> garbage at power-on) and **doubled trigs** (writing a per-track "previous step"
-> array that stock's commit tail deliberately leaves alone).
+> **Revert options:** stock, or **V6.4** (`KYOTI_ALLOW_SUPERSEDED=1 python3
+> tools/build_directjump_v6.py`, `140C_KYOTI`) — hardware-good, and exactly the Analog Rytm's
+> DIRECT JUMP, shifts included; kept for side-by-side listening. **`v1`–`v3` are dead on
+> hardware and must not be reflashed**; v4–v5 (the retracted Session 87 "gold" line) are
+> superseded. History: `NOTES.md` Sessions 60–108.
 
-1. Hold **[PTN]** and tap **[YES]** → a transient **"DIRECT JUMP ON"** overlay
-   (~0.7 s), then **OFF** on the next chord. The SELECT PATTERN chooser must not
-   pop on the `[PTN]` release.
-2. **It does not persist.** Power-cycle → DIRECT JUMP is **OFF** again. That is
-   deliberate: it is a performance toggle.
-3. With DIRECT JUMP **ON**, play a pattern and manually cue another (different
-   Part): it switches on the **next step tick**, loads the new Part at once, and a
-   MIDI Program Change goes out ~1 step early.
-4. **The behaviour to verify, all at 1x:**
-   - tracks and patterns stay in **master time** through the switch — check
-     against the metronome, it must not drift or re-anchor to your keypress;
-   - the new pattern lands on the **correct step**;
-   - **mixed track lengths** in one pattern work together — try 7, 12 and 16;
-   - **MASTER LENGTH is respected**, including **`INF`**;
-   - existing trigs sound **once**, not doubled.
-5. The **arranger** and **pattern chains** must be unchanged (DIRECT JUMP bails
-   when the arranger is running or a chain is active).
-6. Turn it **OFF** → manual pattern changes are stock again (end-of-pattern
-   quantised, restart at step 1).
-7. **[PTN] tapped alone** (no `[YES]`) still opens SELECT PATTERN normally.
-8. **Non-1x scales — the unverified part.** Set a **track scale** to something
-   other than 1x (say 2x on one track, 1x on the rest) and repeat step 4; then set
-   the **master scale** to 2x and repeat again. Each track must land on its own
-   correct step and stay in master time, exactly as the 1x case does. This is the
-   2026-09-24 fix and it has never been heard on hardware.
-9. Watch for the open report while you are there: do the **LEDs and the audio agree**
-   about where the playhead is, and does changing *which trigs are on the grid* change
-   which steps get visited? Both would be the unexplained issue in the callout above.
+1. Hold **[PTN]** and tap **[YES]** → a transient **"DIRECT JUMP ON"** toast, then **OFF**
+   on the next chord. The SELECT PATTERN chooser must not pop on the `[PTN]` release.
+2. **It does not persist.** Power-cycle → DIRECT JUMP is **OFF** again. Deliberate: it is a
+   performance toggle.
+3. With DIRECT JUMP **ON**, play a pattern and cue another: it takes over on the next step,
+   the switched-to pattern's LED turns red **at the jump**, the MIDI Program Change goes out
+   when you cue, and **no MIDI START** is sent.
+4. **The behaviour to verify — against the metronome:**
+   - a 16-step and a 7-step pattern, NORMAL mode, switched both ways at many different
+     moments: the 16-step pattern's trigs always fall on the same pulses (trigs on 1, 5, 9,
+     13 stay on pulses 1, 5, 9, 13) — **never shifted, never fractional**;
+   - **master scale 1x ↔ 2x** switches: no lurch, no half-step landings;
+   - PER-TRACK patterns with mixed track lengths and track scales, and **MASTER LENGTH**
+     including **`INF`**;
+   - a track with **swing / microtiming**: its first trig after the jump is in time;
+   - every trig sounds **once** at the jump, not doubled.
+5. **Rapid switching**: stays instant for as long as you keep switching — it must never fall
+   back to waiting for the end of the pattern.
+6. The **arranger** and **pattern chains** are unchanged (DIRECT JUMP stays out of the way
+   while the arranger is running or a chain is active).
+7. Turn it **OFF** → pattern changes are stock again (end-of-pattern quantised, restart at
+   step 1).
+8. **[PTN] tapped alone** (no `[YES]`) still opens SELECT PATTERN normally.
+9. **MIDI tracks** — *not yet confirmed on hardware.* Jump into a pattern whose MIDI track
+   sequences a synth: its notes must land on the same pulses as the audio tracks.
 
-> Still not validated: the non-1x fix on hardware (above), two patterns with
-> differing MASTER LENGTHs (no fixture), and per-track sub-step phase at a mid-cycle
-> commit. Detail: `NOTES.md` "Session 60"–"Session 88".
+> Hardware-confirmed 2026-09-27: the 16 ↔ 7 case, master 1x ↔ 2x, swing / microtiming and
+> rapid switching, plus the toggle / LED / persistence behaviour carried over from V6.4.
+> Emulator-proven but not separately exercised on hardware: PER-TRACK patterns with mixed
+> lengths and 2x…1/4x track scales. **MASTER LENGTH `INF` has no jump exercised yet**
+> (position model only). MIDI tracks: pending (step 9). Not exercised anywhere:
+> MIDI Song Position Pointer relocation under external sync, pause/continue, and whether
+> cycle-counting trig conditions (1:2, A:B) should follow "since START" (they follow stock's
+> own counters). An old report from the V1–V5 line — visited steps depending on the trigs
+> present, LEDs and audio disagreeing — has not been reported on V7.
 
 ### 4.4  Side-chain compressor  (`build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` — **HARDWARE-CONFIRMED, FINAL**, MKI 2026-09-20, single-core and cross-core both)
 
@@ -693,8 +687,8 @@ Now the patched code is suspect. Isolate it:
 
 ### (c) It boots and runs, but a feature doesn't work
 
-- **Did the flash take?** OS VERSION should read `140C_KYOTI` (fix-only build:
-  still `1.40C`, so test by behaviour). PERSONALIZE is reset by every flash — the
+- **Did the flash take?** OS VERSION should read `140C_KYOTI` (DIRECT JUMP V7:
+  `140C_KDJ7`; fix-only build: still `1.40C`, so test by behaviour). PERSONALIZE is reset by every flash — the
   mods are off until you re-enable them.
 - **Re-run the exact test** from §4 for that feature.
 - **A regression** (something that worked on stock now misbehaves): note the exact
@@ -763,13 +757,15 @@ OCTATRACK_*.bin                   CF-card OS UPGRADE transport (faster)
 | `python3 tools/build_qlrec.py [VERSTR] [LIVE_DUR]` | `140C_KYOTI` | Bug-1 fix + QUANTIZE LIVE REC front-panel toggle, toast-gated — **hardware-confirmed working** (2026-09-25) |
 | `python3 tools/build_sidechain3.py` → `OCTATRACK_SIDECHAIN3_CROSS` | `140C_KYOTI` | Bug-1 fix + the full **SIDE-CHAIN COMPRESSOR** (`KEY` / `KFLT` / `KGN` / `MON`, `KEY` reaching any of the 8 tracks, cross-core) |
 | `python3 tools/build_triglock.py` | `1.40C` | fix only: auto-remove an emptied trigless lock |
-| `KYOTI_ALLOW_WIP=1 python3 tools/build_directjump_v5.py` | `140C_KYOTI` | Bug-1 fix + **DIRECT JUMP** (`[PTN]`+`[YES]`), V5.11 — *WIP: gold line + master seed, hardware check pending; non-1x master scales open* |
+| `python3 tools/build_directjump_v7.py` | `140C_KDJ7` | Bug-1 fix + **DIRECT JUMP V7** (`[PTN]`+`[YES]`): clock-locked jumps — **hardware-confirmed, final** (2026-09-27) |
 | `python3 tools/build_reload3.py` | `140C_KYOTI` | Bug-1 fix + **RELOAD FROM PROJECT**, two chords (`[PTN]`/`[BANK]` + `[TRACK n]`) — **hardware-confirmed, final** (2026-09-25) |
 | `python3 tools/build_bugbuilds.py` | per-image | each finished feature **with all three bug fixes folded in** → `out/Bugbuilds/` |
 
 Superseded, kept only for rollback and reference — **do not flash**:
 `build_mutemode.py` / `build_mutemode_new.py` / `build_softmute.py` (pre-four-mode),
-`build_directjump.py` / `_v2` / `_v3` (dead on hardware), `build_directjump_v4.py` (the gold
-line's original builder; at HEAD it no longer reproduces gold — use commit `16df386`),
+`build_directjump.py` / `_v2` / `_v3` (dead on hardware), `build_directjump_v4.py` / `_v5.py`
+(the retracted "gold" line; at HEAD v4 no longer reproduces gold — use commit `16df386`),
+`build_directjump_v6.py` (V6.4, the OT↔AR parity build — hardware-good, the one superseded
+image that is safe to flash, for side-by-side listening),
 `build_reload.py` / `build_reload2.py` (the picker designs),
 `build_sidechain.py` / `build_sidechain2.py` (intermediate stages).

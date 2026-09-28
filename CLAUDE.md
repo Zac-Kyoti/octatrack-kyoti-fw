@@ -126,9 +126,9 @@ built and waiting.
   the unit between the chord and the worker — it reloaded MIDI track 6 instead
   of audio track 1 and said RELOADED.** RELOAD3 now keeps them in its cave, and
   `build_reload3.py` refuses any reference into `0x80006a40..0x80006abf`.
-  ⚠️ DIRECT JUMP (`0x80006a40-4a`) still keeps state there; its flag is
-  re-armed every tick so a clobber would be invisible rather than absent.
-  NOTES "Sessions 94-96", "Session 98".
+  DIRECT JUMP V6 and V7 keep all their state in the cave too, and
+  `build_directjump_v{6,7}.py` refuse the same range (the V1–V5 line kept state at
+  `0x80006a40-4a`). NOTES "Sessions 94-96", "Session 98".
 - **When hardware and the emulator disagree, build a diagnostic, don't reason.**
   Three flashes of this one were spent on theories that all survived static
   analysis and emulation; a build whose toast *named* the failing condition

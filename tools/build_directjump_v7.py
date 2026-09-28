@@ -34,15 +34,12 @@ Outputs: out/mainos_directjump_v7.bin, out/elek_directjump_v7.bin,
 import hashlib, os, pathlib, subprocess, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from kyoti_status import status, WIP
+from kyoti_status import status, FINAL
 
-status(WIP, "DIRECT JUMP V7", """
-Session 107/108: V7.0 = the CLOCK-LOCKED landing on V6.4's machinery.  The incoming
-pattern lands where it would be had it played since START (absolute clock ticks, model
-verified against the engine's own reference runs), on a tick where every track is at a
-window start; primacy purge of the outgoing pattern's pending events.  Graded by
-tools/cmp_reflock.py (state + live-event equality with a never-switched reference).
-Not flashed.""")
+status(FINAL, "DIRECT JUMP V7", """
+Clock-locked DIRECT JUMP: a jump lands the new pattern exactly where it would be had it
+played since START.  Hardware-confirmed 2026-09-27 (MIDI tracks: emulator-locked only).
+""")
 
 BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent

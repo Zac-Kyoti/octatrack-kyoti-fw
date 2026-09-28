@@ -4,13 +4,15 @@
 """
 Bugbuilds -- each finished FEATURE build, with all three BUG FIXES folded in.
 
-Four composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
+Six composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
 not written alongside, the standalone per-feature images in out/):
 
     MUTEMODE_DT        + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
     QLREC              + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
     SIDECHAIN3_CROSS   + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
     TRIGLOCK           + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
+    RELOAD3            + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
+    DIRECTJUMP_V7      + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
 
 Method -- compose onto the finished feature image, do not re-implement it.
 Each feature builder is run first (so the base is current), then the bug-fix caves are
@@ -74,11 +76,10 @@ BUGFIX = {
 }
 
 # --- the feature bases: name -> (builder, base image, VERSTR, wip, blurb) -------------
-#   wip=True is skipped unless --with-wip is passed.  DIRECT JUMP is not finished (see
-#   reference/MERGE.md); RELOAD3 was finished on 2026-09-25 and is now a normal feature
-#   above.  Session 105: the DIRECT JUMP entry targets build_directjump_v6.py (v4 and
-#   v5 are SUPERSEDED; the Session 87 "gold" image was retracted on hardware).  Its
-#   bug-fix fold was re-checked against V6's cave by running this script with --with-wip.
+#   wip=True is skipped unless --with-wip is passed.  RELOAD3 was finished on 2026-09-25
+#   and DIRECT JUMP V7 on 2026-09-27 (Session 108, hardware-confirmed); both are normal
+#   features.  V4, V5 and V6.4 are SUPERSEDED (V6.4 = the OT<->AR parity build).  V7's
+#   cave (0x400d7400..) was checked DISJOINT from the bug-fix caves by this script.
 FEATURES = {
     "MUTEMODE_DT": ("build_mutemode_dt.py", "out/mainos_mutemode_dt.bin", "BUG_MUTEDT", False,
                     "PERSONALIZE -> MUTE MODE: OT | OTFX | OTFX-T | DT-T (default OT)."),
@@ -92,11 +93,10 @@ FEATURES = {
                  "A trigless lock whose last param is LIVE-erased clears from the trig row."),
     "RELOAD3": ("build_reload3.py", "out/mainos_reload3.bin", "BUG_RL3", False,
                 "[PTN]+[TRACK n] reload track n's saved sequence; [BANK]+[TRACK n] also re-applies the Part."),
-    # --- not finished; build with --with-wip ---------------------------------------
-    "DIRECTJUMP_V6": ("build_directjump_v6.py", "out/mainos_directjump_v6.bin", "BUG_DJV6",
-                      True, "WIP: hold [PTN], tap [YES] -> DIRECT JUMP on/off (V6.4, the OT<->AR parity build)."),
     "DIRECTJUMP_V7": ("build_directjump_v7.py", "out/mainos_directjump_v7.bin", "BUG_DJV7",
-                      True, "WIP: hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.0, clock-locked jumps)."),
+                      False, "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7, clock-locked jumps)."),
+    # --- not finished; build with --with-wip ---------------------------------------
+    # (none at present: DIRECT JUMP V7 shipped 2026-09-27; V6.4 is SUPERSEDED)
 }
 
 PROBLEMS = []

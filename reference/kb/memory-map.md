@@ -440,14 +440,48 @@ Both failures were the same shape:
 > grepping the existing source finds this entry — search `PAT_SMODE` or `0x8e55`, which
 > appear in both threads.
 
+### Sequencer timing facts measured for DIRECT JUMP V7 (Session 108, 2026-09-27)
+
+> source: our own RE — emulator measurement against never-switched reference runs
+> (`tools/diag_reflock.py`, `tools/model_reflock.py`) + disassembly of our image.
+> confidence: **H** (every item measured; the model is exact on 10 references).
+
+- **The metronome** — phase I `0x400a4d36`, every running tick while `0x80006510 == 1`:
+  `0x80006512` tick-in-beat vs `0x400aba6c[setting 0x8000005c]` (beat length:
+  96/48/24/12/6 ticks), click timestamp `0x800019ec` = sample clock, accent
+  `0x46c80350` = 3 (beat 0 of the bar) / 1, `0x80006511` beat-in-bar wrapped at
+  `0x8000005b`. It never reads the pattern's master step `0x800065b2` (the pulse flags built
+  from `0x800065b2` at `0x400a4264` are pattern-relative, not the click).
+- **Position of a never-switched pattern at tick t** (t = 1 on the first running tick,
+  sampled at phase-G entry `0x400a3fdc`): master `m_step = (⌊(t−1)/tps_M⌋+1) mod mlen`,
+  `m_tick = (t−1) mod tps_M`; tracks `t' = ((t + tps_M − 1) mod C) − (tps_M − 1)` with
+  `C = mlen·tps_M` (none for INF), `step = (⌊t'/tps_t⌋+1) mod len_t`, `ticks = t' mod tps_t`.
+  PER-TRACK master length restarts every track; tracks faster than the master free-run
+  `tps_M − tps_t` ticks past each master wrap (stock's deferred landing).
+- **Scheduler**: at each window start a track calls the event builder and writes one event
+  that fires `tps` ticks later; the step that *sounds* is the one the counter showed one step
+  earlier. Builder: audio `0x4009d1e8` (called `0x400a2d7e`), MIDI `0x4009cf4c` (called
+  `0x400a39c6`), args `(track, bank, pattern, step, slot)` on the stack.
+- **Event tables** (3 slots/track, index `track + slot·8`): audio `0x80001904` (times) /
+  `0x46c7e998` (records) / `0x46c7fe44` (slot masks); second audio table `0x80001984` /
+  `0x46c7faa4` / `0x46c7fe8c`; MIDI `0x46c76a26` / `0x46c769c0` / `0x46c77be2` (MIDI clock
+  `0x46107564`). **Cancelled = record cleared + slot bit cleared** (stock's purge
+  `0x400a43b6`–`0x400a4464`); the time is left alone, so "pending" means "slot bit set".
+- **Stock landing loader's scale resolution** (`0x400a2124`–`0x400a21e2`): NORMAL → master and
+  every track from `+0x8e54`; PER-TRACK → master `+0x8e52`, audio track `+0x51 + t·0x91a`, MIDI
+  `+0x48f9 + (t−8)·0x8b0`; **a non-zero flag at track record +4 (`+0x54` / `+0x48fc`) keeps
+  the track's LIVE scale** instead of reloading it.
+- **Absolute tick index**: a counter incremented once per running tick in the phase-D hook
+  equals the phase-G sample index exactly (`DJ_TOFS = 0`, measured).
+
 ### The scale tables — ticks/step and quantise lengths (new 2026-09-24)
 
 > source: `refs/octemu/re/coldfire.syms` @ `6a9ff68` · fetched 2026-09-24.
 > confidence: **C** for the table contents and addresses (octemu ships an emulator
 > that runs on them); **L** for our reading of what they imply for DIRECT JUMP.
 
-**These two tables are the missing numbers for the open DIRECT JUMP non-1x thread**
-(`reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md`). We had the `SCALE_MODE` fork and
+**These two tables were the missing numbers for the DIRECT JUMP non-1x thread** (closed
+2026-09-27 by V7 — see the Session 108 section below; `reference/handoffs/DIRECTJUMP_SCALES_HANDOFF.md` is history). We had the `SCALE_MODE` fork and
 the trailer bytes; we did not have the tick arithmetic they index into.
 
 | Addr | size | What |

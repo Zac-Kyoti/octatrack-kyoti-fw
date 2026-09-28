@@ -33235,3 +33235,45 @@ reference scheduled before the switch, plus counters stock's first-fire path ove
 per-track reasoned-state class that sank V1–V5 — and it adds branches to the proven landing and
 purge, so the whole matrix and hardware would have to be re-proven, for a benefit the author does
 not need. V7.0 stays the DIRECT JUMP; any V7.1 would be a separate build, V7.0 always reflashable.
+
+### Session 109 continued — REV 10: RPS9 + RPSP INSTALLED on both DSP cores (user chose: standalone, take SPRING REVERB)
+
+**User decision:** standalone image, SPRING REVERB is the donor, code placed
+where it will sit in an eventual merge with SIDECHAIN3_CROSS.
+
+**Placement:** the **last 27 words** of spring's 1063-word module, both
+payloads — A `P:0x165e` (`0x1252 + 1063 − 27`), B `P:0x141e`. The sidechain
+builds from the module's START (388 w today), so this tail is stable however
+the sidechain grows (no overlap while it stays under 1036 w). Hooks: A
+`P:0x40b` → `bsr 0d1080 001253`, B `P:0x20e` → `bsr 0d1080 001210` (both
+displacements hand-checked: target − site).
+
+**Neutering (required, not cosmetic — spring's code is now partly ours and
+must never run):** every donor fact is **imported** from the FINAL
+`build_sidechain3.py` (`DSP`, `DONOR_ID`, `DONOR_P`, `NONE_P`, `FX_BUSES`,
+`dsp_module_fileoff`, `dsp_xtable_fileoff`, `bsr_long`), which is not
+modified: the dispatch entry `X:0x215[0x15]` (init) / `[0x35]` (proc) → the
+shared empty-FX stub; FX2 chooser drops spring and `id2pos` is rebuilt; both
+buses' `id2e[0x15]` → NONE (old projects load the NONE page). Asserted
+before every write: the 1063-word module at `cave_org`, spring's init
+signature `22ee00 0140c0 000040`, the stock dispatch pair, the hook words.
+**Cross-check: every neutering byte is IDENTICAL to SIDECHAIN3_CROSS's
+hardware-proven image** (both buses × 3 tables, both payloads' two dispatch
+entries). Spring is FX2-exclusive, so FX1 needed only `id2e`.
+
+**The DSP oracle now tests the built image itself:**
+`python3 tools/repitch_dsp_check.py out/mainos_repitch_kyoti.bin` reads each
+payload's hook from the image, decodes the bsr, reads the cave words at its
+target, confirms they equal the source assembled at that org, and runs the
+probe on those exact words (the unpatched reference module comes from stock).
+**22/22 on both cores at the final orgs.** (Needed: the `do` LAs are
+absolute, and the two payloads' orgs differ.)
+
+**Merge note** (recorded in MERGE.md): both builders assert spring's STOCK
+dispatch entry, so a merged builder must let the second accept the neutered
+state.
+
+**REV 10 = flash-11 candidate: mainos `7e8f437b…`, syx `3f7e9e0c…`** (2505 B
+changed, 0 strays). ColdFire oracle 10/10; DSP oracle 22/22 × 2 cores.
+**Never flashed. Removes SPRING REVERB.** First image where RPS9/RPSP sound
+different from RPCH.

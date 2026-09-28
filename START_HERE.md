@@ -40,8 +40,9 @@ only, for `whatsnew.py`).
 | `reference/kb/*.md` | **distilled knowledge base** — address map + file format + DSP + container + techniques, ours merged with external RE. Read the relevant one before a new patch |
 | `reference/EXTERNAL_RESEARCH.md` | index of the 6 external OT-RE repos + the sync/distill workflow (`tools/refs/`) |
 | `reference/MERGE.md` | **combining every final-scoped mod into one firmware** — cave allocation, detour inventory, shared-state table, and the two remaining blockers. The combined build is **deliberately not buildable** until every feature is shippable; this doc is what it will be rebuilt from, and it stages the merge as `KYOTI_V1.0` / `KYOTI_V1.1` |
-| `reference/handoffs/*.md` | per-thread handoffs for work still open — read the relevant one **before** re-probing that thread (`DIRECTJUMP_PHASE_HANDOFF.md` — the current DIRECT JUMP one; `DIRECTJUMP_SCALES_HANDOFF.md` is stale, history only; `RELOAD2_HANDOFF.md`) |
-| `reference/AR_DIRECT_JUMP.md` | the Analog Rytm's own pattern-commit arithmetic, which DIRECT JUMP's position rule is ported from, plus its measurement hazards |
+| `reference/handoffs/*.md` | per-thread handoffs for work still open — read the relevant one **before** re-probing that thread (DIRECT JUMP is FINAL: `DIRECTJUMP_V7_DESIGN.md` is its design contract and proof method; `DIRECTJUMP_V6_HANDOFF.md`, `DIRECTJUMP_PHASE_HANDOFF.md` and `DIRECTJUMP_SCALES_HANDOFF.md` are history; `RELOAD2_HANDOFF.md`) |
+| `reference/AR_DIRECT_JUMP.md` | the Analog Rytm's own pattern-commit arithmetic — V6.4 ported it exactly (the OT↔AR parity build); V7 deliberately replaces its position rule with the clock-locked one |
+| `reference/OT_SEQUENCER_BUGS.md` | every stock sequencer bug we have determined (tagged measured / hardware / reasoned) and the measured NOT-bugs — update it rather than re-deriving |
 | `reference/RELOAD_REDESIGN.md` | the RELOAD3 chord design: why the picker went, the measured keymap facts, the Part-half semantics |
 | `README.md` | what the firmware is, the feature list + per-feature HW status, repo layout, lineage |
 | `BUILD_KYOTI.md` | roll-your-own build guide (every `build_*.py`, prerequisites, the reproducible patch) |
@@ -89,6 +90,11 @@ only, for `whatsnew.py`).
 - **Keep time by reading the clock, never by reseeding it.** Both DIRECT JUMP and RELOAD3
   shipped a bug that came down to writing the master playhead; the metronome's beat flags
   derive from the same word, so one write breaks two things at once.
+- **Grade against the spec, not a proxy.** DIRECT JUMP V1–V5 passed gate after gate that
+  measured timing classes modulo the step length, which cannot see a whole-step shift. V7
+  was graded by equality with a never-switched reference run of the same pattern
+  (`tools/diag_reflock.py` + `cmp_reflock.py`), after the oracle itself was shown to fail the
+  known-bad builds — and passed first time on hardware.
 - **`er.stage_project` is not concurrency-safe** — it stages into a single shared tree, so
   two full-firmware diagnostics started in parallel race in `mkdir`. Run the suite
   sequentially.
@@ -116,9 +122,10 @@ What keeps unfinished work from being mistaken for shippable is `tools/kyoti_sta
 each builder declares **FINAL**, **PREVIEW**, **WIP** or **SUPERSEDED** and announces it on
 every run. A **WIP** builder exits 2 without `KYOTI_ALLOW_WIP=1`; a **SUPERSEDED** one exits
 2 without `KYOTI_ALLOW_SUPERSEDED=1` and names its replacement (deliberately two variables —
-"I know this is unfinished" should not also unlock "this was abandoned"). Today DIRECT JUMP
-is the only non-FINAL *feature* — `build_directjump_v6.py` WIP (Session 105) — and
-thirteen earlier-stage builders are SUPERSEDED (DJ v1-v5, `build_mutemode{,_new}.py`,
+"I know this is unfinished" should not also unlock "this was abandoned"). Today every
+documented feature is FINAL — DIRECT JUMP V7 since 2026-09-27; the only WIP builder is
+`build_repitch_kyoti.py` (its own thread, `reference/handoffs/REPITCH_KYOTI_SCOPE.md`) — and
+fourteen earlier-stage builders are SUPERSEDED (DJ v1-v6, `build_mutemode{,_new}.py`,
 `build_softmute.py`, `build_relstate_shadow.py`, `build_sidechain{,2}.py`,
 `build_reload{,2}.py`). **`build_bugbuilds.py --with-wip` passes `KYOTI_ALLOW_WIP=1` to the
 child builder itself**, so its own gate does not have to be worked around. When a tier
@@ -146,8 +153,9 @@ interlock proof. There is deliberately **no single all-in-one image**:
 `tools/build_merged.py` stays withdrawn so a combined build cannot quietly ship an
 unfinished feature. `reference/MERGE.md` is the authoritative allocation map it will
 be rebuilt from, and stages the merge as `KYOTI_V1.0` (the seven mods finished when
-it was written, nothing to resolve) then `KYOTI_V1.1` (+ DIRECT JUMP + RELOAD3; RELOAD3
-has since been confirmed final, the map not yet re-cut).
+it was written, nothing to resolve) then `KYOTI_V1.1` (+ DIRECT JUMP V7 + RELOAD3, both final now;
+with V7's 1514 B cave V1.1 no longer fits one free zone — ≈ −422 B, derived — so the map
+needs a second zone before it can be re-cut).
 
 **Not a shipped fix:** the MIDI LFO SETUP knobs sending CC on the twin audio channel
 (the item older notes called "Bug 2", before that number was reused for the
@@ -175,20 +183,29 @@ the working tree).** Every finished feature is here, and so is the one open thre
 RELOAD3, QLREC's stateless rewrite and SIDECHAIN3's UI fix were the last promotions
 (2026-09-25).
 
-**One thread is open (DIRECT JUMP). Everything else in §5 is finished, RELOAD3 included.**
-DIRECT JUMP's builder is WIP-gated (see §5) so a visitor cannot build it by accident.
+**No DIRECT JUMP thread is open: V7 is FINAL (hardware-confirmed 2026-09-27).** Everything
+in §5 is finished. (repitch-kyoti is a separate WIP thread with its own scope doc.)
 
 > Check this section against the tree before trusting it — it has gone stale before
 > (2026-09-25: three claims about `main` that a merge had already made false).
 
-### DIRECT JUMP — V6 (Session 105): AR's commit through stock's own landing; gold RETRACTED
+### DIRECT JUMP — V7, FINAL (hardware-confirmed 2026-09-27): clock-locked jumps
 
-**Read `NOTES.md` "Session 105" and "Session 105 continued" first, then
-`reference/AR_SEQUENCER_ENGINE.md` §3/§6.** `build_directjump_v6.py` (WIP; v1–v5 SUPERSEDED)
-re-lands the sequencer through stock's own `0x80006687` landing path on the next master step
-boundary — two 6-byte hooks at `0x400a1f72` and `0x400a221c`, boundary body untouched.
-**Not flashed; emulator gates first.** Everything from here to the end of this section is the
-HISTORY of the V1–V5 line, kept because its dead ends are still the dead ends.
+**Read `reference/handoffs/DIRECTJUMP_V7_DESIGN.md`, then `NOTES.md` "Session 108".**
+`build_directjump_v7.py` (FINAL; v1–v6 SUPERSEDED). A jump lands the new pattern exactly where
+it would be had it played since START — every track, any length, track scale, master length or
+master scale — through the same stock `0x80006687` landing V6 used (hooks at `0x400a1f72` and
+`0x400a221c`, boundary body untouched). What V7 changed is the *position*: V6 (like the Analog
+Rytm) derived it from the outgoing pattern's master counter `0x800065b2`, which wraps with that
+pattern; V7 derives it from an absolute clock-tick counter, lands only where every incoming track
+is at a step start, purges the outgoing pattern's pending trigs (the first incoming trig wins),
+and fixes up `reload`. Graded by `tools/diag_reflock.py` + `cmp_reflock.py` (equality with a
+never-switched reference, state and live events with content) and `tools/model_reflock.py`
+(the position model, exact on 10 references). **V6.4** (`build_directjump_v6.py`,
+SUPERSEDED) is kept as the hardware-good **OT↔AR parity build**. Not yet on hardware: MIDI
+tracks. Parked by the user: cued-switch policy (design doc §6a); V7.1 mid-window landing (not
+recommended). Everything from here to the end of this section is the HISTORY of the V1–V5
+line, kept because its dead ends are still the dead ends.
 
 **The former baseline, RETRACTED 2026-09-26 = the Session 87 GOLD image** (`out/GOLD_S87_*`, sha256
 `0657157f…`, rebuildable from commit `16df386`), flashed 2026-09-23: tracks and patterns
@@ -255,11 +272,11 @@ state in `0x80006a40..0x80006abf`. MIDI twin sites of the patched blocks
 **Still open from earlier:** a report that the visited steps depend on which trigs are
 on the grid, and that LEDs and audio disagree about position.
 
-The position rule is the Analog Rytm's own commit arithmetic (`reference/AR_DIRECT_JUMP.md`,
-incl. its §9 re-review). The mode deliberately does not persist — OFF on every power-on.
-Handoff: `reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md` (the older
-`DIRECTJUMP_SCALES_HANDOFF.md` is stale — its `CNTDN_TBL` section 5 was retired).
-Detail: `NOTES.md` "Session 15" + "Session 21" + "Session 35", then "Session 60"–"Session 104".
+V1–V6's position rule was the Analog Rytm's own commit arithmetic (`reference/AR_DIRECT_JUMP.md`);
+V7 replaced it (design doc). The mode deliberately does not persist — OFF on every power-on.
+History handoffs: `DIRECTJUMP_V6_HANDOFF.md`, `DIRECTJUMP_PHASE_HANDOFF.md`,
+`DIRECTJUMP_SCALES_HANDOFF.md`. Detail: `NOTES.md` "Session 15" + "Session 21" + "Session 35",
+then "Session 60"–"Session 108".
 
 ### RELOAD FROM PROJECT — RELOAD3, FINAL (hardware-confirmed 2026-09-25)
 
@@ -285,13 +302,17 @@ NOTES "Session 98"). Deferred by the user: all-tracks and whole-bank variants. H
 ### Blockers on the staged merge
 
 Both are DIRECT-JUMP-vs-someone-else, and both are *builder assertion* conflicts
-rather than byte conflicts (`reference/MERGE.md`):
+rather than byte conflicts (`reference/MERGE.md`) — unchanged by V7, which keeps v4's
+toggle route and power-on guarantees:
 
-- **B1** — DIRECT JUMP v4 asserts the `'ANDY'` block restore stays stock, while MUTE
-  MODE must widen it. `DJ_MODE` needs relocating; `0x800000f8` is a candidate, not yet
+- **B1** — DIRECT JUMP (v4 through V7) asserts the `'ANDY'` block restore stays stock, while
+  MUTE MODE must widen it. `DJ_MODE` needs relocating; `0x800000f8` is a candidate, not yet
   proven free.
-- **B2** — DIRECT JUMP v4 writes the `[PTN]`-overlay `[YES]` record, while RELOAD3
-  asserts that overlay is byte-for-byte stock.
+- **B2** — DIRECT JUMP (v4 through V7) writes the `[PTN]`-overlay `[YES]` record, while
+  RELOAD3 asserts that overlay is byte-for-byte stock.
+
+Plus a packing problem new with V7: its 1514 B cave puts V1.1 at ≈ −422 B in the single free
+zone (derived) — a second cave zone is needed (`reference/kb/caves.md`).
 
 `KYOTI_V1.0` (the seven finished mods) has neither problem and is buildable as soon as
 the withdrawn builder is reconstructed from the allocation map.

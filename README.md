@@ -51,11 +51,12 @@ hunt through. Instead, **each builder tells you what tier it is in before it run
 | **WIP** | the author's own flash-and-measure loop; expected to be wrong | **refuses** unless you set `KYOTI_ALLOW_WIP=1` |
 | **SUPERSEDED** | a dead end or an intermediate stage, kept so its reasoning stays readable | **refuses** unless you set `KYOTI_ALLOW_SUPERSEDED=1`, and names what replaced it |
 
-Everything below is FINAL except **DIRECT JUMP**, which is WIP (`build_directjump_v6.py`).
-`tools/` also holds twelve SUPERSEDED builders — earlier stages of MUTE MODE, the
-side-chain, RELOAD and DIRECT JUMP, three of which never worked on hardware at all. They
-stay because the reasoning and the measurements in them are worth reading, and they are
-gated so that browsing `tools/` cannot turn into flashing a dead end. The gates are a
+Everything below is FINAL. `tools/` also holds fourteen SUPERSEDED builders — earlier
+stages of MUTE MODE, the side-chain, RELOAD and DIRECT JUMP, three of which never worked on
+hardware at all — and any work-in-progress builder refuses to run without
+`KYOTI_ALLOW_WIP=1`. The superseded ones stay because the reasoning and the measurements in
+them are worth reading, and they are gated so that browsing `tools/` cannot turn into
+flashing a dead end. The gates are a
 courtesy, not a lock; `tools/kyoti_status.py` is all of it.
 
 ### Extended Features
@@ -75,24 +76,26 @@ courtesy, not a lock; `tools/kyoti_status.py` is all of it.
   → [`tools/build_mutemode_dt.py`](tools/build_mutemode_dt.py)
 
 - **DIRECT JUMP** — an optional immediate pattern change, toggled with **`[PTN]` +
-  `[YES]`**. A manually cued pattern switches on the next step tick instead of
-  waiting out the current one, and **keeps playing in master time** rather than
-  restarting at step 1. It loads the new Part at once and sends the MIDI Program
-  Change ~1 step early. The arranger and pattern chains are untouched, and the
-  toggle deliberately does not persist — a performance feature comes up OFF on
-  every power-on.
-  **Still in development — the one unfinished feature.** On 2026-09-26 the build
-  that had been called hardware-confirmed at 1x was **retracted**: a plain 16-step ↔
-  7-step switch in NORMAL mode lands a fraction of a step off. The cause was
-  architectural — every build since Session 79 committed a jump by re-entering the
-  pattern-boundary body, which is the sequencer's *cycle-wrap* machinery. A full
-  decompilation of the Analog Rytm's sequencer engine (`reference/AR_SEQUENCER_ENGINE.md`)
-  showed AR's DIRECT JUMP re-lands every track synchronously on the next master step
-  boundary — and that the Octatrack already contains that exact landing as stock code.
-  **V6** (Session 105) uses it: two 6-byte hooks in the tick handler, nothing else in the
-  sequencer touched. Emulator gates first, then hardware; not flashed yet.
-  → **WIP**: [`tools/build_directjump_v6.py`](tools/build_directjump_v6.py) (V6) ·
-  handoff [`reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md`](reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md)
+  `[YES]`** (a toast confirms; it comes up OFF at every power-on). A cued pattern takes
+  over on the next step instead of waiting for the current one to finish — and it comes
+  in **locked to the master clock**: exactly where it would be had it been playing since
+  START, whatever its length, track lengths, track scales, master length or master scale.
+  A 16-step pattern with trigs on 1, 5, 9 and 13 still plays them on pulses 1, 5, 9 and 13
+  after the jump — never shifted by a step, never a fraction of a step off. The outgoing
+  pattern's still-pending trigs are dropped at the jump, so the new pattern's first trig
+  always wins. Jumping *into* a pattern with slow tracks (1/2x, 1/4x) waits until every
+  track reaches a step start, up to about two or four steps. The MIDI Program Change goes
+  out as soon as you cue; no MIDI START is sent. The arranger and pattern chains are
+  untouched, and with DIRECT JUMP OFF pattern changes are stock.
+  This deliberately improves on the Analog Rytm's DIRECT JUMP, which places the new
+  pattern relative to the *outgoing* one and so lands shifted or fractional whenever
+  lengths or scales differ. The previous build, V6.4, reproduces AR's behaviour exactly and
+  is kept (SUPERSEDED) for side-by-side listening. How V7 was built and proven — a
+  never-switched reference run of the same pattern as the test oracle — is in
+  [`reference/handoffs/DIRECTJUMP_V7_DESIGN.md`](reference/handoffs/DIRECTJUMP_V7_DESIGN.md);
+  every sequencer bug met on the way is listed in
+  [`reference/OT_SEQUENCER_BUGS.md`](reference/OT_SEQUENCER_BUGS.md).
+  → [`tools/build_directjump_v7.py`](tools/build_directjump_v7.py)
 
 - **SIDE-CHAIN COMPRESSOR** — an external key input for the stock DynamiX
   COMPRESSOR, on the effect's **page 2**:
@@ -171,9 +174,10 @@ courtesy, not a lock; `tools/kyoti_status.py` is all of it.
 - **Octatrack KYOTI FW v1.0 / v1.1** *(staged; the single all-in-one image is
   deliberately not buildable yet, so a combined image cannot quietly ship an
   unfinished feature)* — **`KYOTI_V1.0`** is the seven finished, hardware-confirmed
-  mods; **`KYOTI_V1.1`** adds DIRECT JUMP and RELOAD3 and is held behind two
-  builder-assertion conflicts. [`reference/MERGE.md`](reference/MERGE.md) is the
-  allocation map it will be built from.
+  mods; **`KYOTI_V1.1`** adds DIRECT JUMP V7 and RELOAD3 — both final now, but V1.1 is
+  held behind two builder-assertion conflicts and no longer fits one free cave zone
+  with V7's larger cave. [`reference/MERGE.md`](reference/MERGE.md) is the allocation map
+  it will be built from.
 
 See **[`BUILD_KYOTI.md`](BUILD_KYOTI.md)** for prerequisites, the one-time setup,
 every build variant, and the version strings.
@@ -209,9 +213,12 @@ All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit
 | Bug 1 — MIDI Plays-Free trig fix | all | **confirmed** 2026-08-28 |
 | MUTE MODE — all four modes, menu, SOLO | `build_mutemode_dt.py` | **confirmed, final** 2026-09-21 |
 | ↳ mode survives a power cycle | `build_mutemode_dt.py` | **confirmed** |
-| DIRECT JUMP — 1x master scale | Session 87 "gold" image | **RETRACTED** 2026-09-26 — fractional at 1x, NORMAL mode, 16 ↔ 7 steps |
-| ↳ V6 — AR's commit through stock's own landing | `build_directjump_v6.py` (WIP) | **emulator gates, then hardware — not flashed** |
-| ↳ master scales other than 1x | V6 | **open** — AR itself does not handle it gracefully; design notes in NOTES Session 105 |
+| DIRECT JUMP V7 — clock-locked jumps: 16 ↔ 7-step NORMAL switches vs the metronome, master 1x ↔ 2x, swing/microtiming, rapid switching | `build_directjump_v7.py` | **confirmed, final** 2026-09-27 |
+| ↳ PER-TRACK patterns with mixed lengths and 2x…1/4x track scales | `build_directjump_v7.py` | emulator-proven (reference-lock matrix); not separately exercised on hardware |
+| ↳ MASTER LENGTH `INF` | `build_directjump_v7.py` | position model verified; **no jump exercised yet** (emulator or hardware) |
+| ↳ MIDI tracks | `build_directjump_v7.py` | emulator-locked (every run); **not yet on hardware** |
+| ↳ V6.4 — the OT↔AR parity build (AR's own behaviour, shifts included) | `build_directjump_v6.py` (SUPERSEDED) | **confirmed** 2026-09-27 |
+| ↳ Session 87 "gold" image | — | **RETRACTED** 2026-09-26 — fractional at 1x, NORMAL mode, 16 ↔ 7 steps |
 | SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` | **confirmed, final** 2026-09-20 |
 | ↳ a project still using the donated effect loads as NONE | `build_sidechain3.py` | **confirmed, final** 2026-09-25 |
 | RELOAD FROM PROJECT — both chords | `build_reload3.py` | **confirmed, final** 2026-09-25 |

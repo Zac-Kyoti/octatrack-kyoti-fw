@@ -306,8 +306,8 @@ from ROM and zero-fills only to `0x80004000`; kernel globals live at
   the build now rejects any reference into `0x80006a40..0x80006abf`. **Cave data words do
   survive**: in the same toast the chord-time capture, stored in cave data, was intact at
   job completion while the copy in the scratch block was not.
-- ⚠️ **Still keeping state there, untested:** DIRECT JUMP `0x80006a40-4a`. It re-arms its
-  flag every gesture and clears it every tick, so a clobber would be invisible rather than
-  absent.
+- **DIRECT JUMP no longer keeps state there.** V6 and V7 keep every state byte in their
+  own cave and `build_directjump_v{6,7}.py` reject the same range; only the retired V1–V5
+  line used `0x80006a40-4a`.
 - **Only a diagnostic build on the unit settles this.** Nothing static, and nothing in
   route A, can.

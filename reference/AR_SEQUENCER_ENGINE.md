@@ -5,6 +5,17 @@ out to be step-fractional even at 1x / NORMAL mode / a plain 16-step ↔ 7-step 
 so the OT port restarts from AR's *whole* engine rather than from its commit loops alone.
 Canonical copy here; mirrored to `octatrack-kyoti-fw/reference/AR_SEQUENCER_ENGINE.md`.
 
+> **Outcome for the OT port (2026-09-27).** This decompilation did what it was written for.
+> OT DIRECT JUMP **V6.4** ported AR's commit exactly — through the OT's own stock landing
+> (`0x80006687` path), §6 — and was **hardware-confirmed as AR-exact**, AR's faults included.
+> **V7** then deviated on purpose and **shipped** (hardware-confirmed the same day): it keeps
+> V6.4's landing but replaces the position rule. AR (and V6.4) derive the new pattern's
+> position from the *outgoing* pattern's master counter, which wraps with that pattern; V7
+> lands every track where it would be had the new pattern played since START, from an absolute
+> clock counter — which removes AR's whole-step shifts, the master-scale lurch and the landing
+> duplicate (`AR_DJ_QUIRKS.md` items 1–3). OT `NOTES.md` Session 108 and
+> `octatrack-kyoti-fw/reference/handoffs/DIRECTJUMP_V7_DESIGN.md`.
+
 Source: MAIN OS 1.73, `section_3_MAIN_OS.bin`, load base `0x40000400`, ColdFire BE. Every
 address is measured in Ghidra 12.1.2 (`tools/ghidra/GhidraSeqCensus.java` = global census,
 `GhidraDecompArgs.java` = decompile + listing; outputs in `out/ghidra/*_session10.txt`).

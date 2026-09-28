@@ -336,9 +336,9 @@ address** (CLAUDE.md hard constraint; two projects have bricked units here).
 | target | free | verdict |
 |---|---:|---|
 | **on top of KYOTI_V1.0** (free run at `0x400d6f80`) | **3196 B** | ✅ comfortable |
-| on top of V1.1 (RELOAD3 2104 B + DIRECT JUMP) | **64–332 B** | ❌ needs a second zone |
+| on top of V1.1 (RELOAD3 2104 B + DIRECT JUMP V7 1514 B) | **≈ −422 B before repitch** (V6's 758 B gave +332 B) | ❌ needs a second zone |
 
-**Build against V1.0.** V1.1 sits at ~5 % headroom and its WIP mods move every session.
+**Build against V1.0.** V1.1 no longer fits one zone even before repitch (DIRECT JUMP V7's cave is 1514 B; both V1.1 mods are FINAL as of 2026-09-27).
 If it must coexist with V1.1: second zone `0x400d2ee6` (314 B) plus midisc's published
 D-region pads `0x400d347e..0x400d34cf` (81 B) and `0x400d352d..0x400d356f` (66 B) — and
 per `MERGE.md`, a second zone means the builder must pack multiple ranges and assert the

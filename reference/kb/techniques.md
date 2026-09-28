@@ -267,8 +267,8 @@ lower-risk path when a feature needs its own page rather than a toggle.
 
 ## PERSONALIZE-menu entry recipe (ours, consolidated)
 
-Used for MUTE MODE (`tools/patch_mutemode.s`) and DIRECT JUMP
-(`tools/patch_directjump.s`):
+Used for MUTE MODE (`tools/patch_mutemode.s`) and the first DIRECT JUMP line
+(`tools/patch_directjump.s`, v1–v3; DIRECT JUMP has since moved to the `[PTN]`+`[YES]` chord):
 
 1. Relocate the menu's 3 parallel arrays (labels / value-tables / handlers) to a cave.
 2. Bump the item count (`moveq #15` → `#16`; note the MKI/MKII `0x46c8d18c` probe
@@ -278,7 +278,8 @@ Used for MUTE MODE (`tools/patch_mutemode.s`) and DIRECT JUMP
    "PERSONALIZE settings — persistence". **These words are volatile**: to survive
    a power cycle the setter must also write the `'ANDY'` shadow (`0x100fff00 +
    word − 0x80000070`) and the build must extend the 3 restore `pea 0x64` → `0x70`.
-   MUTE MODE does this since Session 19; DIRECT JUMP (`0x800000a8`) does not yet.
+   MUTE MODE does this since Session 19. DIRECT JUMP deliberately does NOT persist: its
+   `DJ_MODE` (`0x800000d8`) is forced OFF at every power-on (a performance toggle).
 5. Dialog construction via `FUN_4006d57c`.
 
 ## octa-bt-pt — Python image writer

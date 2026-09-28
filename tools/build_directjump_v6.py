@@ -30,13 +30,14 @@ Outputs: out/mainos_directjump_v6.bin, out/elek_directjump_v6.bin,
 import hashlib, os, pathlib, subprocess, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from kyoti_status import status, WIP
+from kyoti_status import status, SUPERSEDED
 
-status(WIP, "DIRECT JUMP V6", """
-    Session 105: the AR-discipline rewrite -- a jump re-lands the sequencer through
-    stock's own landing path (0x80006687) on the next master step boundary.  Two
-    sequencer detours, boundary body untouched.  Emulator gates first, then the
-    user's 16<->7 NORMAL-mode case on hardware.  Not flashed yet.
+status(SUPERSEDED, "DIRECT JUMP V6.4", """
+Replaced by build_directjump_v7.py (Session 108): V7 lands the new pattern where it
+would be had it played since START; V6 inherits the OUTGOING pattern's position, so
+mixed lengths/scales land shifted -- exactly as the Analog Rytm does.  V6.4 is
+hardware-good and kept as the OT<->AR PARITY build, to A/B against AR by ear
+(NOTES Sessions 105-107).
 """)
 
 BASE = 0x40000400

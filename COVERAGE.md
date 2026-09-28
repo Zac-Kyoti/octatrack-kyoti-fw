@@ -61,11 +61,11 @@ fires, when a pattern commits, what the mute gate does — not by processing aud
 | Sequencer: clock / tick | ✅ | **Sample-accurate**: clocked by the audio frame ISR (`0x4000aad0`) via a `2³¹/tempo` phase accumulator, waking the seq task through a kernel queue |
 | Sequencer: trig → voice | 🟡 | `FUN_400977cc` maps trig → voice command; the per-tick step engine (ISR `0x400a1e0c`), the pattern commit (`0x400a44d0`) and its per-track rebuild tail, the dispatch region `0x400a2xxx`, and the per-track step/prev-step arrays are all mapped — this is DIRECT JUMP's territory |
 | Trig types / p-locks / sample locks (12.4-12.6) | 🟡 | **Substantially mapped and exercised from both sides.** The 16 per-pattern p-lock arrays (8 audio + 8 MIDI) and the trig-type layer are read *and written* by shipped fixes: the content predicate `FUN_4009a464` (empty-pattern LED), the stored-p-lock writer `FUN_40042158`, and the erase path `opcode 8` → `FUN_40041af4` → `FUN_40038874` (trigless-lock auto-remove). Sample locks untouched |
-| Pattern scales / conditional locks / micro timing / fill (12.12-12.15) | 🟡 | **Scales mapped in depth** (DIRECT JUMP): `LEN_TBL` ticks-per-step, master ticks-within-step `0x800065b6`, master step `0x800065b2`, per-track scale-index/length/countdown arrays, MASTER LENGTH, and the tick-vs-step domain distinction that is the open problem there. **Trig conditions / FILL** are located: the A:B cycle counters are 16 × u32 at `0x46107918`, advanced by `0x400a536c` on a track step wrap, and per-track pending FILL is 16 × u8 at `0x46107969`, promoted at the next pattern boundary (📖 borrowed, not exercised). Condition *evaluation* and micro-timing *application* are not decompiled |
+| Pattern scales / conditional locks / micro timing / fill (12.12-12.15) | 🟡 | **Scales mapped in depth** (DIRECT JUMP): `LEN_TBL` ticks-per-step, master ticks-within-step `0x800065b6`, master step `0x800065b2`, per-track scale-index/length/countdown arrays, MASTER LENGTH, and — new in Session 108 — an exact model of every track's position against the clock for any length/scale/master-length combination (`tools/model_reflock.py`, verified tick-for-tick on 10 references), which is what DIRECT JUMP V7 lands on. **Trig conditions / FILL** are located: the A:B cycle counters are 16 × u32 at `0x46107918`, advanced by `0x400a536c` on a track step wrap, and per-track pending FILL is 16 × u8 at `0x46107969`, promoted at the next pattern boundary (📖 borrowed, not exercised). Condition *evaluation* and micro-timing *application* are not decompiled |
 | **Scenes & crossfader** (10.3) | 🟡 | The scene-morph **retrigger entry point** is used by the carryover fix. Store geometry (`scene_param_get 0x40031f44`), the frame-ISR morph pair (`0x4000c202`/`0x4000cc60`) and the endpoint buffers (`0x80000ed4`) are mapped at address level (📖 borrowed). The morph *itself* — the OT's flagship feature — is not decompiled |
 | **LFO designer** / LFOs (11.4) | ⬜ | 3 LFOs per track, custom shapes. Untouched here; `kb/octakit-abi.md` carries borrowed LFO-designer addresses |
 | Arranger / song mode (ch.14) | 📖 | Not touched by any build here, but mapped at address level: the arrangement lives in battery NVRAM at `0x10000004` (pointer `0x10000000`), header `+18` = row count, rows at `+20`, **22 B each, 48 cap** (row type / pattern / repeat / scene A,B / OF / Ln); on-card as `arr01..arr08.work`/`.strd`, 11,336 B, `FORM`/`DPS1`/`ARRA`. `arranger_goto 0x4004a5c0` calls **the same `seq_goto_pattern 0x400a0570`** the pattern-change path uses, so it inherits that path's light part-apply |
-| MIDI sequencer (ch.15) | 🟡 | The 8 MIDI tracks' **stored** state is mapped and exercised — MIDI p-lock arrays (empty-pattern LED fix), per-track MIDI sequence reload (RELOAD), and the MIDI-vs-audio track distinction that caused a real bug. The MIDI *engine* (note/CC generation, MIDI LFOs) is not decompiled. ⚠️ the MIDI twin of the sequencer commit tail (`0x400a4cb0` area) is **unpatched** where DIRECT JUMP patches the audio one |
+| MIDI sequencer (ch.15) | 🟡 | The 8 MIDI tracks' **stored** state is mapped and exercised — MIDI p-lock arrays (empty-pattern LED fix), per-track MIDI sequence reload (RELOAD), and the MIDI-vs-audio track distinction that caused a real bug. The MIDI *engine* (note/CC generation, MIDI LFOs) is not decompiled. DIRECT JUMP V7 patches no commit tail at all: MIDI tracks land through the same 16-entry stock landing loop as audio tracks (emulator-locked; MIDI not yet heard on hardware) |
 | MIDI I/O & sync (8.7) | ⬜ | Parser, clock sync, transport, Turbo MIDI, CC control. Config found; UART/parser not |
 | Audio editor (ch.13) | ⬜ | Trim/slice/loop points, timestretch setup. Untouched |
 | Mixer / routing / audio crossfader (8.8, 11.6) | 🟡 | **The per-frame mute/solo/cue gate `FUN_40004db8` is fully mapped and hardware-confirmed as *the* gate** (MUTE MODE), with the voice rebind/retrigger paths around it and the per-track DSP frame words that carry level and trig state. Main/Cue levels, thru and the audio crossfader: untouched |
@@ -87,19 +87,20 @@ Distinct from firmware coverage, and worth stating because it bounds every claim
   and only fell to an on-screen diagnostic build on the unit: scratch RAM at
   `0x80006a40+` not surviving under live audio, a frame-hook UI call crashing the unit,
   and DIRECT JUMP's non-1x phase error. "Emulator green" is evidence about the logic,
-  never about the machine.
+  never about the machine — *unless the emulator is graded against the actual spec*: DIRECT
+  JUMP V7 was judged by equality with a never-switched reference run
+  (`tools/diag_reflock.py`), and that verdict held on hardware first time.
 
 ## Where the remaining value is (highest first)
 
-1. **DIRECT JUMP's non-1x scales** — the one unfinished feature, and the only open
-   thread. See `reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md` (the older
-   `DIRECTJUMP_SCALES_HANDOFF.md` is stale).
-2. **Sample playback engine** — the resolver and per-track pre-image are mapped; the
+*(DIRECT JUMP's non-1x scales, long the top item, closed 2026-09-27 with V7.)*
+
+1. **Sample playback engine** — the resolver and per-track pre-image are mapped; the
    playback itself is not. The natural next depth on the control side.
-3. **Scenes & crossfader morph** — address-level starting points exist (borrowed); this
+2. **Scenes & crossfader morph** — address-level starting points exist (borrowed); this
    is the OT's flagship feature and the largest untouched control-plane subsystem.
-4. **The other 16 DSP effects and timestretch** — the toolchain, the module map and one
+3. **The other 16 DSP effects and timestretch** — the toolchain, the module map and one
    worked example (COMPRESSOR) all exist, so the cost here is now effort, not access.
-5. **Sequencer depth** — conditional-lock *evaluation*, micro-timing *application*,
-   sample locks; and the **MIDI twin** of the commit tail that DIRECT JUMP leaves unpatched.
-6. **MIDI I/O** (parser, sync) and the **display/encoder** half of the UI.
+4. **Sequencer depth** — conditional-lock *evaluation*, micro-timing *application*,
+   sample locks.
+5. **MIDI I/O** (parser, sync) and the **display/encoder** half of the UI.

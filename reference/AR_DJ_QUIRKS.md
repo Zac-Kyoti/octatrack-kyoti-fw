@@ -4,14 +4,25 @@ A running record, kept in both repos (`ar-kyoti-fw/AR_DJ_QUIRKS.md`,
 `octatrack-kyoti-fw/reference/AR_DJ_QUIRKS.md`). The OT port's first goal is to behave
 **exactly like the AR** (`AR_SEQUENCER_ENGINE.md` §6); the stretch goal is to change the
 items below to the author's preference, one at a time, each behind a measurable gate.
-Nothing here is to be coded until the AR-exact baseline is confirmed on the OT hardware.
+
+**Status 2026-09-27: both goals reached on the OT.** The AR-exact baseline — OT DIRECT JUMP
+**V6.4** — was confirmed on hardware (instant, persistent, and faithful to AR including all
+three items below). **V7** then deviated on purpose and was hardware-confirmed the same day:
+a jump lands the new pattern exactly where it would be had it played since START, which fixes
+all three items at once. V6.4 stays buildable in the OT repo as the parity build, so the
+AR-exact behaviour remains reconstructible (OT `NOTES.md` Session 108,
+`reference/handoffs/DIRECTJUMP_V7_DESIGN.md`).
 
 Each item: what the AR does (hardware observation or measured code), where in the code,
 and — clearly marked — any hypothesis about the mechanism.
 
 | # | AR behaviour (observed / measured) | Where | Status |
 |---|---|---|---|
-| 1 | **One-step SHIFT of the 16-step track relative to the master pulse, after certain DIRECT JUMP cadences, NORMAL scale mode, tracks of 16 and 7 steps.** Observed on AR MKI hardware 2026-09-27, **restated by the author 2026-09-27 (Session 107)**: with two tracks in NORMAL mode, lengths 16 and 7, switching *from* the 7-step pattern can leave the 16-step pattern offset by **exactly one whole step** relative to the master (metronome) pulse. Stock AR behaviour. **This is a whole-step phase shift, not fractional/half-step timing** — the earlier "half-step-fractional" and "fractional step time" wordings (Sessions 105-106) were the author's first approximation and are WITHDRAWN: step *durations* are correct, the pattern's step *index* is off by one against the master. This is the DIRECT JUMP **stretch goal**, not a blocker. | Not localised yet. The DJ commit itself (`FUN_4009905c` 0x40099174-0x4009936c) rebuilds every track from `new_step = master_step mod patLen`, so a whole-step offset points at the *step index* the commit derives, not at tick phase — candidates (HYPOTHESES, unmeasured): `new_step mod len_t` against a master step that has already been advanced (an off-by-one in which side of the boundary `master_step` is read on), or the 7-step pattern's own cycle wrap having advanced the master step before the landing reads it. | recorded; mechanism refined by hardware 2026-09-27 (below); **stretch goal** |
+| 1 | **One-step SHIFT of the 16-step track relative to the master pulse, after certain DIRECT JUMP cadences, NORMAL scale mode, tracks of 16 and 7 steps.** Observed on AR MKI hardware 2026-09-27, **restated by the author 2026-09-27 (Session 107)**: with two tracks in NORMAL mode, lengths 16 and 7, switching *from* the 7-step pattern can leave the 16-step pattern offset by **exactly one whole step** relative to the master (metronome) pulse. Stock AR behaviour. **This is a whole-step phase shift, not fractional/half-step timing** — the earlier "half-step-fractional" and "fractional step time" wordings (Sessions 105-106) were the author's first approximation and are WITHDRAWN: step *durations* are correct, the pattern's step *index* is off by one against the master. This is the DIRECT JUMP **stretch goal**, not a blocker. | **Localised (measured on the OT's exact port, V6.4).** The DJ commit (`FUN_4009905c` D2, `new_step = master_step mod patLen` at `0x40099274`) takes `master_step` from the **outgoing** pattern, whose counter wraps with that pattern's own length — so after a 7-step cycle it no longer says where a 16-step pattern would be. OT oracle: perfect whole-step time shifts (+2/−2/+4 steps), 100% of ticks at one offset, no fractional part. Stock cueing has the same class of error (new pattern at step 1 on the outgoing pattern's end). | **fixed on OT (V7, 2026-09-27)** — land at the position since START from an absolute clock counter |
+| 2 | **Occasional spurious trig at the jump** (user-confirmed on AR). The outgoing pattern's step event, scheduled one step earlier, and the landing's immediate fire coincide on the boundary tick; stock's dedupe kills only *equal* fire times, so microtiming splits them into two audible hits. | scheduler phase E, `0x40099664`–`0x400996ee` (dedupe) | **fixed on OT (V7, 2026-09-27)** — the outgoing pattern's pending events are cancelled at the landing with stock's own purge idiom (the new pattern's first trig wins); measured on the OT as two live events on the landing tick before, one after |
+| 3 | **Master-scale changes lurch.** The landing is quantised to the *outgoing* master's step boundary (`countdown = tps_out − phase`, `0x40099146`–`0x40099158`), which is mid-step for the incoming scale whenever the two tick grids don't share that boundary (e.g. 2x → 1x on an odd 2x step). The incoming grid restarts from the landing instant. | `FUN_4009905c` D1/D2 | **fixed on OT (V7, 2026-09-27)** — superseded by the clock-locked landing: the incoming grid comes from the absolute clock, never from the outgoing master, and V7 lands only where every incoming track is at a step start (the lcm idea, in the incoming pattern's own domain) |
+
+### Notes on item 1
 
 **Item 1, refined by OT hardware (2026-09-27, V6.3 flashed, LED fix confirmed so cue-vs-jump
 is now visible as well as audible).** The one-step shift is **not a DJ artifact**: it
@@ -37,10 +48,9 @@ retains its step-time position relative to the overarching master metronome puls
 of its unique track/pattern settings, lengths and scales (cognisant that pattern
 lengths/scales override/control the actual track length and reset behaviour), such that a
 DIRECT JUMP — or even a non-DJ regular sequential cue — ALWAYS brings the pattern back in
-locked step-time and phase relative to the master pulse. This is the stretch goal to explore
-after the V6 line is stable; nothing is to be coded against it yet.
-| 2 | **Occasional spurious trig at the jump** (user-confirmed on AR). The outgoing pattern's step event, scheduled one step earlier, and the landing's immediate fire coincide on the boundary tick; stock's dedupe kills only *equal* fire times, so microtiming splits them into two audible hits. | scheduler phase E, `0x40099664`–`0x400996ee` (dedupe) | recorded; OT fix designed (purge the outgoing pattern's pending slots at the landing) |
-| 3 | **Master-scale changes lurch.** The landing is quantised to the *outgoing* master's step boundary (`countdown = tps_out − phase`, `0x40099146`–`0x40099158`), which is mid-step for the incoming scale whenever the two tick grids don't share that boundary (e.g. 2x → 1x on an odd 2x step). The incoming grid restarts from the landing instant. | `FUN_4009905c` D1/D2 | recorded; OT fix designed (quantise to the lcm of both grids; derive `new_step` in the incoming tick domain when scales differ) |
+locked step-time and phase relative to the master pulse. **Reached for DIRECT JUMP by OT V7** (hardware-confirmed 2026-09-27). Non-DJ cued switches
+are stock on the OT; the author parked the question of extending the lock to them (OT design
+doc §6a — BAR-RESTART vs START-LOCK, with the odd-meter case that argues for stock).
 
 Add items in order of discovery; never delete one — mark it *fixed on OT (build X)* when
 the OT deviates from AR on purpose, so the AR-exact behaviour stays reconstructible.

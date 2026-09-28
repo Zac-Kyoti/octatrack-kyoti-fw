@@ -31,22 +31,26 @@ two words patched: the bound (moveq #4 -> #6 at +0x54) and the icon-table lea
 operand (+0xea). Its glyphs keep stock's visual language: 17x7 bordered box,
 dithered field, a clear cell at the selected position (stride 2 for 7).
 """
-import os, pathlib, struct, subprocess, sys
+import importlib.util, os, pathlib, struct, subprocess, sys
 
 HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (rev 9: ColdFire complete; DSP proven, not installed)", """
-This image restores the ATTR-driven PTCH<->QUAN refresh (a rev-7 regression)
-and carries the final mode channel: the mode rides Q26 bits 2-3 of the
-increment, and bits 2-3 are cleared on EVERY increment, so the DSP can never
-misread a stock track. RPS9/RPSP still SOUND like RPCH here -- the DSP half
-(tools/patch_repitch_dsp.asm, 27 words) is proven on both cores in
-emulation (tools/repitch_dsp_check.py) but not installed: it needs a donor
-module, which is a user decision (no free DSP program memory exists).
-ColdFire oracle 10/10.
+status(WIP, "REPITCH KYOTI (rev 10: RPS9 + RPSP live on the DSP)", """
+FIRST IMAGE WITH THE CHARACTER MODES. RPS9 (linear over 12-bit samples) and
+RPSP (zero-order hold over 12-bit samples) run on both DSP cores, via a
+27-word cave in SPRING REVERB's last words and a bsr at each voice engine's
+kernel prologue (A P:0x40b, B P:0x20e); the stock kernel is untouched, so RPCH
+remains stock linear.
+*** THIS IMAGE REMOVES SPRING REVERB *** (user decision, Session 109): it is
+gone from the FX2 chooser and old projects that used it load the NONE page --
+byte-identical to SIDECHAIN3_CROSS's hardware-proven neutering. A later merge
+with the sidechain costs nothing extra (it builds from the module's start).
+Proven in emulation, never flashed: ColdFire oracle 10/10; DSP oracle 22/22
+on BOTH cores against the built image's exact bytes
+(python3 tools/repitch_dsp_check.py out/mainos_repitch_kyoti.bin).
 """)
 
 BASE = 0x40000400
@@ -151,6 +155,129 @@ def make_glyphs(cave_tab_at):
     return tab + recs + data
 
 
+# ---------------------------------------------------------------------------
+# DSP: the RPS9/RPSP kernel (tools/patch_repitch_dsp.asm), in the SPRING REVERB
+# donor's LAST words. Every donor fact is IMPORTED from build_sidechain3.py
+# (the FINAL, hardware-confirmed SIDECHAIN3_CROSS builder) so it stays
+# single-sourced; that builder is not modified. The sidechain builds from the
+# module's START (388 of 1063 words today), so the tail is stable no matter
+# how it grows, and a merged build costs nothing beyond what it already does.
+# MERGE NOTE: both builders assert they find spring's STOCK dispatch entry;
+# in a merged build whichever runs second must accept the neutered state.
+DSP_SRC = HERE / "patch_repitch_dsp.asm"
+DSP_ASM = ROOT / "vendor/dsp56300/build/source/dsp_host/dsp_asm"
+DSP_DIS = ROOT / "vendor/dsp56300/build/source/disassemble/dsp56kDisassemble"
+VOICE_HOOK = {"A": 0x0040b, "B": 0x0020e}      # the kernel prologue, per payload
+HOOK_WORDS = (0x76e500, 0x5edd00)             # move x:(r5),n6 / move y:(r5)+,a
+SPRING_SIG = [0x22ee00, 0x0140c0, 0x000040]    # spring's init, the sidechain's canary
+
+
+def dsp_assemble(org):
+    out = ROOT / f"out/patch_repitch_dsp_{org:05x}.bin"
+    r = subprocess.run([str(DSP_ASM), "-in", str(DSP_SRC), "-org", f"{org:x}", "-out", str(out)],
+                       capture_output=True, text=True, cwd=ROOT)
+    if r.returncode:
+        sys.exit(f"dsp_asm failed:\n{r.stdout}\n{r.stderr}")
+    raw = out.read_bytes()
+    d = subprocess.run([str(DSP_DIS), "-in", str(out), "-pc", f"{org:x}", "-le"],
+                       capture_output=True, text=True).stdout
+    if " dc " in d or "InvalidInstruction" in d or "mpysu" in d or "macsu" in d:
+        sys.exit(f"DSP cave did not round-trip clean:\n{d}")
+    return [int.from_bytes(raw[i:i + 3], "little") for i in range(0, len(raw), 3)]
+
+
+def dsp_install(img, touched):
+    """Returns {payload: cave org}. Records every changed byte in `touched`."""
+    import build_sidechain3 as sc3
+    mm_spec = importlib.util.spec_from_file_location(
+        "mm", ROOT / "refs/octabam/tools/build/dsp_modmap.py")
+    mm = importlib.util.module_from_spec(mm_spec)
+    mm_spec.loader.exec_module(mm)
+
+    def put(off, word):
+        img[off:off + 3] = sc3.w3(word)
+        touched.update(range(off, off + 3))
+
+    orgs = {}
+    n = len(dsp_assemble(0x1000))                  # size; absolute LAs need the real org
+    for tag, d in sc3.DSP.items():
+        start = d["cave_org"]
+        # the donor must be exactly the 1063-word module the sidechain measured
+        mods, _ = mm.modules(bytes(img), d["va"], d["ln"])
+        mod = [m for m in mods if m[0] == 0 and m[1] == start]
+        if len(mod) != 1 or mod[0][2] != sc3.DONOR_WORDS:      # (sp, addr, count, data)
+            sys.exit(f"payload {tag}: no {sc3.DONOR_WORDS}-word P module at P:0x{start:05x}")
+        so = sc3.dsp_module_fileoff(img, d["va"], d["ln"], start)
+        sig = [sc3.rd3(img, so + 3 * i) for i in range(3)]
+        if sig != SPRING_SIG:
+            sys.exit(f"payload {tag}: SPRING REVERB init signature {[hex(x) for x in sig]}")
+        org = start + sc3.DONOR_WORDS - n
+        words = dsp_assemble(org)
+        if len(words) != n:
+            sys.exit("DSP cave size shifted between the sizing and final passes")
+        co = sc3.dsp_module_fileoff(img, d["va"], d["ln"], org)
+        for i, w in enumerate(words):
+            put(co + 3 * i, w)
+
+        hook = VOICE_HOOK[tag]
+        ho = sc3.dsp_module_fileoff(img, d["va"], d["ln"], hook)
+        if (sc3.rd3(img, ho), sc3.rd3(img, ho + 3)) != HOOK_WORDS:
+            sys.exit(f"payload {tag}: voice hook P:0x{hook:05x} holds "
+                     f"{sc3.rd3(img, ho):06x} {sc3.rd3(img, ho + 3):06x}")
+        op, disp = sc3.bsr_long(hook, org)
+        put(ho, op)
+        put(ho + 3, disp)
+
+        # spring's dispatch entry -> the shared empty-FX stub, exactly as the
+        # sidechain does: its code is now partly ours and must never run
+        xt = sc3.dsp_xtable_fileoff(img, d["va"], d["ln"], 0x215)
+        ini, prc = xt + sc3.DONOR_ID * 3, xt + (0x20 + sc3.DONOR_ID) * 3
+        if (sc3.rd3(img, ini), sc3.rd3(img, prc)) != (start, d["spring_proc"]):
+            sys.exit(f"payload {tag}: X:0x215[0x{sc3.DONOR_ID:02x}] not stock spring "
+                     f"({sc3.rd3(img, ini):06x} {sc3.rd3(img, prc):06x})")
+        put(ini, d["stub_init"])
+        put(prc, d["stub_proc"])
+        orgs[tag] = org
+        print(f"  DSP {tag}: cave {n}w @P:0x{org:05x} (spring tail), hook P:0x{hook:05x} "
+              f"-> bsr {op:06x} {disp:06x}, X:0x215[0x{sc3.DONOR_ID:02x}] -> stub")
+
+    # the ColdFire half: not offered on either bus, and old projects load NONE
+    def u32(a):
+        return int.from_bytes(img[a - BASE:a - BASE + 4], "big")
+
+    def wr32(a, v):
+        img[a - BASE:a - BASE + 4] = v.to_bytes(4, "big")
+        touched.update(range(a - BASE, a - BASE + 4))
+
+    for bus in sc3.FX_BUSES:
+        entries = []
+        while (v := u32(bus["lst"] + len(entries) * 4)):
+            entries.append(v)
+            if len(entries) >= 0x20:
+                sys.exit(f"{bus['tag']}: no terminator in the chooser list")
+        offered = sc3.DONOR_P in entries
+        if offered:
+            pos = entries.index(sc3.DONOR_P)
+            del entries[pos]
+            for i, v in enumerate(entries):
+                wr32(bus["lst"] + i * 4, v)
+            wr32(bus["lst"] + len(entries) * 4, 0)
+            wr32(bus["id2pos"] + sc3.DONOR_ID * 4, 0)
+            for idv in range(0x20):
+                p = u32(bus["id2pos"] + idv * 4)
+                if idv != sc3.DONOR_ID and p > pos:
+                    wr32(bus["id2pos"] + idv * 4, p - 1)
+        if u32(bus["id2pos"] + sc3.DONOR_ID * 4) != 0:
+            sys.exit(f"{bus['tag']}: id2pos[donor] should land on NONE's row")
+        if u32(bus["id2e"] + sc3.DONOR_ID * 4) not in (sc3.DONOR_P, sc3.NONE_P):
+            sys.exit(f"{bus['tag']}: id2e[donor] is neither the donor nor NONE")
+        wr32(bus["id2e"] + sc3.DONOR_ID * 4, sc3.NONE_P)
+        print(f"  {bus['tag']}: " + ("SPRING REVERB removed from the chooser" if offered
+                                      else "SPRING REVERB was never offered here")
+              + "; id2e -> NONE (old projects load the NONE page)")
+    return orgs
+
+
 def main():
     if not STOCK_SECT.exists():
         sys.exit(f"missing {STOCK_SECT} -- run ./fetch-os.sh and ./analyze.sh first")
@@ -210,8 +337,13 @@ def main():
         val = syms[new] if isinstance(new, str) else new
         img[o:o+4] = struct.pack(">I", val)
 
-    # accounting: every changed byte must be a detour, a poke, or the cave
-    expected = set()
+    # DSP half + SPRING neutering (records its own bytes)
+    touched = set()
+    orgs = dsp_install(img, touched)
+
+    # accounting: every changed byte must be a detour, a poke, the cave, or a
+    # byte dsp_install recorded
+    expected = set(touched)
     for site, disp, _ in DETOURS:
         expected |= set(range(site-BASE, site-BASE+len(bytes.fromhex(disp))))
     for addr, *_ in POKES:
