@@ -282,14 +282,23 @@ rate_hook:
         mulu.l  %d2,%d0                 | r * N
         divu.l  %d1,%d0
         add.l   %d5,%d0
-        cmpi.l  #INC_MAX-4,%d0          | -4: the mode tag below must never
-        bls.s   .rh_tag                 | push the result past stock's own
-        move.l  #INC_MAX-4,%d0          | 2.0 ceiling (worth 2^-24, inaudible)
+        cmpi.l  #INC_MAX-16,%d0         | -16: the tag below can never push the
+        bls.s   .rh_tag                 | result past stock's own 2.0 ceiling
+        move.l  #INC_MAX-16,%d0
 .rh_tag:
+        | The mode rides Q26 BITS 2-3 (Session 108). The DSP rebuilds the
+        | increment as a net >>2 (P:0x3bd/0x3bf: asr #16 then asr #10 over a
+        | right-justified hi16:lo16 pair), so bits 0-1 are DISCARDED -- the
+        | old tag position was unreadable there. Bits 2-3 land in the Q24
+        | fraction LSBs, stored at the fixed address y:$40 (l:$40 = this
+        | voice's increment), where the DSP cave reads them. Cost: at most
+        | 2*2^-24 of the increment -- far below anything audible, and the
+        | DSP phase re-seeds every call.
         move.l  %d3,%d5
         swap    %d5
         andi.l  #3,%d5                  | modeoff
-        moveq   #-4,%d4
+        lsl.l   #2,%d5                  | -> bits 2-3
+        moveq   #-16,%d4                | clear bits 0-3
         and.l   %d4,%d0
         or.l    %d5,%d0
 .rh_restore:
@@ -590,6 +599,17 @@ rp_refresh:
         moveq   #0,%d1
         move.b  (UI_TRACK).l,%d1
         bsr     rp_swap
+        | The ATTR path, and ONLY it, marks slot 0 changed -- exactly what
+        | every stock editor does after a store (0x40039510, 0x4005543c, ...).
+        | Returning from the audio editor is not a full page redraw; without
+        | this the knob keeps its old caption until a page press (flash 10,
+        | a regression of rev 7's blanket removal). Unconditional on purpose:
+        | the per-frame rate_gate poll can consume the gate transition before
+        | this runs, and an ATTR TIMESTRETCH edit is a rare deliberate act, so
+        | one ordinary value pop-and-fade on return is the right trade. The
+        | page-2 TSTR path stays mark-free -- that is where it stuck (flash 8).
+        moveq   #0x14,%d0
+        move.l  %d0,(REDRAW_L).l
         move.l  (%sp)+,%d1
         move.l  (%sp)+,%d0
         rts

@@ -118,8 +118,8 @@ uint32_t model(uint32_t neutralInc, unsigned proj, unsigned samp, unsigned idx, 
 	uint64_t N = uint64_t(proj) * RP[idx], D = uint64_t(samp) * RQ[idx];
 	while(N > 2 * D) D <<= 1;
 	uint64_t inc = (neutralInc / D) * N + (neutralInc % D) * N / D;
-	if(inc > INC_MAX - 4) inc = INC_MAX - 4;
-	return uint32_t((inc & ~3ull) | modeoff);
+	if(inc > INC_MAX - 16) inc = INC_MAX - 16;
+	return uint32_t((inc & ~0xfull) | (uint64_t(modeoff) << 2));   // tag in bits 2-3
 }
 
 // the Part-DB fixture used by the gate and swap contracts
@@ -148,7 +148,7 @@ void check(const char* what, bool ok, int detail = -1)
 
 int main(int argc, char** argv)
 {
-	if(argc != 3 && argc != 9) { std::printf("usage: %s STOCK PATCHED [quant_widget rp_ui_gate rp_swap rp_prev quant_step rp_caption]\n", argv[0]); return 2; }
+	if(argc != 3 && argc != 10) { std::printf("usage: %s STOCK PATCHED [quant_widget rp_ui_gate rp_swap rp_prev quant_step rp_caption rp_refresh]\n", argv[0]); return 2; }
 	Img stock, pat;
 	for(auto [img, path] : {std::pair{&stock, argv[1]}, {&pat, argv[2]}}) {
 		std::ifstream in(path, std::ios::binary);
@@ -248,7 +248,7 @@ int main(int argc, char** argv)
 		check("resolver: 4/5/6 behave as OFF register-for-register; 0..3 untouched", ok);
 	}
 
-	if(argc == 9) {
+	if(argc == 10) {
 		const uint32_t quantWidget = uint32_t(std::stoul(argv[3], nullptr, 16));
 		const uint32_t uiGate = uint32_t(std::stoul(argv[4], nullptr, 16));
 		const uint32_t swapFn = uint32_t(std::stoul(argv[5], nullptr, 16));
@@ -409,7 +409,7 @@ int main(int argc, char** argv)
 		}
 	}
 
-	if(argc == 9) {
+	if(argc == 10) {
 		const uint32_t stepFn  = uint32_t(std::stoul(argv[7], nullptr, 16));
 		const uint32_t swapFn  = uint32_t(std::stoul(argv[5], nullptr, 16));
 		const uint32_t prevTab = uint32_t(std::stoul(argv[6], nullptr, 16));
@@ -532,6 +532,39 @@ int main(int argc, char** argv)
 				if(!m.step()) break;
 			ok &= m.read32(0x400d3032) == 0x50544348 && m.read32(0x46c7d248) == 0;
 			check("caption set on a gate change, both directions, and NO value popup", ok);
+		}
+
+		// 10) the ATTR path (rp_refresh) DOES mark slot 0 changed -- the one
+		//     path that must, because returning from the audio editor is not a
+		//     full page redraw (flash 10 regression of rev 7's blanket removal).
+		//     Also register-transparent, since it runs inside the ATTR editor.
+		{
+			const uint32_t refreshFn = uint32_t(std::stoul(argv[9], nullptr, 16));
+			bool ok = true;
+			ot::Machine m(pat.image);
+			auto* cpu = m.getCpuState();
+			m.write8(0x80000000, 3);
+			setPart(m, 3, 1, 3, 1, 70, 4, 2880);   // AUTO + REPITCH sample
+			m.write32(0x46c7d248, 0);
+			const uint32_t seeds[8] = {0, 0x11110001, 0x22220002, 0x33330003,
+			                           0x44440004, 0x55550005, 0x66660006, 0x77770007};
+			for(int r = 0; r < 8; ++r) m68k_set_reg(cpu, m68k_register_t(M68K_REG_D0 + r), seeds[r] | 0x9000);
+			for(int r = 0; r < 6; ++r) m68k_set_reg(cpu, m68k_register_t(M68K_REG_A0 + r), 0x47020000 + r * 0x100);
+			m.write32(stack - 4, trampoline + 0x80);
+			for(unsigned i = 0; i < 8; i += 2) m.write16(trampoline + 0x80 + i, 0x4e71);
+			m68k_set_reg(cpu, M68K_REG_SP, stack - 4);
+			m68k_set_reg(cpu, M68K_REG_PC, refreshFn);
+			unsigned steps = 0;
+			while(m.pc() != trampoline + 0x80 && steps++ < 600)
+				if(!m.step()) break;
+			ok &= m.pc() == trampoline + 0x80 && m68k_get_reg(cpu, M68K_REG_SP) == stack;
+			ok &= m.read32(0x46c7d248) == 0x14;
+			ok &= m.read32(0x400d3032) == 0x5155414e;          // and QUAN is up
+			for(int r = 0; r < 8; ++r)
+				ok &= m68k_get_reg(cpu, m68k_register_t(M68K_REG_D0 + r)) == (seeds[r] | 0x9000);
+			for(int r = 0; r < 6; ++r)
+				ok &= m68k_get_reg(cpu, m68k_register_t(M68K_REG_A0 + r)) == 0x47020000u + r * 0x100;
+			check("ATTR path marks slot 0 changed + QUAN caption, all registers preserved", ok);
 		}
 	}
 
