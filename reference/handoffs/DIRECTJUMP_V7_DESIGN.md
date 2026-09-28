@@ -135,8 +135,9 @@ Order of work, each step gated by the previous:
    after each landing; live events with content identical at every tick). Details: NOTES
    Session 108.
 5. Hardware. **V7.0 HARDWARE-CONFIRMED 2026-09-27** ("the true DJ gold standard"): 16↔7 vs the
-   metronome, master 1x↔2x, swing/microtiming, rapid switching all good; MIDI tracks not yet
-   tested on HW. V7.1 (mid-window landing) parked as NOT RECOMMENDED — NOTES Session 108 cont.
+   metronome, master 1x↔2x, swing/microtiming, rapid switching all good; PER-TRACK patterns
+   with mixed lengths and 2x…1/4x track scales, and MASTER LENGTH `INF`, confirmed 2026-09-28;
+   MIDI tracks not yet tested on HW. V7.1 (mid-window landing) parked as NOT RECOMMENDED — NOTES Session 108 cont.
 
 ## 6a. PARKED by the author (2026-09-27) — cued-switch behaviour, revisit later
 

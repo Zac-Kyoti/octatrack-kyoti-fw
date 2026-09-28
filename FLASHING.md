@@ -255,9 +255,8 @@ below instead.
 
 > Hardware-confirmed 2026-09-27: the 16 ↔ 7 case, master 1x ↔ 2x, swing / microtiming and
 > rapid switching, plus the toggle / LED / persistence behaviour carried over from V6.4.
-> Emulator-proven but not separately exercised on hardware: PER-TRACK patterns with mixed
-> lengths and 2x…1/4x track scales. **MASTER LENGTH `INF` has no jump exercised yet**
-> (position model only). MIDI tracks: pending (step 9). V7.0.1: the Part change (step 10) is hardware-confirmed
+> Hardware-confirmed 2026-09-28: PER-TRACK patterns with mixed lengths and 2x…1/4x track
+> scales, and MASTER LENGTH `INF`. MIDI tracks: pending (step 9). V7.0.1: the Part change (step 10) is hardware-confirmed
 > 2026-09-28 together with a re-run of the checks above; START SILENT and the trig-condition
 > reset are emulator-verified against stock; Program Change on re-cues (step 11) is
 > emulator-verified, not yet tested on hardware. Not exercised anywhere:
