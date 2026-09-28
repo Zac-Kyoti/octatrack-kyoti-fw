@@ -77,27 +77,16 @@ courtesy, not a lock; `tools/kyoti_status.py` is all of it.
 
 - **DIRECT JUMP** — an optional immediate pattern change, toggled with **`[PTN]` +
   `[YES]`** (a toast confirms; it comes up OFF at every power-on). A cued pattern takes
-  over on the next step instead of waiting for the current one to finish — and it comes
-  in **locked to the master clock**: exactly where it would be had it been playing since
-  START, whatever its length, track lengths, track scales, master length or master scale.
-  A 16-step pattern with trigs on 1, 5, 9 and 13 still plays them on pulses 1, 5, 9 and 13
-  after the jump — never shifted by a step, never a fraction of a step off. The outgoing
-  pattern's still-pending trigs are dropped at the jump, so the new pattern's first trig
-  always wins. Jumping *into* a pattern with slow tracks (1/2x, 1/4x) waits until every
-  track reaches a step start, up to about two or four steps. The MIDI Program Change goes
-  out as soon as you cue; re-cue before the jump lands and the new pattern's Program Change
-  follows, cue back to the playing pattern and its Program Change is re-sent, so the last one
-  your gear receives always names what the OT plays. No MIDI START is sent. On the jump the
-  OT changes the Part, applies each track's START SILENT and restarts trig conditions exactly
-  as a stock pattern change does (stock's own Part change, not a full reload). The arranger
-  and pattern chains are untouched, and with DIRECT JUMP OFF pattern changes are stock.
-  This deliberately improves on the Analog Rytm's DIRECT JUMP, which places the new
-  pattern relative to the *outgoing* one and so lands shifted or fractional whenever
-  lengths or scales differ. The previous build, V6.4, reproduces AR's behaviour exactly and
-  is kept (SUPERSEDED) for side-by-side listening. How V7 was built and proven — a
-  never-switched reference run of the same pattern as the test oracle — is in
+  over on the next step instead of waiting for the current one to finish, **locked to the
+  master clock**: it plays exactly where it would be had it been running since START,
+  whatever its track lengths, scales or master settings — never shifted by a step, never a
+  fraction of a step off, and its first trig always wins. The Part, START SILENT and trig
+  conditions change as on a stock pattern change, and the last MIDI Program Change sent
+  always names the pattern that plays. The arranger and chains are untouched, and with
+  DIRECT JUMP OFF pattern changes are stock. The Analog Rytm's DIRECT JUMP, by contrast,
+  lands shifted or fractional whenever lengths or scales differ. Design:
   [`reference/handoffs/DIRECTJUMP_V7_DESIGN.md`](reference/handoffs/DIRECTJUMP_V7_DESIGN.md);
-  every sequencer bug met on the way is listed in
+  sequencer bugs found on the way:
   [`reference/OT_SEQUENCER_BUGS.md`](reference/OT_SEQUENCER_BUGS.md).
   → [`tools/build_directjump_v7.py`](tools/build_directjump_v7.py)
 
