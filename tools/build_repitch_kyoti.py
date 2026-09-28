@@ -38,22 +38,19 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (gate 1, rev 7)", """
-Flash 8 confirmed quant_step's return DOES reach storage (the knob got fast,
-not unchanged -- flash 7's "unchanged" reading was wrong), so no further
-caller diagnosis is needed. Rev 7 answers flash 8's two items:
-(1) the spurious value popup after a page-2 TSTR switch -- the 0x14 mark at
-0x46c7d244+slot*20+4 is what the editor writes to SHOW a value with its
-fade, so writing it from a mode switch popped a value nobody dialled; the
-write is gone and the caption alone drives the change;
-(2) a single detent is now a FINE move -- QS_FINE=3 of them advance one
-ratio (~21 detents across the 8 values) while a bigger, accelerated/pressed
-delta still passes through proportionally, which is the speed the user
-called fine. QS_FINE is the one constant to change for feel.
+status(WIP, "REPITCH KYOTI (gate 1, rev 8)", """
+Flash 9's feel was right; its remaining complaint -- 1/1 no longer centred,
+3 stops left of it and 4 right -- was the RATIO LIST, not the dial: 5/4
+(+386c) had no mirror at -386c. Rev 8 adds 4/5, making the nine values
+pitch-symmetric about 1/1, which lands 1/1 on stop 64: the dial's exact
+centre AND stock's own neutral PTCH value. Stops are 4 + 15*idx
+(4 19 34 49 64 79 94 109 124), one scale for display and storage, so the
+dual-scale hack from rev 6.1 is gone -- which recovered enough bytes to pay
+for the extra ratio and then some. QS_FINE=3 feel unchanged.
 All 9 oracle contracts green.
-*** The ColdFire cave is now EXACTLY FULL: 0x400d6f80..0x400d7b00, zero
-bytes under the bugbuilds base. Any further ColdFire work needs the second
-zone (MERGE.md, reference/kb/caves.md). ***
+*** Cave 0x400d6f80..0x400d7ae4, 28 B under the bugbuilds base. ***
+NOTE: a project saved with a NON-1/1 QUAN shifts one ratio, since the stop
+scale moved; 1/1 (the default, and stop 64) is unaffected.
 """)
 
 BASE = 0x40000400

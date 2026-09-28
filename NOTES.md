@@ -32944,3 +32944,48 @@ genuine trimming, all of it redundancy rather than boundary-creep:
 changed, 0 strays). Oracle 9/9, with contract 8 rewritten for the accumulator
 (three fine detents per ratio, coarse proportional, reversal cancels, floor
 and ceiling hold, stock reached off-mode).
+
+### Session 108 continued (7) — flash 9 good; REV 8 makes the ratio list pitch-symmetric so 1/1 is dead centre
+
+**Flash 9 (rev 7 `fc3171cc`): the feel is right** (`QS_FINE = 3`, ~21 detents
+across the set) and the value popup is gone. One complaint left, and it was a
+**design** error of mine rather than a dial-maths one: 1/1 was not centred,
+with three stops to its left and four to its right.
+
+**Cause: the ratio list was not pitch-symmetric.** In cents the eight values
+were −1200, −702, −498, **0**, +386, +498, +702, +1200 — every interval had
+its mirror except `5/4` (+386), whose partner `4/5` (−386, the just major
+third *down*) I had simply never included. No arrangement of eight
+asymmetric values can centre 1/1.
+
+**Rev 8 adds `4/5`**, giving nine pitch-symmetric values, and the arithmetic
+then lands exactly right:
+
+    idx    0    1    2    3    4    5    6    7    8
+    ratio 1/2  2/3  3/4  4/5  1/1  5/4  4/3  3/2  2/1
+    cents -1200 -702 -498 -386   0  +386 +498 +702 +1200
+    stop     4   19   34   49   64   79   94  109  124
+    loop  2bar 3/2  4/3  5/4  1bar 4/5  3/4  2/3  1/2
+    cycle 1/2  2/3  3/4  4/5  1/1  5/4  4/3  3/2  2/1  (passes/bars)
+
+- 1/1 is idx 4 of 9 — **centre by count** — and its stop is
+  **ui 64: the dial's exact midpoint of 4..124 *and* stock's neutral PTCH
+  value**, so the two notions of "centre" coincide for free.
+- Spacing is exactly 120/8 = 15, so **display and storage collapse back to
+  ONE scale** (`4 + 15*idx`), retiring the dual-scale hack rev 6.1 introduced.
+  `quant_fmt` now just calls `rk_bucket` again, and `rk_bucket` is
+  `(ui + 3)/15` clamped 0..8 — round-to-nearest-stop, no offset fudge.
+- That collapse **recovered more bytes than the ninth ratio cost**: the cave
+  went from exactly full (rev 7) to **28 B under** the bugbuilds base
+  (`0x400d6f80..0x400d7ae4` = 2916 B).
+- `4/5` is musically the mirror of `5/4`: a just major third down, loop 5/4
+  bars, closing 4 passes over 5 bars — a 4-over-5 cross-rhythm.
+
+⚠️ **Compatibility:** the stop scale moved (was `19 + 15*idx` over 8 values),
+so a project saved with a **non-1/1** QUAN reads one ratio off. **1/1 is
+unaffected** — it was ui 64 under both scales, and it is the fresh default
+and the `rp_swap` park floor, so the common case round-trips.
+
+**Rev 8 = flash-10 candidate: mainos `e501880f…`, syx `730fbf88…`** (2315 B
+changed, 0 strays). Oracle 9/9 with the model, stops and `quant_step`
+expectations updated to nine values.

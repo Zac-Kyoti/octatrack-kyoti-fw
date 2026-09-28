@@ -130,7 +130,9 @@
     .equ SCLK,       0x4610757c         | audio-domain sample clock (fire-time base)
     .equ MCLK,       0x46107564         | MIDI-domain clock (MIDI fire-time base)
     .ifndef DJ_TOFS
-    .equ DJ_TOFS,    1                  | sample index t of this ISR = dj_T + DJ_TOFS (oracle-measured)
+    .equ DJ_TOFS,    0                  | t of this ISR = dj_T + DJ_TOFS.  MEASURED 0 (rl_v70: t - dj_T == 0
+                                        | at all 301 ticks); the first build's guess of 1 landed
+                                        | every jump exactly one tick early (oracle: d = +1 tick)
     .endif
 
     .text

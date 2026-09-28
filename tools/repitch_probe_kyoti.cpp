@@ -110,8 +110,9 @@ struct Img
 };
 
 // ---- the independent model -------------------------------------------------
-const unsigned RP[8] = {1, 2, 3, 1, 5, 4, 3, 2}, RQ[8] = {2, 3, 4, 1, 4, 3, 2, 1};
-unsigned bucket(unsigned ui) { unsigned d = ui > 12 ? ui - 12 : 0; d /= 15; return d > 7 ? 7 : d; }
+// nine stops at 4 + 15*idx, pitch-symmetric about 1/1 (idx 4, ui 64 = centre)
+const unsigned RP[9] = {1, 2, 3, 4, 1, 5, 4, 3, 2}, RQ[9] = {2, 3, 4, 5, 1, 4, 3, 2, 1};
+unsigned bucket(unsigned ui) { unsigned d = (ui + 3) / 15; return d > 8 ? 8 : d; }
 uint32_t model(uint32_t neutralInc, unsigned proj, unsigned samp, unsigned idx, unsigned modeoff)
 {
 	uint64_t N = uint64_t(proj) * RP[idx], D = uint64_t(samp) * RQ[idx];
@@ -206,7 +207,7 @@ int main(int argc, char** argv)
 					ok &= oks && okp && got == want;
 					++n;
 				}
-		check("repitch family: bucket(composed word) drives the exact folded ratio", ok, bad);
+		check("repitch family: bucket(composed word) drives the exact folded ratio (9 ratios)", ok, bad);
 		std::printf("      (%d cases)\n", n);
 	}
 
@@ -417,7 +418,7 @@ int main(int argc, char** argv)
 		//    bigger delta passes through proportionally. Results are always
 		//    zone centres; off a repitch track stock's handler runs.
 		{
-			constexpr uint32_t centres[8] = {19, 34, 49, 64, 79, 94, 109, 124};
+			constexpr uint32_t stops[9] = {4, 19, 34, 49, 64, 79, 94, 109, 124};
 			auto step = [&](ot::Machine& m, uint32_t cur, int delta, bool& ran) {
 				auto* cpu = m.getCpuState();
 				m.write32(stack - 16, trampoline + 0x80);
@@ -447,39 +448,39 @@ int main(int argc, char** argv)
 			{
 				auto m = fresh(4);
 				bool ran = false;
-				ok &= step(*m, 64, +1, ran) == centres[3] && ran;   // 1st: holds
-				ok &= step(*m, 64, +1, ran) == centres[3] && ran;   // 2nd: holds
-				ok &= step(*m, 64, +1, ran) == centres[4] && ran;   // 3rd: advances
-				ok &= step(*m, 72, +1, ran) == centres[4] && ran;   // tally reset
+				ok &= step(*m, 64, +1, ran) == stops[4] && ran;   // 1st: holds
+				ok &= step(*m, 64, +1, ran) == stops[4] && ran;   // 2nd: holds
+				ok &= step(*m, 64, +1, ran) == stops[5] && ran;   // 3rd: advances
+				ok &= step(*m, 79, +1, ran) == stops[5] && ran;   // tally reset
 			}
 			// three down = one ratio down
 			{
 				auto m = fresh(5);
 				bool ran = false;
 				step(*m, 64, -1, ran); step(*m, 64, -1, ran);
-				ok &= step(*m, 64, -1, ran) == centres[2] && ran;
+				ok &= step(*m, 64, -1, ran) == stops[3] && ran;
 			}
 			// reversing cancels the tally instead of stepping
 			{
 				auto m = fresh(4);
 				bool ran = false;
 				step(*m, 64, +1, ran); step(*m, 64, +1, ran);
-				ok &= step(*m, 64, -1, ran) == centres[3] && ran;
+				ok &= step(*m, 64, -1, ran) == stops[4] && ran;
 			}
 			// a coarse delta passes straight through, and voids the tally
 			{
 				auto m = fresh(6);
 				bool ran = false;
 				step(*m, 64, +1, ran);
-				ok &= step(*m, 64, +3, ran) == centres[6] && ran;
-				ok &= step(*m, 64, +1, ran) == centres[3] && ran;   // tally was voided
+				ok &= step(*m, 64, +3, ran) == stops[7] && ran;
+				ok &= step(*m, 64, +1, ran) == stops[4] && ran;   // tally was voided
 			}
 			// floor and ceiling hold
 			{
 				auto m = fresh(4);
 				bool ran = false;
-				ok &= step(*m, 19, -9, ran) == centres[0] && ran;
-				ok &= step(*m, 124, +9, ran) == centres[7] && ran;
+				ok &= step(*m, 4, -9, ran) == stops[0] && ran;
+				ok &= step(*m, 124, +9, ran) == stops[8] && ran;
 			}
 			// off a repitch track stock's handler is reached
 			{
@@ -488,7 +489,7 @@ int main(int argc, char** argv)
 				step(*m, 64, +1, ran);
 				ok &= !ran;
 			}
-			check("quant_step: 3 fine detents per ratio, coarse proportional, centres only", ok);
+			check("quant_step: 3 fine detents per ratio, coarse proportional, 9 stops", ok);
 		}
 
 		// 9) a gate change on the panel's track sets the caption AND the

@@ -18,8 +18,11 @@
 | an 8-way ratio selector and the PTCH word (record +0, ui<<8, 64=neutral)
 | becomes its storage. The composed word is captured in pitch_gate, so
 | p-locks and scenes move QUANT. Buckets of 15 ui units, neutral centred:
-|     ui 4..26  27..41 42..56 57..71 72..86 87..101 102..116 117..124
-|     1/2       2/3    3/4    1/1    5/4    4/3     3/2      2/1
+|     stop  4   19   34   49   64   79   94  109  124
+|     ratio 1/2  2/3  3/4  4/5  1/1  5/4  4/3  3/2  2/1
+| Nine values, pitch-symmetric about 1/1 (every interval has its mirror:
+| 4/5 is 5/4 inverted), so 1/1 lands on stop 64 -- the dial's exact centre
+| and stock's own neutral PTCH value.
 | The ratio multiplies the tempo scale EXACTLY (integer p/q), and the
 | product octave-folds in the integer domain (D doubles while N > 2D), so
 | the increment never exceeds 2x AND never leaves the rational grid -- the
@@ -177,13 +180,10 @@ rp_source:
 | 15-unit buckets from ui 12; neutral 64 sits mid-bucket in 1/1.
 rk_bucket:
         move.l  %d1,-(%sp)
-        moveq   #12,%d1
-        sub.l   %d1,%d0
-        bpl.s   1f
-        moveq   #0,%d0
-1:      moveq   #15,%d1
+        addq.l  #3,%d0                  | nearest of the 9 stops at 4 + 15*idx
+        moveq   #15,%d1
         divu.l  %d1,%d0
-        moveq   #7,%d1
+        moveq   #8,%d1
         cmp.l   %d1,%d0
         bls.s   2f
         move.l  %d1,%d0
@@ -673,14 +673,13 @@ quant_step:
         tst.l   %d0
         bpl.s   1f
         moveq   #0,%d0
-1:      moveq   #7,%d1
+1:      moveq   #8,%d1
         cmp.l   %d1,%d0
         ble.s   2f
         move.l  %d1,%d0
-2:      move.l  %d0,%d1                 | 19 + 15*zone
-        lsl.l   #4,%d1
-        sub.l   %d0,%d1
-        moveq   #19,%d0
+2:      moveq   #15,%d1                 | 4 + 15*idx
+        mulu.l  %d0,%d1
+        moveq   #4,%d0
         add.l   %d1,%d0
         move.l  (%sp)+,%d2
         move.l  (%sp)+,%d1
@@ -775,15 +774,11 @@ quant_widget:
         tst.l   %d0
         bmi.s   .qw_frame               | an empty cell keeps the bare frame
         bsr     rk_bucket
-        | DISPLAY position only: 8 stops spanning the dial's whole arc,
-        | 4 + idx*120/7 = 4 21 38 55 72 89 106 124, so 1/2 sits hard left
-        | and 2/1 hard right. The STORED value stays a 15-wide zone centre
-        | (rk_bucket's scale), which is what p-locks, scenes and the engine
-        | read -- display and storage are deliberately different scales.
-        moveq   #120,%d1
+        | snap to this idx's stop -- ONE scale for display and storage now
+        | (4 + 15*idx), so 1/2 sits hard left, 2/1 hard right and 1/1 dead
+        | centre at 64, which is also stock's neutral PTCH value
+        moveq   #15,%d1
         mulu.l  %d0,%d1
-        moveq   #7,%d0
-        divu.l  %d0,%d1
         moveq   #4,%d0
         add.l   %d1,%d0
 .qw_frame:
@@ -808,15 +803,7 @@ quant_fmt:
         move.l  %a0,8(%sp)
         jmp     (SPRINTF).l
 .endif
-        | the display scale (4 + idx*120/7), not rk_bucket's stored scale
-        subq.l  #4,%d0
-        bpl.s   1f
-        moveq   #0,%d0
-1:      moveq   #7,%d1
-        mulu.l  %d1,%d0
-        addi.l  #60,%d0
-        moveq   #120,%d1
-        divu.l  %d1,%d0                 | 4..124 in, 0..7 out: no clamp needed
+        bsr     rk_bucket
         lsl.l   #2,%d0
         lea     .q_labels(%pc),%a0
         adda.l  %d0,%a0
@@ -831,6 +818,7 @@ quant_fmt:
         .ascii  "1/2\0"
         .ascii  "2/3\0"
         .ascii  "3/4\0"
+        .ascii  "4/5\0"
         .ascii  "1/1\0"
         .ascii  "5/4\0"
         .ascii  "4/3\0"
@@ -920,7 +908,7 @@ rp_apply2:
         movem.l %d2-%d7/%a2-%fp,(%sp)   | displaced
         jmp     (0x40009e08).l
 .rk_ratios:
-        .byte   1,2, 2,3, 3,4, 1,1, 5,4, 4,3, 3,2, 2,1
+        .byte   1,2, 2,3, 3,4, 4,5, 1,1, 5,4, 4,3, 3,2, 2,1
         .balign 2
 
 | ---------------------------------------------------------------------------
