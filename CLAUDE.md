@@ -190,5 +190,9 @@ unfinished, unverified edits into an unrelated commit — twice (`10173b3`, `eb8
 5. **Publishing:** `git fetch` first; `main` only moves forward — rebase onto `origin/main`,
    never force-push, never rewrite another session's commits. Checkouts on `main` update with
    `git pull --rebase --autostash`.
+   **Never publish your commit by cherry-picking it past another session's unpushed commit**:
+   NOTES.md's union merge silently carries that session's NOTES entry along (it happened in
+   `def0295`, undone by `dec7248`). Commit in your own worktree, or make the edit directly in a
+   fresh worktree of `origin/main`, then push.
 
 Full detail, toolchain entry points, and the current frontier: `START_HERE.md`.
