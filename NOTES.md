@@ -33277,3 +33277,54 @@ state.
 changed, 0 strays). ColdFire oracle 10/10; DSP oracle 22/22 × 2 cores.
 **Never flashed. Removes SPRING REVERB.** First image where RPS9/RPSP sound
 different from RPCH.
+
+## Session 109 continued (2) (2026-09-27/28, `main`) — rev 10 HW: "Everything works"; RPS9 measured; manufacturer specs found; fidelity scope written
+
+**Flash 11 = rev 10 (syx `3f7e9e0c…`): user reports "Everything works."** That
+covers the ColdFire UI and all three modes audibly running. The user then asked
+whether RPS9 does anything, since it sounds close to RPCH.
+
+**Listening render** (`tools/repitch_dsp_render.cpp` + `tools/repitch_dsp_listen.py`,
+new): streams 16-bit test material through the REAL kernel + cave bytes read out of
+the built image on dsp56kEmu. Modelled: the pre-kernel ring fill and the
+(offset, fraction) table. RPS9−RPCH is a constant ≈ −72 dBFS floor on every
+signal, which is the theoretical 12-bit truncation floor (2⁻¹¹/√3). That is 50+ dB
+under loud material and ~33 dB under a −30 dBFS pad. **RPS9 works; 12-bit alone is
+subtle.** RPSP ≡ RPS9 bit-for-bit at 1/1 (every fraction is zero), and differs a lot
+when repitched (drum loop 0.75×: −5.4 dB relative, >12 kHz energy 5 % → 11.5 %).
+Output in `out/listen/` (not committed).
+
+**Corrections given to the user:** (1) the S900/S950 did not interpolate; each voice
+had its own DAC clock (my earlier claim came from one forum post). (2) RPSP shipped
+without the agreed ~26 kHz hold. That was not disclosed at the time and is disclosed now.
+
+**Manufacturer sources found** (details, quotes, page refs, derived numbers in
+`reference/handoffs/REPITCH_FIDELITY_SCOPE.md` §1):
+- SP-1200 Service Manual (1987): fixed 26.04 kHz playback; pitch word = A0 + 7-bit
+  fraction through an adder carry (drop/repeat); 12-bit linear DAC via 4051 demux into
+  per-channel S/H; level via an 8-bit multiplying DAC on the reference; exactly 2 ×
+  SSM2044 (ch 1/2, dynamic, trimmed to 1.0 kHz self-oscillation); ch 3-6 fixed 5-pole
+  op-amp LPFs, **different values per channel** (schematic p. 17). Our nodal analysis,
+  `tools/sp1200_filter_response.py`: −3 dB at 7.9 / 9.6 / 11.6 / 13.1 kHz.
+- Akai S900 Service Manual, voice block diagram No. 860913A: per voice, 12-bit DAC
+  (BA9221) clocked by its own timer `DSCn` → MF6CN-50 6th-order switched-cap
+  Butterworth on its own clock `FCKn` → BA6110 VCA. Record: MF6 anti-alias at fs × 0.4,
+  36 dB/oct, plus 18 kHz 2-pole. S950 operator's manual: bandwidth 3-19 kHz sets the
+  rate (19.2 kHz = 0.4 × 48 kHz).
+- Undocumented: whether the Akai playback filter clock tracks the voice clock.
+
+**Scope outcome:** both machines are "stored at rate G, played as a staircase at tick
+rate T, then filtered" (SP: G = T = 26.04 kHz, drop/repeat; Akai: T = G × ratio,
+every sample once). So we build one "virtual sampler" DSP engine with two parameter sets. Tempo
+lock and the cross-chip ring contract are untouched. **Gate 0 = measure DSP cycle
+headroom + find ~40 words/voice of persistent state**; nothing else is committed to
+until that is answered. Old scope §2's "the Akai did interpolate" is marked wrong in place.
+
+**Shared-tree audit (my fault):** repitch commits `10173b3`, `2efa133`, `36b0b3e` and
+`eb8f022` used `git add -A` and swept in DIRECT JUMP files that were in progress in the
+other session (AR_DJ_QUIRKS.md, patch_directjump_v6/v7, build_directjump_v6/v7,
+DIRECTJUMP_V7_DESIGN.md, diag/cmp_reflock, diag_dj_part, AR_DIRECT_JUMP.md). Nothing
+was lost, only filed under the wrong message. History left as is: it's shared with a
+live session and later DJ commits sit on top. From now on, explicit paths only.
+
+No build this turn.

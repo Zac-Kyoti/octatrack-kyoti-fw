@@ -156,6 +156,14 @@ it is expensive. §2 prices each one.
 
 ### `RPS9` — linear + 12-bit. Ship it first.
 
+> **⚠️ CORRECTION (Session 109, 2026-09-28): the next paragraph is wrong.** Akai's own
+> S900 service manual (voice block diagram No. 860913A) shows each voice's 12-bit DAC
+> read out by its own programmable clock, followed by a per-voice 6th-order
+> switched-capacitor filter, with **no interpolator**. RPS9 as shipped (linear + 12-bit)
+> therefore models only the 12-bit storage. RPSP also still lacks the ~26 kHz hold
+> this section promised. Both are scoped properly, from manufacturer sources, in
+> [`REPITCH_FIDELITY_SCOPE.md`](REPITCH_FIDELITY_SCOPE.md).
+
 The Akai S900/S950 **did** interpolate; that is exactly why detuning on an Akai does not
 sound like detuning on an SP-1200. So the correct S950 model is the interpolator already
 present plus 12-bit truncation: **one AND mask on the output store at `P:0x419`/`0x41a`.**
