@@ -599,6 +599,15 @@ rp_refresh:
 | wide instead of ~105, and stock still clamps, stores to Part/shadow/live
 | and does its own redraw bookkeeping.
 quant_step:
+.ifdef RPK_DIAG
+        move.l  %d0,-(%sp)              | latch WHO called us: the low word of
+        move.l  %a0,-(%sp)              | the return address, two pushes deep
+        move.l  8(%sp),%d0
+        lea     rk_dret(%pc),%a0
+        move.w  %d0,(%a0)
+        move.l  (%sp)+,%a0
+        move.l  (%sp)+,%d0
+.endif
         move.l  %d1,-(%sp)
         moveq   #0,%d1
         move.b  (UI_TRACK).l,%d1
@@ -803,44 +812,51 @@ rp_prev:
 rk_dvals:
         .byte   0,0,0,0,0
         .balign 2
+rk_dret:
+        .word   0
 rk_dbuf:
         .byte   0,0,0,0,0
         .balign 2
+| DIAG readout: the four hex digits of quant_step's caller -- the low word of
+| the return address it was last entered with. Session 108-cont-5: the gate,
+| the machine and the SETUP byte are all settled (1/0/4 on hardware), and the
+| step counter advances, so the open question is WHICH call site reaches the
+| P+0x12a handler. 0x536a would be the UI editor's own (0x4005536a, the
+| instruction after its jsr); anything else names a different consumer.
+| '----' until quant_step has run once.
 rp_diagstr:
-        lea     -12(%sp),%sp
-        movem.l %d0-%d2,(%sp)
+        lea     -16(%sp),%sp
+        movem.l %d0-%d2/%a0,(%sp)
+        lea     rk_dret(%pc),%a0
+        moveq   #0,%d0
+        move.w  (%a0),%d0
+        lea     rk_dbuf(%pc),%a0
         moveq   #0,%d1
-        move.b  (UI_TRACK).l,%d1
-        bsr     rp_ui_gate              | refresh rk_dvals for this track
-        lea     rk_dvals(%pc),%a0
-        lea     rk_dbuf(%pc),%a1
-        moveq   #0,%d2
+        move.b  %d1,4(%a0)              | NUL
+        tst.l   %d0
+        bne.s   .ds_hex
+        moveq   #0x2d,%d1               | '----': quant_step never entered
+        move.b  %d1,(%a0)
+        move.b  %d1,1(%a0)
+        move.b  %d1,2(%a0)
+        move.b  %d1,3(%a0)
+        bra.s   .ds_out
+.ds_hex:
+        moveq   #3,%d2                  | four digits, least significant last
 .ds_loop:
-        moveq   #0,%d0
-        move.b  (%a0,%d2.l),%d0
-        andi.l  #0xf,%d0
-        moveq   #9,%d1
-        cmp.l   %d1,%d0
+        move.l  %d0,%d1
+        andi.l  #0xf,%d1
+        cmpi.l  #9,%d1
         ble.s   1f
-        addq.l  #7,%d0                  | 'A'..'F'
-1:      addi.l  #0x30,%d0
-        move.b  %d0,(%a1,%d2.l)
-        addq.l  #1,%d2
-        moveq   #3,%d1
-        cmp.l   %d1,%d2
-        ble.s   .ds_loop
-        moveq   #0,%d0
-        move.b  %d0,4(%a1)
-        move.b  (rk_dvals+4).l,%d0      | the step counter in nibble 4
-        andi.l  #0xf,%d0
-        moveq   #9,%d1
-        cmp.l   %d1,%d0
-        ble.s   2f
-        addq.l  #7,%d0
-2:      addi.l  #0x30,%d0
-        move.b  %d0,3(%a1)
-        movem.l (%sp),%d0-%d2
-        lea     12(%sp),%sp
+        addq.l  #7,%d1                  | 'A'..'F'
+1:      addi.l  #0x30,%d1
+        move.b  %d1,(%a0,%d2.l)
+        lsr.l   #4,%d0
+        subq.l  #1,%d2
+        bpl.s   .ds_loop
+.ds_out:
+        movem.l (%sp),%d0-%d2/%a0
+        lea     16(%sp),%sp
         rts
 .endif
 

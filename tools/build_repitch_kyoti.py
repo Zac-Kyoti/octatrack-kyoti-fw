@@ -38,23 +38,24 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (gate 1, rev 6.1 + DIAG)", """
-Flash 6: tests 3 and 4 clean. Two items UNRESOLVED and now instrumented
-rather than guessed at again -- ATTR-driven refresh still needs a page
-press, and the knob speed did not change at all, which means quant_step is
-almost certainly never reaching its QUAN path (if it did, one detent would
-be one whole ratio). Both are hardware-only: the port has no UI thread.
-Rev 6.1 ships one certain fix -- the dial's 8 display stops now span the
-full arc (4 + idx*120/7), so 1/2 sits hard left and 2/1 hard right -- plus
-a DIAGNOSTIC variant:
+status(WIP, "REPITCH KYOTI (gate 1, rev 6.2 + DIAG)", """
+Flash 7 SETTLED the gate: it reads 1 on hardware for SETUP RPCH/RPS9 and for
+AUTO, and the ATTR-driven PTCH->QUAN refresh now works -- items 1 and 3 are
+CLOSED. The dial also spans its full arc now. One item remains, and it is a
+feel request rather than a defect: the knob still walks one ui unit per
+detent, even though quant_step demonstrably reaches its QUAN path (the
+flash-7 counter advanced). So quant_step's RETURN is not what the storing
+editor uses. Nine call sites read the P+0x12a column; the diag build now
+latches and displays the low word of quant_step's CALLER so the responsible
+one can be named instead of guessed at.
 
     KYOTI_ALLOW_WIP=1 RPK_DIAG=1 python3 tools/build_repitch_kyoti.py
     -> out/OCTATRACK_OS1.40C_REPITCH_KYOTI_DIAG.syx, OS shows 140C_RPKD
 
-In the diag image the PTCH/QUAN cell's READOUT becomes four hex nibbles,
-[gate][SETUP TSTR][sample TSMODE][quant_step calls & 0xf], for the panel's
-track. Everything else (increment path, storage, locks) is unchanged.
-All 9 oracle contracts green on the mainline image.
+The PTCH/QUAN readout shows four hex digits: quant_step's last caller,
+or '----' before it has ever run. 0x536a or 0x514e would be the UI editor's
+own two sites; anything else names a different consumer. The mainline image
+is byte-identical with RPK_DIAG unset.
 """)
 
 BASE = 0x40000400

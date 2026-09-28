@@ -32846,3 +32846,51 @@ and the caption write is being lost (draw-order or overwrite); nibble 4 not
 advancing while turning the knob ⇒ `quant_step` is never called ⇒ `P+0x12a`
 is not the PLAYBACK encoder's column and the speed fix needs a different
 lever.
+
+### Session 108 continued (5) — flash 7 CLOSED items 1 and 3; the gate is proven on hardware. Speed remains, now narrowed to "whose call reaches quant_step"
+
+**Flash 7 (rev 6.1 diag) readings — and a bug in my own diagnostic.** The step
+counter was written over the TSMODE nibble (`rp_diagstr` stored it at
+`rk_dbuf[3]`), so the four digits actually read
+**`[gate][machine][SETUP TSTR][counter]`**, not the documented layout. The
+data still decodes cleanly:
+
+| reading | gate | machine | SETUP | counter |
+|---|---|---|---|---|
+| AUTO `1010` | 1 | 0 STATIC | 1 AUTO | 0 |
+| RPCH `1040` | 1 | 0 | 4 | 0 |
+| RPS9 `1050` | 1 | 0 | 5 | 0 |
+
+**⇒ `rp_ui_gate` returns 1 on hardware in every case, AUTO included.** The
+"gate returns 0 outside the widget" hypothesis that drove revs 6 and 6.1 is
+**dead**. And the user saw PTCH→QUAN flip on returning from ATTR, so **items
+1 and 3 are CLOSED**; the full-arc dial fix landed as well.
+
+**What remains is a feel request, not a defect** (user: "the current behaviour
+isn't broken in any way, I just wanted it to take fewer turns"). The state of
+knowledge on it, all verified this session:
+
+- `quant_step` **does** reach its QUAN path — the flash-7 counter advanced
+  while turning. So the gate is fine there and the poke is live.
+- The pokes are certainly effective: the caption, the snap and the ratio
+  readout all come from neighbouring columns (`P+0xca`, `P+0xfa`) of the same
+  static table the editor resolves through, and they all work.
+- **Nine sites read the `P+0x12a` column** (`moveal %aN@(298),%aM` at
+  `0x4003aa48`, `0x4003ac50`, `0x4003ae48`, `0x400509a6`, `0x40050c2c`,
+  `0x40053316`, `0x400538e6`, `0x40055138`, `0x40055352`). **Two are inside
+  the UI editor itself**, and the earlier one (`0x40055138`) is the real value
+  path: same 3-arg convention `(slot, a4, current)`, then clamp with
+  min/count and store to the Part byte, the shadow AND the live byte
+  `0x80000810[t*72+flat]` (`0x40055146..0x40055188`). The later one
+  (`0x40055352`) stores only through `%a5@`.
+- So the return value *should* reach storage, yet stock's one-unit-per-detent
+  stepping is what the unit does. Therefore the site whose call advances the
+  counter is **not** the site that stores — most likely one of the seven
+  outside the editor, running on the redraw that a knob turn triggers.
+
+**Rev 6.2 diag** latches the low word of `quant_step`'s return address on
+entry and displays it as the readout's four digits (`----` until first call).
+`536a`/`514e` would name the UI editor's own sites; anything else names the
+other consumer. Hex printer rewritten as a clean 4-digit unroll (the first
+attempt was muddled and never built). Mainline image byte-identical with
+`RPK_DIAG` unset (`224dc374…`), oracle 9/9.
