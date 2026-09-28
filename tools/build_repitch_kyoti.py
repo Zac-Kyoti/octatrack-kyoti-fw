@@ -122,7 +122,13 @@ DIAG = os.environ.get("RPK_DIAG") == "1"
 
 
 def assemble():
-    o, elf, binf = ROOT/"out/patch_repitch_kyoti.o", ROOT/"out/patch_repitch_kyoti.elf", ROOT/"out/patch_repitch_kyoti.bin"
+    # The diag variant gets its OWN .o/.elf/.bin: its symbols are shifted, and
+    # feeding diag addresses to the oracle against the mainline image silently
+    # fails four contracts (hit 2026-09-27; the probe cannot detect it).
+    tag = "_diag" if DIAG else ""
+    o = ROOT / f"out/patch_repitch_kyoti{tag}.o"
+    elf = ROOT / f"out/patch_repitch_kyoti{tag}.elf"
+    binf = ROOT / f"out/patch_repitch_kyoti{tag}.bin"
     cmd = ["m68k-elf-as", "-mcpu=5407"]
     if DIAG:
         cmd += ["--defsym", "RPK_DIAG=1"]
