@@ -32989,3 +32989,127 @@ and the `rp_swap` park floor, so the common case round-trips.
 **Rev 8 = flash-10 candidate: mainos `e501880f…`, syx `730fbf88…`** (2315 B
 changed, 0 strays). Oracle 9/9 with the model, stops and `quant_step`
 expectations updated to nine values.
+
+## Session 108 (2026-09-27, `main`) — DIRECT JUMP V7.0: CLOCK-LOCKED jumps. Spec-as-oracle, model first, then code; the full matrix PASSES in the emulator
+
+### Hardware first: V6.4 CONFIRMED — and re-labelled
+
+V6.4 flashed: instant jumps, no cueing, persistent, LEDs right, **matching stock AR** — including
+AR's faults (NORMAL- and PER-TRACK-scale and master-scale switches easily land shifted or
+fractional). The author: V6 is now **the OT↔AR parity build**; everything new is V7.
+
+### The V7 spec (the author's, verbatim in substance)
+
+After a switch the incoming pattern plays **exactly as if it were the only pattern ever
+programmed and had run since START**, locked to the master clock (internal or external — the
+metronome is only a readout of it); no fractional steps except exact scale fractions; if a
+trig must be dropped at the switch, the **first incoming trig has primacy**. Contract and
+reasoning: `reference/handoffs/DIRECTJUMP_V7_DESIGN.md`.
+
+### Method (why this is not V1–V5 again)
+
+1. **The oracle IS the spec** (`tools/diag_reflock.py` + `tools/cmp_reflock.py`): a
+   never-switched reference run vs the switched run; PASS ⇔ from the landing on, the full
+   per-tick engine state AND the set of events about to sound — (table, track, fire tick,
+   **pattern, step**), live = slot bit set (stock's own cancellation rule, 0x400a43b6), content
+   from the event builder's own arguments (hooked at 0x4009d1e8 / 0x4009cf4c) — equal the
+   reference's at every tick. Metronome counters must match throughout (same clock). A failing
+   segment reports its best-fit shift in ticks and steps.
+   **Validated before use:** REF-vs-REF PASS; V6.4 and stock DJ-OFF on the 16↔7 fixture FAIL
+   with perfect whole-step shifts (V6.4 +2/−2/+4 steps; stock −5/−2/−3), 100% of ticks at one
+   offset, no fractional part — what the author heard, and what every proxy gate since V1
+   (fire-time classes mod tps) was blind to. At content level: at tick 102 V6.4 sounds step 3
+   where the reference sounds step 1, plus the old pattern's leftover (AR quirk 2).
+2. **Model first** (`tools/model_reflock.py`): a closed form reproduces 10 never-switched
+   references exactly (NORMAL 16/7/3/4x; PER-TRACK mixed lengths; tracks 2x…1/4x; master
+   1x/2x/3/4x; master length 16/7/INF), every track, every tick. Sample point = phase-G entry
+   of ISR t (t = 1 on the first running tick):
+   `m_step = (⌊(t−1)/tps_M⌋+1) mod mlen`, `m_tick = (t−1) mod tps_M`;
+   `t' = ((t + tps_M − 1) mod C) − (tps_M − 1)`, C = mlen·tps_M;
+   `step = (⌊t'/tps_t⌋+1) mod len_t`, `ticks = t' mod tps_t`.
+   Engine facts it had to learn (measured, not reasoned): PER-TRACK **master length restarts
+   every track** (time is master-cycle-local); tracks **faster** than the master keep
+   free-running for tps_M − tps_t ticks past each master wrap (stock's deferred landing) —
+   a window at t' < 0, never at a V7 landing.
+3. **Scheduler rule, measured**: at each window start a track writes one event that fires
+   `tps` ticks later; the step **sounding** at a tick is the one the counter showed a step
+   earlier (one-step lookahead). A landing with snapshot N sounds step N at once and leaves the
+   counter at N+1 — so V7 writes snapshot = reference − 1, matching BOTH counters and content.
+4. **The metronome** (answering "what is the master pulse", in engine terms): phase I
+   @0x400a4d36 — `0x80006512` tick-in-beat vs `0x400aba6c[0x8000005c]` (24 at a quarter-note
+   beat), `0x80006511` beat-in-bar wrapped at `0x8000005b`, click timestamp `0x800019ec`,
+   accent `0x46c80350` = 3/1. It never reads the pattern's master step `0x800065b2` — which is
+   why the click stays solid while patterns shift. (The pulse flags built from `0x800065b2` at
+   `0x400a4264` are pattern-relative, not the metronome.)
+
+### Root cause of every shift (V6, AR, stock cueing) — one sentence
+
+The landing derives the incoming position from the **outgoing** pattern's master counter
+`0x800065b2`, which wraps with that pattern (V6/AR: `new_step = MASTER_STEP mod len`; stock
+cueing: step 0 at the outgoing pattern's wrap). Measured: after the first 16↔7 landing the run's
+master step is 3 = the 7-step pattern's position since its wrap; the reference says 1.
+
+### V7.0 (`tools/patch_directjump_v7.s`, `build_directjump_v7.py`; V6.4 frozen as parity)
+
+V6.4's hardware-proven landing, one input changed, plus four supporting pieces:
+- **`dj_T`**: absolute running clock ticks since START, counted in `dj_land` on EVERY running
+  tick with DJ on or off (cave RAM only), 0 while stopped. **`DJ_TOFS` MEASURED = 0**
+  (`t − dj_T == 0` at all 301 ticks); the first build guessed 1 and landed every jump exactly one
+  tick early — caught by the oracle as `d = +1 tick`, never heard on hardware.
+- **Landing tick** (`dl_arm`): the first tick ≥ now with t' ≡ 0 mod L, L = lcm(tps_M, every
+  track's tps) — every incoming track at a window start, so stock's landing schedules each
+  track exactly. Uniform-scale patterns land on the next master step (as V6); a slow track
+  costs latency (1/2x → up to 12 ticks, 1/4x → up to 24). V6.4's k == 1 same-tick commit kept.
+- **Position** (`dl_commit`): master snapshot = u/tps_M; track snapshot = (t'/tps_t) mod len_t;
+  per-track tps/len resolved exactly as stock's landing loader will load them
+  (0x400a2124–0x400a21e2: NORMAL master+tracks `+0x8e54`, PER-TRACK master `+0x8e52`, audio
+  track `+0x51+t·0x91a`, MIDI `+0x48f9+(t−8)·0x8b0`; **a non-zero flag at record +4 keeps the
+  LIVE scale**).
+- **Primacy purge**: at the landing, every pending event with fire time ≥ now in the two audio
+  tables (`0x80001904`/`0x46c7e998`/`0x46c7fe44`, `0x80001984`/`0x46c7faa4`/`0x46c7fe8c`) and the
+  MIDI table (`0x46c76a26`/`0x46c769c0`/`0x46c77be2`, MIDI clock `0x46107564`) is cancelled with
+  stock's own idiom (record cleared, slot bit cleared, time untouched).
+- **`reload` fix-up** on the tick after the landing (new state ST_FIXUP, set by Hook N):
+  0 before the first master wrap since START, `max(0, tps_t − tps_M)` after — the only state
+  field V6's landing left different besides the position.
+
+### Results — `bd39dfc6ef31d72f` (140C_KDJ7), DIAG `04d2c6a9351616e4` (140C_KDJ7D)
+
+| run | what | verdict |
+|---|---|---|
+| m_s1 | 16↔7 NORMAL, 4 jumps at different phases incl. the boundary-tick (same-tick) path | **PASS** |
+| m_s2 | A07↔A08 PER-TRACK, master 1x↔2x, 2x / 1/2x / 7-step tracks | **PASS** |
+| m_s3 | DJMAST2 master 1x↔2x | **PASS** |
+| m_s4 | NORMAL 7-step → 3/4x + 3/2x + 1/4x tracks → back | **PASS** |
+
+PASS = every post-landing segment state-LOCKED from the tick after the landing (the landing
+tick itself carries stock's first-fire `reload`, by design), best-fit shift 0, and the
+pending-event set with content IDENTICAL at every tick including the landing tick (no leftover
+of the outgoing pattern; the first incoming step correct). **Master-scale switches — "expected
+imperfect" in the V6 handoff, AR quirk 3 — land exactly.** DJ-OFF and DJ-ON-idle identity:
+IDENTICAL on the first V7.0 build AND re-run on the final image `bd39dfc6`: **IDENTICAL**
+(16/16 tracks moving, 38 samples, both gates). Bug-fold
+(`build_bugbuilds --with-wip`, new `DIRECTJUMP_V7` entry): DISJOINT / ALL PRESERVED / NO STRAYS.
+Cave 1514 B (DIAG 1774 B — **ends 18 B below the trig-fix cave**: no room for more diag).
+
+Comparer artifacts found and fixed on the way (both would have produced false FAILs, never
+false PASSes): builder calls are labelled one tick early (they run in E, before the G-entry
+hook advances the label); a reference shorter than the run counted as mismatch.
+
+### Coverage caveats (honest list — the fixtures do not exercise these)
+
+Microtiming/swing at the landing (fixture fire times are all on-grid); trig conditions that
+count cycles (1:2, A:B) — not in the state vector; MIDI-track event CONTENT (MIDI state is
+compared, the fixtures' MIDI tracks carry no trigs); external sync / Song Position Pointer;
+pause/continue. None is expected to break, none is proven.
+
+### Decisions parked by the author
+
+V7's scope is **DIRECT JUMP ON only**; DJ OFF is stock sequencing (plus the manual-trig fix
+every DJ build carries). Cued-switch behaviour (BAR-RESTART vs START-LOCK, chains) is parked —
+design doc §6a, with the case table (16/16 identical; 7→16 stock bug; 16×3 bars → 64-step
+verse: BAR-RESTART bar 1 vs START-LOCK bar 4; DJ between 64-step patterns keeps phrase under
+START-LOCK; odd-meter 12-step "3/4 bar" wants STOCK).
+
+**NEXT: hardware.** Flash `out/OCTATRACK_OS1.40C_DIRECTJUMP_V7.syx` (140C_KDJ7). Then V7.1 =
+mid-window landing to remove the slow-track latency, designed from oracle measurements.

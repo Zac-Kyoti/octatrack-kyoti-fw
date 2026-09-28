@@ -63,7 +63,9 @@ def pending(d):
     content, ci, out = {}, 0, {}
     for s in d["states"]:
         t = s["t"]
-        while ci < len(calls) and calls[ci][0] <= t:
+        # a builder call runs in E, BEFORE the phase-G hook advances the tick label, so a
+        # call made in the ISR sampled as t is labelled t-1: it belongs to samples > label.
+        while ci < len(calls) and calls[ci][0] < t:
             ct, kind, trk, bank, pat, step, slot = calls[ci]
             content[(kind, trk % 8, slot)] = (pat, step)
             ci += 1
@@ -115,6 +117,12 @@ def main(argv):
         print(f"\n-- segment pattern {pat}  ticks [{a},{b})  ({b - a} ticks)")
         if ref is None:
             print("   (no reference for this pattern)")
+            continue
+        last_ref = max(ref["by_t"])
+        if b > last_ref + 1:
+            print(f"   (reference ends at t{last_ref}: segment compared up to there)")
+            b = last_ref + 1
+        if b <= a:
             continue
         clock_bad = [t for t in range(a, b) if t in ref["by_t"] and
                      (run["by_t"][t]["met_beat"], run["by_t"][t]["met_tick"]) !=

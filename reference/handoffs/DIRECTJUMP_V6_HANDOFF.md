@@ -1,5 +1,10 @@
 # DIRECT JUMP V6 — handoff (Session 106 → next session)
 
+> **Superseded as the entry point (Session 108).** V6.4 is hardware-confirmed and FROZEN as the
+> **OT↔AR parity build**. Current work is V7 (clock-locked jumps): start at
+> `reference/handoffs/DIRECTJUMP_V7_DESIGN.md` and NOTES Session 108. Everything below is
+> still correct about V6's machinery, which V7 reuses unchanged.
+
 Written 2026-09-27 at the end of Session 106, for a fresh session picking this up.
 Read this file, then `NOTES.md` Sessions 105–106, then `reference/AR_SEQUENCER_ENGINE.md`
 §3 and §6. `reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md` §0 is the older entry point and

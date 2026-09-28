@@ -116,11 +116,37 @@ Order of work, each step gated by the previous:
    master by one tick inside the ISR: F advances before G). **PASS on NORMAL 16 and NORMAL 7,
    all 16 tracks, all 382 ticks.** PER-TRACK / scale references in flight.
 3. Only then ColdFire: `T`, the reference snapshot, mid-window counters, the purge.
+   **V7.0 BUILT** (`bd39dfc6`): window-start landings only (no mid-window counters yet);
+   `DJ_TOFS` measured 0 (the first build's guess of 1 landed one tick early — oracle d = +1).
 4. Matrix: NORMAL 16↔7 1x; NORMAL 1x↔2x/3/4x patterns; PER-TRACK mixed lengths + scales (incl.
    1/2x, 3/4x, 3/2x); master length INF and odd; MIDI tracks; cues aimed at every master-tick
    phase incl. the boundary tick (the V6.4 lesson). All must PASS. Plus DJ-OFF and DJ-ON-idle
    identity with stock.
+   **V7.0: 16↔7 (4 cue phases incl. same-tick), A07↔A08 PER-TRACK master 1x↔2x, DJMAST2
+   master 1x↔2x, NORMAL 7 → 3/4x+3/2x+1/4x tracks — ALL PASS** (state locked from the tick
+   after each landing; live events with content identical at every tick). Details: NOTES
+   Session 108.
 5. Hardware.
+
+## 6a. PARKED by the author (2026-09-27) — cued-switch behaviour, revisit later
+
+**V7's scope is DIRECT JUMP ON only.** With DJ OFF the sequencer switches patterns exactly as
+stock (V7 DJ-OFF identity gate: IDENTICAL, 16/16 tracks moving). Precise wording for users:
+"DJ OFF = stock sequencing, plus the manual-trig bug fix every DJ build carries
+(`patch_trigscale`)"; the `[PTN]+[YES]` toggle/toast and V7's background clock counter are
+present but change nothing; DJ comes up OFF at power-on.
+
+Two decisions the author parked, to think about before any cued-switch work:
+
+1. For cued (non-DJ) switches: **BAR-RESTART** (new pattern starts at step 1 on the next
+   metronome bar at/after stock's switch point — new behaviour for NORMAL mode; the closest
+   stock analogue is PER-TRACK mode's CHANGE quantisation) vs **START-LOCK** (V7's jump rule).
+   The deciding example: a 16-step intro played 3 bars, then cue a 64-step verse with a fill in
+   bar 4 — BAR-RESTART starts the verse at its bar 1; START-LOCK enters at its bar 4. Odd-meter
+   composition (a 12-step pattern used as a 3/4 bar) is the case that wants STOCK, and the
+   argument for a `CUE: STOCK / BAR` setting. Full case table in the Session 107/108 notes.
+2. Whether chains follow that cue setting (the arranger stays stock either way: its rows carry
+   explicit start-offset and length fields).
 
 ## 6. Open items (decisions and edges, none blocking)
 

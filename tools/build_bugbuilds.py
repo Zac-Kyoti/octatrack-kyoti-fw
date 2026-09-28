@@ -94,7 +94,9 @@ FEATURES = {
                 "[PTN]+[TRACK n] reload track n's saved sequence; [BANK]+[TRACK n] also re-applies the Part."),
     # --- not finished; build with --with-wip ---------------------------------------
     "DIRECTJUMP_V6": ("build_directjump_v6.py", "out/mainos_directjump_v6.bin", "BUG_DJV6",
-                      True, "WIP: hold [PTN], tap [YES] -> DIRECT JUMP on/off (V6, Session 105)."),
+                      True, "WIP: hold [PTN], tap [YES] -> DIRECT JUMP on/off (V6.4, the OT<->AR parity build)."),
+    "DIRECTJUMP_V7": ("build_directjump_v7.py", "out/mainos_directjump_v7.bin", "BUG_DJV7",
+                      True, "WIP: hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.0, clock-locked jumps)."),
 }
 
 PROBLEMS = []
