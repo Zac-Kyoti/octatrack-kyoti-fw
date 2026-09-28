@@ -1,6 +1,6 @@
 # repitch-kyoti — fidelity scope: making RPS9 and RPSP behave like the real machines
 
-Written Session 109 (2026-09-28). **Nothing here is built.** This scope follows the
+Written Session 109 (2026-09-28). **Rev 11 implements it — see the status section.** This scope follows the
 shipped rev 10 (`eb8f022`: RPCH / RPS9 / RPSP, hardware-confirmed working) and the
 listening render that showed how little RPS9 changes (`tools/repitch_dsp_listen.py`).
 It supersedes `REPITCH_KYOTI_SCOPE.md` §2's machine descriptions, which were wrong
@@ -12,6 +12,43 @@ engineering inference; says how), ❓ **not documented anywhere we found**, 📎
 source (forum, press), used only where flagged.
 
 ---
+
+## ⏩ Implementation status — rev 11 BUILT (Session 110, 2026-09-28)
+
+**Built, verified in emulation, not yet flashed.** Gate 0 was answered in
+`ot_emu` against the real firmware and octabam's hardware measurements, and
+tiers 1–2 of both modes were built in one engine. What changed from the plan below,
+and why (details: NOTES "Session 110"):
+
+- **RPS9 is not a literal variable-clock emulation.** Rendering a 32 kHz
+  staircase at 44.1 kHz folds its ultrasonic images into the audible band
+  (−25 dB at 18 kHz for a 6 kHz tone), which the real Akai never did — its
+  MF6 output filter removes them. What leaves an Akai is the source band-limited
+  by the **record** filter, stored at 12 bits, pitched cleanly. RPS9 is exactly
+  that: a 16-tap polyphase "virtual ADC" shaped like the MF6CN-50 (6th-order
+  Butterworth @ 12.8 kHz = a 32 kHz sample; within ~1 dB to 12 kHz, −50 dB at 18 kHz)
+  with 12-bit output. Q1 is therefore answered for now with **32 kHz fixed**.
+- **RPSP = the virtual sampler as scoped**, one tick per output at most (the
+  26.04 kHz clock is slower than 44.1 kHz): SP grid via the 7-bit-style
+  accumulator (exact ratios, Q4), 8-tap virtual ADC (the record filter, ~4th
+  order @ 11 kHz), 12-bit, box-rendered staircase, then **channel 5's** filter
+  as a digital 3-pole fitted to the schematic's 5-pole within 0.5 dB to 18 kHz
+  (Q2: channel 5 fixed for now). Q3: 1/2 and 2/1 allowed.
+- **No pre-filter over the ring, no tracking post-filter**: the virtual ADC
+  is evaluated only where a stored sample is needed, so the cost does not
+  grow with pitch and the ring is never written. RPCH is untouched stock.
+- **Cost (instruction counts, ot_emu full firmware):** RPSP ~113 instr/sample,
+  RPS9 ~61, per track in that mode, replacing stock's ~10. On octabam's
+  measured ~2 cycles/instruction that is ≈ one FX1 FILTER (192 cycles) per RPSP
+  track, half that per RPS9 track. Four RPSP tracks on one core (T1–4 or
+  T5–8) with a heavy reverb is the case to watch on hardware.
+- **Memory:** P = the last 667 words of SPRING's module (SIDECHAIN3's first
+  388 still free); Y:`$A00-$DFF` (octabam: free on stock; SC3 keeps `$800-$9FF`).
+- **Verification:** `tools/repitch_dsp_engine_check.py` — 80/80 bit-exact
+  (4 signals × 5 ratios × 2 modes × 2 cores) against the model's integer twin,
+  with undelivered ring frames poisoned; mode switch away and back bit-exact;
+  full firmware in `ot_emu` with the part's TSTR set: tag on every playing
+  pass, levels equal to RPCH, no clicks. Listening pack: `tools/repitch_dsp_listen.py`.
 
 ## 0. Summary
 

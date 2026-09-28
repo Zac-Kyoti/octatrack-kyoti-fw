@@ -7,10 +7,10 @@ emulated DSP, measure what each mode changes, and write WAVs to listen to.
 
     python3 tools/repitch_dsp_listen.py [out/mainos_repitch_kyoti.bin]
 
-Uses the cave and hook read out of the BUILT image (the bytes you flashed),
-and the unpatched stock kernel as RPCH. See tools/repitch_dsp_render.cpp for
-what is real (the kernel, every sample value) and what is modelled (stock's
-pre-kernel ring fill / table build). Output: out/listen/*.wav + a report.
+Rev 11: the cave is read out of the BUILT image (the bytes you would flash) and
+checked against the source; every mode runs through the real stock voice
+module with the firmware's streaming protocol (tools/repitch_dsp_engine_probe.cpp).
+RPCH is the stock kernel itself. Output: out/listen/*.wav + REPORT.txt.
 """
 import pathlib, subprocess, sys, wave
 import numpy as np
@@ -27,14 +27,9 @@ VEND = ROOT / "vendor/dsp56300"
 
 
 def build_render():
-    inc = [f"-I{VEND}/source", f"-I{VEND}/source/asmjit/src", "-DDSP56300_DEBUGGER=0", "-DASMJIT_STATIC"]
-    libs = [f"{VEND}/build/source/dsp56kEmu/libdsp56kEmu.a",
-            f"{VEND}/build/source/dsp56kBase/libdsp56kBase.a",
-            f"{VEND}/build/source/asmjit/libasmjit.a"]
-    r = subprocess.run(["c++", "-std=c++17", "-O2", *inc, str(ROOT / "tools/repitch_dsp_render.cpp"),
-                        *libs, "-o", str(RENDER)], capture_output=True, text=True)
-    if r.returncode:
-        sys.exit(f"render build failed:\n{r.stderr[-3000:]}")
+    import repitch_dsp_engine_check as ck
+    ck.build_probe()
+    return ck.PROBE
 
 
 # ---- test material: 16-bit sources, as a sample on a CF card would be -------
@@ -86,9 +81,26 @@ def quiet_pad(n):
     return as16(sig), as16(np.roll(sig, 53))
 
 
-SIGNALS = {"tone_decay": tone_decay, "drum_loop": drum_loop, "quiet_pad": quiet_pad}
+def hats(n):
+    """Bright noise bursts and a ride-like tone cluster: where the three
+    machines differ most (band limit, aliasing, output filter)."""
+    rng = np.random.default_rng(11)
+    t = np.arange(n) / SR
+    out = np.zeros(n)
+    step = SR // 8
+    for s in range(0, n, step):
+        e = min(n, s + step)
+        tt = np.arange(e - s) / SR
+        out[s:e] += 0.5 * rng.standard_normal(e - s) * np.exp(-tt * 60)
+    ride = sum(np.sin(2 * np.pi * f * t) for f in (3150, 4730, 6300, 8410, 10530)) * 0.08
+    out += ride * (0.6 + 0.4 * np.cos(2 * np.pi * 2 * t))
+    out /= np.max(np.abs(out)) * 1.1
+    return as16(out), as16(np.roll(out, 23))
+
+
+SIGNALS = {"tone_decay": tone_decay, "drum_loop": drum_loop, "quiet_pad": quiet_pad, "hats": hats}
 RATIOS = {"1x": 1.0, "0.75x": 0.75, "1.5x": 1.5}
-MODES = {"RPCH": (False, 0), "RPS9": (True, 1), "RPSP": (True, 2)}
+MODES = {"RPCH": 0, "RPS9": 1, "RPSP": 2}
 
 
 def write_wav(path, stereo24):
@@ -116,20 +128,25 @@ def hf_share(x, cut=12000):
 
 
 def main():
+    import repitch_dsp_engine_check as ck
+    import repitch_dsp_src as dsrc
     built = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "out/mainos_repitch_kyoti.bin")
     img, stock = built.read_bytes(), chk.IMG.read_bytes()
     tag, va, ln, base, hook, stop = chk.PAYLOADS[0]            # payload A
     mod, _ = chk.voice_module(stock, va, ln, base)
+    n = len(dsrc.assemble(0x1000)[0])
+    org = sc3.DSP[tag]["cave_org"] + sc3.DONOR_WORDS - n
+    cave = chk.module_words(img, va, ln, org, n)
+    want = b"".join(w.to_bytes(3, "little") for w in dsrc.assemble(org)[0])
+    if cave != want:
+        sys.exit(f"{built.name}: the DSP cave is not this source's (rebuild the image)")
     hw = chk.module_words(img, va, ln, hook, 2)
     b0, b1 = (int.from_bytes(hw[i:i + 3], "little") for i in (0, 3))
-    org = (hook + b1) & 0xFFFFFF
-    n = len(chk.assemble(org)[0]) // 3
-    cave = chk.module_words(img, va, ln, org, n)
     OUTDIR.mkdir(parents=True, exist_ok=True)
     (OUTDIR / "voice.bin").write_bytes(mod)
     (OUTDIR / "cave.bin").write_bytes(cave)
-    build_render()
-    print(f"kernel: payload {tag}, cave {n} words @P:{org:05x} read from {built.name}\n")
+    probe = build_render()
+    print(f"cave: payload {tag}, {n} words @P:{org:05x}, read from {built.name} (matches the source)\n")
 
     frames = int(4.0 * SR)
     report = []
@@ -139,13 +156,14 @@ def main():
         src[0::2], src[1::2] = L << 8, R << 8                # 16-bit -> MSB-aligned 24
         inp = OUTDIR / f"{sname}.in.raw"
         inp.write_bytes(src.astype("<i4").tobytes())
-        for rname, inc in RATIOS.items():
+        for rname, ratio in RATIOS.items():
+            inc = int(round(ratio * (1 << 24)))
             outs = {}
-            for mname, (patched, mode) in MODES.items():
+            for mname, mode in MODES.items():
                 o = OUTDIR / f"{sname}_{rname}_{mname}.raw"
-                r = subprocess.run([str(RENDER), str(OUTDIR / "voice.bin"), f"{base:x}", f"{hook:x}",
-                                    f"{stop:x}", str(OUTDIR / "cave.bin"), f"{org:x}", f"{b0:x}", f"{b1:x}",
-                                    "1" if patched else "0", str(mode), repr(inc), str(inp), str(o)],
+                r = subprocess.run([str(probe), str(OUTDIR / "voice.bin"), f"{base:x}", f"{hook:x}", f"{stop:x}",
+                                    str(OUTDIR / "cave.bin"), f"{org:x}", f"{b0:x}", f"{b1:x}",
+                                    f"{mode:x}", f"{inc >> 24:x}", f"{inc & 0xFFFFFF:x}", "0", str(inp), str(o)],
                                    capture_output=True, text=True)
                 if r.returncode:
                     sys.exit(f"render failed ({sname} {rname} {mname}):\n{r.stdout[-800:]}")
@@ -160,14 +178,14 @@ def main():
                 row[f"{mname}_diff_dbfs"] = db(rms(d))
                 row[f"{mname}_diff_rel"] = db(rms(d)) - db(sig)
                 row[f"{mname}_identical"] = bool(np.all(d == 0))
-                gain = 10 ** (48 / 20)
-                write_wav(OUTDIR / f"{sname}_{rname}_DIFF_{mname}_minus_RPCH_plus48dB.wav", d * gain)
             for mname in MODES:
                 row[f"{mname}_hf"] = hf_share(outs[mname][:m])
             report.append(row)
 
-    lines = ["signal      ratio  level    RPS9-RPCH           RPSP-RPCH           energy >12 kHz",
-             "                   dBFS     dBFS   rel.dB       dBFS   rel.dB       RPCH    RPS9    RPSP"]
+    lines = ["signal      ratio  level    RPS9 vs RPCH        RPSP vs RPCH        energy >12 kHz",
+             "                   dBFS     dBFS   rel.dB       dBFS   rel.dB       RPCH    RPS9    RPSP",
+             "(RPS9/RPSP run a few samples behind RPCH by design, so the difference includes that",
+             " small time offset; the >12 kHz column is the clean measure of what each mode does)"]
     for r in report:
         def cell(mn):
             return ("   identical     " if r[f"{mn}_identical"]
@@ -177,7 +195,7 @@ def main():
     text = "\n".join(lines)
     print(text)
     (OUTDIR / "REPORT.txt").write_text(text + "\n")
-    print(f"\nWAVs in {OUTDIR}/  (the *_DIFF_* files are the difference, boosted +48 dB)")
+    print(f"\nWAVs in {OUTDIR}/  ({{signal}}_{{ratio}}_{{mode}}.wav)")
 
 
 if __name__ == "__main__":

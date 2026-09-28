@@ -38,20 +38,24 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (rev 10: RPS9 + RPSP live on the DSP)", """
-FIRST IMAGE WITH THE CHARACTER MODES. RPS9 (linear over 12-bit samples) and
-RPSP (zero-order hold over 12-bit samples) run on both DSP cores, via a
-27-word cave in SPRING REVERB's last words and a bsr at each voice engine's
-kernel prologue (A P:0x40b, B P:0x20e); the stock kernel is untouched, so RPCH
-remains stock linear.
-*** THIS IMAGE REMOVES SPRING REVERB *** (user decision, Session 109): it is
-gone from the FX2 chooser and old projects that used it load the NONE page --
-byte-identical to SIDECHAIN3_CROSS's hardware-proven neutering. A later merge
-with the sidechain costs nothing extra (it builds from the module's start).
-Proven in emulation, never flashed: ColdFire oracle 10/10; DSP oracle 22/22
-on BOTH cores against the built image's exact bytes
-(python3 tools/repitch_dsp_check.py out/mainos_repitch_kyoti.bin).
+status(WIP, "REPITCH KYOTI (rev 11: RPS9 + RPSP as virtual samplers)", """
+REV 11 = THE FIDELITY ENGINE (reference/handoffs/REPITCH_FIDELITY_SCOPE.md,
+NOTES Session 110). RPS9 = Akai S900/S950: the source band-limited by the
+Akai's record filter (6th-order @ 12.8 kHz = a 32 kHz sample) and stored at
+12 bits, pitched cleanly (16-tap polyphase "virtual ADC"). RPSP = E-mu SP-1200:
+a fixed 26.04 kHz clock stepping through a 26.04 kHz grid by repeat/skip,
+12-bit, a staircase, then output channel 5's filter. Both run on both DSP
+cores from a ~670-word cave in SPRING REVERB's tail (hooked at each voice
+engine's kernel prologue, A P:0x40b / B P:0x20e, as rev 10); tables live in
+Y:$A00-$DFF (free on stock; SIDECHAIN3 keeps $800-$9FF). RPCH is stock.
+*** THIS IMAGE REMOVES SPRING REVERB *** (Session 109 decision) -- neutered
+byte-identically to SIDECHAIN3_CROSS; the cave leaves that builder's 388
+words free, so a merged build remains possible.
+Proven in emulation: DSP 80/80 bit-exact against the model's integer twin on
+both cores (python3 tools/repitch_dsp_engine_check.py); ColdFire unchanged
+from rev 10 (hardware: "everything works").
 """)
+
 
 BASE = 0x40000400
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
@@ -173,17 +177,18 @@ SPRING_SIG = [0x22ee00, 0x0140c0, 0x000040]    # spring's init, the sidechain's 
 
 
 def dsp_assemble(org):
-    out = ROOT / f"out/patch_repitch_dsp_{org:05x}.bin"
-    r = subprocess.run([str(DSP_ASM), "-in", str(DSP_SRC), "-org", f"{org:x}", "-out", str(out)],
-                       capture_output=True, text=True, cwd=ROOT)
-    if r.returncode:
-        sys.exit(f"dsp_asm failed:\n{r.stdout}\n{r.stderr}")
-    raw = out.read_bytes()
-    d = subprocess.run([str(DSP_DIS), "-in", str(out), "-pc", f"{org:x}", "-le"],
-                       capture_output=True, text=True).stdout
-    if " dc " in d or "InvalidInstruction" in d or "mpysu" in d or "macsu" in d:
-        sys.exit(f"DSP cave did not round-trip clean:\n{d}")
-    return [int.from_bytes(raw[i:i + 3], "little") for i in range(0, len(raw), 3)]
+    """The rev-11 engine: constants + patch_repitch_dsp.asm + tables, through
+    tools/dsp_xasm.py (every word disassembled back and checked)."""
+    import dsp_xasm
+    import repitch_dsp_src
+    try:
+        words, _, _ = repitch_dsp_src.assemble(org)
+    except dsp_xasm.AsmError as e:
+        sys.exit(f"DSP cave: {e}")
+    # the sidechain builds from the donor's start and needs its first 388 words
+    if len(words) > 1063 - 388:
+        sys.exit(f"DSP cave is {len(words)} words; more than 675 would collide with SIDECHAIN3_CROSS")
+    return words
 
 
 def dsp_install(img, touched):

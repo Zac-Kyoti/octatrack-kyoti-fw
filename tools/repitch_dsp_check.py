@@ -2,7 +2,13 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-repitch-kyoti DSP oracle driver.
+repitch-kyoti DSP oracle driver (rev 10).
+
+SUPERSEDED for the engine itself (Session 110, rev 11): its contracts are rev
+10's (12-bit ring truncation + zeroed fractions) and the rev-11 cave does not
+meet them by design. The rev-11 check is tools/repitch_dsp_engine_check.py.
+This module stays for its helpers (PAYLOADS, IMG, voice_module,
+module_words), which the rev-11 tools import.
 
 Extracts the stock voice engine from BOTH payloads of our own image, assembles
 tools/patch_repitch_dsp.asm, encodes each payload's prologue hook with

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Zac-Kyoti
 //
+// SUPERSEDED (Session 110, rev 11): tests rev 10's kernel contracts; the rev-11
+// engine is checked by tools/repitch_dsp_engine_probe.cpp + _engine_check.py.
+//
 // repitch-kyoti DSP oracle: the REAL stock voice-engine kernel, run from its
 // prologue hook site to the per-voice loop's closing NOP, unpatched and
 // patched, on dsp56kEmu. Built and driven by tools/repitch_dsp_check.py.

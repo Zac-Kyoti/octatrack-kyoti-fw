@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Zac-Kyoti
 //
+// SUPERSEDED (Session 110, rev 11): tests rev 10's kernel contracts; the rev-11
+// engine is checked by tools/repitch_dsp_engine_probe.cpp + _engine_check.py.
+//
 // repitch-kyoti LISTENING render: streams a stereo source through the REAL
 // stock voice-engine kernel on dsp56kEmu, block by block -- unpatched (stock
 // = RPCH) or patched with the repitch cave and a mode -- and writes the
