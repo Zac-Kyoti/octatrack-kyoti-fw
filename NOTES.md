@@ -34287,3 +34287,38 @@ A power cycle between the two crashes did not clear it, so it lives in the proje
 not in cave RAM. **Next:** the user's exported crash project (card is untouched by a re-flash) + the MUTE MODE
 value at the time; if it reproduces, a DIAG build whose exception screen also prints the stacked return
 addresses names the caller that jumped to `0x00800000`.
+
+### Session 114 continued (2) — the MUTE MODE audio bug: combined-image-only; bisection images built
+
+**User, hardware (KYOTI V1.0):** T2 = a sample, no FX; T3 = DARK REVERB, **muted**; MUTE MODE `OTFX`, `OTFX-T` or
+`DT-T`. T2 plays back sounding as if through T3's reverb, distorted; unmuting T3 adds more reverb, like a reverb
+feedback loop. **MUTE MODE `OT` makes all of it disappear** (so: the soft-mute paths). **Standalone
+`MUTEMODE_DT` does NOT reproduce it** → an interaction with another feature in the combined image. The earlier
+DJ crash is plausibly the same thing: the unit was in OTFX-T after the §4.2 tests, the crash was in the frame
+ISR, and none of my emulator DJ runs had a soft-muted track.
+
+**Checked, clean:** no RAM word is WRITTEN by two features (the shared refs are reads of stock state:
+current bank/part, transport, toast handle). MUTE MODE's soft-mute zeroes the dry gains `+2/+4` of the muted
+track in the per-track DSP parameter block `0x80000110 + half*512 + track*64` (= `0x80000110..0x8000050f`);
+REPITCH's LANES begin right after, at `0x80000510` — adjacent, disjoint. REPITCH's three voice hooks are in
+`FUN_40004008`, not in MUTE MODE's functions. `relstate_shadow` (the a0-derived track index) is not in the
+shipped DT build.
+
+**Emulator — no oracle for this one (say so):** the only FX fixture (MMTESTFX: DARK REV on track 0, nothing on
+any other track) cannot show "T2 through T3's reverb". Renders across different images are NOT comparable
+sample-for-sample: stock vs standalone MUTE MODE at GATE 0 (MUTE MODE inert) already differ (max 98k/8.4M) —
+each image's extra CF instructions move the DSP interleave. RMS matched in every case. Also: an ot_emu step
+list that starts the transport itself (`iclock/frame on/seq/transport/frames`) rendered SILENCE — those
+hashes meant nothing; `--sequencer` after a step list is what plays. `--poke-at-frame` is gone from the
+shared ot_emu.
+
+**Bisection images** (`build_kyoti.py --without NAME[,NAME]` → `out/KYOTI_BISECT/<tag>/`, OS VERSION
+`KV1-NO-…`, same method and invariants; the full image still rebuilds `bf1fff8c…`):
+- without REPITCH: `OCTATRACK_OS1.40C_KYOTI_V1.0_WITHOUT_REPITCH_KYOTI.syx` `a16022689b39d748…`, CF `.bin`
+  `dc93b469b8ed00db…`, OS VERSION `KV1-NO-RPK`.
+- without SIDE-CHAIN: `OCTATRACK_OS1.40C_KYOTI_V1.0_WITHOUT_SIDECHAIN3_CROSS.syx` `efe5ecc475a8f871…`, CF `.bin`
+  `00bece8d38506902…`, OS VERSION `KV1-NO-SC`.
+Neither flashed. The prime suspects because they are the only features that change the AUDIO ENGINE and are
+absent from standalone MUTE MODE: REPITCH (CF voice hooks + a DSP hook on every voice, both cores) and
+SIDE-CHAIN (DSP taps). If neither image fixes it, the next split is the voice-touching ColdFire features
+(PARTREAPPLY) and then halves of the rest.

@@ -280,7 +280,37 @@ def refs_into(img, lo, hi):
 
 
 # ------------------------------------------------------------------------------------
+def apply_without(argv):
+    """--without NAME[,NAME]: a BISECTION image -- KYOTI V1.0 minus those features, built
+    by the same method.  It gets its own OS VERSION ("KV1-NO-" + a short code per removed
+    feature, e.g. KV1-NO-RPK) and its own directory out/KYOTI_BISECT/<tag>/, so it can never be
+    mistaken for, or overwrite, the real image."""
+    global VERSTR, TAG, OUTDIR, SANDBOX
+    if "--without" not in argv:
+        return
+    drop = argv[argv.index("--without") + 1].upper().split(",")
+    bad = [d for d in drop if d not in FEATURES]
+    if bad:
+        sys.exit(f"--without: unknown feature(s) {bad}; choose from {sorted(FEATURES)}")
+    for d in drop:
+        del FEATURES[d]
+    if not ({"SIDECHAIN3_CROSS", "REPITCH_KYOTI"} & set(FEATURES)):
+        del RECLAIM_WHOLE["SPRING"]          # nothing removes SPRING any more: not dead
+    if "MUTEMODE_DT" not in FEATURES:
+        del RECLAIM_WHOLE["PERS1"], RECLAIM_WHOLE["PERS2"]
+    short = {"MUTEMODE_DT": "MM", "QLREC": "QL", "SIDECHAIN3_CROSS": "SC", "TRIGLOCK": "TL",
+             "RELOAD3": "RL", "DIRECTJUMP_V7": "DJ", "REPITCH_KYOTI": "RPK",
+             "PLAYSFREEFIX": "PF", "PATTERNLED": "PL", "PARTREAPPLY": "PR"}
+    VERSTR = ("KV1-NO-" + "".join(short[d] for d in drop))[:10]
+    TAG = "KYOTI_V1.0_WITHOUT_" + "_".join(drop)
+    OUTDIR = ROOT / "out/KYOTI_BISECT" / TAG
+    SANDBOX = OUTDIR / "_sandbox"
+    print(f"  BISECTION IMAGE: without {', '.join(drop)}  ->  OS VERSION {VERSTR!r}, "
+          f"{OUTDIR.relative_to(ROOT)}\n")
+
+
 def main():
+    apply_without(sys.argv)
     if not STOCK_SECT.exists():
         sys.exit(f"missing {STOCK_SECT} -- run ./fetch-os.sh and ./analyze.sh first")
     if len(VERSTR) > 10:
@@ -328,13 +358,15 @@ def main():
         lo, hi, cls, _ = ZONES[z]
         at = lo
         for key in keys:
+            if key not in size:                  # its feature is left out (--without)
+                continue
             at = (at + ALIGN - 1) & ~(ALIGN - 1)
             if at + size[key] > hi:
                 sys.exit(f"zone {z}: {key} ({size[key]} B) does not fit at 0x{at:08x} "
                          f"(zone ends 0x{hi:08x})")
             place[key], zone_of[key] = at, z
             at += size[key]
-        print(f"  {z:7s} {cls:7s} " + ", ".join(f"{k} {size[k]}@{place[k]:08x}" for k in keys)
+        print(f"  {z:7s} {cls:7s} " + ", ".join(f"{k} {size[k]}@{place[k]:08x}" for k in keys if k in size)
               + f"   [{hi - at} B left]")
     spans = sorted((place[k], place[k] + size[k], k) for k in place)
     for (a1, e1, k1), (a2, e2, k2) in zip(spans, spans[1:]):
@@ -447,42 +479,43 @@ def main():
         flag(f"branch 0x{src:08x} -> 0x{tgt:08x} lands inside the patched span 0x{s:08x}+{n}")
     print(f"  {len(code_runs)} patched code spans: no branch lands inside any" if not bad else "")
 
-    # B1: DJ_MODE in the DJ cave; MUTE MODE's widened restore therefore cannot reach it
-    dj = syms.get("patch_directjump_v7", {})
-    djm, djlo, djhi = dj.get("DJ_MODE"), place["patch_directjump_v7"], \
-        place["patch_directjump_v7"] + size["patch_directjump_v7"]
-    widened = all(comp[o(s) + 3] == 0x70 for s in (0x4001f322, 0x4001f3be, 0x4001fb24))
-    dj_blob = bytes(comp[o(djlo):o(djhi)])
-    raw_ref = any(struct.unpack(">I", dj_blob[i:i + 4])[0] == 0x800000D8
-                  for i in range(0, len(dj_blob) - 3, 2))
-    if djm is None or not (djlo <= djm < djhi) or raw_ref:
-        flag(f"B1: DJ_MODE is not in DIRECT JUMP's cave (sym {djm}, raw ref {raw_ref})")
-    elif comp[o(djm):o(djm) + 4] != b"\x00\x00\x00\x00":
-        flag("B1: DJ_MODE's image word is not 0")
-    else:
-        print(f"  B1: DJ_MODE at 0x{djm:08x} in DIRECT JUMP's cave, image value 0 "
-              f"(ANDY restore widened by MUTE MODE: {widened}; 0x800000d8 unreferenced by DJ)")
+    if "DIRECTJUMP_V7" in FEATURES:
+        # B1: DJ_MODE in the DJ cave; MUTE MODE's widened restore therefore cannot reach it
+        dj = syms.get("patch_directjump_v7", {})
+        djm, djlo, djhi = dj.get("DJ_MODE"), place["patch_directjump_v7"], \
+            place["patch_directjump_v7"] + size["patch_directjump_v7"]
+        widened = all(comp[o(s) + 3] == 0x70 for s in (0x4001f322, 0x4001f3be, 0x4001fb24))
+        dj_blob = bytes(comp[o(djlo):o(djhi)])
+        raw_ref = any(struct.unpack(">I", dj_blob[i:i + 4])[0] == 0x800000D8
+                      for i in range(0, len(dj_blob) - 3, 2))
+        if djm is None or not (djlo <= djm < djhi) or raw_ref:
+            flag(f"B1: DJ_MODE is not in DIRECT JUMP's cave (sym {djm}, raw ref {raw_ref})")
+        elif comp[o(djm):o(djm) + 4] != b"\x00\x00\x00\x00":
+            flag("B1: DJ_MODE's image word is not 0")
+        else:
+            print(f"  B1: DJ_MODE at 0x{djm:08x} in DIRECT JUMP's cave, image value 0 "
+                  f"(ANDY restore widened by MUTE MODE: {widened}; 0x800000d8 unreferenced by DJ)")
 
-    # B2: the keymap overlays -- DJ's YES press field is the only change
-    ptn_yes = 0x400bf0be
-    for addr, what in ((0x400d00ee, "[BANK]-layer YES record"), (0x400d00d4, "[BANK]-layer NO record"),
-                       (0x4005a044, "[PTN] key handler"), (0x400bf0a4, "[PTN]-layer NO record"),
-                       (0x4007af80, "[BANK] key handler")):
-        if comp[o(addr):o(addr) + 8] != stock[o(addr):o(addr) + 8]:
-            flag(f"B2: {what} 0x{addr:08x} is not stock")
-    for i in range(8):
-        rec = 0x400bf122 + i * 26
-        if int.from_bytes(comp[o(rec) + 2:o(rec) + 6], "big") != 0x40083dc4:
-            flag(f"B2: [PTN]-overlay TRACK slot {i} no longer points at 0x40083dc4")
-    ov = [i for i in range(o(0x400bf000), o(0x400bf300)) if comp[i] != stock[i]]
-    if any(not (o(ptn_yes) + 2 <= i < o(ptn_yes) + 6) for i in ov):
-        flag("B2: the [PTN] overlay changed outside the YES record's press field")
-    press = int.from_bytes(comp[o(ptn_yes) + 2:o(ptn_yes) + 6], "big")
-    if not (djlo <= press < djhi):
-        flag(f"B2: [PTN]-overlay YES press field 0x{press:08x} is not in DIRECT JUMP's cave")
-    else:
-        print(f"  B2: [PTN]+[YES] -> 0x{press:08x} (DIRECT JUMP); RELOAD3's records, handlers and "
-              f"8 TRACK slots stock")
+        # B2: the keymap overlays -- DJ's YES press field is the only change
+        ptn_yes = 0x400bf0be
+        for addr, what in ((0x400d00ee, "[BANK]-layer YES record"), (0x400d00d4, "[BANK]-layer NO record"),
+                           (0x4005a044, "[PTN] key handler"), (0x400bf0a4, "[PTN]-layer NO record"),
+                           (0x4007af80, "[BANK] key handler")):
+            if comp[o(addr):o(addr) + 8] != stock[o(addr):o(addr) + 8]:
+                flag(f"B2: {what} 0x{addr:08x} is not stock")
+        for i in range(8):
+            rec = 0x400bf122 + i * 26
+            if int.from_bytes(comp[o(rec) + 2:o(rec) + 6], "big") != 0x40083dc4:
+                flag(f"B2: [PTN]-overlay TRACK slot {i} no longer points at 0x40083dc4")
+        ov = [i for i in range(o(0x400bf000), o(0x400bf300)) if comp[i] != stock[i]]
+        if any(not (o(ptn_yes) + 2 <= i < o(ptn_yes) + 6) for i in ov):
+            flag("B2: the [PTN] overlay changed outside the YES record's press field")
+        press = int.from_bytes(comp[o(ptn_yes) + 2:o(ptn_yes) + 6], "big")
+        if not (djlo <= press < djhi):
+            flag(f"B2: [PTN]-overlay YES press field 0x{press:08x} is not in DIRECT JUMP's cave")
+        else:
+            print(f"  B2: [PTN]+[YES] -> 0x{press:08x} (DIRECT JUMP); RELOAD3's records, handlers and "
+                  f"8 TRACK slots stock")
 
     # reclaim: nothing but our own pieces may point into a reclaimed zone
     ours = [(place[k], place[k] + size[k]) for k in place]
@@ -495,7 +528,7 @@ def main():
         if foreign:
             flag(f"reclaim {z}: still referenced from outside our caves: "
                  + ", ".join(f"0x{a:08x}->0x{v:08x}" for a, v in foreign[:6]))
-    fx = {"FX1": 0x400d5f58, "FX2": 0x400d5fdc}
+    fx = {"FX1": 0x400d5f58, "FX2": 0x400d5fdc} if "SPRING" in RECLAIM_WHOLE else {}
     for bus, id2e in fx.items():
         if int.from_bytes(comp[o(id2e) + 0x15 * 4:o(id2e) + 0x15 * 4 + 4], "big") != 0x400d45e0 + 0x38:
             flag(f"reclaim SPRING: {bus} id2e[0x15] does not point at NONE")
@@ -535,7 +568,7 @@ def main():
                    check=True, cwd=ROOT, capture_output=True)
     chk = subprocess.run([str(EFT), str(syx)], capture_output=True, text=True, cwd=ROOT)
     field = elek.read_bytes()[0x08:0x12]           # the 10-char ELEK version field
-    if chk.returncode != 0 or "checksums : ok" not in chk.stdout or field != VERSTR.encode().rjust(10):
+    if chk.returncode != 0 or "checksums : ok" not in chk.stdout or field != VERSTR.encode().ljust(10):
         sys.exit(f".syx does not re-parse, or its version field is {field!r}:\n{chk.stdout}\n{chk.stderr}")
     print("\n=== wrapped ===")
     for f in (mainos, syx, binf):
