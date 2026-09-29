@@ -1,0 +1,289 @@
+repitch-kyoti rev 14 (Session 112): the PRIVATE ot_emu instrumentation behind gates 0a/0b.
+Apply to a COPY of refs/octabam's tools/emu/ot_emu + vendor/{mc68k,dsp56300} in your
+scratchpad -- never to the shared clone, never rebuild the shared binary or libunicorn
+(memory: shared-octabam-clone-hazard). In the copy's CMakeLists.txt point OT_VENDOR at the
+copied vendor dir and drop everything from "# THE GATE." down (the test targets).
+
+  cp -R refs/octabam/tools/emu/ot_emu $S/src; cp -R refs/octabam/vendor/mc68k $S/vendor/
+  rsync -a --exclude source/wxWidgets --exclude build refs/octabam/vendor/dsp56300 $S/vendor/
+  (cd $S && patch -p0 < tools/repitch_ot_emu_trace.patch)   # paths below are relative to $S
+  cmake -B $S/build -S $S/src && cmake --build $S/build -j8 --target ot_emu
+
+Environment (all optional):
+  RK_XWATCH=core:S:lo:hi[,...]  log every read/write of those words after arming (per PC)
+  RK_XFROM=N                    arm after N host commands on the core (default 1)
+  RK_XFILL=1                    fill the watched words with a canary when arming
+  RK_XREPORT=FILE               the report (else stderr), written at exit
+  RK_TRACE=core:pc:from:max[;...]  dump registers + RK_TRACE_MEM at each arrival at pc
+  RK_TRACE_MEM=S:addr:len[,...]    what to dump;  RK_TRACE_COND=S:addr:val  only when it holds
+  RK_TRACE_OUT=FILE
+The vendor changes: a data-read hook in Memory::get, and DMA always copies word by word
+(its memcpy fast path bypassed both hooks).
+--- src/dsp.cpp	2026-09-24 20:16:11
++++ src/dsp.cpp	2026-09-28 19:47:34
+@@ -1,6 +1,8 @@
+ #include "dsp.h"
+ 
+ #include <cstdio>
++#include <cstdlib>
++#include <string>
+ #include <algorithm>
+ #include <cstring>
+ #include <array>
+@@ -31,6 +33,92 @@
+ 		// Payload A's bank-id write, `000073: movep r3,x:<<M_HOTX` in
+ 		// out/dsp/payload_A.asm (O9b). A payload that moves it moves this.
+ 		constexpr uint32_t g_bankIdPc = 0x73;
++	}
++
++	// ---- rk (repitch-kyoti rev 14, private build): X-table canary + PC traces ----
++	namespace rk
++	{
++		struct Range { int core; char space; uint32_t lo, hi; };
++		std::vector<Range> ranges;
++		uint64_t fromCmd = 1;			// arm after this many host commands on the core
++		bool fill = false, armed[2] = {false, false}, suppress = false;
++		std::map<std::string, uint64_t> hits;	// "core space lo R/W pc" -> count
++		std::map<std::string, uint64_t> firstAt;
++		uint32_t pat(uint32_t a) { return ((a * 2654435761u) ^ 0xc0de5a) & 0xffffff; }
++		bool inited = false;
++		struct Trace { int core; uint32_t pc; uint64_t from; uint64_t max; uint64_t n = 0; };
++		std::vector<Trace> traces;
++		struct MemSpec { char space; uint32_t addr, len; };
++		std::vector<MemSpec> mem;
++		FILE* out = nullptr;
++		bool cond = false; char condSpace = 'X'; uint32_t condAddr = 0, condVal = 0;
++		void init()
++		{
++			if(inited) return;
++			inited = true;
++			if(const char* e = std::getenv("RK_XWATCH"))
++			{
++				// core:S:lo:hi[,core:S:lo:hi...]  (hex, hi exclusive)
++				std::string v(e); size_t q = 0;
++				while(q < v.size())
++				{
++					auto c = v.find(',', q); if(c == std::string::npos) c = v.size();
++					int core; char sp; unsigned lo, hi;
++					if(std::sscanf(v.substr(q, c - q).c_str(), "%d:%c:%x:%x", &core, &sp, &lo, &hi) == 4)
++						ranges.push_back({core, sp, lo, hi});
++					q = c + 1;
++				}
++			}
++			if(const char* e = std::getenv("RK_XFROM")) fromCmd = std::strtoull(e, nullptr, 0);
++			fill = std::getenv("RK_XFILL") != nullptr;
++			if(const char* e = std::getenv("RK_TRACE"))
++			{
++				// core:pc:from_cmd:max[;...]
++				std::string v(e); size_t q = 0;
++				while(q < v.size())
++				{
++					auto c = v.find(';', q); if(c == std::string::npos) c = v.size();
++					int core; unsigned pc; unsigned long long from, mx;
++					if(std::sscanf(v.substr(q, c - q).c_str(), "%d:%x:%llu:%llu", &core, &pc, &from, &mx) == 4)
++						traces.push_back({core, pc, from, mx});
++					q = c + 1;
++				}
++			}
++			if(const char* e = std::getenv("RK_TRACE_MEM"))
++			{
++				// S:addr:len[,...]
++				std::string v(e); size_t q = 0;
++				while(q < v.size())
++				{
++					auto c = v.find(',', q); if(c == std::string::npos) c = v.size();
++					char sp; unsigned a, l;
++					if(std::sscanf(v.substr(q, c - q).c_str(), "%c:%x:%x", &sp, &a, &l) == 3)
++						mem.push_back({sp, a, l});
++					q = c + 1;
++				}
++			}
++			if(const char* e = std::getenv("RK_TRACE_OUT")) out = std::fopen(e, "w");
++			if(const char* e = std::getenv("RK_TRACE_COND"))
++			{
++				unsigned a, v; char sp;
++				if(std::sscanf(e, "%c:%x:%x", &sp, &a, &v) == 3) { cond = true; condSpace = sp; condAddr = a; condVal = v; }
++			}
++		}
++		int find(int core, char sp, uint32_t a)
++		{
++			for(size_t k = 0; k < ranges.size(); ++k)
++				if(ranges[k].core == core && ranges[k].space == sp && a >= ranges[k].lo && a < ranges[k].hi) return int(k);
++			return -1;
++		}
++		void note(int core, char sp, uint32_t a, char rw, uint32_t pc, uint64_t exec)
++		{
++			if(suppress || !armed[core & 1]) return;
++			const int k = find(core, sp, a);
++			if(k < 0) return;
++			char key[96];
++			std::snprintf(key, sizeof key, "core %d %c:%05x-%05x %c pc %05x", core, sp, ranges[k].lo, ranges[k].hi, rw, pc);
++			if(!hits[key]++) firstAt[key] = exec;
++		}
+ 	}
+ 
+ 	struct DspPair::Core
+@@ -136,6 +224,8 @@
+ 				// and the voice loop count at Y:0x42 became a raw host word.
+ 				if(_area == dsp56k::MemArea_P)
+ 					c.dsp->clearOpcodeCache(_off);
++				if(!rk::ranges.empty() && _area != dsp56k::MemArea_P)
++					rk::note(i, _area == dsp56k::MemArea_Y ? 'Y' : 'X', _off, 'W', c.dsp->getPC().toWord(), c.executed);
+ 				if(m_watchOn && i == m_watchCore && _off == m_watchAddr
+ 					&& _area == (m_watchSpace == 'Y' ? dsp56k::MemArea_Y : m_watchSpace == 'P' ? dsp56k::MemArea_P : dsp56k::MemArea_X))
+ 				{
+@@ -163,6 +253,13 @@
+ 			});
+ 			// AFTER the DSP: its constructor resets the peripherals, and the
+ 			// boot ROM's first act is to enable the host port (HPCR.HEN).
++			rk::init();
++			if(!rk::ranges.empty())
++				c.mem->setReadHook([&c, i](const dsp56k::EMemArea _area, const dsp56k::TWord _off)
++				{
++					if(_area != dsp56k::MemArea_P)
++						rk::note(i, _area == dsp56k::MemArea_Y ? 'Y' : 'X', _off, 'R', c.dsp->getPC().toWord(), c.executed);
++				});
+ 			c.boot.reset(new dsp56k::DspBoot(*c.dsp));
+ 			// HOTX is ONE register: with this clear the DSP's `movep a,x:<<M_HOTX`
+ 			// blocks on HTDE the way the chip does, instead of queueing 8192
+@@ -324,7 +421,34 @@
+ 		}
+ 	}
+ 
+-	DspPair::~DspPair() = default;
++	DspPair::~DspPair()
++	{
++		if(!rk::ranges.empty())
++		{
++			FILE* f = stderr;
++			if(const char* e = std::getenv("RK_XREPORT")) if(FILE* g = std::fopen(e, "w")) f = g;
++			std::fprintf(f, "rk canary report: armed core0 %d core1 %d, fill %d\n", rk::armed[0], rk::armed[1], rk::fill);
++			for(const auto& h : rk::hits)
++				std::fprintf(f, "  %s x%llu (first at exec %llu)\n", h.first.c_str(), (unsigned long long)h.second, (unsigned long long)rk::firstAt[h.first]);
++			if(rk::hits.empty()) std::fprintf(f, "  no reads or writes of any watched word after arming\n");
++			rk::suppress = true;
++			for(const auto& r : rk::ranges)
++			{
++				uint64_t bad = 0; uint32_t first = 0;
++				for(uint32_t a = r.lo; a < r.hi; ++a)
++				{
++					const uint32_t w = m_cores[r.core & 1]->mem->get(r.space == 'Y' ? dsp56k::MemArea_Y : dsp56k::MemArea_X, a) & 0xffffff;
++					if(rk::fill && w != rk::pat(a)) { if(!bad++) first = a; }
++				}
++				if(rk::fill)
++					std::fprintf(f, "  core %d %c:%05x-%05x: %llu of %u words differ from the canary%s\n", r.core, r.space, r.lo, r.hi,
++						(unsigned long long)bad, r.hi - r.lo, bad ? "" : " (intact)");
++				(void)first;
++			}
++			if(f != stderr) std::fclose(f);
++		}
++		if(rk::out) std::fclose(rk::out);
++	}
+ 
+ 	void DspPair::setVerbose(const bool _on)
+ 	{
+@@ -797,8 +921,52 @@
+ 					const uint64_t d = c.executed - m_sw.t0;
+ 					m_sw.armed = false; ++m_sw.n; m_sw.sum += d; if(d > m_sw.max) m_sw.max = d; if(d < m_sw.min) m_sw.min = d;
+ 					if(m_sw.last.size() < 4096) m_sw.last.push_back(static_cast<uint32_t>(d));
++				}
++			}
++			if(!rk::ranges.empty() && !rk::armed[i] && c.commands >= rk::fromCmd)
++			{
++				rk::armed[i] = true;
++				if(rk::fill)
++				{
++					rk::suppress = true;
++					for(const auto& r : rk::ranges)
++						if(r.core == i)
++							for(uint32_t a = r.lo; a < r.hi; ++a)
++								c.mem->set(r.space == 'Y' ? dsp56k::MemArea_Y : dsp56k::MemArea_X, a, rk::pat(a));
++					rk::suppress = false;
+ 				}
++				std::fprintf(stderr, "rk: core %d armed at exec %llu (commands %llu)%s\n", i, (unsigned long long)c.executed, (unsigned long long)c.commands, rk::fill ? ", ranges filled" : "");
+ 			}
++			for(auto& t : rk::traces)
++				if(t.core == i && t.pc == pc && c.commands >= t.from && t.n < t.max && rk::out
++					&& (!rk::cond || (c.mem->get(rk::condSpace == 'Y' ? dsp56k::MemArea_Y : dsp56k::MemArea_X, rk::condAddr) & 0xffffff) == rk::condVal))
++				{
++					++t.n;
++					const auto& r = c.dsp->regs();
++					rk::suppress = true;
++					std::fprintf(rk::out, "T %d %05x %llu %llu a %06x%06x%06x b %06x%06x%06x x %06x %06x y %06x %06x r", i, pc,
++						(unsigned long long)c.executed, (unsigned long long)c.commands,
++						unsigned((r.a.var >> 48) & 0xff), unsigned((r.a.var >> 24) & 0xffffff), unsigned(r.a.var & 0xffffff),
++						unsigned((r.b.var >> 48) & 0xff), unsigned((r.b.var >> 24) & 0xffffff), unsigned(r.b.var & 0xffffff),
++						unsigned(r.x.var & 0xffffff), unsigned((r.x.var >> 24) & 0xffffff), unsigned(r.y.var & 0xffffff), unsigned((r.y.var >> 24) & 0xffffff));
++					for(int k = 0; k < 8; ++k) std::fprintf(rk::out, " %06x", unsigned(r.r[k].var & 0xffffff));
++					std::fprintf(rk::out, " n");
++					for(int k = 0; k < 8; ++k) std::fprintf(rk::out, " %06x", unsigned(r.n[k].var & 0xffffff));
++					for(const auto& ms : rk::mem)
++					{
++						std::fprintf(rk::out, " %c%05x:", ms.space, ms.addr);
++						for(uint32_t k = 0; k < ms.len; ++k)
++						{
++							const uint32_t a = ms.addr + k;
++							uint32_t w;
++							if(a >= g_shareLo && a < g_shareHi) w = m_shared[a - g_shareLo];
++							else w = c.mem->get(ms.space == 'Y' ? dsp56k::MemArea_Y : ms.space == 'P' ? dsp56k::MemArea_P : dsp56k::MemArea_X, a);
++							std::fprintf(rk::out, "%s%06x", k ? "," : "", w & 0xffffff);
++						}
++					}
++					std::fprintf(rk::out, "\n");
++					rk::suppress = false;
++				}
+ 			if(m_pcWatchOn && i == m_pcWatchCore && pc == m_pcWatchPc && c.executed >= m_pcWatchFrom && !(m_pcWatchFrom && m_pcWatchHits.size() >= 24))
+ 			{
+ 				const auto& r = c.dsp->regs();
+--- vendor/dsp56300/source/dsp56kEmu/memory.h	2026-09-14 00:58:29
++++ vendor/dsp56300/source/dsp56kEmu/memory.h	2026-09-28 19:38:53
+@@ -85,6 +85,7 @@
+ 		// octabam: every data write (P, X, Y), after address translation, for
+ 		// an activity instrument -- one branch per write when unset.
+ 		std::function<void(EMemArea, TWord, TWord)>			m_writeHook;
++		std::function<void(EMemArea, TWord)>				m_readHook;	// rk: every data read
+ 		
+ 		struct STransaction
+ 		{
+@@ -153,6 +154,7 @@
+ 			m_sharedLo = _lo; m_sharedHi = _hi; m_sharedX = _x; m_sharedY = _y; m_sharedP = nullptr;
+ 		}
+ 		void				setWriteHook		(std::function<void(EMemArea, TWord, TWord)> _hook) { m_writeHook = std::move(_hook); }
++		void				setReadHook			(std::function<void(EMemArea, TWord)> _hook) { m_readHook = std::move(_hook); }
+ 		// octabam: P, X and Y of [_lo,_hi) all alias _all (see m_sharedP).
+ 		void				setSharedWindow		(TWord _lo, TWord _hi, TWord* _all, std::function<void(TWord)> _onWrite)
+ 		{
+--- vendor/dsp56300/source/dsp56kEmu/memory.cpp	2026-09-14 00:58:29
++++ vendor/dsp56300/source/dsp56kEmu/memory.cpp	2026-09-28 19:38:34
+@@ -188,6 +188,8 @@
+ 			LOG_ERR_MEM_READ( _offset );
+ 			return 0;
+ 		}
++		if(m_readHook)
++			m_readHook(_area, _offset);
+ 
+ 		if (m_sharedX && (_area != MemArea_P || m_sharedP) && _offset >= m_sharedLo && _offset < m_sharedHi)
+ 			return (_area == MemArea_X ? m_sharedX : _area == MemArea_Y ? m_sharedY : m_sharedP)[_offset - m_sharedLo];
+--- vendor/dsp56300/source/dsp56kEmu/dma.cpp	2026-09-14 00:58:29
++++ vendor/dsp56300/source/dsp56kEmu/dma.cpp	2026-09-28 19:38:34
+@@ -400,10 +400,7 @@
+ 			}
+ 			else
+ 			{
+-				const auto* src = getMemPtr(_srcArea, _srcAddr);
+-				auto* dst = getMemPtr(_dstArea, _dstAddr);
+-
+-				memcpy(dst, src, sizeof(TWord) * _count);
++				copyIndividual();	// rk: every word through the hooks
+ 			}
+ 		}
+ 	}
+@@ -415,7 +412,7 @@
+ 		if(_dstAddr >= m_peripherals.getDSP().memory().getBridgedMemoryAddress())
+ 			_dstArea = MemArea_P;
+ 
+-		const auto writeIndividual = _dstArea == MemArea_P || isPeripheralAddr(_dstArea, _dstAddr, _count) || bridgedOverlap(_dstArea, _dstAddr, _count);
++		const auto writeIndividual = true || _dstArea == MemArea_P || isPeripheralAddr(_dstArea, _dstAddr, _count) || bridgedOverlap(_dstArea, _dstAddr, _count);
+ 
+ 		if (readMultiple)
+ 		{

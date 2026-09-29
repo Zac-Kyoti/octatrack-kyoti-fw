@@ -33731,3 +33731,80 @@ virtual-ADC tables and rev 13's packed tables are the same to 0.1 dB at r = 1.0/
 and RPS9. A finer grid only lowers pure-tone spurs (−43…−49 dB → ~8 dB lower). The 1/1 excess vs
 the ideal reference is not the tables (likely the render's 19–26 kHz transition band + the
 reference's idealised converter). Scope §3a.
+
+## Session 112 (2026-09-28, `main`) — repitch-kyoti rev 14, gates 0a/0b/1: SPRING's X tables are free; the DSP's own trig flag and AMP level found; DARK REV broken since rev 10 (cave over a shared routine)
+
+User: build rev 14 — RPSP becomes the SP-1200's channel 1/2 (SSM2044 dynamic low-pass after rev 13's
+staircase), both virtual-ADC tables back to full fidelity, table data in SPRING's orphaned X memory;
+stop at gate 1 for the envelope pick. All emulator work below used a PRIVATE ot_emu copy in the
+scratchpad (`tools/repitch_ot_emu_trace.patch` = the instrumentation: read/write census of any
+DSP range with PCs, canary fill, PC-triggered register + memory dumps with a condition); the
+shared binary and libunicorn were never rebuilt. Card: the user's `~/Desktop/REPITCH` + isaak.wav
+(stage_card.py, set KYOTI project REPITCH), and MMTESTDT (set MMTESTDT project test, with its
+`AUDIO/ELEKTRON/*.wav`). Step-list `poke` addresses need a `0x` prefix (strtoul base 0: a bare
+`40170F68` parses as DECIMAL 40170 and lands at 0x9cea — cost one run).
+
+**DARK REV IS BROKEN ON EVERY REPITCH IMAGE SINCE REV 10 (found, not yet on hardware).** DARK REV
+(payload A P:0x1679 / B P:0x1439, the module after SPRING) calls a 35-word routine *inside SPRING's
+module*: `jsr $1586` at A P:0x17b3/0x1998/0x19c2 (B: `jsr $1346` at 0x1573/0x1758/0x1782; routine
+A P:0x1586–0x15a8, B P:0x1346–0x1368, a 2×4-tap MAC loop ending `rts`). The repitch cave (the last
+671/674/667 words of SPRING's module, A P:0x13da–0x1678) overwrote it with table data. In ot_emu:
+selecting DARK REV on FX2 of T1 (core 1) **or T5 (core 0, no repitch track)** kills the emulator
+(SIGSEGV, shared and private binary alike) on rev 13; on stock it runs (exit 0). Static scan: no
+other module branches into SPRING's P range (the first scan missed it: the disassembler prints
+targets as `func_001586`, not `$1586`). SIDECHAIN3's first 388 words (to 0x13d5) do not reach it.
+Rev 14 must keep A P:0x1586–0x15a8 / B P:0x1346–0x1368 stock: SPRING's usable P is then 432 words
+(A 0x13d6–0x1585) + 208 (0x15a9–0x1678). Told to the user at gate 1.
+
+**Gate 0a — SPRING's five X tables are untouched at runtime (emulator).** Stock image (DARK REV
+cannot run on rev 13, above), the user's project playing A02, FX1/FX2 of T1+T2 (core 1) and T5+T6
+(core 0) cycled every 60 frames through FILTER SPAT EQ DJEQ PHSR FLNG CHRS COMB PLATE DARK COMP LOFI
+(+ DELAY, which is not DSP-dispatched: X:0x215[8] and [0x19] are the empty stub), every init PC
+traced firing on both cores; the five ranges (A X:0x89a4–0x8a7b, 0x8afc–0x8cef; B 0x8464–0x853b,
+0x85bc–0x87af) canary-filled after the second host command: **0 reads, 0 writes, canary intact** on
+both cores. Positive control: the shared 27-word table X:0x8cf0 / 0x87b0 was read 944× per core by
+DARK REV (A P:0x1852/0x1855/0x1969, B 0x1612/0x1615/0x1729). Live FX ids are `0x80000ec4[t]` (FX1) /
+`0x80000ecc[t]` (FX2) — poking only the Part's bytes (blob + 0x8ed80/0x8ed88) changes nothing on the
+DSP. Also measured: Y:$795–$FFF is never touched by stock with DARK REV running (the rev 13 crash is
+the P overwrite, not Y). Scenes/project reload not yet exercised (rev 14's own canary run owes it).
+
+**Gate 0b — the hit and the AMP level are on the DSP, readable at our hook (emulator, MMTESTDT T1
+trigs on steps 1/10/15, T1 set to RPSP and HOLD 0 / REL 30 by part pokes at 0x4017113e and
+0x40171081 = part 0 T1 AMP, stride 0x18/track).** Core 1's per-track driver (B P:0x18b–0x331):
+- the per-voice records (X:$2000/$4000 ping-pong, 32 words per track: AMP p1 hw 0–5 = ATK HOLD REL
+  VOL BAL XVOL, then FX pages) are unpacked by the frame head (B P:0x80–0x8d) into a triple buffer
+  X:$25d/$2dd/$35d (x:$415/$416 rotate); x:$419 = this track's unpacked record, set at P:0x194
+  BEFORE the voice module (0x1a4) — so it is valid at our hook (P:0x20e);
+- **word +$1E of it: bits 8–11 = the sample offset of a start inside this frame (it sets the pass
+  split k / 16−k), bit 12 = a trig starts in this frame, bit 13 = release; the driver clears bits
+  12/13/15 after the frame (`and #$ff4fff`, P:0x30b).** Measured: bit 12 set on exactly the trig
+  frames (step 10: frame 3102, word 0x1dc00, offset 12, passes 12+4; step 15: frame 4825, offset 7),
+  one frame each; after a mid-frame start every later frame keeps the split (the voice's phase), so
+  the split alone is NOT a trig signal. Each frame visits the hook twice (`do #2`); on a trig frame
+  the first visit is the old voice's k samples, the second starts at the trig.
+- **the AMP envelope runs on core 1** (module B P:0x38b, 282 words, per track after the voice
+  module): state block X:$6000 + $300·track (= x:$20a at our hook; FX1/FX2 instances follow at
+  +$100/+$200), per-sample loop `out = b; b += a`: **level = x:(state+8) (linear, Q23), slope =
+  x:(state+6)**. Measured REL 30: from ~1 at the trig down linearly at −5.08e−4/sample (≈45 ms).
+  At our hook it holds the previous frame's end level (the AMP stage for this frame runs after us).
+- the record's command word (+$89) is (samples << 8 | new ring frames), NOT a trig flag; the voice
+  module has no trig concept (the ColdFire streams the audio, the ring coordinate is continuous).
+- Not provoked: RTRG retrigs and a p-locked STRT (lock-record pokes at bank + 0x78 + (s−1)·0x20
+  did not visibly apply — the step also needs its lock mask; not hand-edited). A trig with the STRT
+  lock poked raised bit 12 normally. Retrigs → hardware check.
+- Gate 0c: TSNS is a SETUP-page byte (blob + 0x8ef5a + t·30 + m·6 + 5); the DSP's per-voice record
+  carries only the AMP/FX pages (octabam MIDI.md, PARAM_PAGES §5c) → it would need ColdFire → skipped.
+- The user's project: T2 AMP ATK 0 / HOLD 127 / REL 127 → the AMP level sits at full for the whole
+  loop; T2 has ONE trig (step 1) in A02 and plays isaak.wav (4.0 s) through.
+
+**Gate 1 — model + listening (waiting for the user's pick).** `repitch_engine_model.Ch12`: 4 matched
+one-poles (y += g(x−y), g = 1 − e^(−2πf/SR)), f = 1.0 kHz × 2^(4·env); `CH12_ENV` A (diode + RC on
+the AMP level, τ 0.15 s) / B (5 ms attack, τ 0.10 s) / C (instant, τ 1 ms). At rest −3 dB at
+435 Hz, −49 dB at 4 kHz; open −2.4 dB at 8 kHz. `tools/repitch_ch12_listen.py` → `out/rev14_listen/`
+(README there): isaak 0.75/1.0 + a synthetic break, "loop" (one trig per pass, the user's pattern)
+vs "16ths" (SP-style chopped), A / A-shortamp / B / C / D-extra (the diode + RC on the audio's own
+level — not SP-authentic, the only variant that opens on each drum hit of a loop played from one
+trig). With one trig per loop B and C leave everything after the first hit −12…−22 dB at 1–4 kHz; A
+with the user's AMP is ≈ a static open filter (−5 dB at 10–20 kHz). **Render decision (measured):
+keep rev 13's band-limited render** — through A and B the box render's fold lines stay at −24…−56 dB
+re a tone (rev 13's: −50…−105); `repitch_ch12_listen.py --fold`.

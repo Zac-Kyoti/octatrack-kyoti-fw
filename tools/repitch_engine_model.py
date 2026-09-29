@@ -464,6 +464,85 @@ class Engine:
         return np.array(out)
 
 
+# ------------------------------------------------------ RPSP channel 1/2 (rev 14)
+# The SP-1200's channels 1 and 2 = the same 12-bit staircase through an SSM2044
+# 4-pole low-pass whose cutoff the channel's level envelope pushes open on each
+# hit (reference/handoffs/REPITCH_SP_CH12_SCOPE.md). Resonance 0 (Rossum's
+# "classic" setting): four identical one-pole stages, unity DC gain. The chip's
+# cutoff control is exponential, so
+#     pole frequency = CH12_F_REST x 2^(depth x env),   env in 0..1
+# CH12_F_REST: the service manual trims each filter to OSCILLATE at 1.0 kHz; a
+# 4-pole cascade oscillates at its pole frequency, so that is the resting pole
+# (the cascade's own -3 dB point sits 0.435x lower, ~435 Hz).
+CH12_F_REST = 1000.0
+CH12_DEPTH = 4.0          # octaves at env = 1: poles at 16 kHz, the staircase ~unfiltered (gate 1: to taste)
+
+# Envelope candidates (scope §1c), chosen by ear at gate 1:
+#   A  the OT's own AMP envelope as the SP's GAIN line, through the SP's diode
+#      into 10 uF (schematic reading): rises with the level at once, falls no
+#      faster than the capacitor discharges (tau). ATK/HOLD/REL shape it.
+#   B  a fixed AR started by each trig: ~5 ms sloping attack, then a decay.
+#   C  the fast forum reading: open at the hit, closed after ~1 ms.
+CH12_ENV = {"A": dict(kind="amp", tau=0.15),
+            "B": dict(kind="ar", attack=0.005, tau=0.10),
+            "C": dict(kind="ar", attack=0.0, tau=0.001)}
+
+
+def ch12_g(octaves, f_rest=CH12_F_REST):
+    """One stage's coefficient for y += g (x - y) at a pole frequency of
+    f_rest x 2^octaves (the matched pole: g = 1 - exp(-2 pi f / SR))."""
+    return 1.0 - math.exp(-2 * math.pi * f_rest * 2.0 ** octaves / SR)
+
+
+class Ch12:
+    """The channel 1/2 stage for one track: envelope + SSM2044-style 4-pole.
+    Fed the rendered RPSP output sample by sample; hit() at each trig; for
+    envelope A, amp(level) with the OT's AMP level (0..1) each sample."""
+
+    def __init__(self, env="B", f_rest=CH12_F_REST, depth=CH12_DEPTH):
+        self.cfg = CH12_ENV[env] if isinstance(env, str) else env
+        self.f_rest, self.depth = f_rest, depth
+        self.y = np.zeros((4, 2))
+        self.env = 0.0
+        self.level = 0.0          # A: the AMP level fed in
+        self.rise = False         # B/C: in the attack
+        self.dec = math.exp(-1.0 / (self.cfg["tau"] * SR))
+        at = self.cfg.get("attack", 0.0)
+        self.att = 1.0 if at <= 0 else 1.0 / (at * SR)
+
+    def hit(self):
+        if self.cfg["kind"] == "ar":
+            if self.att >= 1.0:
+                self.env = 1.0
+            else:
+                self.rise = True
+
+    def amp(self, level):
+        self.level = level
+
+    def __call__(self, x):
+        if self.cfg["kind"] == "amp":
+            self.env = max(self.level, self.env * self.dec)
+        elif self.rise:
+            self.env = min(1.0, self.env + self.att)
+            self.rise = self.env < 1.0
+        else:
+            self.env *= self.dec
+        g = ch12_g(self.depth * self.env, self.f_rest)
+        v = np.asarray(x, dtype=float)
+        for k in range(4):
+            self.y[k] += g * (v - self.y[k])
+            v = self.y[k]
+        return v.copy()
+
+
+def ch12_response(octaves, f, f_rest=CH12_F_REST):
+    """|H| of the 4-pole at a fixed envelope position (dB)."""
+    g = ch12_g(octaves, f_rest)
+    z = np.exp(-2j * math.pi * np.asarray(f, dtype=float) / SR)
+    return 20 * np.log10(np.abs(g / (1 - (1 - g) * z)) ** 4)
+
+
 # ------------------------------------------------------------ DSP-exact twin
 class DspExact:
     """The same engine in the DSP's integer arithmetic, bit for bit: what
