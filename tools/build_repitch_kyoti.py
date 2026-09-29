@@ -48,6 +48,7 @@ HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, FINAL
+import kyoti_place                   # combined-image placement (build_kyoti.py); no-op standalone
 
 status(FINAL, "REPITCH KYOTI (rev 16)", """
 TSTR RPCH / RPS9 / RPSP: tempo-locked varispeed with the OT's own, an S900/S950's and an
@@ -63,7 +64,7 @@ BASE = 0x40000400
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
 SUF = "_diag" if os.environ.get("RPK_DIAG") == "1" else ""
 OUT = ROOT / f"out/mainos_repitch_kyoti{SUF}.bin"
-CAVE_AT = 0x400d6f80
+CAVE_AT = kyoti_place.at("rpk_logic", 0x400d6f80)
 # bugbuilds' shared base -- the mainline build stays under it so it can be
 # folded in. The diagnostic never coexists with those, so it may run up to
 # patch_trigscale's pinned base (0x400d7bfc, MERGE.md).
@@ -147,18 +148,25 @@ def assemble():
     return binf.read_bytes(), syms
 
 
-def make_glyphs(cave_tab_at):
-    """7 position glyphs in stock's language + records + table, at known addrs."""
-    tab = b"".join(struct.pack(">I", cave_tab_at + 28 + 20*k) for k in range(7))
-    recs, data = b"", b""
-    data_base = cave_tab_at + 28 + 140
+def make_glyphs(cave_tab_at, rec_at=None, data_at=None):
+    """7 position glyphs in stock's language + records + table.
+
+    Returns [(address, bytes)]: the 28-byte table, then each 20-byte record, then
+    each 68-byte bitmap.  By default they sit contiguously after the table (the
+    standalone layout); the combined image (build_kyoti.py) may scatter the
+    records and bitmaps -- every pointer is written from these addresses."""
+    rec_at = rec_at or [cave_tab_at + 28 + 20*k for k in range(7)]
+    data_at = data_at or [cave_tab_at + 28 + 140 + 68*k for k in range(7)]
+    tab = b"".join(struct.pack(">I", rec_at[k]) for k in range(7))
+    pieces = [(cave_tab_at, tab)]
+    recs, data = [], []
     for k in range(7):
         cols = [0xFE] + [(0xAA if j % 2 else 0xD6) for j in range(1, 16)] + [0xFE]
         for j, pix in enumerate((0xFE, 0x82, 0x82, 0x82, 0xFE)):
             cols[2*k + j] = pix
-        recs += struct.pack(">5I", 17, 7, 1, data_base + 68*k, ICON_SHARED)
-        data += b"".join(struct.pack(">I", c << 24) for c in cols)
-    return tab + recs + data
+        recs.append((rec_at[k], struct.pack(">5I", 17, 7, 1, data_at[k], ICON_SHARED)))
+        data.append((data_at[k], b"".join(struct.pack(">I", c << 24) for c in cols)))
+    return pieces + recs + data
 
 
 # ---------------------------------------------------------------------------
@@ -331,13 +339,15 @@ def main():
     img = bytearray(stock)
     logic, syms = assemble()
 
-    # cave layout
-    w7_at = CAVE_AT + ((len(logic) + 3) & ~3)
-    tab_at = w7_at + WIDGET_LEN
-    glyphs = make_glyphs(tab_at)
-    cave_end = tab_at + len(glyphs)
+    # cave layout: logic, then the widget clone, then the glyph table/records/bitmaps.
+    # Standalone they are contiguous; the combined image places each piece itself.
+    w7_at = kyoti_place.at("rpk_widget7", CAVE_AT + ((len(logic) + 3) & ~3))
+    tab_at = kyoti_place.at("rpk_glyph_tab", w7_at + WIDGET_LEN)
+    glyphs = make_glyphs(tab_at, kyoti_place.at("rpk_glyph_recs", None),
+                         kyoti_place.at("rpk_glyph_data", None))
+    cave_end = max(a + len(b) for a, b in glyphs)
     syms["widget7"] = w7_at
-    if cave_end > CAVE_CEIL:
+    if not kyoti_place.active() and cave_end > CAVE_CEIL:
         sys.exit(f"cave overflows: end 0x{cave_end:08x} > ceil 0x{CAVE_CEIL:08x}")
 
     # the widget clone, two words patched
@@ -350,21 +360,27 @@ def main():
     w7[BOUND_OFF:BOUND_OFF+2] = b"\x70\x06"
     w7[LEA_OFF+2:LEA_OFF+6] = struct.pack(">I", tab_at)
 
-    cave = bytearray(cave_end - CAVE_AT)
-    cave[:len(logic)] = logic
-    cave[w7_at-CAVE_AT : w7_at-CAVE_AT+WIDGET_LEN] = w7
-    cave[tab_at-CAVE_AT:] = glyphs
+    pieces = [(CAVE_AT, logic), (w7_at, bytes(w7))] + glyphs
+    spans = sorted((a, a + len(b)) for a, b in pieces)
+    for (a1, e1), (a2, _) in zip(spans, spans[1:]):
+        if e1 > a2:
+            sys.exit(f"cave pieces overlap: 0x{a1:08x}..0x{e1:08x} / 0x{a2:08x}")
 
     # forbidden-window scan (RELOAD3's rule): no absolute refs into 0x80006a40..abf
-    for i in range(len(cave) - 3):
-        v = struct.unpack(">I", cave[i:i+4])[0]
-        if v in FORBIDDEN:
-            sys.exit(f"cave holds a forbidden ref 0x{v:08x} at +0x{i:x}")
+    for a, b in pieces:
+        for i in range(len(b) - 3):
+            v = struct.unpack(">I", b[i:i+4])[0]
+            if v in FORBIDDEN:
+                sys.exit(f"cave holds a forbidden ref 0x{v:08x} at 0x{a+i:08x}")
 
-    co = CAVE_AT - BASE
-    if any(img[co:co+len(cave)]):
-        sys.exit(f"cave at 0x{CAVE_AT:08x} is not free: {bytes(img[co:co+16]).hex()}")
-    img[co:co+len(cave)] = cave
+    # every piece's span (the standalone layout's alignment gaps included) must be free
+    covered = set()
+    for a, b in pieces:
+        co = a - BASE
+        if any(img[co:co+len(b)]):
+            sys.exit(f"cave at 0x{a:08x} is not free: {bytes(img[co:co+16]).hex()}")
+        img[co:co+len(b)] = b
+        covered |= set(range(co, co + len(b)))
 
     # detours
     for site, disp, sym in DETOURS:
@@ -394,7 +410,7 @@ def main():
         expected |= set(range(site-BASE, site-BASE+len(bytes.fromhex(disp))))
     for addr, *_ in POKES:
         expected |= set(range(addr-BASE, addr-BASE+4))
-    expected |= set(range(co, co+len(cave)))
+    expected |= covered
     stray = [i for i in range(len(img)) if img[i] != stock[i] and i not in expected]
     if stray:
         sys.exit(f"{len(stray)} stray changed bytes, first at 0x{stray[0]+BASE:08x}")
@@ -403,7 +419,8 @@ def main():
     changed = sum(1 for a, b in zip(stock, img) if a != b)
     print(f"{OUT.name}: {changed} B changed, 0 strays")
     print(f"  cave 0x{CAVE_AT:08x}..0x{cave_end:08x} = {cave_end-CAVE_AT} B "
-          f"(logic {len(logic)}, widget7 {WIDGET_LEN} @0x{w7_at:08x}, icons {len(glyphs)})")
+          f"(logic {len(logic)}, widget7 {WIDGET_LEN} @0x{w7_at:08x}, "
+          f"icons {sum(len(b) for _, b in glyphs)} @0x{tab_at:08x})")
     for site, _, sym in DETOURS:
         print(f"  detour 0x{site:08x} -> {sym} @0x{syms[sym]:08x}")
     for addr, _, new, why in POKES:
