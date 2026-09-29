@@ -41,7 +41,8 @@
 ; y:$40 = 0, so it takes the RPCH exit and never reaches the engines (measured).
 ;
 ; MEMORY (Y:$795..$FFF is free on stock on both cores -- octabam, measured on
-; hardware; SIDECHAIN3 takes $800-$9ff):
+; hardware; SIDECHAIN3 takes $7f0-$9ff on both cores -- true only since Session 115:
+; before it, SIDECHAIN3's keybus was $a00-$bff on payload A and overwrote this):
 ;   Y:STBASE + x:$418   per-track RPSP slot ($20 words): the render's residual
 ;                       ring (RINGW words, modulo-addressed, so it starts the
 ;                       slot), then the state (S_SIZE words in all)
