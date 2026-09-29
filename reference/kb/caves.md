@@ -25,7 +25,7 @@ the image that points into them:
 |---|---:|---:|---|
 | `0x401087e4 .. 0x4010c315` | 15,153 B | **0** | ⛔ **NOT USABLE — live at runtime.** Hardware-proven. |
 | `0x4010cdd1 .. 0x4010fdf0` | 12,319 B | **0** | ⛔ **NOT USABLE** — same region class, same verdict until a canary says otherwise. |
-| `0x400d64da .. 0x400d7c3c` | 5,986 B | 2 | ⚠️ the "classic cave" — **contested and effectively full**; see §2. **This is where our builds live.** |
+| `0x400d64da .. 0x400d7c3c` | 5,986 B | 2 | ⚠️ the "classic cave" — **contested and effectively full**; see §2. **This is where our builds live — from `0x400d6500` only** (§2b). |
 | `0x400d24d0 .. 0x400d2ce0` | 2,064 B | 1 | ⚠️ contested — octabam's `modules/menushortcut` pins 300 B here; our KB calls it `SAFE_CAVE` (midisc's). |
 | `0x4010c350 .. 0x4010c57e` | 558 B | 2 | ❓ **unclaimed** — but it sits between the two proven-live tail runs, so treat it as live until a canary clears it. |
 
@@ -110,6 +110,32 @@ trampolines — "D-region pads only, VOICE/RELOAD class"):
 
 These are *outside* the contested classic cave — worth knowing when a patch
 needs a small, independent landing pad rather than more of `0x400d6xxx`.
+
+## 2b. Measured on our own image, 2026-09-29 (the KYOTI V1.0 build) — confidence **C**
+
+**The first 38 B of the classic cave are a runtime table, not free space.** `0x400d64ca` is
+the base of an array of 24-byte records: `0x4000176c` walks it (`tst.l (a0); lea 24(a0)`)
+for the first record whose first long is 0, and `0x40001732`/`0x4000174e` write fields
+`+0x10`/`+0x14` of record `d2` (`0x400d64da` + 24·d2). Stock's first record is already
+empty, so records are appended at runtime, and the long at `0x400d64e2` is the terminator
+while there is one. An emulator boot + project load + 1500 sequencer frames wrote nothing
+there, so the writer is on some other path — but every flashed build (and midisc's `CODE2`)
+starts at **`0x400d6500`**, which is where ours start. ⚠️ `build_bugbuilds.py` used to prefer
+`0x400d64dc` for PARTREAPPLY (fixed the same day; those composites were never flashed).
+
+**midisc's shipping pads, trimmed** (ranges that stock references at the END — the pad
+ends where the referenced word starts): CAVE2 `0x400d2ee6..0x400d301c` (not `..3020`),
+RELOAD_CAVE `0x400d359c..0x400d3664` (not `..3668`), SEAM_CAVE `0x400d46e2..0x400d47aa` (not
+`..47ad`). They are zero tails of 402-byte parameter-page records at `0x400d301c + k·0x192`.
+FILT_PERSIST_SAVE (`0x400d352d..`) is read by stock (`0x4000578e` reads `0x400d3530`) — not
+used. The byte-aligned reference scan found these; a 2-aligned scan does not.
+
+**Reclaim — stock data made unreachable by our own edits.** In an image that removes SPRING
+REVERB (SIDE-CHAIN, REPITCH) its CF descriptor `0x400d5726..0x400d58b8` has no reference
+left; in an image with MUTE MODE the three stock PERSONALIZE arrays (`0x400b2a34`,
+`0x400b2a74`, `0x400b2ac0`, 16 longs each) have none either. `build_kyoti.py` uses both and
+asserts the no-reference property on every build. This is only as good as a static scan
+plus the emulator's read watches (none seen) — the first flash is the canary.
 
 ## 3. The canary test — the gate before anything ships in a new region
 

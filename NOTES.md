@@ -34167,3 +34167,73 @@ unit it needs `defsyms` — the same schema ask MUTE MODE has. Asked of Sam.
 **Build this session:** the two withdrawn `out/Combo` images (`DJ7_RPK16` syx `1fae3bab…`,
 `DJ7_RPK16_BUGFIX` syx `221d22e3…`) — **not flashed, must not be flashed**, removed from the
 tree. No other build.
+## Session 114 (2026-09-29, `kyoti-v1` worktree) — KYOTI V1.0: every FINAL feature in one image, built and emulator-verified; not flashed
+
+**User:** combine all finalized features into a single build; boot splash / status menu read **`KYOTI V1.0`**
+(user: uppercase V is fine — the field shows `KYOTI V1.0`, 10 chars, EFT round-trip OK).
+
+**Built:** `tools/build_kyoti.py` (tier PREVIEW) → `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.0.syx` sha256
+`bf1fff8c53d9799aa4915bb09b827fbda946f250dfa72bb191338978260c38b7`, CF `OCTATRACK_KYOTI_V1.0.bin`
+`724c3243cb974730…`, mainos `6d64d2d9e89a82a4…`; rebuilt twice, byte-identical. **Not flashed.**
+Contents: MUTE MODE (DT), SIDECHAIN3_CROSS, QLREC, TRIGLOCK, RELOAD3, DIRECT JUMP V7.0.1, REPITCH KYOTI rev 16,
+PLAYSFREEFIX, PATTERN LED, PARTREAPPLY.
+
+**Method — compose, never re-implement.** `tools/kyoti_place.py`: every FINAL builder asks it for its cave
+addresses (unset = default; all ten standalone builds re-verified byte-identical, 19 mainos/syx hashes).
+build_kyoti.py copies the tree to `out/KYOTI/_sandbox/`, runs each builder at its allocated addresses, diffs
+its image against the base it was given, composes the union. Asserted every run: pieces in-zone/disjoint;
+deltas pairwise disjoint except SPRING's removal (SIDECHAIN × REPITCH, 18 identical bytes); every changed
+byte owned; outside its caves each feature changes exactly its standalone sites (only cave addresses written
+there differ); no branch into a patched span; B1; B2; reclaim invariants; the version field.
+
+**Space was the real problem.** Measured full blob sizes (in-cave state included) = **9622 B**; the classic
+cave holds 5948. Layout (MERGE.md top section has the table): CAVE `0x400d6500..7c3c` = RELOAD3, DJ,
+soft-mute, PARTREAPPLY, MUTE MODE menu, PATTERN LED, PLAYSFREEFIX, labels array (4 B left); midisc's
+SAFE_CAVE = REPITCH logic + 2 arrays (0 left); SPRING REVERB's dead CF descriptor = REPITCH widget clone;
+midisc ENC/RELOAD/SEAM = TRIGLOCK / SIDECHAIN formatters / QLREC; midisc CAVE2/PASTE/FILT + the dead stock
+PERSONALIZE arrays = REPITCH's glyph data. Engine/ISR-path code only in CAVE and SAFE.
+
+**Found on the way (kb/caves.md §2b):**
+- **`0x400d64ca` is a runtime table of 24-byte records** (finder `0x4000176c` walks to the first empty
+  record — stock's first is empty; writer `0x40001732` hits `+0x10/+0x14` = `0x400d64da..`). The classic
+  cave is usable from `0x400d6500` (every flashed build, midisc). `build_bugbuilds.py` preferred
+  `0x400d64dc` for PARTREAPPLY — **fixed** (floor `0x400d6500`, PARTREAPPLY `0x400d6500`, PATTERN LED
+  `0x400d6694`); all seven composites clean; new syx: DJV7 `4f716a82…`, MUTEDT `23b9bf38…`, QLREC
+  `a65e5c32…`, RL3 `b0950c89…` (unchanged), RPK16 `6d73e0b3…`, SC3X `3dcf616d…`, TRIGLK `9ad47dee…`.
+  None ever flashed. Emulator (boot + load + 1500 frames): nothing wrote the table, so its writer is elsewhere.
+- **midisc's pad ends include stock-referenced words** (byte-aligned scan; a 2-aligned one misses them):
+  CAVE2 → `0x400d301c`, RELOAD_CAVE → `0x400d3664`, SEAM → `0x400d47aa`. They are zero tails of 402-byte
+  param-page records at `0x400d301c + k·0x192`; the record reader `0x40005730` reads `+0x5e..+0x69` only
+  (`d2` 0..5). FILT_PERSIST_SAVE is read by stock (`0x400d3530`) — unused.
+- **Reclaim:** SPRING's CF descriptor `0x400d5726..58b8` (only refs = the two `id2e[0x15]`, both redirected
+  by SIDECHAIN and REPITCH) and the stock PERSONALIZE arrays (only refs = the 5 MUTE MODE repoints).
+  Builders get a PREPARED base with these zeroed (MUTE MODE gets true stock — it copies the arrays).
+- The byte-scan branch guard (build_triglock's) false-alarms on operands (`movea.l 0x800062a4` → "bhi");
+  build_kyoti confirms each hit with objdump from two start points.
+
+**Blockers resolved:** B1 — `DJ_MODE_IN_CAVE` (defsym; standalone V7 unchanged): DJ's on/off word is a cave
+long at `0x400d74bc`, re-loaded from flash each boot, so MUTE MODE's widened restore cannot reach it. B2 —
+asserted per record in the composite (RELOAD3's records/handlers/8 TRACK slots stock; the only overlay
+change is the `[PTN]` YES press → `dj_toggle`).
+
+**Emulator evidence (not hardware):**
+- ot_emu, MMTESTDT, boot + load + 2000 frames `--dsp`: stock and KYOTI both REACHED; write watches on every
+  non-classic zone: stock code writes none (only REPITCH's own state words in SAFE, from its own PCs).
+  Read watches on SPRING, PERS1/2, ENC, CAVE2, RELD, SEAM, PASTE, FILT: no reads.
+- DSP payloads = exactly the union of SIDECHAIN3's and REPITCH's standalone bytes (7943 B, 0 diff).
+- REPITCH audio on the user's project (`~/.Trash/REPITCH` + isaak.wav, staged read-only; T2 TSTR poked
+  4/5/6): KYOTI bit-identical to standalone rev 16 in RPCH, RPS9 and RPSP (non-silent, peaks ≈ 4.6 M).
+  (A first attempt on MMTESTDT was silent — TX0 all zero — and proved nothing; not counted.)
+- DIRECT JUMP (`diag_reflock.py`, new `--dj-mode-addr`; the Bugbuild scenarios s1 16↔7 re-cues, s2, sinf
+  master INF, on the user's `DJTEST2` read from `~/.Trash`): KYOTI vs standalone V7.0.1 — cues, commits
+  (LAND ticks), full per-tick engine state, stock-call trace, every fire-table write and every Program
+  Change **identical** once writer PCs are expressed as symbol+offset (the cave moved). s2's KYOTI run
+  recorded 2 extra trailing ticks (323 vs 321); the common 321 are identical.
+  Assembler note: with `DJ_MODE` a same-section label, gas encodes the two READS PC-relative (`move.l
+  (d16,pc)`, `tst.l (d16,pc)`) and the write absolute — all three disassembled to `0x400d74bc`; the code is
+  4 B shorter before the state block, which is why cave offsets differ from the standalone's.
+
+**Test plan for the first flash:** FLASHING §4.11 (the relocated pieces first — PERSONALIZE list, TSTR
+widget, COMPRESSOR page 2, QLREC, TRIGLOCK, SPRING→NONE, DARK REV; then each feature's own section; then
+the combined-only cases: DJ OFF after a power cycle with MUTE MODE ≠ OT, chord split, reload during a
+pending jump, Part change during a soft-mute, REPITCH through a jump/Part change).

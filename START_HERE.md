@@ -39,7 +39,7 @@ only, for `whatsnew.py`).
 | `NOTES.md` | the full chronological RE log; every finding, every session, every dead end |
 | `reference/kb/*.md` | **distilled knowledge base** — address map + file format + DSP + container + techniques, ours merged with external RE. Read the relevant one before a new patch |
 | `reference/EXTERNAL_RESEARCH.md` | index of the 6 external OT-RE repos + the sync/distill workflow (`tools/refs/`) |
-| `reference/MERGE.md` | **combining every final-scoped mod into one firmware** — cave allocation, detour inventory, shared-state table, and the two remaining blockers. The combined build is **deliberately not buildable** until every feature is shippable; this doc is what it will be rebuilt from, and it stages the merge as `KYOTI_V1.0` / `KYOTI_V1.1` |
+| `reference/MERGE.md` | **the combined firmware** — `KYOTI V1.0` (`tools/build_kyoti.py`): its cave layout across zones, the evidence for each zone, how the two old blockers are resolved; below that, the detour inventory and shared-state table it was planned from |
 | `reference/handoffs/*.md` | per-thread handoffs for work still open — read the relevant one **before** re-probing that thread (DIRECT JUMP is FINAL: `DIRECTJUMP_V7_DESIGN.md` is its design contract and proof method; `DIRECTJUMP_V6_HANDOFF.md`, `DIRECTJUMP_PHASE_HANDOFF.md` and `DIRECTJUMP_SCALES_HANDOFF.md` are history; `RELOAD2_HANDOFF.md`) |
 | `reference/AR_DIRECT_JUMP.md` | the Analog Rytm's own pattern-commit arithmetic — V6.4 ported it exactly (the OT↔AR parity build); V7 deliberately replaces its position rule with the clock-locked one |
 | `reference/OT_SEQUENCER_BUGS.md` | every stock sequencer bug we have determined (tagged measured / hardware / reasoned) and the measured NOT-bugs — update it rather than re-deriving |
@@ -152,13 +152,14 @@ changes, change the call and the README table together. Upstream RE repos are tr
 all three bug fixes folded into it: MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK,
 RELOAD3, DIRECTJUMP_V7 and REPITCH_KYOTI, seven images, written only to `out/Bugbuilds/`. Features are never combined with
 each other. Not flashed; the composition itself is proven by a per-run
-interlock proof. There is deliberately **no single all-in-one image**:
-`tools/build_merged.py` stays withdrawn so a combined build cannot quietly ship an
-unfinished feature. `reference/MERGE.md` is the authoritative allocation map it will
-be rebuilt from, and stages the merge as `KYOTI_V1.0` (the seven mods finished when
-it was written, nothing to resolve) then `KYOTI_V1.1` (+ DIRECT JUMP V7 + RELOAD3, both final now;
-with V7.0.1's 1980 B cave V1.1 no longer fits one free zone — ≈ −888 B, derived — so the map
-needs a second zone before it can be re-cut).
+interlock proof.
+
+**The all-in-one image — `KYOTI V1.0`** (`tools/build_kyoti.py` → `out/KYOTI/`, PREVIEW,
+built 2026-09-29, **not flashed**): every FINAL feature + the three bug fixes, composed from
+the FINAL builders themselves run in a sandbox at relocated addresses
+(`tools/kyoti_place.py`). Its caves need 9622 B; the classic cave holds 5948, so it also uses
+midisc's shipping pads and two blocks of stock data it makes unreachable. Layout, evidence
+and the resolved blockers: `reference/MERGE.md` (top section); test plan: FLASHING §4.11.
 
 **Not a shipped fix:** the MIDI LFO SETUP knobs sending CC on the twin audio channel
 (the item older notes called "Bug 2", before that number was reused for the
@@ -181,8 +182,9 @@ ems-octakit's `abi.inc` ~500-address map → `kb/octakit-abi.md`, the keymap/key
 
 ## 6. Current frontier — UPDATE THIS EACH SESSION
 
-**As of 2026-09-26 (Session 102 committed; a Session 103 experiment is uncommitted in
-the working tree).** Every finished feature is here, and so is the one open thread.
+**As of 2026-09-29 (Session 114): every finished feature is combined in `KYOTI V1.0`
+(`build_kyoti.py`, PREVIEW, not yet flashed) — see "KYOTI V1.0" below.** Every finished
+feature is here.
 RELOAD3, QLREC's stateless rewrite and SIDECHAIN3's UI fix were the last promotions
 (2026-09-25).
 
@@ -327,7 +329,14 @@ the SIDE-CHAIN, which `0ab5666` deferred for the same reason — `threads.txt` a
 (`reference/MERGE.md`); on hardware, RTRG retrigs on a repitch track and a full DSP core of
 RPSP tracks under heavy effects are untested, and DARK REVERB's repair is emulator-only.
 
-### Blockers on the staged merge
+### KYOTI V1.0 — the combined image (built 2026-09-29, awaiting its first flash)
+
+`tools/build_kyoti.py`, PREVIEW. The first flash doubles as the hardware canary for the zones
+this project has not run code from before (`reference/MERGE.md`, `kb/caves.md` §2b) — FLASHING
+§4.11's first block exercises every relocated piece. Blockers B1/B2 below are RESOLVED in it
+(DJ_MODE in DIRECT JUMP's cave; the overlay asserted per record), kept below as history.
+
+### Blockers on the staged merge (RESOLVED in KYOTI V1.0 — history)
 
 Both are DIRECT-JUMP-vs-someone-else, and both are *builder assertion* conflicts
 rather than byte conflicts (`reference/MERGE.md`) — unchanged by V7, which keeps v4's

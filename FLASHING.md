@@ -127,7 +127,7 @@ power-on. The bug fixes are always on.
 The startup screen and **SYSTEM → SYSTEM STATUS → OS VERSION** read `140C_KYOTI`
 (the field is fixed at 10 chars; `1.40C_KYOTI` at 11 does not fit). The bug-fix-only
 builds deliberately keep the stock `1.40C` string, so on those use the feature test
-below instead.
+below instead. The combined image reads **`KYOTI V1.0`** (§4.11).
 
 ### 4.1  The MIDI manual-trig fix  (always on)
 
@@ -681,6 +681,46 @@ it (§4.4): not offered in the chooser, and a project that still uses it loads i
 
 Detail: `NOTES.md` Sessions 106–112; design records `reference/handoffs/REPITCH_*.md`.
 
+### 4.11  KYOTI V1.0 — everything in one image  (`build_kyoti.py` → `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.0.syx` / `OCTATRACK_KYOTI_V1.0.bin` — **PREVIEW, not yet flashed**)
+
+Every feature in this image is hardware-confirmed on its own; what is new is that they
+share one image, and that — for lack of room — some of their code and data now live in
+places this project has not run code from before (midisc's shipping pads, and two blocks of
+stock data the image itself makes unreachable; `reference/MERGE.md`). So the first flash is
+also the canary for those places: **do the first block of checks early and in full**, and
+if anything behaves oddly, note exactly which screen / gesture it was.
+
+**0. Boot.** Splash and SYSTEM STATUS → OS VERSION read `KYOTI V1.0`.
+
+**1. The code and data in new places — open each once:**
+- [ ] PROJECT → SYSTEM → **PERSONALIZE**: scroll the whole list top to bottom; all items
+      present with MUTE MODE third; change MUTE MODE and QUANTIZE LIVE REC and back.
+      (The menu's three pointer arrays were relocated.)
+- [ ] A STATIC or FLEX track, **SETUP → TSTR**: the 7-position widget draws its icons for
+      every value (OFF … RPSP). (REPITCH's glyphs are scattered over five small pads.)
+- [ ] An **FX slot on the COMPRESSOR**, page 2: `KEY` / `KFLT` / `KGN` / `MON` draw and turn.
+      (SIDE-CHAIN's formatters moved.)
+- [ ] **QLREC**: hold `[REC]`, tap `[PLAY]` → toast; tap again while it is up → it flips.
+- [ ] **TRIGLOCK**: make a trigless lock, LIVE-erase its only param (`[NO]`+knob) → the trig
+      clears from the row.
+- [ ] Load an old project that used **SPRING REVERB** → that slot shows NONE (as on the
+      SIDE-CHAIN / REPITCH builds); **DARK REVERB** still sounds right.
+
+**2. Regression pass** — each feature's own section: §4.1, §4.2, §4.3, §4.4, §4.5, §4.6,
+§4.7, §4.8, §4.9, §4.10. Nothing about the features changed except where their code sits.
+
+**3. What only exists in this image:**
+- [ ] **DIRECT JUMP comes up OFF** after a power cycle — with MUTE MODE set to anything but
+      `OT` (MUTE MODE's saved setting rides a widened battery restore; DIRECT JUMP's on/off
+      word was moved out of its reach for exactly this).
+- [ ] Chord split: `[PTN]`+`[YES]` toggles DIRECT JUMP; `[PTN]`+`[TRACK n]` reloads track n;
+      `[BANK]`+`[TRACK n]` reloads + Part. Try a DIRECT JUMP toggle right after a reload.
+- [ ] With DIRECT JUMP ON, cue a jump and do a `[PTN]`+`[TRACK]` reload while it is pending.
+- [ ] MUTE MODE `OTFX` / `DT-T`: soft-mute a track, then change to a pattern on another
+      Part (PARTREAPPLY + soft-mute on the same voice).
+- [ ] A REPITCH track (RPS9/RPSP) through a DIRECT JUMP to a pattern on another Part, and
+      through a Part change with PARTREAPPLY.
+
 ## 5. Reverting to the official firmware
 
 Reflash the official one following the **same steps in §3**, sending
@@ -808,6 +848,7 @@ OCTATRACK_*.bin                   CF-card OS UPGRADE transport (faster)
 | `python3 tools/build_reload3.py` | `140C_KYOTI` | Bug-1 fix + **RELOAD FROM PROJECT**, two chords (`[PTN]`/`[BANK]` + `[TRACK n]`) — **hardware-confirmed, final** (2026-09-25) |
 | `python3 tools/build_repitch_kyoti.py` | `140C_RPK16` | **REPITCH KYOTI** (no bug fix): TSTR `RPCH`/`RPS9`/`RPSP` tempo-locked varispeed + QUAN ratios; removes SPRING REVERB — **hardware-confirmed, final** (rev 16, 2026-09-29) |
 | `python3 tools/build_bugbuilds.py` | per-image | each finished feature **with all three bug fixes folded in** → `out/Bugbuilds/` |
+| `python3 tools/build_kyoti.py` → `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.0` | `KYOTI V1.0` | **every finished feature + all three bug fixes in one image** — PREVIEW, not yet flashed; test with §4.11 |
 
 Superseded, kept only for rollback and reference — **do not flash**:
 `build_mutemode.py` / `build_mutemode_new.py` / `build_softmute.py` (pre-four-mode),

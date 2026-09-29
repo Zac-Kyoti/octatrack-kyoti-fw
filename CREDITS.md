@@ -92,6 +92,12 @@ too, and has its own section above.)
   reusable part-save persistence + composition pattern, distilled into
   `reference/kb/memory-map.md` and `reference/kb/techniques.md`. Already
   vendored by octabam as a submodule (`modules/midi-scenes`).
+  The combined **KYOTI V1.0** image (2026-09-29) places code and data in the zero pads
+  midisc 8.2 ships its own code from (`tools/midisc/memory_map.py`: SAFE_CAVE, CAVE2,
+  RELOAD_CAVE, SEAM_CAVE, SCENE_PASTE_CAVE, ENC_UNLOCK_CAVE, FILT_PERSIST_LOAD_CAVE) —
+  its hardware record is the evidence those pads are usable; the coordinates were
+  re-verified against our own image and three of the ends trimmed (`reference/kb/caves.md`
+  §2b). No midisc code is used.
   Its companion **[midisc-patcher](https://github.com/bkkbrls-del/midisc-patcher)**
   (added 2026-09-24) does the patching **in the browser** from the user's own stock
   OS — the automated form of the "ship a recipe, never a binary" posture

@@ -45,6 +45,7 @@ build is byte-for-byte reproducible from the stock file.
 | `python3 tools/build_repitch_kyoti.py` → `OCTATRACK_OS1.40C_REPITCH_KYOTI` | `140C_RPK16` | **REPITCH KYOTI** (no bug fix folded in — take the Bugbuild for that): three new SETUP **TSTR** values on STATIC/FLEX — `RPCH` (the OT's own playback), `RPS9` (Akai S900/S950: virtual 40 kHz, 12-bit) and `RPSP` (E-mu SP-1200: 26.04 kHz, 12-bit, drop-sample, through channel 1/2's SSM2044-style 4-pole low-pass opened by the track's AMP envelope) — each replaying the sample at the project tempo by varispeed (tempo from the sample's own attribute, 30–300 BPM, otherwise stock). On such a track PTCH becomes **QUAN**: 9 exact ratios `1/2 … 1/1 … 2/1`, p-lockable and scene-lockable, 3 detents per ratio (press + turn: 2); PTCH and QUAN are stored apart and swap when TSTR changes. The audio editor's TIMESTRETCH gains `REPITCH`/`RPS9`/`RPSP` for SETUP `AUTO`. The DSP code space is donated by **SPRING REVERB**, removed as SIDECHAIN3_CROSS removes it (old projects load it as NONE); DARK REVERB is kept working. **Hardware-confirmed, final** (rev 16, 2026-09-29). `RPK_DIAG=1` builds an on-screen diagnostic variant (`140C_RPKD`). |
 | `python3 tools/build_reload3.py` | `140C_KYOTI` | Bug 1 fix + **RELOAD FROM PROJECT**, as two direct chords — no picker, no modal window, no timeout. **`[PTN]` + `[TRACK n]`** reloads that track's card-saved sequence with the Part untouched; **`[BANK]` + `[TRACK n]`** does the same and re-applies the saved Part (from RAM, via stock's own reload-part routine). From the card's last SAVE BANK, **without touching the transport**. **Hardware-confirmed, final** (2026-09-25). The result is shown when the reload has *finished*, and a built-in check reports `SEQ RELOAD LOST` if the trigs did not land. `--diag` builds an on-screen diagnostic variant (`python3 tools/build_reload3.py --diag`, separate `_DIAG` files) |
 | `python3 tools/build_partreapply.py` | `1.40C` (unchanged) | **Bug 3 fix only** — Part-change carryover: after a pattern change that links a different Part, forces the full stock Part-reapply path (recorder record, scene morph, `TRK_PART`/`TRK_BANK` consistency) instead of the stock code's partial one, **re-seeds the per-track sample slot a track leaving PICKUP would otherwise keep**, and stops a pattern switch into a PICKUP track from spuriously marking its Part unsaved. On otherwise-stock 1.40C. **Hardware-confirmed, final** — see below |
+| `python3 tools/build_kyoti.py` → `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.0` | `KYOTI V1.0` | **Everything in one image**: MUTE MODE, SIDE-CHAIN, QUANTIZE LIVE REC, TRIGLESS-LOCK AUTO-REMOVE, RELOAD3, DIRECT JUMP V7.0.1, REPITCH KYOTI rev 16 + PLAYSFREEFIX, PATTERN LED and PARTREAPPLY. Built by running each feature's own FINAL builder at relocated addresses and proving the composite is the disjoint union of their changes. DIRECT JUMP still comes up OFF at every power-on (its on/off word lives in its cave, since MUTE MODE's restore would otherwise carry it). **PREVIEW — emulator-verified, not yet flashed** |
 | `python3 tools/build_bugbuilds.py` | per-image (`BUG_MUTEDT`, `BUG_QLREC`, `BUG_SC3X`, `BUG_TRIGLK`, `BUG_RL3`, `BUG_DJV7`, `BUG_RPK16`) | **One image per finished feature, with all three bug fixes folded into it** — MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK, RELOAD3, DIRECTJUMP_V7 (V7.0.1) and REPITCH_KYOTI (rev 16), each built as *that feature alone* + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX. Features are never combined with each other. Writes **only** to `out/Bugbuilds/`, so the standalone per-feature images above are left alone. Composes onto the finished feature image rather than re-deriving it, with an interlock proof asserted on every run. *Not flashed — every ingredient is individually confirmed, the composites are not* |
 | `python3 tools/build_triglock.py` | `1.40C` (unchanged) | **Auto-remove an emptied trigless lock** — a LIVE-REC `[NO]`+knob erase that clears a step's last p-lock now also drops the now-purposeless trigless lock, instead of leaving it lit on the trig row indefinitely. An empty trigless lock placed deliberately with `FUNC`+`TRIG` is left alone. On otherwise-stock 1.40C. **Hardware-confirmed, final.** |
 
@@ -123,13 +124,16 @@ python3 tools/build_bugbuilds.py              # each finished feature + all 3 bu
                                               #   -> out/Bugbuilds/ (the images above are untouched)
 ```
 
-There is deliberately **no single all-in-one image**: `tools/build_merged.py` is
-withdrawn so a combined build cannot quietly ship an unfinished feature.
-[`reference/MERGE.md`](reference/MERGE.md) is the authoritative allocation map it
-will be rebuilt from, and it stages the merge as `KYOTI_V1.0` (the seven mods that
-were finished when it was written, nothing to resolve) then `KYOTI_V1.1` (+ DIRECT
-JUMP and RELOAD3). RELOAD3 has since been hardware-confirmed final; the map has not
-yet been re-cut around that.
+**The all-in-one image is `python3 tools/build_kyoti.py`** → `out/KYOTI/`
+(`OCTATRACK_OS1.40C_KYOTI_V1.0.syx`, `OCTATRACK_KYOTI_V1.0.bin`), version string
+**`KYOTI V1.0`**. It carries every FINAL feature and the three bug fixes; nothing
+unfinished can reach it, because it runs the FINAL builders themselves. Each builder
+runs in a sandbox copy of the tree (`out/KYOTI/_sandbox/`, deleted after a clean
+build) with its caves moved to the addresses `build_kyoti.py` allocates
+(`tools/kyoti_place.py`; with no override every builder produces its standalone image
+byte for byte). Tier **PREVIEW** until it has been on hardware. The allocation, the
+zones it uses and why, and how the two old merge blockers are resolved:
+[`reference/MERGE.md`](reference/MERGE.md).
 
 Every build is a **guarded binary patch**: it asserts the stock bytes at each
 splice site, checks the code caves are free / non-overlapping / inside the free

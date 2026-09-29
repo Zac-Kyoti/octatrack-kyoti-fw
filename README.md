@@ -202,14 +202,19 @@ courtesy, not a lock; `tools/kyoti_status.py` is all of it.
   current source.
   → [`tools/build_bugbuilds.py`](tools/build_bugbuilds.py)
 
-- **Octatrack KYOTI FW v1.0 / v1.1** *(staged; the single all-in-one image is
-  deliberately not buildable yet, so a combined image cannot quietly ship an
-  unfinished feature)* — **`KYOTI_V1.0`** is the seven finished, hardware-confirmed
-  mods; **`KYOTI_V1.1`** adds DIRECT JUMP V7 and RELOAD3 — both final now, but V1.1 is
-  held behind two builder-assertion conflicts and no longer fits one free cave zone
-  with V7's larger cave. REPITCH KYOTI is final too, and its cave overlaps DIRECT JUMP
-  V7's, so it joins that re-layout. [`reference/MERGE.md`](reference/MERGE.md) is the
-  allocation map it will be built from.
+- **Octatrack KYOTI FW v1.0** *(PREVIEW — built and emulator-verified, not yet
+  flashed)* — **every finished feature in one image**: MUTE MODE, SIDE-CHAIN, QUANTIZE
+  LIVE REC, TRIGLESS-LOCK AUTO-REMOVE, RELOAD3, DIRECT JUMP V7.0.1, REPITCH KYOTI and the
+  three bug fixes. Boot splash and SYSTEM STATUS → OS VERSION read **`KYOTI V1.0`**.
+  The caves need ~9.6 KB against the classic cave's 5.9 KB, so the builder spreads them
+  over zones with a hardware record elsewhere (midisc's shipping pads) and over stock
+  data this image itself makes unreachable (SPRING REVERB's descriptor, the relocated
+  PERSONALIZE arrays). Each feature is built by its own FINAL builder in a sandbox at
+  the allocated addresses, and the composite is proven to be their disjoint union; the
+  two old merge blockers (DIRECT JUMP's power-on default vs MUTE MODE's restore, and the
+  `[PTN]` keymap overlay) are resolved and asserted.
+  → [`tools/build_kyoti.py`](tools/build_kyoti.py), layout and reasoning in
+  [`reference/MERGE.md`](reference/MERGE.md)
 
 See **[`BUILD_KYOTI.md`](BUILD_KYOTI.md)** for prerequisites, the one-time setup,
 every build variant, and the version strings.
@@ -269,6 +274,7 @@ All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit
 | ↳ spurious Part-edited flag on entering PICKUP | `build_partreapply.py` | **confirmed** 2026-09-23 |
 | ↳ recorder SRC/RLEN and REC SETUP carryover | `build_partreapply.py` | unconfirmed — never reproducible on stock |
 | QUANTIZE LIVE REC toggle | `build_qlrec.py` | **confirmed** 2026-09-25 |
+| KYOTI V1.0 — every feature in one image | `build_kyoti.py` | **not flashed** — emulator: boots, loads a project and plays 2000 frames with both DSP cores; REPITCH renders bit-identical to its standalone build in RPCH/RPS9/RPSP; DIRECT JUMP's engine state identical to V7.0.1 on the Bugbuild scenarios |
 | Bugbuild composites | `build_bugbuilds.py` | **not flashed** — every ingredient above is confirmed, no composite has been on hardware |
 
 Exactly what was tested on each flash, and the failures along the way, are in

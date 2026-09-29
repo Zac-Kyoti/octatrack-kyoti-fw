@@ -1,5 +1,91 @@
 # MERGE.md — combining every final-scoped mod into one firmware
 
+## ✅ BUILT 2026-09-29: `KYOTI V1.0` = every FINAL feature (`tools/build_kyoti.py`)
+
+The staging below (V1.0 = seven mods, V1.1 = + DIRECT JUMP + RELOAD3) is **history**. By the
+time it was built every feature was final, so there is one image carrying all of them —
+MUTE MODE, SIDE-CHAIN, QLREC, TRIGLOCK, RELOAD3, DIRECT JUMP V7.0.1, REPITCH KYOTI rev 16 and
+the three bug fixes. The user chose the name **`KYOTI V1.0`** (boot splash and SYSTEM STATUS
+→ OS VERSION; 10 chars). Tier **PREVIEW** until flashed.
+
+**Method: compose, never re-implement.** Each feature's own FINAL builder runs in a sandbox
+copy of the tree (`out/KYOTI/_sandbox/`) with its caves at addresses `build_kyoti.py`
+allocates, read through `tools/kyoti_place.py` (unset = the standalone image, byte for byte —
+verified on all ten builders, 19 image/syx hashes). The composite is the base plus the
+union of every feature's delta. Asserted every run: pieces inside their zones and disjoint;
+feature deltas pairwise disjoint except SPRING REVERB's removal, which SIDE-CHAIN and
+REPITCH write with identical bytes (18 B); every changed byte has an owner; outside its
+caves each feature changes exactly the sites its standalone build changes (only the cave
+addresses written there differ); no branch lands inside a patched span (byte scan, each hit
+confirmed as a real instruction by objdump — the old heuristic false-alarms on operands
+like `movea.l 0x800062a4`); B1; B2; the reclaim invariants; the version field.
+
+### Space — why the caves left the classic cave, and where they went
+
+Measured blob sizes (full, incl. in-cave state): RELOAD3 2104, DIRECT JUMP 1984 (1980 + the
+in-cave `DJ_MODE`), REPITCH 1924 logic + 372 widget clone + 644 glyphs, soft-mute 970,
+PARTREAPPLY 402, TRIGLOCK 296, MUTE MODE menu 208 + 3×68 PERSONALIZE arrays, QLREC 176,
+PATTERN LED 142, SIDE-CHAIN 134, PLAYSFREEFIX 62 = **9622 B**. The classic cave holds 5948.
+
+| zone | range | class | holds |
+|---|---|---|---|
+| CAVE | `0x400d6500..0x400d7c3c` | ours, hardware-proven | RELOAD3, DIRECT JUMP, soft-mute, PARTREAPPLY, MUTE MODE menu, PATTERN LED, PLAYSFREEFIX, PERSONALIZE labels (4 B left) |
+| SAFE | `0x400d24d0..0x400d2cdc` | midisc SAFE_CAVE | REPITCH logic, PERSONALIZE getters + setters (0 left) |
+| SPRING | `0x400d5728..0x400d58b8` | reclaim | REPITCH's 7-position widget clone |
+| ENC | `0x400c45b0..0x400c4700` | midisc ENC_UNLOCK_CAVE | TRIGLOCK |
+| RELD | `0x400d359c..0x400d3664` | midisc RELOAD_CAVE | SIDE-CHAIN's CF formatters |
+| SEAM | `0x400d46e4..0x400d47aa` | midisc SEAM_CAVE | QLREC |
+| CAVE2 / PASTE / FILT | `0x400d2ee8..0x400d301c` / `0x400d3da4..0x400d3e38` / `0x400d3480..0x400d34cf` | midisc | REPITCH glyph bitmaps (data) |
+| PERS1 / PERS2 | `0x400b2a34..0x400b2ab4` / `0x400b2ac0..0x400b2b00` | reclaim | REPITCH glyph table + records (data) |
+
+- **The classic cave starts at `0x400d6500`, not `0x400d64da`.** `0x400d64ca` is the base of a
+  runtime table of 24-byte records: `0x4000176c` walks it for the first record whose first
+  long is 0 (stock's first record IS empty, so records are appended at runtime) and
+  `0x40001732` writes fields `+0x10`/`+0x14` (`0x400d64da..`). Every flashed build and midisc
+  start at `0x400d6500`. ⚠️ The V1.0 table further down and `build_bugbuilds.py`'s preferred
+  PARTREAPPLY address (`0x400d64dc`) sit on that table — see its own note.
+- **midisc's pads, trimmed to what stock leaves alone** — midisc 8.2 ships code in each
+  (`tools/midisc/memory_map.py`), but three of its ends include a word stock references:
+  CAVE2 ends at `0x400d301c` (6 refs), RELOAD_CAVE at `0x400d3664` (4), SEAM_CAVE at
+  `0x400d47aa` (8). They are the zero tails of 402-byte parameter-page records
+  (`0x400d301c` + k·0x192); the one stock reader of those records found (`0x40005730`) reads
+  only `+0x5e..+0x69` (`d2` = 0..5) and the pads start at `+0xca` or later.
+  FILT_PERSIST_SAVE (`0x400d352d..`) is NOT used — `0x400d3530` is read by stock.
+- **Reclaim = stock data this image makes unreachable.** SPRING REVERB's CF descriptor
+  (`0x400d5726..0x400d58b8`, 402 B) is referenced only by the two `id2e[0x15]` entries, which
+  SIDE-CHAIN and REPITCH both redirect to NONE; the three stock PERSONALIZE arrays are
+  referenced only by the five instructions MUTE MODE repoints. The builders get a PREPARED
+  base with these zeroed (MUTE MODE, which reads the stock arrays, gets true stock and must
+  not write there), and the composite is scanned: nothing but our own writes points into them.
+- **Evidence, emulator:** a boot + project load + 2000 frames with both DSP cores: stock code
+  writes into none of the non-classic zones (the only writes are REPITCH's own state words in
+  SAFE, from its own PCs); read watches on SPRING, PERS1/2, ENC, CAVE2, RELD, SEAM, PASTE and
+  FILT see no stock reads. Not a canary on hardware — `kb/caves.md` §3's test is what the
+  first flash is.
+
+### The blockers, resolved
+
+- **B1** — `DIRECT JUMP` is built with `DJ_MODE_IN_CAVE`: its on/off word is a cave long,
+  re-loaded from flash with the OS at every boot (the same property that keeps every other
+  DJ state byte safe), so MUTE MODE's widened ANDY restore cannot reach it. Asserted: the
+  symbol is inside DJ's cave, its image value is 0, and DJ's blob holds no `0x800000d8`.
+  The standalone V7 image is unchanged (`.ifndef`).
+- **B2** — asserted in the composite instead of RELOAD3's standalone "every record stock":
+  the `[BANK]` YES/NO records, the `[PTN]` NO record and both handlers are stock, all 8
+  `[PTN]` TRACK slots still point at `0x40083dc4`, and the only overlay change is the `[PTN]`
+  YES press field → `dj_toggle`.
+
+### Shared SPRING donor (DSP)
+
+SIDE-CHAIN builds from SPRING's module start (388 w), REPITCH ends below DARK REVERB's routine;
+they never met in any builder before. In the composite the DSP payload bytes are exactly the
+union of the two standalone builds (7943 B, 0 differences), and REPITCH renders bit-identical
+audio to its standalone build in RPCH/RPS9/RPSP on the user's REPITCH project.
+
+---
+
+*Everything below this line predates the build and is kept as the reasoning it came from.*
+
 **Status: READY TO BUILD, in two stages (re-scanned 2026-09-23, Session 86; both WIP
 mods' state and measured sizes refreshed 2026-09-24 at commit `91f2f15`, Session 88).**
 There is still deliberately no combined build on disk — `tools/build_merged.py` and
