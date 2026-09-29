@@ -23,7 +23,8 @@ HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
 OUT = ROOT / "out/mainos_patternled.bin"
-CAVE_AT = 0x400d7000
+import kyoti_place                   # combined-image placement (build_kyoti.py); no-op standalone
+CAVE_AT = kyoti_place.at("patch_pattern_led", 0x400d7000)
 DETOUR_AT = 0x4009a464
 DETOUR_EXPECT = bytes.fromhex("2f02202f0008")      # move.l %d2,-(%sp) ; move.l 8(%sp),%d0
 

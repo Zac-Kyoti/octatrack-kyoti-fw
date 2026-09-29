@@ -23,7 +23,8 @@ HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
 OUT = ROOT / "out/mainos_partreapply.bin"
-CAVE_AT = 0x400d7000
+import kyoti_place                   # combined-image placement (build_kyoti.py); no-op standalone
+CAVE_AT = kyoti_place.at("patch_partreapply", 0x400d7000)
 DETOUR_AT = 0x40062216
 DETOUR_EXPECT = bytes.fromhex("4eb9400326a0")     # jsr 0x400326a0
 # Second detour, HEAD of the same "select Part P" handler: the machine-type

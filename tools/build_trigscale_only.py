@@ -25,7 +25,8 @@ HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
 OUT = ROOT / "out/mainos_trigscale_only.bin"
-CAVE_AT = 0x400d7b00
+import kyoti_place                   # combined-image placement (build_kyoti.py); no-op standalone
+CAVE_AT = kyoti_place.at("patch_trigscale", 0x400d7b00)
 DETOUR_AT = 0x4009b6f2
 DETOUR_EXPECT = bytes.fromhex("203c0000091a")      # move.l #0x91a,D0
 

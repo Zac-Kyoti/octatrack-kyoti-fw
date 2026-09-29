@@ -37,3 +37,6 @@ tools/*repitch*
 repitch-repeat98-kyoti/*
 tools/sp1200_filter_response.py
 reference/handoffs/REPITCH_*
+
+[kyoti-v1]
+tools/build_kyoti.py

@@ -127,6 +127,7 @@ Outputs: out/mainos_reload3.bin, out/elek_reload3.bin,
            "140C_RL3DG". Emulator gate: tools/diag_reload3_diagtoast.py.
 """
 import os, pathlib, subprocess, sys
+import kyoti_place                   # combined-image placement (build_kyoti.py); no-op standalone
 
 BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent
@@ -170,7 +171,7 @@ PATCHES = [
     # same site 0x4009b6f2, which the remix ledger refuses.  patch_reload3's ceiling
     # is therefore FREE_END itself (measured: stock is zero from 0x400d7400 to
     # 0x400d7c3b and 0xff from 0x400d7c3c).
-    ("patch_reload3", FREE_START, "RL_DONE=1" + (",RL_DIAG=1" if DIAG else ""),
+    ("patch_reload3", kyoti_place.at("patch_reload3", FREE_START), "RL_DONE=1" + (",RL_DIAG=1" if DIAG else ""),
      # Session 85 redesign + Session 86's two [BANK]-deferral sites -- SIX
      # detours; RELOAD2 had ten. Neither chord site
      # pokes a keymap layer record, the mechanism behind the DIRECT JUMP slot

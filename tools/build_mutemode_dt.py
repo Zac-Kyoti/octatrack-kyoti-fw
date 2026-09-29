@@ -29,6 +29,7 @@ Identical to build_mutemode.py except:
 Usage:   python3 tools/build_mutemode_dt.py [VERSTR]        (default VERSTR = "140C_KYOTI")
 """
 import os, pathlib, subprocess, sys
+import kyoti_place                   # combined-image placement (build_kyoti.py); no-op standalone
 
 BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent
@@ -45,7 +46,7 @@ VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_KYOTI"
 
 # --- code stubs: (source, load addr, defsym, [(detour site, symbol, expected bytes, len)]) ---
 PATCHES = [
-    ("patch_softmute", 0x400d7400, "DT_MODE=1",              # gated + the DT (mode 2) branch
+    ("patch_softmute", kyoti_place.at("patch_softmute", 0x400d7400), "DT_MODE=1",              # gated + the DT (mode 2) branch
      # Session 56 continued: ALWAYS_NOTEOFF (--defsym ALWAYS_NOTEOFF=1, see hook 1's own
      # header comment in patch_softmute.s) was tried and RULED OUT -- readback-level A/B
      # showed zero effect on the retrig blip (byte-identical to baseline from frame 445
@@ -172,13 +173,15 @@ PATCHES = [
     # part 18 addendum 12: hook 16 (otfx_dry) grows patch_softmute past 0x400d7780; bumped
     # 0x80 further out again, same convention as part 8 and addendum 2. The three arrays
     # below move by the same 0x80.
-    ("patch_mutemode", 0x400d7800, "DT_MODE=1", []),   # menu: OT / OTFX-T / DT-T / OTFX
+    ("patch_mutemode", kyoti_place.at("patch_mutemode", 0x400d7800), "DT_MODE=1", []),   # menu: OT / OTFX-T / DT-T / OTFX
 ]
 
 # --- PERSONALIZE menu arrays (stock) ---
 OLD_LBL, OLD_GET, OLD_SET, N_OLD = 0x400b2a34, 0x400b2a74, 0x400b2ac0, 16
 SPLICE_AT = 2                                               # after "PREVIEW WITHOUT FX"
-LBL_AT, GET_AT, SET_AT = 0x400d78e0, 0x400d7940, 0x400d79a0
+LBL_AT = kyoti_place.at("personalize_labels", 0x400d78e0)
+GET_AT = kyoti_place.at("personalize_getters", 0x400d7940)
+SET_AT = kyoti_place.at("personalize_setters", 0x400d79a0)
 # Session 58 continued yet again, part 8: moved 0x400d7750/b0/810 -> 0x400d7790/f0/850,
 # 0x40 further out, to make room for patch_mutemode's own 0x40 shift above.
 REFS = [(0x40068efe, OLD_LBL, "labels  move.l #imm,D5"),

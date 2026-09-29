@@ -29,7 +29,8 @@ HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
 OUT = ROOT / "out/mainos_triglock.bin"
-CAVE_AT = 0x400d7200
+import kyoti_place                   # combined-image placement (build_kyoti.py); no-op standalone
+CAVE_AT = kyoti_place.at("patch_triglock", 0x400d7200)
 # FUN_40038874's one commit point for "is this step's p-lock row now empty" -- the real
 # LIVE erase worker, identified from a hardware trace (ARTLTEST8), not inferred.
 DETOUR_AT = 0x40038a5c

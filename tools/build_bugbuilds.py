@@ -33,8 +33,9 @@ for each fix's detour, so the bases simply all report "already present: none".
 Cave layout, where each fix is placed if that space is free in the base (it is in all but
 RELOAD3, whose own cave starts at 0x400d6500, so the allocator moves the two fixes up):
 
-    patch_partreapply   0x400d64dc   402 B   (RELOAD3: 0x400d6c10)
-    patch_pattern_led   0x400d6670   142 B   (RELOAD3: 0x400d6da4)
+    patch_partreapply   0x400d6500   402 B   (RELOAD3: relocated above its own cave)
+    patch_pattern_led   0x400d6694   142 B   (RELOAD3: likewise)
+    (never below 0x400d6500 -- 0x400d64ca.. is a runtime record table, kb/caves.md 2b)
     patch_trigscale     0x400d7b00    62 B   (added to all seven; REPITCH_KYOTI's cave
                                               ends at 0x400d7afc, right below it)
 
@@ -60,7 +61,10 @@ OUTDIR = ROOT / "out/Bugbuilds"
 WORK = OUTDIR / "_work"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
-FREE_START, FREE_END = 0x400d64da, 0x400d7c3c
+# From 0x400d6500, not the zero run's start 0x400d64da: 0x400d64ca is a runtime table of
+# 24-byte records (fields +0x10/+0x14 written by 0x40001732; 0x400d64e2 its terminator) --
+# reference/kb/caves.md 2b.  Every flashed build starts at 0x400d6500.
+FREE_START, FREE_END = 0x400d6500, 0x400d7c3c
 
 o = lambda a: a - BASE
 
@@ -72,11 +76,11 @@ o = lambda a: a - BASE
 #   NOTE detours[0] must target the cave BASE -- resolve_present() reads that instruction
 #   back out of a base image to learn where an already-present fix was linked.
 BUGFIX = {
-    "patch_partreapply": (0x400d64dc, [
+    "patch_partreapply": (0x400d6500, [
         (0x40062216, None,    "4eb9400326a0", 6, "jsr"),   # tail
         (0x400621da, "cave2", "4eb940020898", 6, "jsr"),   # head, dirty-flag snapshot
     ]),
-    "patch_pattern_led": (0x400d6670, [
+    "patch_pattern_led": (0x400d6694, [
         (0x4009a464, None, "2f02202f0008", 6, "jmp"),
     ]),
     "patch_trigscale": (0x400d7b00, [

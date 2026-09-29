@@ -48,6 +48,7 @@ Outputs: out/mainos_qlrec.bin, out/elek_qlrec.bin,
          out/OCTATRACK_OS1.40C_QLREC.syx, out/OCTATRACK_QLREC.bin
 """
 import os, pathlib, subprocess, sys
+import kyoti_place                   # combined-image placement (build_kyoti.py); no-op standalone
 
 BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent
@@ -79,7 +80,7 @@ PATCHES = [
     # NOTIFY/NOTIFY_CLOSE -- and so the kernel post FUN_40000c3c -- from inside
     # the engine frame handler, which hard-crashed the unit on hardware
     # (2026-09-25).  ASSERT_STOCK below proves the site is left untouched.
-    ("patch_qlrec", 0x400d7400, _QLR_DEFSYM,
+    ("patch_qlrec", kyoti_place.at("patch_qlrec", 0x400d7400), _QLR_DEFSYM,
      [(0x40061778, "qlr_play",   "4eb94009b5c0", 6, "jmp"),
       (0x4004883a, "qlr_recrel", "42b9460d1726", 6, "jmp")]),
 ]

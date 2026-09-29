@@ -62,6 +62,7 @@ import os, pathlib, subprocess, sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import sc_tables
 import dsp_asm_util
+import kyoti_place                   # combined-image placement (build_kyoti.py); no-op standalone
 
 BASE = 0x40000400
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -78,7 +79,7 @@ VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_KYOTI"
 
 # ======================= ColdFire =======================
 CF_PATCHES = [
-    ("patch_sidechain", 0x400d7000, []),
+    ("patch_sidechain", kyoti_place.at("patch_sidechain", 0x400d7000), []),
 ]
 CF_FREE_END = 0x400d7c3c
 E = 0x400d5a4a
