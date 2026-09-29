@@ -202,8 +202,9 @@ courtesy, not a lock; `tools/kyoti_status.py` is all of it.
   current source.
   → [`tools/build_bugbuilds.py`](tools/build_bugbuilds.py)
 
-- **Octatrack KYOTI FW v1.0** *(PREVIEW — built and emulator-verified, not yet
-  flashed)* — **every finished feature in one image**: MUTE MODE, SIDE-CHAIN, QUANTIZE
+- **Octatrack KYOTI FW v1.0** *(PREVIEW — the first image was flashed 2026-09-29 and
+  exposed two feature bugs, both now fixed; the rebuilt image is emulator-verified and
+  not yet flashed)* — **every finished feature in one image**: MUTE MODE, SIDE-CHAIN, QUANTIZE
   LIVE REC, TRIGLESS-LOCK AUTO-REMOVE, RELOAD3, DIRECT JUMP V7.0.1, REPITCH KYOTI and the
   three bug fixes. Boot splash and SYSTEM STATUS → OS VERSION read **`KYOTI V1.0`**.
   The caves need ~9.6 KB against the classic cave's 5.9 KB, so the builder spreads them
@@ -250,6 +251,7 @@ All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit
 | Bug 1 — MIDI Plays-Free trig fix | `build_trigscale_only.py` + every Bugbuild | **confirmed** 2026-08-28 |
 | MUTE MODE — all four modes, menu, SOLO | `build_mutemode_dt.py` | **confirmed, final** 2026-09-21 |
 | ↳ mode survives a power cycle | `build_mutemode_dt.py` | **confirmed** |
+| ↳ OTFX-T: muting a track must not shorten OTHER tracks' notes — broken in every build until 2026-09-29 (a scratch register lost across the note-off call, so the mute edge released an extra track), fixed | `build_mutemode_dt.py` | emulator-verified (the other track's envelope = OT's; OT, OTFX, DT-T renders byte-identical to before); **not yet on hardware** |
 | DIRECT JUMP V7 — clock-locked jumps: 16 ↔ 7-step NORMAL switches vs the metronome, master 1x ↔ 2x, swing/microtiming, rapid switching | `build_directjump_v7.py` | **confirmed, final** 2026-09-27 |
 | ↳ PER-TRACK patterns with mixed lengths and 2x…1/4x track scales | `build_directjump_v7.py` | **confirmed** 2026-09-28 |
 | ↳ MASTER LENGTH `INF` | `build_directjump_v7.py` | **confirmed** 2026-09-28 |
@@ -258,7 +260,8 @@ All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit
 | ↳ V7.0.1: START SILENT and trig-condition (1:2, A:B) reset on a jump | `build_directjump_v7.py` | emulator-verified against stock value for value; not separately exercised on hardware |
 | ↳ V7.0.1: Program Change on fast re-cues (always ends on the pattern that plays) | `build_directjump_v7.py` | emulator-verified; **not yet tested on hardware** |
 | ↳ V6.4 — the OT↔AR parity build (AR's own behaviour, shifts included) | `build_directjump_v6.py` (SUPERSEDED) | **confirmed** 2026-09-27 |
-| SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` | **confirmed, final** 2026-09-20 |
+| SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) — the KEY/KFLT/KGN/MON behaviour | `build_sidechain3.py` | **confirmed** 2026-09-20 |
+| ↳ leaves reverbs on the same DSP core alone — broken until 2026-09-29: the cross-core buffer sat inside the FX2 reverb memory of T3 (and T7), so every track's audio leaked into a DARK/PLATE REVERB there (a muted track audible through it, distorted); moved to memory no stock effect uses | `build_sidechain3.py` | emulator-verified (levels = stock on the user's project); **not yet on hardware** |
 | ↳ a project still using the donated effect loads as NONE | `build_sidechain3.py` | **confirmed, final** 2026-09-25 |
 | RELOAD FROM PROJECT — both chords | `build_reload3.py` | **confirmed, final** 2026-09-25 |
 | REPITCH KYOTI — RPCH/RPS9/RPSP follow the project tempo; the 9 QUAN ratios; both DSP cores | `build_repitch_kyoti.py` | **confirmed, final** 2026-09-29 (rev 16; tempo lock since rev 10, 2026-09-27) |
@@ -274,7 +277,7 @@ All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit
 | ↳ spurious Part-edited flag on entering PICKUP | `build_partreapply.py` | **confirmed** 2026-09-23 |
 | ↳ recorder SRC/RLEN and REC SETUP carryover | `build_partreapply.py` | unconfirmed — never reproducible on stock |
 | QUANTIZE LIVE REC toggle | `build_qlrec.py` | **confirmed** 2026-09-25 |
-| KYOTI V1.0 — every feature in one image | `build_kyoti.py` | **not flashed** — emulator: boots, loads a project and plays 2000 frames with both DSP cores; REPITCH renders bit-identical to its standalone build in RPCH/RPS9/RPSP; DIRECT JUMP's engine state identical to V7.0.1 on the Bugbuild scenarios |
+| KYOTI V1.0 — every feature in one image | `build_kyoti.py` | first image (`bf1fff8c…`) **flashed** 2026-09-29: trig fix OK; reverb cross-talk (SIDE-CHAIN, above), OTFX-T note cut (MUTE MODE, above), and one DIRECT JUMP crash after a long session (cause open). Also found in the combined image only: SIDE-CHAIN's same-core buffer for tracks 5-8 overwrote REPITCH's RPSP state — fixed. The rebuilt image is **not flashed** |
 | Bugbuild composites | `build_bugbuilds.py` | **not flashed** — every ingredient above is confirmed, no composite has been on hardware |
 
 Exactly what was tested on each flash, and the failures along the way, are in

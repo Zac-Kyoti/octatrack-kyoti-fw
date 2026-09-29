@@ -34389,3 +34389,76 @@ a candidate, not established — re-test DJ on `KV1-NO-SC` with a soft-muted tra
 **Fix direction (not built):** move the cross-core window to external Y the FX pool never uses (needs a
 measured bound of the pool's extent across heavy-FX projects), or drop the window and publish only when a
 COMPRESSOR with a foreign-core KEY exists.
+
+## Session 115 (2026-09-29, `kyoti-v1`) — SIDE-CHAIN's DSP memory fixed (two collisions), MUTE MODE OTFX-T note cut fixed; KYOTI V1.0, both standalones and both Bugbuilds rebuilt — none flashed
+
+User asked for the SIDE-CHAIN fix and the OTFX-T envelope bug, and for the standalone builds to be updated too.
+
+### 1. SIDE-CHAIN: the cross-core window moved out of the reverb memory
+
+**Where the reverbs live (C, our reading + measurement).** The FX2 allocator table `X:0x255` (LE 24-bit, both
+payloads) is FX1 `0x1000 0x1c00 0x2800 0x3400` / FX2 `0x4000 0x8000 0x30000 0x34000` (payload B: `0x38000 0x3c000`
+for the last two), 16K words per FX2 slot → the whole 64K shared window is the FX2 slots of bank tracks 3/4 (T3/T4 on
+core 1, T7/T8 on core 0). SIDE-CHAIN's old window `$38100`/`$30100` = 256 words into **T3's / T7's FX2 slot** —
+exactly the user's T3 DARK REVERB. Every stock effect's use of a slot, from its init (payload B listing
+`refs/octabam/out/dsp/payload_B.asm`, readers of `x:>$213`): DARK REVERB lines at fixed offsets up to `+$3da0`
+(3 words) — **measured highest write `+$3da2`** (ot_emu, zeroed memory, the user's project, 6000 frames, peek of the
+whole slot); PLATE `+$0..+$3577`; SPATIALIZER / CHORUS-class / COMB below `+$c00`; SPRING is removed by SIDE-CHAIN;
+the DELAY is a ColdFire routine (octabam COLDFIRE_DELAY.md). Each payload's init zeroes its half of the window
+(B `P:0x40..0x4a`: `Y:$4000..$BFFF` and `Y:$38000..$3FFFF`). ⇒ `slot+$3e00..$3fff` is never touched by stock DSP code.
+**New layout:** SBASE A `$33e00` / B `$3be00` (the last $200 words of T7's / T3's slot), GCNT = SBASE−1, GSEED =
+SBASE−2 (`+$3dfe/$3dff`, still above `+$3da2`).
+
+### 2. SIDE-CHAIN × REPITCH, combined image only: the keybus on payload A was REPITCH's memory
+
+`sctap` indexes the same-core keybus by the ABSOLUTE track (`x:$420` = 4..7 on core 0, NOTES Session 58 watch), so on
+payload A it wrote `Y:$a00..$bff` — REPITCH's STBASE (`$a00`, the RPSP ring) and SPTAB (`$a80..$bff`)
+(`tools/repitch_dsp_src.py`; REPITCH's header assumed "SIDECHAIN3 takes $800-$9ff"). Confirmed on the flashed V1.0:
+`--dsp-watch 0:Y:a80/a00/b80` → the only writer is `P:0x125e`, sctap's copy loop, every block. So RPSP on T5-T8 would
+have rendered from a corrupted table in KYOTI V1.0 (standalone REPITCH has no SIDE-CHAIN, so it never showed).
+**New keybus layout:** slot(t) = `$800 + t*$40` (gen 0 `+$00..$1f`, gen 1 `+$20..$3f`) → `$800..$9ff`; MON_ON/MON_KEY
+moved to `$7f0 + t*2` (Y:$795+ is free on both cores; payload B's modules end at `$7a4`). Same code size: **exactly 17
+words per payload changed** vs the flashed image (4 shift counts `#7→#6`, 3 MON shifts `#7→#1`, 3 `$840→$7f0`, 7
+window addresses), 388 words as before — it still ends right where REPITCH's cave begins.
+
+### 3. MUTE MODE OTFX-T: muting one track cut OTHER tracks' notes short
+
+Reproduced on `kyoti_testMM` (standalone MUTEMODE_DT, T2 muted): T3's note 20 ms after its trig — OT 0.0181, **OTFX-T
+0.0030**, DT-T/OTFX = OT; nothing muted → all modes equal. `--watch-mem 0x8000184a`: on the mute edge REL_STATE went
+`0x02` (hook 1) → `0x02` (FUN_40008f84(1), T2) → **`0x06` (FUN_40008f84(2), T3)**, then hook 1's per-frame
+`REL_STATE |= silenced` kept it at 0x06. **Cause:** hook 1's note-off loop kept the edge mask in `%d1` across `jsr
+F_NOTEOFF`; FUN_40008f84 loads REL_STATE into `%d1` and calls FUN_4000672c — after the first call the loop tested
+garbage. **Fix:** the mask now lives in `%d2` (callee-saved; the silenced set is dead after the REL_STATE update),
+`and.l %d1,%d2` sets Z so the separate `tst.l %d1` goes (−2 B). Every earlier OTFX-T build had it; which extra
+tracks got cut depends on what FUN_4000672c leaves in d1, which is why it looked track- and state-dependent.
+`dt_trig` (the other `jsr` in the file) checked: stock reloads d1/d2 after its return point.
+
+### Verified (emulator — none of this is on hardware yet)
+
+- SIDE-CHAIN DSP suites: `emu_sc_dsp3.py` (38 ok), `_moncommit.py`, `_xcore.py` (21 ok), and `--patched` against
+  the built bytes: ALL GOOD (constants updated to the new layout).
+- User's project, whole-run RMS on all 4 audio slots, T2 muted / unmuted: stock = rebuilt KYOTI (OT and OTFX-T) =
+  standalone MUTEMODE_DT, to 5 decimals (flashed V1.0 with T2 muted: 0.0123 vs 0.0044 on slot 2). Stock's own Y:$38100
+  page back to stock's 8703 writes (was 104k); SIDE-CHAIN now writes `$3be00`/`$33e00`, keybus `$800` (core 1) /
+  `$900` (core 0); core 0 `Y:$a00/$a80/$b80` have no writer.
+- MUTEMODE_DT: OT, OTFX, DT-T (both cases) and OTFX-T unmuted renders **byte-identical** to the previous build;
+  OTFX-T with T2 muted: T3's envelope = OT's; REL_STATE only ever 0x02.
+- KYOTI: all invariants clean; REPITCH standalone unchanged (`e72bd267…`).
+
+### Builds (none flashed)
+
+| image | syx sha256 | CF .bin |
+|---|---|---|
+| KYOTI V1.0 (rebuilt) `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.0.syx` | `9cd6a46381178f0f996244ba2c3b2958461ab4de21c5dd46053097b8e905b23c` | `53e8bc48d394d9f4…` |
+| SIDECHAIN3_CROSS standalone `out/OCTATRACK_OS1.40C_SIDECHAIN3_CROSS.syx` | `bf0ee1d729d82469…` | `ec9d5b1dd0265149…` |
+| MUTEMODE_DT standalone `out/OCTATRACK_OS1.40C_MUTEMODE_DT.syx` | `c6eee7d7657d0a79…` | `579babd78de4ced0…` |
+| Bugbuild BUG_SC3X / BUG_MUTEDT | `770f9d4232ab003a…` / `e4cdae4ab307d223…` | — |
+
+The other five Bugbuilds are byte-identical to Session 114's. The flashed V1.0 (`bf1fff8c…`) is kept in
+`out/KYOTI_flashed_bf1fff8c/`. Tier: `build_sidechain3.py` / `build_mutemode_dt.py` stay FINAL (Bugbuilds refuse
+anything else), with README's status rows saying precisely which part is hardware-confirmed and which fix is not.
+
+**Still open:** the DIRECT JUMP crash (VEC 0B, PC 0x00800000, IPL 5) — both bugs above were live in that session
+(OTFX-T left on, SIDE-CHAIN tested), neither is shown to cause it; re-test on the rebuilt image. MUTE MODE should come
+up in OT on a new/loaded project (user request; the parked first-flash reset is related but not the same thing).
+REPITCH's slow PTCH/QUAN update when switching TSTR into a repitch mode.
