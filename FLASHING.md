@@ -681,7 +681,7 @@ it (§4.4): not offered in the chooser, and a project that still uses it loads i
 
 Detail: `NOTES.md` Sessions 106–112; design records `reference/handoffs/REPITCH_*.md`.
 
-### 4.11  KYOTI V1.0 — everything in one image  (`build_kyoti.py` → `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.0.syx` / `OCTATRACK_KYOTI_V1.0.bin` — **PREVIEW, not yet flashed**)
+### 4.11  KYOTI V1.0 — everything in one image  (`build_kyoti.py` → `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.0.syx` / `OCTATRACK_KYOTI_V1.0.bin` — **PREVIEW, under test on the MKI since 2026-09-29**)
 
 Every feature in this image is hardware-confirmed on its own; what is new is that they
 share one image, and that — for lack of room — some of their code and data now live in
@@ -720,6 +720,21 @@ if anything behaves oddly, note exactly which screen / gesture it was.
       Part (PARTREAPPLY + soft-mute on the same voice).
 - [ ] A REPITCH track (RPS9/RPSP) through a DIRECT JUMP to a pattern on another Part, and
       through a Part change with PARTREAPPLY.
+
+**4. Fixed since the first flash (Sessions 115-117) — the checks that exercise the fixes:**
+- [x] DARK REVERB on T3 with another track muted, every MUTE MODE: no cross-talk, no
+      distortion (SIDE-CHAIN's cross-core buffer moved out of reverb memory). *Confirmed.*
+- [x] OTFX-T: muting one track leaves other tracks' notes at full length. *Confirmed.*
+- [x] A muted SIDE-CHAIN KEY track still ducks the compressor, and MON plays it once, in all
+      four MUTE MODEs. *Confirmed.*
+- [ ] The first kick right after `[PLAY]`, KEY track muted, MUTE MODE `OTFX-T` / `DT-T`.
+- [ ] **RPSP / RPS9 on T5-T8** (REPITCH's state on that DSP core was overwritten by
+      SIDE-CHAIN every block in the first image): sounds the same as on T1-T4.
+- [ ] A DARK or PLATE REVERB on **T7** (the other core's slot next to SIDE-CHAIN's buffer),
+      and a cross-core KEY both ways (T1-T4 keying T5-T8 and the reverse).
+- [ ] **The DIRECT JUMP crash scenario**, deliberately, in each MUTE MODE: tracks muted
+      (e.g. T1+T3+T6), DJ ON, a per-track pattern switch. If it ever crashes again, write
+      down the MUTE MODE, which tracks were muted/soloed/cued, and the exception screen.
 
 ## 5. Reverting to the official firmware
 

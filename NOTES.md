@@ -34518,3 +34518,57 @@ SPRING / ENC. All invariants clean; each feature = its standalone apart from its
 **Build (not flashed):** KYOTI V1.0 `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.0.syx`
 `74459c01e2a57db9738fc78817ad1841c7e9eac400cb919d03375528aa07540b`, CF `8127fa2f6ad1c0c6…`. Standalones and
 Bugbuilds unchanged (SC `bf0ee1d7…`, MM `c6eee7d7…`).
+
+## Session 117 (2026-09-29, `kyoti-v1`) — S115/S116 fixes CONFIRMED on hardware; a MUTE MODE register bug found (`fresh_bind` clobbers `%d3`), the leading DIRECT JUMP crash suspect; every build rebuilt and published
+
+**User, hardware (KYOTI V1.0 `74459c01…`):** MUTE MODE and SIDE-CHAIN issues fixed (reverb cross-talk, OTFX-T note
+cut, muted KEY / MON). Asked for the fixes to cascade to the standalone builds and Bugbuilds, an assessment of what
+is still open, and a commit + push.
+
+### `fresh_bind` (MUTE MODE hook 10) returned with `%d3` = MUTE_STATE  [C, our disassembly + one emulator check]
+
+Found while auditing MUTE MODE's hooks for the Session-115 class of bug (a register the stock code relies on,
+overwritten by our hook). `fresh_bind` detours stock FUN_40006820's prologue, whose epilogue restores only `%d2/%a2`
+— stock never touches `%d3`, so its callers keep live values there. In OTFX-T / DT-T (GATE 1/2, the only modes that
+reach the mute test) the hook did `move.l MUTE_STATE,%d3` and returned. Callers (15 sites; branch-following
+liveness scan) that READ `%d3` after the call:
+- **FUN_40006890** (from a UI routine at 0x40066844, part of a stop-everything sequence): `move.w %sr,%d3`, IPL 7,
+  loop FUN_40006820(0..7), then **`move.w %d3,%sr`** → SR := `mute<<8 | solo`. Mute byte 0x25 (T1+T3+T6) with nothing
+  soloed gives **SR 0x2500 — exactly the crash screen's SR** (which Session 114 read as "frame ISR, IPL 5"). Other
+  mute sets drop the CPU to user mode (S = bit 13 = T6's mute bit) or set TRACE (T8).
+- **The per-track frame handler at 0x4000d458**: for a muted track (`btst track+8, sp@(102)`, mask ≠ −1) it calls
+  FUN_40006820(track) and then uses `%d3` as the track index (`0x800000e0*8 + d3` → a byte → `mvsb` → index into the
+  machine table at `a1`) right before **`jsr (a0)`** at 0x4000d49c — a garbage index → a garbage pointer → PC
+  `0x00800000`, VEC 0B is exactly that shape. Content- and state-dependent, as the crash was.
+`mt_rebind` / `trigflag` / `dt_trig` / `mt_trig` / `pre` checked the same way: clean (`trigflag`'s skip target reads
+`%d1`, which it never modifies).
+**Not reproduced:** in ot_emu the 0x4000d458 call never fires (the mask is −1 on every one of 56,096 frame visits,
+pattern changes in the fixture did not take), and FUN_40006890 was not reached. **Nor is the unit's MUTE MODE at the
+crash known** (user: not sure it was OTFX-T) — in OT or OTFX this hook never touches `%d3`, so this cannot be the
+crash there. Status: a real bug, fixed; the crash's cause is plausible, not confirmed.
+**Fix:** the hook's body uses `%d2` (saved by the displaced stock prologue, rewritten by every exit path before a
+read). Same size. Standalone MUTEMODE_DT renders **byte-identical** to the Session-115 build in all four modes, both
+muted and not.
+
+### Builds (all rebuilt; only MUTE MODE and SIDE-CHAIN differ from the pre-session baseline)
+
+| image | syx sha256 |
+|---|---|
+| KYOTI V1.0 `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.0.syx` | `597a6db99481310a4c5b76353bd6747c29bc28ef0bae72913f0a39a9d15332f3` (CF `ccfb8db3…`) — NOT flashed |
+| MUTEMODE_DT standalone | `ac2a2da6b5927aeb…` (CF `2fa11f9c…`) |
+| SIDECHAIN3_CROSS standalone | `bf0ee1d729d82469…` (unchanged since S115) |
+| BUG_MUTEDT / BUG_SC3X | `b9dbe5764aeb8a24…` / `770f9d4232ab003a…` |
+
+Eight other standalones (PATTERNLED, PARTREAPPLY, TRIGLOCK, QLREC, RELOAD3, DIRECTJUMP_V7, REPITCH_KYOTI, and the trig
+fix module) and five Bugbuilds are byte-identical to the S114 baseline. The S116 key exemption stays KYOTI-only by
+design (standalone SIDE-CHAIN has no MUTE MODE and keeps a muted key — measured; standalone MUTE MODE has no KEY).
+
+### Open
+
+1. DIRECT JUMP crash: re-run the scenario on `597a6db9…` in each MUTE MODE with tracks muted; if it recurs, record
+   MUTE MODE + mute/solo/cue state. If it recurs in OT/OTFX, `fresh_bind` is ruled out → a DIAG build whose exception
+   screen prints the stacked return addresses.
+2. MUTE MODE → OT on a new / loaded project (user request; MUTE MODE is a global PERSONALIZE setting today).
+3. REPITCH: slow PTCH/QUAN redraw when TSTR switches into a repitch mode.
+4. Untested on hardware: RPSP/RPS9 on T5-T8 in KYOTI (the S115 keybus collision), a reverb on T7 with SIDE-CHAIN,
+   cross-core KEY both ways, the first kick after PLAY with a muted key (FLASHING §4.11 block 4).
