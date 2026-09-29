@@ -85,6 +85,9 @@ def main(argv):
     ap.add_argument("--extra", action="append", default=[],
                     help="NAME=ADDR:SIZE -- also record this address every tick (e.g. a cave counter)")
     ap.add_argument("--dj", type=int, default=1)
+    ap.add_argument("--dj-mode-addr", type=lambda v: int(v, 0), default=DJ_MODE,
+                    help="where DJ_MODE lives: 0x800000d8 standalone; the combined KYOTI image "
+                         "keeps it in DIRECT JUMP's cave (out/KYOTI/kyoti_v1.0_map.json)")
     ap.add_argument("--ticks", type=int, default=300)
     ap.add_argument("--tag", default="")
     ap.add_argument("--out", required=True)
@@ -130,7 +133,7 @@ def main(argv):
     rt.frame = True
     rt.next_frame = rt.sample + er.FRAME_PERIOD
     rt.exact_clock()
-    rt.uc.mem_write(DJ_MODE, (1 if a.dj else 0).to_bytes(4, "big"))
+    rt.uc.mem_write(a.dj_mode_addr, (1 if a.dj else 0).to_bytes(4, "big"))
 
     st = dict(tick=0, states=[], fires=[], commits=[], cues=[], calls=[], pcs=[])
     pend = list(switches)

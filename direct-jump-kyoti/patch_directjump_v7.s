@@ -60,7 +60,11 @@
 | State lives IN THE CAVE (this blob is loaded into RAM with the OS), never in the
 | 0x80006a40..0x80006abf scratch block (Session 98: the unit overwrites it).
 
+    .ifndef DJ_MODE_IN_CAVE
     .equ DJ_MODE,   0x800000d8          | state word (0 = OFF/stock, 1 = ON); power-on 0
+    .endif                              | DJ_MODE_IN_CAVE (the combined KYOTI image): see the
+                                        | state block at the end -- MUTE MODE widens the ANDY
+                                        | restore over 0x800000d8 (reference/MERGE.md B1)
     .equ PTN_MODE,  0x460d1742          | 1 = [PTN] currently held
     .equ PTN_USED,  0x460d173e          | !=0 on [PTN] release -> the chooser does NOT open
     .equ POPUP,     0x460e5cd0          | !=0 = a modal popup is up
@@ -922,6 +926,14 @@ dj_pcbank: .byte -1                    | V7.0.1: bank the last PC was sent for
 dj_armpat: .byte -1                    | V7.0.1: the cue this arm is for
 dj_armbank: .byte -1
     .align 2
+    .ifdef DJ_MODE_IN_CAVE
+| The combined image (tools/build_kyoti.py) carries MUTE MODE, whose ANDY restore
+| is widened to 0x800000df -- it would restore 0x800000d8 from battery SRAM, so
+| DIRECT JUMP could come up ON (reference/MERGE.md B1).  Here the word is part of
+| the OS image, re-loaded from flash at every boot: power-on is 0 by construction,
+| the same guarantee the stock re-image gives the standalone build.
+DJ_MODE:   .long 0                     | 0 = OFF/stock, 1 = ON
+    .endif
 dj_T:      .long 0                     | V7: running clock ticks since START (0 while stopped)
 dj_tland:  .long 0                     | V7: t of the last landing
 dj_tpsM:   .long 0                     | V7: incoming pattern's master ticks/step
