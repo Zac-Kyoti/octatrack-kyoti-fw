@@ -34322,3 +34322,33 @@ Neither flashed. The prime suspects because they are the only features that chan
 absent from standalone MUTE MODE: REPITCH (CF voice hooks + a DSP hook on every voice, both cores) and
 SIDE-CHAIN (DSP taps). If neither image fixes it, the next split is the voice-touching ColdFire features
 (PARTREAPPLY) and then halves of the rest.
+
+### Session 114 continued (3) — precise hardware repro; "MUTE MODE OK" RETRACTED by the user; an emulator false lead, caught
+
+**User retracts "MUTE MODE OK"** for KYOTI V1.0. Repro (hardware, KYOTI V1.0, TSTR OFF on both tracks): new
+project; samples on T2 and T3; T3 FX2 = DARK REVERB, send/mix and TIME up; MUTE MODE OT; transport on.
+- **Family 1** — mute **T2**. In **OT**: T3's reverb is wrong — "steppy", slightly distorted. OTFX: normal.
+  OTFX-T: reverb normal, but the sample envelope is cut short (a regression of the Session 58 part 10 bug).
+  DT-T: reverb and envelope normal. NB: OT is MUTE MODE's inert mode (stock mute), so family 1 does not need
+  MUTE MODE's code at all.
+- **Family 2** — back to OT, unmute T2, mute **T3**. OT: nominal. OTFX / OTFX-T / DT-T: T3's reverb is heard,
+  distorted, although T3 is muted (soft modes ring FX by design; the distortion is the bug).
+- Earlier the same day: standalone MUTEMODE_DT does not reproduce the reverb bug.
+
+**Emulator — a false lead, caught (lesson for every audio comparison here):** with MMTESTFX (DARK REV on T0,
+nothing on T1) I compared, per image, "T1 unmuted" vs "T1 muted" renders sample by sample: stock, MUTE MODE and
+SIDE-CHAIN gave 0 difference, REPITCH 6 % RMS, KYOTI 12 %. Bisecting REPITCH's edits by restoring bytes pinned it
+to ONE pair of words: the PTCH widget pointer (`0x400d3116`/`0x400d32a8`, KNOB → `quant_widget`). But
+`quant_widget` is display-only: it is reached (41×) from an UNDETOURED dial renderer at `0x4004e77c` (its KNOB
+reference is PC-relative, `lea %pc@(0x400479b4)` — an absolute-constant scan misses it; REPITCH's qdial1-4 cover
+four renderers of at least six), with the 7-argument layout it expects, and every write to T0/T1's live bytes
+and base words comes from stock PCs, identical in both runs. What the mute changed was only HOW MUCH ColdFire
+code the UI ran — and in ot_emu that shifts the DSP interleave, which changes rendered samples (the same jitter
+that makes stock vs standalone MUTE MODE differ by up to 0.075 FS). A jitter-proof metric (band energy shares,
+<2k / 2-8k / 8-14k / >14k) is identical in all ten renders to 4 decimals. **So: this fixture does not reproduce
+the bug, and the REPITCH attribution is WITHDRAWN.** Rule: in ot_emu, sample-exact audio comparisons are only
+valid when the ColdFire workload is identical; otherwise compare spectra/levels.
+
+**Next (needs the user):** the two bisection images already built (`KV1-NO-RPK`, `KV1-NO-SC`) against these exact
+steps — family 1 needs only OT mode, which both carry — and an export of the test project so the emulator gets a
+real T2-sample / T3-DARK-REV fixture.
