@@ -9,6 +9,22 @@ output. No code was written for this scope.
 Markers as in `REPITCH_FIDELITY_SCOPE.md`: ✅ manufacturer (E-mu / Rossum) · 🟡 derived by us ·
 📎 forum / secondary · ❓ unknown.
 
+## ⏩ rev 14 BUILT (Session 112, 2026-09-28) — emulation-verified, NOT flashed
+
+- **Envelope A** (the user's pick at gate 1): the OT's own AMP level, read on the DSP (X:(x:$20a+8),
+  core 1's AMP stage, one frame old), through the SP's diode + 10 µF (τ 0.15 s, updated per hook
+  visit); poles at 1.0 kHz × 2^(4·env); 4 stages, resonance 0. ATK/HOLD/REL shape it; with HOLD 127
+  the filter stays open (≈ 7/8 with the top rolled off). §4's hit signal was found DSP-side (the
+  unpacked per-voice word +$1E, bit 12 — NOTES Session 112); **no ColdFire change**. The fixed-AR
+  fallback was not needed; TSNS (§6a) needs ColdFire → not done.
+- §3 done as proposed, with full tables (§3a): 593 words over SPRING's five X modules; the canary
+  (gate 0a) held on stock and on rev 14.
+- **Found and fixed on the way:** DARK REVERB calls a routine inside SPRING's module that rev 10–13's
+  cave overwrote (DARK REV was broken on those images); and the crack at every trig start in
+  RPS9/RPSP (stale ring audio replayed at the new trig's full AMP) — both fixed in rev 14.
+- Cost: RPSP ≈ 173 DSP instructions/sample (rev 13 ≈ 128; §5 estimated 155–170), RPS9 61.
+- Build: `out/OCTATRACK_OS1.40C_REPITCH_KYOTI_REV14.syx`, sha256 `217a9c19…`. `RPK_CH12=0` builds 7/8.
+
 ---
 
 ## 0. Summary

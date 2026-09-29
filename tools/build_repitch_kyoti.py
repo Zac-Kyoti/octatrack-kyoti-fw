@@ -38,27 +38,30 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (rev 13: RPSP band-limited render)", """
-REV 13 = rev 12 + RPSP's staircase rendered through a BAND-LIMITED kernel
-(NOTES Session 111; reference/handoffs/REPITCH_FIDELITY_SCOPE.md) instead of
-rev 11/12's box, which let the staircase's images above 22 kHz fold back
-into the audible band (-23 to -35 dB on tones; the box rejects them by only
-6-8 dB, the new 10-tap render by >= 42). RPS9 = Akai S900/S950 at a virtual
-40 kHz (MF6CN-50 shape @ 16 kHz), 12-bit, pitched cleanly. RPSP = E-mu
-SP-1200 on its raw outputs 7/8: fixed 26.04 kHz clock, repeat/skip on its
-grid, 12-bit, 12-tap record filter (flat to 10 kHz, 42 dB/oct-style cutoff).
-The virtual-ADC tables are stored as 9 of 32 rows and rebuilt at first use.
-Both run on both DSP cores from a 671-word cave in SPRING REVERB's tail
-(hooked at each voice engine's kernel prologue, A P:0x40b / B P:0x20e);
-state and tables in Y:$A00-$F40 (free on stock; SIDECHAIN3 keeps
-$800-$9FF). RPCH is stock. *** THIS IMAGE REMOVES SPRING REVERB ***
-(Session 109 decision) -- neutered byte-identically to SIDECHAIN3_CROSS; the
-cave leaves that builder's 388 words free, so a merged build remains possible.
-Proven in emulation: DSP 80/80 bit-exact against the model's integer twin on
-both cores + mode switch away/back (python3 tools/repitch_dsp_engine_check.py);
-ColdFire unchanged from rev 10 (hardware: "everything works"); rev 11 is on
-hardware and working; rev 12 and rev 13 NOT yet flashed.
+status(WIP, "REPITCH KYOTI (rev 14: RPSP = SP-1200 channel 1/2, trig crack fixed)", """
+REV 14 (NOTES Session 112; reference/handoffs/REPITCH_SP_CH12_SCOPE.md):
+  * RPSP is heard as the SP-1200's CHANNEL 1/2: rev 13's staircase (26.04 kHz,
+    12-bit, drop-sample, band-limited render) through an SSM2044-style 4-pole
+    low-pass, resonance 0, resting at 1.0 kHz and pushed open up to 4 octaves
+    by the track's own AMP envelope through the SP's diode + 10 uF (tau 0.15 s):
+    ATK/HOLD/REL shape it as DECAY did on the SP. (RPK_CH12=0: raw 7/8.)
+  * the CRACK at every trig start in RPS9/RPSP is fixed: at the pass that
+    starts a new sound (the DSP's own trig flag) the ring frames behind it --
+    stale audio the engines read behind the OT's position -- become silence,
+    and RPSP starts clean.
+  * both virtual-ADC tables at full fidelity again (RPS9 = rev 12's table),
+    stored in SPRING REVERB's orphaned X data tables (canary-proven unused),
+    copied to Y at first use.
+  * DARK REVERB works again: rev 10-13's cave overwrote a routine DARK REV
+    calls inside SPRING's module; the cave now ends below it (400 words).
+RPS9 = Akai S900/S950 at a virtual 40 kHz, 12-bit. RPCH is stock. Both engines
+run on both DSP cores (hook A P:0x40b / B P:0x20e). *** THIS IMAGE REMOVES
+SPRING REVERB *** (neutered as SIDECHAIN3_CROSS does; its 388 words stay free).
+Proven in emulation: python3 tools/repitch_dsp_engine_check.py (80/80 bit-exact
+with the model's twin, trigs and AMP levels driven, both cores, mode switch).
+NOT yet flashed.
 """)
+
 
 
 
@@ -79,7 +82,7 @@ STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 ELEK = ROOT / f"out/elek_repitch_kyoti{SUF}.bin"
 OUT_SYX = ROOT / f"out/OCTATRACK_OS1.40C_REPITCH_KYOTI{SUF.upper()}.syx"
 OUT_BIN = ROOT / f"out/OCTATRACK_REPITCH_KYOTI{SUF.upper()}.bin"
-VERSTR = "140C_RPKD" if os.environ.get("RPK_DIAG") == "1" else "140C_RPK13"   # rev 13 (rev 11/12: 140C_RPK1)
+VERSTR = "140C_RPKD" if os.environ.get("RPK_DIAG") == "1" else "140C_RPK14"   # rev 14 (13: 140C_RPK13, 11/12: 140C_RPK1)
 
 # --- the seven detours (site, displaced bytes, cave symbol) -----------------
 DETOURS = [
@@ -167,11 +170,13 @@ def make_glyphs(cave_tab_at):
 
 # ---------------------------------------------------------------------------
 # DSP: the RPS9/RPSP kernel (tools/patch_repitch_dsp.asm), in the SPRING REVERB
-# donor's LAST words. Every donor fact is IMPORTED from build_sidechain3.py
-# (the FINAL, hardware-confirmed SIDECHAIN3_CROSS builder) so it stays
-# single-sourced; that builder is not modified. The sidechain builds from the
-# module's START (388 of 1063 words today), so the tail is stable no matter
-# how it grows, and a merged build costs nothing beyond what it already does.
+# donor. Every donor fact is IMPORTED from build_sidechain3.py (the FINAL,
+# hardware-confirmed SIDECHAIN3_CROSS builder) so it stays single-sourced; that
+# builder is not modified. The sidechain builds from the module's START (388 of
+# 1063 words). Rev 10-13 sat in the module's last words and overwrote a 35-word
+# routine DARK REVERB calls there (A P:0x1586 / B P:0x1346 -- DARK REV was broken
+# on those images); since rev 14 the cave ENDS below that routine (placement:
+# repitch_dsp_src.cave_org), and its tables live in SPRING's X data modules.
 # MERGE NOTE: both builders assert they find spring's STOCK dispatch entry;
 # in a merged build whichever runs second must accept the neutered state.
 DSP_SRC = HERE / "patch_repitch_dsp.asm"
@@ -182,19 +187,23 @@ HOOK_WORDS = (0x76e500, 0x5edd00)             # move x:(r5),n6 / move y:(r5)+,a
 SPRING_SIG = [0x22ee00, 0x0140c0, 0x000040]    # spring's init, the sidechain's canary
 
 
-def dsp_assemble(org):
-    """The rev-13 engine: constants + patch_repitch_dsp.asm + tables, through
+def dsp_assemble(org, payload):
+    """The rev-14 engine: constants + patch_repitch_dsp.asm through
     tools/dsp_xasm.py (every word disassembled back and checked)."""
     import dsp_xasm
     import repitch_dsp_src
     try:
-        words, _, _ = repitch_dsp_src.assemble(org)
+        words, _, _ = repitch_dsp_src.assemble(org, payload)
     except dsp_xasm.AsmError as e:
         sys.exit(f"DSP cave: {e}")
-    # the sidechain builds from the donor's start and needs its first 388 words
-    if len(words) > 1063 - 388:
-        sys.exit(f"DSP cave is {len(words)} words; more than 675 would collide with SIDECHAIN3_CROSS")
     return words
+
+
+# SPRING REVERB's X data modules the tables go into (repitch_dsp_src.SPRING_X),
+# asserted stock by content before they are rewritten; DARK REVERB's routine in
+# SPRING's P module (repitch_dsp_src.DARK_SUB), asserted stock AFTER the build.
+X_STOCK_SHA = ["dbbbb85c7676e526", "65cd65b39fcb59e2", "24bed15804f05d8a", "2f169dfb83d9765b", "14716e3d630dd7aa"]
+DARK_SHA = {"A": "4e1de47f64f651fd", "B": "e10bdef29d036c96"}
 
 
 def dsp_install(img, touched):
@@ -209,26 +218,58 @@ def dsp_install(img, touched):
         img[off:off + 3] = sc3.w3(word)
         touched.update(range(off, off + 3))
 
+    import hashlib
+    import repitch_dsp_src as dsrc
     orgs = {}
-    n = len(dsp_assemble(0x1000))                  # size; absolute LAs need the real org
     for tag, d in sc3.DSP.items():
         start = d["cave_org"]
         # the donor must be exactly the 1063-word module the sidechain measured
-        mods, _ = mm.modules(bytes(img), d["va"], d["ln"])
+        mods, blob = mm.modules(bytes(img), d["va"], d["ln"])
         mod = [m for m in mods if m[0] == 0 and m[1] == start]
         if len(mod) != 1 or mod[0][2] != sc3.DONOR_WORDS:      # (sp, addr, count, data)
             sys.exit(f"payload {tag}: no {sc3.DONOR_WORDS}-word P module at P:0x{start:05x}")
+        if start != dsrc.SPRING_P[tag]:
+            sys.exit(f"payload {tag}: SPRING at P:0x{start:05x}, repitch_dsp_src says 0x{dsrc.SPRING_P[tag]:05x}")
         so = sc3.dsp_module_fileoff(img, d["va"], d["ln"], start)
         sig = [sc3.rd3(img, so + 3 * i) for i in range(3)]
         if sig != SPRING_SIG:
             sys.exit(f"payload {tag}: SPRING REVERB init signature {[hex(x) for x in sig]}")
-        org = start + sc3.DONOR_WORDS - n
-        words = dsp_assemble(org)
+        n = len(dsp_assemble(0x1000, tag))              # size; absolute LAs need the real org
+        try:
+            org = dsrc.cave_org(tag, n)                  # ends right below DARK REV's routine
+        except ValueError as e:
+            sys.exit(str(e))
+        words = dsp_assemble(org, tag)
         if len(words) != n:
             sys.exit("DSP cave size shifted between the sizing and final passes")
         co = sc3.dsp_module_fileoff(img, d["va"], d["ln"], org)
         for i, w in enumerate(words):
             put(co + 3 * i, w)
+        sub, sn = dsrc.DARK_SUB[tag]
+        if org + n > sub:
+            sys.exit(f"payload {tag}: cave runs into DARK REV's routine at P:0x{sub:05x}")
+        do = sc3.dsp_module_fileoff(img, d["va"], d["ln"], sub)
+        if hashlib.sha256(bytes(img[do:do + 3 * sn])).hexdigest()[:16] != DARK_SHA[tag]:
+            sys.exit(f"payload {tag}: DARK REV's routine P:0x{sub:05x} is not stock")
+
+        # the tables: over SPRING's own X data modules (stock content asserted first)
+        xd = dsrc.x_data(tag)
+        spans = {}
+        for (addr, cnt), sha in zip(dsrc.SPRING_X[tag], X_STOCK_SHA):
+            xm = [m for m in mods if m[0] == 1 and m[1] == addr]
+            if len(xm) != 1 or xm[0][2] != cnt:
+                sys.exit(f"payload {tag}: no {cnt}-word X module at X:0x{addr:05x}")
+            xo = (d["va"] - BASE) + xm[0][3]
+            if hashlib.sha256(bytes(img[xo:xo + 3 * cnt])).hexdigest()[:16] != sha:
+                sys.exit(f"payload {tag}: X:0x{addr:05x} is not SPRING's stock table")
+            spans[addr] = (cnt, xo)
+        for a, w in xd.items():
+            base = [x for x in spans if x <= a < x + spans[x][0]]
+            if len(base) != 1:
+                sys.exit(f"payload {tag}: table word for X:0x{a:05x} falls outside SPRING's X modules")
+            put(spans[base[0]][1] + 3 * (a - base[0]), w)
+        print(f"  DSP {tag}: {len(xd)} table words into SPRING's X modules "
+              f"({', '.join(f'X:0x{a:05x}' for a in sorted(spans))})")
 
         hook = VOICE_HOOK[tag]
         ho = sc3.dsp_module_fileoff(img, d["va"], d["ln"], hook)
@@ -249,7 +290,8 @@ def dsp_install(img, touched):
         put(ini, d["stub_init"])
         put(prc, d["stub_proc"])
         orgs[tag] = org
-        print(f"  DSP {tag}: cave {n}w @P:0x{org:05x} (spring tail), hook P:0x{hook:05x} "
+        print(f"  DSP {tag}: cave {n}w @P:0x{org:05x}..0x{org + n - 1:05x} (DARK REV's routine at "
+              f"P:0x{dsrc.DARK_SUB[tag][0]:05x} kept stock), hook P:0x{hook:05x} "
               f"-> bsr {op:06x} {disp:06x}, X:0x215[0x{sc3.DONOR_ID:02x}] -> stub")
 
     # the ColdFire half: not offered on either bus, and old projects load NONE

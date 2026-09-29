@@ -133,7 +133,37 @@ def fold_report(envs=("A", "B", "C"), bpm=120.0):
     return "\n".join(lines)
 
 
+def junk_report(src):
+    """Drop-sample junk (tools/repitch_sp_reference.py: what no linear filter of
+    a clean pitch-down explains) per band, rev 13's raw 7/8 vs rev 14's channel
+    1/2 (envelope A), dB re rev 13's output power in the band. The same channel
+    1/2 filter (same trigs, same AMP level) is put on the clean reference first,
+    so the fit sees the filter and only the junk is left."""
+    import repitch_sp_reference as ref
+    lines = ["junk per band, dB re rev 13's output:  " + " ".join(f"{a/1e3:g}-{b/1e3:g}k".rjust(9) for a, b in ref.BANDS)]
+    for r, bpm in ((0.5625, 90.0), (0.75, 90.0)):
+        n = int(min(4.0, (len(src) - 200) / r / SR) * SR)
+        clean = ref.clean_pitch(src, r, n)
+        y78 = m.run(m.MODE_RPSP, src, r)[:n]
+        n = min(len(clean), len(y78)); clean, y78 = clean[:n], y78[:n]
+        P13 = ref.band_power(y78[:, 0])
+        j13 = ref.band_power(ref.junk(y78, clean)[:, 0])
+        lines.append(f"r={r:g} rev 13 (7/8)                        " + " ".join(f"{10*np.log10(v):9.1f}" for v in j13 / P13))
+        step = 60.0 / bpm / 4 * SR
+        for label, hits, amp in (("A, one trig (your A02, HOLD 127)", [0], amp_hold(n, [0])),
+                                 ("A, 16ths, 0.25 s AMP release", [int(round(k * step)) for k in range(int(n / step) + 1)],
+                                  amp_decay(n, [int(round(k * step)) for k in range(int(n / step) + 1)], 0.25))):
+            y = ch12(y78, hits, "A", amp=amp) * (amp[:, None] if "release" in label else 1.0)
+            c = ch12(clean, hits, "A", amp=amp) * (amp[:, None] if "release" in label else 1.0)
+            j14 = ref.band_power(ref.junk(y, c)[:, 0])
+            lines.append(f"r={r:g} rev 14 {label:32}" + " ".join(f"{10*np.log10(v):9.1f}" for v in j14 / P13))
+    return "\n".join(lines)
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--junk":
+        print(junk_report(load(sys.argv[2] if len(sys.argv) > 2 else pathlib.Path.home() / "Desktop/isaak.wav")))
+        return
     if len(sys.argv) > 1 and sys.argv[1] == "--fold":
         print(fold_report())
         return

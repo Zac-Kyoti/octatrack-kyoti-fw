@@ -1,14 +1,20 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Zac-Kyoti
 //
-// repitch-kyoti rev 11: run the BUILT DSP cave (virtual sampler) inside the
-// real stock voice-engine module on dsp56kEmu, pass after pass, the way the
-// firmware drives it (measured in ot_emu, NOTES Session 110):
+// repitch-kyoti rev 11 (rev 14: two visits per frame, the trig flag, the AMP
+// level, X-memory tables): run the BUILT DSP cave (virtual sampler) inside the
+// real stock voice-engine module on dsp56kEmu, frame after frame, the way the
+// firmware drives it (measured in ot_emu, NOTES Sessions 110 and 112):
 //   * a 64-frame stereo ring at X:RING (128-aligned), appended to, never reset
 //   * per 16-sample frame one pass: table x/y:$80+i = (ring word offset,
 //     fraction Q24), r7 = 16, l:$40 = the increment (mode in y:$40 bits 0-1),
 //     x:$418 = the track offset
 //   * Y persists across passes (the engine's state and tables live there)
+//   * rev 14: each frame visits the hook TWICE (the voice module's do #2): k
+//     outputs, then 16-k (k = the frame's split); x:$419 -> a record whose
+//     word +$1E carries the trig flag (bit 12), x:$20a -> an AMP state block
+//     whose +8 is the level. RK_SCHED = a file of per-frame "k flags level"
+//     (hex); RK_XDATA = a file of "addr word" (hex) loaded into X (the tables)
 // Driven by tools/repitch_dsp_engine_check.py, which compares the output with
 // tools/repitch_engine_model.py.
 //
@@ -48,7 +54,7 @@ std::vector<uint32_t> load24(const char* path)
 	return w;
 }
 
-constexpr uint32_t RING = 0x1e00, OUT = 0x0000, TAB = 0x80, PRELUDE = 0xf00;
+constexpr uint32_t RING = 0x1e00, OUT = 0x0000, TAB = 0x80, PRELUDE = 0xf00, REC = 0x25d, AMP = 0x6000;
 constexpr uint32_t BLOCK = 16;
 }
 
@@ -84,6 +90,20 @@ int main(int argc, char** argv)
 	uint32_t seed = 0x2545f491u;
 	for(uint32_t a = 0x800; a < 0x1000; ++a) { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; mem.set(MemArea_Y, a, seed & 0xffffff); }
 
+	if(const char* xd = std::getenv("RK_XDATA")) {
+		std::ifstream xf(xd);
+		unsigned a, w;
+		while(xf >> std::hex >> a >> w) mem.set(MemArea_X, a, w & 0xffffff);
+		if(std::getenv("RK_XPEEK")) { const uint32_t a0 = std::strtoul(std::getenv("RK_XPEEK"), nullptr, 16); std::printf("xpeek after load %05x: %06x %06x %06x\n", a0, mem.get(MemArea_X, a0) & 0xffffff, mem.get(MemArea_X, a0 + 1) & 0xffffff, mem.get(MemArea_X, a0 + 2) & 0xffffff); }
+	}
+	struct Sched { uint32_t k, flags, level; };
+	std::vector<Sched> sched;
+	if(const char* sp = std::getenv("RK_SCHED")) {
+		std::ifstream sf(sp);
+		unsigned k, f, l;
+		while(sf >> std::hex >> k >> f >> l) sched.push_back({k, f, l});
+	}
+
 	// 24.24 with the mode in bits 0-1: the stock table builder accumulates exactly
 	// this (l:$40 via `add x,a`), so the tag is part of the OT's own position
 	const uint64_t incEff = (uint64_t(rint) << 24) | ((rfrac & ~3u) | (mode & 3));
@@ -109,31 +129,49 @@ int main(int argc, char** argv)
 			mem.set(MemArea_X, RING + 2 * (j % 64), seed & 0xffffff);
 			mem.set(MemArea_X, RING + 2 * (j % 64) + 1, (seed >> 7) & 0xffffff);
 		}
-		for(uint32_t i = 0; i < BLOCK; ++i) {
-			const uint64_t p = pos + i * incEff;
-			mem.set(MemArea_X, TAB + i, uint32_t(2 * ((p >> 24) % 64)));
-			mem.set(MemArea_Y, TAB + i, uint32_t(p & 0xffffff));
-		}
-		// RK_MODE_SWITCH=N: passes N..2N-1 run in RPCH (mode 0), as a user switching away and back
+		const size_t fr = counts.size();
+		const Sched sc = fr < sched.size() ? sched[fr] : Sched{0, 0, 0};
+		// RK_MODE_SWITCH=N: frames N..2N-1 run in RPCH (mode 0), as a user switching away and back
 		static const int sw = std::getenv("RK_MODE_SWITCH") ? std::atoi(std::getenv("RK_MODE_SWITCH")) : 0;
-		const uint32_t pm = (sw && counts.size() >= size_t(sw) && counts.size() < size_t(2 * sw)) ? 0 : mode;
-		mem.set(MemArea_X, 0x40, rint | 0xc0);        // the unit's x:$40 carries $c0 above the integer part (measured)
-		mem.set(MemArea_Y, 0x40, (rfrac & ~3u) | (pm & 3));
-		mem.set(MemArea_X, 0x418, trk);
+		const uint32_t pm = (sw && fr >= size_t(sw) && fr < size_t(2 * sw)) ? 0 : mode;
+		uint64_t frameCount = 0;
 		auto& R = dsp.regs();
-		R.r[2].var = RING; R.r[6].var = RING;
-		R.r[3].var = OUT; R.r[5].var = TAB; R.r[7].var = BLOCK;
-		R.r[0].var = 0x5555;   // live in the firmware: must come back untouched
-		dsp.setPC(PRELUDE);
-		const uint64_t before = dsp.getInstructionCounter();
-		unsigned steps = 0;
-		while(dsp.getPC().toWord() != stop && steps++ < 400000) dsp.execInterpreter();
-		if(dsp.getPC().toWord() != stop) { std::printf("pass did not finish (pc %06x)\n", dsp.getPC().toWord()); return 1; }
-		counts.push_back(dsp.getInstructionCounter() - before);
-		if((R.r[0].var & 0xffffff) != 0x5555) { std::printf("r0 clobbered\n"); return 1; }
-		if((R.r[3].var & 0xffffff) != OUT + 2 * BLOCK) { std::printf("r3 = %06x, want %06x\n", R.r[3].var & 0xffffff, OUT + 2 * BLOCK); return 1; }
-		for(int k = 0; k < 8; ++k)
-			if(k != 6 && (R.m[k].var & 0xffffff) != 0xffffff) { std::printf("m%d left at %06x\n", k, R.m[k].var & 0xffffff); return 1; }
+		R.r[3].var = OUT;
+		for(int visit = 0; visit < 2; ++visit) {
+			const uint32_t i0 = visit ? sc.k : 0, i1 = visit ? BLOCK : sc.k;
+			for(uint32_t i = i0; i < i1; ++i) {
+				const uint64_t p = pos + i * incEff;
+				mem.set(MemArea_X, TAB + i - i0, uint32_t(2 * ((p >> 24) % 64)));
+				mem.set(MemArea_Y, TAB + i - i0, uint32_t(p & 0xffffff));
+			}
+			mem.set(MemArea_X, 0x40, rint | 0xc0);        // the unit's x:$40 carries $c0 above the integer part (measured)
+			mem.set(MemArea_Y, 0x40, (rfrac & ~3u) | (pm & 3));
+			mem.set(MemArea_X, 0x418, trk);
+			mem.set(MemArea_X, 0x419, REC);
+			mem.set(MemArea_X, REC + 0x1e, sc.flags & 0xffffff);
+			mem.set(MemArea_X, 0x20a, AMP);
+			mem.set(MemArea_X, AMP + 8, sc.level & 0xffffff);
+			const uint32_t r3in = R.r[3].var & 0xffffff;
+			R.r[2].var = RING; R.r[6].var = RING;
+			R.r[5].var = TAB; R.r[7].var = i1 - i0;
+			R.r[0].var = 0x5555;   // live in the firmware: must come back untouched
+			dsp.setPC(PRELUDE);
+			const uint64_t before = dsp.getInstructionCounter();
+			unsigned steps = 0;
+			while(dsp.getPC().toWord() != stop && steps++ < 400000) dsp.execInterpreter();
+			if(dsp.getPC().toWord() != stop) { std::printf("pass did not finish (pc %06x)\n", dsp.getPC().toWord()); return 1; }
+			frameCount += dsp.getInstructionCounter() - before;
+			if((R.r[0].var & 0xffffff) != 0x5555) { std::printf("r0 clobbered\n"); return 1; }
+			if((R.r[3].var & 0xffffff) != r3in + 2 * (i1 - i0)) { std::printf("r3 = %06x, want %06x\n", R.r[3].var & 0xffffff, r3in + 2 * (i1 - i0)); return 1; }
+			if(std::getenv("RK_AUX")) {
+				static FILE* af = std::fopen(std::getenv("RK_AUX"), "w");
+				for(uint32_t k = 0; k < 12; ++k) std::fprintf(af, "%06x ", mem.get(MemArea_Y, 0xf50 + trk / 2 + k) & 0xffffff);
+				std::fprintf(af, "\n");
+			}
+			for(int k = 0; k < 8; ++k)
+				if(k != 6 && (R.m[k].var & 0xffffff) != 0xffffff) { std::printf("m%d left at %06x\n", k, R.m[k].var & 0xffffff); return 1; }
+		}
+		counts.push_back(frameCount);
 		if(std::getenv("RK_STATE")) {
 			static FILE* sf = std::fopen(std::getenv("RK_STATE"), "w");
 			for(uint32_t k = 0; k < 10; ++k) std::fprintf(sf, "%06x ", mem.get(MemArea_Y, 0xa00 + trk + k) & 0xffffff);
@@ -145,12 +183,13 @@ int main(int argc, char** argv)
 		}
 		pos += BLOCK * incEff;
 	}
+	if(std::getenv("RK_XPEEK")) { const uint32_t a0 = std::strtoul(std::getenv("RK_XPEEK"), nullptr, 16); std::printf("xpeek at end %05x: %06x %06x %06x\n", a0, mem.get(MemArea_X, a0) & 0xffffff, mem.get(MemArea_X, a0 + 1) & 0xffffff, mem.get(MemArea_X, a0 + 2) & 0xffffff); }
 	std::ofstream o(argv[14], std::ios::binary);
 	o.write(reinterpret_cast<const char*>(out.data()), std::streamsize(out.size() * 4));
 	if(argc == 16) {
 		std::ofstream c(argv[15]);
 		for(auto n : counts) c << n << "\n";
 	}
-	std::printf("rendered %zu frames in %zu passes\n", out.size() / 2, counts.size());
+	std::printf("rendered %zu frames in %zu frames of two visits\n", out.size() / 2, counts.size());
 	return 0;
 }

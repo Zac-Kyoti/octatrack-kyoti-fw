@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-repitch-kyoti rev 12: the DSP virtual sampler against its reference model.
+repitch-kyoti rev 14: the DSP virtual sampler against its reference model.
 
     python3 tools/repitch_dsp_engine_check.py
 
@@ -13,7 +13,12 @@ the firmware would not have delivered yet are POISONED), and runs
 tools/repitch_engine_model.py on the same input with the same table. Checks:
 
   * both modes BIT-EXACT with repitch_engine_model.DspExact, the model's
-    integer twin (the DSP's arithmetic, step for step);
+    integer twin (the DSP's arithmetic, step for step), driven the way the
+    firmware drives it since rev 14: two hook visits per frame (split k /
+    16-k), a trig every TRIG_EVERY frames at a varying offset (the per-voice
+    flag word, bit 12 -- the second visit zeroes the ring history, RPSP
+    starts clean), and an AMP level that jumps at each trig and decays
+    (channel 1/2's input);
   * the twin against the float design, reported as a difference level (a
     tick position computed in 24.24 fixed point can put a 12-bit step on the
     other side of a 1/2048 boundary now and then);
@@ -77,14 +82,34 @@ def signals(n):
             "drum": (drum, np.roll(drum, 9)), "fullscale": (loud, -loud)}
 
 
-def model_run(mode, src24, rint, rfrac, exact=None, skip=()):
+TRIG_EVERY = 37
+
+
+def schedule(nframes):
+    """Per frame (k, flags, level): a trig every TRIG_EVERY frames at offset
+    k = 5 x (trig number) mod 16, k kept afterwards (the firmware keeps a
+    mid-frame start's split, measured); level = 0.95 at each trig, falling
+    linearly to 0 over 50 frames (the OT's AMP stage ramps linearly)."""
+    out, k, lev = [], 0, 0.0
+    for f in range(nframes):
+        trig = f % TRIG_EVERY == 3
+        if trig:
+            k = (5 * (f // TRIG_EVERY)) % 16
+            lev = 0.95
+        else:
+            lev = max(0.0, lev - 0.95 / 50)
+        out.append((k, (0x1000 if trig else 0) | (k << 8), int(round(lev * (1 << 23)))))
+    return out
+
+
+def model_run(mode, src24, rint, rfrac, exact=None, skip=(), sched=None):
     """Mirror of the probe's protocol. exact=None: the float design model
     (returns floats); exact=(consts, fir_rows): the DSP-exact twin (returns
-    24-bit ints). Passes in `skip` are not rendered (the track is in RPCH):
+    24-bit ints). Frames in `skip` are not rendered (the track is in RPCH):
     they come back as zeros and leave the engine's state alone."""
     inc = (rint << 24) | ((rfrac & ~3) | mode)
     tagged = (rfrac & ~3) | mode
-    eng = m.Engine(mode) if exact is None else m.DspExact(mode, *exact)
+    eng = m.Engine(mode, ch12=dsrc.CH12) if exact is None else m.DspExact(mode, *exact, ch12=dsrc.CH12)
     frames = len(src24) // 2
     x = np.stack([src24[0::2], src24[1::2]], 1)
     if exact is None:
@@ -98,27 +123,40 @@ def model_run(mode, src24, rint, rfrac, exact=None, skip=()):
         if need > written:
             eng.fill(written, x[written:need])
             written = need
-        if len(out) in skip:
+        f = len(out)
+        k, flags, level = sched[f] if sched and f < len(sched) else (0, 0, 0)
+        if f in skip:
             out.append(np.zeros((16, 2), dtype=np.int64))
-        elif exact is None:
-            table = [(((pos + i * inc) >> 24) % 64, ((pos + i * inc) & 0xFFFFFF) / float(1 << 24)) for i in range(16)]
-            out.append(eng.render(table, inc / float(1 << 24)))
         else:
-            table = [(((pos + i * inc) >> 24) % 64, (pos + i * inc) & 0xFFFFFF) for i in range(16)]
-            out.append(eng.render(table, rint, tagged))
+            parts = []
+            for i0, i1 in ((0, k), (k, 16)):
+                if exact is None:
+                    table = [(((pos + i * inc) >> 24) % 64, ((pos + i * inc) & 0xFFFFFF) / float(1 << 24))
+                             for i in range(i0, i1)]
+                    parts.append(eng.render(table, inc / float(1 << 24), bool(flags & 0x1000),
+                                            level / float(1 << 23)))
+                else:
+                    table = [(((pos + i * inc) >> 24) % 64, (pos + i * inc) & 0xFFFFFF) for i in range(i0, i1)]
+                    parts.append(eng.render(table, rint, tagged, flags, level))
+            out.append(np.concatenate(parts))
         pos += 16 * inc
     return np.concatenate(out)
 
 
 def run_probe(tag, base, hook, stop, org, b0, b1, mode, rint, rfrac, inp, o, cnt, env=None):
     trk = 0x40 if tag == "A" else 0x20
+    e = dict(os.environ if env is None else env, RK_XDATA=str(WORK / f"xdata_{tag}.txt"),
+             RK_SCHED=str(WORK / "sched.txt"))
     r = subprocess.run([str(PROBE), str(WORK / f"voice_{tag}.bin"), f"{base:x}", f"{hook:x}", f"{stop:x}",
                         str(WORK / f"cave_{tag}.bin"), f"{org:x}", f"{b0:x}", f"{b1:x}",
                         f"{mode:x}", f"{rint:x}", f"{rfrac:x}", f"{trk:x}", str(inp), str(o), str(cnt)],
-                       capture_output=True, text=True, env=env)
+                       capture_output=True, text=True, env=e)
     if r.returncode:
         sys.exit(f"probe failed ({o.name}): {r.stdout} {r.stderr}")
     return np.frombuffer(o.read_bytes(), dtype="<i4").astype(np.int64)
+
+
+SCHED = None
 
 
 def exact_for(mode, c):
@@ -140,7 +178,7 @@ def switch_check(tag, base, hook, stop, org, b0, b1, c, src):
             dsp = run_probe(tag, base, hook, stop, org, b0, b1, mode, rint, rfrac, WORK / "drum.raw", o,
                             WORK / "switch.cnt", env={**os.environ, "RK_MODE_SWITCH": str(N)})
             twin = model_run(mode, src, rint, rfrac, exact=exact_for(mode, c),
-                             skip=range(N, 2 * N)).reshape(-1, 16, 2)
+                             skip=range(N, 2 * N), sched=SCHED).reshape(-1, 16, 2)
             dsp = dsp.reshape(-1, 16, 2)
             k = min(len(dsp), len(twin))
             eng = [i for i in range(k) if not N <= i < 2 * N]
@@ -163,8 +201,11 @@ def switch_check(tag, base, hook, stop, org, b0, b1, c, src):
 
 
 def main():
+    global SCHED
     WORK.mkdir(parents=True, exist_ok=True)
     build_probe()
+    SCHED = schedule(4000)
+    (WORK / "sched.txt").write_text("".join(f"{k:x} {f:x} {lv:x}\n" for k, f, lv in SCHED))
     img = chk.IMG.read_bytes()
     report = []
     switches = []
@@ -173,13 +214,13 @@ def main():
     for tag, va, ln, base, hook, stop in chk.PAYLOADS:
         mod, _ = chk.voice_module(img, va, ln, base)
         (WORK / f"voice_{tag}.bin").write_bytes(mod)
-        start = sc3.DSP[tag]["cave_org"]
-        n = len(dsrc.assemble(0x1000)[0])
-        org = start + sc3.DONOR_WORDS - n
-        words, syms, c = dsrc.assemble(org)
+        n = len(dsrc.assemble(0x1000, tag)[0])
+        org = dsrc.cave_org(tag, n)
+        words, syms, c = dsrc.assemble(org, tag)
         (WORK / f"cave_{tag}.bin").write_bytes(b"".join(w.to_bytes(3, "little") for w in words))
+        (WORK / f"xdata_{tag}.txt").write_text("".join(f"{a:x} {w:x}\n" for a, w in sorted(dsrc.x_data(tag).items())))
         b0, b1 = sc3.bsr_long(hook, org)
-        print(f"payload {tag}: cave {n} words @P:{org:05x}, hook P:{hook:05x}")
+        print(f"payload {tag}: cave {n} words @P:{org:05x} (ends below DARK REV's routine), hook P:{hook:05x}")
         n_frames = int(1.0 * SR)
         for sname, (L, R) in signals(n_frames).items():
             src = np.empty(2 * n_frames, dtype=np.int64)
@@ -194,8 +235,8 @@ def main():
                     o = WORK / f"{tag}_{sname}_{ratio}_{mname}.raw"
                     cnt = WORK / f"{tag}_{sname}_{ratio}_{mname}.cnt"
                     dsp = run_probe(tag, base, hook, stop, org, b0, b1, mode, rint, rfrac, inp, o, cnt)
-                    twin = model_run(mode, src, rint, rfrac, exact=exact).reshape(-1)
-                    flt = np.round(model_run(mode, src, rint, rfrac).reshape(-1) * (1 << 23)).astype(np.int64)
+                    twin = model_run(mode, src, rint, rfrac, exact=exact, sched=SCHED).reshape(-1)
+                    flt = np.round(model_run(mode, src, rint, rfrac, sched=SCHED).reshape(-1) * (1 << 23)).astype(np.int64)
                     k = min(len(dsp), len(twin))
                     d = dsp[:k] - twin[:k]
                     frac = float(np.mean(d != 0))

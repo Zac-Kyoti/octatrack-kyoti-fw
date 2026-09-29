@@ -196,16 +196,13 @@ def sp_channel_filter(ch=SP_CHANNEL):
 #         does not have.
 # (rev 11: Kaiser-windowed sinc, 16 taps @ 13 kHz / 8 taps @ 11 kHz; RPSP's 8
 # taps rolled off 2-3 dB early and the box's droop stacked on top.)
-# Rev 13 stores only rows 0,2,..,14 and 15 of each table (PACKED_ROWS): the DSP
-# rebuilds the odd rows 1..13 as the average of their neighbours (<= -54 dB
-# from the designed rows, 0-20 kHz) and every mirror row, which frees 196 P words.
+# Rev 14 stores every row again (16 of 32; rows 16..31 are their mirrors), as rev
+# 12 did: rev 13's packing (9 of 32 rows, odd rows interpolated) was measurable on
+# worst-case tones (-55..-61 dBFS), so the user had full fidelity restored.
 PHASES = 32
 FIR = {MODE_RPS9: dict(taps=16),
        MODE_RPSP: dict(taps=12, flat=10000.0, stop=17500.0, w_trans=0.7, w_stop=30.0,
                        poles=7, corner=10950.0)}
-
-
-PACKED_ROWS = (0, 2, 4, 6, 8, 10, 12, 14, 15)
 
 
 def box_droop(f):
@@ -324,29 +321,15 @@ def fir_response(tab, ph, f):
     return np.abs(np.exp(2j * math.pi * np.asarray(f, dtype=float)[:, None] / SR * d[None, :]) @ tab[ph])
 
 
-def fir_packed(mode):
-    """The rows the DSP stores (PACKED_ROWS), Q23, each row's rounding error
-    folded into its largest tap so its DC gain is exactly 1."""
-    q = np.round(fir_table(mode) * (1 << 23)).astype(np.int64)
-    rows = []
-    for ph in PACKED_ROWS:
-        row = q[ph].copy()
-        row[np.argmax(row)] += (1 << 23) - row.sum()
-        rows.append(row)
-    return np.array(rows)
-
-
 def fir_q23(mode):
-    """The table as the DSP holds it after zqinit's expansion: the stored rows,
-    row 31-ph = row ph reversed, and each odd row 1..13 = floor((row ph-1 +
-    row ph+1) / 2), word for word, as the DSP computes it."""
-    packed = fir_packed(mode)
-    q = np.zeros((PHASES, packed.shape[1]), dtype=np.int64)
-    for ph, row in zip(PACKED_ROWS, packed):
-        q[ph], q[PHASES - 1 - ph] = row, row[::-1]
-    for ph in range(1, 14, 2):
-        q[ph] = (q[ph - 1] + q[ph + 1]) >> 1
-        q[PHASES - 1 - ph] = q[ph][::-1]
+    """The table as the DSP holds it (rev 12's construction, restored in rev 14):
+    Q23, each row's rounding error folded into its largest tap so the DC gain
+    stays exactly 1; row 31-ph = row ph reversed (the same fold, mirrored)."""
+    q = np.round(fir_table(mode) * (1 << 23)).astype(np.int64)
+    for ph in range(PHASES // 2):
+        row = q[ph]
+        row[np.argmax(row)] += (1 << 23) - row.sum()
+        q[PHASES - 1 - ph] = row[::-1]
     return q
 
 
@@ -395,22 +378,32 @@ def q12(v):
 
 class Engine:
     """One track's voice in RPS9 or RPSP. The ring holds float stereo frames
-    exactly as the OT delivered them (the engine never writes it)."""
+    as the OT delivered them. Rev 14: render() is called once per hook VISIT
+    (two per 16-sample frame, whatever the pass split) with the frame's trig
+    flag and the OT's AMP level; ch12 adds RPSP's channel 1/2 stage."""
     RING = 64
 
-    def __init__(self, mode):
+    def __init__(self, mode, ch12=False):
         self.mode = mode
+        self.ch12 = ch12 and mode == MODE_RPSP
         self.ring = np.zeros((self.RING, 2))
         self.fir = fir_q23(mode) / float(1 << 23)
         self.taps = self.fir.shape[1]
         self.c = self.taps // 2 - 1
         self.post = Biquads(design_post(mode))
+        self.vis = False          # the first visit of a trig frame has been seen
+        self.env = 0.0            # ch 1/2: the capacitor
+        self.st = np.zeros((4, 2))   # ch 1/2: the 4-pole's state
+        self.sp_reset()
+
+    def sp_reset(self):
         self.tau = 0.0            # SP: time of the next tick from the start of the next interval
         self.phi = 0.0            # SP: accumulator fraction
         self.held = np.zeros(2)   # SP: the staircase's current step
         self.prev = None          # SP: (ring frame, fraction) of the previous output sample
         self.gc = render_gc()     # SP: the render's step response on its 1/R grid
         self.acc = np.zeros((RENDER["L"], 2))   # SP: residuals owed to the next L outputs
+        self.st[:] = 0.0
 
     def fill(self, start, frames):
         for j, fr in enumerate(frames):
@@ -433,17 +426,41 @@ class Engine:
         idx = [(k - self.c + t) % self.RING for t in range(self.taps)]
         return self.fir[ph] @ self.ring[idx]
 
-    def render(self, table, r):
-        """table: [(ring frame, fraction)] for this pass's output samples;
-        r: the increment. Returns the pass's stereo output samples."""
+    def visit(self, table, trig):
+        """The trig bookkeeping at a hook visit: True when this visit starts a
+        new sound (the second visit of a trig frame). Then the 16 ring frames
+        before its first frame become silence -- they hold the last sound's
+        unscaled audio, which the engines would otherwise replay at the new
+        trig's full level (the rev 13 crack) -- and RPSP starts clean."""
+        if not trig:
+            self.vis = False
+            return False
+        self.vis = not self.vis
+        if self.vis:
+            return False
+        f0 = table[0][0]
+        for j in range(1, 17):
+            self.ring[(f0 - j) % self.RING] = 0.0
+        self.sp_reset()
+        return True
+
+    def render(self, table, r, trig=False, level=0.0):
+        """table: [(ring frame, fraction)] for this visit's output samples;
+        r: the increment. Returns the visit's stereo output samples."""
+        self.visit(table, trig)
         if self.mode == MODE_RPS9:
             # read c+1 frames behind the OT so every tap is at or before floor(p_i):
             # the OT does NOT deliver floor(p)+1 when the fraction is 0 (the stock
             # kernel gives it zero weight) -- measured in ot_emu, Session 110
-            return np.array([q12(self.adc(k + f - self.c - 1)) for k, f in table])
+            return np.array([q12(self.adc(k + f - self.c - 1)) for k, f in table]).reshape(-1, 2)
         out = []
         if self.prev is not None and table and (table[0][0] - self.prev[0]) % 64 > 2:
-            self.prev = table[0]          # ring positions are continuous: a jump = stale state
+            self.prev = table[0]          # a jump = stale state (see the DSP)
+        if self.ch12:                      # the diode + RC, once per visit
+            self.env = max(level, self.env * CH12_DEC8)
+            g = ch12_g(CH12_DEPTH * self.env)
+        if not table:
+            return np.zeros((0, 2))
         for k, f in table:
             if self.prev is None:
                 self.prev = (k, f)
@@ -457,11 +474,16 @@ class Engine:
                 self.held = new
                 self.tau += PSP_TICK
             self.tau -= 1.0
-            out.append(self.post(self.held + self.acc[0]))
+            y = self.post(self.held + self.acc[0])
+            if self.ch12:
+                for st in self.st:
+                    st += g * (y - st)
+                    y = st.copy()
+            out.append(y)
             self.acc = np.roll(self.acc, -1, axis=0)
             self.acc[-1] = 0.0
             self.prev = (k, f)
-        return np.array(out)
+        return np.array(out).reshape(-1, 2)
 
 
 # ------------------------------------------------------ RPSP channel 1/2 (rev 14)
@@ -536,6 +558,24 @@ class Ch12:
         return v.copy()
 
 
+# The DSP's form of envelope A (rev 14): the capacitor is updated once per hook
+# visit -- two per 16-sample frame, whatever the pass split -- so its discharge
+# per visit is exp(-8 / (tau SR)); the cutoff table holds g at every 1/8 octave
+# of env (33 points, linear in between) as (G, D) pairs, read in place in X.
+CH12_DEC8 = math.exp(-8.0 / (CH12_ENV["A"]["tau"] * SR))
+CH12_GSTEPS = 32
+
+
+def ch12_gtab_q23(f_rest=CH12_F_REST, depth=CH12_DEPTH):
+    """[G0, D0, G1, D1, ..., G31, D31], Q23: G[i] = g at env = i/32 (i = 0..32),
+    D[i] = G[i+1] - G[i]."""
+    G = [int(round(ch12_g(depth * i / CH12_GSTEPS, f_rest) * (1 << 23))) for i in range(CH12_GSTEPS + 1)]
+    out = []
+    for i in range(CH12_GSTEPS):
+        out += [G[i], G[i + 1] - G[i]]
+    return out
+
+
 def ch12_response(octaves, f, f_rest=CH12_F_REST):
     """|H| of the 4-pole at a fixed envelope position (dB)."""
     g = ch12_g(octaves, f_rest)
@@ -548,24 +588,40 @@ class DspExact:
     """The same engine in the DSP's integer arithmetic, bit for bit: what
     tools/repitch_dsp_engine_check.py compares the emulated DSP against. The
     float Engine above is the design; this is the implementation's contract.
-    Samples are 24-bit ints (Q23); `consts` is repitch_dsp_src.constants()[0]."""
+    Samples are 24-bit ints (Q23); `consts` is repitch_dsp_src.constants().
+    render() is one hook visit (patch_repitch_dsp.asm, zqrp)."""
     RING = 64
 
-    def __init__(self, mode, consts, fir_rows):
+    def __init__(self, mode, consts, fir_rows, ch12=True):
         self.mode, self.c = mode, consts
+        self.ch12 = ch12 and mode == MODE_RPSP
         self.ring = np.zeros((self.RING, 2), dtype=np.int64)
         self.fir = np.array(fir_rows, dtype=np.int64)          # [32][taps], Q23 signed
         self.taps = self.fir.shape[1]
         self.cc = self.taps // 2 - 1
+        self.T, self.D = render_q23()
+        self.gt = ch12_gtab_q23()
+        self.vis = 0
+        self.env = 0
+        self.st = [0] * 8                                       # L0..3, R0..3
+        self.clean = True                                       # RPSP slot tag invalid
+        self.sp_reset()
+
+    def sp_reset(self):
         self.tau = self.phi = 0
         self.held = np.zeros(2, dtype=np.int64)
         self.prev = None
-        self.T, self.D = render_q23()
         self.acc = np.zeros((RENDER["L"], 2), dtype=np.int64)  # residuals / 4, Q23
+        self.st = [0] * 8
 
     @staticmethod
     def lim(v):
         return int(min(max(v, -(1 << 23)), (1 << 23) - 1))
+
+    @staticmethod
+    def s24(v):
+        v &= 0xFFFFFF
+        return v - (1 << 24) if v & 0x800000 else v
 
     def fill(self, start, frames):
         for j, fr in enumerate(frames):
@@ -576,18 +632,55 @@ class DspExact:
         s = self.fir[ph] @ self.ring[idx]                      # exact: sum of Q23 x Q23
         return np.array([self.lim(v >> 23) & ~0xFFF for v in s], dtype=np.int64)
 
-    def render(self, table, rint, rfrac):
+    def visit(self, table, flags):
+        """zqtok: bit 12 of the per-voice word; the second visit of a trig frame
+        zeroes the 16 ring frames before the pass's first frame and clears the
+        RPSP slot's tag."""
+        if not flags & 0x1000:
+            self.vis = 0
+            return
+        self.vis ^= 0x1000
+        if self.vis:
+            return
+        f0 = table[0][0]                                       # (the DSP reads x:(r5))
+        for j in range(1, 17):
+            self.ring[(f0 - j) % self.RING] = 0
+        self.clean = True
+
+    def cutoff(self, level):
+        """zqsnj's channel 1/2 block: returns (g, 1 - g)."""
+        prod = 2 * self.env * q23i(CH12_DEC8)                  # mpy: fractional, 48 bits
+        b = self.s24(level) << 24
+        self.env = (max(b, prod) >> 24)
+        e = self.env & 0xFFFFFF
+        i2 = (e >> 17) & 0x3E
+        frac = (e << 5) & 0x7FFFFF
+        G, D = self.gt[i2], self.gt[i2 + 1]
+        g = self.lim(((G << 24) + 2 * D * frac) >> 24)
+        return g, 0x7FFFFF - g
+
+    def render(self, table, rint, rfrac, flags=0, level=0):
         """table: [(ring frame, fraction Q24)]; rint/rfrac: the increment as
-        the DSP holds it (x:$40, y:$40 with the mode tag)."""
+        the DSP holds it (x:$40, y:$40 with the mode tag); flags: the unpacked
+        per-voice word +$1E; level: the AMP stage's level word (Q23)."""
         c = self.c
+        self.visit(table, flags)
         if self.mode == MODE_RPS9:
             out = []
             for k, f in table:
                 out.append(self.adc(k - 2 * self.cc - 1, f >> 19))
-            return np.array(out)
+            return np.array(out, dtype=np.int64).reshape(-1, 2)
         out = []
         one = 1 << 20
-        if self.prev is not None and table and (table[0][0] - self.prev[0]) % 64 > 2:
+        if self.ch12:
+            g, g1 = self.cutoff(level)                         # every visit
+        if not table:
+            return np.zeros((0, 2), dtype=np.int64)            # an empty visit: nothing else
+        if self.clean:                                         # zqsp: a clean slot
+            self.sp_reset()
+            self.clean = False
+            self.prev = table[0]
+        elif self.prev is not None and (table[0][0] - self.prev[0]) % 64 > 2:
             self.prev = table[0]                               # stale state: resync
         for k, f in table:
             if self.prev is None:
@@ -613,11 +706,22 @@ class DspExact:
             else:
                 self.tau -= one
             o = [self.lim(4 * int(self.acc[0, ch]) + int(self.held[ch])) for ch in (0, 1)]
+            if self.ch12:
+                for ch in (0, 1):
+                    x = o[ch]
+                    for s in range(4):
+                        x = self.lim((g * x + g1 * self.st[4 * ch + s]) >> 23)
+                        self.st[4 * ch + s] = x
+                    o[ch] = x
             self.acc = np.roll(self.acc, -1, axis=0)
             self.acc[-1] = 0
-            out.append(o)                                      # raw output 7/8: no filter
+            out.append(o)
             self.prev = (k, f)
-        return np.array(out)
+        return np.array(out, dtype=np.int64).reshape(-1, 2)
+
+
+def q23i(v):
+    return int(round(v * (1 << 23)))
 
 
 # ------------------------------------------------------------ protocol driver

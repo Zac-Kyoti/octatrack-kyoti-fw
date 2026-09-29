@@ -33808,3 +33808,80 @@ trig). With one trig per loop B and C leave everything after the first hit −12
 with the user's AMP is ≈ a static open filter (−5 dB at 10–20 kHz). **Render decision (measured):
 keep rev 13's band-limited render** — through A and B the box render's fold lines stay at −24…−56 dB
 re a tone (rev 13's: −50…−105); `repitch_ch12_listen.py --fold`.
+
+## Session 112 continued (2026-09-28, `main`) — repitch-kyoti rev 14 BUILT: RPSP = SP-1200 channel 1/2 (envelope A), the trig crack fixed, full tables in SPRING's X, DARK REV restored; 80/80 bit-exact; NOT flashed
+
+**User's picks/reports:** envelope **A** (follow the OT's AMP envelope). New report on rev 13 (hardware):
+"a crack/pop right at the beginning of each trig" on RPS9 and RPSP, hidden by AMP ATK 1, negligible
+or absent on RPCH. Asked whether RPCH has the same stale-audio pop.
+
+**The crack, root-caused in ot_emu (MMTESTDT T1, HOLD 0 / REL 30, private trace at P:0x21f):** at a
+trig the new sound is written from **ring frame 0** (the ring coordinate restarts — Session 110's
+"continuous through trigs" holds only while a sound plays), so the frames *behind* it (63, 62, …)
+are stale audio from an earlier playback, unscaled (the AMP stage silences a voice later in the
+chain). RPS9 reads 8–15 frames behind the OT's position, RPSP ~13 plus its render: for their first
+8–12 samples after the trig they replayed that stale audio at the new trig's full AMP, then jumped
+to the new sound. Step 10 on rev 13: RPS9 out +0.124 +0.137 … +0.205 then +0.041 (new); RPSP likewise.
+**RPCH does not do it:** the stock kernel reads floor(p) and floor(p)+1 only, and its first output
+after the trig is the new sound's first frame exactly (+0.025, = ring frame 0).
+**Fix:** at the pass that starts the new sound (second hook visit of a frame whose per-voice word
++$1E has bit 12; a per-track parity word tells the visits apart) the 16 ring frames before the pass's
+first frame are zeroed (m1 = $7f wraps them in the ring), and RPSP's slot tag is cleared so it
+starts clean (residual ring, staircase, tick timing, prev position, filter state). Rev 14 at step 10:
+RPS9 … +0.016 → 0.000 ×5 → +0.023 +0.043 +0.071 +0.114 … (= RPCH's new content, 8 samples later);
+RPSP the same through its render and filter.
+
+**Channel 1/2, as built (envelope A):** per hook visit (two per frame, whatever the split) the
+capacitor `env = max(level, env·DEC8)` (level = the AMP stage's X:(x:$20a+8), one frame old;
+DEC8 = e^(−8/(0.15·SR))); cutoff table X:GTAB, 33 points per 1/8 octave (G, D pairs, read in place
+in X), g = G + frac·D; per output sample 4 stages × 2 channels `y = g·x + (1−g)·y` (no intermediate
+leaves [−1, 1); 1−g one LSB short). Poles at 1.0 kHz × 2^(4·env). The float design (Engine,
+ch12=True) uses the exact g; twin vs design −54…−84 dBFS (RPSP).
+
+**Layout / cost:** P cave 400 words (code only) ending right below DARK REV's routine (A
+`P:0x13f6..0x1585`, B `P:0x11b6..0x1345`; SIDECHAIN3's 388 words + 32 free before it); tables 593
+words over SPRING's X modules (run 1: render half-table 81 + cutoff 64; run 2: RPSP 192 + RPS9 256
+half-rows), stock content asserted by hash, copied X→Y by zqinit (rev 12's mirror copy); aux blocks
+Y:$F50 + x:$418/2 (12 words: parity, env, g, 1−g, 8 states), cleared by zqinit. The 7/8 build switch
+`RPK_CH12=0` drops the channel 1/2 blocks (345 words; RPSP 129/sample). Probe: RPS9 60.8
+instr/sample (rev 13 57.7: the trig check), RPSP 172–174 (rev 13 122–124), worst frame 202 (trig
+frames). Full firmware (your project, `--dsp-stopwatch 1:20e:210`): mean per hook visit 353 vs rev 13
+263 → ≈ 173 instr/sample for the RPSP track (rev 13 ≈ 128); first visit (table copy) 5393.
+**Two traps hit:** (1) `move (r1)+n5` does not exist (Rn pairs only with Nn) — computed the address
+instead; (2) **m1 = $7f made `(r1)+` wrap at a 128-word boundary**: the cutoff table's D5 at X:$8A00
+(payload A only) read X:$8980 — so every non-ring walk uses r4 (m4 linear; rev 11–13 walked r4 across
+whole tables on the unit), and the builder asserts the aux blocks (under the stock m6 = $7f) never
+straddle 128 words. Also: `mac x1,y1,a` / `tfr b,a` mis-encode (use `mac y1,x1,a`, `move b,a`) —
+dsp_xasm caught all of them.
+
+**Verification (all PASS):**
+- `repitch_dsp_engine_check.py`: **80/80 bit-exact** (both cores; the probe now does two visits per
+  frame with a split, a trig every 37 frames at varying offsets, and a jumping/decaying AMP level),
+  mode switch **8/8**; also 80/80 with `RPK_CH12=0`.
+- RPS9: twin without trigs == rev 12's twin (ratios 1.0/0.75/1.5); full firmware MMTESTDT T1 RPS9,
+  rev 14 vs rev 12 (`out/mainos_repitch_kyoti_rev12.bin`): identical on 4999 frames except the two
+  trig frames and the one after each (3102/3103, 4825/4826) — the fix's window.
+- RPCH: full-firmware output identical to rev 13 (MMTESTDT T1 voice output; the user's project audio
+  file byte-identical).
+- The user's project (`--sequencer --internal-clock --dsp --main-level 64 --frames 4000`, A02, T2):
+  T2's voice output RMS RPCH −7.93 / rev 13 RPSP −7.95 / rev 14 RPSP −7.96 dBFS; frame-boundary |d²|
+  max/median 1.28 (rev 13 1.25, RPCH 1.80); env 0 → 1.0 after the step-1 trig and stays (HOLD 127:
+  the filter stays open, poles 16 kHz); bands vs rev 13: 4–8k −1.4, 8–14k −4.1, 14–22k −5.7 dB.
+- Per hit (MMTESTDT, HOLD 0 / REL 30): env 0.02 → 0.97 at each trig (steps 10 and 15), then the
+  capacitor: 0.71 after 52 ms (poles ~15.6 → ~7 kHz) while the AMP ramps to 0 in ~45 ms.
+- Gate 0a rerun on rev 14 (FX cycle incl. DARK REV on both cores): DARK REV runs and calls its
+  routine on both cores; SPRING's X ranges are read only by rev 14's own cave (zqinit's copy, the
+  cutoff table), never written. Scenes: not exercised (no scripted crossfader in the step list).
+- Junk (`repitch_ch12_listen.py --junk`, isaak at 0.5625/0.75): with the user's A02 (HOLD 127) the
+  drop-sample junk above 4 kHz drops only by the open filter's roll-off (−1…−6.5 dB); under A the
+  filter closes only when the AMP does, so "junk gone between hits" needs a shorter HOLD/REL. With a
+  0.25 s release on 16ths −4…−11 dB above 6 kHz (the LTI-fit metric is unreliable for a time-varying
+  filter below 2 kHz).
+- Not done: the BPM24 pokes of Session 111's MMTESTDT recipe (their addresses were never recorded;
+  any rate exercises the engines).
+
+**Build (rev 14, WIP tier):** `out/OCTATRACK_OS1.40C_REPITCH_KYOTI.syx` =
+`out/OCTATRACK_OS1.40C_REPITCH_KYOTI_REV14.syx`, sha256
+`217a9c196c874544aa1b8df212fd480bcb12b9d0310241e034771b3a261058d0` (mainos `677bb1d3da8f396a…`, CF
+`.bin` `5746a87f7cad826b…`), 8133 B changed, 0 strays, reproducible; OS VERSION `140C_RPK14`.
+**NOT flashed.** Rev 13 kept as `…_REV13.syx`.

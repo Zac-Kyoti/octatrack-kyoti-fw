@@ -1,6 +1,6 @@
 # repitch-kyoti — fidelity scope: making RPS9 and RPSP behave like the real machines
 
-Written Session 109 (2026-09-28). **Rev 11 implements it; rev 12 corrects its tone; rev 13 fixes RPSP's render — see the status sections.** This scope follows the
+Written Session 109 (2026-09-28). **Rev 11 implements it; rev 12 corrects its tone; rev 13 fixes RPSP's render; rev 14 makes RPSP channel 1/2 and fixes the trig crack — see the status sections.** This scope follows the
 shipped rev 10 (`eb8f022`: RPCH / RPS9 / RPSP, hardware-confirmed working) and the
 listening render that showed how little RPS9 changes (`tools/repitch_dsp_listen.py`).
 It supersedes `REPITCH_KYOTI_SCOPE.md` §2's machine descriptions, which were wrong
@@ -12,6 +12,22 @@ engineering inference; says how), ❓ **not documented anywhere we found**, 📎
 source (forum, press), used only where flagged.
 
 ---
+
+## ⏩ Implementation status — rev 14 BUILT (Session 112, 2026-09-28): channel 1/2, full tables, the trig crack
+
+**Built, verified in emulation, NOT flashed** (rev 13 is on the unit). Detail: NOTES "Session 112"
+and "Session 112 continued"; the channel 1/2 design: `REPITCH_SP_CH12_SCOPE.md`.
+- **RPSP = the SP-1200's channel 1/2**: rev 13's staircase through an SSM2044-style 4-pole
+  (resonance 0) whose cutoff the track's own AMP envelope opens (envelope A). `RPK_CH12=0`
+  builds rev 13's raw 7/8 sound (with the other two changes).
+- **Full-fidelity tables again**: RPS9 = rev 12's exact table (its output is bit-identical to rev
+  12 except the samples right after a trig), RPSP = rev 13's retuned 12-tap design, all 16
+  half-rows each — stored in SPRING REVERB's orphaned X data, copied to Y at first use.
+- **The crack at each trig start (user report on rev 13) is fixed**: at a trig the ring holds stale
+  audio behind the new sound, which RPS9/RPSP (reading 8–13 frames behind) replayed for their first
+  8–12 samples at full AMP; the frames behind a new sound are now silence. RPCH never had it.
+- DARK REVERB works again (rev 10–13 overwrote a routine it calls inside SPRING's module).
+- Cost: RPS9 61 DSP instructions/sample, RPSP ≈ 173. P cave 400 words; Y `$A00-$F8F`.
 
 ## ⏩ Implementation status — rev 13 BUILT (Session 111 cont., 2026-09-28): RPSP's band-limited render
 
