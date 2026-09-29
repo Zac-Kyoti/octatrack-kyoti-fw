@@ -19,6 +19,18 @@ Environment (all optional):
   RK_TRACE_OUT=FILE
 The vendor changes: a data-read hook in Memory::get, and DMA always copies word by word
 (its memcpy fast path bypassed both hooks).
+
+Session 112 continued (3) adds two STEP-SCRIPT verbs to src/main.cpp, so a --steps run can
+drive the REAL panel (stock's own UI code) instead of poking parameter RAM -- which is how
+the TSTR-switch bug was reproduced, since a poke skips the editor the bug lived in:
+
+  key 0x22 down | key 0x22 up    a panel key, the --live FIFO's grammar and key rows
+  enc 4 -1                       an encoder detent (0..5 = A..F)
+
+  codes: SRC 0x22, AMP 0x23, LFO 0x24, FX1 0x25, FX2 0x26, FUNC 0x2d, T1-T8 0x10-0x17,
+  encoder presses 0x38+n (refs/octabam/tools/emu/lcd_view.py KEYS).  A list parameter
+  (TSTR) steps once per 4-detent event; a knob takes single detents.  Interleave with
+  `frames N` to let the UI task run (30+ frames after a key, 40 between turns).
 --- src/dsp.cpp	2026-09-24 20:16:11
 +++ src/dsp.cpp	2026-09-28 19:47:34
 @@ -1,6 +1,8 @@
@@ -235,6 +247,36 @@ The vendor changes: a data-read hook in Memory::get, and DMA always copies word 
  			if(m_pcWatchOn && i == m_pcWatchCore && pc == m_pcWatchPc && c.executed >= m_pcWatchFrom && !(m_pcWatchFrom && m_pcWatchHits.size() >= 24))
  			{
  				const auto& r = c.dsp->regs();
+--- src/main.cpp	2026-09-25 20:19:34
++++ src/main.cpp	2026-09-28 22:52:00
+@@ -899,6 +899,27 @@
+ 								dst, src, len, len == 1 ? "" : "s", nz);
+ 						}
+ 					}
++					else if(verb == "key" || verb == "enc")
++					{
++						// RK: panel events from the script (the --live FIFO's grammar)
++						static uint8_t krows[8] = {};
++						std::istringstream is(rest);
++						if(verb == "key")
++						{
++							std::string code, edge; is >> code >> edge;
++							const auto k = static_cast<uint32_t>(std::strtoul(code.c_str(), nullptr, 0)) & 0x3f;
++							const auto bit = static_cast<uint8_t>(1u << (k & 7));
++							auto& row = krows[k >> 3];
++							row = edge == "down" ? static_cast<uint8_t>(row | bit) : static_cast<uint8_t>(row & ~bit);
++							rtos.panelIn({static_cast<uint8_t>(0x20 | (k >> 3)), row});
++						}
++						else
++						{
++							int n = 0, d = 0; is >> n >> d;
++							rtos.panelIn({static_cast<uint8_t>(0x30 | (n & 15)), static_cast<uint8_t>(d)});
++						}
++						std::printf("step %s     : %s\n", verb.c_str(), rest.c_str());
++					}
+ 					else if(verb == "frame")
+ 					{
+ 						const auto on = rest != "off";
 --- vendor/dsp56300/source/dsp56kEmu/memory.h	2026-09-14 00:58:29
 +++ vendor/dsp56300/source/dsp56kEmu/memory.h	2026-09-28 19:38:53
 @@ -85,6 +85,7 @@

@@ -33987,6 +33987,9 @@ the new sound always starts in the second) — trig = bit 12 AND LC = 1. The par
 e^(−8/(τ·SR)), assuming two visits per frame; unsplit frames give one, so on them it closed at half the
 designed speed (τ ≈ 0.30 s instead of 0.15 s). Now once per frame on LC = 1 with e^(−16/(τ·SR)).
 For the user's A02 (HOLD 127, level constant) the output is unchanged.
+**Harness note (added 2026-09-29):** the `key` / `enc` step verbs are now in
+`tools/repitch_ot_emu_trace.patch` (with the key codes and the pacing), so the real-UI repro is
+reproducible; the patch dry-run-applies to a clean copy of octabam's `ot_emu` + vendor.
 **Harness lesson:** model what the firmware delivers on EVERY pass, including the ones the engine does
 not act on — an assumption about pass structure is only as good as the probe that mimics it.
 
