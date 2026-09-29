@@ -389,10 +389,8 @@ p1_edge_ot:
     .endif
 | ---- shadow edge (always update the shadow) ----
     moveq   #0,%d1
-    move.b  SHADOW,%d1
+    move.b  SHADOW,%d1                  | D1 = last frame's silenced set
     move.b  %d2,SHADOW
-    not.l   %d1
-    and.l   %d2,%d1                     | D1 = newly-silenced (0->1 edge)
 
 | ---- maintain REL_STATE |= silenced ----
     tst.l   %d2
@@ -403,11 +401,23 @@ p1_edge_ot:
     move.b  %d0,REL_STATE
 
 | ---- note-off the newly-silenced tracks, once ----
-    tst.l   %d1
+| Session 115 FIX (OTFX-T: muting one track cut OTHER tracks' notes short).  The edge mask
+| used to live in %d1 across `jsr F_NOTEOFF` -- but %d1 is a scratch register the callee
+| owns: FUN_40008f84 loads REL_STATE into it (`moveb 0x8000184a,%d1`) and then calls
+| FUN_4000672c.  After the first note-off the loop was testing garbage.  MEASURED on the
+| user's kyoti_testMM (T2 muted, GATE 1): REL_STATE went 0x02 (T2, correct) -> 0x06 from a
+| second FUN_40008f84 call for T3, and this hook's per-frame `REL_STATE |= silenced` then
+| read the stray bit back and held it, so every T3 note was released at once for as long as
+| T2 stayed muted (T3 level 20 ms after its trig 0.0030 vs 0.0181 in OT).  The edge mask
+| now lives in %d2 -- callee-saved (FUN_40008f84 saves d2-d3/a2), and free here because
+| the silenced set was consumed by the REL_STATE update just above.  %d3 (the counter) was
+| always callee-saved.
+    not.l   %d1
+    and.l   %d1,%d2                     | D2 = newly-silenced (0->1 edge); sets Z
     beq     p1_done
     moveq   #0,%d3
 p1_loop:
-    btst    %d3,%d1
+    btst    %d3,%d2
     beq     p1_next
     move.l  %d3,-(%sp)
     jsr     F_NOTEOFF
