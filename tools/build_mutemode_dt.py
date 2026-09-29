@@ -44,9 +44,18 @@ OUT_BIN = ROOT / "out/OCTATRACK_MUTEMODE_DT.bin"
 
 VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_KYOTI"
 
+# Session 116: with SC_KEY (combined image only) patch_softmute outgrows 0x400d7800, so the
+# default spots after it move 0x80 out. Only build_kyoti.py's sizing pass ever builds at the
+# defaults with SC_KEY set; it then places every piece itself. Standalone: SC_SHIFT = 0.
+SC_SHIFT = 0x80 if kyoti_place.at("mutemode_sc_key", False) else 0
+
 # --- code stubs: (source, load addr, defsym, [(detour site, symbol, expected bytes, len)]) ---
 PATCHES = [
-    ("patch_softmute", kyoti_place.at("patch_softmute", 0x400d7400), "DT_MODE=1",              # gated + the DT (mode 2) branch
+    # Session 116: SC_KEY=1 (set only by build_kyoti.py, i.e. only in an image that also has
+    # SIDE-CHAIN) adds the SIDE-CHAIN KEY exemption to hook 1 and the trig hooks. The standalone
+    # build does not set it and is byte-identical to its Session 115 build.
+    ("patch_softmute", kyoti_place.at("patch_softmute", 0x400d7400),
+     "DT_MODE=1" + (",SC_KEY=1" if kyoti_place.at("mutemode_sc_key", False) else ""),              # gated + the DT (mode 2) branch
      # Session 56 continued: ALWAYS_NOTEOFF (--defsym ALWAYS_NOTEOFF=1, see hook 1's own
      # header comment in patch_softmute.s) was tried and RULED OUT -- readback-level A/B
      # showed zero effect on the retrig blip (byte-identical to baseline from frame 445
@@ -173,15 +182,15 @@ PATCHES = [
     # part 18 addendum 12: hook 16 (otfx_dry) grows patch_softmute past 0x400d7780; bumped
     # 0x80 further out again, same convention as part 8 and addendum 2. The three arrays
     # below move by the same 0x80.
-    ("patch_mutemode", kyoti_place.at("patch_mutemode", 0x400d7800), "DT_MODE=1", []),   # menu: OT / OTFX-T / DT-T / OTFX
+    ("patch_mutemode", kyoti_place.at("patch_mutemode", 0x400d7800 + SC_SHIFT), "DT_MODE=1", []),   # menu: OT / OTFX-T / DT-T / OTFX
 ]
 
 # --- PERSONALIZE menu arrays (stock) ---
 OLD_LBL, OLD_GET, OLD_SET, N_OLD = 0x400b2a34, 0x400b2a74, 0x400b2ac0, 16
 SPLICE_AT = 2                                               # after "PREVIEW WITHOUT FX"
-LBL_AT = kyoti_place.at("personalize_labels", 0x400d78e0)
-GET_AT = kyoti_place.at("personalize_getters", 0x400d7940)
-SET_AT = kyoti_place.at("personalize_setters", 0x400d79a0)
+LBL_AT = kyoti_place.at("personalize_labels", 0x400d78e0 + SC_SHIFT)
+GET_AT = kyoti_place.at("personalize_getters", 0x400d7940 + SC_SHIFT)
+SET_AT = kyoti_place.at("personalize_setters", 0x400d79a0 + SC_SHIFT)
 # Session 58 continued yet again, part 8: moved 0x400d7750/b0/810 -> 0x400d7790/f0/850,
 # 0x40 further out, to make room for patch_mutemode's own 0x40 shift above.
 REFS = [(0x40068efe, OLD_LBL, "labels  move.l #imm,D5"),

@@ -113,19 +113,26 @@ RECLAIM_WHOLE = {"SPRING": (0x400d5726, 0x400d58b8), "PERS1": (0x400b2a34, 0x400
 # --- the placement plan: zone -> pieces, packed in this order --------------------------
 #   engine / ISR / tick-path code: CAVE and SAFE only.
 PLAN = {
+    # Session 116: MUTE MODE's SIDE-CHAIN KEY exemption grew patch_softmute by 124 B, which
+    # the classic cave does not have. PLAYSFREEFIX moved into RELD beside patch_sidechain,
+    # and the PERSONALIZE labels array into CAVE2. MUTE MODE is built on TRUE stock, where
+    # PERS1/PERS2 still hold the stock arrays it relocates, so no MUTE MODE piece can go
+    # there: REPITCH's glyph data 3 (68 B) moved from CAVE2 into PERS1 to make the room, and
+    # four glyph records (20 B, pure data) out of PERS1 into PERS2 / SPRING / ENC.
     "CAVE":  ["patch_reload3", "patch_directjump_v7", "patch_softmute", "patch_partreapply",
-              "patch_mutemode", "patch_pattern_led", "patch_trigscale", "personalize_labels"],
+              "patch_mutemode", "patch_pattern_led"],
     "SAFE":  ["rpk_logic", "personalize_getters", "personalize_setters"],
-    "SPRING": ["rpk_widget7"],
-    "ENC":   ["patch_triglock"],                   # LIVE-erase key path only
-    "RELD":  ["patch_sidechain"],                  # COMPRESSOR page formatters
+    "SPRING": ["rpk_widget7", "rpk_glyph_rec2"],
+    "ENC":   ["patch_triglock",                    # LIVE-erase key path only
+              "rpk_glyph_rec3", "rpk_glyph_rec4"],
+    "RELD":  ["patch_sidechain",                   # COMPRESSOR page formatters
+              "patch_trigscale"],
     "SEAM":  ["patch_qlrec"],                      # [PLAY]/[REC] key handlers
-    "CAVE2": ["rpk_glyph_data0", "rpk_glyph_data1", "rpk_glyph_data2", "rpk_glyph_data3"],
+    "CAVE2": ["rpk_glyph_data0", "rpk_glyph_data1", "rpk_glyph_data2", "personalize_labels"],
     "PASTE": ["rpk_glyph_data4", "rpk_glyph_data5"],
     "FILT":  ["rpk_glyph_data6"],
-    "PERS1": ["rpk_glyph_tab", "rpk_glyph_rec0", "rpk_glyph_rec1", "rpk_glyph_rec2",
-              "rpk_glyph_rec3", "rpk_glyph_rec4"],
-    "PERS2": ["rpk_glyph_rec5", "rpk_glyph_rec6"],
+    "PERS1": ["rpk_glyph_tab", "rpk_glyph_data3", "rpk_glyph_rec0"],
+    "PERS2": ["rpk_glyph_rec1", "rpk_glyph_rec5", "rpk_glyph_rec6"],
 }
 
 # --- the features: name -> (builder, image, base, placement keys, standalone blob files) --
@@ -160,6 +167,17 @@ FEATURES = {
 }
 # builder flags that are not addresses
 FLAGS = {"DIRECTJUMP_V7": {"dj_mode_in_cave": True}}
+
+
+def flags_for(feat):
+    """FLAGS, plus the ones that depend on what else is in the image.  MUTE MODE's SIDE-CHAIN
+    KEY exemption (Session 116: a muted KEY track keeps feeding the key and MON, whatever
+    MUTE MODE says) only exists when SIDE-CHAIN does -- a --without SIDECHAIN3_CROSS image
+    drops it too."""
+    f = dict(FLAGS.get(feat, {}))
+    if feat == "MUTEMODE_DT" and "SIDECHAIN3_CROSS" in FEATURES:
+        f["mutemode_sc_key"] = True
+    return f
 # bytes two features may both write, with identical values (SPRING REVERB's removal)
 SHARED_OK = {frozenset(("SIDECHAIN3_CROSS", "REPITCH_KYOTI"))}
 
@@ -344,7 +362,7 @@ def main():
     sb1 = make_sandbox("sizes", stock)
     size = {}
     for feat, (builder, _img, _base, keys) in FEATURES.items():
-        run_builder(sb1, feat, dict(FLAGS.get(feat, {})) or {"_sizing": True})
+        run_builder(sb1, feat, flags_for(feat) or {"_sizing": True})
         for key, src in keys.items():
             size[key] = src if isinstance(src, int) else len((sb1 / "out" / src).read_bytes())
     for key in size:
@@ -384,7 +402,7 @@ def main():
         if feat == "REPITCH_KYOTI":
             p["rpk_glyph_recs"] = [place[f"rpk_glyph_rec{k}"] for k in range(7)]
             p["rpk_glyph_data"] = [place[f"rpk_glyph_data{k}"] for k in range(7)]
-        p.update(FLAGS.get(feat, {}))
+        p.update(flags_for(feat))
         img = run_builder(sbs[base], feat, p)
         deltas[feat] = delta(base_of[base], img)
         for src in keys.values():                    # each linked blob's .elf sits beside it

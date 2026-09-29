@@ -160,7 +160,11 @@ p1_ns_clear:
     | part.  The CUE bits (16..23) are deliberately left alone -- stock's own cue-send word
     | at 0x40004e6e..78 keys off them, and cueing is not ours to change.
     andi.l  #0xffff0000,%d5
+    .ifdef SC_KEY
+    bra     p1_key
+    .else
     bra     p1_edge
+    .endif
 
 p1_solo:
     | Solo engaged.  BOTH of stock's solo-branch silencing paths are post-FX HARD cuts that
@@ -198,7 +202,67 @@ p1_solo_fold:
     |  -> every track: solo bit clear + mute bit clear -> the "& D1" keep path
     |  -> D1 = (D5.b == 0) ? -1 : 0  becomes -1 -> words pass through unchanged
     andi.l  #0xffff0000,%d5
+    .ifdef SC_KEY
+    bra     p1_key
+    .else
     bra     p1_edge
+    .endif
+
+    .ifdef SC_KEY
+| ---- SIDE-CHAIN KEY tracks keep stock's mute (Session 116) --------------------------------
+| A track that some COMPRESSOR uses as its SIDE-CHAIN KEY must keep producing audio while it is
+| muted -- that is the whole "ghost kick" use, and SC LISTEN (MON) auditions exactly that
+| audio.  Every soft mode silences the voice BEFORE SIDE-CHAIN's tap (OTFX-T note-off + trig
+| drop, DT-T trig drop, OTFX zeroes VOL/XVOL), so the key went silent (measured: the key
+| buffer holds 0 for a muted T2 in GATE 1/2/3, the full signal in GATE 0).  So a key track is
+| muted the way OT mutes it, in every MUTE MODE: taken OUT of the silenced set (no note-off,
+| no trig drop, no VOL cut) and given back its D5 mute bit, so stock's frame builder cuts its
+| level words post-FX -- which is also exactly what OT does, and why OT kept the key.
+| KEY is read from this frame's per-track DSP record (half 0, 0x80000110 + t*64): FX1 id =
+| low byte of halfword 27 (+55), FX2 id = +57; COMPRESSOR = 0x18; its KEY (page-2 slot 8,
+| r6+$d bits 16-23 on the DSP) = high byte of halfword 19 (+38, FX1) / 25 (+50, FX2),
+| 0 = OFF, 1..8 = T1..T8.  KEYMASK is left for the five trig hooks, which let a key track's
+| trigs through.  %a0 is the caller's: pushed/popped.  %d0/%d1/%d3 are hook 1's own.
+| Assembled only with --defsym SC_KEY=1, i.e. in an image that also carries SIDE-CHAIN
+| (build_kyoti.py sets it).  Standalone MUTE MODE has no KEY -- stock COMPRESSOR's page-2 slot
+| 8 is unused and could hold anything -- and without SC_KEY this file assembles byte-for-byte
+| as it did before Session 116.
+p1_key:
+    move.l  %a0,-(%sp)
+    lea     0x80000110,%a0              | track 0's record, ping-pong half 0
+    moveq   #0,%d0                      | D0 = key mask
+    moveq   #7,%d3                      | 8 tracks, counted down
+| No range check on KEY: OFF (0) sets bit 31 and a corrupt value > 8 some bit 8..31 -- both
+| land above bit 7, and everything below reads only bits 0..7 (the byte store, and the
+| `and.l %d2` with an 8-bit silenced set).  Saves 20 B the combined image does not have.
+pk_loop:
+    move.b  (55,%a0),%d1                | FX1 id
+    cmpi.b  #0x18,%d1                   | COMPRESSOR ?
+    bne.s   pk_fx2
+    mvz.b   (38,%a0),%d1                | its KEY 0..8
+    subq.l  #1,%d1                      | -> track 0..7
+    bset    %d1,%d0
+pk_fx2:
+    move.b  (57,%a0),%d1                | FX2 id
+    cmpi.b  #0x18,%d1
+    bne.s   pk_next
+    mvz.b   (50,%a0),%d1
+    subq.l  #1,%d1
+    bset    %d1,%d0
+pk_next:
+    lea     (64,%a0),%a0
+    subq.l  #1,%d3
+    bpl.s   pk_loop
+    movea.l (%sp)+,%a0
+    move.b  %d0,KEYMASK                 | for mt_trig / mt_rebind / dt_trig / fresh_bind / trigflag
+    move.l  %d0,%d1
+    and.l   %d2,%d1                     | silenced key tracks ...
+    lsl.l   #8,%d1
+    or.l    %d1,%d5                     | ... get stock's own post-FX mute cut (OT's behaviour)
+    not.l   %d0
+    and.l   %d0,%d2                     | and the soft modes never see them
+    bra     p1_edge
+    .endif
 
 p1_zero:
     moveq   #0,%d2
@@ -509,6 +573,10 @@ mt_trig:
     bne     mt_pass                     | soloed -> let it through
 | fallthrough: solo active + this track not soloed -> silence it
 mt_silenced:
+    .ifdef SC_KEY
+    btst    %d1,KEYMASK                 | Session 116: a SIDE-CHAIN KEY track keeps its trigs (see p1_key)
+    bne.s   mt_pass
+    .endif
     move.l  (%sp)+,%d3                  | restore our own scratch
     move.l  (%sp)+,%d2                  | restore FUN_40006820's saved D2 (its loop counter)
     movea.l (%sp)+,%a2                  | restore FUN_40006820's saved A2 (its self-address)
@@ -596,6 +664,11 @@ mt_rebind:
     bne     mr_pass                      | soloed -> let it through
 | fallthrough: solo active + this track not soloed -> silence it
 mr_silence:
+    .ifdef SC_KEY
+    move.l  (0x40,%sp),%d0               | Session 116: a SIDE-CHAIN KEY track keeps its trigs (see p1_key)
+    btst    %d0,KEYMASK
+    bne.s   mr_pass
+    .endif
     jmp     MR_BACK                      | skip BOTH arena-pointer writes for a silenced track
 
 mr_pass:
@@ -955,6 +1028,10 @@ dt_trig:
     bne     dt_pass                     | soloed -> let it through
 | fallthrough: solo active + this track not soloed -> silence it
 dt_silence:
+    .ifdef SC_KEY
+    btst    %d3,KEYMASK                 | Session 116: a SIDE-CHAIN KEY track keeps its trigs (see p1_key)
+    bne.s   dt_pass
+    .endif
     moveq   #0,%d0                      | what the handler would have returned, doing nothing
     jmp     DT_BACK                     | DROP THE TRIG: the handler never runs
 
@@ -1043,6 +1120,10 @@ fresh_bind:
     bne     fb_pass                     | soloed -> normal dispatch
 | fallthrough: solo active + this track not soloed -> silence it
 fb_silence:
+    .ifdef SC_KEY
+    btst    %d1,KEYMASK                 | Session 116: a SIDE-CHAIN KEY track keeps its trigs (see p1_key)
+    bne.s   fb_pass
+    .endif
     jmp     FB_EPILOGUE                 | skip the fresh bind + FUN_4000672c entirely
 
 fb_pass:
@@ -1241,16 +1322,30 @@ trigflag:
     move.l  MUTE_STATE,%d0
     lsr.l   #8,%d0                    | mute bits 8..15 -> 0..7, so %d4 indexes them directly
     btst    %d4,%d0                   | this track muted ?
-    bne     tf_skip
+    bne     tf_sil 
     tst.b   SOLO_BYTE                   | anything soloed at all ?
     beq     tf_pass
     move.l  MUTE_STATE,%d0
     andi.l  #0xff,%d0
     beq     tf_pass                   | nothing soloed -> normal
     btst    %d4,%d0                   | this track soloed ?
-    beq     tf_skip                   | not soloed while something is -> silenced
+    beq     tf_sil                    | not soloed while something is -> silenced
     .endif
 tf_pass:
     jmp     TF_BACK
 tf_skip:
     jmp     TF_SKIP
+    .ifdef SC_KEY
+tf_sil:
+    btst    %d4,KEYMASK                 | Session 116: a SIDE-CHAIN KEY track keeps its trigs (see p1_key)
+    bne.s   tf_pass
+    bra.s   tf_skip
+
+| Session 116: SIDE-CHAIN KEY tracks, rebuilt every frame by p1_key (RAM: the cave is loaded to
+| SDRAM with the image, like DIRECT JUMP's DJ_MODE). 0 until the first active-mode frame.
+    .balign 2
+KEYMASK: .byte 0
+    .balign 2
+    .else
+    .set    tf_sil, tf_skip             | no SIDE-CHAIN: the silenced branches are stock's skip, as before
+    .endif
