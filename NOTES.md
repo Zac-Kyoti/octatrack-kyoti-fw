@@ -33696,3 +33696,31 @@ has little real top end), 12–13 kHz +2.4.
 and channels 1–2 are that same staircase through the SSM2044 dynamic filter — an
 added stage on this engine, not a different engine (it would also remove most of what
 rev 13's render removes, so the render matters most for 7/8).
+
+## Session 111 continued (2) (2026-09-28, `main`) — RPSP drop-sample confirmed against the user's project; channel 1/2 scoped (no code)
+
+**User's REPITCH project in `ot_emu`** (staged with `refs/octabam/tools/emu/ot_emu/stage_card.py
+--audio isaak.wav:AUDIO/ELEKTRON/isaak.wav`; pattern A02 needs a `--steps` file with `seq 0,1`
+AND `--sequencer`, because `--sequencer` plays the pattern at `0x80000004` and `--poke` runs after
+that select; T2's part TSTR byte = `0x4017115c` = bank blob + `0x8ef5a + t*30 + m*6 + 4`, part 0).
+T2 plays at 0.5625 (90/120 × QUAN 3/4). Against an independent numpy SP-1200 (service-manual
+mechanism, no engine code) and a clean pitch-down of the file: RPSP's artifacts match the reference
+within ~1 dB per band above 2 kHz. The residual below 2 kHz is the same in RPCH and RPS9 on that
+track (OT-side processing, not RPSP). At QUAN 1/1 (0.75) both RPSP and the reference make
+everything above ~4 kHz pure drop-sample junk; RPSP and reference agree 90–115 BPM. The user's
+clean window 115–129 BPM = drop-sample modulation |1−r|·26.04 kHz within ~1.1–2.0 kHz of each
+note. Interpolating on the SP grid cuts the junk ~21 dB (identical at 1/1). One engine flaw
+found in passing: at 1/1 RPSP has 7–10 dB more junk at 4–11 kHz than an ideal SP (the ADC's
+32-phase grid). Files: `out/isaak_check/` (gitignored). Primary sources gathered: E-mu owner's
+manual §1F ("ring modulation type of effect" — said of tuning CYMBALS), Rossum QSG ("classic
+sound = resonance fully left, frequency centred"; Mix = filtered 1–6 + raw 7/8), Rossum product
+page ("Transpose a sound … you get the aliasing and grit that define the instrument").
+
+**User's call: they expect channel 1/2, not raw 7/8.** Scope:
+`reference/handoffs/REPITCH_SP_CH12_SCOPE.md`. Key finding for DSP space with no new donor:
+SPRING's payload loads **five X data tables per core referenced by no code but SPRING's**
+(A X:0x89a4/0x89ec/0x8a34 ×72, 0x8afc ×116, 0x8b70 ×384; B X:0x8464/0x84ac/0x84f4, 0x85bc,
+0x8630; the 27-word X:0x8cf0/0x87b0 is shared with the next module — off limits): 716 words
+loaded at boot for a removed effect. Moving RPSP's 189 table words there frees that much P.
+Runtime canary owed. Hit signal: trigs reach the DSP as voice commands and the AMP envelope runs
+on the DSP, so the filter can probably key off DSP state — gate 0b trace.
