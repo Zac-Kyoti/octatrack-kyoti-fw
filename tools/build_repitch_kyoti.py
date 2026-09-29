@@ -45,7 +45,8 @@ REV 15 = rev 14 (flashed: "very nice") + two fixes (NOTES Session 112 continued 
     the voice module's second pass by its loop counter, not by counting visits
     (an empty first pass never reaches the engine);
   * channel 1/2's capacitor is updated once per frame (it decayed at half speed
-    on frames with an empty first pass).
+    on frames with an empty first pass);
+  * QUAN: pressed + turn = one ratio per detent (3x the plain turn).
 REV 14 (NOTES Session 112; reference/handoffs/REPITCH_SP_CH12_SCOPE.md):
   * RPSP is heard as the SP-1200's CHANNEL 1/2: rev 13's staircase (26.04 kHz,
     12-bit, drop-sample, band-limited render) through an SSM2044-style 4-pole

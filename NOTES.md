@@ -34001,7 +34001,22 @@ at frame 5859 rev 14 output stale audio (+0.044 … +0.104, then a dip and the j
 rev 15 outputs silence for the engine's delay and then the new sound. The user's A02 (T2 RPSP): rev 15
 T2 output identical to rev 14 on all 4000 frames (AMP level constant, so the capacitor change is moot).
 
+**QUAN: pressed + turn now faster (user request, same rev).** The press never reaches the step handler
+in the delta — stock's generic handler (`0x4003240c`) reads the key state itself, `0x46c7d8ee +
+24·(0x38 + slot)` (0x38..0x3e = the encoders' press codes, kb/memory-map), and turns 7× while it is set.
+`quant_step` never looked, so a pressed turn (±1 per detent) took the fine path: identical to a plain
+turn. Now `tst.l 0x46c7de2e` (encoder A = slot 0) → the coarse path: **one ratio per detent while
+pressed (3× the plain turn's 3 detents per ratio)**; accelerated spins pass through as before. 8 bytes
+of ColdFire cave: `0x400d6f80..0x400d7afc`, **4 B left** under `0x400d7b00`. Oracle
+(`out/repitch_probe_kyoti`, rebuilt against refs/octabam's prebuilt libs:
+`c++ -std=c++17 -O2 -I$O/tools/emu/ot_emu -I$O/vendor -I$O/vendor/dsp56300/source -I$O/vendor/mc68k
+tools/repitch_probe_kyoti.cpp $O/out/emu/{libot_machine.a,mc68k/lib68kEmu.a,dsp56300/dsp56kEmu/libdsp56kEmu.a,dsp56300/dsp56kBase/libdsp56kBase.a,dsp56300/asmjit/libasmjit.a}`
+with `O=refs/octabam`): all 10 contracts PASS, contract 8 with a pressed case (held: +1 → next ratio,
+−1 back; released: fine again). The key-state address comes from stock's own handler — hardware confirms.
+The DSP payloads are byte-identical to the image verified above.
+
 **Build (rev 15, WIP tier):** `out/OCTATRACK_OS1.40C_REPITCH_KYOTI_REV15.syx`, sha256
-`49c4ca5cdddd25fe834e66eb84b877f38ed5accf578aa53ec5f4f0378cf88d8e` (mainos `a5725fbe4cb67476…`, CF
-`.bin` `0b02c7b5af15a151…`), 8147 B changed, 0 strays; OS VERSION `140C_RPK15`. **NOT flashed.**
-Rev 14 (`…_REV14.syx`, flashed) kept.
+`47c99c75b9ab55d149974ed85fe4dc8f12f70fa1f643038ac94686c6c7696fcb` (mainos `7d09034e17ead906…`, CF
+`.bin` `b5cddee97f21462f…`), 8155 B changed, 0 strays; OS VERSION `140C_RPK15`. **NOT flashed.**
+(Supersedes the same-named `49c4ca5c…` built before the QUAN change, never flashed.) Rev 14
+(`…_REV14.syx`, flashed) kept.

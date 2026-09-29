@@ -484,6 +484,17 @@ int main(int argc, char** argv)
 				ok &= step(*m, 4, -9, ran) == stops[0] && ran;
 				ok &= step(*m, 124, +9, ran) == stops[8] && ran;
 			}
+			// PRESSED + turn (encoder A's key state, 0x46c7de2e): a single detent
+			// moves one whole ratio (rev 15), and releasing restores the fine feel
+			{
+				auto m = fresh(4);
+				bool ran = false;
+				m->write32(0x46c7de2e, 1);
+				ok &= step(*m, 64, +1, ran) == stops[5] && ran;
+				ok &= step(*m, 79, -1, ran) == stops[4] && ran;
+				m->write32(0x46c7de2e, 0);
+				ok &= step(*m, 64, +1, ran) == stops[4] && ran;   // fine again: holds
+			}
 			// off a repitch track stock's handler is reached
 			{
 				auto m = fresh(0);
@@ -491,7 +502,7 @@ int main(int argc, char** argv)
 				step(*m, 64, +1, ran);
 				ok &= !ran;
 			}
-			check("quant_step: 3 fine detents per ratio, coarse proportional, 9 stops", ok);
+			check("quant_step: 3 fine detents per ratio, pressed = 1 per detent, coarse proportional, 9 stops", ok);
 		}
 
 		// 9) a gate change on the panel's track sets the caption AND the

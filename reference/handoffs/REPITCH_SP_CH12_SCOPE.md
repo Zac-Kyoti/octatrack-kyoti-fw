@@ -24,9 +24,9 @@ Markers as in `REPITCH_FIDELITY_SCOPE.md`: ✅ manufacturer (E-mu / Rossum) · �
   RPS9/RPSP (stale ring audio replayed at the new trig's full AMP) — both fixed in rev 14.
 - Cost: RPSP ≈ 173 DSP instructions/sample (rev 13 ≈ 128; §5 estimated 155–170), RPS9 61.
 - Build: `out/OCTATRACK_OS1.40C_REPITCH_KYOTI_REV14.syx`, sha256 `217a9c19…`. `RPK_CH12=0` builds 7/8.
-  **Flashed: "very nice".** Rev 15 (`…_REV15.syx`, `49c4ca5c…`, not flashed) fixes a crack on trigs
-  landing on a frame boundary and updates the capacitor once per frame (it closed at half speed on
-  unsplit frames) — NOTES "Session 112 continued (2)".
+  **Flashed: "very nice".** Rev 15 (`…_REV15.syx`, `47c99c75…`, not flashed) fixes a crack on trigs
+  landing on a frame boundary, updates the capacitor once per frame (it closed at half speed on
+  unsplit frames), and makes QUAN's pressed + turn faster — NOTES "Session 112 continued (2)".
 
 ---
 

@@ -105,6 +105,9 @@
                                         | UI editor's own tail (0x4005543c)
         .equ    STEP_PTCH, 0x40032d08   | stock slot-0 encoder-step handler
         .equ    QS_FINE, 3              | single detents per ratio (feel knob)
+        .equ    ENC_A_HELD, 0x46c7de2e  | key state of encoder A's press (code 0x38):
+                                        | 0x46c7d8ee + 24*code -- stock's generic step
+                                        | handler (0x4003240c) turns 7x while it is set
         .equ    TXT_MEASURE, 0x40012f30 | (font, -1, str) -> px width
         .equ    TXT_DRAW, 0x40012bd8    | (font, canvas, x, y, -1, str)
         .equ    FONT, 0x400ba876
@@ -665,9 +668,13 @@ quant_step:
         move.l  16(%sp),%d1             | delta (arg 2)
         | A single detent (|delta| = 1) is a FINE move: accumulate and advance
         | one ratio every QS_FINE of them, so the 8 ratios are ~21 detents
-        | wide rather than 7. Anything bigger is the accelerated / pressed
-        | turn and passes straight through, which is the speed the user
-        | called fine. QS_FINE is the one number to change for feel.
+        | wide rather than 7. Anything bigger is the accelerated turn and
+        | passes straight through. QS_FINE is the one number to change for feel.
+        | PRESSED + turn (rev 15): the press is not in the delta -- stock reads
+        | the key state itself -- so a held knob takes the coarse path too: one
+        | ratio per detent, 3x the plain turn (the OT's convention: faster).
+        tst.l   (ENC_A_HELD).l
+        bne.s   .qs_coarse
         move.l  %d1,%d2
         bpl.s   .qs_absok
         neg.l   %d2

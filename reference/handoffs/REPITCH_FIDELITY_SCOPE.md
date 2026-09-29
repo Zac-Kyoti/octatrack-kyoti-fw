@@ -30,7 +30,8 @@ and "Session 112 continued"; the channel 1/2 design: `REPITCH_SP_CH12_SCOPE.md`.
 - Cost: RPS9 61 DSP instructions/sample, RPSP ≈ 173. P cave 400 words; Y `$A00-$F8F`.
 - **Rev 14 flashed ("very nice"). Rev 15** (built, not flashed): the trig fix also covers trigs landing
   exactly on a frame boundary (rev 14 missed them — a pop on step 2 of every second cycle in a
-  16-trig pattern), and channel 1/2's capacitor now updates once per frame. Cave 403 words.
+  16-trig pattern), and channel 1/2's capacitor now updates once per frame. Cave 403 words. QUAN pressed + turn =
+  one ratio per detent (3× the plain turn). `…_REV15.syx` sha256 `47c99c75…`.
 
 ## ⏩ Implementation status — rev 13 BUILT (Session 111 cont., 2026-09-28): RPSP's band-limited render
 
