@@ -391,7 +391,6 @@ class Engine:
         self.taps = self.fir.shape[1]
         self.c = self.taps // 2 - 1
         self.post = Biquads(design_post(mode))
-        self.vis = False          # the first visit of a trig frame has been seen
         self.env = 0.0            # ch 1/2: the capacitor
         self.st = np.zeros((4, 2))   # ch 1/2: the 4-pole's state
         self.sp_reset()
@@ -426,17 +425,13 @@ class Engine:
         idx = [(k - self.c + t) % self.RING for t in range(self.taps)]
         return self.fir[ph] @ self.ring[idx]
 
-    def visit(self, table, trig):
+    def visit(self, table, trig, lc):
         """The trig bookkeeping at a hook visit: True when this visit starts a
-        new sound (the second visit of a trig frame). Then the 16 ring frames
+        new sound (a trig frame's second pass, LC = 1). Then the 16 ring frames
         before its first frame become silence -- they hold the last sound's
         unscaled audio, which the engines would otherwise replay at the new
         trig's full level (the rev 13 crack) -- and RPSP starts clean."""
-        if not trig:
-            self.vis = False
-            return False
-        self.vis = not self.vis
-        if self.vis:
+        if not trig or lc != 1:
             return False
         f0 = table[0][0]
         for j in range(1, 17):
@@ -444,10 +439,11 @@ class Engine:
         self.sp_reset()
         return True
 
-    def render(self, table, r, trig=False, level=0.0):
+    def render(self, table, r, trig=False, level=0.0, lc=1):
         """table: [(ring frame, fraction)] for this visit's output samples;
-        r: the increment. Returns the visit's stereo output samples."""
-        self.visit(table, trig)
+        r: the increment; lc: the voice module's loop counter (2: the frame's
+        first pass, 1: its second). Returns the visit's stereo output samples."""
+        self.visit(table, trig, lc)
         if self.mode == MODE_RPS9:
             # read c+1 frames behind the OT so every tap is at or before floor(p_i):
             # the OT does NOT deliver floor(p)+1 when the fraction is 0 (the stock
@@ -456,9 +452,9 @@ class Engine:
         out = []
         if self.prev is not None and table and (table[0][0] - self.prev[0]) % 64 > 2:
             self.prev = table[0]          # a jump = stale state (see the DSP)
-        if self.ch12:                      # the diode + RC, once per visit
-            self.env = max(level, self.env * CH12_DEC8)
-            g = ch12_g(CH12_DEPTH * self.env)
+        if self.ch12 and lc == 1:          # the diode + RC, once per frame
+            self.env = max(level, self.env * CH12_DEC16)
+        g = ch12_g(CH12_DEPTH * self.env)
         if not table:
             return np.zeros((0, 2))
         for k, f in table:
@@ -558,11 +554,14 @@ class Ch12:
         return v.copy()
 
 
-# The DSP's form of envelope A (rev 14): the capacitor is updated once per hook
-# visit -- two per 16-sample frame, whatever the pass split -- so its discharge
-# per visit is exp(-8 / (tau SR)); the cutoff table holds g at every 1/8 octave
-# of env (33 points, linear in between) as (G, D) pairs, read in place in X.
-CH12_DEC8 = math.exp(-8.0 / (CH12_ENV["A"]["tau"] * SR))
+# The DSP's form of envelope A (rev 14): the capacitor is updated once per
+# 16-sample frame, on the frame's second hook visit (LC = 1), so its discharge
+# per update is exp(-16 / (tau SR)); the cutoff table holds g at every 1/8
+# octave of env (33 points, linear in between) as (G, D) pairs, read in place
+# in X. (Rev 14 as first flashed updated per VISIT with exp(-8/(tau SR)) --
+# but a frame's empty first pass never reaches the engine, so unsplit frames
+# decayed at half speed.)
+CH12_DEC16 = math.exp(-16.0 / (CH12_ENV["A"]["tau"] * SR))
 CH12_GSTEPS = 32
 
 
@@ -601,8 +600,8 @@ class DspExact:
         self.cc = self.taps // 2 - 1
         self.T, self.D = render_q23()
         self.gt = ch12_gtab_q23()
-        self.vis = 0
         self.env = 0
+        self.g = (0, 0)                                         # zqinit clears the aux blocks
         self.st = [0] * 8                                       # L0..3, R0..3
         self.clean = True                                       # RPSP slot tag invalid
         self.sp_reset()
@@ -632,15 +631,11 @@ class DspExact:
         s = self.fir[ph] @ self.ring[idx]                      # exact: sum of Q23 x Q23
         return np.array([self.lim(v >> 23) & ~0xFFF for v in s], dtype=np.int64)
 
-    def visit(self, table, flags):
-        """zqtok: bit 12 of the per-voice word; the second visit of a trig frame
+    def visit(self, table, flags, lc):
+        """zqtok: bit 12 of the per-voice word on the frame's second pass (LC = 1)
         zeroes the 16 ring frames before the pass's first frame and clears the
         RPSP slot's tag."""
-        if not flags & 0x1000:
-            self.vis = 0
-            return
-        self.vis ^= 0x1000
-        if self.vis:
+        if not flags & 0x1000 or lc != 1:
             return
         f0 = table[0][0]                                       # (the DSP reads x:(r5))
         for j in range(1, 17):
@@ -649,7 +644,7 @@ class DspExact:
 
     def cutoff(self, level):
         """zqsnj's channel 1/2 block: returns (g, 1 - g)."""
-        prod = 2 * self.env * q23i(CH12_DEC8)                  # mpy: fractional, 48 bits
+        prod = 2 * self.env * q23i(CH12_DEC16)                 # mpy: fractional, 48 bits
         b = self.s24(level) << 24
         self.env = (max(b, prod) >> 24)
         e = self.env & 0xFFFFFF
@@ -659,12 +654,13 @@ class DspExact:
         g = self.lim(((G << 24) + 2 * D * frac) >> 24)
         return g, 0x7FFFFF - g
 
-    def render(self, table, rint, rfrac, flags=0, level=0):
+    def render(self, table, rint, rfrac, flags=0, level=0, lc=1):
         """table: [(ring frame, fraction Q24)]; rint/rfrac: the increment as
         the DSP holds it (x:$40, y:$40 with the mode tag); flags: the unpacked
-        per-voice word +$1E; level: the AMP stage's level word (Q23)."""
+        per-voice word +$1E; level: the AMP stage's level word (Q23); lc: the
+        voice module's loop counter (2, then 1)."""
         c = self.c
-        self.visit(table, flags)
+        self.visit(table, flags, lc)
         if self.mode == MODE_RPS9:
             out = []
             for k, f in table:
@@ -672,8 +668,9 @@ class DspExact:
             return np.array(out, dtype=np.int64).reshape(-1, 2)
         out = []
         one = 1 << 20
-        if self.ch12:
-            g, g1 = self.cutoff(level)                         # every visit
+        if self.ch12 and lc == 1:
+            self.g = self.cutoff(level)                        # once per frame
+        g, g1 = self.g
         if not table:
             return np.zeros((0, 2), dtype=np.int64)            # an empty visit: nothing else
         if self.clean:                                         # zqsp: a clean slot

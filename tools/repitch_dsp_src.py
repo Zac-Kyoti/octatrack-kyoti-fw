@@ -138,7 +138,7 @@ def constants(payload="A"):
         BSTRIDE=(-(2 * R + 1)) & 0xFFFFFF,            # after reading (T, D): R pairs down
         BHALF=L * R // 2 + 1, BPAIRS=L * R, BEND=BTAB + 2 * L * R,
         XSP=x2, XR9=x2 + len(sp), XBL=x1, GTAB=x1 + len(bl),
-        DEC8=q23(m.CH12_DEC8),
+        DEC16=q23(m.CH12_DEC16),
     )
     # modulo-2L addressing needs the ring at a multiple of the next power of two
     assert 2 * L <= 0x20 and STBASE % 0x20 == 0, "the ring must fit a 32-aligned slot"

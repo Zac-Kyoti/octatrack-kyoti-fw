@@ -28,6 +28,9 @@ and "Session 112 continued"; the channel 1/2 design: `REPITCH_SP_CH12_SCOPE.md`.
   8–12 samples at full AMP; the frames behind a new sound are now silence. RPCH never had it.
 - DARK REVERB works again (rev 10–13 overwrote a routine it calls inside SPRING's module).
 - Cost: RPS9 61 DSP instructions/sample, RPSP ≈ 173. P cave 400 words; Y `$A00-$F8F`.
+- **Rev 14 flashed ("very nice"). Rev 15** (built, not flashed): the trig fix also covers trigs landing
+  exactly on a frame boundary (rev 14 missed them — a pop on step 2 of every second cycle in a
+  16-trig pattern), and channel 1/2's capacitor now updates once per frame. Cave 403 words.
 
 ## ⏩ Implementation status — rev 13 BUILT (Session 111 cont., 2026-09-28): RPSP's band-limited render
 

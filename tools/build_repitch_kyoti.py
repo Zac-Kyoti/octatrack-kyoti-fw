@@ -38,7 +38,14 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (rev 14: RPSP = SP-1200 channel 1/2, trig crack fixed)", """
+status(WIP, "REPITCH KYOTI (rev 15: rev 14 + the frame-boundary trig fix)", """
+REV 15 = rev 14 (flashed: "very nice") + two fixes (NOTES Session 112 continued (2)):
+  * a trig landing exactly on a frame boundary still cracked in RPS9/RPSP (the
+    user heard it on step 2 of every second cycle): the trig is now taken on
+    the voice module's second pass by its loop counter, not by counting visits
+    (an empty first pass never reaches the engine);
+  * channel 1/2's capacitor is updated once per frame (it decayed at half speed
+    on frames with an empty first pass).
 REV 14 (NOTES Session 112; reference/handoffs/REPITCH_SP_CH12_SCOPE.md):
   * RPSP is heard as the SP-1200's CHANNEL 1/2: rev 13's staircase (26.04 kHz,
     12-bit, drop-sample, band-limited render) through an SSM2044-style 4-pole
@@ -53,7 +60,7 @@ REV 14 (NOTES Session 112; reference/handoffs/REPITCH_SP_CH12_SCOPE.md):
     stored in SPRING REVERB's orphaned X data tables (canary-proven unused),
     copied to Y at first use.
   * DARK REVERB works again: rev 10-13's cave overwrote a routine DARK REV
-    calls inside SPRING's module; the cave now ends below it (400 words).
+    calls inside SPRING's module; the cave now ends below it (403 words).
 RPS9 = Akai S900/S950 at a virtual 40 kHz, 12-bit. RPCH is stock. Both engines
 run on both DSP cores (hook A P:0x40b / B P:0x20e). *** THIS IMAGE REMOVES
 SPRING REVERB *** (neutered as SIDECHAIN3_CROSS does; its 388 words stay free).
@@ -82,7 +89,7 @@ STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 ELEK = ROOT / f"out/elek_repitch_kyoti{SUF}.bin"
 OUT_SYX = ROOT / f"out/OCTATRACK_OS1.40C_REPITCH_KYOTI{SUF.upper()}.syx"
 OUT_BIN = ROOT / f"out/OCTATRACK_REPITCH_KYOTI{SUF.upper()}.bin"
-VERSTR = "140C_RPKD" if os.environ.get("RPK_DIAG") == "1" else "140C_RPK14"   # rev 14 (13: 140C_RPK13, 11/12: 140C_RPK1)
+VERSTR = "140C_RPKD" if os.environ.get("RPK_DIAG") == "1" else "140C_RPK15"   # rev 15 (14: 140C_RPK14, 13: 140C_RPK13, 11/12: 140C_RPK1)
 
 # --- the seven detours (site, displaced bytes, cave symbol) -----------------
 DETOURS = [

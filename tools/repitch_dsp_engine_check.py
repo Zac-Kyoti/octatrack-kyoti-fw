@@ -16,8 +16,9 @@ tools/repitch_engine_model.py on the same input with the same table. Checks:
     integer twin (the DSP's arithmetic, step for step), driven the way the
     firmware drives it since rev 14: two hook visits per frame (split k /
     16-k), a trig every TRIG_EVERY frames at a varying offset (the per-voice
-    flag word, bit 12 -- the second visit zeroes the ring history, RPSP
-    starts clean), and an AMP level that jumps at each trig and decays
+    flag word, bit 12 -- the frame's second pass (LC = 1) zeroes the ring
+    history, RPSP starts clean; an empty pass is mode 0, as on the unit;
+    trig offsets include 0, the case rev 14 first missed), and an AMP level that jumps at each trig and decays
     (channel 1/2's input);
   * the twin against the float design, reported as a difference level (a
     tick position computed in 24.24 fixed point can put a 12-bit step on the
@@ -129,15 +130,17 @@ def model_run(mode, src24, rint, rfrac, exact=None, skip=(), sched=None):
             out.append(np.zeros((16, 2), dtype=np.int64))
         else:
             parts = []
-            for i0, i1 in ((0, k), (k, 16)):
+            for (i0, i1), lc in (((0, k), 2), ((k, 16), 1)):
+                if i1 == i0:
+                    continue                          # an empty pass is mode 0 on the unit: stock
                 if exact is None:
                     table = [(((pos + i * inc) >> 24) % 64, ((pos + i * inc) & 0xFFFFFF) / float(1 << 24))
                              for i in range(i0, i1)]
                     parts.append(eng.render(table, inc / float(1 << 24), bool(flags & 0x1000),
-                                            level / float(1 << 23)))
+                                            level / float(1 << 23), lc))
                 else:
                     table = [(((pos + i * inc) >> 24) % 64, (pos + i * inc) & 0xFFFFFF) for i in range(i0, i1)]
-                    parts.append(eng.render(table, rint, tagged, flags, level))
+                    parts.append(eng.render(table, rint, tagged, flags, level, lc))
             out.append(np.concatenate(parts))
         pos += 16 * inc
     return np.concatenate(out)

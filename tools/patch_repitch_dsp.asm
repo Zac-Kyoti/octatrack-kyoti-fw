@@ -35,8 +35,10 @@
 ;   x:$20a = this track's AMP stage state (X:$6000 + $300 x track); +8 = its
 ;         level at the end of the last frame, linear Q23 (the AMP stage runs
 ;         after the voice module)
-; Every frame runs this hook twice (the voice module's `do #2`); on a trig
-; frame the first visit is the old sound's tail, the second starts the new one.
+; Every frame runs this hook twice (the voice module's `do #2`: LC = 2, then 1);
+; on a trig frame the first pass is the old sound's tail, the second starts the
+; new one. An EMPTY pass (the first, when nothing is split) has no increment:
+; y:$40 = 0, so it takes the RPCH exit and never reaches the engines (measured).
 ;
 ; MEMORY (Y:$795..$FFF is free on stock on both cores -- octabam, measured on
 ; hardware; SIDECHAIN3 takes $800-$9ff):
@@ -75,7 +77,7 @@ S_PF    equ     RINGW+6 ; previous output's fraction, Q24
 S_RW    equ     RINGW+7 ; the ring slot (absolute address) of the next output
 STTAG   equ     STBASE+S_TAG
 ; ---- the aux block (Y:FBASE + x:$418/2)
-A_VIS   equ     0       ; $1000 after the first visit of a trig frame, else 0
+A_VIS   equ     0       ; (unused since rev 14.1)
 A_ENV   equ     1       ; channel 1/2: the capacitor (env, Q23)
 A_G     equ     2       ; this pass's stage coefficient g
 A_G1    equ     3       ; ... and 1 - g
@@ -111,9 +113,12 @@ zqtok:
         move    x:(r4+$1e),a1           ; this track's unpacked per-voice word +$1E
         and     #>$1000,a               ; a trig starts in this frame?
         beq     zqnh
-        move    y:(r6+A_VIS),x0
-        eor     x0,a                    ; the first visit leaves $1000, the second 0
-        bne     zqnh
+        move    lc,b                    ; ... and this is the frame's second pass (the
+        cmp     #<1,b                   ; voice module's `do #2`: LC 2, then 1), where
+        bne     zqnh                    ; the new sound starts. (Not a count of visits:
+                                        ; an empty first pass carries mode 0 and never
+                                        ; reaches this code -- rev 14 missed every trig
+                                        ; landing on a frame boundary that way.)
         move    x:(r5),a                ; the new sound's first frame (ring word offset)
         sub     #<32,a
         and     #>$7e,a
@@ -129,7 +134,6 @@ zqtok:
         nop
         move    a,y:(r1)                ; RPSP: a clean slot at zqsp
 zqnh:
-        move    a1,y:(r6+A_VIS)
         move    #>$fff000,y1            ; the 12-bit mask (RPS9; RPSP reloads it)
         move    n1,a
         cmp     #<2,a
@@ -181,14 +185,18 @@ zq9e:
 ; whose cutoff the OT's own AMP level pushes open through the SP's diode + RC.
 zqsp:
 ;+CH12
-; ---- channel 1/2: this visit's cutoff (every visit: two per frame). The SP's cutoff CV is its channel GAIN
+; ---- channel 1/2: the cutoff, once per frame (on its second pass; the first
+; renders with the last frame's). The SP's cutoff CV is its channel GAIN
 ; through a diode into 10 uF: it follows a rising level at once and falls no
 ; faster than the capacitor discharges. The OT's AMP level is that GAIN.
+        move    lc,b
+        cmp     #<1,b
+        bne     zqscx
         move    x:>$20a,r4              ; this track's AMP stage (r4: m4 is linear;
         nop                             ;  under m1's $7f a table walk would wrap)
         move    x:(r4+8),b              ; its level (end of the last frame)
         move    y:(r6+A_ENV),x0
-        move    #>DEC8,y0               ; the discharge over half a frame (a visit)
+        move    #>DEC16,y0              ; the discharge over a frame
         mpy     y0,x0,a
         max     a,b                     ; the diode
         move    b,y:(r6+A_ENV)
@@ -208,10 +216,11 @@ zqsp:
         move    #>$7fffff,a
         sub     x1,a
         move    a1,y:(r6+A_G1)          ; 1 - g (one LSB short: unity DC to 2^-21)
+zqscx:
 ;-CH12
-        move    r7,b                    ; an empty visit (a frame's first pass, as a
-        tst     b                       ; rule): nothing to render, and x:(r5) is not
-        beq     zqdone                  ; this track's -- the slot waits for a real pass
+        move    r7,b                    ; an empty pass: nothing to render, and x:(r5)
+        tst     b                       ; is not this track's -- the slot waits for a
+        beq     zqdone                  ; real pass (on the unit an empty pass is mode 0)
         move    n6,a
         add     #>STBASE,a
         move    a1,r4                   ; this track's slot

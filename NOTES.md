@@ -33964,3 +33964,44 @@ repitch-kyoti will be the same shape.
 **Build this session:** no new artifact state — every image rebuilt byte-identical to the
 hashes recorded after the PLAYSFREEFIX edit (features `a49b8973`/`c0499e5c`/`d954d6f8`/
 `64562367`/`6ca210ae`, Bugbuilds unchanged). **Nothing flashed, nothing needs flashing.**
+
+## Session 112 continued (2) (2026-09-28, `main`) — rev 14 FLASHED ("very nice"); one crack left on frame-boundary trigs → rev 15
+
+**User (hardware, rev 14 `217a9c19…` flashed):** RPS9 and RPSP sound "very nice". One bug: a 16-step
+pattern with 16 trigs (normal mode, no scales) pops at the start of **step 2's trig on every second
+cycle** (cycle 1 clean, cycle 2 pops on trig 2, …).
+
+**Root cause (ot_emu, MMTESTDT T1 with all 16 steps set by a RAM poke of the live trig mask at
+`0x400e21e6/7`, two cycles, private trace):** at 120 BPM a 16-step cycle is 5512.5 frames, so each
+cycle shifts every trig by half a frame; step 2 lands at offset 8 in one cycle and **offset 0** (a frame
+boundary) in the next. A frame whose first pass is EMPTY (split 0/16 — every unsplit frame) carries
+**y:$40 = 0 on that pass** (measured: 8203 of 8203 empty passes), so the hook takes the RPCH exit and the
+engines never see it. Rev 14's "second visit of a trig frame" parity therefore counted the new sound's
+pass as the FIRST visit on offset-0 trigs: no zeroing, and rev 13's stale-audio crack came back on
+exactly those trigs. (Rev 14's probe gave empty passes a mode, which the firmware never does — the
+check could not see it. The probe now leaves an empty pass at y:$40 = 0.)
+**Fix (rev 15):** the pass that starts a new sound is identified by the voice module's own loop
+counter — `move lc,b`, LC = 2 on a frame's first pass and 1 on its second (measured on every frame;
+the new sound always starts in the second) — trig = bit 12 AND LC = 1. The parity word is gone.
+**Second consequence, also fixed:** channel 1/2's capacitor was updated per engine visit with
+e^(−8/(τ·SR)), assuming two visits per frame; unsplit frames give one, so on them it closed at half the
+designed speed (τ ≈ 0.30 s instead of 0.15 s). Now once per frame on LC = 1 with e^(−16/(τ·SR)).
+For the user's A02 (HOLD 127, level constant) the output is unchanged.
+**Harness lesson:** model what the firmware delivers on EVERY pass, including the ones the engine does
+not act on — an assumption about pass structure is only as good as the probe that mimics it.
+
+**Verification:** `repitch_dsp_engine_check.py` 80/80 bit-exact, mode switch 8/8 (the trig schedule
+includes offset 0 every 16th trig); `RPK_CH12=0` 80/80. Cave 403 words (A `P:0x13f3..0x1585`),
+RPS9 60.6 / RPSP 170.7–172.9 instr/sample (probe).
+
+**Full firmware (rev 15 image, MMTESTDT T1 with 16 trigs, 11700 frames = two cycles + a trig of the
+third):** all **34 trigs** in RPS9 and in RPSP — including the three at offset 0 (frames 2, 5859 = step 2
+of cycle 2, 11027) — have the 16 ring frames behind the new sound zeroed on their trig frame (0 misses);
+at frame 5859 rev 14 output stale audio (+0.044 … +0.104, then a dip and the jump to the new sound),
+rev 15 outputs silence for the engine's delay and then the new sound. The user's A02 (T2 RPSP): rev 15
+T2 output identical to rev 14 on all 4000 frames (AMP level constant, so the capacitor change is moot).
+
+**Build (rev 15, WIP tier):** `out/OCTATRACK_OS1.40C_REPITCH_KYOTI_REV15.syx`, sha256
+`49c4ca5cdddd25fe834e66eb84b877f38ed5accf578aa53ec5f4f0378cf88d8e` (mainos `a5725fbe4cb67476…`, CF
+`.bin` `0b02c7b5af15a151…`), 8147 B changed, 0 strays; OS VERSION `140C_RPK15`. **NOT flashed.**
+Rev 14 (`…_REV14.syx`, flashed) kept.

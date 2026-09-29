@@ -10,8 +10,9 @@
 //     fraction Q24), r7 = 16, l:$40 = the increment (mode in y:$40 bits 0-1),
 //     x:$418 = the track offset
 //   * Y persists across passes (the engine's state and tables live there)
-//   * rev 14: each frame visits the hook TWICE (the voice module's do #2): k
-//     outputs, then 16-k (k = the frame's split); x:$419 -> a record whose
+//   * rev 14: each frame visits the hook TWICE (the voice module's do #2, LC 2
+//     then 1): k outputs, then 16-k (k = the frame's split; an empty pass has
+//     y:$40 = 0, as on the unit); x:$419 -> a record whose
 //     word +$1E carries the trig flag (bit 12), x:$20a -> an AMP state block
 //     whose +8 is the level. RK_SCHED = a file of per-frame "k flags level"
 //     (hex); RK_XDATA = a file of "addr word" (hex) loaded into X (the tables)
@@ -144,8 +145,10 @@ int main(int argc, char** argv)
 				mem.set(MemArea_X, TAB + i - i0, uint32_t(2 * ((p >> 24) % 64)));
 				mem.set(MemArea_Y, TAB + i - i0, uint32_t(p & 0xffffff));
 			}
-			mem.set(MemArea_X, 0x40, rint | 0xc0);        // the unit's x:$40 carries $c0 above the integer part (measured)
-			mem.set(MemArea_Y, 0x40, (rfrac & ~3u) | (pm & 3));
+			// an EMPTY pass carries no increment on the unit (y:$40 = 0: mode 0, measured)
+			const bool empty = i1 == i0;
+			mem.set(MemArea_X, 0x40, empty ? 0xc0 : (rint | 0xc0));   // x:$40 carries $c0 above the integer part (measured)
+			mem.set(MemArea_Y, 0x40, empty ? 0 : ((rfrac & ~3u) | (pm & 3)));
 			mem.set(MemArea_X, 0x418, trk);
 			mem.set(MemArea_X, 0x419, REC);
 			mem.set(MemArea_X, REC + 0x1e, sc.flags & 0xffffff);
@@ -155,6 +158,7 @@ int main(int argc, char** argv)
 			R.r[2].var = RING; R.r[6].var = RING;
 			R.r[5].var = TAB; R.r[7].var = i1 - i0;
 			R.r[0].var = 0x5555;   // live in the firmware: must come back untouched
+			R.lc.var = visit ? 1 : 2;   // the voice module's do #2 (measured: 2, then 1)
 			dsp.setPC(PRELUDE);
 			const uint64_t before = dsp.getInstructionCounter();
 			unsigned steps = 0;
