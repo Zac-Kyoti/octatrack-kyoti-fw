@@ -33724,3 +33724,10 @@ SPRING's payload loads **five X data tables per core referenced by no code but S
 loaded at boot for a removed effect. Moving RPSP's 189 table words there frees that much P.
 Runtime canary owed. Hit signal: trigs reach the DSP as voice commands and the AMP envelope runs
 on the DSP, so the filter can probably key off DSP state — gate 0b trace.
+
+**Correction (same session):** the "32-phase grid" attribution above is wrong. Measured on
+`isaak.wav` (float model, per-band junk-to-music vs a clean pitch-down): 32-, 64- and 128-phase
+virtual-ADC tables and rev 13's packed tables are the same to 0.1 dB at r = 1.0/0.9/0.75, for RPSP
+and RPS9. A finer grid only lowers pure-tone spurs (−43…−49 dB → ~8 dB lower). The 1/1 excess vs
+the ideal reference is not the tables (likely the render's 19–26 kHz transition band + the
+reference's idealised converter). Scope §3a.

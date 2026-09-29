@@ -115,6 +115,17 @@ project loads, FX changes on both buses, scenes and the reverbs/delays in `ot_em
 any write or read (`--dsp-writes` / a private trace build). Then check on hardware with a
 diagnostic build before relying on it.
 
+### 3a. Table fidelity (asked 2026-09-28)
+With RPSP's tables in X there is room to store every table in full again (rev 12's layout) —
+RPSP 192 + RPS9 256 + render 81 = 529 source words, inside the 716 (runtime copies in Y as today).
+**Measured on `isaak.wav`, it would change nothing audible:** rev 13's packing (9 of 32 rows)
+and the full tables give the same junk-to-music at 1/1, 0.9 and 0.75, to 0.1 dB, for both RPSP
+and RPS9. So do 64- and 128-phase tables. (A finer grid only lowers pure-tone spurs, already at
+−43…−49 dB, by ~8 dB.) So restoring full rows is harmless insurance, not an improvement. For
+RPS9 (locked) the choice is: leave it byte-identical, or restore rev 12's exact rows (a ≤ −54.6 dB
+change, unmeasurable on real material). **Correction:** NOTES "Session 111 continued (2)"
+blamed RPSP's extra 4–11 kHz junk at 1/1 on the 32-phase grid; this measurement rules that out.
+
 ## 4. The hit signal
 
 The DSP kernel we hook does not know when a trig fires: the ColdFire streams audio and the ring
