@@ -22,10 +22,28 @@ The pattern-boundary body, the rebuild loops and every per-track counter are
 STOCK. Design: reference/handoffs/DIRECTJUMP_V7_DESIGN.md; the sequencer bugs
 found on the way: reference/OT_SEQUENCER_BUGS.md.
 
-STATE. One word, DJ_MODE = 0x800000d8 (0 = OFF/stock, 1 = ON), whose boot ROM
-seed the standalone builder asserts is 0 so the feature cannot come up enabled.
-It is NOT the PERSONALIZE word MUTE MODE persists (0x800000dc), so the two
-modules do not collide on SRAM.
+STATE, AND THE ONE THING THAT CAN BREAK IT. One word, DJ_MODE = 0x800000d8
+(0 = OFF/stock, 1 = ON). DIRECT JUMP is a performance feature and must come up OFF
+at every power-on; that is guaranteed by two stock facts, not by this module's
+code: the boot 'ANDY' battery restore (`pea 0x64` at 0x4001f322 / 0x4001f3be /
+0x4001fb24) covers 0x80000070..0x800000d3 and so never reaches 0x800000d8, and
+the boot re-image seeds 0x800000d8 from 0x401087cc, which is 0 in stock.
+
+⚠️ MUTE MODE BREAKS THE FIRST FACT (reference/MERGE.md, blocker B1). It widens
+that restore to `pea 0x70` so its own word 0x800000dc survives power-off -- and
+the widened span 0x80000070..0x800000df SWEEPS 0x800000d8. With both in one
+image, DJ_MODE would be restored from a battery word nothing maintains, and
+DIRECT JUMP could come up ON. The two words differ (d8 vs dc); the RANGE is the
+collision. (An earlier revision of this docstring said the two do not collide on
+SRAM. That compared the words and missed the range. It was wrong.)
+
+So this module CLAIMS those four sites below, as assert-only pokes (expect ==
+write). Octabam's ledger checks every module's pokes against every other's, so a
+remix that pairs this module with anything rewriting them -- MUTE MODE's widening
+-- is REFUSED at the ledger instead of shipping a unit that can power on with
+DIRECT JUMP enabled. The real fix is the source option DJ_MODE_IN_CAVE (branch
+kyoti-v1, `4ed4720`), which moves the word into the cave -- re-loaded from flash
+at every boot, so OFF by construction -- after which these claims can go.
 
 MEASURED. Hardware-confirmed on the author's MKI 2026-09-27/28: the clock-locked
 timing and the Part change. Emulator-verified only (ot_emu, real image bytes):
@@ -175,6 +193,25 @@ assert sum(1 for i in range(0, CAVE_LEN - 3, 2)
            if PIN_BASE <= int.from_bytes(PINNED[i:i + 4], "big") < PIN_BASE + CAVE_LEN) == 17
 
 
+# ---- power-on OFF: the stock facts it rests on, CLAIMED (see STATE above) -------
+# Assert-only: each writes back exactly what it expects. Their job is to put these
+# addresses in the ledger under this module's name, so a module that rewrites any
+# of them is refused rather than silently letting DJ_MODE survive a power cycle.
+#
+# They are returned from emit(), NOT declared as Module.pokes, and that is load-
+# bearing: remix/ledger.py checks a plain Module.poke against caves, hook sites and
+# emit() pokes, but never against ANOTHER module's plain poke -- so as Module.pokes
+# these claims would not collide with a MUTE MODE port that declares its widening
+# the same way. As emit() pokes they are checked against every poke of every kind
+# (measured against the real ledger, both shapes of widening refused).
+ANDY_RESTORE_SITES = (0x4001f322, 0x4001f3be, 0x4001fb24)
+ANDY_RESTORE_STOCK = bytes.fromhex("48780064")          # pea 0x64: ends at 0x800000d3
+DJ_MODE_SEED = 0x401087cc                                # boot re-image source for 0x800000d8
+POWER_ON_OFF = tuple(
+    (site, ANDY_RESTORE_STOCK, ANDY_RESTORE_STOCK) for site in ANDY_RESTORE_SITES
+) + ((DJ_MODE_SEED, bytes(4), bytes(4)),)
+
+
 def _jsr(target: int) -> bytes:
     return b"\x4e\xb9" + target.to_bytes(4, "big")
 
@@ -186,13 +223,14 @@ def _jmp(target: int) -> bytes:
 def emit(addr: int):
     """The source is the only truth for the bytes (b""). All three detours and
     the keymap pointer depend on where the cave lands; each site is fixed, so
-    the ledger sees them all by name."""
+    the ledger sees them all by name. The four power-on-OFF claims ride along
+    here rather than in Module.pokes -- see POWER_ON_OFF for why."""
     return b"", (
         (LAND_HOOK, LAND_HOOK_STOCK, _jsr(addr + OFF_LAND)),
         (NOFA_HOOK, NOFA_HOOK_STOCK, _jsr(addr + OFF_NOFA)),
         (PTNREL_HOOK, PTNREL_HOOK_STOCK, _jmp(addr + OFF_PTNREL)),
         (PTN_LAYER_YES_PRESS, bytes(4), (addr + OFF_TOGGLE).to_bytes(4, "big")),
-    )
+    ) + POWER_ON_OFF
 
 
 MODULE = Module(

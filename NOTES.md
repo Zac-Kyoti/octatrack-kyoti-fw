@@ -34112,3 +34112,58 @@ fold, the PTCH/QUAN swap, the 7-position widget, the DSP engines (RPS9/RPSP, cha
 **Fixed:** CREDITS.md (the bullet moved from Sam's octabam entry to Jannik's, scoped to exactly the above),
 README, both source headers, the scope doc's "Concepts only" (struck, with the correction). Comment-only in the
 sources: the image is unchanged (`e72bd267…`). No build this turn.
+
+## Session 113 continued (2026-09-29, `main`) — a false SRAM claim corrected (DJ × MUTE MODE, blocker B1); the ledger guard that catches it; a ledger gap; the composer withdrawn in favour of `kyoti-v1`
+
+**Correction first.** The `direct-jump-kyoti` manifest and README (pushed in `0ab5666`) said
+DIRECT JUMP and MUTE MODE "do not collide on SRAM". That compared the two WORDS (`0x800000d8`
+vs `0x800000dc`, different) and missed that MUTE MODE widens a RANGE: its three `pea 0x64 ->
+pea 0x70` edits at `0x4001f322/f3be/fb24` extend the boot 'ANDY' restore to `0x800000df`,
+which sweeps `DJ_MODE` — DIRECT JUMP could come up ON (`reference/MERGE.md` B1, recorded long
+before this session). Found only because the `kyoti-v1` worktree's `4ed4720`
+(`DJ_MODE_IN_CAVE`) named it. Both texts now say so, flagged as a correction.
+
+**The guard, measured against octabam's real `remix/ledger.check`.** The DJ module now CLAIMS
+the four sites its power-on-OFF rests on (the three restore sites + `DJ_MODE`'s boot seed
+`0x401087cc`) as assert-only pokes (expect == write). With a stand-in for MUTE MODE's widening:
+
+| selection | ledger |
+|---|---|
+| DJ alone | passes |
+| all five ported modules | passes |
+| DJ + widening declared as `Module.pokes` | **REFUSED** (3 × poke site) |
+| DJ + widening declared via `emit()` | **REFUSED** |
+| widening + the other four modules (no DJ) | passes |
+
+**A gap in octabam's ledger, with a repro.** The first version of the guard used
+`Module.pokes` and was NOT refused: `ledger.check` compares plain `Module.pokes` against caves,
+hook sites and `emit()` pokes, never against another module's plain pokes. Two modules whose
+plain pokes rewrite the same bytes pass silently (`Poke(0x4001f322, 48780064, 48780070)` vs
+`Poke(0x4001f322, 48780064, 48780080)`: 0 clashes). So the DJ claims ride in `emit()`, which is
+checked against every poke of every kind. Reported to Sam.
+
+**The DJ × REPITCH composer is withdrawn.** Written this session as
+`tools/build_combo_dj_repitch.py` (WIP): repitch's image + DJ's cave re-linked top-down at
+`0x400d67c0`, proved byte-level (source reproduces the standalone cave; relocated == standalone
+with exactly 17 self-refs rebased; DJ's guards hold; interlock DISJOINT). Then found the
+`kyoti-v1` worktree: `tools/build_kyoti.py` (PREVIEW) already composes EVERY FINAL feature by
+running each builder sandboxed with its caves moved (`tools/kyoti_place.py`). Two combined
+builders is the mess to avoid, so the composer and its `out/Combo` images were moved out of the
+tree (scratchpad only). **Never commit or flash them**: they used `build_bugbuilds.py`'s
+`FREE_START = 0x400d64da`, which `kyoti-v1`'s `f7434d4` found is a live runtime record table
+(base `0x400d64ca`, 24-byte records written by `0x40001732`, terminator `0x400d64e2`) —
+PARTREAPPLY at `0x400d64dc` lands on it. **The same holds for every Bugbuild on `main` today**
+until `f7434d4` merges; none was ever flashed. Octabam's own ColdFire cave starts at
+`0x400d6b00` and is not exposed.
+
+**Capacity, which the port missed.** Octabam's whole ColdFire cave is `0x400d6b00..0x400d7c3c`
+= 4,412 B, shared by everything a remix plants (chooser list, descriptor clones, every
+module's caves). The five ported ROM caves total 5,162 B (DJ 1,980, RELOAD3 2,104, bugfixes
+606, QLREC 176, TRIGLOCK 296), so all five can never share a remix as written. Octabam's
+`Linked` docstring puts code over "a few hundred bytes" in the DRAM runtime; DJ and RELOAD3 are
+the candidates. RELOAD3's source gates its FINISHED toast on `.ifdef RL_DONE`, so as a `Linked`
+unit it needs `defsyms` — the same schema ask MUTE MODE has. Asked of Sam.
+
+**Build this session:** the two withdrawn `out/Combo` images (`DJ7_RPK16` syx `1fae3bab…`,
+`DJ7_RPK16_BUGFIX` syx `221d22e3…`) — **not flashed, must not be flashed**, removed from the
+tree. No other build.

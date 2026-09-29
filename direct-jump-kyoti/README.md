@@ -47,10 +47,37 @@ Three detours, six bytes each, plus one function pointer:
 | `0x40043418` | `dj_ptnrel` | `pea 0x400bf0f2` — `[PTN]` release, so the chooser stays shut |
 | `0x400bf0c0` | `dj_toggle` | the `[PTN]`-layer YES press slot, all-NULL in stock |
 
-**State:** one word, `DJ_MODE = 0x800000d8` (0 = OFF/stock, 1 = ON). The builder
-asserts its boot ROM seed is zero, so the feature cannot come up enabled. This is
-*not* the PERSONALIZE word MUTE MODE persists (`0x800000dc`) — the two modules do
-not collide on SRAM.
+**State:** one word, `DJ_MODE = 0x800000d8` (0 = OFF/stock, 1 = ON). DIRECT JUMP must
+come up **OFF at every power-on**, and that rests on two *stock* facts rather than on
+this module's code: the boot `ANDY` battery restore (`pea 0x64` at `0x4001f322`,
+`0x4001f3be`, `0x4001fb24`) covers `0x80000070..0x800000d3` and never reaches
+`0x800000d8`; and the boot re-image seeds `0x800000d8` from `0x401087cc`, which is 0.
+
+### ⚠️ Not safe with MUTE MODE yet — and the ledger will refuse it
+
+MUTE MODE widens that restore to `pea 0x70` so its own word `0x800000dc` survives
+power-off — and the widened span `0x80000070..0x800000df` **sweeps `0x800000d8`**. With
+both in one image, `DJ_MODE` would be restored from a battery word nothing maintains,
+and **DIRECT JUMP could come up ON**. (`reference/MERGE.md`, blocker B1.)
+
+> **Correction.** An earlier revision of this README said the two modules "do not
+> collide on SRAM." That compared the two words — `d8` and `dc` differ — and missed that
+> MUTE MODE restores a *range*. It was wrong.
+
+So this module **claims** those four sites as assert-only pokes (each writes back
+exactly the stock bytes it expects). A remix pairing it with anything that rewrites them
+is refused at octabam's ledger rather than shipping a unit that can power on with DIRECT
+JUMP enabled. Measured against the real ledger: refused whether a MUTE MODE port declares
+its widening as `Module.pokes` or through `emit()`; DIRECT JUMP alone, and all five ported
+modules together, still pass.
+
+The claims live in `emit()`, not `Module.pokes`, on purpose: the ledger checks plain pokes
+against caves, hooks and `emit()` pokes, but not against another module's plain pokes.
+
+**The real fix** is the source option `DJ_MODE_IN_CAVE` (branch `kyoti-v1`, `4ed4720`),
+which moves the word into the cave — re-loaded from flash at every boot, so OFF by
+construction. Once that is on `main`, this module will be rebuilt with it and the claims
+can go.
 
 **The cave floats.** It is not position-independent: 17 longwords hold absolute
 addresses of its own state block. `reference(addr)` in the manifest rebases
