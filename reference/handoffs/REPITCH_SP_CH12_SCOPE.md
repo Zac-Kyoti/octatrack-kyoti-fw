@@ -193,9 +193,17 @@ in Y:`$F48–$F7F` (free on stock per octabam's probe, beside our `$E00–$F40`)
   sample-identical to rev 13.
 - **3 — build, flash, listen.**
 
+## 6a. UI: none needed; TSNS as an optional cutoff offset
+The original SP-1200's channel 1/2 cutoff and resonance were fixed factory trims; only the
+Rossum reissue added rear sliders ("classic" = resonance fully left, frequency centred). So the
+core build uses fixed classic constants. Optional (after the core works): playback page 2's
+**TSNS** has no function in the repitch modes and is p-lockable/LFO-able; it could be the initial
+cutoff offset (64 = classic). **Gate 0c:** does TSNS already reach the DSP per track (the
+timestretch engine's own parameter)? If yes, the DSP reads it — no ColdFire change; the label
+stays "TSNS" (a relabel costs ColdFire cave bytes; 12 left). If no, defer (ColdFire space).
+
 ## 7. Not in this scope
-A user-facing 7/8 ↔ 1/2 selector (needs ColdFire cave space); live cutoff/resonance control like
-the reissue's sliders; channels 3–6 (their fixed filters are already modelled in
+A user-facing 7/8 ↔ 1/2 selector (needs ColdFire cave space); resonance control; channels 3–6 (their fixed filters are already modelled in
 `sp_channel_filter()` and could reuse this work later).
 
 ## Sources
