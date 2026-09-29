@@ -65,6 +65,8 @@ else:
     COMP_MOD, COMP_PROC = 0x1864, 0x1871
     COMMIT_HOOK = 0x303
 KB_BASE = 0x800
+KB_STRIDE = 0x40     # Session 115: keybus slot(track) = $800 + track*$40 (was *$80)
+MON_BASE = 0x7f0     # Session 115: MON_ON/MON_KEY[track] = Y:$7f0 + track*2 (was slot+$40/$41)
 Q23 = 1 << 23
 NW = 30                                 # dsp_host caps n7 at 15 frames = 30 words
 
@@ -112,8 +114,8 @@ def assemble():
         # build_sidechain3.py's DSP["B"] entry.
         txt = SRC.read_text() \
                              .replace("@COREBASE@", "0").replace("@FCOREBASE@", "4") \
-                             .replace("@SBASE@", "$38100").replace("@FSBASE@", "$30100") \
-                             .replace("@GCNT@", "$380fc").replace("@GSEED@", "$380fb") \
+                             .replace("@SBASE@", "$3be00").replace("@FSBASE@", "$33e00") \
+                             .replace("@GCNT@", "$3bdff").replace("@GSEED@", "$3bdfe") \
                              .replace("@FOREIGN_BR@", "bne zz24") \
                              .replace("@GTAB@", f"${gt:x}").replace("@FTAB@", f"${ft:x}") \
                              .replace("@LPEDGE@", f"${sc_tables.lp_edge():x}") \
@@ -399,7 +401,7 @@ def main():
 
     MARK = [((0x10 + i) << 12) | 0xABC for i in range(0x20)]
     KEYV, K = 1, 0                       # KEY=1 -> abs track 0 (CORE_BASE 0)
-    SLOT = KB_BASE + K * 0x80
+    SLOT = KB_BASE + K * KB_STRIDE
     pk = ",".join(f"{SLOT + i:x}={MARK[i]:x}" for i in range(0x20))
 
     def P(key=0, kflt=64, kgain=64, mon=0):
@@ -640,10 +642,10 @@ def main():
     check("MON=0: keybus[0] gen1 untouched", all(v == 0 for v in g1))
 
     # 6. MON publish (scdet -> MON_ON[my track]/MON_KEY[my track], Y:0x800+
-    #    track*0x80+0x40/0x41 -- the moncommit hook's only input) ------------
+    #    MON_BASE+track*2 +0/+1 since Session 115 -- the moncommit hook's only input) ------------
     print("\nMON publish (scdet -> MON_ON/MON_KEY for moncommit):")
     MYTRACK = 3
-    MON_ADDR = KB_BASE + MYTRACK * 0x80 + 0x40   # this track's own dead gen-2 slot
+    MON_ADDR = MON_BASE + MYTRACK * 2
     mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
                    [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [0xdead, 0xdead])])
     (pub,) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2)], P(key=KEYV, mon=1), pokey=pk_sig, audio=0)

@@ -174,14 +174,18 @@ DSP = {
     # foreign_br are the new per-payload build tokens -- see the asm file's
     # own header for what each means; SBASE_A/GCNT_A/GSEED_A etc. below are
     # the literal addresses chosen for the shared-window buffer layout.
+    # Session 115: the window is the LAST $200 words of bank track 3's FX2
+    # slot on each core (A $30000+$3e00, B $38000+$3e00), not +$100 -- the old
+    # place was inside DARK/PLATE REVERB's delay lines (patch_sc_dsp3.asm's
+    # header and NOTES.md "Session 115" have the measurement).
     "A": dict(va=0x400e2324, ln=0x136cb, cave_org=0x01252, spring_proc=0x012be,
-              corebase="4", fcorebase="0", sbase="$30100", fsbase="$38100",
-              gcnt="$300fc", gseed="$300fb", foreign_br="beq zz24",
+              corebase="4", fcorebase="0", sbase="$33e00", fsbase="$3be00",
+              gcnt="$33dff", gseed="$33dfe", foreign_br="beq zz24",
               disp_hook=0x004a7, comp_proc=0x01ab1, commit_hook=0x0050e,
               stub_init=0x007c8, stub_proc=0x007c9),
     "B": dict(va=0x400f59ef, ln=0x12d05, cave_org=0x01012, spring_proc=0x0107e,
-              corebase="0", fcorebase="4", sbase="$38100", fsbase="$30100",
-              gcnt="$380fc", gseed="$380fb", foreign_br="bne zz24",
+              corebase="0", fcorebase="4", sbase="$3be00", fsbase="$33e00",
+              gcnt="$3bdff", gseed="$3bdfe", foreign_br="bne zz24",
               disp_hook=0x0029c, comp_proc=0x01871, commit_hook=0x00303,
               stub_init=0x00588, stub_proc=0x00589),
 }

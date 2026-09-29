@@ -18,8 +18,8 @@ races a write -- those need dsp_host_xcore's `-skew` fuzz (a genuinely
 dual-core, timing-fuzzed run) and, ultimately, a hardware test. See NOTES.md
 "Session 77" for the full design writeup and this gap's own callout.
 
-Runs payload B's assembled cave (COREBASE=0, FCOREBASE=4, SBASE=$38100,
-FSBASE=$30100, GCNT=$380fc, GSEED=$380fb) through the ordinary single-core
+Runs payload B's assembled cave (COREBASE=0, FCOREBASE=4, SBASE=$3be00,
+FSBASE=$33e00, GCNT=$3bdff, GSEED=$3bdfe) through the ordinary single-core
 dsp_host, calling `sctap` directly (a plain dispatcher hook -- no per-
 instance r7 context needed) for the counter/publish checks, and `scdet`
 (via base_mem()'s usual splice) for the foreign-read check.
@@ -35,8 +35,8 @@ import emu_sc_dsp3 as sc3  # reuses assemble()/base_mem()/run()/sh()/load_mem/sa
 
 DSP_HOST = sc3.DSP_HOST
 SCRATCH = sc3.SCRATCH
-SBASE_B, FSBASE_B = 0x38100, 0x30100
-GCNT_B, GSEED_B = 0x380fc, 0x380fb
+SBASE_B, FSBASE_B = 0x3be00, 0x33e00        # Session 115 (were 0x38100 / 0x30100)
+GCNT_B, GSEED_B = 0x3bdff, 0x3bdfe          # Session 115 (were 0x380fc / 0x380fb)
 SEEDVAL = 0x10000                       # (q2) `move #1,b`'s stored form
 
 fails = []
@@ -154,7 +154,7 @@ def main():
           slot2 == src2, f"got[:4]={[hex(x) for x in slot2[:4]]} src[:4]={[hex(x) for x in src2[:4]]}")
 
     print("\nforeign-core read (scdet, KEY selecting a track on the OTHER half)")
-    # Foreign region as payload B sees it is FSBASE_B = $30100. Pre-seed all
+    # Foreign region as payload B sees it is FSBASE_B = $33e00. Pre-seed all
     # four generations at foreign-local index 2 (absolute track
     # FCOREBASE_B(4) + 2 = 6) with four distinct patterns, and set GCNT_B
     # (this core's own counter, standing in for "what the foreign core is on

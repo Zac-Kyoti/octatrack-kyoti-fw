@@ -39,37 +39,58 @@
 ;   @FCOREBASE@  the FOREIGN core's base track index: the other one of the
 ;                pair above
 ;   @SBASE@      this core's OWN publish region in the shared window:
-;                $30100 (payload A) / $38100 (payload B) -- where sctap
-;                writes so the FOREIGN core can read
+;                $33e00 (payload A) / $3be00 (payload B) -- where sctap
+;                writes so the FOREIGN core can read.  Session 115 moved it
+;                from $30100/$38100: those are 256 words into the stock FX2
+;                slot of bank track 3 (T7 / T3), i.e. INSIDE a reverb's delay
+;                lines -- every track's audio was being written into DARK/PLATE
+;                REVERB's memory on that core (NOTES.md "Session 114 continued
+;                (4)").  The new block is the last $200 words of the same
+;                16K slot: stock DSP code never writes past slot+$3da2 (DARK
+;                REVERB's last line, measured and read from its init; PLATE
+;                stops near +$3577, every FX1-capable effect below +$c00, the
+;                DELAY runs on the ColdFire), and each payload's own init
+;                zeroes its half of the window at boot.
 ;   @FSBASE@     the FOREIGN core's publish region: the other one of the
 ;                pair above -- where scdet reads a foreign KEY selection from
 ;   @GCNT@       this core's own generation counter, one word, in the shared
-;                window right before its own @SBASE@ block: $300fc (A) /
-;                $380fc (B). Never read the FOREIGN core's copy of this --
+;                window right before its own @SBASE@ block: $33dff (A) /
+;                $3bdff (B). Never read the FOREIGN core's copy of this --
 ;                each core tracks its OWN belief about "what generation is
 ;                everyone on right now" and assumes the two agree (XBUS's own
 ;                rule, inherited along with its caveat: this assumes the two
 ;                cores are rate-locked, unverified, see NOTES.md)
 ;   @GSEED@      this core's own "have I ever seeded @GCNT@" sentinel word,
-;                right before @GCNT@: $300fb (A) / $380fb (B)
+;                right before @GCNT@: $33dfe (A) / $3bdfe (B)
 ;   @FOREIGN_BR@ "beq zzXX" (payload A) / "bne zzXX" (payload B) -- branches
 ;                to the foreign-core read path when a track-membership test
 ;                (`and #>4,acc`, uniform on both payloads) says this KEY
 ;                selection is NOT on this core's own half
 ; Shared-window layout: 4 tracks x 4 generations x 32 words = $200 (512)
 ; words per core, `slot(local_track, gen) = SBASE + local_track*$80 +
-; (gen&3)*$20` -- same $80/$20 stride as the existing same-core keybus
-; formula below, deliberately, so the idiom stays familiar. No accumulation
+; (gen&3)*$20`. No accumulation
 ; (each publish wholly overwrites its own slot), so unlike XBUS's bus there
 ; is no clear-vs-write race and no housekeeper election needed -- only the
 ; write-vs-read race, guarded the same way XBUS's is: four buffers, reader
 ; always two generations behind the writer.
 ;
-; keybus ring (Y): slot(track,gen) = $800 + track*$80 + (gen&3)*$20.
-;   gen 0 = the per-frame publish (sctap).  gen 1 = the SC LISTEN stash --
-;   scdet writes the *processed* key there, sctail copies it to the dry buffer.
+; keybus (Y, this core's private memory; Session 115 layout):
+;   slot(track) = $800 + track*$40, track = ABSOLUTE 0..7, so $800..$9ff:
+;     +$00..$1f  gen 0 = the per-frame publish (sctap) -- only this core's
+;                own 4 tracks are ever written here
+;     +$20..$3f  gen 1 = the SC LISTEN stash -- scdet writes the *processed*
+;                key there (indexed by the SOURCE track, any of 0..7),
+;                moncommit copies it to the dry buffer
+;   MON_ON/MON_KEY[track] = Y:$7f0 + track*2 (+0 / +1), $7f0..$7ff.
+;   Until Session 115 this was $800 + track*$80 with MON at +$40/$41, i.e.
+;   $a00..$bff on payload A (tracks 5-8) -- exactly where REPITCH keeps its
+;   per-track RPSP ring and SP table (Y:$a00.., tools/repitch_dsp_src.py), so
+;   the combined image overwrote REPITCH's state on tracks 5-8 every block.
+;   Y:$795..$fff is free on stock on both cores (measured; payload B's modules
+;   end at $7a4), and REPITCH owns $a00..$fff: SIDE-CHAIN now stays in
+;   $7f0..$9ff.
 ;   This is SAME-CORE-ONLY and unaffected by cross-core KEY (see the design
-;   note above scdet's r5 computation) -- it stays exactly as it was.
+;   note above scdet's r5 computation); only its addresses moved.
 ;
 ; One-pole tracker state, per compressor instance, in the compressor's own r7
 ; block at r7+$16 -- unused by the stock module (RE: state block r7+$f..$1b;
@@ -116,7 +137,7 @@
 ; runs for it unconditionally) rather than an elected one.
 sctap:
         move    x:>$420,a               ; a1 = track index 0..7
-        asl     #7,a,a                  ; a1 = index * $80
+        asl     #6,a,a                  ; a1 = index * $40 (Session 115)
         move    a1,n1
         move    #>$800,r1
         lua     (r1)+n1,r1              ; r1 -> keybus slot (gen 0)
@@ -242,7 +263,7 @@ scdet:
 ; index's gen-1 slot (never touched by gen-0 publish, never touched by any
 ; OTHER hook here) equally free for this per-consumer stash purpose whether
 ; the source track happens to live on this core or the other one.
-        asl     #7,a,a
+        asl     #6,a,a
         move    a1,n1
         move    #>$800,r1
         lua     (r1)+n1,r1
@@ -259,7 +280,7 @@ scdet:
                                         ; token table)
 ; -- same-core copy (UNCHANGED from step 3) --
         move    r4,a
-        asl     #7,a,a
+        asl     #6,a,a
         move    a1,n1
         move    #>$800,r1
         lua     (r1)+n1,r1            ; r1 -> keybus[abs] gen 0
@@ -596,9 +617,9 @@ zz15:
 ; it back here is safe and saves the 3-instruction re-derivation.
         move    r4,a                   ; a = absolute key track 0..7 (kept until the end)
         move    x:>$420,b              ; b = MY track 0..7
-        asl     #7,b,b
+        asl     #1,b,b
         move    b1,n1
-        move    #>$840,r1              ; 0x800 + 0x40 (MON_ON[my track])
+        move    #>$7f0,r1              ; MONB (MON_ON[my track], Session 115)
         lua     (r1)+n1,r1
         move    #1,b
         move    b,y:(r1)+              ; MON_ON = 1 ; r1 -> MON_KEY[my track]
@@ -665,9 +686,9 @@ zz20:
 ; rts, matching sc_assemble()'s updated rts[3] lookup for moncommit's start.
 zz18:
         move    x:>$420,a
-        asl     #7,a,a
+        asl     #1,a,a
         move    a1,n1
-        move    #>$840,r1
+        move    #>$7f0,r1
         lua     (r1)+n1,r1
         move    #0,b
         move    b,y:(r1)
@@ -721,9 +742,9 @@ zz18:
 moncommit:
         move    x:>$206,r0           ; --- displaced --- (must survive untouched)
         move    x:>$420,a             ; a = my track 0..7
-        asl     #7,a,a
+        asl     #1,a,a
         move    a1,n1
-        move    #>$840,r1
+        move    #>$7f0,r1
         lua     (r1)+n1,r1            ; r1 -> MON_ON[my track]
         move    y:(r1)+,b             ; b = MON_ON ; r1 now -> MON_KEY[my track]
         cmp     #>$10000,b             ; (q2) exact match vs scdet's ON sentinel,
@@ -734,7 +755,7 @@ moncommit:
                                         ; OVER.)
 mc09:
         move    y:(r1),b              ; b = MON_KEY 0..7 (still via r1, no r2/n2 needed)
-        asl     #7,b,b
+        asl     #6,b,b
         move    b1,n1                 ; reuse n1 (stock resets it right after us anyway)
         move    #>$820,r1             ; reuse r1
         lua     (r1)+n1,r1            ; r1 -> keybus[key] gen 1

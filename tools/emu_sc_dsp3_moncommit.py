@@ -6,7 +6,7 @@ Isolated dynamic test of `moncommit` alone (patch_sc_dsp3.asm) -- the hook that
 replaced the old proc-end `sctail` splice (NOTES.md Session 58). `moncommit` is
 spliced at the DISPATCHER's per-track COMMIT step (payload A P:0x50e, payload B
 P:0x303 -- both `move x:>$206,r0`), not inside the compressor module, and its
-only inputs are MON_ON[track]/MON_KEY[track] (Y:0x800+track*0x80+0x40/0x41,
+only inputs are MON_ON[track]/MON_KEY[track] (Y:0x7f0+track*2 +0/+1 since Session 115,
 `scdet`'s publish -- see emu_sc_dsp3.py's "MON publish" tests) and the keybus
 gen-1 slot those point at. It does NOT read the page-2 params (r6) at all,
 unlike the old sctail -- so this test drives it purely through MON_ON/MON_KEY
@@ -21,6 +21,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import emu_sc_dsp3 as base
 
 KB_BASE = base.KB_BASE
+KB_STRIDE = base.KB_STRIDE
+MON_BASE = base.MON_BASE
 
 
 def main():
@@ -34,8 +36,8 @@ def main():
 
     MYTRACK = 5
     KEYTRACK = 2
-    MON_ADDR = KB_BASE + MYTRACK * 0x80 + 0x40      # MON_ON/MON_KEY for MYTRACK
-    GEN1 = KB_BASE + KEYTRACK * 0x80 + 0x20          # keybus[KEYTRACK] gen 1
+    MON_ADDR = MON_BASE + MYTRACK * 2      # MON_ON/MON_KEY for MYTRACK
+    GEN1 = KB_BASE + KEYTRACK * KB_STRIDE + 0x20          # keybus[KEYTRACK] gen 1
     SIG = [(0x300000 + i * 0x1111) & 0xFFFFFF for i in range(0x20)]
     pk = ",".join(f"{GEN1 + i:x}={SIG[i]:x}" for i in range(0x20))
 
@@ -77,7 +79,7 @@ def main():
     # 3. Different track's MON_ON must not leak into this track's commit --
     #    seed MYTRACK's own slot OFF while some OTHER track's slot is ON.
     OTHER = (MYTRACK + 1) % 8
-    OTHER_ADDR = KB_BASE + OTHER * 0x80 + 0x40
+    OTHER_ADDR = MON_BASE + OTHER * 2
     mem = base.base_mem(words, scdet, moncommit, False,
                          [(1, 0x420, [MYTRACK]), (1, 0, [0] * 0x20)],
                          [(2, MON_ADDR, [0, KEYTRACK]), (2, OTHER_ADDR, [0x10000, KEYTRACK])])
@@ -102,7 +104,7 @@ def main():
     assert UNSEEDED not in (MYTRACK, KEYTRACK, OTHER)
     real_garbage = base.load_mem(base.MEM_B)
     garbage_val = None
-    ua = KB_BASE + UNSEEDED * 0x80 + 0x40
+    ua = MON_BASE + UNSEEDED * 2
     for sp, addr, w in real_garbage:
         if sp == 1 and addr <= ua < addr + len(w):
             garbage_val = w[ua - addr]
