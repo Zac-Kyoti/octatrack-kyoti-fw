@@ -8,9 +8,18 @@
 # it happened twice on 2026-09-27 (10173b3, eb8f022).
 #
 # Add a new thread's files here BEFORE its first commit. First match wins.
+#
+# OCTABAM MODULE FOLDERS (one per shipped feature: manifest.py + its sources + README.md)
+# are listed under the thread that actually EDITS the source in them -- DIRECT JUMP's cave
+# source is still the directjump thread's file, wherever it lives. The four modules with no
+# live thread (kyoti-bugfixes, reload-from-project, quantize-live-rec-toggle,
+# erase-empty-trigless-locks) are deliberately NOT listed: their builders in tools/ are not
+# listed either, so a commit touching a builder and its module folder together stays a
+# "shared files only" commit instead of being refused for mixing two threads.
 
 [directjump]
 tools/*directjump*
+direct-jump-kyoti/*
 tools/emu_djdiag.py
 tools/diag_dj_*.py
 tools/*reflock*.py
@@ -25,5 +34,6 @@ reference/OT_SEQUENCER_BUGS.md
 
 [repitch]
 tools/*repitch*
+repitch-kyoti/*
 tools/sp1200_filter_response.py
 reference/handoffs/REPITCH_*
