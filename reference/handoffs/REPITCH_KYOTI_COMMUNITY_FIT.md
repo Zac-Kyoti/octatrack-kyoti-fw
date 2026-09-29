@@ -9,6 +9,10 @@ checked against community sources (search-engine summaries of Gearspace, the dxa
 SP-1200 forum, MPC-Forums, and plugin-maker writeups — the forum pages themselves
 blocked direct fetching, so treat these as consensus impressions, not measurements).
 
+> **FINAL — rev 16, hardware-confirmed 2026-09-29** (`tools/build_repitch_kyoti.py`). This page
+> describes rev 11; since rev 14 RPSP is heard through the SP-1200's channel 1/2 filter
+> (`REPITCH_SP_CH12_SCOPE.md`), and rev 12 retuned RPS9 (`REPITCH_FIDELITY_SCOPE.md`).
+
 ---
 
 ## RPSP (SP-1200)

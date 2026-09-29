@@ -125,8 +125,8 @@ each builder declares **FINAL**, **PREVIEW**, **WIP** or **SUPERSEDED** and anno
 every run. A **WIP** builder exits 2 without `KYOTI_ALLOW_WIP=1`; a **SUPERSEDED** one exits
 2 without `KYOTI_ALLOW_SUPERSEDED=1` and names its replacement (deliberately two variables —
 "I know this is unfinished" should not also unlock "this was abandoned"). Today every
-documented feature is FINAL — DIRECT JUMP V7 since 2026-09-27; the only WIP builder is
-`build_repitch_kyoti.py` (its own thread, `reference/handoffs/REPITCH_KYOTI_SCOPE.md`) — and
+documented feature is FINAL — DIRECT JUMP V7 since 2026-09-27, REPITCH KYOTI (rev 16) since
+2026-09-29; no builder is WIP at present — and
 fourteen earlier-stage builders are SUPERSEDED (DJ v1-v6, `build_mutemode{,_new}.py`,
 `build_softmute.py`, `build_relstate_shadow.py`, `build_sidechain{,2}.py`,
 `build_reload{,2}.py`). **`build_bugbuilds.py --with-wip` passes `KYOTI_ALLOW_WIP=1` to the
@@ -146,10 +146,11 @@ changes, change the call and the README table together. Upstream RE repos are tr
 | **QUANTIZE LIVE REC** — `[REC]` + `[PLAY]`, then `[PLAY]` again while the toast is up | `build_qlrec.py` | **confirmed working** (2026-09-25) after three instructive failures: a `dur<=0` toast hung the unit, a `0x400522ca` frame-handler detour crashed it, and a private scratch word at `0x80006a60` did not survive on the unit. Now keeps **no state at all** — the gate is stock's toast handle. 2 cosmetic issues parked |
 | **SIDE-CHAIN COMPRESSOR** — `KEY`/`KFLT`/`KGN`/`MON`, cross-core | `build_sidechain3.py` → `SIDECHAIN3_CROSS` | **confirmed, final** 2026-09-20, single-core and cross-core both |
 | **TRIGLESS-LOCK AUTO-REMOVE** | `build_triglock.py` | **confirmed, final** 2026-09-21 |
+| **REPITCH KYOTI** — TSTR `RPCH`/`RPS9`/`RPSP` tempo-locked varispeed, QUAN ratios on the PTCH slot | `build_repitch_kyoti.py` | **confirmed, final** 2026-09-29 (rev 16). Removes SPRING REVERB. DARK REVERB beside it emulator-verified only |
 
 **Composites** — `build_bugbuilds.py` gives each finished feature its **own** image with
 all three bug fixes folded into it: MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK,
-RELOAD3 and DIRECTJUMP_V7, six images, written only to `out/Bugbuilds/`. Features are never combined with
+RELOAD3, DIRECTJUMP_V7 and REPITCH_KYOTI, seven images, written only to `out/Bugbuilds/`. Features are never combined with
 each other. Not flashed; the composition itself is proven by a per-run
 interlock proof. There is deliberately **no single all-in-one image**:
 `tools/build_merged.py` stays withdrawn so a combined build cannot quietly ship an
@@ -186,7 +187,7 @@ RELOAD3, QLREC's stateless rewrite and SIDECHAIN3's UI fix were the last promoti
 (2026-09-25).
 
 **No DIRECT JUMP thread is open: V7 is FINAL (hardware-confirmed 2026-09-27).** Everything
-in §5 is finished. (repitch-kyoti is a separate WIP thread with its own scope doc.)
+in §5 is finished, and so is repitch-kyoti (rev 16, FINAL 2026-09-29 — see below).
 
 > Check this section against the tree before trusting it — it has gone stale before
 > (2026-09-25: three claims about `main` that a merge had already made false).
@@ -304,6 +305,27 @@ NOTES "Session 98"). Deferred by the user: all-tracks and whole-bank variants. H
 `reference/handoffs/RELOAD3_SEQFAIL_HANDOFF.md`. Spec and measurements:
 `reference/RELOAD_REDESIGN.md`; detail: `NOTES.md` "Session 42"–"44" + "Session 47" +
 "Session 80"–"Session 98".
+
+### REPITCH KYOTI — rev 16, FINAL (hardware-confirmed 2026-09-29)
+
+`build_repitch_kyoti.py` → `140C_RPK16` (and `BUG_RPK16` in the Bugbuilds). SETUP TSTR
+`RPCH`/`RPS9`/`RPSP` replay a STATIC/FLEX sample at the project tempo by varispeed, with
+the OT's own, an S900/S950's and an SP-1200's (channel 1/2, AMP-envelope-driven filter)
+character; PTCH becomes QUAN (9 exact ratios, p-/scene-lockable), and PTCH and QUAN are
+kept apart across TSTR switches. The DSP engine lives in SPRING REVERB's module on both
+cores (SPRING removed, SIDECHAIN3's 388 words and DARK REVERB's shared routine untouched);
+the ColdFire cave `0x400d6f80..0x400d7afc` has 4 B left. Design records:
+`reference/handoffs/REPITCH_KYOTI_SCOPE.md` (ColdFire, QUAN), `REPITCH_FIDELITY_SCOPE.md`
+(RPS9/RPSP), `REPITCH_SP_CH12_SCOPE.md` (channel 1/2); detail `NOTES.md` Sessions 106–112.
+Verification: `tools/repitch_dsp_engine_check.py` (80/80 bit-exact DSP vs model twin, both
+cores) and `out/repitch_probe_kyoti` (10 ColdFire contracts; build line in NOTES Session 112
+continued (2)); the private ot_emu instrumentation is `tools/repitch_ot_emu_trace.patch`.
+
+Still open, none of it blocking: the **octabam module port** (a DSP + ColdFire hybrid like
+the SIDE-CHAIN, which `0ab5666` deferred for the same reason — `threads.txt` already maps
+`repitch-kyoti/` to this thread); the **merge**, where its cave overlaps DIRECT JUMP V7's
+(`reference/MERGE.md`); on hardware, RTRG retrigs on a repitch track and a full DSP core of
+RPSP tracks under heavy effects are untested, and DARK REVERB's repair is emulator-only.
 
 ### Blockers on the staged merge
 

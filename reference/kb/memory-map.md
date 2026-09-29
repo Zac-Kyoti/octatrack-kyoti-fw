@@ -1160,10 +1160,24 @@ one of them has an explicit "publish" step:
 | shadow | `0x100a4ef8` / `0x100a4fe8 + same off` | `0x100a50a8 + part*6322 + track*30 + page*6 + slot2` |
 | "edited" flags | `0x40027e00/e30` (dirty) | `DB+0x95048 |= 1<<part`, `0x100b145e |= 1<<part`, `DB+0x9b332 = 1`, `0x100f8598 = 1` — **omit any of these and the Part store is inert** (measured, octabam tags 94–99). |
 | clamp | `min = P+0x6a[slot]`, `max = min + P+0x9a[slot] − 1` (`0x40054dee`) | same, at descriptor index `slot2+6` |
-| **live lane byte** | `0x80000810 + track*72 + flat` (+ `0xa0` slew marker at `0x80000db4 + track*72 + (flat/4)*4`) | **`0x80000830 + track*72 + slot2`** (= `0x80000810 + track*72 + 0x20 + slot2`) + redraw `0x46c7d244[slot2*20 + 4] = 0x14` |
+| **live lane byte** | `0x80000810 + track*72 + flat` (+ slew counter armed to `0xa0` at **`0x80000db4 + track*32 + (flat/4)*4`** — see the note below the table; the earlier `track*72` stride was wrong) | **`0x80000830 + track*72 + slot2`** (= `0x80000810 + track*72 + 0x20 + slot2`) + redraw `0x46c7d244[slot2*20 + 4] = 0x14` |
 | dial reads | the Part via the page cache | displayed value at `0x8f084 + track*30 + slot` (`slot = slot2+6`) — **separate from the store**; a write that skips it leaves the dial stale |
 | **DSP publish** | writer calls resolver `0x4009da20` → posts a **kind-0x0f** record to the DSP param queue `0x460d17ee`, consumed `0x4009204c` | **none.** Page 2 reaches the DSP *only* through the per-frame copier `0x4000cae8` (twin `0x40003d14`), which ships `0x80000a50`'s halfwords **and the `+0x20` lane** to host-port staging every frame, unconditionally. |
 | load-time fill | frame-builder refreshers `0x40170f8a` / `0x4017107a` (4 instances) from project storage | same refreshers; `0x4000c19c` on transport start re-applies the **saved bank's pattern part** over the lane (`0x4017107a + bank·635712 + part·6322 + track·24` → `0x80000816 + track·72`) |
+
+**Page 1: the base words, and why writing the live byte is not enough** (measured Session 112
+continued (3), our image, ot_emu full firmware with the real UI; confidence **C**). The value the
+engine uses is not the live byte but a **base halfword `0x80000a50 + track*64 + flat*2` (`ui<<8`)**:
+the per-frame copier (`0x4000cb2a`) rebuilds the lane record's first 24 B (`0x80000510 + track*48`,
+PTCH word at `+0`) from it **every frame**, before p-locks and scenes are applied
+(`0x4000cc20` / `0x4000ced0` / `0x4000d07a`). The base only follows the live byte while that group's
+**slew counter** runs: the editor arms it with 160 (`0x400551ec`, index `8*track + flat/4 + 809`
+longs from `0x80000110`); `0x4000d63c` then moves each base word 1/16 of the way to `live<<8` per
+frame (EMAC) and snaps it exactly when the counter goes negative (`0x4000d682`). The editor's
+no-slew path writes the base word directly (`0x400551bc`). So a patch that changes a page-1 value
+behind the editor's back must write the base word (or arm the counter): a lane write lasts one
+frame, and a live-byte write alone is silently ignored until the next knob turn — repitch-kyoti's
+PTCH/QUAN swap did exactly that from rev 5 to rev 15 (fixed rev 16).
 
 MIDI-CC pipeline: `UART → parser → queue 0x46c7e974 → MIDI-in task 0x40005540 →
 0x400d6474[status>>4] → CC handler 0x4000e79c → kernel queue 0x460d17ae (poster

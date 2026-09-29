@@ -2,6 +2,11 @@
 
 Written Session 111 (2026-09-28). Everything below the line is the prompt.
 
+> **FINAL — rev 16, hardware-confirmed 2026-09-29** (`tools/build_repitch_kyoti.py`, tier FINAL,
+> `140C_RPK16`; Bugbuild `BUG_RPK16`). Rev 15 fixed the last trig crack (trigs on a frame
+> boundary), rev 16 the TSTR switch that kept the other domain's PTCH/QUAN value and the QUAN
+> pressed-turn speed (NOTES Session 112 continued (2)–(4)). This prompt was executed in Session 112; it is kept as the record of rev 14's brief.
+
 ---
 
 Repo: ~/Documents/octatrack-kyoti-fw (Octatrack MKI OS 1.40C firmware mods, "OT Kyoti FW").

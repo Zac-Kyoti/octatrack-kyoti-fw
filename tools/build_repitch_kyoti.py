@@ -2,25 +2,36 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-repitch-kyoti, gate 1 (ColdFire only), on TOP OF STOCK 1.40C.
+REPITCH KYOTI -- tempo-locked varispeed with three sampler characters, on STOCK 1.40C.
+FINAL: rev 16, hardware-confirmed 2026-09-29 (NOTES Session 112 continued (4)).
 
-Scope and design record: reference/handoffs/REPITCH_KYOTI_SCOPE.md (read §0).
-Mechanism and per-hook comments: tools/patch_repitch_kyoti.s.
+Design records: reference/handoffs/REPITCH_KYOTI_SCOPE.md (the ColdFire side, QUAN),
+REPITCH_FIDELITY_SCOPE.md (RPS9/RPSP), REPITCH_SP_CH12_SCOPE.md (RPSP = SP-1200 ch 1/2).
+Mechanism and per-hook comments: tools/patch_repitch_kyoti.s (ColdFire),
+tools/patch_repitch_dsp.asm via tools/repitch_dsp_src.py + tools/dsp_xasm.py (DSP).
 
 What this image does:
-  * SETUP TSTR on STATIC/FLEX: OFF AUTO NORM BEAT RPCH RPS9 RPSP (raw 0..6).
-    All three repitch values are tempo-following varispeed; in gate 1 they
-    PLAY IDENTICALLY (the DSP character modes are gates 3/4).
-  * Audio editor ATTR: TIMESTRETCH gains REPITCH (raw 4); SETUP AUTO resolves
-    it to RPCH, never RPS9/RPSP.
-  * QUANT on the reclaimed PTCH slot of a repitch track: 8 exact ratios
-    1/2 2/3 3/4 1/1 5/4 4/3 3/2 2/1, stored in the PTCH word (neutral = 1/1,
-    so old projects load as today), p-lockable, octave-folded so the
-    increment stays rational and <= 2x.
+  * SETUP TSTR on STATIC/FLEX: OFF AUTO NORM BEAT RPCH RPS9 RPSP (raw 0..6). The
+    three new values replay the sample at the project tempo by varispeed (pitch
+    follows tempo, no stretching), each with its own character:
+      RPCH  the OT's own playback path (stock interpolation)
+      RPS9  Akai S900/S950: a virtual 40 kHz, 12-bit sampler
+      RPSP  E-mu SP-1200: 26.04 kHz, 12-bit, drop-sample, heard through channel
+            1/2's SSM2044-style 4-pole low-pass, opened by the track's AMP envelope
+  * Audio editor ATTR: TIMESTRETCH gains REPITCH/RPS9/RPSP; under SETUP AUTO each
+    sample's own setting applies.
+  * QUAN on the PTCH slot of a repitch track: 9 exact ratios 1/2 2/3 3/4 4/5 1/1
+    5/4 4/3 3/2 2/1, p-lockable, octave-folded so the increment stays rational and
+    <= 2x. A plain turn moves a ratio every 3 detents, pressed + turn every 2. PTCH
+    and QUAN are kept as two values: switching TSTR swaps them in and out.
+  * SPRING REVERB is removed: its DSP space holds the RPS9/RPSP engine and tables
+    (SIDECHAIN3's first 388 words stay free, DARK REVERB's shared routine stays
+    stock), it is no longer offered on either FX bus, and a project that still has
+    it loads it as NONE -- as SIDECHAIN3_CROSS does.
 
-Cave: 0x400d6f80 (the KYOTI_V1.0 free run; overlaps V1.1's staging -- see
-MERGE.md and the scope §5). Layout: [logic][widget7 clone][icon table]
-[icon records][glyph data].
+ColdFire cave 0x400d6f80..0x400d7afc (4 B free under patch_trigscale's 0x400d7b00;
+overlaps DIRECT JUMP V7's cave -- MERGE.md). DSP cave 403 words at the tail of
+SPRING's P module on both cores; tables in SPRING's X modules.
 
     out/mainos_repitch_kyoti.bin        patched MAIN OS
     out/OCTATRACK_OS1.40C_REPITCH_KYOTI.syx / out/OCTATRACK_REPITCH_KYOTI.bin
@@ -36,48 +47,17 @@ import importlib.util, os, pathlib, struct, subprocess, sys
 HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
-from kyoti_status import status, WIP
+from kyoti_status import status, FINAL
 
-status(WIP, "REPITCH KYOTI (rev 16: rev 15 + the mode-switch pitch fix)", """
-REV 16 = rev 15 + two ColdFire fixes (NOTES Session 112 continued (3)):
-  * leaving (or entering) a repitch mode could keep playing the OTHER domain's
-    PTCH/QUAN value until a knob turn: the swap now writes the per-track base
-    word the lane is rebuilt from every frame (0x80000a50), not the lane;
-  * QUAN pressed + turn = one ratio per 2 detents (plain: 3; rev 15: 1).
-REV 15 = rev 14 (flashed: "very nice") + two fixes (NOTES Session 112 continued (2)):
-  * a trig landing exactly on a frame boundary still cracked in RPS9/RPSP (the
-    user heard it on step 2 of every second cycle): the trig is now taken on
-    the voice module's second pass by its loop counter, not by counting visits
-    (an empty first pass never reaches the engine);
-  * channel 1/2's capacitor is updated once per frame (it decayed at half speed
-    on frames with an empty first pass);
-  * QUAN: pressed + turn = one ratio per detent (3x the plain turn; rev 16: 2 detents).
-REV 14 (NOTES Session 112; reference/handoffs/REPITCH_SP_CH12_SCOPE.md):
-  * RPSP is heard as the SP-1200's CHANNEL 1/2: rev 13's staircase (26.04 kHz,
-    12-bit, drop-sample, band-limited render) through an SSM2044-style 4-pole
-    low-pass, resonance 0, resting at 1.0 kHz and pushed open up to 4 octaves
-    by the track's own AMP envelope through the SP's diode + 10 uF (tau 0.15 s):
-    ATK/HOLD/REL shape it as DECAY did on the SP. (RPK_CH12=0: raw 7/8.)
-  * the CRACK at every trig start in RPS9/RPSP is fixed: at the pass that
-    starts a new sound (the DSP's own trig flag) the ring frames behind it --
-    stale audio the engines read behind the OT's position -- become silence,
-    and RPSP starts clean.
-  * both virtual-ADC tables at full fidelity again (RPS9 = rev 12's table),
-    stored in SPRING REVERB's orphaned X data tables (canary-proven unused),
-    copied to Y at first use.
-  * DARK REVERB works again: rev 10-13's cave overwrote a routine DARK REV
-    calls inside SPRING's module; the cave now ends below it (403 words).
-RPS9 = Akai S900/S950 at a virtual 40 kHz, 12-bit. RPCH is stock. Both engines
-run on both DSP cores (hook A P:0x40b / B P:0x20e). *** THIS IMAGE REMOVES
-SPRING REVERB *** (neutered as SIDECHAIN3_CROSS does; its 388 words stay free).
-Proven in emulation: python3 tools/repitch_dsp_engine_check.py (80/80 bit-exact
-with the model's twin, trigs and AMP levels driven, both cores, mode switch).
-NOT yet flashed.
+status(FINAL, "REPITCH KYOTI (rev 16)", """
+TSTR RPCH / RPS9 / RPSP: tempo-locked varispeed with the OT's own, an S900/S950's and an
+SP-1200's (channel 1/2) character, and QUAN ratios on the PTCH slot.  Removes SPRING REVERB.
+Hardware-confirmed on rev 5-16 (2026-09-27..29): tempo lock, the 9 QUAN ratios with p-locks and
+scene locks, RPS9/RPSP on both DSP cores, the ch 1/2 filter, no crack at trig start, TSTR
+switches keep PTCH and QUAN apart, QUAN plain/pressed turn speed.  Emulator-verified only:
+DARK REVERB working again beside the engine (broken on rev 10-13).  Not specifically tested:
+RTRG retrigs.
 """)
-
-
-
-
 
 BASE = 0x40000400
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"

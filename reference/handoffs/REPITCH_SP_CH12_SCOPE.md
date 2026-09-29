@@ -9,6 +9,11 @@ output. No code was written for this scope.
 Markers as in `REPITCH_FIDELITY_SCOPE.md`: ✅ manufacturer (E-mu / Rossum) · 🟡 derived by us ·
 📎 forum / secondary · ❓ unknown.
 
+> **FINAL — rev 16, hardware-confirmed 2026-09-29** (`tools/build_repitch_kyoti.py`, tier FINAL,
+> `140C_RPK16`; Bugbuild `BUG_RPK16`). Rev 15 fixed the last trig crack (trigs on a frame
+> boundary), rev 16 the TSTR switch that kept the other domain's PTCH/QUAN value and the QUAN
+> pressed-turn speed (NOTES Session 112 continued (2)–(4)). Rev 14 below is the channel 1/2 design as built; rev 14 was flashed 2026-09-28 ("very nice").
+
 ## ⏩ rev 14 BUILT (Session 112, 2026-09-28) — emulation-verified, NOT flashed
 
 - **Envelope A** (the user's pick at gate 1): the OT's own AMP level, read on the DSP (X:(x:$20a+8),

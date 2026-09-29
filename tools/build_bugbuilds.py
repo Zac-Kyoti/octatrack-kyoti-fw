@@ -4,7 +4,7 @@
 """
 Bugbuilds -- each finished FEATURE build, with all three BUG FIXES folded in.
 
-Six composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
+Seven composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
 not written alongside, the standalone per-feature images in out/):
 
     MUTEMODE_DT        + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
@@ -13,6 +13,7 @@ not written alongside, the standalone per-feature images in out/):
     TRIGLOCK           + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
     RELOAD3            + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
     DIRECTJUMP_V7      + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
+    REPITCH_KYOTI      + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
 
 Method -- compose onto the finished feature image, do not re-implement it.
 Each feature builder is run first (so the base is current), then the bug-fix caves are
@@ -21,20 +22,21 @@ is never re-derived: its DSP payloads, COMPRESSOR descriptor and FX2 chooser edi
 through untouched, and its cave stays at its own address so the descriptor's formatter
 pointers stay valid.
 
-PLAYSFREEFIX (patch_trigscale) is added to ALL SIX images: no feature builder carries a copy
+PLAYSFREEFIX (patch_trigscale) is added to ALL SEVEN images: no feature builder carries a copy
 any more.  Each of them used to (RELOAD3's sat at 0x400d7bfc, the rest at 0x400d7b00), and
 every copy wrote the same site 0x4009b6f2 -- which octabam's remix ledger refuses, so no two
 of those features could ever be selected into one remix.  The fix is its own contribution
 now (the bugfix-bundle module upstream) and this composer is where a combined image gets it.
 Nothing here needed changing for that: `already`/`need` are computed per image by scanning
-for each fix's detour, so the six bases simply all report "already present: none".
+for each fix's detour, so the bases simply all report "already present: none".
 
 Cave layout, where each fix is placed if that space is free in the base (it is in all but
 RELOAD3, whose own cave starts at 0x400d6500, so the allocator moves the two fixes up):
 
     patch_partreapply   0x400d64dc   402 B   (RELOAD3: 0x400d6c10)
     patch_pattern_led   0x400d6670   142 B   (RELOAD3: 0x400d6da4)
-    patch_trigscale     0x400d7b00    62 B   (added to all six)
+    patch_trigscale     0x400d7b00    62 B   (added to all seven; REPITCH_KYOTI's cave
+                                              ends at 0x400d7afc, right below it)
 
 Verification (every image, every run):
   * the feature's builder declares tier FINAL (a SUPERSEDED base is refused), and is re-run
@@ -102,6 +104,9 @@ FEATURES = {
                 "[PTN]+[TRACK n] reload track n's saved sequence; [BANK]+[TRACK n] also re-applies the Part."),
     "DIRECTJUMP_V7": ("build_directjump_v7.py", "out/mainos_directjump_v7.bin", "BUG_DJV7",
                       False, "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.0.1, clock-locked jumps)."),
+    "REPITCH_KYOTI": ("build_repitch_kyoti.py", "out/mainos_repitch_kyoti.bin", "BUG_RPK16",
+                      False, "SETUP TSTR RPCH/RPS9/RPSP: tempo-locked varispeed + QUAN ratios "
+                             "(rev 16).  Removes SPRING REVERB."),
     # --- not finished; build with --with-wip ---------------------------------------
     # (none at present: DIRECT JUMP V7 shipped 2026-09-27; V6.4 is SUPERSEDED)
 }

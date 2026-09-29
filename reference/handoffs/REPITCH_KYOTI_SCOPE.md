@@ -12,6 +12,11 @@ our own image, and the ones that still need that check are flagged **[VERIFY]**.
 
 ## 0. CURRENT STATE — read this first
 
+> **FINAL — rev 16, hardware-confirmed 2026-09-29** (`tools/build_repitch_kyoti.py`, tier FINAL,
+> `140C_RPK16`; Bugbuild `BUG_RPK16`). Rev 15 fixed the last trig crack (trigs on a frame
+> boundary), rev 16 the TSTR switch that kept the other domain's PTCH/QUAN value and the QUAN
+> pressed-turn speed (NOTES Session 112 continued (2)–(4)). Everything below is the design record as it evolved from Session 106; the per-rev status notes are history.
+
 **Status (updated Session 106, same day): GATE 1 IS BUILT and statically
 verified** — `tools/patch_repitch_kyoti.s` + `tools/build_repitch_kyoti.py` (WIP
 tier), image `out/mainos_repitch_kyoti.bin`, syx `140C_RPK1`. Cave

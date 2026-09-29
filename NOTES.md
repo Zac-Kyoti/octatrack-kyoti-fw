@@ -34058,3 +34058,35 @@ descriptor pointers; the DSP payloads are byte-identical to rev 15.
 **Build (rev 16, WIP tier):** `out/OCTATRACK_OS1.40C_REPITCH_KYOTI_REV16.syx`, sha256
 `e72bd267c0382de9dc3e9c37996654619454ed65e82d4ca5a518a89c7d82f0b1` (mainos `3d17b002659023ad…`, `.bin`
 `f955b3a7977997e9…`); OS VERSION `140C_RPK16`. **NOT flashed.** Rev 15 (`…_REV15.syx`, flashed) kept.
+
+## Session 112 continued (4) (2026-09-29, `main`) — rev 16 FLASHED, "works great": repitch-kyoti is FINAL
+
+**User (hardware, rev 16 `e72bd267…` flashed):** "Works great. I think we can call this final." Both rev 16
+changes confirmed on the unit: TSTR switches keep PTCH and QUAN apart with no knob turn, and the QUAN
+pressed-turn speed (2 detents per ratio; plain 3).
+
+**Promoted to FINAL:** `tools/build_repitch_kyoti.py` declares `FINAL` (builds without `KYOTI_ALLOW_WIP`; the
+image is unchanged, syx `e72bd267…`, `140C_RPK16`). Its docstring was still gate 1's ("8 ratios", "play
+identically") — rewritten to describe what ships. The status line names what was confirmed on hardware
+(tempo lock and QUAN with p-locks/scene locks since rev 5–10, RPS9/RPSP on both cores, the ch 1/2 filter,
+no trig crack, the rev 16 fixes) and what was not: **DARK REVERB's repair is emulator-verified only; RTRG
+retrigs and a full core of RPSP under heavy FX are untested.**
+
+**Bugbuild added:** `build_bugbuilds.py` gains `REPITCH_KYOTI` (`BUG_RPK16`): feature 8157 B + bug fixes 545 B
+→ composite 8702 B, **DISJOINT, ALL PRESERVED, NO STRAYS** (patch_trigscale at `0x400d7b00` sits right above
+repitch's cave end `0x400d7afc`). `out/Bugbuilds/OCTATRACK_OS1.40C_REPITCH_KYOTI_BUGFIX.syx` sha256
+`dd1c2ab25a2dc43be4489beaffdb559cdef006173139ed3f2deef43969498399` — **not flashed**. The six existing
+composites rebuilt byte-identical (DJV7 `e09654af…`, MUTEDT `52799ed2…`, QLREC `ebc4c5fb…`, RL3 `b0950c89…`,
+SC3X `5c767fb8…`, TRIGLK `cd9693b3…`).
+
+**Docs:** README (feature entry, hardware-status rows, Bugbuilds count, the V1.x note), BUILD_KYOTI.md (build
+row + status row), FLASHING.md (§4.10 test procedure, file table, version check), START_HERE.md (§5 table,
+composites, §6 frontier + a REPITCH KYOTI subsection with the open items), CREDITS.md (octabam's REPITCH
+module, which the ColdFire side is ported in part from), MERGE.md (cave now `0x400d7afc`, FINAL, Bugbuild
+disjoint; rev 14's trig-parity word is gone), `kb/memory-map.md` (the page-1 base words `0x80000a50 +
+64·t` and the slew counter; **the old `0x80000db4 + track*72` stride was wrong — it is `track*32`**), FINAL
+banners on the five `reference/handoffs/REPITCH_*` docs.
+
+**Still open (none blocking):** the octabam module port (`repitch-kyoti/`, already mapped in `threads.txt`;
+DSP + ColdFire hybrid, deferred for the same reason as SIDECHAIN in Session 113); the V1.x merge, where
+repitch's ColdFire cave overlaps DIRECT JUMP V7's whole cave.

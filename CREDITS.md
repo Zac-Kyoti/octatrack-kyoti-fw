@@ -42,6 +42,10 @@ reverse-engineering work. Nothing here would exist without the projects below.
     **[dsp56300/dsp56300](https://github.com/dsp56300/dsp56300)** core it vendors into
     `vendor/dsp56300` — the toolchain the SIDE-CHAIN COMPRESSOR was written and tested
     with. Our `tools/dsp56300_xcore/` dual-core harness is a thin shim over it.
+  - Its **REPITCH module** (`modules/repitch/repitch.s`, MIT) — **REPITCH KYOTI** grew
+    out of it, and its ColdFire side is ported in part from it: the tempo-source
+    routine's shape, the three increment-builder hooks and the audio-editor ATTR hooks,
+    each re-verified against our image (`tools/patch_repitch_kyoti.s` names them).
   - Its **firmware documentation set** (`docs/firmware/KERNEL.md`, `DSP.md`,
     `CHIP.md`, `LEVEL_LAW.md`, `COLDFIRE_DELAY.md` and siblings) — an independent
     reading of the RTOS, the DSP protocol and the level law, distilled throughout

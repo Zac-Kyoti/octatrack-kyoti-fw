@@ -40,7 +40,7 @@ flashed unit is indistinguishable from stock until you opt in.
 Which builds have run on real hardware is tracked in
 [Hardware-test status](#hardware-test-status) — **read it before you flash.**
 
-**One branch.** `main` carries everything — the finished features, the unfinished one,
+**One branch.** `main` carries everything — the finished features, anything unfinished,
 the research notes and the diagnostics. There is no separate work-in-progress branch to
 hunt through. Instead, **each builder tells you what tier it is in before it runs**:
 
@@ -119,6 +119,35 @@ courtesy, not a lock; `tools/kyoti_status.py` is all of it.
   → [`tools/build_reload3.py`](tools/build_reload3.py) ·
   spec [`reference/RELOAD_REDESIGN.md`](reference/RELOAD_REDESIGN.md)
 
+- **REPITCH KYOTI** — three new **TSTR** settings on a STATIC or FLEX track's SETUP page
+  (`[FUNC]` + `[SRC]`): the sample follows the project tempo by **varispeed**, the way a
+  classic sampler or a turntable would — speed and pitch move together, nothing is
+  stretched. The tempo comes from the sample's own tempo attribute (audio editor, ATTR),
+  so check it is right; a sample whose tempo is outside 30–300 BPM plays as stock. Each
+  setting has its own character:
+  - `RPCH` — the Octatrack's own playback, clean
+  - `RPS9` — an Akai S900/S950: a virtual 40 kHz, 12-bit sampler
+  - `RPSP` — an E-mu SP-1200: 26.04 kHz, 12-bit, drop-sample, heard through its
+    channel 1/2 low-pass filter. The track's AMP envelope opens the filter the way DECAY
+    did on the SP: a short envelope closes it with the note, a long HOLD keeps it open.
+
+  On a repitch track the **PTCH** knob becomes **QUAN**, a ratio against the tempo:
+  `1/2 2/3 3/4 4/5 1/1 5/4 4/3 3/2 2/1`, exact, so a loop at 3/4 lines back up with the
+  pattern instead of drifting. A turn moves one ratio every 3 detents, press + turn every 2.
+  QUAN takes p-locks and scene locks like PTCH, and PTCH and QUAN are kept separately:
+  switch TSTR back and PTCH is where you left it. In the audio editor, TIMESTRETCH gains `REPITCH`, `RPS9`
+  and `RPSP`, so under SETUP `AUTO` each sample plays in its own mode. PICKUP tracks and
+  every other TSTR setting are stock.
+
+  The DSP code space comes from **SPRING REVERB**, removed exactly as SIDE-CHAIN removes
+  it (a project that still has it loads it as NONE). RPSP costs the DSP about one and a
+  half FX1 FILTERs per track; a full core of RPSP tracks under heavy effects has not been
+  tried on hardware. Grown from octabam's REPITCH module ([`CREDITS.md`](CREDITS.md)).
+  Design: [`reference/handoffs/REPITCH_KYOTI_SCOPE.md`](reference/handoffs/REPITCH_KYOTI_SCOPE.md),
+  [`REPITCH_SP_CH12_SCOPE.md`](reference/handoffs/REPITCH_SP_CH12_SCOPE.md).
+  → [`tools/build_repitch_kyoti.py`](tools/build_repitch_kyoti.py) →
+  `OCTATRACK_OS1.40C_REPITCH_KYOTI`
+
 ### QOL Enhancements
 
 - **QUANTIZE LIVE REC toggle** — reach the QUANTIZE LIVE REC setting from the front
@@ -161,10 +190,11 @@ courtesy, not a lock; `tools/kyoti_status.py` is all of it.
 ### Comprehensive KYOTI Octatrack Firmware build
 
 - **Bugbuilds** — one image per finished feature, with all three bug fixes folded
-  in: MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK, RELOAD3 and DIRECTJUMP_V7, each
+  in: MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK, RELOAD3, DIRECTJUMP_V7 and
+  REPITCH_KYOTI, each
   as *that feature* + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX. Written to
   `out/Bugbuilds/`, so the standalone per-feature images are left alone. The features
-  are never combined with each other, which is why there are six images and not one.
+  are never combined with each other, which is why there are seven images and not one.
   Every run rebuilds each feature from its current FINAL builder (and refuses one that
   has been superseded), then asserts the composite's changes are exactly the disjoint
   union of the feature's and the bug fixes' own, with every bug fix byte-equal to its
@@ -176,8 +206,9 @@ courtesy, not a lock; `tools/kyoti_status.py` is all of it.
   unfinished feature)* — **`KYOTI_V1.0`** is the seven finished, hardware-confirmed
   mods; **`KYOTI_V1.1`** adds DIRECT JUMP V7 and RELOAD3 — both final now, but V1.1 is
   held behind two builder-assertion conflicts and no longer fits one free cave zone
-  with V7's larger cave. [`reference/MERGE.md`](reference/MERGE.md) is the allocation map
-  it will be built from.
+  with V7's larger cave. REPITCH KYOTI is final too, and its cave overlaps DIRECT JUMP
+  V7's, so it joins that re-layout. [`reference/MERGE.md`](reference/MERGE.md) is the
+  allocation map it will be built from.
 
 See **[`BUILD_KYOTI.md`](BUILD_KYOTI.md)** for prerequisites, the one-time setup,
 every build variant, and the version strings.
@@ -224,6 +255,13 @@ All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit
 | SIDE-CHAIN COMPRESSOR (`KEY`/`KFLT`/`KGN`/`MON`, cross-core) | `build_sidechain3.py` | **confirmed, final** 2026-09-20 |
 | ↳ a project still using the donated effect loads as NONE | `build_sidechain3.py` | **confirmed, final** 2026-09-25 |
 | RELOAD FROM PROJECT — both chords | `build_reload3.py` | **confirmed, final** 2026-09-25 |
+| REPITCH KYOTI — RPCH/RPS9/RPSP follow the project tempo; the 9 QUAN ratios; both DSP cores | `build_repitch_kyoti.py` | **confirmed, final** 2026-09-29 (rev 16; tempo lock since rev 10, 2026-09-27) |
+| ↳ RPSP through channel 1/2's filter, opened by the AMP envelope | `build_repitch_kyoti.py` | **confirmed** 2026-09-28 (rev 14) |
+| ↳ no crack at the start of a trig in RPS9/RPSP, incl. trigs on a frame boundary | `build_repitch_kyoti.py` | **confirmed** 2026-09-29 (rev 15) |
+| ↳ switching TSTR keeps PTCH and QUAN apart, no knob turn needed; QUAN turn speeds | `build_repitch_kyoti.py` | **confirmed** 2026-09-29 (rev 16) |
+| ↳ DARK REVERB alongside the engine (broken on rev 10–13) | `build_repitch_kyoti.py` | emulator-verified; not specifically tested on hardware |
+| ↳ QUAN p-locks and scene locks | `build_repitch_kyoti.py` | **confirmed** 2026-09-27 (rev 5.1) |
+| ↳ RTRG retrigs on a repitch track | `build_repitch_kyoti.py` | not specifically tested |
 | Bug 2 — Empty-pattern LED fix | `build_pattern_led.py` | **confirmed** 2026-09-13 |
 | Erase empty trigless locks | `build_triglock.py` | **confirmed, final** 2026-09-21 |
 | Bug 3 — Part-change carryover: PICKUP→FLEX stuck loop | `build_partreapply.py` | **confirmed** 2026-09-22 |

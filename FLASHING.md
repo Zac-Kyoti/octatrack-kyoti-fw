@@ -643,6 +643,44 @@ loop.
 
 **Revert**: flash `downloads/extracted/OCTATRACK_OS1.40C.syx`.
 
+### 4.10  REPITCH KYOTI  (`build_repitch_kyoti.py` → `OCTATRACK_OS1.40C_REPITCH_KYOTI` — **HARDWARE-CONFIRMED, FINAL**, rev 16, MKI 2026-09-29)
+
+Three new **SETUP TSTR** values on STATIC and FLEX tracks (`[FUNC]` + `[SRC]`), after
+`BEAT`: `RPCH`, `RPS9`, `RPSP`. Each replays the sample at the **project tempo by
+varispeed** (speed and pitch together), taking the sample's own tempo from its attributes:
+`RPCH` with the OT's own playback, `RPS9` as an Akai S900/S950 (40 kHz, 12-bit), `RPSP` as
+an E-mu SP-1200 (26.04 kHz, 12-bit) through channel 1/2's low-pass, opened by the AMP
+envelope. On such a track PTCH becomes **QUAN**, a ratio against the tempo.
+
+**What it costs:** **SPRING REVERB** is removed, exactly as the side-chain build removes
+it (§4.4): not offered in the chooser, and a project that still uses it loads it as
+**NONE**. This image does **not** include the bug fixes; the `REPITCH_KYOTI` Bugbuild does.
+
+1. **Boot check** — **SYSTEM → SYSTEM STATUS → OS VERSION** reads `140C_RPK16`; SPRING REVERB is gone from the FX
+   chooser.
+2. Load a loop whose tempo is set in the audio editor (ATTR), on a STATIC track with a trig
+   on step 1. `[FUNC]` + `[SRC]` → **TSTR = RPCH**. Change the project tempo: the loop
+   speeds up / slows down *and* changes pitch, and stays in time with the pattern.
+3. On page 1 the PTCH knob now reads **QUAN**. A turn moves one ratio every **3** detents,
+   **press + turn** every **2**: `1/2 2/3 3/4 4/5 1/1 5/4 4/3 3/2 2/1`. At 3/4 the loop
+   plays slower and lower, and lines back up with the pattern instead of drifting.
+4. **TSTR = RPS9**, then **RPSP**: the same timing with the older samplers' grain. On
+   RPSP, a short AMP envelope (HOLD 0, short REL) darkens each hit as it decays; HOLD 127
+   keeps the filter open.
+5. Put a trig on **every step** and listen to the starts in RPS9 and RPSP: **no crack or
+   pop** at any trig, on any cycle (rev 14 popped on step 2 of every second cycle).
+6. **Switching keeps PTCH and QUAN apart:** with TSTR `OFF` set PTCH to, say, +7; switch
+   to `RPSP` and set QUAN 3/4; switch back to `OFF` → **+7 plays immediately**, without
+   touching the knob (before rev 16 the old value kept playing until a knob turn), and
+   back in `RPSP` QUAN is 3/4 again.
+7. p-lock and scene-lock QUAN like PTCH. In the audio editor, TIMESTRETCH offers
+   `REPITCH` / `RPS9` / `RPSP`; with SETUP TSTR `AUTO` each sample plays in its own mode.
+8. **Not specifically tested on hardware:** DARK REVERB beside the engine (rev 10–13 broke
+   it; fixed since rev 14, emulator-verified); RTRG retrigs on a repitch track; a full DSP
+   core (tracks 1–4 or 5–8) of RPSP under heavy effects.
+
+Detail: `NOTES.md` Sessions 106–112; design records `reference/handoffs/REPITCH_*.md`.
+
 ## 5. Reverting to the official firmware
 
 Reflash the official one following the **same steps in §3**, sending
@@ -697,7 +735,7 @@ Now the patched code is suspect. Isolate it:
 ### (c) It boots and runs, but a feature doesn't work
 
 - **Did the flash take?** OS VERSION should read `140C_KYOTI` (DIRECT JUMP V7:
-  `140C_KDJ7`; fix-only build: still `1.40C`, so test by behaviour). PERSONALIZE is reset by every flash — the
+  `140C_KDJ7`; REPITCH KYOTI: `140C_RPK16`; a Bugbuild: its `BUG_*` name; fix-only build: still `1.40C`, so test by behaviour). PERSONALIZE is reset by every flash — the
   mods are off until you re-enable them.
 - **Re-run the exact test** from §4 for that feature.
 - **A regression** (something that worked on stock now misbehaves): note the exact
@@ -768,6 +806,7 @@ OCTATRACK_*.bin                   CF-card OS UPGRADE transport (faster)
 | `python3 tools/build_triglock.py` | `1.40C` | fix only: auto-remove an emptied trigless lock |
 | `python3 tools/build_directjump_v7.py` | `140C_KDJ7` | Bug-1 fix + **DIRECT JUMP V7.0.1** (`[PTN]`+`[YES]`): clock-locked jumps (timing **hardware-confirmed** 2026-09-27) + stock's Part / START SILENT / trig-condition hand-off and Program Change that follows re-cues (hardware pending) |
 | `python3 tools/build_reload3.py` | `140C_KYOTI` | Bug-1 fix + **RELOAD FROM PROJECT**, two chords (`[PTN]`/`[BANK]` + `[TRACK n]`) — **hardware-confirmed, final** (2026-09-25) |
+| `python3 tools/build_repitch_kyoti.py` | `140C_RPK16` | **REPITCH KYOTI** (no bug fix): TSTR `RPCH`/`RPS9`/`RPSP` tempo-locked varispeed + QUAN ratios; removes SPRING REVERB — **hardware-confirmed, final** (rev 16, 2026-09-29) |
 | `python3 tools/build_bugbuilds.py` | per-image | each finished feature **with all three bug fixes folded in** → `out/Bugbuilds/` |
 
 Superseded, kept only for rollback and reference — **do not flash**:
