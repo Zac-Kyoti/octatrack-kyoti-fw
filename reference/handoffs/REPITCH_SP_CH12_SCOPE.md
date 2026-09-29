@@ -126,6 +126,16 @@ RPS9 (locked) the choice is: leave it byte-identical, or restore rev 12's exact 
 change, unmeasurable on real material). **Correction:** NOTES "Session 111 continued (2)"
 blamed RPSP's extra 4–11 kHz junk at 1/1 on the 32-phase grid; this measurement rules that out.
 
+**Worst case, measured (decision 2026-09-28: restore full fidelity for BOTH).** A full-scale
+pure tone at each table's worst frequency, at a ratio that sweeps every fractional position,
+does expose the packing: RPS9 −61 dBFS difference at 14.6 kHz (ratio 1.016) and a line 55 dB below
+the tone at 10.8 kHz (ratio 0.516); RPSP −68 dBFS, line 57 dB below. That is above the 12-bit
+floor (≈ −74 dBFS), so measurable, though not audible. The user's rule: measurable ⇒ restore. Plan:
+RPS9 full = 256 source words (+112 over packed), RPSP full = 192 (+84), render 81 → **529 of the
+716 X words**; the packed-row expansion code (~48 P words) is replaced by rev 12's plain mirror
+copy (~9 words per table). RPS9's output becomes rev 12's exact design (the only deliberate
+change to a locked mode, requested by the user).
+
 ## 4. The hit signal
 
 The DSP kernel we hook does not know when a trig fires: the ColdFire streams audio and the ring
