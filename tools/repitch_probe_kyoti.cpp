@@ -299,7 +299,9 @@ int main(int argc, char** argv)
 				ok &= m.read8(act) == 64 && m.read8(park) == 70;
 				ok &= m.read8(sAct) == 64 && m.read8(sPark) == 70;
 				ok &= m.read8(0x80000810 + 72 * t) == 64;
-				ok &= m.read16(lanes + 48 * t) == 0x4000;
+				// rev 16: the BASE word the lane is rebuilt from every frame
+				// (0x80000a50 + 64t), not the one-frame lane word
+				ok &= m.read16(0x80000a50 + 64 * t) == 0x4000;
 				ok &= (m.read32(dbBase + 0x95048) & 1) && m.read32(0x100f8598) == 1;
 				// (c) idempotence: same state, second call changes nothing
 				ok &= callD1(m, swapFn, t);
@@ -311,7 +313,7 @@ int main(int argc, char** argv)
 				ok &= m.read8(act) == 70 && m.read8(park) == 64;
 				ok &= m.read8(sAct) == 70 && m.read8(sPark) == 64;
 				ok &= m.read8(0x80000810 + 72 * t) == 70;
-				ok &= m.read16(lanes + 48 * t) == 70 << 8;
+				ok &= m.read16(0x80000a50 + 64 * t) == 70 << 8;
 				// (e) a part apply resets the bookkeeping to adopt
 				{
 					auto* cpu = m.getCpuState();
@@ -484,16 +486,21 @@ int main(int argc, char** argv)
 				ok &= step(*m, 4, -9, ran) == stops[0] && ran;
 				ok &= step(*m, 124, +9, ran) == stops[8] && ran;
 			}
-			// PRESSED + turn (encoder A's key state, 0x46c7de2e): a single detent
-			// moves one whole ratio (rev 15), and releasing restores the fine feel
+			// PRESSED + turn (encoder A's key state, 0x46c7de2e): a detent counts
+			// twice -- a ratio every 2 detents (rev 16; plain 3, rev 15 1) -- and
+			// releasing restores the fine feel
 			{
 				auto m = fresh(4);
 				bool ran = false;
 				m->write32(0x46c7de2e, 1);
-				ok &= step(*m, 64, +1, ran) == stops[5] && ran;
+				ok &= step(*m, 64, +1, ran) == stops[4] && ran;   // 1st: holds
+				ok &= step(*m, 64, +1, ran) == stops[5] && ran;   // 2nd: advances
+				ok &= step(*m, 79, -1, ran) == stops[5] && ran;
 				ok &= step(*m, 79, -1, ran) == stops[4] && ran;
 				m->write32(0x46c7de2e, 0);
 				ok &= step(*m, 64, +1, ran) == stops[4] && ran;   // fine again: holds
+				ok &= step(*m, 64, +1, ran) == stops[4] && ran;
+				ok &= step(*m, 64, +1, ran) == stops[5] && ran;   // 3rd advances
 			}
 			// off a repitch track stock's handler is reached
 			{
@@ -502,7 +509,7 @@ int main(int argc, char** argv)
 				step(*m, 64, +1, ran);
 				ok &= !ran;
 			}
-			check("quant_step: 3 fine detents per ratio, pressed = 1 per detent, coarse proportional, 9 stops", ok);
+			check("quant_step: 3 fine detents per ratio, pressed = 2 per ratio, coarse proportional, 9 stops", ok);
 		}
 
 		// 9) a gate change on the panel's track sets the caption AND the

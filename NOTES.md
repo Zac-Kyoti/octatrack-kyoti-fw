@@ -34020,3 +34020,41 @@ The DSP payloads are byte-identical to the image verified above.
 `.bin` `b5cddee97f21462f…`), 8155 B changed, 0 strays; OS VERSION `140C_RPK15`. **NOT flashed.**
 (Supersedes the same-named `49c4ca5c…` built before the QUAN change, never flashed.) Rev 14
 (`…_REV14.syx`, flashed) kept.
+
+## Session 112 continued (3) (2026-09-28, `main`) — rev 15 FLASHED (pop fix confirmed); mode switch kept the other domain's PTCH/QUAN value → rev 16
+
+**User (hardware, rev 15 flashed):** the frame-boundary pop is fixed. Two asks: (1) QUAN pressed + turn is now
+too fast — somewhere between rev 15 (1 detent per ratio) and before (3); (2) "major regression": in RPSP with
+QUAN 3/4, switching TSTR to OFF (PTCH previously +7.3) redraws the knob as PTCH +7.3 but plays "a combination"
+of OFF at pitch 0 and RPSP at 3/4 until the knob is turned once.
+
+**Root cause (full firmware, ot_emu private copy, the REAL UI driven from the step script — new `key` / `enc`
+verbs, the `--live` FIFO grammar; SRC `0x22`, FUNC `0x2d`, encoders 0..5; a list param steps once per
+4-detent event):** the lane record's first 24 B (PTCH word at +0) are **rebuilt every frame** from the per-track
+**base words at `0x80000a50 + 64·t`** (`0x4000cb2a`, before p-locks/scenes are applied). The base words only
+follow the live bytes (`0x80000810 + 72·t`) while the editor's slew counter runs (`0x80000db4 + 32·t +
+4·(flat>>2)`, armed with 160 by the editor at `0x400551ec`; `0x4000d63c` slews 1/16 per frame and snaps at
+expiry; the editor's no-slew path writes the base word directly, `0x400551bc`). `rp_swap` (since rev 5,
+`5be77eb`) wrote Part DB, SRAM copy, live byte and the **lane** word — the lane write lasted one frame, then the
+base word's old value came back. So after leaving RPCH*, the engine played the QUAN value as PTCH (QUAN 3/4 =
+ui 34 → ~0.71×, which is what the user heard as "3/4"), while the knob showed the restored PTCH; a knob turn
+armed the slew and fixed it. Measured on rev 15: after RPSP (QUAN 3/4) → OFF, base `0x2200`, increment
+`0x02d413c0`; entering a repitch mode with no slew running left the PTCH value in the base word too (read as a
+QUAN bucket — right only when PTCH happened to sit in the 1/1 bucket). Not a new regression: present since rev 5,
+masked whenever a knob turn's 160-frame slew was still running at the switch.
+**Fix (rev 16):** `rp_swap` writes the base word (`ui<<8` at `0x80000a50 + 64·t`) instead of the lane word
+(2 B smaller). Rev 16, same scenario: base/lane `0x4700` from the frame of the switch, increment `0x04563f91`
+(= stock's at PTCH 0x47, mode bits clear), unchanged by a later knob turn; entering and re-entering exact.
+
+**QUAN pressed + turn (rev 16):** a pressed detent counts twice in the fine tally → **one ratio per 2 detents**
+(plain 3; rev 15 1). Accelerated turns still go coarse. Net cave size unchanged (+2 −2): ColdFire cave still
+`0x400d6f80..0x400d7afc`, **4 B left**.
+
+**Verification:** oracle `out/repitch_probe_kyoti` (rebuilt; the swap contract now checks the base word,
+contract 8 checks 2 pressed detents per ratio and 3 plain) — all 10 PASS. Full firmware (MMTESTDT T1, real UI):
+the scenarios above. rev 15 → rev 16 image diff: 250 B, all in the ColdFire cave + the two `quant_step`
+descriptor pointers; the DSP payloads are byte-identical to rev 15.
+
+**Build (rev 16, WIP tier):** `out/OCTATRACK_OS1.40C_REPITCH_KYOTI_REV16.syx`, sha256
+`e72bd267c0382de9dc3e9c37996654619454ed65e82d4ca5a518a89c7d82f0b1` (mainos `3d17b002659023ad…`, `.bin`
+`f955b3a7977997e9…`); OS VERSION `140C_RPK16`. **NOT flashed.** Rev 15 (`…_REV15.syx`, flashed) kept.

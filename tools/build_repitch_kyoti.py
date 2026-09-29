@@ -38,7 +38,12 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from kyoti_status import status, WIP
 
-status(WIP, "REPITCH KYOTI (rev 15: rev 14 + the frame-boundary trig fix)", """
+status(WIP, "REPITCH KYOTI (rev 16: rev 15 + the mode-switch pitch fix)", """
+REV 16 = rev 15 + two ColdFire fixes (NOTES Session 112 continued (3)):
+  * leaving (or entering) a repitch mode could keep playing the OTHER domain's
+    PTCH/QUAN value until a knob turn: the swap now writes the per-track base
+    word the lane is rebuilt from every frame (0x80000a50), not the lane;
+  * QUAN pressed + turn = one ratio per 2 detents (plain: 3; rev 15: 1).
 REV 15 = rev 14 (flashed: "very nice") + two fixes (NOTES Session 112 continued (2)):
   * a trig landing exactly on a frame boundary still cracked in RPS9/RPSP (the
     user heard it on step 2 of every second cycle): the trig is now taken on
@@ -46,7 +51,7 @@ REV 15 = rev 14 (flashed: "very nice") + two fixes (NOTES Session 112 continued 
     (an empty first pass never reaches the engine);
   * channel 1/2's capacitor is updated once per frame (it decayed at half speed
     on frames with an empty first pass);
-  * QUAN: pressed + turn = one ratio per detent (3x the plain turn).
+  * QUAN: pressed + turn = one ratio per detent (3x the plain turn; rev 16: 2 detents).
 REV 14 (NOTES Session 112; reference/handoffs/REPITCH_SP_CH12_SCOPE.md):
   * RPSP is heard as the SP-1200's CHANNEL 1/2: rev 13's staircase (26.04 kHz,
     12-bit, drop-sample, band-limited render) through an SSM2044-style 4-pole
@@ -90,7 +95,7 @@ STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 ELEK = ROOT / f"out/elek_repitch_kyoti{SUF}.bin"
 OUT_SYX = ROOT / f"out/OCTATRACK_OS1.40C_REPITCH_KYOTI{SUF.upper()}.syx"
 OUT_BIN = ROOT / f"out/OCTATRACK_REPITCH_KYOTI{SUF.upper()}.bin"
-VERSTR = "140C_RPKD" if os.environ.get("RPK_DIAG") == "1" else "140C_RPK15"   # rev 15 (14: 140C_RPK14, 13: 140C_RPK13, 11/12: 140C_RPK1)
+VERSTR = "140C_RPKD" if os.environ.get("RPK_DIAG") == "1" else "140C_RPK16"   # rev 16 (15: 140C_RPK15, 14: 140C_RPK14, 13: 140C_RPK13, 11/12: 140C_RPK1)
 
 # --- the seven detours (site, displaced bytes, cave symbol) -----------------
 DETOURS = [

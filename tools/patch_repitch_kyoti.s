@@ -94,6 +94,12 @@
         .equ    SHADOW_ADJ, 0x100a4ece-0x8ed80 | SRAM part copy, addressed with
                                         | the same DB-relative offsets
         .equ    LIVE_B, 0x80000810      | live param byte per [t*72 + flat]
+        .equ    BASE_W, 0x80000a50      | per-track base words, 64 B/track, ui<<8:
+                                        | the lane's first 24 B are copied from
+                                        | here every frame (0x4000cb2a), and the
+                                        | editor's slew (0x4000d63c) moves them
+                                        | toward the live bytes only while its
+                                        | counter (0x80000db4 + 32t) runs
         .equ    DIRTY_PARTS, 0x95048    | DB-relative: |= 1<<part
         .equ    DIRTY_SRAM, 0x100b145e  | |= 1<<part
         .equ    DIRTY_DB2, 0x9b332      | DB-relative: = 1
@@ -468,7 +474,7 @@ rp_ui_gate:
 | d1 = track. On a gate transition the PTCH slot's stored value trades
 | places with the PARKED byte -- NEIGHBOR's page-1 slot 0, a '---' param
 | stock saves with the project but never applies -- in the working DB AND
-| the SRAM part copy, and the live/lane bytes follow, with the writer's own
+| the SRAM part copy, and the live byte + base word follow, with the writer's own
 | dirty flags so a project save carries both domains. First sight adopts
 | without swapping (a project saved in a repitch mode already holds QUAN in
 | the slot; TSTR is saved alongside, so the domains stay matched). A parked
@@ -529,12 +535,17 @@ rp_swap:
         mulu.l  %d2,%d0
         lea     (LIVE_B).l,%a1
         move.b  %d5,(%a1,%d0.l)         | live byte, flat 0
-        moveq   #48,%d0
-        mulu.l  %d2,%d0
-        lea     (LANES).l,%a1
+        | The BASE word, not the lane: the lane is rebuilt from it every
+        | frame, so a lane write lasted one frame and the old domain's value
+        | came back -- leaving RPCH* then played the QUAN value as PTCH until
+        | a knob turn re-armed the editor's slew (rev 16; entering only
+        | worked when a recent turn's slew was still running).
+        move.l  %d2,%d0
+        lsl.l   #6,%d0
+        lea     (BASE_W).l,%a1
         move.l  %d5,%d1
         lsl.l   #8,%d1
-        move.w  %d1,(%a1,%d0.l)         | lane word = ui<<8
+        move.w  %d1,(%a1,%d0.l)         | base word = ui<<8
         moveq   #0,%d0                  | the writer's own dirty flags
         move.b  (PART_B).l,%d0
         moveq   #1,%d1
@@ -670,11 +681,10 @@ quant_step:
         | one ratio every QS_FINE of them, so the 8 ratios are ~21 detents
         | wide rather than 7. Anything bigger is the accelerated turn and
         | passes straight through. QS_FINE is the one number to change for feel.
-        | PRESSED + turn (rev 15): the press is not in the delta -- stock reads
-        | the key state itself -- so a held knob takes the coarse path too: one
-        | ratio per detent, 3x the plain turn (the OT's convention: faster).
-        tst.l   (ENC_A_HELD).l
-        bne.s   .qs_coarse
+        | PRESSED + turn: the press is not in the delta -- stock reads the key
+        | state itself -- so a held knob's detent counts double: a ratio every
+        | 2 detents instead of QS_FINE's 3 (the OT's convention: faster).
+        | Rev 15's one ratio per detent was too fast (user, rev 16).
         move.l  %d1,%d2
         bpl.s   .qs_absok
         neg.l   %d2
@@ -684,6 +694,10 @@ quant_step:
         move.b  (rk_acc).l,%d2
         extb.l  %d2
         add.l   %d1,%d2                 | signed detent accumulator
+        tst.l   (ENC_A_HELD).l
+        beq.s   1f
+        add.l   %d1,%d2                 | pressed: the detent counts twice
+1:
         move.l  %d2,%d1
         bpl.s   .qs_accok
         neg.l   %d1
