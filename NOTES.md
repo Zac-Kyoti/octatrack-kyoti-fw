@@ -34462,3 +34462,59 @@ anything else), with README's status rows saying precisely which part is hardwar
 (OTFX-T left on, SIDE-CHAIN tested), neither is shown to cause it; re-test on the rebuilt image. MUTE MODE should come
 up in OT on a new/loaded project (user request; the parked first-flash reset is related but not the same thing).
 REPITCH's slow PTCH/QUAN update when switching TSTR into a repitch mode.
+
+## Session 116 (2026-09-29, `kyoti-v1`) — a muted SIDE-CHAIN KEY in KYOTI: fixed (MUTE MODE exempts key tracks); the user's SIDE-CHAIN reference copy locked away
+
+**User (hardware, the S115 builds):** MUTE MODE bugs fixed; cross-core SIDE-CHAIN works. But a muted KEY track
+no longer drives the compressor, and with MON on a muted key is not monitored (unmute it and you hear it twice).
+Also asked for a **reference copy** of the SIDE-CHAIN build they confirmed, "never overwritten or changed".
+
+### The reference copy (done first)
+
+`~/Documents/Octatrack-reference-builds/SIDECHAIN3_CROSS_REFERENCE_2026-09-25/` — built from **`cde4df3`** (the
+2026-09-25 "loads as NONE" confirmation, the last one; `0ab5666` later un-bundled PLAYSFREEFIX from the standalone,
+so that commit is the image the user actually confirmed), in a throwaway worktree, twice, byte-identical. syx
+`8d273030378d4f4409b4ee06543df2c7577b61d2eaf69c47cf469220fb84e317`, CF `.bin` `55faa761…`, mainos `67823447…`.
+vs today's standalone it differs in exactly PLAYSFREEFIX (18 + 62 B) and Session 115's 17 DSP words per payload.
+Files + folder `chflags uchg` + read-only, README.txt inside; local tag `ref/sidechain3-cross-2026-09-25`
+(not pushed). Never write there.
+
+### The muted-key bug is MUTE MODE × SIDE-CHAIN, in the combined image only — not a Session 115 regression
+
+Watched T2's key slot on `kyoti_testMM` with T2 muted: reference SC, today's standalone SC and KYOTI in OT all hold
+the identical signal; KYOTI in OTFX-T / DT-T / OTFX (flashed V1.0 and S115 alike) hold **0**. Every soft mode
+silences the voice before `sctap` taps it (OTFX-T note-off + trig drop, DT-T trig drop, OTFX zeroes VOL/XVOL at
+record +6/+10). The user's "worked before" was standalone SIDE-CHAIN (no MUTE MODE) or OT.
+
+### Fix: a KEY track mutes like OT, in every mode (`patch_softmute.s`, `--defsym SC_KEY=1`, KYOTI only)
+
+Hook 1 (`p1_key`) builds a key mask every active-mode frame from the per-track DSP records (`0x80000110 + t*64`,
+half 0): FX1/FX2 id = low byte of halfword 27/28 (+55/+57), COMPRESSOR 0x18, its KEY = high byte of halfword 19/25
+(+38/+50) — verified on the user's real `test6` export (T5 FX2 id 0x18, halfword 26 = 0x4001 = KGAIN 64 / MON on).
+Key tracks leave the silenced set (no note-off, no trig drop, no VOL cut) and get their D5 mute bit back, so
+stock's frame builder cuts them post-FX — OT's behaviour, which keeps the key and MON (and no doubling). `KEYMASK`
+(a byte in the cave, like DJ_MODE) lets `mt_trig` / `mt_rebind` / `dt_trig` / `fresh_bind` / `trigflag` pass a key
+track's trigs. No range check on KEY: OFF and garbage land above bit 7, which nothing reads. **Standalone
+MUTEMODE_DT does not get it** (no KEY exists there; stock COMPRESSOR's slot 8 is unused and could hold anything):
+without SC_KEY the file assembles byte-for-byte as before (`c6eee7d7…` unchanged); `build_kyoti.flags_for()` sets it
+only when SIDE-CHAIN is in the image (a `--without SIDECHAIN3_CROSS` bisection drops it).
+
+**Room:** +118 B in the classic cave, which had 4. PLAYSFREEFIX → RELD (beside SIDE-CHAIN's formatters); PERSONALIZE
+labels → CAVE2, REPITCH glyph bitmap 3 → PERS1 (MUTE MODE builds on true stock, where PERS1/2 are still the stock
+arrays — a labels-into-PERS1 attempt was refused by its own "cave not free" check); glyph records 1-4 → PERS2 /
+SPRING / ENC. All invariants clean; each feature = its standalone apart from its own pointers.
+
+### Verified (emulator)
+
+- `test6` (real export; T5 COMPRESSOR, T6 muted, MON on; KEY set to T6 at runtime via the part byte `0x401712de`,
+  because the project was saved under the old per-core KEY where 2 meant T6): MON output **= the reference build**
+  in OT and OTFX, and in OTFX-T / DT-T from the second note on (the first note is lost only because the poked KEY
+  reaches the records at the same instant as the first trig — a test artefact; listen for the first kick after PLAY
+  on hardware). Pre-fix KYOTI: silence in all three soft modes. MON off is uninformative on this project (every
+  image renders identically — its compressor settings do not duck audibly).
+- `kyoti_testMM` (no COMPRESSOR), OTFX-T / DT-T / OTFX, T2 muted and not: 20 ms envelopes identical to the pre-fix
+  KYOTI (max diff 0.0000).
+
+**Build (not flashed):** KYOTI V1.0 `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.0.syx`
+`74459c01e2a57db9738fc78817ad1841c7e9eac400cb919d03375528aa07540b`, CF `8127fa2f6ad1c0c6…`. Standalones and
+Bugbuilds unchanged (SC `bf0ee1d7…`, MM `c6eee7d7…`).

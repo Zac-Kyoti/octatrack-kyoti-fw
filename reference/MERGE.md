@@ -29,14 +29,14 @@ PATTERN LED 142, SIDE-CHAIN 134, PLAYSFREEFIX 62 = **9622 B**. The classic cave 
 
 | zone | range | class | holds |
 |---|---|---|---|
-| CAVE | `0x400d6500..0x400d7c3c` | ours, hardware-proven | RELOAD3, DIRECT JUMP, soft-mute, PARTREAPPLY, MUTE MODE menu, PATTERN LED, PLAYSFREEFIX, PERSONALIZE labels (4 B left) |
+| CAVE | `0x400d6500..0x400d7c3c` | ours, hardware-proven | RELOAD3, DIRECT JUMP, soft-mute (1086 B since Session 116: + the SIDE-CHAIN KEY exemption), PARTREAPPLY, MUTE MODE menu, PATTERN LED (22 B left) |
 | SAFE | `0x400d24d0..0x400d2cdc` | midisc SAFE_CAVE | REPITCH logic, PERSONALIZE getters + setters (0 left) |
-| SPRING | `0x400d5728..0x400d58b8` | reclaim | REPITCH's 7-position widget clone |
-| ENC | `0x400c45b0..0x400c4700` | midisc ENC_UNLOCK_CAVE | TRIGLOCK |
-| RELD | `0x400d359c..0x400d3664` | midisc RELOAD_CAVE | SIDE-CHAIN's CF formatters |
+| SPRING | `0x400d5728..0x400d58b8` | reclaim | REPITCH's 7-position widget clone, glyph record 2 |
+| ENC | `0x400c45b0..0x400c4700` | midisc ENC_UNLOCK_CAVE | TRIGLOCK, glyph records 3-4 (0 left) |
+| RELD | `0x400d359c..0x400d3664` | midisc RELOAD_CAVE | SIDE-CHAIN's CF formatters, PLAYSFREEFIX (Session 116; 2 B left) |
 | SEAM | `0x400d46e4..0x400d47aa` | midisc SEAM_CAVE | QLREC |
-| CAVE2 / PASTE / FILT | `0x400d2ee8..0x400d301c` / `0x400d3da4..0x400d3e38` / `0x400d3480..0x400d34cf` | midisc | REPITCH glyph bitmaps (data) |
-| PERS1 / PERS2 | `0x400b2a34..0x400b2ab4` / `0x400b2ac0..0x400b2b00` | reclaim | REPITCH glyph table + records (data) |
+| CAVE2 / PASTE / FILT | `0x400d2ee8..0x400d301c` / `0x400d3da4..0x400d3e38` / `0x400d3480..0x400d34cf` | midisc | REPITCH glyph bitmaps 0-2, 4-6 (data); PERSONALIZE labels in CAVE2 (Session 116) |
+| PERS1 / PERS2 | `0x400b2a34..0x400b2ab4` / `0x400b2ac0..0x400b2b00` | reclaim | REPITCH glyph table, bitmap 3, records 0/1/5/6 (data). ⚠️ No MUTE MODE piece may go here: MUTE MODE is built on true stock, where these still hold the stock arrays it relocates |
 
 - **The classic cave starts at `0x400d6500`, not `0x400d64da`.** `0x400d64ca` is the base of a
   runtime table of 24-byte records: `0x4000176c` walks it for the first record whose first

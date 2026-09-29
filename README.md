@@ -252,6 +252,7 @@ All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit
 | MUTE MODE — all four modes, menu, SOLO | `build_mutemode_dt.py` | **confirmed, final** 2026-09-21 |
 | ↳ mode survives a power cycle | `build_mutemode_dt.py` | **confirmed** |
 | ↳ OTFX-T: muting a track must not shorten OTHER tracks' notes — broken in every build until 2026-09-29 (a scratch register lost across the note-off call, so the mute edge released an extra track), fixed | `build_mutemode_dt.py` | emulator-verified (the other track's envelope = OT's; OT, OTFX, DT-T renders byte-identical to before); **not yet on hardware** |
+| ↳ in KYOTI (with SIDE-CHAIN): a muted SIDE-CHAIN KEY track mutes like OT in every mode, so it keeps driving the COMPRESSOR and SC LISTEN (MON) — broken in every soft mode until 2026-09-29 (the key went silent) | `build_kyoti.py` (`--defsym SC_KEY=1`) | emulator-verified on the user's `test6` export (MON output = the reference SIDE-CHAIN build); **not yet on hardware** |
 | DIRECT JUMP V7 — clock-locked jumps: 16 ↔ 7-step NORMAL switches vs the metronome, master 1x ↔ 2x, swing/microtiming, rapid switching | `build_directjump_v7.py` | **confirmed, final** 2026-09-27 |
 | ↳ PER-TRACK patterns with mixed lengths and 2x…1/4x track scales | `build_directjump_v7.py` | **confirmed** 2026-09-28 |
 | ↳ MASTER LENGTH `INF` | `build_directjump_v7.py` | **confirmed** 2026-09-28 |
