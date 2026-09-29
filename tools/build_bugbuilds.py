@@ -21,17 +21,20 @@ is never re-derived: its DSP payloads, COMPRESSOR descriptor and FX2 chooser edi
 through untouched, and its cave stays at its own address so the descriptor's formatter
 pointers stay valid.
 
-PLAYSFREEFIX (patch_trigscale) is already present in MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS,
-RELOAD3 and DIRECTJUMP_V7 (each feature builder carries its own copy); only TRIGLOCK needs it
-added.  Every copy is the current tools/patch_trigscale.s -- RELOAD3's sits at 0x400d7bfc,
-the rest at 0x400d7b00, the address the standalone builds use.
+PLAYSFREEFIX (patch_trigscale) is added to ALL SIX images: no feature builder carries a copy
+any more.  Each of them used to (RELOAD3's sat at 0x400d7bfc, the rest at 0x400d7b00), and
+every copy wrote the same site 0x4009b6f2 -- which octabam's remix ledger refuses, so no two
+of those features could ever be selected into one remix.  The fix is its own contribution
+now (the bugfix-bundle module upstream) and this composer is where a combined image gets it.
+Nothing here needed changing for that: `already`/`need` are computed per image by scanning
+for each fix's detour, so the six bases simply all report "already present: none".
 
 Cave layout, where each fix is placed if that space is free in the base (it is in all but
 RELOAD3, whose own cave starts at 0x400d6500, so the allocator moves the two fixes up):
 
     patch_partreapply   0x400d64dc   402 B   (RELOAD3: 0x400d6c10)
     patch_pattern_led   0x400d6670   142 B   (RELOAD3: 0x400d6da4)
-    patch_trigscale     0x400d7b00    62 B   (added to TRIGLOCK only -- the others carry it)
+    patch_trigscale     0x400d7b00    62 B   (added to all six)
 
 Verification (every image, every run):
   * the feature's builder declares tier FINAL (a SUPERSEDED base is refused), and is re-run
@@ -104,6 +107,13 @@ FEATURES = {
 }
 
 PROBLEMS = []
+# The three bug-fix sources now live in the kyoti-bugfixes module directory
+# (one self-contained folder per octabam module: manifest.py + sources + README.md).
+SRC_DIR = {"patch_trigscale": "kyoti-bugfixes",
+           "patch_pattern_led": "kyoti-bugfixes",
+           "patch_partreapply": "kyoti-bugfixes"}
+
+
 def flag(msg):
     PROBLEMS.append(msg)
     print(f"  !! {msg}")
@@ -180,7 +190,8 @@ def link(stem, at):
     """Assemble + link one patch at `at`; return (blob, symbols)."""
     WORK.mkdir(parents=True, exist_ok=True)
     obj, elf, binf = WORK / f"{stem}.o", WORK / f"{stem}.elf", WORK / f"{stem}.bin"
-    subprocess.run(["m68k-elf-as", "-mcpu=5407", "-o", str(obj), f"tools/{stem}.s"],
+    subprocess.run(["m68k-elf-as", "-mcpu=5407", "-o", str(obj),
+                    f"{SRC_DIR.get(stem, 'tools')}/{stem}.s"],
                    check=True, cwd=ROOT)
     subprocess.run(["m68k-elf-ld", f"-Ttext=0x{at:x}", "-o", str(elf), str(obj)],
                    check=True, cwd=ROOT, capture_output=True)

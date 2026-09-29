@@ -33885,3 +33885,82 @@ dsp_xasm caught all of them.
 `217a9c196c874544aa1b8df212fd480bcb12b9d0310241e034771b3a261058d0` (mainos `677bb1d3da8f396a…`, CF
 `.bin` `5746a87f7cad826b…`), 8133 B changed, 0 strays, reproducible; OS VERSION `140C_RPK14`.
 **NOT flashed.** Rev 13 kept as `…_REV13.syx`.
+
+## Session 113 (2026-09-28, `main`) — the finished features become octabam modules: five ported, PLAYSFREEFIX un-bundled from every feature builder
+
+User: get the final feature set into octabam as modules, kept developing here and
+pulled in as a submodule, following the convention Tim Hastie's repo already uses.
+
+**The convention, read from the source rather than guessed.** `timhastie/octatrick-modules`
+is laid out one folder per module at the top level (`direct-jump/`, `quantizer/`, `synth/`,
+`tuner/`), each holding `manifest.py` + its own sources + `README.md`, and his manifest
+derives every source path from its own directory (`_HERE = os.path.relpath(os.path.dirname(
+os.path.realpath(__file__)))`) so one manifest serves both layouts — checked out directly,
+or as octabam's submodule at `modules/<name>/upstream/<name>`. So the sources must be
+COLOCATED with the manifest; a manifest cannot reach into `tools/`. Hence one new top-level
+folder per shipped module here, with the FINAL source `git mv`d into it. `tools/` keeps every
+builder, diagnostic and superseded stage untouched. No repo-wide re-org.
+
+**Five modules built** (`manifest.py` + sources + `README.md` each), every manifest loaded and
+exercised against octabam's real `refs/octabam/tools/remix/schema.py`:
+
+| module | caves | sites | source(s) |
+|---|---|---|---|
+| `direct-jump-kyoti` | 1 | 4 | `patch_directjump_v7.s` |
+| `kyoti-bugfixes` | 3 | 4 | `patch_trigscale.s`, `patch_pattern_led.s`, `patch_partreapply.s` |
+| `reload-from-project` | 1 | 6 | `patch_reload3.s` |
+| `quantize-live-rec-toggle` | 1 | 2 | `patch_qlrec.s` |
+| `erase-empty-trigless-locks` | 1 | 1 | `patch_triglock.s` |
+
+**Cave relocation, measured not assumed.** `CavePatch.reference(addr)` is the oracle for a
+FLOATING cave. Three of our caves are NOT position-independent — DJ V7 holds 17 absolute
+longwords into its own state block, RELOAD3 29, PARTREAPPLY 4 — so each manifest rebases
+exactly those (every u32 on a 2-byte boundary whose value lands inside the cave). The rule
+was proved against real `m68k-elf-ld` output at two other addresses per cave, byte-identical
+both times; trigscale, pattern_led, qlrec and triglock are position-independent and pin one
+blob. **`hook_addr` always plants a `jsr`** (`build_bus.py` §1d), so every `jmp` detour and
+every 8/18-byte span goes through `emit()` instead; DJ additionally cannot use `hook_addr`
+because its entry (`dj_land`, +0x088) is not the cave base (`dj_toggle` is).
+
+**PLAYSFREEFIX un-bundled from all five feature builders** (user's call, knowing the images
+change). Each of MUTEMODE_DT / QLREC / SIDECHAIN3_CROSS / RELOAD3 / DIRECTJUMP_V7 carried its
+own copy of `patch_trigscale` writing the SAME site 0x4009b6f2 — as modules the remix ledger
+refuses that, so no two of those features could ever share a remix. Proof of the edit: each
+image changed **exactly 72 bytes, 0 outside trigscale's site + cave, and every one of those
+bytes now equals stock**. `build_bugbuilds.py` needed NO code change (`already`/`need` are
+scanned per image) — all six now report "already present: none" and fold in all three fixes,
+DISJOINT / ALL PRESERVED / NO STRAYS, and **all six composite syx are byte-identical to the
+pre-change run** (`e09654af…` unchanged) because the composer places trigscale back at the
+same 0x400d7b00. `build_mutemode_dt.py`'s DT-vs-MUTEMODE cross-check needed the trigscale
+site + cave added to its `allowed` list (the superseded sibling still carries the fix).
+
+**Every standalone image rebuilds byte-identical after its source moved** — DJ V7 reproduced
+`fac16421` (the flashed V7.0.1) before the PLAYSFREEFIX edit, confirming the `git mv` alone
+changed nothing.
+
+**DJ × PARTREAPPLY, asked and answered: no dependency.** V7.0.1 changes the Part by posting
+stock's own `{0x14, part}` message, so it reaches the same handler PARTREAPPLY hooks by the
+stock route — it needs no fix to work, and inherits the stock carryover bug exactly as a stock
+pattern change does. Session 109's composite test stands (Part trace, fast-re-cue PCs, timing
+matrix all identical, including a run where every jump changes Part). Kept as separate
+modules; both READMEs now say to take the bugfix bundle along with DIRECT JUMP, and why.
+
+**MUTE MODE is blocked on two octabam gaps** (needs the Linked + Detour + TableGrow + Poke
+shape, not `CavePatch`, because it relocates three stock PERSONALIZE pointer arrays and
+repoints five references):
+1. `TableGrow` only APPENDS; MUTE MODE splices its row at index 2 (`SPLICE_AT = 2`, after
+   "PREVIEW WITHOUT FX"). Writing the arrays ourselves is not an option — they are copies of
+   stock pointer tables, i.e. Elektron bytes, which the author-repo contract forbids;
+   `TableGrow` exists so the build reads them from the user's own 1.40C.
+2. `Linked` has no `defsyms` (both sources are gated on `DT_MODE=1`); `CavePatch` has it.
+Both are small generic additions upstream — asking Sam rather than working around them.
+
+**SIDECHAIN COMPRESSOR** is the only DSP+CF hybrid and is deferred to its own pass: the DSP
+payload takes over SPRING REVERB's 1063-word space (donor id 0x15) while the CF side adds four
+params to the STOCK COMPRESSOR's page 2, which is not octabam's `MenuEntry` "clone a donor into
+a new fx2 id" model — closer to `Override` + `DspSection`, and the DSP assembly paths differ.
+repitch-kyoti will be the same shape.
+
+**Build this session:** no new artifact state — every image rebuilt byte-identical to the
+hashes recorded after the PLAYSFREEFIX edit (features `a49b8973`/`c0499e5c`/`d954d6f8`/
+`64562367`/`6ca210ae`, Bugbuilds unchanged). **Nothing flashed, nothing needs flashing.**

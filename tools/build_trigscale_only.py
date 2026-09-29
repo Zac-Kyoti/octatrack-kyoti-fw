@@ -32,7 +32,7 @@ DETOUR_EXPECT = bytes.fromhex("203c0000091a")      # move.l #0x91a,D0
 
 def assemble():
     subprocess.run(["m68k-elf-as", "-mcpu=5407", "-o", "out/patch_trigscale.o",
-                    "tools/patch_trigscale.s"], check=True, cwd=ROOT)
+                    "kyoti-bugfixes/patch_trigscale.s"], check=True, cwd=ROOT)
     subprocess.run(["m68k-elf-ld", f"-Ttext=0x{CAVE_AT:x}", "-o", "out/patch_trigscale.elf",
                     "out/patch_trigscale.o"], check=True, cwd=ROOT, capture_output=True)
     subprocess.run(["m68k-elf-objcopy", "-O", "binary", "out/patch_trigscale.elf",

@@ -141,6 +141,11 @@ courtesy, not a lock; `tools/kyoti_status.py` is all of it.
   and pattern scale *Per Track* stalled after its first step on a manual trig.
   → [`tools/build_trigscale_only.py`](tools/build_trigscale_only.py)
 
+  *Until 2026-09-28 the five feature builders each folded this fix into their own image;
+  they no longer do.* It is one contribution, and every copy wrote the same patch site —
+  which meant that as octabam modules no two of those features could ever be selected
+  into the same remix. Flash it on its own, or take a **Bugbuild**, which carries all three.
+
 - **Bug 2 — Empty-pattern LED fix** — a pattern whose only content is parameter locks (on a
   MIDI track, or trigless locks on an audio track, with no trig anywhere) showed as
   an unused slot, its grid LED unlit under `[PTN]`.
@@ -205,7 +210,7 @@ All on an Octatrack **MKI**. "Confirmed" means flashed and exercised on the unit
 
 | element | build | status |
 |---|---|---|
-| Bug 1 — MIDI Plays-Free trig fix | all | **confirmed** 2026-08-28 |
+| Bug 1 — MIDI Plays-Free trig fix | `build_trigscale_only.py` + every Bugbuild | **confirmed** 2026-08-28 |
 | MUTE MODE — all four modes, menu, SOLO | `build_mutemode_dt.py` | **confirmed, final** 2026-09-21 |
 | ↳ mode survives a power cycle | `build_mutemode_dt.py` | **confirmed** |
 | DIRECT JUMP V7 — clock-locked jumps: 16 ↔ 7-step NORMAL switches vs the metronome, master 1x ↔ 2x, swing/microtiming, rapid switching | `build_directjump_v7.py` | **confirmed, final** 2026-09-27 |

@@ -45,8 +45,6 @@ VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_KYOTI"
 
 # --- code stubs: (source, load addr, defsym, [(detour site, symbol, expected bytes, len)]) ---
 PATCHES = [
-    ("patch_trigscale", 0x400d7b00, None,
-     [(0x4009b6f2, "cave", "203c0000091a", 18)]),
     ("patch_softmute", 0x400d7400, "DT_MODE=1",              # gated + the DT (mode 2) branch
      # Session 56 continued: ALWAYS_NOTEOFF (--defsym ALWAYS_NOTEOFF=1, see hook 1's own
      # header comment in patch_softmute.s) was tried and RULED OUT -- readback-level A/B
@@ -294,15 +292,16 @@ def main():
     changed = sum(1 for a, b in zip(stock, img) if a != b)
     print(f"\n  {OUT.name}: {changed} bytes changed vs stock")
 
-    # --- the manual-trig fix must stay byte-identical to build_trigscale_only.py ---
-    ts = ROOT / "out/mainos_trigscale_only.bin"
-    if ts.exists():
-        tsb = ts.read_bytes()
-        tsh = [i for i, (x, y) in enumerate(zip(stock, tsb)) if x != y]
-        ok = all(img[i] == tsb[i] for i in tsh)
-        print(f"  manual-trig fix bytes identical to build_trigscale_only.py: {ok}")
-        if not ok:
-            sys.exit("  MANUAL-TRIG FIX DIVERGED")
+    # --- PLAYSFREEFIX (patch_trigscale) is NOT in this image ----------------------
+    # It is its own contribution as an octabam module.  Five KYOTI feature builders
+    # each used to fold in a copy, and every copy wrote the same site 0x4009b6f2 --
+    # which the remix ledger refuses, so no two of those features could ever be
+    # selected into one remix.  build_bugbuilds.py adds it where a combined image
+    # wants it; the bugfix-bundle module owns it for octabam.
+    _PFF = 0x4009b6f2 - BASE
+    if bytes(img[_PFF:_PFF + 18]) != bytes(stock[_PFF:_PFF + 18]):
+        sys.exit("  0x4009b6f2 is not stock -- patch_trigscale crept back into this image")
+    print("  PLAYSFREEFIX not in this image (0x4009b6f2 left stock) -- it is its own module")
 
     # --- the OT / OT+FX behaviour must stay byte-identical to build_mutemode.py, save for
     #     the DT delta: the two caves that grew (patch_softmute, patch_mutemode), the
@@ -329,7 +328,15 @@ def main():
                    # moved to 0x400d78a0/7900/7960 to make room for patch_softmute's growth.
                    (0x40068efe, 0x40068f02), (0x40068f0a, 0x40068f0e),
                    (0x40069022, 0x40069026), (0x4006903e, 0x40069042),
-                   (0x40069056, 0x4006905a)]
+                   (0x40069056, 0x4006905a),
+                   # PLAYSFREEFIX: build_mutemode.py still folds patch_trigscale into
+                   # its image; this build does not, because as an octabam module that
+                   # fix is its own contribution and every feature that carried a copy
+                   # wrote the same site 0x4009b6f2 (the ledger refuses that).  Its
+                   # detour site and its 62-byte cave are therefore an EXPECTED
+                   # difference from the sibling, not a divergence in the DT logic.
+                   (0x4009b6f2, 0x4009b704),        # the manual-trig detour site
+                   (0x400d7b00, 0x400d7b3e)]        # patch_trigscale's cave, sibling only
         stray = [i for i in diff
                  if not any(lo - BASE <= i < hi - BASE for lo, hi in allowed)]
         print(f"  vs build_mutemode.py: {len(diff)} bytes differ, {len(stray)} outside the DT delta")

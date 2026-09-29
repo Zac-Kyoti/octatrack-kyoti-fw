@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-DIRECT JUMP V7.0 -- Session 107/108: the CLOCK-LOCKED landing (see tools/patch_directjump_v7.s
-header and reference/handoffs/DIRECTJUMP_V7_DESIGN.md).  Built on V6.4 (the frozen OT<->AR
+DIRECT JUMP V7.0 -- Session 107/108: the CLOCK-LOCKED landing (see
+direct-jump-kyoti/patch_directjump_v7.s header and
+reference/handoffs/DIRECTJUMP_V7_DESIGN.md).  Built on V6.4 (the frozen OT<->AR
 parity build).  Below: V6's original notes, still true of the machinery.
 
 DIRECT JUMP V6 -- Session 105 (2026-09-26): AR's DIRECT JUMP through OT's own landing.
@@ -22,8 +23,8 @@ V6 therefore touches the sequencer in two 6-byte detours only:
                          landing tick (ACT<-PEND, 0x80006638 = MASTER_STEP mod masterLen,
                          0x80006516[t] = new_step mod len_t, 0x80006536[t] = 0)
     0x400a221c  dj_nofa  no MIDI START (0xFA) on a jump
-plus the unchanged UI pieces (the [PTN]+[YES] keymap slot, dj_ptnrel, the toast) and the
-manual-trig fix cave (patch_trigscale @0x400d7b00, byte-identical to build_trigscale_only).
+plus the unchanged UI pieces (the [PTN]+[YES] keymap slot, dj_ptnrel, the toast).
+PLAYSFREEFIX (patch_trigscale) is NOT folded in -- it is its own octabam module.
 The pattern-boundary body, the rebuild loops, 0x80006628 and every per-track counter are
 STOCK.  DJ_MODE off -> byte-identical stock behaviour.
 
@@ -72,12 +73,9 @@ if DIAG:
         TOAST_DUR = 0x88
 
 CAVE_DJ = 0x400d7000     # V7.0.1: moved down from 0x400d7400 (the hand-off needs room; zero in stock, vetted zone)
-CAVE_TRIGSCALE = 0x400d7b00
 FREE_END = 0x400d7c3c
 
 PATCHES = [
-    ("patch_trigscale", CAVE_TRIGSCALE, None,
-     [(0x4009b6f2, "cave", "203c0000091a", 18, "jmp")]),
     ("patch_directjump_v7", CAVE_DJ, f"DJ_TOAST_DUR=0x{TOAST_DUR:x}" + (f",DJ_TOFS={os.environ['DJ_TOFS']}" if os.environ.get("DJ_TOFS") else "") + (",DJ_DIAG=1" if DIAG else ""),
      [(0x400a1f72, "dj_land", "103980006687", 6, "jsr"),   # move.b (0x80006687).l,%d0
       (0x400a221c, "dj_nofa", "4a398000002a", 6, "jsr"),   # tst.b (0x8000002a).l
@@ -101,11 +99,18 @@ def jsr(t):
     return b"\x4e\xb9" + t.to_bytes(4, "big")
 
 
+# Sources that have moved out of tools/ into their own octabam module directory
+# (docs/remixer/MODULES.md shape: manifest.py + sources + README.md in one folder,
+# so the folder is self-contained whether it is checked out here or as octabam's
+# submodule).  Anything not listed still lives in tools/.
+SRC_DIR = {"patch_directjump_v7": "direct-jump-kyoti"}
+
+
 def assemble(name, at, defsym):
     aso = ["m68k-elf-as", "-mcpu=5407"]
     for d in (defsym.split(",") if defsym else []):
         aso += ["--defsym", d]
-    aso += ["-o", f"out/{name}.o", f"tools/{name}.s"]
+    aso += ["-o", f"out/{name}.o", f"{SRC_DIR.get(name, 'tools')}/{name}.s"]
     subprocess.run(aso, check=True, cwd=ROOT)
     subprocess.run(["m68k-elf-ld", f"-Ttext=0x{at:x}", "-o", f"out/{name}.elf", f"out/{name}.o"],
                    check=True, cwd=ROOT, capture_output=True)
@@ -197,14 +202,16 @@ def main():
     if stray:
         sys.exit(f"  STRAY BYTES at {[hex(BASE + i) for i in stray[:8]]} -- refusing to build")
 
-    ts = ROOT / "out/mainos_trigscale_only.bin"
-    if ts.exists():
-        tsb = ts.read_bytes()
-        tsh = [i for i, (x, y) in enumerate(zip(stock, tsb)) if x != y]
-        ok = all(img[i] == tsb[i] for i in tsh)
-        print(f"  manual-trig fix bytes identical to build_trigscale_only.py: {ok}")
-        if not ok:
-            sys.exit("  MANUAL-TRIG FIX DIVERGED")
+    # --- PLAYSFREEFIX (patch_trigscale) is NOT in this image ----------------------
+    # It is its own contribution as an octabam module.  Five KYOTI feature builders
+    # each used to fold in a copy, and every copy wrote the same site 0x4009b6f2 --
+    # which the remix ledger refuses, so no two of those features could ever be
+    # selected into one remix.  build_bugbuilds.py adds it where a combined image
+    # wants it; the bugfix-bundle module owns it for octabam.
+    _PFF = 0x4009b6f2 - BASE
+    if bytes(img[_PFF:_PFF + 18]) != bytes(stock[_PFF:_PFF + 18]):
+        sys.exit("  0x4009b6f2 is not stock -- patch_trigscale crept back into this image")
+    print("  PLAYSFREEFIX not in this image (0x4009b6f2 left stock) -- it is its own module")
 
     OUT.write_bytes(bytes(img))
     print(f"  {OUT.name}: sha256 {hashlib.sha256(bytes(img)).hexdigest()[:16]}")

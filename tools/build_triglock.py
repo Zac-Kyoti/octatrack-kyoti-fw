@@ -4,7 +4,7 @@
 """
 Build the "auto-remove an emptied trigless lock" fix on TOP OF STOCK 1.40C.
 
-Root cause and mechanism: tools/patch_triglock.s. Section 13 (NOTES.md): a trigless
+Root cause and mechanism: erase-empty-trigless-locks/patch_triglock.s. Section 13 (NOTES.md): a trigless
 lock (a step holding only p-locks, no trig) whose last remaining p-lock is erased stays
 lit on the trig row indefinitely. FUN_40042158 -- the sole writer of the stored p-lock
 stays lit on the trig row indefinitely. FUN_40038874 -- the LIVE erase worker, reached
@@ -45,7 +45,7 @@ VERSTR = "1.40C"                                   # stock-transparent: one bug 
 
 def assemble():
     subprocess.run(["m68k-elf-as", "-mcpu=5407", "-o", "out/patch_triglock.o",
-                    "tools/patch_triglock.s"], check=True, cwd=ROOT)
+                    "erase-empty-trigless-locks/patch_triglock.s"], check=True, cwd=ROOT)
     subprocess.run(["m68k-elf-ld", f"-Ttext=0x{CAVE_AT:x}", "-o", "out/patch_triglock.elf",
                     "out/patch_triglock.o"], check=True, cwd=ROOT, capture_output=True)
     subprocess.run(["m68k-elf-objcopy", "-O", "binary", "out/patch_triglock.elf",

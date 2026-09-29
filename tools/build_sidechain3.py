@@ -78,7 +78,6 @@ VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_KYOTI"
 
 # ======================= ColdFire =======================
 CF_PATCHES = [
-    ("patch_trigscale", 0x400d7b00, [(0x4009b6f2, "cave", "203c0000091a", 18, "jmp")]),
     ("patch_sidechain", 0x400d7000, []),
 ]
 CF_FREE_END = 0x400d7c3c
@@ -540,14 +539,16 @@ def main():
     changed = sum(1 for a, b in zip(stock, img) if a != b)
     print(f"\n  {OUT.name}: {changed} bytes changed vs stock")
 
-    ts = ROOT / "out/mainos_trigscale_only.bin"
-    if ts.exists():
-        tsb = ts.read_bytes()
-        tsh = [i for i, (x, y) in enumerate(zip(stock, tsb)) if x != y]
-        ok = all(img[i] == tsb[i] for i in tsh)
-        print(f"  manual-trig fix identical to build_trigscale_only.py: {ok}")
-        if not ok:
-            sys.exit("MANUAL-TRIG FIX DIVERGED")
+    # --- PLAYSFREEFIX (patch_trigscale) is NOT in this image ----------------------
+    # It is its own contribution as an octabam module.  Five KYOTI feature builders
+    # each used to fold in a copy, and every copy wrote the same site 0x4009b6f2 --
+    # which the remix ledger refuses, so no two of those features could ever be
+    # selected into one remix.  build_bugbuilds.py adds it where a combined image
+    # wants it; the bugfix-bundle module owns it for octabam.
+    _PFF = 0x4009b6f2 - BASE
+    if bytes(img[_PFF:_PFF + 18]) != bytes(stock[_PFF:_PFF + 18]):
+        sys.exit("  0x4009b6f2 is not stock -- patch_trigscale crept back into this image")
+    print("  PLAYSFREEFIX not in this image (0x4009b6f2 left stock) -- it is its own module")
 
     if not EFT.exists() or not STOCK_SYX.exists():
         print("\n  (EFT / stock syx missing -- skipping wrap)")

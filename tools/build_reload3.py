@@ -56,9 +56,7 @@ patch_reload3.s:
   Full RE + design rationale: patch_reload3.s's own header comment; dynamic
   proof against the real stock layer-push code: emu_reload2_keymap.py.
 
-  1. patch_trigscale  -- MIDI manual-trig stall fix.  Byte-identical detour + cave
-                         to build_trigscale_only.py / build_reload.py.
-  2. patch_reload3    -- six detours:
+  1. patch_reload3    -- six detours:
        rl_ptn   @0x4005a044  PTN key handler FUN_4005a044.  event 2 (HOLD) +
                              gates (playing, no arranger, no popup, no reload
                              queued) -> open the window (bare-text popup
@@ -165,20 +163,13 @@ FREE_START = 0x400d6500
 
 # (source, load addr, defsym, [(detour site, symbol, expected bytes, len, kind)])
 PATCHES = [
-    # Session 80 continued (8): moved 0x400d7b00 -> 0x400d7bf0 (62 B) so
-    # patch_reload3 had room for the picker's own keymap layer.
-    # Session 82: moved again, 0x400d7bf0 -> 0x400d7bfc, for the rl_draw redraw
-    # guard (hardware report #5). This is the TOP of the free zone: the address
-    # must stay 4-BYTE ALIGNED or the source's own `.align` pads the blob from 62
-    # to 64 B and the free-zone assert trips (0x400d7bfe was tried first and did
-    # exactly that -- a useful reminder that the cave address is an alignment
-    # constraint, not just an offset). 62 B at 0x400d7bfc ends 0x400d7c3a, inside
-    # FREE_END 0x400d7c3c (measured: stock is zero from 0x400d7400 to 0x400d7c3b
-    # and 0xff from 0x400d7c3c). patch_reload3's ceiling is therefore
-    # 0x400d7bfc - 0x400d7400 = 2044 B; further growth must come out of its own
-    # footprint, since this cannot move up again.
-    ("patch_trigscale", 0x400d7bfc, None,
-     [(0x4009b6f2, "cave", "203c0000091a", 18, "jmp")]),
+    # PLAYSFREEFIX (patch_trigscale) used to sit at the top of the free zone here
+    # (0x400d7b00 -> 0x400d7bf0 in Session 80 continued (8), -> 0x400d7bfc in
+    # Session 82 for the rl_draw redraw guard).  It is gone: it is its own octabam
+    # module contribution, and every feature builder that carried a copy wrote the
+    # same site 0x4009b6f2, which the remix ledger refuses.  patch_reload3's ceiling
+    # is therefore FREE_END itself (measured: stock is zero from 0x400d7400 to
+    # 0x400d7c3b and 0xff from 0x400d7c3c).
     ("patch_reload3", FREE_START, "RL_DONE=1" + (",RL_DIAG=1" if DIAG else ""),
      # Session 85 redesign + Session 86's two [BANK]-deferral sites -- SIX
      # detours; RELOAD2 had ten. Neither chord site
@@ -239,6 +230,11 @@ def jsr(t):
     return b"\x4e\xb9" + t.to_bytes(4, "big")
 
 
+# Sources that have moved out of tools/ into their own octabam module directory
+# (one self-contained folder per module: manifest.py + sources + README.md).
+SRC_DIR = {"patch_reload3": "reload-from-project"}
+
+
 def assemble(name, at, defsym):
     # --diag: the reload patch's outputs get a _diag suffix so the shipping ELF (which
     # cave_syms.py reads by default) is never replaced by a diagnostic build.
@@ -246,7 +242,7 @@ def assemble(name, at, defsym):
     aso = ["m68k-elf-as", "-mcpu=5407"]
     for d in (defsym.split(",") if defsym else []):
         aso += ["--defsym", d]
-    aso += ["-o", f"out/{out}.o", f"tools/{name}.s"]
+    aso += ["-o", f"out/{out}.o", f"{SRC_DIR.get(name, 'tools')}/{name}.s"]
     subprocess.run(aso, check=True, cwd=ROOT)
     subprocess.run(["m68k-elf-ld", f"-Ttext=0x{at:x}", "-o", f"out/{out}.elf", f"out/{out}.o"],
                    check=True, cwd=ROOT, capture_output=True)
@@ -343,42 +339,16 @@ def main():
     changed = sum(1 for a, b in zip(stock, img) if a != b)
     print(f"\n  {OUT.name}: {changed} bytes changed vs stock")
 
-    # Cross-check the manual-trig fix against the standalone build.  The two builds place
-    # the trigscale cave at DIFFERENT addresses -- build_trigscale_only.py uses 0x400d7b00,
-    # while here it sits at 0x400d7bf0 because patch_reload3's cave grew over that address
-    # in Session 80 continued (8) -- so comparing bytes at absolute offsets is meaningless.
-    # It reports a "divergence" that is nothing but the relocation, and because the check
-    # sys.exit()s BEFORE the .syx wrap below, from commit 83ce678 until Session 80
-    # continued (10) every build aborted and the last flashable image on disk silently
-    # stayed three sessions stale.  Relocation-aware check instead: same cave BODY, same
-    # detour shape, and the reference image touching nothing beyond its own detour + cave.
-    ts = ROOT / "out/mainos_trigscale_only.bin"
-    if ts.exists():
-        tsb = ts.read_bytes()
-        at, blob = placed["patch_trigscale"]
-        site, _, _, n, _ = PATCHES[0][3][0]
-        so, pad = o(site), b"\x4e\x71" * ((n - 6) // 2)
-        ref_detour = bytes(tsb[so:so + n])
-        if ref_detour[:2] != b"\x4e\xf9":
-            sys.exit(f"  reference trigscale detour 0x{site:08x} is not a jmp: {ref_detour.hex()}")
-        ref_at = int.from_bytes(ref_detour[2:6], "big")
-        bad = []
-        if bytes(img[so:so + n]) != jmp(at) + pad:
-            bad.append(f"our detour 0x{site:08x} is not `jmp 0x{at:08x}` + nops")
-        if ref_detour[6:] != pad:
-            bad.append("reference detour padding differs")
-        if bytes(tsb[o(ref_at):o(ref_at) + len(blob)]) != blob:
-            bad.append(f"cave body differs: ours @0x{at:08x} vs reference @0x{ref_at:08x} "
-                       "(relocation is not supposed to change the code)")
-        ref_changed = {i for i, (x, y) in enumerate(zip(stock, tsb)) if x != y}
-        if not ref_changed <= set(range(so, so + n)) | set(range(o(ref_at), o(ref_at) + len(blob))):
-            bad.append("reference image changes bytes outside its own detour + cave")
-        print("  manual-trig fix vs build_trigscale_only.py: "
-              + (f"identical (cave relocated 0x{ref_at:08x} -> 0x{at:08x})" if not bad else "DIVERGED"))
-        for b in bad:
-            print(f"    - {b}")
-        if bad:
-            sys.exit("  MANUAL-TRIG FIX DIVERGED")
+    # --- PLAYSFREEFIX (patch_trigscale) is NOT in this image ----------------------
+    # It is its own contribution as an octabam module.  Five KYOTI feature builders
+    # each used to fold in a copy, and every copy wrote the same site 0x4009b6f2 --
+    # which the remix ledger refuses, so no two of those features could ever be
+    # selected into one remix.  build_bugbuilds.py adds it where a combined image
+    # wants it; the bugfix-bundle module owns it for octabam.
+    _PFF = 0x4009b6f2 - BASE
+    if bytes(img[_PFF:_PFF + 18]) != bytes(stock[_PFF:_PFF + 18]):
+        sys.exit("  0x4009b6f2 is not stock -- patch_trigscale crept back into this image")
+    print("  PLAYSFREEFIX not in this image (0x4009b6f2 left stock) -- it is its own module")
 
     if not EFT.exists() or not STOCK_SYX.exists():
         print("\n  (EFT tool or stock syx missing -- skipping the .syx/.bin wrap)")
