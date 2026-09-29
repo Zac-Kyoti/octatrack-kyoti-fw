@@ -67,7 +67,10 @@ The feature: extend octabam's REPITCH concept into a multi-mode tempo-following
 varispeed playback mode with a quantised ratio control.
 
 - **Baseline** is octabam's `modules/repitch/` (their image OCTABAM81, working on an
-  MKII 2026-09-16). Concepts only — see `CREDITS.md`. Our build is its own module.
+  MKII 2026-09-16), written by **Jannik Aßfalg (repeat98)**. ~~Concepts only~~ —
+  *corrected 2026-09-29:* the build adapts his ColdFire code (tempo-source routine,
+  all seven hook sites, the TSTR label formatter) and his probe scaffold; see
+  `CREDITS.md`. Our build is its own module.
 - **Two features, not one:** (a) `QUANT`, a quantised ratio control, pure ColdFire,
   zero DSP risk; (b) three interpolation character modes, which need DSP work.
   **They are separately shippable and should be separately shipped** — see §6.

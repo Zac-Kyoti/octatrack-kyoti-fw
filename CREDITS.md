@@ -42,10 +42,6 @@ reverse-engineering work. Nothing here would exist without the projects below.
     **[dsp56300/dsp56300](https://github.com/dsp56300/dsp56300)** core it vendors into
     `vendor/dsp56300` — the toolchain the SIDE-CHAIN COMPRESSOR was written and tested
     with. Our `tools/dsp56300_xcore/` dual-core harness is a thin shim over it.
-  - Its **REPITCH module** (`modules/repitch/repitch.s`, MIT) — **REPITCH KYOTI** grew
-    out of it, and its ColdFire side is ported in part from it: the tempo-source
-    routine's shape, the three increment-builder hooks and the audio-editor ATTR hooks,
-    each re-verified against our image (`tools/patch_repitch_kyoti.s` names them).
   - Its **firmware documentation set** (`docs/firmware/KERNEL.md`, `DSP.md`,
     `CHIP.md`, `LEVEL_LAW.md`, `COLDFIRE_DELAY.md` and siblings) — an independent
     reading of the RTOS, the DSP protocol and the level law, distilled throughout
@@ -132,6 +128,15 @@ too, and has its own section above.)
   `reference/kb/techniques.md`. `octamachine` is a feasibility study for running
   Machinedrum firmware on Octatrack hardware — out of scope here except for its
   host-side statement of the Octatrack's own platform requirements.
+  **REPITCH KYOTI starts from Jannik's Repitch module for octabam**
+  (`modules/repitch/`, hosted in octabam, MIT, © 2026 Sam Banks as octabam's licence
+  states). The varispeed idea itself — speed = project BPM ÷ sample BPM — is the
+  standard one, but the ColdFire skeleton is his code, adapted: the tempo-source
+  routine, all seven of his hook sites (increment builder, TSTR resolver, audio-editor
+  ATTR) and the TSTR label formatter (`tools/patch_repitch_kyoti.s`), and the
+  scaffold of our ColdFire test oracle (`tools/repitch_probe_kyoti.cpp`, from his
+  `tools/harness/repitch_probe.cpp`). Ours: QUAN and its exact-ratio fold, the
+  PTCH/QUAN swap, the 7-position TSTR widget, and all of RPS9/RPSP on the DSP.
 
 ## The DSP56300 emulator core
 

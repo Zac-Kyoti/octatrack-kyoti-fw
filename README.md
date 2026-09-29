@@ -142,7 +142,8 @@ courtesy, not a lock; `tools/kyoti_status.py` is all of it.
   The DSP code space comes from **SPRING REVERB**, removed exactly as SIDE-CHAIN removes
   it (a project that still has it loads it as NONE). RPSP costs the DSP about one and a
   half FX1 FILTERs per track; a full core of RPSP tracks under heavy effects has not been
-  tried on hardware. Grown from octabam's REPITCH module ([`CREDITS.md`](CREDITS.md)).
+  tried on hardware. Starts from Jannik Aßfalg's Repitch module for octabam
+  ([`CREDITS.md`](CREDITS.md)).
   Design: [`reference/handoffs/REPITCH_KYOTI_SCOPE.md`](reference/handoffs/REPITCH_KYOTI_SCOPE.md),
   [`REPITCH_SP_CH12_SCOPE.md`](reference/handoffs/REPITCH_SP_CH12_SCOPE.md).
   → [`tools/build_repitch_kyoti.py`](tools/build_repitch_kyoti.py) →

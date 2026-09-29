@@ -34090,3 +34090,22 @@ banners on the five `reference/handoffs/REPITCH_*` docs.
 **Still open (none blocking):** the octabam module port (`repitch-kyoti/`, already mapped in `threads.txt`;
 DSP + ColdFire hybrid, deferred for the same reason as SIDECHAIN in Session 113); the V1.x merge, where
 repitch's ColdFire cave overlaps DIRECT JUMP V7's whole cave.
+
+## Session 112 continued (5) (2026-09-29, `main`) — attribution corrected: repitch-kyoti starts from Jannik Aßfalg's Repitch
+
+The user caught a wrong credit: 840a2e8 credited "octabam's REPITCH module" under **Sam Banks** in CREDITS.md
+and the README, and the source headers (`patch_repitch_kyoti.s`, `repitch_probe_kyoti.cpp`) said "(MIT, Sam
+Banks)" since Session 106. octabam's history says otherwise: `modules/repitch/`, `tools/harness/repitch_probe.cpp`,
+`tools/verify/verify_repitch.py` and `docs/firmware/REPITCH.md` are all **repeat98 — Jannik Aßfalg** (85b7604 …
+dddb8ec, 2026-09-16..18). Sam Banks is octabam's licence holder (MIT, © 2026 Sam Banks), which is the notice
+MIT asks us to keep; the author is Jannik.
+**Does it need attribution at all?** The varispeed idea (speed = project BPM ÷ sample BPM) is the standard one
+and needs none — but the code does: compared line by line, our `rp_source` is his routine (same registers,
+labels and comments), `rate_gate` is his plus our `bsr rp_swap`, all seven detour sites are his
+(`0x4000406a/409e/4100`, `0x40007d96`, `0x4006e71c/ee56/ef7c`) and `tstr_fmt` uses his sprintf-tail trick;
+the oracle's scaffold is his probe. The Session 106 scope said "Concepts only", which the source header
+("Ported in part") contradicted — the header was right. Everything else is ours: QUAN and the exact-ratio
+fold, the PTCH/QUAN swap, the 7-position widget, the DSP engines (RPS9/RPSP, channel 1/2).
+**Fixed:** CREDITS.md (the bullet moved from Sam's octabam entry to Jannik's, scoped to exactly the above),
+README, both source headers, the scope doc's "Concepts only" (struck, with the correction). Comment-only in the
+sources: the image is unchanged (`e72bd267…`). No build this turn.

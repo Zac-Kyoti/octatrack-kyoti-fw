@@ -6,8 +6,9 @@
 // through the firmware's own code on ot::Machine (Musashi), against the
 // STOCK image case-for-case and an independent model.
 //
-// Scaffold ported from refs/octabam/tools/harness/repitch_probe.cpp (MIT,
-// Sam Banks). Build line: see NOTES.md Session 106 continued (2); binary
+// Scaffold ported from Jannik Assfalg's (repeat98) Repitch probe for octabam,
+// refs/octabam/tools/harness/repitch_probe.cpp (MIT, Copyright (c) 2026 Sam
+// Banks, octabam's licence). Build line: see NOTES.md Session 106 continued (2); binary
 // out/repitch_probe_kyoti.
 //
 //   out/repitch_probe_kyoti STOCK PATCHED [quant_widget rp_ui_gate rp_swap rp_prev]

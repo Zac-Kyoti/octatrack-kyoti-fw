@@ -35,9 +35,12 @@
 | worth 3/2^26 of a sample per sample, inaudible. The gate-2 open question
 | (a stock track's increment can end in 01/10 by chance) is in the scope §4.
 |
-| Ported in part from refs/octabam/modules/repitch/repitch.s (MIT, Sam
-| Banks) -- rp_source's shape, the three builder hooks, the ATTR hooks.
-| Every borrowed site byte-verified against our image, Session 106.
+| Adapted in part from Jannik Assfalg's (repeat98) Repitch module for
+| octabam, refs/octabam/modules/repitch/repitch.s (MIT, Copyright (c) 2026
+| Sam Banks, octabam's licence) -- rp_source, rate_gate and all seven hook
+| sites (the three builder hooks, the TSTR resolver, the three ATTR hooks)
+| and tstr_fmt's approach. Every borrowed site byte-verified against our
+| image, Session 106. See CREDITS.md.
 
         .text
         .global rate_gate
