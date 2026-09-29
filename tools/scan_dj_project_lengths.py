@@ -52,6 +52,9 @@ def main(argv):
     ap.add_argument("--project", default=str(DEMO_PROJECT))
     ap.add_argument("--bank", type=int, default=1)
     ap.add_argument("--patterns", type=int, default=16)
+    ap.add_argument("--image", default=str(IMAGE),
+                    help="any image boots for this (it reads static pattern data); the default "
+                         "is the retired v4 build, which may no longer exist")
     a = ap.parse_args(argv)
 
     os.chdir(OCTABAM)
@@ -66,7 +69,7 @@ def main(argv):
 
     card, staged_name = er.stage_project(a.project, "OCTABAM", None,
                                           tree=f"out/_emu_dj_scan_tree_b{a.bank}")
-    r, rt = er.attach(str(IMAGE), card,
+    r, rt = er.attach(str(pathlib.Path(a.image).resolve()), card,
                        ips=3990.0, pit_clock_hz=264e6, quantum=4096, step_quantum=32, tick=True)
     if not rt.gate_m6a()[0]:
         rt.run(ms=1000, until=lambda x: x.gate_m6a()[0])

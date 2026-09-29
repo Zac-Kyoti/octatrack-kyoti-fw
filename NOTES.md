@@ -34237,3 +34237,53 @@ change is the `[PTN]` YES press → `dj_toggle`).
 widget, COMPRESSOR page 2, QLREC, TRIGLOCK, SPRING→NONE, DARK REV; then each feature's own section; then
 the combined-only cases: DJ OFF after a power cycle with MUTE MODE ≠ OT, chord split, reload during a
 pending jump, Part change during a soft-mute, REPITCH through a jump/Part change).
+
+## Session 114 continued (2026-09-29, `kyoti-v1`) — KYOTI V1.0 FLASHED (`bf1fff8c…`): first hardware results; DIRECT JUMP crashes; testing STOPPED
+
+**User, hardware (MKI), KYOTI V1.0 syx `bf1fff8c…`:**
+- **MIDI manual-trig fix (PLAYSFREEFIX): OK.**
+- **MUTE MODE: OK**, except: on creating/loading a new project it came up in **`OTFX-T`**; the user wants **`OT`**
+  as the default there. (MUTE MODE is a global PERSONALIZE value restored from the battery 'ANDY' block — the
+  known limitation in Session 58 cont. part 19: a unit that ran an earlier MUTE MODE build restores that build's
+  stored mode. Logged as a requirement; not investigated this turn.)
+- **REPITCH:** switching SETUP TSTR from a non-repitch mode to a repitch mode, the PTCH→QUAN knob value change
+  "happens a bit slow"; repitch → non-repitch is reasonably fast. Logged; not investigated.
+- **DIRECT JUMP: EXCEPTION + crash.** DJ turned on (toast OK). Pattern 2 = 3 tracks, all PER-TRACK, master 16, no
+  scales, T1 12 steps / T2 8 / T3 7. Pattern 1 = similar, all tracks 16. Jump 1→2 OK; **jump 2→1 → exception
+  screen `SSP:4 VEC:0B FS:0 SR:2500 ADDR:00800000 R0178`**, unit crashed.
+- User stopped testing here: the remaining FLASHING §4.11 items were NOT run.
+
+**Exception decoded (C, our reading of the handler 0x4003afb0..0x4003b08e):** `ADDR` is `%a2@(4)` of the
+exception frame = the **stacked PC**; `VEC:0B` = unimplemented line-F opcode; SR `0x2500` = supervisor, IPL 5
+(frame-ISR context). So control transferred to `0x00800000` (not an address the OS uses) and the word there
+decoded as `0xFxxx` — a jump through a bad pointer or a corrupted return address, not DJ code at a wrong address.
+
+**Static checks on the flashed image, all clean:** no cave holds an absolute address into another feature's
+piece (every in-zone longword inside a piece points into its own feature); every external pointer (43 detours,
+descriptor pokes, the keymap record) lands exactly on a symbol of the right feature, DJ's four entries
+included (`dj_toggle` 0x400d6d38, `dj_land` 0x400d6dbe, `dj_nofa` 0x400d712a, `dj_ptnrel` 0x400d714a).
+
+**Where the crash executed (C, our reading):** the tick ISR that runs every DJ hook (`0x400a1e0c`, source 32) is
+programmed at level 3 (`move.b #3,0xfc048060` @ `0x400a10a4`) and drops to `SR 0x2200` (`0x400a1e64`) before the
+consumer that calls `dj_land`/`dj_nofa`. The exception's `SR 0x2500` is IPL 5 = the **frame ISR** (`ICR1 = 5`,
+`0x4001fc32`): the voice/engine path. So DIRECT JUMP's own code (IPL 2) was not executing; frame-ISR code was —
+where the combined image adds MUTE MODE's six hooks and REPITCH's voice-rate, `tstr_resolve` and Part-apply
+(`rp_apply1/2`) hooks, none of which exist in standalone V7.0.1. `rp_apply1/2` read clean (reset `rp_prev`, replay
+the displaced `lea`/`movem` exactly, stack-balanced, clobber only d0/a0).
+
+**Emulator reproduction (route A, `diag_reflock.py` + new `--poke`; DJTEST2 copy preserved in
+`out/fixtures/DJTEST2` after the Trash was emptied):** pattern idx 4 (PER-TRACK, all 16) ↔ idx 3 poked PER-TRACK
+T1/T2/T3 = 12/8/7 (`track*0x91a+0x50`), jumps t100 1→2, t200 2→1, t280 1→2. Standalone V7.0.1, KYOTI (MUTE MODE
+OT) and KYOTI (MUTE MODE OTFX-T, `0x800000dc=1`): **no exception in any**; commits identical in all three
+(LAND 101/203/281, WRAP 186/282), 6337 fire writes each. Does not reproduce.
+
+**User, after re-flashing the same image:** the crash reproduced twice in a row on the first unit state, but
+after the re-flash, a similar situation does not crash. The crashing session had run a long time and gone
+through the FLASHING §4.x procedures one by one first (MUTE MODE modes, SIDE-CHAIN, RELOAD, PARTREAPPLY,
+QLREC, TRIGLOCK, REPITCH …); the crash was the first DJ ON and the first switch (P2→P1). → **state-dependent**:
+something the §4.x session left in the project or the unit (a repitch TSTR on a jumping track, a soft-muted
+track under OTFX-T/DT-T, a SIDE-CHAIN key, a Part difference, a reload) meets the landing in the frame ISR.
+A power cycle between the two crashes did not clear it, so it lives in the project/card or battery SRAM,
+not in cave RAM. **Next:** the user's exported crash project (card is untouched by a re-flash) + the MUTE MODE
+value at the time; if it reproduces, a DIAG build whose exception screen also prints the stacked return
+addresses names the caller that jumped to `0x00800000`.
