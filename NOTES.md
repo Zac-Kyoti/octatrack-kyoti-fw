@@ -34352,3 +34352,40 @@ valid when the ColdFire workload is identical; otherwise compare spectra/levels.
 **Next (needs the user):** the two bisection images already built (`KV1-NO-RPK`, `KV1-NO-SC`) against these exact
 steps — family 1 needs only OT mode, which both carry — and an export of the test project so the emulator gets a
 real T2-sample / T3-DARK-REV fixture.
+
+### Session 114 continued (4) — ROOT CAUSE: SIDECHAIN3's cross-core "shared window" is inside the FX delay memory
+
+**User, hardware bisection:** `KV1-NO-RPK` — reverb distortion / T2 cross-talk STILL present. `KV1-NO-SC` — GONE.
+OTFX-T envelope cut short: present in BOTH, and (user, later) **also in standalone MUTEMODE_DT** → a
+separate, older MUTE MODE bug (OTFX-T), not a merge or SIDE-CHAIN effect. User exported the test project:
+`~/Desktop/kyoti_testMM` + `clap.wav`, `ebass.wav` (fixture copied to `out/fixtures/`, card
+`refs/octabam/out/kv1_mm_card.img`, SET KYOTI, PROJECT kyoti_testMM).
+
+**Measured in ot_emu on that project, jitter-proof (RMS 3x, not sample diffs):** T2 muted, MUTE MODE OT:
+stock 0.0027/0.0026 · KV1-NO-SC = stock · **standalone SIDECHAIN3_CROSS 0.0081/0.0067 · KYOTI 0.0081/0.0067**
+(also higher unmuted: 0.0218 vs 0.0194). The extra signal carries T2's bass-heavy spectrum and its envelope
+(corr 0.70 vs 0.24 with T3) plus broadband energy → T2 leaking, distorted. **Present in the shipped standalone
+SIDECHAIN3 — not a merge bug.** Byte-restore bisection of the SC3X image: CF edits, hook 2 (scdet), hook 3
+(moncommit) → still bug; **restoring hook 1 (`sctap`, the dispatcher publish tap, A P:0x4a7 / B P:0x29c) alone
+→ clean**.
+
+**Mechanism (C):** `sctap` runs for EVERY track EVERY block, COMPRESSOR or not, and copies the track's 32-word
+mix block X:0..$1f to (a) the same-core keybus Y:$800+t*$80 (internal, free) and (b) the Session 77 cross-core
+"shared window" at external **Y:SBASE = $30100 (payload A, tracks 4-7) / $38100 (payload B, tracks 0-3)**,
+$200 words each. `--dsp-writes` on stock with this project: **core 1 uses external Y from $38000 up as FX
+memory** ($38300: 157k writes, $38200: 52k, $38100: 8.7k, continuing to $3bdff) — the window is inside it.
+SC3X: $38100 104k writes. So each track's (incl. a stock-muted track's) audio is written into the DARK REVERB
+delay lines of core 1. Explains all of it: family 1 (stock mute cuts post-FX → T2's audio is still in X:0 when
+sctap copies it); OTFX curing family 1 (MUTE MODE zeroes T2's pre-mix gains → sctap copies silence); family 2
+(soft modes let T3's reverb ring — fed with other tracks' audio). Register clobber ruled out: stock reloads
+everything sctap touches (fresh `tst b` before its first branch). The core-0 window ($30100) collides the same
+way whenever tracks 5-8 carry delay/reverb FX (idle in this project). The "Y:$795-$FFF is free" evidence was
+for INTERNAL Y; the external window addresses were never checked against the FX pool.
+
+**Consequences:** SIDECHAIN3_CROSS's "hardware-confirmed, final" covered the compressor's KEY behaviour, not
+its effect on delay/reverb on the same core — it must be re-tiered and fixed. REPITCH is cleared of the
+reverb bug. The DIRECT JUMP crash (frame ISR, jump to 0x00800000) is NOT explained yet; corrupted FX memory is
+a candidate, not established — re-test DJ on `KV1-NO-SC` with a soft-muted track.
+**Fix direction (not built):** move the cross-core window to external Y the FX pool never uses (needs a
+measured bound of the pool's extent across heavy-FX projects), or drop the window and publish only when a
+COMPRESSOR with a foreign-core KEY exists.
