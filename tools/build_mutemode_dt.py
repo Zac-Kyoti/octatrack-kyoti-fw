@@ -297,7 +297,7 @@ def main():
     # each used to fold in a copy, and every copy wrote the same site 0x4009b6f2 --
     # which the remix ledger refuses, so no two of those features could ever be
     # selected into one remix.  build_bugbuilds.py adds it where a combined image
-    # wants it; the bugfix-bundle module owns it for octabam.
+    # wants it; the batch-bugfixes module owns it for octabam.
     _PFF = 0x4009b6f2 - BASE
     if bytes(img[_PFF:_PFF + 18]) != bytes(stock[_PFF:_PFF + 18]):
         sys.exit("  0x4009b6f2 is not stock -- patch_trigscale crept back into this image")

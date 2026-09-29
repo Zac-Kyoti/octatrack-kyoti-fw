@@ -323,7 +323,7 @@ continued (2)); the private ot_emu instrumentation is `tools/repitch_ot_emu_trac
 
 Still open, none of it blocking: the **octabam module port** (a DSP + ColdFire hybrid like
 the SIDE-CHAIN, which `0ab5666` deferred for the same reason — `threads.txt` already maps
-`repitch-kyoti/` to this thread); the **merge**, where its cave overlaps DIRECT JUMP V7's
+`repitch-repeat98-kyoti/` to this thread); the **merge**, where its cave overlaps DIRECT JUMP V7's
 (`reference/MERGE.md`); on hardware, RTRG retrigs on a repitch track and a full DSP core of
 RPSP tracks under heavy effects are untested, and DARK REVERB's repair is emulator-only.
 

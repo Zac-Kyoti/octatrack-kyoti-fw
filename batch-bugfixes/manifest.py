@@ -1,4 +1,4 @@
-"""KYOTI BUGFIXES -- the three stock Octatrack 1.40C bug fixes, as one module.
+"""BATCH BUGFIXES -- the three stock Octatrack 1.40C bug fixes, as one module.
 
 All three are fixes to STOCK behaviour: nothing here adds a feature, changes a menu
 or touches a setting. Each is independent of the other two; they are bundled because
@@ -164,8 +164,8 @@ def pr_emit(addr: int):
 
 
 MODULE = Module(
-    name="kyoti-bugfixes",
-    key="KYOTI BUGFIXES",
+    name="batch-bugfixes",
+    key="BATCH BUGFIXES",
     kind=Kind.CF_PATCH,
     doc="Three stock 1.40C bug fixes in one module: MIDI Plays-Free trig, "
         "empty-pattern LED, and Part-change carryover.",

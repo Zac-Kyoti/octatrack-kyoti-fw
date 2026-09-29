@@ -5,7 +5,7 @@
 Build the "pattern with only p-locks shows as empty" fix on TOP OF STOCK 1.40C.
 
 Same detour + code-cave shape as tools/build_trigscale_only.py.  Root cause and
-mechanism: kyoti-bugfixes/patch_pattern_led.s.
+mechanism: batch-bugfixes/patch_pattern_led.s.
 
     out/mainos_patternled.bin           patched stock MAIN OS (2 hunks vs stock)
 
@@ -37,7 +37,7 @@ VERSTR = "1.40C"                                   # stock-transparent: one bug 
 
 def assemble():
     subprocess.run(["m68k-elf-as", "-mcpu=5407", "-o", "out/patch_pattern_led.o",
-                    "kyoti-bugfixes/patch_pattern_led.s"], check=True, cwd=ROOT)
+                    "batch-bugfixes/patch_pattern_led.s"], check=True, cwd=ROOT)
     subprocess.run(["m68k-elf-ld", f"-Ttext=0x{CAVE_AT:x}", "-o", "out/patch_pattern_led.elf",
                     "out/patch_pattern_led.o"], check=True, cwd=ROOT, capture_output=True)
     subprocess.run(["m68k-elf-objcopy", "-O", "binary", "out/patch_pattern_led.elf",

@@ -26,7 +26,7 @@ PLAYSFREEFIX (patch_trigscale) is added to ALL SEVEN images: no feature builder 
 any more.  Each of them used to (RELOAD3's sat at 0x400d7bfc, the rest at 0x400d7b00), and
 every copy wrote the same site 0x4009b6f2 -- which octabam's remix ledger refuses, so no two
 of those features could ever be selected into one remix.  The fix is its own contribution
-now (the bugfix-bundle module upstream) and this composer is where a combined image gets it.
+now (the batch-bugfixes module upstream) and this composer is where a combined image gets it.
 Nothing here needed changing for that: `already`/`need` are computed per image by scanning
 for each fix's detour, so the bases simply all report "already present: none".
 
@@ -112,11 +112,11 @@ FEATURES = {
 }
 
 PROBLEMS = []
-# The three bug-fix sources now live in the kyoti-bugfixes module directory
+# The three bug-fix sources now live in the batch-bugfixes module directory
 # (one self-contained folder per octabam module: manifest.py + sources + README.md).
-SRC_DIR = {"patch_trigscale": "kyoti-bugfixes",
-           "patch_pattern_led": "kyoti-bugfixes",
-           "patch_partreapply": "kyoti-bugfixes"}
+SRC_DIR = {"patch_trigscale": "batch-bugfixes",
+           "patch_pattern_led": "batch-bugfixes",
+           "patch_partreapply": "batch-bugfixes"}
 
 
 def flag(msg):

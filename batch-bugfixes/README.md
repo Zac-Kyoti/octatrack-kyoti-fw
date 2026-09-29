@@ -1,4 +1,4 @@
-# KYOTI BUGFIXES
+# BATCH BUGFIXES
 
 Three fixes to **stock** Octatrack OS 1.40C behaviour, as one module. Nothing here
 adds a feature, changes a menu, or touches a setting — each one only makes the stock
