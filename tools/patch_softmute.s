@@ -1093,6 +1093,15 @@ fresh_bind:
     move.l  %a2,-(%sp)                  | displaced 1
     move.l  %d2,-(%sp)                  | displaced 2
     move.l  (12,%sp),%d1                | displaced 3 == track number
+| Session 117 FIX: this hook used %d3 as scratch and never restored it.  Stock FUN_40006820
+| saves only %d2/%a2 and never touches %d3, so its callers keep live values there across the
+| call -- and two do: FUN_40006890 keeps its SAVED SR in %d3 (`move.w %d3,%sr` after its
+| 8-track loop), and the frame handler at 0x4000d45a keeps the TRACK NUMBER in %d3 and uses
+| it to index the per-track machine table right before `jsr (a0)` through it (0x4000d49c).
+| In OTFX-T / DT-T this hook left MUTE_STATE in %d3: SR := mute<<8|solo, or a wild index ->
+| a jump through a garbage pointer.  Mute byte 0x25 (T1+T3+T6) gives exactly SR 0x2500, the
+| DIRECT JUMP crash screen's SR.  %d2 is free here: the displaced prologue above saved it,
+| and every exit (FB_BACK -> 0x40006844 / the clr.l loop, FB_EPILOGUE's pop) rewrites it.
 
     cmpi.l  #8,%d1
     bcc     fb_pass                     | track >= 8 ("do them all") -> never silenced here;
@@ -1108,15 +1117,15 @@ fresh_bind:
 
     move.l  %d1,%d0
     addi.l  #8,%d0
-    move.l  MUTE_STATE,%d3
-    btst    %d0,%d3                     | muted (bit 8+track) ?
+    move.l  MUTE_STATE,%d2
+    btst    %d0,%d2                     | muted (bit 8+track) ?
     bne     fb_silence
     tst.b   SOLO_BYTE                   | anything soloed at all ?
     beq     fb_pass
-    move.l  %d3,%d0
+    move.l  %d2,%d0
     andi.l  #0xff,%d0
     beq     fb_pass                     | nothing soloed -> normal dispatch
-    btst    %d1,%d3                     | this track soloed (bit track) ?
+    btst    %d1,%d2                     | this track soloed (bit track) ?
     bne     fb_pass                     | soloed -> normal dispatch
 | fallthrough: solo active + this track not soloed -> silence it
 fb_silence:
