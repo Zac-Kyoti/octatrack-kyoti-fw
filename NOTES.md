@@ -34715,3 +34715,28 @@ still `4a6c1b5e…`, the DJ module's pinned bytes still assert. The canonical co
 AR docs in `ar-kyoti-fw` (also on GitHub) still say "ported" — not changed; offered.
 
 **No build to flash.**
+## Session 118 (2026-09-30, `kyoti-v1`) — KYOTI V1.0 `597a6db9…` flashed; RELOAD's [BANK]+[TRACK] (TRK SEQ + PART) stalls the UI; bisection images built
+
+**User, hardware (KYOTI V1.0 `597a6db9…`):** TRK SEQ + PART reload works and the audio is seamless, but the toast
+arrives late; while waiting, the trig grid is dark (only the active bank LED lit) and the controls look dead;
+mashing keys during the wait can glitch the audio and lose timing (no full crash). **TRK SEQ alone ([PTN]+[TRACK])
+does not do this.**
+
+**What differs between the two chords (C, our reading of `patch_reload3.s` + stock):** the +PART chord runs stock
+RELOAD PART (`0x4004aab4`) synchronously in the key handler (UI task) BEFORE posting the sequence job; the toast is
+drawn at job completion. RELOAD PART: memcpy saved->live Part (twice, `0x40020898`), then — if it is the current Part —
+`0x40009848(bank, part)` (full apply) and `0x400972fc(part, t, …)` for t = 0..7. A direct call in ot_emu does not return
+(it blocks; the frame ISR runs meanwhile), which fits "can block" in RELOAD's own comments. A static control-flow
+trace from 0x40009848 and 0x400972fc (6 levels, direct calls/branches only) reaches none of KYOTI's ~60 patch sites.
+Engine-side work triggered by the apply is not covered by that trace: REPITCH's Part-apply hooks (0x40009094 /
+0x40009e00, `rp_apply1/2`) and TSTR resolver (0x40007d96) run there — all a few instructions each; and
+PART_CHANGE_CARRYOVER_FIX acts on Part changes (it calls the heavy apply 0x40009094 itself). Not settled statically.
+
+**Bisection (the SIDE-CHAIN approach), not flashed:**
+| image | OS VERSION | syx sha256 |
+|---|---|---|
+| RELOAD_FROM_PROJECT standalone (= the promoted FINAL the user confirmed) | `140C_KYOTI` | `64562367a17c9f032c09beb34680c0986bb6f505465717213625ef5daf8a39a5` |
+| KYOTI without REPITCH_REPEAT98_KYOTI | `KV1-NO-RPK` | `336083d3a2a586034939b52baa2597b99b55ce33e76e17ffadbabdd8271e1c3d` |
+| KYOTI without PART_CHANGE_CARRYOVER_FIX | `KV1-NO-PR` | `d4822923d0ba677596657286e15dbd2322213a507c9294791e6cce64785ecc71` |
+Also noted: the repo reorganisation (`b25b5c8`, another session) left `build_kyoti.py` working — it rebuilds
+`597a6db9…` exactly under `KYOTI_ALLOW_WIP=1` (not on the FINAL list).
