@@ -34815,3 +34815,65 @@ track. Retest on the new build.
 The flashed V1.0 is kept in `out/KYOTI_flashed_597a6db9/`. EMPTY_PATTERN_LED_FIX's FINAL pin
 (`kyoti_status.py`) is unchanged, so its builder and `build_bugbuilds.py` now run WIP until the user promotes
 the fix.
+
+## Session 119 continued (2026-09-30, `kyoti-v1`) — the silent track is REPITCH: long writes to two byte flags, and RELOAD PART taken for a TSTR edit; fixed (emulator-verified, not flashed)
+
+**User, hardware (KYOTI `8a273354…`, pattern-LED fix flashed): the [BANK]+[TRACK] stall is gone.** Their
+analysis of the silent track, project `~/Desktop/kyoti_testMM2`: after a TRK SEQ + PART reload (via T1), T2 —
+FILTER on FX1, DELAY on FX2 — comes back with **SPATIALIZER on FX1, input level 0**. They also expected
+"SAVE PART FIRST!" for Part 1.
+
+**"SAVE PART FIRST!" is correct as shown (M, their card).** `bank01.work` parts_saved_state = `[1,0,1,0]`,
+edited mask `0x01`; saved Part 1 equals the working Part but for one level byte — what SAVE PART writes. Part 1
+was saved between `kyoti_testMM` (Sep 28, state `[0,0,0,0]`) and `kyoti_testMM2`. "Unsaved" on the OT = edited
+since the last save.
+
+**Mechanism (M, disassembly + ot_emu + their files).** REPITCH's `rp_swap` marked the Part edited with
+`or.l %d1,(DB+0x95048)` and `or.l %d1,(0x100b145e)`, d1 = 1<<part. Stock treats both as BYTES (`move.b`,
+e.g. 0x4004ab52/5c). The long's low byte is 3 past each flag:
+* DB+0x9504b = saved Part 1 (+0x9504a) byte 1 = **T2's FX1 type** (bytes 0-7 = FX1 types, 8-15 FX2 types):
+  FILTER 4 | 1 = **5 = SPATIALIZER**, whose params are the filter's (BASE 0 -> input 0).
+* 0x100b1461 = the SRAM copy of parts_saved_state (0x100b145f.., stock 0x4000fb74 memcpy) = **Part 3 "saved"**.
+Both reached their cards: `kyoti_testMM` saved Part 1 T2 FX1 = 5 on disk; `kyoti_testMM2` Part 3 flagged saved
+with a default saved copy (a RELOAD there would load a blank Part).
+
+**Why "later, not the first reload" (M).** rp_forget runs on the Part applies 0x40009094 / 0x40009e00;
+stock RELOAD PART (0x4004aab4: copy saved -> working, then 0x40009848 + 0x400972fc x8) reaches neither
+(call-graph checked). A reload whose saved Part differs in some track's repitch gate is then seen by the
+per-frame poll as a LIVE TSTR edit: it swaps PTCH/QUAN (values that were right) and writes the flags —
+planting the Spatializer; the NEXT reload applies it. Reproduced step by step in ot_emu on `8a273354`
+(fixture REPITCH, saved Part = working with T2 TSTR NORM): reload 1 -> saved P1 T2 FX1 04->05, slot/parked
+swapped 0x22/0x40 -> 0x40/0x22; reload 2 -> working FX1 = 5, T2 -14 dB -> -80 dB. A genuine live edit (poke
+TSTR mid-play) also wrote 04->05. (The earlier "saved Part differs in FX1" result was this same byte on the
+fixture's card.)
+
+**Fix (`patch_repitch_kyoti.s`, new `patch_repitch_reload.s`).**
+* flags: `bset %d0,(DB+0x95048)` / `bset %d0,(0x100b145e).l` — byte ops, bit = part.
+* `rp_reload` detours 0x4004aab4 (8 B `lea -32(sp),sp; movem.l d2-d5/a2-a3,(sp)`): rp_prev = RP_HOLD (0xfe) for
+  all 8 tracks, calls the stock body (`rp_reload_body`: the 2 displaced insns + jmp 0x4004aabc), then jumps to
+  rp_forget (0xff: the next poll adopts). Hold, not just forget: the frame ISR runs rp_swap while the Part is
+  being copied in. rp_forget now uses d1/a0 so RELOAD PART's verdict in d0 survives (RELOAD_FROM_PROJECT tests
+  it). rp_swap loads rp_prev SIGNED (`mvs.b`, `.word 0x7330,0x2800`) so HOLD (-2) and first sight (-1) are
+  `addq #2` / `subq #1` tests — rpk_logic 1924 -> 1916 B.
+* Placement: standalone `rp_reload` 34 B @0x400d6f40, body 14 B @0x400d6f64 (below the main cave; bugbuild
+  pads end 0x400d6732). KYOTI: `rpk_reload` in CAVE2 (2 B left), `rpk_reload_body` in SEAM (8 B left); both
+  UI-task code, not the ISR. SAFE now 8 B spare.
+
+**Verified (ot_emu, old = reconstructed `8a273354` mainos `28d2fc55…` exact, new = below):**
+| test | old | new |
+|---|---|---|
+| 2 reloads, saved T2 TSTR differs | FX1 4->5, swap, -80 dB | FX1 4, no swap (reloaded values adopted), -14 dB |
+| live TSTR edit | swap, saved P1 T2 FX1 -> 5 | swap, neighbours untouched |
+| verdict unsaved / saved | 03 / 02 | 03 / 02 |
+Standalone REPITCH: plays, live edit swaps, neighbours untouched. KYOTI invariants all pass.
+
+**Builds (WIP, not flashed):**
+| image | sha256 |
+|---|---|
+| `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.0.syx` | `576756fdb16f1b293ea20b18eaf72bc0fd44945d0c148201c54042ceddf1fd8f` |
+| `out/KYOTI/OCTATRACK_KYOTI_V1.0.bin` | `4e371d34c4663c602b529a3ad824718c68ff6460e5a53c58346d35e5331aff0e` |
+| `out/OCTATRACK_OS1.40C_REPITCH_REPEAT98_KYOTI.syx` (140C_RPK16) | `1a9484b52cff64cb34b0e5668946b8dea8c74de0d0b0c7fe0aad7ea134b00bec` |
+| `out/Bugbuilds/OCTATRACK_OS1.40C_REPITCH_REPEAT98_KYOTI_BATCH_BUGFIXES.syx` | `a909075a3c178cc481ab06268ac4fc038b6981a5836fc75a0850ece3362803fe` |
+Other six Bugbuilds unchanged. Flashed images kept: `out/KYOTI_flashed_597a6db9/`, `out/KYOTI_flashed_8a273354/`
+(mainos only, reconstructed). REPITCH_REPEAT98_KYOTI's FINAL pin unchanged -> its builder and the Bugbuilds run WIP
+(build_bugbuilds flags the base as unpromoted, exit 1, all seven written).

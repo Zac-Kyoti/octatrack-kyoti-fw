@@ -129,7 +129,9 @@ quick check for each:
   `[TRACK n]` while playing: the saved trigs come back without the transport stopping.
 - **REPITCH_REPEAT98_KYOTI** — a STATIC track with a sample whose tempo is set (audio
   editor, ATTR), SETUP → TSTR = `RPCH`: it follows the project tempo by varispeed, and
-  PTCH now reads QUAN.
+  PTCH now reads QUAN. Then save the Part, set a different TSTR on a track, and reload the
+  Part twice (PART → RELOAD, or `[BANK]` + `[TRACK n]` with RELOAD_FROM_PROJECT): every
+  track keeps its FX, and the TSTR you saved comes back with its own PTCH/QUAN value.
 - **QUANTIZE_LIVE_REC_TOGGLE** — hold `[REC]`, tap `[PLAY]` → toast; tap `[PLAY]` again
   while it is up → the setting inverts.
 - **ERASE_EMPTY_TRIGLESS_LOCKS** — make a trigless lock with one p-lock, erase that lock

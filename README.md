@@ -148,7 +148,14 @@ SIDECHAIN_COMPRESSOR. Starts from Jannik Aßfalg's Repitch module for octabam
 **Hardware:** confirmed. Not specifically tested: RTRG retrigs on a repitch track, and a
 full DSP core of RPSP tracks under heavy effects.\
 **Final build:** [`tools/build_repitch_repeat98_kyoti.py`](tools/build_repitch_repeat98_kyoti.py) →
-`OCTATRACK_OS1.40C_REPITCH_REPEAT98_KYOTI`
+`OCTATRACK_OS1.40C_REPITCH_REPEAT98_KYOTI`\
+**Update (WIP, emulator-verified, not flashed):** the promoted version damaged the bank
+whenever it swapped PTCH/QUAN (a TSTR change): it wrote two one-byte "Part edited" flags
+four bytes wide, turning saved Part 1's track 2 FX1 from FILTER into SPATIALIZER (input 0,
+so the track goes silent after a Part reload) and marking Part 3 as saved. It also took a
+Part RELOAD for a TSTR change and swapped values that were already right. Both are fixed:
+the flags are written as bytes, and RELOAD PART is handled like a Part change. If you used
+the promoted build, SAVE PART on an affected Part rewrites its saved copy correctly.
 
 ### QUANTIZE_LIVE_REC_TOGGLE
 

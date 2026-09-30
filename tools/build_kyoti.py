@@ -126,8 +126,12 @@ PLAN = {
               "rpk_glyph_rec3", "rpk_glyph_rec4"],
     "RELD":  ["patch_sidechain",                   # COMPRESSOR page formatters
               "patch_trigscale"],
-    "SEAM":  ["patch_qlrec"],                      # [PLAY]/[REC] key handlers
-    "CAVE2": ["rpk_glyph_data0", "rpk_glyph_data1", "rpk_glyph_data2", "personalize_labels"],
+    # Session 119: REPITCH's RELOAD PART wrapper (UI task, not the ISR), 34 + 14 B, split
+    # across the two pads with room for it.
+    "SEAM":  ["patch_qlrec",                       # [PLAY]/[REC] key handlers
+              "rpk_reload_body"],
+    "CAVE2": ["rpk_glyph_data0", "rpk_glyph_data1", "rpk_glyph_data2", "personalize_labels",
+              "rpk_reload"],
     "PASTE": ["rpk_glyph_data4", "rpk_glyph_data5"],
     "FILT":  ["rpk_glyph_data6"],
     "PERS1": ["rpk_glyph_tab", "rpk_glyph_data3", "rpk_glyph_rec0"],
@@ -160,7 +164,9 @@ FEATURES = {
                       {"patch_directjump_v7": "patch_directjump_v7.bin"}),
     "REPITCH_REPEAT98_KYOTI": ("build_repitch_repeat98_kyoti.py", "mainos_repitch_repeat98_kyoti.bin", "prep",
                       dict({"rpk_logic": "patch_repitch_kyoti.bin", "rpk_widget7": 0x174,
-                            "rpk_glyph_tab": 28},
+                            "rpk_glyph_tab": 28,
+                            "rpk_reload": "patch_repitch_reload_rl.bin",
+                            "rpk_reload_body": "patch_repitch_reload_rb.bin"},
                            **{f"rpk_glyph_rec{k}": 20 for k in range(7)},
                            **{f"rpk_glyph_data{k}": 68 for k in range(7)})),
 }
