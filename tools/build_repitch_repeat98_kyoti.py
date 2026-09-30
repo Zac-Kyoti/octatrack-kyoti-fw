@@ -63,6 +63,11 @@ CAVE_AT = kyoti_place.at("rpk_logic", 0x400d6f80)
 # patch_trigscale's pinned base (0x400d7bfc, MERGE.md).
 CAVE_CEIL = 0x400d7bfc if os.environ.get("RPK_DIAG") == "1" else 0x400d7b00
 PATCH_S = HERE / "patch_repitch_kyoti.s"
+RELOAD_S = HERE / "patch_repitch_reload.s"
+# Session 119: stock RELOAD PART wrapped as a Part apply (hold + forget), two small
+# pieces. Standalone they sit just below the main cave; KYOTI places each in a pad.
+RELOAD_AT = kyoti_place.at("rpk_reload", CAVE_AT - 0x40)
+RELOAD_BODY_AT = kyoti_place.at("rpk_reload_body", RELOAD_AT + 36)
 
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
@@ -88,6 +93,8 @@ DETOURS = [
     # part applies reset the swap bookkeeping: adopt, never swap, after these
     (0x40009094, "4fefff9848d77cfc", "rp_apply1"),
     (0x40009E00, "4fefffb448d77cfc", "rp_apply2"),
+    # ...and stock RELOAD PART, which applies through neither (Session 119)
+    (0x4004AAB4, "4fefffe048d70c3c", "rp_reload"),
 ]
 
 # --- descriptor pokes (addr, stock long, new long or symbol) ----------------
@@ -139,6 +146,35 @@ def assemble():
         if len(parts) == 3 and parts[1] in "Tt":
             syms[parts[2]] = int(parts[0], 16)
     return binf.read_bytes(), syms
+
+
+def assemble_reload(syms):
+    """patch_repitch_reload.s -> (rl bytes, rb bytes, {symbol: address}). It calls into the
+    main cave, so it links after it, with RP_PREV / RP_FORGET passed in."""
+    o = ROOT / "out/patch_repitch_reload.o"
+    elf = ROOT / "out/patch_repitch_reload.elf"
+    subprocess.run(["m68k-elf-as", "-mcpu=5407",
+                    "--defsym", f"RP_PREV=0x{syms['rp_prev']:x}",
+                    "--defsym", f"RP_FORGET=0x{syms['rp_forget']:x}",
+                    "-o", str(o), str(RELOAD_S)], check=True, cwd=ROOT)
+    subprocess.run(["m68k-elf-ld", f"--section-start=.rp_rl=0x{RELOAD_AT:x}",
+                    f"--section-start=.rp_rb=0x{RELOAD_BODY_AT:x}", "-e", "0",
+                    "-o", str(elf), str(o)], check=True, cwd=ROOT, capture_output=True)
+    out = []
+    for sec, stem in ((".rp_rl", "patch_repitch_reload_rl"), (".rp_rb", "patch_repitch_reload_rb")):
+        binf = ROOT / f"out/{stem}.bin"
+        subprocess.run(["m68k-elf-objcopy", "-O", "binary", f"--only-section={sec}", str(elf), str(binf)],
+                       check=True, cwd=ROOT)
+        (ROOT / f"out/{stem}.elf").write_bytes(elf.read_bytes())    # build_kyoti reads symbols per blob
+        out.append(binf.read_bytes())
+    nm = subprocess.run(["m68k-elf-nm", str(elf)], check=True, capture_output=True, text=True).stdout
+    rsyms = {p[2]: int(p[0], 16) for p in (l.split() for l in nm.splitlines())
+             if len(p) == 3 and p[1] in "Tt"}
+    if rsyms.get("rp_reload") != RELOAD_AT or rsyms.get("rp_reload_body") != RELOAD_BODY_AT:
+        sys.exit("patch_repitch_reload: pieces did not link where placed")
+    if RELOAD_AT + len(out[0]) > RELOAD_BODY_AT and RELOAD_BODY_AT + len(out[1]) > RELOAD_AT:
+        sys.exit("patch_repitch_reload: the two pieces overlap")
+    return out[0], out[1], rsyms
 
 
 def make_glyphs(cave_tab_at, rec_at=None, data_at=None):
@@ -331,6 +367,8 @@ def main():
     stock = STOCK_SECT.read_bytes()
     img = bytearray(stock)
     logic, syms = assemble()
+    rl, rb, rsyms = assemble_reload(syms)
+    syms.update(rsyms)
 
     # cave layout: logic, then the widget clone, then the glyph table/records/bitmaps.
     # Standalone they are contiguous; the combined image places each piece itself.
@@ -353,7 +391,7 @@ def main():
     w7[BOUND_OFF:BOUND_OFF+2] = b"\x70\x06"
     w7[LEA_OFF+2:LEA_OFF+6] = struct.pack(">I", tab_at)
 
-    pieces = [(CAVE_AT, logic), (w7_at, bytes(w7))] + glyphs
+    pieces = [(CAVE_AT, logic), (w7_at, bytes(w7)), (RELOAD_AT, rl), (RELOAD_BODY_AT, rb)] + glyphs
     spans = sorted((a, a + len(b)) for a, b in pieces)
     for (a1, e1), (a2, _) in zip(spans, spans[1:]):
         if e1 > a2:

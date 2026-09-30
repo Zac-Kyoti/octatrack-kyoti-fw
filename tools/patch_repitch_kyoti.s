@@ -53,6 +53,8 @@
         .global rp_swap
         .global rp_apply1
         .global rp_apply2
+        .global rp_forget
+        .global rp_prev
         .global rp_caption
         .global quant_step
         .global rp_refresh
@@ -108,6 +110,8 @@
         .equ    DIRTY_DB2, 0x9b332      | DB-relative: = 1
         .equ    DIRTY_GLOBAL, 0x100f8598
         .equ    TSTR_SLOT2, 4           | page 2: LOOP SLIC LEN RATE TSTR TSNS
+        .equ    RP_HOLD, 0xfe           | rp_prev value: a Part RELOAD is in progress
+                                        | (rp_reload writes it; rp_swap tests -2)
         .equ    PARKED, 18              | NEIGHBOR's slot-0 byte: page-1 '---'
         .equ    REDRAW_L, 0x46c7d248    | slot 0's knob-redraw mark: a LONG 0x14 at
                                         | 0x46c7d244 + slot*20 + 4, measured at the
@@ -489,12 +493,15 @@ rp_swap:
         move.l  %d1,%d2                 | track
         bsr     rp_ui_gate
         lea     rp_prev(%pc),%a0
-        moveq   #0,%d1
-        move.b  (%a0,%d2.l),%d1
+        .word   0x7330,0x2800           | mvs.b (%a0,%d2.l),%d1 -- SIGNED: 0/1 are
+                                        | gate values, -1 (0xff) first sight,
+                                        | -2 (RP_HOLD) a Part RELOAD in progress
         cmp.l   %d1,%d0
         beq     .sw_none
+        addq.l  #2,%d1                  | RP_HOLD: rp_reload is copying the Part
+        beq     .sw_none                | in -- touch nothing until it forgets
         move.b  %d0,(%a0,%d2.l)
-        cmpi.l  #0xff,%d1
+        subq.l  #1,%d1                  | 0xff (d1 is dead after this test)
         beq     .sw_adopt               | first sight: adopt what is stored
         movea.l (DB_PTR).l,%a0
         moveq   #0,%d1
@@ -549,16 +556,19 @@ rp_swap:
         move.l  %d5,%d1
         lsl.l   #8,%d1
         move.w  %d1,(%a1,%d0.l)         | base word = ui<<8
-        moveq   #0,%d0                  | the writer's own dirty flags
+        | The writer's own dirty flags. DIRTY_PARTS and DIRTY_SRAM are BYTE
+        | bitmasks (stock: move.b at 0x4004ab52/0x4004ab5c, 0x4000b062, ...).
+        | Until Session 119 they were written with or.l, a LONG: the 1<<part
+        | landed in the byte 3 past each flag -- saved Part 1's T2 FX1 type
+        | (DB+0x9504b: FILTER 4 -> SPATIALIZER 5 on Part 1) and Part 3's
+        | "has been saved" flag (0x100b1461, the SRAM copy of DB+0x9b312..).
+        | bset Dn,<mem> is a byte op and takes the bit number mod 8.
         move.b  (PART_B).l,%d0
-        moveq   #1,%d1
-        lsl.l   %d0,%d1
         movea.l (DB_PTR).l,%a1          | one DB load, reused: CF lea takes only
         movea.l %a1,%a0                 | a 16-bit displacement, so the big
         adda.l  #DIRTY_PARTS,%a0        | DB-relative offsets need adda.l
-        or.l    %d1,(%a0)
-        lea     (DIRTY_SRAM).l,%a0
-        or.l    %d1,(%a0)
+        bset    %d0,(%a0)
+        bset    %d0,(DIRTY_SRAM).l
         moveq   #1,%d1
         movea.l %a1,%a0
         adda.l  #DIRTY_DB2,%a0
@@ -944,11 +954,13 @@ rp_diagstr:
 | the next poll ADOPTS the freshly applied state. Part changes and project
 | loads are therefore never treated as transitions -- only live in-part
 | edits (SETUP TSTR, ATTR under AUTO) swap the domains.
+| d1 and a0 only: rp_reload returns straight through here with stock RELOAD
+| PART's verdict still in d0 (RELOAD_FROM_PROJECT tests it).
 rp_forget:
         lea     rp_prev(%pc),%a0
-        moveq   #-1,%d0
-        move.l  %d0,(%a0)
-        move.l  %d0,4(%a0)
+        moveq   #-1,%d1
+        move.l  %d1,(%a0)
+        move.l  %d1,4(%a0)
         rts
 rp_apply1:
         bsr.s   rp_forget
