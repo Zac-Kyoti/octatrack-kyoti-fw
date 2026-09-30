@@ -7,7 +7,7 @@ octabam-modules/direct-jump-kyoti/patch_directjump_v7.s header and
 reference/handoffs/DIRECTJUMP_V7_DESIGN.md).  Built on V6.4 (the frozen OT<->AR
 parity build).  Below: V6's original notes, still true of the machinery.
 
-DIRECT JUMP V6 -- Session 105 (2026-09-26): AR's DIRECT JUMP through OT's own landing.
+DIRECT JUMP V6 -- Session 105 (2026-09-26): the AR's DIRECT JUMP behaviour, reproduced through OT's own landing.
 
 The V1-V5 line committed a jump by re-entering the pattern-boundary body with an offset
 in 0x80006628 -- which turned out to be the arranger's cycle-start step feeding AR's

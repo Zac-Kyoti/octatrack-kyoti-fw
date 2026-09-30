@@ -1,7 +1,7 @@
 | SPDX-License-Identifier: MIT
 | SPDX-FileCopyrightText: 2026 Zac-Kyoti
 |
-| DIRECT JUMP V6 -- Session 105 (2026-09-26).  AR's DIRECT JUMP through OT's OWN landing.
+| DIRECT JUMP V6 -- Session 105 (2026-09-26).  the AR's DIRECT JUMP behaviour, reproduced through OT's OWN landing.
 |
 | Everything the V1-V5 line hooked in the sequencer (dj_a/dj_b/dj_c/dj_d7/dj_scaleix_fix,
 | Hooks Z/X/V, the boundary-body offset 0x80006628) is gone.  What stays from those builds

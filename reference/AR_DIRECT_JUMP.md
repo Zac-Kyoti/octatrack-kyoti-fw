@@ -5,8 +5,8 @@ Kept in **both** repos (`ar-kyoti-fw/AR_DIRECT_JUMP.md` and
 `octatrack-kyoti-fw/reference/AR_DIRECT_JUMP.md`) so neither project depends on the other
 being at hand.
 
-> **Outcome for the OT port (2026-09-27).** This decompilation did what it was written for.
-> OT DIRECT JUMP **V6.4** ported AR's commit exactly — through the OT's own stock landing
+> **Outcome for the OT implementation (2026-09-27).** This decompilation did what it was written for.
+> OT DIRECT JUMP **V6.4** reproduced the AR's behaviour exactly — in its own code, through the OT's own stock landing
 > (`0x80006687` path), §6 — and was **hardware-confirmed as AR-exact**, AR's faults included.
 > **V7** then deviated on purpose and **shipped** (hardware-confirmed the same day): it keeps
 > V6.4's landing but replaces the position rule. AR (and V6.4) derive the new pattern's
@@ -219,9 +219,9 @@ Two genuine differences:
 
 ---
 
-## 5. What the port actually turned out to be
+## 5. What reproducing the AR's behaviour actually turned out to be
 
-Not a port. OT's AR-equivalent machinery was already there and already correct — it had
+Not a port of AR code. OT's AR-equivalent machinery was already there and already correct — it had
 simply never been given a non-zero offset, because `0x80006628` is 0 at a natural boundary
 and nothing ever set it otherwise.
 
@@ -299,13 +299,13 @@ AR committing from its own per-tick function rather than reusing a boundary body
    revert lives elsewhere — plausibly reusing `DAT_40566756` ("previous pattern"), **inferred,
    not checked**.
 2. **SEQUENTIAL's own commit path** (`0x4015716c` write target) — located but not traced.
-3. **Semantics of AR's `0`/`-1` per-track arrays** (`0x4056672d`, `0x405667ba`). OT's port
+3. **Semantics of AR's `0`/`-1` per-track arrays** (`0x4056672d`, `0x405667ba`). The OT implementation
    does not need them, but the symmetry is unexplained.
 
 ## 7b. Session 82 correction — OT's tick domain, and the one thing AR does that OT was not
 
 The OT column of §4 carried a mislabelling that invalidated the timing (not the position)
-half of the port.
+half of the OT implementation.
 
 | address | the table used to say | what it is, **MEASURED** (`tools/diag_tick_domain.py`) |
 |---|---|---|
@@ -341,7 +341,7 @@ step position itself resumes, the direct analogue of AR's `0x405666e4 = new_step
 ## 7c. Session 85 — the phrase "as if it had been playing all along" is RETIRED
 
 It is not a specification. It is ambiguous exactly where the two candidate rules differ, and
-it repeatedly steered this port wrong — three flashed builds, each implementing a different
+it repeatedly steered the OT implementation wrong — three flashed builds, each implementing a different
 reading of it. **The specification is AR's arithmetic, stated as arithmetic:**
 
 ```
@@ -373,7 +373,7 @@ OT computes per-track position in the TICK domain (`q = ceil(D7/tps_t)` at `0x40
 position is rescaled by the ratio of the two master scales. It is not correctable through
 `0x80006628`, which is one global where the correction would need to be per-track.
 
-So the OT port writes the per-track arrays directly, after stock's loops have run
+So the OT implementation writes the per-track arrays directly, after stock's loops have run
 (Hook P, `0x400a4d36`):
 
 | AR | OT | value |

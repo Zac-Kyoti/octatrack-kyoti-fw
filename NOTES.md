@@ -34690,3 +34690,28 @@ recorded it as "not pushed", but it is on GitHub.
 **Build this session:** V6.4 (WIP, `out/OCTATRACK_OS1.40C_DIRECT_JUMP_V6_4.syx`, mainos
 `4a6c1b5e…`) and the seven combos (`out/Bugbuilds/*_BATCH_BUGFIXES`). **Nothing new needs
 flashing** — both reproduce images that already existed.
+
+## Session 118 continued (2) (2026-09-30, `main`) — "ported from the AR" corrected in the live docs
+
+User, as a legal concern about publishing the DIRECT_JUMP_KYOTI build tools: was AR code
+ported into the OT? **No — measured.** Both firmwares are ColdFire, so it was testable:
+the assembled V7 cave compared against the AR's MAIN OS 1.73
+(`~/Documents/ar-kyoti-fw/out/section_3_MAIN_OS.bin`) shares no code run longer than
+**8 bytes** — `lea -60(sp),sp; movem.l d0-a6,(sp)`, a generic register save; everything
+else is 2-4-byte single-instruction coincidences. The only longer overlap is the text
+`DIRECT JUMP` in the toast (the AR's menu label). V6.4: identical result. What came from the
+AR is knowledge from decompiling it (the synchronous re-landing mechanism; V6.4's when/where
+rules), implemented in original code that arms the OT's own stock re-landing routine; V7
+replaced both rules. The AR reference docs hold no raw listings or decompiler output — about
+60 lines of pseudocode in our own notation.
+
+So "ported" was the wrong word. Reworded in the live docs, per the user: 19 edits in 8
+files (the three AR reference docs, both DJ patch headers and builders, and one Ghidra
+script comment) — "ported AR's commit" -> "reproduced the AR's behaviour", "the OT port" ->
+"the OT implementation", and V6's "AR's DIRECT JUMP through OT's own landing" -> "the AR's
+DIRECT JUMP behaviour, reproduced through OT's own landing". This log keeps its original
+wording. Comment-only changes: DIRECT_JUMP_KYOTI still matches its promoted image, V6.4 is
+still `4a6c1b5e…`, the DJ module's pinned bytes still assert. The canonical copies of the
+AR docs in `ar-kyoti-fw` (also on GitHub) still say "ported" — not changed; offered.
+
+**No build to flash.**

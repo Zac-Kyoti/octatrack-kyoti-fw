@@ -2,11 +2,11 @@
 
 AR Session 10 (2026-09-26). Written because the OT thread's "gold" DIRECT JUMP build turned
 out to be step-fractional even at 1x / NORMAL mode / a plain 16-step ↔ 7-step pattern switch,
-so the OT port restarts from AR's *whole* engine rather than from its commit loops alone.
+so the OT implementation restarts from AR's *whole* engine rather than from its commit loops alone.
 Canonical copy here; mirrored to `octatrack-kyoti-fw/reference/AR_SEQUENCER_ENGINE.md`.
 
-> **Outcome for the OT port (2026-09-27).** This decompilation did what it was written for.
-> OT DIRECT JUMP **V6.4** ported AR's commit exactly — through the OT's own stock landing
+> **Outcome for the OT implementation (2026-09-27).** This decompilation did what it was written for.
+> OT DIRECT JUMP **V6.4** reproduced the AR's behaviour exactly — in its own code, through the OT's own stock landing
 > (`0x80006687` path), §6 — and was **hardware-confirmed as AR-exact**, AR's faults included.
 > **V7** then deviated on purpose and **shipped** (hardware-confirmed the same day): it keeps
 > V6.4's landing but replaces the position rule. AR (and V6.4) derive the new pattern's
@@ -62,7 +62,7 @@ With **internal** clock nothing in CPU code forces src 44. The tick ISR's tail
 (`0x40099f28`–`0x40099faa`) writes a **deadline mailbox** `0x80006838` (with `0x80006834` as a
 base, cleared at transport start) and no CPU instruction reads it back except the ISR itself.
 Like OT's `0x8000xxxx` region it is shared with the DSP host interface, so the internal clock
-edge is generated outside CPU code from that deadline. Not resolved further — the port does
+edge is generated outside CPU code from that deadline. Not resolved further — the OT implementation does
 not need it. (The tail also re-arms the two slice counters below.)
 
 ### 1.2 Units
@@ -158,7 +158,7 @@ scratch record the scheduler fills (its first long = "an event was built").
 
 ## 3. The tick ISR `FUN_4009905c`, phase by phase
 
-Order matters and is the one thing OT's port had wrong; the phases below run in this order
+Order matters and is the one thing the OT implementation had wrong; the phases below run in this order
 on every entry, each gated as stated. `cfg` = settings record; "tick" = `0x40566578 == 0`.
 
 **A. `0x4009905c`–`0x4009908c` — prologue.** Ack `INTFRCH` bit 25; `cfg` pointer.
@@ -318,7 +318,7 @@ writes the phase itself.
 
 ---
 
-## 6. AR's DIRECT JUMP as a specification (the port target)
+## 6. AR's DIRECT JUMP as a specification (the behaviour to reproduce)
 
 1. **Request**: record target and the DIRECT START flag; set "recompute". Nothing else.
 2. **Quantise**: on the next tick, `countdown = tps_master − master_tick_phase` — the next

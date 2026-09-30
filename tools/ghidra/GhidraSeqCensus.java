@@ -2,7 +2,7 @@
 // Session 10 (AR). The OT thread restarted from scratch after its "gold" DIRECT JUMP
 // build turned out to be step-fractional even at 1x / NORMAL mode / 16-vs-7-step
 // patterns. The decision: understand AR's WHOLE sequencer timing engine, not just the
-// commit loops, before designing the OT port again.
+// commit loops, before designing the OT implementation again.
 //
 // This script is the census pass: for every known sequencer global (master scalars,
 // request/commit globals, the eight per-track arrays) it lists EVERY instruction that
