@@ -32,7 +32,8 @@ import sys
 
 ALLOW_ENV = "KYOTI_ALLOW_WIP"
 
-# builder -> sha256 of the image it built when the author promoted it.
+# builder -> sha256 of the image it built when the author promoted it.  A builder that
+# writes several images maps to {image file name: sha256}, one per promoted image.
 FINAL = {
     "build_mute_modes.py":                 "b5e24316e4dc5824657818f26cf1891e02ac26ae9094f101a7703f5beb74d6ba",
     "build_direct_jump_kyoti.py":          "3f26d8de004469052ec9da58967c066b128393dd4a9c4dfc7d7efd0d3696a759",
@@ -43,6 +44,15 @@ FINAL = {
     "build_erase_empty_trigless_locks.py": "83690ffbd97ad51281630acc8597f6423715885d2a712915df2edc39bb9b6a1c",
     "build_midi_plays_free_fix.py":        "672158c18630703cc1aadc635d45aeb68549a3237830d5c4a0aeb2d113afad35",
     "build_empty_pattern_led_fix.py":      "737979232995e93dba6778ef10e214a5355a498f54965946127258d186c5be2c",
+    "build_bugbuilds.py": {
+        "mainos_mute_modes_batch_bugfixes.bin":              "fbdab3b280c1443cb8bb07ac75a6bdfc786a605d3fb9d745c413224b6fe45d7f",
+        "mainos_quantize_live_rec_toggle_batch_bugfixes.bin":"a91d4bc6cecb68d9e2926cba9c1d129a537aa506a2450f505838f1040930b088",
+        "mainos_sidechain_compressor_batch_bugfixes.bin":    "ebb0355a20ded854acd68b2ad9aecf6aa014842bb61e1969e3b5dfbdccd12974",
+        "mainos_erase_empty_trigless_locks_batch_bugfixes.bin":"863afe55f89cf576c1ed3113a15cd91ab7c98a9e03d369502987541d0179a506",
+        "mainos_reload_from_project_batch_bugfixes.bin":     "420722edeba797953ca3569d8b15df9711fdc9a779bdec9bb876df8d36c59907",
+        "mainos_direct_jump_kyoti_batch_bugfixes.bin":       "fea54f60720e1dc4c615f13783ab8eb3ecd1ec44cb7fc36712dbefbb02eb6a10",
+        "mainos_repitch_repeat98_kyoti_batch_bugfixes.bin":  "72e4a40039d540b8f9a2f93207c06dc5119decbee5d2f505053b0b413fc7c79f",
+    },
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
 }
 
@@ -101,7 +111,10 @@ def seal(builder, image):
         return
     with open(image, "rb") as f:
         sha = hashlib.sha256(f.read()).hexdigest()
-    if sha == FINAL[name]:
+    want = FINAL[name]
+    if isinstance(want, dict):
+        want = want.get(os.path.basename(image), "(not one of the promoted images)")
+    if sha == want:
         print(f"  image matches the promoted FINAL build (sha256 {sha[:16]}...)")
         return
     out = sys.stdout if _allowed() else sys.stderr
@@ -109,6 +122,6 @@ def seal(builder, image):
              "The builder, or something it assembles, has changed since it was",
              "promoted. It stays WIP until the author promotes it.",
              f"  this build  {sha}",
-             f"  promoted    {FINAL[name]}"], out)
+             f"  promoted    {want}"], out)
     if not _allowed():
         _refuse("the build no longer matches its promoted image", builder)

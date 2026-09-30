@@ -56,7 +56,8 @@ build refuses to produce a changed image without the opt-in.
 
 ## Features
 
-Hardware testing is on my Octatrack **MKI**; nothing here has been tested on an MKII.
+Hardware testing is on my Octatrack **MKI**; nothing here has been tested on an MKII, but the
+MKII panel layout has been considered for every build.
 
 ### MUTE_MODES
 
@@ -72,8 +73,7 @@ Choose how an audio track's mute behaves, in **PERSONALIZE → MUTE MODE**:
 SOLO follows the same rule as a manual mute; `CUE MUTES TRK` stays a hard cut. The
 setting survives a power cycle.
 
-**Hardware:** confirmed. Its newest fix (the `OTFX-T` / `DT-T` trig hook no longer
-overwrites a register stock code relies on) is emulator-verified, not yet on hardware.\
+**Hardware:** confirmed.\
 **Final build:** [`tools/build_mute_modes.py`](tools/build_mute_modes.py) →
 `OCTATRACK_OS1.40C_MUTE_MODES`
 
@@ -190,6 +190,17 @@ Three fixes to stock bugs. Each has its own build.
   **Hardware:** confirmed. **Final build:**
   [`tools/build_part_change_carryover_fix.py`](tools/build_part_change_carryover_fix.py) →
   `OCTATRACK_OS1.40C_PART_CHANGE_CARRYOVER_FIX`
+
+### Each feature + BATCH_BUGFIXES
+
+One image per feature above, with all three BATCH_BUGFIXES folded in — seven images, for
+flashing a single feature without giving up the bug fixes. The features are not combined
+with each other.
+
+**Hardware:** every ingredient is confirmed on its own; these combined images have not been
+flashed as such.\
+**Final build:** [`tools/build_bugbuilds.py`](tools/build_bugbuilds.py) →
+`out/Bugbuilds/OCTATRACK_OS1.40C_<FEATURE>_BATCH_BUGFIXES`
 
 ---
 

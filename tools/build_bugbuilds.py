@@ -54,12 +54,9 @@ Usage:  python3 tools/build_bugbuilds.py [--no-rebuild]
 """
 import os, pathlib, subprocess, sys
 import hashlib
-from kyoti_status import gate, FINAL
+from kyoti_status import gate, seal, FINAL
 
-gate(__file__, note="""
-Every promoted feature + BATCH_BUGFIXES, one image each.  Each ingredient is
-hardware-confirmed on its own; no composite has been flashed.
-""")
+gate(__file__)
 
 BASE = 0x40000400
 ROOT = pathlib.Path(__file__).parent.parent
@@ -371,8 +368,9 @@ def main():
         left = sum(r[1] - r[0] for r in free_runs(img))
         print(f"  cave zone: {left} B still free")
 
-        mainos = OUTDIR / f"mainos_{name.lower()}_bugfix.bin"
+        mainos = OUTDIR / f"mainos_{name.lower()}_batch_bugfixes.bin"
         mainos.write_bytes(bytes(img))
+        seal(__file__, mainos)
         print(f"  wrote    {mainos.relative_to(ROOT)}  "
               f"({len(img):,} B, {len(comp_d)} changed vs stock)")
         wrap(mainos, name, verstr, blurb)

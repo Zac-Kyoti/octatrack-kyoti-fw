@@ -155,7 +155,9 @@ built and waiting.
   `seal()` prints into `FINAL`, and give the feature its `README.md` / `BUILD_KYOTI.md`
   entry. An update to a final feature replaces the old final — in place, or by taking the
   old builder's FINAL entry and deleting the old builder. **There is no superseded tier:
-  do not keep old versions around** (git history has them). A new builder needs no tier
+  do not keep old versions around** (git history has them) — the one exception is what the
+  user asks to keep available: DIRECT JUMP V6.4 (`tools/build_direct_jump_v6_4.py`), WIP
+  on purpose and never to be promoted. A new builder needs no tier
   declaration — it is WIP until promoted. Use a short-lived topic branch for risky work.
 - **Feature names** — use them in builders, output images, docs and octabam keys:
   MUTE_MODES, DIRECT_JUMP_KYOTI, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT,

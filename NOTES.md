@@ -34655,3 +34655,38 @@ session's current build.
 **Build this session:** only rebuilds of existing features, every image byte-identical to
 what was already there under the old names. **Nothing new to flash.** Old-named images
 (`OCTATRACK_OS1.40C_MUTEMODE_DT.syx`, …) left in any checkout's `out/` are stale copies.
+
+## Session 118 continued (2026-09-29, `main`) — V6.4 restored as a permanent WIP build; MUTE_MODES confirmed; the combo builds promoted
+
+User: DIRECT JUMP V6.4 must stay available, but never on a main page; MUTE_MODES (with the
+`fresh_bind` fix) is fully tested via KYOTI V1.0 — all nominal; promote the bugfix combo
+builds; nothing to merge from `kyoti-v1` (stress-testing V1.0, likely promoted as-is).
+
+- **V6.4 restored** from `69949ce` as `tools/build_direct_jump_v6_4.py` (source
+  `tools/patch_directjump_v6.s`), gated WIP **by design** — CLAUDE.md now names it as the one
+  exception to "no old versions". Only path edits: MIDI_PLAYS_FREE_FIX's source moved to
+  `octabam-modules/batch-bugfixes/` (V6.4 folds its own copy, as the flashed image did), the
+  cross-check image is `mainos_midi_plays_free_fix.bin`, outputs are `*DIRECT_JUMP_V6_4*`.
+  Refuses without the opt-in; with it, mainos **`4a6c1b5e3fb8562c…` — the hardware-confirmed
+  V6.4 image** (Session 107 continued (3)).
+- **MUTE_MODES**: README's "newest fix emulator-verified" caveat removed. Its FINAL pin
+  (`b5e24316…`, with `fresh_bind`) was already the build the user has now confirmed.
+- **Combo builds promoted.** `FINAL` may now map a multi-image builder to
+  `{image file name: sha256}`; `seal()` checks each image by name. `build_bugbuilds.py` is
+  gated FINAL and seals every composite before its wrap. Composite images renamed
+  `mainos_<feature>_batch_bugfixes.bin` to match their `.syx`. Pinned from the files as built
+  (full hashes, measured); re-run without the opt-in: FINAL, 7/7 composites match. README
+  says what is true: every ingredient confirmed, these composite images not flashed as such.
+- README: the MKI line now reads "…nothing here has been tested on an MKII, but the MKII
+  panel layout has been considered for every build." (the user's wording).
+
+**The tag `ref/sidechain3-cross-2026-09-25`** (user asked what it is): made by the `kyoti-v1`
+session in Session 116 at the user's request for a never-changing reference copy of the
+SIDE-CHAIN build they confirmed on 2026-09-25. It marks commit `cde4df3`, the source of that
+image (syx `8d273030…`); the built copy is locked read-only in
+`~/Documents/Octatrack-reference-builds/SIDECHAIN3_CROSS_REFERENCE_2026-09-25/`. Session 116
+recorded it as "not pushed", but it is on GitHub.
+
+**Build this session:** V6.4 (WIP, `out/OCTATRACK_OS1.40C_DIRECT_JUMP_V6_4.syx`, mainos
+`4a6c1b5e…`) and the seven combos (`out/Bugbuilds/*_BATCH_BUGFIXES`). **Nothing new needs
+flashing** — both reproduce images that already existed.

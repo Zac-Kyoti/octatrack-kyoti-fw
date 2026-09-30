@@ -107,7 +107,8 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | DSP assembly | `tools/dsp_xasm.py` over `vendor/dsp56300`'s `dsp_asm` |
 | a final build | `tools/build_<feature>.py` → `.syx` (MIDI) + `.bin` (CF card); see `BUILD_KYOTI.md` |
 | the combined image | `tools/build_kyoti.py` (WIP; `--without NAME` for bisection images) |
-| each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (WIP) |
+| each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final, seven images) |
+| DIRECT JUMP V6.4, the OT↔AR parity build | `tools/build_direct_jump_v6_4.py` — WIP **by design**: kept buildable at the user's request (hardware-confirmed image `4a6c1b5e…`), never to be promoted |
 | external RE research | `python3 tools/refs/sync.py` (clone or refresh the tracked repos into `refs/`) · `python3 tools/refs/whatsnew.py` |
 
 ## 5. How work is organised
@@ -150,12 +151,12 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
-- **KYOTI V1.0** (`tools/build_kyoti.py`, WIP) — every final feature in one image. Flashed
-  and under test on the MKI since 2026-09-29; the current build adds MUTE_MODES' register
-  fix and is not yet flashed. One DIRECT_JUMP_KYOTI crash in the combined image is still
-  unexplained. `NOTES.md` Sessions 114–117, `reference/MERGE.md`.
-- **MUTE_MODES** — its newest fix (`fresh_bind` no longer overwrites `%d3`) is
-  emulator-verified, not yet on hardware.
+- **KYOTI V1.0** (`tools/build_kyoti.py`, WIP) — every final feature in one image
+  (`597a6db9…`). MUTE_MODES is confirmed nominal through it; the user is stress-testing it
+  and expects to promote this build as-is. One DIRECT_JUMP_KYOTI crash, seen on an earlier
+  V1.0 flash, was never explained; its leading suspect was the MUTE_MODES register bug
+  (`fresh_bind` overwriting `%d3`) fixed since. `NOTES.md` Sessions 114–118,
+  `reference/MERGE.md`.
 - **DIRECT_JUMP_KYOTI** — not yet on hardware: MIDI tracks, and Program Change on fast
   re-cues.
 - **REPITCH_REPEAT98_KYOTI** — not specifically tested: RTRG retrigs; a full DSP core of
