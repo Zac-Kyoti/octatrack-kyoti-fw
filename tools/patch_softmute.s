@@ -706,7 +706,7 @@ mr_pass:
 | that goes high for ordinary natural decay, muted or not; `relcut`'s own Session-58 header
 | comment even says the fix is meant for "ANY silenced track" but the code only ever
 | checked the GLOBAL GATE, not per-track mute state. Confirmed directly
-| (`tools/diag_relcut_unmuted.py` against `out/mainos_mutemode_dt_BASELINE.bin`, hook 13
+| (`tools/diag_relcut_unmuted.py` against `out/mainos_mute_modes_BASELINE.bin`, hook 13
 | not even present): 8267 of 8268 writes to +4 were VALUE 0, starting 2 frames after a
 | single natural trig, with MUTE_STATE at 0 for the entire run. **This predates hook 13
 | entirely** -- every build since Session 58 has had it; it was simply never tested with
@@ -1238,7 +1238,7 @@ relstate_or:
 | the shipped build a single cave byte -- with it assembled unconditionally,
 | patch_softmute grows past patch_mutemode's cave and every downstream address has to
 | move. To re-run the experiment: add --defsym LIVE_NIBBLE=1, re-enable the detour in
-| build_mutemode_dt.py, and bump patch_mutemode + the three PERSONALIZE arrays by 0x80.
+| build_mute_modes.py, and bump patch_mutemode + the three PERSONALIZE arrays by 0x80.
     .ifdef LIVE_NIBBLE
     .equ LN_BACK,   0x4000b914        | right after the displaced load + store
     .global live_nibble

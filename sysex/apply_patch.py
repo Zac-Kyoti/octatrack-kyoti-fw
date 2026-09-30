@@ -7,7 +7,7 @@ No Elektron binary is distributed with this repository. You supply the stock .sy
 (downloaded from elektron.se); this script applies the patch hunks — which are the
 only part authored here — and repacks the result.
 
-    python3 sysex/apply_patch.py -i OCTATRACK_OS1.40C.syx -o OCTATRACK_PLAYSFREEFIX.syx
+    python3 sysex/apply_patch.py -i OCTATRACK_OS1.40C.syx -o OCTATRACK_MIDI_PLAYS_FREE_FIX.syx
 
 Every step is verified: the stock file's checksum, the original bytes under each
 hunk, and the checksum of the produced .syx. Any mismatch aborts before writing.

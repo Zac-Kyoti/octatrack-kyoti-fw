@@ -2,96 +2,113 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-Build status tiers -- what a builder tells you before it runs, and what it refuses.
+The build gate: everything is WORK IN PROGRESS until the author promotes it.
 
-There is one branch in this repo and it carries every build, finished or not, so the
-tier a build is in has to be visible at the moment someone runs it -- not only in
-README.md.  Each build_*.py declares one tier by calling status() right after its
-imports:
+A WIP build refuses to run unless KYOTI_ALLOW_WIP=1 is set, so nobody flashes an
+unfinished image by accident.  A builder is FINAL only while it still builds exactly the
+image that was promoted: FINAL below pins each promoted builder to the sha256 of that
+image (the patched MAIN OS section, before it is wrapped into a .syx).  Change the
+builder or anything it assembles and the image changes, so the build is WIP again until
+the author promotes the new one -- which then replaces the old.  A diagnostic variant of
+a final builder builds a different image, so it is WIP too.
 
-    FINAL       flashed on the author's MKI and working.  One line, then it builds.
-    PREVIEW     incomplete, but safe to try and useful on hardware as far as it goes.
-                Prints what is unfinished, then builds.
-    WIP         the author's own flash-and-measure loop: expected to be wrong, and
-                changing between commits.  REFUSES to build unless the environment
-                has KYOTI_ALLOW_WIP=1.
-    SUPERSEDED  a dead end or an intermediate stage, kept only so its reasoning and
-                its measurements stay readable.  Something else does this better, or
-                it never worked.  REFUSES to build unless KYOTI_ALLOW_SUPERSEDED=1,
-                and says what replaced it.
+Two calls in every builder:
 
-The gates are a courtesy, not a lock -- this is a public repo and anyone can delete the
-call.  They are here so that nobody flashes a diagnostic or an abandoned build by
-accident, and so "which of these is finished?" is answered where the question actually
-comes up: at the moment someone runs one of nearly thirty builders.
+    gate(__file__)           first thing: a builder not on the FINAL list is WIP
+    seal(__file__, image)    after writing the image, before wrapping it: a FINAL
+                             builder whose image no longer matches is WIP
 
-Read FLASHING.md before you flash any of them, whatever the tier says.
+PROMOTION happens only on the author's explicit instruction: build it, put the sha256
+that seal() prints into FINAL, and give the feature its entry in README.md.  When the
+promoted build is a new builder rather than an update in place, it takes the old one's
+FINAL entry and the old builder is deleted.
+
+The gate is a courtesy, not a lock -- this is a public repo.  Read FLASHING.md before you
+flash anything, whatever the gate says.
 """
+import hashlib
 import os
 import sys
 
-FINAL = "FINAL"
-PREVIEW = "PREVIEW"
-WIP = "WIP"
-SUPERSEDED = "SUPERSEDED"
-
 ALLOW_ENV = "KYOTI_ALLOW_WIP"
-ALLOW_SUPERSEDED_ENV = "KYOTI_ALLOW_SUPERSEDED"
 
-# Which environment variable opts in to a gated tier.  A tier absent from this map is
-# never gated.  Deliberately two names, not one: the incantation for "I know this is
-# unfinished" should not also unlock "this one was abandoned".
-_GATE_ENV = {WIP: ALLOW_ENV, SUPERSEDED: ALLOW_SUPERSEDED_ENV}
+# builder -> sha256 of the image it built when the author promoted it.
+FINAL = {
+    "build_mute_modes.py":                 "b5e24316e4dc5824657818f26cf1891e02ac26ae9094f101a7703f5beb74d6ba",
+    "build_direct_jump_kyoti.py":          "3f26d8de004469052ec9da58967c066b128393dd4a9c4dfc7d7efd0d3696a759",
+    "build_sidechain_compressor.py":       "dfafc90cd230f340fd93ecc1f8e130c139fb6128855aca6adbf09cbcedc2d827",
+    "build_reload_from_project.py":        "19a3a62ca65de4c27c44d4f07f0b2e25d58b732bb56ed02c91a8e1b98e2676ac",
+    "build_repitch_repeat98_kyoti.py":     "3d17b002659023ad5d83cdfd4bef3cca9216401a76da1132598b9ddff7ced2bf",
+    "build_quantize_live_rec_toggle.py":   "0832cd9d0b5f804a26c50cf1ed6ce375288635f7c1ec2ad661b0083f80df803f",
+    "build_erase_empty_trigless_locks.py": "83690ffbd97ad51281630acc8597f6423715885d2a712915df2edc39bb9b6a1c",
+    "build_midi_plays_free_fix.py":        "672158c18630703cc1aadc635d45aeb68549a3237830d5c4a0aeb2d113afad35",
+    "build_empty_pattern_led_fix.py":      "737979232995e93dba6778ef10e214a5355a498f54965946127258d186c5be2c",
+    "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
+}
 
 _RULE = "  " + "-" * 72
 
-_HEADLINE = {
-    FINAL: "FINAL -- hardware-confirmed on the author's MKI",
-    PREVIEW: "PREVIEW -- incomplete, buildable on purpose",
-    WIP: "WIP -- work in progress, expected to be wrong",
-    SUPERSEDED: "SUPERSEDED -- a dead end, kept for its reasoning only",
-}
 
-_REFUSAL = {
-    WIP: "this one is not finished, and an image built from it is not something\n"
-         "  to flash",
-    SUPERSEDED: "this one was abandoned or replaced, so building it gets you a worse\n"
-                "  image than the build that replaced it -- and some of these never\n"
-                "  worked on hardware at all",
-}
+def _allowed():
+    return os.environ.get(ALLOW_ENV) == "1"
 
 
-def status(tier, name, note=""):
-    """Announce `name`'s tier, and refuse to continue if that tier is gated.
-
-    `note` is free text -- say what is unfinished, or what replaced this, in the
-    specific.  Called for its side effects (printing, and sys.exit on a gated tier),
-    so it goes at the top of a builder, before it reads the stock image or writes
-    anything.
-    """
-    if tier not in _HEADLINE:
-        raise ValueError(f"unknown tier {tier!r}")
-
-    gate = _GATE_ENV.get(tier)
-    allowed = gate is None or os.environ.get(gate) == "1"
-    out = sys.stdout if allowed else sys.stderr
-
+def _banner(lines, out):
     print(_RULE, file=out)
-    print(f"  {name}  --  {_HEADLINE[tier]}", file=out)
-    for line in note.strip().splitlines():
-        print(f"  {line.strip()}", file=out)
+    for line in lines:
+        print(f"  {line}", file=out)
     print(_RULE, file=out)
-    out.flush()   # a builder's own child processes write straight to the terminal; without
+    out.flush()   # a builder's child processes write straight to the terminal; without
                   # this, a piped run prints the banner after their output instead of first
 
-    if not allowed:
-        print(
-            f"\n  Refusing to build: {_REFUSAL[tier]}.\n"
-            f"  If you meant it, set {gate}=1:\n\n"
-            f"      {gate}=1 python3 {os.path.relpath(sys.argv[0])}\n",
-            file=sys.stderr,
-        )
-        sys.exit(2)
 
-    print(file=out)
-    out.flush()
+def _refuse(why, builder):
+    print(f"\n  Refusing to build: {why}.\n"
+          f"  If you meant it, set {ALLOW_ENV}=1:\n\n"
+          f"      {ALLOW_ENV}=1 python3 {os.path.relpath(builder)}\n", file=sys.stderr)
+    sys.exit(2)
+
+
+def gate(builder, note=""):
+    """Say whether `builder` is FINAL or WIP; refuse a WIP build without the opt-in.
+
+    `note` is free text shown with a WIP banner -- what is unfinished, specifically.
+    Call it at the top of a builder, before it reads the stock image or writes anything.
+    """
+    name = os.path.basename(builder)
+    if name in FINAL:
+        _banner([f"{name}  --  FINAL"], sys.stdout)
+        print()
+        return
+    out = sys.stdout if _allowed() else sys.stderr
+    _banner([f"{name}  --  WIP, not promoted to final"]
+            + [l.strip() for l in note.strip().splitlines()], out)
+    if not _allowed():
+        _refuse("this build is work in progress, and an image built from it is not\n"
+                "  something to flash", builder)
+    print()
+
+
+def seal(builder, image):
+    """After a FINAL builder writes its image: is it still the promoted one?
+
+    A build placed at other addresses for the combined image (KYOTI_PLACE set, see
+    tools/kyoti_place.py) cannot match its standalone promotion, so it is not checked
+    here; the combined builder is gated on its own.
+    """
+    name = os.path.basename(builder)
+    if name not in FINAL or os.environ.get("KYOTI_PLACE"):
+        return
+    with open(image, "rb") as f:
+        sha = hashlib.sha256(f.read()).hexdigest()
+    if sha == FINAL[name]:
+        print(f"  image matches the promoted FINAL build (sha256 {sha[:16]}...)")
+        return
+    out = sys.stdout if _allowed() else sys.stderr
+    _banner([f"{name}  --  WIP: this is not the promoted build",
+             "The builder, or something it assembles, has changed since it was",
+             "promoted. It stays WIP until the author promotes it.",
+             f"  this build  {sha}",
+             f"  promoted    {FINAL[name]}"], out)
+    if not _allowed():
+        _refuse("the build no longer matches its promoted image", builder)

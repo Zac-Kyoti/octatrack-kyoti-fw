@@ -5,7 +5,7 @@
 repitch-kyoti: render the same material through RPCH, RPS9 and RPSP on the
 emulated DSP, measure what each mode changes, and write WAVs to listen to.
 
-    python3 tools/repitch_dsp_listen.py [out/mainos_repitch_kyoti.bin]
+    python3 tools/repitch_dsp_listen.py [out/mainos_repitch_repeat98_kyoti.bin]
 
 Rev 11: the cave is read out of the BUILT image (the bytes you would flash) and
 checked against the source; every mode runs through the real stock voice
@@ -18,7 +18,7 @@ import numpy as np
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 import repitch_dsp_check as chk   # noqa: E402
-import build_sidechain3 as sc3    # noqa: E402
+import build_sidechain_compressor as sc3    # noqa: E402
 
 SR = 44100
 OUTDIR = ROOT / "out/listen"
@@ -130,7 +130,7 @@ def hf_share(x, cut=12000):
 def main():
     import repitch_dsp_engine_check as ck
     import repitch_dsp_src as dsrc
-    built = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "out/mainos_repitch_kyoti.bin")
+    built = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "out/mainos_repitch_repeat98_kyoti.bin")
     img, stock = built.read_bytes(), chk.IMG.read_bytes()
     tag, va, ln, base, hook, stop = chk.PAYLOADS[0]            # payload A
     mod, _ = chk.voice_module(stock, va, ln, base)

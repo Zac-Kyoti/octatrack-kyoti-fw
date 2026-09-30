@@ -100,7 +100,7 @@ changes, even though nothing builds from it today.
 the version of this document written at S48/S83, and *only* because DIRECT JUMP and
 RELOAD both moved off the sites that used to collide.
 
-> **Update 2026-09-27 (Session 108): DIRECT JUMP is FINAL — V7** (`build_directjump_v7.py`,
+> **Update 2026-09-27 (Session 108): DIRECT JUMP is FINAL — V7** (`build_direct_jump_kyoti.py`,
 > hardware-confirmed; clock-locked jumps). V6.4 is SUPERSEDED (kept as the OT↔AR parity
 > build). V7 keeps V6's exact route — same `[PTN]`-overlay toggle record `0x400bf0c0`, same ANDY
 > and boot-seed assertions, same three detours (`0x400a1f72` `dj_land`, `0x400a221c` `dj_nofa`,
@@ -161,13 +161,13 @@ used to carry (`patch_softmute` 368 B → **970 B**, `patch_qlrec` 194 B → **3
 
 | Mod | Standalone build | Sources | cave | HW |
 |---|---|---|---|---|
-| Bug-1 MIDI manual-trig fix | `build_trigscale_only.py` | `patch_trigscale.s` | 62 B | confirmed |
-| Bug-2 pattern-LED "only p-locks → empty" | `build_pattern_led.py` | `patch_pattern_led.s` | 142 B | confirmed |
-| MUTE MODE — `OT` / `OTFX` / `OTFX-T` / `DT-T` | `build_mutemode_dt.py` | `patch_softmute.s` + `patch_mutemode.s` (`DT_MODE=1`) | 970 + 208 + 204 B | confirmed |
-| SIDE-CHAIN compressor (cross-core) | `build_sidechain3.py` | `patch_sidechain.s` + `patch_sc_dsp3.asm` + `sc_tables.py` | 134 B (+ DSP) | confirmed |
-| QUANTIZE LIVE REC — `[REC]` + `[PLAY]`, toast-gated | `build_qlrec.py` | `patch_qlrec.s` | **176 B** | confirmed working 2026-09-25 |
-| TRIGLESS-LOCK AUTO-REMOVE | `build_triglock.py` | `patch_triglock.s` | 296 B | confirmed |
-| Part-change carryover (PARTREAPPLY) | `build_partreapply.py` | `patch_partreapply.s` | 402 B | confirmed |
+| Bug-1 MIDI manual-trig fix | `build_midi_plays_free_fix.py` | `patch_trigscale.s` | 62 B | confirmed |
+| Bug-2 pattern-LED "only p-locks → empty" | `build_empty_pattern_led_fix.py` | `patch_pattern_led.s` | 142 B | confirmed |
+| MUTE MODE — `OT` / `OTFX` / `OTFX-T` / `DT-T` | `build_mute_modes.py` | `patch_softmute.s` + `patch_mutemode.s` (`DT_MODE=1`) | 970 + 208 + 204 B | confirmed |
+| SIDE-CHAIN compressor (cross-core) | `build_sidechain_compressor.py` | `patch_sidechain.s` + `patch_sc_dsp3.asm` + `sc_tables.py` | 134 B (+ DSP) | confirmed |
+| QUANTIZE LIVE REC — `[REC]` + `[PLAY]`, toast-gated | `build_quantize_live_rec_toggle.py` | `patch_qlrec.s` | **176 B** | confirmed working 2026-09-25 |
+| TRIGLESS-LOCK AUTO-REMOVE | `build_erase_empty_trigless_locks.py` | `patch_triglock.s` | 296 B | confirmed |
+| Part-change carryover (PARTREAPPLY) | `build_part_change_carryover_fix.py` | `patch_partreapply.s` | 402 B | confirmed |
 
 Two of these were finished *after* the merge tooling was withdrawn and have never been in
 any combined build: **TRIGLESS-LOCK AUTO-REMOVE** and **PARTREAPPLY**. The withdrawn
@@ -247,7 +247,7 @@ real hardware" — i.e. SPRING was never selectable as FX1 anyway, which is mild
 support for it being the cheapest donor. No action.
 
 **`0x800000d4` — checked, and it does not affect any shipped mod.** Assembled
-`patch_softmute` exactly as `build_mutemode_dt.py` does (`DT_MODE=1`): **970 B with no
+`patch_softmute` exactly as `build_mute_modes.py` does (`DT_MODE=1`): **970 B with no
 reference to `0x800000d4` or `0xd5`**; only the diagnostic `OTFX_PROBE=1` build (986 B)
 contains them. The `0x800000d4` mentions in `patch_mutemode.s` are **comments** about the
 restore-span widening; its state word is `0x800000dc`. The B1 merge blocker below
@@ -266,8 +266,8 @@ this only rules out naively merging an image with those projects. → `kb/caves.
 
 | Mod | Build | cave | state |
 |---|---|---|---|
-| DIRECT JUMP — `[PTN]`+`[YES]` | `build_directjump_v7.py` (**V7**; v1–v6 superseded, V6.4 = OT↔AR parity) | **1980 B** (V7.0.1, at `0x400d7000`) | **FINAL — HW-confirmed 2026-09-27/28** (timing; Part change on a jump). Program Change on re-cues emulator-verified. Clock-locked jumps: lands the new pattern where it would be had it played since START. Hooks at `0x400a1f72` + `0x400a221c` (+ `dj_ptnrel`), same as V6. See `NOTES.md` Session 108 |
-| RELOAD FROM PROJECT — direct chords | `build_reload3.py` (**v3**, not v2) | **2104 B** | **FINAL — HW-confirmed 2026-09-25.** Grew from 1870 B: two-line block toasts, the live self-verify, the playing-bank fix, and the request bytes moved into the cave |
+| DIRECT JUMP — `[PTN]`+`[YES]` | `build_direct_jump_kyoti.py` (**V7**; v1–v6 superseded, V6.4 = OT↔AR parity) | **1980 B** (V7.0.1, at `0x400d7000`) | **FINAL — HW-confirmed 2026-09-27/28** (timing; Part change on a jump). Program Change on re-cues emulator-verified. Clock-locked jumps: lands the new pattern where it would be had it played since START. Hooks at `0x400a1f72` + `0x400a221c` (+ `dj_ptnrel`), same as V6. See `NOTES.md` Session 108 |
+| RELOAD FROM PROJECT — direct chords | `build_reload_from_project.py` (**v3**, not v2) | **2104 B** | **FINAL — HW-confirmed 2026-09-25.** Grew from 1870 B: two-line block toasts, the live self-verify, the playing-bank fix, and the request bytes moved into the cave |
 
 **`build_directjump_v3.py` is superseded.** This document used to say "DIRECT JUMP: use
 v3". That is wrong now: v1–v3 were dead on hardware and v4 is the line. v4 is not a
@@ -285,7 +285,7 @@ by that redesign; so is the `MERGE`/`rly_stock` port it implied.
 Free zone **`0x400d64da … 0x400d7c3c` = 5986 B**, verified as one contiguous zero run in
 `out/raw/section_3_MAIN_OS.bin` (2026-09-23). Packed ascending from `0x400d64dc` on a
 4-byte alignment, with `patch_trigscale` **pinned at `0x400d7bfc`** (the top of the zone,
-where `build_reload3.py` already puts it) so it lands at the *same address in both V1.0
+where `build_reload_from_project.py` already puts it) so it lands at the *same address in both V1.0
 and V1.1* and the free span stays contiguous below it.
 
 ### `KYOTI_V1.0`
@@ -302,14 +302,14 @@ and V1.1* and the free span stays contiguous below it.
 | `patch_pattern_led` | `0x400d6c60` | 142 B |
 | `patch_qlrec` | `0x400d6cf0` | **176 B** (was 358 B before the Sessions 94-96 rewrite; the freed 182 B is not reflected in the rows below) |
 | `patch_triglock` | `0x400d6e58` | 296 B |
-| — free — | `0x400d6f80` | **3196 B** — ⚠️ `patch_repitch_kyoti` (**FINAL, rev 16**, S106-112) claims `0x400d6f80..0x400d7afc` = **2940 B (4 B under `patch_trigscale`'s `0x400d7b00`)**; its Bugbuild (`BUG_RPK16`) composes DISJOINT with all three bug fixes. **DSP (rev 15 = rev 16, S112): 403 words of CODE in the SPRING REVERB donor module in both payloads, ending right below a 35-word routine that DARK REVERB calls inside SPRING's module (A `P:0x13f3..0x1585`, routine `P:0x1586..0x15a8`; B `P:0x11b3..0x1345`, routine `P:0x1346..0x1368` — rev 10-13's tail-aligned cave overwrote it and broke DARK REV; any merged build must keep it stock, `build_repitch_kyoti.py` asserts its hash). The TABLES (593 words) are written over SPRING's own X data modules (A X:`0x89a4/0x89ec/0x8a34` 72 w each + `0x8afc` 116 + `0x8b70` 384; B X:`0x8464/0x84ac/0x84f4`, `0x85bc`, `0x8630`; stock content asserted by hash; the 27-word X:`0x8cf0`/`0x87b0` shared with DARK REV is untouched) — canary-proven unused by any other module (S112). DSP data **Y:`$A00-$F8F` on both cores** (`$A00-$A7B` per-track RPSP slots, `$A7F` table tag, `$A80-$DFF` virtual-ADC tables and `$E00-$F40` the render's step table, copied from X at first use, `$F50-$F8F` per-track aux blocks — channel 1/2 envelope/filter (rev 14's trig-parity word is gone since rev 15: the trig pass is the voice module's LC = 1); Y:`$795-$FFF` is free on stock per octabam's hardware probe, and SIDECHAIN3 keeps `$800-$9FF`); READS x:`$419` (+`$1E`, the trig flag) and x:`$20a` (+8, the AMP level) and WRITES the voice ring (16 frames before a new sound, at a trig); bsr hooks at each voice engine's kernel prologue (A `P:0x40b`, B `P:0x20e`), and SPRING neutered exactly as SIDECHAIN3_CROSS does it (X:0x215[0x15]/[0x35] -> stub, FX chooser + id2pos + id2e). ⚠️ MERGE: both builders assert spring's STOCK dispatch entry; in a merged build the second must accept the neutered state. The sidechain builds from the module START (388 w, to A `P:0x13d5`), repitch ends at the DARK routine (A starts `P:0x13f3`) — 29 words apart; `repitch_dsp_src.cave_org` refuses a cave that would reach the sidechain's 388.** of this run in its standalone build, plus detours at `0x40009094`/`0x40009e00` (part applies — PARTREAPPLY calls, does not detour, the former: compatible); a V1.0+repitch pack has ≈ 1280 B left, and V1.1's staging below overlaps it outright |
+| — free — | `0x400d6f80` | **3196 B** — ⚠️ `patch_repitch_kyoti` (**FINAL, rev 16**, S106-112) claims `0x400d6f80..0x400d7afc` = **2940 B (4 B under `patch_trigscale`'s `0x400d7b00`)**; its Bugbuild (`BUG_RPK16`) composes DISJOINT with all three bug fixes. **DSP (rev 15 = rev 16, S112): 403 words of CODE in the SPRING REVERB donor module in both payloads, ending right below a 35-word routine that DARK REVERB calls inside SPRING's module (A `P:0x13f3..0x1585`, routine `P:0x1586..0x15a8`; B `P:0x11b3..0x1345`, routine `P:0x1346..0x1368` — rev 10-13's tail-aligned cave overwrote it and broke DARK REV; any merged build must keep it stock, `build_repitch_repeat98_kyoti.py` asserts its hash). The TABLES (593 words) are written over SPRING's own X data modules (A X:`0x89a4/0x89ec/0x8a34` 72 w each + `0x8afc` 116 + `0x8b70` 384; B X:`0x8464/0x84ac/0x84f4`, `0x85bc`, `0x8630`; stock content asserted by hash; the 27-word X:`0x8cf0`/`0x87b0` shared with DARK REV is untouched) — canary-proven unused by any other module (S112). DSP data **Y:`$A00-$F8F` on both cores** (`$A00-$A7B` per-track RPSP slots, `$A7F` table tag, `$A80-$DFF` virtual-ADC tables and `$E00-$F40` the render's step table, copied from X at first use, `$F50-$F8F` per-track aux blocks — channel 1/2 envelope/filter (rev 14's trig-parity word is gone since rev 15: the trig pass is the voice module's LC = 1); Y:`$795-$FFF` is free on stock per octabam's hardware probe, and SIDECHAIN3 keeps `$800-$9FF`); READS x:`$419` (+`$1E`, the trig flag) and x:`$20a` (+8, the AMP level) and WRITES the voice ring (16 frames before a new sound, at a trig); bsr hooks at each voice engine's kernel prologue (A `P:0x40b`, B `P:0x20e`), and SPRING neutered exactly as SIDECHAIN3_CROSS does it (X:0x215[0x15]/[0x35] -> stub, FX chooser + id2pos + id2e). ⚠️ MERGE: both builders assert spring's STOCK dispatch entry; in a merged build the second must accept the neutered state. The sidechain builds from the module START (388 w, to A `P:0x13d5`), repitch ends at the DARK routine (A starts `P:0x13f3`) — 29 words apart; `repitch_dsp_src.cave_org` refuses a cave that would reach the sidechain's 388.** of this run in its standalone build, plus detours at `0x40009094`/`0x40009e00` (part applies — PARTREAPPLY calls, does not detour, the former: compatible); a V1.0+repitch pack has ≈ 1280 B left, and V1.1's staging below overlaps it outright |
 | `patch_trigscale` | `0x400d7bfc` | 62 B **pinned** |
 | — tail — | `0x400d7c3a` | 2 B |
 
 ### ⚠️ Standalone-cave collision: `repitch_kyoti` vs `directjump_v7` (S107–108, 2026-09-27)
 
 The two standalone builds overlap and can never be composed as built: `patch_repitch_kyoti`
-claims `0x400d6f80..0x400d7afc` (2940 B at rev 16, final; 1916 B at rev 9) and `build_directjump_v7.py` (V7.0.1) claims
+claims `0x400d6f80..0x400d7afc` (2940 B at rev 16, final; 1916 B at rev 9) and `build_direct_jump_kyoti.py` (V7.0.1) claims
 `CAVE_DJ = 0x400d7000..0x400d77bb` (1980 B) — **1980 B of overlap: all of DJ's cave** (1788 B at rev 9)
 (478 B against V6.4, 764 B against V7.0 at `0x400d7400`). Each builder only verifies its range is free in the STOCK
 image, so neither notices the other. Flashing them one at a time is safe (separate images); any
@@ -353,14 +353,14 @@ displaced-byte guard). Do not hand-copy these addresses into another tool.
 | DSP payload A `P:0x01252`, B `P:0x01012` | 388-word cave in the SPRING REVERB donor + `sctap`/`scdet`/`moncommit` hooks + `X:0x215[0x15]` null-stub. **Separate address space — zero ColdFire interaction.** |
 
 **Correction to the old text:** it said SPATIALIZER is pulled and that *both* FX1 and FX2
-id→position tables must be rebuilt. Neither is true of `build_sidechain3.py` as it stands
+id→position tables must be rebuilt. Neither is true of `build_sidechain_compressor.py` as it stands
 — SPATIALIZER is back as a normal selectable effect, **SPRING REVERB** is what gets
 pulled, and the builder prints `FX1_LIST/FX1_ID2POS untouched`. Only FX2's copy is edited.
 
 **Descriptor pointers track the cave base.** Three of the COMPRESSOR descriptor's
 formatter pointers point *into* `patch_sidechain`'s cave (slot 8 A = base, slot 8 B =
 base+0x72, slot 9 A = base+0x36); the rest point at stock code. Relocating the cave
-changes those three values, so they differ from `build_sidechain3.py`'s output by design —
+changes those three values, so they differ from `build_sidechain_compressor.py`'s output by design —
 assert them against `sc_syms`, and exempt them from the stray-byte check.
 
 ---
@@ -429,7 +429,7 @@ three restore sites are still `pea 0x64` and exits if not
 ROM seed at `0x401087cc` is `00000000` so `FUN_4000f938`'s re-image zeroes `DJ_MODE`
 (`0x800000d8`) every boot. Both facts re-verified against true stock on 2026-09-23.
 
-`build_mutemode_dt.py` widens all three to `pea 0x70`, because its own `GATE` word is
+`build_mute_modes.py` widens all three to `pea 0x70`, because its own `GATE` word is
 `0x800000dc` (offset `0x6c`) and that is how MUTE MODE persists.
 
 Stock restore covers `0x80000070..0x800000d3`; widened it covers `..0x800000df`, which
@@ -459,7 +459,7 @@ thing the user does not want.
 
 *Note:* `patch_softmute`'s `PROBE_LO`/`PROBE_HI` (`0x800000d4`/`d5`) are also inside the
 widened span, and `0x800000d4` **is** referenced once in stock. They are gated behind
-`OTFX_PROBE`, which the shipping `build_mutemode_dt.py` does not define, so this is not a
+`OTFX_PROBE`, which the shipping `build_mute_modes.py` does not define, so this is not a
 merge problem — but do not let that defsym into a merged build.
 
 ### B2 — DIRECT JUMP's keymap slot vs RELOAD3's overlay assertion
@@ -469,7 +469,7 @@ opposite routes:
 
 - **DIRECT JUMP v4 writes** the overlay's YES record (`0x400bf0c0`, all-NULL in stock) so
   `[PTN]`+`[YES]` reaches `dj_toggle`.
-- **RELOAD3 deliberately stopped writing overlay records.** `build_reload3.py`'s own
+- **RELOAD3 deliberately stopped writing overlay records.** `build_reload_from_project.py`'s own
   comment says earlier builds poked the `[PTN]` overlay and *"that mechanism caused the
   DIRECT JUMP slot collision"*; it now detours ordinary key handlers instead and
   **asserts every overlay record is untouched**, plus that all 8 `[PTN]`-overlay TRACK
@@ -483,7 +483,7 @@ only actually depends on the 8 TRACK slots.
 RELOAD3's assertion from "every record is stock" to "every record I depend on is stock,
 and every record written was written by exactly one mod", and have the merged builder
 assert one-owner-per-record across the whole table. Keep the strict form in the
-standalone `build_reload3.py`.
+standalone `build_reload_from_project.py`.
 
 **Gesture split to confirm on hardware:** `[PTN]`+`[YES]` = DIRECT JUMP toggle;
 `[PTN]`+`[TRACK n]` = RELOAD track n; `[BANK]`+`[TRACK n]` = reload + Part. All three are
@@ -566,8 +566,8 @@ The combined image is the shipping build, so it carries its own branding, **not*
 VERSION** must both read **`KYOTI_V1.0`** — exactly 10 chars, which is the ELEK version
 field cap, so the builder must **error rather than truncate** if it overflows.
 
-Note the finished builders are not uniform today: `build_pattern_led.py`,
-`build_triglock.py` and `build_partreapply.py` hardcode `VERSTR = "1.40C"` (deliberately
+Note the finished builders are not uniform today: `build_empty_pattern_led_fix.py`,
+`build_erase_empty_trigless_locks.py` and `build_part_change_carryover_fix.py` hardcode `VERSTR = "1.40C"` (deliberately
 stock-transparent, since each is a pure bug fix); the other four default to
 `140C_KYOTI`. The merged builder overrides all of them. Keep the per-feature builds as
 they are, so a flash log makes it obvious which image is on the unit.
@@ -582,12 +582,12 @@ wrong now.
 
 The builder must assert, as the withdrawn one did: cave layout disjoint and inside the
 zone; every displaced-byte guard; no two detours at one site; Bug-1 bytes identical to
-`build_trigscale_only.py` (modulo relocation); every change is one a standalone feature
+`build_midi_plays_free_fix.py` (modulo relocation); every change is one a standalone feature
 also makes, barring relocated caves, detours and the three SIDE-CHAIN descriptor pointers
 that track `patch_sidechain`'s address; round-trip + checksum through Elektron's tool;
-SIDE-CHAIN DSP bytes byte-identical to `build_sidechain3.py`. Plus, new:
+SIDE-CHAIN DSP bytes byte-identical to `build_sidechain_compressor.py`. Plus, new:
 
-1. **Run every detour through `assert_no_branch_into`.** `build_triglock.py` is currently
+1. **Run every detour through `assert_no_branch_into`.** `build_erase_empty_trigless_locks.py` is currently
    the *only* builder that has it — it refuses a detour whose displaced bytes contain a
    branch target, which is exactly the mistake that sank triglock's first attempt
    (`0x40038af8`, whose neighbour is branched to from two places). Promote it to a shared
@@ -634,7 +634,7 @@ pattern change, Part change during a soft-mute tail, and QLREC's tick sharing
    rewrite (cave 176 B, two key-handler detours, zero scratch). ⚠️ But **do not ship the
    pre-Session-93 QLREC**: the `0x400522ca` tick hook crash was latent in the Session 51
    build this document once treated as finished. Any composite must be rebuilt from the
-   current `build_qlrec.py`. The QLREC/MUTE-MODE frame-handler adjacency case is gone
+   current `build_quantize_live_rec_toggle.py`. The QLREC/MUTE-MODE frame-handler adjacency case is gone
    (above) — QLREC no longer touches `FUN_40052200` at all.
 2. Finish DIRECT JUMP (**flash the Session 88 non-1x fix** — the 1x behaviour is already
    HW-confirmed and is the baseline not to regress; one report is still unexplained) and

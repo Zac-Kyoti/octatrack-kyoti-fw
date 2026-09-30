@@ -7,13 +7,13 @@ Bugbuilds -- each finished FEATURE build, with all three BUG FIXES folded in.
 Seven composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
 not written alongside, the standalone per-feature images in out/):
 
-    MUTEMODE_DT        + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
-    QLREC              + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
-    SIDECHAIN3_CROSS   + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
-    TRIGLOCK           + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
-    RELOAD3            + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
-    DIRECTJUMP_V7      + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
-    REPITCH_KYOTI      + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX
+    MUTE_MODES        + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
+    QUANTIZE_LIVE_REC_TOGGLE              + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
+    SIDECHAIN_COMPRESSOR   + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
+    ERASE_EMPTY_TRIGLESS_LOCKS           + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
+    RELOAD_FROM_PROJECT            + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
+    DIRECT_JUMP_KYOTI      + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
+    REPITCH_REPEAT98_KYOTI      + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
 
 Method -- compose onto the finished feature image, do not re-implement it.
 Each feature builder is run first (so the base is current), then the bug-fix caves are
@@ -22,8 +22,8 @@ is never re-derived: its DSP payloads, COMPRESSOR descriptor and FX2 chooser edi
 through untouched, and its cave stays at its own address so the descriptor's formatter
 pointers stay valid.
 
-PLAYSFREEFIX (patch_trigscale) is added to ALL SEVEN images: no feature builder carries a copy
-any more.  Each of them used to (RELOAD3's sat at 0x400d7bfc, the rest at 0x400d7b00), and
+MIDI_PLAYS_FREE_FIX (patch_trigscale) is added to ALL SEVEN images: no feature builder carries a copy
+any more.  Each of them used to (RELOAD_FROM_PROJECT's sat at 0x400d7bfc, the rest at 0x400d7b00), and
 every copy wrote the same site 0x4009b6f2 -- which octabam's remix ledger refuses, so no two
 of those features could ever be selected into one remix.  The fix is its own contribution
 now (the batch-bugfixes module upstream) and this composer is where a combined image gets it.
@@ -31,20 +31,20 @@ Nothing here needed changing for that: `already`/`need` are computed per image b
 for each fix's detour, so the bases simply all report "already present: none".
 
 Cave layout, where each fix is placed if that space is free in the base (it is in all but
-RELOAD3, whose own cave starts at 0x400d6500, so the allocator moves the two fixes up):
+RELOAD_FROM_PROJECT, whose own cave starts at 0x400d6500, so the allocator moves the two fixes up):
 
-    patch_partreapply   0x400d6500   402 B   (RELOAD3: relocated above its own cave)
-    patch_pattern_led   0x400d6694   142 B   (RELOAD3: likewise)
+    patch_partreapply   0x400d6500   402 B   (RELOAD_FROM_PROJECT: relocated above its own cave)
+    patch_pattern_led   0x400d6694   142 B   (RELOAD_FROM_PROJECT: likewise)
     (never below 0x400d6500 -- 0x400d64ca.. is a runtime record table, kb/caves.md 2b)
-    patch_trigscale     0x400d7b00    62 B   (added to all seven; REPITCH_KYOTI's cave
+    patch_trigscale     0x400d7b00    62 B   (added to all seven; REPITCH_REPEAT98_KYOTI's cave
                                               ends at 0x400d7afc, right below it)
 
 Verification (every image, every run):
-  * the feature's builder declares tier FINAL (a SUPERSEDED base is refused), and is re-run
+  * the feature's builder is promoted (on kyoti_status.FINAL), its rebuilt image still matches, and it is re-run
     first so the base is built from the current source (--no-rebuild skips that);
   * each cave region is all-zero in the base before it is written;
   * each detour site still holds the exact stock bytes (proves no feature took it first);
-  * assert_no_branch_into on every detour site (build_triglock.py's guard, promoted here);
+  * assert_no_branch_into on every detour site (build_erase_empty_trigless_locks.py's guard, promoted here);
   * COMPOSITIONALITY: the composite's byte-delta vs stock is exactly the union of the
     feature's delta and a reference "bug-fixes only, at these same addresses, on stock"
     delta -- and those two deltas are disjoint.  That is the interlock proof: every
@@ -53,6 +53,13 @@ Verification (every image, every run):
 Usage:  python3 tools/build_bugbuilds.py [--no-rebuild]
 """
 import os, pathlib, subprocess, sys
+import hashlib
+from kyoti_status import gate, FINAL
+
+gate(__file__, note="""
+Every promoted feature + BATCH_BUGFIXES, one image each.  Each ingredient is
+hardware-confirmed on its own; no composite has been flashed.
+""")
 
 BASE = 0x40000400
 ROOT = pathlib.Path(__file__).parent.parent
@@ -88,39 +95,32 @@ BUGFIX = {
     ]),
 }
 
-# --- the feature bases: name -> (builder, base image, VERSTR, wip, blurb) -------------
-#   wip=True is skipped unless --with-wip is passed.  RELOAD3 was finished on 2026-09-25
-#   and DIRECT JUMP V7 on 2026-09-27 (Session 108, hardware-confirmed); both are normal
-#   features.  V4, V5 and V6.4 are SUPERSEDED (V6.4 = the OT<->AR parity build).  V7.0.1's
-#   cave (0x400d7000..0x400d77bb) composes DISJOINT with the bug-fix caves (2026-09-28).
+# --- the feature bases: name -> (builder, base image, VERSTR, blurb) -------------------
+#   A base is used only while its builder is on kyoti_status.FINAL, and a rebuilt base that
+#   no longer matches its promoted image is flagged (it carries unpromoted changes).
 FEATURES = {
-    "MUTEMODE_DT": ("build_mutemode_dt.py", "out/mainos_mutemode_dt.bin", "BUG_MUTEDT", False,
+    "MUTE_MODES": ("build_mute_modes.py", "out/mainos_mute_modes.bin", "BUG_MUTEDT",
                     "PERSONALIZE -> MUTE MODE: OT | OTFX | OTFX-T | DT-T (default OT)."),
-    "QLREC": ("build_qlrec.py", "out/mainos_qlrec.bin", "BUG_QLREC", False,
+    "QUANTIZE_LIVE_REC_TOGGLE": ("build_quantize_live_rec_toggle.py", "out/mainos_quantize_live_rec_toggle.bin", "BUG_QLREC",
               "Hold [REC] + [PLAY] -> toast shows QUANTIZE LIVE REC; tap [PLAY] "
               "again while it is up to invert it.  (Stateless rewrite after the "
               "0x400522ca tick hook crashed hardware; hardware-confirmed 2026-09-25.)"),
-    "SIDECHAIN3_CROSS": ("build_sidechain3.py", "out/mainos_sidechain3_cross.bin", "BUG_SC3X",
-                         False, "COMPRESSOR FX page 2: KEY / KFLT / KGAIN / MON, cross-core."),
-    "TRIGLOCK": ("build_triglock.py", "out/mainos_triglock.bin", "BUG_TRIGLK", False,
+    "SIDECHAIN_COMPRESSOR": ("build_sidechain_compressor.py", "out/mainos_sidechain_compressor.bin", "BUG_SC3X", "COMPRESSOR FX page 2: KEY / KFLT / KGAIN / MON, cross-core."),
+    "ERASE_EMPTY_TRIGLESS_LOCKS": ("build_erase_empty_trigless_locks.py", "out/mainos_erase_empty_trigless_locks.bin", "BUG_TRIGLK",
                  "A trigless lock whose last param is LIVE-erased clears from the trig row."),
-    "RELOAD3": ("build_reload3.py", "out/mainos_reload3.bin", "BUG_RL3", False,
+    "RELOAD_FROM_PROJECT": ("build_reload_from_project.py", "out/mainos_reload_from_project.bin", "BUG_RL3",
                 "[PTN]+[TRACK n] reload track n's saved sequence; [BANK]+[TRACK n] also re-applies the Part."),
-    "DIRECTJUMP_V7": ("build_directjump_v7.py", "out/mainos_directjump_v7.bin", "BUG_DJV7",
-                      False, "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.0.1, clock-locked jumps)."),
-    "REPITCH_KYOTI": ("build_repitch_kyoti.py", "out/mainos_repitch_kyoti.bin", "BUG_RPK16",
-                      False, "SETUP TSTR RPCH/RPS9/RPSP: tempo-locked varispeed + QUAN ratios "
+    "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "out/mainos_direct_jump_kyoti.bin", "BUG_DJV7", "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.0.1, clock-locked jumps)."),
+    "REPITCH_REPEAT98_KYOTI": ("build_repitch_repeat98_kyoti.py", "out/mainos_repitch_repeat98_kyoti.bin", "BUG_RPK16", "SETUP TSTR RPCH/RPS9/RPSP: tempo-locked varispeed + QUAN ratios "
                              "(rev 16).  Removes SPRING REVERB."),
-    # --- not finished; build with --with-wip ---------------------------------------
-    # (none at present: DIRECT JUMP V7 shipped 2026-09-27; V6.4 is SUPERSEDED)
 }
 
 PROBLEMS = []
 # The three bug-fix sources now live in the batch-bugfixes module directory
 # (one self-contained folder per octabam module: manifest.py + sources + README.md).
-SRC_DIR = {"patch_trigscale": "batch-bugfixes",
-           "patch_pattern_led": "batch-bugfixes",
-           "patch_partreapply": "batch-bugfixes"}
+SRC_DIR = {"patch_trigscale": "octabam-modules/batch-bugfixes",
+           "patch_pattern_led": "octabam-modules/batch-bugfixes",
+           "patch_partreapply": "octabam-modules/batch-bugfixes"}
 
 
 def flag(msg):
@@ -170,7 +170,7 @@ def resolve_present(img, stem):
 
 
 def assert_no_branch_into(img, site, n, window=0x600):
-    """Refuse a detour whose displaced bytes contain a branch TARGET (from build_triglock.py)."""
+    """Refuse a detour whose displaced bytes contain a branch TARGET (from build_erase_empty_trigless_locks.py)."""
     lo, hi = o(site) - window, o(site) + window
     bad, a = [], max(lo, 0)
     while a < min(hi, len(img) - 4):
@@ -259,8 +259,8 @@ def wrap(mainos, name, verstr, blurb):
     if len(verstr) > 10:
         sys.exit(f"{name}: VERSTR {verstr!r} is {len(verstr)} chars, ELEK field caps at 10")
     elek = WORK / f"elek_{name.lower()}.bin"
-    syx = OUTDIR / f"OCTATRACK_OS1.40C_{name}_BUGFIX.syx"
-    binf = OUTDIR / f"OCTATRACK_{name}_BUGFIX.bin"
+    syx = OUTDIR / f"OCTATRACK_OS1.40C_{name}_BATCH_BUGFIXES.syx"
+    binf = OUTDIR / f"OCTATRACK_{name}_BATCH_BUGFIXES.bin"
     env = dict(os.environ, EFT_EMIT_CONTAINER=str(elek))
     r = subprocess.run([str(EFT), "-i", str(STOCK_SYX), "-c", "3", str(mainos),
                         "-V", verstr, "-o", str(syx)],
@@ -277,49 +277,31 @@ def wrap(mainos, name, verstr, blurb):
     print(f"           {blurb}")
 
 
-def declared_tier(builder):
-    """The tier a builder declares via tools/kyoti_status.status(), or FINAL if it predates
-    the tier system (every builder that does not call status() is a finished feature)."""
-    import re
-    m = re.search(r"^status\((FINAL|PREVIEW|WIP|SUPERSEDED)\b",
-                  (ROOT / "tools" / builder).read_text(), re.M)
-    return m.group(1) if m else "FINAL"
-
-
 def main():
     rebuild = "--no-rebuild" not in sys.argv
-    with_wip = "--with-wip" in sys.argv
     if not STOCK_SECT.exists():
         sys.exit(f"missing {STOCK_SECT} -- run ./fetch-os.sh and ./analyze.sh first")
     stock = STOCK_SECT.read_bytes()
     OUTDIR.mkdir(parents=True, exist_ok=True)
     WORK.mkdir(parents=True, exist_ok=True)
 
-    for name, (builder, basepath, verstr, wip, blurb) in FEATURES.items():
-        if wip and not with_wip:
-            print(f"---- {name}: WIP, skipped (pass --with-wip to build it)\n")
+    for name, (builder, basepath, verstr, blurb) in FEATURES.items():
+        if builder not in FINAL:
+            print(f"---- {name}: {builder} is not promoted to FINAL -- skipped\n")
             continue
-        print(f"════════════ {name} + PARTREAPPLY + PATTERNLED + PLAYSFREEFIX ════════════")
-        # A composite must sit on the CURRENT finished feature: a builder that has since been
-        # marked WIP or SUPERSEDED means FEATURES points at a stale base (name the successor).
-        tier = declared_tier(builder)
-        if not wip and tier != "FINAL":
-            sys.exit(f"{name}: {builder} declares {tier}, not FINAL -- point FEATURES at the "
-                     f"builder that replaced it")
-        if wip:
-            flag(f"{name} is WIP -- see reference/MERGE.md; this image is NOT shippable")
+        print(f"════════════ {name} + BATCH_BUGFIXES ════════════")
         if rebuild:
-            # --with-wip is itself the opt-in, so carry it into the child: a WIP-tier
-            # builder (tools/kyoti_status.py) exits 2 without it.
-            env = dict(os.environ, KYOTI_ALLOW_WIP="1") if wip else None
             r = subprocess.run(["python3", f"tools/{builder}"], capture_output=True,
-                               text=True, cwd=ROOT, env=env)
+                               text=True, cwd=ROOT)
             if r.returncode != 0:
                 sys.exit(f"{name}: feature builder {builder} failed:\n{r.stdout}\n{r.stderr}")
         base = ROOT / basepath
         if not base.exists():
             sys.exit(f"{name}: missing base image {base} -- run tools/{builder}")
         img = bytearray(base.read_bytes())
+        if hashlib.sha256(bytes(img)).hexdigest() != FINAL[builder]:
+            flag(f"{name}: the base image is not {builder}'s promoted build -- it carries "
+                 "unpromoted changes")
         feat_d = delta(stock, img)
 
         # --- who is already here, and where does each cave go? -----------------------

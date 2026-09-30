@@ -125,10 +125,10 @@ built and waiting.
   (Session 98): RELOAD3's request bytes at `0x80006a54-55` were overwritten on
   the unit between the chord and the worker — it reloaded MIDI track 6 instead
   of audio track 1 and said RELOADED.** RELOAD3 now keeps them in its cave, and
-  `build_reload3.py` refuses any reference into `0x80006a40..0x80006abf`.
-  DIRECT JUMP V6 and V7 keep all their state in the cave too, and
-  `build_directjump_v{6,7}.py` refuse the same range (the V1–V5 line kept state at
-  `0x80006a40-4a`). NOTES "Sessions 94-96", "Session 98".
+  `build_reload_from_project.py` refuses any reference into `0x80006a40..0x80006abf`.
+  DIRECT_JUMP_KYOTI keeps all its state in the cave too, and
+  `build_direct_jump_kyoti.py` refuses the same range. NOTES "Sessions 94-96",
+  "Session 98".
 - **When hardware and the emulator disagree, build a diagnostic, don't reason.**
   Three flashes of this one were spent on theories that all survived static
   analysis and emulation; a build whose toast *named* the failing condition
@@ -146,15 +146,22 @@ built and waiting.
   splice asserts the stock bytes it overwrites, asserts caves are free /
   non-overlapping / within the free zone, and round-trips through Elektron's
   own firmware tool.
-- **One branch (`main`), tiers instead of branches.** The `wip` branch was
-  retired 2026-09-26 — cherry-picking between the two produced duplicate
-  commits and conflict-heavy merges. Unfinished work lives here and is kept
-  out of a visitor's hands by `tools/kyoti_status.py`: a builder declares
-  FINAL / PREVIEW / WIP / SUPERSEDED, and a gated tier refuses to run without
-  `KYOTI_ALLOW_WIP=1` / `KYOTI_ALLOW_SUPERSEDED=1`. **A new unfinished builder
-  declares its tier, and superseding one means setting the old builder to
-  SUPERSEDED with a note naming its replacement.** Use a short-lived topic
-  branch for risky work, not a second long-lived one.
+- **One branch (`main`). Everything is WIP until the user promotes it to final.**
+  `tools/kyoti_status.py` holds the FINAL list: each promoted builder pinned to the sha256
+  of the image it built when promoted. Every builder calls `gate(__file__)` first and
+  `seal(__file__, image)` after writing its image; anything not on the list — and any
+  final builder whose image has since changed — refuses to run without
+  `KYOTI_ALLOW_WIP=1`. **Promote only on the user's explicit instruction**: put the sha256
+  `seal()` prints into `FINAL`, and give the feature its `README.md` / `BUILD_KYOTI.md`
+  entry. An update to a final feature replaces the old final — in place, or by taking the
+  old builder's FINAL entry and deleting the old builder. **There is no superseded tier:
+  do not keep old versions around** (git history has them). A new builder needs no tier
+  declaration — it is WIP until promoted. Use a short-lived topic branch for risky work.
+- **Feature names** — use them in builders, output images, docs and octabam keys:
+  MUTE_MODES, DIRECT_JUMP_KYOTI, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT,
+  REPITCH_REPEAT98_KYOTI, QUANTIZE_LIVE_REC_TOGGLE, ERASE_EMPTY_TRIGLESS_LOCKS, and
+  BATCH_BUGFIXES (MIDI_PLAYS_FREE_FIX, EMPTY_PATTERN_LED_FIX, PART_CHANGE_CARRYOVER_FIX).
+  `START_HERE.md` §5 maps each to its builder and octabam module.
 - **Several sessions work on this repo at once — read "Concurrent sessions" below before
   your first edit or commit.**
 - **macOS TCC**: `~/Documents` is protected; grant Full Disk Access to the

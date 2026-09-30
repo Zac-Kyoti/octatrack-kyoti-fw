@@ -19,7 +19,8 @@
 
 [directjump]
 tools/*directjump*
-direct-jump-kyoti/*
+tools/*direct_jump*
+octabam-modules/direct-jump-kyoti/*
 tools/emu_djdiag.py
 tools/diag_dj_*.py
 tools/*reflock*.py
@@ -27,14 +28,13 @@ tools/diag_led_pend.py
 tools/diag_tablearm_phase.py
 tools/diag_fire_phase.py
 tools/scan_dj_project_lengths.py
-tools/ghidra/attic/GhidraDirectJump*.java
 reference/handoffs/DIRECTJUMP_*
 reference/AR_*.md
 reference/OT_SEQUENCER_BUGS.md
 
 [repitch]
 tools/*repitch*
-repitch-repeat98-kyoti/*
+octabam-modules/repitch-repeat98-kyoti/*
 tools/sp1200_filter_response.py
 reference/handoffs/REPITCH_*
 

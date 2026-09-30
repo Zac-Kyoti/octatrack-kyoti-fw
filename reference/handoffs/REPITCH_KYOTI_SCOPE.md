@@ -12,13 +12,13 @@ our own image, and the ones that still need that check are flagged **[VERIFY]**.
 
 ## 0. CURRENT STATE — read this first
 
-> **FINAL — rev 16, hardware-confirmed 2026-09-29** (`tools/build_repitch_kyoti.py`, tier FINAL,
+> **FINAL — rev 16, hardware-confirmed 2026-09-29** (`tools/build_repitch_repeat98_kyoti.py`, tier FINAL,
 > `140C_RPK16`; Bugbuild `BUG_RPK16`). Rev 15 fixed the last trig crack (trigs on a frame
 > boundary), rev 16 the TSTR switch that kept the other domain's PTCH/QUAN value and the QUAN
 > pressed-turn speed (NOTES Session 112 continued (2)–(4)). Everything below is the design record as it evolved from Session 106; the per-rev status notes are history.
 
 **Status (updated Session 106, same day): GATE 1 IS BUILT and statically
-verified** — `tools/patch_repitch_kyoti.s` + `tools/build_repitch_kyoti.py` (WIP
+verified** — `tools/patch_repitch_kyoti.s` + `tools/build_repitch_repeat98_kyoti.py` (WIP
 tier), image `out/mainos_repitch_kyoti.bin`, syx `140C_RPK1`. Cave
 `0x400d6f80..0x400d76fc` (1916 B), 7 detours + 8 descriptor pokes, 0 strays.
 **NOT flashed.** The increment builder and resolver are **proven in-emulator**
@@ -366,12 +366,12 @@ result, not hand-copy addresses.
   hardware-proven** (a relocated CHORUS ran on a unit — octabam `DSP.md`). Upper bound
   unmeasured.
 - This repo's own precedent is **donor slots**: **SIDECHAIN3_CROSS** (the finalized
-  sidechain build — `tools/build_sidechain3.py`, outputs `out/mainos_sidechain3_cross.bin`)
+  sidechain build — `tools/build_sidechain_compressor.py`, outputs `out/mainos_sidechain3_cross.bin`)
   donates **SPRING REVERB** (id `0x15`, FX2-exclusive), whose module measures **1063
   words**. ✅ 30 words is trivial against that. A donated effect loads as `NONE` in the
   UI (Session 91), which is the real cost — worth avoiding if `P:0x2000` proves out.
   ⚠️ `tools/patch_sc_dsp3.asm:226` still carries a **stale** `SPATIALIZER's 261w donor`
-  comment from the superseded donor; `build_sidechain3.py:163` is the correct record
+  comment from the superseded donor; `build_sidechain_compressor.py:163` is the correct record
   ("the old SPATIALIZER donor"). Do not size a DSP cave from that comment.
 - ⚠️ **`P:0x3a1` has no slack** (125 words, contiguous neighbours). The shape of the work
   is: jump out to spare space, dispatch on mode, jump back — **not** in-place expansion.

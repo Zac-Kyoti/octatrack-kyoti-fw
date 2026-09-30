@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-Shared dsp_asm/dsp56kDisassemble helper -- used by both build_sidechain3.py's
+Shared dsp_asm/dsp56kDisassemble helper -- used by both build_sidechain_compressor.py's
 sc_assemble() and emu_sc_dsp3.py's assemble() so the two never drift (same
 rationale as sc_tables.py for the coefficient tables).
 

@@ -6,7 +6,7 @@ repitch-kyoti rev 14: the DSP virtual sampler against its reference model.
 
     python3 tools/repitch_dsp_engine_check.py
 
-Builds the cave exactly as tools/build_repitch_kyoti.py places it (payload A
+Builds the cave exactly as tools/build_repitch_repeat98_kyoti.py places it (payload A
 and B), runs it inside the real stock voice module on dsp56kEmu with the
 firmware's streaming protocol (tools/repitch_dsp_engine_probe.cpp; ring frames
 the firmware would not have delivered yet are POISONED), and runs
@@ -42,7 +42,7 @@ import numpy as np
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 import repitch_dsp_check as chk          # noqa: E402  (payload table, stock module reader)
-import build_sidechain3 as sc3           # noqa: E402
+import build_sidechain_compressor as sc3           # noqa: E402
 import repitch_dsp_src as dsrc           # noqa: E402
 import repitch_engine_model as m         # noqa: E402
 

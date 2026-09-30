@@ -10,14 +10,14 @@ reverse-engineering work. Nothing here would exist without the projects below.
   update chain, patching the OS image with guarded binary edits, using code-cave
   detours, the PERSONALIZE-menu mapping, and the first round of behaviour mods
   (lazy Part transitions, no BANK/PTN countdown, arp key scales, boot branding,
-  LED dirty indicators). **No octamax code is used in any OT Kyoti FW build** —
-  what carried over is the concepts. Octamax's own mod patch sources and bundle
-  builder (`build.py`) are kept in [`tools/attic/`](tools/attic/) for
-  reverse-engineering cross-reference only, and its design notes are in
-  [`reference/upstream-notes.md`](reference/upstream-notes.md).
-  octamax ships no `LICENSE` file; those reference copies are offered under
-  GitHub's Terms of Service, keeping octamax's stance — educational use only, no
-  binaries redistributed.
+  LED dirty indicators). **No octamax code is in any OT Kyoti FW image** — what
+  carried over is the concepts, plus a few of its setup scripts that the build and the
+  flashing checks still run (`fetch-os.sh`, `analyze.sh`, `setup.sh`,
+  `tools/entropy.py`, `tools/bin_decode.py`). octamax ships no `LICENSE` file, so those
+  files stay its author's and are offered under GitHub's Terms of Service, keeping
+  octamax's stance — educational use only, no binaries redistributed (see `LICENSE`).
+  Its own mod sources and design notes were kept here as cross-reference until
+  2026-09-29; they are in this repo's history (`git show 69949ce:tools/attic/`).
 
 ## The harness this project verifies against
 

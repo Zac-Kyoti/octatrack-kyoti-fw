@@ -4,8 +4,8 @@
 """
 Session 89: does STOCK code ever write DIRECT JUMP's scratch at 0x80006a40..4a?
 
-Raised from the QLREC thread: a word at 0x80006a60 proved unreliable in practice, and
-DIRECT JUMP's globals (0x80006a40..4a) and RELOAD3's (0x80006a50..55) are its immediate
+Raised from the QUANTIZE_LIVE_REC_TOGGLE thread: a word at 0x80006a60 proved unreliable in practice, and
+DIRECT JUMP's globals (0x80006a40..4a) and RELOAD_FROM_PROJECT's (0x80006a50..55) are its immediate
 neighbours. The justification for all of them was a static scan finding no ABSOLUTE-LONG
 references -- which cannot see register-indirect writes (`move.b %d0,d16(%a0)` with the
 base in a register). tools/diag_scratch_clobber.py already makes that point for RELOAD's

@@ -8,13 +8,13 @@ between the stock MAIN OS and the patched one). This script derives all of that 
 diffing:
 
     stock  = <section 3 decompressed from the stock .syx>
-    built  = out/mainos_trigscale_only.bin   (tools/build_trigscale_only.py output)
+    built  = out/mainos_midi_plays_free_fix.bin   (tools/build_midi_plays_free_fix.py output)
 
 then repacks with elektron-firmware-tool so it can record result_syx_sha256.
 
     python3 sysex/gen_patch_json.py \
         -i downloads/extracted/OCTATRACK_OS1.40C.syx \
-        --built out/mainos_trigscale_only.bin --trigscale-only \
+        --built out/mainos_midi_plays_free_fix.bin --trigscale-only \
         --version r1 -o sysex/patches/playsfreefix-r1.json
 
 Hunk grouping: bytes are contiguous if <= GAP unchanged bytes lie between them
@@ -109,7 +109,7 @@ def main():
         result_sha = sha(outp.read_bytes())
 
     trigscale_change = {
-        "id": "midi-trig-scale-fix", "source": "tools/patch_trigscale.s",
+        "id": "midi-trig-scale-fix", "source": "octabam-modules/batch-bugfixes/patch_trigscale.s",
         "desc": "Fix: a Plays-Free MIDI track with trig quant Direct and pattern scale "
                 "Per Track no longer stalls after step 1 when manually triggered. "
                 "FUN_4009b5c8 was seeding the per-track scale index with the audio "
@@ -137,7 +137,7 @@ def main():
     }
     if a.trigscale_only and len(hk) != 2:
         sys.exit(f"--trigscale-only expects exactly 2 hunks, got {len(hk)} "
-                 f"(is --built the stock+fix image from tools/build_trigscale_only.py?)")
+                 f"(is --built the stock+fix image from tools/build_midi_plays_free_fix.py?)")
     Path(a.output).write_text(json.dumps(doc, indent=1) + "\n")
     print(f"wrote {a.output}")
     print(f"  {len(hk)} hunks, {total_new} bytes in hunks, {total_changed} bytes changed vs stock")

@@ -28,7 +28,7 @@
 ;   @LPEDGE@ literal Q23 immediate, LP's near-OFF edge-override coefficient
 ;   @HPEDGE@ literal Q23 immediate, HP's near-OFF edge-override coefficient
 ;   @KGNA@   literal Q23 immediate, KEY GAIN's block-rate smoothing coefficient
-; The tables are appended after the code by build_sidechain3.py; @GTAB@/@FTAB@
+; The tables are appended after the code by build_sidechain_compressor.py; @GTAB@/@FTAB@
 ; are resolved in a first sizing pass so the `move #>imm` widths never shift.
 ; @LPEDGE@/@HPEDGE@ are plain literal substitutions (tools/sc_tables.py's
 ; lp_edge()/hp_edge()), not addresses -- fixed width regardless of pass.
@@ -629,7 +629,7 @@ zz17:
 ; MON off -> publish MON_ON[my track] = 0.  Shared with zz20 via `bsr zz18`
 ; (zz18 is placed at the END of scdet, after zz20's own rts, specifically so
 ; the ONE extra internal rts it introduces lands AFTER the rts
-; build_sidechain3.py's sc_assemble() counts on to find moncommit's start --
+; build_sidechain_compressor.py's sc_assemble() counts on to find moncommit's start --
 ; that index was bumped rts[2]->rts[3] there to match. This used to be
 ; duplicated inline instead (fear of disturbing that indexing), which cost
 ; ~9 words per copy for a 1-word `jsr`; reclaimed to make room for the

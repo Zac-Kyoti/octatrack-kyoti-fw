@@ -34572,3 +34572,86 @@ design (standalone SIDE-CHAIN has no MUTE MODE and keeps a muted key — measure
 3. REPITCH: slow PTCH/QUAN redraw when TSTR switches into a repitch mode.
 4. Untested on hardware: RPSP/RPS9 on T5-T8 in KYOTI (the S115 keybus collision), a reverb on T7 with SIDE-CHAIN,
    cross-core KEY both ways, the first kick after PLAY with a muted key (FLASHING §4.11 block 4).
+
+## Session 118 (2026-09-29, `reorg`) — repo reorganised: one WIP gate instead of four tiers, feature names everywhere, `octabam-modules/`, 520 files removed
+
+User: simplify the repo. Everything is WIP until the user promotes it; one gate
+(`KYOTI_ALLOW_WIP=1`); an update to a final feature is WIP until promoted and then replaces
+the old final; no SUPERSEDED tier or verbiage; trimmed main pages; octabam module folders
+under `octabam-modules/`; unreferenced / unneeded / octamax-only files gone; the features
+known by fixed names. Done in worktree `reorg` while `kyoti-v1` was live.
+
+**The gate (`tools/kyoti_status.py`, rewritten).** `FINAL` pins each promoted builder to the
+sha256 of the image (`mainos_*.bin`, before wrapping) it built at promotion. `gate(__file__)`
+first: not on the list → WIP → exit 2 without the opt-in. `seal(__file__, OUT)` right after
+`OUT.write_bytes`, before any wrap: a final builder whose image no longer matches is WIP and
+exits 2 without the opt-in — so no flashable `.syx` of an unpromoted change is written by
+accident, diagnostic variants (`DJ_DIAG`, `RPK_DIAG`) are WIP automatically, and a custom
+VERSTR (syx-only) stays FINAL. A placed build (`KYOTI_PLACE` set, `build_kyoti.py`) skips the
+seal. Tested: un-promoted builder refused; unchanged final → FINAL + "matches"; final with a
+changed input (DJ toast 0x55) refused before the wrap; same with the opt-in builds and says
+WIP; `DJ_DIAG=1` refused. `build_bugbuilds.py` now takes a base only if its builder is on
+`FINAL` and flags a rebuilt base whose image no longer matches; its `wip` column and
+`--with-wip` are gone. Both combined builders are WIP.
+
+**⚠️ A mistake made and caught in this session, recorded so it is not repeated:** the first
+`FINAL` table was written with only the first 16 hex digits of each sha256 measured and the
+other 48 INVENTED. It was replaced from the measured full hashes before anything ran. Never
+write a hash that was not printed in full by a tool.
+
+**Seeded FINAL = the ten builders the README called final**, pinned at the images they built
+at `69949ce`. Caveat to put to the user: MUTE_MODES is pinned WITH the Session 117 `fresh_bind`
+fix, which is emulator-verified only; under the new rule that change was never promoted.
+
+**Renames** (`git mv`; images unchanged). Builders: `mutemode_dt → mute_modes`,
+`directjump_v7 → direct_jump_kyoti`, `sidechain3 → sidechain_compressor`,
+`reload3 → reload_from_project`, `repitch_kyoti → repitch_repeat98_kyoti`,
+`qlrec → quantize_live_rec_toggle`, `triglock → erase_empty_trigless_locks`,
+`trigscale_only → midi_plays_free_fix`, `pattern_led → empty_pattern_led_fix`,
+`partreapply → part_change_carryover_fix`. Output images take the same names
+(`OCTATRACK_OS1.40C_<FEATURE>.syx`; composites `<FEATURE>_BATCH_BUGFIXES`), and so do the
+feature keys in `build_kyoti.py` (`--without MUTE_MODES`, …) and `build_bugbuilds.py`, and
+the octabam module keys. VERSTRs unchanged (10-char field). The `patch_*.s` sources keep
+their names (NOTES grep-ability; two live sessions edit them). Octabam folders stay
+lowercase-hyphen (octabam requires name == folder).
+
+**Removed (git history keeps all of it; last commit carrying them: `69949ce`).**
+14 SUPERSEDED builders and the sources only they used; `tools/attic/` (octamax's mods, "not
+part of any OT Kyoti FW build"); `tools/ghidra/attic/` (348 one-shot probes);
+`tools/parked/`; octamax's generic emulator scripts nothing ran; `disasm.sh`;
+`reference/upstream-notes.md`; the superseded handoffs (DJ phase/scales/V6, RELOAD2, repitch
+rev 14 prompt); diagnostic builders; and diag/emu tools last used before Session 100 that no
+build runs. KEPT by rule: everything a final or combined build runs (computed from string
+literals and imports, comments and docstrings ignored), `tools/emu_rtos.py`, every tool of a
+live thread (`threads.txt` globs — the DJ crash investigation, repitch's bit-exact gate),
+non-superseded tools used since Session 100, and four general utilities (`cave_syms.py`,
+`inspect_bank.py`, `emu_partswitch.py`, `bin_decode.py` — the last because FLASHING §6 uses it
+to verify a `.bin`). No kept tool depends on a removed file (checked); kept prose that names
+one was fixed where a reader would follow it, left as history in diagnostics and sources.
+Pre-existing, not caused here: `emu_partswitch.py`, `emu_pattern_led.py` and
+`diff_flex_static.py` import `emu_card` from `refs/octabam/tools/`, which the current octabam
+clone no longer has.
+
+**LICENSE §2 corrected.** It carved only `tools/attic/` out of the MIT grant, while six
+byte-identical octamax files sat outside the carve-out (`fetch-os.sh`, `analyze.sh`,
+`setup.sh`, `tools/entropy.py`, `tools/bin_decode.py`; the EFT patch falls under §3). §2 now
+names them; CREDITS says the same. This narrows our claim; it never widens it.
+
+**Docs.** README 414 → ~200 lines (intro, builds, the gate, one entry per final feature with
+hardware status and build, before-you-flash). BUILD_KYOTI 168 → ~100 (now correctly lists
+the DSP56300 toolchain for REPITCH too, and drops the stale "Bug 1 fix + …" rows);
+FLASHING 875 → ~200 (§0–3 and §5–6 kept near-verbatim; §4 one quick check per feature;
+§6(b) no longer isolates via a fix-only build, since no feature carries MIDI_PLAYS_FREE_FIX
+any more); START_HERE 373 → 166 (§3 hard constraints kept verbatim; the frontier replaced by
+a short open-work list). CLAUDE.md: the tier rule replaced by the gate + promotion rule and
+the feature names.
+
+**Verified at the end:** all ten final builders rebuild FINAL with every image byte-identical
+to its promoted hash; all five octabam modules load with the new keys and pass octabam's
+ledger together; `build_bugbuilds.py` (opt-in) composes seven DISJOINT images;
+`build_kyoti.py` (opt-in) produces `KYOTI V1.0` syx `597a6db9…` — identical to the kyoti-v1
+session's current build.
+
+**Build this session:** only rebuilds of existing features, every image byte-identical to
+what was already there under the old names. **Nothing new to flash.** Old-named images
+(`OCTATRACK_OS1.40C_MUTEMODE_DT.syx`, …) left in any checkout's `out/` are stale copies.

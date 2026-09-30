@@ -1,6 +1,6 @@
 # RELOAD — redesign spec (Session 85)
 
-**Status: BUILT and FINAL** (`build_reload3.py`, hardware-confirmed on MKI 2026-09-25). This is the
+**Status: BUILT and FINAL** (`build_reload_from_project.py`, hardware-confirmed on MKI 2026-09-25). This is the
 Session 85 design spec, kept for its rationale and measurements. Where the shipped build differs, the
 source and NOTES.md win: the titled message card described below was REPLACED by stock-style block
 toasts (Session 89), and the chord's request bytes live in the patch's own memory, not at `0x80006a50`

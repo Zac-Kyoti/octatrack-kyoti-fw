@@ -41,14 +41,14 @@ Regenerate it from a fresh build with `gen_patch_json.py` (see its header).
 
 python3 sysex/apply_patch.py \
     -i downloads/extracted/OCTATRACK_OS1.40C.syx \
-    -o OCTATRACK_OS1.40C_PLAYSFREEFIX.syx
+    -o OCTATRACK_OS1.40C_MIDI_PLAYS_FREE_FIX.syx
 ```
 
 ```
 [1/5] stock .syx checksum ok
 [2/5] extracted section_3_MAIN_OS.bin (1,112,560 bytes)
 [3/5] applied 2 hunks (72 bytes)
-[4/5] repacked -> OCTATRACK_OS1.40C_PLAYSFREEFIX.syx
+[4/5] repacked -> OCTATRACK_OS1.40C_MIDI_PLAYS_FREE_FIX.syx
 [5/5] output checksum ok — byte-identical to the reference build
 ```
 
@@ -64,7 +64,7 @@ section.
 
 | id | source | effect | gate |
 |---|---|---|---|
-| `midi-trig-scale-fix` | `tools/patch_trigscale.s` | A Plays-Free MIDI track with trig quant *Direct* + pattern scale *Per Track* no longer stalls after step 1 on a manual trig. `FUN_4009b5c8` was seeding the per-track scale index with the audio track stride for MIDI tracks. | **always on** (bug fix) |
+| `midi-trig-scale-fix` | `octabam-modules/batch-bugfixes/patch_trigscale.s` | A Plays-Free MIDI track with trig quant *Direct* + pattern scale *Per Track* no longer stalls after step 1 on a manual trig. `FUN_4009b5c8` was seeding the per-track scale index with the audio track stride for MIDI tracks. | **always on** (bug fix) |
 
 The fix is a detour at `0x4009b6f2` into a 62-byte code cave at `0x400d7b00`.
 Design and RE notes: [`../NOTES.md`](../NOTES.md) ("Session 5 part 3" / "Session 6"),
@@ -82,8 +82,8 @@ container.
 
 ```sh
 EFT_EMIT_CONTAINER=elek.bin elektron-firmware-tool -i stock.syx -c 3 \
-    out/mainos_trigscale_only.bin -o out.syx
-python3 tools/make_bin.py elek.bin -o OCTATRACK_PLAYSFREEFIX.bin
+    out/mainos_midi_plays_free_fix.bin -o out.syx
+python3 tools/make_bin.py elek.bin -o OCTATRACK_MIDI_PLAYS_FREE_FIX.bin
 ```
 
 ## Before you flash

@@ -46,7 +46,7 @@ RTS_ADDR = 0
 S17 = None                              # set by main() once r7 is known; see base_mem()
 
 # default: throwaway placement of the cave over stock payload B (isolation test).
-# --patched: regenerate payload B's .mem from out/mainos_sidechain3_cross.bin -- the
+# --patched: regenerate payload B's .mem from out/mainos_sidechain_compressor.bin -- the
 #   cave is over the real donor and the three detours are live.
 PATCHED = "--patched" in sys.argv
 if PATCHED:
@@ -111,7 +111,7 @@ def assemble():
     # pass 1: placeholder table addrs to size the code
     def build(gt, ft):
         # payload B's cross-core tokens (Session 77) -- same literals as
-        # build_sidechain3.py's DSP["B"] entry.
+        # build_sidechain_compressor.py's DSP["B"] entry.
         txt = SRC.read_text() \
                              .replace("@COREBASE@", "0").replace("@FCOREBASE@", "4") \
                              .replace("@SBASE@", "$3be00").replace("@FSBASE@", "$33e00") \
@@ -145,7 +145,7 @@ def assemble():
     # rts (zz16's, zz20's, and zz18's -- the shared OFF-publish sub zz17/zz20
     # both `jsr` into, added to reclaim word budget for moncommit's exact-
     # match fix): rts[0] = sctap's own, rts[3] = zz18's (last in source order,
-    # so moncommit/HOOK 3 starts right after it). See build_sidechain3.py's
+    # so moncommit/HOOK 3 starts right after it). See build_sidechain_compressor.py's
     # matching comment. Found via dsp_asm_util.find_rts() (disassembler-
     # parsed instruction boundaries), NOT a raw word scan for 0x00000c -- a
     # scan matches that value anywhere, including a 2-word branch's own
@@ -160,14 +160,14 @@ def assemble():
 
 
 def ensure_patched_mem(words):
-    """--patched: build payload B's .mem from out/mainos_sidechain3_cross.bin
+    """--patched: build payload B's .mem from out/mainos_sidechain_compressor.bin
     (octabam's dsp_modmap only dumps the stock image, so replicate its dumpmem
     here), then assert the cave + the three jsr detours landed as
-    build_sidechain3.py wrote."""
+    build_sidechain_compressor.py wrote."""
     import importlib.util
-    imgp = ROOT / "out/mainos_sidechain3_cross.bin"
+    imgp = ROOT / "out/mainos_sidechain_compressor.bin"
     if not imgp.exists():
-        sys.exit("run tools/build_sidechain3.py first (out/mainos_sidechain3_cross.bin missing)")
+        sys.exit("run tools/build_sidechain_compressor.py first (out/mainos_sidechain_compressor.bin missing)")
     spec = importlib.util.spec_from_file_location("mm", MODMAP)
     mm = importlib.util.module_from_spec(spec); spec.loader.exec_module(mm)
     img = imgp.read_bytes()
@@ -188,7 +188,7 @@ def ensure_patched_mem(words):
             if x != y:
                 sys.exit(f"--patched cave word {k} differs: image 0x{x:06x} vs asm 0x{y:06x}")
     # detour opcode word is always exactly 0x0D1080 (bsr_long's constant
-    # opcode half, build_sidechain3.py) -- was `w >> 12 == 0x0D0` (jsr_short's
+    # opcode half, build_sidechain_compressor.py) -- was `w >> 12 == 0x0D0` (jsr_short's
     # pattern) before the SPRING REVERB donor swap moved the cave past
     # dsp_asm's short-jsr range (Session 76 continued).
     cmod = next(m for m in mods if m[0] == 0 and m[1] == COMP_MOD)

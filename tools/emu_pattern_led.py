@@ -4,7 +4,7 @@
 """
 Validate tools/patch_pattern_led.s in octabam's full-firmware emulator.
 
-Boots the image (stock, then out/mainos_patternled.bin with --patched), mounts the
+Boots the image (stock, then out/mainos_empty_pattern_led_fix.bin with --patched), mounts the
 factory OT DEMO, and drives FUN_4009a464 -- the pattern-grid "has content"
 predicate -- through the cases the fix cares about.  Pattern 15 is reset to a
 genuine stock-empty state with the real initialiser FUN_4009abdc(blob+15*0x8ed8)
@@ -22,7 +22,7 @@ sys.stdout.reconfigure(line_buffering=True)
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OCTABAM = ROOT / "refs" / "octabam"
 STOCK_IMAGE = ROOT / "out" / "raw" / "section_3_MAIN_OS.bin"
-PATCHED_IMAGE = ROOT / "out" / "mainos_patternled.bin"
+PATCHED_IMAGE = ROOT / "out" / "mainos_empty_pattern_led_fix.bin"
 DEMO = pathlib.Path.home() / "Desktop" / "OT Backup" / "KYOTI" / "OT DEMO"
 
 os.chdir(OCTABAM)
@@ -55,7 +55,7 @@ def main():
         image = PATCHED_IMAGE if args.patched else STOCK_IMAGE
         tag = "PATCHED" if args.patched else "STOCK"
     if not image.exists():
-        sys.exit(f"missing {image} -- run tools/build_pattern_led.py (or build_merged.py) first")
+        sys.exit(f"missing {image} -- run tools/build_empty_pattern_led_fix.py (or build_merged.py) first")
     fixed = image != STOCK_IMAGE          # the fix is present in anything but bare stock
     print(f"=== {tag}  ({image.name}) ===")
 

@@ -28,7 +28,7 @@ OCTABAM = ROOT / "refs" / "octabam"
 OT_EMU = OCTABAM / "out" / "emu" / "ot_emu"
 CARD = OCTABAM / "out" / "kyoti_led_card.img"
 STOCK_IMAGE = ROOT / "out" / "raw" / "section_3_MAIN_OS.bin"
-PATCHED_IMAGE = ROOT / "out" / "mainos_patternled.bin"
+PATCHED_IMAGE = ROOT / "out" / "mainos_empty_pattern_led_fix.bin"
 
 # the same constants tools/emu_pattern_led.py uses
 PART_PTR = 0x46C82456          # project database pointer (emu_card.PART_PTR)

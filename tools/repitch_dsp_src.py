@@ -5,7 +5,7 @@
 repitch-kyoti rev 14: the complete DSP source = generated constants +
 tools/patch_repitch_dsp.asm, and the table DATA that goes into X memory.
 Everything numeric comes from tools/repitch_engine_model.py, so the DSP and
-its reference model cannot drift apart. Used by tools/build_repitch_kyoti.py
+its reference model cannot drift apart. Used by tools/build_repitch_repeat98_kyoti.py
 and the DSP harnesses.
 
 Since rev 14 the tables are not in the P cave: they are written over SPRING

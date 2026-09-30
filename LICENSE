@@ -20,15 +20,13 @@ WHAT IT DOES NOT COVER
      derived from Elektron's software and is not distributed here; it is not
      licensed by this file.
 
-  2. tools/attic/ (except its README.md). These files are inherited from
-     https://github.com/mxldyn/octamax, which ships no license file. They are
-     tagged "SPDX-License-Identifier: NONE" and remain the property of their
-     author. They are kept here as reverse-engineering cross-reference only, are
-     not part of any OT Kyoti FW build, and are offered under GitHub's Terms of
-     Service in the same educational spirit as upstream (see CREDITS.md). The
-     same applies to any note whose text is explicitly attributed to that
-     project (for example reference/upstream-notes.md, which summarises its
-     design).
+  2. Files inherited from https://github.com/mxldyn/octamax, which ships no license
+     file: fetch-os.sh, analyze.sh, setup.sh, tools/entropy.py and
+     tools/bin_decode.py. They remain the property of their author. They are kept
+     because the one-time setup and the flashing checks use them, and are offered
+     under GitHub's Terms of Service in the same educational spirit as upstream
+     (see CREDITS.md). tools/elektron-firmware-tool.patch, also inherited, falls
+     under item 3.
 
   3. Patches to third-party tools, and everything fetched at build time. The
      *.patch files under tools/ (for example tools/elektron-firmware-tool.patch,

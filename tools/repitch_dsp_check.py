@@ -12,7 +12,7 @@ module_words), which the rev-11 tools import.
 
 Extracts the stock voice engine from BOTH payloads of our own image, assembles
 tools/patch_repitch_dsp.asm, encodes each payload's prologue hook with
-build_sidechain3.bsr_long (the convention SIDECHAIN3_CROSS's hardware-confirmed
+build_sidechain_compressor.bsr_long (the convention SIDECHAIN_COMPRESSOR's hardware-confirmed
 hooks use -- NOT dsp_asm's `bsr >$abs`, which takes the operand as a literal
 displacement), builds tools/repitch_dsp_probe.cpp against our vendored
 dsp56kEmu, and runs it once per payload.
@@ -26,7 +26,7 @@ import importlib.util, pathlib, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
-import build_sidechain3 as sc3   # noqa: E402  (bsr_long)
+import build_sidechain_compressor as sc3   # noqa: E402  (bsr_long)
 
 BASE = 0x40000400
 IMG = ROOT / "out/raw/section_3_MAIN_OS.bin"

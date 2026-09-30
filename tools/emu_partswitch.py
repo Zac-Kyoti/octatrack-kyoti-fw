@@ -47,7 +47,7 @@ sys.stdout.reconfigure(line_buffering=True)
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OCTABAM = ROOT / "refs" / "octabam"
 STOCK_IMAGE = ROOT / "out" / "raw" / "section_3_MAIN_OS.bin"
-PATCHED_IMAGE = ROOT / "out" / "mainos_partreapply.bin"
+PATCHED_IMAGE = ROOT / "out" / "mainos_part_change_carryover_fix.bin"
 DEMO = pathlib.Path.home() / "Desktop" / "OT Backup" / "KYOTI" / "OT DEMO"
 
 if not (OCTABAM / "tools" / "emu" / "emu_rtos.py").exists():
@@ -399,7 +399,7 @@ ARENA_STRIDE = 1096
 
 
 def cmd_repeat(rt, own_poke=False, resolver=False, drive=False):
-    """HW finding (2026-09-13, real MKI, PARTREAPPLY flashed): P1(Part0 T1=PICKUP,
+    """HW finding (2026-09-13, real MKI, PART_CHANGE_CARRYOVER_FIX flashed): P1(Part0 T1=PICKUP,
     silent) -> P5(Part1 T1=FLEX, sample B) sounds correct the FIRST time; jump back
     to P1 then forward to P5 AGAIN and T1 now plays Part0's PICKUP content (sample A)
     under the FLEX machine. The fix's #1 mechanism (SLOT_MIRROR write + KILL_BIT) was
@@ -672,7 +672,7 @@ def main(argv):
                     help="with --repeat: fabricate a CLAIMED PICKUP buffer (owner=T1) first, "
                          "then test whether the pattern->Part change ever releases it")
     ap.add_argument("--patched", action="store_true",
-                    help="boot out/mainos_partreapply.bin (tools/build_partreapply.py) instead of stock")
+                    help="boot out/mainos_part_change_carryover_fix.bin (tools/build_part_change_carryover_fix.py) instead of stock")
     ap.add_argument("--image", help="explicit MAIN OS section to boot (e.g. out/mainos_merged.bin)")
     a = ap.parse_args(argv)
 
@@ -683,7 +683,7 @@ def main(argv):
     else:
         image = PATCHED_IMAGE if a.patched else STOCK_IMAGE
     if not image.exists():
-        sys.exit(f"missing {image} -- run tools/build_partreapply.py first" if image == PATCHED_IMAGE else
+        sys.exit(f"missing {image} -- run tools/build_part_change_carryover_fix.py first" if image == PATCHED_IMAGE else
                   f"missing {image}")
 
     card, name = er.stage_project(str(DEMO), "OCTABAM", None)

@@ -15,7 +15,7 @@
 |                       track, unchanged)
 |      1 .. 8   = track T1..T8, ANY of the eight tracks, flat -- same value
 |                 on both payloads, no longer relative to the edited track's
-|                 own DSP core. Value count 5->9 in build_sidechain3.py's own
+|                 own DSP core. Value count 5->9 in build_sidechain_compressor.py's own
 |                 SLOTS table.
 |
 |  Everything except this formatter is a data poke done by
@@ -97,7 +97,7 @@ kfl_hp_s:
 
 | =====================================================================
 |  KEY list-widget trampoline  --  forces LFO TRIG's own B-callback
-|  (0x40046450, list-style "OFF"/"T1".."T4" renderer, see build_sidechain3.py's
+|  (0x40046450, list-style "OFF"/"T1".."T4" renderer, see build_sidechain_compressor.py's
 |  LIST_FN) into its simple single-centered-value mode instead of its
 |  3-row scroll-preview mode.
 |

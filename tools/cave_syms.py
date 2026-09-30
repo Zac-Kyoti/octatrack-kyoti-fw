@@ -34,7 +34,7 @@ def syms(elf: str | None = None) -> dict:
     path = pathlib.Path(elf) if elf else DEFAULT_ELF
     if not path.exists():
         raise SystemExit(f"cave_syms: {path} missing -- build first "
-                         f"(python3 tools/build_reload3.py)")
+                         f"(python3 tools/build_reload_from_project.py)")
     out = subprocess.run(["m68k-elf-nm", str(path)],
                          capture_output=True, text=True, check=True).stdout
     d = {}

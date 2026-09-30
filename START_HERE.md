@@ -1,56 +1,51 @@
 # START HERE — onboarding for a new session
 
-Octatrack (OS 1.40C) firmware reverse-engineering + custom behaviour patches.
-This file is the stable entry point. Read it, then the pointers it names. Keep it short;
-update the **Current frontier** section at the end of each session.
+Octatrack (OS 1.40C) firmware reverse-engineering and custom behaviour patches. This is the
+stable entry point: read it, then the pointers it names. Keep it short, and update §6 at the
+end of each session.
 
 ---
 
 ## 0. What loads automatically
 
 Running Claude on this Mac auto-loads the project memory
-(`~/.claude/projects/-Users-kyoti-m4/memory/octamax-re-project.md`) — a per-session
-digest of state. Treat it as the summary; this repo's docs are the detail.
+(`~/.claude/projects/-Users-kyoti-m4/memory/octamax-re-project.md`) — a per-session digest
+of state. Treat it as the summary; this repo's docs are the detail.
 
-Local repo: `~/Documents/octatrack-kyoti-fw/` (was `~/Documents/octamax/` until
-2026-09-01). Published as <https://github.com/Zac-Kyoti/octatrack-kyoti-fw>. It is an
-independent project, **not** a fork in any sense that matters: none of octamax's code
-is in a build, only its concepts (credit lives in `CREDITS.md` and one README line —
-keep it there). Remotes: `origin` = the published repo, `upstream` = mxldyn (fetch
-only, for `whatsnew.py`).
+Local repo: `~/Documents/octatrack-kyoti-fw/`, published as
+<https://github.com/Zac-Kyoti/octatrack-kyoti-fw>. It is an independent project: none of
+octamax's feature code is in a build, only its concepts and a few setup scripts (credit in
+`CREDITS.md`, the licence carve-out in `LICENSE`). Remotes: `origin` = the published repo,
+`upstream` = mxldyn (fetch only, for `whatsnew.py`).
 
 ## 1. Read order for a new chat
 
-1. **This file** — §5 is the state of every build, §6 the current frontier. There is
-   **one branch** (`main`); it carries finished and unfinished work alike, and the
-   unfinished builders gate themselves (see §5).
+1. **This file.** §5 is how work is organised, §6 the open work.
 2. **`NOTES.md`** — the RE log. **Do not read top-to-bottom** (it starts at 2026-07 recon).
-   Jump to the newest `## Session N` section and the most recent
-   `### … STATE OF PLAY` / `### NEXT …` blocks. Section index: `grep -nE '^## ' NOTES.md`.
-3. **`reference/kb/*.md`** for anything touching the descriptor table, file formats, DSP, or
-   the container; **task-specific docs** from the map below.
+   Jump to the newest `## Session N` and the most recent `### … STATE OF PLAY` /
+   `### NEXT …` blocks. Section index: `grep -nE '^## ' NOTES.md`.
+3. **`reference/kb/*.md`** for anything touching the descriptor table, file formats, DSP,
+   the container or **caves**; then the task-specific docs from §2.
 4. Only then open `tools/*` and `out/ghidra/*` for the subsystem in question.
 
-## 2. Document map — what each file is for
+## 2. Document map
 
 | File | Use it for |
 |---|---|
-| `START_HERE.md` | this — onboarding + current frontier |
-| `NOTES.md` | the full chronological RE log; every finding, every session, every dead end |
-| `reference/kb/*.md` | **distilled knowledge base** — address map + file format + DSP + container + techniques, ours merged with external RE. Read the relevant one before a new patch |
-| `reference/EXTERNAL_RESEARCH.md` | index of the 6 external OT-RE repos + the sync/distill workflow (`tools/refs/`) |
-| `reference/MERGE.md` | **the combined firmware** — `KYOTI V1.0` (`tools/build_kyoti.py`): its cave layout across zones, the evidence for each zone, how the two old blockers are resolved; below that, the detour inventory and shared-state table it was planned from |
-| `reference/handoffs/*.md` | per-thread handoffs for work still open — read the relevant one **before** re-probing that thread (DIRECT JUMP is FINAL: `DIRECTJUMP_V7_DESIGN.md` is its design contract and proof method; `DIRECTJUMP_V6_HANDOFF.md`, `DIRECTJUMP_PHASE_HANDOFF.md` and `DIRECTJUMP_SCALES_HANDOFF.md` are history; `RELOAD2_HANDOFF.md`) |
-| `reference/AR_DIRECT_JUMP.md` | the Analog Rytm's own pattern-commit arithmetic — V6.4 ported it exactly (the OT↔AR parity build); V7 deliberately replaces its position rule with the clock-locked one |
-| `reference/OT_SEQUENCER_BUGS.md` | every stock sequencer bug we have determined (tagged measured / hardware / reasoned) and the measured NOT-bugs — update it rather than re-deriving |
-| `reference/RELOAD_REDESIGN.md` | the RELOAD3 chord design: why the picker went, the measured keymap facts, the Part-half semantics |
-| `README.md` | what the firmware is, the feature list + per-feature HW status, repo layout, lineage |
-| `BUILD_KYOTI.md` | roll-your-own build guide (every `build_*.py`, prerequisites, the reproducible patch) |
-| `COVERAGE.md` | **this project's own** RE coverage: what is mapped vs still dark, per manual chapter. Descriptive; the scope policy is in `CLAUDE.md` |
+| `README.md` | the final features, what each does, its hardware status and final build |
+| `BUILD_KYOTI.md` | how to build: prerequisites, setup, one command per final feature |
+| `FLASHING.md` | how to flash (MIDI and CF card), verify, and recover |
+| `NOTES.md` | the full chronological RE log — every finding, every session, every dead end |
+| `reference/kb/*.md` | the distilled knowledge base — address map, file format, DSP, container, techniques, caves; ours merged with external RE |
+| `reference/MERGE.md` | the combined image (`tools/build_kyoti.py`): its cave layout across zones, the evidence for each zone, the resolved merge blockers |
+| `reference/handoffs/*.md` | design contracts and scopes: `DIRECTJUMP_V7_DESIGN.md` (DIRECT_JUMP_KYOTI), `REPITCH_*` (REPITCH_REPEAT98_KYOTI), `RELOAD3_SEQFAIL_HANDOFF.md` |
+| `reference/RELOAD_REDESIGN.md` | RELOAD_FROM_PROJECT's chord design and the measured keymap facts |
+| `reference/OT_SEQUENCER_BUGS.md` | every stock sequencer bug we have determined, and the measured NOT-bugs |
+| `reference/AR_*.md` | the Analog Rytm's sequencer and pattern-commit arithmetic (DIRECT_JUMP_KYOTI research) |
+| `reference/EXTERNAL_RESEARCH.md` · `UPSTREAM_INBOX.md` | the external OT-RE repos we track, and what is pending distillation |
+| `COVERAGE.md` | this project's own RE coverage: what is mapped vs still dark, per manual chapter |
 | `ARCHITECTURE.md` | memory map, container format, boot/upgrade chain |
-| `FLASHING.md` | step-by-step flashing (MIDI + CF card) and the per-feature hardware test procedures |
-| `reference/upstream-notes.md` | inherited octamax mod-design notes (scenes, LED, lazy transitions, arp, bank paging) — kept for reference, **not** part of OT Kyoti FW |
-| `tools/attic/` | the octamax mod patch sources + `build.py` — RE cross-reference, not built here |
+| `octabam-modules/` | the features packaged as octabam modules — one self-contained folder each |
 
 ## 3. Hard constraints (do not relearn these the hard way)
 
@@ -103,271 +98,69 @@ only, for `whatsnew.py`).
 
 | Need | Command |
 |---|---|
-| decompressed stock image | `out/raw/section_3_MAIN_OS.bin` (base `0x40000400`); regen via `./fetch-os.sh && ./analyze.sh` |
-| disassemble | `./disasm.sh` (r2, m68k BE, base wired) — note r2 mis-decodes some ColdFire ops; prefer Ghidra |
-| Ghidra headless | JDK 21 + Ghidra 12.1.2 paths in the memory file; project `ghidra_project octamax`, `-process section_3_MAIN_OS.bin -noanalysis`; one-shot probe scripts in `tools/ghidra/attic/*.java` (see `tools/ghidra/README.md`), dumps land in `out/ghidra/` |
-| CPU emulation | `tools/emu_*.py` (Unicorn, runs the real image bytes) — one per feature |
-| build a flashable | `tools/build_*.py` → `.syx` (MIDI) + `.bin` (CF card); see README §"Building" |
-| external RE research | `python3 tools/refs/sync.py` (clone/refresh the 6 repos into `refs/`, gitignored) · `python3 tools/refs/whatsnew.py` (what changed upstream → re-distil into `reference/kb/`) |
+| decompressed stock image | `out/raw/section_3_MAIN_OS.bin` (base `0x40000400`); regenerate with `./fetch-os.sh && ./analyze.sh` |
+| disassemble | `m68k-elf-objdump -D -b binary -m m68k:cfv4e -EB --adjust-vma=0x40000400 --start-address=… out/raw/section_3_MAIN_OS.bin` |
+| Ghidra headless | JDK 21 + Ghidra 12.1.2 paths in the memory file; project `ghidra_project octamax`, `-process section_3_MAIN_OS.bin -noanalysis`; helpers in `tools/ghidra/`, dumps land in `out/ghidra/` |
+| ColdFire emulation | `tools/emu_rtos.py` (Unicorn on real image bytes, via octabam's emulator in `refs/octabam/`) |
+| DIRECT_JUMP_KYOTI timing gate | `tools/diag_reflock.py` + `tools/cmp_reflock.py` (equality with a never-switched reference run) |
+| REPITCH_REPEAT98_KYOTI DSP gate | `tools/repitch_dsp_*` (bit-exact against the reference engine) |
+| DSP assembly | `tools/dsp_xasm.py` over `vendor/dsp56300`'s `dsp_asm` |
+| a final build | `tools/build_<feature>.py` → `.syx` (MIDI) + `.bin` (CF card); see `BUILD_KYOTI.md` |
+| the combined image | `tools/build_kyoti.py` (WIP; `--without NAME` for bisection images) |
+| each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (WIP) |
+| external RE research | `python3 tools/refs/sync.py` (clone or refresh the tracked repos into `refs/`) · `python3 tools/refs/whatsnew.py` |
 
-## 5. Shipped / in-flight work
+## 5. How work is organised
 
-**One branch.** `main` carries every build, finished or not, plus the KB and the
-diagnostics. The long-lived `wip` branch was retired on 2026-09-26: it had drifted 41/11
-commits from `main`, mostly the same changes under different SHAs from cherry-picking
-back and forth, and every sync cost a conflict-heavy merge. **Use short-lived topic
-branches** for anything risky and merge them here when they settle.
+**One branch, `main`**, carries everything. **Several sessions may work at once** —
+`CLAUDE.md` "Concurrent sessions": one git worktree per session (`tools/worktree.sh`),
+explicit-path commits, and a commit guard driven by `tools/githooks/threads.txt`.
 
-**Several sessions may be working at once** — `CLAUDE.md` "Concurrent sessions": one git worktree per session (`tools/worktree.sh`), explicit-path commits, and a commit guard driven by the thread-ownership map `tools/githooks/threads.txt`.
+**Everything is WIP until the author promotes it to final.** `tools/kyoti_status.py` holds
+the FINAL list: each promoted builder, pinned to the sha256 of the image it built when
+promoted. Every builder calls `gate(__file__)` first — a builder not on the list refuses to
+run without `KYOTI_ALLOW_WIP=1` — and `seal(__file__, image)` after writing its image: a
+final builder whose image has changed since promotion is WIP again, and refuses without the
+opt-in. Diagnostic variants build a different image, so they are WIP too.
 
-What keeps unfinished work from being mistaken for shippable is `tools/kyoti_status.py`:
-each builder declares **FINAL**, **PREVIEW**, **WIP** or **SUPERSEDED** and announces it on
-every run. A **WIP** builder exits 2 without `KYOTI_ALLOW_WIP=1`; a **SUPERSEDED** one exits
-2 without `KYOTI_ALLOW_SUPERSEDED=1` and names its replacement (deliberately two variables —
-"I know this is unfinished" should not also unlock "this was abandoned"). Today every
-documented feature is FINAL — DIRECT JUMP V7 since 2026-09-27, REPITCH KYOTI (rev 16) since
-2026-09-29; no builder is WIP at present — and
-fourteen earlier-stage builders are SUPERSEDED (DJ v1-v6, `build_mutemode{,_new}.py`,
-`build_softmute.py`, `build_relstate_shadow.py`, `build_sidechain{,2}.py`,
-`build_reload{,2}.py`). **`build_bugbuilds.py --with-wip` passes `KYOTI_ALLOW_WIP=1` to the
-child builder itself**, so its own gate does not have to be worked around. When a tier
-changes, change the call and the README table together. Upstream RE repos are tracked via `refs/`
-(see `reference/EXTERNAL_RESEARCH.md`), not a mirrored branch.
+**Promotion happens only on the author's explicit instruction.** Build it, put the sha256
+that `seal()` prints into `FINAL`, and give the feature its entry in `README.md` (and
+`BUILD_KYOTI.md`). An update to a final feature replaces the old final: in place when the
+builder itself was updated, or — when the update is a new builder — it takes the old
+builder's FINAL entry and the old builder is deleted. There is no superseded tier.
 
-**Finished and hardware-confirmed on the MKI** (per-feature detail and flash dates:
-`README.md` → *Hardware-test status*, and `BUILD_KYOTI.md`):
+**Feature names.** Use these everywhere — builders, images, docs, octabam keys:
 
-| Thread | Build | State |
+| feature | builder | octabam module |
 |---|---|---|
-| **Bug 1** — Plays-Free MIDI manual-trig stall | `build_trigscale_only.py` | **confirmed** 2026-08-28. Always-on, folded into every feature build |
-| **Bug 2** — a p-lock-only pattern reads as empty (grid LED unlit) | `build_pattern_led.py` | **confirmed** 2026-09-13 |
-| **Bug 3** — Part-change carryover: PICKUP→FLEX stuck loop + spurious Part-edited flag | `build_partreapply.py` | **confirmed** 2026-09-22/23, thread closed |
-| **MUTE MODE** — `OT` / `OTFX` / `OTFX-T` / `DT-T`, menu, SOLO, `'ANDY'` persistence | `build_mutemode_dt.py` | **confirmed, final** 2026-09-21. All four modes; one persisted word with the menu index derived from it |
-| **QUANTIZE LIVE REC** — `[REC]` + `[PLAY]`, then `[PLAY]` again while the toast is up | `build_qlrec.py` | **confirmed working** (2026-09-25) after three instructive failures: a `dur<=0` toast hung the unit, a `0x400522ca` frame-handler detour crashed it, and a private scratch word at `0x80006a60` did not survive on the unit. Now keeps **no state at all** — the gate is stock's toast handle. 2 cosmetic issues parked |
-| **SIDE-CHAIN COMPRESSOR** — `KEY`/`KFLT`/`KGN`/`MON`, cross-core | `build_sidechain3.py` → `SIDECHAIN3_CROSS` | **confirmed, final** 2026-09-20, single-core and cross-core both |
-| **TRIGLESS-LOCK AUTO-REMOVE** | `build_triglock.py` | **confirmed, final** 2026-09-21 |
-| **REPITCH KYOTI** — TSTR `RPCH`/`RPS9`/`RPSP` tempo-locked varispeed, QUAN ratios on the PTCH slot | `build_repitch_kyoti.py` | **confirmed, final** 2026-09-29 (rev 16). Removes SPRING REVERB. DARK REVERB beside it emulator-verified only |
+| MUTE_MODES | `build_mute_modes.py` | not yet ported |
+| DIRECT_JUMP_KYOTI | `build_direct_jump_kyoti.py` | `octabam-modules/direct-jump-kyoti` |
+| SIDECHAIN_COMPRESSOR | `build_sidechain_compressor.py` | not yet ported |
+| RELOAD_FROM_PROJECT | `build_reload_from_project.py` | `octabam-modules/reload-from-project` |
+| REPITCH_REPEAT98_KYOTI | `build_repitch_repeat98_kyoti.py` | not yet ported |
+| QUANTIZE_LIVE_REC_TOGGLE | `build_quantize_live_rec_toggle.py` | `octabam-modules/quantize-live-rec-toggle` |
+| ERASE_EMPTY_TRIGLESS_LOCKS | `build_erase_empty_trigless_locks.py` | `octabam-modules/erase-empty-trigless-locks` |
+| BATCH_BUGFIXES: MIDI_PLAYS_FREE_FIX · EMPTY_PATTERN_LED_FIX · PART_CHANGE_CARRYOVER_FIX | `build_midi_plays_free_fix.py` · `build_empty_pattern_led_fix.py` · `build_part_change_carryover_fix.py` | `octabam-modules/batch-bugfixes` |
 
-**Composites** — `build_bugbuilds.py` gives each finished feature its **own** image with
-all three bug fixes folded into it: MUTEMODE_DT, QLREC, SIDECHAIN3_CROSS, TRIGLOCK,
-RELOAD3, DIRECTJUMP_V7 and REPITCH_KYOTI, seven images, written only to `out/Bugbuilds/`. Features are never combined with
-each other. Not flashed; the composition itself is proven by a per-run
-interlock proof.
+The assembly sources keep their historical names (`patch_directjump_v7.s`,
+`patch_trigscale.s`, …) so they stay greppable against `NOTES.md`. Octabam module folders
+are lowercase-hyphen, because octabam requires a module's name to equal its folder.
 
-**The all-in-one image — `KYOTI V1.0`** (`tools/build_kyoti.py` → `out/KYOTI/`, PREVIEW,
-built 2026-09-29, **not flashed**): every FINAL feature + the three bug fixes, composed from
-the FINAL builders themselves run in a sandbox at relocated addresses
-(`tools/kyoti_place.py`). Its caves need 9622 B; the classic cave holds 5948, so it also uses
-midisc's shipping pads and two blocks of stock data it makes unreachable. Layout, evidence
-and the resolved blockers: `reference/MERGE.md` (top section); test plan: FLASHING §4.11.
+## 6. Open work — UPDATE THIS EACH SESSION
 
-**Not a shipped fix:** the MIDI LFO SETUP knobs sending CC on the twin audio channel
-(the item older notes called "Bug 2", before that number was reused for the
-pattern-LED fix) — emulation says it is **likely already fixed in stock 1.40C**,
-awaiting a hardware check. `tools/emu_lfocc.py`.
+> Check this against the tree before trusting it; it has gone stale before.
 
-**Not part of any build:** the third-party reference patch sources in `tools/attic/`
-(branding, no BANK/PTN countdown, lazy Part transitions, arp key-scales, LED dirty
-indicators). Kept for RE cross-reference; design notes in `reference/upstream-notes.md`;
-credit in `CREDITS.md`.
-
-**External-RE knowledge base** — `reference/kb/*.md`, the address-keyed distillate of
-the 6 prior-art repos (octabam DSP map + kernel/RTOS + step-mask map, OctaLib file
-formats, octa-bt-pt + octabam descriptor table, the bank-file p-lock region,
-ems-octakit's `abi.inc` ~500-address map → `kb/octakit-abi.md`, the keymap/keycodes).
-`python3 tools/refs/sync.py` populates the `refs/` cache;
-`reference/EXTERNAL_RESEARCH.md` is the index.
-
----
-
-## 6. Current frontier — UPDATE THIS EACH SESSION
-
-**As of 2026-09-29 (Session 114): every finished feature is combined in `KYOTI V1.0`
-(`build_kyoti.py`, PREVIEW, not yet flashed) — see "KYOTI V1.0" below.** Every finished
-feature is here.
-RELOAD3, QLREC's stateless rewrite and SIDECHAIN3's UI fix were the last promotions
-(2026-09-25).
-
-**No DIRECT JUMP thread is open: V7 is FINAL (hardware-confirmed 2026-09-27).** Everything
-in §5 is finished, and so is repitch-kyoti (rev 16, FINAL 2026-09-29 — see below).
-
-> Check this section against the tree before trusting it — it has gone stale before
-> (2026-09-25: three claims about `main` that a merge had already made false).
-
-### DIRECT JUMP — V7, FINAL (hardware-confirmed 2026-09-27): clock-locked jumps
-
-**Read `reference/handoffs/DIRECTJUMP_V7_DESIGN.md`, then `NOTES.md` "Session 108".**
-`build_directjump_v7.py` (FINAL; v1–v6 SUPERSEDED). A jump lands the new pattern exactly where
-it would be had it played since START — every track, any length, track scale, master length or
-master scale — through the same stock `0x80006687` landing V6 used (hooks at `0x400a1f72` and
-`0x400a221c`, boundary body untouched). What V7 changed is the *position*: V6 (like the Analog
-Rytm) derived it from the outgoing pattern's master counter `0x800065b2`, which wraps with that
-pattern; V7 derives it from an absolute clock-tick counter, lands only where every incoming track
-is at a step start, purges the outgoing pattern's pending trigs (the first incoming trig wins),
-and fixes up `reload`. Graded by `tools/diag_reflock.py` + `cmp_reflock.py` (equality with a
-never-switched reference, state and live events with content) and `tools/model_reflock.py`
-(the position model, exact on 10 references). **V6.4** (`build_directjump_v6.py`,
-SUPERSEDED) is kept as the hardware-good **OT↔AR parity build**. **V7.0.1** (not yet on
-hardware) replays stock's switch hand-off at the landing — V7.0 skipped it, so a jump never
-changed the Part, applied START SILENT or reset trig conditions — and keeps Program Change on the
-pattern that actually plays through re-cues and cancels. V7.0.1's Part change is
-hardware-confirmed (2026-09-28); not yet on hardware: MIDI tracks and Program Change on re-cues
-(both emulator-verified). Parked by the user: cued-switch policy (design doc §6a); V7.1 mid-window landing (not
-recommended). Everything from here to the end of this section is the HISTORY of the V1–V5
-line, kept because its dead ends are still the dead ends.
-
-**The former baseline, RETRACTED 2026-09-26 = the Session 87 GOLD image** (`out/GOLD_S87_*`, sha256
-`0657157f…`, rebuildable from commit `16df386`), flashed 2026-09-23: tracks and patterns
-stay in master time through a switch, patterns land on the correct step, mixed track
-lengths work together (7 / 12 / 16), track scales and NORMAL/PER-TRACK modes behave,
-MASTER LENGTH is respected including `INF` — all at a 1x master scale.
-
-**V5.11 (Session 104) = gold + ONLY the master-remainder seed** (`dj_mrem`, a byte-equal
-no-op at 1x; AR's own mechanism). Emulator-identical to gold's line at 1x; **its hardware
-check is pending** — verify lengths / NORMAL / PER-TRACK / track scales first.
-
-**Non-1x scales — how the thread got here.**
-
-1. *Session 88 (Hook P, per-track step index).* Correct on paper, **flashed, and broke
-   the 1x baseline; reverted.** The step-index theory was not the audible bug.
-2. *Sessions 97–99 (V5.5).* The stock commit tail destroys each track's sub-step tick
-   counter, so a track on a different ticks-per-step than the master lands mid-step.
-   V5.5 preserved the counter by suppression (Hooks Z/X). **Hardware-rejected.** The
-   emulator could not provoke the failure; a diagnostic build's on-screen toast
-   (`A Z X Y P R`) measured it on the unit instead.
-3. *Session 100 (V5.7).* The toast proved two holes: the mod-reduce sat at a site the
-   unit runs for only some tracks (moved into Hook Z), and commits land mid-master-step
-   (the master tick counter is now seeded with the remainder). Still fractional.
-4. *Session 101 (V5.8).* The audible observable was found — the scheduled fire-timestamp
-   table, `tools/diag_tablearm_phase.py` — and the bug reproduced in the emulator: the
-   half-step flip originates at **natural pattern wraps**, which re-enter the commit body
-   and re-phase 1x tracks under a 2x master. V5.8 preserves through wraps too. **On the
-   unit: a large improvement** — fractional is now confined to the landing interval and
-   heals at the cycle restart.
-5. *Session 102 (V5.9).* The `V5_8D2` toast showed the residual is **not** the
-   master-remainder case (N1 of A6). It also named a new symptom present since V5.8: a
-   spurious trig once per cycle on the 2x track, half a step off-grid — the tail's
-   reposition fire and the track's own advance fire, exclusive in stock only because
-   stock zeroes the counter, both running under the wrap-preserve. V5.9's Hook W cut
-   that conditionally; the suppression path is unreachable in the emulator, so hardware
-   decides.
-6. *Session 103 (V5.10).* Hook W retired (suppressing that fire drops step 1's trig every
-   cycle; firing it late is the spurious); **Hook V** instead deferred each track's whole
-   apply to its own boundary via CNTDN. **Hardware: regressions from gold** — odd track
-   lengths (16 vs 7) at 1x went fractional and a 7-step track's LEDs ran 16 steps; toast
-   `W=7608` showed Hook V forcing countdowns every tick for tracks whose pending bit is
-   never consumed (MIDI 8-15 and more).
-7. *Session 104 (V5.11) — ROLLBACK.* The per-track preserve/defer machinery (Hooks
-   Z/X/V, two masks) does not generalise beyond the fixture it was built against. It is
-   now opt-in (`DJ_PRESERVE=1`) and OFF; V5.11 is the gold line + the master seed.
-
-8. *Session 105 — the retraction and the rewrite.* The user re-flashed gold and got
-   fractional steps at 1x / NORMAL / 16↔7. The AR engine was decompiled end to end
-   (`reference/AR_SEQUENCER_ENGINE.md`): AR's DIRECT JUMP never touches the wrap-change
-   path every OT build had been re-entering; it counts down to the next master step
-   boundary and re-lands all tracks synchronously. OT has that landing as stock code
-   (`0x80006687`). V6 = arm it + fill its snapshot. `dj_mrem` withdrawn (the remainder pair
-   is AR's pause/Song-Position mechanism).
-
-**Method lessons, hard-won:** the emulator judges STEP advances, which was the wrong
-observable — trust the fire-timestamp table (`tools/diag_tablearm_phase.py`, per-writer
-class counts; `tools/diag_fire_phase.py` showed `FUN_400a536c` is the reposition
-callback, not the trig dispatch). A fix gated on one fixture is not a fix: gate every
-candidate on odd lengths and NORMAL mode too. Diagnostic builds with an on-screen toast
-beat further static analysis (also how RELOAD3 and QLREC were cracked). Do not keep
-state in `0x80006a40..0x80006abf`. MIDI twin sites of the patched blocks
-(`0x400a4cb0` area) are still unpatched — audio-only coverage.
-
-**Still open from earlier:** a report that the visited steps depend on which trigs are
-on the grid, and that LEDs and audio disagree about position.
-
-V1–V6's position rule was the Analog Rytm's own commit arithmetic (`reference/AR_DIRECT_JUMP.md`);
-V7 replaced it (design doc). The mode deliberately does not persist — OFF on every power-on.
-History handoffs: `DIRECTJUMP_V6_HANDOFF.md`, `DIRECTJUMP_PHASE_HANDOFF.md`,
-`DIRECTJUMP_SCALES_HANDOFF.md`. Detail: `NOTES.md` "Session 15" + "Session 21" + "Session 35",
-then "Session 60"–"Session 108".
-
-### RELOAD FROM PROJECT — RELOAD3, FINAL (hardware-confirmed 2026-09-25)
-
-`build_reload3.py`. Two direct chords: **`[PTN]` + `[TRACK n]`** (track sequence from
-the card, Part untouched) and **`[BANK]` + `[TRACK n]`** (the same plus re-apply the
-saved Part from RAM). No modal window, no keymap layer of ours, no timeout. It reloads
-the *playing* pattern, never restarts the sequence or the metronome, and reports when
-the job has actually finished — with a built-in check (`SEQ RELOAD LOST`) if the trigs
-did not land.
-
-The last open bug — the sequence intermittently not restored while the toast said
-RELOADED — was root-caused on the unit with `build_reload3.py --diag`, whose toast prints
-the request as armed and as read by the worker. The request bytes lived at
-`0x80006a50-55`, a RAM block the unit overwrites, so the worker sometimes reloaded a
-different (MIDI) track and then verified that. They now live in the patch's own cave, and
-the build refuses any reference into `0x80006a40..0x80006abf`. The user reported every
-issue resolved. **Do not keep state in that block** (`kb/caves.md`, CLAUDE.md,
-NOTES "Session 98"). Deferred by the user: all-tracks and whole-bank variants. Handoff:
-`reference/handoffs/RELOAD3_SEQFAIL_HANDOFF.md`. Spec and measurements:
-`reference/RELOAD_REDESIGN.md`; detail: `NOTES.md` "Session 42"–"44" + "Session 47" +
-"Session 80"–"Session 98".
-
-### REPITCH KYOTI — rev 16, FINAL (hardware-confirmed 2026-09-29)
-
-`build_repitch_kyoti.py` → `140C_RPK16` (and `BUG_RPK16` in the Bugbuilds). SETUP TSTR
-`RPCH`/`RPS9`/`RPSP` replay a STATIC/FLEX sample at the project tempo by varispeed, with
-the OT's own, an S900/S950's and an SP-1200's (channel 1/2, AMP-envelope-driven filter)
-character; PTCH becomes QUAN (9 exact ratios, p-/scene-lockable), and PTCH and QUAN are
-kept apart across TSTR switches. The DSP engine lives in SPRING REVERB's module on both
-cores (SPRING removed, SIDECHAIN3's 388 words and DARK REVERB's shared routine untouched);
-the ColdFire cave `0x400d6f80..0x400d7afc` has 4 B left. Design records:
-`reference/handoffs/REPITCH_KYOTI_SCOPE.md` (ColdFire, QUAN), `REPITCH_FIDELITY_SCOPE.md`
-(RPS9/RPSP), `REPITCH_SP_CH12_SCOPE.md` (channel 1/2); detail `NOTES.md` Sessions 106–112.
-Verification: `tools/repitch_dsp_engine_check.py` (80/80 bit-exact DSP vs model twin, both
-cores) and `out/repitch_probe_kyoti` (10 ColdFire contracts; build line in NOTES Session 112
-continued (2)); the private ot_emu instrumentation is `tools/repitch_ot_emu_trace.patch`.
-
-Still open, none of it blocking: the **octabam module port** (a DSP + ColdFire hybrid like
-the SIDE-CHAIN, which `0ab5666` deferred for the same reason — `threads.txt` already maps
-`repitch-repeat98-kyoti/` to this thread); the **merge**, where its cave overlaps DIRECT JUMP V7's
-(`reference/MERGE.md`); on hardware, RTRG retrigs on a repitch track and a full DSP core of
-RPSP tracks under heavy effects are untested, and DARK REVERB's repair is emulator-only.
-
-### KYOTI V1.0 — the combined image (built 2026-09-29, awaiting its first flash)
-
-`tools/build_kyoti.py`, PREVIEW. The first flash doubles as the hardware canary for the zones
-this project has not run code from before (`reference/MERGE.md`, `kb/caves.md` §2b) — FLASHING
-§4.11's first block exercises every relocated piece. Blockers B1/B2 below are RESOLVED in it
-(DJ_MODE in DIRECT JUMP's cave; the overlay asserted per record), kept below as history.
-
-### Blockers on the staged merge (RESOLVED in KYOTI V1.0 — history)
-
-Both are DIRECT-JUMP-vs-someone-else, and both are *builder assertion* conflicts
-rather than byte conflicts (`reference/MERGE.md`) — unchanged by V7, which keeps v4's
-toggle route and power-on guarantees:
-
-- **B1** — DIRECT JUMP (v4 through V7) asserts the `'ANDY'` block restore stays stock, while
-  MUTE MODE must widen it. `DJ_MODE` needs relocating; `0x800000f8` is a candidate, not yet
-  proven free.
-- **B2** — DIRECT JUMP (v4 through V7) writes the `[PTN]`-overlay `[YES]` record, while
-  RELOAD3 asserts that overlay is byte-for-byte stock.
-
-Plus a packing problem new with V7: its 1980 B cave (V7.0.1) puts V1.1 at ≈ −888 B in the single free
-zone (derived) — a second cave zone is needed (`reference/kb/caves.md`).
-
-`KYOTI_V1.0` (the seven finished mods) has neither problem and is buildable as soon as
-the withdrawn builder is reconstructed from the allocation map.
-
-### Side-chain compressor — closed, but keep these
-
-Final and hardware-confirmed; no open work queued. Two things worth not relearning:
-
-- **Not emulable:** the actual gain-reduction-from-`keybus` chain. `dsp_host` cannot
-  run the stock compressor end to end, so the *response* is a hardware test;
-  `emu_sc_dsp3.py` verifies the GAIN/FLT/LISTEN data transforms numerically against a
-  reference, which is a different claim.
-- **dsp56kEmu quirks**, worked around in `patch_sc_dsp3.asm` and all three HW-correct:
-  `move x:(rN+d),a` reads wrong (use `,b`); a short `move #imm` to a data reg is
-  left-aligned (use `cmp #>imm`); `asr` leaves bits in acc0 that `tst`/`cmp` see
-  (normalise first).
-
-Known-open and deliberately left alone: a very mild HP↔OFF pop (three hardware-tested
-declick designs each failed or regressed — `NOTES.md` Session 76's trail; do not
-re-attempt without a fundamentally different approach), and low-ATK/REL "graininess"
-on a busy key (research-only, no fix attempted).
+- **KYOTI V1.0** (`tools/build_kyoti.py`, WIP) — every final feature in one image. Flashed
+  and under test on the MKI since 2026-09-29; the current build adds MUTE_MODES' register
+  fix and is not yet flashed. One DIRECT_JUMP_KYOTI crash in the combined image is still
+  unexplained. `NOTES.md` Sessions 114–117, `reference/MERGE.md`.
+- **MUTE_MODES** — its newest fix (`fresh_bind` no longer overwrites `%d3`) is
+  emulator-verified, not yet on hardware.
+- **DIRECT_JUMP_KYOTI** — not yet on hardware: MIDI tracks, and Program Change on fast
+  re-cues.
+- **REPITCH_REPEAT98_KYOTI** — not specifically tested: RTRG retrigs; a full DSP core of
+  RPSP tracks under heavy effects. DARK REVERB alongside the engine is emulator-verified.
+- **octabam port** — five modules in `octabam-modules/`. MUTE_MODES, SIDECHAIN_COMPRESSOR
+  and REPITCH_REPEAT98_KYOTI wait on schema answers from octabam's author (`TableGrow`
+  insertion, `defsyms` on `Linked`, DSP data claims, and how to extend a stock effect's
+  page). `NOTES.md` Session 113.

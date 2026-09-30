@@ -1,6 +1,6 @@
 # DIRECT JUMP V7 — design (Session 107/108, 2026-09-27)
 
-> **STATUS: FINAL — V7.0.1 hardware-confirmed 2026-09-28** (`build_directjump_v7.py`,
+> **STATUS: FINAL — V7.0.1 hardware-confirmed 2026-09-28** (`build_direct_jump_kyoti.py`,
 > `140C_KDJ7`, mainos `fac16421de73c3aa`, cave `0x400d7000`): timing and the Part change on a
 > jump confirmed on the unit; Program Change on re-cues and MIDI tracks emulator-verified only. V7.0 (`bd39dfc6`) was
 > hardware-confirmed for timing; the ship check then found it never changed the Part on a jump

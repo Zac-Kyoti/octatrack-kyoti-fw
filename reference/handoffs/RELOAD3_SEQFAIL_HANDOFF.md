@@ -175,7 +175,7 @@ needing to catch the moment.
 
 ## 9. Session 98 (2026-09-25) — the §4 experiment is BUILT. Flash it and read the hex.
 
-**What was built.** `tools/build_reload3.py --diag` assembles the *same* `patch_reload3.s` with
+**What was built.** `tools/build_reload_from_project.py --diag` assembles the *same* `patch_reload3.s` with
 `--defsym RL_DIAG=1`. Every success message (1/2/3, and the LOST override 4) is replaced by a
 four-line block toast held for 6 s (`DIAG_DUR 0x168`), drawn through `rl3_toast2` at the
 same point in `rl_done` where the message used to be drawn. **Nothing under test moves**:
@@ -271,7 +271,7 @@ already live and demonstrably survive). Not built yet.
 
 `G_KIND/G_PAT/G_TRK/G_TMIDI` are now four bytes of `patch_reload3.s`'s own data (after
 `rl_kind`), found by symbol (`cave_syms`), never by address. `G_MENU/G_SEL` (picker-era,
-unused) are gone. `build_reload3.py` asserts the blob references nothing in
+unused) are gone. `build_reload_from_project.py` asserts the blob references nothing in
 `0x80006a40..0x80006abf`; that guard reports 11 references when run on the pre-fix source,
 so it can fail. Nothing else changed: same detours, same copy, same verify, same toasts.
 

@@ -6,9 +6,9 @@ KYOTI V1.0 -- every FINAL feature in one image.
 
     MUTE MODE (OT / OTFX / OTFX-T / DT-T)      QUANTIZE LIVE REC toggle
     SIDE-CHAIN COMPRESSOR (cross-core)         TRIGLESS-LOCK AUTO-REMOVE
-    RELOAD FROM PROJECT (RELOAD3 chords)       DIRECT JUMP V7.0.1
-    REPITCH KYOTI (rev 16)                     the bug fixes: PLAYSFREEFIX,
-                                               PATTERN LED, PARTREAPPLY
+    RELOAD FROM PROJECT (RELOAD_FROM_PROJECT chords)       DIRECT JUMP V7.0.1
+    REPITCH KYOTI (rev 16)                     the bug fixes: MIDI_PLAYS_FREE_FIX,
+                                               PATTERN LED, PART_CHANGE_CARRYOVER_FIX
 
 Boot splash and SYSTEM STATUS -> OS VERSION read VERSTR below.
 
@@ -47,9 +47,9 @@ Merge blockers (reference/MERGE.md), resolved here:
   B1  MUTE MODE widens the ANDY restore over 0x800000d8.  DIRECT JUMP is built
       with DJ_MODE_IN_CAVE: its on/off word lives in its cave, re-loaded from
       flash every boot -> OFF at power-on by construction.  Asserted.
-  B2  DIRECT JUMP writes the [PTN]-overlay YES record; RELOAD3's standalone
+  B2  DIRECT JUMP writes the [PTN]-overlay YES record; RELOAD_FROM_PROJECT's standalone
       builder asserts that record stock.  Asserted here instead: every record
-      RELOAD3 depends on is stock, and DIRECT JUMP's write is the only overlay
+      RELOAD_FROM_PROJECT depends on is stock, and DIRECT JUMP's write is the only overlay
       change.
 
 Verification, every run: every builder reports success in its sandbox; every
@@ -67,12 +67,11 @@ Outputs (out/KYOTI/): OCTATRACK_OS1.40C_KYOTI_V1.0.syx (MIDI), OCTATRACK_KYOTI_V
 import hashlib, json, os, pathlib, shutil, struct, subprocess, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from kyoti_status import status, PREVIEW
+from kyoti_status import gate
 
-status(PREVIEW, "KYOTI V1.0 (combined image)", """
-Every FINAL feature, composed from their own builders.  Each feature is
-hardware-confirmed on its own; this combined image is NOT yet flashed, and it
-places code in zones this project has not used before (see the docstring).
+gate(__file__, note="""
+Every promoted feature in one image, composed from their own builders.  Flashed and
+under test on the author's MKI; one DIRECT JUMP crash is still unexplained.
 """)
 
 VERSTR = "KYOTI V1.0"
@@ -114,7 +113,7 @@ RECLAIM_WHOLE = {"SPRING": (0x400d5726, 0x400d58b8), "PERS1": (0x400b2a34, 0x400
 #   engine / ISR / tick-path code: CAVE and SAFE only.
 PLAN = {
     # Session 116: MUTE MODE's SIDE-CHAIN KEY exemption grew patch_softmute by 124 B, which
-    # the classic cave does not have. PLAYSFREEFIX moved into RELD beside patch_sidechain,
+    # the classic cave does not have. MIDI_PLAYS_FREE_FIX moved into RELD beside patch_sidechain,
     # and the PERSONALIZE labels array into CAVE2. MUTE MODE is built on TRUE stock, where
     # PERS1/PERS2 still hold the stock arrays it relocates, so no MUTE MODE piece can go
     # there: REPITCH's glyph data 3 (68 B) moved from CAVE2 into PERS1 to make the room, and
@@ -139,47 +138,47 @@ PLAN = {
 #   base "stock": built on true stock (MUTE MODE reads the stock PERSONALIZE arrays it
 #   relocates); "prep": built on the prepared base (reclaim zones zeroed).
 FEATURES = {
-    "PLAYSFREEFIX": ("build_trigscale_only.py", "mainos_trigscale_only.bin", "prep",
+    "MIDI_PLAYS_FREE_FIX": ("build_midi_plays_free_fix.py", "mainos_midi_plays_free_fix.bin", "prep",
                      {"patch_trigscale": "patch_trigscale.bin"}),
-    "PATTERNLED": ("build_pattern_led.py", "mainos_patternled.bin", "prep",
+    "EMPTY_PATTERN_LED_FIX": ("build_empty_pattern_led_fix.py", "mainos_empty_pattern_led_fix.bin", "prep",
                    {"patch_pattern_led": "patch_pattern_led.bin"}),
-    "PARTREAPPLY": ("build_partreapply.py", "mainos_partreapply.bin", "prep",
+    "PART_CHANGE_CARRYOVER_FIX": ("build_part_change_carryover_fix.py", "mainos_part_change_carryover_fix.bin", "prep",
                     {"patch_partreapply": "patch_partreapply.bin"}),
-    "TRIGLOCK": ("build_triglock.py", "mainos_triglock.bin", "prep",
+    "ERASE_EMPTY_TRIGLESS_LOCKS": ("build_erase_empty_trigless_locks.py", "mainos_erase_empty_trigless_locks.bin", "prep",
                  {"patch_triglock": "patch_triglock.bin"}),
-    "QLREC": ("build_qlrec.py", "mainos_qlrec.bin", "prep", {"patch_qlrec": "patch_qlrec.bin"}),
-    "MUTEMODE_DT": ("build_mutemode_dt.py", "mainos_mutemode_dt.bin", "stock",
+    "QUANTIZE_LIVE_REC_TOGGLE": ("build_quantize_live_rec_toggle.py", "mainos_quantize_live_rec_toggle.bin", "prep", {"patch_qlrec": "patch_qlrec.bin"}),
+    "MUTE_MODES": ("build_mute_modes.py", "mainos_mute_modes.bin", "stock",
                     {"patch_softmute": "patch_softmute_dt.bin",
                      "patch_mutemode": "patch_mutemode_dt.bin",
                      "personalize_labels": 68, "personalize_getters": 68,
                      "personalize_setters": 68}),
-    "SIDECHAIN3_CROSS": ("build_sidechain3.py", "mainos_sidechain3_cross.bin", "prep",
+    "SIDECHAIN_COMPRESSOR": ("build_sidechain_compressor.py", "mainos_sidechain_compressor.bin", "prep",
                          {"patch_sidechain": "patch_sidechain.bin"}),
-    "RELOAD3": ("build_reload3.py", "mainos_reload3.bin", "prep",
+    "RELOAD_FROM_PROJECT": ("build_reload_from_project.py", "mainos_reload_from_project.bin", "prep",
                 {"patch_reload3": "patch_reload3.bin"}),
-    "DIRECTJUMP_V7": ("build_directjump_v7.py", "mainos_directjump_v7.bin", "prep",
+    "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "mainos_direct_jump_kyoti.bin", "prep",
                       {"patch_directjump_v7": "patch_directjump_v7.bin"}),
-    "REPITCH_KYOTI": ("build_repitch_kyoti.py", "mainos_repitch_kyoti.bin", "prep",
+    "REPITCH_REPEAT98_KYOTI": ("build_repitch_repeat98_kyoti.py", "mainos_repitch_repeat98_kyoti.bin", "prep",
                       dict({"rpk_logic": "patch_repitch_kyoti.bin", "rpk_widget7": 0x174,
                             "rpk_glyph_tab": 28},
                            **{f"rpk_glyph_rec{k}": 20 for k in range(7)},
                            **{f"rpk_glyph_data{k}": 68 for k in range(7)})),
 }
 # builder flags that are not addresses
-FLAGS = {"DIRECTJUMP_V7": {"dj_mode_in_cave": True}}
+FLAGS = {"DIRECT_JUMP_KYOTI": {"dj_mode_in_cave": True}}
 
 
 def flags_for(feat):
     """FLAGS, plus the ones that depend on what else is in the image.  MUTE MODE's SIDE-CHAIN
     KEY exemption (Session 116: a muted KEY track keeps feeding the key and MON, whatever
-    MUTE MODE says) only exists when SIDE-CHAIN does -- a --without SIDECHAIN3_CROSS image
+    MUTE MODE says) only exists when SIDE-CHAIN does -- a --without SIDECHAIN_COMPRESSOR image
     drops it too."""
     f = dict(FLAGS.get(feat, {}))
-    if feat == "MUTEMODE_DT" and "SIDECHAIN3_CROSS" in FEATURES:
+    if feat == "MUTE_MODES" and "SIDECHAIN_COMPRESSOR" in FEATURES:
         f["mutemode_sc_key"] = True
     return f
 # bytes two features may both write, with identical values (SPRING REVERB's removal)
-SHARED_OK = {frozenset(("SIDECHAIN3_CROSS", "REPITCH_KYOTI"))}
+SHARED_OK = {frozenset(("SIDECHAIN_COMPRESSOR", "REPITCH_REPEAT98_KYOTI"))}
 
 PROBLEMS = []
 
@@ -266,7 +265,7 @@ def is_branch_insn(src):
 
 
 def assert_no_branch_into(img, site, n, window=0x600):
-    """Refuse a patched span that a branch lands strictly inside (build_triglock.py's guard,
+    """Refuse a patched span that a branch lands strictly inside (build_erase_empty_trigless_locks.py's guard,
     with each hit confirmed as a real instruction -- see is_branch_insn)."""
     lo, hi = o(site) - window, o(site) + window
     a = max(lo, 0)
@@ -312,13 +311,13 @@ def apply_without(argv):
         sys.exit(f"--without: unknown feature(s) {bad}; choose from {sorted(FEATURES)}")
     for d in drop:
         del FEATURES[d]
-    if not ({"SIDECHAIN3_CROSS", "REPITCH_KYOTI"} & set(FEATURES)):
+    if not ({"SIDECHAIN_COMPRESSOR", "REPITCH_REPEAT98_KYOTI"} & set(FEATURES)):
         del RECLAIM_WHOLE["SPRING"]          # nothing removes SPRING any more: not dead
-    if "MUTEMODE_DT" not in FEATURES:
+    if "MUTE_MODES" not in FEATURES:
         del RECLAIM_WHOLE["PERS1"], RECLAIM_WHOLE["PERS2"]
-    short = {"MUTEMODE_DT": "MM", "QLREC": "QL", "SIDECHAIN3_CROSS": "SC", "TRIGLOCK": "TL",
-             "RELOAD3": "RL", "DIRECTJUMP_V7": "DJ", "REPITCH_KYOTI": "RPK",
-             "PLAYSFREEFIX": "PF", "PATTERNLED": "PL", "PARTREAPPLY": "PR"}
+    short = {"MUTE_MODES": "MM", "QUANTIZE_LIVE_REC_TOGGLE": "QL", "SIDECHAIN_COMPRESSOR": "SC", "ERASE_EMPTY_TRIGLESS_LOCKS": "TL",
+             "RELOAD_FROM_PROJECT": "RL", "DIRECT_JUMP_KYOTI": "DJ", "REPITCH_REPEAT98_KYOTI": "RPK",
+             "MIDI_PLAYS_FREE_FIX": "PF", "EMPTY_PATTERN_LED_FIX": "PL", "PART_CHANGE_CARRYOVER_FIX": "PR"}
     VERSTR = ("KV1-NO-" + "".join(short[d] for d in drop))[:10]
     TAG = "KYOTI_V1.0_WITHOUT_" + "_".join(drop)
     OUTDIR = ROOT / "out/KYOTI_BISECT" / TAG
@@ -399,7 +398,7 @@ def main():
     for feat, (builder, _img, base, keys) in FEATURES.items():
         p = {k: place[k] for k in keys if not k.startswith("rpk_glyph_rec")
              and not k.startswith("rpk_glyph_data")}
-        if feat == "REPITCH_KYOTI":
+        if feat == "REPITCH_REPEAT98_KYOTI":
             p["rpk_glyph_recs"] = [place[f"rpk_glyph_rec{k}"] for k in range(7)]
             p["rpk_glyph_data"] = [place[f"rpk_glyph_data{k}"] for k in range(7)]
         p.update(flags_for(feat))
@@ -497,7 +496,7 @@ def main():
         flag(f"branch 0x{src:08x} -> 0x{tgt:08x} lands inside the patched span 0x{s:08x}+{n}")
     print(f"  {len(code_runs)} patched code spans: no branch lands inside any" if not bad else "")
 
-    if "DIRECTJUMP_V7" in FEATURES:
+    if "DIRECT_JUMP_KYOTI" in FEATURES:
         # B1: DJ_MODE in the DJ cave; MUTE MODE's widened restore therefore cannot reach it
         dj = syms.get("patch_directjump_v7", {})
         djm, djlo, djhi = dj.get("DJ_MODE"), place["patch_directjump_v7"], \
@@ -532,7 +531,7 @@ def main():
         if not (djlo <= press < djhi):
             flag(f"B2: [PTN]-overlay YES press field 0x{press:08x} is not in DIRECT JUMP's cave")
         else:
-            print(f"  B2: [PTN]+[YES] -> 0x{press:08x} (DIRECT JUMP); RELOAD3's records, handlers and "
+            print(f"  B2: [PTN]+[YES] -> 0x{press:08x} (DIRECT JUMP); RELOAD_FROM_PROJECT's records, handlers and "
                   f"8 TRACK slots stock")
 
     # reclaim: nothing but our own pieces may point into a reclaimed zone
