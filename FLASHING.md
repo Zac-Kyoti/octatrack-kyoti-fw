@@ -137,7 +137,8 @@ quick check for each:
 - **MIDI_PLAYS_FREE_FIX** — a PLAYS FREE MIDI track, trig quantize DIRECT, SCALE MODE PER
   TRACK, notes on steps 1 and 2: a manual trig keeps it running instead of stalling.
 - **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is a p-lock on a MIDI track:
-  its LED lights under `[PTN]`.
+  its LED lights under `[PTN]`. Hold `[BANK]` for a few seconds: the grid stays lit and
+  responsive, and releasing it is instant (the promoted build stalled here).
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
 

@@ -183,7 +183,12 @@ Three fixes to stock bugs. Each has its own build.
   its grid LED under `[PTN]`, instead of showing as an unused slot.\
   **Hardware:** confirmed. **Final build:**
   [`tools/build_empty_pattern_led_fix.py`](tools/build_empty_pattern_led_fix.py) →
-  `OCTATRACK_OS1.40C_EMPTY_PATTERN_LED_FIX`
+  `OCTATRACK_OS1.40C_EMPTY_PATTERN_LED_FIX`\
+  **Update (WIP, emulator-verified, not flashed):** the promoted version scanned every
+  empty pattern's lock arrays on every LED refresh, and the `[BANK]` grid checks all 256
+  patterns per refresh, so holding `[BANK]` starved the CPU (late toasts, a dark grid,
+  glitches if keys were pressed meanwhile). The `[BANK]` grid now uses stock's check; the
+  `[PTN]` grid keeps the fix at about a fifth of the old cost.
 - **PART_CHANGE_CARRYOVER_FIX** — after a pattern-triggered Part change, a track leaving
   PICKUP for FLEX no longer keeps playing the old Part's pickup loop, and a switch into a
   PICKUP track no longer marks the Part edited when nothing changed.\

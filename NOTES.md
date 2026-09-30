@@ -34740,3 +34740,78 @@ PART_CHANGE_CARRYOVER_FIX acts on Part changes (it calls the heavy apply 0x40009
 | KYOTI without PART_CHANGE_CARRYOVER_FIX | `KV1-NO-PR` | `d4822923d0ba677596657286e15dbd2322213a507c9294791e6cce64785ecc71` |
 Also noted: the repo reorganisation (`b25b5c8`, another session) left `build_kyoti.py` working — it rebuilds
 `597a6db9…` exactly under `KYOTI_ALLOW_WIP=1` (not on the FINAL list).
+
+## Session 119 (2026-09-30, `kyoti-v1`) — the RELOAD [BANK]+[TRACK] stall is EMPTY_PATTERN_LED_FIX starving the CPU while [BANK] is held; fixed (emulator-verified, not flashed)
+
+**User, hardware bisection:** standalone RELOAD_FROM_PROJECT fine; `KV1-NO-RPK` and `KV1-NO-PR` both stall →
+neither REPITCH nor PART_CHANGE_CARRYOVER_FIX. [PTN]+[TRACK] fine on both. [BANK]+[TRACK]: ~1 s to the
+toast on a quick chord, and the wait after release is ~2× how long the chord was held; LEDs and playback
+glitch if other keys are pressed meanwhile; any MUTE MODE. The Part had been saved. Separately, an RPCH
+track (not the one reloaded) stopped sounding — trigs shown firing, nothing short of a project reload
+revived it — and **not on the first or second reload, later on**.
+
+**Reproduced in ot_emu (M).** New step-list verbs `key CODE down|up` and `mainlevel N`
+(`tools/refs/local-patches/octabam-ot-emu-steps-key.patch`, built privately in the scratchpad so no shared
+binary was replaced). Fixture `kv1_mm_card.img` / KYOTI / kyoti_testMM; [BANK] = 0x2f, TRACK n = 0x10+n-1.
+Toast after the TRACK press: standalone RELOAD < 100 frames; KYOTI 597a6db9 ~1300 frames.
+
+**Cause (M, coverage diff).** Over a 0.6 s window, 0.97M of the chord's extra instructions are in
+`0x400d7bc0..0x400d7c3f` = `patch_pattern_led`. While [BANK] is held, the bank grid (`0x4007b00a`) calls
+`bank_has_content` 0x4000fd78 → FUN_4009a464 for all 16 patterns of every bank on every LED refresh
+(~130 bank checks/s). The old cave scanned the full 32 KB of lock arrays for every empty pattern, at 7
+instructions per long (~57k per pattern):
+
+| 0.6 s window, KYOTI | calls | cave instructions | all ColdFire instructions |
+|---|---|---|---|
+| idle | 0 | 0 | 44.5 M |
+| [PTN] held (old) | 75 | 4.3 M | 49.6 M |
+| [BANK] held (old) | 1244 | **71.4 M** | **116.8 M** |
+| [PTN] held (new) | 75 | 0.93 M | 46.2 M |
+| [BANK] held (new) | 1441 | 8.6 k | 45.6 M |
+
+The standalone EMPTY_PATTERN_LED_FIX and every Bugbuild carry the same cost whenever [BANK] is held;
+RELOAD's chord only made it visible (the Part reload + the job + the toast all queue behind it).
+
+**Fix (`patch_pattern_led.s`, 142 → 158 B, position independent):** a call returning to 0x4000fd8c
+(i.e. from bank_has_content) takes stock's predicate only; every other caller runs stock's trig-mask test
+FIRST and scans the lock arrays only if that says empty; the scan ANDs 8 longs per step (12 instructions
+per 32 B). Trade-off, stated in the module README: under [BANK], a bank whose only content is p-locks reads
+empty, as in stock; the [PTN] grid and the chain view keep the fix. Callers checked: 0x4009a464 is
+referenced only from 0x4000fd7e (bank_has_content), 0x400354f6, 0x400355a2, 0x4007b1f4; bank_has_content
+from 0x4004a080, 0x4007b00a.
+
+**Verified (emulator):** all 256 (bank, pattern) results identical to the old cave; a single p-lock
+planted in an empty pattern (audio first byte, audio T8 last byte, MIDI first byte, MIDI T8 last byte)
+found by both, removed → empty; bank_has_content now returns stock's answer for such a bank (the one
+intended change). Held chord: toast within 100 frames (old: 1300). Octabam manifest loads; pinned bytes =
+the source assembled at 0x400d6694. KYOTI differs from 597a6db9 only in the cave (151 B in
+0x400d7b98..0x400d7c35).
+
+**The silent RPCH track — not reproduced; what the emulator shows (M):** in the REPITCH fixture (A02: only
+T2, one trig on step 1), a [BANK]+[TRACK 1] reload silenced T2 — but identically with TSTR NORM and on
+standalone RELOAD. Bisected to the fixture's SAVED Part: byte +0x1 (T2's FX1 type, 4 → 5; bytes 0–7 are
+FX1 types, 8–15 FX2 types). With saved == working, T2 keeps sounding through the reload in RPCH/NORM/RPSP,
+and through 8 reloads in a row on both images. So that is RELOAD restoring a different saved FX, not a
+bug. Adding key presses during each stall (TRACK 3, TRACK 4, a quick PLAY-PLAY) on the OLD image gave
+~2 s audio gaps: the held-up presses were processed seconds late (a pause/resume tap became a 2 s pause) —
+the user's "loss of timing". The new image: no gaps. Permanent silence still unexplained; candidates: a
+side effect of the overload (lost/late messages) or the saved Part restoring settings that silence that
+track. Retest on the new build.
+
+**Builds (WIP, not flashed):**
+| image | sha256 |
+|---|---|
+| `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.0.syx` (OS VERSION `KYOTI V1.0`) | `8a27335472bf5de657aff005018666e332c8c07ea1d4c9cf68d2a1ff15a5161f` |
+| `out/KYOTI/OCTATRACK_KYOTI_V1.0.bin` (CF) | `2523c41a816227dad16337ee8230a9dc112515633fe52198d58c0e7af88b33a6` |
+| `out/OCTATRACK_OS1.40C_EMPTY_PATTERN_LED_FIX.syx` | `cd912343bf5aa5d497ee3862f8a300be9f47556b6a1a3af16e624ddd2d4bd62e` |
+| `…MUTE_MODES_BATCH_BUGFIXES.syx` | `0cd754ea9b18b645c84d790de1e34be580708488d985019ed86d1c6139ddf85b` |
+| `…QUANTIZE_LIVE_REC_TOGGLE_BATCH_BUGFIXES.syx` | `dd3fc11f8c57e7b9c284b7d448fabd246fee33891d129ee7fadbc391929fe7ae` |
+| `…SIDECHAIN_COMPRESSOR_BATCH_BUGFIXES.syx` | `4a107bac38330f8ea5a302b7e3715e99d5ff80eaeeb044cd99fb5d00a4dbfdb1` |
+| `…ERASE_EMPTY_TRIGLESS_LOCKS_BATCH_BUGFIXES.syx` | `48ab8cff4abb45c667f8e79be79d0b6309796fcd316399a9797867141156cabf` |
+| `…RELOAD_FROM_PROJECT_BATCH_BUGFIXES.syx` | `9e180cbd110ae2076626863f8305f2074d01e8c0f641f2e898b7db53aa01c196` |
+| `…DIRECT_JUMP_KYOTI_BATCH_BUGFIXES.syx` | `540f13f58324f1f212ab09cd9031362fa54c080174a855abf2514283955c7674` |
+| `…REPITCH_REPEAT98_KYOTI_BATCH_BUGFIXES.syx` | `da0a40ce05decc61f82752812bf937fd30e907a871b0a77781f40d66d40880a6` |
+
+The flashed V1.0 is kept in `out/KYOTI_flashed_597a6db9/`. EMPTY_PATTERN_LED_FIX's FINAL pin
+(`kyoti_status.py`) is unchanged, so its builder and `build_bugbuilds.py` now run WIP until the user promotes
+the fix.

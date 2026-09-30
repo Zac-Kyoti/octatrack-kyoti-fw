@@ -34,7 +34,7 @@ Cave layout, where each fix is placed if that space is free in the base (it is i
 RELOAD_FROM_PROJECT, whose own cave starts at 0x400d6500, so the allocator moves the two fixes up):
 
     patch_partreapply   0x400d6500   402 B   (RELOAD_FROM_PROJECT: relocated above its own cave)
-    patch_pattern_led   0x400d6694   142 B   (RELOAD_FROM_PROJECT: likewise)
+    patch_pattern_led   0x400d6694   158 B   (RELOAD_FROM_PROJECT: likewise)
     (never below 0x400d6500 -- 0x400d64ca.. is a runtime record table, kb/caves.md 2b)
     patch_trigscale     0x400d7b00    62 B   (added to all seven; REPITCH_REPEAT98_KYOTI's cave
                                               ends at 0x400d7afc, right below it)

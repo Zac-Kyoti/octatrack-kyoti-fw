@@ -1,0 +1,41 @@
+# ot_emu step-list verbs 'key CODE down|up' (one panel key edge, the live FIFO's row encoding)
+# and 'mainlevel N' (SET MAIN LEVEL outside --sequencer). Applies on top of octabam-ot-emu-steps.patch.
+# Session 119 (kyoti-v1): used to reproduce and measure the RELOAD [BANK]+[TRACK] stall.
+#   git -C refs/octabam apply ../../tools/refs/local-patches/octabam-ot-emu-steps-key.patch
+--- a/tools/emu/ot_emu/main.cpp
++++ b/tools/emu/ot_emu/main.cpp
+@@ -748,6 +748,7 @@
+ 			if(!stepsPath.empty())
+ 			{
+ 				std::map<std::string, uint32_t> vars;
++				uint8_t stepRows[8] = {};
+ 				const auto trim = [](std::string t)
+ 				{
+ 					while(!t.empty() && std::isspace(static_cast<unsigned char>(t.front()))) t.erase(t.begin());
+@@ -905,6 +906,26 @@
+ 						rtos.setFrame(on);
+ 						std::printf("step frame  : DSP frame clock %s\n", on ? "ON" : "off");
+ 					}
++					else if(verb == "key")
++					{
++						// key CODE down|up -- one panel key edge, the same row
++						// encoding the live FIFO uses (the whole row is resent).
++						std::istringstream is(rest);
++						std::string code, edge; is >> code >> edge;
++						const auto k = static_cast<uint32_t>(std::strtoul(code.c_str(), nullptr, 0)) & 0x3f;
++						const auto bit = static_cast<uint8_t>(1u << (k & 7));
++						auto& row = stepRows[k >> 3];
++						row = edge == "down" ? static_cast<uint8_t>(row | bit) : static_cast<uint8_t>(row & ~bit);
++						rtos.panelIn({static_cast<uint8_t>(0x20 | (k >> 3)), row});
++						std::printf("step key    : %#04x %s (panel irq %s)\n", k, edge.c_str(), (rtos.panelImr() & 2) ? "on" : "OFF");
++					}
++					else if(verb == "mainlevel")
++					{
++						// mainlevel N -- post SET MAIN LEVEL, as --sequencer's --main-level does
++						const auto lv = resolve(rest);
++						const auto g = rtos.setMainLevelLive(lv);
++						std::printf("step mainlvl: %u -> %s\n", lv, g ? "posted" : "NOT FILLED");
++					}
+ 					else if(verb == "iclock")
+ 						std::printf("step iclock : %#04x -> clock receive cleared\n", rtos.internalClock());
+ 					else if(verb == "triglog")

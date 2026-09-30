@@ -16,7 +16,7 @@ three or none, and a site conflict on any one of them keeps all three out.)
   BUG 2 -- EMPTY-PATTERN LED (patch_pattern_led.s, `EMPTY_PATTERN_LED_FIX`)
     A pattern whose only content is parameter locks -- on a MIDI track, or trigless
     locks on an audio track, with no trig anywhere -- showed as an unused slot, its
-    grid LED unlit under [PTN]. 142 bytes, one 6-byte detour.
+    grid LED unlit under [PTN]. 158 bytes, one 6-byte detour.
 
   BUG 3 -- PART-CHANGE CARRYOVER (patch_partreapply.s, `PART_CHANGE_CARRYOVER_FIX`)
     After a pattern-triggered Part change, stale per-track state from the old Part
@@ -94,14 +94,15 @@ def ts_emit(addr: int):
 PL_HOOK = 0x4009a464
 PL_HOOK_STOCK = bytes.fromhex("2f02202f0008")    # move.l %d2,-(%sp); move.l 8(%sp),%d0
 PL_PINNED = bytes.fromhex(
-    "2f02202f0008243c00008ed84c020800222f000c243c0009b3404c021800d081"
-    "220020010680400e22392040740822482019528066000052200990880c800000"
-    "08006500ffec41e8091a53826600ffe020010680400e6ae02040740822482019"
-    "528066000024200990880c80000008006500ffec41e808b053826600ffe0202f"
-    "00084ef94009a46a241f70014e75"
+    "20170c804000fd8c670000882f2f00082f2f00086100007c508f4a80664c2f02"
+    "2f03262f000c243c00008ed84c023800222f0010243c0009b3404c021800d681"
+    "2043d1fc400e2239223c0000011a611c66102043d1fc400e6ae0223c000000b0"
+    "610a67027001261f241f4e75740843e808002018c098c098c098c098c098c098"
+    "c0984680660ab1c965e8d1c1538266de4e752f02202f00084ef94009a46a"
 )
-assert len(PL_PINNED) == 142
-assert PL_PINNED[:6] == PL_HOOK_STOCK            # the cave opens by replaying them
+assert len(PL_PINNED) == 158
+# the cave replays the displaced prologue in its stock-predicate trampoline (Session 119)
+assert PL_HOOK_STOCK in PL_PINNED
 
 
 def pl_emit(addr: int):

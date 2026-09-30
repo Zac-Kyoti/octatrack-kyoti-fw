@@ -7,7 +7,7 @@ instrument do what it already meant to do.
 | # | fix | size | sites |
 |---|---|---|---|
 | 1 | MIDI Plays-Free trig (`MIDI_PLAYS_FREE_FIX`) | 62 B | `0x4009b6f2` (18-byte splice) |
-| 2 | Empty-pattern LED (`EMPTY_PATTERN_LED_FIX`) | 142 B | `0x4009a464` |
+| 2 | Empty-pattern LED (`EMPTY_PATTERN_LED_FIX`) | 158 B | `0x4009a464` |
 | 3 | Part-change carryover (`PART_CHANGE_CARRYOVER_FIX`) | 402 B | `0x40062216` + `0x400621da` |
 
 ## Contents
@@ -37,7 +37,11 @@ meant no two of those features could ever share a remix.
 
 **Bug 2 — Empty-pattern LED.** A pattern whose only content is parameter locks — on a
 MIDI track, or trigless locks on an audio track, with no trig anywhere — showed as an
-unused slot, its grid LED unlit under `[PTN]`.
+unused slot, its grid LED unlit under `[PTN]`. The fix scans the lock arrays only after
+stock's own trig test says "empty", and not at all for the `[BANK]` grid, which asks about
+all 256 patterns on every LED refresh: scanning there starved the CPU while `[BANK]` was
+held (Session 119). Under `[BANK]` a bank whose only content is p-locks therefore still
+reads empty, exactly as in stock.
 
 **Bug 3 — Part-change carryover.** After a pattern-triggered Part change, stale
 per-track state from the old Part leaked into the new one. Reported on Elektronauts
