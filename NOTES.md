@@ -34894,3 +34894,26 @@ rewording) first, then every one of the 12 FINAL builders run WITHOUT the opt-in
 (WIP…)" fix-history paragraphs added in Session 119 are gone again; KYOTI V1.0 got a feature-style entry. Rule
 written into CLAUDE.md (README = intro, Builds, one entry per FINAL build, Before you flash — nothing else).
 BUILD_KYOTI.md lists `build_kyoti.py`; START_HERE §6 updated.
+
+## Session 119 continued (3) (2026-09-30, `main`) — octabam's remixer: its own always-current clone; the worktree retired
+
+* The `kyoti-v1` worktree and branch were removed after the push (fully merged); the main checkout was
+  fast-forwarded to `4d6bb26` and all 12 FINAL builders reproduced there without the opt-in. As-flashed
+  KYOTI copies moved to `out/KYOTI_flashed_{bf1fff8c,597a6db9,8a273354}/`.
+* **The remixer runs from `~/Documents/octabam`, not `refs/octabam`.** `refs/octabam` is the pinned research
+  harness (local emulator patches, `dsp_modmap.py` read by the REPITCH/SIDECHAIN builders) and was 1519
+  commits behind; moving it would change our emulator and possibly builds. `tools/octabam_remixer.sh`
+  fast-forwards the remixer clone to `origin/main` on every launch (refuses on local edits or divergence,
+  re-runs `make setup` only when `scripts/setup.sh` changed, `uv sync --frozen --extra emu` only when
+  pyproject/uv.lock changed — a plain `uv sync` with Homebrew's newer uv rewrote `uv.lock`, which would then
+  block every update), then `make remix`. Launch-time update instead of a launchd job: TCC blocks launchd
+  from `~/Documents` without Full Disk Access for `/bin/sh` (as with `com.kyoti.kb-refresh`). Set up and
+  verified at upstream `363861e3`: toolchain, `.venv`, recon (stock MAIN OS identical to ours),
+  `make bus REMIX=bottleservice` builds, the remixer draws headless.
+* Upstream removed WarpFold/Ripple/Rungs/Streamz/BodeShift and the `mutables` remix on 2026-09-27
+  (`8e934a5`, "none had reached hardware"); `bamsep26` became `bottleservice`. Upstream also now carries
+  Tim Hastie's `direct-jump` (CHAIN AFTER = DIRECT, hook `0x400a06d6`): `ledger.check` passes it with
+  DIRECT_JUMP_KYOTI (no shared address), but both change when a cued pattern lands — untested together;
+  raised in the (uncommitted) note to Sam, §7.
+* `refs/octabam` itself got the remixer's Python env too (`uv` via Homebrew; `.venv/lib/unicorn-emac`
+  preserved byte-identical) — harmless, but `~/Documents/octabam` is the one to use.
