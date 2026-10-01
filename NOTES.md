@@ -34930,3 +34930,36 @@ BUILD_KYOTI.md lists `build_kyoti.py`; START_HERE §6 updated.
   untested behaviours (MIDI tracks, PC on fast re-cues, START SILENT, trig-condition reset — user: not tried).
 * **User, hardware: a QUANTIZE LIVE REC setting changed with the `[REC]`+`[PLAY]` gesture survives a power
   cycle.** Module docs updated.
+
+## Session 120 (2026-10-01, `octabam-port`) — octabam pre-flight after Sam's reply: real octabam builds, the defsym trap, MUTE_MODES ported
+
+Sam's reply to the pre-flight note (`~/Documents/octabam-note-to-sam.md`) promises schema changes A–F (cross-module
+plain-poke check, keep-stock claim, `Linked.defsyms`, `TableGrow.insert_at`, DSP data-range claims,
+`Module.conflicts`). None had landed (upstream still `363861e3`).
+
+* **The defsym trap.** octabam's `CavePatch.defsyms` (and, as Sam describes it, the coming `Linked.defsyms`) reach
+  the LINKER — `build_bus._link` passes them as `ld --defsym`. `.ifdef`/`.ifndef` are decided by the ASSEMBLER, so a
+  defsym can never select a source variant. Our earlier module checks (including Session 119 (4)'s audit) passed
+  defsyms to `as`, so they could not see it. **Measured with real octabam builds** (a scratch copy of
+  `~/Documents/octabam` at `363861e3`, module shims symlinked to this worktree, `make bus` per test remix):
+  RELOAD_FROM_PROJECT was refused (1880 B assembled vs 2104 B pinned: `RL_DONE` never reached `as`). That is what
+  the five-module note shipped to Sam. Fixed by making each gated symbol the source's DEFAULT: `RL_DONE`
+  (`RL_NO_DONE` opts out), `DJ_MODE_IN_CAVE` (`DJ_MODE_IN_RAM=1` opts out; only `build_direct_jump_kyoti.py`
+  passes it), `DT_MODE`. All FINAL builders still seal.
+* **DIRECT_JUMP_KYOTI** builds with DJ_MODE in its cave: re-pinned (same 1980 B, 18 self-refs), equal to the KYOTI
+  V1.0 image's DJ cave rebased; the four power-on guard pokes dropped.
+* **MUTE_MODES ported** (`octabam-modules/mute-modes/`; sources moved from `tools/`): two Linked units with
+  reference oracles, six jmp detours, three TableGrow, four pokes. `TableGrow` only appends, and appending is WRONG
+  on an MKI (15 rows; LED BRIGHTNESS = row 15 is MKII-only): the tables are 15 stock rows + MUTE MODE + LED
+  BRIGHTNESS (absolute `mm_led_*` symbols), so MUTE MODE is the last row until `insert_at`. `SC_KEY` not yet in the
+  module: Sam's suggested `.set SC_KEY,0` would ENABLE it, since the source uses `.ifdef`.
+* **octabam builds pass:** RELOAD_FROM_PROJECT; DIRECT_JUMP_KYOTI; QLREC + ERASE + BATCH_BUGFIXES; MUTE_MODES;
+  MUTE_MODES + DIRECT_JUMP_KYOTI. All six together overflow the 4,412 B ROM cave (assertion at RELOAD_FROM_PROJECT),
+  as expected until something moves to DRAM. MUTE_MODES' octabam image changes exactly the standalone's stock
+  sites (plus octabam's own chooser-list refs).
+* **Public FINAL builds:** all twelve FINAL builders (18 images) re-run before and after, every sha256 unchanged.
+* For Sam: defsyms are link-time only (so C must be assembler-time for `RL_DONE`/`DT_MODE`/`SC_KEY`-style gates,
+  and a ROM `CavePatch.defsyms` does NOT work for them today); a DRAM unit's reference oracle is linked without
+  defsyms or `remix.inc`; a reference sha cannot cover a unit whose bytes depend on `remix.inc`; `TableGrow` append
+  is wrong for PERSONALIZE on an MKI; SIDECHAIN_COMPRESSOR's `Y:$7F0-$9FF` and `slot+$3E00` windows overlap
+  BusDelay/BusVerb private Y and shared-window halves.
