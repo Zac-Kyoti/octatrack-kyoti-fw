@@ -48,13 +48,9 @@ builds without it, so the claims stay until it switches.
 
 MEASURED. Hardware-confirmed on the author's MKI 2026-09-27/28: the clock-locked
 timing and the Part change. Emulator-verified only (ot_emu, real image bytes):
-Program Change on fast re-cues, START SILENT, trig-condition reset, MIDI tracks.
+Program Change on fast re-cues, MIDI tracks, START SILENT and the trig-condition
+reset (the last two identical to a stock pattern change in the emulator).
 Standalone image and version string: tools/build_direct_jump_kyoti.py -> 140C_KDJ7.
-
-MIDI_PLAYS_FREE_FIX is deliberately NOT part of this module. The standalone builder
-folds the manual-trig fix (patch_trigscale) into its own image, but as a module
-that fix is its own contribution -- five KYOTI feature builders each carry a copy
-of it and all write the same site 0x4009b6f2, which the ledger would refuse.
 """
 
 import os

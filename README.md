@@ -88,8 +88,9 @@ on a stock pattern change, and the last MIDI Program Change sent always names th
 pattern that plays. The arranger and chains are untouched; with DIRECT JUMP off, pattern
 changes are stock.
 
-**Hardware:** confirmed. Not yet tested on hardware: MIDI tracks, and Program Change on
-fast re-cues.\
+**Hardware:** confirmed: the clock-locked timing and the Part change. Not yet tested on
+hardware: MIDI tracks, Program Change on fast re-cues, START SILENT, and the trig-condition
+reset.\
 **Final build:** [`tools/build_direct_jump_kyoti.py`](tools/build_direct_jump_kyoti.py) →
 `OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI`
 
