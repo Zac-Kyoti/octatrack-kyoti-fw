@@ -159,6 +159,14 @@ built and waiting.
   user asks to keep available: DIRECT JUMP V6.4 (`tools/build_direct_jump_v6_4.py`), WIP
   on purpose and never to be promoted. A new builder needs no tier
   declaration — it is WIP until promoted. Use a short-lived topic branch for risky work.
+- **README.md is a feature catalogue, kept short (the user's rule, 2026-09-30).** It holds
+  the intro, "Builds" (bring your own OS, the WIP gate), one entry per FINAL build — what it
+  does for the player, a **Hardware:** status line, a **Final build:** link — and "Before you
+  flash". Nothing else: no bug histories or changelogs, no "Update"/WIP notes, no mechanism,
+  addresses, hashes or session references, no WIP features. A fix to a final feature does
+  not get README text; change the entry only if what the feature does for the player
+  changes. History goes in `NOTES.md`, hardware checks in `FLASHING.md` §4, build commands
+  in `BUILD_KYOTI.md`, the frontier in `START_HERE.md` §6.
 - **Feature names** — use them in builders, output images, docs and octabam keys:
   MUTE_MODES, DIRECT_JUMP_KYOTI, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT,
   REPITCH_REPEAT98_KYOTI, QUANTIZE_LIVE_REC_TOGGLE, ERASE_EMPTY_TRIGLESS_LOCKS, and

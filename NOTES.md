@@ -34877,3 +34877,20 @@ Standalone REPITCH: plays, live edit swaps, neighbours untouched. KYOTI invarian
 Other six Bugbuilds unchanged. Flashed images kept: `out/KYOTI_flashed_597a6db9/`, `out/KYOTI_flashed_8a273354/`
 (mainos only, reconstructed). REPITCH_REPEAT98_KYOTI's FINAL pin unchanged -> its builder and the Bugbuilds run WIP
 (build_bugbuilds flags the base as unpromoted, exit 1, all seven written).
+
+## Session 119 continued (2) (2026-09-30, `kyoti-v1`) — KYOTI V1.0, the fixed standalones and the Bugbuilds promoted to FINAL
+
+**User, hardware: KYOTI V1.0 `576756fd…` flashed — the silent-track bug is fixed.** Promoted on their instruction:
+* `build_kyoti.py` -> FINAL `{mainos_kyoti_v1.0.bin: 8baf5ac0…}` (syx `576756fd…`, the flashed image). It now calls
+  `seal()` after writing its image, so a `--without` bisection image (another file name) is WIP by construction.
+* `build_repitch_repeat98_kyoti.py` -> `845aca5b…` (syx `1a9484b5…`, the RELOAD-safe REPITCH);
+  `build_empty_pattern_led_fix.py` -> `0e50306d…` (syx `cd912343…`, the [BANK]-grid fix).
+* `build_bugbuilds.py` -> all seven composites re-pinned (each carries the new pattern-LED fix; REPITCH's also the
+  REPITCH fix).
+Pins written from measured files, never typed. Rebased onto `origin/main` (`69b04ea`, comment-only DIRECT JUMP
+rewording) first, then every one of the 12 FINAL builders run WITHOUT the opt-in: all FINAL, every image matches.
+
+**README rule** (user: the README was just simplified; keep it that way, set a permanent rule): the two "Update
+(WIP…)" fix-history paragraphs added in Session 119 are gone again; KYOTI V1.0 got a feature-style entry. Rule
+written into CLAUDE.md (README = intro, Builds, one entry per FINAL build, Before you flash — nothing else).
+BUILD_KYOTI.md lists `build_kyoti.py`; START_HERE §6 updated.

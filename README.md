@@ -148,14 +148,7 @@ SIDECHAIN_COMPRESSOR. Starts from Jannik Aßfalg's Repitch module for octabam
 **Hardware:** confirmed. Not specifically tested: RTRG retrigs on a repitch track, and a
 full DSP core of RPSP tracks under heavy effects.\
 **Final build:** [`tools/build_repitch_repeat98_kyoti.py`](tools/build_repitch_repeat98_kyoti.py) →
-`OCTATRACK_OS1.40C_REPITCH_REPEAT98_KYOTI`\
-**Update (WIP, emulator-verified, not flashed):** the promoted version damaged the bank
-whenever it swapped PTCH/QUAN (a TSTR change): it wrote two one-byte "Part edited" flags
-four bytes wide, turning saved Part 1's track 2 FX1 from FILTER into SPATIALIZER (input 0,
-so the track goes silent after a Part reload) and marking Part 3 as saved. It also took a
-Part RELOAD for a TSTR change and swapped values that were already right. Both are fixed:
-the flags are written as bytes, and RELOAD PART is handled like a Part change. If you used
-the promoted build, SAVE PART on an affected Part rewrites its saved copy correctly.
+`OCTATRACK_OS1.40C_REPITCH_REPEAT98_KYOTI`
 
 ### QUANTIZE_LIVE_REC_TOGGLE
 
@@ -190,12 +183,7 @@ Three fixes to stock bugs. Each has its own build.
   its grid LED under `[PTN]`, instead of showing as an unused slot.\
   **Hardware:** confirmed. **Final build:**
   [`tools/build_empty_pattern_led_fix.py`](tools/build_empty_pattern_led_fix.py) →
-  `OCTATRACK_OS1.40C_EMPTY_PATTERN_LED_FIX`\
-  **Update (WIP, emulator-verified, not flashed):** the promoted version scanned every
-  empty pattern's lock arrays on every LED refresh, and the `[BANK]` grid checks all 256
-  patterns per refresh, so holding `[BANK]` starved the CPU (late toasts, a dark grid,
-  glitches if keys were pressed meanwhile). The `[BANK]` grid now uses stock's check; the
-  `[PTN]` grid keeps the fix at about a fifth of the old cost.
+  `OCTATRACK_OS1.40C_EMPTY_PATTERN_LED_FIX`
 - **PART_CHANGE_CARRYOVER_FIX** — after a pattern-triggered Part change, a track leaving
   PICKUP for FLEX no longer keeps playing the old Part's pickup loop, and a switch into a
   PICKUP track no longer marks the Part edited when nothing changed.\
@@ -213,6 +201,15 @@ with each other.
 flashed as such.\
 **Final build:** [`tools/build_bugbuilds.py`](tools/build_bugbuilds.py) →
 `out/Bugbuilds/OCTATRACK_OS1.40C_<FEATURE>_BATCH_BUGFIXES`
+
+### KYOTI V1.0
+
+Every feature above and all three BATCH_BUGFIXES in **one image**. The boot splash and
+SYSTEM STATUS → OS VERSION read `KYOTI V1.0`.
+
+**Hardware:** confirmed.\
+**Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) →
+`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.0`
 
 ---
 

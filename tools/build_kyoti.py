@@ -67,7 +67,7 @@ Outputs (out/KYOTI/): OCTATRACK_OS1.40C_KYOTI_V1.0.syx (MIDI), OCTATRACK_KYOTI_V
 import hashlib, json, os, pathlib, shutil, struct, subprocess, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from kyoti_status import gate
+from kyoti_status import gate, seal
 
 gate(__file__, note="""
 Every promoted feature in one image, composed from their own builders.  Flashed and
@@ -568,6 +568,7 @@ def main():
     # --- write + wrap -----------------------------------------------------------------------
     mainos = OUTDIR / f"mainos_{TAG.lower()}.bin"
     mainos.write_bytes(bytes(comp))
+    seal(__file__, mainos)       # FINAL pins mainos_kyoti_v1.0.bin; a bisection image is WIP
     cmap = {"verstr": VERSTR, "zones": {z: [hex(lo), hex(hi), cls] for z, (lo, hi, cls, _) in ZONES.items()},
             "pieces": {k: {"zone": zone_of[k], "at": hex(place[k]), "size": size[k]} for k in place},
             "symbols": {e: {s: hex(a) for s, a in sorted(t.items())} for e, t in syms.items()}}
