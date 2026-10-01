@@ -60,6 +60,15 @@
 | State lives IN THE CAVE (this blob is loaded into RAM with the OS), never in the
 | 0x80006a40..0x80006abf scratch block (Session 98: the unit overwrites it).
 
+| Where DJ_MODE lives. DEFAULT: in the cave (DJ_MODE_IN_CAVE) -- the KYOTI V1.0 image and
+| the octabam module, whose build cannot pass assembler symbols. tools/build_direct_jump_kyoti.py
+| (the standalone V7.0.1 image, promoted with the word at 0x800000d8) passes DJ_MODE_IN_RAM=1.
+    .ifndef DJ_MODE_IN_RAM
+    .ifndef DJ_MODE_IN_CAVE
+    .equ DJ_MODE_IN_CAVE, 1
+    .endif
+    .endif
+
     .ifndef DJ_MODE_IN_CAVE
     .equ DJ_MODE,   0x800000d8          | state word (0 = OFF/stock, 1 = ON); power-on 0
     .endif                              | DJ_MODE_IN_CAVE (the combined KYOTI image): see the

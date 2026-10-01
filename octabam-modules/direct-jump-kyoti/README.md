@@ -47,40 +47,21 @@ Three detours, six bytes each, plus one function pointer:
 | `0x40043418` | `dj_ptnrel` | `pea 0x400bf0f2` — `[PTN]` release, so the chooser stays shut |
 | `0x400bf0c0` | `dj_toggle` | the `[PTN]`-layer YES press slot, all-NULL in stock |
 
-**State:** one word, `DJ_MODE = 0x800000d8` (0 = OFF/stock, 1 = ON). DIRECT JUMP must
-come up **OFF at every power-on**, and that rests on two *stock* facts rather than on
-this module's code: the boot `ANDY` battery restore (`pea 0x64` at `0x4001f322`,
-`0x4001f3be`, `0x4001fb24`) covers `0x80000070..0x800000d3` and never reaches
-`0x800000d8`; and the boot re-image seeds `0x800000d8` from `0x401087cc`, which is 0.
+**State:** one word, `DJ_MODE` (0 = OFF/stock, 1 = ON), kept **inside the cave**
+(the source's default; only the standalone builder passes `DJ_MODE_IN_RAM=1` for the old
+`0x800000d8` word). DIRECT JUMP must come up **OFF at every power-on**: the
+cave is part of the OS image, re-loaded from flash at every boot, so the word starts at 0
+by construction and no battery restore can reach it.
 
-### ⚠️ Not safe with MUTE MODE yet — and the ledger will refuse it
+That is what lets it share an image with MUTE MODE, which widens the boot `ANDY` restore
+(`pea 0x64` → `pea 0x70` at `0x4001f322`, `0x4001f3be`, `0x4001fb24`) so its own word
+`0x800000dc` survives power-off. The widened span `0x80000070..0x800000df` sweeps
+`0x800000d8`, where `DJ_MODE` lived before this module switched, and where the
+standalone build still keeps it (`reference/MERGE.md`, blocker B1). The KYOTI V1.0
+combined image, flashed on the author's MKI, carries exactly this cave.
 
-MUTE MODE widens that restore to `pea 0x70` so its own word `0x800000dc` survives
-power-off — and the widened span `0x80000070..0x800000df` **sweeps `0x800000d8`**. With
-both in one image, `DJ_MODE` would be restored from a battery word nothing maintains,
-and **DIRECT JUMP could come up ON**. (`reference/MERGE.md`, blocker B1.)
-
-> **Correction.** An earlier revision of this README said the two modules "do not
-> collide on SRAM." That compared the two words — `d8` and `dc` differ — and missed that
-> MUTE MODE restores a *range*. It was wrong.
-
-So this module **claims** those four sites as assert-only pokes (each writes back
-exactly the stock bytes it expects). A remix pairing it with anything that rewrites them
-is refused at octabam's ledger rather than shipping a unit that can power on with DIRECT
-JUMP enabled. Measured against the real ledger: refused whether a MUTE MODE port declares
-its widening as `Module.pokes` or through `emit()`; DIRECT JUMP alone, and all five ported
-modules together, still pass.
-
-The claims live in `emit()`, not `Module.pokes`, on purpose: the ledger checks plain pokes
-against caves, hooks and `emit()` pokes, but not against another module's plain pokes.
-
-**The real fix** is the source option `DJ_MODE_IN_CAVE` (`--defsym DJ_MODE_IN_CAVE=1`),
-which moves the word into the cave — re-loaded from flash at every boot, so OFF by
-construction. The KYOTI V1.0 combined image is built with it. This module still builds
-without it, so the claims stay until it switches.
-
-**The cave floats.** It is not position-independent: 17 longwords hold absolute
-addresses of its own state block. `reference(addr)` in the manifest rebases
+**The cave floats.** It is not position-independent: 18 longwords hold absolute
+addresses of its own state block and `DJ_MODE`. `reference(addr)` in the manifest rebases
 exactly those, and was verified against real `m68k-elf-ld` output at `0x400d7300`
 and `0x400d6500` — byte-identical at both.
 
@@ -96,8 +77,8 @@ as on a stock pattern change in the emulator, but were not exercised on the unit
 Everything the emulators prove is control flow and image bytes, not how the unit
 sounds. Nothing here has been tested on an MKII.
 
-Reproduction: assembled with `m68k-elf-as -mcpu=5407 --defsym DJ_TOAST_DUR=0x44`,
-linked at `0x400d7000` → 1980 bytes, sha256 `34635ad57f25f733…`.
+Reproduction: assembled with `m68k-elf-as -mcpu=5407`, linked at `0x400d7000` with
+`ld --defsym DJ_TOAST_DUR=0x44` → 1980 bytes, sha256 `a2010a6b9c40c7c9…`.
 
 ## Recommended pairing: the bugfix bundle
 
