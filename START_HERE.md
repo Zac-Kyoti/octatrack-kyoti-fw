@@ -135,7 +135,7 @@ builder's FINAL entry and the old builder is deleted. There is no superseded tie
 
 | feature | builder | octabam module |
 |---|---|---|
-| MUTE_MODES | `build_mute_modes.py` | not yet ported |
+| MUTE_MODES | `build_mute_modes.py` | `octabam-modules/mute-modes` |
 | DIRECT_JUMP_KYOTI | `build_direct_jump_kyoti.py` | `octabam-modules/direct-jump-kyoti` |
 | SIDECHAIN_COMPRESSOR | `build_sidechain_compressor.py` | not yet ported |
 | RELOAD_FROM_PROJECT | `build_reload_from_project.py` | `octabam-modules/reload-from-project` |

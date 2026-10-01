@@ -82,6 +82,13 @@
 |
 | Assemble:  m68k-elf-as -mcpu=5407 [--defsym ALWAYS_ON=1] ; ld -Ttext=<at> ; objcopy -O binary
 
+| DT_MODE (the four-mode MUTE MODE) is what every build ships, so it is the default here
+| rather than only a --defsym: octabam's Linked units cannot pass symbols, and this way they
+| assemble the same bytes as tools/build_mute_modes.py.
+    .ifndef DT_MODE
+    .equ DT_MODE, 1
+    .endif
+
     .equ GATE,        0x800000dc     | MUTE MODE word (0 = OT/stock, 1 = OT+FX).  Ignored when ALWAYS_ON.
     .equ MUTE_STATE,  0x80000008     | bits 0..7 SOLO   bits 8..15 MUTE   bits 16..23 CUE
     .equ SOLO_BYTE,   0x8000000b     | MUTE_STATE's SOLO byte (bits 0..7), one per track --

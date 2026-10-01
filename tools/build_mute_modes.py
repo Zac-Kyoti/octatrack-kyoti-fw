@@ -215,7 +215,7 @@ def assemble(name, at, defsym):
     aso = ["m68k-elf-as", "-mcpu=5407"]
     for d in (defsym.split(",") if defsym else []):
         aso += ["--defsym", d]
-    aso += ["-o", f"out/{out}.o", f"tools/{name}.s"]
+    aso += ["-o", f"out/{out}.o", f"octabam-modules/mute-modes/{name}.s"]
     subprocess.run(aso, check=True, cwd=ROOT)
     subprocess.run(["m68k-elf-ld", f"-Ttext=0x{at:x}", "-o", f"out/{out}.elf", f"out/{out}.o"],
                    check=True, cwd=ROOT, capture_output=True)
