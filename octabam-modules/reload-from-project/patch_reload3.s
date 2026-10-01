@@ -128,6 +128,15 @@
 | The ORIGINAL 0x4005e4c8/0x4005e25c detours are UNCHANGED and still needed --
 | they're what answers the picker once the user has let go of [PTN], which is
 | the documented, no-timeout, common case.
+| RL_DONE (rl_done, below) is in every shipped build, so it is the default here: octabam's
+| CavePatch.defsyms reach the LINKER (ld --defsym), and `.ifdef` is decided by the
+| assembler. Define RL_NO_DONE to build without it.
+    .ifndef RL_NO_DONE
+    .ifndef RL_DONE
+    .equ RL_DONE, 1
+    .endif
+    .endif
+
     .equ PTN_LAYER_YES,     0x400bf0be   | [PTN]-held layer record, code 0x31 (YES);
                                         | press field @ +2. Stock: NULL.
     .equ PTN_LAYER_NO,      0x400bf0a4   | [PTN]-held layer record, code 0x32 (NO);

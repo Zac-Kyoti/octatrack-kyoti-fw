@@ -65,7 +65,7 @@ OFF = {
 }
 CAVE_LEN = 0x838
 
-# patch_reload3.s, m68k-elf-as -mcpu=5407 (--defsym RL_DONE=1), linked at
+# patch_reload3.s, m68k-elf-as -mcpu=5407 (RL_DONE is the source's default), linked at
 # 0x400d6500 -- the address the standalone, hardware-confirmed image uses.
 # 2104 bytes, sha256 bd02dd428559e27abea093612326aed0.
 PIN_BASE = 0x400d6500
@@ -190,7 +190,6 @@ MODULE = Module(
             hook_stock=b"",
             emit=emit,
             reference=reference,
-            defsyms=(("RL_DONE", 1),),
             cpu="5407",
             report_note=" (2 chords: [PTN]/[BANK] + [TRACK n]; 6 jmp detours, "
                         "two of them 8-byte spans; stock's own 0x14 worker)",
