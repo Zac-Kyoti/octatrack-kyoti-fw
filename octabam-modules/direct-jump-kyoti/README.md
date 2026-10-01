@@ -74,10 +74,10 @@ modules together, still pass.
 The claims live in `emit()`, not `Module.pokes`, on purpose: the ledger checks plain pokes
 against caves, hooks and `emit()` pokes, but not against another module's plain pokes.
 
-**The real fix** is the source option `DJ_MODE_IN_CAVE` (branch `kyoti-v1`, `4ed4720`),
+**The real fix** is the source option `DJ_MODE_IN_CAVE` (`--defsym DJ_MODE_IN_CAVE=1`),
 which moves the word into the cave — re-loaded from flash at every boot, so OFF by
-construction. Once that is on `main`, this module will be rebuilt with it and the claims
-can go.
+construction. The KYOTI V1.0 combined image is built with it. This module still builds
+without it, so the claims stay until it switches.
 
 **The cave floats.** It is not position-independent: 17 longwords hold absolute
 addresses of its own state block. `reference(addr)` in the manifest rebases
@@ -90,14 +90,14 @@ and `0x400d6500` — byte-identical at both.
 clock-locked timing, and the Part change on a jump.
 
 **Emulator only** (`ot_emu`, Unicorn on real image bytes): Program Change on fast
-re-cues, START SILENT, trig-condition reset, MIDI tracks.
+re-cues, MIDI tracks, and START SILENT and the trig-condition reset (both behave exactly
+as on a stock pattern change in the emulator, but were not exercised on the unit).
 
 Everything the emulators prove is control flow and image bytes, not how the unit
 sounds. Nothing here has been tested on an MKII.
 
 Reproduction: assembled with `m68k-elf-as -mcpu=5407 --defsym DJ_TOAST_DUR=0x44`,
-linked at `0x400d7000` → 1980 bytes, sha256 `34635ad57f25f733…`. The standalone
-image is `fac16421de73c3aa…`.
+linked at `0x400d7000` → 1980 bytes, sha256 `34635ad57f25f733…`.
 
 ## Recommended pairing: the bugfix bundle
 
@@ -120,12 +120,8 @@ Either can be selected without the other; the sites are disjoint.
 ## What is open
 
 - MKII is untested.
-- The four emulator-only behaviours above want hardware confirmation.
-- **MIDI_PLAYS_FREE_FIX is deliberately not part of this module.** The standalone
-  builder folds the manual-trig fix (`patch_trigscale`) into its own image, but
-  as a module that fix is its own contribution — five KYOTI feature builders each
-  carry a copy and all write the same site `0x4009b6f2`, which octabam's ledger
-  would refuse. It belongs to the bugfix bundle module.
+- Hardware confirmation of Program Change on fast re-cues, MIDI tracks, START SILENT
+  and the trig-condition reset.
 
 ## Design notes
 

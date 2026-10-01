@@ -41,9 +41,10 @@ So this module CLAIMS those four sites below, as assert-only pokes (expect ==
 write). Octabam's ledger checks every module's pokes against every other's, so a
 remix that pairs this module with anything rewriting them -- MUTE MODE's widening
 -- is REFUSED at the ledger instead of shipping a unit that can power on with
-DIRECT JUMP enabled. The real fix is the source option DJ_MODE_IN_CAVE (branch
-kyoti-v1, `4ed4720`), which moves the word into the cave -- re-loaded from flash
-at every boot, so OFF by construction -- after which these claims can go.
+DIRECT JUMP enabled. The real fix is the source option DJ_MODE_IN_CAVE (on main;
+the KYOTI V1.0 combined image uses it), which moves the word into the cave --
+re-loaded from flash at every boot, so OFF by construction. This module still
+builds without it, so the claims stay until it switches.
 
 MEASURED. Hardware-confirmed on the author's MKI 2026-09-27/28: the clock-locked
 timing and the Part change. Emulator-verified only (ot_emu, real image bytes):
