@@ -58,9 +58,9 @@ shared-RAM window and does not survive live audio on hardware.
 
 ## Measured
 
-Hardware-confirmed on the author's **MKI** (2026-09-25): the show-then-invert gesture
-works on this version, with the tick hook removed. (Keeping the setting across a power
-cycle is stock's own storage, which this module writes through.)
+Hardware-confirmed on the author's **MKI**: the show-then-invert gesture works on this
+version, with the tick hook removed (2026-09-25), and a setting changed with it survives
+a power cycle (2026-09-30).
 Nothing tested on an MKII.
 
 176 bytes, sha256 `52c26af67443e470…` linked at `0x400d7400`.

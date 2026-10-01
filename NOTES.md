@@ -34917,3 +34917,16 @@ BUILD_KYOTI.md lists `build_kyoti.py`; START_HERE §6 updated.
   raised in the (uncommitted) note to Sam, §7.
 * `refs/octabam` itself got the remixer's Python env too (`uv` via Homebrew; `.venv/lib/unicorn-emac`
   preserved byte-identical) — harmless, but `~/Documents/octabam` is the one to use.
+
+## Session 119 continued (4) (2026-09-30, `main`) — octabam module docs audited; QLREC persistence hardware-confirmed
+
+* All five `octabam-modules/` audited against the code: every cave reassembles to its manifest's pinned bytes
+  (two addresses each) and equals the promoted standalone image's; every quoted size, site, displaced span,
+  rebase count (4 / 17 / 29) and hash holds; cited files and builder safeguards exist; all five pass
+  `ledger.check` on both our pinned octabam and upstream `363861e3`. Prose fixed (`bf1f317`, `c57ebe0`):
+  MIDI_PLAYS_FREE_FIX asides gone from modules it does not concern; EMPTY_PATTERN_LED_FIX's current version
+  says HW confirmed the [BANK] stall gone, the emulator its [PTN] answers; DIRECT JUMP pairing names
+  DIRECT_JUMP_KYOTI (octabam now has Tim's `direct-jump`); README's DIRECT JUMP Hardware line lists all four
+  untested behaviours (MIDI tracks, PC on fast re-cues, START SILENT, trig-condition reset — user: not tried).
+* **User, hardware: a QUANTIZE LIVE REC setting changed with the `[REC]`+`[PLAY]` gesture survives a power
+  cycle.** Module docs updated.

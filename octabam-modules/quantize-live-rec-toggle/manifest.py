@@ -26,8 +26,9 @@ RAM window and does not survive live audio on hardware.
 
 The cave is position-independent, so it may land anywhere the allocator puts it.
 
-MEASURED: hardware-confirmed on the author's MKI (2026-09-25): the show-then-invert
-gesture works on this version, with the tick hook removed. The standalone image is tools/build_quantize_live_rec_toggle.py.
+MEASURED: hardware-confirmed on the author's MKI: the show-then-invert gesture works
+on this version, with the tick hook removed (2026-09-25), and a setting changed with it
+survives a power cycle (2026-09-30). The standalone image is tools/build_quantize_live_rec_toggle.py.
 """
 
 import os
