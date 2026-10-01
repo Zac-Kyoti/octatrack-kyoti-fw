@@ -30,18 +30,13 @@ disjoint union of the feature's and the fixes' own.
 and pattern scale *Per Track* stalled after its first step on a manual trig.
 Hardware-confirmed 2026-08-28.
 
-*Note on history:* until 2026-09-28, five KYOTI feature builders each folded a copy of
-this fix into their own standalone image. They no longer do. Every copy wrote this
-same site, and octabam's ledger refuses two modules on one site — which would have
-meant no two of those features could ever share a remix.
-
 **Bug 2 — Empty-pattern LED.** A pattern whose only content is parameter locks — on a
 MIDI track, or trigless locks on an audio track, with no trig anywhere — showed as an
 unused slot, its grid LED unlit under `[PTN]`. The fix scans the lock arrays only after
 stock's own trig test says "empty", and not at all for the `[BANK]` grid, which asks about
 all 256 patterns on every LED refresh: scanning there starved the CPU while `[BANK]` was
-held (Session 119). Under `[BANK]` a bank whose only content is p-locks therefore still
-reads empty, exactly as in stock.
+held. Under `[BANK]` a bank whose only content is p-locks therefore still reads empty,
+exactly as in stock.
 
 **Bug 3 — Part-change carryover.** After a pattern-triggered Part change, stale
 per-track state from the old Part leaked into the new one. Reported on Elektronauts
@@ -70,16 +65,17 @@ The fix detours the handler's tail, after its existing `FUN_400972fc` ×8 loop, 
 3. calls `FUN_40001f18` to re-seed the sample slot, which stock calls on the way
    *into* PICKUP and never on the way out.
 
-Step 3 is the actual fix for the reported case. Session 49 copied the kill bit and
-omitted the re-seed; Session 81 found it.
+Step 3 is the actual fix for the reported case: an earlier version set the kill bit
+but omitted the re-seed.
 
 Verified with `tools/emu_partswitch.py --repro`, watching `FUN_400972fc` and the
 voice/slot state across a real pattern-driven switch.
 
-## ⚠️ If your remix includes DIRECT JUMP, take this module with it
+## ⚠️ If your remix includes DIRECT_JUMP_KYOTI, take this module with it
 
-DIRECT JUMP changes the Part by posting stock's own `{0x14, part}` message, so it
-reaches the very handler bug 3 fixes — stock path, stock bug included.
+This is about this repo's DIRECT_JUMP_KYOTI module, not octabam's `direct-jump`. It
+changes the Part by posting stock's own `{0x14, part}` message, so it reaches the very
+handler bug 3 fixes — stock path, stock bug included.
 
 The two are **independent**, and were measured as such: with and without this module,
 DIRECT JUMP's Part-change trace, its Program Changes on fast re-cues and its whole
@@ -99,8 +95,12 @@ real `m68k-elf-ld` output at `0x400d7300` and `0x400d6d00`.
 
 ## Measured
 
-All three hardware-confirmed on the author's Octatrack **MKI**. Nothing tested on an
-MKII.
+Bugs 1 and 3 are hardware-confirmed on the author's Octatrack **MKI**. Bug 2: the
+original fix was hardware-confirmed; the current version (stock's test first, the
+`[BANK]` grid left to stock) is confirmed on hardware to end the `[BANK]`-held stall,
+and in the emulator gives the same answer as the original for all 256 patterns and
+finds a planted lock at the first and last byte of both lock arrays. Nothing tested
+on an MKII.
 
 ## Licence
 

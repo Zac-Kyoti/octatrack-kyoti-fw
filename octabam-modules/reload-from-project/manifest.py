@@ -33,9 +33,6 @@ rather than reimplementing it.
 MEASURED: hardware-confirmed on the author's MKI, including that the sequencer and
 the internal metronome keep their phase (RELOAD_NOW is not armed on any path).
 The standalone image is tools/build_reload_from_project.py.
-
-MIDI_PLAYS_FREE_FIX is not part of this module: it is its own contribution, and every
-feature builder that carried a copy wrote the same site 0x4009b6f2.
 """
 
 import os

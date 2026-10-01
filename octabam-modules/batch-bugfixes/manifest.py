@@ -8,15 +8,13 @@ three or none, and a site conflict on any one of them keeps all three out.)
   BUG 1 -- MIDI PLAYS-FREE TRIG (patch_trigscale.s, `MIDI_PLAYS_FREE_FIX`)
     A Plays-Free MIDI track with trig quantize DIRECT and pattern scale PER TRACK
     stalled after its first step on a manual trig. 62 bytes, one 18-byte splice.
-    Hardware-confirmed 2026-08-28. Until 2026-09-28 five KYOTI feature builders
-    each folded a copy of this into their own standalone image; they no longer do,
-    because every copy wrote this same site and the remix ledger refuses that --
-    which would have meant no two of those features could share a remix.
+    Hardware-confirmed 2026-08-28.
 
   BUG 2 -- EMPTY-PATTERN LED (patch_pattern_led.s, `EMPTY_PATTERN_LED_FIX`)
     A pattern whose only content is parameter locks -- on a MIDI track, or trigless
     locks on an audio track, with no trig anywhere -- showed as an unused slot, its
-    grid LED unlit under [PTN]. 158 bytes, one 6-byte detour.
+    grid LED unlit under [PTN]. 158 bytes, one 6-byte detour. The [BANK] grid (all
+    256 patterns per LED refresh) gets stock's test: scanning there starved the CPU.
 
   BUG 3 -- PART-CHANGE CARRYOVER (patch_partreapply.s, `PART_CHANGE_CARRYOVER_FIX`)
     After a pattern-triggered Part change, stale per-track state from the old Part
@@ -39,18 +37,20 @@ detours the handler's tail, after its existing FUN_400972fc x8 loop, and: republ
 all 8 tracks' recorder records in one 96-byte copy; sets the voice-kill bit for the
 PICKUP->notPICKUP transition (stock's own reverse arm already does this); and calls
 FUN_40001f18 to re-seed the sample slot, which stock calls on the way INTO PICKUP and
-never on the way out. Session 49 copied the kill bit and omitted that re-seed -- it
-is the actual fix for the reported case.
+never on the way out. An earlier version set the kill bit but omitted that re-seed --
+the re-seed is the actual fix for the reported case.
 
-⚠️ IF YOUR REMIX INCLUDES DIRECT JUMP, TAKE THIS MODULE WITH IT. DIRECT JUMP changes
-the Part by posting stock's own {0x14, part} message, so it reaches the same handler
+⚠️ IF YOUR REMIX INCLUDES DIRECT_JUMP_KYOTI (this repo's module, not octabam's
+`direct-jump`), TAKE THIS MODULE WITH IT. DIRECT_JUMP_KYOTI changes the Part by posting stock's own {0x14, part} message, so it reaches the same handler
 BUG 3 fixes -- stock path, stock bug included. The two are independent and were
 measured as such (Part-change trace, fast-re-cue Program Changes and the whole timing
 matrix identical with and without, including a run where every jump changes Part), so
 neither needs the other; but DIRECT JUMP gives you many more Part changes to meet the
 carryover with.
 
-MEASURED: all three hardware-confirmed on the author's MKI. Standalone images:
+MEASURED: bugs 1 and 3 hardware-confirmed on the author's MKI; bug 2's original fix
+too, and its current version confirmed on hardware to end the [BANK]-held stall (its
+[PTN] answers emulator-verified identical to the original). Standalone images:
 tools/build_midi_plays_free_fix.py, tools/build_empty_pattern_led_fix.py, tools/build_part_change_carryover_fix.py.
 tools/build_bugbuilds.py composes all three onto each finished feature image and
 asserts on every run that the composite's changes are the disjoint union of the
@@ -101,7 +101,7 @@ PL_PINNED = bytes.fromhex(
     "c0984680660ab1c965e8d1c1538266de4e752f02202f00084ef94009a46a"
 )
 assert len(PL_PINNED) == 158
-# the cave replays the displaced prologue in its stock-predicate trampoline (Session 119)
+# the cave replays the displaced prologue in its stock-predicate trampoline
 assert PL_HOOK_STOCK in PL_PINNED
 
 

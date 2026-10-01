@@ -13,8 +13,7 @@ the same word plus its 'ANDY' battery shadow and re-checksums.
 
 TIMING COMES FROM THE OS, NOT FROM US. "Is the toast still up" is read from the
 OS's own toast state (the handle 0x460d1e70 / countdown 0x460d1e6c); this module
-ticks nothing of its own. That is deliberate and it is the whole story of Session
-93: a third detour, `qlr_tick` at 0x400522ca, used to drive the toast from inside
+ticks nothing of its own. That is deliberate: a third detour, `qlr_tick` at 0x400522ca, used to drive the toast from inside
 the ENGINE FRAME HANDLER. FUN_4005a2b8 (NOTIFY) and FUN_40056bec (close) both
 bottom out in FUN_40000c3c, the kernel post/wake -- legal from a key handler, not
 from the engine frame path -- and it hard-crashed a real MKI on 2026-09-25 (dead
@@ -27,8 +26,8 @@ RAM window and does not survive live audio on hardware.
 
 The cave is position-independent, so it may land anywhere the allocator puts it.
 
-MEASURED: hardware-confirmed on the author's MKI, after the Session 93 crash was
-found and the tick hook removed. The standalone image is tools/build_quantize_live_rec_toggle.py.
+MEASURED: hardware-confirmed on the author's MKI (2026-09-25): the show-then-invert
+gesture works on this version, with the tick hook removed. The standalone image is tools/build_quantize_live_rec_toggle.py.
 """
 
 import os

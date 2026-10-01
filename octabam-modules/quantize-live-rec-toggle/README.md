@@ -41,7 +41,7 @@ Timing here comes from **the OS, not from us**: "is the toast still up" is read 
 the OS's own toast state (handle `0x460d1e70`, countdown `0x460d1e6c`). This module
 ticks nothing of its own.
 
-That is deliberate, and it is the whole story of Session 93. A third detour,
+That is deliberate. A third detour,
 `qlr_tick` at `0x400522ca`, used to drive the toast from inside the **engine frame
 handler**. `FUN_4005a2b8` (NOTIFY) and `FUN_40056bec` (close) both bottom out in
 `FUN_40000c3c`, the kernel post/wake — legal from a key handler, not from the engine
@@ -58,11 +58,10 @@ shared-RAM window and does not survive live audio on hardware.
 
 ## Measured
 
-Hardware-confirmed on the author's **MKI** — after the Session 93 crash was found
-and the tick hook removed. Note the lesson recorded in `CLAUDE.md`: this feature
-carried "hardware-confirmed, final" for six sessions while still containing that
-latent crash. What had actually been confirmed was *that it did not hang during
-that flash*.
+Hardware-confirmed on the author's **MKI** (2026-09-25): the show-then-invert gesture
+works on this version, with the tick hook removed. (Keeping the setting across a power
+cycle is stock's own storage, which this module writes through.)
+Nothing tested on an MKII.
 
 176 bytes, sha256 `52c26af67443e470…` linked at `0x400d7400`.
 

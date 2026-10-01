@@ -74,9 +74,6 @@ Nothing tested on an MKII.
 
 2104 bytes, sha256 `bd02dd428559e27a…` linked at `0x400d6500`.
 
-**MIDI_PLAYS_FREE_FIX is not part of this module** — it is its own contribution, and every
-feature builder that carried a copy wrote the same site `0x4009b6f2`.
-
 ## Licence
 
 MIT, © 2026 Zac-Kyoti. No Elektron bytes are included or distributed.
