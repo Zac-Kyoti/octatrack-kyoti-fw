@@ -7,9 +7,9 @@
 >   Octakit (§3).
 > - Both crashing modules now declare OCTAKIT a conflict: DJK in `a7a5291`, RELOAD in
 >   `c9a66cf`, both on `origin/main`.
-> - **They reach users only when Sam moves octabam's six KYOTI submodules off `7f80b85`**
->   (§6). The note asking him to was drafted 2026-10-02; whether he has done it is not
->   recorded here.
+> - **They reach users only when Sam merges octabam PR #551**, which moves the six KYOTI
+>   submodules from `7f80b85` to `77f132f` (§6). Updated and noted to Sam 2026-10-02
+>   (`~/Documents/octabam-note-to-sam-3.md`); its merge is not recorded here.
 >
 > **C** = read in source: her runtime `modules/octakit/upstream/runtime/*.S` @ `c6d3f39`,
 > our `octabam-modules/*/*.s`, the stock image. **L** = inference, which Phase 1 has to
@@ -17,7 +17,9 @@
 
 ## 0. Start here next time
 
-1. Has Sam bumped? Run `git -C ~/Documents/octabam fetch && git -C ~/Documents/octabam ls-tree origin/main modules/direct-jump-kyoti/upstream`. A pin at `c9a66cf` or later means the stopgaps are live.
+1. Has Sam merged #551? Run `gh pr view 551 -R sambanks/octabam --json state`, or
+   `git -C ~/Documents/octabam fetch && git -C ~/Documents/octabam ls-tree origin/main modules/direct-jump-kyoti/upstream`.
+   A pin at `77f132f` or later means the stopgaps are live.
 2. Phase 0 intake (§5): reporters' crash screens (ADDR!), module lists, projects.
 3. RELOAD's bridge (§4, B-RL) is the small, well-understood one: do it first. DJK's (B-DJ)
    needs Phases 1–2 first.
@@ -178,16 +180,20 @@ carrying the Phase 2 trail.
 - Test image, a FLASHING.md §4 checklist, the user flashes it. Then the reporters.
 - Status lines name what was confirmed.
 
-## 6. octabam: the submodule bump (asked of Sam 2026-10-02)
+## 6. octabam: the submodule bump (PR #551, updated 2026-10-02)
 
 - octabam pins all six KYOTI modules as separate submodules of this repo:
   `modules/<name>/upstream`, all at `7f80b85` as of octabam `8d0ad6f4`.
 - Each octabam wrapper `modules/<name>/manifest.py` `runpy`s
   `upstream/octabam-modules/<name>/manifest.py` and adds octabam's
   category/author/proof fields.
-- Asked: move all six to **`c9a66cf`**, `make check`, commit, and touch up the
-  `direct-jump-kyoti` / `reload-from-project` wrapper docstrings. Those still say
-  "pinned to `7f80b85`" and "one floating ROM cave".
+- The user's open **PR sambanks/octabam #551** (branch `Zac-Kyoti/octabam:kyoti-pins-8773713`)
+  already bumped the six pins to `8773713`, with the shim docstrings and READMEs updated.
+- 2026-10-02: commit `5f5d67d4` on that branch moves all six to **`77f132f`**. It updates
+  the shim pin text and adds Octakit notes to the DJK / RELOAD / BATCH shim READMEs. The
+  PR's title and description are updated to match.
+- The branch name still says `8773713`; renaming a PR's branch would close the PR.
+- Sam has the note (`~/Documents/octabam-note-to-sam-3.md`).
 - The bump also carries our Session 120 work: DJK and RELOAD as `Linked(dram=True)` (on HW
   from DRAM 2026-10-01, OBKYOTI6/7), MUTE_MODES `TableGrow insert_at=2`, DJK ↔ `DIRECT JUMP`
   conflict, RELOAD knob repaint.
@@ -196,7 +202,15 @@ carrying the Phase 2 trail.
   `tools/verify/verify_docs.py` 0 problems.
 - Then `c9a66cf` by direct manifest load: RELOAD + OCTAKIT refused, the six KYOTI modules
   clean, keys OK, no existing remix combining OCTAKIT with RELOAD or DJK.
-- No image built: `make check` is Sam's.
+- At `77f132f`, in a scratch clone of the PR branch:
+  - `make verify-shared REMIXES=<the eight KYOTI test remixes>` passes;
+  - `make check-remix` passes on each of the eight;
+  - `verify_dram_boot` passes for `direct-jump-kyoti`, `reload-from-project` and
+    `kyoti-mute-jump` (the port built with `make emu-cf`);
+  - `verify_set` was skipped (no project configured);
+  - `make docs` output is unchanged.
+- No module code changed since `8773713` (manifests and READMEs only), so #551's earlier
+  hardware runs and all-six build still apply.
 
 ## 7. How these checks were run (reuse)
 
