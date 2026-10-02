@@ -34987,3 +34987,12 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
   lengths/scales, Part change, OFF again after power-cycle (with MUTE MODE set to non-OT, which widens the restore);
   RELOAD both chords incl. FINISHED toast, transport keeps running; MUTE MODE row 2, all four modes, survives
   power-cycle; QLREC gesture; trigless-lock erase; the three bug fixes. Revert: the KYOTI V1.0 syx `576756fd…`.
+* **ROM vs DRAM, per combination** (octabam's placement rule simulated, stock effects in the chooser, no other ROM
+  modules; the four borderline cases confirmed with real `make bus` on the ROM manifests from `e20b532`): with DJ and RL
+  back in ROM, 26 of the 48 combinations containing either fail. DJ + RL fits alone (4 B spare), nothing more. MM + DJ
+  or MM + RL fits with at most one of QL / ER and never BB (MM + DJ + BB fails — DJ's own README recommends BB). Without
+  MM either big module fits with QL + ER + BB. In DRAM all 48 fit, but `Linked.dram` is a fixed bool: any remix with DJ
+  or RL pays the 10 MiB reserve unless another DRAM module already does. **Parked ask for Sam (user, 2026-10-01: hold
+  until the next reply):** automatic placement — ROM if it fits, DRAM otherwise (bytes are identical for 5407/54455).
+  Also: the MEMORY page still reads 85.5 MB on OBKYOTI6 (octabam's PLACEMENT.md records the same); check FREE MEM in
+  the Flex list instead.
