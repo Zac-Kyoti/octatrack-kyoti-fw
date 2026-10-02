@@ -69,6 +69,12 @@ slot is declared `Keep`, so a module writing into it is refused.
 no address, but both change when a cued pattern takes over and have never been tried in
 one image, so the module declares them a conflict and the ledger refuses the pair.
 
+**Not with `OCTAKIT`** (Em's Octakit), for now. The two share no address either, but
+Octakit runs every pattern switch as a checked Kit transaction, and a jump's Part
+hand-off goes around it; images with both are reported to crash. The ledger refuses the
+pair until a bridge module exists (`reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md` in
+octatrack-kyoti-fw).
+
 ## Measured vs inferred
 
 **Hardware-confirmed** (the author's Octatrack MKI): the clock-locked timing, and the

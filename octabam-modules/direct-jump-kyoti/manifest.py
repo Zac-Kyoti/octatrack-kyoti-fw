@@ -93,9 +93,16 @@ MODULE = Module(
         "next step exactly where it would be had it played since START.",
     # Tim Hastie's DIRECT JUMP (modules/direct-jump) shares no address with this one,
     # but both change WHEN a cued pattern takes over; untested together.
+    # Octakit shares no byte either, but wraps stock's switch block (0x400a4568..0x400a4856)
+    # in a checked Kit transaction that this landing's hand-off bypasses: reported to crash
+    # the unit. Refused until a bridge exists (reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md).
     conflicts=(("DIRECT JUMP",
                 "both change when a cued pattern takes over (CHAIN AFTER = DIRECT vs "
-                "[PTN]+[YES]); never tested together -- take one"),),
+                "[PTN]+[YES]); never tested together -- take one"),
+               ("OCTAKIT",
+                "a jump changes the pattern and Part outside Octakit's Kit transaction, and "
+                "the pair is reported to crash the unit; refused until a bridge exists -- "
+                "take one"),),
     linked=(
         Linked("dj7", os.path.join(_HERE, "patch_directjump_v7.s"), dram=True,
                reference=REFERENCE),
