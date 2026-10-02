@@ -139,7 +139,7 @@ builder's FINAL entry and the old builder is deleted. There is no superseded tie
 | DIRECT_JUMP_KYOTI | `build_direct_jump_kyoti.py` | `octabam-modules/direct-jump-kyoti` |
 | SIDECHAIN_COMPRESSOR | `build_sidechain_compressor.py` | not yet ported |
 | RELOAD_FROM_PROJECT | `build_reload_from_project.py` | `octabam-modules/reload-from-project` |
-| REPITCH_REPEAT98_KYOTI | `build_repitch_repeat98_kyoti.py` | not yet ported |
+| REPITCH_REPEAT98_KYOTI | `build_repitch_repeat98_kyoti.py` | `octabam-modules/repitch-repeat98-kyoti` (ColdFire half; DSP pending) |
 | QUANTIZE_LIVE_REC_TOGGLE | `build_quantize_live_rec_toggle.py` | `octabam-modules/quantize-live-rec-toggle` |
 | ERASE_EMPTY_TRIGLESS_LOCKS | `build_erase_empty_trigless_locks.py` | `octabam-modules/erase-empty-trigless-locks` |
 | BATCH_BUGFIXES: MIDI_PLAYS_FREE_FIX · EMPTY_PATTERN_LED_FIX · PART_CHANGE_CARRYOVER_FIX | `build_midi_plays_free_fix.py` · `build_empty_pattern_led_fix.py` · `build_part_change_carryover_fix.py` | `octabam-modules/batch-bugfixes` |

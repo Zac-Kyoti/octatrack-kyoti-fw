@@ -139,7 +139,8 @@ too, and has its own section above.)
   states). The varispeed idea itself — speed = project BPM ÷ sample BPM — is the
   standard one, but the ColdFire skeleton is his code, adapted: the tempo-source
   routine, all seven of his hook sites (increment builder, TSTR resolver, audio-editor
-  ATTR) and the TSTR label formatter (`tools/patch_repitch_kyoti.s`), and the
+  ATTR) and the TSTR label formatter
+  (`octabam-modules/repitch-repeat98-kyoti/patch_repitch_kyoti.s`), and the
   scaffold of our ColdFire test oracle (`tools/repitch_probe_kyoti.cpp`, from his
   `tools/harness/repitch_probe.cpp`). Ours: QUAN and its exact-ratio fold, the
   PTCH/QUAN swap, the 7-position TSTR widget, and all of RPS9/RPSP on the DSP.
