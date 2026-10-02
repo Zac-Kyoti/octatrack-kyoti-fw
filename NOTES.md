@@ -34963,3 +34963,27 @@ plain-poke check, keep-stock claim, `Linked.defsyms`, `TableGrow.insert_at`, DSP
   defsyms or `remix.inc`; a reference sha cannot cover a unit whose bytes depend on `remix.inc`; `TableGrow` append
   is wrong for PERSONALIZE on an MKI; SIDECHAIN_COMPRESSOR's `Y:$7F0-$9FF` and `slot+$3E00` windows overlap
   BusDelay/BusVerb private Y and shared-window halves.
+
+## Session 120 continued (2026-10-01, `octabam-port`) — after Sam's merge (octabam `6be052d8`): insert_at, conflicts, two units to DRAM, all six in one remix
+
+Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
+* **MUTE_MODES** back at PERSONALIZE row 2: `TableGrow(count=16, insert_at=2)`; the interim LED-row symbols gone (`b74276c`).
+* **DIRECT_JUMP_KYOTI** `conflicts=(("DIRECT JUMP", why),)`: the ledger refuses it with Tim's module (`e20b532`).
+* **ROM budget, corrected.** octabam floats ROM code only in `0x400d6b20..0x400d7bbc` (~4.2 KB with stock effects in
+  the chooser; also holds its chooser list and descriptor clones). KYOTI V1.0 fits because it hand-places ~9.6 KB over
+  its own cave from `0x400d6500`, the midisc zones and stock data only its combination makes dead. octabam's "1,276 B
+  over" counted only up to RELOAD; with RELOAD alone in DRAM the rest was still ~4,450 B of ROM (+0x80 alignment).
+  User chose: **RELOAD_FROM_PROJECT and DIRECT_JUMP_KYOTI both as `Linked(dram=True)`** (`7884749`, `573a863`). DJ's
+  `[PTN]`-layer YES slot is a `SymbolRef`, the rest of that record `Keep`. Oracles: RELOAD = the standalone cave at
+  `0x400d6500` (`bd02dd42…`); DJ = the flashed KYOTI V1.0 cave at `0x400d6d38` (`b86e3c32…`). Sources unchanged.
+  Cost: any DRAM unit brings octabam's loader and its 10 MiB reserve — samples/recorders 85.5 → 75 MB.
+* **Verified:** `make check` passes on all eight KYOTI test remixes; all six in one remix (scratch `kyoti-all`: the six
+  + the stock effects) build — ROM run ends `0x400d7804` (~950 B spare) — and pass `verify_dram_boot` (loader ran
+  once; reserve == linked runtime, 4,084 B). Every FINAL builder still seals.
+* **HW test image, BUILT, NOT flashed** (out/octabam_kyoti6/, version `OBKYOTI6`):
+  `OCTATRACK_OS1.40C_OBKYOTI6.syx` sha256 `6ca4dce58cdd8d2418098b6fca0a8a9fb25ae33c80d6b6ed6c9232c7087bdcd0`,
+  card `OCTATRACK_OBKYOTI6.bin` `80c96c0f…`, mainos `182b2674…`. First octabam-built KYOTI image, first DJ/RELOAD from
+  DRAM. Test: boot/version; MEMORY ~75 MB; DJ OFF at power-on, [PTN]+[YES] toggle, clock-locked landing across
+  lengths/scales, Part change, OFF again after power-cycle (with MUTE MODE set to non-OT, which widens the restore);
+  RELOAD both chords incl. FINISHED toast, transport keeps running; MUTE MODE row 2, all four modes, survives
+  power-cycle; QLREC gesture; trigless-lock erase; the three bug fixes. Revert: the KYOTI V1.0 syx `576756fd…`.
