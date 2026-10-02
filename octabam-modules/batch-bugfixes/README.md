@@ -83,6 +83,16 @@ timing matrix are identical, including a run where *every* jump changes Part. So
 neither needs the other. But DIRECT JUMP gives you many more Part changes to meet the
 carryover with, which makes the pairing the sensible default.
 
+## With OCTAKIT, bug 3's fix stays idle
+
+Em's Octakit replaces the "select Part" handler that bug 3 hooks with her own Kit-change
+code. It takes over at the handler's entry (`0x400621a6`) and rejoins stock only at its
+end, so the two hooks inside (`0x400621da`, `0x40062216`) are never reached. In a remix
+with OCTAKIT, bug 3's fix is present but does nothing: no effect and no crash. Bugs 1
+and 2 are unaffected.
+
+Whether the carryover bugs also occur on an Octakit Kit change has not been tested.
+
 ## What the bundle costs
 
 A remix takes all three or none, and a site conflict on any one of them keeps all

@@ -48,6 +48,12 @@ matrix identical with and without, including a run where every jump changes Part
 neither needs the other; but DIRECT JUMP gives you many more Part changes to meet the
 carryover with.
 
+WITH OCTAKIT, BUG 3 STAYS IDLE. Em's Octakit replaces the "select Part" handler with her
+own Kit-change code: it takes over at 0x400621a6 and rejoins stock only at the handler's
+end (0x40062d1c), so bug 3's hooks (0x400621da, 0x40062216) are never reached. The fix is
+present but does nothing -- no effect, no crash; bugs 1 and 2 are unaffected. Whether the
+carryover bugs occur on her Kit change is untested.
+
 MEASURED: bugs 1 and 3 hardware-confirmed on the author's MKI; bug 2's original fix
 too, and its current version confirmed on hardware to end the [BANK]-held stall (its
 [PTN] answers emulator-verified identical to the original). Standalone images:
