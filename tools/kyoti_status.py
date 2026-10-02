@@ -38,7 +38,7 @@ FINAL = {
     "build_mute_modes.py":                 "b5e24316e4dc5824657818f26cf1891e02ac26ae9094f101a7703f5beb74d6ba",
     "build_direct_jump_kyoti.py":          "3f26d8de004469052ec9da58967c066b128393dd4a9c4dfc7d7efd0d3696a759",
     "build_sidechain_compressor.py":       "dfafc90cd230f340fd93ecc1f8e130c139fb6128855aca6adbf09cbcedc2d827",
-    "build_reload_from_project.py":        "19a3a62ca65de4c27c44d4f07f0b2e25d58b732bb56ed02c91a8e1b98e2676ac",
+    "build_reload_from_project.py":        "7fbf10968c68d85797658d22161df75491ab527a2a052649624db8a44af344ca",
     "build_repitch_repeat98_kyoti.py":     "845aca5b4506fa834b8cb1bfcfde79f2fbfa4d2e9b24b09c3cd6ed7ce52883ab",
     "build_quantize_live_rec_toggle.py":   "0832cd9d0b5f804a26c50cf1ed6ce375288635f7c1ec2ad661b0083f80df803f",
     "build_erase_empty_trigless_locks.py": "83690ffbd97ad51281630acc8597f6423715885d2a712915df2edc39bb9b6a1c",
@@ -49,12 +49,12 @@ FINAL = {
         "mainos_quantize_live_rec_toggle_batch_bugfixes.bin":"f425ae2270e6f612a7abd8338962d115786934a8e76348c646fd45de9d502130",
         "mainos_sidechain_compressor_batch_bugfixes.bin":    "cad73c0922d886875191b940f163cb45a141c8bee6786459325fe9e4defd86ee",
         "mainos_erase_empty_trigless_locks_batch_bugfixes.bin":"db348f68a32adcc195208e46f6c964d0a5714ba41c1d8c4f2fad6beb2d122922",
-        "mainos_reload_from_project_batch_bugfixes.bin":     "911b1c55eec402cf20d229e0fc70632248270dbfc98c4d9707cf1cb8ddc0eb20",
+        "mainos_reload_from_project_batch_bugfixes.bin":     "09ab9ea238af1b9b07ef22418097b0d8c2accf6b097cf71741b808e00aad643c",
         "mainos_direct_jump_kyoti_batch_bugfixes.bin":       "fa4617506e9d7e3ef6af9bb3c6a2739c03f7f17a4db475d8329d80a34f986f37",
         "mainos_repitch_repeat98_kyoti_batch_bugfixes.bin":  "b5a42c83cdacca4e3f874cfa861f3caf6a8e65388cb474d65bd380587ae8f03b",
     },
     "build_kyoti.py": {
-        "mainos_kyoti_v1.0.bin":                             "8baf5ac0ab7bc7c5c217160f2db73ba879a064ef0a0e4256b24c91fb4907d110",
+        "mainos_kyoti_v1.0.bin":                             "57576d9169e47764cea070669496736aaa48bf710c9d418bc6d5662a194de27e",
     },
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
 }

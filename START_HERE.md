@@ -152,7 +152,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
-- **KYOTI V1.0** (`tools/build_kyoti.py`) — FINAL since 2026-09-30 (syx `576756fd…`). One
+- **KYOTI V1.0** (`tools/build_kyoti.py`) — FINAL since 2026-09-30; re-promoted 2026-10-01 with the
+  RELOAD knob-repaint fix (syx `f1a6e99a…`, was `576756fd…`). One
   DIRECT_JUMP_KYOTI crash, seen on an early V1.0 flash, was never reproduced; its leading
   suspect was the MUTE_MODES register bug (`fresh_bind` overwriting `%d3`) fixed since.
   `NOTES.md` Sessions 114–119, `reference/MERGE.md`.

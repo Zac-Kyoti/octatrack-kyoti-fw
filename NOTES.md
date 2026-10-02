@@ -35019,3 +35019,7 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
   module re-pinned (`reference` sha `ef22237d…` = the new standalone bytes at `0x400d6500`); `make check
   REMIX=reload-from-project` passes. **HW test image OBKYOTI7, BUILT, NOT flashed** (out/octabam_kyoti7/): syx
   `5ef8eb7dc676d91eb779497b91ef1f977874a20c28c4ca83f5a0ac5bbd0557bc`, card `12c9661b…`; passes `verify_dram_boot`.
+* **User: fix confirmed on hardware (OBKYOTI7, 2026-10-01). PROMOTED to FINAL** on the user's instruction:
+  `build_reload_from_project.py` mainos `7fbf1096…` (syx `0da606e5…`), `build_kyoti.py` mainos `57576d91…` (syx
+  `f1a6e99a…`), `build_bugbuilds.py` BUG_RL3 mainos `09ab9ea2…` (syx `46316050…`). All twelve FINAL builders re-run
+  without the opt-in: every one seals (18 images).
