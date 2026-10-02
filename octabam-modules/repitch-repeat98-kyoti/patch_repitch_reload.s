@@ -19,10 +19,19 @@
 | forgotten (0xff: the next poll adopts the reloaded state).
 |
 | Two pieces so the combined image can place them in small pads.
-| RP_PREV / RP_FORGET come from the main cave's link (--defsym).
+| RP_PREV / RP_FORGET come from the main cave's link (--defsym), as the standalone and
+| KYOTI builders pass them. Without them (the octabam module) this is ONE unit in .text,
+| linked after the main one, and the two names alias its rp_prev / rp_forget.
 | Detour: 0x4004aab4, 8 B `lea -32(sp),sp ; movem.l d2-d5/a2-a3,(sp)` -> jmp rp_reload.
 
+        .ifdef RP_PREV                  | standalone / KYOTI: two pieces, addresses passed in
         .section .rp_rl,"ax"
+        .else                           | octabam: one unit in .text
+        .text
+        .set    RPK_ONE_UNIT, 1
+        .set    RP_PREV, rp_prev
+        .set    RP_FORGET, rp_forget
+        .endif
         .global rp_reload
 rp_reload:
         lea     (RP_PREV).l,%a1
@@ -35,7 +44,9 @@ rp_reload:
         jmp     (RP_FORGET).l           | forget, then rts to our caller -- rp_forget
                                         | uses d1/a0 only, so the verdict in d0 survives
 
+        .ifndef RPK_ONE_UNIT
         .section .rp_rb,"ax"
+        .endif
         .global rp_reload_body
 rp_reload_body:
         lea     -32(%sp),%sp            | displaced

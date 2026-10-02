@@ -7,7 +7,7 @@ FINAL: rev 16, hardware-confirmed 2026-09-29 (NOTES Session 112 continued (4)).
 
 Design records: reference/handoffs/REPITCH_KYOTI_SCOPE.md (the ColdFire side, QUAN),
 REPITCH_FIDELITY_SCOPE.md (RPS9/RPSP), REPITCH_SP_CH12_SCOPE.md (RPSP = SP-1200 ch 1/2).
-Mechanism and per-hook comments: tools/patch_repitch_kyoti.s (ColdFire),
+Mechanism and per-hook comments: octabam-modules/repitch-repeat98-kyoti/patch_repitch_kyoti.s (ColdFire),
 tools/patch_repitch_dsp.asm via tools/repitch_dsp_src.py + tools/dsp_xasm.py (DSP).
 
 What this image does:
@@ -62,8 +62,8 @@ CAVE_AT = kyoti_place.at("rpk_logic", 0x400d6f80)
 # folded in. The diagnostic never coexists with those, so it may run up to
 # patch_trigscale's pinned base (0x400d7bfc, MERGE.md).
 CAVE_CEIL = 0x400d7bfc if os.environ.get("RPK_DIAG") == "1" else 0x400d7b00
-PATCH_S = HERE / "patch_repitch_kyoti.s"
-RELOAD_S = HERE / "patch_repitch_reload.s"
+PATCH_S = ROOT / "octabam-modules/repitch-repeat98-kyoti/patch_repitch_kyoti.s"
+RELOAD_S = ROOT / "octabam-modules/repitch-repeat98-kyoti/patch_repitch_reload.s"
 # Session 119: stock RELOAD PART wrapped as a Part apply (hold + forget), two small
 # pieces. Standalone they sit just below the main cave; KYOTI places each in a pad.
 RELOAD_AT = kyoti_place.at("rpk_reload", CAVE_AT - 0x40)
