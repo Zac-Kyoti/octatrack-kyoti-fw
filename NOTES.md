@@ -35046,3 +35046,24 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
   six submodules `7f80b85` → `c9a66cf`.
 * Everything else (mechanism tables, options, phases, how the checks were run, open decisions):
   `reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md`.
+## Session 120 continued (3) (2026-10-01, `octabam-port`) — the last two modules: REPITCH's ColdFire half ported; the asks to Sam
+
+* **Note to Sam** (`~/Documents/octabam-note-to-sam-2.md`, sent by the user, plus its addenda): per-payload `DspHook`
+  sites (SIDECHAIN's three per core, REPITCH's one); a hook-only `MenuEntry` (the COMPRESSOR clone keeps stock's
+  dispatch); REPITCH's 593 table words via `ptable`; **an octabam bug** — DARK REV calls a 35-word routine inside SPRING's
+  span (A `P:0x1586-0x15a8`, B `P:0x1346-0x1368`), so harvesting SPRING with DARK kept breaks DARK once the stream
+  reaches +1,414 words from PLATE's base; **correction**: `dsp_asm` has no expressions or `equ`, so per-core values
+  cannot be derived from the `$30000` rewrite without new code — user chose to ask for per-payload text substitution
+  (keeps SIDECHAIN byte-identical to its FINAL); **addendum**: `Param` raw A/B/`P+0x12a` words (stock address or unit
+  symbol) for SIDECHAIN's slots 8-11 — `Formatter`/`FormatterReg` cannot express them.
+* **REPITCH_REPEAT98_KYOTI ColdFire half** (`6649a77`, `0049f6b`): sources moved into
+  `octabam-modules/repitch-repeat98-kyoti/`; `patch_repitch_reload.s` is one `.text` unit without `RP_PREV` (standalone
+  bytes unchanged); `rpk_glyphs.s` = the FINAL glyph block. The 7-position selector is stock's UNREFERENCED 5-position
+  select `0x40046ab4` (no pointer, jsr or PC-relative ref in 1.40C; Jannik's REPITCH uses it unmodified) patched in place
+  (Poke `moveq #4`→`#6` at `+0x54`, SymbolRef the icon table at `+0xEA`) — no stock code copied. octabam build: matches
+  FINAL bytes, every ColdFire stock site of the standalone, `verify_dram_boot` passes, refused with REPITCH by name, clean
+  with the six. WIP until the DSP half (per-payload hook + tables) lands.
+* **SIDECHAIN ColdFire side** waits on the `Param` addendum + the hook-only menu entry; nothing written yet.
+* **Bus compatibility** (user wants it eventually): compact the keybus to core-local `$100` words below `$903`;
+  per-remix window base (slot tails normally, core A's free `0x36200-0x37EFF` when a module owns the FX2 buffers);
+  needs per-remix DSP values/claims from octabam. Deferred until SIDECHAIN is in.
