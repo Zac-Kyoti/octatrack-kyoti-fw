@@ -71,9 +71,10 @@ one image, so the module declares them a conflict and the ledger refuses the pai
 
 ## Measured vs inferred
 
-**Hardware-confirmed** (the author's Octatrack MKI, 2026-09-27/28, from the ROM cave):
-the clock-locked timing, and the Part change on a jump. **Not yet run from DRAM on
-hardware.**
+**Hardware-confirmed** (the author's Octatrack MKI): the clock-locked timing, and the
+Part change on a jump, first from the ROM cave (2026-09-27/28), then from DRAM in an
+octabam-built image with all six KYOTI modules (2026-10-01). That image also confirmed
+OFF at power-on, the `[PTN]`+`[YES]` toggle, and OFF again after a power cycle.
 
 **Emulator only** (`ot_emu`, Unicorn on real image bytes): Program Change on fast
 re-cues, MIDI tracks, and START SILENT and the trig-condition reset (both behave exactly

@@ -40,8 +40,10 @@ hold every KYOTI module, so this unit and RELOAD_FROM_PROJECT live in DRAM. The 
 reserve is the same cached SDRAM the OS image runs from, so the tick-path code runs at
 the same speed; what DRAM adds is the dependency on octabam's loader at boot.
 
-MEASURED. Hardware-confirmed on the author's MKI 2026-09-27/28 (from the ROM cave):
-the clock-locked timing and the Part change. Not yet run from DRAM on hardware. Emulator-verified only (ot_emu, real image bytes):
+MEASURED. Hardware-confirmed on the author's MKI: the clock-locked timing and the Part
+change, from the ROM cave (2026-09-27/28) and from DRAM in an octabam-built image with
+all six KYOTI modules (2026-10-01; also OFF at power-on, the PTN+YES toggle, OFF again
+after a power cycle). Emulator-verified only (ot_emu, real image bytes):
 Program Change on fast re-cues, MIDI tracks, START SILENT and the trig-condition
 reset (the last two identical to a stock pattern change in the emulator).
 Standalone image and version string: tools/build_direct_jump_kyoti.py -> 140C_KDJ7.

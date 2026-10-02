@@ -39,7 +39,8 @@ the per-step tick. Its state still lives in the unit itself, not the DSP window.
 
 MEASURED: hardware-confirmed on the author's MKI from ROM (the standalone image and
 KYOTI V1.0), including that the sequencer and the internal metronome keep their phase
-(RELOAD_NOW is not armed on any path). Not yet run from DRAM on hardware.
+(RELOAD_NOW is not armed on any path), and from DRAM in an octabam-built image with all
+six KYOTI modules (2026-10-01: both chords, the FINISHED toast, the knob repaint).
 The standalone image is tools/build_reload_from_project.py.
 """
 
