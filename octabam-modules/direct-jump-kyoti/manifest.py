@@ -78,8 +78,9 @@ PTN_LAYER_YES_PRESS = PTN_LAYER_YES + 2                # the u32 press handler
 # ---- the author's oracle -------------------------------------------------------
 # patch_directjump_v7.s, m68k-elf-as -mcpu=5407 or 54455 (identical bytes), no symbols
 # (DJ_MODE in the unit and DJ_TOAST_DUR = 0x44 are the source's defaults), linked at
-# 0x400d6d38: byte for byte the DIRECT JUMP code of the promoted KYOTI V1.0 image the
-# author flashed (syx 576756fd...). octabam re-links it there on every build and compares.
+# 0x400d6d38: byte for byte the DIRECT JUMP code of the KYOTI V1.0 image the author
+# flashed on 2026-09-30 (syx 576756fd...; the 2026-10-01 re-promotion places it 16 B lower
+# because RELOAD shrank). octabam re-links it there on every build and compares.
 REFERENCE = (0x400d6d38, "b86e3c3255674ceff539423ad45f3c747649be5b6615fd2cf95ee98f310b070e")
 
 MODULE = Module(
