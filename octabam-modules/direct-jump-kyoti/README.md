@@ -23,8 +23,8 @@ build); V7 is the clock-locked landing that this module ships.
 
 | file | what it is |
 |---|---|
-| `manifest.py` | the octabam module declaration — cave, three detours, the keymap slot |
-| `patch_directjump_v7.s` | the m68k source; the only truth for the cave's bytes |
+| `manifest.py` | the octabam module declaration — one DRAM unit, three detours, the keymap slot |
+| `patch_directjump_v7.s` | the m68k source; the only truth for the unit's bytes |
 
 The standalone image (this repo's own build, outside octabam) is
 `tools/build_direct_jump_kyoti.py` → version string `140C_KDJ7`.
@@ -47,23 +47,23 @@ Three detours, six bytes each, plus one function pointer:
 | `0x40043418` | `dj_ptnrel` | `pea 0x400bf0f2` — `[PTN]` release, so the chooser stays shut |
 | `0x400bf0c0` | `dj_toggle` | the `[PTN]`-layer YES press slot, all-NULL in stock |
 
-**State:** one word, `DJ_MODE` (0 = OFF/stock, 1 = ON), kept **inside the cave**
+**State:** one word, `DJ_MODE` (0 = OFF/stock, 1 = ON), kept **inside the code unit**
 (the source's default; only the standalone builder passes `DJ_MODE_IN_RAM=1` for the old
-`0x800000d8` word). DIRECT JUMP must come up **OFF at every power-on**: the
-cave is part of the OS image, re-loaded from flash at every boot, so the word starts at 0
+`0x800000d8` word). DIRECT JUMP must come up **OFF at every power-on**: in octabam the
+unit lives in DRAM and octabam's loader unpacks it at every boot, so the word starts at 0
 by construction and no battery restore can reach it.
 
 That is what lets it share an image with MUTE MODE, which widens the boot `ANDY` restore
 (`pea 0x64` → `pea 0x70` at `0x4001f322`, `0x4001f3be`, `0x4001fb24`) so its own word
 `0x800000dc` survives power-off. The widened span `0x80000070..0x800000df` sweeps
 `0x800000d8`, where `DJ_MODE` lived before this module switched, and where the
-standalone build still keeps it (`reference/MERGE.md`, blocker B1). The KYOTI V1.0
-combined image, flashed on the author's MKI, carries exactly this cave.
+standalone build still keeps it (`reference/MERGE.md`, blocker B1).
 
-**The cave floats.** It is not position-independent: 18 longwords hold absolute
-addresses of its own state block and `DJ_MODE`. `reference(addr)` in the manifest rebases
-exactly those, and was verified against real `m68k-elf-ld` output at `0x400d7300`
-and `0x400d6500` — byte-identical at both.
+**In DRAM.** In octabam the code is a `Linked(dram=True)` unit in the platform reserve
+at the bottom of the audio page arena, not a ROM cave: octabam's floating ROM run cannot
+hold every KYOTI module. The reserve is the same cached SDRAM the OS image runs from, so
+the tick-path code runs at the same speed. The `[PTN]`-layer YES record around the press
+slot is declared `Keep`, so a module writing into it is refused.
 
 **Not with octabam's `DIRECT JUMP`** (Tim Hastie's CHAIN AFTER = DIRECT). The two share
 no address, but both change when a cued pattern takes over and have never been tried in
@@ -71,8 +71,9 @@ one image, so the module declares them a conflict and the ledger refuses the pai
 
 ## Measured vs inferred
 
-**Hardware-confirmed** (the author's Octatrack MKI, 2026-09-27/28): the
-clock-locked timing, and the Part change on a jump.
+**Hardware-confirmed** (the author's Octatrack MKI, 2026-09-27/28, from the ROM cave):
+the clock-locked timing, and the Part change on a jump. **Not yet run from DRAM on
+hardware.**
 
 **Emulator only** (`ot_emu`, Unicorn on real image bytes): Program Change on fast
 re-cues, MIDI tracks, and START SILENT and the trig-condition reset (both behave exactly
@@ -81,8 +82,10 @@ as on a stock pattern change in the emulator, but were not exercised on the unit
 Everything the emulators prove is control flow and image bytes, not how the unit
 sounds. Nothing here has been tested on an MKII.
 
-Reproduction: assembled with `m68k-elf-as -mcpu=5407`, linked at `0x400d7000` with
-`ld --defsym DJ_TOAST_DUR=0x44` → 1980 bytes, sha256 `a2010a6b9c40c7c9…`.
+Reproduction: assembled with `m68k-elf-as -mcpu=5407` or `54455` (identical) and no
+symbols, linked at `0x400d6d38` → 1980 bytes, sha256 `b86e3c3255674cef…`: byte for byte
+the DIRECT JUMP code of the KYOTI V1.0 image flashed on the author's MKI. octabam
+re-links it there on every build and compares.
 
 ## Recommended pairing: the bugfix bundle
 
