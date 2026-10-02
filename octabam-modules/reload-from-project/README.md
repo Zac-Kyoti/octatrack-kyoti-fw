@@ -18,8 +18,8 @@ Deferred by the author's own scoping: all-tracks and whole-bank reload.
 
 | file | what it is |
 |---|---|
-| `manifest.py` | the octabam module declaration — one cave, six `jmp` detours |
-| `patch_reload3.s` | the m68k source; the only truth for the cave's bytes |
+| `manifest.py` | the octabam module declaration — one DRAM unit, six `jmp` detours |
+| `patch_reload3.s` | the m68k source; the only truth for the unit's bytes |
 
 Standalone image: `tools/build_reload_from_project.py` → `RELOAD_FROM_PROJECT`.
 
@@ -39,9 +39,12 @@ nop — otherwise the span would be left half-rewritten.
 
 The worker is **stock's own**; this module hooks it rather than reimplementing it.
 
-The cave floats. It is not position-independent — 29 longwords hold absolute
-addresses inside it — so `reference(addr)` rebases exactly those, verified against
-real `m68k-elf-ld` output at `0x400d6800` and `0x400d6c00`.
+**In DRAM.** In octabam the code is a `Linked(dram=True)` unit: octabam's loader
+unpacks it into the platform reserve at the bottom of the audio page arena at every
+boot, and the six detours jump there. It left the ROM cave so that every KYOTI module
+fits one remix, and it is the one that moved because it runs from key chords and the
+message worker, never on the per-step tick. The standalone image keeps it in the ROM
+cave at `0x400d6500`; the bytes are the same, linked at a different address.
 
 ## Why two plain chords and not a picker
 
@@ -63,16 +66,17 @@ worker**: it reloaded MIDI track 6 instead of audio track 1 and cheerfully repor
 `RELOADED` (Session 98). That block sits in the DSP shared-RAM window, and a static
 "no references" scan says nothing about runtime writes.
 
-Everything now lives in the cave, and the standalone builder refuses any reference
-into `0x80006a40..0x80006abf`.
+Everything now lives in the unit itself, and the standalone builder refuses any
+reference into `0x80006a40..0x80006abf`.
 
 ## Measured
 
-Hardware-confirmed on the author's Octatrack **MKI**, including that the sequencer
-and the internal metronome keep their phase (`RELOAD_NOW` is not armed on any path).
-Nothing tested on an MKII.
+Hardware-confirmed on the author's Octatrack **MKI** from the ROM cave (the standalone
+image and KYOTI V1.0), including that the sequencer and the internal metronome keep
+their phase (`RELOAD_NOW` is not armed on any path). **Not yet run from DRAM on
+hardware.** Nothing tested on an MKII.
 
-2104 bytes, sha256 `bd02dd428559e27a…` linked at `0x400d6500`.
+2104 bytes, sha256 `bd02dd428559e27a…` linked at `0x400d6500` (`-mcpu=5407` or `54455`, identical); octabam re-links it there on every build and compares.
 
 ## Licence
 
