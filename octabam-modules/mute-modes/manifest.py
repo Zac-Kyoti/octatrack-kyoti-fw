@@ -16,24 +16,19 @@ TWO UNITS. `mm_softmute` (patch_softmute.s) is the mute behaviour: six detours i
 frame builder, the trig dispatch, the fresh-voice bind and the per-trig flag word.
 `mm_menu` (patch_mutemode.s) is the PERSONALIZE row: label, getter, setter.
 
-THE MENU, FOR NOW. tools/build_mute_modes.py splices MUTE MODE in at index 2, right after
-PREVIEW WITHOUT FX. octabam's TableGrow can only append after a stock prefix, and plain
-appending is WRONG on an MKI: the count function (0x40068fa8) shows 15 rows on an MKI and
-16 on an MKII, hiding LED BRIGHTNESS (index 15) on the MKI. Appended at index 16, MUTE
-MODE would be unreachable on an MKI and LED BRIGHTNESS would appear. So the tables take
-15 stock rows, then MUTE MODE, then the stock LED BRIGHTNESS row again (absolute symbols
-mm_led_* in patch_mutemode.s), and the count goes 15 -> 16: MUTE MODE is the last row on
-an MKI, LED BRIGHTNESS stays MKII-only. Nothing in the firmware keys off a PERSONALIZE
-row's position (every reference to the menu's cursor/scroll/count/row state is inside
-0x40068e00..0x40069074, NOTES.md Session 19), so the order is free. When TableGrow gains
-`insert_at`, this becomes count=16, insert_at=2, MUTE MODE only.
+THE MENU. MUTE MODE goes in at index 2, right after PREVIEW WITHOUT FX, as in
+tools/build_mute_modes.py: TableGrow(count=16, insert_at=2) relocates each of the three
+16-entry stock arrays with MUTE MODE spliced in, and the row count goes 15 -> 16 (MKI),
+16 -> 17 (MKII). LED BRIGHTNESS stays the last row and stays MKII-only. Nothing in the
+firmware keys off a PERSONALIZE row's position (every reference to the menu's
+cursor/scroll/count/row state is inside 0x40068e00..0x40069074, NOTES.md Session 19).
 
 NOT YET: SC_KEY. In an image with SIDECHAIN_COMPRESSOR, tools/build_kyoti.py assembles
 patch_softmute with --defsym SC_KEY=1, so a muted KEY track keeps feeding the compressor
 the way stock mute does. The source tests it with `.ifdef`, so it must be ABSENT, not 0,
-otherwise. That needs a per-remix symbol (Linked.defsyms or a remix.inc the source
-includes); it waits until SIDECHAIN_COMPRESSOR is a module, and until then no remix can
-hold both.
+otherwise. octabam can express it (a Linked.include that writes `.set SC_KEY,1` only when
+SIDECHAIN_COMPRESSOR is in the remix, and a callable `reference(modules)` for the two
+variants); it is added when SIDECHAIN_COMPRESSOR becomes a module.
 
 MEASURED. Hardware-confirmed on the author's MKI (tools/build_mute_modes.py, the promoted
 standalone image, and the KYOTI V1.0 combined image). Both units, assembled with no
@@ -88,15 +83,13 @@ MODULE = Module(
                "per-trig flag bits in the DSP frame word"),
     ),
     tables=(
-        TableGrow("PERSONALIZE labels", LABELS, 15,
-                  (("mm_menu", "lbl_mutemode"), ("mm_menu", "mm_led_lbl")),
-                  ((0x40068efe, LABELS),)),
-        TableGrow("PERSONALIZE getters", GETTERS, 15,
-                  (("mm_menu", "get_mutemode"), ("mm_menu", "mm_led_get")),
-                  ((0x40068f0a, GETTERS),)),
-        TableGrow("PERSONALIZE setters", SETTERS, 15,
-                  (("mm_menu", "set_mutemode"), ("mm_menu", "mm_led_set")),
-                  ((0x40069022, SETTERS), (0x4006903e, SETTERS), (0x40069056, SETTERS))),
+        TableGrow("PERSONALIZE labels", LABELS, 16, (("mm_menu", "lbl_mutemode"),),
+                  ((0x40068efe, LABELS),), insert_at=2),
+        TableGrow("PERSONALIZE getters", GETTERS, 16, (("mm_menu", "get_mutemode"),),
+                  ((0x40068f0a, GETTERS),), insert_at=2),
+        TableGrow("PERSONALIZE setters", SETTERS, 16, (("mm_menu", "set_mutemode"),),
+                  ((0x40069022, SETTERS), (0x4006903e, SETTERS), (0x40069056, SETTERS)),
+                  insert_at=2),
     ),
     pokes=(
         Poke(COUNT_AT, H("720f"), H("7210"),

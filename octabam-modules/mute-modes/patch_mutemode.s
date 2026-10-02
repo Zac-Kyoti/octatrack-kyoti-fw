@@ -89,15 +89,6 @@
     .endif
     .equ NMAX,      N_MODES - 1
 
-| The stock LED BRIGHTNESS row (index 15 of the PERSONALIZE arrays), named for the octabam
-| module (octabam-modules/mute-modes/manifest.py): its TableGrow can only APPEND after a
-| stock prefix, so it takes 15 stock rows + MUTE MODE + these, keeping LED BRIGHTNESS last
-| and behind the MKII gate. Absolute symbols: no bytes. tools/build_mute_modes.py splices
-| at index 2 instead and does not use them.
-    .equ mm_led_lbl, 0x400b63f8          | "LED BRIGHTNESS"
-    .equ mm_led_get, 0x40068c80          | FUN_40068c80: LOW / MID / MAX
-    .equ mm_led_set, 0x4006907c          | FUN_4006907c
-
     .text
 
 | ---- label ----

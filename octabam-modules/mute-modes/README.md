@@ -39,19 +39,15 @@ with no symbols defined (`DT_MODE`, the four-mode build, is the source default).
 `0x4001f3be` and `0x4001fb24`, and the setter writes the shadow at `0x100fff6c`.
 
 **The menu row.** The three stock PERSONALIZE pointer arrays (`0x400b2a34` labels,
-`0x400b2a74` getters, `0x400b2ac0` setters) are relocated with MUTE MODE added, and the row
-count at `0x40068fb2` goes from 15 to 16. The stock count shows 15 rows on an MKI and 16
-on an MKII, which is how LED BRIGHTNESS (row 15) stays MKII-only. octabam's `TableGrow`
-can only append after a stock prefix, so this module takes 15 stock rows, then MUTE
-MODE, then the stock LED BRIGHTNESS row again (`mm_led_*` in `patch_mutemode.s`): MUTE MODE
-is the **last** row on an MKI. The standalone image puts it at row 2, after PREVIEW
-WITHOUT FX; with `TableGrow.insert_at` this module will too. Nothing in the firmware keys
-off a PERSONALIZE row's position.
+`0x400b2a74` getters, `0x400b2ac0` setters) are relocated with MUTE MODE inserted at row 2,
+after PREVIEW WITHOUT FX (`TableGrow(count=16, insert_at=2)`), and the row count at
+`0x40068fb2` goes from 15 to 16. LED BRIGHTNESS stays the last row, which the stock count
+shows on an MKII only. Nothing in the firmware keys off a PERSONALIZE row's position.
 
 **With SIDECHAIN_COMPRESSOR** (not a module yet): the combined KYOTI image assembles
 `patch_softmute.s` with `SC_KEY` so a muted KEY track keeps feeding the compressor, as on
-stock. The source tests it with `.ifdef`, so it must be absent otherwise. It needs a
-per-remix assembler symbol, and is not in this module yet.
+stock. The source tests it with `.ifdef`, so it must be absent otherwise. octabam can
+express that per remix; it is added when SIDECHAIN_COMPRESSOR becomes a module.
 
 ## Measured vs inferred
 
