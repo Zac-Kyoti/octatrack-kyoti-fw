@@ -204,6 +204,8 @@
     .equ TOAST,     0x4005a2b8          | FUN_4005a2b8(text, dur) -- the "PART %d RELOADED" toast
     .equ PARTAPPLY, 0x40009094          | FUN_40009094(bank, part) -- apply a Part by event (parts-switch path)
     .equ RDRAW,     0x46c7c72c          | screen redraw dirty flag (set to 1)
+    .equ PART_RFRSH, 0x4005e0a8         | Session 120: the tail of stock's Part-reload shortcut
+                                        | (key 0x2a, FUN_4005e038): RDRAW = 1, then its UI refresh
 |   ===== Session 98: the DIAG build (--defsym RL_DIAG=1, tools/build_reload_from_project.py --diag) =====
 |   reference/handoffs/RELOAD3_SEQFAIL_HANDOFF.md section 4. On hardware a [PTN]+[TRACK n]
 |   reload frequently leaves the EDITED sequence playing while the toast says RELOADED and
@@ -633,6 +635,7 @@ r3b_try_bank:
 |   forced out -- each line is now well inside the box width.
     moveq   #2,%d0
     move.b  %d0,rl_msg                 | "TRK SEQ + PART" / "RELOADED", shown on SUCCESS
+    bsr.w   rl3_part_refresh           | Session 120: repaint the knobs as stock does
     bra.b   r3b_armed
 r3b_unsaved:
 |   Never saved: the SEQUENCE still reloaded, so saying only "SAVE PART FIRST!"
@@ -848,6 +851,22 @@ rl3_show2:
     addq.l  #8,%sp
     rts
 
+| ============ Session 120: the Part-reload UI refresh ============
+| Hardware (OBKYOTI6): after [BANK] + [TRACK n] the Part's values were live and audible but
+| the knobs still showed their pre-reload positions until a page press or a transport stop.
+| PART_RELOAD (FUN_4004aab4) changes the values only. Stock's own Part-reload shortcut
+| (key 0x2a -> FUN_4005e038, the same key-handler context as this chord) follows it with
+| a toast and then, from 0x4005e0a8: RDRAW = 1; pea -1; FUN_4004d948, FUN_40032208,
+| FUN_4004d640, FUN_400486cc, FUN_4006dbe8, FUN_40077b00, FUN_4002f2f8; lea 12(sp),sp;
+| unlk fp; rts. We run THAT code, not a copy: `link fp,#-8` gives it the frame it expects
+| (its lea 12 pops its own -1 plus our 8 bytes, so sp is back at fp before unlk, with
+| nothing below sp at any point), and its unlk/rts return here. Only after a SUCCESSFUL
+| Part reload: on "SAVE PART FIRST!" nothing changed. The calls are C functions: d2-d7 and
+| a2-a6 survive; the caller needs none of d0/d1/a0/a1 afterwards.
+rl3_part_refresh:
+    link.w  %fp,#-8
+    jmp     PART_RFRSH
+
 | ============ SELECT BANK: shown on RELEASE, not on PRESS ============
 | Gate spliced into stock's shared show tail at 0x4007af42. A [BANK] PRESS reaches it
 | with the gate CLOSED and simply returns, so no window and no overlay layer. The
@@ -1001,14 +1020,9 @@ rl3_msg_trk:
 rl3_msg_trkpart_1:
     .asciz "TRK SEQ + PART"
     .align 2
-rl3_msg_trkpart_2:
-    .asciz "RELOADED"
-    .align 2
+    .equ rl3_msg_trkpart_2, rl3_msg_trk + 8   | "RELOADED": the tail of "TRK SEQ RELOADED"
 |   Session 89: the card is gone, so its title bar string and the split
 |   "TRK SEQ"/"RELOADED" pair go with it -- that message is a one-line toast again.
-rl3_msg_empty:
-    .asciz ""
-    .align 2
 |   MLNOTIFY's line array. Stock's own groups carry an empty-string terminator
 |   after the lines (0x400b44b5), so mirror that shape.
 |   rl3_card takes an explicit line count, so these no longer need stock's
@@ -1079,12 +1093,6 @@ rat_aud:
     jsr     JOB_POST                   | FUN_40022778(1<<curbank)
     addq.l  #4,%sp
     rts
-rl_fmt_trk:
-    .asciz "T%d SEQ"
-    .align 2
-rl_fmt_mtrk:
-    .asciz "MT%d SEQ"
-    .align 2
 
 | ===== suppress the stock WHOLE-BANK reload our own job would otherwise cause =====
 | Session 80 continued (4). MEASURED by tools/diag_reload2_deser.py on the real

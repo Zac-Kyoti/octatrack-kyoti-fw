@@ -34996,3 +34996,26 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
   until the next reply):** automatic placement — ROM if it fits, DRAM otherwise (bytes are identical for 5407/54455).
   Also: the MEMORY page still reads 85.5 MB on OBKYOTI6 (octabam's PLACEMENT.md records the same); check FREE MEM in
   the Flex list instead.
+
+## Session 120 continued (2) (2026-10-01, `octabam-port`) — OBKYOTI6 on hardware: all five steps pass; RELOAD's stale knobs after a Part reload fixed (WIP)
+
+* **User flashed OBKYOTI6 (syx `6ca4dce5…`): all five test steps pass** — first hardware run of DIRECT_JUMP_KYOTI and
+  RELOAD_FROM_PROJECT from octabam DRAM. MEMORY page still reads 85.5 MB (expected; see above). FREE MEM not reported.
+* **Bug (user):** after `[BANK]`+`[TRACK n]` ("TRK SEQ + PART") the reloaded Part sounds right but the knobs keep their
+  pre-reload positions until a page press or a transport stop. Same family as REPITCH's ATTR repaint (S108/109).
+  **Cause:** `rl3_bank_trk` calls stock `FUN_4004aab4` (Part reload: values only) and nothing repaints the page. Stock's
+  own Part-reload shortcut (key `0x2a` → `FUN_4005e038`, keymap records `0x400bf574` / `0x400bf8ce` — key-handler
+  context like ours) follows it with a toast and, from `0x4005e0a8`: `RDRAW = 1`; `pea -1`; `FUN_4004d948`,
+  `FUN_40032208`, `FUN_4004d640`, `FUN_400486cc`, `FUN_4006dbe8`, `FUN_40077b00`, `FUN_4002f2f8`; `lea 12(sp)`; `unlk`;
+  `rts`. Old `patch_reload.s` (S42–47, never flashed) copied exactly that; S47 removed it when the Part work moved to the
+  storage task, and the S85 redesign moved the Part reload back into the key handler WITHOUT it.
+  **Fix (`patch_reload3.s`):** on a successful Part reload, `bsr rl3_part_refresh` = `link fp,#-8; jmp 0x4005e0a8` —
+  stock's own tail runs, its `lea 12`/`unlk`/`rts` return to us (no write below sp at any point). 14 B; paid for by
+  aliasing "RELOADED" to the tail of "TRK SEQ RELOADED" and removing three unreferenced strings (`rl3_msg_empty`,
+  `rl_fmt_trk`, `rl_fmt_mtrk`): RELOAD 2104 → 2088 B, so KYOTI V1.0's full CAVE zone still fits (a 58 B verbatim copy did
+  not: `patch_pattern_led` fell off the end).
+* **Builds, all WIP until promoted** (RELOAD's bytes changed): standalone RELOAD mainos `7fbf1096…` syx `0da606e5…`;
+  KYOTI V1.0 mainos `57576d91…` syx `f1a6e99a…`; Bugbuild BUG_RL3 rebuilt (the other six Bugbuilds still match). octabam
+  module re-pinned (`reference` sha `ef22237d…` = the new standalone bytes at `0x400d6500`); `make check
+  REMIX=reload-from-project` passes. **HW test image OBKYOTI7, BUILT, NOT flashed** (out/octabam_kyoti7/): syx
+  `5ef8eb7dc676d91eb779497b91ef1f977874a20c28c4ca83f5a0ac5bbd0557bc`, card `12c9661b…`; passes `verify_dram_boot`.

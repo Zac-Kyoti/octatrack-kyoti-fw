@@ -65,9 +65,9 @@ HOOKS = (
 # ---- the author's oracle -------------------------------------------------------
 # patch_reload3.s, m68k-elf-as -mcpu=5407 or 54455 (identical bytes; RL_DONE is the
 # source's default), linked at 0x400d6500 -- the address the standalone,
-# hardware-confirmed image uses: 2104 bytes. octabam re-links it there on every build
+# hardware-confirmed image uses: 2088 bytes. octabam re-links it there on every build
 # and compares.
-REFERENCE = (0x400d6500, "bd02dd428559e27abea093612326aed095240d21c32e61350b8e84829972b2b7")
+REFERENCE = (0x400d6500, "ef22237d38c24966e8bd5353a8cb05b020a33a655925e8fe90ee6f84d5e819c4")
 
 MODULE = Module(
     name="reload-from-project",

@@ -39,6 +39,11 @@ nop — otherwise the span would be left half-rewritten.
 
 The worker is **stock's own**; this module hooks it rather than reimplementing it.
 
+After a successful `[BANK]` + `[TRACK n]` Part reload it runs the tail of stock's own
+Part-reload shortcut (`0x4005e0a8`: the redraw flag plus stock's UI refresh), so the knobs
+show the reloaded Part's values at once instead of after a page press. Not yet confirmed
+on hardware.
+
 **In DRAM.** In octabam the code is a `Linked(dram=True)` unit: octabam's loader
 unpacks it into the platform reserve at the bottom of the audio page arena at every
 boot, and the six detours jump there. It left the ROM cave so that every KYOTI module
@@ -76,7 +81,7 @@ image and KYOTI V1.0), including that the sequencer and the internal metronome k
 their phase (`RELOAD_NOW` is not armed on any path). **Not yet run from DRAM on
 hardware.** Nothing tested on an MKII.
 
-2104 bytes, sha256 `bd02dd428559e27a…` linked at `0x400d6500` (`-mcpu=5407` or `54455`, identical); octabam re-links it there on every build and compares.
+2088 bytes, sha256 `ef22237d38c24966…` linked at `0x400d6500` (`-mcpu=5407` or `54455`, identical); octabam re-links it there on every build and compares.
 
 ## Licence
 
