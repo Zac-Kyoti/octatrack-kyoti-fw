@@ -76,6 +76,15 @@ MODULE = Module(
     kind=Kind.CF_PATCH,
     doc="Reload one track's sequence from the card without stopping the "
         "transport: [PTN]+[TRACK n], or [BANK]+[TRACK n] to re-apply the Part.",
+    # [BANK]+[TRACK n] calls stock Part RELOAD (0x4004aab4) from this unit. Octakit
+    # replaces that routine and traps (`illegal`) unless the caller is the menu Part
+    # Reload (0x4002dd5c) or FUNC+CUE (0x4005e060), so the pair crashes on the first use.
+    # The ledger cannot see it: the call is not a detour. Refused until a bridge exists
+    # (reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md).
+    conflicts=(("OCTAKIT",
+                "[BANK]+[TRACK n] calls the stock Part reload, which Octakit replaces and "
+                "traps on for any caller but its own two; refused until a bridge exists -- "
+                "take one"),),
     linked=(
         Linked("rl3", os.path.join(_HERE, "patch_reload3.s"), dram=True,
                reference=REFERENCE),

@@ -51,6 +51,12 @@ fits one remix, and it is the one that moved because it runs from key chords and
 message worker, never on the per-step tick. The standalone image keeps it in the ROM
 cave at `0x400d6500`; the bytes are the same, linked at a different address.
 
+**Not with `OCTAKIT`** (Em's Octakit), for now. `[BANK]+[TRACK n]` reloads the Part
+with stock's own Part RELOAD, and Octakit replaces that routine with one that halts the
+unit for any caller but the menu's and FUNC+CUE's. The ledger refuses the pair until a
+bridge module exists (`reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md` in
+octatrack-kyoti-fw).
+
 ## Why two plain chords and not a picker
 
 An earlier design (RELOAD2) put a modal picker window on a `[PTN]`-hold with arrow
