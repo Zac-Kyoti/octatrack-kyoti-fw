@@ -20,10 +20,13 @@
 1. Has Sam merged #551? Run `gh pr view 551 -R sambanks/octabam --json state`, or
    `git -C ~/Documents/octabam fetch && git -C ~/Documents/octabam ls-tree origin/main modules/direct-jump-kyoti/upstream`.
    A pin at `77f132f` or later means the stopgaps are live.
-2. Phase 0 intake (§5): reporters' crash screens (ADDR!), module lists, projects.
-3. RELOAD's bridge (§4, B-RL) is the small, well-understood one: do it first. DJK's (B-DJ)
+2. Phase 0 intake (§5): reporters' crash screens (ADDR!), module lists, projects. Resolve
+   an ADDR with §10.1.
+3. **The detail a fix needs is §10:** her switch protocol site by site, her calling
+   conventions and checks, and design notes for both bridges.
+4. RELOAD's bridge (§4, B-RL; §10.5) is the small, well-understood one: do it first. DJK's (B-DJ)
    needs Phases 1–2 first.
-4. Work in worktree `djk-octakit` (`../octatrack-kyoti-fw-djk-octakit`). Test octabam
+5. Work in worktree `djk-octakit` (`../octatrack-kyoti-fw-djk-octakit`). Test octabam
    changes in a **scratch octabam worktree**, never by rebuilding the shared libunicorn (§7).
 
 ## 1. Why octabam lets users build these pairs
@@ -99,7 +102,7 @@ against Octakit's recipe sites. Then each hit was read.
 | | what | for | against |
 |---|---|---|---|
 | **A** ✅ done | `conflicts=(("OCTAKIT", …),)` in DJK (`a7a5291`) and RELOAD (`c9a66cf`) | Stops new crash reports once Sam bumps | Takes both features away from Octakit users until a bridge exists |
-| **B-RL** | A RELOAD bridge, `kits-reload`'s pattern: under Octakit, call `0x4004aab4` with a whitelisted return (`0x4005e060`, the FUNC+CUE site) and continue our post-work from a detour on that return site. Under Octakit the Part half *means* "reload the saved Kit", which is what her routine does. | Small, the pattern is proven on hardware (`OKMS2`) | Must coexist with `kits-reload`'s own handling of `0x4005e060` / `0x4005e062`, and with her `reload-shortcut-format` rejoin |
+| **B-RL** | A RELOAD bridge. First candidate: under OCTAKIT, call stock's whole FUNC+CUE handler `0x4005e038` instead of `jsr 0x4004aab4` + the repaint tail, so her caller and selector checks pass by construction. Fallback: `kits-reload`'s return-site pattern. Details §10.5. Under Octakit the Part half *means* "reload the saved Kit", which is what her routine does. | Small, the pattern is proven on hardware (`OKMS2`) | Must coexist with `kits-reload`'s own handling of `0x4005e060` / `0x4005e062`, and with her `reload-shortcut-format` rejoin |
 | **B-DJ** | A DJK bridge, selected only when both are present. It makes the landing run her transaction around the replayed writes, gates arming on her prepared Kit, and releases her lease when the cue is cancelled | Leaves V7's hardware-confirmed timing code untouched | Depends on her private globals (`gk_sequencer_latch_begin`, `gk_sequencer_latch_commit_part`, `gk_midi_refresh_begin`, …) and so is pinned to her version. Unknown whether an octabam `Linked` unit can link against a `Runtime`'s symbols (`runtime_build.py` has the table internally) |
 | **C** | Restructure DJK so that its landing runs **stock's own switch block** instead of replaying it | Composes with every mod | Undoes V7's founding rule ("nothing enters the wrap-change body"). Means a full re-gate and new hardware runs. Shelved |
 | **D** | Ask Em for supported entry points ("switch to bank/pattern now", "reload the current Kit") | Cleanest long term; her code, her invariants | Depends on her time; her README invites combining her repo as a submodule |
@@ -252,3 +255,243 @@ print(ledger.check([m, registry.by_key('OCTAKIT')]) or 'CLEAN')"
   the bridge's hardware claims until they are.
 - PART_CHANGE_CARRYOVER_FIX being inert under Octakit may hide those bugs on Kit changes.
   Tell Em if Phase 1 shows they exist there.
+
+## 10. Research detail for the fix
+
+Everything below was read 2026-10-02:
+- her runtime at `c6d3f39` (`~/Documents/octabam/modules/octakit/upstream/runtime/`);
+- octabam `8d0ad6f4`;
+- the stock image `out/raw/section_3_MAIN_OS.bin` (objdump, base `0x40000400`).
+
+All of it is **C** unless marked. Re-check her side if her pin moves: her symbols, stack
+offsets and checks are hers to change.
+
+### 10.1 Resolving a crash screen
+
+- **Her runtime links at fixed addresses for a given version**, the same in every octabam
+  remix. octabam's runtime cache, `~/Documents/octabam/out/cache/runtime/<sha256>` (JSON,
+  key `symbols`, 3,855 entries from `m68k-elf-nm --defined-only`), resolves an ADDR
+  directly.
+- **Proof:** `gk_stock_part_saved_to_working_reload_report_fatal` = `0x45d167e0`, exactly
+  the ADDR on midisc's OKMS1 crash screen.
+  ```sh
+  f=$(ls -t ~/Documents/octabam/out/cache/runtime/* | head -1)
+  python3 -c "import json,sys; s=json.load(open('$f'))['symbols']; a=int(sys.argv[1],16); \
+  print(max(((v,k) for k,v in s.items() if v<=a)))" 45D167E0
+  ```
+- VEC:04 = `illegal` = one of her fatal labels. The ones that matter here, at `c6d3f39`:
+
+| ADDR | label | who triggers it |
+|---|---|---|
+| `0x45d167e0` | `gk_stock_part_saved_to_working_reload_report_fatal` | RELOAD `[BANK]+[TRACK]` (caller not whitelisted) |
+| `0x45d167da` / `0x45d167dc` / `0x45d167e8` / `0x45d167ec` | part-reload transaction / interlock / context-corrupt / transaction-corrupt | a reload that got past the caller check but found her state corrupt |
+| `0x45d18376` | `gk_sequencer_latch_begin_fatal` | the switch block's latch begin failed (DJK suspect) |
+| `0x45d183be` / `0x45d183c0` / `0x45d183c2` | latch final-store / queue-commit-deferred / commit fatal | the switch block's latch commit failed (DJK suspect) |
+| `0x45d1843a` / `0x45d1843c` / `0x45d1843e` | scene A / scene B / audio-latch store fatal | a scene move while the latch is not ready (DJK suspect) |
+| `0x45d1525a`..`0x45d15260` | MIDI refresh begin / commit / consume / generic | the MIDI twin of the switch (DJK suspect) |
+| `0x45d1d674`..`0x45d1d682` | sequencer tick return / snapshot / publish / release | descriptor release in her tick wrappers |
+| `0x45d16a00`..`0x45d16a0c` | pattern transition pre/post engine, retry | the cue/schedule path |
+| `0x45d2df86`..`0x45d2dfce` | pattern queue commit prepare/guard/defer/exit, arranger | the queue path |
+| `0x45d199ac` | `gk_current_tuple_refresh_fatal` | a non-whitelisted call to `0x40001f18` (BATCH_BUGFIXES' carryover cave, unreachable under her) |
+| `0x45d13cbc`..`0x45d13cc0` | engine part load / saved part reload | `0x40009094` from a non-whitelisted caller while quiesced |
+
+### 10.2 Her constants and state (abi.inc)
+
+- Status codes: `GK_OK` 0, `GK_ERR_INVALID` −1, `_UPDATING` −2, `_BUSY` −3, `_OVERFLOW` −4,
+  `_UNDERFLOW` −5, `_CORRUPT` −6, `_RANGE` −7, `_EXHAUSTED` −8, `_IO` −9.
+- `GK_ID_NONE` `0xff`. `GK_DESCRIPTOR_COUNT` 128.
+- `__gk_lifecycle_state`: `GK_LIFECYCLE_ACTIVE` 0, `GK_LIFECYCLE_QUIESCED` `0x4b495451`.
+  While quiesced (boot / project load) most wrappers fall through to stock.
+- Descriptor, 16 B (`__gk_descriptors + id*16`): PAYLOAD +0 (long), ROOTS +8 (word),
+  READERS +10 (word), KIT +12, PHYSICAL +13, SPILL +14, FLAGS +15. FLAGS bits: VALID
+  `0x01`, COPYING `0x02`, SPILLED `0x04`, WORKSPACE `0x08`, DIRTY `0x10`, CLONING `0x20`,
+  PROMOTING `0x40`.
+- Physical cache entry, 4 B (`__gk_physical_cache + slot*4`): OWNER +0, KIT +1, STATE +2,
+  RESERVED +3.
+- **Physical slot = bank*4 + part**, so the 64 stock Part positions are her slots, and
+  `__gk_physical_payload_table[slot]` is that slot's payload.
+- `__gk_pattern_assignments[bank*16 + pattern]` = the pattern's Kit (0..255).
+- Sidecars, at `__gk_lease_sidecars + offset`: one word each, high byte = old descriptor,
+  low byte = new descriptor, `0xff` = none. ENGINE_CURRENT +0, SEQUENCER_LATCH,
+  MIDI_REFRESH, AUDIO_* (+98/+146/+194/+210).
+- Shadows: `__gk_current_bank` / `__gk_current_pattern` / `__gk_current_kit`. The only
+  writer of the first two is the workspace commit (`workspace.S`), not the switch.
+- `__gk_sequencer_latch_queue_handoff`: set by latch begin during a pattern switch. While
+  set, her MIDI-refresh and audio wrappers take the hand-off path.
+- Stock addresses she names that we also use: `GK_STOCK_SCHEDULER_STATE` `0x800065b8` (=
+  DJK `TRANSPORT_L`, 1 = running); `GK_STOCK_SEQUENCER_PREVIOUS_PATTERN` `0x800065c1`
+  (the word PREV_PAT<<8 | PREV_BANK); `GK_STOCK_SEQUENCER_CURRENT_BANK/PATTERN`
+  `0x800065bd/be` (= DJK ACT_BANK/ACT_PAT); `GK_STOCK_SEQUENCER_LATCH_BANK/PART`
+  `0x46c7ff40/62` (= DJK ENG_ABANK/ENG_APART); `GK_STOCK_PATTERN_ASSIGNMENT_TABLE`
+  `0x400eb036` (+1 = blob `+0x8e57`); `GK_STOCK_WORKING_PART_MIRROR_BASE` `0x100a4ece`;
+  `GK_STOCK_PATTERN_MIRROR_BASE` `0x1001614e`.
+- Kit data, from Em via octabam's `modules/octakit/README.md`:
+  - Kits keep the Part layout.
+  - Saved Kit data: `__gk_canonical_payloads + kit*0x18b2`.
+  - The working Kit is separate. A write goes `gk_workspace_prepare` →
+    `gk_physical_acquire` → `gk_descriptor_store_byte` per byte →
+    `gk_workspace_mark_dirty_pending` → `gk_workspace_commit_update` →
+    `gk_descriptor_release`, all `.global`.
+
+### 10.3 The stock switch block and her four wrappers
+
+The block runs in the tick ISR. Stock reaches it on a real switch (`d6` = PEND ≠ ACT), after
+PREV←ACT and ACT←PEND.
+
+| site | stock instruction(s) displaced | her entry | continues at | what runs |
+|---|---|---|---|---|
+| `0x400a45a8` (8 B) | `moveq #1,%d4; move.l %d4,0x46c7fa80` (AFLAGS = 1), just after the `{0x14, part}` post (`0x400a459a..a6`) | `gk_stock_sequencer_latch_begin` | `0x400a45b0` | saves d0-d3/d5-d7/a0-a6 (**not d4**); `bsr gk_sequencer_latch_begin`; nonzero → `illegal` unless quiesced; then the displaced pair. |
+| `0x400a468c` (6 B) | `move.b %d0,0x46c7ff62` (APART; d0 = `0x400eb036[off+1]`) | `gk_stock_sequencer_latch_commit` | `0x400a4692` | saves all; `bsr gk_sequencer_latch_commit_part` (d0 = part), which **itself** stores APART and publishes the sidecar under SR `0x2700`; nonzero → `gk_sequencer_latch_queue_commit_deferred`. Quiesced → the plain store. |
+| `0x400a475e` (8 B) | `moveq #1,%d2; move.l %d2,0x46c76a22` (MIDI flag) | `gk_stock_midi_refresh_begin` | stock continue | if `__gk_sequencer_latch_queue_handoff` is set: passthrough; else `gk_midi_refresh_begin` (validates, `gk_selector_begin_physical`); failure → `illegal` unless quiesced. |
+| `0x400a47f0` (6 B) | `move.b (%a0),0x46c7a934` (MIDI part) | `gk_stock_midi_refresh_commit` | stock continue | hand-off or quiesced → the plain store; else `gk_selector_commit_physical_part`, failure → `illegal`. |
+
+**What `gk_sequencer_latch_begin` checks:**
+1. It acquires the engine-current descriptor (`gk_sequencer_engine_acquire`).
+2. Shadow checks, failing with CORRUPT (corrupt → release, return −6):
+   - `__gk_workspace_descriptor` equals it;
+   - `__gk_current_bank/pattern` ≤ 15, ENGINE_PART (`0x80001829`) ≤ 3;
+   - ENGINE_BANK (`0x80001828`) == shadow bank;
+   - the descriptor is VALID, WORKSPACE, not SPILLED or bit 7;
+   - payload == its physical slot's payload, ROOTS and READERS > 0;
+   - physical == bank*4 + ENGINE_PART;
+   - the physical cache owner/kit match, state 0, reserved none;
+   - `__gk_current_kit` and the pattern's assignment == the descriptor's kit;
+   - the shadow pattern's blob `+0x8e57` == ENGINE_PART.
+3. **If ACT (`0x800065bd/be`) ≠ the shadow**, the pattern-switch case: it runs
+   `gk_sequencer_latch_queue_handoff_validate` (`audio_secondary.S`). That requires:
+   - ACT bank/pattern ≤ 15;
+   - `0x800065b8 == 1`;
+   - when not a repeat, **the word at `0x800065c1` (PREV) == the shadow**.
+
+   It then publishes the hand-off marker and returns OK.
+4. Otherwise it opens the SEQUENCER_LATCH sidecar (`gk_selector_begin_update`).
+
+**Audio side.** At `0x4000af24` stock tests AFLAGS. Her gate, when flags ≠ 0, calls
+`gk_audio_latch_ready`:
+- If `__gk_sequencer_latch_queue_handoff` is set, it defers to
+  `gk_pattern_queue_audio_handoff_ready`.
+- Otherwise it requires the latch sidecar low byte to be none, ENGINE_CURRENT == latch
+  sidecar, latch bank/part == ENGINE_BANK/PART, and the descriptor valid at physical
+  bank*4 + part.
+- Not ready → jump to `GK_STOCK_AUDIO_LATCH_SKIP` `0x4000b266`, so the apply is
+  **postponed** to a later frame.
+- The apply itself is `jsr 0x40009e00` at `0x4000b1d8`, which her
+  `audio-pattern-part-load-commit` replaces at `0x4000b1d6`.
+- Scene A/B stores inside the apply path call `gk_audio_latch_store_byte`: not ready →
+  `illegal`.
+
+**At cue time** (`gk_stock_pattern_schedule_prepare`, `pattern.S`), for callers whose return
+is one of `0x400a0eae` / `0x400a1022` / `0x400a1044` / `0x4004a658`, she:
+1. prepares the workspace for the cued pattern's Kit (`gk_workspace_prepare` → physical
+   slot);
+2. writes the slot's part into the pattern's `+0x8e57` (blob and mirror);
+3. calls the light apply `0x40009e00` herself, then `gk_workspace_commit_update`.
+
+So **the incoming Kit is likely resident before the switch (L)**. Phase 2 must confirm it
+for cues made during playback (`0x400a10c8` queue-commit path).
+
+### 10.4 DJK against that protocol (B-DJ design notes)
+
+- `dl_commit` (`patch_directjump_v7.s`) does PREV←ACT, ACT←PEND, then the `{0x15}` post,
+  `dj_handoff`, and the `{0x11}` post.
+- `dj_handoff` replays, in stock order:
+  - `{0x14, part}` post;
+  - ENG_AFLAGS `0x46c7fa80`, ENG_ATIME `0x800019e4`, ENG_ABANK `0x46c7ff40`, ENG_APART
+    `0x46c7ff62`;
+  - ENG_MFLAGS `0x46c7a120`, ENG_MTIME1 `0x46c76aa6`, ENG_MFLAG `0x46c76a22`, ENG_MTIME2
+    `0x46c76aaa`, ENG_MBANK `0x46c7a850`, ENG_MPART `0x46c7a934`;
+  - `COND_RESET(-1)`.
+- **Its PREV/ACT state at that point is what her hand-off validation expects** (PREV ==
+  her shadow, transport running). So the minimal bridge is her two calls in stock's
+  positions:
+  1. after the `{0x14}` post, **`jsr gk_sequencer_latch_begin`** (callee-saved
+     d2-d7/a2-a5, result in d0);
+  2. **if d0 ≠ 0, cancel the landing** and let stock cue it (no trap: we call her inner
+     routine, not her `illegal`-ing wrapper);
+  3. write AFLAGS / ATIME / ABANK as now;
+  4. **`jsr gk_sequencer_latch_commit_part` with d0 = part** in place of the ENG_APART
+     store (it stores APART itself). It clobbers a0; on failure, mirror her wrapper (the
+     deferred path) or cancel;
+  5. the MIDI half can stay as is, since her MIDI wrappers pass through while
+     `__gk_sequencer_latch_queue_handoff` is set. Confirm under the port.
+- Unknowns for Phase 2:
+  - who clears the hand-off marker afterwards (`gk_pattern_queue_audio_handoff_ready`,
+    `arranger.S`);
+  - whether DJK's landing time (now, not now + one master step) upsets her audio
+    hand-off;
+  - V7.0.1's re-cue take-back (`da_recue`) against a Kit she prepared at cue time;
+  - whether `+0x8e57` already holds her physical part when DJK reads it (it should, per
+    10.3).
+- **Symbols:** her addresses are fixed per version (10.1), but octabam's schema has no way
+  yet for a `Linked` unit to import a `Runtime` symbol: `runtime_build.py` passes
+  `symbols` only to the loader. Options: add that to the schema (ask Sam), or have the
+  bridge's manifest read the cache / her ELF and emit `--defsym`. `defsym`s are
+  **link-time** in octabam (S120), so `.ifdef` gates won't see them.
+
+### 10.5 RELOAD against her Part reload (B-RL design notes)
+
+**Our side**, `patch_reload3.s`:
+- `r3b_try_bank` pushes CUR_PART (`0x80000003`) and does `jsr PART_RELOAD` (`0x4004aab4`).
+- A verdict d0 = 0 means never saved, which gives "SAVE PART FIRST!".
+- On success it runs `rl3_part_refresh` (`link.w %fp,#-8; jmp 0x4005e0a8`, the knob
+  repaint tail of stock's FUNC+CUE handler).
+- Then `rl3_arm_n` posts the sequence job.
+
+**Her side**, `gk_stock_part_saved_to_working_reload` (`part_save_clear_reload.S`):
+1. lifecycle must be active, else fatal;
+2. **(sp) must be `0x4002dd5c` or `0x4005e060`**, else fatal;
+3. the part arg ≤ 3;
+4. **the selector check reads the return again**: FUNC+CUE return → part must == `0x80000003`;
+   menu return → part must == `GK_STOCK_SELECTED_PART` `0x460d10c8`;
+5. `gk_stock_current_context_validate_or_resume`, workspace bound, current Kit initialised;
+6. `gk_stock_load_kit_transaction`.
+
+It returns **d0 = 1** on success and 0 on a soft failure; CORRUPT is fatal. **RELOAD's
+argument already satisfies the FUNC+CUE selector.**
+
+**The stock FUNC+CUE handler** `0x4005e038` takes no arguments; it is a keymap handler,
+pointed to from `0x400bf574` / `0x400bf8ce`:
+
+| address | what it does |
+|---|---|
+| `0x4005e03c..54` | `link fp,#-32`; part = `0x80000003`; test the bank's saved bitmask (`*0x46c82456 + 0x95048`, bit part), else → `0x4005e0e2` ("SAVE PART FIRST!") |
+| `0x4005e058..60` | push part, `jsr 0x4004aab4`, `addq #4,sp` |
+| `0x4005e062..9a` | format "PART %d RELOADED" (`0x400b41aa`) or `0x400b41bb` via `0x40013a08` |
+| `0x4005e09c..a4` | toast, 0x18 |
+| `0x4005e0a8..` | the repaint tail RELOAD borrows |
+
+Under Octakit, `0x4005e062` belongs to her (`reload-shortcut-format` → her formatter). When
+MIDI SCENES is present, `kits-reload` overrides `0x4005e05a` and `0x4005e062` (§4 there).
+
+**Bridge candidates:**
+- **(a) Call the whole handler.** Under OCTAKIT, replace `jsr PART_RELOAD` +
+  `rl3_part_refresh` with `jsr 0x4005e038`.
+  - For: her checks pass by construction, and it composes with `kits-reload` and her
+    formatter.
+  - Against: her toast appears before RELOAD's own; RELOAD loses the saved/unsaved verdict
+    (read the saved bit first ourselves, or read her result); the handler's d0 return is 1
+    (kits-reload README).
+- **(b) kits-reload's pattern.** Push `0x4005e060` as our return and get control back by
+  detouring a return site. That collides with `kits-reload`'s own `0x4005e062` override:
+  harder.
+
+**(a) is the first thing to try.** The `[PTN]+[TRACK]` chord's open questions (10.3
+mirrors, the case-0x14 job worker) are Phase 1 items.
+
+### 10.6 Where else to look
+
+- **Her sources:**
+  - `sequencer_audio.S`: latch begin/commit, audio gate, scene stores;
+  - `audio_secondary.S`: hand-off validation;
+  - `audio_upstream.S`: queue commit deferral;
+  - `midi_refresh.S`, `pattern.S` (schedule), `part_save_clear_reload.S`, `events.S`
+    (`part-event-publish`), `track_refresh.S` (`0x40001f18`), `engine_load.S`
+    (`0x40009094`).
+- **Her recipe:** `runtime/firmware.json` `patches[]`, `addr = 0x40000400 + offset`;
+  `writes[].data` is the replacement, usually `4ef9`/`4eb9` + her address.
+- **octabam:**
+  - `modules/kits-reload/{manifest.py,reload.s}`, the working bridge;
+  - `modules/octakit/README.md` ("Calling the page-1 writer beside her": her
+    `GK_TRACK_PARAMETER_TOKEN_ARMED` token pattern; Kit data);
+  - `tools/remix/runtime_build.py`, symbols;
+  - `tools/remix/schema.py`: `Runtime.pinned_returns`, `Detour.subst_return`, `Override`.
