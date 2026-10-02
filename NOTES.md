@@ -35023,3 +35023,26 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
   `build_reload_from_project.py` mainos `7fbf1096…` (syx `0da606e5…`), `build_kyoti.py` mainos `57576d91…` (syx
   `f1a6e99a…`), `build_bugbuilds.py` BUG_RL3 mainos `09ab9ea2…` (syx `46316050…`). All twelve FINAL builders re-run
   without the opt-in: every one seals (18 images).
+
+## Session 121 (2026-10-02, `djk-octakit`) — KYOTI modules × Octakit: two crashes scoped, both refused
+
+* **Report:** users say octabam images with OCTAKIT + DIRECT_JUMP_KYOTI crash the OT. The ledger called the
+  pair CLEAN (no shared byte). Read both sources; nothing reproduced, no build.
+* **DJK (L, from source):** Octakit runs stock's switch block `0x400a4568..0x400a4856` inside checked Kit
+  transactions: latch begin/commit `0x400a45a8`/`0x400a468c`, MIDI refresh `0x400a475e`/`0x400a47f0`, audio
+  gate `0x4000af24`/`0x4000b1d6`, scene stores that `illegal` on a mismatch. V7.0.1's `dj_handoff` replays
+  that block's stock writes raw and `dl_commit` does ACT←PEND itself, so her shadows and sidecars go stale.
+  Expect VEC:04, possibly after the jump rather than on it.
+* **RELOAD (C):** `[BANK]+[TRACK n]` does `jsr 0x4004aab4` from our unit. Her replacement accepts only returns
+  `0x4002dd5c`/`0x4005e060`, so it traps on first use (midisc's kits-reload class). `[PTN]+[TRACK n]` is
+  probably safe, but its LIVE_REFRESH writes mirrors she reads. Its `PARTAPPLY` call is dead code (only kind 3
+  is armed).
+* **BATCH_BUGFIXES (C):** PART_CHANGE_CARRYOVER_FIX is inert under Octakit. Her `part-event-publish` takes over
+  case 0x13 from `0x400621a6` to `0x40062d1c`, so our hooks `0x400621da`/`0x40062216` never run. MUTE_MODES /
+  QLREC / ERASE reference no Octakit site.
+* **Ledger blind spot** (told Sam): `pinned_returns` covers detours only, not direct calls from `Linked` units.
+* **Stopgaps pushed:** OCTAKIT conflict in DJK `a7a5291` and RELOAD `c9a66cf`. Checked against octabam `8d0ad6f4`
+  (selftest OK, docs 0 problems, pairs refused, the six KYOTI modules together clean). Sam asked to move all
+  six submodules `7f80b85` → `c9a66cf`.
+* Everything else (mechanism tables, options, phases, how the checks were run, open decisions):
+  `reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md`.

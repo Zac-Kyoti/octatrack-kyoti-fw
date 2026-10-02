@@ -165,3 +165,7 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   and REPITCH_REPEAT98_KYOTI wait on schema answers from octabam's author (`TableGrow`
   insertion, `defsyms` on `Linked`, DSP data claims, and how to extend a stock effect's
   page). `NOTES.md` Session 113.
+- **KYOTI modules × Octakit** — DIRECT_JUMP_KYOTI and RELOAD_FROM_PROJECT crash beside
+  Octakit and are refused with it until bridges exist (`a7a5291`, `c9a66cf`; live once Sam
+  bumps octabam's six KYOTI submodules off `7f80b85`). Scope, findings and the plan:
+  `reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md` — start at its §0. `NOTES.md` Session 121.
