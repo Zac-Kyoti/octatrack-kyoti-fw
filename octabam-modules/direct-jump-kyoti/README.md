@@ -65,6 +65,10 @@ addresses of its own state block and `DJ_MODE`. `reference(addr)` in the manifes
 exactly those, and was verified against real `m68k-elf-ld` output at `0x400d7300`
 and `0x400d6500` — byte-identical at both.
 
+**Not with octabam's `DIRECT JUMP`** (Tim Hastie's CHAIN AFTER = DIRECT). The two share
+no address, but both change when a cued pattern takes over and have never been tried in
+one image, so the module declares them a conflict and the ledger refuses the pair.
+
 ## Measured vs inferred
 
 **Hardware-confirmed** (the author's Octatrack MKI, 2026-09-27/28): the

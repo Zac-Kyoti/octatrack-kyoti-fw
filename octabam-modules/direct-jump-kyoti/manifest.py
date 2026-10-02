@@ -208,6 +208,11 @@ MODULE = Module(
     kind=Kind.CF_PATCH,
     doc="Clock-locked DIRECT JUMP ([PTN]+[YES]): a cued pattern lands on the "
         "next step exactly where it would be had it played since START.",
+    # Tim Hastie's DIRECT JUMP (modules/direct-jump) shares no address with this one,
+    # but both change WHEN a cued pattern takes over; untested together.
+    conflicts=(("DIRECT JUMP",
+                "both change when a cued pattern takes over (CHAIN AFTER = DIRECT vs "
+                "[PTN]+[YES]); never tested together -- take one"),),
     cf_patches=(
         CavePatch(
             label="DIRECT_JUMP_KYOTI cave",
