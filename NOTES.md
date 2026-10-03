@@ -35186,3 +35186,38 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
 * **Promoted on the user's instruction:** `FINAL["build_kyoti.py"]` → `82dd6660…` (was
   `57576d91…`). README's KYOTI entry no longer says "except REC_TRIG_MUTE". The Bugbuilds
   entry keeps it, because it is true: `build_bugbuilds.py` has no REC_TRIG_MUTE image.
+## Session 120 continued (4) (2026-10-03, `octabam-port`) — Sam's schema answers; REPITCH draft PR; SIDECHAIN_COMPRESSOR as a module; MUTE_MODES' SC_KEY per remix (WIP)
+
+* **Octabam.** #551 merged (`f3b12f36`, the six pinned at `77f132f`). Its CI runs #255/#256 failed with zero jobs:
+  fork-PR runs need the owner's approval and expired; Sam ran the gates locally (all green), and `main` CI has
+  passed since. Sam's #552 answered every ask (per-payload `DspHook.site`, `MenuEntry.stock_dsp`,
+  `Param.formatter_word/widget_word/word_12a`, `DspSection.subst`; `ptable` with one `$fab1e0` base literal and
+  `p:(rN)` reads); #553 keeps routines a kept effect calls inside a harvested one (DARK-in-SPRING + three more).
+* **REPITCH_REPEAT98_KYOTI:** the three held commits pushed (`0fea4f4`); draft PR sambanks/octabam#561 (ColdFire
+  half shim + test remix; `tools/remix/selftest.py` needs every test remix in its "gives up" table). **DSP half
+  blocked:** octabam's `dsp_asm` cannot build an ALU op with an XY dual move — `clr a x:(r1)+,x0 y:(r7)+,y0` is
+  `InvalidInstruction`, `mac x1,y0,b x:(r1)+,x1 y:(r7)+,y0` encodes `macsu x1,y0,b` (`0126a6`, moves dropped; its
+  round-trip catches it). `dsp_xasm.py` splices these. Asked on #561 (user's choice) rather than adding an
+  instruction per tap.
+* **SIDECHAIN_COMPRESSOR module** (`octabam-modules/sidechain-compressor/`): `sc_cf` ROM unit (134 B, reference =
+  the standalone's bytes at `0x400d7000`); COMPRESSOR row with `stock_dsp`; page-2 raw words as the standalone writes
+  them; three per-payload hooks; per-core values via `subst`; tables via `ptable`. Source changes, standalone bytes
+  unchanged (all 12 FINAL builders seal): the KEY GAIN load reads the `$fab1e0` literal (the standalone builder
+  substitutes the address), and the KEY FLT load is token `@FTAB_R1@` (standalone: `move #>FTAB,r1`; octabam:
+  `lua (r1+$10),r1` + `nop`; r1 is not written between the reads and the KEY GAIN read dominates zz06).
+  Measured in a scratch octabam (`f6ce41d6`): placed DSP code = the standalone's instruction for instruction on both
+  payloads except the two table loads, tables identical, 340 words; descriptor = the standalone's except the three
+  `sc_cf` pointers; `make check-remix` green for `sidechain-compressor` (SPRING REV given up), MUTE_MODES +
+  SIDECHAIN, and all six KYOTI + SIDECHAIN (248 B ROM cave left, `verify_dram_boot` PASS); the ledger refuses it
+  beside BusDelay and BusVerb (keybus `y:$903+`). `emu_sc_dsp3.py`: ALL GOOD.
+* **Two octabam findings for Sam:** (1) `Param()` does NOT inherit the donor's enable nibble — the build writes the
+  bitmap from `active`, so the clone hid ATK..MIX and RMS (`P+0x18e` 0 vs stock `01111111`) and `verify_menu` passed
+  it (it checks against the declaration). Fixed here by declaring slots 0-6 active under stock's names. (2) Labels
+  on a raw-word slot still generate an unused label formatter (138 B of ROM) — dropped.
+* **My note to Sam (#552 addendum) was wrong on KFLT's widget:** the standalone writes 0 (a plain knob), not the
+  donor's `0x400475f8`. The module uses 0.
+* **MUTE_MODES SC_KEY per remix:** `patch_softmute.s` `.include "remix.inc"`; `build_mute_modes.py` gives it an
+  empty one (`out/mute_modes_inc/`, SC_KEY stays a `--defsym` from build_kyoti); the manifest's `include` writes
+  `.set SC_KEY,1` only beside SIDECHAIN_COMPRESSOR and its callable `reference` names KYOTI V1.0's bytes
+  (`0x400d74e4`, `8814aa2c…`, 1086 B) or the standalone's (`0x400d7400`, `d56d848e…`). Both verified in octabam.
+* **Not pushed, no PR yet, nothing to flash.**

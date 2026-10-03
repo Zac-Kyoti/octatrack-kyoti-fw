@@ -137,7 +137,7 @@ builder's FINAL entry and the old builder is deleted. There is no superseded tie
 |---|---|---|
 | MUTE_MODES | `build_mute_modes.py` | `octabam-modules/mute-modes` |
 | DIRECT_JUMP_KYOTI | `build_direct_jump_kyoti.py` | `octabam-modules/direct-jump-kyoti` |
-| SIDECHAIN_COMPRESSOR | `build_sidechain_compressor.py` | not yet ported |
+| SIDECHAIN_COMPRESSOR | `build_sidechain_compressor.py` | `octabam-modules/sidechain-compressor` (WIP, not on hardware in this form) |
 | RELOAD_FROM_PROJECT | `build_reload_from_project.py` | `octabam-modules/reload-from-project` |
 | REPITCH_REPEAT98_KYOTI | `build_repitch_repeat98_kyoti.py` | `octabam-modules/repitch-repeat98-kyoti` (ColdFire half; DSP pending) |
 | QUANTIZE_LIVE_REC_TOGGLE | `build_quantize_live_rec_toggle.py` | `octabam-modules/quantize-live-rec-toggle` |
@@ -162,13 +162,14 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   re-cues.
 - **REPITCH_REPEAT98_KYOTI** — not specifically tested: RTRG retrigs; a full DSP core of
   RPSP tracks under heavy effects. DARK REVERB alongside the engine is emulator-verified.
-- **octabam port** — five modules in `octabam-modules/`. MUTE_MODES, SIDECHAIN_COMPRESSOR
-  and REPITCH_REPEAT98_KYOTI wait on schema answers from octabam's author (`TableGrow`
-  insertion, `defsyms` on `Linked`, DSP data claims, and how to extend a stock effect's
-  page). `NOTES.md` Session 113.
+- **octabam port** — six modules merged in octabam (`f3b12f36`, pinned at `77f132f`).
+  SIDECHAIN_COMPRESSOR: module built and gated in a scratch octabam copy, with MUTE_MODES'
+  SC_KEY variant; not yet a PR, not on hardware in this form. REPITCH_REPEAT98_KYOTI:
+  ColdFire half in draft PR sambanks/octabam#561; its DSP half waits on XY+ALU dual-move
+  support in octabam's assembler (asked on #561). `NOTES.md` Session 120 continued (4).
 - **KYOTI modules × Octakit** — DIRECT_JUMP_KYOTI and RELOAD_FROM_PROJECT crash beside
-  Octakit and are refused with it until bridges exist (`a7a5291`, `c9a66cf`; live once Sam
-  bumps octabam's six KYOTI submodules off `7f80b85`). Scope, findings and the plan:
+  Octakit and are refused with it until bridges exist (`a7a5291`, `c9a66cf`; live in octabam
+  since `f3b12f36`). Scope, findings and the plan:
   `reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md` — start at its §0. `NOTES.md` Session 121.
 - **REC_TRIG_MUTE** (`tools/build_rec_trig_mute.py`) — FINAL since 2026-10-03, standalone
   (syx `c1cd7381…`) and in KYOTI V1.0. MIDI CC 80 not tried on hardware yet. Not done on
