@@ -117,7 +117,7 @@ def assemble():
                              .replace("@SBASE@", "$3be00").replace("@FSBASE@", "$33e00") \
                              .replace("@GCNT@", "$3bdff").replace("@GSEED@", "$3bdfe") \
                              .replace("@FOREIGN_BR@", "bne zz24") \
-                             .replace("@GTAB@", f"${gt:x}").replace("@FTAB@", f"${ft:x}") \
+                             .replace("$fab1e0", f"${gt:x}").replace("@FTAB_R1@", f"move    #>${ft:x},r1") \
                              .replace("@LPEDGE@", f"${sc_tables.lp_edge():x}") \
                              .replace("@HPEDGE@", f"${sc_tables.hp_edge():x}") \
                              .replace("@KGNA@", f"${sc_tables.kgn_smooth_a():x}")

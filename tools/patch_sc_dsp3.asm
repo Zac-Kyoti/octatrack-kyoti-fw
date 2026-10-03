@@ -23,12 +23,19 @@
 ; every label here is `zzNN`, all 4 chars, all distinct => none is a prefix of
 ; another), every routine ends `rts` (the build hand-encodes `jsr <cave>` at
 ; each site, control returns via rts).  Build tokens, rewritten per payload:
-;   @GTAB@   absolute P addr of the 16-word KEY GAIN table (gain/64, Q23)
-;   @FTAB@   absolute P addr of the 32-word KEY FLT table (a = 1-exp(-2pi fc/fs), Q23)
+;   the KEY GAIN table's base -- the one 6-hex-digit `fab1e0` literal below
+;            (octabam's ptable marker, so it appears nowhere else in this file):
+;            absolute P addr of the 16-word KEY GAIN table (gain/64, Q23); the
+;            32-word KEY FLT table (a = 1-exp(-2pi fc/fs), Q23) follows it
+;   FTAB_R1 (the token at zz06, in @s)  r1 = the KEY FLT table: `move #>FTAB,r1` (the standalone
+;            builder, unchanged bytes), or `lua (r1+$10),r1` from the KEY GAIN
+;            base still in r1 (octabam: one table literal; r1 is not written
+;            between the two reads, and the KEY GAIN read runs on every path
+;            to zz06)
 ;   @LPEDGE@ literal Q23 immediate, LP's near-OFF edge-override coefficient
 ;   @HPEDGE@ literal Q23 immediate, HP's near-OFF edge-override coefficient
 ;   @KGNA@   literal Q23 immediate, KEY GAIN's block-rate smoothing coefficient
-; The tables are appended after the code by build_sidechain_compressor.py; @GTAB@/@FTAB@
+; The tables are appended after the code by build_sidechain_compressor.py; both table addresses
 ; are resolved in a first sizing pass so the `move #>imm` widths never shift.
 ; @LPEDGE@/@HPEDGE@ are plain literal substitutions (tools/sc_tables.py's
 ; lp_edge()/hp_edge()), not addresses -- fixed width regardless of pass.
@@ -358,7 +365,7 @@ zz25:
         move    b1,a                 ; (q3) a = KEY GAIN 0..127
         asr     #$3,a,a               ; a1 = gain table index 0..15
         move    a1,n1
-        move    #>@GTAB@,r1
+        move    #>$fab1e0,r1
         move    p:(r1+n1),x1          ; x1 = target gain/64 (Q23), this block
         move    x:(r7+$17),b          ; b = applied gain (persisted; 0 = cold)
         tst     b
@@ -470,7 +477,7 @@ zz05:
         move    #>@LPEDGE@,x1           ; edge -> Q23 ceiling, ~unity LP
         bra     zz09
 zz06:
-        move    #>@FTAB@,r1
+        @FTAB_R1@
         move    p:(r1+n1),x1          ; x1 = a coefficient (Q23)
 zz09:
 ;   NOTE: do NOT gate on the stock "first-block" bit (r7+$f) here -- it can go

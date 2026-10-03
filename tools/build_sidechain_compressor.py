@@ -25,7 +25,7 @@ choosers, sctap publish tap, scdet detector redirect) PLUS:
                  if MON_ON says so, overwrites X:0 with a fresh re-fetch of
                  keybus[key] gen 1 before this track's audio is committed.
   * two coefficient tables (tools/sc_tables.py: 16-word gain, 32-word f) are
-    appended to the cave; @GTAB@ / @FTAB@ in the .asm are resolved to their
+    appended to the cave; the KEY GAIN table literal and @FTAB_R1@ in the .asm are resolved to their
     absolute P addresses in a first sizing pass.
 
 Session 76 continued: donor swapped from SPATIALIZER (261 stock words, no slack
@@ -266,7 +266,7 @@ def cf_assemble(name, at):
 
 def sc_assemble(tok, org):
     """assemble patch_sc_dsp3.asm at `org`, append the gain/f tables.
-    Two passes so `move #>@GTAB@` / `move #>@FTAB@` widths don't shift.
+    Two passes so the two `move #>table,r1` widths don't shift.
     `tok` is one payload's DSP dict entry (corebase/fcorebase/sbase/fsbase/
     gcnt/gseed/foreign_br -- the cross-core build tokens).
     Returns (words, sctap, scdet, moncommit)."""
@@ -276,7 +276,7 @@ def sc_assemble(tok, org):
                .replace("@SBASE@", tok["sbase"]).replace("@FSBASE@", tok["fsbase"])
                .replace("@GCNT@", tok["gcnt"]).replace("@GSEED@", tok["gseed"])
                .replace("@FOREIGN_BR@", tok["foreign_br"])
-               .replace("@GTAB@", f"${gt:x}").replace("@FTAB@", f"${ft:x}")
+               .replace("$fab1e0", f"${gt:x}").replace("@FTAB_R1@", f"move    #>${ft:x},r1")
                .replace("@LPEDGE@", f"${sc_tables.lp_edge():x}")
                .replace("@HPEDGE@", f"${sc_tables.hp_edge():x}")
                .replace("@KGNA@", f"${sc_tables.kgn_smooth_a():x}"))
