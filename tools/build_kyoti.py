@@ -8,7 +8,7 @@ KYOTI V1.0 -- every FINAL feature in one image.
     SIDE-CHAIN COMPRESSOR (cross-core)         TRIGLESS-LOCK AUTO-REMOVE
     RELOAD FROM PROJECT (RELOAD_FROM_PROJECT chords)       DIRECT JUMP V7.0.1
     REPITCH KYOTI (rev 16)                     the bug fixes: MIDI_PLAYS_FREE_FIX,
-                                               PATTERN LED, PART_CHANGE_CARRYOVER_FIX
+    REC TRIG MUTE ([TRK]+[NO]/[YES], CC 80)    PATTERN LED, PART_CHANGE_CARRYOVER_FIX
 
 Boot splash and SYSTEM STATUS -> OS VERSION read VERSTR below.
 
@@ -39,6 +39,10 @@ evidence behind them:
              them (17 entries) and repoints all five references.
            The builders see these zeroed (a PREPARED base); the composite is
            checked to hold no reference into them from anything but our caves.
+
+REC_TRIG_MUTE needs no zone for its code: it overwrites four stock routines nothing can
+reach (its builder proves that on the image it is given, and the composite is re-scanned
+below).  Its one runtime-written byte is the CAVE piece "rtm_mask".
 
 Code on the engine/frame/ISR paths stays in the proven zone and SAFE_CAVE;
 the thinner zones carry key-handler / page-draw code and REPITCH's glyph data.
@@ -119,7 +123,8 @@ PLAN = {
     # there: REPITCH's glyph data 3 (68 B) moved from CAVE2 into PERS1 to make the room, and
     # four glyph records (20 B, pure data) out of PERS1 into PERS2 / SPRING / ENC.
     "CAVE":  ["patch_reload3", "patch_directjump_v7", "patch_softmute", "patch_partreapply",
-              "patch_mutemode", "patch_pattern_led"],
+              "patch_mutemode", "patch_pattern_led",
+              "rtm_mask"],                         # REC_TRIG_MUTE's state byte, written at runtime
     "SAFE":  ["rpk_logic", "personalize_getters", "personalize_setters"],
     "SPRING": ["rpk_widget7", "rpk_glyph_rec2"],
     "ENC":   ["patch_triglock",                    # LIVE-erase key path only
@@ -169,7 +174,14 @@ FEATURES = {
                             "rpk_reload_body": "patch_repitch_reload_rb.bin"},
                            **{f"rpk_glyph_rec{k}": 20 for k in range(7)},
                            **{f"rpk_glyph_data{k}": 68 for k in range(7)})),
+    "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "mainos_rec_trig_mute.bin", "prep",
+                      {"rtm_mask": 4}),
 }
+# REC_TRIG_MUTE's code regions: four dead stock routines (build_rec_trig_mute.py REGIONS),
+# and the only references allowed into them -- the [TRK]-held layer's YES / NO records
+RTM_REGIONS = [(0x40083488, 0x40083544), (0x40032bd4, 0x40032d08),
+               (0x4005a0e0, 0x4005a14c), (0x4009e7dc, 0x4009e884)]
+RTM_RECORD_FIELDS = (0x400d15e4, 0x400d15e8, 0x400d15fe, 0x400d1602)
 # builder flags that are not addresses
 FLAGS = {"DIRECT_JUMP_KYOTI": {"dj_mode_in_cave": True}}
 
@@ -286,10 +298,31 @@ def assert_no_branch_into(img, site, n, window=0x600):
             else:
                 disp = d8 - 0x100 if d8 & 0x80 else d8
             tgt = BASE + a + 2 + disp
-            if site < tgt < site + n and is_branch_insn(BASE + a):
+            # a branch FROM inside the span is replaced with it (a whole dead routine reused)
+            if site < tgt < site + n and not (site <= BASE + a < site + n) \
+                    and is_branch_insn(BASE + a):
                 return BASE + a, tgt
         a += 2
     return None
+
+
+def pc_targets(img, a):
+    """PC-relative targets of an instruction that might start at image offset a
+    (Bcc/BRA/BSR, and jsr/jmp/pea/lea (d16,pc))."""
+    op = int.from_bytes(img[a:a + 2], "big")
+    pc = BASE + a + 2
+    if 0x6000 <= op <= 0x6FFF:
+        d8 = op & 0xFF
+        if d8 == 0:
+            d = int.from_bytes(img[a + 2:a + 4], "big", signed=True)
+        elif d8 == 0xFF:
+            d = int.from_bytes(img[a + 2:a + 6], "big", signed=True)
+        else:
+            d = d8 - 0x100 if d8 & 0x80 else d8
+        return [pc + d]
+    if op in (0x4EBA, 0x4EFA, 0x487A) or (op & 0xF1FF) == 0x41FA:
+        return [pc + int.from_bytes(img[a + 2:a + 4], "big", signed=True)]
+    return []
 
 
 def refs_into(img, lo, hi):
@@ -323,7 +356,8 @@ def apply_without(argv):
         del RECLAIM_WHOLE["PERS1"], RECLAIM_WHOLE["PERS2"]
     short = {"MUTE_MODES": "MM", "QUANTIZE_LIVE_REC_TOGGLE": "QL", "SIDECHAIN_COMPRESSOR": "SC", "ERASE_EMPTY_TRIGLESS_LOCKS": "TL",
              "RELOAD_FROM_PROJECT": "RL", "DIRECT_JUMP_KYOTI": "DJ", "REPITCH_REPEAT98_KYOTI": "RPK",
-             "MIDI_PLAYS_FREE_FIX": "PF", "EMPTY_PATTERN_LED_FIX": "PL", "PART_CHANGE_CARRYOVER_FIX": "PR"}
+             "MIDI_PLAYS_FREE_FIX": "PF", "EMPTY_PATTERN_LED_FIX": "PL", "PART_CHANGE_CARRYOVER_FIX": "PR",
+             "REC_TRIG_MUTE": "RTM"}
     VERSTR = ("KV1-NO-" + "".join(short[d] for d in drop))[:10]
     TAG = "KYOTI_V1.0_WITHOUT_" + "_".join(drop)
     OUTDIR = ROOT / "out/KYOTI_BISECT" / TAG
@@ -496,6 +530,10 @@ def main():
     code_runs = [(a + BASE, e - a) for a, e in runs(owner)
                  if a + BASE < 0x400b0000
                  and not any(lo <= a + BASE < hi for lo, hi in zone_ranges)]
+    if "REC_TRIG_MUTE" in FEATURES:     # a reused dead routine is one replaced span: its own
+        in_rtm = lambda a: any(lo <= a < hi for lo, hi in RTM_REGIONS)   # internal branches
+        code_runs = [r for r in code_runs if not in_rtm(r[0])] + \
+            [(lo, hi - lo) for lo, hi in RTM_REGIONS]                    # go with it
     bad = [(s, n, assert_no_branch_into(stock, s, n)) for s, n in code_runs]
     bad = [b for b in bad if b[2]]
     for s, n, (src, tgt) in bad:
@@ -558,6 +596,29 @@ def main():
     print("  reclaim: SPRING's descriptor and the stock PERSONALIZE arrays are unreferenced "
           "except by our own caves; both id2e[SPRING] -> NONE" if not any(
               "reclaim" in p for p in PROBLEMS) else "")
+
+    # REC_TRIG_MUTE: its reused dead routines are still unreachable from everything else
+    if "REC_TRIG_MUTE" in FEATURES:
+        inside = lambda a: any(lo <= a < hi for lo, hi in RTM_REGIONS)
+        mine = deltas["REC_TRIG_MUTE"]          # its own detours (jsr / jmp targets) are fine
+        written = lambda a: any(o(a) + k in mine for k in range(4))
+        reach = []
+        for lo, hi in RTM_REGIONS:
+            reach += [f"pointer 0x{a:08x}->0x{v:08x}" for a, v in refs_into(comp, lo, hi)
+                      if not inside(a) and a not in RTM_RECORD_FIELDS and not written(a)]
+            for i in range(0, len(comp) - 6, 2):
+                if not inside(i + BASE) and not written(i + BASE):
+                    reach += [f"pc-relative 0x{i + BASE:08x}->0x{t:08x}"
+                              for t in pc_targets(comp, i) if lo <= t < hi]
+        rm = place["rtm_mask"]
+        if reach:
+            flag("REC_TRIG_MUTE: a reused stock routine is reachable from outside: "
+                 + ", ".join(reach[:6]))
+        elif comp[o(rm):o(rm) + 4] != bytes(4):
+            flag(f"REC_TRIG_MUTE: rtm_mask 0x{rm:08x} is not 0 in the image")
+        else:
+            print(f"  REC_TRIG_MUTE: its 4 reused stock routines are reachable only through the "
+                  f"[TRK]-layer records; rtm_mask at 0x{rm:08x}, image value 0")
 
     # the classic cave floor: the runtime record table below 0x400d6500 stays stock
     if comp[o(0x400d64ca):o(0x400d6500)] != stock[o(0x400d64ca):o(0x400d6500)]:
