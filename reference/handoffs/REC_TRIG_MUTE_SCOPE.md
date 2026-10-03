@@ -578,3 +578,9 @@ KYOTI composite.
 
 The §14 "not done" items are now: the MIDI additions, and KYOTI's promotion after the
 hardware test.
+
+## 16. KYOTI V1.0 promoted with it (2026-10-03)
+
+The user flashed KYOTI V1.0 `5106f7fb…` and passed the hardware list. MIDI CC 80 was **not**
+tested on hardware. KYOTI V1.0 was promoted (mainos `82dd6660…`). `NOTES.md` Session 123
+continued.

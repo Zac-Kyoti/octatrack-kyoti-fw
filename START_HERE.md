@@ -153,8 +153,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
-- **KYOTI V1.0** (`tools/build_kyoti.py`) — FINAL since 2026-09-30; re-promoted 2026-10-01 with the
-  RELOAD knob-repaint fix (syx `f1a6e99a…`, was `576756fd…`). One
+- **KYOTI V1.0** (`tools/build_kyoti.py`) — FINAL since 2026-09-30; re-promoted 2026-10-03 with
+  REC_TRIG_MUTE (syx `5106f7fb…`; before it `f1a6e99a…`, with the RELOAD knob-repaint fix). One
   DIRECT_JUMP_KYOTI crash, seen on an early V1.0 flash, was never reproduced; its leading
   suspect was the MUTE_MODES register bug (`fresh_bind` overwriting `%d3`) fixed since.
   `NOTES.md` Sessions 114–119, `reference/MERGE.md`.
@@ -170,10 +170,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   Octakit and are refused with it until bridges exist (`a7a5291`, `c9a66cf`; live once Sam
   bumps octabam's six KYOTI submodules off `7f80b85`). Scope, findings and the plan:
   `reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md` — start at its §0. `NOTES.md` Session 121.
-- **REC_TRIG_MUTE** (`tools/build_rec_trig_mute.py`) — FINAL since 2026-10-03 (standalone,
-  syx `c1cd7381…`, flashed: "works well"). Not done on purpose: MIDI echo / CC 80 state at
-  power-up. Scope and every proof: `reference/handoffs/REC_TRIG_MUTE_SCOPE.md`. `NOTES.md`
+- **REC_TRIG_MUTE** (`tools/build_rec_trig_mute.py`) — FINAL since 2026-10-03, standalone
+  (syx `c1cd7381…`) and in KYOTI V1.0. MIDI CC 80 not tried on hardware yet. Not done on
+  purpose: MIDI echo / CC 80 state at power-up; not in the BATCH_BUGFIXES images; its
+  octabam module is local-only WIP. `reference/handoffs/REC_TRIG_MUTE_SCOPE.md`, `NOTES.md`
   Sessions 122–123.
-- **KYOTI V1.0 + REC_TRIG_MUTE** — `build_kyoti.py` now composes it, so the builder is
-  **WIP until the new image is flashed and promoted** (it still pins the image without
-  REC_TRIG_MUTE). Hardware test list: `NOTES.md` Session 123.

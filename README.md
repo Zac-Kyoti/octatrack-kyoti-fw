@@ -225,8 +225,7 @@ flashed as such.\
 
 ### KYOTI V1.0
 
-Every feature above except REC_TRIG_MUTE, and all three BATCH_BUGFIXES, in **one image**.
-The boot splash and
+Every feature above and all three BATCH_BUGFIXES in **one image**. The boot splash and
 SYSTEM STATUS → OS VERSION read `KYOTI V1.0`.
 
 **Hardware:** confirmed.\

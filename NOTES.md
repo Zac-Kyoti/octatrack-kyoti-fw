@@ -35175,3 +35175,14 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
   7. A normal session's use, watching for anything new (the old DJ crash included).
   Then promote: pin the `mainos_kyoti_v1.0.bin` sha256 that `seal()` prints, and drop
   "except REC_TRIG_MUTE" from README's KYOTI and Bugbuilds entries.
+
+### Session 123 continued (2026-10-03) — KYOTI V1.0 with REC_TRIG_MUTE: hardware-tested, promoted
+
+* **The user flashed** KYOTI V1.0 syx `5106f7fb…` (mainos `82dd6660…`) and ran the Session 123
+  list: **all steps pass except MIDI (step 6), which was not tested**. That covers the
+  REC_TRIG_MUTE keys and toasts, the `..▶` / `..■` icons, the running recording finishing,
+  multi-track hold, a pattern change, a power-cycle, FUNC+YES/NO one-shots, the neighbouring
+  KYOTI features and a normal session.
+* **Promoted on the user's instruction:** `FINAL["build_kyoti.py"]` → `82dd6660…` (was
+  `57576d91…`). README's KYOTI entry no longer says "except REC_TRIG_MUTE". The Bugbuilds
+  entry keeps it, because it is true: `build_bugbuilds.py` has no REC_TRIG_MUTE image.
