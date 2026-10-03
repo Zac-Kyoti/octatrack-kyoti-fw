@@ -44,10 +44,10 @@ after PREVIEW WITHOUT FX (`TableGrow(count=16, insert_at=2)`), and the row count
 `0x40068fb2` goes from 15 to 16. LED BRIGHTNESS stays the last row, which the stock count
 shows on an MKII only. Nothing in the firmware keys off a PERSONALIZE row's position.
 
-**With SIDECHAIN_COMPRESSOR** (not a module yet): the combined KYOTI image assembles
-`patch_softmute.s` with `SC_KEY` so a muted KEY track keeps feeding the compressor, as on
-stock. The source tests it with `.ifdef`, so it must be absent otherwise. octabam can
-express that per remix; it is added when SIDECHAIN_COMPRESSOR becomes a module.
+**With SIDECHAIN_COMPRESSOR:** a muted track that a COMPRESSOR uses as its KEY keeps
+feeding it, as on stock. `patch_softmute.s` includes `remix.inc`, which carries
+`.set SC_KEY,1` only when SIDECHAIN_COMPRESSOR is in the remix (the source tests it with
+`.ifdef`). That variant is byte-identical to the KYOTI V1.0 combined image's.
 
 ## Measured vs inferred
 

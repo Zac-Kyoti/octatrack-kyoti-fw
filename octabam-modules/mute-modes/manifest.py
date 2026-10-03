@@ -23,17 +23,17 @@ tools/build_mute_modes.py: TableGrow(count=16, insert_at=2) relocates each of th
 firmware keys off a PERSONALIZE row's position (every reference to the menu's
 cursor/scroll/count/row state is inside 0x40068e00..0x40069074, NOTES.md Session 19).
 
-NOT YET: SC_KEY. In an image with SIDECHAIN_COMPRESSOR, tools/build_kyoti.py assembles
-patch_softmute with --defsym SC_KEY=1, so a muted KEY track keeps feeding the compressor
-the way stock mute does. The source tests it with `.ifdef`, so it must be ABSENT, not 0,
-otherwise. octabam can express it (a Linked.include that writes `.set SC_KEY,1` only when
-SIDECHAIN_COMPRESSOR is in the remix, and a callable `reference(modules)` for the two
-variants); it is added when SIDECHAIN_COMPRESSOR becomes a module.
+SC_KEY. Beside SIDECHAIN_COMPRESSOR, a muted track that a COMPRESSOR uses as its KEY keeps
+feeding it, the way stock mute does (Session 116): mm_softmute's remix.inc carries
+`.set SC_KEY,1` when SIDECHAIN_COMPRESSOR is in the remix and is empty otherwise (the source
+tests it with `.ifdef`). Its `reference` names the variant: with SC_KEY, the bytes of the
+KYOTI V1.0 combined image (tools/build_kyoti.py, --defsym SC_KEY=1) at their address there.
 
 MEASURED. Hardware-confirmed on the author's MKI (tools/build_mute_modes.py, the promoted
 standalone image, and the KYOTI V1.0 combined image). Both units, assembled with no
 symbols defined (DT_MODE defaults to 1 in the source), are byte-identical to that build
-at its addresses -- the `reference` pairs below -- for -mcpu=5407 and 54455 alike.
+at its addresses -- the `reference` pairs below -- for -mcpu=5407 and 54455 alike; with
+SC_KEY, mm_softmute is byte-identical to the KYOTI V1.0 image at 0x400d74e4.
 """
 
 import os
@@ -47,6 +47,20 @@ from remix.schema import Detour, Kind, Linked, Module, Poke, TableGrow
 _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 
 H = bytes.fromhex
+
+SC = "SIDECHAIN_COMPRESSOR"
+
+
+def _sc_key_inc(modules):
+    """remix.inc for mm_softmute: SC_KEY only beside SIDECHAIN_COMPRESSOR."""
+    return ".set SC_KEY,1\n" if SC in modules else "| no SIDECHAIN_COMPRESSOR: no SC_KEY\n"
+
+
+def _softmute_ref(modules):
+    """The variant the author ratified for this selection."""
+    if SC in modules:       # tools/build_kyoti.py's placement in KYOTI V1.0
+        return (0x400d74e4, "8814aa2ca49df775371b17c6c14116494bca7c40febd2dca94c7e90fec7e2009")
+    return (0x400d7400, "d56d848e51e96f9561028741a46e509872981fdce6b2e17ee55831d47db5d356")
 
 # The PERSONALIZE pointer arrays (16 u32 each in 1.40C) and the code that names them.
 LABELS, GETTERS, SETTERS = 0x400b2a34, 0x400b2a74, 0x400b2ac0
@@ -62,8 +76,7 @@ MODULE = Module(
     linked=(
         # Linked at the standalone image's own addresses by tools/build_mute_modes.py.
         Linked("mm_softmute", os.path.join(_HERE, "patch_softmute.s"),
-               reference=(0x400d7400,
-                          "d56d848e51e96f9561028741a46e509872981fdce6b2e17ee55831d47db5d356")),
+               include=_sc_key_inc, reference=_softmute_ref),
         Linked("mm_menu", os.path.join(_HERE, "patch_mutemode.s"),
                reference=(0x400d7800,
                           "4c6702aaae1840d9a95a274bd97e252b4bd1e39338c0e50c5257e96060bd4220")),

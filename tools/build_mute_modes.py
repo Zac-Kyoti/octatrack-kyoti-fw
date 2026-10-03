@@ -212,7 +212,12 @@ def assemble(name, at, defsym):
     # distinct "_dt" intermediates so this build never clobbers build_mutemode.py's
     # out/patch_*.elf (which emu_mutemode.py / emu_solo.py read back).
     out = f"{name}_dt"
-    aso = ["m68k-elf-as", "-mcpu=5407"]
+    # patch_softmute.s `.include`s remix.inc (octabam writes `.set SC_KEY,1` there when
+    # SIDECHAIN_COMPRESSOR is in the remix); here SC_KEY comes from --defsym, so it is empty.
+    inc = ROOT / "out/mute_modes_inc"
+    inc.mkdir(parents=True, exist_ok=True)
+    (inc / "remix.inc").write_text("| empty: SC_KEY, if any, is a --defsym (build_mute_modes.py)\n")
+    aso = ["m68k-elf-as", "-mcpu=5407", "-I", str(inc)]
     for d in (defsym.split(",") if defsym else []):
         aso += ["--defsym", d]
     aso += ["-o", f"out/{out}.o", f"octabam-modules/mute-modes/{name}.s"]

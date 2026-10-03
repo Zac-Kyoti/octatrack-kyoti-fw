@@ -89,6 +89,11 @@
     .equ DT_MODE, 1
     .endif
 
+| SC_KEY (the SIDE-CHAIN KEY exemption, p1_key below) is set by the image, not here:
+| tools/build_kyoti.py passes --defsym SC_KEY=1; octabam's remix.inc carries `.set SC_KEY,1`
+| when SIDECHAIN_COMPRESSOR is in the remix. Standalone builds include an empty remix.inc.
+    .include "remix.inc"
+
     .equ GATE,        0x800000dc     | MUTE MODE word (0 = OT/stock, 1 = OT+FX).  Ignored when ALWAYS_ON.
     .equ MUTE_STATE,  0x80000008     | bits 0..7 SOLO   bits 8..15 MUTE   bits 16..23 CUE
     .equ SOLO_BYTE,   0x8000000b     | MUTE_STATE's SOLO byte (bits 0..7), one per track --
