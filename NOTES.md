@@ -35067,3 +35067,55 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
 * **Bus compatibility** (user wants it eventually): compact the keybus to core-local `$100` words below `$903`;
   per-remix window base (slot tails normally, core A's free `0x36200-0x37EFF` when a module owns the FX2 buffers);
   needs per-remix DSP values/claims from octabam. Deferred until SIDECHAIN is in.
+
+## Session 122 (2026-10-02, `rec-trig-mute`) — REC_TRIG_MUTE: [TRK]+[NO]/[YES] mutes recorder trigs (WIP, shelved as finished)
+
+* **Ask:**
+  - `[TRK]`+`[NO]` mutes and `[TRK]`+`[YES]` unmutes the held tracks' recorder trigs, on any
+    screen and in any mode. The trigs stay in the pattern, and a running recording finishes
+    its RLEN.
+  - Toasts `REC TRIGS MUTED` / `REC TRIGS UNMUTED`.
+  - MIDI CC 80, receive and transmit (0 = off, 1–127 = on; sent as 1/0).
+  - The track-edge status glyph shows `..■` / `..▶` on a muted track.
+  - Global across pattern changes; volatile.
+  - `[FUNC]`+`[YES]`/`[NO]` stock.
+* **Stock facts found (C, our disassembly):**
+  - Holding a track key pushes the input layer `0x400d164a`: YES → `0x400834d8` (ARM REC TRK),
+    NO → `0x40083488` (DISARM REC TRK) for the held mask `0x460fab40`, on every screen.
+  - `0x46c803d4` / `0x46c7fe22` / `0x8000184e` / `0x46c7ff64` are the one-shot
+    arm / disarm / spent / pending masks. The KB's "MAIN mute" / "CUE/MUTE" labels for two of
+    them are wrong.
+  - Mask `0x38` (`+0x41`) is the **recorder one-shot layer**, not swing/slide.
+  - The step handler's `tst.l %d3` at `0x4009d9a4` is the only producer of recorder events
+    (`0x46c7a6c0` has 3 refs).
+  - A pattern switch never re-arms one-shots: the spent state is per track; only keys,
+    STOP-STOP (PERSONALIZE `DIS. STOP-STOP ARM` = `0x800000bc`) and placing a one-shot re-arm.
+  - The edge status glyph renderer is `0x4004bd48`. It was found by emulating a load while
+    logging LCD-plane writes with stack chains. It is polled from `FUN_40052200`'s UI-frame
+    path (`0x4005222e`). "+" = voice `[1]`, recorder live.
+  - Unused CCs 62–111 fall through a 6-byte compare at `0x4000f210`.
+* **Space:** the KYOTI zones are full, so the code overwrites **four unreachable stock
+  routines**. A strict scan qualified each one: no branch, code literal or byte-aligned pointer
+  into the range, in stock or KYOTI. The four are the stock `[TRK]`-layer handlers, the dead
+  popup `FUN_4005a0e0`, an orphaned encoder helper `0x40032bd4` and an orphaned arranger
+  resolver `0x4009e7dc`. `RTM_MASK` lives in the classic cave (`0x400d7c3a`).
+  - A looser scan that checked only start addresses passed `0x40073984`, which is **live** via
+    menu wrappers. Always use the strict scan; the builder re-runs it on every build.
+  - `0x40046ab4` / `0x40046d9c` are dead in stock, but octabam's REPITCH calls one of them:
+    not reused.
+* **Build:** `tools/patch_rec_trig_mute.s` + `tools/build_rec_trig_mute.py` (standalone on stock,
+  `140C_RTM`). The YES record is repointed at `rtm_yes`; NO keeps `0x40083488`.
+  - A register audit caught `rtm_yes` clobbering callee-saved `%d2` (the MUTE MODE `%d3` class
+    of bug) before any test ran.
+  - `tools/emu_rec_trig_mute.py` **ALL PASS**: keys, CC in/out, the gate (muted T1: 0
+    recorder flag writes vs T2: 5; after unmute 4), the glyph (renderer called directly, since
+    route A does not poll it) and an LCD screenshot.
+* **Hardware:**
+  - Build 1 (`bf29a574…`) flashed: "works well".
+  - The user then changed the glyph rule. Muted means always `..■` / `..▶`; the `...` and the
+    live-trig computation are gone; `+` still wins while a recording runs.
+  - **Build 2** (`c1cd738100cfc0d03cf697d17927d11cec1e5c44b7616d9d63395a303978f038`) flashed:
+    "works well". No itemised checks in either report.
+* **Shelved as finished, WIP (not promoted).** Not done, by the user's choice: the KYOTI
+  composite, CC echo, CC 80 state at power-up / on request.
+  `reference/handoffs/REC_TRIG_MUTE_SCOPE.md` §§1–14.

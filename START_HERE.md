@@ -169,3 +169,7 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   Octakit and are refused with it until bridges exist (`a7a5291`, `c9a66cf`; live once Sam
   bumps octabam's six KYOTI submodules off `7f80b85`). Scope, findings and the plan:
   `reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md` — start at its §0. `NOTES.md` Session 121.
+- **REC_TRIG_MUTE** (`tools/build_rec_trig_mute.py`) — WIP, **shelved as finished** by the
+  user 2026-10-02: standalone on stock, flashed (syx `c1cd7381…`, "works well"). Not done on
+  purpose: a KYOTI composite, and the MIDI echo / CC state at power-up. Scope and every proof:
+  `reference/handoffs/REC_TRIG_MUTE_SCOPE.md`. `NOTES.md` Session 122.
