@@ -87,8 +87,14 @@ MODULE = Module(
     # from `active` (a bare Param() would hide them) and verify_menu wants every drawn
     # knob named, so they are declared active under stock's own names -- the bytes the
     # donor already holds. Every other field stays the donor's. Slot 7 is stock's empty one.
-    params=tuple(Param(n, active=True) for n in
-                 (b"ATK", b"REL", b"THRS", b"RAT", b"GAIN", b"MIX", b"RMS")) + (Param(),) + (
+    params=tuple(Param(n, active=True, doc=d) for n, d in (
+        (b"ATK", "stock: attack time"),
+        (b"REL", "stock: release time"),
+        (b"THRS", "stock: threshold"),
+        (b"RAT", "stock: ratio"),
+        (b"GAIN", "stock: make-up gain"),
+        (b"MIX", "stock: dry/wet mix"),
+        (b"RMS", "stock: the detector's RMS setting"))) + (Param(),) + (
         Param(b"KEY", 0, count=9, active=True,
               formatter_word=("sc_cf", "key_fmt"), widget_word=("sc_cf", "key_list_fix"),
               doc="the track whose audio drives the detector; OFF = stock (self)"),
