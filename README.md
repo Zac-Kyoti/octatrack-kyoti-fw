@@ -172,6 +172,25 @@ deliberately with `FUNC` + `TRIG` is left alone.
 **Final build:** [`tools/build_erase_empty_trigless_locks.py`](tools/build_erase_empty_trigless_locks.py) →
 `OCTATRACK_OS1.40C_ERASE_EMPTY_TRIGLESS_LOCKS`
 
+### REC_TRIG_MUTE
+
+Mute a track's recorder trigs without deleting them. Hold **`[TRACK]`** and press **`[NO]`**:
+the held tracks' recorder trigs stop firing — a recording already running finishes — and a
+toast reads `REC TRIGS MUTED`. **`[TRACK]`** + **`[YES]`** brings them back
+(`REC TRIGS UNMUTED`). It works on any screen, with or without grid recording, and holds
+across pattern changes until you unmute; every track starts unmuted at power-on. A muted
+track shows two dots beside its play/stop icon at the screen edge (`..■` / `..▶`).
+
+MIDI: **CC 80** on a track's channel mutes it (1–127) or unmutes it (0); on the AUTO
+channel it acts on the active track. The keys send CC 80 (1 / 0) on each held track's
+channel. Both need AUDIO CC IN / OUT on, as for every audio-track CC. `[FUNC]` + `[YES]` /
+`[NO]` still arm and disarm one-shot trigs as on stock; `[TRACK]` + `[YES]` / `[NO]` now do
+this instead.
+
+**Hardware:** confirmed. MIDI CC 80 not specifically tested.\
+**Final build:** [`tools/build_rec_trig_mute.py`](tools/build_rec_trig_mute.py) →
+`OCTATRACK_OS1.40C_REC_TRIG_MUTE`
+
 ### BATCH_BUGFIXES
 
 Three fixes to stock bugs. Each has its own build.
@@ -194,7 +213,8 @@ Three fixes to stock bugs. Each has its own build.
 
 ### Each feature + BATCH_BUGFIXES
 
-One image per feature above, with all three BATCH_BUGFIXES folded in — seven images, for
+One image per feature above except REC_TRIG_MUTE, with all three BATCH_BUGFIXES folded in —
+seven images, for
 flashing a single feature without giving up the bug fixes. The features are not combined
 with each other.
 
@@ -205,7 +225,8 @@ flashed as such.\
 
 ### KYOTI V1.0
 
-Every feature above and all three BATCH_BUGFIXES in **one image**. The boot splash and
+Every feature above except REC_TRIG_MUTE, and all three BATCH_BUGFIXES, in **one image**.
+The boot splash and
 SYSTEM STATUS → OS VERSION read `KYOTI V1.0`.
 
 **Hardware:** confirmed.\

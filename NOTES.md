@@ -35119,3 +35119,59 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
 * **Shelved as finished, WIP (not promoted).** Not done, by the user's choice: the KYOTI
   composite, CC echo, CC 80 state at power-up / on request.
   `reference/handoffs/REC_TRIG_MUTE_SCOPE.md` §§1–14.
+
+## Session 123 (2026-10-03, `rec-trig-mute`) — REC_TRIG_MUTE promoted; composed into KYOTI V1.0 (KYOTI WIP until flashed)
+
+* **User:** REC_TRIG_MUTE into KYOTI V1.0 and the main docs; push; a local-only WIP octabam
+  module. Promotion choice: **feature now, KYOTI after it is flashed**.
+* **REC_TRIG_MUTE → FINAL**, pinned to the flashed image: mainos `34f06e29…`, syx
+  `c1cd7381…`. The builder now takes `RTM_MASK` from `kyoti_place("rtm_mask")` via
+  `--defsym`; the standalone image is unchanged.
+* **`build_kyoti.py`:**
+  - REC_TRIG_MUTE is a feature, plus a CAVE piece `rtm_mask` (4 B; landed at `0x400d7c28`,
+    16 B left). The state byte is allocated, so no future re-pack can put code under a byte
+    that is written at runtime.
+  - Two checks were taught dead-routine reuse. The no-branch-into check treats each reused
+    routine as one replaced span: its own internal branches go with it, and they were
+    false-flagging because some of our bytes equal stock. A new invariant re-runs the
+    strict reachability scan on the composite: our own detours and the `[TRK]` records are
+    allowed, nothing else is.
+  - The composite: 16796 B changed vs stock; every check passes; REC_TRIG_MUTE's bytes
+    equal its standalone build except the 8 `RTM_MASK` address bytes.
+  - **KYOTI V1.0 (with REC_TRIG_MUTE), WIP, NOT flashed:** syx
+    `5106f7fbfbbbfed6bc5430840a101051b3a0ca1ff2ea827ea6ef1a74a8a6ec`, bin `08495995…`,
+    mainos `82dd6660…`. ⚠️ OS VERSION still reads `KYOTI V1.0`; tell it from the old image
+    by the feature itself.
+* **Emulator:** route A cannot load a KYOTI image. A/B: `build_kyoti.py --without
+  REC_TRIG_MUTE` reproduces the **promoted** V1.0 byte for byte (`57576d91…`), and it faults
+  `UC_ERR_FETCH_UNMAPPED` (task `sys`) during LOAD PROJECT, exactly as the new image does:
+  - both at sample 14324.8 (324.83 ms), after 264 dispatches, 64 instructions apart
+    (53,330,614 vs 53,330,678 — REC_TRIG_MUTE's boot-time renderer hook);
+  - the printed PC is the start of the faulting burst (`emu_start(self.pc, …)`), so it moves
+    with those 64 instructions: `0x400a69b0` without, `0x40012d5a` with. Same fault.
+  So this is a harness limit with KYOTI, not this change. (The older flashed V1.0
+  `8baf5ac0…` faults the same way.) `emu_rec_trig_mute.py` (standalone, ALL PASS) stands in,
+  via the byte identity above.
+* **octabam module:** `octabam-modules/rec-trig-mute/` is **local only** (in
+  `.git/info/exclude`, not pushed). One DRAM `Linked` unit built from the same source with
+  `--defsym OCTABAM_UNIT`: a single section, `RTM_MASK` in the unit, the step-handler hook a
+  plain `jmp` so octabam's `nop` padding follows it. Four `Detour`s, four `SymbolRef`s.
+  The manifest constructs under octabam's schema; no remix or oracle yet.
+* **Hardware test list — KYOTI V1.0 + REC_TRIG_MUTE:**
+  1. Flash `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.0.syx` (`5106f7fb…`). Power-cycle. OS VERSION
+     reads `KYOTI V1.0` (unchanged), so step 2 is what shows the new image is on.
+  2. A track with recorder trigs every cycle, playing: `[TRACK]`+`[NO]` → `REC TRIGS MUTED`,
+     edge icon `..▶`, the current recording finishes, the next cycle does not record.
+     `[TRACK]`+`[YES]` → `REC TRIGS UNMUTED`, recording resumes. Stop → a muted track shows
+     `..■`.
+  3. T1+T3 held + `[NO]` → both muted. Change pattern → still muted. Power-cycle → unmuted.
+  4. GRID REC on, REC SETUP open: `[FUNC]`+`[YES]`/`[NO]` still arm/disarm the recorder
+     one-shots.
+  5. Neighbours that share keys / screen: MUTE_MODES (track-mute a rec-muted track, then
+     unmute both; edge icons sane); RELOAD_FROM_PROJECT (`[BANK]`+`[TRACK]`, `[PTN]`+`[TRACK]`);
+     DIRECT_JUMP_KYOTI (`[PTN]`+`[YES]` toast); QUANTIZE_LIVE_REC_TOGGLE (`[REC]`+`[PLAY]`).
+  6. If a controller is to hand: CC 80 = 127 / 0 on a track's channel (AUDIO CC IN on)
+     mutes / unmutes it; the keys send CC 80 1 / 0 (AUDIO CC OUT on).
+  7. A normal session's use, watching for anything new (the old DJ crash included).
+  Then promote: pin the `mainos_kyoti_v1.0.bin` sha256 that `seal()` prints, and drop
+  "except REC_TRIG_MUTE" from README's KYOTI and Bugbuilds entries.

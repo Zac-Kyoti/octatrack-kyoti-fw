@@ -43,6 +43,7 @@ One command per final feature. Each writes its image to `out/`:
 | REPITCH_REPEAT98_KYOTI | `python3 tools/build_repitch_repeat98_kyoti.py` | `140C_RPK16` |
 | QUANTIZE_LIVE_REC_TOGGLE | `python3 tools/build_quantize_live_rec_toggle.py` | `140C_KYOTI` |
 | ERASE_EMPTY_TRIGLESS_LOCKS | `python3 tools/build_erase_empty_trigless_locks.py` | `1.40C` |
+| REC_TRIG_MUTE | `python3 tools/build_rec_trig_mute.py` | `140C_RTM` |
 | BATCH_BUGFIXES: MIDI_PLAYS_FREE_FIX | `python3 tools/build_midi_plays_free_fix.py` | `1.40C` |
 | BATCH_BUGFIXES: EMPTY_PATTERN_LED_FIX | `python3 tools/build_empty_pattern_led_fix.py` | `1.40C` |
 | BATCH_BUGFIXES: PART_CHANGE_CARRYOVER_FIX | `python3 tools/build_part_change_carryover_fix.py` | `1.40C` |

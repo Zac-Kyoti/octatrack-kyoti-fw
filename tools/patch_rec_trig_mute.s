@@ -19,7 +19,21 @@
 
     .globl rtm_no, rtm_yes, rtm_gate, rtm_glyph, rtm_draw, rtm_cc
 
+| OCTABAM_UNIT (--defsym; the octabam module octabam-modules/rec-trig-mute): one linked unit
+| octabam places itself -- a single section, RTM_MASK inside it, the step-handler hook a plain
+| jmp.  Without it this is the standalone / KYOTI layout, byte for byte.
+    .ifdef OCTABAM_UNIT
+    .macro SECT name
+    .text
+    .endm
+    .else
+    .macro SECT name
+    .section \name,"ax"
+    .endm
+    .ifndef RTM_MASK                | the builder passes it: kyoti_place "rtm_mask"
     .equ RTM_MASK,  0x400d7c3a      | bit t = track t's recorder trigs muted (byte, image 0)
+    .endif
+    .endif
     .equ RTM_CC,    80
 
     .equ HELD,      0x460fab40      | held track keys, bit t (physical keys, both modes)
@@ -39,7 +53,7 @@
 | ------------------------------------------------------------------ .keys @ 0x40083488
 | handler(keycode@4, event@8), reached through the [TRK]-held layer records: NO (0x400d15fc)
 | keeps naming 0x40083488 = rtm_no; the builder repoints YES (0x400d15e2) at rtm_yes.
-    .section .keys,"ax"
+    SECT .keys
 rtm_no:
     moveq   #1,%d0
     cmp.l   8(%sp),%d0              | press only
@@ -71,7 +85,13 @@ rtm_gate:
     beq.s   1f
     moveq   #0,%d3                  | muted: this step has no recorder trig
 1:  tst.l   %d3                     | rts keeps the CCR for the caller's beq
+    .ifdef OCTABAM_UNIT                 | reached by jmp (octabam pads the 10 B with nops)
+    bne.s   2f
+    jmp     0x4009da16              | no recorder trig on this step
+2:  jmp     0x4009d9ae              | muls.l %d7,%d2 and on
+    .else
     rts
+    .endif
 
 rtm_yes:
     moveq   #1,%d0
@@ -116,7 +136,7 @@ rtm_tx:
 | (d2 + 2*d1 + 4*d0; bit 0 = playing, bit 1 = recorder live).  A muted track that is not
 | recording -> a4 = 8 | playing, shown as "..[]" / "..>" whether or not it has recorder trigs
 | (user, 2026-10-02).  Folding it into a4 lets the stock cache redraw on every toggle.
-    .section .glyph,"ax"
+    SECT .glyph
 rtm_glyph:
     mvz.b   RTM_MASK,%d0
     btst    %d3,%d0
@@ -140,7 +160,7 @@ S_UNMUTED: .asciz "REC TRIGS UNMUTED"
 | ------------------------------------------------------------------ .draw @ 0x4005a0e0
 | renderer 0x4004c00c: `jmp rtm_draw` replaces `moveq #3,%d0 ; cmpl %a4,%d0 ; bnes R_SKIP`
 | a3 = box x, a2 = row offset, a5 = the blit 0x400128a8(desc, plane, x, y)
-    .section .draw,"ax"
+    SECT .draw
 rtm_draw:
     move.l  %a4,%d0
     moveq   #3,%d1
@@ -169,7 +189,7 @@ D_DOTSP: .long 7,5,1,G_DOTSP,MASK7
 | (the fall-through of every CC stock ignores).  d1 = CC#, a2 = msg (value at +2),
 | d7 = channel -> track mask (bit 8 = AUTO), tracks d5 .. a4-1 (set at 0x4000e8fe..e91a).
 | Gating and loop are stock's CC 52/53 (0x4000ed90..0x4000ee0c) one for one.
-    .section .ccrx,"ax"
+    SECT .ccrx
 rtm_cc:
     moveq   #RTM_CC,%d0
     cmp.l   %d1,%d0
@@ -199,3 +219,9 @@ rtm_cc:
     blt.s   3b
     move.b  %d0,RTM_MASK
 9:  jmp     CC_EXIT
+
+    .ifdef OCTABAM_UNIT
+    .data
+RTM_MASK: .byte 0                   | volatile: 0 at every boot
+    .even
+    .endif

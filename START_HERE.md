@@ -142,6 +142,7 @@ builder's FINAL entry and the old builder is deleted. There is no superseded tie
 | REPITCH_REPEAT98_KYOTI | `build_repitch_repeat98_kyoti.py` | `octabam-modules/repitch-repeat98-kyoti` (ColdFire half; DSP pending) |
 | QUANTIZE_LIVE_REC_TOGGLE | `build_quantize_live_rec_toggle.py` | `octabam-modules/quantize-live-rec-toggle` |
 | ERASE_EMPTY_TRIGLESS_LOCKS | `build_erase_empty_trigless_locks.py` | `octabam-modules/erase-empty-trigless-locks` |
+| REC_TRIG_MUTE | `build_rec_trig_mute.py` | not yet ported |
 | BATCH_BUGFIXES: MIDI_PLAYS_FREE_FIX · EMPTY_PATTERN_LED_FIX · PART_CHANGE_CARRYOVER_FIX | `build_midi_plays_free_fix.py` · `build_empty_pattern_led_fix.py` · `build_part_change_carryover_fix.py` | `octabam-modules/batch-bugfixes` |
 
 The assembly sources keep their historical names (`patch_directjump_v7.s`,
@@ -169,7 +170,10 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   Octakit and are refused with it until bridges exist (`a7a5291`, `c9a66cf`; live once Sam
   bumps octabam's six KYOTI submodules off `7f80b85`). Scope, findings and the plan:
   `reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md` — start at its §0. `NOTES.md` Session 121.
-- **REC_TRIG_MUTE** (`tools/build_rec_trig_mute.py`) — WIP, **shelved as finished** by the
-  user 2026-10-02: standalone on stock, flashed (syx `c1cd7381…`, "works well"). Not done on
-  purpose: a KYOTI composite, and the MIDI echo / CC state at power-up. Scope and every proof:
-  `reference/handoffs/REC_TRIG_MUTE_SCOPE.md`. `NOTES.md` Session 122.
+- **REC_TRIG_MUTE** (`tools/build_rec_trig_mute.py`) — FINAL since 2026-10-03 (standalone,
+  syx `c1cd7381…`, flashed: "works well"). Not done on purpose: MIDI echo / CC 80 state at
+  power-up. Scope and every proof: `reference/handoffs/REC_TRIG_MUTE_SCOPE.md`. `NOTES.md`
+  Sessions 122–123.
+- **KYOTI V1.0 + REC_TRIG_MUTE** — `build_kyoti.py` now composes it, so the builder is
+  **WIP until the new image is flashed and promoted** (it still pins the image without
+  REC_TRIG_MUTE). Hardware test list: `NOTES.md` Session 123.

@@ -566,3 +566,15 @@ KYOTI composite.
 - the KYOTI V1.0 composite. The four reused regions were scanned free in KYOTI V1.0 (§10). A
   composite needs `build_kyoti.py` to place `RTM_MASK` (CAVE tail) and run the same strict
   scan on the composed image.
+
+## 15. Promoted; composed into KYOTI V1.0 (2026-10-03)
+
+- **REC_TRIG_MUTE is FINAL** (mainos `34f06e29…`, syx `c1cd7381…`, the image the user flashed).
+- **`build_kyoti.py`** composes it. `RTM_MASK` is a CAVE piece there (`0x400d7c28`); the
+  standalone keeps `0x400d7c3a`.
+- **The new KYOTI V1.0** (syx `5106f7fb…`) is WIP until flashed and promoted.
+- **Local octabam module:** `octabam-modules/rec-trig-mute/` (not pushed).
+- Detail and the hardware test list: `NOTES.md` Session 123.
+
+The §14 "not done" items are now: the MIDI additions, and KYOTI's promotion after the
+hardware test.

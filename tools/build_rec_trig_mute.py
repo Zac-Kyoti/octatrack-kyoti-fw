@@ -26,6 +26,7 @@ Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_rec_trig_mute.py [VERSTR]
 """
 import os, pathlib, subprocess, sys
 from kyoti_status import gate, seal
+import kyoti_place                   # combined-image placement (build_kyoti.py); no-op standalone
 
 gate(__file__)
 
@@ -54,7 +55,9 @@ REGIONS = {
 # records (0x400d15e2 / 0x400d15fc), press + release fields -> our two entry points
 ALLOWED_REFS = {0x400d15e4: 0x400834d8, 0x400d15e8: 0x400834d8,
                 0x400d15fe: 0x40083488, 0x400d1602: 0x40083488}
-RTM_MASK = 0x400d7c3a                     # classic cave, proven runtime-writable
+# the one runtime-written byte: classic cave, proven runtime-writable.  In KYOTI V1.0 it is a
+# CAVE piece of its own ("rtm_mask"), so no other piece can ever be packed over it.
+RTM_MASK = kyoti_place.at("rtm_mask", 0x400d7c3a)
 
 # detours: site -> (stock bytes, symbol, kind)
 SITES = {
@@ -73,7 +76,7 @@ def run(*cmd, **kw):
 
 
 def assemble():
-    run("m68k-elf-as", "-mcpu=5407", "-o", str(OBJ), str(SRC))
+    run("m68k-elf-as", "-mcpu=5407", f"--defsym=RTM_MASK=0x{RTM_MASK:x}", "-o", str(OBJ), str(SRC))
     starts = [f"--section-start={s}=0x{a:x}" for s, (a, _) in REGIONS.items()]
     run("m68k-elf-ld", "-e", "rtm_no", *starts, "-o", str(ELF), str(OBJ))
     blobs = {}

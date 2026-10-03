@@ -113,6 +113,7 @@ unit that boots; if it doesn't, use §3b.
 | MUTE_MODES, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT, QUANTIZE_LIVE_REC_TOGGLE | `140C_KYOTI` |
 | DIRECT_JUMP_KYOTI | `140C_KDJ7` |
 | REPITCH_REPEAT98_KYOTI | `140C_RPK16` |
+| REC_TRIG_MUTE | `140C_RTM` |
 | ERASE_EMPTY_TRIGLESS_LOCKS and the BATCH_BUGFIXES builds | `1.40C` (stock string — check by behaviour) |
 | a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_RPK16`, `BUG_QLREC`, `BUG_TRIGLK`) |
 
@@ -136,6 +137,10 @@ quick check for each:
   while it is up → the setting inverts.
 - **ERASE_EMPTY_TRIGLESS_LOCKS** — make a trigless lock with one p-lock, erase that lock
   in live record: the step goes dark.
+- **REC_TRIG_MUTE** — a track with recorder trigs on every pattern cycle: hold its
+  `[TRACK]`, press `[NO]` → toast `REC TRIGS MUTED`, the edge icon shows `..▶`, the
+  current recording finishes and the next cycle does not record. `[TRACK]` + `[YES]` →
+  `REC TRIGS UNMUTED`, recording resumes. Stopped, a muted track shows `..■`.
 - **MIDI_PLAYS_FREE_FIX** — a PLAYS FREE MIDI track, trig quantize DIRECT, SCALE MODE PER
   TRACK, notes on steps 1 and 2: a manual trig keeps it running instead of stalling.
 - **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is a p-lock on a MIDI track:

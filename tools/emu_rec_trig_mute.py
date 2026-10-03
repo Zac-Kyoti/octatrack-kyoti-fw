@@ -22,6 +22,8 @@ Every result is printed as PASS / FAIL.  Logic only: route A has no real DSP/aud
 whether a recording really stops is a hardware question.
 
     python3 tools/emu_rec_trig_mute.py [--image out/mainos_rec_trig_mute.bin] [--frames 1500]
+    python3 tools/emu_rec_trig_mute.py --image out/KYOTI/mainos_kyoti_v1.0.bin
+        (RTM_MASK is then read from the map beside the image: KYOTI places it itself)
 """
 import argparse, os, pathlib, struct, subprocess, sys
 sys.stdout.reconfigure(line_buffering=True)
@@ -46,7 +48,8 @@ NO_ENTRY, YES_FIELD = 0x40083488, 0x400d15e4
 CC_SEND, NOTIFY, CC_HANDLER, BLIT = 0x40033e3c, 0x4005a2b8, 0x4000e79c, 0x400128a8
 CC_IN, AUTO_CH, TRIG_CH, MIDI_TRK_FLAGS = 0x80000049, 0x80000047, 0x8000003f, 0x8000000c
 FLAGWORD = 0x46c7a6c0
-MSG = 0x400d6600                    # test buffer: classic-cave zeros, unused on this image
+MSG = 0x4009e870                    # test buffer: the zero tail of our own .ccrx region,
+                                    # unused in both the standalone and the KYOTI image
 RTM_CC = 80
 
 fails = []
@@ -72,6 +75,12 @@ def main():
     image = pathlib.Path(a.image)
     if not image.is_absolute():
         image = ROOT / image
+    global RTM_MASK
+    maps = list(image.parent.glob("kyoti*_map.json"))
+    if maps:
+        import json
+        RTM_MASK = int(json.loads(maps[0].read_text())["pieces"]["rtm_mask"]["at"], 16)
+        print(f"RTM_MASK {RTM_MASK:#x} (from {maps[0].name})")
     S = syms()
     card, name = er.stage_project(str(DEMO), "OCTABAM", None)
     r, rt = er.attach(str(image), card, tick=True)
