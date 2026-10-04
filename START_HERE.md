@@ -174,5 +174,5 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 - **REC_TRIG_MUTE** (`tools/build_rec_trig_mute.py`) — FINAL since 2026-10-03, standalone
   (syx `c1cd7381…`) and in KYOTI V1.0. MIDI CC 80 not tried on hardware yet. Not done on
   purpose: MIDI echo / CC 80 state at power-up. Also as `BUG_RTM` (+ BATCH_BUGFIXES), and
-  as an octabam module (offered to octabam in a PR). `reference/handoffs/REC_TRIG_MUTE_SCOPE.md`, `NOTES.md`
+  as an octabam module (sambanks/octabam PR #566, ready for review). `reference/handoffs/REC_TRIG_MUTE_SCOPE.md`, `NOTES.md`
   Sessions 122–123.

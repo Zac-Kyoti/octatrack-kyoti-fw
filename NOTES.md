@@ -35242,5 +35242,9 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
     `0x40000000` with octabam's own DRAM-unit oracle recipe (`as -mcpu=54455` + defsym,
     `ld -Ttext` + defsym, `objcopy -O binary`): 8698 B, sha256 `dbb5d5f6…`. The manifest's
     `REFERENCE` is that; the builder refuses if they ever differ. The image is unaffected.
-  - Offered to octabam as a PR: wrapper + test remix `rec-trig-mute`; no site clash with
-    any octabam module in the ledger matrix.
+  - **octabam PR #566** (`Zac-Kyoti:rec-trig-mute`, `fd400f8b`, ready for review): a wrapper
+    + the test remix `rec-trig-mute`, the submodule pinned at `9ea9a11`, the selftest list.
+    No site clash with any octabam module in the ledger matrix.
+  - `make check REMIX=rec-trig-mute` on upstream `cd017851`, in a scratch clone of the fork:
+    all runnable checks pass. The oracle matches (8,698 B); `verify_dram_boot` boots to the
+    handoff; `verify_set` skipped (no project).
