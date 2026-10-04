@@ -1,4 +1,4 @@
-"""REC_TRIG_MUTE -- [TRK]+[NO] mutes, [TRK]+[YES] unmutes the held tracks' recorder trigs.
+"""REC_TRIG_MUTE -- [TRACK]+[NO] mutes, [TRACK]+[YES] unmutes the held tracks' recorder trigs.
 
 The octabam form has not been flashed; the same source is hardware-confirmed as the standalone
 image and inside KYOTI V1.0.
@@ -12,7 +12,7 @@ AUDIO CC OUT -- both exactly like stock's CC 52/53.  The track-edge status icon 
 "..[]" / "..>" on a muted track that is not recording.  [FUNC]+[YES]/[NO] stay stock.
 
 SITES (our own disassembly of 1.40C; proofs: reference/handoffs/REC_TRIG_MUTE_SCOPE.md):
-  * the [TRK]-held input layer 0x400d164a: its YES / NO records (0x400d15e2 / 0x400d15fc)
+  * the [TRACK]-held input layer 0x400d164a: its YES / NO records (0x400d15e2 / 0x400d15fc)
     name stock's ARM / DISARM REC TRK handlers 0x400834d8 / 0x40083488 -> repointed here;
   * the step handler's recorder-trig test at 0x4009d9a4 (`tst.l %d3` = REC1/2/3 of track
     d7) -- the only producer of recorder events (0x46c7a6c0 has three references);
@@ -52,7 +52,7 @@ DRAW_STOCK = bytes.fromhex("7003b08c6618")
 CC = 0x4000f210
 CC_STOCK = bytes.fromhex("7c77bc816c5e")
 
-# the [TRK]-held layer's YES / NO records: press + release handler fields
+# the [TRACK]-held layer's YES / NO records: press + release handler fields
 TRK_YES = (0x400d15e4, 0x400d15e8)
 TRK_YES_STOCK = 0x400834d8          # ARM REC TRK
 TRK_NO = (0x400d15fe, 0x400d1602)
@@ -62,14 +62,14 @@ TRK_NO_STOCK = 0x40083488           # DISARM REC TRK
 # tools/build_rec_trig_mute.py builds this on every run, with octabam's own DRAM-unit oracle
 # recipe (m68k-elf-as -mcpu=54455 --defsym OCTABAM_UNIT=0x1; ld -Ttext=0x40000000 + the same
 # defsym; objcopy -O binary), and refuses if this line no longer matches.
-REFERENCE = (0x40000000, "dbb5d5f6c9714b2a8f92fd502833a59f36c70abb32cbf9a3cee96ada9e248fc4")
+REFERENCE = (0x40000000, "d49e0d82ec7fe66fad0c3eb67b41c2a1e892af0db6320bae1ae745997edf5f19")
 
 
 MODULE = Module(
     name="rec-trig-mute",
     key="REC_TRIG_MUTE",
     kind=Kind.CF_PATCH,
-    doc="[TRK]+[NO]/[YES] mute/unmute the held tracks' recorder trigs; MIDI CC 80; "
+    doc="[TRACK]+[NO]/[YES] mute/unmute the held tracks' recorder trigs; MIDI CC 80; "
         "'..' beside a muted track's status icon.",
     linked=(
         Linked("rtm", os.path.join(_HERE, "patch_rec_trig_mute.s"), dram=True,
@@ -86,8 +86,8 @@ MODULE = Module(
                "CC handler fall-through: CC 80, else stock's compare replayed"),
     ),
     symbol_refs=tuple(
-        SymbolRef(a, TRK_YES_STOCK, "rtm", "rtm_yes", "[TRK]-layer YES record") for a in TRK_YES
+        SymbolRef(a, TRK_YES_STOCK, "rtm", "rtm_yes", "[TRACK]-layer YES record") for a in TRK_YES
     ) + tuple(
-        SymbolRef(a, TRK_NO_STOCK, "rtm", "rtm_no", "[TRK]-layer NO record") for a in TRK_NO
+        SymbolRef(a, TRK_NO_STOCK, "rtm", "rtm_no", "[TRACK]-layer NO record") for a in TRK_NO
     ),
 )

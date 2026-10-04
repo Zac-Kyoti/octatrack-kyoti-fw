@@ -220,8 +220,7 @@ rtm_cc:
     move.b  %d0,RTM_MASK
 9:  jmp     CC_EXIT
 
-    .ifdef OCTABAM_UNIT
-    .data
-RTM_MASK: .byte 0                   | volatile: 0 at every boot
-    .even
+    .ifdef OCTABAM_UNIT                 | in .text, right after the code: the unit lives in DRAM,
+RTM_MASK: .byte 0                   | so it is writable; a .data section would sit 8 KB past
+    .even                           | the code (ld's default) -- Sam, octabam PR #566
     .endif

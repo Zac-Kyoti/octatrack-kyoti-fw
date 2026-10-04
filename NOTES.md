@@ -35248,3 +35248,22 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
   - `make check REMIX=rec-trig-mute` on upstream `cd017851`, in a scratch clone of the fork:
     all runnable checks pass. The oracle matches (8,698 B); `verify_dram_boot` boots to the
     handoff; `verify_set` skipped (no project).
+
+### Session 123 continued (3) (2026-10-04) — octabam PR #566 merged; Sam's two follow-ups
+
+* **Sam merged #566** as `fa24fb53`; octabam `main` pins `upstream` at `9ea9a11`. His gates:
+  - `make check REMIX=rec-trig-mute` and `make reach RUN=1`, with and without `TESTS=1`;
+  - `make modules`: no claim or site conflict;
+  - REC_TRIG_MUTE with each of bottleservice, ok-ms, octatrick, analog-bassdrum, wave, rig,
+    octakit, midi-scenes and mods: `make bus` + `verify_dram_boot`, all four detours placed.
+  Not tested by him: CC 80 arriving through cc-map's / Octakit's CC wrapper (`0x4000e79c`)
+  at runtime.
+* **Follow-up 1: `RTM_MASK` moves from `.data` to `.text`** in the `OCTABAM_UNIT` form. ld's
+  default script put `.data` 8 KB past the code, so the unit was 8,698 B, almost all zeros
+  in octabam's DRAM reserve. It is now **496 B**. With the byte in the same section, gas
+  turns the five reads into `(d16,pc)` and the three writes stay absolute; all eight hit
+  `RTM_MASK`. The oracle becomes `d49e0d82…`; the standalone, KYOTI and `BUG_RTM` images are
+  unchanged (that branch is `OCTABAM_UNIT`-only).
+* **Follow-up 2:** the module's text says `[TRACK]`, not `[TRK]` (the doc line feeds
+  octabam's README table).
+* The pin bump goes to octabam in a new PR.

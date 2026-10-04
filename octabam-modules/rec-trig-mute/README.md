@@ -18,8 +18,8 @@ The same source builds the standalone image (`tools/build_rec_trig_mute.py`) and
 KYOTI V1.0; both are **hardware-confirmed** on the author's MKI (keys, toasts, the edge icons,
 a running recording finishing and nothing new starting). MIDI CC 80 has not been tried on
 hardware. This octabam form — the `OCTABAM_UNIT` variant of the source — has not been flashed.
-Its `reference` is the author's build of that form (linked alone at `0x40000000`, 8698 B,
-sha256 `dbb5d5f6…`), made by `tools/build_rec_trig_mute.py` with octabam's own DRAM-unit
+Its `reference` is the author's build of that form (linked alone at `0x40000000`, 496 B,
+sha256 `d49e0d82…`), made by `tools/build_rec_trig_mute.py` with octabam's own DRAM-unit
 oracle recipe on every run.
 
 ## Contents
@@ -37,8 +37,8 @@ oracle recipe on every run.
 | `0x4004bee2` | `lea 0x400c0cb8,%a0` | `jsr` | edge renderer: the mute folded into its state cache |
 | `0x4004c00c` | `moveq #3,%d0 ; cmpl %a4,%d0 ; bnes` | `jmp` | edge renderer: `..■` / `..▶` |
 | `0x4000f210` | `moveq #119,%d6 ; cmp.l %d1,%d6 ; bge` | `jmp` | CC handler fall-through: CC 80 |
-| `0x400d15e4` / `e8` | `0x400834d8` | data | `[TRK]`-layer YES record → `rtm_yes` |
-| `0x400d15fe` / `0x400d1602` | `0x40083488` | data | `[TRK]`-layer NO record → `rtm_no` |
+| `0x400d15e4` / `e8` | `0x400834d8` | data | `[TRACK]`-layer YES record → `rtm_yes` |
+| `0x400d15fe` / `0x400d1602` | `0x40083488` | data | `[TRACK]`-layer NO record → `rtm_no` |
 
 Compatible by construction with octabam's `cc-map` and with Octakit's CC wrapper: both
 hook the CC handler's **entry** (`0x4000e79c`) and pass CCs they don't own to stock, which
