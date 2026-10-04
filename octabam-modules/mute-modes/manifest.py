@@ -33,7 +33,9 @@ MEASURED. Hardware-confirmed on the author's MKI (tools/build_mute_modes.py, the
 standalone image, and the KYOTI V1.0 combined image). Both units, assembled with no
 symbols defined (DT_MODE defaults to 1 in the source), are byte-identical to that build
 at its addresses -- the `reference` pairs below -- for -mcpu=5407 and 54455 alike; with
-SC_KEY, mm_softmute is byte-identical to the KYOTI V1.0 image at 0x400d74e4.
+SC_KEY, mm_softmute is byte-identical to the KYOTI V1.0 image at 0x400d74e4, and ran on the
+author's MKI in an octabam-built image with SIDECHAIN_COMPRESSOR (2026-10-04): a muted KEY
+keeps ducking in every MUTE MODE.
 """
 
 import os

@@ -47,7 +47,9 @@ shows on an MKII only. Nothing in the firmware keys off a PERSONALIZE row's posi
 **With SIDECHAIN_COMPRESSOR:** a muted track that a COMPRESSOR uses as its KEY keeps
 feeding it, as on stock. `patch_softmute.s` includes `remix.inc`, which carries
 `.set SC_KEY,1` only when SIDECHAIN_COMPRESSOR is in the remix (the source tests it with
-`.ifdef`). That variant is byte-identical to the KYOTI V1.0 combined image's.
+`.ifdef`). That variant is byte-identical to the KYOTI V1.0 combined image's, and ran on the
+author's MKI in an octabam-built image with SIDECHAIN_COMPRESSOR (2026-10-04): a muted KEY
+keeps ducking in every MUTE MODE.
 
 ## Measured vs inferred
 

@@ -6,7 +6,7 @@
             KGN   the key's gain, about -24..+24 dB around 64
             MON   ON = hear the processed key instead of the track (audition)
 
-WORK IN PROGRESS: built and gated in octabam, not run on a unit in this form.
+Hardware-confirmed in this octabam form (the author's MKI, 2026-10-04; see MEASURED).
 
 COLDFIRE. One ROM unit, sc_cf (tools/patch_sidechain.s, 134 B): KEY's and KFLT's
 formatters and KEY's list widget. The page-2 slots are written as raw descriptor words
@@ -38,10 +38,11 @@ MEASURED. The ColdFire unit, linked at the standalone image's own address, is th
 image's bytes (5407 and 54455 alike). The DSP source is the standalone's
 (tools/patch_sc_dsp3.asm), with the same per-core values; octabam assembles and places
 it itself: on both payloads its code is the standalone's instruction for instruction except
-the two table loads, and the 48 table words are identical. On the author's MKI (standalone
-and KYOTI V1.0): KEY ducking, MON, a muted KEY with MUTE_MODES. Not yet on a unit:
-cross-core KEY both ways, a reverb on T7 beside it, the first kick after PLAY with a muted
-key. This octabam form has not been run on a unit.
+the two table loads, and the 48 table words are identical. On the author's MKI, this octabam
+form (2026-10-04, with all six KYOTI modules and REC_TRIG_MUTE): COMPRESSOR's two pages,
+KEY ducking on one core and across cores both ways, KFLT, KGN, MON, no reverb cross-talk on
+T7, a muted KEY in each MUTE MODE and the first kick after PLAY. Before that, the standalone
+and KYOTI V1.0: KEY ducking, MON, a muted KEY with MUTE_MODES.
 """
 
 import importlib.util

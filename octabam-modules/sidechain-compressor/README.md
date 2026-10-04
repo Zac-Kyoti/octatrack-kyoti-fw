@@ -10,9 +10,7 @@ detector. Four controls join RMS on page 2:
 | **KGN** | the key's gain, about −24 to +24 dB; 64 is unity |
 | **MON** | ON: hear the processed key on this track instead (audition) |
 
-## ⚠️ Work in progress
-
-Built and gated in octabam. This form has not been run on a unit.
+**Hardware-confirmed in this octabam form** (the author's MKI, 2026-10-04, see Measured).
 
 ## Contents
 
@@ -68,11 +66,14 @@ refuses the pair. A later version is planned to move both.
   instruction, except for the two table loads above. The 48 table words are identical.
 - `make check-remix` passes for `sidechain-compressor`, for MUTE_MODES with this module,
   and for all six KYOTI modules with this module.
-- **On hardware** (the author's MKI, the standalone image and the KYOTI V1.0 combined
-  image): KEY ducking, MON, and a muted KEY with MUTE_MODES (Session 117). No reverb
-  cross-talk. **Not yet tested on a unit:** cross-core KEY in both directions, a reverb on
-  T7 beside SIDE-CHAIN, and the first kick after PLAY with a muted key (`FLASHING.md`
-  §4.11 block 4). This octabam form has not been run on a unit.
+- **On hardware, this octabam form** (the author's MKI, 2026-10-04, an octabam-built image
+  with all six KYOTI modules, REC_TRIG_MUTE and this module): COMPRESSOR's page 1
+  (ATK..MIX) and page 2 (RMS, KEY, KFLT, KGN, MON); KEY ducking on the same core and
+  **across cores in both directions** (T1 → T5, T5 → T1); KFLT, KGN, MON; no reverb
+  cross-talk with DARK or PLATE REV on T7; a muted KEY in each MUTE MODE, and the first kick
+  after PLAY with it muted.
+- Before that, on the standalone image and the KYOTI V1.0 combined image: KEY ducking,
+  MON, a muted KEY with MUTE_MODES (Session 117).
 
 ## Licence
 
