@@ -35297,3 +35297,11 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
   octabam `make bus` places it (ptable P:0x1252, code P:0x14a3 on A) and stops only at the four XY+ALU lines;
   with those swapped for plain XY moves (diagnostic only) its dsp_asm assembles the 420 words. Octabam branch
   `repitch-repeat98-kyoti` (scratch, `9d34dccc`, pin `7c63d45`) ready, not pushed.
+* **Later (same day): Sam merged #573** (`b38a39ab`): octabam's dsp_asm encodes an ALU op with an XY move pair
+  (`mac x1,y0,b x:(r1)+,x1 y:(r7)+,y0` = `f4f9ea`, as dsp_xasm) and its round-trip compares operands. In a scratch
+  octabam with a freshly built toolchain, REPITCH's placed 1013 words (593 ptable + 420 code) are word-for-word the
+  `dsp_xasm` build that passed 176/176, on both payloads; `check-remix` and `check-shared` green; SIDECHAIN's two
+  test remixes still green. **Octabam limitation:** a hook-only section's ptable is never parked in the curve bank
+  (its XTABLE pass covers chooser modules only), so REPITCH needs one run of 1013 words: its test remix gives up
+  SPRING REV and DARK REV. Asked on #561. (Do not run `make dsp-repatch` in a COPIED octabam clone: its
+  `vendor/dsp56300/build` points at the original; `rm -rf` it and reconfigure first.)
