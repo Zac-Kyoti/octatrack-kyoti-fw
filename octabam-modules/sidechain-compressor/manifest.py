@@ -83,20 +83,19 @@ MODULE = Module(
         "key gain and a key listen switch on page 2.",
     menu=MenuEntry(fx2_id=0x18, donor_desc=E, abbr=b"COMP", fullname=b"COMPRESSOR",
                    replaces="COMPRESSOR", stock_dsp=True),
-    # Slots 0-6 are stock COMPRESSOR's, unchanged. The build writes the enable bitmap
-    # from `active` (a bare Param() would hide them) and verify_menu wants every drawn
-    # knob named, so they are declared active under stock's own names -- the bytes the
-    # donor already holds. Every other field stays the donor's. Slot 7 is stock's empty one.
-    params=tuple(Param(n, active=True, doc=d) for n, d in (
-        (b"ATK", "stock: attack time"),
-        (b"REL", "stock: release time"),
-        (b"THRS", "stock: threshold"),
-        (b"RAT", "stock: ratio"),
-        (b"GAIN", "stock: make-up gain"),
-        (b"MIX", "stock: dry/wet mix"),
-        (b"RMS", "stock: the detector's RMS setting"))) + (Param(),) + (
+    # Slots 0-6 are stock COMPRESSOR's, unchanged: on a stock_dsp clone a Param() keeps the
+    # donor's enable nibble and every other field (octabam #571). Slot 7 is stock's empty one.
+    params=tuple(Param(doc=d) for d in (
+        "stock: attack time",
+        "stock: release time",
+        "stock: threshold",
+        "stock: ratio",
+        "stock: make-up gain",
+        "stock: dry/wet mix",
+        "stock: the detector's RMS setting")) + (Param(),) + (
         Param(b"KEY", 0, count=9, active=True,
               formatter_word=("sc_cf", "key_fmt"), widget_word=("sc_cf", "key_list_fix"),
+              labels=("OFF", "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"),
               doc="the track whose audio drives the detector; OFF = stock (self)"),
         Param(b"KFLT", 64, count=128, active=True,
               formatter_word=("sc_cf", "kfilt_fmt"), widget_word=0,   # a plain knob, not the donor's switch
@@ -106,6 +105,7 @@ MODULE = Module(
               doc="the key's gain, about -24..+24 dB; 64 = unity"),
         Param(b"MON", 0, count=2, active=True,
               formatter_word=FMT_ONOFF, widget_word=SWITCH_FN,
+              labels=("OFF", "ON"),
               doc="ON: this track plays its processed key instead (audition)"),
     ),
     linked=(
