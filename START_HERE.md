@@ -108,7 +108,7 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | a final build | `tools/build_<feature>.py` → `.syx` (MIDI) + `.bin` (CF card); see `BUILD_KYOTI.md` |
 | the combined image | `tools/build_kyoti.py` (final; `--without NAME` builds a WIP bisection image) |
 | octabam's remixer (`make remix`) | `sh tools/octabam_remixer.sh` — its own clone at `~/Documents/octabam`, fast-forwarded to octabam's `main` on every launch; `refs/octabam` stays the pinned research harness |
-| each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final, seven images) |
+| each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final, eight images) |
 | DIRECT JUMP V6.4, the OT↔AR parity build | `tools/build_direct_jump_v6_4.py` — WIP **by design**: kept buildable at the user's request (hardware-confirmed image `4a6c1b5e…`), never to be promoted |
 | external RE research | `python3 tools/refs/sync.py` (clone or refresh the tracked repos into `refs/`) · `python3 tools/refs/whatsnew.py` |
 
@@ -142,7 +142,7 @@ builder's FINAL entry and the old builder is deleted. There is no superseded tie
 | REPITCH_REPEAT98_KYOTI | `build_repitch_repeat98_kyoti.py` | `octabam-modules/repitch-repeat98-kyoti` (ColdFire half; DSP pending) |
 | QUANTIZE_LIVE_REC_TOGGLE | `build_quantize_live_rec_toggle.py` | `octabam-modules/quantize-live-rec-toggle` |
 | ERASE_EMPTY_TRIGLESS_LOCKS | `build_erase_empty_trigless_locks.py` | `octabam-modules/erase-empty-trigless-locks` |
-| REC_TRIG_MUTE | `build_rec_trig_mute.py` | not yet ported |
+| REC_TRIG_MUTE | `build_rec_trig_mute.py` | `octabam-modules/rec-trig-mute` |
 | BATCH_BUGFIXES: MIDI_PLAYS_FREE_FIX · EMPTY_PATTERN_LED_FIX · PART_CHANGE_CARRYOVER_FIX | `build_midi_plays_free_fix.py` · `build_empty_pattern_led_fix.py` · `build_part_change_carryover_fix.py` | `octabam-modules/batch-bugfixes` |
 
 The assembly sources keep their historical names (`patch_directjump_v7.s`,
@@ -173,6 +173,6 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   `reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md` — start at its §0. `NOTES.md` Session 121.
 - **REC_TRIG_MUTE** (`tools/build_rec_trig_mute.py`) — FINAL since 2026-10-03, standalone
   (syx `c1cd7381…`) and in KYOTI V1.0. MIDI CC 80 not tried on hardware yet. Not done on
-  purpose: MIDI echo / CC 80 state at power-up; not in the BATCH_BUGFIXES images; its
-  octabam module is local-only WIP. `reference/handoffs/REC_TRIG_MUTE_SCOPE.md`, `NOTES.md`
+  purpose: MIDI echo / CC 80 state at power-up. Also as `BUG_RTM` (+ BATCH_BUGFIXES), and
+  as an octabam module (offered to octabam in a PR). `reference/handoffs/REC_TRIG_MUTE_SCOPE.md`, `NOTES.md`
   Sessions 122–123.

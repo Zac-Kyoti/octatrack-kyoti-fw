@@ -351,7 +351,7 @@ User decisions: glyph **B** (`...` idle / `..▶` playing), **no dots on PICKUP*
 full scope** (mute + both glyphs + skip spent one-shots) **if the space can be found**. It can.
 
 **Measured, not estimated.** A size draft assembled with `m68k-elf-as -mcpu=5407` (removed once
-`tools/patch_rec_trig_mute.s` replaced it) gave:
+`octabam-modules/rec-trig-mute/patch_rec_trig_mute.s` replaced it) gave:
 
 | piece | bytes |
 |---|---:|
@@ -509,7 +509,7 @@ referenced only from inside it.
 User decisions: CC 80; transmit **1 / 0**, stock's own on/off values (CC 53's arm pushes 1, the
 mute CC sends `neg` of a 0/−1 flag); no toast on receive.
 
-- Source `tools/patch_rec_trig_mute.s`, builder `tools/build_rec_trig_mute.py`. `.keys` 186/188,
+- Source `octabam-modules/rec-trig-mute/patch_rec_trig_mute.s`, builder `tools/build_rec_trig_mute.py`. `.keys` 186/188,
   `.glyph` 246/308, `.draw` 104/108, `.ccrx` 84/168. The YES record is **repointed** at
   `rtm_yes` (0x400834de); NO keeps 0x40083488. 754 B changed vs stock; `140C_RTM`.
   - `syx`: `bf29a57447a7abd4c68e65cbe9beac00f7c5ffe8c1cdac989c0931a6c6c8057a`

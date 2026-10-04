@@ -213,8 +213,7 @@ Three fixes to stock bugs. Each has its own build.
 
 ### Each feature + BATCH_BUGFIXES
 
-One image per feature above except REC_TRIG_MUTE, with all three BATCH_BUGFIXES folded in —
-seven images, for
+One image per feature above, with all three BATCH_BUGFIXES folded in — eight images, for
 flashing a single feature without giving up the bug fixes. The features are not combined
 with each other.
 

@@ -4,7 +4,7 @@
 """
 Bugbuilds -- each finished FEATURE build, with all three BUG FIXES folded in.
 
-Seven composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
+Eight composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
 not written alongside, the standalone per-feature images in out/):
 
     MUTE_MODES        + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
@@ -14,6 +14,7 @@ not written alongside, the standalone per-feature images in out/):
     RELOAD_FROM_PROJECT            + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     DIRECT_JUMP_KYOTI      + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     REPITCH_REPEAT98_KYOTI      + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
+    REC_TRIG_MUTE          + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
 
 Method -- compose onto the finished feature image, do not re-implement it.
 Each feature builder is run first (so the base is current), then the bug-fix caves are
@@ -22,7 +23,7 @@ is never re-derived: its DSP payloads, COMPRESSOR descriptor and FX2 chooser edi
 through untouched, and its cave stays at its own address so the descriptor's formatter
 pointers stay valid.
 
-MIDI_PLAYS_FREE_FIX (patch_trigscale) is added to ALL SEVEN images: no feature builder carries a copy
+MIDI_PLAYS_FREE_FIX (patch_trigscale) is added to ALL EIGHT images: no feature builder carries a copy
 any more.  Each of them used to (RELOAD_FROM_PROJECT's sat at 0x400d7bfc, the rest at 0x400d7b00), and
 every copy wrote the same site 0x4009b6f2 -- which octabam's remix ledger refuses, so no two
 of those features could ever be selected into one remix.  The fix is its own contribution
@@ -36,13 +37,14 @@ RELOAD_FROM_PROJECT, whose own cave starts at 0x400d6500, so the allocator moves
     patch_partreapply   0x400d6500   402 B   (RELOAD_FROM_PROJECT: relocated above its own cave)
     patch_pattern_led   0x400d6694   158 B   (RELOAD_FROM_PROJECT: likewise)
     (never below 0x400d6500 -- 0x400d64ca.. is a runtime record table, kb/caves.md 2b)
-    patch_trigscale     0x400d7b00    62 B   (added to all seven; REPITCH_REPEAT98_KYOTI's cave
+    patch_trigscale     0x400d7b00    62 B   (added to all eight; REPITCH_REPEAT98_KYOTI's cave
                                               ends at 0x400d7afc, right below it)
 
 Verification (every image, every run):
   * the feature's builder is promoted (on kyoti_status.FINAL), its rebuilt image still matches, and it is re-run
     first so the base is built from the current source (--no-rebuild skips that);
-  * each cave region is all-zero in the base before it is written;
+  * each cave region is all-zero in the base before it is written, and never covers a byte a
+    feature writes at runtime (RESERVED: REC_TRIG_MUTE's RTM_MASK is zero in the image);
   * each detour site still holds the exact stock bytes (proves no feature took it first);
   * assert_no_branch_into on every detour site (build_erase_empty_trigless_locks.py's guard, promoted here);
   * COMPOSITIONALITY: the composite's byte-delta vs stock is exactly the union of the
@@ -110,7 +112,12 @@ FEATURES = {
     "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "out/mainos_direct_jump_kyoti.bin", "BUG_DJV7", "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.0.1, clock-locked jumps)."),
     "REPITCH_REPEAT98_KYOTI": ("build_repitch_repeat98_kyoti.py", "out/mainos_repitch_repeat98_kyoti.bin", "BUG_RPK16", "SETUP TSTR RPCH/RPS9/RPSP: tempo-locked varispeed + QUAN ratios "
                              "(rev 16).  Removes SPRING REVERB."),
+    "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "out/mainos_rec_trig_mute.bin", "BUG_RTM",
+                      "[TRACK]+[NO]/[YES] mute/unmute recorder trigs; MIDI CC 80; '..' edge icon."),
 }
+# Bytes a feature writes AT RUNTIME that are zero in its image: no bug-fix cave may cover
+# them, though free_runs() would otherwise count them free.
+RESERVED = {"REC_TRIG_MUTE": [(0x400d7c3a, 1)]}       # RTM_MASK (build_rec_trig_mute.py)
 
 PROBLEMS = []
 # The three bug-fix sources now live in the batch-bugfixes module directory
@@ -312,6 +319,14 @@ def main():
                 already.append(stem)
                 addrs[stem] = resolve_present(img, stem)     # honour where IT put it
         runs = free_runs(img)
+        for at, n in RESERVED.get(name, []):            # carve out runtime-written bytes
+            cut = []
+            for r in runs:
+                if r[0] < at + n and at < r[1]:
+                    cut += [x for x in ([r[0], at], [at + n, r[1]]) if x[1] - x[0] >= 16]
+                else:
+                    cut.append(r)
+            runs = sorted(cut)
         for stem in sorted(need, key=lambda s: -len(link(s, BUGFIX[s][0])[0])):
             size = len(link(stem, BUGFIX[stem][0])[0])
             at = place(runs, size, BUGFIX[stem][0])
@@ -361,6 +376,10 @@ def main():
         if extra:
             flag(f"{name}: {len(extra)} byte(s) belong to no contributor, "
                  f"first at 0x{BASE + extra[0]:08x}")
+        for at, n in RESERVED.get(name, []):
+            if any(img[o(at):o(at) + n]):
+                flag(f"{name}: runtime byte(s) 0x{at:08x}+{n} are no longer 0 in the composite")
+                extra = extra or [o(at)]
         clean = not (clash or broke or mism or extra)
         print(f"  interlock: feature {len(feat_d)} B + bug fixes {len(ref_all)} B "
               f"-> composite {len(comp_d)} B   "

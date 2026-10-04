@@ -35221,3 +35221,26 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
   `.set SC_KEY,1` only beside SIDECHAIN_COMPRESSOR and its callable `reference` names KYOTI V1.0's bytes
   (`0x400d74e4`, `8814aa2c…`, 1086 B) or the standalone's (`0x400d7400`, `d56d848e…`). Both verified in octabam.
 * **Not pushed, no PR yet, nothing to flash.**
+
+### Session 123 continued (2) (2026-10-03) — REC_TRIG_MUTE + BATCH_BUGFIXES; the octabam module published
+
+* **`build_bugbuilds.py`: an eighth image, `BUG_RTM`** = REC_TRIG_MUTE + the three bug fixes.
+  - Interlock: disjoint, all bytes preserved, no strays (745 + 563 → 1308 B).
+  - **Pinned on the user's instruction**, like its seven siblings: mainos `fd65e293…`, syx
+    `bd0c40c4…`. Every ingredient is hardware-confirmed; the image itself is not flashed.
+  - New guard `RESERVED`: a feature's runtime-written bytes that are zero in its image
+    (REC_TRIG_MUTE's `RTM_MASK` `0x400d7c3a`) are carved out of `free_runs()`, so no bug-fix
+    cave can be placed over them, and the composite asserts they are still 0.
+  - All eight images match their pins without `KYOTI_ALLOW_WIP`.
+* **The octabam module is published** in this repo: `octabam-modules/rec-trig-mute/`.
+  - The source moved there from `tools/` (as every other module's); the builder points
+    there; the standalone image is unchanged (`34f06e29…`).
+  - Off `.git/info/exclude`. The README / docstring drop "local only" and say what is
+    hardware-confirmed: standalone and KYOTI V1.0 yes, the `OCTABAM_UNIT` form no, so it
+    has no `reference`.
+  - **Oracle:** `build_rec_trig_mute.py` now also links the `OCTABAM_UNIT` form alone at
+    `0x40000000` with octabam's own DRAM-unit oracle recipe (`as -mcpu=54455` + defsym,
+    `ld -Ttext` + defsym, `objcopy -O binary`): 8698 B, sha256 `dbb5d5f6…`. The manifest's
+    `REFERENCE` is that; the builder refuses if they ever differ. The image is unaffected.
+  - Offered to octabam as a PR: wrapper + test remix `rec-trig-mute`; no site clash with
+    any octabam module in the ledger matrix.

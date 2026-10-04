@@ -43,4 +43,5 @@ tools/build_kyoti.py
 
 [rec-trig-mute]
 tools/*rec_trig_mute*
+octabam-modules/rec-trig-mute/*
 reference/handoffs/REC_TRIG_MUTE_*

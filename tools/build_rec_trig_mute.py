@@ -7,7 +7,8 @@ Build REC_TRIG_MUTE on TOP OF STOCK 1.40C (WIP).
 [TRK]+[NO] mutes, [TRK]+[YES] unmutes the held tracks' recorder trigs; MIDI CC 80 does the
 same (receive and transmit); the track-edge status glyph shows "..." / "..>" while a muted
 track still has live recorder trigs.  Mechanism and proofs:
-reference/handoffs/REC_TRIG_MUTE_SCOPE.md; source: tools/patch_rec_trig_mute.s.
+reference/handoffs/REC_TRIG_MUTE_SCOPE.md; source: octabam-modules/rec-trig-mute/patch_rec_trig_mute.s
+(the octabam module's own source, one file for every layout).
 
 The code has no cave: it overwrites four stock routines that nothing can reach.  That is
 only safe while it stays true, so every build re-proves it on the image it patches:
@@ -22,7 +23,12 @@ only safe while it stays true, so every build re-proves it on the image it patch
     out/OCTATRACK_OS1.40C_REC_TRIG_MUTE.syx        MIDI DIN
     out/OCTATRACK_REC_TRIG_MUTE.bin                CF card
 
-Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_rec_trig_mute.py [VERSTR]
+It also builds the octabam module's ORACLE: the OCTABAM_UNIT form of the same source,
+linked alone at ORACLE_AT exactly as octabam links a DRAM unit's `reference` (as -mcpu=54455
+with the defsyms, ld -Ttext + the same defsyms, objcopy -O binary), and refuses if
+octabam-modules/rec-trig-mute/manifest.py's REFERENCE no longer matches it.
+
+Usage:  python3 tools/build_rec_trig_mute.py [VERSTR]
 """
 import os, pathlib, subprocess, sys
 from kyoti_status import gate, seal
@@ -34,7 +40,7 @@ BASE = 0x40000400
 HERE = pathlib.Path(__file__).parent
 ROOT = HERE.parent
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
-SRC = ROOT / "tools/patch_rec_trig_mute.s"
+SRC = ROOT / "octabam-modules/rec-trig-mute/patch_rec_trig_mute.s"
 OBJ, ELF = ROOT / "out/patch_rec_trig_mute.o", ROOT / "out/patch_rec_trig_mute.elf"
 OUT = ROOT / "out/mainos_rec_trig_mute.bin"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
@@ -91,6 +97,20 @@ def assemble():
             sys.exit(f"unresolved symbol in {ELF.name}: {line}")
         syms[f[2]] = int(f[0], 16)
     return blobs, syms
+
+
+ORACLE_AT = 0x40000000                   # the author's address for the octabam unit's reference
+MANIFEST = ROOT / "octabam-modules/rec-trig-mute/manifest.py"
+
+
+def octabam_oracle():
+    """(address, sha256) of the OCTABAM_UNIT form, linked the way octabam checks a DRAM unit."""
+    o, e, b = (ROOT / f"out/rtm_unit.{x}" for x in ("o", "elf", "bin"))
+    run("m68k-elf-as", "-mcpu=54455", "--defsym", "OCTABAM_UNIT=0x1", "-o", str(o), str(SRC))
+    run("m68k-elf-ld", f"-Ttext=0x{ORACLE_AT:x}", "--defsym=OCTABAM_UNIT=0x1", "-o", str(e), str(o))
+    run("m68k-elf-objcopy", "-O", "binary", str(e), str(b))
+    import hashlib
+    return ORACLE_AT, hashlib.sha256(b.read_bytes()).hexdigest(), len(b.read_bytes())
 
 
 def pc_targets(img, a):
@@ -191,6 +211,14 @@ def main():
     for site, (_, sym, _) in SITES.items():
         print(f"  detour 0x{site:08x} -> {sym} 0x{syms[sym]:08x}")
     print(f"  RTM_MASK 0x{RTM_MASK:08x}")
+
+    at, sha, n = octabam_oracle()
+    import re
+    m = re.search(r'REFERENCE = \(0x([0-9a-f]+), "([0-9a-f]{64})"\)', MANIFEST.read_text())
+    if not m or (int(m.group(1), 16), m.group(2)) != (at, sha):
+        sys.exit(f"octabam oracle: the OCTABAM_UNIT form linked at 0x{at:08x} is {n} B sha256 {sha};\n"
+                 f"  {MANIFEST.relative_to(ROOT)} REFERENCE says {m.groups() if m else 'nothing'} -- update it")
+    print(f"  octabam oracle 0x{at:08x}: {n} B sha256 {sha[:16]}... = manifest REFERENCE")
 
     if not EFT.exists() or not STOCK_SYX.exists():
         print("\n  (EFT tool or stock syx missing -- skipping the .syx/.bin wrap)")
