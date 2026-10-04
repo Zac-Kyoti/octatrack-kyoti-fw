@@ -35272,3 +35272,28 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
   `verify_dram_boot` sees the 496 B runtime in the reserve.
 * Housekeeping: the `rec-trig-mute` worktree and branch removed after this push. The flashed
   images were copied into the primary checkout's `out/` and checked against their FINAL pins.
+## Session 120 continued (5) (2026-10-04, `octabam-port`) — Sam's answers; SIDECHAIN tidied + HW test image OBKYOTI8; REPITCH's DSP half generated and bit-exact (WIP)
+
+* (Correcting continued (4)'s last line: SIDECHAIN's commits were pushed, `7c2fe04`, and draft PR sambanks/octabam#565 opened.)
+* **Sam, #561:** octabam's assembler will take XY dual moves with an ALU op (a separate PR from him; the round-trip
+  check will compare operands too). Write the kernel as the standalone has it. **#565:** both schema points fixed in
+  #571 (`f4ab3871`): a `Param()` on a `stock_dsp` clone keeps the donor's enable nibble; a raw-word slot's labels
+  are display only. #561 had been flipped to ready-for-review from this account by another session; put back to
+  draft (user).
+* **SIDECHAIN:** slots 0-6 back to `Param(doc=...)`, labels back on KEY and MON (`fba19cc`, pushed); image
+  byte-identical to the explicit declaration (`cmp`, `kyoti-mute-sidechain`). #565 rebased on octabam `fa24fb53`
+  (after #566 REC_TRIG_MUTE merged), pinned `fba19cc`, `make reach` all green.
+* **HW test image OBKYOTI8, BUILT, NOT flashed** (out/octabam_kyoti8/): the six KYOTI modules + REC_TRIG_MUTE +
+  SIDECHAIN_COMPRESSOR, stock effects less SPRING REV. syx `93c544391a366068063ad8b8257b782c5fe3ece68b12a254447b6a5db13842c2`,
+  card `e0a8a5f4…`, mainos `4b03a5ac…`. `check-remix` green, `verify_dram_boot` PASS, 248 B ROM cave left.
+* **REPITCH DSP half** (`7c63d45`, local): `tools/repitch_dsp_octabam.py` generates
+  `octabam-modules/repitch-repeat98-kyoti/rpk_dsp.asm` + `rpk_dsp_ptable.py` from the standalone kernel (asserted
+  substitutions): constants resolved; the 593 table words one ptable block (render half +0, cutoff +0x51, RPSP
+  +0x91, RPS9 +0x151) read through `p:(rN)`; zqrp loads the one base literal and re-inits when the tag OR the
+  stored base (Y:$ff0) differs; zqinit stores the base and the cutoff table's address (Y:$ff1); zqsp adds the
+  latter. Manifest: `Kind.HYBRID`, hook `zqrp` (A `0x40b`, B `0x20e`, stock `76e500 5edd00`), claim Y:$a00-$fff.
+  `tools/repitch_dsp_octabam_check.py`: **176/176 bit-exact** with the DSP twin (both payloads, tables in P and in
+  the X curve bank, mode switches); RPS9 61.1 / RPSP 171.2-173.5 instr/sample (standalone 60.6 / 170.7-172.9).
+  octabam `make bus` places it (ptable P:0x1252, code P:0x14a3 on A) and stops only at the four XY+ALU lines;
+  with those swapped for plain XY moves (diagnostic only) its dsp_asm assembles the 420 words. Octabam branch
+  `repitch-repeat98-kyoti` (scratch, `9d34dccc`, pin `7c63d45`) ready, not pushed.
