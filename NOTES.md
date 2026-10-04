@@ -35266,4 +35266,9 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
   unchanged (that branch is `OCTABAM_UNIT`-only).
 * **Follow-up 2:** the module's text says `[TRACK]`, not `[TRK]` (the doc line feeds
   octabam's README table).
-* The pin bump goes to octabam in a new PR.
+* **octabam PR #572** (`Zac-Kyoti:rec-trig-mute-followup`, `f59a735b`): the pin `9ea9a11` →
+  `0bc14c7` with the README row re-rendered. `make check REMIX=rec-trig-mute` on `fa24fb53`:
+  all runnable checks pass, the unit matches the author's build at 496 B, and
+  `verify_dram_boot` sees the 496 B runtime in the reserve.
+* Housekeeping: the `rec-trig-mute` worktree and branch removed after this push. The flashed
+  images were copied into the primary checkout's `out/` and checked against their FINAL pins.
