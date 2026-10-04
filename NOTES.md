@@ -35305,3 +35305,15 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
   (its XTABLE pass covers chooser modules only), so REPITCH needs one run of 1013 words: its test remix gives up
   SPRING REV and DARK REV. Asked on #561. (Do not run `make dsp-repatch` in a COPIED octabam clone: its
   `vendor/dsp56300/build` points at the original; `rm -rf` it and reconfigure first.)
+
+## Session 120 continued (6) (2026-10-04, `octabam-port`) — OBKYOTI8 on hardware: everything works; COMPRESSOR's chooser row
+
+* **User flashed OBKYOTI8 (syx `93c54439…`): everything works** — the six-step plan: COMPRESSOR's page 1 (ATK..MIX)
+  and page 2 (RMS, KEY, KFLT, KGN, MON); same-core ducking, KFLT, KGN, MON; **cross-core KEY both ways (T1 → T5,
+  T5 → T1), the first time on a unit**; no reverb cross-talk with DARK/PLATE on T7; a muted KEY in each MUTE MODE and
+  the first kick after PLAY; the other KYOTI modules and REC_TRIG_MUTE unchanged.
+* **Only oddity: COMPRESSOR sat at FX2 slot 2 (row 1, under NONE).** Octabam builds the FX2 chooser in the remix's
+  `modules` order, and the OBKYOTI8 / test remixes listed SIDECHAIN_COMPRESSOR first. Stock (and the standalone,
+  KYOTI V1.0) has it at row 9, after COMB FILTER. FX1 is repointed in place, so it never moved; projects store the id
+  (`0x18`), not the row. Fixed in #565's two test remixes (listed between COMB FILTER and LO-FI; `verify_menu`:
+  `ID2POS[0x18] == 9`); #565 head `f38d1904` on octabam `e6f8fabb`, `make reach` green. Any later image: same order.
