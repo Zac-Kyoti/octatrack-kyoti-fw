@@ -35845,3 +35845,41 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
 * **2026-10-14: KYOTI V1.4 PROMOTED to FINAL.** The user flashed syx `568b2efb…`: everything good.
   Pinned mainos `72710a3c…` (replaces V1.3's `d14555ec…`); it rebuilds and seals without the opt-in.
   README's Hardware line reads confirmed. octabam removal PR: sambanks/octabam#721.
+## Session 124 (2026-10-04, `ot303`) — OT-303 synth machine: scoped, Phase 1 filter study and Phase 0a effect costs (no build)
+
+New thread `ot303` (worktree `../octatrack-kyoti-fw-ot303`): a TB-303 synthesis machine from
+Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
+`reference/handoffs/OT303_SCOPE.md` (§0a decisions, §9 the 4× question, §10 results).
+
+- **Decisions (user):**
+  - DSP-resident voice, max two instances = one per core.
+  - **No degradation**: every stock-legal configuration stays clean, and there are no FX
+    restrictions anywhere.
+  - Donating effects is allowed; keeping SPRING is preferred (try the FX2-slot tails
+    `slot+$3da3..$3fff` first).
+  - Oversampling may drop below 4× if inaudible.
+  - A saturating filter is the ideal.
+  - THRU-mode host as a test vehicle only; machine type 5 is the final goal.
+- **Phase 1 (offline, `tools/ot303/`):**
+  - `voice_study` is bit-exact to `rosic::Open303` (4 scenes).
+  - Open303's TB_303 mode = Zavalishin's diode ladder (VA Filter Design eq. 5.18,
+    ω_c = 2 × stage rate) + 150 Hz feedback HP. Its §6.9 tanh form linearises to it.
+  - The ZDF candidate's error, the rate cost and the saturating + Heun results: scope §10.
+  - Open303's own fitted filter departs from the model more (hot: 1.2 / 5.9 dB) than any of
+    our rates do.
+  - Heun matters more than 3×→4×.
+- **Phase 0a (emulator):** every stock effect's DSP cost, BOTLI playing on stock 1.40C.
+  - `ot_emu --dsp-stopwatch` at the four dispatcher call sites (core 1 FX1 `P:0x2cc`, FX2
+    `0x302`; core 0 FX1 `0x4d7`, FX2 `0x50d`).
+  - Live FX ids poked at frame 5 with `--step 5:poke:` (the pinned refs/octabam port has no
+    `--step`; a private copy of the remixer clone's port `8d0ad6f4` does).
+  - Table in scope §10: DJ EQ 300 instr/sample is the most expensive; FILTER 207 = 192
+    hardware cycles → ~0.93 cycles/instr.
+  - Worst legal config per core (DJ EQ × 8 slots) ≈ 2,230 cycles of 3,120 → ≈ 890 spare.
+- **Corrected:** "two stock reverbs on one core glitch" (repeated in this scope's first
+  draft) is octabam's *reverb in FX1*, which stock's menu forbids.
+- **Next:**
+  - Phase 0b: a burn-probe hardware image (BURN knob on DJ EQ page 2) to confirm the spare
+    under the worst config on both cores.
+  - Phase 1: listening ABX pack + saturation drive voicing, and the asymmetric accent-sweep
+    RC (Whittle's component values; check against x0xb0x).

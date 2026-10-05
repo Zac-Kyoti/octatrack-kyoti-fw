@@ -50,3 +50,8 @@ reference/handoffs/REC_TRIG_MUTE_*
 [load-audit]
 tools/load_audit/*
 reference/handoffs/KYOTI_LOAD_AUDIT*
+
+[ot303]
+tools/ot303/*
+tools/*ot303*
+reference/handoffs/OT303_*
