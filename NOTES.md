@@ -35892,3 +35892,12 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   - Emulator trap: an id poke keeps the previous effect's page-2 bytes, so zero the lanes
     first (the menu loads defaults).
   - Procedure: scope §10 Phase 0b.
+- **S124 cont: listening pack** published as a private artifact (https://claude.ai/artifact/VM8mZ61ARuDkp2QbmsxfNX).
+  - ABX of 2×/3×/4× against the ideal 8× (saturating, D1 + Heun).
+  - Voicing: Open303 / linear / D0.5 / D1 / D2 at 4×; 3 scenes.
+  - Clips come from `tools/ot303/listening_pack.py` (10 s, 16-bit, RMS-matched at −23 dBFS).
+  - The user pastes the results back.
+- **Burn-test project:** the user asked for a generated busy project. Declined (CLAUDE.md:
+  never fabricate a project blob), and not needed: FX cost is independent of the audio
+  content, and the burn only runs on a playing track. Recipe given: one long looping sample
+  on all 8 tracks, DJ EQ ×16.
