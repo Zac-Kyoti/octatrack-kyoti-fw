@@ -11,8 +11,9 @@ CREDIT. Jannik Aßfalg (repeat98) wrote the basic Repitch (octabam's modules/rep
 the seven detour sites, the rate gate, the TSTR formatter). Zac Kyoti wrote the S900/S950
 and SP-1200 repitch emulations (RPS9 / RPSP) and the Quantizer (QUAN).
 
-⚠️ WORK IN PROGRESS: not run on a unit in this form. Needs octabam with #573 (dsp_asm's
-XY+ALU moves) and #603 (DspSection.ptable2, tables in a given-up effect's X data).
+Hardware-confirmed in this octabam form (the author's MKI, 2026-10-05; see MEASURED). Needs
+octabam with #573 (dsp_asm's XY+ALU moves) and #603 (DspSection.ptable2, tables in a given-up
+effect's X data).
 
 DSP. One hook, zqrp, at the voice kernel's prologue (A P:0x40b, B P:0x20e): RPS9 and RPSP
 render the pass there; RPCH runs stock's kernel. rpk_dsp.asm is generated from the
@@ -44,7 +45,12 @@ own addresses, are byte for byte that image (5407 and 54455 alike). rpk_dsp.asm,
 stock voice module on both payloads with its two table blocks in P, in the curve bank and in
 SPRING REVERB's X data, is bit-exact with the reference model's DSP twin in all 264 cases
 (tools/repitch_dsp_octabam_check.py); octabam's placed code and tables are word for word
-that build. The octabam form has not been run on hardware.
+that build. On the author's MKI, 2026-10-05, in an octabam-built image with all the KYOTI modules,
+REC_TRIG_MUTE and SIDECHAIN_COMPRESSOR, only SPRING REV given up (OBKYOTI11): RPCH follows
+the project tempo and PTCH reads QUAN, one ratio per detent; RPS9 and RPSP at several tempos,
+no clicks at trig starts; RPS9/RPSP on T5-T8 while a SIDECHAIN compressor ducks on that core;
+TSTR restored by a Part reload ([BANK]+[TRACK n] and stock RELOAD PART); DARK REV, DJ EQ and
+the other modules unaffected.
 """
 
 import os

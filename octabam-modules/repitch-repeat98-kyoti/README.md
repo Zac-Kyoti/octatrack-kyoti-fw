@@ -15,11 +15,9 @@ On a repitch track the PTCH knob becomes **QUAN**: one detent per ratio.
 (octabam's `modules/repitch`). Zac Kyoti wrote the S900/S950 and SP-1200 repitch emulations
 and the Quantizer.
 
-## ⚠️ Work in progress
-
-Not run on a unit in this form. octabam's assembler builds the kernel's XY dual moves with
-an ALU op only once its fix for them lands (sambanks/octabam#561); until then a remix with
-this module does not build.
+**Hardware-confirmed in this octabam form** (the author's MKI, 2026-10-05; see Measured).
+Needs octabam with #573 (XY dual moves with an ALU op) and #603 (`ptable2`, tables in a
+given-up effect's X data).
 
 ## Contents
 
@@ -86,7 +84,7 @@ instructions per sample (the standalone kernel: 60.6 and 170.7–172.9). In octa
 only SPRING REV given up, the placed code (SPRING's P run) and both blocks (SPRING's X data)
 are word for word that build.
 
-The octabam form has not been run on hardware.
+**On hardware, this octabam form:** the author's MKI, 2026-10-05, in an octabam-built image with all the KYOTI modules, REC_TRIG_MUTE and SIDECHAIN_COMPRESSOR, only SPRING REV given up (OBKYOTI11): RPCH follows the project tempo and PTCH reads QUAN, one ratio per detent; RPS9 and RPSP at several tempos, no clicks at trig starts; RPS9/RPSP on T5-T8 while a SIDECHAIN compressor ducks on that core; TSTR restored by a Part reload ([BANK]+[TRACK n] and stock RELOAD PART); DARK REV, DJ EQ and the other modules unaffected.
 
 ## Licence
 

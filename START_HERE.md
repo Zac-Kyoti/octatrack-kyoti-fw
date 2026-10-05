@@ -139,7 +139,7 @@ builder's FINAL entry and the old builder is deleted. There is no superseded tie
 | DIRECT_JUMP_KYOTI | `build_direct_jump_kyoti.py` | `octabam-modules/direct-jump-kyoti` |
 | SIDECHAIN_COMPRESSOR | `build_sidechain_compressor.py` | `octabam-modules/sidechain-compressor` (octabam #565; on hardware 2026-10-04) |
 | RELOAD_FROM_PROJECT | `build_reload_from_project.py` | `octabam-modules/reload-from-project` |
-| REPITCH_REPEAT98_KYOTI | `build_repitch_repeat98_kyoti.py` | `octabam-modules/repitch-repeat98-kyoti` (ColdFire half; DSP pending) |
+| REPITCH_REPEAT98_KYOTI | `build_repitch_repeat98_kyoti.py` | `octabam-modules/repitch-repeat98-kyoti` (octabam #561; on hardware 2026-10-05) |
 | QUANTIZE_LIVE_REC_TOGGLE | `build_quantize_live_rec_toggle.py` | `octabam-modules/quantize-live-rec-toggle` |
 | ERASE_EMPTY_TRIGLESS_LOCKS | `build_erase_empty_trigless_locks.py` | `octabam-modules/erase-empty-trigless-locks` |
 | REC_TRIG_MUTE | `build_rec_trig_mute.py` | `octabam-modules/rec-trig-mute` |
@@ -162,12 +162,10 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   re-cues.
 - **REPITCH_REPEAT98_KYOTI** — not specifically tested: RTRG retrigs; a full DSP core of
   RPSP tracks under heavy effects. DARK REVERB alongside the engine is emulator-verified.
-- **octabam port** — the six modules and REC_TRIG_MUTE are merged in octabam.
-  SIDECHAIN_COMPRESSOR (+ MUTE_MODES' SC_KEY variant): draft PR sambanks/octabam#565,
-  hardware-confirmed in octabam form 2026-10-04 (OBKYOTI8). REPITCH_REPEAT98_KYOTI: draft PR
-  #561, both halves, builds in octabam since #573; not yet on a unit in this form (next: a
-  test image). Open question on #561: let a hook-only module's ptable park in the curve
-  bank (today REPITCH needs SPRING and DARK REV given up). `NOTES.md` Session 120 continued (4)-(6).
+- **octabam port** — the six modules, REC_TRIG_MUTE and SIDECHAIN_COMPRESSOR (+ MUTE_MODES'
+  SC_KEY variant, #565) are merged in octabam. REPITCH_REPEAT98_KYOTI: PR sambanks/octabam#561,
+  both halves, hardware-confirmed in octabam form 2026-10-05 (OBKYOTI11, only SPRING REV given
+  up). `NOTES.md` Session 120 continued (4)-(8).
 - **KYOTI modules × Octakit** — DIRECT_JUMP_KYOTI and RELOAD_FROM_PROJECT crash beside
   Octakit and are refused with it until bridges exist (`a7a5291`, `c9a66cf`; live in octabam
   since `f3b12f36`). Scope, findings and the plan:

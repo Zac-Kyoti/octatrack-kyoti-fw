@@ -35339,3 +35339,12 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
   `fae359bbcc0b2da620ade26ae4e01699d9a23b07664044d9eb275f868ed9f23a`. SIDECHAIN 388 + REPITCH 426 words share SPRING's P
   run (814/820); REPITCH code A P:0x13d6 / B P:0x1196, words == dsp_xasm, **88/88 bit-exact at this layout**;
   `verify_dram_boot` PASS; 248 B ROM cave left.
+
+## Session 120 continued (8) (2026-10-05, `octabam-port`) — OBKYOTI11 on hardware: all tests pass
+
+* **User flashed OBKYOTI11 (syx `fae359bb…`): all tests pass** — RPCH follows the project tempo, PTCH reads QUAN (one
+  ratio per detent); RPS9 / RPSP at several tempos, no clicks at trig starts; RPS9/RPSP on T5-T8 while a SIDECHAIN
+  compressor ducks on that core; TSTR restored by a Part reload ([BANK]+[TRACK n] and stock RELOAD PART); DARK REV,
+  DJ EQ, SIDECHAIN, MUTE MODE, DIRECT JUMP, RELOAD unaffected. First hardware run of REPITCH_REPEAT98_KYOTI in octabam
+  form (two table blocks in SPRING's X data, kernel in SPRING's P run beside SIDECHAIN). Docs → hardware-confirmed;
+  #561 re-pinned (still draft until the user says).
