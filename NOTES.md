@@ -35317,3 +35317,25 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
   KYOTI V1.0) has it at row 9, after COMB FILTER. FX1 is repointed in place, so it never moved; projects store the id
   (`0x18`), not the row. Fixed in #565's two test remixes (listed between COMB FILTER and LO-FI; `verify_menu`:
   `ID2POS[0x18] == 9`); #565 head `f38d1904` on octabam `e6f8fabb`, `make reach` green. Any later image: same order.
+
+## Session 120 continued (7) (2026-10-05, `octabam-port`) — #565 merged; REPITCH's tables in SPRING's own X data (#603); OBKYOTI11 (WIP)
+
+* **SIDECHAIN_COMPRESSOR merged** in octabam (#565, `6da9e9e4`), with MUTE_MODES' SC_KEY variant.
+* **Sam #578** (`9b53589b`): a hook-only module's ptable parks in the curve bank when no reader (DJ EQ) is kept — REPITCH
+  "option B" (SPRING REV + DJ EQ, DJ EQ off both choosers via `fx1=` in stock order: the FX1 chooser is built in `fx1`
+  order). Image OBKYOTI10 built for it (syx `b44ce838…`, bit-exact 176/176 at its layout), superseded below, never flashed.
+* **Why DJ EQ:** the curve bank (X:0x4840, 4,096 words) has one stock reader, DJ EQ; giving up any other effect
+  (SPATIALIZER: 261 P words at A P:0xaa8) frees P only. DJ EQ's own P words: 345 (A P:0x1d71, B P:0x1b31).
+* **Sam #603** (`0ec8309d`) on our ask: a table may go in X data only a given-up effect addresses (`stock.x_exclusive_runs`);
+  `DspSection.ptable2` (`$fab2e0`). SPRING's exclusive X data is ONE run of 844 words per payload (A 0x89a4..0x8cef,
+  B 0x8464..0x87af — the 128-word record between our two runs is SPRING's too); his port canary: all 844 words intact.
+* **REPITCH kernel → two blocks** (`a4106b7`, pushed): block 1 = render half-table + cutoff table (145, `$fab1e0`),
+  block 2 = RPSP + RPS9 rows (448, `$fab2e0`); zqrp re-inits on tag or either base (Y:$ff0 / $ff2; TABG Y:$ff1); code
+  426 words. `tools/repitch_dsp_octabam_check.py`: **264/264 bit-exact** (P, curve bank, SPRING X data; both payloads);
+  RPS9 61.6 / RPSP 171.8–174.0 instr/sample. Octabam puts the code in SPRING's P run and the blocks at A X:0x89a4 / 0x8a35,
+  B X:0x8464 / 0x84f5: word for word that build. Test remix gives up SPRING REV only. #561 head `2c153364`, reach green, draft.
+* **HW test image OBKYOTI11, BUILT, NOT flashed** (out/octabam_kyoti11/): every KYOTI module incl. REPITCH and SIDECHAIN,
+  only SPRING REV given up (DARK REV, DJ EQ kept; COMPRESSOR in its stock row). syx
+  `fae359bbcc0b2da620ade26ae4e01699d9a23b07664044d9eb275f868ed9f23a`. SIDECHAIN 388 + REPITCH 426 words share SPRING's P
+  run (814/820); REPITCH code A P:0x13d6 / B P:0x1196, words == dsp_xasm, **88/88 bit-exact at this layout**;
+  `verify_dram_boot` PASS; 248 B ROM cave left.
