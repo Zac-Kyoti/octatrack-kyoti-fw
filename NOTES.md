@@ -35883,3 +35883,12 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
     under the worst config on both cores.
   - Phase 1: listening ABX pack + saturation drive voicing, and the asymmetric accent-sweep
     RC (Whittle's component values; check against x0xb0x).
+- **S124 cont: Phase 0b burn-probe image BUILT, emulator-verified, NOT flashed.**
+  - Builder: `tools/build_ot303_burnprobe.py` (WIP), syx `d2abc4d3b541ceb7…`, `140C_303BP`.
+  - What it is: a BURN knob on DJ EQ page 2 slot 6 (octabam's burn body, 24 cycles/sample
+    per step). `X:$235[$0d]` → the routine in SPRING's words → `bra` into stock DJ EQ.
+    SPRING is nulled and gone from the choosers. 107 bytes changed.
+  - Verified (`verify_burnprobe.py`): exact on both cores and both slots.
+  - Emulator trap: an id poke keeps the previous effect's page-2 bytes, so zero the lanes
+    first (the menu loads defaults).
+  - Procedure: scope §10 Phase 0b.

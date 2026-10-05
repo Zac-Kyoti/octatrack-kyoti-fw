@@ -593,3 +593,38 @@ Method:
 
   Phase 0b (one hardware burn-probe image) calibrates the first and confirms the worst-case
   spare directly.
+
+### Phase 0b, the burn-probe image (built 2026-10-04, emulator-verified, NOT flashed)
+
+`tools/build_ot303_burnprobe.py` (WIP) → `out/OCTATRACK_OS1.40C_OT303_BURNPROBE.syx`
+(version `140C_303BP`).
+
+What the image contains:
+- Stock plus a BURN knob on DJ EQ page 2 (slot 6, 24 cycles/sample per step), via
+  `tools/ot303/burn_djeq.asm`, octabam's RIG BURN body.
+- SPRING REV removed (its words hold the routine).
+- 107 bytes changed; no ColdFire code.
+
+`tools/ot303/verify_burnprobe.py`, against stock, with BOTLI playing: **ALL GOOD**.
+- BURN 0 = +8 instructions per call.
+- BURN n = +3·8·n·16 instructions, on the targeted track only, both cores and both slots.
+- SPRING's id → the 69-instruction passthrough.
+- DARK REV identical to stock.
+
+Not covered by the emulator: the knob's drawing, and real cycles (the point of the image).
+
+**Procedure (the user):**
+1. Flash, power-cycle, and work in a *copy* of a busy project. A raised BURN is stored in
+   the Part, but stock firmware ignores it, so reflashing the normal image always recovers.
+2. All 8 tracks playing continuously.
+3. Heavy run:
+   - FX1 = FX2 = DJ EQ on all 8 tracks; check every BURN reads 0.
+   - On T1, raise FX1 page-2 BURN step by step (~5 s each) until the audio breaks
+     (crackle, dropout, squeal or a stalled sequencer).
+   - Note the last clean value N1, then back to 0.
+   - The same on T5 → N0.
+4. Light run: all FX NONE except T1 FX1 = DJ EQ → L1; except T5 FX1 = DJ EQ → L0.
+5. Results:
+   - spare in the worst legal config = 24·N per core;
+   - 7 DJ EQ instances = 24·(L − N) cycles, which calibrates cycles/instruction against
+     the 300-instruction count.
