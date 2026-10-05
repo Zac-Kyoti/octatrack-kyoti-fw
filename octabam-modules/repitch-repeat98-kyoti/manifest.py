@@ -11,15 +11,16 @@ CREDIT. Jannik Aßfalg (repeat98) wrote the basic Repitch (octabam's modules/rep
 the seven detour sites, the rate gate, the TSTR formatter). Zac Kyoti wrote the S900/S950
 and SP-1200 repitch emulations (RPS9 / RPSP) and the Quantizer (QUAN).
 
-⚠️ WORK IN PROGRESS: not run on a unit in this form, and octabam's dsp_asm builds the
-kernel's XY+ALU moves only once sambanks/octabam#561's assembler fix lands.
+⚠️ WORK IN PROGRESS: not run on a unit in this form. Needs octabam with #573 (dsp_asm's
+XY+ALU moves) and #603 (DspSection.ptable2, tables in a given-up effect's X data).
 
 DSP. One hook, zqrp, at the voice kernel's prologue (A P:0x40b, B P:0x20e): RPS9 and RPSP
 render the pass there; RPCH runs stock's kernel. rpk_dsp.asm is generated from the
 hardware-tested kernel by tools/repitch_dsp_octabam.py (constants resolved; the tables as
-one ptable block read through `p:(rN)`; the block's base checked and stored at first use,
-since it moves between remixes). The section needs donor words: the test remix gives up
-SPRING REV, as the standalone build does.
+two blocks, ptable and ptable2, read through `p:(rN)`; both bases checked and stored at
+first use, since they move between remixes). The test remix gives up SPRING REV only, as
+the standalone does: the code takes SPRING's P run, and octabam's XHARVEST (#603) puts the
+two blocks in SPRING's own X data, where the standalone keeps them.
 
 COLDFIRE. Three DRAM units: rpk_logic (patch_repitch_kyoti.s -- gates, QUAN, the swap
 bookkeeping, the four page-1 dial renderers), rpk_glyphs (the seven TSTR glyphs) and
@@ -40,9 +41,10 @@ reserve unless another DRAM module already does.
 MEASURED. Hardware-confirmed on the author's MKI (the standalone image, rev 16, and the
 KYOTI V1.0 combined image). rpk_logic and rpk_glyphs, linked at the standalone image's
 own addresses, are byte for byte that image (5407 and 54455 alike). rpk_dsp.asm, run in the
-stock voice module on both payloads with the table block in P and in the X curve bank, is
-bit-exact with the reference model's DSP twin in all 176 cases
-(tools/repitch_dsp_octabam_check.py). The octabam form has not been run on hardware.
+stock voice module on both payloads with its two table blocks in P, in the curve bank and in
+SPRING REVERB's X data, is bit-exact with the reference model's DSP twin in all 264 cases
+(tools/repitch_dsp_octabam_check.py); octabam's placed code and tables are word for word
+that build. The octabam form has not been run on hardware.
 """
 
 import os
@@ -154,7 +156,8 @@ MODULE = Module(
         asm=os.path.join(_HERE, "rpk_dsp.asm"),
         priority=31,
         ybase=YBase.NEVER,
-        ptable=_tab.PTABLE,
+        ptable=_tab.PTABLE,          # 145: render half-table + cutoff table
+        ptable2=_tab.PTABLE2,        # 448: the RPSP and RPS9 half-rows
         hooks=(DspHook({"A": 0x0040b, "B": 0x0020e}, (0x76e500, 0x5edd00), "zqrp",
                        "voice kernel prologue: RPS9 / RPSP render the pass"),),
     ),
