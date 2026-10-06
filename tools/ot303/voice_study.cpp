@@ -192,6 +192,70 @@ struct FZdf : Filt {
     }
 };
 
+// Voicing variant of FZdf (Phase 1c): the diode ladder's nonlinearities placed separately.
+//   Din  the input pair: tanh on u = in - feedback (the bottom transistor pair of the ladder)
+//   Dst  the stage differences (FZdf's D): adds harmonics AND lowers the effective cutoff at level
+//   Dfb  the feedback path only: tanh on the high-passed k*y4 (tames the resonance peak)
+//   comp undo the SLOW part of the stages' cutoff loss: omega_c / (mean stage gain, smoothed at
+//        ~50 Hz), so the level-dependent darkening goes while the audio-rate nonlinearity stays
+struct FZdf2 : Filt {
+    Mapping m; double fs = FS, Din = 0, Dst = 0, Dfb = 0; bool comp = false, heun = true;
+    double z[5] = {0}, uprev = 0, gsm = 1.0;
+    void setSampleRate(double f) override { fs = f; }
+    void setCutoff(double fc) override { m.fc = fc; m.update(); }
+    void setResonance(double pct) override { m.r = Mapping::skew(pct); m.update(); }
+    void reset() override { memset(z, 0, sizeof z); uprev = 0; gsm = 1.0; }
+    double meanStage = 1.0;
+    void step(const double* z0, const double* est, double uest, double in, double* z1) {
+        double h = 1.0 / fs;
+        double wres = m.wc / sqrt(2.0), arg = wres * h / 2;
+        if (arg > 0.98 * M_PI / 2) arg = 0.98 * M_PI / 2;
+        double wc = m.wc * tan(arg) / (wres * h / 2);
+        if (comp) wc /= gsm;
+        double wh = (2 / h) * tan(M_PI * 150.0 * h);
+        double hpE = m.k * est[3] - est[4];
+        double c = Dfb > 0 ? Tfac(hpE, Dfb) : 1.0;
+        double a = Din > 0 ? Tfac(uest - c * hpE, Din) : 1.0;
+        double b12 = 1, b23 = 1, b34 = 1, b4 = 1;
+        if (Dst > 0) {
+            b12 = Tfac(est[0] - est[1], Dst); b23 = Tfac(est[1] - est[2], Dst);
+            b34 = Tfac(est[2] - est[3], Dst); b4 = Tfac(est[3], Dst);
+        }
+        meanStage = 0.25 * (b12 + b23 + b34 + b4);
+        double A[5][5] = {{0}}, B[5] = {0};
+        A[0][0] = -wc * b12; A[0][1] = wc * b12; A[0][3] = -wc * a * c * m.k; A[0][4] = wc * a * c;
+        B[0] = wc * a;
+        A[1][0] = 0.5 * wc * b12; A[1][1] = -0.5 * wc * (b12 + b23); A[1][2] = 0.5 * wc * b23;
+        A[2][1] = 0.5 * wc * b23; A[2][2] = -0.5 * wc * (b23 + b34); A[2][3] = 0.5 * wc * b34;
+        A[3][2] = 0.5 * wc * b34; A[3][3] = -0.5 * wc * (b34 + b4);
+        A[4][3] = wh * m.k; A[4][4] = -wh;
+        double M[5][5], rhs[5];
+        for (int i = 0; i < 5; i++) {
+            rhs[i] = z0[i] + 0.5 * h * B[i] * (uprev + in);
+            for (int j = 0; j < 5; j++) {
+                rhs[i] += 0.5 * h * A[i][j] * z0[j];
+                M[i][j] = (i == j ? 1.0 : 0.0) - 0.5 * h * A[i][j];
+            }
+        }
+        solve5(M, rhs);
+        memcpy(z1, rhs, sizeof rhs);
+    }
+    double tick(double in) override {
+        double z1[5];
+        bool nl = Din > 0 || Dst > 0 || Dfb > 0;
+        step(z, z, 0.5 * (uprev + in), in, z1);
+        if (heun && nl) {
+            double mid[5];
+            for (int i = 0; i < 5; i++) mid[i] = 0.5 * (z[i] + z1[i]);
+            step(z, mid, 0.5 * (uprev + in), in, z1);
+        }
+        if (comp) gsm += (meanStage - gsm) * (1.0 - exp(-2 * M_PI * 50.0 / fs));
+        memcpy(z, z1, sizeof z1);
+        uprev = in;
+        return 2 * m.g * z[3];
+    }
+};
+
 // Kaiser-windowed sinc decimator: pass 0-20 kHz, stop from 24.1 kHz (folds onto 20 kHz), 100 dB
 struct Fir {
     std::vector<double> h, buf; int pos = 0;
@@ -262,6 +326,30 @@ struct Voice {
         b.phaseIndex += b.increment;
         return out1 + out2;
     }
+    // the stock 303's accent sweep (Whittle, Devil Fish notes): MEG -> diode + 47k -> 1 uF, bled
+    // by the 100k ACCENT pot + 100k mixing resistor: fast charge, slow discharge, so consecutive
+    // accents stack ("wow"). accTauD is the discharge (pot-dependent 100-200 ms; 150 here).
+    bool accRC = false; double accS = 0, accN = 1, accTauC = 0.047, accTauD = 0.150;
+    void calibrateAccent() {      // one isolated accent peaks where Open303's rc2 path peaks
+        double T = 1.0 / FS, tauE = 0.200, y = 0, s = 0, py = 0, ps = 0;
+        double ar = 1 - exp(-T / 0.015), ac = 1 - exp(-T / accTauC), ad = 1 - exp(-T / accTauD);
+        for (int n = 0; n < (int)FS; n++) {
+            double e = exp(-n * T / tauE);
+            y += (e - y) * ar; py = fmax(py, y);
+            if (e > s) s += (e - s) * ac;
+            s -= s * ad; ps = fmax(ps, s);
+        }
+        accN = py / ps;           // Open303's n2 then scales both the same way
+    }
+    double accentPath(double mainEnvOut) {
+        double e = o.accentGain > 0.0 ? mainEnvOut : 0.0;
+        if (!accRC) return o.n2 * o.rc2.getSample(e);
+        double T = 1.0 / FS;
+        if (e > accS) accS += (e - accS) * (1 - exp(-T / accTauC));
+        accS -= accS * (1 - exp(-T / accTauD));
+        o.rc2.getSample(e);       // keep Open303's state moving identically (unused)
+        return o.n2 * accN * accS;
+    }
     double getSample() {
         if (o.idle) return 0.0;
         double instFreq = o.pitchSlewLimiter.getSample(o.oscFreq);
@@ -269,9 +357,7 @@ struct Voice {
         o.oscillator.calculateIncrement();
         double mainEnvOut = o.mainEnv.getSample();
         double tmp1 = o.n1 * o.rc1.getSample(mainEnvOut);
-        double tmp2 = 0.0;
-        if (o.accentGain > 0.0) tmp2 = mainEnvOut;
-        tmp2 = o.n2 * o.rc2.getSample(tmp2);
+        double tmp2 = accentPath(mainEnvOut);
         tmp1 = o.envScaler * (tmp1 - o.envOffset);
         tmp2 = o.accentGain * tmp2;
         double instCutoff = o.cutoff * pow(2.0, tmp1 + tmp2);
@@ -305,13 +391,19 @@ static const Step LINE[16] = {
     {36, true, false}, {46, false, true}, {36, false, false}, {34, false, false},
     {36, true, true}, {48, false, false}, {36, false, false}, {41, true, false}};
 
-struct Scene { double cut0, cut1, res, env, dec, acc, wave; };
+static const Step ACCLINE[16] = {   // runs of consecutive accents: where the 303's accent stacks
+    {36, true, false}, {36, true, false}, {48, true, true}, {36, true, false},
+    {-1, false, false}, {39, false, false}, {36, true, false}, {36, true, false},
+    {43, true, false}, {36, false, false}, {46, true, true}, {36, true, false},
+    {34, true, false}, {36, false, false}, {48, true, false}, {36, true, false}};
+struct Scene { double cut0, cut1, res, env, dec, acc, wave; const Step* line = LINE; };
 static bool scene(const std::string& s, Scene& sc) {
     // cut0/cut1: Open303's cutoff knob 0..1 (314..2394 Hz, exponential), swept linearly over the take
     if (s == "sweep")   { sc = {0.0, 1.0, 85, 60, 400, 70, 0}; return true; }
     if (s == "hot")     { sc = {0.7, 0.7, 100, 100, 1500, 100, 0}; return true; }
     if (s == "squelch") { sc = {0.10, 0.30, 95, 80, 200, 80, 0}; return true; }
     if (s == "square")  { sc = {0.0, 1.0, 85, 60, 400, 70, 1}; return true; }
+    if (s == "accents") { sc = {0.30, 0.30, 85, 70, 400, 85, 0, ACCLINE}; return true; }
     return false;
 }
 
@@ -330,7 +422,7 @@ static std::vector<float> run(V& v, const Scene& sc, std::function<void(double)>
         double pos = n / stepLen;
         int si = (int)pos;
         if (si < steps && n == (int)ceil(si * stepLen)) {
-            const Step& st = LINE[si % 16];
+            const Step& st = sc.line[si % 16];
             if (st.note >= 0) {
                 v.noteOn(st.note, st.acc ? 127 : 80);            // held note -> Open303 slides
                 if (held >= 0 && held != st.note) v.noteOn(held, 0);
@@ -338,8 +430,8 @@ static std::vector<float> run(V& v, const Scene& sc, std::function<void(double)>
             }
         }
         if (si < steps && n == (int)ceil((si + 0.5) * stepLen)) {
-            const Step& st = LINE[si % 16];
-            const Step& nx = LINE[(si + 1) % 16];
+            const Step& st = sc.line[si % 16];
+            const Step& nx = sc.line[(si + 1) % 16];
             bool hold = st.note >= 0 && st.slide && nx.note >= 0 && si + 1 < steps;
             if (held >= 0 && !hold) { v.noteOn(held, 0); held = -1; }
         }
@@ -394,16 +486,34 @@ int main(int argc, char** argv) {
     int N = atoi(argv[4]);
     bool useEll = !strcmp(argv[5], "ell");
     double D = atof(argv[6]);
+    double oin = 0, ost = 0, ofb = 0; bool ocomp = false, oacc = false;
+    for (std::string opt = argv[6]; !opt.empty();) {          // "k:v,k:v" (or a bare number = D)
+        auto cm = opt.find(','); std::string kv = opt.substr(0, cm);
+        auto co = kv.find(':');
+        if (co != std::string::npos) {
+            std::string k = kv.substr(0, co); double v = atof(kv.c_str() + co + 1);
+            if (k == "in") oin = v; else if (k == "st") ost = v; else if (k == "fb") ofb = v;
+            else if (k == "comp") ocomp = v != 0; else if (k == "acc") oacc = v != 0;
+            else { fprintf(stderr, "unknown option %s\n", k.c_str()); return 2; }
+        }
+        opt = cm == std::string::npos ? "" : opt.substr(cm + 1);
+    }
     bool heun = atoi(argv[7]) != 0;
     if (useEll && N != 4) { fprintf(stderr, "ell decimator is quarter-band: N must be 4\n"); return 2; }
     std::unique_ptr<Filt> f;
     if (fname == "o303") f = std::make_unique<FO303>();
     else if (fname == "zdf") f = std::make_unique<FZdf>(0.0, false);
     else if (fname == "zdfnl") f = std::make_unique<FZdf>(D, heun);
+    else if (fname == "zdf2") {
+        auto z2 = std::make_unique<FZdf2>();
+        z2->Din = oin; z2->Dst = ost; z2->Dfb = ofb; z2->comp = ocomp; z2->heun = heun;
+        f = std::move(z2);
+    }
     else if (fname == "ref") f = std::make_unique<FRef>(0.0);
     else if (fname == "refnl") f = std::make_unique<FRef>(D);
     else { fprintf(stderr, "unknown filter %s\n", fname.c_str()); return 2; }
     Voice v; params(v.o, sc);
+    v.accRC = oacc; v.calibrateAccent();
     v.init(std::move(f), N, useEll);
     v.setResonance(sc.res);
     auto out = run(v, sc, [&](double c) { v.o.setCutoff(c); });

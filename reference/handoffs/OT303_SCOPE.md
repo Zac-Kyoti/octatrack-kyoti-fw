@@ -661,3 +661,40 @@ saturation available.
   "not distinguishable".
 - Drive becomes a user parameter (SETUP page): 0 = Open303-like, ~0.5 default per Hot. The
   DSP cost is the same at any drive.
+
+### Phase 1c, voicing (2026-10-05)
+
+**The user's target:**
+- rich, gummy, complex, deep, chirpy, squelchy;
+- pleasing and not fatiguing over long sessions;
+- the top end kept available at the source (easy to carve away later, impossible to add
+  back).
+
+Round-1 notes: Drive 1/2 were "too dark, a loss of sheen and 3D complexity"; Open303 and the
+linear model a touch bright/harsh.
+
+**Rule for every control (user):** a knob must give an apparent, usable change across its
+whole range. No near-inaudible ranges. A DRIVE knob is only added if its range passes that test.
+
+**Why drive darkened:** in the tanh-per-stage ladder the stage nonlinearity scales the
+integrator gain (Zavalishin §6.9: K = Δtanh/Δx ≤ 1), so level lowers the effective cutoff.
+`voice_study` now has `zdf2` (FZdf2) with the nonlinearities placed separately:
+- `in` = the input pair, tanh on in − feedback;
+- `st` = stage differences;
+- `fb` = the feedback path only;
+- `comp` = undo the slow (~50 Hz smoothed) mean stage-gain loss;
+- the circuit accent (`acc:1`: Whittle's diode + 47 kΩ / 1 µF / 100 k + 100 k, τ 47 ms
+  charge, 150 ms discharge; normalised so one isolated accent peaks where Open303's rc2 does);
+- the `accents` scene (runs of consecutive accents).
+
+Exploration at 2× (spectral change vs linear / 4–16 kHz energy at equal RMS):
+- st+comp keeps the top (HF 0 to +7 dB) while changing 4–12 dB;
+- `in` −7 dB per unit of drive;
+- `fb` a big bass bloom (−15 to −30 dB HF at equal RMS);
+- circuit accent vs Open303 accent: 2.1 / 8–11 dB p95.
+
+**Round 2 pack** (same artifact, v4; `tools/ot303/listening_pack2.py`):
+- seven voicings per scene behind shuffled letters: Open303 4×, linear, st0.5, st1+comp,
+  st2+comp, in1, fb1;
+- an accent A/B on Accents and Hot;
+- a free-text note per scene.
