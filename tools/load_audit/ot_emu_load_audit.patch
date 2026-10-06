@@ -3,7 +3,8 @@
 # Env: OT_SW_EXTRA="core:start:stop,..." + OT_SW_OUT (stopwatches: every pair, instructions and
 #      datasheet cycles); OT_IPL_OUT2 (ColdFire instructions per interrupt level); OT_ISR_OUT /
 #      OT_TICK_OUT (per-episode instruction counts at IPL>=5 / IPL 2); OT_IPL_FROM (start count);
-#      OT_TRIPWIRE=1 (last 256 PCs when the PC enters >=0xC0000000); OT_TRIP_PC + OT_TRIP_MAX.
+#      OT_TRIPWIRE=1 (last 256 PCs when the PC enters >=0xC0000000); OT_TRIP_PC + OT_TRIP_MAX;
+#      OT_RW="lo,hi;..." + OT_RW_OUT (every data read in those ranges, counted per address and PC).
 diff --git a/tools/emu/ot_emu/dsp.cpp b/tools/emu/ot_emu/dsp.cpp
 index 3e81e7be..cb004432 100644
 --- a/tools/emu/ot_emu/dsp.cpp
@@ -197,7 +198,7 @@ index df5407f3..045760f0 100644
  				++m_profile[p];
  			if(p == m_pcCountAddr)
 diff --git a/tools/emu/ot_emu/main.cpp b/tools/emu/ot_emu/main.cpp
-index 117288d2..93e38f30 100644
+index 117288d2..479948b2 100644
 --- a/tools/emu/ot_emu/main.cpp
 +++ b/tools/emu/ot_emu/main.cpp
 @@ -1510,6 +1510,17 @@ int main(int _argc, char** _argv)
@@ -218,7 +219,29 @@ index 117288d2..93e38f30 100644
  		if(!dspPcWatch.empty())
  		{
  			int core = 0; unsigned pc = 0; unsigned long long from = 0;
-@@ -2760,6 +2771,16 @@ int main(int _argc, char** _argv)
+@@ -1769,6 +1780,21 @@ int main(int _argc, char** _argv)
+ 				edmaOut << line;
+ 			});
+ 		}
++		if(const char* rw = std::getenv("OT_RW"))	// load-audit: "lo,hi;lo,hi" -> every read, counted per (addr, pc), dumped to OT_RW_OUT at exit
++		{
++			struct RwLog { std::map<std::pair<uint32_t, uint32_t>, uint64_t> n; ~RwLog() { if(const char* f = std::getenv("OT_RW_OUT")) if(FILE* o = std::fopen(f, "w")) { for(const auto& [k, v] : n) std::fprintf(o, "%08x %08x %llu\n", k.first, k.second, static_cast<unsigned long long>(v)); std::fclose(o); } } };
++			static RwLog log;
++			std::string all(rw); size_t p = 0;
++			while(p < all.size())
++			{
++				size_t q = all.find(';', p); if(q == std::string::npos) q = all.size();
++				const auto one = all.substr(p, q - p); p = q + 1;
++				const auto c = one.find(','); if(c == std::string::npos) continue;
++				const auto lo = static_cast<uint32_t>(std::strtoul(one.c_str(), nullptr, 0));
++				const auto hi = static_cast<uint32_t>(std::strtoul(one.c_str() + c + 1, nullptr, 0));
++				m.addReadWatch(lo, hi - 1, [](const uint32_t _addr, const uint8_t, const uint32_t, const uint32_t _pc) { ++log.n[{_addr, _pc}]; });
++			}
++		}
+ 		if(!watchRead.empty())
+ 		{
+ 			const auto comma = watchRead.find(',');
+@@ -2760,6 +2786,16 @@ int main(int _argc, char** _argv)
  		if(!dspStopwatch.empty())
  		{
  			const auto& w = dspPair->stopwatch();

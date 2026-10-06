@@ -35405,3 +35405,11 @@ stay clean; a feature's own new modes may add load but not break what stock allo
   ceiling ≈ 3,760–3,830 modelled cycles. Beside stock's heaviest FX there is room for ONE
   REPITCH voice per core. To meet the bar, 4 voices need ≈ 60–75 modelled cycles each (RPSP
   239, RPS9 77 today).
+* **2026-10-06 (4): KYOTI V1.0's midisc pads are live page-record tables.**
+  * **Second confirmed crash:** encoder A on an FX1/FX2 page set to NONE `jsr`s `0x460d1726`
+    (SEAM = FX NONE record `0x400d4618`'s step-handler table, holding QLREC code). Emulator
+    stops on an unimplemented opcode at `0x460d17c2`.
+  * Also: RELD = NEIGHBOR's record (garbage row reads); PASTE = record `0x400d3cac` (sample-slot
+    page, untested); FILT = THRU's record (latent).
+  * OBKYOTI6–12, standalones and Bugbuilds are clean.
+  * Fix needs ~900 B re-homed. Report §8b; tools: OT_RW read census in the ot_emu patch.

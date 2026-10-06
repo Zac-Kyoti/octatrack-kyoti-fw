@@ -316,6 +316,36 @@ This is not a load issue; it is recorded here because the audit tripped over it.
 
 ---
 
+### 8b. Follow-up (2026-10-06): it is every midisc pad, and a second confirmed crash
+
+**Record layout, read off the readers.** Each 402-byte page record is:
+- `+0x14` 12 labels × 6 B;
+- 12-long tables at `+0x6a` (max), `+0x9a`, `+0xca` (formatter), `+0xfa` (widget), `+0x12a`
+  (step handler) and `+0x15a`;
+- 8 flag bytes at `+0x18a`.
+
+Stock reads these tables by slot, and a **zero entry means "the default"**: the encoder handlers
+`0x4003aa48` (FX2) and `0x4003ac50` (FX1) `jsr` the step handler at `+0x12a + 4·(enc+6)`
+unconditionally, falling back to `0x4003240c`. The read census (OT_RW, every page × machine
+type, all encoders) found 8 stock routines reading the flag tails, plus the row and table reads
+listed below.
+
+| pad | record | page | KYOTI V1.0 bytes there | status |
+|---|---|---|---|---|
+| CAVE2 | `0x400d2e8a` | MASTER track PLAYBACK / LFO | REPITCH glyphs 0–2, PERSONALIZE labels, `rpk_reload` | **crash** on draw (confirmed) |
+| SEAM | `0x400d4618` | FX **NONE** (FX1 and FX2) | QLREC, `rpk_reload_body` | **crash: turning encoder A on an FX page set to NONE calls `0x460d1726`** (step-handler table = QLREC code); emulator stops on an unimplemented opcode at `0x460d17c2` (confirmed) |
+| RELD | `0x400d34d2` | NEIGHBOR PLAYBACK | SIDECHAIN formatters, PLAYSFREEFIX | tail reads "rows active", so `0x4003ce38`/`48` read row fields out of SIDECHAIN code. No derail seen; latent |
+| PASTE | `0x400d3cac` | used with the sample-slot arena (probably the audio editor's ATTRIBUTES page) | REPITCH glyphs 4–5 over the widget/step tables | untested |
+| FILT | `0x400d3340` | THRU PLAYBACK | REPITCH glyph 6 over step-handler slots 6–11 and `+0x15a` | not read in any exercised path; latent |
+
+**Not affected:** OBKYOTI6–12 (all five pads stock), every standalone image and Bugbuild.
+midisc 1.40MIDISC 8.2, where these pads come from, ships code in them too; probably the same
+bug there (not checked).
+
+**Fix scope.** Trimming the tails is not enough: the pads are the records' pointer tables. A
+correct KYOTI V1.0 must leave CAVE2, SEAM, RELD, PASTE and FILT stock, about **900 B** to
+re-home. KYOTI's other zones have about 80 B left in total.
+
 ## 9. Reproduce
 
 - **`tools/load_audit/ot_emu_load_audit.patch`:** against octabam `36a056c5` `tools/emu/ot_emu`.
