@@ -35450,3 +35450,16 @@ stay clean; a feature's own new modes may add load but not break what stock allo
     there.
   * S114's VEC:0B crash is still not tied to the pads: no `0x00800000` pointer in KYOTI's
     descriptor bytes.
+* **2026-10-06 (6): midisc reported** — https://github.com/bkkbrls-del/midisc/issues/7 (on the user's instruction; emulator evidence, repro steps for a unit).
+  * **midisc 8.1** (rebuilt from `midisc-patcher/patch.json`, sha verified):
+    * the FX-NONE encoder calls `0x13c1400d`;
+    * the T8 MASTER page derails on project load (CAVE2 enable bytes `221f201f4e750000`).
+  * **midisc 2.0:** FX-NONE only.
+* **Combined-image routes (S125):** octabam's 10 MiB is its FIXED platform reserve
+  (`tools/remix/arena.py` `PLATFORM_PAGES = 1707`, sized for KITS/PLOCKS), not our need. Our DRAM
+  units total ~7 KB (RELOAD 2,088 + DJ 1,980 + REPITCH CF ~2.6 KB), i.e. 2–3 pages. The
+  loader/arena code is ~600 lines, MIT (`tools/remix/loader.S`, `platform_build.py`,
+  `arena.py`, `verify_dram_boot.py`). Routes put to the user:
+  * A: a pinned octabam remix;
+  * B: our own builder with the vendored loader and a right-sized reserve;
+  * C: ROM-only, ~850 B to free.
