@@ -222,18 +222,15 @@ flashed as such.\
 **Final build:** [`tools/build_bugbuilds.py`](tools/build_bugbuilds.py) →
 `out/Bugbuilds/OCTATRACK_OS1.40C_<FEATURE>_BATCH_BUGFIXES`
 
-### KYOTI V1.0
-
-Every feature above and all three BATCH_BUGFIXES in **one image**. The boot splash and
-SYSTEM STATUS → OS VERSION read `KYOTI V1.0`.
-
-**Hardware:** confirmed.\
-**Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) →
-`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.0`
-
 ---
 
 ## ⚠️ Before you flash
+
+**KYOTI V1.0 (the all-in-one image) is withdrawn as of 2026-10-06.** It can crash the unit
+when an encoder is turned on an FX page set to NONE, and when T8's PLAYBACK or LFO page is
+shown with T8 as MASTER. If you flashed it, flash one of the single-feature builds above, or
+stock OS 1.40C. The single-feature builds and the eight BATCH_BUGFIXES images do not have
+this problem.
 
 **This is for personal study.** Updating an Elektron unit with anything other than
 official firmware is risky: it puts the warranty in question and can leave the unit

@@ -106,7 +106,7 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | REPITCH_REPEAT98_KYOTI DSP gate | `tools/repitch_dsp_*` (bit-exact against the reference engine) |
 | DSP assembly | `tools/dsp_xasm.py` over `vendor/dsp56300`'s `dsp_asm` |
 | a final build | `tools/build_<feature>.py` → `.syx` (MIDI) + `.bin` (CF card); see `BUILD_KYOTI.md` |
-| the combined image | `tools/build_kyoti.py` (final; `--without NAME` builds a WIP bisection image) |
+| the combined image | `tools/build_kyoti.py` — **WIP, withdrawn 2026-10-06** (crashes; see §6) |
 | octabam's remixer (`make remix`) | `sh tools/octabam_remixer.sh` — its own clone at `~/Documents/octabam`, fast-forwarded to octabam's `main` on every launch; `refs/octabam` stays the pinned research harness |
 | each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final, eight images) |
 | DIRECT JUMP V6.4, the OT↔AR parity build | `tools/build_direct_jump_v6_4.py` — WIP **by design**: kept buildable at the user's request (hardware-confirmed image `4a6c1b5e…`), never to be promoted |
@@ -153,11 +153,13 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
-- **KYOTI V1.0** (`tools/build_kyoti.py`) — FINAL since 2026-09-30; re-promoted 2026-10-03 with
-  REC_TRIG_MUTE (syx `5106f7fb…`; before it `f1a6e99a…`, with the RELOAD knob-repaint fix). One
-  DIRECT_JUMP_KYOTI crash, seen on an early V1.0 flash, was never reproduced; its leading
-  suspect was the MUTE_MODES register bug (`fresh_bind` overwriting `%d3`) fixed since.
-  `NOTES.md` Sessions 114–119, `reference/MERGE.md`.
+- **KYOTI V1.0** (`tools/build_kyoti.py`) — **WITHDRAWN 2026-10-06** (was FINAL 2026-09-30,
+  syx `5106f7fb…`). Its midisc pads are live stock parameter-page tables. Confirmed crashes:
+  - an encoder on an FX page set to NONE;
+  - T8's PLAYBACK/LFO page with T8 MASTER on.
+
+  Builds only with `KYOTI_ALLOW_WIP=1`. `reference/handoffs/KYOTI_LOAD_AUDIT.md` §8/§8b;
+  replacement under discussion (octabam remix). The octabam images OBKYOTI6–12 are clean.
 - **DIRECT_JUMP_KYOTI** — not yet on hardware: MIDI tracks, and Program Change on fast
   re-cues.
 - **REPITCH_REPEAT98_KYOTI** — not specifically tested: RTRG retrigs; a full DSP core of

@@ -55,9 +55,6 @@ FINAL = {
         "mainos_repitch_repeat98_kyoti_batch_bugfixes.bin":  "b5a42c83cdacca4e3f874cfa861f3caf6a8e65388cb474d65bd380587ae8f03b",
         "mainos_rec_trig_mute_batch_bugfixes.bin":           "fd65e293657e3caa895064255c7dad76882c21640c6eebdc1cf812074744c658",
     },
-    "build_kyoti.py": {
-        "mainos_kyoti_v1.0.bin":                             "82dd6660547c768b8521c54a3d0b49dffe8732b9e338f5b6423f4047fc8c6260",
-    },
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
 }
 
