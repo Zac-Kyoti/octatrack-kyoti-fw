@@ -10,6 +10,24 @@ re-pinned, nothing pushed. Measurement tools: `tools/load_audit/` (section 9).
 
 ## 1. The answer, ranked
 
+> **Update 2026-10-06 (3): HW-F on OBKYOTI12.**
+>
+> - HW-A's configuration (DJ EQ in both slots on T5–T8, 4 voices) plus **RPSP on T8: clean**.
+> - Then **RPS9 or RPSP on T7 as well: crash.**
+>
+> Core 0's ceiling is now ≈ 3,760–3,830 modelled cycles (stock worst + SIDECHAIN ≈ 3,516, +1 RPSP
+> ≈ 240, +1 RPS9 ≈ 77). The earlier 4 × RPSP estimate (≈ 3,740, crash) sits ~1 % under it: model
+> error, voice work not counted. **Beside stock's heaviest effects, a core has room for one REPITCH
+> voice.**
+>
+> **The bar** ("stock-clean configurations stay clean with the new mode selected") needs
+> 4 REPITCH voices in ≲ 240–310 modelled cycles: **≈ 60–75 per voice**. That is about RPS9's
+> cost today (77), against RPSP's 239.
+>
+> The REPITCH session's target is RPSP ≲ ~60 modelled cycles per voice, or a cap of one
+> REPITCH voice per core when the core's FX are heavy, or the limit documented.
+
+
 > **Update 2026-10-06 (2): HW-B, HW-C, HW-D on OBKYOTI12** (syx `754742de…`, built by the REPITCH
 > session).
 >

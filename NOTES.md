@@ -35401,3 +35401,7 @@ stay clean; a feature's own new modes may add load but not break what stock allo
   * HW-D: 8 STATIC voices, RPSP ×8, FX NONE, busy UI, clean → REPITCH ColdFire Low.
   * Next, HW-F: HW-A + RPSP on one track. Predicted at the edge: one voice ≈ +240 lands on the
     crashing point. If it fails, RPSP needs ≲ 55 modelled cycles per voice (for 4) or a cap.
+* **2026-10-06 (3): HW-F.** HW-A + RPSP on T8 is clean; + RPS9 or RPSP on T7 crashes. Core 0's
+  ceiling ≈ 3,760–3,830 modelled cycles. Beside stock's heaviest FX there is room for ONE
+  REPITCH voice per core. To meet the bar, 4 voices need ≈ 60–75 modelled cycles each (RPSP
+  239, RPS9 77 today).
