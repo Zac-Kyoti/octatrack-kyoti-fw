@@ -35390,3 +35390,6 @@ stay clean; a feature's own new modes may add load but not break what stock allo
     draws harmlessly.
   * Only KYOTI V1.0 is affected; every standalone, Bugbuild and OBKYOTI6–11 image is clean.
   * Not fixed. It belongs to the KYOTI V1.0 builder.
+* **2026-10-06: HW-A ran clean on OBKYOTI11** (user). DJ EQ in both slots on T5–T8 and on T1–T4,
+  four voices sounding, stock TSTR. SIDECHAIN → Low. Core 0's ceiling is now ≈ 3,520–3,740
+  modelled cycles. HW-B…D steps handed over.

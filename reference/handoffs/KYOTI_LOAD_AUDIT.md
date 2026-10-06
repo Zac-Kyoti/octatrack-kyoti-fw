@@ -10,11 +10,27 @@ re-pinned, nothing pushed. Measurement tools: `tools/load_audit/` (section 9).
 
 ## 1. The answer, ranked
 
+> **Update 2026-10-06: HW-A ran clean on OBKYOTI11** (user). DJ EQ was in both slots on T5–T8
+> and on T1–T4, four voices sounding, stock TSTR. So stock's worst DSP load plus SIDECHAIN's
+> `sctap` fits on both cores, and **SIDECHAIN drops to Low**. Core 0's ceiling is now bracketed
+> by OBKYOTI11's DJ EQ ×16 measure (≈ 3,520 modelled cycles, clean) and the user's RPSP crash
+> (≈ 3,740). Predictions for HW-B/C on core 0:
+>
+> | test | modelled cycles | prediction |
+> |---|---|---|
+> | RPS9 ×4 + DARK ×4 + DJ EQ ×3 | ≈ 3,090 | clean |
+> | the same + DJ EQ on T5 | ≈ 3,440 | clean |
+> | RPSP ×1 with the crash FX | ≈ 3,020 | clean |
+> | RPSP ×2 | ≈ 3,260 | clean |
+> | RPSP ×3 | ≈ 3,500 | borderline |
+> | RPSP ×4 | ≈ 3,740 | crash (known) |
+
+
 | # | feature | risk | in one line |
 |---|---|---|---|
 | 1 | **REPITCH_REPEAT98_KYOTI**, DSP | **High** (hardware) | 4 RPSP voices on a core cost ≈ 720 instr / ≈ 955 modelled cycles per sample, ≈ 2.75 DJ EQs. That broke a stock-legal FX set on the user's unit (DARK ×4 + DJ EQ ×3 on T5–T8). |
 | 2 | **REPITCH_REPEAT98_KYOTI**, ColdFire | **Medium** | Its rate path runs **inside the frame ISR for every playing voice, even with no track in a REPITCH mode**: +5.5 % frame-ISR p99 at 7 voices (+7.4 % with RPSP). Stock's hardware ISR headroom at 7 voices is only ~10–15 % of the frame. |
-| 3 | **SIDECHAIN_COMPRESSOR**, DSP | **Medium** (margin unknown) | `sctap` copies every track's audio twice per frame, on both cores, whenever the module is in the image: +43 instr / +56 cycles per sample per core, with no COMPRESSOR anywhere. On core 0, stock's own worst case already sits *inside* the band between a hardware-clean and a hardware-crashing configuration, so 1.6 % more may or may not tip it. One flash-free test settles it (HW-A). |
+| 3 | **SIDECHAIN_COMPRESSOR**, DSP | **Low** since HW-A (was Medium) | `sctap` copies every track's audio twice per frame, on both cores, whenever the module is in the image: +43 instr / +56 cycles per sample per core, with no COMPRESSOR anywhere. On core 0, stock's own worst case already sits *inside* the band between a hardware-clean and a hardware-crashing configuration, so 1.6 % more may or may not tip it. One flash-free test settles it (HW-A). |
 | 4 | EMPTY_PATTERN_LED_FIX | Low | [PTN] held over a bank of empty patterns: +7.3 M instr/s at task level, roughly doubling task-level ColdFire work while held. Frame ISR untouched. [BANK] held is now exactly stock (the S119 fix holds). |
 | 5 | DIRECT_JUMP_KYOTI | Low | The landing tick (IPL 2) is +3.5 k instr over stock's pattern-change tick, once per jump. Adds nothing to the frame ISR. |
 | 6 | MUTE_MODES | Low | +45 instr per frame in the ISR; muting or unmuting all 8 tracks in one frame shows no spike in any mode. |
