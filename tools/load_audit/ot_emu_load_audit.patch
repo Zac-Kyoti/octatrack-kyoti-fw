@@ -1,0 +1,237 @@
+# ot_emu instrumentation for the KYOTI load audit (reference/handoffs/KYOTI_LOAD_AUDIT.md).
+# Base: octabam 36a056c5, tools/emu/ot_emu. Apply in a SCRATCH octabam copy only.
+# Env: OT_SW_EXTRA="core:start:stop,..." + OT_SW_OUT (stopwatches: every pair, instructions and
+#      datasheet cycles); OT_IPL_OUT2 (ColdFire instructions per interrupt level); OT_ISR_OUT /
+#      OT_TICK_OUT (per-episode instruction counts at IPL>=5 / IPL 2); OT_IPL_FROM (start count);
+#      OT_TRIPWIRE=1 (last 256 PCs when the PC enters >=0xC0000000); OT_TRIP_PC + OT_TRIP_MAX.
+diff --git a/tools/emu/ot_emu/dsp.cpp b/tools/emu/ot_emu/dsp.cpp
+index 3e81e7be..cb004432 100644
+--- a/tools/emu/ot_emu/dsp.cpp
++++ b/tools/emu/ot_emu/dsp.cpp
+@@ -85,6 +85,7 @@ namespace ot
+ 
+ 	struct DspPair::Core
+ 	{
++		uint64_t cycAcc = 0;	// load-audit: datasheet cycles of every instrumented instruction
+ 		AllowAll validator;
+ 		std::unique_ptr<dsp56k::Memory> mem;
+ 		std::unique_ptr<dsp56k::Peripherals56362> px;
+@@ -3080,16 +3081,28 @@ namespace ot
+ 
+ 	void DspPair::instrumentBefore(Core& c, const int i, const uint32_t pc)
+ 	{
++		c.cycAcc += c.dsp->calcOpcodeCycles(pc);
+ 		if(m_frameTraceOn)
+ 			frameTraceLine(c, pc, c.executed, m_due);
+ 		if(m_sw.core == i)
+ 		{
+-			if(pc == m_sw.start) { m_sw.t0 = c.executed; m_sw.armed = true; }
++			if(pc == m_sw.start) { m_sw.t0 = c.executed; m_sw.c0 = c.cycAcc; m_sw.armed = true; }
+ 			else if(pc == m_sw.stop && m_sw.armed)
+ 			{
+ 				const uint64_t d = c.executed - m_sw.t0;
+ 				m_sw.armed = false; ++m_sw.n; m_sw.sum += d; if(d > m_sw.max) m_sw.max = d; if(d < m_sw.min) m_sw.min = d;
+-				if(m_sw.last.size() < 4096) m_sw.last.push_back(static_cast<uint32_t>(d));
++				m_sw.last.push_back(static_cast<uint32_t>(d)); m_sw.cyc.push_back(static_cast<uint32_t>(c.cycAcc - m_sw.c0));
++			}
++		}
++		for(auto& w : m_swx)
++		{
++			if(w.core != i) continue;
++			if(pc == w.start) { w.t0 = c.executed; w.c0 = c.cycAcc; w.armed = true; }
++			else if(pc == w.stop && w.armed)
++			{
++				const uint64_t d = c.executed - w.t0;
++				w.armed = false; ++w.n; w.sum += d; if(d > w.max) w.max = d; if(d < w.min) w.min = d;
++				w.last.push_back(static_cast<uint32_t>(d)); w.cyc.push_back(static_cast<uint32_t>(c.cycAcc - w.c0));
+ 			}
+ 		}
+ 		if(m_pcWatchOn && i == m_pcWatchCore && pc == m_pcWatchPc && c.executed >= m_pcWatchFrom && !(m_pcWatchFrom && m_pcWatchHits.size() >= 24))
+diff --git a/tools/emu/ot_emu/dsp.h b/tools/emu/ot_emu/dsp.h
+index 7c755e28..d0ea39b8 100644
+--- a/tools/emu/ot_emu/dsp.h
++++ b/tools/emu/ot_emu/dsp.h
+@@ -282,8 +282,11 @@ namespace ot
+ 		// arrival pair (the dispatcher's head to its exit = one frame's DSP work,
+ 		// in the same unit as dsp_host's meter). Spins outside the pair (the host
+ 		// wait, the bank wait) are not counted, which is what "busy" failed to do.
+-		struct Stopwatch { int core = -1; uint32_t start = 0, stop = 0; uint64_t t0 = 0; bool armed = false; uint64_t n = 0, sum = 0, max = 0, min = ~0ull; std::vector<uint32_t> last; };
++		struct Stopwatch { int core = -1; uint32_t start = 0, stop = 0; uint64_t t0 = 0, c0 = 0; bool armed = false; uint64_t n = 0, sum = 0, max = 0, min = ~0ull; std::vector<uint32_t> last; std::vector<uint32_t> cyc; };
+ 		void setStopwatch(const int _core, const uint32_t _start, const uint32_t _stop) { m_sw.core = _core; m_sw.start = _start; m_sw.stop = _stop; refreshInstrumented(); }
++		// load-audit: extra stopwatches (OT_SW_EXTRA="core:start:stop,..."), every pair kept
++		void addStopwatch(const int _core, const uint32_t _start, const uint32_t _stop) { Stopwatch w; w.core = _core; w.start = _start; w.stop = _stop; m_swx.push_back(w); refreshInstrumented(); }
++		const std::vector<Stopwatch>& stopwatches() const { return m_swx; }
+ 		const Stopwatch& stopwatch() const { return m_sw; }
+ 		const std::vector<PcWatchHit>& pcWatchHits() const { return m_pcWatchHits; }
+ 		const std::vector<std::string>& writeMap() const { return m_writeMap; }
+@@ -517,7 +520,7 @@ namespace ot
+ 		void timerCapture(Core& c) __attribute__((noinline));
+ 		void instrumentBefore(Core& c, int i, uint32_t pc) __attribute__((noinline));
+ 		void traceLine(Core& c, int i, uint32_t pc) __attribute__((noinline));
+-		void refreshInstrumented() { m_instrumented = m_traceEvery != 0 || m_pcWatchOn || m_sw.core == 0 || m_sw.core == 1 || m_frameTraceOn; }
++		void refreshInstrumented() { m_instrumented = m_traceEvery != 0 || m_pcWatchOn || m_sw.core == 0 || m_sw.core == 1 || !m_swx.empty() || m_frameTraceOn; }
+ 		// O17c diagnostic (OT_DSP_FRAMETRACE=1, any mode): one stderr line per marker PC of core 0's frame
+ 		// (the bank word, the take seen, core 1's mailbox seen, the output stage, the return to the DSR2
+ 		// poll) with the DSP's own clock, the ColdFire's due count and DSR2 -- the frame's timeline against
+@@ -596,6 +599,7 @@ namespace ot
+ 		bool m_pcWatchOn = false; int m_pcWatchCore = 0; uint32_t m_pcWatchPc = 0; uint64_t m_pcWatchFrom = 0;	// with a `from`, the FIRST 24 arrivals after it are kept
+ 		std::vector<PcWatchHit> m_pcWatchHits;
+ 		Stopwatch m_sw;
++		std::vector<Stopwatch> m_swx;
+ 		bool m_watchOn = false; int m_watchCore = 0; char m_watchSpace = 'X'; uint32_t m_watchAddr = 0;
+ 		std::vector<WatchHit> m_watchHits;			// inside pullHalfwords: host-port words are the read-back, not the bank id
+ 		bool m_hostWordFired = false;	// set by runDue when the hook fired; tickSamples stops its slice on it
+diff --git a/tools/emu/ot_emu/machine.cpp b/tools/emu/ot_emu/machine.cpp
+index df5407f3..045760f0 100644
+--- a/tools/emu/ot_emu/machine.cpp
++++ b/tools/emu/ot_emu/machine.cpp
+@@ -1,3 +1,5 @@
++#include <vector>
++#include <cstdlib>
+ #include "machine.h"
+ 
+ #include "v4e.h"
+@@ -15,6 +17,26 @@
+ #include "mc68k/Musashi/m68k.h"
+ #include "mc68k/cpuState.h"
+ 
++namespace { struct LaIpl { uint64_t n[8] = {}; ~LaIpl() { if(const char* f = std::getenv("OT_IPL_OUT2")) if(FILE* o = std::fopen(f, "w")) { for(int k = 0; k < 8; ++k) std::fprintf(o, "%d %llu\n", k, static_cast<unsigned long long>(n[k])); std::fclose(o); } } }; LaIpl g_laIpl; }
++namespace { struct LaEp { std::vector<uint64_t> ep; ~LaEp() { if(const char* f = std::getenv("OT_ISR_OUT")) if(FILE* o = std::fopen(f, "w")) { for(size_t i = 0; i + 1 < ep.size(); i += 2) std::fprintf(o, "%llu %llu\n", static_cast<unsigned long long>(ep[i]), static_cast<unsigned long long>(ep[i + 1])); std::fclose(o); } } }; LaEp g_laEp; uint32_t g_laPrev = 0; uint64_t g_laStart = 0; }
++void laIplCount(uint32_t sr, uint64_t instr)
++{
++	static const uint64_t from = std::getenv("OT_IPL_FROM") ? std::strtoull(std::getenv("OT_IPL_FROM"), nullptr, 0) : 0;
++	if(instr < from) return;
++	const uint32_t lvl = (sr >> 8) & 7;
++	++g_laIpl.n[lvl];
++	if(lvl >= 5 && g_laPrev < 5) g_laStart = instr;						// frame ISR (IPL 5, nesting 6/7 counted inside) entered
++	else if(lvl < 5 && g_laPrev >= 5) { g_laEp.ep.push_back(g_laStart); g_laEp.ep.push_back(instr - g_laStart); }	// left: (start, length)
++	{	// level-2 (sequencer tick) episodes: own instructions only, nested >2 excluded
++		struct L2 { std::vector<uint64_t> ep; ~L2() { if(const char* f = std::getenv("OT_TICK_OUT")) if(FILE* o = std::fopen(f, "w")) { for(size_t i = 0; i + 1 < ep.size(); i += 2) std::fprintf(o, "%llu %llu\n", static_cast<unsigned long long>(ep[i]), static_cast<unsigned long long>(ep[i + 1])); std::fclose(o); } } };
++		static L2 l2; static bool in2 = false; static uint64_t s2 = 0, n2 = 0;
++		if(!in2 && lvl >= 2 && g_laPrev < 2) { in2 = true; s2 = instr; n2 = 0; }
++		if(in2 && lvl == 2) ++n2;
++		if(in2 && lvl < 2) { in2 = false; l2.ep.push_back(s2); l2.ep.push_back(n2); }
++	}
++	g_laPrev = lvl;
++}
++
+ namespace ot
+ {
+ 	namespace
+@@ -386,7 +408,33 @@ namespace ot
+ 		if(!m_watchPc.empty())
+ 			notePcWatch(p);
+ 		if(m_profileEvery && (m_instructions % m_profileEvery) == 0)
+-			++m_profile[p];		// the RTOS phase steps through here, not run() (O9b's coverage)
++			++m_profile[p];
++		::laIplCount(m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_SR), m_instructions);
++		{	// load-audit tripwire: the last 256 PCs when the PC first enters garbage (>= 0xC0000000)
++			static uint32_t ring[256]; static uint32_t rpos = 0; static bool fired = false;
++			static const uint32_t tpc = std::getenv("OT_TRIP_PC") ? static_cast<uint32_t>(std::strtoul(std::getenv("OT_TRIP_PC"), nullptr, 0)) : 0;
++			static int tpcHits = 0;
++			if(tpc && p == tpc && tpcHits < (std::getenv("OT_TRIP_MAX") ? std::atoi(std::getenv("OT_TRIP_MAX")) : 8))
++			{
++				++tpcHits;
++				const auto* cs = const_cast<mc68k::CpuState*>(getCpuState());
++				std::fprintf(stderr, "TRIP_PC %#x hit %d instr %llu: sr %#x d0 %#x d1 %#x d2 %#x d6 %#x a0 %#x a1 %#x a2 %#x a3 %#x a4 %#x a6 %#x a7 %#x; last PCs:", p, tpcHits, static_cast<unsigned long long>(m_instructions), m68k_get_reg(cs, M68K_REG_SR),
++					m68k_get_reg(cs, M68K_REG_D0), m68k_get_reg(cs, M68K_REG_D1), m68k_get_reg(cs, M68K_REG_D2), m68k_get_reg(cs, M68K_REG_D6), m68k_get_reg(cs, M68K_REG_A0), m68k_get_reg(cs, M68K_REG_A1),
++					m68k_get_reg(cs, M68K_REG_A2), m68k_get_reg(cs, M68K_REG_A3), m68k_get_reg(cs, M68K_REG_A4), m68k_get_reg(cs, M68K_REG_A6), m68k_get_reg(cs, M68K_REG_A7));
++				for(uint32_t k = 192; k < 256; ++k) std::fprintf(stderr, " %#x", ring[(rpos + k) & 255]);
++				std::fprintf(stderr, "\n");
++			}
++			if(p >= 0xc0000000u && !fired && std::getenv("OT_TRIPWIRE"))
++			{
++				fired = true;
++				std::fprintf(stderr, "TRIPWIRE pc %#x at instruction %llu; last PCs:\n", p, static_cast<unsigned long long>(m_instructions));
++				for(uint32_t k = 0; k < 256; ++k) std::fprintf(stderr, " %#x%s", ring[(rpos + k) & 255], (k % 8 == 7) ? "\n" : "");
++				std::fprintf(stderr, "\n regs: d0 %#x d1 %#x d2 %#x d3 %#x a0 %#x a1 %#x a6 %#x a7 %#x\n",
++					m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_D0), m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_D1), m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_D2), m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_D3),
++					m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_A0), m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_A1), m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_A6), m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_A7));
++			}
++			if(!fired) ring[rpos++ & 255] = p;
++		}		// the RTOS phase steps through here, not run() (O9b's coverage)
+ 		const auto op = read16(p);
+ 		// The EMAC and mov3q are A-line: Musashi routes 0xAxxx to the A-line
+ 		// EXCEPTION, not to the illegal-instruction callback the V4e layer
+@@ -419,6 +467,32 @@ namespace ot
+ 			notePcWatch(p);
+ 		if(m_profileEvery && (m_instructions % m_profileEvery) == 0)
+ 			++m_profile[p];
++		::laIplCount(m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_SR), m_instructions);
++		{	// load-audit tripwire: the last 256 PCs when the PC first enters garbage (>= 0xC0000000)
++			static uint32_t ring[256]; static uint32_t rpos = 0; static bool fired = false;
++			static const uint32_t tpc = std::getenv("OT_TRIP_PC") ? static_cast<uint32_t>(std::strtoul(std::getenv("OT_TRIP_PC"), nullptr, 0)) : 0;
++			static int tpcHits = 0;
++			if(tpc && p == tpc && tpcHits < (std::getenv("OT_TRIP_MAX") ? std::atoi(std::getenv("OT_TRIP_MAX")) : 8))
++			{
++				++tpcHits;
++				const auto* cs = const_cast<mc68k::CpuState*>(getCpuState());
++				std::fprintf(stderr, "TRIP_PC %#x hit %d instr %llu: sr %#x d0 %#x d1 %#x d2 %#x d6 %#x a0 %#x a1 %#x a2 %#x a3 %#x a4 %#x a6 %#x a7 %#x; last PCs:", p, tpcHits, static_cast<unsigned long long>(m_instructions), m68k_get_reg(cs, M68K_REG_SR),
++					m68k_get_reg(cs, M68K_REG_D0), m68k_get_reg(cs, M68K_REG_D1), m68k_get_reg(cs, M68K_REG_D2), m68k_get_reg(cs, M68K_REG_D6), m68k_get_reg(cs, M68K_REG_A0), m68k_get_reg(cs, M68K_REG_A1),
++					m68k_get_reg(cs, M68K_REG_A2), m68k_get_reg(cs, M68K_REG_A3), m68k_get_reg(cs, M68K_REG_A4), m68k_get_reg(cs, M68K_REG_A6), m68k_get_reg(cs, M68K_REG_A7));
++				for(uint32_t k = 192; k < 256; ++k) std::fprintf(stderr, " %#x", ring[(rpos + k) & 255]);
++				std::fprintf(stderr, "\n");
++			}
++			if(p >= 0xc0000000u && !fired && std::getenv("OT_TRIPWIRE"))
++			{
++				fired = true;
++				std::fprintf(stderr, "TRIPWIRE pc %#x at instruction %llu; last PCs:\n", p, static_cast<unsigned long long>(m_instructions));
++				for(uint32_t k = 0; k < 256; ++k) std::fprintf(stderr, " %#x%s", ring[(rpos + k) & 255], (k % 8 == 7) ? "\n" : "");
++				std::fprintf(stderr, "\n regs: d0 %#x d1 %#x d2 %#x d3 %#x a0 %#x a1 %#x a6 %#x a7 %#x\n",
++					m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_D0), m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_D1), m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_D2), m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_D3),
++					m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_A0), m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_A1), m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_A6), m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_A7));
++			}
++			if(!fired) ring[rpos++ & 255] = p;
++		}
+ 		// The opcode: the inline read16 (O15c) -- the page's own bytes while
+ 		// the PC is inside a region page, the slow body anywhere else (the
+ 		// alias, a grown page, a peripheral: each behaves exactly as step()
+@@ -848,6 +922,9 @@ namespace ot
+ 				m_why = msg;
+ 				return Stop::Handoff;
+ 			}
++			{ // load-audit IPL count (run loop)
++				::laIplCount(m68k_get_reg(const_cast<mc68k::CpuState*>(getCpuState()), M68K_REG_SR), m_instructions);
++			}
+ 			if(m_profileEvery && (m_instructions % m_profileEvery) == 0)
+ 				++m_profile[p];
+ 			if(p == m_pcCountAddr)
+diff --git a/tools/emu/ot_emu/main.cpp b/tools/emu/ot_emu/main.cpp
+index 117288d2..93e38f30 100644
+--- a/tools/emu/ot_emu/main.cpp
++++ b/tools/emu/ot_emu/main.cpp
+@@ -1510,6 +1510,17 @@ int main(int _argc, char** _argv)
+ 			if(std::sscanf(dspStopwatch.c_str(), "%d:%x:%x", &core, &a0, &a1) == 3)
+ 				dspPair->setStopwatch(core, a0, a1);
+ 		}
++		if(const char* ex = std::getenv("OT_SW_EXTRA"))
++		{
++			std::string all(ex); size_t p = 0;
++			while(p < all.size())
++			{
++				size_t q = all.find(',', p); if(q == std::string::npos) q = all.size();
++				int core = 0; unsigned a0 = 0, a1 = 0;
++				if(std::sscanf(all.substr(p, q - p).c_str(), "%d:%x:%x", &core, &a0, &a1) == 3) dspPair->addStopwatch(core, a0, a1);
++				p = q + 1;
++			}
++		}
+ 		if(!dspPcWatch.empty())
+ 		{
+ 			int core = 0; unsigned pc = 0; unsigned long long from = 0;
+@@ -2760,6 +2771,16 @@ int main(int _argc, char** _argv)
+ 		if(!dspStopwatch.empty())
+ 		{
+ 			const auto& w = dspPair->stopwatch();
++			if(const char* path = std::getenv("OT_SW_OUT"))
++			{
++				if(FILE* f = std::fopen(path, "w"))
++				{
++					for(size_t j = 0; j < w.last.size(); ++j) std::fprintf(f, "0 %u %u\n", w.last[j], j < w.cyc.size() ? w.cyc[j] : 0);
++					int k = 1;
++					for(const auto& x : dspPair->stopwatches()) { for(size_t j = 0; j < x.last.size(); ++j) std::fprintf(f, "%d %u %u\n", k, x.last[j], j < x.cyc.size() ? x.cyc[j] : 0); ++k; }
++					std::fclose(f);
++				}
++			}
+ 			std::printf("dsp stopwatch: %s -- %llu pair(s), instructions per pair mean %.0f min %llu max %llu\n", dspStopwatch.c_str(),
+ 				static_cast<unsigned long long>(w.n), w.n ? static_cast<double>(w.sum) / static_cast<double>(w.n) : 0.0,
+ 				static_cast<unsigned long long>(w.n ? w.min : 0), static_cast<unsigned long long>(w.max));

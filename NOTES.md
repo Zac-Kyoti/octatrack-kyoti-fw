@@ -35348,3 +35348,45 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
   DJ EQ, SIDECHAIN, MUTE MODE, DIRECT JUMP, RELOAD unaffected. First hardware run of REPITCH_REPEAT98_KYOTI in octabam
   form (two table blocks in SPRING's X data, kernel in SPRING's P run beside SIDECHAIN). Docs → hardware-confirmed;
   #561 re-pinned (still draft until the user says).
+
+## Session 125 (2026-10-05, `load-audit`) — KYOTI processor-load audit; KYOTI V1.0's MASTER-page crash found
+
+Report: `reference/handoffs/KYOTI_LOAD_AUDIT.md`. Audit only: no feature code changed, nothing
+built or re-pinned, nothing pushed. Bar confirmed by the user: stock-clean configurations must
+stay clean; a feature's own new modes may add load but not break what stock allows.
+
+* **Instruments** (`tools/load_audit/`, a patch to octabam `36a056c5` ot_emu, applied in a
+  scratch copy only): both DSP cores' four-track loops on the stopwatch in executed instructions
+  and datasheet cycles; ColdFire instructions per interrupt level; every frame-ISR (IPL ≥ 5) and
+  tick (IPL 2) episode; a garbage-PC tripwire. Fixtures are real exports only, set up by runtime
+  pokes: the user's `OT DEMO` (copied from `~/Desktop/OT Backup/KYOTI`; loads A05 / Part 2, FLEX
+  T1–T7) and MMTESTDT.
+* **Ranked:**
+  * REPITCH DSP **High** (hardware): RPSP 180 instr / 239 modelled cycles per voice; ×4 ≈ 2.75
+    DJ EQs.
+  * REPITCH ColdFire **Medium**: the rate path (`rate_gate` → `rp_swap` → `rp_ui_gate`,
+    `rp_source`) runs in the frame ISR (SR 0x2504) per playing voice even with stock TSTR:
+    ISR p99 +5.5 % at 7 voices, +7.4 % with RPSP.
+  * SIDECHAIN DSP **Medium**: `sctap` costs 43 instr / 56 cycles per core whenever it is in the
+    image.
+  * EMPTY_PATTERN_LED_FIX Low: [PTN] held over an empty bank costs +7.3 M instr/s at task
+    level; [BANK] is now stock.
+  * DIRECT_JUMP Low: +3.5 k on the landing tick, nothing in the ISR.
+  * MUTE_MODES Low: +45 per frame, no edge spike.
+  * RELOAD Low: ISR and tick identical with the transport running.
+  * The rest None.
+* **The user's crash test, answered this session:** FX1 elsewhere = NONE; all four voices
+  continuous. It brackets core 0's ceiling between ≈ 3,350 and ≈ 3,740 modelled cycles per
+  sample (loop). **Stock's own worst case (DJ EQ ×16) measures 3,454 on core 0, inside that
+  band**, so core 0's margin over stock is unknown and possibly nil.
+* **HW-A (no flash, on OBKYOTI11) settles SIDECHAIN:** DJ EQ in both slots on T5–T8, four voices
+  sounding, stock TSTR. Not yet run.
+* **KYOTI V1.0 crashes on the MASTER track's PLAYBACK / LFO page** (emulator, real path; the
+  user's `OT DEMO` has `MASTER_TRACK=1` and derails during load). CAVE2 holds REPITCH glyphs and
+  `rpk_reload`, and they are record `0x400d2e8a`'s rows and its row-flag tail (`+0x18A`, read by
+  the renderer `0x4004e4c6` via `0x400a6994`). The widget pointer reads `0xd6000000`.
+  * MERGE.md's "the one reader reads only +0x5e..+0x69" missed this renderer.
+  * NEIGHBOR's page `0x400d34d2` also carries KYOTI bytes in its tail (PLAYSFREEFIX's `jmp`) but
+    draws harmlessly.
+  * Only KYOTI V1.0 is affected; every standalone, Bugbuild and OBKYOTI6–11 image is clean.
+  * Not fixed. It belongs to the KYOTI V1.0 builder.

@@ -175,3 +175,6 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   purpose: MIDI echo / CC 80 state at power-up. Also as `BUG_RTM` (+ BATCH_BUGFIXES), and
   as an octabam module (sambanks/octabam #566 merged `fa24fb53`; follow-up #572 open). `reference/handoffs/REC_TRIG_MUTE_SCOPE.md`, `NOTES.md`
   Sessions 122–123.
+- **KYOTI load audit** (Session 125) — `reference/handoffs/KYOTI_LOAD_AUDIT.md`: ranked DSP/ColdFire
+  costs of every feature, the hardware test plan (HW-A first, no flash), and **a KYOTI V1.0 crash on
+  the MASTER track's PLAYBACK/LFO page** (emulator; section 8), not fixed yet.
