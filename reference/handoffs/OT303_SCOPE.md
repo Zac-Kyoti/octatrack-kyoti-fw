@@ -628,3 +628,36 @@ Not covered by the emulator: the knob's drawing, and real cycles (the point of t
    - spare in the worst legal config = 24·N per core;
    - 7 DJ EQ instances = 24·(L − N) cycles, which calibrates cycles/instruction against
      the 300-instruction count.
+
+### Phase 1 listening results (user, 2026-10-05)
+
+ABX against the ideal 8× (saturating, D1 + Heun), 10 trials each:
+
+| scene | 2× correct | p |
+|---|---|---|
+| Hot | 6/10 | 0.377 |
+| Sweep | 6/10 | 0.377 |
+| Squelch | 3/10 | 0.945 |
+
+**2× is not distinguishable** in any scene, including Hot, which has the largest measured
+error (0.38 / 1.9 dB). Ten trials only catch obvious differences, which matches the user's
+bar ("virtually inaudible"). **Decision input: 2× + Heun.** 3× stays the fallback if hardware
+listening ever disagrees.
+
+Voicing favourites (RMS-matched, all 4×):
+
+| scene | favourite |
+|---|---|
+| Hot | Drive 0.5 |
+| Sweep | Open303 as shipped |
+| Squelch | Open303 as shipped |
+
+So the target is **Open303's own response**, not the bare circuit model, with light
+saturation available.
+- Open303's fitted coefficients pull its response 1–2 dB lower above ~2 kHz at high cutoffs
+  and move the peak up to 40 c (§10). That is most likely what was heard.
+- Next: fit the ZDF's cutoff/resonance mapping to Open303's measured response (keeping the
+  saturating stages), then ABX "Open303-matched ZDF @2×" against Open303 itself, aiming for
+  "not distinguishable".
+- Drive becomes a user parameter (SETUP page): 0 = Open303-like, ~0.5 default per Hot. The
+  DSP cost is the same at any drive.

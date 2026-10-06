@@ -35901,3 +35901,11 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   never fabricate a project blob), and not needed: FX cost is independent of the audio
   content, and the burn only runs on a playing track. Recipe given: one long looping sample
   on all 8 tracks, DJ EQ ×16.
+- **S124 cont (2026-10-05): listening results.**
+  - ABX 2× vs ideal 8× (saturating D1): Hot 6/10, Sweep 6/10, Squelch 3/10, all at chance,
+    so 2× + Heun is sufficient.
+  - Favourites: Hot = Drive 0.5; Sweep and Squelch = Open303 as shipped. The voicing target
+    is now Open303's fitted response plus a drive parameter.
+  - Next: fit the ZDF mapping to Open303, then ABX that against Open303.
+  - Listening pack fixes: the AudioContext re-check + test tone (v2); `<meta charset>` in
+    the page (v3; the local `python -m http.server` sent no charset → "Â·").
