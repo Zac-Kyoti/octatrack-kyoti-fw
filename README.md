@@ -125,32 +125,6 @@ so if the trigs did not land.
 **Final build:** [`tools/build_reload_from_project.py`](tools/build_reload_from_project.py) →
 `OCTATRACK_OS1.40C_RELOAD_FROM_PROJECT`
 
-### REPITCH_REPEAT98_KYOTI
-
-Three new **TSTR** settings on a STATIC or FLEX track's SETUP page (`[FUNC]` + `[SRC]`).
-The sample follows the project tempo by **varispeed**, the way a classic sampler or a
-turntable would — speed and pitch move together, nothing is stretched. The tempo comes
-from the sample's own tempo attribute (audio editor, ATTR); a sample outside 30–300 BPM
-plays as stock.
-
-- `RPCH` — the Octatrack's own playback, clean
-- `RPS9` — an Akai S900/S950: a virtual 40 kHz, 12-bit sampler
-- `RPSP` — an E-mu SP-1200: 26.04 kHz, 12-bit, drop-sample, through its channel 1/2
-  low-pass filter, which the track's AMP envelope opens
-
-On a repitch track the **PTCH** knob becomes **QUAN**, an exact ratio against the tempo —
-`1/2 2/3 3/4 4/5 1/1 5/4 4/3 3/2 2/1` — so a loop at 3/4 lines back up with the pattern.
-QUAN takes p-locks and scene locks, and PTCH and QUAN are kept separately. In the audio
-editor, TIMESTRETCH gains `REPITCH`, `RPS9` and `RPSP`, so under SETUP `AUTO` each sample
-plays in its own mode. The DSP space comes from **SPRING REVERB**, as for
-SIDECHAIN_COMPRESSOR. Starts from Jannik Aßfalg's Repitch module for octabam
-([`CREDITS.md`](CREDITS.md)).
-
-**Hardware:** confirmed. Not specifically tested: RTRG retrigs on a repitch track, and a
-full DSP core of RPSP tracks under heavy effects.\
-**Final build:** [`tools/build_repitch_repeat98_kyoti.py`](tools/build_repitch_repeat98_kyoti.py) →
-`OCTATRACK_OS1.40C_REPITCH_REPEAT98_KYOTI`
-
 ### QUANTIZE_LIVE_REC_TOGGLE
 
 Reach the QUANTIZE LIVE REC setting from the front panel. Hold **`[REC]`** and tap
@@ -213,7 +187,7 @@ Three fixes to stock bugs. Each has its own build.
 
 ### Each feature + BATCH_BUGFIXES
 
-One image per feature above, with all three BATCH_BUGFIXES folded in — eight images, for
+One image per feature above, with all three BATCH_BUGFIXES folded in — seven images, for
 flashing a single feature without giving up the bug fixes. The features are not combined
 with each other.
 
@@ -229,8 +203,14 @@ flashed as such.\
 **KYOTI V1.0 (the all-in-one image) is withdrawn as of 2026-10-06.** It can crash the unit
 when an encoder is turned on an FX page set to NONE, and when T8's PLAYBACK or LFO page is
 shown with T8 as MASTER. If you flashed it, flash one of the single-feature builds above, or
-stock OS 1.40C. The single-feature builds and the eight BATCH_BUGFIXES images do not have
+stock OS 1.40C. The single-feature builds and the BATCH_BUGFIXES images do not have
 this problem.
+
+**REPITCH_REPEAT98_KYOTI is back to work in progress as of 2026-10-06** (its own build and
+its BATCH_BUGFIXES image). With RPSP on all four tracks of one DSP core (T1–T4 or T5–T8) and
+heavy effects on those tracks, the DSP runs out of time: a loud tone, and the sequencer
+stops. One RPSP track per core beside heavy effects ran clean. If you flashed it, avoid RPSP
+on several tracks of a core with heavy effects, or go back to stock OS 1.40C.
 
 **This is for personal study.** Updating an Elektron unit with anything other than
 official firmware is risky: it puts the warranty in question and can leave the unit

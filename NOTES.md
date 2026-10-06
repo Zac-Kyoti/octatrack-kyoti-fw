@@ -35413,3 +35413,21 @@ stay clean; a feature's own new modes may add load but not break what stock allo
     page, untested); FILT = THRU's record (latent).
   * OBKYOTI6–12, standalones and Bugbuilds are clean.
   * Fix needs ~900 B re-homed. Report §8b; tools: OT_RW read census in the ot_emu patch.
+
+## Session 120 continued (9) (2026-10-06, `octabam-port`) — REPITCH_REPEAT98_KYOTI demoted to WIP
+
+* **Demoted on the user's instruction:** the standalone build (`build_repitch_repeat98_kyoti.py`,
+  was FINAL `845aca5b…`) and its BATCH_BUGFIXES image (`BUG_RPK16`, was `b5a42c83…`). Both FINAL
+  pins removed from `tools/kyoti_status.py`; `build_bugbuilds.py` now skips REPITCH (it builds
+  only promoted features) and writes seven images. README entry replaced by a notice under
+  "Before you flash"; BUILD_KYOTI, FLASHING and START_HERE updated.
+* **Why:** the load problem. On the user's MKI, RPSP on all four tracks of a core with DARK REV
+  and DJ EQ crashed the DSP (OBKYOTI11, 2026-10-05: tone or silence, sequencer stops). The load
+  audit (Session 125, HW-A..F) puts core 0's ceiling ≈ 3,760–3,830 modelled cycles, stock's
+  heaviest FX + SIDECHAIN at ≈ 3,516, so four REPITCH voices beside heavy FX need ≈ 60–75
+  modelled cycles each. RPSP costs ≈ 234–239, RPS9 ≈ 77.
+* **Work in the `octabam-port` worktree (unpushed):** a bit-exact rework of the kernel (264/264
+  octabam + 80/80 standalone cases) takes RPS9 to ≈ 58 and RPSP to ≈ 234; RPSP without the
+  channel 1/2 filter ≈ 181. Same-sound savings left for RPSP are ≈ 10–20; the rest needs a
+  design change, which the user decides with A/B listening packs.
+* Not affected: the octabam module (PR sambanks/octabam#561, on hold) and every other build.
