@@ -74,8 +74,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from kyoti_status import gate, seal
 
 gate(__file__, note="""
-Every promoted feature in one image, composed from their own builders.  Flashed and
-under test on the author's MKI; one DIRECT JUMP crash is still unexplained.
+WITHDRAWN 2026-10-06 -- do not flash.  The midisc pads this image fills (CAVE2, SEAM, RELD,
+PASTE, FILT) are live stock parameter-page tables: an encoder on an FX page set to NONE,
+or T8's PLAYBACK/LFO page with T8 MASTER on, crashes the unit.  reference/handoffs/
+KYOTI_LOAD_AUDIT.md sections 8/8b.
 """)
 
 VERSTR = "KYOTI V1.0"
