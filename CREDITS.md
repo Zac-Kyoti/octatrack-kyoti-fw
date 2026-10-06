@@ -107,7 +107,7 @@ too, and has its own section above.)
   Ableton's, CAPTURE, GENERATOR, workflow shortcuts) added to stock **OS 1.40C**,
   **built and tested on an Octatrack MKI** — the same OS *and the same hardware
   revision* as this project, which no other upstream can claim. It publishes
-  findings only (MIT), not firmware or source, and its
+  findings only (MIT until 27 Sep 2026; text and images CC BY-NC-SA 4.0 since), not firmware or source, and its
   [`docs/CAVES.md`](https://github.com/nordseele/octalab/blob/main/docs/CAVES.md)
   is the reason this project now has a cave ledger: it establishes **on hardware,
   at the cost of a MIDI-only recovery**, that the 27 KB of zeros at the tail of the
@@ -124,6 +124,12 @@ too, and has its own section above.)
   naming of much of the image and is distilled into
   `reference/kb/memory-map.md`. Own sources MIT; **its binaries combine
   incompatible licences and may not be redistributed** — build your own.
+- **[timhastie/octatrick-modules](https://github.com/timhastie/octatrick-modules)**
+  (**Tim Hastie**, MIT) — added 2026-10-06. His octabam modules for OS 1.40C:
+  SYNTH MACHINE, SCALE QUANTIZER, TUNER and his DIRECT JUMP, which octabam consumes
+  as `modules/direct-jump`. Tracked as research only, with its addresses indexed in
+  `reference/kb/octatrick-index.md`. None of his code is in a build of ours;
+  DIRECT_JUMP_KYOTI is an independent design.
 - **[repeat98/octamad](https://github.com/repeat98/octamad)** and
   **[repeat98/octamachine](https://github.com/repeat98/octamachine)**
   (**Jannik Aßfalg / repeat98**) — added 2026-09-24. Jannik contributes to octabam

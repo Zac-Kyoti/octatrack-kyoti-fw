@@ -58,13 +58,14 @@ thread on demand and distil the finding into `kb/` with the URL + retrieval date
 | [repeat98/octamad](https://github.com/repeat98/octamad) | ColdFire | **Added 2026-09-24.** Jannik Aßfalg's octabam fork, tracked because octabam's `CONTRIBUTIONS.md` records that his `STOCK_PROFILE.md`, `stock-analysis-fast` module and `--work-profile` counter **were not sent upstream** — this is the only published copy. ⚠️ **They live on branch `origin/poly-machine` at `ccb11fb`, not on `main`** — read them with `git -C refs/octamad show ccb11fb:docs/firmware/STOCK_PROFILE.md`. Gives a stock-firmware ColdFire **instruction profile** (where frame time actually goes), verified frame-ISR / voice-renderer extents, and that `FUN_4000c8a4` is not a function boundary. → [`kb/techniques.md`](kb/techniques.md), [`kb/memory-map.md`](kb/memory-map.md) |
 | [repeat98/octamachine](https://github.com/repeat98/octamachine) | ColdFire | **Added 2026-09-24.** An attempt to run **Machinedrum UW OS 1.63 on Octatrack hardware** (feasibility stage). The Machinedrum half is **out of scope**; tracked only for `docs/BOOT_FEASIBILITY.md` + `docs/COMPATIBILITY_MATRIX.md`, which state the Octatrack's own ColdFire/DSP/memory/peripheral requirements from the host side — an independent cross-check of our boot and platform-reserve figures. Uses octemu as its target emulator. |
 | [bkkbrls-del/midisc-patcher](https://github.com/bkkbrls-del/midisc-patcher) | tooling | **Added 2026-09-24.** A **browser-side patcher**: the user supplies their own stock OS 1.40C and the page builds the patched image locally, so no Elektron binary is ever redistributed. Mine `patch.json` for the region/relocation-table shape, and the whole thing as a **distribution pattern** — it is the automated version of the posture `FLASHING.md` already takes by hand. |
+| [timhastie/octatrick-modules](https://github.com/timhastie/octatrick-modules) | ColdFire + DSP | **Added 2026-10-06.** Tim Hastie's octabam modules (MIT): SYNTH MACHINE (a paraphonic FM synth rendered on the ColdFire, a DRAM unit, overriding the DSP voice record's envelope words), SCALE QUANTIZER with glide, TUNER, and his DIRECT JUMP, the source octabam consumes. Mine it for the two-DIRECT-JUMP comparison and as prior art for a synth voice (OT-303). Address index: `kb/octatrick-index.md`. |
 
 ## Licence posture
 
 Each repo keeps its own terms. octamax **and ems-octakit** ship no `LICENSE`
 (the `tools/attic/` reference copies exist under GitHub's ToS, educational use only, per `CREDITS.md`;
 ems-octakit takes the same "provide your own official OS, contains no official
-code or assets" stance). octabam / octa-bt-pt each carry their own — check
+code or assets" stance). octabam / octa-bt-pt each carry their own; **octalab relicensed its text and images to CC BY-NC-SA 4.0 on 27 Sep 2026 (MIT before)**, so quote facts, not prose — check
 `refs/<name>/LICENSE` before quoting more than a fact. We store **findings and
 small factual excerpts** in `kb/`, never wholesale copies of their source — for
 ems-octakit that means distilled address facts, not its `.S` or `abi.inc` in bulk.

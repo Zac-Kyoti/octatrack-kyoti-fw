@@ -22,6 +22,31 @@ second look.
 
 ## Pending
 
+- 2026-10-06  octabam@36a056c5  **746 commits since our pin `111fd769`, triaged WITHOUT advancing `refs/octabam`.**
+              The pinned harness carries another session's uncommitted local edits (a Unicorn counter patch,
+              `emu_rtos.py`, `ot_emu/main.cpp`), and a sync would stash and reset them. Read from the remixer clone
+              `~/Documents/octabam` (fetched to `36a056c5`).
+              Distilled:
+              - **the descriptor table is live data** (`PARAM_PAGES.md`, `PLACEMENT.md`) → `kb/caves.md` §0,
+                `kb/memory-map.md` "P-relative arrays";
+              - the DRAM unit class and ROM free list → `kb/caves.md` §5;
+              - CF METER frame-ISR timings → `kb/techniques.md`;
+              - Octakit removed / KITS → `kb/octakit-abi.md`;
+              - CONTRIBUTIONS.md → THIRD_PARTY.md → the pull-research skill;
+              - the new repo `timhastie/octatrick-modules` → MANIFEST.
+              Indexed (not verified): 1,292 address citations from `docs/firmware` + `docs/contributing` →
+              `kb/octabam-index.md`.
+              [ TODO — prose of the new/rewritten firmware docs not yet read line by line: PARTS.md, STEP_LOCKS.md
+              (new), MIDI.md, PANEL.md, MAINMENU.md, RECORDER.md, SAMPLE_SAVE.md, STORAGE.md, KERNEL.md, LFO.md,
+              COLDFIRE_DELAY.md, LEVEL_LAW.md, DSP.md, REPITCH.md; promote verified entries from the index into
+              memory-map.md. Advance `refs/octabam`'s lock only once the other session's local edits are saved, then
+              re-run a known-good emulator scenario (CLAUDE.md). ]
+- 2026-10-06  octatrick-modules@15bdd774  **new repo** (Tim Hastie, found in octabam THIRD_PARTY.md). Cloned + locked.
+              Addresses indexed → `kb/octatrick-index.md`; summary → EXTERNAL_RESEARCH, CREDITS.
+              [ TODO — the OT-303 thread: his SYNTH MACHINE renders on the ColdFire and overrides the DSP voice record
+              (`synth/README.md`), which is prior art for a voice and a frame-ISR load question. The DIRECT_JUMP_KYOTI
+              thread: compare `direct-jump/README.md`. ]
+
 - 2026-09-16  octabam@0ad97b9  178 new commits since our 2026-09-14 pin (2 days).
               **CLOSED 2026-09-24** — done as part of the 397-commit skim below;
               the doc set it told us to skim has since been reorganised (see that
@@ -71,6 +96,28 @@ second look.
               CREDITS.md updated.                                  [ kb/octakit-abi.md ]
 
 ## Distilled
+
+- 2026-10-06  midisc@4f9a8945  2 commits: MIDISC2.0 (8.19/8.20). Release recipe `release20.json` (byte writes over stock).
+              **Checked here:** MIDISC2.0 no longer touches CAVE2 (the MASTER page), but still fills SEAM, i.e. the
+              FX-NONE page's step-handler table. Turning encoder A on an FX page set to NONE calls `0x13c1400d`
+              (emulator). NEIGHBOR's flags are left zero, so that page is not read. → `kb/caves.md` §0. Not reported
+              upstream (the user's call).
+- 2026-10-06  octamad@21383e5f  85 commits: mostly merges of octabam to 23 Sep, plus his own: STOCK_PROFILE on
+              main, `stock-analysis-fast`, `cfburn`, validation docs. → `kb/techniques.md` (EMAC save/restore
+              `0x4000ac98`/`0x4000d968` MACSR 0, analysis hook `0x40098494`, cave `0x400d6b80..`, CF BURN `0x40003826`).
+- 2026-10-06  octalab@fd349ba  32 commits: input LED meter driver (`LED_METERS.md`) → `kb/memory-map.md` (verified
+              `0x40040938`, `0x4002edfc`/`0x400ba4b2`). Also: OTX proposal + module guidelines (shared project-settings
+              file; proposal only), USB-audio input WIP for octabam PR 468, a web page, and **a relicence: text and
+              images CC BY-NC-SA 4.0 since 27 Sep** → EXTERNAL_RESEARCH, CREDITS. Indexed: 187 citations →
+              `kb/octalab-index.md`.
+- 2026-10-06  dsp56300@90d3af66  24 commits: core semantic fixes (DO-loop end at the fetch of LA, signed AGU
+              modulo bounds, Scale Up limit, MOVEP, peripherals while an interrupt waits) → `kb/dsp56300.md`.
+- 2026-10-06  octamax@3083f69  OCTAMAX_2c: gates its slice playhead + LED dimmer on `0x80000012` (MIDI mode) →
+              `kb/memory-map.md`.
+- 2026-10-06  octemu@3adc0a8  frontend Retina mouse fix. Not for us (SDL front end).                [ no kb change ]
+- 2026-10-06  contributors scan: `nordseele/otype-docs` (OType language reference, a generated user manual),
+              `repeat98/octamod-redirect`, `CHOMPI-Club/CHOMPI`, `timhastie/octa-panel`, `timhastie/octatrick` →
+              MANIFEST "not tracked", with reasons.
 
 - 2026-09-24  **PENDING ITEMS FROM THIS MORNING'S SYNC — ALL CLEARED.** Second pass the same
               day. (a) **octabam's unread firmware docs**: `PARAM_PAGES.md` §5g distilled

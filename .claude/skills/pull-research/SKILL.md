@@ -33,7 +33,7 @@ repo's lock line pointing past a commit you have not actually looked at.**
    contributor publishes a **new** repo (invisible to `whatsnew.py`, which only
    reads `MANIFEST.toml`), or an upstream repo **credits somebody we do not
    track**. The script does both passes; it prints candidates only. **Also read
-   `refs/octabam/docs/firmware/CONTRIBUTIONS.md` by hand** — it is the
+   octabam's credit ledger by hand** — `THIRD_PARTY.md` "Contributions received" since octabam `78e2b7bf` (30 Sep 2026; it was `docs/firmware/CONTRIBUTIONS.md`)** — it is the
    ecosystem's dated credit ledger, and it is where `nordseele/octalab` and
    `markandrus/octemu` were found. The bottom of `refs/MANIFEST.toml` carries a
    "deliberately NOT tracked" block: check it before triaging a candidate again.

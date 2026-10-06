@@ -35431,3 +35431,22 @@ stay clean; a feature's own new modes may add load but not break what stock allo
   channel 1/2 filter ≈ 181. Same-sound savings left for RPSP are ≈ 10–20; the rest needs a
   design change, which the user decides with A/B listening packs.
 * Not affected: the octabam module (PR sambanks/octabam#561, on hold) and every other build.
+* **2026-10-06 (5): KYOTI V1.0 DEMOTED and pushed (`2c232dc`); upstream intake.**
+  * **Demotion:** FINAL pin removed; README entry replaced by a withdrawal notice under "Before
+    you flash"; BUILD_KYOTI row removed; builder gate note says withdrawn.
+  * **whatsnew:** 7 repos moved; 6 synced. octabam (746 commits) was triaged from
+    `~/Documents/octabam` WITHOUT advancing `refs/octabam`, whose clone holds another session's
+    uncommitted emulator edits.
+  * **Key finding:** octabam documents the descriptor table (`PARAM_PAGES.md`) and has REFUSED
+    CAVE2 since 25 Sep. Its midi-scenes port puts every midisc unit in DRAM "immune (measured)".
+    We never ingested that because our pin predates it. → `kb/caves.md` §0, CLAUDE.md hard
+    constraint.
+  * **midisc 2.0:** dropped CAVE2, but SEAM still makes the FX-NONE encoder call `0x13c1400d`
+    (emulator).
+  * **New repo:** `timhastie/octatrick-modules`, tracked.
+  * **Generated indexes:** `kb/octabam-index.md` (1,292), `kb/octalab-index.md` (187),
+    `kb/octatrick-index.md` (544), via `tools/refs/upstream_index.py`.
+  * **Also:** Octakit removed from octabam 6 Oct (KITS), so our OCTAKIT conflict entries are moot
+    there.
+  * S114's VEC:0B crash is still not tied to the pads: no `0x00800000` pointer in KYOTI's
+    descriptor bytes.

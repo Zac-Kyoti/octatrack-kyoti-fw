@@ -1014,7 +1014,7 @@ detour `FUN_40056ab8` — a proven periodic-UI-tick site.)
 
 ## Effect & machine parameter-descriptor table (`0x400d2e52`–`0x400d5f00`)
 
-> sources: `refs/octa-bt-pt/patch_tool/addresses.json` + `tools/generate_streamlit_patch.py` @ `e970dd0` (2026-09-02) · **`refs/octabam/docs/PARAM_PAGES.md` @ `2f241e1`** (2026-09-06) — a full struct decode of the same table. confidence: **C** for FILTER/DELAY/NONE + the layout (two independent decodes agree), **L** for the other effects' id↔`E` pairing.
+> sources: `refs/octa-bt-pt/patch_tool/addresses.json` + `tools/generate_streamlit_patch.py` @ `e970dd0` (2026-09-02) · **`refs/octabam/docs/PARAM_PAGES.md` @ `2f241e1`** (2026-09-06) — *since moved to `docs/firmware/PARAM_PAGES.md` (octabam `36a056c5`); the P-relative layout is below* — a full struct decode of the same table. confidence: **C** for FILTER/DELAY/NONE + the layout (two independent decodes agree), **L** for the other effects' id↔`E` pairing.
 
 **One table describes every parameter page on the machine** — not just effects:
 the 5 machine types, AMP, both LFOs, the recorder, the MIDI NOTE/ARP/CTRL pages,
@@ -1216,6 +1216,44 @@ FILTER's coefficient block is `X:0x2c0` for the **FX2** instance, `X:0x3a0` for
 **FX1** (id byte at DSP record `+27/+28`; `r6` param base `X:0x2c3 / 0x3a3`).
 Stock RAM part page snapshot at `0x4017109e` (e.g. `0x7f40007f` = BASE 127 WDTH 64).
 
+### P-relative arrays, the zero-means-default rule, and who reads them (2026-10-06, confidence **C**)
+
+> sources: octabam `docs/firmware/PARAM_PAGES.md` §2–3b @ `36a056c5` (fetched 2026-10-06 from `~/Documents/octabam`) ·
+> our own disassembly + `ot_emu` read census (`tools/load_audit/ot_emu_load_audit.patch`, `OT_RW`) and two reproduced crashes,
+> `reference/handoffs/KYOTI_LOAD_AUDIT.md` §8/8b.
+
+**Pointers.** Every lookup table holds `P = E + 0x38`, not `E`:
+- the machine PLAYBACK table `0x400d5f38[mtype]`: STATIC `0x400d301c`, FLEX `0x400d31ae`,
+  THRU `0x400d3340`, NEIGHBOR `0x400d34d2` (also types 5, 6), PICKUP `0x400d3664`;
+- FX1 `0x400d5f58[id]`, FX2 `0x400d5fdc[id]`. Every unused id → NONE `0x400d4618`.
+
+**Fixed returns of the page getter `0x40031da4`** (entry `0x40031ee0` resolves −1 → the
+current track/page):
+- AMP `0x400d37f6`;
+- LFO `0x400d3988`;
+- the five fixed pages `0x400d3e3e` / `4162` / `3fd0` / `42f4` / `4486`;
+- **MASTER `0x400d2e8a`**: page 0 or 2 of track 7 when `0x80000034` ≠ 0 (T8 is MASTER).
+
+**Arrays read from `P`, 12 slots each:**
+- min `P+0x6a`, count `P+0x9a`;
+- formatter `P+0xca`, widget `P+0xfa`;
+- step handler `P+0x12a`;
+- `P+0x15a`;
+- enable nibbles `P+0x18e` (params 0–7) and `P+0x18a` (8–11), unpacked by `0x400a6994`.
+
+**A zero entry is a live value meaning "default"**, so a zero byte inside the table is not
+free:
+- **FX1/FX2 encoder handlers** `0x4003ac50` / `0x4003aa48` load `P+0x12a+4·(enc+6)` and
+  `jsr` it unconditionally; 0 → `0x4003240c`, stock's generic step handler.
+- **Page renderer** `0x4004e4c6..`: per slot, nibble bit 0 gates the row; the widget is
+  `jsr (row+48)` at `0x4004e7a0`, with 0 → `0x400479b4`.
+- **Enable-word readers** (census): `0x40032712`, `0x4003780e`, `0x400378a4`, `0x40037baa`,
+  `0x40037c40`, `0x4004e56c`, `0x4004e5a4`, `0x40055032`, `0x4003c074`, `0x4003cdda`,
+  `0x4003ce68`.
+- **Row-field readers when enabled:** `0x4003ce38` / `0x4003ce48` (machine pages).
+
+Placement rule: `caves.md` §0.
+
 ## PERSONALIZE settings — persistence (the 'ANDY' battery-SRAM block)
 
 > source: `refs/octamax` `c78ff70` (2026-09-06), verified against our `section_3_MAIN_OS.bin` in Session 19. confidence: **C** (bytes + octamax HW-confirmed).
@@ -1374,6 +1412,30 @@ a safe point for a durable write.
 notes) in [`techniques.md`](techniques.md) "midisc — MIDI scene locks".
 
 ---
+
+## Audio-input LED meters, MIDI-mode flag (2026-10-06)
+
+> sources: octalab `docs/LED_METERS.md` @ `fd349ba` (fetched 2026-10-06) · octamax `3083f69` (OCTAMAX_2c) ·
+> each address checked on our image the same day (confidence **C** where marked).
+
+**Input level meters.** `FUN_40040938` paints the input level meters (C: entry
+`lea %sp@(-40),%sp`).
+- It reads six level words at `0x800000f0..0x80000104`:
+  - the MKI uses the first four;
+  - the model flag `0x46c8d18c` enables all six on the MKII.
+- Brightness lookup: table `0x400a72e8` by the leading set bit.
+- LED base ids: table `0x400a72d0`. In level-word order: `0x38`, `0x3a`, `0x3e`, `0x3c` (MKI),
+  then `0x80`, `0x82` (MKII only).
+- It writes through `FUN_400135b0`, the brightness setter.
+- It's reached by the callback `0x4002edfc` (C: pointer at `0x400ba4b2`), which runs when the
+  recorder arm/config flags are clear.
+- The level words are updated by MAC code near `0x4000d562`, inside the frame ISR.
+- Emulator slot → word mapping: RX0 slot 0 → `0x800000fc`, 1 → `f0`, 2 → `f4`, 3 → `f8`.
+  Which physical jack is which is **not** established (octalab 🟡).
+
+**MIDI mode flag.** `0x80000012` ≠ 0 means the unit is in MIDI mode. Uses:
+- the page getter adds 8 to the track index on it (C: `tstl 0x80000012` at `0x40031f02`);
+- octamax 2c gates its slice playhead and LED dimmer on it.
 
 ## To import next (from `refs/`)
 

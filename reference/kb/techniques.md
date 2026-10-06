@@ -470,10 +470,54 @@ headroom claim — **do not convert with the hardware clock.** No hardware was f
 measured. Useful as a **relative** map of where cost sits when we judge whether a hook
 is affordable, and nothing more.
 
+**Update 2026-10-06** (octamad `21383e5f`, `modules/stock-analysis-fast` + `modules/cfburn`, on main since 23 Sep;
+upstream claims, not verified by us):
+- The frame ISR saves the EMAC state at `0x4000ac98` and restores it at `0x4000d968` with
+  MACSR = 0, i.e. integer mode. An emulator that writes the accumulator extension only in the
+  fractional layout corrupts saved accumulators. octabam's port fixed that; Unicorn routes
+  need the same check.
+- The sample-analysis MAC recurrence is `0x40098494..0x400984be` (caller `0x40098cac`).
+  octamad's opt-in optimisation hooks it into a cave at `0x400d6b80..0x400d6cfa`, inside the
+  classic cave — one more contender there.
+- CF BURN (`modules/cfburn`): a ColdFire margin probe hooked at `0x40003826` in the
+  eight-track delay.
+
 Also from the same doc: **`FUN_4000c8a4` is not a function boundary** — it points inside
 the frame ISR, even inside an operand at that exact address. Our
 `tools/patch_partreapply.s` names it; see the correction in
 [`memory-map.md`](memory-map.md) "Kernel / RTOS scheduler".
+
+### ColdFire frame-ISR time on a unit (CF METER) and the load-audit instruments (2026-10-06)
+
+> source: octabam `modules/cfmeter/README.md` + `docs/firmware/ARCHITECTURE.md` "ColdFire time per frame on a unit"
+> @ `36a056c5` · fetched 2026-10-06 · confidence **C** (hardware, MKII: Sam Banks' unit and Bryan T's). Not yet measured on an MKI.
+
+The frame period is **362.8 µs** (16 samples; DTIM3 at 132 MHz). The frame ISR on hardware:
+
+| state | ISR mean | ISR max |
+|---|---|---|
+| near-empty project, stopped | 119 µs | 198–205 µs |
+| 7 FLEX playing | 244–268 µs | 291–306 µs |
+| 7 STATIC playing | 256–285 µs | **307–330 µs** (idle 0.00 %) |
+
+- Each playing voice costs ~16.5 µs.
+- TSTR AUTO and the stock DELAY add nothing measurable.
+- CPI against the port's instruction count is ~1.1 at baseline and ~4.4 per voice
+  (memory-bound).
+- So stock leaves only ~10–15 % of the frame free at 7–8 voices. **Any per-voice hook in the
+  frame ISR spends that margin.** REPITCH's rate path does (load audit §4).
+
+**Our own instruments:** `tools/load_audit/ot_emu_load_audit.patch` (octabam `36a056c5`
+ot_emu, applied in a scratch copy only) adds:
+- multiple DSP stopwatches, in instructions and datasheet cycles;
+- ColdFire instructions per interrupt level;
+- per-invocation frame-ISR (IPL ≥ 5) and tick (IPL 2) episodes;
+- a garbage-PC tripwire;
+- a multi-range read census (`OT_RW`) that names the stock PCs reading a range. That is the
+  tool that settles "is this zero run read?" (`caves.md` §0).
+
+`tools/load_audit/la_run.py` sets FX and TSTR by runtime poke on a real project, so no
+project file is edited.
 
 ### Distributing a patch as a span diff — the midisc-patcher format
 

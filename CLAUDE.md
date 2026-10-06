@@ -73,6 +73,11 @@ built and waiting.
   contested by four other projects and is effectively full; when it runs out
   the answers are in that file (append-a-runtime, or a CF-card payload), not a
   new region.
+- **The parameter-page descriptor table `0x400d2e52..0x400d5f00` is live data, zero bytes
+  included** (31 × 402-byte page records; a zero pointer or nibble means "use the default").
+  midisc's pads CAVE2 / SEAM_CAVE / RELOAD_CAVE / SCENE_PASTE_CAVE / FILT_PERSIST_LOAD all lie
+  inside it. KYOTI V1.0 filled them and crashed: an encoder on an FX page set to NONE, and T8's
+  MASTER PLAYBACK/LFO page. It was withdrawn 2026-10-06. `reference/kb/caves.md` §0.
 - **A borrowed address or signature is a claim, not a fact — verify it against
   our own image before relying on it.** Every upstream we track cites the same
   MAIN OS (`section_3_MAIN_OS.bin`, sha256 `164f3122…`), so their addresses are

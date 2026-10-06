@@ -1,5 +1,10 @@
 # Octakit ABI — stock-firmware address map from a shipping Kit mod
 
+> ⚠️ **2026-10-06: octabam removed Octakit (6 Oct 2026) and replaced it with its own `modules/kits` (KITS).** The ABI below
+> still describes Em's ems-octakit; octabam images no longer carry it. Our DIRECT_JUMP_KYOTI / RELOAD_FROM_PROJECT
+> `conflicts` entries name OCTAKIT, so they no longer bite in octabam. KITS is untested with them.
+> source: octabam `docs/contributing/PLACEMENT.md`, `docs/contributing/FAILURE_MODES.md` @ `36a056c5` · fetched 2026-10-06.
+
 Curated distillate of **emuyia/ems-octakit** ("Octakit"), which replaces the
 Octatrack's 4-Parts-per-Bank model with 256 Kits per Project. The repo was
 **closed-source until 2026-09** (README + issue templates only); commit

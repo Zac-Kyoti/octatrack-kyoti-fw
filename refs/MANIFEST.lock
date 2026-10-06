@@ -1,15 +1,16 @@
 # Resolved by tools/refs/sync.py — do not edit by hand.
 
-octamax = "7d9debcfdf7dbb1351066f6010d7f250d2b2ab28"  # README: hardware screenshots for slice playhead, 256 slots and arp sca
+octamax = "3083f69f0bee1c3b90d505277cedfc583583b7c2"  # Fix MIDI mode: gate slice playhead and LED dimmer on 0x80000012 (OCTAM
 elektron-firmware-tool = "a5bce9a6af644386d900924082993a805e812874"  # device: rename section 2 from DSP to bootstrap
 OctaLib = "6e2438ebae7687ad50b43f098b19bc1de1b8f4b9"  # Merge pull request #9 from snugsound/feature/release-macos-0.1.1.0
 ems-octakit = "c6d3f3927b13fda0cf03711157237b837acdb1f9"  # add more feature descriptions
 octa-bt-pt = "e970dd0f9841ce5f648c2a257342cb8a3a05b54a"  # added the ability to upload presets and some built-in presets that I l
 octabam = "111fd76977344146cb92e8cfea4375cdd5853319"  # Merge pull request #408 from sambanks/padfix
-midisc = "63ca127bc99638602957f2b05747f8ed3bd9ba52"  # Merge pull request #6 from bkkbrls-del/midisc82-gas
-dsp56300 = "2afc1c4fe274e945556c12641d0c7535ccdda4b3"  # ESAI: even slot interrupts, and the flags behind them
-octalab = "e0dc56ddbb42bf1d69cb0f6b992b5843b04c8c18"  # Clarify stock behavior versus OCTALAB shortcuts
-octemu = "6a9ff68d045e81dd0027c83ac35b26bbcc55bdf5"  # feat: UAC2 PoC
+midisc = "4f9a89453fdcdd39a3cd57f010ffa489cac721cd"  # MIDISC2.0: sync Parts/scenes on pattern commit (8.20).
+dsp56300 = "90d3af6661727f01ce98b6c023c7b1e57bbd4fe6"  # BUG-10217: MmuHelper (Linux/macOS): unmapping a region no longer frees
+octalab = "fd349ba584f4f53199c8c46e363c90ec5133abf6"  # Link preview image on the dark theme
+octemu = "3adc0a8e59db4342ee105f937dc620a0039d5b58"  # Merge pull request #1 from amorgan101010/retina-mouse-fix
 midisc-patcher = "1ce22456a01dc149d598d2b3808b8a6b36c82e41"  # patcher: freeze clean 1.40MIDISC8.1 (splash 1.40MDIS81).
-octamad = "0980fb57fa7390fad96cba645c655074a9111052"  # Merge remote-tracking branch 'origin/codex/euclidean-filter'
+octamad = "21383e5f9c33a045009f1516efea20026c9eba64"  # Add CF BURN margin probe and Tape Echo optimizations
 octamachine = "5184aa20cada2a949354874f77c58b3e440a84eb"  # WP-07: document memory and MMIO contract (#13)
+octatrick-modules = "15bdd774494e71206c39e9621bde5f2b66b55b94"  # synth manifest: the MIDI trig detour pads to the whole 10-byte displaced span (it wrote 8 

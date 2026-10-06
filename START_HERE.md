@@ -173,7 +173,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   SC_KEY variant, #565) are merged in octabam. REPITCH_REPEAT98_KYOTI: PR sambanks/octabam#561,
   both halves, hardware-confirmed in octabam form 2026-10-05 (OBKYOTI11, only SPRING REV given
   up). `NOTES.md` Session 120 continued (4)-(8).
-- **KYOTI modules × Octakit** — DIRECT_JUMP_KYOTI and RELOAD_FROM_PROJECT crash beside
+- **KYOTI modules × Octakit** — ⚠️ octabam removed Octakit on 2026-10-06 (replaced by its own KITS), so the
+  conflicts below no longer bite there; KITS is untested with our modules. DIRECT_JUMP_KYOTI and RELOAD_FROM_PROJECT crash beside
   Octakit and are refused with it until bridges exist (`a7a5291`, `c9a66cf`; live in octabam
   since `f3b12f36`). Scope, findings and the plan:
   `reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md` — start at its §0. `NOTES.md` Session 121.

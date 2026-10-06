@@ -12,9 +12,12 @@ findings are merged into one address-keyed picture.
 | [`memory-map.md`](memory-map.md) | THE merge point — every function / RAM word / MMIO reg by address, ours + theirs |
 | [`container-format.md`](container-format.md) | ELUP/ELEK container, aPLib, checksum, `.bin` vs `.syx` transport, the update chain |
 | [`file-format.md`](file-format.md) | on-CF Set/Project/Bank/Part/Pattern/Arrangement layout; the per-step trig / p-lock model |
-| [`dsp56300.md`](dsp56300.md) | the DSP program: location, upload path, and octabam's findings. Out of scope to *patch* here |
+| [`dsp56300.md`](dsp56300.md) | the DSP program: location, upload path, octabam's findings, and the dsp56300 core's semantic fixes that can change an emulated answer |
 | [`techniques.md`](techniques.md) | code-cave/detour patterns, PERSONALIZE-menu recipe, pre-flash emulation, build-pipeline ideas worth stealing |
 | [`caves.md`](caves.md) | **code caves** — the ecosystem's free-space ledger, who owns which bytes of the contested 6 KB cave, the regions **proven live at runtime on hardware**, and the canary test a region must pass. **Read before choosing an address for any new hook.** |
+| [`octabam-index.md`](octabam-index.md) | **generated** (`tools/refs/upstream_index.py`): every address octabam's `docs/firmware` + `docs/contributing` cite that no other kb file names, with its doc, section and line — upstream claims, unverified until moved into `memory-map.md` |
+| [`octalab-index.md`](octalab-index.md) | **generated**, the same for octalab's `docs/` |
+| [`octatrick-index.md`](octatrick-index.md) | **generated**, the same for Tim Hastie's octatrick-modules READMEs (SYNTH MACHINE, SCALE QUANTIZER, TUNER, DIRECT JUMP) |
 | [`octakit-abi.md`](octakit-abi.md) | ems-octakit's `abi.inc` — ~500 named stock addresses for the Part/Kit/Bank/scene/LFO/sequencer subsystems + guarded patch-site facts |
 
 ## Rules for entries

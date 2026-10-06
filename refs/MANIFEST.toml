@@ -108,6 +108,13 @@ side   = "coldfire"
 use    = "repeat98's attempt to run Machinedrum UW OS 1.63 on Octatrack hardware. The Machinedrum half is out of scope; tracked ONLY for docs/BOOT_FEASIBILITY.md + docs/COMPATIBILITY_MATRIX.md, which enumerate the Octatrack's own ColdFire/DSP/memory/peripheral requirements from the host side — an independent cross-check of our boot + platform-reserve figures. Added 2026-09-24."
 
 # ---------------------------------------------------------------------------
+[repo.octatrick-modules]
+url    = "https://github.com/timhastie/octatrick-modules.git"
+branch = "main"
+pin    = "HEAD"
+side   = "coldfire"
+use    = "Tim Hastie's octabam modules for OS 1.40C (MIT): SYNTH MACHINE (a paraphonic FM synth machine: a DSP voice), SCALE QUANTIZER with glide, TUNER, and his DIRECT JUMP -- the source of truth octabam consumes as modules/synth, quantizer, direct-jump, tuner. Tracked for DIRECT_JUMP_KYOTI comparison (two DIRECT JUMPs in one ecosystem) and as prior art for a DSP voice (the OT-303 thread). Found in octabam's THIRD_PARTY.md 2026-10-06."
+
 # Deliberately NOT tracked — reviewed 2026-09-24. `tools/refs/contributors.sh`
 # will keep surfacing these; this block is the answer, so nobody re-triages them.
 #
@@ -119,7 +126,15 @@ use    = "repeat98's attempt to run Machinedrum UW OS 1.63 on Octatrack hardware
 # so tracking the fork duplicates it. (octamad is the documented EXCEPTION: it
 # carries material octabam records as never sent upstream.)
 #   sambanks/midisc-fork, sambanks/midisc  (stale at 1.40MIDISC5 vs bkkbrls-del's 8.2)
+#   timhastie/octa-panel  (an octabam fork, 10-25 Sep 2026; its panel + emulator landed in octabam's tools/panel)
+#   timhastie/octatrick  (an 8 KB wrapper; the modules live in octatrick-modules, tracked above)
 #   sambanks/dsp56300, repeat98/octamad's own upstream mirror
+#
+# Not RE, or not the Octatrack's firmware (reviewed 2026-10-06):
+#   nordseele/otype-docs  (the OType scripting-language reference for octalab's OT1 firmware: a generated
+#       user manual from a closed repo, no firmware facts)
+#   CHOMPI-Club/CHOMPI  (another sampler's hardware + firmware; octabam transcribes its WAVE code into DSP modules)
+#   repeat98/octamod-redirect  (a static web redirect)
 #
 # Out of scope — Elektron RE, but NOT the Octatrack or the Analog Rytm. Noted so
 # the judgement is on record; revisit only if one starts stating OT/AR facts:

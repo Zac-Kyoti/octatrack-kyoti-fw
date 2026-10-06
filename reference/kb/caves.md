@@ -12,6 +12,67 @@ before picking an address for a new hook.
 
 ---
 
+## 0. ⛔ The parameter-page descriptor table is live data — zeros included (2026-10-06)
+
+**Never place code or data in `0x400d2e52..0x400d5f00`** unless the entry it lands in is
+proven unreachable in that image.
+
+**The table.** One table describes every parameter page: 31 entries × 402 (`0x192`) bytes,
+`0x400d2e52..0x400d5f00`.
+- Pages are reached as `P = entry + 0x38`, through:
+  - the getter `0x40031da4` / `0x40031ee0`;
+  - the machine table `0x400d5f38[mtype]`;
+  - FX1 `0x400d5f58[id]`, FX2 `0x400d5fdc[id]`.
+- From `P`, stock reads arrays indexed by slot:
+  - min `P+0x6a`, count `P+0x9a`;
+  - formatters `P+0xca`, widgets `P+0xfa`;
+  - per-encoder step handlers `P+0x12a`;
+  - `P+0x15a`;
+  - the enable nibbles `P+0x18a`/`P+0x18e`.
+- **A zero entry means "the default"**:
+  - a zero widget draws a plain dial;
+  - a zero step handler falls back to `0x4003240c`;
+  - zero nibbles mean the slot is off.
+
+So the table's zero runs are not free space.
+source: `refs/octabam` → octabam `docs/firmware/PARAM_PAGES.md` §1–3b, `docs/contributing/PLACEMENT.md`
+("`0x400d2ee6..0x400d3020` refused at placement by the build, 25 Sep 2026: a live descriptor")
+@ `36a056c5` · fetched 2026-10-06 (read from `~/Documents/octabam`; `refs/octabam` not advanced, see
+`UPSTREAM_INBOX.md`) · confidence **C**: confirmed on our image by disassembly, an emulator read census
+(`tools/load_audit/ot_emu_load_audit.patch`, `OT_RW`) and two reproduced crashes.
+
+**Readers measured on our image (S125):**
+- the page renderer `0x4004e4c6..`;
+- the FX1/FX2 encoder handlers `0x4003ac50` / `0x4003aa48`. They `jsr` the step handler at
+  `P+0x12a+4·(enc+6)` unconditionally.
+- Eight routines read the enable words: `0x40032712`, `0x4003780e`, `0x400378a4`,
+  `0x40037baa`, `0x40037c40`, `0x4004e56c`, `0x4004e5a4`, `0x40055032`, plus `0x4003c074` /
+  `0x4003cdda` / `0x4003ce68`.
+
+**All five midisc pads lie inside this table**, so the earlier "trimmed pads" entry in §2b
+is ❌ retracted:
+
+| pad | entry (`P`) | page | what happens when something is placed there |
+|---|---|---|---|
+| CAVE2 `0x400d2ee6..` | `0x400d2e8a` | MASTER track PLAYBACK / LFO (T8, `0x80000034` set) | KYOTI V1.0: draw → `jsr 0xd6000000` (**crash**, emulator) |
+| SEAM `0x400d46e2..` | `0x400d4618` | the FX **NONE** page (every unused FX id) | KYOTI V1.0: encoder A → `jsr 0x460d1726` (**crash**); **midisc 2.0: → `jsr 0x13c1400d` (crash)**, emulator |
+| RELOAD_CAVE `0x400d359c..` | `0x400d34d2` | NEIGHBOR PLAYBACK | KYOTI V1.0 set the enable nibbles, so rows read code as descriptors (latent); midisc 2.0 left them zero (not read) |
+| SCENE_PASTE `0x400d3da2..` | `0x400d3cac` | a page used with the sample-slot arena (probably the audio editor's ATTRIBUTES) | widget/step tables overlaid; untested |
+| FILT_PERSIST_LOAD `0x400d347e..` | `0x400d3340` | THRU PLAYBACK | step slots 6–11 and `+0x15a`, plus the first 5 bytes of the enable words; not read in exercised paths |
+
+**What is safe.**
+- octabam: no ROM module in the table (its free list is `0x400c45b0`, `0x400d24d0`,
+  `0x400d64da..`); overflow goes to DRAM. Its `midi-scenes` port links every midisc unit into
+  DRAM and is "immune (measured)".
+- Our standalone images, Bugbuilds and OBKYOTI6–12: stock bytes in all five pads.
+- **KYOTI V1.0, which used them, was withdrawn on 2026-10-06** (`reference/handoffs/KYOTI_LOAD_AUDIT.md` §8/8b).
+
+**One exception, with its condition.** The SPRING reclaim (`0x400d5728..0x400d58b8`) is
+SPRING's own entry. It is safe only while that image leaves SPRING unreachable (no
+`0x400d5fdc`/`0x400d5f58` entry and no `id2e` pointing at it); `build_kyoti.py` asserts that.
+
+---
+
 ## 1. The free-space scan — and why it is only half a test
 
 > source: `refs/octalab/docs/CAVES.md` @ `e0dc56d` · fetched 2026-09-24.
@@ -123,8 +184,9 @@ there, so the writer is on some other path — but every flashed build (and midi
 starts at **`0x400d6500`**, which is where ours start. ⚠️ `build_bugbuilds.py` used to prefer
 `0x400d64dc` for PARTREAPPLY (fixed the same day; those composites were never flashed).
 
-**midisc's shipping pads, trimmed** (ranges that stock references at the END — the pad
-ends where the referenced word starts): CAVE2 `0x400d2ee6..0x400d301c` (not `..3020`),
+**❌ RETRACTED 2026-10-06, see §0: these pads are live descriptor-table data, not free.**
+The original text is kept below for provenance. **midisc's shipping pads, trimmed**
+(ranges that stock references at the END — the pad ends where the referenced word starts): CAVE2 `0x400d2ee6..0x400d301c` (not `..3020`),
 RELOAD_CAVE `0x400d359c..0x400d3664` (not `..3668`), SEAM_CAVE `0x400d46e2..0x400d47aa` (not
 `..47ad`). They are zero tails of 402-byte parameter-page records at `0x400d301c + k·0x192`.
 FILT_PERSIST_SAVE (`0x400d352d..`) is read by stock (`0x4000578e` reads `0x400d3530`) — not
@@ -198,6 +260,21 @@ does not follow the rewritten arena geometry. The page count 14,602
 (`0x0000390a`) appears as a word at 18 places in stock and most stay untouched;
 which one the page reads is **not yet pinned**. A cosmetic-but-visible artefact
 any adoption of this route inherits.
+
+**Update 2026-10-06: it is now octabam's standard placement class, and ours on hardware.**
+- octabam `docs/contributing/PLACEMENT.md` @ `36a056c5` has two classes:
+  - ROM cave (`CavePatch`): ~8.4 KB total, shared;
+  - **DRAM unit** (`Linked(..., dram=True)`): every DRAM unit in a remix is linked as one
+    image, packed, appended after the OS behind the loader, and depacked at boot into the
+    reserve. 10 MiB, taken from the sample/recorder pool.
+- The third class (Octakit's appended runtime) went with Octakit on 6 Oct 2026.
+- octabam's ROM free list now: `0x400c45b0..0x400c4702`, `0x400d24d0..0x400d2ce0`,
+  `0x400d64da..0x400d7c3c` (the FX2 chooser's NONE row sits at `0x400d6b00`; clones from
+  `0x400d6b20`). CAVE2 is refused, and nothing inside the descriptor table is listed (§0).
+- **Ours, confidence C:** OBKYOTI6–12 put RELOAD_FROM_PROJECT, DIRECT_JUMP_KYOTI and
+  REPITCH's ColdFire half in DRAM. They are hardware-tested on the author's MKI (NOTES S120).
+  The emulator measures DRAM-resident code at the same per-frame cost as ROM code
+  (`reference/handoffs/KYOTI_LOAD_AUDIT.md`).
 
 ## 5b. The OTHER way past the ceiling — a payload on the CF card
 
