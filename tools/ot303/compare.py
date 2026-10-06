@@ -31,7 +31,7 @@ def align(x, ref):
     frac = 0.5 * (y0 - y2) / (y0 - 2 * y1 + y2) if (y0 - 2 * y1 + y2) != 0 else 0.0
     d = lag + frac
     f = np.fft.rfftfreq(n)
-    Xs = np.fft.rfft(x, n) * np.exp(2j * np.pi * f * d)
+    Xs = np.fft.rfft(x, n) * np.exp(-2j * np.pi * f * d)      # delay x by d (was +: wrong way)
     return np.fft.irfft(Xs, n)[:len(ref)], d
 
 

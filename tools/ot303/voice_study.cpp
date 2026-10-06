@@ -34,11 +34,14 @@
 #include <string>
 #include <vector>
 
+#include "halfband79.h"
+
 using namespace rosic;
 static const double FS = 44100.0;
 
 // ------------------------------------------------------------------------------------------
 // the analog-limit parameter mapping of Open303's TB_303 mode (filter_linear.py documents it)
+static double KMAX = 0;            // 0: Open303's 16.998792; else the RES-100 feedback gain
 struct Mapping {
     double fc = 1000.0, r = 0.0, wc = 0, k = 0, g = 1;
     static double skew(double pct) {
@@ -49,7 +52,7 @@ struct Mapping {
         double f = fc < 200.0 ? 200.0 : (fc > 20000.0 ? 20000.0 : fc);
         double w = 0.00045522346 * 176400.0 + 6.1922189 * f / sqrt(2.0);
         wc = 2.0 * w;
-        k = 16.998792 * r;
+        k = (KMAX > 0 ? KMAX : 16.998792) * r;
         g = ((16.998792 / 17.0 - 1.0) * r + 1.0) * (1.0 + r);
     }
 };
@@ -81,11 +84,15 @@ static inline double Tfac(double v, double D) {      // tanh(Dv)/(Dv), -> 1 at 0
 // derivative of the diode ladder (Zavalishin VA Filter Design 2.1.0 §6.9 nonlinear form,
 // linear when D == 0), state z = [y1 y2 y3 y4 l], HP out = k y4 - l
 static inline void deriv(const double* z, double u, const Mapping& m, double wc, double wh,
-                         double D, double* dz) {
-    auto N = [&](double v) { return D > 0 ? tanh(D * v) / D : v; };
-    double x = u - (m.k * z[3] - z[4]);
-    double n0 = N(x), n12 = N(z[0] - z[1]), n23 = N(z[1] - z[2]), n34 = N(z[2] - z[3]),
-           n4 = N(z[3]);
+                         double D, double* dz, double Dst = -1, double Dfb = 0) {
+    // D: the input pair (and the stages too when Dst < 0, FZdf's uniform form); Dst: stages;
+    // Dfb: the feedback path only
+    if (Dst < 0) Dst = D;
+    auto N = [](double v, double d) { return d > 0 ? tanh(d * v) / d : v; };
+    double fb = N(m.k * z[3] - z[4], Dfb);
+    double x = u - fb;
+    double n0 = N(x, D), n12 = N(z[0] - z[1], Dst), n23 = N(z[1] - z[2], Dst), n34 = N(z[2] - z[3], Dst),
+           n4 = N(z[3], Dst);
     dz[0] = wc * (n0 - n12);
     dz[1] = 0.5 * wc * (n12 - n23);
     dz[2] = 0.5 * wc * (n23 - n34);
@@ -95,7 +102,7 @@ static inline void deriv(const double* z, double u, const Mapping& m, double wc,
 
 // ground truth: RK4 with S substeps per tick, input linearly interpolated
 struct FRef : Filt {
-    Mapping m; double fs = FS, D = 0; int S = 16; double z[5] = {0}, uprev = 0;
+    Mapping m; double fs = FS, D = 0, Dst = -1, Dfb = 0; int S = 16; double z[5] = {0}, uprev = 0;
     explicit FRef(double D_) : D(D_) {}
     void setSampleRate(double f) override { fs = f; }
     void setCutoff(double fc) override { m.fc = fc; m.update(); }
@@ -107,13 +114,13 @@ struct FRef : Filt {
             double u0 = uprev + (in - uprev) * s / S, u1 = uprev + (in - uprev) * (s + 1) / S,
                    um = 0.5 * (u0 + u1);
             double k1[5], k2[5], k3[5], k4[5], t[5];
-            deriv(z, u0, m, m.wc, wh, D, k1);
+            deriv(z, u0, m, m.wc, wh, D, k1, Dst, Dfb);
             for (int i = 0; i < 5; i++) t[i] = z[i] + 0.5 * h * k1[i];
-            deriv(t, um, m, m.wc, wh, D, k2);
+            deriv(t, um, m, m.wc, wh, D, k2, Dst, Dfb);
             for (int i = 0; i < 5; i++) t[i] = z[i] + 0.5 * h * k2[i];
-            deriv(t, um, m, m.wc, wh, D, k3);
+            deriv(t, um, m, m.wc, wh, D, k3, Dst, Dfb);
             for (int i = 0; i < 5; i++) t[i] = z[i] + h * k3[i];
-            deriv(t, u1, m, m.wc, wh, D, k4);
+            deriv(t, u1, m, m.wc, wh, D, k4, Dst, Dfb);
             for (int i = 0; i < 5; i++) z[i] += h / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
         }
         uprev = in;
@@ -287,6 +294,169 @@ struct Fir {
     }
 };
 
+// ==========================================================================================
+// Phase 2: the DSP-shaped voice. Every block below is written the way the DSP56300 will run it:
+// closed-form solves, table lookups instead of tanh / division, a half-band decimator, a
+// band-limited oscillator. QUANT models 24-bit storage (Q23 with a per-signal full scale),
+// so the same code answers "what does the algorithm cost" and "what does 24 bits cost".
+struct Quant {
+    bool on = false; int stateBits = 24;
+    double q(double v, double fs) const {                 // store v in Q23 of full scale fs
+        if (!on) return v;
+        double l = ldexp(1.0, 23), x = std::nearbyint(v / fs * l);
+        if (x > l - 1) x = l - 1; if (x < -l) x = -l;
+        return x / l * fs;
+    }
+    double qs(double v, double fs) const {                // a filter state (24 or 48 bit)
+        if (!on) return v;
+        if (stateBits >= 48) { double l = ldexp(1.0, 47); return std::nearbyint(v / fs * l) / l * fs; }
+        return q(v, fs);
+    }
+};
+static Quant QNT;
+
+struct Tables {                                           // built once, in double, then stored
+    bool use = false;                                     // false: exact functions
+    static const int NT = 256; double TX = 8.0; double tnl[NT + 2];
+    static const int NR = 64; double rc[NR + 2];
+    static const int NS = 512; double SX = 8.0; double th[NS + 2];
+    void build() {
+        for (int i = 0; i <= NT + 1; i++) { double x = TX * i / NT; tnl[i] = QNT.q(x < 1e-9 ? 1.0 : tanh(x) / x, 1.0); }
+        for (int i = 0; i <= NR + 1; i++) { double d = 1.0 + (double)i / NR; rc[i] = QNT.q(1.0 / d, 1.0); }
+        for (int i = 0; i <= NS + 1; i++) { double x = -SX + 2 * SX * i / NS; th[i] = QNT.q(tanh(x), 1.0); }
+    }
+    double T(double x) const {                            // tanh(x)/x, even
+        x = fabs(x);
+        if (!use) return x < 1e-5 ? 1.0 - x * x / 3 : tanh(x) / x;
+        double p = x / TX * NT; if (p >= NT) return QNT.q(tanh(x) / x, 1.0);
+        int i = (int)p; double f = p - i;
+        return QNT.q(tnl[i] + f * (tnl[i + 1] - tnl[i]), 1.0);
+    }
+    double recip(double d) const {                        // 1/d, d >= 1 (normalise, table, Newton)
+        if (!use) return 1.0 / d;
+        int e = 0; double m = frexp(d, &e); m *= 2; e -= 1;      // d = m 2^e, m in [1,2)
+        double p = (m - 1.0) * NR; int i = (int)p; double f = p - i;
+        double r = QNT.q(rc[i] + f * (rc[i + 1] - rc[i]), 1.0);
+        r = QNT.q(r * (2.0 - QNT.q(m * r, 2.0)), 1.0);         // one Newton step
+        return ldexp(r, -e);
+    }
+    double tanh_(double x) const {
+        if (!use) return tanh(x);
+        double p = (x + SX) / (2 * SX) * NS; if (p <= 0) return -1.0; if (p >= NS) return 1.0;
+        int i = (int)p; double f = p - i;
+        return QNT.q(th[i] + f * (th[i + 1] - th[i]), 1.0);
+    }
+};
+static Tables TAB;
+
+// the diode ladder (Zavalishin 5.18 / 6.9) in TPT form, solved in closed form by back
+// substitution: four stage divisions and one for the resonance loop. Nonlinear stage gains by
+// the cheap method (tanh(v)/v at an estimate), one Heun pass optional. Stage saturation only
+// (the round-2 voicing): input pair and feedback stay linear.
+struct FNested : Filt {
+    Mapping m; double fs = FS, D = 0.5; bool heun = true;
+    double s[4] = {0}, sl = 0, yp[4] = {0}, lp = 0, uprev = 0;
+    double g = 0, gh = 0, ih = 1;
+    static constexpr double SS = 8.0;                     // full scale of the ladder's signals
+    void setSampleRate(double f) override { fs = f; gh = tan(M_PI * 150.0 / fs); ih = 1.0 / (1.0 + gh); }
+    void coef() {
+        double h = 1.0 / fs, wres = m.wc / sqrt(2.0), arg = wres * h / 2;
+        if (arg > 0.98 * M_PI / 2) arg = 0.98 * M_PI / 2;
+        g = QNT.q(m.wc * h / 2 * tan(arg) / arg, 2.0);
+    }
+    void setCutoff(double fc) override { m.fc = fc; m.update(); coef(); }
+    void setResonance(double pct) override { m.r = Mapping::skew(pct); m.update(); coef(); }
+    void reset() override { memset(s, 0, sizeof s); memset(yp, 0, sizeof yp); sl = lp = uprev = 0; }
+    void solve(const double* est, double in, double* y, double& l) {
+        double b12 = 1, b23 = 1, b34 = 1, b4 = 1;
+        if (D > 0) {
+            b12 = TAB.T(D * (est[0] - est[1])); b23 = TAB.T(D * (est[1] - est[2]));
+            b34 = TAB.T(D * (est[2] - est[3])); b4 = TAB.T(D * est[3]);
+        }
+        double h2 = 0.5 * g, k = m.k;
+        double d4 = 1 + h2 * (b34 + b4), r4 = TAB.recip(d4);
+        double A4 = QNT.q(h2 * b34 * r4, 1.0), B4 = QNT.q(s[3] * r4, SS);
+        double d3 = 1 + h2 * (b23 + b34 - b34 * A4), r3 = TAB.recip(d3);
+        double A3 = QNT.q(h2 * b23 * r3, 1.0), B3 = QNT.q((s[2] + h2 * b34 * B4) * r3, SS);
+        double d2 = 1 + h2 * (b12 + b23 - b23 * A3), r2 = TAB.recip(d2);
+        double A2 = QNT.q(h2 * b12 * r2, 1.0), B2 = QNT.q((s[1] + h2 * b23 * B3) * r2, SS);
+        double d1 = 1 + g * b12 * (1 - A2), r1 = TAB.recip(d1);
+        double P1 = QNT.q(g * r1, 2.0), Q1 = QNT.q((s[0] + g * b12 * B2) * r1, SS);
+        double P4 = QNT.q(A4 * A3 * A2 * P1, 2.0);
+        double Q4 = QNT.q(A4 * (A3 * (A2 * Q1 + B2) + B3) + B4, SS);
+        double dx = 1 + ih * k * P4, rx = TAB.recip(dx);
+        double x = QNT.q((in + ih * (sl - k * Q4)) * rx, SS);
+        y[0] = QNT.q(P1 * x + Q1, SS);
+        y[1] = QNT.q(A2 * y[0] + B2, SS);
+        y[2] = QNT.q(A3 * y[1] + B3, SS);
+        y[3] = QNT.q(A4 * y[2] + B4, SS);
+        l = QNT.q((gh * k * y[3] + sl) * ih, SS);
+    }
+    double tick(double in) override {
+        double y[4], l;
+        solve(yp, in, y, l);
+        if (heun && D > 0) {
+            double mid[4];
+            for (int i = 0; i < 4; i++) mid[i] = 0.5 * (yp[i] + y[i]);
+            solve(mid, in, y, l);
+        }
+        for (int i = 0; i < 4; i++) { s[i] = QNT.qs(2 * y[i] - s[i], SS); yp[i] = y[i]; }
+        sl = QNT.qs(2 * l - sl, SS); lp = l;
+        uprev = in;
+        return 2 * m.g * y[3];
+    }
+};
+
+// Open303's 303 saw and square, computed: a polyBLEP saw (one 2-sample residual per reset) and
+// the square as -tanh(70.0 s + 4.37) of the saw half a cycle on, minus its DC (Open303 plays
+// DC-free mip-map tables). Blend as Open303: (1-b) saw + b * 0.5 * square.
+struct OscBlep {
+    double p = 0, sqDC = 0;
+    static double blep(double t, double dt) {            // polyBLEP residual for a unit step
+        if (t < dt) { t /= dt; return t + t - t * t - 1.0; }
+        if (t > 1.0 - dt) { t = (t - 1.0) / dt; return t * t + t + t + 1.0; }
+        return 0.0;
+    }
+    static double sawAt(double q, double dt) {            // standard saw 2q-1 with the drop at q=1
+        return 2 * q - 1 - blep(q, dt);
+    }
+    void init() {                                          // square's DC over one cycle (fine grid)
+        double a = 0; const int N = 1 << 16;
+        for (int i = 0; i < N; i++) { double q = (i + 0.5) / N; a += -tanh(dB2amp(36.9) * (2 * q - 1) + 4.37); }
+        sqDC = a / N;
+    }
+    void reset() { p = 0; }
+    double tick(double inc, double blend) {
+        // Open303's saw table: 0..1 over the first half, -1..0 over the second = 2q-1 with q = p+0.5
+        double q = p + 0.5; if (q >= 1) q -= 1;
+        double saw = sawAt(q, inc);
+        double sq = 0;
+        if (blend > 0) {                                   // the square table is shifted 180 deg
+            double s2 = sawAt(p, inc);
+            sq = -TAB.tanh_(dB2amp(36.9) * s2 + 4.37) - sqDC;
+        }
+        p += inc; if (p >= 1) p -= 1;
+        return QNT.q((1 - blend) * saw + blend * 0.5 * sq, 2.0);
+    }
+};
+
+struct HalfBand {                                          // 79-tap, 40 odd taps + centre 0.5
+    double buf[HB_N] = {0}; int pos = 0; double c[40];
+    void init() { for (int i = 0; i < 40; i++) c[i] = QNT.q(HB_ODD[i], 1.0); }
+    void reset() { memset(buf, 0, sizeof buf); pos = 0; }
+    void push(double x) { buf[pos] = x; pos = (pos + 1) % HB_N; }
+    double out() const {                                   // newest sample at pos-1
+        double acc = 0; int ci = 0;
+        for (int i = 0; i < HB_N; i++) {
+            int d = i - (HB_N - 1) / 2;                    // tap offset from centre
+            double x = buf[(pos - 1 - i + 2 * HB_N) % HB_N];
+            if (d == 0) acc += 0.5 * x;
+            else if (d % 2 != 0) acc += c[ci++] * x;
+        }
+        return QNT.q(acc, 2.0);
+    }
+};
+
 // Open303::getSample with a pluggable filter and oversampling factor
 struct Voice {
     Open303 o;
@@ -295,6 +465,7 @@ struct Voice {
     bool ell = true;
     EllipticQuarterBandFilter el;
     Fir fir;
+    bool blepOsc = false, hb = false; OscBlep ob; HalfBand hbd;
     void init(std::unique_ptr<Filt> f, int n, bool useEll) {
         flt = std::move(f); N = n; ell = useEll;
         // table k carries harmonics up to fs/8..fs/4 at offset k: keep >= 22 kHz without aliasing,
@@ -305,13 +476,14 @@ struct Voice {
         o.highpass1.setSampleRate(N * FS);
         flt->setSampleRate(N * FS);
         flt->setResonance(o.filter.getResonance());
-        if (!ell) fir.design(N * FS);
+        if (!ell && !hb) fir.design(N * FS);
+        ob.init(); hbd.init();
     }
     void setResonance(double pct) { o.setResonance(pct); flt->setResonance(pct); }
     void noteOn(int note, int vel) {
         bool wasIdle = o.idle;
         o.noteOn(note, vel, 0.0);
-        if (wasIdle && vel > 0) { flt->reset(); el.reset(); fir.reset(); }
+        if (wasIdle && vel > 0) { flt->reset(); el.reset(); fir.reset(); ob.reset(); hbd.reset(); }
     }
     double osc() {
         BlendOscillator& b = o.oscillator;
@@ -366,19 +538,20 @@ struct Voice {
         if (o.ampEnv.isNoteOn()) ampEnvOut += 0.45 * mainEnvOut + o.accentGain * 4.0 * mainEnvOut;
         ampEnvOut = o.ampDeClicker.getSample(ampEnvOut);
         double tmp = 0;
+        double inc = o.oscillator.increment / o.oscillator.tableLengthDbl;   // cycles per OS sample
         for (int i = 1; i <= N; i++) {
-            tmp = -osc();
-            tmp = o.highpass1.getSample(tmp);
+            tmp = blepOsc ? -ob.tick(inc, o.oscillator.blend) : -osc();
+            tmp = QNT.q(o.highpass1.getSample(tmp), 2.0);
             tmp = flt->tick(tmp);
-            if (ell) tmp = el.getSample(tmp); else fir.push(tmp);
+            if (hb) hbd.push(tmp); else if (ell) tmp = el.getSample(tmp); else fir.push(tmp);
         }
-        if (!ell) tmp = fir.out();
+        if (hb) tmp = hbd.out(); else if (!ell) tmp = fir.out();
         tmp = o.allpass.getSample(tmp);
         tmp = o.highpass2.getSample(tmp);
         tmp = o.notch.getSample(tmp);
         tmp *= ampEnvOut;
         tmp *= o.ampScaler;
-        return tmp;
+        return QNT.q(tmp, 4.0);
     }
 };
 
@@ -484,9 +657,9 @@ int main(int argc, char** argv) {
     if (!scene(argv[2], sc)) { fprintf(stderr, "unknown scene %s\n", argv[2]); return 2; }
     std::string fname = argv[3];
     int N = atoi(argv[4]);
-    bool useEll = !strcmp(argv[5], "ell");
+    bool useEll = !strcmp(argv[5], "ell"), useHB = !strcmp(argv[5], "hb");
     double D = atof(argv[6]);
-    double oin = 0, ost = 0, ofb = 0; bool ocomp = false, oacc = false;
+    double oin = 0, ost = 0, ofb = 0, ores = -1, okmax = 0; bool ocomp = false, oacc = false, oblep = false;
     for (std::string opt = argv[6]; !opt.empty();) {          // "k:v,k:v" (or a bare number = D)
         auto cm = opt.find(','); std::string kv = opt.substr(0, cm);
         auto co = kv.find(':');
@@ -494,6 +667,9 @@ int main(int argc, char** argv) {
             std::string k = kv.substr(0, co); double v = atof(kv.c_str() + co + 1);
             if (k == "in") oin = v; else if (k == "st") ost = v; else if (k == "fb") ofb = v;
             else if (k == "comp") ocomp = v != 0; else if (k == "acc") oacc = v != 0;
+            else if (k == "blep") oblep = v != 0; else if (k == "tab") TAB.use = v != 0;
+            else if (k == "q") QNT.on = v != 0; else if (k == "stbits") QNT.stateBits = (int)v;
+            else if (k == "res") ores = v; else if (k == "kmax") okmax = v;
             else { fprintf(stderr, "unknown option %s\n", k.c_str()); return 2; }
         }
         opt = cm == std::string::npos ? "" : opt.substr(cm + 1);
@@ -509,12 +685,24 @@ int main(int argc, char** argv) {
         z2->Din = oin; z2->Dst = ost; z2->Dfb = ofb; z2->comp = ocomp; z2->heun = heun;
         f = std::move(z2);
     }
+    else if (fname == "nest") {
+        TAB.build();
+        auto fn = std::make_unique<FNested>(); fn->D = ost; fn->heun = heun;
+        f = std::move(fn);
+    }
+    else if (fname == "ref2") {                       // the reference with zdf2's separate placements
+        auto r = std::make_unique<FRef>(oin); r->Dst = ost; r->Dfb = ofb; f = std::move(r);
+    }
     else if (fname == "ref") f = std::make_unique<FRef>(0.0);
     else if (fname == "refnl") f = std::make_unique<FRef>(D);
     else { fprintf(stderr, "unknown filter %s\n", fname.c_str()); return 2; }
     Voice v; params(v.o, sc);
     v.accRC = oacc; v.calibrateAccent();
+    v.blepOsc = oblep; v.hb = useHB;
+    if (useHB && N != 2) { fprintf(stderr, "hb decimator is half-band: N must be 2\n"); return 2; }
     v.init(std::move(f), N, useEll);
+    if (ores >= 0) sc.res = ores;
+    KMAX = okmax;
     v.setResonance(sc.res);
     auto out = run(v, sc, [&](double c) { v.o.setCutoff(c); });
     FILE* fh = fopen(argv[8], "wb");

@@ -35916,3 +35916,12 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   - Decision: 2× + Heun, built-in D 0.5 stage saturation (no DRIVE knob), Open303-style top
     end above ~3 kHz (to A/B), circuit accent with an ACCENT-dependent discharge.
   - Next: Phase 2, the fixed-point twin. Scope §10.
+- **S124 cont (2026-10-05): Phase 2, the DSP-shaped voice.**
+  - Built in `voice_study`: FNested (TPT diode ladder in closed form, 5 reciprocals per
+    pass), OscBlep, the 79-tap HalfBand, Tables, Quant.
+  - Twin vs the approved voice: 0.3–0.5 / 1.3–1.75 dB. 24-bit is free (0.00).
+  - Found: at RES 100 (k 16.9988) the true saturating model self-oscillates in Hot (onset at
+    k 16.8–16.9), so the ceiling is now k 16.5. The round-2 st0.5 Hot clip was oscillating.
+  - `compare.align` sign bug fixed.
+  - Cost ~600 instructions with Heun, ~390 without.
+  - Round 3 pack published. Scope §11.

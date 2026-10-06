@@ -727,3 +727,74 @@ Exploration at 2× (spectral change vs linear / 4–16 kHz energy at equal RMS):
      ACCENT a large, usable range.
 - **Next:** Phase 2, the fixed-point twin (the DSP's exact arithmetic) of this voice, plus a
   listening check of the twin against the double-precision version.
+
+## 11. Phase 2: the DSP-shaped voice (2026-10-05)
+
+### The algorithm (`tools/ot303/voice_study.cpp`: FNested, OscBlep, HalfBand, Tables, Quant)
+
+**Per output sample (44.1 kHz):** Open303's control path unchanged in function.
+- Pitch slew. MEG. The circuit accent in place of rc2.
+- Env-mod scaler/offset from Open303's *measured* 303 mapping (`calculateEnvModScalerAndOffset`;
+  `n1 = n2 = 1` in Open303).
+- cutoff·2^(env) → **one log-domain table g(log2 fc)** with the prewarp folded in.
+- AMP envelope + declicker. Post allpass 14 Hz, HP 24.2 Hz, notch, level.
+
+**Per oversampled sample (88.2 kHz):**
+- **Oscillator:**
+  - polyBLEP saw (Open303's SAW303 = saw with its reset at mid-cycle);
+  - the square = −tanh(70.0·saw(p) + 4.37) − DC, 180° on (Open303's SQUARE303), from a
+    tanh table;
+  - blend (1−b)·saw + b·0.5·square.
+- **Pre-HP** 44.5 Hz.
+- **Ladder:** TPT diode ladder solved in closed form by back substitution:
+  - four stage reciprocals + one loop reciprocal per pass (normalise, 64-entry table, one
+    Newton step);
+  - stage saturation D = 0.5 via a 256-entry tanh(x)/x table (input pair and feedback linear);
+  - optional Heun pass.
+- **Decimator:** 79-tap half-band (`halfband79.h`; 41 MACs per output; flat to 19 kHz,
+  −92 dB from 25.1 kHz).
+
+**Resonance ceiling, k at RES 100 = 16.5** (was Open303's 16.9988).
+- The true saturating model (RK4 8×) starts to *sustain* self-oscillation between k = 16.8
+  and 16.9 in Hot.
+- At 16.9988 whether a discretisation oscillates is numerical luck: the matrix 2× + Heun did
+  (RMS 1.6), the closed form did not (0.22).
+- The round-2 "st0.5" Hot clip was oscillating.
+- 16.5 keeps every correct method on the same side. A stock 303 rings but does not
+  self-oscillate.
+
+### Verified, step by step (mean / p95 spectral dB; scenes Hot, Sweep, Squelch, Accents, Square)
+
+| step | result |
+|---|---|
+| closed form vs matrix solve (linear) | −36 dB null, 0.03 dB; the solve is right |
+| closed form vs true model (RK4 8×) | 0.07–0.64 / 0.25–2.4 (Hot largest), same as the matrix 2× solve |
+| BLEP oscillator vs Open303's tables | 0.03–0.29 / 0.1–1.1 (square largest) |
+| half-band vs Kaiser | −58 dB in sustain; ~0.3 / 1.5 overall, from the amp envelope (applied after the decimator, as in Open303) meeting a 15-sample shorter delay at note on/off, ~0.34 ms |
+| tables + 24-bit signals + 24-bit states | **0.00 / 0.01**: 24-bit states are enough, no double-word storage |
+| no Heun corrector | 0.01–0.07 / 0.05–0.41 |
+| **DSP twin vs the approved voice** | **0.30–0.49 / 1.26–1.75** |
+
+- The "Open303 top" fit (k vs fc/res for peak height) was dropped: where it brackets,
+  Open303's peak height is within ~0.5% of the model.
+- `compare.py` alignment fix: the shift went the wrong way for unequal delays. Earlier nulls
+  for unequal decimator delays were pessimistic; the spectral metrics were unaffected.
+
+### Cost estimate (instructions per output sample; the DSP code does not exist yet)
+
+| block | with Heun | without |
+|---|---|---|
+| oscillator ×2 | ~50 | ~50 |
+| pre-HP ×2 | ~6 | ~6 |
+| ladder ×2 (~105 per pass incl. 5 reciprocals and 4 table gains) | ~440 | ~230 |
+| half-band | ~41 | ~41 |
+| control + accent + post + level | ~60 | ~60 |
+| **total** | **~600** | **~390** |
+
+Budget: ≈ 890 cycles per core in the worst legal stock configuration (§10, ~950 instructions
+at 0.93 c/i). Both fit; Phase 0b's burn test confirms on hardware.
+
+**Round 3 pack (artifact v5):**
+- ABX twin vs approved (Hot, Sweep);
+- ABX Heun on/off (Hot, Sweep);
+- Hot preference, twin vs Open303.
