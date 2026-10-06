@@ -10,6 +10,32 @@ re-pinned, nothing pushed. Measurement tools: `tools/load_audit/` (section 9).
 
 ## 1. The answer, ranked
 
+> **Update 2026-10-06 (2): HW-B, HW-C, HW-D on OBKYOTI12** (syx `754742de…`, built by the REPITCH
+> session).
+>
+> **The image.** OBKYOTI11 + CF METER, minus ERASE_EMPTY_TRIGLESS_LOCKS. Checked here: the
+> REPITCH and SIDECHAIN hooks and code are word-identical to OBKYOTI11 (A `P:13d6` / B `1196`,
+> `sctap` A `1282` / B `1042`). The only differing DSP words are the run after DARK's helper:
+> A `15a9..1676`, B `1369..1436`. They were unreferenced SPRING code in OBKYOTI11 and are CF METER
+> in OBKYOTI12.
+>
+> **Results**, all clean (no crash, dropout or glitch):
+> - **HW-B:** RPS9 ×4 on T5–T8, DARK ×4, DJ EQ on T6–T8, T5 FX1 NONE. The DJ-EQ-on-T5 variant
+>   was not run; predicted clean.
+> - **HW-C:** RPSP on T8, then T7+T8, then T6+T7+T8, with the same FX. So **3 RPSP voices fit
+>   beside DARK ×4 + DJ EQ ×3 on core 0; the 4th crashes** (S120). The model's "borderline"
+>   point (≈ 3,500) is clean.
+> - **HW-D:** 8 STATIC voices on long samples, FX NONE, a busy UI, stock TSTR and then RPSP ×8.
+>   No gross ColdFire failure, so REPITCH's frame-ISR cost goes from Medium to **Low (no meter
+>   reading)**.
+>
+> **Still open for the bar.** Stock's worst case on core 0 is already ≈ 3,520 (clean, HW-A).
+> One RPSP voice adds ≈ 240, which lands at the crashing point (≈ 3,740). Predicted: HW-A plus
+> RPSP on one track fails or sits on the edge (**HW-F**, not yet run). If so, RPSP fits the
+> bar on core 0 only at ≲ 55 modelled cycles per voice for 4 voices (≈ 220 cycles of headroom
+> per core), or with a voice cap. That is the target for the REPITCH session.
+
+
 > **Update 2026-10-06: HW-A ran clean on OBKYOTI11** (user). DJ EQ was in both slots on T5–T8
 > and on T1–T4, four voices sounding, stock TSTR. So stock's worst DSP load plus SIDECHAIN's
 > `sctap` fits on both cores, and **SIDECHAIN drops to Low**. Core 0's ceiling is now bracketed
@@ -29,7 +55,7 @@ re-pinned, nothing pushed. Measurement tools: `tools/load_audit/` (section 9).
 | # | feature | risk | in one line |
 |---|---|---|---|
 | 1 | **REPITCH_REPEAT98_KYOTI**, DSP | **High** (hardware) | 4 RPSP voices on a core cost ≈ 720 instr / ≈ 955 modelled cycles per sample, ≈ 2.75 DJ EQs. That broke a stock-legal FX set on the user's unit (DARK ×4 + DJ EQ ×3 on T5–T8). |
-| 2 | **REPITCH_REPEAT98_KYOTI**, ColdFire | **Medium** | Its rate path runs **inside the frame ISR for every playing voice, even with no track in a REPITCH mode**: +5.5 % frame-ISR p99 at 7 voices (+7.4 % with RPSP). Stock's hardware ISR headroom at 7 voices is only ~10–15 % of the frame. |
+| 2 | **REPITCH_REPEAT98_KYOTI**, ColdFire | **Low** since HW-D (was Medium; no meter reading) | Its rate path runs **inside the frame ISR for every playing voice, even with no track in a REPITCH mode**: +5.5 % frame-ISR p99 at 7 voices (+7.4 % with RPSP). Stock's hardware ISR headroom at 7 voices is only ~10–15 % of the frame. |
 | 3 | **SIDECHAIN_COMPRESSOR**, DSP | **Low** since HW-A (was Medium) | `sctap` copies every track's audio twice per frame, on both cores, whenever the module is in the image: +43 instr / +56 cycles per sample per core, with no COMPRESSOR anywhere. On core 0, stock's own worst case already sits *inside* the band between a hardware-clean and a hardware-crashing configuration, so 1.6 % more may or may not tip it. One flash-free test settles it (HW-A). |
 | 4 | EMPTY_PATTERN_LED_FIX | Low | [PTN] held over a bank of empty patterns: +7.3 M instr/s at task level, roughly doubling task-level ColdFire work while held. Frame ISR untouched. [BANK] held is now exactly stock (the S119 fix holds). |
 | 5 | DIRECT_JUMP_KYOTI | Low | The landing tick (IPL 2) is +3.5 k instr over stock's pattern-change tick, once per jump. Adds nothing to the frame ISR. |

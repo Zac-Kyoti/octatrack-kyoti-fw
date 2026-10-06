@@ -35393,3 +35393,11 @@ stay clean; a feature's own new modes may add load but not break what stock allo
 * **2026-10-06: HW-A ran clean on OBKYOTI11** (user). DJ EQ in both slots on T5–T8 and on T1–T4,
   four voices sounding, stock TSTR. SIDECHAIN → Low. Core 0's ceiling is now ≈ 3,520–3,740
   modelled cycles. HW-B…D steps handed over.
+* **2026-10-06 (2): HW-B/C/D clean on OBKYOTI12** (`754742de…`). Checked here: the REPITCH and
+  SIDECHAIN DSP code is word-identical to OBKYOTI11; only the run after DARK's helper differs
+  (SPRING leftovers → CF METER).
+  * HW-B: RPS9 ×4 + DARK ×4 + DJ EQ ×3, clean.
+  * HW-C: RPSP ×1/×2/×3 with the same FX, clean → **3 RPSP voices fit, the 4th crashes**.
+  * HW-D: 8 STATIC voices, RPSP ×8, FX NONE, busy UI, clean → REPITCH ColdFire Low.
+  * Next, HW-F: HW-A + RPSP on one track. Predicted at the edge: one voice ≈ +240 lands on the
+    crashing point. If it fails, RPSP needs ≲ 55 modelled cycles per voice (for 4) or a cap.
