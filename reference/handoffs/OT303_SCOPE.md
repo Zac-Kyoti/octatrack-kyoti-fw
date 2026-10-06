@@ -698,3 +698,32 @@ Exploration at 2× (spectral change vs linear / 4–16 kHz energy at equal RMS):
   st2+comp, in1, fb1;
 - an accent A/B on Accents and Hot;
 - a free-text note per scene.
+
+### Phase 1c results and the voicing decision (user, 2026-10-05)
+
+| scene | keep | second |
+|---|---|---|
+| Sweep | stage sat, light (st0.5) | linear |
+| Hot | Open303 as shipped | input pair |
+| Squelch | linear | st0.5 |
+| Accents | linear | st0.5 |
+
+- **Accent:** the 303 circuit accent was preferred in both A/Bs (Hot, Accents; blind,
+  shuffled numbering).
+- **Reading:** 6 of 8 picks are linear or st0.5. The two are nearly identical at normal
+  settings (spectral change 0.5 dB, measured) and differ only at extreme
+  resonance/env/accent, where st0.5 tames the peak. No compensated, heavy or feedback variant
+  was picked. At the extreme (Hot) the softer top won: Open303's fitted high-cutoff response,
+  then input-pair.
+- **Voicing decision (to confirm by ear on the fixed-point twin):**
+  1. Diode-ladder ZDF at 2× + Heun, with a **fixed, built-in light stage saturation (D 0.5)**.
+     No DRIVE knob: its audible range is too narrow for the user's control rule. It also
+     bounds self-oscillation, which a fixed-point linear ladder at RES 127 would not.
+  2. **Open303-style top end:** take Open303's effective cutoff→response mapping above
+     ~3 kHz (its fitted b0/k), so extreme sweeps get its softer top. Low and mid cutoffs stay
+     on the model. A/B it with and without in the fixed-point listening check.
+  3. **The circuit accent** replaces Open303's rc2 path. The discharge time follows the ACCENT
+     knob as the real pot does (values to check against the x0xb0x schematic), which gives
+     ACCENT a large, usable range.
+- **Next:** Phase 2, the fixed-point twin (the DSP's exact arithmetic) of this voice, plus a
+  listening check of the twin against the double-precision version.

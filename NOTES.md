@@ -35909,3 +35909,10 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   - Next: fit the ZDF mapping to Open303, then ABX that against Open303.
   - Listening pack fixes: the AudioContext re-check + test tone (v2); `<meta charset>` in
     the page (v3; the local `python -m http.server` sent no charset → "Â·").
+- **S124 cont (2026-10-05): round-2 voicing results.**
+  - Keeps: Sweep = st0.5, Hot = Open303, Squelch = linear, Accents = linear. Seconds: linear,
+    input pair, st0.5, st0.5.
+  - The circuit accent won both A/Bs.
+  - Decision: 2× + Heun, built-in D 0.5 stage saturation (no DRIVE knob), Open303-style top
+    end above ~3 kHz (to A/B), circuit accent with an ACCENT-dependent discharge.
+  - Next: Phase 2, the fixed-point twin. Scope §10.
