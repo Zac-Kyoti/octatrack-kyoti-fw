@@ -9,7 +9,8 @@
 #           (the core's ESAI capture) carries the riff
 #   square  303 = 100: the same code path at the square's cost; its output is silence (cost only)
 #   SPRING (id 0x15) -> the passthrough stub; DARK REV unchanged against stock
-# Instruction counts are the stopwatch's unit; the bench (hwprobe_check.py) prices cycles.
+# Instruction counts are the stopwatch's unit; the bench (hwprobe_check.py) prices cycles and checks
+# the samples. ot_emu 8d0ad6f4's --audio-out capture is all zeros here, stock included: no audio check.
 import concurrent.futures as cf, os, re, shutil, struct, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -93,13 +94,16 @@ def main():
             e = res[(v, core)][0][-4:]
             print(f'   {v:6}: extra per call {[b - a for a, b in zip(i, e)]} (the engine on the 2nd track only)')
             ok &= e[1] - i[1] > 3000 and all(e[k] == i[k] for k in (0, 2, 3))
-        ri, rs, rq = res[('inert', core)][2], res[('saw', core)][2], res[('square', core)][2]
-        if ri and rs:
-            print(f'   capture RMS, inert vs saw vs square: {max(ri):.4f} / {max(rs):.4f} / {max(rq):.4f}')
         sp = res[('spring', core)][0][-4:]
-        dk, dks = res[('dark', core)][0][-4:], res[('dark-stock', core)][0][-4:]
-        print(f'   SPRING id -> {sp} (stub ~69)   DARK REV {dk} vs stock {dks}')
-        ok &= all(x < 200 for x in sp) and dk == dks
+        dk, dks = res[('dark', core)][0], res[('dark-stock', core)][0]
+        # DARK REV's work on a track with signal varies call to call (stock alike: 3207..3277 seen);
+        # a track whose 6 stock calls are all equal must match exactly, the others stay in range
+        same = True
+        for t in range(4):
+            a, b = dks[t::4], dk[t::4]
+            same &= (b == a) if len(set(a)) == 1 else (min(a) <= min(b) and max(b) <= max(a) + 100)
+        print(f'   SPRING id -> {sp} (stub ~69)   DARK REV {dk[-4:]} vs stock {dks[-4:]}: {"same" if same else "DIFFERS"}')
+        ok &= all(x < 200 for x in sp) and same
     print('ALL GOOD' if ok else 'FAILED')
     return 0 if ok else 1
 

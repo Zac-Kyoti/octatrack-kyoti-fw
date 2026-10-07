@@ -35975,3 +35975,17 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
     it now builds XY+ALU with write halves (`ec96d45`, REPITCH unchanged). SR RM = 0 on stock.
   - Next: trig handling and host words in the DSP, the THRU hook question, a hardware cost
     measurement of the real engine.
+- **S124 cont (2026-10-07): v4 cycle tuning; hardware probe image BUILT (NOT flashed).**
+  - Cycles, not instructions (emulator cycle table): v3 was 508/690, v4 364/498, now 366/500
+    after S48/M48 became Y pairs (no address on the unit has both X and Y free for L moves:
+    Y `$795..$FFF` is free, X there is the curve bank). Layout is base-relative (XB/YS/LT).
+  - `tools/build_ot303_hwprobe.py` (WIP) → `OCTATRACK_OS1.40C_OT303_HWPROBE.syx`
+    (`3868cd3c…`, version `140C_303HP`): DJ EQ page 2 = BURN (slot 6) + 303 (slot 7); the engine
+    + a 16-step Hot riff replace the track's audio; SPRING removed. Placement: SPRING's P up to
+    DARK REV's helper (756/820) + 79 after it; SPRING's five X records (716 = X block + packed
+    b0/kp); LT built in 15 calls into Y `$7a5`. **Square is cost-only** (tanh's data does not fit:
+    the full engine needs ~80 words more than SPRING gives → scope §11 memory note).
+  - Bench `hwprobe_check.py`: both payloads, split dispatcher calls, 4 bars bit-exact vs the
+    twin; 393/528 cycles/sample incl. wrapper. Firmware `verify_hwprobe.py` (ot_emu, BOTLI):
+    +11 instr/call inert, engine only on its track, SPRING → stub, DARK REV as stock (its 4th
+    track varies call to call in stock too). ot_emu's `--audio-out` capture is all zeros (stock too).

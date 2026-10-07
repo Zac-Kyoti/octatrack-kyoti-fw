@@ -1128,3 +1128,82 @@ post 58. P: 556 words (fits SPRING; one FX2 tail is ~605).
 Against the burn test (heaviest legal FX): core 1 (624 spare) hosts the saw voice with margin
 and the square voice about at the limit; core 0 (288 spare) overruns there, as accepted. The
 hardware measurement of the real engine is the next number that matters.
+
+### Phase 2b, step 3: the engine on the unit -- the hardware probe (2026-10-07, built, NOT flashed)
+
+**Engine change first.** S48/M48 were L moves (high word in X at the Y word's address). On the unit
+no address has both its X and its Y word free (Y `$795..$FFF` is free; X there is stock's curve
+bank `X:$438 +6305`), so they are now Y pairs, hi then lo: +2 instructions, **366 / 500 cycles per
+sample**, still bit-exact. The layout is three bases (`XB`, `YS`, `LT`, `;@LAYOUT` lines rewritten
+per payload by `asm_macros.layout`).
+
+**The image:** `tools/build_ot303_hwprobe.py` (WIP) → `out/OCTATRACK_OS1.40C_OT303_HWPROBE.syx`
+(sha256 `3868cd3c64b5ec5d89e16dbf4ffa63b4b7fe476cc1e90dc39b4b057cac46a6fe`, version `140C_303HP`;
+`.bin` `2e500aa9…`).
+- DJ EQ page 2: **BURN** (slot 6, 24 cycles/sample a step, as in the burn probe) and **303**
+  (slot 7: 0 off, 1–63 saw, 64–127 square). With 303 up, the engine replaces the track's audio
+  ahead of DJ EQ with a built-in 16-step riff (Hot's first bar, 130 BPM) -- the approved voice.
+  `out/ot303/hwprobe/expected_saw_riff.wav` is what it renders (bit-exact bench output).
+- **The square is cost-only:** it runs the real square code path, but its tanh table is not built,
+  so it renders silence.
+- One engine per core (global state): 303 up on one track of 1–4 and/or one of 5–8.
+- SPRING REV removed (as the burn probe). Nothing on the ColdFire but descriptor data.
+
+**Placement** (`tools/ot303/hwprobe_image.py`, both payloads):
+
+| | what | words |
+|---|---|---|
+| P, SPRING up to DARK REV's helper | engine 558 + wrapper (burn, knob, save, render loop, table build) | 756 / 820 |
+| P, after the helper | the riff's step events (`hwprobe_ev.asm`) | 79 / 208 |
+| X, SPRING's records `89a4×216` / `8464×216` | the engine's X block, the wrapper's words, loaded ready | 216 |
+| X, `8afc×500` / `85bc×500` | b0 and kp/64, 216 each (the slopes are differences) | 432 |
+| Y `$7a5..$f02` | LT (860, built in 15 calls) + TH (1,026, cleared) | built |
+| Y `$f40..$feb` | the Y state block | built |
+
+**Memory, the finding that matters for the product:** engine (558) + glue (~200–350) + tanh's
+data (257: odd, half stored) + the coefficient data (432) + the X block (~150) is **~80–200 words
+more than SPRING's P (1,028) + X records (716) give**. Ways out, for the product:
+1. generate the tanh table on the DSP at boot with an integer recipe the twin defines too
+   (tanh's addition formula, th[j+1] = (th[j] + t)/(1 + th[j]·t), one division per entry).
+   That frees 257 words for an LSB-level table change (re-check with twin_check; no ABX expected);
+2. the same for b0/kp (the polynomial and rational forms of fc = 200·2^(i/32)), which frees 432 more;
+3. donate a second effect (COMB, SPATIALIZER), or the FX2-slot tails (~605 words a slot, §4).
+
+Recommendation: 1, then 2 if the glue needs it. Both keep the DSP bit-exact with the twin.
+
+**Verified:**
+- Bench, `tools/ot303/hwprobe_check.py`:
+  - both payloads, run the way the dispatcher calls them: two calls a frame, the split varying,
+    `n7 = 0` included;
+  - r0/r6/r7/n7 and m0–m7 kept;
+  - the track's audio is untouched while the tables build, and the built LT matches the twin
+    word for word;
+  - **4 bars bit-exact with the twin, saw and square;**
+  - 393 / 528 cycles/sample including the wrapper; worst frame 418 / 579; the table-build frame
+    is 87/sample once.
+- Firmware, `tools/ot303/verify_hwprobe.py` (ot_emu `8d0ad6f4`, BOTLI playing, DJ EQ ×4 on a
+  core):
+  - 303 at 0: +11 instructions a call;
+  - 303 up on the core's second track: only that track's calls grow (core 1 +3,425 saw / +4,446
+    square a call; core 0 +5,423 / +7,056 with its own split);
+  - SPRING's id → the passthrough stub;
+  - DARK REV as stock. Its fourth track varies call to call in stock too, 3,207–3,277 seen.
+- **Not verified:**
+  - Audio out of the firmware: ot_emu's `--audio-out` capture is all zeros, stock included.
+  - Real cycles: that is the point of the flash.
+
+**Procedure (the user):**
+1. Flash; use a copy of BURNTEST (8 tracks looping a Flex sample).
+2. **Listen:** T2 FX1 = DJ EQ (flat), page 2 `303` = 32. T2 now plays the riff (compare
+   `expected_saw_riff.wav`). Turn 303 up first: the tables build on the first calls, an
+   extra ~87 cycles/sample for one frame.
+3. **Core 1 cost** (the burn test's heavy config: DJ EQ in FX1 + FX2 on all 8 tracks):
+   - On T2 FX1, raise BURN until the audio breaks, three times: with 303 = 0, 32 and 100.
+   - 24 × (N₀ − N₃₂) = the saw voice's real cost (engine + wrapper), and the same with 100 for
+     the square.
+   - Breaking at BURN 0 means the voice alone overruns that config.
+4. **Core 0 cost:** the heavy config with T7 and T8 FX2 = NONE (core 0 overruns at the full one
+   with the voice), T6 FX1 = DJ EQ; the same three sweeps.
+5. **Normal setups:** your own projects, 303 = 32 on one track per core; listen for breakup.
+6. Use tracks 2 and 6, not the first track of a core (VOCODER's T1/T5 click caveat). Recover from
+   a crash by power-cycling; reflash the normal image to finish.
