@@ -35585,3 +35585,41 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
   `git submodule update --init` between checking out the new pin and `git add` silently resets the
   gitlink to the old pin — reach then reports only text changes; check `git show --stat` for the
   `upstream` line.
+## Session 120 continued (10) (2026-10-06, `octabam-port`) — REPITCH rev 17: RPSP = SP mid + clean side, channel 5; boot-time table copy; rate_gate early exit (WIP)
+
+* **Design (the user's pick, listening pack 3):** the mid (L+R)/2 through the SP path (8-tap virtual
+  ADC at 26.04 kHz, 12 bits, the 10-tap band-limited render), then the SP's fixed channel 5 output
+  filter; the side (L−R)/2 read clean at the OT position less the mid path's delay (c+1 frames + 7
+  increments); L, R = mid ± side. Channel 1/2 (the AMP-following sweep) is gone.
+* **Kernel bit-exact to the model's twin** (`repitch_dsp_engine_check.py`, both payloads;
+  `repitch_dsp_octabam_check.py` 264/264 at all three table placements). Twin vs float design
+  −116 dBFS where nothing clips. **Cost, modelled cycles per output sample: RPSP 159 (was 234),
+  RPS9 57 (was 77)** — above the ~100–120 estimated before writing it; the design's floor is
+  ~140–150 (render 4 Y accesses per tap, side ~27, channel 5 ~17). Net of the skipped stock
+  playback loop (~12), RPSP ≈ 147: four voices ≈ 590, against the load audit's ~950 of room in
+  the setup that crashed rev 16 (DARK ×4 + DJ EQ ×3) and ~245–315 beside DJ EQ in all 8 slots.
+* **How:** one walking state pointer for per-output state, the render table transposed (no
+  stride), immediate multiplies in the filter, `mpyuu` for u·r, R:Y / X:R parallel moves
+  (`dsp_xasm` encodes them; octabam's dsp_asm already did, same words). dsp_asm traps found:
+  `tfr a,b` encodes as `rnd` (bare or with a move); no `jcc` in either assembler; octabam's
+  dsp_asm mis-sizes a backward `bsr label` (zqboot sits before zqinit for that).
+* **Load audit's REPITCH items, no change to the sound:** `zqboot` runs the table copy at boot,
+  hooked into each payload's one-time memory clear (A P:0x46 / B P:0x47, `do b,LA`; it replays
+  all passes but the last, the stock body runs that one). `repitch_dsp_boot_check.py` boots both
+  payloads on dsp56kEmu: memory after boot equals the same image without the hook outside
+  Y:0xa00–0xfff, tables + tag equal the model (+2,768 instructions at boot). `rate_gate` skips
+  `rp_swap` for a voice that is not repitch now and was not last frame.
+* **octabam:** `DspHook.stock` takes per-payload words (`{"A": …, "B": …}`) — local change in
+  `out/octabam-scratch` (schema.py + build_bus.py), not sent upstream. CF blob pin
+  `d194b52d…` (= the standalone build's).
+* **SIDECHAIN "keys wanted" mask: not built.** It would cut sctap's ~56 cycles/core but blank the
+  detector for 1–3 blocks when a KEY is first switched on; the exact alternatives (pipelined
+  copy, one copy instead of two) save ~15–25 cycles/core, ~0.5 % of a core, which changes no
+  configuration's outcome — not worth re-qualifying a FINAL feature for.
+* **Listening pack 4** (private artifact `7bjiyBgJvZPbwBSxVFsL4i`): today / the pack-3 pick /
+  rev 17 rendered by the bit-exact twin. Rev 17 vs the pick: ±0.07 dB per band (the waveforms
+  differ in the SP clock's sub-sample phase: pack 3 used a ratio the OT cannot represent).
+* **HW test image OBKYOTI13, BUILT, NOT flashed** (out/octabam_kyoti13/): OBKYOTI11's set (every
+  KYOTI module, only SPRING REV given up) + rev 17. syx
+  `bf7c55fcb907041040d6cf928b7ea0e8f4489307850945063638fc97e890e468`; octabam verify-remix
+  green (DRAM boot, dirty state, init regs, menu, USB). Commit `cc94a6d` (local, unpushed).
