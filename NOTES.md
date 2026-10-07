@@ -35623,3 +35623,15 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
   KYOTI module, only SPRING REV given up) + rev 17. syx
   `bf7c55fcb907041040d6cf928b7ea0e8f4489307850945063638fc97e890e468`; octabam verify-remix
   green (DRAM boot, dirty state, init regs, menu, USB). Commit `cc94a6d` (local, unpushed).
+* **2026-10-06 (later): side aligned (`1b89720`).** The user preferred pack 3's render to rev 17
+  (pack 4: "better separation and definition in the mid/side field"). Measured: the mid's delay is
+  c+1 frames + ~6.5 outputs + the SP's truncating read (PSP_LAG·phi early per tick), and at the QUAN
+  ratios phi settles into short patterns, so a fixed 7-output side offset was off by up to 1.16
+  samples (0.44 early at 0.84×; pack 3's xcorr-chosen integer lag was off 0.19). Side offset now
+  = c+1 frames + 6.47 increments + a one-pole mean of the read shift (2^-4 per tick, per pass):
+  within ±0.03 samples to 1.25×, ±0.13 to 2×. The first cut also applied 2·D·r (twin and DSP
+  alike, so bit-exact and wrong; caught by the 1.99× ring limit) — fixed, unsigned multiply.
+  RPSP **164** modelled cycles; zqboot keeps registers on the hardware stack (boot check now also
+  compares registers). **OBKYOTI14 BUILT, NOT flashed** (out/octabam_kyoti14/): syx
+  `f08f584373c9b1c282b0606faf6fccbc91f4846f6f32efbff049635b67789899`, verify-remix green.
+  Listening pack 5 (private `9RTmBEU4ak9tiVKZwPVfWM`): pick / first cut / aligned.
