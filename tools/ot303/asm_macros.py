@@ -36,3 +36,20 @@ def yspace(src):
         if line.startswith(';@Y'):
             names.update(line[3:].split())
     return names
+
+
+def layout(src, **vals):
+    """rewrite `NAME equ VALUE ;@LAYOUT ...` lines: the builders place the engine per payload"""
+    seen = set()
+
+    def sub(m):
+        name = m.group(1)
+        if name not in vals:
+            return m.group(0)
+        seen.add(name)
+        return f'{name:<8}equ     ${vals[name]:x}{m.group(3)}'
+    out = re.sub(r'^([A-Za-z_][A-Za-z0-9_]*)\s+equ\s+(\S+)(\s*;@LAYOUT.*)$', sub, src, flags=re.M)
+    missing = set(vals) - seen
+    if missing:
+        raise ValueError(f'no ;@LAYOUT line for {sorted(missing)}')
+    return out
