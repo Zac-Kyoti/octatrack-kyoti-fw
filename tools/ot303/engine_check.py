@@ -12,6 +12,8 @@ import os, re, subprocess, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import dsp_xasm  # noqa: E402
+sys.path.insert(0, os.path.join(ROOT, 'tools', 'ot303'))
+import asm_macros  # noqa: E402
 
 OUT = os.path.join(ROOT, 'out', 'ot303', 'engine')
 VEND = os.path.join(ROOT, 'vendor', 'dsp56300')
@@ -44,7 +46,9 @@ def equs(src):
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    src = open(ASM).read()
+    raw = open(ASM).read()
+    src = asm_macros.expand(raw)
+    ysp = asm_macros.yspace(raw)
     words, syms = dsp_xasm.assemble(src, ORG)
     assert syms['ot303'] < 0x1000
     stub = [0x0d0000 | syms['ot303'], 0x000000]           # jsr <ot303 (short absolute) ; nop = the stop
@@ -55,7 +59,7 @@ def main():
     allsyms = dict(equs(src)); allsyms.update(syms)
     with open(os.path.join(OUT, 'syms.txt'), 'w') as f:
         for k, v in sorted(allsyms.items()):
-            f.write(f'{k} {v:x}\n')
+            f.write(f'{k} {v:x} {"Y" if k in ysp else "X"}\n')
     print(f'engine: {len(words)} words at P:${ORG:x}')
     probe = os.path.join(OUT, 'engine_probe')
     inc = [f'-I{VEND}/source', f'-I{VEND}/source/asmjit/src', f'-I{ROOT}/tools/ot303', '-DDSP56300_DEBUGGER=0', '-DASMJIT_STATIC']

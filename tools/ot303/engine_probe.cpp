@@ -40,8 +40,8 @@ int main(int argc, char** argv) {
     auto hx = [](const std::string& s) { return (uint32_t)std::stoul(s, nullptr, 16); };
     auto code = load24(argv[1]); uint32_t org = hx(argv[2]);
     auto stub = load24(argv[3]); uint32_t sorg = hx(argv[4]);
-    std::map<std::string, uint32_t> S;
-    { std::ifstream f(argv[5]); std::string n, v; while (f >> n >> v) S[n] = hx(v); }
+    std::map<std::string, uint32_t> S; std::set<std::string> YN;      // "name hex X|Y"
+    { std::ifstream f(argv[5]); std::string n, v, sp; while (f >> n >> v >> sp) { S[n] = hx(v); if (sp == "Y") YN.insert(n); } }
     auto sym = [&](const char* n) { auto it = S.find(n); if (it == S.end()) { std::printf("no symbol %s\n", n); std::exit(2); } return it->second; };
 
     // the contract: the lean engine
@@ -63,10 +63,8 @@ int main(int argc, char** argv) {
     auto Y = [&](uint32_t a, int32_t w) { mem.set(MemArea_Y, a, uint32_t(w) & 0xffffff); };
     auto gx = [&](uint32_t a) { return sx(mem.get(MemArea_X, a)); };
     auto gy = [&](uint32_t a) { return sx(mem.get(MemArea_Y, a)); };
-    // which memory each named word lives in (ot303_engine.asm: coefficients in X, data in Y)
-    static const std::set<std::string> YN = {"INC_T", "RC2", "L0_16", "AG_8", "AMP2", "DIC1", "DIC2", "MEG2", "TOPS",
-        "APX", "APY", "H2X", "H2Y", "NIC1", "NIC2", "HPX", "HPY", "FBX", "FBY", "YY1", "YY2", "YY3", "YY4"};
-    auto isY = [](const std::string& n) { return YN.count(n) != 0; };
+    // which memory each named word lives in: the source's `;@Y` list (engine_check.py)
+    auto isY = [&](const std::string& n) { return YN.count(n) != 0; };
     auto gs = [&](const char* n) { return isY(n) ? gy(sym(n)) : gx(sym(n)); };
     auto ws = [&](const char* n, int32_t w) { if (isY(n)) Y(sym(n), w); else X(sym(n), w); };
     // constants and tables, from the twin
@@ -76,22 +74,26 @@ int main(int argc, char** argv) {
     X(sym("TOPA"), e.TOP_A);
     X(sym("NA1"), e.notch.a1); X(sym("NA2"), e.notch.a2); X(sym("NA3"), e.notch.a3); X(sym("NKK"), e.notch.kk);
     X(sym("DA1"), e.decl.a1); X(sym("DA2"), e.decl.a2); X(sym("DA3"), e.decl.a3); X(sym("DA2B"), e.decl.a2);
+    X(sym("MASK4"), 0xfffffc); X(sym("LTBASE"), sym("LT")); X(sym("MASKF"), 0x7fffff); X(sym("SEVENF"), 0x7fffff);
     for (int i = 0; i <= twin::LT_N; i++) {
         uint32_t a = sym("LT") + 4 * i;
         Y(a, twin::T.b0[i]); Y(a + 1, twin::T.db0[i]); Y(a + 2, twin::T.kp[i]); Y(a + 3, twin::T.dkp[i]);
     }
     for (int i = 0; i <= 512; i++) { Y(sym("TH") + 2 * i, twin::T.th[i]); Y(sym("TH") + 2 * i + 1, twin::T.dth[i]); }
-    for (int i = 0; i < 8; i++) Y(sym("HB1C") + i, e.hb4.c[i]);
-    for (int i = 0; i < 22; i++) Y(sym("HB2C") + i, e.hb2.c[i]);
+    // the half-bands' odd taps, reversed (the branches are read oldest first); the 15-tap's twice
+    for (int i = 0; i < 8; i++) { Y(sym("HB1C") + i, e.hb4.c[7 - i]); Y(sym("HB1C") + 8 + i, e.hb4.c[7 - i]); }
+    for (int i = 0; i < 22; i++) X(sym("HB2C") + i, e.hb2.c[21 - i]);
     if (sym("THM") != sym("TH") + 512) { std::printf("THM != TH + 512\n"); return 2; }
 
     const char* zeroed[] = {"PH", "APX", "APY", "H2X", "H2Y", "TOPS", "NIC1", "NIC2", "DIC1", "DIC2"};
     auto resetDsp = [&]() {
         for (auto n : zeroed) ws(n, 0);
-        for (int i = 0; i < 16; i++) Y(sym("PP") + i, 0);
-        for (int i = 0; i < 16; i++) X(sym("HB1B") + i, 0);
-        for (int i = 0; i < 64; i++) X(sym("HB2B") + i, 0);
-        X(sym("HB1P"), sym("HB1B")); X(sym("HB2P"), sym("HB2B"));
+        for (int i = 0; i < 36; i++) Y(sym("PP") + i, 0);
+        for (int i = 0; i < 8; i++) X(sym("HB1A") + i, 0);
+        for (int i = 0; i < 4; i++) X(sym("HB1B") + i, 0);
+        for (int i = 0; i < 22; i++) Y(sym("HB2A") + i, 0);
+        for (int i = 0; i < 11; i++) Y(sym("HB2B") + i, 0);
+        X(sym("P_R3"), sym("HB1A")); X(sym("P_N2"), sym("HB1B")); X(sym("P_R7"), sym("HB2A")); X(sym("P_N7"), sym("HB2B"));
     };
     resetDsp();
     for (auto n : {"S48", "M48"}) { X(sym(n), 0); Y(sym(n), 0); }
@@ -100,7 +102,9 @@ int main(int argc, char** argv) {
     const char* hostNames[] = {"INC_T", "CS", "C_MEG", "C2", "M_AMP", "L0_16", "ES8", "AG8", "AGFM", "RS", "AG_8", "BG",
                                "K8", "SC", "W1", "W2", "W3", "SQ"};
     const uint32_t OUTB = 0x3000;
-    const bool prof = std::getenv("OT303_PROF") != nullptr;      // instructions per code region (labels)
+    const bool prof = std::getenv("OT303_PROF") != nullptr;
+    uint32_t watchA = 0, watchV = 0; bool watchX = true; int watchN = 0;
+    if (const char* w = std::getenv("OT303_WATCH")) { watchX = w[0] == 'x'; watchA = std::stoul(w + 1, nullptr, 16); }      // instructions per code region (labels)
     std::map<uint32_t, uint64_t> pcHist;
     std::ifstream lf(argv[6]); std::string line;
     long seg = 0, samples = 0; uint64_t instr = 0, worst16 = 0, cycles = 0, worstCyc16 = 0;
@@ -114,6 +118,7 @@ int main(int argc, char** argv) {
         e.ES8 = sx(h[6]); e.AG8 = sx(h[7]); e.AGF = h[8] != 0; e.RS = sx(h[9]); e.AG_8 = sx(h[10]); e.BG = sx(h[11]);
         e.K8 = sx(h[12]); e.SC = sx(h[13]); e.W1 = sx(h[14]); e.W2 = sx(h[15]); e.W3 = sx(h[16]); e.SQ = h[17] != 0;
         for (int i = 0; i < 18; i++) ws(hostNames[i], sx(h[i]));
+        if (S.count("W1A")) X(sym("W1A"), sx(h[14]));
         if (rst) { e.resetAudio(); resetDsp(); }
         if (trg) {
             e.S48 = (twin::A(s48h) << 24) | s48l; e.M48 = (twin::A(m48h) << 24) | m48l; e.AMP2 = sx(amp);
@@ -140,6 +145,11 @@ int main(int argc, char** argv) {
                 cycles += cy; callCycles += cy;
                 if (prof) pcHist[pc] += cy;
                 dsp.doLoopEnd();
+                if (watchA) {                                   // OT303_WATCH=xADDR / yADDR: report each change
+                    uint32_t v = mem.get(watchX ? MemArea_X : MemArea_Y, watchA) & 0xffffff;
+                    if (v != watchV) { std::printf("watch %c:%05x %06x -> %06x at P:%05x (segment %ld)\n", watchX ? 'x' : 'y', watchA, watchV, v, pc, seg);
+                                       watchV = v; if (++watchN > 40) return 1; }
+                }
             }
 #else
             while (dsp.getPC().toWord() != stopA && steps++ < 2000000) {
@@ -150,7 +160,12 @@ int main(int argc, char** argv) {
             if (dsp.getPC().toWord() != stopA) { std::printf("segment %ld: did not return (pc %06x)\n", seg, dsp.getPC().toWord()); return 1; }
             uint64_t ni = dsp.getInstructionCounter() - i0; instr += ni; if (k == 16 && ni > worst16) worst16 = ni;
             if (k == 16 && callCycles > worstCyc16) worstCyc16 = callCycles;
-            if ((R.r[3].var & 0xffffff) != OUTB + uint32_t(k)) { std::printf("r3 = %06x after %d samples\n", R.r[3].var & 0xffffff, k); return 1; }
+            if ((R.r[3].var & 0xffffff) != OUTB + uint32_t(k)) {
+                std::printf("r3 = %06x after %d samples (OUTP %06x, r0 %06x r2 %06x r6 %06x r1 %06x r4 %06x r5 %06x r7 %06x)\n",
+                            R.r[3].var & 0xffffff, k, gx(sym("OUTP")) & 0xffffff, R.r[0].var & 0xffffff, R.r[2].var & 0xffffff,
+                            R.r[6].var & 0xffffff, R.r[1].var & 0xffffff, R.r[4].var & 0xffffff, R.r[5].var & 0xffffff, R.r[7].var & 0xffffff);
+                return 1;
+            }
             for (int m = 0; m < 8; m++) if ((R.m[m].var & 0xffffff) != 0xffffff) { std::printf("m%d left at %06x\n", m, R.m[m].var & 0xffffff); return 1; }
             for (int j = 0; j < k; j++) {
                 e.tick();
