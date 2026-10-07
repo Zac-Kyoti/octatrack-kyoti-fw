@@ -16,6 +16,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -59,13 +60,19 @@ int main(int argc, char** argv) {
     auto Y = [&](uint32_t a, int32_t w) { mem.set(MemArea_Y, a, uint32_t(w) & 0xffffff); };
     auto gx = [&](uint32_t a) { return sx(mem.get(MemArea_X, a)); };
     auto gy = [&](uint32_t a) { return sx(mem.get(MemArea_Y, a)); };
+    // which memory each named word lives in (ot303_engine.asm: coefficients in X, data in Y)
+    static const std::set<std::string> YN = {"INC_T", "RC2", "L0_16", "AG_8", "AMP2", "DIC1", "DIC2", "MEG2", "TOPS",
+        "APX", "APY", "H2X", "H2Y", "NIC1", "NIC2", "HPX", "HPY", "FBX", "FBY", "YY1", "YY2", "YY3", "YY4"};
+    auto isY = [](const std::string& n) { return YN.count(n) != 0; };
+    auto gs = [&](const char* n) { return isY(n) ? gy(sym(n)) : gx(sym(n)); };
+    auto ws = [&](const char* n, int32_t w) { if (isY(n)) Y(sym(n), w); else X(sym(n), w); };
     // constants and tables, from the twin
     X(sym("LMAX"), twin::q23(twin::LT_OCT / 16.0)); X(sym("S70"), e.S70); X(sym("C437"), e.C437);
     X(sym("HP1B"), e.HP1_B); X(sym("HP1A"), e.HP1_A); X(sym("FBB"), e.FB_B); X(sym("FBA"), e.FB_A);
     X(sym("APB"), e.AP_B); X(sym("APA"), e.AP_A); X(sym("HP2B"), e.HP2_B); X(sym("HP2A"), e.HP2_A);
     X(sym("TOPA"), e.TOP_A);
     X(sym("NA1"), e.notch.a1); X(sym("NA2"), e.notch.a2); X(sym("NA3"), e.notch.a3); X(sym("NKK"), e.notch.kk);
-    X(sym("DA1"), e.decl.a1); X(sym("DA2"), e.decl.a2); X(sym("DA3"), e.decl.a3);
+    X(sym("DA1"), e.decl.a1); X(sym("DA2"), e.decl.a2); X(sym("DA3"), e.decl.a3); X(sym("DA2B"), e.decl.a2);
     for (int i = 0; i <= twin::LT_N; i++) {
         uint32_t a = sym("LT") + 4 * i;
         Y(a, twin::T.b0[i]); Y(a + 1, twin::T.db0[i]); Y(a + 2, twin::T.kp[i]); Y(a + 3, twin::T.dkp[i]);
@@ -74,19 +81,18 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 8; i++) Y(sym("HB1C") + i, e.hb4.c[i]);
     for (int i = 0; i < 22; i++) Y(sym("HB2C") + i, e.hb2.c[i]);
     if (sym("THM") != sym("TH") + 512) { std::printf("THM != TH + 512\n"); return 2; }
-    // the 4x loop's state lives in Y (double-buffered from PP); everything else in X
-    auto isY = [](const std::string& n) { return n == "HPX" || n == "HPY" || n == "FBX" || n == "FBY" || n.rfind("YY", 0) == 0; };
-    auto gs = [&](const char* n) { return isY(n) ? gy(sym(n)) : gx(sym(n)); };
+
     const char* zeroed[] = {"PH", "APX", "APY", "H2X", "H2Y", "TOPS", "NIC1", "NIC2", "DIC1", "DIC2"};
     auto resetDsp = [&]() {
-        for (auto n : zeroed) X(sym(n), 0);
+        for (auto n : zeroed) ws(n, 0);
         for (int i = 0; i < 16; i++) Y(sym("PP") + i, 0);
         for (int i = 0; i < 16; i++) X(sym("HB1B") + i, 0);
         for (int i = 0; i < 64; i++) X(sym("HB2B") + i, 0);
         X(sym("HB1P"), sym("HB1B")); X(sym("HB2P"), sym("HB2B"));
     };
     resetDsp();
-    for (auto n : {"S48", "M48", "RC2", "AMP2"}) { X(sym(n), 0); Y(sym(n), 0); }
+    for (auto n : {"S48", "M48"}) { X(sym(n), 0); Y(sym(n), 0); }
+    ws("RC2", 0); ws("AMP2", 0);
 
     const char* hostNames[] = {"INC_T", "CS", "C_MEG", "C2", "M_AMP", "L0_16", "ES8", "AG8", "AGFM", "RS", "AG_8", "BG",
                                "K8", "SC", "W1", "W2", "W3", "SQ"};
@@ -104,11 +110,11 @@ int main(int argc, char** argv) {
         e.INC_T = sx(h[0]); e.CS = sx(h[1]); e.C_MEG = sx(h[2]); e.C2 = sx(h[3]); e.M_AMP = sx(h[4]); e.L0_16 = sx(h[5]);
         e.ES8 = sx(h[6]); e.AG8 = sx(h[7]); e.AGF = h[8] != 0; e.RS = sx(h[9]); e.AG_8 = sx(h[10]); e.BG = sx(h[11]);
         e.K8 = sx(h[12]); e.SC = sx(h[13]); e.W1 = sx(h[14]); e.W2 = sx(h[15]); e.W3 = sx(h[16]); e.SQ = h[17] != 0;
-        for (int i = 0; i < 18; i++) X(sym(hostNames[i]), sx(h[i]));
+        for (int i = 0; i < 18; i++) ws(hostNames[i], sx(h[i]));
         if (rst) { e.resetAudio(); resetDsp(); }
         if (trg) {
             e.S48 = (twin::A(s48h) << 24) | s48l; e.M48 = (twin::A(m48h) << 24) | m48l; e.AMP2 = sx(amp);
-            X(sym("S48"), s48h); Y(sym("S48"), s48l); X(sym("M48"), m48h); Y(sym("M48"), m48l); X(sym("AMP2"), sx(amp));
+            X(sym("S48"), s48h); Y(sym("S48"), s48l); X(sym("M48"), m48h); Y(sym("M48"), m48l); ws("AMP2", sx(amp));
         }
         // DSP: one call per segment, in calls of at most 16 (a frame)
         for (int done = 0; done < n;) {

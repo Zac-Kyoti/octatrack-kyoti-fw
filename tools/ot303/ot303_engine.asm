@@ -13,76 +13,87 @@
 ; written S48 / M48 / AMP2 (later: the DSP does that itself from a trig flag).
 ; Clobbers a b x y r0-r2 r4-r7 n0-n7; restores m0-m7 = $ffffff; r3 advances r7 words.
 ;
-; v2 (cycle-tuned). The 4x loop keeps its constants in X (block XC, walked by r1 modulo 9)
-; and its state in Y, double-buffered (PP: bank A = PP+0..7, bank B = PP+8..15; r4 reads
-; the old bank, r5 writes the new one, both modulo 16, so they swap banks every sample and
-; are back where they started after the four). Between output samples bank A holds the
-; state. One dual move then feeds both multiplier operands (X -> x0/x1, Y -> y0/y1).
-; The ladder uses acc(Y) - B2*Y = (1 - 2b0)*Y exactly (OB2 = $800000 - B2).
+; v3 (cycle-tuned). Coefficients live in X and data in Y, each block laid out in the order the
+; code reads it, so one dual move feeds both multiplier operands (X -> x0/x1, Y -> y0/y1):
+;   control  CX (X, r3) / CY (Y, r6); S48, M48 as L pairs at SM (r0)
+;   4x loop  XC (X, r1 modulo 9) / PP (Y, double-buffered: bank A = PP+0..7, bank B =
+;            PP+8..15; r4 reads the old bank, r5 writes the new one, both modulo 16, so they
+;            swap banks every sample and are back where they started after the four)
+;   post     PX (X, r3) / PY (Y, r6)
+; State goes back with absolute single moves. The ladder uses acc(Y) - B2*Y = (1 - 2b0)*Y
+; exactly (OB2 = $800000 - B2). Truncating stores obey floor(A/2^24) - k = floor((A - k 2^24)
+; /2^24), so a difference may be taken before the store without changing the stored word.
+; dsp_asm cannot encode the X:R / R:Y move classes (it drops a half): none are used.
 ; ===========================================================================
-VB      equ     $1000           ; the voice block, X and Y (L pairs live here)
-; ---- HOST words (X)
-INC_T   equ     VB+0
-CS      equ     VB+1
-C_MEG   equ     VB+2
-C2      equ     VB+3
-M_AMP   equ     VB+4
-L0_16   equ     VB+5
-ES8     equ     VB+6
-AG8     equ     VB+7
-AGFM    equ     VB+8            ; 0 or $ffffff: rc2 is fed by the MEG (accent)
-RS      equ     VB+9
-AG_8    equ     VB+10
-BG      equ     VB+11
-K8      equ     VB+12
-SC      equ     VB+13
-W1      equ     VB+14
-W2      equ     VB+15
-W3      equ     VB+16
-SQ      equ     VB+17           ; 0: saw only
-; ---- state (X; L = x hi, y lo)
-S48     equ     VB+18
-M48     equ     VB+19
-RC2     equ     VB+20
-AMP2    equ     VB+21
-PH      equ     VB+22
-APX     equ     VB+31
-APY     equ     VB+32
-H2X     equ     VB+33
-H2Y     equ     VB+34
-TOPS    equ     VB+35
-NIC1    equ     VB+36
-NIC2    equ     VB+37
-DIC1    equ     VB+38
-DIC2    equ     VB+39
-HB1P    equ     VB+40           ; half-band write pointers
-HB2P    equ     VB+41
-OUTP    equ     VB+42           ; the caller's output pointer
-; ---- per output sample scratch
-INC     equ     VB+43
-MEG2    equ     VB+44
-ADS     equ     VB+48
-OSC     equ     VB+49           ; 4 words
-OSC4    equ     VB+53           ; L scratch
-DT      equ     VB+54           ; L scratch: W1 * INC
-; ---- constants (X), written by the host once
-LMAX    equ     VB+56
-S70     equ     VB+57
-C437    equ     VB+58
-APB     equ     VB+63
-APA     equ     VB+64
-HP2B    equ     VB+65
-HP2A    equ     VB+66
-TOPA    equ     VB+67
-NA1     equ     VB+68
-NA2     equ     VB+69           ; x 2^8
-NA3     equ     VB+70           ; x 2^16
-NKK     equ     VB+71           ; k / 8
-DA1     equ     VB+72
-DA2     equ     VB+73
-DA3     equ     VB+74           ; x 2^8
+; ---- control, X (read in this order by r3)
+CX      equ     $1000
+CS      equ     CX+0
+C_MEG   equ     CX+1
+AGFM    equ     CX+2            ; 0 or $ffffff: rc2 is fed by the MEG (accent)
+C2      equ     CX+3
+ES8     equ     CX+4
+AG8     equ     CX+5
+LMAX    equ     CX+6
+RS      equ     CX+7
+BG      equ     CX+8
+M_AMP   equ     CX+9
+K8      equ     CX+10
+DA2     equ     CX+11
+DA1     equ     CX+12
+DA3     equ     CX+13           ; x 2^8
+DA2B    equ     CX+14           ; DA2 again
+SC      equ     CX+15
+; ---- control, Y (read in this order by r6)
+CY      equ     $1000
+INC_T   equ     CY+0
+RC2     equ     CY+1
+L0_16   equ     CY+2
+AG_8    equ     CY+3
+AMP2    equ     CY+4
+DIC1    equ     CY+5
+DIC2    equ     CY+6
+; ---- L pairs (x hi, y lo)
+SM      equ     $1010
+S48     equ     SM+0
+M48     equ     SM+1
+; ---- other host words and state (X unless noted)
+W1      equ     $1014
+W2      equ     $1015
+W3      equ     $1016
+SQ      equ     $1017           ; 0: saw only
+PH      equ     $1018
+HB1P    equ     $1019           ; half-band write pointers
+HB2P    equ     $101a
+OUTP    equ     $101b           ; the caller's output pointer
+INC     equ     $101c
+ADS     equ     $101d
+S70     equ     $101e
+C437    equ     $101f
+TOPA    equ     $1020
+OSC     equ     $1028           ; 4 words
+OSC4    equ     $102c           ; L scratch
+DT      equ     $102d           ; L scratch: W1 * INC
+MEG2    equ     $1030           ; (Y)
+TOPS    equ     $1031           ; (Y)
+; ---- post, X (r3) / Y (r6)
+PX      equ     $1038
+APB     equ     PX+0
+APA     equ     PX+1
+HP2B    equ     PX+2
+HP2A    equ     PX+3
+NA2     equ     PX+4            ; x 2^8
+NA1     equ     PX+5
+NA3     equ     PX+6            ; x 2^16
+NKK     equ     PX+7            ; k / 8
+PY      equ     $1038
+APX     equ     PY+0
+APY     equ     PY+1
+H2X     equ     PY+2
+H2Y     equ     PY+3
+NIC2    equ     PY+4
+NIC1    equ     PY+5
 ; ---- the 4x loop's constants (X, read in this order by r1 every sample)
-XC      equ     VB+80
+XC      equ     $1050
 K64     equ     XC+0            ; per output sample
 HP1B    equ     XC+1            ; host, once
 HP1A    equ     XC+2
@@ -131,121 +142,95 @@ ot303:
         do      r7,zsend
         move    x:>HB2P,r7
         move    #42,m7
-; ---- pitch slew (24-bit): S48 += CS * (INC_T - hi)
-        move    #>S48,r6
-        move    x:>INC_T,a
-        move    x:>S48,x0
-        sub     x0,a            x:>CS,x1
-        move    a1,y0
-        move    l:(r6),a
-        mac     x1,y0,a
-        move    a10,l:(r6)
+        move    #>CX,r3
+        move    #>CY,r6
+        move    #>SM,r0
+        move    #>$ffffff,m3                  ; (r3 walks CX linearly here)
+; ---- pitch slew (24-bit): S48 += CS INC_T - CS hi
+        move    x:(r3)+,x1      y:(r6)+,y0      ; CS ; INC_T
+        move    l:(r0),a                        ; S48
+        mac     x1,y0,a         a,y1            ; + CS T ; y1 = hi
+        mac     -y1,x1,a        x:(r3)+,x0      ; - CS hi ; C_MEG
+        move    a10,l:(r0)+
         move    a1,x:>INC
 zcmeg:
 ; ---- main envelope, 48 bits: M48 = C*hi + (C*lo >> 24)
-        move    #>M48,r6
-        move    x:>C_MEG,x0
-        move    l:(r6),b
+        move    l:(r0),b
         move    b0,y0
         mpysu   x0,y0,a
         asr     #24,a,a
-        move    b1,y1
-        mac     x0,y1,a
-        move    a10,l:(r6)
-        move    a1,x:>MEG2
-; ---- accent attack rc2: in = MEG2 & AGFM; RC2 = rnd(in + C2 (RC2 - in))
+        move    b,y1
+        mac     x0,y1,a         x:(r3)+,x0      ; M48' ; AGFM
+        move    a10,l:(r0)
+; ---- accent attack rc2: in = MEG2 & AGFM; RC2 = rnd(in + C2 RC2 - C2 in)
         move    a1,b
-        move    x:>AGFM,x0
-        and     x0,b            x:>RC2,a
-        sub     b,a             x:>C2,x1
-        move    a1,y0
-        mpy     x1,y0,a
-        add     b,a
-        rnd     a
-        move    a,x:>RC2
+        and     x0,b            x:(r3)+,x1      y:(r6)+,y1     ; in ; C2 ; RC2
+        mac     y1,x1,b         b,y0            ; + C2 RC2 ; y0 = in
+        macr    -x1,y0,b        a,y0            ; - C2 in -> RC2' ; y0 = MEG2
+        move    b,y1                            ; RC2'
 zccut:
-; ---- log cutoff L/16, clamped to 200 Hz .. 20 kHz
-        move    a,y1
-        move    x:>AG8,x1
-        mpy     y1,x1,a         x:>MEG2,y0
-        move    x:>ES8,x0
-        mac     y0,x0,a         x:>L0_16,b
-        add     b,a
-        move    a,x0
-        move    x0,a
-        move    #0,x0
-        cmp     x0,a
-        tlt     x0,a
-        move    x:>LMAX,x0
-        cmp     x0,a
-        tgt     x0,a
+; ---- log cutoff L/16 = L0_16 + ES8 MEG2 + AG8 RC2', clamped to 200 Hz .. 20 kHz
+        move    x:(r3)+,x0      y:(r6)+,a       ; ES8 ; L0_16
+        mac     y0,x0,a         x:(r3)+,x1      ; + ES8 MEG2 ; AG8
+        mac     y1,x1,a         y1,y:>RC2       ; + AG8 RC2' ; RC2
+        move    a,x1                            ; (the store's limit)
+        move    x1,a
+        clr     b               x:(r3)+,x0      ; LMAX
+        max     a,b
+        cmp     x0,b            y0,y:>MEG2
+        tgt     x0,b
 ; ---- the coefficient tables: entry (L >> 14), fraction (L << 9) & $7fffff
-        asr     #12,a,b
-        and     #>$fffffc,b
-        add     #>LT,b
-        asl     #9,a,a
-        and     #>$7fffff,a
-        move    b1,r6
-        move    a1,x0
-        move    y:(r6)+,b
-        move    y:(r6)+,y0
-        mac     y0,x0,b         y:(r6)+,a       ; b = b0 ; a = kp/64 (start)
-        move    b,x1                            ; b0 (limited)
-        move    y:(r6)+,y0
-        mac     y0,x0,a         x1,x:>B0
-        move    a,y1                            ; kp/64
+        asr     #12,b,a
+        and     #>$fffffc,a
+        add     #>LT,a
+        asl     #9,b,b
+        and     #>$7fffff,b
+        move    a1,r0
+        move    b1,x0                           ; f
+        move    y:(r0)+,b                       ; b0[i]
+        move    y:(r0)+,y0                      ; db0
+        mac     y0,x0,b         y:(r0)+,a       ; B0 ; kp[i]
+        move    y:(r0)+,y0                      ; dkp
+        mac     y0,x0,a         b,x1            ; KP ; x1 = B0
+        move    a,y1                            ; KP
         move    x1,b
-        asl     b
-        move    b1,x:>B2
-        move    b1,x0
-        move    #>$400000,b
-        sub     x0,b
-        add     #>$400000,b                     ; $800000 - B2 (as a positive word)
-        move    b1,x:>OB2
-        move    x:>RS,x0
-        mpy     x0,y1,a         x:>BG,x0
-        move    a,x:>K64
-        mpy     x0,y1,a         x:>AG_8,x1
-        add     x1,a
-        move    a,x:>G8
+        asl     b               x1,x:>B0        ; 2 b0 ; B0
+        neg     b               b,x:>B2         ; ; B2
+        add     #>$400000,b
+        add     #>$400000,b                     ; $800000 - B2
+        move    b,x:>OB2
+        move    x:(r3)+,x0      y:(r6)+,b       ; RS ; AG_8
+        mpy     x0,y1,a         x:(r3)+,x0      ; KP RS ; BG
+        mac     x0,y1,b         a,x:>K64        ; AG_8 + BG KP ; K64
+        move    b,x:>G8
 zcamp:
 ; ---- amp envelope + the MEG into the declicker (amp / 16)
-        move    x:>AMP2,x0
-        move    x:>M_AMP,y0
-        mpy     y0,x0,a
-        move    a,x0
-        move    x0,x:>AMP2
-        move    #>$100000,y0
-        mpy     y0,x0,a         x:>K8,x1
-        move    x:>MEG2,y1
-        mac     y1,x1,a
-        move    a,x0
-; declicker SVF (s2 0, s3 8): x0 = u
-        move    x:>DIC2,y1
-        tfr     x0,a
-        sub     y1,a            x:>DA2,x1
-        move    a,y0                    ; v3
-        mpy     x1,y0,a         x:>DIC1,x0
-        move    x:>DA1,y1
-        mac     x0,y1,a         x:>DA3,y1
-        rnd     a
-        move    a,x1                    ; v1
-        mpy     y1,y0,b         x:>DA2,y1
-        asr     #8,b,b
-        mac     x0,y1,b         x:>DIC2,y1
-        add     y1,b
-        rnd     b
-        move    b,y0                    ; v2 = AD16
-        tfr     x1,a
+        move    x:(r3)+,x0      y:(r6)+,y0      ; M_AMP ; AMP2
+        mpy     y0,x0,a         x:(r3)+,x1      ; AMP2 M ; K8
+        move    a,y0                            ; AMP2'
+        mpy     y0,#3,a                         ; AMP2'/8
+        move    y:>MEG2,y1
+        mac     y1,x1,a         y0,y:>AMP2      ; + K8 MEG2 = u (unstored) ; AMP2
+; declicker SVF (s2 0, s3 8)
+        move    x:(r3)+,x0      y:(r6)+,y1      ; DA2 ; ic1
+        move    y:(r6)+,b                       ; ic2
+        sub     b,a                             ; u - ic2
+        move    a,y0                            ; v3
+        mpy     y0,x0,a         x:(r3)+,x0      ; DA2 v3 ; DA1
+        macr    x0,y1,a         x:(r3)+,x0      ; v1 ; DA3
+        mpy     y0,x0,a         a,x1            ; DA3 v3 ; x1 = v1
+        asr     #8,a,a
+        add     a,b             x:(r3)+,x0      ; ic2 + (DA3 v3 >> 8) ; DA2
+        macr    x0,y1,b                         ; v2
+        tfr     x1,a            b,y0            ; v1 ; y0 = v2
         asl     a
-        sub     x0,a
-        move    a,x:>DIC1
-        tfr     y0,b
-        asl     b
-        sub     y1,b            x:>SC,x0
-        move    b,x:>DIC2
-        mpy     y0,x0,a
+        sub     y1,a                            ; 2 v1 - ic1
+        asl     b               a,y:>DIC1       ; 2 v2 ; ic1'
+        move    y:>DIC2,y1
+        sub     y1,b            x:(r3)+,x1      ; 2 v2 - ic2 ; SC
+        mpy     x1,y0,a         b,y:>DIC2       ; v2 SC ; ic2'
         move    a,x:>ADS
+        move    #14,m3
 zcosc:
 ; ---- oscillator: 4 samples into OSC
         move    #>OSC,r0
@@ -343,126 +328,6 @@ zosc:
         move    #>OSC,r0
         move    y:>YY4,y1
         do      #2,zfl
-        bsr     zfs
-        bsr     zfs
-zchb1:
-        lua     (r2)+n2,r3              ; ---- the first half-band: centre pos - 8
-        move    #>HB1C,r6
-        move    x:(r3),a
-        asr     a
-        lua     (r2)-,r3                ; newest
-        nop
-        move    x:(r3)+n3,x0    y:(r6)+,y0
-        rep     #7
-        mac     y0,x0,a         x:(r3)+n3,x0    y:(r6)+,y0
-        mac     y0,x0,a
-        move    a,x:(r7)+               ; into the second half-band
-zfl:
-zchb2:
-; ---- the second half-band: one output sample
-        move    #42,m0
-        lua     (r7)+n7,r0              ; centre pos - 22
-        move    #>HB2C,r6
-        move    x:(r0),a
-        asr     a
-        lua     (r7)-,r0                ; newest
-        nop
-        move    x:(r0)+n0,x0    y:(r6)+,y0
-        rep     #21
-        mac     y0,x0,a         x:(r0)+n0,x0    y:(r6)+,y0
-        mac     y0,x0,a
-        move    #>$ffffff,m0
-        move    a,x0                    ; fs 8
-zcpost:
-; ---- post: allpass 14 Hz, high-pass 24 Hz, notch 7.5 Hz
-        move    x:>APB,x1
-        mpy     x1,x0,a         x:>APX,b
-        add     b,a             x:>APA,x1
-        move    x:>APY,y0
-        mac     x1,y0,a         x0,x:>APX
-        rnd     a
-        move    a,x0
-        move    x0,x:>APY
-        move    x:>HP2B,x1
-        mpy     x1,x0,a         x:>H2X,y0
-        mac     -x1,y0,a        x:>HP2A,x1
-        move    x:>H2Y,y0
-        mac     x1,y0,a         x0,x:>H2X
-        rnd     a
-        move    a,x0                    ; x0 = x (notch input), kept
-        move    x0,x:>H2Y
-; notch SVF (s2 8, s3 16, sk 3)
-        move    x:>NIC2,y1
-        tfr     x0,a
-        sub     y1,a            x:>NA2,x1
-        move    a,y0                    ; v3
-        mpy     x1,y0,a         x:>NIC1,y1
-        asr     #8,a,a
-        move    x:>NA1,x1
-        mac     y1,x1,a
-        rnd     a
-        move    a,x1                    ; v1
-        move    x:>NA3,y1
-        mpy     y1,y0,a         x:>NA2,y0
-        asr     #16,a,a
-        move    x:>NIC1,y1
-        mpy     y1,y0,b
-        asr     #8,b,b
-        add     b,a             x:>NIC2,y1
-        add     y1,a
-        rnd     a
-        move    a,y0                    ; v2
-        tfr     x1,a            x:>NIC1,y1
-        asl     a
-        sub     y1,a
-        move    a,x:>NIC1
-        tfr     y0,a            x:>NIC2,y1
-        asl     a
-        sub     y1,a
-        move    a,x:>NIC2
-        move    x:>NKK,y1               ; notch = x - (k/8) v1 * 8
-        mpy     y1,x1,b
-        asl     #3,b,b
-        tfr     x0,a
-        sub     b,a
-        move    a,x0
-; ---- amp, level, top rounding
-        move    x:>ADS,y0
-        mpy     y0,x0,a
-        asl     #5,a,a
-        move    a,x0                    ; y
-        move    x:>TOPS,y1
-        tfr     x0,a
-        sub     y1,a            x:>TOPA,x1
-        move    a,y0
-        mpy     x1,y0,a
-        rnd     a
-        move    a,x1                    ; v
-        tfr     x1,a
-        add     y1,a
-        move    a,y0                    ; yy
-        tfr     y0,b
-        add     x1,b
-        move    b,x:>TOPS
-        move    x:>OUTP,r6
-        move    r7,x:>HB2P
-        move    y0,x:(r6)+
-        move    r6,x:>OUTP
-zsend:
-        move    r2,x:>HB1P
-        move    x:>OUTP,r3
-        move    #>$ffffff,m1
-        move    #>$ffffff,m2
-        move    #>$ffffff,m3
-        move    #>$ffffff,m4
-        move    #>$ffffff,m5
-        move    #>$ffffff,m7
-        rts
-
-; ---- one 4x sample: pre-HP, the TB-303 filter, the output into the first half-band.
-; In: y1 = Y4, r0 -> OSC[n], r1 -> XC, r4 -> the old bank, r5 -> the new bank.
-; Out: y1 = the new Y4; x:(r2)+ = 2 g y4 / 8.
-zfs:
         move    x:(r1)+,x0                      ; K64
         mpy     x0,y1,a         x:(r0)+,x1      y:(r4)+,y0     ; k y4 ; osc ; hpx
         asl     #5,a,a     ; HP1B ; hpy
@@ -494,9 +359,135 @@ zfs:
         mpy     x0,y1,a         b,y:(r5)+                       ; G8 Y4' ; Y4'
         asl     #4,a,a
         move    a,x:(r2)+
+
+        move    x:(r1)+,x0                      ; K64
+        mpy     x0,y1,a         x:(r0)+,x1      y:(r4)+,y0     ; k y4 ; osc ; hpx
+        asl     #5,a,a     ; HP1B ; hpy
+        move    x:(r1)+,x0      y:(r4)+,y1
+        mpy     x1,x0,b         x1,y:(r5)+                      ; HB osc ; HPX' = osc
+        mac     -y0,x0,b        a,x1                            ; - HB hpx ; x1 = fbin
+        move    x:(r1)+,x0                      ; HP1A
+        macr    x0,y1,b         x:(r1)+,x0      y:(r4)+,y0     ; hpy' ; FBB ; fbx
+        mpy     x1,x0,a         b,y:(r5)+                       ; FBB fbin ; HPY'
+        mac     -y0,x0,a        x1,y:(r5)+                      ; - FBB fbx ; FBX' = fbin
+        move    x:(r1)+,x0      y:(r4)+,y1                      ; FBA ; fby
+        macr    x0,y1,a                                         ; fby'
+        asr     #2,b,b                       ; hpy'/4 ; FBY'
+        move    a,y:(r5)+
+        asl     a               x:(r1)+,x0      y:(r4)+,y1     ; 2 fby' ; B2 ; Y1
+        sub     a,b             x:(r1)+,x1                      ; y0in ; OB2
+        mpy     y1,x1,a         b,y0                            ; OB2 Y1 ; y0 = y0in
+        mac     y0,x0,a         y:(r4)+,y1                      ; B2 y0in ; Y2
+        macr    x0,y1,a         x:(r1)+,x0      y:(r4)+,y0     ; B2 Y2 -> Y1' ; B0 ; Y3
+        mpy     y1,x1,b         a,y1                            ; OB2 Y2 ; y1 = Y1'
+        mac     y0,x0,b         a,y:(r5)+                       ; B0 Y3 ; Y1'
+        macr    x0,y1,b         y:(r4)+,y1                      ; B0 Y1' -> Y2' ; Y4
+        mpy     x1,y0,a         b,y0                            ; OB2 Y3 ; y0 = Y2'
+        mac     x0,y1,a         b,y:(r5)+                       ; B0 Y4 ; Y2'
+        macr    y0,x0,a                                         ; B0 Y2' -> Y3'
+        mpy     y1,x1,b         a,y0                            ; OB2 Y4 ; y0 = Y3'
+        macr    y0,x0,b         x:(r1)+,x0      a,y:(r5)+      ; B0 Y3' -> Y4' ; G8 ; Y3'
+        move    b,y1                                            ; y1 = Y4'
+        mpy     x0,y1,a         b,y:(r5)+                       ; G8 Y4' ; Y4'
+        asl     #4,a,a
+        move    a,x:(r2)+
+
+zchb1:
+        lua     (r2)+n2,r3              ; ---- the first half-band: centre pos - 8
+        move    #>HB1C,r6
+        move    x:(r3),a
+        asr     a
+        lua     (r2)-,r3                ; newest
+        nop
+        move    x:(r3)+n3,x0    y:(r6)+,y0
+        rep     #7
+        mac     y0,x0,a         x:(r3)+n3,x0    y:(r6)+,y0
+        mac     y0,x0,a
+        move    a,x:(r7)+               ; into the second half-band
+zfl:
+zchb2:
+; ---- the second half-band: one output sample
+        move    #42,m0
+        lua     (r7)+n7,r0              ; centre pos - 22
+        move    #>HB2C,r6
+        move    x:(r0),a
+        asr     a
+        lua     (r7)-,r0                ; newest
+        nop
+        move    x:(r0)+n0,x0    y:(r6)+,y0
+        rep     #21
+        mac     y0,x0,a         x:(r0)+n0,x0    y:(r6)+,y0
+        mac     y0,x0,a
+        move    #>$ffffff,m0
+        move    a,x0                    ; fs 8
+zcpost:
+; ---- post: allpass 14 Hz, high-pass 24 Hz, notch 7.5 Hz (x in a, fs 8)
+        move    #>PX,r3
+        move    #>PY,r6
+        move    #>$ffffff,m3
+        move    a,y0                                    ; x
+        move    x:(r3)+,x1      y:(r6)+,b               ; APB ; apx
+        mac     x1,y0,b         x:(r3)+,x1      y:(r6)+,y1     ; apx + APB x ; APA ; apy
+        macr    y1,x1,b         y0,y:>APX               ; apy' ; apx = x
+        move    b,y0                                    ; x2
+        move    x:(r3)+,x1      y:(r6)+,y1              ; HP2B ; h2x
+        mpy     x1,y0,a         y0,y:>APY               ; HP2B x2 ; APY
+        mac     -y1,x1,a        x:(r3)+,x1      y:(r6)+,y1     ; - HP2B h2x ; HP2A ; h2y
+        macr    y1,x1,a         y0,y:>H2X               ; h2y' ; h2x = x2
+        move    a,y0                                    ; x3
+        move    y:(r6)+,b                               ; ic2
+        sub     b,a             y0,y:>H2Y               ; x3 - ic2 ; H2Y = x3
+        move    a,y1                                    ; v3
+        move    x:(r3)+,x1      y:(r6)+,y0              ; NA2 ; ic1
+        mpy     y1,x1,a         x:(r3)+,x0              ; NA2 v3 ; NA1
+        asr     #8,a,a
+        macr    y0,x0,a                                 ; v1
+        mpy     x1,y0,a         a,x0                    ; NA2 ic1 ; x0 = v1
+        asr     #8,a,a
+        add     a,b             x:(r3)+,x1              ; ic2 + (NA2 ic1 >> 8) ; NA3
+        mpy     y1,x1,a                                 ; NA3 v3
+        asr     #16,a,a
+        add     a,b
+        rnd     b                                       ; v2
+        tfr     x0,a            b,y1                    ; v1 ; y1 = v2
+        asl     a
+        sub     y0,a                                    ; 2 v1 - ic1
+        asl     b               a,y:>NIC1               ; 2 v2 ; ic1'
+        move    y:>NIC2,y0
+        sub     y0,b            x:(r3)+,x1              ; 2 v2 - ic2 ; NKK
+        mpy     x1,x0,a         b,y:>NIC2               ; NKK v1 ; ic2'
+        asl     #3,a,a
+        move    y:>H2Y,b                                ; x3
+        sub     a,b                                     ; notch
+        move    b,y0
+; ---- amp, level, top rounding
+        move    x:>ADS,x1
+        mpy     x1,y0,a         y:>TOPS,y1
+        asl     #5,a,a                                  ; y (unstored)
+        sub     y1,a            x:>TOPA,x1              ; y - tops
+        move    a,y0
+        mpyr    x1,y0,a                                 ; v
+        move    a,x0
+        add     y1,a                                    ; v + tops
+        move    a,y0                                    ; yy
+        add     x0,a                                    ; yy + v
+        move    a,y:>TOPS
+        move    #14,m3
+        move    x:>OUTP,r6
+        move    r7,x:>HB2P
+        move    y0,x:(r6)+
+        move    r6,x:>OUTP
+zsend:
+        move    r2,x:>HB1P
+        move    x:>OUTP,r3
+        move    #>$ffffff,m1
+        move    #>$ffffff,m2
+        move    #>$ffffff,m3
+        move    #>$ffffff,m4
+        move    #>$ffffff,m5
+        move    #>$ffffff,m7
         rts
 
-; ---- BLEP: a1 = phase p (A0 = 0), x0 = inc  ->  a1 = the saw with its polyBLEP (limited)
 zblep:
         move    a,b                     ; (= tfr: p is in range; dsp_asm mis-encodes a bare tfr a,b)
         add     #>$400000,b
