@@ -12,7 +12,7 @@
 ;
 ; ENTRY ot303: renders r7 (>= 1) output samples into x:(r3)+ (one word each).
 ; The host (ColdFire, later the hook) has written the HOST words; a note trigger has
-; written S48 / M48 / AMP2 (later: the DSP does that itself from a trig flag).
+; written S48H/L, M48H/L, AMP2 (later: the DSP does that itself from a trig flag).
 ; Clobbers a b x y r0-r7 n0-n7; restores m0-m7 = $ffffff; r3 advances r7 words.
 ;
 ; v4 (cycle-tuned against the emulator's cycle table, which counts an absolute address or a long
@@ -20,9 +20,10 @@
 ; two walkers in the order the code uses it, so its load rides an ALU op as a parallel move:
 ;   r2  X walker, block XW (coefficients and host words), modulo 53, back at its start after
 ;       each output sample
-;   r6  Y walker, block YW (data, state, the first half-band's taps), modulo 33, the same; a
-;       state is read with (r6) and written back with (r6)+ (the X twin of two YW words holds
-;       S48's and M48's high words: L moves)
+;   r6  Y walker, block YW (data, state, the first half-band's taps), modulo 35, the same; a
+;       state is read with (r6) and written back with (r6)+; the two 48-bit states (S48, M48)
+;       are Y pairs, hi then lo (not L moves: on the unit no address has both its X and its Y
+;       word free -- Y $795..$FFF is free, X there is stock's curve bank)
 ; Persistent pointers, saved across calls in PTRS: r1 XC (the 4x loop's constants, modulo 9),
 ; r3 the first half-band's odd branch (X, modulo 8), r4 / r5 the 4x loop's state banks (Y,
 ; four banks of 9: the oscillator's sample, then 8 states; r4 reads bank n, r5 writes bank n+1,
@@ -37,8 +38,12 @@
 ; obey floor(A/2^24) - k = floor((A - k 2^24)/2^24), so a difference may be taken before the
 ; store without changing the stored word.
 ; ===========================================================================
+; ---- placement: three bases, rewritten per payload by the builders (asm_macros.layout)
+XB      equ     $1000           ;@LAYOUT X block, 64-aligned, $6d words
+YS      equ     $1040           ;@LAYOUT Y state block, 64-aligned, $ab words
+LT      equ     $1200           ;@LAYOUT Y tables, 1,886 words (LT 860, then TH 1,026)
 ; ---- the X walker's block (r2), in reading order
-XW      equ     $1000           ; 64-aligned
+XW      equ     XB              ; 64-aligned
 CS      equ     XW+0
 C_MEG   equ     XW+1
 AGFM    equ     XW+2            ; 0 or $ffffff: rc2 is fed by the MEG (accent)
@@ -73,28 +78,30 @@ NKK     equ     XW+51           ; k / 8
 TOPA    equ     XW+52
 XWM     equ     52              ; modulo - 1
 ; ---- the Y walker's block (r6), in reading order
-YW      equ     $1040           ; 64-aligned
+YW      equ     YS              ; 64-aligned
 INC_T   equ     YW+0
-S48     equ     YW+1            ; L (x hi, y lo)
-M48     equ     YW+2            ; L
-RC2     equ     YW+3
-L0_16   equ     YW+4
-AG_8    equ     YW+5
-AMP2    equ     YW+6
-DIC2    equ     YW+7
-DIC1    equ     YW+8
-PH      equ     YW+9
-HB1C    equ     YW+10           ; 8 odd taps of the 15-tap, REVERSED, twice (two outputs a sample)
-APX     equ     YW+26
-APY     equ     YW+27
-H2X     equ     YW+28
-H2Y     equ     YW+29
-NIC2    equ     YW+30
-NIC1    equ     YW+31
-TOPS    equ     YW+32
-YWM     equ     32
+S48H    equ     YW+1            ; S48, high word (48-bit pitch slew: two Y words, hi then lo)
+S48L    equ     YW+2
+M48H    equ     YW+3            ; M48, high word (48-bit main envelope)
+M48L    equ     YW+4
+RC2     equ     YW+5
+L0_16   equ     YW+6
+AG_8    equ     YW+7
+AMP2    equ     YW+8
+DIC2    equ     YW+9
+DIC1    equ     YW+10
+PH      equ     YW+11
+HB1C    equ     YW+12           ; 8 odd taps of the 15-tap, REVERSED, twice (two outputs a sample)
+APX     equ     YW+28
+APY     equ     YW+29
+H2X     equ     YW+30
+H2Y     equ     YW+31
+NIC2    equ     YW+32
+NIC1    equ     YW+33
+TOPS    equ     YW+34
+YWM     equ     34
 ; ---- the 4x loop's constants (X, read in this order by r1 every 4x sample)
-XC      equ     $1080           ; 16-aligned
+XC      equ     XB+$40          ; 16-aligned
 K64     equ     XC+0            ; per output sample
 HP1B    equ     XC+1            ; host, once
 HP1A    equ     XC+2
@@ -106,7 +113,7 @@ B0      equ     XC+7            ;                    b0
 G8      equ     XC+8            ;                    g / 8
 ; ---- the 4x loop's state (Y): four banks of 9 (OSC, HPX, HPY, FBX, FBY, Y1..Y4); bank 0
 ; holds the state between output samples (the probe and a reset address it by these names)
-PP      equ     $10c0           ; 64-aligned
+PP      equ     YS+$40          ; 64-aligned
 OSCW    equ     PP+0
 HPX     equ     PP+1
 HPY     equ     PP+2
@@ -118,18 +125,18 @@ YY3     equ     PP+7
 YY4     equ     PP+8
 PPW     equ     PP+10           ; r5's start: bank 1, past its oscillator word
 ; ---- the half-band branches
-HB1A    equ     $1108           ; X, 8 (8-aligned): the 15-tap's odd samples
-HB1B    equ     $1110           ; X, 4 (4-aligned): its even samples, the centre = the oldest
-HB2A    equ     $1120           ; Y, 22 (32-aligned): the 43-tap's odd samples
-HB2B    equ     $1140           ; Y, 11 (16-aligned): its even samples, the centre = the oldest
+HB1A    equ     XB+$50          ; X, 8 (8-aligned): the 15-tap's odd samples
+HB1B    equ     XB+$58          ; X, 4 (4-aligned): its even samples, the centre = the oldest
+HB2A    equ     YS+$80          ; Y, 22 (32-aligned): the 43-tap's odd samples
+HB2B    equ     YS+$a0          ; Y, 11 (16-aligned): its even samples, the centre = the oldest
 ; ---- pointers saved across calls (X), and the square path's words (X, absolute)
-PTRS    equ     $1150           ; r3, r7, n2, n7, the output pointer
+PTRS    equ     XB+$68          ; r3, r7, n2, n7, the output pointer
 P_R3    equ     PTRS+0
 P_R7    equ     PTRS+1
 P_N2    equ     PTRS+2
 P_N7    equ     PTRS+3
 OUTP    equ     PTRS+4
-OCB     equ     $1158           ; the square path's words (8-aligned), read in this order
+OCB     equ     XB+$60          ; the square path's words (8-aligned), read in this order
 S70     equ     OCB+0
 C437    equ     OCB+1
 MASKE   equ     OCB+2           ; $fffffe
@@ -138,10 +145,9 @@ W1A     equ     OCB+4           ; W1 again; W1..W3 are a ring (4-aligned)
 W2      equ     OCB+5
 W3      equ     OCB+6
 ; ---- tables (Y)
-LT      equ     $1200           ; 215 entries x 4: b0, db0, kp/64, dkp
-TH      equ     $1600           ; 513 entries x 2: tanh, slope
-THM     equ     $1800           ; TH + 2*256: x = 0
-;@Y INC_T RC2 L0_16 AG_8 AMP2 DIC2 DIC1 PH HB1C APX APY H2X H2Y NIC2 NIC1 TOPS OSCW HPX HPY FBX FBY YY1 YY2 YY3 YY4 PP HB2A HB2B LT TH THM
+TH      equ     LT+860          ; 513 entries x 2: tanh, slope (LT: 215 x 4: b0, db0, kp/64, dkp)
+THM     equ     TH+512          ; TH + 2*256: x = 0
+;@Y INC_T S48H S48L M48H M48L RC2 L0_16 AG_8 AMP2 DIC2 DIC1 PH HB1C APX APY H2X H2Y NIC2 NIC1 TOPS OSCW HPX HPY FBX FBY YY1 YY2 YY3 YY4 PP HB2A HB2B LT TH THM
 
 ot303:
         move    r3,x:>OUTP
@@ -168,20 +174,22 @@ ot303:
         do      n6,zsend
 ; ---- pitch slew (24-bit): S48 += CS INC_T - CS hi
         move    x:(r2)+,x1      y:(r6)+,y0      ; CS ; INC_T
-        move    l:(r6),a                        ; S48
+        move    y:(r6)+,a                       ; S48 hi (A0 = 0)
+        move    y:(r6)-,a0                      ; S48 lo
         mac     x1,y0,a         a,y1            ; + CS T ; y1 = hi
         mac     -y1,x1,a        x:(r2)+,x0      ; - CS hi ; C_MEG
-        move    a10,l:(r6)+
+        move    a1,y:(r6)+
+        move    a0,y:(r6)+
         move    a1,n0                           ; INC
 zcmeg:
 ; ---- main envelope, 48 bits: M48 = C*hi + (C*lo >> 24)
-        move    l:(r6),b
-        move    b0,y0
+        move    y:(r6)+,y1                      ; M48 hi
+        move    y:(r6)-,y0                      ; M48 lo
         mpysu   x0,y0,a
         asr     #24,a,a
-        move    b,y1
         mac     x0,y1,a         x:(r2)+,x0      ; M48' ; AGFM
-        move    a10,l:(r6)+
+        move    a1,y:(r6)+
+        move    a0,y:(r6)+
 ; ---- accent attack rc2: in = MEG2 & AGFM; RC2 = rnd(in + C2 RC2 - C2 in)
         move    a1,b
         and     x0,b            x:(r2)+,x1      y:(r6),y1      ; in ; C2 ; RC2

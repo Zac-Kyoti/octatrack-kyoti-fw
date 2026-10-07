@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
         X(sym("P_R3"), sym("HB1A")); X(sym("P_N2"), sym("HB1B")); X(sym("P_R7"), sym("HB2A")); X(sym("P_N7"), sym("HB2B"));
     };
     resetDsp();
-    for (auto n : {"S48", "M48"}) { X(sym(n), 0); Y(sym(n), 0); }
+    for (auto n : {"S48H", "S48L", "M48H", "M48L"}) Y(sym(n), 0);
     ws("RC2", 0); ws("AMP2", 0);
 
     const char* hostNames[] = {"INC_T", "CS", "C_MEG", "C2", "M_AMP", "L0_16", "ES8", "AG8", "AGFM", "RS", "AG_8", "BG",
@@ -123,7 +123,7 @@ int main(int argc, char** argv) {
         if (rst) { e.resetAudio(); resetDsp(); }
         if (trg) {
             e.S48 = (twin::A(s48h) << 24) | s48l; e.M48 = (twin::A(m48h) << 24) | m48l; e.AMP2 = sx(amp);
-            X(sym("S48"), s48h); Y(sym("S48"), s48l); X(sym("M48"), m48h); Y(sym("M48"), m48l); ws("AMP2", sx(amp));
+            Y(sym("S48H"), s48h); Y(sym("S48L"), s48l); Y(sym("M48H"), m48h); Y(sym("M48L"), m48l); ws("AMP2", sx(amp));
         }
         // DSP: one call per segment, in calls of at most 16 (a frame)
         for (int done = 0; done < n;) {
@@ -178,8 +178,8 @@ int main(int argc, char** argv) {
                         {"YY3", e.Y3}, {"YY4", e.Y4}, {"RC2", e.RC2}, {"AMP2", e.AMP2}, {"APY", e.apy}, {"H2Y", e.h2y}, {"TOPS", e.tops},
                         {"NIC1", e.notch.ic1}, {"NIC2", e.notch.ic2}, {"DIC1", e.decl.ic1}, {"DIC2", e.decl.ic2}};
                     for (auto& q : st) std::printf("  %-5s dsp %06x twin %06x%s\n", q.n, gs(q.n) & 0xffffff, q.t & 0xffffff, gs(q.n) == q.t ? "" : "  <--");
-                    std::printf("  M48 dsp %06x%06x twin %012llx; S48 dsp %06x%06x twin %012llx\n", gx(sym("M48")) & 0xffffff, gy(sym("M48")) & 0xffffff,
-                                (unsigned long long)e.M48, gx(sym("S48")) & 0xffffff, gy(sym("S48")) & 0xffffff, (unsigned long long)e.S48);
+                    std::printf("  M48 dsp %06x%06x twin %012llx; S48 dsp %06x%06x twin %012llx\n", gy(sym("M48H")) & 0xffffff, gy(sym("M48L")) & 0xffffff,
+                                (unsigned long long)e.M48, gy(sym("S48H")) & 0xffffff, gy(sym("S48L")) & 0xffffff, (unsigned long long)e.S48);
                     return 1;
                 }
                 samples++;
