@@ -44,7 +44,7 @@ TTMP = 0xF40                              # zqinit's scratch run of the render's
 # copy changes shape (2: rev 17's first cut, the cutoff table in Y; 3: no cutoff table; 4: the render's
 # table transposed)
 Y_LAYOUT = 4
-TAGSP = 0x5A5A07                          # "this slot is rev 17's" (rev 11: ...02, 12: ...03, 13: ...04, 14: ...05, 17 first cut: ...06)
+TAGSP = 0x5A5A08                          # "this slot is rev 17's" (rev 11: ...02, 12: ...03, 13: ...04, 14: ...05, 17 first cut: ...06, aligned: ...07)
 
 # SPRING REVERB's exclusive X data modules, per payload: (address, words), and
 # the two contiguous runs they form. X:0x8cf0 / 0x87b0 (27 words) is shared

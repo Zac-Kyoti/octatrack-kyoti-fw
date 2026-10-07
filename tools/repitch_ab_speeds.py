@@ -36,6 +36,7 @@ def main():
     ap.add_argument("out")
     ap.add_argument("sources", nargs="+", help="name=file.wav")
     ap.add_argument("--bpm", type=float, required=True)
+    ap.add_argument("--avg", action="store_true", help="pack 8: mid + side before and after the side average")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -50,12 +51,18 @@ def main():
             n_out = int((len(src) - 64) / r) // 16 * 16
             trig = [t for t in (int(round(j * slice_len / r)) for j in range(int(len(src) / slice_len) + 1)) if t < n_out]
             mid = (src[:, :1] + src[:, 1:]) / 2
-            clips = {
-                "ref": p.rpch(src, r, n_out),
-                "ms": p.run(m.MODE_RPSP, src, r, trig, ms=True),
-                "monol": p.run(m.MODE_RPSP, np.repeat(src[:, :1], 2, axis=1), r, trig, ms=True),
-                "monos": p.run(m.MODE_RPSP, np.repeat(mid, 2, axis=1), r, trig, ms=True),
-            }
+            if a.avg:
+                m.Engine.side_avg = False
+                prev = p.run(m.MODE_RPSP, src, r, trig, ms=True)
+                m.Engine.side_avg = True
+                clips = {"ref": p.rpch(src, r, n_out), "ms": prev, "msavg": p.run(m.MODE_RPSP, src, r, trig, ms=True)}
+            else:
+                clips = {
+                    "ref": p.rpch(src, r, n_out),
+                    "ms": p.run(m.MODE_RPSP, src, r, trig, ms=True),
+                    "monol": p.run(m.MODE_RPSP, np.repeat(src[:, :1], 2, axis=1), r, trig, ms=True),
+                    "monos": p.run(m.MODE_RPSP, np.repeat(mid, 2, axis=1), r, trig, ms=True),
+                }
             target = p.active_rms(clips["ref"])
             g = {k: target / p.active_rms(y) for k, y in clips.items()}
             trim = min(1.0, 0.89 / max(np.abs(y).max() * g[k] for k, y in clips.items()))

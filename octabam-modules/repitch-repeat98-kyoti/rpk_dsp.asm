@@ -197,21 +197,21 @@ zqsp:
         move    n6,a
         add     #>$a00,a
         move    a1,r4                   ; this track's slot
-        move    #>$5a5a07,x1
+        move    #>$5a5a08,x1
         move    y:(r4+$a),b
         cmp     x1,b
         beq     zqsok
         clr     b                       ; stale, first use or a trig: clean ring + state
         move    r4,r1
-        do      #$1c,zqsz
+        do      #$1d,zqsz
         move    b,y:(r1)+
 zqsz:
         move    x1,y:(r4+$a)
-        move    r4,y:(r4+$18)
+        move    r4,y:(r4+$19)
         move    #>$7fffff,x0
         move    x0,y:(r4+$16)
         move    #>$3630a9,x0                ; the read shift starts at its mean
-        move    x0,y:(r4+$1b)
+        move    x0,y:(r4+$1c)
         bra     zqsrs                   ; "previous output" = this pass's first
 zqsok:
         move    x:(r5),a                ; resync "previous" if this pass does not
@@ -235,19 +235,19 @@ zqsnj:
 ; increments + the smoothed read shift, its integer part doubled (ring words;
 ; the fraction stays one)
         move    y:>$40,b
-        move    b1,y:(r4+$1a)
+        move    b1,y:(r4+$1b)
         clr     a
         move    x:>$40,a1
         and     #<1,a
         move    y:>$40,a0               ; a = r as 24.24
         asr     a                       ; a0 = RH = r x 2^23, unsigned (a1 = 0)
-        move    a0,y:(r4+$19)
+        move    a0,y:(r4+$1a)
         move    a0,y0
-        move    #>$33c28f,x0
+        move    #>$2fc28f,x0
         mpyuu   y0,x0,a                 ; (MS_SIDE_DELAY / 16) r x 2^47 (RH unsigned; < 2^47)
         asr     #19,a,a                 ; -> MS_SIDE_DELAY r, 24.24
         add     #<$4,a               ; + c + 1 frames
-        move    y:(r4+$1b),b
+        move    y:(r4+$1c),b
         asr     #22,b,b                 ; + the read shift (Q22 -> 24.24)
         add     b,a
         move    a1,x0
@@ -258,9 +258,9 @@ zqsnj:
         move    r7,n1                   ; the pass count (r7 becomes the ring pointer)
         move    m7,n7                   ; restored at zqoe
         move    #$9,m7
-        move    y:(r4+$18),r7
-        lua     (r4+$b),r6           ; r6 walks TAU .. ONE once per output (m6 = $7f:
-        move    #>$fffff5,n6             ; the slot does not straddle 128 words)
+        move    y:(r4+$19),r7
+        lua     (r4+$b),r6           ; r6 walks TAU .. SPV once per output (m6 = $7f:
+        move    #>$fffff4,n6             ; the slot does not straddle 128 words)
         do      n1,zqoe
         move    y:(r6),a
         sub     #>$100000,a             ; tau, less this output interval
@@ -272,21 +272,21 @@ zqsnj:
         sub     #>$b1855,a
         asl     #3,a,a
         move    a1,x1                   ; u, Q23 (x1 is free until the render)
-        move    y:(r4+$17),a          ; phi = frac(phi + r)
-        move    y:(r4+$1a),y0
+        move    y:(r4+$18),a          ; phi = frac(phi + r)
+        move    y:(r4+$1b),y0
         add     y0,a
-        move    a1,y:(r4+$17)
+        move    a1,y:(r4+$18)
         lsr     a                       ; Q24 phi >> 1 = the same phi as Q23
         move    a1,y0
         mpyi    #$6c6152,y0,b              ; (PSP/2)*phi = PSP*phi * 2^46: the read shift
-        move    y:(r4+$1b),y1          ; (b1 = the shift, Q22) into its one-pole mean
+        move    y:(r4+$1c),y1          ; (b1 = the shift, Q22) into its one-pole mean
         move    b1,a
         sub     y1,a
         asr     #$4,a,a
         add     y1,a
-        move    a1,y:(r4+$1b)
+        move    a1,y:(r4+$1c)
         asr     #22,b,b                 ; -> frames, 24.24
-        move    y:(r4+$19),y0
+        move    y:(r4+$1a),y0
         mpyuu   x1,y0,a                 ; u*r * 2^47 (u r/2, unsigned)
         asr     #23,a,a                 ; -> frames, 24.24
         sub     b,a
@@ -388,7 +388,7 @@ zqout:
         move    a0,b
         move    y:(r6)+,y1              ; RB: the ring is 128-aligned, so OR adds it
         and     #>$7e,a
-        or      y1,a    y:(r6)+n6,x1    ; $7fffff (r6 back to TAU)
+        or      y1,a    y:(r6)+,x1      ; $7fffff
         lsr     b       a1,r1           ; g = the fraction, Q23
         move    b1,y0
         move    x1,b
@@ -399,14 +399,17 @@ zqout:
         sub     x0,b    a,x1
         asr     b                       ; (L1 - R1)/2
         mpy     y1,x1,a b,x1
-        mac     x1,y0,a
+        mac     x1,y0,a y:(r6),b        ; the previous side sample
         move    a,x0                    ; the side (limited)
+        add     x0,b    x0,y:(r6)+n6    ; (r6 back to TAU)
+        asr     b                       ; the two-sample average: channel 5's zero at Nyquist
+        move    b,x0
         move    n5,a
         add     x0,a    n5,b
         sub     x0,b    a,x:(r3)+       ; L = mid + side
         move    b,x:(r3)+               ; R = mid - side
 zqoe:
-        move    r7,y:(r4+$18)
+        move    r7,y:(r4+$19)
         move    n7,m7
 
 

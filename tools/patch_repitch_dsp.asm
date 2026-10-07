@@ -65,7 +65,7 @@
 ; ---- the RPSP slot (Y:STBASE + x:$418, $20 words): the mid's residual ring
 ; (RINGM1+1 words, modulo-addressed, residuals / 4), then:
 S_TAG   equ     $0a
-S_TAU   equ     $0b     ; r6 walks TAU .. ONE once per output, in this order:
+S_TAU   equ     $0b     ; r6 walks TAU .. SPV once per output, in this order:
 S_HM    equ     $0c     ;   time of the next tick (from the start of the next
 S_XP    equ     $0d     ;   interval, Q20), the current step (the mid), channel 5's
 S_Y1    equ     $0e     ;   x[n-1], s1[n-1], s2[n-2], s2[n-1], the side's offset
@@ -77,13 +77,14 @@ S_PKW   equ     $13
 S_PF    equ     $14
 S_RB    equ     $15
 S_ONE   equ     $16
-S_PHI   equ     $17     ; accumulator fraction, Q24
-S_RW    equ     $18     ; the ring slot (absolute address) of the next output
-S_RH    equ     $19     ; r / 2, unsigned Q23 (this pass's)
-S_RF    equ     $1a     ; frac(r), Q24, with the mode tag (this pass's)
-S_LS    equ     $1b     ; the smoothed read shift (the SP's truncation), Q22 frames
-S_SIZE  equ     $1c     ; (track 3's slot ends in TABTAG at +$1f)
-S_RWND  equ     S_TAU-S_ONE
+S_SPV   equ     $17     ; the side's previous sample (its two-sample average; walked last)
+S_PHI   equ     $18     ; accumulator fraction, Q24
+S_RW    equ     $19     ; the ring slot (absolute address) of the next output
+S_RH    equ     $1a     ; r / 2, unsigned Q23 (this pass's)
+S_RF    equ     $1b     ; frac(r), Q24, with the mode tag (this pass's)
+S_LS    equ     $1c     ; the smoothed read shift (the SP's truncation), Q22 frames
+S_SIZE  equ     $1d     ; (track 3's slot ends in TABTAG at +$1f)
+S_RWND  equ     S_TAU-S_SPV
 STTAG   equ     STBASE+S_TAG
 
 zqrp:
@@ -274,7 +275,7 @@ zqsnj:
         move    m7,n7                   ; restored at zqoe
         move    #RINGM1,m7
         move    y:(r4+S_RW),r7
-        lua     (r4+S_TAU),r6           ; r6 walks TAU .. ONE once per output (m6 = $7f:
+        lua     (r4+S_TAU),r6           ; r6 walks TAU .. SPV once per output (m6 = $7f:
         move    #>S_RWND,n6             ; the slot does not straddle 128 words)
         do      n1,zqoe
         move    y:(r6),a
@@ -403,7 +404,7 @@ zqout:
         move    a0,b
         move    y:(r6)+,y1              ; RB: the ring is 128-aligned, so OR adds it
         and     #>$7e,a
-        or      y1,a    y:(r6)+n6,x1    ; $7fffff (r6 back to TAU)
+        or      y1,a    y:(r6)+,x1      ; $7fffff
         lsr     b       a1,r1           ; g = the fraction, Q23
         move    b1,y0
         move    x1,b
@@ -414,8 +415,11 @@ zqout:
         sub     x0,b    a,x1
         asr     b                       ; (L1 - R1)/2
         mpy     y1,x1,a b,x1
-        mac     x1,y0,a
+        mac     x1,y0,a y:(r6),b        ; the previous side sample
         move    a,x0                    ; the side (limited)
+        add     x0,b    x0,y:(r6)+n6    ; (r6 back to TAU)
+        asr     b                       ; the two-sample average: channel 5's zero at Nyquist
+        move    b,x0
         move    n5,a
         add     x0,a    n5,b
         sub     x0,b    a,x:(r3)+       ; L = mid + side

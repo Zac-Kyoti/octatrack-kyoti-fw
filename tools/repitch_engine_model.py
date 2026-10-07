@@ -80,8 +80,15 @@ SP_CHANNEL = 7                     # which SP-1200 output RPSP is heard on: 7 (=
 # tick, applied per pass): measured side - mid within +/-0.03 output samples at every
 # ratio (a fixed 7 was off by up to 1.16 -- the user heard pack 3's luckier alignment as
 # clearer stereo, listening pack 4, 2026-10-06), with no tick-rate jitter on the side.
+# The side then gets a two-sample average, (s + s[n-1]) / 2 (2026-10-07): a zero at Nyquist
+# and -3 dB near 11 kHz, like channel 5's top. The mid's treble is gone through channel 5
+# and the render; a panned sound's treble was left in the side alone, so it came out on
+# both sides in opposite polarity. The average takes that leak down 5-9 dB above 12 kHz
+# at speeds off 1/1 (at 1/1 the side's own interpolation was already averaging) for
+# ~3 cycles; channel 5 itself on the side would do more for ~18. Its half-sample delay
+# comes off MS_SIDE_DELAY.
 MS_CHANNEL = 5
-MS_SIDE_DELAY = 6.47
+MS_SIDE_DELAY = 5.97
 MS_LAG_SHIFT = 4
                                    # The DSP has no output-filter stage since rev 12; 3..6 are
                                    # modelled below (sp_channel_filter) for a future selectable channel
@@ -392,6 +399,7 @@ def q12(v):
 
 
 class Engine:
+    side_avg = True           # rev 17's side average (False: the build before it, for packs)
     """One track's voice in RPS9 or RPSP. The ring holds float stereo frames
     as the OT delivered them. Rev 14: render() is called once per hook VISIT
     (two per 16-sample frame, whatever the pass split) with the frame's trig
@@ -424,6 +432,7 @@ class Engine:
             self.acc = np.zeros(RENDER["L"])
             self.post = Biquads(sp_channel_filter(MS_CHANNEL), ch=1)
             self.lags = PSP_LAG / 2               # the smoothed read shift, frames
+            self.sprev = 0.0                      # the side's previous sample (the average)
 
     def fill(self, start, frames):
         for j, fr in enumerate(frames):
@@ -525,7 +534,8 @@ class Engine:
         out = []
         if self.prev is not None and table and (table[0][0] - self.prev[0]) % 64 > 2:
             self.prev = table[0]
-        offs = self.c + 1 + MS_SIDE_DELAY * r + self.lags            # this pass's
+        # this pass's (side_avg False: the build before the average, for listening packs)
+        offs = self.c + 1 + (MS_SIDE_DELAY if self.side_avg else MS_SIDE_DELAY + 0.5) * r + self.lags
         for k, f in table:
             if self.prev is None:
                 self.prev = (k, f)
@@ -541,7 +551,8 @@ class Engine:
                 self.tau += PSP_TICK
             self.tau -= 1.0
             y = self.post(np.array([self.held + self.acc[0]]))[0]
-            s = self.side_at(k + f - offs)
+            s1 = self.side_at(k + f - offs)
+            s, self.sprev = ((s1 + self.sprev) / 2 if self.side_avg else s1), s1
             out.append((y + s, y - s))
             self.acc = np.roll(self.acc, -1)
             self.acc[-1] = 0.0
@@ -681,6 +692,7 @@ class DspExact:
         self.acc = [0] * RENDER["L"]                           # residuals / 4, Q23
         self.xp = self.y1 = self.z1 = self.z2 = 0              # channel 5: x[n-1], s1[n-1], s2[n-1], s2[n-2]
         self.ls = self.c["LS0"]                                # the smoothed read shift, Q22 frames
+        self.spv = 0                                           # the side's previous sample
 
     @staticmethod
     def lim(v):
@@ -793,7 +805,8 @@ class DspExact:
             s1 = self.lim((fb * mid + fb * self.xp + fq * self.y1) >> 23)
             s2 = self.lim((fg2 * s1 + fa1 * self.z1 + fa2 * self.z2) >> 22)
             self.xp, self.y1, self.z2, self.z1 = mid, s1, self.z1, s2
-            sd = self.side((k << 24) + f - offs)
+            s1 = self.side((k << 24) + f - offs)
+            sd, self.spv = (self.spv + s1) >> 1, s1                    # the two-sample average
             out.append([self.lim(s2 + sd), self.lim(s2 - sd)])
             self.acc = self.acc[1:] + [0]
             self.prev = (k, f)
