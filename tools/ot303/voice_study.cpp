@@ -667,6 +667,24 @@ struct TwinVoice {
     twin::Engine e;
     double rs = 0, sqDC = 0;
     int frame = 1, n = 0;           // knob words refreshed every `frame` samples (events: at once)
+    // log: the segments the DSP probe replays (tools/ot303/engine_probe.cpp): every run of samples
+    // with the same host words, and the state the host pokes at its start (trigger, reset)
+    FILE* log = nullptr; bool dirty = true, pokeTrig = false, pokeReset = false; int segN = 0;
+    std::string segHead;
+    void flushSeg() { if (log && segN) fprintf(log, "%d %s\n", segN, segHead.c_str()); segN = 0; }
+    void beginSeg() {
+        if (!log) return;
+        char b[1024]; auto& x = e;
+        snprintf(b, sizeof b, "%d %d %06x %06x %06x %06x %06x %06x %06x %06x %06x %06x %06x %06x %06x %06x %06x %06x %06x %06x"
+                 " %06x %06x %06x %06x %06x",
+                 pokeReset, pokeTrig, x.INC_T & 0xffffff, x.CS & 0xffffff, x.C_MEG & 0xffffff, x.C2 & 0xffffff,
+                 x.M_AMP & 0xffffff, x.L0_16 & 0xffffff, x.ES8 & 0xffffff, x.AG8 & 0xffffff, x.AGF ? 0xffffff : 0,
+                 x.RS & 0xffffff, x.AG_8 & 0xffffff, x.BG & 0xffffff, x.K8 & 0xffffff, x.SC & 0xffffff,
+                 x.W1 & 0xffffff, x.W2 & 0xffffff, x.W3 & 0xffffff, x.SQ ? 1 : 0,
+                 (int)((x.S48 >> 24) & 0xffffff), (int)(x.S48 & 0xffffff), (int)((x.M48 >> 24) & 0xffffff),
+                 (int)(x.M48 & 0xffffff), x.AMP2 & 0xffffff);
+        segHead = b; pokeTrig = pokeReset = false;
+    }
     double pendCut = -1;
     void init(const double* hb2odd, int hb2n, double topHz, const double* hb1odd = nullptr, int hb1n = 0) {
         o.setSampleRate(FS);
@@ -685,6 +703,7 @@ struct TwinVoice {
         else pendCut = c;
     }
     void host() {
+        dirty = true;
         using twin::q23;
         e.INC_T = q23(2.0 * o.oscFreq * o.pitchWheelFactor / (4 * FS));
         e.INC_T48 = (twin::A)std::nearbyint(2.0 * o.oscFreq * o.pitchWheelFactor / (4 * FS) * 140737488355328.0);
@@ -710,7 +729,8 @@ struct TwinVoice {
         o.noteOn(note, vel, 0.0);
         host();
         if (trig) {
-            if (wasIdle) { e.resetAudio(); ob.reset(); }
+            pokeTrig = true;
+            if (wasIdle) { e.resetAudio(); ob.reset(); pokeReset = true; }
             e.S48 = e.inc48 ? e.INC_T48 : twin::acc(e.INC_T);
             e.MEG2 = twin::q23(0.5 / o.mainEnv.c);                 // first output = 1
             e.M48 = (twin::A)std::nearbyint(0.5 / o.mainEnv.c * 140737488355328.0);
@@ -727,6 +747,8 @@ struct TwinVoice {
         if (e.oscHook) rinc = o.pitchSlewLimiter.getSample(o.oscFreq) * o.pitchWheelFactor / (4 * FS);
         if (frame > 1 && n % frame == 0 && pendCut >= 0) { o.setCutoff(pendCut); pendCut = -1; host(); }
         n++;
+        if (dirty || pokeTrig) { flushSeg(); beginSeg(); dirty = false; }
+        segN++;
         return e.tick();
     }
 };
@@ -882,7 +904,7 @@ int main(int argc, char** argv) {
     if (argc == 5 && !strcmp(argv[1], "twin")) {        // voice_study twin SCENE OPTS OUT.f32
         Scene sc;
         if (!scene(argv[2], sc)) { fprintf(stderr, "unknown scene %s\n", argv[2]); return 2; }
-        int hb2 = 79, hbfp = 0, hb1 = 23, hb1fp = 0, frame = 1, fbs = 4; bool hbdelay = false; double top = 16000; bool inc48 = false, refosc = false, exactcoef = false, meg48 = false;
+        int hb2 = 79, hbfp = 0, hb1 = 23, hb1fp = 0, frame = 1, fbs = 4; bool hbdelay = false; std::string logp; double top = 16000; bool inc48 = false, refosc = false, exactcoef = false, meg48 = false;
         for (std::string opt = argv[3]; !opt.empty();) {
             auto cm = opt.find(','); std::string kv = opt.substr(0, cm); auto co = kv.find(':');
             if (co != std::string::npos) {
@@ -896,6 +918,7 @@ int main(int argc, char** argv) {
                 else if (k == "hbfp") hbfp = (int)v;
                 else if (k == "hbdelay") hbdelay = v != 0;
                 else if (k == "hb1") hb1 = (int)v; else if (k == "hb1fp") hb1fp = (int)v;
+                else if (k == "log") logp = kv.substr(co + 1);
                 else { fprintf(stderr, "unknown option %s\n", k.c_str()); return 2; }
             }
             opt = cm == std::string::npos ? "" : opt.substr(cm + 1);
@@ -917,7 +940,9 @@ int main(int argc, char** argv) {
         v.e.exactCoef = exactcoef; v.e.meg48 = meg48;
         if (hbdelay) v.e.dlyN = (79 - hb2) / 4 + (23 - hb1) / 8;
         v.setResonance(sc.res);
+        if (!logp.empty()) v.log = fopen(logp.c_str(), "w");
         auto out = run(v, sc, [&](double c) { v.setCutoff(c); });
+        if (v.log) { v.flushSeg(); fclose(v.log); }
         FILE* fh = fopen(argv[4], "wb");
         if (!fh) { perror(argv[4]); return 1; }
         fwrite(out.data(), sizeof(float), out.size(), fh); fclose(fh);

@@ -329,8 +329,10 @@ struct Engine {
             tops = st(acc(yy) + acc(v), "top");
             y = yy;
         }
+        outW = y;
         return f23(y) * 4.0;
     }
+    W outW = 0;                 // the last output word
 };
 
 } // namespace twin
