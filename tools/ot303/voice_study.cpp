@@ -657,6 +657,81 @@ struct Voice {
 };
 
 // ------------------------------------------------------------------------------------------
+// Phase 2b: the integer twin (twin.h) driven like the voice above. Open303 keeps the note logic
+// (note list, slide/accent decisions, its parameter values); host() turns its state into the
+// twin's HOST words, as the ColdFire will.
+#include "twin.h"
+#include "halfband2x.h"
+struct TwinVoice {
+    Open303 o;
+    twin::Engine e;
+    double rs = 0, sqDC = 0;
+    int frame = 1, n = 0;           // knob words refreshed every `frame` samples (events: at once)
+    double pendCut = -1;
+    void init(const double* hb2odd, int hb2n, double topHz, const double* hb1odd = nullptr, int hb1n = 0) {
+        o.setSampleRate(FS);
+        e.init(hb2odd, hb2n, topHz, hb1odd, hb1n);
+        double a = 0; const int NN = 1 << 16;     // the square's DC, as OscBlep
+        for (int i = 0; i < NN; i++) { double q = (i + 0.5) / NN; a += -tanh(dB2amp(36.9) * (2 * q - 1) + 4.37); }
+        sqDC = a / NN;
+    }
+    void setResonance(double pct) {
+        o.setResonance(pct);
+        double rr = 0.01 * pct; rs = (1.0 - exp(-3.0 * rr)) / (1.0 - exp(-3.0));
+        host();
+    }
+    void setCutoff(double c) {
+        if (frame <= 1) { o.setCutoff(c); host(); }
+        else pendCut = c;
+    }
+    void host() {
+        using twin::q23;
+        e.INC_T = q23(2.0 * o.oscFreq * o.pitchWheelFactor / (4 * FS));
+        e.INC_T48 = (twin::A)std::nearbyint(2.0 * o.oscFreq * o.pitchWheelFactor / (4 * FS) * 140737488355328.0);
+        e.CS = q23(1.0 - o.pitchSlewLimiter.coeff);
+        e.C_MEG = q23(o.mainEnv.c);
+        e.C2 = q23(o.rc2.coeff);
+        e.M_AMP = q23(1.0 - (o.ampEnv.noteIsOn ? o.ampEnv.decayCoeff : o.ampEnv.releaseCoeff));
+        e.L0_16 = q23((log2(o.cutoff / 200.0) - o.envScaler * o.envOffset) / 16.0);
+        e.ES8 = q23(o.envScaler / 8.0);
+        e.AG8 = q23(o.accentGain * o.n2 / 8.0);
+        e.AGF = o.accentGain > 0.0;
+        e.RS = q23(rs);
+        e.AG_8 = q23((1.0 - rs * rs) / 8.0);
+        e.BG = q23(rs * (1.0 + rs) * 8.0 / 17.0);
+        e.K8 = q23(o.ampEnv.noteIsOn ? (0.45 + 4.0 * o.accentGain) / 8.0 : 0.0);
+        e.SC = q23(o.ampScaler);
+        double b = o.oscillator.blend;
+        e.W1 = q23(-(1.0 - b) / 2.0); e.W2 = q23(b / 4.0); e.W3 = q23(b * sqDC / 4.0);
+        e.SQ = b > 0.0;
+    }
+    void noteOn(int note, int vel) {
+        bool trig = vel > 0 && o.noteList.empty(), wasIdle = o.idle;
+        o.noteOn(note, vel, 0.0);
+        host();
+        if (trig) {
+            if (wasIdle) { e.resetAudio(); ob.reset(); }
+            e.S48 = e.inc48 ? e.INC_T48 : twin::acc(e.INC_T);
+            e.MEG2 = twin::q23(0.5 / o.mainEnv.c);                 // first output = 1
+            e.M48 = (twin::A)std::nearbyint(0.5 / o.mainEnv.c * 140737488355328.0);
+            e.AMP2 = twin::q23(0.5 / f23m(e.M_AMP));
+        }
+    }
+    static double f23m(twin::W w) { return twin::f23(w); }
+    // diagnostic refosc: the reference's oscillator (OscBlep, Open303's slew in double)
+    OscBlep ob; double rinc = 0;
+    static double oscCb(void* p) { auto* t = (TwinVoice*)p; return t->ob.tick(t->rinc, t->o.oscillator.blend); }
+    void useRefOsc() { QNT.on = true; TAB.use = true; TAB.build(); ob.init(); e.oscHook = oscCb; e.oscCtx = this; }
+    double getSample() {
+        if (o.idle) return 0.0;
+        if (e.oscHook) rinc = o.pitchSlewLimiter.getSample(o.oscFreq) * o.pitchWheelFactor / (4 * FS);
+        if (frame > 1 && n % frame == 0 && pendCut >= 0) { o.setCutoff(pendCut); pendCut = -1; host(); }
+        n++;
+        return e.tick();
+    }
+};
+
+// ------------------------------------------------------------------------------------------
 // scenes: one 16-step acid line, 8 bars at 130 BPM, 303-style gates (half step, slides held)
 struct Step { int note; bool acc, slide; };
 static const Step LINE[16] = {
@@ -760,6 +835,97 @@ int main(int argc, char** argv) {
         }
         return fails;
     }
+    if (argc == 2 && !strcmp(argv[1], "twinunit")) {    // each twin block vs its Open303 counterpart
+        TwinVoice tv; tv.init(HB_ODD, 40, 16000);
+        twin::Engine& e = tv.e;
+        Open303 o; o.setSampleRate(FS);
+        const int N = 4 * 44100; std::vector<double> x(N);
+        unsigned s = 1; for (auto& v : x) { s = s * 1664525u + 1013904223u; v = ((s >> 8) / 16777216.0 - 0.5) * 0.4; }
+        auto rep = [](const char* nm, const std::vector<double>& a, const std::vector<double>& b) {
+            double e2 = 0, r2 = 0; for (size_t i = 0; i < a.size(); i++) { e2 += (a[i] - b[i]) * (a[i] - b[i]); r2 += b[i] * b[i]; }
+            printf("%-28s null %7.1f dB\n", nm, 10 * log10(e2 / r2 + 1e-30));
+        };
+        // post chain (fs 8 words)
+        std::vector<double> a(N), b(N);
+        for (int i = 0; i < N; i++) {
+            double t = o.notch.getSample(o.highpass2.getSample(o.allpass.getSample(x[i])));
+            b[i] = t; a[i] = twin::f23(e.post(twin::q23(x[i] / 8.0))) * 8.0;
+        }
+        rep("post: allpass+hp2+notch", a, b);
+        // each post stage alone
+        Open303 o2; o2.setSampleRate(FS); twin::Engine e2; e2.init(HB_ODD, 40, 16000);
+        for (int i = 0; i < N; i++) { b[i] = o2.allpass.getSample(x[i]);
+            twin::W w = twin::q23(x[i] / 8.0); e2.apy = twin::str(twin::mpy(e2.AP_B, w) + twin::acc(e2.apx) + twin::mpy(e2.AP_A, e2.apy)); e2.apx = w; a[i] = twin::f23(e2.apy) * 8; }
+        rep("  allpass", a, b);
+        for (int i = 0; i < N; i++) { b[i] = o2.highpass2.getSample(x[i]);
+            twin::W w = twin::q23(x[i] / 8.0); e2.h2y = twin::str(twin::mpy(e2.HP2_B, w) - twin::mpy(e2.HP2_B, e2.h2x) + twin::mpy(e2.HP2_A, e2.h2y)); e2.h2x = w; a[i] = twin::f23(e2.h2y) * 8; }
+        rep("  hp2", a, b);
+        for (int i = 0; i < N; i++) { b[i] = o2.notch.getSample(x[i]);
+            twin::W w = twin::q23(x[i] / 8.0), v1, v2; e2.notch.tick(w, v1, v2, nullptr, nullptr);
+            a[i] = twin::f23(twin::st(twin::acc(w) - twin::sh(twin::mpy(e2.notch.kk, v1), e2.notch.sk))) * 8; }
+        rep("  notch", a, b);
+        // declicker (amp / 16), a step train like the amp envelope
+        for (int i = 0; i < N; i++) { double u = ((i / 3000) % 2) ? 0.0 : 5.0 * fabs(x[i]) + 0.2;
+            b[i] = o2.ampDeClicker.getSample(u); twin::W v1, v2; e2.decl.tick(twin::q23(u / 16.0), v1, v2, nullptr, nullptr); a[i] = twin::f23(v2) * 16; }
+        rep("declicker", a, b);
+        // decimators: 4x noise in, 1x out
+        HalfBand4 rh4; HalfBand rh2; rh4.init(); rh2.init(); twin::HB th4, th2; th4.init(HB4_ODD, 12); th2.init(HB_ODD, 40);
+        std::vector<double> da(N / 4), db(N / 4);
+        for (int i = 0; i < N; i++) {
+            rh4.push(x[i]); th4.push(twin::q23(x[i] / 8.0));
+            if (i % 2 == 1) { rh2.push(rh4.out()); th2.push(th4.out(nullptr)); }
+            if (i % 4 == 3) { db[i / 4] = rh2.out(); da[i / 4] = twin::f23(th2.out(nullptr)) * 8; }
+        }
+        rep("decimators 23+79", da, db);
+        return 0;
+    }
+    if (argc == 5 && !strcmp(argv[1], "twin")) {        // voice_study twin SCENE OPTS OUT.f32
+        Scene sc;
+        if (!scene(argv[2], sc)) { fprintf(stderr, "unknown scene %s\n", argv[2]); return 2; }
+        int hb2 = 79, hbfp = 0, hb1 = 23, hb1fp = 0, frame = 1, fbs = 4; bool hbdelay = false; double top = 16000; bool inc48 = false, refosc = false, exactcoef = false, meg48 = false;
+        for (std::string opt = argv[3]; !opt.empty();) {
+            auto cm = opt.find(','); std::string kv = opt.substr(0, cm); auto co = kv.find(':');
+            if (co != std::string::npos) {
+                std::string k = kv.substr(0, co); double v = atof(kv.c_str() + co + 1);
+                if (k == "hb2") hb2 = (int)v; else if (k == "frame") frame = (int)v;
+                else if (k == "fbs") fbs = (int)v; else if (k == "top") top = v;
+                else if (k == "inc48") inc48 = v != 0;
+                else if (k == "refosc") refosc = v != 0;
+                else if (k == "exactcoef") exactcoef = v != 0;
+                else if (k == "meg48") meg48 = v != 0;
+                else if (k == "hbfp") hbfp = (int)v;
+                else if (k == "hbdelay") hbdelay = v != 0;
+                else if (k == "hb1") hb1 = (int)v; else if (k == "hb1fp") hb1fp = (int)v;
+                else { fprintf(stderr, "unknown option %s\n", k.c_str()); return 2; }
+            }
+            opt = cm == std::string::npos ? "" : opt.substr(cm + 1);
+        }
+        const double* odd = nullptr; int nodd = 0;
+        if (hb2 == 79) { odd = HB_ODD; nodd = 40; }        // the approved stage (halfband79.h)
+        else for (auto& d : HB2_DESIGNS)                       // lean candidates: hb2:N,hbfp:kHz
+            if (d.n == hb2 && (int)lround(d.fp / 1000) == hbfp) { odd = d.odd; nodd = d.nodd; }
+        if (!odd) { fprintf(stderr, "hb2:%d hbfp:%d not built in\n", hb2, hbfp); return 2; }
+        const double* odd1 = nullptr; int nodd1 = 0;
+        if (hb1 != 23) {
+            for (auto& d : HB1_DESIGNS) if (d.n == hb1 && (int)lround(d.fp / 1000) == hb1fp) { odd1 = d.odd; nodd1 = d.nodd; }
+            if (!odd1) { fprintf(stderr, "hb1:%d hb1fp:%d not built in\n", hb1, hb1fp); return 2; }
+        }
+        TwinVoice v; params(v.o, sc);
+        v.frame = frame; v.e.FBS = fbs; v.e.inc48 = inc48;
+        v.init(odd, nodd, top, odd1, nodd1);
+        if (refosc) v.useRefOsc();
+        v.e.exactCoef = exactcoef; v.e.meg48 = meg48;
+        if (hbdelay) v.e.dlyN = (79 - hb2) / 4 + (23 - hb1) / 8;
+        v.setResonance(sc.res);
+        auto out = run(v, sc, [&](double c) { v.setCutoff(c); });
+        FILE* fh = fopen(argv[4], "wb");
+        if (!fh) { perror(argv[4]); return 1; }
+        fwrite(out.data(), sizeof(float), out.size(), fh); fclose(fh);
+        double pk = 0; for (float x : out) pk = fmax(pk, fabs(x));
+        printf("twin %s %s -> %s (peak %.4f, saturations %ld, shaper clamps %ld)\n", argv[2], argv[3], argv[4], pk, twin::g_sat, v.e.sqClamp);
+        for (auto& kv : twin::g_peak) printf("  %-6s %.3f\n", kv.first.c_str(), kv.second);
+        return 0;
+    }
     if (argc != 9 || strcmp(argv[1], "render")) {
         fprintf(stderr, "usage: voice_study validate | render SCENE FILTER N DEC DRIVE HEUN OUT.f32\n");
         return 2;
@@ -770,7 +936,7 @@ int main(int argc, char** argv) {
     int N = atoi(argv[4]);
     bool useEll = !strcmp(argv[5], "ell"), useHB = !strcmp(argv[5], "hb"), useHB2 = !strcmp(argv[5], "hb2");
     double D = atof(argv[6]);
-    double oin = 0, ost = 0, ofb = 0, ores = -1, okmax = 0, ofmax = 20000, otop = 0, oacctc = 47; int oktab = 0, okcap = 0; bool ocomp = false, oacc = false, oblep = false;
+    double otune = 440.0; double oin = 0, ost = 0, ofb = 0, ores = -1, okmax = 0, ofmax = 20000, otop = 0, oacctc = 47; int oktab = 0, okcap = 0; bool ocomp = false, oacc = false, oblep = false;
     for (std::string opt = argv[6]; !opt.empty();) {          // "k:v,k:v" (or a bare number = D)
         auto cm = opt.find(','); std::string kv = opt.substr(0, cm);
         auto co = kv.find(':');
@@ -784,6 +950,7 @@ int main(int argc, char** argv) {
             else if (k == "fmax") ofmax = v; else if (k == "top") otop = v;
             else if (k == "ktab") oktab = (int)lround(v * 10);
             else if (k == "acctc") oacctc = v; else if (k == "kcap") okcap = (int)v;
+            else if (k == "tune") otune = v;
             else { fprintf(stderr, "unknown option %s\n", k.c_str()); return 2; }
         }
         opt = cm == std::string::npos ? "" : opt.substr(cm + 1);
@@ -811,7 +978,7 @@ int main(int argc, char** argv) {
     else if (fname == "ref") f = std::make_unique<FRef>(0.0);
     else if (fname == "refnl") f = std::make_unique<FRef>(D);
     else { fprintf(stderr, "unknown filter %s\n", fname.c_str()); return 2; }
-    Voice v; params(v.o, sc);
+    Voice v; params(v.o, sc); v.o.pitchWheelFactor = otune / 440.0;   // tune: a clean global pitch factor
     v.accRC = oacc; v.accTauC = oacctc * 0.001; v.calibrateAccent();
     v.blepOsc = oblep; v.hb = useHB; v.hb2 = useHB2;
     if (useHB2 && N != 4) { fprintf(stderr, "hb2 decimator is two half-bands: N must be 4\n"); return 2; }
