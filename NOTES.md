@@ -35939,3 +35939,10 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   - Found that the k ceiling had scaled every RES by 3%; now k = min(16.998792 r, 16.5),
     RK4-safe in all scenes.
   - Round 5 confirmation (Accents, Squelch: Open303 vs final) published.
+- **S124 cont (2026-10-06): round 5 → Open303's own algorithm.** Accents/Squelch kept Open303.
+  - Engine switched to the TB_303 filter transcribed (FO303Q, bit-exact to rosic) at 4×, with
+    BLEP, a 23+79-tap half-band chain and 24-bit; ±0.1 dB vs Open303 below 14 kHz.
+  - RES ceiling dropped: Open303 never self-oscillates, and a k 16.5 cap bites from RES 85%
+    under its skew.
+  - Fixed top rounding: 16 or 13 kHz (decimator-folded).
+  - Round 6 published. ~320 instructions per sample.

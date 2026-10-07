@@ -869,3 +869,50 @@ Voicing constants that stay tweakable on hardware (data, not code):
 - Δ;
 - D;
 - the RES ceiling.
+
+### Round 5 → the engine becomes Open303's own algorithm (2026-10-06)
+
+User: Accents keep = Open303, Squelch keep = Open303 (vs the final ladder voice).
+
+**Reading, over five rounds:** Open303, or the linear model that mirrors it, wins at normal
+settings. A slightly rounder top wins only at the extreme (Hot). Never picked at normal
+settings: stage saturation, the circuit accent's charge, our discretisation.
+
+**Decision: the DSP engine is Open303's TB_303 algorithm at 4×** (`o303q`, FO303Q: the filter
+transcribed from rosic_TeeBeeFilter.h, **bit-exact to it** through the whole voice in 4 scenes):
+- BLEP oscillator;
+- two half-band stages (`halfband4x.h` 23 taps 4×→2×, −62 dB from 63.1 kHz; then the 79-tap
+  stage);
+- tables, 24-bit.
+
+| step | result |
+|---|---|
+| vs Open303 as shipped | ±0.1 dB per band below 14 kHz; spec 0.29–0.42 / p95 1.2–1.8, from the envelope/decimator-delay timing as before |
+| 48-bit states | buy nothing over 24 |
+
+**No RES ceiling.**
+- Open303 (linear Euler) does not self-oscillate in any scene, even at RES 100 (Hot RMS 0.225).
+- The ceiling existed for the saturating ladder.
+- With Open303's RES skew a k 16.5 cap already bites from RES ≈ 85% (it changed Squelch at
+  RES 95).
+
+**Cost:** cheaper than the ladder, ~320 vs ~390 instructions per sample.
+- No divisions, no tanh-ratio tables.
+- Per 4× sample ≈ oscillator 25 + HP 3 + TB filter ~24 → ×4 ≈ 210.
+- Decimation 13·2 + 41 ≈ 67 MAC per output.
+- Control/post ~60.
+
+**"Slightly rounder top at the extreme":** a fixed one-pole rounding (on the DSP it folds into
+the 79-tap decimator design, at no cost):
+
+| scene | 16 kHz rounding (10–14 / 14–18 kHz) | 13 kHz rounding |
+|---|---|---|
+| Hot | −0.9 / −2.2 dB | −2.1 / −4.3 dB |
+| other scenes | same relative change, in bands holding −62…−74 dB of their energy | |
+
+**Round 6 (artifact v8, local :8303):**
+- Hot pick: Open303 / 16 kHz / 13 kHz;
+- ABX Squelch and Accents: Open303 vs DSP + 13 kHz.
+
+The harness bug found on the way: the tanh table was only built for the ladder path; now
+built always.

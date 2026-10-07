@@ -36,6 +36,7 @@
 
 #include "halfband79.h"
 #include "ktab.h"
+#include "halfband4x.h"
 
 using namespace rosic;
 static const double FS = 44100.0;
@@ -486,6 +487,70 @@ struct HalfBand {                                          // 79-tap, 40 odd tap
     }
 };
 
+// Open303's TB_303 filter, transcribed for the DSP (rosic_TeeBeeFilter.h @ 313bf0d9, MIT): the
+// explicit 4x update, the fitted b0/k/g, the 150 Hz one-pole high-pass in the feedback. With QNT
+// off and no ceiling it is bit-exact to rosic::TeeBeeFilter (checked by `validate`). RCAP holds
+// resonanceSkewed at the ceiling (k <= KMAX at fx -> 0): the round-5 decision.
+static double RCAP = 1.0;
+struct FO303Q : Filt {
+    double fs = 176400, twoPiOverFs = 0, cutoff = 1000.0, rs = 0, b0 = 0, k = 0, g = 1;
+    double y1 = 0, y2 = 0, y3 = 0, y4 = 0, hx1 = 0, hy1 = 0, hb0 = 0, hb1 = 0, ha1 = 0;
+    static constexpr double SS = 8.0;
+    void setSampleRate(double f) override {
+        fs = f; twoPiOverFs = 2.0 * PI / fs;
+        double x = exp(-2.0 * PI * 150.0 * (1.0 / fs));
+        hb0 = QNT.q(0.5 * (1 + x), 1.0); hb1 = QNT.q(-0.5 * (1 + x), 1.0); ha1 = QNT.q(x, 1.0);
+        calc();
+    }
+    void setCutoff(double c) override {
+        if (c != cutoff) { cutoff = c < 200.0 ? 200.0 : (c > 20000.0 ? 20000.0 : c); calc(); }
+    }
+    void setResonance(double pct) override {
+        double rr = 0.01 * pct; rs = (1.0 - exp(-3.0 * rr)) / (1.0 - exp(-3.0));
+        if (rs > RCAP) rs = RCAP;
+        calc();
+    }
+    void calc() {
+        double wc = twoPiOverFs * cutoff, r = rs;
+        double fx = wc * ONE_OVER_SQRT2 / (2 * PI);
+        b0 = (0.00045522346 + 6.1922189 * fx) / (1.0 + 12.358354 * fx + 4.4156345 * (fx * fx));
+        k = fx*(fx*(fx*(fx*(fx*(fx+7198.6997)-5837.7917)-476.47308)+614.95611)+213.87126)+16.998792;
+        g = k * 0.058823529411764705882352941176471;
+        g = (g - 1.0) * r + 1.0;
+        g = (g * (1.0 + r));
+        k = k * r;
+        b0 = QNT.q(b0, 1.0); k = QNT.q(k, 64.0); g = QNT.q(g, 4.0);
+    }
+    void reset() override { y1 = y2 = y3 = y4 = hx1 = hy1 = 0; }
+    double tick(double in) override {
+        double fbin = QNT.q(k * y4, SS);
+        hy1 = QNT.qs(hb0 * fbin + hb1 * hx1 + ha1 * hy1 + (QNT.on ? 0.0 : TINY), SS);
+        hx1 = fbin;
+        double y0 = in - hy1;
+        y1 = QNT.qs(y1 + 2 * b0 * (y0 - y1 + y2), SS);
+        y2 = QNT.qs(y2 + b0 * (y1 - 2 * y2 + y3), SS);
+        y3 = QNT.qs(y3 + b0 * (y2 - 2 * y3 + y4), SS);
+        y4 = QNT.qs(y4 + b0 * (y3 - 2 * y4), SS);
+        return 2 * g * y4;
+    }
+};
+
+struct HalfBand4 {                                         // 23-tap, 12 odd taps + centre 0.5
+    double buf[HB4_N] = {0}; int pos = 0; double c[12];
+    void init() { for (int i = 0; i < 12; i++) c[i] = QNT.q(HB4_ODD[i], 1.0); }
+    void reset() { memset(buf, 0, sizeof buf); pos = 0; }
+    void push(double x) { buf[pos] = x; pos = (pos + 1) % HB4_N; }
+    double out() const {
+        double acc = 0; int ci = 0;
+        for (int i = 0; i < HB4_N; i++) {
+            int d = i - (HB4_N - 1) / 2;
+            double x = buf[(pos - 1 - i + 2 * HB4_N) % HB4_N];
+            if (d == 0) acc += 0.5 * x; else if (d % 2 != 0) acc += c[ci++] * x;
+        }
+        return QNT.q(acc, 2.0);
+    }
+};
+
 // Open303::getSample with a pluggable filter and oversampling factor
 struct Voice {
     Open303 o;
@@ -496,6 +561,7 @@ struct Voice {
     Fir fir;
     bool blepOsc = false, hb = false; OscBlep ob; HalfBand hbd;
     double topHz = 0, topS = 0;
+    bool hb2 = false; HalfBand4 hb4;               // 4x: 23-tap stage to 2x, then the 79-tap stage
     void init(std::unique_ptr<Filt> f, int n, bool useEll) {
         flt = std::move(f); N = n; ell = useEll;
         // table k carries harmonics up to fs/8..fs/4 at offset k: keep >= 22 kHz without aliasing,
@@ -506,14 +572,14 @@ struct Voice {
         o.highpass1.setSampleRate(N * FS);
         flt->setSampleRate(N * FS);
         flt->setResonance(o.filter.getResonance());
-        if (!ell && !hb) fir.design(N * FS);
-        ob.init(); hbd.init();
+        if (!ell && !hb && !hb2) fir.design(N * FS);
+        ob.init(); hbd.init(); hb4.init();
     }
     void setResonance(double pct) { o.setResonance(pct); flt->setResonance(pct); }
     void noteOn(int note, int vel) {
         bool wasIdle = o.idle;
         o.noteOn(note, vel, 0.0);
-        if (wasIdle && vel > 0) { flt->reset(); el.reset(); fir.reset(); ob.reset(); hbd.reset(); }
+        if (wasIdle && vel > 0) { flt->reset(); el.reset(); fir.reset(); ob.reset(); hbd.reset(); hb4.reset(); }
     }
     double osc() {
         BlendOscillator& b = o.oscillator;
@@ -573,9 +639,10 @@ struct Voice {
             tmp = blepOsc ? -ob.tick(inc, o.oscillator.blend) : -osc();
             tmp = QNT.q(o.highpass1.getSample(tmp), 2.0);
             tmp = flt->tick(tmp);
-            if (hb) hbd.push(tmp); else if (ell) tmp = el.getSample(tmp); else fir.push(tmp);
+            if (hb2) { hb4.push(tmp); if (i % 2 == 0) hbd.push(hb4.out()); }
+            else if (hb) hbd.push(tmp); else if (ell) tmp = el.getSample(tmp); else fir.push(tmp);
         }
-        if (hb) tmp = hbd.out(); else if (!ell) tmp = fir.out();
+        if (hb || hb2) tmp = hbd.out(); else if (!ell) tmp = fir.out();
         tmp = o.allpass.getSample(tmp);
         tmp = o.highpass2.getSample(tmp);
         tmp = o.notch.getSample(tmp);
@@ -681,6 +748,16 @@ int main(int argc, char** argv) {
                    md == 0 ? "BIT-EXACT" : "DIFFERS");
             fails += md != 0;
         }
+        for (auto nm : names) {          // FO303Q (QNT off, no ceiling) == TeeBeeFilter through the voice
+            Scene sc; scene(nm, sc);
+            Voice a; params(a.o, sc); a.init(std::make_unique<FO303>(), 4, true); a.setResonance(sc.res);
+            auto xa = run(a, sc, [&](double c) { a.o.setCutoff(c); });
+            Voice b; params(b.o, sc); b.init(std::make_unique<FO303Q>(), 4, true); b.setResonance(sc.res);
+            auto xb = run(b, sc, [&](double c) { b.o.setCutoff(c); });
+            double md = 0; for (size_t i = 0; i < xa.size(); i++) md = fmax(md, fabs(xa[i] - xb[i]));
+            printf("%-8s FO303Q vs TeeBeeFilter  max|diff| %.3g  %s\n", nm, md, md == 0 ? "BIT-EXACT" : "DIFFERS");
+            fails += md != 0;
+        }
         return fails;
     }
     if (argc != 9 || strcmp(argv[1], "render")) {
@@ -691,7 +768,7 @@ int main(int argc, char** argv) {
     if (!scene(argv[2], sc)) { fprintf(stderr, "unknown scene %s\n", argv[2]); return 2; }
     std::string fname = argv[3];
     int N = atoi(argv[4]);
-    bool useEll = !strcmp(argv[5], "ell"), useHB = !strcmp(argv[5], "hb");
+    bool useEll = !strcmp(argv[5], "ell"), useHB = !strcmp(argv[5], "hb"), useHB2 = !strcmp(argv[5], "hb2");
     double D = atof(argv[6]);
     double oin = 0, ost = 0, ofb = 0, ores = -1, okmax = 0, ofmax = 20000, otop = 0, oacctc = 47; int oktab = 0, okcap = 0; bool ocomp = false, oacc = false, oblep = false;
     for (std::string opt = argv[6]; !opt.empty();) {          // "k:v,k:v" (or a bare number = D)
@@ -713,6 +790,7 @@ int main(int argc, char** argv) {
     }
     bool heun = atoi(argv[7]) != 0;
     if (useEll && N != 4) { fprintf(stderr, "ell decimator is quarter-band: N must be 4\n"); return 2; }
+    TAB.build();                     // every filter path uses the tables when tab:1 (built after q:)
     std::unique_ptr<Filt> f;
     if (fname == "o303") f = std::make_unique<FO303>();
     else if (fname == "zdf") f = std::make_unique<FZdf>(0.0, false);
@@ -723,22 +801,24 @@ int main(int argc, char** argv) {
         f = std::move(z2);
     }
     else if (fname == "nest") {
-        TAB.build();
         auto fn = std::make_unique<FNested>(); fn->D = ost; fn->heun = heun;
         f = std::move(fn);
     }
     else if (fname == "ref2") {                       // the reference with zdf2's separate placements
         auto r = std::make_unique<FRef>(oin); r->Dst = ost; r->Dfb = ofb; f = std::move(r);
     }
+    else if (fname == "o303q") f = std::make_unique<FO303Q>();
     else if (fname == "ref") f = std::make_unique<FRef>(0.0);
     else if (fname == "refnl") f = std::make_unique<FRef>(D);
     else { fprintf(stderr, "unknown filter %s\n", fname.c_str()); return 2; }
     Voice v; params(v.o, sc);
     v.accRC = oacc; v.accTauC = oacctc * 0.001; v.calibrateAccent();
-    v.blepOsc = oblep; v.hb = useHB;
+    v.blepOsc = oblep; v.hb = useHB; v.hb2 = useHB2;
+    if (useHB2 && N != 4) { fprintf(stderr, "hb2 decimator is two half-bands: N must be 4\n"); return 2; }
     if (useHB && N != 2) { fprintf(stderr, "hb decimator is half-band: N must be 2\n"); return 2; }
     v.init(std::move(f), N, useEll);
     if (ores >= 0) sc.res = ores;
+    RCAP = (fname == "o303q" && okmax > 0) ? okmax / 16.998792 : 1.0;
     KMAX = okmax; FMAX = ofmax; v.topHz = otop; KTSEL = oktab; KCAPMODE = okcap;
     v.setResonance(sc.res);
     auto out = run(v, sc, [&](double c) { v.o.setCutoff(c); });
