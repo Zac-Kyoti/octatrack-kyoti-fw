@@ -22,7 +22,8 @@ Extensions accepted here:
     NAME    equ     expr            textual constant (python int expression)
             dc      v[,v...]        raw data words (expr each)
             movem   p:(rN)+,D       program-memory read, D in x0 x1 y0 y1 a b
-            <alu>   x:...,R y:...,R XY dual move with an ALU op
+            <alu>   x:...,R y:...,R XY dual move with an ALU op (either half may be
+                                    a write: R,x:... / R,y:...)
 
 THE CHECK: the finished blob is disassembled and every instruction is
 compared, operand for operand, with the source (labels resolved). Any
@@ -229,7 +230,8 @@ def assemble(src, org):
             out_lines.append(f"        {op}     >$100")
             continue
         parts = rest.split()
-        if len(parts) == 3 and parts[1].startswith("x:") and parts[2].startswith("y:") and op != "move":
+        # XY dual move with an ALU op, read or write halves (`x:(r1)+,x0 a,y:(r5)+`)
+        if len(parts) == 3 and "x:" in parts[1] and "y:" in parts[2] and op != "move":
             specials.append((len(out_lines), "xy", (op, parts, body)))
             out_lines.append("        nop")
             continue
