@@ -63,7 +63,7 @@ def main():
         log = os.path.join(OUT, f'{sc}.log')
         subprocess.run([vs, 'twin', sc, f'{LEAN},log:{log}', os.path.join(OUT, f'{sc}.f32')], check=True, capture_output=True)
         p = subprocess.run([probe, os.path.join(OUT, 'engine.bin'), f'{ORG:x}', os.path.join(OUT, 'stub.bin'), f'{STUBORG:x}',
-                            os.path.join(OUT, 'syms.txt'), log], capture_output=True, text=True)
+                            os.path.join(OUT, 'syms.txt'), log], capture_output=True, text=True, errors='replace')
         lines = [l for l in p.stdout.splitlines() if not re.match(r'^\w+@\d+:', l)]
         print(f'{sc:8} ' + '\n         '.join(lines[-20:]))
         fails += p.returncode != 0

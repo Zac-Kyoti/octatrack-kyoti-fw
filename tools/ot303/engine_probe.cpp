@@ -74,10 +74,13 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 8; i++) Y(sym("HB1C") + i, e.hb4.c[i]);
     for (int i = 0; i < 22; i++) Y(sym("HB2C") + i, e.hb2.c[i]);
     if (sym("THM") != sym("TH") + 512) { std::printf("THM != TH + 512\n"); return 2; }
-    const char* zeroed[] = {"PH", "HPX", "HPY", "FBX", "FBY", "YY1", "YY2", "YY3", "YY4", "APX", "APY", "H2X", "H2Y",
-                            "TOPS", "NIC1", "NIC2", "DIC1", "DIC2"};
+    // the 4x loop's state lives in Y (double-buffered from PP); everything else in X
+    auto isY = [](const std::string& n) { return n == "HPX" || n == "HPY" || n == "FBX" || n == "FBY" || n.rfind("YY", 0) == 0; };
+    auto gs = [&](const char* n) { return isY(n) ? gy(sym(n)) : gx(sym(n)); };
+    const char* zeroed[] = {"PH", "APX", "APY", "H2X", "H2Y", "TOPS", "NIC1", "NIC2", "DIC1", "DIC2"};
     auto resetDsp = [&]() {
         for (auto n : zeroed) X(sym(n), 0);
+        for (int i = 0; i < 16; i++) Y(sym("PP") + i, 0);
         for (int i = 0; i < 16; i++) X(sym("HB1B") + i, 0);
         for (int i = 0; i < 64; i++) X(sym("HB2B") + i, 0);
         X(sym("HB1P"), sym("HB1B")); X(sym("HB2P"), sym("HB2B"));
@@ -88,6 +91,8 @@ int main(int argc, char** argv) {
     const char* hostNames[] = {"INC_T", "CS", "C_MEG", "C2", "M_AMP", "L0_16", "ES8", "AG8", "AGFM", "RS", "AG_8", "BG",
                                "K8", "SC", "W1", "W2", "W3", "SQ"};
     const uint32_t OUTB = 0x3000;
+    const bool prof = std::getenv("OT303_PROF") != nullptr;      // instructions per code region (labels)
+    std::map<uint32_t, uint64_t> pcHist;
     std::ifstream lf(argv[6]); std::string line;
     long seg = 0, samples = 0; uint64_t instr = 0, worst16 = 0;
     while (std::getline(lf, line)) {
@@ -111,7 +116,10 @@ int main(int argc, char** argv) {
             R.r[7].var = k; R.r[3].var = OUTB;
             dsp.setPC(sorg);
             uint64_t i0 = dsp.getInstructionCounter(); unsigned steps = 0;
-            while (dsp.getPC().toWord() != stopA && steps++ < 2000000) dsp.execInterpreter();
+            while (dsp.getPC().toWord() != stopA && steps++ < 2000000) {
+                if (prof) pcHist[dsp.getPC().toWord()]++;
+                dsp.execInterpreter();
+            }
             if (dsp.getPC().toWord() != stopA) { std::printf("segment %ld: did not return (pc %06x)\n", seg, dsp.getPC().toWord()); return 1; }
             uint64_t ni = dsp.getInstructionCounter() - i0; instr += ni; if (k == 16 && ni > worst16) worst16 = ni;
             if ((R.r[3].var & 0xffffff) != OUTB + uint32_t(k)) { std::printf("r3 = %06x after %d samples\n", R.r[3].var & 0xffffff, k); return 1; }
@@ -125,7 +133,7 @@ int main(int argc, char** argv) {
                     struct { const char* n; twin::W t; } st[] = {{"PH", e.P}, {"HPY", e.hpy}, {"FBY", e.fby}, {"YY1", e.Y1}, {"YY2", e.Y2},
                         {"YY3", e.Y3}, {"YY4", e.Y4}, {"RC2", e.RC2}, {"AMP2", e.AMP2}, {"APY", e.apy}, {"H2Y", e.h2y}, {"TOPS", e.tops},
                         {"NIC1", e.notch.ic1}, {"NIC2", e.notch.ic2}, {"DIC1", e.decl.ic1}, {"DIC2", e.decl.ic2}};
-                    for (auto& q : st) std::printf("  %-5s dsp %06x twin %06x%s\n", q.n, gx(sym(q.n)) & 0xffffff, q.t & 0xffffff, gx(sym(q.n)) == q.t ? "" : "  <--");
+                    for (auto& q : st) std::printf("  %-5s dsp %06x twin %06x%s\n", q.n, gs(q.n) & 0xffffff, q.t & 0xffffff, gs(q.n) == q.t ? "" : "  <--");
                     std::printf("  M48 dsp %06x%06x twin %012llx; S48 dsp %06x%06x twin %012llx\n", gx(sym("M48")) & 0xffffff, gy(sym("M48")) & 0xffffff,
                                 (unsigned long long)e.M48, gx(sym("S48")) & 0xffffff, gy(sym("S48")) & 0xffffff, (unsigned long long)e.S48);
                     return 1;
@@ -135,6 +143,14 @@ int main(int argc, char** argv) {
             done += k;
         }
         seg++;
+    }
+    if (prof) {                                 // attribute each PC to the nearest label at or below it
+        std::map<uint32_t, std::string> labs;
+        for (auto& kv : S) if (kv.first.size() > 1 && kv.first[0] == 'z' && kv.second >= org && kv.second < org + code.size()) labs[kv.second] = kv.first;
+        labs[org] = "ot303";
+        std::map<std::string, uint64_t> per;
+        for (auto& kv : pcHist) { auto it = labs.upper_bound(kv.first); --it; per[it->second] += kv.second; }
+        for (auto& kv : per) std::printf("  %-8s %7.1f instructions/sample\n", kv.first.c_str(), double(kv.second) / samples);
     }
     std::printf("BIT-EXACT: %ld samples in %ld segments; %.1f instructions/sample (worst 16-sample call %.1f/sample)\n",
                 samples, seg, samples ? double(instr) / samples : 0.0, worst16 / 16.0);
