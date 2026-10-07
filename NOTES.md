@@ -35635,3 +35635,14 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
   compares registers). **OBKYOTI14 BUILT, NOT flashed** (out/octabam_kyoti14/): syx
   `f08f584373c9b1c282b0606faf6fccbc91f4846f6f32efbff049635b67789899`, verify-remix green.
   Listening pack 5 (private `9RTmBEU4ak9tiVKZwPVfWM`): pick / first cut / aligned.
+* **2026-10-07: mid + side kept (user: "I like the current build best"); side top softened
+  (`3b292fd`).** Measured with hard-left noise: centred material is pure SP mid; panned treble
+  above ~9 kHz leaks to the far side in opposite polarity (channel 5 + render cut the mid's top,
+  not the side's), and away from 1/1 the SP's pitch aliasing (mid only) caps separation at
+  ~10–18 dB — inherent. Mitigations measured: channel 5 on the side (leak −5…−15 dB, ~+18
+  cycles), section 1 or 2 alone (worse), a two-sample side average (leak above 12 kHz −8 → −14 dB
+  at 3/2, little change at 1/1, +3 cycles) — the average shipped. RPSP **167** modelled cycles;
+  code 432/432 (SPRING run full beside SIDECHAIN). **OBKYOTI15 BUILT, NOT flashed**
+  (out/octabam_kyoti15/): syx `d1ec941f06a6a47835c43e98f33aff9de6419cb2ddaaa4b4f13a01b8197b1060`,
+  verify-remix green, boot check PASS. Packs 6–8 (private): `Ty3bBxZEPHPr38bDHNZDZ2` (mono
+  options), `EWYjCRCCFihmDhbGrayt3H` (four speeds), `X2F5pTfhg6u8u5BVtaJ6Xr` (side average).
