@@ -35946,3 +35946,9 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
     under its skew.
   - Fixed top rounding: 16 or 13 kHz (decimator-folded).
   - Round 6 published. ~320 instructions per sample.
+- **S124 cont (2026-10-06): round 6, VOICING FINAL.**
+  - Hot = 16 kHz rounding. ABX vs Open303 with the stronger 13 kHz rounding: Squelch 8/10
+    (p 0.055, borderline), Accents 5/10.
+  - Final voice = Open303's TB_303 voice at 4× (transcribed), BLEP, half-band chain with a
+    16 kHz rounding, 24-bit. Scope §11.
+  - Next: Phase 2b, an integer-exact twin, then the DSP asm bit-exact to it.

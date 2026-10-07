@@ -916,3 +916,39 @@ the 79-tap decimator design, at no cost):
 
 The harness bug found on the way: the tanh table was only built for the ladder path; now
 built always.
+
+### Round 6 results: VOICING FINAL (user, 2026-10-06)
+
+- **Hot pick:** the DSP version with **16 kHz rounding**.
+- ABX vs Open303 as shipped, with the *stronger* 13 kHz rounding:
+
+  | scene | correct | p | reading |
+  |---|---|---|---|
+  | Squelch | 8/10 | 0.055 | borderline |
+  | Accents | 5/10 | 0.623 | chance |
+
+  The chosen 16 kHz rounding changes about half as much as the 13 kHz one (Squelch 10–14 kHz:
+  −0.8 vs −1.9 dB; 14–18 kHz: −1.6 vs −4.0 dB, bands holding ~−62…−74 dB of the energy).
+
+**The OT-303 voice, as the DSP will run it:**
+- Open303's TB_303 voice: oscillator blend, envelopes, the measured env-mod mapping, slide,
+  Open303's accent, pre/post voicing;
+- the TB_303 filter at 4× (explicit update, Open303's fitted b0/k/g, 150 Hz feedback HP), no
+  RES ceiling;
+- BLEP saw + tanh-table square;
+- 23-tap + 79-tap half-band decimation with a fixed one-pole rounding at 16 kHz folded into
+  the 79-tap design;
+- 24-bit data and states.
+
+Est. ~320 instructions per sample per voice. Reference renders: `voice_study o303q 4 hb2
+blep:1,tab:1,q:1,stbits:24,top:16000`.
+
+Superseded (kept in the harness, not shipped): the ZDF diode ladder (FNested), stage
+saturation, ktab, the circuit accent, the RES ceiling.
+
+**Next (Phase 2b): the DSP engine.**
+1. An **integer-exact twin**: DSP56300 arithmetic, 24-bit words, 56-bit accumulators, the
+   rounding the asm will use. The current Quant model is quantise-on-store in double.
+2. The engine in DSP56300 assembly through `tools/dsp_xasm.py`, **bit-exact against that
+   twin**. Placement: the FX2-slot tails if it fits (keeps SPRING), else SPRING.
+3. The burn test (Phase 0b, still not flashed) confirms the cycle budget on hardware.
