@@ -35952,3 +35952,11 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   - Final voice = Open303's TB_303 voice at 4× (transcribed), BLEP, half-band chain with a
     16 kHz rounding, 24-bit. Scope §11.
   - Next: Phase 2b, an integer-exact twin, then the DSP asm bit-exact to it.
+- **S124 cont (2026-10-06): BURN TEST ON HARDWARE.**
+  - Heavy (DJ EQ ×16): core 1 N1 = 26 (624–648 cycles spare); core 0 N0 = 12 (288–312).
+  - Light: both 127+.
+  - The emulator's ~890 was optimistic: DJ EQ ≥ 1.15–1.3 cycles/instruction, and core 0 has
+    the mixdown/DELAY-return load.
+  - Core 1 fits one OT-303; core 0 does not in the worst legal config without a cheaper
+    engine or a donated DJ EQ.
+  - User decision needed. Scope §11.

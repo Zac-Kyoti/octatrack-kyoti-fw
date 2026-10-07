@@ -952,3 +952,27 @@ saturation, ktab, the circuit accent, the RES ceiling.
 2. The engine in DSP56300 assembly through `tools/dsp_xasm.py`, **bit-exact against that
    twin**. Placement: the FX2-slot tails if it fits (keeps SPRING), else SPRING.
 3. The burn test (Phase 0b, still not flashed) confirms the cycle budget on hardware.
+
+### Phase 0b on hardware (user, 2026-10-06): the burn test
+
+Image `140C_303BP` (syx `d2abc4d3…`), BURNTEST project, all 8 tracks looping one long Flex
+sample.
+
+| run | core 1 (T1–4) | core 0 (T5–8) |
+|---|---|---|
+| heavy: DJ EQ in FX1 + FX2 on all 8 tracks, last clean BURN | **N1 = 26 → 624–648 cycles/sample spare** | **N0 = 12 → 288–312 cycles/sample spare** |
+| light: one DJ EQ on the core, everything else NONE | L1 = 127+ (≥ 3,048) | L0 = 127+ (≥ 3,048) |
+
+**What it means:**
+- **The emulator's ~890 was optimistic.**
+  - 7 extra DJ EQ instances cost ≥ 101 steps (core 1) / ≥ 115 steps (core 0), i.e.
+    ≥ 346 / ≥ 394 cycles each, against 300 instructions.
+  - So DJ EQ runs at ≥ 1.15–1.3 cycles/instruction, not the 0.93 FILTER suggested.
+  - These are lower bounds: the light runs never broke.
+- **Core 0 has much less room than core 1** in the same configuration (288 vs 624). Core 0
+  also carries the mixdown, the DELAY's return block and cue/main routing (DSP.md §6c).
+- **Against the voice (~300–320 instructions ≈ 300–420 cycles at 1.0–1.3 c/i):**
+  - core 1 hosts one OT-303 with margin;
+  - core 0 does not, in the worst legal configuration, unless the engine gets well under
+    ~280 cycles or the worst case is lowered (donate DJ EQ, and maybe LO-FI; re-measure with
+    the new worst case).
