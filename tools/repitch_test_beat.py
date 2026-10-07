@@ -80,6 +80,9 @@ def main():
     ap.add_argument("out")
     ap.add_argument("--bpm", type=float, default=104.0)
     ap.add_argument("--swing", type=float, default=0.58, help="where the off 16th falls, 0.5 = straight")
+    ap.add_argument("--hat-pan", type=float, default=0.45, help="-1 left .. 1 right")
+    ap.add_argument("--ghost-pan", type=float, default=-0.5, help="the ghost hats' pan")
+    ap.add_argument("--room", type=float, default=0.2, help="the room's wet share")
     a = ap.parse_args()
     s16 = 60.0 / a.bpm / 4
     bars = 2
@@ -107,12 +110,12 @@ def main():
             put(snare(0.25), o + 7, -0.15)
         for st in range(0, 16, 2):
             if b and st == 14:
-                put(hat(0.75, open_=True), o + st, 0.45)
+                put(hat(0.75, open_=True), o + st, a.hat_pan)
             else:
-                put(hat(0.9 if st % 4 == 0 else 0.55), o + st, 0.45)
+                put(hat(0.9 if st % 4 == 0 else 0.55), o + st, a.hat_pan)
         for st in (3, 9, 13):
-            put(hat(0.28), o + st, -0.5)
-    mix = room(mix[:n + SR // 2])
+            put(hat(0.28), o + st, a.ghost_pan)
+    mix = room(mix[:n + SR // 2], wet=a.room)
     mix = mix[:n]                                      # exactly two bars: it loops
     mix *= 0.89 / np.abs(mix).max()
     y = np.clip(np.round(mix * 32767), -32768, 32767).astype("<i2")

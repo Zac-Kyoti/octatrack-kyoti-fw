@@ -253,6 +253,13 @@ SETS = {
         ("rev17b", "Rev 17, side aligned to the mid at every ratio (the DSP's arithmetic)",
          dict(exact=True), dict(taps=8, L=10), "stereo", "164 measured"),
     ],
+    "6": [
+        ("ref", "Reference: clean varispeed (RPCH, the OT's own read)", None, None, "stereo", "~0 extra"),
+        ("ms", "SP mid + clean side, aligned (rev 17 as built)", dict(exact=True), dict(taps=8, L=10), "stereo",
+         "164 measured"),
+        ("monol", "Left channel on both sides, SP + channel 5", dict(mono=True), dict(taps=8, L=10), "stereo",
+         "~135 est."),
+    ],
 }
 
 
@@ -288,6 +295,8 @@ def main():
             kw = dict(kw)
             if kw.get("exact"):
                 y = run_exact(src, a.ratio, trig_at)
+            elif kw.get("mono"):
+                y = run(m.MODE_RPSP, np.repeat(src[:, :1], 2, axis=1), a.ratio, trig_at, ms=True)
             elif "ms" in kw:
                 y = mid_side(src, a.ratio, trig_at, kw["ms"])
             else:
