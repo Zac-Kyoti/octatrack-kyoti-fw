@@ -35463,3 +35463,32 @@ stay clean; a feature's own new modes may add load but not break what stock allo
   * A: a pinned octabam remix;
   * B: our own builder with the vendored loader and a right-sized reserve;
   * C: ROM-only, ~850 B to free.
+
+## Session 125 continued (2026-10-06, `load-audit`) — KYOTI V1.1: the combined image rebuilt without the descriptor table (option B), WIP, NOT flashed
+
+* **Changes:**
+  * `tools/build_kyoti.py` → **KYOTI V1.1**. CAVE2/RELD/SEAM/PASTE/FILT are gone. A guard
+    refuses any zone or piece in `0x400d2e52..0x400d5f00` except SPRING.
+  * Reclaim zones are zeroed only when a plan uses them (default: none).
+  * REPITCH (demoted to WIP by `eff9e19`) is opt-in: `--with REPITCH_REPEAT98_KYOTI`. That
+    switches to PLAN_REPITCH, which moves RELOAD_FROM_PROJECT to DRAM.
+  * `tools/dram/`: octabam's loader.S, pack.py and depack.py vendored unchanged (MIT; Em's
+    design), plus `dram.py`. dram.py sizes the reserve to the payload and asserts the 24 arena
+    base operands, the 4 geometry words and the boot site stock. It redirects the boot to
+    `0x4010fdf0` and appends the loader + payload.
+  * `build_reload_from_project.py` gained `KYOTI_PLACE patch_reload3_dram`: link at the DRAM
+    address, write only the detours. The standalone image still seals FINAL `7fbf1096…`.
+* **Default build — ROM-only, RAM cost none:**
+  * syx `0e1b6012ec153629a9fe6adfb0676f9871e40b738c5ac60d406a8d36c0e2f4c6`,
+    mainos `01ffe407…`, OS VERSION `KYOTI V1.1`.
+  * All composition invariants pass. Inside the descriptor table only SIDECHAIN's deliberate
+    COMPRESSOR edits differ from stock; all five pads are stock.
+  * Emulator: OT DEMO (MASTER on) loads and plays 3,000 frames. The FX-NONE ui_pages script,
+    NEIGHBOR, the RELOAD chords (worker ×2) and the DJ jumps are clean, with no tripwire.
+* **WIP `--with REPITCH_REPEAT98_KYOTI`:**
+  * syx `bdd79d7183f7a45442bdc262529054127444a73af43dc28b9891c1452094d49e`, mainos `413b89ef…`,
+    OS VERSION `KV11+RPK`.
+  * RELOAD 2,088 B at `0x40a955e0`, packed 1,306 B, append 1,538 B. **1 arena page (6 KB).**
+  * Emulator: the DRAM after boot == the build's raw (sha `52a2972b…`). rl_job runs from DRAM
+    for both chords; OT DEMO plays with RPSP active.
+* **Not flashed. Neither image has been on hardware.**

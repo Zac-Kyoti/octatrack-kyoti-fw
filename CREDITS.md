@@ -124,6 +124,13 @@ too, and has its own section above.)
   naming of much of the image and is distilled into
   `reference/kb/memory-map.md`. Own sources MIT; **its binaries combine
   incompatible licences and may not be redistributed** — build your own.
+- **The DRAM loader in `tools/dram/`** is vendored from **[sambanks/octabam](https://github.com/sambanks/octabam)**
+  (`tools/remix/loader.S`, `pack.py`, `tools/ghidra/depack.py` @ `36a056c5`; MIT, © 2026 Sam
+  Banks). Its design (a stub past the OS image that stages, hash-checks and depacks a payload
+  with the firmware's own aPLib routine) and its packer are **Em's (June Kiff)**, from
+  **[emuyia/ems-octakit](https://github.com/emuyia/ems-octakit)** (MIT). The files are unchanged
+  apart from their attribution headers. Our `tools/dram/dram.py` drives them, with a reserve
+  sized to the payload.
 - **[timhastie/octatrick-modules](https://github.com/timhastie/octatrick-modules)**
   (**Tim Hastie**, MIT) — added 2026-10-06. His octabam modules for OS 1.40C:
   SYNTH MACHINE, SCALE QUANTIZER, TUNER and his DIRECT JUMP, which octabam consumes

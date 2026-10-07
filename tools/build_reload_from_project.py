@@ -225,6 +225,12 @@ BANK_LAYER_YES_STOCK = bytes([0x31, 0x00]) + bytes(24)
 
 FREE_END = 0x400d7c3c
 
+# build_kyoti.py may carry this cave in DRAM (tools/dram/: the vendored platform loader).
+# Then it is linked at the DRAM address it is given and NOT written into this image -- only
+# its detours are; the combined builder appends it behind the loader. Unset in every
+# standalone run, so this image is byte-for-byte what it was.
+DRAM = bool(kyoti_place.at("patch_reload3_dram", False))
+
 
 def jmp(t):
     return b"\x4e\xf9" + t.to_bytes(4, "big")
@@ -272,12 +278,18 @@ def main():
         blob, s = assemble(name, at, defsym)
         syms[name] = s
         placed[name] = (at, blob)
-        co = o(at)
-        if any(img[co:co + len(blob)]):
-            sys.exit(f"cave 0x{at:08x} ({name}) not free: {bytes(img[co:co+16]).hex()}")
-        spans.append((at, at + len(blob), name))
-        img[co:co + len(blob)] = blob
-        print(f"  {name:16s} {len(blob):3d} B @ 0x{at:08x} .. 0x{at+len(blob)-1:08x}")
+        if DRAM and name == "patch_reload3":
+            if 0x40000400 <= at < 0x40000400 + len(img):
+                sys.exit(f"patch_reload3_dram: 0x{at:08x} is inside the OS image, not DRAM")
+            print(f"  {name:16s} {len(blob):3d} B linked at 0x{at:08x} (DRAM: carried by the "
+                  f"combined image's loader, not written here)")
+        else:
+            co = o(at)
+            if any(img[co:co + len(blob)]):
+                sys.exit(f"cave 0x{at:08x} ({name}) not free: {bytes(img[co:co+16]).hex()}")
+            spans.append((at, at + len(blob), name))
+            img[co:co + len(blob)] = blob
+            print(f"  {name:16s} {len(blob):3d} B @ 0x{at:08x} .. 0x{at+len(blob)-1:08x}")
         for site, sym, exp, n, kind in detours:
             exp = bytes.fromhex(exp)
             do = o(site)
@@ -330,12 +342,14 @@ def main():
     print("  patch_reload3 references nothing in 0x80006a40..0x80006abf")
 
     spans.sort()
+    if not spans:
+        print("  no ROM caves (patch_reload3 is in DRAM)")
     for (a1, b1, n1), (a2, b2, n2) in zip(spans, spans[1:]):
         if b1 > a2:
             sys.exit(f"cave overlap: {n1} 0x{a1:x}..0x{b1:x} / {n2} 0x{a2:x}..0x{b2:x}")
-    if spans[0][0] < FREE_START:
+    if spans and spans[0][0] < FREE_START:
         sys.exit(f"cave starts below the free zone (0x{spans[0][0]:x} < 0x{FREE_START:x})")
-    if spans[-1][1] > FREE_END:
+    if spans and spans[-1][1] > FREE_END:
         sys.exit(f"cave runs past the free zone end (0x{spans[-1][1]:x} > 0x{FREE_END:x})")
     print("  no overlaps; all within the free cave")
 

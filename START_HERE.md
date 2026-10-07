@@ -153,6 +153,13 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
+- **KYOTI V1.1** (`tools/build_kyoti.py`) — **WIP, built, NOT flashed** (2026-10-06).
+  - Every FINAL feature, ROM-only, nothing placed in the descriptor table.
+  - Emulator: OT DEMO with T8 MASTER loads and plays, the FX-NONE knob script and NEIGHBOR
+    pages are clean, RELOAD and DIRECT JUMP work.
+  - `--with REPITCH_REPEAT98_KYOTI` (WIP) carries RELOAD in DRAM: 1 page, 6 KB. The DRAM
+    image depacks bit-exactly at boot (emulator).
+  - Next: a hardware test, then promotion on the user's word.
 - **KYOTI V1.0** (`tools/build_kyoti.py`) — **WITHDRAWN 2026-10-06** (was FINAL 2026-09-30,
   syx `5106f7fb…`). Its midisc pads are live stock parameter-page tables. Confirmed crashes:
   - an encoder on an FX page set to NONE;

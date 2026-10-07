@@ -2,13 +2,28 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-KYOTI V1.0 -- every FINAL feature in one image.
+KYOTI V1.1 -- every FINAL feature in one image.
 
     MUTE MODE (OT / OTFX / OTFX-T / DT-T)      QUANTIZE LIVE REC toggle
     SIDE-CHAIN COMPRESSOR (cross-core)         TRIGLESS-LOCK AUTO-REMOVE
     RELOAD FROM PROJECT (RELOAD_FROM_PROJECT chords)       DIRECT JUMP V7.0.1
-    REPITCH KYOTI (rev 16)                     the bug fixes: MIDI_PLAYS_FREE_FIX,
-    REC TRIG MUTE ([TRK]+[NO]/[YES], CC 80)    PATTERN LED, PART_CHANGE_CARRYOVER_FIX
+    REC TRIG MUTE ([TRK]+[NO]/[YES], CC 80)    the bug fixes: MIDI_PLAYS_FREE_FIX,
+                                               PATTERN LED, PART_CHANGE_CARRYOVER_FIX
+    WIP, opt-in only:  --with REPITCH_REPEAT98_KYOTI   (demoted 2026-10-06: DSP load)
+
+V1.1 vs V1.0 (withdrawn 2026-10-06). V1.0 used five midisc pads -- CAVE2, RELOAD_CAVE,
+SEAM_CAVE, SCENE_PASTE_CAVE and FILT_PERSIST_LOAD_CAVE. All five lie inside the
+parameter-page descriptor table 0x400d2e52..0x400d5f00. That table is live data: its zero
+bytes are "use the default" pointers and enable nibbles. V1.0 crashed on an FX page set to
+NONE and on T8's MASTER PLAYBACK/LFO page (reference/kb/caves.md §0). V1.1 drops those pads,
+and refuses any placement inside the table except SPRING's own entry, which the image makes
+unreachable.
+
+RAM. The default image is ROM-only: it costs nothing of the 85.5 MB sample/recorder pool.
+With REPITCH (--with), the image no longer fits ROM. RELOAD_FROM_PROJECT then moves to DRAM,
+carried by octabam's platform loader (vendored in tools/dram/, MIT). The reserve is sized to
+the payload in whole 6 KB arena pages, not octabam's fixed 10 MiB. The build prints the
+exact cost.
 
 Boot splash and SYSTEM STATUS -> OS VERSION read VERSTR below.
 
@@ -31,6 +46,8 @@ evidence behind them:
            finder 0x4000176c) -- the word at 0x400d64e2 is its terminator.
   midisc   midisc 1.40MIDISC8.2 ships code in each of these (tools/midisc/
            memory_map.py).  Ends are trimmed below any word stock references.
+           V1.1 keeps only the two OUTSIDE the descriptor table: SAFE_CAVE and
+           ENC_UNLOCK_CAVE (both also on octabam's free-ROM list).
   reclaim  stock data this very image makes unreachable:
            SPRING REVERB's ColdFire descriptor -- both SIDE-CHAIN and REPITCH
              remove SPRING, and the only references to it are the two id2e
@@ -72,16 +89,17 @@ import hashlib, json, os, pathlib, shutil, struct, subprocess, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from kyoti_status import gate, seal
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
+import dram                                    # noqa: E402  (tools/dram/dram.py)
 
 gate(__file__, note="""
-WITHDRAWN 2026-10-06 -- do not flash.  The midisc pads this image fills (CAVE2, SEAM, RELD,
-PASTE, FILT) are live stock parameter-page tables: an encoder on an FX page set to NONE,
-or T8's PLAYBACK/LFO page with T8 MASTER on, crashes the unit.  reference/handoffs/
-KYOTI_LOAD_AUDIT.md sections 8/8b.
+KYOTI V1.1 (WIP until promoted): every FINAL feature in one image, ROM-only, nothing placed in
+the parameter-page descriptor table. V1.0 (withdrawn 2026-10-06) crashed because it did.
+--with REPITCH_REPEAT98_KYOTI (WIP) moves RELOAD to DRAM; the build prints the RAM cost.
 """)
 
-VERSTR = "KYOTI V1.0"
-TAG = "KYOTI_V1.0"
+VERSTR = "KYOTI V1.1"
+TAG = "KYOTI_V1.1"
 BASE = 0x40000400
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
@@ -99,11 +117,6 @@ ZONES = {
               "this project's cave (from 0x400d6500 as every flashed build; 0xff from 0x400d7c3c)"),
     "SAFE":  (0x400d24d0, 0x400d2cdc, "midisc", "SAFE_CAVE; stock references 0x400d2cdc"),
     "ENC":   (0x400c45b0, 0x400c4700, "midisc", "ENC_UNLOCK_CAVE"),
-    "CAVE2": (0x400d2ee8, 0x400d301c, "midisc", "CAVE2; stock references 0x400d301c (6x)"),
-    "RELD":  (0x400d359c, 0x400d3664, "midisc", "RELOAD_CAVE; stock references 0x400d3664 (4x)"),
-    "SEAM":  (0x400d46e4, 0x400d47aa, "midisc", "SEAM_CAVE; stock references 0x400d47aa (8x)"),
-    "PASTE": (0x400d3da4, 0x400d3e38, "midisc", "SCENE_PASTE_CAVE"),
-    "FILT":  (0x400d3480, 0x400d34cf, "midisc", "FILT_PERSIST_LOAD_CAVE"),
     "SPRING": (0x400d5728, 0x400d58b8, "reclaim",
                "SPRING REVERB's CF descriptor 0x400d5726..; dead once SIDE-CHAIN/REPITCH remove SPRING"),
     "PERS1": (0x400b2a34, 0x400b2ab4, "reclaim",
@@ -111,39 +124,46 @@ ZONES = {
     "PERS2": (0x400b2ac0, 0x400b2b00, "reclaim",
               "stock PERSONALIZE setters; dead once MUTE MODE relocates them"),
 }
+# The parameter-page descriptor table: live data, zeros included (reference/kb/caves.md §0).
+# No zone may overlap it except SPRING, whose entry this image makes unreachable (asserted).
+DESCRIPTOR_TABLE = (0x400d2e52, 0x400d5f00)
+DESCRIPTOR_TABLE_OK = {"SPRING"}
+
 # What each reclaim zone's deadness depends on, and the stock words that referenced it.
 RECLAIM_WHOLE = {"SPRING": (0x400d5726, 0x400d58b8), "PERS1": (0x400b2a34, 0x400b2ab4),
                  "PERS2": (0x400b2ac0, 0x400b2b00)}
 
 # --- the placement plan: zone -> pieces, packed in this order --------------------------
 #   engine / ISR / tick-path code: CAVE and SAFE only.
-PLAN = {
-    # Session 116: MUTE MODE's SIDE-CHAIN KEY exemption grew patch_softmute by 124 B, which
-    # the classic cave does not have. MIDI_PLAYS_FREE_FIX moved into RELD beside patch_sidechain,
-    # and the PERSONALIZE labels array into CAVE2. MUTE MODE is built on TRUE stock, where
-    # PERS1/PERS2 still hold the stock arrays it relocates, so no MUTE MODE piece can go
-    # there: REPITCH's glyph data 3 (68 B) moved from CAVE2 into PERS1 to make the room, and
-    # four glyph records (20 B, pure data) out of PERS1 into PERS2 / SPRING / ENC.
+# Two plans. The default (FINAL features) is ROM-only. With REPITCH (WIP, --with) its ~3 KB
+# do not fit beside everything else, so RELOAD_FROM_PROJECT goes to DRAM ("DRAM" is not a ROM zone:
+# pieces there are linked at the arena reserve and carried by tools/dram/'s loader).
+PLAN_ROM = {
     "CAVE":  ["patch_reload3", "patch_directjump_v7", "patch_softmute", "patch_partreapply",
               "patch_mutemode", "patch_pattern_led",
               "rtm_mask"],                         # REC_TRIG_MUTE's state byte, written at runtime
+    "SAFE":  ["personalize_getters", "personalize_setters", "personalize_labels",
+              "patch_sidechain",                   # COMPRESSOR page formatters
+              "patch_trigscale",                   # MIDI_PLAYS_FREE_FIX
+              "patch_qlrec"],                      # [PLAY]/[REC] key handlers
+    "ENC":   ["patch_triglock"],                   # LIVE-erase key path only
+    "SPRING": [], "PERS1": [], "PERS2": [],
+}
+PLAN_REPITCH = {
+    "DRAM":  ["patch_reload3"],                    # key-handler + sys-task code; DRAM-proven in octabam
+    "CAVE":  ["patch_directjump_v7", "patch_softmute", "patch_partreapply",
+              "patch_mutemode", "patch_pattern_led", "rtm_mask",
+              "patch_qlrec", "patch_sidechain", "patch_trigscale", "personalize_labels",
+              "rpk_reload", "rpk_reload_body",
+              "rpk_glyph_data0", "rpk_glyph_data1", "rpk_glyph_data2",
+              "rpk_glyph_data4", "rpk_glyph_data5", "rpk_glyph_data6"],
     "SAFE":  ["rpk_logic", "personalize_getters", "personalize_setters"],
     "SPRING": ["rpk_widget7", "rpk_glyph_rec2"],
-    "ENC":   ["patch_triglock",                    # LIVE-erase key path only
-              "rpk_glyph_rec3", "rpk_glyph_rec4"],
-    "RELD":  ["patch_sidechain",                   # COMPRESSOR page formatters
-              "patch_trigscale"],
-    # Session 119: REPITCH's RELOAD PART wrapper (UI task, not the ISR), 34 + 14 B, split
-    # across the two pads with room for it.
-    "SEAM":  ["patch_qlrec",                       # [PLAY]/[REC] key handlers
-              "rpk_reload_body"],
-    "CAVE2": ["rpk_glyph_data0", "rpk_glyph_data1", "rpk_glyph_data2", "personalize_labels",
-              "rpk_reload"],
-    "PASTE": ["rpk_glyph_data4", "rpk_glyph_data5"],
-    "FILT":  ["rpk_glyph_data6"],
+    "ENC":   ["patch_triglock", "rpk_glyph_rec3", "rpk_glyph_rec4"],
     "PERS1": ["rpk_glyph_tab", "rpk_glyph_data3", "rpk_glyph_rec0"],
     "PERS2": ["rpk_glyph_rec1", "rpk_glyph_rec5", "rpk_glyph_rec6"],
 }
+PLAN = PLAN_ROM
 
 # --- the features: name -> (builder, image, base, placement keys, standalone blob files) --
 #   base "stock": built on true stock (MUTE MODE reads the stock PERSONALIZE arrays it
@@ -169,6 +189,11 @@ FEATURES = {
                 {"patch_reload3": "patch_reload3.bin"}),
     "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "mainos_direct_jump_kyoti.bin", "prep",
                       {"patch_directjump_v7": "patch_directjump_v7.bin"}),
+    "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "mainos_rec_trig_mute.bin", "prep",
+                      {"rtm_mask": 4}),
+}
+# Features that are WIP (not promoted, or demoted): only with --with NAME.
+WIP_FEATURES = {
     "REPITCH_REPEAT98_KYOTI": ("build_repitch_repeat98_kyoti.py", "mainos_repitch_repeat98_kyoti.bin", "prep",
                       dict({"rpk_logic": "patch_repitch_kyoti.bin", "rpk_widget7": 0x174,
                             "rpk_glyph_tab": 28,
@@ -176,8 +201,6 @@ FEATURES = {
                             "rpk_reload_body": "patch_repitch_reload_rb.bin"},
                            **{f"rpk_glyph_rec{k}": 20 for k in range(7)},
                            **{f"rpk_glyph_data{k}": 68 for k in range(7)})),
-    "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "mainos_rec_trig_mute.bin", "prep",
-                      {"rtm_mask": 4}),
 }
 # REC_TRIG_MUTE's code regions: four dead stock routines (build_rec_trig_mute.py REGIONS),
 # and the only references allowed into them -- the [TRK]-held layer's YES / NO records
@@ -238,6 +261,8 @@ def run_builder(sb, feat, place):
     builder = FEATURES[feat][0]
     env = dict(os.environ, KYOTI_PLACE=json.dumps(place))
     env.pop("KYOTI_ALLOW_WIP", None)
+    if feat in WIP_FEATURES:                 # asked for by name with --with: its builder is WIP
+        env["KYOTI_ALLOW_WIP"] = "1"
     r = subprocess.run([sys.executable, f"tools/{builder}"], cwd=sb, env=env,
                        capture_output=True, text=True)
     (OUTDIR / "_logs").mkdir(parents=True, exist_ok=True)
@@ -338,6 +363,28 @@ def refs_into(img, lo, hi):
 
 
 # ------------------------------------------------------------------------------------
+def apply_with(argv):
+    """--with NAME[,NAME]: add WIP features (not promoted). The image is WIP too: its own OS
+    VERSION and directory (out/KYOTI_WIP/<tag>/), so it can never be taken for the FINAL one.
+    REPITCH switches to PLAN_REPITCH, where RELOAD_FROM_PROJECT moves to DRAM."""
+    global VERSTR, TAG, OUTDIR, SANDBOX, PLAN
+    if "--with" not in argv:
+        return
+    add = argv[argv.index("--with") + 1].upper().split(",")
+    bad = [a for a in add if a not in WIP_FEATURES]
+    if bad:
+        sys.exit(f"--with: unknown or non-WIP feature(s) {bad}; choose from {sorted(WIP_FEATURES)}")
+    for a in add:
+        FEATURES[a] = WIP_FEATURES[a]
+    if "REPITCH_REPEAT98_KYOTI" in add:
+        PLAN = PLAN_REPITCH
+    VERSTR = "KV11+RPK"[:10]
+    TAG = "KYOTI_V1.1_WITH_" + "_".join(add)
+    OUTDIR = ROOT / "out/KYOTI_WIP" / TAG
+    SANDBOX = OUTDIR / "_sandbox"
+    print(f"  WIP IMAGE: with {', '.join(add)}  ->  OS VERSION {VERSTR!r}, {OUTDIR.relative_to(ROOT)}\n")
+
+
 def apply_without(argv):
     """--without NAME[,NAME]: a BISECTION image -- KYOTI V1.0 minus those features, built
     by the same method.  It gets its own OS VERSION ("KV1-NO-" + a short code per removed
@@ -360,8 +407,8 @@ def apply_without(argv):
              "RELOAD_FROM_PROJECT": "RL", "DIRECT_JUMP_KYOTI": "DJ", "REPITCH_REPEAT98_KYOTI": "RPK",
              "MIDI_PLAYS_FREE_FIX": "PF", "EMPTY_PATTERN_LED_FIX": "PL", "PART_CHANGE_CARRYOVER_FIX": "PR",
              "REC_TRIG_MUTE": "RTM"}
-    VERSTR = ("KV1-NO-" + "".join(short[d] for d in drop))[:10]
-    TAG = "KYOTI_V1.0_WITHOUT_" + "_".join(drop)
+    VERSTR = ("KV11-NO-" + "".join(short[d] for d in drop))[:10]
+    TAG = "KYOTI_V1.1_WITHOUT_" + "_".join(drop)
     OUTDIR = ROOT / "out/KYOTI_BISECT" / TAG
     SANDBOX = OUTDIR / "_sandbox"
     print(f"  BISECTION IMAGE: without {', '.join(drop)}  ->  OS VERSION {VERSTR!r}, "
@@ -369,7 +416,11 @@ def apply_without(argv):
 
 
 def main():
+    apply_with(sys.argv)
     apply_without(sys.argv)
+    # a reclaim zone is zeroed only when this plan puts something in it
+    for z in [z for z in RECLAIM_WHOLE if not PLAN.get(z)]:
+        del RECLAIM_WHOLE[z]
     if not STOCK_SECT.exists():
         sys.exit(f"missing {STOCK_SECT} -- run ./fetch-os.sh and ./analyze.sh first")
     if len(VERSTR) > 10:
@@ -390,6 +441,10 @@ def main():
             if r:
                 sys.exit(f"zone {z}: stock references into it: "
                          + ", ".join(f"0x{a:08x}->0x{v:08x}" for a, v in r[:6]))
+        dlo, dhi = DESCRIPTOR_TABLE
+        if lo < dhi and dlo < hi and z not in DESCRIPTOR_TABLE_OK:
+            sys.exit(f"zone {z} 0x{lo:08x}..0x{hi:08x} lies in the parameter-page descriptor table "
+                     f"0x{dlo:08x}..0x{dhi:08x}: live data, zeros included (reference/kb/caves.md §0)")
         print(f"  {z:7s} 0x{lo:08x}..0x{hi:08x} {hi-lo:5d} B  {cls:7s} {why}")
 
     # the prepared base: stock with the reclaim zones zeroed
@@ -414,7 +469,10 @@ def main():
     print("\n=== allocation ===")
     place, zone_of = {}, {}
     for z, keys in PLAN.items():
-        lo, hi, cls, _ = ZONES[z]
+        if z == "DRAM":
+            lo, hi, cls = dram.ARENA_BASE, dram.ARENA_BASE + 0x100000, "dram"
+        else:
+            lo, hi, cls, _ = ZONES[z]
         at = lo
         for key in keys:
             if key not in size:                  # its feature is left out (--without)
@@ -426,7 +484,11 @@ def main():
             place[key], zone_of[key] = at, z
             at += size[key]
         print(f"  {z:7s} {cls:7s} " + ", ".join(f"{k} {size[k]}@{place[k]:08x}" for k in keys if k in size)
-              + f"   [{hi - at} B left]")
+              + (f"   [{hi - at} B left]" if z != "DRAM" else "   [linked at the arena reserve]"))
+    dlo, dhi = DESCRIPTOR_TABLE
+    for k in place:
+        if zone_of[k] not in DESCRIPTOR_TABLE_OK and place[k] < dhi and dlo < place[k] + size[k]:
+            sys.exit(f"{k} at 0x{place[k]:08x} lies in the descriptor table -- refusing")
     spans = sorted((place[k], place[k] + size[k], k) for k in place)
     for (a1, e1, k1), (a2, e2, k2) in zip(spans, spans[1:]):
         if e1 > a2:
@@ -436,7 +498,7 @@ def main():
     print("\n=== pass 2: builders at the allocated addresses ===")
     sbs = {"stock": make_sandbox("stock", stock), "prep": make_sandbox("prep", prep)}
     base_of = {"stock": stock, "prep": prep}
-    deltas, syms = {}, {}
+    deltas, syms, dram_blob = {}, {}, {}
     for feat, (builder, _img, base, keys) in FEATURES.items():
         p = {k: place[k] for k in keys if not k.startswith("rpk_glyph_rec")
              and not k.startswith("rpk_glyph_data")}
@@ -444,7 +506,13 @@ def main():
             p["rpk_glyph_recs"] = [place[f"rpk_glyph_rec{k}"] for k in range(7)]
             p["rpk_glyph_data"] = [place[f"rpk_glyph_data{k}"] for k in range(7)]
         p.update(flags_for(feat))
+        for k in keys:
+            if zone_of.get(k) == "DRAM":
+                p[k + "_dram"] = True
         img = run_builder(sbs[base], feat, p)
+        for k, src in keys.items():                # keep each DRAM piece's linked bytes
+            if zone_of.get(k) == "DRAM":
+                dram_blob[k] = (sbs[base] / "out" / src).read_bytes()
         deltas[feat] = delta(base_of[base], img)
         for src in keys.values():                    # each linked blob's .elf sits beside it
             if isinstance(src, str):
@@ -595,9 +663,11 @@ def main():
     for bus, id2e in fx.items():
         if int.from_bytes(comp[o(id2e) + 0x15 * 4:o(id2e) + 0x15 * 4 + 4], "big") != 0x400d45e0 + 0x38:
             flag(f"reclaim SPRING: {bus} id2e[0x15] does not point at NONE")
-    print("  reclaim: SPRING's descriptor and the stock PERSONALIZE arrays are unreferenced "
-          "except by our own caves; both id2e[SPRING] -> NONE" if not any(
-              "reclaim" in p for p in PROBLEMS) else "")
+    if not RECLAIM_WHOLE:
+        print("  reclaim: none in this plan -- SPRING's descriptor and the PERSONALIZE arrays stay stock")
+    elif not any("reclaim" in p for p in PROBLEMS):
+        print(f"  reclaim ({', '.join(RECLAIM_WHOLE)}): unreferenced except by our own caves"
+              + ("; both id2e[SPRING] -> NONE" if "SPRING" in RECLAIM_WHOLE else ""))
 
     # REC_TRIG_MUTE: its reused dead routines are still unreachable from everything else
     if "REC_TRIG_MUTE" in FEATURES:
@@ -628,12 +698,37 @@ def main():
     else:
         print("  0x400d64ca..0x400d6500 (runtime record table + terminator) untouched")
 
+    # --- DRAM: the loader, the reserve, the boot redirect -------------------------------------
+    print("\n=== RAM (the 85.5 MB sample/recorder pool) ===")
+    dram_report = None
+    dkeys = sorted((place[k], k) for k in place if zone_of[k] == "DRAM")
+    if dkeys:
+        raw = bytearray()
+        for at, k in dkeys:
+            off = at - dram.ARENA_BASE
+            raw += bytes(off - len(raw))
+            if len(dram_blob[k]) != size[k]:
+                sys.exit(f"{k}: pass-2 blob is {len(dram_blob[k])} B, pass 1 sized {size[k]}")
+            raw += dram_blob[k]
+        append, dram_report = dram.build(bytes(raw), OUTDIR / "_dram", comp)
+        comp.extend(append)
+        r = dram_report
+        print(f"  DRAM: {', '.join(k for _, k in dkeys)} -- {r['raw']:,} B linked at 0x{r['base']:08x}, "
+              f"packed {r['packed']:,} B, loader + payload {r['append']:,} B appended at "
+              f"0x{dram.LOADER_AT:08x}")
+        print(f"  RAM COST: {r['pages']} arena page(s) = {r['reserve_bytes']:,} B "
+              f"({r['reserve_bytes'] / 1024:.0f} KB) taken from the sample/recorder pool; "
+              f"{r['pages_left']:,} of {dram.PAGES:,} pages left. The MEMORY page still reads 85.5 MB.")
+    else:
+        print("  RAM COST: none -- this image is ROM-only, the sample/recorder pool is untouched.")
+
     # --- write + wrap -----------------------------------------------------------------------
     mainos = OUTDIR / f"mainos_{TAG.lower()}.bin"
     mainos.write_bytes(bytes(comp))
     seal(__file__, mainos)       # FINAL pins mainos_kyoti_v1.0.bin; a bisection image is WIP
     cmap = {"verstr": VERSTR, "zones": {z: [hex(lo), hex(hi), cls] for z, (lo, hi, cls, _) in ZONES.items()},
             "pieces": {k: {"zone": zone_of[k], "at": hex(place[k]), "size": size[k]} for k in place},
+            "dram": dram_report,
             "symbols": {e: {s: hex(a) for s, a in sorted(t.items())} for e, t in syms.items()}}
     (OUTDIR / f"{TAG.lower()}_map.json").write_text(json.dumps(cmap, indent=1))
 

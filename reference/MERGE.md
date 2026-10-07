@@ -1,5 +1,19 @@
 # MERGE.md — combining every final-scoped mod into one firmware
 
+> **2026-10-06 — KYOTI V1.1 replaces V1.0 (withdrawn).**
+> - Five of V1.0's zones lie inside the live parameter-page descriptor table
+>   `0x400d2e52..0x400d5f00` (`reference/kb/caves.md` §0): CAVE2, RELD, SEAM, PASTE and FILT.
+>   V1.0 crashed on an FX page set to NONE and on T8's MASTER PLAYBACK/LFO page.
+> - V1.1 (`tools/build_kyoti.py`) drops those five zones and refuses any placement in the
+>   table except SPRING's unreachable entry.
+> - Default plan (the FINAL features): ROM-only, with CAVE, SAFE and ENC.
+> - `--with REPITCH_REPEAT98_KYOTI`: RELOAD_FROM_PROJECT moves to DRAM through octabam's
+>   vendored loader (`tools/dram/`), with a reserve sized to the payload. That is 1 page
+>   (6 KB), not octabam's fixed 10 MiB.
+> - The zone tables below describe V1.0 and are kept for the record. Their "midisc pads"
+>   evidence is ❌ retracted.
+
+
 ## ✅ BUILT 2026-09-29: `KYOTI V1.0` = every FINAL feature (`tools/build_kyoti.py`)
 
 The staging below (V1.0 = seven mods, V1.1 = + DIRECT JUMP + RELOAD3) is **history**. By the
