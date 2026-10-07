@@ -11,8 +11,9 @@
 #      wrapper's step events (hwprobe_ev.asm, assembled on its own)
 #   X  SPRING's five X records, unread by stock at runtime: run 1 (3 x 72) = the engine's X block
 #      and the wrapper's words, loaded ready; run 2 (116 + 384) = b0 and kp (the slopes are built)
-#   Y  $7a5..$feb, never touched by stock: the tables (built at run time; tanh stays zero: the
-#      square is cost-only in this probe) and the Y state block
+#   Y  $7a5..$feb, never touched by stock: the tanh table at the bottom (cleared: the square is
+#      cost-only in this probe), the coefficient table above $800 (octabam: absolute scratch at
+#      $800 or above), the Y state block
 import os, pathlib, re, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
@@ -33,7 +34,7 @@ PAYLOAD = {
               xrun1=((0x8464, 72), (0x84ac, 72), (0x84f4, 72)), xrun2=((0x85bc, 116), (0x8630, 384))),
 }
 DARK_N = 35
-YS, LT = 0xf40, 0x7a5            # Y: tables $7a5..$f02, state block $f40..$feb
+YS, TH, LT = 0xf40, 0x7a5, 0xba7  # Y: TH $7a5..$ba6 (the square's, cleared), LT $ba7..$f02, state $f40..$feb
 
 # the riff: the Hot scene (voice_study `twin hot`), its host words at the first bar's events
 HOST = dict(CS=0x000c62, C2=0x7fce80, L0_16=0x08c434, ES8=0x4e4ffe, RS=0x7fffff, AG_8=0x000000,
@@ -73,7 +74,7 @@ def source(tag):
     assert xb % 64 == 0, f'payload {tag}: X block {xb:x} not 64-aligned'
     eng = (ROOT / 'tools/ot303/ot303_engine.asm').read_text()
     wrap = (ROOT / 'tools/ot303/hwprobe.asm').read_text()
-    src = asm_macros.layout(eng, XB=xb, YS=YS, LT=LT) + asm_macros.layout(wrap, R2=d['xrun2'][0][0], HQEV=d['dark'] + DARK_N)
+    src = asm_macros.layout(eng, XB=xb, YS=YS, LT=LT, TH=TH) + asm_macros.layout(wrap, R2=d['xrun2'][0][0], HQEV=d['dark'] + DARK_N)
     equs = '\n'.join(l for l in src.splitlines() if re.match(r'^[A-Za-z_][A-Za-z0-9_]*\s+equ\s', l))
     ev = equs + '\n' + (ROOT / 'tools/ot303/hwprobe_ev.asm').read_text()
     return src, ev, asm_macros.yspace(eng)
@@ -111,12 +112,14 @@ def build(tag):
     bra = S['hq_out']
     assert words[bra - d['org']] == 0x0d10c0 and words[bra - d['org'] + 1] == 0, 'bra placeholder moved'
     words[bra - d['org'] + 1] = (d['djeq_proc'] - bra) & 0xffffff
-    cal = S['hq_callev']
-    assert words[cal - d['org']] == 0x0d1080 and words[cal - d['org'] + 1] == 0, 'bsr placeholder moved'
-    words[cal - d['org'] + 1] = (ev_org - cal) & 0xffffff
+    checks = [(bra, f'bra     func_{d["djeq_proc"]:06x}', 'exit branch')]
+    for site, target in (('hq_callev', 'hq_event'), ('hq_cton', 'hq_tgen'), ('hq_cwat', 'hq_watch'), ('hq_cbrn', 'hq_burnx')):
+        cal = S[site]
+        assert words[cal - d['org']] == 0x0d1080 and words[cal - d['org'] + 1] == 0, f'{site}: bsr placeholder moved'
+        words[cal - d['org'] + 1] = (evs[target] - cal) & 0xffffff
+        checks.append((cal, f'bsr     func_{evs[target]:06x}', f'{site} -> {target}'))
     dis = dsp_xasm.disassemble(words, d['org'])
-    for at, want, what in ((bra, f'bra     func_{d["djeq_proc"]:06x}', 'exit branch'),
-                           (cal, f'bsr     func_{ev_org:06x}', 'event call')):
+    for at, want, what in checks:
         line = dis.get(at, ('',))[0]
         if want not in line:
             raise ValueError(f'payload {tag}: {what} disassembles as {line!r}')
@@ -171,7 +174,7 @@ def build(tag):
         for a in range(r, r + n):
             x.setdefault(a, 0)
     # the Y footprint stays in the free region
-    assert S['TH'] + 1026 <= YS and S['YS'] + 0xab <= 0x1000 and LT >= 0x7a5
+    assert TH + 1026 <= LT and LT >= 0x800 and LT + 860 <= YS and S['YS'] + 0xab <= 0x1000 and TH >= 0x7a5
     return dict(org=d['org'], words=words, syms=S, ysyms=ysyms, p2=(ev_org, evw), x=x,
                 djeq_proc=d['djeq_proc'], entry=S['hq_entry'])
 

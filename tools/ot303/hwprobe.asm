@@ -5,29 +5,38 @@
 ; Appended to tools/ot303/ot303_engine.asm (its layout equates and the `ot303` routine) by
 ; tools/ot303/hwprobe_image.py, placed in SPRING REV's program words.
 ;
-; Reached instead of DJ EQ's process routine (X:$235[$0d]); leaves through DJ EQ's stock proc,
-; whose rts returns to the dispatcher. DJ EQ's proc reads r0, r6, r7, n7 and loads its ALU
-; registers itself, so this keeps r0 r6 r7 n7 and may use everything else (the burn probe's
-; contract, hardware-proven). m0-m7 are linear on entry and on exit (the engine restores them).
+; Reached instead of DJ EQ's process routine (X:$235[$0d]). With 303 at 0 it leaves through DJ EQ's
+; stock proc (whose rts returns to the dispatcher); with 303 up it returns itself and DJ EQ does not
+; run, so the track's output is the engine's, bit for bit (a recording can be compared with the
+; bench). It keeps r0 r6 r7 n7, and saves m0-m7 on entry, runs with them linear, and puts them back
+; (stock leaves them linear between effects, but octabam saw m1 not linear at an init on the unit).
 ;
 ; Page 2 of DJ EQ (r6+$c):
-;   slot 6 BURN  bits 16-23: burns 24 * BURN cycles per sample (burn_djeq.asm, unchanged)
-;   slot 7 303   bits 8-15: 0 off; 1-63 the engine with the saw, 64-127 with the square. The
-;                engine REPLACES the track's audio (both channels) ahead of DJ EQ, playing a
-;                built-in 16-step riff (the Hot scene's first bar, 130 BPM, 50 % gate).
-;                The square is COST ONLY: its tanh table is not built (no room for its data
-;                beside the code in SPRING's words), it stays zero, and the square renders silence
-;                through the same code path, so its cycles are the real voice's.
+;   (no BURN in this diagnostic: its room went to the modes below)
+;   slot 7 303   bits 8-15: 0 off, else a mode by sixteens (the output REPLACES the track's audio,
+;                both channels; the riff is a built-in 16-step bar of the Hot voice, 130 BPM):
+;                  1-15   TONE      a plain 110 Hz saw from the wrapper; the engine does not run
+;                  16-31  ENG+TONE  the engine runs (state, cost) but the TONE is what is heard
+;                  32-47  RIFF      the engine, saw
+;                  48-63  WATCH     the riff, and every call a checksum of the engine's constant
+;                                   memory (tables, filter and half-band coefficients, the riff's
+;                                   data); if it ever changes: an 880 Hz tone from then on
+;                  64-79  NOPS      the TONE, plus ~400 cycles a sample of nop (time, no memory)
+;                  80-95  READS     the TONE, plus ~400 cycles a sample of X and Y reads, two a
+;                                   cycle (the engine's memory traffic, no writes, no arithmetic)
+;                  96-127 SQUARE    COST ONLY: its tanh table is not built (no room for its data
+;                                   beside the code in SPRING's words), it stays zero, and the
+;                                   square renders silence through the real code path
 ; One engine per core: its state is global, so a second DJ EQ with 303 > 0 on the same core
 ; renders the same voice again (twice the speed). Use it on one track per core.
 ;
 ; The filter's coefficient tables (Y, 860 words at LT) are built on the first calls, 16 entries
 ; a call (15 calls, ~6 ms), from b0 and kp/64 (215 + 1 each) the loader puts in SPRING's X records;
 ; the slopes are differences. The engine stays silent (the track passes untouched) until then.
-; The step events (hq_event) live after DARK REV's helper: tools/ot303/hwprobe_ev.asm.
+; The step events, the tone and the watch live after DARK REV's helper: tools/ot303/hwprobe_ev.asm.
 ; ===========================================================================
 R2      equ     $8afc           ;@LAYOUT X run 2 (packed b0, kp)
-HQEV    equ     $15a9           ;@LAYOUT hq_event, after DARK REV's helper (hwprobe_ev.asm)
+HQEV    equ     $15a9           ;@LAYOUT hwprobe_ev.asm's origin, after DARK REV's helper
 
 PB      equ     XB-$1c          ; X, 28 words before the engine's block (reached by pointer)
 SAWW    equ     PB+0            ; W1 W2 W3 SQ for the saw
@@ -39,6 +48,16 @@ HB1I    equ     PB+11           ; 16: the 15-tap's odd taps (YW's HB1C), copied 
 ; r5 = XM through the wrapper: one-word moves x:(r5+d), -64 <= d <= 63, reach the engine's host
 ; words below it and the wrapper's words above it. (Address registers take two words either way.)
 XM      equ     XB+$40
+MSAV    equ     XB+$35          ; m0..m7 on entry (the gap after XW)
+TPH     equ     XB+$49          ; the tone's phase (the gap after XC)
+TINC    equ     XB+$4a          ; the tone's increment
+REF1    equ     XB+$4b          ; the watch: the checksum, A1 and A0
+REF0    equ     XB+$4c
+RFLG    equ     XB+$4d          ;   1 once REF is taken
+ALRM    equ     XB+$4e          ;   1 once it has changed
+REF2    equ     XB+$4f          ;   the checksum's A2
+T110    equ     $a3a3           ; 110 Hz: 2^24 * 110 / 44100
+T880    equ     $51d1c          ; 880 Hz
 WB      equ     XB+$70          ; X, 76 words after the engine's block
 STG     equ     WB+0            ; 0..1 building the tables, 2 running
 SV_R0   equ     WB+6
@@ -66,6 +85,9 @@ D_OUTA  equ     $3b             ; the audio block pointer (interleaved L/R)
 D_KNB   equ     $3c             ; the 303 knob << 8
 D_KCNT  equ     $3d             ; this render's sample count
 D_AMPT  equ     $3e             ; the trigger's AMP2
+D_BAND  equ     $3f             ; the mode: 303 >> 4
+D_TINC  equ     $a              ; +: TINC
+N_MSAV  equ     $b              ; -: MSAV (m0 at XM - $b .. m7 at XM - 4)
 D_W1A   equ     $24             ; +: OCB's W1A W2 W3
 D_W2    equ     $25
 D_W3    equ     $26
@@ -90,21 +112,6 @@ BX      equ     R2              ; b0[0..214], b0[214] again
 KX      equ     R2+216          ; kp[0..214], kp[214] again
 
 hq_entry:
-; ---- BURN: page-2 slot 6 (octabam's RIG BURN body; tools/ot303/burn_djeq.asm). The zero guard
-; is load-bearing: DO with a count of 0 loops 65536 times; asl sets Z.
-        move    x:(r6+$c),a
-        and     #>$7f0000,a
-        move    a1,y1
-        move    n7,x0
-        mpy     x0,y1,a
-        asl     #$a,a,a
-        beq     hq_noburn
-        do      a1,hq_burnend
-        nop
-        nop
-        nop
-hq_burnend:
-hq_noburn:
 ; ---- the 303 knob: page-2 slot 7 (bits 8-15); 0 = off. n7 = 0 (the dispatcher's second call
 ; can carry none) = nothing to do.
         move    x:(r6+$c),a
@@ -113,8 +120,32 @@ hq_noburn:
         move    n7,b
         tst     b
         beq     hq_out
+; m0-m7: m1 linear first (r1 is the save pointer), all saved, then all linear
+        move    a1,y1                           ; the knob
+        move    m1,x0
+        move    #>$ffffff,x1
+        move    x1,m1
+        move    #>MSAV,r1
+        move    m0,x:(r1)+
+        move    x0,x:(r1)+
+        move    m2,x:(r1)+
+        move    m3,x:(r1)+
+        move    m4,x:(r1)+
+        move    m5,x:(r1)+
+        move    m6,x:(r1)+
+        move    m7,x:(r1)+
+        move    x1,m0
+        move    x1,m2
+        move    x1,m3
+        move    x1,m4
+        move    x1,m5
+        move    x1,m6
+        move    x1,m7
         move    #>XM,r5
-        move    a1,x:(r5+D_KNB)
+        move    y1,x:(r5+D_KNB)
+        move    y1,a
+        asr     #12,a,a
+        move    a1,x:(r5+D_BAND)
         move    r0,x:>SV_R0
         move    r6,x:>SV_R6
         move    r7,x:>SV_R7
@@ -129,7 +160,7 @@ hq_run:
 ; the wave words: knob >= 64 = the square
         move    #>SAWW,r1
         move    x:(r5+D_KNB),a
-        move    #>$4000,x0
+        move    #>$6000,x0
         cmp     x0,a
         blt     hq_saw
         move    #>SQRW,r1
@@ -143,8 +174,17 @@ hq_saw:
         move    x0,x:(r5+D_W3)
         move    x:(r1)+,x0
         move    x0,x:(r5-N_SQ)
-        move    b,x:(r5+D_REM)                  ; b = n7
+        move    n7,b
+        move    b,x:(r5+D_REM)
         move    r0,x:(r5+D_OUTA)
+        move    #>T110,x0
+        move    x0,x:(r5+D_TINC)
+        move    x:(r5+D_BAND),a
+        move    #>3,x0
+        cmp     x0,a
+        bne     hq_loop
+hq_cwat:
+        dc      $0d1080,0                       ; bsr >hq_watch (may turn the mode into the alarm tone)
 ; render up to each event, then the event
 hq_loop:
         move    x:(r5+D_EVC),a
@@ -159,10 +199,31 @@ hq_noev:
         cmp     x1,b
         tgt     x1,b                            ; b = min(REM, EVC)
         move    b,x:(r5+D_KCNT)
+        move    x:(r5+D_BAND),a
+        tst     a
+        beq     hq_notengine                    ; TONE: no engine
+        move    #>4,x0
+        cmp     x0,a
+        blt     hq_eng
+        move    #>6,x0
+        cmp     x0,a
+        bge     hq_eng
+hq_cbrn:
+        dc      $0d1080,0                       ; bsr >hq_burnx: NOPS / READS, then the TONE
+        bra     hq_notengine
+hq_eng:
         move    b1,r7
         move    #>RBUF,r3
         bsr     ot303
         move    #>XM,r5
+        move    x:(r5+D_BAND),a
+        move    #>1,x0
+        cmp     x0,a
+        bne     hq_notone
+hq_notengine:
+hq_cton:
+        dc      $0d1080,0                       ; bsr >hq_tgen: KCNT samples of the tone into RBUF
+hq_notone:
         move    #>RBUF,r1
         move    x:(r5+D_OUTA),r0
         move    x:(r5+D_KCNT),x0
@@ -180,10 +241,21 @@ hq_cpend:
         move    a,x:(r5+D_REM)
         bne     hq_loop
 hq_rest:
+        move    #>MSAV,r0                       ; m1..m7 through r0 (m0 still linear), m0 last
+        move    (r0)+
+        move    x:(r0)+,m1
+        move    x:(r0)+,m2
+        move    x:(r0)+,m3
+        move    x:(r0)+,m4
+        move    x:(r0)+,m5
+        move    x:(r0)+,m6
+        move    x:(r0)+,m7
+        move    x:>MSAV,m0
         move    x:>SV_R0,r0
         move    x:>SV_R6,r6
         move    x:>SV_R7,r7
         move    x:>SV_N7,n7
+        rts                                     ; 303 up: DJ EQ does not run
 hq_out:
         dc      $0d10c0,0                       ; bra >DJ EQ's stock proc: the builder writes the
                                                 ; displacement and checks it by disassembly

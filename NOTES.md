@@ -35989,3 +35989,7 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
     twin; 393/528 cycles/sample incl. wrapper. Firmware `verify_hwprobe.py` (ot_emu, BOTLI):
     +11 instr/call inert, engine only on its track, SPRING → stub, DARK REV as stock (its 4th
     track varies call to call in stock too). ot_emu's `--audio-out` capture is all zeros (stock too).
+- **S124 cont: probe 1 on HW = dirty** (T2 crackle, T6 grind, mains pops with the track muted,
+  light config). DIAG2 built (`140C_303D2`, syx `bac0c74e…`, NOT flashed): mode bands on the 303
+  knob (TONE / ENG+TONE / RIFF / WATCH / NOPS / READS / SQUARE), m0–m7 saved/restored (probe 1
+  forced them linear), LT above Y:$800, DJ EQ bypassed while 303 is up. Scope §11 decision table.

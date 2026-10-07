@@ -3,9 +3,12 @@
 //
 // OT-303 hardware probe on dsp56kEmu: the wrapper (tools/ot303/hwprobe.asm + hwprobe_ev.asm) entered
 // the way the stock dispatcher enters DJ EQ's process routine, against the integer twin.
-//   hwprobe_probe DIR KNOB FRAMES
+//   hwprobe_probe DIR KNOB FRAMES [corrupt]
 // DIR holds p1.bin (ORG in p1.org), p2.bin (p2.org), x.txt ("addr word"), syms.txt ("name hex X|Y"),
-// djeq.txt (DJ EQ's proc address: reaching it = the wrapper's exit). KNOB: page-2 slot 7 (1..127).
+// djeq.txt (DJ EQ's proc address). KNOB: page-2 slot 7 (1..127): 1-15 TONE, 16-31 ENG+TONE, 32-47 RIFF,
+// 48-63 WATCH, 64-127 SQUARE. Entered by a jsr from a stub; with 303 up it returns itself.
+// m0-m5 and m7 are NOT linear on entry here (m6 is: the knob is read through r6), and must come back.
+// `corrupt`: in WATCH, one table word is changed mid-run; the output must become the 880 Hz tone.
 // Each frame is two calls, as the dispatcher makes them: n7 = k1 (skipped when 0), then 16 - k1
 // (made even when 0), k1 varying. Checks: r0 r6 r7 n7 and m0-m7 kept; the track's audio untouched
 // while the tables build; the built LT table and the cleared tanh table word for word; then every
@@ -36,7 +39,8 @@ static int32_t sx(uint32_t w) { return int32_t(w << 8) >> 8; }
 static uint32_t hx(const std::string& s) { return (uint32_t)std::stoul(s, nullptr, 16); }
 
 int main(int argc, char** argv) {
-    if (argc != 4) { std::printf("usage: hwprobe_probe DIR KNOB FRAMES\n"); return 2; }
+    if (argc < 4) { std::printf("usage: hwprobe_probe DIR KNOB FRAMES [corrupt]\n"); return 2; }
+    const bool corrupt = argc > 4;
     std::string dir = argv[1]; int knob = std::atoi(argv[2]); long frames = std::atol(argv[3]);
     auto rd = [&](const char* n) { std::ifstream f(dir + "/" + n); std::string s; f >> s; return hx(s); };
     auto p1 = load24(dir + "/p1.bin"), p2 = load24(dir + "/p2.bin");
@@ -49,12 +53,15 @@ int main(int argc, char** argv) {
     Peripherals56362 px; Peripherals56367 py; DSP dsp(mem, &px, &py);
     for (size_t i = 0; i < p1.size(); i++) dsp.memWriteP(o1 + TWord(i), p1[i]);
     for (size_t i = 0; i < p2.size(); i++) dsp.memWriteP(o2 + TWord(i), p2[i]);
-    dsp.memWriteP(djeq, 0);                                       // a nop: the wrapper's exit lands here
+    dsp.memWriteP(djeq, 0);                                       // a nop: with 303 at 0 the wrapper leaves here
+    const uint32_t STUB = 0x100;                                  // jsr >hq_entry ; nop (the return lands on it)
+    dsp.memWriteP(STUB, 0x0bf080); dsp.memWriteP(STUB + 1, sym("hq_entry")); dsp.memWriteP(STUB + 2, 0);
     { std::ifstream f(dir + "/x.txt"); std::string a, w; while (f >> a >> w) mem.set(MemArea_X, hx(a), hx(w)); }
     // the Y region the probe owns starts as noise on the unit: poison it here
     for (uint32_t a = 0x795; a < 0x1000; a++) mem.set(MemArea_Y, a, (a * 2654435761u) & 0xffffff);
     auto& R = dsp.regs();
-    for (int k = 0; k < 8; k++) R.m[k].var = 0xffffff;
+    const uint32_t MIN[8] = {0xff, 0x3ff, 0x1f, 0x3, 0x7f, 0x5fb, 0xffffff, 0x9};    // entry modifiers
+    for (int k = 0; k < 8; k++) R.m[k].var = MIN[k];
     dsp.setHostStepped(true);
     auto gx = [&](uint32_t a) { return sx(mem.get(MemArea_X, a)); };
     auto gy = [&](uint32_t a) { return sx(mem.get(MemArea_Y, a)); };
@@ -65,9 +72,10 @@ int main(int argc, char** argv) {
     // one call; returns its cycles
     auto call = [&](int n7, uint32_t r0) -> uint64_t {
         R.r[0].var = r0; R.r[6].var = PARB; R.r[7].var = R7V; R.n[7].var = n7;
-        dsp.setPC(sym("hq_entry"));
+        for (int k = 0; k < 8; k++) R.m[k].var = MIN[k];
+        dsp.setPC(STUB);
         uint64_t cyc = 0; unsigned steps = 0;
-        while (dsp.getPC().toWord() != djeq && steps++ < 3000000) {
+        while (dsp.getPC().toWord() != djeq && dsp.getPC().toWord() != STUB + 2 && steps++ < 3000000) {
             uint32_t pc = dsp.getPC().toWord();
             uint64_t c0 = dsp.getInstructionCounter();
             uint32_t cy = dsp.calcOpcodeCycles(pc);
@@ -77,17 +85,17 @@ int main(int argc, char** argv) {
             cyc += cy;
             dsp.doLoopEnd();
         }
-        if (dsp.getPC().toWord() != djeq) { std::printf("call %ld: no exit (pc %06x)\n", calls, dsp.getPC().toWord()); std::exit(1); }
+        if (dsp.getPC().toWord() != STUB + 2) { std::printf("call %ld: did not return (pc %06x)\n", calls, dsp.getPC().toWord()); std::exit(1); }
         if ((R.r[0].var & 0xffffff) != r0 || (R.r[6].var & 0xffffff) != PARB || (R.r[7].var & 0xffffff) != R7V ||
             (R.n[7].var & 0xffffff) != uint32_t(n7)) {
             std::printf("call %ld: r0 %06x r6 %06x r7 %06x n7 %06x not kept\n", calls, R.r[0].var & 0xffffff,
                         R.r[6].var & 0xffffff, R.r[7].var & 0xffffff, R.n[7].var & 0xffffff); std::exit(1);
         }
-        for (int m = 0; m < 8; m++) if ((R.m[m].var & 0xffffff) != 0xffffff) { std::printf("call %ld: m%d %06x\n", calls, m, R.m[m].var & 0xffffff); std::exit(1); }
+        for (int m = 0; m < 8; m++) if ((R.m[m].var & 0xffffff) != MIN[m]) { std::printf("call %ld: m%d %06x, entered %06x\n", calls, m, R.m[m].var & 0xffffff, MIN[m]); std::exit(1); }
         calls++;
         return cyc;
     };
-    auto split = [](long f) { int k = int((f * 7) % 17); return k; };      // 0..16
+    auto split = [](long f) { int k = int((f * 7) % 16); return k; };      // 0..15: the trig's offset (the second call is never empty)
 
     twin::Engine e;                                              // builds the twin's tables
     e.init(HB2_43_16, 22, 16000.0, HB1_15_18, 8);
@@ -120,7 +128,8 @@ int main(int argc, char** argv) {
     auto X = [&](const char* n) { return gx(sym(n)); };
     e.CS = X("CS"); e.C2 = X("C2"); e.ES8 = X("ES8"); e.RS = X("RS"); e.BG = X("BG"); e.SC = X("SC");
     e.L0_16 = sx(mem.get(MemArea_X, sym("L0C"))); e.AG_8 = sx(mem.get(MemArea_X, sym("AG8C")));
-    bool sq = knob >= 64;
+    const int band = knob >> 4;
+    bool sq = knob >= 96;
     uint32_t ww = sym(sq ? "SQRW" : "SAWW");
     e.W1 = gx(ww); e.W2 = gx(ww + 1); e.W3 = gx(ww + 2); e.SQ = gx(ww + 3) != 0;
     auto vars = [&](int v) { uint32_t a = sym("VARS") + 5 * v; e.C_MEG = gx(a); e.M_AMP = gx(a + 1); e.AG8 = gx(a + 2); e.AGF = gx(a + 3) != 0; e.K8 = gx(a + 4); };
@@ -147,7 +156,11 @@ int main(int argc, char** argv) {
     };
     std::vector<float> wav;
     long sample = 0;
+    uint32_t tph = 0, tinc = 0xa3a3; bool alarm = false;
+    const long corruptAt = frames / 2;
     for (long f = 0; f < frames; f++) {
+        if (corrupt && f == corruptAt) { mem.set(MemArea_Y, sym("LT") + 300, (mem.get(MemArea_Y, sym("LT") + 300) + 1) & 0xffffff);
+                                         alarm = true; tinc = 0x51d1c; }        // this frame's first call sees it
         int k1 = split(f);
         uint64_t c = 0;
         if (k1) c += call(k1, AUD);
@@ -155,20 +168,26 @@ int main(int argc, char** argv) {
         totalCyc += c; if (c > worstFrame) worstFrame = c;
         for (int j = 0; j < 16; j++) {
             if (evc == 0) event();
-            e.tick(); evc--;
+            if (!alarm) { e.tick(); }
+            evc--;
+            int32_t want = e.outW;
+            bool toneNow = band <= 1 || band == 4 || band == 5 || alarm;
+            if (toneNow) { tph = (tph + tinc) & 0xffffff; want = sx(tph) >> 2; }
             int32_t l = gx(AUD + 2 * j), r = gx(AUD + 2 * j + 1);
-            if (l != e.outW || r != e.outW) {
-                std::printf("MISMATCH frame %ld sample %ld (step %d): dsp L %06x R %06x twin %06x\n", f, sample, step,
-                            l & 0xffffff, r & 0xffffff, e.outW & 0xffffff);
+            if (l != want || r != want) {
+                std::printf("MISMATCH frame %ld sample %ld (step %d): dsp L %06x R %06x want %06x\n", f, sample, step,
+                            l & 0xffffff, r & 0xffffff, want & 0xffffff);
                 return 1;
             }
             wav.push_back(float(l) / 8388608.0f);
             sample++;
         }
     }
-    std::printf("BIT-EXACT: %ld samples (%s), %ld calls; %.1f cycles/sample incl. the wrapper (worst frame %.1f)\n",
-                sample, sq ? "square, tanh cleared" : "saw", calls, double(totalCyc) / (frames * 16.0), worstFrame / 16.0);
-    std::ofstream o(dir + (sq ? "/square.f32" : "/saw.f32"), std::ios::binary);
+    const char* what[] = {"TONE", "ENG+TONE", "RIFF", "WATCH", "NOPS+TONE", "READS+TONE", "SQUARE (tanh cleared)"};
+    std::printf("BIT-EXACT: %ld samples, %s%s, %ld calls; %.1f cycles/sample incl. the wrapper (worst frame %.1f)\n",
+                sample, what[band < 6 ? band : 6], corrupt ? " (a table word changed mid-run: the alarm tone followed)" : "",
+                calls, double(totalCyc) / (frames * 16.0), worstFrame / 16.0);
+    std::ofstream o(dir + "/out_" + std::to_string(knob) + (corrupt ? "c" : "") + ".f32", std::ios::binary);
     o.write(reinterpret_cast<const char*>(wav.data()), std::streamsize(wav.size() * sizeof(float)));
     return 0;
 }

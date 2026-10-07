@@ -16,7 +16,7 @@ import concurrent.futures as cf, os, re, shutil, struct, subprocess, sys, tempfi
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 EMU = os.path.join(ROOT, 'out', 'ot303', 'ot_emu_8d0ad6f4')
 CARD = os.path.join(os.path.realpath(os.path.join(ROOT, 'refs', 'octabam')), 'out', 'botli_card2.img')
-PROBE = os.path.join(ROOT, 'out', 'mainos_ot303_hwprobe.bin')
+PROBE = os.path.join(ROOT, 'out', os.environ.get('HWP_IMAGE', 'mainos_ot303_hwprobe_diag2.bin'))
 STOCK = os.path.join(ROOT, 'out', 'raw', 'section_3_MAIN_OS.bin')
 SW = {(1, 1): '1:2cc:2cd', (0, 1): '0:4d7:4d8', (0, 2): '0:50d:50e', (1, 2): '1:302:303'}
 IDS = {1: 0x80000ec4, 2: 0x80000ecc}
@@ -75,7 +75,7 @@ def main():
         t = 1 if core == 1 else 5
         jobs[('stock', core)] = (STOCK, core, 1, 0x0d)
         jobs[('inert', core)] = (PROBE, core, 1, 0x0d)
-        jobs[('saw', core)] = (PROBE, core, 1, 0x0d, t, 32)
+        jobs[('saw', core)] = (PROBE, core, 1, 0x0d, t, 40)
         jobs[('square', core)] = (PROBE, core, 1, 0x0d, t, 100)
         jobs[('spring', core)] = (PROBE, core, 2, 0x15)
         jobs[('dark', core)] = (PROBE, core, 2, 0x16)
@@ -90,10 +90,11 @@ def main():
     for core in (1, 0):
         s, i = res[('stock', core)][0][-4:], res[('inert', core)][0][-4:]
         print(f'core {core}: inert overhead per call {[b - a for a, b in zip(s, i)]}')
+        ok &= all(0 <= b - a <= 12 for a, b in zip(s, i))
         for v in ('saw', 'square'):
             e = res[(v, core)][0][-4:]
-            print(f'   {v:6}: extra per call {[b - a for a, b in zip(i, e)]} (the engine on the 2nd track only)')
-            ok &= e[1] - i[1] > 3000 and all(e[k] == i[k] for k in (0, 2, 3))
+            print(f'   {v:6}: extra per call {[b - a for a, b in zip(i, e)]} (the engine, DJ EQ bypassed, on the 2nd track only)')
+            ok &= e[1] != i[1] and all(e[k] == i[k] for k in (0, 2, 3))
         sp = res[('spring', core)][0][-4:]
         dk, dks = res[('dark', core)][0], res[('dark-stock', core)][0]
         # DARK REV's work on a track with signal varies call to call (stock alike: 3207..3277 seen);

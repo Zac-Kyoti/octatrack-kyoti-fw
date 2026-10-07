@@ -1207,3 +1207,55 @@ Recommendation: 1, then 2 if the glue needs it. Both keep the DSP bit-exact with
 5. **Normal setups:** your own projects, 303 = 32 on one track per core; listen for breakup.
 6. Use tracks 2 and 6, not the first track of a core (VOCODER's T1/T5 click caveat). Recover from
    a crash by power-cycling; reflash the normal image to finish.
+
+### Probe 1 on hardware (user, 2026-10-07), and DIAG2 (built, NOT flashed)
+
+**Probe 1 (`140C_303HP`, `3868cd3c…`)**, one DJ EQ on one track, no other FX anywhere:
+- **T2 (core 1):** the riff is audible, with medium-sparse crackle and pops ("scratched vinyl, no hiss").
+- **T6 (core 0):** the riff is audible, with a uniform grain/distortion grind.
+- **With T2 muted:** the crackle is reduced but not gone. Pops come from the mains, left channel,
+  with the transport running or stopped. A STATIC machine playing a loop changes nothing.
+
+Not DSP time (light configuration). Not register clobbering of the caller: the stock track loop
+(B `P:18b..2cc`) reloads every register after the effect call. The interrupt handlers save what
+they touch. The dispatcher's two calls are one 16-sample frame split at the trig offset
+(`$20c = a`, `$20d = 16 - a`, `$20e = 2a`, `a` = 0..15), as the bench assumed.
+
+Candidates, and what DIAG2 does about each:
+1. **m registers:** probe 1 forced m0–m7 linear on exit. DIAG2 saves and restores them; the bench
+   now enters with them non-linear and checks they come back.
+2. **Y below $800:** octabam advises absolute scratch at $800 or above. LT moves to $ba7 (TH, the
+   square's cleared table, takes $7a5).
+3. **Memory-bus contention:** the engine makes two X/Y accesses most cycles. The burn image's nop
+   loop makes none, and it was clean at 3,048 cycles. DMA starved by the core would click the I/O
+   on the mains even with the track muted.
+4. **Arithmetic** that differs on silicon. DJ EQ is bypassed while 303 is up, so a 24-bit
+   recording of the track is the engine's output bit for bit and can be compared with the bench.
+
+**DIAG2:** `tools/build_ot303_hwprobe.py` → `out/OCTATRACK_OS1.40C_OT303_DIAG2.syx`
+(`bac0c74e775fb283d12f6862cdad275983a13a2b470806274b00f82869d5fdba`, version `140C_303D2`).
+- DJ EQ page 2 slot 7 `303`, in sixteens:
+
+  | 303 | mode |
+  |---|---|
+  | 1–15 | TONE (110 Hz saw) |
+  | 16–31 | ENG+TONE |
+  | 32–47 | RIFF |
+  | 48–63 | WATCH (riff + a checksum of the engine's constants; a change latches 880 Hz) |
+  | 64–79 | NOPS+TONE |
+  | 80–95 | READS+TONE |
+  | 96–127 | SQUARE (cost only) |
+
+- No BURN knob.
+- Bench: all modes bit-exact on both payloads, a corruption test fires the alarm. Firmware (ot_emu):
+  inert +4 instructions a call, the engine only on its track, SPRING → stub, DARK REV as stock.
+
+**How to read the result:**
+
+| result | cause |
+|---|---|
+| TONE dirty | the injection/bypass path |
+| TONE clean, ENG+TONE dirty, NOPS clean, READS dirty | contention |
+| READS clean, ENG+TONE dirty | the engine's writes/state |
+| WATCH beeps | something overwrites the engine's constants |
+| RIFF dirty, everything else clean | arithmetic (then a 24-bit recording) |

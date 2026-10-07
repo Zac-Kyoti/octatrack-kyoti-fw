@@ -6,7 +6,7 @@
 # dsp56kEmu as the dispatcher would call them (tools/ot303/hwprobe_probe.cpp), saw and square,
 # against the integer twin. Needs the private toolchain (out/ot303/dsp56300_new).
 #   python3 tools/ot303/hwprobe_check.py [FRAMES]
-import os, pathlib, subprocess, sys
+import os, pathlib, re, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / 'tools' / 'ot303'))
@@ -42,9 +42,10 @@ def main():
         (d / 'x.txt').write_text(''.join(f'{a:x} {v:x}\n' for a, v in sorted(b['x'].items())))
         (d / 'syms.txt').write_text(''.join(f'{k} {v & 0xffffff:x} {"Y" if k in b["ysyms"] else "X"}\n'
                                             for k, v in sorted(b['syms'].items())))
-        for knob in (32, 100):
-            p = subprocess.run([str(probe), str(d), str(knob), frames], capture_output=True, text=True, errors='replace')
-            print(f'payload {tag} knob {knob:3d}: ' + '\n                    '.join(p.stdout.strip().splitlines()))
+        for knob, extra in ((8, []), (20, []), (40, []), (56, []), (56, ['corrupt']), (70, []), (85, []), (100, [])):
+            p = subprocess.run([str(probe), str(d), str(knob), frames, *extra], capture_output=True, text=True, errors='replace')
+            lines = [l for l in p.stdout.strip().splitlines() if not re.match(r'^\w+@\d+:', l)]
+            print(f'payload {tag} 303 = {knob:3d}{" corrupt" if extra else ""}: ' + '\n' + ''.join(f'    {l}\n' for l in lines), end='')
             fails += p.returncode != 0
     print('ALL GOOD' if not fails else f'{fails} FAILED')
     return 1 if fails else 0

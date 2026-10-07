@@ -41,7 +41,8 @@
 ; ---- placement: three bases, rewritten per payload by the builders (asm_macros.layout)
 XB      equ     $1000           ;@LAYOUT X block, 64-aligned, $6d words
 YS      equ     $1040           ;@LAYOUT Y state block, 64-aligned, $ab words
-LT      equ     $1200           ;@LAYOUT Y tables, 1,886 words (LT 860, then TH 1,026)
+LT      equ     $1200           ;@LAYOUT Y coefficient table, 860 words
+TH      equ     $155c           ;@LAYOUT Y tanh table, 1,026 words (the square's)
 ; ---- the X walker's block (r2), in reading order
 XW      equ     XB              ; 64-aligned
 CS      equ     XW+0
@@ -145,7 +146,7 @@ W1A     equ     OCB+4           ; W1 again; W1..W3 are a ring (4-aligned)
 W2      equ     OCB+5
 W3      equ     OCB+6
 ; ---- tables (Y)
-TH      equ     LT+860          ; 513 entries x 2: tanh, slope (LT: 215 x 4: b0, db0, kp/64, dkp)
+; LT: 215 entries x 4: b0, db0, kp/64, dkp; TH: 513 entries x 2: tanh, slope
 THM     equ     TH+512          ; TH + 2*256: x = 0
 ;@Y INC_T S48H S48L M48H M48L RC2 L0_16 AG_8 AMP2 DIC2 DIC1 PH HB1C APX APY H2X H2Y NIC2 NIC1 TOPS OSCW HPX HPY FBX FBY YY1 YY2 YY3 YY4 PP HB2A HB2B LT TH THM
 
