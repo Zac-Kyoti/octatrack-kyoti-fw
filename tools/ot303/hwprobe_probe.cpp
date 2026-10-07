@@ -95,7 +95,8 @@ int main(int argc, char** argv) {
         calls++;
         return cyc;
     };
-    auto split = [](long f) { int k = int((f * 7) % 16); return k; };      // 0..15: the trig's offset (the second call is never empty)
+    const bool nosplit = std::getenv("HWP_NOSPLIT") != nullptr;          // one 16-sample call a frame (the firmware's usual)
+    auto split = [&](long f) { return nosplit ? 0 : int((f * 7) % 16); };  // 0..15: the trig's offset (the second call is never empty)
 
     twin::Engine e;                                              // builds the twin's tables
     e.init(HB2_43_16, 22, 16000.0, HB1_15_18, 8);
@@ -182,6 +183,11 @@ int main(int argc, char** argv) {
             wav.push_back(float(l) / 8388608.0f);
             sample++;
         }
+    }
+    if (std::getenv("HWP_DUMP")) {                                      // the engine's memory after FRAMES riff frames
+        uint32_t pb = sym("SAWW");
+        std::printf("X:%05x:", pb); for (int i = 0; i < 216; i++) std::printf(" %06x", mem.get(MemArea_X, pb + i) & 0xffffff); std::printf("\n");
+        std::printf("Y:%05x:", sym("YS")); for (int i = 0; i < 172; i++) std::printf(" %06x", mem.get(MemArea_Y, sym("YS") + i) & 0xffffff); std::printf("\n");
     }
     const char* what[] = {"TONE", "ENG+TONE", "RIFF", "WATCH", "NOPS+TONE", "READS+TONE", "SQUARE (tanh cleared)"};
     std::printf("BIT-EXACT: %ld samples, %s%s, %ld calls; %.1f cycles/sample incl. the wrapper (worst frame %.1f)\n",

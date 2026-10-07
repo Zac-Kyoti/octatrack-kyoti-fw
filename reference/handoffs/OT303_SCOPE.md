@@ -1259,3 +1259,46 @@ Candidates, and what DIAG2 does about each:
 | READS clean, ENG+TONE dirty | the engine's writes/state |
 | WATCH beeps | something overwrites the engine's constants |
 | RIFF dirty, everything else clean | arithmetic (then a 24-bit recording) |
+
+**DIAG2 in the firmware emulator (2026-10-07).**
+- **Capture:** ot_emu's `--audio-out` works with `--load-ms 20000`. Core 0's slots 2–5 are
+  MAIN/CUE (BOTLI's own tracks are silent under this emulator; the probe's tone shows).
+- **Engine state:** with 303 = 40 on T2 and every other FX cleared, the engine's memory after 4,448
+  riff samples equals the bench's (`HWP_NOSPLIT=1 HWP_DUMP=1 hwprobe_probe`) word for word: all of
+  the Y state block, the X block, and the wrapper's riff position.
+- **m registers:** the saved entry values (MSAV) are all `$ffffff`, so stock calls DJ EQ with m0–m7
+  linear. Candidate 1 is out, at least under the emulator.
+- **Call pattern:** one call a frame, `n7 = 16`, `r0 = 0`. `r6` rotates over the stock
+  triple-buffered parameter blocks (`$283/$303/$383`).
+- **The MAIN capture** equals the bench × 0.7957 bit for bit through every note's attack and
+  sustain. It departs in the releases. The engine's state is equal, so the departure is
+  downstream: the test project's own T2 settings (unidentified).
+
+**Conclusion:** on the emulator the engine and the wrapper are correct inside the firmware. The
+crackle on the unit is hardware-specific: contention, or silicon behaviour the emulator lacks.
+DIAG2's NOPS/READS/ENG+TONE modes are the test.
+
+**Learned from octabam's ANALOG BD (repeat98; HW-tested on an MK1, ANALOGBD1) and SYNTH (Tim Hastie):**
+- **Host:**
+  - ANALOG BD runs at the per-track SOURCE seam: `move a,x:>$20e` (A `P:0x39c` / B `P:0x1a2`)
+    becomes a jsr, and the DSP continues at A `P:0x426` / B `P:0x221`.
+  - The voice renders 16 samples into X:0, upstream of stock AMP and both FX slots.
+  - FLEX tracks carry a signature in the source record (`w0 $ab09`, `w2 $0909`).
+  - The trig flag is in the record, and the trig's sample offset is `x:$20c`.
+  - It sets m0/m5/m6 linear itself.
+  - **This is the OT-303's host for the product** (both FX slots stay free; no THRU question).
+- **Data memory:** octabam's loader boots a rebuilt DSP upload (pre-boot payload) with one more X
+  record: ANALOG BD's tables and voice blocks sit at X:$2840–$3940, free in octabam's measured
+  ledgers on both cores. **The OT-303's full tables can load as data:** no packing, no build at
+  boot, and the square's tanh fits.
+- **P:** DARK REV's 35-word helper relocated to the donor's end, with its three callers
+  retargeted, gives one contiguous 1,028-word region.
+- **Registration:**
+  - ANALOG BD is machine row 5 on FLEX + `AB\x01` in unused NEIGHBOR bytes.
+  - MACHINEDRUM / SYNTH / POLY conflict with those seams: a shared registry is needed before an
+    OT-303 machine composes with them.
+- **SYNTH:**
+  - FM on the ColdFire into a FLEX stream.
+  - Its pops and crackles were its own limiter and its START/retrigger handling.
+  - Since 2.9 it owns the AMP envelope (the DSP sees an always-open AMP), a model for the
+    OT-303's VCA against stock AMP.
