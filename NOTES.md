@@ -35925,3 +35925,11 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   - `compare.align` sign bug fixed.
   - Cost ~600 instructions with Heun, ~390 without.
   - Round 3 pack published. Scope §11.
+- **S124 cont (2026-10-06): round 3 → top end.**
+  - ABX twin vs approved, Hot: p 0.172. Hot pick: Open303, "a little more rounded".
+  - Cause: high-fc resonance near the self-oscillation edge, plus the slower circuit-accent
+    charge; not the filter model (the linear model + Open303 accent matches Open303's top
+    to 0.1 dB).
+  - Added `ktab` (Δ 4.5 is the only oscillation-safe curve, RK4-checked) and `acctc` (12 ms
+    lands 2.9 dB under Open303 at 14–18 kHz).
+  - Round 4 published. Scope §11.

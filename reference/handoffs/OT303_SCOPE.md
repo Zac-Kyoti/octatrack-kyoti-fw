@@ -798,3 +798,42 @@ at 0.93 c/i). Both fit; Phase 0b's burn test confirms on hardware.
 - ABX twin vs approved (Hot, Sweep);
 - ABX Heun on/off (Hot, Sweep);
 - Hot preference, twin vs Open303.
+
+### Round 3 results and the top end (2026-10-06)
+
+User:
+- ABX twin vs approved, Hot: p = 0.172, not distinguishable. Sweep and the corrector ABX
+  were lost to the page losing audio.
+- Hot pick: Open303 as shipped. Its extended top matters, but it is "a touch too much at
+  the very top" → wanted: Open303, a little more rounded.
+
+**Where Open303's Hot top end comes from** (band energy at equal RMS, 14–18 kHz vs Open303):
+
+| version | 14–18 kHz |
+|---|---|
+| the linear model with Open303's accent and k 16.9988 (2× or 4×) | −0.1 |
+| the twin with Open303's accent | −6 (k ceiling 16.5 and D 0.5 compressing the peaks) |
+| the twin with the circuit accent (47 ms charge) | −12 |
+
+**The filter model is not the cause.** The causes are:
+1. Resonance near the self-oscillation edge at high cutoffs. Open303's peak at fc 14–20 kHz,
+   RES 100 is +26–27 dB against our +17–21.
+2. The accent charge time.
+
+**Changes (in `voice_study`):**
+- `ktab:Δ` (`tools/ot303/ktab.h`): k(RES, fc) fitted so the 2× ladder's peak = Open303's − Δ
+  dB.
+  - Applied above ~1.4–2.8 kHz only, and only ever adding resonance; capped at 16.9.
+  - Safety, true model (RK4 8×) in Hot: Δ 1.5 sustains oscillation (RMS 1.75), Δ 3
+    intermittent (0.65), **Δ 4.5 safe (0.222)**. Δ 4.5 is the one in use.
+- `acctc:ms`, the circuit accent's charge time:
+  - 47 ms (Whittle's values) → −9.7 dB at 14–18 kHz (with Δ 4.5);
+  - 25 ms → −4.7;
+  - 12 ms → −2.9.
+  - The discharge (150 ms, the stacking) is unchanged.
+- Saturation 0.5 vs 0.3: no top-end difference.
+- `fmax` (the cutoff ceiling above 20 kHz): no effect; Hot never asks for it.
+
+**Round 4 pack (artifact v6, also served locally on :8303):**
+- blind pick on Hot and Accents: Open303 vs 25 ms vs 12 ms (both with Δ 4.5);
+- the corrector ABX (Hot, Sweep) on the 12 ms voice.

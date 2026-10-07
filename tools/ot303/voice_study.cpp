@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "halfband79.h"
+#include "ktab.h"
 
 using namespace rosic;
 static const double FS = 44100.0;
@@ -42,6 +43,19 @@ static const double FS = 44100.0;
 // ------------------------------------------------------------------------------------------
 // the analog-limit parameter mapping of Open303's TB_303 mode (filter_linear.py documents it)
 static double KMAX = 0;            // 0: Open303's 16.998792; else the RES-100 feedback gain
+static double FMAX = 20000.0;      // the cutoff ceiling (Open303: 20 kHz)
+static int KTSEL = 0;              // 0 off; 15/30/45: k(RES, fc) toward Open303's peaks - 1.5/3/4.5 dB
+static double ktab(double knob, double fc) {
+    const double (*T)[15] = KTSEL == 15 ? KT_15 : KTSEL == 30 ? KT_30 : KT_45;
+    double x = (log2(fc) - log2(200.0)) / (log2(20000.0) - log2(200.0)) * (KT_NF - 1);
+    x = x < 0 ? 0 : (x > KT_NF - 1 ? KT_NF - 1 : x);
+    int j = (int)x; if (j > KT_NF - 2) j = KT_NF - 2; double fx = x - j;
+    int i = 0; while (i < 3 && knob > KT_KNOB[i + 1]) i++;
+    double fy = (knob - KT_KNOB[i]) / (KT_KNOB[i + 1] - KT_KNOB[i]); fy = fy < 0 ? 0 : (fy > 1 ? 1 : fy);
+    auto at = [&](int r, int c) { return T[r][c]; };
+    double a = at(i, j) + fx * (at(i, j + 1) - at(i, j)), b = at(i + 1, j) + fx * (at(i + 1, j + 1) - at(i + 1, j));
+    return a + fy * (b - a);
+}
 struct Mapping {
     double fc = 1000.0, r = 0.0, wc = 0, k = 0, g = 1;
     static double skew(double pct) {
@@ -49,10 +63,20 @@ struct Mapping {
         return (1.0 - exp(-3.0 * rr)) / (1.0 - exp(-3.0));
     }
     void update() {
-        double f = fc < 200.0 ? 200.0 : (fc > 20000.0 ? 20000.0 : fc);
+        double f = fc < 200.0 ? 200.0 : (fc > FMAX ? FMAX : fc);
         double w = 0.00045522346 * 176400.0 + 6.1922189 * f / sqrt(2.0);
         wc = 2.0 * w;
         k = (KMAX > 0 ? KMAX : 16.998792) * r;
+        if (KTSEL && r > 0) {          // only ever adds resonance, only above ~1.4-2.8 kHz
+            double knob = -log(1.0 - r * (1.0 - exp(-3.0))) / 3.0;
+            if (knob >= 0.25) {
+                double w = (log2(f) - log2(1400.0)) / (log2(2800.0) - log2(1400.0));
+                w = w < 0 ? 0 : (w > 1 ? 1 : w);
+                double kt = ktab(knob, f);
+                if (kt > k) k = k + w * (kt - k);
+                if (k > KTAB_CAP) k = KTAB_CAP;
+            }
+        }
         g = ((16.998792 / 17.0 - 1.0) * r + 1.0) * (1.0 + r);
     }
 };
@@ -466,6 +490,7 @@ struct Voice {
     EllipticQuarterBandFilter el;
     Fir fir;
     bool blepOsc = false, hb = false; OscBlep ob; HalfBand hbd;
+    double topHz = 0, topS = 0;
     void init(std::unique_ptr<Filt> f, int n, bool useEll) {
         flt = std::move(f); N = n; ell = useEll;
         // table k carries harmonics up to fs/8..fs/4 at offset k: keep >= 22 kHz without aliasing,
@@ -551,6 +576,10 @@ struct Voice {
         tmp = o.notch.getSample(tmp);
         tmp *= ampEnvOut;
         tmp *= o.ampScaler;
+        if (topHz > 0) {                       // gentle rounding of the very top (one pole, bilinear)
+            double K = tan(M_PI * topHz / FS), a = K / (1 + K);
+            double v = (tmp - topS) * a, y = v + topS; topS = y + v; tmp = y;
+        }
         return QNT.q(tmp, 4.0);
     }
 };
@@ -659,7 +688,7 @@ int main(int argc, char** argv) {
     int N = atoi(argv[4]);
     bool useEll = !strcmp(argv[5], "ell"), useHB = !strcmp(argv[5], "hb");
     double D = atof(argv[6]);
-    double oin = 0, ost = 0, ofb = 0, ores = -1, okmax = 0; bool ocomp = false, oacc = false, oblep = false;
+    double oin = 0, ost = 0, ofb = 0, ores = -1, okmax = 0, ofmax = 20000, otop = 0, oacctc = 47; int oktab = 0; bool ocomp = false, oacc = false, oblep = false;
     for (std::string opt = argv[6]; !opt.empty();) {          // "k:v,k:v" (or a bare number = D)
         auto cm = opt.find(','); std::string kv = opt.substr(0, cm);
         auto co = kv.find(':');
@@ -670,6 +699,9 @@ int main(int argc, char** argv) {
             else if (k == "blep") oblep = v != 0; else if (k == "tab") TAB.use = v != 0;
             else if (k == "q") QNT.on = v != 0; else if (k == "stbits") QNT.stateBits = (int)v;
             else if (k == "res") ores = v; else if (k == "kmax") okmax = v;
+            else if (k == "fmax") ofmax = v; else if (k == "top") otop = v;
+            else if (k == "ktab") oktab = (int)lround(v * 10);
+            else if (k == "acctc") oacctc = v;
             else { fprintf(stderr, "unknown option %s\n", k.c_str()); return 2; }
         }
         opt = cm == std::string::npos ? "" : opt.substr(cm + 1);
@@ -697,12 +729,12 @@ int main(int argc, char** argv) {
     else if (fname == "refnl") f = std::make_unique<FRef>(D);
     else { fprintf(stderr, "unknown filter %s\n", fname.c_str()); return 2; }
     Voice v; params(v.o, sc);
-    v.accRC = oacc; v.calibrateAccent();
+    v.accRC = oacc; v.accTauC = oacctc * 0.001; v.calibrateAccent();
     v.blepOsc = oblep; v.hb = useHB;
     if (useHB && N != 2) { fprintf(stderr, "hb decimator is half-band: N must be 2\n"); return 2; }
     v.init(std::move(f), N, useEll);
     if (ores >= 0) sc.res = ores;
-    KMAX = okmax;
+    KMAX = okmax; FMAX = ofmax; v.topHz = otop; KTSEL = oktab;
     v.setResonance(sc.res);
     auto out = run(v, sc, [&](double c) { v.o.setCutoff(c); });
     FILE* fh = fopen(argv[8], "wb");
