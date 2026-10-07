@@ -1030,3 +1030,15 @@ B lean, on Hot, Squelch, Accents, Square.
 **Cost estimate (instructions per output sample, to be measured on the asm):** control ~50,
 oscillator + pre-HP + TB filter ×4 ≈ 110–120 (square +40), decimation ≈ 45, post ≈ 22, overhead
 ~10 → **≈ 240 saw, ≈ 280 square** (was ≈ 320).
+
+### Round 7 results (user, 2026-10-06): the lean engine is accepted
+
+| scene | correct | p |
+|---|---|---|
+| Hot | 0/4 | 1.000 |
+| Squelch | 4/10 | 0.828 |
+| Accents | 1/5 | 0.969 |
+| Square | 6/10 | 0.377 |
+
+All at chance. **The twin (`twin.h`, options `hb2:43,hbfp:16,hb1:15,hb1fp:18,meg48:1`) is the
+contract the DSP assembly must match bit for bit.**
