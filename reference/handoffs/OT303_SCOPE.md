@@ -1042,3 +1042,57 @@ oscillator + pre-HP + TB filter ×4 ≈ 110–120 (square +40), decimation ≈ 4
 
 All at chance. **The twin (`twin.h`, options `hb2:43,hbfp:16,hb1:15,hb1fp:18,meg48:1`) is the
 contract the DSP assembly must match bit for bit.**
+
+### Phase 2b, step 2: the DSP engine (2026-10-06/07, `tools/ot303/ot303_engine.asm`)
+
+**Bit-exact against the twin on dsp56kEmu, all five scenes** (695,423 samples each:
+sample-accurate notes, slides, accents, square, knob words every 16 samples).
+`python3 tools/ot303/engine_check.py`: assembles through `tools/dsp_xasm.py` (every word
+disassembled and checked), has `voice_study`'s twin log each scene's host segments, and replays
+them through the twin and the emulated DSP (`engine_probe.cpp`).
+
+- Standalone routine `ot303`: renders r7 samples into `x:(r3)+`; the host words and the
+  trigger pokes (S48, M48, AMP2) are memory words. Position-independent (relative branches).
+- **543 words of P** (413 instructions, 128 of them two-word); fits SPRING's 1,063 or one
+  FX2-slot tail (~605).
+- Data: Y tables 1,886 words (coefficients 860, tanh 1,026) + ~100 words of state and
+  constants; X ~140 words incl. the half-band buffers. Placement still to check against the
+  free regions (Y `$795..$FFF` = 2,155 words on stock: tight but fits).
+- **Cost, instructions per output sample** (emulator count; cycles ≈ +15% for two-word
+  instructions and stalls, measure on hardware):
+
+  | path | instructions |
+  |---|---|
+  | saw (WAVE 0) | **360** |
+  | square / blend | **472** |
+
+  Breakdown (saw): control 81 (envelopes, accent, log cutoff, coefficient tables, amp
+  declicker), oscillator 29, 4× pre-HP + TB filter 116, half-band 1 32, half-band 2 32, post
+  54, loop and I/O ~15.
+
+- This is above the ~240/280 estimate: the control block (48-bit envelopes, the 2nd-order
+  declicker) and the post filters (the 7.5 Hz notch SVF needs scaled coefficients) cost more
+  than budgeted. Further hand-tuning (fewer two-word moves, square path) is worth maybe
+  10–15%.
+- **Against the burn test:** core 1 (624 cycles spare, worst legal config) hosts one OT-303
+  with margin. Core 0 (288 spare in the worst config) overruns in the heaviest FX
+  configurations, as accepted (option 4, caveated); its headroom in normal configurations is
+  the next measurement.
+
+**Toolchain lessons (dsp_asm, the emulator's assembler):**
+- `mpy/mac` operand pairs must be one of the 8 QQQ orders; anything else silently becomes
+  `mpysu`.
+- Immediate shifts (`asl #n`), long-immediate ALU ops (`and #>`), `mpy S,#n` take **no**
+  parallel move; the move is silently dropped.
+- The X:R / R:Y move classes are not encoded (one half dropped).
+- A bare `tfr a,b` encodes as `rnd b`.
+- `dsp_xasm` catches all of these by disassembling every word; it now also builds XY+ALU
+  instructions whose halves are writes (commit `ec96d45`, REPITCH output unchanged).
+- Stock DSP code leaves SR RM = 0 (`move #$300,sr` at boot; no other writer): convergent
+  rounding, as the twin assumes.
+
+**Next:**
+1. The host side, still standalone: triggers from a flag (the DSP pokes S48/M48/AMP2 itself),
+   the host words from the OT's per-track record.
+2. Phase 3's first item: does THRU run the voice engine (`P:0x3a1`)? That picks the hook.
+3. Hardware cost: a burn-style measurement of the real engine on core 0 and core 1.
