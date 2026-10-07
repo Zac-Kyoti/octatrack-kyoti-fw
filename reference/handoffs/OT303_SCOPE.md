@@ -993,3 +993,40 @@ sample.
   core) is the target; the build is **caveated**: in the heaviest FX configurations on T5–8
   (many DJ EQ / LO-FI / SPRING / CHORUS instances) the second instance can overrun the core.
   The caveat's exact boundary is measured once the engine exists.
+
+### Phase 2b, step 1: the integer twin (2026-10-06, `tools/ot303/twin.h`)
+
+The final voice in the DSP56300's own arithmetic: 24-bit words, 56-bit accumulators, stores that
+saturate and truncate, convergent `rnd` (SR RM = 0, the reset default ❓ confirm the OT leaves it
+there) on every recursive state. Host words (note/knob events; the ColdFire's job) are separate
+from the per-sample DSP work. `voice_study twin SCENE OPTS OUT`, `voice_study twinunit`,
+`tools/ot303/twin_check.py TAG OPTS`.
+
+**What the twin needed (found by measurement, each against the approved voice):**
+
+| issue | fix | effect |
+|---|---|---|
+| truncating stores in the slow post filters build a DC offset (notch 7.5 Hz, allpass, HP) | convergent rounding on recursive states | notch null −29 → −61 dB, one-poles −54 → −89 dB |
+| the filter envelope (MEG) decaying in 24 bits drifts the resonance's path (Hot 4–10 kHz error −15 dB) | **48-bit MEG** (≈3 instructions per sample) | Hot −25 → −34…−46 dB; other scenes −51…−65 dB |
+| 24-bit phase increment: ≤ 0.14 cent off (0.27 at C1) | kept (lean) | inaudible: detuning the approved voice by 0.05 cent moves the spectral metrics more |
+
+**The lean savings (option 3), each measured with the reference oscillator and latency matched:**
+
+| saving | result |
+|---|---|
+| coefficient tables over log2(cutoff), 1/32 octave, linear interpolation (no exp2, no division) | vs exact formulas: same within −60 dB |
+| second decimator 79 → **43 taps** (pass to 16 kHz, −99 dB from 28.1 kHz): 22 MACs, was 40 | same within −60 dB |
+| first decimator 23 → **15 taps** (pass to 18 kHz, −88 dB from 70.2 kHz): 8 MACs, was 12 | same within −60 dB |
+| square only when WAVE > 0 | identical by construction |
+
+The shorter decimators cut the filter→VCA latency by 10 samples (0.23 ms); that moves toward the
+analog 303 (no latency), and is the one change not hidden by latency matching.
+
+**The lean twin as it will run** (own oscillator, 24-bit phase, knob words every 16 samples) vs the
+approved voice: spec 0.33–0.45 dB, p95 1.5–2.0, the same size as the approved voice against
+itself detuned by 0.05 cent (0.37–0.71 / 1.6–3.3). **Round 7 ABX** (local :8303): A approved,
+B lean, on Hot, Squelch, Accents, Square.
+
+**Cost estimate (instructions per output sample, to be measured on the asm):** control ~50,
+oscillator + pre-HP + TB filter ×4 ≈ 110–120 (square +40), decimation ≈ 45, post ≈ 22, overhead
+~10 → **≈ 240 saw, ≈ 280 square** (was ≈ 320).
