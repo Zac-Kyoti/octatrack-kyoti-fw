@@ -35933,3 +35933,9 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   - Added `ktab` (Δ 4.5 is the only oscillation-safe curve, RK4-checked) and `acctc` (12 ms
     lands 2.9 dB under Open303 at 14–18 kHz).
   - Round 4 published. Scope §11.
+- **S124 cont (2026-10-06): round 4.**
+  - Hot = 25 ms accent charge; Accents = Open303; corrector inaudible (3/10, 7/10) →
+    dropped.
+  - Found that the k ceiling had scaled every RES by 3%; now k = min(16.998792 r, 16.5),
+    RK4-safe in all scenes.
+  - Round 5 confirmation (Accents, Squelch: Open303 vs final) published.

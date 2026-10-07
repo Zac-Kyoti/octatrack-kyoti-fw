@@ -44,6 +44,7 @@ static const double FS = 44100.0;
 // the analog-limit parameter mapping of Open303's TB_303 mode (filter_linear.py documents it)
 static double KMAX = 0;            // 0: Open303's 16.998792; else the RES-100 feedback gain
 static double FMAX = 20000.0;      // the cutoff ceiling (Open303: 20 kHz)
+static int KCAPMODE = 0;           // 0: k = KMAX r (rounds 3-4); 1: k = min(16.998792 r, KMAX)
 static int KTSEL = 0;              // 0 off; 15/30/45: k(RES, fc) toward Open303's peaks - 1.5/3/4.5 dB
 static double ktab(double knob, double fc) {
     const double (*T)[15] = KTSEL == 15 ? KT_15 : KTSEL == 30 ? KT_30 : KT_45;
@@ -66,7 +67,11 @@ struct Mapping {
         double f = fc < 200.0 ? 200.0 : (fc > FMAX ? FMAX : fc);
         double w = 0.00045522346 * 176400.0 + 6.1922189 * f / sqrt(2.0);
         wc = 2.0 * w;
-        k = (KMAX > 0 ? KMAX : 16.998792) * r;
+        // Open303's resonance curve, clipped at the ceiling: only RES above ~92% (where 16.998792 r
+        // would exceed KMAX) is held down. (Until 2026-10-06 this scaled every RES by KMAX/16.998792.)
+        k = 16.998792 * r;
+        if (KCAPMODE == 0 && KMAX > 0) k = KMAX * r;
+        else if (KMAX > 0 && k > KMAX) k = KMAX;
         if (KTSEL && r > 0) {          // only ever adds resonance, only above ~1.4-2.8 kHz
             double knob = -log(1.0 - r * (1.0 - exp(-3.0))) / 3.0;
             if (knob >= 0.25) {
@@ -688,7 +693,7 @@ int main(int argc, char** argv) {
     int N = atoi(argv[4]);
     bool useEll = !strcmp(argv[5], "ell"), useHB = !strcmp(argv[5], "hb");
     double D = atof(argv[6]);
-    double oin = 0, ost = 0, ofb = 0, ores = -1, okmax = 0, ofmax = 20000, otop = 0, oacctc = 47; int oktab = 0; bool ocomp = false, oacc = false, oblep = false;
+    double oin = 0, ost = 0, ofb = 0, ores = -1, okmax = 0, ofmax = 20000, otop = 0, oacctc = 47; int oktab = 0, okcap = 0; bool ocomp = false, oacc = false, oblep = false;
     for (std::string opt = argv[6]; !opt.empty();) {          // "k:v,k:v" (or a bare number = D)
         auto cm = opt.find(','); std::string kv = opt.substr(0, cm);
         auto co = kv.find(':');
@@ -701,7 +706,7 @@ int main(int argc, char** argv) {
             else if (k == "res") ores = v; else if (k == "kmax") okmax = v;
             else if (k == "fmax") ofmax = v; else if (k == "top") otop = v;
             else if (k == "ktab") oktab = (int)lround(v * 10);
-            else if (k == "acctc") oacctc = v;
+            else if (k == "acctc") oacctc = v; else if (k == "kcap") okcap = (int)v;
             else { fprintf(stderr, "unknown option %s\n", k.c_str()); return 2; }
         }
         opt = cm == std::string::npos ? "" : opt.substr(cm + 1);
@@ -734,7 +739,7 @@ int main(int argc, char** argv) {
     if (useHB && N != 2) { fprintf(stderr, "hb decimator is half-band: N must be 2\n"); return 2; }
     v.init(std::move(f), N, useEll);
     if (ores >= 0) sc.res = ores;
-    KMAX = okmax; FMAX = ofmax; v.topHz = otop; KTSEL = oktab;
+    KMAX = okmax; FMAX = ofmax; v.topHz = otop; KTSEL = oktab; KCAPMODE = okcap;
     v.setResonance(sc.res);
     auto out = run(v, sc, [&](double c) { v.o.setCutoff(c); });
     FILE* fh = fopen(argv[8], "wb");

@@ -837,3 +837,35 @@ User:
 **Round 4 pack (artifact v6, also served locally on :8303):**
 - blind pick on Hot and Accents: Open303 vs 25 ms vs 12 ms (both with Δ 4.5);
 - the corrector ABX (Hot, Sweep) on the 12 ms voice.
+
+### Round 4 results and the final voicing (2026-10-06)
+
+User:
+- Hot keep = **accent charge 25 ms** (≈ 5 dB under Open303 at 14–18 kHz).
+- Accents keep = Open303 as shipped.
+- Corrector ABX: Hot 3/10 (p 0.945), Sweep 7/10 (p 0.172), both chance → **Heun dropped**.
+  Cost estimate ~390 instructions per sample (§11).
+
+**Fix:**
+- The ceiling had been applied as k = 16.5 · r, which cut *every* RES by 3% (Accents at RES
+  85 lost resonance).
+- Now **k = min(16.998792 · r, 16.5)** (`kcap:1`): Open303's curve is untouched below
+  RES ≈ 92%, and only the top is held.
+- Safe by construction (never above the RK4-checked 16.5 Hot case). Re-checked: the true
+  model with the final mapping does not sustain oscillation in any scene.
+
+**Final voicing (round-5 candidate):**
+- 2×, no Heun, stage saturation 0.5;
+- k = min(16.998792 r, 16.5), plus ktab Δ 4.5 above ~1.4–2.8 kHz (adds only, capped 16.9);
+- circuit accent with 25 ms charge and 150 ms discharge.
+
+Against Open303 at equal RMS, 0.5–10 kHz is within about ±1 dB in every scene, then 1–2 dB
+under at 10–18 kHz (5 dB in Hot, the user's pick).
+
+**Round 5 (artifact v7, local :8303):** blind keep on Accents and Squelch, Open303 vs final.
+
+Voicing constants that stay tweakable on hardware (data, not code):
+- the accent charge/discharge;
+- Δ;
+- D;
+- the RES ceiling.
