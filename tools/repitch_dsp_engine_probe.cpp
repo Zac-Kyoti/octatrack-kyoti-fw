@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <map>
 #include <iterator>
 #include <string>
 #include <vector>
@@ -110,6 +111,11 @@ int main(int argc, char** argv)
 	const uint64_t incEff = (uint64_t(rint) << 24) | ((rfrac & ~3u) | (mode & 3));
 	std::vector<int32_t> out;
 	std::vector<uint64_t> counts;
+	// RK_PCHIST=FILE: per P address, how often it executed and its datasheet cycles (the
+	// emulator's opcodecycles table, as the load audit counts), over every pass
+	std::map<uint32_t, std::pair<uint64_t, uint64_t>> pchistStore;
+	std::map<uint32_t, std::pair<uint64_t, uint64_t>>* pchist = std::getenv("RK_PCHIST") ? &pchistStore : nullptr;
+	if(pchist) dsp.setHostStepped(true);
 	uint64_t pos = 0;                                       // source position, 24.24
 	size_t written = 0;
 	while(true) {
@@ -162,7 +168,14 @@ int main(int argc, char** argv)
 			dsp.setPC(PRELUDE);
 			const uint64_t before = dsp.getInstructionCounter();
 			unsigned steps = 0;
-			while(dsp.getPC().toWord() != stop && steps++ < 400000) dsp.execInterpreter();
+			while(dsp.getPC().toWord() != stop && steps++ < 400000) {
+				const uint32_t hpc = dsp.getPC().toWord();
+				// RK_PCHIST: executions and datasheet cycles per P address (the interpreter does not
+				// advance getCycles(), so price the instruction from the shared opcode-cycle table)
+				if(pchist) { auto& e = (*pchist)[hpc]; ++e.first; e.second += dsp.calcOpcodeCycles(hpc); }
+				dsp.execInterpreter();
+				if(pchist) while(dsp.doLoopEnd()) {}   // host-stepped: a DO loop's body is one step per instruction
+			}
 			if(dsp.getPC().toWord() != stop) { std::printf("pass did not finish (pc %06x)\n", dsp.getPC().toWord()); return 1; }
 			frameCount += dsp.getInstructionCounter() - before;
 			if((R.r[0].var & 0xffffff) != 0x5555) { std::printf("r0 clobbered\n"); return 1; }
@@ -193,6 +206,10 @@ int main(int argc, char** argv)
 	if(argc == 16) {
 		std::ofstream c(argv[15]);
 		for(auto n : counts) c << n << "\n";
+	}
+	if(pchist) {
+		std::ofstream h(std::getenv("RK_PCHIST"));
+		for(const auto& [a, n] : *pchist) h << std::hex << a << " " << std::dec << n.first << " " << n.second << "\n";
 	}
 	std::printf("rendered %zu frames in %zu frames of two visits\n", out.size() / 2, counts.size());
 	return 0;

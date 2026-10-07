@@ -124,7 +124,7 @@ MODULE = Module(
         # At the standalone image's own addresses (tools/build_repitch_repeat98_kyoti.py).
         Linked("rpk_logic", os.path.join(_HERE, "patch_repitch_kyoti.s"), dram=True,
                reference=(0x400d6f80,
-                          "b1208b324e4e2f057c1c2665e78fb1f8a5fc0ebcfb65752541a5187a130a29ce")),
+                          "d194b52dc093ec877e167018c30185ff5a118b3c9a168d4b476c2517480990de")),
         Linked("rpk_glyphs", os.path.join(_HERE, "rpk_glyphs.s"), dram=True,
                reference=(0x400d7870,
                           "5f3a4808fa88fcbb217afb632c8f205275cda31125a82dde55597bb04bff3fe9")),
@@ -162,13 +162,18 @@ MODULE = Module(
         asm=os.path.join(_HERE, "rpk_dsp.asm"),
         priority=31,
         ybase=YBase.NEVER,
-        ptable=_tab.PTABLE,          # 145: render half-table + cutoff table
-        ptable2=_tab.PTABLE2,        # 448: the RPSP and RPS9 half-rows
+        ptable=_tab.PTABLE,          # 81: the render's half-table
+        ptable2=_tab.PTABLE2,        # 384: the RPSP and RPS9 half-rows
         hooks=(DspHook({"A": 0x0040b, "B": 0x0020e}, (0x76e500, 0x5edd00), "zqrp",
-                       "voice kernel prologue: RPS9 / RPSP render the pass"),),
+                       "voice kernel prologue: RPS9 / RPSP render the pass"),
+               # each payload's one-time boot memory clear, `do b,LA`: zqboot runs it
+               # and copies the tables to Y before the frame loop exists
+               DspHook({"A": 0x00046, "B": 0x00047},
+                       {"A": (0x06cf00, 0x000049), "B": (0x06cf00, 0x00004a)}, "zqboot",
+                       "boot memory clear: the table copy, outside every audio pass")),
     ),
     claims=Claims(dsp_ranges=(
         DspRange("y", 0xa00, 0x600, "RPSP slots and tag, the copied ADC and render tables, "
-                                    "the aux blocks, the table base (TABB/TABG)"),
+                                    "zqinit's scratch run"),
     )),
 )

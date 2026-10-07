@@ -118,6 +118,57 @@ def _split_moves(rest):
     return parts
 
 
+RR_REG = re.compile(r"^(a|b),(x0|x1|y0|y1)$")
+
+
+def _rr_form(op, parts):
+    """An R:Y (`a,x0 y:ea,y0` / `a,x0 y0,y:ea`) or X:R (`x:ea,x0 a,y1` / `x0,x:ea a,y1`)
+    class I move, which dsp_asm drops silently: (kind, S1, D1, memory half), else None.
+    The moves are the 1st/2nd tokens after `move`, or the 2nd/3rd after an ALU op."""
+    mv = parts if op == "move" else parts[1:]
+    if len(mv) != 2:
+        return None
+    for reg, mem in ((mv[0], mv[1]), (mv[1], mv[0])):
+        m = RR_REG.match(reg)
+        if not m:
+            continue
+        s, d = m.groups()
+        space = mem[0] if mem[:2] in ("x:", "y:") else (mem.split(",", 1)[1][0] if re.search(r",[xy]:", mem) else None)
+        if space == "y" and d in ("x0", "x1"):
+            return ("ry", s, d, mem)
+        if space == "x" and d in ("y0", "y1"):
+            return ("xr", s, d, mem)
+    return None
+
+
+def _rr_word(rr, op, parts):
+    """Encode R:Y class I (0001 deff W1MM MRRR | alu) or X:R class I (0001 ffdF W0MM MRRR
+    | alu). The memory half's W and MMMRRR come from dsp_asm's own single-move encoding
+    (same bit positions); THE CHECK below disassembles the result against the source."""
+    kind, s, d, mem = rr
+    if mem[:2] in ("x:", "y:"):
+        reg2 = mem.rsplit(",", 1)[1]                    # memory -> register
+    else:
+        reg2 = mem.split(",", 1)[0]                     # register -> memory
+    single = _one(f"move {mem}")
+    if len(single) != 1:
+        raise AsmError(f"R:Y / X:R memory half is not one word: {mem}")
+    w_ea = (single[0] >> 8) & 0xbf                      # W . MMM RRR (bits 15, 13..8)
+    alu = 0
+    if op != "move":
+        aw = _one(f"{op} {parts[0]}")
+        if len(aw) != 1:
+            raise AsmError(f"ALU half is not one word: {op} {parts[0]}")
+        alu = aw[0] & 0xff
+    if kind == "ry":
+        f = {"y0": 0, "y1": 1, "a": 2, "b": 3}[reg2]
+        w = 1 << 20 | (s == "b") << 19 | (d == "x1") << 18 | f << 16 | (w_ea | 0x40) << 8
+    else:
+        f = {"x0": 0, "x1": 1, "a": 2, "b": 3}[reg2]
+        w = 1 << 20 | f << 18 | (s == "b") << 17 | (d == "y1") << 16 | w_ea << 8
+    return w | alu
+
+
 def assemble(src, org):
     # ---- equ + comments
     consts = {}
@@ -182,6 +233,11 @@ def assemble(src, org):
             specials.append((len(out_lines), "xy", (op, parts, body)))
             out_lines.append("        nop")
             continue
+        rr = _rr_form(op, parts)
+        if rr:
+            specials.append((len(out_lines), "rr", (rr, op, parts, body)))
+            out_lines.append("        nop")
+            continue
         out_lines.append("        " + body)
 
     text = "\n".join(out_lines) + "\n"
@@ -212,6 +268,9 @@ def assemble(src, org):
         elif kind == "movem":
             words[a - org] = pay[0]
             expect[a] = pay[1]
+        elif kind == "rr":
+            words[a - org] = _rr_word(*pay[:3])
+            expect[a] = pay[3]
         else:
             op, parts, body = pay
             mv = _one(f"move {parts[1]} {parts[2]}")

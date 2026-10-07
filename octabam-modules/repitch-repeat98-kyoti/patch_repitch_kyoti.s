@@ -218,10 +218,19 @@ rate_gate:
         subi.l  #STATES,%d1
         moveq   #40,%d3
         divu.l  %d3,%d1                 | the track
-        bsr     rp_swap                 | domain bookkeeping (also polled at draw)
-        bsr     rp_source
-        move.l  %d0,%d3                 | bpm | modeoff<<16 (0 = not repitch)
-        movem.l (%sp),%d0-%d1/%a0
+        bsr     rp_source               | (reads only the lane and the voice: rp_swap
+        move.l  %d0,%d3                 | writes neither) bpm | modeoff<<16, 0 = not repitch
+        bne.s   1f
+        | Not a repitch voice now, and its gate was off last time: rp_swap could
+        | only find a gate turning on that this voice does not play yet -- the
+        | swap waits for the frame it does, or for the dial draw's poll (rp_swap
+        | runs there too). This is the early exit for every stock-TSTR voice
+        | (KYOTI load audit: ~200 instructions per voice per frame without it).
+        lea     rp_prev(%pc),%a0
+        tst.b   (%a0,%d1.l)
+        beq.s   2f
+1:      bsr     rp_swap                 | domain bookkeeping (also polled at draw)
+2:      movem.l (%sp),%d0-%d1/%a0
         lea     12(%sp),%sp
         btst    #4,67(%sp)              | displaced
         bne.s   .rg_compute

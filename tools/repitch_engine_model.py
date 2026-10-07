@@ -68,6 +68,14 @@ PSP_TICK = round(PSP * (1 << 20)) / (1 << 20)
 PSP_LAG = round(PSP / 2 * (1 << 23)) * 2 / (1 << 23)
 MODE_RPS9, MODE_RPSP = 1, 2
 SP_CHANNEL = 7                     # which SP-1200 output RPSP is heard on: 7 (= 8) raw, no filter.
+# Rev 17 (listening pack 3, the user's pick, 2026-10-06): RPSP is MID + SIDE. The mid (L+R)/2
+# runs the SP-1200 path -- 8-tap virtual ADC, 26.04 kHz drop-sample, 12-bit, the 10-tap
+# render -- then output channel 5's fixed filter; the side (L-R)/2 is read cleanly (the OT's
+# own 2-tap read) MS_SIDE_DELAY outputs behind, which lines it up with the mid's latency
+# (measured 6.6-7.5 samples over r = 0.75..1.99); L = mid + side, R = mid - side. Anti-phase
+# content lives in the side, so nothing cancels. ~1/3 of the stereo design's DSP cost.
+MS_CHANNEL = 5
+MS_SIDE_DELAY = 7
                                    # The DSP has no output-filter stage since rev 12; 3..6 are
                                    # modelled below (sp_channel_filter) for a future selectable channel
 
@@ -201,7 +209,7 @@ def sp_channel_filter(ch=SP_CHANNEL):
 # worst-case tones (-55..-61 dBFS), so the user had full fidelity restored.
 PHASES = 32
 FIR = {MODE_RPS9: dict(taps=16),
-       MODE_RPSP: dict(taps=12, flat=10000.0, stop=17500.0, w_trans=0.7, w_stop=30.0,
+       MODE_RPSP: dict(taps=8, flat=10000.0, stop=17500.0, w_trans=0.7, w_stop=30.0,
                        poles=7, corner=10950.0)}
 
 
@@ -383,14 +391,15 @@ class Engine:
     flag and the OT's AMP level; ch12 adds RPSP's channel 1/2 stage."""
     RING = 64
 
-    def __init__(self, mode, ch12=False):
+    def __init__(self, mode, ch12=False, ms=True):
         self.mode = mode
-        self.ch12 = ch12 and mode == MODE_RPSP
+        self.ms = ms and mode == MODE_RPSP
+        self.ch12 = ch12 and mode == MODE_RPSP and not self.ms
         self.ring = np.zeros((self.RING, 2))
         self.fir = fir_q23(mode) / float(1 << 23)
         self.taps = self.fir.shape[1]
         self.c = self.taps // 2 - 1
-        self.post = Biquads(design_post(mode))
+        self.post = Biquads(sp_channel_filter(MS_CHANNEL), ch=1) if self.ms else Biquads(design_post(mode))
         self.env = 0.0            # ch 1/2: the capacitor
         self.st = np.zeros((4, 2))   # ch 1/2: the 4-pole's state
         self.sp_reset()
@@ -403,6 +412,10 @@ class Engine:
         self.gc = render_gc()     # SP: the render's step response on its 1/R grid
         self.acc = np.zeros((RENDER["L"], 2))   # SP: residuals owed to the next L outputs
         self.st[:] = 0.0
+        if self.ms:                               # rev 17: the mid path is mono
+            self.held = 0.0
+            self.acc = np.zeros(RENDER["L"])
+            self.post = Biquads(sp_channel_filter(MS_CHANNEL), ch=1)
 
     def fill(self, start, frames):
         for j, fr in enumerate(frames):
@@ -424,6 +437,21 @@ class Engine:
         ph = min(int((pos - k) * PHASES), PHASES - 1)
         idx = [(k - self.c + t) % self.RING for t in range(self.taps)]
         return self.fir[ph] @ self.ring[idx]
+
+    def adc_mid(self, pos):
+        """Rev 17: the virtual ADC on the mid, (L + R) / 2."""
+        k = math.floor(pos)
+        ph = min(int((pos - k) * PHASES), PHASES - 1)
+        idx = [(k - self.c + t) % self.RING for t in range(self.taps)]
+        return self.fir[ph] @ (self.ring[idx, 0] + self.ring[idx, 1]) / 2
+
+    def side_at(self, p):
+        """Rev 17: the clean side (L - R) / 2 at ring position p, the OT's 2-tap read."""
+        k = math.floor(p)
+        f = p - k
+        s0 = (self.ring[k % self.RING, 0] - self.ring[k % self.RING, 1]) / 2
+        s1 = (self.ring[(k + 1) % self.RING, 0] - self.ring[(k + 1) % self.RING, 1]) / 2
+        return s0 + f * (s1 - s0)
 
     def visit(self, table, trig, lc):
         """The trig bookkeeping at a hook visit: True when this visit starts a
@@ -449,6 +477,8 @@ class Engine:
             # the OT does NOT deliver floor(p)+1 when the fraction is 0 (the stock
             # kernel gives it zero weight) -- measured in ot_emu, Session 110
             return np.array([q12(self.adc(k + f - self.c - 1)) for k, f in table]).reshape(-1, 2)
+        if self.ms:
+            return self.render_ms(table, r)
         out = []
         if self.prev is not None and table and (table[0][0] - self.prev[0]) % 64 > 2:
             self.prev = table[0]          # a jump = stale state (see the DSP)
@@ -477,6 +507,33 @@ class Engine:
                     y = st.copy()
             out.append(y)
             self.acc = np.roll(self.acc, -1, axis=0)
+            self.acc[-1] = 0.0
+            self.prev = (k, f)
+        return np.array(out).reshape(-1, 2)
+
+
+    def render_ms(self, table, r):
+        """Rev 17 RPSP: the mid through the SP path and channel 5, the side clean."""
+        out = []
+        if self.prev is not None and table and (table[0][0] - self.prev[0]) % 64 > 2:
+            self.prev = table[0]
+        for k, f in table:
+            if self.prev is None:
+                self.prev = (k, f)
+            pk, pf = self.prev
+            while self.tau < 1.0:
+                u = self.tau
+                self.phi = (self.phi + r) % 1.0
+                pos = pk + pf + u * r - PSP_LAG * self.phi
+                new = q12(self.adc_mid(pos - self.c - 1))
+                self.acc += self.step_weights(u) * (new - self.held)
+                self.held = new
+                self.tau += PSP_TICK
+            self.tau -= 1.0
+            y = self.post(np.array([self.held + self.acc[0]]))[0]
+            s = self.side_at(k + f - self.c - 1 - MS_SIDE_DELAY * r)
+            out.append((y + s, y - s))
+            self.acc = np.roll(self.acc, -1)
             self.acc[-1] = 0.0
             self.prev = (k, f)
         return np.array(out).reshape(-1, 2)
@@ -591,9 +648,9 @@ class DspExact:
     render() is one hook visit (patch_repitch_dsp.asm, zqrp)."""
     RING = 64
 
-    def __init__(self, mode, consts, fir_rows, ch12=True):
+    def __init__(self, mode, consts, fir_rows, ch12=False):
         self.mode, self.c = mode, consts
-        self.ch12 = ch12 and mode == MODE_RPSP
+        self.ch12 = False                                       # rev 17: RPSP is mid + side
         self.ring = np.zeros((self.RING, 2), dtype=np.int64)
         self.fir = np.array(fir_rows, dtype=np.int64)          # [32][taps], Q23 signed
         self.taps = self.fir.shape[1]
@@ -607,11 +664,12 @@ class DspExact:
         self.sp_reset()
 
     def sp_reset(self):
+        """zqsp's clean slot (rev 17): the mono mid path and channel 5's filter state."""
         self.tau = self.phi = 0
-        self.held = np.zeros(2, dtype=np.int64)
+        self.held = 0
         self.prev = None
-        self.acc = np.zeros((RENDER["L"], 2), dtype=np.int64)  # residuals / 4, Q23
-        self.st = [0] * 8
+        self.acc = [0] * RENDER["L"]                           # residuals / 4, Q23
+        self.xp = self.y1 = self.z1 = self.z2 = 0              # channel 5: x[n-1], s1[n-1], s2[n-1], s2[n-2]
 
     @staticmethod
     def lim(v):
@@ -625,6 +683,22 @@ class DspExact:
     def fill(self, start, frames):
         for j, fr in enumerate(frames):
             self.ring[(start + j) % self.RING] = fr
+
+    def adc_mid(self, first, ph):
+        """Rev 17: sum of taps x (L + R), halved by the accumulator's asr, then 12 bits."""
+        idx = [(first + t) % self.RING for t in range(self.taps)]
+        s = int(self.fir[ph] @ (self.ring[idx, 0] + self.ring[idx, 1]))
+        return self.lim(s >> 24) & ~0xFFF
+
+    def side(self, pos):
+        """Rev 17: the clean side at pos (24.24 frames): (L - R) >> 1 at both frames,
+        weighted 0x7FFFFF - g and g (g = the fraction, Q23)."""
+        j, g = pos >> 24, (pos & 0xFFFFFF) >> 1
+        s = []
+        for i in (j, j + 1):
+            fr = self.ring[i % self.RING]
+            s.append((int(fr[0]) - int(fr[1])) >> 1)
+        return self.lim((s[0] * (0x7FFFFF - g) + s[1] * g) >> 23)
 
     def adc(self, first, ph):
         idx = [(first + t) % self.RING for t in range(self.taps)]
@@ -666,11 +740,6 @@ class DspExact:
             for k, f in table:
                 out.append(self.adc(k - 2 * self.cc - 1, f >> 19))
             return np.array(out, dtype=np.int64).reshape(-1, 2)
-        out = []
-        one = 1 << 20
-        if self.ch12 and lc == 1:
-            self.g = self.cutoff(level)                        # once per frame
-        g, g1 = self.g
         if not table:
             return np.zeros((0, 2), dtype=np.int64)            # an empty visit: nothing else
         if self.clean:                                         # zqsp: a clean slot
@@ -679,6 +748,11 @@ class DspExact:
             self.prev = table[0]
         elif self.prev is not None and (table[0][0] - self.prev[0]) % 64 > 2:
             self.prev = table[0]                               # stale state: resync
+        one = 1 << 20
+        L, R = RENDER["L"], RENDER["R"]
+        # the side's offset behind the OT: c + 1 frames, + MS_SIDE_DELAY increments (24.24)
+        offs = ((self.cc + 1) << 24) + MS_SIDE_DELAY * (((1 if rint else 0) << 24) + (rfrac & 0xFFFFFF))
+        out = []
         for k, f in table:
             if self.prev is None:
                 self.prev = (k, f)
@@ -690,29 +764,24 @@ class DspExact:
                 lag = (c["PSPH"] * (self.phi >> 1) * 2) >> 22
                 ur = (u * (rfrac >> 1) * 2) >> 23
                 pos = (pk << 24) + pf + ur - lag + (2 * u if rint else 0) - (c["SPC2"] << 24)
-                new = self.adc(pos >> 24, (pos & 0xFFFFFF) >> 19)
+                new = self.adc_mid(pos >> 24, (pos & 0xFFFFFF) >> 19)
                 dh = (new - self.held) >> 1                    # the step / 2 (exact: 12-bit values)
                 self.held = new
-                L, R = RENDER["L"], RENDER["R"]
                 j, fr = u >> 19, (u & 0x7FFFF) << 4             # u x R: table index, fraction (Q23)
                 for mm in range(L):
                     kk = (L - 1 - mm) * R + j
                     w = int(self.T[kk]) + ((int(self.D[kk]) * fr) >> 23)       # weight / 2
-                    for ch in (0, 1):
-                        self.acc[mm, ch] = self.lim(int(self.acc[mm, ch]) + ((w * int(dh[ch])) >> 23))
+                    self.acc[mm] = self.lim(self.acc[mm] + ((w * dh) >> 23))
             else:
                 self.tau -= one
-            o = [self.lim(4 * int(self.acc[0, ch]) + int(self.held[ch])) for ch in (0, 1)]
-            if self.ch12:
-                for ch in (0, 1):
-                    x = o[ch]
-                    for s in range(4):
-                        x = self.lim((g * x + g1 * self.st[4 * ch + s]) >> 23)
-                        self.st[4 * ch + s] = x
-                    o[ch] = x
-            self.acc = np.roll(self.acc, -1, axis=0)
-            self.acc[-1] = 0
-            out.append(o)
+            mid = self.lim(4 * self.acc[0] + self.held)
+            fb, fq, fg2, fa1, fa2 = (self.s24(c[k]) for k in ("FB", "FQ", "FG2", "FNA1", "FNA2"))
+            s1 = self.lim((fb * mid + fb * self.xp + fq * self.y1) >> 23)
+            s2 = self.lim((fg2 * s1 + fa1 * self.z1 + fa2 * self.z2) >> 22)
+            self.xp, self.y1, self.z2, self.z1 = mid, s1, self.z1, s2
+            sd = self.side((k << 24) + f - offs)
+            out.append([self.lim(s2 + sd), self.lim(s2 - sd)])
+            self.acc = self.acc[1:] + [0]
             self.prev = (k, f)
         return np.array(out, dtype=np.int64).reshape(-1, 2)
 

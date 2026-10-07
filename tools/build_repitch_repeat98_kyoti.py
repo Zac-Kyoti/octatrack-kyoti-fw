@@ -214,6 +214,9 @@ DSP_ASM = ROOT / "vendor/dsp56300/build/source/dsp_host/dsp_asm"
 DSP_DIS = ROOT / "vendor/dsp56300/build/source/disassemble/dsp56kDisassemble"
 VOICE_HOOK = {"A": 0x0040b, "B": 0x0020e}      # the kernel prologue, per payload
 HOOK_WORDS = (0x76e500, 0x5edd00)             # move x:(r5),n6 / move y:(r5)+,a
+# rev 17: the table copy at boot -- each payload's one-time memory clear, `do b,LA`
+# (octabam docs/firmware/DSP.md: payload B's boot zero, P:0x40-0x4a; A's alike)
+BOOT_HOOK = {"A": (0x00046, (0x06cf00, 0x000049)), "B": (0x00047, (0x06cf00, 0x00004a))}
 SPRING_SIG = [0x22ee00, 0x0140c0, 0x000040]    # spring's init, the sidechain's canary
 
 
@@ -223,10 +226,10 @@ def dsp_assemble(org, payload):
     import dsp_xasm
     import repitch_dsp_src
     try:
-        words, _, _ = repitch_dsp_src.assemble(org, payload)
+        words, syms, _ = repitch_dsp_src.assemble(org, payload)
     except dsp_xasm.AsmError as e:
         sys.exit(f"DSP cave: {e}")
-    return words
+    return words, syms
 
 
 # SPRING REVERB's X data modules the tables go into (repitch_dsp_src.SPRING_X),
@@ -264,12 +267,12 @@ def dsp_install(img, touched):
         sig = [sc3.rd3(img, so + 3 * i) for i in range(3)]
         if sig != SPRING_SIG:
             sys.exit(f"payload {tag}: SPRING REVERB init signature {[hex(x) for x in sig]}")
-        n = len(dsp_assemble(0x1000, tag))              # size; absolute LAs need the real org
+        n = len(dsp_assemble(0x1000, tag)[0])           # size; absolute LAs need the real org
         try:
             org = dsrc.cave_org(tag, n)                  # ends right below DARK REV's routine
         except ValueError as e:
             sys.exit(str(e))
-        words = dsp_assemble(org, tag)
+        words, syms = dsp_assemble(org, tag)
         if len(words) != n:
             sys.exit("DSP cave size shifted between the sizing and final passes")
         co = sc3.dsp_module_fileoff(img, d["va"], d["ln"], org)
@@ -309,6 +312,14 @@ def dsp_install(img, touched):
         op, disp = sc3.bsr_long(hook, org)
         put(ho, op)
         put(ho + 3, disp)
+        bsite, bstock = BOOT_HOOK[tag]
+        bo = sc3.dsp_module_fileoff(img, d["va"], d["ln"], bsite)
+        if (sc3.rd3(img, bo), sc3.rd3(img, bo + 3)) != bstock:
+            sys.exit(f"payload {tag}: boot hook P:0x{bsite:05x} holds "
+                     f"{sc3.rd3(img, bo):06x} {sc3.rd3(img, bo + 3):06x}")
+        bop, bdisp = sc3.bsr_long(bsite, syms["zqboot"])
+        put(bo, bop)
+        put(bo + 3, bdisp)
 
         # spring's dispatch entry -> the shared empty-FX stub, exactly as the
         # sidechain does: its code is now partly ours and must never run
@@ -322,7 +333,8 @@ def dsp_install(img, touched):
         orgs[tag] = org
         print(f"  DSP {tag}: cave {n}w @P:0x{org:05x}..0x{org + n - 1:05x} (DARK REV's routine at "
               f"P:0x{dsrc.DARK_SUB[tag][0]:05x} kept stock), hook P:0x{hook:05x} "
-              f"-> bsr {op:06x} {disp:06x}, X:0x215[0x{sc3.DONOR_ID:02x}] -> stub")
+              f"-> bsr {op:06x} {disp:06x}, boot hook P:0x{bsite:05x} -> zqboot "
+              f"P:0x{syms['zqboot']:05x}, X:0x215[0x{sc3.DONOR_ID:02x}] -> stub")
 
     # the ColdFire half: not offered on either bus, and old projects load NONE
     def u32(a):

@@ -1,15 +1,15 @@
 ; SPDX-License-Identifier: MIT
 ; SPDX-FileCopyrightText: 2026 Zac-Kyoti
 ; ===========================================================================
-; repitch-kyoti rev 14 -- DSP side: the "virtual sampler" behind RPS9 / RPSP.
+; repitch-kyoti rev 17 -- DSP side: the "virtual sampler" behind RPS9 / RPSP.
 ; Model (the ground truth this must match): tools/repitch_engine_model.py.
-; Scope: reference/handoffs/REPITCH_FIDELITY_SCOPE.md and REPITCH_SP_CH12_SCOPE.md.
+; Scope: reference/handoffs/REPITCH_FIDELITY_SCOPE.md; rev 17 (RPSP = mid + side through
+; the SP's channel 5 filter, the DSP load audit's budget): NOTES Session 120 continued (10).
 ; Plumbing: NOTES Session 110; rev 12/13: Session 111; rev 14: Session 112.
 ; Assembled by tools/dsp_xasm.py (NOT plain dsp_asm: this uses XY+ALU moves,
 ; equ and dc, and every word is disassembled back and checked);
-; tools/repitch_dsp_src.py prepends the constants (and drops the ;+CH12 ..
-; ;-CH12 blocks for the raw 7/8 build) -- the table DATA lives in X memory
-; since rev 14 (SPRING REVERB's own X tables, rewritten by the builder).
+; tools/repitch_dsp_src.py prepends the constants -- the table DATA lives in X
+; memory since rev 14 (SPRING REVERB's own X tables, rewritten by the builder).
 ;
 ; WHERE IT RUNS. Unchanged from rev 10: the stock voice engine (payload A
 ; P:0x3a1, B P:0x1a4) is detoured at its kernel prologue (A P:0x40b, B
@@ -43,46 +43,49 @@
 ; MEMORY (Y:$795..$FFF is free on stock on both cores -- octabam, measured on
 ; hardware; SIDECHAIN3 takes $7f0-$9ff on both cores -- true only since Session 115:
 ; before it, SIDECHAIN3's keybus was $a00-$bff on payload A and overwrote this):
-;   Y:STBASE + x:$418   per-track RPSP slot ($20 words): the render's residual
-;                       ring (RINGW words, modulo-addressed, so it starts the
-;                       slot), then the state (S_SIZE words in all)
+;   Y:STBASE + x:$418   per-track RPSP slot ($20 words): the mid's residual
+;                       ring (modulo-addressed, so it starts the slot), then the state
 ;   Y:TABTAG            table tag; != TAGVAL => copy the tables in (once/core)
-;   Y:SPTAB, Y:R9TAB    the virtual-ADC tables, 32 phases each (12 / 16 taps),
+;   Y:SPTAB, Y:R9TAB    the virtual-ADC tables, 32 phases each (8 / 16 taps),
 ;                       from their 16 stored half-rows in X (rows 16-31 mirror)
 ;   Y:BTAB              the render's step table: (T[k], T[k+1]-T[k]) pairs
-;   Y:FBASE + x:$418/2  per-track aux block: the trig parity, and channel 1/2's
-;                       envelope, coefficients and filter state
-;   X:GTAB              channel 1/2's cutoff table (read in place)
 ;
 ; REGISTERS. Uses a, b, x0, x1, y0, y1, r1, r4, r6, r7, m1 and m7 (saved and
 ; restored), n1, n2, n4, n5, n6, n7; r5 is borrowed during an RPSP tick and
 ; restored. Leaves r0, r2, m6 alone; advances r3 by two words per output. m1
 ; is $7f from zqtok on: an XY dual move needs its X pointer in r0-r3, and the
-; ring's own modulo register is m6. So every other walk uses r4 (m4 linear:
-; rev 11-13 walked it across whole tables on the unit) -- r1 under $7f wraps
-; at a 128-word boundary (rev 14's first cutoff table did, on payload A only).
+; ring's own modulo register is m6. So every table walk uses r4/r5 (linear) --
+; r1 and r6 (m6 = $7f) wrap at a 128-word boundary (rev 14's first cutoff table
+; did, on payload A only); r6 only walks inside one RPSP slot.
 ; Hardware stack: at most bsr + two nested DOs below zqrp (as rev 11-13).
 ;
 ; LABELS: no label may be a prefix of another (dsp_asm's lookup). zq*.
 ; ===========================================================================
 
-; ---- the RPSP slot (Y:STBASE + x:$418): ring 0..RINGW-1 (L,R interleaved,
-; one frame per output, residuals / 4), then:
-S_TAG   equ     RINGW+0
-S_TAU   equ     RINGW+1 ; time of the next tick from the start of the next interval, Q20
-S_PHI   equ     RINGW+2 ; accumulator fraction, Q24
-S_HL    equ     RINGW+3 ; current staircase step, L
-S_HR    equ     RINGW+4
-S_PKF   equ     RINGW+5 ; previous output's ring frame (0..63)
-S_PF    equ     RINGW+6 ; previous output's fraction, Q24
-S_RW    equ     RINGW+7 ; the ring slot (absolute address) of the next output
+; ---- the RPSP slot (Y:STBASE + x:$418, $20 words): the mid's residual ring
+; (RINGM1+1 words, modulo-addressed, residuals / 4), then:
+S_TAG   equ     $0a
+S_TAU   equ     $0b     ; r6 walks TAU .. ONE once per output, in this order:
+S_HM    equ     $0c     ;   time of the next tick (from the start of the next
+S_XP    equ     $0d     ;   interval, Q20), the current step (the mid), channel 5's
+S_Y1    equ     $0e     ;   x[n-1], s1[n-1], s2[n-2], s2[n-1], the side's offset
+S_Z2    equ     $0f     ;   behind the OT (2 x integer part, fraction; this pass's),
+S_Z1    equ     $10     ;   the previous output's ring word offset (2 x frame) and
+S_OH    equ     $11     ;   fraction (Q24), the ring's base (r2, this pass's) and
+S_OL    equ     $12     ;   $7fffff
+S_PKW   equ     $13
+S_PF    equ     $14
+S_RB    equ     $15
+S_ONE   equ     $16
+S_PHI   equ     $17     ; accumulator fraction, Q24
+S_RW    equ     $18     ; the ring slot (absolute address) of the next output
+S_RH    equ     $19     ; r / 2, unsigned Q23 (this pass's)
+S_RF    equ     $1a     ; frac(r), Q24, with the mode tag (this pass's)
+S_SIZE  equ     $1b     ; (track 3's slot ends in TABTAG at +$1f)
+S_RWND  equ     S_TAU-S_ONE
+ZQSAV   equ     STBASE+S_SIZE   ; zqboot's register saves: slot 0's spare words (r6),
+ZQSV1   equ     ZQSAV+$20       ; slot 1's (the other five; S_SIZE + 5 = $20)
 STTAG   equ     STBASE+S_TAG
-; ---- the aux block (Y:FBASE + x:$418/2)
-A_VIS   equ     0       ; (unused since rev 14.1)
-A_ENV   equ     1       ; channel 1/2: the capacitor (env, Q23)
-A_G     equ     2       ; this pass's stage coefficient g
-A_G1    equ     3       ; ... and 1 - g
-A_ST    equ     4       ; the 4-pole's state: L 0..3, R 0..3
 
 zqrp:
         clr     a
@@ -105,10 +108,7 @@ zqtok:
 ; frame become silence, and RPSP's slot starts clean (tag cleared: zqsp).
         move    x:>$418,a
         move    a1,n6                   ; the track offset
-        asr     a
-        add     #>FBASE,a
-        move    a1,r6                   ; this track's aux block (m6 = $7f: the
-        move    x:>$419,r4              ; blocks never straddle 128 words, asserted)
+        move    x:>$419,r4
         move    #$7f,m1                 ; (not for r4's reads: its m4 is linear --
         clr     a                       ; x:$419 + $1E can straddle a 128-word block)
         move    x:(r4+$1e),a1           ; this track's unpacked per-voice word +$1E
@@ -145,80 +145,68 @@ zqnh:
 ; ring frames k_i-2c-1 .. k_i, all delivered. (NOT k_i+1: at a zero fraction
 ; the OT does not deliver it -- the stock kernel weights it 0. Measured.)
         do      r7,zq9e
-        move    x:(r5),a                ; a1 = ring word offset of k_i
-        sub     #<R9SW,a                ; first tap = k_i - 2c - 1 frames
-        and     #>$7e,a
-        move    a1,n1
-        move    y:(r5)+,b               ; b1 = fraction
+        move    l:(r5)+,ab              ; a1 = ring word offset of k_i, b1 = its fraction
+        sub     #<R9SW,a                ; first tap = k_i - 2c - 1 frames: may go below 0,
+        move    a1,n1                   ; which m1's modulo 128 wraps (|n1| <= 128)
+        move    r2,r1
         lsr     #19,b                   ; phase 0..31
         lsl     #4,b                    ; x 16 taps
         add     #>R9TAB,b
-        move    r2,r1
-        move    b1,r7                   ; the phase's row (the loop count is in LC now)
-        nop
         move    (r1)+n1                 ; modulo 128 under m1
-        nop
-        clr     a       x:(r1)+,x0      y:(r7)+,y0
-        clr     b       x:(r1)+,x1
-        do      #R9NM1,zq9f
+        move    b1,r7                   ; the phase's row (the loop count is in LC now)
+        clr     a       x:(r1)+,x0      ; (r7 is not used until the next instruction's Y)
+        clr     b       x:(r1)+,x1      y:(r7)+,y0
+; taps 1..15, unrolled (rev 17): a DO here cost 5 cycles per output, 8% of RPS9
         mac     y0,x0,a x:(r1)+,x0
         mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
-zq9f:
+        mac     y0,x0,a x:(r1)+,x0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
         mac     y0,x0,a
-        mac     x1,y0,b
-        move    a,x0                    ; limit
-        move    x0,a
+        mac     x1,y0,b a,x0            ; limit L
+        tfr     x0,a    b,x0            ; limit R
         and     y1,a                    ; 12 bits: floor to a 1/2048 step
-        move    a1,x:(r3)+
-        move    b,x0
-        move    x0,b
+        tfr     x0,b    a1,x:(r3)+
         and     y1,b
         move    b1,x:(r3)+
 zq9e:
         bra     zqdone
 
 ; ============================================================ RPSP (SP-1200)
-; The SP's clock period is 1.69 output samples, so an output interval holds at
-; most one tick. A tick at u stores a new step; the render spreads the step
-; (new - old) over this and the next L-1 outputs with the band-limited step
-; response (the residual ring); output = current step + its ring slot. Rev 14:
-; then channel 1/2 (;+CH12 blocks): an SSM2044-style 4-pole, resonance 0,
-; whose cutoff the OT's own AMP level pushes open through the SP's diode + RC.
+; Rev 17: the mid (L + R)/2 goes through the SP -- the virtual ADC (8 taps) at
+; the SP's clock, 12 bits, the band-limited render to 44.1 kHz -- then the SP's
+; channel 5 output filter; the side (L - R)/2 is read clean, as far behind the
+; OT's position as the mid's path delays it, and L, R = mid +/- side. The SP's
+; clock period is 1.69 output samples, so an output interval holds at most one
+; tick. A tick at u stores a new step; the render spreads the step (new - old)
+; over this and the next L-1 outputs with the band-limited step response (the
+; residual ring); the mid = current step + its ring slot.
 zqsp:
-;+CH12
-; ---- channel 1/2: the cutoff, once per frame (on its second pass; the first
-; renders with the last frame's). The SP's cutoff CV is its channel GAIN
-; through a diode into 10 uF: it follows a rising level at once and falls no
-; faster than the capacitor discharges. The OT's AMP level is that GAIN.
-        move    lc,b
-        cmp     #<1,b
-        bne     zqscx
-        move    x:>$20a,r4              ; this track's AMP stage (r4: m4 is linear;
-        nop                             ;  under m1's $7f a table walk would wrap)
-        move    x:(r4+8),b              ; its level (end of the last frame)
-        move    y:(r6+A_ENV),x0
-        move    #>DEC16,y0              ; the discharge over a frame
-        mpy     y0,x0,a
-        max     a,b                     ; the diode
-        move    b,y:(r6+A_ENV)
-        move    b1,a
-        lsr     #17,b
-        and     #>$3e,b                 ; env x 32: one (G, D) pair per 1/8 octave
-        add     #>GTAB,b
-        move    b1,r4
-        lsl     #5,a
-        and     #>$7fffff,a
-        move    a1,y1                   ; the fraction between pairs, Q23
-        move    x:(r4)+,a               ; G
-        move    x:(r4),x0               ; D
-        mac     x0,y1,a                 ; g = G + frac x D
-        move    a,y:(r6+A_G)
-        move    a,x1
-        move    #>$7fffff,a
-        sub     x1,a
-        move    a1,y:(r6+A_G1)          ; 1 - g (one LSB short: unity DC to 2^-21)
-zqscx:
-;-CH12
         move    r7,b                    ; an empty pass: nothing to render, and x:(r5)
         tst     b                       ; is not this track's -- the slot waits for a
         beq     zqdone                  ; real pass (on the unit an empty pass is mode 0)
@@ -234,192 +222,199 @@ zqscx:
         do      #S_SIZE,zqsz
         move    b,y:(r1)+
 zqsz:
-        lua     (r6+A_ST),r1            ; ... and the 4-pole's state (the capacitor
-        nop                             ; keeps its charge: any Q23 value is in range)
-        rep     #<8
-        move    b,y:(r1)+
         move    x1,y:(r4+S_TAG)
         move    r4,y:(r4+S_RW)
+        move    #>$7fffff,x0
+        move    x0,y:(r4+S_ONE)
         bra     zqsrs                   ; "previous output" = this pass's first
 zqsok:
         move    x:(r5),a                ; resync "previous" if this pass does not
-        asr     a                       ; continue it: ring positions advance
-        move    y:(r4+S_PKF),x0         ; continuously while a sound plays, so a
-        sub     x0,a                    ; jump of more than 2 frames means the
-        and     #<$3f,a                 ; state is stale (the track has been in
-        move    a1,x0                   ; another mode meanwhile)
-        move    x0,a
-        cmp     #<2,a
+        move    y:(r4+S_PKW),x0         ; continue it: ring positions advance
+        sub     x0,a                    ; continuously while a sound plays, so a
+        and     #>$7e,a                 ; jump of more than 2 frames (4 words) means
+        move    a1,b                    ; the state is stale (the track has been in
+        cmp     #<4,b                   ; another mode meanwhile)
         ble     zqsnj
 zqsrs:
         move    x:(r5),b
-        asr     b
-        move    b1,y:(r4+S_PKF)
+        move    b1,y:(r4+S_PKW)
         move    y:(r5),b
         move    b1,y:(r4+S_PF)
 zqsnj:
+; ---- this pass's constants. r = int(r) + frac(r) as the DSP holds it (x:$40 is
+; read for bit 0 only -- on the unit it reads $c1 at 1.0x; the table builder
+; masks it too, measured in ot_emu -- and y:$40 carries the mode tag in its low
+; bits, as the twin's r does): RF = frac(r); RH = r / 2, unsigned Q23 (for the
+; tick's u x r); the side's offset behind the OT, c + 1 frames + MSD
+; increments, its integer part doubled (ring words; the fraction stays one)
+        move    y:>$40,b
+        move    b1,y:(r4+S_RF)
+        clr     a
+        move    x:>$40,a1
+        and     #<1,a
+        move    y:>$40,a0               ; a = r as 24.24
+        clr     b
+        add     a,b                     ; (dsp_asm encodes `tfr a,b` as rnd)
+        asr     b
+        move    b0,y:(r4+S_RH)
+        clr     b
+        add     a,b
+        asl     #3,a,a
+        sub     b,a                     ; 7 r     (MSD = 7: asserted by the generator)
+        add     #<SIDEC,a               ; + c + 1 frames
+        move    a1,x0
+        add     x0,a                    ; integer part x 2
+        move    a1,y:(r4+S_OH)
+        move    a0,y:(r4+S_OL)
+        move    r2,y:(r4+S_RB)
         move    r7,n1                   ; the pass count (r7 becomes the ring pointer)
         move    m7,n7                   ; restored at zqoe
         move    #RINGM1,m7
         move    y:(r4+S_RW),r7
+        lua     (r4+S_TAU),r6           ; r6 walks TAU .. ONE once per output (m6 = $7f:
+        move    #>S_RWND,n6             ; the slot does not straddle 128 words)
         do      n1,zqoe
-        move    y:(r4+S_TAU),a
-        move    #>$100000,x0
-        cmp     x0,a
-        blt     zqtk
-        sub     x0,a                    ; no tick: the step holds
+        move    y:(r6),a
+        sub     #>$100000,a             ; tau, less this output interval
+        move    a1,y:(r6)+              ; (no tick: the step holds)
+        bge     zqout
+; ---- a tick at u = tau (PSP > 1: at most one per output interval)
+        add     #>PSPQ20,a              ; tau += PSP
         move    a1,y:(r4+S_TAU)
-        bra     zqout
-zqtk:
+        sub     #>PSPM1,a
         asl     #3,a,a
-        move    a1,n2                   ; u, Q23 (kept out of the FIR's registers)
-        move    a1,x0
-        lsr     #3,a                    ; tau += PSP - 1 interval
-        add     #>PSPM1,a
-        move    a1,y:(r4+S_TAU)
+        move    a1,x1                   ; u, Q23 (x1 is free until the render)
         move    y:(r4+S_PHI),a          ; phi = frac(phi + r)
-        move    y:>$40,y0
+        move    y:(r4+S_RF),y0
         add     y0,a
         move    a1,y:(r4+S_PHI)
         lsr     a                       ; Q24 phi >> 1 = the same phi as Q23
         move    a1,y0
-        move    #>PSPH,x1
-        mpy     x1,y0,b                 ; (PSP/2)*phi = PSP*phi * 2^46
+        mpyi    #PSPH,y0,b              ; (PSP/2)*phi = PSP*phi * 2^46
         asr     #22,b,b                 ; -> frames, 24.24
-        move    y:>$40,a
-        lsr     a
-        move    a1,y0                   ; frac(r) as Q23 (the dropped LSB is the mode tag's)
-        mpy     y0,x0,a                 ; u*frac(r) * 2^47
+        move    y:(r4+S_RH),y0
+        mpyuu   x1,y0,a                 ; u*r * 2^47 (u r/2, unsigned)
         asr     #23,a,a                 ; -> frames, 24.24
         sub     b,a
-        move    x:>$40,b                ; + u*int(r) (0 or 1): only bit 0 -- on the unit
-        and     #<1,b                   ; x:$40 reads $c1 at 1.0x (the table builder
-        beq     zqri                    ; masks it too), measured in ot_emu
-        clr     b
-        move    x0,b0
-        asl     b
-        add     b,a
-zqri:
-        clr     b                       ; + the previous output's position
+        move    y:(r4+S_PKW),b          ; + the previous output's position
+        asr     b                       ; (ring words -> frames; even, so b0 stays 0)
         move    y:(r4+S_PF),b0
-        move    y:(r4+S_PKF),b1
         add     b,a
         sub     #<SPC2,a                ; first tap = floor(pos) - 2c - 1
         move    a0,b
         lsr     #19,b                   ; phase 0..31
-        lsl     #2,b                    ; x 12 taps = x4 + x8
-        move    b1,x1
-        lsl     #1,b
-        add     x1,b
+        lsl     #3,b                    ; x 8 taps
         add     #>SPTAB,b
-        move    r5,n6                   ; r5 (this pass's table) is borrowed until zqbl
+        asl     a       r5,n1           ; frames -> words; r5 (this pass's table) is
+        and     #>$7e,a                 ; borrowed until zqbl
+        move    a1,n2
         move    b1,r5
-        asl     a                       ; frames -> words
-        and     #>$7e,a
-        move    a1,n1
-        move    r2,r1
-        nop
-        move    (r1)+n1
-        nop
+        lua     (r2)+n2,r1              ; (r2 is 128-aligned: m1 = $7f wraps r1 in the ring)
+        move    y:(r4+S_HM),y1          ; the step it replaces
+; ---- the mid's virtual ADC: 8 taps over L + R (the sum, halved below)
         clr     a       x:(r1)+,x0      y:(r5)+,y0
-        clr     b       x:(r1)+,x1
-        do      #SPNM1,zqsf
         mac     y0,x0,a x:(r1)+,x0
-        mac     x1,y0,b x:(r1)+,x1      y:(r5)+,y0
-zqsf:
+        mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
+        mac     y0,x0,a x:(r1)+,x0
+        mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
+        mac     y0,x0,a x:(r1)+,x0
         mac     y0,x0,a
-        mac     x1,y0,b
-        move    #>$fff000,y1            ; the 12-bit mask (channel 1/2 used y1)
-        move    a,x0                    ; the new step, 12 bits
+        asr     a                       ; (L + R) / 2
+        move    a,x0                    ; limited
         move    x0,a
-        and     y1,a
-        move    b,x1
-        move    x1,b
-        and     y1,b
-; ---- the step, halved (it can span 2.0), into the render
-        move    y:(r4+S_HL),x0
-        move    a1,y:(r4+S_HL)
-        sub     x0,a
+        and     #>$fff000,a             ; the new step, 12 bits
+        move    a1,y:(r4+S_HM)
+        sub     y1,a
         asr     a
-        move    a,y1                    ; (new - old)/2, L
-        move    y:(r4+S_HR),x0
-        move    b1,y:(r4+S_HR)
-        sub     x0,b
-        asr     b
-        move    b,x1                    ; (new - old)/2, R
-        move    n2,a                    ; u x R: the table's segment and fraction
-        lsr     #18,a
-        and     #<$3e,a                 ; 2 floor(uR): one (T, D) pair per segment
-        add     #>BSTART,a              ; tap 0 reads segment (L-1)R + floor(uR)
+        move    a,y1                    ; (new - old)/2
+; ---- the step into the render: row floor(uR) of the transposed table holds
+; the L taps' (T, D) pairs in order; the weight is T + frac(uR) D
+        move    x1,a
+        lsr     #19,a                   ; floor(uR), R = 16
+        lsl     #2,a
+        move    a1,x0
+        lsl     #2,a
+        add     x0,a                    ; x 2L = 20 words a row
+        add     #>BTAB,a
         move    a1,r5
-        move    n2,a
+        move    x1,a
         lsl     #4,a
         and     #>$7fffff,a
-        move    a1,y0                   ; frac(uR), Q23
-        move    #>BSTRIDE,n5            ; each tap: R segments down, (T, D) pairs
-        nop
+        move    a1,x0                   ; frac(uR), Q23
         move    y:(r5)+,a               ; T
-        move    y:(r5)+n5,x0            ; D
+        move    y:(r5)+,y0              ; D
         do      #BL,zqbl
-        mac     y0,x0,a y:(r7),b        ; a = weight/2 = T + frac D; b = ring L
-        move    a,x0
-        mac     x0,y1,b y:(r5)+,a       ; b += step/2 x weight/2; next T
-        move    b,y:(r7)+
-        move    y:(r7),b
-        mac     x1,x0,b y:(r5)+n5,x0    ; ring R; next D
+        mac     y0,x0,a y:(r7),b        ; a = weight/2 = T + frac D; b = the ring
+        move    a,x1    y:(r5)+,a       ; next T
+        mac     y1,x1,b y:(r5)+,y0      ; b += step/2 x weight/2; next D
         move    b,y:(r7)+
 zqbl:
-        move    n6,r5
-; ---- out: the current step + what the render still owes this output
+        move    n1,r5
+; ---- out: the mid = the current step + what the render still owes this output,
+; through channel 5 (section 1: b (x + x[n-1]) + q s1[n-1]; section 2 at half
+; scale, doubled: g/2 s1 - a1/2 s2[n-1] - a2/2 s2[n-2])
 zqout:
         clr     b
         move    y:(r7),a
         asl     #2,a,a
-        move    y:(r4+S_HL),x0
+        move    y:(r6)+,x0              ; HM
         add     x0,a    b,y:(r7)+       ; (the slot is spent)
-        move    a,x:(r3)+
-        move    y:(r7),a
-        asl     #2,a,a
-        move    y:(r4+S_HR),x0
-        add     x0,a    b,y:(r7)+
-        move    a,x:(r3)+
-;+CH12
-; ---- channel 1/2: four one-pole stages per channel, y += g (x - y) written as
-; g x + (1 - g) y (no intermediate can leave [-1, 1)), in place on the output
-        move    (r3)-
-        move    (r3)-
-        move    y:(r6+A_G),y0
-        move    y:(r6+A_G1),x1
-        lua     (r6+A_ST),r1
-        do      #2,zqcf
-        move    x:(r3),x0
-        mpy     y0,x0,a y:(r1),y1
-        mac     y1,x1,a
-        move    a,x0
-        move    x0,y:(r1)+
-        mpy     y0,x0,a y:(r1),y1
-        mac     y1,x1,a
-        move    a,x0
-        move    x0,y:(r1)+
-        mpy     y0,x0,a y:(r1),y1
-        mac     y1,x1,a
-        move    a,x0
-        move    x0,y:(r1)+
-        mpy     y0,x0,a y:(r1),y1
-        mac     y1,x1,a
-        move    a,x0
-        move    x0,y:(r1)+
-        move    x0,x:(r3)+
-zqcf:
-;-CH12
-        move    x:(r5),a                ; this output becomes "previous"
-        asr     a
-        move    a1,y:(r4+S_PKF)
-        move    y:(r5)+,a
-        move    a1,y:(r4+S_PF)
+        move    a,x0    y:(r6),y0       ; mid (limited); XP = x[n-1]
+        move    #>FB,x1
+        mpy     x1,x0,a x0,y:(r6)+
+        mac     x1,y0,a y:(r6),y0       ; Y1 = s1[n-1]
+        maci    #FQ,y0,a
+        move    a,x0    a,y:(r6)+       ; s1 (limited)
+        mpyi    #FG2,x0,a
+        move    y:(r6)+,y1              ; Z2 = s2[n-2]
+        move    y:(r6)-,y0              ; Z1 = s2[n-1]
+        maci    #FNA1,y0,a
+        maci    #FNA2,y1,a
+        asl     a       y0,y:(r6)+
+        move    a,x0    a,y:(r6)+       ; s2 (limited)
+        move    x0,n5                   ; (n5: free outside the tick)
+; ---- the side, clean: (L - R)/2 at the OT's position less the offset, linear
+; between its two frames. l:(r5) = (ring words, fraction): less (2 int, frac) of the
+; offset, the words' LSB is the fraction's borrow, which the $7e mask drops
+        move    l:(r5)+,a
+        move    y:(r6)+,y1              ; OH
+        move    y:(r6)+,y0              ; OL
+        move    a1,y:(r6)+              ; this output becomes "previous"
+        sub     y,a     a0,y:(r6)+
+        move    a0,b
+        move    y:(r6)+,y1              ; RB: the ring is 128-aligned, so OR adds it
+        and     #>$7e,a
+        or      y1,a    y:(r6)+n6,x1    ; $7fffff (r6 back to TAU)
+        lsr     b       a1,r1           ; g = the fraction, Q23
+        move    b1,y0
+        move    x1,b
+        sub     y0,b    x:(r1)+,a       ; 1 - g; L0
+        move    x:(r1)+,x0      b,y1    ; R0
+        sub     x0,a    x:(r1)+,b       ; L1
+        asr     a       x:(r1)+,x0      ; (L0 - R0)/2; R1
+        sub     x0,b    a,x1
+        asr     b                       ; (L1 - R1)/2
+        mpy     y1,x1,a b,x1
+        mac     x1,y0,a
+        move    a,x0                    ; the side (limited)
+        move    n5,a
+        add     x0,a    n5,b
+        sub     x0,b    a,x:(r3)+       ; L = mid + side
+        move    b,x:(r3)+               ; R = mid - side
 zqoe:
         move    r7,y:(r4+S_RW)
         move    n7,m7
+
 
 zqdone:
         move    n4,m1
@@ -427,6 +422,43 @@ zqdone:
 zqstk:
         move    x:(r5),n6               ; displaced from the hook site
         move    y:(r5)+,a
+        rts
+
+; ---------------------------------------------------------------------------
+; zqboot (rev 17): the table copy at boot, outside every audio pass (the KYOTI
+; load audit: on a core's first RPS9/RPSP pass it cost one frame ~5,000
+; instructions on top of its audio). Hooked at the payload's one-time memory
+; clear, before its frame loop exists: A P:0x46 / B P:0x47, `do b,LA` with
+; a = 0, b = the count, r4/r5 its two pointers. This runs the clear's passes
+; but the last; the stock body at the return address runs that one, so the
+; memory the clear leaves is stock's (an extra pass would write one word past
+; each run -- on payload A, Y:$38000, payload B's entry in the shared window).
+; Then zqinit, with the registers it uses kept in the slots' spare words. zqrp's
+; tag check stays: it rebuilds Y if anything ever overwrites the tables. (Placed
+; before zqinit: octabam's dsp_asm sizes a backward call differently per pass.)
+zqboot:
+        move    #>1,x0
+        sub     x0,b
+        do      b,zqbz
+        move    a,y:(r4)+
+        move    a,y:(r5)+
+zqbz:
+        add     x0,b                    ; the count, as the stock DO leaves it
+        move    r6,y:>ZQSAV             ; (zqinit leaves r6 alone)
+        move    #>ZQSV1,r6
+        move    b1,y:(r6)+
+        move    r1,y:(r6)+
+        move    r4,y:(r6)+
+        move    n2,y:(r6)+
+        move    n4,y:(r6)+
+        bsr     zqinit
+        move    y:-(r6),n4
+        move    y:-(r6),n2
+        move    y:-(r6),r4
+        move    y:-(r6),r1
+        move    y:-(r6),b
+        move    y:>ZQSAV,r6
+        clr     a
         rts
 
 ; ---------------------------------------------------------------------------
@@ -453,30 +485,38 @@ zqi1:
         move    x0,y:(r7)-
 zqi2:
         move    #>XBL,r1
-        move    #>BTAB,r4
-        move    #>BEND,r7
-        move    #<2,n4
-        move    #<2,n7
+        move    #>TTMP,r4               ; T[0..LR] into a scratch run first
+        move    #>TTEND,r7
         move    #>$c00000,y0            ; -1/2
         do      #BHALF,zqi3             ; T[k] stored for k = 0..LR/2; T[LR-k] = -1/2 - T[k]
         move    x:(r1)+,x0
-        move    x0,y:(r4)+n4
+        move    x0,y:(r4)+
         move    y0,a
         sub     x0,a
-        move    a1,y:(r7)-n7
+        move    a1,y:(r7)-
 zqi3:
-        move    #>BTAB,r4               ; D[k] = T[k+1] - T[k], beside T[k]
-        move    #<1,n4
+; the render's table, transposed (rev 17): row j (one per segment) holds the L
+; taps' (T[k], D[k] = T[k+1] - T[k]) pairs in tap order, tap m at segment
+; k = (L-1-m)R + j, so a tick walks one row with (r5)+. One DO (the hardware
+; stack's budget): every L pairs the next row starts one segment up.
+        move    #>BTAB,r1
+        move    #>TTAP0,r7              ; row 0, tap 0
+        move    r7,r4
+        move    #>BTNEG,n4              ; k+1 -> k-R (n1 holds zqrp's mode)
+        move    #>BL,b
         do      #BPAIRS,zqi4
-        move    y:(r4)+,x0
-        move    y:(r4+n4),a
-        sub     x0,a
-        move    a1,y:(r4)+
+        move    y:(r4)+,x0              ; T[k]
+        move    y:(r4)+n4,a             ; T[k+1]
+        sub     x0,a    x0,y:(r1)+
+        move    a1,y:(r1)+
+        sub     #<1,b
+        bne     zqi5
+        move    (r7)+
+        move    r7,r4
+        move    #>BL,b
+zqi5:
+        nop                             ; (the loop's last word: a branch target)
 zqi4:
-        move    #>FBASE,r4              ; the aux blocks start clean (Y is dirty after
-        clr     a                       ; a reflash; channel 1/2's capacitor would
-        rep     #<64                    ; start anywhere)
-        move    a,y:(r4)+
         move    #>TAGVAL,x0
         move    x0,y:>TABTAG
         move    n2,r7

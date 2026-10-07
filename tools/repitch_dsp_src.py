@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-repitch-kyoti rev 14: the complete DSP source = generated constants +
+repitch-kyoti rev 17: the complete DSP source = generated constants +
 tools/patch_repitch_dsp.asm, and the table DATA that goes into X memory.
 Everything numeric comes from tools/repitch_engine_model.py, so the DSP and
 its reference model cannot drift apart. Used by tools/build_repitch_repeat98_kyoti.py
@@ -11,9 +11,10 @@ and the DSP harnesses.
 Since rev 14 the tables are not in the P cave: they are written over SPRING
 REVERB's own X data tables (five modules per payload that only SPRING's code
 references -- the canary run of NOTES Session 112), and zqinit copies them to
-Y. Run 1 (three adjacent 72-word modules) holds the render's half-table and
-channel 1/2's cutoff table (read in place); run 2 (116 + 384 words) the RPSP
-and RPS9 half-rows, in that order (zqinit's r1 runs on from one to the next).
+Y. Run 1 (three adjacent 72-word modules) holds the render's half-table; run
+2 (116 + 384 words) the RPSP and RPS9 half-rows, in that order (zqinit's r1 runs
+on from one to the next). Rev 17 (RPSP = mid + side through channel 5): no cutoff
+table, no aux blocks; the RPSP kernel is 8 taps (the mid's).
 
     python3 tools/repitch_dsp_src.py [A|B] [ORG]   -> assembles, prints size + tag
 """
@@ -34,11 +35,16 @@ ASM = HERE / "patch_repitch_dsp.asm"
 # Y:$795..$FFF is free on stock (octabam, hardware); SIDECHAIN3 owns $800-$9FF.
 # Per-track RPSP slots at STBASE + x:$418 ($20 words: the render's residual
 # ring, modulo-addressed so it starts the slot, then the state); the tag in the
-# last word of track 3's slot; the RPSP table (32 x 12 = $180 words), the RPS9
-# table (32 x 16 = $200), the render's step table at $E00 (L*R (T, D) pairs +
-# T[L*R], to $F40), and since rev 14 the per-track aux blocks at FBASE + x:$418/2.
-STBASE, TABTAG, SPTAB, R9TAB, BTAB, FBASE, YEND = 0xA00, 0xA7F, 0xA80, 0xC00, 0xE00, 0xF50, 0x1000
-TAGSP = 0x5A5A05                          # "this slot is rev 14's" (rev 11: ...02, 12: ...03, 13: ...04)
+# last word of track 3's slot; the RPSP table (32 x 8 = $100 words), the RPS9
+# table (32 x 16 = $200), the render's step table at $E00 (R rows of L (T, D)
+# pairs, to $F40; rev 17 transposed it), and zqinit's scratch run of T above it.
+STBASE, TABTAG, SPTAB, R9TAB, BTAB, YEND = 0xA00, 0xA7F, 0xA80, 0xC00, 0xE00, 0x1000
+TTMP = 0xF40                              # zqinit's scratch run of the render's T (161 words)
+# the tag says the Y tables' CONTENTS and LAYOUT are this build's: Y_LAYOUT moves it when the
+# copy changes shape (2: rev 17's first cut, the cutoff table in Y; 3: no cutoff table; 4: the render's
+# table transposed)
+Y_LAYOUT = 4
+TAGSP = 0x5A5A06                          # "this slot is rev 17's" (rev 11: ...02, 12: ...03, 13: ...04, 14: ...05)
 
 # SPRING REVERB's exclusive X data modules, per payload: (address, words), and
 # the two contiguous runs they form. X:0x8cf0 / 0x87b0 (27 words) is shared
@@ -65,9 +71,8 @@ def cave_org(payload, n):
     return org
 
 
-# The 7/8 build switch: CH12=0 in the environment drops the ;+CH12 .. ;-CH12
-# blocks (RPSP heard as the raw outputs 7/8, rev 13's sound + the trig fix).
-CH12 = os.environ.get("RPK_CH12", "1") != "0"
+# Rev 14-16's channel 1/2 build switch (RPK_CH12) is gone with channel 1/2 itself (rev 17).
+CH12 = False
 
 
 def q23(v):
@@ -96,34 +101,39 @@ def render_half():
 
 
 def x_data(payload):
-    """{X address: word} for one payload: run 1 = render half + cutoff table,
+    """{X address: word} for one payload: run 1 = the render's half-table,
     run 2 = RPSP half-rows then RPS9 half-rows."""
     sp, _ = half_table(m.MODE_RPSP)
     r9, _ = half_table(m.MODE_RPS9)
     bl = render_half()
-    gt = [w & 0xFFFFFF for w in m.ch12_gtab_q23()]
     (r1, n1), (r2, n2) = XRUNS[payload]
-    run1, run2 = bl + gt, sp + r9
+    run1, run2 = bl, sp + r9
     assert len(run1) <= n1 and len(run2) <= n2, "the tables outgrow SPRING's X runs"
     data = {r1 + i: w for i, w in enumerate(run1)}
     data.update({r2 + i: w for i, w in enumerate(run2)})
     return data
 
 
+def ms_filter():
+    """Channel 5's filter (rev 17's mid) as the DSP runs it: section 1 = b (x + x[n-1]) + q s1[n-1];
+    section 2, at half scale and doubled by an asl = g/2 s1 + (-a1/2) s2[n-1] + (-a2/2) s2[n-2]."""
+    (b0, b1, b2, a1, a2), (g, _, _, c1, c2) = m.sp_channel_filter(m.MS_CHANNEL)
+    assert b0 == b1 and b2 == 0 and a2 == 0, "section 1 is the real pole with a zero at Nyquist"
+    return dict(FB=q23(b0), FQ=q23(-a1), FG2=q23(g / 2), FNA1=q23(-c1 / 2), FNA2=q23(-c2 / 2))
+
+
 def constants(payload="A"):
     sp, spn = half_table(m.MODE_RPSP)
     r9, r9n = half_table(m.MODE_RPS9)
     bl = render_half()
-    gt = [w & 0xFFFFFF for w in m.ch12_gtab_q23()]
     L, R = m.RENDER["L"], m.RENDER["R"]
-    # the asm computes the RPSP row as phase x 12 (x8 + x4) and the RPS9 row as
-    # phase x 16; the render's fraction as (u << 4), i.e. R = 16; the cutoff
-    # table's index as env >> 18 (32 steps)
-    assert (spn, r9n, R, m.CH12_GSTEPS) == (12, 16, 16, 32), "patch_repitch_dsp.asm's arithmetic"
-    tag = (sum((i + 1) * w for i, w in enumerate(sp + r9 + bl + gt)) * 2654435761) & 0xFFFFFF | 1
+    # the asm computes the RPSP row as phase x 8 and the RPS9 row as phase x 16; the
+    # render's fraction as (u << 4), i.e. R = 16; RPS9's 15 taps after the first are unrolled
+    assert (spn, r9n, R) == (8, 16, 16), "patch_repitch_dsp.asm's arithmetic"
+    tag = ((sum((i + 1) * w for i, w in enumerate(sp + r9 + bl)) + Y_LAYOUT) * 2654435761) & 0xFFFFFF | 1
     (x1, _), (x2, _) = XRUNS[payload]
     c = dict(
-        STBASE=STBASE, TABTAG=TABTAG, SPTAB=SPTAB, R9TAB=R9TAB, BTAB=BTAB, FBASE=FBASE,
+        STBASE=STBASE, TABTAG=TABTAG, SPTAB=SPTAB, R9TAB=R9TAB, BTAB=BTAB,
         TAGVAL=tag, TAGSP=TAGSP,
         SPN=spn, SPNM1=spn - 1, SPHALF=16 * spn, SPEND=SPTAB + 32 * spn - 1,
         R9N=r9n, R9NM1=r9n - 1, R9HALF=16 * r9n, R9END=R9TAB + 32 * r9n - 1,
@@ -132,32 +142,27 @@ def constants(payload="A"):
         PSPQ20=int(round(m.PSP * (1 << 20))),        # SP tick period, output samples, Q20
         PSPM1=int(round(m.PSP * (1 << 20))) - (1 << 20),   # ... minus the interval it ticks in
         PSPH=q23(m.PSP / 2),                          # PSP/2, Q23 (the lag term)
-        RINGW=2 * L, RINGM1=2 * L - 1,                # the residual ring: L frames, modulo 2L
-        S_SIZE=2 * L + 8,                             # ring + the 8 state words (asm S_*)
-        BL=L, BSTART=BTAB + 2 * (L - 1) * R,          # tap 0's segment
-        BSTRIDE=(-(2 * R + 1)) & 0xFFFFFF,            # after reading (T, D): R pairs down
-        BHALF=L * R // 2 + 1, BPAIRS=L * R, BEND=BTAB + 2 * L * R,
-        XSP=x2, XR9=x2 + len(sp), XBL=x1, GTAB=x1 + len(bl),
-        DEC16=q23(m.CH12_DEC16),
+        RINGM1=L - 1,                                 # the mid's residual ring: L words, modulo L
+        BL=L, BHALF=L * R // 2 + 1, BPAIRS=L * R, BEND=BTAB + 2 * L * R,
+        TTMP=TTMP, TTEND=TTMP + L * R,                # zqinit's scratch run of T[0..LR]
+        TTAP0=TTMP + (L - 1) * R,                     # row 0's tap 0: segment (L-1)R
+        BTNEG=(-(R + 1)) & 0xFFFFFF,                  # after T[k], T[k+1]: on to T[k-R]
+        XSP=x2, XR9=x2 + len(sp), XBL=x1,
+        SIDEC=spn // 2,                               # the side reads c + 1 frames behind, as the ADC
+        MSD=m.MS_SIDE_DELAY,                          # ... and MSD increments more
+        **ms_filter(),
     )
-    # modulo-2L addressing needs the ring at a multiple of the next power of two
-    assert 2 * L <= 0x20 and STBASE % 0x20 == 0, "the ring must fit a 32-aligned slot"
-    assert 0x60 + c["S_SIZE"] <= TABTAG - STBASE < 0x80, "slots overlap the table tag"
+    # modulo-L addressing needs the ring at a multiple of the next power of two
+    assert L <= 0x10 and STBASE % 0x20 == 0, "the residual ring must fit a 16-aligned slot"
     assert TABTAG < SPTAB and SPTAB + 32 * spn <= R9TAB and R9TAB + 32 * r9n <= BTAB
-    assert c["BEND"] < FBASE and FBASE + 0x30 + 12 <= YEND, "aux blocks: 12 words at FBASE + x:$418/2"
-    # r6 (the aux pointer) runs under the stock m6 = $7f: no block may straddle 128 words
-    assert all((FBASE + 0x10 * t) // 0x80 == (FBASE + 0x10 * t + 11) // 0x80 for t in range(4)), "aux block straddles"
+    assert c["BEND"] <= TTMP and TTMP + L * R + 1 <= YEND
     return c
 
 
 def source(payload="A", ch12=None):
-    ch12 = CH12 if ch12 is None else ch12
     c = constants(payload)
     head = "".join(f"{k:<8}equ     ${v & 0xFFFFFF:x}\n" for k, v in c.items())
-    text = ASM.read_text()
-    if not ch12:
-        text = re.sub(r";\+CH12\n.*?;-CH12\n", "", text, flags=re.S)
-    return head + text, c
+    return head + ASM.read_text(), c
 
 
 def assemble(org, payload="A", ch12=None):
@@ -174,5 +179,5 @@ if __name__ == "__main__":
     except dsp_xasm.AsmError as e:
         sys.exit(f"repitch DSP source: {e}")
     xd = x_data(pl)
-    print(f"payload {pl}: {len(words)} P words at P:{org:05x} (code only; CH12 {'on' if CH12 else 'off'}); "
+    print(f"payload {pl}: {len(words)} P words at P:{org:05x} (code only); "
           f"{len(xd)} X words; TAGVAL {c['TAGVAL']:06x}")
