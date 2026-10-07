@@ -277,7 +277,57 @@ zsws:                                   ; saw, with the BLEP check every sample
         move    x:>INC,x0
 zswl:
         bra     zosc
-zsqr:                                   ; saw + square, the BLEP check every sample
+zsqr:                                   ; saw + square: fast unless either phase wraps within 5 steps
+        tfr     x0,b
+        asl     #2,b,b
+        add     x0,b
+        move    b,y1                    ; 5 INC
+        add     a,b
+        cmp     #>$7fffff,b
+        bgt     zsqs
+        move    a,b
+        eor     #>$800000,b             ; the square's phase, half a cycle on
+        move    b1,b
+        add     y1,b
+        cmp     #>$7fffff,b
+        bgt     zsqs
+        move    #>$ffffff,m3
+        move    #>OSC4,r3
+        do      #4,zsqf
+        add     x0,a            x:>W1,x1        ; P_k ; W1
+        move    a,y0                            ; P_k (in range: no wrap on this path)
+        mpy     x1,y0,b         x:>S70,x1       ; W1 P_k ; S70
+        move    b10,l:(r3)                      ; the saw part, exact
+        tfr     y0,b
+        eor     #>$800000,b
+        move    b1,y0                           ; S_k
+        mpy     x1,y0,b         x:>C437,y1      ; S70 S_k ; C437
+        add     y1,b
+        asl     #4,b,b
+        move    b,y1                            ; x/8, saturating
+        tfr     y1,b
+        asr     #14,b,b
+        and     #>$fffffe,b
+        add     #>THM,b
+        move    b1,r6
+        tfr     y1,b            y:(r6)+,x1      ; ; tanh[i]
+        asl     #8,b,b
+        and     #>$7fff00,b                     ; frac
+        move    y:(r6)+,y1                      ; slope[i]
+        move    b1,y0
+        mpy     y1,y0,b
+        add     x1,b
+        move    b,y0                            ; tanh
+        move    l:(r3),b
+        move    x:>W2,x1
+        mac     x1,y0,b         x:>W3,x1
+        add     x1,b
+        move    b,x:(r0)+
+zsqf:
+        move    a1,x:>PH
+        move    #14,m3
+        bra     zosc
+zsqs:                                   ; saw + square, the BLEP check every sample
         do      #4,zsqe
         add     x0,a
         move    a1,a
