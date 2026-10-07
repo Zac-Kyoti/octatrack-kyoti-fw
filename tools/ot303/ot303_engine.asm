@@ -129,11 +129,14 @@ P_R7    equ     PTRS+1
 P_N2    equ     PTRS+2
 P_N7    equ     PTRS+3
 OUTP    equ     PTRS+4
-W1A     equ     $1158           ; W1 again
-W2      equ     $1159
-W3      equ     $115a
-S70     equ     $115b
-C437    equ     $115c
+OCB     equ     $1158           ; the square path's words (8-aligned), read in this order
+S70     equ     OCB+0
+C437    equ     OCB+1
+MASKE   equ     OCB+2           ; $fffffe
+THMW    equ     OCB+3           ; THM
+W1A     equ     OCB+4           ; W1 again; W1..W3 are a ring (4-aligned)
+W2      equ     OCB+5
+W3      equ     OCB+6
 ; ---- tables (Y)
 LT      equ     $1200           ; 215 entries x 4: b0, db0, kp/64, dkp
 TH      equ     $1600           ; 513 entries x 2: tanh, slope
@@ -452,37 +455,60 @@ zsqr:
         add     y0,b
         cmp     y1,b
         bgt     zsqs
-        do      #4,zsqf
-        move    n0,x0
-        add     x0,a                                            ; P_k (in range: no wrap on this path)
-        move    a,y0
-        tfr     y0,b
+; fast square, in three passes over the state banks' oscillator words (r4, step 9, back at the
+; start after each): the shaper's argument and the saw part are both linear in k on this path.
+;  A: x8_k = sat(16 (S70 S_k + C437)), S_k = S0 + k INC
+;  B: th_k = tanh[i] + f slope[i] from x8_k, in place
+;  C: osc_k = W1 P_k + W2 th_k + W3, in place
+        move    #>OCB,r0
+        move    a,y0                                            ; (a = P0, y1 = $7fffff, x0 = INC)
+        tfr     y0,b            x:(r0)+,x1                      ; ; S70
         eor     #>$800000,b
-        move    b1,y1                                           ; S_k
-        move    x:>S70,x1
-        mpy     y1,x1,b         x:>C437,y1
-        add     y1,b
-        asl     #4,b,b
-        move    b,y1                                            ; x/8, saturating
-        tfr     y1,b
-        asr     #14,b,b
-        and     #>$fffffe,b
-        add     #>THM,b
-        move    b1,r0
-        tfr     y1,b
-        asl     #8,b,b
-        and     #>$7fff00,b                                     ; frac
-        move    y:(r0)+,x1                                      ; tanh[i]
-        move    b1,x0
-        move    y:(r0)+,y1                                      ; slope[i]
-        mpy     x0,y1,b
-        add     x1,b
-        move    b,y1                                            ; tanh
-        move    x:>W2,x1
-        mpy     y1,x1,b         x:>W1A,x1
-        mac     x1,y0,b         x:>W3,x1                        ; + W1 P_k
-        add     x1,b
+        move    b1,y1                                           ; S0
+        mpy     y1,x1,a         x:(r0)+,y1                      ; S70 S0 ; C437
+        mpy     x1,x0,b                                         ; S70 INC (48 bits)
+        add     y1,a                                            ; + C437
+        move    b1,y1
+        move    b0,y0                                           ; y = S70 INC
+        add     y,a
+        asl     #4,a,b
+        add     y,a             b,y:(r4)+n4
+        asl     #4,a,b
+        add     y,a             b,y:(r4)+n4
+        asl     #4,a,b
+        add     y,a             b,y:(r4)+n4
+        asl     #4,a,b
         move    b,y:(r4)+n4
+        move    x:(r0)+,x0                                      ; $fffffe
+        move    x:(r0)+,x1                                      ; THM
+        move    r0,n6                                           ; (the block's next word: W1)
+        do      #4,zsqb
+        move    y:(r4),a                                        ; x8
+        asr     #14,a,b
+        and     x0,b
+        add     x1,b
+        asl     #8,a,a
+        and     #>$7fff00,a                                     ; frac
+        move    b1,r0
+        move    a1,y0
+        move    y:(r0)+,a                                       ; tanh[i]
+        move    y:(r0)+,y1                                      ; slope[i]
+        mac     y1,y0,a
+        move    a,y:(r4)+n4                                     ; th_k
+zsqb:
+        move    n6,r0
+        move    #2,m0                                           ; W1, W2, W3 as a ring
+        move    n0,x0                                           ; INC
+        move    y:(r6),a                                        ; P0
+        do      #4,zsqc
+        add     x0,a            x:(r0)+,y0                      ; P_k ; W1
+        move    a,x1            y:(r4),y1                       ; x1 = P_k ; th_k
+        mpy     x1,y0,b         x:(r0)+,y0                      ; W1 P_k ; W2
+        mac     y1,y0,b         x:(r0)+,y0                      ; + W2 th_k ; W3
+        add     y0,b
+        move    b,y:(r4)+n4                                     ; osc_k
+zsqc:
+        move    #>$ffffff,m0
 zsqf:
         move    a,y:(r6)+                                       ; PH
         bra     zosc

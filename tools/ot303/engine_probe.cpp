@@ -75,6 +75,7 @@ int main(int argc, char** argv) {
     X(sym("NA1"), e.notch.a1); X(sym("NA2"), e.notch.a2); X(sym("NA3"), e.notch.a3); X(sym("NKK"), e.notch.kk);
     X(sym("DA1"), e.decl.a1); X(sym("DA2"), e.decl.a2); X(sym("DA3"), e.decl.a3); X(sym("DA2B"), e.decl.a2);
     X(sym("MASK4"), 0xfffffc); X(sym("LTBASE"), sym("LT")); X(sym("MASKF"), 0x7fffff); X(sym("SEVENF"), 0x7fffff);
+    if (S.count("MASKE")) { X(sym("MASKE"), 0xfffffe); X(sym("THMW"), sym("THM")); }
     for (int i = 0; i <= twin::LT_N; i++) {
         uint32_t a = sym("LT") + 4 * i;
         Y(a, twin::T.b0[i]); Y(a + 1, twin::T.db0[i]); Y(a + 2, twin::T.kp[i]); Y(a + 3, twin::T.dkp[i]);
