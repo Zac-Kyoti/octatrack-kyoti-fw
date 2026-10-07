@@ -35960,3 +35960,18 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   - Core 1 fits one OT-303; core 0 does not in the worst legal config without a cheaper
     engine or a donated DJ EQ.
   - User decision needed. Scope §11.
+- **S124 cont (2026-10-06/07): lean engine, integer twin, DSP engine bit-exact (no build).**
+  - User: option 3 (lean engine) + option 1 (one instance on T1–4) as the baseline + option 4
+    (two instances, core 0 caveated for the heaviest FX configs).
+  - Integer twin `tools/ot303/twin.h`: needed a 48-bit filter envelope (24-bit drifted Hot's
+    resonance) and convergent `rnd` on recursive states (truncation built DC in the slow post
+    filters). Lean savings: coefficient tables over log2(cutoff), 15+43-tap half-bands (was
+    23+79), square only when used. Round 7 ABX lean vs approved: all at chance → accepted.
+  - DSP engine `tools/ot303/ot303_engine.asm` (543 words): **bit-exact with the twin on
+    dsp56kEmu in all five scenes** (`tools/ot303/engine_check.py`). 360 instructions/sample
+    saw, 472 square — above the 240/280 estimate (control and post filters). Scope §11.
+  - dsp_asm traps found (operand orders → mpysu, dropped parallel moves on immediate shifts /
+    long-immediate ops / X:R-R:Y classes, bare `tfr a,b` → `rnd b`); `dsp_xasm` catches them;
+    it now builds XY+ALU with write halves (`ec96d45`, REPITCH unchanged). SR RM = 0 on stock.
+  - Next: trig handling and host words in the DSP, the THRU hook question, a hardware cost
+    measurement of the real engine.
