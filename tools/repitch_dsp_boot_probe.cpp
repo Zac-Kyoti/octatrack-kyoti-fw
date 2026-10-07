@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <string>
 #include <vector>
 #include "dsp56kEmu/dsp.h"
 #include "dsp56kEmu/memory.h"
@@ -70,6 +71,11 @@ int main(int argc, char** argv)
 		dsp.execInterpreter();
 	if(dsp.getPC().toWord() != stop) { std::printf("did not reach %05x (pc %06x)\n", stop, dsp.getPC().toWord()); return 1; }
 	std::printf("BOOT_INSTR %llu\n", (unsigned long long)(dsp.getInstructionCounter() - before));
+	std::printf("BOOT_REGS");
+	for(int i = 0; i < 8; ++i) std::printf(" r%d=%06x n%d=%06x m%d=%06x", i, R.r[i].var & 0xffffff, i, R.n[i].var & 0xffffff, i, R.m[i].var & 0xffffff);
+	std::printf(" a=%s b=%s x0=%06x x1=%06x y0=%06x y1=%06x sp=%x\n",
+		std::to_string(R.a.var).c_str(), std::to_string(R.b.var).c_str(),
+		R.x.var & 0xffffff, (R.x.var >> 24) & 0xffffff, R.y.var & 0xffffff, (R.y.var >> 24) & 0xffffff, dsp.regs().sp.var);
 
 	std::ofstream out(argv[3], std::ios::binary);
 	auto put = [&](uint32_t w) { w &= 0xffffff; out.write(reinterpret_cast<const char*>(&w), 4); };

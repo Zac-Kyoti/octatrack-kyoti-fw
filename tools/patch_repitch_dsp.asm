@@ -81,10 +81,9 @@ S_PHI   equ     $17     ; accumulator fraction, Q24
 S_RW    equ     $18     ; the ring slot (absolute address) of the next output
 S_RH    equ     $19     ; r / 2, unsigned Q23 (this pass's)
 S_RF    equ     $1a     ; frac(r), Q24, with the mode tag (this pass's)
-S_SIZE  equ     $1b     ; (track 3's slot ends in TABTAG at +$1f)
+S_LS    equ     $1b     ; the smoothed read shift (the SP's truncation), Q22 frames
+S_SIZE  equ     $1c     ; (track 3's slot ends in TABTAG at +$1f)
 S_RWND  equ     S_TAU-S_ONE
-ZQSAV   equ     STBASE+S_SIZE   ; zqboot's register saves: slot 0's spare words (r6),
-ZQSV1   equ     ZQSAV+$20       ; slot 1's (the other five; S_SIZE + 5 = $20)
 STTAG   equ     STBASE+S_TAG
 
 zqrp:
@@ -226,6 +225,8 @@ zqsz:
         move    r4,y:(r4+S_RW)
         move    #>$7fffff,x0
         move    x0,y:(r4+S_ONE)
+        move    #>LS0,x0                ; the read shift starts at its mean
+        move    x0,y:(r4+S_LS)
         bra     zqsrs                   ; "previous output" = this pass's first
 zqsok:
         move    x:(r5),a                ; resync "previous" if this pass does not
@@ -244,24 +245,26 @@ zqsnj:
 ; ---- this pass's constants. r = int(r) + frac(r) as the DSP holds it (x:$40 is
 ; read for bit 0 only -- on the unit it reads $c1 at 1.0x; the table builder
 ; masks it too, measured in ot_emu -- and y:$40 carries the mode tag in its low
-; bits, as the twin's r does): RF = frac(r); RH = r / 2, unsigned Q23 (for the
-; tick's u x r); the side's offset behind the OT, c + 1 frames + MSD
-; increments, its integer part doubled (ring words; the fraction stays one)
+; bits, as the twin's r does): RF = frac(r); RH = r / 2, unsigned Q23 (the tick's
+; u x r); the side's offset behind the OT = c + 1 frames + MS_SIDE_DELAY
+; increments + the smoothed read shift, its integer part doubled (ring words;
+; the fraction stays one)
         move    y:>$40,b
         move    b1,y:(r4+S_RF)
         clr     a
         move    x:>$40,a1
         and     #<1,a
         move    y:>$40,a0               ; a = r as 24.24
-        clr     b
-        add     a,b                     ; (dsp_asm encodes `tfr a,b` as rnd)
-        asr     b
-        move    b0,y:(r4+S_RH)
-        clr     b
-        add     a,b
-        asl     #3,a,a
-        sub     b,a                     ; 7 r     (MSD = 7: asserted by the generator)
+        asr     a                       ; a0 = RH = r x 2^23, unsigned (a1 = 0)
+        move    a0,y:(r4+S_RH)
+        move    a0,y0
+        move    #>KD,x0
+        mpyuu   y0,x0,a                 ; (MS_SIDE_DELAY / 16) r x 2^47 (RH unsigned; < 2^47)
+        asr     #19,a,a                 ; -> MS_SIDE_DELAY r, 24.24
         add     #<SIDEC,a               ; + c + 1 frames
+        move    y:(r4+S_LS),b
+        asr     #22,b,b                 ; + the read shift (Q22 -> 24.24)
+        add     b,a
         move    a1,x0
         add     x0,a                    ; integer part x 2
         move    a1,y:(r4+S_OH)
@@ -290,7 +293,13 @@ zqsnj:
         move    a1,y:(r4+S_PHI)
         lsr     a                       ; Q24 phi >> 1 = the same phi as Q23
         move    a1,y0
-        mpyi    #PSPH,y0,b              ; (PSP/2)*phi = PSP*phi * 2^46
+        mpyi    #PSPH,y0,b              ; (PSP/2)*phi = PSP*phi * 2^46: the read shift
+        move    y:(r4+S_LS),y1          ; (b1 = the shift, Q22) into its one-pole mean
+        move    b1,a
+        sub     y1,a
+        asr     #LSSH,a,a
+        add     y1,a
+        move    a1,y:(r4+S_LS)
         asr     #22,b,b                 ; -> frames, 24.24
         move    y:(r4+S_RH),y0
         mpyuu   x1,y0,a                 ; u*r * 2^47 (u r/2, unsigned)
@@ -433,7 +442,7 @@ zqstk:
 ; but the last; the stock body at the return address runs that one, so the
 ; memory the clear leaves is stock's (an extra pass would write one word past
 ; each run -- on payload A, Y:$38000, payload B's entry in the shared window).
-; Then zqinit, with the registers it uses kept in the slots' spare words. zqrp's
+; Then zqinit, with the registers it uses kept on the hardware stack. zqrp's
 ; tag check stays: it rebuilds Y if anything ever overwrites the tables. (Placed
 ; before zqinit: octabam's dsp_asm sizes a backward call differently per pass.)
 zqboot:
@@ -444,20 +453,17 @@ zqboot:
         move    a,y:(r5)+
 zqbz:
         add     x0,b                    ; the count, as the stock DO leaves it
-        move    r6,y:>ZQSAV             ; (zqinit leaves r6 alone)
-        move    #>ZQSV1,r6
-        move    b1,y:(r6)+
-        move    r1,y:(r6)+
-        move    r4,y:(r6)+
-        move    n2,y:(r6)+
-        move    n4,y:(r6)+
+        move    b1,ssh                  ; the registers zqinit uses, on the hardware
+        move    r1,ssh                  ; stack (the boot path is shallow: jsr + five +
+        move    r4,ssh                  ; bsr + one DO)
+        move    n2,ssh
+        move    n4,ssh
         bsr     zqinit
-        move    y:-(r6),n4
-        move    y:-(r6),n2
-        move    y:-(r6),r4
-        move    y:-(r6),r1
-        move    y:-(r6),b
-        move    y:>ZQSAV,r6
+        move    ssh,n4
+        move    ssh,n2
+        move    ssh,r4
+        move    ssh,r1
+        move    ssh,b
         clr     a
         rts
 

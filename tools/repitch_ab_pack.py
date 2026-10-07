@@ -247,6 +247,12 @@ SETS = {
         ("rev17", "Rev 17 as built: the DSP's own arithmetic, bit for bit",
          dict(exact=True), dict(taps=8, L=10), "stereo", "159 measured"),
     ],
+    "5": [
+        ("ref", "Reference: clean varispeed (RPCH, the OT's own read)", None, None, "stereo", "~0 extra"),
+        ("ms56", "Your pick from pack 3", dict(ms=5), dict(taps=8, L=10), "stereo", "design"),
+        ("rev17b", "Rev 17, side aligned to the mid at every ratio (the DSP's arithmetic)",
+         dict(exact=True), dict(taps=8, L=10), "stereo", "164 measured"),
+    ],
 }
 
 

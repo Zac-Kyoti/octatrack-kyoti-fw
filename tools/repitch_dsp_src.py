@@ -44,7 +44,7 @@ TTMP = 0xF40                              # zqinit's scratch run of the render's
 # copy changes shape (2: rev 17's first cut, the cutoff table in Y; 3: no cutoff table; 4: the render's
 # table transposed)
 Y_LAYOUT = 4
-TAGSP = 0x5A5A06                          # "this slot is rev 17's" (rev 11: ...02, 12: ...03, 13: ...04, 14: ...05)
+TAGSP = 0x5A5A07                          # "this slot is rev 17's" (rev 11: ...02, 12: ...03, 13: ...04, 14: ...05, 17 first cut: ...06)
 
 # SPRING REVERB's exclusive X data modules, per payload: (address, words), and
 # the two contiguous runs they form. X:0x8cf0 / 0x87b0 (27 words) is shared
@@ -149,7 +149,9 @@ def constants(payload="A"):
         BTNEG=(-(R + 1)) & 0xFFFFFF,                  # after T[k], T[k+1]: on to T[k-R]
         XSP=x2, XR9=x2 + len(sp), XBL=x1,
         SIDEC=spn // 2,                               # the side reads c + 1 frames behind, as the ADC
-        MSD=m.MS_SIDE_DELAY,                          # ... and MSD increments more
+        KD=q23(m.MS_SIDE_DELAY / 16),                 # ... MS_SIDE_DELAY increments more (x RH = r x 2^23)
+        LS0=int(round(m.PSP_LAG / 2 * (1 << 22))),    # ... + the smoothed read shift, Q22, from its mean
+        LSSH=m.MS_LAG_SHIFT,
         **ms_filter(),
     )
     # modulo-L addressing needs the ring at a multiple of the next power of two

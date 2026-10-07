@@ -94,7 +94,8 @@ def boot(img, tag, name):
         sys.exit(f"boot probe ({name} {tag}): {r.stdout} {r.stderr}")
     d = np.frombuffer(out.read_bytes(), dtype="<u4").astype(np.int64)
     n = int([l for l in r.stdout.splitlines() if l.startswith("BOOT_INSTR ")][0].split()[1])
-    return n, {"P": d[:0x2000], "X": d[0x2000:0x12000], "Y": d[0x12000:0x22000],
+    regs = dict(kv.split("=") for kv in [l for l in r.stdout.splitlines() if l.startswith("BOOT_REGS")][0].split()[1:])
+    return n, regs, {"P": d[:0x2000], "X": d[0x2000:0x12000], "Y": d[0x12000:0x22000],
                                       "YS": d[0x22000:0x32000]}
 
 
@@ -126,8 +127,10 @@ def main():
     want = expected_y()
     ok = True
     for tag in ("A", "B"):
-        n0, s = boot(base, tag, "unhooked")
-        n1, p = boot(img, tag, "built")
+        n0, r0, s = boot(base, tag, "unhooked")
+        n1, r1, p = boot(img, tag, "built")
+        # zqinit leaves x0/y0 (the stock path loads them before use: A P:0x61, B P:0x53)
+        rbad = [k for k in r0 if r0[k] != r1[k] and k not in ("x0", "y0")]
         bad = []
         for sp, space, off in (("X", 1, 0), ("Y", 2, 0), ("YS", 2, 0x30000)):
             for a in np.nonzero(s[sp] != p[sp])[0]:
@@ -138,8 +141,9 @@ def main():
         tab = [a for a, w in want.items() if p["Y"][a] != w]
         print(f"payload {tag}: boot {n0:,} instructions without the hook, {n1:,} with zqboot (+{n1 - n0:,}); "
               f"memory outside Y:0xa00-0xfff {'identical' if not bad else 'DIFFERS ' + ' '.join(bad[:8])}; "
-              f"tables + tag {'as the model' if not tab else f'{len(tab)} words DIFFER, first Y:{tab[0]:05x}'}")
-        ok &= not bad and not tab
+              f"tables + tag {'as the model' if not tab else f'{len(tab)} words DIFFER, first Y:{tab[0]:05x}'}; "
+              f"registers {'as without the hook (x0, y0 aside)' if not rbad else 'DIFFER ' + ' '.join(f'{k} {r0[k]}->{r1[k]}' for k in rbad)}")
+        ok &= not bad and not tab and not rbad
     print("PASS" if ok else "FAIL")
     sys.exit(0 if ok else 1)
 

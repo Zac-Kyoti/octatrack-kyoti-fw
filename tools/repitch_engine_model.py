@@ -71,11 +71,18 @@ SP_CHANNEL = 7                     # which SP-1200 output RPSP is heard on: 7 (=
 # Rev 17 (listening pack 3, the user's pick, 2026-10-06): RPSP is MID + SIDE. The mid (L+R)/2
 # runs the SP-1200 path -- 8-tap virtual ADC, 26.04 kHz drop-sample, 12-bit, the 10-tap
 # render -- then output channel 5's fixed filter; the side (L-R)/2 is read cleanly (the OT's
-# own 2-tap read) MS_SIDE_DELAY outputs behind, which lines it up with the mid's latency
-# (measured 6.6-7.5 samples over r = 0.75..1.99); L = mid + side, R = mid - side. Anti-phase
-# content lives in the side, so nothing cancels. ~1/3 of the stereo design's DSP cost.
+# own 2-tap read) as far behind the OT as the mid path delays the mid; L = mid + side,
+# R = mid - side. Anti-phase content lives in the side, so nothing cancels.
+# The mid's delay is c + 1 frames + MS_SIDE_DELAY outputs + the SP's truncating read: each
+# tick reads PSP_LAG x phi frames early, and at simple ratios (the QUAN ratios 1/1, 3/4,
+# 3/2, ...) phi settles into short patterns, so its average moves the mid by up to a
+# sample. The side follows a smoothed copy of that shift (one pole, 2^-MS_LAG_SHIFT per
+# tick, applied per pass): measured side - mid within +/-0.03 output samples at every
+# ratio (a fixed 7 was off by up to 1.16 -- the user heard pack 3's luckier alignment as
+# clearer stereo, listening pack 4, 2026-10-06), with no tick-rate jitter on the side.
 MS_CHANNEL = 5
-MS_SIDE_DELAY = 7
+MS_SIDE_DELAY = 6.47
+MS_LAG_SHIFT = 4
                                    # The DSP has no output-filter stage since rev 12; 3..6 are
                                    # modelled below (sp_channel_filter) for a future selectable channel
 
@@ -416,6 +423,7 @@ class Engine:
             self.held = 0.0
             self.acc = np.zeros(RENDER["L"])
             self.post = Biquads(sp_channel_filter(MS_CHANNEL), ch=1)
+            self.lags = PSP_LAG / 2               # the smoothed read shift, frames
 
     def fill(self, start, frames):
         for j, fr in enumerate(frames):
@@ -517,6 +525,7 @@ class Engine:
         out = []
         if self.prev is not None and table and (table[0][0] - self.prev[0]) % 64 > 2:
             self.prev = table[0]
+        offs = self.c + 1 + MS_SIDE_DELAY * r + self.lags            # this pass's
         for k, f in table:
             if self.prev is None:
                 self.prev = (k, f)
@@ -524,6 +533,7 @@ class Engine:
             while self.tau < 1.0:
                 u = self.tau
                 self.phi = (self.phi + r) % 1.0
+                self.lags += (PSP_LAG * self.phi - self.lags) / (1 << MS_LAG_SHIFT)
                 pos = pk + pf + u * r - PSP_LAG * self.phi
                 new = q12(self.adc_mid(pos - self.c - 1))
                 self.acc += self.step_weights(u) * (new - self.held)
@@ -531,7 +541,7 @@ class Engine:
                 self.tau += PSP_TICK
             self.tau -= 1.0
             y = self.post(np.array([self.held + self.acc[0]]))[0]
-            s = self.side_at(k + f - self.c - 1 - MS_SIDE_DELAY * r)
+            s = self.side_at(k + f - offs)
             out.append((y + s, y - s))
             self.acc = np.roll(self.acc, -1)
             self.acc[-1] = 0.0
@@ -670,6 +680,7 @@ class DspExact:
         self.prev = None
         self.acc = [0] * RENDER["L"]                           # residuals / 4, Q23
         self.xp = self.y1 = self.z1 = self.z2 = 0              # channel 5: x[n-1], s1[n-1], s2[n-1], s2[n-2]
+        self.ls = self.c["LS0"]                                # the smoothed read shift, Q22 frames
 
     @staticmethod
     def lim(v):
@@ -750,8 +761,10 @@ class DspExact:
             self.prev = table[0]                               # stale state: resync
         one = 1 << 20
         L, R = RENDER["L"], RENDER["R"]
-        # the side's offset behind the OT: c + 1 frames, + MS_SIDE_DELAY increments (24.24)
-        offs = ((self.cc + 1) << 24) + MS_SIDE_DELAY * (((1 if rint else 0) << 24) + (rfrac & 0xFFFFFF))
+        # the side's offset behind the OT (24.24): c + 1 frames + MS_SIDE_DELAY increments
+        # (RH = r x 2^23, unsigned, times MS_SIDE_DELAY / 16) + the smoothed read shift
+        rh = ((1 if rint else 0) << 23) | ((rfrac & 0xFFFFFF) >> 1)
+        offs = ((self.cc + 1) << 24) + ((2 * rh * c["KD"]) >> 19) + (self.ls << 2)
         out = []
         for k, f in table:
             if self.prev is None:
@@ -762,6 +775,7 @@ class DspExact:
                 self.tau += c["PSPQ20"] - one
                 self.phi = (self.phi + rfrac) & 0xFFFFFF
                 lag = (c["PSPH"] * (self.phi >> 1) * 2) >> 22
+                self.ls += ((lag >> 2) - self.ls) >> MS_LAG_SHIFT     # Q22, floor (the DSP's asr)
                 ur = (u * (rfrac >> 1) * 2) >> 23
                 pos = (pk << 24) + pf + ur - lag + (2 * u if rint else 0) - (c["SPC2"] << 24)
                 new = self.adc_mid(pos >> 24, (pos & 0xFFFFFF) >> 19)
