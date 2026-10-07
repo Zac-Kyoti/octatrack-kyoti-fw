@@ -976,3 +976,20 @@ sample.
   - core 0 does not, in the worst legal configuration, unless the engine gets well under
     ~280 cycles or the worst case is lowered (donate DJ EQ, and maybe LO-FI; re-measure with
     the new worst case).
+
+### Decision after the burn test (user, 2026-10-06)
+
+- **Option 3: build the engine lean.** Savings that cannot change the voice, each accepted only
+  if it measures (and, if in doubt, ABX-tests) as indistinguishable from the final voice:
+  - the square only computed when WAVE ≠ pure saw (identical output; helps typical load, not
+    the worst case);
+  - Open303's per-sample coefficient formulas (b0, the k polynomial, g; divisions) replaced
+    by small interpolated tables over log-cutoff;
+  - a shorter second decimator, co-designed with the 16 kHz rounding.
+  - Not on the table: lower oversampling, envelopes updated less than every sample.
+- **Option 1 is the guaranteed baseline:** one OT-303 on T1–4 (core 1) fits the worst legal
+  configuration with margin.
+- **Option 4: the no-degradation rule is relaxed for now on core 0.** Two OT-303s (one per
+  core) is the target; the build is **caveated**: in the heaviest FX configurations on T5–8
+  (many DJ EQ / LO-FI / SPRING / CHORUS instances) the second instance can overrun the core.
+  The caveat's exact boundary is measured once the engine exists.
