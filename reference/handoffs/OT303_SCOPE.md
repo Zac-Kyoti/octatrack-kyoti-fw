@@ -1096,3 +1096,35 @@ them through the twin and the emulated DSP (`engine_probe.cpp`).
    the host words from the OT's per-track record.
 2. Phase 3's first item: does THRU run the voice engine (`P:0x3a1`)? That picks the hook.
 3. Hardware cost: a burn-style measurement of the real engine on core 0 and core 1.
+
+### Phase 2b, step 2 continued: cycles, not instructions; the research pulled in on 2026-10-07
+
+**Correction.** The 360/472 figures above are *instructions*. Priced by the emulator's own cycle
+table (`dsp56k::calcCycles`, internal P, no interlocks; the probe now runs octabam's
+host-stepped interpreter one instruction at a time), v3 cost **508 cycles/sample (saw) and 690
+(square)**: an absolute address costs 3 cycles, a long immediate 2, a long branch 5.
+
+**What the upstream research (whatsnew, 2026-10-07) changed:**
+
+| source | finding | used |
+|---|---|---|
+| octabam `AGENTS.md`, `tools/patches/dsp56300.patch` (4 Oct 2026, pin `8ccdd843`) | dsp_asm now encodes an ALU op with two parallel moves, the X:R / R:Y classes, the one-word `(rN+d)` move; the emulator fixes DO-loop ends and modulo bounds | built privately in `out/ot303/dsp56300_new` (`OT303_DSP=new`), the shared `vendor/` untouched; the engine re-verified bit-exact under the fixed emulator |
+| octabam VOCODER (Ignorato's MKII, 4–5 Oct 2026) | real cost 850–940 cycles for 760 counted: **hardware runs ~12–25% above the cycle table** (one-word displaced moves ~4 cycles); two per core fit beside four FX1 FILTERs; an effect at a core's first track (T1/T5) gave click bursts (finishing before the ColdFire's pull); 48-bit envelope followers; DJ EQ donated to free X memory for tables; a branch-free polyBLEP with a per-note 1/du table | the cost margin below; the T1/T5 caveat noted for the hook choice; our 48-bit MEG is the same lesson |
+| octamad `OPTIMIZATION_LEVERS.md` §3 | stock's DSP load is fixed (~1,410 of 4,532 cycles/core); idle tracks take a *more* expensive DSP path (~60 instructions/sample/core, memoisable 🟡); no CPU lever is shown to buy DSP headroom yet | context only: nothing frees core 0's heavy-config budget |
+
+**v4 (`89f7592`, then the square path):** every once-per-sample word read by an X or a Y
+walker in use order (no absolute addressing on the sample path); half-bands as polyphase pairs
+(odd branch read oldest-first and back, even branch a delay: no pointer arithmetic); the
+oscillator writes straight into the 4× state banks. Bit-exact in all five scenes.
+
+| | v3 | **v4** | hardware estimate (×1.12–1.25) |
+|---|---|---|---|
+| saw, mean (worst 16-sample call) | 508 | **364 (387)** | ~410–480 |
+| square | 690 | **498 (541)** | ~560–680 |
+
+Saw breakdown: control 78, oscillator 33, 4× filter + first half-band 153, second half-band 39,
+post 58. P: 556 words (fits SPRING; one FX2 tail is ~605).
+
+Against the burn test (heaviest legal FX): core 1 (624 spare) hosts the saw voice with margin
+and the square voice about at the limit; core 0 (288 spare) overruns there, as accepted. The
+hardware measurement of the real engine is the next number that matters.
