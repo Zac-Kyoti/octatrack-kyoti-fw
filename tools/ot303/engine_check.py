@@ -15,6 +15,14 @@ import dsp_xasm  # noqa: E402
 
 OUT = os.path.join(ROOT, 'out', 'ot303', 'engine')
 VEND = os.path.join(ROOT, 'vendor', 'dsp56300')
+# OT303_DSP=new: octabam's current dsp56300 pin + patch (8ccdd843, the 4 Oct 2026 assembler that encodes
+# ALU + two parallel moves, X:R / R:Y and the one-word displaced move), built privately in
+# out/ot303/dsp56300_new so the shared vendor/ toolchain is untouched.
+if os.environ.get('OT303_DSP') == 'new':
+    VEND = os.path.join(ROOT, 'out', 'ot303', 'dsp56300_new')
+    import pathlib as _pl
+    dsp_xasm.DSP_ASM = _pl.Path(VEND) / 'build/source/dsp_host/dsp_asm'
+    dsp_xasm.DSP_DIS = _pl.Path(VEND) / 'build/source/disassemble/dsp56kDisassemble'
 ASM = os.path.join(ROOT, 'tools', 'ot303', 'ot303_engine.asm')
 ORG, STUBORG = 0x200, 0x100
 LEAN = 'hb2:43,hbfp:16,hb1:15,hb1fp:18,meg48:1,frame:16'
@@ -51,6 +59,8 @@ def main():
     print(f'engine: {len(words)} words at P:${ORG:x}')
     probe = os.path.join(OUT, 'engine_probe')
     inc = [f'-I{VEND}/source', f'-I{VEND}/source/asmjit/src', f'-I{ROOT}/tools/ot303', '-DDSP56300_DEBUGGER=0', '-DASMJIT_STATIC']
+    if os.environ.get('OT303_DSP') == 'new':
+        inc.append('-DOT303_HOSTSTEP')
     libs = [f'{VEND}/build/source/dsp56kEmu/libdsp56kEmu.a', f'{VEND}/build/source/dsp56kBase/libdsp56kBase.a',
             f'{VEND}/build/source/asmjit/libasmjit.a']
     r = subprocess.run(['c++', '-std=c++17', '-O2', '-w', *inc, os.path.join(ROOT, 'tools/ot303/engine_probe.cpp'), *libs, '-o', probe],
@@ -65,7 +75,7 @@ def main():
         p = subprocess.run([probe, os.path.join(OUT, 'engine.bin'), f'{ORG:x}', os.path.join(OUT, 'stub.bin'), f'{STUBORG:x}',
                             os.path.join(OUT, 'syms.txt'), log], capture_output=True, text=True, errors='replace')
         lines = [l for l in p.stdout.splitlines() if not re.match(r'^\w+@\d+:', l)]
-        print(f'{sc:8} ' + '\n         '.join(lines[-20:]))
+        print(f'{sc:8} ' + '\n         '.join(lines if os.environ.get('OT303_PROF') else lines[-20:]))
         fails += p.returncode != 0
     sys.exit(1 if fails else 0)
 

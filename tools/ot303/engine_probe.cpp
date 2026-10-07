@@ -55,6 +55,9 @@ int main(int argc, char** argv) {
     for (size_t i = 0; i < stub.size(); i++) dsp.memWriteP(sorg + TWord(i), stub[i]);
     auto& R = dsp.regs();
     for (int k = 0; k < 8; k++) R.m[k].var = 0xffffff;
+#ifdef OT303_HOSTSTEP
+    dsp.setHostStepped(true);
+#endif
     const uint32_t stopA = sorg + uint32_t(stub.size()) - 1;    // the stub's last word (a nop)
     auto X = [&](uint32_t a, int32_t w) { mem.set(MemArea_X, a, uint32_t(w) & 0xffffff); };
     auto Y = [&](uint32_t a, int32_t w) { mem.set(MemArea_Y, a, uint32_t(w) & 0xffffff); };
@@ -100,7 +103,7 @@ int main(int argc, char** argv) {
     const bool prof = std::getenv("OT303_PROF") != nullptr;      // instructions per code region (labels)
     std::map<uint32_t, uint64_t> pcHist;
     std::ifstream lf(argv[6]); std::string line;
-    long seg = 0, samples = 0; uint64_t instr = 0, worst16 = 0;
+    long seg = 0, samples = 0; uint64_t instr = 0, worst16 = 0, cycles = 0, worstCyc16 = 0;
     while (std::getline(lf, line)) {
         std::istringstream s(line); int n, rst, trg; s >> n >> rst >> trg;
         uint32_t h[18]; for (auto& v : h) { std::string t; s >> t; v = hx(t); }
@@ -121,13 +124,32 @@ int main(int argc, char** argv) {
             int k = std::min(16, n - done);
             R.r[7].var = k; R.r[3].var = OUTB;
             dsp.setPC(sorg);
-            uint64_t i0 = dsp.getInstructionCounter(); unsigned steps = 0;
+            uint64_t i0 = dsp.getInstructionCounter(); unsigned steps = 0; uint64_t callCycles = 0;
+#ifdef OT303_HOSTSTEP
+            // octabam's host-stepped interpreter: one instruction per step (a DO loop returns after
+            // each instruction; doLoopEnd() applies the loop's end test). Cycles from the emulator's
+            // own table (dsp56k::calcCycles: internal P, no interlocks), a REP's repeats priced as
+            // the repeated instruction.
+            while (dsp.getPC().toWord() != stopA && steps++ < 4000000) {
+                uint32_t pc = dsp.getPC().toWord();
+                uint64_t c0 = dsp.getInstructionCounter();
+                uint32_t cy = dsp.calcOpcodeCycles(pc);
+                dsp.execInterpreter();
+                uint64_t n = dsp.getInstructionCounter() - c0;
+                if (n > 1) cy += uint32_t(n - 1) * dsp.calcOpcodeCycles(pc + 1);
+                cycles += cy; callCycles += cy;
+                if (prof) pcHist[pc] += cy;
+                dsp.doLoopEnd();
+            }
+#else
             while (dsp.getPC().toWord() != stopA && steps++ < 2000000) {
                 if (prof) pcHist[dsp.getPC().toWord()]++;
                 dsp.execInterpreter();
             }
+#endif
             if (dsp.getPC().toWord() != stopA) { std::printf("segment %ld: did not return (pc %06x)\n", seg, dsp.getPC().toWord()); return 1; }
             uint64_t ni = dsp.getInstructionCounter() - i0; instr += ni; if (k == 16 && ni > worst16) worst16 = ni;
+            if (k == 16 && callCycles > worstCyc16) worstCyc16 = callCycles;
             if ((R.r[3].var & 0xffffff) != OUTB + uint32_t(k)) { std::printf("r3 = %06x after %d samples\n", R.r[3].var & 0xffffff, k); return 1; }
             for (int m = 0; m < 8; m++) if ((R.m[m].var & 0xffffff) != 0xffffff) { std::printf("m%d left at %06x\n", m, R.m[m].var & 0xffffff); return 1; }
             for (int j = 0; j < k; j++) {
@@ -150,13 +172,19 @@ int main(int argc, char** argv) {
         }
         seg++;
     }
+#ifdef OT303_HOSTSTEP
+    std::printf("CYCLES (emulator table, internal P, no interlocks): %.1f/sample (worst 16-sample call %.1f/sample)\n",
+                samples ? double(cycles) / samples : 0.0, worstCyc16 / 16.0);
+#endif
     if (prof) {                                 // attribute each PC to the nearest label at or below it
         std::map<uint32_t, std::string> labs;
         for (auto& kv : S) if (kv.first.size() > 1 && kv.first[0] == 'z' && kv.second >= org && kv.second < org + code.size()) labs[kv.second] = kv.first;
         labs[org] = "ot303";
         std::map<std::string, uint64_t> per;
         for (auto& kv : pcHist) { auto it = labs.upper_bound(kv.first); --it; per[it->second] += kv.second; }
-        for (auto& kv : per) std::printf("  %-8s %7.1f instructions/sample\n", kv.first.c_str(), double(kv.second) / samples);
+        for (auto& kv : per) std::printf("  %-8s %7.1f per sample\n", kv.first.c_str(), double(kv.second) / samples);
+        if (std::string(std::getenv("OT303_PROF")) == "2")       // per PC (cycles with OT303_HOSTSTEP)
+            for (auto& kv : pcHist) std::printf("  PC %05x %8.3f\n", kv.first, double(kv.second) / samples);
     }
     std::printf("BIT-EXACT: %ld samples in %ld segments; %.1f instructions/sample (worst 16-sample call %.1f/sample)\n",
                 samples, seg, samples ? double(instr) / samples : 0.0, worst16 / 16.0);
