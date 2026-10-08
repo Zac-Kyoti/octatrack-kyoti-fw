@@ -35660,3 +35660,16 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
   crash points above), play the excess RPSP voices as RPS9 or plain varispeed instead of letting
   the DSP overrun. Trades a crash for a sound change in overload setups only; thresholds need
   hardware tuning with these same tests.
+* **2026-10-08: the mid's output filter is now SP channel 6 (`c3bf748`).** The user heard less
+  metallic grit in rev 17 than in rev 16. Cause: rev 16's RPSP was the raw 7/8 output; rev 17's
+  mid goes through channel 5, which cuts the aliasing and staircase images above ~10 kHz that
+  made the grit. Listening pack 9 (private `K558pnkGzhFJxpmVQShP1Z`; `repitch_ab_speeds.py
+  --filters`) offered channel 5, channel 6 and no filter (raw ≈ 147 cycles, estimated). **The user
+  picked channel 6.** It has the same 3-pole code with new coefficients: −3 dB near 13 kHz and
+  −9 dB at 16 kHz (channel 5: 11.6 kHz, −14 dB). Its group delay is ~0.2 outputs shorter, so
+  MS_SIDE_DELAY goes 5.97 → 5.77. Its peak gain is +0.4 dB and its worst-case gain lower than
+  channel 5's. RPSP stays at 167 modelled cycles. Checks: engine check PASS; octabam check 264/264;
+  twin vs design −104…−118 dBFS RMS (channel 5 measures the same way). **OBKYOTI16 BUILT, NOT
+  flashed** (out/octabam_kyoti16/): OBKYOTI15's set + channel 6. syx
+  `1b43a8a487b5a1402684fdd5ab4c38882754c2c8087b1d6dc3e1384041ea94c6`; verify-remix green; boot
+  check PASS; the channel 6 coefficients are in both payloads and channel 5's are gone.
