@@ -113,10 +113,10 @@ unit that boots; if it doesn't, use §3b.
 | MUTE_MODES, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT, QUANTIZE_LIVE_REC_TOGGLE | `140C_KYOTI` |
 | KYOTI V1.1 (every feature in one image) | `KYOTI V1.1` |
 | DIRECT_JUMP_KYOTI | `140C_KDJ7` |
-| REPITCH_REPEAT98_KYOTI (WIP since 2026-10-06) | `140C_RPK16` |
+| REPITCH_REPEAT98_KYOTI | `140C_RPK17` |
 | REC_TRIG_MUTE | `140C_RTM` |
 | ERASE_EMPTY_TRIGLESS_LOCKS and the BATCH_BUGFIXES builds | `1.40C` (stock string — check by behaviour) |
-| a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_RPK16`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`) |
+| a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_RPK17`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`) |
 
 PERSONALIZE is reset by every flash, so features are off until you re-enable them. A
 quick check for each:

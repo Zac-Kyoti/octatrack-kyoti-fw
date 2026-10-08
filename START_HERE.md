@@ -108,7 +108,7 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | a final build | `tools/build_<feature>.py` → `.syx` (MIDI) + `.bin` (CF card); see `BUILD_KYOTI.md` |
 | the combined image | `tools/build_kyoti.py` — **KYOTI V1.1, FINAL 2026-10-08** (V1.0 withdrawn; see §6) |
 | octabam's remixer (`make remix`) | `sh tools/octabam_remixer.sh` — its own clone at `~/Documents/octabam`, fast-forwarded to octabam's `main` on every launch; `refs/octabam` stays the pinned research harness |
-| each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final, seven images; REPITCH's `BUG_RPK16` is WIP since 2026-10-06 and skipped) |
+| each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final, eight images) |
 | DIRECT JUMP V6.4, the OT↔AR parity build | `tools/build_direct_jump_v6_4.py` — WIP **by design**: kept buildable at the user's request (hardware-confirmed image `4a6c1b5e…`), never to be promoted |
 | external RE research | `python3 tools/refs/sync.py` (clone or refresh the tracked repos into `refs/`) · `python3 tools/refs/whatsnew.py` |
 
@@ -139,7 +139,7 @@ builder's FINAL entry and the old builder is deleted. There is no superseded tie
 | DIRECT_JUMP_KYOTI | `build_direct_jump_kyoti.py` | `octabam-modules/direct-jump-kyoti` |
 | SIDECHAIN_COMPRESSOR | `build_sidechain_compressor.py` | `octabam-modules/sidechain-compressor` (octabam #565; on hardware 2026-10-04) |
 | RELOAD_FROM_PROJECT | `build_reload_from_project.py` | `octabam-modules/reload-from-project` |
-| REPITCH_REPEAT98_KYOTI | `build_repitch_repeat98_kyoti.py` (**WIP since 2026-10-06**) | `octabam-modules/repitch-repeat98-kyoti` (octabam #561; on hardware 2026-10-05) |
+| REPITCH_REPEAT98_KYOTI | `build_repitch_repeat98_kyoti.py` | `octabam-modules/repitch-repeat98-kyoti` (octabam #561; on hardware 2026-10-05) |
 | QUANTIZE_LIVE_REC_TOGGLE | `build_quantize_live_rec_toggle.py` | `octabam-modules/quantize-live-rec-toggle` |
 | ERASE_EMPTY_TRIGLESS_LOCKS | `build_erase_empty_trigless_locks.py` | `octabam-modules/erase-empty-trigless-locks` |
 | REC_TRIG_MUTE | `build_rec_trig_mute.py` | `octabam-modules/rec-trig-mute` |
@@ -177,13 +177,13 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   stock firmware (the reset is emulator-verified). octabam: draft PR sambanks/octabam#648
   (pin 45ab46c; draft until an octabam-built image is flashed).
   `NOTES.md` Session 126.
-- **REPITCH_REPEAT98_KYOTI** — **demoted to WIP 2026-10-06** (standalone build and
-  `BUG_RPK16`; FINAL pins removed, README entry replaced by a notice). On the user's MKI, RPSP
-  on all four tracks of a core with DARK REV + DJ EQ crashes the DSP (tone, sequencer stops);
-  beside stock's heaviest FX a core has room for about one RPSP voice.
-  `reference/handoffs/KYOTI_LOAD_AUDIT.md` §1 (HW-A..F): the bar is ≈ 60–75 modelled cycles
-  per voice; RPSP costs ≈ 234–239, RPS9 ≈ 77 (≈ 58 in the octabam-port worktree's unpushed
-  bit-exact rework). Not specifically tested: RTRG retrigs.
+- **REPITCH_REPEAT98_KYOTI** — **rev 17, FINAL 2026-10-08** (`140C_RPK17`, `BUG_RPK17`): RPSP =
+  the SP's mid through raw outputs 7/8, the side clean; 146 modelled cycles per RPSP voice (rev 16:
+  ≈ 235), RPS9 57. On hardware (octabam images OBKYOTI15/16, same kernel with a filter): four RPSP
+  voices + DARK REV ×4 pass with three DJ EQs on T5–T8 and four on T1–T4; a fourth on T5–T8
+  overloads. The raw output itself not yet flashed. Channel 6 and channels 1/2 stay buildable
+  (`RPK_OUT=ch6|ch12`, NOTES 2026-10-08). Future: a ColdFire load guard. Not specifically
+  tested: RTRG retrigs.
 - **octabam port** — the six modules, REC_TRIG_MUTE and SIDECHAIN_COMPRESSOR (+ MUTE_MODES'
   SC_KEY variant, #565) are merged in octabam. REPITCH_REPEAT98_KYOTI: PR sambanks/octabam#561,
   both halves, hardware-confirmed in octabam form 2026-10-05 (OBKYOTI11, only SPRING REV given
