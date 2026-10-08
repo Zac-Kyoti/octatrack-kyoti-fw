@@ -110,8 +110,8 @@ FEATURES = {
     "RELOAD_FROM_PROJECT": ("build_reload_from_project.py", "out/mainos_reload_from_project.bin", "BUG_RL3",
                 "[PTN]+[TRACK n] reload track n's saved sequence; [BANK]+[TRACK n] also re-applies the Part."),
     "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "out/mainos_direct_jump_kyoti.bin", "BUG_DJV7", "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.0.1, clock-locked jumps)."),
-    "REPITCH_REPEAT98_KYOTI": ("build_repitch_repeat98_kyoti.py", "out/mainos_repitch_repeat98_kyoti.bin", "BUG_RPK16", "SETUP TSTR RPCH/RPS9/RPSP: tempo-locked varispeed + QUAN ratios "
-                             "(rev 16).  Removes SPRING REVERB."),
+    "REPITCH_REPEAT98_KYOTI": ("build_repitch_repeat98_kyoti.py", "out/mainos_repitch_repeat98_kyoti.bin", "BUG_RPK17", "SETUP TSTR RPCH/RPS9/RPSP: tempo-locked varispeed + QUAN ratios "
+                             "(rev 17).  Removes SPRING REVERB."),
     "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "out/mainos_rec_trig_mute.bin", "BUG_RTM",
                       "[TRACK]+[NO]/[YES] mute/unmute recorder trigs; MIDI CC 80; '..' edge icon."),
 }
