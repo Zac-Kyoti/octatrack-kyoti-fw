@@ -106,7 +106,7 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | REPITCH_REPEAT98_KYOTI DSP gate | `tools/repitch_dsp_*` (bit-exact against the reference engine) |
 | DSP assembly | `tools/dsp_xasm.py` over `vendor/dsp56300`'s `dsp_asm` |
 | a final build | `tools/build_<feature>.py` → `.syx` (MIDI) + `.bin` (CF card); see `BUILD_KYOTI.md` |
-| the combined image | `tools/build_kyoti.py` — **WIP, withdrawn 2026-10-06** (crashes; see §6) |
+| the combined image | `tools/build_kyoti.py` — **KYOTI V1.1, FINAL 2026-10-08** (V1.0 withdrawn; see §6) |
 | octabam's remixer (`make remix`) | `sh tools/octabam_remixer.sh` — its own clone at `~/Documents/octabam`, fast-forwarded to octabam's `main` on every launch; `refs/octabam` stays the pinned research harness |
 | each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final, seven images; REPITCH's `BUG_RPK16` is WIP since 2026-10-06 and skipped) |
 | DIRECT JUMP V6.4, the OT↔AR parity build | `tools/build_direct_jump_v6_4.py` — WIP **by design**: kept buildable at the user's request (hardware-confirmed image `4a6c1b5e…`), never to be promoted |
@@ -153,13 +153,14 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
-- **KYOTI V1.1** (`tools/build_kyoti.py`) — **WIP, built, NOT flashed** (2026-10-06).
-  - Every FINAL feature, ROM-only, nothing placed in the descriptor table.
-  - Emulator: OT DEMO with T8 MASTER loads and plays, the FX-NONE knob script and NEIGHBOR
-    pages are clean, RELOAD and DIRECT JUMP work.
-  - `--with REPITCH_REPEAT98_KYOTI` (WIP) carries RELOAD in DRAM: 1 page, 6 KB. The DRAM
-    image depacks bit-exactly at boot (emulator).
-  - Next: a hardware test, then promotion on the user's word.
+- **KYOTI V1.1** (`tools/build_kyoti.py`) — **FINAL 2026-10-08**, syx `0e1b6012…`, mainos
+  `01ffe407…`. Flashed: the V1.0 crashes are gone and every feature works on hardware.
+  - Every FINAL feature, ROM-only (no sample RAM), nothing placed in the descriptor table.
+  - `--with REPITCH_REPEAT98_KYOTI` (WIP, needs the opt-in) carries RELOAD in DRAM: 1 page,
+    6 KB. Emulator only.
+  - Its pin breaks whenever a feature it contains is re-promoted: rebuild, re-test, re-pin
+    with that feature's Bugbuild. When REPITCH returns to FINAL it goes back into the default
+    image (with RELOAD in DRAM, 6 KB): that image is V1.2.
 - **KYOTI V1.0** (`tools/build_kyoti.py`) — **WITHDRAWN 2026-10-06** (was FINAL 2026-09-30,
   syx `5106f7fb…`). Its midisc pads are live stock parameter-page tables. Confirmed crashes:
   - an encoder on an FX page set to NONE;

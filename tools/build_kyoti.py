@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-KYOTI V1.1 -- every FINAL feature in one image.
+KYOTI V1.1 (FINAL, promoted 2026-10-08) -- every FINAL feature in one image.
 
     MUTE MODE (OT / OTFX / OTFX-T / DT-T)      QUANTIZE LIVE REC toggle
     SIDE-CHAIN COMPRESSOR (cross-core)         TRIGLESS-LOCK AUTO-REMOVE
@@ -93,8 +93,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
 import dram                                    # noqa: E402  (tools/dram/dram.py)
 
 gate(__file__, note="""
-KYOTI V1.1 (WIP until promoted): every FINAL feature in one image, ROM-only, nothing placed in
-the parameter-page descriptor table. V1.0 (withdrawn 2026-10-06) crashed because it did.
+KYOTI V1.1: every FINAL feature in one image, ROM-only, nothing placed in the parameter-page
+descriptor table. V1.0 (withdrawn 2026-10-06) crashed because it did.
 --with REPITCH_REPEAT98_KYOTI (WIP) moves RELOAD to DRAM; the build prints the RAM cost.
 """)
 
@@ -363,6 +363,15 @@ def refs_into(img, lo, hi):
 
 
 # ------------------------------------------------------------------------------------
+def wip_variant(flag):
+    """--with / --without images are never the promoted one: refuse them up front without the
+    opt-in, instead of after a full build at seal()."""
+    if os.environ.get("KYOTI_ALLOW_WIP") != "1":
+        sys.exit(f"\n  Refusing to build: {flag} makes a WIP image, not KYOTI V1.1.\n"
+                 f"  If you meant it, set KYOTI_ALLOW_WIP=1:\n\n"
+                 f"      KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py {flag} ...\n")
+
+
 def apply_with(argv):
     """--with NAME[,NAME]: add WIP features (not promoted). The image is WIP too: its own OS
     VERSION and directory (out/KYOTI_WIP/<tag>/), so it can never be taken for the FINAL one.
@@ -370,6 +379,7 @@ def apply_with(argv):
     global VERSTR, TAG, OUTDIR, SANDBOX, PLAN
     if "--with" not in argv:
         return
+    wip_variant("--with")
     add = argv[argv.index("--with") + 1].upper().split(",")
     bad = [a for a in add if a not in WIP_FEATURES]
     if bad:
@@ -386,13 +396,14 @@ def apply_with(argv):
 
 
 def apply_without(argv):
-    """--without NAME[,NAME]: a BISECTION image -- KYOTI V1.0 minus those features, built
-    by the same method.  It gets its own OS VERSION ("KV1-NO-" + a short code per removed
-    feature, e.g. KV1-NO-RPK) and its own directory out/KYOTI_BISECT/<tag>/, so it can never be
+    """--without NAME[,NAME]: a BISECTION image -- KYOTI V1.1 minus those features, built
+    by the same method.  It gets its own OS VERSION ("KV11-NO-" + a short code per removed
+    feature, e.g. KV11-NO-SC) and its own directory out/KYOTI_BISECT/<tag>/, so it can never be
     mistaken for, or overwrite, the real image."""
     global VERSTR, TAG, OUTDIR, SANDBOX
     if "--without" not in argv:
         return
+    wip_variant("--without")
     drop = argv[argv.index("--without") + 1].upper().split(",")
     bad = [d for d in drop if d not in FEATURES]
     if bad:
@@ -725,7 +736,7 @@ def main():
     # --- write + wrap -----------------------------------------------------------------------
     mainos = OUTDIR / f"mainos_{TAG.lower()}.bin"
     mainos.write_bytes(bytes(comp))
-    seal(__file__, mainos)       # FINAL pins mainos_kyoti_v1.0.bin; a bisection image is WIP
+    seal(__file__, mainos)       # FINAL pins mainos_kyoti_v1.1.bin; --with/--without images are WIP
     cmap = {"verstr": VERSTR, "zones": {z: [hex(lo), hex(hi), cls] for z, (lo, hi, cls, _) in ZONES.items()},
             "pieces": {k: {"zone": zone_of[k], "at": hex(place[k]), "size": size[k]} for k in place},
             "dram": dram_report,

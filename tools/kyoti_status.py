@@ -53,6 +53,9 @@ FINAL = {
         "mainos_direct_jump_kyoti_batch_bugfixes.bin":       "fa4617506e9d7e3ef6af9bb3c6a2739c03f7f17a4db475d8329d80a34f986f37",
         "mainos_rec_trig_mute_batch_bugfixes.bin":           "fd65e293657e3caa895064255c7dad76882c21640c6eebdc1cf812074744c658",
     },
+    "build_kyoti.py": {
+        "mainos_kyoti_v1.1.bin":                             "01ffe4076b0a8200ce16f9d0c8a5440eb1d7799001db4718ebdc64778e2afb79",
+    },
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
 }
 

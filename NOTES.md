@@ -35492,3 +35492,18 @@ stay clean; a feature's own new modes may add load but not break what stock allo
   * Emulator: the DRAM after boot == the build's raw (sha `52a2972b…`). rl_job runs from DRAM
     for both chords; OT DEMO plays with RPSP active.
 * **Not flashed. Neither image has been on hardware.**
+
+## Session 125 continued (2026-10-08, `load-audit`) — KYOTI V1.1 PROMOTED to FINAL
+
+* **Hardware (user, 2026-10-08):** flashed V1.1 syx `0e1b6012…`. The V1.0 crashes (FX page set
+  to NONE, T8 MASTER PLAYBACK/LFO, NEIGHBOR/THRU/ATTRIBUTES pages) are gone, and every feature works.
+* **Promoted:** `kyoti_status.py` pins `build_kyoti.py` → `mainos_kyoti_v1.1.bin`
+  `01ffe4076b0a8200ce16f9d0c8a5440eb1d7799001db4718ebdc64778e2afb79`. The builder rebuilt
+  the flashed syx byte for byte, and it seals without the opt-in.
+* `--with` / `--without` images now refuse up front without `KYOTI_ALLOW_WIP=1` (before, the
+  refusal came at seal() after a full build).
+* README: KYOTI V1.1 catalogue entry with its sample-memory line (none). FLASHING's OS VERSION
+  table, BUILD_KYOTI, START_HERE §6 and MERGE updated.
+* **Coupling:** the SIDECHAIN_COMPRESSOR fix (`sc-defaults`, patch_sidechain 134 → 338 B) and the
+  REPITCH work will each break this pin when promoted: rebuild V1.1, re-test, re-pin with the
+  Bugbuilds. REPITCH back to FINAL = back into the default image with RELOAD in DRAM (6 KB) = V1.2.

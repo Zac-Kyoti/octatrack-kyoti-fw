@@ -196,15 +196,26 @@ flashed as such.\
 **Final build:** [`tools/build_bugbuilds.py`](tools/build_bugbuilds.py) →
 `out/Bugbuilds/OCTATRACK_OS1.40C_<FEATURE>_BATCH_BUGFIXES`
 
+### KYOTI V1.1
+
+Every feature above and all three BATCH_BUGFIXES in **one image**. The boot splash and
+SYSTEM STATUS → OS VERSION read `KYOTI V1.1`. It replaces KYOTI V1.0 (withdrawn, see below).
+REPITCH_REPEAT98_KYOTI is not in it while that feature is work in progress.
+
+**Sample memory:** none used — the image is ROM-only, and the 85.5 MB sample/recorder
+pool is untouched.\
+**Hardware:** confirmed.\
+**Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) →
+`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.1`
+
 ---
 
 ## ⚠️ Before you flash
 
-**KYOTI V1.0 (the all-in-one image) is withdrawn as of 2026-10-06.** It can crash the unit
-when an encoder is turned on an FX page set to NONE, and when T8's PLAYBACK or LFO page is
-shown with T8 as MASTER. If you flashed it, flash one of the single-feature builds above, or
-stock OS 1.40C. The single-feature builds and the BATCH_BUGFIXES images do not have
-this problem.
+**KYOTI V1.0 (the earlier all-in-one image) is withdrawn as of 2026-10-06.** It can crash
+the unit when an encoder is turned on an FX page set to NONE, and when T8's PLAYBACK or LFO
+page is shown with T8 as MASTER. If you flashed it, flash KYOTI V1.1 above, one of the
+single-feature builds, or stock OS 1.40C. None of those has this problem.
 
 **REPITCH_REPEAT98_KYOTI is back to work in progress as of 2026-10-06** (its own build and
 its BATCH_BUGFIXES image). With RPSP on all four tracks of one DSP core (T1–T4 or T5–T8) and

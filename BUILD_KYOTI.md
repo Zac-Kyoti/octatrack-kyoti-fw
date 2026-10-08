@@ -62,12 +62,12 @@ OCTATRACK_<FEATURE>.bin               flash from the CF card (faster)
 alone. MIDI_PLAYS_FREE_FIX writes only its `mainos_` image; to flash it on its own, use the
 no-assembler patch below or wrap it as its builder's header shows.
 
-### The combined image: KYOTI V1.1 (WIP until promoted)
+### The combined image: KYOTI V1.1
 
 Every FINAL feature in one image:
 
 ```sh
-KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py
+python3 tools/build_kyoti.py
 ```
 
 It writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.1.syx` and `.bin` (OS VERSION `KYOTI V1.1`).

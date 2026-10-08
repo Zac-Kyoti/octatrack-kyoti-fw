@@ -1,6 +1,6 @@
 # MERGE.md — combining every final-scoped mod into one firmware
 
-> **2026-10-06 — KYOTI V1.1 replaces V1.0 (withdrawn).**
+> **2026-10-06 — KYOTI V1.1 replaces V1.0 (withdrawn). FINAL 2026-10-08 (hardware-confirmed).**
 > - Five of V1.0's zones lie inside the live parameter-page descriptor table
 >   `0x400d2e52..0x400d5f00` (`reference/kb/caves.md` §0): CAVE2, RELD, SEAM, PASTE and FILT.
 >   V1.0 crashed on an FX page set to NONE and on T8's MASTER PLAYBACK/LFO page.
