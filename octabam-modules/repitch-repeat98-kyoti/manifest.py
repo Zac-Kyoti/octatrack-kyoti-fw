@@ -4,22 +4,24 @@ TSTR positions, plus a QUAN ratio quantizer on the PTCH knob.
     TSTR  the four stock values, then
           RPCH  tempo-following varispeed (the basic Repitch)
           RPS9  S900/S950-style repitch emulation
-          RPSP  SP-1200-style repitch emulation (channels 1/2)
+          RPSP  SP-1200-style repitch emulation (its raw outputs 7/8)
     PTCH  on a repitch track: QUAN -- one detent per ratio
 
 CREDIT. Jannik Aßfalg (repeat98) wrote the basic Repitch (octabam's modules/repitch:
 the seven detour sites, the rate gate, the TSTR formatter). Zac Kyoti wrote the S900/S950
 and SP-1200 repitch emulations (RPS9 / RPSP) and the Quantizer (QUAN).
 
-Hardware-confirmed in this octabam form (the author's MKI, 2026-10-05; see MEASURED). Needs
-octabam with #573 (dsp_asm's XY+ALU moves) and #603 (DspSection.ptable2, tables in a given-up
-effect's X data).
+Hardware-confirmed in this octabam form (the author's MKI, 2026-10-05 to 10-08; see the
+README). Needs octabam with #573 (dsp_asm's XY+ALU moves), #603 (DspSection.ptable2, tables
+in a given-up effect's X data) and per-payload DspHook stock words (the boot hook).
 
-DSP. One hook, zqrp, at the voice kernel's prologue (A P:0x40b, B P:0x20e): RPS9 and RPSP
-render the pass there; RPCH runs stock's kernel. rpk_dsp.asm is generated from the
-hardware-tested kernel by tools/repitch_dsp_octabam.py (constants resolved; the tables as
-two blocks, ptable and ptable2, read through `p:(rN)`; both bases checked and stored at
-first use, since they move between remixes). The test remix gives up SPRING REV only, as
+DSP. Two hooks. zqrp, at the voice kernel's prologue (A P:0x40b, B P:0x20e): RPS9 and RPSP
+render the pass there; RPCH runs stock's kernel. zqboot, at each payload's one-time memory
+clear (A P:0x46, B P:0x47): it runs the clear and copies the tables into Y at boot, outside
+every audio pass; zqrp's tag check rebuilds them if anything ever overwrites the copy.
+rpk_dsp.asm is generated from the hardware-tested kernel by tools/repitch_dsp_octabam.py
+(constants resolved; the tables as two blocks, ptable and ptable2, read through `p:(rN)` by
+the copy only). The test remix gives up SPRING REV only, as
 the standalone does: the code takes SPRING's P run, and octabam's XHARVEST (#603) puts the
 two blocks in SPRING's own X data, where the standalone keeps them.
 
