@@ -42,8 +42,7 @@ def main():
         (d / 'x.txt').write_text(''.join(f'{a:x} {v:x}\n' for a, v in sorted(b['x'].items())))
         (d / 'syms.txt').write_text(''.join(f'{k} {v & 0xffffff:x} {"Y" if k in b["ysyms"] else "X"}\n'
                                             for k, v in sorted(b['syms'].items())))
-        for knob, extra, burn in ((8, [], 0), (20, [], 0), (32, [], 0), (32, [], 10), (42, [], 0), (63, [], 0),
-                                  (70, [], 0), (85, [], 0), (100, [], 0)):
+        for knob, extra, burn in ((8, [], 0), (20, [], 0), (32, [], 0), (32, [], 10), (42, [], 0), (63, [], 0), (100, [], 0)):
             pre = knob - 32 if 32 < knob < 64 else 0
             env = dict(os.environ, HWP_BURN=str(burn))
             p = subprocess.run([str(probe), str(d), str(knob), frames, *extra], capture_output=True, text=True, errors='replace', env=env)

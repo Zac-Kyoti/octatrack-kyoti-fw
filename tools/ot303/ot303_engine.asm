@@ -354,7 +354,10 @@ zchb2:
         asr     a
         move    r0,n7
         move    x:(r2)+,x0      y:(r7)+,y0
-        rep     #21
+        do      #10,zhbl                        ; no REP: stock never uses one (a REP holds off
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0      ; interrupts, and the host-port
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0      ; handlers must answer at once)
+zhbl:
         mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
         mac     y0,x0,a
         move    #>$ffffff,m0
@@ -582,8 +585,10 @@ zbla:
         neg     b
         add     x0,b                    ; inc - (p + 1)
         andi    #$fe,ccr
-        rep     #24
+        do      #12,zdva                        ; no REP (above)
         div     x0,b
+        div     x0,b
+zdva:
         move    b0,y0
         mpy     y0,y0,b
         add     a,b
@@ -594,8 +599,10 @@ zblb:
         neg     b
         add     x0,b                    ; inc - (1 - p)
         andi    #$fe,ccr
-        rep     #24
+        do      #12,zdvb                        ; no REP (above)
         div     x0,b
+        div     x0,b
+zdvb:
         move    b0,y0
         mpy     -y0,y0,b
         add     a,b

@@ -128,35 +128,3 @@ hq_pre:
 hq_pzero:
         rts
 
-; ---- XREADS (mode 4) / YREADS (mode 5): KCNT x ~400 cycles of reads over the engine's own
-; blocks, in interruptible DO loops (no REP)
-hq_reads:
-        move    x:(r5+D_KCNT),x0
-        move    x:(r5+D_BAND),a
-        move    #>XB,r1
-        move    #>YS,r4
-        move    #63,m1
-        move    #63,m4
-        move    #>5,x1
-        cmp     x1,a
-        beq     hq_yrd
-        do      x0,hq_xend
-        do      #200,hq_xin
-        move    x:(r1)+,x1
-        move    x:(r1)+,x1
-hq_xin:
-        nop
-hq_xend:
-        bra     hq_rdone
-hq_yrd:
-        do      x0,hq_yend
-        do      #200,hq_yin
-        move    y:(r4)+,y1
-        move    y:(r4)+,y1
-hq_yin:
-        nop
-hq_yend:
-hq_rdone:
-        move    #>$ffffff,m1
-        move    #>$ffffff,m4
-        rts

@@ -1419,3 +1419,51 @@ recorder's source was the track; analysis scripts in `tools/ot303/hwrec/`):
 | XREADS dirty, YREADS clean | X-bus contention |
 | both clean | the engine's writes or its arithmetic timing |
 | riff clean from some PRE upward | a start-time window (and its width) |
+
+### DIAG4 on the unit (user, 2026-10-07): it is REP; DIAG5 (built, NOT flashed)
+
+**DIAG4 results:**
+
+| 303 | T2 (core 1) | T6 (core 0) |
+|---|---|---|
+| 1–15 TONE | clean | clean |
+| 16–35 (ENG+TONE, RIFF with PRE 0–3) | junk; junk on the master with T2 muted | 16–31 junk, on the master too; 32–35 a little distortion |
+| 36–63 (RIFF with PRE ≥ 4) | clean riff, clean master | 36–49 mostly clean (a couple of ticks) |
+| 64–95 (XREADS / YREADS + tone) | clean | — |
+| 96+ SQUARE | static, pops, junk on the master | — |
+| crash | — | at 303 = 50 (PRE 18): voice silent, sequencer crashed |
+
+**The crash also garbled ColdFire state:** project name garbage, "never saved", set "not mounted".
+A power cycle restored everything (RAM only).
+
+**Reading:**
+- Memory traffic is innocent: XREADS / YREADS spend the engine's time in X / Y reads and are clean.
+- The engine is harmful only in the first ~1,500 cycles of its call: PRE ≥ 4 steps is clean.
+- The one thing the engine does that the read loops do not is `rep`. It had three: a 21-cycle
+  half-band MAC per sample, and two 24-cycle DIVs in the BLEP. The square uses the BLEP twice per
+  cycle, hence its junk.
+- **Stock P code on both payloads contains no `rep` at all.**
+- A REP is not interruptible. The host-port handlers (IRQA/IRQB `P:0x588/0x597`, which arm DMA0
+  from `M_HORX` words) must answer at once. A late answer slips the ColdFire's transfer stream by
+  a word, which is:
+  - the recorded junk (sample halves one word apart, L/R offset);
+  - lasting until something resyncs;
+  - and, when worse, ColdFire RAM written out of place (the garbled project name).
+- The early window is where the host transfers fall relative to our call.
+
+**DIAG5:** `out/OCTATRACK_OS1.40C_OT303_DIAG5.syx`
+(`2d2064655e0330cccd78ef59be31d1cad28b3a57e805ae8f4240de60a676fda1`, version `140C_303D5`).
+- The engine's three REPs became DO loops (`do #10` of two MACs + the tail; `do #12` of two DIVs).
+  Still bit-exact in all five scenes, 366 / 500 cycles.
+- The X/Y read modes are dropped. Bands: 1–15 TONE, 16–31 ENG+TONE, 32–63 RIFF with PRE, 64–127
+  SQUARE.
+- `hwprobe_image.py` **refuses any REP** in the assembled code.
+- Bench all modes bit-exact; firmware (ot_emu) ALL GOOD.
+
+**Rule for every DSP module here:** no REP, ever. Stock has none.
+
+**The test** (fresh power cycle, transport stopped, **do not save the project under a test image**):
+1. 303 = 20 (ENG+TONE) and 303 = 32 (RIFF, no PRE) on T2, then T6: clean track, clean master
+   (track muted)?
+2. Then BURN 0 → 30 at 303 = 32: no crash until a real overrun.
+3. Then 303 = 100 (square: silent, but must not junk).

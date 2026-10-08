@@ -113,12 +113,18 @@ def build(tag):
     assert words[bra - d['org']] == 0x0d10c0 and words[bra - d['org'] + 1] == 0, 'bra placeholder moved'
     words[bra - d['org'] + 1] = (d['djeq_proc'] - bra) & 0xffffff
     checks = [(bra, f'bra     func_{d["djeq_proc"]:06x}', 'exit branch')]
-    for site, target in (('hq_callev', 'hq_event'), ('hq_cton', 'hq_tgen'), ('hq_cbr0', 'hq_burn'), ('hq_cbr1', 'hq_burn'), ('hq_cpre', 'hq_pre'), ('hq_crd', 'hq_reads')):
+    for site, target in (('hq_callev', 'hq_event'), ('hq_cton', 'hq_tgen'), ('hq_cbr0', 'hq_burn'), ('hq_cbr1', 'hq_burn'), ('hq_cpre', 'hq_pre')):
         cal = S[site]
         assert words[cal - d['org']] == 0x0d1080 and words[cal - d['org'] + 1] == 0, f'{site}: bsr placeholder moved'
         words[cal - d['org'] + 1] = (evs[target] - cal) & 0xffffff
         checks.append((cal, f'bsr     func_{evs[target]:06x}', f'{site} -> {target}'))
     dis = dsp_xasm.disassemble(words, d['org'])
+    # no REP: stock never uses one (a REP holds off interrupts, and the host-port handlers must
+    # answer at once: DIAG2-4 on the unit tore the ColdFire transfers whenever ours ran early)
+    for code, extra in ((dis, d['org']), (dsp_xasm.disassemble(evw, ev_org), ev_org)):
+        reps = [f'P:{a:x}' for a, l in code.items() if l[0].split()[:1] == ['rep']]
+        if reps:
+            raise ValueError(f'payload {tag}: REP at {reps[:6]}')
     for at, want, what in checks:
         line = dis.get(at, ('',))[0]
         if want not in line:

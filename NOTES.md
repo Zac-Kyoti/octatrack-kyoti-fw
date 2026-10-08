@@ -36005,3 +36005,9 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   help; WATCH (later engine start) was. Lead: the engine's X traffic starves the pull's DMA.
   DIAG4 built (`140C_303D4`, syx `cf9cbb74…`, NOT flashed): RIFF + PRE (303 − 32), XREADS / YREADS
   modes. Scripts `tools/ot303/hwrec/`.
+- **S124 cont: DIAG4 on HW = REP.** X/Y read modes clean; riff clean only with PRE ≥ 4 (engine
+  started ≥ ~1,500 cycles into the call); square junks. Stock DSP P code has NO `rep` at all; the
+  engine had three (MAC 21, DIV 24 ×2). REP holds off interrupts → host-port handlers late → the
+  CF transfer slips a word (the recorded junk; a crash garbled the project name, power cycle
+  restored). DIAG5 built (`140C_303D5`, syx `2d206465…`, NOT flashed): REPs → DO loops (bit-exact,
+  same cost), builder refuses REP. **Rule: no REP in any DSP code here.**

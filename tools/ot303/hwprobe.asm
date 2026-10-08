@@ -18,9 +18,7 @@
 ;   slot 7 303   bits 8-15: 0 off (stock DJ EQ), else, in sixteens, the track's audio is replaced
 ;                (both channels) by: 1-15 TONE (a 110 Hz saw; the engine does not run);
 ;                16-31 ENG+TONE (the engine runs, the tone is heard); 32-63 RIFF (the engine,
-;                saw: a built-in 16-step bar of the Hot voice, 130 BPM); 64-79 XREADS+TONE and
-;                80-95 YREADS+TONE (~400 cycles a sample of X or Y reads, interruptible, the
-;                engine's time without its arithmetic); 96-127 SQUARE (COST ONLY)
+;                saw: a built-in 16-step bar of the Hot voice, 130 BPM); 64-127 SQUARE (COST ONLY)
 ;                PRE: in the RIFF band, 303 = 32 + p spends 24 * p cycles per sample BEFORE the
 ;                render (32 = none; DIAG2's WATCH, clean, started the engine ~5 steps later)
 ; DIAG2 on the unit: the riff was clean only when its call ended late enough. Stock copies each
@@ -161,7 +159,7 @@ hq_run:
 ; the wave words: knob >= 64 = the square
         move    #>SAWW,r1
         move    x:(r5+D_KNB),a
-        move    #>$6000,x0
+        move    #>$4000,x0
         cmp     x0,a
         blt     hq_saw
         move    #>SQRW,r1
@@ -199,16 +197,6 @@ hq_noev:
         move    x:(r5+D_BAND),a
         tst     a
         beq     hq_notengine                    ; TONE: no engine
-        move    #>4,x0
-        cmp     x0,a
-        blt     hq_engx
-        move    #>6,x0
-        cmp     x0,a
-        bge     hq_engx
-hq_crd:
-        dc      $0d1080,0                       ; bsr >hq_reads: XREADS / YREADS, then the TONE
-        bra     hq_notengine
-hq_engx:
         move    b1,r7
         move    #>RBUF,r3
         bsr     ot303

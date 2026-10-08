@@ -2,24 +2,25 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-OT-303 hardware probe, DIAGNOSTIC 4 (DIAG4): the OT-303 DSP engine on the unit, hosted in DJ EQ
-(reference/handoffs/OT303_SCOPE.md §11). The unit's recordings (DIAG4) show the junk is a torn
-DSP->ColdFire read-back (each sample's two halves from different moments), and DIAG2's WATCH
-mode, which started the engine ~1,900 cycles later, was clean. DIAG4 tests whether the engine's
-memory traffic during the ColdFire's pull is what tears it.
+OT-303 hardware probe, DIAGNOSTIC 5 (DIAG5): the OT-303 DSP engine on the unit, hosted in DJ EQ
+(reference/handoffs/OT303_SCOPE.md §11). DIAG4 on the unit: X / Y reads of the engine's length were
+clean, and the riff was clean only when the engine started >= ~1,500 cycles into the call. Stock
+DSP code has no REP at all; the engine had three (a 21-cycle half-band MAC, two 24-cycle DIVs).
+A REP holds off interrupts, and the host-port handlers must answer at once: a late answer slips
+the ColdFire's transfers by a word (the recorded junk; a crash garbled the project name).
+DIAG5 has no REP anywhere (the builder refuses one).
 
 Stock 1.40C plus exactly this:
   * DJ EQ page 2: slot 6 BURN (24 cycles/sample a step, after the render; before DJ EQ when 303
     is 0), slot 7 303. 303 bands: 1-15 TONE, 16-31 ENG+TONE, 32-63 RIFF with PRE = 303 - 32
-    (24 cycles/sample a step BEFORE the render; 32 = none), 64-79 XREADS+TONE, 80-95 YREADS+TONE
-    (~400 cycles/sample of X or Y reads: the engine's time and memory traffic, no arithmetic),
-    96-127 SQUARE (cost only). One engine per core. No long REP anywhere in the wrapper.
+    (24 cycles/sample a step before the render; 32 = none), 64-127 SQUARE (cost only).
+    One engine per core.
   * SPRING REV is removed (its words hold the engine, the wrapper and the packed table data);
     DARK REV's helper inside SPRING's module is untouched. Nothing on the ColdFire but data.
 
 Usage:   python3 tools/build_ot303_hwprobe.py      (WIP: KYOTI_ALLOW_WIP=1)
-Outputs: out/mainos_ot303_hwprobe_diag4.bin, out/OCTATRACK_OS1.40C_OT303_DIAG4.syx,
-         out/OCTATRACK_OT303_DIAG4.bin
+Outputs: out/mainos_ot303_hwprobe_diag5.bin, out/OCTATRACK_OS1.40C_OT303_DIAG5.syx,
+         out/OCTATRACK_OT303_DIAG5.bin
 """
 import importlib.util, os, pathlib, subprocess, sys
 from kyoti_status import gate, seal
@@ -35,11 +36,11 @@ STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
 STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 DIS = ROOT / "vendor/dsp56300/build/source/disassemble/dsp56kDisassemble"
-OUT = ROOT / "out/mainos_ot303_hwprobe_diag4.bin"
-ELEK = ROOT / "out/elek_ot303_hwprobe_diag4.bin"
-OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_DIAG4.syx"
-OUT_BIN = ROOT / "out/OCTATRACK_OT303_DIAG4.bin"
-VERSTR = "140C_303D4"      # the field takes 10 characters
+OUT = ROOT / "out/mainos_ot303_hwprobe_diag5.bin"
+ELEK = ROOT / "out/elek_ot303_hwprobe_diag5.bin"
+OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_DIAG5.syx"
+OUT_BIN = ROOT / "out/OCTATRACK_OT303_DIAG5.bin"
+VERSTR = "140C_303D5"      # the field takes 10 characters
 
 DJEQ_ID = 0x0d
 SPRING_ID = 0x15
