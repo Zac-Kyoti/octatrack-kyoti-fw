@@ -7,7 +7,7 @@ four stock ones:
 |---|---|
 | **RPCH** | follows the project tempo by playback speed, without grains (the basic Repitch) |
 | **RPS9** | the same, with an S900/S950-style repitch emulation |
-| **RPSP** | the same, with an SP-1200-style repitch emulation (output channel 6) |
+| **RPSP** | the same, with an SP-1200-style repitch emulation (its raw outputs 7/8) |
 
 On a repitch track the PTCH knob becomes **QUAN**: one detent per ratio.
 

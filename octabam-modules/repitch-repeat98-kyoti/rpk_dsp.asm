@@ -9,8 +9,9 @@
 ; ===========================================================================
 ; repitch-kyoti rev 17 -- DSP side: the "virtual sampler" behind RPS9 / RPSP.
 ; Model (the ground truth this must match): tools/repitch_engine_model.py.
-; Scope: reference/handoffs/REPITCH_FIDELITY_SCOPE.md; rev 17 (RPSP = mid + side through
-; the SP's channel 6 filter (5 until 2026-10-08), the DSP load audit's budget): NOTES Session 120 continued (10).
+; Scope: reference/handoffs/REPITCH_FIDELITY_SCOPE.md; rev 17 (RPSP = mid + side, the SP's
+; raw outputs 7/8 -- the final build; channel 6 and channels 1/2 stay selectable with RPK_OUT;
+; the DSP load audit's budget): NOTES Session 120 continued (10).
 ; Plumbing: NOTES Session 110; rev 12/13: Session 111; rev 14: Session 112.
 ; Assembled by tools/dsp_xasm.py (NOT plain dsp_asm: this uses XY+ALU moves,
 ; equ and dc, and every word is disassembled back and checked);
@@ -71,8 +72,9 @@
 ; ---- the RPSP slot (Y:STBASE + x:$418, $20 words): the mid's residual ring
 ; (RINGM1+1 words, modulo-addressed, residuals / 4), then:
 ; Three output builds (RPK_OUT; tools/repitch_dsp_src.py keeps the ";@ list" blocks
-; that name it): ch6 (channel 6's fixed filter + the side average), raw (outputs
-; 7/8: neither), ch12 (channels 1/2: the trig-opened 4-pole on the mid and side).
+; that name it): raw (outputs 7/8, no filter: the default), ch6 (channel 6's fixed
+; filter + the side average), ch12 (channels 1/2: the trig-opened 4-pole on the mid
+; and side).
 
 zqrp:
         clr     a
@@ -186,8 +188,9 @@ zq9e:
 
 ; ============================================================ RPSP (SP-1200)
 ; Rev 17: the mid (L + R)/2 goes through the SP -- the virtual ADC (8 taps) at
-; the SP's clock, 12 bits, the band-limited render to 44.1 kHz -- then the SP's
-; channel 6 output filter; the side (L - R)/2 is read clean, as far behind the
+; the SP's clock, 12 bits, the band-limited render to 44.1 kHz -- out raw, as the
+; SP's outputs 7/8 (ch6: channel 6's filter; ch12: channels 1/2's, on the side
+; too); the side (L - R)/2 is read clean, as far behind the
 ; OT's position as the mid's path delays it, and L, R = mid +/- side. The SP's
 ; clock period is 1.69 output samples, so an output interval holds at most one
 ; tick. A tick at u stores a new step; the render spreads the step (new - old)
@@ -206,19 +209,19 @@ zqsp:
         beq     zqsok
         clr     b                       ; stale, first use or a trig: clean ring + state
         move    r4,r1
-        do      #$1d,zqsz
+        do      #$18,zqsz
         move    b,y:(r1)+
 zqsz:
         move    x1,y:(r4+$a)
-        move    r4,y:(r4+$19)
+        move    r4,y:(r4+$14)
         move    #>$7fffff,x0
-        move    x0,y:(r4+$16)
+        move    x0,y:(r4+$12)
         move    #>$3630a9,x0                ; the read shift starts at its mean
-        move    x0,y:(r4+$1c)
+        move    x0,y:(r4+$17)
         bra     zqsrs                   ; "previous output" = this pass's first
 zqsok:
         move    x:(r5),a                ; resync "previous" if this pass does not
-        move    y:(r4+$13),x0         ; continue it: ring positions advance
+        move    y:(r4+$f),x0         ; continue it: ring positions advance
         sub     x0,a                    ; continuously while a sound plays, so a
         and     #>$7e,a                 ; jump of more than 2 frames (4 words) means
         move    a1,b                    ; the state is stale (the track has been in
@@ -226,9 +229,9 @@ zqsok:
         ble     zqsnj
 zqsrs:
         move    x:(r5),b
-        move    b1,y:(r4+$13)
+        move    b1,y:(r4+$f)
         move    y:(r5),b
-        move    b1,y:(r4+$14)
+        move    b1,y:(r4+$10)
 zqsnj:
 ; ---- this pass's constants. r = int(r) + frac(r) as the DSP holds it (x:$40 is
 ; read for bit 0 only -- on the unit it reads $c1 at 1.0x; the table builder
@@ -238,32 +241,32 @@ zqsnj:
 ; increments + the smoothed read shift, its integer part doubled (ring words;
 ; the fraction stays one)
         move    y:>$40,b
-        move    b1,y:(r4+$1b)
+        move    b1,y:(r4+$16)
         clr     a
         move    x:>$40,a1
         and     #<1,a
         move    y:>$40,a0               ; a = r as 24.24
         asr     a                       ; a0 = RH = r x 2^23, unsigned (a1 = 0)
-        move    a0,y:(r4+$1a)
+        move    a0,y:(r4+$15)
         move    a0,y0
-        move    #>$2e28f6,x0
+        move    #>$2ea3d7,x0
         mpyuu   y0,x0,a                 ; (MS_SIDE_DELAY / 16) r x 2^47 (RH unsigned; < 2^47)
         asr     #19,a,a                 ; -> MS_SIDE_DELAY r, 24.24
         add     #<$4,a               ; + c + 1 frames
-        move    y:(r4+$1c),b
+        move    y:(r4+$17),b
         asr     #22,b,b                 ; + the read shift (Q22 -> 24.24)
         add     b,a
         move    a1,x0
         add     x0,a                    ; integer part x 2
-        move    a1,y:(r4+$11)
-        move    a0,y:(r4+$12)
-        move    r2,y:(r4+$15)
+        move    a1,y:(r4+$d)
+        move    a0,y:(r4+$e)
+        move    r2,y:(r4+$11)
         move    r7,n1                   ; the pass count (r7 becomes the ring pointer)
         move    m7,n7                   ; restored at zqoe
         move    #$9,m7
-        move    y:(r4+$19),r7
+        move    y:(r4+$14),r7
         lua     (r4+$b),r6           ; r6 walks TAU .. SPV once per output (m6 = $7f:
-        move    #>$fffff4,n6             ; the slot does not straddle 128 words)
+        move    #>$fffff9,n6             ; the slot does not straddle 128 words)
         do      n1,zqoe
         move    y:(r6),a
         sub     #>$100000,a             ; tau, less this output interval
@@ -275,27 +278,27 @@ zqsnj:
         sub     #>$b1855,a
         asl     #3,a,a
         move    a1,x1                   ; u, Q23 (x1 is free until the render)
-        move    y:(r4+$18),a          ; phi = frac(phi + r)
-        move    y:(r4+$1b),y0
+        move    y:(r4+$13),a          ; phi = frac(phi + r)
+        move    y:(r4+$16),y0
         add     y0,a
-        move    a1,y:(r4+$18)
+        move    a1,y:(r4+$13)
         lsr     a                       ; Q24 phi >> 1 = the same phi as Q23
         move    a1,y0
         mpyi    #$6c6152,y0,b              ; (PSP/2)*phi = PSP*phi * 2^46: the read shift
-        move    y:(r4+$1c),y1          ; (b1 = the shift, Q22) into its one-pole mean
+        move    y:(r4+$17),y1          ; (b1 = the shift, Q22) into its one-pole mean
         move    b1,a
         sub     y1,a
         asr     #$4,a,a
         add     y1,a
-        move    a1,y:(r4+$1c)
+        move    a1,y:(r4+$17)
         asr     #22,b,b                 ; -> frames, 24.24
-        move    y:(r4+$1a),y0
+        move    y:(r4+$15),y0
         mpyuu   x1,y0,a                 ; u*r * 2^47 (u r/2, unsigned)
         asr     #23,a,a                 ; -> frames, 24.24
         sub     b,a
-        move    y:(r4+$13),b          ; + the previous output's position
+        move    y:(r4+$f),b          ; + the previous output's position
         asr     b                       ; (ring words -> frames; even, so b0 stays 0)
-        move    y:(r4+$14),b0
+        move    y:(r4+$10),b0
         add     b,a
         sub     #<$7,a                ; first tap = floor(pos) - 2c - 1
         move    a0,b
@@ -366,19 +369,7 @@ zqout:
         asl     #2,a,a
         move    y:(r6)+,x0              ; HM
         add     x0,a    b,y:(r7)+       ; (the slot is spent)
-        move    a,x0    y:(r6),y0       ; mid (limited); XP = x[n-1]
-        move    #>$2e147b,x1
-        mpy     x1,x0,a x0,y:(r6)+
-        mac     x1,y0,a y:(r6),y0       ; Y1 = s1[n-1]
-        maci    #$23d70a,y0,a
-        move    a,x0    a,y:(r6)+       ; s1 (limited)
-        mpyi    #$5618cd,x0,a
-        move    y:(r6)+,y1              ; Z2 = s2[n-2]
-        move    y:(r6)-,y0              ; Z1 = s2[n-1]
-        maci    #$fe0f5d,y0,a
-        maci    #$ebd7d6,y1,a
-        asl     a       y0,y:(r6)+
-        move    a,x0    a,y:(r6)+       ; s2 (limited)
+        move    a,x0                    ; mid (limited)
         move    x0,n5                   ; (n5: free outside the tick)
 ; ---- the side, clean: (L - R)/2 at the OT's position less the offset, linear
 ; between its two frames. l:(r5) = (ring words, fraction): less (2 int, frac) of the
@@ -391,7 +382,7 @@ zqout:
         move    a0,b
         move    y:(r6)+,y1              ; RB: the ring is 128-aligned, so OR adds it
         and     #>$7e,a
-        or      y1,a    y:(r6)+,x1      ; $7fffff
+        or      y1,a    y:(r6)+n6,x1    ; $7fffff (r6 back to TAU)
         lsr     b       a1,r1           ; g = the fraction, Q23
         move    b1,y0
         move    x1,b
@@ -402,17 +393,14 @@ zqout:
         sub     x0,b    a,x1
         asr     b                       ; (L1 - R1)/2
         mpy     y1,x1,a b,x1
-        mac     x1,y0,a y:(r6),b        ; the previous side sample
+        mac     x1,y0,a
         move    a,x0                    ; the side (limited)
-        add     x0,b    x0,y:(r6)+n6    ; (r6 back to TAU)
-        asr     b                       ; the two-sample average: the channel filter's zero at Nyquist
-        move    b,x0
         move    n5,a
         add     x0,a    n5,b
         sub     x0,b    a,x:(r3)+       ; L = mid + side
         move    b,x:(r3)+               ; R = mid - side
 zqoe:
-        move    r7,y:(r4+$19)
+        move    r7,y:(r4+$14)
         move    n7,m7
 
 

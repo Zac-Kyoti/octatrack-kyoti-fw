@@ -94,13 +94,14 @@ SP_CHANNEL = 7                     # which SP-1200 output RPSP is heard on: 7 (=
 # samples shorter (0.40 vs 0.63 below 1 kHz, 0.39 vs 0.55 at 3 kHz), so MS_SIDE_DELAY
 # drops from 5.97 to 5.77.
 #
-# Three output builds, chosen with RPK_OUT in the environment (2026-10-08, test builds for the
-# user): "ch6" (the default, above); "raw" = outputs 7/8, no filter and no side average; "ch12"
+# Three output builds, chosen with RPK_OUT in the environment (2026-10-08): "raw" = outputs 7/8,
+# no filter and no side average -- THE DEFAULT, the user's final pick (listening pack 10,
+# 2026-10-08); "ch6" = channel 6 above (OBKYOTI16); "ch12"
 # = channels 1/2: the SSM2044 4-pole whose cutoff each trig throws open and a fixed RC closes
 # (DYN_* below). Raw and ch12 read the side 5.83 outputs behind (pack 9's measured "no filter"
 # offset, 6.47 - channel 5's 0.64); ch12's filter runs on the mid AND the side with the same
 # coefficients, so it adds no mid/side misalignment.
-MS_OUT = os.environ.get("RPK_OUT", "ch6")
+MS_OUT = os.environ.get("RPK_OUT", "raw")
 assert MS_OUT in ("ch6", "raw", "ch12"), f"RPK_OUT={MS_OUT!r}: ch6, raw or ch12"
 MS_CHANNEL = {"ch6": 6, "raw": 7, "ch12": 12}[MS_OUT]
 MS_SIDE_DELAY = {"ch6": 5.77, "raw": 5.83, "ch12": 5.83}[MS_OUT]

@@ -3,7 +3,8 @@
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
 REPITCH KYOTI -- tempo-locked varispeed with three sampler characters, on STOCK 1.40C.
-FINAL: rev 16, hardware-confirmed 2026-09-29 (NOTES Session 112 continued (4)).
+Rev 17 (NOTES Session 120 continued (10)): RPSP = the SP-1200's raw outputs 7/8 on the mid,
+the side clean; the user's final pick 2026-10-08 (listening pack 10).
 
 Design records: reference/handoffs/REPITCH_KYOTI_SCOPE.md (the ColdFire side, QUAN),
 REPITCH_FIDELITY_SCOPE.md (RPS9/RPSP), REPITCH_SP_CH12_SCOPE.md (RPSP = SP-1200 ch 1/2).
@@ -16,8 +17,8 @@ What this image does:
     follows tempo, no stretching), each with its own character:
       RPCH  the OT's own playback path (stock interpolation)
       RPS9  Akai S900/S950: a virtual 40 kHz, 12-bit sampler
-      RPSP  E-mu SP-1200: 26.04 kHz, 12-bit, drop-sample, heard through channel
-            1/2's SSM2044-style 4-pole low-pass, opened by the track's AMP envelope
+      RPSP  E-mu SP-1200: 26.04 kHz, 12-bit, drop-sample, as its raw outputs 7/8:
+            the mid (L + R)/2 through the SP, the side (L - R)/2 clean and aligned
   * Audio editor ATTR: TIMESTRETCH gains REPITCH/RPS9/RPSP; under SETUP AUTO each
     sample's own setting applies.
   * QUAN on the PTCH slot of a repitch track: 9 exact ratios 1/2 2/3 3/4 4/5 1/1
@@ -30,7 +31,7 @@ What this image does:
     it loads it as NONE -- as SIDECHAIN_COMPRESSOR does.
 
 ColdFire cave 0x400d6f80..0x400d7afc (4 B free under patch_trigscale's 0x400d7b00;
-overlaps DIRECT JUMP V7's cave -- MERGE.md). DSP cave 403 words at the tail of
+overlaps DIRECT JUMP V7's cave -- MERGE.md). DSP cave 412 words at the tail of
 SPRING's P module on both cores; tables in SPRING's X modules.
 
     out/mainos_repitch_repeat98_kyoti.bin        patched MAIN OS
@@ -74,7 +75,7 @@ STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 ELEK = ROOT / f"out/elek_repitch_repeat98_kyoti{SUF}.bin"
 OUT_SYX = ROOT / f"out/OCTATRACK_OS1.40C_REPITCH_REPEAT98_KYOTI{SUF.upper()}.syx"
 OUT_BIN = ROOT / f"out/OCTATRACK_REPITCH_REPEAT98_KYOTI{SUF.upper()}.bin"
-VERSTR = "140C_RPKD" if os.environ.get("RPK_DIAG") == "1" else "140C_RPK16"   # rev 16 (15: 140C_RPK15, 14: 140C_RPK14, 13: 140C_RPK13, 11/12: 140C_RPK1)
+VERSTR = "140C_RPKD" if os.environ.get("RPK_DIAG") == "1" else "140C_RPK17"   # rev 17 (16: 140C_RPK16, 15: 140C_RPK15, 14: 140C_RPK14, 13: 140C_RPK13, 11/12: 140C_RPK1)
 
 # --- the seven detours (site, displaced bytes, cave symbol) -----------------
 DETOURS = [

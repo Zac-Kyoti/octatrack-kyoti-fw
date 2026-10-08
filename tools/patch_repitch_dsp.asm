@@ -3,8 +3,9 @@
 ; ===========================================================================
 ; repitch-kyoti rev 17 -- DSP side: the "virtual sampler" behind RPS9 / RPSP.
 ; Model (the ground truth this must match): tools/repitch_engine_model.py.
-; Scope: reference/handoffs/REPITCH_FIDELITY_SCOPE.md; rev 17 (RPSP = mid + side through
-; the SP's channel 6 filter (5 until 2026-10-08), the DSP load audit's budget): NOTES Session 120 continued (10).
+; Scope: reference/handoffs/REPITCH_FIDELITY_SCOPE.md; rev 17 (RPSP = mid + side, the SP's
+; raw outputs 7/8 -- the final build; channel 6 and channels 1/2 stay selectable with RPK_OUT;
+; the DSP load audit's budget): NOTES Session 120 continued (10).
 ; Plumbing: NOTES Session 110; rev 12/13: Session 111; rev 14: Session 112.
 ; Assembled by tools/dsp_xasm.py (NOT plain dsp_asm: this uses XY+ALU moves,
 ; equ and dc, and every word is disassembled back and checked);
@@ -65,8 +66,9 @@
 ; ---- the RPSP slot (Y:STBASE + x:$418, $20 words): the mid's residual ring
 ; (RINGM1+1 words, modulo-addressed, residuals / 4), then:
 ; Three output builds (RPK_OUT; tools/repitch_dsp_src.py keeps the ";@ list" blocks
-; that name it): ch6 (channel 6's fixed filter + the side average), raw (outputs
-; 7/8: neither), ch12 (channels 1/2: the trig-opened 4-pole on the mid and side).
+; that name it): raw (outputs 7/8, no filter: the default), ch6 (channel 6's fixed
+; filter + the side average), ch12 (channels 1/2: the trig-opened 4-pole on the mid
+; and side).
 S_TAG   equ     $0a
 S_TAU   equ     $0b     ; r6 walks TAU .. its last word once per output, in this order:
 S_HM    equ     $0c     ;   time of the next tick (from the start of the next
@@ -241,8 +243,9 @@ zq9e:
 
 ; ============================================================ RPSP (SP-1200)
 ; Rev 17: the mid (L + R)/2 goes through the SP -- the virtual ADC (8 taps) at
-; the SP's clock, 12 bits, the band-limited render to 44.1 kHz -- then the SP's
-; channel 6 output filter; the side (L - R)/2 is read clean, as far behind the
+; the SP's clock, 12 bits, the band-limited render to 44.1 kHz -- out raw, as the
+; SP's outputs 7/8 (ch6: channel 6's filter; ch12: channels 1/2's, on the side
+; too); the side (L - R)/2 is read clean, as far behind the
 ; OT's position as the mid's path delays it, and L, R = mid +/- side. The SP's
 ; clock period is 1.69 output samples, so an output interval holds at most one
 ; tick. A tick at u stores a new step; the render spreads the step (new - old)

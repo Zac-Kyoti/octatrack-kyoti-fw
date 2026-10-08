@@ -13,7 +13,7 @@ REVERB's own X data tables (five modules per payload that only SPRING's code
 references -- the canary run of NOTES Session 112), and zqinit copies them to
 Y. Run 1 (three adjacent 72-word modules) holds the render's half-table; run
 2 (116 + 384 words) the RPSP and RPS9 half-rows, in that order (zqinit's r1 runs
-on from one to the next). Rev 17 (RPSP = mid + side through channel 6): no cutoff
+on from one to the next). Rev 17 (RPSP = mid + side, raw outputs 7/8 by default): no cutoff
 table, no aux blocks; the RPSP kernel is 8 taps (the mid's).
 
     python3 tools/repitch_dsp_src.py [A|B] [ORG]   -> assembles, prints size + tag
