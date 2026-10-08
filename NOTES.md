@@ -35646,3 +35646,17 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
   (out/octabam_kyoti15/): syx `d1ec941f06a6a47835c43e98f33aff9de6419cb2ddaaa4b4f13a01b8197b1060`,
   verify-remix green, boot check PASS. Packs 6–8 (private): `Ty3bBxZEPHPr38bDHNZDZ2` (mono
   options), `EWYjCRCCFihmDhbGrayt3H` (four speeds), `X2F5pTfhg6u8u5BVtaJ6Xr` (side average).
+* **2026-10-08: OBKYOTI15 FLASHED (syx `d1ec941f…`), hardware load test.** RPSP + DARK REV on FX2
+  on four tracks, then DJ EQ on FX1 track by track: **T1–T4 (core B) pass through the fourth DJ
+  EQ; T5–T8 (core A, the tighter core) pass three DJ EQs and crash at the fourth (T5; loud tone,
+  sequencer stops).** Rev 16 crashed at the third. Consistent with the audit: rev 17 saved ~270
+  modelled cycles over four voices ≈ one DJ EQ (~350). **Limit accepted by the user (documented
+  here):** four RPSP voices + four DARK REV + three DJ EQ per core; a fourth DJ EQ on T5–T8
+  overloads. Fitting it would need RPSP ≈ 70 cycles/voice (mid + side ≈ 155 net, left mono ≈ 125).
+* **Future upgrade (recorded, not started): a ColdFire load guard.** The ColdFire knows every
+  track's FX and TSTR mode; estimate each core's DSP load per frame from the load audit's
+  per-effect costs (reference/handoffs/KYOTI_LOAD_AUDIT.md: DJ EQ ≈ 350 modelled cycles, RPSP 167,
+  RPS9 57, SIDECHAIN 56/core, …) and, past a per-core threshold (core A ≈ 3,760, measured clean/
+  crash points above), play the excess RPSP voices as RPS9 or plain varispeed instead of letting
+  the DSP overrun. Trades a crash for a sound change in overload setups only; thresholds need
+  hardware tuning with these same tests.
