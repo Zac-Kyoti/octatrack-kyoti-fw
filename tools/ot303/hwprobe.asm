@@ -17,15 +17,20 @@
 ;                read-back pull, below), BEFORE DJ EQ when 303 is 0 (the burn probe's measure)
 ;   slot 7 303   bits 8-15: 0 off (stock DJ EQ), else, in sixteens, the track's audio is replaced
 ;                (both channels) by: 1-15 TONE (a 110 Hz saw; the engine does not run);
-;                16-31 ENG+TONE (the engine runs, the tone is heard); 32-63 RIFF (the engine,
-;                saw: a built-in 16-step bar of the Hot voice, 130 BPM); 64-127 SQUARE (COST ONLY)
+;                16-31 XHAM+TONE (no engine: ~256 X reads a sample in the engine's ORIGINAL X block,
+;                the tone is heard); 32-63 RIFF (the engine, saw: a built-in 16-step bar of the Hot
+;                voice, 130 BPM); 64-127 SQUARE (COST ONLY)
 ;                PRE: in the RIFF band, 303 = 32 + p spends 24 * p cycles per sample BEFORE the
 ;                render (32 = none; DIAG2's WATCH, clean, started the engine ~5 steps later)
 ; DIAG2 on the unit: the riff was clean only when its call ended late enough. Stock copies each
 ; track's block into the read-back buffer after FX2 while the ColdFire's DMA pulls that buffer;
 ; a call that ends inside the pull's window tears the block (octabam FAILURE_MODES, "Junk on main
 ; R": junk on the track and on the opposite main channel). BURN pads the end: find the clean range.
-; No REP over long counts (a REP is not interruptible: the host-port DMA handlers wait it out).
+; No REP at all (DIAG4: a REP is not interruptible; the host-port DMA handlers wait it out).
+; DIAG6: on core 0 (payload A) the engine's X block moves out of SPRING's X records (X:$8xxx, the
+; memory block of core 0's ESAI DMA buffers X:$8000-$833f; core 1 runs no ESAI DMA, and T2 is clean)
+; to X:$3224.. (inside Analog BD's free private region X:$2840-$3940). hq_reloc copies it there on
+; the first call with 303 up; the builder places the words at XD above their run-time addresses.
 ; One engine per core: its state is global, so a second DJ EQ with 303 > 0 on the same core
 ; renders the same voice again (twice the speed). Use it on one track per core.
 ;
@@ -34,7 +39,9 @@
 ; the slopes are differences. The engine stays silent (the track passes untouched) until then.
 ; The step events, the tone and the watch live after DARK REV's helper: tools/ot303/hwprobe_ev.asm.
 ; ===========================================================================
-R2      equ     $8afc           ;@LAYOUT X run 2 (packed b0, kp)
+R2      equ     $8afc           ;@LAYOUT X run 2 (packed b0, kp), at run time
+XD      equ     $0              ;@LAYOUT the loader's copy is XD words above (payload A: relocated)
+NXD     equ     $0              ;@LAYOUT -XD (24 bits)
 HQEV    equ     $15a9           ;@LAYOUT hwprobe_ev.asm's origin, after DARK REV's helper
 
 PB      equ     XB-$1c          ; X, 28 words before the engine's block (reached by pointer)
@@ -72,6 +79,10 @@ VAR_NON equ     VARS+10         ;   normal on,
 VAR_NOF equ     VARS+15         ;   normal gate off
 TRIG    equ     WB+68           ; M48 hi, lo for an accent, then for a normal note
 TRIGN   equ     TRIG+2
+OLD1    equ     PB+XD           ; the loader's copy of PB..PB+215 (X run 1)
+OLD2    equ     R2+XD           ; the loader's copy of R2..R2+499 (X run 2)
+RFLAG   equ     STG+XD          ; the loader's STG: 0 until hq_reloc has copied
+HAMB    equ     XB+XD           ; XHAM's reads: the engine's original X block
 ; displacements from XM (the operand's sign is written out: the assembler wants small numbers)
 D_STG   equ     $30             ; +: WB+0..15
 D_CNK   equ     $31             ; chunk within the stage
@@ -124,6 +135,8 @@ hq_entry:
         move    m1,x0
         move    #>$ffffff,x1
         move    x1,m1
+hq_crel:
+        dc      $0d1080,0                       ; bsr >hq_reloc (payload A; two nops on B)
         move    #>MSAV,r1
         move    m0,x:(r1)+
         move    x0,x:(r1)+
@@ -197,14 +210,17 @@ hq_noev:
         move    x:(r5+D_BAND),a
         tst     a
         beq     hq_notengine                    ; TONE: no engine
+        move    #>1,x0
+        cmp     x0,a
+        beq     hq_xham                         ; XHAM+TONE: no engine
         move    b1,r7
         move    #>RBUF,r3
         bsr     ot303
         move    #>XM,r5
-        move    x:(r5+D_BAND),a
-        move    #>1,x0
-        cmp     x0,a
-        bne     hq_notone
+        bra     hq_notone
+hq_xham:
+hq_cham:
+        dc      $0d1080,0                       ; bsr >hq_ham: KCNT x 256 X reads at HAMB
 hq_notengine:
 hq_cton:
         dc      $0d1080,0                       ; bsr >hq_tgen: KCNT samples of the tone into RBUF

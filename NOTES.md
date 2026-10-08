@@ -36011,3 +36011,11 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   CF transfer slips a word (the recorded junk; a crash garbled the project name, power cycle
   restored). DIAG5 built (`140C_303D5`, syx `2d206465…`, NOT flashed): REPs → DO loops (bit-exact,
   same cost), builder refuses REP. **Rule: no REP in any DSP code here.**
+- **S124 cont: DIAG5 on HW** — T2 (core 1) clean everywhere, no crash (REP was all of core 1).
+  T6 (core 0): PRE map 32–41 dirty (+ master junk muted), 42/45/46 clean, 38/43/44/47 near-clean,
+  48 dirty, crash at 49 (PRE 17). Engine-specific (tone + BURN 127 fine) and core-0-specific. Stack
+  ruled out (SP 7 at the deepest point, both cores). Only core 0 runs ESAI DMA (boot `P:$3001d`:
+  DMA2 TX `X:$8000`, DMA3 RX `X:$8100–$833f`); the engine's X block was `X:$89a4–$8cef`, same memory
+  block. **DIAG6** built (`140C_303D6`, syx `a7a5a821…`, NOT flashed): core 0's block relocated to
+  `X:$3224–$356f` (Analog BD's free region) by `hq_reloc` on the first call; band 16–31 =
+  XHAM+TONE (hard X reads of the old block, no engine). Bench bit-exact, ot_emu ALL GOOD.

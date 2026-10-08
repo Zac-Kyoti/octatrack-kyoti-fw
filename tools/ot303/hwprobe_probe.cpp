@@ -59,6 +59,11 @@ int main(int argc, char** argv) {
     { std::ifstream f(dir + "/x.txt"); std::string a, w; while (f >> a >> w) mem.set(MemArea_X, hx(a), hx(w)); }
     // the Y region the probe owns starts as noise on the unit: poison it here
     for (uint32_t a = 0x795; a < 0x1000; a++) mem.set(MemArea_Y, a, (a * 2654435761u) & 0xffffff);
+    // DIAG6: a relocated X block (payload A) starts as noise too; hq_reloc fills it on the first call
+    if (sym("OLD1") != sym("PB")) {
+        for (uint32_t a = sym("PB"); a < sym("PB") + 216; a++) mem.set(MemArea_X, a, (a * 2246822519u) & 0xffffff);
+        for (uint32_t a = sym("R2"); a < sym("R2") + 500; a++) mem.set(MemArea_X, a, (a * 2246822519u) & 0xffffff);
+    }
     auto& R = dsp.regs();
     const uint32_t MIN[8] = {0xff, 0x3ff, 0x1f, 0x3, 0x7f, 0x5fb, 0xffffff, 0x9};    // entry modifiers
     for (int k = 0; k < 8; k++) R.m[k].var = MIN[k];
@@ -191,7 +196,7 @@ int main(int argc, char** argv) {
         std::printf("X:%05x:", pb); for (int i = 0; i < 216; i++) std::printf(" %06x", mem.get(MemArea_X, pb + i) & 0xffffff); std::printf("\n");
         std::printf("Y:%05x:", sym("YS")); for (int i = 0; i < 172; i++) std::printf(" %06x", mem.get(MemArea_Y, sym("YS") + i) & 0xffffff); std::printf("\n");
     }
-    const char* what[] = {"TONE", "ENG+TONE", "RIFF", "RIFF", "SQUARE (tanh cleared)"};
+    const char* what[] = {"TONE", "XHAM+TONE", "RIFF", "RIFF", "SQUARE (tanh cleared)"};
     if (burn || pre) std::printf("BURN %d PRE %d: +%d cycles a sample expected (24 x each)\n", burn, pre, 24 * (burn + pre));
     std::printf("BIT-EXACT: %ld samples, %s%s, %ld calls; %.1f cycles/sample incl. the wrapper (worst frame %.1f)\n",
                 sample, what[band < 4 ? band : 4], corrupt ? " (a table word changed mid-run: the alarm tone followed)" : "",

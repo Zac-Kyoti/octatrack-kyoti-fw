@@ -28,9 +28,12 @@ dsp_xasm.DSP_ASM = NEW / 'build/source/dsp_host/dsp_asm'
 dsp_xasm.DSP_DIS = NEW / 'build/source/disassemble/dsp56kDisassemble'
 
 PAYLOAD = {
-    'A': dict(org=0x1252, dark=0x1586, end=0x1679, djeq_proc=0x1d7d,
+    # xd: the run-time X block sits xd words BELOW the loader's copy (hq_reloc moves it on the first
+    # call). Payload A = core 0, the only core running ESAI DMA (X:$8000-$833f, boot P:$3001d); its
+    # engine block moves out of that memory block to X:$3224.. (Analog BD's free region $2840-$3940).
+    'A': dict(org=0x1252, dark=0x1586, end=0x1679, djeq_proc=0x1d7d, xd=0x5780,
               xrun1=((0x89a4, 72), (0x89ec, 72), (0x8a34, 72)), xrun2=((0x8afc, 116), (0x8b70, 384))),
-    'B': dict(org=0x1012, dark=0x1346, end=0x1439, djeq_proc=0x1b3d,
+    'B': dict(org=0x1012, dark=0x1346, end=0x1439, djeq_proc=0x1b3d, xd=0,
               xrun1=((0x8464, 72), (0x84ac, 72), (0x84f4, 72)), xrun2=((0x85bc, 116), (0x8630, 384))),
 }
 DARK_N = 35
@@ -70,11 +73,15 @@ def twin_constants():
 
 def source(tag):
     d = PAYLOAD[tag]
-    xb = d['xrun1'][0][0] + 0x1c
-    assert xb % 64 == 0, f'payload {tag}: X block {xb:x} not 64-aligned'
+    xd = d['xd']
+    xb = d['xrun1'][0][0] + 0x1c - xd
+    assert xb % 64 == 0 and xd % 64 == 0, f'payload {tag}: X block {xb:x} not 64-aligned'
+    if xd:
+        assert 0x2840 <= xb - 0x1c and d['xrun2'][0][0] + 500 - xd <= 0x3940, 'outside Analog BD\'s free X region'
     eng = (ROOT / 'tools/ot303/ot303_engine.asm').read_text()
     wrap = (ROOT / 'tools/ot303/hwprobe.asm').read_text()
-    src = asm_macros.layout(eng, XB=xb, YS=YS, LT=LT, TH=TH) + asm_macros.layout(wrap, R2=d['xrun2'][0][0], HQEV=d['dark'] + DARK_N)
+    src = asm_macros.layout(eng, XB=xb, YS=YS, LT=LT, TH=TH) + asm_macros.layout(wrap, R2=d['xrun2'][0][0] - xd, HQEV=d['dark'] + DARK_N,
+                                                                         XD=xd, NXD=(-xd) & 0xffffff)
     equs = '\n'.join(l for l in src.splitlines() if re.match(r'^[A-Za-z_][A-Za-z0-9_]*\s+equ\s', l))
     ev = equs + '\n' + (ROOT / 'tools/ot303/hwprobe_ev.asm').read_text()
     return src, ev, asm_macros.yspace(eng)
@@ -113,9 +120,13 @@ def build(tag):
     assert words[bra - d['org']] == 0x0d10c0 and words[bra - d['org'] + 1] == 0, 'bra placeholder moved'
     words[bra - d['org'] + 1] = (d['djeq_proc'] - bra) & 0xffffff
     checks = [(bra, f'bra     func_{d["djeq_proc"]:06x}', 'exit branch')]
-    for site, target in (('hq_callev', 'hq_event'), ('hq_cton', 'hq_tgen'), ('hq_cbr0', 'hq_burn'), ('hq_cbr1', 'hq_burn'), ('hq_cpre', 'hq_pre')):
+    for site, target in (('hq_callev', 'hq_event'), ('hq_cton', 'hq_tgen'), ('hq_cbr0', 'hq_burn'), ('hq_cbr1', 'hq_burn'),
+                         ('hq_cpre', 'hq_pre'), ('hq_cham', 'hq_ham'), ('hq_crel', 'hq_reloc')):
         cal = S[site]
         assert words[cal - d['org']] == 0x0d1080 and words[cal - d['org'] + 1] == 0, f'{site}: bsr placeholder moved'
+        if site == 'hq_crel' and not d['xd']:
+            words[cal - d['org']] = 0                                       # nothing to move: two nops
+            continue
         words[cal - d['org'] + 1] = (evs[target] - cal) & 0xffffff
         checks.append((cal, f'bsr     func_{evs[target]:06x}', f'{site} -> {target}'))
     dis = dsp_xasm.disassemble(words, d['org'])
@@ -172,6 +183,8 @@ def build(tag):
         X(S['BX'] + i, v)
     for i, v in enumerate(kp + [kp[-1]]):
         X(S['KX'] + i, v)
+    # the loader's copy: every word xd above its run-time address
+    x = {a + d['xd']: v for a, v in x.items()}
     # every X word inside SPRING's five records, the rest of them zero
     runs = d['xrun1'] + d['xrun2']
     for a in x:
@@ -181,7 +194,7 @@ def build(tag):
             x.setdefault(a, 0)
     # the Y footprint stays in the free region
     assert TH + 1026 <= LT and LT >= 0x800 and LT + 860 <= YS and S['YS'] + 0xab <= 0x1000 and TH >= 0x7a5
-    return dict(org=d['org'], words=words, syms=S, ysyms=ysyms, p2=(ev_org, evw), x=x,
+    return dict(org=d['org'], words=words, syms=S, ysyms=ysyms, p2=(ev_org, evw), x=x, xd=d['xd'],
                 djeq_proc=d['djeq_proc'], entry=S['hq_entry'])
 
 

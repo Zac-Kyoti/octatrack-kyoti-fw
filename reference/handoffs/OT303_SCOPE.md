@@ -1467,3 +1467,68 @@ A power cycle restored everything (RAM only).
    (track muted)?
 2. Then BURN 0 → 30 at 303 = 32: no crash until a real overrun.
 3. Then 303 = 100 (square: silent, but must not junk).
+
+### DIAG5 on the unit (user, 2026-10-08): core 1 clean; core 0 has a second problem; DIAG6 (built, NOT flashed)
+
+**DIAG5 results:**
+
+| 303 | T2 (core 1) | T6 (core 0) |
+|---|---|---|
+| 1–31 (TONE, ENG+TONE) | clean tone | (as DIAG4) |
+| 32–63 (RIFF, PRE 0–31) | **clean riff, clean master, no crash** | 32–41 dirty, junk on the master with T6 muted; 38, 43, 44, 47 near-clean (rare quiet pops); 42, 45, 46 clean; 48 plenty of pops |
+| 64+ (SQUARE, silent) | silent, no crash | not reached |
+| crash | none | **303 = 49 (PRE 17)**: voice silent, sequencer stuck; no garbled project this time |
+
+**Reading:**
+- REP was core 1's whole problem.
+- Core 0's remainder needs the engine to run. The tone with BURN up to 127 (DIAG3) never junked
+  or crashed on T6, and the engine plus ~400 cycles/sample crashes whether the 400 come before the
+  render (PRE 17) or after it (DIAG3's BURN 17).
+- So it is neither the call's end time alone nor the cycle budget: the light burn test gave core 0
+  ≥ 3,048 spare.
+- Stack depth is ruled out: firmware emulator, `--dsp-pcwatch` at the BLEP DIV loop shows SP = 7 on
+  both cores, and the host and DMA handlers add at most 2.
+- **What only core 0 has:** the ESAI audio DMA. The boot module `P:$3001d` (payload A only; B's stub
+  `P:$38000` calls only `$30082`/`$3008a`) arms:
+  - DMA2: TX from `X:$8000`, 256 words, `M_DCR2 = $cc6220`;
+  - DMA3: RX into `X:$8100–$833f`, `M_DCR3 = $ac59c0`.
+
+  The engine's X block sat in SPRING's X records, `X:$89a4–$8cef`: the same memory block, read and
+  written on nearly every cycle. Core 1 runs no ESAI DMA, and T2 is clean.
+- **Lead (not proven):** core/DMA contention in that block holds up the DMA controller. The
+  host-port DMA (DMA0/1, same controller) then answers late: the same torn transfers as REP. When
+  it lands on a host write, the crash follows.
+- Also consistent:
+  - the tone (two X words a sample there) is clean;
+  - DIAG4's XREADS on T2 (core 1) were clean;
+  - the PRE map is a scan of the engine across the frame's host-transfer windows.
+
+**DIAG6:** `out/OCTATRACK_OS1.40C_OT303_DIAG6.syx`
+(`a7a5a82175ff8123c2c8cca5470cf298eff03403d210dca076af7dbb4a30f00e`, version `140C_303D6`).
+- **Payload A (core 0):** the engine's X block runs at `X:$3224–$356f`, inside Analog BD's free
+  private region `$2840–$3940`, with no DMA in that memory block.
+  - The loader still puts the words in SPRING's records, `xd = $5780` above.
+  - On the first call with 303 up, `hq_reloc` (region 2) copies them: run 1 is 216 words, run 2 is
+    500.
+  - `RFLAG` (the loader's copy of STG, zeroed by the boot loader) marks the copy done.
+- **Payload B:** unchanged; the call site is two nops.
+- **Band 16–31 is now XHAM+TONE:** the tone, plus `KCNT × 256` X reads in the engine's ORIGINAL
+  block, with no engine. On core 0 that is the ESAI DMA's block.
+- **Checks:**
+  - Bench: all modes bit-exact on both payloads, the relocated block poisoned before the first call.
+  - Firmware (ot_emu): ALL GOOD. Core 0's flag and stage confirmed: boot loader writes 0, `hq_reloc`
+    writes 1, STG = 2.
+  - Stock never writes `X:$3224`/`$3400`/`$356f` on core 0 (BOTLI, 1,500 frames).
+  - Wrapper 818/820 words; region 2 174/208.
+
+**The test** (fresh power cycle, transport stopped, DJ EQ on the track's FX1 only, BURN 0, **do not
+save the project**):
+
+| step | settings | contention confirmed if… |
+|---|---|---|
+| 1 | T6, 303 = 32 → 48, one step at a time | clean riff, clean master |
+| 2 | T6, 303 = 49 → 63 | no crash |
+| 3 | T6, 303 = 20 (XHAM+TONE) | dirty tone, junk on the master |
+| 4 | T2, 303 = 20 | clean (no ESAI DMA on core 1) |
+
+If 1–2 stay dirty, the memory block is not the cause and the lead is dropped.

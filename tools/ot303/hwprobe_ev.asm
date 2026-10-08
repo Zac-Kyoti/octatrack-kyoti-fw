@@ -128,3 +128,45 @@ hq_pre:
 hq_pzero:
         rts
 
+; ---- RELOC (payload A; the builder nops the call on B): on the first call with 303 up, copy the
+; engine's X block (run 1) and the packed tables (run 2) from where the loader put them (XD above)
+; to their run-time addresses. RFLAG, in the loader's copy, marks it done until power-off.
+; m1 is linear (hq_entry). Uses a, r1, n1; keeps x0 x1 y1.
+hq_reloc:
+        move    x:>RFLAG,a
+        tst     a
+        bne     hq_rldone
+        move    #>NXD,n1
+        move    #>OLD1,r1
+        do      #216,hq_rla
+        move    x:(r1),a
+        move    a,x:(r1+n1)
+        move    (r1)+
+hq_rla:
+        move    #>OLD2,r1
+        do      #500,hq_rlb
+        move    x:(r1),a
+        move    a,x:(r1+n1)
+        move    (r1)+
+hq_rlb:
+        move    #>1,a
+        move    a,x:>RFLAG
+hq_rldone:
+        rts
+
+; ---- XHAM: KCNT x 128 pairs of X reads in the engine's original X block (HAMB, 64 words, modulo):
+; on core 0 that is the memory block of the ESAI DMA buffers. r5 = XM. Uses a, r1, m1, x0, x1.
+hq_ham:
+        move    #>HAMB,r1
+        move    #>63,a
+        move    a1,m1
+        move    x:(r5+D_KCNT),a
+        asl     #7,a,a
+        beq     hq_hzero
+        do      a1,hq_hzero
+        move    x:(r1)+,x0
+        move    x:(r1)+,x1
+hq_hzero:
+        move    #>$ffffff,a
+        move    a1,m1
+        rts
