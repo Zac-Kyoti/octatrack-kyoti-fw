@@ -10,7 +10,7 @@
 ; repitch-kyoti rev 17 -- DSP side: the "virtual sampler" behind RPS9 / RPSP.
 ; Model (the ground truth this must match): tools/repitch_engine_model.py.
 ; Scope: reference/handoffs/REPITCH_FIDELITY_SCOPE.md; rev 17 (RPSP = mid + side through
-; the SP's channel 5 filter, the DSP load audit's budget): NOTES Session 120 continued (10).
+; the SP's channel 6 filter (5 until 2026-10-08), the DSP load audit's budget): NOTES Session 120 continued (10).
 ; Plumbing: NOTES Session 110; rev 12/13: Session 111; rev 14: Session 112.
 ; Assembled by tools/dsp_xasm.py (NOT plain dsp_asm: this uses XY+ALU moves,
 ; equ and dc, and every word is disassembled back and checked);
@@ -184,7 +184,7 @@ zq9e:
 ; ============================================================ RPSP (SP-1200)
 ; Rev 17: the mid (L + R)/2 goes through the SP -- the virtual ADC (8 taps) at
 ; the SP's clock, 12 bits, the band-limited render to 44.1 kHz -- then the SP's
-; channel 5 output filter; the side (L - R)/2 is read clean, as far behind the
+; channel 6 output filter; the side (L - R)/2 is read clean, as far behind the
 ; OT's position as the mid's path delays it, and L, R = mid +/- side. The SP's
 ; clock period is 1.69 output samples, so an output interval holds at most one
 ; tick. A tick at u stores a new step; the render spreads the step (new - old)
@@ -243,7 +243,7 @@ zqsnj:
         asr     a                       ; a0 = RH = r x 2^23, unsigned (a1 = 0)
         move    a0,y:(r4+$1a)
         move    a0,y0
-        move    #>$2fc28f,x0
+        move    #>$2e28f6,x0
         mpyuu   y0,x0,a                 ; (MS_SIDE_DELAY / 16) r x 2^47 (RH unsigned; < 2^47)
         asr     #19,a,a                 ; -> MS_SIDE_DELAY r, 24.24
         add     #<$4,a               ; + c + 1 frames
@@ -355,7 +355,7 @@ zqsnj:
 zqbl:
         move    n1,r5
 ; ---- out: the mid = the current step + what the render still owes this output,
-; through channel 5 (section 1: b (x + x[n-1]) + q s1[n-1]; section 2 at half
+; through channel 6 (section 1: b (x + x[n-1]) + q s1[n-1]; section 2 at half
 ; scale, doubled: g/2 s1 - a1/2 s2[n-1] - a2/2 s2[n-2])
 zqout:
         clr     b
@@ -364,16 +364,16 @@ zqout:
         move    y:(r6)+,x0              ; HM
         add     x0,a    b,y:(r7)+       ; (the slot is spent)
         move    a,x0    y:(r6),y0       ; mid (limited); XP = x[n-1]
-        move    #>$26b852,x1
+        move    #>$2e147b,x1
         mpy     x1,x0,a x0,y:(r6)+
         mac     x1,y0,a y:(r6),y0       ; Y1 = s1[n-1]
-        maci    #$328f5c,y0,a
+        maci    #$23d70a,y0,a
         move    a,x0    a,y:(r6)+       ; s1 (limited)
-        mpyi    #$4efbae,x0,a
+        mpyi    #$5618cd,x0,a
         move    y:(r6)+,y1              ; Z2 = s2[n-2]
         move    y:(r6)-,y0              ; Z1 = s2[n-1]
-        maci    #$9f159,y0,a
-        maci    #$e712fa,y1,a
+        maci    #$fe0f5d,y0,a
+        maci    #$ebd7d6,y1,a
         asl     a       y0,y:(r6)+
         move    a,x0    a,y:(r6)+       ; s2 (limited)
         move    x0,n5                   ; (n5: free outside the tick)
@@ -402,7 +402,7 @@ zqout:
         mac     x1,y0,a y:(r6),b        ; the previous side sample
         move    a,x0                    ; the side (limited)
         add     x0,b    x0,y:(r6)+n6    ; (r6 back to TAU)
-        asr     b                       ; the two-sample average: channel 5's zero at Nyquist
+        asr     b                       ; the two-sample average: the channel filter's zero at Nyquist
         move    b,x0
         move    n5,a
         add     x0,a    n5,b

@@ -4,7 +4,7 @@
 ; repitch-kyoti rev 17 -- DSP side: the "virtual sampler" behind RPS9 / RPSP.
 ; Model (the ground truth this must match): tools/repitch_engine_model.py.
 ; Scope: reference/handoffs/REPITCH_FIDELITY_SCOPE.md; rev 17 (RPSP = mid + side through
-; the SP's channel 5 filter, the DSP load audit's budget): NOTES Session 120 continued (10).
+; the SP's channel 6 filter (5 until 2026-10-08), the DSP load audit's budget): NOTES Session 120 continued (10).
 ; Plumbing: NOTES Session 110; rev 12/13: Session 111; rev 14: Session 112.
 ; Assembled by tools/dsp_xasm.py (NOT plain dsp_asm: this uses XY+ALU moves,
 ; equ and dc, and every word is disassembled back and checked);
@@ -67,7 +67,7 @@
 S_TAG   equ     $0a
 S_TAU   equ     $0b     ; r6 walks TAU .. SPV once per output, in this order:
 S_HM    equ     $0c     ;   time of the next tick (from the start of the next
-S_XP    equ     $0d     ;   interval, Q20), the current step (the mid), channel 5's
+S_XP    equ     $0d     ;   interval, Q20), the current step (the mid), channel 6's
 S_Y1    equ     $0e     ;   x[n-1], s1[n-1], s2[n-2], s2[n-1], the side's offset
 S_Z2    equ     $0f     ;   behind the OT (2 x integer part, fraction; this pass's),
 S_Z1    equ     $10     ;   the previous output's ring word offset (2 x frame) and
@@ -200,7 +200,7 @@ zq9e:
 ; ============================================================ RPSP (SP-1200)
 ; Rev 17: the mid (L + R)/2 goes through the SP -- the virtual ADC (8 taps) at
 ; the SP's clock, 12 bits, the band-limited render to 44.1 kHz -- then the SP's
-; channel 5 output filter; the side (L - R)/2 is read clean, as far behind the
+; channel 6 output filter; the side (L - R)/2 is read clean, as far behind the
 ; OT's position as the mid's path delays it, and L, R = mid +/- side. The SP's
 ; clock period is 1.69 output samples, so an output interval holds at most one
 ; tick. A tick at u stores a new step; the render spreads the step (new - old)
@@ -371,7 +371,7 @@ zqsnj:
 zqbl:
         move    n1,r5
 ; ---- out: the mid = the current step + what the render still owes this output,
-; through channel 5 (section 1: b (x + x[n-1]) + q s1[n-1]; section 2 at half
+; through channel 6 (section 1: b (x + x[n-1]) + q s1[n-1]; section 2 at half
 ; scale, doubled: g/2 s1 - a1/2 s2[n-1] - a2/2 s2[n-2])
 zqout:
         clr     b
@@ -418,7 +418,7 @@ zqout:
         mac     x1,y0,a y:(r6),b        ; the previous side sample
         move    a,x0                    ; the side (limited)
         add     x0,b    x0,y:(r6)+n6    ; (r6 back to TAU)
-        asr     b                       ; the two-sample average: channel 5's zero at Nyquist
+        asr     b                       ; the two-sample average: the channel filter's zero at Nyquist
         move    b,x0
         move    n5,a
         add     x0,a    n5,b

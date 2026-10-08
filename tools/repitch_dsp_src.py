@@ -13,7 +13,7 @@ REVERB's own X data tables (five modules per payload that only SPRING's code
 references -- the canary run of NOTES Session 112), and zqinit copies them to
 Y. Run 1 (three adjacent 72-word modules) holds the render's half-table; run
 2 (116 + 384 words) the RPSP and RPS9 half-rows, in that order (zqinit's r1 runs
-on from one to the next). Rev 17 (RPSP = mid + side through channel 5): no cutoff
+on from one to the next). Rev 17 (RPSP = mid + side through channel 6): no cutoff
 table, no aux blocks; the RPSP kernel is 8 taps (the mid's).
 
     python3 tools/repitch_dsp_src.py [A|B] [ORG]   -> assembles, prints size + tag
@@ -115,8 +115,8 @@ def x_data(payload):
 
 
 def ms_filter():
-    """Channel 5's filter (rev 17's mid) as the DSP runs it: section 1 = b (x + x[n-1]) + q s1[n-1];
-    section 2, at half scale and doubled by an asl = g/2 s1 + (-a1/2) s2[n-1] + (-a2/2) s2[n-2]."""
+    """MS_CHANNEL's filter (rev 17's mid; channel 6 since 2026-10-08) as the DSP runs it:
+    section 1 = b (x + x[n-1]) + q s1[n-1]; section 2, at half scale and doubled by an asl = g/2 s1 + (-a1/2) s2[n-1] + (-a2/2) s2[n-2]."""
     (b0, b1, b2, a1, a2), (g, _, _, c1, c2) = m.sp_channel_filter(m.MS_CHANNEL)
     assert b0 == b1 and b2 == 0 and a2 == 0, "section 1 is the real pole with a zero at Nyquist"
     return dict(FB=q23(b0), FQ=q23(-a1), FG2=q23(g / 2), FNA1=q23(-c1 / 2), FNA2=q23(-c2 / 2))

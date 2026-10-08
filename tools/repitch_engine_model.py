@@ -70,7 +70,7 @@ MODE_RPS9, MODE_RPSP = 1, 2
 SP_CHANNEL = 7                     # which SP-1200 output RPSP is heard on: 7 (= 8) raw, no filter.
 # Rev 17 (listening pack 3, the user's pick, 2026-10-06): RPSP is MID + SIDE. The mid (L+R)/2
 # runs the SP-1200 path -- 8-tap virtual ADC, 26.04 kHz drop-sample, 12-bit, the 10-tap
-# render -- then output channel 5's fixed filter; the side (L-R)/2 is read cleanly (the OT's
+# render -- then an SP output channel's fixed filter (MS_CHANNEL); the side (L-R)/2 is read cleanly (the OT's
 # own 2-tap read) as far behind the OT as the mid path delays the mid; L = mid + side,
 # R = mid - side. Anti-phase content lives in the side, so nothing cancels.
 # The mid's delay is c + 1 frames + MS_SIDE_DELAY outputs + the SP's truncating read: each
@@ -81,14 +81,19 @@ SP_CHANNEL = 7                     # which SP-1200 output RPSP is heard on: 7 (=
 # ratio (a fixed 7 was off by up to 1.16 -- the user heard pack 3's luckier alignment as
 # clearer stereo, listening pack 4, 2026-10-06), with no tick-rate jitter on the side.
 # The side then gets a two-sample average, (s + s[n-1]) / 2 (2026-10-07): a zero at Nyquist
-# and -3 dB near 11 kHz, like channel 5's top. The mid's treble is gone through channel 5
+# and -3 dB near 11 kHz, like the channel filter's top. The mid's treble is gone through the channel filter
 # and the render; a panned sound's treble was left in the side alone, so it came out on
 # both sides in opposite polarity. The average takes that leak down 5-9 dB above 12 kHz
 # at speeds off 1/1 (at 1/1 the side's own interpolation was already averaging) for
-# ~3 cycles; channel 5 itself on the side would do more for ~18. Its half-sample delay
+# ~3 cycles; the channel filter itself on the side would do more for ~18. Its half-sample delay
 # comes off MS_SIDE_DELAY.
-MS_CHANNEL = 5
-MS_SIDE_DELAY = 5.97
+# Channel 6 (listening pack 9, the user's pick, 2026-10-08): the same 3-pole filter with
+# channel 6's coefficients -- lighter (-3 dB near 13 kHz, -9 dB at 16 kHz vs channel 5's
+# -3 dB near 11.6 kHz, -14 dB at 16 kHz), the same cycles. Its group delay is ~0.2 output
+# samples shorter (0.40 vs 0.63 below 1 kHz, 0.39 vs 0.55 at 3 kHz), so MS_SIDE_DELAY
+# drops from 5.97 to 5.77.
+MS_CHANNEL = 6
+MS_SIDE_DELAY = 5.77
 MS_LAG_SHIFT = 4
                                    # The DSP has no output-filter stage since rev 12; 3..6 are
                                    # modelled below (sp_channel_filter) for a future selectable channel
@@ -530,7 +535,7 @@ class Engine:
 
 
     def render_ms(self, table, r):
-        """Rev 17 RPSP: the mid through the SP path and channel 5, the side clean."""
+        """Rev 17 RPSP: the mid through the SP path and MS_CHANNEL's filter, the side clean."""
         out = []
         if self.prev is not None and table and (table[0][0] - self.prev[0]) % 64 > 2:
             self.prev = table[0]
@@ -685,12 +690,12 @@ class DspExact:
         self.sp_reset()
 
     def sp_reset(self):
-        """zqsp's clean slot (rev 17): the mono mid path and channel 5's filter state."""
+        """zqsp's clean slot (rev 17): the mono mid path and the channel filter's state."""
         self.tau = self.phi = 0
         self.held = 0
         self.prev = None
         self.acc = [0] * RENDER["L"]                           # residuals / 4, Q23
-        self.xp = self.y1 = self.z1 = self.z2 = 0              # channel 5: x[n-1], s1[n-1], s2[n-1], s2[n-2]
+        self.xp = self.y1 = self.z1 = self.z2 = 0              # the channel filter: x[n-1], s1[n-1], s2[n-1], s2[n-2]
         self.ls = self.c["LS0"]                                # the smoothed read shift, Q22 frames
         self.spv = 0                                           # the side's previous sample
 
