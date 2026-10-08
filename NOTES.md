@@ -35673,3 +35673,49 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
   flashed** (out/octabam_kyoti16/): OBKYOTI15's set + channel 6. syx
   `1b43a8a487b5a1402684fdd5ab4c38882754c2c8087b1d6dc3e1384041ea94c6`; verify-remix green; boot
   check PASS; the channel 6 coefficients are in both payloads and channel 5's are gone.
+* **2026-10-08 (later): two more test builds, raw 7/8 and channels 1/2 (`4741f23`, `RPK_OUT`).**
+  OBKYOTI16 (channel 6) is flashed; the user hears much less aliasing than in KYOTI V1.0 (rev 16).
+  Why: rev 16 ran both channels through the SP path, and its channel 1/2 stage was held open by
+  the AMP level (≈ raw 7/8 on held sounds). Rev 17 runs only the mid through the SP path, behind
+  channel 6.
+  * **The channel 1/2 research (libmd12, github.com/Mudb0y/libmd12, MIT; checked 2026-10-08 at
+    `427c8e3`).** It models the SP-1200 / SP-12 from ngspice netlists of the service-manual
+    schematics, the OS timing comes from running E-mu's Z80 code, and the sweep is fitted to a
+    measured SP-12 within 0.024 octaves.
+    * **How it works:** every note on channels 1/2 pulls the cutoff's control line low for 8
+      housekeeping ticks (8.8–10.1 ms). That discharges C111 (10 µF) through D9 and opens the
+      filter in 1–2 ms. C111 then recharges with τ = 0.101 s back to the trimmed rest (SP-1200:
+      1.0 kHz).
+    * **Measured sweep:** 20.5 kHz at the end of the pulse, 15 kHz at 20 ms, 3.4 kHz at 100 ms,
+      1.6 kHz at 200 ms, 1.07 kHz at 400 ms.
+    * **The audio never reaches the control path.** So rev 14–16's AMP-level drive was not the
+      SP's behaviour (rev 14 had offered a fixed AR, candidate B, but the user picked A).
+    * **A looped break with one trig, on a real SP:** bright for tens of ms, then a dark 1 kHz
+      4-pole. No transient detector is authentic. Breaks were chopped into hits.
+  * **Builds.**
+    * **raw:** no filter, no side average, side offset 5.83. RPSP **146** modelled cycles.
+    * **ch12:** per pass e = 4.87 (K^n − 0.795^n) octaves (K = the RC per 16 outputs). This is
+      within 0.06 octave of libmd12's sweep from 10 ms on, and 0.2 octave in the first 9 ms. g
+      comes from a 4th-order polynomial (relative fit, within 0.007 octave below 3.5 octaves).
+      Four one-pole stages run on the mid AND the side, so there is no mid/side mismatch; they
+      reset at every trig or first use. State lives at Y:$FE0 + 8 × track, which is also
+      zqinit's last scratch word: a table rebuild while a voice plays would disturb one stage
+      briefly.
+    * **Fitting ch12 into 432 P words:** octabam places SIDECHAIN first and refuses a larger
+      REPITCH (tested: "largest single opening has only 432"). So ch12 runs RPS9's taps, the
+      mid's ADC and the stages in DOs: RPSP **191**, RPS9 **62** (57 elsewhere). Unrolled it
+      would be ~178, which needs ~26 P words from elsewhere (e.g. zqboot/zqinit as their own
+      module in SPRING's second run, 208 free).
+  * **Checks:** engine check 80/80 + 8/8 for both; octabam check 264/264 for both. Twin vs design
+      −107…−119 dBFS (raw) and −97…−104 (ch12). Channel 6's P and X words are unchanged. The
+      engine check's work dir is now per build.
+  * **Listening pack 10** (private `4T1Jw5ciFArbpQBRmG9Y3f`, out/ab_pack11/): channel 6 / raw /
+    ch12 trig per slice / ch12 one trig, at four QUAN speeds on both sources.
+  * **Images, BUILT, NOT flashed** (octabam scratch, OBKYOTI11's set; boot check PASS and
+    verify-remix green for both):
+    * **OBKYOTI17 = raw:** out/octabam_kyoti17/, syx
+      `bc6fd01bce92a4147953f08ade1af5be7f921a0fbdbda213473dfe43e9763461`.
+    * **OBKYOTI18 = channels 1/2:** out/octabam_kyoti18/, syx
+      `06ca8d516fe93aaced2d9cd5dda44e6e4cb8f1b205105355fde2b39508336eff`.
+    * Load: on T5–T8, ch12 adds ~96 cycles over four voices against channel 6, so the setup
+      that passed (4 × RPSP + DARK + 3 DJ EQ) may not. Raw frees ~84.
