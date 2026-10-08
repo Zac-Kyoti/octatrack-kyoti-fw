@@ -35719,3 +35719,23 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
       `06ca8d516fe93aaced2d9cd5dda44e6e4cb8f1b205105355fde2b39508336eff`.
     * Load: on T5–T8, ch12 adds ~96 cycles over four voices against channel 6, so the setup
       that passed (4 × RPSP + DARK + 3 DJ EQ) may not. Raw frees ~84.
+* **2026-10-08 (later): rev 17 raw 7/8 is FINAL** (the user's instruction; channels 1/2 kept as
+  `RPK_OUT=ch12` for later refinement — it still "wow-wows" on full breaks).
+  * **Default `RPK_OUT=raw`** (`2ad503c`). Standalone `140C_RPK17`: mainos `90b4a1c1…`, syx
+    `b38639f71e613f01d5fbe1e7429a4a79814ec501e8dfe9cd271fba8998f323c4`. `BUG_RPK17`: mainos
+    `07aaa68b…`, syx `a58ab8df4692bfcc4b53f7797a8c659ca737fd391d3814d461218d3bb1eb0999`. Both
+    are pinned in `kyoti_status.FINAL` (`e5dc4b4`). Boot check PASS for both. README, BUILD_KYOTI,
+    FLASHING and START_HERE restored (`05117ab`). The raw output itself is **not yet flashed**
+    (OBKYOTI17 = the same kernel in octabam form).
+  * **KYOTI combined build: not done.** `build_kyoti.py` is still WITHDRAWN (midisc pads, live
+    descriptor table) and the S125 routes A/B/C wait on the user.
+  * **octabam PR #561, prepared locally (nothing pushed).** In out/octabam-scratch, branch
+    `rpk561-rebase` = origin/main `063a4262` + the PR commit + the review edits + a new commit
+    "DspHook: per-payload stock words" (schema, build_bus, selftest, MODULES.md). It also needs
+    the submodule pin and the rev 17 README/shim text.
+    * Gates: selftest 270 PASS; `make check-remix REMIX=repitch-repeat98-kyoti` passes;
+      `make docs` no diff; verify-docs 0 problems.
+    * The cycle gate names hook sections "NOT COUNTED" (upstream `5c81e249`), so REPITCH is not
+      priced there.
+    * The previous local state is kept on `scratch-local-2026-10-08`; the scratch remixes are
+      parked in out/octabam-scratch-remixes/.
