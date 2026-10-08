@@ -136,3 +136,123 @@ key_list_fix:
     or.l    #2,%d0
     move.l  %d0,20(%sp)
     jmp     LIST_FN
+
+| =====================================================================
+|  sc_norm  --  a COMPRESSOR saved before SIDE-CHAIN existed comes up with
+|  its side-chain OFF (the user's rule, 2026-10-08).
+|
+|  Stock COMPRESSOR uses page-2 slots 6/7 only; its descriptor still gives
+|  slots 8..11 the defaults 0x7f/0/0/0 and selecting the effect writes them.
+|  SIDE-CHAIN reads those four bytes as KEY/KFLT/KGN/MON, so every
+|  compressor made on stock firmware would load keyed from KEY 127 (the DSP
+|  reads unrelated memory as the key), the key filter shut and the key gain
+|  at -24 dB.  A SIDE-CHAIN-era compressor can only hold KEY 0..8 (count 9),
+|  so: KEY > 8 = never set up here -> KEY OFF, KFLT 64 (OFF), KGN 64 (0 dB),
+|  MON OFF.  An in-range KEY is the user's setting and is left alone.
+|
+|  Called (jsr) from both copies of the per-frame page-2 copier, in place of
+|  their first instruction `lea 0x80000a50,%a3`, which is replayed at the
+|  end:  0x4000cae8 (the frame builder, every frame, transport running or
+|  stopped) and 0x40003d1c (its twin, no static caller).  Every register is
+|  preserved; no kernel or UI calls, no private state.
+|
+|  Two copies are checked, EACH ONLY AGAINST ITSELF -- its own FX id and its
+|  own KEY -- so a copy caught mid-update (a Part change refreshes the live
+|  ids and the lane at different moments) is never judged by another copy:
+|    1. the current part's working store, which the page shows and the card
+|       saves:  [0x46c82456] + 0x8ed80 + p*0x18b2  (p = byte 0x80000003),
+|       FX ids at +0 (FX1) / +8 (FX2) + t, page 2 at +0x2f2 + t*30 + 12/18
+|       (stock's editor, 0x4003a5b4);
+|    2. the live lane the copier ships to the DSP right after this returns:
+|       0x80000810 + t*72 + 0x32/0x38, live ids 0x80000ec4 / 0x80000ecc + t.
+|  The saved copy and the battery-SRAM copy are not written: whenever they
+|  come back (Part reload, power-up, the transport start's re-apply) they
+|  land in one of these two and are caught there.  No "edited" flags.
+| =====================================================================
+    .equ LANE,     0x80000810           | live lane, 72 B per track
+    .equ LIVE_IDS, 0x80000ec4           | live FX1 ids [8], FX2 ids at +8
+    .equ CUR_PART, 0x80000003           | current part (byte)
+    .equ DBPTR,    0x46c82456           | -> the current bank's blob
+    .equ COMP_ID,  0x18
+
+    .balign 2
+    .global sc_norm
+sc_norm:
+    lea     (-24,%sp),%sp
+    movem.l %d0-%d2/%a0-%a2,(%sp)
+    moveq   #0,%d1
+    move.b  CUR_PART,%d1
+    mulu.w  #0x18b2,%d1
+    movea.l DBPTR,%a2
+    adda.l  %d1,%a2
+    adda.l  #0x8ed80,%a2                | a2 = the current part's working store
+    lea     LIVE_IDS,%a0
+    lea     LANE,%a1
+    moveq   #0,%d0                      | d0 = track 0..7
+sn_track:
+    move.b  (0,%a2,%d0.l),%d1           | store: FX1 id
+    cmpi.b  #COMP_ID,%d1
+    bne.s   sn_s2
+    moveq   #12,%d2
+    bsr.s   sn_store
+sn_s2:
+    move.b  (8,%a2,%d0.l),%d1           | store: FX2 id
+    cmpi.b  #COMP_ID,%d1
+    bne.s   sn_l1
+    moveq   #18,%d2
+    bsr.s   sn_store
+sn_l1:
+    move.b  (0,%a0,%d0.l),%d1           | lane: live FX1 id
+    cmpi.b  #COMP_ID,%d1
+    bne.s   sn_l2
+    moveq   #0x32,%d2
+    bsr.s   sn_lane
+sn_l2:
+    move.b  (8,%a0,%d0.l),%d1           | lane: live FX2 id
+    cmpi.b  #COMP_ID,%d1
+    bne.s   sn_next
+    moveq   #0x38,%d2
+    bsr.s   sn_lane
+sn_next:
+    lea     (72,%a1),%a1                | next track's lane
+    addq.l  #1,%d0
+    cmpi.l  #8,%d0
+    bne.s   sn_track
+    movem.l (%sp),%d0-%d2/%a0-%a2
+    lea     (24,%sp),%sp
+    lea     0x80000a50,%a3              | displaced
+    rts
+
+| store: page 2 at a2 + 0x2f2 + d0*30 + d2.  Uses d1/d2; a1 saved around.
+sn_store:
+    move.l  %a1,-(%sp)
+    move.l  %d0,%d1
+    mulu.w  #30,%d1
+    add.l   %d1,%d2
+    addi.l  #0x2f2,%d2
+    lea     (0,%a2,%d2.l),%a1
+    bsr.s   sn_fix
+    movea.l (%sp)+,%a1
+    rts
+
+| lane: page 2 at a1 (this track's lane) + d2.
+sn_lane:
+    move.l  %a1,-(%sp)
+    adda.l  %d2,%a1
+    bsr.s   sn_fix
+    movea.l (%sp)+,%a1
+    rts
+
+| a1 -> a page-2 block (slot 6).  KEY > 8 -> KEY 0, KFLT 64, KGN 64, MON 0.
+sn_fix:
+    moveq   #0,%d1
+    move.b  (2,%a1),%d1
+    cmpi.l  #8,%d1
+    bls.s   sn_done                     | 0..8: the user's own setting
+    moveq   #64,%d1
+    clr.b   (2,%a1)
+    move.b  %d1,(3,%a1)
+    move.b  %d1,(4,%a1)
+    clr.b   (5,%a1)
+sn_done:
+    rts

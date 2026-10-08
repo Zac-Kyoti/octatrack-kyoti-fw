@@ -8,8 +8,13 @@
 
 Hardware-confirmed in this octabam form (the author's MKI, 2026-10-04; see MEASURED).
 
-COLDFIRE. One ROM unit, sc_cf (tools/patch_sidechain.s, 134 B): KEY's and KFLT's
-formatters and KEY's list widget. The page-2 slots are written as raw descriptor words
+COLDFIRE. One ROM unit, sc_cf (tools/patch_sidechain.s, 338 B): KEY's and KFLT's
+formatters, KEY's list widget, and sc_norm, reached by a `jsr` detour at the first
+instruction of both page-2 copiers (0x4000cae8, its twin 0x40003d1c). A COMPRESSOR saved
+on stock firmware holds stock's slot 8..11 defaults 0x7f/0/0/0, i.e. KEY 127; sc_norm
+resets any COMPRESSOR whose KEY is above 8 to KEY OFF, KFLT 64, KGN 64, MON OFF, in the
+current part's working store and in the live lane, each judged by its own FX id, so the
+side-chain stays off until the user sets it up. A KEY of 0..8 is never touched. The page-2 slots are written as raw descriptor words
 (Param.formatter_word / widget_word), as the standalone builder writes them: this unit's
 symbols for KEY's formatter and widget and KFLT's formatter, stock's bipolar formatter
 for KGN and ON/OFF formatter and switch for MON, and widget 0 (a plain knob) for KFLT
@@ -48,8 +53,8 @@ and KYOTI V1.0: KEY ducking, MON, a muted KEY with MUTE_MODES.
 import importlib.util
 import os
 
-from remix.schema import (Claims, DspHook, DspRange, DspSection, Kind, Linked, MenuEntry,
-                          Module, Param, YBase)
+from remix.schema import (Claims, Detour, DspHook, DspRange, DspSection, Kind, Linked,
+                          MenuEntry, Module, Param, YBase)
 
 # This module's own directory, relative to the build's cwd (octabam's repo root):
 # "modules/sidechain-compressor" checked out directly, or
@@ -113,7 +118,17 @@ MODULE = Module(
         # At the standalone image's own address (tools/build_sidechain_compressor.py).
         Linked("sc_cf", os.path.join(_TOOLS, "patch_sidechain.s"),
                reference=(0x400d7000,
-                          "24853ca8ce0095ff9e4c4f4184416f0f439b34cc4deded006396eccc2befcc9e")),
+                          "76a4badcef6024b7de8bd6f05930146bdb6a47ffd577da340a6c252c316ff854")),
+    ),
+    # sc_norm: a COMPRESSOR saved before SIDE-CHAIN existed holds stock's slot 8..11 defaults
+    # 0x7f/0/0/0 and comes up with its side-chain OFF. Both page-2 copiers; sc_norm replays
+    # the displaced `lea 0x80000a50,%a3` and returns.
+    detours=(
+        Detour(0x4000cae8, bytes.fromhex("47f980000a50"), "sc_cf", "sc_norm",
+               "frame builder's page-2 copier: a stale KEY (> 8) -> side-chain defaults",
+               kind="jsr"),
+        Detour(0x40003d1c, bytes.fromhex("47f980000a50"), "sc_cf", "sc_norm",
+               "the copier's twin: the same check", kind="jsr"),
     ),
     dsp=DspSection(
         asm=os.path.join(_TOOLS, "patch_sc_dsp3.asm"),

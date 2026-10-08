@@ -170,6 +170,11 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   replacement under discussion (octabam remix). The octabam images OBKYOTI6–12 are clean.
 - **DIRECT_JUMP_KYOTI** — not yet on hardware: MIDI tracks, and Program Change on fast
   re-cues.
+- **SIDECHAIN_COMPRESSOR** — `sc_norm` (2026-10-08, branch `sc-defaults`, not pushed): a
+  COMPRESSOR saved on stock firmware (KEY byte 127) comes up with its side-chain OFF.
+  Emulator-verified, standalone and octabam form; WIP until the user flashes and promotes
+  it (standalone syx `d21762d0…`). Then: promote, octabam PR (pin bump), KYOTI must fit the
+  larger unit, `BUG_SC3X`. `NOTES.md` Session 126.
 - **REPITCH_REPEAT98_KYOTI** — **demoted to WIP 2026-10-06** (standalone build and
   `BUG_RPK16`; FINAL pins removed, README entry replaced by a notice). On the user's MKI, RPSP
   on all four tracks of a core with DARK REV + DJ EQ crashes the DSP (tone, sequencer stops);

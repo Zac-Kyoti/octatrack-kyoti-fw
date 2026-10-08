@@ -35507,3 +35507,60 @@ stay clean; a feature's own new modes may add load but not break what stock allo
 * **Coupling:** the SIDECHAIN_COMPRESSOR fix (`sc-defaults`, patch_sidechain 134 → 338 B) and the
   REPITCH work will each break this pin when promoted: rebuild V1.1, re-test, re-pin with the
   Bugbuilds. REPITCH back to FINAL = back into the default image with RELOAD in DRAM (6 KB) = V1.2.
+## Session 126 (2026-10-08, `sc-defaults`) — SIDECHAIN_COMPRESSOR: a COMPRESSOR saved on stock firmware comes up with its side-chain OFF (`sc_norm`)
+
+**Trigger.** Modwerk report #321 (repeat98/modwerk, kazeko, MKI, octabam module 0.1.1-experimental):
+"when used sidechain compressor on track 8, KEY source does not work". Not reproduced, by the user
+or in `ot_emu` (standalone `bf0ee1d7…`, the user's OT DEMO card, T8 = MASTER): KEY selectable OFF..T8
+from the panel; KEY = T8 from T1 (cross-core, T8's window slot Y:$33f80..) and from T5 (same core,
+keybus Y:$9e0) read live audio; COMPRESSOR on T8 keyed by T1/T5 works, MON on T8 plays the key; T4
+(the other core's last slot) keys with MASTER off; no stock DSP write lands in either core's window
+with DARK REV on every FX2 (stops at slot+$3dxx); MUTE_MODES' KEYMASK bit 7 is byte-sized
+everywhere. Untested: T8 as a non-MASTER track carrying audio (OT DEMO's T8 is a trigless THRU).
+Replied on #321 (can't close it: no triage rights on that repo).
+
+**What was found instead (C, our image).** Stock COMPRESSOR's descriptor gives the hidden page-2
+slots 8..11 the defaults `0x7f/0/0/0` (`build_sidechain_compressor.py` SLOTS asserts them), and
+selecting an effect writes all twelve slots. SIDE-CHAIN reads those bytes as KEY/KFLT/KGN/MON, so
+every COMPRESSOR created on stock firmware loads as KEY "T127" — scdet has no range check and keys
+the detector from Y:$800+126*$40 = Y:$2780 (measured: r4 = $7e) — with KFLT 0 (LP 40 Hz) and KGN 0
+(-24 dB). Turning KEY from 127 clamps to T8 first, leaving KFLT/KGN at 0: OT DEMO's T1 holds exactly
+that (`00 01 08 00 00 00`), a plausible route to the report. (Correction to this session's first
+read: OT DEMO's T7 FX2 is PLATE; its "KEY 127" was my poke over PLATE's bytes.) Selecting COMPRESSOR
+on SIDE-CHAIN firmware writes our defaults (KEY 0, KFLT 64, KGN 64, MON 0 — measured via the panel).
+
+**User's rule (2026-10-08):** a compressor saved before the install comes up with KEY OFF, KFLT OFF,
+KGN 0, MON OFF and engages nothing until the user sets it up. A SIDE-CHAIN-era compressor can only
+hold KEY 0..8, so **KEY > 8 = never set up here → reset all four; an in-range KEY is never touched**
+(no compatibility break; the OT DEMO T1 case stays as it is).
+
+**Where page 2 lives (C, `ot_emu` dumps of OT DEMO, all four copies equal).** Page 2 of FX1/FX2 =
+part + `0x2f2 + t*30 + 12/18` (slot 6 first; KEY = +2). Working `[0x46c82456] + 0x8ed80 + p*0x18b2`,
+saved `+ 0x9504a`, battery SRAM `0x100a4ece + p*0x18b2` (stock editor `0x4003a5b4..c2`, p = byte
+`0x80000003`), Part FX ids at part +0 / +8. Live lane `0x80000810 + t*72 + 0x32/0x38` (FX1/FX2 page 2),
+live ids `0x80000ec4/ecc`. The copier `0x4000cae8` (loop `cb2a`) ships lane +0x32..+0x3d into the DSP
+record every frame (record +36..+53; KEY at +38 / +50); it runs every frame with the transport running
+**and stopped**. Its twin `0x40003d14` has no static caller and never ran in a 600-frame coverage run.
+
+**Fix: `sc_norm` in `patch_sidechain.s`** (unit 134 → 338 B), `jsr` over the first instruction of
+both copiers (`lea 0x80000a50,%a3`, replayed): for each track and FX slot, (1) the current part's
+working store if ITS OWN FX id is 0x18 and ITS OWN KEY > 8, (2) the live lane if the live id is 0x18
+and the lane's KEY > 8 → KEY 0, KFLT 64, KGN 64, MON 0. Each copy is judged only by itself: the
+first version judged by the lane and wrote the Part too, and erased a valid KEY when the lane still
+held the previous effect's bytes (a test poke; a Part change can do the same). Saved and SRAM copies
+are not written: they surface through the working copy or the lane and are caught there. No flags
+(the Part is not marked edited), no kernel/UI calls, no private state. Cost 171 instructions/frame =
+0.53 % of the frame's ColdFire work (coverage, OT DEMO). DSP unchanged.
+
+**Verified (emulator, standalone `d21762d0…`).** Simulated stock compressor (COMPRESSOR id poked over
+PLATE's `7f/00/00/00` on T7, i.e. stock's exact signature): working store, lane and DSP record reset,
+transport running and stopped; core 0 never enters the key copy (old image: keyed from Y:$2780); the
+EFFECT 2 SETUP screen shows KEY OFF, KFLT/KGN centred (old: "T127", both dials hard left). T8 keyed
+from T1 and OT DEMO's T1 → T8: audio bit-identical to the old image; T5 keyed from T8 keys correctly.
+Not tested: a real project saved on stock firmware (hardware check added to FLASHING.md §4).
+
+**Builds (WIP, NOT flashed).** Standalone `OCTATRACK_OS1.40C_SIDECHAIN_COMPRESSOR.syx`
+`d21762d0b2b18c622989f065aac6966625f5b5040f9b82c7dc78716e4b855fa2` (FINAL pin `dfafc90c…` no longer
+seals → WIP until promoted). octabam module: two `Detour(kind="jsr")`, sc_cf reference
+`76a4badc…`. KYOTI (`build_kyoti.py`, kyoti-v1 thread) composes this builder and must fit the larger
+unit; `BUG_SC3X` rebuilds only after promotion.

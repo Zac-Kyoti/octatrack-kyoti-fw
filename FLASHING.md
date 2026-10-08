@@ -127,6 +127,9 @@ quick check for each:
   another pattern: it takes over on the next step, in time with the metronome.
 - **SIDECHAIN_COMPRESSOR** — COMPRESSOR on a track, page 2 → `KEY` = another track
   playing a kick. The compressed track ducks on the kick; `MON` lets you hear the key.
+  A project saved on stock firmware with a COMPRESSOR in it: that compressor's page 2
+  reads `KEY OFF`, `KFLT` and `KGN` centred, `MON OFF`, and it compresses as it did on
+  stock; a KEY you set on this firmware is kept.
 - **RELOAD_FROM_PROJECT** — save the bank, change a track's trigs, then `[PTN]` +
   `[TRACK n]` while playing: the saved trigs come back without the transport stopping.
 - **REPITCH_REPEAT98_KYOTI** — a STATIC track with a sample whose tempo is set (audio

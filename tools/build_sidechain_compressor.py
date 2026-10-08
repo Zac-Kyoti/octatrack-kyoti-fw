@@ -81,8 +81,14 @@ OUT_BIN = ROOT / "out/OCTATRACK_SIDECHAIN_COMPRESSOR.bin"
 VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_KYOTI"
 
 # ======================= ColdFire =======================
+# sc_norm (2026-10-08): a COMPRESSOR saved before SIDE-CHAIN existed holds stock's slot-8..11
+# defaults 0x7f/0/0/0 -> its side-chain comes up OFF (patch_sidechain.s). Spliced over the
+# first instruction of both page-2 copiers, `lea 0x80000a50,%a3`, which sc_norm replays.
 CF_PATCHES = [
-    ("patch_sidechain", kyoti_place.at("patch_sidechain", 0x400d7000), []),
+    ("patch_sidechain", kyoti_place.at("patch_sidechain", 0x400d7000), [
+        (0x4000cae8, "sc_norm", "47f980000a50", 6, "jsr"),   # frame builder's copier
+        (0x40003d1c, "sc_norm", "47f980000a50", 6, "jsr"),   # its twin
+    ]),
 ]
 CF_FREE_END = 0x400d7c3c
 E = 0x400d5a4a
