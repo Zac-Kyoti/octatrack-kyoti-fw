@@ -55,6 +55,7 @@ Tempo lock is untouched: the engine never changes where the OT reads.
 """
 import functools
 import math
+import os
 
 import numpy as np
 
@@ -92,9 +93,41 @@ SP_CHANNEL = 7                     # which SP-1200 output RPSP is heard on: 7 (=
 # -3 dB near 11.6 kHz, -14 dB at 16 kHz), the same cycles. Its group delay is ~0.2 output
 # samples shorter (0.40 vs 0.63 below 1 kHz, 0.39 vs 0.55 at 3 kHz), so MS_SIDE_DELAY
 # drops from 5.97 to 5.77.
-MS_CHANNEL = 6
-MS_SIDE_DELAY = 5.77
+#
+# Three output builds, chosen with RPK_OUT in the environment (2026-10-08, test builds for the
+# user): "ch6" (the default, above); "raw" = outputs 7/8, no filter and no side average; "ch12"
+# = channels 1/2: the SSM2044 4-pole whose cutoff each trig throws open and a fixed RC closes
+# (DYN_* below). Raw and ch12 read the side 5.83 outputs behind (pack 9's measured "no filter"
+# offset, 6.47 - channel 5's 0.64); ch12's filter runs on the mid AND the side with the same
+# coefficients, so it adds no mid/side misalignment.
+MS_OUT = os.environ.get("RPK_OUT", "ch6")
+assert MS_OUT in ("ch6", "raw", "ch12"), f"RPK_OUT={MS_OUT!r}: ch6, raw or ch12"
+MS_CHANNEL = {"ch6": 6, "raw": 7, "ch12": 12}[MS_OUT]
+MS_SIDE_DELAY = {"ch6": 5.77, "raw": 5.83, "ch12": 5.83}[MS_OUT]
 MS_LAG_SHIFT = 4
+
+# Channels 1/2 (RPK_OUT=ch12). The circuit, from libmd12 (github.com/Mudb0y/libmd12, MIT; its
+# ngspice netlists of the SP-1200 / SP-12 service-manual schematics, the OS's timing from E-mu's
+# own Z80 code, the sweep fitted to a measured SP-12 within 0.024 octaves): every note on
+# channels 1/2 pulls the filter's control line low for 8 housekeeping ticks (8.8-10.1 ms), which
+# discharges C111 (10 uF) through a diode -- the cutoff jumps open within 1-2 ms -- and C111 then
+# recharges through fixed resistors (tau 0.101 s), closing the filter back to its trimmed rest
+# (1.0 kHz on the SP-1200, "oscillate at 1.0 kHz"). The audio never touches the control path:
+# a sound's level, length and DECAY do not move it, only notes do. Measured sweep (libmd12's
+# preset): 20.5 kHz at the end of the pulse, 15 kHz at 20 ms, 3.4 kHz at 100 ms, 1.6 kHz at
+# 200 ms, 1.07 kHz at 400 ms.
+# Here, per OT frame (16 outputs; updated once per pass, before its outputs), the cutoff in
+# octaves over rest is the difference of two decays, DYN_P (K^n - F^n): K = the RC's, F the
+# opening's; no gate counter and no branch. Fitted to libmd12's measured sweep: within 0.06
+# octave from 10 ms on, 0.2 at worst in the first 9 ms (where the cutoff is near Nyquist).
+# Four identical one-pole stages (the SSM2044 at resonance 0, Rossum's "classic" setting), each
+# y += g (x - y) with g chosen so the stage is -3 dB at the pole frequency; g as a function of
+# the octave is a 4th-order polynomial (within 0.025 octave of the exact mapping).
+DYN_REST = 1000.0
+DYN_TAU = 0.1012
+DYN_F = 0.795
+DYN_P = 4.87
+DYN_K = math.exp(-16 / (44100.0 * DYN_TAU))
                                    # The DSP has no output-filter stage since rev 12; 3..6 are
                                    # modelled below (sp_channel_filter) for a future selectable channel
 
@@ -396,6 +429,29 @@ class Biquads:
         return y
 
 
+def dyn_g_exact(octaves, f_rest=DYN_REST):
+    """Channels 1/2: one stage's g for y += g (x - y), -3 dB at the pole frequency
+    f_rest x 2^octaves (clamped below Nyquist)."""
+    f = min(f_rest * 2.0 ** octaves, SR / 2 * 0.999)
+    c = math.cos(2 * math.pi * f / SR)
+    return 1 - ((2 - c) - math.sqrt((2 - c) ** 2 - 1))
+
+
+@functools.lru_cache(maxsize=None)
+def dyn_poly():
+    """g as a 4th-order polynomial in e = octaves / 8, over the envelope's range;
+    highest power first."""
+    top = DYN_P * max(DYN_K ** n - DYN_F ** n for n in range(1, 200)) / 8
+    e = np.linspace(0, top * 1.02, 400)
+    g = np.array([dyn_g_exact(8 * x) for x in e])
+    return tuple(np.polyfit(e, g, 4, w=1 / g))           # relative error: the rest point exact
+
+
+def dyn_g(e):
+    """The design's g at e = octaves / 8 (the polynomial the DSP evaluates)."""
+    return float(np.polyval(dyn_poly(), e))
+
+
 def q12(v):
     """12-bit truncation, as the DSP does it: limit to the 24-bit range
     (the accumulator-to-register move saturates), then floor to 1/2048."""
@@ -404,7 +460,7 @@ def q12(v):
 
 
 class Engine:
-    side_avg = True           # rev 17's side average (False: the build before it, for packs)
+    side_avg = MS_OUT == "ch6"   # rev 17's side average (packs switch it off: the build before it)
     """One track's voice in RPS9 or RPSP. The ring holds float stereo frames
     as the OT delivered them. Rev 14: render() is called once per hook VISIT
     (two per 16-sample frame, whatever the pass split) with the frame's trig
@@ -420,6 +476,7 @@ class Engine:
         self.taps = self.fir.shape[1]
         self.c = self.taps // 2 - 1
         self.post = Biquads(sp_channel_filter(MS_CHANNEL), ch=1) if self.ms else Biquads(design_post(mode))
+        self.dyn = self.ms and MS_OUT == "ch12"
         self.env = 0.0            # ch 1/2: the capacitor
         self.st = np.zeros((4, 2))   # ch 1/2: the 4-pole's state
         self.sp_reset()
@@ -438,6 +495,8 @@ class Engine:
             self.post = Biquads(sp_channel_filter(MS_CHANNEL), ch=1)
             self.lags = PSP_LAG / 2               # the smoothed read shift, frames
             self.sprev = 0.0                      # the side's previous sample (the average)
+            self.ds = [DYN_P / 8, DYN_P / 8]      # ch 1/2: the two decays (a trig: the filter opens)
+            self.dst = np.zeros((2, 4))           # ch 1/2: side and mid, four stages each
 
     def fill(self, start, frames):
         for j, fr in enumerate(frames):
@@ -540,7 +599,12 @@ class Engine:
         if self.prev is not None and table and (table[0][0] - self.prev[0]) % 64 > 2:
             self.prev = table[0]
         # this pass's (side_avg False: the build before the average, for listening packs)
-        offs = self.c + 1 + (MS_SIDE_DELAY if self.side_avg else MS_SIDE_DELAY + 0.5) * r + self.lags
+        # (packs that switch the average off a channel 6 build model the build before it: +0.5)
+        d = MS_SIDE_DELAY + (0.5 if MS_OUT == "ch6" and not self.side_avg else 0.0)
+        offs = self.c + 1 + d * r + self.lags
+        if self.dyn and table:                    # ch 1/2: once per pass, before its outputs
+            self.ds = [self.ds[0] * DYN_K, self.ds[1] * DYN_F]
+            g = dyn_g(self.ds[0] - self.ds[1])
         for k, f in table:
             if self.prev is None:
                 self.prev = (k, f)
@@ -558,6 +622,15 @@ class Engine:
             y = self.post(np.array([self.held + self.acc[0]]))[0]
             s1 = self.side_at(k + f - offs)
             s, self.sprev = ((s1 + self.sprev) / 2 if self.side_avg else s1), s1
+            if self.dyn:
+                for ch, x in ((0, s), (1, y)):
+                    for st in range(4):
+                        self.dst[ch, st] += g * (x - self.dst[ch, st])
+                        x = self.dst[ch, st]
+                    if ch:
+                        y = x
+                    else:
+                        s = x
             out.append((y + s, y - s))
             self.acc = np.roll(self.acc, -1)
             self.acc[-1] = 0.0
@@ -698,6 +771,8 @@ class DspExact:
         self.xp = self.y1 = self.z1 = self.z2 = 0              # the channel filter: x[n-1], s1[n-1], s2[n-1], s2[n-2]
         self.ls = self.c["LS0"]                                # the smoothed read shift, Q22 frames
         self.spv = 0                                           # the side's previous sample
+        self.ds = [self.c.get("DP", 0)] * 2                    # ch 1/2: the two decays (S_S1, S_S2)
+        self.dst = [0] * 8                                     # ch 1/2: side stages 0..3, mid 4..7
 
     @staticmethod
     def lim(v):
@@ -756,6 +831,24 @@ class DspExact:
         g = self.lim(((G << 24) + 2 * D * frac) >> 24)
         return g, 0x7FFFFF - g
 
+    def dyn_coef(self):
+        """zqsnj's channel 1/2 block (RPK_OUT=ch12): the two decays, e = s1 - s2
+        (octaves / 8), g by Horner (coefficients / 16, then asl #4), h = 1 - g."""
+        c = self.c
+        A = 2 * self.ds[0] * c["DKQ"]                         # mpyi: s1 K
+        B = 2 * self.ds[1] * c["DFQ"]                         # mpyi: s2 F
+        self.ds = [A >> 24, B >> 24]
+        e = self.lim((A - B) >> 24)                           # sub b,a; move a,x0
+        pc = [self.s24(c[f"PC{i}"]) for i in range(5)]
+        A = 2 * e * pc[4]                                     # mpyi #PC4,x0,a
+        for i in (3, 2, 1):
+            A += pc[i] << 24
+            A = 2 * e * self.lim(A >> 24)                     # move a,y0; mpy x0,y0,a
+        A = (A + (pc[0] << 24)) << 4                          # add #>PC0,a; asl #4,a,a
+        g = A >> 24
+        h = ((0x7FFFFF << 24) - A) >> 24                      # move y:ONE,b; sub a,b
+        return g, h
+
     def render(self, table, rint, rfrac, flags=0, level=0, lc=1):
         """table: [(ring frame, fraction Q24)]; rint/rfrac: the increment as
         the DSP holds it (x:$40, y:$40 with the mode tag); flags: the unpacked
@@ -780,6 +873,8 @@ class DspExact:
         L, R = RENDER["L"], RENDER["R"]
         # the side's offset behind the OT (24.24): c + 1 frames + MS_SIDE_DELAY increments
         # (RH = r x 2^23, unsigned, times MS_SIDE_DELAY / 16) + the smoothed read shift
+        if MS_OUT == "ch12":                                   # zqsnj: once per pass
+            g, h = self.dyn_coef()
         rh = ((1 if rint else 0) << 23) | ((rfrac & 0xFFFFFF) >> 1)
         offs = ((self.cc + 1) << 24) + ((2 * rh * c["KD"]) >> 19) + (self.ls << 2)
         out = []
@@ -806,12 +901,27 @@ class DspExact:
             else:
                 self.tau -= one
             mid = self.lim(4 * self.acc[0] + self.held)
-            fb, fq, fg2, fa1, fa2 = (self.s24(c[k]) for k in ("FB", "FQ", "FG2", "FNA1", "FNA2"))
-            s1 = self.lim((fb * mid + fb * self.xp + fq * self.y1) >> 23)
-            s2 = self.lim((fg2 * s1 + fa1 * self.z1 + fa2 * self.z2) >> 22)
-            self.xp, self.y1, self.z2, self.z1 = mid, s1, self.z1, s2
+            if MS_OUT == "ch6":
+                fb, fq, fg2, fa1, fa2 = (self.s24(c[k]) for k in ("FB", "FQ", "FG2", "FNA1", "FNA2"))
+                s1 = self.lim((fb * mid + fb * self.xp + fq * self.y1) >> 23)
+                s2 = self.lim((fg2 * s1 + fa1 * self.z1 + fa2 * self.z2) >> 22)
+                self.xp, self.y1, self.z2, self.z1 = mid, s1, self.z1, s2
+            else:
+                s2 = mid
             s1 = self.side((k << 24) + f - offs)
-            sd, self.spv = (self.spv + s1) >> 1, s1                    # the two-sample average
+            if MS_OUT == "ch6":
+                sd, self.spv = (self.spv + s1) >> 1, s1                # the two-sample average
+            else:
+                sd = s1
+            if MS_OUT == "ch12":                               # side, then mid: four stages each
+                for base, x in ((0, sd), (4, s2)):
+                    for st in range(base, base + 4):
+                        x = self.lim((2 * g * x + 2 * h * self.dst[st]) >> 24)
+                        self.dst[st] = x
+                    if base:
+                        s2 = x
+                    else:
+                        sd = x
             out.append([self.lim(s2 + sd), self.lim(s2 - sd)])
             self.acc = self.acc[1:] + [0]
             self.prev = (k, f)

@@ -70,6 +70,9 @@
 
 ; ---- the RPSP slot (Y:STBASE + x:$418, $20 words): the mid's residual ring
 ; (RINGM1+1 words, modulo-addressed, residuals / 4), then:
+; Three output builds (RPK_OUT; tools/repitch_dsp_src.py keeps the ";@ list" blocks
+; that name it): ch6 (channel 6's fixed filter + the side average), raw (outputs
+; 7/8: neither), ch12 (channels 1/2: the trig-opened 4-pole on the mid and side).
 
 zqrp:
         clr     a
@@ -354,8 +357,8 @@ zqsnj:
         move    b,y:(r7)+
 zqbl:
         move    n1,r5
-; ---- out: the mid = the current step + what the render still owes this output,
-; through channel 6 (section 1: b (x + x[n-1]) + q s1[n-1]; section 2 at half
+; ---- out: the mid = the current step + what the render still owes this output;
+; ch6: through channel 6 (section 1: b (x + x[n-1]) + q s1[n-1]; section 2 at half
 ; scale, doubled: g/2 s1 - a1/2 s2[n-1] - a2/2 s2[n-2])
 zqout:
         clr     b

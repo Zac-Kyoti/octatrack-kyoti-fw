@@ -64,9 +64,13 @@
 
 ; ---- the RPSP slot (Y:STBASE + x:$418, $20 words): the mid's residual ring
 ; (RINGM1+1 words, modulo-addressed, residuals / 4), then:
+; Three output builds (RPK_OUT; tools/repitch_dsp_src.py keeps the ";@ list" blocks
+; that name it): ch6 (channel 6's fixed filter + the side average), raw (outputs
+; 7/8: neither), ch12 (channels 1/2: the trig-opened 4-pole on the mid and side).
 S_TAG   equ     $0a
-S_TAU   equ     $0b     ; r6 walks TAU .. SPV once per output, in this order:
+S_TAU   equ     $0b     ; r6 walks TAU .. its last word once per output, in this order:
 S_HM    equ     $0c     ;   time of the next tick (from the start of the next
+;@ ch6
 S_XP    equ     $0d     ;   interval, Q20), the current step (the mid), channel 6's
 S_Y1    equ     $0e     ;   x[n-1], s1[n-1], s2[n-2], s2[n-1], the side's offset
 S_Z2    equ     $0f     ;   behind the OT (2 x integer part, fraction; this pass's),
@@ -85,6 +89,35 @@ S_RF    equ     $1b     ; frac(r), Q24, with the mode tag (this pass's)
 S_LS    equ     $1c     ; the smoothed read shift (the SP's truncation), Q22 frames
 S_SIZE  equ     $1d     ; (track 3's slot ends in TABTAG at +$1f)
 S_RWND  equ     S_TAU-S_SPV
+;@ raw,ch12
+S_OH    equ     $0d     ;   interval, Q20), the current step (the mid), the side's
+S_OL    equ     $0e     ;   offset behind the OT (2 x integer part, fraction; this
+S_PKW   equ     $0f     ;   pass's), the previous output's ring word offset (2 x
+S_PF    equ     $10     ;   frame) and fraction (Q24), the ring's base (r2, this
+S_RB    equ     $11     ;   pass's), $7fffff; ch12 then: the filter's state block
+S_ONE   equ     $12     ;   (Y:CHB + 8 x track: side stages 0..3, mid 4..7), g, 1 - g
+;@ raw
+S_PHI   equ     $13     ; accumulator fraction, Q24
+S_RW    equ     $14     ; the ring slot (absolute address) of the next output
+S_RH    equ     $15     ; r / 2, unsigned Q23 (this pass's)
+S_RF    equ     $16     ; frac(r), Q24, with the mode tag (this pass's)
+S_LS    equ     $17     ; the smoothed read shift (the SP's truncation), Q22 frames
+S_SIZE  equ     $18
+S_RWND  equ     S_TAU-S_ONE
+;@ ch12
+S_CB    equ     $13
+S_G     equ     $14
+S_H     equ     $15
+S_PHI   equ     $16     ; accumulator fraction, Q24
+S_RW    equ     $17     ; the ring slot (absolute address) of the next output
+S_RH    equ     $18     ; r / 2, unsigned Q23 (this pass's)
+S_RF    equ     $19     ; frac(r), Q24, with the mode tag (this pass's)
+S_LS    equ     $1a     ; the smoothed read shift (the SP's truncation), Q22 frames
+S_S1    equ     $1b     ; the cutoff's two decays (octaves / 8), e = S1 - S2: S1 the
+S_S2    equ     $1c     ;   RC's (x DKQ per pass), S2 the opening's (x DFQ); DP at a trig
+S_SIZE  equ     $1d     ; (track 3's slot ends in TABTAG at +$1f)
+S_RWND  equ     S_TAU-S_H
+;@
 STTAG   equ     STBASE+S_TAG
 
 zqrp:
@@ -156,6 +189,7 @@ zqnh:
         move    b1,r7                   ; the phase's row (the loop count is in LC now)
         clr     a       x:(r1)+,x0      ; (r7 is not used until the next instruction's Y)
         clr     b       x:(r1)+,x1      y:(r7)+,y0
+;@ ch6,raw
 ; taps 1..15, unrolled (rev 17): a DO here cost 5 cycles per output, 8% of RPS9
         mac     y0,x0,a x:(r1)+,x0
         mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
@@ -187,6 +221,14 @@ zqnh:
         mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
         mac     y0,x0,a x:(r1)+,x0
         mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+;@ ch12
+; taps 1..15 in a DO (ch12: the code room the channel 1/2 filter needs; +5 cycles
+; per output)
+        do      #15,zq9t
+        mac     y0,x0,a x:(r1)+,x0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+zq9t:
+;@
         mac     y0,x0,a
         mac     x1,y0,b a,x0            ; limit L
         tfr     x0,a    b,x0            ; limit R
@@ -228,6 +270,18 @@ zqsz:
         move    x0,y:(r4+S_ONE)
         move    #>LS0,x0                ; the read shift starts at its mean
         move    x0,y:(r4+S_LS)
+;@ ch12
+        move    n6,a                    ; the track's state block: CHB + offset / 4
+        asr     #2,a,a
+        add     #>CHB,a
+        move    a1,y:(r4+S_CB)
+        move    a1,r1
+        move    #>DP,x0                 ; a trig: the cutoff's control line pulled low --
+        move    x0,y:(r4+S_S1)          ; the filter throws open
+        move    x0,y:(r4+S_S2)
+        rep     #8
+        move    b,y:(r1)+               ; its eight stages start at rest (b = 0)
+;@
         bra     zqsrs                   ; "previous output" = this pass's first
 zqsok:
         move    x:(r5),a                ; resync "previous" if this pass does not
@@ -271,6 +325,35 @@ zqsnj:
         move    a1,y:(r4+S_OH)
         move    a0,y:(r4+S_OL)
         move    r2,y:(r4+S_RB)
+;@ ch12
+; ---- channels 1/2: this pass's cutoff. e = S1 - S2 octaves over rest (/ 8): S1 the
+; RC closing it (x DKQ, a 0.101 s time constant per 16 outputs), S2 the opening
+; (x DFQ); g = the 4th-order polynomial in e (coefficients / 16, then x 16), h = 1 - g
+        move    y:(r4+S_S1),x0
+        mpyi    #DKQ,x0,a
+        move    a1,y:(r4+S_S1)
+        move    y:(r4+S_S2),x0
+        mpyi    #DFQ,x0,b
+        move    b1,y:(r4+S_S2)
+        sub     b,a
+        move    a,x0                    ; e
+        mpyi    #PC4,x0,a
+        add     #>PC3,a
+        move    a,y0
+        mpy     y0,x0,a
+        add     #>PC2,a
+        move    a,y0
+        mpy     y0,x0,a
+        add     #>PC1,a
+        move    a,y0
+        mpy     y0,x0,a
+        add     #>PC0,a
+        asl     #4,a,a                  ; g
+        move    a1,y:(r4+S_G)
+        move    y:(r4+S_ONE),b
+        sub     a,b
+        move    b1,y:(r4+S_H)           ; 1 - g
+;@
         move    r7,n1                   ; the pass count (r7 becomes the ring pointer)
         move    m7,n7                   ; restored at zqoe
         move    #RINGM1,m7
@@ -323,6 +406,7 @@ zqsnj:
         move    y:(r4+S_HM),y1          ; the step it replaces
 ; ---- the mid's virtual ADC: 8 taps over L + R (the sum, halved below)
         clr     a       x:(r1)+,x0      y:(r5)+,y0
+;@ ch6,raw
         mac     y0,x0,a x:(r1)+,x0
         mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
         mac     y0,x0,a x:(r1)+,x0
@@ -339,6 +423,13 @@ zqsnj:
         mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
         mac     y0,x0,a x:(r1)+,x0
         mac     y0,x0,a
+;@ ch12
+; (ch12: in a DO, for code room; the last pass reads one word past each run, unused)
+        do      #8,zqad
+        mac     y0,x0,a x:(r1)+,x0
+        mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
+zqad:
+;@
         asr     a                       ; (L + R) / 2
         move    a,x0                    ; limited
         move    x0,a
@@ -370,8 +461,8 @@ zqsnj:
         move    b,y:(r7)+
 zqbl:
         move    n1,r5
-; ---- out: the mid = the current step + what the render still owes this output,
-; through channel 6 (section 1: b (x + x[n-1]) + q s1[n-1]; section 2 at half
+; ---- out: the mid = the current step + what the render still owes this output;
+; ch6: through channel 6 (section 1: b (x + x[n-1]) + q s1[n-1]; section 2 at half
 ; scale, doubled: g/2 s1 - a1/2 s2[n-1] - a2/2 s2[n-2])
 zqout:
         clr     b
@@ -379,6 +470,7 @@ zqout:
         asl     #2,a,a
         move    y:(r6)+,x0              ; HM
         add     x0,a    b,y:(r7)+       ; (the slot is spent)
+;@ ch6
         move    a,x0    y:(r6),y0       ; mid (limited); XP = x[n-1]
         move    #>FB,x1
         mpy     x1,x0,a x0,y:(r6)+
@@ -392,6 +484,9 @@ zqout:
         maci    #FNA2,y1,a
         asl     a       y0,y:(r6)+
         move    a,x0    a,y:(r6)+       ; s2 (limited)
+;@ raw,ch12
+        move    a,x0                    ; mid (limited)
+;@
         move    x0,n5                   ; (n5: free outside the tick)
 ; ---- the side, clean: (L - R)/2 at the OT's position less the offset, linear
 ; between its two frames. l:(r5) = (ring words, fraction): less (2 int, frac) of the
@@ -404,7 +499,11 @@ zqout:
         move    a0,b
         move    y:(r6)+,y1              ; RB: the ring is 128-aligned, so OR adds it
         and     #>$7e,a
+;@ ch6,ch12
         or      y1,a    y:(r6)+,x1      ; $7fffff
+;@ raw
+        or      y1,a    y:(r6)+n6,x1    ; $7fffff (r6 back to TAU)
+;@
         lsr     b       a1,r1           ; g = the fraction, Q23
         move    b1,y0
         move    x1,b
@@ -413,17 +512,48 @@ zqout:
         sub     x0,a    x:(r1)+,b       ; L1
         asr     a       x:(r1)+,x0      ; (L0 - R0)/2; R1
         sub     x0,b    a,x1
+;@ ch6,raw
         asr     b                       ; (L1 - R1)/2
         mpy     y1,x1,a b,x1
+;@ ch6
         mac     x1,y0,a y:(r6),b        ; the previous side sample
         move    a,x0                    ; the side (limited)
         add     x0,b    x0,y:(r6)+n6    ; (r6 back to TAU)
         asr     b                       ; the two-sample average: the channel filter's zero at Nyquist
         move    b,x0
+;@ raw
+        mac     x1,y0,a
+        move    a,x0                    ; the side (limited)
+;@ ch6,raw
         move    n5,a
         add     x0,a    n5,b
         sub     x0,b    a,x:(r3)+       ; L = mid + side
         move    b,x:(r3)+               ; R = mid - side
+;@ ch12
+        asr     b       y:(r6)+,r1      ; (L1 - R1)/2; the filter's state block
+        mpy     y1,x1,a b,x1
+        mac     x1,y0,a y:(r6)+,x1      ; g
+        move    a,x0    y:(r6)+n6,y1    ; the side (limited); 1 - g (r6 back to TAU)
+; ---- channels 1/2: the side, then the mid, through the same four stages
+; (y += g (x - y), as g x + (1 - g) y)
+        do      #4,zqfs
+        mpy     x1,x0,a y:(r1),y0
+        mac     y1,y0,a
+        move    a,x0    a,y:(r1)+
+zqfs:
+        move    x0,b                    ; the side
+        move    n5,x0                   ; the mid
+        do      #4,zqfm
+        mpy     x1,x0,a y:(r1),y0
+        mac     y1,y0,a
+        move    a,x0    a,y:(r1)+
+zqfm:
+        move    x0,a
+        add     b,a
+        sub     b,a     a,x:(r3)+       ; L = mid + side
+        sub     b,a
+        move    a,x:(r3)+               ; R = mid - side
+;@
 zqoe:
         move    r7,y:(r4+S_RW)
         move    n7,m7

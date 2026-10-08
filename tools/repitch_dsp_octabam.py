@@ -108,7 +108,7 @@ def generate():
     w1, w2, off = tables()
     assert off["XBL"] == 0 and off["XSP"] == 0, "zqinit reads each block from its start"
     c = constants()
-    text = dsrc.ASM.read_text()
+    text = dsrc.variant_text(dsrc.ASM.read_text())
     assert MARK not in text and MARK2 not in text
     for old, new in SUBS:
         n = text.count(old)

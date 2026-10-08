@@ -114,6 +114,38 @@ def x_data(payload):
     return data
 
 
+# Channels 1/2 (RPK_OUT=ch12): each track's eight filter stages at CHB + 8 x track. Y:$FE0 is
+# also the last word of zqinit's scratch run (T[LR]): free once zqinit is done, and cleared with
+# the rest of the block at every trig / first use, so only a rebuild of the tables while a voice
+# plays (the tag check's safety net; never seen) would disturb one stage for a moment.
+CHB = 0xFE0
+VARIANTS = ("ch6", "raw", "ch12")
+
+
+def variant_text(text, out=None):
+    """Keep the ';@ name,name' ... ';@' blocks of patch_repitch_dsp.asm that name this build."""
+    out = out or m.MS_OUT
+    keep, res = True, []
+    for line in text.splitlines(keepends=True):
+        mm = re.match(r";@(.*)$", line)
+        if mm:
+            names = [n.strip() for n in mm.group(1).split(",") if n.strip()]
+            assert set(names) <= set(VARIANTS), line
+            keep = not names or out in names
+            continue
+        if keep:
+            res.append(line)
+    return "".join(res)
+
+
+def dyn_consts():
+    """Channels 1/2: the two decays per pass, the opening's start, g's polynomial / 16."""
+    pc = m.dyn_poly()[::-1]                     # PC0 .. PC4
+    c = dict(DKQ=q23(m.DYN_K), DFQ=q23(m.DYN_F), DP=q23(m.DYN_P / 8), CHB=CHB)
+    c.update({f"PC{i}": q23(v / 16) for i, v in enumerate(pc)})
+    return c
+
+
 def ms_filter():
     """MS_CHANNEL's filter (rev 17's mid; channel 6 since 2026-10-08) as the DSP runs it:
     section 1 = b (x + x[n-1]) + q s1[n-1]; section 2, at half scale and doubled by an asl = g/2 s1 + (-a1/2) s2[n-1] + (-a2/2) s2[n-2]."""
@@ -152,19 +184,21 @@ def constants(payload="A"):
         KD=q23(m.MS_SIDE_DELAY / 16),                 # ... MS_SIDE_DELAY increments more (x RH = r x 2^23)
         LS0=int(round(m.PSP_LAG / 2 * (1 << 22))),    # ... + the smoothed read shift, Q22, from its mean
         LSSH=m.MS_LAG_SHIFT,
-        **ms_filter(),
+        **(ms_filter() if m.MS_OUT == "ch6" else {}),
+        **(dyn_consts() if m.MS_OUT == "ch12" else {}),
     )
     # modulo-L addressing needs the ring at a multiple of the next power of two
     assert L <= 0x10 and STBASE % 0x20 == 0, "the residual ring must fit a 16-aligned slot"
     assert TABTAG < SPTAB and SPTAB + 32 * spn <= R9TAB and R9TAB + 32 * r9n <= BTAB
     assert c["BEND"] <= TTMP and TTMP + L * R + 1 <= YEND
+    assert CHB + 32 <= YEND and CHB >= TTMP + L * R
     return c
 
 
 def source(payload="A", ch12=None):
     c = constants(payload)
     head = "".join(f"{k:<8}equ     ${v & 0xFFFFFF:x}\n" for k, v in c.items())
-    return head + ASM.read_text(), c
+    return head + variant_text(ASM.read_text()), c
 
 
 def assemble(org, payload="A", ch12=None):

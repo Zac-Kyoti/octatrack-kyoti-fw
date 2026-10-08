@@ -38,6 +38,7 @@ def main():
     ap.add_argument("--bpm", type=float, required=True)
     ap.add_argument("--avg", action="store_true", help="pack 8: mid + side before and after the side average")
     ap.add_argument("--filters", action="store_true", help="pack 9: the mid's output filter, channel 5 / 6 / none")
+    ap.add_argument("--outputs", action="store_true", help="pack 10: channel 6 / raw 7/8 / channels 1/2")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -52,7 +53,19 @@ def main():
             n_out = int((len(src) - 64) / r) // 16 * 16
             trig = [t for t in (int(round(j * slice_len / r)) for j in range(int(len(src) / slice_len) + 1)) if t < n_out]
             mid = (src[:, :1] + src[:, 1:]) / 2
-            if a.filters:
+            if a.outputs:
+                # pack 10: the three output builds (RPK_OUT), channels 1/2 also with one trig
+                # for the whole loop (what the SP does to an unchopped break)
+                clips = {"ref": p.rpch(src, r, n_out)}
+                saved = m.MS_OUT, m.MS_CHANNEL, m.MS_SIDE_DELAY, m.Engine.side_avg
+                for key, build, tr in (("ch6", "ch6", trig), ("raw", "raw", trig), ("ch12", "ch12", trig),
+                                       ("ch12one", "ch12", [0])):
+                    m.MS_OUT, m.MS_CHANNEL = build, {"ch6": 6, "raw": 7, "ch12": 12}[build]
+                    m.MS_SIDE_DELAY = {"ch6": 5.77, "raw": 5.83, "ch12": 5.83}[build]
+                    m.Engine.side_avg = build == "ch6"
+                    clips[key] = p.run(m.MODE_RPSP, src, r, tr, ms=True)
+                m.MS_OUT, m.MS_CHANNEL, m.MS_SIDE_DELAY, m.Engine.side_avg = saved
+            elif a.filters:
                 # pack 9: the mid's output filter (only coefficients change on the DSP); the
                 # side offset re-measured for each (side - mid within 0.03 samples)
                 clips = {"ref": p.rpch(src, r, n_out)}

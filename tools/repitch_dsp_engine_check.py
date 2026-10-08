@@ -48,7 +48,7 @@ import repitch_engine_model as m         # noqa: E402
 
 VEND = ROOT / "vendor/dsp56300"
 PROBE = ROOT / "out/repitch_dsp_engine_probe"
-WORK = ROOT / "out/repitch_engine_check"
+WORK = ROOT / ("out/repitch_engine_check" + ("" if m.MS_OUT == "ch6" else f"_{m.MS_OUT}"))   # per RPK_OUT build
 SR = 44100
 
 
