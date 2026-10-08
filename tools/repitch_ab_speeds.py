@@ -37,6 +37,7 @@ def main():
     ap.add_argument("sources", nargs="+", help="name=file.wav")
     ap.add_argument("--bpm", type=float, required=True)
     ap.add_argument("--avg", action="store_true", help="pack 8: mid + side before and after the side average")
+    ap.add_argument("--filters", action="store_true", help="pack 9: the mid's output filter, channel 5 / 6 / none")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -51,7 +52,18 @@ def main():
             n_out = int((len(src) - 64) / r) // 16 * 16
             trig = [t for t in (int(round(j * slice_len / r)) for j in range(int(len(src) / slice_len) + 1)) if t < n_out]
             mid = (src[:, :1] + src[:, 1:]) / 2
-            if a.avg:
+            if a.filters:
+                # pack 9: the mid's output filter (only coefficients change on the DSP); the
+                # side offset re-measured for each (side - mid within 0.03 samples)
+                clips = {"ref": p.rpch(src, r, n_out)}
+                orig = m.sp_channel_filter
+                for key, secs, d, avg in (("ch5", orig(5), 5.97, True), ("ch6", orig(6), 5.77, True),
+                                          ("raw", [], 5.33, False)):
+                    m.sp_channel_filter = lambda ch=None, s=secs: s
+                    m.MS_SIDE_DELAY, m.Engine.side_avg = d, avg
+                    clips[key] = p.run(m.MODE_RPSP, src, r, trig, ms=True)
+                m.sp_channel_filter, m.MS_SIDE_DELAY, m.Engine.side_avg = orig, 5.97, True
+            elif a.avg:
                 m.Engine.side_avg = False
                 prev = p.run(m.MODE_RPSP, src, r, trig, ms=True)
                 m.Engine.side_avg = True
