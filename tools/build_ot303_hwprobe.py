@@ -2,29 +2,24 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-OT-303 hardware probe, DIAGNOSTIC 2 (DIAG2): the OT-303 DSP engine on the unit, hosted in DJ EQ, with
-modes that isolate each stage (reference/handoffs/OT303_SCOPE.md §11). Probe 1 (140C_303HP) played
-the riff with crackle on core 1, grind on core 0, and pops on the mains with the 303 track muted.
+OT-303 hardware probe, DIAGNOSTIC 3 (DIAG3): the OT-303 DSP engine on the unit, hosted in DJ EQ
+(reference/handoffs/OT303_SCOPE.md §11). DIAG2 on the unit: the riff was clean only when its call
+ended late (WATCH mode); ENG+TONE and NOPS (same ~6,400 cycles, no engine output) distorted the
+track and the opposite main channel: octabam's read-back pull hazard ("Junk on main R"). NOPS's
+uninterruptible REP 400 also stopped the voice.
 
 Stock 1.40C plus exactly this:
-  * DJ EQ page 2 slot 7 = 303 (0..127, default 0). 0: stock DJ EQ. Otherwise DJ EQ does not run and
-    the track's audio is replaced (both channels) by, in sixteens:
-      1-15 TONE (110 Hz saw, no engine)   16-31 ENG+TONE (engine runs, the tone is heard)
-      32-47 RIFF (the engine, saw)        48-63 WATCH (riff + checksum of the engine's constants;
-                                                 a change latches an 880 Hz tone)
-      64-79 NOPS+TONE (~400 cycles/sample of nop)
-      80-95 READS+TONE (~400 cycles/sample of dual X/Y memory reads)
-      96-127 SQUARE (cost only: renders silence)
-    One engine per core: one track of 1-4 and/or one of 5-8.
-  * Changes from probe 1: m0-m7 saved and restored (were forced linear on exit); the coefficient
-    table above Y:$800; DJ EQ bypassed while 303 is up (the output is the engine's, bit for bit);
-    no BURN knob.
+  * DJ EQ page 2: slot 6 BURN (24 cycles/sample a step, octabam's RIG BURN body) and slot 7 303.
+    303 = 0: stock DJ EQ, BURN before it (the burn probe). 303 > 0: DJ EQ does not run; the track's
+    audio is replaced by 1-15 TONE, 16-31 ENG+TONE, 32-63 RIFF, 64-127 SQUARE (cost only), and
+    BURN is spent AFTER the render (it moves the call's end later). One engine per core.
+  * No long REP anywhere in the wrapper (DO loops instead).
   * SPRING REV is removed (its words hold the engine, the wrapper and the packed table data);
     DARK REV's helper inside SPRING's module is untouched. Nothing on the ColdFire but data.
 
 Usage:   python3 tools/build_ot303_hwprobe.py      (WIP: KYOTI_ALLOW_WIP=1)
-Outputs: out/mainos_ot303_hwprobe_diag2.bin, out/OCTATRACK_OS1.40C_OT303_DIAG2.syx,
-         out/OCTATRACK_OT303_DIAG2.bin
+Outputs: out/mainos_ot303_hwprobe_diag3.bin, out/OCTATRACK_OS1.40C_OT303_DIAG3.syx,
+         out/OCTATRACK_OT303_DIAG3.bin
 """
 import importlib.util, os, pathlib, subprocess, sys
 from kyoti_status import gate, seal
@@ -40,11 +35,11 @@ STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
 STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 DIS = ROOT / "vendor/dsp56300/build/source/disassemble/dsp56kDisassemble"
-OUT = ROOT / "out/mainos_ot303_hwprobe_diag2.bin"
-ELEK = ROOT / "out/elek_ot303_hwprobe_diag2.bin"
-OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_DIAG2.syx"
-OUT_BIN = ROOT / "out/OCTATRACK_OT303_DIAG2.bin"
-VERSTR = "140C_303D2"      # the field takes 10 characters
+OUT = ROOT / "out/mainos_ot303_hwprobe_diag3.bin"
+ELEK = ROOT / "out/elek_ot303_hwprobe_diag3.bin"
+OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_DIAG3.syx"
+OUT_BIN = ROOT / "out/OCTATRACK_OT303_DIAG3.bin"
+VERSTR = "140C_303D3"      # the field takes 10 characters
 
 DJEQ_ID = 0x0d
 SPRING_ID = 0x15
@@ -200,11 +195,11 @@ def main():
         assert u32(bus["id2e"] + DJEQ_ID * 4) == DJEQ_P, f"{bus['tag']}: DJ EQ descriptor moved"
 
     # ---------------- ColdFire: BURN and 303 on DJ EQ page 2 ----------------
-    print("\n=== ColdFire: DJ EQ page 2 slot 7 = 303 ===")
+    print("\n=== ColdFire: DJ EQ page 2 slot 6 = BURN, slot 7 = 303 ===")
     E = DJEQ_P - 0x38
     en = E + 0x38 + 0x18e                      # params 0-7, one nibble each, low nibble first
     assert u32(en) == 0x00111101, f"DJ EQ enable word 0x{u32(en):08x}"
-    for slot, name in ((T303_SLOT, b"303\0\0\0"),):
+    for slot, name in ((BURN_SLOT, b"BURN\0\0"), (T303_SLOT, b"303\0\0\0")):
         na, ca, da = E + 0x4e + 6 * slot, E + 0xd2 + 4 * slot, E + 0x96 + slot
         aa, ba = E + 0x102 + 4 * slot, E + 0x132 + 4 * slot
         assert bytes(img[o(na):o(na) + 6]) == b"\0" * 6, f"slot {slot} name not empty"
@@ -212,7 +207,7 @@ def main():
             f"slot {slot} is not a blank 0..127 knob"
         img[o(na):o(na) + 6] = name
         wr32(en, u32(en) | 1 << (4 * slot))
-    print(f"  '303' slot 7, 0..127 (stock count/default/formatter), enable 0x{u32(en):08x}")
+    print(f"  'BURN' slot 6, '303' slot 7, 0..127 (stock count/default/formatter), enable 0x{u32(en):08x}")
 
     OUT.write_bytes(bytes(img))
     seal(__file__, OUT)

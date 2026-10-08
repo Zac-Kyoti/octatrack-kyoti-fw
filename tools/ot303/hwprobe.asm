@@ -12,21 +12,19 @@
 ; (stock leaves them linear between effects, but octabam saw m1 not linear at an init on the unit).
 ;
 ; Page 2 of DJ EQ (r6+$c):
-;   (no BURN in this diagnostic: its room went to the modes below)
-;   slot 7 303   bits 8-15: 0 off, else a mode by sixteens (the output REPLACES the track's audio,
-;                both channels; the riff is a built-in 16-step bar of the Hot voice, 130 BPM):
-;                  1-15   TONE      a plain 110 Hz saw from the wrapper; the engine does not run
-;                  16-31  ENG+TONE  the engine runs (state, cost) but the TONE is what is heard
-;                  32-47  RIFF      the engine, saw
-;                  48-63  WATCH     the riff, and every call a checksum of the engine's constant
-;                                   memory (tables, filter and half-band coefficients, the riff's
-;                                   data); if it ever changes: an 880 Hz tone from then on
-;                  64-79  NOPS      the TONE, plus ~400 cycles a sample of nop (time, no memory)
-;                  80-95  READS     the TONE, plus ~400 cycles a sample of X and Y reads, two a
-;                                   cycle (the engine's memory traffic, no writes, no arithmetic)
-;                  96-127 SQUARE    COST ONLY: its tanh table is not built (no room for its data
-;                                   beside the code in SPRING's words), it stays zero, and the
-;                                   square renders silence through the real code path
+;   slot 6 BURN  bits 16-23: 24 * BURN cycles per sample (octabam's RIG BURN body), spent
+;                AFTER the 303's render when 303 is up (it moves the call's end later: the
+;                read-back pull, below), BEFORE DJ EQ when 303 is 0 (the burn probe's measure)
+;   slot 7 303   bits 8-15: 0 off (stock DJ EQ), else, in sixteens, the track's audio is replaced
+;                (both channels) by: 1-15 TONE (a 110 Hz saw; the engine does not run);
+;                16-31 ENG+TONE (the engine runs, the tone is heard); 32-63 RIFF (the engine,
+;                saw: a built-in 16-step bar of the Hot voice, 130 BPM); 64-127 SQUARE (COST ONLY:
+;                its tanh table is not built, the square renders silence through its real code)
+; DIAG2 on the unit: the riff was clean only when its call ended late enough. Stock copies each
+; track's block into the read-back buffer after FX2 while the ColdFire's DMA pulls that buffer;
+; a call that ends inside the pull's window tears the block (octabam FAILURE_MODES, "Junk on main
+; R": junk on the track and on the opposite main channel). BURN pads the end: find the clean range.
+; No REP over long counts (a REP is not interruptible: the host-port DMA handlers wait it out).
 ; One engine per core: its state is global, so a second DJ EQ with 303 > 0 on the same core
 ; renders the same voice again (twice the speed). Use it on one track per core.
 ;
@@ -160,7 +158,7 @@ hq_run:
 ; the wave words: knob >= 64 = the square
         move    #>SAWW,r1
         move    x:(r5+D_KNB),a
-        move    #>$6000,x0
+        move    #>$4000,x0
         cmp     x0,a
         blt     hq_saw
         move    #>SQRW,r1
@@ -179,12 +177,6 @@ hq_saw:
         move    r0,x:(r5+D_OUTA)
         move    #>T110,x0
         move    x0,x:(r5+D_TINC)
-        move    x:(r5+D_BAND),a
-        move    #>3,x0
-        cmp     x0,a
-        bne     hq_loop
-hq_cwat:
-        dc      $0d1080,0                       ; bsr >hq_watch (may turn the mode into the alarm tone)
 ; render up to each event, then the event
 hq_loop:
         move    x:(r5+D_EVC),a
@@ -202,16 +194,6 @@ hq_noev:
         move    x:(r5+D_BAND),a
         tst     a
         beq     hq_notengine                    ; TONE: no engine
-        move    #>4,x0
-        cmp     x0,a
-        blt     hq_eng
-        move    #>6,x0
-        cmp     x0,a
-        bge     hq_eng
-hq_cbrn:
-        dc      $0d1080,0                       ; bsr >hq_burnx: NOPS / READS, then the TONE
-        bra     hq_notengine
-hq_eng:
         move    b1,r7
         move    #>RBUF,r3
         bsr     ot303
@@ -255,8 +237,13 @@ hq_rest:
         move    x:>SV_R6,r6
         move    x:>SV_R7,r7
         move    x:>SV_N7,n7
+hq_cbr1:
+        dc      $0d1080,0                       ; bsr >hq_burn (after the render: the call ends later)
         rts                                     ; 303 up: DJ EQ does not run
 hq_out:
+hq_cbr0:
+        dc      $0d1080,0                       ; bsr >hq_burn (before DJ EQ: the burn probe's place)
+hq_djeq:
         dc      $0d10c0,0                       ; bra >DJ EQ's stock proc: the builder writes the
                                                 ; displacement and checks it by disassembly
 
@@ -268,11 +255,15 @@ hq_init:
 ; square's, not built: it renders silence), then YW's constants
         clr     a
         move    #>YS,r0
-        rep     #172
+        do      #172,hq_z1
         move    a,y:(r0)+
+        nop
+hq_z1:
         move    #>TH,r0
-        rep     #1026
+        do      #1026,hq_z2
         move    a,y:(r0)+
+        nop
+hq_z2:
         move    #>HB1I,r1
         move    #>HB1C,r0
         do      #16,hq_s0cp

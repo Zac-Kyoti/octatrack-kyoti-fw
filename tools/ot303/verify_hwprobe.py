@@ -90,7 +90,7 @@ def main():
     for core in (1, 0):
         s, i = res[('stock', core)][0][-4:], res[('inert', core)][0][-4:]
         print(f'core {core}: inert overhead per call {[b - a for a, b in zip(s, i)]}')
-        ok &= all(0 <= b - a <= 12 for a, b in zip(s, i))
+        ok &= all(0 <= b - a <= 16 for a, b in zip(s, i))
         for v in ('saw', 'square'):
             e = res[(v, core)][0][-4:]
             print(f'   {v:6}: extra per call {[b - a for a, b in zip(i, e)]} (the engine, DJ EQ bypassed, on the 2nd track only)')

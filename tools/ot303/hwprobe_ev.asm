@@ -87,81 +87,20 @@ hq_tloop:
         move    a1,x:>TPH
         rts
 
-; ---- WATCH: a checksum of the engine's constant memory; the first call takes it, a later one that
-; differs latches the alarm; while latched, this call is the TONE at 880 Hz
-hq_watch:
-        clr     a
-        move    #>LT,r0
-        do      #860,hq_w1
-        move    y:(r0)+,x0
-        add     x0,a
-hq_w1:
-        move    #>HB1C,r0
-        do      #16,hq_w2
-        move    y:(r0)+,x0
-        add     x0,a
-hq_w2:
-        move    #>HB2C,r0                       ; HB2C .. TOPA: the X block's constant tail
-        do      #31,hq_w3
-        move    x:(r0)+,x0
-        add     x0,a
-hq_w3:
-        move    #>PAT,r0                        ; the riff's pattern, host-word sets, triggers
-        do      #40,hq_w4
-        move    x:(r0)+,x0
-        add     x0,a
-hq_w4:
-        move    x:>RFLG,b
-        tst     b
-        bne     hq_wcmp
-        move    a2,x:>REF2
-        move    a1,x:>REF1
-        move    a0,x:>REF0
-        move    #>1,x0
-        move    x0,x:>RFLG
-        rts
-hq_wcmp:
-        move    x:>REF1,b
-        move    x:>REF0,b0
-        move    x:>REF2,b2
-        sub     b,a
-        beq     hq_wok
-        move    #>1,x0
-        move    x0,x:>ALRM
-hq_wok:
-        move    x:>ALRM,b
-        tst     b
-        beq     hq_wret
-        clr     b
-        move    b,x:(r5+D_BAND)
-        move    #>T880,x0
-        move    x0,x:(r5+D_TINC)
-hq_wret:
-        rts
-
-; ---- NOPS (mode 4) / READS (mode 5): ~400 cycles a sample, KCNT samples
-hq_burnx:
-        move    x:(r5+D_KCNT),x0
-        move    x:(r5+D_BAND),a
-        move    #>4,x1
-        cmp     x1,a
-        bne     hq_readsx
-        do      x0,hq_nopsend
-        rep     #400
+; ---- BURN: page-2 slot 6, 24 * BURN cycles per sample over this call's n7 samples (octabam's RIG
+; BURN body, hardware-proven; tools/ot303/burn_djeq.asm). r6 and n7 are the caller's. Uses a, x0,
+; y1. The zero guard is load-bearing: DO with a count of 0 loops 65536 times; asl sets Z.
+hq_burn:
+        move    x:(r6+$c),a
+        and     #>$7f0000,a
+        move    a1,y1
+        move    n7,x0
+        mpy     x0,y1,a
+        asl     #$a,a,a
+        beq     hq_bzero
+        do      a1,hq_bzero
         nop
         nop
-hq_nopsend:
-        rts
-hq_readsx:
-        move    #>RBUF,r1
-        move    #>YS,r4
-        move    #15,m1
-        move    #63,m4
-        do      x0,hq_readsend
-        rep     #400
-        move    x:(r1)+,x1      y:(r4)+,y0
         nop
-hq_readsend:
-        move    #>$ffffff,m1
-        move    #>$ffffff,m4
+hq_bzero:
         rts

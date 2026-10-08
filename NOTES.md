@@ -35993,3 +35993,9 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   light config). DIAG2 built (`140C_303D2`, syx `bac0c74e…`, NOT flashed): mode bands on the 303
   knob (TONE / ENG+TONE / RIFF / WATCH / NOPS / READS / SQUARE), m0–m7 saved/restored (probe 1
   forced them linear), LT above Y:$800, DJ EQ bypassed while 303 is up. Scope §11 decision table.
+- **S124 cont: DIAG2 on HW** — TONE clean; ENG+TONE / RIFF / NOPS dirty (track + master LEFT);
+  WATCH (riff + ~1,900 cycles of reads first) CLEAN; NOPS stopped the voice (rep #400).
+  = octabam's read-back pull hazard (FAILURE_MODES "Junk on main R"): the call's END time decides.
+  Firmware emulator: engine memory = bench word for word; stock calls DJ EQ with m0–m7 linear.
+  DIAG3 built (`140C_303D3`, syx `4d5bfc65…`, NOT flashed): BURN after the render to map the
+  clean range, no long REP. ANALOG BD's source-seam host + pre-boot X record noted for the product.

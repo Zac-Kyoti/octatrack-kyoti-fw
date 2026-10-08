@@ -1302,3 +1302,53 @@ DIAG2's NOPS/READS/ENG+TONE modes are the test.
   - Its pops and crackles were its own limiter and its START/retrigger handling.
   - Since 2.9 it owns the AMP envelope (the DSP sees an always-open AMP), a model for the
     OT-303's VCA against stock AMP.
+
+### DIAG2 on the unit (user, 2026-10-07): the read-back pull, and DIAG3 (built, NOT flashed)
+
+**DIAG2 results** (T2, nothing else running):
+
+| 303 | mode | heard |
+|---|---|---|
+| 8 | TONE | clean track, clean master |
+| 16 | ENG+TONE | distortion on the track, plus a similar, quieter distortion on the master's LEFT channel (heard with the track muted) |
+| 32 | RIFF | the same distortion, now rhythmic |
+| 48 | WATCH | **clean riff, clean master** |
+| 64 | NOPS | steady distortion, then the voice stopped; the rest of the unit was fine |
+
+**Reading:**
+- WATCH is RIFF plus ~1,900 cycles of reads before the render, and it is clean. NOPS spends the
+  engine's ~6,400 cycles without the engine, and it is dirty. So the cause is **when the call
+  ends**, not the engine's arithmetic or its memory traffic.
+- This is octabam's read-back pull hazard (`docs/contributing/FAILURE_MODES.md`, "Junk on main R",
+  and VOCODER's T1/T5 bursts):
+  - after FX2, stock copies each track's block into the read-back buffer (`X:$2600`/`$4600`);
+  - the ColdFire's DMA pulls that same buffer during the frame;
+  - a call ending inside the pull's window for its track tears the block: junk on the track and
+    on the opposite main channel.
+  - BusDelay's fix is 8,192 nops before its rts. VOCODER avoids position 0.
+- Stock DJ EQ (~4,800 cycles), the tone (~600) and WATCH (~8,500) all land outside the window on T2;
+  the engine (~6,400) lands in it.
+- NOPS's stop is probably its `rep #400`: a REP is not interruptible, and the host-port DMA
+  handlers waited it out.
+
+**DIAG3:** `out/OCTATRACK_OS1.40C_OT303_DIAG3.syx`
+(`4d5bfc65d923d416c4634a57e23d754f1ee78e0e33307c117280bde2165a9255`, version `140C_303D3`).
+- DJ EQ page 2: BURN on slot 6, 303 on slot 7.
+  - 303 = 0: BURN runs before DJ EQ (the burn probe).
+  - 303 > 0: BURN runs **after** the render, moving the call's end later.
+  - 303 bands: 1–15 TONE, 16–31 ENG+TONE, 32–63 RIFF, 64–127 SQUARE (cost only).
+- No long REP in the wrapper (DO loops, interruptible).
+- Bench: all modes bit-exact on both payloads; BURN 10 = +240.6 cycles/sample.
+- Firmware (ot_emu): inert +13 instructions a call, the engine only on its track, SPRING → stub,
+  DARK REV as stock.
+
+**The test:** riff (303 = 40) on T2, sweep BURN 0, 1, 2, …. Record the clean range on the track and
+the master. Then T6. WATCH's extra ~1,900 cycles a call is ≈ 120 cycles/sample ≈ BURN 5.
+
+**For the product:** the voice's call must end outside the pull window wherever its track sits and
+whatever runs before it. Options:
+1. A fixed exit pad, costly. BusDelay pays 2 samples a frame.
+2. Wait until a safe point read from a DSP timer: free when the frame is already late.
+3. Render the voice where its timing cannot land a copy in the window.
+
+The sweep says how wide the window is.
