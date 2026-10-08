@@ -1352,3 +1352,70 @@ whatever runs before it. Options:
 3. Render the voice where its timing cannot land a copy in the window.
 
 The sweep says how wide the window is.
+
+### DIAG3 on the unit and the first recordings (user, 2026-10-07); DIAG4 (built, NOT flashed)
+
+**DIAG3:**
+- **T2:** the riff is never clean. BURN after the render changes nothing, up to 127 with no crash.
+  Muted: distortion on the master's left channel, low hiss on the right.
+- **T6:** less distorted (crackle). BURN 17 silences the voice and crashes the sequencer. The tone
+  with BURN 127 is fine on T6.
+- **After a power cycle:** T6 played the riff **clean** at 303 = 32 (dirty after earlier power
+  cycles).
+- **Stock operations change T2's timbre,** some permanently: transport start, the recorder setup
+  menu, recording.
+
+**Recordings** (`~/Desktop/303coretest.wav` = T2, `303coretest2.wav` = T6; 24-bit stereo, 8 s; the
+recorder's source was the track; analysis scripts in `tools/ot303/hwrec/`):
+- **T6 (clean):**
+  - Per-note spectra equal the bench's within 0.2 dB at unity level; the bar period and the
+    pitches are equal.
+  - It is not sample-identical, as expected: TONE / ENG+TONE (303 swept through 8 and 20) advance
+    the riff's events without advancing the voice, so the voice's phase differs.
+  - **The engine computes correctly on the chip.**
+- **T2 (dirty):**
+  - Whole 16-sample frames are junk. Each holds a run of byte values `b << 16`, each byte
+    repeated, with L and R offset by one word (`L[i] = R[i-1]`).
+  - That is the DSP→ColdFire read-back torn: stock stores each sample as two halves
+    (`P:0x55a`, mpy by `$8000` and `$80`), and the ColdFire paired halves from different moments.
+  - It is octabam's "Junk on main R" (random full-scale words, the opposite main channel).
+  - 194 record-like runs in 8 s, bursty, mostly 1–2 samples or exactly 16.
+
+**Reading (lead, not proven):**
+- The pull is DSP DMA channel 1 streaming the read-back buffer from X memory.
+- The engine reads X on nearly every cycle and may starve that DMA, so the pull overlaps the
+  copies and tears.
+- Consistent with:
+  - TONE clean (no traffic);
+  - WATCH clean (the engine started ~1,900 cycles later);
+  - BURN-after no help (it leaves the engine's start unchanged);
+  - NOPS dirty (an uninterruptible `rep` delayed the DMA re-arm handlers);
+  - session- and operation-dependence (the ColdFire's load moves the pull).
+
+**DIAG4:** `out/OCTATRACK_OS1.40C_OT303_DIAG4.syx`
+(`cf9cbb743a2172f79e83707b2c3dab2df75bf487d01455a21d748c7ca737f30c`, version `140C_303D4`).
+- 303 bands:
+
+  | 303 | mode |
+  |---|---|
+  | 1–15 | TONE |
+  | 16–31 | ENG+TONE |
+  | 32–63 | RIFF with PRE = 303 − 32 (24 cycles/sample a step BEFORE the render; 32 = none) |
+  | 64–79 | XREADS+TONE |
+  | 80–95 | YREADS+TONE |
+  | 96–127 | SQUARE |
+
+- XREADS and YREADS each spend ~400 cycles/sample on reads of the engine's own X or Y block, with
+  no arithmetic and no writes, in interruptible DO loops.
+- BURN (slot 6) as in DIAG3. Page-2 slot 8 has no enable nibble in DJ EQ's descriptor (the enable
+  word covers params 0–7), so PRE rides the 303 knob.
+- Bench: all modes bit-exact on both payloads; PRE 10 = +242 cycles/sample. Firmware (ot_emu):
+  ALL GOOD.
+
+**The test** (fresh power cycle, T2, then T6):
+
+| result | cause |
+|---|---|
+| XREADS dirty, YREADS clean | X-bus contention |
+| both clean | the engine's writes or its arithmetic timing |
+| riff clean from some PRE upward | a start-time window (and its width) |

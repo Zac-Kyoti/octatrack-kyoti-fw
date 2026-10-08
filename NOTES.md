@@ -35999,3 +35999,9 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   Firmware emulator: engine memory = bench word for word; stock calls DJ EQ with m0–m7 linear.
   DIAG3 built (`140C_303D3`, syx `4d5bfc65…`, NOT flashed): BURN after the render to map the
   clean range, no long REP. ANALOG BD's source-seam host + pre-boot X record noted for the product.
+- **S124 cont: DIAG3 on HW + recordings** — T6 clean after a power cycle (= bench spectra
+  within 0.2 dB: the engine is right on the chip); T2 junk = torn read-back (sample halves from
+  different moments, L/R one word apart), octabam's "Junk on main R". BURN after the render no
+  help; WATCH (later engine start) was. Lead: the engine's X traffic starves the pull's DMA.
+  DIAG4 built (`140C_303D4`, syx `cf9cbb74…`, NOT flashed): RIFF + PRE (303 − 32), XREADS / YREADS
+  modes. Scripts `tools/ot303/hwrec/`.

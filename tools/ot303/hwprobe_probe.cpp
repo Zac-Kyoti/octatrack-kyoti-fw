@@ -69,6 +69,7 @@ int main(int argc, char** argv) {
     const uint32_t PARB = 0x3000, AUD = 0x0000, R7V = 0x6200;
     const int burn = std::getenv("HWP_BURN") ? std::atoi(std::getenv("HWP_BURN")) : 0;    // page-2 slot 6
     mem.set(MemArea_X, PARB + 0xc, (uint32_t(burn & 0x7f) << 16) | (uint32_t(knob & 0x7f) << 8));
+    const int pre = (knob > 32 && knob < 64) ? knob - 32 : 0;                               // PRE rides the riff band
     uint64_t totalCyc = 0, worstFrame = 0, worstInit = 0; long calls = 0;
     // one call; returns its cycles
     auto call = [&](int n7, uint32_t r0) -> uint64_t {
@@ -131,7 +132,7 @@ int main(int argc, char** argv) {
     e.CS = X("CS"); e.C2 = X("C2"); e.ES8 = X("ES8"); e.RS = X("RS"); e.BG = X("BG"); e.SC = X("SC");
     e.L0_16 = sx(mem.get(MemArea_X, sym("L0C"))); e.AG_8 = sx(mem.get(MemArea_X, sym("AG8C")));
     const int band = knob >> 4;
-    bool sq = knob >= 64;
+    bool sq = knob >= 96;
     uint32_t ww = sym(sq ? "SQRW" : "SAWW");
     e.W1 = gx(ww); e.W2 = gx(ww + 1); e.W3 = gx(ww + 2); e.SQ = gx(ww + 3) != 0;
     auto vars = [&](int v) { uint32_t a = sym("VARS") + 5 * v; e.C_MEG = gx(a); e.M_AMP = gx(a + 1); e.AG8 = gx(a + 2); e.AGF = gx(a + 3) != 0; e.K8 = gx(a + 4); };
@@ -173,7 +174,7 @@ int main(int argc, char** argv) {
             if (!alarm) { e.tick(); }
             evc--;
             int32_t want = e.outW;
-            bool toneNow = band <= 1 || alarm;
+            bool toneNow = band <= 1 || band == 4 || band == 5 || alarm;
             if (toneNow) { tph = (tph + tinc) & 0xffffff; want = sx(tph) >> 2; }
             int32_t l = gx(AUD + 2 * j), r = gx(AUD + 2 * j + 1);
             if (l != want || r != want) {
@@ -190,10 +191,10 @@ int main(int argc, char** argv) {
         std::printf("X:%05x:", pb); for (int i = 0; i < 216; i++) std::printf(" %06x", mem.get(MemArea_X, pb + i) & 0xffffff); std::printf("\n");
         std::printf("Y:%05x:", sym("YS")); for (int i = 0; i < 172; i++) std::printf(" %06x", mem.get(MemArea_Y, sym("YS") + i) & 0xffffff); std::printf("\n");
     }
-    const char* what[] = {"TONE", "ENG+TONE", "RIFF", "RIFF", "SQUARE (tanh cleared)"};
-    if (burn) std::printf("BURN %d: +%d cycles a sample expected (24 x BURN)\n", burn, 24 * burn);
+    const char* what[] = {"TONE", "ENG+TONE", "RIFF", "RIFF", "XREADS+TONE", "YREADS+TONE", "SQUARE (tanh cleared)"};
+    if (burn || pre) std::printf("BURN %d PRE %d: +%d cycles a sample expected (24 x each)\n", burn, pre, 24 * (burn + pre));
     std::printf("BIT-EXACT: %ld samples, %s%s, %ld calls; %.1f cycles/sample incl. the wrapper (worst frame %.1f)\n",
-                sample, what[band < 4 ? band : 4], corrupt ? " (a table word changed mid-run: the alarm tone followed)" : "",
+                sample, what[band < 6 ? band : 6], corrupt ? " (a table word changed mid-run: the alarm tone followed)" : "",
                 calls, double(totalCyc) / (frames * 16.0), worstFrame / 16.0);
     std::ofstream o(dir + "/out_" + std::to_string(knob) + (corrupt ? "c" : "") + ".f32", std::ios::binary);
     o.write(reinterpret_cast<const char*>(wav.data()), std::streamsize(wav.size() * sizeof(float)));

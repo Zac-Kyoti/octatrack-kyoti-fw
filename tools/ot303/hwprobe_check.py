@@ -42,12 +42,14 @@ def main():
         (d / 'x.txt').write_text(''.join(f'{a:x} {v:x}\n' for a, v in sorted(b['x'].items())))
         (d / 'syms.txt').write_text(''.join(f'{k} {v & 0xffffff:x} {"Y" if k in b["ysyms"] else "X"}\n'
                                             for k, v in sorted(b['syms'].items())))
-        for knob, extra, burn in ((8, [], 0), (20, [], 0), (40, [], 0), (40, [], 10), (100, [], 0)):
+        for knob, extra, burn in ((8, [], 0), (20, [], 0), (32, [], 0), (32, [], 10), (42, [], 0), (63, [], 0),
+                                  (70, [], 0), (85, [], 0), (100, [], 0)):
+            pre = knob - 32 if 32 < knob < 64 else 0
             env = dict(os.environ, HWP_BURN=str(burn))
             p = subprocess.run([str(probe), str(d), str(knob), frames, *extra], capture_output=True, text=True, errors='replace', env=env)
             lines = [l for l in p.stdout.strip().splitlines() if not re.match(r'^\w+@\d+:', l)]
  
-            print(f'payload {tag} 303 = {knob:3d} BURN {burn:2d}: ' + '\n' + ''.join(f'    {l}\n' for l in lines), end='')
+            print(f'payload {tag} 303 = {knob:3d} BURN {burn:2d} PRE {pre:2d}: ' + '\n' + ''.join(f'    {l}\n' for l in lines), end='')
             fails += p.returncode != 0
     print('ALL GOOD' if not fails else f'{fails} FAILED')
     return 1 if fails else 0

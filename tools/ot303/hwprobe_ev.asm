@@ -104,3 +104,59 @@ hq_burn:
         nop
 hq_bzero:
         rts
+
+; ---- PRE: in the RIFF band, 303 = 32 + p spends 24 * p cycles per sample BEFORE the render
+; (p = 0..31; DIAG2's WATCH, clean, started the engine ~120 cycles a sample later: p ~ 5).
+; r5 = XM, n7 the caller's. Uses a, x0, y1.
+hq_pre:
+        move    x:(r5+D_KNB),a                  ; 303 << 8
+        move    #>$2000,x0
+        sub     x0,a                            ; (303 - 32) << 8
+        ble     hq_pzero
+        cmp     x0,a
+        bge     hq_pzero                        ; 303 >= 64: not the riff
+        asl     #8,a,a                          ; p << 16
+        move    a1,y1
+        move    n7,x0
+        mpy     x0,y1,a
+        asl     #$a,a,a                         ; 8 * p * n7
+        beq     hq_pzero
+        do      a1,hq_pzero
+        nop
+        nop
+        nop
+hq_pzero:
+        rts
+
+; ---- XREADS (mode 4) / YREADS (mode 5): KCNT x ~400 cycles of reads over the engine's own
+; blocks, in interruptible DO loops (no REP)
+hq_reads:
+        move    x:(r5+D_KCNT),x0
+        move    x:(r5+D_BAND),a
+        move    #>XB,r1
+        move    #>YS,r4
+        move    #63,m1
+        move    #63,m4
+        move    #>5,x1
+        cmp     x1,a
+        beq     hq_yrd
+        do      x0,hq_xend
+        do      #200,hq_xin
+        move    x:(r1)+,x1
+        move    x:(r1)+,x1
+hq_xin:
+        nop
+hq_xend:
+        bra     hq_rdone
+hq_yrd:
+        do      x0,hq_yend
+        do      #200,hq_yin
+        move    y:(r4)+,y1
+        move    y:(r4)+,y1
+hq_yin:
+        nop
+hq_yend:
+hq_rdone:
+        move    #>$ffffff,m1
+        move    #>$ffffff,m4
+        rts
