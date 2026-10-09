@@ -16,8 +16,8 @@ detector. Four controls join RMS on page 2:
 
 | file | what it is |
 |---|---|
-| `manifest.py` | the octabam module declaration: one ROM unit, the COMPRESSOR row, three DSP hooks |
-| `../../tools/patch_sidechain.s` | the ColdFire unit `sc_cf`: KEY's and KFLT's formatters, KEY's list widget |
+| `manifest.py` | the octabam module declaration: one ROM unit, two `jsr` detours, the COMPRESSOR row, three DSP hooks |
+| `../../tools/patch_sidechain.s` | the ColdFire unit `sc_cf`: KEY's and KFLT's formatters, KEY's list widget, `sc_norm` |
 | `../../tools/patch_sc_dsp3.asm` | the DSP code: `sctap`, `scdet`, `moncommit` |
 | `../../tools/sc_tables.py` | the KEY GAIN and KEY FLT tables and coefficients |
 
@@ -49,6 +49,16 @@ Page 2's slots 8–11 are raw descriptor words, as the standalone builder writes
 | KGN | stock bipolar `0x4003c7a0` | 0 |
 | MON | stock ON/OFF `0x4003c14c` | stock switch `0x40046f10` |
 
+**A COMPRESSOR saved on stock firmware comes up with its side-chain OFF.** Stock
+COMPRESSOR does not use page-2 slots 8–11, but its descriptor gives them the defaults
+`0x7f/0/0/0` and choosing the effect writes them, so such a compressor would read as
+KEY 127 (the DSP would key from unrelated memory), KFLT and KGN at minimum. `sc_norm`,
+called by a `jsr` detour at the first instruction of both page-2 copiers (`0x4000cae8`, its
+twin `0x40003d1c`), resets every COMPRESSOR whose KEY is above 8 to KEY OFF, KFLT 64,
+KGN 64, MON OFF. It checks the current part's working store and the live lane the copier
+sends to the DSP, each against its own FX id, every frame (171 instructions). A KEY of 0–8
+was set on this firmware and is never changed.
+
 **With MUTE_MODES:** a muted KEY track keeps feeding the compressor. MUTE_MODES carries
 that variant when this module is in the remix.
 
@@ -72,6 +82,12 @@ refuses the pair. A later version is planned to move both.
   **across cores in both directions** (T1 → T5, T5 → T1); KFLT, KGN, MON; no reverb
   cross-talk with DARK or PLATE REV on T7; a muted KEY in each MUTE MODE, and the first kick
   after PLAY with it muted.
+- `sc_norm` (2026-10-08), in `ot_emu` on the standalone, this octabam form and KYOTI V1.1:
+  a COMPRESSOR put over stock's `7f/00/00/00` comes up KEY OFF, KFLT and KGN centred, MON
+  OFF, on screen, in the Part and in the DSP record, transport running or stopped; an
+  in-range KEY (T8) is kept; keyed audio is bit-identical to the build before. On hardware
+  the standalone and KYOTI V1.1 with `sc_norm` were flashed with no issues; a project saved
+  on stock firmware was not specifically tried.
 - Before that, on the standalone image and the KYOTI V1.0 combined image: KEY ducking,
   MON, a muted KEY with MUTE_MODES (Session 117).
 
