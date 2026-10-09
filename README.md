@@ -86,7 +86,8 @@ plays exactly where it would be had it been running since START, whatever its tr
 lengths, scales or master settings. The Part, START SILENT and trig conditions change as
 on a stock pattern change, and the last MIDI Program Change sent always names the
 pattern that plays. The arranger and chains are untouched; with DIRECT JUMP off, pattern
-changes are stock.
+changes are stock. The image also carries BATCH_BUGFIXES' MIDI Plays-Free fix, which
+keeps a stock bug from feeding DIRECT JUMP a bad scale.
 
 **Hardware:** confirmed: the clock-locked timing and the Part change. Not yet tested on
 hardware: MIDI tracks, Program Change on fast re-cues, START SILENT, and the trig-condition
@@ -228,17 +229,17 @@ flashed as such.\
 **Final build:** [`tools/build_bugbuilds.py`](tools/build_bugbuilds.py) →
 `out/Bugbuilds/OCTATRACK_OS1.40C_<FEATURE>_BATCH_BUGFIXES`
 
-### KYOTI V1.1
+### KYOTI V1.2
 
 Every feature above and all three BATCH_BUGFIXES in **one image**. The boot splash and
-SYSTEM STATUS → OS VERSION read `KYOTI V1.1`. It replaces KYOTI V1.0 (withdrawn, see below).
-REPITCH_REPEAT98_KYOTI is not in it while that feature is work in progress.
+SYSTEM STATUS → OS VERSION read `KYOTI V1.2`. It replaces KYOTI V1.1 and the withdrawn
+V1.0 (see below).
 
-**Sample memory:** none used — the image is ROM-only, and the 85.5 MB sample/recorder
-pool is untouched.\
+**Sample memory:** 6 KB of the 85.5 MB sample/recorder pool, for code loaded at boot; the
+MEMORY page still reads 85.5 MB.\
 **Hardware:** confirmed.\
 **Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) →
-`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.1`
+`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.2`
 
 ---
 
@@ -246,7 +247,7 @@ pool is untouched.\
 
 **KYOTI V1.0 (the earlier all-in-one image) is withdrawn as of 2026-10-06.** It can crash
 the unit when an encoder is turned on an FX page set to NONE, and when T8's PLAYBACK or LFO
-page is shown with T8 as MASTER. If you flashed it, flash KYOTI V1.1 above, one of the
+page is shown with T8 as MASTER. If you flashed it, flash KYOTI V1.2 above, one of the
 single-feature builds, or stock OS 1.40C. None of those has this problem.
 
 **This is for personal study.** Updating an Elektron unit with anything other than
