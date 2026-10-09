@@ -196,7 +196,7 @@ int main(int argc, char** argv) {
         std::printf("X:%05x:", pb); for (int i = 0; i < 216; i++) std::printf(" %06x", mem.get(MemArea_X, pb + i) & 0xffffff); std::printf("\n");
         std::printf("Y:%05x:", sym("YS")); for (int i = 0; i < 172; i++) std::printf(" %06x", mem.get(MemArea_Y, sym("YS") + i) & 0xffffff); std::printf("\n");
     }
-    const char* what[] = {"TONE", "XHAM+TONE", "RIFF", "RIFF", "SQUARE (tanh cleared)"};
+    const char* what[] = {"TONE", "TONE", "RIFF", "RIFF", "SQUARE (tanh cleared)"};
     if (burn || pre) std::printf("BURN %d PRE %d: +%d cycles a sample expected (24 x each)\n", burn, pre, 24 * (burn + pre));
     std::printf("BIT-EXACT: %ld samples, %s%s, %ld calls; %.1f cycles/sample incl. the wrapper (worst frame %.1f)\n",
                 sample, what[band < 4 ? band : 4], corrupt ? " (a table word changed mid-run: the alarm tone followed)" : "",

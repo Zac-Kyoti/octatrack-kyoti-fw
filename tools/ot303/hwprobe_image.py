@@ -121,7 +121,7 @@ def build(tag):
     words[bra - d['org'] + 1] = (d['djeq_proc'] - bra) & 0xffffff
     checks = [(bra, f'bra     func_{d["djeq_proc"]:06x}', 'exit branch')]
     for site, target in (('hq_callev', 'hq_event'), ('hq_cton', 'hq_tgen'), ('hq_cbr0', 'hq_burn'), ('hq_cbr1', 'hq_burn'),
-                         ('hq_cpre', 'hq_pre'), ('hq_cham', 'hq_ham'), ('hq_crel', 'hq_reloc')):
+                         ('hq_cpre', 'hq_pre'), ('hq_crel', 'hq_reloc')):
         cal = S[site]
         assert words[cal - d['org']] == 0x0d1080 and words[cal - d['org'] + 1] == 0, f'{site}: bsr placeholder moved'
         if site == 'hq_crel' and not d['xd']:

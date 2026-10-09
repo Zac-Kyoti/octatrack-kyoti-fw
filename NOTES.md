@@ -36019,3 +36019,8 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   block. **DIAG6** built (`140C_303D6`, syx `a7a5a821…`, NOT flashed): core 0's block relocated to
   `X:$3224–$356f` (Analog BD's free region) by `hq_reloc` on the first call; band 16–31 =
   XHAM+TONE (hard X reads of the old block, no engine). Bench bit-exact, ot_emu ALL GOOD.
+- **S124 cont: DIAG6 on HW** — T2 clean (XHAM harmless on core 1); T6 tone 1–15 fine (copy OK),
+  **XHAM at 16 = instant silence + sequencer crash** (only a power cycle recovers; project reload
+  doesn't). → hard core reads of X:$8000–$8FFF on core 0 starve the ESAI DMA. Rule: keep core-0
+  hot data out of that block. DIAG7 (`140C_303D7`, syx `ed314ad4…`, NOT flashed) = DIAG6 minus
+  XHAM (1–31 TONE) so the relocated riff on T6 can be reached; copy paced.

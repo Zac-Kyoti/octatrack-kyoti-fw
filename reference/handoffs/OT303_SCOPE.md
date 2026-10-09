@@ -1532,3 +1532,30 @@ save the project**):
 | 4 | T2, 303 = 20 | clean (no ESAI DMA on core 1) |
 
 If 1–2 stay dirty, the memory block is not the cause and the lead is dropped.
+
+### DIAG6 on the unit (user, 2026-10-08): the X-read test kills core 0; DIAG7 (built, NOT flashed)
+
+**DIAG6 results:**
+- **T2 (core 1):** clean. At 303 = 20 (XHAM+TONE) it plays the tone; the riff starts at 32.
+- **T6 (core 0):** the tone at 1–15 is fine, so `hq_reloc`'s one-time copy passed. At **16
+  (XHAM+TONE)** the voice goes silent at once and the sequencer crashes.
+- **Recovery:** only a power cycle undoes the crash. A project reload does not, which fits a stuck
+  DSP-side DMA/host state.
+
+**Reading:**
+- XHAM runs no engine. It only reads `X:$89c0–$89ff`, on every cycle of its loop, in the memory
+  block that holds core 0's ESAI DMA buffers.
+- On core 0 that alone is fatal at once. On core 1 (no ESAI DMA) it is harmless.
+- So **back-to-back core access to `X:$8000–$8FFF` on core 0 starves the DMA**: the engine's
+  partial density gave the junk, and XHAM's 100% gave the crash. The memory-block lead is now
+  well supported.
+- The relocated riff could not be tested: the band order put XHAM between 0 and the riff.
+
+**Rule for every DSP module here:** keep core 0's working data (anything touched on most cycles) out
+of `X:$8000–$8FFF`.
+
+**DIAG7:** `out/OCTATRACK_OS1.40C_OT303_DIAG7.syx`
+(`ed314ad40707acdf691a2061f1d488fd3cafee59455cc5c3ef273aa4f4b1c42a`, version `140C_303D7`).
+- DIAG6 without XHAM: 1–31 TONE, 32–63 RIFF with PRE, 64–127 SQUARE (cost only).
+- `hq_reloc`'s copy is paced to one read of the old block every 4 cycles.
+- Bench bit-exact on both payloads; ot_emu ALL GOOD. Wrapper 816/820 words, region 2 161/208.

@@ -17,8 +17,8 @@
 ;                read-back pull, below), BEFORE DJ EQ when 303 is 0 (the burn probe's measure)
 ;   slot 7 303   bits 8-15: 0 off (stock DJ EQ), else, in sixteens, the track's audio is replaced
 ;                (both channels) by: 1-15 TONE (a 110 Hz saw; the engine does not run);
-;                16-31 XHAM+TONE (no engine: ~256 X reads a sample in the engine's ORIGINAL X block,
-;                the tone is heard); 32-63 RIFF (the engine, saw: a built-in 16-step bar of the Hot
+;                16-31 TONE too (DIAG6's XHAM band there crashed core 0 at once and blocked the
+;                riff: DIAG7 drops it); 32-63 RIFF (the engine, saw: a built-in 16-step bar of the Hot
 ;                voice, 130 BPM); 64-127 SQUARE (COST ONLY)
 ;                PRE: in the RIFF band, 303 = 32 + p spends 24 * p cycles per sample BEFORE the
 ;                render (32 = none; DIAG2's WATCH, clean, started the engine ~5 steps later)
@@ -82,7 +82,6 @@ TRIGN   equ     TRIG+2
 OLD1    equ     PB+XD           ; the loader's copy of PB..PB+215 (X run 1)
 OLD2    equ     R2+XD           ; the loader's copy of R2..R2+499 (X run 2)
 RFLAG   equ     STG+XD          ; the loader's STG: 0 until hq_reloc has copied
-HAMB    equ     XB+XD           ; XHAM's reads: the engine's original X block
 ; displacements from XM (the operand's sign is written out: the assembler wants small numbers)
 D_STG   equ     $30             ; +: WB+0..15
 D_CNK   equ     $31             ; chunk within the stage
@@ -212,15 +211,12 @@ hq_noev:
         beq     hq_notengine                    ; TONE: no engine
         move    #>1,x0
         cmp     x0,a
-        beq     hq_xham                         ; XHAM+TONE: no engine
+        beq     hq_notengine                    ; 16-31: TONE as well
         move    b1,r7
         move    #>RBUF,r3
         bsr     ot303
         move    #>XM,r5
         bra     hq_notone
-hq_xham:
-hq_cham:
-        dc      $0d1080,0                       ; bsr >hq_ham: KCNT x 256 X reads at HAMB
 hq_notengine:
 hq_cton:
         dc      $0d1080,0                       ; bsr >hq_tgen: KCNT samples of the tone into RBUF
