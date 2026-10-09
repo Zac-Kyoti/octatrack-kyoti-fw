@@ -36,9 +36,9 @@ ALLOW_ENV = "KYOTI_ALLOW_WIP"
 # writes several images maps to {image file name: sha256}, one per promoted image.
 FINAL = {
     "build_mute_modes.py":                 "b5e24316e4dc5824657818f26cf1891e02ac26ae9094f101a7703f5beb74d6ba",
-    "build_direct_jump_kyoti.py":          "3f26d8de004469052ec9da58967c066b128393dd4a9c4dfc7d7efd0d3696a759",
+    "build_direct_jump_kyoti.py":          "3fa14332d95eda55f56de5935afbd988a7179666ae9d8bc2614c1cc7c9f8a896",
     "build_sidechain_compressor.py":       "ce10e9646bb2703d49e2224f8b618d7cd3c44ed994851e228443b2195a0f2e90",
-    "build_reload_from_project.py":        "7fbf10968c68d85797658d22161df75491ab527a2a052649624db8a44af344ca",
+    "build_reload_from_project.py":        "4961e6286ef4f824e855d08fa19a896fabe8df479e9a6054bae00e446f042941",
     "build_quantize_live_rec_toggle.py":   "0832cd9d0b5f804a26c50cf1ed6ce375288635f7c1ec2ad661b0083f80df803f",
     "build_erase_empty_trigless_locks.py": "83690ffbd97ad51281630acc8597f6423715885d2a712915df2edc39bb9b6a1c",
     "build_midi_plays_free_fix.py":        "672158c18630703cc1aadc635d45aeb68549a3237830d5c4a0aeb2d113afad35",
@@ -50,13 +50,13 @@ FINAL = {
         "mainos_quantize_live_rec_toggle_batch_bugfixes.bin":"f425ae2270e6f612a7abd8338962d115786934a8e76348c646fd45de9d502130",
         "mainos_sidechain_compressor_batch_bugfixes.bin":    "9d4b63d9517960121e85a21c000b6afd80f6cdb476f24ccf8e172142eee9a4b0",
         "mainos_erase_empty_trigless_locks_batch_bugfixes.bin":"db348f68a32adcc195208e46f6c964d0a5714ba41c1d8c4f2fad6beb2d122922",
-        "mainos_reload_from_project_batch_bugfixes.bin":     "09ab9ea238af1b9b07ef22418097b0d8c2accf6b097cf71741b808e00aad643c",
-        "mainos_direct_jump_kyoti_batch_bugfixes.bin":       "fa4617506e9d7e3ef6af9bb3c6a2739c03f7f17a4db475d8329d80a34f986f37",
+        "mainos_reload_from_project_batch_bugfixes.bin":     "a9b162479518c828f5e5a1d4a6e30e57c9ebc48d199dfabcfe66fe48426e3467",
+        "mainos_direct_jump_kyoti_batch_bugfixes.bin":       "2cc151e7f9fa7568eca7d1e50d06ed179ff36ffa28f85fe59ce27295917ca21a",
         "mainos_rec_trig_mute_batch_bugfixes.bin":           "fd65e293657e3caa895064255c7dad76882c21640c6eebdc1cf812074744c658",
         "mainos_repitch_repeat98_kyoti_batch_bugfixes.bin":  "07aaa68bf0e0fd5d67bd0a146959cf4647c5dd8cfbf3e4b1f45cce14f348b4f4",
     },
     "build_kyoti.py": {
-        "mainos_kyoti_v1.1.bin":                             "8d61d93160eeb4bbb0a00b223822cc1107ed7826c69e438c8589dcfaf4f73016",
+        "mainos_kyoti_v1.2.bin":                             "8dede0c039fb1dcd08acbe5cc882dbd2f614c63a88a11497a3494ad7a533508f",
     },
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
 }
