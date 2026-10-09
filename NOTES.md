@@ -35769,3 +35769,19 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
     * DJK and RELOAD pins moved; BATCH_BUGFIXES added to the `direct-jump-kyoti`,
       `kyoti-mute-jump` and `mods` remixes (all build).
     * check-remix passes for `direct-jump-kyoti` and `reload-from-project`.
+* **2026-10-08 (end): KYOTI V1.2 FINAL and published.**
+  * **Hardware and pins:** the user flashed KYOTI V1.2: everything works. Pinned (`acaae20`):
+    V1.2 mainos `8dede0c0…`, DJ `3fa14332…`, RELOAD `4961e628…`, BUG_DJV7 `2cc151e7…`, BUG_RL3
+    `a9b16247…`. The DJ/RELOAD standalones and Bugbuilds were not flashed on their own (the user's
+    call: same sources).
+  * **Pushed:** origin/main `befd840`. Main checkout pulled, and all 13 FINAL builders reproduce
+    their pins there.
+  * **octabam:**
+    * **#561:** force-pushed (`eb69d74e` on `063a4262`, pin `329b801`); body updated; reply
+      posted, which answers Sam's hardware test and his three static findings.
+    * **#649:** new, for the DJK/RELOAD review fixes (`ba7fb256`): requires BATCH_BUGFIXES, and
+      three remixes take it.
+    * **Gates:** `make reach RUN=1 TESTS=1` green on both branches, incl. check_shards.
+  * **Outstanding for Sam:** #561 (REPITCH; also the per-payload `DspHook.stock` schema
+    change), #649 (DJK + RELOAD), #648 (SIDECHAIN sc_norm, the SIDECHAIN session's PR). The other
+    five KYOTI modules are current on octabam main.
