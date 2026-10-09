@@ -35739,3 +35739,33 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
       priced there.
     * The previous local state is kept on `scratch-local-2026-10-08`; the scratch remixes are
       parked in out/octabam-scratch-remixes/.
+* **2026-10-08 (later): Sam's static review fixed, REPITCH wrapped into KYOTI (V1.2), rebased
+  onto origin/main `1a87fa3`.** Everything is WIP: nothing re-pinned, nothing flashed.
+  * **DIRECT_JUMP_KYOTI** (`19e9618`).
+    * **The bug:** `LEN_TBL` has scales 0..6; index 12 is 0 and the rest is other data. A garbage
+      scale byte (stock's MIDI per-track seed, BATCH_BUGFIXES bug 1) divided by zero in the tick
+      handler. **Reproduced:** old FINAL image + `--setb 6:0x1285=255`, jump 7→6 → `unhandled
+      exception 5 at 0x400d7366` (route A).
+    * **The guard:** all five lookups take a scale byte <= 6 only; otherwise a track gets the
+      master's tps and the master gets 1x. With the guard the same run lands at t107 and runs on.
+    * **The V7 reference-lock matrix still passes** (s1–s4 PASS; fixtures DJTEST2/DJMAST2,
+      recovered from refs/octabam/out emulator copies into out/fixtures/).
+    * **Bug fix 1 in every DIRECT JUMP build:** the standalone folds patch_trigscale in at
+      0x400d7b00; KYOTI passes dj_trigscale=False and brings it as its own feature; octabam gets
+      `requires=("BATCH_BUGFIXES",)` (refuses a DJK-only remix — tested).
+    * **Images:** standalone mainos `3fa14332…`, syx `0e202360…`; BUG_DJV7 syx `e1a5432c…`.
+  * **RELOAD_FROM_PROJECT** (`0413fb4`).
+    * The displaced instruction is `mvz.w` (stock word 71f9). It is now replayed as `moveq #0` +
+      `move.w` (same 8 bytes, zero-extended). Harmless before: the callee keeps only the low word.
+    * SCRATCH note corrected: all 14 users of the buffer are storage-task jobs, so they run one at
+      a time with our worker.
+    * **Images:** standalone mainos `4961e628…`, syx `1ef3bce3…`; BUG_RL3 syx `43ce655c…`.
+  * **KYOTI V1.2** (`a950866`).
+    * REPITCH rev 17 is a default feature. RELOAD moves to DRAM: one 6 KB arena page.
+      PERSONALIZE setters move SAFE → CAVE.
+    * **Image:** syx `cd5a723b21e7dad7ccbe59dd043606b1b09ccc2dcb69dd9a08cddab30c11d02a`
+      (out/KYOTI/), every invariant holds.
+  * **octabam** (scratch, branch `kyoti-review-fixes`):
+    * DJK and RELOAD pins moved; BATCH_BUGFIXES added to the `direct-jump-kyoti`,
+      `kyoti-mute-jump` and `mods` remixes (all build).
+    * check-remix passes for `direct-jump-kyoti` and `reload-from-project`.
