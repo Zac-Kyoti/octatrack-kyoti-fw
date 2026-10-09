@@ -94,10 +94,18 @@ symbols, linked at `0x400d6d38` → 1980 bytes, sha256 `b86e3c3255674cef…`: by
 the DIRECT JUMP code of the KYOTI V1.0 image flashed on the author's MKI. octabam
 re-links it there on every build and compares.
 
-## Recommended pairing: the bugfix bundle
+## Required: the bugfix bundle
 
-**If you are composing a remix with DIRECT JUMP, take the KYOTI bugfix bundle with
-it.** Not because this module needs it — it does not — but because a jump reaches
+**The module declares `requires=("BATCH_BUGFIXES",)`** (2026-10-08), so a remix with
+DIRECT JUMP takes the KYOTI bugfix bundle with it. DIRECT JUMP reads every track's live
+scale byte to place a landing, and stock's per-track scale seed for a MIDI track (PER
+TRACK scale) can leave garbage there — the bundle's MIDI_PLAYS_FREE_FIX removes the
+cause. The source guards every step-length lookup as well: a scale byte above 6 reads as
+the master's (or 1x for the master), so a garbage byte can no longer divide by zero in
+the tick handler (Sam Banks' static review, octabam #561). The standalone image folds the
+fix in; KYOTI carries it as a feature.
+
+The bundle also helps on its own terms: a jump reaches
 the Part machinery by posting stock's own `{0x14, part}` message, which is the
 stock path, stock bug family included. Without the bundle's PART_CHANGE_CARRYOVER_FIX fix, a
 jump into a pattern on a different Part shows exactly what a *stock* pattern

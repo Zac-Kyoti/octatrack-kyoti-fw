@@ -83,7 +83,7 @@ PTN_LAYER_YES_PRESS = PTN_LAYER_YES + 2                # the u32 press handler
 # 0x400d6d38: byte for byte the DIRECT JUMP code of the KYOTI V1.0 image the author
 # flashed on 2026-09-30 (syx 576756fd...; the 2026-10-01 re-promotion places it 16 B lower
 # because RELOAD shrank). octabam re-links it there on every build and compares.
-REFERENCE = (0x400d6d38, "b86e3c3255674ceff539423ad45f3c747649be5b6615fd2cf95ee98f310b070e")
+REFERENCE = (0x400d6d38, "a0f480909d91b7fac0fb77d08dd8b5e2199fc14731d4bb427be71478e296bf9e")
 
 MODULE = Module(
     name="direct-jump-kyoti",
@@ -103,6 +103,11 @@ MODULE = Module(
                 "a jump changes the pattern and Part outside Octakit's Kit transaction, and "
                 "the pair is reported to crash the unit; refused until a bridge exists -- "
                 "take one"),),
+    # DIRECT JUMP reads each track's live scale byte. Stock's per-track scale seed for a MIDI
+    # track can leave garbage there (BATCH_BUGFIXES bug 1, MIDI_PLAYS_FREE_FIX), so every
+    # DIRECT JUMP image carries the fix; the source also guards every step-length lookup
+    # (Sam Banks' static review, octabam #561).
+    requires=("BATCH_BUGFIXES",),
     linked=(
         Linked("dj7", os.path.join(_HERE, "patch_directjump_v7.s"), dram=True,
                reference=REFERENCE),

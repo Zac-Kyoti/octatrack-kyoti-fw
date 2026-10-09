@@ -24,7 +24,10 @@ V6 therefore touches the sequencer in two 6-byte detours only:
                          0x80006516[t] = new_step mod len_t, 0x80006536[t] = 0)
     0x400a221c  dj_nofa  no MIDI START (0xFA) on a jump
 plus the unchanged UI pieces (the [PTN]+[YES] keymap slot, dj_ptnrel, the toast).
-MIDI_PLAYS_FREE_FIX (patch_trigscale) is NOT folded in -- it is its own octabam module.
+MIDI_PLAYS_FREE_FIX (patch_trigscale) IS folded in (2026-10-08): stock's MIDI per-track scale
+bug can leave a garbage scale byte that DIRECT JUMP reads (octabam #561 review), so every DIRECT
+JUMP build carries the fix -- here in the image, in KYOTI as its own feature, and in octabam as
+`requires=("BATCH_BUGFIXES",)`.
 The pattern-boundary body, the rebuild loops, 0x80006628 and every per-track counter are
 STOCK.  DJ_MODE off -> byte-identical stock behaviour.
 
@@ -71,6 +74,12 @@ if DIAG:
 
 CAVE_DJ = kyoti_place.at("patch_directjump_v7", 0x400d7000)     # V7.0.1: moved down from 0x400d7400 (the hand-off needs room; zero in stock, vetted zone)
 FREE_END = 0x400d7c3c
+# MIDI_PLAYS_FREE_FIX, folded in standalone; a combined build (KYOTI) brings it as its own
+# feature and turns this off.
+WITH_TRIGSCALE = kyoti_place.at("dj_trigscale", True)
+CAVE_TRIGSCALE = 0x400d7b00
+TRIGSCALE_SITE = 0x4009b6f2
+TRIGSCALE_STOCK = bytes.fromhex("203c0000091a")      # move.l #0x91a,D0
 
 PATCHES = [
     ("patch_directjump_v7", CAVE_DJ, f"DJ_TOAST_DUR=0x{TOAST_DUR:x}" + (f",DJ_TOFS={os.environ['DJ_TOFS']}" if os.environ.get("DJ_TOFS") else "") + (",DJ_DIAG=1" if DIAG else "") + (",DJ_MODE_IN_CAVE=1" if kyoti_place.at("dj_mode_in_cave", False) else ",DJ_MODE_IN_RAM=1"),
@@ -199,16 +208,36 @@ def main():
     if stray:
         sys.exit(f"  STRAY BYTES at {[hex(BASE + i) for i in stray[:8]]} -- refusing to build")
 
-    # --- MIDI_PLAYS_FREE_FIX (patch_trigscale) is NOT in this image ----------------------
-    # It is its own contribution as an octabam module.  Five KYOTI feature builders
-    # each used to fold in a copy, and every copy wrote the same site 0x4009b6f2 --
-    # which the remix ledger refuses, so no two of those features could ever be
-    # selected into one remix.  build_bugbuilds.py adds it where a combined image
-    # wants it; the batch-bugfixes module owns it for octabam.
-    _PFF = 0x4009b6f2 - BASE
+    # --- MIDI_PLAYS_FREE_FIX (patch_trigscale), folded in standalone ----------------------
+    # Stock's per-track scale seed for a MIDI track (PER TRACK scale) can leave a garbage
+    # byte in 0x8000663e[t]; DIRECT JUMP reads those bytes. The fix removes the cause and
+    # patch_directjump_v7.s guards every lookup anyway. In octabam the batch-bugfixes
+    # module owns the site and direct-jump-kyoti requires it; KYOTI adds it as a feature.
+    _PFF = TRIGSCALE_SITE - BASE
     if bytes(img[_PFF:_PFF + 18]) != bytes(stock[_PFF:_PFF + 18]):
-        sys.exit("  0x4009b6f2 is not stock -- patch_trigscale crept back into this image")
-    print("  MIDI_PLAYS_FREE_FIX not in this image (0x4009b6f2 left stock) -- it is its own module")
+        sys.exit("  0x4009b6f2 is not stock before MIDI_PLAYS_FREE_FIX -- refusing")
+    if WITH_TRIGSCALE:
+        subprocess.run(["m68k-elf-as", "-mcpu=5407", "-o", "out/patch_trigscale_dj.o",
+                        "octabam-modules/batch-bugfixes/patch_trigscale.s"], check=True, cwd=ROOT)
+        subprocess.run(["m68k-elf-ld", f"-Ttext=0x{CAVE_TRIGSCALE:x}", "-o", "out/patch_trigscale_dj.elf",
+                        "out/patch_trigscale_dj.o"], check=True, cwd=ROOT, capture_output=True)
+        subprocess.run(["m68k-elf-objcopy", "-O", "binary", "out/patch_trigscale_dj.elf",
+                        "out/patch_trigscale_dj.bin"], check=True, cwd=ROOT)
+        tsc = (ROOT / "out/patch_trigscale_dj.bin").read_bytes()
+        if bytes(img[_PFF:_PFF + 6]) != TRIGSCALE_STOCK:
+            sys.exit(f"  0x4009b6f2 unexpected: {bytes(img[_PFF:_PFF + 6]).hex()}")
+        tco = o(CAVE_TRIGSCALE)
+        if any(img[tco:tco + len(tsc)]) or any(a < CAVE_TRIGSCALE + len(tsc) and CAVE_TRIGSCALE < b
+                                               for a, b, _n in spans):
+            sys.exit(f"  MIDI_PLAYS_FREE_FIX cave 0x{CAVE_TRIGSCALE:08x} is not free")
+        if CAVE_TRIGSCALE + len(tsc) > FREE_END:
+            sys.exit("  MIDI_PLAYS_FREE_FIX cave runs past the free zone end")
+        img[_PFF:_PFF + 18] = b"\x4e\xf9" + CAVE_TRIGSCALE.to_bytes(4, "big") + b"\x4e\x71" * 6
+        img[tco:tco + len(tsc)] = tsc
+        print(f"  MIDI_PLAYS_FREE_FIX folded in: 0x4009b6f2 -> jmp 0x{CAVE_TRIGSCALE:08x}, "
+              f"{len(tsc)} B cave (as tools/build_midi_plays_free_fix.py)")
+    else:
+        print("  MIDI_PLAYS_FREE_FIX left to the combined build (0x4009b6f2 stock here)")
 
     OUT.write_bytes(bytes(img))
 

@@ -99,6 +99,14 @@
     .equ TICK_CTR,  0x800065b6          | byte: master ticks-within-step, 0..tps-1
     .equ SCALE_IX,  0x8000663d          | byte: LIVE master scale index
     .equ LEN_TBL,   0x400aba50          | [scaleIdx] -> ticks per step (long)
+|   LEN_TBL holds the seven scales at 0..6 (index 2 = 1x); what follows is other data, and
+|   index 12 is 0. Stock can leave a garbage scale byte (0xff) for a MIDI track under PER
+|   TRACK scale (BATCH_BUGFIXES bug 1, MIDI_PLAYS_FREE_FIX), and LEN_TBL[0xff]'s low byte is
+|   0 -- a divide by zero in the tick handler (Sam Banks' static review, octabam #561).
+|   Every lookup below takes a scale byte only if it is <= SCALE_MAX: a track's out-of-range
+|   scale reads as the master's, the master's as 1x.
+    .equ SCALE_MAX, 6
+    .equ SCALE_1X,  2
     .equ LAND_CNTDN, 0x80006687         | byte: stock's landing countdown (phase D)
     .equ SNAP_STEP, 0x80006516          | word[16]: per-track landing step
     .equ SNAP_TICK, 0x80006536          | byte[16]: per-track landing ticks-in-step
@@ -735,7 +743,11 @@ dj_bparams:
     bne.b   bp_pt
     move.l  #P_SCALE_N,%d0
     move.b  (%a2,%d0.l),%d1
-    move.l  (%a0,%d1.l*4),%d3          | tps_M
+    moveq   #SCALE_MAX,%d0
+    cmp.l   %d0,%d1
+    bls.b   1f
+    moveq   #SCALE_1X,%d1              | out of range: 1x
+1:  move.l  (%a0,%d1.l*4),%d3          | tps_M
     move.l  #P_LEN_BYTE,%d0
     moveq   #0,%d4
     move.b  (%a2,%d0.l),%d4            | mlen
@@ -743,7 +755,11 @@ dj_bparams:
 bp_pt:
     move.l  #P_MSCALE,%d0
     move.b  (%a2,%d0.l),%d1
-    move.l  (%a0,%d1.l*4),%d3
+    moveq   #SCALE_MAX,%d0
+    cmp.l   %d0,%d1
+    bls.b   1f
+    moveq   #SCALE_1X,%d1              | out of range: 1x
+1:  move.l  (%a0,%d1.l*4),%d3
     move.l  #P_MLEN_WORD,%d0
     move.w  (%a2,%d0.l),%d4
     ext.l   %d4
@@ -790,7 +806,13 @@ bp_blobscl:
 bp_ptscl:
     move.b  T_SCL(%a1),%d1
 bp_scl:
-    move.l  (%a0,%d1.l*4),%d2          | tps_t
+    moveq   #SCALE_MAX,%d0
+    cmp.l   %d0,%d1
+    bls.b   1f
+    move.l  dj_tpsM,%d2                | out of range: the master's
+    bra.b   2f
+1:  move.l  (%a0,%d1.l*4),%d2          | tps_t
+2:
     move.b  %d2,(%a3)+
     tst.b   %d7
     bne.b   bp_ptlen
@@ -896,7 +918,11 @@ dl_fixup:
     lea     LEN_TBL,%a0
     moveq   #0,%d0
     move.b  SCALE_IX,%d0
-    move.l  (%a0,%d0.l*4),%d3          | tps_M (live, as loaded by the landing)
+    moveq   #SCALE_MAX,%d1
+    cmp.l   %d1,%d0
+    bls.b   1f
+    moveq   #SCALE_1X,%d0              | out of range: 1x
+1:  move.l  (%a0,%d0.l*4),%d3          | tps_M (live, as loaded by the landing)
     moveq   #0,%d5                     | "past the first master wrap"
     move.l  dj_C,%d1
     beq.b   fx_go                      | INF: never wraps
@@ -915,8 +941,11 @@ fx_loop:
     beq.b   fx_store
     moveq   #0,%d0
     move.b  (%a1,%d6.l),%d0
+    move.l  %d3,%d1                    | out of range: the master's
+    cmpi.l  #SCALE_MAX,%d0             | (no scratch register: d2 is the caller's)
+    bhi.b   1f
     move.l  (%a0,%d0.l*4),%d1
-    sub.l   %d3,%d1                    | tps_t - tps_M
+1:  sub.l   %d3,%d1                    | tps_t - tps_M
     bpl.b   fx_store
     moveq   #0,%d1
 fx_store:
