@@ -7,7 +7,7 @@
 #   inert   303 = 0, BURN = 0 everywhere: per call = stock DJ EQ + the wrapper's guard
 #   saw     303 = 32 on the core's second track: that track's calls grow by the engine; its audio
 #           (the core's ESAI capture) carries the riff
-#   square  303 = 100: the same code path at the square's cost; its output is silence (cost only)
+#   square  303 = 100: (DIAG8: METER mode 4, a Y-read calibration loop; the name is historical)
 #   SPRING (id 0x15) -> the passthrough stub; DARK REV unchanged against stock
 # Instruction counts are the stopwatch's unit; the bench (hwprobe_check.py) prices cycles and checks
 # the samples. ot_emu 8d0ad6f4's --audio-out capture is all zeros here, stock included: no audio check.

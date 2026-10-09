@@ -1559,3 +1559,55 @@ of `X:$8000–$8FFF`.
 - DIAG6 without XHAM: 1–31 TONE, 32–63 RIFF with PRE, 64–127 SQUARE (cost only).
 - `hq_reloc`'s copy is paced to one read of the old block every 4 cycles.
 - Bench bit-exact on both payloads; ot_emu ALL GOOD. Wrapper 816/820 words, region 2 161/208.
+
+### DIAG7 on the unit (user, 2026-10-08): relocation changes nothing; DIAG8 measures (built, NOT flashed)
+
+**DIAG7:**
+- **T6:** 32–48 dirty riff, with junk on the master when muted (some steps may be a clean riff with
+  dirt only on the master; the two are hard to separate by ear). 49 and up still crash.
+- **Same as DIAG5:** the X block's place does not matter for the riff. The memory-block lead is
+  dropped for the riff.
+- **What still stands:** XHAM, a 100%-dense read loop with no engine, killed core 0 at once (DIAG6).
+  So dense memory traffic on core 0 is harmful in some way, whatever the address.
+- **Facts the next step has to explain:**
+  - only memory-touching code junks core 0; nops (BURN, PRE) and the tone do not;
+  - the crash comes at a fixed amount of extra time after the engine runs;
+  - only a power cycle recovers.
+- **Leading hypothesis:** core 0's memory accesses cost far more on the chip than the cycle table
+  says (DMA contention; stock leaves the core's SR CP bits at 0, the lowest core priority). If
+  true, the engine on core 0 costs ~2,700 cycles/sample, and PRE 17 crosses the budget.
+- **Against it:** DJ EQ ×8 cost only ~14% more on core 0 in the burn test. So the penalty would
+  have to depend on the code or the region. Hence a measurement, not another guess.
+
+**DIAG8:** `out/OCTATRACK_OS1.40C_OT303_DIAG8.syx`
+(`21b91d89d0d5ad5fd52a51fa4f84b965b37423f898733ef2c53b59ef5994e5ff`, version `140C_303D8`).
+- **303 bands:** 1–31 TONE; 32–63 plain RIFF (no PRE, so no crash band); **64–127 METER** (the
+  square is gone).
+- **METER** (`hq_meng`, region 2):
+  - each render restarts core timer 0 (`M_TCSR0`/`TLR0`, CLK/2, unused by stock on both payloads);
+  - it writes `TCR0 << 7` as the render's first sample, and `-(KCNT << 16)` in the rest. The ruler
+    makes the reading gain-proof.
+  - mode = (303 − 64) >> 3:
+
+    | 303 | mode | what runs |
+    |---|---|---|
+    | 64 | 0 | the engine |
+    | 72 | 1 | an empty loop (3 nops) |
+    | 80 | 2 | X reads, the engine's block |
+    | 88 | 3 | X reads, the loader's copy (`X:$89c0` on A) |
+    | 96 | 4 | X reads, stock's instance state `X:$5900` |
+    | 104 | 5 | Y reads, the engine's state `Y:$f40` |
+    | 112 | 6 | Y reads, an FX1 slot `Y:$1000` |
+    | 120 | 7 | Y reads, the coefficient table `Y:$bc0` |
+
+    Modes 1–7 run 32 × KCNT iterations of 3 instructions (1/3 density, unlike XHAM's 100%).
+    Expected on the cycle table: mode 1 ≈ 192 cycles/sample, if probe 57's 2 cycles/instruction holds.
+- **Decoder:** `tools/ot303/hwrec/meter.py REC.wav` prints the median cycles/sample per stretch of
+  the recording. Tested on a synthetic recording with gain 0.5 and a junk frame.
+- **Checks:** bench all modes run and return with registers kept, the riff and tone bit-exact (the
+  emulator's timer is too coarse to check the counts); ot_emu ALL GOOD. Wrapper 818/820, region 2
+  207/208. The tone moved into region 1. `tools/dsp_xasm.py` learned the timer register names.
+
+**The test:** a track recording of T6, then of T2, stepping 64 → 120 by 8 with ~3 s each.
+- The core 0 / core 1 ratio per mode tells whether memory traffic costs more on core 0, and where.
+- Mode 0 against the bench's 366 gives the engine's real cost on each core.

@@ -95,9 +95,15 @@ def disassemble(words, org):
     return out
 
 
+# the disassembler names some peripheral registers; the source writes their addresses
+PERIPH = {"m_tcr0": 0xffff8c, "m_tcpr0": 0xffff8d, "m_tlr0": 0xffff8e, "m_tcsr0": 0xffff8f}
+
+
 def _norm(text, syms):
     """Canonical operand tokens for comparing source with disassembly."""
     t = text.lower().replace("<", "").replace(">", "")
+    for name, v in PERIPH.items():
+        t = re.sub(rf"\b{name}\b", f"${v:x}", t)
     t = re.sub(r"^movem\b", "move", t.strip())
     for name in sorted(syms, key=len, reverse=True):
         t = re.sub(rf"\b{re.escape(name.lower())}\b", f"${syms[name]:x}", t)

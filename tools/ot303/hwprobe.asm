@@ -17,11 +17,9 @@
 ;                read-back pull, below), BEFORE DJ EQ when 303 is 0 (the burn probe's measure)
 ;   slot 7 303   bits 8-15: 0 off (stock DJ EQ), else, in sixteens, the track's audio is replaced
 ;                (both channels) by: 1-15 TONE (a 110 Hz saw; the engine does not run);
-;                16-31 TONE too (DIAG6's XHAM band there crashed core 0 at once and blocked the
-;                riff: DIAG7 drops it); 32-63 RIFF (the engine, saw: a built-in 16-step bar of the Hot
-;                voice, 130 BPM); 64-127 SQUARE (COST ONLY)
-;                PRE: in the RIFF band, 303 = 32 + p spends 24 * p cycles per sample BEFORE the
-;                render (32 = none; DIAG2's WATCH, clean, started the engine ~5 steps later)
+;                16-31 TONE too (DIAG6's XHAM band there crashed core 0 at once); 32-63 RIFF (the
+;                engine, saw: a built-in 16-step bar of the Hot voice, 130 BPM); 64-127 METER
+;                (hwprobe_ev.asm hq_meng: each render timed by timer 0 and written as the audio)
 ; DIAG2 on the unit: the riff was clean only when its call ended late enough. Stock copies each
 ; track's block into the read-back buffer after FX2 while the ColdFire's DMA pulls that buffer;
 ; a call that ends inside the pull's window tears the block (octabam FAILURE_MODES, "Junk on main
@@ -57,11 +55,8 @@ XM      equ     XB+$40
 MSAV    equ     XB+$35          ; m0..m7 on entry (the gap after XW)
 TPH     equ     XB+$49          ; the tone's phase (the gap after XC)
 TINC    equ     XB+$4a          ; the tone's increment
-REF1    equ     XB+$4b          ; the watch: the checksum, A1 and A0
-REF0    equ     XB+$4c
-RFLG    equ     XB+$4d          ;   1 once REF is taken
-ALRM    equ     XB+$4e          ;   1 once it has changed
-REF2    equ     XB+$4f          ;   the checksum's A2
+MT0     equ     XB+$4b          ; the METER: unused (the timer restarts per render)
+MTAB    equ     R2+440          ; the METER's 7 calibration modes' 64-word blocks (hwprobe_ev.asm)
 T110    equ     $a3a3           ; 110 Hz: 2^24 * 110 / 44100
 T880    equ     $51d1c          ; 880 Hz
 WB      equ     XB+$70          ; X, 76 words after the engine's block
@@ -168,14 +163,8 @@ hq_crel:
         bsr     hq_init
         bra     hq_rest
 hq_run:
-; the wave words: knob >= 64 = the square
+; the wave words: the saw (DIAG8: the square's band is the meter's)
         move    #>SAWW,r1
-        move    x:(r5+D_KNB),a
-        move    #>$4000,x0
-        cmp     x0,a
-        blt     hq_saw
-        move    #>SQRW,r1
-hq_saw:
         move    x:(r1)+,x0
         move    x0,x:(r5-N_W1)
         move    x0,x:(r5+D_W1A)
@@ -190,8 +179,6 @@ hq_saw:
         move    r0,x:(r5+D_OUTA)
         move    #>T110,x0
         move    x0,x:(r5+D_TINC)
-hq_cpre:
-        dc      $0d1080,0                       ; bsr >hq_pre: PRE (the riff band's 303 - 32) before the render
 ; render up to each event, then the event
 hq_loop:
         move    x:(r5+D_EVC),a
@@ -214,12 +201,23 @@ hq_noev:
         beq     hq_notengine                    ; 16-31: TONE as well
         move    b1,r7
         move    #>RBUF,r3
-        bsr     ot303
+hq_cmeng:
+        dc      $0d1080,0                       ; bsr >hq_meng: the engine, or (303 >= 64) the METER
         move    #>XM,r5
         bra     hq_notone
 hq_notengine:
-hq_cton:
-        dc      $0d1080,0                       ; bsr >hq_tgen: KCNT samples of the tone into RBUF
+; TONE: KCNT samples of a 110 Hz (TINC) saw at -12 dBFS into RBUF
+        move    #>RBUF,r1
+        move    x:>TPH,a
+        move    x:(r5+D_TINC),x1
+        move    x:(r5+D_KCNT),x0
+        do      x0,hq_tloop
+        add     x1,a
+        move    a1,a                            ; the phase wraps at 24 bits
+        asr     #2,a,b
+        move    b,x:(r1)+
+hq_tloop:
+        move    a1,x:>TPH
 hq_notone:
         move    #>RBUF,r1
         move    x:(r5+D_OUTA),r0

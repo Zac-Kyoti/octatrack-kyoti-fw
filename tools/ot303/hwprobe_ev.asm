@@ -72,21 +72,6 @@ hq_vars:
         rts
 
 
-; ---- TONE (hq_tgen): KCNT samples of a 110 Hz (TINC) saw at -12 dBFS into RBUF
-hq_tgen:
-        move    #>RBUF,r1
-        move    x:>TPH,a
-        move    x:(r5+D_TINC),x1
-        move    x:(r5+D_KCNT),x0
-        do      x0,hq_tloop
-        add     x1,a
-        move    a1,a                            ; the phase wraps at 24 bits
-        asr     #2,a,b
-        move    b,x:(r1)+
-hq_tloop:
-        move    a1,x:>TPH
-        rts
-
 ; ---- BURN: page-2 slot 6, 24 * BURN cycles per sample over this call's n7 samples (octabam's RIG
 ; BURN body, hardware-proven; tools/ot303/burn_djeq.asm). r6 and n7 are the caller's. Uses a, x0,
 ; y1. The zero guard is load-bearing: DO with a count of 0 loops 65536 times; asl sets Z.
@@ -103,29 +88,6 @@ hq_burn:
         nop
         nop
 hq_bzero:
-        rts
-
-; ---- PRE: in the RIFF band, 303 = 32 + p spends 24 * p cycles per sample BEFORE the render
-; (p = 0..31; DIAG2's WATCH, clean, started the engine ~120 cycles a sample later: p ~ 5).
-; r5 = XM, n7 the caller's. Uses a, x0, y1.
-hq_pre:
-        move    x:(r5+D_KNB),a                  ; 303 << 8
-        move    #>$2000,x0
-        sub     x0,a                            ; (303 - 32) << 8
-        ble     hq_pzero
-        cmp     x0,a
-        bge     hq_pzero                        ; 303 >= 64: not the riff
-        asl     #8,a,a                          ; p << 16
-        move    a1,y1
-        move    n7,x0
-        mpy     x0,y1,a
-        asl     #$a,a,a                         ; 8 * p * n7
-        beq     hq_pzero
-        do      a1,hq_pzero
-        nop
-        nop
-        nop
-hq_pzero:
         rts
 
 ; ---- RELOC (payload A; the builder nops the call on B): on the first call with 303 up, copy the
@@ -157,4 +119,82 @@ hq_rlb:
         move    #>1,a
         move    a,x:>RFLAG
 hq_rldone:
+        rts
+
+; ---- the render (r7 = KCNT, r3 = RBUF): the engine, or with 303 >= 64 the METER. METER mode m =
+; (303 - 64) >> 3: 0 the engine (the riff, unheard), 1-7 a calibration loop over 32 x KCNT
+; iterations of three instructions, one of them a read from MTAB[m]'s 64-word block: 1 none,
+; 2 X the engine's block, 3 X its loader copy, 4 X stock's instance state, 5 Y the engine's state,
+; 6 Y an FX1 slot, 7 Y the engine's coefficient table.
+; Timer 0 (CLK/2) restarts at the render's start; RBUF[0] = ticks << 7, RBUF[1..KCNT-1] = -(KCNT << 16).
+hq_meng:
+        move    x:(r5+D_KNB),a
+        sub     #>$4000,a
+        bge     hq_meter
+hq_cot0:
+        dc      $0d10c0,0                       ; bra >ot303 (its rts returns to our caller)
+hq_meter:
+        asr     #11,a,a                         ; m = (303 - 64) >> 3
+        move    a1,n1
+        clr     b
+        move    b,x:>$ffff8f                    ; TCSR0: stop
+        move    b,x:>$ffff8e                    ; TLR0 = 0
+        move    #>1,x0
+        move    x0,x:>$ffff8f                   ; TCSR0: TE, timer mode, CLK/2: TCR0 from 0
+        tst     a
+        bne     hq_mcal
+hq_cot1:
+        dc      $0d1080,0                       ; bsr >ot303
+        bra     hq_mend
+hq_mcal:
+        move    #>MTAB,r1
+        move    x:(r5+D_KCNT),b
+        asl     #5,b,b
+        move    #>63,x1
+        move    x1,m1
+        move    x:(r1+n1),r1                    ; the mode's block
+        cmp     #<1,a
+        beq     hq_mnop                         ; 1: no access
+        cmp     #<5,a
+        bge     hq_ylp                          ; 5-7: Y; 2-4: X
+        do      b1,hq_mxe
+        move    x:(r1)+,x0
+        nop
+        nop
+hq_mxe:
+        bra     hq_mlin
+hq_ylp:
+        do      b1,hq_yend
+        move    y:(r1)+,x0
+        nop
+        nop
+hq_yend:
+        bra     hq_mlin
+hq_mnop:
+        do      b1,hq_mne
+        nop
+        nop
+        nop
+hq_mne:
+hq_mlin:
+        move    #>$ffffff,x1
+        move    x1,m1
+hq_mend:
+        move    x:>$ffff8c,a                    ; TCR0: ticks since the start
+        move    #>XM,r5
+        move    #>RBUF,r1
+        asl     #7,a,a                          ; ticks << 7 (a render's ticks stay under 65,536)
+        move    a1,x:(r1)+
+        move    x:(r5+D_KCNT),a
+        asl     #16,a,a                         ; -(KCNT << 16): a gain-proof ruler for the ticks
+        neg     a
+        move    a1,x0
+        move    x:(r5+D_KCNT),a
+        sub     #<1,a
+        beq     hq_mret
+        do      a1,hq_mret
+        move    x0,x:(r1)+
+        nop
+        nop
+hq_mret:
         rts

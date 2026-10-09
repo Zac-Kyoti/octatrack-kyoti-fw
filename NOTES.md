@@ -36024,3 +36024,8 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   doesn't). → hard core reads of X:$8000–$8FFF on core 0 starve the ESAI DMA. Rule: keep core-0
   hot data out of that block. DIAG7 (`140C_303D7`, syx `ed314ad4…`, NOT flashed) = DIAG6 minus
   XHAM (1–31 TONE) so the relocated riff on T6 can be reached; copy paced.
+- **S124 cont: DIAG7 on HW** — relocation changed nothing (T6 32–48 dirty + master junk, crash ≥49):
+  the memory-block lead is dropped for the riff. **DIAG8** (`140C_303D8`, syx `21b91d89…`, NOT
+  flashed): 303 ≥ 64 = METER (core timer 0 per render → audio, `tools/ot303/hwrec/meter.py`
+  decodes; modes: engine / nops / X×3 regions / Y×3 regions); PRE and square removed (32–63 plain
+  riff); tone moved into region 1; dsp_xasm knows M_TCR0..M_TCSR0.

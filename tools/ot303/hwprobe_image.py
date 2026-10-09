@@ -120,8 +120,8 @@ def build(tag):
     assert words[bra - d['org']] == 0x0d10c0 and words[bra - d['org'] + 1] == 0, 'bra placeholder moved'
     words[bra - d['org'] + 1] = (d['djeq_proc'] - bra) & 0xffffff
     checks = [(bra, f'bra     func_{d["djeq_proc"]:06x}', 'exit branch')]
-    for site, target in (('hq_callev', 'hq_event'), ('hq_cton', 'hq_tgen'), ('hq_cbr0', 'hq_burn'), ('hq_cbr1', 'hq_burn'),
-                         ('hq_cpre', 'hq_pre'), ('hq_crel', 'hq_reloc')):
+    for site, target in (('hq_callev', 'hq_event'), ('hq_cbr0', 'hq_burn'), ('hq_cbr1', 'hq_burn'),
+                         ('hq_cmeng', 'hq_meng'), ('hq_crel', 'hq_reloc')):
         cal = S[site]
         assert words[cal - d['org']] == 0x0d1080 and words[cal - d['org'] + 1] == 0, f'{site}: bsr placeholder moved'
         if site == 'hq_crel' and not d['xd']:
@@ -129,6 +129,17 @@ def build(tag):
             continue
         words[cal - d['org'] + 1] = (evs[target] - cal) & 0xffffff
         checks.append((cal, f'bsr     func_{evs[target]:06x}', f'{site} -> {target}'))
+    # region 2's calls into region 1 (assembled apart: placeholders, patched here)
+    evchecks = []
+    for site, op in (('hq_cot0', 0x0d10c0), ('hq_cot1', 0x0d1080)):
+        cal = evs[site]
+        assert evw[cal - ev_org] == op and evw[cal - ev_org + 1] == 0, f'{site}: placeholder moved'
+        evw[cal - ev_org + 1] = (S['ot303'] - cal) & 0xffffff
+        evchecks.append((cal, f'{"bra" if op == 0x0d10c0 else "bsr"}     func_{S["ot303"]:06x}', f'{site} -> ot303'))
+    evdis = dsp_xasm.disassemble(evw, ev_org)
+    for at, want, what in evchecks:
+        if want not in evdis.get(at, ('',))[0]:
+            raise ValueError(f'payload {tag}: {what} disassembles as {evdis.get(at)!r}')
     dis = dsp_xasm.disassemble(words, d['org'])
     # no REP: stock never uses one (a REP holds off interrupts, and the host-port handlers must
     # answer at once: DIAG2-4 on the unit tore the ColdFire transfers whenever ours ran early)
@@ -176,6 +187,11 @@ def build(tag):
         X(S['VARS'] + i, v)
     for i, v in enumerate(TRIG):
         X(S['TRIG'] + i, v)
+    # the METER's calibration modes 1-7: 64-word, 64-aligned blocks (1 reads none; 2-4 X, 5-7 Y)
+    for m, v in enumerate((0, S['XB'], S['XB'] + d['xd'], 0x5900, S['YS'], 0x1000, 0xbc0), start=1):
+        assert v & 63 == 0
+        X(S['MTAB'] + m, v)
+    assert S['MTAB'] + 8 <= S['R2'] + 500 and S['MTAB'] >= S['KX'] + 216
     # b0 and kp/64 in run 2 (one entry more each: the last slope is 0)
     b0, kp = T['B0'], T['KP']
     assert len(b0) == len(kp) == 215
