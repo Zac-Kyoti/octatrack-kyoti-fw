@@ -316,7 +316,7 @@
                                         | memcpy(0x1001614e, blob+bank*0x9b340, 0x8ed80)
                                         | + parts -> 0x100a4ece. RAM->RAM, no card.
     .equ MASK_SAVED,   0x460bd910       | the bank mask, stashed by FUN_40022778 at buf-2
-    .equ DONE_RESUME,  0x40023c68       | resume after the displaced mvs.w (move.l d0,-(sp))
+    .equ DONE_RESUME,  0x40023c68       | resume after the displaced mvz.w (move.l d0,-(sp))
     .equ DONE_EPILOG,  0x40023c76       | doneFn epilogue: move.l (sp)+,d2 ; movea.l (sp)+,a2 ; rts
 
     .equ JOB_POST,  0x40022778          | FUN_40022778(mask) -> post the type-0x14 storage job
@@ -378,7 +378,7 @@
     .equ FWMEMCPY,  0x40020898          | (dst, src, len)
     .equ FMT_STRD,  0x400b86d8          | "%s/bank%02d.strd"
     .equ MODE_R,    0x400b3289          | "r"
-    .equ OPEN_BUF,  0x460a8f60          | the loader's 64 KB buffer (idle while we hold the task)
+    .equ OPEN_BUF,  0x460a8f60          | the storage task's 64 KB buffer (idle while we hold the task)
     .equ SCRATCH,   0x460aff60          | = OPEN_BUF + 0x7000 ; 0x8ed8 B pattern scratch
     .equ CKSUM,     0x460fab5c          | the deserialiser's rolling checksum (word)
     .equ BLOB,      0x400e21e0
@@ -1118,7 +1118,7 @@ rat_aud:
 | ran TWICE, and the reload is in the SECOND pair, reached from the SUCCESS path:
 |
 |   0x40023c0e  bge.s 0x40023c62          ; result >= 0
-|   0x40023c62  mvs.w 0x460bd910,d0       ; the bank mask (stashed at buf-2)
+|   0x40023c62  mvz.w 0x460bd910,d0       ; the bank mask (stashed at buf-2)
 |   0x40023c68  move.l d0,-(sp) ; pea 0x100f8378
 |   0x40023c70  bsr.w 0x40023b68          ; <-- THE reload
 |
@@ -1168,8 +1168,11 @@ rat_aud:
 rl_done:
     tst.b   rl_own
     bne.b   rld_skip
-    move.w  MASK_SAVED,%d0             | displaced (mvs.w 0x460bd910,d0), as
-    ext.l   %d0                        | plain m68k -- no ColdFire mvs needed
+    moveq   #0,%d0                     | displaced mvz.w 0x460bd910,d0 (stock word 71f9:
+    move.w  MASK_SAVED,%d0             | ZERO-extend), same 8 bytes as the old move.w + ext.l,
+|   which sign-extended: bank 16's mask 0x8000 reached FUN_40023b68 as 0xffff8000. Harmless
+|   (it keeps only the low word, move.w %d3,0x460bdfc6) but not stock's value; found by Sam
+|   Banks' static review (octabam #561), corrected 2026-10-08.
     jmp     DONE_RESUME
 rld_skip:
     clr.b   rl_own                     | one-shot: consume it
@@ -1556,10 +1559,16 @@ rlj_trk_copy:
 |       (a) the copy never stuck   -- the bytes here are not what we parsed
 |       (b) the copy was undone    -- they were, and something overwrote them afterwards
 |   The snapshot goes into OUR CAVE, deliberately NOT into SCRATCH: SCRATCH is
-|   OPEN_BUF + 0x7000 and every one of stock's 14 users of that buffer passes size
-|   0x10000 (e.g. 0x4008fbde, 0x400916d4), so on hardware -- where audio really does
-|   stream off the card -- stock file I/O can overwrite SCRATCH. Comparing against
-|   SCRATCH would confuse "the copy was undone" with "my reference was clobbered".
+|   OPEN_BUF + 0x7000, and every one of stock's 14 users of that buffer passes size
+|   0x10000 (e.g. 0x4008fbde, 0x400916d4). Corrected 2026-10-08 (octabam #561 review):
+|   those 14 references all sit in the file-format routines 0x4008fb58..0x40091920, and
+|   every caller found is a STORAGE-TASK job -- FUN_4008445c's dispatcher on queue
+|   0x460d17ce (0x40084b9e, 0x400850b8, 0x4008522e, 0x40085314, 0x40085370, 0x40085582)
+|   and FUN_400919e4 (0x40091a52, the type-6 case). Our worker is that task's type-0x14
+|   job, so no stock user of the buffer runs while SCRATCH holds our parse: audio
+|   streaming does not use it (the earlier note here said it might; it was a guess).
+|   Static evidence; a write-watch on SCRATCH under the port would settle it. The cave
+|   snapshot stays: it costs 16 bytes and keeps the verify independent of SCRATCH.
     move.l  #SCRATCH,%a0
     add.l   %d2,%a0
     lea     rl_vsnap,%a1
