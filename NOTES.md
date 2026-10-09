@@ -35564,3 +35564,14 @@ Not tested: a real project saved on stock firmware (hardware check added to FLAS
 seals → WIP until promoted). octabam module: two `Detour(kind="jsr")`, sc_cf reference
 `76a4badc…`. KYOTI (`build_kyoti.py`, kyoti-v1 thread) composes this builder and must fit the larger
 unit; `BUG_SC3X` rebuilds only after promotion.
+
+**Session 126 continued (2026-10-08).** User flashed the standalone `d21762d0…`: "Flashed. No issues."
+(no statement on whether a stock-saved project was tried — the reset itself is emulator-verified only).
+On the user's instruction SIDECHAIN_COMPRESSOR is **promoted**: `build_sidechain_compressor.py` →
+`ce10e964…` (syx `d21762d0…`). Rebased onto KYOTI V1.1's promotion (`cca0907`): KYOTI V1.1 composes
+the 338 B unit into SAFE at `0x400d259c` (1,276 B left), both detours → `sc_norm` `0x400d2622`,
+invariants clean, emulator checks as the standalone (simulated stock compressor reset, T1 → T8 kept,
+T8 from T1 −25.65 dB). New KYOTI V1.1 mainos `8d61d931…`, syx
+`370d77054042891f5177694cb9f8922f89c801e1b961ee1cd6e706fc50f72508`; `BUG_SC3X` mainos `9d4b63d9…`,
+syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI before KYOTI and
+`BUG_SC3X` are re-pinned; nothing is pushed until then.

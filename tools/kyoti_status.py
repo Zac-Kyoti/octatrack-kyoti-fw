@@ -37,7 +37,7 @@ ALLOW_ENV = "KYOTI_ALLOW_WIP"
 FINAL = {
     "build_mute_modes.py":                 "b5e24316e4dc5824657818f26cf1891e02ac26ae9094f101a7703f5beb74d6ba",
     "build_direct_jump_kyoti.py":          "3f26d8de004469052ec9da58967c066b128393dd4a9c4dfc7d7efd0d3696a759",
-    "build_sidechain_compressor.py":       "dfafc90cd230f340fd93ecc1f8e130c139fb6128855aca6adbf09cbcedc2d827",
+    "build_sidechain_compressor.py":       "ce10e9646bb2703d49e2224f8b618d7cd3c44ed994851e228443b2195a0f2e90",
     "build_reload_from_project.py":        "7fbf10968c68d85797658d22161df75491ab527a2a052649624db8a44af344ca",
     "build_quantize_live_rec_toggle.py":   "0832cd9d0b5f804a26c50cf1ed6ce375288635f7c1ec2ad661b0083f80df803f",
     "build_erase_empty_trigless_locks.py": "83690ffbd97ad51281630acc8597f6423715885d2a712915df2edc39bb9b6a1c",
