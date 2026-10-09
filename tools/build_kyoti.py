@@ -2,14 +2,16 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-KYOTI V1.1 (FINAL, promoted 2026-10-08) -- every FINAL feature in one image.
+KYOTI V1.2 -- every FINAL feature in one image (V1.1, FINAL 2026-10-08, + REPITCH).
 
     MUTE MODE (OT / OTFX / OTFX-T / DT-T)      QUANTIZE LIVE REC toggle
     SIDE-CHAIN COMPRESSOR (cross-core)         TRIGLESS-LOCK AUTO-REMOVE
     RELOAD FROM PROJECT (RELOAD_FROM_PROJECT chords)       DIRECT JUMP V7.0.1
-    REC TRIG MUTE ([TRK]+[NO]/[YES], CC 80)    the bug fixes: MIDI_PLAYS_FREE_FIX,
-                                               PATTERN LED, PART_CHANGE_CARRYOVER_FIX
-    WIP, opt-in only:  --with REPITCH_REPEAT98_KYOTI   (demoted 2026-10-06: DSP load)
+    REC TRIG MUTE ([TRK]+[NO]/[YES], CC 80)    REPITCH (RPCH / RPS9 / RPSP, QUAN; rev 17)
+    the bug fixes: MIDI_PLAYS_FREE_FIX, PATTERN LED, PART_CHANGE_CARRYOVER_FIX
+
+V1.2 vs V1.1: REPITCH_REPEAT98_KYOTI rev 17 (FINAL 2026-10-08) joins; RELOAD_FROM_PROJECT's
+displaced mvz.w replayed zero-extended; DIRECT JUMP guards every step-length lookup.
 
 V1.1 vs V1.0 (withdrawn 2026-10-06). V1.0 used five midisc pads -- CAVE2, RELOAD_CAVE,
 SEAM_CAVE, SCENE_PASTE_CAVE and FILT_PERSIST_LOAD_CAVE. All five lie inside the
@@ -19,11 +21,11 @@ NONE and on T8's MASTER PLAYBACK/LFO page (reference/kb/caves.md §0). V1.1 drop
 and refuses any placement inside the table except SPRING's own entry, which the image makes
 unreachable.
 
-RAM. The default image is ROM-only: it costs nothing of the 85.5 MB sample/recorder pool.
-With REPITCH (--with), the image no longer fits ROM. RELOAD_FROM_PROJECT then moves to DRAM,
-carried by octabam's platform loader (vendored in tools/dram/, MIT). The reserve is sized to
-the payload in whole 6 KB arena pages, not octabam's fixed 10 MiB. The build prints the
-exact cost.
+RAM. With REPITCH the image no longer fits ROM: RELOAD_FROM_PROJECT moves to DRAM, carried
+by octabam's platform loader (vendored in tools/dram/, MIT). The reserve is sized to the
+payload in whole 6 KB arena pages, not octabam's fixed 10 MiB: one page (6 KB) of the 85.5 MB
+sample/recorder pool, and the MEMORY page still reads 85.5 MB. The build prints the exact
+cost. A --without REPITCH_REPEAT98_KYOTI image is ROM-only (V1.1's plan).
 
 Boot splash and SYSTEM STATUS -> OS VERSION read VERSTR below.
 
@@ -93,13 +95,13 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
 import dram                                    # noqa: E402  (tools/dram/dram.py)
 
 gate(__file__, note="""
-KYOTI V1.1: every FINAL feature in one image, ROM-only, nothing placed in the parameter-page
-descriptor table. V1.0 (withdrawn 2026-10-06) crashed because it did.
---with REPITCH_REPEAT98_KYOTI (WIP) moves RELOAD to DRAM; the build prints the RAM cost.
+KYOTI V1.2: every FINAL feature in one image, nothing placed in the parameter-page
+descriptor table. V1.0 (withdrawn 2026-10-06) crashed because it did. REPITCH moves
+RELOAD to DRAM (one 6 KB arena page); the build prints the RAM cost.
 """)
 
-VERSTR = "KYOTI V1.1"
-TAG = "KYOTI_V1.1"
+VERSTR = "KYOTI V1.2"
+TAG = "KYOTI_V1.2"
 BASE = 0x40000400
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
@@ -156,14 +158,15 @@ PLAN_REPITCH = {
               "patch_qlrec", "patch_sidechain", "patch_trigscale", "personalize_labels",
               "rpk_reload", "rpk_reload_body",
               "rpk_glyph_data0", "rpk_glyph_data1", "rpk_glyph_data2",
-              "rpk_glyph_data4", "rpk_glyph_data5", "rpk_glyph_data6"],
-    "SAFE":  ["rpk_logic", "personalize_getters", "personalize_setters"],
+              "rpk_glyph_data4", "rpk_glyph_data5", "rpk_glyph_data6",
+              "personalize_setters"],            # (rev 17's rpk_logic grew: SAFE ran 28 B short)
+    "SAFE":  ["rpk_logic", "personalize_getters"],
     "SPRING": ["rpk_widget7", "rpk_glyph_rec2"],
     "ENC":   ["patch_triglock", "rpk_glyph_rec3", "rpk_glyph_rec4"],
     "PERS1": ["rpk_glyph_tab", "rpk_glyph_data3", "rpk_glyph_rec0"],
     "PERS2": ["rpk_glyph_rec1", "rpk_glyph_rec5", "rpk_glyph_rec6"],
 }
-PLAN = PLAN_ROM
+PLAN = PLAN_REPITCH            # V1.2: REPITCH is FINAL; --without it falls back to PLAN_ROM
 
 # --- the features: name -> (builder, image, base, placement keys, standalone blob files) --
 #   base "stock": built on true stock (MUTE MODE reads the stock PERSONALIZE arrays it
@@ -191,9 +194,6 @@ FEATURES = {
                       {"patch_directjump_v7": "patch_directjump_v7.bin"}),
     "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "mainos_rec_trig_mute.bin", "prep",
                       {"rtm_mask": 4}),
-}
-# Features that are WIP (not promoted, or demoted): only with --with NAME.
-WIP_FEATURES = {
     "REPITCH_REPEAT98_KYOTI": ("build_repitch_repeat98_kyoti.py", "mainos_repitch_repeat98_kyoti.bin", "prep",
                       dict({"rpk_logic": "patch_repitch_kyoti.bin", "rpk_widget7": 0x174,
                             "rpk_glyph_tab": 28,
@@ -202,13 +202,16 @@ WIP_FEATURES = {
                            **{f"rpk_glyph_rec{k}": 20 for k in range(7)},
                            **{f"rpk_glyph_data{k}": 68 for k in range(7)})),
 }
+# Features that are WIP (not promoted, or demoted): only with --with NAME.
+WIP_FEATURES = {}
 # REC_TRIG_MUTE's code regions: four dead stock routines (build_rec_trig_mute.py REGIONS),
 # and the only references allowed into them -- the [TRK]-held layer's YES / NO records
 RTM_REGIONS = [(0x40083488, 0x40083544), (0x40032bd4, 0x40032d08),
                (0x4005a0e0, 0x4005a14c), (0x4009e7dc, 0x4009e884)]
 RTM_RECORD_FIELDS = (0x400d15e4, 0x400d15e8, 0x400d15fe, 0x400d1602)
 # builder flags that are not addresses
-FLAGS = {"DIRECT_JUMP_KYOTI": {"dj_mode_in_cave": True}}
+FLAGS = {"DIRECT_JUMP_KYOTI": {"dj_mode_in_cave": True,
+                              "dj_trigscale": False}}   # MIDI_PLAYS_FREE_FIX is its own feature here
 
 
 def flags_for(feat):
@@ -367,7 +370,7 @@ def wip_variant(flag):
     """--with / --without images are never the promoted one: refuse them up front without the
     opt-in, instead of after a full build at seal()."""
     if os.environ.get("KYOTI_ALLOW_WIP") != "1":
-        sys.exit(f"\n  Refusing to build: {flag} makes a WIP image, not KYOTI V1.1.\n"
+        sys.exit(f"\n  Refusing to build: {flag} makes a WIP image, not KYOTI V1.2.\n"
                  f"  If you meant it, set KYOTI_ALLOW_WIP=1:\n\n"
                  f"      KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py {flag} ...\n")
 
@@ -375,7 +378,7 @@ def wip_variant(flag):
 def apply_with(argv):
     """--with NAME[,NAME]: add WIP features (not promoted). The image is WIP too: its own OS
     VERSION and directory (out/KYOTI_WIP/<tag>/), so it can never be taken for the FINAL one.
-    REPITCH switches to PLAN_REPITCH, where RELOAD_FROM_PROJECT moves to DRAM."""
+    (REPITCH, the one that changed the plan, is FINAL since V1.2.)"""
     global VERSTR, TAG, OUTDIR, SANDBOX, PLAN
     if "--with" not in argv:
         return
@@ -388,19 +391,19 @@ def apply_with(argv):
         FEATURES[a] = WIP_FEATURES[a]
     if "REPITCH_REPEAT98_KYOTI" in add:
         PLAN = PLAN_REPITCH
-    VERSTR = "KV11+RPK"[:10]
-    TAG = "KYOTI_V1.1_WITH_" + "_".join(add)
+    VERSTR = ("KV12+" + "".join(a[:3] for a in add))[:10]
+    TAG = "KYOTI_V1.2_WITH_" + "_".join(add)
     OUTDIR = ROOT / "out/KYOTI_WIP" / TAG
     SANDBOX = OUTDIR / "_sandbox"
     print(f"  WIP IMAGE: with {', '.join(add)}  ->  OS VERSION {VERSTR!r}, {OUTDIR.relative_to(ROOT)}\n")
 
 
 def apply_without(argv):
-    """--without NAME[,NAME]: a BISECTION image -- KYOTI V1.1 minus those features, built
-    by the same method.  It gets its own OS VERSION ("KV11-NO-" + a short code per removed
-    feature, e.g. KV11-NO-SC) and its own directory out/KYOTI_BISECT/<tag>/, so it can never be
+    """--without NAME[,NAME]: a BISECTION image -- KYOTI V1.2 minus those features, built
+    by the same method.  It gets its own OS VERSION ("KV12-NO-" + a short code per removed
+    feature, e.g. KV12-NO-SC) and its own directory out/KYOTI_BISECT/<tag>/, so it can never be
     mistaken for, or overwrite, the real image."""
-    global VERSTR, TAG, OUTDIR, SANDBOX
+    global VERSTR, TAG, OUTDIR, SANDBOX, PLAN
     if "--without" not in argv:
         return
     wip_variant("--without")
@@ -410,6 +413,8 @@ def apply_without(argv):
         sys.exit(f"--without: unknown feature(s) {bad}; choose from {sorted(FEATURES)}")
     for d in drop:
         del FEATURES[d]
+    if "REPITCH_REPEAT98_KYOTI" in drop:
+        PLAN = PLAN_ROM                      # V1.1's ROM-only plan
     if not ({"SIDECHAIN_COMPRESSOR", "REPITCH_REPEAT98_KYOTI"} & set(FEATURES)):
         del RECLAIM_WHOLE["SPRING"]          # nothing removes SPRING any more: not dead
     if "MUTE_MODES" not in FEATURES:
@@ -418,8 +423,8 @@ def apply_without(argv):
              "RELOAD_FROM_PROJECT": "RL", "DIRECT_JUMP_KYOTI": "DJ", "REPITCH_REPEAT98_KYOTI": "RPK",
              "MIDI_PLAYS_FREE_FIX": "PF", "EMPTY_PATTERN_LED_FIX": "PL", "PART_CHANGE_CARRYOVER_FIX": "PR",
              "REC_TRIG_MUTE": "RTM"}
-    VERSTR = ("KV11-NO-" + "".join(short[d] for d in drop))[:10]
-    TAG = "KYOTI_V1.1_WITHOUT_" + "_".join(drop)
+    VERSTR = ("KV12-NO-" + "".join(short[d] for d in drop))[:10]
+    TAG = "KYOTI_V1.2_WITHOUT_" + "_".join(drop)
     OUTDIR = ROOT / "out/KYOTI_BISECT" / TAG
     SANDBOX = OUTDIR / "_sandbox"
     print(f"  BISECTION IMAGE: without {', '.join(drop)}  ->  OS VERSION {VERSTR!r}, "
@@ -736,7 +741,7 @@ def main():
     # --- write + wrap -----------------------------------------------------------------------
     mainos = OUTDIR / f"mainos_{TAG.lower()}.bin"
     mainos.write_bytes(bytes(comp))
-    seal(__file__, mainos)       # FINAL pins mainos_kyoti_v1.1.bin; --with/--without images are WIP
+    seal(__file__, mainos)       # FINAL pins mainos_kyoti_v1.2.bin; --with/--without images are WIP
     cmap = {"verstr": VERSTR, "zones": {z: [hex(lo), hex(hi), cls] for z, (lo, hi, cls, _) in ZONES.items()},
             "pieces": {k: {"zone": zone_of[k], "at": hex(place[k]), "size": size[k]} for k in place},
             "dram": dram_report,
