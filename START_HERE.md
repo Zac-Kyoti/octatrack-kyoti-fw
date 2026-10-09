@@ -174,7 +174,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 - **SIDECHAIN_COMPRESSOR** — `sc_norm` (FINAL 2026-10-08, syx `d21762d0…`): a COMPRESSOR saved
   on stock firmware (KEY byte 127) comes up with its side-chain OFF. User flashed the standalone
   and KYOTI V1.1 `370d7705…`: no issues. Not specifically tried on hardware: a project saved on
-  stock firmware (the reset is emulator-verified). octabam: pin-bump PR for the module.
+  stock firmware (the reset is emulator-verified). octabam: draft PR sambanks/octabam#648
+  (pin 45ab46c; draft until an octabam-built image is flashed).
   `NOTES.md` Session 126.
 - **REPITCH_REPEAT98_KYOTI** — **demoted to WIP 2026-10-06** (standalone build and
   `BUG_RPK16`; FINAL pins removed, README entry replaced by a notice). On the user's MKI, RPSP

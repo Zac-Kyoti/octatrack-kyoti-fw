@@ -35578,3 +35578,10 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
 * **KYOTI V1.1 flashed** (`370d7705…`): "Flashed. All good." **Promoted** on the user's instruction:
   `build_kyoti.py` → `8d61d931…`, `BUG_SC3X` → `9d4b63d9…`; all 13 FINAL builders seal (KYOTI, the 7
   Bugbuilds, SIDECHAIN checked without the opt-in). Pushed; octabam pin bump next.
+* **octabam:** draft PR sambanks/octabam#648 (fork branch `sidechain-sc-norm`, `853c4ee9`-amended head on
+  `063a4262`): sidechain-compressor pin `d3e0801` → `45ab46c` (mute-modes stays `d3e0801`), README /
+  shim docstring / THIRD_PARTY text. `make reach TESTS=1 RUN=1` green (reaches the sidechain-compressor
+  remix). Draft until an octabam-built image with the module is flashed. Trap hit on the way: a
+  `git submodule update --init` between checking out the new pin and `git add` silently resets the
+  gitlink to the old pin — reach then reports only text changes; check `git show --stat` for the
+  `upstream` line.
