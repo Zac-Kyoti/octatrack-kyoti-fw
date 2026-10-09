@@ -152,9 +152,8 @@ DARK REV on each run clean beside up to three DJ EQs on T5–T8 and four on T1�
 effects than that on those tracks can overload the DSP (a loud tone, and the sequencer stops).
 RPS9 costs about a third as much.
 
-**Hardware:** the engine and the limit above confirmed in test images; this build's
-unfiltered RPSP output has not yet been flashed on its own. Not specifically tested: RTRG
-retrigs.\
+**Hardware:** confirmed, including the limit above (this build's RPSP runs in KYOTI V1.2 on
+the unit). Not specifically tested: RTRG retrigs.\
 **Final build:** [`tools/build_repitch_repeat98_kyoti.py`](tools/build_repitch_repeat98_kyoti.py) →
 `OCTATRACK_OS1.40C_REPITCH_REPEAT98_KYOTI`
 
