@@ -35575,3 +35575,6 @@ T8 from T1 −25.65 dB). New KYOTI V1.1 mainos `8d61d931…`, syx
 `370d77054042891f5177694cb9f8922f89c801e1b961ee1cd6e706fc50f72508`; `BUG_SC3X` mainos `9d4b63d9…`,
 syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI before KYOTI and
 `BUG_SC3X` are re-pinned; nothing is pushed until then.
+* **KYOTI V1.1 flashed** (`370d7705…`): "Flashed. All good." **Promoted** on the user's instruction:
+  `build_kyoti.py` → `8d61d931…`, `BUG_SC3X` → `9d4b63d9…`; all 13 FINAL builders seal (KYOTI, the 7
+  Bugbuilds, SIDECHAIN checked without the opt-in). Pushed; octabam pin bump next.

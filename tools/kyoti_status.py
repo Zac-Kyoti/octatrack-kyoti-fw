@@ -47,14 +47,14 @@ FINAL = {
     "build_bugbuilds.py": {
         "mainos_mute_modes_batch_bugfixes.bin":              "2c5600dc4dd30812a54ddfec8904f7762593e7c6233638fa2ae40319602ead47",
         "mainos_quantize_live_rec_toggle_batch_bugfixes.bin":"f425ae2270e6f612a7abd8338962d115786934a8e76348c646fd45de9d502130",
-        "mainos_sidechain_compressor_batch_bugfixes.bin":    "cad73c0922d886875191b940f163cb45a141c8bee6786459325fe9e4defd86ee",
+        "mainos_sidechain_compressor_batch_bugfixes.bin":    "9d4b63d9517960121e85a21c000b6afd80f6cdb476f24ccf8e172142eee9a4b0",
         "mainos_erase_empty_trigless_locks_batch_bugfixes.bin":"db348f68a32adcc195208e46f6c964d0a5714ba41c1d8c4f2fad6beb2d122922",
         "mainos_reload_from_project_batch_bugfixes.bin":     "09ab9ea238af1b9b07ef22418097b0d8c2accf6b097cf71741b808e00aad643c",
         "mainos_direct_jump_kyoti_batch_bugfixes.bin":       "fa4617506e9d7e3ef6af9bb3c6a2739c03f7f17a4db475d8329d80a34f986f37",
         "mainos_rec_trig_mute_batch_bugfixes.bin":           "fd65e293657e3caa895064255c7dad76882c21640c6eebdc1cf812074744c658",
     },
     "build_kyoti.py": {
-        "mainos_kyoti_v1.1.bin":                             "01ffe4076b0a8200ce16f9d0c8a5440eb1d7799001db4718ebdc64778e2afb79",
+        "mainos_kyoti_v1.1.bin":                             "8d61d93160eeb4bbb0a00b223822cc1107ed7826c69e438c8589dcfaf4f73016",
     },
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
 }

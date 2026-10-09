@@ -153,8 +153,9 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
-- **KYOTI V1.1** (`tools/build_kyoti.py`) — **FINAL 2026-10-08**, syx `0e1b6012…`, mainos
-  `01ffe407…`. Flashed: the V1.0 crashes are gone and every feature works on hardware.
+- **KYOTI V1.1** (`tools/build_kyoti.py`) — **FINAL 2026-10-08**, syx `370d7705…`, mainos
+  `8d61d931…` (re-pinned the same day for SIDECHAIN's `sc_norm`; the first V1.1 was `0e1b6012…`).
+  Flashed, both versions: the V1.0 crashes are gone and every feature works on hardware.
   - Every FINAL feature, ROM-only (no sample RAM), nothing placed in the descriptor table.
   - `--with REPITCH_REPEAT98_KYOTI` (WIP, needs the opt-in) carries RELOAD in DRAM: 1 page,
     6 KB. Emulator only.
@@ -170,11 +171,11 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   replacement under discussion (octabam remix). The octabam images OBKYOTI6–12 are clean.
 - **DIRECT_JUMP_KYOTI** — not yet on hardware: MIDI tracks, and Program Change on fast
   re-cues.
-- **SIDECHAIN_COMPRESSOR** — `sc_norm` (2026-10-08, branch `sc-defaults`, not pushed): a
-  COMPRESSOR saved on stock firmware (KEY byte 127) comes up with its side-chain OFF.
-  Emulator-verified, standalone and octabam form; WIP until the user flashes and promotes
-  it (standalone syx `d21762d0…`). Then: promote, octabam PR (pin bump), KYOTI must fit the
-  larger unit, `BUG_SC3X`. `NOTES.md` Session 126.
+- **SIDECHAIN_COMPRESSOR** — `sc_norm` (FINAL 2026-10-08, syx `d21762d0…`): a COMPRESSOR saved
+  on stock firmware (KEY byte 127) comes up with its side-chain OFF. User flashed the standalone
+  and KYOTI V1.1 `370d7705…`: no issues. Not specifically tried on hardware: a project saved on
+  stock firmware (the reset is emulator-verified). octabam: pin-bump PR for the module.
+  `NOTES.md` Session 126.
 - **REPITCH_REPEAT98_KYOTI** — **demoted to WIP 2026-10-06** (standalone build and
   `BUG_RPK16`; FINAL pins removed, README entry replaced by a notice). On the user's MKI, RPSP
   on all four tracks of a core with DARK REV + DJ EQ crashes the DSP (tone, sequencer stops);
