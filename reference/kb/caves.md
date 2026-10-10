@@ -67,9 +67,19 @@ is ❌ retracted:
 - Our standalone images, Bugbuilds and OBKYOTI6–12: stock bytes in all five pads.
 - **KYOTI V1.0, which used them, was withdrawn on 2026-10-06** (`reference/handoffs/KYOTI_LOAD_AUDIT.md` §8/8b).
 
-**One exception, with its condition.** The SPRING reclaim (`0x400d5728..0x400d58b8`) is
-SPRING's own entry. It is safe only while that image leaves SPRING unreachable (no
+**One exception, with its condition.** The SPRING reclaim (`0x400d575e..0x400d58f0`, placed
+from `0x400d5760`) is SPRING's own record. It is safe only while that image leaves SPRING unreachable (no
 `0x400d5fdc`/`0x400d5f58` entry and no `id2e` pointing at it); `build_kyoti.py` asserts that.
+
+**A record is the 0x192 bytes from `P`, not from `E`.** `P = E + 0x38` is what `id2e` holds and
+what every reader indexes from, so a record's encoder-handler pointers (`P+0x15a`) and enable
+nibbles (`P+0x18a`/`P+0x18e`) lie *past* `E + 0x192`, in the bytes that look like the next
+entry's head. KYOTI V1.0 and V1.2 reclaimed SPRING as `0x400d5728..0x400d58b8` (from `E`) and
+so overwrote PLATE REV's last 0x38 bytes. On hardware (V1.2, 2026-10-10), the PLATE page showed only TIME,
+LP and an unnamed 0/1 slot 10, exactly what the clobbered nibbles decode to, and its knobs did
+nothing. V1.1 placed nothing there and was clean. Fixed in V1.3: bounds from `id2e[0x15]`
+(asserted), and every changed table byte outside the reclaimed record must be one a standalone
+build changes (the pointer scan cannot see indexed readers).
 
 ---
 
@@ -193,7 +203,7 @@ FILT_PERSIST_SAVE (`0x400d352d..`) is read by stock (`0x4000578e` reads `0x400d3
 used. The byte-aligned reference scan found these; a 2-aligned scan does not.
 
 **Reclaim — stock data made unreachable by our own edits.** In an image that removes SPRING
-REVERB (SIDE-CHAIN, REPITCH) its CF descriptor `0x400d5726..0x400d58b8` has no reference
+REVERB (SIDE-CHAIN, REPITCH) its CF descriptor record `0x400d575e..0x400d58f0` (`P..P+0x192`; see §0) has no reference
 left; in an image with MUTE MODE the three stock PERSONALIZE arrays (`0x400b2a34`,
 `0x400b2a74`, `0x400b2ac0`, 16 longs each) have none either. `build_kyoti.py` uses both and
 asserts the no-reference property on every build. This is only as good as a static scan

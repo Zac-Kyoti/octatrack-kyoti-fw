@@ -35785,3 +35785,32 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
   * **Outstanding for Sam:** #561 (REPITCH; also the per-payload `DspHook.stock` schema
     change), #649 (DJK + RELOAD), #648 (SIDECHAIN sc_norm, the SIDECHAIN session's PR). The other
     five KYOTI modules are current on octabam main.
+
+## Session 127 (2026-10-10, `kyoti-plate`) — PLATE REV broken in KYOTI V1.2: the combined build's SPRING reclaim started 0x38 bytes early (fixed in V1.3, WIP, NOT flashed)
+
+* **Report (hardware, V1.2):** PLATE REV on either core shows only TIME (knob 1) and LP (knob 5)
+  on page 1, and on page 2 an unnamed knob 10 with values 0/1. No knob changes the sound.
+* **A combination bug, not a module bug.** PLATE's record (`P` 0x400d55cc..0x400d575e) is
+  byte-identical to stock in all 12 standalones and all 8 Bugbuilds. In KYOTI V1.0 and V1.2, 50 bytes differ
+  (0x400d5726..0x400d575d). V1.1 is clean because its ROM plan put nothing in SPRING, so the zone was never zeroed.
+* **Cause:** `build_kyoti.py` reclaimed SPRING REVERB's descriptor as `0x400d5728..0x400d58b8`, i.e.
+  from `E` (the memory-map table's entry start). But a record is the 0x192 bytes from `P = E+0x38`
+  (SPRING: 0x400d575e..0x400d58f0). REPITCH's `rpk_widget7` therefore overwrote PLATE's
+  `P+0x15a` pointers (stock 6 × `0x40038d94` + 6 × 0, the per-encoder handlers) and its enable nibbles
+  `P+0x18a/0x18e`. Decoding V1.2's nibbles: slots 1 (TIME), 5 (LP) and 10 (`---`, count 2) are on,
+  which is exactly the report. The overwritten encoder pointers fit "knobs do nothing" (the exact reader is not traced).
+  The static "no reference into the reclaim" check could not see it: readers index from PLATE's own `P`.
+* **Fix (WIP until promoted):** SPRING zone `0x400d5760..0x400d58f0` (aligned), reclaim
+  `0x400d575e..0x400d58f0`; asserted equal to `[id2e[0x15], +0x192)` from stock. DESCRIPTOR_TABLE is
+  now its true extent `0x400d2e8a..0x400d5f38`. New invariant: every changed table byte outside
+  the reclaimed record must sit within a longword of a byte some standalone changes. Replayed
+  on V1.2 with the true dead range, it flags all 50 PLATE bytes; on V1.3, 0. The record bounds come from the assert,
+  which V1.2's wrong range would also have failed.
+* **KYOTI V1.3** (OS VERSION `KYOTI V1.3`): mainos `d14555ec…`, syx
+  `9f6d2374d204cd66749f9acb6cf23ac1bc36d161e3dbce9c9c5399d43d3bcd71` (out/KYOTI/ in the
+  `kyoti-plate` worktree). Every invariant holds. PLATE's record = stock; its decoded page = stock's
+  (TIME DAMP GATE HP LP / MIX GVOL BAL MONO MIXF). Same placement otherwise; rpk_widget7 at
+  0x400d5760, rpk_glyph_rec2 at 0x400d58d4 (8 B left in SPRING). **NOT flashed, NOT promoted.**
+* **Hardware test for V1.3:** PLATE REV on FX2 of a T1–T4 track and a T5–T8 track: all 10 controls
+  present and audible. Repeat the V1.2 smoke tests (REPITCH RPSP/RPS9 + its glyphs, since
+  `rpk_widget7` moved; DARK REV; COMPRESSOR side-chain).
