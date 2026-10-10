@@ -182,7 +182,8 @@ int main(int argc, char** argv) {
             if (!alarm) { e.tick(); }
             evc--;
             int32_t want = e.outW;
-            bool toneNow = band <= 1 || band >= 4 || alarm;
+            bool toneNow = knob < 72 || knob >= 104 || alarm;                // DIAG11: 72-87 riff / 8, 88-103 riff
+            if (!toneNow && knob < 88) want >>= 3;
             if (toneNow) { tph = (tph + tinc) & 0xffffff; want = sx(tph) >> 2; }
             int32_t l = gx(AUD + 2 * j), r = gx(AUD + 2 * j + 1);
             if (meter) {                                                 // ticks, then -KCNT for the rest of the render
@@ -219,10 +220,10 @@ int main(int argc, char** argv) {
                     double(totalCyc) / (frames * 16.0));
         return 0;
     }
-    const char* what[] = {"TONE", "TONE", "RIFF", "RIFF", "STRESS + TONE"};
+    const char* what[] = {"TONE", "STRESS + TONE", "STRESS + TONE", "ENG + TONE", "ENG + TONE", "RIFF / 8", "RIFF", "X READS + TONE"};
     if (burn || pre) std::printf("BURN %d PRE %d: +%d cycles a sample expected (24 x each)\n", burn, pre, 24 * (burn + pre));
     std::printf("BIT-EXACT: %ld samples, %s%s, %ld calls; %.1f cycles/sample incl. the wrapper (worst frame %.1f)\n",
-                sample, what[band < 4 ? band : 4], corrupt ? " (a table word changed mid-run: the alarm tone followed)" : "",
+                sample, what[knob < 16 ? 0 : knob < 48 ? 1 : knob < 72 ? 3 : knob < 88 ? 5 : knob < 104 ? 6 : 7], corrupt ? " (a table word changed mid-run: the alarm tone followed)" : "",
                 calls, double(totalCyc) / (frames * 16.0), worstFrame / 16.0);
     std::ofstream o(dir + "/out_" + std::to_string(knob) + (corrupt ? "c" : "") + ".f32", std::ios::binary);
     o.write(reinterpret_cast<const char*>(wav.data()), std::streamsize(wav.size() * sizeof(float)));

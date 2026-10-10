@@ -1755,3 +1755,36 @@ SRC3 = MAIN, T6 muted, nothing else playing.
 - **Dropped:** the meter, the yielding riff, the per-call TINC store (the loader presets it).
 - **Checks:** bench bit-exact for every band on both payloads, every mode ~427–430 cycles/sample;
   ot_emu ALL GOOD.
+
+### DIAG10 on the unit (user, 2026-10-10), and DIAG11 (built, NOT flashed)
+
+**DIAG10:**
+- No tone or crackle leaked at any STRESS step (64–127).
+- **But the riff at 32 crashed the sequencer first, so all STRESS results were taken with the
+  sequencer down: void.** With transfers frozen, the master may simply have stayed muted.
+- The knob kept changing the sound after the crash. So the DSP and the knob → DSP parameter path
+  stayed alive; it is the sequencer side that stops.
+- **The riff crash is random in time:** 49 (DIAG5, PRE 17), 48 (DIAG9, assumed to be the yield),
+  32 (DIAG10). It comes after some seconds of riff, not at a knob value.
+  - So DIAG5's "crash at PRE 17" and DIAG9's "yield crash" may both be this.
+  - The engine without riff output (DIAG8's METER mode 0, DIAG10's 112) never crashed.
+
+**DIAG11:** `out/OCTATRACK_OS1.40C_OT303_DIAG11.syx`
+(`0550c63241bde2493dd40782ca8f243d6400620c9853a16903f927080d7d2f1a`, version `140C_303DB`).
+- **The 303 knob, safest first** (`hq_mode` sets D_BAND once per call):
+
+  | 303 | mode |
+  |---|---|
+  | 1–15 | tone |
+  | 16 / 24 / 32 / 40 | STRESS + tone: Y reads, Y writes (`Y:$ff0`), mac + X:Y reads, the engine without events |
+  | **48–71** | **ENG + TONE: the riff's whole work, events included, the tone heard** |
+  | **72–87** | **RIFF / 8** |
+  | **88–103** | **RIFF** |
+  | 104–127 | X reads + tone (DIAG6's crash shape, three-instruction body) |
+
+- **BURN (slot 6) is inert.** Its code went for space, along with the X:Y-only stress mode.
+- **The question:** does the leak/crash need the riff's *work* (48) or its *sound* in the track
+  output (72 / 88)?
+  - DIAG8's meter ran the same work with other output and never crashed.
+- **Checks:** bench bit-exact for every band on both payloads (riff / 8 = `asr #3` of the twin);
+  ot_emu ALL GOOD.

@@ -17,10 +17,11 @@
 ;                read-back pull, below), BEFORE DJ EQ when 303 is 0 (the burn probe's measure)
 ;   slot 7 303   bits 8-15: 0 off (stock DJ EQ), else, in sixteens, the track's audio is replaced
 ;                (both channels) by: 1-15 TONE (a 110 Hz saw; the engine does not run);
-;                16-31 TONE too (DIAG6's XHAM band there crashed core 0 at once); 32-63 RIFF (the
-;                engine, saw: a built-in 16-step bar of the Hot voice, 130 BPM); 64-127 STRESS +
-;                TONE (hwprobe_ev.asm hq_stress: a workload before each call's tone; listen to the
-;                master with the track MUTED: a leak of the tone = the workload breaks the mix)
+;                DIAG11 (hwprobe_ev.asm hq_mode), safest first: 16-47 STRESS + TONE (a workload
+;                before each call's tone: Y reads, Y writes, mac + X:Y reads, the engine without
+;                events); 48-71 ENG+TONE (the riff's whole work, the tone heard); 72-87
+;                RIFF / 8; 88-103 RIFF (the engine, saw: a built-in 16-step bar of the Hot voice,
+;                130 BPM); 104-127 STRESS X reads. Listen to the master with the track MUTED.
 ; DIAG2 on the unit: the riff was clean only when its call ended late enough. Stock copies each
 ; track's block into the read-back buffer after FX2 while the ColdFire's DMA pulls that buffer;
 ; a call that ends inside the pull's window tears the block (octabam FAILURE_MODES, "Junk on main
@@ -88,7 +89,7 @@ D_OUTA  equ     $3b             ; the audio block pointer (interleaved L/R)
 D_KNB   equ     $3c             ; the 303 knob << 8
 D_KCNT  equ     $3d             ; this render's sample count
 D_AMPT  equ     $3e             ; the trigger's AMP2
-D_BAND  equ     $3f             ; the mode: 303 >> 4
+D_BAND  equ     $3f             ; the render: 0 tone, 1 engine + tone, 2 riff, 3 riff / 8 (hq_mode)
 D_TINC  equ     $a              ; +: TINC
 N_MSAV  equ     $b              ; -: MSAV (m0 at XM - $b .. m7 at XM - 4)
 D_W1A   equ     $24             ; +: OCB's W1A W2 W3
@@ -177,7 +178,8 @@ hq_run:
         move    b,x:(r5+D_REM)
         move    r0,x:(r5+D_OUTA)
 hq_cstr:
-        dc      $0d1080,0                       ; bsr >hq_stress: 303 >= 64, a workload before the tone
+        dc      $0d1080,0                       ; bsr >hq_mode: sets D_BAND (0 tone, 1 engine + tone,
+                                                ; 2 riff, 3 riff / 8) and runs any STRESS workload
 ; render up to each event, then the event
 hq_loop:
         move    x:(r5+D_EVC),a
@@ -194,16 +196,15 @@ hq_noev:
         move    b,x:(r5+D_KCNT)
         move    x:(r5+D_BAND),a
         tst     a
-        beq     hq_notengine                    ; TONE: no engine
-        cmp     #<1,a
-        beq     hq_notengine                    ; 16-31: TONE as well
-        cmp     #<4,a
-        bge     hq_notengine                    ; 64-127: TONE (after the STRESS workload)
+        beq     hq_notengine                    ; 0: TONE, no engine
         move    b1,r7
         move    #>RBUF,r3
-        bsr     ot303
+hq_cmeng:
+        dc      $0d1080,0                       ; bsr >hq_reng: the engine (band 3: scaled 1/8)
         move    #>XM,r5
-        bra     hq_notone
+        move    x:(r5+D_BAND),a
+        cmp     #<1,a
+        bne     hq_notone                       ; 2, 3: the riff is heard; 1: the tone
 hq_notengine:
 ; TONE: KCNT samples of a 110 Hz (TINC) saw at -12 dBFS into RBUF
         move    #>RBUF,r1
@@ -249,12 +250,8 @@ hq_rest:
         move    x:>SV_R6,r6
         move    x:>SV_R7,r7
         move    x:>SV_N7,n7
-hq_cbr1:
-        dc      $0d1080,0                       ; bsr >hq_burn (after the render: the call ends later)
         rts                                     ; 303 up: DJ EQ does not run
-hq_out:
-hq_cbr0:
-        dc      $0d1080,0                       ; bsr >hq_burn (before DJ EQ: the burn probe's place)
+hq_out:                                         ; DIAG11: BURN (slot 6) is inert
 hq_djeq:
         dc      $0d10c0,0                       ; bra >DJ EQ's stock proc: the builder writes the
                                                 ; displacement and checks it by disassembly

@@ -120,8 +120,8 @@ def build(tag):
     assert words[bra - d['org']] == 0x0d10c0 and words[bra - d['org'] + 1] == 0, 'bra placeholder moved'
     words[bra - d['org'] + 1] = (d['djeq_proc'] - bra) & 0xffffff
     checks = [(bra, f'bra     func_{d["djeq_proc"]:06x}', 'exit branch')]
-    for site, target in (('hq_callev', 'hq_event'), ('hq_cbr0', 'hq_burn'), ('hq_cbr1', 'hq_burn'),
-                         ('hq_cstr', 'hq_stress'), ('hq_crel', 'hq_reloc')):
+    for site, target in (('hq_callev', 'hq_event'),
+                         ('hq_cstr', 'hq_mode'), ('hq_cmeng', 'hq_reng'), ('hq_crel', 'hq_reloc')):
         cal = S[site]
         assert words[cal - d['org']] == 0x0d1080 and words[cal - d['org'] + 1] == 0, f'{site}: bsr placeholder moved'
         if site == 'hq_crel' and not d['xd']:
@@ -131,7 +131,7 @@ def build(tag):
         checks.append((cal, f'bsr     func_{evs[target]:06x}', f'{site} -> {target}'))
     # region 2's calls into region 1 (assembled apart: placeholders, patched here)
     evchecks = []
-    for site, op in (('hq_cot1', 0x0d1080),):
+    for site, op in (('hq_cot1', 0x0d1080), ('hq_cot2', 0x0d1080)):
         cal = evs[site]
         assert evw[cal - ev_org] == op and evw[cal - ev_org + 1] == 0, f'{site}: placeholder moved'
         evw[cal - ev_org + 1] = (S['ot303'] - cal) & 0xffffff

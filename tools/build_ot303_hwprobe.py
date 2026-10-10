@@ -2,23 +2,23 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-OT-303 hardware probe, DIAGNOSTIC 10 (DIAG10): the OT-303 DSP engine on the unit, hosted in DJ EQ
-(reference/handoffs/OT303_SCOPE.md §11). DIAG9 on the unit: its host-DMA-yielding riff crashed at 48;
-with T6 muted the tone and the tone + BURN leave the master silent, the riff leaks. DIAG10 asks
-which kind of work breaks core 0's mix: 303 >= 64 runs a ~400-cycle/sample workload before the
-tone (mode (303 - 64) >> 3: div, mac, Y reads, Y writes, X:Y reads, mac + X:Y reads, the engine,
-X reads; safest first). The meter and the yielding riff are gone; 32-63 is the plain riff.
+OT-303 hardware probe, DIAGNOSTIC 11 (DIAG11): the OT-303 DSP engine on the unit, hosted in DJ EQ
+(reference/handoffs/OT303_SCOPE.md §11). DIAG10 on the unit: the riff (32) crashed the sequencer
+before the STRESS bands could be reached, so their clean result is void. The riff crash is random in
+time (49, 48, 32). DIAG11 orders the 303 knob safest first: 1-15 tone; 16-47 STRESS + tone (Y reads,
+Y writes, mac + X:Y reads, the engine without events); 48-71 the riff's whole work with the tone
+heard; 72-87 the riff at 1/8; 88-103 the riff; 104-127 X reads + tone. BURN (slot 6) is inert.
 
 Stock 1.40C plus exactly this:
   * DJ EQ page 2: slot 6 BURN (24 cycles/sample a step, after the render; before DJ EQ when 303
-    is 0), slot 7 303. 303 bands: 1-31 TONE, 32-63 RIFF, 64-127 STRESS + TONE.
+    is 0), slot 7 303. 303 bands as above; BURN inert.
     One engine per core.
   * SPRING REV is removed (its words hold the engine, the wrapper and the packed table data);
     DARK REV's helper inside SPRING's module is untouched. Nothing on the ColdFire but data.
 
 Usage:   python3 tools/build_ot303_hwprobe.py      (WIP: KYOTI_ALLOW_WIP=1)
-Outputs: out/mainos_ot303_hwprobe_diag10.bin, out/OCTATRACK_OS1.40C_OT303_DIAG10.syx,
-         out/OCTATRACK_OT303_DIAG10.bin
+Outputs: out/mainos_ot303_hwprobe_diag11.bin, out/OCTATRACK_OS1.40C_OT303_DIAG11.syx,
+         out/OCTATRACK_OT303_DIAG11.bin
 """
 import importlib.util, os, pathlib, subprocess, sys
 from kyoti_status import gate, seal
@@ -34,11 +34,11 @@ STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
 STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 DIS = ROOT / "vendor/dsp56300/build/source/disassemble/dsp56kDisassemble"
-OUT = ROOT / "out/mainos_ot303_hwprobe_diag10.bin"
-ELEK = ROOT / "out/elek_ot303_hwprobe_diag10.bin"
-OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_DIAG10.syx"
-OUT_BIN = ROOT / "out/OCTATRACK_OT303_DIAG10.bin"
-VERSTR = "140C_303DA"      # the field takes 10 characters
+OUT = ROOT / "out/mainos_ot303_hwprobe_diag11.bin"
+ELEK = ROOT / "out/elek_ot303_hwprobe_diag11.bin"
+OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_DIAG11.syx"
+OUT_BIN = ROOT / "out/OCTATRACK_OT303_DIAG11.bin"
+VERSTR = "140C_303DB"      # the field takes 10 characters
 
 DJEQ_ID = 0x0d
 SPRING_ID = 0x15

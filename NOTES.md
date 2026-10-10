@@ -36041,3 +36041,8 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   §10.3.2: core beats DMA on a shared internal partition. **DIAG10** (`140C_303DA`, syx `d17059df…`,
   NOT flashed): 303 ≥ 64 = 8 STRESS workloads (div / mac / Y rd / Y wr / XY rd / mac+XY / engine /
   X rd) before a tone; listen to the master with T6 muted.
+- **S124 cont: DIAG10 on HW** — riff (32) crashed the sequencer before the STRESS bands → their
+  "no leak" is void; knob still changed sound after the crash (DSP alive). Riff crash is RANDOM in
+  time (49 / 48 / 32). **DIAG11** (`140C_303DB`, syx `0550c632…`, NOT flashed): safest-first knob:
+  stress 16–47, ENG+TONE 48–71 (riff work, tone heard), riff/8 72–87, riff 88–103, X reads 104+.
+  BURN inert. Asks: work or sound?
