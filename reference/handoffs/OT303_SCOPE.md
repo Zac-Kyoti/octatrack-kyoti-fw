@@ -1643,3 +1643,16 @@ The recordings are `out/ot303/hwprobe/hw/diag8_t6.wav` and `diag8_t2.wav` (from 
     engine's memory traffic. XHAM's instant crash (100% X reads, 4,096 cycles at a time) is the
     extreme case.
   - Torn recording → the read-back after all.
+
+**The T6 riff recording** (user, 2026-10-09; `out/ot303/hwprobe/hw/diag8c_t6_riff.wav`, DIAG8, 303 = 40,
+recorder source T6, 12 s). The riff sounded dirty and the master was dirty with T6 muted.
+- **The recording is clean:** L = R in every sample.
+- **Its click statistics match the bench render's:** median second difference 4,494 vs 4,644;
+  outliers 5,358/s vs 5,455/s (the saw's edges); max/median 1,140 vs 1,165; rms 0.053 vs 0.054.
+- **No junk words:** 4 of 377,906 are multiples of 65,536, which is chance.
+- **So T6's track data reaches the ColdFire intact. The dirt is downstream,** in core 0's
+  master/output path: the master mix, the ColdFire→core 0 return block `X:$4400`, or the ESAI DMA.
+- **Next, no flash:** a recorder on SRC3 = MAIN with T6 muted (nothing else playing).
+  - A dirty recording → the master's digital mix is corrupted (the `X:$4400` transfer, or
+    core 0's mix).
+  - A clean recording while the speakers are dirty → the ESAI output DMA (starved, like XHAM's crash).
