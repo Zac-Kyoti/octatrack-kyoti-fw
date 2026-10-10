@@ -2,13 +2,18 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-KYOTI V1.2 -- every FINAL feature in one image (V1.1, FINAL 2026-10-08, + REPITCH).
+KYOTI V1.3 -- every FINAL feature in one image (V1.1, FINAL 2026-10-08, + REPITCH).
 
     MUTE MODE (OT / OTFX / OTFX-T / DT-T)      QUANTIZE LIVE REC toggle
     SIDE-CHAIN COMPRESSOR (cross-core)         TRIGLESS-LOCK AUTO-REMOVE
     RELOAD FROM PROJECT (RELOAD_FROM_PROJECT chords)       DIRECT JUMP V7.0.1
     REC TRIG MUTE ([TRK]+[NO]/[YES], CC 80)    REPITCH (RPCH / RPS9 / RPSP, QUAN; rev 17)
     the bug fixes: MIDI_PLAYS_FREE_FIX, PATTERN LED, PART_CHANGE_CARRYOVER_FIX
+
+V1.3 vs V1.2: PLATE REVERB works again. V1.2 reclaimed SPRING REVERB's descriptor 0x38 bytes
+early (from its entry start E, not from P = E+0x38), so REPITCH's widget clone overwrote PLATE's
+own tail: its 12 encoder-handler pointers (P+0x15a) and its enable nibbles (P+0x18a/P+0x18e).
+The PLATE page showed random slots and its knobs did nothing (reference/kb/caves.md §0).
 
 V1.2 vs V1.1: REPITCH_REPEAT98_KYOTI rev 17 (FINAL 2026-10-08) joins; RELOAD_FROM_PROJECT's
 displaced mvz.w replayed zero-extended; DIRECT JUMP guards every step-length lookup.
@@ -95,13 +100,13 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
 import dram                                    # noqa: E402  (tools/dram/dram.py)
 
 gate(__file__, note="""
-KYOTI V1.2: every FINAL feature in one image, nothing placed in the parameter-page
+KYOTI V1.3: every FINAL feature in one image, nothing placed in the parameter-page
 descriptor table. V1.0 (withdrawn 2026-10-06) crashed because it did. REPITCH moves
 RELOAD to DRAM (one 6 KB arena page); the build prints the RAM cost.
 """)
 
-VERSTR = "KYOTI V1.2"
-TAG = "KYOTI_V1.2"
+VERSTR = "KYOTI V1.3"
+TAG = "KYOTI_V1.3"
 BASE = 0x40000400
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
@@ -119,8 +124,8 @@ ZONES = {
               "this project's cave (from 0x400d6500 as every flashed build; 0xff from 0x400d7c3c)"),
     "SAFE":  (0x400d24d0, 0x400d2cdc, "midisc", "SAFE_CAVE; stock references 0x400d2cdc"),
     "ENC":   (0x400c45b0, 0x400c4700, "midisc", "ENC_UNLOCK_CAVE"),
-    "SPRING": (0x400d5728, 0x400d58b8, "reclaim",
-               "SPRING REVERB's CF descriptor 0x400d5726..; dead once SIDE-CHAIN/REPITCH remove SPRING"),
+    "SPRING": (0x400d5760, 0x400d58f0, "reclaim",
+               "SPRING REVERB's CF descriptor record P 0x400d575e..; dead once SIDE-CHAIN/REPITCH remove SPRING"),
     "PERS1": (0x400b2a34, 0x400b2ab4, "reclaim",
               "stock PERSONALIZE labels+getters; dead once MUTE MODE relocates them"),
     "PERS2": (0x400b2ac0, 0x400b2b00, "reclaim",
@@ -128,11 +133,15 @@ ZONES = {
 }
 # The parameter-page descriptor table: live data, zeros included (reference/kb/caves.md §0).
 # No zone may overlap it except SPRING, whose entry this image makes unreachable (asserted).
-DESCRIPTOR_TABLE = (0x400d2e52, 0x400d5f00)
+# A record is the 0x192 bytes from P = E + 0x38 -- the pointer id2e holds and every reader
+# indexes from (encoder handlers P+0x15a, enable nibbles P+0x18a/P+0x18e lie past E+0x192).
+# V1.2 reclaimed SPRING from E and so overwrote PLATE's last 0x38 bytes: never use E bounds.
+DESCRIPTOR_TABLE = (0x400d2e8a, 0x400d5f38)       # first P .. the machine table (last P + 0x192)
+DESC_REC = 0x192
 DESCRIPTOR_TABLE_OK = {"SPRING"}
 
 # What each reclaim zone's deadness depends on, and the stock words that referenced it.
-RECLAIM_WHOLE = {"SPRING": (0x400d5726, 0x400d58b8), "PERS1": (0x400b2a34, 0x400b2ab4),
+RECLAIM_WHOLE = {"SPRING": (0x400d575e, 0x400d58f0), "PERS1": (0x400b2a34, 0x400b2ab4),
                  "PERS2": (0x400b2ac0, 0x400b2b00)}
 
 # --- the placement plan: zone -> pieces, packed in this order --------------------------
@@ -166,7 +175,7 @@ PLAN_REPITCH = {
     "PERS1": ["rpk_glyph_tab", "rpk_glyph_data3", "rpk_glyph_rec0"],
     "PERS2": ["rpk_glyph_rec1", "rpk_glyph_rec5", "rpk_glyph_rec6"],
 }
-PLAN = PLAN_REPITCH            # V1.2: REPITCH is FINAL; --without it falls back to PLAN_ROM
+PLAN = PLAN_REPITCH            # since V1.2: REPITCH is FINAL; --without it falls back to PLAN_ROM
 
 # --- the features: name -> (builder, image, base, placement keys, standalone blob files) --
 #   base "stock": built on true stock (MUTE MODE reads the stock PERSONALIZE arrays it
@@ -370,7 +379,7 @@ def wip_variant(flag):
     """--with / --without images are never the promoted one: refuse them up front without the
     opt-in, instead of after a full build at seal()."""
     if os.environ.get("KYOTI_ALLOW_WIP") != "1":
-        sys.exit(f"\n  Refusing to build: {flag} makes a WIP image, not KYOTI V1.2.\n"
+        sys.exit(f"\n  Refusing to build: {flag} makes a WIP image, not KYOTI V1.3.\n"
                  f"  If you meant it, set KYOTI_ALLOW_WIP=1:\n\n"
                  f"      KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py {flag} ...\n")
 
@@ -391,17 +400,17 @@ def apply_with(argv):
         FEATURES[a] = WIP_FEATURES[a]
     if "REPITCH_REPEAT98_KYOTI" in add:
         PLAN = PLAN_REPITCH
-    VERSTR = ("KV12+" + "".join(a[:3] for a in add))[:10]
-    TAG = "KYOTI_V1.2_WITH_" + "_".join(add)
+    VERSTR = ("KV13+" + "".join(a[:3] for a in add))[:10]
+    TAG = "KYOTI_V1.3_WITH_" + "_".join(add)
     OUTDIR = ROOT / "out/KYOTI_WIP" / TAG
     SANDBOX = OUTDIR / "_sandbox"
     print(f"  WIP IMAGE: with {', '.join(add)}  ->  OS VERSION {VERSTR!r}, {OUTDIR.relative_to(ROOT)}\n")
 
 
 def apply_without(argv):
-    """--without NAME[,NAME]: a BISECTION image -- KYOTI V1.2 minus those features, built
-    by the same method.  It gets its own OS VERSION ("KV12-NO-" + a short code per removed
-    feature, e.g. KV12-NO-SC) and its own directory out/KYOTI_BISECT/<tag>/, so it can never be
+    """--without NAME[,NAME]: a BISECTION image -- KYOTI V1.3 minus those features, built
+    by the same method.  It gets its own OS VERSION ("KV13-NO-" + a short code per removed
+    feature, e.g. KV13-NO-SC) and its own directory out/KYOTI_BISECT/<tag>/, so it can never be
     mistaken for, or overwrite, the real image."""
     global VERSTR, TAG, OUTDIR, SANDBOX, PLAN
     if "--without" not in argv:
@@ -423,8 +432,8 @@ def apply_without(argv):
              "RELOAD_FROM_PROJECT": "RL", "DIRECT_JUMP_KYOTI": "DJ", "REPITCH_REPEAT98_KYOTI": "RPK",
              "MIDI_PLAYS_FREE_FIX": "PF", "EMPTY_PATTERN_LED_FIX": "PL", "PART_CHANGE_CARRYOVER_FIX": "PR",
              "REC_TRIG_MUTE": "RTM"}
-    VERSTR = ("KV12-NO-" + "".join(short[d] for d in drop))[:10]
-    TAG = "KYOTI_V1.2_WITHOUT_" + "_".join(drop)
+    VERSTR = ("KV13-NO-" + "".join(short[d] for d in drop))[:10]
+    TAG = "KYOTI_V1.3_WITHOUT_" + "_".join(drop)
     OUTDIR = ROOT / "out/KYOTI_BISECT" / TAG
     SANDBOX = OUTDIR / "_sandbox"
     print(f"  BISECTION IMAGE: without {', '.join(drop)}  ->  OS VERSION {VERSTR!r}, "
@@ -462,6 +471,14 @@ def main():
             sys.exit(f"zone {z} 0x{lo:08x}..0x{hi:08x} lies in the parameter-page descriptor table "
                      f"0x{dlo:08x}..0x{dhi:08x}: live data, zeros included (reference/kb/caves.md §0)")
         print(f"  {z:7s} 0x{lo:08x}..0x{hi:08x} {hi-lo:5d} B  {cls:7s} {why}")
+
+    # SPRING's reclaim must be exactly the record stock's id2e points at: [P, P + 0x192)
+    if "SPRING" in RECLAIM_WHOLE:
+        sp = int.from_bytes(stock[o(0x400d5fdc) + 0x15 * 4:o(0x400d5fdc) + 0x15 * 4 + 4], "big")
+        if RECLAIM_WHOLE["SPRING"] != (sp, sp + DESC_REC) or \
+                not (sp <= ZONES["SPRING"][0] and ZONES["SPRING"][1] <= sp + DESC_REC):
+            sys.exit(f"SPRING reclaim {RECLAIM_WHOLE['SPRING']} / zone {ZONES['SPRING'][:2]} is not "
+                     f"SPRING's record 0x{sp:08x}..0x{sp + DESC_REC:08x} (P = id2e[0x15])")
 
     # the prepared base: stock with the reclaim zones zeroed
     prep = bytearray(stock)
@@ -685,6 +702,28 @@ def main():
         print(f"  reclaim ({', '.join(RECLAIM_WHOLE)}): unreferenced except by our own caves"
               + ("; both id2e[SPRING] -> NONE" if "SPRING" in RECLAIM_WHOLE else ""))
 
+    # descriptor table: outside a reclaimed record, change only what a standalone changes.
+    # (The pointer check above cannot see readers that index from a neighbour's P -- V1.2
+    # put REPITCH's widget over PLATE's encoder handlers and enable nibbles that way.)
+    dlo, dhi = DESCRIPTOR_TABLE
+    alone_sites = sorted({i for feat in FEATURES
+                          for i in delta(stock, (sb1 / "out" / FEATURES[feat][1]).read_bytes())
+                          if o(dlo) <= i < o(dhi)})
+    def near_alone(i):
+        import bisect
+        k = bisect.bisect_left(alone_sites, i - 3)
+        return k < len(alone_sites) and alone_sites[k] <= i + 3
+    dead = [RECLAIM_WHOLE["SPRING"]] if "SPRING" in RECLAIM_WHOLE else []
+    rogue = [i for i in range(o(dlo), o(dhi)) if comp[i] != stock[i]
+             and not any(lo <= i + BASE < hi for lo, hi in dead) and not near_alone(i)]
+    if rogue:
+        rec = lambda a: dlo + (a - dlo) // DESC_REC * DESC_REC
+        flag(f"descriptor table: {len(rogue)} byte(s) changed that no standalone changes, first "
+             f"0x{rogue[0] + BASE:08x} (record P 0x{rec(rogue[0] + BASE):08x})")
+    else:
+        print(f"  descriptor table: every change outside {'SPRING' if dead else 'no'} reclaimed "
+              f"record is a standalone feature's own edit")
+
     # REC_TRIG_MUTE: its reused dead routines are still unreachable from everything else
     if "REC_TRIG_MUTE" in FEATURES:
         inside = lambda a: any(lo <= a < hi for lo, hi in RTM_REGIONS)
@@ -741,7 +780,7 @@ def main():
     # --- write + wrap -----------------------------------------------------------------------
     mainos = OUTDIR / f"mainos_{TAG.lower()}.bin"
     mainos.write_bytes(bytes(comp))
-    seal(__file__, mainos)       # FINAL pins mainos_kyoti_v1.2.bin; --with/--without images are WIP
+    seal(__file__, mainos)       # FINAL pins mainos_kyoti_v1.2.bin (V1.3 is WIP until promoted); --with/--without images are WIP
     cmap = {"verstr": VERSTR, "zones": {z: [hex(lo), hex(hi), cls] for z, (lo, hi, cls, _) in ZONES.items()},
             "pieces": {k: {"zone": zone_of[k], "at": hex(place[k]), "size": size[k]} for k in place},
             "dram": dram_report,
