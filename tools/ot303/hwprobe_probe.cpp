@@ -213,7 +213,7 @@ int main(int argc, char** argv) {
         std::vector<double> per;
         for (size_t i = 1; i + 1 < mvals.size(); i++) per.push_back(2.0 * (mvals[i] >> 7) / mlens[i]);    // ticks are CLK/2
         std::sort(per.begin(), per.end());
-        std::printf("METER mode %d: %zu renders; cycles/sample by the timer: min %.1f median %.1f max %.1f; "
+        std::printf("METER mode %d (0 plain, else yielding): %zu renders; cycles/sample by the timer: min %.1f median %.1f max %.1f; "
                     "the bench's own count %.1f cycles/sample incl. the wrapper\n", (knob - 64) >> 3, per.size(),
                     per.empty() ? 0 : per.front(), per.empty() ? 0 : per[per.size() / 2], per.empty() ? 0 : per.back(),
                     double(totalCyc) / (frames * 16.0));

@@ -36029,3 +36029,10 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   flashed): 303 ≥ 64 = METER (core timer 0 per render → audio, `tools/ot303/hwrec/meter.py`
   decodes; modes: engine / nops / X×3 regions / Y×3 regions); PRE and square removed (32–63 plain
   riff); tone moved into region 1; dsp_xasm knows M_TCR0..M_TCSR0.
+- **S124 cont: DIAG8 on HW** — METER: engine 426 cycles/sample on BOTH cores; X/Y reads = nops;
+  budget is not it. T6 track recording of the dirty riff is bit-clean. MAIN recording with T6 MUTED
+  holds the muted riff on ~29 % of frames (every other frame): core 0's master mix uses stale mix
+  params on some frames. Lead: engine memory traffic delays host DMA 0/1 into core 0. **DIAG9**
+  (`140C_303D9`, syx `91aa7f8c…`, NOT flashed): 303 48–63 = riff rendered per sample after DSTR
+  shows no host block in flight (bounded); 32–47 plain riff for A/B; relocation + calibration
+  modes dropped.

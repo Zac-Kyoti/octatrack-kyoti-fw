@@ -31,7 +31,7 @@ PAYLOAD = {
     # xd: the run-time X block sits xd words BELOW the loader's copy (hq_reloc moves it on the first
     # call). Payload A = core 0, the only core running ESAI DMA (X:$8000-$833f, boot P:$3001d); its
     # engine block moves out of that memory block to X:$3224.. (Analog BD's free region $2840-$3940).
-    'A': dict(org=0x1252, dark=0x1586, end=0x1679, djeq_proc=0x1d7d, xd=0x5780,
+    'A': dict(org=0x1252, dark=0x1586, end=0x1679, djeq_proc=0x1d7d, xd=0,     # DIAG6/7's 0x5780 changed nothing
               xrun1=((0x89a4, 72), (0x89ec, 72), (0x8a34, 72)), xrun2=((0x8afc, 116), (0x8b70, 384))),
     'B': dict(org=0x1012, dark=0x1346, end=0x1439, djeq_proc=0x1b3d, xd=0,
               xrun1=((0x8464, 72), (0x84ac, 72), (0x84f4, 72)), xrun2=((0x85bc, 116), (0x8630, 384))),
@@ -131,7 +131,7 @@ def build(tag):
         checks.append((cal, f'bsr     func_{evs[target]:06x}', f'{site} -> {target}'))
     # region 2's calls into region 1 (assembled apart: placeholders, patched here)
     evchecks = []
-    for site, op in (('hq_cot0', 0x0d10c0), ('hq_cot1', 0x0d1080)):
+    for site, op in (('hq_cot0', 0x0d10c0), ('hq_cot1', 0x0d1080), ('hq_cot2', 0x0d1080)):
         cal = evs[site]
         assert evw[cal - ev_org] == op and evw[cal - ev_org + 1] == 0, f'{site}: placeholder moved'
         evw[cal - ev_org + 1] = (S['ot303'] - cal) & 0xffffff
@@ -187,11 +187,6 @@ def build(tag):
         X(S['VARS'] + i, v)
     for i, v in enumerate(TRIG):
         X(S['TRIG'] + i, v)
-    # the METER's calibration modes 1-7: 64-word, 64-aligned blocks (1 reads none; 2-4 X, 5-7 Y)
-    for m, v in enumerate((0, S['XB'], S['XB'] + d['xd'], 0x5900, S['YS'], 0x1000, 0xbc0), start=1):
-        assert v & 63 == 0
-        X(S['MTAB'] + m, v)
-    assert S['MTAB'] + 8 <= S['R2'] + 500 and S['MTAB'] >= S['KX'] + 216
     # b0 and kp/64 in run 2 (one entry more each: the last slope is 0)
     b0, kp = T['B0'], T['KP']
     assert len(b0) == len(kp) == 215

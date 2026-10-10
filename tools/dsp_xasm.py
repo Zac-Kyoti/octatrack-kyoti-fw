@@ -96,7 +96,7 @@ def disassemble(words, org):
 
 
 # the disassembler names some peripheral registers; the source writes their addresses
-PERIPH = {"m_tcr0": 0xffff8c, "m_tcpr0": 0xffff8d, "m_tlr0": 0xffff8e, "m_tcsr0": 0xffff8f}
+PERIPH = {"m_tcr0": 0xffff8c, "m_tcpr0": 0xffff8d, "m_tlr0": 0xffff8e, "m_tcsr0": 0xffff8f, "m_dstr": 0xfffff4}
 
 
 def _norm(text, syms):

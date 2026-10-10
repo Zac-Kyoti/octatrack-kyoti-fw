@@ -17,9 +17,10 @@
 ;                read-back pull, below), BEFORE DJ EQ when 303 is 0 (the burn probe's measure)
 ;   slot 7 303   bits 8-15: 0 off (stock DJ EQ), else, in sixteens, the track's audio is replaced
 ;                (both channels) by: 1-15 TONE (a 110 Hz saw; the engine does not run);
-;                16-31 TONE too (DIAG6's XHAM band there crashed core 0 at once); 32-63 RIFF (the
-;                engine, saw: a built-in 16-step bar of the Hot voice, 130 BPM); 64-127 METER
-;                (hwprobe_ev.asm hq_meng: each render timed by timer 0 and written as the audio)
+;                16-31 TONE too (DIAG6's XHAM band there crashed core 0 at once); 32-47 RIFF (the
+;                engine, saw: a built-in 16-step bar of the Hot voice, 130 BPM); 48-63 RIFF that
+;                yields to the ColdFire's host DMA before each sample; 64-127 METER (hwprobe_ev.asm
+;                hq_meng: each render timed by timer 0 and written as the audio)
 ; DIAG2 on the unit: the riff was clean only when its call ended late enough. Stock copies each
 ; track's block into the read-back buffer after FX2 while the ColdFire's DMA pulls that buffer;
 ; a call that ends inside the pull's window tears the block (octabam FAILURE_MODES, "Junk on main
@@ -55,8 +56,8 @@ XM      equ     XB+$40
 MSAV    equ     XB+$35          ; m0..m7 on entry (the gap after XW)
 TPH     equ     XB+$49          ; the tone's phase (the gap after XC)
 TINC    equ     XB+$4a          ; the tone's increment
-MT0     equ     XB+$4b          ; the METER: unused (the timer restarts per render)
-MTAB    equ     R2+440          ; the METER's 7 calibration modes' 64-word blocks (hwprobe_ev.asm)
+YCNT    equ     XB+$4c          ; the yielding render: samples left
+YPTR    equ     XB+$4d          ;   and where the next one goes
 T110    equ     $a3a3           ; 110 Hz: 2^24 * 110 / 44100
 T880    equ     $51d1c          ; 880 Hz
 WB      equ     XB+$70          ; X, 76 words after the engine's block

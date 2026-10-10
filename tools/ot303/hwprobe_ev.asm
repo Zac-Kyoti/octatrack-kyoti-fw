@@ -90,95 +90,30 @@ hq_burn:
 hq_bzero:
         rts
 
-; ---- RELOC (payload A; the builder nops the call on B): on the first call with 303 up, copy the
-; engine's X block (run 1) and the packed tables (run 2) from where the loader put them (XD above)
-; to their run-time addresses. RFLAG, in the loader's copy, marks it done until power-off.
-; m1 is linear (hq_entry). Uses a, r1, n1; keeps x0 x1 y1. Paced: on core 0 the loader's block shares
-; a memory block with the ESAI DMA, and back-to-back reads there starve it (DIAG6's XHAM crashed).
-hq_reloc:
-        move    x:>RFLAG,a
-        tst     a
-        bne     hq_rldone
-        move    #>NXD,n1
-        move    #>OLD1,r1
-        do      #216,hq_rla
-        move    x:(r1),a
-        nop                                     ; one read of the loader's block in four cycles
-        move    a,x:(r1+n1)
-        nop
-        move    (r1)+
-hq_rla:
-        move    #>OLD2,r1
-        do      #500,hq_rlb
-        move    x:(r1),a
-        nop                                     ; one read of the loader's block in four cycles
-        move    a,x:(r1+n1)
-        nop
-        move    (r1)+
-hq_rlb:
-        move    #>1,a
-        move    a,x:>RFLAG
-hq_rldone:
-        rts
-
-; ---- the render (r7 = KCNT, r3 = RBUF): the engine, or with 303 >= 64 the METER. METER mode m =
-; (303 - 64) >> 3: 0 the engine (the riff, unheard), 1-7 a calibration loop over 32 x KCNT
-; iterations of three instructions, one of them a read from MTAB[m]'s 64-word block: 1 none,
-; 2 X the engine's block, 3 X its loader copy, 4 X stock's instance state, 5 Y the engine's state,
-; 6 Y an FX1 slot, 7 Y the engine's coefficient table.
-; Timer 0 (CLK/2) restarts at the render's start; RBUF[0] = ticks << 7, RBUF[1..KCNT-1] = -(KCNT << 16).
+; ---- the render (r7 = KCNT, r3 = RBUF). DIAG9: 303 32-47 the plain riff; 48-63 the riff YIELDING:
+; before each sample it waits (at most 512 polls) until host DMA channels 0 and 1 are idle (DSTR
+; DTD0, DTD1; both run DTM 001: DE and DTD clear for the length of a ColdFire block); 64-127 the
+; METER: (303 - 64) >> 3 = 0 the plain engine, else the yielding one. Timer 0 (CLK/2) restarts at
+; the render's start; RBUF[0] = ticks << 7, RBUF[1..KCNT-1] = -(KCNT << 16).
 hq_meng:
         move    x:(r5+D_KNB),a
-        sub     #>$4000,a
-        bge     hq_meter
-hq_cot0:
-        dc      $0d10c0,0                       ; bra >ot303 (its rts returns to our caller)
-hq_meter:
-        asr     #11,a,a                         ; m = (303 - 64) >> 3
-        move    a1,n1
+        sub     #>$3000,a
+        blt     hq_plain                        ; 32-47
+        sub     #>$1000,a
+        blt     hq_yield                        ; 48-63
+        asr     #11,a,a                         ; METER mode
         clr     b
         move    b,x:>$ffff8f                    ; TCSR0: stop
         move    b,x:>$ffff8e                    ; TLR0 = 0
         move    #>1,x0
         move    x0,x:>$ffff8f                   ; TCSR0: TE, timer mode, CLK/2: TCR0 from 0
         tst     a
-        bne     hq_mcal
+        bne     hq_mylp
 hq_cot1:
         dc      $0d1080,0                       ; bsr >ot303
         bra     hq_mend
-hq_mcal:
-        move    #>MTAB,r1
-        move    x:(r5+D_KCNT),b
-        asl     #5,b,b
-        move    #>63,x1
-        move    x1,m1
-        move    x:(r1+n1),r1                    ; the mode's block
-        cmp     #<1,a
-        beq     hq_mnop                         ; 1: no access
-        cmp     #<5,a
-        bge     hq_ylp                          ; 5-7: Y; 2-4: X
-        do      b1,hq_mxe
-        move    x:(r1)+,x0
-        nop
-        nop
-hq_mxe:
-        bra     hq_mlin
-hq_ylp:
-        do      b1,hq_yend
-        move    y:(r1)+,x0
-        nop
-        nop
-hq_yend:
-        bra     hq_mlin
-hq_mnop:
-        do      b1,hq_mne
-        nop
-        nop
-        nop
-hq_mne:
-hq_mlin:
-        move    #>$ffffff,x1
-        move    x1,m1
+hq_mylp:
+        bsr     hq_yield
 hq_mend:
         move    x:>$ffff8c,a                    ; TCR0: ticks since the start
         move    #>XM,r5
@@ -197,4 +132,33 @@ hq_mend:
         nop
         nop
 hq_mret:
+        rts
+hq_plain:
+hq_cot0:
+        dc      $0d10c0,0                       ; bra >ot303 (its rts returns to our caller)
+; the yielding render: one sample at a time, each after host DMA 0 and 1 are idle
+hq_yield:
+        move    x:(r5+D_KCNT),a
+        move    a1,x:>YCNT
+        move    #>RBUF,a
+        move    a1,x:>YPTR
+hq_ylp:
+        do      #512,hq_ywe
+        move    x:>$fffff4,a                    ; DSTR
+        and     #>3,a
+        cmp     #<3,a
+        brkeq                                   ; DTD0 and DTD1: no block in flight
+hq_ywe:
+        move    x:>YPTR,r3
+        move    #>1,r7
+hq_cot2:
+        dc      $0d1080,0                       ; bsr >ot303
+        move    #>XM,r5
+        move    x:>YPTR,a
+        add     #<1,a
+        move    a1,x:>YPTR
+        move    x:>YCNT,a
+        sub     #<1,a
+        move    a1,x:>YCNT
+        bne     hq_ylp
         rts

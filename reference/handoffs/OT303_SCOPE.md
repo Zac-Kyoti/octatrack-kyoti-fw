@@ -1656,3 +1656,57 @@ recorder source T6, 12 s). The riff sounded dirty and the master was dirty with 
   - A dirty recording → the master's digital mix is corrupted (the `X:$4400` transfer, or
     core 0's mix).
   - A clean recording while the speakers are dirty → the ESAI output DMA (starved, like XHAM's crash).
+
+### The MAIN recording, T6 muted (user, 2026-10-09), and DIAG9 (built, NOT flashed)
+
+**The recording:** `out/ot303/hwprobe/hw/diag8d_main_t6muted.wav`, DIAG8 at 303 = 40, recorder
+SRC3 = MAIN, T6 muted, nothing else playing.
+- **It is not silent.** 28.8% of the 16-sample frames carry audio, mostly every other frame
+  (`#.#.#...#.#...`), aligned to frame boundaries. L = R in 99.9% of samples.
+- **The audio is the muted riff itself.** Its note sequence per quarter-step (64, 129, 86, 107 Hz,
+  rests where the pattern rests) matches T6's track recording.
+- **Its level is in the range of a normally mixed track:** per leaked frame ~0.005 rms, against
+  the track tap's 0.053.
+- **So on some frames core 0's master mix treats T6 as unmuted:** it uses mix parameters other
+  than the current frame's. The frame gating is the "dirt".
+  - With T6 unmuted, the same wrong frames change its gain, which explains why the riff itself
+    sounds dirty while its track data is perfect.
+  - With the tone, or an unmuted constant level, wrong-parameter frames are inaudible. So the
+    tone + BURN tests could never show this.
+- **Lead:**
+  - The ColdFire's per-frame host transfers into core 0 (records `X:$080`, the `x:$41f`
+    ping-pong, the `X:$4400` return block) arrive late or torn when the engine's dense memory
+    traffic holds up DMA channel 0/1, so the mix reads stale parameters on some frames.
+  - It fits: only memory-dense code harms (engine, XHAM; never nops); the X address doesn't
+    matter; the riff's timing (PRE) moves the effect around; XHAM (100% X, ~4,000 cycles) kills the
+    protocol outright (a power cycle is needed).
+  - Core 1's transfers do not feed the master mix.
+
+**DIAG9:** `out/OCTATRACK_OS1.40C_OT303_DIAG9.syx`
+(`91aa7f8c54a81af375b024357379088f6f2f335c6e3ca3a08c7010c1861cfc86`, version `140C_303D9`).
+
+| 303 | mode |
+|---|---|
+| 1–31 | TONE |
+| 32–47 | plain RIFF |
+| **48–63** | **YIELDING RIFF** |
+| 64–71 | METER plain |
+| 72–127 | METER yielding |
+
+- **The yielding riff** (`hq_yield`):
+  - one sample at a time;
+  - before each, a bounded poll (≤ 512 × 4 instructions) of `M_DSTR` until DTD0 and DTD1 are both
+    set, i.e. no ColdFire block in flight. Both host channels run DTM 001: DE and DTD clear for the
+    length of a block.
+  - `brkeq` leaves the poll; `dsp_xasm` knows `M_DSTR`.
+- **Dropped:**
+  - DIAG6/7's core-0 X relocation (it changed nothing; `xd = 0` again);
+  - the METER's calibration modes (memory reads cost nops on both cores, settled).
+- **Checks:** bench bit-exact for the plain and yielding riffs on both payloads (the yielding riff
+  is +128 cycles/sample on the cycle table: per-sample calls); ot_emu ALL GOOD, the engine running
+  on core 0 in both riff modes.
+
+**The test** (T6 muted, master):
+1. 40 → dirt expected.
+2. 56 → silence if the lead holds.
+3. Then unmuted.
