@@ -1611,3 +1611,35 @@ of `X:$8000–$8FFF`.
 **The test:** a track recording of T6, then of T2, stepping 64 → 120 by 8 with ~3 s each.
 - The core 0 / core 1 ratio per mode tells whether memory traffic costs more on core 0, and where.
 - Mode 0 against the bench's 366 gives the engine's real cost on each core.
+
+### DIAG8 on the unit (user, 2026-10-09): the METER readings
+
+The recordings are `out/ot303/hwprobe/hw/diag8_t6.wav` and `diag8_t2.wav` (from `~/Desktop/DIAG8*.wav`).
+- Track recordings, 24-bit, about 48 s each, 303 stepped 64 → 120. The transport was stopped, so
+  every render was 16 samples.
+- Every render decoded on both tracks: 132,996 on T6 and 136,647 on T2. L = R throughout, and the
+  ruler read the gain as exactly 1.
+
+| | T6 (core 0) | T2 (core 1) |
+|---|---|---|
+| mode 0, the engine (riff) | **426.2** cycles/sample (worst render 451.6) | **426.2** (451.6) |
+| modes 1–7: 96 instructions/sample, none / X / Y reads | 99.2–100.0, all modes alike | 97.7–100.1, all modes alike |
+
+**What this settles:**
+- **The engine costs 426 cycles/sample on the chip, on both cores:** 1.16× the cycle table's 366,
+  inside the VOCODER's 1.12–1.25 margin.
+- **Memory reads cost the same as nops on both cores, in every region tested.** There is no
+  core-0 memory penalty, and the cycle budget is nowhere near: the engine plus PRE 17 is ~850 of
+  ~3,120.
+- So **the crash is not running out of time.** The cost-penalty hypothesis is dead.
+- **T6's track signal was bit-clean for the 5 s the engine ran (mode 0):** not one torn frame.
+  - The riff's dirt that the user hears may therefore not be in the track's read-back at all, but
+    on core 0's audio output: core 0 alone runs the ESAI DMA to the DACs and mixes the master.
+  - This matches the "dirt on the master with T6 muted" every round, and the user's own note that
+    some steps may be a clean riff with dirt only on the master.
+- **Next, decisive and with no flash:** a track recording of T6's riff (303 = 40) while it sounds
+  dirty.
+  - Clean recording → the dirt is downstream: core 0's mix/ESAI path, starved or disturbed by the
+    engine's memory traffic. XHAM's instant crash (100% X reads, 4,096 cycles at a time) is the
+    extreme case.
+  - Torn recording → the read-back after all.
