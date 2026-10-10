@@ -780,7 +780,7 @@ def main():
     # --- write + wrap -----------------------------------------------------------------------
     mainos = OUTDIR / f"mainos_{TAG.lower()}.bin"
     mainos.write_bytes(bytes(comp))
-    seal(__file__, mainos)       # FINAL pins mainos_kyoti_v1.2.bin (V1.3 is WIP until promoted); --with/--without images are WIP
+    seal(__file__, mainos)       # FINAL pins mainos_kyoti_v1.3.bin; --with/--without images are WIP
     cmap = {"verstr": VERSTR, "zones": {z: [hex(lo), hex(hi), cls] for z, (lo, hi, cls, _) in ZONES.items()},
             "pieces": {k: {"zone": zone_of[k], "at": hex(place[k]), "size": size[k]} for k in place},
             "dram": dram_report,

@@ -56,7 +56,7 @@ FINAL = {
         "mainos_repitch_repeat98_kyoti_batch_bugfixes.bin":  "07aaa68bf0e0fd5d67bd0a146959cf4647c5dd8cfbf3e4b1f45cce14f348b4f4",
     },
     "build_kyoti.py": {
-        "mainos_kyoti_v1.2.bin":                             "8dede0c039fb1dcd08acbe5cc882dbd2f614c63a88a11497a3494ad7a533508f",
+        "mainos_kyoti_v1.3.bin":                             "d14555ecb5e789dd3335a0d6fad12c1d27a0ccec1f1c69ff83acf5cad16508aa",
     },
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
 }
