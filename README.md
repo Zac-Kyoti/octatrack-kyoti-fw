@@ -152,7 +152,7 @@ DARK REV on each run clean beside up to three DJ EQs on T5–T8 and four on T1�
 effects than that on those tracks can overload the DSP (a loud tone, and the sequencer stops).
 RPS9 costs about a third as much.
 
-**Hardware:** confirmed, including the limit above (this build's RPSP runs in KYOTI V1.2 on
+**Hardware:** confirmed, including the limit above (this build's RPSP runs in KYOTI V1.3 on
 the unit). Not specifically tested: RTRG retrigs.\
 **Final build:** [`tools/build_repitch_repeat98_kyoti.py`](tools/build_repitch_repeat98_kyoti.py) →
 `OCTATRACK_OS1.40C_REPITCH_REPEAT98_KYOTI`
@@ -228,17 +228,17 @@ flashed as such.\
 **Final build:** [`tools/build_bugbuilds.py`](tools/build_bugbuilds.py) →
 `out/Bugbuilds/OCTATRACK_OS1.40C_<FEATURE>_BATCH_BUGFIXES`
 
-### KYOTI V1.2
+### KYOTI V1.3
 
 Every feature above and all three BATCH_BUGFIXES in **one image**. The boot splash and
-SYSTEM STATUS → OS VERSION read `KYOTI V1.2`. It replaces KYOTI V1.1 and the withdrawn
+SYSTEM STATUS → OS VERSION read `KYOTI V1.3`. It replaces KYOTI V1.2 and V1.1, and the withdrawn
 V1.0 (see below).
 
 **Sample memory:** 6 KB of the 85.5 MB sample/recorder pool, for code loaded at boot; the
 MEMORY page still reads 85.5 MB.\
 **Hardware:** confirmed.\
 **Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) →
-`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.2`
+`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.3`
 
 ---
 
@@ -246,8 +246,10 @@ MEMORY page still reads 85.5 MB.\
 
 **KYOTI V1.0 (the earlier all-in-one image) is withdrawn as of 2026-10-06.** It can crash
 the unit when an encoder is turned on an FX page set to NONE, and when T8's PLAYBACK or LFO
-page is shown with T8 as MASTER. If you flashed it, flash KYOTI V1.2 above, one of the
+page is shown with T8 as MASTER. If you flashed it, flash KYOTI V1.3 above, one of the
 single-feature builds, or stock OS 1.40C. None of those has this problem.
+
+**KYOTI V1.2 breaks PLATE REVERB** (a damaged page, and its knobs do nothing). Flash KYOTI V1.3.
 
 **This is for personal study.** Updating an Elektron unit with anything other than
 official firmware is risky: it puts the warranty in question and can leave the unit

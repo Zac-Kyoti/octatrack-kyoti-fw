@@ -111,7 +111,7 @@ unit that boots; if it doesn't, use §3b.
 | build | OS VERSION |
 |---|---|
 | MUTE_MODES, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT, QUANTIZE_LIVE_REC_TOGGLE | `140C_KYOTI` |
-| KYOTI V1.2 (every feature in one image) | `KYOTI V1.2` |
+| KYOTI V1.3 (every feature in one image) | `KYOTI V1.3` |
 | DIRECT_JUMP_KYOTI | `140C_KDJ7` |
 | REPITCH_REPEAT98_KYOTI | `140C_RPK17` |
 | REC_TRIG_MUTE | `140C_RTM` |

@@ -35814,3 +35814,7 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
 * **Hardware test for V1.3:** PLATE REV on FX2 of a T1–T4 track and a T5–T8 track: all 10 controls
   present and audible. Repeat the V1.2 smoke tests (REPITCH RPSP/RPS9 + its glyphs, since
   `rpk_widget7` moved; DARK REV; COMPRESSOR side-chain).
+* **2026-10-10 (later): KYOTI V1.3 PROMOTED to FINAL.** The user flashed syx `9f6d2374…`:
+  everything works, PLATE REVERB fixed. Pinned mainos `d14555ec…` (replaces V1.2's
+  `8dede0c0…`). It rebuilds and seals without the opt-in. README, BUILD_KYOTI, FLASHING and START_HERE name V1.3,
+  and README's "Before you flash" tells V1.2 users to move to V1.3. A copy is in the main checkout's out/KYOTI/.

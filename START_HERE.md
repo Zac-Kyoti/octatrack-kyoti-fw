@@ -106,7 +106,7 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | REPITCH_REPEAT98_KYOTI DSP gate | `tools/repitch_dsp_*` (bit-exact against the reference engine) |
 | DSP assembly | `tools/dsp_xasm.py` over `vendor/dsp56300`'s `dsp_asm` |
 | a final build | `tools/build_<feature>.py` → `.syx` (MIDI) + `.bin` (CF card); see `BUILD_KYOTI.md` |
-| the combined image | `tools/build_kyoti.py` — **KYOTI V1.2, FINAL 2026-10-08** (V1.0 withdrawn; see §6) |
+| the combined image | `tools/build_kyoti.py` — **KYOTI V1.3, FINAL 2026-10-10** (V1.0 withdrawn; see §6) |
 | octabam's remixer (`make remix`) | `sh tools/octabam_remixer.sh` — its own clone at `~/Documents/octabam`, fast-forwarded to octabam's `main` on every launch; `refs/octabam` stays the pinned research harness |
 | each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final, eight images) |
 | DIRECT JUMP V6.4, the OT↔AR parity build | `tools/build_direct_jump_v6_4.py` — WIP **by design**: kept buildable at the user's request (hardware-confirmed image `4a6c1b5e…`), never to be promoted |
@@ -153,14 +153,16 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
-- **KYOTI V1.2** (`tools/build_kyoti.py`) — **FINAL 2026-10-08**, syx `cd5a723b…`, mainos
-  `8dede0c0…`; flashed by the user: everything works. V1.1 + REPITCH rev 17 (RELOAD in DRAM,
+- **KYOTI V1.3** (`tools/build_kyoti.py`) — **FINAL 2026-10-10**, syx `9f6d2374…`, mainos
+  `d14555ec…`; flashed by the user: everything works, PLATE REVERB fixed. It is V1.2 with
+  SPRING's reclaim bounded by its real record (P..P+0x192); V1.2 (syx `cd5a723b…`, FINAL
+  2026-10-08) overwrote PLATE's page tail and is superseded. V1.2 = V1.1 + REPITCH rev 17 (RELOAD in DRAM,
   one 6 KB page) + the octabam #561 review fixes (DIRECT JUMP's scale guard, RELOAD's
   mvz.w). Its pin breaks whenever a feature it contains is re-promoted: rebuild, re-test,
   re-pin with that feature's Bugbuild. `--without REPITCH_REPEAT98_KYOTI` gives V1.1's
   ROM-only layout (WIP, bisection).
 - **DIRECT_JUMP_KYOTI / RELOAD_FROM_PROJECT standalones and their Bugbuilds** — re-pinned
-  2026-10-08 with the review fixes; same sources as V1.2, not flashed on their own. The
+  2026-10-08 with the review fixes; same sources as V1.2/V1.3, not flashed on their own. The
   DIRECT JUMP standalone now folds in MIDI_PLAYS_FREE_FIX.
 - **KYOTI V1.0** (`tools/build_kyoti.py`) — **WITHDRAWN 2026-10-06** (was FINAL 2026-09-30,
   syx `5106f7fb…`). Its midisc pads are live stock parameter-page tables. Confirmed crashes:

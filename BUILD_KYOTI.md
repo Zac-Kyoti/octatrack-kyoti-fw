@@ -63,7 +63,7 @@ OCTATRACK_<FEATURE>.bin               flash from the CF card (faster)
 alone. MIDI_PLAYS_FREE_FIX writes only its `mainos_` image; to flash it on its own, use the
 no-assembler patch below or wrap it as its builder's header shows.
 
-### The combined image: KYOTI V1.2
+### The combined image: KYOTI V1.3
 
 Every FINAL feature in one image:
 
@@ -71,7 +71,7 @@ Every FINAL feature in one image:
 python3 tools/build_kyoti.py
 ```
 
-It writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.2.syx` and `.bin` (OS VERSION `KYOTI V1.2`).
+It writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.3.syx` and `.bin` (OS VERSION `KYOTI V1.3`).
 
 > **Sample memory.**
 > - **This image costs one 6 KB arena page:** with REPITCH it no longer fits ROM, so
@@ -82,7 +82,8 @@ It writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.2.syx` and `.bin` (OS VERSION `K
 > - An octabam-built image (octabam's own remixer) reserves a fixed **10 MiB** whenever any
 >   module runs from DRAM.
 
-KYOTI V1.0 was withdrawn on 2026-10-06; V1.1 replaced it, and V1.2 (with REPITCH) replaces V1.1.
+KYOTI V1.0 was withdrawn on 2026-10-06; V1.1 replaced it, V1.2 (with REPITCH) replaced V1.1, and
+V1.3 replaces V1.2, whose SPRING reclaim overwrote PLATE REVERB's page (`reference/kb/caves.md` §0).
 
 Every build is a **guarded binary patch**: it asserts the stock bytes at each splice
 site, checks that its code caves are free and non-overlapping, takes every detour target
