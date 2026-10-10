@@ -121,7 +121,7 @@ def build(tag):
     words[bra - d['org'] + 1] = (d['djeq_proc'] - bra) & 0xffffff
     checks = [(bra, f'bra     func_{d["djeq_proc"]:06x}', 'exit branch')]
     for site, target in (('hq_callev', 'hq_event'), ('hq_cbr0', 'hq_burn'), ('hq_cbr1', 'hq_burn'),
-                         ('hq_cmeng', 'hq_meng'), ('hq_crel', 'hq_reloc')):
+                         ('hq_cstr', 'hq_stress'), ('hq_crel', 'hq_reloc')):
         cal = S[site]
         assert words[cal - d['org']] == 0x0d1080 and words[cal - d['org'] + 1] == 0, f'{site}: bsr placeholder moved'
         if site == 'hq_crel' and not d['xd']:
@@ -131,7 +131,7 @@ def build(tag):
         checks.append((cal, f'bsr     func_{evs[target]:06x}', f'{site} -> {target}'))
     # region 2's calls into region 1 (assembled apart: placeholders, patched here)
     evchecks = []
-    for site, op in (('hq_cot0', 0x0d10c0), ('hq_cot1', 0x0d1080), ('hq_cot2', 0x0d1080)):
+    for site, op in (('hq_cot1', 0x0d1080),):
         cal = evs[site]
         assert evw[cal - ev_org] == op and evw[cal - ev_org + 1] == 0, f'{site}: placeholder moved'
         evw[cal - ev_org + 1] = (S['ot303'] - cal) & 0xffffff
@@ -179,6 +179,7 @@ def build(tag):
     for i, v in enumerate(SAW + SQUARE):
         X(S['SAWW'] + i, v)
     X('L0C', HOST['L0_16']); X('AG8C', HOST['AG_8']); X('AMPT', AMPT)
+    X('TINC', S['T110'])                                               # the tone's 110 Hz increment
     for i, v in enumerate(T['HB1C'] + T['HB1C']):
         X(S['HB1I'] + i, v)
     for i, v in enumerate(PATTERN):

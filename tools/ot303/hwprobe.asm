@@ -17,10 +17,10 @@
 ;                read-back pull, below), BEFORE DJ EQ when 303 is 0 (the burn probe's measure)
 ;   slot 7 303   bits 8-15: 0 off (stock DJ EQ), else, in sixteens, the track's audio is replaced
 ;                (both channels) by: 1-15 TONE (a 110 Hz saw; the engine does not run);
-;                16-31 TONE too (DIAG6's XHAM band there crashed core 0 at once); 32-47 RIFF (the
-;                engine, saw: a built-in 16-step bar of the Hot voice, 130 BPM); 48-63 RIFF that
-;                yields to the ColdFire's host DMA before each sample; 64-127 METER (hwprobe_ev.asm
-;                hq_meng: each render timed by timer 0 and written as the audio)
+;                16-31 TONE too (DIAG6's XHAM band there crashed core 0 at once); 32-63 RIFF (the
+;                engine, saw: a built-in 16-step bar of the Hot voice, 130 BPM); 64-127 STRESS +
+;                TONE (hwprobe_ev.asm hq_stress: a workload before each call's tone; listen to the
+;                master with the track MUTED: a leak of the tone = the workload breaks the mix)
 ; DIAG2 on the unit: the riff was clean only when its call ended late enough. Stock copies each
 ; track's block into the read-back buffer after FX2 while the ColdFire's DMA pulls that buffer;
 ; a call that ends inside the pull's window tears the block (octabam FAILURE_MODES, "Junk on main
@@ -56,8 +56,6 @@ XM      equ     XB+$40
 MSAV    equ     XB+$35          ; m0..m7 on entry (the gap after XW)
 TPH     equ     XB+$49          ; the tone's phase (the gap after XC)
 TINC    equ     XB+$4a          ; the tone's increment
-YCNT    equ     XB+$4c          ; the yielding render: samples left
-YPTR    equ     XB+$4d          ;   and where the next one goes
 T110    equ     $a3a3           ; 110 Hz: 2^24 * 110 / 44100
 T880    equ     $51d1c          ; 880 Hz
 WB      equ     XB+$70          ; X, 76 words after the engine's block
@@ -178,8 +176,8 @@ hq_run:
         move    n7,b
         move    b,x:(r5+D_REM)
         move    r0,x:(r5+D_OUTA)
-        move    #>T110,x0
-        move    x0,x:(r5+D_TINC)
+hq_cstr:
+        dc      $0d1080,0                       ; bsr >hq_stress: 303 >= 64, a workload before the tone
 ; render up to each event, then the event
 hq_loop:
         move    x:(r5+D_EVC),a
@@ -197,13 +195,13 @@ hq_noev:
         move    x:(r5+D_BAND),a
         tst     a
         beq     hq_notengine                    ; TONE: no engine
-        move    #>1,x0
-        cmp     x0,a
+        cmp     #<1,a
         beq     hq_notengine                    ; 16-31: TONE as well
+        cmp     #<4,a
+        bge     hq_notengine                    ; 64-127: TONE (after the STRESS workload)
         move    b1,r7
         move    #>RBUF,r3
-hq_cmeng:
-        dc      $0d1080,0                       ; bsr >hq_meng: the engine, or (303 >= 64) the METER
+        bsr     ot303
         move    #>XM,r5
         bra     hq_notone
 hq_notengine:

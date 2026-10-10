@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
     const int burn = std::getenv("HWP_BURN") ? std::atoi(std::getenv("HWP_BURN")) : 0;    // page-2 slot 6
     mem.set(MemArea_X, PARB + 0xc, (uint32_t(burn & 0x7f) << 16) | (uint32_t(knob & 0x7f) << 8));
     const int pre = 0;                                                                     // DIAG8: no PRE
-    const bool meter = knob >= 64;                                       // DIAG8: the METER band (no twin compare)
+    const bool meter = false;                                            // DIAG10: 64-127 = STRESS + TONE
     std::vector<int32_t> mvals; std::vector<int> mlens;
     uint64_t totalCyc = 0, worstFrame = 0, worstInit = 0; long calls = 0;
     // one call; returns its cycles
@@ -182,7 +182,7 @@ int main(int argc, char** argv) {
             if (!alarm) { e.tick(); }
             evc--;
             int32_t want = e.outW;
-            bool toneNow = band <= 1 || alarm;
+            bool toneNow = band <= 1 || band >= 4 || alarm;
             if (toneNow) { tph = (tph + tinc) & 0xffffff; want = sx(tph) >> 2; }
             int32_t l = gx(AUD + 2 * j), r = gx(AUD + 2 * j + 1);
             if (meter) {                                                 // ticks, then -KCNT for the rest of the render
@@ -219,7 +219,7 @@ int main(int argc, char** argv) {
                     double(totalCyc) / (frames * 16.0));
         return 0;
     }
-    const char* what[] = {"TONE", "TONE", "RIFF", "RIFF", "RIFF"};
+    const char* what[] = {"TONE", "TONE", "RIFF", "RIFF", "STRESS + TONE"};
     if (burn || pre) std::printf("BURN %d PRE %d: +%d cycles a sample expected (24 x each)\n", burn, pre, 24 * (burn + pre));
     std::printf("BIT-EXACT: %ld samples, %s%s, %ld calls; %.1f cycles/sample incl. the wrapper (worst frame %.1f)\n",
                 sample, what[band < 4 ? band : 4], corrupt ? " (a table word changed mid-run: the alarm tone followed)" : "",

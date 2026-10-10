@@ -1710,3 +1710,48 @@ SRC3 = MAIN, T6 muted, nothing else playing.
 1. 40 → dirt expected.
 2. 56 → silence if the lead holds.
 3. Then unmuted.
+
+### DIAG9 on the unit (user, 2026-10-09), and DIAG10 (built, NOT flashed)
+
+**DIAG9:**
+- **The yielding riff (48) silenced the voice and crashed the sequencer at once.** The likely reason:
+  DSTR's DTD0/DTD1 are not both set as often as assumed, so each sample polled its full 512 times
+  (~2,500 cycles) and core 0 overran.
+- **Mute checks on DIAG9, T6 muted:**
+  - 303 = 8 (tone): master **silent**.
+  - 303 = 8 with BURN 10/20/30/40 (up to ~960 cycles/sample, no memory work): master **silent**.
+  - 303 = 40 (riff): the usual dirt.
+- **So the master leak needs the engine's work, not time and not the wrapper.**
+- **What the DSP56300 Family Manual says** (local copy `out/ot303/refs/56300fm.pdf`):
+  - §2.3.2: DO loops are interruptible; only REP is not.
+  - §10.3.2: if the core and a DMA channel want the same internal memory partition, **the core
+    always wins**, and the DMA waits until the core leaves that partition alone for a cycle. The
+    partition is 256 words on older parts; NXP's engineering bulletins give 1,024 words on HiP4/HiP7
+    derivatives (the DSP56721's own size is unconfirmed).
+  - The DSP56721 errata (ES151–153) say nothing about loops or DMA.
+- **Emulator write map** (BOTLI, 600 frames, stock): stock writes Y only below `$800` on both
+  cores, so the engine's Y blocks are not shared. Core 0 alternates its buffer sets `X:$2000–$25ff` /
+  `X:$4000–$45ff` frame by frame (ping-pong).
+
+**DIAG10:** `out/OCTATRACK_OS1.40C_OT303_DIAG10.syx`
+(`d17059df20144ba505011e9f88be1d1897c00dea614849703dd9c0dff7627af3`, version `140C_303DA`).
+- **303 bands:** 1–31 TONE; 32–63 plain RIFF; **64–127 STRESS + TONE**.
+- **STRESS:** a workload of `n7 × 128` iterations of a three-instruction body, run once per call
+  before the tone (~400 cycles/sample, like the engine). Mode (303 − 64) >> 3, safest first:
+
+  | 303 | workload |
+  |---|---|
+  | 64 | `div`, no memory |
+  | 72 | `mac`, no memory |
+  | 80 | Y reads |
+  | 88 | Y writes (`Y:$ff0`, 16) |
+  | 96 | X:Y parallel reads |
+  | 104 | `mac` + X:Y reads (the half-band's shape) |
+  | 112 | the engine itself (no events) |
+  | 120 | X reads (the engine's X block) |
+
+- **The detector:** T6 muted, listen to the master. Any tone or crackle means the workload breaks
+  core 0's mix.
+- **Dropped:** the meter, the yielding riff, the per-call TINC store (the loader presets it).
+- **Checks:** bench bit-exact for every band on both payloads, every mode ~427–430 cycles/sample;
+  ot_emu ALL GOOD.

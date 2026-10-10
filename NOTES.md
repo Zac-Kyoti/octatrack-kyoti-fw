@@ -36036,3 +36036,8 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   (`140C_303D9`, syx `91aa7f8c…`, NOT flashed): 303 48–63 = riff rendered per sample after DSTR
   shows no host block in flight (bounded); 32–47 plain riff for A/B; relocation + calibration
   modes dropped.
+- **S124 cont: DIAG9 on HW** — yielding riff crashed at 48 (DSTR polls ran to their cap). T6 muted:
+  tone and tone+BURN ≤40 → master silent; riff → dirt. So the leak needs the ENGINE's work. Manual
+  §10.3.2: core beats DMA on a shared internal partition. **DIAG10** (`140C_303DA`, syx `d17059df…`,
+  NOT flashed): 303 ≥ 64 = 8 STRESS workloads (div / mac / Y rd / Y wr / XY rd / mac+XY / engine /
+  X rd) before a tone; listen to the master with T6 muted.

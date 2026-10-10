@@ -90,75 +90,96 @@ hq_burn:
 hq_bzero:
         rts
 
-; ---- the render (r7 = KCNT, r3 = RBUF). DIAG9: 303 32-47 the plain riff; 48-63 the riff YIELDING:
-; before each sample it waits (at most 512 polls) until host DMA channels 0 and 1 are idle (DSTR
-; DTD0, DTD1; both run DTM 001: DE and DTD clear for the length of a ColdFire block); 64-127 the
-; METER: (303 - 64) >> 3 = 0 the plain engine, else the yielding one. Timer 0 (CLK/2) restarts at
-; the render's start; RBUF[0] = ticks << 7, RBUF[1..KCNT-1] = -(KCNT << 16).
-hq_meng:
+; ---- STRESS (303 >= 64; DIAG10): before the render, whose tone is heard, n7 x 128 iterations of a
+; three-instruction body. Mode (303 - 64) >> 3, safest first:
+;   0 div, no memory         1 mac, no memory          2 Y reads (YS)          3 Y writes (Y:$ff0)
+;   4 X:Y parallel reads     5 mac + X:Y parallel reads (the half-band's shape)
+;   6 the engine itself (n7 samples, no events)        7 X reads (the engine's X block)
+; DIAG8D/9: with the track muted, the riff leaks into the master on ~29 % of frames; the tone + BURN
+; does not. Which workload leaks? r5 = XM; uses a b x0 x1 y0 y1 r1 r3 r4 r7 m1 m4.
+hq_stress:
         move    x:(r5+D_KNB),a
-        sub     #>$3000,a
-        blt     hq_plain                        ; 32-47
-        sub     #>$1000,a
-        blt     hq_yield                        ; 48-63
-        asr     #11,a,a                         ; METER mode
-        clr     b
-        move    b,x:>$ffff8f                    ; TCSR0: stop
-        move    b,x:>$ffff8e                    ; TLR0 = 0
-        move    #>1,x0
-        move    x0,x:>$ffff8f                   ; TCSR0: TE, timer mode, CLK/2: TCR0 from 0
-        tst     a
-        bne     hq_mylp
+        sub     #>$4000,a
+        blt     hq_sret
+        asr     #11,a,a
+        move    n7,b
+        asl     #7,b,b
+        cmp     #<6,a
+        bne     hq_snot6
+        move    n7,r7
+        move    #>RBUF,r3
 hq_cot1:
         dc      $0d1080,0                       ; bsr >ot303
-        bra     hq_mend
-hq_mylp:
-        bsr     hq_yield
-hq_mend:
-        move    x:>$ffff8c,a                    ; TCR0: ticks since the start
         move    #>XM,r5
-        move    #>RBUF,r1
-        asl     #7,a,a                          ; ticks << 7 (a render's ticks stay under 65,536)
-        move    a1,x:(r1)+
-        move    x:(r5+D_KCNT),a
-        asl     #16,a,a                         ; -(KCNT << 16): a gain-proof ruler for the ticks
-        neg     a
-        move    a1,x0
-        move    x:(r5+D_KCNT),a
-        sub     #<1,a
-        beq     hq_mret
-        do      a1,hq_mret
-        move    x0,x:(r1)+
-        nop
-        nop
-hq_mret:
         rts
-hq_plain:
-hq_cot0:
-        dc      $0d10c0,0                       ; bra >ot303 (its rts returns to our caller)
-; the yielding render: one sample at a time, each after host DMA 0 and 1 are idle
-hq_yield:
-        move    x:(r5+D_KCNT),a
-        move    a1,x:>YCNT
-        move    #>RBUF,a
-        move    a1,x:>YPTR
-hq_ylp:
-        do      #512,hq_ywe
-        move    x:>$fffff4,a                    ; DSTR
-        and     #>3,a
+hq_snot6:
+        move    #>63,x1
+        move    x1,m1
+        move    x1,m4
+        move    #>XB,r1
+        move    #>YS,r4
+        cmp     #<1,a
+        blt     hq_w0a
+        beq     hq_w1a
         cmp     #<3,a
-        brkeq                                   ; DTD0 and DTD1: no block in flight
-hq_ywe:
-        move    x:>YPTR,r3
-        move    #>1,r7
-hq_cot2:
-        dc      $0d1080,0                       ; bsr >ot303
-        move    #>XM,r5
-        move    x:>YPTR,a
-        add     #<1,a
-        move    a1,x:>YPTR
-        move    x:>YCNT,a
-        sub     #<1,a
-        move    a1,x:>YCNT
-        bne     hq_ylp
+        blt     hq_w2a
+        beq     hq_w3a
+        cmp     #<5,a
+        blt     hq_w4a
+        beq     hq_w5a
+        do      b1,hq_w7z                       ; 7: X reads
+        move    x:(r1)+,x0
+        move    x:(r1)+,x0
+        move    x:(r1)+,x0
+hq_w7z:
+        bra     hq_sdone
+hq_w0a:
+        do      b1,hq_w0z
+        div     x0,a
+        div     x0,a
+        div     x0,a
+hq_w0z:
+        bra     hq_sdone
+hq_w1a:
+        do      b1,hq_w1z
+        mac     y0,x0,a
+        mac     y0,x0,a
+        mac     y0,x0,a
+hq_w1z:
+        bra     hq_sdone
+hq_w2a:
+        do      b1,hq_w2z
+        move    y:(r4)+,y0
+        move    y:(r4)+,y0
+        move    y:(r4)+,y0
+hq_w2z:
+        bra     hq_sdone
+hq_w3a:
+        move    #>$ff0,r4
+        move    #>15,x1
+        move    x1,m4
+        do      b1,hq_w3z
+        move    y0,y:(r4)+
+        move    y0,y:(r4)+
+        move    y0,y:(r4)+
+hq_w3z:
+        bra     hq_sdone
+hq_w4a:
+        do      b1,hq_w4z
+        move    x:(r1)+,x0      y:(r4)+,y0
+        move    x:(r1)+,x0      y:(r4)+,y0
+        move    x:(r1)+,x0      y:(r4)+,y0
+hq_w4z:
+        bra     hq_sdone
+hq_w5a:
+        do      b1,hq_w5z
+        mac     y0,x0,a         x:(r1)+,x0      y:(r4)+,y0
+        mac     y0,x0,a         x:(r1)+,x0      y:(r4)+,y0
+        mac     y0,x0,a         x:(r1)+,x0      y:(r4)+,y0
+hq_w5z:
+hq_sdone:
+        move    #>$ffffff,x1
+        move    x1,m1
+        move    x1,m4
+hq_sret:
         rts
