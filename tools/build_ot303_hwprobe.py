@@ -2,26 +2,29 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-OT-303 hardware probe, DIAGNOSTIC 13 (DIAG13): the OT-303 DSP engine on the unit, hosted in DJ EQ
-(reference/handoffs/OT303_SCOPE.md §11). DIAG12 on the unit: with the engine's X working set out of
-every DMA's memory partition the riff is clean on T6 (core 0), muted master silent, no flips, and
-a 10-minute soak plus T1 and T5 ran clean. DIAG13 is the product-shaped placement: run 1 at
-X:$7b24 on BOTH cores (stock's unreferenced X:$7a92-$7fff, no DMA), so any track works; BURN
-(slot 6) is back for the cost measurements. 303: 1-31 tone, 32-127 riff; 0 = stock DJ EQ with
-BURN before it (the burn probe). One engine per core.
+OT-303 hardware probe, DIAGNOSTIC 14 (DIAG14): the OT-303 DSP engine on the unit, hosted at the
+per-track SOURCE seam (octabam ANALOG BD's host; reference/handoffs/OT303_SCOPE.md §11-12). DIAG13
+on the unit: the engine in DJ EQ's process routine ran clean on any track and both cores, two at
+once, through a soak and the heaviest legal config. DIAG14 moves the voice upstream of AMP, FX1 and
+FX2, where the product machine will put it; DJ EQ stays only as the remote control that picks the
+track.
 
 Stock 1.40C plus exactly this:
-  * DJ EQ page 2: slot 6 BURN (24 cycles/sample a step, after the render; before DJ EQ when 303
-    is 0), slot 7 303. 303 bands as above.
-    One engine per core.
+  * Source seam: `move a,x:>$20e` (A P:$39c, B P:$1a2) -> jsr the glue. On the core's claimed track
+    the engine renders the frame into X:0 and the stock code continues after the source (A P:$426,
+    B P:$221); every other track runs the stock source.
+  * DJ EQ page 2: slot 6 BURN (24 cycles/sample a step, before DJ EQ, always), slot 7 303: 0 off,
+    1-31 tone, 32-127 riff; 303 up claims the track for its core's voice (first claim wins, one
+    voice per core). DJ EQ itself runs as stock on whatever the track carries.
   * SPRING REV is removed (its words hold the engine, the wrapper and the packed table data);
-    DARK REV's helper inside SPRING's module is untouched. Nothing on the ColdFire but data.
+    DARK REV's 35-word helper moves from inside SPRING's module to its last 35 words, its three
+    stock callers retargeted (octabam ANALOG BD's layout). Nothing on the ColdFire but data.
 
 Usage:   python3 tools/build_ot303_hwprobe.py      (WIP: KYOTI_ALLOW_WIP=1)
-Outputs: out/mainos_ot303_hwprobe_diag13.bin, out/OCTATRACK_OS1.40C_OT303_DIAG13.syx,
-         out/OCTATRACK_OT303_DIAG13.bin
+Outputs: out/mainos_ot303_hwprobe_diag14.bin, out/OCTATRACK_OS1.40C_OT303_DIAG14.syx,
+         out/OCTATRACK_OT303_DIAG14.bin
 """
-import importlib.util, os, pathlib, subprocess, sys
+import hashlib, importlib.util, os, pathlib, subprocess, sys
 from kyoti_status import gate, seal
 
 gate(__file__)
@@ -35,11 +38,11 @@ STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
 STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 DIS = ROOT / "vendor/dsp56300/build/source/disassemble/dsp56kDisassemble"
-OUT = ROOT / "out/mainos_ot303_hwprobe_diag13.bin"
-ELEK = ROOT / "out/elek_ot303_hwprobe_diag13.bin"
-OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_DIAG13.syx"
-OUT_BIN = ROOT / "out/OCTATRACK_OT303_DIAG13.bin"
-VERSTR = "140C_303DD"      # the field takes 10 characters
+OUT = ROOT / "out/mainos_ot303_hwprobe_diag14.bin"
+ELEK = ROOT / "out/elek_ot303_hwprobe_diag14.bin"
+OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_DIAG14.syx"
+OUT_BIN = ROOT / "out/OCTATRACK_OT303_DIAG14.bin"
+VERSTR = "140C_303DE"      # the field takes 10 characters
 
 DJEQ_ID = 0x0d
 SPRING_ID = 0x15
@@ -47,15 +50,23 @@ SPRING_ID = 0x15
 #   spring_init/proc  X:$215[$15] / X:$235[$15] stock -> also the burn routine's origin
 #   djeq_proc         X:$235[$0d] stock (DJ EQ's process routine)
 #   stub_init/proc    the shared empty-FX passthrough (18 unused ids already point there)
-#   dark_helper       first word of DARK REV's helper inside SPRING's module: must stay stock
+#   dark_helper       first word of DARK REV's helper inside SPRING's module (moved to its end)
+#   dark_calls        the three stock jsr's into it from outside SPRING (PLATE / DARK REV)
 DSP = {
     "A": dict(va=0x400e2324, ln=0x136cb, spring_init=0x01252, spring_proc=0x012be,
-              djeq_proc=0x01d7d, stub_init=0x007c8, stub_proc=0x007c9, dark_helper=0x01586),
+              djeq_proc=0x01d7d, stub_init=0x007c8, stub_proc=0x007c9, dark_helper=0x01586,
+              dark_calls=(0x017b3, 0x01998, 0x019c2)),
     "B": dict(va=0x400f59ef, ln=0x12d05, spring_init=0x01012, spring_proc=0x0107e,
-              djeq_proc=0x01b3d, stub_init=0x00588, stub_proc=0x00589, dark_helper=0x01346),
+              djeq_proc=0x01b3d, stub_init=0x00588, stub_proc=0x00589, dark_helper=0x01346,
+              dark_calls=(0x01573, 0x01758, 0x01782)),
 }
 SPRING_SIG = [0x22ee00, 0x0140c0, 0x000040]      # SPRING's stock init, both payloads
 DJEQ_SIG = [0x221e00, 0x61f400, 0x000140]        # DJ EQ's stock proc: move r0,n6 / move #>$140,r1
+SEAM_SIG = [0x567000, 0x00020e]                  # move a,x:>$20e (both payloads)
+JSR = 0x0bf080
+# DARK REV's helper with its one absolute word (word 6, the DO's end) made relative: octabam's digest
+# of the same routine (tools/build/ab_image.py SHARED_SHA256), checked against our own image
+DARK_SHA = "c411c03ac315959374f7f16b8cc3558f65dbcd60dcdaa912ff0a39dcea53752a"
 
 # ColdFire tables (memory-map.md; SIDECHAIN_COMPRESSOR uses the same)
 FX_BUSES = (
@@ -123,27 +134,49 @@ def main():
         img[o(a):o(a) + 4] = v.to_bytes(4, "big")
 
     # ---------------- DSP, both payloads ----------------
-    print("=== DSP: engine + wrapper in SPRING REV's words and X records; DJ EQ proc -> wrapper ===")
+    print("=== DSP: engine + wrapper in SPRING REV's words and X records; seam + DJ EQ proc -> wrapper ===")
     for tag, d in DSP.items():
         b = hwprobe_image.build(tag)
         org, words = b["org"], b["words"]
         assert org == d["spring_init"]
         so, mod_a, mod_c = p_off(mm, img, d["va"], d["ln"], org)
         assert [rd3(img, so + 3 * i) for i in range(3)] == SPRING_SIG, f"payload {tag}: SPRING init"
-        assert mod_a == org and mod_c == 1063, f"payload {tag}: SPRING's module is not 1063 words at its init"
-        dark = d["dark_helper"]
-        dark_stock = [rd3(img, so + 3 * (dark - org + i)) for i in range(hwprobe_image.DARK_N)]
-        assert org + len(words) <= dark, f"payload {tag}: code reaches DARK REV's helper"
+        assert mod_a == org and mod_c == hwprobe_image.SPRING_N, f"payload {tag}: SPRING's module is not 1063 words at its init"
+        # DARK REV's helper: from inside SPRING's module to its last 35 words, its outside callers retargeted
+        dark, n = d["dark_helper"], hwprobe_image.DARK_N
+        new = org + mod_c - n
+        helper = [rd3(img, so + 3 * (dark - org + i)) for i in range(n)]
+        norm = helper.copy(); norm[6] -= dark
+        assert hashlib.sha256(b"".join(w.to_bytes(3, "big") for w in norm)).hexdigest() == DARK_SHA, \
+            f"payload {tag}: DARK REV's helper is not the stock routine"
+        helper[6] += new - dark
+        callers = []
+        for sp, addr, cnt, data in mm.modules(bytes(img), d["va"], d["ln"])[0]:
+            if sp != 0:
+                continue
+            off = (d["va"] - BASE) + data
+            for k in range(1, cnt):
+                if rd3(img, off + 3 * k) == dark and rd3(img, off + 3 * (k - 1)) == JSR and not org <= addr + k < org + mod_c:
+                    callers.append(addr + k - 1)
+        assert tuple(callers) == d["dark_calls"], f"payload {tag}: helper callers {[hex(c) for c in callers]}"
+        assert len(words) <= new - org, f"payload {tag}: code reaches the helper's new place"
         for i, wv in enumerate(words):
             img[so + 3 * i: so + 3 * i + 3] = w3(wv)
-        eorg, ew = b["p2"]
-        assert eorg == dark + hwprobe_image.DARK_N and eorg + len(ew) <= org + mod_c
-        for i, wv in enumerate(ew):
-            img[so + 3 * (eorg - org + i): so + 3 * (eorg - org + i) + 3] = w3(wv)
-        assert [rd3(img, so + 3 * (dark - org + i)) for i in range(hwprobe_image.DARK_N)] == dark_stock, \
-            f"payload {tag}: DARK REV's helper changed"
-        print(f"  payload {tag}: {len(words)} words @ P:0x{org:05x}, events {len(ew)} @ P:0x{eorg:05x} "
-              f"(SPRING's module {mod_c} w; DARK REV's helper P:0x{dark:05x} kept); entry P:0x{b['entry']:05x}")
+        for i, wv in enumerate(helper):
+            img[so + 3 * (new - org + i): so + 3 * (new - org + i) + 3] = w3(wv)
+        for c in callers:
+            co, _, _ = p_off(mm, img, d["va"], d["ln"], c + 1)
+            img[co:co + 3] = w3(new)
+        print(f"  payload {tag}: {len(words)} words @ P:0x{org:05x}; DARK REV's helper P:0x{dark:05x} -> P:0x{new:05x}, "
+              f"callers {', '.join(f'P:0x{c:05x}' for c in callers)} retargeted; DJ EQ entry P:0x{b['entry']:05x}, "
+              f"seam entry P:0x{b['seam_entry']:05x}")
+        # the source seam -> jsr the glue
+        sm, _, _ = p_off(mm, img, d["va"], d["ln"], b["seam"])
+        assert [rd3(img, sm + 3 * i) for i in range(2)] == SEAM_SIG, f"payload {tag}: seam P:0x{b['seam']:05x} not stock"
+        assert p_off(mm, img, d["va"], d["ln"], b["seam"] + 1)[0] == sm + 3
+        img[sm:sm + 3] = w3(JSR)
+        img[sm + 3:sm + 6] = w3(b["seam_entry"])
+        print(f"    P:0x{b['seam']:05x} move a,x:>$20e -> jsr >P:0x{b['seam_entry']:05x}; continues at P:0x{b['cont']:05x}")
         # X: SPRING's five records, address and length asserted, every word rewritten
         mods, _ = mm.modules(bytes(img), d["va"], d["ln"])
         runs = hwprobe_image.PAYLOAD[tag]["xrun1"] + hwprobe_image.PAYLOAD[tag]["xrun2"]

@@ -3,43 +3,39 @@
 ; ===========================================================================
 ; OT-303 hardware probe -- the wrapper (DIAGNOSTIC image only; reference/handoffs/OT303_SCOPE.md).
 ; Appended to tools/ot303/ot303_engine.asm (its layout equates and the `ot303` routine) by
-; tools/ot303/hwprobe_image.py, placed in SPRING REV's program words.
+; tools/ot303/hwprobe_image.py, placed in SPRING REV's program words (DARK REV's 35-word helper
+; moved to the region's end by the builder: one contiguous 1,028-word block).
 ;
-; Reached instead of DJ EQ's process routine (X:$235[$0d]). With 303 at 0 it leaves through DJ EQ's
-; stock proc (whose rts returns to the dispatcher); with 303 up it returns itself and DJ EQ does not
-; run, so the track's output is the engine's, bit for bit (a recording can be compared with the
-; bench). It keeps r0 r6 r7 n7, and saves m0-m7 on entry, runs with them linear, and puts them back
-; (stock leaves them linear between effects, but octabam saw m1 not linear at an init on the unit).
+; DIAG14: the voice runs at the per-track SOURCE seam (octabam ANALOG BD's host). The stock
+; `move a,x:>$20e` just before the source (payload A P:$39c, B P:$1a2) is a jsr to sg_entry. On
+; the core's 303 track the engine renders the frame's 16 samples into X:0 (L, R interleaved, where
+; the stock source puts them), and the stock code continues after the source (A P:$426, B P:$221):
+; AMP, FX1, FX2 run on the voice. Every other track returns into the stock source untouched (the
+; glue clobbers b, x0 and the condition codes only; the stock source loads them before it reads).
 ;
-; Page 2 of DJ EQ (r6+$c):
-;   slot 6 BURN  bits 16-23: 24 * BURN cycles per sample (octabam's RIG BURN body), spent
-;                AFTER the 303's render when 303 is up (it moves the call's end later: the
-;                read-back pull, below), BEFORE DJ EQ when 303 is 0 (the burn probe's measure)
-;   slot 7 303   bits 8-15: 0 off (stock DJ EQ), else, in sixteens, the track's audio is replaced
-;                (both channels) by: 1-15 TONE (a 110 Hz saw; the engine does not run);
-;                DIAG13: 1-31 TONE, 32-127 RIFF (the engine, saw: a built-in 16-step bar of the
-;                Hot voice, 130 BPM).
-; DIAG2 on the unit: the riff was clean only when its call ended late enough. Stock copies each
-; track's block into the read-back buffer after FX2 while the ColdFire's DMA pulls that buffer;
-; a call that ends inside the pull's window tears the block (octabam FAILURE_MODES, "Junk on main
-; R": junk on the track and on the opposite main channel). BURN pads the end: find the clean range.
-; No REP at all (DIAG4: a REP is not interruptible; the host-port DMA handlers wait it out).
-; DIAG6: on core 0 (payload A) the engine's X block moves out of SPRING's X records (X:$8xxx, the
-; memory block of core 0's ESAI DMA buffers X:$8000-$833f; core 1 runs no ESAI DMA, and T2 is clean)
-; to X:$3224.. (inside Analog BD's free private region X:$2840-$3940). hq_reloc copies it there on
-; the first call with 303 up; the builder places the words at XD above their run-time addresses.
-; One engine per core: its state is global, so a second DJ EQ with 303 > 0 on the same core
-; renders the same voice again (twice the speed). Use it on one track per core.
+; DJ EQ is the remote control (its process routine, X:$235[$0d], enters hq_entry). Page 2:
+;   slot 6 BURN  bits 16-23: 24 * BURN cycles per sample, before DJ EQ, always (the burn probe)
+;   slot 7 303   bits 8-15: 0 off; 1-31 TONE (a 110 Hz saw, no engine), 32-127 RIFF (the engine,
+;                saw: a built-in 16-step bar of the Hot voice, 130 BPM). A DJ EQ with 303 up
+;                CLAIMS its track for its core's voice (OWN, first claim wins) and refreshes the
+;                claim every frame (LIVE = 2); the seam counts LIVE down on each render and frees
+;                the voice when it reaches 0 (303 back to 0, DJ EQ removed: 2 frames later).
+;                DJ EQ itself then processes the voice like any source (it is no longer bypassed).
+; One engine per core: a second claim on the same core waits until the first is released.
 ;
-; The filter's coefficient tables (Y, 860 words at LT) are built on the first calls, 16 entries
-; a call (15 calls, ~6 ms), from b0 and kp/64 (215 + 1 each) the loader puts in SPRING's X records;
-; the slopes are differences. The engine stays silent (the track passes untouched) until then.
-; The step events, the tone and the watch live after DARK REV's helper: tools/ot303/hwprobe_ev.asm.
+; Rules (both broke the unit): no REP (it holds off the host-port IRQs: torn transfers); no dense
+; working data in a DMA's 8K partition (core 0: $0000, $2000, $4000, $8000): run 1 (the engine's X
+; working set and these words) runs at X:$7b24 on both cores, in stock's unreferenced $7a92-$7fff.
+; hq_reloc copies it there from SPRING's records (XD above) on the first claim.
+; The filter's coefficient tables (Y, 860 words at LT) build at the seam on the claimed track's
+; first frames, 16 entries a frame (15 frames, the track's own source heard meanwhile), from b0 and
+; kp/64 in SPRING's X records; then the voice.
 ; ===========================================================================
 R2      equ     $8afc           ;@LAYOUT X run 2 (packed b0, kp), at run time
-XD      equ     $0              ;@LAYOUT the loader's copy is XD words above (payload A: relocated)
+XD      equ     $0              ;@LAYOUT the loader's copy is XD words above
 NXD     equ     $0              ;@LAYOUT -XD (24 bits)
-HQEV    equ     $15a9           ;@LAYOUT hwprobe_ev.asm's origin, after DARK REV's helper
+CONT    equ     $426            ;@LAYOUT the stock code after the source (A $426, B $221)
+RAWP    equ     1               ;@LAYOUT 1: this payload's source has the raw path (A: bit 18)
 
 PB      equ     XB-$1c          ; X, 28 words before the engine's block (reached by pointer)
 SAWW    equ     PB+0            ; W1 W2 W3 SQ for the saw
@@ -55,13 +51,9 @@ MSAV    equ     XB+$35          ; m0..m7 on entry (the gap after XW)
 TPH     equ     XB+$49          ; the tone's phase (the gap after XC)
 TINC    equ     XB+$4a          ; the tone's increment
 T110    equ     $a3a3           ; 110 Hz: 2^24 * 110 / 44100
-T880    equ     $51d1c          ; 880 Hz
 WB      equ     XB+$70          ; X, 76 words after the engine's block
 STG     equ     WB+0            ; 0..1 building the tables, 2 running
-SV_R0   equ     WB+6
-SV_R6   equ     WB+7
-SV_R7   equ     WB+8
-SV_N7   equ     WB+9
+SV_R2   equ     WB+6            ; the seam's r2 while the tables build
 AMPT    equ     WB+14           ; the trigger's AMP2
 RBUF    equ     WB+16           ; 16: the engine's output
 PAT     equ     WB+32           ; 16 steps: bit 23 rest, bit 22 accent, bits 0-15 the pitch increment
@@ -72,7 +64,10 @@ VAR_NOF equ     VARS+15         ;   normal gate off
 TRIG    equ     WB+68           ; M48 hi, lo for an accent, then for a normal note
 TRIGN   equ     TRIG+2
 OLD1    equ     PB+XD           ; the loader's copy of PB..PB+215 (X run 1)
-SIGA    equ     XB-$3c          ; DIAG13: X:$7b04, below run 1 in the unreferenced region: the copy's mark
+SIGA    equ     XB-$3c          ; X:$7b04, below run 1 in the unreferenced region: the copy's mark
+OWN     equ     XB-$3b          ; the claimed track: x:$418 + 1 ($1 $21 $41 $61), 0 = none
+LIVE    equ     XB-$3a          ; frames the claim lasts without a refresh
+KNB     equ     XB-$39          ; the claiming DJ EQ's 303 knob << 8
 ; displacements from XM (the operand's sign is written out: the assembler wants small numbers)
 D_STG   equ     $30             ; +: WB+0..15
 D_CNK   equ     $31             ; chunk within the stage
@@ -85,9 +80,8 @@ D_OUTA  equ     $3b             ; the audio block pointer (interleaved L/R)
 D_KNB   equ     $3c             ; the 303 knob << 8
 D_KCNT  equ     $3d             ; this render's sample count
 D_AMPT  equ     $3e             ; the trigger's AMP2
-D_BAND  equ     $3f             ; the render: 0 tone, 1 engine + tone, 2 riff, 3 riff / 8 (hq_mode)
+D_BAND  equ     $3f             ; the render: 0 tone, 2 riff (hq_mode)
 D_TINC  equ     $a              ; +: TINC
-N_MSAV  equ     $b              ; -: MSAV (m0 at XM - $b .. m7 at XM - 4)
 D_W1A   equ     $24             ; +: OCB's W1A W2 W3
 D_W2    equ     $25
 D_W3    equ     $26
@@ -111,55 +105,92 @@ E_AMP2  equ     8
 BX      equ     R2              ; b0[0..214], b0[214] again
 KX      equ     R2+216          ; kp[0..214], kp[214] again
 
+; ---- DJ EQ's process routine: the remote control. With 303 up it claims the voice for its track
+; (the first claim also copies run 1 into place); it always leaves through BURN and DJ EQ's stock
+; proc (which reads r0 r6 r7 n7 and the m registers on entry: all kept here; a, b, x, y1, r1, n1
+; change).
 hq_entry:
-; ---- the 303 knob: page-2 slot 7 (bits 8-15); 0 = off. n7 = 0 (the dispatcher's second call
-; can carry none) = nothing to do.
         move    x:(r6+$c),a
         and     #>$7f00,a
-        beq     hq_out
-        move    n7,b
-        tst     b
-        beq     hq_out
-; m0-m7: m1 linear first (r1 is the save pointer), all saved, then all linear
+        beq     hq_out                          ; 303 = 0: no claim
         move    a1,y1                           ; the knob
-        move    m1,x0
-        move    #>$ffffff,x1
+        move    m1,x1
+        move    #>$ffffff,x0
+        move    x0,m1
+        bsr     hq_reloc
         move    x1,m1
-hq_crel:
-        dc      $0d1080,0                       ; bsr >hq_reloc (payload A; two nops on B)
-        move    #>MSAV,r1
-        move    m0,x:(r1)+
-        move    x0,x:(r1)+
-        move    m2,x:(r1)+
-        move    m3,x:(r1)+
-        move    m4,x:(r1)+
-        move    m5,x:(r1)+
-        move    m6,x:(r1)+
-        move    m7,x:(r1)+
-        move    x1,m0
-        move    x1,m2
-        move    x1,m3
-        move    x1,m4
-        move    x1,m5
-        move    x1,m6
-        move    x1,m7
+        move    x:>$418,b                       ; this track: x:$418 + 1
+        add     #<$1,b
+        move    x:>OWN,a
+        tst     a
+        beq     hq_claim                        ; the voice is free
+        cmp     b,a
+        bne     hq_out                          ; another track has it
+hq_claim:
+        move    b1,x:>OWN
+        move    #>2,x0
+        move    x0,x:>LIVE
+        move    y1,x:>KNB
+hq_out:
+        bsr     hq_burn
+hq_djeq:
+        dc      $0d10c0,0                       ; bra >DJ EQ's stock proc: the builder writes the
+                                                ; displacement and checks it by disassembly
+
+; ---- the source seam (jsr from A P:$39c / B P:$1a2). Not the 303 track: back into the stock
+; source with b, x0 and the CCR changed. The 303 track: while the tables build, one chunk, then
+; the stock source (r2 kept: payload A's reads the track word through it); then the voice, and
+; on at CONT.
+sg_entry:
+        move    a,x:>$20e                       ; the stock instruction the jsr replaced
+        move    x:>$418,b
+        add     #<$1,b
+        move    x:>OWN,x0
+        cmp     x0,b
+        bne     sg_stock
+        move    x:>SIGA,b
+        move    #>$5a5a5a,x0
+        cmp     x0,b
+        bne     sg_stock
+        move    x:>LIVE,b
+        tst     b
+        beq     sg_free
+        move    #>1,x0
+        sub     x0,b
+        move    b1,x:>LIVE
+        bsr     hq_msave
         move    #>XM,r5
-        move    y1,x:(r5+D_KNB)
-        move    y1,a
-        asr     #12,a,a
-        move    a1,x:(r5+D_BAND)
-        move    r0,x:>SV_R0
-        move    r6,x:>SV_R6
-        move    r7,x:>SV_R7
-        move    n7,x:>SV_N7
         move    x:(r5+D_STG),a
         move    #>2,x0
         cmp     x0,a
-        beq     hq_run
+        beq     sg_voice
+        move    r2,x:>SV_R2
         bsr     hq_init
-        bra     hq_rest
-hq_run:
-; the wave words: the saw (DIAG8: the square's band is the meter's)
+        bsr     hq_mrest
+        move    x:>SV_R2,r2
+        rts
+sg_free:
+        move    b1,x:>OWN                       ; b = 0: the claim lapsed
+sg_stock:
+        rts
+sg_voice:
+; the next track's ring base, as the stock source would leave it (payload A: not on the raw path,
+; bit 18 of the track word; payload B has no raw path)
+        move    #>RAWP,b
+        tst     b
+        beq     sg_ring
+        move    x:(r2+$1e),b
+        btst    #18,b1
+        bcs     sg_noring
+sg_ring:
+        move    x:>$20b,b
+        move    #>$80,x0
+        add     x0,b
+        move    b1,x:>$20b
+sg_noring:
+        move    x:>KNB,x0
+        move    x0,x:(r5+D_KNB)
+; the wave words: the saw
         move    #>SAWW,r1
         move    x:(r1)+,x0
         move    x0,x:(r5-N_W1)
@@ -170,19 +201,17 @@ hq_run:
         move    x0,x:(r5+D_W3)
         move    x:(r1)+,x0
         move    x0,x:(r5-N_SQ)
-        move    n7,b
-        move    b,x:(r5+D_REM)
-        move    r0,x:(r5+D_OUTA)
-hq_cstr:
-        dc      $0d1080,0                       ; bsr >hq_mode: sets D_BAND (0 tone, 1 engine + tone,
-                                                ; 2 riff, 3 riff / 8) and runs any STRESS workload
+        move    #>16,x0
+        move    x0,x:(r5+D_REM)
+        move    #0,x0
+        move    x0,x:(r5+D_OUTA)
+        bsr     hq_mode                         ; D_BAND: 0 tone, 2 riff
 ; render up to each event, then the event
 hq_loop:
         move    x:(r5+D_EVC),a
         tst     a
         bne     hq_noev
-hq_callev:
-        dc      $0d1080,0                       ; bsr >hq_event (HQEV): the builder writes the displacement
+        bsr     hq_event
         move    x:(r5+D_EVC),a
 hq_noev:
         move    x:(r5+D_REM),b
@@ -192,16 +221,13 @@ hq_noev:
         move    b,x:(r5+D_KCNT)
         move    x:(r5+D_BAND),a
         tst     a
-        beq     hq_notengine                    ; 0: TONE, no engine
+        beq     hq_tone                         ; 0: TONE, no engine
         move    b1,r7
         move    #>RBUF,r3
-hq_cmeng:
-        dc      $0d1080,0                       ; bsr >hq_reng: the engine (band 3: scaled 1/8)
+        bsr     ot303
         move    #>XM,r5
-        move    x:(r5+D_BAND),a
-        cmp     #<1,a
-        bne     hq_notone                       ; 2, 3: the riff is heard; 1: the tone
-hq_notengine:
+        bra     hq_copy
+hq_tone:
 ; TONE: KCNT samples of a 110 Hz (TINC) saw at -12 dBFS into RBUF
         move    #>RBUF,r1
         move    x:>TPH,a
@@ -214,7 +240,7 @@ hq_notengine:
         move    b,x:(r1)+
 hq_tloop:
         move    a1,x:>TPH
-hq_notone:
+hq_copy:
         move    #>RBUF,r1
         move    x:(r5+D_OUTA),r0
         move    x:(r5+D_KCNT),x0
@@ -231,8 +257,37 @@ hq_cpend:
         sub     x0,a
         move    a,x:(r5+D_REM)
         bne     hq_loop
-hq_rest:
-        move    #>MSAV,r0                       ; m1..m7 through r0 (m0 still linear), m0 last
+; m0-m7 back as found; drop the seam's return: the stock source is skipped
+        bsr     hq_mrest
+        move    ssh,x0
+        dc      $0af080,CONT                    ; jmp >CONT (checked by disassembly)
+
+; ---- m0-m7: saved as found into MSAV, then all linear (m1 first: r1 is the save pointer). Uses
+; x0 x1 r1.
+hq_msave:
+        move    m1,x0
+        move    #>$ffffff,x1
+        move    x1,m1
+        move    #>MSAV,r1
+        move    m0,x:(r1)+
+        move    x0,x:(r1)+
+        move    m2,x:(r1)+
+        move    m3,x:(r1)+
+        move    m4,x:(r1)+
+        move    m5,x:(r1)+
+        move    m6,x:(r1)+
+        move    m7,x:(r1)+
+        move    x1,m0
+        move    x1,m2
+        move    x1,m3
+        move    x1,m4
+        move    x1,m5
+        move    x1,m6
+        move    x1,m7
+        rts
+; ---- m0-m7 back from MSAV (m1..m7 through r0, m0 still linear, m0 last). Uses r0.
+hq_mrest:
+        move    #>MSAV,r0
         move    (r0)+
         move    x:(r0)+,m1
         move    x:(r0)+,m2
@@ -242,21 +297,9 @@ hq_rest:
         move    x:(r0)+,m6
         move    x:(r0)+,m7
         move    x:>MSAV,m0
-        move    x:>SV_R0,r0
-        move    x:>SV_R6,r6
-        move    x:>SV_R7,r7
-        move    x:>SV_N7,n7
-hq_cbr1:
-        dc      $0d1080,0                       ; bsr >hq_burn (after the render: the call ends later)
-        rts                                     ; 303 up: DJ EQ does not run
-hq_out:
-hq_cbr0:
-        dc      $0d1080,0                       ; bsr >hq_burn (before DJ EQ: the burn probe's place)
-hq_djeq:
-        dc      $0d10c0,0                       ; bra >DJ EQ's stock proc: the builder writes the
-                                                ; displacement and checks it by disassembly
+        rts
 
-; ---- the tables, one chunk per call
+; ---- the tables, one chunk per call (a = STG)
 hq_init:
         tst     a
         bne     hq_st1
@@ -332,4 +375,124 @@ hq_next:
         move    b1,x:(r5+D_STG)
 hq_keep:
         move    a1,x:(r5+D_CNK)
+        rts
+
+; ---- an event: a step's start (pitch, host words, trigger) or its gate's end (host words)
+hq_event:
+        move    #>2544,x0
+        move    x0,x:(r5+D_EVC)
+        move    #>YS,r4
+        move    x:(r5+D_HALF),a
+        tst     a
+        bne     hq_gateoff
+        move    #>1,x0
+        move    x0,x:(r5+D_HALF)
+        move    #>PAT,r1
+        move    x:(r5+D_STEP),n1
+        move    x:(r1+n1),a
+        move    a,x:(r5+D_CURW)
+        btst    #23,a1
+        bcs     hq_evret
+        move    #>VARS,r2
+        move    #>TRIG,r1
+        btst    #22,a1
+        bcs     hq_accon
+        move    #>VAR_NON,r2
+        move    #>TRIGN,r1
+hq_accon:
+        bsr     hq_vars
+        and     #>$00ffff,a
+        move    a1,y:(r4+E_INCT)
+        move    a1,y:(r4+E_S48H)
+        clr     b
+        move    b,y:(r4+E_S48L)
+        move    x:(r1)+,x0
+        move    x0,y:(r4+E_M48H)
+        move    x:(r1)+,x0
+        move    x0,y:(r4+E_M48L)
+        move    x:(r5+D_AMPT),x0
+        move    x0,y:(r4+E_AMP2)
+hq_evret:
+        rts
+hq_gateoff:
+        clr     b
+        move    b,x:(r5+D_HALF)
+        move    x:(r5+D_STEP),b
+        move    #>1,x0
+        add     x0,b
+        move    #>15,x0
+        and     x0,b
+        move    b1,x:(r5+D_STEP)
+        move    x:(r5+D_CURW),a
+        btst    #23,a1
+        bcs     hq_evret
+        move    #>VAR_AOF,r2
+        btst    #22,a1
+        bcs     hq_vars
+        move    #>VAR_NOF,r2
+hq_vars:
+        move    x:(r2)+,x0
+        move    x0,x:(r5-N_CMEG)
+        move    x:(r2)+,x0
+        move    x0,x:(r5-N_MAMP)
+        move    x:(r2)+,x0
+        move    x0,x:(r5-N_AG8)
+        move    x:(r2)+,x0
+        move    x0,x:(r5-N_AGFM)
+        move    x:(r2)+,x0
+        move    x0,x:(r5-N_K8)
+        rts
+
+; ---- BURN: page-2 slot 6, 24 * BURN cycles per sample over this call's n7 samples (octabam's RIG
+; BURN body, hardware-proven; tools/ot303/burn_djeq.asm). r6 and n7 are the caller's. Uses a, x0,
+; y1. The zero guard is load-bearing: DO with a count of 0 loops 65536 times; asl sets Z.
+hq_burn:
+        move    x:(r6+$c),a
+        and     #>$7f0000,a
+        move    a1,y1
+        move    n7,x0
+        mpy     x0,y1,a
+        asl     #$a,a,a
+        beq     hq_bzero
+        do      a1,hq_bzero
+        nop
+        nop
+        nop
+hq_bzero:
+        rts
+
+; ---- the mode, once per render: 303 1-31 the tone, 32-127 the riff
+hq_mode:
+        move    x:(r5+D_KNB),a                  ; 303 << 8
+        clr     b
+        cmp     #>$2000,a
+        blt     hq_mset
+        move    #>2,b
+hq_mset:
+        move    b1,x:(r5+D_BAND)
+        rts
+
+; ---- RELOC: the engine's run-1 block (216 words: its X working set and the wrapper's words) runs
+; at X:$7b24-$7bfb, in stock's unreferenced X:$7a92-$7fff: a memory partition with no DMA on either
+; core. The loader puts the words XD above, in SPRING's records. SIGA (X:$7b04, unused) marks the
+; copy done until power-off; the copy also frees the voice (OWN, LIVE). m1 is linear. Uses a, r1, n1.
+hq_reloc:
+        move    x:>SIGA,a
+        cmp     #>$5a5a5a,a
+        beq     hq_rldone
+        move    #>NXD,n1
+        move    #>OLD1,r1
+        do      #216,hq_rla
+        move    x:(r1),a
+        nop                                     ; one read of the loader's block in four cycles
+        move    a,x:(r1+n1)
+        nop
+        move    (r1)+
+hq_rla:
+        clr     a
+        move    a,x:>OWN
+        move    a,x:>LIVE
+        move    #>$5a5a5a,a
+        move    a,x:>SIGA
+hq_rldone:
         rts

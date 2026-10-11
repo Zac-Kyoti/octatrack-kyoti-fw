@@ -6,9 +6,9 @@
 # Shared by tools/build_ot303_hwprobe.py (writes it into the firmware) and
 # tools/ot303/hwprobe_check.py (runs it on dsp56kEmu against the twin).
 #
-# Placement (both payloads; reference/handoffs/OT303_SCOPE.md §11, REPITCH Session 112's census):
-#   P  SPRING REV's module up to DARK REV's 35-word helper (engine + wrapper), and after it the
-#      wrapper's step events (hwprobe_ev.asm, assembled on its own)
+# Placement (both payloads; reference/handoffs/OT303_SCOPE.md §11-12, REPITCH Session 112's census):
+#   P  SPRING REV's module, its first 1,028 words (engine + wrapper, one piece); the builder moves
+#      DARK REV's 35-word helper from inside it to its last 35 words (octabam ANALOG BD's layout)
 #   X  SPRING's five X records, unread by stock at runtime: run 1 (3 x 72) = the engine's X block
 #      and the wrapper's words, loaded ready; run 2 (116 + 384) = b0 and kp (the slopes are built)
 #   Y  $7a5..$feb, never touched by stock: the tanh table at the bottom (cleared: the square is
@@ -34,12 +34,13 @@ PAYLOAD = {
     # DIAG13: run 1 (the engine's X working set, 216 words) runs at X:$7b24 on both cores, in stock's
     # unreferenced X:$7a92-$7fff (a partition no DMA touches); run 2 (b0/kp, read only while the
     # tables build) stays in SPRING's records. xd = the loader's copy minus the run-time address.
-    'A': dict(org=0x1252, dark=0x1586, end=0x1679, djeq_proc=0x1d7d, xd=0x0e80,
+    'A': dict(org=0x1252, djeq_proc=0x1d7d, xd=0x0e80, seam=0x39c, cont=0x426, rawp=1,
               xrun1=((0x89a4, 72), (0x89ec, 72), (0x8a34, 72)), xrun2=((0x8afc, 116), (0x8b70, 384))),
-    'B': dict(org=0x1012, dark=0x1346, end=0x1439, djeq_proc=0x1b3d, xd=0x0940,
+    'B': dict(org=0x1012, djeq_proc=0x1b3d, xd=0x0940, seam=0x1a2, cont=0x221, rawp=0,
               xrun1=((0x8464, 72), (0x84ac, 72), (0x84f4, 72)), xrun2=((0x85bc, 116), (0x8630, 384))),
 }
-DARK_N = 35
+SPRING_N, DARK_N = 1063, 35     # SPRING's P module; DARK REV's helper (moved to its end)
+CODE_N = SPRING_N - DARK_N
 YS, TH, LT = 0xf40, 0x7a5, 0xba7  # Y: TH $7a5..$ba6 (the square's, cleared), LT $ba7..$f02, state $f40..$feb
 
 # the riff: the Hot scene (voice_study `twin hot`), its host words at the first bar's events
@@ -83,11 +84,9 @@ def source(tag):
         assert 0x7b08 <= xb - 0x1c and xb - 0x1c + 216 <= 0x8000, 'run 1 outside X:$7b00-$7fff'
     eng = (ROOT / 'tools/ot303/ot303_engine.asm').read_text()
     wrap = (ROOT / 'tools/ot303/hwprobe.asm').read_text()
-    src = asm_macros.layout(eng, XB=xb, YS=YS, LT=LT, TH=TH) + asm_macros.layout(wrap, R2=d['xrun2'][0][0], HQEV=d['dark'] + DARK_N,
-                                                                         XD=xd, NXD=(-xd) & 0xffffff)
-    equs = '\n'.join(l for l in src.splitlines() if re.match(r'^[A-Za-z_][A-Za-z0-9_]*\s+equ\s', l))
-    ev = equs + '\n' + (ROOT / 'tools/ot303/hwprobe_ev.asm').read_text()
-    return src, ev, asm_macros.yspace(eng)
+    src = asm_macros.layout(eng, XB=xb, YS=YS, LT=LT, TH=TH) + asm_macros.layout(wrap, R2=d['xrun2'][0][0], XD=xd,
+                                                                         NXD=(-xd) & 0xffffff, CONT=d['cont'], RAWP=d['rawp'])
+    return src, asm_macros.yspace(eng)
 
 
 def labels_ok(src):
@@ -101,17 +100,12 @@ def labels_ok(src):
 def build(tag):
     """-> dict(org, words, syms, ysyms, p2=(addr, words), x={addr: word})"""
     d = PAYLOAD[tag]
-    src, evsrc, ysyms = source(tag)
+    src, ysyms = source(tag)
     src = asm_macros.expand(src)
-    labels_ok(src + evsrc)
+    labels_ok(src)
     words, syms = dsp_xasm.assemble(src, d['org'])
-    ev_org = d['dark'] + DARK_N
-    evw, evs = dsp_xasm.assemble(evsrc, ev_org)
-    assert evs['hq_event'] == ev_org, 'hq_event is not hwprobe_ev.asm\'s first word'
-    if ev_org + len(evw) > d['end']:
-        raise ValueError(f'payload {tag}: the step events run past SPRING\'s module')
-    if d['org'] + len(words) > d['dark']:
-        raise ValueError(f'payload {tag}: {len(words)} words reach DARK REV\'s helper at P:{d["dark"]:x}')
+    if len(words) > CODE_N:
+        raise ValueError(f'payload {tag}: {len(words)} words; SPRING\'s module leaves {CODE_N} beside DARK REV\'s helper')
     consts = {}
     for line in src.splitlines():
         m = re.match(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s+equ\s+(.+)$', line.split(';', 1)[0].rstrip())
@@ -122,38 +116,18 @@ def build(tag):
     bra = S['hq_djeq']
     assert words[bra - d['org']] == 0x0d10c0 and words[bra - d['org'] + 1] == 0, 'bra placeholder moved'
     words[bra - d['org'] + 1] = (d['djeq_proc'] - bra) & 0xffffff
-    checks = [(bra, f'bra     func_{d["djeq_proc"]:06x}', 'exit branch')]
-    for site, target in (('hq_callev', 'hq_event'), ('hq_cbr0', 'hq_burn'), ('hq_cbr1', 'hq_burn'),
-                         ('hq_cstr', 'hq_mode'), ('hq_cmeng', 'hq_reng'), ('hq_crel', 'hq_reloc')):
-        cal = S[site]
-        assert words[cal - d['org']] == 0x0d1080 and words[cal - d['org'] + 1] == 0, f'{site}: bsr placeholder moved'
-        if site == 'hq_crel' and not d['xd']:
-            words[cal - d['org']] = 0                                       # nothing to move: two nops
-            continue
-        words[cal - d['org'] + 1] = (evs[target] - cal) & 0xffffff
-        checks.append((cal, f'bsr     func_{evs[target]:06x}', f'{site} -> {target}'))
-    # region 2's calls into region 1 (assembled apart: placeholders, patched here)
-    evchecks = []
-    for site, op in (('hq_cot2', 0x0d1080),):
-        cal = evs[site]
-        assert evw[cal - ev_org] == op and evw[cal - ev_org + 1] == 0, f'{site}: placeholder moved'
-        evw[cal - ev_org + 1] = (S['ot303'] - cal) & 0xffffff
-        evchecks.append((cal, f'{"bra" if op == 0x0d10c0 else "bsr"}     func_{S["ot303"]:06x}', f'{site} -> ot303'))
-    evdis = dsp_xasm.disassemble(evw, ev_org)
-    for at, want, what in evchecks:
-        if want not in evdis.get(at, ('',))[0]:
-            raise ValueError(f'payload {tag}: {what} disassembles as {evdis.get(at)!r}')
     dis = dsp_xasm.disassemble(words, d['org'])
     # no REP: stock never uses one (a REP holds off interrupts, and the host-port handlers must
     # answer at once: DIAG2-4 on the unit tore the ColdFire transfers whenever ours ran early)
-    for code, extra in ((dis, d['org']), (dsp_xasm.disassemble(evw, ev_org), ev_org)):
-        reps = [f'P:{a:x}' for a, l in code.items() if l[0].split()[:1] == ['rep']]
-        if reps:
-            raise ValueError(f'payload {tag}: REP at {reps[:6]}')
-    for at, want, what in checks:
-        line = dis.get(at, ('',))[0]
-        if want not in line:
-            raise ValueError(f'payload {tag}: {what} disassembles as {line!r}')
+    reps = [f'P:{a:x}' for a, l in dis.items() if l[0].split()[:1] == ['rep']]
+    if reps:
+        raise ValueError(f'payload {tag}: REP at {reps[:6]}')
+    jm = [a for a, l in dis.items() if l[0].startswith('jmp')]
+    if [dis[a][0] for a in jm] != [f'jmp     func_{d["cont"]:06x}'] * len(jm) or len(jm) != 1:
+        raise ValueError(f'payload {tag}: the continuation jmp disassembles as {[dis[a][0] for a in jm]}')
+    line = dis.get(bra, ('',))[0]
+    if f'bra     func_{d["djeq_proc"]:06x}' not in line:
+        raise ValueError(f'payload {tag}: exit branch disassembles as {line!r}')
 
     T = twin_constants()
     x = {}
@@ -210,13 +184,12 @@ def build(tag):
             x.setdefault(a, 0)
     # the Y footprint stays in the free region
     assert TH + 1026 <= LT and LT >= 0x800 and LT + 860 <= YS and S['YS'] + 0xab <= 0x1000 and TH >= 0x7a5
-    return dict(org=d['org'], words=words, syms=S, ysyms=ysyms, p2=(ev_org, evw), x=x, xd=d['xd'],
-                djeq_proc=d['djeq_proc'], entry=S['hq_entry'])
+    return dict(org=d['org'], words=words, syms=S, ysyms=ysyms, x=x, xd=d['xd'], djeq_proc=d['djeq_proc'],
+                entry=S['hq_entry'], seam_entry=S['sg_entry'], seam=d['seam'], cont=d['cont'], rawp=d['rawp'])
 
 
 if __name__ == '__main__':
     for tag in ('A', 'B'):
         b = build(tag)
-        print(f'payload {tag}: {len(b["words"])} words at P:{b["org"]:x} (to {b["org"] + len(b["words"]) - 1:x}, '
-              f'DARK REV\'s helper at {PAYLOAD[tag]["dark"]:x}); entry P:{b["entry"]:x}; '
-              f'step events {len(b["p2"][1])} words at P:{b["p2"][0]:x} (module ends {PAYLOAD[tag]["end"]:x}); X {len(b["x"])} words')
+        print(f'payload {tag}: {len(b["words"])} of {CODE_N} words at P:{b["org"]:x} (to {b["org"] + len(b["words"]) - 1:x}); '
+              f'DJ EQ entry P:{b["entry"]:x}, seam entry P:{b["seam_entry"]:x}; X {len(b["x"])} words')

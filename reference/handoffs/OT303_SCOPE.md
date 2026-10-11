@@ -1970,7 +1970,7 @@ sample), DJ EQ in FX1 and FX2 on every track, OT-303 (303 = 88) on T2 and T6, BU
 - **Option 4's core-0 caveat is not needed** in this configuration. It remains a sensible warning
   for stacks heavier than DJ EQ everywhere (reverbs).
 
-## 12. Status and handoff (2026-10-11)
+## 12. Status and handoff (2026-10-11, DIAG14 update)
 
 **Done and HW-confirmed:**
 - The lean engine (`tools/ot303/ot303_engine.asm`) is bit-exact with the integer twin and costs
@@ -1989,17 +1989,45 @@ sample), DJ EQ in FX1 and FX2 on every track, OT-303 (303 = 88) on T2 and T6, BU
      no DMA.
 3. Init-only or sparse reads in a DMA block are fine (b0/kp stay in SPRING's records).
 
-**The probe host** (DIAG13): DJ EQ's process routine. Page 2 slot 7 = 303 (1–31 tone, 32–127 the
-built-in Hot riff), slot 6 = BURN. SPRING REV removed, one engine per core.
-- Builder: `tools/build_ot303_hwprobe.py` (WIP gate).
-- Image: `tools/ot303/hwprobe_image.py`.
-- Wrapper: `tools/ot303/hwprobe.asm` and `hwprobe_ev.asm`.
-- Bench: `tools/ot303/hwprobe_check.py`.
-- Firmware check: `tools/ot303/verify_hwprobe.py` (`HWP_IMAGE=`).
-- Recording tools: `tools/ot303/hwrec/` (meter.py decodes a METER take).
+**The probe host** (DIAG14, built 2026-10-11, not yet on the unit): the voice runs at the per-track
+**source seam** (§12 item 1a), upstream of AMP, FX1 and FX2. DJ EQ stays only as the remote control:
+page 2 slot 7 = 303 (0 off, 1–31 tone, 32–127 the built-in Hot riff) claims its track for its core's
+voice (first claim wins; the claim lapses 2 frames after 303 goes to 0 or DJ EQ is removed), slot 6 =
+BURN (always before DJ EQ). DJ EQ itself now processes the voice. SPRING REV removed; DARK REV's
+35-word helper moved to the end of SPRING's module (callers retargeted), one contiguous 1,028-word
+block (1,004 used). One engine per core.
+- Builder: `tools/build_ot303_hwprobe.py` (WIP gate) → `out/OCTATRACK_OS1.40C_OT303_DIAG14.syx`
+  (sha256 `85cfe103…`, version `140C_303DE`).
+- Image: `tools/ot303/hwprobe_image.py`. Wrapper: `tools/ot303/hwprobe.asm` (seam glue, remote,
+  render, events, tables, reloc in one piece).
+- Bench: `tools/ot303/hwprobe_check.py`: three tracks a frame in firmware order (seam, then DJ EQ's two
+  calls), a claim handed over between two tracks, payload A's raw path; every rendered block
+  bit-exact vs the twin. Voice at the seam 385–386 cycles/sample (table), other tracks 23 cycles/frame.
+- Firmware check: `tools/ot303/verify_hwprobe.py` (ot_emu, BOTLI): glue +7 instructions per track
+  source; voice ~5,500 instr/frame on the claimed track only; DJ EQ remote +13 (+21 claiming); DARK
+  REV and PLATE REV equal to stock after the helper move; the voice reaches DJ EQ's input through stock
+  AMP, also on a track that streams no sample (BOTLI T8).
+- Recording tools: `tools/ot303/hwrec/` (meter.py decodes a METER take from DIAG8).
+
+**DIAG14 on the unit — what to check:**
+1. T2: DJ EQ in FX1, page 2 303 = 40 → the riff replaces T2's sample (through T2's AMP; DJ EQ's page 1
+   now acts on it). Clean on the track; MAIN clean with T2 muted.
+2. T6 the same (core 0); then T2 + T6 together; T1 and T5 (a core's first track: VOCODER's click caveat).
+3. 303 = 8: the tone. 303 back to 0: the track's own sample returns.
+4. Claim: 303 up on T2 and T3 (same core) → only T2 plays the voice; T2 to 0 → the voice moves to T3.
+5. DARK REV and PLATE REV on any track sound as stock (their helper moved).
+6. If a track with no trigs stays silent, give it trigs / a long AMP HOLD (AMP is stock).
+7. Optional: DIAG13's worst case (all 8 tracks playing, DJ EQ FX1+FX2 everywhere, voices T2+T6) with BURN.
 
 **Next (the product, Phase 3+ of §8), in order:**
-1. **The real host.** Move the voice from the DJ EQ probe to a proper machine.
+1. **The real host.** Move the voice from the DJ EQ probe to a proper machine. Approved plan
+   (2026-10-11): **1a** = DIAG14 above (DSP only); **1b** = the ColdFire machine: ANALOG BD-style
+   registration (an "OT-303" chooser row stored as FLEX + a signature in unused NEIGHBOR bytes, its
+   Part-validator wrapper; octabam MIT, credit repeat98) and a render hook on the FLEX supplier slot
+   (`0x400d6438`) that writes a signed control record (trig flag, knobs) for OT-303 tracks; the glue
+   keys on the record; one track per core; the riff steps on trigs. **Tables stay in place** in
+   SPRING's X records (716 words: run 1 216 + tanh half 257, odd-symmetric + b0/kp as packed 12-bit
+   second differences ~218), expanded bit-exactly at boot; no pre-boot loader.
    - The planned route is Analog BD's source seam (A `P:0x39c` / B `P:0x1a2` → jsr; continue at A
      `P:0x426` / B `P:0x221`; render 16 samples into `X:0`, upstream of AMP and both FX; trig offset at
      `x:$20c`).
@@ -2018,4 +2046,4 @@ built-in Hot riff), slot 6 = BURN. SPRING REV removed, one engine per core.
 - Keep shipping DIAG-style images with a bench (bit-exact vs the twin) and ot_emu checks before
   each flash. The emulator cannot see REP or contention problems; only the unit can.
 
-**Pending outside the code:** the note to Sam (`~/Documents/octabam-note-to-sam-4.md`, not sent).
+**Outside the code:** the note to Sam (`~/Documents/octabam-note-to-sam-4.md`) was sent 2026-10-11.

@@ -36072,3 +36072,15 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   voices on T2+T6: core 1 breaks at 23 (~528 spare), core 0 at 10 (~216 spare); vs 6 Oct no-voice
   26/12 → the voice costs ~DJ EQ + 70-100. **Two OT-303s fit the heaviest legal config.** Handoff:
   OT303_SCOPE.md §12 (status, rules, next steps).
+- **S124 cont: DIAG14 BUILT (NOT flashed)** — item 1a of the real host: the voice at the per-track
+  SOURCE seam (A P:$39c / B P:$1a2 → jsr, on at P:$426 / P:$221; 16 samples L/R into X:0, upstream
+  of AMP/FX1/FX2; ring base x:$20b += $80 except payload A's raw path, bit 18). DJ EQ page 2 = remote:
+  303 up claims the track for its core (OWN/LIVE at X:$7b05/6, first claim wins, lapses 2 frames after
+  release); tables build at the seam on the claimed track (its sample heard meanwhile). DARK REV's
+  helper moved to SPRING's end (3 callers retargeted, octabam's digest matched) → 1,028 contiguous
+  words, 1,004 used. Bench bit-exact (3 tracks, handover, raw path), seam voice 385 cycles/sample;
+  ot_emu ALL GOOD (glue +7 instr/track, DARK/PLATE = stock, the voice passes stock AMP even on an
+  idle track). dsp56kEmu keeps accumulators left-aligned (<< 8) — set `regs().a` accordingly.
+  `out/OCTATRACK_OS1.40C_OT303_DIAG14.syx` sha256 85cfe103893e9484a570f2e0e7f2d00df5384906117c56272882fed786963fe9
+  (`140C_303DE`). Plan approved: 1b (ColdFire machine, ANALOG BD-style) next; tables stay in place.
+  Note to Sam sent.

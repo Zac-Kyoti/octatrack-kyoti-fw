@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 #
-# OT-303 hardware probe on the bench: both payloads' placements (tools/ot303/hwprobe_image.py) run on
-# dsp56kEmu as the dispatcher would call them (tools/ot303/hwprobe_probe.cpp), saw and square,
-# against the integer twin. Needs the private toolchain (out/ot303/dsp56300_new).
+# OT-303 hardware probe (DIAG14) on the bench: both payloads' placements (tools/ot303/hwprobe_image.py)
+# run on dsp56kEmu as the firmware enters them (tools/ot303/hwprobe_probe.cpp: the source seam and
+# the DJ EQ remote, three tracks, a claim handed over), tone and riff, against the integer twin.
+# Needs the private toolchain (out/ot303/dsp56300_new).
 #   python3 tools/ot303/hwprobe_check.py [FRAMES]
 import os, pathlib, re, subprocess, sys
 
@@ -37,18 +38,19 @@ def main():
         d = OUT / tag
         d.mkdir(exist_ok=True)
         (d / 'p1.bin').write_bytes(w24(b['words'])); (d / 'p1.org').write_text(f'{b["org"]:x}\n')
-        (d / 'p2.bin').write_bytes(w24(b['p2'][1])); (d / 'p2.org').write_text(f'{b["p2"][0]:x}\n')
+        (d / 'cont.txt').write_text(f'{b["cont"]:x}\n'); (d / 'rawp.txt').write_text(f'{b["rawp"]:x}\n')
         (d / 'djeq.txt').write_text(f'{b["djeq_proc"]:x}\n')
         (d / 'x.txt').write_text(''.join(f'{a:x} {v:x}\n' for a, v in sorted(b['x'].items())))
         (d / 'syms.txt').write_text(''.join(f'{k} {v & 0xffffff:x} {"Y" if k in b["ysyms"] else "X"}\n'
                                             for k, v in sorted(b['syms'].items())))
-        for knob, extra, burn in ((8, [], 0), (8, [], 20), (32, [], 0), (32, [], 10), (88, [], 0), (127, [], 0)):
-            pre = 0
+        for knob, burn, raw in ((8, 0, 0), (32, 0, 0), (32, 20, 0), (127, 0, 0), (40, 0, 1)):
             env = dict(os.environ, HWP_BURN=str(burn))
-            p = subprocess.run([str(probe), str(d), str(knob), frames, *extra], capture_output=True, text=True, errors='replace', env=env)
+            env.pop('HWP_RAW', None)
+            if raw:
+                env['HWP_RAW'] = '1'
+            p = subprocess.run([str(probe), str(d), str(knob), frames], capture_output=True, text=True, errors='replace', env=env)
             lines = [l for l in p.stdout.strip().splitlines() if not re.match(r'^\w+@\d+:', l)]
- 
-            print(f'payload {tag} 303 = {knob:3d} BURN {burn:2d} PRE {pre:2d}: ' + '\n' + ''.join(f'    {l}\n' for l in lines), end='')
+            print(f'payload {tag} 303 = {knob:3d} BURN {burn:2d}{" RAW" if raw else ""}: ' + '\n' + ''.join(f'    {l}\n' for l in lines), end='')
             fails += p.returncode != 0
     print('ALL GOOD' if not fails else f'{fails} FAILED')
     return 1 if fails else 0
