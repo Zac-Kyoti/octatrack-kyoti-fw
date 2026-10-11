@@ -1922,3 +1922,29 @@ time.
 - **Checks:**
   - bench bit-exact on both payloads (tone and riff, BURN 0/10/20);
   - ot_emu: STG = 2 at `X:$7bb0` with the riff on T2 (core 1), T5 and T7 (core 0); verify ALL GOOD.
+
+### DIAG13 on the unit (user, 2026-10-11): any track, two voices, the budget
+
+1. T3, T6, T8 (one at a time, 303 = 88): **clean riff, master silent when muted.**
+2. **T2 and T6 together** (one voice per core): **both clean.**
+3. **Light** (the two voices plus one DJ EQ at 303 = 0 with BURN):
+
+   | core | result | spare beside a voice |
+   |---|---|---|
+   | core 1 (T1) | BURN to 127 with no change | **≥ 3,048 cycles/sample** |
+   | core 0 (T5) | breaks at 116 | **~2,760** (last clean 115) |
+
+4. **Heavy** (DJ EQ in FX1 and FX2 on all eight tracks; voices on T2 and T6; BURN on a 303 = 0
+   DJ EQ; **all other tracks idle, no samples playing**):
+
+   | core | breaks at | spare | crash |
+   |---|---|---|---|
+   | core 0 | 34 (35 slows the sequencer) | **~790** (last clean 33) | 36, loud high squeal: the deep-overrun signature |
+   | core 1 | 47 | **~1,100** (last clean 46) | silent crash at 57 |
+
+**Reading:**
+- Two OT-303s (426 cycles/sample each, measured) fit with headroom in this configuration.
+- **Caveat:** the Phase 0b burn test (6 Oct) had all eight tracks playing a long Flex sample, and
+  gave core 0 only ~300 spare. Playing tracks cost the DSP more.
+- **Still to measure:** the heavy configuration with every track playing, which decides the core-0
+  caveat for a second instance.

@@ -36063,3 +36063,8 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   fail / DIAG12 pass). **DIAG13** (`140C_303DD`, syx `70395721…`, NOT flashed): run 1 at X:$7b24 on
   BOTH cores (stock's unreferenced X:$7a92-$7fff), any track; BURN back for cost measurements;
   303 1-31 tone, 32-127 riff.
+- **S124 cont: DIAG13 on HW** — T3/T6/T8 clean + muted-silent; T2+T6 together clean. Light: core 1
+  BURN to 127, core 0 breaks at 116. Heavy (DJ EQ FX1+FX2 everywhere, tracks IDLE): core 0 breaks
+  at 34 (~790 spare; 36 = squeal crash), core 1 at 47 (~1,100; silent crash 57). Next: heavy with all
+  tracks PLAYING (6 Oct burn test had core 0 at ~300 spare). Note to Sam drafted:
+  ~/Documents/octabam-note-to-sam-4.md (not sent).
