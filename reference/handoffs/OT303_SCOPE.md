@@ -1989,7 +1989,8 @@ sample), DJ EQ in FX1 and FX2 on every track, OT-303 (303 = 88) on T2 and T6, BU
      no DMA.
 3. Init-only or sparse reads in a DMA block are fine (b0/kp stay in SPRING's records).
 
-**The probe host** (DIAG14, built 2026-10-11, not yet on the unit): the voice runs at the per-track
+**The probe host** (DIAG14, `140C_303DE`, FLASHED 2026-10-11: checks 1–6 below PASS on the unit, 7 not
+tried): the voice runs at the per-track
 **source seam** (§12 item 1a), upstream of AMP, FX1 and FX2. DJ EQ stays only as the remote control:
 page 2 slot 7 = 303 (0 off, 1–31 tone, 32–127 the built-in Hot riff) claims its track for its core's
 voice (first claim wins; the claim lapses 2 frames after 303 goes to 0 or DJ EQ is removed), slot 6 =
@@ -2009,7 +2010,13 @@ block (1,004 used). One engine per core.
   AMP, also on a track that streams no sample (BOTLI T8).
 - Recording tools: `tools/ot303/hwrec/` (meter.py decodes a METER take from DIAG8).
 
-**DIAG14 on the unit — what to check:**
+**Level (user, DIAG14):** the voice is much quieter than samples peaking near 0 dB. Measured: every saw
+scene peaks at −6 dBFS (Hot −5.8, RMS −25 dBFS; square −11): the output word is Open303 / 4 and the
+riff's `SC` (Open303's volume, the ampScaler host word) is 0.501 (−6 dB). Fix (no cycles, twin
+unchanged): default `SC` = 0.89 (+5 dB: Hot peaks −0.8 dBFS, no scene saturates), and `SC` becomes the
+SETUP page's VOL (item 3). Louder than that needs saturation/limiting = a sound change (A/B pack).
+
+**DIAG14 on the unit — what to check** (1–6 PASS 2026-10-11):
 1. T2: DJ EQ in FX1, page 2 303 = 40 → the riff replaces T2's sample (through T2's AMP; DJ EQ's page 1
    now acts on it). Clean on the track; MAIN clean with T2 muted.
 2. T6 the same (core 0); then T2 + T6 together; T1 and T5 (a core's first track: VOCODER's click caveat).

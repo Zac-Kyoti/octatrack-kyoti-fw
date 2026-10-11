@@ -36084,3 +36084,9 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   `out/OCTATRACK_OS1.40C_OT303_DIAG14.syx` sha256 85cfe103893e9484a570f2e0e7f2d00df5384906117c56272882fed786963fe9
   (`140C_303DE`). Plan approved: 1b (ColdFire machine, ANALOG BD-style) next; tables stay in place.
   Note to Sam sent.
+- **S124 cont: DIAG14 on HW — checks 1–6 PASS** (seam voice on T2/T6/both/T1/T5 clean, muted MAIN
+  silent; tone; release returns the sample; claim handover T2→T3; DARK/PLATE REV as stock after the
+  helper move; worst-case BURN not tried). User: the voice is much quieter than samples near 0 dB →
+  measured −6 dBFS peaks (output word = Open303/4, riff SC = 0.501); 1b default SC = 0.89 (+5 dB,
+  no scene saturates), VOL = SC on the SETUP page later. Next: 1b, the ColdFire machine.
+
