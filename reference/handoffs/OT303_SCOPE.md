@@ -1950,3 +1950,72 @@ time.
   gave core 0 only ~300 spare. Playing tracks cost the DSP more.
 - **Still to measure:** the heavy configuration with every track playing, which decides the core-0
   caveat for a second instance.
+
+### The worst case (user, 2026-10-11): two voices fit
+
+**Heavy, every track playing:** the 6 Oct BURNTEST setup (all eight tracks looping a long Flex
+sample), DJ EQ in FX1 and FX2 on every track, OT-303 (303 = 88) on T2 and T6, BURN raised on a
+303 = 0 DJ EQ per core.
+
+| | breaks up at | spare beside the voice | 6 Oct, no voice (last clean) | the voice's extra over the DJ EQ it replaces |
+|---|---|---|---|---|
+| core 1 | 23 | **~528 cycles/sample** (last clean 22) | 26 (624–648) | ~96 |
+| core 0 | 10 | **~216** (last clean 9) | 12 (288–312) | ~72 |
+
+**Conclusion:**
+- **Two OT-303s (one per core) fit the heaviest legal configuration, with margin left on both
+  cores.**
+- The voice costs about a DJ EQ plus 70–100 cycles/sample, consistent with the METER's 426 against
+  DJ EQ's ~346–394.
+- **Option 4's core-0 caveat is not needed** in this configuration. It remains a sensible warning
+  for stacks heavier than DJ EQ everywhere (reverbs).
+
+## 12. Status and handoff (2026-10-11)
+
+**Done and HW-confirmed:**
+- The lean engine (`tools/ot303/ot303_engine.asm`) is bit-exact with the integer twin and costs
+  **426 cycles/sample on the chip** (METER, both cores).
+- It runs clean on any track, both cores, two instances at once, through a 10-minute soak and the
+  heaviest legal configuration (DIAG13: `140C_303DD`, syx `70395721…`, the image on the unit).
+
+**Hardware rules** (both broke the unit before they were known):
+1. **No REP**, anywhere. It holds off the host-port IRQs, the ColdFire's transfers slip, and the
+   read-back tears. At worst the ColdFire's RAM is garbled. `hwprobe_image.py` refuses REP.
+2. **No dense working data in an internal memory partition (8K) that a DMA uses.**
+   - Core 0: `$0000` (records), `$2000` and `$4000` (host ping-pong), `$8000` (ESAI).
+   - Dense core work there stalls the DMA (FM §10.3.2), and core 0's handoff slips: persistent
+     L / R / silent states, muted tracks leaking into MAIN, the sequencer stuck on step 1–2.
+   - **Use `X:$6000–$7FFF`** (DIAG13: run 1 at `X:$7b24`, in stock's unreferenced `$7a92–$7fff`). Y has
+     no DMA.
+3. Init-only or sparse reads in a DMA block are fine (b0/kp stay in SPRING's records).
+
+**The probe host** (DIAG13): DJ EQ's process routine. Page 2 slot 7 = 303 (1–31 tone, 32–127 the
+built-in Hot riff), slot 6 = BURN. SPRING REV removed, one engine per core.
+- Builder: `tools/build_ot303_hwprobe.py` (WIP gate).
+- Image: `tools/ot303/hwprobe_image.py`.
+- Wrapper: `tools/ot303/hwprobe.asm` and `hwprobe_ev.asm`.
+- Bench: `tools/ot303/hwprobe_check.py`.
+- Firmware check: `tools/ot303/verify_hwprobe.py` (`HWP_IMAGE=`).
+- Recording tools: `tools/ot303/hwrec/` (meter.py decodes a METER take).
+
+**Next (the product, Phase 3+ of §8), in order:**
+1. **The real host.** Move the voice from the DJ EQ probe to a proper machine.
+   - The planned route is Analog BD's source seam (A `P:0x39c` / B `P:0x1a2` → jsr; continue at A
+     `P:0x426` / B `P:0x221`; render 16 samples into `X:0`, upstream of AMP and both FX; trig offset at
+     `x:$20c`).
+   - Its pre-boot X record holds the tables. **Rule 2 applies:** Analog BD's own `X:$2840–$31ff` is in
+     the `$2000` DMA block, so put dense data at `$6000–$7FFF`. Tables read only at init may sit
+     elsewhere.
+   - Mind octabam's ledger conflicts (MACHINEDRUM / SYNTH / POLY).
+2. **The OT's sequencer drives the voice.**
+   - Trigs, note, slide, accent and gate become the per-track record and the host words; remove the
+     built-in riff.
+   - The ColdFire side writes the host words per frame (§5–§7).
+3. **The parameter pages** (§7) and the full square: build the tanh table (cleared in the probe)
+   in Y at boot, the twin's integer recipe.
+4. **Two instances by design** (one per core), state per core at the fixed no-DMA address.
+   Re-run the heavy test with the real host.
+- Keep shipping DIAG-style images with a bench (bit-exact vs the twin) and ot_emu checks before
+  each flash. The emulator cannot see REP or contention problems; only the unit can.
+
+**Pending outside the code:** the note to Sam (`~/Documents/octabam-note-to-sam-4.md`, not sent).

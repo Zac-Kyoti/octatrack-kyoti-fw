@@ -36068,3 +36068,7 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   at 34 (~790 spare; 36 = squeal crash), core 1 at 47 (~1,100; silent crash 57). Next: heavy with all
   tracks PLAYING (6 Oct burn test had core 0 at ~300 spare). Note to Sam drafted:
   ~/Documents/octabam-note-to-sam-4.md (not sent).
+- **S124 cont: WORST CASE on HW (DIAG13)** — all 8 tracks playing Flex + DJ EQ FX1+FX2 everywhere,
+  voices on T2+T6: core 1 breaks at 23 (~528 spare), core 0 at 10 (~216 spare); vs 6 Oct no-voice
+  26/12 → the voice costs ~DJ EQ + 70-100. **Two OT-303s fit the heaviest legal config.** Handoff:
+  OT303_SCOPE.md §12 (status, rules, next steps).
