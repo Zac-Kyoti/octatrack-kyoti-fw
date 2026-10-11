@@ -36059,3 +36059,7 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   mute leaks, sequencer stuck on step 1-2). **Rule: no dense DSP working data in a DMA partition**
   (core 0: X:$8000-$8FFF, the $2xxx/$4xxx host-buffer blocks); use the host's FX instance block (r7).
   Next: 10-min soak, r7-relative product placement, then BURN cost measurements.
+- **S124 cont: soak clean** (10 min T6; T1, T5 clean; no crash). Partition size 4K-8K (from DIAG7
+  fail / DIAG12 pass). **DIAG13** (`140C_303DD`, syx `70395721…`, NOT flashed): run 1 at X:$7b24 on
+  BOTH cores (stock's unreferenced X:$7a92-$7fff), any track; BURN back for cost measurements;
+  303 1-31 tone, 32-127 riff.

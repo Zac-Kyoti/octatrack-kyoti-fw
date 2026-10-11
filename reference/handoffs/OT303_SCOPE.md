@@ -1895,3 +1895,30 @@ T8 `$6a00`. Stock tables live at `$6c00–$7a91` (TABLES.md). With 8 DJ EQs, DJ 
 - **The product placement:** the working set addressed from `r7` (any track, any core) instead of
   fixed addresses, or a fixed no-DMA region per core.
 - **Then the BURN cost measurements** (heavy configurations) that were pending since step 3.
+
+### The soak (user, 2026-10-11) and DIAG13 (built, NOT flashed)
+
+**DIAG12 soak:** a 10-minute run on T6 was clean, and T1 and T5 also ran clean, with no crash at any
+time.
+- So the random riff crash (DIAG5/9/10) was this same mechanism.
+- T5 was clean because payload A's block sat in T6's (empty) FX1 instance block.
+
+**Partition size, bounded by the unit:**
+- `$3224` (shares a block with the `$2xxx` host buffers) failed, so blocks are ≥ 4K.
+- `$6400` (vs `$4400–$48ff`) worked, so blocks are ≤ 8K.
+- **4K or 8K words.**
+
+**DIAG13:** `out/OCTATRACK_OS1.40C_OT303_DIAG13.syx`
+(`70395721e32a7366a801b17322e46e8594ccfe470314699fcca1d5198d8ed4f1`, version `140C_303DD`).
+- **Run 1** (216 words) at **`X:$7b24–$7bfb` on both cores.** That is stock's unreferenced `X:$7a92–$7fff`
+  (DSP.md; never written in the BOTLI write map), in a partition of stock tables only, with no DMA
+  under either size.
+  - `hq_reloc` copies it once from SPRING's records (A `xd = $e80`, B `$940`).
+  - `SIGA` `X:$7b04` marks the copy.
+  - Run 2 stays in SPRING's records (read only while the tables build).
+- **Any track, either core;** one engine per core.
+- **303:** 1–31 tone, 32–127 riff; 0 = stock DJ EQ with BURN before it (the burn probe).
+  **BURN (slot 6) is back:** 24 cycles/sample per step, after the render when 303 > 0.
+- **Checks:**
+  - bench bit-exact on both payloads (tone and riff, BURN 0/10/20);
+  - ot_emu: STG = 2 at `X:$7bb0` with the riff on T2 (core 1), T5 and T7 (core 0); verify ALL GOOD.

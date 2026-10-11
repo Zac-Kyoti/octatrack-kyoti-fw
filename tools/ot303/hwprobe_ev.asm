@@ -72,53 +72,40 @@ hq_vars:
         rts
 
 
-; ---- the mode (DIAG12), once per call before the render: K = 303
-;   1-47 tone | 48-71 engine + tone (the riff's work, events included) | 72-87 riff / 8 |
-;   88-103 riff | 104-127 X reads + tone (n7 x 384 reads of the engine's X block, 3 a loop pass)
-; r5 = XM; uses a b x0 x1 r1 m1.
+; ---- BURN: page-2 slot 6, 24 * BURN cycles per sample over this call's n7 samples (octabam's RIG
+; BURN body, hardware-proven; tools/ot303/burn_djeq.asm). r6 and n7 are the caller's. Uses a, x0,
+; y1. The zero guard is load-bearing: DO with a count of 0 loops 65536 times; asl sets Z.
+hq_burn:
+        move    x:(r6+$c),a
+        and     #>$7f0000,a
+        move    a1,y1
+        move    n7,x0
+        mpy     x0,y1,a
+        asl     #$a,a,a
+        beq     hq_bzero
+        do      a1,hq_bzero
+        nop
+        nop
+        nop
+hq_bzero:
+        rts
+
+; ---- the mode (DIAG13), once per call before the render: 303 1-31 the tone, 32-127 the riff
 hq_mode:
-        move    x:(r5+D_KNB),a                  ; K << 8
+        move    x:(r5+D_KNB),a                  ; 303 << 8
         clr     b
-        cmp     #>$6800,a
-        bge     hq_mx                           ; 104-127
-        cmp     #>$5800,a
-        bge     hq_mriff                        ; 88-103
-        cmp     #>$4800,a
-        bge     hq_mr8                          ; 72-87
-        cmp     #>$3000,a
-        blt     hq_mset                         ; 1-47: the tone
-        move    #>1,b                           ; 48-71
-        bra     hq_mset
-hq_mriff:
+        cmp     #>$2000,a
+        blt     hq_mset
         move    #>2,b
-        bra     hq_mset
-hq_mr8:
-        move    #>3,b
 hq_mset:
         move    b1,x:(r5+D_BAND)
         rts
-hq_mx:
-        move    b1,x:(r5+D_BAND)
-        move    n7,b
-        asl     #7,b,b
-        move    #>63,x1
-        move    x1,m1
-        move    #>XB,r1
-        do      b1,hq_xrdz
-        move    x:(r1)+,x0
-        move    x:(r1)+,x0
-        move    x:(r1)+,x0
-hq_xrdz:
-        move    #>$ffffff,x1
-        move    x1,m1
-        rts
 
-; ---- RELOC (payload A; the builder nops the call on B). DIAG12: the engine's run-1 block (216
-; words: its X working set and the wrapper's words) runs from inside the host's own FX1 instance
-; block (T6: X:$6400-$64ff), a memory partition no DMA touches; the loader puts it XD words above
-; (SPRING's records, X:$89a4, the partition of core 0's ESAI DMA). DJ EQ writes its own state at
-; r7 + 4 whenever it runs (303 = 0): SIGA there is our mark; when it is gone, copy again (and the
-; tables rebuild from STG = 0). m1 is linear (hq_entry). Uses a, r1, n1; keeps x0 x1 y1.
+; ---- RELOC (both payloads, DIAG13): the engine's run-1 block (216 words: its X working set and the
+; wrapper's words) runs at X:$7b24-$7bfb, in stock's unreferenced X:$7a92-$7fff: a memory partition
+; with no DMA on either core (DIAG12: dense core work in a DMA's partition stalls the DMA; on core 0
+; that slips the ColdFire handoff). The loader puts the words XD above, in SPRING's records. SIGA
+; (X:$7b04, unused) marks the copy done until power-off. m1 is linear (hq_entry). Uses a, r1, n1.
 hq_reloc:
         move    x:>SIGA,a
         cmp     #>$5a5a5a,a

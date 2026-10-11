@@ -31,11 +31,12 @@ PAYLOAD = {
     # xd: the run-time X block sits xd words BELOW the loader's copy (hq_reloc moves it on the first
     # call). Payload A = core 0, the only core running ESAI DMA (X:$8000-$833f, boot P:$3001d); its
     # engine block moves out of that memory block to X:$3224.. (Analog BD's free region $2840-$3940).
-    # DIAG12: run 1 (the engine's X working set) runs in T6's FX1 instance block X:$6400-$64ff
-    # (a partition no DMA touches); run 2 (b0/kp, read only while the tables build) stays put.
-    'A': dict(org=0x1252, dark=0x1586, end=0x1679, djeq_proc=0x1d7d, xd=0x2580,
+    # DIAG13: run 1 (the engine's X working set, 216 words) runs at X:$7b24 on both cores, in stock's
+    # unreferenced X:$7a92-$7fff (a partition no DMA touches); run 2 (b0/kp, read only while the
+    # tables build) stays in SPRING's records. xd = the loader's copy minus the run-time address.
+    'A': dict(org=0x1252, dark=0x1586, end=0x1679, djeq_proc=0x1d7d, xd=0x0e80,
               xrun1=((0x89a4, 72), (0x89ec, 72), (0x8a34, 72)), xrun2=((0x8afc, 116), (0x8b70, 384))),
-    'B': dict(org=0x1012, dark=0x1346, end=0x1439, djeq_proc=0x1b3d, xd=0,
+    'B': dict(org=0x1012, dark=0x1346, end=0x1439, djeq_proc=0x1b3d, xd=0x0940,
               xrun1=((0x8464, 72), (0x84ac, 72), (0x84f4, 72)), xrun2=((0x85bc, 116), (0x8630, 384))),
 }
 DARK_N = 35
@@ -79,7 +80,7 @@ def source(tag):
     xb = d['xrun1'][0][0] + 0x1c - xd
     assert xb % 64 == 0 and xd % 64 == 0, f'payload {tag}: X block {xb:x} not 64-aligned'
     if xd:
-        assert 0x6408 <= xb - 0x1c and xb - 0x1c + 216 <= 0x6500, 'run 1 outside T6 FX1\'s instance block'
+        assert 0x7b08 <= xb - 0x1c and xb - 0x1c + 216 <= 0x8000, 'run 1 outside X:$7b00-$7fff'
     eng = (ROOT / 'tools/ot303/ot303_engine.asm').read_text()
     wrap = (ROOT / 'tools/ot303/hwprobe.asm').read_text()
     src = asm_macros.layout(eng, XB=xb, YS=YS, LT=LT, TH=TH) + asm_macros.layout(wrap, R2=d['xrun2'][0][0], HQEV=d['dark'] + DARK_N,
@@ -122,7 +123,7 @@ def build(tag):
     assert words[bra - d['org']] == 0x0d10c0 and words[bra - d['org'] + 1] == 0, 'bra placeholder moved'
     words[bra - d['org'] + 1] = (d['djeq_proc'] - bra) & 0xffffff
     checks = [(bra, f'bra     func_{d["djeq_proc"]:06x}', 'exit branch')]
-    for site, target in (('hq_callev', 'hq_event'),
+    for site, target in (('hq_callev', 'hq_event'), ('hq_cbr0', 'hq_burn'), ('hq_cbr1', 'hq_burn'),
                          ('hq_cstr', 'hq_mode'), ('hq_cmeng', 'hq_reng'), ('hq_crel', 'hq_reloc')):
         cal = S[site]
         assert words[cal - d['org']] == 0x0d1080 and words[cal - d['org'] + 1] == 0, f'{site}: bsr placeholder moved'

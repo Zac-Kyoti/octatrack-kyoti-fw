@@ -17,11 +17,8 @@
 ;                read-back pull, below), BEFORE DJ EQ when 303 is 0 (the burn probe's measure)
 ;   slot 7 303   bits 8-15: 0 off (stock DJ EQ), else, in sixteens, the track's audio is replaced
 ;                (both channels) by: 1-15 TONE (a 110 Hz saw; the engine does not run);
-;                DIAG11 (hwprobe_ev.asm hq_mode), safest first: 16-47 STRESS + TONE (a workload
-;                before each call's tone: Y reads, Y writes, mac + X:Y reads, the engine without
-;                events); 48-71 ENG+TONE (the riff's whole work, the tone heard); 72-87
-;                RIFF / 8; 88-103 RIFF (the engine, saw: a built-in 16-step bar of the Hot voice,
-;                130 BPM); 104-127 STRESS X reads. Listen to the master with the track MUTED.
+;                DIAG13: 1-31 TONE, 32-127 RIFF (the engine, saw: a built-in 16-step bar of the
+;                Hot voice, 130 BPM).
 ; DIAG2 on the unit: the riff was clean only when its call ended late enough. Stock copies each
 ; track's block into the read-back buffer after FX2 while the ColdFire's DMA pulls that buffer;
 ; a call that ends inside the pull's window tears the block (octabam FAILURE_MODES, "Junk on main
@@ -75,7 +72,7 @@ VAR_NOF equ     VARS+15         ;   normal gate off
 TRIG    equ     WB+68           ; M48 hi, lo for an accent, then for a normal note
 TRIGN   equ     TRIG+2
 OLD1    equ     PB+XD           ; the loader's copy of PB..PB+215 (X run 1)
-SIGA    equ     XB-$3c          ; DIAG12 (A, T6): X:$6404 = r7 + 4 of T6's FX1 block, DJ EQ's own state word
+SIGA    equ     XB-$3c          ; DIAG13: X:$7b04, below run 1 in the unreferenced region: the copy's mark
 ; displacements from XM (the operand's sign is written out: the assembler wants small numbers)
 D_STG   equ     $30             ; +: WB+0..15
 D_CNK   equ     $31             ; chunk within the stage
@@ -249,8 +246,12 @@ hq_rest:
         move    x:>SV_R6,r6
         move    x:>SV_R7,r7
         move    x:>SV_N7,n7
+hq_cbr1:
+        dc      $0d1080,0                       ; bsr >hq_burn (after the render: the call ends later)
         rts                                     ; 303 up: DJ EQ does not run
-hq_out:                                         ; DIAG11: BURN (slot 6) is inert
+hq_out:
+hq_cbr0:
+        dc      $0d1080,0                       ; bsr >hq_burn (before DJ EQ: the burn probe's place)
 hq_djeq:
         dc      $0d10c0,0                       ; bra >DJ EQ's stock proc: the builder writes the
                                                 ; displacement and checks it by disassembly
