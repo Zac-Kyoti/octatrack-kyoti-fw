@@ -1903,16 +1903,18 @@ time.
 - So the random riff crash (DIAG5/9/10) was this same mechanism.
 - T5 was clean because payload A's block sat in T6's (empty) FX1 instance block.
 
-**Partition size, bounded by the unit:**
-- `$3224` (shares a block with the `$2xxx` host buffers) failed, so blocks are ≥ 4K.
-- `$6400` (vs `$4400–$48ff`) worked, so blocks are ≤ 8K.
-- **4K or 8K words.**
+**Partition size, bounded by the unit** (corrected 2026-10-11):
+- `$3224–$356f` (DIAG7) failed. With 4K blocks it would share nothing with a DMA (the host buffers
+  are `$2400–$28ff`), so blocks are ≥ 8K.
+- `$6400` (DIAG12) worked. A 16K block would hold the `$4400–$48ff` host buffers, so blocks are < 16K.
+- **8K words: `$0000`, `$2000`, `$4000`, `$6000`, `$8000`.**
+  - Core 0's DMA blocks are `$0000` (records), `$2000` and `$4000` (host ping-pong), and `$8000` (ESAI).
+  - **`$6000–$7FFF` is the no-DMA block.**
 
 **DIAG13:** `out/OCTATRACK_OS1.40C_OT303_DIAG13.syx`
 (`70395721e32a7366a801b17322e46e8594ccfe470314699fcca1d5198d8ed4f1`, version `140C_303DD`).
 - **Run 1** (216 words) at **`X:$7b24–$7bfb` on both cores.** That is stock's unreferenced `X:$7a92–$7fff`
-  (DSP.md; never written in the BOTLI write map), in a partition of stock tables only, with no DMA
-  under either size.
+  (DSP.md; never written in the BOTLI write map), in the `$6000` block (stock tables only, no DMA).
   - `hq_reloc` copies it once from SPRING's records (A `xd = $e80`, B `$940`).
   - `SIGA` `X:$7b04` marks the copy.
   - Run 2 stays in SPRING's records (read only while the tables build).
