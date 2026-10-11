@@ -36053,3 +36053,9 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   ($3224). **DIAG12** (`140C_303DC`, syx `aa516fb9…`, NOT flashed): A's run 1 in T6's own FX1
   instance block X:$6424-$64fb (no-DMA partition), re-copied when DJ EQ's word r7+4 loses our mark.
   T6 only.
+- **S124 cont: DIAG12 on HW = T6 CLEAN** (riff clean, muted master silent, no flips through sweeps,
+  ENG+TONE muted silent). Cause CONFIRMED: dense core access to a DMA-used internal partition stalls
+  core 0's ESAI / host DMA (FM §10.3.2) → the CF↔core-0 handoff slips (persistent L/R/silent states,
+  mute leaks, sequencer stuck on step 1-2). **Rule: no dense DSP working data in a DMA partition**
+  (core 0: X:$8000-$8FFF, the $2xxx/$4xxx host-buffer blocks); use the host's FX instance block (r7).
+  Next: 10-min soak, r7-relative product placement, then BURN cost measurements.

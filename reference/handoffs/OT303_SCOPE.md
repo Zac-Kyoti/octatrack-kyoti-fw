@@ -1858,3 +1858,40 @@ T8 `$6a00`. Stock tables live at `$6c00–$7a91` (TABLES.md). With 8 DJ EQs, DJ 
 - **The test:**
   - T6 riff at 88, unmuted and muted, 30 s+.
   - Then sweep to 120 and back several times: does the state still flip?
+
+### DIAG12 on the unit (user, 2026-10-11): T6 CLEAN — the cause was DMA memory contention
+
+**Results (T6, DJ EQ FX1 only, after a power cycle):**
+1. 303 = 88, unmuted, 30 s+: **clean stereo riff**.
+2. T6 muted: **master silent**.
+3. Swept to 120 (X reads, now in the new block) and back several times: **no flips, stereo every
+   time**.
+4. 48 (the riff's work, tone heard) muted: **silent**.
+
+**Conclusion:**
+- On core 0, the DMA traffic is the ESAI audio DMA (`X:$8000–$833f`) plus the ColdFire's host
+  transfers (`X:$2400–$28ff` / `$4400–$48ff`, ping-pong). Dense core access to an internal memory
+  partition that DMA uses stalls the DMA: DSP56300 FM §10.3.2, the core always wins.
+- The stalls slip the per-frame handoff between core 0 and the ColdFire into persistent wrong
+  states (silent / L / R / stereo, mute leaks), and in the worst case lose it: the sequencer stuck
+  on step 1–2 until a power cycle.
+- The engine's X working set had sat in a DMA partition both times: SPRING's records at
+  `$89a4` (ESAI's block), then `$3224` (the host buffers' block).
+- Moved to the host's own FX1 instance block (`$6400`, tables and FX state only), it is clean.
+- Core 1 runs no ESAI DMA and its host buffers are not where our block was, hence T2 clean all along.
+
+**Rules from here (every DSP module in this repo):**
+- **No REP** (DIAG4).
+- **Keep dense working data out of any memory partition a DMA uses.** On core 0 that means
+  `X:$8000–$8FFF` and the `$2xxx` / `$4xxx` host buffer blocks. Use the host's own FX instance block
+  (`r7`) or another partition with no DMA. Y has no DMA on either core.
+- The partition size of the DSP56721's private memory is still unconfirmed (no RM). The safe
+  reading is the whole 8K block.
+
+**Open before the product:**
+- **A soak test:** the riff for 10+ minutes on T6 (and T2), transport running with other tracks
+  playing. The random riff crash of DIAG5/9/10 is presumed the same mechanism, but octabam's rare
+  events needed 10-minute takes.
+- **The product placement:** the working set addressed from `r7` (any track, any core) instead of
+  fixed addresses, or a fixed no-DMA region per core.
+- **Then the BURN cost measurements** (heavy configurations) that were pending since step 3.
