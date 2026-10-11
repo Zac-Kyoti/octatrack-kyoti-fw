@@ -31,7 +31,9 @@ PAYLOAD = {
     # xd: the run-time X block sits xd words BELOW the loader's copy (hq_reloc moves it on the first
     # call). Payload A = core 0, the only core running ESAI DMA (X:$8000-$833f, boot P:$3001d); its
     # engine block moves out of that memory block to X:$3224.. (Analog BD's free region $2840-$3940).
-    'A': dict(org=0x1252, dark=0x1586, end=0x1679, djeq_proc=0x1d7d, xd=0,     # DIAG6/7's 0x5780 changed nothing
+    # DIAG12: run 1 (the engine's X working set) runs in T6's FX1 instance block X:$6400-$64ff
+    # (a partition no DMA touches); run 2 (b0/kp, read only while the tables build) stays put.
+    'A': dict(org=0x1252, dark=0x1586, end=0x1679, djeq_proc=0x1d7d, xd=0x2580,
               xrun1=((0x89a4, 72), (0x89ec, 72), (0x8a34, 72)), xrun2=((0x8afc, 116), (0x8b70, 384))),
     'B': dict(org=0x1012, dark=0x1346, end=0x1439, djeq_proc=0x1b3d, xd=0,
               xrun1=((0x8464, 72), (0x84ac, 72), (0x84f4, 72)), xrun2=((0x85bc, 116), (0x8630, 384))),
@@ -77,10 +79,10 @@ def source(tag):
     xb = d['xrun1'][0][0] + 0x1c - xd
     assert xb % 64 == 0 and xd % 64 == 0, f'payload {tag}: X block {xb:x} not 64-aligned'
     if xd:
-        assert 0x2840 <= xb - 0x1c and d['xrun2'][0][0] + 500 - xd <= 0x3940, 'outside Analog BD\'s free X region'
+        assert 0x6408 <= xb - 0x1c and xb - 0x1c + 216 <= 0x6500, 'run 1 outside T6 FX1\'s instance block'
     eng = (ROOT / 'tools/ot303/ot303_engine.asm').read_text()
     wrap = (ROOT / 'tools/ot303/hwprobe.asm').read_text()
-    src = asm_macros.layout(eng, XB=xb, YS=YS, LT=LT, TH=TH) + asm_macros.layout(wrap, R2=d['xrun2'][0][0] - xd, HQEV=d['dark'] + DARK_N,
+    src = asm_macros.layout(eng, XB=xb, YS=YS, LT=LT, TH=TH) + asm_macros.layout(wrap, R2=d['xrun2'][0][0], HQEV=d['dark'] + DARK_N,
                                                                          XD=xd, NXD=(-xd) & 0xffffff)
     equs = '\n'.join(l for l in src.splitlines() if re.match(r'^[A-Za-z_][A-Za-z0-9_]*\s+equ\s', l))
     ev = equs + '\n' + (ROOT / 'tools/ot303/hwprobe_ev.asm').read_text()
@@ -131,7 +133,7 @@ def build(tag):
         checks.append((cal, f'bsr     func_{evs[target]:06x}', f'{site} -> {target}'))
     # region 2's calls into region 1 (assembled apart: placeholders, patched here)
     evchecks = []
-    for site, op in (('hq_cot1', 0x0d1080), ('hq_cot2', 0x0d1080)):
+    for site, op in (('hq_cot2', 0x0d1080),):
         cal = evs[site]
         assert evw[cal - ev_org] == op and evw[cal - ev_org + 1] == 0, f'{site}: placeholder moved'
         evw[cal - ev_org + 1] = (S['ot303'] - cal) & 0xffffff
@@ -195,8 +197,9 @@ def build(tag):
         X(S['BX'] + i, v)
     for i, v in enumerate(kp + [kp[-1]]):
         X(S['KX'] + i, v)
-    # the loader's copy: every word xd above its run-time address
-    x = {a + d['xd']: v for a, v in x.items()}
+    # the loader's copy: run 1's words xd above their run-time addresses; run 2 in place
+    r1lo = S['PB']
+    x = {(a + d['xd'] if r1lo <= a < r1lo + 216 else a): v for a, v in x.items()}
     # every X word inside SPRING's five records, the rest of them zero
     runs = d['xrun1'] + d['xrun2']
     for a in x:

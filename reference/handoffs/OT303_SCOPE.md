@@ -1788,3 +1788,73 @@ SRC3 = MAIN, T6 muted, nothing else playing.
   - DIAG8's meter ran the same work with other output and never crashed.
 - **Checks:** bench bit-exact for every band on both payloads (riff / 8 = `asr #3` of the twin);
   ot_emu ALL GOOD.
+
+### DIAG11 on the unit and the track tests (user, 2026-10-10); DIAG12 (built, NOT flashed)
+
+**DIAG11, T6 muted:** 1–24 clean; 25–39 loud dirt; 40 quieter; 41–47 loud; 48–71 quieter; 72–87
+very quiet riff-pattern dirt; 88–103 louder riff-pattern dirt; 104–127 loud. No crash.
+
+**The crash, described:**
+- The first or second step LED lights yellow.
+- STOP clears it and PLAY relights it, but the sequencer never advances past step 1–2.
+- T6 is silent.
+- This is octabam's documented "core 1 killed at project load (sequencer stuck on step 1, AED
+  preview silent)", which they saw when heavy compute sat in core 0's handshake path.
+
+**Track tests (DIAG11, riff at 88, one DJ EQ at a time):**
+
+| track | result |
+|---|---|
+| T5 | silent at first. After sweeps up into 104+ and back: **L only, then R only, then stereo, then silent**; each state persists until the next disturbance. Muted: sparse pops on L / R / both / none, matching the state. |
+| T7 | like T6 (dirty) |
+| T8 | **can be 100% clean (stereo, silent master when muted)**; sweeps flip it into the same L / R / stereo / none states, with no discernible pattern |
+
+**Reading (with the user's push: "T2 is clean — what is different on T6?"):**
+- The engine can run fully clean on core 0 (T8), so cost and arithmetic are excluded.
+- Whether it is clean depends on where in core 0's frame the work lands: T5 and T8 are clean until
+  disturbed, T6 and T7 are dirty from the start. This matches DIAG5's PRE map (some delays clean).
+- The damage is a **persistent** misalignment in core 0's per-frame handoff (silent / L / R / stereo),
+  set by memory-heavy work and flipped only by the next disturbance.
+  - So DIAG10/11's per-band verdicts are unreliable: the first disturbance carries over into
+    every later band.
+- **Core 0's frame, from the code:**
+  1. The wait at `P:$4a` polls `M_DSR2` (the ESAI TX DMA source) for `$80f0` / `$8070`.
+  2. It picks the `$2xxx` or `$4xxx` buffer set, patches the host masks and sends the ping.
+  3. It unpacks the ColdFire's return block (`x:$204`, 512 words, all eight tracks).
+  4. It mixes into the ESAI TX half (`x:$203` = `$8000` / `$8080`) with the main ramp.
+  5. It copies the TX half into the read-back's upper 256 words (what the recorder's MAIN reads).
+  6. It clears the DMA2 watchdog `x:$20f`, writes the staging back to `X:$30000`, then runs T5–T8.
+  7. After each track it copies the track into the read-back at `P:$55a`.
+- **Most likely mechanism:**
+  - DSP56300 FM §10.3.2: on a shared internal partition the core wins and the DMA waits.
+  - The DSP5672x family has a "DMA stall monitor" for exactly that kind of stall.
+  - Core 0 alone runs ESAI DMA (`X:$8000–$833f`) and its host DMA ping-pongs between `X:$2400–$28ff`
+    and `X:$4400–$48ff`.
+  - Our X working set sat at `$89a4` (ESAI's 8K block) and in DIAG7 at `$3224` (the `$2xxx` host
+    buffers' 8K block). Both are DMA blocks, which is why the relocation "changed nothing".
+  - Unknown: the DSP56721's private-memory partition size (the RM was not retrievable;
+    `out/ot303/refs/` holds the 56300 FM and AN3653).
+- The emulator's `--audio-out` capture is all zeros in this build (stock too, BOTLI and MMTESTDT), so
+  no emulator reproduction.
+
+**FX1 instance blocks on core 0** (`--dsp-pcwatch` at `hq_entry`, `r7`): T5 `$6100`, T6 `$6400`, T7 `$6700`,
+T8 `$6a00`. Stock tables live at `$6c00–$7a91` (TABLES.md). With 8 DJ EQs, DJ EQ writes `$6a10–$6a41`
+(its T8 block, `P:$1e98`); `$6a50–$6bff` are unwritten in that run.
+
+**DIAG12:** `out/OCTATRACK_OS1.40C_OT303_DIAG12.syx`
+(`aa516fb9e44f10cbfd0da6fe6d50240c80d7da2971ab07644c5f7921a3d2ccda`, version `140C_303DC`).
+- **Payload A's run 1** (the engine's X working set and the wrapper's words, 216 words) runs at
+  `X:$6424–$64fb`, inside **T6's own FX1 instance block** (`$6400–$64ff`): a partition of stock tables
+  and FX state, with no DMA.
+  - The loader still places it in SPRING's records (`xd = $2580`); run 2 (b0/kp, read only while
+    the tables build) stays at `$8afc`.
+  - `hq_reloc` copies run 1 when `SIGA` (`X:$6404` = `r7 + 4`, a word DJ EQ writes whenever it runs)
+    is not `$5a5a5a`. So a stretch at 303 = 0 is recovered by a re-copy and a table rebuild.
+- **For T6 only.** Payload B is unchanged.
+- **303:** 1–47 tone; 48–71 ENG + TONE; 72–87 riff / 8; 88–103 riff; 104–127 X reads (now in the new
+  block) + tone. BURN is inert.
+- **Checks:** bench bit-exact for every band on both payloads (run 1 poisoned before the first call);
+  ot_emu: T6's STG in the new block reaches 2 under the firmware; verify ALL GOOD.
+- **The test:**
+  - T6 riff at 88, unmuted and muted, 30 s+.
+  - Then sweep to 120 and back several times: does the state still flip?

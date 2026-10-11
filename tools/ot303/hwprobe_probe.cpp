@@ -60,10 +60,9 @@ int main(int argc, char** argv) {
     { std::ifstream f(dir + "/x.txt"); std::string a, w; while (f >> a >> w) mem.set(MemArea_X, hx(a), hx(w)); }
     // the Y region the probe owns starts as noise on the unit: poison it here
     for (uint32_t a = 0x795; a < 0x1000; a++) mem.set(MemArea_Y, a, (a * 2654435761u) & 0xffffff);
-    // DIAG6: a relocated X block (payload A) starts as noise too; hq_reloc fills it on the first call
+    // DIAG12: a relocated run 1 (payload A, T6's FX1 block) starts as noise too; hq_reloc fills it on the first call
     if (sym("OLD1") != sym("PB")) {
         for (uint32_t a = sym("PB"); a < sym("PB") + 216; a++) mem.set(MemArea_X, a, (a * 2246822519u) & 0xffffff);
-        for (uint32_t a = sym("R2"); a < sym("R2") + 500; a++) mem.set(MemArea_X, a, (a * 2246822519u) & 0xffffff);
     }
     auto& R = dsp.regs();
     const uint32_t MIN[8] = {0xff, 0x3ff, 0x1f, 0x3, 0x7f, 0x5fb, 0xffffff, 0x9};    // entry modifiers
@@ -223,7 +222,7 @@ int main(int argc, char** argv) {
     const char* what[] = {"TONE", "STRESS + TONE", "STRESS + TONE", "ENG + TONE", "ENG + TONE", "RIFF / 8", "RIFF", "X READS + TONE"};
     if (burn || pre) std::printf("BURN %d PRE %d: +%d cycles a sample expected (24 x each)\n", burn, pre, 24 * (burn + pre));
     std::printf("BIT-EXACT: %ld samples, %s%s, %ld calls; %.1f cycles/sample incl. the wrapper (worst frame %.1f)\n",
-                sample, what[knob < 16 ? 0 : knob < 48 ? 1 : knob < 72 ? 3 : knob < 88 ? 5 : knob < 104 ? 6 : 7], corrupt ? " (a table word changed mid-run: the alarm tone followed)" : "",
+                sample, what[knob < 48 ? 0 : knob < 72 ? 3 : knob < 88 ? 5 : knob < 104 ? 6 : 7], corrupt ? " (a table word changed mid-run: the alarm tone followed)" : "",
                 calls, double(totalCyc) / (frames * 16.0), worstFrame / 16.0);
     std::ofstream o(dir + "/out_" + std::to_string(knob) + (corrupt ? "c" : "") + ".f32", std::ios::binary);
     o.write(reinterpret_cast<const char*>(wav.data()), std::streamsize(wav.size() * sizeof(float)));

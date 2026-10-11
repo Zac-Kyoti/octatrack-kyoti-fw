@@ -75,8 +75,7 @@ VAR_NOF equ     VARS+15         ;   normal gate off
 TRIG    equ     WB+68           ; M48 hi, lo for an accent, then for a normal note
 TRIGN   equ     TRIG+2
 OLD1    equ     PB+XD           ; the loader's copy of PB..PB+215 (X run 1)
-OLD2    equ     R2+XD           ; the loader's copy of R2..R2+499 (X run 2)
-RFLAG   equ     STG+XD          ; the loader's STG: 0 until hq_reloc has copied
+SIGA    equ     XB-$3c          ; DIAG12 (A, T6): X:$6404 = r7 + 4 of T6's FX1 block, DJ EQ's own state word
 ; displacements from XM (the operand's sign is written out: the assembler wants small numbers)
 D_STG   equ     $30             ; +: WB+0..15
 D_CNK   equ     $31             ; chunk within the stage

@@ -72,98 +72,69 @@ hq_vars:
         rts
 
 
-; ---- the mode (DIAG11), once per call before the render: K = 303
-;   1-15 tone | 16-47 STRESS (K - 16) >> 3 + tone | 48-71 engine + tone (the riff's work, events
-;   included) | 72-87 riff / 8 | 88-103 riff | 104-127 STRESS 4 (X reads) + tone
-; STRESS: n7 x 128 iterations of a three-instruction body: 0 Y reads (YS), 1 Y writes (Y:$ff0),
-; 2 mac + X:Y reads (the half-band's shape), 3 the engine itself (no events), 4 X reads (the
-; engine's X block). r5 = XM; uses a b x0 x1 y0 y1 r1 r3 r4 r7 m1 m4.
+; ---- the mode (DIAG12), once per call before the render: K = 303
+;   1-47 tone | 48-71 engine + tone (the riff's work, events included) | 72-87 riff / 8 |
+;   88-103 riff | 104-127 X reads + tone (n7 x 384 reads of the engine's X block, 3 a loop pass)
+; r5 = XM; uses a b x0 x1 r1 m1.
 hq_mode:
         move    x:(r5+D_KNB),a                  ; K << 8
         clr     b
         cmp     #>$6800,a
-        bge     hq_m5                           ; 104-127
+        bge     hq_mx                           ; 104-127
         cmp     #>$5800,a
         bge     hq_mriff                        ; 88-103
         cmp     #>$4800,a
         bge     hq_mr8                          ; 72-87
         cmp     #>$3000,a
-        bge     hq_meng                         ; 48-71
-        move    b1,x:(r5+D_BAND)                ; 1-47: the tone
-        sub     #>$1000,a
-        blt     hq_sret                         ; 1-15
-        asr     #11,a,a                         ; STRESS 0-3
-        bra     hq_mst
+        blt     hq_mset                         ; 1-47: the tone
+        move    #>1,b                           ; 48-71
+        bra     hq_mset
 hq_mriff:
         move    #>2,b
         bra     hq_mset
 hq_mr8:
         move    #>3,b
-        bra     hq_mset
-hq_meng:
-        move    #>1,b
 hq_mset:
         move    b1,x:(r5+D_BAND)
         rts
-hq_m5:
+hq_mx:
         move    b1,x:(r5+D_BAND)
-        move    #>4,a                           ; (falls into the STRESS run)
-hq_mst:
         move    n7,b
         asl     #7,b,b
-        cmp     #<3,a
-        bne     hq_snot4
-        move    n7,r7
-        move    #>RBUF,r3
-hq_cot1:
-        dc      $0d1080,0                       ; bsr >ot303
-        move    #>XM,r5
-        rts
-hq_snot4:
         move    #>63,x1
         move    x1,m1
-        move    x1,m4
         move    #>XB,r1
-        move    #>YS,r4
-        cmp     #<1,a
-        blt     hq_w2a
-        beq     hq_w3a
-        cmp     #<2,a
-        beq     hq_w5a
-        do      b1,hq_w7z                       ; 4: X reads
+        do      b1,hq_xrdz
         move    x:(r1)+,x0
         move    x:(r1)+,x0
         move    x:(r1)+,x0
-hq_w7z:
-        bra     hq_sdone
-hq_w2a:
-        do      b1,hq_w2z
-        move    y:(r4)+,y0
-        move    y:(r4)+,y0
-        move    y:(r4)+,y0
-hq_w2z:
-        bra     hq_sdone
-hq_w3a:
-        move    #>$ff0,r4
-        move    #>15,x1
-        move    x1,m4
-        do      b1,hq_w3z
-        move    y0,y:(r4)+
-        move    y0,y:(r4)+
-        move    y0,y:(r4)+
-hq_w3z:
-        bra     hq_sdone
-hq_w5a:
-        do      b1,hq_w5z
-        mac     y0,x0,a         x:(r1)+,x0      y:(r4)+,y0
-        mac     y0,x0,a         x:(r1)+,x0      y:(r4)+,y0
-        mac     y0,x0,a         x:(r1)+,x0      y:(r4)+,y0
-hq_w5z:
-hq_sdone:
+hq_xrdz:
         move    #>$ffffff,x1
         move    x1,m1
-        move    x1,m4
-hq_sret:
+        rts
+
+; ---- RELOC (payload A; the builder nops the call on B). DIAG12: the engine's run-1 block (216
+; words: its X working set and the wrapper's words) runs from inside the host's own FX1 instance
+; block (T6: X:$6400-$64ff), a memory partition no DMA touches; the loader puts it XD words above
+; (SPRING's records, X:$89a4, the partition of core 0's ESAI DMA). DJ EQ writes its own state at
+; r7 + 4 whenever it runs (303 = 0): SIGA there is our mark; when it is gone, copy again (and the
+; tables rebuild from STG = 0). m1 is linear (hq_entry). Uses a, r1, n1; keeps x0 x1 y1.
+hq_reloc:
+        move    x:>SIGA,a
+        cmp     #>$5a5a5a,a
+        beq     hq_rldone
+        move    #>NXD,n1
+        move    #>OLD1,r1
+        do      #216,hq_rla
+        move    x:(r1),a
+        nop                                     ; one read of the loader's block in four cycles
+        move    a,x:(r1+n1)
+        nop
+        move    (r1)+
+hq_rla:
+        move    #>$5a5a5a,a
+        move    a,x:>SIGA
+hq_rldone:
         rts
 
 ; ---- the engine's render (r7 = KCNT, r3 = RBUF); band 3 scales it by 1/8

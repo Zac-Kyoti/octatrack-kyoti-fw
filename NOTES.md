@@ -36046,3 +36046,10 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   time (49 / 48 / 32). **DIAG11** (`140C_303DB`, syx `0550c632…`, NOT flashed): safest-first knob:
   stress 16–47, ENG+TONE 48–71 (riff work, tone heard), riff/8 72–87, riff 88–103, X reads 104+.
   BURN inert. Asks: work or sound?
+- **S124 cont: DIAG11 + track tests on HW** — riff can be fully clean on T5/T8 until a disturbance
+  flips core 0 into a PERSISTENT state (silent / L / R / stereo); T6/T7 dirty. Crash = sequencer stuck
+  on step 1-2 (octabam's documented core-0 handshake failure). Lead: core beats DMA on a shared
+  partition (FM §10.3.2); our X sat in the ESAI DMA's 8K block ($89a4) and in DIAG7 the host buffers'
+  ($3224). **DIAG12** (`140C_303DC`, syx `aa516fb9…`, NOT flashed): A's run 1 in T6's own FX1
+  instance block X:$6424-$64fb (no-DMA partition), re-copied when DJ EQ's word r7+4 loses our mark.
+  T6 only.
