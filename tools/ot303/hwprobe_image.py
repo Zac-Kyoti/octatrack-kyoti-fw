@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 #
-# OT-303 hardware probe: the DSP side of one payload, as words and addresses (no image I/O).
-# Shared by tools/build_ot303_hwprobe.py (writes it into the firmware) and
-# tools/ot303/hwprobe_check.py (runs it on dsp56kEmu against the twin).
+# OT-303 on the DSP: one payload's words and addresses (no image I/O), for either wrapper:
+#   the hardware probe (tools/ot303/hwprobe.asm; tools/build_ot303_hwprobe.py, bench hwprobe_check.py)
+#   the machine's host (tools/ot303/host.asm, host=True; tools/build_ot303.py, bench host_check.py)
 #
 # Placement (both payloads; reference/handoffs/OT303_SCOPE.md §11-12, REPITCH Session 112's census):
 #   P  SPRING REV's module, its first 1,028 words (engine + wrapper, one piece); the builder moves
@@ -46,6 +46,9 @@ YS, TH, LT = 0xf40, 0x7a5, 0xba7  # Y: TH $7a5..$ba6 (the square's, cleared), LT
 # the riff: the Hot scene (voice_study `twin hot`), its host words at the first bar's events
 HOST = dict(CS=0x000c62, C2=0x7fce80, L0_16=0x08c434, ES8=0x4e4ffe, RS=0x7fffff, AG_8=0x000000,
             BG=0x787878, SC=0x4026e7)
+# the machine's level: SC (Open303's volume, the ampScaler) 0.89 = +5 dB over the riff's 0.501 -- every
+# twin scene peaks below full scale (Hot -0.8 dBFS; the user found DIAG14's -6 dBFS too quiet)
+SC_HOST = 0x71eb85
 VARS = [  # C_MEG M_AMP AG8 AGFM K8
     (0x7ffc49, 0x7fff65, 0x100000, 0xffffff, 0x473333),   # accent, gate on
     (0x7ffc49, 0x7ff125, 0x100000, 0xffffff, 0x000000),   # accent, gate off
@@ -75,7 +78,7 @@ def twin_constants():
     return out
 
 
-def source(tag):
+def source(tag, host=False):
     d = PAYLOAD[tag]
     xd = d['xd']
     xb = d['xrun1'][0][0] + 0x1c - xd
@@ -83,7 +86,7 @@ def source(tag):
     if xd:
         assert 0x7b08 <= xb - 0x1c and xb - 0x1c + 216 <= 0x8000, 'run 1 outside X:$7b00-$7fff'
     eng = (ROOT / 'tools/ot303/ot303_engine.asm').read_text()
-    wrap = (ROOT / 'tools/ot303/hwprobe.asm').read_text()
+    wrap = (ROOT / 'tools/ot303' / ('host.asm' if host else 'hwprobe.asm')).read_text()
     src = asm_macros.layout(eng, XB=xb, YS=YS, LT=LT, TH=TH) + asm_macros.layout(wrap, R2=d['xrun2'][0][0], XD=xd,
                                                                          NXD=(-xd) & 0xffffff, CONT=d['cont'], RAWP=d['rawp'])
     return src, asm_macros.yspace(eng)
@@ -97,10 +100,10 @@ def labels_ok(src):
         raise ValueError(f'label prefixes another: {bad[:5]}')
 
 
-def build(tag):
+def build(tag, host=False):
     """-> dict(org, words, syms, ysyms, p2=(addr, words), x={addr: word})"""
     d = PAYLOAD[tag]
-    src, ysyms = source(tag)
+    src, ysyms = source(tag, host)
     src = asm_macros.expand(src)
     labels_ok(src)
     words, syms = dsp_xasm.assemble(src, d['org'])
@@ -112,10 +115,11 @@ def build(tag):
         if m:
             consts[m.group(1)] = int(eval(m.group(2).replace('$', '0x'), {}, dict(consts)))
     S = dict(consts); S.update(syms)
-    # the exit branch -> DJ EQ's stock proc
-    bra = S['hq_djeq']
-    assert words[bra - d['org']] == 0x0d10c0 and words[bra - d['org'] + 1] == 0, 'bra placeholder moved'
-    words[bra - d['org'] + 1] = (d['djeq_proc'] - bra) & 0xffffff
+    # the probe's exit branch -> DJ EQ's stock proc
+    bra = S.get('hq_djeq')
+    if bra is not None:
+        assert words[bra - d['org']] == 0x0d10c0 and words[bra - d['org'] + 1] == 0, 'bra placeholder moved'
+        words[bra - d['org'] + 1] = (d['djeq_proc'] - bra) & 0xffffff
     dis = dsp_xasm.disassemble(words, d['org'])
     # no REP: stock never uses one (a REP holds off interrupts, and the host-port handlers must
     # answer at once: DIAG2-4 on the unit tore the ColdFire transfers whenever ours ran early)
@@ -125,8 +129,8 @@ def build(tag):
     jm = [a for a, l in dis.items() if l[0].startswith('jmp')]
     if [dis[a][0] for a in jm] != [f'jmp     func_{d["cont"]:06x}'] * len(jm) or len(jm) != 1:
         raise ValueError(f'payload {tag}: the continuation jmp disassembles as {[dis[a][0] for a in jm]}')
-    line = dis.get(bra, ('',))[0]
-    if f'bra     func_{d["djeq_proc"]:06x}' not in line:
+    line = dis.get(bra, ('',))[0] if bra is not None else None
+    if line is not None and f'bra     func_{d["djeq_proc"]:06x}' not in line:
         raise ValueError(f'payload {tag}: exit branch disassembles as {line!r}')
 
     T = twin_constants()
@@ -145,7 +149,7 @@ def build(tag):
     for i, v in enumerate(T['HB2C']):
         X(S['HB2C'] + i, v)
     for n in ('CS', 'C2', 'ES8', 'RS', 'BG', 'SC'):
-        X(n, HOST[n])
+        X(n, SC_HOST if host and n == 'SC' else HOST[n])
     for n, v in zip(('C_MEG', 'M_AMP', 'AG8', 'AGFM', 'K8'), VARS[3]):
         X(n, v)
     for n, v in zip(('W1', 'W2', 'W3', 'SQ'), SAW):
@@ -156,7 +160,8 @@ def build(tag):
     for i, v in enumerate(SAW + SQUARE):
         X(S['SAWW'] + i, v)
     X('L0C', HOST['L0_16']); X('AG8C', HOST['AG_8']); X('AMPT', AMPT)
-    X('TINC', S['T110'])                                               # the tone's 110 Hz increment
+    if 'TINC' in S:
+        X('TINC', S['T110'])                                           # the probe's tone: 110 Hz
     for i, v in enumerate(T['HB1C'] + T['HB1C']):
         X(S['HB1I'] + i, v)
     for i, v in enumerate(PATTERN):
@@ -185,11 +190,13 @@ def build(tag):
     # the Y footprint stays in the free region
     assert TH + 1026 <= LT and LT >= 0x800 and LT + 860 <= YS and S['YS'] + 0xab <= 0x1000 and TH >= 0x7a5
     return dict(org=d['org'], words=words, syms=S, ysyms=ysyms, x=x, xd=d['xd'], djeq_proc=d['djeq_proc'],
-                entry=S['hq_entry'], seam_entry=S['sg_entry'], seam=d['seam'], cont=d['cont'], rawp=d['rawp'])
+                entry=S.get('hq_entry'), seam_entry=S['sg_entry'], seam=d['seam'], cont=d['cont'], rawp=d['rawp'])
 
 
 if __name__ == '__main__':
     for tag in ('A', 'B'):
-        b = build(tag)
+      for host in (False, True):
+        b = build(tag, host)
+        print('host' if host else 'probe', end=' ')
         print(f'payload {tag}: {len(b["words"])} of {CODE_N} words at P:{b["org"]:x} (to {b["org"] + len(b["words"]) - 1:x}); '
-              f'DJ EQ entry P:{b["entry"]:x}, seam entry P:{b["seam_entry"]:x}; X {len(b["x"])} words')
+              f'DJ EQ entry P:{b["entry"] or 0:x}, seam entry P:{b["seam_entry"]:x}; X {len(b["x"])} words')

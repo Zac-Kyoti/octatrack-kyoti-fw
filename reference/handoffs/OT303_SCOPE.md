@@ -2026,13 +2026,47 @@ SETUP page's VOL (item 3). Louder than that needs saturation/limiting = a sound 
 6. If a track with no trigs stays silent, give it trigs / a long AMP HOLD (AMP is stock).
 7. Optional: DIAG13's worst case (all 8 tracks playing, DJ EQ FX1+FX2 everywhere, voices T2+T6) with BURN.
 
+**The machine, test image 1 (MT1, built 2026-10-11, NOT flashed):** item 1b. "OT-303" is row 6 of the
+track's machine chooser and of SRC SETUP, any track, one per DSP core (T1–4 / T5–8; a second on the
+same core is refused with the toast `1 OT-303 / 4 TRKS`). Stored as FLEX + `'O','T',1` in unused
+NEIGHBOR bytes (stock sees FLEX); a new assignment seeds the twelve knobs with the defaults. The FLEX
+renderer slot (`0x400d6438`) sends an OT-303 track's control record (w0 `$3303`, w2 `$0909`, w3 trig,
+w8–19 knobs); the DSP host (`tools/ot303/host.asm`) keys on it at the source seam. Each trig plays the
+next step of the built-in Hot bar at the trig's sample (gate 2,544 samples or the next trig). The
+knobs (PTCH CUT RES ENV DEC ACC / WAVE TUNE SLID GATE VOL) are stored and sent but not used yet. Level
++5 dB (SC 0.89). Silent for the first 15 frames after the voice is assigned (the tables build).
+- Builder: `tools/build_ot303.py` (WIP) → `out/OCTATRACK_OS1.40C_OT303_MT1.syx` (`140C_303T1`).
+  Shared DSP edits: `tools/ot303/dsp_patch.py` (also used by the DIAG builder; DIAG14 rebuilds
+  identically). ColdFire: `tools/ot303/cf/machine.s` + `control.c` (ported from octabam ANALOG BD,
+  repeat98, MIT; no engine browser), 2,750 B in the classic cave from `0x400d6500` (3,198 B left);
+  16 detours + 6 pokes + the renderer slot, each asserted against stock.
+- Bench: `tools/ot303/host_check.py` (four tracks, two OT-303 records on one core, trigs at varying
+  offsets, some inside an open gate): bit-exact vs the twin; voice 389 cycles/sample (worst trig frame
+  434), stock records ~42 cycles/call; peak −1.1 dBFS.
+- Firmware: `tools/ot303/verify_mt1.py` (ot_emu, BOTLI): the chooser through real panel events
+  (select on T2; T3 refused; T6 lands; both Part copies; the page published), the voice on the
+  OT-303 tracks only, the renderer and the DSP trig steps, DARK/PLATE = stock. This ot_emu ignores the
+  track keys, so the current track is poked; the Part is poked in RAM for the sequencer runs (no file
+  edited).
+
+**MT1 on the unit — what to check:**
+1. T2: FUNC+SRC → SRC SETUP → the last row OT-303 → YES (and the machine list from a track
+   double-tap). The SRC page reads OT-303 with PTCH CUT RES ENV DEC ACC; SETUP WAVE TUNE SLID GATE VOL.
+2. Put trigs on T2 and play: each trig plays the next step of the riff (rests and accents included),
+   through T2's AMP and FX. Louder than DIAG14.
+3. OT-303 on T3 → refused with the toast; on T6 → allowed; both voices together.
+4. T2 back to FLEX → its sample plays again.
+5. Part change / RELOAD PART keep the OT-303 tracks.
+6. DARK REV and PLATE REV as stock; SPRING REV is not offered.
+7. Save only into a scratch project (a test image), never a real one.
+
 **Next (the product, Phase 3+ of §8), in order:**
 1. **The real host.** Move the voice from the DJ EQ probe to a proper machine. Approved plan
    (2026-10-11): **1a** = DIAG14 above (DSP only); **1b** = the ColdFire machine: ANALOG BD-style
    registration (an "OT-303" chooser row stored as FLEX + a signature in unused NEIGHBOR bytes, its
    Part-validator wrapper; octabam MIT, credit repeat98) and a render hook on the FLEX supplier slot
    (`0x400d6438`) that writes a signed control record (trig flag, knobs) for OT-303 tracks; the glue
-   keys on the record; one track per core; the riff steps on trigs. **Tables stay in place** in
+   keys on the record; one track per core; the riff steps on trigs (MT1 above). **Tables stay in place** in
    SPRING's X records (716 words: run 1 216 + tanh half 257, odd-symmetric + b0/kp as packed 12-bit
    second differences ~218), expanded bit-exactly at boot; no pre-boot loader.
    - The planned route is Analog BD's source seam (A `P:0x39c` / B `P:0x1a2` → jsr; continue at A

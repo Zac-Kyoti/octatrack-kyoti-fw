@@ -36089,4 +36089,15 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   helper move; worst-case BURN not tried). User: the voice is much quieter than samples near 0 dB →
   measured −6 dBFS peaks (output word = Open303/4, riff SC = 0.501); 1b default SC = 0.89 (+5 dB,
   no scene saturates), VOL = SC on the SETUP page later. Next: 1b, the ColdFire machine.
+- **S124 cont: OT-303 machine test image MT1 BUILT (NOT flashed)** — item 1b. `tools/build_ot303.py`
+  → `out/OCTATRACK_OS1.40C_OT303_MT1.syx` sha256 16d2a800c715e93c73915bc3c382ff829e02d5c294b7dda3725e48fce8d75278
+  (`140C_303T1`). "OT-303" = machine row 6 (FLEX + 'OT',1 in NEIGHBOR bytes, one per core, toast on a
+  second), registration ported from octabam ANALOG BD (16 detours + 6 pokes, all re-asserted against
+  our image; 2,750 B in the classic cave from 0x400d6500); FLEX renderer slot → control record (w0
+  $3303 / w2 $0909 / w3 trig / knobs) → DSP host `tools/ot303/host.asm` at the source seam; trigs step
+  the built-in bar at their sample; knobs stored + sent, unused; SC 0.89 (+5 dB). Shared DSP edits →
+  `tools/ot303/dsp_patch.py` (DIAG14 rebuilds identically). Bench `host_check.py` bit-exact (claims,
+  trigs in open gates; 389 cycles/sample); ot_emu `verify_mt1.py` ALL GOOD (panel chooser: T2 lands,
+  T3 refused, T6 lands; voice on OT-303 tracks only; DARK/PLATE = stock). ot_emu 8d0ad6f4 ignores
+  track keys (current track poked); trigs in the first 15 frames after assignment are silent (tables).
 
