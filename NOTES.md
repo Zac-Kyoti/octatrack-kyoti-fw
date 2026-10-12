@@ -36112,4 +36112,11 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   (`140C_303T2`). verify_ot303.py ALL GOOD incl. the panel round trip (Part = stock byte for byte);
   screenshots confirm label, box, knobs. Side letter: a type-indexed glyph, not found yet (not the
   name tables 0x400a78c8 / 0x400a78b4, no letter immediates).
+- **S124 cont: MT2 on HW — all items pass. MT3 BUILT (NOT flashed):** the side columns' machine
+  glyph. Drawer 0x40040088 (per track d4, type a4) pushes a 3x4 glyph from a table copied from
+  0x400a81a4 (S F T N P; 0x400bb3a6 = M for a MASTER T8) into 0x400128a8; detour 0x4004012c gives an
+  OT-303 track a "3" (user's choice; "M" rejected: stock's MASTER mark). Glyph = {w, h, planes, ink,
+  mask}, a column per word, rows bottom-up. `out/OCTATRACK_OS1.40C_OT303_MT3.syx` sha256
+  2246eba98e4174c49afac7f80e2d409761b2f86af3e08aaa96f97bed2ceba3bb (`140C_303T3`); verify_ot303.py
+  ALL GOOD; screenshot shows 3 on T7, M kept on the master T8.
 

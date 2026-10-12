@@ -151,6 +151,16 @@ static uint32_t slot_rec(unsigned t, unsigned machine, unsigned slot) {
 }
 uint32_t ot_slot_rec(unsigned machine, unsigned slot) { return slot_rec(U8(0x80000000u), machine, slot); }
 uint32_t ot_slot_rec_ui(unsigned machine, unsigned slot) { return slot_rec(U8(0x100b14ccu), machine, slot); }
+/* The side columns' machine glyph for an OT-303 track: a 3, in stock's format (0x400a81a4's six:
+ * width 3, height 4, one plane, ink, mask; a column a word, row r at bit 31 - r, stored bottom-up:
+ * shown top to bottom ###, .##, ..#, ###). Mask as stock's S/F/T. */
+static const uint32_t ot_glyph3_ink[3] = {0x90000000u, 0xb0000000u, 0xf0000000u};
+static const uint32_t ot_glyph3_mask[3] = {0xfe000000u, 0xfe000000u, 0xfe000000u};
+const uint32_t ot_glyph3[5] = {3, 4, 1, (uint32_t)(uintptr_t)ot_glyph3_ink, (uint32_t)(uintptr_t)ot_glyph3_mask};
+/* machine.s ot_glyph: the side columns' machine letter for track t (d4 in the stock drawer) */
+unsigned ot_track_is(unsigned t) {
+    return signed_track(part_base(), t);
+}
 /* The stock validator sees FLEX defaults for every OT-303 track; the twelve bytes come back after.
  * Every other Part byte is checked by stock's real validator (machine.s skips our own detour). */
 extern int ot_stock_validate(void *part);

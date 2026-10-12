@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-OT-303 machine, test image 2 (MT2; reference/handoffs/OT303_SCOPE.md §12 item 1b): the OT-303 DSP
+OT-303 machine, test image 3 (MT3; reference/handoffs/OT303_SCOPE.md §12 item 1b): the OT-303 DSP
 voice as a track machine. "OT-303" is the sixth row of the track's machine chooser and of SRC SETUP,
 on any track, one per DSP core (T1-4, T5-8). The track is stored as FLEX plus a signature in unused
 NEIGHBOR page bytes, so a stock OS loads the project as a FLEX track. Its FLEX renderer sends the
@@ -13,18 +13,18 @@ used yet: the sequencer and the pages drive the voice in item 2 and 3). Registra
 octabam's ANALOG BD (repeat98, MIT). MT2 (after MT1 on the unit): FLEX's own values survive a trip
 through OT-303 (stashed in NEIGHBOR's unused bytes, put back on leaving; MT1 wrote the OT-303 defaults
 over them and left them there), the page label reads PLAYBACK>OT-303, the track box names OT-303
-instead of a sample.
+instead of a sample. MT3: the side columns' machine glyph reads 3 (for 303).
 
 Stock 1.40C plus exactly this:
   * DSP, both payloads: tools/ot303/host.asm + the engine over SPRING REV's P words (DARK REV's
     helper moved to the module's end, callers retargeted), SPRING's X records, the source seam
     (A P:$39c / B P:$1a2) -> jsr the host; SPRING's dispatch -> the passthrough stub.
   * ColdFire: SPRING REV out of the FX choosers; tools/ot303/cf/{machine.s,control.c} in the classic
-    cave from 0x400d6500; 18 detours, 6 pokes and the FLEX renderer slot (ANALOG BD's seams, each
+    cave from 0x400d6500; 19 detours, 6 pokes and the FLEX renderer slot (ANALOG BD's seams, each
     asserted against stock).
 
 Usage:   python3 tools/build_ot303.py      (WIP: KYOTI_ALLOW_WIP=1)
-Outputs: out/mainos_ot303_mt2.bin, out/OCTATRACK_OS1.40C_OT303_MT2.syx, out/OCTATRACK_OT303_MT2.bin
+Outputs: out/mainos_ot303_mt3.bin, out/OCTATRACK_OS1.40C_OT303_MT3.syx, out/OCTATRACK_OT303_MT3.bin
 """
 import os, pathlib, subprocess, sys
 from kyoti_status import gate, seal
@@ -41,11 +41,11 @@ STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 CF = ROOT / "tools/ot303/cf"
 WORK = ROOT / "out/ot303/cf"
-OUT = ROOT / "out/mainos_ot303_mt2.bin"
-ELEK = ROOT / "out/elek_ot303_mt2.bin"
-OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_MT2.syx"
-OUT_BIN = ROOT / "out/OCTATRACK_OT303_MT2.bin"
-VERSTR = "140C_303T2"      # the field takes 10 characters
+OUT = ROOT / "out/mainos_ot303_mt3.bin"
+ELEK = ROOT / "out/elek_ot303_mt3.bin"
+OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_MT3.syx"
+OUT_BIN = ROOT / "out/OCTATRACK_OT303_MT3.bin"
+VERSTR = "140C_303T3"      # the field takes 10 characters
 
 # the classic cave, from 0x400d6500 (reference/kb/caves.md §2b: 0x400d64ca.. is a live record table);
 # the cave's end, 0x400d7c3c, is where the zero run stops
@@ -75,6 +75,7 @@ DETOURS = (
     (0x40002318, H("4fefffa048d77cfc"), "ot_validate", "jmp", 8),          # the Part validator
     (0x4003D552, H("4eb940031d18"), "ot_slot_rec", "jsr", 6),             # MT2: the label builder's sample
     (0x4004C1C0, H("4eb940031d18"), "ot_slot_rec_ui", "jsr", 6),          # MT2: the track box's sample name
+    (0x4004012C, H("486a00012f034879400bf10a2f36cce8"), "ot_glyph", "jmp", 16),  # MT3: side glyph 3
 )
 POKES = (
     (0x40079248, H("48780005"), H("48780006"), "machine chooser has six rows, OT-303 the last"),

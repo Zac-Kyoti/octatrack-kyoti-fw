@@ -11,7 +11,7 @@
         .global ot_machine_name, ot_src_names, ot_main_commit, ot_src_commit, ot_src_commit2
         .global ot_name_a, ot_name_b, ot_setup_row, ot_chooser_row, ot_setup_open, ot_chooser_open
         .global ot_setup_edit6, ot_setup_draw6, ot_resolve_pb, ot_validate, ot_stock_validate
-        .global ot_tick_hook
+        .global ot_tick_hook, ot_glyph
 
         .equ    OT_ROW, 5
         .equ    FLEX, 1
@@ -248,6 +248,25 @@ ot_tick_hook:
         jsr     0x4007e940
         jsr     ot_ui_tick
         jmp     0x40052228
+
+| the side columns' machine letter: the stock drawer (0x40040088, track d4, its type in a4) pushes the
+| glyph from a table at fp - 24 indexed by type, or the M glyph (0x400bb3a6) for a MASTER T8; an
+| OT-303 track gets a 3 (control.c ot_glyph3; the user's choice). Replays the 16 displaced bytes
+| (0x4004012c: pea 1(a2); move.l d3,-(sp); pea 0x400bf10a; the glyph) and goes on at the draw call.
+| d0/d1/a0/a1 are free here (the draw call clobbers them).
+ot_glyph:
+        move.l  %d4,-(%sp)
+        jsr     ot_track_is
+        addq.l  #4,%sp
+        pea     1(%a2)
+        move.l  %d3,-(%sp)
+        pea     (0x400bf10a).l
+        tst.l   %d0
+        bne.s   1f
+        move.l  -24(%fp,%a4.l*4),-(%sp)
+        jmp     (0x4004013c).l
+1:      pea     ot_glyph3
+        jmp     (0x4004013c).l
 
 ot_name:
         .asciz  "OT-303"

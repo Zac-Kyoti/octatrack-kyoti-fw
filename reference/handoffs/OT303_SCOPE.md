@@ -2066,9 +2066,15 @@ signature: 56 bits + a mark) and restored on leaving, both Part copies (MT1-assi
 stash get stock's FLEX defaults); label PLAYBACK>OT-303; the track box and the label builder's slot
 lookups (`0x4004c1c0`, `0x4003d552`) return a record named OT-303. Firmware check renamed
 `tools/ot303/verify_ot303.py`; adds the panel round trip (OT-303 and back: both Part copies equal
-stock byte for byte). Screenshots via octabam `tools/emu/lcd_view.py --png` from `--lcd`. **Open:**
-the side-column machine letter ("F") is a type-indexed glyph drawn elsewhere (not the name tables;
-not found yet: part of the type-byte reader audit, 138 sites read `part + 0x8eda2 + t`).
+stock byte for byte). Screenshots via octabam `tools/emu/lcd_view.py --png` from `--lcd`. The
+side-column letter: MT3 below.
+
+**MT2 on the unit (user, 2026-10-11):** all items pass (FLEX round trip, label, track box).
+**MT3 (built 2026-10-11, NOT flashed):** `out/OCTATRACK_OS1.40C_OT303_MT3.syx` (`140C_303T3`) = MT2 +
+the side columns' machine glyph: the drawer at `0x40040088` (track d4, type a4) pushes a 3×4 glyph from
+a type-indexed table (copied from `0x400a81a4`: S F T N P, and `0x400bb3a6` = M for a MASTER T8); a
+detour at `0x4004012c` gives an OT-303 track a **3** (the user's choice; "M" rejected because stock's
+MASTER T8 uses it). Glyph format: width, height, planes, ink, mask; a column a word, rows bottom-up.
 
 **MT1 on the unit — what to check:**
 1. T2: FUNC+SRC → SRC SETUP → the last row OT-303 → YES (and the machine list from a track
