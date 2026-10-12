@@ -50,11 +50,12 @@ T7, a muted KEY in each MUTE MODE and the first kick after PLAY. Before that, th
 and KYOTI V1.0: KEY ducking, MON, a muted KEY with MUTE_MODES.
 """
 
+import dataclasses
 import importlib.util
 import os
 
-from remix.schema import (Claims, Detour, DspHook, DspRange, DspSection, Kind, Linked,
-                          MenuEntry, Module, Param, YBase)
+from remix.schema import (Apply, Claims, Detour, DspHook, DspRange, DspSection, Kind, Linked,
+                          MenuEntry, Module, Option, Param, Setting, Store, YBase)
 
 # This module's own directory, relative to the build's cwd (octabam's repo root):
 # "modules/sidechain-compressor" checked out directly, or
@@ -80,6 +81,30 @@ _SAME = {"@LPEDGE@": f"${_sc.lp_edge():x}",
          # two words as the standalone's `move #>FTAB,r1`, so nothing after it moves.
          "@FTAB_R1@": "lua     (r1+$10),r1\n        nop"}
 assert _sc.GAIN_N == 0x10, "@FTAB_R1@'s offset is the KEY GAIN table's length"
+
+# At the standalone image's own address (tools/build_sidechain_compressor.py).
+LINKED = (
+    Linked("sc_cf", os.path.join(_TOOLS, "patch_sidechain.s"),
+           reference=(0x400d7000,
+                      "76a4badcef6024b7de8bd6f05930146bdb6a47ffd577da340a6c252c316ff854")),
+)
+
+# PLACE: where octabam links sc_cf. CAVE (the default) is the ColdFire free
+# region, as the standalone image; DRAM puts it in octabam's platform runtime
+# (as rl3 and dj7), still re-linked at 0x400d7000 and compared with the bytes
+# above. The store id is octabam.sidechain-compressor, the id octabam already
+# files this effect's page defaults under (its module directory), so a module
+# store changes nothing there. tools/build_sidechain_compressor.py does not read
+# this manifest.
+PLACES = ("CAVE", "DRAM")
+
+
+def _variant(values):
+    """PLACE -> sc_cf's placement."""
+    if values["PLACE"] == "DRAM":
+        return {"linked": tuple(dataclasses.replace(u, dram=True) for u in LINKED)}
+    return {}
+
 
 MODULE = Module(
     name="sidechain-compressor",
@@ -114,12 +139,7 @@ MODULE = Module(
               labels=("OFF", "ON"),
               doc="ON: this track plays its processed key instead (audition)"),
     ),
-    linked=(
-        # At the standalone image's own address (tools/build_sidechain_compressor.py).
-        Linked("sc_cf", os.path.join(_TOOLS, "patch_sidechain.s"),
-               reference=(0x400d7000,
-                          "76a4badcef6024b7de8bd6f05930146bdb6a47ffd577da340a6c252c316ff854")),
-    ),
+    linked=LINKED,
     # sc_norm: a COMPRESSOR saved before SIDE-CHAIN existed holds stock's slot 8..11 defaults
     # 0x7f/0/0/0 and comes up with its side-chain OFF. Both page-2 copiers; sc_norm replays
     # the displaced `lea 0x80000a50,%a3` and returns.
@@ -160,4 +180,9 @@ MODULE = Module(
                                      "4 tracks x 4 generations x 32 words",
                  half_relative=True),
     )),
+    store=Store("octabam.sidechain-compressor"),
+    settings=(Setting(1, "PLACE", Option(*PLACES), default="CAVE", apply=Apply.BUILD,
+                      doc="CAVE: sc_cf in the ColdFire free region (the standalone image's "
+                          "placement); DRAM: in octabam's platform runtime"),),
+    variant=_variant,
 )
