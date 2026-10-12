@@ -66,6 +66,22 @@ that variant when this module is in the remix.
 cross-core window (the last `$202` words of each core's half) overlap theirs. The ledger
 refuses the pair. A later version is planned to move both.
 
+## Placement in octabam (PLACE)
+
+A build setting, store `octabam.sidechain-compressor` (the id octabam already files this
+effect's page defaults under), picks where octabam links `sc_cf`:
+
+| PLACE | `sc_cf` |
+|---|---|
+| `CAVE` (default) | the ColdFire free region, as before; images bit-identical to the build without the setting (`test/sidechain-compressor`, `test/kyoti-mute-sidechain`) |
+| `DRAM` | octabam's platform runtime, as `rl3` and `dj7`; still re-linked at `0x400d7000` and compared with the author's bytes |
+
+A remix pins it: `settings={("octabam.sidechain-compressor", "PLACE"): Pin("DRAM")}`.
+The DRAM runtime is assembled for the 54455, so `tools/patch_sidechain.s` no longer
+carries `.cpu 5407`; every builder passes `-mcpu=5407` on the command line, and the
+unit's 338 B of `.text` are identical with and without the line, for 5407 and 54455.
+`DRAM` has not run on a unit.
+
 ## Measured
 
 - `sc_cf`, linked at the standalone image's own address, is that image's bytes for
