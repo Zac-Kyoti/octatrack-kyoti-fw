@@ -116,8 +116,9 @@ zqtok:
         add     x0,a                    ; (r2 is 128-aligned: r1 stays in the ring,
         move    a1,r1                   ;  and m1 = $7f wraps it)
         clr     a
-        rep     #<32
+        do      #<32,>zqnorep1          ; interruptible, unlike rep (octabam tools/build/norep.py)
         move    a,x:(r1)+
+zqnorep1:
         move    n6,b
         add     #>$a0a,b
         move    b1,r1
