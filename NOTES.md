@@ -36119,4 +36119,17 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   mask}, a column per word, rows bottom-up. `out/OCTATRACK_OS1.40C_OT303_MT3.syx` sha256
   2246eba98e4174c49afac7f80e2d409761b2f86af3e08aaa96f97bed2ceba3bb (`140C_303T3`); verify_ot303.py
   ALL GOOD; screenshot shows 3 on T7, M kept on the master T8.
+- **S124 cont: MT3 confirmed on HW. Item 2 started; DRAM runtime MT4 BUILT (NOT flashed).** Item 2
+  decisions (all at once; PTCH 64 = C2; Devil Fish ranges where the voicing allows: CUT 200 Hz-10 kHz
+  — Open303 clamps the instantaneous cutoff at 200 Hz — DEC 30 ms-3 s; full list in scope §12).
+  `tools/ot303/cf/params.c` (knobs -> host words, fixed point; constants from Open303 by
+  params_check.py) within 3 LSB of Open303 everywhere. Sequencer RE: step handler 0x4009d1e8
+  (track, bank, pattern, step), masks per track (+0x08 trigless, +0x40 swing, +0x48 slide), event
+  codes 0x46c7a810, tempo 0x80001814, ticks/step 0x400aba50. ColdFire space ran out (SAFE_CAVE
+  0x400d24d0 refused: the live tail of a 1,024-entry curve table at 0x400d1ce0 indexed by u16>>6).
+  User chose a DRAM runtime: tools/ot303/dram.py (16 arena pages, octabam's arena geometry) +
+  cf/loader.S (octabam/Octakit-derived) appended at 0x4010fdf0 from the boot site 0x4000050c.
+  MT4 = MT3 from DRAM, `out/OCTATRACK_OS1.40C_OT303_MT4.syx` sha256
+  bd23955a0affd2854779e78fce15d2b1b54e379adb1bf46a9f3533669eb7e493 (`140C_303T4`); verify_ot303.py
+  ALL GOOD incl. the DRAM audit (loader once, reserve intact, only the runtime writes there).
 

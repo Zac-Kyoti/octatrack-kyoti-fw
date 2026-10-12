@@ -2076,6 +2076,36 @@ a type-indexed table (copied from `0x400a81a4`: S F T N P, and `0x400bb3a6` = M 
 detour at `0x4004012c` gives an OT-303 track a **3** (the user's choice; "M" rejected because stock's
 MASTER T8 uses it). Glyph format: width, height, planes, ink, mask; a column a word, rows bottom-up.
 
+**MT3 on the unit (user, 2026-10-11):** confirmed (side glyph 3).
+
+**Item 2 decisions (user, 2026-10-11):** all of item 2 in one round (knobs + per-step locks, ties,
+slides); PTCH 64 = C2 (MIDI 36), semitones; Devil Fish-style ranges where the voicing allows:
+CUT 200 Hz–10 kHz exp (not lower: Open303's filter clamps the instantaneous cutoff at 200 Hz, so a
+lower knob end would be dead travel at low ENV), DEC 30 ms–3 s exp, RES/ENV/ACC 0–100 % (ACC 0 = an
+unaccented step; accent by an ACC lock), VOL (k/127)² (default 119 ≈ −1 dB), WAVE saw→square (needs
+the square's tanh table: item 3's packing comes in now), TUNE A4 400–480 Hz, SLID 0–198 ms (default
+60), GATE (k+1)/128 of a step (default 50 %). Defaults from Open303's: CUT 30 (500 Hz), RES 64,
+ENV 32, DEC 71 (400 ms). The parameter compiler `tools/ot303/cf/params.c` (fixed point, shared by the
+ColdFire and the bench; constants from Open303 by `tools/ot303/params_check.py`) matches Open303's
+double-precision host words within 3 LSB of 2^-23 on every word over every knob value and the
+CUT×ENV plane (checked, `ALL WITHIN 8 LSB`). Sequencer facts found: step handler `0x4009d1e8`
+(track, bank, pattern, step); per-track masks at `0x400e21e0 + bank·0x9b340 + pattern·0x8ed8 +
+track·0x91a`: +0x00 trig, +0x08 trigless, +0x10 lock, +0x18 one-shot, +0x40 swing (default 0xAA..),
++0x48 slide; event code `0x46c7a810[t]` (29 note, 25 trigless, 61 one-shot, 1 lock); tempo
+`0x80001814` = BPM·24; ticks per step `0x400aba50[scale]` (3 4 6 8 12 24 48); step = ticks·2,646,000 /
+tempo24 samples. Ties and slides by look-ahead at the note (no trigless timing needed).
+**ColdFire space ran out** (the compiler alone is ~3.3 KB): the user chose a **DRAM runtime**.
+
+**MT4 (built 2026-10-11, NOT flashed):** `out/OCTATRACK_OS1.40C_OT303_MT4.syx` (`140C_303T4`) = MT3 with
+its ColdFire code moved to DRAM, to test the new boot path on its own: `tools/ot303/dram.py` takes 16
+pages (96 KiB) off the bottom of the audio page arena (base literal at 24 sites + 4 geometry words,
+octabam's measured arena.py), `tools/ot303/cf/loader.S` (derived from octabam's loader, itself from
+Octakit's) is appended at `0x4010fdf0` and reached from the boot site `0x4000050c`; it replays boot
+continue, copies the runtime into the reserve through the uncached alias, hash-gates it (x33) and
+hangs on a mismatch. The classic ROM cave is no longer used. ot_emu: the loader ran once from the
+boot site, never hit its hang; after boot, project load and play the reserve's code equals the
+linked runtime; every reserve write comes from the runtime's own .data; the whole MT3 check passes.
+
 **MT1 on the unit — what to check:**
 1. T2: FUNC+SRC → SRC SETUP → the last row OT-303 → YES (and the machine list from a track
    double-tap). The SRC page reads OT-303 with PTCH CUT RES ENV DEC ACC; SETUP WAVE TUNE SLID GATE VOL.

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 #
-# OT-303 machine test image (tools/build_ot303.py, MT3) under the firmware (ot_emu, the BOTLI project).
+# OT-303 machine test image (tools/build_ot303.py, MT4) under the firmware (ot_emu, the BOTLI project).
 #   ui       panel events (transport stopped): FUNC+SRC (SRC SETUP) -> the bottom row -> YES on T2
 #            makes it an OT-303 (FLEX + 'OT',1, the defaults seeded in both Part copies); with T2 an
 #            OT-303, the same on T3 is refused (one per core) and leaves T3 as it was, and on T6 (core 0)
@@ -16,18 +16,24 @@
 #            tracks = stock + the glue's signature check; the ColdFire renderer ran and saw trigs; the
 #            DSP started steps on them (a pcwatch at hq_start)
 #   inert    no OT-303 track: every track's source = stock + the glue, the renderer never took over
+#   dram     the DRAM runtime (tools/ot303/dram.py): the appended loader runs once from the boot site and
+#            never reaches its hang; after boot, project load and play the reserve's code and constants
+#            equal the linked runtime; every write into the reserve comes from the runtime itself
 #   SPRING (id 0x15) -> the passthrough stub; DARK REV (0x16) and PLATE REV (0x14) against stock
 import concurrent.futures as cf, os, re, shutil, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, 'tools', 'ot303'))
 import hwprobe_image  # noqa: E402
+import dram  # noqa: E402
 
 EMU = os.path.join(ROOT, 'out', 'ot303', 'ot_emu_8d0ad6f4')
 CARD = os.path.join(os.path.realpath(os.path.join(ROOT, 'refs', 'octabam')), 'out', 'botli_card2.img')
-IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt3.bin'))
+IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt4.bin'))
 STOCK = os.path.join(ROOT, 'out', 'raw', 'section_3_MAIN_OS.bin')
-ELF = os.path.join(ROOT, 'out', 'ot303', 'cf', 'ot303_cf.elf')
+ELF = os.path.join(ROOT, 'out', 'ot303', 'cf', 'ot303_runtime.elf')
+LOADER = os.path.join(ROOT, 'out', 'ot303', 'cf', 'loader.elf')
+RUNTIME = os.path.join(ROOT, 'out', 'ot303', 'cf', 'ot303_runtime.bin')
 FRAMES = int(os.environ.get('MT1_FRAMES', '3000'))
 SEQ_FRAMES = int(os.environ.get('MT1_SEQ_FRAMES', '16000'))   # BOTLI's T2/T6 trigs after step 1 (whose trigs land while the tables build)
 PART = 0x40170f60                     # BOTLI's Part 1 in RAM (bank 0x400e21e0 + 0x8ed80, read under ot_emu)
@@ -113,6 +119,24 @@ def run(image, core, sw, pokes=(), fxslot=None, fxid=None, pcw=None, dump=None, 
         return ([int(x) for x in m.group(1).split()] if m else None), p.returncode, hits, got, p.stdout
 
 
+def dram_audit():
+    sym = {}
+    for line in subprocess.run(['m68k-elf-nm', LOADER], capture_output=True, text=True, check=True).stdout.splitlines():
+        f = line.split()
+        if len(f) == 3:
+            sym[f[2]] = int(f[0], 16)
+    blob = open(RUNTIME, 'rb').read()
+    lo = dram.RESERVE
+    with tempfile.TemporaryDirectory() as td:
+        p = emu(IMAGE, ['--sequencer', '--internal-clock', '--frames', str(FRAMES), '--watch-pc',
+                        f'{sym["ot_loader"]:#x},{sym["fatal"]:#x}', '--watch-mem', f'{lo:#x},0x18000',
+                        '--mem-dump', f'{lo:#x},{len(blob)}={td}/reserve.bin'], td)
+        got = open(f'{td}/reserve.bin', 'rb').read() if os.path.exists(f'{td}/reserve.bin') else b''
+    hits = re.findall(r'\] at (0x[0-9a-f]+) ', p.stdout)
+    pcs = [int(x, 16) for x in re.findall(r'<- .* at pc (0x[0-9a-f]+)', p.stdout)]
+    return p, hits, pcs, got, blob, lo
+
+
 def ot303_pokes(tracks):
     out = []
     for t in tracks:
@@ -129,7 +153,7 @@ def main():
     hs = {tag: hwprobe_image.build(tag, host=True)['syms']['hq_start'] for tag in ('A', 'B')}
     counters = {'calls': (S['ot_render_calls'], 4), 'trigs': (S['ot_trigs'], 4)}
     jobs = {('ui', 'T2'): (1, ()), ('ui', 'T3'): (2, (1,)), ('ui', 'T6'): (5, (1,)),
-            ('ui', 'back'): (1, (), True), ('ui', 'stock'): (1, (), False, STOCK)}
+            ('ui', 'back'): (1, (), True), ('ui', 'stock'): (1, (), False, STOCK), ('dram', ''): None}
     for core in (1, 0):
         jobs[('src-stock', core)] = (STOCK, core, SRC[core])
         jobs[('src-inert', core)] = (IMAGE, core, SRC[core], (), None, None, None, counters)
@@ -140,9 +164,17 @@ def main():
             jobs[(name, core)] = (IMAGE, core, FX2[core], (), 2, fx)
             jobs[(name + '-stock', core)] = (STOCK, core, FX2[core], (), 2, fx)
     with cf.ThreadPoolExecutor(len(jobs)) as ex:
-        fut = {k: ex.submit(ui, S, *v) if k[0] == 'ui' else ex.submit(run, *v) for k, v in jobs.items()}
+        fut = {k: ex.submit(ui, S, *v) if k[0] == 'ui' else ex.submit(dram_audit) if k[0] == 'dram' else ex.submit(run, *v)
+               for k, v in jobs.items()}
         res = {k: f.result() for k, f in fut.items()}
     ok = True
+    # ---- the DRAM runtime
+    p, hits, pcs, got, blob, lo = res[('dram', '')]
+    data0 = min(v for k, v in S.items() if k in ('ot_trigs', 'ot_render_calls', 'ot_desc_p'))    # .data: the runtime's own state
+    outside = sorted({hex(x) for x in pcs if not lo <= x < lo + len(blob)})
+    print(f'dram: loader hits {hits}; {len(pcs)} writes into the reserve, writers outside the runtime {outside}; '
+          f'code + constants equal after the run: {got[:data0 - lo] == blob[:data0 - lo]}')
+    ok &= p.returncode == 0 and len(hits) == 1 and not outside and len(got) == len(blob) and got[:data0 - lo] == blob[:data0 - lo]
     # ---- ui
     for name, t, want in (('T2', 1, True), ('T3', 2, False), ('T6', 5, True)):  # ('back', 'stock': below)
         p, got = res[('ui', name)]
@@ -176,7 +208,7 @@ def main():
         ok &= len(a) == len(b) == 6322 and not diff
     ok &= pb.returncode == 0 and 'ended on quit' in pb.stdout
     # ---- sequencer
-    for k, v in sorted(((k, v) for k, v in res.items() if k[0] != 'ui'), key=lambda kv: (kv[0][1], kv[0][0])):
+    for k, v in sorted(((k, v) for k, v in res.items() if k[0] not in ('ui', 'dram')), key=lambda kv: (kv[0][1], kv[0][0])):
         print(f'{k[0]:10} core {k[1]}: rc {v[1]}  last 8 {v[0][-8:] if v[0] else None}')
         ok &= v[1] == 0 and bool(v[0])
     if not ok:
