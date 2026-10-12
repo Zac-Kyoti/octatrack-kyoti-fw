@@ -101,6 +101,16 @@ SUBS = [
      """        do      #BHALF,zqi3             ; T[k] stored for k = 0..LR/2; T[LR-k] = -1/2 - T[k]
         move    p:(r1)+,x0
 """),
+    # zqtok's ring clear: octabam refuses `rep` in a DSP source since 86a9a611
+    # (tools/build/norep.py; rep cannot be interrupted and holds off payload B's
+    # host-command vectors). Sam Banks, Zac-Kyoti/octatrack-kyoti-fw#1.
+    ("""        rep     #<32
+        move    a,x:(r1)+
+""",
+     """        do      #<32,>zqnorep1          ; interruptible, unlike rep (octabam tools/build/norep.py)
+        move    a,x:(r1)+
+zqnorep1:
+"""),
 ]
 
 
