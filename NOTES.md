@@ -36143,7 +36143,7 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   queues a note step's gate/slide (look-ahead: trigless = tie, a note before a slide trig held to the
   end of the next step); the renderer plays a flag only with a queued note (live-played notes do not
   sound yet; stray flags counted). The record (cf/record.c, 84 longs) carries 12 continuous words, 11
-  note words and a chunk of the voice's Y image: the DSP no longer builds tables (host.asm 990 -> 941
+  note words and a chunk of the voice's Y image: the DSP no longer builds tables (host.asm 990 -> 946
   words); the square works. The owner's own stock record frees the voice at once. Bench host_check:
   bit-exact (974,960 samples, 130 notes, slides into open/closed gates, square, junk in the transport's
   top bits — found the signature compare looked at A2: now `eor`); saw 399 cyc/sample (worst frame

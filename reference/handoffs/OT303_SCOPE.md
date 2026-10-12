@@ -2123,7 +2123,7 @@ owner's claim aged out over 2 frames and the new track's first note fell in that
   continuous words, 11 note words, a chunk of the voice's Y image); the step hook `0x4009d1e8`
   (`machine.s ot_step_hook` → `control.c ot_step`). New defaults: CUT 30, RES 64, ENV 32, DEC 71, ACC 0,
   SLID 38, GATE 63, VOL 119.
-- DSP (`host.asm`, 941 of 1,028 words): the riff and the table builder are gone; the tables arrive
+- DSP (`host.asm`, 946 of 1,028 words): the riff and the table builder are gone; the tables arrive
   from the ColdFire in order (2,119 Y words, ~37 frames of silence once per power-up); the voice's own
   track's stock record frees the claim at once. Bench: bit-exact, saw 399 cycles/sample (worst frame
   435), **square 533 (worst 598)**: the square is the engine's costlier loop, ~+135 over the saw.
