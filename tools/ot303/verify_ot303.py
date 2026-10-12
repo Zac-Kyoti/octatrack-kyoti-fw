@@ -2,12 +2,15 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 #
-# OT-303 machine test image 1 (tools/build_ot303.py) under the firmware (ot_emu, the BOTLI project).
+# OT-303 machine test image (tools/build_ot303.py, MT2) under the firmware (ot_emu, the BOTLI project).
 #   ui       panel events (transport stopped): FUNC+SRC (SRC SETUP) -> the bottom row -> YES on T2
 #            makes it an OT-303 (FLEX + 'OT',1, the defaults seeded in both Part copies); with T2 an
 #            OT-303, the same on T3 is refused (one per core) and leaves T3 as it was, and on T6 (core 0)
 #            it lands. The page table's row 5 is our descriptor, named OT-303 with our twelve knobs.
 #            (This ot_emu ignores the track keys: the current track is poked.)
+#   flex     the round trip through the panel: T2 -> OT-303 -> back (SRC SETUP, four rows up, YES)
+#            leaves both Part copies byte for byte as stock had them (FLEX's twelve values stashed and
+#            put back, the stash and the signature cleared); the page's label is stock's PB / PLAYBACK
 #   seq      the sequencer playing, T2 and T6 made OT-303 by pokes into the loaded Part (no file
 #            edited): the stopwatch over each track's source: the voice on T2 / T6 only, the other
 #            tracks = stock + the glue's signature check; the ColdFire renderer ran and saw trigs; the
@@ -22,7 +25,7 @@ import hwprobe_image  # noqa: E402
 
 EMU = os.path.join(ROOT, 'out', 'ot303', 'ot_emu_8d0ad6f4')
 CARD = os.path.join(os.path.realpath(os.path.join(ROOT, 'refs', 'octabam')), 'out', 'botli_card2.img')
-IMAGE = os.path.join(ROOT, 'out', os.environ.get('MT1_IMAGE', 'mainos_ot303_mt1.bin'))
+IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt2.bin'))
 STOCK = os.path.join(ROOT, 'out', 'raw', 'section_3_MAIN_OS.bin')
 ELF = os.path.join(ROOT, 'out', 'ot303', 'cf', 'ot303_cf.elf')
 FRAMES = int(os.environ.get('MT1_FRAMES', '3000'))
@@ -55,23 +58,33 @@ def key(code, gap=600, hold=600):
     return [(gap, f'key {code:#x} down'), (hold, f'key {code:#x} up')]
 
 
-def ui(S, track, pre):
+def ui(S, track, pre, back=False, image=None):
     """one panel run: the current track set to `track` (this ot_emu ignores the track keys: the two
     current-track bytes are poked), `pre` OT-303 tracks poked into the Part, then FUNC+SRC (SRC SETUP)
     -> the bottom row -> YES -> NO"""
     ev = [(600, 'key 0x2d down'), (300, 'key 0x22 down'), (300, 'key 0x22 up'), (300, 'key 0x2d up')]
     for _ in range(6):
         ev += key(0x20, 250, 250)
-    ev += key(0x31) + key(0x32) + [(800, 'quit')]
+    ev += key(0x31) + key(0x32)
+    if back:                                         # again, up four rows to FLEX, YES
+        ev += [(600, 'key 0x2d down'), (300, 'key 0x22 down'), (300, 'key 0x22 up'), (300, 'key 0x2d up')]
+        for _ in range(4):
+            ev += key(0x33, 250, 250)
+        ev += key(0x31) + key(0x32)
+    if image is not None:                            # the stock image: no panel events, the Part as loaded
+        ev = []
+    ev += [(800, 'quit')]
     with tempfile.TemporaryDirectory() as td:
         t, lines = 0, []
         for d, e in ev:
             t += d; lines.append(f'{t} {e}\n')
         evf = os.path.join(td, 'events.txt'); open(evf, 'w').writelines(lines)
-        dumps = {'part': (PART, 6322), 'shadow': (SHADOW, 6322), 'page': (0x400d5f4c, 4), 'desc': (S['desc'], 458)}
+        dumps = {'part': (PART, 6322), 'shadow': (SHADOW, 6322)}
+        if image is None:
+            dumps.update(page=(0x400d5f4c, 4), desc=(S['desc'], 458))
         spans = ';'.join(f'{a:#x},{n}={os.path.join(td, k)}.bin' for k, (a, n) in dumps.items())
         pokes = [f'0x100b14cc={track:#x}', f'0x80000000={track:#x}'] + ot303_pokes(pre)
-        p = emu(IMAGE, ['--mem-dump', spans, '--step', '-:poke:' + ';'.join(pokes), '--live-script', evf], td)
+        p = emu(image or IMAGE, ['--mem-dump', spans, '--step', '-:poke:' + ';'.join(pokes), '--live-script', evf], td)
         got = {k: open(os.path.join(td, k + '.bin'), 'rb').read() for k in dumps if os.path.exists(os.path.join(td, k + '.bin'))}
         return p, got
 
@@ -115,7 +128,8 @@ def main():
     S = syms()
     hs = {tag: hwprobe_image.build(tag, host=True)['syms']['hq_start'] for tag in ('A', 'B')}
     counters = {'calls': (S['ot_render_calls'], 4), 'trigs': (S['ot_trigs'], 4)}
-    jobs = {('ui', 'T2'): (1, ()), ('ui', 'T3'): (2, (1,)), ('ui', 'T6'): (5, (1,))}
+    jobs = {('ui', 'T2'): (1, ()), ('ui', 'T3'): (2, (1,)), ('ui', 'T6'): (5, (1,)),
+            ('ui', 'back'): (1, (), True), ('ui', 'stock'): (1, (), False, STOCK)}
     for core in (1, 0):
         jobs[('src-stock', core)] = (STOCK, core, SRC[core])
         jobs[('src-inert', core)] = (IMAGE, core, SRC[core], (), None, None, None, counters)
@@ -130,7 +144,7 @@ def main():
         res = {k: f.result() for k, f in fut.items()}
     ok = True
     # ---- ui
-    for name, t, want in (('T2', 1, True), ('T3', 2, False), ('T6', 5, True)):
+    for name, t, want in (('T2', 1, True), ('T3', 2, False), ('T6', 5, True)):  # ('back', 'stock': below)
         p, got = res[('ui', name)]
         part, shadow = got.get('part', b''), got.get('shadow', b'')
         if len(part) != 6322 or len(shadow) != 6322:
@@ -147,7 +161,20 @@ def main():
             desc = got.get('desc', b'')
             names = [desc[0x4e + 6 * i:0x4e + 6 * i + 6].split(b'\0')[0].decode() for i in range(12)]
             print(f'   page row 5 0x{page:08x} (desc+0x38 0x{S["desc"] + 0x38:08x}); name {desc[0x41:0x48]!r}; knobs {names}')
-            ok &= page == S['desc'] + 0x38 and desc[0x41:0x47] == b'OT-303' and names[:6] == ['PTCH', 'CUT', 'RES', 'ENV', 'DEC', 'ACC']
+            print(f'   page label fields {desc[0x3c:0x3e]!r} / {desc[0x41:0x49]!r} (stock PB / PLAYBACK: PLAYBACK>OT-303)')
+            ok &= page == S['desc'] + 0x38 and desc[0x3c:0x3f] == b'PB\0' and desc[0x41:0x4a] == b'PLAYBACK\0' \
+                and names[:6] == ['PTCH', 'CUT', 'RES', 'ENV', 'DEC', 'ACC']
+    # the FLEX round trip against stock's Part as loaded
+    (pb, gb), (ps, gs) = res[('ui', 'back')], res[('ui', 'stock')]
+    for c in ('part', 'shadow'):
+        a, b = gs.get(c, b''), gb.get(c, b'')
+        diff = [i for i in range(min(len(a), len(b))) if a[i] != b[i]]
+        t = 1
+        flex = [b[0x2a + 30 * t + 6 + k] for k in range(6)] + [b[0x1da + 30 * t + 6 + k] for k in range(6)] if b else []
+        print(f'flex round trip, {c}: {len(diff)} bytes differ from stock {[hex(i) for i in diff[:8]]}; T2 type {b[0x22 + t] if b else None}, '
+              f'FLEX knobs {flex}, signature {b[60 + 30 * t:63 + 30 * t]!r}' if b else f'flex round trip, {c}: no dump')
+        ok &= len(a) == len(b) == 6322 and not diff
+    ok &= pb.returncode == 0 and 'ended on quit' in pb.stdout
     # ---- sequencer
     for k, v in sorted(((k, v) for k, v in res.items() if k[0] != 'ui'), key=lambda kv: (kv[0][1], kv[0][0])):
         print(f'{k[0]:10} core {k[1]}: rc {v[1]}  last 8 {v[0][-8:] if v[0] else None}')

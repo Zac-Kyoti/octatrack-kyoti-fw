@@ -19,6 +19,10 @@
 #define DESC_SIZE 0x1cau
 #define FLEX_RENDER 0x40004008u
 #define PB_TABLE 0x400d5f38u
+#define SRAM_PART 0x100a4eceu
+#define FLEX_DEFAULTS 0x400d320cu   /* the stock FLEX page descriptor's twelve defaults (E + 0x96) */
+#define SLOT_REC 0x40031d18u        /* stock (machine, slot) -> the sample slot's record, name at +24 */
+#define STASH_MARK 0x55u
 
 /* SRC (page 1) then SRC SETUP (page 2). Stored with the track; the DSP reads them from the record. */
 const uint8_t ot_defaults[12] = {64, 64, 64, 64, 64, 64, 0, 64, 64, 64, 100, 0};
@@ -60,7 +64,7 @@ static uint32_t page(void) {
     if (!ot_desc_p) {
         const volatile uint8_t *src = (const volatile uint8_t *)0x400d3176u;
         for (unsigned i = 0; i < DESC_SIZE; ++i) desc[i] = src[i];
-        text(desc + 0x3c, "SYN", 5); text(desc + 0x41, "OT-303", 13);
+        /* the header keeps stock's "PB" / "PLAYBACK": the page label reads PLAYBACK>OT-303 */
         for (unsigned i = 0; i < 12; ++i) {
             text(desc + 0x4e + 6 * i, ot_names[i], 6);
             desc[0x96 + i] = ot_defaults[i];
@@ -82,6 +86,71 @@ uint32_t ot_track_page(const volatile uint8_t *type_ptr) {
 void ot_ui_tick(void) {
     U32(PB_TABLE + 5 * 4) = page();
 }
+/* An OT-303 track's twelve knobs live in the track's FLEX bytes (the stock page editor and the
+ * engine reach them there), so FLEX's own values are stashed while the track is an OT-303 and put
+ * back when it leaves: packed into NEIGHBOR's unused bytes (NEIGHBOR has no parameters; stock shows
+ * them as ---). Page 1 bytes 3..5 (0..2 hold the signature) and the SETUP block's six: 8 data bytes
+ * of 7 bits (stock's validator keeps them <= 127) and the mark. FLEX's ranges make 56 bits: page 1
+ * PTCH STRT LEN RATE RTRG RTIM 7 each, SETUP LOOP 2, SLIC 1, LEN 1, RATE 1, TSTR 2, TSNS 7. */
+static const uint8_t flex_bits[12] = {7, 7, 7, 7, 7, 7, 2, 1, 1, 1, 2, 7};
+static volatile uint8_t *knob(volatile uint8_t *part, unsigned t, unsigned k) {
+    return part + (k < 6 ? 0x2a : 0x1da) + 30 * t + 6 + k % 6;
+}
+static volatile uint8_t *stash(volatile uint8_t *part, unsigned t, unsigned i) {   /* i = 0..8 */
+    return i < 3 ? part + SIG + 30 * t + 3 + i : part + 0x1da + 30 * t + 18 + (i - 3);
+}
+static void flex_stash(volatile uint8_t *part, unsigned t) {
+    uint32_t acc = 0; unsigned n = 0, out = 0;
+    for (unsigned k = 0; k < 12; ++k) {
+        acc |= (uint32_t)(*knob(part, t, k) & ((1u << flex_bits[k]) - 1)) << n;
+        n += flex_bits[k];
+        while (n >= 7) { *stash(part, t, out++) = (uint8_t)(acc & 0x7f); acc >>= 7; n -= 7; }
+    }
+    *stash(part, t, 8) = STASH_MARK;
+}
+static void flex_restore(volatile uint8_t *part, unsigned t) {
+    const volatile uint8_t *def = (const volatile uint8_t *)FLEX_DEFAULTS;
+    if (*stash(part, t, 8) != STASH_MARK) {          /* no stash (an MT1 track): stock's defaults */
+        for (unsigned k = 0; k < 12; ++k) *knob(part, t, k) = def[k];
+    } else {
+        uint32_t acc = 0; unsigned n = 0, in = 0;
+        for (unsigned k = 0; k < 12; ++k) {
+            while (n < flex_bits[k]) { acc |= (uint32_t)(*stash(part, t, in++) & 0x7f) << n; n += 7; }
+            *knob(part, t, k) = (uint8_t)(acc & ((1u << flex_bits[k]) - 1));
+            acc >>= flex_bits[k]; n -= flex_bits[k];
+        }
+    }
+    for (unsigned i = 0; i < 9; ++i) *stash(part, t, i) = 0;   /* NEIGHBOR's stock defaults */
+}
+/* machine.s's commits: sign = 1 makes track t of this Part an OT-303 (FLEX stashed, the OT-303
+ * defaults seeded), 0 makes it something else (FLEX put back); both copies (the Part and its SRAM
+ * mirror); nothing changes when the track already is / is not one. */
+void ot_assign(volatile uint8_t *part, unsigned t, unsigned sign) {
+    volatile uint8_t *copies[2] = {part, part - (U32(BANK) + PART_OFF) + SRAM_PART};
+    for (unsigned c = 0; c < 2; ++c) {
+        volatile uint8_t *p = copies[c], *s = p + SIG + 30 * t;
+        unsigned is = s[0] == 'O' && s[1] == 'T' && s[2] == 1;
+        if (sign && !is) {
+            flex_stash(p, t);
+            for (unsigned k = 0; k < 12; ++k) *knob(p, t, k) = ot_defaults[k];
+            s[0] = 'O'; s[1] = 'T'; s[2] = 1;
+        } else if (!sign && is) {
+            flex_restore(p, t);
+            s[0] = s[1] = s[2] = 0;
+        }
+    }
+}
+/* The main page names the current track's sample: the track box (0x4004c1c0, the UI's current track
+ * 0x100b14cc) and the screen's label builder (0x4003d552, the current track 0x80000000) both call the
+ * slot lookup. An OT-303 track has no sample: they get a record named OT-303. */
+static const uint8_t ot_slot[32] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                    'O', 'T', '-', '3', '0', '3', 0, 0};
+static uint32_t slot_rec(unsigned t, unsigned machine, unsigned slot) {
+    if (machine == 1 && signed_track(part_base(), t)) return (uint32_t)(uintptr_t)ot_slot;
+    return ((uint32_t (*)(unsigned, unsigned))SLOT_REC)(machine, slot);
+}
+uint32_t ot_slot_rec(unsigned machine, unsigned slot) { return slot_rec(U8(0x80000000u), machine, slot); }
+uint32_t ot_slot_rec_ui(unsigned machine, unsigned slot) { return slot_rec(U8(0x100b14ccu), machine, slot); }
 /* The stock validator sees FLEX defaults for every OT-303 track; the twelve bytes come back after.
  * Every other Part byte is checked by stock's real validator (machine.s skips our own detour). */
 extern int ot_stock_validate(void *part);

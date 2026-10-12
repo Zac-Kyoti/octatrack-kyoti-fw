@@ -2049,6 +2049,27 @@ knobs (PTCH CUT RES ENV DEC ACC / WAVE TUNE SLID GATE VOL) are stored and sent b
   track keys, so the current track is poked; the Part is poked in RAM for the sequencer runs (no file
   edited).
 
+**MT1 on the unit (user, 2026-10-11):** 1, 2, 3, 4, 6 work. Two voices (T2 + T6) "sound awful together,
+like one voice full of intermodulation": both play the same built-in bar from the same start state, so
+with the same trigs they are sample-identical (one voice at +6 dB), and at MT1's level (−1 dBFS each)
+the sum passes full scale → clipping (DIAG14's −6 dBFS voices summed to ~0 dBFS: clean). Not a voice
+bug; a level / identical-material effect (user test: offset one track's trigs, or lower both LEVELs).
+Test 5 broke: a track that went OT-303 → FLEX came back with STRT/LEN 64 (a looped portion) and SETUP
+values outside FLEX's ranges (missing knobs until turned): MT1 seeded the OT-303 defaults into FLEX's
+bytes and never put FLEX's back (ANALOG BD has the same flaw). Also: the label read OT-303>OT-303
+(the descriptor's PB/PLAYBACK names overwritten), the track box showed the sample's name, the side
+columns show "F".
+
+**MT2 (built 2026-10-11, NOT flashed):** `out/OCTATRACK_OS1.40C_OT303_MT2.syx` (`140C_303T2`). FLEX's
+twelve values are stashed on assignment (packed 7 bits/byte into NEIGHBOR's 9 unused bytes beside the
+signature: 56 bits + a mark) and restored on leaving, both Part copies (MT1-assigned tracks without a
+stash get stock's FLEX defaults); label PLAYBACK>OT-303; the track box and the label builder's slot
+lookups (`0x4004c1c0`, `0x4003d552`) return a record named OT-303. Firmware check renamed
+`tools/ot303/verify_ot303.py`; adds the panel round trip (OT-303 and back: both Part copies equal
+stock byte for byte). Screenshots via octabam `tools/emu/lcd_view.py --png` from `--lcd`. **Open:**
+the side-column machine letter ("F") is a type-indexed glyph drawn elsewhere (not the name tables;
+not found yet: part of the type-byte reader audit, 138 sites read `part + 0x8eda2 + t`).
+
 **MT1 on the unit — what to check:**
 1. T2: FUNC+SRC → SRC SETUP → the last row OT-303 → YES (and the machine list from a track
    double-tap). The SRC page reads OT-303 with PTCH CUT RES ENV DEC ACC; SETUP WAVE TUNE SLID GATE VOL.

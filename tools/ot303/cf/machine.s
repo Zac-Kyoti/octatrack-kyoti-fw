@@ -4,8 +4,8 @@
 |
 | OT-303 registration: machine row 5 in the track's machine chooser and in SRC SETUP, stored as FLEX
 | plus the signature 'O','T',1 in unused NEIGHBOR page bytes (part + 0x2a + 18 + 30 t), on any track,
-| one per DSP core. A new assignment seeds both Part copies with the OT-303 defaults; reselecting
-| keeps the patch. Each stub is reached by a detour (tools/build_ot303.py) and replays the stock
+| one per DSP core. A new assignment seeds both Part copies with the OT-303 defaults (FLEX's values
+| stashed beside the signature, put back when the track leaves OT-303); reselecting keeps the patch. Each stub is reached by a detour (tools/build_ot303.py) and replays the stock
 | instructions it displaced. ANALOG BD's engine browser is not ported (no detours on the pool).
         .text
         .global ot_machine_name, ot_src_names, ot_main_commit, ot_src_commit, ot_src_commit2
@@ -23,62 +23,18 @@
         .equ    PAGE2_GAP, 0x1da - 0x2a
         .equ    PB_TABLE, 0x400d5f38
 
-| a0 = the Part, d0 = the track, d1 = 1 sign (seeding the twelve bytes with the defaults when the
-| track was not already an OT-303) / 0 clear; both copies (the working Part and its SRAM image)
+| a0 = the Part, d0 = the track, d1 = 1 sign / 0 clear: control.c ot_assign (FLEX's values stashed
+| while the track is an OT-303, put back when it leaves; both Part copies). Keeps every register.
 ot_sig_write:
         lea     -16(%sp),%sp
-        movem.l %d0-%d2/%a1,(%sp)
-        mulu.w  #30,%d0
-        lea     SIG_OFF(%a0,%d0.l),%a1
-        bsr.s   .sw_one
-        move.l  %a0,%d2
-        sub.l   (BANK_PTR).l,%d2
-        subi.l  #PART_OFF,%d2
-        addi.l  #SRAM_PART + SIG_OFF,%d2
-        add.l   %d0,%d2
-        movea.l %d2,%a1
-        bsr.s   .sw_one
-        movem.l (%sp),%d0-%d2/%a1
-        lea     16(%sp),%sp
-        rts
-.sw_one:
-        tst.l   %d1
-        beq.w   .sw_clear
-        move.b  (%a1),%d2
-        cmpi.b  #'O',%d2
-        beq.s   .sw_mark
-        move.l  %a0,-(%sp)
+        movem.l %d0-%d1/%a0-%a1,(%sp)
+        move.l  %d1,-(%sp)
         move.l  %d0,-(%sp)
-        lea     ot_defaults,%a0
-        moveq   #5,%d0
-.sw_defaults1:
-        move.b  (%a0)+,-12(%a1)
-        addq.l  #1,%a1
-        subq.l  #1,%d0
-        bpl.s   .sw_defaults1
-        lea     -6(%a1),%a1
-        moveq   #5,%d0
-.sw_defaults2:
-        move.b  (%a0)+,PAGE2_GAP-12(%a1)
-        addq.l  #1,%a1
-        subq.l  #1,%d0
-        bpl.s   .sw_defaults2
-        lea     -6(%a1),%a1
-        move.l  (%sp)+,%d0
-        move.l  (%sp)+,%a0
-.sw_mark:
-        move.b  #'O',(%a1)
-        move.b  #'T',1(%a1)
-        move.b  #1,2(%a1)
-        rts
-.sw_clear:
-        move.b  (%a1),%d2
-        cmpi.b  #'O',%d2
-        bne.s   .sw_out
-        clr.b   (%a1)
-        clr.b   1(%a1)
-        clr.b   2(%a1)
-.sw_out:
+        move.l  %a0,-(%sp)
+        jsr     ot_assign
+        lea     12(%sp),%sp
+        movem.l (%sp),%d0-%d1/%a0-%a1
+        lea     16(%sp),%sp
         rts
 
 | the chooser's row name: row 5 is ours, the rest stock (0x400334d8 displaced: move.l d2,-(sp);

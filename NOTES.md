@@ -36100,4 +36100,16 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   trigs in open gates; 389 cycles/sample); ot_emu `verify_mt1.py` ALL GOOD (panel chooser: T2 lands,
   T3 refused, T6 lands; voice on OT-303 tracks only; DARK/PLATE = stock). ot_emu 8d0ad6f4 ignores
   track keys (current track poked); trigs in the first 15 frames after assignment are silent (tables).
+- **S124 cont: MT1 on HW + MT2 BUILT (NOT flashed).** MT1: tests 1-4, 6 OK. T2+T6 sounded "awful,
+  like one voice with IMD" = same built-in bar from the same start → sample-identical voices summed
+  (+6 dB) at −1 dBFS each → clipping (a level effect, not a voice bug). Test 5: OT-303 → FLEX left
+  FLEX with the OT-303 defaults (STRT/LEN 64 loop a portion; SETUP out of range = missing knobs) —
+  MT1 (and ANALOG BD) never restore FLEX's bytes. Label "OT-303>OT-303" (descriptor PB/PLAYBACK
+  overwritten), sample name in the track box, side letter "F". MT2: FLEX's 12 values packed into
+  NEIGHBOR's 9 unused bytes (7 bits each + mark) on assignment, restored on leaving (both copies);
+  label PLAYBACK>OT-303; slot lookups 0x4004c1c0 (track box) / 0x4003d552 (label builder) return an
+  "OT-303" record. `out/OCTATRACK_OS1.40C_OT303_MT2.syx` sha256 b3329243eca1bf836129922e6780185e3f4ee73bdf7b3eed77bb4de92d33d8f8
+  (`140C_303T2`). verify_ot303.py ALL GOOD incl. the panel round trip (Part = stock byte for byte);
+  screenshots confirm label, box, knobs. Side letter: a type-indexed glyph, not found yet (not the
+  name tables 0x400a78c8 / 0x400a78b4, no letter immediates).
 
