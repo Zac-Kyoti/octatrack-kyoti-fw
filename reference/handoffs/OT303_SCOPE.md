@@ -2106,6 +2106,32 @@ hangs on a mismatch. The classic ROM cave is no longer used. ot_emu: the loader 
 boot site, never hit its hang; after boot, project load and play the reserve's code equals the
 linked runtime; every reserve write comes from the runtime's own .data; the whole MT3 check passes.
 
+**MT4 on the unit (user, 2026-10-11):** nominal (the DRAM boot path works). Reported on MT4: pattern +
+Part changes retrigger the riff with no trig placed (two 1/32s on the old pattern's last step, one on
+the new one's first; sometimes ~1 s of repeats), mild pops at Part changes, a late start after a Part
+change. Cause: the renderer's trig flag (`0x46104d0c[t]` & 16) is the frame builder's copy of a
+per-track trigger byte that trig apply, track starts and Part loads all set; the late start: the old
+owner's claim aged out over 2 frames and the new track's first note fell in that window.
+
+**MT5 (built 2026-10-11, NOT flashed): item 2.** `out/OCTATRACK_OS1.40C_OT303_MT5.syx` (`140C_303T5`).
+- The sequencer drives the voice: each note step plays with the knobs of its frame (page-1 p-locks,
+  LFOs and scenes included); trigless trigs after a note tie it (whole steps); a slide trig slides
+  into its note when the previous gate is open (no retrigger), the previous note held to it; GATE's
+  share of a step otherwise. Only flags with a note step queued by the step hook play; live-played
+  notes do not sound yet.
+- ColdFire (DRAM runtime, 19 KB): `cf/params.c` linked; `cf/record.c` writes the record (84 longs: 12
+  continuous words, 11 note words, a chunk of the voice's Y image); the step hook `0x4009d1e8`
+  (`machine.s ot_step_hook` → `control.c ot_step`). New defaults: CUT 30, RES 64, ENV 32, DEC 71, ACC 0,
+  SLID 38, GATE 63, VOL 119.
+- DSP (`host.asm`, 941 of 1,028 words): the riff and the table builder are gone; the tables arrive
+  from the ColdFire in order (2,119 Y words, ~37 frames of silence once per power-up); the voice's own
+  track's stock record frees the claim at once. Bench: bit-exact, saw 399 cycles/sample (worst frame
+  435), **square 533 (worst 598)**: the square is the engine's costlier loop, ~+135 over the saw.
+- Checks: `host_check.py` (records from record.c/params.c natively, junk in the transport's top
+  bits), `chain_check.py` (ours vs TwinVoice: null −84.5 dB; both vs Open303: spec 0.68 / p95 3.1 dB),
+  `verify_ot303.py` (a test line with ties, holds, slides and PTCH locks on T2/T6 of BOTLI: every note's
+  gate, slide and PTCH as expected; the Y image intact on both cores; DARK/PLATE as stock).
+
 **MT1 on the unit — what to check:**
 1. T2: FUNC+SRC → SRC SETUP → the last row OT-303 → YES (and the machine list from a track
    double-tap). The SRC page reads OT-303 with PTCH CUT RES ENV DEC ACC; SETUP WAVE TUNE SLID GATE VOL.

@@ -1,85 +1,82 @@
 ; SPDX-License-Identifier: MIT
 ; SPDX-FileCopyrightText: 2026 Zac-Kyoti
 ; ===========================================================================
-; OT-303 machine -- the DSP host (reference/handoffs/OT303_SCOPE.md §12 item 1b). Appended to
+; OT-303 machine -- the DSP host (reference/handoffs/OT303_SCOPE.md §12 items 1b, 2). Appended to
 ; tools/ot303/ot303_engine.asm by tools/ot303/hwprobe_image.py (HOST=1), placed in SPRING REV's
 ; program words (DARK REV's 35-word helper moved to the region's end by the builder).
 ;
 ; The voice runs at the per-track SOURCE seam (octabam ANALOG BD's host; DIAG14 proved it on the
 ; unit): the stock `move a,x:>$20e` before the source (payload A P:$39c, B P:$1a2) is a jsr to
-; sg_entry. An OT-303 track's record is the control record tools/ot303/cf/control.c writes:
-;   w0 $3303, w2 $0909  the signature;  w3  1 when this frame carries the track's trig (its sample
-;   offset is the stock x:$20c);  w8..w19  the twelve knob bytes (not read yet)
+; sg_entry. An OT-303 track's record is the control record tools/ot303/cf/record.c writes. The
+; transport carries each ColdFire long as two 16-bit words (high half first, the DSP word's top 8
+; bits not ours); a 24-bit word v rides one long, bits 23-8 in the high half, 7-0 in the low:
+;   w0 $3303, w2 $0909  the signature
+;   w3                  bit 0: a note starts at the frame's trig sample (the stock x:$20c);
+;                       bit 1: it slides (no retrigger when the gate is still open)
+;   w4..w27             12 continuous words, every frame (Open303's setters act at once):
+;                       CS ES8 RS BG SC SQ W1 W1 W2 W3 L0_16 AG_8
+;   w28..w49            11 note words, read only with bit 0: C_MEG AG8 AGFM K8 MOFF (M_AMP at the
+;                       gate's end) GL (gate samples, $7fffff: held) M_AMP INC_T M48H M48L AMP2
+;   w50..w53            a table chunk: its Y address and length, then w54.. its words. The
+;                       ColdFire cycles through the voice's Y image (tanh, the coefficient table,
+;                       the state block); the DSP takes the chunks in order until the image is
+;                       complete, and renders silence until then.
 ; Any other record returns into the stock source untouched (b, x0, r4 and the CCR changed; the
 ; stock source loads them before it reads).
 ; One voice per core (the ColdFire admits one OT-303 per four tracks): the first signed track
-; claims it (OWN) and refreshes the claim every frame (LIVE = 2); the core's first track ages it
-; each frame, so a track that stops being an OT-303 frees the voice 2 frames later. Another signed
+; claims it (OWN) and refreshes the claim every frame (LIVE = 2); its own track's first stock
+; record frees it at once, and the core's first track ages it each frame (a claim not refreshed
+; lapses 2 frames later). Another signed
 ; track on the same core renders silence. Its frame: 16 samples, L and R, into X:0, and the stock
 ; code continues after the source (A P:$426, B P:$221): AMP, FX1, FX2 run on the voice.
-; Notes (the built-in Hot bar, until the sequencer drives the voice -- item 2): each trig starts
-; the next of the bar's 16 steps at the trig's sample; the gate closes 2,544 samples later (a 16th
-; at 130 BPM) or at the next trig. Silence while the tables build (the first 15 frames).
+; Notes: a note's words take effect at its sample; its gate closes GL samples later (M_AMP to the
+; release, K8 to 0) unless the next note comes first. A slide into an open gate only moves the
+; pitch target and the accent words (Open303 slideToNote); anything else retriggers (triggerNote).
 ;
 ; Rules (both broke the unit): no REP; no dense working data in a DMA's 8K partition: run 1 (the
 ; engine's X working set and these words) runs at X:$7b24 on both cores, in stock's unreferenced
 ; $7a92-$7fff; hq_reloc copies it there from SPRING's records (XD above) on the first frame.
 ; ===========================================================================
-R2      equ     $8afc           ;@LAYOUT X run 2 (packed b0, kp), at run time
 XD      equ     $0              ;@LAYOUT the loader's copy is XD words above
 NXD     equ     $0              ;@LAYOUT -XD (24 bits)
 CONT    equ     $426            ;@LAYOUT the stock code after the source (A $426, B $221)
 RAWP    equ     1               ;@LAYOUT 1: this payload's source has the raw path (A: bit 18)
 
-PB      equ     XB-$1c          ; X, 28 words before the engine's block (reached by pointer)
-SAWW    equ     PB+0            ; W1 W2 W3 SQ for the saw
-SQRW    equ     PB+4            ; W1 W2 W3 SQ for the square
-L0C     equ     PB+8            ; L0_16 (Y host word, constant)
-AG8C    equ     PB+9            ; AG_8 (Y host word, constant)
-HB1I    equ     PB+11           ; 16: the 15-tap's odd taps (YW's HB1C), copied at stage 0
-
+PB      equ     XB-$1c          ; X, 28 words before the engine's block (run 1's start)
 ; r5 = XM through the wrapper: one-word moves x:(r5+d), -64 <= d <= 63, reach the engine's host
 ; words below it and the wrapper's words above it. (Address registers take two words either way.)
 XM      equ     XB+$40
 MSAV    equ     XB+$35          ; m0..m7 on entry (the gap after XW)
 WB      equ     XB+$70          ; X, 76 words after the engine's block
-STG     equ     WB+0            ; 0..1 building the tables, 2 running
-AMPT    equ     WB+14           ; the trigger's AMP2
 RBUF    equ     WB+16           ; 16: the engine's output
-PAT     equ     WB+32           ; 16 steps: bit 23 rest, bit 22 accent, bits 0-15 the pitch increment
-VARS    equ     WB+48           ; 4 x 5 host words C_MEG M_AMP AG8 AGFM K8:
-VAR_AOF equ     VARS+5          ;   accent on (VARS), accent gate off,
-VAR_NON equ     VARS+10         ;   normal on,
-VAR_NOF equ     VARS+15         ;   normal gate off
-TRIG    equ     WB+68           ; M48 hi, lo for an accent, then for a normal note
-TRIGN   equ     TRIG+2
+CDST    equ     WB+32           ; 10: the continuous X words' addresses (CS .. W3, in record order)
+NDST    equ     WB+42           ; 6: the note words' X addresses (C_MEG AG8 AGFM K8, WB's MOFF, EVC)
 OLD1    equ     PB+XD           ; the loader's copy of PB..PB+215 (X run 1)
 SIGA    equ     XB-$3c          ; X:$7b04, below run 1 in the unreferenced region: the copy's mark
 OWN     equ     XB-$3b          ; the core's voice: its track's x:$418 + 1 ($1 $21 $41 $61), 0 = none
 LIVE    equ     XB-$3a          ; frames the claim lasts without a refresh
-TRF     equ     XB-$39          ; this frame's trig flag (the record's w3)
+TRF     equ     XB-$39          ; this frame's event bits (the record's w3)
+; Y staging, in the gap between the coefficient table and the state block (the image's zeros:
+; written by the chunks only before the voice runs)
+CB      equ     YS-$3c          ; 12: the continuous words
+NB      equ     CB+12           ; 11: the note words
+CHH     equ     NB+11           ; 2: the chunk's address and length
+YBEG    equ     TH              ; the Y image: TH .. the state block's end
+YEND    equ     YS+172
+W_CONT  equ     4               ; record words
+W_CHK   equ     50
 ; displacements from XM (the operand's sign is written out: the assembler wants small numbers)
-D_STG   equ     $30             ; +: WB+0..15
-D_CNK   equ     $31             ; chunk within the stage
-D_EVC   equ     $32             ; samples to the next event (0: an event is due)
-D_HALF  equ     $33             ; 0: the next event starts a step, 1: it ends the gate
-D_STEP  equ     $34
-D_CURW  equ     $35             ; this step's pattern word
+D_STG   equ     $30             ; +: WB+0..15. 0 the tables arriving, 2 running
+D_EXP   equ     $31             ; the next chunk's Y address
+D_EVC   equ     $32             ; samples to the gate's end ($7fffff: none)
+D_HALF  equ     $33             ; 1: the gate is open
+D_MOFF  equ     $34             ; M_AMP for the gate's end
 D_REM   equ     $3a             ; samples still to render in this call
 D_OUTA  equ     $3b             ; the audio block pointer (interleaved L/R)
 D_KCNT  equ     $3d             ; this render's sample count
-D_AMPT  equ     $3e             ; the trigger's AMP2
-D_TRG   equ     $3f             ; samples to this frame's trig ($7fffff: none)
-D_W1A   equ     $24             ; +: OCB's W1A W2 W3
-D_W2    equ     $25
-D_W3    equ     $26
-N_CMEG  equ     $3f             ; -: XW's host words
-N_AGFM  equ     $3e
-N_AG8   equ     $3b
-N_MAMP  equ     $34
+D_TRG   equ     $3f             ; samples to this frame's note ($7fffff: none)
+N_MAMP  equ     $34             ; -: XW's host words
 N_K8    equ     $33
-N_SQ    equ     $2d
-N_W1    equ     $2b
 ; Y host words from YS (r4)
 E_INCT  equ     0
 E_S48H  equ     1
@@ -89,9 +86,6 @@ E_M48L  equ     4
 E_L016  equ     6
 E_AG_8  equ     7
 E_AMP2  equ     8
-
-BX      equ     R2              ; b0[0..214], b0[214] again
-KX      equ     R2+216          ; kp[0..214], kp[214] again
 
 ; ---- the source seam (jsr from A P:$39c / B P:$1a2)
 sg_entry:
@@ -112,14 +106,23 @@ sg_sig:
         move    #>$003303,x0
         move    x:(r4),b
         and     #>$ffff,b
-        cmp     x0,b
+        eor     x0,b                            ; Z on B1 alone (the transport's top bits are not ours)
         bne     sg_stock
         move    #>$000909,x0
         move    x:(r4+$2),b
         and     #>$ffff,b
-        cmp     x0,b
+        eor     x0,b
         beq     sg_ours
 sg_stock:
+        move    x:>$418,b                       ; the voice's own track now stock (a Part change,
+        add     #<$1,b                          ;  the machine changed): free the voice at once, so
+        move    x:>OWN,x0                       ;  a later track can claim it this same frame
+        eor     x0,b
+        bne     sg_sret
+        clr     b
+        move    b1,x:>OWN
+        move    b1,x:>LIVE
+sg_sret:
         rts
 sg_ours:
         move    x:(r4+$3),b                     ; the trig flag
@@ -175,24 +178,31 @@ sg_voice:
         move    x0,x:(r5+D_REM)
         move    #0,x0
         move    x0,x:(r5+D_OUTA)
-        move    #>$7fffff,a                     ; no trig this frame
+; the record's words: the continuous ones, then the note's (they follow) when a note starts here
+        move    x:>$209,r4
+        move    #>W_CONT,n4
+        move    #>CB,r1
+        move    (r4)+n4
+        move    #>12,x1
+        bsr     hq_unp
+        move    #>$7fffff,a                     ; no note this frame
         move    x:>TRF,b
-        tst     b
-        beq     sg_notrig
-        move    x:>$20c,a                       ; the trig's sample in this frame
+        btst    #0,b1
+        bcc     sg_notrig
+        move    #>11,x1                         ; r1 = NB
+        bsr     hq_unp
+        move    x:>$20c,a                       ; the note's sample in this frame
 sg_notrig:
         move    a,x:(r5+D_TRG)
-; the wave words: the saw
-        move    #>SAWW,r1
-        move    x:(r1)+,x0
-        move    x0,x:(r5-N_W1)
-        move    x0,x:(r5+D_W1A)
-        move    x:(r1)+,x0
-        move    x0,x:(r5+D_W2)
-        move    x:(r1)+,x0
-        move    x0,x:(r5+D_W3)
-        move    x:(r1)+,x0
-        move    x0,x:(r5-N_SQ)
+        move    #>CB,r1
+        move    #>CDST,r2
+        move    #>10,x1
+        bsr     hq_copy
+        move    #>YS,r4
+        move    y:(r1)+,x0
+        move    x0,y:(r4+E_L016)
+        move    y:(r1)+,x0
+        move    x0,y:(r4+E_AG_8)
 ; render up to each event (the gate's end, the trig), then the event
 hq_loop:
         move    x:(r5+D_EVC),a
@@ -279,159 +289,101 @@ hq_mrest:
         move    x:>MSAV,m0
         rts
 
-; ---- the tables, one chunk per call (a = STG)
-hq_init:
-        tst     a
-        bne     hq_st1
-; stage 0: clear the Y state block (YW, PP, the 43-tap's branches) and the tanh table (the
-; square's, not built: it renders silence), then YW's constants
-        clr     a
-        move    #>YS,r0
-        do      #172,hq_z1
-        move    a,y:(r0)+
-        nop
-hq_z1:
-        move    #>TH,r0
-        do      #1026,hq_z2
-        move    a,y:(r0)+
-        nop
-hq_z2:
-        move    #>HB1I,r1
-        move    #>HB1C,r0
-        do      #16,hq_s0cp
-        move    x:(r1)+,x0
-        move    x0,y:(r0)+
-hq_s0cp:
-        move    #>YS,r4
-        move    #>L0C,r1
-        move    x:(r1)+,x0
-        move    x0,y:(r4+E_L016)
-        move    x:(r1)+,x0
-        move    x0,y:(r4+E_AG_8)
-        move    #>1,x1                          ; one chunk
-        bra     hq_next
-hq_st1:
-; stage 1: LT, 16 entries a call: b0[i], b0[i+1] - b0[i], kp[i], kp[i+1] - kp[i]
-        move    x:(r5+D_CNK),a
-        asl     #4,a,a                          ; i0
-        move    a1,n1
-        move    a1,n2
-        move    #>BX,r1
-        move    #>KX,r2
-        move    (r1)+n1
-        move    (r2)+n2
-        asl     #2,a,b                          ; 4 i0
-        move    b1,n4
-        move    #>LT,r4
-        move    (r4)+n4
-        move    #>215,b
-        sub     a,b
-        move    #>16,x0
-        cmp     x0,b
-        tgt     x0,b
-        do      b1,hq_s1lp
-        move    x:(r1)+,a
-        move    x:(r1),b
-        sub     a,b             a,y:(r4)+
-        move    b,y:(r4)+
-        move    x:(r2)+,a
-        move    x:(r2),b
-        sub     a,b             a,y:(r4)+
-        move    b,y:(r4)+
-hq_s1lp:
-        move    #>14,x1                         ; 14 chunks: 13 x 16 + 7
-        bra     hq_next
-; next chunk; at the stage's last, the next stage
-hq_next:
-        move    #>XM,r5
-        move    x:(r5+D_CNK),a
-        move    #>1,x0
-        add     x0,a
-        cmp     x1,a
-        blt     hq_keep
-        clr     a
-        move    x:(r5+D_STG),b
-        add     x0,b
-        move    b1,x:(r5+D_STG)
-hq_keep:
-        move    a1,x:(r5+D_CNK)
+; ---- x1 record word pairs at r4 -> 24-bit words at y:(r1)+ (the high word's low 16 bits are
+; bits 23-8, the low word's low 8 bits are bits 7-0). Uses a b x0; r4, r1 advance.
+hq_unp:
+        do      x1,hq_upend
+        move    x:(r4)+,a
+        asl     #8,a,a
+        move    x:(r4)+,b
+        and     #>$ff,b
+        move    b1,x0
+        or      x0,a
+        move    a1,y:(r1)+
+hq_upend:
+        rts
+; ---- x1 Y words at r1 -> the X addresses listed at r2. Uses r0 x0; r1, r2 advance.
+hq_copy:
+        do      x1,hq_cyend
+        move    x:(r2)+,r0
+        move    y:(r1)+,x0
+        move    x0,x:(r0)
+hq_cyend:
         rts
 
-; ---- a trig: the bar's next step starts (pitch, host words, trigger); a gate still open closes
-; first. r5 = XM.
+; ---- the tables: the record's chunk, when it is the next one (D_EXP); the last one starts the
+; voice (STG 2). r5 = XM.
+hq_init:
+        move    x:>$209,r4
+        move    #>W_CHK,n4
+        move    #>CHH,r1
+        move    (r4)+n4
+        move    #>2,x1
+        bsr     hq_unp                          ; r4 -> the chunk's words
+        move    #>CHH,r1
+        move    x:(r5+D_EXP),x0
+        move    y:(r1)+,a
+        cmp     x0,a
+        bne     hq_evret                        ; not the next one
+        move    y:(r1),x1
+        move    a1,r1
+        add     x1,a
+        move    a1,x:(r5+D_EXP)
+        bsr     hq_unp
+        move    x:(r5+D_EXP),a
+        move    #>YEND,x0
+        cmp     x0,a
+        blt     hq_evret
+        move    #>2,x0
+        move    x0,x:(r5+D_STG)
+        rts
+
+; ---- a note at its sample: the words both kinds take, then (unless it slides into an open gate)
+; the retrigger: the pitch slew, the main envelope and the amp envelope restart. r5 = XM.
 hq_start:
-        move    x:(r5+D_HALF),a
-        tst     a
-        beq     hq_st_open
-        bsr     hq_gateoff
-hq_st_open:
         move    #>$7fffff,x0
         move    x0,x:(r5+D_TRG)
-        move    #>2544,x0
-        move    x0,x:(r5+D_EVC)
+        move    #>NB,r1
+        move    #>NDST,r2
+        move    #>6,x1
+        bsr     hq_copy                         ; C_MEG AG8 AGFM K8, MOFF, GL -> EVC
         move    #>YS,r4
+        move    y:(r1)+,x1                      ; M_AMP (the gate open)
+        move    y:(r1)+,x0                      ; INC_T
+        move    x0,y:(r4+E_INCT)
+        move    x:>TRF,a
+        btst    #1,a1
+        bcc     hq_trig
+        move    x:(r5+D_HALF),a
+        tst     a
+        bne     hq_evret                        ; a slide into an open gate
+hq_trig:
+        move    x1,x:(r5-N_MAMP)
+        move    x0,y:(r4+E_S48H)
+        clr     a
+        move    a,y:(r4+E_S48L)
+        move    y:(r1)+,x0
+        move    x0,y:(r4+E_M48H)
+        move    y:(r1)+,x0
+        move    x0,y:(r4+E_M48L)
+        move    y:(r1)+,x0
+        move    x0,y:(r4+E_AMP2)
         move    #>1,x0
         move    x0,x:(r5+D_HALF)
-        move    #>PAT,r1
-        move    x:(r5+D_STEP),n1
-        move    x:(r1+n1),a
-        move    a,x:(r5+D_CURW)
-        btst    #23,a1
-        bcs     hq_evret
-        move    #>VARS,r2
-        move    #>TRIG,r1
-        btst    #22,a1
-        bcs     hq_accon
-        move    #>VAR_NON,r2
-        move    #>TRIGN,r1
-hq_accon:
-        bsr     hq_vars
-        and     #>$00ffff,a
-        move    a1,y:(r4+E_INCT)
-        move    a1,y:(r4+E_S48H)
-        clr     b
-        move    b,y:(r4+E_S48L)
-        move    x:(r1)+,x0
-        move    x0,y:(r4+E_M48H)
-        move    x:(r1)+,x0
-        move    x0,y:(r4+E_M48L)
-        move    x:(r5+D_AMPT),x0
-        move    x0,y:(r4+E_AMP2)
 hq_evret:
         rts
-; ---- the gate's end: the step's host words go to their gate-off values, the bar moves on
+; ---- the gate's end: the amp envelope releases (MOFF), the declicker's MEG feed stops (K8 0)
 hq_gateoff:
         move    #>$7fffff,x0
         move    x0,x:(r5+D_EVC)
         move    x:(r5+D_HALF),a
         tst     a
         beq     hq_evret
-        clr     b
-        move    b,x:(r5+D_HALF)
-        move    x:(r5+D_STEP),b
-        move    #>1,x0
-        add     x0,b
-        move    #>15,x0
-        and     x0,b
-        move    b1,x:(r5+D_STEP)
-        move    x:(r5+D_CURW),a
-        btst    #23,a1
-        bcs     hq_evret
-        move    #>VAR_AOF,r2
-        btst    #22,a1
-        bcs     hq_vars
-        move    #>VAR_NOF,r2
-hq_vars:
-        move    x:(r2)+,x0
-        move    x0,x:(r5-N_CMEG)
-        move    x:(r2)+,x0
+        clr     a
+        move    a,x:(r5+D_HALF)
+        move    a,x:(r5-N_K8)
+        move    x:(r5+D_MOFF),x0
         move    x0,x:(r5-N_MAMP)
-        move    x:(r2)+,x0
-        move    x0,x:(r5-N_AG8)
-        move    x:(r2)+,x0
-        move    x0,x:(r5-N_AGFM)
-        move    x:(r2)+,x0
-        move    x0,x:(r5-N_K8)
         rts
 
 

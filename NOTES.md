@@ -36132,4 +36132,23 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   MT4 = MT3 from DRAM, `out/OCTATRACK_OS1.40C_OT303_MT4.syx` sha256
   bd23955a0affd2854779e78fce15d2b1b54e379adb1bf46a9f3533669eb7e493 (`140C_303T4`); verify_ot303.py
   ALL GOOD incl. the DRAM audit (loader once, reserve intact, only the runtime writes there).
+- **S124 cont: MT4 FLASHED, nominal on HW (DRAM boot path confirmed). MT4 report: pattern + Part
+  changes retrigger the riff** (two 1/32s on the last step of the old pattern, one on the new pattern's
+  first step, no trigs placed; sometimes ~1 s of repeated retriggers; mild pops at Part changes; the
+  303 sometimes starts late after a Part change). Cause: the renderer's trig flag `0x46104d0c[t]` & 16
+  is the frame builder's copy (0x4000c62e) of the per-track trigger byte `0x46104d15[t]`, which the
+  trig apply, track starts and Part loads all set: not proof of a sequencer note. The late start:
+  the old owner's claim took up to 2 frames to age out and the new track's first note fell in that
+  silent window. **MT5 BUILT (NOT flashed): item 2.** The step hook (detour 0x4009d1e8, 8 B replayed)
+  queues a note step's gate/slide (look-ahead: trigless = tie, a note before a slide trig held to the
+  end of the next step); the renderer plays a flag only with a queued note (live-played notes do not
+  sound yet; stray flags counted). The record (cf/record.c, 84 longs) carries 12 continuous words, 11
+  note words and a chunk of the voice's Y image: the DSP no longer builds tables (host.asm 990 -> 941
+  words); the square works. The owner's own stock record frees the voice at once. Bench host_check:
+  bit-exact (974,960 samples, 130 notes, slides into open/closed gates, square, junk in the transport's
+  top bits — found the signature compare looked at A2: now `eor`); saw 399 cyc/sample (worst frame
+  435), square 533 (worst 598). chain_check: ours vs TwinVoice null -84.5 dB. verify_ot303 ALL GOOD
+  (notes' gates/slides/PTCH locks as the line implies; the Y image arrives intact on both cores).
+  `out/OCTATRACK_OS1.40C_OT303_MT5.syx` sha256 1d87b686c514084916199e01424ff836ce217e70686896ff337809fec03e9e1f
+  (`140C_303T5`).
 

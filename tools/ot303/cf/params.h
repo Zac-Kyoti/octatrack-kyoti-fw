@@ -16,6 +16,9 @@
 #ifndef OT303_PARAMS_H
 #define OT303_PARAMS_H
 #include <stdint.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 enum { OT_PTCH, OT_CUT, OT_RES, OT_ENV, OT_DEC, OT_ACC, OT_WAVE, OT_TUNE, OT_SLID, OT_GATE, OT_VOL };
 
@@ -38,4 +41,7 @@ unsigned ot_note_number(unsigned ptch);
 /* the gate of one step of `steplen` samples: (GATE + 1) / 128 of it */
 uint32_t ot_gate_samples(unsigned gate, uint32_t steplen);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

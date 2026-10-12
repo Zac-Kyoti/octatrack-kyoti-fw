@@ -2,24 +2,31 @@
 // SPDX-FileCopyrightText: 2026 Zac-Kyoti
 //
 // OT-303 machine host (tools/ot303/host.asm) on dsp56kEmu, entered the way the firmware enters the
-// source seam, against the integer twin.
+// source seam, against the integer twin; the records come from the ColdFire's own code
+// (tools/ot303/cf/record.c + params.c, compiled natively).
 //   host_probe DIR FRAMES
 // DIR holds p1.bin (ORG in p1.org), x.txt ("addr word"), syms.txt ("name hex X|Y"), cont.txt (the
 // stock code after the source), rawp.txt.
 // Each frame runs one core's four tracks in order, each a seam call (jsr from a stub, as the stock
 // `move a,x:>$20e` now is) with its record at x:$209 and its frame offset at x:$20c:
 //   $00, $60  stock records (never the signature)
-//   $20 (A)   an OT-303 record (w0 $3303, w2 $0909, w3 = trig) until 3/4 of the run, then stock
-//   $40 (B)   stock, then an OT-303 record from half the run: silent while A holds the voice, then
-//             it takes the voice over (the same engine, continuing) once A's claim has aged out
-// Trigs reach the OT-303 tracks at varying offsets, mostly a bar's 16th apart (318 frames), every
-// fourth one sooner than the gate (100 frames: the open gate closes first).
+//   $20 (A)   an OT-303 track until 3/4 of the run, then stock
+//   $40 (B)   stock, then an OT-303 track from half the run: silent while A holds the voice, then
+//             it takes the voice over (the same engine, continuing) in the frame A's record turns stock
+// Each OT-303 track plays its own 16-step line (notes, ties, rests, slides into open and into
+// closed gates, accents by an ACC lock) at a step of 4,999 samples, so the notes land on every
+// frame offset; its knobs move all the time (a CUT sweep, RES/ENV/DEC drifts, WAVE saw ->
+// square -> half, SLID, GATE, TUNE). Gates as the ColdFire makes them: ties extend a note by
+// whole steps, a note before a slide is held. The transport's top 8 bits carry junk. The tables
+// arrive by the record's chunks, A's stream starting mid-cycle.
 // A model of the claim (OWN, LIVE) predicts each call. Checks:
-//   stock record: returns (rts) with only b, x0, r4 and the CCR changed; X:0 and the ring base kept
+//   stock record: returns (rts) with only b, x0, r4 and the CCR changed; X:0 and the ring base kept;
+//     the voice's own track's stock record frees the voice
 //   OT-303 record: never returns (on at CONT, the return dropped, SP as before the jsr); ring base
 //     + $80; m0-m7 as found; x:$20e = a; X:0..31 = the twin's next 16 samples L = R when it holds the
-//     voice and the tables are built, else silence
-// and the built LT table and the cleared tanh table word for word; cycles (host-stepped).
+//     voice and the tables are complete, else silence
+// the Y image word for word against the twin's tables, Y outside it untouched; cycles
+// (host-stepped).
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -37,6 +44,7 @@
 #include "halfband4x.h"
 #include "halfband2x.h"
 #include "twin.h"
+#include "record.h"
 using namespace dsp56k;
 struct AllowAll : IMemoryValidator { bool memValidateAccess(EMemArea, TWord, bool) const override { return true; } };
 static std::vector<uint32_t> load24(const std::string& p) {
@@ -93,15 +101,17 @@ int main(int argc, char** argv) {
         return dsp.getPC().toWord();
     };
     enum Want { STOCK, SILENT, VOICE };
-    uint64_t voiceCyc = 0, voiceWorst = 0, voiceFrames = 0, stockCyc = 0, stockCalls = 0, silentWorst = 0;
+    uint64_t lastVoiceCyc = 0, stockCyc = 0, stockCalls = 0, silentWorst = 0;
     // one seam call; X:0..31 after it are returned through `out` for a VOICE call
     auto seam = [&](uint32_t t, bool sig, int trig, int offset, Want want) {
         mem.set(MemArea_X, 0x418, t);
         mem.set(MemArea_X, 0x209, REC);
         mem.set(MemArea_X, 0x20c, offset);
-        for (int i = 0; i < 24; i++) mem.set(MemArea_X, REC + i, (0x4100 + 0x11 * i + t) & 0xffff);   // a stock-looking record
-        if (sig) { mem.set(MemArea_X, REC, 0x3303); mem.set(MemArea_X, REC + 2, 0x0909); mem.set(MemArea_X, REC + 3, trig); }
-        else mem.set(MemArea_X, REC, 0x0000);                       // stock w0: the high half of a source count
+        if (!sig) {                                                 // a stock-looking record
+            for (int i = 0; i < 24; i++) mem.set(MemArea_X, REC + i, (0x4100 + 0x11 * i + t) & 0xffff);
+            mem.set(MemArea_X, REC, 0x0000);                        // stock w0: the high half of a source count
+        }
+        (void)trig;
         mem.set(MemArea_X, TRKW + 0x1e, 0x000300);
         const uint32_t rb = 0x1e00 + t * 4;
         mem.set(MemArea_X, 0x20b, rb);
@@ -136,102 +146,181 @@ int main(int argc, char** argv) {
         if (want == SILENT) {
             for (int i = 0; i < 32; i++) if (mem.get(MemArea_X, i) & 0xffffff) fail("not silent");
             silentWorst = std::max(silentWorst, cyc);
-        } else { voiceCyc += cyc; voiceFrames++; voiceWorst = std::max(voiceWorst, cyc); }
+        } else lastVoiceCyc = cyc;
     };
 
     twin::Engine e;
     e.init(HB2_43_16, 22, 16000.0, HB1_15_18, 8);
     e.meg48 = true; e.inc48 = false; e.FBS = 4;
-    for (int i = 0; i <= 512; i++) { twin::T.th[i] = 0; twin::T.dth[i] = 0; }
     const long BIG = 0x7fffff;
-    long evc = 0; int half = 0, step = 0; int32_t curw = 0;
-    auto vars = [&](int v) { uint32_t a = sym("VARS") + 5 * v; e.C_MEG = gx(a); e.M_AMP = gx(a + 1); e.AG8 = gx(a + 2); e.AGF = gx(a + 3) != 0; e.K8 = gx(a + 4); };
-    auto gateoff = [&]() {
-        evc = BIG;
-        if (!half) return;
-        half = 0; step = (step + 1) & 15;
-        if (curw & 0x800000) return;
-        vars((curw & 0x400000) ? 1 : 3);
+    // the DSP host's note state, modelled
+    long evc = BIG; int half = 0; twin::W moff = 0;
+    const uint32_t YB = sym("YBEG"), YE = sym("YEND");
+    if (YE - YB != ot_ylen || YB != ot_ybeg) { std::printf("the Y image's bounds differ from ytab.c\n"); return 1; }
+
+    // ---- the two lines: kind N note, T tie, R rest; slide on a note slides into it
+    struct St { char kind; int ptch; bool slide, acc; };
+    const St LA[16] = {{'N', 64, false, true}, {'T', 0, false, false}, {'N', 76, true, false}, {'N', 64, false, false},
+                       {'R', 0, false, false}, {'N', 67, true, false}, {'N', 71, false, true}, {'T', 0, false, false},
+                       {'T', 0, false, false}, {'N', 74, true, true}, {'N', 62, false, false}, {'N', 64, true, false},
+                       {'N', 76, false, true}, {'R', 0, false, false}, {'N', 64, false, false}, {'N', 69, true, false}};
+    const St LB[16] = {{'N', 60, false, false}, {'N', 72, true, true}, {'N', 60, true, false}, {'T', 0, false, false},
+                       {'N', 63, false, true}, {'R', 0, false, false}, {'R', 0, false, false}, {'N', 58, true, false},
+                       {'N', 70, false, false}, {'T', 0, false, false}, {'N', 60, true, true}, {'N', 65, true, false},
+                       {'N', 53, false, false}, {'N', 60, false, true}, {'T', 0, false, false}, {'R', 0, false, false}};
+    const long STEPS = 4999;
+    auto knobs = [&](const St* L, long f, int step, uint8_t k[12]) {
+        long ph = f % 6000; int tri = int(ph < 3000 ? ph * 127 / 3000 : (6000 - ph) * 127 / 3000);
+        const St& s = L[step & 15];
+        k[OT_PTCH] = uint8_t(s.kind == 'N' ? s.ptch : 64);
+        k[OT_CUT] = uint8_t(tri);
+        k[OT_RES] = uint8_t(40 + (f / 700) % 88);
+        k[OT_ENV] = uint8_t((f / 450) % 128);
+        k[OT_DEC] = uint8_t((f / 1300 * 37) % 128);
+        k[OT_ACC] = uint8_t(s.acc ? 90 + (f / 2000) % 38 : 0);
+        k[OT_WAVE] = uint8_t(f < frames / 3 ? 0 : f < frames * 2 / 3 ? 127 : 64);
+        k[OT_TUNE] = uint8_t(f < frames / 2 ? 64 : 70);
+        k[OT_SLID] = uint8_t((f / 2500) & 1 ? 100 : 38);
+        k[OT_GATE] = uint8_t(((f / 1800) * 41 + 20) % 128);
+        k[OT_VOL] = uint8_t(119 - (f / 5000) % 3 * 20);
+        k[11] = 0;
     };
-    auto start = [&]() {
-        if (half) gateoff();
-        evc = 2544; half = 1; curw = gx(sym("PAT") + step);
-        if (curw & 0x800000) return;
-        bool acc = (curw & 0x400000) != 0;
-        vars(acc ? 0 : 2);
-        int32_t inc = curw & 0xffff;
-        e.INC_T = inc; e.S48 = twin::A(inc) << 24;
-        uint32_t tr = sym("TRIG") + (acc ? 0 : 2);
-        e.M48 = (twin::A(gx(tr)) << 24) | (mem.get(MemArea_X, tr + 1) & 0xffffff);
-        e.AMP2 = gx(sym("AMPT"));
+    // the note a step starts (the ColdFire's look-ahead), or 0
+    auto stepEvent = [&](const St* L, int s, unsigned gate, uint32_t& gl) -> unsigned {
+        if (L[s].kind != 'N') return 0;
+        int count = 1, n = s;
+        for (int i = 1; i < 16; i++) { n = (n + 1) & 15; if (L[n].kind != 'T') break; count++; }
+        bool hold = L[n].kind == 'N' && L[n].slide && n != s;
+        uint64_t g = hold ? uint64_t(count + 1) * STEPS : uint64_t(count - 1) * STEPS + ot_gate_samples(gate, STEPS);
+        gl = uint32_t(std::min<uint64_t>(std::max<uint64_t>(g, 1), 0x7ffffe));
+        return OT_EV_NOTE | (L[s].slide ? OT_EV_SLIDE : 0);
+    };
+    ot_voice va{}, vb{};
+    va.chunk = 11; vb.chunk = 23;
+    uint32_t rec[OT_REC_LONGS];
+    long junk = 1;
+    auto putRecord = [&]() {
+        for (unsigned i = 0; i < OT_REC_LONGS; i++) {
+            junk = junk * 1103515245 + 12345;
+            uint32_t j1 = (junk >> 8) & 0xff, j2 = (junk >> 16) & 0xff;
+            mem.set(MemArea_X, REC + 2 * i, (j1 << 16) | (rec[i] >> 16));
+            mem.set(MemArea_X, REC + 2 * i + 1, (j2 << 16) | (rec[i] & 0xffff));
+        }
     };
     bool twinSet = false;
     auto setupTwin = [&]() {
         auto X = [&](const char* n) { return gx(sym(n)); };
-        e.CS = X("CS"); e.C2 = X("C2"); e.ES8 = X("ES8"); e.RS = X("RS"); e.BG = X("BG"); e.SC = X("SC");
-        e.L0_16 = gx(sym("L0C")); e.AG_8 = gx(sym("AG8C"));
-        uint32_t ww = sym("SAWW");
-        e.W1 = gx(ww); e.W2 = gx(ww + 1); e.W3 = gx(ww + 2); e.SQ = gx(ww + 3) != 0;
-        vars(3); e.INC_T = 0;
+        e.C2 = X("C2"); e.C_MEG = X("C_MEG"); e.M_AMP = X("M_AMP"); e.AG8 = X("AG8"); e.AGF = X("AGFM") != 0; e.K8 = X("K8");
+        e.INC_T = 0;
+        moff = gx(sym("XM") + sym("D_MOFF"));
         twinSet = true;
     };
-    // the trig frames: mostly 318 apart, every fourth 100 after the one before
-    std::set<long> trigs;
-    for (long f = 3, i = 0; f < frames; f += (++i % 4) ? 318 : 100) trigs.insert(f);
     std::vector<float> wav;
-    long sample = 0, aFrames = 0, bFrames = 0, takeover = -1, trigsHeard = 0;
+    long sample = 0, aFrames = 0, bFrames = 0, takeover = -1, notesHeard = 0, slidesHeard = 0, retrigSlides = 0;
+    uint64_t sawCyc = 0, sawN = 0, sqCyc = 0, sqN = 0, evWorst = 0, evSawWorst = 0, offSawWorst = 0, sawWorst = 0, sqWorst = 0;
     uint32_t own = 0; int live = 0; bool tablesChecked = false, relocated = false; long initFrames = 0;
     for (long f = 0; f < frames; f++) {
         const bool sigA = f < frames * 3 / 4, sigB = f >= frames / 2;
-        const int trig = trigs.count(f) ? 1 : 0;
-        const int offset = int((f * 5) % 16);
+        // this frame's notes: a step starts at sample STEPS * s (+ a little, B)
+        unsigned evA = 0, evB = 0; uint32_t glA = 0, glB = 0; int offA = int((f * 5) % 16), offB = int((f * 3) % 16);
+        uint8_t kA[12], kB[12];
+        for (int w = 0; w < 2; w++) {
+            const St* L = w ? LB : LA; long shift = w ? 1234 : 0;
+            long s0 = f * 16 - shift, step = s0 >= 0 ? (s0 + STEPS - 1) / STEPS : -1;
+            long at = step * STEPS + shift;
+            uint8_t* k = w ? kB : kA;
+            int cur = int(std::max<long>(0, (f * 16 - shift) / STEPS));
+            knobs(L, f, cur, k);
+            if (step >= 0 && at >= f * 16 && at < f * 16 + 16) {
+                knobs(L, f, int(step), k);
+                uint32_t gl = 0;
+                unsigned ev = stepEvent(L, int(step & 15), k[OT_GATE], gl);
+                (w ? evB : evA) = ev; (w ? glB : glA) = gl; (w ? offB : offA) = int(at - f * 16);
+            }
+        }
         for (uint32_t t : {0x00u, 0x20u, 0x40u, 0x60u}) {
             const bool sig = (t == 0x20 && sigA) || (t == 0x40 && sigB);
             if (t == 0 && live > 0 && --live == 0) own = 0;
+            if (!sig && own == t + 1) { own = 0; live = 0; }                // the owner's own stock record frees it
             Want want = STOCK;
             bool voice = false;
             if (sig) {
                 if (!relocated) { own = 0; live = 0; relocated = true; }    // the first frame copies run 1 and frees the voice
                 if (own == 0 || own == t + 1) {
                     own = t + 1; live = 2;
-                    voice = gx(sym("STG")) == 2;
+                    voice = gx(sym("XM") + sym("D_STG")) == 2;
                     if (!voice) initFrames++;
                 }
                 want = voice ? VOICE : SILENT;
             }
             if (voice && !tablesChecked) {
                 int bad = 0;
+                for (uint32_t i = 0; i < ot_ylen; i++) {
+                    uint32_t a = YB + i;
+                    if (a >= sym("CB") && a < sym("CHH") + 2) { bad += ot_ytab[i] != 0; continue; }   // the host's Y scratch (zeros in the image)
+                    bad += (mem.get(MemArea_Y, a) & 0xffffff) != ot_ytab[i];
+                }
+                for (int i = 0; i <= 512; i++) { bad += gyy(sym("TH") + 2 * i) != twin::T.th[i]; bad += gyy(sym("TH") + 2 * i + 1) != twin::T.dth[i]; }
                 for (int i = 0; i <= twin::LT_N; i++) {
                     uint32_t a = sym("LT") + 4 * i;
                     bad += gyy(a) != twin::T.b0[i]; bad += gyy(a + 1) != twin::T.db0[i]; bad += gyy(a + 2) != twin::T.kp[i]; bad += gyy(a + 3) != twin::T.dkp[i];
                 }
-                for (int i = 0; i < 1026; i++) bad += gyy(sym("TH") + i) != 0;
+                for (int i = 0; i < 16; i++) bad += gyy(sym("HB1C") + i) != e.hb4.c[7 - (i & 7)];
+                for (uint32_t a = 0x795; a < 0x1000; a++)
+                    if ((a < YB || a >= YE) && (mem.get(MemArea_Y, a) & 0xffffff) != ((a * 2654435761u) & 0xffffff)) bad++;
                 if (bad) { std::printf("tables: %d words differ\n", bad); return 1; }
-                std::printf("tables built in %ld silent frames (worst %.1f cycles/sample); LT matches the twin, tanh cleared\n",
-                            initFrames, silentWorst / 16.0);
+                std::printf("tables: the Y image arrived in %ld silent frames (A's stream from chunk 11): equal to the twin's "
+                            "tanh, coefficient table and taps; Y outside it untouched\n", initFrames);
                 tablesChecked = true;
                 setupTwin();
             }
-            seam(t, sig, trig, sig ? offset : int((f * 3) % 16), want);
+            const bool isA = t == 0x20, isB = t == 0x40;
+            unsigned ev = isA ? evA : isB ? evB : 0; uint32_t gl = isA ? glA : glB; int off = isA ? offA : isB ? offB : int((f * 3) % 16);
+            const uint8_t* k = isA ? kA : kB;
+            if (sig) { ot_record(rec, isA ? &va : &vb, k, ev, gl); putRecord(); }
+            seam(t, sig, ev & 1, off, want);
             if (!voice) continue;
-            (t == 0x20 ? aFrames : bFrames)++;
-            if (t == 0x40 && takeover < 0) takeover = f;
-            long trg = trig ? offset : BIG;
-            trigsHeard += trig;
+            (isA ? aFrames : bFrames)++;
+            if (isB && takeover < 0) takeover = f;
+            ot_cont c; ot_params_cont(k, &c);
+            e.CS = c.cs; e.ES8 = c.es8; e.RS = c.rs; e.BG = c.bg; e.SC = c.sc; e.SQ = c.sq != 0;
+            e.W1 = c.w1; e.W2 = c.w2; e.W3 = c.w3; e.L0_16 = c.l0_16; e.AG_8 = c.ag_8;
+            ot_note n{}; if (ev & 1) ot_params_note(k, &n);
+            long trg = (ev & 1) ? off : BIG;
+            bool gateEnded = false;
             for (int j = 0; j < 16; j++) {
-                if (evc == 0) gateoff();
-                if (trg == 0) { start(); trg = BIG; }
+                if (evc == 0) {
+                    gateEnded = true;
+                    evc = BIG;
+                    if (half) { half = 0; e.K8 = 0; e.M_AMP = moff; }
+                }
+                if (trg == 0) {
+                    trg = BIG; notesHeard++;
+                    e.C_MEG = n.c_meg; e.AG8 = n.ag8; e.AGF = n.agf != 0; e.K8 = n.k8_on; moff = n.m_amp_off; evc = long(gl);
+                    e.INC_T = n.inc_t;
+                    if ((ev & 2) && half) slidesHeard++;
+                    else {
+                        if (ev & 2) retrigSlides++;
+                        e.M_AMP = n.m_amp_on; e.S48 = twin::acc(n.inc_t);
+                        e.M48 = (twin::A(n.m48h) << 24) | (uint32_t(n.m48l) & 0xffffff); e.AMP2 = n.amp2; half = 1;
+                    }
+                }
                 e.tick(); evc--; trg--;
                 int32_t want = e.outW;
                 int32_t l = gx(2 * j), r = gx(2 * j + 1);
                 if (l != want || r != want) {
-                    std::printf("MISMATCH frame %ld track $%02x sample %ld (step %d): dsp L %06x R %06x want %06x\n", f, t, sample, step,
+                    std::printf("MISMATCH frame %ld track $%02x sample %ld: dsp L %06x R %06x want %06x\n", f, t, sample,
                                 l & 0xffffff, r & 0xffffff, want & 0xffffff);
                     return 1;
                 }
                 wav.push_back(float(l) / 8388608.0f);
                 sample++;
             }
+            uint64_t cy = lastVoiceCyc;
+            if (c.sq) { sqCyc += cy; sqN++; } else { sawCyc += cy; sawN++; }
+            if (ev & 1) (c.sq ? evWorst : evSawWorst) = std::max(c.sq ? evWorst : evSawWorst, cy);
+            else if (gateEnded && !c.sq) offSawWorst = std::max(offSawWorst, cy);
+            else if (!gateEnded) (c.sq ? sqWorst : sawWorst) = std::max(c.sq ? sqWorst : sawWorst, cy);
             if ((mem.get(MemArea_X, sym("OWN")) & 0xffffff) != own || gx(sym("LIVE")) != live) {
                 std::printf("frame %ld track $%02x: OWN %06x LIVE %d, the model says %06x %d\n", f, t,
                             mem.get(MemArea_X, sym("OWN")) & 0xffffff, gx(sym("LIVE")), own, live);
@@ -243,9 +332,12 @@ int main(int argc, char** argv) {
     float pk = 0; for (float x : wav) pk = std::max(pk, std::fabs(x));
     std::printf("claims: A ($20) voiced %ld frames; B ($40) silent beside it, then took the voice at frame %ld "
                 "(A stopped at %ld) and voiced %ld; $00/$60 always stock\n", aFrames, takeover, frames * 3 / 4, bFrames);
-    std::printf("BIT-EXACT: %ld samples, %ld trigs heard (peak %.3f = %.1f dBFS); voice %.1f cycles/sample (worst frame %.1f); "
-                "stock records %.1f cycles/call; a silent frame at most %.1f cycles/sample\n",
-                sample, trigsHeard, pk, 20 * std::log10(pk), double(voiceCyc) / (voiceFrames * 16.0), voiceWorst / 16.0,
+    std::printf("BIT-EXACT: %ld samples, %ld notes (%ld slides into an open gate, %ld slides into a closed one retriggered); "
+                "peak %.3f = %.1f dBFS\n", sample, notesHeard, slidesHeard, retrigSlides, pk, 20 * std::log10(pk));
+    std::printf("cycles/sample: saw %.1f (worst plain frame %.1f, note %.1f, gate end %.1f), square %.1f (worst plain %.1f, note %.1f); "
+                "stock records %.1f cycles/call; a silent frame at most %.1f\n",
+                double(sawCyc) / std::max<uint64_t>(sawN * 16, 1), sawWorst / 16.0, evSawWorst / 16.0, offSawWorst / 16.0,
+                double(sqCyc) / std::max<uint64_t>(sqN * 16, 1), sqWorst / 16.0, evWorst / 16.0,
                 double(stockCyc) / std::max<uint64_t>(stockCalls, 1), silentWorst / 16.0);
     std::ofstream o(dir + "/host_out.f32", std::ios::binary);
     o.write(reinterpret_cast<const char*>(wav.data()), std::streamsize(wav.size() * sizeof(float)));

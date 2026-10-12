@@ -11,7 +11,7 @@
         .global ot_machine_name, ot_src_names, ot_main_commit, ot_src_commit, ot_src_commit2
         .global ot_name_a, ot_name_b, ot_setup_row, ot_chooser_row, ot_setup_open, ot_chooser_open
         .global ot_setup_edit6, ot_setup_draw6, ot_resolve_pb, ot_validate, ot_stock_validate
-        .global ot_tick_hook, ot_glyph
+        .global ot_tick_hook, ot_glyph, ot_step_hook
 
         .equ    OT_ROW, 5
         .equ    FLEX, 1
@@ -273,3 +273,17 @@ ot_name:
 ot_reject_name:
         .asciz  "1 OT-303 / 4 TRKS"
         .balign 2
+
+| the sequencer's step handler 0x4009d1e8 (track, bank, pattern, step, ...; about 3 frames before the
+| step): control.c ot_step reads an OT-303 note step's gate and slide first. Replays the 8 displaced
+| bytes (lea -104(sp),sp; movem.l d2-d7/a2-a6,(sp)) and goes on after them. d0/d1/a0/a1 are free at
+| the entry (the handler loads them before it reads them).
+ot_step_hook:
+        move.l  16(%sp),-(%sp)
+        move.l  16(%sp),-(%sp)
+        move.l  16(%sp),-(%sp)
+        move.l  16(%sp),-(%sp)
+        jsr     ot_step
+        lea     (16-104,%sp),%sp
+        movem.l %d2-%d7/%a2-%fp,(%sp)
+        jmp     0x4009d1f0
