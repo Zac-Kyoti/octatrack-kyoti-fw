@@ -38,9 +38,10 @@ author's MKI in an octabam-built image with SIDECHAIN_COMPRESSOR (2026-10-04): a
 keeps ducking in every MUTE MODE.
 """
 
+import dataclasses
 import os
 
-from remix.schema import Detour, Kind, Linked, Module, Poke, TableGrow
+from remix.schema import Apply, Detour, Kind, Linked, Module, Option, Poke, Setting, Store, TableGrow
 
 # This module's own directory, relative to the build's cwd (octabam's repo root):
 # "modules/mute-modes" checked out directly, or
@@ -69,20 +70,37 @@ LABELS, GETTERS, SETTERS = 0x400b2a34, 0x400b2a74, 0x400b2ac0
 COUNT_AT = 0x40068fb2                    # moveq #15,%d1 in the count function
 ANDY_RESTORE_SITES = (0x4001f322, 0x4001f3be, 0x4001fb24)
 
+# Linked at the standalone image's own addresses by tools/build_mute_modes.py.
+LINKED = (
+    Linked("mm_softmute", os.path.join(_HERE, "patch_softmute.s"),
+           include=_sc_key_inc, reference=_softmute_ref),
+    Linked("mm_menu", os.path.join(_HERE, "patch_mutemode.s"),
+           reference=(0x400d7800,
+                      "4c6702aaae1840d9a95a274bd97e252b4bd1e39338c0e50c5257e96060bd4220")),
+)
+
+# PLACE: where octabam links the two units. CAVE (the default) is the ColdFire
+# free region, as the standalone image; DRAM puts them in octabam's platform
+# runtime (as rl3 and dj7), each still re-linked at its reference address and
+# compared with the bytes above. The PERSONALIZE tables are placed by the build
+# either way. tools/build_mute_modes.py does not read this manifest.
+PLACES = ("CAVE", "DRAM")
+
+
+def _variant(values):
+    """PLACE -> the units' placement."""
+    if values["PLACE"] == "DRAM":
+        return {"linked": tuple(dataclasses.replace(u, dram=True) for u in LINKED)}
+    return {}
+
+
 MODULE = Module(
     name="mute-modes",
     key="MUTE_MODES",
     kind=Kind.CF_PATCH,
     doc="PERSONALIZE -> MUTE MODE: OT (stock) / OTFX / OTFX-T / DT-T -- dry cut with FX "
         "tails, trig suppression, or a Digitakt-style sequencer mute.",
-    linked=(
-        # Linked at the standalone image's own addresses by tools/build_mute_modes.py.
-        Linked("mm_softmute", os.path.join(_HERE, "patch_softmute.s"),
-               include=_sc_key_inc, reference=_softmute_ref),
-        Linked("mm_menu", os.path.join(_HERE, "patch_mutemode.s"),
-               reference=(0x400d7800,
-                          "4c6702aaae1840d9a95a274bd97e252b4bd1e39338c0e50c5257e96060bd4220")),
-    ),
+    linked=LINKED,
     detours=(
         Detour(0x40004dc6, H("2a3980000008"), "mm_softmute", "pre",
                "frame builder: per-frame silenced set, dry cut, release"),
@@ -114,4 +132,9 @@ MODULE = Module(
              "ANDY restore pea 0x64 -> 0x70: MUTE MODE (0x800000dc) survives power-off")
         for site in ANDY_RESTORE_SITES
     ),
+    store=Store("kyoti.mute-modes"),
+    settings=(Setting(1, "PLACE", Option(*PLACES), default="CAVE", apply=Apply.BUILD,
+                      doc="CAVE: the two units in the ColdFire free region (the standalone "
+                          "image's placement); DRAM: in octabam's platform runtime"),),
+    variant=_variant,
 )
