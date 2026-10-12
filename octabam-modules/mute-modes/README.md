@@ -51,6 +51,20 @@ feeding it, as on stock. `patch_softmute.s` includes `remix.inc`, which carries
 author's MKI in an octabam-built image with SIDECHAIN_COMPRESSOR (2026-10-04): a muted KEY
 keeps ducking in every MUTE MODE.
 
+## Placement in octabam (PLACE)
+
+A build setting, store `kyoti.mute-modes`, picks where octabam links the two units:
+
+| PLACE | units |
+|---|---|
+| `CAVE` (default) | the ColdFire free region, as before; the image is bit-identical to the build without the setting (`test/mute-modes`) |
+| `DRAM` | octabam's platform runtime, as `rl3` and `dj7`; each unit is still re-linked at `0x400d7400` / `0x400d7800` and compared with the author's bytes |
+
+A remix pins it: `settings={("kyoti.mute-modes", "PLACE"): Pin("DRAM")}`. The three
+PERSONALIZE tables are placed by the build either way. `tools/build_mute_modes.py`
+does not read the manifest, so the standalone image is unchanged. `DRAM` has not
+run on a unit.
+
 ## Measured vs inferred
 
 **Hardware-confirmed** (the author's Octatrack MKI): all four modes, from the standalone
