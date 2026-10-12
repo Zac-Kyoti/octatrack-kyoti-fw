@@ -187,52 +187,92 @@ int ot_validate_part(uint8_t *part) {
         }
     return result;
 }
-/* The sequencer (the step handler 0x4009d1e8, entered about 3 frames before its step: machine.s
- * ot_step_hook calls this first). For an OT-303 track's note step it works out the note's gate and
- * slide, held until the renderer sends the note at the trig (a trig that does not fire leaves it
- * for the next step to clear):
+/* The sequencer: the step handler 0x4009d1e8 schedules a track's next step right after the step
+ * before it fires -- about a step ahead (ot_emu trace; MT5 on the unit: our renderer saw that next
+ * step's call before or after the current trig, in either order). Two hooks:
+ *   ot_step (machine.s ot_step_hook, the handler's entry): which step of which pattern is being
+ *     scheduled; a step out of sequence (the transport started again, a jump) clears the track's
+ *     queue, a note still queued from two steps back is dropped (its trig never came)
+ *   ot_note (machine.s ot_note_hook, 0x4009d422: the handler writes the note code 29 there, after the
+ *     step's trig condition passed -- a note that will fire): queues its gate and slide
+ * The trig takes the oldest queued note, so trigs and notes pair one for one in order.
  *   slide  the step's slide trig: the note slides from the one before when that gate is still open
  *   gate   GATE's share of the step, plus a whole step for each trigless trig straight after (a tie);
  *          held to the end of the next step when the next step is a note with a slide trig
+ * At the end of a pattern the handler is already scheduling the next pattern: whether the track is
+ * an OT-303 there is read from that pattern's own Part (+0x8e57). (One-shot trigs, code 61, are not
+ * queued: the frame builder can still drop them.)
  * Steps: the bank's pattern masks (0x400e21e0 + bank 0x9b340 + pattern 0x8ed8 + track 0x91a: +0 trig,
  * +8 trigless, +0x48 slide; step s < 32 in the long at +4, bit s, else the long at +0, bit s - 32),
  * the length and scale of the pattern (+0x8e53/+0x8e54) or, in PER TRACK mode (+0x8e55), the
  * track's (+0x50/+0x51); ticks per step 0x400aba50[scale], tempo 0x80001814 = BPM x 24. */
-struct ot_pend { uint32_t gl; uint8_t kind, slide, pad[2]; };
-#define PEND_NOTE 1u
-#define PEND_TIE 2u
-static struct ot_pend pend[8] = {{0, 0, 0, {0, 0}}};
-static struct ot_voice voice[8] = {{{0}, 0, {0}, 0}};
+struct ot_qn { uint32_t gl; uint8_t step, slide, call, pad; };
+#define QN 4u
+static struct ot_qn q[8][QN] = {{{0, 0, 0, 0, 0}}};
+static uint8_t qn[8] = {0}, qcall[8] = {0}, qlast[8] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, qlen[8] = {0};
+static uint32_t qctx[8] = {0};          /* the step being scheduled: 1 << 24 | bank << 16 | pattern << 8 | step */
+static struct ot_voice voice[8] = {{{0}, 0, {0}, 0, 0}};
 /* for the firmware check (tools/ot303/verify_ot303.py): note steps seen, the last step handler call
- * (track, bank, pattern, step a byte each), trig flags that came on a tie step or with no note step
- * (ignored), the last 32
- * notes sent (track << 28 | EV << 24 | gate) */
-uint32_t ot_steps = 0, ot_last_step = 0, ot_evn = 0, ot_tieflags = 0, ot_strayflags = 0;
+ * (track, bank, pattern, step a byte each), trig flags with no note queued (ignored), queue clears
+ * and notes dropped unplayed, the last 32 notes sent (track << 28 | EV << 24 | gate) */
+uint32_t ot_steps = 0, ot_last_step = 0, ot_evn = 0, ot_strayflags = 0, ot_qclears = 0, ot_qdrops = 0;
 uint32_t ot_evlog[32] = {0};
 uint8_t ot_evptch[32] = {0};            /* each logged note's PTCH (the step's lock, if any) */
+/* a trace for the firmware check: kind << 28 | track << 24 | a << 16 | b, kind 1 the step handler
+ * (a step, b pattern << 8 | 1 for a note queued), 2 a trig flag (a the step played or $ff, b the flag
+ * byte << 8 | the notes queued); stamped by ot_frames (the renderer's second calls) */
+uint32_t ot_trace[128] = {0}, ot_tracen = 0, ot_frames = 0, ot_tracet[128] = {0};
+static void trace(unsigned kind, unsigned track, unsigned a, unsigned b) {
+    ot_tracet[ot_tracen & 127] = ot_frames;
+    ot_trace[ot_tracen++ & 127] = kind << 28 | track << 24 | (a & 0xff) << 16 | (b & 0xffff);
+}
 static unsigned step_bit(uintptr_t trk, unsigned mask, unsigned s) {
     return s < 32 ? (U32(trk + mask + 4) >> s) & 1u : (U32(trk + mask) >> (s - 32)) & 1u;
 }
 static unsigned knob_now(unsigned track, unsigned k) {   /* SETUP's live bytes (page 1: fp, below) */
     return U8(0x80000810u + 72u * track + 0x20u + k - 6u);
 }
-void ot_step(unsigned track, unsigned bank, unsigned pattern, unsigned s) {
-    if (track >= 8 || bank >= 16 || pattern >= 16 || s >= 64 || !signed_track(part_base(), track)) return;
-    ++ot_steps;
-    ot_last_step = track << 24 | bank << 16 | pattern << 8 | s;
-    uintptr_t base = 0x400e21e0u + bank * 0x9b340u + pattern * 0x8ed8u, trk = base + track * 0x91au;
+static uintptr_t pattern_at(unsigned bank, unsigned pattern) { return 0x400e21e0u + bank * 0x9b340u + pattern * 0x8ed8u; }
+static unsigned step_len(uintptr_t base, uintptr_t trk, uint32_t *sl) {
     unsigned len = U8(base + 0x8e53), sc = U8(base + 0x8e54);
     if (U8(base + 0x8e55)) { len = U8(trk + 0x50); sc = U8(trk + 0x51); }
     if (len < 1 || len > 64) len = 16;
     if (sc > 6) sc = 2;
     uint32_t t24 = U32(0x80001814u);
     if (t24 < 720 || t24 > 7200) t24 = 2880;
-    uint32_t sl = U8(0x400aba50u + 4 * sc + 3) * 2646000u / t24;
-    struct ot_pend *p = &pend[track];
-    if (!step_bit(trk, 0x00, s)) {                /* no note here: nothing the next trig flag may play */
-        p->kind = step_bit(trk, 0x08, s) ? PEND_TIE : 0;
-        return;
+    *sl = U8(0x400aba50u + 4 * sc + 3) * 2646000u / t24;
+    return len;
+}
+void ot_step(unsigned track, unsigned bank, unsigned pattern, unsigned s) {
+    if (track >= 8) return;
+    qctx[track] = 0;
+    if (bank >= 16 || pattern >= 16 || s >= 64) return;
+    uintptr_t base = pattern_at(bank, pattern), trk = base + track * 0x91au;
+    const volatile uint8_t *part = (const volatile uint8_t *)(0x400e21e0u + bank * 0x9b340u + PART_OFF + (U8(base + 0x8e57) & 3u) * PART_STRIDE);
+    if (!signed_track(part, track)) return;
+    ++ot_steps;
+    ot_last_step = track << 24 | bank << 16 | pattern << 8 | s;
+    uint32_t sl;
+    unsigned len = step_len(base, trk, &sl);
+    unsigned last = qlast[track], same = s == last;
+    if (!same && !(s == last + 1u || (s == 0 && last + 1u == qlen[track]))) { if (qn[track]) ++ot_qclears; qn[track] = 0; }
+    qlast[track] = (uint8_t)s; qlen[track] = (uint8_t)len;
+    if (!same) {
+        ++qcall[track];
+        unsigned k = qn[track], j = 0;          /* a note queued two steps back never played */
+        while (j < k && (uint8_t)(qcall[track] - q[track][j].call) >= 2) ++j;
+        for (unsigned i = j; i < k; ++i) q[track][i - j] = q[track][i];
+        qn[track] = (uint8_t)(k - j); ot_qdrops += j;
     }
+    qctx[track] = 1u << 24 | bank << 16 | pattern << 8 | s;
+    trace(1, track, s, pattern << 8);
+}
+void ot_note(unsigned track) {
+    if (track >= 8 || !qctx[track]) return;
+    unsigned bank = qctx[track] >> 16 & 0xff, pattern = qctx[track] >> 8 & 0xff, s = qctx[track] & 0xff;
+    uintptr_t base = pattern_at(bank, pattern), trk = base + track * 0x91au;
+    uint32_t sl;
+    unsigned len = step_len(base, trk, &sl);
     unsigned count = 1, n = s, i;
     for (i = 1; i < len; ++i) {
         n = (n + 1) % len;
@@ -241,9 +281,23 @@ void ot_step(unsigned track, unsigned bank, unsigned pattern, unsigned s) {
     }
     unsigned hold = i < len && step_bit(trk, 0x00, n) && step_bit(trk, 0x48, n);
     uint32_t gl = hold ? (count + 1) * sl : (count - 1) * sl + ot_gate_samples(knob_now(track, OT_GATE), sl);
-    p->gl = gl < 1 ? 1 : gl > 0x7ffffeu ? 0x7ffffeu : gl;
-    p->slide = (uint8_t)step_bit(trk, 0x48, s);
-    p->kind = PEND_NOTE;
+    struct ot_qn e = {gl < 1 ? 1 : gl > 0x7ffffeu ? 0x7ffffeu : gl, (uint8_t)s, (uint8_t)step_bit(trk, 0x48, s), qcall[track], 0};
+    unsigned k = qn[track];
+    if (k && q[track][k - 1].step == s && q[track][k - 1].call == qcall[track]) q[track][k - 1] = e;   /* the same call again */
+    else {
+        if (k == QN) { for (unsigned j = 1; j < QN; ++j) q[track][j - 1] = q[track][j]; --k; ++ot_qdrops; }
+        q[track][k] = e; qn[track] = (uint8_t)(k + 1);
+    }
+    trace(1, track, s, pattern << 8 | 1);
+}
+/* the trig's note: the oldest queued, or none */
+static unsigned take(unsigned track, struct ot_qn *out) {
+    unsigned k = qn[track];
+    if (!k) return 0;
+    *out = q[track][0];
+    for (unsigned i = 1; i < k; ++i) q[track][i - 1] = q[track][i];
+    qn[track] = (uint8_t)(k - 1);
+    return 1;
 }
 
 /* The FLEX renderer (kind table slot 1), ABI measured by octabam at 4000d430/4000d518: every track
@@ -251,7 +305,7 @@ void ot_step(unsigned track, unsigned bank, unsigned pattern, unsigned s) {
  * An OT-303 track reserves FLEX's space (later tracks keep their record boundaries) and, once the
  * second segment exists, its record becomes the control record (record.h): the signature, the
  * continuous words from the knobs (page 1 live: p-locks, LFOs, scenes; then SETUP), at a trig the
- * note (the step's pending gate and slide), and the next chunk of the voice's tables. (Stock w0 is the high half of a source
+ * note (its queued gate and slide), and the next chunk of the voice's tables. (Stock w0 is the high half of a source
  * count, 0; w2 the high half of a bounded ring position, never $0909: octabam REVIEW.md.) */
 int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
     if (track >= 8 || !signed_track(part_base(), track))
@@ -262,6 +316,7 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
     unsigned n = end > start && end <= 16 ? end - start : 0;
     for (unsigned i = 0; i < 4 + 2 * n; ++i) cursor[i] = 0;
     if (end == 16) {
+        ++ot_frames;
         uint8_t p[12];
         for (unsigned k = 0; k < 12; ++k) p[k] = k < 6 ? (uint8_t)(fp[k] >> 8) : (uint8_t)knob_now(track, k);
         /* the packer's fixed slot, not this call's cursor (the first call can still be stock FLEX) */
@@ -272,17 +327,17 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
              * trig apply, a track start and a Part load all set; only a note step's flag plays (MT4 on
              * the unit: pattern + Part changes set it with no trig on the step, once a frame for up to
              * a second). Notes played live (track keys, MIDI) do not sound yet. */
-            struct ot_pend *pd = &pend[track];
-            if (pd->kind == PEND_NOTE) {
+            struct ot_qn e;
+            unsigned qd = qn[track];
+            if (take(track, &e)) {
                 ++ot_trigs;
-                ev = OT_EV_NOTE | (pd->slide ? OT_EV_SLIDE : 0);
-                gl = pd->gl;
-            } else if (pd->kind == PEND_TIE) {
-                ++ot_tieflags;
+                ev = OT_EV_NOTE | (e.slide ? OT_EV_SLIDE : 0);
+                gl = e.gl;
+                trace(2, track, e.step, (unsigned)U8(0x46104d0cu + track) << 8 | qd);
             } else {
                 ++ot_strayflags;
+                trace(2, track, 0xff, (unsigned)U8(0x46104d0cu + track) << 8 | qd);
             }
-            pd->kind = 0;
         }
         if (ev) { ot_evptch[ot_evn & 31] = p[OT_PTCH]; ot_evlog[ot_evn++ & 31] = track << 28 | ev << 24 | (gl & 0xffffffu); }
         ot_record(record, &voice[track], p, ev, gl);

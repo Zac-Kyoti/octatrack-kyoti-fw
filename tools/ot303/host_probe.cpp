@@ -18,7 +18,9 @@
 // frame offset; its knobs move all the time (a CUT sweep, RES/ENV/DEC drifts, WAVE saw ->
 // square -> half, SLID, GATE, TUNE). Gates as the ColdFire makes them: ties extend a note by
 // whole steps, a note before a slide is held. The transport's top 8 bits carry junk. The tables
-// arrive by the record's chunks, A's stream starting mid-cycle.
+// arrive by the record's chunks, A's stream starting mid-cycle. Records ride two ping-pong slots per
+// track, as on the unit; for 12 frames A's voice stops rendering and its slots keep their last two
+// records (old numbers): silence, its claim lapses, no old note replays.
 // A model of the claim (OWN, LIVE) predicts each call. Checks:
 //   stock record: returns (rts) with only b, x0, r4 and the CCR changed; X:0 and the ring base kept;
 //     the voice's own track's stock record frees the voice
@@ -29,6 +31,7 @@
 // (host-stepped).
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -198,6 +201,14 @@ int main(int argc, char** argv) {
     ot_voice va{}, vb{};
     va.chunk = 11; vb.chunk = 23;
     uint32_t rec[OT_REC_LONGS];
+    uint32_t slots[2][2][OT_REC_LONGS] = {};        // [track A/B][ping]: the transport's ping-pong slots
+    uint32_t lseq[4] = {0, 0, 0, 0};                // the host's last record number taken, per track (modelled)
+    // A's voice stops rendering for 12 frames right after one of its notes: its slots stay (one holds the note)
+    long STALE0 = frames / 4;
+    for (long st = frames / 4 * 16 / 4999 + 1;; st++)
+        if (LA[st & 15].kind == 'N') { STALE0 = (st * 4999 + 15) / 16 + 1; break; }
+    const long STALE1 = STALE0 + 12;
+    long staleFrames = 0;
     long junk = 1;
     auto putRecord = [&]() {
         for (unsigned i = 0; i < OT_REC_LONGS; i++) {
@@ -244,7 +255,24 @@ int main(int argc, char** argv) {
             if (!sig && own == t + 1) { own = 0; live = 0; }                // the owner's own stock record frees it
             Want want = STOCK;
             bool voice = false;
+            const bool isA0 = t == 0x20, isB0 = t == 0x40;
+            bool old = false;
             if (sig) {
+                uint32_t* slot = slots[isB0][f & 1];
+                if (!(isA0 && f >= STALE0 && f < STALE1)) {
+                    unsigned ev0 = isA0 ? evA : evB; uint32_t gl0 = isA0 ? glA : glB;
+                    ot_record(slot, isA0 ? &va : &vb, isA0 ? kA : kB, ev0, gl0);
+                } else staleFrames++;
+                std::memcpy(rec, slot, sizeof rec);
+                putRecord();
+                const uint32_t sq = rec[0] & 0xffff, L = lseq[t >> 5];
+                old = sq == L || ((sq + 1) & 0xffff) == L;
+                if (!old) lseq[t >> 5] = sq;
+            }
+            if (sig && old) {
+                if (!relocated) { own = 0; live = 0; relocated = true; }
+                want = SILENT;
+            } else if (sig) {
                 if (!relocated) { own = 0; live = 0; relocated = true; }    // the first frame copies run 1 and frees the voice
                 if (own == 0 || own == t + 1) {
                     own = t + 1; live = 2;
@@ -277,7 +305,7 @@ int main(int argc, char** argv) {
             const bool isA = t == 0x20, isB = t == 0x40;
             unsigned ev = isA ? evA : isB ? evB : 0; uint32_t gl = isA ? glA : glB; int off = isA ? offA : isB ? offB : int((f * 3) % 16);
             const uint8_t* k = isA ? kA : kB;
-            if (sig) { ot_record(rec, isA ? &va : &vb, k, ev, gl); putRecord(); }
+            if (old) ev = 0;                                                // the old record's bits are not read
             seam(t, sig, ev & 1, off, want);
             if (!voice) continue;
             (isA ? aFrames : bFrames)++;
@@ -330,8 +358,9 @@ int main(int argc, char** argv) {
     }
     if (!tablesChecked || !aFrames || !bFrames) { std::printf("the voice did not run on both tracks (A %ld, B %ld frames)\n", aFrames, bFrames); return 1; }
     float pk = 0; for (float x : wav) pk = std::max(pk, std::fabs(x));
-    std::printf("claims: A ($20) voiced %ld frames; B ($40) silent beside it, then took the voice at frame %ld "
-                "(A stopped at %ld) and voiced %ld; $00/$60 always stock\n", aFrames, takeover, frames * 3 / 4, bFrames);
+    std::printf("claims: A ($20) voiced %ld frames (silent for its %ld old records, its claim lapsed); B ($40) silent beside it, "
+                "then took the voice at frame %ld (A stopped at %ld) and voiced %ld; $00/$60 always stock\n", aFrames, staleFrames,
+                takeover, frames * 3 / 4, bFrames);
     std::printf("BIT-EXACT: %ld samples, %ld notes (%ld slides into an open gate, %ld slides into a closed one retriggered); "
                 "peak %.3f = %.1f dBFS\n", sample, notesHeard, slidesHeard, retrigSlides, pk, 20 * std::log10(pk));
     std::printf("cycles/sample: saw %.1f (worst plain frame %.1f, note %.1f, gate end %.1f), square %.1f (worst plain %.1f, note %.1f); "

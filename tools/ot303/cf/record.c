@@ -16,7 +16,7 @@ void ot_record(volatile uint32_t *rec, struct ot_voice *v, const uint8_t k[12], 
     if (!same) { ot_params_cont(k, &v->c); v->have = 1; }
     const struct ot_cont *c = &v->c;
     const ot_w cw[12] = {c->cs, c->es8, c->rs, c->bg, c->sc, c->sq, c->w1, c->w1, c->w2, c->w3, c->l0_16, c->ag_8};
-    rec[0] = 0x33030000u;
+    rec[0] = 0x33030000u | (++v->seq & 0xffffu);
     rec[1] = 0x09090000u | (ev & 3u);
     for (unsigned i = 0; i < 12; ++i) rec[2 + i] = pk(cw[i]);
     if (ev & OT_EV_NOTE) {

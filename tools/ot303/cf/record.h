@@ -5,8 +5,8 @@
  * it). One source for the ColdFire (control.c's renderer) and the bench (host_probe.cpp drives the
  * DSP and the twin with the same records). 84 longs; the transport carries each long as two 16-bit
  * DSP words, high half first.
- *   long 0, 1     $3303 0000, $0909 EV: the signature; EV bit 0 a note at the frame's trig sample,
- *                 bit 1 it slides
+ *   long 0, 1     $3303 SEQ, $0909 EV: the signature; SEQ the record's number (one more each
+ *                 frame); EV bit 0 a note at the frame's trig sample, bit 1 it slides
  *   long 2..13    12 continuous words: CS ES8 RS BG SC SQ W1 W1 W2 W3 L0_16 AG_8
  *   long 14..24   11 note words (EV bit 0 only): C_MEG AG8 AGFM K8 MOFF GL M_AMP INC_T M48H M48L AMP2
  *   long 25, 26   a table chunk's Y address and length; long 27.. its words (OT_CHUNK at most)
@@ -35,6 +35,7 @@ struct ot_voice {
     uint32_t have;          /* 0: make them */
     struct ot_cont c;
     uint32_t chunk;         /* the next table chunk */
+    uint32_t seq;           /* the next record's number */
 };
 
 /* the frame's record: the continuous words from knobs k (made again only when they change), a

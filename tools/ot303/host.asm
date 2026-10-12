@@ -10,7 +10,7 @@
 ; sg_entry. An OT-303 track's record is the control record tools/ot303/cf/record.c writes. The
 ; transport carries each ColdFire long as two 16-bit words (high half first, the DSP word's top 8
 ; bits not ours); a 24-bit word v rides one long, bits 23-8 in the high half, 7-0 in the low:
-;   w0 $3303, w2 $0909  the signature
+;   w0 $3303, w2 $0909  the signature;  w1  the record's number (one more each frame)
 ;   w3                  bit 0: a note starts at the frame's trig sample (the stock x:$20c);
 ;                       bit 1: it slides (no retrigger when the gate is still open)
 ;   w4..w27             12 continuous words, every frame (Open303's setters act at once):
@@ -21,6 +21,10 @@
 ;                       ColdFire cycles through the voice's Y image (tanh, the coefficient table,
 ;                       the state block); the DSP takes the chunks in order until the image is
 ;                       complete, and renders silence until then.
+; A record whose number is this track's last one taken or the one before is old: the track's voice
+; stopped rendering and both ping-pong slots still hold its last records (a Part change, a hard
+; stop). It renders silence and does not refresh the claim, so the voice is freed 2 frames later
+; and never replays an old note.
 ; Any other record returns into the stock source untouched (b, x0, r4 and the CCR changed; the
 ; stock source loads them before it reads).
 ; One voice per core (the ColdFire admits one OT-303 per four tracks): the first signed track
@@ -55,7 +59,11 @@ OLD1    equ     PB+XD           ; the loader's copy of PB..PB+215 (X run 1)
 SIGA    equ     XB-$3c          ; X:$7b04, below run 1 in the unreferenced region: the copy's mark
 OWN     equ     XB-$3b          ; the core's voice: its track's x:$418 + 1 ($1 $21 $41 $61), 0 = none
 LIVE    equ     XB-$3a          ; frames the claim lasts without a refresh
-TRF     equ     XB-$39          ; this frame's event bits (the record's w3)
+TRF     equ     XB-$39          ; this frame's event bits (the record's w3); bit 7: an old record
+LSEQ    equ     XB-$38          ; 4: each track's last record number taken (x:$418 / $20)
+LSEQ1   equ     XB-$37
+LSEQ2   equ     XB-$36
+LSEQ3   equ     XB-$35
 ; Y staging, in the gap between the coefficient table and the state block (the image's zeros:
 ; written by the chunks only before the voice runs)
 CB      equ     YS-$3c          ; 12: the continuous words
@@ -125,7 +133,7 @@ sg_stock:
 sg_sret:
         rts
 sg_ours:
-        move    x:(r4+$3),b                     ; the trig flag
+        move    x:(r4+$3),b                     ; the event bits
         and     #>$ffff,b
         move    b1,x:>TRF
         move    m1,x1                           ; run 1 into place first (MSAV is inside it): m1
@@ -148,6 +156,23 @@ sg_ring:
         add     x0,b
         move    b1,x:>$20b
 sg_noring:
+; the record's number: new, or an old record (silence, no claim)
+        move    x:>$418,a
+        lsr     #5,a
+        move    #>LSEQ,r1
+        move    a1,n1
+        move    x:(r4+$1),b
+        and     #>$ffff,b
+        move    b1,x1
+        move    x:(r1+n1),x0                    ; the last one taken
+        eor     x0,b
+        beq     sg_silent                       ; the same
+        move    x1,b
+        add     #<$1,b
+        and     #>$ffff,b
+        eor     x0,b
+        beq     sg_silent                       ; the one before
+        move    x1,x:(r1+n1)
 ; the claim: this track when the voice is free or already ours
         move    x:>$418,b
         add     #<$1,b
@@ -390,7 +415,7 @@ hq_gateoff:
 ; ---- RELOC: the engine's run-1 block (216 words: its X working set and the wrapper's words) runs
 ; at X:$7b24-$7bfb, in stock's unreferenced X:$7a92-$7fff: a memory partition with no DMA on either
 ; core. The loader puts the words XD above, in SPRING's records. SIGA (X:$7b04, unused) marks the
-; copy done until power-off; the copy also frees the voice (OWN, LIVE). m1 is linear. Uses a, r1, n1.
+; copy done until power-off; the copy also frees the voice (OWN, LIVE) and clears the record numbers. m1 is linear. Uses a, r1, n1.
 hq_reloc:
         move    x:>SIGA,a
         cmp     #>$5a5a5a,a
@@ -407,6 +432,10 @@ hq_rla:
         clr     a
         move    a,x:>OWN
         move    a,x:>LIVE
+        move    a,x:>LSEQ
+        move    a,x:>LSEQ1
+        move    a,x:>LSEQ2
+        move    a,x:>LSEQ3
         move    #>$5a5a5a,a
         move    a,x:>SIGA
 hq_rldone:

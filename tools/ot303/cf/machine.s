@@ -11,7 +11,7 @@
         .global ot_machine_name, ot_src_names, ot_main_commit, ot_src_commit, ot_src_commit2
         .global ot_name_a, ot_name_b, ot_setup_row, ot_chooser_row, ot_setup_open, ot_chooser_open
         .global ot_setup_edit6, ot_setup_draw6, ot_resolve_pb, ot_validate, ot_stock_validate
-        .global ot_tick_hook, ot_glyph, ot_step_hook
+        .global ot_tick_hook, ot_glyph, ot_step_hook, ot_note_hook, ot_chooser_level
 
         .equ    OT_ROW, 5
         .equ    FLEX, 1
@@ -188,6 +188,16 @@ ot_chooser_open:
         pea     (0x460e7386).l
         jmp     (0x40078890).l
 
+| the machine window's focus (0x400788c4, a0 = the track's type byte): stock opens STATIC and FLEX
+| (type < 2) on the sample list, any other machine on the machine list. An OT-303 (stored as FLEX)
+| reads as its row (5): a track double-tap shows the machine list, as for THRU / NEIGHBOR / PICKUP.
+ot_chooser_level:
+        mvz.b   (%a0),%d0
+        bsr     ot_row_type
+        moveq   #1,%d2
+        cmp.l   %d0,%d2
+        jmp     (0x400788ca).l
+
 ot_name_a:
         bsr.s   ot_name_pick
         jmp     (0x4003d722).l
@@ -271,7 +281,7 @@ ot_glyph:
 ot_name:
         .asciz  "OT-303"
 ot_reject_name:
-        .asciz  "1 OT-303 / 4 TRKS"
+        .asciz  "ONE 303 PER CORE!"
         .balign 2
 
 | the sequencer's step handler 0x4009d1e8 (track, bank, pattern, step, ...; about 3 frames before the
@@ -287,3 +297,15 @@ ot_step_hook:
         lea     (16-104,%sp),%sp
         movem.l %d2-%d7/%a2-%fp,(%sp)
         jmp     0x4009d1f0
+
+| the step handler queues a note (0x4009d422: the trig's condition passed, code 29 goes in for track
+| d7): control.c ot_note queues its gate and slide. Replays the 12 displaced bytes (lea 0x46c7a810,a0;
+| moveq #29,d2; move.l d2,(a0,d7.l*4)). d0/d1/a0/a1 are reloaded before they are read after it.
+ot_note_hook:
+        move.l  %d7,-(%sp)
+        jsr     ot_note
+        addq.l  #4,%sp
+        lea     (0x46c7a810).l,%a0
+        moveq   #29,%d2
+        move.l  %d2,(%a0,%d7.l*4)
+        jmp     (0x4009d42e).l

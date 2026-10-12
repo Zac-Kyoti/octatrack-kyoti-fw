@@ -2028,7 +2028,7 @@ SETUP page's VOL (item 3). Louder than that needs saturation/limiting = a sound 
 
 **The machine, test image 1 (MT1, built 2026-10-11, NOT flashed):** item 1b. "OT-303" is row 6 of the
 track's machine chooser and of SRC SETUP, any track, one per DSP core (T1–4 / T5–8; a second on the
-same core is refused with the toast `1 OT-303 / 4 TRKS`). Stored as FLEX + `'O','T',1` in unused
+same core is refused with the toast `1 OT-303 / 4 TRKS`, MT6: `ONE 303 PER CORE!`). Stored as FLEX + `'O','T',1` in unused
 NEIGHBOR bytes (stock sees FLEX); a new assignment seeds the twelve knobs with the defaults. The FLEX
 renderer slot (`0x400d6438`) sends an OT-303 track's control record (w0 `$3303`, w2 `$0909`, w3 trig,
 w8–19 knobs); the DSP host (`tools/ot303/host.asm`) keys on it at the source seam. Each trig plays the
@@ -2131,6 +2131,20 @@ owner's claim aged out over 2 frames and the new track's first note fell in that
   bits), `chain_check.py` (ours vs TwinVoice: null −84.5 dB; both vs Open303: spec 0.68 / p95 3.1 dB),
   `verify_ot303.py` (a test line with ties, holds, slides and PTCH locks on T2/T6 of BOTLI: every note's
   gate, slide and PTCH as expected; the Y image intact on both cores; DARK/PLATE as stock).
+
+**MT5 on the unit (user, 2026-10-12):** a full bar drops step 2 every other bar; ties do nothing;
+CUT/ENV/DEC locks crack; double-tap opens an empty sample list; wanted: toast "ONE 303 PER CORE!",
+all six machines visible in PLAYBACK SETUP.
+- The step handler runs one step ahead (called right after the previous trig fires); MT5's single
+  pending note raced the renderer. **MT6** queues each note where the handler writes its note code
+  (`0x4009d422`, after the trig condition) and pairs trigs with notes in order.
+- Clicks: measured (`chain_check.cpp` lock modes): ours = Open303 within ~1 dB; Open303's own
+  anti-click measures (amp declicker 200 Hz, accent attack rc2 15 ms, pitch slew, idle reset; rc1 is
+  tau 0) are all in the engine. Smoothing knob jumps would go beyond Open303: a sound change, decided by
+  an A/B pack.
+- `out/OCTATRACK_OS1.40C_OT303_MT6.syx` (`140C_303T6`, sha256 `63398fdc…`), NOT flashed: also record
+  numbers (no old note replays when a voice stops rendering), double-tap → machine list, six rows in
+  PLAYBACK SETUP, the toast.
 
 **MT1 on the unit — what to check:**
 1. T2: FUNC+SRC → SRC SETUP → the last row OT-303 → YES (and the machine list from a track

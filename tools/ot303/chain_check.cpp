@@ -22,6 +22,7 @@
 #undef protected
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <fstream>
 #include <string>
@@ -62,6 +63,9 @@ struct Ev { long at; int kind; int note, vel; uint8_t k[12]; unsigned ev; uint32
 int main(int argc, char** argv) {
     if (argc < 2) { std::printf("usage: chain_check OUTDIR\n"); return 2; }
     const std::string dir = argv[1];
+    const std::string mode = argc > 2 ? argv[2] : "";
+    const bool locks = mode.rfind("locks", 0) == 0;                     // every step locks CUT ENV DEC (random); locks-cut etc: one
+    const int gateK = argc > 3 ? std::atoi(argv[3]) : 63;
     const int BARS = 6;
     // the knobs of each bar (WAVE: saw, saw, square, square, half, saw)
     auto knobs = [&](int bar, const St& s, uint8_t* k) {
@@ -71,6 +75,13 @@ int main(int argc, char** argv) {
         k[OT_WAVE] = bar == 2 || bar == 3 ? 127 : bar == 4 ? 64 : 0;
         k[OT_PTCH] = uint8_t(s.kind == 'N' ? s.ptch : 64);
         k[OT_ACC] = uint8_t(s.acc);
+        k[OT_GATE] = uint8_t(gateK);
+        if (locks) {
+            unsigned h = unsigned(bar * 16 + (&s - LINE)) * 2654435761u;
+            if (mode == "locks" || mode == "locks-cut") k[OT_CUT] = uint8_t((h >> 8) % 128);
+            if (mode == "locks" || mode == "locks-env") k[OT_ENV] = uint8_t((h >> 15) % 128);
+            if (mode == "locks" || mode == "locks-dec") k[OT_DEC] = uint8_t((h >> 22) % 128);
+        }
     };
     std::vector<Ev> evs;
     for (int bar = 0; bar < BARS; bar++)

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-OT-303 machine, test image 5 (MT5; reference/handoffs/OT303_SCOPE.md §12 items 1b, 2): the OT-303 DSP
+OT-303 machine, test image 6 (MT6; reference/handoffs/OT303_SCOPE.md §12 items 1b, 2): the OT-303 DSP
 voice as a track machine. "OT-303" is the sixth row of the track's machine chooser and of SRC SETUP,
 on any track, one per DSP core (T1-4, T5-8). The track is stored as FLEX plus a signature in unused
 NEIGHBOR page bytes, so a stock OS loads the project as a FLEX track. Its FLEX renderer sends the
@@ -23,6 +23,11 @@ note tie it, a slide trig slides into its note from the one before (no retrigger
 compiles the knobs into the engine's words (params.c, within 3 LSB of Open303) and streams the
 voice's tables to the DSP in the record (record.c), so the DSP no longer builds them; the square
 (WAVE) works.
+MT6 (after MT5 on the unit): notes queue where the step handler schedules them (after the trig
+condition), so trigs and notes pair one for one whichever comes first (MT5 dropped a note when the
+next step was queued before the trig was seen: a missing step 2, ties that did nothing); records carry
+a number, so a voice that stops rendering never replays an old note; a track double-tap opens the
+machine list for an OT-303; PLAYBACK SETUP shows all six machines; the toast reads ONE 303 PER CORE!.
 
 Stock 1.40C plus exactly this:
   * DSP, both payloads: tools/ot303/host.asm + the engine over SPRING REV's P words (DARK REV's
@@ -30,11 +35,12 @@ Stock 1.40C plus exactly this:
     (A P:$39c / B P:$1a2) -> jsr the host; SPRING's dispatch -> the passthrough stub.
   * ColdFire: SPRING REV out of the FX choosers; tools/ot303/cf/{machine.s,control.c} as a DRAM runtime
     (the arena's bottom 16 pages; base literal at 24 sites + 4 geometry words; the boot site's jsr ->
-    the appended loader); 20 detours (ANALOG BD's seams, the glyph, the step handler's entry), 6 pokes
+    the appended loader); 22 detours (ANALOG BD's seams, the glyph, the step handler's entry and its
+    note write, the machine window's focus), 7 pokes
     and the FLEX renderer slot, each asserted against stock.
 
 Usage:   python3 tools/build_ot303.py      (WIP: KYOTI_ALLOW_WIP=1)
-Outputs: out/mainos_ot303_mt5.bin, out/OCTATRACK_OS1.40C_OT303_MT5.syx, out/OCTATRACK_OT303_MT5.bin
+Outputs: out/mainos_ot303_mt6.bin, out/OCTATRACK_OS1.40C_OT303_MT6.syx, out/OCTATRACK_OT303_MT6.bin
 """
 import os, pathlib, subprocess, sys
 from kyoti_status import gate, seal
@@ -52,11 +58,11 @@ STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 CF = ROOT / "tools/ot303/cf"
 WORK = ROOT / "out/ot303/cf"
-OUT = ROOT / "out/mainos_ot303_mt5.bin"
-ELEK = ROOT / "out/elek_ot303_mt5.bin"
-OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_MT5.syx"
-OUT_BIN = ROOT / "out/OCTATRACK_OT303_MT5.bin"
-VERSTR = "140C_303T5"      # the field takes 10 characters
+OUT = ROOT / "out/mainos_ot303_mt6.bin"
+ELEK = ROOT / "out/elek_ot303_mt6.bin"
+OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_MT6.syx"
+OUT_BIN = ROOT / "out/OCTATRACK_OT303_MT6.bin"
+VERSTR = "140C_303T6"      # the field takes 10 characters
 
 # MT4: no ROM cave. The ColdFire code is a DRAM runtime (tools/ot303/dram.py): linked at its arena
 # reserve, appended after the OS image behind tools/ot303/cf/loader.S, copied in at boot.
@@ -88,10 +94,13 @@ DETOURS = (
     (0x4004C1C0, H("4eb940031d18"), "ot_slot_rec_ui", "jsr", 6),          # MT2: the track box's sample name
     (0x4004012C, H("486a00012f034879400bf10a2f36cce8"), "ot_glyph", "jmp", 16),  # MT3: side glyph 3
     (0x4009D1E8, H("4fefff9848d77cfc"), "ot_step_hook", "jmp", 8),         # MT5: the step handler's entry
+    (0x400788C4, H("71907401b480"), "ot_chooser_level", "jmp", 6),         # MT6: double-tap opens the machine list
+    (0x4009D422, H("41f946c7a810741d21827c00"), "ot_note_hook", "jmp", 12),  # MT6: a note the step handler schedules
 )
 POKES = (
     (0x40079248, H("48780005"), H("48780006"), "machine chooser has six rows, OT-303 the last"),
     (0x400585FA, H("48780005"), H("48780006"), "SRC SETUP selector has six rows"),
+    (0x400585FE, H("48780005"), H("48780006"), "MT6: SRC SETUP shows all six rows"),
     (0x4003C950, H("7204"), H("7205"), "SRC SETUP name lookup admits row 5"),
     (0x40078678, H("7004"), H("7005"), "machine chooser draws row 5"),
     (0x400786CE, H("7004"), H("7005"), "machine chooser highlights row 5"),

@@ -33,7 +33,7 @@ import dram  # noqa: E402
 
 EMU = os.path.join(ROOT, 'out', 'ot303', 'ot_emu_8d0ad6f4')
 CARD = os.path.join(os.path.realpath(os.path.join(ROOT, 'refs', 'octabam')), 'out', 'botli_card2.img')
-IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt5.bin'))
+IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt6.bin'))
 STOCK = os.path.join(ROOT, 'out', 'raw', 'section_3_MAIN_OS.bin')
 ELF = os.path.join(ROOT, 'out', 'ot303', 'cf', 'ot303_runtime.elf')
 LOADER = os.path.join(ROOT, 'out', 'ot303', 'cf', 'loader.elf')
@@ -50,6 +50,12 @@ BANK0 = 0x400e21e0                    # BOTLI plays bank 0, pattern 0 (PER TRACK
 # the test line, steps 0..15: N note, T trigless trig (a tie), S note with a slide trig, . empty
 LINE = 'NTNS.SNST...N...'
 LOCKS = {2: 76, 6: 52}                # PTCH locks on two of its notes (the pattern's p-lock records, TRAC + 0x59)
+# T2's line: every step a note, each with its own PTCH lock, and a trig condition that never fires in
+# play (FILL, code 1: the trig word TRAC + 0x89a + 2 step, low byte) on two of them -- the notes must
+# come in order and skip exactly those (MT5 on the unit dropped step 2 of a full bar every other bar)
+LINE2 = 'N' * 16
+LOCKS2 = {s: 40 + s for s in range(16)}
+CONDS2 = {4: 1, 10: 1}
 
 
 
@@ -161,11 +167,11 @@ def ot303_pokes(tracks):
     return out
 
 
-def line_pokes(tracks):
-    """the test line into bank 0 pattern 0: steps 0..31 in the masks' second long (trig +4,
-    trigless +0xc, slide +0x4c)"""
+def line_pokes(tracks, line=LINE, locks=LOCKS, conds={}):
+    """a test line into bank 0 pattern 0: steps 0..31 in the masks' second long (trig +4,
+    trigless +0xc, slide +0x4c), PTCH locks, trig conditions"""
     m = {0x04: 0, 0x0c: 0, 0x4c: 0}
-    for s, c in enumerate(LINE):
+    for s, c in enumerate(line):
         m[0x04] |= (c in 'NS') << s
         m[0x0c] |= (c == 'T') << s
         m[0x4c] |= (c == 'S') << s
@@ -174,18 +180,21 @@ def line_pokes(tracks):
         for off, v in m.items():
             for i, b in enumerate(v.to_bytes(4, 'big')):
                 out.append(f'{BANK0 + t * 0x91a + off + i:#x}={b:#x}')
-        for s, v in LOCKS.items():               # p-lock record[step][param], PTCH = param 0
+        for s, v in locks.items():               # p-lock record[step][param], PTCH = param 0
             out.append(f'{BANK0 + t * 0x91a + 0x59 + 32 * s:#x}={v:#x}')
+        for s, v in conds.items():
+            out.append(f'{BANK0 + t * 0x91a + 0x89a + 2 * s + 1:#x}={v:#x}')
     return out
 
 
-def line_events(steplen, gate):
-    """the (EV, gate) each note of LINE sends (control.c ot_step): ties extend by whole steps, a note
-    before a slide trig is held to the end of the next step"""
+def line_events(steplen, gate, line=LINE, locks=LOCKS, conds={}):
+    """the (EV, gate, PTCH) each note of a line sends (control.c ot_note): ties extend by whole steps, a
+    note before a slide trig is held to the end of the next step; a FILL step does not play"""
     out = []
     gs = steplen * (gate + 1) >> 7
+    LINE = line
     for s, c in enumerate(LINE):
-        if c not in 'NS':
+        if c not in 'NS' or s in conds:
             continue
         count, n = 1, s
         for _ in range(1, 16):
@@ -195,7 +204,7 @@ def line_events(steplen, gate):
             count += 1
         hold = LINE[n] == 'S'
         out.append((1 | (2 if c == 'S' else 0), (count + 1) * steplen if hold else (count - 1) * steplen + gs,
-                    LOCKS.get(s, DEFAULTS[0])))
+                    locks.get(s, DEFAULTS[0])))
     return out
 
 
@@ -204,7 +213,7 @@ def main():
     hs = {tag: hwprobe_image.build(tag, host=True)['syms']['hq_start'] for tag in ('A', 'B')}
     counters = {'calls': (S['ot_render_calls'], 4), 'trigs': (S['ot_trigs'], 4)}
     seqdump = dict(counters, steps=(S['ot_steps'], 4), evn=(S['ot_evn'], 4), evlog=(S['ot_evlog'], 128),
-                   evptch=(S['ot_evptch'], 32), ties=(S['ot_tieflags'], 4), stray=(S['ot_strayflags'], 4), tempo=(0x80001814, 4))
+                   evptch=(S['ot_evptch'], 32), clears=(S['ot_qclears'], 4), drops=(S['ot_qdrops'], 4), stray=(S['ot_strayflags'], 4), tempo=(0x80001814, 4))
     hb = {tag: hwprobe_image.build(tag, host=True) for tag in ('A', 'B')}
     yimg = hb['A']['y']
     ys = hb['A']['syms']
@@ -216,7 +225,7 @@ def main():
     for core in (1, 0):
         jobs[('src-stock', core)] = (STOCK, core, SRC[core])
         jobs[('src-inert', core)] = (IMAGE, core, SRC[core], (), None, None, None, counters)
-        jobs[('src-seq', core)] = (IMAGE, core, SRC[core], ot303_pokes((1, 5)) + line_pokes((1, 5)), None, None,
+        jobs[('src-seq', core)] = (IMAGE, core, SRC[core], ot303_pokes((1, 5)) + line_pokes((5,)) + line_pokes((1,), LINE2, LOCKS2, CONDS2), None, None,
                                    f'{core}:{hs["B" if core == 1 else "A"]:x}', seqdump, SEQ_FRAMES, peek)
         jobs[('spring', core)] = (IMAGE, core, FX2[core], (), 2, 0x15)
         for name, fx in (('dark', 0x16), ('plate', 0x14)):
@@ -289,8 +298,8 @@ def main():
         c = {k: int.from_bytes(v, 'big') for k, v in got.items() if k not in ('evlog', 'evptch')}
         ci = {k: int.from_bytes(v, 'big') for k, v in res[('src-inert', core)][3].items()}
         print(f'   ColdFire renderer: inert calls {ci.get("calls")} trigs {ci.get("trigs")}; with OT-303 tracks calls {c.get("calls")} '
-              f'notes {c.get("trigs")}, step-hook calls {c.get("steps")}, trig flags ignored: on tie steps {c.get("ties")}, '
-              f'with no note step {c.get("stray")}; '
+              f'notes {c.get("trigs")}, step-hook calls {c.get("steps")}, trig flags with no note queued {c.get("stray")}, '
+              f'queue clears {c.get("clears")}, notes dropped unplayed {c.get("drops")}; '
               f'DSP hq_start arrivals (last-24 window) {res[("src-seq", core)][2]}')
         ok &= ci.get('calls') == 0 and c.get('calls', 0) > 0 and c.get('trigs', 0) > 0 and c.get('steps', 0) > 0 \
             and res[('src-seq', core)][2] > 0
@@ -298,18 +307,26 @@ def main():
         steplen = 6 * 2646000 // c['tempo']
         want = sorted(set(line_events(steplen, DEFAULTS[9])))
         log = got.get('evlog', b'')
-        ents = [int.from_bytes(log[i:i + 4], 'big') for i in range(0, len(log), 4)][:min(c['evn'], 32)]
-        pt = got.get('evptch', b'')
-        seen = {}
+        ring = [int.from_bytes(log[i:i + 4], 'big') for i in range(0, len(log), 4)]
+        pt0 = got.get('evptch', b'')
+        m = min(c['evn'], 32)
+        at = [(c['evn'] - m + i) & 31 for i in range(m)]        # the ring, oldest first
+        ents, pt = [ring[a] for a in at], [pt0[a] for a in at]
+        order = {}
         for i, e in enumerate(ents):
-            seen.setdefault(e >> 28, set()).add(((e >> 24) & 3, e & 0xffffff, pt[i]))
-        print(f'   notes sent ({c["evn"]}; tempo {c["tempo"] / 24:.1f} BPM, step {steplen} samples): '
-              f'T2 {sorted(seen.get(1, ()))}, T6 {sorted(seen.get(5, ()))}; the line implies {want}')
-        # T6 exactly; T2's PTCH sits halfway to 90 (BOTLI's scene on T2's pitch, the crossfader in the middle:
-        # the note follows the knob's live value, as stock FLEX's pitch does)
-        want2 = sorted({(e, g, (v + 90 + 1) // 2) for e, g, v in want})
-        ok &= sorted(seen.get(1, ())) == want2 and sorted(seen.get(5, ())) == want
-        print(f'   T6 as the line; T2 as the line with PTCH halfway to its scene\'s 90: {sorted(seen.get(1, ())) == want2}')
+            order.setdefault(e >> 28, []).append(((e >> 24) & 3, e & 0xffffff, pt[i]))
+        # T6: the tie / hold / slide / lock line; T2: every step but the two FILL steps, in order, each with
+        # its own PTCH (halfway to 90: BOTLI's scene on T2's pitch, the crossfader in the middle -- the note
+        # follows the knob's live value, as stock FLEX's pitch does)
+        full6 = line_events(steplen, DEFAULTS[9])
+        full2 = [(e, g, (v + 91) // 2) for e, g, v in line_events(steplen, DEFAULTS[9], LINE2, LOCKS2, CONDS2)]
+        def in_order(seq, line):
+            return bool(seq) and any(all(seq[i] == line[(o + i) % len(line)] for i in range(len(seq))) for o in range(len(line)))
+        ok6, ok2 = in_order(order.get(5, []), full6), in_order(order.get(1, []), full2)
+        print(f'   notes sent ({c["evn"]}; tempo {c["tempo"] / 24:.1f} BPM, step {steplen} samples), the last {m} in order:')
+        print(f'     T6 (ties, holds, slides, locks) {order.get(5, [])[:7]}...: as the line {ok6}')
+        print(f'     T2 (16 notes, FILL on steps 5 and 11) PTCH {[x[2] for x in order.get(1, [])]}: as the line, none skipped {ok2}')
+        ok &= ok6 and ok2 and c.get('stray', 1) == 0 and c.get('drops', 1) == 0
         # the Y image through the records, both cores; the voice running
         for cc in (1, 0):
             m = re.search(rf'core {cc} Y:0x0*{ys["YBEG"]:x}:((?: [0-9a-f]{{6}})+)', res[('src-seq', core)][4])

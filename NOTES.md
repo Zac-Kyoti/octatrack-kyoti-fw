@@ -36151,4 +36151,29 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   (notes' gates/slides/PTCH locks as the line implies; the Y image arrives intact on both cores).
   `out/OCTATRACK_OS1.40C_OT303_MT5.syx` sha256 1d87b686c514084916199e01424ff836ce217e70686896ff337809fec03e9e1f
   (`140C_303T5`).
+- **S124 cont (2026-10-12): MT5 FLASHED. Report:** (1) a full 16-trig bar drops step 2 every other bar;
+  (2) CUT/ENV/DEC p-locks crack; (3) trigless ties do nothing; (4) a track double-tap on an OT-303
+  opens an empty sample list; (5) toast wanted "ONE 303 PER CORE!"; (6) PLAYBACK SETUP shows 5 of 6
+  machines. **Causes:** an ot_emu trace shows the step handler 0x4009d1e8 is called right AFTER the
+  previous step's trig fires (one step ahead, not "~3 frames before its step" as memory-map.md says),
+  so MT5's single pending slot raced the renderer: on the unit the next step overwrote it before the
+  trig was seen (the trig took the next step's data, the next trig found none; a tie step's TIE
+  swallowed the note before it). The handler's trig conditions run inside it; it writes event code 29
+  (0x46c7a810[t], at 0x4009d422) only for a note that will fire. Double-tap: the machine window reads
+  the raw type at 0x400788c4 (type < 2 = sample list). PLAYBACK SETUP list = 0x4007ec60(list,
+  visible, count) at 0x400585f4 (visible 5). Clicks: chain_check `locks` modes (CUT/ENV/DEC locked
+  per step): our onset clicks equal Open303's within ~1 dB everywhere; Open303's only anti-click
+  measures are the 200 Hz amp declicker, rc2 (accent attack 15 ms), the pitch slew and the idle reset
+  (rc1 has tau 0) and we have them; it does nothing for knob jumps. Further smoothing = a sound change
+  (A/B). **MT6 BUILT (NOT flashed):** notes queue at 0x4009d422 (ot_note_hook), the entry hook tracks
+  the step being scheduled (pruning, continuity clears; the next pattern's own Part decides OT-303),
+  trigs take the oldest; record w1 = a sequence number, the DSP treats a record whose number is its
+  track's last or the one before as old (silence, no claim); double-tap detour 0x400788c4 (ot_row_type);
+  poke 0x400585fe 5 -> 6; toast text. One-shot trigs (code 61) not played (the frame builder can drop
+  them). ot_emu reproduction of a pattern+Part change (cue 0x400a0570(0, 1, 0, -1, 0) at a frame, the
+  pattern's Part link +0x8e57) runs clean. Host 976/1028 words; bench bit-exact incl. 12 frames of
+  frozen slots holding a note; verify ALL GOOD (T2: 16 notes with PTCH locks and FILL on two steps, in
+  order, none skipped; T6 ties/holds/slides/locks in order); screenshots: PLAYBACK SETUP six rows, the
+  double-tap machine list. `out/OCTATRACK_OS1.40C_OT303_MT6.syx` sha256
+  63398fdcd180a3b691cdd4b51a0fca1f2c6501d9361d7fa8b340ebd2878adc4d (`140C_303T6`).
 
