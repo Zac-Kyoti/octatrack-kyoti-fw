@@ -6,7 +6,9 @@
 # 0 -> 127: as built / makeup gain by RES / feedback high-pass 350 Hz / a gentler RES curve) and the pops on
 # big lock or LFO jumps inside held notes (as built / the words glided over 1 ms / 3 ms). Renders
 # tools/ot303/listening_pack13.cpp, cuts 10 s clips at one loudness into out/ot303/listen/clips13/, writes
-# manifest13.json (the page's PICK list). Judge within a clip: each clip is level-matched as a whole.
+# manifest13.json (the page's PICK list). The bass clips share one gain (as built's at -20 dBFS RMS), so
+# their RES-0 first bar is identical and the level each keeps as RES rises is heard as it is; the jump
+# clips are level-matched one by one.
 #   python3 tools/ot303/listening_pack13.py
 import json, os, subprocess, sys, wave
 import numpy as np
@@ -15,7 +17,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 OUT = os.path.join(ROOT, 'out', 'ot303', 'listen'); RENDER = os.path.join(ROOT, 'out', 'ot303', 'pack13')
 FS = 44100; SECONDS = 10.0; STEP = 5088
 SCENE_TEXT = {
-    'sweep': 'The acid line around C2 (CUT 45, ENV 70) while RES rises from 0 to 127 over the clip.',
+    'sweep': 'The acid line around C2 (CUT 45, ENV 70): RES 0 for the first bar, then rising to 127. All four play '
+             'at the same gain, so the first bar is identical and the level each keeps is heard as it is.',
     'jumps': 'Held notes (one every bar quarter, tied); CUT, ENV and RES jump to new values on every step, '
              'as trigless locks or a square / random LFO do.',
 }
@@ -59,15 +62,19 @@ def main():
     k = kick(); a, b = int(0.5 * FS), int(0.5 * FS) + int(SECONDS * FS)
     for key, _, _, scs, vars_, withKick in PAIRS:
         for sc in scs:
+            ref = np.fromfile(os.path.join(RENDER, f'{sc}.base.f32'), dtype=np.float32).astype(np.float64)[a:b]
             for v in vars_:
                 x = np.fromfile(os.path.join(RENDER, f'{sc}.{v}.f32'), dtype=np.float32).astype(np.float64)
-                x = x / np.sqrt(np.mean(x[a:b] ** 2))
+                shared = key == 'bass'                # one gain for the bass clips: as built's
+                x = x / np.sqrt(np.mean((ref if shared else x[a:b]) ** 2))
                 if withKick:                          # quarter notes, on the steps (every 4th 16th)
                     kk = np.zeros_like(x)
                     for s in range(0, len(x) // STEP, 4):
                         p = s * STEP; m = min(len(k), len(x) - p); kk[p:p + m] += k[:m]
                     x = x + 1.4 * kk / np.sqrt(np.mean(kk[a:b] ** 2))
-                x = x[a:b]; x = x / np.sqrt(np.mean(x ** 2))
+                x = x[a:b]
+                if not shared:
+                    x = x / np.sqrt(np.mean(x ** 2))
                 n = int(0.005 * FS); r = np.linspace(0, 1, n); x[:n] *= r; x[-n:] *= r[::-1]
                 xs.append((f'{key}-{sc}-{v}', x))
     crest = max(np.max(np.abs(x)) for _, x in xs); target = min(10 ** (-20 / 20), 10 ** (-1.0 / 20) / crest)

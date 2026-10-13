@@ -4,7 +4,7 @@
 // OT-303 listening pack round 13 (tools/ot303/listening_pack13.py): the machine as MT13 plays it (params.c's
 // words, the host's note rules, the integer twin; the saw free-running, VOL 99 = drive +2.5 dB) and
 // candidates for two reports from MT12 on the unit:
-//   bass lost as RES rises (scene "sweep": RES 0 -> 127 over the clip):
+//   bass lost as RES rises (scene "sweep": RES 0 for the first bar, then 0 -> 127):
 //     makeup   the output scaled up by RES to hold RES 0's loudness (the loss measured on the twin: -4.6 dB
 //              at RES 8, about -10 dB from RES 64), before the drive
 //     fb350    the resonance feedback's high-pass 150 -> 350 Hz (less bass fed back, so less cancelled)
@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
                 const int idx = bar * 16 + s;
                 uint8_t base[12] = {(uint8_t)(24 + st.dp), 45, 0, 70, 60, (uint8_t)(st.acc ? 100 : 0), 0, 64, 38, 63, 99, 0};
                 for (int i = 0; i < 12; i++) kk[i] = base[i];
-                if (sweep) kk[OT_RES] = uint8_t(idx * 127 / (BARS * 16 - 1));
+                if (sweep) kk[OT_RES] = uint8_t(idx < 16 ? 0 : (idx - 16) * 127 / (BARS * 16 - 17));
                 else {
                     unsigned h = unsigned(idx + 1) * 2654435761u;
                     kk[OT_CUT] = uint8_t(idx & 1 ? 15 + (h >> 8) % 30 : 85 + (h >> 8) % 35);   // a big jump every step
