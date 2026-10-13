@@ -89,8 +89,18 @@ void ot_params_cont(const uint8_t k[12], struct ot_cont *c) {
 }
 
 unsigned ot_note_number(unsigned ptch) {
-    unsigned n = 12 + ptch;                 /* a semitone a step: 0 C0, 12 C1, 24 C2, 36 C3 ... 115 G9 */
-    return n > 127 ? 127 : n;
+    return 12 + ((ptch & 127) * 73 >> 7);   /* C0 .. C6 over the knob: 73 notes, one or two values each */
+}
+
+unsigned ot_note_name(unsigned ptch, char out[4]) {
+    static const char nm[12][2] = {{'C', 0}, {'C', '#'}, {'D', 0}, {'D', '#'}, {'E', 0}, {'F', 0},
+                                   {'F', '#'}, {'G', 0}, {'G', '#'}, {'A', 0}, {'A', '#'}, {'B', 0}};
+    unsigned n = ot_note_number(ptch) - 12, s = n % 12, i = 0;
+    out[i++] = nm[s][0];
+    if (nm[s][1]) out[i++] = nm[s][1];
+    out[i++] = (char)('0' + n / 12);
+    out[i] = 0;
+    return i;
 }
 
 void ot_params_note(const uint8_t k[12], struct ot_note *n) {

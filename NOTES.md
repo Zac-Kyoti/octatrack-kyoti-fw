@@ -36224,4 +36224,9 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   (asm_macros forbids labels in macros: `teq y1,a`). Benches all bit-exact, DIAG14 still 85cfe103, verify
   ALL GOOD incl. a DSP-memory check of RC1W/GD8. `out/OCTATRACK_OS1.40C_OT303_MT10.syx` sha256
   865b890bf602f900f74b89d9275f3618b85388a3aac2ce1732e4da4a116e13e0 (`140C303T10`), NOT flashed.
+- **S124 cont: MT11 -- PTCH C0..C6 with note names.** User's change: note = 12 + (PTCH*73 >> 7), default 64 = C3.
+  The page descriptor's +0x102 per-knob field is the value formatter f(buf, value) (stock FLEX PTCH
+  0x4003b4b0 -> sprintf 0x40013a08); OT-303's PTCH points at control.c ot_fmt_ptch. LCD in ot_emu shows
+  C0/C#3/C6. `out/OCTATRACK_OS1.40C_OT303_MT11.syx` sha256
+  1b636369e58c59c8af97e0be1acfd50e21a5e75779b73dede990e87840a5b9d2 (`140C303T11`), NOT flashed (replaces MT10, unflashed).
 

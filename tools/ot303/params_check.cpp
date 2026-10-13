@@ -156,7 +156,7 @@ static Ref reference(const uint8_t k[12]) {
 static int check() {
     static const char* cn[] = {"CS", "L0_16", "ES8", "RS", "AG_8", "BG", "SC", "W1", "W2", "W3", "SQ", "RC1", "GD8"};
     static const char* nn[] = {"INC_T", "C_MEG", "M_AMP_on", "M_AMP_off", "AG8", "AGF", "K8_on", "M48 hi", "M48 lo", "AMP2"};
-    const uint8_t D[12] = {36, 30, 64, 32, 71, 0, 0, 64, 38, 63, 119, 0};   // control.c's defaults
+    const uint8_t D[12] = {64, 30, 64, 32, 71, 0, 0, 64, 38, 63, 119, 0};   // control.c's defaults
     long worstC[13] = {0}, worstN[10] = {0}; int atC[13] = {0}, atN[10] = {0};
     double m48rel = 0;
     auto cmp = [&](const uint8_t* k, int knob) {
@@ -189,6 +189,24 @@ static int check() {
     for (int i = 0; i < 10; i++) if (i != 7 && i != 8) { std::printf("  %-9s %6ld  (%d)\n", nn[i], worstN[i], atN[i]); bad += worstN[i] > 8; }
     std::printf("  M48       relative %.2e\n", m48rel);
     bad += m48rel > 1e-6;
+    // PTCH: C0 .. C6 over the knob, every note on one or two values, named as the display shows it
+    {
+        static const char* NM[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+        int per[73] = {0}, pbad = 0, prev = -1;
+        for (int v = 0; v < 128; v++) {
+            int n = (int)ot_note_number(v) - 12;
+            char got[4], want[8]; unsigned len = ot_note_name(v, got);
+            std::snprintf(want, sizeof want, "%s%d", NM[n % 12], n / 12);
+            pbad += n < 0 || n > 72 || n < prev || std::strcmp(got, want) != 0 || len != std::strlen(want);
+            if (n >= 0 && n <= 72) per[n]++;
+            prev = n;
+        }
+        for (int n = 0; n < 73; n++) pbad += per[n] < 1 || per[n] > 2;
+        char a0[4], a64[4], a127[4]; ot_note_name(0, a0); ot_note_name(64, a64); ot_note_name(127, a127);
+        pbad += std::strcmp(a0, "C0") || std::strcmp(a64, "C3") || std::strcmp(a127, "C6");
+        std::printf("PTCH: 0 %s, 64 %s, 127 %s; 73 notes, each on 1-2 values: %s\n", a0, a64, a127, pbad ? "BAD" : "ok");
+        bad += pbad;
+    }
     std::printf(bad ? "%d words beyond 8 LSB\n" : "ALL WITHIN 8 LSB (2^-20)\n", bad);
     return bad ? 1 : 0;
 }

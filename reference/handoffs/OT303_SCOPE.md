@@ -2226,6 +2226,14 @@ crossing 109→110 engages tanh at G ≈ 1.03, a small peak compression). Host+e
 host bit-exact both payloads (RES 40–127, VOL 79/99/119 sweep both words); engine bit-exact; chain vs
 twin −86 dB; DIAG14 rebuilds `85cfe103…`; verify ALL GOOD + the DSP's RC1W/GD8 equal the records'
 (RES 64, VOL 119) on both cores. **On the unit: check low notes don't gallop** (the restart fixed that in MT7).
+**MT11 (built, NOT flashed; user's change of mind, 2026-10-12):** `out/OCTATRACK_OS1.40C_OT303_MT11.syx`
+(`140C303T11`, sha256 `1b636369…`, mainos `8ca4fe23…`): PTCH spans C0..C6 over the knob, note = 12 +
+(PTCH·73 >> 7) (73 notes, each on 1 or 2 values; 0 C0, 64 C3 = the default, 127 C6), and shows note
+names: the page descriptor's per-knob value formatter (+0x102 + 4k; stock FLEX PTCH 0x4003b4b0, called
+f(buf, value), writes the text; +0xa2 min, +0xd2 count, +0x132/+0x162 other callbacks, 0 = none) →
+control.c `ot_fmt_ptch` → params.c `ot_note_name` ("C3", "C#3"). params_check tests all 128 values;
+ot_emu LCD: C0 / C#3 / C6 on the SRC page while turning. MT9/MT10-era PTCH values now read differently
+(36 was C3, is G#1). Benches, verify ALL GOOD; DSP unchanged from MT10.
 
 **MT7 on the unit + round 8 results (user, 2026-10-12):** STATIC preview: odd characters under SLIC/LEN
 (stock's LEN formatter `0x4003b2ec` and slice checks `0x40044dbe`, `0x4004fee2` read the *current*
