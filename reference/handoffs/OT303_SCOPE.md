@@ -2203,6 +2203,15 @@ attack moves Hot only 0.91 → 1.03. **Round 11 pack (v12):** `tools/ot303/liste
 Hot restart + no soft attack / free + none / free + 1 ms; soft attack 1 ms vs none, free (Locks, Line);
 drive none / +2.5 / +4.5 dB, free + 1 ms (Locks, Line). The results line now always prints the 1/2/3 key.
 
+**Round 11 results (user, 2026-10-12):** Hot: notes start on the step, no soft attack (over free + none,
+free + 1 ms). Soft attack 1 ms kept on Locks and Line (free-running). Drive: Locks none, Line +2.5 dB.
+**Decisions (user):** the note start gets a tie-breaker round; the drive rides on **VOL** (ABL3-style):
+VOL 0–109 clean volume, 110–127 also drive tanh(G y) up to +4.5 dB, the default VOL 119 = +2.5 dB
+(G = 10^(dB/20), linear in dB over 109..127). Planned for MT10 too: soft attack 1 ms faded out by RES
+(full to RES 100, none from RES 115). **Round 12 pack (v13):** `tools/ot303/listening_pack12.{cpp,py}`:
+on the step vs free-running, both with the faded soft attack and drive +2.5 dB, over the round 10 kick
+(Low, Line, Hot, Locks).
+
 **MT7 on the unit + round 8 results (user, 2026-10-12):** STATIC preview: odd characters under SLIC/LEN
 (stock's LEN formatter `0x4003b2ec` and slice checks `0x40044dbe`, `0x4004fee2` read the *current*
 machine's SLIC byte = OT-303's TUNE; zeroing TUNE alone fixes both labels in ot_emu); DIAG stayed 4 with

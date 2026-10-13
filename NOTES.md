@@ -36214,4 +36214,8 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   listening_pack11) tests Hot's note start, soft attack 1 ms vs none, drive 0/+2.5/+4.5 dB. Pack 10's
   "MT8" clip had the 2 ms release too. README notes for release (the trigless-trig tie trade-off,
   ERASE skip) logged in OT303_SCOPE.md. No firmware change yet; MT9 still NOT flashed.
+- **S124 cont: round 11 results -> round 12.** Hot kept on-the-step with no soft attack; soft attack kept on
+  Locks/Line; drive none (Locks) / +2.5 dB (Line). User: tie-breaker round for the note start; drive on
+  VOL's top (110-127 up to +4.5 dB, VOL 119 = +2.5 dB). Round 12 (v13, listening_pack12): step vs free,
+  soft attack faded by RES (100..115), drive +2.5 dB, over the kick. No firmware change; MT9 NOT flashed.
 
