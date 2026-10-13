@@ -53,6 +53,14 @@ SC_HOST = 0x71eb85
 # tau 1 ms (Open303's rc1), and the output drive tanh(1.68 y) (+4.5 dB into the soft clip). Since MT10
 # only start values: the record rewrites both every frame (from RES and VOL, tools/ot303/cf/params.c)
 import math
+FB_HZ = 350.0                       # the machine's feedback high-pass (MT14; Open303 150)
+
+
+def q23f(v):
+    """twin.h q23: round to 2^-23, saturate"""
+    return max(-0x800000, min(0x7fffff, int(round(v * 8388608.0)))) & 0xffffff
+
+
 RC1W = round(math.exp(-1.0 / (0.001 * 44100.0)) * 8388608)
 GD8 = round(1.68 / 8.0 * 8388608)
 VARS = [  # C_MEG M_AMP AG8 AGFM K8
@@ -186,6 +194,12 @@ def build(tag, host=False):
         raise ValueError(f'payload {tag}: exit branch disassembles as {line!r}')
 
     T = twin_constants()
+    if host:
+        # MT14 (listening round 13, the user's pick): the resonance feedback's high-pass 150 -> 350 Hz, so
+        # less bass is fed back and cancelled as RES rises (about -5 dB at the top instead of -10); RES 0
+        # is unchanged (no feedback). The hardware-probe build keeps Open303's 150 Hz.
+        fx = math.exp(-2.0 * math.pi * FB_HZ / 176400.0)
+        T = dict(T, FBB=q23f(0.5 * (1 + fx)), FBA=q23f(fx))
     x = {}
 
     def X(name, v):

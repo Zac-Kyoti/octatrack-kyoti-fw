@@ -36240,4 +36240,8 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   crackle: probable stock ring-offset bug at mid-play selection (subagent; scope doc). DSP P now 1028/1028.
   `out/OCTATRACK_OS1.40C_OT303_MT13.syx` sha256 d9219dbd5f150902990642a749c89f799becafc1699abec843f769e234fadd9d
   (`140C303T13`), NOT flashed. Round 13 pack (v14): bass candidates, lock-jump glides.
+- **S124 cont: round 13 -> MT14.** Bass: fb350 (RES 0 identical to as built; the "flabby" start is level + drive);
+  pops: glide 1 ms (not built: DSP full). MT14 = MT13 + feedback HPF 350 Hz (host builds; DIAG14 still 85cfe103).
+  `out/OCTATRACK_OS1.40C_OT303_MT14.syx` sha256 60f9e18d84b0e5d182c02581783e5aa3467f182301c7360250b0f6846fffc7a3
+  (`140C303T14`), NOT flashed.
 

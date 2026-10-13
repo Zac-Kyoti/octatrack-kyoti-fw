@@ -223,6 +223,7 @@ int main(int argc, char** argv) {
         auto X = [&](const char* n) { return gx(sym(n)); };
         e.C2 = X("C2"); e.C_MEG = X("C_MEG"); e.M_AMP = X("M_AMP"); e.AG8 = X("AG8"); e.AGF = X("AGFM") != 0; e.K8 = X("K8");
         e.MEGS = X("MEGS");                                         // the soft attack's state (RC1, GD8: the record's)
+        e.FB_B = X("FBB"); e.FB_A = X("FBA");                       // the machine's feedback high-pass (MT14: 350 Hz)
         e.INC_T = 0;
         moff = gx(sym("XM") + sym("D_MOFF"));
         twinSet = true;

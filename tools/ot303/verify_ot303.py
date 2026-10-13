@@ -33,7 +33,7 @@ import dram  # noqa: E402
 
 EMU = os.path.join(ROOT, 'out', 'ot303', 'ot_emu_8d0ad6f4')
 CARD = os.path.join(os.path.realpath(os.path.join(ROOT, 'refs', 'octabam')), 'out', 'botli_card2.img')
-IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt13.bin'))
+IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt14.bin'))
 STOCK = os.path.join(ROOT, 'out', 'raw', 'section_3_MAIN_OS.bin')
 ELF = os.path.join(ROOT, 'out', 'ot303', 'cf', 'ot303_runtime.elf')
 LOADER = os.path.join(ROOT, 'out', 'ot303', 'cf', 'loader.elf')

@@ -2285,6 +2285,17 @@ RC1W/GD8 at VOL 99); ot_emu LCD: LFO SETUP "PMTR PB / CUT", OSC "FREE".
 gain by RES / feedback HPF 350 / RES² curve) and jumps inside held notes (as built / glide 1 ms /
 3 ms; measured mean click >3 kHz −1.6 / −3.2 dB, worst unchanged).
 
+**Round 13 results (user, 2026-10-13; MT13 not flashed):** bass: leaning to the 350 Hz feedback HPF, worried
+the RES-0 start sounds "flabby / blown out" and must not get bassier. Answer (measured): at RES 0 there is
+no feedback, so as built and fb350 are sample-identical there; the start is the voice's loudest part
+(as built −13.5 dB RMS in bar 1 vs −19.5 dB at the top, so level-matching plays it hot) and the drive
+works hardest there (VOL 99: 4.9 % of samples > 1 dB gain reduction vs 0.5 %). Pops: glide 1 ms.
+**MT14 (built, NOT flashed; replaces MT13):** `out/OCTATRACK_OS1.40C_OT303_MT14.syx` (`140C303T14`, sha256
+`60f9e18d…`, mainos `aaec612c…`): MT13 + feedback HPF 350 Hz (hwprobe_image FB_HZ, host builds only;
+DIAG14 keeps 150 and still rebuilds `85cfe103…`). Benches: host bit-exact (the twin takes FBB/FBA from
+the DSP), the image's X words carry the 350 Hz pair on both payloads, chain ours vs twinv 0.000 dB,
+engine bit-exact, verify ALL GOOD. Glide 1 ms not built: DSP P is 1,028/1,028.
+
 **MT7 on the unit + round 8 results (user, 2026-10-12):** STATIC preview: odd characters under SLIC/LEN
 (stock's LEN formatter `0x4003b2ec` and slice checks `0x40044dbe`, `0x4004fee2` read the *current*
 machine's SLIC byte = OT-303's TUNE; zeroing TUNE alone fixes both labels in ot_emu); DIAG stayed 4 with

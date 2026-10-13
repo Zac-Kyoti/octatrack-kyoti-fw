@@ -154,6 +154,7 @@ int main(int argc, char** argv) {
             double b = o.oscillator.blend;
             e.W1 = q23(-(1.0 - b) / 2.0); e.W2 = q23(b / 4.0); e.W3 = q23(b * SQDC / 4.0); e.SQ = b > 0.0;
             ot_cont mc; ot_params_cont(curk, &mc); e.RC1 = mc.rc1; e.GD8 = mc.gd8;   // the machine's additions
+            { double x = std::exp(-2.0 * M_PI * 350.0 / 176400.0); e.FB_B = twin::q23(0.5 * (1 + x)); e.FB_A = twin::q23(x); }   // MT14
         };
         size_t mi = 0;
         for (long t = 0; t < N; t++) {
@@ -176,6 +177,7 @@ int main(int argc, char** argv) {
     {   // ours: params.c's words, the DSP host's rules
         twin::Engine e; e.init(HB2_43_16, 22, 16000.0, HB1_15_18, 8); e.meg48 = true; e.inc48 = false; e.FBS = 4;
         Open303 o; o.setSampleRate(FS); e.C2 = twin::q23(o.rc2.coeff);
+        { double x = std::exp(-2.0 * M_PI * 350.0 / 176400.0); e.FB_B = twin::q23(0.5 * (1 + x)); e.FB_A = twin::q23(x); }   // MT14: 350 Hz
         long evc = 0x7fffff; int half = 0; twin::W moff = 0;
         size_t ei = 0;
         uint8_t k[12]; for (int i = 0; i < 12; i++) k[i] = evs[0].k[i];
