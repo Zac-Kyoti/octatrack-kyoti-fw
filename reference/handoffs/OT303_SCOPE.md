@@ -2163,6 +2163,20 @@ commented out), so a note's first edge lands up to a period after its trig (2-60
 - DIAG, SETUP's 12th slot (read only): each note's gate in eighths of a step (4 = half a step, 12 =
   one tie). Host 990/1028 words.
 
+**MT7 on the unit + round 8 results (user, 2026-10-12):** STATIC preview: odd characters under SLIC/LEN
+(stock's LEN formatter `0x4003b2ec` and slice checks `0x40044dbe`, `0x4004fee2` read the *current*
+machine's SLIC byte = OT-303's TUNE; zeroing TUNE alone fixes both labels in ot_emu); DIAG stayed 4 with
+ties entered (ot_emu: 12); the note start sounds good; PTCH ≤ 35 not useful. Round 8 picks: note start
+Low = restart (unsure without a pulse), Line = free-running; drive: Line base, Hot drive; feedback HPF
+250: base both; all-together: base both; notes on grit (indifferent), edges (wants 1 ms + 2 ms), square
+(wants a little rounding) — their 1/2 numbering is per browser, printed by round 9's "Round 8 key".
+**MT8 (built, NOT flashed):** `out/OCTATRACK_OS1.40C_OT303_MT8.syx` (`140C_303T8`, sha256 `23a9c438…`):
+PTCH two steps a semitone (0 C1, 24 C2, 48 C3 default … 120–127 C6); the three SLIC reads give an OT-303
+track FLEX's stashed value; DIAG = what the look-ahead saw (bits 0–2 spanned steps, +8 next step a note,
++16 trigless, +32 lock, +64 one-shot). **Round 9 pack (v10):** note start over a kick (Low from D1,
+Line), edges none / 1+2 ms / 2+4 ms (Locks, Line), square 36.9 / 32 / 28 dB, drive none / +4.5 / +9 dB
+(Hot, Line); `tools/ot303/listening_pack9.{cpp,py}`.
+
 **Listening pack round 8 (2026-10-12, artifact https://claude.ai/artifact/VM8mZ61ARuDkp2QbmsxfNX v9):**
 `tools/ot303/listening_pack8.{cpp,py}` render the machine as MT7 plays it (params.c words, the host's
 note rules, the integer twin) against one candidate at a time, blind two-way picks with "Same" and a

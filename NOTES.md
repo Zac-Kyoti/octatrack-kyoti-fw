@@ -36190,4 +36190,11 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   bc0c5a966fb2c5e5e7c9cea9c3278f646d176db65206e9e2e850a607a2aa2cb1 (`140C_303T7`), commit 1c77a6a.
   Pack round 8 (tools/ot303/listening_pack8.{cpp,py}; twin.h gained off-by-default GRIT/NOISE/RC1):
   12 blind two-way picks, published to the listening-pack artifact (version 9).
+- **S124 cont: MT7 on HW + round 8 results -> MT8 + round 9.** STATIC preview garbage = stock's LEN
+  formatter 0x4003b2ec + slice checks 0x40044dbe/0x4004fee2 read the CURRENT machine's SLIC byte
+  (OT-303's TUNE) -> detoured to FLEX's stash. DIAG stayed 4 with ties on the unit (emulator 12) ->
+  DIAG now encodes the look-ahead's view (next step's trig kinds). PTCH two steps a semitone C1..C6
+  (default 48). `out/OCTATRACK_OS1.40C_OT303_MT8.syx` sha256
+  23a9c4383a779b4356982b319fc3c41b6534c188038b55b76a21373c0e67240b (`140C_303T8`), commit e04397e, NOT
+  flashed. Pack round 9 published (artifact v10) with the round 8 key.
 
