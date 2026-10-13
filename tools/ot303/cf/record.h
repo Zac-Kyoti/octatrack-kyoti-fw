@@ -7,9 +7,9 @@
  * DSP words, high half first.
  *   long 0, 1     $3303 SEQ, $0909 EV: the signature; SEQ the record's number (one more each
  *                 frame); EV bit 0 a note at the frame's trig sample, bit 1 it slides
- *   long 2..13    12 continuous words: CS ES8 RS BG SC SQ W1 W1 W2 W3 L0_16 AG_8
- *   long 14..24   11 note words (EV bit 0 only): C_MEG AG8 AGFM K8 MOFF GL M_AMP INC_T M48H M48L AMP2
- *   long 25, 26   a table chunk's Y address and length; long 27.. its words (OT_CHUNK at most)
+ *   long 2..15    14 continuous words: CS ES8 RS BG SC SQ W1 W1 W2 W3 RC1 GD8 L0_16 AG_8
+ *   long 16..26   11 note words (EV bit 0 only): C_MEG AG8 AGFM K8 MOFF GL M_AMP INC_T M48H M48L AMP2
+ *   long 27, 28   a table chunk's Y address and length; long 29.. its words (OT_CHUNK at most)
  * A 24-bit word v rides one long: bits 23-8 in the high half, 7-0 in the low half's low byte.
  */
 #ifndef OT303_RECORD_H
@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define OT_REC_LONGS 84u
-#define OT_CHUNK (OT_REC_LONGS - 27u)
+#define OT_CHUNK (OT_REC_LONGS - 29u)
 #define OT_EV_NOTE 1u
 #define OT_EV_SLIDE 2u
 #define OT_GL_HELD 0x7fffffu

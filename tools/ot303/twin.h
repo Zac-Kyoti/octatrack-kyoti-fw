@@ -188,7 +188,7 @@ struct Engine {
     // the cutoff (Open303's rc1, shipped at tau 0; on the DSP since MT9)
     W GRIT = 0, NOISE = 0, RC1 = 0, MEGS = 0; uint32_t rng = 22222;
     // the machine's (MT9, the DSP engine too): RC1 the soft attack, GD8 the output drive's gain / 8
-    // (0: none -- the DSP engine always drives, so a bench of it sets GD8)
+    // (0: none, as the DSP engine since MT10; the record sets both from RES and VOL)
     W GD8 = 0;
     // diagnostic: the oscillator from outside (the reference's, in double); returns osc (not /2)
     double (*oscHook)(void*) = nullptr; void* oscCtx = nullptr;

@@ -36218,4 +36218,10 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   Locks/Line; drive none (Locks) / +2.5 dB (Line). User: tie-breaker round for the note start; drive on
   VOL's top (110-127 up to +4.5 dB, VOL 119 = +2.5 dB). Round 12 (v13, listening_pack12): step vs free,
   soft attack faded by RES (100..115), drive +2.5 dB, over the kick. No firmware change; MT9 NOT flashed.
+- **S124 cont: round 12 -> MT10.** Free-running won 3/4. MT10: no saw restart; RC1 (soft attack, faded by
+  RES 100..115) and GD8 (drive on VOL 110..127, 119 = +2.5 dB, 0 = clean) as record cont words 13-14
+  every frame (record: 14 cont, note longs 16-26, chunk 27-28, OT_CHUNK 55); ODRIVE bypass branch-free
+  (asm_macros forbids labels in macros: `teq y1,a`). Benches all bit-exact, DIAG14 still 85cfe103, verify
+  ALL GOOD incl. a DSP-memory check of RC1W/GD8. `out/OCTATRACK_OS1.40C_OT303_MT10.syx` sha256
+  865b890bf602f900f74b89d9275f3618b85388a3aac2ce1732e4da4a116e13e0 (`140C303T10`), NOT flashed.
 

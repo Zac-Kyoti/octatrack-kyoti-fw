@@ -11,7 +11,8 @@
  *                            4 DEC (30 ms..3 s, exp)      5 ACC (0..100 %; 0 = no accent)
  *                 SETUP      6 WAVE (saw..square)         7 TUNE (A4 = 400..480 Hz, 64 = 440)
  *                            8 SLID (0..198 ms)           9 GATE ((k + 1) / 128 of a step)
- *                           10 VOL ((k / 127)^2)         11 -
+ *                           10 VOL ((k / 127)^2; from 110 also the drive, +4.5 dB at 127)  11 -
+ * MT10 (not Open303): RES fades the soft attack out (1 ms to RES 100, none from 115).
  */
 #ifndef OT303_PARAMS_H
 #define OT303_PARAMS_H
@@ -27,7 +28,7 @@ typedef int32_t ot_w;
 
 /* read every frame (they act at once, as Open303's setters do) */
 struct ot_cont {
-    ot_w cs, l0_16, es8, rs, ag_8, bg, sc, w1, w2, w3, sq;
+    ot_w cs, l0_16, es8, rs, ag_8, bg, sc, w1, w2, w3, sq, rc1, gd8;
 };
 /* latched at a note (Open303 reads them when a note starts or slides) */
 struct ot_note {

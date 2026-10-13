@@ -33,7 +33,7 @@ import dram  # noqa: E402
 
 EMU = os.path.join(ROOT, 'out', 'ot303', 'ot_emu_8d0ad6f4')
 CARD = os.path.join(os.path.realpath(os.path.join(ROOT, 'refs', 'octabam')), 'out', 'botli_card2.img')
-IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt9.bin'))
+IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt10.bin'))
 STOCK = os.path.join(ROOT, 'out', 'raw', 'section_3_MAIN_OS.bin')
 ELF = os.path.join(ROOT, 'out', 'ot303', 'cf', 'ot303_runtime.elf')
 LOADER = os.path.join(ROOT, 'out', 'ot303', 'cf', 'loader.elf')
@@ -222,7 +222,12 @@ def main():
     ys = hb['A']['syms']
     stg = ys['XM'] + ys['D_STG']
     assert all(hb['B']['syms'][k] == ys[k] for k in ('XM', 'D_STG', 'YBEG', 'CB', 'CHH', 'HB1C')) and hb['B']['y'] == yimg
-    peek = ';'.join(f'{c}:Y:{ys["YBEG"]:#x},{len(yimg)};{c}:X:{stg:#x},4' for c in (1, 0))
+    peek = ';'.join(f'{c}:Y:{ys["YBEG"]:#x},{len(yimg)};{c}:X:{stg:#x},4;{c}:X:{ys["RC1W"]:#x},2' for c in (1, 0))
+    # MT10: the soft attack and the drive the records carry for the line's RES and VOL (not locked: the defaults)
+    pc = open(os.path.join(ROOT, 'tools', 'ot303', 'cf', 'params_const.h')).read()
+    tab = lambda n: [int(v) for v in re.search(rf'{n}\[\d+\] = \{{([^}}]*)\}}', pc).group(1).replace('\n', ' ').split(',')]
+    want_rc1 = 0 if DEFAULTS[2] >= 115 else tab('OT_RC1')[max(0, DEFAULTS[2] - 100)]
+    want_gd8 = tab('OT_GD8')[DEFAULTS[10] - 110] if DEFAULTS[10] > 109 else 0
     jobs = {('ui', 'T2'): (1, ()), ('ui', 'T3'): (2, (1,)), ('ui', 'T6'): (5, (1,)),
             ('ui', 'back'): (1, (), True), ('ui', 'stock'): (1, (), False, STOCK), ('dram', ''): None}
     for core in (1, 0):
@@ -362,6 +367,11 @@ def main():
             print(f'   core {cc} Y image: {len(ws)} words read, its constants ({sum(const(ys["YBEG"] + i) for i in range(len(yimg)))}) '
                   f'equal to the image but {len(bad)} {bad[:6]}; STG {st}')
             ok &= len(ws) == len(yimg) and not bad and st == 2
+            m3 = re.search(rf'core {cc} X:0x0*{ys["RC1W"]:x}: ([0-9a-f]{{6}}) ([0-9a-f]{{6}})', res[('src-seq', core)][4])
+            rg = (int(m3.group(1), 16), int(m3.group(2), 16)) if m3 else None
+            print(f'   core {cc} soft attack / drive words {rg and [hex(v) for v in rg]} (RES {DEFAULTS[2]}, VOL {DEFAULTS[10]}: '
+                  f'want {hex(want_rc1)} {hex(want_gd8)})')
+            ok &= rg == (want_rc1, want_gd8)
         sp = res[('spring', core)][0][-4:]
         print(f'   SPRING id -> {sp} (stub ~69)')
         ok &= all(x < 200 for x in sp)

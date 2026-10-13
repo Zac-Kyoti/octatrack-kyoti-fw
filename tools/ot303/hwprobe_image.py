@@ -50,7 +50,8 @@ HOST = dict(CS=0x000c62, C2=0x7fce80, L0_16=0x08c434, ES8=0x4e4ffe, RS=0x7fffff,
 # twin scene peaks below full scale (Hot -0.8 dBFS; the user found DIAG14's -6 dBFS too quiet)
 SC_HOST = 0x71eb85
 # MT9 (listening pack round 9, the user's picks): the soft attack, the main envelope smoothed with
-# tau 1 ms (Open303's rc1), and the output drive tanh(1.68 y) (+4.5 dB into the soft clip)
+# tau 1 ms (Open303's rc1), and the output drive tanh(1.68 y) (+4.5 dB into the soft clip). Since MT10
+# only start values: the record rewrites both every frame (from RES and VOL, tools/ot303/cf/params.c)
 import math
 RC1W = round(math.exp(-1.0 / (0.001 * 44100.0)) * 8388608)
 GD8 = round(1.68 / 8.0 * 8388608)
@@ -71,7 +72,7 @@ STEP, GATE = 5088, 2544          # samples: a 16th at 130 BPM, 50 % gate (EVC re
 
 
 # the machine's continuous X words, in the record's order (host.asm CDST; tools/ot303/cf/record.c)
-CONT_X = ('CS', 'ES8', 'RS', 'BG', 'SC', 'SQ', 'W1', 'W1A', 'W2', 'W3')
+CONT_X = ('CS', 'ES8', 'RS', 'BG', 'SC', 'SQ', 'W1', 'W1A', 'W2', 'W3', 'RC1W', 'GD8')
 
 
 def yimage(T, S):

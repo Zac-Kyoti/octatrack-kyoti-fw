@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-OT-303 machine, test image 9 (MT9; reference/handoffs/OT303_SCOPE.md §12 items 1b, 2): the OT-303 DSP
+OT-303 machine, test image 10 (MT10; reference/handoffs/OT303_SCOPE.md §12 items 1b, 2): the OT-303 DSP
 voice as a track machine. "OT-303" is the sixth row of the track's machine chooser and of SRC SETUP,
 on any track, one per DSP core (T1-4, T5-8). The track is stored as FLEX plus a signature in unused
 NEIGHBOR page bytes, so a stock OS loads the project as a FLEX track. Its FLEX renderer sends the
@@ -39,6 +39,10 @@ step's trig kinds).
 MT9 (after MT8 on the unit and listening round 9): ties are trigless LOCKS (FUNC+TRIG; trigless trigs
 keep their stock job); PTCH a semitone a step from C0 (36 = C3); the soft attack (the main envelope
 smoothed, 1 ms) and a 2 ms normal release; the output drive tanh(1.68 x) (+4.5 dB into the soft clip).
+Before flashing, trigless trigs tie too (they keep their stock LFO/FX reset, never retrigger the voice).
+MT10 (listening rounds 10-12): the saw runs free (no restart from silence); the soft attack fades out
+with RES (1 ms to RES 100, none from 115); the drive rides on VOL's top (clean to 109, then up to
++4.5 dB at 127; the default 119 = +2.5 dB). Both reach the DSP in the record every frame.
 
 Stock 1.40C plus exactly this:
   * DSP, both payloads: tools/ot303/host.asm + the engine over SPRING REV's P words (DARK REV's
@@ -51,7 +55,7 @@ Stock 1.40C plus exactly this:
     and the FLEX renderer slot, each asserted against stock.
 
 Usage:   python3 tools/build_ot303.py      (WIP: KYOTI_ALLOW_WIP=1)
-Outputs: out/mainos_ot303_mt9.bin, out/OCTATRACK_OS1.40C_OT303_MT9.syx, out/OCTATRACK_OT303_MT9.bin
+Outputs: out/mainos_ot303_mt10.bin, out/OCTATRACK_OS1.40C_OT303_MT10.syx, out/OCTATRACK_OT303_MT10.bin
 """
 import os, pathlib, subprocess, sys
 from kyoti_status import gate, seal
@@ -69,11 +73,11 @@ STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 CF = ROOT / "tools/ot303/cf"
 WORK = ROOT / "out/ot303/cf"
-OUT = ROOT / "out/mainos_ot303_mt9.bin"
-ELEK = ROOT / "out/elek_ot303_mt9.bin"
-OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_MT9.syx"
-OUT_BIN = ROOT / "out/OCTATRACK_OT303_MT9.bin"
-VERSTR = "140C_303T9"      # the field takes 10 characters
+OUT = ROOT / "out/mainos_ot303_mt10.bin"
+ELEK = ROOT / "out/elek_ot303_mt10.bin"
+OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_MT10.syx"
+OUT_BIN = ROOT / "out/OCTATRACK_OT303_MT10.bin"
+VERSTR = "140C303T10"      # the field takes 10 characters
 
 # MT4: no ROM cave. The ColdFire code is a DRAM runtime (tools/ot303/dram.py): linked at its arena
 # reserve, appended after the OS image behind tools/ot303/cf/loader.S, copied in at boot.

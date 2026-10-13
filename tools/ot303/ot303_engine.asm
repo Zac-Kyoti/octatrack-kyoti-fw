@@ -138,8 +138,8 @@ P_N2    equ     PTRS+2
 P_N7    equ     PTRS+3
 OUTP    equ     PTRS+4
 MEGS    equ     XB+$6d          ; the main envelope smoothed (soft attack, Open303's rc1)
-RC1W    equ     XB+$6e          ; its one-pole coefficient (0: none, MEGS = MEG2 exactly)
-GD8     equ     XB+$6f          ; the output drive's gain / 8 (into the tanh table)
+RC1W    equ     XB+$6e          ; its one-pole coefficient (0: none, MEGS = MEG2 exactly); per frame
+GD8     equ     XB+$6f          ; the output drive's gain / 8 (into the tanh table; 0: none); per frame
 OCB     equ     XB+$60          ; the square path's words (8-aligned), read in this order
 S70     equ     OCB+0
 C437    equ     OCB+1
@@ -167,7 +167,9 @@ SOFTATK macro
         move    a,y0                                            ; MEGS
         endm
 ODRIVE  macro
-; ---- output drive: tanh(G yy) from the square's tanh table, x8 = (G / 8) yy
+; ---- output drive: tanh(G yy) from the square's tanh table, x8 = (G / 8) yy; GD8 0: none, yy kept
+; (MT10: the drive rides on VOL's top, clean below). y1 is free here (the loop reloads it).
+        move    y0,y1                                           ; yy
         move    x:>GD8,x1
         mpy     x1,y0,a
         move    a,x0                                            ; x8
@@ -183,6 +185,9 @@ ODRIVE  macro
         move    y:(r0)+,x0                                      ; slope[i]
         mpy     y0,x0,a
         add     x1,a
+        move    x:>GD8,b
+        tst     b
+        teq     y1,a                                            ; GD8 0: yy
         move    a,y0                                            ; the output
         endm
 

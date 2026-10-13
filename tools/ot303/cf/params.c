@@ -77,6 +77,9 @@ void ot_params_cont(const uint8_t k[12], struct ot_cont *c) {
     c->bg = q23((p * OT_RCP17X8) >> 32, 30);                /* * 8 / 17 */
     /* volume: (VOL / 127)^2 */
     c->sc = clamp24(((int64_t)k[OT_VOL] * k[OT_VOL] * OT_SC_PER_K2 + 0x8000) >> 16);
+    /* MT10: the output drive / 8 on VOL's top (0: none, the DSP skips it), the soft attack faded by RES */
+    c->gd8 = k[OT_VOL] > 109 ? OT_GD8[k[OT_VOL] - 110] : 0;
+    c->rc1 = k[OT_RES] >= 115 ? 0 : OT_RC1[k[OT_RES] > 100 ? k[OT_RES] - 100 : 0];
     /* waveform: blend b = WAVE / 127; osc/2 = -(1 - b)/2 saw + b/4 tanh(..) + b sqDC / 4 */
     uint32_t w = k[OT_WAVE];
     c->w1 = -(ot_w)((((127 - w) << 22) + 63) / 127);
@@ -110,7 +113,7 @@ void ot_params_note(const uint8_t k[12], struct ot_note *n) {
         /* decay 30 * 100^f ms: x = 2^(-f log2 100) / 1323 */
         int64_t e2 = exp2q(-(int32_t)(k[OT_DEC] * OT_DEC_ARG24));
         meg((OT_X0 * e2) >> 30, n);
-        n->m_amp_off = OT_M_AMP_OFF_N;                      /* release 1 ms */
+        n->m_amp_off = OT_M_AMP_OFF_N;                      /* release 2 ms (MT9) */
         n->ag8 = 0;
         n->agf = 0;
         n->k8_on = OT_K8_BASE;                              /* 0.45 / 8 */

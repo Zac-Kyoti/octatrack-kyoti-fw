@@ -13,11 +13,12 @@
 ;   w0 $3303, w2 $0909  the signature;  w1  the record's number (one more each frame)
 ;   w3                  bit 0: a note starts at the frame's trig sample (the stock x:$20c);
 ;                       bit 1: it slides (no retrigger when the gate is still open)
-;   w4..w27             12 continuous words, every frame (Open303's setters act at once):
-;                       CS ES8 RS BG SC SQ W1 W1 W2 W3 L0_16 AG_8
-;   w28..w49            11 note words, read only with bit 0: C_MEG AG8 AGFM K8 MOFF (M_AMP at the
+;   w4..w31             14 continuous words, every frame (Open303's setters act at once):
+;                       CS ES8 RS BG SC SQ W1 W1 W2 W3 RC1 GD8 L0_16 AG_8 (RC1: the soft attack,
+;                       GD8: the output drive, 0 = none; MT10: from RES and VOL)
+;   w32..w53            11 note words, read only with bit 0: C_MEG AG8 AGFM K8 MOFF (M_AMP at the
 ;                       gate's end) GL (gate samples, $7fffff: held) M_AMP INC_T M48H M48L AMP2
-;   w50..w53            a table chunk: its Y address and length, then w54.. its words. The
+;   w54..w57            a table chunk: its Y address and length, then w58.. its words. The
 ;                       ColdFire cycles through the voice's Y image (tanh, the coefficient table,
 ;                       the state block); the DSP takes the chunks in order until the image is
 ;                       complete, and renders silence until then.
@@ -36,9 +37,8 @@
 ; Notes: a note's words take effect at its sample; its gate closes GL samples later (M_AMP to the
 ; release, K8 to 0) unless the next note comes first. A slide into an open gate only moves the
 ; pitch target and the accent words (Open303 slideToNote); anything else retriggers (triggerNote).
-; A retrigger from silence (the amp envelope under IDLE) also restarts the saw just before its edge: Open303's
-; oscillator runs free after its first note, so a low note's first edge could come up to a period
-; after its trig (MT6 on the unit: late, galloping low notes).
+; The saw runs free, as Open303's does (MT7-MT9 restarted it from silence; the user's listening rounds
+; 10-12 chose free-running).
 ;
 ; Rules (both broke the unit): no REP; no dense working data in a DMA's 8K partition: run 1 (the
 ; engine's X working set and these words) runs at X:$7b24 on both cores, in stock's unreferenced
@@ -56,8 +56,8 @@ XM      equ     XB+$40
 MSAV    equ     XB+$35          ; m0..m7 on entry (the gap after XW)
 WB      equ     XB+$70          ; X, 76 words after the engine's block
 RBUF    equ     WB+16           ; 16: the engine's output
-CDST    equ     WB+32           ; 10: the continuous X words' addresses (CS .. W3, in record order)
-NDST    equ     WB+42           ; 6: the note words' X addresses (C_MEG AG8 AGFM K8, WB's MOFF, EVC)
+CDST    equ     WB+32           ; 12: the continuous X words' addresses (CS .. GD8, in record order)
+NDST    equ     WB+44           ; 6: the note words' X addresses (C_MEG AG8 AGFM K8, WB's MOFF, EVC)
 OLD1    equ     PB+XD           ; the loader's copy of PB..PB+215 (X run 1)
 SIGA    equ     XB-$3c          ; X:$7b04, below run 1 in the unreferenced region: the copy's mark
 OWN     equ     XB-$3b          ; the core's voice: its track's x:$418 + 1 ($1 $21 $41 $61), 0 = none
@@ -69,13 +69,13 @@ LSEQ2   equ     XB-$36
 LSEQ3   equ     XB-$35
 ; Y staging, in the gap between the coefficient table and the state block (the image's zeros:
 ; written by the chunks only before the voice runs)
-CB      equ     YS-$3c          ; 12: the continuous words
-NB      equ     CB+12           ; 11: the note words
+CB      equ     YS-$3c          ; 14: the continuous words
+NB      equ     CB+14           ; 11: the note words
 CHH     equ     NB+11           ; 2: the chunk's address and length
 YBEG    equ     TH              ; the Y image: TH .. the state block's end
 YEND    equ     YS+172
 W_CONT  equ     4               ; record words
-W_CHK   equ     50
+W_CHK   equ     54
 ; displacements from XM (the operand's sign is written out: the assembler wants small numbers)
 D_STG   equ     $30             ; +: WB+0..15. 0 the tables arriving, 2 running
 D_EXP   equ     $31             ; the next chunk's Y address
@@ -97,8 +97,6 @@ E_M48L  equ     4
 E_L016  equ     6
 E_AG_8  equ     7
 E_AMP2  equ     8
-E_PH    equ     11
-IDLE    equ     $000400         ; AMP2 below this (-66 dB under a note's start): the voice is silent
 
 ; ---- the source seam (jsr from A P:$39c / B P:$1a2)
 sg_entry:
@@ -213,7 +211,7 @@ sg_voice:
         move    #>W_CONT,n4
         move    #>CB,r1
         move    (r4)+n4
-        move    #>12,x1
+        move    #>14,x1
         bsr     hq_unp
         move    #>$7fffff,a                     ; no note this frame
         move    x:>TRF,b
@@ -226,7 +224,7 @@ sg_notrig:
         move    a,x:(r5+D_TRG)
         move    #>CB,r1
         move    #>CDST,r2
-        move    #>10,x1
+        move    #>12,x1
         bsr     hq_copy
         move    #>YS,r4
         move    y:(r1)+,x0
@@ -388,17 +386,6 @@ hq_start:
         tst     a
         bne     hq_evret                        ; a slide into an open gate
 hq_trig:
-        move    y:(r4+E_AMP2),b                 ; a note from silence starts its saw 22 samples
-        move    #>IDLE,a                        ;  (0.5 ms) before its edge: the edge lands as the
-        cmp     a,b                             ;  amp has opened, so the note sounds 1-2 ms after
-        bge     hq_live                         ;  its trig at any pitch; a note into a sounding one
-        move    #>44,y0                         ;  keeps its phase
-        mpy     y0,x0,a                         ; a1:a0 = 88 INC_T, an integer (22 samples x 4)
-        move    a0,y1
-        move    #>$7fffff,b
-        sub     y1,b
-        move    b1,y:(r4+E_PH)                  ; the phase, modulo 2
-hq_live:
         move    x1,x:(r5-N_MAMP)
         move    x0,y:(r4+E_S48H)
         clr     a

@@ -7,7 +7,8 @@
 //            on; a slide's on before the previous note's off (Open303's slideToNote)
 //   twinv    the approved voice: the integer twin with Open303's note logic, its words made from
 //            Open303's state at each event (voice_study.cpp TwinVoice, without its idle reset), with the
-//            machine's one addition: a note from silence restarts the saw 22 samples before its edge (host.asm IDLE)
+//            machine's additions (MT9-MT10): the soft attack and the output drive, from RES and VOL as params.c
+//            makes them (params_check holds those two tables to their formulas); the saw runs free
 //   ours     the machine: the twin driven as the DSP host drives the engine (tools/ot303/host.asm:
 //            a note's words at its sample, a slide into an open gate without a retrigger, the gate's
 //            end), the words from tools/ot303/cf/params.c, the gates as control.c ot_step makes them
@@ -138,7 +139,6 @@ int main(int argc, char** argv) {
     {   // twinv: TwinVoice's host() and noteOn
         Open303 o; o.setSampleRate(FS); o.normalAmpRelease = 2.0;
         twin::Engine e; e.init(HB2_43_16, 22, 16000.0, HB1_15_18, 8); e.meg48 = true; e.inc48 = false; e.FBS = 4;
-        e.RC1 = twin::q23(std::exp(-1.0 / 44.1)); e.GD8 = twin::q23(1.68 / 8.0);   // MT9, as the machine
         const uint8_t* curk = evs[0].k;
         auto host = [&]() {
             using twin::q23;
@@ -153,6 +153,7 @@ int main(int argc, char** argv) {
             e.SC = q23(o.ampScaler);
             double b = o.oscillator.blend;
             e.W1 = q23(-(1.0 - b) / 2.0); e.W2 = q23(b / 4.0); e.W3 = q23(b * SQDC / 4.0); e.SQ = b > 0.0;
+            ot_cont mc; ot_params_cont(curk, &mc); e.RC1 = mc.rc1; e.GD8 = mc.gd8;   // the machine's additions
         };
         size_t mi = 0;
         for (long t = 0; t < N; t++) {
@@ -163,7 +164,6 @@ int main(int argc, char** argv) {
                 o.noteOn(note, vel, 0.0);
                 host();
                 if (trig) {
-                    if (e.AMP2 < 0x400) e.P = twin::wrap(twin::acc(0x7fffff) - twin::acc(88 * e.INC_T));   // the machine's restart from silence (host.asm IDLE)
                     e.S48 = twin::acc(e.INC_T);
                     e.M48 = (twin::A)std::nearbyint(0.5 / o.mainEnv.c * 140737488355328.0);
                     e.AMP2 = twin::q23(0.5 / twin::f23(e.M_AMP));
@@ -176,7 +176,6 @@ int main(int argc, char** argv) {
     {   // ours: params.c's words, the DSP host's rules
         twin::Engine e; e.init(HB2_43_16, 22, 16000.0, HB1_15_18, 8); e.meg48 = true; e.inc48 = false; e.FBS = 4;
         Open303 o; o.setSampleRate(FS); e.C2 = twin::q23(o.rc2.coeff);
-        e.RC1 = twin::q23(std::exp(-1.0 / 44.1)); e.GD8 = twin::q23(1.68 / 8.0);
         long evc = 0x7fffff; int half = 0; twin::W moff = 0;
         size_t ei = 0;
         uint8_t k[12]; for (int i = 0; i < 12; i++) k[i] = evs[0].k[i];
@@ -186,6 +185,7 @@ int main(int argc, char** argv) {
                 ot_cont c; ot_params_cont(k, &c);
                 e.CS = c.cs; e.ES8 = c.es8; e.RS = c.rs; e.BG = c.bg; e.SC = c.sc; e.SQ = c.sq != 0;
                 e.W1 = c.w1; e.W2 = c.w2; e.W3 = c.w3; e.L0_16 = c.l0_16; e.AG_8 = c.ag_8;
+                e.RC1 = c.rc1; e.GD8 = c.gd8;
             }
             if (evc == 0) { evc = 0x7fffff; if (half) { half = 0; e.K8 = 0; e.M_AMP = moff; } }
             if (ei < evs.size() && evs[ei].at == t) {
@@ -194,7 +194,6 @@ int main(int argc, char** argv) {
                 e.C_MEG = n.c_meg; e.AG8 = n.ag8; e.AGF = n.agf != 0; e.K8 = n.k8_on; moff = n.m_amp_off; evc = long(v.gl);
                 e.INC_T = n.inc_t;
                 if (!((v.ev & 2) && half)) {
-                    if (e.AMP2 < 0x400) e.P = twin::wrap(twin::acc(0x7fffff) - twin::acc(88 * n.inc_t));
                     e.M_AMP = n.m_amp_on; e.S48 = twin::acc(n.inc_t);
                     e.M48 = (twin::A(n.m48h) << 24) | (uint32_t(n.m48l) & 0xffffff); e.AMP2 = n.amp2; half = 1;
                 }

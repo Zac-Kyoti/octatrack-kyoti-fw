@@ -46,6 +46,14 @@ static double cutoffHz(int k) { return 200.0 * std::pow(50.0, k / 127.0); }
 static double decayMs(int k) { return 30.0 * std::pow(100.0, k / 127.0); }
 static double slideMs(int k) { return 1.5625 * k; }
 static double tuningHz(int k) { return 440.0 + (k - 64) * 80.0 / 127.0; }
+// MT10's two additions (not Open303's; the user's listening rounds 11-12): the soft attack, 1 ms faded
+// out by RES (full to RES 100, none from RES 115), and the output drive on VOL's top (none to VOL 109,
+// then +4.5 dB at 127, linear in dB: VOL 119 = +2.5 dB); 0 = off for both
+static int32_t rc1Word(int res) {
+    double ms = std::fmin(1.0, std::fmax(0.0, (115.0 - res) / 15.0));
+    return ms > 0 ? q23(std::exp(-1.0 / (0.001 * ms * FS))) : 0;
+}
+static int32_t gd8Word(int vol) { return vol > 109 ? q23(std::pow(10.0, 4.5 * (vol - 109) / 18.0 / 20.0) / 8.0) : 0; }
 
 static int gen(const char* path) {
     Open303 o; o.setSampleRate(FS);
@@ -94,6 +102,11 @@ static int gen(const char* path) {
     std::fprintf(f, "#define OT_LN2_Q38 (%lldLL)\n", (long long)qn(std::log(2.0), 38));   // u = t ln2 2^6, t of 2^18
     std::fprintf(f, "static const uint32_t OT_EXP2[65] = {");
     for (int j = 0; j <= 64; j++) std::fprintf(f, "%s%s%uu", j ? "," : "", j % 6 ? " " : "\n    ", (unsigned)std::llround(std::ldexp(std::exp2(j / 64.0), 30)));
+    std::fprintf(f, "};\n/* MT10: the soft attack for RES 100..114 (below: [0], from 115: none), the drive / 8 for VOL 110..127 */\n");
+    std::fprintf(f, "static const int32_t OT_RC1[15] = {");
+    for (int j = 0; j < 15; j++) std::fprintf(f, "%s%s%d", j ? "," : "", j % 8 ? " " : "\n    ", rc1Word(100 + j));
+    std::fprintf(f, "};\nstatic const int32_t OT_GD8[18] = {");
+    for (int j = 0; j < 18; j++) std::fprintf(f, "%s%s%d", j ? "," : "", j % 8 ? " " : "\n    ", gd8Word(110 + j));
     std::fprintf(f, "};\n#endif\n");
     std::fclose(f);
     std::printf("wrote %s\n", path);
@@ -124,6 +137,7 @@ static Ref reference(const uint8_t k[12]) {
     r.c.ag_8 = q23((1.0 - rs * rs) / 8.0);
     r.c.bg = q23(rs * (1.0 + rs) * 8.0 / 17.0);
     r.c.sc = q23(std::pow(k[OT_VOL] / 127.0, 2.0));
+    r.c.rc1 = rc1Word(k[OT_RES]); r.c.gd8 = gd8Word(k[OT_VOL]);
     double b = o.oscillator.blend;
     r.c.w1 = q23(-(1.0 - b) / 2.0); r.c.w2 = q23(b / 4.0); r.c.w3 = q23(b * sqDC() / 4.0); r.c.sq = b > 0.0;
     r.n.inc_t = q23(2.0 * o.oscFreq * o.pitchWheelFactor / (4 * FS));
@@ -140,16 +154,16 @@ static Ref reference(const uint8_t k[12]) {
 }
 
 static int check() {
-    static const char* cn[] = {"CS", "L0_16", "ES8", "RS", "AG_8", "BG", "SC", "W1", "W2", "W3", "SQ"};
+    static const char* cn[] = {"CS", "L0_16", "ES8", "RS", "AG_8", "BG", "SC", "W1", "W2", "W3", "SQ", "RC1", "GD8"};
     static const char* nn[] = {"INC_T", "C_MEG", "M_AMP_on", "M_AMP_off", "AG8", "AGF", "K8_on", "M48 hi", "M48 lo", "AMP2"};
-    const uint8_t D[12] = {64, 30, 64, 32, 71, 0, 0, 64, 38, 63, 119, 0};   // control.c's defaults
-    long worstC[11] = {0}, worstN[10] = {0}; int atC[11] = {0}, atN[10] = {0};
+    const uint8_t D[12] = {36, 30, 64, 32, 71, 0, 0, 64, 38, 63, 119, 0};   // control.c's defaults
+    long worstC[13] = {0}, worstN[10] = {0}; int atC[13] = {0}, atN[10] = {0};
     double m48rel = 0;
     auto cmp = [&](const uint8_t* k, int knob) {
         ot_cont c; ot_note n; ot_params_cont(k, &c); ot_params_note(k, &n);
         Ref r = reference(k);
         const ot_w* a = &c.cs; const ot_w* b = &r.c.cs;
-        for (int i = 0; i < 11; i++) { long d = std::labs((long)a[i] - b[i]); if (d > worstC[i]) { worstC[i] = d; atC[i] = knob; } }
+        for (int i = 0; i < 13; i++) { long d = std::labs((long)a[i] - b[i]); if (d > worstC[i]) { worstC[i] = d; atC[i] = knob; } }
         a = &n.inc_t; b = &r.n.inc_t;
         for (int i = 0; i < 10; i++) {
             if (i == 7 || i == 8) continue;
@@ -170,7 +184,7 @@ static int check() {
     }
     int bad = 0;
     std::printf("continuous words, worst |params.c - Open303| in LSBs of 2^-23 (where):\n");
-    for (int i = 0; i < 11; i++) { std::printf("  %-6s %6ld  (%d)\n", cn[i], worstC[i], atC[i]); bad += worstC[i] > 8; }
+    for (int i = 0; i < 13; i++) { std::printf("  %-6s %6ld  (%d)\n", cn[i], worstC[i], atC[i]); bad += worstC[i] > 8; }
     std::printf("note words:\n");
     for (int i = 0; i < 10; i++) if (i != 7 && i != 8) { std::printf("  %-9s %6ld  (%d)\n", nn[i], worstN[i], atN[i]); bad += worstN[i] > 8; }
     std::printf("  M48       relative %.2e\n", m48rel);
