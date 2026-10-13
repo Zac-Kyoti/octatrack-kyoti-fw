@@ -140,6 +140,10 @@ OUTP    equ     PTRS+4
 MEGS    equ     XB+$6d          ; the main envelope smoothed (soft attack, Open303's rc1)
 RC1W    equ     XB+$6e          ; its one-pole coefficient (0: none, MEGS = MEG2 exactly); per frame
 GD8     equ     XB+$6f          ; the output drive's gain / 8 (into the tanh table; 0: none); per frame
+GLT     equ     XB+$a4          ; MT15, the glide (host.asm's WB+52..54): ES8 and L0_16's targets, its gain
+ES8T    equ     GLT+0
+L016T   equ     GLT+1
+GLD     equ     GLT+2
 OCB     equ     XB+$60          ; the square path's words (8-aligned), read in this order
 S70     equ     OCB+0
 C437    equ     OCB+1
@@ -191,6 +195,38 @@ ODRIVE  macro
         move    a,y0                                            ; the output
         endm
 
+GLIDE   macro
+; ---- MT15: the env amount and the cutoff glide to the record's values (listening round 13: lock and LFO
+; jumps click less), W -= g (W - T) each sample, g = 1 - e^(-1/44.1) (tau 1 ms). r0 and the data
+; registers are free at the loop's top.
+        move    #>GLT,r0
+        move    x:>ES8,b
+        tfr     b,a             x:(r0)+,x0                      ; ES8T
+        sub     x0,a            x:(r0)+,y1                      ; ES8 - T ; L016T
+        move    a,x1
+        move    x:(r0),y0                                       ; g
+        macr    -x1,y0,b
+        move    b,x:>ES8
+        move    y:>L0_16,b
+        tfr     b,a
+        sub     y1,a
+        move    a,x1
+        macr    -x1,y0,b
+        move    b,y:>L0_16
+        endm
+MLIN    macro
+; ---- the modifiers linear for the host (the hardware probe's build spells out eight long immediates)
+        move    #>$ffffff,x0
+        move    x0,m0
+        move    x0,m1
+        move    x0,m2
+        move    x0,m3
+        move    x0,m4
+        move    x0,m5
+        move    x0,m6
+        move    x0,m7
+        endm
+
 ot303:
         move    r3,x:>OUTP
         move    r7,n6                           ; the count (r7 becomes the 43-tap's pointer)
@@ -214,6 +250,7 @@ ot303:
         move    #2,n5
         move    #21,m7
         do      n6,zsend
+        GLIDE
 ; ---- pitch slew (24-bit): S48 += CS INC_T - CS hi
         move    x:(r2)+,x1      y:(r6)+,y0      ; CS ; INC_T
         move    y:(r6)+,a                       ; S48 hi (A0 = 0)
@@ -468,14 +505,7 @@ zsend:
         move    n2,x:>P_N2
         move    n7,x:>P_N7
         move    x:>OUTP,r3
-        move    #>$ffffff,m0
-        move    #>$ffffff,m1
-        move    #>$ffffff,m2
-        move    #>$ffffff,m3
-        move    #>$ffffff,m4
-        move    #>$ffffff,m5
-        move    #>$ffffff,m6
-        move    #>$ffffff,m7
+        MLIN
         rts
 
 ; ---- saw, with the BLEP check every sample (the phase lives in PH while zblep runs)

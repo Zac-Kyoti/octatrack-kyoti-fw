@@ -13,7 +13,7 @@
  *                 SETUP      6 WAVE (saw..square)         7 TUNE (A4 = 400..480 Hz, 64 = 440)
  *                            8 SLID (0..198 ms)           9 GATE ((k + 1) / 128 of a step)
  *                           10 VOL (0 off, 1..64 -30 dB .. 0 dB, 65..127 driven 0 .. +4.5 dB; 99 = +2.5 dB)
- *                           11 OSC (0 FREE: the saw runs free; 1 SYNC: a note from silence restarts it)
+ *                           11 - (MT13's OSC test switch, removed in MT15)
  * MT10 (not Open303): RES fades the soft attack out (1 ms to RES 100, none from 115).
  */
 #ifndef OT303_PARAMS_H
@@ -23,7 +23,7 @@
 extern "C" {
 #endif
 
-enum { OT_PTCH, OT_CUT, OT_RES, OT_ENV, OT_DEC, OT_ACC, OT_WAVE, OT_TUNE, OT_SLID, OT_GATE, OT_VOL, OT_OSC };
+enum { OT_PTCH, OT_CUT, OT_RES, OT_ENV, OT_DEC, OT_ACC, OT_WAVE, OT_TUNE, OT_SLID, OT_GATE, OT_VOL };
 
 /* a host word: 24 bits, sign-extended */
 typedef int32_t ot_w;

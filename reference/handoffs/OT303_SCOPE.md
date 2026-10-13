@@ -2296,6 +2296,24 @@ DIAG14 keeps 150 and still rebuilds `85cfe103…`). Benches: host bit-exact (the
 the DSP), the image's X words carry the 350 Hz pair on both payloads, chain ours vs twinv 0.000 dB,
 engine bit-exact, verify ALL GOOD. Glide 1 ms not built: DSP P is 1,028/1,028.
 
+**MT14 on the unit (user, 2026-10-13): "good overall"**; LFO PMTR names good; **free-running chosen**
+(the note start is final). Round 13 again (bass clips at one shared gain, RES 0 for a bar: the first run's
+per-clip level matching had made the RES-0 starts differ): fb350 kept ("1 and 3 very similar; as built
+bass-weak; makeup way too heavy"). Questions: DEC 71 = 394 ms ≈ Open303 VST's default decay 400 ms (its
+range 200–2000 ms; ours 30 ms–3 s); VOL 99 = MT13's mapping of MT10's default sound (+2.5 dB drive, the
+round 11 pick). WAVE loudness check (twin, line at CUT 20/45/90, RES 0/90, VOL 64 clean and 99 driven):
+WAVE 32/64/96/127 within −0.1..−0.8 dB of the saw (RMS and K-weighted alike); the square end drops H2
+−3.5 → −15.7 dB re H1. Glide variants (twin, held notes, jumps mid-note, 350 Hz): per sample 1 ms all five
+words −3.0 / −5.7 dB (>3 / >8 kHz mean); cutoff + env only ≈ all five; per frame 2 ms ≈ the same mean.
+**MT15 (built, NOT flashed):** `out/OCTATRACK_OS1.40C_OT303_MT15.syx` (`140C303T15`, sha256 `ce4f91df…`,
+mainos `35b57b24…`): the OSC switch and the host's restart removed (12th slot hidden, EV bit 2 gone);
+engine macro GLIDE at the sample loop's top: ES8 and L0_16 move toward host targets ES8T / L016T
+(X:GLT = XB+$a4 = WB+52..54, gain GLD = 1−e^(−1/44.1)) — the record's ES8 goes to ES8T via CDST, L0_16
+to L016T; MLIN macro (x0 → m0..m7, 10 words) replaces zsend's eight long immediates in host builds
+(the probe keeps them: DIAG14 still `85cfe103…`). 1,026 / 1,028 words; saw 471 cycles/sample (+23),
+square 616 (worst note frame 666). Benches: host bit-exact (twin glide from DSP state), engine bit-exact,
+chain ours vs twinv −86 dB, verify ALL GOOD; ot_emu LCD: SETUP shows 11 knobs.
+
 **MT7 on the unit + round 8 results (user, 2026-10-12):** STATIC preview: odd characters under SLIC/LEN
 (stock's LEN formatter `0x4003b2ec` and slice checks `0x40044dbe`, `0x4004fee2` read the *current*
 machine's SLIC byte = OT-303's TUNE; zeroing TUNE alone fixes both labels in ot_emu); DIAG stayed 4 with

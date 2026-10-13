@@ -190,6 +190,9 @@ struct Engine {
     // the machine's (MT9, the DSP engine too): RC1 the soft attack, GD8 the output drive's gain / 8
     // (0: none, as the DSP engine since MT10; the record sets both from RES and VOL)
     W GD8 = 0;
+    // MT15: the glide -- ES8 and L0_16 move toward ES8T / L016T each sample by GLD (the DSP's GLIDE:
+    // d = limit(W - T), W = rnd(W - d GLD)); off: the host words are used as they are
+    bool glide = false; W ES8T = 0, L016T = 0, GLD = 0;
     // diagnostic: the oscillator from outside (the reference's, in double); returns osc (not /2)
     double (*oscHook)(void*) = nullptr; void* oscCtx = nullptr;
     bool exactCoef = false;     // diagnostic: b0/kpoly from the formulas (double) instead of tables
@@ -250,6 +253,10 @@ struct Engine {
 
     // one 44.1 kHz output sample
     double tick() {
+        if (glide) {
+            W d = st(acc(ES8) - acc(ES8T), nullptr); ES8 = str(acc(ES8) - mpy(d, GLD), nullptr);
+            d = st(acc(L0_16) - acc(L016T), nullptr); L0_16 = str(acc(L0_16) - mpy(d, GLD), nullptr);
+        }
         // pitch slew, 48-bit state
         if (inc48) {                 // d = T - S (acc), asl #8 -> word, mpy CS, asr #8, add
             W d = st((INC_T48 - S48) << 8, "slew");

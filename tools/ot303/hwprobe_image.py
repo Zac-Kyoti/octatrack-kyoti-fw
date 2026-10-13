@@ -61,6 +61,7 @@ def q23f(v):
     return max(-0x800000, min(0x7fffff, int(round(v * 8388608.0)))) & 0xffffff
 
 
+GLDW = q23f(1.0 - math.exp(-1.0 / 44.1))   # MT15: the glide's gain a sample (tau 1 ms)
 RC1W = round(math.exp(-1.0 / (0.001 * 44100.0)) * 8388608)
 GD8 = round(1.68 / 8.0 * 8388608)
 VARS = [  # C_MEG M_AMP AG8 AGFM K8
@@ -80,7 +81,7 @@ STEP, GATE = 5088, 2544          # samples: a 16th at 130 BPM, 50 % gate (EVC re
 
 
 # the machine's continuous X words, in the record's order (host.asm CDST; tools/ot303/cf/record.c)
-CONT_X = ('CS', 'ES8', 'RS', 'BG', 'SC', 'SQ', 'W1', 'W1A', 'W2', 'W3', 'RC1W', 'GD8')
+CONT_X = ('CS', 'ES8T', 'RS', 'BG', 'SC', 'SQ', 'W1', 'W1A', 'W2', 'W3', 'RC1W', 'GD8')
 
 
 def yimage(T, S):
@@ -142,8 +143,10 @@ def source(tag, host=False):
     if xd:
         assert 0x7b08 <= xb - 0x1c and xb - 0x1c + 216 <= 0x8000, 'run 1 outside X:$7b00-$7fff'
     eng = (ROOT / 'tools/ot303/ot303_engine.asm').read_text()
-    if not host:                        # the hardware probe: without MT9's soft attack and drive
-        eng = re.sub(r'^(SOFTATK|ODRIVE)(\s+)macro\n.*?^\s+endm\n', r'\1\2macro\n        endm\n', eng, flags=re.M | re.S)
+    if not host:                        # the hardware probe: without MT9's soft attack and drive, MT15's glide
+        eng = re.sub(r'^(SOFTATK|ODRIVE|GLIDE)(\s+)macro\n.*?^\s+endm\n', r'\1\2macro\n        endm\n', eng, flags=re.M | re.S)
+        eng = re.sub(r'^(MLIN)(\s+)macro\n.*?^\s+endm\n', 'MLIN macro\n' + ''.join(f'        move    #>$ffffff,m{i}\n' for i in range(8))
+                     + '        endm\n', eng, flags=re.M | re.S)
     wrap = (ROOT / 'tools/ot303' / ('host.asm' if host else 'hwprobe.asm')).read_text()
     lay = dict(XD=xd, NXD=(-xd) & 0xffffff, CONT=d['cont'], RAWP=d['rawp'])
     if not host:
@@ -214,6 +217,7 @@ def build(tag, host=False):
     X('MASKE', 0xfffffe); X('THMW', S['THM'])
     if host:
         X('RC1W', RC1W); X('GD8', GD8)
+        X('ES8T', HOST['ES8']); X('L016T', HOST['L0_16']); X('GLD', GLDW)   # MT15: the glide
     for i, v in enumerate(T['HB2C']):
         X(S['HB2C'] + i, v)
     for n in ('CS', 'C2', 'ES8', 'RS', 'BG', 'SC'):

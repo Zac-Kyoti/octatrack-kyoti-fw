@@ -36244,4 +36244,9 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   pops: glide 1 ms (not built: DSP full). MT14 = MT13 + feedback HPF 350 Hz (host builds; DIAG14 still 85cfe103).
   `out/OCTATRACK_OS1.40C_OT303_MT14.syx` sha256 60f9e18d84b0e5d182c02581783e5aa3467f182301c7360250b0f6846fffc7a3
   (`140C303T14`), NOT flashed.
+- **S124 cont: MT14 on HW (good; free-running final) -> MT15.** OSC switch + restart removed; GLIDE macro (cutoff +
+  env amount, per sample, tau 1 ms; targets X:XB+$a4..); MLIN shortens zsend (host builds only, DIAG14 85cfe103).
+  1026/1028 words, saw 471 cycles. WAVE loudness within 0.8 dB across the knob. DEC 71 = Open303 VST's 400 ms.
+  `out/OCTATRACK_OS1.40C_OT303_MT15.syx` sha256 ce4f91dfe0364a51acecf9c70c7eeffcb5918b6f93474d835ad423f62f6697d8
+  (`140C303T15`), NOT flashed.
 

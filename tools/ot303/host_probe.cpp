@@ -186,7 +186,7 @@ int main(int argc, char** argv) {
         k[OT_SLID] = uint8_t((f / 2500) & 1 ? 100 : 38);
         k[OT_GATE] = uint8_t(((f / 1800) * 41 + 20) % 128);
         k[OT_VOL] = uint8_t(119 - (f / 5000) % 4 * 30);       // driven (119, 89), clean (59, 29)
-        k[OT_OSC] = uint8_t((f / 3000) & 1);                    // OSC FREE / SYNC
+        k[11] = 0;
     };
     // the note a step starts (the ColdFire's look-ahead), or 0
     auto stepEvent = [&](const St* L, int s, unsigned gate, uint32_t& gl) -> unsigned {
@@ -224,12 +224,13 @@ int main(int argc, char** argv) {
         e.C2 = X("C2"); e.C_MEG = X("C_MEG"); e.M_AMP = X("M_AMP"); e.AG8 = X("AG8"); e.AGF = X("AGFM") != 0; e.K8 = X("K8");
         e.MEGS = X("MEGS");                                         // the soft attack's state (RC1, GD8: the record's)
         e.FB_B = X("FBB"); e.FB_A = X("FBA");                       // the machine's feedback high-pass (MT14: 350 Hz)
+        e.glide = true; e.GLD = X("GLD"); e.ES8 = X("ES8"); e.L0_16 = gyy(sym("L0_16"));   // MT15: the glide's state
         e.INC_T = 0;
         moff = gx(sym("XM") + sym("D_MOFF"));
         twinSet = true;
     };
     std::vector<float> wav;
-    long sample = 0, aFrames = 0, bFrames = 0, takeover = -1, notesHeard = 0, slidesHeard = 0, retrigSlides = 0, fromSilence = 0, syncRestarts = 0;
+    long sample = 0, aFrames = 0, bFrames = 0, takeover = -1, notesHeard = 0, slidesHeard = 0, retrigSlides = 0, fromSilence = 0;
     uint64_t sawCyc = 0, sawN = 0, sqCyc = 0, sqN = 0, evWorst = 0, evSawWorst = 0, offSawWorst = 0, sawWorst = 0, sqWorst = 0;
     uint32_t own = 0; int live = 0; bool tablesChecked = false, relocated = false; long initFrames = 0;
     for (long f = 0; f < frames; f++) {
@@ -248,7 +249,6 @@ int main(int argc, char** argv) {
                 knobs(L, f, int(step), k);
                 uint32_t gl = 0;
                 unsigned ev = stepEvent(L, int(step & 15), k[OT_GATE], gl);
-                if (ev && k[OT_OSC]) ev |= OT_EV_SYNC;
                 (w ? evB : evA) = ev; (w ? glB : glA) = gl; (w ? offB : offA) = int(at - f * 16);
             }
         }
@@ -314,8 +314,8 @@ int main(int argc, char** argv) {
             (isA ? aFrames : bFrames)++;
             if (isB && takeover < 0) takeover = f;
             ot_cont c; ot_params_cont(k, &c);
-            e.CS = c.cs; e.ES8 = c.es8; e.RS = c.rs; e.BG = c.bg; e.SC = c.sc; e.SQ = c.sq != 0;
-            e.W1 = c.w1; e.W2 = c.w2; e.W3 = c.w3; e.L0_16 = c.l0_16; e.AG_8 = c.ag_8;
+            e.CS = c.cs; e.ES8T = c.es8; e.RS = c.rs; e.BG = c.bg; e.SC = c.sc; e.SQ = c.sq != 0;
+            e.W1 = c.w1; e.W2 = c.w2; e.W3 = c.w3; e.L016T = c.l0_16; e.AG_8 = c.ag_8;
             e.RC1 = c.rc1; e.GD8 = c.gd8;                                   // MT10: from RES and VOL, every frame
             ot_note n{}; if (ev & 1) ot_params_note(k, &n);
             long trg = (ev & 1) ? off : BIG;
@@ -333,10 +333,7 @@ int main(int argc, char** argv) {
                     if ((ev & 2) && half) slidesHeard++;
                     else {
                         if (ev & 2) retrigSlides++;
-                        if (e.AMP2 < 0x400) {
-                            fromSilence++;
-                            if (ev & OT_EV_SYNC) { e.P = twin::wrap(twin::acc(0x7fffff) - twin::acc(88 * n.inc_t)); syncRestarts++; }
-                        }
+                        if (e.AMP2 < 0x400) fromSilence++;                  // the saw runs free
                         e.M_AMP = n.m_amp_on; e.S48 = twin::acc(n.inc_t);
                         e.M48 = (twin::A(n.m48h) << 24) | (uint32_t(n.m48l) & 0xffffff); e.AMP2 = n.amp2; half = 1;
                     }
@@ -370,8 +367,8 @@ int main(int argc, char** argv) {
                 "then took the voice at frame %ld (A stopped at %ld) and voiced %ld; $00/$60 always stock\n", aFrames, staleFrames,
                 takeover, frames * 3 / 4, bFrames);
     std::printf("BIT-EXACT: %ld samples, %ld notes (%ld slides into an open gate, %ld slides into a closed one retriggered, "
-                "%ld from silence, %ld of them OSC SYNC restarts); peak %.3f = %.1f dBFS\n", sample, notesHeard, slidesHeard, retrigSlides,
-                fromSilence, syncRestarts, pk, 20 * std::log10(pk));
+                "%ld from silence, the saw running free; cutoff and env amount gliding); peak %.3f = %.1f dBFS\n", sample, notesHeard, slidesHeard, retrigSlides,
+                fromSilence, pk, 20 * std::log10(pk));
     std::printf("cycles/sample: saw %.1f (worst plain frame %.1f, note %.1f, gate end %.1f), square %.1f (worst plain %.1f, note %.1f); "
                 "stock records %.1f cycles/call; a silent frame at most %.1f\n",
                 double(sawCyc) / std::max<uint64_t>(sawN * 16, 1), sawWorst / 16.0, evSawWorst / 16.0, offSawWorst / 16.0,

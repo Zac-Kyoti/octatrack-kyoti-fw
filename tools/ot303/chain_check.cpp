@@ -140,8 +140,10 @@ int main(int argc, char** argv) {
         Open303 o; o.setSampleRate(FS); o.normalAmpRelease = 2.0;
         twin::Engine e; e.init(HB2_43_16, 22, 16000.0, HB1_15_18, 8); e.meg48 = true; e.inc48 = false; e.FBS = 4;
         const uint8_t* curk = evs[0].k;
+        twin::W ES8now = 0, L016now = 0;
         auto host = [&]() {
             using twin::q23;
+            ES8now = e.ES8; L016now = e.L0_16;
             double rr = 0.01 * (100.0 * curk[OT_RES] / 127.0), rs = (1.0 - std::exp(-3.0 * rr)) / (1.0 - std::exp(-3.0));
             e.INC_T = q23(2.0 * o.oscFreq * o.pitchWheelFactor / (4 * FS));
             e.CS = q23(1.0 - o.pitchSlewLimiter.coeff); e.C_MEG = q23(o.mainEnv.c); e.C2 = q23(o.rc2.coeff);
@@ -155,6 +157,8 @@ int main(int argc, char** argv) {
             e.W1 = q23(-(1.0 - b) / 2.0); e.W2 = q23(b / 4.0); e.W3 = q23(b * SQDC / 4.0); e.SQ = b > 0.0;
             ot_cont mc; ot_params_cont(curk, &mc); e.RC1 = mc.rc1; e.GD8 = mc.gd8;   // the machine's additions
             { double x = std::exp(-2.0 * M_PI * 350.0 / 176400.0); e.FB_B = twin::q23(0.5 * (1 + x)); e.FB_A = twin::q23(x); }   // MT14
+            e.ES8T = e.ES8; e.L016T = e.L0_16;                                    // MT15: Open303's words as the glide's targets
+            if (!e.glide) { e.glide = true; e.GLD = twin::q23(1.0 - std::exp(-1.0 / 44.1)); } else { e.ES8 = ES8now; e.L0_16 = L016now; }
         };
         size_t mi = 0;
         for (long t = 0; t < N; t++) {
@@ -185,9 +189,10 @@ int main(int argc, char** argv) {
             if (t % 16 == 0) {      // the frame's continuous words: the knobs of the frame's note, else the last note's
                 if (ei < evs.size() && evs[ei].at < t + 16) for (int i = 0; i < 12; i++) k[i] = evs[ei].k[i];
                 ot_cont c; ot_params_cont(k, &c);
-                e.CS = c.cs; e.ES8 = c.es8; e.RS = c.rs; e.BG = c.bg; e.SC = c.sc; e.SQ = c.sq != 0;
-                e.W1 = c.w1; e.W2 = c.w2; e.W3 = c.w3; e.L0_16 = c.l0_16; e.AG_8 = c.ag_8;
+                e.CS = c.cs; e.ES8T = c.es8; e.RS = c.rs; e.BG = c.bg; e.SC = c.sc; e.SQ = c.sq != 0;
+                e.W1 = c.w1; e.W2 = c.w2; e.W3 = c.w3; e.L016T = c.l0_16; e.AG_8 = c.ag_8;
                 e.RC1 = c.rc1; e.GD8 = c.gd8;
+                if (!e.glide) { e.glide = true; e.GLD = twin::q23(1.0 - std::exp(-1.0 / 44.1)); e.ES8 = c.es8; e.L0_16 = c.l0_16; }   // MT15
             }
             if (evc == 0) { evc = 0x7fffff; if (half) { half = 0; e.K8 = 0; e.M_AMP = moff; } }
             if (ei < evs.size() && evs[ei].at == t) {

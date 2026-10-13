@@ -33,7 +33,7 @@ import dram  # noqa: E402
 
 EMU = os.path.join(ROOT, 'out', 'ot303', 'ot_emu_8d0ad6f4')
 CARD = os.path.join(os.path.realpath(os.path.join(ROOT, 'refs', 'octabam')), 'out', 'botli_card2.img')
-IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt14.bin'))
+IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt15.bin'))
 STOCK = os.path.join(ROOT, 'out', 'raw', 'section_3_MAIN_OS.bin')
 ELF = os.path.join(ROOT, 'out', 'ot303', 'cf', 'ot303_runtime.elf')
 LOADER = os.path.join(ROOT, 'out', 'ot303', 'cf', 'loader.elf')
@@ -304,8 +304,8 @@ def main():
         ok &= all(q[k] == i[k] for k in (2, 3)) and all(0 <= b - a <= 8 for a, b in zip(i[0], q[0])) and min(q[1]) > 3000
         got = res[('src-seq', core)][3]
         c = {k: int.from_bytes(v, 'big') for k, v in got.items() if k not in ('evlog', 'evptch')}
-        # MT13: the 12th slot is OSC (FREE / SYNC), a knob the renderer no longer writes (DIAG did)
-        print(f'   OSC bytes after the run: T2 {c.get("osc2")} T6 {c.get("osc6")} (the defaults {DEFAULTS[11]}, untouched)')
+        # the 12th slot (hidden since MT15; DIAG wrote it until MT12): the renderer leaves it alone
+        print(f'   12th-slot bytes after the run: T2 {c.get("osc2")} T6 {c.get("osc6")} (the defaults {DEFAULTS[11]}, untouched)')
         ok &= c.get('osc2') == DEFAULTS[11] and c.get('osc6') == DEFAULTS[11]
         ci = {k: int.from_bytes(v, 'big') for k, v in res[('src-inert', core)][3].items()}
         print(f'   ColdFire renderer: inert calls {ci.get("calls")} trigs {ci.get("trigs")}; with OT-303 tracks calls {c.get("calls")} '

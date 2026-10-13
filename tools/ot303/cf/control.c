@@ -30,10 +30,11 @@
 /* SRC (page 1) then SRC SETUP (page 2), stored with the track (params.h has the ranges). PTCH 36 = C3.
  * Open303's
  * defaults: CUT 30 (500 Hz), RES 64, ENV 32, DEC 71 (400 ms), SLID 38 (60 ms); ACC 0 (an accent is
- * an ACC lock), GATE 63 (half a step), VOL 99 (driven +2.5 dB, MT10's default sound), OSC 0 (FREE). */
+ * an ACC lock), GATE 63 (half a step), VOL 99 (driven +2.5 dB, MT10's default sound). The 12th slot is
+ * hidden (MT13's OSC test switch is gone: the saw runs free, the user's choice on the unit). */
 const uint8_t ot_defaults[12] = {36, 30, 64, 32, 71, 0, 0, 64, 38, 63, 99, 0};
 static const char *const ot_names[12] = {
-    "PTCH", "CUT", "RES", "ENV", "DEC", "ACC", "WAVE", "TUNE", "SLID", "GATE", "VOL", "OSC"
+    "PTCH", "CUT", "RES", "ENV", "DEC", "ACC", "WAVE", "TUNE", "SLID", "GATE", "VOL", ""
 };
 static uint8_t desc[DESC_SIZE] = {0};
 uint32_t ot_desc_p = 0;
@@ -70,14 +71,9 @@ static void text(uint8_t *p, const char *s, unsigned n) {
 int ot_fmt_ptch(char *buf, int v) {
     return (int)ot_note_name((unsigned)v, buf);
 }
-/* OSC (MT13, a test switch for the note start on the unit): FREE (Open303) or SYNC (MT7-MT9's restart) */
-int ot_fmt_osc(char *buf, int v) {
-    text((uint8_t *)buf, v ? "SYNC" : "FREE", 5);
-    return 4;
-}
 /* The stock FLEX page descriptor, renamed: twelve knobs (an empty name hides a slot; +0xa2 a knob's
  * minimum, +0xd2 its number of values, +0x102 its value formatter); PTCH runs 0..96 (C0 .. C8) and
- * shows note names, OSC is a two-way switch, the rest run 0..127. */
+ * shows note names, the rest run 0..127. */
 static uint32_t page(void) {
     if (!ot_desc_p) {
         const volatile uint8_t *src = (const volatile uint8_t *)0x400d3176u;
@@ -87,15 +83,14 @@ static uint32_t page(void) {
             text(desc + 0x4e + 6 * i, ot_names[i], 6);
             desc[0x96 + i] = ot_defaults[i];
             put32(desc + 0xa2 + 4 * i, 0);
-            put32(desc + 0xd2 + 4 * i, !ot_names[i][0] ? 0 : i == OT_PTCH ? OT_PTCH_MAX + 1 : i == OT_OSC ? 2 : 128);
-            put32(desc + 0x102 + 4 * i, i == OT_PTCH ? (uint32_t)(uintptr_t)ot_fmt_ptch :
-                                        i == OT_OSC ? (uint32_t)(uintptr_t)ot_fmt_osc : 0);
+            put32(desc + 0xd2 + 4 * i, !ot_names[i][0] ? 0 : i == OT_PTCH ? OT_PTCH_MAX + 1 : 128);
+            put32(desc + 0x102 + 4 * i, i == OT_PTCH ? (uint32_t)(uintptr_t)ot_fmt_ptch : 0);
             put32(desc + 0x132 + 4 * i, 0);
             put32(desc + 0x162 + 4 * i, 0);
         }
         /* one nibble a knob, low first (knobs 8..11, then 0..7): bit 0 on (stock FLEX also sets 2 and 4 on
-         * some, meaning unknown; OSC flips like FLEX's SLIC without them, ot_emu); all twelve on */
-        put32(desc + 0x1c2, 0x1111); put32(desc + 0x1c6, 0x11111111u);
+         * some, meaning unknown); the first eleven on */
+        put32(desc + 0x1c2, 0x0111); put32(desc + 0x1c6, 0x11111111u);
         ot_desc_p = (uint32_t)(uintptr_t)(desc + 0x38);
     }
     return ot_desc_p;
@@ -386,7 +381,7 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
             unsigned qd = qn[track];
             if (take(track, &e)) {
                 ++ot_trigs;
-                ev = OT_EV_NOTE | (e.slide ? OT_EV_SLIDE : 0) | (p[OT_OSC] ? OT_EV_SYNC : 0);
+                ev = OT_EV_NOTE | (e.slide ? OT_EV_SLIDE : 0);
                 gl = e.gl;
                 trace(2, track, e.step, (unsigned)U8(0x46104d0cu + track) << 8 | qd);
             } else {
