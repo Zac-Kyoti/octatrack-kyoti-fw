@@ -43,7 +43,7 @@ static double sqDC() {                           // TwinVoice::init: the square'
 }
 // the knob ranges (params.h)
 static double cutoffHz(int k) { return 200.0 * std::pow(50.0, k / 127.0); }
-static double decayMs(int k) { return 30.0 * std::pow(100.0, k / 127.0); }
+static double decayMs(int k) { return 200.0 * std::pow(10.0, k / 127.0); }   // MT16: Open303 VST's range, 200 ms .. 2 s
 static double slideMs(int k) { return 1.5625 * k; }
 static double tuningHz(int k) { return 440.0 + (k - 64) * 80.0 / 127.0; }
 // MT10's two additions (not Open303's; the user's listening rounds 11-12): the soft attack, 1 ms faded
@@ -89,9 +89,9 @@ static int gen(const char* path) {
     // resonance skew and the exponent steps (Q24 per knob step)
     std::fprintf(f, "#define OT_RES_ARG24 (%lldLL)\n#define OT_RES_K (%lldLL)\n", (long long)qn(3.0 * std::log2(std::exp(1.0)) / 127.0, 24),
                  (long long)qn(1.0 / (1.0 - std::exp(-3.0)), 30));
-    std::fprintf(f, "#define OT_DEC_ARG24 (%lldLL)\n", (long long)qn(std::log2(100.0) / 127.0, 24));
-    // decay rates x = 1 / (0.001 tau fs), Q41: tau 30 ms (DEC 0) and the accent's 200 ms
-    std::fprintf(f, "#define OT_X0 (%lldLL)\n#define OT_X_ACC (%lldLL)\n", (long long)qn(1.0 / (0.001 * 30.0 * FS), 41),
+    std::fprintf(f, "#define OT_DEC_ARG24 (%lldLL)\n", (long long)qn(std::log2(10.0) / 127.0, 24));
+    // decay rates x = 1 / (0.001 tau fs), Q41: tau 200 ms (DEC 0) and the accent's 200 ms
+    std::fprintf(f, "#define OT_X0 (%lldLL)\n#define OT_X_ACC (%lldLL)\n", (long long)qn(1.0 / (0.001 * 200.0 * FS), 41),
                  (long long)qn(1.0 / (0.001 * o.accentDecay * FS), 41));
     std::fprintf(f, "#define OT_SQDC4_MAG_Q30 (%lldLL)\n", (long long)qn(-sqDC() / 4.0, 30));
     std::fprintf(f, "#define OT_RCP17X8 (%lldLL)\n#define OT_SC_PER_K2 (%lldLL)\n", (long long)qn(8.0 / 17.0, 32),
@@ -166,7 +166,7 @@ static Ref reference(const uint8_t k[12]) {
 static int check() {
     static const char* cn[] = {"CS", "L0_16", "ES8", "RS", "AG_8", "BG", "SC", "W1", "W2", "W3", "SQ", "RC1", "GD8"};
     static const char* nn[] = {"INC_T", "C_MEG", "M_AMP_on", "M_AMP_off", "AG8", "AGF", "K8_on", "M48 hi", "M48 lo", "AMP2"};
-    const uint8_t D[12] = {36, 30, 64, 32, 71, 0, 0, 64, 38, 63, 99, 0};   // control.c's defaults
+    const uint8_t D[12] = {36, 30, 64, 32, 38, 0, 0, 64, 38, 63, 99, 0};   // control.c's defaults
     long worstC[13] = {0}, worstN[10] = {0}; int atC[13] = {0}, atN[10] = {0};
     double m48rel = 0;
     auto cmp = [&](const uint8_t* k, int knob) {

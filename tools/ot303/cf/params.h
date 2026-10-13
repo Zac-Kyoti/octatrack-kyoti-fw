@@ -9,7 +9,7 @@
  * Knobs (0..127): SRC page   0 PTCH (0..96 only: a semitone a value, 0 C0, 36 C3, 96 C8; shown as
  *                              note names)                1 CUT (200 Hz..10 kHz, exp)
  *                            2 RES (0..100 %)             3 ENV (0..100 %)
- *                            4 DEC (30 ms..3 s, exp)      5 ACC (0..100 %; 0 = no accent)
+ *                            4 DEC (200 ms..2 s, exp)     5 ACC (0..100 %; 0 = no accent)
  *                 SETUP      6 WAVE (saw..square)         7 TUNE (A4 = 400..480 Hz, 64 = 440)
  *                            8 SLID (0..198 ms)           9 GATE ((k + 1) / 128 of a step)
  *                           10 VOL (0 off, 1..64 -30 dB .. 0 dB, 65..127 driven 0 .. +4.5 dB; 99 = +2.5 dB)

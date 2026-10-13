@@ -121,7 +121,7 @@ void ot_params_note(const uint8_t k[12], struct ot_note *n) {
         n->agf = 0xffffff;
         n->k8_on = clamp24(OT_K8_BASE + (ot_w)(((a << 22) + 63) / 127));   /* (0.45 + 4 acc) / 8 */
     } else {
-        /* decay 30 * 100^f ms: x = 2^(-f log2 100) / 1323 */
+        /* decay 200 * 10^f ms (MT16: Open303 VST's 200 ms .. 2 s): x = 2^(-f log2 10) / 8820 */
         int64_t e2 = exp2q(-(int32_t)(k[OT_DEC] * OT_DEC_ARG24));
         meg((OT_X0 * e2) >> 30, n);
         n->m_amp_off = OT_M_AMP_OFF_N;                      /* release 2 ms (MT9) */

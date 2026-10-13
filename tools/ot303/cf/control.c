@@ -29,10 +29,10 @@
 
 /* SRC (page 1) then SRC SETUP (page 2), stored with the track (params.h has the ranges). PTCH 36 = C3.
  * Open303's
- * defaults: CUT 30 (500 Hz), RES 64, ENV 32, DEC 71 (400 ms), SLID 38 (60 ms); ACC 0 (an accent is
+ * defaults: CUT 30 (500 Hz), RES 64, ENV 32, DEC 38 (398 ms; 200 ms .. 2 s since MT16), SLID 38 (60 ms); ACC 0 (an accent is
  * an ACC lock), GATE 63 (half a step), VOL 99 (driven +2.5 dB, MT10's default sound). The 12th slot is
  * hidden (MT13's OSC test switch is gone: the saw runs free, the user's choice on the unit). */
-const uint8_t ot_defaults[12] = {36, 30, 64, 32, 71, 0, 0, 64, 38, 63, 99, 0};
+const uint8_t ot_defaults[12] = {36, 30, 64, 32, 38, 0, 0, 64, 38, 63, 99, 0};
 static const char *const ot_names[12] = {
     "PTCH", "CUT", "RES", "ENV", "DEC", "ACC", "WAVE", "TUNE", "SLID", "GATE", "VOL", ""
 };

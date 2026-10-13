@@ -36249,4 +36249,7 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   1026/1028 words, saw 471 cycles. WAVE loudness within 0.8 dB across the knob. DEC 71 = Open303 VST's 400 ms.
   `out/OCTATRACK_OS1.40C_OT303_MT15.syx` sha256 ce4f91dfe0364a51acecf9c70c7eeffcb5918b6f93474d835ad423f62f6697d8
   (`140C303T15`), NOT flashed.
+- **S124 cont: MT16 -- DEC 200 ms .. 2 s** (Open303 VST's range), default 38 = 398 ms. ColdFire only.
+  `out/OCTATRACK_OS1.40C_OT303_MT16.syx` sha256 a756180e5007776f53e69d4abe41e6b2201c4aa39d724e402967c2016096ff15
+  (`140C303T16`), NOT flashed (replaces MT15).
 

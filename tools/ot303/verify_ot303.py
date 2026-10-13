@@ -33,7 +33,7 @@ import dram  # noqa: E402
 
 EMU = os.path.join(ROOT, 'out', 'ot303', 'ot_emu_8d0ad6f4')
 CARD = os.path.join(os.path.realpath(os.path.join(ROOT, 'refs', 'octabam')), 'out', 'botli_card2.img')
-IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt15.bin'))
+IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt16.bin'))
 STOCK = os.path.join(ROOT, 'out', 'raw', 'section_3_MAIN_OS.bin')
 ELF = os.path.join(ROOT, 'out', 'ot303', 'cf', 'ot303_runtime.elf')
 LOADER = os.path.join(ROOT, 'out', 'ot303', 'cf', 'loader.elf')
@@ -45,7 +45,7 @@ SHADOW = 0x100a4ece
 SRC = {1: '1:1a2:221', 0: '0:39c:426'}
 FX2 = {1: '1:302:303', 0: '0:50d:50e'}
 IDS = {1: 0x80000ec4, 2: 0x80000ecc}
-DEFAULTS = bytes([36, 30, 64, 32, 71, 0, 0, 64, 38, 63, 99, 0])
+DEFAULTS = bytes([36, 30, 64, 32, 38, 0, 0, 64, 38, 63, 99, 0])
 BANK0 = 0x400e21e0                    # BOTLI plays bank 0, pattern 0 (PER TRACK scale; T2/T6: 16 steps, 1x)
 # the test line, steps 0..15: N note, T trigless lock, G trigless trig (both tie, MT9), S note with a slide
 # trig, . empty
