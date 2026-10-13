@@ -27,11 +27,11 @@
 #define SLOT_REC 0x40031d18u        /* stock (machine, slot) -> the sample slot's record, name at +24 */
 #define STASH_MARK 0x55u
 
-/* SRC (page 1) then SRC SETUP (page 2), stored with the track (params.h has the ranges). PTCH 48 = C3.
+/* SRC (page 1) then SRC SETUP (page 2), stored with the track (params.h has the ranges). PTCH 36 = C3.
  * Open303's
  * defaults: CUT 30 (500 Hz), RES 64, ENV 32, DEC 71 (400 ms), SLID 38 (60 ms); ACC 0 (an accent is
  * an ACC lock), GATE 63 (half a step), VOL 119 (-1 dB). */
-const uint8_t ot_defaults[12] = {48, 30, 64, 32, 71, 0, 0, 64, 38, 63, 119, 0};
+const uint8_t ot_defaults[12] = {36, 30, 64, 32, 71, 0, 0, 64, 38, 63, 119, 0};
 static const char *const ot_names[12] = {
     "PTCH", "CUT", "RES", "ENV", "DEC", "ACC", "WAVE", "TUNE", "SLID", "GATE", "VOL", "DIAG"
 };
@@ -233,13 +233,15 @@ int ot_validate_part(uint8_t *part) {
  *     step's trig condition passed -- a note that will fire): queues its gate and slide
  * The trig takes the oldest queued note, so trigs and notes pair one for one in order.
  *   slide  the step's slide trig: the note slides from the one before when that gate is still open
- *   gate   GATE's share of the step, plus a whole step for each trigless trig straight after (a tie);
+ *   gate   GATE's share of the step, plus a whole step for each trigless LOCK straight after (a tie:
+ *          the single FUNC+TRIG gesture; trigless trigs keep their stock job, MT9 the user's choice);
  *          held to the end of the next step when the next step is a note with a slide trig
  * At the end of a pattern the handler is already scheduling the next pattern: whether the track is
  * an OT-303 there is read from that pattern's own Part (+0x8e57). (One-shot trigs, code 61, are not
  * queued: the frame builder can still drop them.)
  * Steps: the bank's pattern masks (0x400e21e0 + bank 0x9b340 + pattern 0x8ed8 + track 0x91a: +0 trig,
- * +8 trigless, +0x48 slide; step s < 32 in the long at +4, bit s, else the long at +0, bit s - 32),
+ * +8 trigless trig, +0x10 trigless lock, +0x48 slide; step s < 32 in the long at +4, bit s, else the
+ * long at +0, bit s - 32),
  * the length and scale of the pattern (+0x8e53/+0x8e54) or, in PER TRACK mode (+0x8e55), the
  * track's (+0x50/+0x51); ticks per step 0x400aba50[scale], tempo 0x80001814 = BPM x 24. */
 struct ot_qn { uint32_t gl; uint8_t step, slide, call, diag; };
@@ -312,7 +314,7 @@ void ot_note(unsigned track) {
     unsigned count = 1, n = s, i;
     for (i = 1; i < len; ++i) {
         n = (n + 1) % len;
-        if (step_bit(trk, 0x00, n) || !step_bit(trk, 0x08, n)) break;
+        if (step_bit(trk, 0x00, n) || !step_bit(trk, 0x10, n)) break;
         ++count;
     }
     unsigned hold = i < len && step_bit(trk, 0x00, n) && step_bit(trk, 0x48, n);

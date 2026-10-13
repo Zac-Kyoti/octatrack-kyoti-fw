@@ -36197,4 +36197,13 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   (default 48). `out/OCTATRACK_OS1.40C_OT303_MT8.syx` sha256
   23a9c4383a779b4356982b319fc3c41b6534c188038b55b76a21373c0e67240b (`140C_303T8`), commit e04397e, NOT
   flashed. Pack round 9 published (artifact v10) with the round 8 key.
+- **S124 cont: MT8 on HW + round 9 -> MT9 + round 10.** Ties were trigless locks on the unit; user
+  chose ties = trigless locks (+0x10), PTCH a semitone a step from C0 (36 = C3). Round 9 picks built
+  into the DSP: soft attack 1 ms (rc1 on the cutoff's envelope), normal release 2 ms, output drive
+  tanh(1.68 y) via the square's tanh table (engine macros SOFTATK/ODRIVE, emptied for DIAG14 which
+  still rebuilds 85cfe103). ERASE_EMPTY_TRIGLESS_LOCKS must skip OT-303 tracks in any combined build.
+  An edit-script slip built MT9 sources under MT8's names; those outputs were deleted (the flashed MT8
+  rebuilds from e04397e). `out/OCTATRACK_OS1.40C_OT303_MT9.syx` sha256
+  060f2a5526ef7c4b1bbc1c73149a96aab8ab0199a17bd98b91edd7f0970973d6 (`140C_303T9`), NOT flashed. Pack
+  round 10 published (v11).
 

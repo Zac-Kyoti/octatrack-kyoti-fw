@@ -2163,6 +2163,25 @@ commented out), so a note's first edge lands up to a period after its trig (2-60
 - DIAG, SETUP's 12th slot (read only): each note's gate in eighths of a step (4 = half a step, 12 =
   one tie). Host 990/1028 words.
 
+**MT8 on the unit + round 9 results (user, 2026-10-12):** STATIC garbage solved. The "ties" that did
+nothing were trigless LOCKS; with trigless trigs, ties work. The user's choices: ties become trigless
+locks (one gesture, FUNC+TRIG), trigless trigs keep their stock job; PTCH a semitone a step from C0.
+Round 9: edges 1 ms + 2 ms (both scenes), square as built, drive +4.5 dB (both scenes); the note start
+undecided (round 9's kick was sub-only, inaudible on the user's speakers). Round 8 key decoded: grit
+"lean #1" = grit (indifferent), edges Locks "prefer 1" = as built, square "1" = as built.
+**Rule for any combined build:** KYOTI's ERASE_EMPTY_TRIGLESS_LOCKS deletes a trigless lock whose last
+lock is removed; on an OT-303 track that would delete a tie. Its emptiness check must skip OT-303
+tracks (the signature, `'O','T',1` in the Part) — the user agreed (2026-10-12).
+**MT9 (built, NOT flashed):** `out/OCTATRACK_OS1.40C_OT303_MT9.syx` (`140C_303T9`, sha256 `060f2a55…`):
+ties on trigless locks (mask +0x10); PTCH 0 C0 … 36 C3 (default) … 115–127 G9; DSP: soft attack (MEGS
+= rnd(MEG2 + RC1 (MEGS − MEG2)), RC1 = e^(−1/44.1), what moves the cutoff; amp and rc2 keep MEG2) and
+the output drive tanh(1.68 y) from the square's tanh table (GD8 = 1.68/8), engine macros SOFTATK /
+ODRIVE (emptied for the DIAG14 probe build, which still rebuilds `85cfe103…`); normal release 2 ms
+(params_const from Open303 with normalAmpRelease 2). Host 1,021/1,028 words; saw 440 cycles/sample
+(+39), square 585. Benches: host, engine (OT303_DSP=new), DIAG14 bit-exact; chain vs TwinVoice −86 dB;
+verify ALL GOOD. **Round 10 pack (v11):** the note start over a kick with a bright click (audible on
+small speakers: click band +8–17 dB on the beat), MT9's voice vs MT8's (Line, Hot, Locks).
+
 **MT7 on the unit + round 8 results (user, 2026-10-12):** STATIC preview: odd characters under SLIC/LEN
 (stock's LEN formatter `0x4003b2ec` and slice checks `0x40044dbe`, `0x4004fee2` read the *current*
 machine's SLIC byte = OT-303's TUNE; zeroing TUNE alone fixes both labels in ot_emu); DIAG stayed 4 with

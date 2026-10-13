@@ -182,11 +182,14 @@ struct Engine {
     bool meg48 = false;         // 48-bit main envelope (else 24-bit, truncating)
     int dlyN = 0; std::vector<W> dly; int dlyP = 0;   // test only: restore the 79-tap stage's latency
     long sqClamp = 0;           // the shaper's deliberate clamps (not errors)
-    // listening-pack candidates (listening_pack8.cpp), all off by default: the bit-exact paths never
-    // set them. GRIT: saw += GRIT (saw^2 - 1/3) (even harmonics); NOISE: white noise into the
-    // oscillator, NOISE full scale; RC1: the main envelope's soft attack, MEG smoothed by a one-pole
-    // (coefficient RC1 per sample) before it moves the cutoff (Open303's rc1, shipped at tau 0)
+    // listening-pack candidates (listening_pack8.cpp), off by default. GRIT: saw += GRIT (saw^2 - 1/3)
+    // (even harmonics); NOISE: white noise into the oscillator, NOISE full scale; RC1: the main
+    // envelope's soft attack, MEG smoothed by a one-pole (coefficient RC1 per sample) before it moves
+    // the cutoff (Open303's rc1, shipped at tau 0; on the DSP since MT9)
     W GRIT = 0, NOISE = 0, RC1 = 0, MEGS = 0; uint32_t rng = 22222;
+    // the machine's (MT9, the DSP engine too): RC1 the soft attack, GD8 the output drive's gain / 8
+    // (0: none -- the DSP engine always drives, so a bench of it sets GD8)
+    W GD8 = 0;
     // diagnostic: the oscillator from outside (the reference's, in double); returns osc (not /2)
     double (*oscHook)(void*) = nullptr; void* oscCtx = nullptr;
     bool exactCoef = false;     // diagnostic: b0/kpoly from the formulas (double) instead of tables
@@ -263,8 +266,8 @@ struct Engine {
             MEG2 = (W)(M48 >> 24);
         } else
             MEG2 = st(mpy(MEG2, C_MEG), "meg");
-        W MEGF = MEG2;
-        if (RC1) { MEGS = str(acc(MEG2) + mpy(RC1, MEGS - MEG2), nullptr); MEGF = MEGS; }
+        MEGS = str(acc(MEG2) + mpy(RC1, MEGS - MEG2), nullptr);    // RC1 0: MEGS = MEG2 exactly
+        W MEGF = MEGS;
         W in2 = AGF ? MEG2 : 0;
         RC2 = str(acc(in2) + mpy(C2, RC2 - in2), "rc2");
         // log cutoff, clamped to 200 Hz .. 20 kHz, then the coefficient tables
@@ -337,6 +340,12 @@ struct Engine {
             W yy = st(acc(v) + acc(tops), "top");
             tops = st(acc(yy) + acc(v), "top");
             y = yy;
+        }
+        if (GD8) {                                                // output drive: tanh(8 GD8 y), the table
+            W x8 = st(mpy(y, GD8), nullptr);
+            int ti = (x8 >> 15) + 256;
+            W tf = (x8 & 0x7FFF) << 8;
+            y = st(lerp(T.th, T.dth, ti, tf), nullptr);
         }
         outW = y;
         return f23(y) * 4.0;

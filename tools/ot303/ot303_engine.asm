@@ -39,7 +39,7 @@
 ; store without changing the stored word.
 ; ===========================================================================
 ; ---- placement: three bases, rewritten per payload by the builders (asm_macros.layout)
-XB      equ     $1000           ;@LAYOUT X block, 64-aligned, $6d words
+XB      equ     $1000           ;@LAYOUT X block, 64-aligned, $70 words
 YS      equ     $1040           ;@LAYOUT Y state block, 64-aligned, $ab words
 LT      equ     $1200           ;@LAYOUT Y coefficient table, 860 words
 TH      equ     $155c           ;@LAYOUT Y tanh table, 1,026 words (the square's)
@@ -137,6 +137,9 @@ P_R7    equ     PTRS+1
 P_N2    equ     PTRS+2
 P_N7    equ     PTRS+3
 OUTP    equ     PTRS+4
+MEGS    equ     XB+$6d          ; the main envelope smoothed (soft attack, Open303's rc1)
+RC1W    equ     XB+$6e          ; its one-pole coefficient (0: none, MEGS = MEG2 exactly)
+GD8     equ     XB+$6f          ; the output drive's gain / 8 (into the tanh table)
 OCB     equ     XB+$60          ; the square path's words (8-aligned), read in this order
 S70     equ     OCB+0
 C437    equ     OCB+1
@@ -149,6 +152,39 @@ W3      equ     OCB+6
 ; LT: 215 entries x 4: b0, db0, kp/64, dkp; TH: 513 entries x 2: tanh, slope
 THM     equ     TH+512          ; TH + 2*256: x = 0
 ;@Y INC_T S48H S48L M48H M48L RC2 L0_16 AG_8 AMP2 DIC2 DIC1 PH HB1C APX APY H2X H2Y NIC2 NIC1 TOPS OSCW HPX HPY FBX FBY YY1 YY2 YY3 YY4 PP HB2A HB2B LT TH THM
+
+; ---- MT9's two additions, as macros (tools/ot303/asm_macros.py): the hardware-probe build
+; (hwprobe_image.py, host=False) empties them, so DIAG14 assembles as it always did
+SOFTATK macro
+; ---- soft attack: MEGS = rnd(MEG2 + RC1 (MEGS - MEG2)), what moves the cutoff (the amp and rc2 keep MEG2)
+        move    x:>MEGS,a
+        sub     y0,a
+        move    a,x1                                            ; MEGS - MEG2
+        move    x:>RC1W,x0
+        tfr     y0,a
+        macr    x1,x0,a
+        move    a,x:>MEGS
+        move    a,y0                                            ; MEGS
+        endm
+ODRIVE  macro
+; ---- output drive: tanh(G yy) from the square's tanh table, x8 = (G / 8) yy
+        move    x:>GD8,x1
+        mpy     x1,y0,a
+        move    a,x0                                            ; x8
+        tfr     x0,a
+        asr     #14,a,b
+        and     #>$fffffe,b
+        add     #>THM,b
+        asl     #8,a,a
+        and     #>$7fff00,a                                     ; frac
+        move    b1,r0
+        move    a1,y0
+        move    y:(r0)+,x1                                      ; tanh[i]
+        move    y:(r0)+,x0                                      ; slope[i]
+        mpy     y0,x0,a
+        add     x1,a
+        move    a,y0                                            ; the output
+        endm
 
 ot303:
         move    r3,x:>OUTP
@@ -197,6 +233,7 @@ zcmeg:
         mac     y1,x1,b         b,y0                            ; + C2 RC2 ; y0 = in
         macr    -x1,y0,b        a,y0                            ; RC2' ; y0 = MEG2
         move    y0,n6                                           ; MEG2
+        SOFTATK
 zccut:
 ; ---- log cutoff L/16 = L0_16 + ES8 MEG2 + AG8 RC2', clamped to 200 Hz .. 20 kHz
         move    x:(r2)+,x0      b,y1                            ; ES8 ; y1 = RC2'
@@ -415,6 +452,7 @@ zcpost:
         move    a,y0                                            ; yy
         add     x0,a                                            ; yy + v
         move    a,y:(r6)+                                       ; TOPS
+        ODRIVE
         move    x:>OUTP,r0
         nop
         move    y0,x:(r0)+

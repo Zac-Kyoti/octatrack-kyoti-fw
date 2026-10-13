@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
 
     std::vector<float> ref(N), tv(N), ours(N);
     {
-        Open303 o; o.setSampleRate(FS);
+        Open303 o; o.setSampleRate(FS); o.normalAmpRelease = 2.0;      // MT9: the normal release 2 ms
         size_t mi = 0;
         for (long t = 0; t < N; t++) {
             while (mi < midi.size() && midi[mi].first == t) {
@@ -136,8 +136,9 @@ int main(int argc, char** argv) {
     }
     const double SQDC = sqDCv();
     {   // twinv: TwinVoice's host() and noteOn
-        Open303 o; o.setSampleRate(FS);
+        Open303 o; o.setSampleRate(FS); o.normalAmpRelease = 2.0;
         twin::Engine e; e.init(HB2_43_16, 22, 16000.0, HB1_15_18, 8); e.meg48 = true; e.inc48 = false; e.FBS = 4;
+        e.RC1 = twin::q23(std::exp(-1.0 / 44.1)); e.GD8 = twin::q23(1.68 / 8.0);   // MT9, as the machine
         const uint8_t* curk = evs[0].k;
         auto host = [&]() {
             using twin::q23;
@@ -175,6 +176,7 @@ int main(int argc, char** argv) {
     {   // ours: params.c's words, the DSP host's rules
         twin::Engine e; e.init(HB2_43_16, 22, 16000.0, HB1_15_18, 8); e.meg48 = true; e.inc48 = false; e.FBS = 4;
         Open303 o; o.setSampleRate(FS); e.C2 = twin::q23(o.rc2.coeff);
+        e.RC1 = twin::q23(std::exp(-1.0 / 44.1)); e.GD8 = twin::q23(1.68 / 8.0);
         long evc = 0x7fffff; int half = 0; twin::W moff = 0;
         size_t ei = 0;
         uint8_t k[12]; for (int i = 0; i < 12; i++) k[i] = evs[0].k[i];

@@ -27,6 +27,8 @@ extern "C" {
 using namespace rosic;
 
 static const double FS = 44100.0;
+// the normal (unaccented) amp release: Open303 ships 1 ms; MT9 2 ms (the user's pick, listening round 9)
+static const double NORMAL_RELEASE_MS = 2.0;
 static int32_t q23(double v) {                    // twin.h's q23: nearest, clamped
     double x = std::nearbyint(v * 8388608.0);
     if (x > 8388607.0) x = 8388607.0;
@@ -47,6 +49,7 @@ static double tuningHz(int k) { return 440.0 + (k - 64) * 80.0 / 127.0; }
 
 static int gen(const char* path) {
     Open303 o; o.setSampleRate(FS);
+    o.normalAmpRelease = NORMAL_RELEASE_MS;
     // amp envelope coefficients after a normal and an accented note (triggerNote's switch)
     o.noteOn(36, 64, 0.0);
     double decayC = o.ampEnv.decayCoeff, relN = o.ampEnv.releaseCoeff;
@@ -102,6 +105,7 @@ static int gen(const char* path) {
 struct Ref { ot_cont c; ot_note n; };
 static Ref reference(const uint8_t k[12]) {
     Open303 o; o.setSampleRate(FS);
+    o.normalAmpRelease = NORMAL_RELEASE_MS;
     o.setCutoff(cutoffHz(k[OT_CUT]));
     o.setEnvMod(100.0 * k[OT_ENV] / 127.0);
     o.setResonance(100.0 * k[OT_RES] / 127.0);
