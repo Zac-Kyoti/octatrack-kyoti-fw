@@ -36229,4 +36229,7 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   0x4003b4b0 -> sprintf 0x40013a08); OT-303's PTCH points at control.c ot_fmt_ptch. LCD in ot_emu shows
   C0/C#3/C6. `out/OCTATRACK_OS1.40C_OT303_MT11.syx` sha256
   1b636369e58c59c8af97e0be1acfd50e21a5e75779b73dede990e87840a5b9d2 (`140C303T11`), NOT flashed (replaces MT10, unflashed).
+- **S124 cont: MT12 -- PTCH a semitone a value, knob 0..72.** User wants equal steps. Descriptor +0xd2 = value
+  count (emulator: encoder stops at 72); PTCH count 73, default 36 = C3. `out/OCTATRACK_OS1.40C_OT303_MT12.syx`
+  sha256 0a515c5d7b810b7afc5de31c5bb6e50fb520614f1d3f79b0ef1c92823510cc36 (`140C303T12`), NOT flashed (replaces MT11).
 

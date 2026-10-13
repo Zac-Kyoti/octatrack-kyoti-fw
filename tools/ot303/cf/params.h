@@ -6,7 +6,7 @@
  * control record) and the native bench (tools/ot303/params_check.cpp holds it against Open303's
  * double-precision formulas; tools/ot303/host_probe.cpp drives the DSP and the twin with it).
  *
- * Knobs (0..127): SRC page   0 PTCH (C0 .. C6: 73 notes over the knob, 0 C0, 64 C3, 127 C6; shown as
+ * Knobs (0..127): SRC page   0 PTCH (0..72 only: a semitone a value, 0 C0, 36 C3, 72 C6; shown as
  *                              note names)                1 CUT (200 Hz..10 kHz, exp)
  *                            2 RES (0..100 %)             3 ENV (0..100 %)
  *                            4 DEC (30 ms..3 s, exp)      5 ACC (0..100 %; 0 = no accent)
@@ -38,7 +38,9 @@ struct ot_note {
 
 void ot_params_cont(const uint8_t k[12], struct ot_cont *c);
 void ot_params_note(const uint8_t k[12], struct ot_note *n);
-/* the note PTCH plays: MIDI 12 (C0) + PTCH 73 / 128, so 0 C0, 64 C3, 127 C6 (MT11, the user's choice) */
+/* the note PTCH plays: MIDI 12 (C0) + PTCH, the knob 0..72 (C0 .. C6, a semitone a value; MT12, the
+ * user's choice: equal steps); a larger value (a CC, an old project) plays C6 */
+#define OT_PTCH_MAX 72u
 unsigned ot_note_number(unsigned ptch);
 /* its name for the knob's display: "C3", "C#3" (NUL-terminated); returns the length */
 unsigned ot_note_name(unsigned ptch, char out[4]);

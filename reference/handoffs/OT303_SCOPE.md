@@ -2234,6 +2234,12 @@ f(buf, value), writes the text; +0xa2 min, +0xd2 count, +0x132/+0x162 other call
 control.c `ot_fmt_ptch` → params.c `ot_note_name` ("C3", "C#3"). params_check tests all 128 values;
 ot_emu LCD: C0 / C#3 / C6 on the SRC page while turning. MT9/MT10-era PTCH values now read differently
 (36 was C3, is G#1). Benches, verify ALL GOOD; DSP unchanged from MT10.
+**MT12 (built, NOT flashed; the user: equal steps, "1 or 2 but never both"):**
+`out/OCTATRACK_OS1.40C_OT303_MT12.syx` (`140C303T12`, sha256 `0a515c5d…`, mainos `fac9e23b…`): PTCH's
+knob runs 0..72, a semitone a value, C0..C6 (36 = C3, the default) — descriptor +0xd2 is the value
+COUNT (from +0xa2's min): 73 for PTCH; ot_emu: the encoder stops at 72 (C6) and 0 (C0), one detent =
+one semitone (C#3 at 37). A larger stored value (CC, old project) plays C6. Two values a semitone could
+not reach C6 (146 values). WAVE: answered continuous (Open303's saw→square blend), so no toggle.
 
 **MT7 on the unit + round 8 results (user, 2026-10-12):** STATIC preview: odd characters under SLIC/LEN
 (stock's LEN formatter `0x4003b2ec` and slice checks `0x40044dbe`, `0x4004fee2` read the *current*

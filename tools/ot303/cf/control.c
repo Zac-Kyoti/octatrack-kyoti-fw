@@ -27,11 +27,11 @@
 #define SLOT_REC 0x40031d18u        /* stock (machine, slot) -> the sample slot's record, name at +24 */
 #define STASH_MARK 0x55u
 
-/* SRC (page 1) then SRC SETUP (page 2), stored with the track (params.h has the ranges). PTCH 64 = C3.
+/* SRC (page 1) then SRC SETUP (page 2), stored with the track (params.h has the ranges). PTCH 36 = C3.
  * Open303's
  * defaults: CUT 30 (500 Hz), RES 64, ENV 32, DEC 71 (400 ms), SLID 38 (60 ms); ACC 0 (an accent is
  * an ACC lock), GATE 63 (half a step), VOL 119 (-1 dB). */
-const uint8_t ot_defaults[12] = {64, 30, 64, 32, 71, 0, 0, 64, 38, 63, 119, 0};
+const uint8_t ot_defaults[12] = {36, 30, 64, 32, 71, 0, 0, 64, 38, 63, 119, 0};
 static const char *const ot_names[12] = {
     "PTCH", "CUT", "RES", "ENV", "DEC", "ACC", "WAVE", "TUNE", "SLID", "GATE", "VOL", "DIAG"
 };
@@ -71,7 +71,7 @@ int ot_fmt_ptch(char *buf, int v) {
     return (int)ot_note_name((unsigned)v, buf);
 }
 /* The stock FLEX page descriptor, renamed: twelve 0..127 knobs (an empty name hides a slot); PTCH
- * shows note names. */
+ * runs 0..72 (C0 .. C6) and shows note names. */
 static uint32_t page(void) {
     if (!ot_desc_p) {
         const volatile uint8_t *src = (const volatile uint8_t *)0x400d3176u;
@@ -81,7 +81,7 @@ static uint32_t page(void) {
             text(desc + 0x4e + 6 * i, ot_names[i], 6);
             desc[0x96 + i] = ot_defaults[i];
             put32(desc + 0xa2 + 4 * i, 0);
-            put32(desc + 0xd2 + 4 * i, ot_names[i][0] ? 128 : 0);
+            put32(desc + 0xd2 + 4 * i, !ot_names[i][0] ? 0 : i == OT_PTCH ? OT_PTCH_MAX + 1 : 128);   /* values (min +0xa2) */
             put32(desc + 0x102 + 4 * i, i == OT_PTCH ? (uint32_t)(uintptr_t)ot_fmt_ptch : 0);
             put32(desc + 0x132 + 4 * i, 0);
             put32(desc + 0x162 + 4 * i, 0);

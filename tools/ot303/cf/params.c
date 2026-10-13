@@ -89,7 +89,7 @@ void ot_params_cont(const uint8_t k[12], struct ot_cont *c) {
 }
 
 unsigned ot_note_number(unsigned ptch) {
-    return 12 + ((ptch & 127) * 73 >> 7);   /* C0 .. C6 over the knob: 73 notes, one or two values each */
+    return 12 + (ptch > OT_PTCH_MAX ? OT_PTCH_MAX : ptch);   /* a semitone a value: 0 C0 .. 72 C6 */
 }
 
 unsigned ot_note_name(unsigned ptch, char out[4]) {
