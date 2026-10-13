@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-OT-303 machine, test image 12 (MT12; reference/handoffs/OT303_SCOPE.md §12 items 1b, 2): the OT-303 DSP
+OT-303 machine, test image 13 (MT13; reference/handoffs/OT303_SCOPE.md §12 items 1b, 2): the OT-303 DSP
 voice as a track machine. "OT-303" is the sixth row of the track's machine chooser and of SRC SETUP,
 on any track, one per DSP core (T1-4, T5-8). The track is stored as FLEX plus a signature in unused
 NEIGHBOR page bytes, so a stock OS loads the project as a FLEX track. Its FLEX renderer sends the
@@ -46,6 +46,9 @@ with RES (1 ms to RES 100, none from 115); the drive rides on VOL's top (clean t
 MT11 (the user's choice): PTCH spans C0 .. C6 over the knob (73 notes, one or two values each; 64 = C3,
 the default) and shows note names (C3, C#3, ...) through the descriptor's value formatter.
 MT12 (the user: equal steps): PTCH's knob runs 0..72, a semitone a value, C0 .. C6 (36 = C3, the default).
+MT13 (after MT12 on the unit): PTCH 0..96, C0 .. C8; VOL 0 off, 1..64 clean (-30 dB .. 0 dB), 65..127
+driven 0 .. +4.5 dB (99 = +2.5 dB, the default); DIAG gone, its slot is OSC, a test switch FREE / SYNC (the
+saw restarted on a note from silence, MT7-MT9); the LFO page's PMTR lists PTCH CUT RES ENV DEC ACC.
 
 Stock 1.40C plus exactly this:
   * DSP, both payloads: tools/ot303/host.asm + the engine over SPRING REV's P words (DARK REV's
@@ -53,12 +56,12 @@ Stock 1.40C plus exactly this:
     (A P:$39c / B P:$1a2) -> jsr the host; SPRING's dispatch -> the passthrough stub.
   * ColdFire: SPRING REV out of the FX choosers; tools/ot303/cf/{machine.s,control.c} as a DRAM runtime
     (the arena's bottom 16 pages; base literal at 24 sites + 4 geometry words; the boot site's jsr ->
-    the appended loader); 26 detours (ANALOG BD's seams, the glyph, the step handler's entry and its
+    the appended loader); 27 detours (ANALOG BD's seams, the glyph, the step handler's entry and its
     note write, the machine window's focus, the SETUP preview's value read, three SLIC reads), 7 pokes
     and the FLEX renderer slot, each asserted against stock.
 
 Usage:   python3 tools/build_ot303.py      (WIP: KYOTI_ALLOW_WIP=1)
-Outputs: out/mainos_ot303_mt12.bin, out/OCTATRACK_OS1.40C_OT303_MT12.syx, out/OCTATRACK_OT303_MT12.bin
+Outputs: out/mainos_ot303_mt13.bin, out/OCTATRACK_OS1.40C_OT303_MT13.syx, out/OCTATRACK_OT303_MT13.bin
 """
 import os, pathlib, subprocess, sys
 from kyoti_status import gate, seal
@@ -76,11 +79,11 @@ STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 CF = ROOT / "tools/ot303/cf"
 WORK = ROOT / "out/ot303/cf"
-OUT = ROOT / "out/mainos_ot303_mt12.bin"
-ELEK = ROOT / "out/elek_ot303_mt12.bin"
-OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_MT12.syx"
-OUT_BIN = ROOT / "out/OCTATRACK_OT303_MT12.bin"
-VERSTR = "140C303T12"      # the field takes 10 characters
+OUT = ROOT / "out/mainos_ot303_mt13.bin"
+ELEK = ROOT / "out/elek_ot303_mt13.bin"
+OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_MT13.syx"
+OUT_BIN = ROOT / "out/OCTATRACK_OT303_MT13.bin"
+VERSTR = "140C303T13"      # the field takes 10 characters
 
 # MT4: no ROM cave. The ColdFire code is a DRAM runtime (tools/ot303/dram.py): linked at its arena
 # reserve, appended after the OS image behind tools/ot303/cf/loader.S, copied in at boot.
@@ -118,6 +121,7 @@ DETOURS = (
     (0x4003B33C, H("d3fc0008ef5b1011"), "ot_slic_a", "jmp", 8),           # MT8: LEN's label reads the machine's SLIC
     (0x40044DBE, H("d1fc0008ef5b4a10"), "ot_slic_b", "jmp", 8),           # MT8: a slice check reads it
     (0x4004FEE2, H("d1fc0008ef5b1c10"), "ot_slic_c", "jmp", 8),           # MT8: another slice check
+    (0x4003BFF0, H("711041f9400d5f38605a"), "ot_pmtr_pb", "jmp", 10),     # MT13: the LFO PMTR names
 )
 POKES = (
     (0x40079248, H("48780005"), H("48780006"), "machine chooser has six rows, OT-303 the last"),

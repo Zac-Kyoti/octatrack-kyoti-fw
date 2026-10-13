@@ -12,7 +12,8 @@
 ; bits not ours); a 24-bit word v rides one long, bits 23-8 in the high half, 7-0 in the low:
 ;   w0 $3303, w2 $0909  the signature;  w1  the record's number (one more each frame)
 ;   w3                  bit 0: a note starts at the frame's trig sample (the stock x:$20c);
-;                       bit 1: it slides (no retrigger when the gate is still open)
+;                       bit 1: it slides (no retrigger when the gate is still open);
+;                       bit 2: OSC SYNC (MT13's test switch): a note from silence restarts the saw
 ;   w4..w31             14 continuous words, every frame (Open303's setters act at once):
 ;                       CS ES8 RS BG SC SQ W1 W1 W2 W3 RC1 GD8 L0_16 AG_8 (RC1: the soft attack,
 ;                       GD8: the output drive, 0 = none; MT10: from RES and VOL)
@@ -38,7 +39,8 @@
 ; release, K8 to 0) unless the next note comes first. A slide into an open gate only moves the
 ; pitch target and the accent words (Open303 slideToNote); anything else retriggers (triggerNote).
 ; The saw runs free, as Open303's does (MT7-MT9 restarted it from silence; the user's listening rounds
-; 10-12 chose free-running).
+; 10-12 chose free-running). OSC SYNC (bit 2, MT13: to compare on the unit) restarts it as MT7-MT9 did:
+; a retrigger from silence (the amp envelope under IDLE) sets the saw just before its edge.
 ;
 ; Rules (both broke the unit): no REP; no dense working data in a DMA's 8K partition: run 1 (the
 ; engine's X working set and these words) runs at X:$7b24 on both cores, in stock's unreferenced
@@ -97,6 +99,8 @@ E_M48L  equ     4
 E_L016  equ     6
 E_AG_8  equ     7
 E_AMP2  equ     8
+E_PH    equ     11
+IDLE    equ     $000400         ; AMP2 below this (-66 dB under a note's start): the voice is silent
 
 ; ---- the source seam (jsr from A P:$39c / B P:$1a2)
 sg_entry:
@@ -382,10 +386,22 @@ hq_start:
         move    x:>TRF,a
         btst    #1,a1
         bcc     hq_trig
-        move    x:(r5+D_HALF),a
-        tst     a
+        move    x:(r5+D_HALF),b
+        tst     b
         bne     hq_evret                        ; a slide into an open gate
 hq_trig:
+        btst    #2,a1                           ; (a: TRF) OSC SYNC: a note from silence starts its saw 22
+        bcc     hq_live
+        move    y:(r4+E_AMP2),b                 ;  samples (0.5 ms) before its edge, so the edge
+        cmp     #>$000400,b                     ;  lands as the amp has opened (IDLE)
+        bge     hq_live                         ; a note into a sounding one keeps its phase
+        move    #>44,y0
+        mpy     y0,x0,a                         ; a1:a0 = 88 INC_T, an integer (22 samples x 4)
+        move    a0,y1
+        move    #>$7fffff,b
+        sub     y1,b
+        move    b1,y:(r4+E_PH)                  ; the phase, modulo 2
+hq_live:
         move    x1,x:(r5-N_MAMP)
         move    x0,y:(r4+E_S48H)
         clr     a

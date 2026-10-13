@@ -53,7 +53,14 @@ static int32_t rc1Word(int res) {
     double ms = std::fmin(1.0, std::fmax(0.0, (115.0 - res) / 15.0));
     return ms > 0 ? q23(std::exp(-1.0 / (0.001 * ms * FS))) : 0;
 }
-static int32_t gd8Word(int vol) { return vol > 109 ? q23(std::pow(10.0, 4.5 * (vol - 109) / 18.0 / 20.0) / 8.0) : 0; }
+// MT13 (the user: most of VOL's travel useful, the drive over its top half): VOL 0 silent; 1..64 clean,
+// -30 dB .. the top level (MT10's VOL 119, (119/127)^2); 65..127 the top level driven, 0 .. +4.5 dB
+// linear in dB (99 = +2.5 dB, the default: MT10's sound at its default)
+static double volTop() { return std::pow(119.0 / 127.0, 2.0); }
+static int32_t scWord(int vol) {
+    return vol == 0 ? 0 : vol >= 64 ? q23(volTop()) : q23(volTop() * std::pow(10.0, -30.0 * (64 - vol) / 63.0 / 20.0));
+}
+static int32_t gd8Word(int vol) { return vol > 64 ? q23(std::pow(10.0, 4.5 * (vol - 64) / 63.0 / 20.0) / 8.0) : 0; }
 
 static int gen(const char* path) {
     Open303 o; o.setSampleRate(FS);
@@ -102,11 +109,14 @@ static int gen(const char* path) {
     std::fprintf(f, "#define OT_LN2_Q38 (%lldLL)\n", (long long)qn(std::log(2.0), 38));   // u = t ln2 2^6, t of 2^18
     std::fprintf(f, "static const uint32_t OT_EXP2[65] = {");
     for (int j = 0; j <= 64; j++) std::fprintf(f, "%s%s%uu", j ? "," : "", j % 6 ? " " : "\n    ", (unsigned)std::llround(std::ldexp(std::exp2(j / 64.0), 30)));
-    std::fprintf(f, "};\n/* MT10: the soft attack for RES 100..114 (below: [0], from 115: none), the drive / 8 for VOL 110..127 */\n");
+    std::fprintf(f, "};\n/* MT10: the soft attack for RES 100..114 (below: [0], from 115: none) */\n");
     std::fprintf(f, "static const int32_t OT_RC1[15] = {");
     for (int j = 0; j < 15; j++) std::fprintf(f, "%s%s%d", j ? "," : "", j % 8 ? " " : "\n    ", rc1Word(100 + j));
-    std::fprintf(f, "};\nstatic const int32_t OT_GD8[18] = {");
-    for (int j = 0; j < 18; j++) std::fprintf(f, "%s%s%d", j ? "," : "", j % 8 ? " " : "\n    ", gd8Word(110 + j));
+    std::fprintf(f, "};\n/* MT13: VOL -> the level (0 silent, 1..64 -30 dB .. top) and the drive / 8 for VOL 65..127 */\n");
+    std::fprintf(f, "static const int32_t OT_SC[128] = {");
+    for (int j = 0; j < 128; j++) std::fprintf(f, "%s%s%d", j ? "," : "", j % 8 ? " " : "\n    ", scWord(j));
+    std::fprintf(f, "};\nstatic const int32_t OT_GD8[63] = {");
+    for (int j = 0; j < 63; j++) std::fprintf(f, "%s%s%d", j ? "," : "", j % 8 ? " " : "\n    ", gd8Word(65 + j));
     std::fprintf(f, "};\n#endif\n");
     std::fclose(f);
     std::printf("wrote %s\n", path);
@@ -136,7 +146,7 @@ static Ref reference(const uint8_t k[12]) {
     r.c.rs = q23(rs);
     r.c.ag_8 = q23((1.0 - rs * rs) / 8.0);
     r.c.bg = q23(rs * (1.0 + rs) * 8.0 / 17.0);
-    r.c.sc = q23(std::pow(k[OT_VOL] / 127.0, 2.0));
+    r.c.sc = scWord(k[OT_VOL]);
     r.c.rc1 = rc1Word(k[OT_RES]); r.c.gd8 = gd8Word(k[OT_VOL]);
     double b = o.oscillator.blend;
     r.c.w1 = q23(-(1.0 - b) / 2.0); r.c.w2 = q23(b / 4.0); r.c.w3 = q23(b * sqDC() / 4.0); r.c.sq = b > 0.0;
@@ -156,7 +166,7 @@ static Ref reference(const uint8_t k[12]) {
 static int check() {
     static const char* cn[] = {"CS", "L0_16", "ES8", "RS", "AG_8", "BG", "SC", "W1", "W2", "W3", "SQ", "RC1", "GD8"};
     static const char* nn[] = {"INC_T", "C_MEG", "M_AMP_on", "M_AMP_off", "AG8", "AGF", "K8_on", "M48 hi", "M48 lo", "AMP2"};
-    const uint8_t D[12] = {36, 30, 64, 32, 71, 0, 0, 64, 38, 63, 119, 0};   // control.c's defaults
+    const uint8_t D[12] = {36, 30, 64, 32, 71, 0, 0, 64, 38, 63, 99, 0};   // control.c's defaults
     long worstC[13] = {0}, worstN[10] = {0}; int atC[13] = {0}, atN[10] = {0};
     double m48rel = 0;
     auto cmp = [&](const uint8_t* k, int knob) {
@@ -189,23 +199,23 @@ static int check() {
     for (int i = 0; i < 10; i++) if (i != 7 && i != 8) { std::printf("  %-9s %6ld  (%d)\n", nn[i], worstN[i], atN[i]); bad += worstN[i] > 8; }
     std::printf("  M48       relative %.2e\n", m48rel);
     bad += m48rel > 1e-6;
-    // PTCH: C0 .. C6 on the knob's 73 values, a semitone each (above 72: C6), named as the display shows it
+    // PTCH: C0 .. C8 on the knob's 97 values, a semitone each (above 96: C8), named as the display shows it
     {
         static const char* NM[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-        int per[73] = {0}, pbad = 0, prev = -1;
+        int per[97] = {0}, pbad = 0, prev = -1;
         for (int v = 0; v < 128; v++) {
             int n = (int)ot_note_number(v) - 12;
             char got[4], want[8]; unsigned len = ot_note_name(v, got);
             std::snprintf(want, sizeof want, "%s%d", NM[n % 12], n / 12);
-            pbad += n < 0 || n > 72 || n < prev || std::strcmp(got, want) != 0 || len != std::strlen(want);
-            if (n >= 0 && n <= 72) per[n]++;
+            pbad += n < 0 || n > 96 || n < prev || std::strcmp(got, want) != 0 || len != std::strlen(want);
+            if (n >= 0 && n <= 96) per[n]++;
             prev = n;
         }
-        for (int n = 0; n < 72; n++) pbad += per[n] != 1;
-        for (int v = 0; v <= 72; v++) pbad += (int)ot_note_number(v) != 12 + v;
-        char a0[4], a36[4], a72[4]; ot_note_name(0, a0); ot_note_name(36, a36); ot_note_name(72, a72);
-        pbad += std::strcmp(a0, "C0") || std::strcmp(a36, "C3") || std::strcmp(a72, "C6");
-        std::printf("PTCH: 0 %s, 36 %s, 72 %s (73..127: C6); a semitone a value: %s\n", a0, a36, a72, pbad ? "BAD" : "ok");
+        for (int n = 0; n < 96; n++) pbad += per[n] != 1;
+        for (int v = 0; v <= 96; v++) pbad += (int)ot_note_number(v) != 12 + v;
+        char a0[4], a36[4], a96[4]; ot_note_name(0, a0); ot_note_name(36, a36); ot_note_name(96, a96);
+        pbad += std::strcmp(a0, "C0") || std::strcmp(a36, "C3") || std::strcmp(a96, "C8");
+        std::printf("PTCH: 0 %s, 36 %s, 96 %s (97..127: C8); a semitone a value: %s\n", a0, a36, a96, pbad ? "BAD" : "ok");
         bad += pbad;
     }
     std::printf(bad ? "%d words beyond 8 LSB\n" : "ALL WITHIN 8 LSB (2^-20)\n", bad);

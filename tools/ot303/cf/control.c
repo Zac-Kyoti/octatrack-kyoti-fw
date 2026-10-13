@@ -30,10 +30,10 @@
 /* SRC (page 1) then SRC SETUP (page 2), stored with the track (params.h has the ranges). PTCH 36 = C3.
  * Open303's
  * defaults: CUT 30 (500 Hz), RES 64, ENV 32, DEC 71 (400 ms), SLID 38 (60 ms); ACC 0 (an accent is
- * an ACC lock), GATE 63 (half a step), VOL 119 (-1 dB). */
-const uint8_t ot_defaults[12] = {36, 30, 64, 32, 71, 0, 0, 64, 38, 63, 119, 0};
+ * an ACC lock), GATE 63 (half a step), VOL 99 (driven +2.5 dB, MT10's default sound), OSC 0 (FREE). */
+const uint8_t ot_defaults[12] = {36, 30, 64, 32, 71, 0, 0, 64, 38, 63, 99, 0};
 static const char *const ot_names[12] = {
-    "PTCH", "CUT", "RES", "ENV", "DEC", "ACC", "WAVE", "TUNE", "SLID", "GATE", "VOL", "DIAG"
+    "PTCH", "CUT", "RES", "ENV", "DEC", "ACC", "WAVE", "TUNE", "SLID", "GATE", "VOL", "OSC"
 };
 static uint8_t desc[DESC_SIZE] = {0};
 uint32_t ot_desc_p = 0;
@@ -70,8 +70,14 @@ static void text(uint8_t *p, const char *s, unsigned n) {
 int ot_fmt_ptch(char *buf, int v) {
     return (int)ot_note_name((unsigned)v, buf);
 }
-/* The stock FLEX page descriptor, renamed: twelve 0..127 knobs (an empty name hides a slot); PTCH
- * runs 0..72 (C0 .. C6) and shows note names. */
+/* OSC (MT13, a test switch for the note start on the unit): FREE (Open303) or SYNC (MT7-MT9's restart) */
+int ot_fmt_osc(char *buf, int v) {
+    text((uint8_t *)buf, v ? "SYNC" : "FREE", 5);
+    return 4;
+}
+/* The stock FLEX page descriptor, renamed: twelve knobs (an empty name hides a slot; +0xa2 a knob's
+ * minimum, +0xd2 its number of values, +0x102 its value formatter); PTCH runs 0..96 (C0 .. C8) and
+ * shows note names, OSC is a two-way switch, the rest run 0..127. */
 static uint32_t page(void) {
     if (!ot_desc_p) {
         const volatile uint8_t *src = (const volatile uint8_t *)0x400d3176u;
@@ -81,12 +87,15 @@ static uint32_t page(void) {
             text(desc + 0x4e + 6 * i, ot_names[i], 6);
             desc[0x96 + i] = ot_defaults[i];
             put32(desc + 0xa2 + 4 * i, 0);
-            put32(desc + 0xd2 + 4 * i, !ot_names[i][0] ? 0 : i == OT_PTCH ? OT_PTCH_MAX + 1 : 128);   /* values (min +0xa2) */
-            put32(desc + 0x102 + 4 * i, i == OT_PTCH ? (uint32_t)(uintptr_t)ot_fmt_ptch : 0);
+            put32(desc + 0xd2 + 4 * i, !ot_names[i][0] ? 0 : i == OT_PTCH ? OT_PTCH_MAX + 1 : i == OT_OSC ? 2 : 128);
+            put32(desc + 0x102 + 4 * i, i == OT_PTCH ? (uint32_t)(uintptr_t)ot_fmt_ptch :
+                                        i == OT_OSC ? (uint32_t)(uintptr_t)ot_fmt_osc : 0);
             put32(desc + 0x132 + 4 * i, 0);
             put32(desc + 0x162 + 4 * i, 0);
         }
-        put32(desc + 0x1c2, 0x1111); put32(desc + 0x1c6, 0x11111111u);  /* one nibble a knob, low first: all twelve on (11 = DIAG) */
+        /* one nibble a knob, low first (knobs 8..11, then 0..7): bit 0 on (stock FLEX also sets 2 and 4 on
+         * some, meaning unknown; OSC flips like FLEX's SLIC without them, ot_emu); all twelve on */
+        put32(desc + 0x1c2, 0x1111); put32(desc + 0x1c6, 0x11111111u);
         ot_desc_p = (uint32_t)(uintptr_t)(desc + 0x38);
     }
     return ot_desc_p;
@@ -251,9 +260,9 @@ int ot_validate_part(uint8_t *part) {
  * long at +0, bit s - 32),
  * the length and scale of the pattern (+0x8e53/+0x8e54) or, in PER TRACK mode (+0x8e55), the
  * track's (+0x50/+0x51); ticks per step 0x400aba50[scale], tempo 0x80001814 = BPM x 24. */
-struct ot_qn { uint32_t gl; uint8_t step, slide, call, diag; };
+struct ot_qn { uint32_t gl; uint8_t step, slide, call; };
 #define QN 4u
-static struct ot_qn q[8][QN] = {{{0, 0, 0, 0, 0}}};
+static struct ot_qn q[8][QN] = {{{0, 0, 0, 0}}};
 static uint8_t qn[8] = {0}, qcall[8] = {0}, qlast[8] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, qlen[8] = {0};
 static uint32_t qctx[8] = {0};          /* the step being scheduled: 1 << 24 | bank << 16 | pattern << 8 | step */
 static struct ot_voice voice[8] = {{{0}, 0, {0}, 0, 0}};
@@ -327,12 +336,7 @@ void ot_note(unsigned track) {
     unsigned hold = i < len && step_bit(trk, 0x00, n) && step_bit(trk, 0x48, n);
     uint32_t gl = hold ? (count + 1) * sl : (count - 1) * sl + ot_gate_samples(knob_now(track, OT_GATE), sl);
     gl = gl < 1 ? 1 : gl > 0x7ffffeu ? 0x7ffffeu : gl;
-    /* the DIAG readout (MT8): what the look-ahead saw -- bits 0-2 the steps the gate spans (1 + ties,
-     * at most 7), bits 3-6 the step after the note: +8 note trig, +16 trigless trig, +32 lock trig,
-     * +64 one-shot trig (MT7 on the unit: DIAG stayed 4 with ties entered) */
-    unsigned nx = (s + 1) % len, d = count > 7 ? 7 : count;
-    d |= step_bit(trk, 0x00, nx) << 3 | step_bit(trk, 0x08, nx) << 4 | step_bit(trk, 0x10, nx) << 5 | step_bit(trk, 0x18, nx) << 6;
-    struct ot_qn e = {gl, (uint8_t)s, (uint8_t)step_bit(trk, 0x48, s), qcall[track], (uint8_t)d};
+    struct ot_qn e = {gl, (uint8_t)s, (uint8_t)step_bit(trk, 0x48, s), qcall[track]};
     unsigned k = qn[track];
     if (k && q[track][k - 1].step == s && q[track][k - 1].call == qcall[track]) q[track][k - 1] = e;   /* the same call again */
     else {
@@ -382,10 +386,8 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
             unsigned qd = qn[track];
             if (take(track, &e)) {
                 ++ot_trigs;
-                ev = OT_EV_NOTE | (e.slide ? OT_EV_SLIDE : 0);
+                ev = OT_EV_NOTE | (e.slide ? OT_EV_SLIDE : 0) | (p[OT_OSC] ? OT_EV_SYNC : 0);
                 gl = e.gl;
-                /* DIAG (SETUP's 12th slot, read only): what the look-ahead saw for this note (ot_note) */
-                *knob(part_base(), track, 11) = e.diag;
                 trace(2, track, e.step, (unsigned)U8(0x46104d0cu + track) << 8 | qd);
             } else {
                 ++ot_strayflags;

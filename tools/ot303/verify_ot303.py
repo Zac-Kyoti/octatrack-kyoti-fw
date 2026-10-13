@@ -33,7 +33,7 @@ import dram  # noqa: E402
 
 EMU = os.path.join(ROOT, 'out', 'ot303', 'ot_emu_8d0ad6f4')
 CARD = os.path.join(os.path.realpath(os.path.join(ROOT, 'refs', 'octabam')), 'out', 'botli_card2.img')
-IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt12.bin'))
+IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt13.bin'))
 STOCK = os.path.join(ROOT, 'out', 'raw', 'section_3_MAIN_OS.bin')
 ELF = os.path.join(ROOT, 'out', 'ot303', 'cf', 'ot303_runtime.elf')
 LOADER = os.path.join(ROOT, 'out', 'ot303', 'cf', 'loader.elf')
@@ -45,7 +45,7 @@ SHADOW = 0x100a4ece
 SRC = {1: '1:1a2:221', 0: '0:39c:426'}
 FX2 = {1: '1:302:303', 0: '0:50d:50e'}
 IDS = {1: 0x80000ec4, 2: 0x80000ecc}
-DEFAULTS = bytes([36, 30, 64, 32, 71, 0, 0, 64, 38, 63, 119, 0])
+DEFAULTS = bytes([36, 30, 64, 32, 71, 0, 0, 64, 38, 63, 99, 0])
 BANK0 = 0x400e21e0                    # BOTLI plays bank 0, pattern 0 (PER TRACK scale; T2/T6: 16 steps, 1x)
 # the test line, steps 0..15: N note, T trigless lock, G trigless trig (both tie, MT9), S note with a slide
 # trig, . empty
@@ -216,7 +216,7 @@ def main():
     counters = {'calls': (S['ot_render_calls'], 4), 'trigs': (S['ot_trigs'], 4)}
     seqdump = dict(counters, steps=(S['ot_steps'], 4), evn=(S['ot_evn'], 4), evlog=(S['ot_evlog'], 128),
                    evptch=(S['ot_evptch'], 32), clears=(S['ot_qclears'], 4), drops=(S['ot_qdrops'], 4),
-                   diag2=(PART + 0x1da + 30 * 1 + 11, 1), diag6=(PART + 0x1da + 30 * 5 + 11, 1), stray=(S['ot_strayflags'], 4), tempo=(0x80001814, 4))
+                   osc2=(PART + 0x1da + 30 * 1 + 11, 1), osc6=(PART + 0x1da + 30 * 5 + 11, 1), stray=(S['ot_strayflags'], 4), tempo=(0x80001814, 4))
     hb = {tag: hwprobe_image.build(tag, host=True) for tag in ('A', 'B')}
     yimg = hb['A']['y']
     ys = hb['A']['syms']
@@ -227,7 +227,7 @@ def main():
     pc = open(os.path.join(ROOT, 'tools', 'ot303', 'cf', 'params_const.h')).read()
     tab = lambda n: [int(v) for v in re.search(rf'{n}\[\d+\] = \{{([^}}]*)\}}', pc).group(1).replace('\n', ' ').split(',')]
     want_rc1 = 0 if DEFAULTS[2] >= 115 else tab('OT_RC1')[max(0, DEFAULTS[2] - 100)]
-    want_gd8 = tab('OT_GD8')[DEFAULTS[10] - 110] if DEFAULTS[10] > 109 else 0
+    want_gd8 = tab('OT_GD8')[DEFAULTS[10] - 65] if DEFAULTS[10] > 64 else 0
     jobs = {('ui', 'T2'): (1, ()), ('ui', 'T3'): (2, (1,)), ('ui', 'T6'): (5, (1,)),
             ('ui', 'back'): (1, (), True), ('ui', 'stock'): (1, (), False, STOCK), ('dram', ''): None}
     for core in (1, 0):
@@ -304,25 +304,9 @@ def main():
         ok &= all(q[k] == i[k] for k in (2, 3)) and all(0 <= b - a <= 8 for a, b in zip(i[0], q[0])) and min(q[1]) > 3000
         got = res[('src-seq', core)][3]
         c = {k: int.from_bytes(v, 'big') for k, v in got.items() if k not in ('evlog', 'evptch')}
-        def diag(line, conds={}):
-            """DIAG for each note of a line: 1 + ties (at most 7), +8/+16 when the next step is a note / trigless"""
-            out = set()
-            for st, ch in enumerate(line):
-                if ch not in 'NS' or st in conds:
-                    continue
-                cnt, n = 1, st
-                for _ in range(1, 16):
-                    n = (n + 1) % 16
-                    if line[n] not in 'TG':
-                        break
-                    cnt += 1
-                nx = line[(st + 1) % 16]
-                out.add(min(cnt, 7) | (8 if nx in 'NS' else 0) | (16 if nx == 'G' else 0) | (32 if nx == 'T' else 0))
-            return out
-        dg6, dg2 = diag(LINE), diag(LINE2, CONDS2)
-        print(f'   DIAG (the last note: spanned steps + 8 next step a note, + 16 trigless trig, + 32 trigless lock): T2 {c.get("diag2")} (the line gives '
-              f'{sorted(dg2)}), T6 {c.get("diag6")} (the line gives {sorted(dg6)})')
-        ok &= c.get('diag2') in dg2 and c.get('diag6') in dg6
+        # MT13: the 12th slot is OSC (FREE / SYNC), a knob the renderer no longer writes (DIAG did)
+        print(f'   OSC bytes after the run: T2 {c.get("osc2")} T6 {c.get("osc6")} (the defaults {DEFAULTS[11]}, untouched)')
+        ok &= c.get('osc2') == DEFAULTS[11] and c.get('osc6') == DEFAULTS[11]
         ci = {k: int.from_bytes(v, 'big') for k, v in res[('src-inert', core)][3].items()}
         print(f'   ColdFire renderer: inert calls {ci.get("calls")} trigs {ci.get("trigs")}; with OT-303 tracks calls {c.get("calls")} '
               f'notes {c.get("trigs")}, step-hook calls {c.get("steps")}, trig flags with no note queued {c.get("stray")}, '

@@ -12,7 +12,7 @@
         .global ot_name_a, ot_name_b, ot_setup_row, ot_chooser_row, ot_setup_open, ot_chooser_open
         .global ot_setup_edit6, ot_setup_draw6, ot_resolve_pb, ot_validate, ot_stock_validate
         .global ot_tick_hook, ot_glyph, ot_step_hook, ot_note_hook, ot_chooser_level, ot_setup_value_hook
-        .global ot_slic_a, ot_slic_b, ot_slic_c
+        .global ot_slic_a, ot_slic_b, ot_slic_c, ot_pmtr_pb
 
         .equ    OT_ROW, 5
         .equ    FLEX, 1
@@ -262,6 +262,15 @@ ot_resolve_pb:
         jmp     (0x40031ed6).l
 1:      lea     (PB_TABLE).l,%a0
         jmp     (0x40031ece).l
+
+| MT13: the LFO page's PMTR formatter (0x4003bf64) names a machine destination from PB_TABLE by the
+| track's stored type (a0 -> the Part type byte; d1 = the track): an OT-303 (stored as FLEX) reads row 5,
+| our page, so it lists PTCH CUT RES ENV DEC ACC
+ot_pmtr_pb:
+        mvs.b   (%a0),%d0
+        bsr     ot_row_type
+        lea     (PB_TABLE).l,%a0
+        jmp     (0x4003c054).l          | a2 = PB_TABLE[d0]
 
 ot_validate:
         jmp     ot_validate_part

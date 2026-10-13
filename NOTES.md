@@ -36232,4 +36232,12 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
 - **S124 cont: MT12 -- PTCH a semitone a value, knob 0..72.** User wants equal steps. Descriptor +0xd2 = value
   count (emulator: encoder stops at 72); PTCH count 73, default 36 = C3. `out/OCTATRACK_OS1.40C_OT303_MT12.syx`
   sha256 0a515c5d7b810b7afc5de31c5bb6e50fb520614f1d3f79b0ef1c92823510cc36 (`140C303T12`), NOT flashed (replaces MT11).
+- **S124 cont (2026-10-13): MT12 on HW ("working very well") -> MT13 + round 13.** PTCH 0..96 (C0..C8);
+  VOL remap (0 off, 1..64 -30..0 dB, 65..127 drive to +4.5 dB, default 99); DIAG gone, slot 12 = OSC
+  FREE/SYNC (EV bit 2, host restart from silence); LFO PMTR names via detour 0x4003BFF0 (PMTR formatter
+  0x4003bf64 reads PB_TABLE by stored type). DEC verified end to end (C_MEG per DEC on the DSP). Onset
+  measured: SYNC ~1 ms, free up to a cycle late. Bass vs RES: -4.7 dB at RES 8, ~-10 dB from 64. Spatializer
+  crackle: probable stock ring-offset bug at mid-play selection (subagent; scope doc). DSP P now 1028/1028.
+  `out/OCTATRACK_OS1.40C_OT303_MT13.syx` sha256 d9219dbd5f150902990642a749c89f799becafc1699abec843f769e234fadd9d
+  (`140C303T13`), NOT flashed. Round 13 pack (v14): bass candidates, lock-jump glides.
 

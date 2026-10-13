@@ -6,13 +6,14 @@
  * control record) and the native bench (tools/ot303/params_check.cpp holds it against Open303's
  * double-precision formulas; tools/ot303/host_probe.cpp drives the DSP and the twin with it).
  *
- * Knobs (0..127): SRC page   0 PTCH (0..72 only: a semitone a value, 0 C0, 36 C3, 72 C6; shown as
+ * Knobs (0..127): SRC page   0 PTCH (0..96 only: a semitone a value, 0 C0, 36 C3, 96 C8; shown as
  *                              note names)                1 CUT (200 Hz..10 kHz, exp)
  *                            2 RES (0..100 %)             3 ENV (0..100 %)
  *                            4 DEC (30 ms..3 s, exp)      5 ACC (0..100 %; 0 = no accent)
  *                 SETUP      6 WAVE (saw..square)         7 TUNE (A4 = 400..480 Hz, 64 = 440)
  *                            8 SLID (0..198 ms)           9 GATE ((k + 1) / 128 of a step)
- *                           10 VOL ((k / 127)^2; from 110 also the drive, +4.5 dB at 127)  11 -
+ *                           10 VOL (0 off, 1..64 -30 dB .. 0 dB, 65..127 driven 0 .. +4.5 dB; 99 = +2.5 dB)
+ *                           11 OSC (0 FREE: the saw runs free; 1 SYNC: a note from silence restarts it)
  * MT10 (not Open303): RES fades the soft attack out (1 ms to RES 100, none from 115).
  */
 #ifndef OT303_PARAMS_H
@@ -22,7 +23,7 @@
 extern "C" {
 #endif
 
-enum { OT_PTCH, OT_CUT, OT_RES, OT_ENV, OT_DEC, OT_ACC, OT_WAVE, OT_TUNE, OT_SLID, OT_GATE, OT_VOL };
+enum { OT_PTCH, OT_CUT, OT_RES, OT_ENV, OT_DEC, OT_ACC, OT_WAVE, OT_TUNE, OT_SLID, OT_GATE, OT_VOL, OT_OSC };
 
 /* a host word: 24 bits, sign-extended */
 typedef int32_t ot_w;
@@ -38,9 +39,9 @@ struct ot_note {
 
 void ot_params_cont(const uint8_t k[12], struct ot_cont *c);
 void ot_params_note(const uint8_t k[12], struct ot_note *n);
-/* the note PTCH plays: MIDI 12 (C0) + PTCH, the knob 0..72 (C0 .. C6, a semitone a value; MT12, the
- * user's choice: equal steps); a larger value (a CC, an old project) plays C6 */
-#define OT_PTCH_MAX 72u
+/* the note PTCH plays: MIDI 12 (C0) + PTCH, the knob 0..96 (C0 .. C8, a semitone a value; MT13, the
+ * user's choice); a larger value (a CC, an old project) plays C8 */
+#define OT_PTCH_MAX 96u
 unsigned ot_note_number(unsigned ptch);
 /* its name for the knob's display: "C3", "C#3" (NUL-terminated); returns the length */
 unsigned ot_note_name(unsigned ptch, char out[4]);

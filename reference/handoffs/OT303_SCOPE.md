@@ -2241,6 +2241,50 @@ COUNT (from +0xa2's min): 73 for PTCH; ot_emu: the encoder stops at 72 (C6) and 
 one semitone (C#3 at 37). A larger stored value (CC, old project) plays C6. Two values a semitone could
 not reach C6 (146 values). WAVE: answered continuous (Open303's saw→square blend), so no toggle.
 
+**MT12 on the unit (user, 2026-10-13): "working very well"**, plus: PTCH to ~C8 over the whole knob (1 or 2
+values a semitone, never both); bass lost as RES rises; VOL to drive over more of its travel; DEC
+unclear; LFO PMTR showing FLEX names; doubts on the note start (restart sounded tighter to them);
+DIAG still there; a list of what adds weight; crackle on big lock / LFO jumps; once, a Spatializer
+crackle on core 1 that went away after re-selecting it.
+**Findings.**
+- *Bass vs RES* (twin, line at CUT 30/60, level vs RES 0): −4.7 dB at RES 8, −7 at 16, −9 at 32,
+  −10..−11 from 64. Mostly overall level, not only lows (Open303's feedback cancels the passband; its
+  g compensation rises only to 2x; the RES curve 1−e^(−3r) is front-loaded). Feedback HPF 250 / 350 Hz
+  holds −7 / −5 dB; RES² curve: −1.5 dB at 16.
+- *DEC* works: ColdFire → DSP C_MEG equal to params.c for DEC 0/64/127 (ot_emu peek, core 1: 7fe73e,
+  7ffd91, 7fffc1). Audibly small at the defaults: a half-step gate ends before decays above ~400 ms
+  matter (centroid 340 → 580 Hz over DEC 0..127 at ENV 32; 420 → 1370 Hz at ENV 100); accents ignore DEC
+  (Open303 / 303).
+- *Note start* (twin, 40 notes from silence, −12 dB of the note's peak after the trig): SYNC 0.8–1.2 ms
+  at C1/C2/C3; free 0.8–21 ms (C1), 0.8–13 (C2), 0.8–4.2 (C3). The pack code and page were checked:
+  no mix-up (variant flags → files → names; play and Keep buttons share one shuffled order). Blind
+  picks favoured free anyway → OSC switch for a hardware A/B.
+- *LFO PMTR names*: formatter 0x4003bf64 (LFO descriptor formatter slot 6), machine group reads
+  PB_TABLE[type] at 0x4003bff0 by the stored type (FLEX) → detour `ot_pmtr_pb` (row 5 for an OT-303).
+- *Descriptor*: +0xd2 = value count; the knob nibble mask at +0x18a/+0x18e holds 1/3/5/7 in stock
+  (bit 0 on; 2 and 4 unknown); a two-value knob flips on a turn of 3 in ot_emu exactly as FLEX's SLIC.
+- *Spatializer* (subagent, emulator + model, P): no shared memory with the voice (its state X:$6000+
+  $100·(3t+slot), ring Y $a60 words from the allocator; ours X:$7b04.., Y $7a5..$feb); cost small
+  (frame ≈ 74 % of budget with it). Probable stock bug: the dispatcher splits a frame's FX call at
+  x:$20c (held every frame), and SPATIALIZER's init zeroes its ring write offset between the two calls,
+  misaligning the ring by 32−2·off when selected mid-play with a non-zero held offset; later calls can
+  read across the ring end (wet path only; re-selecting at offset 0 realigns). Hardware test: stock OS,
+  FLEX track, trig every step at 120 BPM, re-select SPATIALIZER while playing (WDTH/DPTH/SEND high).
+  Possible fix: init sets w = x:$20e (2 words, needs a cave/jsr).
+- *DSP space*: host + engine = 1,028 / 1,028 words in MT13. Further DSP features (smoothing, makeup in
+  the engine) need words reclaimed (e.g. the OSC switch once decided, or a second module's tail).
+**MT13 (built, NOT flashed):** `out/OCTATRACK_OS1.40C_OT303_MT13.syx` (`140C303T13`, sha256 `d9219dbd…`,
+mainos `b9ff5490…`): PTCH 0..96 = C0..C8 a semitone a value; VOL 0 off, 1..64 −30 dB..top (top =
+(119/127)², MT10's level), 65..127 driven 0..+4.5 dB (OT_SC[128], OT_GD8[63]; default 99 = +2.5 dB);
+DIAG removed (the renderer no longer writes knob 11); slot 12 = OSC FREE/SYNC (count 2, formatter
+ot_fmt_osc; EV bit 2; host restarts the saw from silence as MT7–MT9 when set; default FREE); LFO PMTR
+names (detour 0x4003BFF0, 27 detours). Benches: params (incl. PTCH 0..96 names, SC/GD8 tables), host
+bit-exact both payloads (9 SYNC restarts; VOL clean/driven), verify ALL GOOD (+ OSC bytes untouched,
+RC1W/GD8 at VOL 99); ot_emu LCD: LFO SETUP "PMTR PB / CUT", OSC "FREE".
+**Round 13 pack (v14):** `tools/ot303/listening_pack13.{cpp,py}`: RES sweep 0→127 (as built / makeup
+gain by RES / feedback HPF 350 / RES² curve) and jumps inside held notes (as built / glide 1 ms /
+3 ms; measured mean click >3 kHz −1.6 / −3.2 dB, worst unchanged).
+
 **MT7 on the unit + round 8 results (user, 2026-10-12):** STATIC preview: odd characters under SLIC/LEN
 (stock's LEN formatter `0x4003b2ec` and slice checks `0x40044dbe`, `0x4004fee2` read the *current*
 machine's SLIC byte = OT-303's TUNE; zeroing TUNE alone fixes both labels in ot_emu); DIAG stayed 4 with

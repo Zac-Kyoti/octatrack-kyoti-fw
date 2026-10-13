@@ -76,9 +76,10 @@ void ot_params_cont(const uint8_t k[12], struct ot_cont *c) {
     int64_t p = (rs * (((int64_t)1 << 30) + rs)) >> 30;    /* rs (1 + rs), Q30 */
     c->bg = q23((p * OT_RCP17X8) >> 32, 30);                /* * 8 / 17 */
     /* volume: (VOL / 127)^2 */
-    c->sc = clamp24(((int64_t)k[OT_VOL] * k[OT_VOL] * OT_SC_PER_K2 + 0x8000) >> 16);
-    /* MT10: the output drive / 8 on VOL's top (0: none, the DSP skips it), the soft attack faded by RES */
-    c->gd8 = k[OT_VOL] > 109 ? OT_GD8[k[OT_VOL] - 110] : 0;
+    /* MT13: VOL 0 silent, 1..64 -30 dB .. the top level, 65..127 the top level driven 0 .. +4.5 dB (the
+     * output drive / 8; 0: none, the DSP skips it); the soft attack faded by RES (MT10) */
+    c->sc = OT_SC[k[OT_VOL] & 127];
+    c->gd8 = k[OT_VOL] > 64 ? OT_GD8[(k[OT_VOL] & 127) - 65] : 0;
     c->rc1 = k[OT_RES] >= 115 ? 0 : OT_RC1[k[OT_RES] > 100 ? k[OT_RES] - 100 : 0];
     /* waveform: blend b = WAVE / 127; osc/2 = -(1 - b)/2 saw + b/4 tanh(..) + b sqDC / 4 */
     uint32_t w = k[OT_WAVE];
