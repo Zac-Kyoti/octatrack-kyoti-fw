@@ -6,7 +6,8 @@
 //   open303  Open303 itself (double precision), the line as MIDI: a note's off GL samples after its
 //            on; a slide's on before the previous note's off (Open303's slideToNote)
 //   twinv    the approved voice: the integer twin with Open303's note logic, its words made from
-//            Open303's state at each event (voice_study.cpp TwinVoice, without its idle reset)
+//            Open303's state at each event (voice_study.cpp TwinVoice, without its idle reset), with the
+//            machine's one addition: a note from silence restarts the saw 22 samples before its edge (host.asm IDLE)
 //   ours     the machine: the twin driven as the DSP host drives the engine (tools/ot303/host.asm:
 //            a note's words at its sample, a slide into an open gate without a retrigger, the gate's
 //            end), the words from tools/ot303/cf/params.c, the gates as control.c ot_step makes them
@@ -161,6 +162,7 @@ int main(int argc, char** argv) {
                 o.noteOn(note, vel, 0.0);
                 host();
                 if (trig) {
+                    if (e.AMP2 < 0x400) e.P = twin::wrap(twin::acc(0x7fffff) - twin::acc(88 * e.INC_T));   // the machine's restart from silence (host.asm IDLE)
                     e.S48 = twin::acc(e.INC_T);
                     e.M48 = (twin::A)std::nearbyint(0.5 / o.mainEnv.c * 140737488355328.0);
                     e.AMP2 = twin::q23(0.5 / twin::f23(e.M_AMP));
@@ -190,6 +192,7 @@ int main(int argc, char** argv) {
                 e.C_MEG = n.c_meg; e.AG8 = n.ag8; e.AGF = n.agf != 0; e.K8 = n.k8_on; moff = n.m_amp_off; evc = long(v.gl);
                 e.INC_T = n.inc_t;
                 if (!((v.ev & 2) && half)) {
+                    if (e.AMP2 < 0x400) e.P = twin::wrap(twin::acc(0x7fffff) - twin::acc(88 * n.inc_t));
                     e.M_AMP = n.m_amp_on; e.S48 = twin::acc(n.inc_t);
                     e.M48 = (twin::A(n.m48h) << 24) | (uint32_t(n.m48l) & 0xffffff); e.AMP2 = n.amp2; half = 1;
                 }

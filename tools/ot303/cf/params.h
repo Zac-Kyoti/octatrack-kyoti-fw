@@ -6,7 +6,7 @@
  * control record) and the native bench (tools/ot303/params_check.cpp holds it against Open303's
  * double-precision formulas; tools/ot303/host_probe.cpp drives the DSP and the twin with it).
  *
- * Knobs (0..127): SRC page   0 PTCH (64 = C2; semitones)  1 CUT (200 Hz..10 kHz, exp)
+ * Knobs (0..127): SRC page   0 PTCH (64 = C3, MIDI 48; semitones)  1 CUT (200 Hz..10 kHz, exp)
  *                            2 RES (0..100 %)             3 ENV (0..100 %)
  *                            4 DEC (30 ms..3 s, exp)      5 ACC (0..100 %; 0 = no accent)
  *                 SETUP      6 WAVE (saw..square)         7 TUNE (A4 = 400..480 Hz, 64 = 440)
@@ -36,7 +36,7 @@ struct ot_note {
 
 void ot_params_cont(const uint8_t k[12], struct ot_cont *c);
 void ot_params_note(const uint8_t k[12], struct ot_note *n);
-/* the note PTCH plays: 36 (C2) at 64, clamped to 0..127 */
+/* the note PTCH plays: 48 (C3) at 64, clamped to 0..127 (MT7: an octave up; 64 was C2) */
 unsigned ot_note_number(unsigned ptch);
 /* the gate of one step of `steplen` samples: (GATE + 1) / 128 of it */
 uint32_t ot_gate_samples(unsigned gate, uint32_t steplen);

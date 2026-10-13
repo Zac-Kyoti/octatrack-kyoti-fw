@@ -2146,6 +2146,55 @@ all six machines visible in PLAYBACK SETUP.
   numbers (no old note replays when a voice stops rendering), double-tap → machine list, six rows in
   PLAYBACK SETUP, the toast.
 
+**MT6 on the unit (user, 2026-10-12):** (1) PLAYBACK SETUP on an OT-303 track: the FLEX row's preview
+misses knobs (OT-303's SETUP values sit in FLEX's bytes, out of FLEX's ranges), the STATIC row shows
+odd values (the track's own static bytes: not touched by OT-303); (2) DEC "does nothing", one trig plus
+ties never sustains (AMP HOLD/REL already 127; ot_emu sends the long gate and the bench holds it, a
+tied note's reference render sustains ~-1 dB/step: unexplained on the unit -> a diagnostic); (3) low
+notes start late and "gallop": Open303's oscillator runs free after its first note (its idle reset is
+commented out), so a note's first edge lands up to a period after its trig (2-60 ms at 16 Hz).
+**MT7 (built, NOT flashed):** `out/OCTATRACK_OS1.40C_OT303_MT7.syx` (`140C_303T7`, sha256 `bc0c5a96…`):
+- PTCH 64 = C3 (MIDI 48; the user's choice).
+- A note from silence (AMP2 < IDLE) restarts the saw 22 samples before its edge (phase = 1 − 88·INC_T):
+  onset 1.1–1.8 ms at every pitch (free-running: up to 60 ms). Beyond Open303: changes the attack
+  (chain_check vs Open303 spectrum 0.99 → 2.6 dB) — in the A/B pack.
+- SETUP: the FLEX row on an OT-303 track previews FLEX's stash (`0x4003ce02` read detour) and ignores
+  encoders there (edit detour exits); LEN's label text stays blank (its draw routine reads elsewhere).
+- DIAG, SETUP's 12th slot (read only): each note's gate in eighths of a step (4 = half a step, 12 =
+  one tie). Host 990/1028 words.
+
+**Research (2026-10-12): JC-303, ABL3, and what could make the voice fatter.** (User asked for
+findings, no code; the A/B pack follows.)
+- **JC-303** (midilab/jc303, Open303 in JUCE): its Open303 core adds no declick DSP and no
+  parameter smoothing. Changes: a diode-ladder filter option (Pirkle-style, tanh input drive 0–9 dB,
+  passband compensation), an LFO, resonance skew for the diode model. Its "mod" mode exposes Open303
+  internals as knobs: SOFT ATTACK = `setNormalAttack` (rc1, 0.3 ms–3 s; Open303 ships rc1 at tau 0),
+  FEEDBACK HPF 350→100 Hz (Open303 150 Hz), TANH SHAPER DRIVE 25–80 dB (square; Open303 36.9),
+  normal/accent amp decay 30 ms–3 s, slide 2–360 ms; a neural overdrive (GuitarML) after the voice.
+  Its sequencer bridge does not retrigger a same-pitch note tied across the pattern wrap.
+- **ABL3** (AudioRealism, closed source; only its two manuals): three VCO models (clean "Rebirth";
+  the default "a bit of grit and dirt", with VCO noise modelling; one with less bottom); square PW
+  varies with pitch; VOLUME to +9 dB with internal clipping (off/soft/hard) — the product page credits
+  "simulated filter overdrive" and the clipping above 75 % volume; VCA Clicks (extra attack click "to
+  cut through"; Normal/Reduced) and VCA Noise; Gate Trim (VCA release: tight vs loose, fewer clicks
+  when slow); Low Cut (50 % = the 303); Reso Trim (max resonance); Detune (per-octave tuning).
+- **Earlier rounds rule out** saturation inside the filter (input pair, stages, feedback): blind
+  picks preferred Open303/linear at normal settings (§10 Phase 1c, rounds 1–5).
+- **Suggestions, ranked by effect per DSP cost** (core 0 heavy: ~216 cycles/sample spare beside a saw
+  voice; the square uses ~135):
+  1. Output drive: a soft clip after the voice's amp, reached by VOL above ~75 % (to +9 dB), as
+     ABL3 does — weight and compression ("balls"); ~8–12 cycles; some aliasing on bright high notes.
+  2. Feedback high-pass 150 → ~80–100 Hz (Devil Fish / JC-303): bass kept under high resonance; 0
+     cycles (a constant).
+  3. Oscillator grit: a slight saw curvature (even harmonics) and faint VCO noise, as ABL3's default
+     VCO; ~10–20 cycles (4× rate).
+  4. Envelope edges: soft attack (rc1 ~1–3 ms) and a gate-release trim (ABL3 Gate Trim): fewer
+     lock cracks, tight vs smooth; ~5 cycles.
+  5. Square shaper drive below 36.9 dB: a rounder square; 0 cycles.
+  Also: per-note pitch drift (ColdFire only, 0 DSP); the OT's own LO-FI / COMPRESSOR on the track (free
+  to try); not recommended: JC-303's diode ladder (in-filter saturation, rejected before). SRC SETUP's
+  12th slot is free for one control (a drive or a bass knob, under the user's knob rule).
+
 **MT1 on the unit — what to check:**
 1. T2: FUNC+SRC → SRC SETUP → the last row OT-303 → YES (and the machine list from a track
    double-tap). The SRC page reads OT-303 with PTCH CUT RES ENV DEC ACC; SETUP WAVE TUNE SLID GATE VOL.

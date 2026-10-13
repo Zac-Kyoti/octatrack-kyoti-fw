@@ -33,7 +33,7 @@ import dram  # noqa: E402
 
 EMU = os.path.join(ROOT, 'out', 'ot303', 'ot_emu_8d0ad6f4')
 CARD = os.path.join(os.path.realpath(os.path.join(ROOT, 'refs', 'octabam')), 'out', 'botli_card2.img')
-IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt6.bin'))
+IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt7.bin'))
 STOCK = os.path.join(ROOT, 'out', 'raw', 'section_3_MAIN_OS.bin')
 ELF = os.path.join(ROOT, 'out', 'ot303', 'cf', 'ot303_runtime.elf')
 LOADER = os.path.join(ROOT, 'out', 'ot303', 'cf', 'loader.elf')
@@ -213,7 +213,8 @@ def main():
     hs = {tag: hwprobe_image.build(tag, host=True)['syms']['hq_start'] for tag in ('A', 'B')}
     counters = {'calls': (S['ot_render_calls'], 4), 'trigs': (S['ot_trigs'], 4)}
     seqdump = dict(counters, steps=(S['ot_steps'], 4), evn=(S['ot_evn'], 4), evlog=(S['ot_evlog'], 128),
-                   evptch=(S['ot_evptch'], 32), clears=(S['ot_qclears'], 4), drops=(S['ot_qdrops'], 4), stray=(S['ot_strayflags'], 4), tempo=(0x80001814, 4))
+                   evptch=(S['ot_evptch'], 32), clears=(S['ot_qclears'], 4), drops=(S['ot_qdrops'], 4),
+                   diag2=(PART + 0x1da + 30 * 1 + 11, 1), diag6=(PART + 0x1da + 30 * 5 + 11, 1), stray=(S['ot_strayflags'], 4), tempo=(0x80001814, 4))
     hb = {tag: hwprobe_image.build(tag, host=True) for tag in ('A', 'B')}
     yimg = hb['A']['y']
     ys = hb['A']['syms']
@@ -296,6 +297,13 @@ def main():
         ok &= all(q[k] == i[k] for k in (2, 3)) and all(0 <= b - a <= 8 for a, b in zip(i[0], q[0])) and min(q[1]) > 3000
         got = res[('src-seq', core)][3]
         c = {k: int.from_bytes(v, 'big') for k, v in got.items() if k not in ('evlog', 'evptch')}
+        steplen0 = 6 * 2646000 // c['tempo']
+        d8 = lambda g: min(127, (g * 8 + steplen0 // 2) // steplen0)
+        dg6 = {d8(g) for _, g, _ in line_events(steplen0, DEFAULTS[9])}
+        dg2 = {d8(g) for _, g, _ in line_events(steplen0, DEFAULTS[9], LINE2, LOCKS2, CONDS2)}
+        print(f'   DIAG (the last note\'s gate, eighths of a step): T2 {c.get("diag2")} (the line gives {sorted(dg2)}), '
+              f'T6 {c.get("diag6")} (the line gives {sorted(dg6)})')
+        ok &= c.get('diag2') in dg2 and c.get('diag6') in dg6
         ci = {k: int.from_bytes(v, 'big') for k, v in res[('src-inert', core)][3].items()}
         print(f'   ColdFire renderer: inert calls {ci.get("calls")} trigs {ci.get("trigs")}; with OT-303 tracks calls {c.get("calls")} '
               f'notes {c.get("trigs")}, step-hook calls {c.get("steps")}, trig flags with no note queued {c.get("stray")}, '

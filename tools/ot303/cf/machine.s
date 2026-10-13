@@ -11,7 +11,7 @@
         .global ot_machine_name, ot_src_names, ot_main_commit, ot_src_commit, ot_src_commit2
         .global ot_name_a, ot_name_b, ot_setup_row, ot_chooser_row, ot_setup_open, ot_chooser_open
         .global ot_setup_edit6, ot_setup_draw6, ot_resolve_pb, ot_validate, ot_stock_validate
-        .global ot_tick_hook, ot_glyph, ot_step_hook, ot_note_hook, ot_chooser_level
+        .global ot_tick_hook, ot_glyph, ot_step_hook, ot_note_hook, ot_chooser_level, ot_setup_value_hook
 
         .equ    OT_ROW, 5
         .equ    FLEX, 1
@@ -163,7 +163,19 @@ ot_setup_open:
 
 | SETUP's editor and drawer use the track's FLEX slot for row 5 (d2/d6 = the row; replays d * 6)
 ot_setup_edit6:
-        cmpi.l  #OT_ROW,%d2
+        cmpi.l  #FLEX,%d2               | FLEX's row on an OT-303 track shows FLEX's stash: not editable
+        bne.s   2f                      | here (its bytes are the OT-303's SETUP knobs)
+        lea     -16(%sp),%sp
+        movem.l %d0-%d1/%a0-%a1,(%sp)
+        move.l  %d4,-(%sp)
+        jsr     ot_track_is
+        addq.l  #4,%sp
+        tst.l   %d0
+        movem.l (%sp),%d0-%d1/%a0-%a1
+        lea     16(%sp),%sp
+        beq.s   2f
+        jmp     (0x4003a624).l
+2:      cmpi.l  #OT_ROW,%d2
         bne.s   1f
         moveq   #FLEX,%d2
 1:      move.l  %d2,%d0
@@ -172,7 +184,12 @@ ot_setup_edit6:
         sub.l   %d2,%d0
         jmp     (0x4003a536).l
 ot_setup_draw6:
-        cmpi.l  #OT_ROW,%d6
+        clr.l   (ot_preview_flex).l
+        cmpi.l  #FLEX,%d6
+        bne.s   2f
+        moveq   #1,%d7
+        move.l  %d7,(ot_preview_flex).l
+2:      cmpi.l  #OT_ROW,%d6
         bne.s   1f
         moveq   #FLEX,%d6
 1:      move.l  %d6,%d7
@@ -309,3 +326,17 @@ ot_note_hook:
         moveq   #29,%d2
         move.l  %d2,(%a0,%d7.l*4)
         jmp     (0x4009d42e).l
+
+| SRC SETUP's value read (0x4003ce02: d6 = the byte at Part + 0x1da + fp + d7 + d3, fp = part 0x18b2 +
+| track 30, d7 = row 6, d3 = the knob): control.c ot_setup_value (FLEX's stash for FLEX's row on an
+| OT-303 track). Replaces the 20 bytes up to 0x4003ce16; a1 is live after them, d0/d1/a0 are not.
+ot_setup_value_hook:
+        move.l  %a1,-(%sp)
+        move.l  %d7,-(%sp)
+        move.l  %d3,-(%sp)
+        move.l  %fp,-(%sp)
+        jsr     ot_setup_value
+        lea     12(%sp),%sp
+        move.l  (%sp)+,%a1
+        move.b  %d0,%d6
+        jmp     (0x4003ce16).l

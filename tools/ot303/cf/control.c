@@ -32,7 +32,7 @@
  * an ACC lock), GATE 63 (half a step), VOL 119 (-1 dB). */
 const uint8_t ot_defaults[12] = {64, 30, 64, 32, 71, 0, 0, 64, 38, 63, 119, 0};
 static const char *const ot_names[12] = {
-    "PTCH", "CUT", "RES", "ENV", "DEC", "ACC", "WAVE", "TUNE", "SLID", "GATE", "VOL", ""
+    "PTCH", "CUT", "RES", "ENV", "DEC", "ACC", "WAVE", "TUNE", "SLID", "GATE", "VOL", "DIAG"
 };
 static uint8_t desc[DESC_SIZE] = {0};
 uint32_t ot_desc_p = 0;
@@ -79,7 +79,7 @@ static uint32_t page(void) {
             put32(desc + 0x132 + 4 * i, 0);
             put32(desc + 0x162 + 4 * i, 0);
         }
-        put32(desc + 0x1c2, 0x111); put32(desc + 0x1c6, 0x11111111u);   /* one nibble a knob, low first: 0-7 on, 8-10 on, 11 off */
+        put32(desc + 0x1c2, 0x1111); put32(desc + 0x1c6, 0x11111111u);  /* one nibble a knob, low first: all twelve on (11 = DIAG) */
         ot_desc_p = (uint32_t)(uintptr_t)(desc + 0x38);
     }
     return ot_desc_p;
@@ -113,19 +113,40 @@ static void flex_stash(volatile uint8_t *part, unsigned t) {
     }
     *stash(part, t, 8) = STASH_MARK;
 }
-static void flex_restore(volatile uint8_t *part, unsigned t) {
+/* FLEX's twelve values as stashed (stock's FLEX defaults when there is no stash: an MT1 track) */
+static void flex_values(const volatile uint8_t *part, unsigned t, uint8_t v[12]) {
     const volatile uint8_t *def = (const volatile uint8_t *)FLEX_DEFAULTS;
-    if (*stash(part, t, 8) != STASH_MARK) {          /* no stash (an MT1 track): stock's defaults */
-        for (unsigned k = 0; k < 12; ++k) *knob(part, t, k) = def[k];
-    } else {
-        uint32_t acc = 0; unsigned n = 0, in = 0;
-        for (unsigned k = 0; k < 12; ++k) {
-            while (n < flex_bits[k]) { acc |= (uint32_t)(*stash(part, t, in++) & 0x7f) << n; n += 7; }
-            *knob(part, t, k) = (uint8_t)(acc & ((1u << flex_bits[k]) - 1));
-            acc >>= flex_bits[k]; n -= flex_bits[k];
-        }
+    if (*stash((volatile uint8_t *)part, t, 8) != STASH_MARK) {
+        for (unsigned k = 0; k < 12; ++k) v[k] = def[k];
+        return;
     }
+    uint32_t acc = 0; unsigned n = 0, in = 0;
+    for (unsigned k = 0; k < 12; ++k) {
+        while (n < flex_bits[k]) { acc |= (uint32_t)(*stash((volatile uint8_t *)part, t, in++) & 0x7f) << n; n += 7; }
+        v[k] = (uint8_t)(acc & ((1u << flex_bits[k]) - 1));
+        acc >>= flex_bits[k]; n -= flex_bits[k];
+    }
+}
+static void flex_restore(volatile uint8_t *part, unsigned t) {
+    uint8_t v[12];
+    flex_values(part, t, v);
+    for (unsigned k = 0; k < 12; ++k) *knob(part, t, k) = v[k];
     for (unsigned i = 0; i < 9; ++i) *stash(part, t, i) = 0;   /* NEIGHBOR's stock defaults */
+}
+/* SRC SETUP previews the machine under its cursor with that machine's six bytes (0x4003ce02 reads
+ * Part + 0x1da + 30 track + 6 row + k; machine.s ot_setup_value). An OT-303's SETUP knobs live in
+ * FLEX's bytes, so on an OT-303 track the FLEX row would show OT-303's values in FLEX's slots (MT6 on
+ * the unit: missing knobs): it shows FLEX's own, from the stash. machine.s ot_setup_draw6 sets
+ * ot_preview_flex when the drawn row is FLEX itself (not the OT-303 row, which reads the same bytes). */
+uint32_t ot_preview_flex = 0;
+unsigned ot_setup_value(uint32_t off, unsigned k, unsigned row6) {
+    const volatile uint8_t *b = (const volatile uint8_t *)(uintptr_t)(U32(BANK) + PART_OFF + 0x1da + off + row6 + k);
+    unsigned pidx = off / PART_STRIDE, t = (off % PART_STRIDE) / 30;
+    if (ot_preview_flex && row6 == 6 && k < 6 && pidx < 4 && t < 8) {
+        const volatile uint8_t *part = (const volatile uint8_t *)(uintptr_t)(U32(BANK) + PART_OFF + pidx * PART_STRIDE);
+        if (signed_track(part, t)) { uint8_t v[12]; flex_values(part, t, v); return v[6 + k]; }
+    }
+    return *b;
 }
 /* machine.s's commits: sign = 1 makes track t of this Part an OT-303 (FLEX stashed, the OT-303
  * defaults seeded), 0 makes it something else (FLEX put back); both copies (the Part and its SRAM
@@ -206,7 +227,7 @@ int ot_validate_part(uint8_t *part) {
  * +8 trigless, +0x48 slide; step s < 32 in the long at +4, bit s, else the long at +0, bit s - 32),
  * the length and scale of the pattern (+0x8e53/+0x8e54) or, in PER TRACK mode (+0x8e55), the
  * track's (+0x50/+0x51); ticks per step 0x400aba50[scale], tempo 0x80001814 = BPM x 24. */
-struct ot_qn { uint32_t gl; uint8_t step, slide, call, pad; };
+struct ot_qn { uint32_t gl; uint8_t step, slide, call, diag; };
 #define QN 4u
 static struct ot_qn q[8][QN] = {{{0, 0, 0, 0, 0}}};
 static uint8_t qn[8] = {0}, qcall[8] = {0}, qlast[8] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, qlen[8] = {0};
@@ -281,7 +302,9 @@ void ot_note(unsigned track) {
     }
     unsigned hold = i < len && step_bit(trk, 0x00, n) && step_bit(trk, 0x48, n);
     uint32_t gl = hold ? (count + 1) * sl : (count - 1) * sl + ot_gate_samples(knob_now(track, OT_GATE), sl);
-    struct ot_qn e = {gl < 1 ? 1 : gl > 0x7ffffeu ? 0x7ffffeu : gl, (uint8_t)s, (uint8_t)step_bit(trk, 0x48, s), qcall[track], 0};
+    gl = gl < 1 ? 1 : gl > 0x7ffffeu ? 0x7ffffeu : gl;
+    uint32_t d8 = (gl * 8u + sl / 2) / sl;                  /* the DIAG readout: the gate in eighths of a step */
+    struct ot_qn e = {gl, (uint8_t)s, (uint8_t)step_bit(trk, 0x48, s), qcall[track], (uint8_t)(d8 > 127 ? 127 : d8)};
     unsigned k = qn[track];
     if (k && q[track][k - 1].step == s && q[track][k - 1].call == qcall[track]) q[track][k - 1] = e;   /* the same call again */
     else {
@@ -333,6 +356,9 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
                 ++ot_trigs;
                 ev = OT_EV_NOTE | (e.slide ? OT_EV_SLIDE : 0);
                 gl = e.gl;
+                /* DIAG (SETUP's 12th slot, read only): this note's gate in eighths of a step -- a plain
+                 * note at GATE 63 reads 4, one tie more 12. A diagnostic for MT7 (ties on the unit). */
+                *knob(part_base(), track, 11) = e.diag;
                 trace(2, track, e.step, (unsigned)U8(0x46104d0cu + track) << 8 | qd);
             } else {
                 ++ot_strayflags;

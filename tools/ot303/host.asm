@@ -36,6 +36,9 @@
 ; Notes: a note's words take effect at its sample; its gate closes GL samples later (M_AMP to the
 ; release, K8 to 0) unless the next note comes first. A slide into an open gate only moves the
 ; pitch target and the accent words (Open303 slideToNote); anything else retriggers (triggerNote).
+; A retrigger from silence (the amp envelope under IDLE) also restarts the saw just before its edge: Open303's
+; oscillator runs free after its first note, so a low note's first edge could come up to a period
+; after its trig (MT6 on the unit: late, galloping low notes).
 ;
 ; Rules (both broke the unit): no REP; no dense working data in a DMA's 8K partition: run 1 (the
 ; engine's X working set and these words) runs at X:$7b24 on both cores, in stock's unreferenced
@@ -94,6 +97,8 @@ E_M48L  equ     4
 E_L016  equ     6
 E_AG_8  equ     7
 E_AMP2  equ     8
+E_PH    equ     11
+IDLE    equ     $000400         ; AMP2 below this (-66 dB under a note's start): the voice is silent
 
 ; ---- the source seam (jsr from A P:$39c / B P:$1a2)
 sg_entry:
@@ -383,6 +388,17 @@ hq_start:
         tst     a
         bne     hq_evret                        ; a slide into an open gate
 hq_trig:
+        move    y:(r4+E_AMP2),b                 ; a note from silence starts its saw 22 samples
+        move    #>IDLE,a                        ;  (0.5 ms) before its edge: the edge lands as the
+        cmp     a,b                             ;  amp has opened, so the note sounds 1-2 ms after
+        bge     hq_live                         ;  its trig at any pitch; a note into a sounding one
+        move    #>44,y0                         ;  keeps its phase
+        mpy     y0,x0,a                         ; a1:a0 = 88 INC_T, an integer (22 samples x 4)
+        move    a0,y1
+        move    #>$7fffff,b
+        sub     y1,b
+        move    b1,y:(r4+E_PH)                  ; the phase, modulo 2
+hq_live:
         move    x1,x:(r5-N_MAMP)
         move    x0,y:(r4+E_S48H)
         clr     a
