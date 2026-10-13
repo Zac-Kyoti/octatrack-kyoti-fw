@@ -36204,6 +36204,8 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   still rebuilds 85cfe103). ERASE_EMPTY_TRIGLESS_LOCKS must skip OT-303 tracks in any combined build.
   An edit-script slip built MT9 sources under MT8's names; those outputs were deleted (the flashed MT8
   rebuilds from e04397e). `out/OCTATRACK_OS1.40C_OT303_MT9.syx` sha256
-  060f2a5526ef7c4b1bbc1c73149a96aab8ab0199a17bd98b91edd7f0970973d6 (`140C_303T9`), NOT flashed. Pack
+  060f2a5526ef7c4b1bbc1c73149a96aab8ab0199a17bd98b91edd7f0970973d6, then (before flashing) rebuilt so trigless
+  trigs tie too (a trigless trig ended a tie): b39fa0df58441a6cbea61fb79bc09da60b56d92a68f58ede7a8d0a6fdba06a52
+  (`140C_303T9`), NOT flashed. Pack
   round 10 published (v11).
 

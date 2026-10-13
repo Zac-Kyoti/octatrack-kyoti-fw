@@ -47,8 +47,9 @@ FX2 = {1: '1:302:303', 0: '0:50d:50e'}
 IDS = {1: 0x80000ec4, 2: 0x80000ecc}
 DEFAULTS = bytes([36, 30, 64, 32, 71, 0, 0, 64, 38, 63, 119, 0])
 BANK0 = 0x400e21e0                    # BOTLI plays bank 0, pattern 0 (PER TRACK scale; T2/T6: 16 steps, 1x)
-# the test line, steps 0..15: N note, T trigless lock (a tie, MT9), S note with a slide trig, . empty
-LINE = 'NTNS.SNST...N...'
+# the test line, steps 0..15: N note, T trigless lock, G trigless trig (both tie, MT9), S note with a slide
+# trig, . empty
+LINE = 'NTNS.SNSG...N...'
 LOCKS = {2: 76, 6: 52}                # PTCH locks on two of its notes (the pattern's p-lock records, TRAC + 0x59)
 # T2's line: every step a note, each with its own PTCH lock, and a trig condition that never fires in
 # play (FILL, code 1: the trig word TRAC + 0x89a + 2 step, low byte) on two of them -- the notes must
@@ -170,10 +171,11 @@ def ot303_pokes(tracks):
 def line_pokes(tracks, line=LINE, locks=LOCKS, conds={}):
     """a test line into bank 0 pattern 0: steps 0..31 in the masks' second long (trig +4,
     trigless lock +0x14, slide +0x4c), PTCH locks, trig conditions"""
-    m = {0x04: 0, 0x0c: 0, 0x14: 0, 0x4c: 0}           # (trigless trigs cleared: BOTLI's T2 has them; they no longer tie)
+    m = {0x04: 0, 0x0c: 0, 0x14: 0, 0x4c: 0}           # (all four written: BOTLI's T2 has its own trigless trigs)
     for s, c in enumerate(line):
         m[0x04] |= (c in 'NS') << s
         m[0x14] |= (c == 'T') << s
+        m[0x0c] |= (c == 'G') << s
         m[0x4c] |= (c == 'S') << s
     out = []
     for t in tracks:
@@ -199,7 +201,7 @@ def line_events(steplen, gate, line=LINE, locks=LOCKS, conds={}):
         count, n = 1, s
         for _ in range(1, 16):
             n = (n + 1) % 16
-            if LINE[n] != 'T':
+            if LINE[n] not in 'TG':
                 break
             count += 1
         hold = LINE[n] == 'S'
@@ -306,14 +308,14 @@ def main():
                 cnt, n = 1, st
                 for _ in range(1, 16):
                     n = (n + 1) % 16
-                    if line[n] != 'T':
+                    if line[n] not in 'TG':
                         break
                     cnt += 1
                 nx = line[(st + 1) % 16]
-                out.add(min(cnt, 7) | (8 if nx in 'NS' else 0) | (32 if nx == 'T' else 0))
+                out.add(min(cnt, 7) | (8 if nx in 'NS' else 0) | (16 if nx == 'G' else 0) | (32 if nx == 'T' else 0))
             return out
         dg6, dg2 = diag(LINE), diag(LINE2, CONDS2)
-        print(f'   DIAG (the last note: spanned steps + 8 next step a note, + 32 trigless lock): T2 {c.get("diag2")} (the line gives '
+        print(f'   DIAG (the last note: spanned steps + 8 next step a note, + 16 trigless trig, + 32 trigless lock): T2 {c.get("diag2")} (the line gives '
               f'{sorted(dg2)}), T6 {c.get("diag6")} (the line gives {sorted(dg6)})')
         ok &= c.get('diag2') in dg2 and c.get('diag6') in dg6
         ci = {k: int.from_bytes(v, 'big') for k, v in res[('src-inert', core)][3].items()}

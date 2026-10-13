@@ -233,8 +233,9 @@ int ot_validate_part(uint8_t *part) {
  *     step's trig condition passed -- a note that will fire): queues its gate and slide
  * The trig takes the oldest queued note, so trigs and notes pair one for one in order.
  *   slide  the step's slide trig: the note slides from the one before when that gate is still open
- *   gate   GATE's share of the step, plus a whole step for each trigless LOCK straight after (a tie:
- *          the single FUNC+TRIG gesture; trigless trigs keep their stock job, MT9 the user's choice);
+ *   gate   GATE's share of the step, plus a whole step for each trigless lock or trigless trig straight
+ *          after (a tie; a trigless trig still does its stock job -- LFO / FX envelope resets -- and
+ *          never retriggers the voice: the user's choice, MT9);
  *          held to the end of the next step when the next step is a note with a slide trig
  * At the end of a pattern the handler is already scheduling the next pattern: whether the track is
  * an OT-303 there is read from that pattern's own Part (+0x8e57). (One-shot trigs, code 61, are not
@@ -314,7 +315,7 @@ void ot_note(unsigned track) {
     unsigned count = 1, n = s, i;
     for (i = 1; i < len; ++i) {
         n = (n + 1) % len;
-        if (step_bit(trk, 0x00, n) || !step_bit(trk, 0x10, n)) break;
+        if (step_bit(trk, 0x00, n) || !(step_bit(trk, 0x08, n) | step_bit(trk, 0x10, n))) break;
         ++count;
     }
     unsigned hold = i < len && step_bit(trk, 0x00, n) && step_bit(trk, 0x48, n);

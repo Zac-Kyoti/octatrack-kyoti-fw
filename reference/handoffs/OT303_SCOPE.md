@@ -2172,8 +2172,10 @@ undecided (round 9's kick was sub-only, inaudible on the user's speakers). Round
 **Rule for any combined build:** KYOTI's ERASE_EMPTY_TRIGLESS_LOCKS deletes a trigless lock whose last
 lock is removed; on an OT-303 track that would delete a tie. Its emptiness check must skip OT-303
 tracks (the signature, `'O','T',1` in the Part) — the user agreed (2026-10-12).
-**MT9 (built, NOT flashed):** `out/OCTATRACK_OS1.40C_OT303_MT9.syx` (`140C_303T9`, sha256 `060f2a55…`):
-ties on trigless locks (mask +0x10); PTCH 0 C0 … 36 C3 (default) … 115–127 G9; DSP: soft attack (MEGS
+**MT9 (built, NOT flashed):** `out/OCTATRACK_OS1.40C_OT303_MT9.syx` (`140C_303T9`, sha256 `b39fa0df…`; first
+build `060f2a55…` replaced before flashing): ties on trigless locks (+0x10) AND trigless trigs (+0x08) —
+the user: a trigless trig must not end a tie; it still does its stock LFO/FX reset and never retriggers
+the voice; PTCH 0 C0 … 36 C3 (default) … 115–127 G9; DSP: soft attack (MEGS
 = rnd(MEG2 + RC1 (MEGS − MEG2)), RC1 = e^(−1/44.1), what moves the cutoff; amp and rc2 keep MEG2) and
 the output drive tanh(1.68 y) from the square's tanh table (GD8 = 1.68/8), engine macros SOFTATK /
 ODRIVE (emptied for the DIAG14 probe build, which still rebuilds `85cfe103…`); normal release 2 ms
