@@ -12,6 +12,7 @@
         .global ot_name_a, ot_name_b, ot_setup_row, ot_chooser_row, ot_setup_open, ot_chooser_open
         .global ot_setup_edit6, ot_setup_draw6, ot_resolve_pb, ot_validate, ot_stock_validate
         .global ot_tick_hook, ot_glyph, ot_step_hook, ot_note_hook, ot_chooser_level, ot_setup_value_hook
+        .global ot_slic_a, ot_slic_b, ot_slic_c
 
         .equ    OT_ROW, 5
         .equ    FLEX, 1
@@ -340,3 +341,41 @@ ot_setup_value_hook:
         move.l  (%sp)+,%a1
         move.b  %d0,%d6
         jmp     (0x4003ce16).l
+
+| Three stock reads of the current machine's SLIC byte (address = the register + 585563): control.c
+| ot_setup_byte gives an OT-303 track FLEX's own value. Each saves d0/d1/a0/a1 and puts the result
+| where stock would: ot_slic_a (0x4003b33c, LEN's label: d0's low byte, a1 the address),
+| ot_slic_b (0x40044dbe: tst.b, the CCR kept to its beq), ot_slic_c (0x4004fee2: d6's low byte).
+ot_slic_a:
+        adda.l  #585563,%a1
+        lea     -16(%sp),%sp
+        movem.l %d0-%d1/%a0-%a1,(%sp)
+        move.l  %a1,-(%sp)
+        jsr     ot_setup_byte
+        addq.l  #4,%sp
+        move.b  %d0,3(%sp)
+        movem.l (%sp),%d0-%d1/%a0-%a1
+        lea     16(%sp),%sp
+        jmp     (0x4003b344).l
+ot_slic_b:
+        adda.l  #585563,%a0
+        lea     -16(%sp),%sp
+        movem.l %d0-%d1/%a0-%a1,(%sp)
+        move.l  %a0,-(%sp)
+        jsr     ot_setup_byte
+        addq.l  #4,%sp
+        tst.b   %d0
+        movem.l (%sp),%d0-%d1/%a0-%a1
+        lea     16(%sp),%sp
+        jmp     (0x40044dc6).l
+ot_slic_c:
+        adda.l  #585563,%a0
+        lea     -16(%sp),%sp
+        movem.l %d0-%d1/%a0-%a1,(%sp)
+        move.l  %a0,-(%sp)
+        jsr     ot_setup_byte
+        addq.l  #4,%sp
+        move.b  %d0,%d6
+        movem.l (%sp),%d0-%d1/%a0-%a1
+        lea     16(%sp),%sp
+        jmp     (0x4004feea).l

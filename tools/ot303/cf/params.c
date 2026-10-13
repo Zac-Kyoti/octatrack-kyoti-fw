@@ -86,8 +86,8 @@ void ot_params_cont(const uint8_t k[12], struct ot_cont *c) {
 }
 
 unsigned ot_note_number(unsigned ptch) {
-    int n = 48 + (int)ptch - 64;
-    return n < 0 ? 0 : n > 127 ? 127 : (unsigned)n;
+    unsigned n = 24 + ptch / 2;             /* two steps a semitone: 0 C1, 24 C2, 48 C3 ... 120 C6 */
+    return n > 84 ? 84 : n;
 }
 
 void ot_params_note(const uint8_t k[12], struct ot_note *n) {

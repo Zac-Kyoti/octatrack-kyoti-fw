@@ -27,10 +27,11 @@
 #define SLOT_REC 0x40031d18u        /* stock (machine, slot) -> the sample slot's record, name at +24 */
 #define STASH_MARK 0x55u
 
-/* SRC (page 1) then SRC SETUP (page 2), stored with the track (params.h has the ranges). Open303's
+/* SRC (page 1) then SRC SETUP (page 2), stored with the track (params.h has the ranges). PTCH 48 = C3.
+ * Open303's
  * defaults: CUT 30 (500 Hz), RES 64, ENV 32, DEC 71 (400 ms), SLID 38 (60 ms); ACC 0 (an accent is
  * an ACC lock), GATE 63 (half a step), VOL 119 (-1 dB). */
-const uint8_t ot_defaults[12] = {64, 30, 64, 32, 71, 0, 0, 64, 38, 63, 119, 0};
+const uint8_t ot_defaults[12] = {48, 30, 64, 32, 71, 0, 0, 64, 38, 63, 119, 0};
 static const char *const ot_names[12] = {
     "PTCH", "CUT", "RES", "ENV", "DEC", "ACC", "WAVE", "TUNE", "SLID", "GATE", "VOL", "DIAG"
 };
@@ -139,6 +140,20 @@ static void flex_restore(volatile uint8_t *part, unsigned t) {
  * the unit: missing knobs): it shows FLEX's own, from the stash. machine.s ot_setup_draw6 sets
  * ot_preview_flex when the drawn row is FLEX itself (not the OT-303 row, which reads the same bytes). */
 uint32_t ot_preview_flex = 0;
+/* A setup byte stock reads for the track's current machine (machine.s ot_slic_a/b/c: the LEN label's
+ * formatter 0x4003b33c and two slice checks 0x40044dbe, 0x4004fee2 read its SLIC byte, Part + 0x1da +
+ * 30 track + 6 type + 1). An OT-303 is stored as FLEX, and FLEX's bytes hold OT-303's SETUP knobs
+ * (TUNE there), so on an OT-303 track they get FLEX's own value from the stash (MT7 on the unit: odd
+ * characters under SLIC and LEN in the STATIC preview, LEN blank in FLEX's). */
+unsigned ot_setup_byte(uint32_t addr) {
+    uint32_t off = addr - (U32(BANK) + PART_OFF + 0x1da);
+    unsigned pidx = off / PART_STRIDE, rem = off % PART_STRIDE, t = rem / 30, row = (rem % 30) / 6, k = rem % 6;
+    if (pidx < 4 && t < 8 && row == 1) {
+        const volatile uint8_t *part = (const volatile uint8_t *)(uintptr_t)(U32(BANK) + PART_OFF + pidx * PART_STRIDE);
+        if (signed_track(part, t)) { uint8_t v[12]; flex_values(part, t, v); return v[6 + k]; }
+    }
+    return U8(addr);
+}
 unsigned ot_setup_value(uint32_t off, unsigned k, unsigned row6) {
     const volatile uint8_t *b = (const volatile uint8_t *)(uintptr_t)(U32(BANK) + PART_OFF + 0x1da + off + row6 + k);
     unsigned pidx = off / PART_STRIDE, t = (off % PART_STRIDE) / 30;
@@ -303,8 +318,12 @@ void ot_note(unsigned track) {
     unsigned hold = i < len && step_bit(trk, 0x00, n) && step_bit(trk, 0x48, n);
     uint32_t gl = hold ? (count + 1) * sl : (count - 1) * sl + ot_gate_samples(knob_now(track, OT_GATE), sl);
     gl = gl < 1 ? 1 : gl > 0x7ffffeu ? 0x7ffffeu : gl;
-    uint32_t d8 = (gl * 8u + sl / 2) / sl;                  /* the DIAG readout: the gate in eighths of a step */
-    struct ot_qn e = {gl, (uint8_t)s, (uint8_t)step_bit(trk, 0x48, s), qcall[track], (uint8_t)(d8 > 127 ? 127 : d8)};
+    /* the DIAG readout (MT8): what the look-ahead saw -- bits 0-2 the steps the gate spans (1 + ties,
+     * at most 7), bits 3-6 the step after the note: +8 note trig, +16 trigless trig, +32 lock trig,
+     * +64 one-shot trig (MT7 on the unit: DIAG stayed 4 with ties entered) */
+    unsigned nx = (s + 1) % len, d = count > 7 ? 7 : count;
+    d |= step_bit(trk, 0x00, nx) << 3 | step_bit(trk, 0x08, nx) << 4 | step_bit(trk, 0x10, nx) << 5 | step_bit(trk, 0x18, nx) << 6;
+    struct ot_qn e = {gl, (uint8_t)s, (uint8_t)step_bit(trk, 0x48, s), qcall[track], (uint8_t)d};
     unsigned k = qn[track];
     if (k && q[track][k - 1].step == s && q[track][k - 1].call == qcall[track]) q[track][k - 1] = e;   /* the same call again */
     else {
@@ -356,8 +375,7 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
                 ++ot_trigs;
                 ev = OT_EV_NOTE | (e.slide ? OT_EV_SLIDE : 0);
                 gl = e.gl;
-                /* DIAG (SETUP's 12th slot, read only): this note's gate in eighths of a step -- a plain
-                 * note at GATE 63 reads 4, one tie more 12. A diagnostic for MT7 (ties on the unit). */
+                /* DIAG (SETUP's 12th slot, read only): what the look-ahead saw for this note (ot_note) */
                 *knob(part_base(), track, 11) = e.diag;
                 trace(2, track, e.step, (unsigned)U8(0x46104d0cu + track) << 8 | qd);
             } else {
