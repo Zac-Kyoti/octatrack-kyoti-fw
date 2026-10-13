@@ -2183,6 +2183,25 @@ ODRIVE (emptied for the DIAG14 probe build, which still rebuilds `85cfe103…`);
 (+39), square 585. Benches: host, engine (OT303_DSP=new), DIAG14 bit-exact; chain vs TwinVoice −86 dB;
 verify ALL GOOD. **Round 10 pack (v11):** the note start over a kick with a bright click (audible on
 small speakers: click band +8–17 dB on the beat), MT9's voice vs MT8's (Line, Hot, Locks).
+**README notes (for the release text, when OT-303 ships):**
+- Ties: a note keeps sounding through any run of trigless locks and/or trigless trigs right after it.
+  Trade-off: a trigless trig placed right after a note to reset an LFO or FX envelope also ties
+  that note (it still does its stock reset, and never retriggers the voice). (User, 2026-10-12.)
+- KYOTI's ERASE_EMPTY_TRIGLESS_LOCKS skips OT-303 tracks (an empty trigless lock is a tie there).
+
+**Round 10 results (user, 2026-10-12):** note start over the kick: **free-running** on Low and Line (it
+reverses MT7's restart; MT6's "galloping low notes" report is what the restart fixed, so confirm on the
+unit). MT9 vs MT8: Line MT9; **Hot MT8 — "fast clicks on the transients" of MT9**; Locks MT9 — "I like
+the drive of MT8 but the detail of MT9; MT8 almost too liquid on attack/release, MT9 could be the
+tiniest touch more liquid". Pack 10's "MT8" clip used params.c's 2 ms release (params_const was already
+regenerated), so MT8 vs MT9 differed only in soft attack + drive. Measured (onset 4–20 kHz peak / RMS,
+non-slide notes; scratch renders of pack 10's cpp with one change each): Hot restart 0.45 → + drive 0.46
+→ + soft attack 0.92 (the clicks: the 1 ms cutoff glide rings the filter at RES 115; at RES 80–90 it
+halves the onset instead), but **free-running alone 0.91** (Locks 0.64 → 0.90, Line 0.10 → 0.18): a free
+saw starts mid-cycle and the amp's onset steps it (Open303's own behaviour). With free-running the soft
+attack moves Hot only 0.91 → 1.03. **Round 11 pack (v12):** `tools/ot303/listening_pack11.{cpp,py}`:
+Hot restart + no soft attack / free + none / free + 1 ms; soft attack 1 ms vs none, free (Locks, Line);
+drive none / +2.5 / +4.5 dB, free + 1 ms (Locks, Line). The results line now always prints the 1/2/3 key.
 
 **MT7 on the unit + round 8 results (user, 2026-10-12):** STATIC preview: odd characters under SLIC/LEN
 (stock's LEN formatter `0x4003b2ec` and slice checks `0x40044dbe`, `0x4004fee2` read the *current*

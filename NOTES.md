@@ -36208,4 +36208,10 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   trigs tie too (a trigless trig ended a tie): b39fa0df58441a6cbea61fb79bc09da60b56d92a68f58ede7a8d0a6fdba06a52
   (`140C_303T9`), NOT flashed. Pack
   round 10 published (v11).
+- **S124 cont: round 10 results -> round 11.** Free-running won both note-start tests; Hot kept MT8
+  ("fast clicks" in MT9). Measured: the clicks = soft attack + restart (onset HF 0.45 -> 0.92), but a
+  free-running saw alone gives 0.91 (amp onset steps a mid-cycle saw), so round 11 (v12,
+  listening_pack11) tests Hot's note start, soft attack 1 ms vs none, drive 0/+2.5/+4.5 dB. Pack 10's
+  "MT8" clip had the 2 ms release too. README notes for release (the trigless-trig tie trade-off,
+  ERASE skip) logged in OT303_SCOPE.md. No firmware change yet; MT9 still NOT flashed.
 
