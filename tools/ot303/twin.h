@@ -182,6 +182,11 @@ struct Engine {
     bool meg48 = false;         // 48-bit main envelope (else 24-bit, truncating)
     int dlyN = 0; std::vector<W> dly; int dlyP = 0;   // test only: restore the 79-tap stage's latency
     long sqClamp = 0;           // the shaper's deliberate clamps (not errors)
+    // listening-pack candidates (listening_pack8.cpp), all off by default: the bit-exact paths never
+    // set them. GRIT: saw += GRIT (saw^2 - 1/3) (even harmonics); NOISE: white noise into the
+    // oscillator, NOISE full scale; RC1: the main envelope's soft attack, MEG smoothed by a one-pole
+    // (coefficient RC1 per sample) before it moves the cutoff (Open303's rc1, shipped at tau 0)
+    W GRIT = 0, NOISE = 0, RC1 = 0, MEGS = 0; uint32_t rng = 22222;
     // diagnostic: the oscillator from outside (the reference's, in double); returns osc (not /2)
     double (*oscHook)(void*) = nullptr; void* oscCtx = nullptr;
     bool exactCoef = false;     // diagnostic: b0/kpoly from the formulas (double) instead of tables
@@ -258,10 +263,12 @@ struct Engine {
             MEG2 = (W)(M48 >> 24);
         } else
             MEG2 = st(mpy(MEG2, C_MEG), "meg");
+        W MEGF = MEG2;
+        if (RC1) { MEGS = str(acc(MEG2) + mpy(RC1, MEGS - MEG2), nullptr); MEGF = MEGS; }
         W in2 = AGF ? MEG2 : 0;
         RC2 = str(acc(in2) + mpy(C2, RC2 - in2), "rc2");
         // log cutoff, clamped to 200 Hz .. 20 kHz, then the coefficient tables
-        A l = acc(L0_16) + mpy(ES8, MEG2) + mpy(AG8, RC2);
+        A l = acc(L0_16) + mpy(ES8, MEGF) + mpy(AG8, RC2);
         W L16 = st(l, "L16");
         const W LMAX = q23(LT_OCT / 16.0);
         if (L16 < 0) L16 = 0;
@@ -291,6 +298,8 @@ struct Engine {
                 P = (W)(PH >> 24); if (P & 0x800000) P -= 0x1000000;
             } else P = wrap(acc(P) + acc(INC));
             W saw = blep(P, INC);
+            if (GRIT) saw = st(acc(saw) + mpy(GRIT, st(mpy(saw, saw) - acc(0x2aaaab), nullptr)), nullptr);
+            if (NOISE) { rng = rng * 1664525u + 1013904223u; saw = st(acc(saw) + mpy(NOISE, W(int32_t(rng) >> 8)), nullptr); }
             A o = mpy(W1, saw);
             if (SQ) {
                 W s = blep(P >= 0 ? P - 0x800000 : P + 0x800000, INC);   // half a cycle on (eor #$800000)

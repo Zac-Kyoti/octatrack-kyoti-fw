@@ -2163,6 +2163,14 @@ commented out), so a note's first edge lands up to a period after its trig (2-60
 - DIAG, SETUP's 12th slot (read only): each note's gate in eighths of a step (4 = half a step, 12 =
   one tie). Host 990/1028 words.
 
+**Listening pack round 8 (2026-10-12, artifact https://claude.ai/artifact/VM8mZ61ARuDkp2QbmsxfNX v9):**
+`tools/ot303/listening_pack8.{cpp,py}` render the machine as MT7 plays it (params.c words, the host's
+note rules, the integer twin) against one candidate at a time, blind two-way picks with "Same" and a
+note: note start (MT7 restart vs free-running: Low, Line), output drive tanh(2.8x) (Line, Hot),
+feedback HPF 250 Hz (Hot, Line), grit (saw +0.12(s²−1/3), noise −60 dB: Line), edges (rc1 2 ms + 4 ms
+release: Locks, Line), square shaper 28 dB (Square), all together (Line, Hot). Clips level-matched at
+−22.5 dBFS RMS.
+
 **Research (2026-10-12): JC-303, ABL3, and what could make the voice fatter.** (User asked for
 findings, no code; the A/B pack follows.)
 - **JC-303** (midilab/jc303, Open303 in JUCE): its Open303 core adds no declick DSP and no
@@ -2184,8 +2192,9 @@ findings, no code; the A/B pack follows.)
   voice; the square uses ~135):
   1. Output drive: a soft clip after the voice's amp, reached by VOL above ~75 % (to +9 dB), as
      ABL3 does — weight and compression ("balls"); ~8–12 cycles; some aliasing on bright high notes.
-  2. Feedback high-pass 150 → ~80–100 Hz (Devil Fish / JC-303): bass kept under high resonance; 0
-     cycles (a constant).
+  2. Feedback high-pass raised 150 → ~250 Hz (JC-303's knob: 350–100 Hz): less bass fed back, so more
+     kept under resonance; 0 cycles (a constant). (First written as "lower it to 80–100 Hz": the round-8
+     render measured the opposite — 90 Hz thinned the sound, centroid 412 → 727 Hz; 250 Hz: 412 → 207 Hz.)
   3. Oscillator grit: a slight saw curvature (even harmonics) and faint VCO noise, as ABL3's default
      VCO; ~10–20 cycles (4× rate).
   4. Envelope edges: soft attack (rc1 ~1–3 ms) and a gate-release trim (ABL3 Gate Trim): fewer

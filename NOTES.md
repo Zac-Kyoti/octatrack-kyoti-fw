@@ -36176,4 +36176,18 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   order, none skipped; T6 ties/holds/slides/locks in order); screenshots: PLAYBACK SETUP six rows, the
   double-tap machine list. `out/OCTATRACK_OS1.40C_OT303_MT6.syx` sha256
   63398fdcd180a3b691cdd4b51a0fca1f2c6501d9361d7fa8b340ebd2878adc4d (`140C_303T6`).
+- **S124 cont (2026-10-12): research + MT6 on HW + MT7 + listening pack round 8.** JC-303 adds no
+  declick DSP (its mod mode exposes Open303's rc1 soft attack, feedback HPF, shaper drive, amp decays);
+  ABL3 manuals: VCO grit/noise models, VOL to +9 dB with internal clipping, VCA clicks, Gate Trim, Low
+  Cut. Findings + ranked suggestions in OT303_SCOPE.md (feedback HPF direction corrected after
+  measuring: raising it keeps bass). MT6 on HW: FLEX preview missing knobs, DEC/ties not heard (AMP
+  HOLD/REL 127 already), late/galloping low notes. Findings: Open303's idle reset is commented out (its
+  oscillator runs free); stock calls a track's renderer every frame once installed (0x400d61f0[t],
+  written only at 0x4000bff0 and init); a tied note's reference render sustains. **MT7 BUILT (NOT
+  flashed):** PTCH 64 = C3; saw restart from silence 22 samples before its edge (onset 1-2 ms at any
+  pitch); SETUP FLEX preview from the stash (0x4003ce02 detour), not editable there; DIAG readout (gate
+  in eighths of a step) in SETUP's 12th slot. `out/OCTATRACK_OS1.40C_OT303_MT7.syx` sha256
+  bc0c5a966fb2c5e5e7c9cea9c3278f646d176db65206e9e2e850a607a2aa2cb1 (`140C_303T7`), commit 1c77a6a.
+  Pack round 8 (tools/ot303/listening_pack8.{cpp,py}; twin.h gained off-by-default GRIT/NOISE/RC1):
+  12 blind two-way picks, published to the listening-pack artifact (version 9).
 
