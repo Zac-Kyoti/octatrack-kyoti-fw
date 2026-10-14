@@ -124,6 +124,11 @@ before the transport starts (`pre_*`), every pass from frame 10.
   0.57 dB; `pre_S950` 0.09 / 0.35 dB; `pre_SP12` 0.09 / **1.05 dB** (the harness's 1.0 dB
   limit, so it prints DIFFER; RMS is within 0.09 dB and the DSP inputs are bit-identical; the
   two runs' transport starts are 3 samples apart). Only core 0 puts out TX0 in the emulator.
+  **Superseded 2026-10-14 (dirty-side review):** that run compared whole files, which are silent
+  until the project loads (~16.5 s of 17.6 s), so it judged ~1 s of sound with onsets 2-5 samples
+  apart. The harness now compares from each recording's onset. A long run (`--frames 22000`,
+  7.93 s of sound, `out/vem/harness_audio_long.txt`) gives all three engines MATCH: RMS max
+  0.1 dB and 1/3-octave max 0.03 dB (OT 0.02, S950 0.03, SP12 0.01).
 - **Screens:** not compared. The emulator never draws SRC SETUP; the widgets are tested
   directly in (b).
 
