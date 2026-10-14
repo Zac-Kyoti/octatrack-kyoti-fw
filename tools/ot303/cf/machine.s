@@ -5,7 +5,7 @@
 | OT-303 registration: machine row 5 in the track's machine chooser and in SRC SETUP, stored as FLEX
 | plus the signature 'O','T',1 in unused NEIGHBOR page bytes (part + 0x2a + 18 + 30 t), on any track,
 | one per DSP core. A new assignment seeds both Part copies with the OT-303 defaults (FLEX's values
-| stashed beside the signature, put back when the track leaves OT-303); reselecting keeps the patch. Each stub is reached by a detour (tools/build_ot303.py) and replays the stock
+| stashed beside the signature, put back when the track leaves OT-303); reselecting keeps the patch. Each stub is reached by a detour (tools/build_blackpyramid_303.py) and replays the stock
 | instructions it displaced. ANALOG BD's engine browser is not ported (no detours on the pool).
         .text
         .global ot_machine_name, ot_src_names, ot_main_commit, ot_src_commit, ot_src_commit2

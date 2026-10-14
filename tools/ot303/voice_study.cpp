@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Zac-Kyoti
+// SPDX-FileCopyrightText: 2009 Robin Schmidt (Open303, MIT: the algorithm and constants ported here; tools/ot303/LICENSE.Open303.txt)
 //
 // OT-303 Phase 1, time-domain half: render Open303's voice with the filter and the
 // oversampling factor swapped, everything else (oscillator tables, envelopes, slide, accent,

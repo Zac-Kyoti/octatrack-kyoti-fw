@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 #
 # OT-303: the image edits both OT-303 builders share (tools/build_ot303_hwprobe.py, the DIAG probe;
-# tools/build_ot303.py, the machine), every one asserting the stock words it replaces:
+# tools/build_blackpyramid_303.py, the machine), every one asserting the stock words it replaces:
 #   patch_dsp     both DSP payloads: the engine + wrapper over SPRING REV's P words, DARK REV's
 #                 35-word helper moved to the module's end (its three outside callers retargeted),
 #                 the source seam -> jsr the wrapper, SPRING's five X records rewritten, SPRING's

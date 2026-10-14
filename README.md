@@ -166,6 +166,41 @@ this instead.
 **Final build:** [`tools/build_rec_trig_mute.py`](tools/build_rec_trig_mute.py) →
 `OCTATRACK_OS1.40C_REC_TRIG_MUTE`
 
+### BLACKPYRAMID_303
+
+A TB-303 voice as a track machine, shown as **BLKPYRAMD**: the sixth row of a track's machine
+list (double-tap the track, or `[FUNC]` + `[SRC]` → MACHINE). One per DSP core: one on T1–T4,
+one on T5–T8.
+
+- **SRC:** `PTCH` (C0–C8, a semitone a step, shown as note names) · `CUT` · `RES` · `ENV` ·
+  `DEC` (200 ms–2 s) · `ACC`. **SETUP:** `WAVE` (saw → square) · `TUNE` · `SLID` (slide time) ·
+  `GATE` (note length) · `VOL` (clean up to 64, driven above; the default adds +2.5 dB).
+- **Notes:** each trig plays a note with the knobs at that step; p-lock `PTCH` for a melody.
+- **Accent:** p-lock `ACC` on the step (0 = no accent).
+- **Slide:** an OT slide trig glides into its note from the previous one, without a retrigger.
+- **Ties:** trigless locks and/or trigless trigs right after a note hold it. A trigless trig
+  still resets LFOs and FX envelopes as on stock, so a trigless trig after a note also ties it.
+- AMP, FX1, FX2, LFOs (`PMTR` lists the six SRC knobs), scenes, p-locks and trig conditions
+  work as on any track.
+
+**Limits:**
+- SPRING REVERB is removed: its DSP space holds the voice.
+- Notes played live (track keys, MIDI) and one-shot trigs don't sound.
+- On a stock OS, the track opens as a FLEX track.
+- A square-wave voice on T5–T8 beside DJ EQ in both FX slots of all eight tracks may crackle.
+
+**Credits:** the voice is Robin Schmidt's [Open303](https://github.com/RobinSchmidt/Open303)
+(MIT). The machine registration follows repeat98's ANALOG BD for octabam. Design, voicing by
+ear and hardware testing are by Zac-Kyoti. The design, every voicing decision and full
+attribution: [`reference/BLACKPYRAMID_303.md`](reference/BLACKPYRAMID_303.md) and
+[`CREDITS.md`](CREDITS.md).
+
+**Hardware:** confirmed through test image 14: the voice, the grid (notes, accents, slides,
+ties), every knob and the LFO names. The 1 ms cutoff glide, the DEC range and the BLKPYRAMD
+name are emulator-verified only.\
+**Final build:** [`tools/build_blackpyramid_303.py`](tools/build_blackpyramid_303.py) →
+`OCTATRACK_OS1.40C_BLACKPYRAMID_303`
+
 ### BATCH_BUGFIXES
 
 Three fixes to stock bugs. Each has its own build.

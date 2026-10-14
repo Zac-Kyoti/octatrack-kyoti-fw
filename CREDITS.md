@@ -177,6 +177,28 @@ too, and has its own section above.)
   submodule; reviewed 2026-09-16 and not tracked separately since it adds
   nothing beyond that submodule for this project's purposes.
 
+## BLACKPYRAMID_303 — the TB-303 machine
+
+Full attribution and every design decision: [`reference/BLACKPYRAMID_303.md`](reference/BLACKPYRAMID_303.md) §5.
+
+- **[RobinSchmidt/Open303](https://github.com/RobinSchmidt/Open303)** — © 2009 Robin Schmidt, MIT.
+  The voice is Open303's TB_303 algorithm ported to the DSP56300: the oscillator blend and square
+  shaper, the TeeBee ladder and its fitted coefficients, the envelopes, accent, slide, pre/post
+  voicing and the knob formulas. Licence kept in `tools/ot303/LICENSE.Open303.txt`.
+- **[midilab/jc303](https://github.com/midilab/jc303)** — GPLv3, Open303 in JUCE. Reference only, no
+  code: its soft attack, movable feedback high-pass, square drive and overdrive suggested
+  candidates that were then A/B-tested by ear.
+- **AudioRealism ABL3** — its manuals only: drive reached by turning the volume up, and gate trim
+  (release), behind the drive and release candidates.
+- **ANALOG BD for octabam** — repeat98 (Jannik Aßfalg), MIT. The machine-registration pattern
+  (a sixth machine row stored as FLEX plus a signature) and the per-track source seam on SPRING
+  REV's DSP space, ported. **SYNTH** (Tim Hastie) was studied for the FLEX-renderer approach.
+- **Research consulted, no code:** Vadim Zavalishin, *The Art of VA Filter Design*; Andy Sloane's
+  x0xb0x measurements ([a1k0n/303](https://github.com/a1k0n/303)); Robin Whittle's Devil Fish notes.
+- **Zac-Kyoti** — the concept, the grid mapping, every voicing decision by ear (thirteen blind
+  listening rounds), every control range and default, and hardware testing on an MKI. The
+  implementation was written with AI assistance (Claude) under the author's direction.
+
 ## Community reverse-engineering & documentation
 
 - **emuyia / junes** — the Octakit (`ems-octakit`) source release attributes a

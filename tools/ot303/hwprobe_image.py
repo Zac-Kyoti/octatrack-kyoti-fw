@@ -4,7 +4,7 @@
 #
 # OT-303 on the DSP: one payload's words and addresses (no image I/O), for either wrapper:
 #   the hardware probe (tools/ot303/hwprobe.asm; tools/build_ot303_hwprobe.py, bench hwprobe_check.py)
-#   the machine's host (tools/ot303/host.asm, host=True; tools/build_ot303.py, bench host_check.py)
+#   the machine's host (tools/ot303/host.asm, host=True; tools/build_blackpyramid_303.py, bench host_check.py)
 #
 # Placement (both payloads; reference/handoffs/OT303_SCOPE.md §11-12, REPITCH Session 112's census):
 #   P  SPRING REV's module, its first 1,028 words (engine + wrapper, one piece); the builder moves

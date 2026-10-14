@@ -113,6 +113,7 @@ unit that boots; if it doesn't, use §3b.
 | KYOTI V1.4 (every feature in one image) | `KYOTI V1.4` |
 | DIRECT_JUMP_KYOTI | `140C_KDJ7` |
 | REC_TRIG_MUTE | `140C_RTM` |
+| BLACKPYRAMID_303 | `140C_BP303` |
 | ERASE_EMPTY_TRIGLESS_LOCKS and the BATCH_BUGFIXES builds | `1.40C` (stock string — check by behaviour) |
 | a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`) |
 
@@ -138,6 +139,10 @@ quick check for each:
   `[TRACK]`, press `[NO]` → toast `REC TRIGS MUTED`, the edge icon shows `..▶`, the
   current recording finishes and the next cycle does not record. `[TRACK]` + `[YES]` →
   `REC TRIGS UNMUTED`, recording resumes. Stopped, a muted track shows `..■`.
+- **BLACKPYRAMID_303** — double-tap T1, pick `BLKPYRAMD`, put trigs on a few steps: each plays
+  a 303 note. P-lock `PTCH` and `ACC` on a step; put a trigless trig after a note (it holds) and a
+  slide trig on the next note (it glides). FX menus no longer offer SPRING REVERB. Choosing it on
+  T2 as well is refused with `ONE 303 PER CORE!`; on T5 it is allowed.
 - **MIDI_PLAYS_FREE_FIX** — a PLAYS FREE MIDI track, trig quantize DIRECT, SCALE MODE PER
   TRACK, notes on steps 1 and 2: a manual trig keeps it running instead of stalling.
 - **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is a p-lock on a MIDI track:

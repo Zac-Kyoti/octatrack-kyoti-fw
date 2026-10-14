@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026 Zac-Kyoti
+ * SPDX-FileCopyrightText: 2009 Robin Schmidt (Open303, MIT: the algorithm and constants ported here; tools/ot303/LICENSE.Open303.txt)
  *
  * OT-303: the knobs -> the engine's host words (params.h). Open303's own formulas (rosic_Open303.cpp:
  * calculateEnvModScalerAndOffset, DecayEnvelope / LeakyIntegrator coefficients, triggerNote's accent

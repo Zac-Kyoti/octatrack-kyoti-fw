@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Zac-Kyoti
+// SPDX-FileCopyrightText: 2009 Robin Schmidt (Open303, MIT: the algorithm and constants ported here; tools/ot303/LICENSE.Open303.txt)
 // OT-303 resonance gain k(RES, fc): the 2x ladder's resonance peak = Open303's (4x) minus
 // DELTA dB (the user's 'Open303, a little more rounded at the very top'). Fitted by bisection on
 // the exact 2x transfer function (tools/ot303, Phase 2); k never above KTAB_CAP. Rows RES knob

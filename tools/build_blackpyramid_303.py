@@ -2,59 +2,18 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-OT-303 machine, test image 17 (MT17; reference/handoffs/OT303_SCOPE.md §12 items 1b, 2): the OT-303 DSP
-voice as a track machine. "OT-303" is the sixth row of the track's machine chooser and of SRC SETUP,
-on any track, one per DSP core (T1-4, T5-8). The track is stored as FLEX plus a signature in unused
-NEIGHBOR page bytes, so a stock OS loads the project as a FLEX track. Its FLEX renderer sends the
-DSP a control record (signature, trig flag, the twelve knobs) instead of sample data; the voice
-runs at the per-track source seam (DIAG14, hardware-proven), upstream of stock AMP, FX1 and FX2.
-In MT1 each trig plays the next step of the built-in Hot bar (the knobs are stored and sent, not
-used yet: the sequencer and the pages drive the voice in item 2 and 3). Registration ported from
-octabam's ANALOG BD (repeat98, MIT). MT2 (after MT1 on the unit): FLEX's own values survive a trip
-through OT-303 (stashed in NEIGHBOR's unused bytes, put back on leaving; MT1 wrote the OT-303 defaults
-over them and left them there), the page label reads PLAYBACK>OT-303, the track box names OT-303
-instead of a sample. MT3: the side columns' machine glyph reads 3 (for 303). MT4: the same machine, its ColdFire code now
-a DRAM runtime (tools/ot303/dram.py): 16 pages off the bottom of the audio page arena, filled at boot
-by tools/ot303/cf/loader.S appended after the OS image; the classic ROM cave is no longer used.
-MT5 (item 2): the sequencer and the knobs drive the voice. The built-in bar is gone; each trig plays a
-note with the track's knobs at that moment (page 1 p-lockable: PTCH CUT RES ENV DEC ACC; SETUP:
-WAVE TUNE SLID GATE VOL; Devil Fish-style ranges, tools/ot303/cf/params.h), trigless trigs after a
-note tie it, a slide trig slides into its note from the one before (no retrigger). The ColdFire
-compiles the knobs into the engine's words (params.c, within 3 LSB of Open303) and streams the
-voice's tables to the DSP in the record (record.c), so the DSP no longer builds them; the square
-(WAVE) works.
-MT6 (after MT5 on the unit): notes queue where the step handler schedules them (after the trig
-condition), so trigs and notes pair one for one whichever comes first (MT5 dropped a note when the
-next step was queued before the trig was seen: a missing step 2, ties that did nothing); records carry
-a number, so a voice that stops rendering never replays an old note; a track double-tap opens the
-machine list for an OT-303; PLAYBACK SETUP shows all six machines; the toast reads ONE 303 PER CORE!.
-MT7 (after MT6 on the unit): PTCH 64 = C3 (an octave up); a note from silence restarts the saw just
-before its edge, so low notes sound on their step (MT6: late, galloping low notes); SRC SETUP's FLEX row
-on an OT-303 track previews FLEX's own values (from the stash) and is not editable there; DIAG, a
-read-only 12th SETUP slot, shows each note's gate in eighths of a step (ties on the unit).
-MT8 (after MT7 on the unit): PTCH two steps a semitone, 0 C1 .. 120 C6 (default 48 = C3); stock's three
-reads of the current machine's SLIC byte get FLEX's own value on an OT-303 track (the STATIC preview's
-SLIC / LEN labels, FLEX's LEN label); DIAG shows what the tie look-ahead saw (spanned steps, the next
-step's trig kinds).
-MT9 (after MT8 on the unit and listening round 9): ties are trigless LOCKS (FUNC+TRIG; trigless trigs
-keep their stock job); PTCH a semitone a step from C0 (36 = C3); the soft attack (the main envelope
-smoothed, 1 ms) and a 2 ms normal release; the output drive tanh(1.68 x) (+4.5 dB into the soft clip).
-Before flashing, trigless trigs tie too (they keep their stock LFO/FX reset, never retrigger the voice).
-MT10 (listening rounds 10-12): the saw runs free (no restart from silence); the soft attack fades out
-with RES (1 ms to RES 100, none from 115); the drive rides on VOL's top (clean to 109, then up to
-+4.5 dB at 127; the default 119 = +2.5 dB). Both reach the DSP in the record every frame.
-MT11 (the user's choice): PTCH spans C0 .. C6 over the knob (73 notes, one or two values each; 64 = C3,
-the default) and shows note names (C3, C#3, ...) through the descriptor's value formatter.
-MT12 (the user: equal steps): PTCH's knob runs 0..72, a semitone a value, C0 .. C6 (36 = C3, the default).
-MT13 (after MT12 on the unit): PTCH 0..96, C0 .. C8; VOL 0 off, 1..64 clean (-30 dB .. 0 dB), 65..127
-driven 0 .. +4.5 dB (99 = +2.5 dB, the default); DIAG gone, its slot is OSC, a test switch FREE / SYNC (the
-saw restarted on a note from silence, MT7-MT9); the LFO page's PMTR lists PTCH CUT RES ENV DEC ACC.
-MT14 (listening round 13): the resonance feedback's high-pass 150 -> 350 Hz (less bass lost as RES rises).
-MT15 (after MT14 on the unit: free-running chosen): the OSC switch and the restart are gone (the 12th slot
-hidden); the cutoff and env amount glide to new values (tau 1 ms, per sample: round 13's pick).
-MT16 (the user): DEC spans 200 ms .. 2 s (Open303 VST's range; was 30 ms .. 3 s), default 38 = 398 ms.
-MT17: the machine is named BLKPYRAMD on the unit (BlackPyramid_303): the chooser, SRC SETUP, the track box
-and the PLAYBACK>name label.
+BLACKPYRAMID_303: a TB-303 voice as a track machine (shown as BLKPYRAMD), Open303's algorithm on the
+DSP56300. The design, the voicing decisions and the resources: reference/BLACKPYRAMID_303.md; the
+development record (MT1-MT17, the listening rounds, the hardware diagnostics):
+reference/handoffs/OT303_SCOPE.md.
+
+The machine is the sixth row of a track's machine chooser and of SRC SETUP, on any track, one per DSP
+core (T1-4, T5-8). The track is stored as FLEX plus a signature in unused NEIGHBOR page bytes, so a
+stock OS loads the project as a FLEX track (FLEX's own values are kept in NEIGHBOR's unused bytes and
+put back when the track leaves the machine). Its FLEX renderer sends the DSP a control record (the
+signature, the note, the knobs compiled into the engine's words, a chunk of the voice's tables)
+instead of sample data; the voice runs at the per-track source seam, upstream of stock AMP, FX1 and
+FX2. Registration follows octabam's ANALOG BD (repeat98, MIT).
 
 Stock 1.40C plus exactly this:
   * DSP, both payloads: tools/ot303/host.asm + the engine over SPRING REV's P words (DARK REV's
@@ -66,8 +25,9 @@ Stock 1.40C plus exactly this:
     note write, the machine window's focus, the SETUP preview's value read, three SLIC reads), 7 pokes
     and the FLEX renderer slot, each asserted against stock.
 
-Usage:   python3 tools/build_ot303.py      (WIP: KYOTI_ALLOW_WIP=1)
-Outputs: out/mainos_ot303_mt17.bin, out/OCTATRACK_OS1.40C_OT303_MT17.syx, out/OCTATRACK_OT303_MT17.bin
+Usage:   python3 tools/build_blackpyramid_303.py      (WIP: KYOTI_ALLOW_WIP=1)
+Outputs: out/mainos_blackpyramid_303.bin, out/OCTATRACK_OS1.40C_BLACKPYRAMID_303.syx,
+         out/OCTATRACK_BLACKPYRAMID_303.bin (CF card: PROJECT > OS UPGRADE)
 """
 import os, pathlib, subprocess, sys
 from kyoti_status import gate, seal
@@ -85,11 +45,11 @@ STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 CF = ROOT / "tools/ot303/cf"
 WORK = ROOT / "out/ot303/cf"
-OUT = ROOT / "out/mainos_ot303_mt17.bin"
-ELEK = ROOT / "out/elek_ot303_mt17.bin"
-OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_MT17.syx"
-OUT_BIN = ROOT / "out/OCTATRACK_OT303_MT17.bin"
-VERSTR = "140C303T17"      # the field takes 10 characters
+OUT = ROOT / "out/mainos_blackpyramid_303.bin"
+ELEK = ROOT / "out/elek_blackpyramid_303.bin"
+OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_BLACKPYRAMID_303.syx"
+OUT_BIN = ROOT / "out/OCTATRACK_BLACKPYRAMID_303.bin"
+VERSTR = "140C_BP303"      # the field takes 10 characters
 
 # MT4: no ROM cave. The ColdFire code is a DRAM runtime (tools/ot303/dram.py): linked at its arena
 # reserve, appended after the OS image behind tools/ot303/cf/loader.S, copied in at boot.

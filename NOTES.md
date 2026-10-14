@@ -36255,4 +36255,12 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
 - **S124 cont: MT17 -- named BLKPYRAMD (BlackPyramid_303).** `out/OCTATRACK_OT303_MT17.bin` sha256
   7aec32ecbd7b1d991ed3828d316af38c68908207a0a9cbefab02045aa2f8ac52, syx 33cef9be0f4ffeeeff3c28712156d8fc5428469600f600defe1c3f57f504a56b
   (`140C303T17`), NOT flashed.
+- **S124 cont: landing prep -- BLACKPYRAMID_303.** Branch rebased onto origin/main (32f2bcb; conflicts: threads.txt,
+  kb/caves.md, both kept); all 13 FINAL builders still match their pins. Builder renamed
+  tools/build_blackpyramid_303.py (outputs OCTATRACK_OS1.40C_BLACKPYRAMID_303.syx / OCTATRACK_BLACKPYRAMID_303.bin,
+  `140C_BP303`; mainos 20093b86… = MT17's bytes); Open303's MIT notice added (tools/ot303/LICENSE.Open303.txt + SPDX
+  lines); reference/BLACKPYRAMID_303.md (use, voice, every voicing decision, resources, attribution, octabam plan);
+  README/CREDITS/BUILD_KYOTI/FLASHING/START_HERE/CLAUDE.md entries; threads [ot303] extended. NOT promoted, NOT pushed:
+  promote after the author flashes the release image. Octabam module: needs an upstream generic DSP-source-machine
+  schema (ANALOG BD's ab_image is hard-wired); plan in the design doc §6.
 
