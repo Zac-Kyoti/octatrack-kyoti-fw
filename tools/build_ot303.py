@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-OT-303 machine, test image 16 (MT16; reference/handoffs/OT303_SCOPE.md §12 items 1b, 2): the OT-303 DSP
+OT-303 machine, test image 17 (MT17; reference/handoffs/OT303_SCOPE.md §12 items 1b, 2): the OT-303 DSP
 voice as a track machine. "OT-303" is the sixth row of the track's machine chooser and of SRC SETUP,
 on any track, one per DSP core (T1-4, T5-8). The track is stored as FLEX plus a signature in unused
 NEIGHBOR page bytes, so a stock OS loads the project as a FLEX track. Its FLEX renderer sends the
@@ -53,6 +53,8 @@ MT14 (listening round 13): the resonance feedback's high-pass 150 -> 350 Hz (les
 MT15 (after MT14 on the unit: free-running chosen): the OSC switch and the restart are gone (the 12th slot
 hidden); the cutoff and env amount glide to new values (tau 1 ms, per sample: round 13's pick).
 MT16 (the user): DEC spans 200 ms .. 2 s (Open303 VST's range; was 30 ms .. 3 s), default 38 = 398 ms.
+MT17: the machine is named BLKPYRAMD on the unit (BlackPyramid_303): the chooser, SRC SETUP, the track box
+and the PLAYBACK>name label.
 
 Stock 1.40C plus exactly this:
   * DSP, both payloads: tools/ot303/host.asm + the engine over SPRING REV's P words (DARK REV's
@@ -65,7 +67,7 @@ Stock 1.40C plus exactly this:
     and the FLEX renderer slot, each asserted against stock.
 
 Usage:   python3 tools/build_ot303.py      (WIP: KYOTI_ALLOW_WIP=1)
-Outputs: out/mainos_ot303_mt16.bin, out/OCTATRACK_OS1.40C_OT303_MT16.syx, out/OCTATRACK_OT303_MT16.bin
+Outputs: out/mainos_ot303_mt17.bin, out/OCTATRACK_OS1.40C_OT303_MT17.syx, out/OCTATRACK_OT303_MT17.bin
 """
 import os, pathlib, subprocess, sys
 from kyoti_status import gate, seal
@@ -83,11 +85,11 @@ STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 CF = ROOT / "tools/ot303/cf"
 WORK = ROOT / "out/ot303/cf"
-OUT = ROOT / "out/mainos_ot303_mt16.bin"
-ELEK = ROOT / "out/elek_ot303_mt16.bin"
-OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_MT16.syx"
-OUT_BIN = ROOT / "out/OCTATRACK_OT303_MT16.bin"
-VERSTR = "140C303T16"      # the field takes 10 characters
+OUT = ROOT / "out/mainos_ot303_mt17.bin"
+ELEK = ROOT / "out/elek_ot303_mt17.bin"
+OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_OT303_MT17.syx"
+OUT_BIN = ROOT / "out/OCTATRACK_OT303_MT17.bin"
+VERSTR = "140C303T17"      # the field takes 10 characters
 
 # MT4: no ROM cave. The ColdFire code is a DRAM runtime (tools/ot303/dram.py): linked at its arena
 # reserve, appended after the OS image behind tools/ot303/cf/loader.S, copied in at boot.

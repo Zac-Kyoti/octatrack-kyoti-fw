@@ -33,7 +33,7 @@ import dram  # noqa: E402
 
 EMU = os.path.join(ROOT, 'out', 'ot303', 'ot_emu_8d0ad6f4')
 CARD = os.path.join(os.path.realpath(os.path.join(ROOT, 'refs', 'octabam')), 'out', 'botli_card2.img')
-IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt16.bin'))
+IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_ot303_mt17.bin'))
 STOCK = os.path.join(ROOT, 'out', 'raw', 'section_3_MAIN_OS.bin')
 ELF = os.path.join(ROOT, 'out', 'ot303', 'cf', 'ot303_runtime.elf')
 LOADER = os.path.join(ROOT, 'out', 'ot303', 'cf', 'loader.elf')
@@ -270,7 +270,7 @@ def main():
             desc = got.get('desc', b'')
             names = [desc[0x4e + 6 * i:0x4e + 6 * i + 6].split(b'\0')[0].decode() for i in range(12)]
             print(f'   page row 5 0x{page:08x} (desc+0x38 0x{S["desc"] + 0x38:08x}); name {desc[0x41:0x48]!r}; knobs {names}')
-            print(f'   page label fields {desc[0x3c:0x3e]!r} / {desc[0x41:0x49]!r} (stock PB / PLAYBACK: PLAYBACK>OT-303)')
+            print(f'   page label fields {desc[0x3c:0x3e]!r} / {desc[0x41:0x49]!r} (stock PB / PLAYBACK: PLAYBACK>BLKPYRAMD)')
             ok &= page == S['desc'] + 0x38 and desc[0x3c:0x3f] == b'PB\0' and desc[0x41:0x4a] == b'PLAYBACK\0' \
                 and names[:6] == ['PTCH', 'CUT', 'RES', 'ENV', 'DEC', 'ACC']
     # the FLEX round trip against stock's Part as loaded

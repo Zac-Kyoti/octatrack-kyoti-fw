@@ -193,9 +193,9 @@ void ot_assign(volatile uint8_t *part, unsigned t, unsigned sign) {
 }
 /* The main page names the current track's sample: the track box (0x4004c1c0, the UI's current track
  * 0x100b14cc) and the screen's label builder (0x4003d552, the current track 0x80000000) both call the
- * slot lookup. An OT-303 track has no sample: they get a record named OT-303. */
-static const uint8_t ot_slot[32] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                                    'O', 'T', '-', '3', '0', '3', 0, 0};
+ * slot lookup. An OT-303 track has no sample: they get a record named as the machine (MT17: BLKPYRAMD). */
+static const uint8_t ot_slot[36] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                    'B', 'L', 'K', 'P', 'Y', 'R', 'A', 'M', 'D', 0, 0, 0};
 static uint32_t slot_rec(unsigned t, unsigned machine, unsigned slot) {
     if (machine == 1 && signed_track(part_base(), t)) return (uint32_t)(uintptr_t)ot_slot;
     return ((uint32_t (*)(unsigned, unsigned))SLOT_REC)(machine, slot);

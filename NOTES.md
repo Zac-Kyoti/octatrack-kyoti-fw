@@ -36252,4 +36252,7 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
 - **S124 cont: MT16 -- DEC 200 ms .. 2 s** (Open303 VST's range), default 38 = 398 ms. ColdFire only.
   `out/OCTATRACK_OS1.40C_OT303_MT16.syx` sha256 a756180e5007776f53e69d4abe41e6b2201c4aa39d724e402967c2016096ff15
   (`140C303T16`), NOT flashed (replaces MT15).
+- **S124 cont: MT17 -- named BLKPYRAMD (BlackPyramid_303).** `out/OCTATRACK_OT303_MT17.bin` sha256
+  7aec32ecbd7b1d991ed3828d316af38c68908207a0a9cbefab02045aa2f8ac52, syx 33cef9be0f4ffeeeff3c28712156d8fc5428469600f600defe1c3f57f504a56b
+  (`140C303T17`), NOT flashed.
 

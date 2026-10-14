@@ -305,8 +305,8 @@ ot_glyph:
 1:      pea     ot_glyph3
         jmp     (0x4004013c).l
 
-ot_name:
-        .asciz  "OT-303"
+ot_name:                                | MT17: the machine's display name (BlackPyramid_303; 9 characters fit
+        .asciz  "BLKPYRAMD"             | the chooser, SRC SETUP, the track box and PLAYBACK>name, ot_emu)
 ot_reject_name:
         .asciz  "ONE 303 PER CORE!"
         .balign 2

@@ -2318,6 +2318,11 @@ chain ours vs twinv −86 dB, verify ALL GOOD; ot_emu LCD: SETUP shows 11 knobs.
 VST's range; was 30 ms .. 3 s), default 38 = 398 ms (the old default's sound); OT_X0 / OT_DEC_ARG24
 regenerated, params_check against Open303 exact (C_MEG 0 LSB). ColdFire only; DSP as MT15. Benches: host
 bit-exact, verify ALL GOOD; ot_emu: the DSP's C_MEG for DEC 0/64/127 = params.c (7ffc49, 7ffed6, 7fffa1).
+**MT17 (built, NOT flashed; replaces MT16): the machine is named BlackPyramid_303, shown as BLKPYRAMD**
+(9 characters; ot_emu: SRC SETUP list and the track box fit, PLAYBACK>BLKPYRAMD ends 1 px before the
+pattern icon; stock's two sprintf sites have 24-byte / sample-name buffers; the double-tap chooser
+not reachable in ot_emu). `out/OCTATRACK_OT303_MT17.bin` (CF card) sha256 `7aec32ec…`,
+`out/OCTATRACK_OS1.40C_OT303_MT17.syx` `33cef9be…` (`140C303T17`), mainos `20093b86…`; verify ALL GOOD.
 
 **MT7 on the unit + round 8 results (user, 2026-10-12):** STATIC preview: odd characters under SLIC/LEN
 (stock's LEN formatter `0x4003b2ec` and slice checks `0x40044dbe`, `0x4004fee2` read the *current*
