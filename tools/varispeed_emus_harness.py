@@ -84,6 +84,10 @@ def p2(t, m, slot2, v):
     return [u8(DB + o, v), u8(SHADOW + o, v), u8(LIVE_P2 + 72 * t + slot2, v)]
 
 
+def part_only(o, v):
+    return [u8(DB + o, v), u8(SHADOW + o, v)]
+
+
 def settings(t, field, v):
     return u32((SET_FLEX if MACH == 1 else SET_STATIC) + SLOT[t] * SET_STRIDE + field, v)
 
@@ -120,22 +124,31 @@ def scenario_steps(cfg, image):
             s1 += p2(t, m, 3, c["ratemode"])
         if "quan" in c:
             s2 += p1(t, m, 0, c["quan"])
+            if cfg.get("pre") and c["mode"] in ("VARI", "AUTO"):
+                # the value in the slot AND in the park the swap would bring in: adopted or
+                # swapped, the track starts with it (new: NEIGHBOR p1 s0 / s5 by machine;
+                # the shipped design parks PTCH in NEIGHBOR p1 s0 for both, retained code)
+                for pk in ({18 if m == 0 else 23} | ({18} if image == "oracle" else set())):
+                    s2 += part_only(OFF_P1 + PART * PSTRIDE + 30 * t + pk, c["quan"])
         if "rate" in c:
             s2 += p1(t, m, 3, c["rate"])
         if image == "new" and c["mode"] in ("VARI", "AUTO"):
             s2 += p2(t, m, 5, EMUS[e])
+            if cfg.get("pre"):
+                s2 += part_only(OFF_P2 + PART * PSTRIDE + 30 * t + (23 if m == 0 else 21), EMUS[e])
     st = []
     if s0:
         st.append(f"1:poke:" + ";".join(s0))
         for t, c in cfg["tracks"].items():
             if c["mode"] == "PICKUP":
                 st.append(f"1:call:{SET_MACHINE:#x},{PART},{t}")
+    f1, f2 = ("-", "-") if cfg.get("pre") else (T_SET, T_VAL)
     if cfg.get("tempo"):
-        st.append(f"{T_SET}:call:{SET_TEMPO:#x},{cfg['tempo']}")
+        st.append(f"{f1}:call:{SET_TEMPO:#x},{cfg['tempo']}")
     if s1:
-        st.append(f"{T_SET}:poke:" + ";".join(s1))
+        st.append(f"{f1}:poke:" + ";".join(s1))
     if s2:
-        st.append(f"{T_VAL}:poke:" + ";".join(s2))
+        st.append(f"{f2}:poke:" + ";".join(s2))
     return st
 
 
@@ -148,7 +161,7 @@ def run(image, scens, frames, jobs, tag):
             "--scenario-jobs", str(jobs)]
     for name, steps in scens.items():
         log = d / f"{name}.log"
-        a = f"{log} --sequencer --internal-clock --frames {frames} --audio-out {d / (name + '.wav')}"
+        a = f"{log} --sequencer --internal-clock --frames {frames}"
         a += f" --step -:dump:0x46c82456,4={d / (name + '.dbptr')};0x80000003,1={d / (name + '.part')}"
         for s in steps:
             a += f" --step {s}"
@@ -198,6 +211,9 @@ def compare(a, b, cfg, label, ymask=0xffffff):
         per = {}
         for i, (x, y) in enumerate(zip(A, B)):
             t = track_of(core, x[0])
+            if (x[2], x[3] & ymask) != (y[2], y[3] & ymask):       # the whole run, transitions too
+                res.setdefault("whole_run", []).append(
+                    (i // (2 * ntrk), t + 1, x[1], f"{x[2]:06x}:{x[3]:06x}", f"{y[2]:06x}:{y[3]:06x}"))
             if (x[0], x[1]) != (y[0], y[1]):
                 res["ok"] = False
                 res.setdefault("notes", []).append(f"core {core} pass {i}: pass order differs {x[:2]} {y[:2]}")
@@ -205,7 +221,9 @@ def compare(a, b, cfg, label, ymask=0xffffff):
             st = per.setdefault(t, dict(started=False, n=0, diff=0, first=None, trigs=0))
             frame = i // (2 * ntrk)
             if not st["started"]:
-                if frame >= SKIP_FRAMES and x[4] and x[1] == 1:
+                # set before the transport: from frame 10 (the first-sight frames aside, see
+                # the whole-run list); otherwise from the track's first trig after SKIP_FRAMES
+                if (cfg.get("pre") and frame >= 10) or (frame >= SKIP_FRAMES and x[4] and x[1] == 1):
                     st["started"] = True
                 else:
                     continue
@@ -240,6 +258,10 @@ def matrix(quick):
                     q = QUAN[(t + 7 * qset) % 9]
                     tr[t] = dict(mode="VARI", emus=e, quan=q, rate=rates[t])
                 sc[f"vari_{e}_T{tempo or 'p'}_q{qset}"] = dict(tempo=tempo, tracks=tr)
+    # set before the transport starts: every pass compared, from the first frame
+    for e in emus_list:
+        tr = {t: dict(mode="VARI", emus=e, quan=QUAN[(t * 3 + 1) % 9], rate=rates[t]) for t in range(7)}
+        sc[f"pre_{e}"] = dict(tempo=None, tracks=tr, pre=True)
     if not quick:
         # AUTO with the sample's TSMODE (VARISPEED / 4 / 5 / 6 on the oracle)
         for e in emus_list:
@@ -281,6 +303,98 @@ def oor_matrix():
     return sc
 
 
+def run_audio(image, name, steps, frames, tag):
+    """One process per scenario (a --scenario child does not capture audio): --audio-out
+    PREFIX writes PREFIX_core0.wav / _core1.wav, every TX0 frame each core put out."""
+    d = OUTD / tag / image
+    d.mkdir(parents=True, exist_ok=True)
+    args = [str(EMU), "--image", str(IMAGES[image]), "--card", str(CARD), "--set", PRJ["set"],
+            "--project", PRJ["project"], "--load-ms", "20000", "--dsp", "--main-level", "64",
+            "--sequencer", "--internal-clock", "--frames", str(frames), "--audio-out", str(d / name)]
+    for st in steps:
+        args += ["--step", st]
+    return subprocess.Popen(args, stdout=open(d / f"{name}.log", "w"), stderr=subprocess.STDOUT)
+
+
+def wav(path):
+    import wave
+    import numpy as np
+    w = wave.open(str(path))
+    raw = w.readframes(w.getnframes())
+    sw = w.getsampwidth()
+    if sw == 3:                                      # 24-bit little-endian
+        b = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 3).astype(np.int32)
+        a = (b[:, 0] | (b[:, 1] << 8) | (b[:, 2] << 16)).astype(np.int32)
+        a = np.where(a & 0x800000, a - 0x1000000, a).astype(float)
+    else:
+        a = np.frombuffer(raw, dtype={2: np.int16, 4: np.int32}[sw]).astype(float)
+    return a.reshape(-1, w.getnchannels()) / 2 ** (8 * sw - 1), w.getframerate()
+
+
+def audio_compare(pa, pb, skip_s=0.5):
+    """Levels and spectra, never samples (the ColdFire workload differs): RMS per 50 ms
+    window and 1/3-octave band levels over the run after `skip_s`, per channel."""
+    import numpy as np
+    a, fr = wav(pa)
+    b, _ = wav(pb)
+    n = min(len(a), len(b))
+    a, b = a[int(skip_s * fr):n], b[int(skip_s * fr):n]
+    out = {}
+    win = int(0.05 * fr)
+    db = lambda x: 20 * np.log10(max(x, 1e-9))
+    for ch in range(a.shape[1]):
+        ra = [db(np.sqrt(np.mean(a[i:i + win, ch] ** 2))) for i in range(0, len(a) - win, win)]
+        rb = [db(np.sqrt(np.mean(b[i:i + win, ch] ** 2))) for i in range(0, len(b) - win, win)]
+        loud = [(x, y) for x, y in zip(ra, rb) if max(x, y) > -60]
+        if not loud:
+            continue
+        rms_dev = max(abs(x - y) for x, y in loud)
+        fa = np.abs(np.fft.rfft(a[:, ch] * np.hanning(len(a)))) ** 2
+        fb = np.abs(np.fft.rfft(b[:, ch] * np.hanning(len(b)))) ** 2
+        f = np.fft.rfftfreq(len(a), 1 / fr)
+        bands, dev = [], 0.0
+        fc = 31.5
+        while fc < fr / 2 / 1.12:
+            m = (f >= fc / 2 ** (1 / 6)) & (f < fc * 2 ** (1 / 6))
+            if m.any():
+                la, lb = 10 * np.log10(fa[m].sum() + 1e-30), 10 * np.log10(fb[m].sum() + 1e-30)
+                if max(la, lb) > 10 * np.log10(max(fa.sum(), fb.sum()) + 1e-30) - 60:
+                    dev = max(dev, abs(la - lb))
+            fc *= 2 ** (1 / 3)
+        out[ch] = dict(windows=len(loud), rms_max_dev_db=round(rms_dev, 2), band_max_dev_db=round(dev, 2))
+    return out
+
+
+def main_audio(frames, jobs):
+    """New vs oracle audio, by level and spectrum, for the three engines."""
+    names = [f"pre_{e}" for e in ("OT", "S950", "SP12")]
+    sc = matrix(True)
+    if not os.environ.get("VEM_AUDIO_REUSE"):
+        procs = []
+        for n in names:
+            for img in ("new", "oracle"):
+                procs.append(run_audio(img, n, scenario_steps(sc[n], img), frames, "audio"))
+        for p in procs:
+            p.wait()
+    res = {}
+    ok = True
+    for n in names:
+        for core in (0, 1):
+            pa = OUTD / "audio" / "new" / f"{n}_core{core}.wav"
+            pb = OUTD / "audio" / "oracle" / f"{n}_core{core}.wav"
+            if not (pa.exists() and pb.exists()):        # only the core that puts out TX0
+                continue
+            r = audio_compare(pa, pb)
+            res[f"{n} core{core}"] = r
+            bad = [c for c, v in r.items() if v["rms_max_dev_db"] > 1.0 or v["band_max_dev_db"] > 1.0]
+            ok &= not bad
+            print(f"  {'MATCH ' if not bad else 'DIFFER'} {n} core {core}: " +
+                  "; ".join(f"ch{c} {v['windows']} windows, RMS max {v['rms_max_dev_db']} dB, "
+                            f"1/3-oct max {v['band_max_dev_db']} dB" for c, v in r.items()))
+    (OUTD / "audio" / "results.json").write_text(json.dumps(res, indent=1))
+    sys.exit(0 if ok else 1)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true")
@@ -288,7 +402,10 @@ def main():
     ap.add_argument("--jobs", type=int, default=6)
     ap.add_argument("--frames", type=int, default=3000)
     ap.add_argument("--reuse", action="store_true", help="compare existing logs only")
+    ap.add_argument("--audio", action="store_true", help="the audio comparison (levels, spectra)")
     a = ap.parse_args()
+    if a.audio:
+        return main_audio(a.frames, a.jobs)
     import hashlib
     if not os.environ.get("VEM_IMG_ORACLE") and \
             hashlib.sha256(IMAGES["oracle"].read_bytes()).hexdigest() != ORACLE_SHA:
@@ -332,6 +449,10 @@ def main():
             for t, s in sorted(r["tracks"].items()):
                 if s["first"]:
                     print(f"      T{t + 1} first difference: {s['first']}")
+            w = r.get("whole_run", [])
+            if w:
+                print(f"      whole run (transitions included): {len(w)} differing pass(es), first "
+                      + ", ".join(f"frame {f} T{t} LC{lc} {a_}/{b_}" for f, t, lc, a_, b_ in w[:4]))
             if r["tagged"]:
                 print(f"      {r['tagged']} passes of the new image carry an engine tag out of range")
             for nt in r.get("notes", []):

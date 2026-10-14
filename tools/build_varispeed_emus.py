@@ -468,6 +468,15 @@ def main():
         dsp_orgs=orgs, mainos_sha256=sha), indent=1))
     print(f"  octabam reference: unit linked at 0x{CAVE:08x}, {len(blob)} B, sha256 "
           f"{hashlib.sha256(blob).hexdigest()}")
+    if not VARIANT:                      # the octabam module's REFERENCE must be this unit
+        import re
+        man = (ROOT / "octabam-modules/varispeed-emus/manifest.py").read_text()
+        m = re.search(r'reference=\(0x([0-9a-f]+),\s*"([0-9a-f]{64})"\)', man)
+        if not m or (int(m.group(1), 16), m.group(2)) != (CAVE, hashlib.sha256(blob).hexdigest()):
+            sys.exit(f"octabam-modules/varispeed-emus/manifest.py: reference is "
+                     f"{m.groups() if m else 'missing'}, the unit is 0x{CAVE:08x} "
+                     f"{hashlib.sha256(blob).hexdigest()} -- update it")
+        print("  = octabam-modules/varispeed-emus/manifest.py reference")
 
     # ---- wrap ------------------------------------------------------------------------
     if VARIANT:
