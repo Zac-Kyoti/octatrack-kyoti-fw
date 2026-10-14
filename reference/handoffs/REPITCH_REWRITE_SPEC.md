@@ -28,7 +28,9 @@ Two roles:
   next `## ` heading)
 - in this repo: `octabam-modules/repitch-repeat98-kyoti/patch_repitch_kyoti.s` and
   `manifest.py` (use the redacted `REPITCH_REWRITE_RETAINED.s` instead)
-- `tools/*repitch*` (builder, probes, trace patch, emulator checks)
+- `tools/repitch_probe_kyoti.cpp`, `tools/repitch_ot_emu_trace.patch`, and any other `tools/*repitch*`
+  file not on the allowed list below (the old standalone builder is deleted on `main`; do not
+  dig it out of git history)
 - `reference/handoffs/REPITCH_*.md` **except this file and the scope file the clean agent
   writes**, especially `REPITCH_REWRITE_OVERLAP.md`
 - `NOTES.md` sessions and `CREDITS.md` paragraphs about repitch / RPCH / REPITCH
@@ -51,6 +53,17 @@ comments mention the old ColdFire routine names in passing; names alone are fine
 - `reference/kb/*` (minus the section above), `START_HERE.md`, `CLAUDE.md`, `COVERAGE.md`,
   octabam's general firmware docs (PARAM_PAGES, STORAGE, …) minus repitch paragraphs, and
   octabam's toolchain and schema
+- the DSP-side tools (ours, checked 2026-10-14 to carry nothing of his but file names):
+  `tools/patch_repitch_dsp.asm`, `tools/repitch_dsp_src.py`, `tools/repitch_engine_model.py`,
+  `tools/repitch_dsp_check.py`, `tools/repitch_dsp_engine_check.py`,
+  `tools/repitch_dsp_engine_probe.cpp`, `tools/repitch_dsp_octabam.py`,
+  `tools/repitch_dsp_octabam_check.py`, `tools/repitch_dsp_boot_check.py`,
+  `tools/repitch_dsp_boot_probe.cpp`, `tools/repitch_dsp_probe.cpp`, `tools/repitch_dsp_render.cpp`,
+  `tools/repitch_dsp_listen.py`, `tools/repitch_dsp_profile.py`, and `tools/dsp_xasm.py`
+- `REPITCH_REWRITE_DSP_INSTALL.py`: the old builder's DSP half, extracted verbatim (ours)
+- the oracle `out/oracle/shipped_repitch_repeat98_kyoti_FINAL.bin` (sha256 `90b4a1c1…`), the
+  shipped FINAL image: run it **only** through the §5 black-box harness, which compares outputs.
+  Never disassemble it, diff it, or trace its ColdFire code
 - our own code: `REPITCH_REWRITE_RETAINED.s` (redacted from the shipped module),
   `octabam-modules/repitch-repeat98-kyoti/rpk_glyphs.s`, `patch_repitch_reload.s`,
   `rpk_dsp.asm`, `rpk_dsp_ptable.py`, and the module's `README.md`
