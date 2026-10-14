@@ -36292,4 +36292,11 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   If pops remain on HW: a diag moving RES to another slot. verify ALL GOOD, DIAG14 85cfe103.
   `out/OCTATRACK_BLACKPYRAMID_303.bin` sha256 3453fb2a1b33f235315283f068cbb958cefa226f06b18e7457b58b917ad014c9,
   syx cd9a522e06d5cb3c97f2304b36cf47631596ba2303c1b5f14f7ad747d8a6f292 (`140C_BP303`), NOT flashed.
+- **S124 cont: MT20 flashed ("working well", attack fixed) -> MT21, short HOLD/REL pops.** The AMP envelope closes
+  (HOLD+REL) under a still-sounding voice; with ATK 0 the next trig snapped it 0 -> 1 onto the sound (ot_emu: output
+  step 0 -> -0.23..-0.46 FS). Fix (CF): while the voice sounds (snd_until), the trig frame's AMP ATK is raised to 1
+  (hw0 0x0100: linear ~240-sample fade) for 24 frames, beside MT20's ANLG switch. ot_emu: no gain jumps; HOLD/REL
+  127 and notes from silence sample-identical to MT20. verify ALL GOOD.
+  `out/OCTATRACK_BLACKPYRAMID_303.bin` sha256 1222cb3257b6e8f5ac12caca38cfc264e0afe825ffa88218ea4fb984ccda5cb2,
+  syx a0e58e9b68676525d3e200ad7e35420ef34df9c76d4a195e4a8819788a22f019 (`140C_BP303`), NOT flashed.
 

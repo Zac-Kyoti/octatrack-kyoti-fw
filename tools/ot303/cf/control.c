@@ -268,6 +268,11 @@ static struct ot_voice voice[8] = {{{0}, 0, {0}, 0, 0, 0, 0, 0}};
  * 0x200 ping + 64 track, hw 0x15 high byte: 0 ANLG, 1 RTRG, 2/3 the trigless-trig pair) is switched
  * to its analog twin for that frame (no reset; ATK still fades in a note from silence). */
 static uint32_t snd_until[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+/* MT21, short AMP HOLD / REL: the AMP envelope can close while this voice still sounds (its gate is
+ * longer); the next trig then opened it in one sample (ATK 0) onto a sounding voice: a pop (a sample
+ * restarts from its start there). While the voice sounds, a trig's AMP gets at least ATK 1 (a linear
+ * ~5 ms fade from where the level is) for the frames its ramp takes. */
+static uint32_t atk_until[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 uint32_t ot_amp_legato = 0;
 /* for the firmware check (tools/ot303/verify_ot303.py): note steps seen, the last step handler call
  * (track, bank, pattern, step a byte each), trig flags with no note queued (ignored), queue clears
@@ -499,7 +504,9 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
         if ((amp[0x1e] & 0x10u) && (int32_t)(snd_until[track] - ot_frames) > 0) {
             unsigned m = amp[0x15] >> 8;
             if (m == 1 || m == 2) { amp[0x15] = (uint16_t)(amp[0x15] ^ 0x0100u); ++ot_amp_legato; }
+            atk_until[track] = ot_frames + 24u;
         }
+        if ((int32_t)(atk_until[track] - ot_frames) > 0 && amp[0] < 0x0100u) amp[0] = 0x0100u;
         {   /* the voice sounds until its gate ends plus 7 time constants of its release (2 ms / accent 50 ms) */
             uint32_t rel = p[OT_ACC] ? 960u : 40u;
             if (ev & OT_EV_NOTE) snd_until[track] = gl >= OT_GL_HELD ? ot_frames + 0x40000000u : ot_frames + gl / 16u + 2u + rel;

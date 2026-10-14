@@ -55,6 +55,12 @@ Builder: [`tools/build_blackpyramid_303.py`](../tools/build_blackpyramid_303.py)
   to sound (gate + 7 release time constants), the trig frame's AMP record (`0x80000110` + 0x200·ping
   + 64·track, halfword 0x15) is switched to the ANLG twin, so the level isn't reset. A note from
   silence keeps ATK's fade-in. In ot_emu, overlapping notes are sample-identical to ATK 0.
+- **Short AMP HOLD / REL (MT21):** the AMP envelope can close while the voice still sounds (its
+  gate outlasts HOLD + REL). With ATK 0, the next trig re-opened it in one sample onto a sounding
+  voice, which popped; a sample would restart from its start there. While the voice sounds, a trig's
+  AMP now gets at least ATK 1 for 24 frames: a linear ~5 ms fade from wherever the level is. In
+  ot_emu (GATE 127, HOLD/REL 6): the output step at the trig went from 0 → −0.23…−0.46 FS to
+  0 → −0.001, with no gain jumps. HOLD/REL 127 and notes from silence are sample-identical to MT20.
 - **RES steps (MT20):** the resonance words (RS, BG, AG_8) ease to each new value over a few frames
   (1/6 per frame, ~2 ms), set by the ColdFire. The engine glides cutoff and env amount itself.
 - **The track's own pages work as on any track:** AMP (attack/hold/release act on the 303's
