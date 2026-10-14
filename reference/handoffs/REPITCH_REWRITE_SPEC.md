@@ -1,10 +1,10 @@
-# REPITCH rewrite: clean-room spec
+# VARISPEED_EMUS (the REPITCH rewrite): clean-room spec
 
-Written 2026-10-13 for a clean-room rewrite of the ColdFire core of REPITCH_REPEAT98_KYOTI. The
-goal is a module with no code from Jannik Aßfalg's (repeat98) octabam `repitch` module, the base
-the shipped module grew from. Jannik asked for the emulations to be separated from his Repitch
-altogether. The rewrite keeps the feature the same for the player and replaces only the part
-that came from his code.
+Written 2026-10-13 for a clean-room rewrite of the ColdFire core of REPITCH_REPEAT98_KYOTI, and
+revised 2026-10-14 when the user redesigned it as **VARISPEED_EMUS**. The goal is a module with no
+code from Jannik Aßfalg's (repeat98) octabam `repitch` module, the base the shipped module grew
+from. Jannik asked for the emulations to be separated from his Repitch altogether.
+REPITCH_REPEAT98_KYOTI has been removed from every build here and from octabam (#721).
 
 This file is **clean**: it states behaviour, our own interfaces and our own DSP facts. It names
 none of his hook sites or mechanisms. Keep it that way.
@@ -59,86 +59,119 @@ comments mention the old ColdFire routine names in passing; names alone are fine
 A firmware fact the clean agent rediscovers on its own (including a site that may turn out to
 be the only workable one) is fine. Copying a fact from the blacklisted material is not.
 
-## 2. What the feature does (unchanged for the player)
+## 2. What the feature does (VARISPEED_EMUS, revised 2026-10-14)
 
-1. **TSTR on STATIC and FLEX** gets seven positions: `OFF AUTO NORM BEAT RPCH RPS9 RPSP`, raw
-   values 0..6. Raw 4/5/6 are what the Part and project store. Projects saved with the shipped
-   module (and RPCH projects from octabam's REPITCH) must load unchanged. The selector draws
-   our seven glyphs (`rpk_glyphs.s`). PICKUP is untouched.
-2. **Audio editor, ATTR page, TIMESTRETCH** (the sample's own setting) gains `REPITCH`,
-   `RPS9`, `RPSP` (raw 4/5/6) after BEAT. The value keys step OFF ↔ NORMAL ↔ BEAT ↔ REPITCH ↔
-   RPS9 ↔ RPSP, and every ATTR edit calls `rp_refresh` so the PLAYBACK dial follows at once.
-   Under SETUP `AUTO`, the sample's own value applies, mode included.
-3. **A repitch track**: SETUP 4/5/6, or AUTO with sample TSMODE 4/5/6. It must be STATIC or
-   FLEX with a bound sample whose tempo (BPM×24) lies in 720..7200, and the project tempo must
-   lie in the same range. On such a track:
+One build only: VARI + S950 + SP12, with the DSP kernel. There is no VARI-only variant.
+
+1. **TSTR on STATIC and FLEX** gets five positions: `OFF AUTO NORM BEAT VARI`, raw 0..4. VARI is
+   raw 4. (Clean scope §2.3: stock's unreferenced 5-position select widget fits this unmodified,
+   with stock's own icons; the label comes from a new formatter, since stock's is shared with
+   PICKUP.) PICKUP is untouched.
+2. **Audio editor, ATTR page, TIMESTRETCH** (the sample's own setting) gains `VARISPEED` (raw 4)
+   after BEAT. If the field cannot hold nine characters, use `VARI`. The value keys step
+   OFF ↔ NORMAL ↔ BEAT ↔ VARISPEED, and every ATTR edit calls `rp_refresh`. Under SETUP `AUTO`,
+   a sample whose TIMESTRETCH is VARISPEED plays as VARI.
+3. **A VARI track**: SETUP 4, or AUTO with sample TSMODE 4. It must be STATIC or FLEX with a
+   bound sample whose tempo (BPM×24) lies in 720..7200, and the project tempo must lie in the
+   same range. On such a track:
    - **Speed** = (project BPM × p) / (sample BPM × q), where p/q is the QUAN ratio, computed
      **exactly in integers** (no rounding drift: N = projectBPM24·p, D = sampleBPM24·q). While
      N > 2D, D doubles (an exact octave fold). The scaled increment is clamped to 2.0 − 16
-     LSB in the Q26 increment (the tag in item 5 must never push it past 2.0).
+     LSB in the Q26 increment.
    - Pitch and length move together: **no grains, no time-stretch.** The track plays dry,
      forwards and in reverse, and follows tempo changes every frame.
-   - **RATE still applies** (tape stops keep working). **PTCH is not applied as pitch.** Its
-     composed word (base value + p-locks + scenes) selects the QUAN ratio instead (item 4).
-     For LFO-on-PTCH and note transposition, match the shipped module's behaviour; find out
-     by the §5 comparison.
-   - Outside the tempo ranges, or off these modes, the track plays exactly as stock.
-4. **QUAN** (retained code): the PTCH page-1 slot on a repitch track. Index =
-   `rk_bucket(word >> 8)` from the composed 16-bit PTCH word; ratio = `.rk_ratios[idx]`
-   (p, q bytes; nine values 1/2 … 2/1, 1/1 at ui 64).
-5. **DSP mode tag** (our own design; the DSP kernel depends on it). The Q26 increment that
-   reaches the DSP voice command carries the mode in **bits 2-3**: 0 = RPCH, 1 = RPS9,
-   2 = RPSP. The DSP rebuilds the increment as a net `>>2`, so bits 0-1 never arrive. On the
-   DSP the mode lands in `y:$40` bits 0-1 (`l:$40` = this voice's increment), where
-   `rpk_dsp.asm` reads it.
-   - On a repitch track: clear bits 0-3, then OR in mode<<2.
-   - On **every other increment the firmware builds**: bits 2-3 must be 0, so a stock track
-     never reads as RPS9/RPSP by chance (PTCH +1 st gives arbitrary low bits). Our earlier
-     finding, which you should verify yourself: the firmware's other increment writers store
-     the literal `0x04000000`.
-6. **DSP kernel**: `rpk_dsp.asm` unchanged, with its two hooks and Y claim as in the module
-   README. New requirement: an **RPCH-only build option** with no DSP hooks, no Y claim and
-   no effect given up. TSTR then has five positions (no RPS9/RPSP), and ATTR offers only
-   REPITCH.
-7. **Cost**: a track not on a repitch mode should cost near nothing extra per frame (a few
-   instructions). The KYOTI load audit flagged the old per-frame path; don't regress it.
-8. **Coexistence**: conflicts with octabam's `REPITCH` and with `repitch-repeat98-kyoti` (same
-   TSTR words). It must coexist with every other KYOTI module.
+   - **RATE still applies.** **PTCH is not applied as pitch**: its composed word selects the
+     QUAN ratio (item 4).
+   - **Out of range** (a sample or project tempo outside 30..300 BPM): the track behaves exactly
+     like TSTR **OFF**. It plays dry at normal speed, PTCH applies as pitch, PTCH shows as PTCH and
+     TSNS as TSNS. It is not a VARI track.
+4. **QUAN** (retained, unchanged): the PTCH page-1 slot on a VARI track. Index =
+   `rk_bucket(word >> 8)` from the composed 16-bit PTCH word; ratio = `.rk_ratios[idx]`.
+5. **EMUS** (new): on a VARI track, the **TSNS** slot (SRC SETUP page, beside TSTR) becomes
+   **EMUS**, a three-value knob: `S950` (left), `OT` (middle), `SP12` (right). It follows **the
+   same rules and mechanisms as PTCH/QUAN**:
+   - its caption reads `EMUS` and its readout the value name, exactly when the VARI gate is on
+     (the same gate as QUAN, `rp_ui_gate`);
+   - the TSNS value and the EMUS value are kept separately: on a gate change they trade places
+     with a **spare parked byte** that stock saves with the Part and never applies (QUAN parks
+     PTCH in NEIGHBOR's page-1 `---` byte; EMUS needs its own such byte for TSNS);
+   - first sight adopts without swapping; a parked value that is fresh (never written) enters as
+     the middle value, `OT`;
+   - one encoder detent steps one value;
+   - PTCH↔QUAN and TSNS↔EMUS swap **together**, on the same gate transition.
+   - **Engine changes take effect at the next trig.** Stock cannot lock page-2 parameters, but
+     a mod can, so EMUS must be read as its composed value (base + any locks or scene values)
+     wherever those would land. The DSP engine a sound plays with is latched when that sound's
+     trig starts. Turning EMUS, or a lock/scene changing it, mid-note does not switch the engine
+     until the next trig on that track.
+6. **DSP mode tag** (our own design; the DSP kernel depends on it, unchanged). The Q26
+   increment that reaches the DSP voice command carries the engine in **bits 2-3**: 0 = OT,
+   1 = S950, 2 = SP12. The DSP rebuilds the increment as a net `>>2`, so bits 0-1 never arrive.
+   On the DSP the mode lands in `y:$40` bits 0-1, where `rpk_dsp.asm` reads it.
+   - On a VARI track: clear bits 0-3, then OR in the latched engine << 2.
+   - On **every other increment the firmware builds**: bits 2-3 must be 0 (clean scope §2.5
+     measured a stock track whose bits 2-3 read as SP12).
+7. **DSP kernel**: `rpk_dsp.asm` (the hardware-proven kernel) unchanged, with its two hooks and Y
+   claim as in the module README. It runs its engines only for S950/SP12. Every other voice pass
+   costs its short mode check.
+8. **Cost**: a track not on VARI should cost near nothing extra per frame.
+9. **Coexistence**: conflicts with `repitch-repeat98-kyoti` (same TSTR words). Must coexist with
+   every other KYOTI module.
+10. **Old projects**: TSTR/TSMODE values 5 and 6 (saved with REPITCH_REPEAT98_KYOTI) get **no
+    conversion and no special handling**. They must not crash anything; whatever stock does with
+    an unknown value is acceptable.
+11. **The swap must not repeat the shipped module's known bug**: after a VARI track's machine is
+    switched to PICKUP or THRU and back, the shipped swap could trade PTCH and QUAN the wrong way
+    round, and its dial-draw poll reached PICKUP tracks. Neither may happen, for PTCH/QUAN or for
+    TSNS/EMUS. Add a test for both.
 
 ## 3. Interfaces to the retained code (`REPITCH_REWRITE_RETAINED.s`)
 
-- `rp_swap` (d1 = track, preserves all): the PTCH↔QUAN domain bookkeeping. The new core calls
-  it **every frame for each track whose repitch gate is on, or whose `rp_prev[t]` byte is
-  nonzero** (the gate was on last time, or the bookkeeping is forgotten/held). A track with
-  the gate off and `rp_prev[t] == 0` skips it: that is the cheap path for stock tracks. It is
-  also polled at dial draws (already in the retained code).
+The retained code is ours and may be changed where VARISPEED_EMUS needs it: the gate range (VARI
+is raw 4 only, not 4..6), the second swapped pair, and item 11's fix.
+
+- `rp_swap` (d1 = track, preserves all): the domain bookkeeping. It is extended to swap
+  TSNS↔EMUS together with PTCH↔QUAN. The new core calls it **every frame for each track whose
+  gate is on, or whose `rp_prev[t]` byte is nonzero**; a track with the gate off and
+  `rp_prev[t] == 0` skips it. It is also polled at dial draws.
 - `rp_prev`: 8 bytes, one per track (`0xff` forgotten, `0xfe` = RP_HOLD during RELOAD PART).
-- `rp_ui_gate` (d1 → d0): the Part-DB form of the gate, used by the UI. The runtime gate the
-  new core computes **must agree with it** (same modes, same tempo range, STATIC/FLEX only).
-- `rk_bucket`, `.rk_ratios`: QUAN index and ratio table (item 4).
+- `rp_ui_gate` (d1 → d0): the Part-DB form of the gate. The runtime gate **must agree with it**.
+- `rk_bucket`, `.rk_ratios`, `quant_widget`, `quant_fmt`, `quant_step`, `qdial1..4`: QUAN.
+  These are kept as they are; EMUS gets its own widget, formatter and step handler on the same
+  pattern.
 - `rp_refresh`: call after an ATTR TIMESTRETCH edit.
 - `rp_forget` / `rp_apply1` / `rp_apply2` / `rp_reload` (`patch_repitch_reload.s`): Part
-  applies and RELOAD PART. These are our own hook sites and stay as they are.
-- `quant_widget`, `quant_fmt`, `quant_step`, `qdial1..4`: QUAN drawing and stepping. Ours,
-  staying as they are.
-- The old core read the per-track TSTR, the sample's TSMODE/tempo and the project tempo for
-  itself. The new core finds and reads them its own way.
+  applies and RELOAD PART, unchanged.
+- `rpk_glyphs.s` is no longer needed: the 5-position widget uses stock's icons.
 
-## 4. Open product decisions (the user's)
+## 4. Decided (the user, 2026-10-14)
 
-- **Name.** Placeholder `REPITCH_KYOTI`. `repeat98` leaves the name either way.
-- **ATTR integration**: kept by default (item 2). Report its cost; it can be dropped.
-- **RPCH-only option** (item 6): asked for, but the build form (setting vs. separate builder)
-  is still open.
+- Name **VARISPEED_EMUS**; TSTR label `VARI`; ATTR label `VARISPEED` (or `VARI` if it does not fit).
+- The ATTR integration is kept.
+- One build (VARI + S950 + SP12 + the DSP kernel); no VARI-only build.
+- The DSP kernel is the hardware-proven one, unchanged. No ColdFire-only emulation.
 
 ## 5. Acceptance (implementation phase)
 
-- **Black-box equivalence** with the shipped FINAL REPITCH image in the emulator, comparing
-  **outputs only**, over the same matrix of TSTR 0..6 × TSMODE 0/2/4/5/6 × STATIC/FLEX/PICKUP ×
-  tempos in and out of range × PTCH/QUAN values × RATE values × forward/reverse:
+- **Black-box equivalence** with the shipped FINAL REPITCH_REPEAT98_KYOTI image in the emulator,
+  outputs only, where the two designs coincide:
+
+  | new | shipped |
+  |---|---|
+  | VARI, EMUS `OT` | TSTR 4 (RPCH) |
+  | VARI, EMUS `S950` | TSTR 5 (RPS9) |
+  | VARI, EMUS `SP12` | TSTR 6 (RPSP) |
+
+  Run it over TSTR × TSMODE × STATIC/FLEX/PICKUP × tempos in and out of range × QUAN values ×
+  RATE values × forward/reverse:
   - the increment each DSP voice pass receives (`l:$40`) is bit-identical
-  - the screens (PLAYBACK page, PLAYBACK SETUP, ATTR) are identical
-  - the audio matches by levels/spectra (not sample-exact: the CF workload differs)
-- The DSP-side checks (`rpk_dsp.asm` bit-exact vs the engine model) are unchanged and still
-  pass.
-- Hardware: the FLASHING §4 REPITCH checklist on the MKI before any promotion.
+  - the audio matches by levels/spectra
+  - screens are compared only where the UI is the same (PTCH/QUAN, the ATTR row for VARISPEED vs
+    REPITCH aside)
+
+  Out of range is the one deliberate difference: OFF with stock pitch. Check it against stock OFF
+  instead.
+- New behaviour has its own tests: EMUS swap and adoption, the engine latch at trig (a mid-note
+  EMUS change does not switch the engine), item 11, and item 10 (no crash).
+- The DSP-side checks (`rpk_dsp.asm` bit-exact vs the engine model) are unchanged and still pass.
+- Hardware: a VARISPEED_EMUS checklist in FLASHING §4 on the MKI before any promotion.
