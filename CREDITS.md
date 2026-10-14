@@ -147,18 +147,15 @@ too, and has its own section above.)
   `reference/kb/techniques.md`. `octamachine` is a feasibility study for running
   Machinedrum firmware on Octatrack hardware — out of scope here except for its
   host-side statement of the Octatrack's own platform requirements.
-  **REPITCH KYOTI starts from Jannik's Repitch module for octabam**
-  (`modules/repitch/`, hosted in octabam, MIT, © 2026 Sam Banks as octabam's licence
-  states). The varispeed idea itself — speed = project BPM ÷ sample BPM — is the
-  standard one, but the ColdFire skeleton is his code, adapted: the tempo-source
-  routine, all seven of his hook sites (increment builder, TSTR resolver, audio-editor
-  ATTR) and the TSTR label formatter
-  (`octabam-modules/repitch-repeat98-kyoti/patch_repitch_kyoti.s`), and the
-  scaffold of our ColdFire test oracle (`tools/repitch_probe_kyoti.cpp`, from his
-  `tools/harness/repitch_probe.cpp`). Ours: QUAN and its exact-ratio fold, the
-  PTCH/QUAN swap, the 7-position TSTR widget, and all of RPS9/RPSP on the DSP.
-  REPITCH_REPEAT98_KYOTI was removed from every build here on 2026-10-13; its ColdFire core
-  is being rewritten without his code (`reference/handoffs/REPITCH_REWRITE_SPEC.md`).
+  **REPITCH_REPEAT98_KYOTI started from Jannik's Repitch module for
+  octabam** (`modules/repitch/`, MIT, © 2026 Sam Banks as octabam's licence states): its
+  ColdFire skeleton was his code, adapted (the tempo-source routine, his seven hook sites and
+  the TSTR label formatter), as was the scaffold of its ColdFire test oracle. At Jannik's
+  request it was removed from every build on 2026-10-13, and its files were deleted on
+  2026-10-14. Its successor, **VARISPEED_EMUS**, is a clean-room rewrite with none of his
+  code. The ColdFire core was re-derived from the stock image by agents that never saw his
+  module (`reference/handoffs/REPITCH_REWRITE_SPEC.md`, `..._SCOPE*.md`, `..._IMPL.md`). It
+  keeps our own parts: QUAN, the PTCH/QUAN swap, and the S950/SP-1200 DSP kernel.
 
 ## The DSP56300 emulator core
 

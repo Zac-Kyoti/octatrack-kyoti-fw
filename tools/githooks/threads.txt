@@ -36,7 +36,6 @@ reference/OT_SEQUENCER_BUGS.md
 tools/*repitch*
 tools/*varispeed*
 octabam-modules/varispeed-emus/*
-octabam-modules/repitch-repeat98-kyoti/*
 tools/sp1200_filter_response.py
 reference/handoffs/REPITCH_*
 
