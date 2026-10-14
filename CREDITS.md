@@ -156,6 +156,11 @@ too, and has its own section above.)
   code. The ColdFire core was re-derived from the stock image by agents that never saw his
   module (`reference/handoffs/REPITCH_REWRITE_SPEC.md`, `..._SCOPE*.md`, `..._IMPL.md`). It
   keeps our own parts: QUAN, the PTCH/QUAN swap, and the S950/SP-1200 DSP kernel.
+  **Prior art:** Jannik's module was the first to publish the firmware locations a varispeed
+  mode on this OS comes down to: the playback increment's final store (`0x40004100`), the
+  audio editor's TIMESTRETCH row (`0x4006e71c` label, `0x4006ef7c` down), the TSTR count, and
+  stock's unused 5-position select (`0x40046ab4`). VARISPEED_EMUS uses those too. Our agents
+  re-derived them from the stock image without seeing his module, but he found them first.
 
 ## The DSP56300 emulator core
 

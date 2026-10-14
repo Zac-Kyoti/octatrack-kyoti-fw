@@ -331,14 +331,26 @@ def wav(path):
     return a.reshape(-1, w.getnchannels()) / 2 ** (8 * sw - 1), w.getframerate()
 
 
-def audio_compare(pa, pb, skip_s=0.5):
-    """Levels and spectra, never samples (the ColdFire workload differs): RMS per 50 ms
-    window and 1/3-octave band levels over the run after `skip_s`, per channel."""
+def audio_compare(pa, pb, skip_s=0.05):
+    """Levels and spectra per channel, compared FROM EACH RECORDING'S SOUND ONSET: RMS per
+    50 ms window and 1/3-octave band levels over the audible part, after `skip_s`. The two
+    images run different ColdFire code, so the emulator starts the sound a few samples
+    apart (2026-10-14: 2-5 samples, OT included, whose DSP path is stock) and the files
+    are silent until the project has loaded (~16.5 s of a 17.6 s run). Comparing whole
+    files therefore compared mostly silence plus a ~1 s tail. Run enough --frames for
+    several seconds of sound. Samples are never compared: a few samples of timing
+    already moves every high-frequency phase."""
     import numpy as np
     a, fr = wav(pa)
     b, _ = wav(pb)
-    n = min(len(a), len(b))
-    a, b = a[int(skip_s * fr):n], b[int(skip_s * fr):n]
+    def onset(x):
+        hot = np.nonzero(np.abs(x).max(axis=1) > 1e-4)[0]
+        return int(hot[0]) if len(hot) else 0
+    oa, ob = onset(a), onset(b)
+    n = min(len(a) - oa, len(b) - ob)
+    k = int(skip_s * fr)
+    a, b = a[oa + k:oa + n], b[ob + k:ob + n]
+    audible_s, lag = round(len(a) / fr, 2), oa - ob
     out = {}
     win = int(0.05 * fr)
     db = lambda x: 20 * np.log10(max(x, 1e-9))
@@ -361,7 +373,8 @@ def audio_compare(pa, pb, skip_s=0.5):
                 if max(la, lb) > 10 * np.log10(max(fa.sum(), fb.sum()) + 1e-30) - 60:
                     dev = max(dev, abs(la - lb))
             fc *= 2 ** (1 / 3)
-        out[ch] = dict(windows=len(loud), rms_max_dev_db=round(rms_dev, 2), band_max_dev_db=round(dev, 2))
+        out[ch] = dict(windows=len(loud), rms_max_dev_db=round(rms_dev, 2), band_max_dev_db=round(dev, 2),
+                       audible_s=audible_s, onset_lag=lag)
     return out
 
 
@@ -390,7 +403,9 @@ def main_audio(frames, jobs):
             ok &= not bad
             print(f"  {'MATCH ' if not bad else 'DIFFER'} {n} core {core}: " +
                   "; ".join(f"ch{c} {v['windows']} windows, RMS max {v['rms_max_dev_db']} dB, "
-                            f"1/3-oct max {v['band_max_dev_db']} dB" for c, v in r.items()))
+                            f"1/3-oct max {v['band_max_dev_db']} dB" for c, v in r.items())
+                  + (f"  [{next(iter(r.values()))['audible_s']} s of sound compared; onsets "
+                     f"{next(iter(r.values()))['onset_lag']:+d} samples apart]" if r else ""))
     (OUTD / "audio" / "results.json").write_text(json.dumps(res, indent=1))
     sys.exit(0 if ok else 1)
 
