@@ -47,8 +47,9 @@ Builder: [`tools/build_blackpyramid_303.py`](../tools/build_blackpyramid_303.py)
     host's release event (EV bit 2) never starts a note.
   - TRIG + YES previews the held step with its locks, as often as you press it.
   - One-shot trigs play once until re-armed.
-  - The first live note after power-on waits ~30 ms for the voice's tables, which nothing loads
-    while the transport is stopped.
+  - The voice's tables load right after power-on (MT22): an idle OT-303 track renders through the
+    silent renderer's hook (`0x400047f0`) until its core has had two chunk passes (~82 frames), so the
+    first trigs after the transport starts sound, and so does the first live note.
 - **AMP attack (MT20):** stock's AMP (mode RTRG) drops a track's level to near zero at every trig
   when ATK > 0, with no fade. A sample restarts there; this voice can still be sounding (a long gate,
   an accent's tail, a slide, a held live note), and that was a click. While the voice is estimated

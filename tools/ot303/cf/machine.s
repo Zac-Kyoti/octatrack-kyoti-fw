@@ -14,7 +14,7 @@
         .global ot_tick_hook, ot_glyph, ot_step_hook, ot_note_hook, ot_chooser_level, ot_setup_value_hook
         .global ot_slic_a, ot_slic_b, ot_slic_c, ot_pmtr_pb
         .global ot_live_req_hook, ot_live_midi_hook, ot_live_chrom_hook, ot_live_rel_hook, ot_oneshot_hook
-        .global ot_rec_chrom_hook, ot_rec_midi_hook
+        .global ot_rec_chrom_hook, ot_rec_midi_hook, ot_idle_hook
 
         .equ    OT_ROW, 5
         .equ    FLEX, 1
@@ -382,6 +382,21 @@ ot_rec_midi_hook:
         move.l  (%sp)+,%d1
         move.l  %d0,-(%sp)
         jmp     (0x40062612).l
+
+| MT22: the silent renderer 0x400047f0(track, ping, start, end), the packer's call for a track with no
+| voice: an OT-303 track whose DSP core has not had the tables yet renders through ot_render instead
+| (control.c ot_idle_feed). Replays the 6 displaced bytes.
+ot_idle_hook:
+        move.l  16(%sp),-(%sp)          | end
+        move.l  8(%sp),-(%sp)           | track
+        jsr     ot_idle_feed
+        addq.l  #8,%sp
+        tst.l   %d0
+        beq.s   1f
+        jmp     ot_render               | the same arguments, the same return
+1:      move.l  %d2,-(%sp)
+        move.l  20(%sp),%d1
+        jmp     (0x400047f6).l
 
 ot_validate:
         jmp     ot_validate_part

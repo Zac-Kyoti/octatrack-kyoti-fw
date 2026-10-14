@@ -400,6 +400,14 @@ int ot_live_midi(unsigned t, unsigned note) {
     ++ot_live_reqs;
     return 1;
 }
+/* MT22: an idle track's frame (no voice: the packer calls the silent renderer 0x400047f0 for it). An
+ * OT-303 track whose core has not had the voice's tables yet renders as a playing one would -- its
+ * records (no note) feed the DSP the tables, so the first trigs after the transport starts sound
+ * (MT21 on the unit: the first two were missed). 1: render it (machine.s ot_idle_hook). */
+int ot_idle_feed(unsigned t, unsigned end) {
+    if (end != 16 || t >= 8 || (dsp_ready(0) && dsp_ready(4))) return 0;
+    return !dsp_ready(t) && signed_track(part_base(), t);
+}
 /* the frame builder found a release (0x40) in the track's mailbox (0x4000b4f6) */
 void ot_live_release(unsigned t) {
     if (t >= 8) return;

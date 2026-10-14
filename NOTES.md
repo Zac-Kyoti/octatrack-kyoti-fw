@@ -36299,4 +36299,10 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   127 and notes from silence sample-identical to MT20. verify ALL GOOD.
   `out/OCTATRACK_BLACKPYRAMID_303.bin` sha256 1222cb3257b6e8f5ac12caca38cfc264e0afe825ffa88218ea4fb984ccda5cb2,
   syx a0e58e9b68676525d3e200ad7e35420ef34df9c76d4a195e4a8819788a22f019 (`140C_BP303`), NOT flashed.
+- **S124 cont: MT22 -- the first trigs after the transport starts.** The DSP's tables arrived only while the track
+  rendered (a playing voice), so the first notes after power-on were lost (user confirmed). The packer calls the silent
+  renderer 0x400047f0 for idle tracks every frame (tables 0x400d61d0/0x400d61f0 rebuilt each frame); hooked: an
+  OT-303 track whose core is not dsp_ready renders through ot_render (records with no note). ot_emu: idle after boot
+  -> STG 2, YBEG..$fec complete in 82 frames, then the hook stops; PLAY after 2 s: 9 notes sent, 9 hq_start arrivals.
+  verify ALL GOOD. `out/OCTATRACK_BLACKPYRAMID_303.bin` sha256 fe6970d0ead8ecfc3ff029f29d990167d39f51ed5cb191240e3bb59a7d1c24fe.
 
