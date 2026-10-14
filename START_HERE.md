@@ -142,7 +142,7 @@ builder's FINAL entry and the old builder is deleted. There is no superseded tie
 | QUANTIZE_LIVE_REC_TOGGLE | `build_quantize_live_rec_toggle.py` | `octabam-modules/quantize-live-rec-toggle` |
 | ERASE_EMPTY_TRIGLESS_LOCKS | `build_erase_empty_trigless_locks.py` | `octabam-modules/erase-empty-trigless-locks` |
 | REC_TRIG_MUTE | `build_rec_trig_mute.py` | `octabam-modules/rec-trig-mute` |
-| BLACKPYRAMIDS_303 (shown as BLKPYRAMD; working name OT-303) | `build_blackpyramids_303.py` (sources `tools/ot303/`) | `octabam-modules/blackpyramids-303` (not yet ported: `reference/BLACKPYRAMIDS_303.md` §6) |
+| BLACKPYRAMIDS_303 (shown as BLKPYRAMD; working name OT-303) | `build_blackpyramids_303.py` (sources `tools/ot303/`) | `octabam-modules/blackpyramids-303` (with the `Module.dsp_source` PR, drafted; `reference/BLACKPYRAMIDS_303.md` §6) |
 | BATCH_BUGFIXES: MIDI_PLAYS_FREE_FIX · EMPTY_PATTERN_LED_FIX · PART_CHANGE_CARRYOVER_FIX | `build_midi_plays_free_fix.py` · `build_empty_pattern_led_fix.py` · `build_part_change_carryover_fix.py` | `octabam-modules/batch-bugfixes` |
 
 The assembly sources keep their historical names (`patch_directjump_v7.s`,
@@ -157,7 +157,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   `3624a1e7…`, CF `.bin` `8fb372af…`, syx `5a63cf20…`, `140C_BP303`; flashed by the user:
   everything works (the voice, the grid, live play, chromatic with PAGE, FUNC + PTCH octaves).
   Bugbuild `BUG_BP303` (mainos `0de8be5c…`, syx `55b38837…`): emulator-verified, not flashed.
-  - Open: the octabam module (`reference/BLACKPYRAMIDS_303.md` §6).
+  - The octabam module is ported (`octabam-modules/blackpyramids-303/`); its octabam PR
+    (with `Module.dsp_source`) is drafted, not sent. Not flashed in octabam form.
   - Open: a square-wave voice on core 0 under the heaviest FX stack may overrun (§4 there).
   - Open: not in KYOTI yet. SIDE-CHAIN's key bus (Y:$7f0–$9ff) lies inside the voice's Y
     (`$7a5–$feb`), and ERASE_EMPTY_TRIGLESS_LOCKS must skip these tracks (an empty trigless

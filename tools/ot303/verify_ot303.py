@@ -248,7 +248,10 @@ def main():
     p, hits, pcs, got, blob, lo = res[('dram', '')]
     data0 = next(int(l.split()[3], 16) for l in subprocess.run(['m68k-elf-objdump', '-h', ELF], capture_output=True, text=True,
                  check=True).stdout.splitlines() if len(l.split()) > 3 and l.split()[1] == '.data')   # the runtime's own state
-    outside = sorted({hex(x) for x in pcs if not lo <= x < lo + len(blob)})
+    # OT303_LOADER_WRITERS: PCs a loader's helpers write the reserve from (an octabam image's loader
+    # clears the reserve with stock's zero fill 0x40020984, its store at 0x400209a4, then depacks)
+    allowed = {int(a, 0) for a in os.environ.get('OT303_LOADER_WRITERS', '').split(',') if a}
+    outside = sorted({hex(x) for x in pcs if not lo <= x < lo + len(blob) and x not in allowed})
     print(f'dram: loader hits {hits}; {len(pcs)} writes into the reserve, writers outside the runtime {outside}; '
           f'code + constants equal after the run: {got[:data0 - lo] == blob[:data0 - lo]}')
     ok &= p.returncode == 0 and len(hits) == 1 and not outside and len(got) == len(blob) and got[:data0 - lo] == blob[:data0 - lo]

@@ -36357,3 +36357,22 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   images still match their pins. verify_ot303.py on the composite (OT303_IMAGE=Bugbuilds/...): ALL GOOD.
   mainos 0de8be5c17949be2ec506fa22384ba0d6903a4da60d59feb3d7ef40ac9555458, CF .bin ac64aab9…, syx 55b38837…
   (`BUG_BP303`). NOT flashed.
+- **S124 cont: the octabam module `octabam-modules/blackpyramids-303/` (2026-10-14, the user: "prepare this feature as
+  an octabam module ... draft a PR").** tools/ot303/octabam_module.py generates `bp_runtime.s` (machine.s + the C as
+  gcc -S + libgcc __muldi3 as words), `bp_dsp_{A,B}.asm`, `bp_dsp_data.py`; it refuses to write unless the unit linked
+  alone at 0x40a955e0 is the standalone runtime (28,576 B, sha256 56b37d91…) for -mcpu=5407 AND 54455. What it took:
+  (1) every operand naming another file's / section's symbol gets `.l` (one unit lets gas relax jsr/lea to PC-rel);
+  (2) gas pseudo-branches to another file (`jra ot_note_name`) were Bcc.L: written as `.short 0x60ff; .long sym - .`
+  because gas -mcpu=54455 refuses bra.l (the chip runs it: the standalone does on the unit); (3) ld's SEC_MERGE tail
+  merge put "" on "ACC"'s NUL -> `.set`; (4) ld pads .data to 4 for the later empty .data inputs. bp_image.py = the
+  DSP integrate (dsp_patch.py's edits, same asserts) through a NEW octabam field `Module.dsp_source`, which replaces
+  build_bus.py's hard-wired ANALOG BD hook (ANALOG BD's test image unchanged: ece7075f… before and after). Manifest:
+  43 detours + 7 pokes taken from the builder module itself, FLEX renderer SymbolRef, conflicts ANALOG BD / SPRING REV
+  / SYNTH MACHINE (same renderer slot + 0x4000e746) / TAPE ECHO (replaces SPRING) / SCALE QUANTIZER (0x4000e746) /
+  SIDECHAIN_COMPRESSOR. Scratch octabam (out/octabam-bp, upstream df298c51 + branch blackpyramids-303): `make bus
+  REMIX=test/blackpyramids-303` -> runtime "matches the author's build at 0x40a955e0", both payloads' voice = the
+  standalone's; image vs standalone differs only in octabam's loader/arena/chooser relocation/own DSP edits (a Part
+  naming SPRING keeps SPRING's page there, as ANALOG BD). verify_ot303.py on it (OT303_LOADER_WRITERS=0x400209a4:
+  octabam's loader zero-fills the reserve with stock 0x40020984 first): ALL GOOD. octabam gates: selftest OK (+ the
+  test remix in its give-up table), verify-remix all pass (verify_dram_boot: reserve == linked runtime), verify_docs
+  one problem, pre-existing upstream (docs/site/index.md -> reference/modules.md). Not flashed in octabam form.
