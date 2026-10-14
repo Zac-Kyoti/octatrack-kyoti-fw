@@ -36278,4 +36278,8 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   MT16 (fixed; firmware fine). Open: live-recorded chromatic/MIDI notes store FLEX-unit PTCH locks.
   `out/OCTATRACK_BLACKPYRAMID_303.bin` sha256 0f2bcb69e14fe68bd4d8775deba930d6132c5f13c12bd3f434155b1db5ab3d16,
   syx 7043be96117c97b0b8ff5aac17b5e2ce540f97181e177c8b15e245bdd24c9a1a (`140C_BP303`), NOT flashed.
+- **S124 cont: MT19 -- live-recorded chromatic / MIDI notes store this machine's PTCH.** 0x40042158(track, param,
+  value, step, ..) writes the lock; the chromatic key (0x4004fd0c..fd20) and MIDI (0x40062604, pea 5 note - 356) pass
+  FLEX's 64 + 5 semis; hooks convert to knob + semis on OT-303 tracks (ot_rec_pitch). ot_emu T6 live rec: key an
+  octave down -> lock 24, centre -> 36; MIDI 72/84 the same. verify ALL GOOD.
 

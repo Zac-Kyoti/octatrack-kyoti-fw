@@ -187,8 +187,6 @@ one on T5–T8.
 
 **Limits:**
 - SPRING REVERB is removed: its DSP space holds the voice.
-- A chromatic or MIDI note recorded live into the pattern stores its pitch in FLEX's units, so it
-  plays back at the wrong pitch. Enter notes with a PTCH p-lock instead.
 - On a stock OS, the track opens as a FLEX track.
 - A square-wave voice on T5–T8 beside DJ EQ in both FX slots of all eight tracks may crackle.
 

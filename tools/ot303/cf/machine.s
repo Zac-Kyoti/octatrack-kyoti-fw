@@ -14,6 +14,7 @@
         .global ot_tick_hook, ot_glyph, ot_step_hook, ot_note_hook, ot_chooser_level, ot_setup_value_hook
         .global ot_slic_a, ot_slic_b, ot_slic_c, ot_pmtr_pb
         .global ot_live_req_hook, ot_live_midi_hook, ot_live_chrom_hook, ot_live_rel_hook, ot_oneshot_hook
+        .global ot_rec_chrom_hook, ot_rec_midi_hook
 
         .equ    OT_ROW, 5
         .equ    FLEX, 1
@@ -343,6 +344,44 @@ ot_oneshot_hook:
         moveq   #61,%d2
         move.l  %d2,(%a0,%d7.l*4)
         jmp     (0x4009d4ae).l
+
+| MT19: a chromatic key recorded live (0x4004fd0c: d2 = the track, a2 = FLEX's pitch value, d0 = the
+| step): the PTCH lock in this machine's units (control.c ot_rec_pitch). Replays the 20 displaced
+| bytes, the pushes and the call to 0x40042158; continues at its stack pop.
+ot_rec_chrom_hook:
+        move.l  %d0,-(%sp)
+        move.l  %a2,-(%sp)
+        move.l  %d2,-(%sp)
+        jsr     ot_rec_pitch
+        addq.l  #8,%sp
+        move.l  %d0,%a0
+        move.l  (%sp)+,%d0
+        move.l  (0x46c7e956).l,-(%sp)
+        move.l  %d0,-(%sp)
+        move.l  %a0,-(%sp)
+        clr.l   -(%sp)
+        move.l  %d2,-(%sp)
+        jsr     (0x40042158).l
+        jmp     (0x4004fd20).l
+
+| MT19: a MIDI chromatic note recorded live (0x40062604: (a2 + 2) = the note, the track at
+| 0x80000000): stock pushes FLEX's value 5 note - 356; this pushes ot_rec_pitch's. Replays the 14
+| displaced bytes (d0, a0 are dead after them; d1 is kept).
+ot_rec_midi_hook:
+        move.l  %d1,-(%sp)
+        mvs.b   2(%a2),%d0
+        move.l  %d0,%d1
+        lsl.l   #2,%d1
+        add.l   %d1,%d0
+        subi.l  #356,%d0
+        move.l  %d0,-(%sp)
+        mvz.b   (0x80000000).l,%d0
+        move.l  %d0,-(%sp)
+        jsr     ot_rec_pitch
+        addq.l  #8,%sp
+        move.l  (%sp)+,%d1
+        move.l  %d0,-(%sp)
+        jmp     (0x40062612).l
 
 ot_validate:
         jmp     ot_validate_part

@@ -160,7 +160,6 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   - Open: the octabam module (`reference/BLACKPYRAMID_303.md` §6; needs a generic "DSP
     source machine" schema upstream).
   - Open: a square-wave voice on core 0 under the heaviest FX stack may overrun (§4 there).
-  - Open: a chromatic or MIDI note recorded live stores its PTCH lock in FLEX's units.
   - Live play and one-shots (MT18) are emulator-verified, not yet on hardware.
   - Open: KYOTI must make ERASE_EMPTY_TRIGLESS_LOCKS skip these tracks if both are ever combined.
 

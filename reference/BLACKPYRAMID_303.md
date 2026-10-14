@@ -54,9 +54,9 @@ Builder: [`tools/build_blackpyramid_303.py`](../tools/build_blackpyramid_303.py)
   trig conditions and micro-timing.
 - **Limits:**
   - SPRING REVERB is removed from the FX menus: its DSP program space holds the voice.
-  - A chromatic or MIDI note recorded live into the pattern stores its pitch lock in FLEX's units
-    (stock writes it at `0x4004fd14` → `0x40042158` and `0x400625b8`), so it plays back at the wrong
-    pitch. Not converted yet.
+  - (Fixed in MT19: a chromatic key or MIDI note recorded live now stores the PTCH lock in this
+    machine's units, PTCH knob + semitones. Stock's FLEX value was 64 + 5 × semitones, written via
+    `0x40042158` from `0x4004fd1a` and from the MIDI path at `0x40062604`.)
   - The track is stored as FLEX plus a signature. FLEX's own settings are kept aside and put
     back when the track leaves the machine. On a stock OS the project opens with the track as
     a FLEX track.
@@ -135,7 +135,7 @@ is full in stock, so the voice takes **SPRING REVERB's** module space.
 | DSP P (each payload) | 1,027 words, in SPRING REV's module (DARK REV's 35-word helper moved beside it) | 1,028 |
 | DSP X | 216 working words at `X:$7b24–$7bfb` (stock's unreferenced top, outside the DMA partitions), copied from SPRING's X records at the first frame | — |
 | DSP Y | 2,119 words `$7a5–$feb`: tables and the voice state, streamed from the ColdFire | — |
-| ColdFire | a 26 KB DRAM runtime (a 16-page arena reserve, loader appended after the OS), 32 detours, 7 pokes, the FLEX renderer slot | — |
+| ColdFire | a 26 KB DRAM runtime (a 16-page arena reserve, loader appended after the OS), 34 detours, 7 pokes, the FLEX renderer slot | — |
 
 **Cycles per sample** (emulator cycle table, host and engine together; on the chip ×1.16,
 from the METER on DIAG8):

@@ -395,6 +395,16 @@ void ot_live_release(unsigned t) {
     else if (live[t].sounding) live[t].release = 1;
     ++ot_live_rels;
 }
+/* A chromatic key or MIDI note recorded live (0x40042158(track, param 0, value, step, ..) from
+ * 0x4004fd1a and from the MIDI path at 0x40062604) writes the PTCH lock in FLEX's units: 64 + 5
+ * semitones. On an OT-303 track it becomes this machine's PTCH: the track's PTCH knob plus the
+ * semitones (MT19). */
+unsigned ot_rec_pitch(unsigned t, int raw) {
+    if (t >= 8 || !signed_track(part_base(), t)) return (unsigned)raw;
+    int semis = (raw - 64) / 5;
+    int v = (int)*knob(part_base(), t, OT_PTCH) + semis;
+    return (unsigned)(v < 0 ? 0 : v > (int)OT_PTCH_MAX ? (int)OT_PTCH_MAX : v);
+}
 /* a one-shot trig (code 61) the step handler schedules (0x4009d4a8): a note when it is armed (its
  * track's bit in 0x8000184e clear: the frame builder plays it once, then sets the bit) */
 void ot_oneshot(unsigned t) {
