@@ -47,3 +47,16 @@ The clean agent opened no blacklisted file. Disclosed: one stray `grep -l` print
 only (`tools/repitch_*`, builder, DSP asm, engine model, NOTES/README/CREDITS), and the
 auto-memory index was in its context at start (no addresses of his in it). It read the module
 README (allowed), which names the old hook kinds. Its design uses neither.
+
+## Addendum 2026-10-14: the VARISPEED_EMUS revision (`REPITCH_REWRITE_SCOPE_EMUS.md`)
+
+- **TSTR now matches his data changes exactly**: count 4 → 5, widget → the unmodified 5-position
+  select `0x40046ab4`, and a new formatter. The descriptor format forces this: it is stock's
+  only 5-position select. The labels differ (`VARI` vs `RPCH`).
+- The new EMUS sites have no counterpart in his module: the TSNS widget pokes
+  `0x400d3142`/`0x400d32d4` and the page-2 editor's step redirect at `0x4003a566`.
+- The trig latch lives inside H1 and adds no site.
+- Clean-room record: the agent opened no blacklisted file. It disclosed reading
+  `reference/kb/memory-map.md` ~1100–1240 (one line on the old swap's base-word fix, a fact
+  that is ours and also in the retained code), seeing file names only, and the memory index in
+  its context.

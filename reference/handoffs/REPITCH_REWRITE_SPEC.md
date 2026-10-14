@@ -140,6 +140,11 @@ is raw 4 only, not 4..6), the second swapped pair, and item 11's fix.
   These are kept as they are; EMUS gets its own widget, formatter and step handler on the same
   pattern.
 - `rp_refresh`: call after an ATTR TIMESTRETCH edit.
+- **How the shipped module wired QUAN** (our own wiring, answering the EMUS scope's question):
+  the STATIC and FLEX slot-0 widget pointers (`0x400d3116`, `0x400d32a8`) → `quant_widget`; the
+  STATIC and FLEX slot-0 encoder-step pointers (`0x400d3146`, `0x400d32d8`) → `quant_step`; and
+  `jmp` detours at the four `qdialN` sites named in the retained code (`0x40036698`,
+  `0x4003690c`, `0x4003786a`, `0x40037c06`).
 - `rp_forget` / `rp_apply1` / `rp_apply2` / `rp_reload` (`patch_repitch_reload.s`): Part
   applies and RELOAD PART, unchanged.
 - `rpk_glyphs.s` is no longer needed: the 5-position widget uses stock's icons.
