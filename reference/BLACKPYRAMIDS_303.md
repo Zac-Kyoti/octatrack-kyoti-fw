@@ -19,7 +19,8 @@ Builder: [`tools/build_blackpyramids_303.py`](../tools/build_blackpyramids_303.p
   columns mark the track with a **3**.
 - **SRC page (p-lockable, LFO and scene targets):**
   - **PTCH**: C0–C8, one semitone per value, shown as note names (C3 = 36, the default);
-    FUNC + turn steps a whole octave and keeps the note (D#2 → D#3), and does nothing past C0 or C8;
+    FUNC + turn steps a whole octave every three detents and keeps the note (D#2 → D#3), and does
+    nothing past C0 or C8;
   - **CUT**: 200 Hz–10 kHz, exponential;
   - **RES**: 0–100 %;
   - **ENV**: env mod;
@@ -66,8 +67,9 @@ Builder: [`tools/build_blackpyramids_303.py`](../tools/build_blackpyramids_303.p
 - **RES steps (MT20):** the resonance words (RS, BG, AG_8) ease to each new value over a few frames
   (1/6 per frame, ~2 ms), set by the ColdFire. The engine glides cutoff and env amount itself.
 - **Trig-key modes (MT23):**
-  - CHROMATIC plays absolute notes over four octaves. `[FUNC]` + `[UP]` / `[DOWN]` steps the octave
-    0–3 (`0x460d16fc`; stock toggles 0/1); the page LEDs show it. Trig 1 is C1 / C2 / C3 / C4; 16
+  - CHROMATIC plays absolute notes over four octaves. `[FUNC]` + the arrows steps the octave
+    0–3, wrapping at the ends (`0x460d16fc`; key 0x21 up, 0x34 down, as the author chose on the unit;
+    stock toggles 0/1); the page LEDs show it. Trig 1 is C1 / C2 / C3 / C4; 16
     keys a page reach D#5. Live recording stores the same note.
   - MIDI's follow-the-trig-mode path stays a transpose around PTCH. Other tracks keep stock's 0/1
     octave; one coming from an OT-303 track's 2 or 3 is reset to 0.
@@ -142,7 +144,8 @@ anything not listed is Open303 as shipped.
 
 Control decisions (the author's):
 - **PTCH:** a semitone per value, C0–C8, with note names. Earlier there were two values per
-  semitone, and a C0–C6 spread. FUNC + turn steps by octaves and keeps the note; stock FLEX's
+  semitone, and a C0–C6 spread. FUNC + turn steps by octaves and keeps the note, three detents an
+  octave (one a detent was too quick on the unit); stock FLEX's
   FUNC + PTCH jumps to −64 / 0 / +64 instead. PERSONALIZE's DISABLE FUNC+ENC turns it off, as on
   stock.
 - **DEC:** 200 ms–2 s, Open303's plugin range. It was first 30 ms–3 s, which crowded the audible

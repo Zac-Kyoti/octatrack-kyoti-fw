@@ -36331,3 +36331,10 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   FUNC +1 x5 62 74 86 86 86 -> FUNC -1 x8 .. 2 2 -> plain +3 4. verify ALL GOOD.
   `out/OCTATRACK_BLACKPYRAMIDS_303.bin` sha256 7e138f4bd47ddefad224112c9cb82c726226222517d40aa1c21c711cf33a2239,
   syx faac6f92966264427cb62d1d8c0b8ee9197a0bf1e0e6b81fde4a0d9e6c2d5593 (`140C_BP303`), NOT flashed.
+- **S124 cont: flashed 7e138f4b (user: FUNC + PTCH octaves work, too quick; the chromatic octave arrows backwards).**
+  Arrows swapped: key 0x21 up, 0x34 down (still wrapping). FUNC + PTCH: OCT_DETENTS 3 detents an octave, own tally
+  (oct_tally, .data): a reversal restarts it, a turn without FUNC clears it. ot_emu T6 (run8.py q1..q7): FUNC +1 x2 36,
+  +1 48, +1 x3 60, -1 60, -1 x2 48; plain +1 (swallowed by stock's tally) then FUNC +1 x2 48, +1 60. CH (run7.py):
+  key 1 -> 12; 0x34 x3 (oct 3, 2, 1) key 1 -> 24, key 13 -> 36; 0x34 -> oct 0 key 1 -> 12; 0x21 -> oct 1 key 1 -> 24.
+  verify ALL GOOD. `out/OCTATRACK_BLACKPYRAMIDS_303.bin` sha256 232b693689e8d7e99aea0f17f35d03f7d4e27341d4ea4a048e764da4a9c5cf4c,
+  syx 9361321554fa989eec9f44b190c29b193df80e0170c4b35d528d76c9f55c6591 (`140C_BP303`), NOT flashed.

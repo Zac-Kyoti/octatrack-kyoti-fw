@@ -75,15 +75,22 @@ int ot_fmt_ptch(char *buf, int v) {
 /* PTCH's step handler (descriptor +0x162; every caller passes (knob, turn, value) and clamps what
  * comes back). FUNC held (0x46c7dd26, unless PERSONALIZE's DISABLE FUNC+ENC is on, 0x800000a0 --
  * stock FLEX's PTCH handler gates the same way) moves a whole octave per step and keeps the note: an
- * octave that would leave C0 .. C8 is not taken. One octave a detent, by the turn's sign: stock's
- * generic handler (0x4003240c) tallies 256 a detent against a step of 270 on this knob (ot_emu),
- * so it swallows a detent now and then (most often the first one back after a reversal), which an
- * octave can't afford; its tally (0x46c7d244 + 20 k) is left alone. Without FUNC the knob is that
- * handler's, as before. */
+ * octave that would leave C0 .. C8 is not taken. OCT_DETENTS detents an octave (one was too quick
+ * on the unit), tallied here: a reversal starts the tally again, so the first octave back takes
+ * the same turn; a turn without FUNC clears it. Not stock's generic handler (0x4003240c) for the
+ * count: it tallies 256 a detent against a step of 270 on this knob (ot_emu), so it swallows a
+ * detent now and then; its own tally (0x46c7d244 + 20 k) is left alone. Without FUNC the knob is
+ * that handler's, as before. */
+#define OCT_DETENTS 3
+static int oct_tally = 0;
 int ot_ptch_step(int k, int turn, int v) {
     int (*generic)(int, int, int) = (int (*)(int, int, int))0x4003240cu;
-    if (!U32(0x46c7dd26u) || U32(0x800000a0u)) return generic(k, turn, v);
-    int o = v + (turn > 0 ? 12 : turn < 0 ? -12 : 0);
+    if (!U32(0x46c7dd26u) || U32(0x800000a0u)) { oct_tally = 0; return generic(k, turn, v); }
+    if ((oct_tally ^ turn) < 0) oct_tally = 0;
+    oct_tally += turn;
+    if (oct_tally > -OCT_DETENTS && oct_tally < OCT_DETENTS) return v;
+    int o = v + (oct_tally > 0 ? 12 : -12);
+    oct_tally = 0;
     return o < 0 || o > (int)OT_PTCH_MAX ? v : o;
 }
 /* The stock FLEX page descriptor, renamed: twelve knobs (an empty name hides a slot; +0xa2 a knob's
@@ -461,10 +468,11 @@ unsigned ot_rec_chrom_pitch(unsigned t, int raw, uint32_t ret) {
 int ot_trigmode_dark(void) {
     return (TMODE == 2 || TMODE == 3) && signed_track(part_base(), U8(0x100b14ccu));
 }
-void ot_chrom_oct(unsigned key) {           /* FUNC + UP (0x34) / DOWN (0x21) */
+void ot_chrom_oct(unsigned key) {           /* FUNC + an arrow (0x34 / 0x21) */
     uint32_t o = TOCT;
-    /* as stock: UP (0x34) up, DOWN (0x21) down, wrapping at the ends (stock's 0/1 toggle wraps too) */
-    if (signed_track(part_base(), U8(0x100b14ccu))) o = key == 0x34u ? (o >= 3 ? 0 : o + 1) : (o == 0 || o > 3 ? 3 : o - 1);
+    /* 0x21 up, 0x34 down (the user, on the unit: the other way round was backwards), wrapping at the
+     * ends (stock's 0/1 toggle wraps too) */
+    if (signed_track(part_base(), U8(0x100b14ccu))) o = key == 0x21u ? (o >= 3 ? 0 : o + 1) : (o == 0 || o > 3 ? 3 : o - 1);
     else o = o == 0;                        /* stock: a toggle (2, 3 from an OT-303 track: back to 0) */
     TOCT = o;
 }
