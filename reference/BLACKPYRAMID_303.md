@@ -49,6 +49,14 @@ Builder: [`tools/build_blackpyramid_303.py`](../tools/build_blackpyramid_303.py)
   - One-shot trigs play once until re-armed.
   - The first live note after power-on waits ~30 ms for the voice's tables, which nothing loads
     while the transport is stopped.
+- **AMP attack (MT20):** stock's AMP (mode RTRG) drops a track's level to near zero at every trig
+  when ATK > 0, with no fade. A sample restarts there; this voice can still be sounding (a long gate,
+  an accent's tail, a slide, a held live note), and that was a click. While the voice is estimated
+  to sound (gate + 7 release time constants), the trig frame's AMP record (`0x80000110` + 0x200·ping
+  + 64·track, halfword 0x15) is switched to the ANLG twin, so the level isn't reset. A note from
+  silence keeps ATK's fade-in. In ot_emu, overlapping notes are sample-identical to ATK 0.
+- **RES steps (MT20):** the resonance words (RS, BG, AG_8) ease to each new value over a few frames
+  (1/6 per frame, ~2 ms), set by the ColdFire. The engine glides cutoff and env amount itself.
 - **The track's own pages work as on any track:** AMP (attack/hold/release act on the 303's
   output), FX1, FX2, the three LFOs (PMTR lists PTCH CUT RES ENV DEC ACC), scenes,
   trig conditions and micro-timing.

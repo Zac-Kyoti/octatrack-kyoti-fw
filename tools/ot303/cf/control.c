@@ -261,7 +261,14 @@ struct ot_qn { uint32_t gl; uint8_t step, slide, call; };
 static struct ot_qn q[8][QN] = {{{0, 0, 0, 0}}};
 static uint8_t qn[8] = {0}, qcall[8] = {0}, qlast[8] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, qlen[8] = {0};
 static uint32_t qctx[8] = {0};          /* the step being scheduled: 1 << 24 | bank << 16 | pattern << 8 | step */
-static struct ot_voice voice[8] = {{{0}, 0, {0}, 0, 0}};
+static struct ot_voice voice[8] = {{{0}, 0, {0}, 0, 0, 0, 0, 0}};
+/* MT20, AMP ATK > 0: stock's AMP (mode RTRG) drops the track's level to ~0 at every trig, no fade --
+ * a sample restarts there, this voice may still sound (a long gate, an accent's tail, a slide, a held
+ * live note): a click. While the voice is estimated to sound, the frame's AMP record (0x80000110 +
+ * 0x200 ping + 64 track, hw 0x15 high byte: 0 ANLG, 1 RTRG, 2/3 the trigless-trig pair) is switched
+ * to its analog twin for that frame (no reset; ATK still fades in a note from silence). */
+static uint32_t snd_until[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+uint32_t ot_amp_legato = 0;
 /* for the firmware check (tools/ot303/verify_ot303.py): note steps seen, the last step handler call
  * (track, bank, pattern, step a byte each), trig flags with no note queued (ignored), queue clears
  * and notes dropped unplayed, the last 32 notes sent (track << 28 | EV << 24 | gate) */
@@ -488,6 +495,16 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
             }
         }
         if (ev) { ot_evptch[ot_evn & 31] = p[OT_PTCH]; ot_evlog[ot_evn++ & 31] = track << 28 | ev << 24 | (gl & 0xffffffu); }
+        volatile uint16_t *amp = (volatile uint16_t *)(uintptr_t)(0x80000110u + 0x200u * (ping & 1u) + 64u * track);
+        if ((amp[0x1e] & 0x10u) && (int32_t)(snd_until[track] - ot_frames) > 0) {
+            unsigned m = amp[0x15] >> 8;
+            if (m == 1 || m == 2) { amp[0x15] = (uint16_t)(amp[0x15] ^ 0x0100u); ++ot_amp_legato; }
+        }
+        {   /* the voice sounds until its gate ends plus 7 time constants of its release (2 ms / accent 50 ms) */
+            uint32_t rel = p[OT_ACC] ? 960u : 40u;
+            if (ev & OT_EV_NOTE) snd_until[track] = gl >= OT_GL_HELD ? ot_frames + 0x40000000u : ot_frames + gl / 16u + 2u + rel;
+            else if (ev & OT_EV_OFF) snd_until[track] = ot_frames + rel;
+        }
         ot_record(record, &voice[track], p, ev, gl);
     }
     U32(0x80001c80u) = (uint32_t)(uintptr_t)(cursor + 4 + 2 * n);

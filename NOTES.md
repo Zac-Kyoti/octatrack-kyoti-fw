@@ -36282,4 +36282,14 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   value, step, ..) writes the lock; the chromatic key (0x4004fd0c..fd20) and MIDI (0x40062604, pea 5 note - 356) pass
   FLEX's 64 + 5 semis; hooks convert to knob + semis on OT-303 tracks (ot_rec_pitch). ot_emu T6 live rec: key an
   octave down -> lock 24, centre -> 36; MIDI 72/84 the same. verify ALL GOOD.
+- **S124 cont: MT20 -- AMP ATK clicks, RES steps.** Subagent: stock AMP (DSP P:0x426.., per sample) resets the level
+  to ~0 (P:0x655-0x65a) at the trig sample when ATK > 0 in mode RTRG, no fade; our voice may still sound -> click
+  (GATE 127 / accents / slides: -5..-28 dBFS jumps). Fix (CF): AMP record 0x80000110 + 0x200 ping + 64 t, hw 0x15
+  high byte 1/2 -> ^1 (ANLG twin) on trig frames while snd_until (gate + 7 tau of the release) says the voice
+  sounds. ot_emu ATK 8 vs 0: overlapping trigs sample-identical, slides too; notes from silence keep the fade-in.
+  RES pops: no stock cause found (LEN's record never reaches the DSP; turning RES changes only RS/BG/AG_8); RS/BG/AG_8
+  now eased per frame in record.c (ot_ease, 1/6 a frame); host_probe twin takes the eased words; benches bit-exact.
+  If pops remain on HW: a diag moving RES to another slot. verify ALL GOOD, DIAG14 85cfe103.
+  `out/OCTATRACK_BLACKPYRAMID_303.bin` sha256 3453fb2a1b33f235315283f068cbb958cefa226f06b18e7457b58b917ad014c9,
+  syx cd9a522e06d5cb3c97f2304b36cf47631596ba2303c1b5f14f7ad747d8a6f292 (`140C_BP303`), NOT flashed.
 

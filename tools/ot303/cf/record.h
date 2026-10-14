@@ -37,11 +37,14 @@ struct ot_voice {
     struct ot_cont c;
     uint32_t chunk;         /* the next table chunk */
     uint32_t seq;           /* the next record's number */
+    ot_w rs, bg, ag_8;      /* MT20: the resonance words as sent, eased toward c's over a few frames */
 };
 
 /* the frame's record: the continuous words from knobs k (made again only when they change), a
  * note's words when ev has OT_EV_NOTE (gate gl samples, OT_GL_HELD: held), the next table chunk */
 void ot_record(volatile uint32_t *rec, struct ot_voice *v, const uint8_t k[12], unsigned ev, uint32_t gl);
+/* one frame's step of a word eased toward t (MT20) */
+ot_w ot_ease(ot_w s, ot_w t);
 
 #ifdef __cplusplus
 }
