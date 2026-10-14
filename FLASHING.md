@@ -115,7 +115,7 @@ unit that boots; if it doesn't, use §3b.
 | REC_TRIG_MUTE | `140C_RTM` |
 | BLACKPYRAMIDS_303 | `140C_BP303` |
 | ERASE_EMPTY_TRIGLESS_LOCKS and the BATCH_BUGFIXES builds | `1.40C` (stock string — check by behaviour) |
-| a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`) |
+| a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303`) |
 
 PERSONALIZE is reset by every flash, so features are off until you re-enable them. A
 quick check for each:

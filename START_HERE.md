@@ -108,7 +108,7 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | a final build | `tools/build_<feature>.py` → `.syx` (MIDI) + `.bin` (CF card); see `BUILD_KYOTI.md` |
 | the combined image | `tools/build_kyoti.py` — **KYOTI V1.4, FINAL 2026-10-14** (without REPITCH; V1.0 withdrawn; see §6) |
 | octabam's remixer (`make remix`) | `sh tools/octabam_remixer.sh` — its own clone at `~/Documents/octabam`, fast-forwarded to octabam's `main` on every launch; `refs/octabam` stays the pinned research harness |
-| each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final, seven images) |
+| each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final, eight images) |
 | DIRECT JUMP V6.4, the OT↔AR parity build | `tools/build_direct_jump_v6_4.py` — WIP **by design**: kept buildable at the user's request (hardware-confirmed image `4a6c1b5e…`), never to be promoted |
 | external RE research | `python3 tools/refs/sync.py` (clone or refresh the tracked repos into `refs/`) · `python3 tools/refs/whatsnew.py` |
 
@@ -156,6 +156,7 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 - **BLACKPYRAMIDS_303** (`tools/build_blackpyramids_303.py`) — **FINAL 2026-10-14**, mainos
   `3624a1e7…`, CF `.bin` `8fb372af…`, syx `5a63cf20…`, `140C_BP303`; flashed by the user:
   everything works (the voice, the grid, live play, chromatic with PAGE, FUNC + PTCH octaves).
+  Bugbuild `BUG_BP303` (mainos `0de8be5c…`, syx `55b38837…`): emulator-verified, not flashed.
   - Open: the octabam module (`reference/BLACKPYRAMIDS_303.md` §6).
   - Open: a square-wave voice on core 0 under the heaviest FX stack may overrun (§4 there).
   - Open: not in KYOTI yet. SIDE-CHAIN's key bus (Y:$7f0–$9ff) lies inside the voice's Y

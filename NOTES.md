@@ -36350,3 +36350,10 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   both sides kept); backup branch ot303-pre-rebase-2026-10-14. The rebased build is byte-identical to the flashed one:
   mainos 3624a1e74d2759ff5cafd7bcd0882f8b2406c9509a4d8136d60cee6336be14d5 (pinned), CF .bin 8fb372af…, syx 5a63cf20….
   README: Hardware confirmed; KYOTI V1.4 entry now says it excludes BLACKPYRAMIDS_303.
+- **S124 cont: BUG_BP303 -- BLACKPYRAMIDS_303 + BATCH_BUGFIXES (pinned FINAL in build_bugbuilds, 2026-10-14, the
+  user's instruction).** build_bugbuilds.py: the eighth feature; delta() now counts bytes past stock's end (the
+  appended loader + runtime) so the interlock proof covers them. Fixes at their preferred caves (BP uses none of
+  0x400d6500..0x400d7c3c); interlock 39347 + 563 -> 39910 B DISJOINT, ALL PRESERVED, NO STRAYS; the seven other
+  images still match their pins. verify_ot303.py on the composite (OT303_IMAGE=Bugbuilds/...): ALL GOOD.
+  mainos 0de8be5c17949be2ec506fa22384ba0d6903a4da60d59feb3d7ef40ac9555458, CF .bin ac64aab9…, syx 55b38837…
+  (`BUG_BP303`). NOT flashed.

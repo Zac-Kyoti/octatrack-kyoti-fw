@@ -47,7 +47,7 @@ One command per final feature. Each writes its image to `out/`:
 | BATCH_BUGFIXES: MIDI_PLAYS_FREE_FIX | `python3 tools/build_midi_plays_free_fix.py` | `1.40C` |
 | BATCH_BUGFIXES: EMPTY_PATTERN_LED_FIX | `python3 tools/build_empty_pattern_led_fix.py` | `1.40C` |
 | BATCH_BUGFIXES: PART_CHANGE_CARRYOVER_FIX | `python3 tools/build_part_change_carryover_fix.py` | `1.40C` |
-| each feature + BATCH_BUGFIXES (seven images) | `python3 tools/build_bugbuilds.py` | `BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM` |
+| each feature + BATCH_BUGFIXES (eight images) | `python3 tools/build_bugbuilds.py` | `BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303` |
 
 Each build writes four files to `out/`, named after the feature:
 
@@ -58,14 +58,14 @@ OCTATRACK_OS1.40C_<FEATURE>.syx       flash over MIDI DIN
 OCTATRACK_<FEATURE>.bin               flash from the CF card (faster)
 ```
 
-`build_bugbuilds.py` writes its seven images to `out/Bugbuilds/`, as
+`build_bugbuilds.py` writes its eight images to `out/Bugbuilds/`, as
 `OCTATRACK_OS1.40C_<FEATURE>_BATCH_BUGFIXES.syx` and `.bin`, and leaves the images above
 alone. MIDI_PLAYS_FREE_FIX writes only its `mainos_` image; to flash it on its own, use the
 no-assembler patch below or wrap it as its builder's header shows.
 
 ### The combined image: KYOTI V1.4
 
-Every FINAL feature in one image:
+Every FINAL feature except BLACKPYRAMIDS_303 in one image:
 
 ```sh
 python3 tools/build_kyoti.py

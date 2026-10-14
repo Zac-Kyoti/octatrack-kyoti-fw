@@ -52,6 +52,7 @@ FINAL = {
         "mainos_reload_from_project_batch_bugfixes.bin":     "a9b162479518c828f5e5a1d4a6e30e57c9ebc48d199dfabcfe66fe48426e3467",
         "mainos_direct_jump_kyoti_batch_bugfixes.bin":       "2cc151e7f9fa7568eca7d1e50d06ed179ff36ffa28f85fe59ce27295917ca21a",
         "mainos_rec_trig_mute_batch_bugfixes.bin":           "fd65e293657e3caa895064255c7dad76882c21640c6eebdc1cf812074744c658",
+        "mainos_blackpyramids_303_batch_bugfixes.bin":       "0de8be5c17949be2ec506fa22384ba0d6903a4da60d59feb3d7ef40ac9555458",
     },
     "build_kyoti.py": {
         "mainos_kyoti_v1.4.bin":                             "72710a3ca63c8f69a13346621aa623982951cd71de244f1c06eedcd516681613",
