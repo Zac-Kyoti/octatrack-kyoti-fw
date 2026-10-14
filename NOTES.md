@@ -36345,3 +36345,8 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   test. ot_emu T6 (scratchpad livenotes/run9.py): PAGE at oct 0..3 -> 28 40 52 64, trig 16 at oct 3 -> 63.
   verify ALL GOOD. `out/OCTATRACK_BLACKPYRAMIDS_303.bin` sha256 8fb372af1148eaf63272a7970ee864d66ff08f5bcabc493dd1113e7995d3226a,
   syx 5a63cf2068ef79b98b895f164e50bb01a641f84ca23aa8aeaa545f5a733d663a (`140C_BP303`), NOT flashed.
+- **S124 cont: BLACKPYRAMIDS_303 PROMOTED TO FINAL (2026-10-14, the user: "Flashed, everything working as expected").**
+  Rebased onto origin/main dc210cd (REPITCH removal, KYOTI V1.4 FINAL; conflicts in CLAUDE.md / START_HERE.md only,
+  both sides kept); backup branch ot303-pre-rebase-2026-10-14. The rebased build is byte-identical to the flashed one:
+  mainos 3624a1e74d2759ff5cafd7bcd0882f8b2406c9509a4d8136d60cee6336be14d5 (pinned), CF .bin 8fb372af…, syx 5a63cf20….
+  README: Hardware confirmed; KYOTI V1.4 entry now says it excludes BLACKPYRAMIDS_303.

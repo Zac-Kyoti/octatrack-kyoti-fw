@@ -56,6 +56,7 @@ FINAL = {
     "build_kyoti.py": {
         "mainos_kyoti_v1.4.bin":                             "72710a3ca63c8f69a13346621aa623982951cd71de244f1c06eedcd516681613",
     },
+    "build_blackpyramids_303.py":          "3624a1e74d2759ff5cafd7bcd0882f8b2406c9509a4d8136d60cee6336be14d5",
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
 }
 

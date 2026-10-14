@@ -200,9 +200,7 @@ saturation. So is the hardware testing. The design, every voicing decision and f
 attribution: [`reference/BLACKPYRAMIDS_303.md`](reference/BLACKPYRAMIDS_303.md) and
 [`CREDITS.md`](CREDITS.md).
 
-**Hardware:** confirmed through test image 14: the voice, the grid (notes, accents, slides,
-ties), every knob and the LFO names. Emulator-verified only: the 1 ms cutoff glide, the DEC
-range, the BLKPYRAMD name, live play and one-shot trigs.\
+**Hardware:** confirmed.\
 **Final build:** [`tools/build_blackpyramids_303.py`](tools/build_blackpyramids_303.py) →
 `OCTATRACK_OS1.40C_BLACKPYRAMIDS_303`
 
@@ -239,7 +237,7 @@ flashed as such.\
 
 ### KYOTI V1.4
 
-Every feature above and all three BATCH_BUGFIXES in **one image**. The boot splash and
+Every feature above except BLACKPYRAMIDS_303, and all three BATCH_BUGFIXES, in **one image**. The boot splash and
 SYSTEM STATUS → OS VERSION read `KYOTI V1.4`. It replaces KYOTI V1.3, V1.2 and V1.1, and the
 withdrawn V1.0 (see below).
 

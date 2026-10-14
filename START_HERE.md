@@ -153,15 +153,14 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
-- **BLACKPYRAMIDS_303** (`tools/build_blackpyramids_303.py`, working name OT-303) — WIP, ready to
-  promote. The hardware is confirmed through test image MT14. MT15–MT17 (the 1 ms cutoff/env
-  glide, DEC 200 ms–2 s, the BLKPYRAMD name) and MT18 (live play, one-shots) are emulator-verified.
-  The release image: mainos `6b74ff65…`, `140C_BP303`. Promote after the author flashes it.
-  - Open: the octabam module (`reference/BLACKPYRAMIDS_303.md` §6; needs a generic "DSP
-    source machine" schema upstream).
+- **BLACKPYRAMIDS_303** (`tools/build_blackpyramids_303.py`) — **FINAL 2026-10-14**, mainos
+  `3624a1e7…`, CF `.bin` `8fb372af…`, syx `5a63cf20…`, `140C_BP303`; flashed by the user:
+  everything works (the voice, the grid, live play, chromatic with PAGE, FUNC + PTCH octaves).
+  - Open: the octabam module (`reference/BLACKPYRAMIDS_303.md` §6).
   - Open: a square-wave voice on core 0 under the heaviest FX stack may overrun (§4 there).
-  - Live play and one-shots (MT18) are emulator-verified, not yet on hardware.
-  - Open: KYOTI must make ERASE_EMPTY_TRIGLESS_LOCKS skip these tracks if both are ever combined.
+  - Open: not in KYOTI yet. SIDE-CHAIN's key bus (Y:$7f0–$9ff) lies inside the voice's Y
+    (`$7a5–$feb`), and ERASE_EMPTY_TRIGLESS_LOCKS must skip these tracks (an empty trigless
+    lock is a tie here).
 
 - **KYOTI V1.4** (`tools/build_kyoti.py`, 2026-10-13) — V1.3 without REPITCH_REPEAT98_KYOTI,
   ROM-only (RELOAD back in the proven cave, EMPTY_PATTERN_LED_FIX in SAFE_CAVE). **FINAL
