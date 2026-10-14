@@ -468,10 +468,10 @@ unsigned ot_rec_chrom_pitch(unsigned t, int raw, uint32_t ret) {
 int ot_trigmode_dark(void) {
     return (TMODE == 2 || TMODE == 3) && signed_track(part_base(), U8(0x100b14ccu));
 }
-void ot_chrom_oct(unsigned key) {           /* FUNC + an arrow (0x34 / 0x21) */
+void ot_chrom_oct(unsigned key) {           /* FUNC + LEFT (0x34) / RIGHT (0x21) */
     uint32_t o = TOCT;
-    /* 0x21 up, 0x34 down (the user, on the unit: the other way round was backwards), wrapping at the
-     * ends (stock's 0/1 toggle wraps too) */
+    /* RIGHT (0x21) up, LEFT (0x34) down (the user, on the unit: the other way round was backwards),
+     * wrapping at the ends (stock's 0/1 toggle wraps too) */
     if (signed_track(part_base(), U8(0x100b14ccu))) o = key == 0x21u ? (o >= 3 ? 0 : o + 1) : (o == 0 || o > 3 ? 3 : o - 1);
     else o = o == 0;                        /* stock: a toggle (2, 3 from an OT-303 track: back to 0) */
     TOCT = o;
@@ -480,7 +480,15 @@ void ot_chrom_sanitize(void) {              /* a chromatic key on any other trac
     if (TOCT > 1 && !signed_track(part_base(), U8(0x100b14ccu))) TOCT = 0;
 }
 unsigned ot_chrom_limit(unsigned t, uint32_t ret) {   /* the highest idx the chromatic handler takes */
-    return (t < 8 && ret != CHROM_MIDI_RET && signed_track(part_base(), t)) ? 51u : 24u;
+    return (t < 8 && ret != CHROM_MIDI_RET && signed_track(part_base(), t)) ? 52u : 24u;
+}
+/* CHROMATIC's PAGE key (0x4004fde4): stock plays it as idx 16, the note above trig 16, on octave 0
+ * only. On an OT-303 track it plays on every octave: idx 16 + 12 octaves (E2 .. E5, trig 16 + 1).
+ * -1: stock's path. */
+int ot_page_idx(void) {
+    unsigned t = U8(0x100b14ccu);
+    if (t >= 8 || !signed_track(part_base(), t)) return -1;
+    return 16 + 12 * (int)(TOCT > 3 ? 0 : TOCT);
 }
 /* a one-shot trig (code 61) the step handler schedules (0x4009d4a8): a note when it is armed (its
  * track's bit in 0x8000184e clear: the frame builder plays it once, then sets the bit) */

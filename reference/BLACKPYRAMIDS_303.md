@@ -67,10 +67,10 @@ Builder: [`tools/build_blackpyramids_303.py`](../tools/build_blackpyramids_303.p
 - **RES steps (MT20):** the resonance words (RS, BG, AG_8) ease to each new value over a few frames
   (1/6 per frame, ~2 ms), set by the ColdFire. The engine glides cutoff and env amount itself.
 - **Trig-key modes (MT23):**
-  - CHROMATIC plays absolute notes over four octaves. `[FUNC]` + the arrows steps the octave
-    0–3, wrapping at the ends (`0x460d16fc`; key 0x21 up, 0x34 down, as the author chose on the unit;
-    stock toggles 0/1); the page LEDs show it. Trig 1 is C1 / C2 / C3 / C4; 16
-    keys a page reach D#5. Live recording stores the same note.
+  - CHROMATIC plays absolute notes over four octaves. `[FUNC]` + `[RIGHT]` / `[LEFT]` steps the
+    octave up / down 0–3, wrapping at the ends (`0x460d16fc`; the author's choice on the unit; stock
+    toggles 0/1); the page LEDs show it. Trig 1 is C1 / C2 / C3 / C4; `[PAGE]` plays the note above
+    trig 16 on every octave (E2 .. E5; stock only on its first, hook `0x4004fde4`). Live recording stores the same note.
   - MIDI's follow-the-trig-mode path stays a transpose around PTCH. Other tracks keep stock's 0/1
     octave; one coming from an OT-303 track's 2 or 3 is reset to 0.
   - SLOTS and SLICES: their trig LEDs stay dark (stock's own no-slot path) and the keys do nothing.

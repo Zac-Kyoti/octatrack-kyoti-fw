@@ -15,7 +15,7 @@
         .global ot_slic_a, ot_slic_b, ot_slic_c, ot_pmtr_pb
         .global ot_live_req_hook, ot_live_midi_hook, ot_live_chrom_hook, ot_live_rel_hook, ot_oneshot_hook
         .global ot_rec_chrom_hook, ot_rec_midi_hook, ot_idle_hook
-        .global ot_led_hook, ot_slices_hook, ot_slots_hook, ot_oct_hook, ot_chrom_key_hook, ot_chrom_limit_hook, ot_chrom_img_hook
+        .global ot_led_hook, ot_slices_hook, ot_slots_hook, ot_oct_hook, ot_chrom_key_hook, ot_chrom_limit_hook, ot_chrom_img_hook, ot_page_key_hook
 
         .equ    OT_ROW, 5
         .equ    FLEX, 1
@@ -442,7 +442,7 @@ ot_slots_hook:
         move.l  12(%sp),%d2
         jmp     (0x4004fa5c).l
 
-| CHROMATIC's octave (0x40045918, FUNC + UP / DOWN; 8(sp) = the key): 0..3 on an OT-303 track
+| CHROMATIC's octave (0x40045918, FUNC + LEFT / RIGHT; 8(sp) = the key): 0..3 on an OT-303 track
 ot_oct_hook:
         move.l  8(%sp),-(%sp)
         jsr     ot_chrom_oct
@@ -613,3 +613,25 @@ ot_slic_c:
         movem.l (%sp),%d0-%d1/%a0-%a1
         lea     16(%sp),%sp
         jmp     (0x4004feea).l
+
+| CHROMATIC's PAGE key (0x4004fde4, a0 live): control.c ot_page_idx gives the note's idx on an OT-303
+| track, played through the chromatic handler 0x4004fb94(track, idx, a0) as stock does on octave 0;
+| otherwise stock's own test (octave 0 plays idx 16, others nothing)
+ot_page_key_hook:
+        lea     -8(%sp),%sp
+        movem.l %d1/%a0,(%sp)
+        jsr     ot_page_idx
+        movem.l (%sp),%d1/%a0
+        lea     8(%sp),%sp
+        tst.l   %d0
+        bmi.s   1f
+        move.l  %a0,-(%sp)
+        move.l  %d0,-(%sp)
+        mvz.b   (0x100b14cc).l,%d0
+        move.l  %d0,-(%sp)
+        jsr     (0x4004fb94).l
+        jmp     (0x4004fe00).l          | pops the three, then on as stock
+1:      tst.l   (0x460d16fc).l
+        bne.s   2f
+        jmp     (0x4004fdee).l
+2:      jmp     (0x4004ff96).l

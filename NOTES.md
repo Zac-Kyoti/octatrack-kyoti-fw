@@ -36338,3 +36338,10 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   key 1 -> 12; 0x34 x3 (oct 3, 2, 1) key 1 -> 24, key 13 -> 36; 0x34 -> oct 0 key 1 -> 12; 0x21 -> oct 1 key 1 -> 24.
   verify ALL GOOD. `out/OCTATRACK_BLACKPYRAMIDS_303.bin` sha256 232b693689e8d7e99aea0f17f35d03f7d4e27341d4ea4a048e764da4a9c5cf4c,
   syx 9361321554fa989eec9f44b190c29b193df80e0170c4b35d528d76c9f55c6591 (`140C_BP303`), NOT flashed.
+- **S124 cont: flashed 232b6936; CHROMATIC's PAGE key on every octave.** Key codes (lcd_view): LEFT 0x34, RIGHT 0x21,
+  PAGE 0x1b -- so the swapped arrows are RIGHT up, LEFT down. PAGE's chromatic branch (FUN_4004ffc4 -> 0x4004fd74)
+  plays idx 16 through 0x4004fb94 only when the octave is 0 (`tstl 0x460d16fc; bne` at 0x4004fde4). Detour 43
+  `ot_page_key_hook` there: on an OT-303 track idx 16 + 12 oct (E2..E5), limit 51 -> 52; other tracks run stock's
+  test. ot_emu T6 (scratchpad livenotes/run9.py): PAGE at oct 0..3 -> 28 40 52 64, trig 16 at oct 3 -> 63.
+  verify ALL GOOD. `out/OCTATRACK_BLACKPYRAMIDS_303.bin` sha256 8fb372af1148eaf63272a7970ee864d66ff08f5bcabc493dd1113e7995d3226a,
+  syx 5a63cf2068ef79b98b895f164e50bb01a641f84ca23aa8aeaa545f5a733d663a (`140C_BP303`), NOT flashed.
