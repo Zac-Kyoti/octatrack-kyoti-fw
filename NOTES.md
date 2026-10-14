@@ -36305,4 +36305,12 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   OT-303 track whose core is not dsp_ready renders through ot_render (records with no note). ot_emu: idle after boot
   -> STG 2, YBEG..$fec complete in 82 frames, then the hook stops; PLAY after 2 s: 9 notes sent, 9 hq_start arrivals.
   verify ALL GOOD. `out/OCTATRACK_BLACKPYRAMID_303.bin` sha256 fe6970d0ead8ecfc3ff029f29d990167d39f51ed5cb191240e3bb59a7d1c24fe.
+- **S124 cont: MT23 -- trig-key modes.** Subagent RE: tmode 0x460d16f0 (0 TRACKS, 1 CHROM, 2 SLOTS, 3 SLICES), octave
+  0x460d16fc (stock 0/1 toggle at 0x40045918, FUNC+UP 0x34 / DOWN 0x21), idx limit 24 at 0x4004fba8, LED routine
+  0x40043fdc (no-slot dark path 0x400441cc). On OT-303 tracks: SLOTS/SLICES LEDs dark + handlers 0x4004fa54/0x4004f8dc
+  inert; CHROMATIC octave 0..3, idx <= 51, absolute notes PTCH 12 + idx (C1..), live-record locks the same; other tracks
+  keep 0/1 (sanitised at 0x40050254); full keyboard image (0x40044968). ot_emu T6: SLOTS/SLICES no notes, trig LEDs 0;
+  CHROM key 1 -> 12 / 48 (oct 3) / 36 (oct 2), key 13 at oct 3 -> 60; live rec locks 12, 24; T1 FLEX toggles 1/0/1.
+  verify ALL GOOD. `out/OCTATRACK_BLACKPYRAMID_303.bin` sha256 d31dbf17c5633fff1bcadfada81cc2fdf50a1bb1baad63ee21b71bc37c2972cf,
+  syx 6af0dfb6ec0f72bab312c9b4d0e96339a5b3733a4a03161a4a580afc5dce1656 (`140C_BP303`), NOT flashed.
 

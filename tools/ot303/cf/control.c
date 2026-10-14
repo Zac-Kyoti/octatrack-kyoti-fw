@@ -361,8 +361,8 @@ void ot_note(unsigned track) {
  * key-up / note-off / YES release (0x40 in the mailbox: ot_live_release). A pending note lapses after
  * LIVE_TTL frames, so a later pattern or Part flag never plays it. */
 #define LIVE_TTL 2756u                    /* frames: 1 s */
-struct ot_live { uint32_t pending; int32_t semis; uint8_t release, sounding, ptch, armed; };
-static struct ot_live live[8] = {{0, 0, 0, 0, 0, 0}};
+struct ot_live { uint32_t pending; int32_t semis; uint8_t release, sounding, ptch, armed, abs, note; };
+static struct ot_live live[8] = {{0, 0, 0, 0, 0, 0, 0, 0}};
 /* the frames each DSP core's voice has been sent records since boot (T1-T4, T5-T8): the DSP takes the
  * table chunks in order, so two full passes of chunks guarantee its tables (it renders silence and
  * drops notes until then). Nothing plays a track while the transport is stopped and idle, so the
@@ -378,24 +378,33 @@ void ot_live_req(uint32_t ret, unsigned t, unsigned cmd) {
     if (t >= 8 || cmd != 0x1d || !signed_track(part_base(), t)) return;
     for (unsigned i = 0; i < 6; ++i)
         if (ret == live_rets[i]) {
-            if (ret != 0x4004fcc6u) live[t].semis = 0;     /* the chromatic keys set theirs first */
+            if (ret != 0x4004fcc6u) { live[t].semis = 0; live[t].abs = 0; }   /* the chromatic keys set theirs first */
             live[t].pending = ot_frames + LIVE_TTL; live[t].armed = 0;
             ++ot_live_reqs;
             return;
         }
 }
-/* a chromatic trig key (0x4004fc84: raw = 5 idx + 4, idx 0..24, 12 = the track's pitch): 1 on an
- * OT-303 track (its PTCH byte is not overwritten with FLEX's value) */
-int ot_live_chrom(unsigned t, unsigned raw) {
+/* a chromatic trig key (0x4004fc84: raw = 5 idx + 4; ret = the chromatic handler's caller): 1 on an
+ * OT-303 track (its PTCH byte is not overwritten with FLEX's value). MT23: from the trig keys the
+ * note is absolute -- idx = key + 12 octaves (0..3), PTCH 12 + idx: C1 at page 1's first key, C4 at
+ * page 4's; MIDI's follow-the-trig-mode path (0x4005014a) stays a transpose around PTCH. */
+#define CHROM_MIDI_RET 0x4005014au
+static unsigned chrom_abs(unsigned raw) {
+    unsigned n = 12u + (raw - 4u) / 5u;
+    return n > OT_PTCH_MAX ? OT_PTCH_MAX : n;
+}
+int ot_live_chrom(unsigned t, unsigned raw, uint32_t ret) {
     if (t >= 8 || !signed_track(part_base(), t)) return 0;
     live[t].semis = (int32_t)((raw - 4u) / 5u) - 12;
+    live[t].abs = ret != CHROM_MIDI_RET;
+    live[t].note = (uint8_t)chrom_abs(raw);
     live[t].pending = ot_frames + LIVE_TTL; live[t].armed = 0;
     return 1;
 }
 /* a MIDI chromatic note (0x4000e746: notes 72-96, 84 = the track's pitch): 1 on an OT-303 track */
 int ot_live_midi(unsigned t, unsigned note) {
     if (t >= 8 || !signed_track(part_base(), t)) return 0;
-    live[t].semis = (int32_t)(note & 0xffu) - 84;
+    live[t].semis = (int32_t)(note & 0xffu) - 84; live[t].abs = 0;
     live[t].pending = ot_frames + LIVE_TTL; live[t].armed = 0;
     ++ot_live_reqs;
     return 1;
@@ -424,6 +433,31 @@ unsigned ot_rec_pitch(unsigned t, int raw) {
     int semis = (raw - 64) / 5;
     int v = (int)*knob(part_base(), t, OT_PTCH) + semis;
     return (unsigned)(v < 0 ? 0 : v > (int)OT_PTCH_MAX ? (int)OT_PTCH_MAX : v);
+}
+/* the chromatic key recorded live (0x4004fd0c): the lock it plays (absolute from the trig keys) */
+unsigned ot_rec_chrom_pitch(unsigned t, int raw, uint32_t ret) {
+    if (t < 8 && ret != CHROM_MIDI_RET && signed_track(part_base(), t)) return chrom_abs((unsigned)raw);
+    return ot_rec_pitch(t, raw);
+}
+/* MT23, the trig-key modes on an OT-303 track (tmode 0x460d16f0: 0 TRACKS, 1 CHROMATIC, 2 SLOTS, 3
+ * SLICES; the octave 0x460d16fc; the track 0x100b14cc). SLOTS / SLICES: nothing to play -- the LEDs
+ * dark (stock's own no-slot path) and the keys inert. CHROMATIC: four octaves (0..3) instead of two. */
+#define TMODE U32(0x460d16f0u)
+#define TOCT U32(0x460d16fcu)
+int ot_trigmode_dark(void) {
+    return (TMODE == 2 || TMODE == 3) && signed_track(part_base(), U8(0x100b14ccu));
+}
+void ot_chrom_oct(unsigned key) {           /* FUNC + UP (0x34) / DOWN (0x21) */
+    uint32_t o = TOCT;
+    if (signed_track(part_base(), U8(0x100b14ccu))) o = key == 0x34u ? (o >= 3 ? 3 : o + 1) : (o == 0 || o > 3 ? 0 : o - 1);
+    else o = o == 0;                        /* stock: a toggle (2, 3 from an OT-303 track: back to 0) */
+    TOCT = o;
+}
+void ot_chrom_sanitize(void) {              /* a chromatic key on any other track: stock's 0 / 1 */
+    if (TOCT > 1 && !signed_track(part_base(), U8(0x100b14ccu))) TOCT = 0;
+}
+unsigned ot_chrom_limit(unsigned t, uint32_t ret) {   /* the highest idx the chromatic handler takes */
+    return (t < 8 && ret != CHROM_MIDI_RET && signed_track(part_base(), t)) ? 51u : 24u;
 }
 /* a one-shot trig (code 61) the step handler schedules (0x4009d4a8): a note when it is armed (its
  * track's bit in 0x8000184e clear: the frame builder plays it once, then sets the bit) */
@@ -476,7 +510,7 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
             /* a live note: the knobs (with the preview's or the chromatic key's locks in fp), held */
             struct ot_qn e;
             if ((flag & 16) && !(flag & 0x20)) (void)take(track, &e);   /* a sequencer START merged into this frame */
-            int32_t pt = (int32_t)p[OT_PTCH] + live[track].semis;
+            int32_t pt = live[track].abs ? (int32_t)live[track].note : (int32_t)p[OT_PTCH] + live[track].semis;
             pt = pt < 0 ? 0 : pt > (int32_t)OT_PTCH_MAX ? (int32_t)OT_PTCH_MAX : pt;
             p[OT_PTCH] = (uint8_t)pt;
             live[track].pending = 0; live[track].armed = 0; live[track].release = 0; live[track].sounding = 1; live[track].ptch = (uint8_t)pt;

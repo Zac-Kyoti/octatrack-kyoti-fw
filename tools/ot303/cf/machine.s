@@ -15,6 +15,7 @@
         .global ot_slic_a, ot_slic_b, ot_slic_c, ot_pmtr_pb
         .global ot_live_req_hook, ot_live_midi_hook, ot_live_chrom_hook, ot_live_rel_hook, ot_oneshot_hook
         .global ot_rec_chrom_hook, ot_rec_midi_hook, ot_idle_hook
+        .global ot_led_hook, ot_slices_hook, ot_slots_hook, ot_oct_hook, ot_chrom_key_hook, ot_chrom_limit_hook, ot_chrom_img_hook
 
         .equ    OT_ROW, 5
         .equ    FLEX, 1
@@ -306,10 +307,11 @@ ot_live_midi_hook:
 | a chromatic trig key (0x4004fc84: d2 = the track, a2 = 5 idx + 4, FLEX's PTCH value): on an OT-303
 | track the staged PTCH lock is not written (control.c keeps idx - 12 as a pitch offset)
 ot_live_chrom_hook:
+        move.l  16(%sp),-(%sp)          | the chromatic handler's caller (MT23)
         move.l  %a2,-(%sp)
         move.l  %d2,-(%sp)
         jsr     ot_live_chrom
-        addq.l  #8,%sp
+        lea     12(%sp),%sp
         tst.l   %d0
         bne.s   1f
         move.l  %d2,%d0
@@ -350,10 +352,11 @@ ot_oneshot_hook:
 | bytes, the pushes and the call to 0x40042158; continues at its stack pop.
 ot_rec_chrom_hook:
         move.l  %d0,-(%sp)
+        move.l  20(%sp),-(%sp)          | the chromatic handler's caller (MT23)
         move.l  %a2,-(%sp)
         move.l  %d2,-(%sp)
-        jsr     ot_rec_pitch
-        addq.l  #8,%sp
+        jsr     ot_rec_chrom_pitch
+        lea     12(%sp),%sp
         move.l  %d0,%a0
         move.l  (%sp)+,%d0
         move.l  (0x46c7e956).l,-(%sp)
@@ -397,6 +400,102 @@ ot_idle_hook:
 1:      move.l  %d2,-(%sp)
         move.l  20(%sp),%d1
         jmp     (0x400047f6).l
+
+| MT23, the trig-key modes (control.c). The trig LEDs (0x40044006: d1 the routine's argument): SLOTS /
+| SLICES on an OT-303 track take stock's no-slot path 0x400441cc (all dark, the playhead while playing).
+ot_led_hook:
+        lea     -12(%sp),%sp
+        movem.l %d1/%a0-%a1,(%sp)
+        jsr     ot_trigmode_dark
+        tst.l   %d0
+        movem.l (%sp),%d1/%a0-%a1
+        lea     12(%sp),%sp
+        bne.s   1f
+        move.l  (0x460d16f0).l,%d0
+        jmp     (0x4004400c).l
+1:      jmp     (0x400441cc).l
+
+| SLICES' key handler 0x4004f8dc(track, idx, event): inert on an OT-303 track
+ot_slices_hook:
+        move.l  4(%sp),-(%sp)
+        jsr     ot_track_is
+        addq.l  #4,%sp
+        tst.l   %d0
+        beq.s   1f
+        moveq   #0,%d0
+        rts
+1:      lea     -12(%sp),%sp
+        movem.l %d2-%d4,(%sp)
+        jmp     (0x4004f8e4).l
+
+| SLOTS' key handler 0x4004fa54(track, idx, event): inert on an OT-303 track
+ot_slots_hook:
+        move.l  4(%sp),-(%sp)
+        jsr     ot_track_is
+        addq.l  #4,%sp
+        tst.l   %d0
+        beq.s   1f
+        moveq   #0,%d0
+        rts
+1:      move.l  %d3,-(%sp)
+        move.l  %d2,-(%sp)
+        move.l  12(%sp),%d2
+        jmp     (0x4004fa5c).l
+
+| CHROMATIC's octave (0x40045918, FUNC + UP / DOWN; 8(sp) = the key): 0..3 on an OT-303 track
+ot_oct_hook:
+        move.l  8(%sp),-(%sp)
+        jsr     ot_chrom_oct
+        addq.l  #4,%sp
+        moveq   #1,%d2
+        jmp     (0x40045920).l
+
+| a chromatic trig key (0x40050254, a0 = the key): another track never sees an OT-303 track's octave
+ot_chrom_key_hook:
+        lea     -12(%sp),%sp
+        movem.l %d1/%a0-%a1,(%sp)
+        jsr     ot_chrom_sanitize
+        movem.l (%sp),%d1/%a0-%a1
+        lea     12(%sp),%sp
+        move.l  (0x460d16fc).l,%d0
+        jmp     (0x4005025a).l
+
+| the chromatic handler's range (0x4004fba8: d2 the track, a2 idx, d0 the event; 16(sp) its caller)
+ot_chrom_limit_hook:
+        lea     -16(%sp),%sp
+        movem.l %d0-%d1/%a0-%a1,(%sp)
+        move.l  32(%sp),-(%sp)
+        move.l  %d2,-(%sp)
+        jsr     ot_chrom_limit
+        addq.l  #8,%sp
+        cmp.l   %a2,%d0
+        movem.l (%sp),%d0-%d1/%a0-%a1
+        lea     16(%sp),%sp
+        bcs.s   2f
+        blt.s   2f
+        moveq   #24,%d1
+        jmp     (0x4004fbb4).l
+2:      moveq   #24,%d1
+        jmp     (0x4004fd68).l
+
+| the CHROMATIC screen's keyboard image (0x40044968): the full one at every octave on an OT-303 track
+ot_chrom_img_hook:
+        lea     -12(%sp),%sp
+        movem.l %d0/%a0-%a1,(%sp)
+        mvz.b   (0x100b14cc).l,%d0
+        move.l  %d0,-(%sp)
+        jsr     ot_track_is
+        addq.l  #4,%sp
+        tst.l   %d0
+        movem.l (%sp),%d0/%a0-%a1
+        lea     12(%sp),%sp
+        bne.s   1f
+        moveq   #1,%d1
+        cmp.l   (0x460d16fc).l,%d1
+        bne.s   1f
+        jmp     (0x40044972).l
+1:      moveq   #1,%d1
+        jmp     (0x40044988).l
 
 ot_validate:
         jmp     ot_validate_part

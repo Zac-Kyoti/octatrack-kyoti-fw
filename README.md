@@ -182,6 +182,9 @@ one on T5–T8.
   still resets LFOs and FX envelopes as on stock, so a trigless trig after a note also ties it.
 - **Live:** the track key, chromatic keys and MIDI notes play it, held while the key or note is
   down. TRIG + YES previews a step, and one-shot trigs play once until re-armed.
+- **Chromatic mode:** four octaves of absolute notes. `[FUNC]` + `[UP]` / `[DOWN]` picks the
+  octave (the page LEDs show it), and trig 1 plays C1, C2, C3 or C4. SLOTS and SLICES modes have
+  nothing to play here: their LEDs stay dark.
 - AMP, FX1, FX2, LFOs (`PMTR` lists the six SRC knobs), scenes, p-locks and trig conditions
   work as on any track.
 

@@ -21,7 +21,7 @@ Stock 1.40C plus exactly this:
     (A P:$39c / B P:$1a2) -> jsr the host; SPRING's dispatch -> the passthrough stub.
   * ColdFire: SPRING REV out of the FX choosers; tools/ot303/cf/{machine.s,control.c} as a DRAM runtime
     (the arena's bottom 16 pages; base literal at 24 sites + 4 geometry words; the boot site's jsr ->
-    the appended loader); 35 detours (ANALOG BD's seams, the glyph, the step handler's entry and its
+    the appended loader); 42 detours (ANALOG BD's seams, the glyph, the step handler's entry and its
     note write, the machine window's focus, the SETUP preview's value read, three SLIC reads), 7 pokes
     and the FLEX renderer slot, each asserted against stock.
 
@@ -96,6 +96,13 @@ DETOURS = (
     (0x4004FD0C, H("2f3946c7e9562f002f0a42a72f024eb940042158"), "ot_rec_chrom_hook", "jmp", 20),  # MT19: a chromatic key recorded
     (0x40062604, H("712a0002204041f00c004868fe9c"), "ot_rec_midi_hook", "jmp", 14),  # MT19: a MIDI note recorded
     (0x400047F0, H("2f02222f0014"), "ot_idle_hook", "jmp", 6),             # MT22: an idle track feeds the DSP's tables
+    (0x40044006, H("2039460d16f0"), "ot_led_hook", "jmp", 6),              # MT23: SLOTS / SLICES LEDs dark
+    (0x4004F8DC, H("4feffff448d7001c"), "ot_slices_hook", "jmp", 8),      # MT23: SLICES keys inert
+    (0x4004FA54, H("2f032f02242f000c"), "ot_slots_hook", "jmp", 8),       # MT23: SLOTS keys inert
+    (0x40045918, H("7401b5b9460d16fc"), "ot_oct_hook", "jmp", 8),         # MT23: CHROMATIC octaves 0..3
+    (0x40050254, H("2039460d16fc"), "ot_chrom_key_hook", "jmp", 6),       # MT23: other tracks keep 0 / 1
+    (0x4004FBA8, H("7218b28a650001ba6d0001b6"), "ot_chrom_limit_hook", "jmp", 12),  # MT23: idx up to 51
+    (0x40044968, H("7201b2b9460d16fc6616"), "ot_chrom_img_hook", "jmp", 10),  # MT23: the full keyboard image
 )
 POKES = (
     (0x40079248, H("48780005"), H("48780006"), "machine chooser has six rows, OT-303 the last"),

@@ -64,6 +64,16 @@ Builder: [`tools/build_blackpyramid_303.py`](../tools/build_blackpyramid_303.py)
   0 → −0.001, with no gain jumps. HOLD/REL 127 and notes from silence are sample-identical to MT20.
 - **RES steps (MT20):** the resonance words (RS, BG, AG_8) ease to each new value over a few frames
   (1/6 per frame, ~2 ms), set by the ColdFire. The engine glides cutoff and env amount itself.
+- **Trig-key modes (MT23):**
+  - CHROMATIC plays absolute notes over four octaves. `[FUNC]` + `[UP]` / `[DOWN]` steps the octave
+    0–3 (`0x460d16fc`; stock toggles 0/1); the page LEDs show it. Trig 1 is C1 / C2 / C3 / C4; 16
+    keys a page reach D#5. Live recording stores the same note.
+  - MIDI's follow-the-trig-mode path stays a transpose around PTCH. Other tracks keep stock's 0/1
+    octave; one coming from an OT-303 track's 2 or 3 is reset to 0.
+  - SLOTS and SLICES: their trig LEDs stay dark (stock's own no-slot path) and the keys do nothing.
+    Before, they played the voice and SLICES recorded CUT locks.
+  - Hooks: `0x40044006` (LEDs), `0x4004f8dc` / `0x4004fa54` (the keys), `0x40045918` (the octave),
+    `0x40050254` (other tracks), `0x4004fba8` (idx up to 51), `0x40044968` (the full keyboard image).
 - **The track's own pages work as on any track:** AMP (attack/hold/release act on the 303's
   output), FX1, FX2, the three LFOs (PMTR lists PTCH CUT RES ENV DEC ACC), scenes,
   trig conditions and micro-timing.
@@ -150,7 +160,7 @@ is full in stock, so the voice takes **SPRING REVERB's** module space.
 | DSP P (each payload) | 1,027 words, in SPRING REV's module (DARK REV's 35-word helper moved beside it) | 1,028 |
 | DSP X | 216 working words at `X:$7b24–$7bfb` (stock's unreferenced top, outside the DMA partitions), copied from SPRING's X records at the first frame | — |
 | DSP Y | 2,119 words `$7a5–$feb`: tables and the voice state, streamed from the ColdFire | — |
-| ColdFire | a 26 KB DRAM runtime (a 16-page arena reserve, loader appended after the OS), 34 detours, 7 pokes, the FLEX renderer slot | — |
+| ColdFire | a 27 KB DRAM runtime (a 16-page arena reserve, loader appended after the OS), 42 detours, 7 pokes, the FLEX renderer slot | — |
 
 **Cycles per sample** (emulator cycle table, host and engine together; on the chip ×1.16,
 from the METER on DIAG8):
@@ -274,3 +284,10 @@ Not yet ported. What it needs (scope, 2026-10-13):
 - **Conflicts:** ANALOG BD, SYNTH and TAPE ECHO (the same seams, slots and SPRING REV),
   SIDECHAIN_COMPRESSOR and REPITCH_REPEAT98_KYOTI (the same DSP Y memory), and QUANTIZER (the
   same chromatic and MIDI note sites). The module refuses all six.
+- **Why FLEX plus a signature, not a sixth machine type:** the OS knows five machine types. A sixth
+  would have to be taught to the Part validator, the project file (a stock OS would reset the
+  track), the page and parameter tables, the DSP's per-track sources, the trig-key modes, MIDI and
+  live recording, each one a crash or corruption risk if missed. Stored as FLEX with a signature
+  (repeat98's ANALOG BD pattern, proven on hardware), the track is valid everywhere and opens on a
+  stock OS. The cost is that FLEX behaviour leaks wherever it isn't intercepted: AMP resets, the
+  chromatic range, SLOTS/SLICES, live-record pitch units. Each needs a hook.
