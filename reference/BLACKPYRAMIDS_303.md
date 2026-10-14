@@ -1,4 +1,4 @@
-# BLACKPYRAMID_303 — design and voicing
+# BLACKPYRAMIDS_303 — design and voicing
 
 A TB-303 voice as an Octatrack MKI track machine, shown on the unit as **BLKPYRAMD**. This is
 the reference for what the machine does, how the voice is built, every by-ear decision that
@@ -6,7 +6,7 @@ shaped it, what it costs, and where each part came from. The full development re
 images MT1–MT17, listening rounds 1–13, the hardware diagnostics) is
 [`reference/handoffs/OT303_SCOPE.md`](handoffs/OT303_SCOPE.md); "OT-303" was the working name.
 
-Builder: [`tools/build_blackpyramid_303.py`](../tools/build_blackpyramid_303.py). Sources:
+Builder: [`tools/build_blackpyramids_303.py`](../tools/build_blackpyramids_303.py). Sources:
 [`tools/ot303/`](../tools/ot303/).
 
 ---
@@ -272,7 +272,7 @@ Not yet ported. What it needs (scope, 2026-10-13):
   SPRING's P words, DARK REV's helper moved, the source-seam jsr, X records, and SPRING's
   dispatch nulled. The plan is to generalise it upstream (a schema field used by both modules)
   and send it to sambanks as a PR.
-- **On our side:** a generator that writes `octabam-modules/blackpyramid-303/`:
+- **On our side:** a generator that writes `octabam-modules/blackpyramids-303/`:
   - flat DSP asm with macros and `equ` resolved;
   - the ColdFire C as checked-in `gcc -S` output;
   - a small 64-bit multiply in place of libgcc's `__muldi3`, because octabam's DRAM link has no

@@ -36313,4 +36313,9 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   CHROM key 1 -> 12 / 48 (oct 3) / 36 (oct 2), key 13 at oct 3 -> 60; live rec locks 12, 24; T1 FLEX toggles 1/0/1.
   verify ALL GOOD. `out/OCTATRACK_BLACKPYRAMID_303.bin` sha256 d31dbf17c5633fff1bcadfada81cc2fdf50a1bb1baad63ee21b71bc37c2972cf,
   syx 6af0dfb6ec0f72bab312c9b4d0e96339a5b3733a4a03161a4a580afc5dce1656 (`140C_BP303`), NOT flashed.
+- **S124 cont: renamed BLACKPYRAMIDS_303 (the user: "BlackPyramids_303"); octave arrows as stock.** Feature name,
+  builder tools/build_blackpyramids_303.py, outputs OCTATRACK_OS1.40C_BLACKPYRAMIDS_303.syx / OCTATRACK_BLACKPYRAMIDS_303.bin,
+  doc reference/BLACKPYRAMIDS_303.md, octabam key blackpyramids-303; the unit still shows BLKPYRAMD. Chromatic octave:
+  UP up, DOWN down, wrapping at the ends as stock's 0/1 toggle (ot_emu: oct 3 + UP -> C1, + DOWN -> C4).
+  `out/OCTATRACK_BLACKPYRAMIDS_303.bin` sha256 98f98e7d14da426d1c89f44a8d4dcf1bef7910a4453514785656aafc0857ae21 (`140C_BP303`), NOT flashed. Earlier entries keep the old name.
 

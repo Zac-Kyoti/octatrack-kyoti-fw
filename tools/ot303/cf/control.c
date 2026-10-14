@@ -449,7 +449,8 @@ int ot_trigmode_dark(void) {
 }
 void ot_chrom_oct(unsigned key) {           /* FUNC + UP (0x34) / DOWN (0x21) */
     uint32_t o = TOCT;
-    if (signed_track(part_base(), U8(0x100b14ccu))) o = key == 0x34u ? (o >= 3 ? 3 : o + 1) : (o == 0 || o > 3 ? 0 : o - 1);
+    /* as stock: UP (0x34) up, DOWN (0x21) down, wrapping at the ends (stock's 0/1 toggle wraps too) */
+    if (signed_track(part_base(), U8(0x100b14ccu))) o = key == 0x34u ? (o >= 3 ? 0 : o + 1) : (o == 0 || o > 3 ? 3 : o - 1);
     else o = o == 0;                        /* stock: a toggle (2, 3 from an OT-303 track: back to 0) */
     TOCT = o;
 }

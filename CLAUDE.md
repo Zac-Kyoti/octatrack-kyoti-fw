@@ -175,7 +175,7 @@ built and waiting.
 - **Feature names** — use them in builders, output images, docs and octabam keys:
   MUTE_MODES, DIRECT_JUMP_KYOTI, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT,
   QUANTIZE_LIVE_REC_TOGGLE, ERASE_EMPTY_TRIGLESS_LOCKS,
-  REC_TRIG_MUTE, BLACKPYRAMID_303, and BATCH_BUGFIXES (MIDI_PLAYS_FREE_FIX, EMPTY_PATTERN_LED_FIX, PART_CHANGE_CARRYOVER_FIX).
+  REC_TRIG_MUTE, BLACKPYRAMIDS_303, and BATCH_BUGFIXES (MIDI_PLAYS_FREE_FIX, EMPTY_PATTERN_LED_FIX, PART_CHANGE_CARRYOVER_FIX).
   `START_HERE.md` §5 maps each to its builder and octabam module.
 - **Several sessions work on this repo at once — read "Concurrent sessions" below before
   your first edit or commit.**

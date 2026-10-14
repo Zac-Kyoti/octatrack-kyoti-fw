@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-BLACKPYRAMID_303: a TB-303 voice as a track machine (shown as BLKPYRAMD), Open303's algorithm on the
-DSP56300. The design, the voicing decisions and the resources: reference/BLACKPYRAMID_303.md; the
+BLACKPYRAMIDS_303: a TB-303 voice as a track machine (shown as BLKPYRAMD), Open303's algorithm on the
+DSP56300. The design, the voicing decisions and the resources: reference/BLACKPYRAMIDS_303.md; the
 development record (MT1-MT17, the listening rounds, the hardware diagnostics):
 reference/handoffs/OT303_SCOPE.md.
 
@@ -25,9 +25,9 @@ Stock 1.40C plus exactly this:
     note write, the machine window's focus, the SETUP preview's value read, three SLIC reads), 7 pokes
     and the FLEX renderer slot, each asserted against stock.
 
-Usage:   python3 tools/build_blackpyramid_303.py      (WIP: KYOTI_ALLOW_WIP=1)
-Outputs: out/mainos_blackpyramid_303.bin, out/OCTATRACK_OS1.40C_BLACKPYRAMID_303.syx,
-         out/OCTATRACK_BLACKPYRAMID_303.bin (CF card: PROJECT > OS UPGRADE)
+Usage:   python3 tools/build_blackpyramids_303.py      (WIP: KYOTI_ALLOW_WIP=1)
+Outputs: out/mainos_blackpyramids_303.bin, out/OCTATRACK_OS1.40C_BLACKPYRAMIDS_303.syx,
+         out/OCTATRACK_BLACKPYRAMIDS_303.bin (CF card: PROJECT > OS UPGRADE)
 """
 import os, pathlib, subprocess, sys
 from kyoti_status import gate, seal
@@ -45,10 +45,10 @@ STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 CF = ROOT / "tools/ot303/cf"
 WORK = ROOT / "out/ot303/cf"
-OUT = ROOT / "out/mainos_blackpyramid_303.bin"
-ELEK = ROOT / "out/elek_blackpyramid_303.bin"
-OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_BLACKPYRAMID_303.syx"
-OUT_BIN = ROOT / "out/OCTATRACK_BLACKPYRAMID_303.bin"
+OUT = ROOT / "out/mainos_blackpyramids_303.bin"
+ELEK = ROOT / "out/elek_blackpyramids_303.bin"
+OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_BLACKPYRAMIDS_303.syx"
+OUT_BIN = ROOT / "out/OCTATRACK_BLACKPYRAMIDS_303.bin"
 VERSTR = "140C_BP303"      # the field takes 10 characters
 
 # MT4: no ROM cave. The ColdFire code is a DRAM runtime (tools/ot303/dram.py): linked at its arena

@@ -177,9 +177,9 @@ too, and has its own section above.)
   submodule; reviewed 2026-09-16 and not tracked separately since it adds
   nothing beyond that submodule for this project's purposes.
 
-## BLACKPYRAMID_303 — the TB-303 machine
+## BLACKPYRAMIDS_303 — the TB-303 machine
 
-Full attribution and every design decision: [`reference/BLACKPYRAMID_303.md`](reference/BLACKPYRAMID_303.md) §5.
+Full attribution and every design decision: [`reference/BLACKPYRAMIDS_303.md`](reference/BLACKPYRAMIDS_303.md) §5.
 
 - **[RobinSchmidt/Open303](https://github.com/RobinSchmidt/Open303)** — © 2009 Robin Schmidt, MIT.
   The voice is Open303's TB_303 algorithm ported to the DSP56300: the oscillator blend and square

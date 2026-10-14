@@ -54,7 +54,7 @@ reference/handoffs/KYOTI_LOAD_AUDIT*
 [ot303]
 tools/ot303/*
 tools/*ot303*
-tools/*blackpyramid*
+tools/*blackpyramids*
 reference/handoffs/OT303_*
-reference/BLACKPYRAMID_303*
-octabam-modules/blackpyramid-303/*
+reference/BLACKPYRAMIDS_303*
+octabam-modules/blackpyramids-303/*

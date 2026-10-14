@@ -166,7 +166,7 @@ this instead.
 **Final build:** [`tools/build_rec_trig_mute.py`](tools/build_rec_trig_mute.py) →
 `OCTATRACK_OS1.40C_REC_TRIG_MUTE`
 
-### BLACKPYRAMID_303
+### BLACKPYRAMIDS_303
 
 A TB-303 voice as a track machine, shown as **BLKPYRAMD**: the sixth row of a track's machine
 list (double-tap the track, or `[FUNC]` + `[SRC]` → MACHINE). One per DSP core: one on T1–T4,
@@ -197,14 +197,14 @@ one on T5–T8.
 (MIT). The machine registration follows repeat98's ANALOG BD for octabam. The design and the
 voicing are by Zac-Kyoti, tuned by ear: filter, bass under resonance, declicking, drive and
 saturation. So is the hardware testing. The design, every voicing decision and full
-attribution: [`reference/BLACKPYRAMID_303.md`](reference/BLACKPYRAMID_303.md) and
+attribution: [`reference/BLACKPYRAMIDS_303.md`](reference/BLACKPYRAMIDS_303.md) and
 [`CREDITS.md`](CREDITS.md).
 
 **Hardware:** confirmed through test image 14: the voice, the grid (notes, accents, slides,
 ties), every knob and the LFO names. Emulator-verified only: the 1 ms cutoff glide, the DEC
 range, the BLKPYRAMD name, live play and one-shot trigs.\
-**Final build:** [`tools/build_blackpyramid_303.py`](tools/build_blackpyramid_303.py) →
-`OCTATRACK_OS1.40C_BLACKPYRAMID_303`
+**Final build:** [`tools/build_blackpyramids_303.py`](tools/build_blackpyramids_303.py) →
+`OCTATRACK_OS1.40C_BLACKPYRAMIDS_303`
 
 ### BATCH_BUGFIXES
 
