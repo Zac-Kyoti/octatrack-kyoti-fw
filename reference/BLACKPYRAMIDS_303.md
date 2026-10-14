@@ -19,6 +19,7 @@ Builder: [`tools/build_blackpyramids_303.py`](../tools/build_blackpyramids_303.p
   columns mark the track with a **3**.
 - **SRC page (p-lockable, LFO and scene targets):**
   - **PTCH**: C0–C8, one semitone per value, shown as note names (C3 = 36, the default);
+    FUNC + turn steps a whole octave and keeps the note (D#2 → D#3), and does nothing past C0 or C8;
   - **CUT**: 200 Hz–10 kHz, exponential;
   - **RES**: 0–100 %;
   - **ENV**: env mod;
@@ -141,7 +142,9 @@ anything not listed is Open303 as shipped.
 
 Control decisions (the author's):
 - **PTCH:** a semitone per value, C0–C8, with note names. Earlier there were two values per
-  semitone, and a C0–C6 spread.
+  semitone, and a C0–C6 spread. FUNC + turn steps by octaves and keeps the note; stock FLEX's
+  FUNC + PTCH jumps to −64 / 0 / +64 instead. PERSONALIZE's DISABLE FUNC+ENC turns it off, as on
+  stock.
 - **DEC:** 200 ms–2 s, Open303's plugin range. It was first 30 ms–3 s, which crowded the audible
   part into the bottom half of the knob.
 - **VOL:** clean lower half, driven upper half.

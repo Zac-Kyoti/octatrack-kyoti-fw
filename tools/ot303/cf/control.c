@@ -72,9 +72,23 @@ static void text(uint8_t *p, const char *s, unsigned n) {
 int ot_fmt_ptch(char *buf, int v) {
     return (int)ot_note_name((unsigned)v, buf);
 }
+/* PTCH's step handler (descriptor +0x162; every caller passes (knob, turn, value) and clamps what
+ * comes back). FUNC held (0x46c7dd26, unless PERSONALIZE's DISABLE FUNC+ENC is on, 0x800000a0 --
+ * stock FLEX's PTCH handler gates the same way) moves a whole octave per step and keeps the note: an
+ * octave that would leave C0 .. C8 is not taken. One octave a detent, by the turn's sign: stock's
+ * generic handler (0x4003240c) tallies 256 a detent against a step of 270 on this knob (ot_emu),
+ * so it swallows a detent now and then (most often the first one back after a reversal), which an
+ * octave can't afford; its tally (0x46c7d244 + 20 k) is left alone. Without FUNC the knob is that
+ * handler's, as before. */
+int ot_ptch_step(int k, int turn, int v) {
+    int (*generic)(int, int, int) = (int (*)(int, int, int))0x4003240cu;
+    if (!U32(0x46c7dd26u) || U32(0x800000a0u)) return generic(k, turn, v);
+    int o = v + (turn > 0 ? 12 : turn < 0 ? -12 : 0);
+    return o < 0 || o > (int)OT_PTCH_MAX ? v : o;
+}
 /* The stock FLEX page descriptor, renamed: twelve knobs (an empty name hides a slot; +0xa2 a knob's
- * minimum, +0xd2 its number of values, +0x102 its value formatter); PTCH runs 0..96 (C0 .. C8) and
- * shows note names, the rest run 0..127. */
+ * minimum, +0xd2 its number of values, +0x102 its value formatter, +0x162 its step handler); PTCH
+ * runs 0..96 (C0 .. C8), shows note names and steps by octaves with FUNC, the rest run 0..127. */
 static uint32_t page(void) {
     if (!ot_desc_p) {
         const volatile uint8_t *src = (const volatile uint8_t *)0x400d3176u;
@@ -87,7 +101,7 @@ static uint32_t page(void) {
             put32(desc + 0xd2 + 4 * i, !ot_names[i][0] ? 0 : i == OT_PTCH ? OT_PTCH_MAX + 1 : 128);
             put32(desc + 0x102 + 4 * i, i == OT_PTCH ? (uint32_t)(uintptr_t)ot_fmt_ptch : 0);
             put32(desc + 0x132 + 4 * i, 0);
-            put32(desc + 0x162 + 4 * i, 0);
+            put32(desc + 0x162 + 4 * i, i == OT_PTCH ? (uint32_t)(uintptr_t)ot_ptch_step : 0);
         }
         /* one nibble a knob, low first (knobs 8..11, then 0..7): bit 0 on (stock FLEX also sets 2 and 4 on
          * some, meaning unknown); the first eleven on */

@@ -36319,3 +36319,15 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   UP up, DOWN down, wrapping at the ends as stock's 0/1 toggle (ot_emu: oct 3 + UP -> C1, + DOWN -> C4).
   `out/OCTATRACK_BLACKPYRAMIDS_303.bin` sha256 98f98e7d14da426d1c89f44a8d4dcf1bef7910a4453514785656aafc0857ae21 (`140C_BP303`), NOT flashed. Earlier entries keep the old name.
 
+- **S124 cont: FUNC + PTCH steps by octaves (the user's design: D#2 -> D#3 -> back to D#2).** Descriptor +0x162 is the
+  per-knob step handler, called (knob, turn, value) by every editor (page 0x40055140, locks 0x400509ae/0x40050c34,
+  scenes 0x4005331e/0x400538ee, SETUP 0x4003aa50), result clamped to min..min+count-1; 0 = generic 0x4003240c.
+  ot_ptch_step: FUNC (0x46c7dd26) held and PERSONALIZE DISABLE FUNC+ENC (0x800000a0) off -> +-12 by the turn's sign,
+  refused past C0/C8; else the generic. Stock FLEX's own (0x40032d08) jumps to 0/64/127 (table 0x400a8150). Not
+  through the generic's tally: on PTCH it counts 256 a detent against a step of 270 (encoder 0 +8 = 0x10e in ot_emu;
+  CUT's is 0x100), so it swallows detents (first one back after a reversal lost: D#5 stayed D#5); the plain knob keeps
+  that tally (3 plain detents from rest -> +2 in ot_emu, before and after this change; unverified on the unit).
+  ot_emu T6 (scratchpad livenotes/run8.py): 36 -> plain x3 38 -> FUNC +1 50, +1 62, -1 50 -> plain -1 50 ->
+  FUNC +1 x5 62 74 86 86 86 -> FUNC -1 x8 .. 2 2 -> plain +3 4. verify ALL GOOD.
+  `out/OCTATRACK_BLACKPYRAMIDS_303.bin` sha256 7e138f4bd47ddefad224112c9cb82c726226222517d40aa1c21c711cf33a2239,
+  syx faac6f92966264427cb62d1d8c0b8ee9197a0bf1e0e6b81fde4a0d9e6c2d5593 (`140C_BP303`), NOT flashed.

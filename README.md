@@ -172,7 +172,7 @@ A TB-303 voice as a track machine, shown as **BLKPYRAMD**: the sixth row of a tr
 list (double-tap the track, or `[FUNC]` + `[SRC]` → MACHINE). One per DSP core: one on T1–T4,
 one on T5–T8.
 
-- **SRC:** `PTCH` (C0–C8, a semitone a step, shown as note names) · `CUT` · `RES` · `ENV` ·
+- **SRC:** `PTCH` (C0–C8, a semitone a step, shown as note names; `FUNC` + turn steps by octaves) · `CUT` · `RES` · `ENV` ·
   `DEC` (200 ms–2 s) · `ACC`. **SETUP:** `WAVE` (saw → square) · `TUNE` · `SLID` (slide time) ·
   `GATE` (note length) · `VOL` (clean up to 64, driven above; the default adds +2.5 dB).
 - **Notes:** each trig plays a note with the knobs at that step; p-lock `PTCH` for a melody.
