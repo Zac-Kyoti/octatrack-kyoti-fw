@@ -28,23 +28,36 @@ import argparse, json, os, pathlib, subprocess, sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCR = ROOT / "out/vem"
 EMU = pathlib.Path(os.environ.get("VEM_EMU", SCR / "octabam/out/emu/ot_emu"))
-CARD = pathlib.Path(os.environ.get("VEM_CARD", SCR / "img/otdemo.img"))
-OUTD = pathlib.Path(os.environ.get("VEM_OUT", SCR / "harness"))
+# REAL hardware-exported projects, staged as cards (stage_card.py): OTDEMO (T1-T7 FLEX,
+# T8 THRU, part 1 playing) and MMTESTDT (T1-T8 STATIC, part 0).
+PROJECTS = {
+    "otdemo": dict(card=SCR / "img/otdemo.img", set="KYOTI", project="OTDEMO", part=1, m=1,
+                   slots={0: 20, 1: 5, 2: 3, 3: 10, 4: 16, 5: 4, 6: 15}),
+    "mmtestdt": dict(card=SCR / "img/mmtestdt.img", set="MMTESTDT", project="test", part=0, m=0,
+                     slots={t: t for t in range(8)}),
+}
+PRJ = PROJECTS[os.environ.get("VEM_PROJECT", "otdemo")]
+CARD = pathlib.Path(os.environ.get("VEM_CARD", PRJ["card"]))
+OUTD = pathlib.Path(os.environ.get("VEM_OUT", SCR / ("harness_" + os.environ.get("VEM_PROJECT", "otdemo"))))
 IMAGES = {"new": ROOT / "out/mainos_varispeed_emus.bin",
           "oracle": ROOT / "out/oracle/shipped_repitch_repeat98_kyoti_FINAL.bin",
           "stock": ROOT / "out/raw/section_3_MAIN_OS.bin"}
+for _k, _e in (("new", "VEM_IMG_NEW"), ("oracle", "VEM_IMG_ORACLE")):
+    if os.environ.get(_e):                  # the harness's own oracle check: stock vs stock,
+        IMAGES[_k] = pathlib.Path(os.environ[_e]).resolve()   # a deliberately wrong build
 ORACLE_SHA = "90b4a1c11b40b93901b0a0c3f9500d22193facf82c13aeac447eb97f9a45acfa"
 
-DB = 0x400e21e0                     # [0x46c82456] in this project (checked by the dump step)
-PART = 1                            # OTDEMO's current part (0-based; checked)
+DB = 0x400e21e0                     # [0x46c82456] in these projects (checked by the dump step)
+PART = PRJ["part"]                  # the project's current part (0-based; checked)
 PSTRIDE = 0x18b2
 OFF_P1, OFF_P2, OFF_SLOT5, OFF_MACH = 0x8edaa, 0x8ef5a, 0x8f04a, 0x8eda2
 SHADOW = 0x100a4ece - 0x8ed80
 LIVE_P1, LIVE_P2, BASE_W = 0x80000810, 0x80000830, 0x80000a50
 SET_FLEX, SET_STATIC, SET_STRIDE = 0x100b14f0, 0x100d5b30, 0x448
 SET_TEMPO = 0x4009c708
-# OTDEMO part 1 (dumped from the loaded project): T1-T7 FLEX, T8 THRU; FLEX slot per track
-FLEX_SLOT = {0: 20, 1: 5, 2: 3, 3: 10, 4: 16, 5: 4, 6: 15}
+SLOT = PRJ["slots"]                 # the track's sample slot (dumped from the loaded project)
+MACH = PRJ["m"]                     # its machine: 1 FLEX / 0 STATIC
+PICKUP, SET_MACHINE = 4, 0x400972fc  # machine select's refresher (part, track)
 QUAN = [4 + 15 * i for i in range(9)]          # the 9 stops: 1/2 .. 2/1
 EMUS = {"S950": 1, "OT": 64, "SP12": 127}
 ORACLE_TSTR = {"S950": 5, "OT": 4, "SP12": 6}
@@ -72,18 +85,23 @@ def p2(t, m, slot2, v):
 
 
 def settings(t, field, v):
-    return u32(SET_FLEX + FLEX_SLOT[t] * SET_STRIDE + field, v)
+    return u32((SET_FLEX if MACH == 1 else SET_STATIC) + SLOT[t] * SET_STRIDE + field, v)
 
 
 def scenario_steps(cfg, image):
     """cfg: dict(tempo=bpm24|None, tracks={t: dict(mode, emus, tsmode, bpm24, quan, rate,
     ratemode)}). mode: 'VARI' (TSTR 4 / oracle 4-6), 'AUTO' (TSTR 1, the sample's TSMODE
     4 / oracle 4-6), 'OFF' (TSTR 0)."""
-    s1, s2, calls = [], [], []
+    s1, s2, s0 = [], [], []
     for t, c in cfg["tracks"].items():
-        m = 1                                            # FLEX
+        m = MACH
         e = c.get("emus", "OT")
-        if c["mode"] == "VARI":
+        if c["mode"] == "PICKUP":                        # the track becomes a PICKUP machine
+            m = PICKUP
+            o = OFF_MACH + PART * PSTRIDE + t
+            s0 += [u8(DB + o, PICKUP), u8(SHADOW + o, PICKUP)]
+            s1 += p2(t, m, 4, c.get("tstr", 0))
+        elif c["mode"] == "VARI":
             ts = 4 if image == "new" else ORACLE_TSTR[e] if image == "oracle" else 0
             s1 += p2(t, m, 4, ts)
         elif c["mode"] == "AUTO":
@@ -92,6 +110,10 @@ def scenario_steps(cfg, image):
             s1 += settings(t, 0x110, c.get("tsmode", tsm))
         elif c["mode"] == "OFF":
             s1 += p2(t, m, 4, 0)
+        elif c["mode"] == "RAW":                         # a stock TSTR (and TSMODE) on both images
+            s1 += p2(t, m, 4, c["tstr"])
+            if "tsmode" in c:
+                s1 += settings(t, 0x110, c["tsmode"])
         if "bpm24" in c:
             s1 += settings(t, 0x114, c["bpm24"])
         if "ratemode" in c:
@@ -103,6 +125,11 @@ def scenario_steps(cfg, image):
         if image == "new" and c["mode"] in ("VARI", "AUTO"):
             s2 += p2(t, m, 5, EMUS[e])
     st = []
+    if s0:
+        st.append(f"1:poke:" + ";".join(s0))
+        for t, c in cfg["tracks"].items():
+            if c["mode"] == "PICKUP":
+                st.append(f"1:call:{SET_MACHINE:#x},{PART},{t}")
     if cfg.get("tempo"):
         st.append(f"{T_SET}:call:{SET_TEMPO:#x},{cfg['tempo']}")
     if s1:
@@ -116,8 +143,8 @@ def run(image, scens, frames, jobs, tag):
     """One load, one forked child per scenario. Returns {name: log path}."""
     d = OUTD / tag / image
     d.mkdir(parents=True, exist_ok=True)
-    args = [str(EMU), "--image", str(IMAGES[image]), "--card", str(CARD), "--set", "KYOTI",
-            "--project", "OTDEMO", "--load-ms", "20000", "--dsp", "--main-level", "64",
+    args = [str(EMU), "--image", str(IMAGES[image]), "--card", str(CARD), "--set", PRJ["set"],
+            "--project", PRJ["project"], "--load-ms", "20000", "--dsp", "--main-level", "64",
             "--scenario-jobs", str(jobs)]
     for name, steps in scens.items():
         log = d / f"{name}.log"
@@ -150,18 +177,20 @@ def parse(vem):
     return out
 
 
-NTRK = {1: 4, 0: 3}         # voice passes per frame: core 1 T1-T4, core 0 T5-T7 (T8 is THRU here)
 
 
 def track_of(core, off):
     return (0 if core == 1 else 4) + off // 0x20
 
 
-def compare(a, b, cfg, label):
-    """a/b: parse() results. Per track, from its first trig pass after SKIP_FRAMES."""
-    res = {"label": label, "tracks": {}, "ok": True}
+def compare(a, b, cfg, label, ymask=0xffffff):
+    """a/b: parse() results. Per track, from its first trig pass after SKIP_FRAMES.
+    ymask: the y:$40 bits compared (out of range vs stock: all but the engine bits 0-1,
+    which stock leaves arbitrary and the new image must keep 0 -- counted separately)."""
+    res = {"label": label, "tracks": {}, "ok": True, "tagged": 0}
     for core in (0, 1):
         A, B = a[core], b[core]
+        ntrk = max(1, len({e[0] for e in A[:200]}))     # voice passes per frame: 2 per track
         if len(A) != len(B):
             n = min(len(A), len(B))
             res.setdefault("notes", []).append(f"core {core}: {len(A)} vs {len(B)} passes, first {n} compared")
@@ -174,7 +203,7 @@ def compare(a, b, cfg, label):
                 res.setdefault("notes", []).append(f"core {core} pass {i}: pass order differs {x[:2]} {y[:2]}")
                 break
             st = per.setdefault(t, dict(started=False, n=0, diff=0, first=None, trigs=0))
-            frame = i // (2 * NTRK[core])
+            frame = i // (2 * ntrk)
             if not st["started"]:
                 if frame >= SKIP_FRAMES and x[4] and x[1] == 1:
                     st["started"] = True
@@ -182,7 +211,10 @@ def compare(a, b, cfg, label):
                     continue
             st["n"] += 1
             st["trigs"] += x[4] and x[1] == 1
-            if (x[2], x[3]) != (y[2], y[3]):
+            if ymask != 0xffffff and x[3] & 3:
+                res["tagged"] += 1
+                res["ok"] = False
+            if (x[2], x[3] & ymask) != (y[2], y[3] & ymask):
                 st["diff"] += 1
                 if st["first"] is None:
                     st["first"] = dict(pass_=i, frame=frame, lc=x[1], a=f"{x[2]:06x}:{x[3]:06x}",
@@ -219,6 +251,18 @@ def matrix(quick):
             tr = {t: dict(mode="VARI", emus=e, quan=QUAN[(t * 4) % 9], rate=rates[t], ratemode=1,
                           bpm24=[720, 7200, 721, 7199, 2880, 1440, 5760][t]) for t in range(7)}
             sc[f"ratemode_edges_{e}"] = dict(tempo=None, tracks=tr)
+        # stock TSTR / TSMODE on both images (not VARI): identical to the oracle
+        for k, (tstrs, tsms) in enumerate((([0, 1, 2, 3, 0, 1, 2], [0, 2, 3, 0, 2, 3, 0]),
+                                            ([3, 2, 1, 0, 1, 1, 1], [2, 0, 0, 3, 3, 2, 0]))):
+            tr = {t: dict(mode="RAW", tstr=tstrs[t], tsmode=tsms[t], quan=QUAN[(t * 3 + k) % 9],
+                          rate=rates[(t + k) % 7]) for t in range(7)}
+            sc[f"stock_tstr_{k}"] = dict(tempo=None, tracks=tr)
+        # PICKUP tracks (switched at runtime) beside VARI ones: PICKUP untouched
+        tr = {t: dict(mode="VARI", emus=emus_list[t % 3], quan=QUAN[(t * 2) % 9], rate=rates[t])
+              for t in range(7)}
+        for t in (2, 5):
+            tr[t] = dict(mode="PICKUP", tstr=t % 3, quan=QUAN[t], rate=rates[t])
+        sc["pickup_mix"] = dict(tempo=None, tracks=tr)
         # project tempo at the edges with mixed samples
         for tempo in (720, 7200):
             tr = {t: dict(mode="VARI", emus=emus_list[t % 3], quan=QUAN[(t * 5) % 9], rate=rates[t])
@@ -246,7 +290,8 @@ def main():
     ap.add_argument("--reuse", action="store_true", help="compare existing logs only")
     a = ap.parse_args()
     import hashlib
-    if hashlib.sha256(IMAGES["oracle"].read_bytes()).hexdigest() != ORACLE_SHA:
+    if not os.environ.get("VEM_IMG_ORACLE") and \
+            hashlib.sha256(IMAGES["oracle"].read_bytes()).hexdigest() != ORACLE_SHA:
         sys.exit("the oracle image is not the shipped FINAL (sha256 90b4a1c1...)")
     results = []
     sc = matrix(a.quick)
@@ -275,7 +320,9 @@ def main():
         for n in scens:
             la, lb = logs[ia][n], logs[ib][n]
             ok_run = all("run ended REACHED" in p.read_text() for p in (la, lb) if p.exists())
-            r = compare(parse(str(la) + ".vem"), parse(str(lb) + ".vem"), scens[n], f"{tag}:{n} {ia} vs {ib}")
+            r = compare(parse(str(la) + ".vem"), parse(str(lb) + ".vem"), scens[n],
+                        f"{tag}:{n} {ia} vs {ib} [{PRJ['project']}]",
+                        0xfffffc if tag == "oor" else 0xffffff)
             r["reached"] = ok_run
             results.append(r)
             tr = " ".join(f"T{t + 1}:{s['n']}/{s['diff']}{'' if s['started'] else '(no trig)'}"
@@ -285,6 +332,8 @@ def main():
             for t, s in sorted(r["tracks"].items()):
                 if s["first"]:
                     print(f"      T{t + 1} first difference: {s['first']}")
+            if r["tagged"]:
+                print(f"      {r['tagged']} passes of the new image carry an engine tag out of range")
             for nt in r.get("notes", []):
                 print("     ", nt)
     OUTD.mkdir(parents=True, exist_ok=True)

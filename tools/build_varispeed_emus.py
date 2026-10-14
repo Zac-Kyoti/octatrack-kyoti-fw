@@ -13,7 +13,7 @@ REPITCH_REWRITE_SCOPE.md + REPITCH_REWRITE_SCOPE_EMUS.md; this build:
 reference/handoffs/REPITCH_REWRITE_IMPL.md.
 
   ColdFire: octabam-modules/varispeed-emus/varispeed_emus.s, one unit linked at the
-            classic cave's proven start (0x400d6500), 17 detours, 12 descriptor pokes.
+            classic cave's proven start (0x400d6500), 18 detours, 12 descriptor pokes.
   DSP:      the hardware-proven RPS9/RPSP kernel (tools/patch_repitch_dsp.asm via
             tools/repitch_dsp_src.py) in SPRING REVERB's P module and X data, its voice
             and boot hooks, SPRING removed from both FX choosers -- the old builder's DSP
@@ -52,6 +52,16 @@ OUT_BIN = ROOT / "out/OCTATRACK_VARISPEED_EMUS.bin"
 SYMS_JSON = ROOT / "out/varispeed_emus_syms.json"
 WORK = ROOT / "out/vem_build"
 VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM1"
+# A TEST variant (the harness's deliberately wrong builds): VEM_VARIANT=<tag> and
+# VEM_VARIANT_SRC=<.s> build out/vem_variants/mainos_varispeed_emus_<tag>.bin from that
+# source, with every check, and no wrap. Never a flash candidate.
+VARIANT = os.environ.get("VEM_VARIANT")
+if VARIANT:
+    SRC = pathlib.Path(os.environ["VEM_VARIANT_SRC"]).resolve()
+    OUT = ROOT / f"out/vem_variants/mainos_varispeed_emus_{VARIANT}.bin"
+    SYMS_JSON = ROOT / f"out/vem_variants/varispeed_emus_{VARIANT}_syms.json"
+    WORK = ROOT / f"out/vem_variants/build_{VARIANT}"
+    OUT.parent.mkdir(parents=True, exist_ok=True)
 
 CAVE = 0x400d6500            # the classic cave's proven start (kb/caves.md §2b)
 CAVE_END = 0x400d7c3c        # its end (kb/caves.md §1)
@@ -78,15 +88,17 @@ DETOURS = {
     0x40009094: ("4fefff9848d77cfc", "rp_apply1", "jmp"),
     0x40009e00: ("4fefffb448d77cfc", "rp_apply2", "jmp"),
     0x4004aab4: ("4fefffe048d70c3c", "rp_reload", "jmp"),
-    # O2: the bulk writers -- SRC page paste, track paste, PART menu
+    # O2: the bulk writers -- SRC page paste (and its undo), track paste (and its undo),
+    # the PART menu's paste core (PASTE and UNDO) and CLEAR
     0x40027e4c: ("4fefffcc48d77cfc", "vh_srcpaste", "jmp"),
     0x4002b654: ("4fefffbc48d77cfc", "vh_trkpaste", "jmp"),
-    0x4005a5a8: ("4fefffec48d7007c", "vh_partmenu", "jmp"),
+    0x40029a4c: ("4fefffec48d7043c", "vh_partpaste", "jmp"),
+    0x4004a9d0: ("4feffff048d70c0c", "vh_partclear", "jmp"),
 }
 # Each body replays its site's displaced bytes and jumps back here: the builder checks
 # the jump target equals site + displaced length.
 RETURNS = {"vem_frame": None, "vb_srcpaste": 0x40027e54, "vb_trkpaste": 0x4002b65c,
-           "vb_partmenu": 0x4005a5b0, "vb_reload": 0x4004aabc}
+           "vb_partpaste": 0x40029a54, "vb_partclear": 0x4004a9d8, "vb_reload": 0x4004aabc}
 
 # descriptor pokes (u32): addr -> (stock value, new value or symbol, what)
 POKES = {
@@ -354,6 +366,9 @@ def main():
     stock = STOCK_SECT.read_bytes()
     img = bytearray(stock)
     o = lambda a: a - BASE
+    if VARIANT:                          # a test variant without some detours (e.g. the O2 holds)
+        for a in filter(None, os.environ.get("VEM_VARIANT_SKIP", "").split(",")):
+            print(f"  test variant {VARIANT}: detour 0x{DETOURS.pop(int(a, 16)) and int(a, 16):08x} left stock")
 
     # ---- the ColdFire unit ---------------------------------------------------------
     print("=== ColdFire: varispeed_emus.s ===")
@@ -455,6 +470,9 @@ def main():
           f"{hashlib.sha256(blob).hexdigest()}")
 
     # ---- wrap ------------------------------------------------------------------------
+    if VARIANT:
+        print(f"  test variant {VARIANT}: no wrap")
+        return
     if not EFT.exists() or not STOCK_SYX.exists():
         print("\n  (EFT tool or stock syx missing -- skipping the .syx/.bin wrap)")
         return

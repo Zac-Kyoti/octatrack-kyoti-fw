@@ -37,7 +37,8 @@
         .global emus_p2step
         .global vh_srcpaste
         .global vh_trkpaste
-        .global vh_partmenu
+        .global vh_partpaste
+        .global vh_partclear
         .global rp_reload
         .global quant_widget
         .global quant_fmt
@@ -183,6 +184,24 @@ vem_frame:
         lsr.l   #8,%d1
         cmp.l   %d3,%d1
         bne     .vf_plain               | the DB machine is not the one rendering
+| Engaged only when the runtime gate agrees: a candidate (the lane's own TSTR, or AUTO
+| through the sample this voice plays), its sample and the project tempo in 30..300
+| BPM. Anything else -- out of range, or the Part gate and the voice disagreeing (a
+| sample lock under AUTO) -- plays exactly as stock would (masked), dry if a candidate.
+        tst.l   %d4
+        beq     .vf_plain
+        bsr     voice_set               | the sample this voice plays
+        beq     .vf_plain
+        move.l  0x114(%a1),%d4          | S = its BPM x 24
+        cmpi.l  #BPM24_MIN,%d4
+        blt     .vf_plain
+        cmpi.l  #BPM24_MAX,%d4
+        bgt     .vf_plain
+        move.l  (TEMPO24).l,%d3         | T = the project's BPM x 24
+        cmpi.l  #BPM24_MIN,%d3
+        blt     .vf_plain
+        cmpi.l  #BPM24_MAX,%d3
+        bgt     .vf_plain
 | The slot holds QUAN: PTCH is not pitch. The increment is RATE alone, exactly what
 | stock computes with a neutral PTCH word (0x4000 -> 1.0, shift 1): the two EMAC
 | products are exact multiples of 2^45, so the closed form is bit-identical.
@@ -203,21 +222,6 @@ vem_frame:
 .vf_unity:
         move.l  #0x04000000,%d0
 .vf_rate:
-        tst.l   %d4
-        beq     .vf_untagged            | VARI domain without a candidate (a sample
-                                        | lock under AUTO): dry rate, no ratio
-        bsr     voice_set               | the sample this voice plays
-        beq     .vf_untagged
-        move.l  0x114(%a1),%d4          | S = its BPM x 24
-        cmpi.l  #BPM24_MIN,%d4
-        blt     .vf_untagged
-        cmpi.l  #BPM24_MAX,%d4
-        bgt     .vf_untagged
-        move.l  (TEMPO24).l,%d3         | T = the project's BPM x 24
-        cmpi.l  #BPM24_MIN,%d3
-        blt     .vf_untagged
-        cmpi.l  #BPM24_MAX,%d3
-        bgt     .vf_untagged
         move.l  %d0,%d7                 | d7 = the rate increment
 | QUAN: the composed PTCH word's ui value, or the live byte on a swap frame (the lane
 | was copied before the swap and still holds the old domain).
@@ -298,9 +302,6 @@ vem_frame:
         and.l   %d4,%d0
         lsl.l   #2,%d1
         or.l    %d1,%d0
-        bra.s   .vf_store
-.vf_untagged:
-        andi.l  #0xfffffff3,%d0
         bra.s   .vf_store
 .vf_plain:
         move.l  %d7,%d0
@@ -576,8 +577,10 @@ db_tsns:
         rts
 
 | ---------------------------------------------------------------------------
-| Bulk writers (the user's O2): SRC page paste, track paste and the PART menu rewrite
-| TSTR together with values already in the right domain, and pass no Part apply. As
+| Bulk writers (the user's O2): SRC page paste, track paste and the PART menu (paste,
+| undo, clear) rewrite TSTR together with values already in the right domain, and pass
+| no Part apply before the ISR can see them (the PART paste core applies only at its
+| end, and only for the current part). As
 | rp_reload: every rp_prev byte on HOLD for the call, forgotten after it, so the next
 | poll ADOPTS. Each `jmp`s from its function's 8-byte entry; the caller's (up to six)
 | arguments are passed on again; d0 comes back untouched.
@@ -613,7 +616,7 @@ vb_trkpaste:
         movem.l %d2-%d7/%a2-%fp,(%sp)   | displaced
         jmp     (0x4002b65c).l
 
-vh_partmenu:
+vh_partpaste:                           | PART menu PASTE and UNDO: 0x40029a4c(clip, part)
         bsr     vh_enter
         move.l  24(%sp),-(%sp)
         move.l  24(%sp),-(%sp)
@@ -621,13 +624,29 @@ vh_partmenu:
         move.l  24(%sp),-(%sp)
         move.l  24(%sp),-(%sp)
         move.l  24(%sp),-(%sp)
-        jsr     vb_partmenu
+        jsr     vb_partpaste
         lea     24(%sp),%sp
         bra     vh_leave
-vb_partmenu:
+vb_partpaste:
         lea     -20(%sp),%sp            | displaced
-        movem.l %d2-%d6,(%sp)           | displaced
-        jmp     (0x4005a5b0).l
+        movem.l %d2-%d5/%a2,(%sp)       | displaced
+        jmp     (0x40029a54).l
+
+vh_partclear:                           | PART menu CLEAR: 0x4004a9d0(part)
+        bsr     vh_enter
+        move.l  24(%sp),-(%sp)
+        move.l  24(%sp),-(%sp)
+        move.l  24(%sp),-(%sp)
+        move.l  24(%sp),-(%sp)
+        move.l  24(%sp),-(%sp)
+        move.l  24(%sp),-(%sp)
+        jsr     vb_partclear
+        lea     24(%sp),%sp
+        bra     vh_leave
+vb_partclear:
+        lea     -16(%sp),%sp            | displaced
+        movem.l %d2-%d3/%a2-%a3,(%sp)   | displaced
+        jmp     (0x4004a9d8).l
 
 | RELOAD PART (stock 0x4004aab4(part)) copies the saved Part in and refreshes, through
 | neither Part apply: the same hold/forget (patch_repitch_reload.s's design, 16 bytes).
