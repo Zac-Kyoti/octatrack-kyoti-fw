@@ -6,8 +6,7 @@ How to flash an OT Kyoti FW image onto your Octatrack, with a full safety net.
 > apart from the always-on bug fixes. MUTE_MODES lives in PERSONALIZE;
 > QUANTIZE_LIVE_REC_TOGGLE, DIRECT_JUMP_KYOTI and RELOAD_FROM_PROJECT are front-panel
 > chords that do nothing until you press them (DIRECT_JUMP_KYOTI comes up OFF on every
-> power-on); SIDECHAIN_COMPRESSOR and REPITCH_REPEAT98_KYOTI only engage on a setting you
-> pick.
+> power-on); SIDECHAIN_COMPRESSOR only engages on a setting you pick.
 
 > **MKI.** Elektron ships one OS 1.40C image for the MKI and MKII, but all hardware
 > testing here is on an MKI.
@@ -111,12 +110,11 @@ unit that boots; if it doesn't, use §3b.
 | build | OS VERSION |
 |---|---|
 | MUTE_MODES, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT, QUANTIZE_LIVE_REC_TOGGLE | `140C_KYOTI` |
-| KYOTI V1.3 (every feature in one image) | `KYOTI V1.3` |
+| KYOTI V1.4 (every feature in one image) | `KYOTI V1.4` |
 | DIRECT_JUMP_KYOTI | `140C_KDJ7` |
-| REPITCH_REPEAT98_KYOTI | `140C_RPK17` |
 | REC_TRIG_MUTE | `140C_RTM` |
 | ERASE_EMPTY_TRIGLESS_LOCKS and the BATCH_BUGFIXES builds | `1.40C` (stock string — check by behaviour) |
-| a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_RPK17`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`) |
+| a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`) |
 
 PERSONALIZE is reset by every flash, so features are off until you re-enable them. A
 quick check for each:
@@ -132,11 +130,6 @@ quick check for each:
   stock; a KEY you set on this firmware is kept.
 - **RELOAD_FROM_PROJECT** — save the bank, change a track's trigs, then `[PTN]` +
   `[TRACK n]` while playing: the saved trigs come back without the transport stopping.
-- **REPITCH_REPEAT98_KYOTI** — a STATIC track with a sample whose tempo is set (audio
-  editor, ATTR), SETUP → TSTR = `RPCH`: it follows the project tempo by varispeed, and
-  PTCH now reads QUAN. Then save the Part, set a different TSTR on a track, and reload the
-  Part twice (PART → RELOAD, or `[BANK]` + `[TRACK n]` with RELOAD_FROM_PROJECT): every
-  track keeps its FX, and the TSTR you saved comes back with its own PTCH/QUAN value.
 - **QUANTIZE_LIVE_REC_TOGGLE** — hold `[REC]`, tap `[PLAY]` → toast; tap `[PLAY]` again
   while it is up → the setting inverts.
 - **ERASE_EMPTY_TRIGLESS_LOCKS** — make a trigless lock with one p-lock, erase that lock

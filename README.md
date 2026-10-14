@@ -126,37 +126,6 @@ so if the trigs did not land.
 **Final build:** [`tools/build_reload_from_project.py`](tools/build_reload_from_project.py) →
 `OCTATRACK_OS1.40C_RELOAD_FROM_PROJECT`
 
-### REPITCH_REPEAT98_KYOTI
-
-Three new **TSTR** settings on a STATIC or FLEX track's SETUP page (`[FUNC]` + `[SRC]`).
-The sample follows the project tempo by **varispeed**, the way a classic sampler or a
-turntable would — speed and pitch move together, nothing is stretched. The tempo comes
-from the sample's own tempo attribute (audio editor, ATTR); a sample outside 30–300 BPM
-plays as stock.
-
-- `RPCH` — the Octatrack's own playback, clean
-- `RPS9` — an Akai S900/S950: a virtual 40 kHz, 12-bit sampler
-- `RPSP` — an E-mu SP-1200: 26.04 kHz, 12-bit, drop-sample, as its unfiltered outputs
-  7/8; the stereo width stays clean
-
-On a repitch track the **PTCH** knob becomes **QUAN**, an exact ratio against the tempo —
-`1/2 2/3 3/4 4/5 1/1 5/4 4/3 3/2 2/1` — so a loop at 3/4 lines back up with the pattern.
-QUAN takes p-locks and scene locks, and PTCH and QUAN are kept separately. In the audio
-editor, TIMESTRETCH gains `REPITCH`, `RPS9` and `RPSP`, so under SETUP `AUTO` each sample
-plays in its own mode. The DSP space comes from **SPRING REVERB**, as for
-SIDECHAIN_COMPRESSOR. Starts from Jannik Aßfalg's Repitch module for octabam
-([`CREDITS.md`](CREDITS.md)).
-
-**Limit:** RPSP takes real DSP time. Four RPSP tracks on one DSP core (T1–T4 or T5–T8) with
-DARK REV on each run clean beside up to three DJ EQs on T5–T8 and four on T1–T4; more heavy
-effects than that on those tracks can overload the DSP (a loud tone, and the sequencer stops).
-RPS9 costs about a third as much.
-
-**Hardware:** confirmed, including the limit above (this build's RPSP runs in KYOTI V1.3 on
-the unit). Not specifically tested: RTRG retrigs.\
-**Final build:** [`tools/build_repitch_repeat98_kyoti.py`](tools/build_repitch_repeat98_kyoti.py) →
-`OCTATRACK_OS1.40C_REPITCH_REPEAT98_KYOTI`
-
 ### QUANTIZE_LIVE_REC_TOGGLE
 
 Reach the QUANTIZE LIVE REC setting from the front panel. Hold **`[REC]`** and tap
@@ -219,7 +188,7 @@ Three fixes to stock bugs. Each has its own build.
 
 ### Each feature + BATCH_BUGFIXES
 
-One image per feature above, with all three BATCH_BUGFIXES folded in — eight images, for
+One image per feature above, with all three BATCH_BUGFIXES folded in — seven images, for
 flashing a single feature without giving up the bug fixes. The features are not combined
 with each other.
 
@@ -228,17 +197,15 @@ flashed as such.\
 **Final build:** [`tools/build_bugbuilds.py`](tools/build_bugbuilds.py) →
 `out/Bugbuilds/OCTATRACK_OS1.40C_<FEATURE>_BATCH_BUGFIXES`
 
-### KYOTI V1.3
+### KYOTI V1.4
 
 Every feature above and all three BATCH_BUGFIXES in **one image**. The boot splash and
-SYSTEM STATUS → OS VERSION read `KYOTI V1.3`. It replaces KYOTI V1.2 and V1.1, and the withdrawn
-V1.0 (see below).
+SYSTEM STATUS → OS VERSION read `KYOTI V1.4`. It replaces KYOTI V1.3, V1.2 and V1.1, and the
+withdrawn V1.0 (see below).
 
-**Sample memory:** 6 KB of the 85.5 MB sample/recorder pool, for code loaded at boot; the
-MEMORY page still reads 85.5 MB.\
-**Hardware:** confirmed.\
+**Hardware:** every ingredient is confirmed; this image has not been flashed as such.\
 **Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) →
-`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.3`
+`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.4`
 
 ---
 
@@ -246,10 +213,10 @@ MEMORY page still reads 85.5 MB.\
 
 **KYOTI V1.0 (the earlier all-in-one image) is withdrawn as of 2026-10-06.** It can crash
 the unit when an encoder is turned on an FX page set to NONE, and when T8's PLAYBACK or LFO
-page is shown with T8 as MASTER. If you flashed it, flash KYOTI V1.3 above, one of the
+page is shown with T8 as MASTER. If you flashed it, flash KYOTI V1.4 above, one of the
 single-feature builds, or stock OS 1.40C. None of those has this problem.
 
-**KYOTI V1.2 breaks PLATE REVERB** (a damaged page, and its knobs do nothing). Flash KYOTI V1.3.
+**KYOTI V1.2 breaks PLATE REVERB** (a damaged page, and its knobs do nothing). Flash KYOTI V1.4.
 
 **This is for personal study.** Updating an Elektron unit with anything other than
 official firmware is risky: it puts the warranty in question and can leave the unit

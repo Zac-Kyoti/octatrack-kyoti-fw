@@ -157,6 +157,8 @@ too, and has its own section above.)
   scaffold of our ColdFire test oracle (`tools/repitch_probe_kyoti.cpp`, from his
   `tools/harness/repitch_probe.cpp`). Ours: QUAN and its exact-ratio fold, the
   PTCH/QUAN swap, the 7-position TSTR widget, and all of RPS9/RPSP on the DSP.
+  REPITCH_REPEAT98_KYOTI was removed from every build here on 2026-10-13; its ColdFire core
+  is being rewritten without his code (`reference/handoffs/REPITCH_REWRITE_SPEC.md`).
 
 ## The DSP56300 emulator core
 

@@ -35818,3 +35818,27 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
   everything works, PLATE REVERB fixed. Pinned mainos `d14555ec…` (replaces V1.2's
   `8dede0c0…`). It rebuilds and seals without the opt-in. README, BUILD_KYOTI, FLASHING and START_HERE name V1.3,
   and README's "Before you flash" tells V1.2 users to move to V1.3. A copy is in the main checkout's out/KYOTI/.
+
+## Session 128 (2026-10-13, `repitch-removal`) — REPITCH_REPEAT98_KYOTI removed from every build; KYOTI V1.4 (WIP, NOT flashed)
+
+* **Why.** Jannik Aßfalg asked for RPS9/RPSP to be separated altogether from his Repitch (his
+  octabam module is DSP-free; ours reused his ColdFire core). The user chose a clean-room rewrite
+  of that core (branch `repitch-rewrite`, `reference/handoffs/REPITCH_REWRITE_SPEC.md`) and,
+  meanwhile, removal of the shipped module from every build here and from octabam.
+* **Removed:** `tools/build_repitch_repeat98_kyoti.py` and its FINAL pin; `BUG_RPK17` from
+  `build_bugbuilds.py` (now seven images) and its pin; REPITCH from `build_kyoti.py` (FEATURES,
+  PLAN_REPITCH, the glyph placement, SHARED_OK, the --with/--without special cases). README,
+  BUILD_KYOTI, FLASHING (§4 check + OS VERSION rows), START_HERE, CLAUDE.md's feature list and
+  CREDITS updated. **Kept** as the rewrite's sources: `octabam-modules/repitch-repeat98-kyoti/`
+  (DSP kernel, glyphs, RELOAD hook) and `tools/repitch_dsp_*` / engine model. Their default
+  paths to `out/mainos_repitch_repeat98_kyoti.bin` now point at nothing until the rewrite builds.
+* **KYOTI V1.4** = V1.3 minus REPITCH. ROM-only again. V1.1's ROM plan no longer fit (V1.2's
+  RELOAD/DIRECT JUMP fixes grew them: CAVE overflowed by `patch_pattern_led`), so
+  EMPTY_PATTERN_LED_FIX moves to SAFE_CAVE (UI-path code, SAFE allows engine code anyway).
+  CAVE: reload3, directjump_v7, softmute, partreapply, mutemode, rtm_mask (128 B left); SAFE:
+  personalize ×3, sidechain, trigscale, qlrec, pattern_led (1,118 B left); ENC: triglock. No
+  reclaim zone used (SIDE-CHAIN still drops SPRING from the FX lists; its descriptor stays stock
+  bytes). All composition checks pass. mainos `72710a3c…`, syx `568b2efb…`, OS VERSION
+  `KYOTI V1.4`. **NOT flashed, NOT pinned** (`build_kyoti.py` has no FINAL entry until the user
+  promotes it).
+* Verification: all seven Bugbuilds rebuilt and match their pins; no FINAL standalone was touched.

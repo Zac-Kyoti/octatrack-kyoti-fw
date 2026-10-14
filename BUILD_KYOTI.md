@@ -15,7 +15,7 @@ reproducible from the stock file.
 - **Your own copy of the official OS 1.40C** — from
   <https://www.elektron.se/support-downloads/octatrack-mkii>. The same image serves MKI
   and MKII.
-- *For SIDECHAIN_COMPRESSOR and REPITCH_REPEAT98_KYOTI only* — the DSP56300 toolchain
+- *For SIDECHAIN_COMPRESSOR only* — the DSP56300 toolchain
   built into `vendor/dsp56300/`, and the external-RE clone cache
   (`python3 tools/refs/sync.py`). Every other build is ColdFire-only.
 
@@ -40,14 +40,13 @@ One command per final feature. Each writes its image to `out/`:
 | DIRECT_JUMP_KYOTI | `python3 tools/build_direct_jump_kyoti.py` | `140C_KDJ7` |
 | SIDECHAIN_COMPRESSOR | `python3 tools/build_sidechain_compressor.py` | `140C_KYOTI` |
 | RELOAD_FROM_PROJECT | `python3 tools/build_reload_from_project.py` | `140C_KYOTI` |
-| REPITCH_REPEAT98_KYOTI | `python3 tools/build_repitch_repeat98_kyoti.py` | `140C_RPK17` |
 | QUANTIZE_LIVE_REC_TOGGLE | `python3 tools/build_quantize_live_rec_toggle.py` | `140C_KYOTI` |
 | ERASE_EMPTY_TRIGLESS_LOCKS | `python3 tools/build_erase_empty_trigless_locks.py` | `1.40C` |
 | REC_TRIG_MUTE | `python3 tools/build_rec_trig_mute.py` | `140C_RTM` |
 | BATCH_BUGFIXES: MIDI_PLAYS_FREE_FIX | `python3 tools/build_midi_plays_free_fix.py` | `1.40C` |
 | BATCH_BUGFIXES: EMPTY_PATTERN_LED_FIX | `python3 tools/build_empty_pattern_led_fix.py` | `1.40C` |
 | BATCH_BUGFIXES: PART_CHANGE_CARRYOVER_FIX | `python3 tools/build_part_change_carryover_fix.py` | `1.40C` |
-| each feature + BATCH_BUGFIXES (eight images) | `python3 tools/build_bugbuilds.py` | `BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_RPK17`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM` |
+| each feature + BATCH_BUGFIXES (seven images) | `python3 tools/build_bugbuilds.py` | `BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM` |
 
 Each build writes four files to `out/`, named after the feature:
 
@@ -58,12 +57,12 @@ OCTATRACK_OS1.40C_<FEATURE>.syx       flash over MIDI DIN
 OCTATRACK_<FEATURE>.bin               flash from the CF card (faster)
 ```
 
-`build_bugbuilds.py` writes its eight images to `out/Bugbuilds/`, as
+`build_bugbuilds.py` writes its seven images to `out/Bugbuilds/`, as
 `OCTATRACK_OS1.40C_<FEATURE>_BATCH_BUGFIXES.syx` and `.bin`, and leaves the images above
 alone. MIDI_PLAYS_FREE_FIX writes only its `mainos_` image; to flash it on its own, use the
 no-assembler patch below or wrap it as its builder's header shows.
 
-### The combined image: KYOTI V1.3
+### The combined image: KYOTI V1.4
 
 Every FINAL feature in one image:
 
@@ -71,19 +70,15 @@ Every FINAL feature in one image:
 python3 tools/build_kyoti.py
 ```
 
-It writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.3.syx` and `.bin` (OS VERSION `KYOTI V1.3`).
+It writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.4.syx` and `.bin` (OS VERSION `KYOTI V1.4`).
 
-> **Sample memory.**
-> - **This image costs one 6 KB arena page:** with REPITCH it no longer fits ROM, so
->   RELOAD_FROM_PROJECT runs from DRAM behind a boot loader. The MEMORY page still reads
->   85.5 MB, and the builder prints the exact cost.
-> - A ROM-only image without REPITCH (V1.1's layout) is a bisection build:
->   `KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py --without REPITCH_REPEAT98_KYOTI`.
-> - An octabam-built image (octabam's own remixer) reserves a fixed **10 MiB** whenever any
->   module runs from DRAM.
+> **Sample memory.** This image is ROM-only: the sample/recorder pool is untouched. An
+> octabam-built image (octabam's own remixer) reserves a fixed **10 MiB** whenever any module
+> runs from DRAM.
 
-KYOTI V1.0 was withdrawn on 2026-10-06; V1.1 replaced it, V1.2 (with REPITCH) replaced V1.1, and
-V1.3 replaces V1.2, whose SPRING reclaim overwrote PLATE REVERB's page (`reference/kb/caves.md` §0).
+KYOTI V1.0 was withdrawn on 2026-10-06; V1.1 replaced it, V1.2 (with REPITCH) replaced V1.1,
+V1.3 replaced V1.2, whose SPRING reclaim overwrote PLATE REVERB's page (`reference/kb/caves.md` §0),
+and V1.4 replaces V1.3 without REPITCH.
 
 Every build is a **guarded binary patch**: it asserts the stock bytes at each splice
 site, checks that its code caves are free and non-overlapping, takes every detour target

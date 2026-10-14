@@ -38,7 +38,7 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | `NOTES.md` | the full chronological RE log — every finding, every session, every dead end |
 | `reference/kb/*.md` | the distilled knowledge base — address map, file format, DSP, container, techniques, caves; ours merged with external RE |
 | `reference/MERGE.md` | the combined image (`tools/build_kyoti.py`): its cave layout across zones, the evidence for each zone, the resolved merge blockers |
-| `reference/handoffs/*.md` | design contracts and scopes: `DIRECTJUMP_V7_DESIGN.md` (DIRECT_JUMP_KYOTI), `REPITCH_*` (REPITCH_REPEAT98_KYOTI), `RELOAD3_SEQFAIL_HANDOFF.md` |
+| `reference/handoffs/*.md` | design contracts and scopes: `DIRECTJUMP_V7_DESIGN.md` (DIRECT_JUMP_KYOTI), `REPITCH_*` (REPITCH, being rewritten: `REPITCH_REWRITE_SPEC.md`), `RELOAD3_SEQFAIL_HANDOFF.md` |
 | `reference/RELOAD_REDESIGN.md` | RELOAD_FROM_PROJECT's chord design and the measured keymap facts |
 | `reference/OT_SEQUENCER_BUGS.md` | every stock sequencer bug we have determined, and the measured NOT-bugs |
 | `reference/AR_*.md` | the Analog Rytm's sequencer and pattern-commit arithmetic (DIRECT_JUMP_KYOTI research) |
@@ -103,12 +103,12 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | Ghidra headless | JDK 21 + Ghidra 12.1.2 paths in the memory file; project `ghidra_project octamax`, `-process section_3_MAIN_OS.bin -noanalysis`; helpers in `tools/ghidra/`, dumps land in `out/ghidra/` |
 | ColdFire emulation | `tools/emu_rtos.py` (Unicorn on real image bytes, via octabam's emulator in `refs/octabam/`) |
 | DIRECT_JUMP_KYOTI timing gate | `tools/diag_reflock.py` + `tools/cmp_reflock.py` (equality with a never-switched reference run) |
-| REPITCH_REPEAT98_KYOTI DSP gate | `tools/repitch_dsp_*` (bit-exact against the reference engine) |
+| REPITCH DSP kernel gate (kept for the rewrite) | `tools/repitch_dsp_*` (bit-exact against the reference engine) |
 | DSP assembly | `tools/dsp_xasm.py` over `vendor/dsp56300`'s `dsp_asm` |
 | a final build | `tools/build_<feature>.py` → `.syx` (MIDI) + `.bin` (CF card); see `BUILD_KYOTI.md` |
-| the combined image | `tools/build_kyoti.py` — **KYOTI V1.3, FINAL 2026-10-10** (V1.0 withdrawn; see §6) |
+| the combined image | `tools/build_kyoti.py` — **KYOTI V1.4** (without REPITCH; V1.0 withdrawn; see §6) |
 | octabam's remixer (`make remix`) | `sh tools/octabam_remixer.sh` — its own clone at `~/Documents/octabam`, fast-forwarded to octabam's `main` on every launch; `refs/octabam` stays the pinned research harness |
-| each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final, eight images) |
+| each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final, seven images) |
 | DIRECT JUMP V6.4, the OT↔AR parity build | `tools/build_direct_jump_v6_4.py` — WIP **by design**: kept buildable at the user's request (hardware-confirmed image `4a6c1b5e…`), never to be promoted |
 | external RE research | `python3 tools/refs/sync.py` (clone or refresh the tracked repos into `refs/`) · `python3 tools/refs/whatsnew.py` |
 
@@ -139,7 +139,6 @@ builder's FINAL entry and the old builder is deleted. There is no superseded tie
 | DIRECT_JUMP_KYOTI | `build_direct_jump_kyoti.py` | `octabam-modules/direct-jump-kyoti` |
 | SIDECHAIN_COMPRESSOR | `build_sidechain_compressor.py` | `octabam-modules/sidechain-compressor` (octabam #565; on hardware 2026-10-04) |
 | RELOAD_FROM_PROJECT | `build_reload_from_project.py` | `octabam-modules/reload-from-project` |
-| REPITCH_REPEAT98_KYOTI | `build_repitch_repeat98_kyoti.py` | `octabam-modules/repitch-repeat98-kyoti` (octabam #561; on hardware 2026-10-05) |
 | QUANTIZE_LIVE_REC_TOGGLE | `build_quantize_live_rec_toggle.py` | `octabam-modules/quantize-live-rec-toggle` |
 | ERASE_EMPTY_TRIGLESS_LOCKS | `build_erase_empty_trigless_locks.py` | `octabam-modules/erase-empty-trigless-locks` |
 | REC_TRIG_MUTE | `build_rec_trig_mute.py` | `octabam-modules/rec-trig-mute` |
@@ -153,14 +152,16 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
-- **KYOTI V1.3** (`tools/build_kyoti.py`) — **FINAL 2026-10-10**, syx `9f6d2374…`, mainos
+- **KYOTI V1.4** (`tools/build_kyoti.py`, 2026-10-13) — V1.3 without REPITCH_REPEAT98_KYOTI,
+  ROM-only (RELOAD back in the proven cave, EMPTY_PATTERN_LED_FIX in SAFE_CAVE). Built
+  (mainos `72710a3c…`, syx `568b2efb…`), not flashed; WIP until promoted.
+- **KYOTI V1.3** — FINAL 2026-10-10 until 2026-10-13, syx `9f6d2374…`, mainos
   `d14555ec…`; flashed by the user: everything works, PLATE REVERB fixed. It is V1.2 with
   SPRING's reclaim bounded by its real record (P..P+0x192); V1.2 (syx `cd5a723b…`, FINAL
   2026-10-08) overwrote PLATE's page tail and is superseded. V1.2 = V1.1 + REPITCH rev 17 (RELOAD in DRAM,
   one 6 KB page) + the octabam #561 review fixes (DIRECT JUMP's scale guard, RELOAD's
   mvz.w). Its pin breaks whenever a feature it contains is re-promoted: rebuild, re-test,
-  re-pin with that feature's Bugbuild. `--without REPITCH_REPEAT98_KYOTI` gives V1.1's
-  ROM-only layout (WIP, bisection).
+  re-pin with that feature's Bugbuild.
 - **DIRECT_JUMP_KYOTI / RELOAD_FROM_PROJECT standalones and their Bugbuilds** — re-pinned
   2026-10-08 with the review fixes; same sources as V1.2/V1.3, not flashed on their own. The
   DIRECT JUMP standalone now folds in MIDI_PLAYS_FREE_FIX.
@@ -179,7 +180,12 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   stock firmware (the reset is emulator-verified). octabam: draft PR sambanks/octabam#648
   (pin 45ab46c; draft until an octabam-built image is flashed).
   `NOTES.md` Session 126.
-- **REPITCH_REPEAT98_KYOTI** — **rev 17, FINAL 2026-10-08** (`140C_RPK17`, `BUG_RPK17`): RPSP =
+- **REPITCH_REPEAT98_KYOTI** — **REMOVED 2026-10-13**: its standalone builder, Bugbuild and
+  KYOTI slot are gone, and octabam is asked to drop its module. Jannik asked for RPS9/RPSP to be
+  separated altogether from his Repitch, so the ColdFire core (the part from his module) is
+  being rewritten clean-room: `reference/handoffs/REPITCH_REWRITE_SPEC.md` (branch
+  `repitch-rewrite`). The module folder, DSP kernel and `tools/repitch_dsp_*` stay as the
+  rewrite's sources. Last state (rev 17, FINAL 2026-10-08, `140C_RPK17`, `BUG_RPK17`): RPSP =
   the SP's mid through raw outputs 7/8, the side clean; 146 modelled cycles per RPSP voice (rev 16:
   ≈ 235), RPS9 57. On hardware (octabam images OBKYOTI15/16, same kernel with a filter): four RPSP
   voices + DARK REV ×4 pass with three DJ EQs on T5–T8 and four on T1–T4; a fourth on T5–T8
@@ -187,7 +193,7 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   (`RPK_OUT=ch6|ch12`, NOTES 2026-10-08). Future: a ColdFire load guard. Not specifically
   tested: RTRG retrigs.
 - **octabam port** — the six modules, REC_TRIG_MUTE and SIDECHAIN_COMPRESSOR (+ MUTE_MODES'
-  SC_KEY variant, #565) are merged in octabam. REPITCH_REPEAT98_KYOTI: PR sambanks/octabam#561,
+  SC_KEY variant, #565) are merged in octabam. REPITCH_REPEAT98_KYOTI (removed here 2026-10-13; octabam asked to drop it): PR sambanks/octabam#561,
   both halves, hardware-confirmed in octabam form 2026-10-05 (OBKYOTI11, only SPRING REV given
   up). `NOTES.md` Session 120 continued (4)-(8).
 - **KYOTI modules × Octakit** — ⚠️ octabam removed Octakit on 2026-10-06 (replaced by its own KITS), so the

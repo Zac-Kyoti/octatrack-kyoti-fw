@@ -44,7 +44,6 @@ FINAL = {
     "build_midi_plays_free_fix.py":        "672158c18630703cc1aadc635d45aeb68549a3237830d5c4a0aeb2d113afad35",
     "build_empty_pattern_led_fix.py":      "0e50306d8c242cf0365f2df3e09998be5db3b92a4cc95d5d17e590d9cc36b266",
     "build_rec_trig_mute.py":              "34f06e293a6f97f0ade3db740273c7f41e06717f3971798c85f1cb362911c804",
-    "build_repitch_repeat98_kyoti.py":     "90b4a1c11b40b93901b0a0c3f9500d22193facf82c13aeac447eb97f9a45acfa",
     "build_bugbuilds.py": {
         "mainos_mute_modes_batch_bugfixes.bin":              "2c5600dc4dd30812a54ddfec8904f7762593e7c6233638fa2ae40319602ead47",
         "mainos_quantize_live_rec_toggle_batch_bugfixes.bin":"f425ae2270e6f612a7abd8338962d115786934a8e76348c646fd45de9d502130",
@@ -53,10 +52,6 @@ FINAL = {
         "mainos_reload_from_project_batch_bugfixes.bin":     "a9b162479518c828f5e5a1d4a6e30e57c9ebc48d199dfabcfe66fe48426e3467",
         "mainos_direct_jump_kyoti_batch_bugfixes.bin":       "2cc151e7f9fa7568eca7d1e50d06ed179ff36ffa28f85fe59ce27295917ca21a",
         "mainos_rec_trig_mute_batch_bugfixes.bin":           "fd65e293657e3caa895064255c7dad76882c21640c6eebdc1cf812074744c658",
-        "mainos_repitch_repeat98_kyoti_batch_bugfixes.bin":  "07aaa68bf0e0fd5d67bd0a146959cf4647c5dd8cfbf3e4b1f45cce14f348b4f4",
-    },
-    "build_kyoti.py": {
-        "mainos_kyoti_v1.3.bin":                             "d14555ecb5e789dd3335a0d6fad12c1d27a0ccec1f1c69ff83acf5cad16508aa",
     },
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
 }

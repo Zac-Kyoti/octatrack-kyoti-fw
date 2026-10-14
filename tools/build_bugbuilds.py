@@ -4,7 +4,7 @@
 """
 Bugbuilds -- each finished FEATURE build, with all three BUG FIXES folded in.
 
-Eight composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
+Seven composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
 not written alongside, the standalone per-feature images in out/):
 
     MUTE_MODES        + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
@@ -13,7 +13,6 @@ not written alongside, the standalone per-feature images in out/):
     ERASE_EMPTY_TRIGLESS_LOCKS           + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     RELOAD_FROM_PROJECT            + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     DIRECT_JUMP_KYOTI      + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
-    REPITCH_REPEAT98_KYOTI      + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     REC_TRIG_MUTE          + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
 
 Method -- compose onto the finished feature image, do not re-implement it.
@@ -23,7 +22,7 @@ is never re-derived: its DSP payloads, COMPRESSOR descriptor and FX2 chooser edi
 through untouched, and its cave stays at its own address so the descriptor's formatter
 pointers stay valid.
 
-MIDI_PLAYS_FREE_FIX (patch_trigscale) is added to ALL EIGHT images: no feature builder carries a copy
+MIDI_PLAYS_FREE_FIX (patch_trigscale) is added to ALL SEVEN images: no feature builder carries a copy
 any more.  Each of them used to (RELOAD_FROM_PROJECT's sat at 0x400d7bfc, the rest at 0x400d7b00), and
 every copy wrote the same site 0x4009b6f2 -- which octabam's remix ledger refuses, so no two
 of those features could ever be selected into one remix.  The fix is its own contribution
@@ -37,8 +36,7 @@ RELOAD_FROM_PROJECT, whose own cave starts at 0x400d6500, so the allocator moves
     patch_partreapply   0x400d6500   402 B   (RELOAD_FROM_PROJECT: relocated above its own cave)
     patch_pattern_led   0x400d6694   158 B   (RELOAD_FROM_PROJECT: likewise)
     (never below 0x400d6500 -- 0x400d64ca.. is a runtime record table, kb/caves.md 2b)
-    patch_trigscale     0x400d7b00    62 B   (added to all eight; REPITCH_REPEAT98_KYOTI's cave
-                                              ends at 0x400d7afc, right below it)
+    patch_trigscale     0x400d7b00    62 B   (added to all seven)
 
 Verification (every image, every run):
   * the feature's builder is promoted (on kyoti_status.FINAL), its rebuilt image still matches, and it is re-run
@@ -110,8 +108,6 @@ FEATURES = {
     "RELOAD_FROM_PROJECT": ("build_reload_from_project.py", "out/mainos_reload_from_project.bin", "BUG_RL3",
                 "[PTN]+[TRACK n] reload track n's saved sequence; [BANK]+[TRACK n] also re-applies the Part."),
     "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "out/mainos_direct_jump_kyoti.bin", "BUG_DJV7", "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.0.1, clock-locked jumps)."),
-    "REPITCH_REPEAT98_KYOTI": ("build_repitch_repeat98_kyoti.py", "out/mainos_repitch_repeat98_kyoti.bin", "BUG_RPK17", "SETUP TSTR RPCH/RPS9/RPSP: tempo-locked varispeed + QUAN ratios "
-                             "(rev 17).  Removes SPRING REVERB."),
     "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "out/mainos_rec_trig_mute.bin", "BUG_RTM",
                       "[TRACK]+[NO]/[YES] mute/unmute recorder trigs; MIDI CC 80; '..' edge icon."),
 }

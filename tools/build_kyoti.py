@@ -2,13 +2,20 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
-KYOTI V1.3 -- every FINAL feature in one image (V1.1, FINAL 2026-10-08, + REPITCH).
+KYOTI V1.4 -- every FINAL feature in one image.
 
     MUTE MODE (OT / OTFX / OTFX-T / DT-T)      QUANTIZE LIVE REC toggle
     SIDE-CHAIN COMPRESSOR (cross-core)         TRIGLESS-LOCK AUTO-REMOVE
     RELOAD FROM PROJECT (RELOAD_FROM_PROJECT chords)       DIRECT JUMP V7.0.1
-    REC TRIG MUTE ([TRK]+[NO]/[YES], CC 80)    REPITCH (RPCH / RPS9 / RPSP, QUAN; rev 17)
+    REC TRIG MUTE ([TRK]+[NO]/[YES], CC 80)
     the bug fixes: MIDI_PLAYS_FREE_FIX, PATTERN LED, PART_CHANGE_CARRYOVER_FIX
+
+V1.4 vs V1.3: REPITCH_REPEAT98_KYOTI is removed (2026-10-13: it is being rewritten clean-room,
+without the code it took from Jannik Aßfalg's octabam Repitch; reference/handoffs/
+REPITCH_REWRITE_SPEC.md). The image is ROM-only again and SPRING REVERB is removed by SIDE-CHAIN
+alone. RELOAD_FROM_PROJECT returns from DRAM to the proven cave; EMPTY_PATTERN_LED_FIX moves to
+SAFE_CAVE to make room (V1.2's RELOAD and DIRECT JUMP fixes grew both, so V1.1's ROM plan no longer
+fits as it was).
 
 V1.3 vs V1.2: PLATE REVERB works again. V1.2 reclaimed SPRING REVERB's descriptor 0x38 bytes
 early (from its entry start E, not from P = E+0x38), so REPITCH's widget clone overwrote PLATE's
@@ -26,11 +33,10 @@ NONE and on T8's MASTER PLAYBACK/LFO page (reference/kb/caves.md §0). V1.1 drop
 and refuses any placement inside the table except SPRING's own entry, which the image makes
 unreachable.
 
-RAM. With REPITCH the image no longer fits ROM: RELOAD_FROM_PROJECT moves to DRAM, carried
-by octabam's platform loader (vendored in tools/dram/, MIT). The reserve is sized to the
-payload in whole 6 KB arena pages, not octabam's fixed 10 MiB: one page (6 KB) of the 85.5 MB
-sample/recorder pool, and the MEMORY page still reads 85.5 MB. The build prints the exact
-cost. A --without REPITCH_REPEAT98_KYOTI image is ROM-only (V1.1's plan).
+RAM. A plan may put pieces in "DRAM": linked at an arena reserve and carried by octabam's
+platform loader (vendored in tools/dram/, MIT), sized in whole 6 KB arena pages of the 85.5 MB
+sample/recorder pool. V1.2-V1.3 used it for RELOAD_FROM_PROJECT; V1.4's plan is ROM-only, so
+no loader is appended.
 
 Boot splash and SYSTEM STATUS -> OS VERSION read VERSTR below.
 
@@ -41,7 +47,7 @@ writes lands in out/), with its caves moved to the addresses this build allocate
 standalone self).  Its image is diffed against the base it was built from, and
 the composite is that base plus the union of every delta.  Nothing about a
 feature is re-derived here: SIDE-CHAIN's DSP payloads and descriptors, MUTE
-MODE's menu surgery and REPITCH's DSP engine all come through untouched.
+MODE's menu surgery all come through untouched.
 
 Why the caves move, and where to (reference/MERGE.md, reference/kb/caves.md):
 the finished caves need ~9.6 KB and the classic cave holds 5.9 KB.  Zones, by the
@@ -56,9 +62,8 @@ evidence behind them:
            V1.1 keeps only the two OUTSIDE the descriptor table: SAFE_CAVE and
            ENC_UNLOCK_CAVE (both also on octabam's free-ROM list).
   reclaim  stock data this very image makes unreachable:
-           SPRING REVERB's ColdFire descriptor -- both SIDE-CHAIN and REPITCH
-             remove SPRING, and the only references to it are the two id2e
-             entries they both redirect to NONE;
+           SPRING REVERB's ColdFire descriptor -- SIDE-CHAIN removes SPRING, and
+             the only references to it are the two id2e entries it redirects to NONE;
            the three stock PERSONALIZE pointer arrays -- MUTE MODE relocates
              them (17 entries) and repoints all five references.
            The builders see these zeroed (a PREPARED base); the composite is
@@ -69,7 +74,7 @@ reach (its builder proves that on the image it is given, and the composite is re
 below).  Its one runtime-written byte is the CAVE piece "rtm_mask".
 
 Code on the engine/frame/ISR paths stays in the proven zone and SAFE_CAVE;
-the thinner zones carry key-handler / page-draw code and REPITCH's glyph data.
+the thinner zones carry key-handler / page-draw code.
 
 Merge blockers (reference/MERGE.md), resolved here:
   B1  MUTE MODE widens the ANDY restore over 0x800000d8.  DIRECT JUMP is built
@@ -82,8 +87,8 @@ Merge blockers (reference/MERGE.md), resolved here:
 
 Verification, every run: every builder reports success in its sandbox; every
 piece lies inside its zone and no two pieces overlap; feature deltas are
-pairwise DISJOINT except SPRING's removal, which SIDE-CHAIN and REPITCH write
-with identical bytes; every byte that differs from stock has an owner; each
+pairwise DISJOINT (SHARED_OK lists any pair allowed to write identical bytes; none
+now); every byte that differs from stock has an owner; each
 feature's delta, outside its caves, equals its standalone delta (a relocation
 may move caves and the pointers into them, nothing else); no branch lands
 inside any displaced span; B1, B2 and the reclaim invariants.
@@ -100,13 +105,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
 import dram                                    # noqa: E402  (tools/dram/dram.py)
 
 gate(__file__, note="""
-KYOTI V1.3: every FINAL feature in one image, nothing placed in the parameter-page
-descriptor table. V1.0 (withdrawn 2026-10-06) crashed because it did. REPITCH moves
-RELOAD to DRAM (one 6 KB arena page); the build prints the RAM cost.
+KYOTI V1.4: every FINAL feature in one image, nothing placed in the parameter-page
+descriptor table. V1.0 (withdrawn 2026-10-06) crashed because it did. ROM-only.
 """)
 
-VERSTR = "KYOTI V1.3"
-TAG = "KYOTI_V1.3"
+VERSTR = "KYOTI V1.4"
+TAG = "KYOTI_V1.4"
 BASE = 0x40000400
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
@@ -125,7 +129,7 @@ ZONES = {
     "SAFE":  (0x400d24d0, 0x400d2cdc, "midisc", "SAFE_CAVE; stock references 0x400d2cdc"),
     "ENC":   (0x400c45b0, 0x400c4700, "midisc", "ENC_UNLOCK_CAVE"),
     "SPRING": (0x400d5760, 0x400d58f0, "reclaim",
-               "SPRING REVERB's CF descriptor record P 0x400d575e..; dead once SIDE-CHAIN/REPITCH remove SPRING"),
+               "SPRING REVERB's CF descriptor record P 0x400d575e..; dead once SIDE-CHAIN removes SPRING"),
     "PERS1": (0x400b2a34, 0x400b2ab4, "reclaim",
               "stock PERSONALIZE labels+getters; dead once MUTE MODE relocates them"),
     "PERS2": (0x400b2ac0, 0x400b2b00, "reclaim",
@@ -145,37 +149,20 @@ RECLAIM_WHOLE = {"SPRING": (0x400d575e, 0x400d58f0), "PERS1": (0x400b2a34, 0x400
                  "PERS2": (0x400b2ac0, 0x400b2b00)}
 
 # --- the placement plan: zone -> pieces, packed in this order --------------------------
-#   engine / ISR / tick-path code: CAVE and SAFE only.
-# Two plans. The default (FINAL features) is ROM-only. With REPITCH (WIP, --with) its ~3 KB
-# do not fit beside everything else, so RELOAD_FROM_PROJECT goes to DRAM ("DRAM" is not a ROM zone:
-# pieces there are linked at the arena reserve and carried by tools/dram/'s loader).
-PLAN_ROM = {
+#   engine / ISR / tick-path code: CAVE and SAFE only.  ROM-only: a "DRAM" zone (pieces
+#   linked at the arena reserve, carried by tools/dram/'s loader) is supported, unused since V1.4.
+PLAN = {
     "CAVE":  ["patch_reload3", "patch_directjump_v7", "patch_softmute", "patch_partreapply",
-              "patch_mutemode", "patch_pattern_led",
+              "patch_mutemode",
               "rtm_mask"],                         # REC_TRIG_MUTE's state byte, written at runtime
     "SAFE":  ["personalize_getters", "personalize_setters", "personalize_labels",
               "patch_sidechain",                   # COMPRESSOR page formatters
               "patch_trigscale",                   # MIDI_PLAYS_FREE_FIX
-              "patch_qlrec"],                      # [PLAY]/[REC] key handlers
+              "patch_qlrec",                       # [PLAY]/[REC] key handlers
+              "patch_pattern_led"],                # EMPTY_PATTERN_LED_FIX (CAVE is full since V1.2)
     "ENC":   ["patch_triglock"],                   # LIVE-erase key path only
     "SPRING": [], "PERS1": [], "PERS2": [],
 }
-PLAN_REPITCH = {
-    "DRAM":  ["patch_reload3"],                    # key-handler + sys-task code; DRAM-proven in octabam
-    "CAVE":  ["patch_directjump_v7", "patch_softmute", "patch_partreapply",
-              "patch_mutemode", "patch_pattern_led", "rtm_mask",
-              "patch_qlrec", "patch_sidechain", "patch_trigscale", "personalize_labels",
-              "rpk_reload", "rpk_reload_body",
-              "rpk_glyph_data0", "rpk_glyph_data1", "rpk_glyph_data2",
-              "rpk_glyph_data4", "rpk_glyph_data5", "rpk_glyph_data6",
-              "personalize_setters"],            # (rev 17's rpk_logic grew: SAFE ran 28 B short)
-    "SAFE":  ["rpk_logic", "personalize_getters"],
-    "SPRING": ["rpk_widget7", "rpk_glyph_rec2"],
-    "ENC":   ["patch_triglock", "rpk_glyph_rec3", "rpk_glyph_rec4"],
-    "PERS1": ["rpk_glyph_tab", "rpk_glyph_data3", "rpk_glyph_rec0"],
-    "PERS2": ["rpk_glyph_rec1", "rpk_glyph_rec5", "rpk_glyph_rec6"],
-}
-PLAN = PLAN_REPITCH            # since V1.2: REPITCH is FINAL; --without it falls back to PLAN_ROM
 
 # --- the features: name -> (builder, image, base, placement keys, standalone blob files) --
 #   base "stock": built on true stock (MUTE MODE reads the stock PERSONALIZE arrays it
@@ -203,13 +190,6 @@ FEATURES = {
                       {"patch_directjump_v7": "patch_directjump_v7.bin"}),
     "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "mainos_rec_trig_mute.bin", "prep",
                       {"rtm_mask": 4}),
-    "REPITCH_REPEAT98_KYOTI": ("build_repitch_repeat98_kyoti.py", "mainos_repitch_repeat98_kyoti.bin", "prep",
-                      dict({"rpk_logic": "patch_repitch_kyoti.bin", "rpk_widget7": 0x174,
-                            "rpk_glyph_tab": 28,
-                            "rpk_reload": "patch_repitch_reload_rl.bin",
-                            "rpk_reload_body": "patch_repitch_reload_rb.bin"},
-                           **{f"rpk_glyph_rec{k}": 20 for k in range(7)},
-                           **{f"rpk_glyph_data{k}": 68 for k in range(7)})),
 }
 # Features that are WIP (not promoted, or demoted): only with --with NAME.
 WIP_FEATURES = {}
@@ -233,7 +213,7 @@ def flags_for(feat):
         f["mutemode_sc_key"] = True
     return f
 # bytes two features may both write, with identical values (SPRING REVERB's removal)
-SHARED_OK = {frozenset(("SIDECHAIN_COMPRESSOR", "REPITCH_REPEAT98_KYOTI"))}
+SHARED_OK = set()
 
 PROBLEMS = []
 
@@ -379,7 +359,7 @@ def wip_variant(flag):
     """--with / --without images are never the promoted one: refuse them up front without the
     opt-in, instead of after a full build at seal()."""
     if os.environ.get("KYOTI_ALLOW_WIP") != "1":
-        sys.exit(f"\n  Refusing to build: {flag} makes a WIP image, not KYOTI V1.3.\n"
+        sys.exit(f"\n  Refusing to build: {flag} makes a WIP image, not KYOTI V1.4.\n"
                  f"  If you meant it, set KYOTI_ALLOW_WIP=1:\n\n"
                  f"      KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py {flag} ...\n")
 
@@ -387,8 +367,8 @@ def wip_variant(flag):
 def apply_with(argv):
     """--with NAME[,NAME]: add WIP features (not promoted). The image is WIP too: its own OS
     VERSION and directory (out/KYOTI_WIP/<tag>/), so it can never be taken for the FINAL one.
-    (REPITCH, the one that changed the plan, is FINAL since V1.2.)"""
-    global VERSTR, TAG, OUTDIR, SANDBOX, PLAN
+"""
+    global VERSTR, TAG, OUTDIR, SANDBOX
     if "--with" not in argv:
         return
     wip_variant("--with")
@@ -398,21 +378,19 @@ def apply_with(argv):
         sys.exit(f"--with: unknown or non-WIP feature(s) {bad}; choose from {sorted(WIP_FEATURES)}")
     for a in add:
         FEATURES[a] = WIP_FEATURES[a]
-    if "REPITCH_REPEAT98_KYOTI" in add:
-        PLAN = PLAN_REPITCH
-    VERSTR = ("KV13+" + "".join(a[:3] for a in add))[:10]
-    TAG = "KYOTI_V1.3_WITH_" + "_".join(add)
+    VERSTR = ("KV14+" + "".join(a[:3] for a in add))[:10]
+    TAG = "KYOTI_V1.4_WITH_" + "_".join(add)
     OUTDIR = ROOT / "out/KYOTI_WIP" / TAG
     SANDBOX = OUTDIR / "_sandbox"
     print(f"  WIP IMAGE: with {', '.join(add)}  ->  OS VERSION {VERSTR!r}, {OUTDIR.relative_to(ROOT)}\n")
 
 
 def apply_without(argv):
-    """--without NAME[,NAME]: a BISECTION image -- KYOTI V1.3 minus those features, built
-    by the same method.  It gets its own OS VERSION ("KV13-NO-" + a short code per removed
-    feature, e.g. KV13-NO-SC) and its own directory out/KYOTI_BISECT/<tag>/, so it can never be
+    """--without NAME[,NAME]: a BISECTION image -- KYOTI V1.4 minus those features, built
+    by the same method.  It gets its own OS VERSION ("KV14-NO-" + a short code per removed
+    feature, e.g. KV14-NO-SC) and its own directory out/KYOTI_BISECT/<tag>/, so it can never be
     mistaken for, or overwrite, the real image."""
-    global VERSTR, TAG, OUTDIR, SANDBOX, PLAN
+    global VERSTR, TAG, OUTDIR, SANDBOX
     if "--without" not in argv:
         return
     wip_variant("--without")
@@ -422,18 +400,16 @@ def apply_without(argv):
         sys.exit(f"--without: unknown feature(s) {bad}; choose from {sorted(FEATURES)}")
     for d in drop:
         del FEATURES[d]
-    if "REPITCH_REPEAT98_KYOTI" in drop:
-        PLAN = PLAN_ROM                      # V1.1's ROM-only plan
-    if not ({"SIDECHAIN_COMPRESSOR", "REPITCH_REPEAT98_KYOTI"} & set(FEATURES)):
+    if "SIDECHAIN_COMPRESSOR" not in FEATURES:
         del RECLAIM_WHOLE["SPRING"]          # nothing removes SPRING any more: not dead
     if "MUTE_MODES" not in FEATURES:
         del RECLAIM_WHOLE["PERS1"], RECLAIM_WHOLE["PERS2"]
     short = {"MUTE_MODES": "MM", "QUANTIZE_LIVE_REC_TOGGLE": "QL", "SIDECHAIN_COMPRESSOR": "SC", "ERASE_EMPTY_TRIGLESS_LOCKS": "TL",
-             "RELOAD_FROM_PROJECT": "RL", "DIRECT_JUMP_KYOTI": "DJ", "REPITCH_REPEAT98_KYOTI": "RPK",
+             "RELOAD_FROM_PROJECT": "RL", "DIRECT_JUMP_KYOTI": "DJ",
              "MIDI_PLAYS_FREE_FIX": "PF", "EMPTY_PATTERN_LED_FIX": "PL", "PART_CHANGE_CARRYOVER_FIX": "PR",
              "REC_TRIG_MUTE": "RTM"}
-    VERSTR = ("KV13-NO-" + "".join(short[d] for d in drop))[:10]
-    TAG = "KYOTI_V1.3_WITHOUT_" + "_".join(drop)
+    VERSTR = ("KV14-NO-" + "".join(short[d] for d in drop))[:10]
+    TAG = "KYOTI_V1.4_WITHOUT_" + "_".join(drop)
     OUTDIR = ROOT / "out/KYOTI_BISECT" / TAG
     SANDBOX = OUTDIR / "_sandbox"
     print(f"  BISECTION IMAGE: without {', '.join(drop)}  ->  OS VERSION {VERSTR!r}, "
@@ -533,11 +509,7 @@ def main():
     base_of = {"stock": stock, "prep": prep}
     deltas, syms, dram_blob = {}, {}, {}
     for feat, (builder, _img, base, keys) in FEATURES.items():
-        p = {k: place[k] for k in keys if not k.startswith("rpk_glyph_rec")
-             and not k.startswith("rpk_glyph_data")}
-        if feat == "REPITCH_REPEAT98_KYOTI":
-            p["rpk_glyph_recs"] = [place[f"rpk_glyph_rec{k}"] for k in range(7)]
-            p["rpk_glyph_data"] = [place[f"rpk_glyph_data{k}"] for k in range(7)]
+        p = {k: place[k] for k in keys}
         p.update(flags_for(feat))
         for k in keys:
             if zone_of.get(k) == "DRAM":
@@ -685,7 +657,7 @@ def main():
     ours = [(place[k], place[k] + size[k]) for k in place]
     for z, (lo, hi) in RECLAIM_WHOLE.items():
         # a reference is ours if we wrote it: inside a placed piece, or a longword
-        # some feature changed (REPITCH's descriptor pokes aim at its widget clone)
+        # some feature changed (a descriptor poke aimed at a piece we placed)
         foreign = [(a, v) for a, v in refs_into(comp, lo, hi)
                    if not any(p <= a < e for p, e in ours)
                    and comp[o(a):o(a) + 4] == stock[o(a):o(a) + 4]]
@@ -780,7 +752,7 @@ def main():
     # --- write + wrap -----------------------------------------------------------------------
     mainos = OUTDIR / f"mainos_{TAG.lower()}.bin"
     mainos.write_bytes(bytes(comp))
-    seal(__file__, mainos)       # FINAL pins mainos_kyoti_v1.3.bin; --with/--without images are WIP
+    seal(__file__, mainos)       # FINAL pins mainos_kyoti_v1.4.bin; --with/--without images are WIP
     cmap = {"verstr": VERSTR, "zones": {z: [hex(lo), hex(hi), cls] for z, (lo, hi, cls, _) in ZONES.items()},
             "pieces": {k: {"zone": zone_of[k], "at": hex(place[k]), "size": size[k]} for k in place},
             "dram": dram_report,
