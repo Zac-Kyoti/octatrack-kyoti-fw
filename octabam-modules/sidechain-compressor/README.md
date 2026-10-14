@@ -36,6 +36,10 @@ leaves its dispatch entry as it is, and the module's DSP code runs only from thr
 | `scdet` | `P:0x01ab1` | `P:0x01871` | COMPRESSOR proc+0: the detector reads the KEY track through KGN and KFLT; the result is stashed for MON |
 | `moncommit` | `P:0x0050e` | `P:0x00303` | dispatcher, per-track commit: with MON on, the stashed key replaces the track's output |
 
+`moncommit` replays the displaced `move x:>$206,r0` before entering
+`scmonbody`. A composed dispatcher hook may call `scmonbody` after replaying
+that instruction itself. The body preserves `r0` for the stock output commit.
+
 The values that differ per core (own and foreign core base, the window addresses, the
 branch sense) are `DspSection.subst`. The 48 table words are one `ptable`. The source
 reads it at the KEY GAIN site through its single base literal. At the KEY FLT site it

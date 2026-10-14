@@ -275,7 +275,9 @@ def sc_assemble(tok, org):
     Two passes so the two `move #>table,r1` widths don't shift.
     `tok` is one payload's DSP dict entry (corebase/fcorebase/sbase/fsbase/
     gcnt/gseed/foreign_br -- the cross-core build tokens).
-    Returns (words, sctap, scdet, moncommit)."""
+    Returns (words, sctap, scdet, moncommit). The `scmonbody` symbol is
+    checked against the parsed `moncommit` entry so hook composition cannot
+    silently drift when the wrapper changes."""
     def one(gt, ft):
         src = (SC_SRC.read_text()
                .replace("@COREBASE@", tok["corebase"]).replace("@FCOREBASE@", tok["fcorebase"])
@@ -288,16 +290,20 @@ def sc_assemble(tok, org):
                .replace("@KGNA@", f"${sc_tables.kgn_smooth_a():x}"))
         a = ROOT / "out/patch_sc_dsp3.asm"; a.write_text(src)
         o = ROOT / "out/patch_sc_dsp3.bin"
-        r = subprocess.run([str(DSP_ASM), "-in", str(a), "-org", f"{org:x}", "-out", str(o)],
+        sym = ROOT / "out/patch_sc_dsp3.sym"
+        r = subprocess.run([str(DSP_ASM), "-in", str(a), "-org", f"{org:x}", "-out", str(o),
+                            "-sym", str(sym)],
                            capture_output=True, text=True, cwd=ROOT)
         if r.returncode:
             sys.exit(f"dsp_asm failed:\n{r.stdout}\n{r.stderr}")
         raw = o.read_bytes()
-        return [int.from_bytes(raw[i:i + 3], "little") for i in range(0, len(raw), 3)]
+        syms = {name: int(addr, 16) for name, addr in
+                (line.split() for line in sym.read_text().splitlines() if line.strip())}
+        return ([int.from_bytes(raw[i:i + 3], "little") for i in range(0, len(raw), 3)], syms)
 
-    code = one(org, org)
+    code, _ = one(org, org)
     n = len(code)
-    code = one(org + n, org + n + sc_tables.GAIN_N)
+    code, syms = one(org + n, org + n + sc_tables.GAIN_N)
     assert len(code) == n, "cave size shifted between the two sizing passes"
     words = code + sc_tables.gain_table() + sc_tables.flt_table()
     if len(words) > DONOR_WORDS:
@@ -324,7 +330,11 @@ def sc_assemble(tok, org):
     # because emu_sc_dsp3_moncommit.py failed after a full rebuild, not by
     # this same round-trip check above, which only rejects invalid opcodes).
     rts = dsp_asm_util.find_rts(d, org)
-    return words, org, org + rts[0] + 1, org + rts[3] + 1
+    moncommit = org + rts[3] + 1
+    if syms.get("scmonbody") != moncommit + 2:
+        sys.exit(f"scmonbody is at {syms.get('scmonbody')!r}, expected the first word after "
+                 f"moncommit's two-word displaced load at 0x{moncommit + 2:x}")
+    return words, org, org + rts[0] + 1, moncommit
 
 
 def dsp_module_fileoff(img, va, ln, p_addr):
