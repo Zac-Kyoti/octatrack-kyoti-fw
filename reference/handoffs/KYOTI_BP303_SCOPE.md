@@ -1,8 +1,8 @@
 # KYOTI + BLACKPYRAMIDS_303 — scope (2026-10-14)
 
 Can BLACKPYRAMIDS_303 join KYOTI V1.4? Yes, but not as it stands: it collides with
-SIDECHAIN_COMPRESSOR in DSP memory, and the fix needs a decision from the author (§3). Nothing
-else blocks it.
+SIDECHAIN_COMPRESSOR in DSP memory. The author chose (2026-10-14) to move SIDE-CHAIN's DSP code and
+key bus out of the way and keep every effect (§3). Nothing else blocks it.
 
 ## 1. What was checked
 
@@ -34,25 +34,61 @@ else blocks it.
 - **Y:** the key bus lies inside the voice's Y. Stock Y is free from `$795`, and the voice takes
   almost all of it: only `$f03–$f3f` (61 words) is left, against the key bus's 528.
 
-## 3. Options (the author's call)
+## 3. The plan (the author's choice, 2026-10-14): SIDE-CHAIN's DSP out of SPRING, every effect kept
 
-1. **Give up a second effect for SIDE-CHAIN's code (lowest risk).** Only DARK REV (1,067),
-   FILTER (727), PLATE (594) and LO-FI (537) are big enough on their own; LO-FI or PLATE are
-   the realistic donors. SIDE-CHAIN takes the donor's P run the way it takes SPRING's today
-   (null dispatch, a NONE page for old projects). Its key bus moves to external Y, into the
-   free tail of the second FX2 slot (~605 words from `slot+$3da3`, never written by stock;
-   NOTES S115): one wait state per access, a few cycles per track per frame.
-2. **Keep every effect: SIDE-CHAIN's code into the FX2-slot tails.** About 605 words per slot,
-   two slots per core, and the shared window already takes `$200` of one. Code 388 + key bus 528
-   + window 512 = 1,428 against ~1,210 per core, so the key bus must also shrink (stride `$40`
-   to `$20`?). The DSP's boot clear at `P:0x40` zeroes the window after upload and has to be
-   patched to skip the code. Every P fetch costs a wait state. This is new ground: none of our
-   code has run from external P yet.
-3. **Two images instead of one:** KYOTI as it is (no BLACKPYRAMIDS_303), plus a KYOTI-303
-   flavour without SIDE-CHAIN. No DSP work, but two images to keep pinned.
+The first draft of this section counted only the shared-window tails and concluded that the key
+bus could not fit beside the code. It missed the two **internal** FX2 slots per core. Octabam's
+hardware sweeps (`docs/firmware/CHIP.md`) give these facts:
+- Y `$4000–$BFFF` holds two 16K-word FX2 slots, and stock never writes past `+$3DA2` in one
+  (`stock.SLOT_EXTENT`, DARK REV the highest).
+- The shared window `$30000–$3FFFF` aliases P, X and Y. As X or Y it costs no wait states; as P,
+  one per fetch.
+- Code at `P:$2000+` has run on a unit (octabam's CHORUS relocation).
 
-Whichever option is picked, SIDE-CHAIN's DSP changes inside KYOTI, so KYOTI needs a hardware
-test of SIDE-CHAIN again (cross-core keys, MON) as well as of the voice.
+Each slot's tail, `+$3DA3..+$3FFF`, is 605 words. Per core:
+
+| tail | space | free for us |
+|---|---|---|
+| `Y:$7DA3–$7FFF` | internal Y, 0 wait | 605 |
+| `Y:$BDA3–$BFFF` | internal Y, 0 wait | 605 |
+| shared slot 1 (A `$33DA3..`, B `$3BDA3..`) | P/X/Y, 1 wait as P | 93 (SIDE-CHAIN's window takes the last `$200`) |
+| shared slot 2 (A `$37DA3..`, B `$3FDA3..`) | P/X/Y, 1 wait as P | 605 (octabam's mailbox sits at `$37F00` in octabam images only) |
+
+The moves:
+1. **Key bus and MON** (528 words): Y `$7F0–$9FF` → an internal Y tail, e.g. `Y:$7E00–$7FFF` +
+   MON. This costs nothing per access.
+2. **SIDE-CHAIN's code** (388 words: sctap, scdet, moncommit and two tables) → shared slot 2's
+   tail.
+   - The boot clears zero that memory after the upload (A `P:$040` clears `$30000–$37FFF`; B
+     clears `$37F00–$3FFFF`). So the code ships as data, in an X record or a pre-boot upload
+     (octabam's DRAM-sourced upload), and a boot hook copies it into place after the clear, as
+     REPITCH's `zqboot` did.
+   - The three `bsr`s that reach it become `jsr`s to the new address.
+3. **Cost to measure before building:** one wait state per instruction fetch in sctap (every track,
+   every frame) and scdet, on core 0 especially, beside the voice's estimate in
+   `reference/BLACKPYRAMIDS_303.md` §4. The tool is SIDE-CHAIN's cross-core bench
+   (`tools/dsp56300_xcore/`) with the code at its new address.
+
+What this buys:
+- **KYOTI with every feature:** only SPRING REV is given up, by BLACKPYRAMIDS_303. Its voice
+  (1,027 words) stays in SPRING's module.
+  - The voice cannot move to the shared window: about 300 words per core would be left after
+    SIDE-CHAIN's code, and the voice is the hot loop (~400 instructions a sample), so a wait per
+    fetch would add roughly 60–80 %.
+  - SPRING with BLACKPYRAMIDS_303 is possible only by giving up a different effect for the voice:
+    DARK REV (1,067 words, the only other module big enough), or two smaller ones with the voice
+    split.
+- **SPRING back where BLACKPYRAMIDS_303 is absent:** KYOTI V1.4 and the standalone
+  SIDECHAIN_COMPRESSOR lose SPRING today only because SIDE-CHAIN's code is in it.
+
+The other levers, not taken:
+- Give up LO-FI or PLATE for SIDE-CHAIN's code: lower risk, but it loses an effect.
+- Two KYOTI images.
+- Switch the DSP's memory map to 16K of P (OMR `MS`/`MSW`): untested, and it removes Y
+  `$A000–$BFFF`, inside the second internal FX2 slot.
+
+Whichever route is taken, SIDE-CHAIN's DSP changes, so it needs a hardware re-test (cross-core
+keys, MON), in KYOTI and in its standalone build.
 
 ## 4. Needed whatever option is picked
 
@@ -68,6 +104,6 @@ test of SIDE-CHAIN again (cross-core keys, MON) as well as of the voice.
 
 ## 5. Estimate
 
-Option 1: a day of DSP and builder work plus emulator checks (SIDE-CHAIN's cross-core bench
-`tools/dsp56300_xcore/`, `verify_ot303.py`), then one hardware session. Option 2: about twice
-that, with more hardware risk. Option 3: half a day.
+§3's plan: DSP relocation, the boot copy hook, the key bus move and the emulator checks (the
+cross-core bench, `verify_ot303.py`, SIDE-CHAIN's own checks) take about two days, then one
+hardware session for SIDE-CHAIN and the voice together.
