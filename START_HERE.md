@@ -106,7 +106,7 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | REPITCH DSP kernel gate (kept for the rewrite) | `tools/repitch_dsp_*` (bit-exact against the reference engine) |
 | DSP assembly | `tools/dsp_xasm.py` over `vendor/dsp56300`'s `dsp_asm` |
 | a final build | `tools/build_<feature>.py` → `.syx` (MIDI) + `.bin` (CF card); see `BUILD_KYOTI.md` |
-| the combined image | `tools/build_kyoti.py` — **KYOTI V1.4** (without REPITCH; V1.0 withdrawn; see §6) |
+| the combined image | `tools/build_kyoti.py` — **KYOTI V1.4, FINAL 2026-10-14** (without REPITCH; V1.0 withdrawn; see §6) |
 | octabam's remixer (`make remix`) | `sh tools/octabam_remixer.sh` — its own clone at `~/Documents/octabam`, fast-forwarded to octabam's `main` on every launch; `refs/octabam` stays the pinned research harness |
 | each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final, seven images) |
 | DIRECT JUMP V6.4, the OT↔AR parity build | `tools/build_direct_jump_v6_4.py` — WIP **by design**: kept buildable at the user's request (hardware-confirmed image `4a6c1b5e…`), never to be promoted |
@@ -153,8 +153,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 > Check this against the tree before trusting it; it has gone stale before.
 
 - **KYOTI V1.4** (`tools/build_kyoti.py`, 2026-10-13) — V1.3 without REPITCH_REPEAT98_KYOTI,
-  ROM-only (RELOAD back in the proven cave, EMPTY_PATTERN_LED_FIX in SAFE_CAVE). Built
-  (mainos `72710a3c…`, syx `568b2efb…`), not flashed; WIP until promoted.
+  ROM-only (RELOAD back in the proven cave, EMPTY_PATTERN_LED_FIX in SAFE_CAVE). **FINAL
+  2026-10-14**, mainos `72710a3c…`, syx `568b2efb…`; flashed by the user: everything works.
 - **KYOTI V1.3** — FINAL 2026-10-10 until 2026-10-13, syx `9f6d2374…`, mainos
   `d14555ec…`; flashed by the user: everything works, PLATE REVERB fixed. It is V1.2 with
   SPRING's reclaim bounded by its real record (P..P+0x192); V1.2 (syx `cd5a723b…`, FINAL

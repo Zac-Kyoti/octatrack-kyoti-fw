@@ -203,7 +203,7 @@ Every feature above and all three BATCH_BUGFIXES in **one image**. The boot spla
 SYSTEM STATUS → OS VERSION read `KYOTI V1.4`. It replaces KYOTI V1.3, V1.2 and V1.1, and the
 withdrawn V1.0 (see below).
 
-**Hardware:** every ingredient is confirmed; this image has not been flashed as such.\
+**Hardware:** confirmed.\
 **Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) →
 `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.4`
 

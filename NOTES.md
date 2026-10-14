@@ -35842,3 +35842,6 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
   `KYOTI V1.4`. **NOT flashed, NOT pinned** (`build_kyoti.py` has no FINAL entry until the user
   promotes it).
 * Verification: all seven Bugbuilds rebuilt and match their pins; no FINAL standalone was touched.
+* **2026-10-14: KYOTI V1.4 PROMOTED to FINAL.** The user flashed syx `568b2efb…`: everything good.
+  Pinned mainos `72710a3c…` (replaces V1.3's `d14555ec…`); it rebuilds and seals without the opt-in.
+  README's Hardware line reads confirmed. octabam removal PR: sambanks/octabam#721.
