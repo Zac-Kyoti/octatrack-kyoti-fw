@@ -155,12 +155,13 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 - **BLACKPYRAMID_303** (`tools/build_blackpyramid_303.py`, working name OT-303) — WIP, ready to
   promote. The hardware is confirmed through test image MT14. MT15–MT17 (the 1 ms cutoff/env
-  glide, DEC 200 ms–2 s, the BLKPYRAMD name) are emulator-verified. The release image has the
-  same OS bytes as MT17: mainos `20093b86…`, `140C_BP303`. Promote after the author flashes it.
+  glide, DEC 200 ms–2 s, the BLKPYRAMD name) and MT18 (live play, one-shots) are emulator-verified.
+  The release image: mainos `6b74ff65…`, `140C_BP303`. Promote after the author flashes it.
   - Open: the octabam module (`reference/BLACKPYRAMID_303.md` §6; needs a generic "DSP
     source machine" schema upstream).
   - Open: a square-wave voice on core 0 under the heaviest FX stack may overrun (§4 there).
-  - Open: live notes and one-shot trigs don't sound.
+  - Open: a chromatic or MIDI note recorded live stores its PTCH lock in FLEX's units.
+  - Live play and one-shots (MT18) are emulator-verified, not yet on hardware.
   - Open: KYOTI must make ERASE_EMPTY_TRIGLESS_LOCKS skip these tracks if both are ever combined.
 
 - **KYOTI V1.4** (`tools/build_kyoti.py`, 2026-10-13) — V1.3 without REPITCH_REPEAT98_KYOTI,

@@ -13,6 +13,7 @@
         .global ot_setup_edit6, ot_setup_draw6, ot_resolve_pb, ot_validate, ot_stock_validate
         .global ot_tick_hook, ot_glyph, ot_step_hook, ot_note_hook, ot_chooser_level, ot_setup_value_hook
         .global ot_slic_a, ot_slic_b, ot_slic_c, ot_pmtr_pb
+        .global ot_live_req_hook, ot_live_midi_hook, ot_live_chrom_hook, ot_live_rel_hook, ot_oneshot_hook
 
         .equ    OT_ROW, 5
         .equ    FLEX, 1
@@ -271,6 +272,77 @@ ot_pmtr_pb:
         bsr     ot_row_type
         lea     (PB_TABLE).l,%a0
         jmp     (0x4003c054).l          | a2 = PB_TABLE[d0]
+
+| MT18, live notes (control.c ot_live_*). The stock voice request 0x40005030(track, cmd, flags, slot):
+| its callers for a track key, a chromatic key, the trig preview and MIDI notes 36-43 mark the track's
+| live note pending (ret, track, cmd to C). Replays the 8 displaced bytes.
+ot_live_req_hook:
+        move.l  8(%sp),-(%sp)           | cmd
+        move.l  8(%sp),-(%sp)           | track
+        move.l  8(%sp),-(%sp)           | the return address
+        jsr     ot_live_req
+        lea     12(%sp),%sp
+        lea     -24(%sp),%sp
+        movem.l %d2-%d6/%a2,(%sp)
+        jmp     (0x40005038).l
+
+| a MIDI chromatic note (0x4000e746: d2 = the track, (a3) = the note, a5 = the mailboxes, d4 -> the
+| staged PTCH lock, a2 -> the held note): post the START; on an OT-303 track skip FLEX's PTCH lock
+| (control.c keeps the note as a pitch offset)
+ot_live_midi_hook:
+        moveq   #29,%d1
+        move.l  %d1,(%a5,%d2.l*4)
+        mvz.b   (%a3),%d0
+        move.l  %d0,-(%sp)
+        move.l  %d2,-(%sp)
+        jsr     ot_live_midi
+        addq.l  #8,%sp
+        tst.l   %d0
+        beq.s   1f
+        jmp     (0x4000e75a).l
+1:      jmp     (0x4000e74c).l
+
+| a chromatic trig key (0x4004fc84: d2 = the track, a2 = 5 idx + 4, FLEX's PTCH value): on an OT-303
+| track the staged PTCH lock is not written (control.c keeps idx - 12 as a pitch offset)
+ot_live_chrom_hook:
+        move.l  %a2,-(%sp)
+        move.l  %d2,-(%sp)
+        jsr     ot_live_chrom
+        addq.l  #8,%sp
+        tst.l   %d0
+        bne.s   1f
+        move.l  %d2,%d0
+        lsl.l   #5,%d0
+        lea     (0x46c7dfda).l,%a0
+        move.w  %a2,%d1
+        move.b  %d1,(%a0,%d0.l)
+1:      jmp     (0x4004fc94).l
+
+| the frame builder's release (0x4000b4f6: the track's mailbox has bit 6; 114(sp) = the track, a1
+| live): control.c ot_live_release. Replays the 10 displaced bytes.
+ot_live_rel_hook:
+        move.l  %a1,-(%sp)
+        move.l  118(%sp),-(%sp)
+        jsr     ot_live_release
+        addq.l  #4,%sp
+        move.l  (%sp)+,%a1
+        move.b  (0x80001828).l,%d4
+        move.b  %d4,118(%sp)
+        jmp     (0x4000b500).l
+
+| a one-shot trig the step handler schedules (0x4009d4a8: d7 = the track, a0/a1 live): control.c
+| ot_oneshot queues its note when armed. Replays the 6 displaced bytes.
+ot_oneshot_hook:
+        lea     -8(%sp),%sp
+        movem.l %a0-%a1,(%sp)
+        move.l  %d7,-(%sp)
+        jsr     ot_oneshot
+        addq.l  #4,%sp
+        movem.l (%sp),%a0-%a1
+        lea     8(%sp),%sp
+        moveq   #61,%d2
+        move.l  %d2,(%a0,%d7.l*4)
+        jmp     (0x4009d4ae).l
 
 ot_validate:
         jmp     ot_validate_part

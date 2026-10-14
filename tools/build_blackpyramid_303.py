@@ -21,7 +21,7 @@ Stock 1.40C plus exactly this:
     (A P:$39c / B P:$1a2) -> jsr the host; SPRING's dispatch -> the passthrough stub.
   * ColdFire: SPRING REV out of the FX choosers; tools/ot303/cf/{machine.s,control.c} as a DRAM runtime
     (the arena's bottom 16 pages; base literal at 24 sites + 4 geometry words; the boot site's jsr ->
-    the appended loader); 27 detours (ANALOG BD's seams, the glyph, the step handler's entry and its
+    the appended loader); 32 detours (ANALOG BD's seams, the glyph, the step handler's entry and its
     note write, the machine window's focus, the SETUP preview's value read, three SLIC reads), 7 pokes
     and the FLEX renderer slot, each asserted against stock.
 
@@ -88,6 +88,11 @@ DETOURS = (
     (0x40044DBE, H("d1fc0008ef5b4a10"), "ot_slic_b", "jmp", 8),           # MT8: a slice check reads it
     (0x4004FEE2, H("d1fc0008ef5b1c10"), "ot_slic_c", "jmp", 8),           # MT8: another slice check
     (0x4003BFF0, H("711041f9400d5f38605a"), "ot_pmtr_pb", "jmp", 10),     # MT13: the LFO PMTR names
+    (0x40005030, H("4fefffe848d7047c"), "ot_live_req_hook", "jmp", 8),    # MT18: live notes: the voice request
+    (0x4000E746, H("721d2b812c00"), "ot_live_midi_hook", "jmp", 6),       # MT18: a MIDI chromatic note
+    (0x4004FC84, H("2002eb8841f946c7dfda320a11810800"), "ot_live_chrom_hook", "jmp", 16),  # MT18: a chromatic key
+    (0x4000B4F6, H("183980001828" "1f440076"), "ot_live_rel_hook", "jmp", 10),  # MT18: a live release
+    (0x4009D4A8, H("743d21827c00"), "ot_oneshot_hook", "jmp", 6),         # MT18: a one-shot trig
 )
 POKES = (
     (0x40079248, H("48780005"), H("48780006"), "machine chooser has six rows, OT-303 the last"),

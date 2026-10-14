@@ -14,6 +14,7 @@
 #include "record.h"
 #define U8(a) (*(volatile uint8_t *)(uintptr_t)(a))
 #define U32(a) (*(volatile uint32_t *)(uintptr_t)(a))
+#define U16(a) (*(volatile uint16_t *)(uintptr_t)(a))
 #define BANK 0x46c82456u
 #define PART_IDX 0x100b14cfu
 #define PART_OFF 0x8ed80u
@@ -340,6 +341,68 @@ void ot_note(unsigned track) {
     }
     trace(1, track, s, pattern << 8 | 1);
 }
+/* Live notes (MT18): the track keys (TRACKS / SLOTS / SLICES modes), the chromatic trig keys, MIDI
+ * notes (36-43 and the chromatic 72-96) and the trig preview (TRIG + YES) post a START (0x1d) to the
+ * stock voice mailbox without the sequencer's note scheduling, so the renderer saw a flag with no
+ * queued note (a stray) and stayed silent. machine.s's hooks mark the track's live note pending, with
+ * a pitch offset for chromatic keys and MIDI; the renderer plays it on the next flag, held until the
+ * key-up / note-off / YES release (0x40 in the mailbox: ot_live_release). A pending note lapses after
+ * LIVE_TTL frames, so a later pattern or Part flag never plays it. */
+#define LIVE_TTL 2756u                    /* frames: 1 s */
+struct ot_live { uint32_t pending; int32_t semis; uint8_t release, sounding, ptch, armed; };
+static struct ot_live live[8] = {{0, 0, 0, 0, 0, 0}};
+/* the frames each DSP core's voice has been sent records since boot (T1-T4, T5-T8): the DSP takes the
+ * table chunks in order, so two full passes of chunks guarantee its tables (it renders silence and
+ * drops notes until then). Nothing plays a track while the transport is stopped and idle, so the
+ * first live note after boot comes while they are still arriving: it waits for them (~30 ms). */
+static uint32_t core_frames[2] = {0, 0};
+static unsigned dsp_ready(unsigned t) {
+    return core_frames[t >= 4] >= 2u * ((ot_ylen + OT_CHUNK - 1u) / OT_CHUNK) + 4u;
+}
+uint32_t ot_live_reqs = 0, ot_live_notes = 0, ot_live_rels = 0, ot_oneshots = 0;
+static const uint32_t live_rets[6] = {0x40044770u, 0x4004fcc6u, 0x40043d7au, 0x4000e568u, 0x4004f9f2u, 0x4004fb36u};
+/* 0x40005030(track, cmd, flags, slot) from one of the live callers (ret) */
+void ot_live_req(uint32_t ret, unsigned t, unsigned cmd) {
+    if (t >= 8 || cmd != 0x1d || !signed_track(part_base(), t)) return;
+    for (unsigned i = 0; i < 6; ++i)
+        if (ret == live_rets[i]) {
+            if (ret != 0x4004fcc6u) live[t].semis = 0;     /* the chromatic keys set theirs first */
+            live[t].pending = ot_frames + LIVE_TTL; live[t].armed = 0;
+            ++ot_live_reqs;
+            return;
+        }
+}
+/* a chromatic trig key (0x4004fc84: raw = 5 idx + 4, idx 0..24, 12 = the track's pitch): 1 on an
+ * OT-303 track (its PTCH byte is not overwritten with FLEX's value) */
+int ot_live_chrom(unsigned t, unsigned raw) {
+    if (t >= 8 || !signed_track(part_base(), t)) return 0;
+    live[t].semis = (int32_t)((raw - 4u) / 5u) - 12;
+    live[t].pending = ot_frames + LIVE_TTL; live[t].armed = 0;
+    return 1;
+}
+/* a MIDI chromatic note (0x4000e746: notes 72-96, 84 = the track's pitch): 1 on an OT-303 track */
+int ot_live_midi(unsigned t, unsigned note) {
+    if (t >= 8 || !signed_track(part_base(), t)) return 0;
+    live[t].semis = (int32_t)(note & 0xffu) - 84;
+    live[t].pending = ot_frames + LIVE_TTL; live[t].armed = 0;
+    ++ot_live_reqs;
+    return 1;
+}
+/* the frame builder found a release (0x40) in the track's mailbox (0x4000b4f6) */
+void ot_live_release(unsigned t) {
+    if (t >= 8) return;
+    if (live[t].pending) live[t].pending = 0;           /* not played yet (a short tap, the tables arriving) */
+    else if (live[t].sounding) live[t].release = 1;
+    ++ot_live_rels;
+}
+/* a one-shot trig (code 61) the step handler schedules (0x4009d4a8): a note when it is armed (its
+ * track's bit in 0x8000184e clear: the frame builder plays it once, then sets the bit) */
+void ot_oneshot(unsigned t) {
+    if (t >= 8 || (U16(0x8000184eu) & (1u << t))) return;
+    ++ot_oneshots;
+    ot_note(t);
+}
+
 /* the trig's note: the oldest queued, or none */
 static unsigned take(unsigned track, struct ot_qn *out) {
     unsigned k = qn[track];
@@ -372,7 +435,31 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
         /* the packer's fixed slot, not this call's cursor (the first call can still be stock FLEX) */
         volatile uint32_t *record = (volatile uint32_t *)(uintptr_t)(0x80001c90u + (ping & 1) * 0xa80u + 336u * track);
         unsigned ev = 0; uint32_t gl = 0;
-        if (U8(0x46104d0cu + track) & 16) {
+        unsigned flag = U8(0x46104d0cu + track);
+        ++core_frames[track >= 4];
+        if (live[track].pending && (int32_t)(ot_frames - live[track].pending) > 0) live[track].pending = 0;   /* lapsed */
+        if ((flag & 16) && live[track].pending && !dsp_ready(track)) {
+            live[track].armed = 1;                           /* its START came; the DSP's tables have not */
+            struct ot_qn e;
+            if (!(flag & 0x20)) (void)take(track, &e);
+        } else if (live[track].pending && (live[track].armed || (flag & 16)) && dsp_ready(track)) {
+            /* a live note: the knobs (with the preview's or the chromatic key's locks in fp), held */
+            struct ot_qn e;
+            if ((flag & 16) && !(flag & 0x20)) (void)take(track, &e);   /* a sequencer START merged into this frame */
+            int32_t pt = (int32_t)p[OT_PTCH] + live[track].semis;
+            pt = pt < 0 ? 0 : pt > (int32_t)OT_PTCH_MAX ? (int32_t)OT_PTCH_MAX : pt;
+            p[OT_PTCH] = (uint8_t)pt;
+            live[track].pending = 0; live[track].armed = 0; live[track].release = 0; live[track].sounding = 1; live[track].ptch = (uint8_t)pt;
+            ev = OT_EV_NOTE; gl = OT_GL_HELD;
+            ++ot_live_notes;
+        } else if (!(flag & 16) && live[track].release) {
+            /* the key is up: the gate closes (host.asm EV bit 2 -- it never starts a note) */
+            live[track].release = 0;
+            if (live[track].sounding) { live[track].sounding = 0; ev = OT_EV_OFF; }
+        } else if ((flag & 16) && U32(0x800065b8u) != 1) {   /* the sequencer stepping (kb memory-map) */
+            ++ot_strayflags;                                 /* transport stopped: no sequencer note */
+            trace(2, track, 0xfe, flag << 8 | qn[track]);
+        } else if (flag & 16) {
             /* the flag is the frame builder's copy of a per-track trigger byte (0x4000c62e) that the
              * trig apply, a track start and a Part load all set; only a note step's flag plays (MT4 on
              * the unit: pattern + Part changes set it with no trig on the step, once a frame for up to
@@ -383,6 +470,7 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
                 ++ot_trigs;
                 ev = OT_EV_NOTE | (e.slide ? OT_EV_SLIDE : 0);
                 gl = e.gl;
+                live[track].sounding = 0;                    /* a sequencer note takes the voice */
                 trace(2, track, e.step, (unsigned)U8(0x46104d0cu + track) << 8 | qd);
             } else {
                 ++ot_strayflags;

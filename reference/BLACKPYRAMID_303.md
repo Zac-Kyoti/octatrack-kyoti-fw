@@ -39,12 +39,24 @@ Builder: [`tools/build_blackpyramid_303.py`](../tools/build_blackpyramid_303.py)
   A trigless trig still does its stock job (it resets LFOs and FX envelopes) and never
   retriggers the voice. *Trade-off:* a trigless trig placed after a note only to reset an LFO
   also ties that note.
+- **Live play (MT18):**
+  - The track key (TRACKS, SLOTS and SLICES key modes), the chromatic trig keys and MIDI notes
+    play the voice. MIDI notes 36–43 trigger the tracks; 72–96 play chromatic around 84.
+  - Chromatic and MIDI notes transpose around the track's PTCH.
+  - A live note is held while the key or note is down, and its release closes the gate. The DSP
+    host's release event (EV bit 2) never starts a note.
+  - TRIG + YES previews the held step with its locks, as often as you press it.
+  - One-shot trigs play once until re-armed.
+  - The first live note after power-on waits ~30 ms for the voice's tables, which nothing loads
+    while the transport is stopped.
 - **The track's own pages work as on any track:** AMP (attack/hold/release act on the 303's
   output), FX1, FX2, the three LFOs (PMTR lists PTCH CUT RES ENV DEC ACC), scenes,
   trig conditions and micro-timing.
 - **Limits:**
   - SPRING REVERB is removed from the FX menus: its DSP program space holds the voice.
-  - Notes played live (track keys, MIDI) and one-shot trigs don't sound yet.
+  - A chromatic or MIDI note recorded live into the pattern stores its pitch lock in FLEX's units
+    (stock writes it at `0x4004fd14` → `0x40042158` and `0x400625b8`), so it plays back at the wrong
+    pitch. Not converted yet.
   - The track is stored as FLEX plus a signature. FLEX's own settings are kept aside and put
     back when the track leaves the machine. On a stock OS the project opens with the track as
     a FLEX track.
@@ -120,10 +132,10 @@ is full in stock, so the voice takes **SPRING REVERB's** module space.
 
 | | used | of |
 |---|---|---|
-| DSP P (each payload) | 1,026 words, in SPRING REV's module (DARK REV's 35-word helper moved beside it) | 1,028 |
+| DSP P (each payload) | 1,027 words, in SPRING REV's module (DARK REV's 35-word helper moved beside it) | 1,028 |
 | DSP X | 216 working words at `X:$7b24–$7bfb` (stock's unreferenced top, outside the DMA partitions), copied from SPRING's X records at the first frame | — |
 | DSP Y | 2,119 words `$7a5–$feb`: tables and the voice state, streamed from the ColdFire | — |
-| ColdFire | a 23,964-byte DRAM runtime (a 16-page arena reserve, loader appended after the OS), 27 detours, 7 pokes, the FLEX renderer slot | — |
+| ColdFire | a 26 KB DRAM runtime (a 16-page arena reserve, loader appended after the OS), 32 detours, 7 pokes, the FLEX renderer slot | — |
 
 **Cycles per sample** (emulator cycle table, host and engine together; on the chip ×1.16,
 from the METER on DIAG8):
@@ -244,6 +256,6 @@ Not yet ported. What it needs (scope, 2026-10-13):
   - one DRAM `Linked` unit, the 27 detours and 7 pokes;
   - the FLEX renderer `SymbolRef`;
   - the DSP ranges.
-- **Conflicts:** ANALOG BD, SYNTH and TAPE ECHO (the same seams, slots and SPRING REV), and
-  SIDECHAIN_COMPRESSOR and REPITCH_REPEAT98_KYOTI (the same DSP Y memory). The module refuses
-  all five.
+- **Conflicts:** ANALOG BD, SYNTH and TAPE ECHO (the same seams, slots and SPRING REV),
+  SIDECHAIN_COMPRESSOR and REPITCH_REPEAT98_KYOTI (the same DSP Y memory), and QUANTIZER (the
+  same chromatic and MIDI note sites). The module refuses all six.

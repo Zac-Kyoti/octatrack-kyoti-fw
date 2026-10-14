@@ -230,7 +230,7 @@ int main(int argc, char** argv) {
         twinSet = true;
     };
     std::vector<float> wav;
-    long sample = 0, aFrames = 0, bFrames = 0, takeover = -1, notesHeard = 0, slidesHeard = 0, retrigSlides = 0, fromSilence = 0;
+    long sample = 0, aFrames = 0, bFrames = 0, takeover = -1, notesHeard = 0, slidesHeard = 0, retrigSlides = 0, fromSilence = 0, releases = 0;
     uint64_t sawCyc = 0, sawN = 0, sqCyc = 0, sqN = 0, evWorst = 0, evSawWorst = 0, offSawWorst = 0, sawWorst = 0, sqWorst = 0;
     uint32_t own = 0; int live = 0; bool tablesChecked = false, relocated = false; long initFrames = 0;
     for (long f = 0; f < frames; f++) {
@@ -252,6 +252,10 @@ int main(int argc, char** argv) {
                 (w ? evB : evA) = ev; (w ? glB : glA) = gl; (w ? offB : offA) = int(at - f * 16);
             }
         }
+        // MT18: a live note's release now and then, in a frame with no note (an open gate closes at the
+        // frame's start; a closed one is left alone)
+        if (!evA && f % 997 == 500) evA = OT_EV_OFF;
+        if (!evB && f % 1301 == 650) evB = OT_EV_OFF;
         for (uint32_t t : {0x00u, 0x20u, 0x40u, 0x60u}) {
             const bool sig = (t == 0x20 && sigA) || (t == 0x40 && sigB);
             if (t == 0 && live > 0 && --live == 0) own = 0;
@@ -319,6 +323,7 @@ int main(int argc, char** argv) {
             e.RC1 = c.rc1; e.GD8 = c.gd8;                                   // MT10: from RES and VOL, every frame
             ot_note n{}; if (ev & 1) ot_params_note(k, &n);
             long trg = (ev & 1) ? off : BIG;
+            if (ev & OT_EV_OFF) { evc = 0; releases++; }
             bool gateEnded = false;
             for (int j = 0; j < 16; j++) {
                 if (evc == 0) {
@@ -367,8 +372,8 @@ int main(int argc, char** argv) {
                 "then took the voice at frame %ld (A stopped at %ld) and voiced %ld; $00/$60 always stock\n", aFrames, staleFrames,
                 takeover, frames * 3 / 4, bFrames);
     std::printf("BIT-EXACT: %ld samples, %ld notes (%ld slides into an open gate, %ld slides into a closed one retriggered, "
-                "%ld from silence, the saw running free; cutoff and env amount gliding); peak %.3f = %.1f dBFS\n", sample, notesHeard, slidesHeard, retrigSlides,
-                fromSilence, pk, 20 * std::log10(pk));
+                "%ld from silence, the saw running free; cutoff and env amount gliding; %ld releases); peak %.3f = %.1f dBFS\n", sample, notesHeard, slidesHeard, retrigSlides,
+                fromSilence, releases, pk, 20 * std::log10(pk));
     std::printf("cycles/sample: saw %.1f (worst plain frame %.1f, note %.1f, gate end %.1f), square %.1f (worst plain %.1f, note %.1f); "
                 "stock records %.1f cycles/call; a silent frame at most %.1f\n",
                 double(sawCyc) / std::max<uint64_t>(sawN * 16, 1), sawWorst / 16.0, evSawWorst / 16.0, offSawWorst / 16.0,

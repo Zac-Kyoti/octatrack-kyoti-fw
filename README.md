@@ -180,12 +180,15 @@ one on T5–T8.
 - **Slide:** an OT slide trig glides into its note from the previous one, without a retrigger.
 - **Ties:** trigless locks and/or trigless trigs right after a note hold it. A trigless trig
   still resets LFOs and FX envelopes as on stock, so a trigless trig after a note also ties it.
+- **Live:** the track key, chromatic keys and MIDI notes play it, held while the key or note is
+  down. TRIG + YES previews a step, and one-shot trigs play once until re-armed.
 - AMP, FX1, FX2, LFOs (`PMTR` lists the six SRC knobs), scenes, p-locks and trig conditions
   work as on any track.
 
 **Limits:**
 - SPRING REVERB is removed: its DSP space holds the voice.
-- Notes played live (track keys, MIDI) and one-shot trigs don't sound.
+- A chromatic or MIDI note recorded live into the pattern stores its pitch in FLEX's units, so it
+  plays back at the wrong pitch. Enter notes with a PTCH p-lock instead.
 - On a stock OS, the track opens as a FLEX track.
 - A square-wave voice on T5–T8 beside DJ EQ in both FX slots of all eight tracks may crackle.
 
@@ -197,8 +200,8 @@ attribution: [`reference/BLACKPYRAMID_303.md`](reference/BLACKPYRAMID_303.md) an
 [`CREDITS.md`](CREDITS.md).
 
 **Hardware:** confirmed through test image 14: the voice, the grid (notes, accents, slides,
-ties), every knob and the LFO names. The 1 ms cutoff glide, the DEC range and the BLKPYRAMD
-name are emulator-verified only.\
+ties), every knob and the LFO names. Emulator-verified only: the 1 ms cutoff glide, the DEC
+range, the BLKPYRAMD name, live play and one-shot trigs.\
 **Final build:** [`tools/build_blackpyramid_303.py`](tools/build_blackpyramid_303.py) →
 `OCTATRACK_OS1.40C_BLACKPYRAMID_303`
 

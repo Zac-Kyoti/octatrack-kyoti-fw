@@ -37,7 +37,7 @@ using namespace rosic;
 
 static const double FS = 44100.0;
 static double cutoffHz(int k) { return 200.0 * std::pow(50.0, k / 127.0); }
-static double decayMs(int k) { return 30.0 * std::pow(100.0, k / 127.0); }
+static double decayMs(int k) { return 200.0 * std::pow(10.0, k / 127.0); }   // params.c (MT16): 200 ms .. 2 s
 static double slideMs(int k) { return 1.5625 * k; }
 static double tuningHz(int k) { return 440.0 + (k - 64) * 80.0 / 127.0; }
 static double sqDCv() {

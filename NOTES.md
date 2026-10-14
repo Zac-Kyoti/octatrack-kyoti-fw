@@ -36263,4 +36263,19 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   README/CREDITS/BUILD_KYOTI/FLASHING/START_HERE/CLAUDE.md entries; threads [ot303] extended. NOT promoted, NOT pushed:
   promote after the author flashes the release image. Octabam module: needs an upstream generic DSP-source-machine
   schema (ANALOG BD's ab_image is hard-wired); plan in the design doc §6.
+- **S124 cont: MT18 -- live play, one-shots, TRIG+YES.** Live STARTs (0x1d to the voice mailbox 0x46c80354) never
+  went through ot_note: stray flags. Hooks: 0x40005030 (voice request; callers TRACKS/SLOTS/SLICES keys, chromatic,
+  preview, MIDI 36-43 by return address), 0x4000E746 (MIDI chromatic: semis note-84, FLEX's PTCH lock skipped),
+  0x4004FC84 (chromatic key: semis idx-12, lock skipped), 0x4000B4F6 (frame builder's release 0x40), 0x4009D4A8
+  (one-shot code 61 -> ot_note when armed: bit clear in 0x8000184e). Renderer: a pending live note plays on the flag,
+  held (GL 0x7fffff); key-up sends EV bit 2 (new host.asm gate-off: EVC := 0 at the frame's start, a no-op on a
+  closed gate -- the first try, a slide with GL 1, retriggered a closed gate: a blip); sequencer notes only while
+  0x800065b8 == 1 (long). TRIG+YES "worked once" because grid-rec re-scheduled the stopped playhead's step. While
+  stopped and idle nothing renders the track, so the DSP has no tables until the first START: a live note waits
+  for two chunk passes (core_frames). host 1027/1028 (lua for the record offsets). Benches bit-exact (19 releases),
+  verify ALL GOOD, ot_emu T6: keys/chromatic/MIDI/preview pitches, held gate open, released gate closed; T2 in
+  BOTLI plays PTCH 1 unlocked (the project's own modulation; sequencer too). chain_check's DEC copy was stale since
+  MT16 (fixed; firmware fine). Open: live-recorded chromatic/MIDI notes store FLEX-unit PTCH locks.
+  `out/OCTATRACK_BLACKPYRAMID_303.bin` sha256 0f2bcb69e14fe68bd4d8775deba930d6132c5f13c12bd3f434155b1db5ab3d16,
+  syx 7043be96117c97b0b8ff5aac17b5e2ce540f97181e177c8b15e245bdd24c9a1a (`140C_BP303`), NOT flashed.
 

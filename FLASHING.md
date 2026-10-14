@@ -142,7 +142,9 @@ quick check for each:
 - **BLACKPYRAMID_303** — double-tap T1, pick `BLKPYRAMD`, put trigs on a few steps: each plays
   a 303 note. P-lock `PTCH` and `ACC` on a step; put a trigless trig after a note (it holds) and a
   slide trig on the next note (it glides). FX menus no longer offer SPRING REVERB. Choosing it on
-  T2 as well is refused with `ONE 303 PER CORE!`; on T5 it is allowed.
+  T2 as well is refused with `ONE 303 PER CORE!`; on T5 it is allowed. Stopped, right after
+  power-on: the track key plays a held note; TRIG + YES on a step replays it every time; a
+  MIDI note on the track's channel plays (AUDIO NOTE IN on).
 - **MIDI_PLAYS_FREE_FIX** — a PLAYS FREE MIDI track, trig quantize DIRECT, SCALE MODE PER
   TRACK, notes on steps 1 and 2: a manual trig keeps it running instead of stalling.
 - **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is a p-lock on a MIDI track:

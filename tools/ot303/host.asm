@@ -13,6 +13,7 @@
 ;   w0 $3303, w2 $0909  the signature;  w1  the record's number (one more each frame)
 ;   w3                  bit 0: a note starts at the frame's trig sample (the stock x:$20c);
 ;                       bit 1: it slides (no retrigger when the gate is still open);
+;                       bit 2: a release (MT18, a live note's key-up): an open gate closes at the frame's start
 
 ;   w4..w31             14 continuous words, every frame (Open303's setters act at once):
 ;                       CS ES8 RS BG SC SQ W1 W1 W2 W3 RC1 GD8 L0_16 AG_8 (RC1: the soft attack,
@@ -209,13 +210,17 @@ sg_voice:
         move    x0,x:(r5+D_OUTA)
 ; the record's words: the continuous ones, then the note's (they follow) when a note starts here
         move    x:>$209,r4
-        move    #>W_CONT,n4
         move    #>CB,r1
-        move    (r4)+n4
+        lua     (r4+W_CONT),r4
         move    #>14,x1
         bsr     hq_unp
         move    #>$7fffff,a                     ; no note this frame
         move    x:>TRF,b
+        btst    #2,b1                           ; a release: the gate's end now (hq_gateoff closes an
+        bcc     sg_noff                         ;  open gate, and does nothing to a closed one)
+        move    #0,x0
+        move    x0,x:(r5+D_EVC)
+sg_noff:
         btst    #0,b1
         bcc     sg_notrig
         move    #>11,x1                         ; r1 = NB
@@ -344,9 +349,8 @@ hq_cyend:
 ; voice (STG 2). r5 = XM.
 hq_init:
         move    x:>$209,r4
-        move    #>W_CHK,n4
         move    #>CHH,r1
-        move    (r4)+n4
+        lua     (r4+W_CHK),r4
         move    #>2,x1
         bsr     hq_unp                          ; r4 -> the chunk's words
         move    #>CHH,r1
