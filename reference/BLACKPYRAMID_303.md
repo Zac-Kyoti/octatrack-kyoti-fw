@@ -187,17 +187,44 @@ Any lighter stack, or the saw, fits.
   Open303's model.
 - **Test tooling only, not in the image:** the dsp56300 emulator core (GPLv3, via octabam),
   for the DSP benches.
-- **Zac-Kyoti** — the concept and its requirements:
-  - one per DSP core, and no degradation of stock;
-  - the grid mapping (ties, accents, slides);
-  - every by-ear voicing decision above, over thirteen blind listening rounds;
-  - every control range and default;
-  - the name;
-  - hardware testing on an MKI through 17 test images and 14 diagnostic probes.
+- **Zac-Kyoti** — the concept, the sonic direction and the tuning: they set the goals, judged
+  every candidate blind by ear over thirteen listening rounds, and chose and refined the
+  values. Specifically:
+  - **The concept and requirements:** a 303 as a track machine, one per DSP core, no
+    degradation of stock, no FX restrictions, the filter design as the priority.
+  - **Filter voicing:**
+    - kept Open303's linear ladder over saturating, diode-ladder and circuit-accent models;
+    - chose the 16 kHz top-end rounding;
+    - accepted the lean engine by ABX.
+  - **Warmth and body under resonance:** identified the bass loss as RES rises. Chose the 350 Hz
+    feedback high-pass over makeup gain and a gentler RES curve, judging how much low end
+    survives without the low-RES sound getting heavier.
+  - **Declicking and edges:**
+    - asked for Open303's declick measures to be examined;
+    - specified the edge timings (soft attack 1 ms, normal release 2 ms);
+    - heard the soft attack's clicks at high resonance, which led to its fade-out with RES;
+    - picked the 1 ms glide on lock and LFO jumps.
+  - **"Liquid", "creamy", "balls":**
+    - asked for the JC-303 / ABL3 research and the fatness candidates;
+    - weighed drive against detail and liquidity across the Line, Hot and Locks scenes;
+    - settled the soft clip at +2.5 dB by default and up to +4.5 dB;
+    - moved it onto VOL's upper half so most of the knob's travel is usable;
+    - kept the square's shaper and left out grit.
+  - **Saturation:** kept saturation out of the filter and put a single output soft clip after
+    the voice, its range chosen by ear.
+  - **Timing:** chose the free-running oscillator by ear over a measurably tighter restart, after
+    blind rounds and an on-unit FREE/SYNC comparison.
+  - **Playability:**
+    - the grid mapping: notes, ACC accents, slide trigs, ties on both trigless kinds, with
+      trigless trigs keeping their stock reset;
+    - PTCH C0–C8 a semitone per step with note names, DEC 200 ms–2 s, the VOL map, the WAVE
+      loudness check;
+    - the name and glyph.
+  - **Hardware testing** on an MKI: 17 test images, 14 diagnostic probes, recordings and METER
+    readings. These found the REP and DMA-contention failures and the sequencer races.
 
-  The implementation (the DSP assembly, the integer twin, the ColdFire runtime, the benches
-  and the listening packs) was written for this project with AI assistance (Claude), under the
-  author's direction.
+  The candidates, the DSP assembly, the integer twin, the ColdFire runtime, the benches and
+  the listening packs were written with AI assistance (Claude), under the author's direction.
 
 ## 6. Octabam module — status
 

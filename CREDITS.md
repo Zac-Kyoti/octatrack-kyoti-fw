@@ -195,9 +195,19 @@ Full attribution and every design decision: [`reference/BLACKPYRAMID_303.md`](re
   REV's DSP space, ported. **SYNTH** (Tim Hastie) was studied for the FLEX-renderer approach.
 - **Research consulted, no code:** Vadim Zavalishin, *The Art of VA Filter Design*; Andy Sloane's
   x0xb0x measurements ([a1k0n/303](https://github.com/a1k0n/303)); Robin Whittle's Devil Fish notes.
-- **Zac-Kyoti** — the concept, the grid mapping, every voicing decision by ear (thirteen blind
-  listening rounds), every control range and default, and hardware testing on an MKI. The
-  implementation was written with AI assistance (Claude) under the author's direction.
+- **Zac-Kyoti** — the concept and the sonic direction:
+  - **filter voicing** (the linear ladder, the 16 kHz top);
+  - **body under resonance** (the 350 Hz feedback high-pass);
+  - **declick and edge tuning** (soft attack and its fade with RES, the 2 ms release, the 1 ms
+    glide on lock jumps);
+  - **drive and saturation** (one output soft clip, +2.5 dB by default and up to +4.5 dB on
+    VOL's top, nothing inside the filter);
+  - **the "liquid" / "creamy" trade-offs**;
+  - **the free-running note start.**
+
+  All of these were tuned by ear over thirteen blind listening rounds. Zac-Kyoti also designed the
+  grid mapping and every control range, and tested on an MKI. The implementation was written with
+  AI assistance (Claude) under the author's direction.
 
 ## Community reverse-engineering & documentation
 

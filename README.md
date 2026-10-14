@@ -190,8 +190,9 @@ one on T5–T8.
 - A square-wave voice on T5–T8 beside DJ EQ in both FX slots of all eight tracks may crackle.
 
 **Credits:** the voice is Robin Schmidt's [Open303](https://github.com/RobinSchmidt/Open303)
-(MIT). The machine registration follows repeat98's ANALOG BD for octabam. Design, voicing by
-ear and hardware testing are by Zac-Kyoti. The design, every voicing decision and full
+(MIT). The machine registration follows repeat98's ANALOG BD for octabam. The design and the
+voicing are by Zac-Kyoti, tuned by ear: filter, bass under resonance, declicking, drive and
+saturation. So is the hardware testing. The design, every voicing decision and full
 attribution: [`reference/BLACKPYRAMID_303.md`](reference/BLACKPYRAMID_303.md) and
 [`CREDITS.md`](CREDITS.md).
 
