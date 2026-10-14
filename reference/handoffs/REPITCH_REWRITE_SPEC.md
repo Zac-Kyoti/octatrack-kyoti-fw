@@ -95,9 +95,15 @@ One build only: VARI + S950 + SP12, with the DSP kernel. There is no VARI-only v
    - the TSNS value and the EMUS value are kept separately: on a gate change they trade places
      with a **spare parked byte** that stock saves with the Part and never applies (QUAN parks
      PTCH in NEIGHBOR's page-1 `---` byte; EMUS needs its own such byte for TSNS);
-   - first sight adopts without swapping; a parked value that is fresh (never written) enters as
-     the middle value, `OT`;
-   - one encoder detent steps one value;
+   - **exactly three positions**, labelled `S950`, `OT`, `SP12`, nothing else ever shown. EMUS
+     stores 1 / 64 / 127 (S950 / OT / SP12). The value must stay within 0..127, because stock's
+     time-stretch task indexes a 128-entry table with it. Any other stored value displays as its
+     bucket (0..42 S950, 43..85 OT, 86..127 SP12) and snaps to that stop on the first detent, as
+     QUAN does;
+   - first sight adopts without swapping; a parked byte of 0 means never written and enters EMUS
+     as `OT` (S950 is stored as 1 so that 0 can mean "never written"). TSNS comes back unchanged
+     on leaving VARI;
+   - one encoder detent steps one position;
    - PTCH↔QUAN and TSNS↔EMUS swap **together**, on the same gate transition.
    - **Engine changes take effect at the next trig.** Stock cannot lock page-2 parameters, but
      a mod can, so EMUS must be read as its composed value (base + any locks or scene values)
@@ -151,7 +157,17 @@ is raw 4 only, not 4..6), the second swapped pair, and item 11's fix.
 
 ## 4. Decided (the user, 2026-10-14)
 
-- Name **VARISPEED_EMUS**; TSTR label `VARI`; ATTR label `VARISPEED` (or `VARI` if it does not fit).
+From the EMUS scope's open questions (`REPITCH_REWRITE_SCOPE_EMUS.md`):
+- **O1:** per-machine parks, gate and `rp_prev` (STATIC and FLEX each have their own), so a
+  machine change never swaps. FLEX's PTCH park moving is fine: old projects get no conversion.
+- **O2:** fix the paste/clear/undo class now: hold/forget wrappers on SRC page paste, track
+  paste and the PART menu, built like `rp_reload`.
+- **O3:** the ATTR label is `VARI` (`VARISPEED` measured 2-3 px past the 34-px box).
+- **O4:** EMUS as in §2 item 5: three positions only.
+- **O5:** ATTR TSMODE 5/6 shows `ERROR`, as stock.
+- **O6:** no round-robin poll of the non-current machine.
+
+- Name **VARISPEED_EMUS**; TSTR label `VARI`; ATTR label `VARI`.
 - The ATTR integration is kept.
 - One build (VARI + S950 + SP12 + the DSP kernel); no VARI-only build.
 - The DSP kernel is the hardware-proven one, unchanged. No ColdFire-only emulation.
