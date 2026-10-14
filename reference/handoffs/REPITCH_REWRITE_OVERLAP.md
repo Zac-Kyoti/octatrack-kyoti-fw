@@ -60,3 +60,18 @@ README (allowed), which names the old hook kinds. Its design uses neither.
   `reference/kb/memory-map.md` ~1100–1240 (one line on the old swap's base-word fix, a fact
   that is ours and also in the retained code), seeing file names only, and the memory index in
   its context.
+
+## Addendum 2026-10-14: the implementation (`REPITCH_REWRITE_IMPL.md`)
+
+- As implemented: one ColdFire unit (2,952 B at `0x400d6500`), 18 detours, 12 descriptor pokes.
+  The scope's sites, plus the O2 wrappers on the PART menu's paste core `0x40029a4c` and CLEAR
+  `0x4004a9d0`, which his module never touched.
+- Clean-room record: the implementer opened no blacklisted file and ran the oracle only through
+  the harness. It disclosed:
+  - blacklisted file *names* in `ls`/grep output, and one old commit subject;
+  - deleting a scratch octabam copy's `modules/repitch*` folders unopened;
+  - octabam's `CMakeLists.txt` carrying a comment that Jannik's module "relies on stock TSTR values,
+    descriptor bounds and one rate-selection block", a one-line description of his module and
+    no mechanism. The design was already fixed by the scopes when it saw this.
+- On 2026-10-14 the dirty side deleted `octabam-modules/repitch-repeat98-kyoti/`,
+  `tools/repitch_probe_kyoti.cpp` and `tools/repitch_ot_emu_trace.patch` (`c76bc05`).
