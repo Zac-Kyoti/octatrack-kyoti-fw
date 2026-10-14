@@ -748,6 +748,10 @@ zz18:
 ; the millions, Q23-audio-scale, nowhere near $10000 = 65536).
 moncommit:
         move    x:>$206,r0           ; --- displaced --- (must survive untouched)
+; Exported callable entry for a composed hook. The caller must have replayed
+; the displaced x:$206 load first; this body preserves r0 for the stock
+; dispatcher and returns after optionally replacing the committed audio.
+scmonbody:
         move    x:>$420,a             ; a = my track 0..7
         asl     #1,a,a
         move    a1,n1

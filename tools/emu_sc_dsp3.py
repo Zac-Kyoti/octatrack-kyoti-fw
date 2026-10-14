@@ -123,14 +123,17 @@ def assemble():
                              .replace("@KGNA@", f"${sc_tables.kgn_smooth_a():x}")
         a = SCRATCH / "sc3_test.asm"; a.write_text(txt)
         o = SCRATCH / "sc3_test.bin"
-        sh(DSP_ASM, "-in", a, "-org", f"{CAVE_ORG:x}", "-out", o)
+        sym = SCRATCH / "sc3_test.sym"
+        sh(DSP_ASM, "-in", a, "-org", f"{CAVE_ORG:x}", "-out", o, "-sym", sym)
         raw = o.read_bytes()
-        return [int.from_bytes(raw[i:i + 3], "little") for i in range(0, len(raw), 3)]
+        syms = {name: int(addr, 16) for name, addr in
+                (line.split() for line in sym.read_text().splitlines() if line.strip())}
+        return ([int.from_bytes(raw[i:i + 3], "little") for i in range(0, len(raw), 3)], syms)
 
-    code = build(CAVE_ORG, CAVE_ORG)
+    code, _ = build(CAVE_ORG, CAVE_ORG)
     n = len(code)
     gtab_off, ftab_off = n, n + sc_tables.GAIN_N
-    code = build(CAVE_ORG + gtab_off, CAVE_ORG + ftab_off)
+    code, syms = build(CAVE_ORG + gtab_off, CAVE_ORG + ftab_off)
     assert len(code) == n, "code size shifted between sizing passes"
     words = code + GAIN_T + FLT_T
     total = len(words)
@@ -154,6 +157,9 @@ def assemble():
     # branch happened to have a displacement of 12).
     rts = dsp_asm_util.find_rts(d, CAVE_ORG)
     sctap, scdet, sctail = CAVE_ORG, CAVE_ORG + rts[0] + 1, CAVE_ORG + rts[3] + 1
+    if syms.get("scmonbody") != sctail + 2:
+        sys.exit(f"scmonbody is at {syms.get('scmonbody')!r}, expected the first word after "
+                 f"moncommit's two-word displaced load at 0x{sctail + 2:x}")
     global RTS_ADDR
     RTS_ADDR = CAVE_ORG + rts[0]                       # sctap's own rts -- a safe -init
     return words, sctap, scdet, sctail, gtab_off, ftab_off
