@@ -45,7 +45,7 @@ TTMP = R9TAB                              # zqinit's scratch run of the render's
 # the tag says the Y tables' CONTENTS and LAYOUT are this build's: Y_LAYOUT moves it when the
 # copy changes shape (2: rev 17's first cut, the cutoff table in Y; 3: no cutoff table; 4: the render's
 # table transposed)
-Y_LAYOUT = 5                              # 5: the VEM DSP optimisation's render table (T and D runs per tap)
+Y_LAYOUT = 6                              # 6: the VEM DSP optimisation (padded render rows, RPS9 transposed)
 TAGSP = 0x5A5A09                          # "this slot is this layout's" (rev 11: ...02, 12: ...03, 13: ...04, 14: ...05, 17 first cut: ...06, aligned: ...07, VEM DSP optimisation: ...09)
 
 # SPRING REVERB's exclusive X data modules, per payload: (address, words), and
@@ -94,6 +94,14 @@ def half_table(mode):
     return [int(v) & 0xFFFFFF for v in q[:16].reshape(-1)], n
 
 
+def r9_stored():
+    """RPS9's 16 stored half-rows in the order zqinit copies them: tap-major (the
+    VEM DSP optimisation's table is transposed: tap t of phase p at R9TAB + 32 t + p, so
+    a phase's taps are walked with a stride of 32 and its row base is R9TAB + phase)."""
+    r9, n = half_table(m.MODE_RPS9)
+    return [r9[n * p + t] for t in range(n) for p in range(16)], n
+
+
 def render_half():
     """The render's step table T[0..LR/2] (zqinit rebuilds the rest and D)."""
     T, _ = m.render_q23()
@@ -106,7 +114,7 @@ def x_data(payload):
     """{X address: word} for one payload: run 1 = the render's half-table,
     run 2 = RPSP half-rows then RPS9 half-rows."""
     sp, _ = half_table(m.MODE_RPSP)
-    r9, _ = half_table(m.MODE_RPS9)
+    r9, _ = r9_stored()
     bl = render_half()
     (r1, n1), (r2, n2) = XRUNS[payload]
     run1, run2 = bl, sp + r9
@@ -154,7 +162,7 @@ def ms_filter():
 
 def constants(payload="A"):
     sp, spn = half_table(m.MODE_RPSP)
-    r9, r9n = half_table(m.MODE_RPS9)
+    r9, r9n = r9_stored()
     bl = render_half()
     L, R = m.RENDER["L"], m.RENDER["R"]
     # the asm computes the RPSP row as phase x 8 and the RPS9 row as phase x 16; the
@@ -166,7 +174,7 @@ def constants(payload="A"):
         STBASE=STBASE, TABTAG=TABTAG, SPTAB=SPTAB, R9TAB=R9TAB, BTAB=BTAB,
         TAGVAL=tag, TAGSP=TAGSP,
         SPN=spn, SPNM1=spn - 1, SPHALF=16 * spn, SPEND=SPTAB + 32 * spn - 1,
-        R9N=r9n, R9NM1=r9n - 1, R9HALF=16 * r9n, R9END=R9TAB + 32 * r9n - 1,
+        R9N=r9n, R9NM1=r9n - 1, R9HALF=16 * r9n, R9END=R9TAB + 32 * r9n - 1, R9RUN=16,
         R9SW=4 * (r9n // 2 - 1) + 2,                 # first tap: k_i - 2c - 1 frames, in words
         SPC2=2 * (spn // 2 - 1) + 1,                 # first tap: floor(pos) - 2c - 1 frames
         PSPQ20=int(round(m.PSP * (1 << 20))),        # SP tick period, output samples, Q20

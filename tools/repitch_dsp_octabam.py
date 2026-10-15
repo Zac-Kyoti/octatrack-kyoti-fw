@@ -53,7 +53,7 @@ MARK2 = "$" + "fab2e0"                  # ... and ptable2's
 def tables():
     """The two blocks, and each table's offset in its block."""
     sp, _ = dsrc.half_table(dsrc.m.MODE_RPSP)
-    r9, _ = dsrc.half_table(dsrc.m.MODE_RPS9)
+    r9, _ = dsrc.r9_stored()
     bl = dsrc.render_half()
     off = dict(XBL=0, XSP=0, XR9=len(sp))
     return bl, sp + r9, off

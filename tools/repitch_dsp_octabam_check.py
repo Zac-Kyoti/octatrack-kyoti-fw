@@ -20,8 +20,11 @@ sambanks/octabam#573.
 
     python3 tools/repitch_dsp_octabam_check.py
 """
+import os
 import pathlib
+import subprocess
 import sys
+import tempfile
 
 import numpy as np
 
@@ -68,6 +71,35 @@ def build(tag, placement):
     (ec.WORK / f"cave_{tag}.bin").write_bytes(b"".join(w.to_bytes(3, "little") for w in cave))
     (ec.WORK / f"xdata_{tag}.txt").write_text("".join(f"{a:x} {w:x}\n" for a, w in sorted(xdata.items())))
     return cave, org, code_org, len(code), (b1, b2)
+
+
+# octabam's own assembler (the user's octabam clone; OCTABAM_DSP_ASM overrides): when present,
+# the generated source must assemble there to exactly dsp_xasm's words
+OCTABAM_ASM = pathlib.Path(os.environ.get("OCTABAM_DSP_ASM", pathlib.Path.home() /
+                                          "Documents/octabam/vendor/dsp56300/build/source/dsp_host/dsp_asm"))
+
+
+def cross_assemble():
+    """None when octabam's dsp_asm is not built here; else (same words?, detail)."""
+    if not OCTABAM_ASM.exists():
+        return None
+    src, _, (w1, w2), _, _ = gen.generate()
+    org = ec.dsrc.SPRING_P["A"] + len(w1) + len(w2)
+    asm = src.replace(MARK, f"${ec.dsrc.SPRING_P['A']:x}").replace(MARK2, f"${ec.dsrc.SPRING_P['A'] + len(w1):x}")
+    mine, _ = dsp_xasm.assemble(asm, org)
+    with tempfile.TemporaryDirectory() as d:
+        a, b = pathlib.Path(d) / "k.asm", pathlib.Path(d) / "k.bin"
+        a.write_text(asm)
+        r = subprocess.run([str(OCTABAM_ASM), "-in", str(a), "-org", f"{org:x}", "-out", str(b)],
+                           capture_output=True, text=True)
+        if r.returncode:
+            return False, (r.stdout + r.stderr).strip().splitlines()[-1]
+        raw = b.read_bytes()
+    theirs = [int.from_bytes(raw[i:i + 3], "little") for i in range(0, len(raw), 3)]
+    diff = [i for i, (x, y) in enumerate(zip(mine, theirs)) if x != y]
+    if len(mine) != len(theirs) or diff:
+        return False, f"{len(theirs)} vs {len(mine)} words, first difference at +{diff[0] if diff else '?'}"
+    return True, f"{len(mine)} words identical"
 
 
 def main():
@@ -117,6 +149,13 @@ def main():
                 if not ok:
                     print(f"  FAIL mode switch {label}: {detail}")
     print(f"\n{sum(results)}/{len(results)} PASS (bit-exact with the DSP-exact twin, and the mode switch)")
+    cross = cross_assemble()
+    if cross is None:
+        print(f"  (octabam's dsp_asm not found at {OCTABAM_ASM}: cross-assembly skipped)")
+    else:
+        print(f"  octabam's dsp_asm on the generated source (P placement): "
+              f"{'PASS' if cross[0] else 'FAIL'} -- {cross[1]}")
+        results.append(cross[0])
     for (p, mname), v in sorted(cost.items()):
         print(f"  {p} {mname}: median {np.median(v):.1f} instr/sample, range {min(v):.1f}-{max(v):.1f}")
     sys.exit(0 if all(results) else 1)

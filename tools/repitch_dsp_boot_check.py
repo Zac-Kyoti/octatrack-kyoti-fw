@@ -103,10 +103,13 @@ def expected_y():
     """{Y address: word} of what zqinit must leave."""
     c = dsrc.constants("A")
     want = {c["TABTAG"]: c["TAGVAL"]}
-    for mode, base in ((m.MODE_RPSP, c["SPTAB"]), (m.MODE_RPS9, c["R9TAB"])):
-        q = m.fir_q23(mode) & 0xFFFFFF
-        for i, w in enumerate(q.reshape(-1)):
-            want[base + i] = int(w)
+    q = m.fir_q23(m.MODE_RPSP) & 0xFFFFFF                   # row-major: phase p, tap t at 8 p + t
+    for i, w in enumerate(q.reshape(-1)):
+        want[c["SPTAB"] + i] = int(w)
+    q = m.fir_q23(m.MODE_RPS9) & 0xFFFFFF                   # transposed: tap t of phase p at 32 t + p
+    for p_ in range(q.shape[0]):
+        for t in range(q.shape[1]):
+            want[c["R9TAB"] + 32 * t + p_] = int(q[p_, t])
     T, D = m.render_q23()
     L, R = m.RENDER["L"], m.RENDER["R"]
     for j in range(R):

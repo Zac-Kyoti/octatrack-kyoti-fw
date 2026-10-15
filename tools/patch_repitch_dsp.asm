@@ -81,15 +81,24 @@ S_TAU   equ     $15     ; time of the next tick (from the start of the next inte
 S_RW    equ     $16     ; the ring slot (absolute address) of the next output
 S_TAG   equ     $17
 S_SIZE  equ     $18     ; (track 3's slot ends in TABTAG at +$1f)
-; in the output loop r6 rests on OH: these are the fields' displacements from it
+; RPSP's r6 rests on OH: these are the fields' displacements from it (the ring
+; starts S_OH words below)
+D_OL    equ     S_OL-S_OH
 D_PF    equ     S_PF-S_OH
 D_HM    equ     S_HM-S_OH
 D_PKW   equ     S_PKW-S_OH
+D_MASK  equ     S_MASK-S_OH
+D_RB    equ     S_RB-S_OH
 D_RF    equ     S_RF-S_OH
+D_PHI   equ     S_PHI-S_OH
+D_RH    equ     S_RH-S_OH
+D_LS    equ     S_LS-S_OH
 D_TAU   equ     S_TAU-S_OH
 D_RW    equ     S_RW-S_OH
+D_TAG   equ     S_TAG-S_OH
 NWALK   equ     $1000000-(S_RB-S_OH)    ; r6 back from RB to OH
 STTAG   equ     STBASE+S_TAG
+STOH    equ     STBASE+S_OH
 R9B     equ     128-R9SW                ; RPS9's first tap, from r2, mod 128
 LSMUL   equ     ((1<<LSSH)-1)<<(23-LSSH)        ; (2^LSSH - 1) / 2^LSSH, Q23
 BRM1    equ     BR-1
@@ -145,54 +154,54 @@ zqnh:
         move    #<R9B,n2
         move    #>$fff000,y1            ; the 12-bit mask
         lua     (r2)+n2,r6              ; r6 = r2 + the first tap's offset (in the block)
+        move    #<32,n7                 ; the table is transposed: tap t of phase p at R9TAB + 32 t + p
+        move    y:(r5),b                ; b1 = the fraction (each output loads the next one's)
         do      r7,zq9e
-        move    y:(r5),b                ; b1 = the fraction
         move    x:(r5)+,n1              ; n1 = ring word offset of k_i
         move    r6,r1
         lsr     #19,b                   ; phase 0..31
         move    (r1)+n1                 ; r1 = the first tap, k_i - 2c - 1 (m1 = $7f wraps it)
-        lsl     #4,b                    ; x 16 taps
         add     #>R9TAB,b
-        move    b1,r7                   ; the phase's row (the loop count is in LC now)
+        move    b1,r7                   ; the phase's tap 0 (the loop count is in LC now)
         clr     a       x:(r1)+,x0
-        clr     b       x:(r1)+,x1      y:(r7)+,y0
+        clr     b       x:(r1)+,x1      y:(r7)+n7,y0
 ; taps 1..15, unrolled (rev 17): a DO here cost 5 cycles per output, 8% of RPS9
         mac     y0,x0,a x:(r1)+,x0
-        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+n7,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+n7,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+n7,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+n7,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+n7,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+n7,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+n7,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+n7,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+n7,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+n7,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+n7,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+n7,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+n7,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+n7,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     x1,y0,b x:(r1)+,x1      y:(r7)+,y0
+        mac     x1,y0,b x:(r1)+,x1      y:(r7)+n7,y0
         mac     y0,x0,a
         mac     x1,y0,b a,x0            ; limit L
         tfr     x0,a    b,x0            ; limit R
         and     y1,a    x0,b            ; 12 bits: floor to a 1/2048 step
         and     y1,b    a1,x:(r3)+
-        move    b1,x:(r3)+
+        move    b,x:(r3)+       y:(r5),b        ; (b = b1: in range); the next fraction
 zq9e:
         move    n5,m1                   ; (zqdone's tail, inline: no branch)
         move    #$0,r7
@@ -214,29 +223,32 @@ zqsp:
         tst     b                       ; is not this track's -- the slot waits for a
         beq     zqdone                  ; real pass (on the unit an empty pass is mode 0)
         move    x:>$418,n6              ; the track offset
-        move    #>STBASE,r6
+        move    #>STOH,r6
         move    r7,n2                   ; n2 = the pass count
-        move    (r6)+n6                 ; r6 = this track's slot (m6 = $7f: the slot does
+        move    (r6)+n6                 ; r6 = this track's OH (m6 = $7f: the slot does
         move    #$40,r4                 ;  not straddle 128 words)
-        move    y:(r6+S_TAG),b
+        move    y:(r6+D_TAG),b
         cmp     #>TAGSP,b
         beq     zqsok
         clr     b                       ; stale, first use or a trig: clean ring + state
-        move    r6,r1
-        do      #S_SIZE,zqsz
+        lua     (r6-S_OH),r1            ; (the ring and what starts at zero; every other
+        move    #>TAGSP,x1              ;  word is set below or at each pass)
+        move    r1,y:(r6+D_RW)          ; the ring starts the slot
+        do      #BL,zqsz
         move    b,y:(r1)+
 zqsz:
-        move    #>TAGSP,x1
-        move    x1,y:(r6+S_TAG)
+        move    b,y:(r6+D_PHI)
+        move    b,y:(r6+D_HM)
+        move    b,y:(r6+D_TAU)
+        move    x1,y:(r6+D_TAG)
         move    #>$7e,x0
-        move    r6,y:(r6+S_RW)          ; the ring starts the slot
-        move    x0,y:(r6+S_MASK)
+        move    x0,y:(r6+D_MASK)
         move    #>LS0,x0                ; the read shift starts at its mean
-        move    x0,y:(r6+S_LS)
+        move    x0,y:(r6+D_LS)
         bra     zqsrs                   ; "previous output" = this pass's first
 zqsok:
         move    x:(r5),a                ; resync "previous" if this pass does not
-        move    y:(r6+S_PKW),x0         ; continue it: ring positions advance
+        move    y:(r6+D_PKW),x0         ; continue it: ring positions advance
         sub     x0,a                    ; continuously while a sound plays, so a
         and     #>$7e,a                 ; jump of more than 2 frames (4 words) means
         move    a1,b                    ; the state is stale (the track has been in
@@ -244,9 +256,9 @@ zqsok:
         ble     zqsnj
 zqsrs:
         move    x:(r5),x0
-        move    x0,y:(r6+S_PKW)
+        move    x0,y:(r6+D_PKW)
         move    y:(r5),x0
-        move    x0,y:(r6+S_PF)
+        move    x0,y:(r6+D_PF)
 zqsnj:
 ; ---- this pass's constants. r = int(r) + frac(r) as the DSP holds it (x:$40 is
 ; read for bit 0 only -- on the unit it reads $c1 at 1.0x; the table builder
@@ -257,28 +269,27 @@ zqsnj:
 ; the fraction stays one)
         move    l:(r4),a                ; a = l:$40 = r as 24.24 (r4 = $40)
         and     #<1,a                   ; (a1 only; a0 stays)
-        move    a0,y:(r6+S_RF)
+        move    a0,y:(r6+D_RF)
         asr     a                       ; a0 = RH = r x 2^23, unsigned (a1 = 0)
         move    a0,y0
-        move    y0,y:(r6+S_RH)
+        move    y0,y:(r6+D_RH)
         move    #>KD,x0
         mpyuu   y0,x0,a                 ; (MS_SIDE_DELAY / 16) r x 2^47 (RH unsigned; < 2^47)
-        move    y:(r6+S_LS),b
+        move    y:(r6+D_LS),b
         asr     #19,a,a                 ; -> MS_SIDE_DELAY r, 24.24
         asr     #22,b,b                 ; the read shift (Q22 -> 24.24)
         add     #<SIDEC,a               ; + c + 1 frames
         add     b,a
         move    a1,x0
         add     x0,a                    ; integer part x 2
-        move    a1,y:(r6+S_OH)
-        move    a0,y:(r6+S_OL)
-        move    r2,y:(r6+S_RB)
+        move    a1,y:(r6)
+        move    a0,y:(r6+D_OL)
+        move    r2,y:(r6+D_RB)
         move    m7,n7                   ; restored at zqoe
         move    #RINGM1,m7
-        move    y:(r6+S_RW),r7
-        move    y:(r6+S_TAU),r4         ; r4 = tau through the pass; n4 = one interval
+        move    y:(r6+D_RW),r7
+        move    y:(r6+D_TAU),r4         ; r4 = tau through the pass; n4 = one interval
         move    #>$100000,n4
-        lua     (r6+S_OH),r6            ; r6 rests on OH
         move    #>NWALK,n6              ; r6 walks OH .. RB once per output
         do      n2,zqoe
         jset    #20,r4,zqout            ; tau >= 1 (tau < PSP < 2 always): no tick here
@@ -524,12 +535,22 @@ zqi4:
         move    x0,y:(r4)+
         move    x0,y:(r7)-
 zqi1:
+; RPS9's arrives tap-major (16 runs, one per tap, of phases 0..15): each run goes up
+; from the table's start and its mirror (phases 31..16 of tap 15-t) down from its end
         move    #>R9TAB,r4              ; r1 is at XR9: it follows XSP
         move    #>R9END,r7
+        move    #>R9RUN,b
         do      #R9HALF,zqi2
         move    x:(r1)+,x0
         move    x0,y:(r4)+
         move    x0,y:(r7)-
+        sub     #<1,b
+        bne     zqi6
+        lua     (r4+R9RUN),r4           ; past the mirrored phases
+        lua     (r7-R9RUN),r7
+        move    #>R9RUN,b
+zqi6:
+        nop                             ; (the loop's last word: a branch target)
 zqi2:
         move    #>TAGVAL,x0
         move    x0,y:>TABTAG
