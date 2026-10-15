@@ -128,7 +128,9 @@ quick check for each:
   playing a kick. The compressed track ducks on the kick; `MON` lets you hear the key.
   A project saved on stock firmware with a COMPRESSOR in it: that compressor's page 2
   reads `KEY OFF`, `KFLT` and `KGN` centred, `MON OFF`, and it compresses as it did on
-  stock; a KEY you set on this firmware is kept.
+  stock; a KEY you set on this firmware is kept. With a keyed COMPRESSOR running, DARK REV
+  and PLATE REV in FX2 on T1 and on T5 (long settings) ring clean, with no other track's
+  audio in them.
 - **RELOAD_FROM_PROJECT** — save the bank, change a track's trigs, then `[PTN]` +
   `[TRACK n]` while playing: the saved trigs come back without the transport stopping.
 - **QUANTIZE_LIVE_REC_TOGGLE** — hold `[REC]`, tap `[PLAY]` → toast; tap `[PLAY]` again

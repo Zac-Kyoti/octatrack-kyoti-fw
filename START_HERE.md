@@ -159,10 +159,21 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   Bugbuild `BUG_BP303` (mainos `0de8be5c…`, syx `55b38837…`): emulator-verified, not flashed.
   - The octabam module is ported (`octabam-modules/blackpyramids-303/`); its octabam PR
     (with `Module.dsp_source`) is drafted, not sent. Not flashed in octabam form.
+  - **WIP 2026-10-15 (not flashed, not promoted): an optimization pass over the Octatrack-side
+    code, with the sound unchanged.**
+    - What changed: the Y table is pre-packed, the continuous words are remade only when their own
+      knobs change, and the DSP record unpack is one instruction a word shorter.
+    - Results: ColdFire −688 instructions a frame with two voices; DSP −1.6 cycles a sample.
+    - Checked: the records are byte-identical to the old `record.c`'s, `host_check` is BIT-EXACT,
+      and `verify_ot303` passes.
+    - Builds: standalone mainos `504aed6a…`, syx `d4808a7b…`; `BUG_BP303` mainos `0e1aff99…`.
+    - The FINAL pins still name `3624a1e7…` / `0de8be5c…`.
   - Open: a square-wave voice on core 0 under the heaviest FX stack may overrun (§4 there).
-  - Open: not in KYOTI yet. SIDE-CHAIN's key bus (Y:$7f0–$9ff) lies inside the voice's Y
-    (`$7a5–$feb`), and ERASE_EMPTY_TRIGLESS_LOCKS must skip these tracks (an empty trigless
-    lock is a tie here).
+  - Open: not in KYOTI yet. SIDE-CHAIN's key bus has left the voice's Y (WIP, 2026-10-15), but
+    both still need SPRING REV's program words, so a combined image gives up a second effect for
+    one of them. ERASE_EMPTY_TRIGLESS_LOCKS must also skip these tracks (an empty trigless lock is
+    a tie here). KYOTI V1.5 is planned without BLACKPYRAMIDS_303: V1.4 + VARISPEED + SIDE-CHAIN,
+    composed once VARISPEED is on main.
 
 - **KYOTI V1.4** (`tools/build_kyoti.py`, 2026-10-13) — V1.3 without REPITCH_REPEAT98_KYOTI,
   ROM-only (RELOAD back in the proven cave, EMPTY_PATTERN_LED_FIX in SAFE_CAVE). **FINAL
@@ -186,6 +197,23 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   replacement under discussion (octabam remix). The octabam images OBKYOTI6–12 are clean.
 - **DIRECT_JUMP_KYOTI** — not yet on hardware: MIDI tracks, and Program Change on fast
   re-cues.
+- **SIDECHAIN_COMPRESSOR, WIP 2026-10-15 (not flashed, not promoted):**
+  - **The change:** the DSP keybus and MON words moved from Y:`$800–$9ff`/`$7f0` to
+    Y:`$7e00–$7fff`/`$7df0` (the first internal FX2 slot's unused tail), freeing `$7f0–$9ff` for
+    BLACKPYRAMIDS_303's voice. `sctap` now copies each block in one pass, at 2 instructions a word
+    (ot_emu: 96 instructions a call against 163).
+  - **Verified (emulator only):** `tools/emu_sc_sctap.py` (a model, and word for word against
+    `8265344`'s tap), `emu_sc_dsp3.py`, and ot_emu, where the mix equals the promoted build's.
+  - **Builds:** standalone mainos `9f7899d4…`, `BUG_SC3X` mainos `5513f93b…`. They are WIP, so
+    `kyoti_status` FINAL still pins the old images. KYOTI V1.4's pin breaks with them, and its
+    FINAL image is unchanged.
+  - **To check on the unit:**
+    - KEY ducking on the same core and across cores;
+    - MON;
+    - DARK REV and PLATE REV in FX2 on T1 and T5 (the slot whose tail now holds the keybus),
+      long settings, with a keyed COMPRESSOR running: no cross-talk.
+  - **Sam's PR #2 on our repo** (`scmonbody`, for LOAD METER's composed hook): reviewed, merges
+    cleanly on top, not merged yet (the user merges it). octabam's pin moves to the merge commit.
 - **SIDECHAIN_COMPRESSOR** — `sc_norm` (FINAL 2026-10-08, syx `d21762d0…`): a COMPRESSOR saved
   on stock firmware (KEY byte 127) comes up with its side-chain OFF. User flashed the standalone
   and KYOTI V1.1 `370d7705…`: no issues. Not specifically tried on hardware: a project saved on

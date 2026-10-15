@@ -36376,3 +36376,53 @@ Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
   octabam's loader zero-fills the reserve with stock 0x40020984 first): ALL GOOD. octabam gates: selftest OK (+ the
   test remix in its give-up table), verify-remix all pass (verify_dram_boot: reserve == linked runtime), verify_docs
   one problem, pre-existing upstream (docs/site/index.md -> reference/modules.md). Not flashed in octabam form.
+
+## 2026-10-15 (`ot303`) — SIDECHAIN_COMPRESSOR keybus move + one-pass tap (WIP); Sam's PR #2; BLACKPYRAMIDS_303 optimization pass (WIP); KYOTI V1.5 waits for VARISPEED
+
+The user's plan: KYOTI V1.5 = V1.4 + plain VARISPEED + SIDECHAIN_COMPRESSOR, only SPRING REV given up, no
+BLACKPYRAMIDS_303 (VARISPEED is CF-only, so SPRING keeps only SIDE-CHAIN's section). Then any SIDE-CHAIN work still
+open, Sam's PR #2, and an optimization pass over BLACKPYRAMIDS_303's Octatrack-side code with the sound unchanged.
+
+- **Sam's PR #2** (Zac-Kyoti/octatrack-kyoti-fw, `codex/sidechain-load-meter-hook`, 8b2e3c9): exports `scmonbody`
+  (moncommit + 2) so LOAD METER's OTOP hook, which takes the same dispatcher site (A P:$50E / B P:$303), can call
+  SIDE-CHAIN's MON body after replaying the displaced load. Builds the promoted image byte for byte, emu_sc_dsp3 ALL
+  GOOD, merges cleanly with main and with the commits below (scmonbody = moncommit + 2 on the new code too). NOT
+  merged by this session: the user merges it (the auto-mode classifier refused a local merge of the external
+  commit). Review note for Sam: the body also clobbers a, b, x0, r1, n1, r3 and the loop registers. Reply draft:
+  ~/Documents/octabam-note-to-sam-pr2.md (pin placeholder <MERGE>).
+- **SIDECHAIN_COMPRESSOR (687869a, WIP):** keybus Y:$800-$9ff -> $7e00-$7fff, MON $7f0 -> $7df0, both cores: the first
+  internal FX2 slot's tail (stock's highest write slot+$3da2, octabam stock.SLOT_EXTENT; the same +$3e00 offset as
+  the cross-core window in the shared slots, hardware-confirmed since S115; both boot loops zero Y:$4000-$bfff).
+  Only long immediates name them: 7 words a payload. Frees $7f0-$9ff (BP's voice Y, BusDelay's private $903).
+  sctap: one pass, `move a,y:(r1)+` + XY `move x:(r0)+,a a,y:(r6)+` (r6 reloaded by the displaced instruction), 2
+  instructions a word for both copies (was 4); 384 words (was 388). ot_emu --dsp-stopwatch over the hook: 96
+  instructions a call (was 163), 4 calls a block a core => ~17 a sample a core.
+  Verified: new tools/emu_sc_sctap.py (model: 6 blocks x 4 tracks, a counter crossing $800000, 642 words, no
+  stray Y write; --ref 8265344: all of internal Y + the shared window equal, keybus at each version's address);
+  emu_sc_dsp3.py ALL GOOD (+ --patched); ot_emu sctest6 (KEY=T2, MON on/off): the mix equals the promoted build's
+  over the common 591,712 frames (the keybus-only build was byte-identical; the tap build's run ends a frame
+  apart); --dsp-watch: sctap writes $7e00 (core 1) / $7f00 (core 0) with the values it wrote at $800/$900, $800
+  no longer written. octabam scratch (da2def4d + submodule 687869a): check-remix test/sidechain-compressor and
+  test/kyoti-mute-sidechain pass; the ledger takes DspRange y $7df0 +$210.
+  Builds (WIP, NOT flashed): standalone mainos 9f7899d4756cc8fb…, syx b26551a2b13e9676… (`140C_KYOTI`); BUG_SC3X
+  mainos 5513f93b658c0ded…, syx 6cf980e13320ec47…. HW checks: ducking same/cross core, MON, DARK/PLATE on T1 and
+  T5 FX2 (the slot whose tail holds the keybus) with a keyed COMPRESSOR: no cross-talk.
+  KYOTI V1.4's FINAL pin now breaks (it carries SIDE-CHAIN): its flashed image is unchanged; the next KYOTI is V1.5.
+- **KYOTI V1.5: NOT built.** Plain VARISPEED (tools/build_varispeed.py, 140C_VARI1, syx 78cfad33…) lives only on the
+  repitch-rewrite branch (another session's, unpushed, the user's OK to push pending). That session will push it
+  and message this one; then build_kyoti.py gets VERSTR "KYOTI V1.5", VARISPEED as a feature, outputs under
+  out/KYOTI_WIP/ until promoted.
+- **BLACKPYRAMIDS_303 optimization pass (e2fde9a, WIP).** Measured first (ot_emu, BOTLI line on T2 + T6): the
+  engine is ~6,030 instructions a frame, the host glue ~550-750 (8 %); ColdFire: BP's runtime ~3,000 of 29,934
+  instructions a frame (two voices), the hottest part ot_record's table chunk (55 words packed every frame, 13
+  instructions a word). The engine (Open303's port) is excluded by the user. Changes: the Y table packed at
+  build time (ot_ytab_pk; the chunk a plain copy, 5 instructions a word); the continuous words made again only
+  when CUT/RES/ENV/WAVE/SLID/VOL change (they were remade on any of the 12 knobs, so a PTCH lock or LFO forced
+  the 64-bit compile); host.asm hq_unp masks with y1 and adds (y1 dead at CONT: stock writes it first on both
+  payloads). Results: records byte-identical to the old record.c over 200,000 random frames x 2 voices;
+  host_check BIT-EXACT (saw 471.8 -> 470.2, square 616.9 -> 615.3 cycles/sample, note frames -2.7);
+  verify_ot303 ALL GOOD (voiced frame 6354 -> 6341); ColdFire 29,934 -> 29,246 instructions a frame. Not worth
+  doing: the stock-track seam path (54.6 cycles a call: dsp_asm emits long branches only, nothing to drop), the
+  output copy (3 X accesses a sample is the floor). The octabam module is regenerated (runtime 28,704 B, sha256
+  2b3b045d…). Builds (WIP, NOT flashed): standalone mainos 504aed6aafa92427…, CF .bin 33dfa28be8d908b5…, syx
+  d4808a7b00ccdadf… (`140C_BP303`); BUG_BP303 mainos 0e1aff9980b97baf…, syx c8e130c14cfa6809….

@@ -116,6 +116,13 @@ What this settles:
 - (A 417–419 reading between the steps in both recordings matches the mode at 120 and is not
   analysed further.)
 
+### 3b. 2026-10-15: what was done instead
+
+The author chose KYOTI V1.5 = V1.4 + VARISPEED + SIDECHAIN_COMPRESSOR, with only SPRING REV given up
+and no BLACKPYRAMIDS_303. SIDE-CHAIN's keybus and MON words moved anyway (WIP), from Y:`$7f0–$9ff`
+to Y:`$7df0–$7fff`, the tail of the first internal FX2 slot (§3's move 1, at no cost per access).
+The Y collision in §2 is therefore gone; the P collision (both in SPRING's words) stays.
+
 ## 4. Needed whatever option is picked
 
 - **ERASE_EMPTY_TRIGLESS_LOCKS must skip BLACKPYRAMIDS_303 tracks:** an empty trigless lock is
