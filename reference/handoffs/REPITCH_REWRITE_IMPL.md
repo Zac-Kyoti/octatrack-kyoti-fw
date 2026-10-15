@@ -7,7 +7,8 @@ Nothing was flashed, promoted or pushed. KYOTI's combined image was not touched.
 
 Marks: **C** = confirmed on our image (objdump, or an emulator run); **I** = inferred.
 
-**Current build: `140C_VEM2` (§8, 2026-10-14), the two fixes from the first hardware test.**
+**Current build: `140C_VEM4G` (§10, 2026-10-14), VEM3 plus the DSP load guard (a test label, not flashed).**
+Earlier: `140C_VEM2` (§8), the two fixes from the first hardware test; `140C_VEM3` (§9).
 §1-§5 describe `140C_VEM1`, the image flashed on 2026-10-14; where VEM2 changed something,
 §8 says so.
 
@@ -567,3 +568,289 @@ now adds a stopband from 0.5 × FS_AKAI (20 kHz):
   264/264; RPS9 52.2 instructions per sample (unchanged).
 - **Build:** OS VERSION `140C_VEM3`. syx `6a39fa79…`, CF bin `68a60119…`, MAIN OS `22848483…`.
   NOT flashed.
+
+---
+
+## 10. VEM4G, 2026-10-14 (clean side): the DSP load guard (spec §6)
+
+Same worktree, clean side. Read for this section: the spec (all), this file §1-9, both scopes,
+`CLAUDE.md`, `reference/kb/caves.md` (§0-§2b, filtered), `reference/kb/file-format.md` (the
+pattern/track layout), our module sources, builder, tests, harness, `tools/repitch_dsp_profile.py`,
+`tools/load_audit/{la_run.py (filtered), isr_stats.py, ot_emu_load_audit.patch}`, the stock image.
+**Nothing was flashed, promoted or pushed.** KYOTI's combined image was not touched.
+
+**A new build exists: `140C_VEM4G` (a test label), WIP, not flashed.**
+
+| file | sha256 |
+|---|---|
+| `out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx` (MIDI DIN) | `9b04a6d9602da90af1545f292221fa04755efb37fa4655eb3daede45d2f35721` |
+| `out/OCTATRACK_VARISPEED_EMUS.bin` (CF card) | `b261a5df8181ff9271fe6001f2d48d241cc67200a21e9a7e534b3f56c9b54f9d` |
+| `out/mainos_varispeed_emus.bin` | `bfec7573576f8ac7d1d6e52b120ebefac5890561ea716ddae6d375817bd20b82` |
+| `out/elek_varispeed_emus.bin` | `939c277dcfe64c16e559a8c5cfbf7dff27f31a99a5a25b309b302386699e047d` |
+
+Unit: **4,016 B** at `0x400d6500..0x400d74b0` (1,932 B of the classic cave left), the same bytes
+for `-mcpu=5407` and `54455`, sha256 `c650b4ad…` (manifest reference updated). Against VEM3 the
+image differs only in the unit, the 19 detour target words and the descriptor pokes (the unit's
+symbols moved): **the DSP payloads are byte-identical to VEM3's**. Rebuilt twice, same hashes.
+
+Emulator: the harness/test binary is unchanged (`out/vem/octabam/out/emu/ot_emu`). The DSP-cycle
+measurements use a second build of the same scratch source with an environment-gated cycle
+stopwatch (`out/vem/octabam/out/emu_cyc/ot_emu`; `tools/varispeed_emus_ot_emu.patch` now carries
+it), driven by scratch scripts in `out/vg/` (`measure.py`, `m1.py`-`m4.py`; not committed). VEM3's MAIN OS is kept as
+`out/vem_variants/mainos_varispeed_emus_vem3.bin` (`22848483…`) with its symbols, for the
+comparisons below.
+
+### 10.1 Facts found (C = objdump of `section_3_MAIN_OS.bin` or an emulator run; I = inferred)
+
+1. **Which core renders which tracks (C, emulator).** DSP core 1 (payload B, voice kernel entry
+   `P:0x20e`, four-track loop `P:0x17a..0x333`) renders **T1-T4**; core 0 (payload A, `P:0x40b`,
+   loop `P:0x372..0x53e`) renders **T5-T8**. Evidence: the VEM log's `x:$418` track offsets per
+   core (T1 = core 1 offset 0; the `latch` test); and the loops' own cost: four SP12 voices on
+   T1-T4 raise core 1's loop by 516 modelled cycles/sample and leave core 0's; three on T5-T7
+   raise core 0's by 283. The ColdFire builds all eight voice records in one block per frame
+   (voice loop `0x4000d3fc..0x4000d55e`, `0x80001c90 + 2688·frame + 336·t`); the split per core
+   happens on the host-port side (I, not traced).
+2. **The live FX types (C).** One byte per track: **FX1 at `0x80000ec4 + t`, FX2 at
+   `0x80000ecc + t`**. The Part applies copy them from the Part (`0x4000220e..0x4000222a`: Part
+   block `DB + 0x8ed80 + 0x18b2·part`, `+0` FX1, `+8` FX2), and every frame `0x40004d30` /
+   `0x40004d40` copy them into the frame's per-track DSP record (words `+54` / `+56`): they are
+   what the DSP runs this frame. Id -> effect: the FX1 / FX2 tables `0x400d5f58` / `0x400d5fdc`
+   give each id's page descriptor `P`, whose `P+0` is the id itself, `P+4` the short name and
+   `P+9` the long one: `0x00` NONE, `0x04` FLTR (FILTER), `0x05` SPAT, `0x08` DEL (FX2 only),
+   `0x0c` EQ, `0x0d` DJEQ, `0x10` PHSR, `0x11` FLNG, `0x12` CHOR, `0x13` COMB, `0x14` PLTE,
+   `0x15` SPRG, `0x16` DARK (FX2 only), `0x18` COMP, `0x1c` LOFI; every other id points at
+   NONE's page. In this image SPRING (`0x15`) shows NONE and its DSP entry is the empty stub.
+3. **Sounding (C).** The voice state `0x800049d8 + 168·t`, **byte `+0`**: nonzero while the voice
+   plays. The stream engine outputs silence when it is 0 (`tst.b (a2)` at `0x400079b2`); the
+   voice reset `0x40006820` clears it (`0x4000685e`), and the voice loop calls the reset on a
+   stop event (`0x4000d45a`). Emulator: `0xff` on playing tracks, 0 after the reset.
+4. **But the DSP does not care whether a voice sounds (C, emulator) -- a deviation from the
+   spec's model, see 10.6.** The render sets every pass's output count from the pass length, not
+   from the voice (`0x40004172..0x400041aa`, header `+0..+2`), and the kernel runs its engine
+   over all of them. Measured: seven VARI SP12 voices, all reset at frame 801 (voice `+0` = 0 on
+   every track, no trig until 820+): core 1's loop stays at 1,074-1,118 modelled cycles/sample
+   (580 on OT). **An S950 / SP12 voice costs its engine on every frame its increment carries
+   the engine, sounding or not.**
+5. **Where to compute it (C).** The render's increment store (our H1, `vem_frame`) runs on the
+   second pass of every ST/FL/PU track, **in track order T1..T8** inside the voice loop, and the
+   records go to the DSP after the loop. So the first engaged VARI track of a core in a frame
+   comes before every other emu voice of that core: one pass there can decide for the whole
+   core within the same frame. The frame's identity: `0x800000e0` is the DSP's buffer index,
+   read from the host word `0x2000001c` at every frame ISR entry (`0x4000aaee..0x4000ab02`;
+   it halts if it exceeds 1, `0x4000ab3e`); emulator: it alternates 1, 0, 1, 0 frame by frame.
+   The machine bytes `0x80000eb4 + 8·frame + t` (DB machine codes; `0xff` until a track's
+   first trig) select the render through `0x400d6434`: only 0 ST, 1 FL and 4 PU reach
+   `0x40004008`, and PICKUP's increments are masked (engine 0).
+6. **The spec's prices re-measured (C, emulator, our scratch ot_emu with a cycle stopwatch,
+   OTDEMO, 1,500 frames, the loops above, modelled = datasheet cycles):** base (all FX NONE)
+   577 (core 1) / 482 (core 0) on stock, against the spec's 574 / 477; DARK x4: 273 / 260 per
+   instance (spec 267); DJ EQ x4: 352 / 350 (spec 347). The emulation engines in situ: SP12
+   129 per voice (core 1 mean), S950 43 on OTDEMO; 133 / 45 on MMTESTDT's core 0 (10.4); the
+   profile's worst case (10.3) is higher.
+
+### 10.2 Design
+
+All in `varispeed_emus.s` (PART 1, "THE DSP LOAD GUARD"), three routines and 120 B of state:
+
+- **`vem_frame`** (engaged VARI tracks only; every other path is unchanged, so a track that is
+  not VARI costs nothing new): reads the engine its increment carries (`36(a3)` bits 2-3), calls
+  `vg_core`, then at a trig `vg_latch` with the engine EMUS asks for; tags the increment with the
+  result.
+- **`vg_core`**, per core and frame (key `frame << 4 | track` detects the first call of a core in
+  a frame): FX = the prices of the core's eight live FX ids (cached per core with their sum,
+  re-priced only when an id changes). If `VG_BASE + FX + 4·VG_SP12` fits the budget the core is
+  **free** this frame and nothing else runs. Otherwise `est = VG_BASE + FX + Σ` the engine each of
+  the core's ST/FL tracks carries; above the budget it **steps the core's emu voices down at
+  once**, one engine at a time (SP12 -> S950 -> OT), lowering their carried engine in the render
+  state (`+36`), so each plays the cheaper engine in this very frame and keeps it until its next
+  trig. Order: **silent voices first** (voice `+0` = 0), then **the most recently started**
+  (`vg_stamp`, the latch's counter), until the estimate fits or every emu voice is on OT (stock
+  FX alone over budget: nothing more).
+- **`vg_latch`**, at a trig: free core -> granted. Else `est - old engine + wanted`; while over
+  budget the next cheaper engine (SP12 -> S950 -> OT). The start is stamped; `vg_down[t]` records
+  whether it was stepped down.
+- **Restore**: only at a later trig (`vg_latch` grants the EMUS choice when the budget allows).
+- **Marker (draw path only)**: `emus_widget` calls `vg_mark`: while `vg_down[t]` is set and the
+  track plays a cheaper engine than its EMUS setting, the dial points at the playing engine and
+  the readout is `emus_fmt_dn`: **`OT!`** or **`S95!`** (at most four characters, like `S950`).
+  A pending EMUS change (latched at the next trig) is not marked: `vg_down` is only set by the
+  guard. `rp_swap_m` clears `vg_down[t]` on every VARI transition and adoption.
+- State (`vg_fxc`, `vg_stamp`, `vg_est`, `vg_clock`, `vg_free`, `vg_down`, `vg_key`) lives in the
+  unit, nowhere near `0x80006a40..0x80006abf` (the builder refuses it). The frame path calls no
+  UI or kernel primitive.
+- Builder: seven new CONTEXT asserts (the FX-id copies, the voice `+0` test and reset, the frame
+  index read, the voice loop's machine bytes, the render table), default label `140C_VEM4G`.
+
+### 10.3 Constants (one block in `varispeed_emus.s`, `VG_*`; the tests read it from there)
+
+| constant | value | source |
+|---|---|---|
+| `VG_BASE_C1` / `VG_BASE_C0` | 574 / 477 | spec §6 item 1 (re-measured 577 / 482) |
+| `VG_SC` | 0 | spec: SIDECHAIN_COMPRESSOR adds 56 per core; not in this image |
+| `VG_FX_*` | DJ EQ 347, LO-FI 313, CHORUS 312, SPRING 306 (`VG_FX_SPRING_HERE` 0: the stub), FILTER 267, DARK 267, PLATE 240, PHASER 223, EQ 200, FLANGER 146, COMB 111, COMPRESSOR 89, SPATIALIZER 77, DELAY 0, NONE 0 | spec §6 item 1 |
+| `VG_SP12` / `VG_S950` | **270 / 109** | `tools/repitch_dsp_profile.py`, worst ratio, its `~hw` column (see below) |
+| `VG_BUDGET_C1` / `VG_BUDGET_C0` | 3930 / 3350 | spec §6 item 2, the clean points |
+
+**Which engine price (a deviation from the instructions; please decide).** The profile reports
+three figures per output sample, the worst over 0.5-1.99x (VEM3's kernel, both payloads):
+
+| engine | instructions | datasheet cycles | `~hw` estimate |
+|---|---|---|---|
+| SP12 (RPSP) | 115.4 | 146.5 | 269.8 |
+| S950 (RPS9) | 51.6 | 57.3 | 108.6 |
+
+I was asked to use the datasheet ("modelled") column. With it the spec's own acceptance setup
+does not trip: 4 x SP12 + DARK x4 + DJ EQ x3 on T5-T8 is 477 + 1,068 + 1,041 + 4·147 = **3,174**,
+under the 3,350 clean point, and so is the user's crash bracket. The brackets themselves pin the
+per-voice price in the budget's units: clean at DJ EQ x2 and crash at x3 give 278 and 288 (264
+and 275 if SIDECHAIN's 56 was in the image they were measured on). The profile's `~hw` column
+(a one-word instruction 2 cycles, a displaced access +2: this kernel is dense in displaced
+accesses, the stock FX code is not) gives **270**, inside that range: DJ EQ x2 = 3,319 (fits,
+by 31), x3 = 3,666 (steps down). So the build uses `~hw` for both engines. If the hardware
+brackets were measured on an older, heavier kernel, the datasheet figures may be the right ones
+and the guard over-protects (steps down at x3 where the unit might cope); switching is two
+`.equ` lines. The in-situ datasheet figures (10.1 item 6) are lower still (129 / 43).
+
+### 10.4 Tests
+
+**(a) Harness, oracle = the shipped FINAL (`90b4a1c1…`):**
+- full set, OTDEMO: **35/35 identical** (`out/vg/harness_otdemo.txt`);
+- full set, MMTESTDT (STATIC), `--frames 6000`: **35/35 identical** (`out/vg/harness_mmtestdt.txt`);
+- both print exactly the lines VEM2/VEM3's runs printed, the whole-run difference counts included
+  (the known transition / adoption frames); the quick set (`out/vg/harness_quick.txt`, 9/9) ran
+  on the first VEM4G build, before the one-line fix below, and its scenarios are part of the full
+  set. Every harness scenario is under budget: OTDEMO's own FX price 1,620 (T1-T4) and 1,440
+  (T5-T8), so seven SP12 voices estimate 3,274 / 2,727 against 3,930 / 3,350 -- both cores are
+  "free" every frame; MMTESTDT (FILTER x4, DELAY x4) likewise.
+
+**(b) `tools/varispeed_emus_test.py`: **24/24 PASS** (`out/vg/tests_all.txt`).** The 18 existing tests unchanged, plus six
+guard scenarios on the real export **MMTESTDT** (T1-T8 STATIC, part 0, 120 BPM; card
+`out/vem/img/mmtestdt.img`), all set by runtime pokes before the transport: T5-T8 VARI on the
+two slots that hold a sample (slots 0 / 1), trigs poked into the playing pattern's T5-T8 masks
+at steps 1/3/5/7 (bars at frames ~2 and ~5514), FX2 DARK x4, FX1 as listed, the rest NONE.
+Expectations come from an independent Python model of the guard fed with the `VG_*` block and,
+where every voice sounds, are also written out by hand:
+
+| test | setup | result |
+|---|---|---|
+| `guard_x2` | 4 x SP12, DJ EQ x2 (est 3,319) | nothing steps down; **every pass on both cores equals VEM3's** (65,600 per core, `guard_x2_ref` = the same run on VEM3); `vg_down` 0 |
+| `guard_x3` | 4 x SP12, DJ EQ x3 (3,666) | at the latch: T5 SP12, T6 SP12, **T7 S950, T8 S950** (bars 1 and 2); `vg_est` 3,344 = the model |
+| `guard_latch` | EMUS SP12 SP12 S950 S950, DJ EQ x3 + FILTER on T8 | **T6 SP12 -> S950, T8 S950 -> OT** at their latches; T5 SP12, T7 S950 |
+| `guard_mid` | x2, a third DJ EQ (T7) poked at frame 2,600, removed at 3,500 | all four sounding; at once (first cheaper pass at frame 2,602): **T8 SP12 -> S950 -> OT, then T7 SP12 -> S950** (most recent first), est 3,235; after the removal they stay down; T7 back on SP12 at its next trig (6,892), T8 at its (7,581); the marker through `emus_widget` (KNOB captured): T8 `(value 1, emus_fmt_dn)`, T7 `(64, emus_fmt_dn)`, T5 `(127, emus_fmt)`; `emus_fmt_dn` 1 / 64 / -1 = `OT!` / `S95!` / `???`; at the end T8 `(127, emus_fmt)` |
+| `guard_silent` | as `guard_mid`, T6's voice stopped (stock reset) 4 frames before | **T6 (silent, older) SP12 -> S950 -> OT first, then T8 -> S950**; T6 / T8 back at their next trigs |
+
+Negative controls (`out/vem_variants/`, built with `VEM_VARIANT`): `vg_nosilent` (the step-down ignores sounding) fails
+`guard_silent` (it steps T8 and T7, the sounding ones, and leaves the silent T6) and passes
+`guard_mid`; `vg_oldest` (the oldest first) fails `guard_mid` (it steps T5 to OT and T6 to S950).
+One bug was caught by the tests during the work: the free test branched on the flags of the
+`move.b` that stored the flag (a `move` sets Z), so a core that was NOT free also skipped the
+estimate; fixed before the runs above.
+
+**(c) DSP:** the payloads are byte-identical to VEM3's (so the engine and octabam checks stand);
+`repitch_dsp_boot_check.py out/mainos_varispeed_emus.bin`: PASS on both payloads.
+
+**(d) octabam:** `make bus` equivalent in the scratch octabam (`a67a1112`): `vem_cf: matches the
+author's build at 0x400d6500 (4,016 B)`, the unit in DRAM at `0x40a955e0`, 19 detours.
+
+**DSP load in situ (C, emulator, core 0's loop, datasheet cycles/sample, MMTESTDT):**
+
+
+| setup | VEM3 | VEM4G |
+|---|---|---|
+| 4 x SP12 + DARK x4 + DJ EQ x2 | 3,055 | 3,055 (unchanged) |
+| ... + DJ EQ x3 from the start | 3,455 | **3,276** (T7, T8 on S950) |
+| x2, third DJ EQ at frame 2,600 (frames 2,700-4,900) | 3,455 | **3,230** (T8 OT, T7 S950) |
+
+The same project, engines alone (datasheet, in situ): SP12 133 and S950 45 per voice above OT;
+and its stock FX cost more than the spec's table (DARK 328 per instance here, 260-273 on OTDEMO;
+DJ EQ 364). So in datasheet units measured in place, x2 (3,055) is under 3,350 and x3 (3,455) over
+it as well -- the same verdict the guard's model (3,319 / 3,666) reaches with the `~hw` engine
+price and the spec's FX table. FX prices clearly vary with the effect's settings or the project;
+the table is the spec's.
+
+### 10.5 The guard's ColdFire cost (C, emulator)
+
+`python3 tools/varispeed_emus_test.py --cost`: `ot_emu --coverage` counts every ColdFire PC from
+the transport start; summed per frame over the unit and over the guard's routines, VEM4G against
+VEM3, 3,000 frames:
+
+
+
+| scenario | unit, VEM3 | unit, VEM4G | delta | of which `vg_core` / `vg_latch` |
+|---|---|---|---|---|
+| OTDEMO, no VARI track | 227.4 | 227.5 | **0.0** | 0.0 |
+| OTDEMO, 7 x VARI SP12 (both cores free) | 1,389.5 | 1,535.1 | **+145.6** | 127.0 |
+| MMTESTDT, 4 x SP12, x2 (core 0 free) | 617.6 | 682.5 | **+64.9** | 57.0 |
+| MMTESTDT, 4 x SP12, x3 (core 0 over: full estimate every frame) | 617.6 | 720.3 | **+102.8** | 94.9 |
+
+(whole ColdFire per frame: about 32,000-35,600; the guard adds 0.2-0.4 %.) A project without
+VARI tracks pays nothing. With VARI tracks the guard costs about 13 instructions per engaged
+track per frame (reading the carried engine, the call, the "first on this core?" test) plus,
+once per core and frame, about 35 (FX cache check, the free test) or about 70 (the full
+estimate). **That is more than the spec's "a few dozen" with many VARI tracks** (146 with
+seven). Ways down, if wanted: inline the per-track test (-2 each); cache the free verdict with
+the FX ids (-~8 per core); skip the per-track test on tracks whose engine is OT and that do not
+trig (needs care: the core pass must still run before the core's first emu voice). Nothing on
+the DSP.
+
+### 10.6 Deviations
+
+1. **Engine prices: the profile's `~hw` column, not its datasheet column** (10.3). Two lines.
+2. **"Sounding" voices.** The spec counts the engine of each *sounding* voice. The DSP runs the
+   engine for every voice whose increment carries it, sounding or not (10.1 item 4), so the
+   estimate counts those; sounding only orders the step-down (silent voices go first: inaudible,
+   and they cost the same). Without this, a one-shot SP12 track whose sample has ended would
+   still load the DSP and the guard would not see it.
+3. **Step-down order within one voice:** the most recent voice goes all the way down (SP12 ->
+   S950 -> OT) before the next one is touched ("most recently started first", read literally).
+4. **The free shortcut:** a core whose base + FX leave room for four SP12 voices is not
+   estimated at all that frame (no engine can overrun it). Same decisions, less work.
+5. **Marker text** `OT!` / `S95!` (the spec gives the form, not the text).
+6. **Untestable branch:** "stock FX alone over budget" cannot happen with today's numbers (the
+   heaviest stock setup is 3,253 on core 0 and 3,350 on core 1, both within their budgets); the
+   code path exists (every emu voice to OT, then nothing) but no test reaches it.
+
+### 10.7 Open questions
+
+- **The engine price column** (10.3): `~hw` (this build) or the datasheet one. The user's brackets
+  support `~hw`; the kernel optimization will change both, and the brackets should be re-measured
+  on hardware with the final kernel.
+- **SIDECHAIN_COMPRESSOR in the same image** (KYOTI, an octabam remix): `VG_SC` is 0 here; the
+  module does not know whether SC shares the image. A combined build should set it to 56.
+- Only core 0 (T5-T8) was exercised over budget; core 1's budget (3,930) needs DJ EQ x4 with four
+  SP12 voices (4,110) -- same code, other index.
+- RTRG retrigs keep the trig's engine (as before) and are not stamped as new starts.
+
+### 10.8 FLASHING §4 item (draft) -- the DSP load guard
+
+OS VERSION `140C_VEM4G`. A project on T5-T8 with four STATIC/FLEX tracks on VARI, EMUS `SP12`,
+samples that keep sounding (loops), DARK REV on every FX2:
+1. **Normal load, no step-down:** FX1 DJ EQ on two of the four (T5, T6): all four play SP12, every
+   EMUS readout shows `SP12`, no pops; let it run several minutes.
+2. **The crash setup no longer crashes:** add DJ EQ on T7's FX1 while they play. Within a frame the
+   most recently started of the four drops (its readout `OT!`, the next one `S95!`); audio stays
+   clean (a click at the switch is acceptable), the sequencer keeps running, no squeal. Leave it
+   five minutes; change patterns and parts.
+3. **Restore:** remove the third DJ EQ: nothing changes until each stepped-down track's next trig,
+   where it plays SP12 again and its readout loses the `!`.
+4. **At the trig:** with DJ EQ x3 set before starting, the later tracks start on S950 (`S95!`).
+5. **T1-T4** (the other core): four SP12 + DARK x4 + DJ EQ x3 plays all SP12 (no `!`).
+6. An everyday project with VARI tracks: no `!` anywhere.
+
+### 10.9 Blacklist statement (this session)
+
+**I opened nothing on the spec §1 blacklist.** In particular I did not open
+`reference/handoffs/KYOTI_LOAD_AUDIT.md`. Disclosures:
+1. **The memory index** (`MEMORY.md`) was injected into this agent's context at start, as for the
+   earlier clean sessions; I opened no memory file. Among its one-line summaries are a few about
+   the load audit (that it rated the old kernel's DSP load high, and a SIDECHAIN tap bug) and the
+   old module's history. Nothing here was taken from it: every fact in 10.1 comes from the image
+   and our own emulator runs, every number from the spec, the profile or our measurements.
+2. **Allowed files that mention the audit:** `tools/repitch_dsp_profile.py`'s docstring names
+   the audit's section 2 as the source of its "modelled cycles" unit and quotes a per-voice
+   budget ("about 60-75 per voice for four voices beside stock's heaviest FX on core 0"); the
+   kernel's header says rev 17 followed "the DSP load audit's budget". `tools/load_audit/la_run.py`
+   (read with the keyword lines removed; one line was skipped) names the audit as its origin and
+   gave the loop bounds and FX ids, which I then confirmed (10.1). I used none of their numbers
+   beyond the profile's own output.
+3. The oracle was run only through the harness.

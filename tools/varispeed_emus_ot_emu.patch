@@ -10,8 +10,15 @@ Apply ONLY in a scratch octabam copy (base a67a1112): git apply, then
   cmake -B out/emu -S tools/emu/ot_emu && cmake --build out/emu --target ot_emu
 (the ot_emu target alone). Never in a shared clone.
 
+VEM4G (the DSP load guard, IMPL §10) adds, all gated by environment variables: with
+--dsp-stopwatch and OT_SW_OUT=FILE, every stopwatch pair's instructions AND datasheet cycles
+(dsp56kEmu's calcOpcodeCycles, no memory stalls) are written to FILE ("k instr cycles" per
+line); OT_SW_EXTRA="core:start:stop,..." adds stopwatches (k = 1, 2, ...). The guard's DSP
+measurements used the four-track loops B P:0x17a..0x333 (core 1) and A P:0x372..0x53e (core 0),
+built into a separate directory (out/emu_cyc) so the harness binary stayed as it was.
+
 diff --git a/tools/emu/ot_emu/dsp.cpp b/tools/emu/ot_emu/dsp.cpp
-index 3e81e7be..fc5d100c 100644
+index 3e81e7be..0f6a0e0f 100644
 --- a/tools/emu/ot_emu/dsp.cpp
 +++ b/tools/emu/ot_emu/dsp.cpp
 @@ -1,3 +1,4 @@
@@ -19,7 +26,15 @@ index 3e81e7be..fc5d100c 100644
  #include "dsp.h"
  
  #include <cstdio>
-@@ -173,6 +174,7 @@ namespace ot
+@@ -85,6 +86,7 @@ namespace ot
+ 
+ 	struct DspPair::Core
+ 	{
++		uint64_t cycAcc = 0;	// VEM guard: datasheet cycles of every instrumented instruction (OT_SW_OUT)
+ 		AllowAll validator;
+ 		std::unique_ptr<dsp56k::Memory> mem;
+ 		std::unique_ptr<dsp56k::Peripherals56362> px;
+@@ -173,6 +175,7 @@ namespace ot
  		setVerbose(false);
  		if(const char* e = std::getenv("OT_DSP_EDGELOG"); e && *e && *e != '0') m_edgeLog = true;	// O16c: one stderr line per bank write seen from a chunk (the guard's evidence)
  		if(const char* e = std::getenv("OT_FENCE_TRACE"); e && *e && *e != '0') m_fenceTrace = true;	// O17b: the per-frame protocol on stderr
@@ -27,10 +42,34 @@ index 3e81e7be..fc5d100c 100644
  		if(const char* e = std::getenv("OT_DSP_FRAMETRACE"); e && *e && *e != '0') { m_frameTraceOn = true; refreshInstrumented(); }	// O17c: core 0's frame timeline on stderr (dsp.h)
  		for(int i = 0; i < 2; ++i)
  		{
-@@ -3092,6 +3094,38 @@ namespace ot
+@@ -3082,16 +3085,61 @@ namespace ot
+ 	{
+ 		if(m_frameTraceOn)
+ 			frameTraceLine(c, pc, c.executed, m_due);
++		if(m_swCyc) c.cycAcc += c.dsp->calcOpcodeCycles(pc);
+ 		if(m_sw.core == i)
+ 		{
+-			if(pc == m_sw.start) { m_sw.t0 = c.executed; m_sw.armed = true; }
++			if(pc == m_sw.start) { m_sw.t0 = c.executed; m_sw.c0 = c.cycAcc; m_sw.armed = true; }
+ 			else if(pc == m_sw.stop && m_sw.armed)
+ 			{
+ 				const uint64_t d = c.executed - m_sw.t0;
+ 				m_sw.armed = false; ++m_sw.n; m_sw.sum += d; if(d > m_sw.max) m_sw.max = d; if(d < m_sw.min) m_sw.min = d;
++				if(m_swCyc) { m_sw.all.push_back(static_cast<uint32_t>(d)); m_sw.cyc.push_back(static_cast<uint32_t>(c.cycAcc - m_sw.c0)); }
  				if(m_sw.last.size() < 4096) m_sw.last.push_back(static_cast<uint32_t>(d));
  			}
  		}
++		for(auto& w : m_swx)
++		{
++			if(w.core != i) continue;
++			if(pc == w.start) { w.t0 = c.executed; w.c0 = c.cycAcc; w.armed = true; }
++			else if(pc == w.stop && w.armed)
++			{
++				const uint64_t d = c.executed - w.t0;
++				w.armed = false; ++w.n; w.sum += d;
++				w.all.push_back(static_cast<uint32_t>(d)); w.cyc.push_back(static_cast<uint32_t>(c.cycAcc - w.c0));
++			}
++		}
 +		if(m_vemOn && pc == (i == 0 ? 0x40bu : 0x20eu))
 +		{
 +			// VARISPEED_EMUS harness: the voice kernel entry (A P:0x40b core 0, B P:0x20e core 1)
@@ -67,16 +106,78 @@ index 3e81e7be..fc5d100c 100644
  		{
  			const auto& r = c.dsp->regs();
 diff --git a/tools/emu/ot_emu/dsp.h b/tools/emu/ot_emu/dsp.h
-index 7c755e28..648dcf3a 100644
+index 7c755e28..57febb96 100644
 --- a/tools/emu/ot_emu/dsp.h
 +++ b/tools/emu/ot_emu/dsp.h
-@@ -517,7 +517,8 @@ namespace ot
+@@ -282,7 +282,11 @@ namespace ot
+ 		// arrival pair (the dispatcher's head to its exit = one frame's DSP work,
+ 		// in the same unit as dsp_host's meter). Spins outside the pair (the host
+ 		// wait, the bank wait) are not counted, which is what "busy" failed to do.
+-		struct Stopwatch { int core = -1; uint32_t start = 0, stop = 0; uint64_t t0 = 0; bool armed = false; uint64_t n = 0, sum = 0, max = 0, min = ~0ull; std::vector<uint32_t> last; };
++		struct Stopwatch { int core = -1; uint32_t start = 0, stop = 0; uint64_t t0 = 0, c0 = 0; bool armed = false; uint64_t n = 0, sum = 0, max = 0, min = ~0ull; std::vector<uint32_t> last; std::vector<uint32_t> all, cyc; };
++		// VEM guard (OT_SW_OUT): every pair's instructions and datasheet cycles; OT_SW_EXTRA adds stopwatches
++		void enableSwCycles() { m_swCyc = true; refreshInstrumented(); }
++		void addStopwatch(const int _core, const uint32_t _start, const uint32_t _stop) { Stopwatch w; w.core = _core; w.start = _start; w.stop = _stop; m_swx.push_back(w); refreshInstrumented(); }
++		const std::vector<Stopwatch>& stopwatches() const { return m_swx; }
+ 		void setStopwatch(const int _core, const uint32_t _start, const uint32_t _stop) { m_sw.core = _core; m_sw.start = _start; m_sw.stop = _stop; refreshInstrumented(); }
+ 		const Stopwatch& stopwatch() const { return m_sw; }
+ 		const std::vector<PcWatchHit>& pcWatchHits() const { return m_pcWatchHits; }
+@@ -517,7 +521,8 @@ namespace ot
  		void timerCapture(Core& c) __attribute__((noinline));
  		void instrumentBefore(Core& c, int i, uint32_t pc) __attribute__((noinline));
  		void traceLine(Core& c, int i, uint32_t pc) __attribute__((noinline));
 -		void refreshInstrumented() { m_instrumented = m_traceEvery != 0 || m_pcWatchOn || m_sw.core == 0 || m_sw.core == 1 || m_frameTraceOn; }
-+		void refreshInstrumented() { m_instrumented = m_traceEvery != 0 || m_pcWatchOn || m_sw.core == 0 || m_sw.core == 1 || m_frameTraceOn || m_vemOn; }
++		void refreshInstrumented() { m_instrumented = m_traceEvery != 0 || m_pcWatchOn || m_sw.core == 0 || m_sw.core == 1 || m_frameTraceOn || m_vemOn || !m_swx.empty(); }
 +		bool m_vemOn = false; std::FILE* m_vemLog = nullptr; long m_vemPid = 0;	// VARISPEED_EMUS harness: OT_VEM_LOG
  		// O17c diagnostic (OT_DSP_FRAMETRACE=1, any mode): one stderr line per marker PC of core 0's frame
  		// (the bank word, the take seen, core 1's mailbox seen, the output stage, the return to the DSR2
  		// poll) with the DSP's own clock, the ColdFire's due count and DSR2 -- the frame's timeline against
+@@ -596,6 +601,7 @@ namespace ot
+ 		bool m_pcWatchOn = false; int m_pcWatchCore = 0; uint32_t m_pcWatchPc = 0; uint64_t m_pcWatchFrom = 0;	// with a `from`, the FIRST 24 arrivals after it are kept
+ 		std::vector<PcWatchHit> m_pcWatchHits;
+ 		Stopwatch m_sw;
++		std::vector<Stopwatch> m_swx; bool m_swCyc = false;
+ 		bool m_watchOn = false; int m_watchCore = 0; char m_watchSpace = 'X'; uint32_t m_watchAddr = 0;
+ 		std::vector<WatchHit> m_watchHits;			// inside pullHalfwords: host-port words are the read-back, not the bank id
+ 		bool m_hostWordFired = false;	// set by runDue when the hook fired; tickSamples stops its slice on it
+diff --git a/tools/emu/ot_emu/main.cpp b/tools/emu/ot_emu/main.cpp
+index 35acd6a6..3afeada5 100644
+--- a/tools/emu/ot_emu/main.cpp
++++ b/tools/emu/ot_emu/main.cpp
+@@ -1547,6 +1547,21 @@ int main(int _argc, char** _argv)
+ 			int core = 0; unsigned a0 = 0, a1 = 0;
+ 			if(std::sscanf(dspStopwatch.c_str(), "%d:%x:%x", &core, &a0, &a1) == 3)
+ 				dspPair->setStopwatch(core, a0, a1);
++			if(std::getenv("OT_SW_OUT"))
++			{
++				dspPair->enableSwCycles();
++				if(const char* ex = std::getenv("OT_SW_EXTRA"))
++				{
++					std::string all(ex); size_t p = 0;
++					while(p < all.size())
++					{
++						size_t q = all.find(',', p); if(q == std::string::npos) q = all.size();
++						int c2 = 0; unsigned b0 = 0, b1 = 0;
++						if(std::sscanf(all.substr(p, q - p).c_str(), "%d:%x:%x", &c2, &b0, &b1) == 3) dspPair->addStopwatch(c2, b0, b1);
++						p = q + 1;
++					}
++				}
++			}
+ 		}
+ 		if(!dspPcWatch.empty())
+ 		{
+@@ -2833,6 +2848,14 @@ int main(int _argc, char** _argv)
+ 		if(!dspStopwatch.empty())
+ 		{
+ 			const auto& w = dspPair->stopwatch();
++			if(const char* path = std::getenv("OT_SW_OUT"))
++				if(FILE* f = std::fopen(path, "w"))
++				{
++					for(size_t j = 0; j < w.all.size(); ++j) std::fprintf(f, "0 %u %u\n", w.all[j], w.cyc[j]);
++					int k = 1;
++					for(const auto& x : dspPair->stopwatches()) { for(size_t j = 0; j < x.all.size(); ++j) std::fprintf(f, "%d %u %u\n", k, x.all[j], x.cyc[j]); ++k; }
++					std::fclose(f);
++				}
+ 			std::printf("dsp stopwatch: %s -- %llu pair(s), instructions per pair mean %.0f min %llu max %llu\n", dspStopwatch.c_str(),
+ 				static_cast<unsigned long long>(w.n), w.n ? static_cast<double>(w.sum) / static_cast<double>(w.n) : 0.0,
+ 				static_cast<unsigned long long>(w.n ? w.min : 0), static_cast<unsigned long long>(w.max));
