@@ -575,7 +575,10 @@ def scenarios():
     # T7 FX1 DJ EQ: refused (2685; stock alone 2586 fits); T8 FX1 SPATIALIZER: lands; T7 FX1
     # DJ EQ again: stock alone 2663 > 2600, NOT refused -- and the net then steps T8 to OT,
     # and nothing more (2663 is still over)
-    if IMG_LOW.exists():
+    low_syms = IMG_LOW.parent / "varispeed_emus_lowbudget_syms.json"
+    same = lambda a, b: {k: v for k, v in a.items() if not k.startswith("VG_")} == \
+        {k: v for k, v in b.items() if not k.startswith("VG_")}
+    if IMG_LOW.exists() and same(json.loads(low_syms.read_text())["syms"], S):   # the same unit, one .equ apart
         s = net_scn("ref_fx_alone", {7: "S950"}, {4: "DJEQ", 5: "DJEQ"}, img=IMG_LOW,
                     tstr={4: 0, 5: 0, 6: 0})
         fx_actions(s, None, [("f1", 1, "DJEQ", 6), ("f2", 1, "SPATIALIZER", 7), ("f3", 1, "DJEQ", 6)])
@@ -795,6 +798,7 @@ def net_scn(name, emus, fx1, fx2=None, tstr=None, park=None, slots=None, extra=(
     s.add("-:poke:" + ";".join(pk), "-:poke:" + ";".join(ncap_stub()))
     s.cfg = dict(emus=emus, fx1=fx1, fx2=fx2, tstr=tstr, park=park)
     s.dump(frames - 20, NCAP_BUF, 12, "end.ncap")
+    s.dump(frames - 20, mmpart(0), PSTRIDE, "end.part")
     g_dump(s, frames - 20, "end")
     return s
 
@@ -1156,6 +1160,9 @@ def toast_ctx(t, log):
     bad = [h for h in ours if not (S["vg_tick"] <= h[0] < S["vg_sig"] and UI_STACK[0] <= h[3] < UI_STACK[1])]
     t.eq("every MAX DSP: EMU LIMIT came from vg_tick, on the UI task's stack", [hex(h[0]) for h in bad], [])
     t.eq("... with 1.2 s (0x48)", sorted({h[2] for h in ours}), [0x48] if ours else [])
+    txt = img_str(S["str_emu_limit"])
+    t.eq("the text, and its box (text + 15 px in the stock toast font) fits the 128 px screen",
+         (txt, toast_px(txt) + 15 <= 128), ("MAX DSP: EMU LIMIT", True))
     return ours
 
 
@@ -1301,6 +1308,8 @@ def net_check(t, s, d, log):
                  seen[-1], (False, True))
             t.eq("the end: every emu track on OT, nothing more (the model)", {k + 1: nm(e) for k, e in eng.items()},
                  {k + 1: "OT" for k in eng})
+            pe = (d / "end.part").read_bytes()
+            t.eq("the end: T8's EMUS in the image", EM_NAME.get(emus_at(pe, 7)[0]), "OT")
     elif kind == "under":
         p = (d / "after.part").read_bytes()
         t.eq("under budget: EMUS SP12 x4 kept", [EM_NAME.get(emus_at(p, k)[0]) for k in GT], ["SP12"] * 4)
@@ -1404,6 +1413,9 @@ def cost(frames=3000):
     procs = {}
     for c, (proj, steps) in cases.items():
         for i, (img, _) in imgs.items():
+            if os.environ.get("VEM_COST_REUSE") and (d / f"{c}_{i}.cov").exists():
+                procs[(c, i)] = None
+                continue
             a = [str(EMU), "--image", str(img), "--card", str(proj["card"]), "--set", proj["set"], "--project",
                  proj["project"], "--load-ms", "20000", "--sequencer", "--internal-clock", "--frames", str(frames),
                  "--dsp", "--main-level", "64", "--coverage", str(d / f"{c}_{i}.cov")]
@@ -1411,7 +1423,8 @@ def cost(frames=3000):
                 a += ["--step", st]
             procs[(c, i)] = subprocess.Popen(a, stdout=open(d / f"{c}_{i}.log", "w"), stderr=subprocess.STDOUT)
     for p in procs.values():
-        p.wait(timeout=7200)
+        if p:
+            p.wait(timeout=7200)
     rows = {}
     for (c, i), _ in procs.items():
         sy = imgs[i][1]
@@ -1423,22 +1436,24 @@ def cost(frames=3000):
         rng = lambda lo, hi: sum(k for a, k in cov if lo <= a < hi)
         unit = rng(sy["cave"], sy["end"])
         if "vg_tick" in g and "vg_sig" in g:
-            nxt = min(v for v in g.values() if v > g["vg_sig"])
-            tail = rng(g["vg_tick"], nxt)
+            nxt = min(v for k, v in g.items() if v > g["vg_sig"] and not k.startswith("."))
+            tail = rng(g["vg_tick"], nxt)               # vg_tick + vg_sig
+            nsync = min(v for k, v in g.items() if v > g["rp_sync"] and not k.startswith("."))
+            sync = rng(g["rp_sync"], nsync)
             net = rng(g["vg_scan"], g["vg_fx_try"])
             fixes = dict(cov).get(g["vg_fix"], 0)
             ticks = dict(cov).get(g["vg_tick"], 0)
         else:
-            tail = net = fixes = ticks = 0
-        rows[(c, i)] = dict(unit=unit / n, tail=tail / n, net=net / n, frame=(unit - tail - net) / n,
+            tail = net = fixes = ticks = sync = 0
+        rows[(c, i)] = dict(unit=unit / n, tail=tail / n, net=net / n, frame=(unit - tail - net) / n, sync=sync / n,
                             fixes=fixes, ticks=ticks, net_total=net, total=sum(k for a, k in cov) / n,
                             tail_per_tick=tail / ticks if ticks else 0)
-    print(f"{'scenario':14} {'image':5} {'unit/fr':>8} {'frame/fr':>9} {'tail/fr':>8} {'net/fr':>7} "
+    print(f"{'scenario':14} {'image':5} {'unit/fr':>8} {'frame/fr':>9} {'sync/fr':>8} {'tail/fr':>8} {'net/fr':>7} "
           f"{'ticks':>6} {'tail/tick':>9} {'fixes':>6} {'net/fix':>8} {'allCF/fr':>9}")
     for c in cases:
         for i in imgs:
             r = rows[(c, i)]
-            print(f"{c:14} {i:5} {r['unit']:8.1f} {r['frame']:9.1f} {r['tail']:8.1f} {r['net']:7.1f} "
+            print(f"{c:14} {i:5} {r['unit']:8.1f} {r['frame']:9.1f} {r['sync']:8.1f} {r['tail']:8.1f} {r['net']:7.1f} "
                   f"{r['ticks']:6d} {r['tail_per_tick']:9.1f} {r['fixes']:6d} "
                   f"{(r['net_total'] / r['fixes'] if r['fixes'] else 0):8.1f} {r['total']:9.1f}")
         print(f"{'':14} {'delta':5} {rows[(c, 'new')]['unit'] - rows[(c, 'VEM3')]['unit']:8.1f} "
@@ -1459,7 +1474,7 @@ VARIANTS = {
     "w_no_cap": [("        bsr     vg_cap                  | dearer: the highest stop up to it that fits\n",
                   "        nop\n")],
     "w_no_fxref": [("        bsr     vg_fx_try\n", "        moveq   #0,%d0\n")],
-    "w_no_sync": [("rp_sync:\n        lea     -8(%sp),%sp", "rp_sync:\n        rts\n        lea     -8(%sp),%sp")],
+    "w_no_sync": [("rp_sync:\n        lea     -12(%sp),%sp", "rp_sync:\n        rts\n        lea     -12(%sp),%sp")],
     "w_6det": [(".equ    EM_DETENTS, 4", ".equ    EM_DETENTS, 6")],
     "w_toast_direct": [("        move.b  %d4,(vg_toast).l        | refused (as far as it went): MAX DSP: EMU LIMIT",
                         "        move.l  %d0,-(%sp)\n        pea     (TOAST_DUR).w\n        pea     str_emu_limit(%pc)\n"

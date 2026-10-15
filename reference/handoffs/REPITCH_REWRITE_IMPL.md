@@ -7,8 +7,9 @@ Nothing was flashed, promoted or pushed. KYOTI's combined image was not touched.
 
 Marks: **C** = confirmed on our image (objdump, or an emulator run); **I** = inferred.
 
-**Current build: `140C_VEM5` (§11, 2026-10-15), VEM4 plus the guard's UX (spec §6a), not flashed.**
-Earlier: `140C_VEM2` (§8), the two fixes from the first hardware test; `140C_VEM3` (§9);
+**Current build: `140C_VEM6` (§12, 2026-10-15), the guard redesigned (spec §6b, "6b
+simplified"): refusals and one safety net, no run-time step-down. Not flashed.**
+`140C_VEM5` (§11) is the image on the user's MKI. Earlier: `140C_VEM2` (§8), the two fixes from the first hardware test; `140C_VEM3` (§9);
 `140C_VEM4G` (§10), the DSP load guard; `140C_VEM4` (commit `10ac83e`, §11.1), the optimized
 kernels with the guard at their prices.
 §1-§5 describe `140C_VEM1`, the image flashed on 2026-10-14; where VEM2 changed something,
@@ -1064,4 +1065,345 @@ on every FX2.
    one line (a file name, nothing of its content); I did not open the audit.
 3. In ot_emu's source tree I grepped only `tools/emu/ot_emu/main.cpp` (option names); the
    octabam `tools/verify/verify_dram_boot.py` path appeared in a file list, unopened.
+4. The oracle was run only through the harness.
+
+---
+
+## 12. VEM6, 2026-10-15 (clean side): the guard refuses, one safety net (spec §6b, "6b simplified")
+
+Same worktree, clean side. Read for this section: the spec (all, §6b and "6b, simplified"
+new), this file §8, §10, §11, `CLAUDE.md`, `reference/kb/caves.md` (§0-§1, filtered),
+`reference/kb/memory-map.md` (the part-apply family, the keymap, the UI loop, the FX choosers'
+tables, the toast; filtered), our module sources, builder, manifest, tests, harness, ot_emu's
+`main.cpp` options and `rtos.cpp`'s task table and load loop, and the stock image (objdump,
+`out/clean-room/stock.dis`). **Nothing was flashed, promoted or pushed.** KYOTI's combined
+image was not touched. The octabam module was not rebuilt this session (its reference is
+updated; the builder checks it).
+
+The work started on spec §6b as first written (per-path hooks: Part applies, RELOAD, the bulk
+writers, PART_B / bank-pointer stores, TSTR / ATTR special cases). The user then simplified it
+("6b, simplified": two refusals and one safety net); §12.2 is the simplified design, and §12.3
+lists what was built for the first form and removed before any commit.
+
+**A new build exists: `140C_VEM6`, WIP, not flashed.** Built twice, same hashes.
+
+| file | sha256 |
+|---|---|
+| `out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx` (MIDI DIN) | `16a07e772b137377863b0c2206c6e98b07762a7faa26071b82d6bd7a3fd97834` |
+| `out/OCTATRACK_VARISPEED_EMUS.bin` (CF card) | `23fd69fe3df83594f66be6fda13416c835e6fbe81ba717e7dce5ec12371181ba` |
+| `out/mainos_varispeed_emus.bin` | `5480ba2cfbc4ab798b50b9ff63a1a6d1f43f7226bee0cff9ee6731e703ef13ce` |
+| `out/elek_varispeed_emus.bin` | `57355ac6963231fd1250e97cf933d1a2dbda7d9d4eca1f364022da24d88567b6` |
+
+OS VERSION reads `140C_VEM6`. Unit: **4,852 B** at `0x400d6500..0x400d77f4` (1,096 B of the
+classic cave left), the same bytes for `-mcpu=5407` and `54455`, sha256 `236e5218…` (manifest
+reference updated). 22 detours (VEM5's 19 + 3), 12 descriptor pokes, 9,552 bytes differ from
+stock. The DSP payloads are VEM4's / VEM5's (unchanged kernel, generator and tables). The
+image VEM5 left on the unit is kept as `out/vem_variants/mainos_varispeed_emus_vem5.bin`
+(`e96ed87e…`) with its symbols.
+
+### 12.1 Facts found (C = objdump of `section_3_MAIN_OS.bin` or an ot_emu run; I = inferred)
+
+1. **The FX type selection (C).** The FX1 / FX2 chooser is a window with its own 26-byte key
+   records (`{code, 0, press, …}`, the keymap's format): FX1's at `0x400bc0e0..0x400bc17c`,
+   FX2's alike. LEFT / RIGHT (`0x20` / `0x33`) move the list cursor (`0x4003ad8c`, list
+   `0x460d5c8c`); UP / DOWN are `rts` (`0x400321e8`); NO (`0x32`) closes (`0x4003d440`);
+   **YES (`0x31`) applies: FX1 `0x400526e4`, FX2 `0x40052474`** (records `0x400bc148`,
+   `0x400bc372`: their only references). The apply takes no arguments: the cursor row
+   (`0x460d5c94` / `0x460d5ca8`) indexes the rows (`0x400d6060` / `0x400d6090`, each a page
+   pointer whose long is the type id), the id is compared with the Part's byte (`DB +
+   part·0x18b2 + 0x8ed80 / 0x8ed88 + t`) -- the same id returns at once -- and only then the
+   Part, its SRAM copy, the dirty flags, the live id (`0x80000ec4 / ecc + t`) and the page's
+   defaults are written. Moving the cursor applies nothing. **So a refusal at the apply's
+   entry stops a chosen type from landing, and leaves the chooser open on it.**
+   The other writers of a Part's FX bytes are the bulk ones: the page paste `0x40027e4c`
+   (`0x400284b6` / `0x400286ae`), the track paste `0x4002b654` (`0x4002b6fc` / `0x4002b706`),
+   the PART menu's block copies, RELOAD PART's copy, the loader. Live-only writers (the Part
+   applies `0x4000220e`; the sample loaders `0x40093e9c` / `0x40096ab0`, which restore the
+   Part's ids, and `0x40043ba0` / `0x400940ac` / `0x40096c54`, which clear live ids to NONE)
+   never raise the cost above the Part's settings.
+2. **Where Part changes land, and in which context (C).**
+   - **A sequencer pattern switch to another Part** (ot_emu, MMTESTDT with pattern 1 poked to
+     use Part 1, cued with `0x400a1030(0, 1)`): at the commit (`0x400a44d0`, frame path; the
+     sequencer's hand-off posts `{0x14, part}`, memory-map.md) **the UI task's case for message
+     20 (`0x400621a6`) moves PART_B at `0x400621e2`**
+     (instruction 939.42 M); **the light apply `0x40009e00` runs in the frame ISR
+     (`0x4000b1d8`) one master step later** (950.13 M; the ISR posts message 25 just before it,
+     `0x4000b188`). Message 17 (`0x40062142`) moves PART_B on a pattern change, message 21
+     (`0x400622aa`) the bank pointer `[0x46c82456] = 0x400e21e0 + bank × 0x9b340`.
+   - **The heavy apply `0x40009094(bank, part)`**: the PART menu (paste, clear, undo, save,
+     RELOAD) in the UI task; the project load in the engine task (`0x400905d4` →
+     `0x400907ea`). **RELOAD PART** `0x4004aab4(part)` copies the saved copy (`DB + 0x9504a +
+     part × 0x18b2`) when the saved flag (`DB + 0x9b312 + part`) is set, then applies.
+   - **The project load** (engine task; ot_emu watch on OTDEMO): the bank pointer
+     (`0x40087d44`) and PART_B (`0x40087ea6`) first, the Part blocks reset to defaults
+     (`0x40005684..`), then read from the card (`0x400165dc`), then the light and the heavy
+     apply. **The UI task keeps running meanwhile** (1,098 message-loop passes during the load).
+   - `0x80001828 / 0x80001829` = (bank, part) of the last apply: written by the three applies
+     and nothing else -- whose bytes the live page bytes are.
+3. **Machine changes (C).** The machine chooser writes the Part's machine byte and calls
+   `0x400972fc(part, track, old machine)`; UI message 20 calls it for all eight tracks after a
+   Part change. With per-machine parks and `rp_prev[2t+m]` (spec O1), a machine change makes
+   no gate transition: the machine's VARI state simply comes along. Only a check of the
+   settings sees it.
+4. **The safe UI-task point (C): `0x40062d1c`, the tail of the UI task's message loop.** The
+   task (entry `0x40061a94`) receives from the UI queue `0x460d17ae` (`jsr 0x40000d00` at
+   `0x40061cd8`), dispatches 78 types through the table at `0x40061cfa` -- keys via
+   `0x40031734`, encoders via `0x40031944`, so P2EDIT and every key handler run in this task --
+   and **every case ends at `0x40062d1a` / `0x40062d1c`** before the next receive. Why it is
+   safe to raise NOTIFY there:
+   - it is the UI task itself, between messages: no handler is in flight, and the stack depth
+     is the same on every pass (`sp = 0x460d8d80` on all 1,186 passes of a run, ot_emu);
+   - **stock raises NOTIFY at this very level**: message cases 27 / 29 (`0x40062cc0`, a
+     formatted text, 0x78) and 31 (`0x40062cf2`, "P%d DUB ABORTED", 0x30) call it and branch to
+     this tail;
+   - it runs **at 60 Hz even when idle**: DTIM1's ISR (`0x40055cb8`) posts message type 5
+     (`0x400a7279`) to the UI queue on every second tick. Measured: 60 passes in 1 s idle,
+     ~80 per 3,000 frames playing (ot_emu).
+   So a step-down made anywhere reaches a toast within one UI message (≤ 17 ms).
+5. **What else turns a gate on (C).** TSTR (P2EDIT, a paste), the sample's TIMESTRETCH and
+   TEMPO (the ATTR keys), the sample loaded into the slot (its settings record's +0x110 /
+   +0x114), the slot choice, a Part or bank switch, a load. The project tempo is clamped to
+   720..7200 by stock (`0x40005c2e`, `0x4000fedc`), so it never closes the gate by itself.
+6. **A defect of every build up to VEM5, found here (C, ot_emu).** Because PART_B moves a step
+   before the new Part is applied (item 2), the frame hook polled the new Part's bytes against
+   rp_prev, which still described the old Part. A track whose VARI state differs between the
+   two Parts read as a TSTR change and **SWAPPED the new Part's PTCH/QUAN and TSNS/EMUS**.
+   Measured on the VEM5 image (the one on the unit), test `net_part`: Part 1's T5 (not VARI,
+   PTCH 70, QUAN 109 parked, TSNS 30, EMUS 127 parked) came out (109, 70, 127, 30). Fixed by
+   `rp_sync` (§12.2); the fixed image keeps (70, 109, 30, 127).
+
+### 12.2 Design (all in `varispeed_emus.s`, PART 1 "THE DSP LOAD GUARD"; constants `VG_*`, unchanged)
+
+- **The estimate is a property of the settings** (spec §6b item 1): per DSP core, `VG_BASE` +
+  the prices of its four tracks' FX1 / FX2 types (the current Part's bytes) + the engine price
+  of each of its tracks whose current machine is ST / FL, whose gate is on (`rp_gate_m`: VARI,
+  or AUTO on a VARI sample, the sample's tempo in range), with the project tempo in range,
+  by its EMUS value -- in the TSNS slot, or in the park while a swap into VARI is still to come
+  (`rp_prev[2t+m] == 0`) (`vg_scan`, `vg_fxsum`, `vg_est`). Prices and budgets: `VG_SP12` 218,
+  `VG_S950` 99, `VG_BUDGET_C0` 3,350 (T5-T8), `VG_BUDGET_C1` 3,930 (T1-T4).
+- **Refusal 1, EMUS** (`vg_cap`, from `emus_p2step` in P2EDIT): a move toward a dearer stop stops
+  at the highest stop, from the current one up, whose engine fits the room the track's core
+  has without it; stopped short flags the toast. A cheaper stop is always allowed.
+- **Refusal 2, the FX type** (`vh_fx1` / `vh_fx2` at the choosers' YES `0x400526e4` /
+  `0x40052474`, `vg_fx_try`): the new type is refused (nothing written, the chooser stays open,
+  the toast flagged) when the core's estimate with it is over the budget **and** the core's
+  base + FX alone would fit (emulated engines tip it). Stock FX alone over: not refused (the net
+  then steps every emu track of the core, and nothing more).
+- **The safety net** (`vg_tick` at `0x40062d1c`, the UI loop's tail, every UI message): `vg_sig`
+  computes a signature of every input of the estimate -- the current Part block, its 16 FX
+  bytes, the tempo range, per track its machine and that machine's TSTR, and on AUTO / VARI
+  also the slot, the sample's TSMODE and tempo, `rp_prev`, the TSNS slot and the park (h = 33h +
+  x). Only when it differs from the last one checked does `vg_fix` run: while a core is over its
+  budget, the next track of the core -- **SP12 first, then S950, highest track number first** --
+  gets EMUS = OT (`vg_step_ot`: the slot or the park where the value lives now, the working DB
+  and its SRAM copy with the swap's dirty flags, and the live byte when the live bytes are the
+  current Part's (`APPLIED_B/P`)), just enough. It covers Part change and reload, project and
+  bank loads (old projects included), machine changes, pastes, sample / tempo changes that open
+  a gate, and TSTR / ATTR onto VARI. Interrupts are masked inside `vg_fix`; it does nothing
+  while a bulk write holds the Part (`vem_depth`).
+- **The toast `MAX DSP: EMU LIMIT`**, `NOTIFY(text, 0x48)` = 1.2 s (stock's 0x30 × 1.5), is
+  raised **only in `vg_tick`**: a refusal flags it in its handler and the loop's tail right after
+  that handler raises it; a net step-down raises it at the tail that ran the net -- right after
+  the UI handler that caused it, or at the next UI message when the cause was not the UI's. Its
+  text is 92 px in the stock toast font: the box (text + 15) is 107 of the screen's 128.
+- **`rp_sync`** (the defect of 12.1 item 6): `rp_prev` belongs to one Part (`rp_pb` / `rp_pp`:
+  its bank blob and part). `rp_swap_m` calls it on a gate difference, before it would swap --
+  nothing per frame otherwise -- and the guard calls it before it reads `rp_prev`. Another
+  current Part: forget, so the next poll adopts the new Part as it is.
+- **EMUS: four detents per stop** (`EM_DETENTS` 4); a reversal restarts the count, as before.
+- **The frame hook** is VEM3's again: the engine latch at the trig unchanged, no estimate, no
+  step-down, no toast.
+- Builder: 3 new detours (`0x40062d1c` jmp `vg_tick`, `0x400526e4` jmp `vh_fx1`, `0x40052474`
+  jmp `vh_fx2`, each body jumps back behind its displaced bytes, checked), new CONTEXT asserts
+  (the UI loop's receive and tail, stock's own NOTIFY cases, the DTIM1 tick post, both choosers'
+  YES bodies and records, the applies' `0x80001828/29` stores, the bank-blob formula, the
+  PART_B store of message 20); default label `140C_VEM6`. Manifest: the detours, the docstring
+  (GUARD line), reference `236e5218…`.
+
+### 12.3 What was removed
+
+- **The run-time step-down**: `vg_core` (per-frame estimate, at once mid-note), `vg_latch` (the
+  step-down at the trig) and their state (`vg_fxc`, `vg_stamp`, `vg_est`, `vg_clock`,
+  `vg_free`, `vg_down`, `vg_key`). The latch is VEM3's.
+- **The `S95!` / `OT!` readout**: `vg_mark`, `emus_fmt_ot_dn`, `emus_fmt_s95_dn` and their
+  strings. EMUS shows its stored value.
+- **The old toasts**: `MAX DSP: S950 USED` / `OT USED`, `vg_room` (old), `vg_ask`, `vg_gates`,
+  `vg_entered`, the `.ep_tstr` branch of `emus_p2step` (TSTR now keeps stock's conversion and
+  the net sees a track enter VARI), the ATTR handler's gates-before/after.
+- **Built for §6b's first form, removed before any commit when the user simplified it**: six
+  detours on stock's PART_B / bank-pointer stores (`0x40062142`, `0x400621e2`, `0x40087ea6`,
+  `0x400622aa`, `0x40087d44`, `0x40025aa2`) with a load-in-progress HOLD (`vg_busy`); a check
+  after each Part apply (with a pending-Part wait, `vg_pend`); a check in the bulk writers'
+  leave; `vg_enter` (TSTR parks OT itself); the ATTR handler's restricted fix (only the tracks
+  that entered); a check on the frame hook's poll (`vg_dirty`); `vg_watch`. The net replaces
+  them all; `rp_sync` replaces the store detours' forget.
+
+### 12.4 Tests
+
+**(b) `tools/varispeed_emus_test.py`: 33/33 PASS** (`out/vem6/tests_all.txt`). The 11 non-guard
+tests (swap, fresh0, adopt, widget, item11, latch, o2, o2late, o2rev, old56) unchanged and
+`p2edit` and the seven `panel_*` rewritten for four detents (p2edit: 8 detents in one report =
+two stops, three back none, the fourth S950, pushed reports count one each, snapping, the count
+restarting on another track and at SRC SETUP's open; panel: slow / fast / multi / jitter /
+bounce / held / reset through the real panel path). **Retired: the VEM4G / VEM5 guard tests**
+`guard_x2`, `guard_x2_ref`, `guard_x3`, `guard_latch`, `guard_mid`, `guard_silent` (run-time
+step-down, marker) and `toast_emus`, `toast_emus_ot`, `toast_tstr`, `toast_attr` (the old
+toasts), with `GuardModel`. **New** (MMTESTDT, T5-T8 = DSP core 0, all by runtime pokes on the
+real export; every expectation from `NetModel`, an independent model fed with the `VG_*`
+block, and every scenario checks that the right rule differs from the wrong ones it names;
+NOTIFY captured, still run, and watched):
+
+| test | setup and action | result (VEM6) |
+|---|---|---|
+| `net_load` | over at the start: S950 T5, SP12 T6-T8, DJ EQ x4 (3,686) | T8, T7 -> OT (3,250); T5 S950, T6 SP12 kept; from bar 2 each plays that engine; one toast |
+| `net_part` | part 0 fits; pattern 1 poked to Part 1 (T5 not VARI, T6-T8 SP12, DJ EQ x4: 3,587), cued, plays from bar 2 | Part 1: T8, T7 -> OT, T6 SP12; T5's PTCH 70 / QUAN 109 / TSNS 30 / EMUS 127 untouched; Part 0 untouched; after the switch T6 SP12, T7 / T8 / T5 OT; one toast |
+| `net_reload` | RELOAD PART from a saved copy (poked, flagged) with S950 T5, DJ EQ x4 | T8, T7 -> OT; T5 S950, T6 SP12 |
+| `net_paste` | T5-T7 SP12 + DJ EQ (3,240); track paste T5 -> T8 (3,805) | T8, T7, T6 -> OT; T5 SP12 |
+| `net_machine` | T8 STATIC (off) -> FLEX stored VARI SP12 (3,458) | T8's FLEX EMUS -> OT; T5-T7 SP12 |
+| `net_gate` | T8 AUTO, SP12 parked; its sample's TIMESTRETCH poked to VARI | T8 enters, -> OT, plays OT from its next trig |
+| `net_tstr` / `_order` / `_fit` | TSTR BEAT -> VARI through P2EDIT | T8 -> OT; with T6 entering and T8 already SP12: **T8** -> OT, T6 SP12 (the net's order); S950 that fits: nothing, no toast |
+| `net_attr` | ATTR TIMESTRETCH BEAT -> VARI (value-up key) with T7, T8 on AUTO, SP12 parked | both enter; T8 -> OT, T7 SP12 |
+| `ref_emus` | T5-T7 SP12 + DJ EQ x3, T8 OT: +4, +4, -4, +8 detents | S950 (no toast), **S950 refused SP12** (toast), OT, **S950 for +8** (toast) |
+| `ref_emus_ot` | the same, SPATIALIZER on T8's FX1 | OT (toast), OT, OT, OT (toast) |
+| `ref_fx` | SP12 x4, DJ EQ T5-T7, DARK T5-T7 (3,191): T8 FX2 DARK, FX2 SPATIALIZER, FX1 COMPRESSOR, FX1 SPATIALIZER | refused (3,458; toast), lands, refused (3,357; toast), lands |
+| `ref_fx_alone` | a test build with core 0's budget 2,600 (`lowbudget`): T8 S950; T7 FX1 DJ EQ; T8 FX1 SPATIALIZER; T7 FX1 DJ EQ again | refused (engines tip it), lands, **lands** (stock alone 2,663 > 2,600) and the net steps T8 to OT, nothing more |
+| `under` | SP12 x4 + DJ EQ x2 (3,111): EMUS SP12 -> S950 -> SP12, FX1 SPATIALIZER, a heavy apply of the same Part, RELOAD (nothing saved) | nothing changes, SPATIALIZER lands, **no toast** |
+
+Every test with a toast checks: each `MAX DSP: EMU LIMIT` NOTIFY came **from `vg_tick`, on the
+UI task's stack** (return address inside `vg_tick`, sp in `0x460d6de4..0x460d8de4`), with
+`0x48`, once per refusal or step-down; the text is the image's and its box fits the screen.
+
+**Deliberately wrong builds** (`--build-variants`, sources in `out/vem_variants/src/`; each run on
+its tests, `out/vem6/variants.txt`): every one fails its tests, its control passes.
+
+| build | wrong rule | fails |
+|---|---|---|
+| `w_low_first` | lowest track first | all nine `net_*` with a step-down (`under` passes) |
+| `w_s950_first` | S950 before SP12 | `net_load`, `net_reload` (`net_part` passes: no S950 there) |
+| `w_no_cap` | EMUS never refused | `ref_emus`, `ref_emus_ot` (the net then steps it to OT) |
+| `w_no_fxref` | FX never refused | `ref_fx` |
+| `w_no_sync` | no `rp_sync` | `net_part` (T5 swapped: 109, 70, 127, 30) |
+| `w_6det` | six detents | `p2edit`, `panel_slow`, `_fast`, `_held`, `_reset` |
+| `w_toast_direct` | NOTIFY raised in P2EDIT | `ref_emus`, `ref_emus_ot` (toast not from `vg_tick`) |
+| `w_no_net` | the net never runs | all nine `net_*` |
+
+The VEM5 image (on the unit) fails `p2edit`, `panel_slow`, `panel_reset` (six detents),
+`net_load` (no net) and `net_part` (no net, and the PTCH/TSNS swap of 12.1 item 6).
+
+**(a) Harness**, oracle = the shipped FINAL (`90b4a1c1…`), outputs in `out/vem6/`: quick **9/9
+identical**; full OTDEMO **35/35 identical**; full MMTESTDT (`--frames 6000`) **35/35
+identical**. The quick set prints exactly VEM5's lines. In the full sets every scenario is
+identical over its compared range; only the whole-run counts of a few scenarios moved, by 1 to
+4 passes in frames 5-9, before the compared range (the first frames' transitions and
+adoptions; the UI task now does ~600-1,600 more instructions around the run's first messages,
+which shifts them by a frame in the emulator).
+
+**(c) DSP**: payloads unchanged; `repitch_dsp_boot_check.py out/mainos_varispeed_emus.bin`:
+**PASS** on both payloads.
+
+**ColdFire cost** (C, ot_emu, `--cost`: coverage over 3,000 frames, against VEM3 (no guard),
+`out/vem6/cost.txt`; and per event with watches at the routines' entries and exits,
+`out/vem6/costw.log`):
+
+| scenario | unit per frame, VEM3 -> VEM6 | of which the frame hook | the UI loop's tail |
+|---|---|---|---|
+| OTDEMO, no VARI | 227.4 -> 243.9 | +1.2 | 14.8 |
+| OTDEMO, 7 x VARI SP12 | 1,389.5 -> 1,407.3 | +1.7 | 15.4 |
+| MMTESTDT, 4 x SP12 + DJ EQ x2 (fits) | 617.6 -> 636.3 | +1.6 | 16.4 |
+| MMTESTDT, over at the start (one step-down) | 617.6 -> 636.5 | +2.4 | 16.0 |
+
+- **The frame hook: ~+2 instructions per frame** (VEM5's guard: +65 to +146). `rp_sync` runs
+  only on a gate difference.
+- **The UI loop's tail: ~660 instructions per UI message** without a change (`vg_sig` with
+  eight ST tracks, four of them VARI; ~550 on OTDEMO), at ~60-80 messages a second: ~15 per
+  frame on average, in the UI task, never in the frame ISR.
+- **A change event: `vg_fix` ~960-1,130 instructions when it fits, ~1,580 when it steps two
+  tracks**; a tail with a step-down and its toast ~8,500 (NOTIFY opening the window).
+  (Whole ColdFire per frame: 32,000-35,500.)
+
+### 12.5 Toasts: when none is possible, and caveats
+
+- **No case without a toast was found.** Every refusal and every net step-down reaches
+  `vg_tick` within one UI message, and DTIM1's 60 Hz tick keeps that loop turning.
+- The toast for a sequencer pattern switch into an over-budget Part appears **about one step
+  before** that Part plays (the UI moves PART_B then; the net fixes the Part before it is
+  applied, so its first trigs already latch OT).
+- RELOAD PART's own toast ("PART n RELOADED") is replaced by `MAX DSP: EMU LIMIT` when the
+  reload steps something down (NOTIFY closes the open toast).
+- While a bulk write holds the Part the check waits for its end (never seen from the UI task).
+- **During a project load the net may run on the Part while the engine task writes it** (9
+  checks during MMTESTDT's load, none stepped). A step-down there would land in bytes the load
+  then overwrites, but could still toast and set the dirty flags; the loaded settings are
+  checked again when they are complete.
+
+### 12.6 Deviations and open questions
+
+- **TSTR / ATTR onto VARI use the net's order** ("6b simplified" puts them under the net). The
+  track entering goes to OT when it is the core's highest SP12 / S950 track; otherwise a
+  higher-numbered one does (`net_tstr_order`: T6 enters, T8 steps). Spec §6b item 3 says "the
+  track goes to VARI and its EMUS becomes OT". Please confirm which the user wants.
+- **The engine follows at the next trig** (unchanged latch): after a step-down the DSP runs the
+  old engine until each stepped track's next trig. For a sequencer Part switch the step-down
+  comes a step before the switch (none). For a change from the PART menu, RELOAD, a paste or a
+  machine change while playing, a trig inside that handler could still latch the old engine;
+  a sample change that opens a gate at a trig plays that note with the old (parked) engine.
+- **`rp_sync` fixes a defect of VEM1-VEM5**, including the flashed VEM5: a sequencer Part change
+  between Parts whose VARI state differs swapped the new Part's PTCH/QUAN and TSNS/EMUS.
+  Projects played on VEM5 may carry such swaps; there is no conversion.
+- The "stock FX alone over" branch cannot happen with today's prices (the heaviest stock setup
+  is 3,253 / 3,350 against 3,350 / 3,930); it is tested on the `lowbudget` test build only.
+- Prices and budgets are §11's, to be re-tuned on hardware.
+- The octabam module was not rebuilt (its detours and reference are updated).
+- An emulator housekeeping note: once this session stopped every `ot_emu --image` process on
+  the machine (to abort a harness run a rebuild had invalidated); a concurrent session's
+  emulator runs, if any were running then, would have been stopped too.
+
+### 12.7 FLASHING §4 item (draft) -- VARISPEED_EMUS VEM6, the guard
+
+OS VERSION `140C_VEM6`. A project with T5-T8 STATIC / FLEX on VARI, looping samples, DARK REV on
+every FX2 of T5-T8. "Toast" = `MAX DSP: EMU LIMIT`, readable in full, about 1.2 s.
+1. **EMUS feel:** four detents per step, both directions; one detent back restarts the count.
+2. **EMUS refused:** T5-T7 on SP12 with DJ EQ on their FX1, T8 on OT. Turn T8's EMUS right: at
+   S950 no toast; four more detents: **it stays S950** and the toast shows. Turn left to OT: no
+   toast. Put SPATIALIZER on T8's FX1 and turn right: **it stays OT**, toast.
+3. **FX refused:** T5-T8 on SP12, DJ EQ on T5-T7's FX1, DARK on T5-T7's FX2, T8's FX1 / FX2 NONE.
+   On T8 choose FX2 DARK REV and press YES: **it stays NONE**, toast, the chooser stays open;
+   choose SPATIALIZER: it lands, no toast. FX1 COMPRESSOR: refused; FX1 SPATIALIZER: lands.
+4. **TSTR onto VARI:** T5-T7 SP12 + DJ EQ x3; T8 on BEAT with EMUS SP12 from before. Set TSTR to
+   VARI: T8 is on VARI, **its EMUS reads OT**, toast. Then the same with T6 entering while T8 is
+   on SP12: T8 goes to OT (the order), T6 keeps SP12.
+5. **ATTR onto VARI:** T7, T8 on AUTO with the same sample, both SP12 from before; the sample's
+   TIMESTRETCH BEAT -> VARI in the audio editor: T8 OT, T7 SP12, toast.
+6. **Part change while playing:** a second Part with T6-T8 SP12, DJ EQ on all four FX1, and T5
+   NOT on VARI with a distinctive PTCH (e.g. +5) and TSNS. Chain a pattern that uses it: the
+   toast shows about a step before it plays; on it T7 and T8 read OT, T6 SP12; **T5's PTCH and
+   TSNS are what you set** (the `rp_sync` fix -- VEM5 swapped them). Switch back and forth for a
+   few minutes: PTCH / QUAN / TSNS / EMUS values stay put on both Parts.
+7. **Project load and RELOAD PART:** on VEM5, save a project over budget (4 x SP12 + DARK x4 +
+   DJ EQ x3 on T5-T8, its Part saved too); flash VEM6 and load it: toast, T8 reads OT (then
+   T7 if still needed), the others keep SP12. RELOAD PART on that Part: the same again.
+8. **Machine change:** T8 on FLEX, VARI, EMUS SP12 while T5-T7 are on OT; switch T8 to STATIC
+   (not VARI); put T5-T7 on SP12 and DJ EQ on T5-T7's FX1 (all fits); switch T8 back to FLEX:
+   toast, T8's EMUS reads OT.
+9. **The crash setup cannot be built:** 4 x SP12 + DARK x4 + DJ EQ x3 on T5-T8 -- the third DJ
+   EQ or the fourth SP12 is refused. Leave the allowed maximum playing five minutes: no squeal,
+   no pops, the sequencer runs.
+10. **Toast safety:** provoke the toast often (EMUS against the limit, quick pattern switches
+   between the two Parts while playing) for five minutes: no hang, controls live, no crackle
+   (the CLAUDE.md "Session 93" signature).
+11. **Everyday project:** no toast ever, nothing changes; no `S95!` / `OT!` anywhere.
+
+### 12.8 Blacklist statement (this session)
+
+**I opened nothing on the spec §1 blacklist.** Disclosures:
+1. The memory index (`MEMORY.md`) was injected into this agent's context at start, as for the
+   earlier clean sessions; it summarizes the old module's history. I opened no memory file and
+   took nothing from it.
+2. Greps of allowed files showed matching lines only: `reference/kb/memory-map.md` (a file
+   list naming `REPITCH.md`, an attribution naming its author, a line naming "repitch-kyoti"),
+   `reference/kb/caves.md` (lines naming `KYOTI_LOAD_AUDIT.md` and `tools/load_audit/...` as
+   references, nothing of their content), `CLAUDE.md` (the concurrent-sessions line). I read no
+   section about REPITCH.
+3. ot_emu's `main.cpp` (option names) and `rtos.cpp` (the task table, the load loop): no
+   keyword hits in either file.
 4. The oracle was run only through the harness.

@@ -1587,7 +1587,6 @@ rp_ui_gate:
 rp_swap:
         lea     -12(%sp),%sp
         movem.l %d2-%d3/%a0,(%sp)
-        bsr     rp_sync                 | rp_prev must describe the current Part
         bsr     db_mach                 | d2 = m
         moveq   #1,%d0
         cmp.l   %d0,%d2
@@ -1626,8 +1625,9 @@ rp_swap:
 | new Part, and a bank switch moves the bank pointer (message 21): until VEM5 the frame
 | hook then polled the new Part's bytes against the old Part's rp_prev, read a gate
 | difference as a TSTR change, and SWAPPED the new Part's PTCH/QUAN and TSNS/EMUS (C,
-| ot_emu, IMPL §12). Called by rp_swap, rp_poll_all and the guard (vg_scan, vg_sig).
-| Keeps every register.
+| ot_emu, IMPL §12). Called where it matters: by rp_swap_m on a gate difference (before
+| it would swap; nothing per frame otherwise) and by the guard before it reads rp_prev
+| (vg_scan, vg_sig). Keeps every register.
 rp_sync:
         lea     -12(%sp),%sp
         movem.l %d1-%d2/%a0,(%sp)
@@ -1682,6 +1682,10 @@ rp_swap_m:
         add.l   %d2,%d0
         adda.l  %d0,%a0                 | a0 -> rp_prev[2t + m]
         mvs.b   (%a0),%d0               | signed: 0/1, -1 forgotten, -2 HOLD
+        cmp.l   %d0,%d4
+        beq     .sm_same
+        bsr     rp_sync                 | a gate difference: but is rp_prev still about the
+        mvs.b   (%a0),%d0               | current Part? (forgotten now if it was not: adopt)
         cmp.l   %d0,%d4
         beq     .sm_same
         moveq   #-2,%d5
@@ -1841,7 +1845,6 @@ rp_poll_all:
         movem.l %d0-%d4,(%sp)
         move.w  %sr,%d4
         move.w  #0x2700,%sr
-        bsr     rp_sync
         moveq   #0,%d1
 1:      bsr     db_mach
         move.l  %d2,%d0                 | the current machine
