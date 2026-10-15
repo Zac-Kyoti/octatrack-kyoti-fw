@@ -426,3 +426,15 @@ several tracks onto VARI at once, those tracks step in the net's order among the
 
 (Also 2026-10-15: SP12 goes back to full stereo on the DSP side. The ColdFire side changes only
 the guard's `VG_SP12` price, which the DSP work measures and the dirty side updates.)
+
+#### 6b, option B extended (the user, 2026-10-15, after VEM9)
+
+**A slot assign that also changes the machine** (a FLEX slot picked for a STATIC track, or the
+reverse) counts as an indirect entry onto VARI for that track. If the new machine's setting puts
+the track on VARI and its engine does not fit, **that track's own** EMUS steps to OT, with the
+toast. It does not get the net's order. A machine change made on its own, from the machine
+selector, keeps the net's order.
+
+**VARISPEED_EMUS also gets a Bugbuild:** `BUG_VEM…`, composed by `tools/build_bugbuilds.py` through
+the same explicit WIP opt-in as VARISPEED (`--wip VARISPEED_EMUS`). It is never sealed, and the
+final Bugbuilds are untouched.
