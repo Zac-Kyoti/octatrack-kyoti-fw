@@ -95,28 +95,36 @@ One build only: VARI + S950 + SP12, with the DSP kernel. There is no VARI-only v
      forwards and in reverse, and follows tempo changes every frame.
    - **RATE still applies.** **PTCH is not applied as pitch**: its composed word selects the
      QUAN ratio (item 4).
+   - **Above 2x** (N > 2D): the octave fold above stays, as in the shipped module (the user is
+     leaning this way, 2026-10-14; it stays unless they say otherwise). True varispeed past 2x is a possible
+     later research spike, not part of this work.
    - **Out of range** (a sample or project tempo outside 30..300 BPM): the track behaves exactly
      like TSTR **OFF**. It plays dry at normal speed, PTCH applies as pitch, PTCH shows as PTCH and
      TSNS as TSNS. It is not a VARI track.
 4. **QUAN** (retained, unchanged): the PTCH page-1 slot on a VARI track. Index =
    `rk_bucket(word >> 8)` from the composed 16-bit PTCH word; ratio = `.rk_ratios[idx]`.
 5. **EMUS** (new): on a VARI track, the **TSNS** slot (SRC SETUP page, beside TSTR) becomes
-   **EMUS**, a three-value knob: `S950` (left), `OT` (middle), `SP12` (right). It follows **the
+   **EMUS**, a three-value knob: `OT` (left), `S950` (middle), `SP12` (right) (order revised
+   2026-10-14 after the first flash; it was S950 / OT / SP12). It follows **the
    same rules and mechanisms as PTCH/QUAN**:
    - its caption reads `EMUS` and its readout the value name, exactly when the VARI gate is on
      (the same gate as QUAN, `rp_ui_gate`);
    - the TSNS value and the EMUS value are kept separately: on a gate change they trade places
      with a **spare parked byte** that stock saves with the Part and never applies (QUAN parks
      PTCH in NEIGHBOR's page-1 `---` byte; EMUS needs its own such byte for TSNS);
-   - **exactly three positions**, labelled `S950`, `OT`, `SP12`, nothing else ever shown. EMUS
-     stores 1 / 64 / 127 (S950 / OT / SP12). The value must stay within 0..127, because stock's
+   - **exactly three positions**, labelled `OT`, `S950`, `SP12`, nothing else ever shown. EMUS
+     stores 1 / 64 / 127 (OT / S950 / SP12). The value must stay within 0..127, because stock's
      time-stretch task indexes a 128-entry table with it. Any other stored value displays as its
-     bucket (0..42 S950, 43..85 OT, 86..127 SP12) and snaps to that stop on the first detent, as
+     bucket (0..42 OT, 43..85 S950, 86..127 SP12) and snaps to that stop on the first detent, as
      QUAN does;
    - first sight adopts without swapping; a parked byte of 0 means never written and enters EMUS
-     as `OT` (S950 is stored as 1 so that 0 can mean "never written"). TSNS comes back unchanged
+     as `OT`, stored 1 (the low stop is 1 so that 0 can mean "never written"). TSNS comes back unchanged
      on leaving VARI;
-   - one encoder detent steps one position;
+   - **six encoder detents in one direction step one position** (revised 2026-10-14: one detent
+     per position was far too sensitive on the unit, "jumping around almost chaotically").
+     Reversing direction restarts the count, so jitter cannot flip it. A fast or accelerated turn
+     must not step faster than its physical detents (find out how stock's P2EDIT delivers deltas
+     and with what acceleration, and count detents, not accelerated units);
    - PTCH↔QUAN and TSNS↔EMUS swap **together**, on the same gate transition.
    - **Engine changes take effect at the next trig.** Stock cannot lock page-2 parameters, but
      a mod can, so EMUS must be read as its composed value (base + any locks or scene values)
