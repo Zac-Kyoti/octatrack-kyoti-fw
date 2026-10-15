@@ -217,3 +217,51 @@ From the EMUS scope's open questions (`REPITCH_REWRITE_SCOPE_EMUS.md`):
   EMUS change does not switch the engine), item 11, and item 10 (no crash).
 - The DSP-side checks (`rpk_dsp.asm` bit-exact vs the engine model) are unchanged and still pass.
 - Hardware: a VARISPEED_EMUS checklist in FLASHING §4 on the MKI before any promotion.
+
+## 6. The DSP load guard (added 2026-10-14, the user's request)
+
+Source: `reference/handoffs/KYOTI_LOAD_AUDIT.md` (ours; §3 and §4 are allowed reading for clean
+agents, and so is every section of it, since it predates nothing of Jannik's). Shipped behaviour
+today: four SP12 voices on one DSP core beside heavy stock FX can overrun the DSP on the unit. The
+audio squeals or pops and the sequencer stops. The guard must prevent that, and must change nothing
+in every situation that does not overrun.
+
+1. **Model, per DSP core, recomputed every frame.** The estimate is the sum of:
+   - a base: the four-track loop with all FX NONE, audit §4;
+   - the stock price of each FX1/FX2 effect on that core's four tracks, audit §4's table,
+     modelled cycles;
+   - the price of each **sounding** voice's engine: SP12 and S950 at the per-voice worst case
+     from `tools/repitch_dsp_profile.py`; OT costs 0.
+
+   Keep every price and budget as a named constant in one place. The DSP kernels are being
+   optimized in parallel, so their prices will change. Find which tracks run on which core, and
+   how the ColdFire knows a track's FX types and whether its voice is sounding, from the stock
+   image.
+2. **Budget per core:** the hardware brackets of audit §3.
+   - Core with T5–T8 (fails first): clean ≈ 3,350, crash ≈ 3,740 modelled cycles.
+   - The other core: clean ≈ 3,930, crash ≈ 4,310.
+
+   The guard acts above the **clean** point. These are the user's own measurements; they get
+   re-tuned on hardware.
+3. **What it does:**
+   - **At the trig latch.** If latching S950 or SP12 would put the core over budget, latch the
+     next cheaper engine instead: SP12 → S950 → OT, or S950 → OT.
+   - **Mid-note.** If the estimate rises over budget later (another voice starts, an FX changes),
+     step down the emu voices on that core at once, most recently started first, until the
+     estimate is under budget. A click is better than a crash.
+   - **Back up.** A stepped-down track returns to its EMUS choice only at a later trig, when the
+     budget allows.
+   - **Never anything else.** It never touches OT tracks, stock tracks or stock FX. If stock FX
+     alone exceed the budget, the guard steps every emu voice on that core down to OT and does
+     nothing more.
+4. **Visible:** while a track plays a cheaper engine than its EMUS setting, its EMUS readout
+   says so. For example, the playing engine with a marker, within the existing readout width.
+   Draw paths only: no toast, nothing UI from the frame path (CLAUDE.md).
+5. **Cost:** a few dozen ColdFire instructions per frame at most, and nothing on the DSP.
+6. **Tests:**
+   - **Under budget:** bit-identical increments to VEM3, on every existing harness scenario.
+   - **Over budget:** scenarios built with runtime pokes on real exported projects. 4 × SP12 +
+     DARK ×4 + DJ EQ ×3 on the T5–T8 core steps down; the same with DJ EQ ×2 does not.
+   - **Stepping order and restore.**
+   - **A FLASHING §4 hardware item:** the audit's crash setup no longer crashes, and nothing
+     steps down at normal loads.
