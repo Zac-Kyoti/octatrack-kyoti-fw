@@ -413,3 +413,16 @@ A second feature from the same code: **VARISPEED**. It is VARI with QUAN and not
     clearly WIP. Nothing changes for the seven final Bugbuilds: their hashes must stay their pins.
 - **Source:** shared with VARISPEED_EMUS, one source with an assembly switch, so fixes cannot
   diverge. (octabam `defsyms` are link-time: `.ifdef` gates need source defaults.)
+
+#### 6b, option B (the user, 2026-10-15, after VEM7)
+
+**A track that becomes a VARI track indirectly** steps **its own** EMUS to OT when its engine
+does not fit, the same rule as TSTR/ATTR → VARI. "Indirectly" means its gate turns on with TSTR
+untouched: a sample's ATTR tempo moved into range, a different sample assigned to its slot, a
+sample loaded into the slot, or its sample's TIMESTRETCH set to VARI under AUTO. The net's order
+(SP12 first, highest track first) applies only when no single track can be named as the one that
+changed: Part change or reload, project or bank load, machine change, paste. If one action moves
+several tracks onto VARI at once, those tracks step in the net's order among themselves.
+
+(Also 2026-10-15: SP12 goes back to full stereo on the DSP side. The ColdFire side changes only
+the guard's `VG_SP12` price, which the DSP work measures and the dirty side updates.)
