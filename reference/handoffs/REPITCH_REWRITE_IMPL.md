@@ -650,7 +650,7 @@ comparisons below.
 
 ### 10.2 Design
 
-All in `varispeed_emus.s` (PART 1, "THE DSP LOAD GUARD"), three routines and 120 B of state:
+All in `varispeed_emus.s` (PART 1, "THE DSP LOAD GUARD"), three routines, about 80 B of state and 100 B of tables:
 
 - **`vem_frame`** (engaged VARI tracks only; every other path is unchanged, so a track that is
   not VARI costs nothing new): reads the engine its increment carries (`36(a3)` bits 2-3), calls
