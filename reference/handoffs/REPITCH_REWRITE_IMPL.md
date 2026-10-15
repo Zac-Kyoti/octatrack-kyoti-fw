@@ -1677,3 +1677,198 @@ OS VERSION `140C_VARI1` (or `BUG_VARI`). Power-cycle once first.
    Jannik Aßfalg and an octabam PR number (attribution only). `ls -d refs/octabam/modules/*repitch*`
    printed the folder name `refs/octabam/modules/repitch`.
 4. The oracle was run only through the harness.
+
+---
+
+## 15. VEM8, 2026-10-15 (clean side): indirect entry onto VARI steps that track (spec "6b, option B")
+
+Same worktree, clean side. Read for this section: the spec (all; "6b, option B" new), this file
+§12-§14, `CLAUDE.md`, our module source, builders, manifest, tests and harness, ot_emu's
+`main.cpp` (option names, the step verbs) and `rtos.cpp` / `rtos.h` (`loadProjectLive` and its
+constants), and the stock image (objdump, `out/clean-room/stock.dis`). **Nothing was flashed,
+promoted or pushed.** KYOTI's combined image was not touched. The DSP kernel, its tables and its
+generator were not touched (another agent is changing SP12 in another worktree).
+
+**A new build exists: `140C_VEM8`, WIP, not flashed.**
+
+| file | sha256 |
+|---|---|
+| `out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx` (MIDI DIN) | `24f7d4a6bea9c5d33461e3e44b54fd852aa1cd568887c8985882750aef039ff4` |
+| `out/OCTATRACK_VARISPEED_EMUS.bin` (CF card) | `b0ee3c06139d61e980d0e159ba06deab88db9a79431c62916efcab9737db5627` |
+| `out/mainos_varispeed_emus.bin` | `f787f4204385c2dc9bb3012dd04dc5c6d6c1cd3cd265a9e9e936f1e326d94ab8` |
+| `out/elek_varispeed_emus.bin` | `c0f2dbbe7839a399dafb71584f8bf1d67461d7e69f6ba13482b870f660bac411` |
+
+OS VERSION reads `140C_VEM8`. Unit: **5,192 B** at `0x400d6500..0x400d7948` (756 B of the classic
+cave left), sha256 `4f19e79c…` (manifest reference updated). 22 detours and 12 descriptor pokes,
+as VEM7; 9,826 bytes differ from stock. The DSP payloads are VEM7's (the builder's DSP half is
+unchanged; the boot check passes, §15.3).
+
+**VARISPEED is unaffected** (`.if VEM_EMUS` holds everything new): `tools/build_varispeed.py`
+on the changed source builds `out/OCTATRACK_OS1.40C_VARISPEED.syx` sha256
+`78cfad333ff231adda18f415d9585deae7c09a9668882903b30b4b3afd97f64d`, `mainos_varispeed.bin`
+`ce7e69fd…`: byte-identical to §14 (`140C_VARI1`).
+
+### 15.1 Facts found (C = objdump of `section_3_MAIN_OS.bin` or an ot_emu run; I = inferred)
+
+1. **What can turn a gate on.** The gate (`rp_gate_m`) reads the track's machine, that machine's
+   TSTR, its slot byte (`Part + 0x8f04a + 5t + m`), and the slot's record: TIMESTRETCH (`+0x110`)
+   and tempo (`+0x114`). The project tempo is clamped by stock (§12.1 item 5). Writers (C):
+   - **TSTR**: P2EDIT (VEM7's `vg_note`), the pastes, the loads and Part applies.
+   - **machine**: the machine chooser (then `0x400972fc`), and the slot assign below (it writes
+     the machine byte from the audio editor's machine, `0x40079522`).
+   - **slot byte**: a scan of every `#0x8f04a` reference finds two stores: the SRC page paste
+     (`0x40027ec2`, inside `0x40027e4c`, held by `vh_srcpaste`) and **the slot assign
+     `0x40079424`** (Part `0x400795c0`, its SRAM copy `0x400795c8`, the live slot byte
+     `0x40079610`). The slot assign is reached from the SRC page (`0x4005a7fe`, which reads
+     `PAGE_M`) and from the audio editor (`0x40079770`), both UI-task handlers. The wholesale
+     writers (bank read, track paste, PART menu, RELOAD) copy blocks.
+   - **the record's TIMESTRETCH / tempo**: the ATTR value keys (UI task; row 2 TIMESTRETCH, row 3
+     TEMPO: `0x4006eb6c`, step 6, or 1 with FUNC, then `0x40099090`, which clamps to
+     720..7200, so an ATTR TEMPO edit always lands in range); **the sample load into a slot**:
+     `0x40022610(machine, slot, path)` writes the record's path and posts disk command 1 (STATIC) /
+     0 (FLEX), handled in the disk task (`0x40084c08`: `0x40093980`, `0x40099148` /
+     `0x40099680`, `0x4008fb58`); and the project load (`0x4009083c`, every slot).
+2. **A sample load runs no Part apply** (C, ot_emu, MMTESTDT, a watch on `rp_forget`, both
+   applies, the loader's functions): after `0x40022610(0, 2, "../AUDIO/ELEKTRON/isaak.wav")`
+   the disk task loaded slot 2 (path, TIMESTRETCH 0 -> 2, tempo 714 -> 2880) with no
+   `rp_forget` hit. It refreshes the tracks through the per-track apply `0x40001f18` (also
+   the machine change's, `0x400973da`), which is not hooked.
+3. **The project load can be checked half-done** (C, ot_emu, MMTESTDT, `loadProjectLive` =
+   disk command 4, `0x40085336`): the reset `0x400909d8` and the parse `0x4009000c` each end in a
+   light and a heavy apply (both forget); then the samples (`0x4009083c`), then every bank
+   (`0x400905d4`). The current bank's read `0x4008ded0` returned at instruction 127.85 M,
+   **the UI task's tail (`vg_tick`) ran at 128.09 M**, the light apply came at 128.13 M (from
+   `0x400a1030`) and the heavy at 128.24 M. So one check can see the read Part before any
+   apply: Part bytes rewritten, live bytes still the old ones, no forget yet.
+4. **The live slot byte `0x8000082f + 72t`** is written by the applies (heavy `0x40009118`,
+   light `0x400098ca`, the frame ISR's `0x4000b486`), the per-track apply (`0x400020fa`, in
+   `0x40001f18`), the SRC paste (`0x40027fd8`) and the slot assign (`0x40079610`), and by
+   nothing else (C: every reference of the address). So a slot byte that differs from its live
+   byte was written without an apply: a bank read (or the SRC paste, which is held anyway).
+5. **Every Part apply and bulk write already reaches `rp_forget`** (the two apply detours,
+   `vh_leave`, `rp_sync` on another current Part; §12, §13). One flag there marks "Parts
+   rewritten wholesale since the last check".
+
+### 15.2 Design (`varispeed_emus.s`, PART 1, the guard; inside `.if VEM_EMUS`)
+
+Inside the existing net, no new hooks:
+- **`vg_new`** (run by `vg_tick` only when the signature changed) keeps a snapshot from the last
+  check: each track's gate (`vg_gon`, its current machine, with the project tempo in range) and
+  its key (`vg_tkey`: machine << 16 | that machine's TSTR << 8 | slot byte, `vg_key`). A track is
+  **named** -- it became a VARI track indirectly -- when its gate is on now and was off then,
+  its machine and TSTR are unchanged, no wholesale rewrite came between (`vg_bulk`), and either
+  its slot byte is unchanged (what the slot plays changed: ATTR TEMPO / TIMESTRETCH, a sample
+  load) or its slot byte equals its live slot byte (a slot assign; a bank read before its apply
+  fails this, 15.1 items 3-4).
+- **`vg_bulk`** (initially 1): set by `rp_forget`, read and cleared by `vg_new` with interrupts
+  masked (the frame path can forget too). Set, nothing is named.
+- **`vg_tick`**: signature -> `vg_new` -> the named tracks OR VEM7's TSTR / ATTR tracks
+  (`vg_pend` -> `vg_entered`) -> `vg_fix` with that mask first (just enough of THEM, SP12 first,
+  highest first among them), then `vg_fix(-1)` (the net's order for whatever is still over),
+  the signature recomputed after a step, one toast. ATTR TIMESTRETCH -> VARI under AUTO is now
+  caught by both (VEM7's note and `vg_new`), with the same result.
+- **Net's order kept** for: a Part change or reload, a project / bank load, a paste, the PART
+  menu (all forget, or hold then forget), a machine change (key), a TSTR change other than
+  P2EDIT's (key), and a slot byte rewritten without its live byte.
+- Cost: nothing in the frame path. The UI tail as before when nothing changed; `vg_new` adds
+  ~8 x (`vg_tkey` + `rp_ui_gate`) only on a signature change.
+- Shared code: `rp_forget` sets the flag inside `.if VEM_EMUS`; VARISPEED is byte-identical.
+
+### 15.3 Tests
+
+**(b) `tools/varispeed_emus_test.py`: 39/39 PASS** (`out/vem8/tests_all.txt`): VEM7's 34 unchanged and
+five new, all on the real MMTESTDT export with runtime pokes only, every expectation from
+`NetModel` (`enter_fix` for a named track, `fix` for the net), each checking that the right
+rule differs from the wrong one here. Common set-up: T5, T7, T8 VARI SP12 on STATIC slot 0
+(146.6 BPM), DJ EQ x3, DARK x4 (3,240, fits); T6 with SP12 parked; T6 entering makes 3,458.
+
+| test | the change (stock code only) | result (VEM8) |
+|---|---|---|
+| `net_tempo_order` | T6 VARI on slot 1, slot 1's tempo 714 (out of range); the ATTR value-up key on the TEMPO row (`0x4006edc8`, row 3) -> 720 | **T6 -> OT**, T8 keeps SP12 (the net would take T8); TSTR untouched; T6 plays OT from its next trig; one toast |
+| `net_slot_order` | T6 AUTO on the empty slot 2; slot 1's TIMESTRETCH VARI; the slot assign `0x40079424` gives T6 slot 1 (Part and live slot byte 1) | **T6 -> OT**, T8 SP12; one toast |
+| `net_sample_order` | T6 VARI on the empty slot 2, its tempo 714; `0x40022610(0, 2, "../AUDIO/ELEKTRON/isaak.wav")` -> disk command 1 loads it (tempo 2880), outside any UI handler | **T6 -> OT**, T8 SP12; the toast at the UI loop's tail |
+| `net_machine_order` | T6 STATIC (not VARI) -> FLEX stored VARI SP12 (machine byte + `0x400972fc`) | the net's order: **T8 -> OT**, T6's FLEX EMUS SP12 |
+| `net_partwrite_order` | T6 AUTO on slot 2; its PART slot byte -> 1 and TSNS slot -> SP12 (as a bank read writes a Part, live bytes untouched), the heavy apply 100 frames later | the net's order: **T8 -> OT**, T6 SP12; one toast |
+
+The sample load is reachable in the emulator through stock's own load-to-slot API: the path is
+poked into the unit's zero tail behind the test stubs, the command runs in the disk task.
+
+**Deliberately wrong builds** (`out/vem8/variants.txt`; `--build-variants all`, every one rebuilt
+on the VEM8 source):
+
+| build | wrong rule | fails | passes |
+|---|---|---|---|
+| `w_indirect_net` (new) | an indirect entry gets the net's order (VEM7) | `net_tempo_order`, `net_slot_order`, `net_sample_order` | the other 13 `net_*` / `under` |
+| `w_name_all` (new) | every gate that comes on is named (no machine / TSTR / slot / bulk test) | `net_machine_order`, `net_partwrite_order` | 14 |
+| `w_no_live` (new) | a changed slot byte named without the live-slot test | `net_partwrite_order` (two toasts: it steps T6 in the read Part, the apply's adopt undoes it, then the net steps T8) | 6 |
+| `w_enter_net` | every entering track gets the net's order (VEM6) | `net_tstr_order`, `net_attr_order`, and the three indirect ones | 11 |
+| `w_low_first` | lowest track first | 9 (`net_load`, `_part`, `_reload`, `_paste`, `_machine`, `_attr`, `_attr_order`, `_partwrite_order`, `_machine_order`) | 7 (one named track has no order) |
+| `w_s950_first` | S950 before SP12 | `net_load`, `net_reload` | `net_part` |
+| `w_no_cap` | EMUS never refused | `ref_emus`, `ref_emus_ot` | `ref_fx` |
+| `w_no_fxref` | FX never refused | `ref_fx` | `ref_emus` |
+| `w_no_sync` | no `rp_sync` | `net_part` | `net_load` |
+| `w_6det` | six detents | `p2edit`, `panel_slow`, `_fast`, `_held`, `_reset` | `panel_multi`, `_jitter` |
+| `w_toast_direct` | NOTIFY raised in P2EDIT | `ref_emus`, `ref_emus_ot` | `net_load` |
+| `w_no_net` | the net never runs | `net_load`, `_part`, `_reload`, `_paste`, `_machine`, `_partwrite_order`, `_machine_order` | the named ones (`net_gate` now too: a sample attribute turning a gate on is an indirect entry) |
+
+**(a) Harness**, oracle = the shipped FINAL (`90b4a1c1…`), outputs in `out/vem8/`: quick **9/9
+identical**, full OTDEMO **35/35 identical**, full MMTESTDT (`--frames 6000`) **34/35**: every line
+(whole-run counts included) is **exactly VEM7's** from the re-run after the harness fix `4d1d54f`
+(`out/vem7b/`, `diff` empty on all three). The one MMTESTDT non-identical, `tempo_edge_720`, is
+"NOTHING COMPARED" in VEM7's re-run too: since `4d1d54f` an empty compared set fails, and at 30 BPM
+no compared track reaches its start in 6,000 frames. A harness limit, not a difference.
+
+**(c) DSP**: `repitch_dsp_boot_check.py out/mainos_varispeed_emus.bin`: **PASS** on both payloads
+(`out/vem8/dsp_boot.txt`).
+
+**VARISPEED**: rebuilt twice on the VEM8 source: syx `78cfad33…`, identical to §14.
+
+**Reproducible**: VEM8 built twice, the same four hashes.
+
+**ColdFire cost** (`--cost`, `out/vem8/cost.txt`, 3,000 frames vs VEM3): the unit +17.8 / +19.5 /
++20.5 / +20.3 instructions per frame (VEM6, §12.4: +16.5 to +18.9); the tail per UI message 557-636
+(unchanged when nothing changed); a net check ~510-550. The tool's "frame" column (the unit minus
+the tail and the net ranges) now also holds `vg_new` / `vg_tkey`, which sit outside those ranges:
++2.4 to +3.7 per frame there, averaged; the frame hook's code is unchanged.
+
+### 15.4 FLASHING §4 (draft) -- changes to §12.7 / §13.3 for VEM8
+
+OS VERSION `140C_VEM8`. §12.7 with §13.3 stands; add:
+12. **ATTR TEMPO into range:** T5, T7, T8 VARI SP12 with DJ EQ on T5-T7's FX1 and DARK on every
+    FX2; T6 on VARI with EMUS SP12 from before, playing a sample whose ATTR TEMPO is out of range
+    (it plays as OFF). In the audio editor bring its TEMPO into range: **T6's EMUS reads OT**, T8
+    keeps SP12, toast.
+13. **Slot assign:** the same, T6 on AUTO with an empty slot; give the sample a TIMESTRETCH of
+    VARI in the audio editor, then assign that slot to T6 from the SRC page: **T6 reads OT**, toast.
+14. **Sample load:** the same, T6 on VARI on an empty slot with an out-of-range tempo (or a sample
+    whose tempo is out of range); load a sample into that slot from the card: **T6 reads OT**,
+    toast (after the load finishes).
+15. **Net's order kept:** T6 STATIC not VARI with FLEX stored VARI SP12; switch T6 to FLEX: **T8
+    reads OT**, T6 SP12.
+
+### 15.5 Open questions
+
+- **A slot assign that also changes the machine** (an audio-editor slot of the other machine type:
+  `0x40079424` writes the machine byte too) counts as a machine change: the net's order. Say if it
+  should name the track.
+- **A named change and a Part apply in the same UI-message window** (~17 ms; e.g. a sample load
+  finishing as the sequencer switches Part) take the net's order: the apply wins.
+- **A project load's sample phase** runs before the current bank is read (15.1 item 3): a check
+  then may name tracks of the outgoing Part and step them; the bank read overwrites those bytes
+  and the final check (after the applies) uses the net's order. As in §12.5, such a load can show a
+  toast for a step that does not survive. Not seen in the tests (MMTESTDT has no VARI track at load).
+- The engine still follows at the next trig (unchanged latch).
+- `VG_SP12` is unchanged here (218); the stereo SP12 price is the DSP work's.
+
+### 15.6 Blacklist statement (this session)
+
+**I opened no blacklisted file.** Disclosures:
+1. The memory index (`MEMORY.md`) was injected into this agent's context at start, as for earlier
+   clean sessions; it summarizes the old module's history. I opened no memory file and took
+   nothing from it.
+2. `CLAUDE.md` was read whole: it has one line naming the old thread ("repitch-kyoti") in its
+   concurrent-sessions section; nothing about the old module.
+3. ot_emu's `main.cpp`, `rtos.cpp`, `rtos.h` (in `out/vem/octabam/tools/emu/ot_emu/`) were used: `main.cpp` and `rtos.cpp` grepped
+   for the keywords first (no hits), `rtos.h` grepped for four load constants only; read only for the step verbs and
+   `loadProjectLive`.
+4. The oracle was run only through the harness.
