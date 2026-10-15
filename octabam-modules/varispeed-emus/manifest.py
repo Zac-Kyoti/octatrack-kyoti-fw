@@ -16,18 +16,20 @@
             when a signature of those settings changes, sets just enough EMUS to OT however
             a core got over (SP12 first, then S950, highest track first) -- but a TSTR or
             ATTR TIMESTRETCH edit that puts a track on VARI over budget sets THAT track's
-            EMUS to OT; each shows MAX DSP: EMU LIMIT (1.2 s). Nothing steps down at run
+            EMUS to OT, and so does an indirect entry (a sample's tempo or TIMESTRETCH, a
+            slot assign, a sample load, a slot picked that changes the machine); each shows MAX DSP: EMU LIMIT (1.2 s). Nothing steps down at run
             time; EMUS shows what plays
 
 COLDFIRE. One unit, vem_cf (varispeed_emus.s, its default VEM_EMUS = 1; the same source
 with VEM_EMUS = 0 is the plain VARISPEED module, octabam-modules/varispeed/), the standalone
-builder's own (tools/build_varispeed_emus.py). 22 detours: the render's increment store (the frame hook),
+builder's own (tools/build_varispeed_emus.py). 24 detours: the render's increment store (the frame hook),
 P2EDIT's delta conversion (EMUS steps), SRC SETUP's open (the EMUS detent count restarts),
 five in the audio editor's ATTR page, the four
 SETUP-page dial resolvers, the two Part applies, RELOAD PART, and hold wrappers on the
 bulk writers (SRC page paste, track paste, the PART menu's paste core and CLEAR); the
-guard's: the UI task's message-loop tail (its safety net and its toast) and the FX1 / FX2
-choosers' YES. The
+guard's: the UI task's message-loop tail (its safety net and its toast), the FX1 / FX2
+choosers' YES, and the slot columns of the SRC menu's and the audio editor's machine / slot
+choosers (a machine change by a slot pick names that track). The
 STATIC and FLEX descriptors: TSTR count 4 -> 5 with stock's 5-position select and this
 unit's formatter; PTCH's widget and encoder step; TSNS's widget. The domain swap keeps
 PTCH / TSNS of each machine in NEIGHBOR's '---' bytes of the same track (claimed below).
@@ -73,7 +75,7 @@ U = "vem_cf"
 LINKED = (
     Linked(U, os.path.join(_HERE, "varispeed_emus.s"),
            reference=(0x400d6500,
-                      "ca7cda3e18506db7dc7f13c69ac6481401c1c979bede5ca1a8ded069f97c8ed3")),
+                      "4b4a2ec8256f0ddc235a79fab77ebffcb268b860f89e6dd3e9c2b581bbbd0d79")),
 )
 
 _X = bytes.fromhex
@@ -109,6 +111,10 @@ DETOURS = (
            pad_to=8),
     Detour(0x40052474, _X("4fefffbc48d77cfc"), U, "vh_fx2", "FX2 chooser YES: refused if it overloads",
            pad_to=8),
+    Detour(0x4005a760, _X("4eb94003d014"), U, "vg_pick_src",
+           "SRC menu's slot column: marks its track (a machine change by a slot pick names it)", kind="jsr"),
+    Detour(0x400796d6, _X("2839460e738e"), U, "vg_pick_ae",
+           "audio editor chooser's slot column: marks its track (likewise)", kind="jsr"),
 )
 
 _u32 = lambda v: v.to_bytes(4, "big")

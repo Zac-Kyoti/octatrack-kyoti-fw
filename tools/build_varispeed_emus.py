@@ -13,7 +13,8 @@ within its budget: EMUS and FX-type changes that would overload a core are refus
 their UI handlers; a TSTR / ATTR TIMESTRETCH edit that puts a track on VARI over budget
 steps THAT track's EMUS to OT (VEM7, spec "6b, answers"), and so does a track that
 becomes a VARI track indirectly -- its gate on with its TSTR untouched: a sample's ATTR
-TEMPO, a slot assign, a sample loaded into its slot (VEM8, spec "6b, option B"); and one
+TEMPO, a slot assign, a sample loaded into its slot (VEM8, spec "6b, option B"), and a
+slot picked from a slot list that changes its machine (VEM10, "6b, option B extended"); and one
 safety net -- run in the UI task's message loop when a signature of the estimate's inputs
 changes -- steps just enough tracks to OT however else a core got over (Part change,
 reload, loads, machine, paste), in its order; the toast MAX DSP: EMU LIMIT is raised from
@@ -23,7 +24,7 @@ REPITCH_REWRITE_SCOPE.md + REPITCH_REWRITE_SCOPE_EMUS.md; this build:
 reference/handoffs/REPITCH_REWRITE_IMPL.md.
 
   ColdFire: octabam-modules/varispeed-emus/varispeed_emus.s (VEM_EMUS = 1, its default),
-            one unit linked at the classic cave's proven start (0x400d6500), 22 detours,
+            one unit linked at the classic cave's proven start (0x400d6500), 24 detours,
             12 descriptor pokes; the sites, pokes and splice it shares with VARISPEED
             (tools/build_varispeed.py, the same source with VEM_EMUS = 0) are in
             tools/varispeed_buildlib.py.
@@ -43,7 +44,7 @@ middle of what it displaces; the cave must be zero in stock and inside the class
 cave from 0x400d6500; no reference into 0x80006a40..0x80006abf; the unit must link to
 the same bytes for -mcpu=5407 and 54455 (octabam assembles DRAM units for 54455).
 
-Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM8)
+Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM10)
 """
 import hashlib, importlib.util, json, os, pathlib, struct, subprocess, sys
 from kyoti_status import gate, seal
@@ -64,7 +65,7 @@ OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx"
 OUT_BIN = ROOT / "out/OCTATRACK_VARISPEED_EMUS.bin"
 SYMS_JSON = ROOT / "out/varispeed_emus_syms.json"
 WORK = ROOT / "out/vem_build"
-VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM8"
+VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM10"
 # A TEST variant (the harness's deliberately wrong builds): VEM_VARIANT=<tag> and
 # VEM_VARIANT_SRC=<.s> build out/vem_variants/mainos_varispeed_emus_<tag>.bin from that
 # source, with every check, and no wrap. Never a flash candidate.
@@ -95,6 +96,12 @@ DETOURS.update({
     # emulated engines would tip the core over
     0x400526e4: ("4fefffbc48d77cfc", "vh_fx1", "jmp"),
     0x40052474: ("4fefffbc48d77cfc", "vh_fx2", "jmp"),
+    # VEM10 (spec "6b, option B extended"): the slot columns of the two machine / slot
+    # choosers that reach the slot assign 0x40079424 mark their track (vg_pick): a machine
+    # change that follows is a slot pick's, and names that track; the machine columns do not
+    # pass here. SRC menu: its slot selection call; audio editor: its machine load.
+    0x4005a760: ("4eb94003d014", "vg_pick_src", "jsr"),
+    0x400796d6: ("2839460e738e", "vg_pick_ae", "jsr"),
 })
 # Each body replays its site's displaced bytes and jumps back here: the builder checks
 # the jump target equals site + displaced length.
@@ -167,6 +174,23 @@ CONTEXT.update({
     # live bytes these are, vg_step_ot)
     0x400090a4: "300d1f40004a13c080001828320e1f41004b13c18000",
     0x40009e10: "13c68000182813c580001829",
+    # ---- VEM10: what tells a slot pick's machine change from the machine selector's (IMPL §17.1)
+    # the SRC menu's handler 0x4005a5a8: column 0x460d1a48 != 0 -> 0x4005a758, which goes on
+    # (to the vg_pick_src site 0x4005a760) only for column 1; column 0 writes the machine from
+    # PAGE_M at 0x4005a61c (the machine selector)
+    0x4005a5b8: "2039460d1a4866000198",
+    0x4005a758: "7201b2806600015c",
+    0x4005a614: "79102239460d5c301081",
+    # ... its slot column: the other machine with its slot byte already on the slot picked
+    # skips the slot assign and writes the machine straight (0x4005a826)
+    0x4005a7f0: "7100b0846704b483672c",
+    # the audio editor's chooser 0x400796a0: column 0x460e739a == 1 falls into the
+    # vg_pick_ae site 0x400796d6; any other column -> 0x400798fe (its machine path)
+    0x400796ca: "7401b4b9460e739a6600022a",
+    # the slot assign 0x40079424: the picked machine's slot byte already the slot -> out
+    # (0x40079672, no machine write); else the machine byte written at 0x40079522
+    0x400794b6: "7190b081670001b6",
+    0x40079520: "79101082",
 })
 
 

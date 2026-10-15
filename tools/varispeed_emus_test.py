@@ -44,7 +44,13 @@ Tests (one forked scenario each):
             (net_tempo_order), a slot assigned to it (net_slot_order), a sample loaded into its
             slot by the disk task (net_sample_order); a machine change (net_machine_order) and a
             Part rewritten ahead of its apply (net_partwrite_order, a load's bank read) keep the
-            net's order
+            net's order. VEM10 (spec "6b, option B extended"): a slot picked from a slot list that
+            changes the machine names that track: the SRC menu's slot column through the slot
+            assign (net_slotmach_order), with the picked machine's slot byte already on that slot
+            (no slot assign: net_slotmach_same_order), from a track already on VARI under its old
+            machine (net_slotmach_vv_order), the audio editor's chooser (net_slotmach_ae_order);
+            the SRC menu's MACHINE column (the machine selector) keeps the net's order
+            (net_selmach_order)
   ref_*     the two refusals: EMUS through P2EDIT (ref_emus, ref_emus_ot: stops at the highest
             stop that fits), the FX choosers' YES (ref_fx; ref_fx_alone on a test build whose
             core-0 budget is 2600: stock FX alone over is not refused)
@@ -72,7 +78,13 @@ Test builds (--build-variants): lowbudget (VG_BUDGET_C0 2600, for ref_fx_alone) 
 deliberately wrong builds w_* (out/vem_variants/), each of which must fail its tests
 (w_enter_net: every track entering VARI gets the net's order, as VEM6 did; w_indirect_net: an
 indirect entry gets it, as VEM7 did; w_name_all: every gate that comes on is named, loads and
-machine changes included; w_no_live: a slot change is named without the live-slot test).
+machine changes included; w_no_live: a slot change is named without the live-slot test;
+VEM10: w_slotmach_net: a slot pick's machine change gets the net's order, as VEM9 did;
+w_mach_named: every machine change is named, the machine selector's included).
+
+Test stubs (the KNOB / NOTIFY captures, a sample path) go in the zero cave tail behind the unit,
+or at VEM_STUB_AT (an image whose cave holds more, e.g. the Bugbuild BUG_VEM10, whose bug-fix
+caves fill that tail: VEM_STUB_AT=0x47fd8000, high SDRAM no literal names, PLACEMENT.md).
 
 EMUS order (2026-10-14): OT (stored 1, left), S950 (64, middle), SP12 (127, right).
 """
@@ -114,13 +126,15 @@ FL, ST, PU, THRU = 1, 0, 4, 2
 PARK1 = {ST: 18, FL: 23}
 PARK2 = {ST: 23, FL: 21}
 # the test stubs: in the zero cave tail behind the unit (the classic cave ends 0x400d7c3c)
-_TAIL = max(0x400d7800, (json.loads(SYMS.read_text())["end"] + 0x3f) & ~0x3f)
+_STUB_AT = os.environ.get("VEM_STUB_AT")         # VEM10: elsewhere (the Bugbuild's cave is full)
+_TAIL = int(_STUB_AT, 0) if _STUB_AT else max(0x400d7800, (json.loads(SYMS.read_text())["end"] + 0x3f) & ~0x3f)
+_TAIL_END = _TAIL + 0x200 if _STUB_AT else 0x400d7c3c
 CAP_AT, CAP_BUF, FMT_BUF = _TAIL, _TAIL + 0x60, _TAIL + 0x80
 NCAP_AT, NCAP_BUF = _TAIL + 0x90, _TAIL + 0xe0      # the NOTIFY capture (count, text, dur)
-assert NCAP_BUF + 12 <= 0x400d7c3c, "no room for the test stubs behind the unit"
+assert NCAP_BUF + 12 <= _TAIL_END, "no room for the test stubs behind the unit"
 PATH_AT = _TAIL + 0x100                          # a sample path for LOAD_TO_SLOT (VEM8's net_sample_order)
 PATH_B = b"../AUDIO/ELEKTRON/isaak.wav\0"          # STATIC slot 1's file on MMTESTDT's card
-assert PATH_AT + len(PATH_B) <= 0x400d7c3c, "no room for the path behind the unit"
+assert PATH_AT + len(PATH_B) <= _TAIL_END, "no room for the path behind the unit"
 NOTIFY, NOTIF_H, NOTIF_T = 0x4005a2b8, 0x460d1e70, 0x460d1e6c    # the stock toast, its handle, countdown
 NOTIFY_STOCK = bytes.fromhex("2f032f02242f000c")  # its first 8 bytes (the stub replays them)
 STATIC0_BPM = 0x100d5b30 + 0x114                # static slot 0 (T1's STATIC slot): 120 BPM
@@ -668,6 +682,67 @@ def scenarios():
     s.dump(2800, mmpart(0), PSTRIDE, "after.part")
     s.net = dict(kind="machine", enter=5)
     sc[s.name] = s
+    # ---- VEM10, spec "6b, option B extended": a slot picked from a slot list that changes the
+    # machine names that track (its own EMUS to OT); the machine selector keeps the net's order.
+    # Each through a chooser's REAL YES handler, its column, machine and slot row poked as the
+    # panel leaves them. MMTESTDT's FLEX slots are empty (the slot assign refuses an empty slot:
+    # IMPL §17.1), so the slot-assign cases pick a loaded STATIC slot for a FLEX T6 (the
+    # reverse), and net_slotmach_order first loads isaak.wav into FLEX slot 7 (LOAD_TO_SLOT,
+    # disk command 0). T6 becomes FLEX by stock's machine change at frame 100; its STATIC side
+    # is put on VARI at frame 200, while not current, with SP12 in its TSNS slot AND its park (it
+    # enters on SP12 whether the next poll adopts or swaps).
+    def pick(menu, col, m, slot, t=5):
+        row = FL_PICK(slot) if m == FL else slot
+        if menu == "src":
+            return [poke(2600, [b(UI_TRACK, t), b(UI_TRACK_M, t), b(PART_M, 0)] + lpoke(SRC_COL, col) +
+                         lpoke(PAGE_M, m) + lpoke(SRC_SLOT[m], row)),
+                    call(2600, SRC_MENU, 0, 0)]
+        return [poke(2600, [b(UI_TRACK, t), b(UI_TRACK_M, t), b(PART_M, 0)] + lpoke(AE_COL, col) +
+                     lpoke(AE_MACH, m) + lpoke(AE_SLOT[m], row)),
+                call(2600, AE_MENU, 0, 0)]
+    # STATIC -> FLEX, through the slot assign (FLEX slot 7 loaded first; T6's FLEX slot 3)
+    s = gscn("net_slotmach_order", IND["emus"], IND_NAMED, tstr={5: 0}, slots={4: 0, 5: 0, 6: 0, 7: 0},
+             extra=flex_side(5, "SP12", 3) + [b(PATH_AT + i, x) for i, x in enumerate(PATH_B)])
+    s.add(call(10, LOAD_TO_SLOT, FL, 7, PATH_AT))
+    s.dump(2590, 0x46c922c4 + 44 * 7, 12, "flex7.rec")
+    s.add(*pick("src", 1, FL, 7))
+    s.net = dict(kind="indirect", enter=[5], how="slotmach", eng={5: "SP12"}, to=FL, slot=7, before=3)
+    sc[s.name] = s
+    # STATIC -> FLEX with T6's FLEX slot already 7: the SRC menu changes the machine without the
+    # slot assign (0x4005a7f8 -> 0x4005a826)
+    s = gscn("net_slotmach_same_order", IND["emus"], IND_NAMED, tstr={5: 0}, slots={4: 0, 5: 0, 6: 0, 7: 0},
+             extra=flex_side(5, "SP12", 7))
+    s.add(*pick("src", 1, FL, 7))
+    s.net = dict(kind="indirect", enter=[5], how="slotmach", eng={5: "SP12"}, to=FL, slot=7, before=7)
+    sc[s.name] = s
+    # FLEX -> STATIC (the reverse), through the slot assign: the SRC menu, the audio editor's chooser;
+    # and from a FLEX side already on VARI (EMUS OT) -- its new machine's VARI SP12 is the entry
+    def fl_first(fl_tstr=0, fl_emus=None):
+        pk = (mm_byte(O_P2 + 30 * 5 + 6 * FL + 4, fl_tstr) + mm_byte(O_SLOT5 + 5 * 5 + FL, 3) +
+              (mm_byte(O_P2 + 30 * 5 + 6 * FL + 5, EM[fl_emus]) if fl_emus else []))
+        return [poke(100, mm_byte(O_MACH + 5, FL)), call(100, SET_MACHINE3, 0, 5, ST),
+                poke(200, mm_byte(O_P2 + 30 * 5 + 4, 4) + mm_byte(O_P2 + 30 * 5 + 5, EM["SP12"]) +
+                     mm_byte(O_P2 + 30 * 5 + PARK2[ST], EM["SP12"]))], pk
+    for name, menu, vv in (("net_slotmach_rev_order", "src", False), ("net_slotmach_ae_order", "ae", False),
+                           ("net_slotmach_vv_order", "src", True)):
+        steps, pk = fl_first(4 if vv else 0, "OT" if vv else None)
+        s = gscn(name, IND["emus"], IND_NAMED, tstr={5: 0}, slots={4: 0, 5: 0, 6: 0, 7: 0}, extra=pk)
+        s.add(*steps)
+        s.dump(2590, mmpart(0), PSTRIDE, "pre.part")
+        s.add(*pick(menu, 1, ST, 1))
+        s.net = dict(kind="indirect", enter=[5], how="slotmach", eng={5: "SP12"}, to=ST, slot=1, before=0,
+                     vv=vv)
+        sc[s.name] = s
+    for s in [sc[k] for k in sc if k.startswith("net_slotmach")]:
+        s.dump(2590, S["vg_gon"], 1, "pre.gon")             # the guard's gates at its last check
+        s.dump(2800, mmpart(0), PSTRIDE, "after.part")
+        s.dump(2800, MM_LIVE_SLOT + 72 * 5, 1, "after.live_slot")
+    # ... and the SRC menu's MACHINE column (the machine selector, FLEX picked): the net's order
+    s = gscn("net_selmach_order", IND["emus"], IND_NET, tstr={5: 0}, extra=flex_side(5, "SP12"))
+    s.add(*pick("src", 0, FL, 7))
+    s.dump(2800, mmpart(0), PSTRIDE, "after.part")
+    s.net = dict(kind="machine", enter=5)
+    sc[s.name] = s
 
     # the EMUS refusal (P2EDIT): T5-T7 SP12, T8 VARI on OT. +4 S950, +4 SP12, -4 OT, +8 (two
     # stops asked). ref_emus: S950 fits, SP12 does not (refused: stays S950); ref_emus_ot: with
@@ -949,6 +1024,10 @@ SLOT_ASSIGN = 0x40079424                       # assign the audio editor's slot 
                                                # to the panel's track (0x100b14cc): Part + live slot
 LOAD_TO_SLOT = 0x40022610                      # (machine, slot, path): the slot's path, then disk command 1
 UI_TRACK_M, PART_M = 0x100b14cc, 0x100b14cf    # the panel's track / part, as the slot assign reads them
+# VEM10: the two machine / slot choosers that reach the slot assign (their YES handlers)
+SRC_MENU, SRC_COL, SRC_SLOT = 0x4005a5a8, 0x460d1a48, {ST: 0x460d5c44, FL: 0x460d5c58}   # + PAGE_M
+AE_MENU, AE_COL, AE_MACH, AE_SLOT = 0x400796a0, 0x460e739a, 0x460e738e, {ST: 0x460e737a, FL: 0x460e7366}
+FL_PICK = lambda slot: slot + 8                  # a FLEX slot's row in a slot column (rows 0-7: recorders)
 FX_YES = {1: 0x400526e4, 2: 0x40052474}        # the FX choosers' YES handlers (key handlers)
 FX_CUR = {1: 0x460d5c94, 2: 0x460d5ca8}        # their cursor rows
 FX_LIST = {1: 0x400d6060, 2: 0x400d6090}       # their rows (-> P, whose long is the type id)
@@ -1038,10 +1117,10 @@ def saved_setup(emus, fx1, fx2):
     return pk
 
 
-def flex_side(t, emus):
+def flex_side(t, emus, slot=7):
     """track t's FLEX row stored on VARI with EMUS in the slot (FLEX slot 7, 120 BPM)"""
     return (mm_byte(O_P2 + 30 * t + 6 * FL + 4, 4) + mm_byte(O_P2 + 30 * t + 6 * FL + 5, EM[emus]) +
-            mm_byte(O_SLOT5 + 5 * t + FL, 7))
+            mm_byte(O_SLOT5 + 5 * t + FL, slot))
 
 
 def net_scn(name, emus, fx1, fx2=None, tstr=None, park=None, slots=None, extra=(), frames=G_FRAMES, img=None):
@@ -1479,7 +1558,7 @@ def net_check(t, s, d, log):
             fxx, eng_in = fx, {**eng0, n["enter"]: ENG[c["park"][n["enter"]]]}
         elif kind == "indirect":
             fxx = fx
-            eng_in = {**eng0, **{k: ENG[c["park"][k]] for k in n["enter"]}}
+            eng_in = {**eng0, **{k: ENG[(n.get("eng") or c["park"])[k]] for k in n["enter"]}}
         elif kind in ("gate", "attr"):
             fxx = fx
             eng_in = {**eng0, **{k: ENG[c["park"][k]] for k in c["park"]}}
@@ -1508,7 +1587,7 @@ def net_check(t, s, d, log):
                 t.eq("the model: here the entering track is also the net's choice", want, net)
         elif kind in ("machine", "gate", "partwrite"):
             want = discriminates(eng_in, fxx, ("low_first",))
-            if s.name in ("net_machine_order", "net_partwrite_order"):
+            if s.name in ("net_machine_order", "net_partwrite_order", "net_selmach_order"):
                 # VEM8: a machine change names no single track: the net's order, which here
                 # differs from stepping the track that changed
                 t.eq("the model: the net's order differs here from stepping the track that changed",
@@ -1549,7 +1628,8 @@ def net_check(t, s, d, log):
             if kind == "indirect":
                 k = n["enter"][0]
                 ts = c["tstr"][k]
-                t.eq(f"T{k + 1}'s TSTR untouched ({ts})", p[O_P2 + 30 * k + 4], ts)
+                if n["how"] != "slotmach":            # (slotmach: its new machine's TSTR, checked below)
+                    t.eq(f"T{k + 1}'s TSTR untouched ({ts})", p[O_P2 + 30 * k + 4], ts)
                 if n["how"] == "tempo":
                     r = (d / "after.rec").read_bytes()
                     t.eq("slot 1's tempo: 714 -> 720 by the ATTR TEMPO key (stock's clamp)",
@@ -1557,6 +1637,24 @@ def net_check(t, s, d, log):
                 elif n["how"] == "slot":
                     t.eq(f"T{k + 1}'s STATIC slot: 2 -> 1 by the slot assign", p[O_SLOT5 + 5 * k], 1)
                     t.eq(f"T{k + 1}'s live slot byte (written by the assign)", (d / "after.live_slot").read_bytes()[0], 1)
+                elif n["how"] == "slotmach":
+                    mt, mn = n["to"], {ST: "STATIC", FL: "FLEX"}
+                    if (d / "pre.part").exists():
+                        pp = (d / "pre.part").read_bytes()
+                        t.eq(f"before the pick: T{k + 1} on FLEX (TSTR {'VARI' if n.get('vv') else 'OFF'}), "
+                             "its STATIC side VARI, slot 0", (pp[O_MACH + k], pp[O_P2 + 30 * k + 6 * FL + 4],
+                                                              pp[O_P2 + 30 * k + 4], pp[O_SLOT5 + 5 * k]),
+                             (FL, 4 if n.get("vv") else 0, 4, 0))
+                    if (d / "pre.gon").exists():
+                        t.eq(f"the guard's gate for T{k + 1} before the pick (vg_gon): "
+                             f"{'on (VARI under its old machine)' if n.get('vv') else 'off'}",
+                             bool((d / "pre.gon").read_bytes()[0] >> k & 1), bool(n.get("vv")))
+                    if (d / "flex7.rec").exists():
+                        t.eq("FLEX slot 7 loaded before the pick (its record's +8 is 0)",
+                             struct.unpack(">I", (d / "flex7.rec").read_bytes()[8:12])[0], 0)
+                    t.eq(f"T{k + 1}: -> {mn[mt]} by the slot pick", p[O_MACH + k], mt)
+                    t.eq(f"T{k + 1}'s {mn[mt]} slot: {n['before']} -> {n['slot']}, its {mn[mt]} TSTR VARI",
+                         (p[O_SLOT5 + 5 * k + mt], p[O_P2 + 30 * k + 6 * mt + 4]), (n["slot"], 4))
                 else:
                     r = (d / "after.rec2").read_bytes()
                     t.eq("slot 2 loaded: its path, its tempo 714 -> 2880 (the loader's)",
@@ -1803,6 +1901,12 @@ VARIANTS = {
     "w_no_live": [("        cmp.b   (%a0),%d0\n        bne.s   .vn_n\n", "")],
     "w_no_net": [("6:      moveq   #-1,%d0\n        bsr     vg_fix                  | the net's order for whatever is still over\n        or.l    %d0,%d2",
                   "6:      moveq   #0,%d0\n        or.l    %d0,%d2")],
+    # VEM9's rule: a slot pick's machine change gets the net's order (option B extended off)
+    "w_slotmach_net": [("        mvz.b   (vg_pick).l,%d7         | VEM10: the track a slot pick just ran on (bit t)",
+                        "        moveq   #0,%d7")],
+    # over-applied: EVERY machine change is named, the machine selector's too (no pick test)
+    "w_mach_named": [("        btst    %d1,%d7\n        beq.s   4f                      | no slot pick on this track",
+                      "        nop\n        nop")],
 }
 
 

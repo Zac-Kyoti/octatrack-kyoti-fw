@@ -108,6 +108,9 @@
         .global vg_gon
         .global vg_bulk
         .global vg_key
+        .global vg_pick
+        .global vg_pick_src
+        .global vg_pick_ae
         .global vg_sig
         .global vg_last
         .global vg_fxp
@@ -128,6 +131,9 @@
         .equ    UI_TRACK, 0x80000000    | byte: the panel's track
         .equ    PART_B, 0x80000003      | byte: the current part
         .equ    PAGE_M, 0x460d5c30      | long: the machine whose SRC page is open (P2EDIT)
+        .equ    UI_TRACK_M, 0x100b14cc  | byte: the track the machine / slot choosers act on
+        .equ    SRC_SLOT_SEL, 0x4003d014 | the SRC menu's slot column: selects its slot (C)
+        .equ    AE_PICK_M, 0x460e738e   | long: the audio editor chooser's machine (C)
         .equ    DB_PTR, 0x46c82456      | -> the working bank blob
         .equ    PART_STRIDE, 0x18b2
         .equ    OFF_MACH, 0x8eda2       | + t: machine type (0 ST, 1 FL, 2 THRU, 3 NEIGHBOR, 4 PU)
@@ -1254,6 +1260,14 @@ vg_entered:
 | last check (rp_forget sets vg_bulk; rp_sync forgets on another Part), a machine change, a
 | TSTR change (P2EDIT's TSTR is VEM7's: vg_note / vg_entered). Keeps the snapshot (vg_gon,
 | vg_key) for the next check. Keeps all but d0.
+| VEM10 (spec "6b, option B extended"): a machine change made by a SLOT PICK -- a slot of the
+| other machine picked from a slot list (vg_pick, set by the two choosers' slot columns for
+| their track, cleared at every loop tail) -- names that track when its gate is on now (its
+| new machine's setting puts it on VARI; on or off under the old machine) and no bulk change
+| came between. No live-slot test here: the pick that finds the other machine's slot byte
+| already on its slot changes the machine alone and writes no live slot byte (C: ot_emu,
+| IMPL §17), and vg_pick already says the change came from this message's UI handler. A
+| machine change from the machine column, or any other, sets no vg_pick bit: the net's order.
 vg_new:
         lea     -36(%sp),%sp
         movem.l %d1-%d7/%a0-%a1,(%sp)
@@ -1262,8 +1276,10 @@ vg_new:
         mvz.b   (vg_bulk).l,%d6
         clr.b   (vg_bulk).l
         move.w  %d7,%sr
+        mvz.b   (vg_pick).l,%d7         | VEM10: the track a slot pick just ran on (bit t)
         tst.l   %d6
         beq.s   1f
+        moveq   #0,%d7                  | (a bulk change since: no pick counts either)
         moveq   #-1,%d6                 | a bulk change since: as if every gate had been on
         bra.s   2f
 1:      mvz.b   (vg_gon).l,%d6          | the gates at the last check
@@ -1283,7 +1299,12 @@ vg_new:
         tst.l   %d0
         beq.s   .vn_n
         bset    %d1,%d4                 | on now
-        btst    %d1,%d6
+        btst    %d1,%d7
+        beq.s   4f                      | no slot pick on this track
+        move.l  %d2,%d0
+        andi.l  #0xff0000,%d0
+        bne.s   3f                      | VEM10: a slot pick changed its machine: named
+4:      btst    %d1,%d6
         bne.s   .vn_n                   | on before (or a bulk change)
         move.l  %d2,%d0
         andi.l  #0xffffff00,%d0
@@ -1346,6 +1367,33 @@ vg_tkey:
         lea     20(%sp),%sp
         rts
 
+| vg_pick_src / vg_pick_ae (VEM10, spec "6b, option B extended"): the slot columns of the two
+| machine / slot choosers that reach the slot assign 0x40079424 -- the SRC menu's
+| (0x4005a5a8, its column 0x460d1a48 = 1: `jsr 0x4003d014` at 0x4005a760 -> `jsr vg_pick_src`)
+| and the audio editor's (0x400796a0, its column 0x460e739a = 1: `move.l 0x460e738e,%d4` at
+| 0x400796d6 -> `jsr vg_pick_ae`). Each marks the chooser's track (0x100b14cc) in vg_pick,
+| then does what it displaced. Either column then changes the machine when the slot picked
+| is the other machine's -- through the slot assign (0x40079522), or, when that machine's
+| slot byte already holds the slot, straight (0x4005a826 / via 0x400798fe to 0x400797cc).
+| Their machine columns (0x4005a5c2; 0x400798fe) reach neither site: the machine selector.
+| UI task (key handlers). Keep every register (vg_pick_ae: all but d4, which it loads).
+vg_pick_src:
+        bsr.s   vg_pick_t
+        jmp     (SRC_SLOT_SEL).l        | displaced: the call (its rts returns behind the site)
+vg_pick_ae:
+        bsr.s   vg_pick_t
+        move.l  (AE_PICK_M).l,%d4       | displaced
+        rts
+vg_pick_t:
+        move.l  %d0,-(%sp)
+        move.l  %a0,-(%sp)
+        mvz.b   (UI_TRACK_M).l,%d0
+        lea     vg_pick(%pc),%a0
+        bset    %d0,(%a0)
+        movea.l (%sp)+,%a0
+        move.l  (%sp)+,%d0
+        rts
+
 | vg_tick: `jmp` from 0x40062d1c, the UI task's message-loop tail (C, stock: every message
 | the UI task takes -- keys, encoders, and DTIM1's 60 Hz tick, type 5 -- ends here, at one
 | stack depth, no handler in flight; stock's own message cases 27/29/31 raise NOTIFY at
@@ -1387,7 +1435,8 @@ vg_tick:
         move.l  %d0,(vg_last).l
 4:      clr.b   (vg_pend).l
         move.l  (%sp)+,%d2
-2:      tst.b   (vg_toast).l
+2:      clr.b   (vg_pick).l             | VEM10: a slot pick counts for its own message only
+        tst.b   (vg_toast).l
         beq.s   3f
         clr.b   (vg_toast).l
         pea     (TOAST_DUR).w
@@ -2399,6 +2448,8 @@ vg_gon:                                 | vg_new: each track's gate at the last 
         .byte   0
 vg_bulk:                                | vg_new: Parts rewritten wholesale since (rp_forget)
         .byte   1
+vg_pick:                                | vg_new: a slot pick's track (bit t), this message only
+        .byte   0
         .balign 4
 vg_key:                                 | vg_new: each track's key at the last check (vg_tkey)
         .long   0, 0, 0, 0, 0, 0, 0, 0

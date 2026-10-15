@@ -55,8 +55,10 @@ Usage:  python3 tools/build_bugbuilds.py [--no-rebuild]
 WIP OPT-IN, for one base at a time:
 
     KYOTI_ALLOW_WIP=1 python3 tools/build_bugbuilds.py --wip VARISPEED
+    KYOTI_ALLOW_WIP=1 python3 tools/build_bugbuilds.py --wip VARISPEED_EMUS
 
-builds ONLY that base's Bugbuild (WIP_FEATURES below; VARISPEED -> BUG_VARI), with every
+builds ONLY that base's Bugbuild (WIP_FEATURES below; VARISPEED -> BUG_VARI, VARISPEED_EMUS ->
+BUG_VEM10: its DSP payload edits come through untouched, as SIDECHAIN's do), with every
 check above except the promotion ones: its builder is WIP and is run with the opt-in, the
 result is announced as WIP, and it is NEVER sealed (kyoti_status.seal is not called, so it
 can never pass for a promoted image). Without KYOTI_ALLOW_WIP=1 it refuses. A run without
@@ -126,22 +128,49 @@ FEATURES = {
 WIP_FEATURES = {
     "VARISPEED": ("build_varispeed.py", "out/mainos_varispeed.bin", "BUG_VARI",
                   "STATIC/FLEX TSTR VARI: tempo-locked varispeed, QUAN ratios on PTCH (WIP)."),
+    # carries DSP payload changes (the S950 / SP12 kernel in SPRING REVERB's modules, SPRING off
+    # both FX choosers), composed as the SIDECHAIN base is: the image as built, the fixes only
+    # in the ColdFire cave zone, every feature byte preserved (the interlock proof)
+    "VARISPEED_EMUS": ("build_varispeed_emus.py", "out/mainos_varispeed_emus.bin", "BUG_VEM10",
+                       "STATIC/FLEX TSTR VARI + EMUS (OT / S950 / SP12), DSP load guard (WIP)."),
 }
 # Bytes a feature writes AT RUNTIME that are zero in its image: no bug-fix cave may cover
 # them, though free_runs() would otherwise count them free.
 RESERVED = {"REC_TRIG_MUTE": [(0x400d7c3a, 1)]}       # RTM_MASK (build_rec_trig_mute.py)
 
 
-def reserved(name):
+def reserved(name, img=None):
     """RESERVED, plus VARISPEED's runtime state at its unit's tail: vem_depth, rk_acc and rp_pb
     are zero in the image and written at run time (rp_pp between them is 0xff), read from the
-    builder's symbols so they follow the unit."""
+    builder's symbols so they follow the unit.
+    VARISPEED_EMUS: EVERY zero byte inside its unit (cave .. end, from the builder's symbols;
+    the runtime state -- vg_key, vg_last, vg_eng, the flags, em_ctx, rp_pb ... -- and the zero
+    words of its tables alike), so no fix cave can start inside the unit."""
     out = list(RESERVED.get(name, []))
     if name == "VARISPEED":
         import json
         sy = json.loads((ROOT / "out/varispeed_syms.json").read_text())
         g = sy["syms"]
         out += [(g["vem_depth"], g["rp_pp"] - g["vem_depth"]), (g["rp_pp"] + 1, sy["end"] - g["rp_pp"] - 1)]
+    elif name == "VARISPEED_EMUS":
+        import json
+        sy = json.loads((ROOT / "out/varispeed_emus_syms.json").read_text())
+        if img is None:
+            sys.exit("reserved(VARISPEED_EMUS) needs the base image")
+        if not any(img[o(sy["cave"]):o(sy["end"])]):
+            sys.exit("VARISPEED_EMUS: no unit in the base image at its symbols' address")
+        if hashlib.sha256(img[o(sy["cave"]):o(sy["end"])]).hexdigest() != sy["unit_sha256"]:
+            sys.exit("VARISPEED_EMUS: out/varispeed_emus_syms.json does not describe the base image's unit")
+        a = sy["cave"]
+        while a < sy["end"]:
+            if img[o(a)] == 0:
+                b = a
+                while b < sy["end"] and img[o(b)] == 0:
+                    b += 1
+                out.append((a, b - a))
+                a = b
+            else:
+                a += 1
     return out
 
 PROBLEMS = []
@@ -339,7 +368,8 @@ def compose(name, builder, basepath, verstr, blurb, stock, rebuild, wip=False):
             already.append(stem)
             addrs[stem] = resolve_present(img, stem)     # honour where IT put it
     runs = free_runs(img)
-    for at, n in reserved(name):            # carve out runtime-written bytes
+    res = reserved(name, bytes(img))        # (from the base, before any fix is written)
+    for at, n in res:                       # carve out runtime-written bytes
         cut = []
         for r in runs:
             if r[0] < at + n and at < r[1]:
@@ -396,7 +426,7 @@ def compose(name, builder, basepath, verstr, blurb, stock, rebuild, wip=False):
     if extra:
         flag(f"{name}: {len(extra)} byte(s) belong to no contributor, "
              f"first at 0x{BASE + extra[0]:08x}")
-    for at, n in reserved(name):
+    for at, n in res:
         if any(img[o(at):o(at) + n]):
             flag(f"{name}: runtime byte(s) 0x{at:08x}+{n} are no longer 0 in the composite")
             extra = extra or [o(at)]
