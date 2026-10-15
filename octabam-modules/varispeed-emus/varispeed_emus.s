@@ -21,8 +21,9 @@
 | renders the track with, latched at each trig; four detents in one direction step it once.
 | A DSP load guard (spec §6b) keeps each DSP core's estimated load, a property of the
 | settings, under its budget: a change that would overload it is refused (EMUS, the FX
-| type), TSTR / ATTR onto VARI steps that track's EMUS to OT, and a change that cannot be
-| refused (Part change, reload, load, machine, sample...) steps just enough tracks to OT;
+| type), TSTR / ATTR onto VARI steps THAT track's EMUS to OT (VEM7), and a change that
+| cannot be refused (Part change, reload, load, machine, sample...) steps just enough
+| tracks to OT;
 | each raises the toast MAX DSP: EMU LIMIT from the UI task's message loop. Spec:
 | reference/handoffs/REPITCH_REWRITE_SPEC.md; facts: REPITCH_REWRITE_SCOPE.md +
 | REPITCH_REWRITE_SCOPE_EMUS.md (clean-room); this build: REPITCH_REWRITE_IMPL.md §12.
@@ -99,6 +100,9 @@
         .global vh_fx2
         .global vg_eng
         .global vg_toast
+        .global vg_pend
+        .global vg_note
+        .global vg_entered
         .global vg_sig
         .global vg_last
         .global vg_fxp
@@ -513,8 +517,13 @@ attr_up:
 2:      moveq   #3,%d1
         cmp.l   %d1,%d0
         bne.s   .au_out                 | VARI and anything unknown: no change
-        moveq   #VARI,%d0               | BEAT -> VARI (tracks under AUTO on this sample enter
-                                        | VARI: the guard's safety net checks their cores)
+        .if VEM_EMUS
+        moveq   #7,%d1                  | BEAT -> VARI: tracks under AUTO on this sample enter
+3:      bsr     vg_note                 |   VARI. Every track whose gate is off before the
+        subq.l  #1,%d1                  |   edit is noted: vg_tick gives one the edit puts on
+        bpl.s   3b                      |   VARI over budget EMUS = OT, its own (VEM7)
+        .endif
+        moveq   #VARI,%d0
 .au_st: move.l  %d0,0x110(%a0)
 .au_out:
         bsr     rp_refresh
@@ -646,8 +655,9 @@ emus_fmt:
 | stores the stop itself (a non-stop value snaps to its bucket's stop on the first
 | detent). The DSP load guard (spec §6b item 2): a move toward a dearer engine stops at
 | the highest stop whose engine fits the track's DSP core (vg_cap), and flags the toast
-| if it stopped short; a move toward a cheaper one is always allowed. Everything else
-| (TSTR included: the guard's safety net sees a track entering VARI): stock's conversion.
+| if it stopped short; a move toward a cheaper one is always allowed. TSTR (slot 4): the
+| panel's track is noted when its gate is off (vg_note; vg_tick then gives it EMUS = OT if
+| the edit put it on VARI over budget), then stock's conversion. Everything else: stock's.
 | P2EDIT's own registers (d2 = old value, d3, d4, d5, a2-a5) are kept: C ABI, d0/d1/a0/a1
 | only. This is P2EDIT, the SRC SETUP page's encoder handler (UI task).
 emus_p2step:
@@ -658,6 +668,12 @@ emus_p2step:
         moveq   #TSNS_SLOT2,%d0
         cmp.l   4(%sp),%d0
         beq.s   1f
+        moveq   #TSTR_SLOT2,%d0
+        cmp.l   4(%sp),%d0
+        bne.s   .ep_stock
+        moveq   #0,%d1                  | TSTR: note the panel's track if it is off VARI now
+        move.b  (UI_TRACK).l,%d1
+        bsr     vg_note
 .ep_stock:
         jmp     (ACCUM).l
 1:      move.l  8(%sp),-(%sp)           | stock's accumulator first: it keeps its own
@@ -769,12 +785,17 @@ emus_open:
 |     stops at the highest stop that fits (vg_cap, from P2EDIT); an FX type that does not
 |     fit, when emulated engines are what tip the core over, does not land (vg_fx_try,
 |     from the FX choosers' YES);
+|   * TSTR / ATTR TIMESTRETCH onto VARI (spec "6b, answers", VEM7): the user acts on that
+|     track, so when the edit puts its core over the budget THAT track's EMUS goes to OT
+|     first (vg_note in the handler, vg_entered + vg_fix on those tracks alone in vg_tick);
 |   * one safety net (vg_tick -> vg_fix): however a core got over its budget -- a Part
 |     change or reload, a project or bank load (old projects included), a machine change,
-|     a paste, a sample or tempo change that turns a gate on, TSTR / ATTR onto VARI --
+|     a paste, a sample or tempo change that turns a gate on, and whatever the entering
+|     track's own step leaves over --
 |     just enough of its tracks get EMUS = OT, SP12 first, then S950, highest track number
 |     first. It runs in the UI task's message loop, and only when a cheap signature of the
-|     estimate's inputs (vg_sig) differs from the last one checked;
+|     estimate's inputs (vg_sig) differs from the last one checked. RELOAD PART has no
+|     special code: the net acts on a reload whose result is over budget;
 |   * the toast MAX DSP: EMU LIMIT (1.2 s) is raised there too, the one NOTIFY: right after
 |     the UI handler that caused it, or at the next UI message (a tick at 60 Hz) when the
 |     cause was not the UI's (a sequencer Part switch). Never from the frame path.
@@ -1175,19 +1196,66 @@ vb_fx2:
         movem.l %d2-%d7/%a2-%fp,(%sp)   | displaced
         jmp     (0x4005247c).l
 
+| vg_note (UI task: P2EDIT's TSTR step, the ATTR value-up's BEAT -> VARI): d1 = track; when
+| its gate (rp_ui_gate) is off now, it is noted in vg_pend: the edit about to land may put
+| it on VARI. vg_tick (this handler's loop tail) then checks the noted tracks. Keeps every
+| register.
+vg_note:
+        move.l  %d0,-(%sp)
+        move.l  %a0,-(%sp)
+        bsr     rp_ui_gate
+        tst.l   %d0
+        bne.s   1f
+        lea     vg_pend(%pc),%a0
+        bset    %d1,(%a0)
+1:      movea.l (%sp)+,%a0
+        move.l  (%sp)+,%d0
+        rts
+
+| vg_entered: d0 = tracks vg_note noted (bit t) -> d0 = those of them on VARI now (the edit
+| put them there). Keeps all but d0.
+vg_entered:
+        lea     -12(%sp),%sp
+        movem.l %d1-%d3,(%sp)
+        move.l  %d0,%d2
+        moveq   #0,%d3
+        moveq   #7,%d1
+1:      btst    %d1,%d2
+        beq.s   2f
+        bsr     rp_ui_gate
+        tst.l   %d0
+        beq.s   2f
+        bset    %d1,%d3
+2:      subq.l  #1,%d1
+        bpl.s   1b
+        move.l  %d3,%d0
+        movem.l (%sp),%d1-%d3
+        lea     12(%sp),%sp
+        rts
+
 | vg_tick: `jmp` from 0x40062d1c, the UI task's message-loop tail (C, stock: every message
 | the UI task takes -- keys, encoders, and DTIM1's 60 Hz tick, type 5 -- ends here, at one
 | stack depth, no handler in flight; stock's own message cases 27/29/31 raise NOTIFY at
 | this level and branch here). The safety net: when the inputs' signature differs from
-| the last one checked, vg_fix. Then the toast when flagged (a refusal in the handler that
-| just ran, or the net): MAX DSP: EMU LIMIT, 1.2 s. The ONLY NOTIFY of this unit.
+| the last one checked, vg_fix. Before that, the tracks a TSTR / ATTR edit just put on VARI
+| (vg_pend, vg_entered) get the first step: vg_fix on them alone, so on an over-budget core
+| THEIR EMUS goes to OT (VEM7). Then the toast when flagged (a refusal in the handler that
+| just ran, the entering track's step, or the net): MAX DSP: EMU LIMIT, 1.2 s. The ONLY
+| NOTIFY of this unit.
 | d0/d1/a0/a1 are free at this point (the loop's next act is a call); the rest is kept.
 vg_tick:
         tst.l   (DB_PTR).l
         beq.s   2f                      | no bank blob yet (early boot)
         tst.b   (vem_depth).l
         bne.s   2f                      | a bulk write holds the Part (not the UI task's)
-        bsr     vg_sig
+        move.b  (vg_pend).l,%d0         | a TSTR / ATTR edit just ran
+        beq.s   1f
+        clr.b   (vg_pend).l
+        bsr     vg_entered              | the tracks it put on VARI
+        tst.l   %d0
+        beq.s   1f
+        bsr     vg_fix                  | over budget: THEIR EMUS to OT first
+1:      bsr     vg_sig
         cmp.l   (vg_last).l,%d0
         beq.s   2f                      | nothing the estimate reads has changed
         move.l  %d0,(vg_last).l
@@ -1544,7 +1612,6 @@ rp_gate_m:
         addi.l  #OFF_P2+TSTR_SLOT2,%d3
         moveq   #0,%d0
         move.b  (%a0,%d3.l),%d0         | SETUP TSTR, the Part's own copy
-.gm_test:                               | (rp_gate_v enters here: d0 = TSTR, a1 = settings)
         moveq   #VARI,%d3
         cmp.l   %d3,%d0
         beq.s   .gm_tempo
@@ -1568,38 +1635,6 @@ rp_gate_m:
         movem.l (%sp),%d1/%d3/%a0-%a1
         lea     16(%sp),%sp
         rts
-
-| rp_gate_v: rp_gate_m with d0 = a SETUP TSTR value in place of the Part's (what a TSTR
-| edit is about to store). d1 = track, d2 = machine. UI task. Keeps everything but d0.
-rp_gate_v:
-        lea     -16(%sp),%sp
-        movem.l %d1/%d3/%a0-%a1,(%sp)   | rp_gate_m's frame: it leaves through .gm_out
-        move.l  %d0,-(%sp)
-        moveq   #7,%d0
-        cmp.l   %d0,%d1
-        bhi.s   1f
-        moveq   #1,%d0
-        cmp.l   %d0,%d2
-        bhi.s   1f
-        bsr     part_base
-        move.l  %d1,%d3
-        lsl.l   #2,%d3
-        add.l   %d1,%d3                 | 5t
-        add.l   %d2,%d3
-        addi.l  #OFF_SLOT5,%d3
-        moveq   #0,%d0
-        move.b  (%a0,%d3.l),%d0         | the sample slot byte
-        move.l  #SET_STRIDE,%d3
-        mulu.l  %d0,%d3
-        lea     (SET_STATIC).l,%a1
-        tst.l   %d2
-        beq.s   2f
-        lea     (SET_FLEX).l,%a1
-2:      adda.l  %d3,%a1
-        move.l  (%sp)+,%d0
-        bra     .gm_test
-1:      addq.l  #4,%sp
-        bra     .gm_no
 
 | d1 = track -> d0 = rp_gate_m for its current DB machine (0 off ST/FL). Keeps all else.
 rp_ui_gate:
@@ -2231,6 +2266,8 @@ rp_pp:
 vg_eng:                                 | vg_scan: the engine each track's settings run
         .byte   0, 0, 0, 0, 0, 0, 0, 0
 vg_toast:                               | MAX DSP: EMU LIMIT is due (vg_tick raises it)
+        .byte   0
+vg_pend:                                | tracks noted off VARI before a TSTR / ATTR edit (bit t)
         .byte   0
         .endif
         .balign 4

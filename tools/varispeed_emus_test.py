@@ -34,9 +34,11 @@ Tests (one forked scenario each):
             over budget at the start (net_load), a sequencer Part change (net_part, with the
             rp_sync check of the switched Part's PTCH), RELOAD PART (net_reload), a track paste
             (net_paste), a machine change (net_machine), a sample attribute turning a gate on
-            (net_gate), SETUP TSTR (net_tstr, net_tstr_order, net_tstr_fit) and ATTR TIMESTRETCH
-            (net_attr) onto VARI: just enough EMUS to OT, SP12 first, then S950, highest track
-            first; the engine each plays from its next trig; one toast
+            (net_gate): just enough EMUS to OT, SP12 first, then S950, highest track first;
+            SETUP TSTR (net_tstr, net_tstr_order, net_tstr_fit) and ATTR TIMESTRETCH (net_attr,
+            net_attr_order) onto VARI over budget: THE ENTERING track's EMUS to OT (VEM7, spec
+            "6b, answers"; among several entering, the net's order), the net's order for what
+            is still over; the engine each plays from its next trig; one toast
   ref_*     the two refusals: EMUS through P2EDIT (ref_emus, ref_emus_ot: stops at the highest
             stop that fits), the FX choosers' YES (ref_fx; ref_fx_alone on a test build whose
             core-0 budget is 2600: stock FX alone over is not refused)
@@ -54,7 +56,8 @@ Tests (one forked scenario each):
             VEM2-VEM5 (six detents per stop) too.
 
 Test builds (--build-variants): lowbudget (VG_BUDGET_C0 2600, for ref_fx_alone) and the
-deliberately wrong builds w_* (out/vem_variants/), each of which must fail its tests.
+deliberately wrong builds w_* (out/vem_variants/), each of which must fail its tests
+(w_enter_net: a track entering VARI by TSTR / ATTR gets the net's order, as VEM6 did).
 
 EMUS order (2026-10-14): OT (stored 1, left), S950 (64, middle), SP12 (127, right).
 """
@@ -517,7 +520,8 @@ def scenarios():
     s.net = dict(kind="gate")
     sc[s.name] = s
     # SETUP TSTR onto VARI through P2EDIT: T8 BEAT, EMUS SP12 parked -> T8 enters on OT. Then
-    # (net_tstr_order) T6 enters with T8 already on SP12: the net steps T8, not T6
+    # (net_tstr_order) T6 enters with T8 already on SP12: T6 itself goes to OT, T8 keeps SP12
+    # (VEM7; VEM6 stepped T8, the net's order)
     s = net_scn("net_tstr", {4: "SP12", 5: "SP12", 6: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
                 tstr={7: 3}, park={7: "SP12"})
     s.add(poke(2599, [b(UI_TRACK, 7)] + lpoke(PAGE_M, ST) + lpoke(ENC_F_HELD, 0)), call(2600, P2EDIT, 4, 1))
@@ -541,6 +545,18 @@ def scenarios():
     # AUTO there, both SP12 parked; T5, T6 VARI SP12 -> both enter, T8 to OT, T7 keeps SP12
     s = net_scn("net_attr", {4: "SP12", 5: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
                 tstr={6: 1, 7: 1}, park={6: "SP12", 7: "SP12"}, slots={6: 1, 7: 1},
+                extra=lpoke(STATIC_SET + 0x448 * 1 + 0x110, 3))
+    s.add(poke(2600, lpoke(ATTR_SLOT, 1) + lpoke(ATTR_MACH, 0) + lpoke(ATTR_ROW, 2) + lpoke(ATTR_MODE, 0)),
+          call(2600, ATTR_UP))
+    s.dump(2800, mmpart(0), PSTRIDE, "after.part")
+    s.dump(2800, STATIC_SET + 0x448 * 1 + 0x110, 4, "after.tsmode")
+    s.net = dict(kind="attr")
+    sc[s.name] = s
+    # the same edit where the net's order and the entering tracks' own step differ: T5, T8 VARI
+    # SP12; T6, T7 on AUTO on STATIC slot 1 (BEAT), both SP12 parked -> both enter, one step
+    # is needed: T7 (the highest ENTERING track) to OT; the net's order would take T8
+    s = net_scn("net_attr_order", {4: "SP12", 7: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
+                tstr={5: 1, 6: 1}, park={5: "SP12", 6: "SP12"}, slots={5: 1, 6: 1},
                 extra=lpoke(STATIC_SET + 0x448 * 1 + 0x110, 3))
     s.add(poke(2600, lpoke(ATTR_SLOT, 1) + lpoke(ATTR_MACH, 0) + lpoke(ATTR_ROW, 2) + lpoke(ATTR_MODE, 0)),
           call(2600, ATTR_UP))
@@ -665,6 +681,21 @@ class NetModel:
             eng[v] = 0
             stepped.append(v)
         return eng, stepped
+
+    def enter_fix(self, fx, eng, entering):
+        """VEM7 (spec "6b, answers"): a TSTR / ATTR edit put `entering` on VARI. While over,
+        THEIR EMUS goes to OT first (SP12 first, then S950, highest track first among them);
+        whatever is still over, the net's order."""
+        eng, stepped = dict(eng), []
+        while self.est(fx, eng) > self.budget:
+            c = [t for t in entering if eng.get(t)]
+            if not c:
+                break
+            v = max(c, key=lambda t: (eng[t], t))
+            eng[v] = 0
+            stepped.append(v)
+        eng, rest = self.fix(fx, eng)
+        return eng, stepped + rest
 
     def cap(self, fx, eng, t, want):
         room = self.budget - self.est(fx, {k: e for k, e in eng.items() if k != t})
@@ -1222,14 +1253,23 @@ def net_check(t, s, d, log):
         else:                                   # part: part 1
             fxx = {k: ("DJEQ", "DARK") for k in GT}
             eng_in = {5: 2, 6: 2, 7: 2}
+        entering = [n["enter"]] if kind == "tstr" else sorted(c["park"]) if kind == "attr" else None
         if s.name == "net_tstr_fit":
             want = m.fix(fxx, eng_in)[0]
             t.eq("the model: it fits, nothing steps", want, eng_in)
-        elif s.name == "net_tstr_order":
-            want = m.fix(fxx, eng_in)[0]
-            t.eq("the model steps the highest SP12 track (T8), not the one entering (T6)", want[7] == 0 and want[5] == 2, True)
-            discriminates(eng_in, fxx, ("low_first",))
-        elif kind == "machine" or kind == "gate" or kind == "tstr":
+        elif kind in ("tstr", "attr"):
+            # VEM7: the entering track's own EMUS first; the net's order is the wrong rule
+            # wherever it would step another track (the *_order scenarios)
+            want = m.enter_fix(fxx, eng_in, entering)[0]
+            t.eq("the model steps something here", want != eng_in, True)
+            net = m.fix(fxx, eng_in)[0]
+            if s.name.endswith("_order"):
+                t.eq("the model: the entering track steps, not the net's choice (the right rule "
+                     "differs from the net's order here)",
+                     ([k for k in entering if want[k] == 0 and eng_in[k]] != [], want != net), (True, True))
+            else:
+                t.eq("the model: here the entering track is also the net's choice", want, net)
+        elif kind == "machine" or kind == "gate":
             want = discriminates(eng_in, fxx, ("low_first",))
         else:
             want = discriminates(eng_in, fxx, ("low_first", "s950_first") if 1 in eng_in.values() else ("low_first",))
@@ -1480,6 +1520,9 @@ VARIANTS = {
                         "        move.l  %d0,-(%sp)\n        pea     (TOAST_DUR).w\n        pea     str_emu_limit(%pc)\n"
                         "        jsr     (NOTIFY).l\n        addq.l  #8,%sp\n        move.l  (%sp)+,%d0\n"
                         "        lea     vg_engp(%pc),%a0")],
+    "w_enter_net": [("        bsr     vg_entered              | the tracks it put on VARI\n        tst.l   %d0\n"
+                     "        beq.s   1f\n        bsr     vg_fix                  | over budget: THEIR EMUS to OT first",
+                     "        moveq   #0,%d0\n        tst.l   %d0\n        beq.s   1f\n        nop")],
     "w_no_net": [("        moveq   #-1,%d0\n        bsr     vg_fix\n        tst.l   %d0\n        beq.s   2f",
                   "        moveq   #0,%d0\n        tst.l   %d0\n        beq.s   2f")],
 }

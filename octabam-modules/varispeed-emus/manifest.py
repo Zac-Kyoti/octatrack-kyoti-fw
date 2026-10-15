@@ -14,11 +14,14 @@
             budget is refused (EMUS stops at the highest engine that fits; an FX type does
             not land when emulated engines tip the core); a safety net, run in the UI task
             when a signature of those settings changes, sets just enough EMUS to OT however
-            a core got over (SP12 first, then S950, highest track first); each shows
-            MAX DSP: EMU LIMIT (1.2 s). Nothing steps down at run time; EMUS shows what plays
+            a core got over (SP12 first, then S950, highest track first) -- but a TSTR or
+            ATTR TIMESTRETCH edit that puts a track on VARI over budget sets THAT track's
+            EMUS to OT; each shows MAX DSP: EMU LIMIT (1.2 s). Nothing steps down at run
+            time; EMUS shows what plays
 
-COLDFIRE. One unit, vem_cf (varispeed_emus.s), the standalone builder's own
-(tools/build_varispeed_emus.py). 22 detours: the render's increment store (the frame hook),
+COLDFIRE. One unit, vem_cf (varispeed_emus.s, its default VEM_EMUS = 1; the same source
+with VEM_EMUS = 0 is the plain VARISPEED module, octabam-modules/varispeed/), the standalone
+builder's own (tools/build_varispeed_emus.py). 22 detours: the render's increment store (the frame hook),
 P2EDIT's delta conversion (EMUS steps), SRC SETUP's open (the EMUS detent count restarts),
 five in the audio editor's ATTR page, the four
 SETUP-page dial resolvers, the two Part applies, RELOAD PART, and hold wrappers on the
@@ -70,7 +73,7 @@ U = "vem_cf"
 LINKED = (
     Linked(U, os.path.join(_HERE, "varispeed_emus.s"),
            reference=(0x400d6500,
-                      "236e521859a3920aab8dac93986496e0d02b68c6d62bb8cf5ccf43ac6328e29e")),
+                      "37f72b04e48c30f3a5d988bb45e9c1b958d20973f14ca1ff8806c3e7bb246cac")),
 )
 
 _X = bytes.fromhex
@@ -78,7 +81,8 @@ DETOURS = (
     Detour(0x40004100, _X("a1c0eca027400024"), U, "vem_frame",
            "render, second pass: the increment store (VARI speed, dry, engine tag, mask)", pad_to=8),
     Detour(0x4003a566, _X("4eb94003249c"), U, "emus_p2step",
-           "P2EDIT's delta conversion: one EMUS stop per six detents", kind="jsr"),
+           "P2EDIT's delta conversion: one EMUS stop per four detents; notes a TSTR edit",
+           kind="jsr"),
     Detour(0x400585f4, _X("4eb9400326d4"), U, "emus_open",
            "SRC SETUP's open, its encoder set-up: the EMUS detent count restarts", kind="jsr"),
     Detour(0x4006e71c, _X("4879400b94f660000154"), U, "attr_label",
