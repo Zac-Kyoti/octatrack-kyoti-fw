@@ -79,10 +79,10 @@ SUBS = [
         move    r7,n2
         move    #>@MARK@,r1             ; block 1: the render's half-table
 """),
-    ("""        do      #BHALF,zqi3             ; T[k] stored for k = 0..LR/2; T[LR-k] = -1/2 - T[k]
+    ("""        do      #BHALF,zqi3             ; T'[k] stored for k = 0..LR/2; T'[LR-k] = 1/2 - T'[k]
         move    x:(r1)+,x0
 """,
-     """        do      #BHALF,zqi3             ; T[k] stored for k = 0..LR/2; T[LR-k] = -1/2 - T[k]
+     """        do      #BHALF,zqi3             ; T'[k] stored for k = 0..LR/2; T'[LR-k] = 1/2 - T'[k]
         move    p:(r1)+,x0
 """),
     ("""        move    #>XSP,r1
@@ -108,7 +108,7 @@ def generate():
     w1, w2, off = tables()
     assert off["XBL"] == 0 and off["XSP"] == 0, "zqinit reads each block from its start"
     c = constants()
-    text = dsrc.variant_text(dsrc.ASM.read_text())
+    text = dsrc.ASM.read_text()
     assert MARK not in text and MARK2 not in text
     for old, new in SUBS:
         n = text.count(old)

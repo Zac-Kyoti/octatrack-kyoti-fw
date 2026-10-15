@@ -110,13 +110,13 @@ def expected_y():
     for p_ in range(q.shape[0]):
         for t in range(q.shape[1]):
             want[c["R9TAB"] + 32 * t + p_] = int(q[p_, t])
-    T, D = m.render_q23()
+    Tp = dsrc.render_tp()                                   # T' = T + 1/2 (SP12 stereo's full-form ring)
     L, R = m.RENDER["L"], m.RENDER["R"]
     for j in range(R):
-        for mm_ in range(L):
-            k = (L - 1 - mm_) * R + j
-            want[c["BTAB"] + c["BROW"] * j + 2 * mm_] = int(T[k]) & 0xFFFFFF
-            want[c["BTAB"] + c["BROW"] * j + 2 * mm_ + 1] = (int(T[k + 1]) - int(T[k])) & 0xFFFFFF
+        for i in range(L):                                  # pair i = tap L-1-i, the order a tick applies them
+            k = i * R + j
+            want[c["BTAB"] + c["BROW"] * j + 2 * i] = int(Tp[k]) & 0xFFFFFF
+            want[c["BTAB"] + c["BROW"] * j + 2 * i + 1] = (int(Tp[k + 1]) - int(Tp[k])) & 0xFFFFFF
     return want
 
 

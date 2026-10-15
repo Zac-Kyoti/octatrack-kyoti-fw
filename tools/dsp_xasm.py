@@ -235,7 +235,8 @@ def assemble(src, org):
             specials.append((len(out_lines), "tfr", (parts, body)))
             out_lines.append("        nop")
             continue
-        if len(parts) == 3 and parts[1].startswith("x:") and parts[2].startswith("y:") and op != "move":
+        if (len(parts) == 3 and re.match(r"^(\w+,)?x:", parts[1]) and re.match(r"^(\w+,)?y:", parts[2])
+                and op != "move"):                  # XY dual move (either direction) with an ALU op
             specials.append((len(out_lines), "xy", (op, parts, body)))
             out_lines.append("        nop")
             continue

@@ -16,7 +16,9 @@ correction and rev 13's band-limited render: NOTES Session 111.
                         ratio (repeat/skip: a phase accumulator); 12-bit; the
                         DAC output is a staircase, heard as on the raw outputs
                         7/8 (rev 12: no output filter; the ch 3-6 designs stay
-                        below for a future selectable channel).
+                        below for a future selectable channel). FULL STEREO since
+                        2026-10-15 (VARISPEED_EMUS_SP12_STEREO.md): L and R each
+                        run the whole path, on one shared clock and tick schedule.
   RPS9 (Akai S900/950)  each voice's DAC clock runs at (recording rate x ratio)
                         into a steep filter that follows that clock and removes
                         the staircase's images, so what leaves the machine is
@@ -42,8 +44,10 @@ position p_i advancing by the increment r. The engine only READS the ring:
   * RPS9: output i = 12-bit(ADC at p_i - c - 1);
   * RPSP: output i is the staircase averaged over [i-1, i) (a box: cheap, and
     it keeps a 26 kHz staircase from folding at 44.1 kHz); a tick at time
-    i-1+u stores 12-bit(ADC at p_{i-1} + u*r - PSP*phi - c - 1), phi being the SP's
-    accumulator fraction so repeats/skips land on its 26.04 kHz grid.
+    i-1+u stores 12-bit(ADC at p_i - (1-u)*r - PSP*phi - c - 1), phi being the SP's
+    accumulator fraction so repeats/skips land on its 26.04 kHz grid. (p_i - r is
+    p_{i-1}; since the stereo move it is read that way, from the current output's
+    position, so no "previous position" is kept and none can go stale.)
     Rev 13 renders the staircase through a BAND-LIMITED kernel (RENDER, the
     converter a real SP is recorded through) instead of rev 11/12's box, whose
     6-8 dB of rejection at 26-31 kHz let the staircase's images above 22 kHz
@@ -69,6 +73,11 @@ PSP_TICK = round(PSP * (1 << 20)) / (1 << 20)
 PSP_LAG = round(PSP / 2 * (1 << 23)) * 2 / (1 << 23)
 MODE_RPS9, MODE_RPSP = 1, 2
 SP_CHANNEL = 7                     # which SP-1200 output RPSP is heard on: 7 (= 8) raw, no filter.
+# 2026-10-15: RPSP is FULL STEREO again (the user's decision; Engine's default, ms=False, and the
+# only form DspExact and the DSP kernel implement): each channel runs the SP path below on one
+# shared clock. What follows to DYN_K is the MID/SIDE design it replaced (rev 17 .. VEM7, kept at the
+# tag ref/sp12-midside-vem7, reference/handoffs/SP12_MIDSIDE_REFERENCE.md); Engine(ms=True) still
+# renders it for the old listening-pack tools (repitch_ab_pack.py, repitch_ab_speeds.py) only.
 # Rev 17 (listening pack 3, the user's pick, 2026-10-06): RPSP is MID + SIDE. The mid (L+R)/2
 # runs the SP-1200 path -- 8-tap virtual ADC, 26.04 kHz drop-sample, 12-bit, the 10-tap
 # render -- then an SP output channel's fixed filter (MS_CHANNEL); the side (L-R)/2 is read cleanly (the OT's
@@ -477,10 +486,12 @@ class Engine:
     """One track's voice in RPS9 or RPSP. The ring holds float stereo frames
     as the OT delivered them. Rev 14: render() is called once per hook VISIT
     (two per 16-sample frame, whatever the pass split) with the frame's trig
-    flag and the OT's AMP level; ch12 adds RPSP's channel 1/2 stage."""
+    flag and the OT's AMP level. RPSP is full stereo (2026-10-15, the default);
+    ch12 (a channel 1/2 stage) and ms (rev 17's mid/side) are the old designs,
+    for the listening-pack tools only."""
     RING = 64
 
-    def __init__(self, mode, ch12=False, ms=True):
+    def __init__(self, mode, ch12=False, ms=False):
         self.mode = mode
         self.ms = ms and mode == MODE_RPSP
         self.ch12 = ch12 and mode == MODE_RPSP and not self.ms
@@ -574,21 +585,20 @@ class Engine:
         if self.ms:
             return self.render_ms(table, r)
         out = []
-        if self.prev is not None and table and (table[0][0] - self.prev[0]) % 64 > 2:
-            self.prev = table[0]          # a jump = stale state (see the DSP)
         if self.ch12 and lc == 1:          # the diode + RC, once per frame
             self.env = max(level, self.env * CH12_DEC16)
         g = ch12_g(CH12_DEPTH * self.env)
         if not table:
             return np.zeros((0, 2))
         for k, f in table:
-            if self.prev is None:
-                self.prev = (k, f)
-            pk, pf = self.prev
+            # 2026-10-15 (stereo): the tick reads from the CURRENT output's position less
+            # one increment (= the previous output's, p_i - r), so no previous position is
+            # kept: at a clean start it reads one increment before the sound (silence, the
+            # trig clear), and nothing goes stale while the track is in another mode
             while self.tau < 1.0:              # PSP > 1: at most one tick per interval
                 u = self.tau
                 self.phi = (self.phi + r) % 1.0
-                pos = pk + pf + u * r - PSP_LAG * self.phi
+                pos = k + f + (u - 1.0) * r - PSP_LAG * self.phi
                 new = q12(self.adc(pos - self.c - 1))
                 self.acc += np.outer(self.step_weights(u), new - self.held)
                 self.held = new
@@ -602,7 +612,6 @@ class Engine:
             out.append(y)
             self.acc = np.roll(self.acc, -1, axis=0)
             self.acc[-1] = 0.0
-            self.prev = (k, f)
         return np.array(out).reshape(-1, 2)
 
 
@@ -757,35 +766,38 @@ class DspExact:
     tools/repitch_dsp_engine_check.py compares the emulated DSP against. The
     float Engine above is the design; this is the implementation's contract.
     Samples are 24-bit ints (Q23); `consts` is repitch_dsp_src.constants().
-    render() is one hook visit (patch_repitch_dsp.asm, zqrp)."""
+    render() is one hook visit (patch_repitch_dsp.asm, zqrp).
+
+    RPSP is FULL STEREO (2026-10-15; VARISPEED_EMUS_SP12_STEREO.md): both channels run
+    the SP path on one clock. The render's residuals live in a "full-form" ring: slot m
+    holds what output (now + m) will be, / 4 -- the held step at the time the slot was
+    last read, plus every later tick's share -- so a read slot is reset to the current
+    held step / 4, and an output is 4 x its slot. Each tick adds step x the render's step
+    response (1 - Gc) / 2 (the table T' = T + 1/2). That is the rev 13 render (held +
+    residuals): held / 4 is exact (12-bit) and (T + 1/2) dh >> 23 = (T dh >> 23) + dh / 2
+    exactly (dh = step / 2 is a multiple of 2^11). One difference, a finer rounding: a
+    tick's share of its OWN output (tap 0) is not stored, so it is not floored to the
+    slot's 1/4 scale -- the output is lim(4 slot + (w dh >> 21)) (the DSP keeps that sum
+    in the accumulator for the out block, both channels alike)."""
     RING = 64
 
     def __init__(self, mode, consts, fir_rows, ch12=False):
         self.mode, self.c = mode, consts
-        self.ch12 = False                                       # rev 17: RPSP is mid + side
         self.ring = np.zeros((self.RING, 2), dtype=np.int64)
         self.fir = np.array(fir_rows, dtype=np.int64)          # [32][taps], Q23 signed
         self.taps = self.fir.shape[1]
         self.cc = self.taps // 2 - 1
-        self.T, self.D = render_q23()
-        self.gt = ch12_gtab_q23()
-        self.env = 0
-        self.g = (0, 0)                                         # zqinit clears the aux blocks
-        self.st = [0] * 8                                       # L0..3, R0..3
+        T, self.D = render_q23()
+        self.Tp = T + (1 << 22)                                 # (1 - Gc) / 2: the step response / 2
         self.clean = True                                       # RPSP slot tag invalid
         self.sp_reset()
 
     def sp_reset(self):
-        """zqsp's clean slot (rev 17): the mono mid path and the channel filter's state."""
-        self.tau = self.phi = 0
-        self.held = 0
-        self.prev = None
-        self.acc = [0] * RENDER["L"]                           # residuals / 4, Q23
-        self.xp = self.y1 = self.z1 = self.z2 = 0              # the channel filter: x[n-1], s1[n-1], s2[n-1], s2[n-2]
-        self.ls = self.c["LS0"]                                # the smoothed read shift, Q22 frames
-        self.spv = 0                                           # the side's previous sample
-        self.ds = [self.c.get("DP", 0)] * 2                    # ch 1/2: the two decays (S_S1, S_S2)
-        self.dst = [0] * 8                                     # ch 1/2: side stages 0..3, mid 4..7
+        """zqsp's clean slot: tau = 0 (the DSP holds tau - 1), phi, the held steps, the ring."""
+        self.tau = self.phi = 0                                # tau Q23 (output samples)
+        self.h4 = np.zeros(2, dtype=np.int64)                  # the held step / 4, L and R
+        self.slots = np.zeros((RENDER["L"], 2), dtype=np.int64)   # the full-form ring, / 4, Q23
+        self.rw = 0                                            # the slot of the next output
 
     @staticmethod
     def lim(v):
@@ -800,23 +812,9 @@ class DspExact:
         for j, fr in enumerate(frames):
             self.ring[(start + j) % self.RING] = fr
 
-    def adc_mid(self, first, ph):
-        """Rev 17: sum of taps x (L + R), halved by the accumulator's asr, then 12 bits."""
-        idx = [(first + t) % self.RING for t in range(self.taps)]
-        s = int(self.fir[ph] @ (self.ring[idx, 0] + self.ring[idx, 1]))
-        return self.lim(s >> 24) & ~0xFFF
-
-    def side(self, pos):
-        """Rev 17: the clean side at pos (24.24 frames): (L - R) >> 1 at both frames,
-        weighted 0x7FFFFF - g and g (g = the fraction, Q23)."""
-        j, g = pos >> 24, (pos & 0xFFFFFF) >> 1
-        s = []
-        for i in (j, j + 1):
-            fr = self.ring[i % self.RING]
-            s.append((int(fr[0]) - int(fr[1])) >> 1)
-        return self.lim((s[0] * (0x7FFFFF - g) + s[1] * g) >> 23)
-
     def adc(self, first, ph):
+        """The virtual ADC on both channels: sum of taps x samples (Q46, exact), limited
+        to 24 bits (the accumulator-to-register move), then floored to 12 bits."""
         idx = [(first + t) % self.RING for t in range(self.taps)]
         s = self.fir[ph] @ self.ring[idx]                      # exact: sum of Q23 x Q23
         return np.array([self.lim(v >> 23) & ~0xFFF for v in s], dtype=np.int64)
@@ -832,41 +830,11 @@ class DspExact:
             self.ring[(f0 - j) % self.RING] = 0
         self.clean = True
 
-    def cutoff(self, level):
-        """zqsnj's channel 1/2 block: returns (g, 1 - g)."""
-        prod = 2 * self.env * q23i(CH12_DEC16)                 # mpy: fractional, 48 bits
-        b = self.s24(level) << 24
-        self.env = (max(b, prod) >> 24)
-        e = self.env & 0xFFFFFF
-        i2 = (e >> 17) & 0x3E
-        frac = (e << 5) & 0x7FFFFF
-        G, D = self.gt[i2], self.gt[i2 + 1]
-        g = self.lim(((G << 24) + 2 * D * frac) >> 24)
-        return g, 0x7FFFFF - g
-
-    def dyn_coef(self):
-        """zqsnj's channel 1/2 block (RPK_OUT=ch12): the two decays, e = s1 - s2
-        (octaves / 8), g by Horner (coefficients / 16, then asl #4), h = 1 - g."""
-        c = self.c
-        A = 2 * self.ds[0] * c["DKQ"]                         # mpyi: s1 K
-        B = 2 * self.ds[1] * c["DFQ"]                         # mpyi: s2 F
-        self.ds = [A >> 24, B >> 24]
-        e = self.lim((A - B) >> 24)                           # sub b,a; move a,x0
-        pc = [self.s24(c[f"PC{i}"]) for i in range(5)]
-        A = 2 * e * pc[4]                                     # mpyi #PC4,x0,a
-        for i in (3, 2, 1):
-            A += pc[i] << 24
-            A = 2 * e * self.lim(A >> 24)                     # move a,y0; mpy x0,y0,a
-        A = (A + (pc[0] << 24)) << 4                          # add #>PC0,a; asl #4,a,a
-        g = A >> 24
-        h = ((0x7FFFFF << 24) - A) >> 24                      # move y:ONE,b; sub a,b
-        return g, h
-
     def render(self, table, rint, rfrac, flags=0, level=0, lc=1):
         """table: [(ring frame, fraction Q24)]; rint/rfrac: the increment as
         the DSP holds it (x:$40, y:$40 with the mode tag); flags: the unpacked
-        per-voice word +$1E; level: the AMP stage's level word (Q23); lc: the
-        voice module's loop counter (2, then 1)."""
+        per-voice word +$1E; level: the AMP stage's level word (unused since rev 17);
+        lc: the voice module's loop counter (2, then 1)."""
         c = self.c
         self.visit(table, flags, lc)
         if self.mode == MODE_RPS9:
@@ -879,65 +847,41 @@ class DspExact:
         if self.clean:                                         # zqsp: a clean slot
             self.sp_reset()
             self.clean = False
-            self.prev = table[0]
-        elif self.prev is not None and (table[0][0] - self.prev[0]) % 64 > 2:
-            self.prev = table[0]                               # stale state: resync
-        one = 1 << 20
         L, R = RENDER["L"], RENDER["R"]
-        # the side's offset behind the OT (24.24): c + 1 frames + MS_SIDE_DELAY increments
-        # (RH = r x 2^23, unsigned, times MS_SIDE_DELAY / 16) + the smoothed read shift
-        if MS_OUT == "ch12":                                   # zqsnj: once per pass
-            g, h = self.dyn_coef()
-        rh = ((1 if rint else 0) << 23) | ((rfrac & 0xFFFFFF) >> 1)
-        offs = ((self.cc + 1) << 24) + ((2 * rh * c["KD"]) >> 19) + (self.ls << 2)
+        one = 1 << 23
+        rf = rfrac & 0xFFFFFF                                  # frac(r), Q24, with the mode tag
+        rh = ((1 if rint else 0) << 23) | (rf >> 1)            # r x 2^23, unsigned (bit 0 of x:$40 only)
         out = []
         for k, f in table:
-            if self.prev is None:
-                self.prev = (k, f)
-            pk, pf = self.prev
-            if self.tau < one:                                 # a tick at u (PSP > 1: at most one)
-                u = self.tau << 3
-                self.tau += c["PSPQ20"] - one
-                self.phi = (self.phi + rfrac) & 0xFFFFFF
-                lag = (c["PSPH"] * (self.phi >> 1) * 2) >> 22
-                self.ls += ((lag >> 2) - self.ls) >> MS_LAG_SHIFT     # Q22, floor (the DSP's asr)
-                ur = (u * (rfrac >> 1) * 2) >> 23
-                pos = (pk << 24) + pf + ur - lag + (2 * u if rint else 0) - (c["SPC2"] << 24)
-                new = self.adc_mid(pos >> 24, (pos & 0xFFFFFF) >> 19)
-                dh = (new - self.held) >> 1                    # the step / 2 (exact: 12-bit values)
-                self.held = new
-                j, fr = u >> 19, (u & 0x7FFFF) << 4             # u x R: table index, fraction (Q23)
-                for mm in range(L):
+            if self.tau < one:                                 # a tick at u = tau (PSP > 1: at most one)
+                u = self.tau
+                self.tau += c["PSPQ23"]
+                self.phi = (self.phi + rf) & 0xFFFFFF
+                lag = (c["PSPH"] * (self.phi >> 1) * 2) >> 22  # the SP's truncating read, 24.24
+                ur = (2 * (u - one) * rh) >> 23                # (u - 1) r, 24.24 (mpysu, floored)
+                pos = (k << 24) + f + ur - lag - (c["SPC2"] << 24)
+                new = self.adc(pos >> 24, (pos & 0xFFFFFF) >> 19)
+                h4 = new >> 2                                  # exact: 12-bit values
+                dh = 2 * (h4 - self.h4)                        # the step / 2
+                self.h4 = h4
+                j, fr = u >> 19, (u & 0x7FFFF) << 4            # u x R: table row, fraction (Q23)
+                own = [0, 0]
+                for mm in range(L - 1, -1, -1):                # the DSP's order: tap L-1 first
                     kk = (L - 1 - mm) * R + j
-                    w = int(self.T[kk]) + ((int(self.D[kk]) * fr) >> 23)       # weight / 2
-                    self.acc[mm] = self.lim(self.acc[mm] + ((w * dh) >> 23))
+                    w = int(self.Tp[kk]) + ((int(self.D[kk]) * fr) >> 23)    # the step response / 2
+                    s = (self.rw + mm) % L
+                    for ch in (0, 1):
+                        if mm:
+                            self.slots[s, ch] = self.lim(int(self.slots[s, ch]) + ((w * int(dh[ch])) >> 23))
+                        else:
+                            own[ch] = (w * int(dh[ch])) >> 21          # x 4, unfloored
             else:
-                self.tau -= one
-            mid = self.lim(4 * self.acc[0] + self.held)
-            if MS_OUT == "ch6":
-                fb, fq, fg2, fa1, fa2 = (self.s24(c[k]) for k in ("FB", "FQ", "FG2", "FNA1", "FNA2"))
-                s1 = self.lim((fb * mid + fb * self.xp + fq * self.y1) >> 23)
-                s2 = self.lim((fg2 * s1 + fa1 * self.z1 + fa2 * self.z2) >> 22)
-                self.xp, self.y1, self.z2, self.z1 = mid, s1, self.z1, s2
-            else:
-                s2 = mid
-            s1 = self.side((k << 24) + f - offs)
-            if MS_OUT == "ch6":
-                sd, self.spv = (self.spv + s1) >> 1, s1                # the two-sample average
-            else:
-                sd = s1
-            if MS_OUT == "ch12":                               # side, then mid: four stages each
-                for base, x in ((0, sd), (4, s2)):
-                    for st in range(base, base + 4):
-                        x = self.lim((2 * g * x + 2 * h * self.dst[st]) >> 24)
-                        self.dst[st] = x
-                    if base:
-                        s2 = x
-                    else:
-                        sd = x
-            out.append([self.lim(s2 + sd), self.lim(s2 - sd)])
-            self.acc = self.acc[1:] + [0]
-            self.prev = (k, f)
+                own = [0, 0]
+            self.tau -= one
+            s = self.rw
+            out.append([self.lim(4 * int(self.slots[s, 0]) + own[0]), self.lim(4 * int(self.slots[s, 1]) + own[1])])
+            self.slots[s] = self.h4
+            self.rw = (s + 1) % L
         return np.array(out, dtype=np.int64).reshape(-1, 2)
 
 
