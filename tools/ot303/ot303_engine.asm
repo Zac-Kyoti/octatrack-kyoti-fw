@@ -179,18 +179,17 @@ ODRIVE  macro
         mpy     x1,y0,a
         move    a,x0                                            ; x8
         tfr     x0,a
-        asr     #14,a,b
-        and     #>$fffffe,b
+        asr     #15,a,b                                         ; 2 floor(x8 / 2^15) = (x8 >> 14) & ~1,
+        lsl     #1,b                                            ;  on b1 alone (b0 carries nothing into the add)
         add     #>THM,b
-        asl     #8,a,a
-        and     #>$7fff00,a                                     ; frac
+        lsl     #9,a                                            ; frac = (x8 & $7fff) << 8:
+        lsr     #1,a                                            ;  on a1 alone
         move    b1,r0
         move    a1,y0
-        move    y:(r0)+,x1                                      ; tanh[i]
+        tfr     x1,b            y:(r0)+,x1                      ; b = GD8 (x1 still holds it) ; tanh[i]
         move    y:(r0)+,x0                                      ; slope[i]
         mpy     y0,x0,a
         add     x1,a
-        move    x:>GD8,b
         tst     b
         teq     y1,a                                            ; GD8 0: yy
         move    a,y0                                            ; the output
@@ -200,20 +199,21 @@ GLIDE   macro
 ; ---- MT15: the env amount and the cutoff glide to the record's values (listening round 13: lock and LFO
 ; jumps click less), W -= g (W - T) each sample, g = 1 - e^(-1/44.1) (tau 1 ms). r0 and the data
 ; registers are free at the loop's top.
+; ES8 (XW+4) and L0_16 (YW+6) through the walkers, back at XW / YW at the loop's top (one-word moves)
         move    #>GLT,r0
-        move    x:>ES8,b
+        move    x:(r2+4),b
         tfr     b,a             x:(r0)+,x0                      ; ES8T
         sub     x0,a            x:(r0)+,y1                      ; ES8 - T ; L016T
         move    a,x1
         move    x:(r0),y0                                       ; g
         macr    -x1,y0,b
-        move    b,x:>ES8
-        move    y:>L0_16,b
+        move    b,x:(r2+4)
+        move    y:(r6+6),b
         tfr     b,a
         sub     y1,a
         move    a,x1
         macr    -x1,y0,b
-        move    b,y:>L0_16
+        move    b,y:(r6+6)
         endm
 MLIN    macro
 ; ---- the modifiers linear for the host (the hardware probe's build spells out eight long immediates)
@@ -367,7 +367,8 @@ zosc:
 ; the taps), two outputs into the second half-band
         move    n2,r0
         move    #3,m0
-        move    y:>YY4,y1
+        move    y:(r4+8),y1                                     ; YY4 (PP+8): every oscillator path leaves r4
+                                                                ;  at PP (four +9 steps, modulo 36)
 ZFS     macro
         move    x:(r1)+,x0      y:(r4)+,y0                      ; K64 ; osc
         mpy     x0,y1,a         x:(r1)+,x0      y:(r4)+,y1     ; k y4 ; HP1B ; hpx
@@ -434,10 +435,28 @@ zchb2:
         asr     a
         move    r0,n7
         move    x:(r2)+,x0      y:(r7)+,y0
-        do      #10,zhbl                        ; no REP: stock never uses one (a REP holds off
-        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0      ; interrupts, and the host-port
-        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0      ; handlers must answer at once)
-zhbl:
+; the 22 odd taps, unrolled (it was a DO of 10 and two more: a DO's setup every sample; no REP either:
+; stock never uses one, a REP holds off interrupts, and the host-port handlers must answer at once)
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
+        mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
         mac     y0,x0,a         x:(r2)+,x0      y:(r7)+,y0
         mac     y0,x0,a
         move    #>$ffffff,m0
@@ -573,8 +592,8 @@ zsqr:
         asr     #14,a,b
         and     x0,b
         add     x1,b
-        asl     #8,a,a
-        and     #>$7fff00,a                                     ; frac
+        lsl     #9,a                                            ; frac = (x8 & $7fff) << 8:
+        lsr     #1,a                                            ;  on a1 alone
         move    b1,r0
         move    a1,y0
         move    y:(r0)+,a                                       ; tanh[i]
@@ -619,11 +638,11 @@ zsqs:                                   ; saw + square, the BLEP check every sam
         asl     #4,a,a
         move    a,x0                    ; x/8, saturating
         tfr     x0,a
-        asr     #14,a,b
-        and     #>$fffffe,b
+        asr     #15,a,b                                         ; 2 floor(x8 / 2^15) = (x8 >> 14) & ~1,
+        lsl     #1,b                                            ;  on b1 alone (b0 carries nothing into the add)
         add     #>THM,b
-        asl     #8,a,a
-        and     #>$7fff00,a
+        lsl     #9,a
+        lsr     #1,a
         move    b1,r0
         move    a1,y0
         move    y:(r0)+,x1

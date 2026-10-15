@@ -151,6 +151,8 @@ def source(tag, host=False):
         eng = re.sub(r'^(MLIN)(\s+)macro\n.*?^\s+endm\n', 'MLIN macro\n' + ''.join(f'        move    #>$ffffff,m{i}\n' for i in range(8))
                      + '        endm\n', eng, flags=re.M | re.S)
     wrap = (ROOT / 'tools/ot303' / ('host.asm' if host else 'hwprobe.asm')).read_text()
+    if not d['rawp']:                   # host.asm's raw-path test is payload A's alone
+        wrap = re.sub(r'^(RAWCHK)(\s+)macro\n.*?^\s+endm\n', r'\1\2macro\n        endm\n', wrap, flags=re.M | re.S)
     lay = dict(XD=xd, NXD=(-xd) & 0xffffff, CONT=d['cont'], RAWP=d['rawp'])
     if not host:
         lay['R2'] = d['xrun2'][0][0]

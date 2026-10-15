@@ -70,8 +70,23 @@ instead.
     PTCH, TUNE, ACC, DEC or GATE change (a PTCH lock or LFO);
   - the DSP's record unpack takes one instruction fewer a word.
   
-  ColdFire: 688 fewer instructions a frame with two voices (2.3 % of the frame's work). DSP: 13
-  fewer instructions a frame, about 1.6 cycles a sample.
+  ColdFire: 688 fewer instructions a frame with two voices (2.3 % of the frame's work).
+- **The same day, a second pass over the DSP engine** (the Open303 port), every output word
+  unchanged:
+  - bit-exact against the twin in `engine_check.py` (five scenes) and `host_check.py`;
+  - the voice's output in `ot_emu` is sample-identical to the FINAL standalone's;
+  - `verify_ot303.py` passes.
+  
+  What changed:
+  - the second half-band's taps are unrolled;
+  - the tanh index and fraction are one-word shifts;
+  - the glide and the 4× loop reach their words through the walkers;
+  - the drive reads GD8 once;
+  - the host's raw-path test is folded per payload.
+  
+  With the host change above: 455 / 598 cycles a sample (saw / square), against the FINAL
+  build's 473 / 620 on the same bench, about 3.7 % off the voice. P: 1,026 words on payload A
+  and 1,022 on B, of SPRING's 1,028.
 
 ## Limits
 

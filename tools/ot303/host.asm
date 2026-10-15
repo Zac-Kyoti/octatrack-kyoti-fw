@@ -100,6 +100,14 @@ E_M48L  equ     4
 E_AG_8  equ     7
 E_AMP2  equ     8
 
+; payload A's raw-path test (RAWP 1). tools/ot303/hwprobe_image.py empties this macro for a payload
+; without the raw path (B, RAWP 0), so neither payload tests the constant at run time
+RAWCHK  macro
+        move    x:(r2+$1e),b
+        btst    #18,b1
+        bcs     sg_noring
+        endm
+
 ; ---- the source seam (jsr from A P:$39c / B P:$1a2)
 sg_entry:
         move    a,x:>$20e                       ; the stock instruction the jsr replaced
@@ -149,12 +157,7 @@ sg_ours:
         bsr     hq_msave
 ; the next track's ring base, as the stock source would leave it (payload A: not on the raw path,
 ; bit 18 of the track word; an OT-303 track is FLEX, but the stock rule is kept)
-        move    #>RAWP,b
-        tst     b
-        beq     sg_ring
-        move    x:(r2+$1e),b
-        btst    #18,b1
-        bcs     sg_noring
+        RAWCHK
 sg_ring:
         move    x:>$20b,b
         move    #>$80,x0

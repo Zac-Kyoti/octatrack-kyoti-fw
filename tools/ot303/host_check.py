@@ -9,7 +9,7 @@
 # ColdFire's own record.c + params.c, compiled natively. Needs the private toolchain
 # (out/ot303/dsp56300_new).
 #   python3 tools/ot303/host_check.py [FRAMES]
-import pathlib, subprocess, sys
+import os, pathlib, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / 'tools' / 'ot303'))
@@ -54,7 +54,10 @@ def main():
         (d / 'x.txt').write_text(''.join(f'{a:x} {v:x}\n' for a, v in sorted(b['x'].items())))
         (d / 'syms.txt').write_text(''.join(f'{k} {v & 0xffffff:x} {"Y" if k in b["ysyms"] else "X"}\n'
                                             for k, v in sorted(b['syms'].items())))
-        p = subprocess.run([str(probe), str(d), frames], capture_output=True, text=True, errors='replace')
+        env = dict(os.environ)
+        if os.environ.get('OT_PCPROF'):                 # a profile per payload: FILE.A / FILE.B
+            env['OT_PCPROF'] = f"{os.environ['OT_PCPROF']}.{tag}"
+        p = subprocess.run([str(probe), str(d), frames], capture_output=True, text=True, errors='replace', env=env)
         lines = [l for l in p.stdout.strip().splitlines() if '@' not in l.split(':')[0]]
         print(f'payload {tag}:\n' + ''.join(f'    {l}\n' for l in lines), end='')
         fails += p.returncode != 0

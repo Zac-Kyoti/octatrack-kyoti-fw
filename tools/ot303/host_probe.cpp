@@ -85,6 +85,10 @@ int main(int argc, char** argv) {
 
     const uint32_t REC = 0x2a00, TRKW = 0x3100;
     long calls = 0;
+    // OT_PCPROF=FILE: every executed instruction's cycles summed by its address, written as "pc cycles count"
+    // lines at the end (a profiling aid; the checks below do not use it)
+    const char* pcprof = std::getenv("OT_PCPROF");
+    std::map<uint32_t, std::pair<uint64_t, uint64_t>> prof;
     auto run = [&](uint64_t& cyc) -> uint32_t {
         dsp.setPC(STUB);
         cyc = 0; unsigned steps = 0;
@@ -96,8 +100,12 @@ int main(int argc, char** argv) {
             uint32_t cy = dsp.calcOpcodeCycles(pc);
             dsp.execInterpreter();
             uint64_t n = dsp.getInstructionCounter() - c0;
-            if (n > 1) cy += uint32_t(n - 1) * dsp.calcOpcodeCycles(pc + 1);
+            // a step that ran more than one instruction (a DO and its loop's first): the extra one is
+            // the instruction after this one, at pc + this one's length (pc + 1 decoded a DO's
+            // loop-address operand as an opcode, which made the cost depend on where the loop ends)
+            if (n > 1) cy += uint32_t(n - 1) * dsp.calcOpcodeCycles(pc + dsp.opcodes().getOpcodeLength(mem.get(MemArea_P, pc)));
             cyc += cy;
+            if (pcprof) { auto& e = prof[pc]; e.first += cy; e.second += 1; }
             dsp.doLoopEnd();
         }
         calls++;
@@ -380,6 +388,10 @@ int main(int argc, char** argv) {
                 double(sawCyc) / std::max<uint64_t>(sawN * 16, 1), sawWorst / 16.0, evSawWorst / 16.0, offSawWorst / 16.0,
                 double(sqCyc) / std::max<uint64_t>(sqN * 16, 1), sqWorst / 16.0, evWorst / 16.0,
                 double(stockCyc) / std::max<uint64_t>(stockCalls, 1), silentWorst / 16.0);
+    if (pcprof) {
+        std::ofstream pf(pcprof);
+        for (auto& [pc, e] : prof) pf << std::hex << pc << std::dec << ' ' << e.first << ' ' << e.second << '\n';
+    }
     std::ofstream o(dir + "/host_out.f32", std::ios::binary);
     o.write(reinterpret_cast<const char*>(wav.data()), std::streamsize(wav.size() * sizeof(float)));
     return 0;

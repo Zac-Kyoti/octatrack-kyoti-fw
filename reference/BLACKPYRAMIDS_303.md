@@ -163,7 +163,7 @@ is full in stock, so the voice takes **SPRING REVERB's** module space.
 
 | | used | of |
 |---|---|---|
-| DSP P (each payload) | 1,027 words, in SPRING REV's module (DARK REV's 35-word helper moved beside it) | 1,028 |
+| DSP P (each payload) | 1,026 words (A) / 1,022 (B), in SPRING REV's module (DARK REV's 35-word helper moved beside it) | 1,028 |
 | DSP X | 216 working words at `X:$7b24–$7bfb` (stock's unreferenced top, outside the DMA partitions), copied from SPRING's X records at the first frame | — |
 | DSP Y | 2,119 words `$7a5–$feb`: tables and the voice state, streamed from the ColdFire | — |
 | ColdFire | a 28 KB DRAM runtime (a 16-page arena reserve, loader appended after the OS), 43 detours, 7 pokes, the FLEX renderer slot; about 1,200 instructions a frame per voice in ot_emu, of ~29,000 for the whole frame (15 Oct 2026: the Y table pre-packed, the continuous words made only when their knobs change; −340 a voice) | — |
@@ -173,12 +173,23 @@ from the METER on DIAG8):
 
 | | average | worst frame (a note starting) | ≈ on the chip (worst) |
 |---|---|---|---|
-| WAVE 0 (saw only) | 470 | 510 | ~592 |
-| WAVE > 0 (the square path) | 615 | 663 | ~769 |
+| WAVE 0 (saw only) | 455 | 496 | ~575 |
+| WAVE > 0 (the square path) | 598 | 646 | ~749 |
 
-(`tools/ot303/host_check.py`, 15 Oct 2026 source: 1.6 cycles a sample below the FINAL build
-`3624a1e7…`, whose figures were 471/511 and 616/666; the record unpack in `host.asm` is one
-instruction a word shorter. The voice itself is unchanged.)
+(`tools/ot303/host_check.py`, 15 Oct 2026 source, WIP. On the same bench the FINAL build `3624a1e7…`
+measures 473/515 and 620/670. The bench's accounting was corrected the same day: it priced the
+instruction a DO runs with by decoding the DO's loop address as an opcode. The earlier figures
+here, 471/511 and 616/666, came from it.)
+
+The 15 Oct 2026 optimization pass changes no output word (bit-exact against the twin in
+`engine_check.py` and `host_check.py`). It is about 3.7 % off the voice:
+- the second half-band's 22 taps are unrolled, so there is no DO setup a sample;
+- the tanh tables' index and fraction are one-word shifts, with no 2-word masks;
+- the glide's ES8 / L0_16 and the 4× loop's YY4 are reached through the walkers, not absolute
+  addresses;
+- the drive keeps GD8 in a register instead of reading it twice;
+- the host's raw-path test is folded per payload at build time;
+- the record unpack is one instruction a word shorter.
 
 Each core has about **3,120 usable cycles per sample**. Measured on the unit with an earlier
 426-cycle build of the voice (DIAG13 and the worst-case test, 2026-10-11):
