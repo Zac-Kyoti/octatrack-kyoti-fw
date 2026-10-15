@@ -5,14 +5,15 @@
 ; S950 (RPS9) and SP12 (RPSP). Model (the ground truth this must match, bit for bit):
 ; tools/repitch_engine_model.py, DspExact. Scope: reference/handoffs/REPITCH_FIDELITY_SCOPE.md;
 ; rev 17: NOTES Session 120 continued (10). The VEM DSP optimisation (fewer cycles, the
-; same output word for word): reference/handoffs/VARISPEED_EMUS_DSP_OPT.md.
+; same output word for word): reference/handoffs/VARISPEED_EMUS_DSP_OPT.md. SP12 in full
+; stereo again (2026-10-15; rev 17's mid/side is at the tag ref/sp12-midside-vem7):
+; reference/handoffs/VARISPEED_EMUS_SP12_STEREO.md.
 ; Assembled by tools/dsp_xasm.py (NOT plain dsp_asm: this uses XY+ALU moves,
 ; equ and dc, and every word is disassembled back and checked);
 ; tools/repitch_dsp_src.py prepends the constants -- the table DATA lives in X
 ; memory (SPRING REVERB's own X tables, rewritten by the builder) and zqinit copies
-; it into Y. Only RPSP's raw build (outputs 7/8) is kept here: the channel 6 and
-; channel 1/2 builds (RPK_OUT=ch6/ch12) were dropped with the VEM optimisation (git
-; history has them; the model still renders them for listening packs).
+; it into Y. RPSP is the SP's raw outputs 7/8 only (the channel 6 and channel 1/2
+; builds were dropped with the VEM optimisation; git history has them).
 ;
 ; WHERE IT RUNS. The stock voice engine (payload A P:0x3a1, B P:0x1a4) is detoured
 ; at its kernel prologue (A P:0x40b, B P:0x20e): `move x:(r5),n6 / move y:(r5)+,a`
@@ -42,21 +43,24 @@
 ;
 ; MEMORY (Y:$795..$FFF is free on stock on both cores -- octabam, measured on
 ; hardware; SIDECHAIN3 takes $7f0-$9ff on both cores):
-;   Y:STBASE + x:$418   per-track RPSP slot ($20 words): the mid's residual
-;                       ring (modulo-addressed, so it starts the slot), then the state
+;   Y:STBASE + x:$418   per-track RPSP slot ($20 words): the render's stereo ring
+;                       (2 x BL words, L and R interleaved, modulo-addressed, so it
+;                       starts the slot), then the state
 ;   Y:TABTAG            table tag; != TAGVAL => copy the tables in (once/core)
 ;   Y:SPTAB, Y:R9TAB    the virtual-ADC tables, 32 phases each (8 / 16 taps),
 ;                       from their 16 stored half-rows in X (rows 16-31 mirror)
-;   Y:BTAB              the render's step table: row j = the L taps' (T, D) pairs, rows
-;                       BROW words apart (the tail of each row is padding)
+;   Y:BTAB              the render's step table: row j = the L taps' (T', D) pairs in the
+;                       order a tick applies them, rows BROW words apart (the tail of each
+;                       row is padding)
 ;
 ; REGISTERS. Uses a, b, x0, x1, y0, y1, r1, r4, r6, r7, m1 and m7 (kept in n5 and n7,
 ; restored), n1, n2, n4, n6; r5 is parked in n1 during an RPSP tick. Leaves
 ; r0, r2 and m6 alone; r3 advances by two words per output. An (Rn)+Nn update always
 ; takes its own Nn. m1 is $7f from zqtok on: an XY dual move needs its X pointer in
 ; r0-r3, and the ring's own modulo register is m6. r1 and r6 (m6 = $7f) wrap at a
-; 128-word boundary, so every table walk uses r4/r5/r7 (linear); r6 only walks inside
-; one RPSP slot.
+; 128-word boundary: r6 only walks inside one RPSP slot, r1 the OT's ring and, in an
+; RPSP tick, one 32-aligned render row (20 words: never across a 128-word boundary);
+; every other table walk uses r5/r7 (linear; r7 is modulo 2 x BL only in RPSP's pass).
 ; Hardware stack: at most bsr + two nested DOs below zqrp.
 ; Pipeline: no address register is used for addressing in the instruction right after
 ; the one that loads it (the DSP56300 stalls a cycle there; dsp56kEmu does not price it).

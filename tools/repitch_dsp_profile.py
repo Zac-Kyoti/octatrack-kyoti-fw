@@ -21,7 +21,7 @@ RK_PCHIST, then prices every executed instruction three ways:
           modelled as 2 x words, + 2 for a displaced access. A floor; only a
           hardware burn measures the real figure.
 
-    python3 tools/repitch_dsp_profile.py [--mode RPSP|RPS9] [--payload A|B] [--top N]
+    python3 tools/repitch_dsp_profile.py [--mode RPSP|RPS9] [--payload A|B] [--top N] [--ratios 0.5,1.99]
 """
 import argparse
 import os
@@ -51,7 +51,9 @@ def main():
     ap.add_argument("--mode", default="RPSP", choices=("RPSP", "RPS9"))
     ap.add_argument("--payload", default="A", choices=("A", "B"))
     ap.add_argument("--top", type=int, default=25)
+    ap.add_argument("--ratios", default=",".join(map(str, RATIOS)), help="comma-separated (default: %(default)s)")
     a = ap.parse_args()
+    ratios = tuple(float(x) for x in a.ratios.split(","))
     mode = {"RPS9": 1, "RPSP": 2}[a.mode]
     ec.WORK.mkdir(parents=True, exist_ok=True)
     ec.build_probe()
@@ -72,7 +74,7 @@ def main():
     inp = ec.WORK / "drum.raw"
     inp.write_bytes(src.astype("<i4").tobytes())
     hist, outputs = {}, 0
-    for ratio in RATIOS:
+    for ratio in ratios:
         inc = int(round(ratio * (1 << 24)))
         h = ec.WORK / f"hist_{tag}_{a.mode}_{ratio}.txt"
         env = {**os.environ, "RK_PCHIST": str(h)}
@@ -101,7 +103,7 @@ def main():
     tot_i = sum(r[4] for r in rows)
     tot_c = sum(r[5] for r in rows)
     tot_h = sum(r[6] for r in rows)
-    print(f"{a.mode}, payload {tag}, drum at {', '.join(map(str, RATIOS))}x: {outputs} output samples")
+    print(f"{a.mode}, payload {tag}, drum at {', '.join(map(str, ratios))}x: {outputs} output samples")
     print(f"TOTAL  {tot_i:6.1f} instr  {tot_c:6.1f} modelled cycles  ~{tot_h:6.1f} hw-estimate, per output sample\n")
     print(f"{'region':10} {'instr':>7} {'cyc':>7} {'~hw':>7}  share(cyc)")
     by = {}
