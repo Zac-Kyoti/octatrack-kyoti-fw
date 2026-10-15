@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac Kyoti
+# SPDX-FileCopyrightText: 2026 Zac-Kyoti
 """
 Bugbuilds -- each finished FEATURE build, with all three BUG FIXES folded in.
 
-Eight composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
+Seven composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
 not written alongside, the standalone per-feature images in out/):
 
     MUTE_MODES        + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
@@ -14,7 +14,6 @@ not written alongside, the standalone per-feature images in out/):
     RELOAD_FROM_PROJECT            + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     DIRECT_JUMP_KYOTI      + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     REC_TRIG_MUTE          + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
-    BLACKPYRAMIDS_303      + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
 
 Method -- compose onto the finished feature image, do not re-implement it.
 Each feature builder is run first (so the base is current), then the bug-fix caves are
@@ -23,7 +22,7 @@ is never re-derived: its DSP payloads, COMPRESSOR descriptor and FX2 chooser edi
 through untouched, and its cave stays at its own address so the descriptor's formatter
 pointers stay valid.
 
-MIDI_PLAYS_FREE_FIX (patch_trigscale) is added to ALL EIGHT images: no feature builder carries a copy
+MIDI_PLAYS_FREE_FIX (patch_trigscale) is added to ALL SEVEN images: no feature builder carries a copy
 any more.  Each of them used to (RELOAD_FROM_PROJECT's sat at 0x400d7bfc, the rest at 0x400d7b00), and
 every copy wrote the same site 0x4009b6f2 -- which octabam's remix ledger refuses, so no two
 of those features could ever be selected into one remix.  The fix is its own contribution
@@ -37,7 +36,7 @@ RELOAD_FROM_PROJECT, whose own cave starts at 0x400d6500, so the allocator moves
     patch_partreapply   0x400d6500   402 B   (RELOAD_FROM_PROJECT: relocated above its own cave)
     patch_pattern_led   0x400d6694   158 B   (RELOAD_FROM_PROJECT: likewise)
     (never below 0x400d6500 -- 0x400d64ca.. is a runtime record table, kb/caves.md 2b)
-    patch_trigscale     0x400d7b00    62 B   (added to all eight)
+    patch_trigscale     0x400d7b00    62 B   (added to all seven)
 
 Verification (every image, every run):
   * the feature's builder is promoted (on kyoti_status.FINAL), its rebuilt image still matches, and it is re-run
@@ -52,6 +51,16 @@ Verification (every image, every run):
     changed byte has exactly one owner and no owner's bytes were altered.
 
 Usage:  python3 tools/build_bugbuilds.py [--no-rebuild]
+
+WIP OPT-IN, for one base at a time:
+
+    KYOTI_ALLOW_WIP=1 python3 tools/build_bugbuilds.py --wip VARISPEED
+
+builds ONLY that base's Bugbuild (WIP_FEATURES below; VARISPEED -> BUG_VARI), with every
+check above except the promotion ones: its builder is WIP and is run with the opt-in, the
+result is announced as WIP, and it is NEVER sealed (kyoti_status.seal is not called, so it
+can never pass for a promoted image). Without KYOTI_ALLOW_WIP=1 it refuses. A run without
+--wip is unchanged: the seven final Bugbuilds, and any base not on FINAL is skipped.
 """
 import os, pathlib, subprocess, sys
 import hashlib
@@ -111,12 +120,29 @@ FEATURES = {
     "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "out/mainos_direct_jump_kyoti.bin", "BUG_DJV7", "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.0.1, clock-locked jumps)."),
     "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "out/mainos_rec_trig_mute.bin", "BUG_RTM",
                       "[TRACK]+[NO]/[YES] mute/unmute recorder trigs; MIDI CC 80; '..' edge icon."),
-    "BLACKPYRAMIDS_303": ("build_blackpyramids_303.py", "out/mainos_blackpyramids_303.bin", "BUG_BP303",
-                          "BLKPYRAMD: a TB-303 voice as a track machine (one per DSP core)."),
+}
+# WIP bases, composed ONLY with the explicit opt-in `--wip NAME` (and KYOTI_ALLOW_WIP=1): one
+# per run, never sealed, never part of the default run above.
+WIP_FEATURES = {
+    "VARISPEED": ("build_varispeed.py", "out/mainos_varispeed.bin", "BUG_VARI",
+                  "STATIC/FLEX TSTR VARI: tempo-locked varispeed, QUAN ratios on PTCH (WIP)."),
 }
 # Bytes a feature writes AT RUNTIME that are zero in its image: no bug-fix cave may cover
 # them, though free_runs() would otherwise count them free.
 RESERVED = {"REC_TRIG_MUTE": [(0x400d7c3a, 1)]}       # RTM_MASK (build_rec_trig_mute.py)
+
+
+def reserved(name):
+    """RESERVED, plus VARISPEED's runtime state at its unit's tail: vem_depth, rk_acc and rp_pb
+    are zero in the image and written at run time (rp_pp between them is 0xff), read from the
+    builder's symbols so they follow the unit."""
+    out = list(RESERVED.get(name, []))
+    if name == "VARISPEED":
+        import json
+        sy = json.loads((ROOT / "out/varispeed_syms.json").read_text())
+        g = sy["syms"]
+        out += [(g["vem_depth"], g["rp_pp"] - g["vem_depth"]), (g["rp_pp"] + 1, sy["end"] - g["rp_pp"] - 1)]
+    return out
 
 PROBLEMS = []
 # The three bug-fix sources now live in the batch-bugfixes module directory
@@ -251,11 +277,8 @@ def apply_bugfixes(img, which, label, addrs):
 
 
 def delta(a, b):
-    """Byte positions where a and b differ -> {offset: value_in_b}. A longer b (BLACKPYRAMIDS_303
-    appends its DRAM loader and runtime after the OS) counts every byte past a's end as changed."""
-    d = {i: b[i] for i in range(min(len(a), len(b))) if a[i] != b[i]}
-    d.update({i: b[i] for i in range(len(a), len(b))})
-    return d
+    """Byte positions where a and b differ -> {offset: value_in_b}."""
+    return {i: b[i] for i in range(len(a)) if a[i] != b[i]}
 
 
 def wrap(mainos, name, verstr, blurb):
@@ -283,6 +306,118 @@ def wrap(mainos, name, verstr, blurb):
     print(f"           {blurb}")
 
 
+def compose(name, builder, basepath, verstr, blurb, stock, rebuild, wip=False):
+    """One Bugbuild: the feature's image + the bug-fix caves, checked and wrapped."""
+    if not wip and builder not in FINAL:
+        print(f"---- {name}: {builder} is not promoted to FINAL -- skipped\n")
+        return
+    print(f"════════════ {name} + BATCH_BUGFIXES ════════════" + ("   (WIP)" if wip else ""))
+    if rebuild:
+        r = subprocess.run(["python3", f"tools/{builder}"], capture_output=True,
+                           text=True, cwd=ROOT)
+        if r.returncode != 0:
+            sys.exit(f"{name}: feature builder {builder} failed:\n{r.stdout}\n{r.stderr}")
+    base = ROOT / basepath
+    if not base.exists():
+        sys.exit(f"{name}: missing base image {base} -- run tools/{builder}")
+    img = bytearray(base.read_bytes())
+    if wip:
+        print(f"  WIP base: {builder} is not promoted; this Bugbuild is WIP and is not sealed")
+    elif hashlib.sha256(bytes(img)).hexdigest() != FINAL[builder]:
+        flag(f"{name}: the base image is not {builder}'s promoted build -- it carries "
+             "unpromoted changes")
+    feat_d = delta(stock, img)
+
+    # --- who is already here, and where does each cave go? -----------------------
+    need, already, addrs = [], [], {}
+    for stem, (pref, detours) in BUGFIX.items():
+        site, _, expect_hex, _, _ = detours[0]
+        expect = bytes.fromhex(expect_hex)
+        if bytes(img[o(site):o(site) + len(expect)]) == expect:
+            need.append(stem)
+        else:
+            already.append(stem)
+            addrs[stem] = resolve_present(img, stem)     # honour where IT put it
+    runs = free_runs(img)
+    for at, n in reserved(name):            # carve out runtime-written bytes
+        cut = []
+        for r in runs:
+            if r[0] < at + n and at < r[1]:
+                cut += [x for x in ([r[0], at], [at + n, r[1]]) if x[1] - x[0] >= 16]
+            else:
+                cut.append(r)
+        runs = sorted(cut)
+    for stem in sorted(need, key=lambda s: -len(link(s, BUGFIX[s][0])[0])):
+        size = len(link(stem, BUGFIX[stem][0])[0])
+        at = place(runs, size, BUGFIX[stem][0])
+        if at is None:
+            sys.exit(f"{name}: no free run fits {stem} ({size} B). Free: "
+                     + ", ".join(f"0x{r[0]:08x}+{r[1]-r[0]}" for r in runs))
+        addrs[stem] = at
+    moved = [f"{s} -> 0x{addrs[s]:08x} (preferred 0x{BUGFIX[s][0]:08x} was taken)"
+             for s in need if addrs[s] != BUGFIX[s][0]]
+    for m in moved:
+        print(f"  relocated: {m}")
+    print(f"  base {base.name}: {len(feat_d)} B vs stock; "
+          f"already present: {', '.join(already) or 'none'}; "
+          f"adding: {', '.join(need) or 'none'}")
+
+    # --- reference: the three fixes alone, on stock, at THESE addresses -----------
+    ref_per = {}
+    for stem in BUGFIX:
+        one = bytearray(stock)
+        apply_bugfixes(one, [stem], f"{name}/ref", addrs)
+        ref_per[stem] = delta(stock, one)
+    for x in BUGFIX:
+        for y in BUGFIX:
+            if x < y and set(ref_per[x]) & set(ref_per[y]):
+                sys.exit(f"{name}: bug fixes {x} and {y} overlap each other")
+    ref_all = {k: v for d in ref_per.values() for k, v in d.items()}
+
+    for line in apply_bugfixes(img, need, name, addrs):
+        print(line)
+    comp_d = delta(stock, img)
+
+    # --- interlock proof ----------------------------------------------------------
+    new_d = {k: v for d in (ref_per[s] for s in need) for k, v in d.items()}
+    clash = sorted(set(feat_d) & set(new_d))
+    if clash:
+        flag(f"{name}: {len(clash)} byte(s) claimed by BOTH the feature and a bug fix, "
+             f"first at 0x{BASE + clash[0]:08x}")
+    broke = sorted(k for k, v in feat_d.items() if comp_d.get(k) != v)
+    if broke:
+        flag(f"{name}: composite altered {len(broke)} feature byte(s), "
+             f"first at 0x{BASE + broke[0]:08x}")
+    mism = sorted(k for k, v in ref_all.items() if comp_d.get(k) != v)
+    if mism:
+        flag(f"{name}: {len(mism)} bug-fix byte(s) differ from the stock-only reference, "
+             f"first at 0x{BASE + mism[0]:08x}")
+    extra = sorted(k for k in comp_d if k not in feat_d and k not in ref_all)
+    if extra:
+        flag(f"{name}: {len(extra)} byte(s) belong to no contributor, "
+             f"first at 0x{BASE + extra[0]:08x}")
+    for at, n in reserved(name):
+        if any(img[o(at):o(at) + n]):
+            flag(f"{name}: runtime byte(s) 0x{at:08x}+{n} are no longer 0 in the composite")
+            extra = extra or [o(at)]
+    clean = not (clash or broke or mism or extra)
+    print(f"  interlock: feature {len(feat_d)} B + bug fixes {len(ref_all)} B "
+          f"-> composite {len(comp_d)} B   "
+          f"{'DISJOINT, ALL PRESERVED, NO STRAYS' if clean else '*** SEE FLAGS ***'}")
+    left = sum(r[1] - r[0] for r in free_runs(img))
+    print(f"  cave zone: {left} B still free")
+
+    mainos = OUTDIR / f"mainos_{name.lower()}_batch_bugfixes.bin"
+    mainos.write_bytes(bytes(img))
+    if not wip:                         # a WIP Bugbuild is never sealed
+        seal(__file__, mainos)
+    print(f"  wrote    {mainos.relative_to(ROOT)}  "
+          f"({len(img):,} B, {len(comp_d)} changed vs stock)")
+    wrap(mainos, name, verstr, blurb)
+    print()
+
+
+
 def main():
     rebuild = "--no-rebuild" not in sys.argv
     if not STOCK_SECT.exists():
@@ -291,111 +426,24 @@ def main():
     OUTDIR.mkdir(parents=True, exist_ok=True)
     WORK.mkdir(parents=True, exist_ok=True)
 
-    for name, (builder, basepath, verstr, blurb) in FEATURES.items():
-        if builder not in FINAL:
-            print(f"---- {name}: {builder} is not promoted to FINAL -- skipped\n")
-            continue
-        print(f"════════════ {name} + BATCH_BUGFIXES ════════════")
-        if rebuild:
-            r = subprocess.run(["python3", f"tools/{builder}"], capture_output=True,
-                               text=True, cwd=ROOT)
-            if r.returncode != 0:
-                sys.exit(f"{name}: feature builder {builder} failed:\n{r.stdout}\n{r.stderr}")
-        base = ROOT / basepath
-        if not base.exists():
-            sys.exit(f"{name}: missing base image {base} -- run tools/{builder}")
-        img = bytearray(base.read_bytes())
-        if hashlib.sha256(bytes(img)).hexdigest() != FINAL[builder]:
-            flag(f"{name}: the base image is not {builder}'s promoted build -- it carries "
-                 "unpromoted changes")
-        feat_d = delta(stock, img)
-
-        # --- who is already here, and where does each cave go? -----------------------
-        need, already, addrs = [], [], {}
-        for stem, (pref, detours) in BUGFIX.items():
-            site, _, expect_hex, _, _ = detours[0]
-            expect = bytes.fromhex(expect_hex)
-            if bytes(img[o(site):o(site) + len(expect)]) == expect:
-                need.append(stem)
-            else:
-                already.append(stem)
-                addrs[stem] = resolve_present(img, stem)     # honour where IT put it
-        runs = free_runs(img)
-        for at, n in RESERVED.get(name, []):            # carve out runtime-written bytes
-            cut = []
-            for r in runs:
-                if r[0] < at + n and at < r[1]:
-                    cut += [x for x in ([r[0], at], [at + n, r[1]]) if x[1] - x[0] >= 16]
-                else:
-                    cut.append(r)
-            runs = sorted(cut)
-        for stem in sorted(need, key=lambda s: -len(link(s, BUGFIX[s][0])[0])):
-            size = len(link(stem, BUGFIX[stem][0])[0])
-            at = place(runs, size, BUGFIX[stem][0])
-            if at is None:
-                sys.exit(f"{name}: no free run fits {stem} ({size} B). Free: "
-                         + ", ".join(f"0x{r[0]:08x}+{r[1]-r[0]}" for r in runs))
-            addrs[stem] = at
-        moved = [f"{s} -> 0x{addrs[s]:08x} (preferred 0x{BUGFIX[s][0]:08x} was taken)"
-                 for s in need if addrs[s] != BUGFIX[s][0]]
-        for m in moved:
-            print(f"  relocated: {m}")
-        print(f"  base {base.name}: {len(feat_d)} B vs stock; "
-              f"already present: {', '.join(already) or 'none'}; "
-              f"adding: {', '.join(need) or 'none'}")
-
-        # --- reference: the three fixes alone, on stock, at THESE addresses -----------
-        ref_per = {}
-        for stem in BUGFIX:
-            one = bytearray(stock)
-            apply_bugfixes(one, [stem], f"{name}/ref", addrs)
-            ref_per[stem] = delta(stock, one)
-        for x in BUGFIX:
-            for y in BUGFIX:
-                if x < y and set(ref_per[x]) & set(ref_per[y]):
-                    sys.exit(f"{name}: bug fixes {x} and {y} overlap each other")
-        ref_all = {k: v for d in ref_per.values() for k, v in d.items()}
-
-        for line in apply_bugfixes(img, need, name, addrs):
-            print(line)
-        comp_d = delta(stock, img)
-
-        # --- interlock proof ----------------------------------------------------------
-        new_d = {k: v for d in (ref_per[s] for s in need) for k, v in d.items()}
-        clash = sorted(set(feat_d) & set(new_d))
-        if clash:
-            flag(f"{name}: {len(clash)} byte(s) claimed by BOTH the feature and a bug fix, "
-                 f"first at 0x{BASE + clash[0]:08x}")
-        broke = sorted(k for k, v in feat_d.items() if comp_d.get(k) != v)
-        if broke:
-            flag(f"{name}: composite altered {len(broke)} feature byte(s), "
-                 f"first at 0x{BASE + broke[0]:08x}")
-        mism = sorted(k for k, v in ref_all.items() if comp_d.get(k) != v)
-        if mism:
-            flag(f"{name}: {len(mism)} bug-fix byte(s) differ from the stock-only reference, "
-                 f"first at 0x{BASE + mism[0]:08x}")
-        extra = sorted(k for k in comp_d if k not in feat_d and k not in ref_all)
-        if extra:
-            flag(f"{name}: {len(extra)} byte(s) belong to no contributor, "
-                 f"first at 0x{BASE + extra[0]:08x}")
-        for at, n in RESERVED.get(name, []):
-            if any(img[o(at):o(at) + n]):
-                flag(f"{name}: runtime byte(s) 0x{at:08x}+{n} are no longer 0 in the composite")
-                extra = extra or [o(at)]
-        clean = not (clash or broke or mism or extra)
-        print(f"  interlock: feature {len(feat_d)} B + bug fixes {len(ref_all)} B "
-              f"-> composite {len(comp_d)} B   "
-              f"{'DISJOINT, ALL PRESERVED, NO STRAYS' if clean else '*** SEE FLAGS ***'}")
-        left = sum(r[1] - r[0] for r in free_runs(img))
-        print(f"  cave zone: {left} B still free")
-
-        mainos = OUTDIR / f"mainos_{name.lower()}_batch_bugfixes.bin"
-        mainos.write_bytes(bytes(img))
-        seal(__file__, mainos)
-        print(f"  wrote    {mainos.relative_to(ROOT)}  "
-              f"({len(img):,} B, {len(comp_d)} changed vs stock)")
-        wrap(mainos, name, verstr, blurb)
-        print()
+    wip = None
+    if "--wip" in sys.argv:
+        k = sys.argv.index("--wip")
+        wip = sys.argv[k + 1] if k + 1 < len(sys.argv) else ""
+        if wip not in WIP_FEATURES:
+            sys.exit(f"--wip {wip!r}: not a WIP base this composer knows ({', '.join(WIP_FEATURES)})")
+        if os.environ.get("KYOTI_ALLOW_WIP") != "1":
+            print(f"\n  Refusing to build: --wip {wip} composes a work-in-progress base, and an image\n"
+                  f"  built from it is not something to flash. If you meant it, set KYOTI_ALLOW_WIP=1:\n\n"
+                  f"      KYOTI_ALLOW_WIP=1 python3 tools/build_bugbuilds.py --wip {wip}\n", file=sys.stderr)
+            sys.exit(2)
+        print("  " + "-" * 72)
+        print(f"  WIP Bugbuild: {wip} only -- not promoted, not sealed, not one of the final seven")
+        print("  " + "-" * 72 + "\n")
+        compose(wip, *WIP_FEATURES[wip], stock, rebuild, wip=True)
+    else:
+        for name, (builder, basepath, verstr, blurb) in FEATURES.items():
+            compose(name, builder, basepath, verstr, blurb, stock, rebuild)
 
     print("════════════════════ summary ════════════════════")
     if PROBLEMS:

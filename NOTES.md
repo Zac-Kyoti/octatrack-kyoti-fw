@@ -36450,3 +36450,28 @@ open, Sam's PR #2, and an optimization pass over BLACKPYRAMIDS_303's Octatrack-s
   Builds (WIP, NOT flashed): standalone mainos 42c0da934c399a2e…, CF .bin 0399a1f3…, syx eee3f936b1c58ec7…;
   BUG_BP303 mainos 1df0fd2130f21e47…, syx ef5abf570dd0658b…. The octabam module is regenerated (runtime unchanged,
   2b3b045d…; DSP words new).
+
+## Session 129 (2026-10-15, `repitch-rewrite` → `vari-push`): VARISPEED, the plain build, pushed (WIP, NOT flashed)
+
+* **What:** VARISPEED = VARI on TSTR (5 positions) + QUAN on PTCH, ATTR `VARI`, the octave fold
+  above 2x, OFF outside 30–300 BPM. No emulators, no DSP change (SPRING stays), no EMUS, no load
+  guard. It is the clean-room rewrite's plain build (spec `reference/handoffs/REPITCH_REWRITE_SPEC.md`
+  §7, report `REPITCH_REWRITE_IMPL.md` §14). It shares `octabam-modules/varispeed-emus/varispeed_emus.s`
+  with VARISPEED_EMUS (assembled with `VEM_EMUS=0`).
+* **Builds:**
+  - standalone `tools/build_varispeed.py`: `140C_VARI1`, syx
+    `78cfad333ff231adda18f415d9585deae7c09a9668882903b30b4b3afd97f64d`;
+  - Bugbuild `KYOTI_ALLOW_WIP=1 python3 tools/build_bugbuilds.py --wip VARISPEED`: `BUG_VARI`, syx
+    `f2f37df360f19f7667c6a78fead813fd5b47da322e29dfaa4e76cc365bca4a68`.
+
+  Both were rebuilt byte-identical on this commit's tree. The octabam module is
+  `octabam-modules/varispeed/`, which needs `varispeed-emus/` beside it.
+* **Verified in the emulator:** tests 11/11 (10/10 on the Bugbuild); harness full OTDEMO 19/19,
+  MMTESTDT (6,000 frames) 17/19 (the two misses compare nothing by design); stock and PICKUP tracks
+  bit-identical to stock 1.40C. Not on hardware yet.
+* **Pushed for:** the KYOTI V1.5 compose (the BLACKPYRAMIDS/SIDECHAIN session).
+* **Not pushed:** VARISPEED_EMUS (VEM9 and its history), the deletion of the old REPITCH folder, and
+  tag `ref/sp12-midside-vem7`. They stay on branch `repitch-rewrite`.
+* **Note:** on this `main`, `python3 tools/build_bugbuilds.py` (the final seven) stops at
+  SIDECHAIN_COMPRESSOR. Its builder no longer matches its FINAL pin since the WIP keybus change
+  (687869a). This is not caused by this commit.
