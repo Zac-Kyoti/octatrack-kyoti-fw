@@ -1275,13 +1275,13 @@ def latch_check(t, d):
 
 def cost(frames=3000):
     """The guard's own ColdFire cost (spec §6 item 5), measured. ot_emu --coverage counts every
-    ColdFire PC executed from the transport start; summed per frame over the unit (VEM4G and
+    ColdFire PC executed from the transport start; summed per frame over the unit (this image and
     VEM3, each with its own symbols) and over the guard's routines (vg_core .. emus_idx: the
     per-core pass and the latch). The guard's inline part (reading the carried engine, the two
     calls) is in vem_frame: the unit's VEM4G - VEM3 difference includes it."""
     import varispeed_emus_harness as H
     ref_syms = json.loads((IMG_REF.parent / "varispeed_emus_vem3_syms.json").read_text())
-    imgs = {"VEM4G": (IMG, json.loads(SYMS.read_text())), "VEM3": (IMG_REF, ref_syms)}
+    imgs = {"new": (IMG, json.loads(SYMS.read_text())), "VEM3": (IMG_REF, ref_syms)}
     cases = {
         "otdemo_stock": (OTD, []),                       # no VARI track: the guard never runs
         "otdemo_7sp12": (OTD, H.scenario_steps(dict(tempo=None, pre=True,
@@ -1319,8 +1319,8 @@ def cost(frames=3000):
         for i in imgs:
             u, gg, tt = rows[(c, i)]
             print(f"{c:16} {i:6} {u:11.1f} {gg:11.1f} {tt:13.1f}")
-        print(f"{'':16} {'delta':6} {rows[(c, 'VEM4G')][0] - rows[(c, 'VEM3')][0]:11.1f} {'':11} "
-              f"{rows[(c, 'VEM4G')][2] - rows[(c, 'VEM3')][2]:13.1f}")
+        print(f"{'':16} {'delta':6} {rows[(c, 'new')][0] - rows[(c, 'VEM3')][0]:11.1f} {'':11} "
+              f"{rows[(c, 'new')][2] - rows[(c, 'VEM3')][2]:13.1f}")
     (d / "cost.json").write_text(json.dumps({f"{c} {i}": v for (c, i), v in rows.items()}, indent=1))
 
 
@@ -1329,7 +1329,7 @@ def main():
     ap.add_argument("--only", default="")
     ap.add_argument("--jobs", type=int, default=9)
     ap.add_argument("--reuse", action="store_true")
-    ap.add_argument("--cost", action="store_true", help="the guard's ColdFire cost per frame (VEM4G vs VEM3)")
+    ap.add_argument("--cost", action="store_true", help="the guard's ColdFire cost per frame (this image vs VEM3)")
     a = ap.parse_args()
     if a.cost:
         return cost()

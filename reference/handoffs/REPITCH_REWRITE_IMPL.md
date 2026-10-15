@@ -7,8 +7,10 @@ Nothing was flashed, promoted or pushed. KYOTI's combined image was not touched.
 
 Marks: **C** = confirmed on our image (objdump, or an emulator run); **I** = inferred.
 
-**Current build: `140C_VEM4G` (§10, 2026-10-14), VEM3 plus the DSP load guard (a test label, not flashed).**
-Earlier: `140C_VEM2` (§8), the two fixes from the first hardware test; `140C_VEM3` (§9).
+**Current build: `140C_VEM5` (§11, 2026-10-15), VEM4 plus the guard's UX (spec §6a), not flashed.**
+Earlier: `140C_VEM2` (§8), the two fixes from the first hardware test; `140C_VEM3` (§9);
+`140C_VEM4G` (§10), the DSP load guard; `140C_VEM4` (commit `10ac83e`, §11.1), the optimized
+kernels with the guard at their prices.
 §1-§5 describe `140C_VEM1`, the image flashed on 2026-10-14; where VEM2 changed something,
 §8 says so.
 
@@ -854,3 +856,212 @@ samples that keep sounding (loops), DARK REV on every FX2:
    gave the loop bounds and FX ids, which I then confirmed (10.1). I used none of their numbers
    beyond the profile's own output.
 3. The oracle was run only through the harness.
+
+---
+
+## 11. VEM5, 2026-10-15 (clean side): the guard's UX (spec §6a), and the guard tests
+
+Same worktree, clean side. Read for this section: the spec (all, §6a new), this file §8 and §10,
+`CLAUDE.md`, `reference/kb/caves.md` (§1-§2b, §5, filtered), `reference/kb/memory-map.md` (the
+toast rows, filtered), our module sources, builder, tests, harness, the QUANTIZE_LIVE_REC_TOGGLE
+and REC_TRIG_MUTE modules (how they raise toasts), and the stock image (objdump).
+**Nothing was flashed, promoted or pushed.** KYOTI's combined image was not touched.
+
+**A new build exists: `140C_VEM5`, WIP, not flashed.** Rebuilt twice, same hashes.
+
+| file | sha256 |
+|---|---|
+| `out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx` (MIDI DIN) | `4c2b15d11ae8e1d65fbec08cbafc31856a39fcd667d650c4c8484ab2e699cceb` |
+| `out/OCTATRACK_VARISPEED_EMUS.bin` (CF card) | `ec278dae9047eca050817c300470873dca6e42257c35f13b83d6b194bdda01f9` |
+| `out/mainos_varispeed_emus.bin` | `e96ed87ec0bf700051a6c3d3e6f2246c0ca7412f8645414da0218607cc3c9f5b` |
+| `out/elek_varispeed_emus.bin` | `d32def067db1c8a805f3982c6f7b6ecd1057dd58e6aa9ce67e52c49c5a07fad7` |
+
+Unit: **4,660 B** at `0x400d6500..0x400d7734` (1,288 B of the classic cave left), the same bytes
+for `-mcpu=5407` and `54455`, sha256 `e19b17c0…` (manifest reference updated). Against VEM4 (the
+`10ac83e` source, rebuilt as `out/vem_variants/mainos_varispeed_emus_vem4.bin`, `3ac96ebf…`) the
+image differs only in the unit, the detour target words and the descriptor pokes: **the DSP
+payloads are byte-identical**.
+
+### 11.1 VEM4, for the record (commit `10ac83e`, not described here before)
+
+The optimized kernels (bit-identical output) and the guard at their prices, re-profiled over
+0.5-1.99x on both payloads (`~hw` column): **`VG_SP12` 270 -> 218, `VG_S950` 109 -> 99**. OS
+VERSION `140C_VEM4`, syx `69493aff…`, not flashed. Four guard tests failed on it (20/24): they
+hard-coded the step-downs computed with the old prices. §11.4 fixes them for good.
+
+### 11.2 What changed
+
+1. **The dial stays on the choice (§6a item 1).** `vg_mark` (draw path only) no longer moves the
+   dial: while `vg_down[t]` is set and the track plays a cheaper engine than its EMUS setting, it
+   only swaps the formatter, to **`emus_fmt_ot_dn` (`OT!`) or `emus_fmt_s95_dn` (`S95!`)**, by the
+   engine the track plays. The dial value stays the choice's stop. When the guard restores the
+   track at a later trig, `vg_latch` clears `vg_down[t]` and the readout is the plain one again.
+   `emus_fmt_dn` / `emus_tab_dn` are gone.
+2. **The toast (§6a item 2), from the user's own UI action only:**
+   - **`vg_room`** (d1 = track -> d0): the room the track's DSP core has for it now, in the
+     guard's own model: `budget - (base + the core's FX1/FX2 prices + the engine each OTHER
+     ST/FL track of the core carries)`, the same terms `vg_core` sums (live FX ids
+     `0x80000ec4/ecc`, machine bytes `0x80000eb4 + 8·frame + t`, render state `+36` bits 2-3). It
+     is read fresh: the frame hook's own per-core sums (`vg_fxc`, `vg_est`) are kept only while a
+     VARI track plays on that core and `vg_est` holds one core at a time, so they are not
+     reliable from the UI task.
+   - **`vg_ask`** (d1 = track, d0 = the engine asked for): OT, or a project tempo outside 30..300
+     BPM (the track would play as OFF), says nothing. Otherwise the engine the guard would use is
+     the asked one stepped down (SP12 -> S950 -> OT) until `price <= room`, `vg_latch`'s rule. If
+     that is cheaper than the asked one: **`NOTIFY("MAX DSP: S950 USED" | "MAX DSP: OT USED",
+     0x30)`**, stock's self-timing 0.8 s toast (dur > 0 only; dur <= 0 is the modal path that hung
+     a unit, memory-map.md).
+   - Its three callers, all UI-task handlers:
+     - **EMUS** (`emus_p2step`, inside P2EDIT, the SRC SETUP encoder handler): when a report moves
+       EMUS to a new stop, `vg_ask` for that stop's engine. A report that moves no stop (under six
+       detents, or the same stop) asks nothing.
+     - **SETUP TSTR** (`emus_p2step`'s new `.ep_tstr`, slot 4 on ST/FL): stock's steps are
+       unchanged; the new value is P2EDIT's own (old + steps, clamped 0..4). After
+       `rp_swap_ui` settles the domain, if the track is not on VARI and **`rp_gate_v`** (new:
+       `rp_gate_m` with a given TSTR value, entering its tail at `.gm_test`) says the new TSTR
+       puts it there (VARI, or AUTO on a VARI sample), `vg_ask` for its parked EMUS
+       (**`db_park2`**; 0 = never written = OT).
+     - **ATTR TIMESTRETCH** (`attr_up`, BEAT -> VARI only, the value-up key handler): the gates of
+       every track before the edit (**`vg_gates`**), the edit, `rp_refresh` (the domains swap),
+       then **`vg_entered`**: every track whose gate came on asks for its EMUS (now in the TSNS
+       slot). If two tracks enter at once, each asks alone and the last toast shows.
+   - **Nothing on the frame path changed.** `vem_frame`, `voice_set`, `vg_core`, `vg_latch`,
+     `rp_swap`, `rp_swap_m`, `rp_gate_m`'s body, `caption_m`, `rp_poll_all` and the helpers they
+     call disassemble to the same instructions as VEM4's (objdump of both link units, addresses
+     aside; `rp_gate_m` gained only the `.gm_test` label). The guard acting on its own (the latch,
+     the mid-note step-down, the restore) raises nothing.
+3. **Builder**: three new CONTEXT asserts: NOTIFY's entry `0x4005a2b8` (close-if-open, the
+   measure in font `0x400ba862`, the `textpx + 15` window), its `dur > 0` branch `0x4005a324`,
+   and the window centring `0x40058184` (`x = (128 - w) / 2`). Default label `140C_VEM5`.
+4. **Manifest**: docstring (GUARD line, ~4.7 KB), reference `e19b17c0…`.
+
+### 11.3 The toast's text capacity (C, objdump of `section_3_MAIN_OS.bin`)
+
+- **NOTIFY** `0x4005a2b8(text, dur)`: width = `0x40012f30(font 0x400ba862, -1, text)`; the window
+  is `0x4005829c(width + 15, 0x12, …)`, 18 px high, centred by `0x40058134` on the screen:
+  `x = (128 - w) / 2`, `y = (64 - h) / 2`. Each window owns a 1,024-byte bitmap (128 x 64 / 8).
+  So the box fits the screen while **text width <= 113 px**.
+- **The font** `0x400ba862`: fixed width 5 (`+0`), per-character widths at `[+8]` (0 = fixed),
+  a glyph map at `[+12]` (negative = no glyph), characters 1 px apart. Letters and digits are
+  5 px (`I` 1, `1` 2), space 4, `:` 1.
+- **Ours:** `MAX DSP: S950 USED` = **100 px** (box 115, 6 px margin each side);
+  `MAX DSP: OT USED` = 88 px (box 103). It fits in full; nothing was cut.
+- **Stock, for comparison** (every string pushed right before a NOTIFY call, 145 of them): the
+  widest are `NO FREE STATIC SLOTS!` 114 px, `NOT A STEREO SAMPLE!` 112, `BULK DATA TOO LARGE`
+  110; our 100 px equals this repo's hardware-shown `QUANT LIVE REC OFF` (also 18 characters).
+- The tests re-measure both texts from the built image (`toast_px`).
+
+### 11.4 Tests
+
+**(b) `tools/varispeed_emus_test.py`: 28/28 PASS** (`out/vem/tests_all_vem5.txt`): the 18
+non-guard tests and seven `panel_*` unchanged, the six guard tests (the four repaired), and four
+new `toast_*`.
+
+**The four guard tests no longer hard-code engines.** Every expectation comes from `GuardModel`,
+the independent model of spec §6 / §10.2 fed with the `VG_*` block read from
+`varispeed_emus.s`: the bar-1 latch in trig order, the mid-note step-down, the bar-2 latch after
+it. `GuardModel` takes the wrong rules as switches (`oldest`, `silent_first=False`), and each
+scenario checks that it still **discriminates**, so a price change cannot make it pass quietly
+without teeth:
+
+| test | what it derives (prices of VEM5) | discrimination check |
+|---|---|---|
+| `guard_x3` | latch: T5-T7 SP12, **T8 S950** (est 3,339) | spec §6 item 6: x3 steps down, per the model; no toast |
+| `guard_latch` | latch: T5, T6 SP12, **T7, T8 S950 -> OT** (est 3,289) | an S950 voice steps to OT; readouts `OT!` with the dial on S950 |
+| `guard_mid` | third DJ EQ: **T8 SP12 -> S950** at once (est 3,339); back at its next trig | most-recent-first differs from oldest-first (which would step T5); `S95!` with the dial on SP12; no toast |
+| `guard_silent` | T6 silent: **T6 SP12 -> S950** first (est 3,339) | silent-first differs from silence-ignored (which would step T8); no toast |
+
+`guard_x2` (and `guard_x2_ref`, VEM3) assert spec §6 item 6's other half from the model: x2 does
+not step down (est 3,111); every pass on both cores still equals VEM3's.
+
+**New tests** (MMTESTDT, T5-T7 VARI SP12 + DJ EQ on their FX1 + DARK x4, latched by frame
+~2,000; the user's action on T8 from frame 2,600; NOTIFY captured by a runtime stub that counts
+the call, keeps `(text, dur)` and then runs stock's NOTIFY unchanged). The expected toast of
+every action is `GuardModel.ask` on the model's own latch, after checking that the image's
+carried engines equal the model's:
+
+| test | actions on T8 (P2EDIT / the key handler, direct calls) | result |
+|---|---|---|
+| `toast_emus` | EMUS OT -> S950 -> SP12 -> S950 -> OT, then half a stop | toast **only at SP12: `MAX DSP: S950 USED`**; S950 fits (none); OT none; the half stop none; every stop stored |
+| `toast_emus_ot` | the same, SPATIALIZER on T8's FX1 | **`MAX DSP: OT USED`** at S950, SP12, S950; none at OT |
+| `toast_tstr` | TSTR BEAT -> VARI (EMUS SP12 parked); back to BEAT; S950 parked, -> VARI | **`MAX DSP: S950 USED`**; none on leaving; none when S950 fits |
+| `toast_attr` | `0x4006edc8` (ATTR value-up) on STATIC slot 1, row 2, T8 on AUTO, EMUS SP12 parked | TIMESTRETCH BEAT -> VARI, **`MAX DSP: S950 USED`** |
+
+On every toast: `dur` 0x30, the OS's toast handle `0x460d1e70` set and its countdown `0x460d1e6c`
+= 0x30 (the stock toast really opened). The dial is checked in `guard_latch` (`OT!`, the dial on
+S950) and `guard_mid` (`S95!`, the dial on SP12; `w8end` plain on SP12 after the restore).
+
+**Negative controls** (`out/vem_variants/`, built from this source with `VEM_VARIANT`, sources in
+`out/vem_variants/src/`):
+
+| variant | fails | passes |
+|---|---|---|
+| `vg_oldest` (the oldest steps first) | `guard_mid` (steps T5), `guard_silent` | |
+| `vg_nosilent` (silence not preferred) | `guard_silent` (steps T8) | `guard_mid` |
+| `dial_follows` (VEM4's dial) | `guard_latch` (dial 1, want 64), `guard_mid` (64, want 127) | |
+| `toast_always` (toasts even when it fits) | `toast_emus` (a1, a3), `toast_tstr` (t3) | `toast_emus_ot` (every request there is over) |
+
+**(a) Harness**, oracle = the shipped FINAL (`90b4a1c1…`), outputs in `out/vem5/`:
+- quick set **9/9 identical**;
+- full set, OTDEMO **35/35 identical**, full set, MMTESTDT (`--frames 6000`) **35/35
+  identical**; both print **exactly** the lines VEM4G's runs printed (`out/vg/harness_*.txt`,
+  `diff` empty), whole-run difference counts included.
+
+**(c) DSP**: payloads byte-identical to VEM4's; `repitch_dsp_boot_check.py
+out/mainos_varispeed_emus.bin`: **PASS** on both payloads.
+
+**(d) octabam**: not rebuilt this session (the manifest's reference is updated; the builder
+checks it).
+
+**ColdFire cost** (`--cost`, 3,000 frames, against VEM3; `out/vem5/cost.txt`): unit per frame
+227.5 (OTDEMO, no VARI) / 1,535.1 (7 x SP12) / 682.5 (MMTESTDT x2) / 720.3 (x3), **the same as
+VEM4G's to the tenth** (§10.5): the frame path did not change. The new UI code runs only in the
+handlers above.
+
+### 11.5 Deviations and open questions
+
+- **The toast length** is stock's house 0x30 (0.8 s), as QUANTIZE_LIVE_REC_TOGGLE and
+  REC_TRIG_MUTE use. If 18 characters read too briefly on the unit, `TOAST_DUR` is one `.equ`
+  (0x60 = 1.6 s, also a stock value).
+- **The fit is the moment's**: the toast names the engine the guard would use *now*; the engine
+  is taken at the next trig, when the core may have changed. Two tracks entering VARI by one
+  ATTR edit each ask alone (each counts the other at its carried engine), and the last toast
+  shows.
+- **The emulator calls the handlers directly** (P2EDIT, `0x4006edc8`), not through the UI task;
+  the panel tests show P2EDIT runs in the UI task on the unit's real path. NOTIFY from these
+  handlers is the same use QUANTIZE_LIVE_REC_TOGGLE and REC_TRIG_MUTE make from theirs; the
+  emulator cannot show UI-task safety (CLAUDE.md), the hardware item below does.
+- No toast for an ATTR TEMPO edit that brings a sample into range, nor for a lock or scene that
+  changes EMUS: the spec names only EMUS turns, SETUP TSTR and ATTR TIMESTRETCH.
+
+### 11.6 FLASHING §4 item (draft) -- the guard's UX
+
+OS VERSION `140C_VEM5`. The §10.8 project: T5-T8 STATIC/FLEX on VARI, looping samples, DARK REV
+on every FX2.
+1. **Dial stays:** EMUS `SP12` on all four, DJ EQ on T5-T7's FX1, play. T8 drops (§10.8 item 2);
+   on T8's SRC SETUP page the **EMUS dial still points at SP12** while the readout says `S95!`
+   (or `OT!`). Remove one DJ EQ: at T8's next trig the readout returns to `SP12`.
+2. **Toast on EMUS:** with T5-T7 on SP12 + DJ EQ x3 and T8 on `OT`, turn T8's EMUS right. At
+   `S950`: no toast. At `SP12`: **`MAX DSP: S950 USED`**, readable in full, about 0.8 s. Turn
+   back to S950 and OT: no toast. Add SPATIALIZER on T8's FX1 and turn to S950: **`MAX DSP: OT
+   USED`**.
+3. **Toast on TSTR:** T8 on BEAT with EMUS SP12 from before; set TSTR to VARI: **`MAX DSP: S950
+   USED`**. Back to BEAT: nothing.
+4. **Toast on ATTR:** T8 on TSTR AUTO, its sample's TIMESTRETCH BEAT in the audio editor's ATTR
+   page; step it to VARI: **`MAX DSP: S950 USED`**.
+5. **Never on its own:** start with DJ EQ x3 already set (§10.8 item 4) and let it run, then add
+   and remove DJ EQ while it plays: tracks step down and come back, **no toast ever appears**
+   unless a knob or key was touched. Leave it five minutes: no crash, controls live, no crackle
+   (the CLAUDE.md "Session 93" signature).
+6. An everyday project: turning EMUS anywhere raises no toast.
+
+### 11.7 Blacklist statement (this session)
+
+**I opened nothing on the spec §1 blacklist.** Disclosures:
+1. The memory index (`MEMORY.md`) was injected into this agent's context at start, as for the
+   earlier clean sessions; I opened no memory file and took nothing from it.
+2. `reference/kb/caves.md` §5 names `reference/handoffs/KYOTI_LOAD_AUDIT.md` as a reference in
+   one line (a file name, nothing of its content); I did not open the audit.
+3. In ot_emu's source tree I grepped only `tools/emu/ot_emu/main.cpp` (option names); the
+   octabam `tools/verify/verify_dram_boot.py` path appeared in a file list, unopened.
+4. The oracle was run only through the harness.
