@@ -1872,3 +1872,66 @@ OS VERSION `140C_VEM8`. §12.7 with §13.3 stands; add:
    for the keywords first (no hits), `rtos.h` grepped for four load constants only; read only for the step verbs and
    `loadProjectLive`.
 4. The oracle was run only through the harness.
+
+---
+
+## 16. VEM9, 2026-10-15: SP12 in stereo merged, the guard's price, the guard tests solved from the constants
+
+**The merge (dirty side / coordinator, commits `377dc64`, `36c8e83`):** SP12 (RPSP) back to full
+stereo on the DSP side, merged with VEM8's option B; the guard's `VG_SP12` 218 -> **187** (the
+re-profiled stereo price; `VG_S950` 99 unchanged). No other ColdFire change. **Build `140C_VEM9`,
+WIP, not flashed:** `out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx` sha256
+`aa1ee66e004fb2e920b86f5ee5a1fd069421a2822afa68194ff3517009d78d48`, `out/mainos_varispeed_emus.bin`
+`3fabfd1c…` (rebuilt here with `KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py
+140C_VEM9`: the same hashes).
+
+**The problem:** at 187 the guard tests' fixed FX layouts (DJ EQ / DARK chosen for 218) fit, so
+13 tests failed with "the model steps something here: got False" -- they had become no-ops.
+
+**The fix (clean side, `tools/varispeed_emus_test.py`, commit `031aecd`; no firmware change):**
+- `solve_fx(pred, fixed, prefer)`: every guard / net scenario's FX are chosen FROM the VG_*
+  constants. Every reachable FX price sum over T5-T8's FX1 / FX2 slots (types limited to what
+  this image's choosers offer, `fx_avail`) gets one deterministic witness; sums are tried in
+  ascending order ("max": descending, the tightest fit) and the first assignment the scenario's
+  predicate accepts is used. No assignment: the test run stops with an error.
+- The predicates, all on `NetModel`: `g_over` (the net's scenarios: the pre-state fits, the
+  post-state is over, the net keeps at least one emu track, and its order differs from each wrong
+  order named: `low_first`, and `s950_first` where an S950 track is present); `g_enter` (TSTR /
+  ATTR / option B: pre fits, post over, the entering rule differs from -- `_order` -- or equals
+  the net's order); the controls (`net_tstr_fit`, `under`, Part 0 of `net_part` / `net_reload`) the
+  tightest FX that still fit; `ref_emus` (S950 fits, SP12 refused) and `ref_emus_ot` (S950
+  refused); `ref_fx`: the FX AND its four chooser actions solved (FX2 refused, FX2 lands, FX1
+  refused, FX1 lands; DARK / SPATIALIZER / COMPRESSOR / SPATIALIZER preferred when they do it;
+  at 187 it picks DJ EQ / SPATIALIZER / DJ EQ / SPATIALIZER); `ref_fx_alone` on the low-budget build
+  (refused, lands, not refused + the net steps). `net_part` / `net_reload` take Part 1 / the saved
+  copy's FX from the solver too (`part1_setup(fx1, fx2)`, `saved_setup(emus, fx1, fx2)`; the check
+  reads them from the scenario, no more hard-coded DJ EQ / DARK). Each test prints its solved FX.
+- A missing or stale low-budget image now FAILS `ref_fx_alone` (it used to be skipped silently).
+- `--cost`'s two scenarios are solved the same way.
+- Sweep (the scenario builder alone, the VG block varied): every scenario solves for SP12 120..320
+  with S950 50..180 wherever S950 < SP12 leaves the premise of `ref_emus` possible; the
+  combinations where it cannot (S950 >= SP12, or SP12 100 with a 50-wide window) stop with the error,
+  as intended.
+
+**Results on the VEM9 image** (`out/vem9t/`): **39/39 PASS**. Wrong builds (all rebuilt on the VEM9
+source), each failing its tests:
+
+| build | fails |
+|---|---|
+| `w_indirect_net` | `net_tempo_order`, `net_slot_order`, `net_sample_order` |
+| `w_name_all` | `net_partwrite_order`, `net_machine_order` |
+| `w_no_live` | `net_partwrite_order` |
+| `w_enter_net` | `net_tstr_order`, `net_attr_order`, `net_tempo_order`, `net_slot_order`, `net_sample_order` |
+| `w_low_first` | `net_load`, `_part`, `_reload`, `_paste`, `_machine`, `_attr`, `_attr_order`, `_partwrite_order`, `_machine_order` |
+| `w_s950_first` | `net_load`, `net_reload` |
+| `w_no_cap` | `ref_emus`, `ref_emus_ot` |
+| `w_no_fxref` | `ref_fx` |
+| `w_no_sync` | `net_part` |
+| `w_6det` | `p2edit`, `panel_slow`, `_fast`, `_held`, `_reset` |
+| `w_toast_direct` | `ref_emus`, `ref_emus_ot` |
+| `w_no_net` | `net_load`, `_part`, `_reload`, `_paste`, `_machine`, `_partwrite_order`, `_machine_order` |
+
+The same pattern as VEM8 (§15.3). The harness was not run here (the coordinator ran it: quick
+9/9, full OTDEMO 35/35). No DSP file was touched.
+
+**Blacklist:** nothing opened (as §15.6).
