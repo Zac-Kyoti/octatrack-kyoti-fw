@@ -7,13 +7,19 @@
 | (no grains, no stretch) at the speed (project BPM x p) / (sample BPM x q), p/q the QUAN
 | ratio picked with the PTCH knob, exact in integers; RATE still applies. Its TSNS knob
 | becomes EMUS (OT / S950 / SP12, left to right), the engine the DSP kernel (rpk_dsp.asm)
-| renders the track with, latched at each trig; six detents in one direction step it once. Spec: reference/handoffs/REPITCH_REWRITE_SPEC.md;
-| facts: REPITCH_REWRITE_SCOPE.md + REPITCH_REWRITE_SCOPE_EMUS.md (clean-room).
+| renders the track with, latched at each trig; four detents in one direction step it once.
+| A DSP load guard (spec §6b) keeps each DSP core's estimated load, a property of the
+| settings, under its budget: a change that would overload it is refused (EMUS, the FX
+| type), TSTR / ATTR onto VARI steps that track's EMUS to OT, and a change that cannot be
+| refused (Part change, reload, load, machine, sample...) steps just enough tracks to OT;
+| each raises the toast MAX DSP: EMU LIMIT from the UI task's message loop. Spec:
+| reference/handoffs/REPITCH_REWRITE_SPEC.md; facts: REPITCH_REWRITE_SCOPE.md +
+| REPITCH_REWRITE_SCOPE_EMUS.md (clean-room); this build: REPITCH_REWRITE_IMPL.md §12.
 |
 | Two parts:
 |   PART 1, NEW CORE (written for VARISPEED_EMUS): the frame hook vem_frame, the TSTR
 |     formatter, the audio-editor ATTR hooks, the EMUS widget / formatter / step and its
-|     page-open reset, the hold wrappers of the bulk writers.
+|     page-open reset, the DSP load guard, the hold wrappers of the bulk writers.
 |   PART 2, RETAINED (REPITCH_REWRITE_RETAINED.s, extended): QUAN, the domain swap -- now
 |     per machine, with a second pair (TSNS<->EMUS) -- the Part-DB gate, the Part-apply
 |     bookkeeping and RELOAD PART.
@@ -34,28 +40,30 @@
         .global attr_tail
         .global emus_widget
         .global emus_fmt
-        .global emus_fmt_ot_dn
-        .global emus_fmt_s95_dn
+        .global vg_fix
+        .global vg_scan
         .global vg_room
-        .global vg_ask
-        .global vg_gates
-        .global vg_entered
-        .global rp_gate_v
-        .global str_max_ot
-        .global str_max_s950
-        .global vg_core
-        .global vg_latch
-        .global vg_est
-        .global vg_key
-        .global vg_fxc
-        .global vg_free
-        .global vg_down
-        .global vg_stamp
-        .global vg_clock
+        .global vg_fx_try
+        .global vg_tick
+        .global vh_fx1
+        .global vh_fx2
+        .global vg_eng
+        .global vg_toast
+        .global vg_sig
+        .global vg_last
+        .global rp_pb
+        .global rp_pp
+        .global rp_sync
+        .global vg_sig
+        .global vg_last
+        .global rp_pb
+        .global rp_pp
+        .global rp_sync
         .global vg_fxp
         .global vg_engp
         .global vg_budget
         .global vg_base
+        .global str_emu_limit
         .global emus_p2step
         .global emus_open
         .global vh_srcpaste
@@ -79,6 +87,8 @@
         .global rp_forget
         .global rp_apply1
         .global rp_apply2
+        .global vb_fx1
+        .global vb_fx2
         .global rp_prev
         .global vem_depth
         .global rk_ratios
@@ -135,15 +145,23 @@
         .equ    NAME11_ST, 0x400d3074   | STATIC slot-11 (TSNS) caption
         .equ    NAME11_FL, 0x400d3206   | FLEX slot-11 caption
         .equ    RENDER_BACK, 0x40004108 | after the render's increment store
-        .equ    RENDER, 0x80004898      | per-track render state, stride 40; +36 = the increment
-        .equ    FX1_IDS, 0x80000ec4     | live FX1 type id per track (8 bytes; FX2 ids follow at +8)
-        .equ    FRAME_IDX, 0x800000e0   | long: this frame's buffer, 0 / 1 alternating
-        .equ    MACH_RT, 0x80000eb4     | the voice loop's machine bytes, + 8 frame + t (0xff: no trig yet)
-        .equ    NOTIFY, 0x4005a2b8      | FUN_4005a2b8(text, dur): the stock toast. KEY / ENCODER
-                                        | HANDLERS ONLY (it posts to the kernel; CLAUDE.md, NOTES
-                                        | "Session 93"): never from the frame path
-        .equ    TOAST_DUR, 0x30         | 0.8 s in 1/60 s units, stock's own house length (dur > 0
+        .equ    NOTIFY, 0x4005a2b8      | FUN_4005a2b8(text, dur): the stock toast. UI TASK ONLY
+                                        | (it posts to the kernel; CLAUDE.md, NOTES "Session 93"):
+                                        | raised from vg_tick alone, never from the frame path
+        .equ    TOAST_DUR, 0x48         | 1.2 s in 1/60 s units: 1.5 x stock's house 0x30 (dur > 0
                                         | only: dur <= 0 is the modal path that hung a unit)
+        .equ    UI_TAIL_BACK, 0x40062d22 | the UI task's message loop, after its tail test
+        .equ    UI_FLUSH, 0x46c7c72c    | the loop tail's own test (displaced)
+        .equ    APPLIED_B, 0x80001828   | bank, part the live bytes were last applied from (all
+        .equ    APPLIED_P, 0x80001829   |   three Part applies write these, and nothing else)
+        .equ    BANK0_DB, 0x400e21e0    | bank b's blob = BANK0_DB + b * BANK_STRIDE
+        .equ    BANK_STRIDE, 0x9b340
+        .equ    OFF_FX1, 0x8ed80        | + t: the Part's FX1 type id; FX2 at + 8 + t
+        .equ    PART_B_UI, 0x100b14cf   | PART_B's mirror (written with it)
+        .equ    FX1_CURSOR, 0x460d5c94  | the FX1 chooser's cursor row
+        .equ    FX2_CURSOR, 0x460d5ca8  | the FX2 chooser's cursor row
+        .equ    FX1_LIST, 0x400d6060    | the choosers' rows (-> P, whose long is the id)
+        .equ    FX2_LIST, 0x400d6090
 
 | ---------------------------------------------------------------------------- ours
         .equ    VARI, 4                 | TSTR / TSMODE raw value
@@ -158,13 +176,16 @@
         .equ    PARK2_FL, 21            | NEIGHBOR p2 slot 3: FLEX's TSNS park
         .equ    TSNS_SLOT2, 5
         .equ    TSTR_SLOT2, 4
-        .equ    EM_DETENTS, 6           | EMUS: detents in one direction per stop
+        .equ    EM_DETENTS, 4           | EMUS: detents in one direction per stop (spec §6b item 6)
 
 | ---------------------------------------------------------------------------- the DSP load guard
-| Spec §6 (reference/handoffs/REPITCH_REWRITE_SPEC.md). Every price and budget the guard
+| Spec §6 item 1 (the cost model) and §6b (the guard). Every price and budget the guard
 | uses is HERE and nowhere else (the tests read this block). Unit: MODELLED DSP cycles
 | per output sample, the unit of the KYOTI load audit as the spec carries it (the audit
-| itself is not read here: clean-room). Report: REPITCH_REWRITE_IMPL.md §10.
+| itself is not read here: clean-room). Reports: REPITCH_REWRITE_IMPL.md §10, §12.
+| The estimate of a core is a property of the SETTINGS (spec §6b item 1): base + the
+| prices of its four tracks' FX1 / FX2 types + the engine of each of its tracks that is
+| a VARI track with EMUS on S950 / SP12.
 |
 | Base: the four-track voice loop with every FX NONE, per DSP core -- spec §6 item 1
 | (re-measured in ot_emu on stock 1.40C, 2026-10-14: 577 / 482).
@@ -173,8 +194,8 @@
         .equ    VG_SC, 0                | SIDECHAIN_COMPRESSOR adds 56 per core when it shares
                                         | the image (spec §6 item 1); not in this one
 | Stock FX1 / FX2 prices, per effect instance -- spec §6 item 1 (measured on core 1, used for
-| both). The ids are the stock FX type ids (0x80000ec4 / 0x80000ecc, the page descriptors'
-| id word, IMPL §10.1).
+| both). The ids are the stock FX type ids (the Part's bytes +0x8ed80 / +0x8ed88 + t, the
+| page descriptors' id word, IMPL §10.1).
         .equ    VG_FX_NONE, 0
         .equ    VG_FX_FILTER, 267       | id 0x04
         .equ    VG_FX_SPATIALIZER, 77   | id 0x05
@@ -191,7 +212,8 @@
         .equ    VG_FX_DARK, 267         | id 0x16
         .equ    VG_FX_COMPRESSOR, 89    | id 0x18
         .equ    VG_FX_LOFI, 313         | id 0x1c
-| The emulation engines, per voice the DSP renders with them: the worst case over the
+| The emulation engines, per VARI track whose EMUS selects them (the DSP runs the engine on
+| every pass whose increment carries it, sounding or not, IMPL §10.1): the worst case over the
 | playback ratios 0.5-1.99x, both payloads, of tools/repitch_dsp_profile.py, its "~hw"
 | column (a one-word instruction 2 cycles, a displaced access +2). VEM3's kernel: RPSP 269.8,
 | RPS9 108.6 (its datasheet column, 146.5 / 57.3, cannot reproduce the user's brackets below,
@@ -200,7 +222,7 @@
         .equ    VG_S950, 99
         .equ    VG_SP12, 218
 | Budgets: the CLEAN points of the user's hardware brackets (4 SP12 voices, DARK on every
-| FX2, DJ EQ added on FX1) -- spec §6 item 2. The guard acts above them.
+| FX2, DJ EQ added on FX1) -- spec §6 item 2. An estimate above them does not fit.
         .equ    VG_BUDGET_C1, 3930      | T1-T4 (crash ~4,310)
         .equ    VG_BUDGET_C0, 3350      | T5-T8, the core that fails first (crash ~3,740)
 
@@ -350,41 +372,40 @@ vem_frame:
 1:
 | The engine: latched when this track's new sound starts (the trig byte's bit 4 is
 | still set during this second pass; the voice loop clears it at 0x4000d534), carried
-| in 36(a3) bits 2-3 on every other frame. The DSP load guard (spec §6) sits between:
-| vg_core may step the carried engine down (this core over budget), vg_latch grants a
-| new sound the next cheaper engine while the one EMUS asks for would not fit.
-        move.l  %d0,%d4                 | d4 = the increment, untagged
-        move.l  36(%a3),%d6             | the engine so far (the last frame's tag)
-        lsr.l   #2,%d6
-        moveq   #3,%d1
-        and.l   %d1,%d6                 | d6 = 0 OT / 1 S950 / 2 SP12
-        bsr     vg_core
+| in 36(a3) bits 2-3 on every other frame. Nothing here steps an engine down (spec §6b
+| item 1): the guard keeps the SETTINGS within the budget, and the latch takes them.
         lea     (TRIGB).l,%a0
         adda.l  %d2,%a0
         btst    #4,(%a0)
-        beq.s   .vf_tag                 | no new sound: the engine carries
+        beq.s   .vf_carry
         btst    #0,%d5
         beq.s   1f
         move.l  %d2,%d1                 | swap frame: the live EMUS byte
         lsl.l   #3,%d1
-        move.l  %d2,%d0
-        lsl.l   #6,%d0
-        add.l   %d0,%d1
+        move.l  %d2,%d4
+        lsl.l   #6,%d4
+        add.l   %d4,%d1
         lea     (LIVE_P2+TSNS_SLOT2).l,%a1
+        move.l  %d0,%d4
         mvs.b   0(%a1,%d1.l),%d0
         bra.s   2f
-1:      mvs.b   29(%fp),%d0             | lane TSNS = the composed EMUS value
+1:      move.l  %d0,%d4
+        mvs.b   29(%fp),%d0             | lane TSNS = the composed EMUS value
 2:      bsr     emus_idx
         lea     emus_mode(%pc),%a0
-        mvz.b   0(%a0,%d0.l),%d1        | the engine EMUS asks for
-        bsr     vg_latch                | -> the engine this sound gets
-        move.l  %d1,%d6
-.vf_tag:
+        mvz.b   0(%a0,%d0.l),%d1        | DSP mode 0 OT / 1 S950 / 2 SP12
         move.l  %d4,%d0
-        moveq   #-16,%d1
-        and.l   %d1,%d0
-        lsl.l   #2,%d6
-        or.l    %d6,%d0                 | bits 2-3: the engine, for the DSP
+        bra.s   .vf_tag
+.vf_carry:
+        move.l  36(%a3),%d1             | the latched engine, from the last frame
+        lsr.l   #2,%d1
+        moveq   #3,%d4
+        and.l   %d4,%d1
+.vf_tag:
+        moveq   #-16,%d4
+        and.l   %d4,%d0
+        lsl.l   #2,%d1
+        or.l    %d1,%d0
         bra.s   .vf_store
 .vf_plain:
         move.l  %d7,%d0
@@ -392,7 +413,6 @@ vem_frame:
 .vf_store:
         move.l  %d0,36(%a3)
         jmp     (RENDER_BACK).l
-
 | d2 = track -> a1 = the sample settings record the voice plays (voice +8), Z set when
 | there is none. Keeps everything but d1/a1 (d1 = the offset).
 voice_set:
@@ -402,257 +422,6 @@ voice_set:
         move.l  8(%a1,%d1.l),%d1
         movea.l %d1,%a1
         rts
-
-| ---------------------------------------------------------------------------
-| THE DSP LOAD GUARD (spec §6; constants: VG_* above; report: IMPL §10).
-| The DSP runs the S950 / SP12 engine on every pass of an ST / FL track whose increment
-| carries it in bits 2-3, sounding or not (measured, IMPL §10.1), so the estimate counts
-| the engines the increments carry; "sounding" (voice +0) only orders the step-down.
-| Nothing here runs for a track that is not an engaged VARI track, and nothing changes
-| any increment while the estimate fits the budget.
-|
-| vg_core: from vem_frame on every engaged VARI track, before its engine is chosen. The
-| FIRST such call on a DSP core in a frame (T1-T4 = core 1, T5-T8 = core 0) is that
-| core's pass:
-|   * FX = the prices of the FX1 / FX2 effects on the core's four tracks (the live type
-|     ids, cached per core with their sum);
-|   * when VG_BASE + FX + 4 x VG_SP12 fits the core's budget nothing can overrun: the
-|     core is marked free for the frame (vg_latch then grants at once), and that's all;
-|   * else est = VG_BASE + FX + the engine each of the core's ST / FL tracks carries
-|     (render state +36, bits 2-3); above the budget the core's emu voices step down at
-|     once, one engine at a time (SP12 -> S950 -> OT): silent voices first, then the
-|     most recently started, until the estimate fits or every one is on OT (stock FX
-|     alone over budget: nothing more is done).
-| Later calls on the same core in the frame return at once. The voice loop renders T1..T8
-| in order and a core's first engaged track precedes every other emu voice of the core,
-| so a voice stepped down here plays the cheaper engine in this very frame (its carried
-| engine in +36 is lowered; it stays there until its next trig).
-|   in:  d2 = track, a3 = its render state, a5 -> its machine byte (this frame),
-|        d6 = its engine so far
-|   out: d6 = its engine (stepped down or not)
-|   uses d0, d1, d3, d7, a0, a1, a2, a4
-vg_core:
-        move.l  (FRAME_IDX).l,%d1
-        lsl.l   #4,%d1
-        or.l    %d2,%d1                 | key = frame << 4 | track
-        lea     vg_key(%pc),%a0
-        mvz.b   (%a0),%d3
-        move.b  %d1,(%a0)
-        cmp.l   %d3,%d1
-        bls.s   .vc_pass                | not after the last call's track: a new frame
-        eor.l   %d1,%d3
-        andi.l  #0x14,%d3               | the other buffer, or the other core
-        bne.s   .vc_pass
-        rts
-.vc_pass:
-        move.l  %d2,%d0
-        andi.l  #4,%d0                  | g = 0 (T1-T4, core 1) / 4 (T5-T8, core 0)
-        lea     vg_fxc(%pc),%a1
-        move.l  %d0,%d1
-        add.l   %d1,%d1
-        add.l   %d0,%d1
-        adda.l  %d1,%a1                 | -> the core's cache: FX1 ids, FX2 ids, their price
-        lea     (FX1_IDS).l,%a0
-        adda.l  %d0,%a0                 | -> the core's first FX1 id (its FX2 id at +8)
-        move.l  (%a0),%d1
-        move.l  8(%a0),%d3
-        cmp.l   (%a1),%d1
-        bne.s   .vc_fx
-        cmp.l   4(%a1),%d3
-        beq.s   .vc_fxok
-.vc_fx: move.l  %d1,(%a1)               | the core's FX changed: price them again
-        move.l  %d3,4(%a1)
-        lea     vg_fxp(%pc),%a2
-        moveq   #0,%d7
-        moveq   #4,%d3
-1:      mvz.b   (%a0),%d1               | FX1
-        andi.l  #0x1f,%d1
-        add.l   %d1,%d1
-        mvz.w   0(%a2,%d1.l),%d1
-        add.l   %d1,%d7
-        mvz.b   8(%a0),%d1              | FX2
-        andi.l  #0x1f,%d1
-        add.l   %d1,%d1
-        mvz.w   0(%a2,%d1.l),%d1
-        add.l   %d1,%d7
-        addq.l  #1,%a0
-        subq.l  #1,%d3
-        bne.s   1b
-        move.l  %d7,8(%a1)
-.vc_fxok:
-        move.l  8(%a1),%d7
-        lea     vg_base(%pc),%a0
-        add.l   0(%a0,%d0.l),%d7        | the core without its engines
-        lea     vg_budget(%pc),%a0
-        move.l  0(%a0,%d0.l),%d3        | its budget
-        move.l  %d7,%d1
-        addi.l  #4*VG_SP12,%d1
-        cmp.l   %d3,%d1
-        sle     %d1                     | 0xff: room for four SP12 voices
-        lea     vg_free(%pc),%a1
-        move.b  %d1,0(%a1,%d0.l)        | (the move sets Z from the flag)
-        bne     .vc_out                 | nothing can overrun on this core this frame
-        movea.l %a5,%a4
-        suba.l  %d2,%a4
-        adda.l  %d0,%a4                 | -> the core's first machine byte (this frame)
-        move.l  %d2,%d1
-        sub.l   %d0,%d1
-        lsl.l   #3,%d1
-        movea.l %a3,%a2
-        suba.l  %d1,%a2
-        lsl.l   #2,%d1
-        suba.l  %d1,%a2                 | -> the core's first render state (40 B each)
-        lea     vg_engp(%pc),%a0
-        .rept   4
-        mvz.b   (%a4)+,%d1
-        cmpi.l  #1,%d1
-        bhi.s   1f                      | not ST / FL: renders no engine
-        move.l  36(%a2),%d1
-        andi.l  #12,%d1
-        add.l   0(%a0,%d1.l),%d7        | the engine its increment carries
-1:      lea     40(%a2),%a2
-        .endr
-        move.l  %d7,(vg_est).l
-        cmp.l   %d3,%d7
-        bgt.s   .vc_over
-.vc_out:
-        rts
-| Over budget: step the core's emu voices down. d0 = g, d3 = budget, d7 = est.
-.vc_over:
-        lea     -24(%sp),%sp
-        movem.l %d2/%d4-%d6/%a3/%a5,(%sp)
-        subq.l  #4,%a4                  | -> the core's first machine byte
-        lea     -160(%a2),%a2           | -> its first render state
-.vo_pick:
-        moveq   #-1,%d5                 | the victim (k), none yet
-        moveq   #0,%d4                  | its key
-        moveq   #0,%d1                  | k = 0..3
-1:      mvz.b   0(%a4,%d1.l),%d2
-        cmpi.l  #1,%d2
-        bhi.s   3f                      | not ST / FL
-        moveq   #40,%d2
-        mulu.w  %d1,%d2
-        move.l  36(%a2,%d2.l),%d6
-        andi.l  #12,%d6
-        beq.s   3f                      | on OT: not an emu voice
-        move.l  %d0,%d2
-        add.l   %d1,%d2                 | the track
-        move.l  %d2,%d6
-        mulu.w  #168,%d6
-        movea.l %d6,%a3
-        lea     (VOICE).l,%a1
-        moveq   #0,%d6
-        tst.b   0(%a1,%a3.l)            | voice +0: 0 = not sounding
-        bne.s   2f
-        move.l  #0x80000000,%d6         | silent: before every sounding voice
-2:      lea     vg_stamp(%pc),%a1
-        or.l    0(%a1,%d2.l*4),%d6      | key = silent << 31 | its start stamp
-        cmp.l   %d4,%d6
-        bcs.s   3f                      | older (unsigned)
-        move.l  %d6,%d4
-        move.l  %d1,%d5
-3:      addq.l  #1,%d1
-        moveq   #4,%d2
-        cmp.l   %d2,%d1
-        blt.s   1b
-        tst.l   %d5
-        bmi.s   .vo_out                 | every emu voice on OT already
-        moveq   #40,%d2
-        mulu.w  %d5,%d2
-        lea     36(%a2,%d2.l),%a1       | -> the victim's increment
-        move.l  (%a1),%d6
-        move.l  %d6,%d1
-        andi.l  #12,%d1                 | its engine << 2 (1 or 2)
-        lea     vg_engp(%pc),%a0
-        sub.l   0(%a0,%d1.l),%d7
-        subq.l  #4,%d6                  | one engine down (bits 2-3 only)
-        move.l  %d6,(%a1)
-        subq.l  #4,%d1
-        add.l   0(%a0,%d1.l),%d7
-        move.l  %d0,%d2
-        add.l   %d5,%d2
-        lea     vg_down(%pc),%a0
-        moveq   #1,%d1
-        move.b  %d1,0(%a0,%d2.l)        | its readout shows it
-        cmp.l   %d3,%d7
-        bgt     .vo_pick
-.vo_out:
-        move.l  %d7,(vg_est).l
-        movem.l (%sp),%d2/%d4-%d6/%a3/%a5
-        lea     24(%sp),%sp
-        move.l  36(%a3),%d6             | this track's engine, perhaps stepped down
-        lsr.l   #2,%d6
-        moveq   #3,%d1
-        and.l   %d1,%d6
-        rts
-
-| vg_latch: a new sound starts on the track. d1 = the engine EMUS asks for, d6 = the
-| engine its old sound had, d2 = track (vg_core ran for this frame). -> d1 = the engine
-| the new sound gets: while the core's estimate with it would exceed the budget, the next
-| cheaper one (SP12 -> S950 -> OT); OT when even that does not fit (stock FX alone). The
-| start is stamped (the step-down order); vg_down[t] = stepped down.
-| Uses d0, d3, d5, d7, a0, a1.
-vg_latch:
-        moveq   #0,%d5                  | stepped down?
-        move.l  %d2,%d0
-        andi.l  #4,%d0
-        lea     vg_free(%pc),%a0
-        tst.b   0(%a0,%d0.l)
-        bne.s   .vl_ok                  | room for four SP12 voices on this core
-        lea     vg_engp(%pc),%a0
-        move.l  %d6,%d3
-        lsl.l   #2,%d3
-        move.l  (vg_est).l,%d7
-        sub.l   0(%a0,%d3.l),%d7        | the core without the old sound
-        lea     vg_budget(%pc),%a1
-        move.l  0(%a1,%d0.l),%d0        | its budget
-1:      move.l  %d1,%d3
-        lsl.l   #2,%d3
-        move.l  0(%a0,%d3.l),%d3
-        add.l   %d7,%d3                 | ... with the new sound on engine d1
-        cmp.l   %d0,%d3
-        ble.s   2f
-        tst.l   %d1
-        beq.s   2f                      | OT: nothing cheaper
-        subq.l  #1,%d1
-        moveq   #1,%d5
-        bra.s   1b
-2:      move.l  %d3,(vg_est).l
-.vl_ok:
-        lea     vg_down(%pc),%a0
-        move.b  %d5,0(%a0,%d2.l)
-        lea     vg_clock(%pc),%a0
-        move.l  (%a0),%d3
-        addq.l  #1,%d3
-        bclr    #31,%d3                 | 31 bits: bit 31 of a key marks a silent voice
-        move.l  %d3,(%a0)
-        lea     vg_stamp(%pc),%a0
-        move.l  %d3,0(%a0,%d2.l*4)
-        rts
-
-| vg_mark: the readout's marker (draw path only; spec §6a item 1). d1 = track, d0 = the
-| EMUS setting's index (= its engine), a1 = the formatter. While the guard has stepped this
-| track down and it plays a cheaper engine than the setting, a1 = the marked formatter of
-| the engine it PLAYS (emus_fmt_ot_dn / emus_fmt_s95_dn: OT! / S95!). d0 is left alone: the
-| dial stays on the user's choice, only the readout changes. Uses d2, a0.
-vg_mark:
-        lea     vg_down(%pc),%a0
-        tst.b   0(%a0,%d1.l)
-        beq.s   1f
-        moveq   #40,%d2
-        mulu.w  %d1,%d2
-        lea     (RENDER+36).l,%a0
-        move.l  0(%a0,%d2.l),%d2        | its increment, as the frame hook left it
-        lsr.l   #2,%d2
-        andi.l  #3,%d2                  | the engine it plays
-        cmp.l   %d0,%d2
-        bcc.s   1f                      | not below the setting (a pending EMUS change
-                                        | is not a step-down)
-        lea     emus_fmt_ot_dn(%pc),%a1
-        tst.l   %d2
-        beq.s   1f
-        lea     emus_fmt_s95_dn(%pc),%a1
-1:      rts
 
 | d0 = an EMUS value (signed byte) -> d0 = its stop index: 0 OT (..42 and any
 | negative), 1 S950 (43..85), 2 SP12 (86..). Keeps everything else.
@@ -714,17 +483,8 @@ attr_up:
 2:      moveq   #3,%d1
         cmp.l   %d1,%d0
         bne.s   .au_out                 | VARI and anything unknown: no change
-| BEAT -> VARI: tracks under AUTO playing this sample may enter VARI. The gates before,
-| the edit, the poll (their domains swap), then each track that entered asks for its EMUS
-| engine (vg_entered: the toast if it does not fit, spec §6a item 2). A key handler.
-        bsr     vg_gates
-        move.l  %d0,-(%sp)
-        moveq   #VARI,%d0
-        move.l  %d0,0x110(%a0)
-        bsr     rp_refresh
-        move.l  (%sp)+,%d0
-        bsr     vg_entered
-        jmp     (ATTR_TAIL_UP).l
+        moveq   #VARI,%d0               | BEAT -> VARI (tracks under AUTO on this sample enter
+                                        | VARI: the guard's safety net checks their cores)
 .au_st: move.l  %d0,0x110(%a0)
 .au_out:
         bsr     rp_refresh
@@ -799,9 +559,7 @@ emus_widget:
 1:      lea     emus_fmt(%pc),%a1
         tst.l   %d0
         bmi.s   .ew_frame               | an empty cell keeps the bare frame
-        bsr     emus_idx
-        bsr     vg_mark                 | stepped down by the load guard: the readout
-                                        | shows what it plays, the dial keeps the choice
+        bsr     emus_idx                | the readout is the stored value: what plays
         lea     emus_stops(%pc),%a0
         mvz.b   0(%a0,%d0.l),%d0
 .ew_frame:
@@ -831,17 +589,6 @@ live_tsns:
         move.l  (%sp)+,%d1
         rts
 
-| emus_fmt_ot_dn(buf, v) / emus_fmt_s95_dn(buf, v): the readout while the load guard has
-| the track on a cheaper engine than its EMUS setting: the engine it plays, marked, within
-| the readout's width (OT! / S95!). v is the setting's stop (the dial stays on it).
-emus_fmt_ot_dn:
-        lea     str_ot_dn(%pc),%a0
-        bra.s   1f
-emus_fmt_s95_dn:
-        lea     str_s95_dn(%pc),%a0
-1:      move.l  %a0,8(%sp)
-        jmp     (SPRINTF).l
-
 | emus_fmt(buf, v): OT / S950 / SP12 by bucket; a negative value "???".
 emus_fmt:
         move.l  8(%sp),%d0
@@ -866,12 +613,12 @@ emus_fmt:
 | (em_tally) belongs to one track / machine / part (em_ctx) and restarts when that
 | changes or SRC SETUP opens (emus_open). The return is (stop - old), so P2EDIT
 | stores the stop itself (a non-stop value snaps to its bucket's stop on the first
-| detent). A move to a new stop whose engine does not fit the track's DSP core now
-| raises the toast (vg_ask, spec §6a item 2). TSTR (slot 4) keeps stock's conversion; a
-| step that puts the track on VARI asks for its parked EMUS engine the same way
-| (.ep_tstr). Everything else: stock's conversion. P2EDIT's own registers (d2 = old
-| value, d3, d4, d5, a2-a5) are kept: C ABI, d0/d1/a0/a1 only. This is P2EDIT, the
-| SRC SETUP page's encoder handler (UI task), where the toast is legal.
+| detent). The DSP load guard (spec §6b item 2): a move toward a dearer engine stops at
+| the highest stop whose engine fits the track's DSP core (vg_cap), and flags the toast
+| if it stopped short; a move toward a cheaper one is always allowed. Everything else
+| (TSTR included: the guard's safety net sees a track entering VARI): stock's conversion.
+| P2EDIT's own registers (d2 = old value, d3, d4, d5, a2-a5) are kept: C ABI, d0/d1/a0/a1
+| only. This is P2EDIT, the SRC SETUP page's encoder handler (UI task).
 emus_p2step:
         move.l  (PAGE_M).l,%d0
         moveq   #1,%d1
@@ -880,9 +627,6 @@ emus_p2step:
         moveq   #TSNS_SLOT2,%d0
         cmp.l   4(%sp),%d0
         beq.s   1f
-        moveq   #TSTR_SLOT2,%d0
-        cmp.l   4(%sp),%d0
-        beq     .ep_tstr
 .ep_stock:
         jmp     (ACCUM).l
 1:      move.l  8(%sp),-(%sp)           | stock's accumulator first: it keeps its own
@@ -963,8 +707,8 @@ emus_p2step:
         ble.s   9f
         move.l  %d4,%d0
 9:      cmp.l   %d3,%d0
-        beq.s   9f
-        bsr     vg_ask                  | a new stop: the toast if its engine does not fit
+        ble.s   9f                      | the same stop, or a cheaper one: always allowed
+        bsr     vg_cap                  | dearer: the highest stop up to it that fits
 9:      lea     emus_stops(%pc),%a0
         mvz.b   0(%a0,%d0.l),%d0
         sub.l   (%sp),%d0               | - P2EDIT's old value (its d2): P2EDIT adds
@@ -976,45 +720,6 @@ emus_p2step:
 .ep_out:
         rts
 
-| TSTR (slot 4) on ST / FL: stock's steps, unchanged. When they take the track onto VARI
-| (its gate off now, on with the new TSTR -- VARI, or AUTO on a VARI sample), ask for the
-| engine its parked EMUS names (vg_ask: the toast if it does not fit). The new value is
-| P2EDIT's own: old (d2) + steps, clamped to the five positions.
-.ep_tstr:
-        move.l  8(%sp),-(%sp)
-        move.l  8(%sp),-(%sp)
-        jsr     (ACCUM).l               | d0 = the steps
-        addq.l  #8,%sp
-        tst.l   %d0
-        beq.s   .et_out
-        lea     -12(%sp),%sp
-        movem.l %d0/%d2-%d3,(%sp)
-        add.l   %d2,%d0                 | the new TSTR
-        bpl.s   1f
-        moveq   #0,%d0
-1:      moveq   #VARI,%d1
-        cmp.l   %d1,%d0
-        ble.s   2f
-        move.l  %d1,%d0
-2:      move.l  %d0,%d3
-        moveq   #0,%d1
-        move.b  (UI_TRACK).l,%d1
-        move.l  (PAGE_M).l,%d2
-        bsr     rp_swap_ui              | settle the domain first (as the EMUS path does)
-        btst    #1,%d0
-        bne.s   3f                      | on VARI already: not entering it
-        move.l  %d3,%d0
-        bsr     rp_gate_v
-        tst.l   %d0
-        beq.s   3f                      | the new TSTR does not put it on VARI
-        bsr     db_park2                | its EMUS, parked until the swap
-        bsr     emus_idx
-        bsr     vg_ask
-3:      movem.l (%sp),%d0/%d2-%d3
-        lea     12(%sp),%sp
-.et_out:
-        rts
-
 | emus_open: `jsr` redirected from SRC SETUP's open (0x400585f4, stock `jsr 0x400326d4`,
 | the page's encoder set-up). It runs at every open of the page: entering it, and the
 | re-open a track change makes. A half-turned EMUS count never carries over.
@@ -1023,154 +728,559 @@ emus_open:
         jmp     (ENC_SETUP).l
 
 | ---------------------------------------------------------------------------
-| THE GUARD'S TOAST (spec §6a item 2). UI TASK ONLY: called from P2EDIT (emus_p2step,
-| an encoder handler) and the ATTR value-up key handler (attr_up), never from the frame
-| path (vem_frame / vg_core / vg_latch call none of this). The guard acting on its own
-| (vg_core's step-down, vg_latch's grant) raises nothing.
-|
-| vg_room: d1 = track -> d0 = the room its DSP core has for that track's engine now, in
-| the guard's own model and units (VG_*): budget - (base + the core's FX1 / FX2 prices +
-| the engine each OTHER ST / FL track of the core carries, render state +36 bits 2-3, as
-| vg_core counts them). Read fresh from the live state (the frame hook's own sums are
-| kept only while a VARI track plays on that core). Keeps everything but d0.
+| THE DSP LOAD GUARD (spec §6b and "6b, simplified"; constants: VG_* above; IMPL §12).
+| The load of a DSP core is a property of the SETTINGS: base + the prices of its four
+| tracks' FX1 / FX2 types (the current Part's bytes) + the engine of each of its tracks
+| that is a VARI track whose EMUS is S950 / SP12 (vg_scan, vg_est). Nothing here looks at
+| playback, and nothing steps a playing voice down: the engine latch at the trig is the
+| frame hook's, unchanged. The guard keeps the settings within the budget instead:
+|   * two refusals, at their UI handlers: EMUS turned toward an engine that does not fit
+|     stops at the highest stop that fits (vg_cap, from P2EDIT); an FX type that does not
+|     fit, when emulated engines are what tip the core over, does not land (vg_fx_try,
+|     from the FX choosers' YES);
+|   * one safety net (vg_tick -> vg_fix): however a core got over its budget -- a Part
+|     change or reload, a project or bank load (old projects included), a machine change,
+|     a paste, a sample or tempo change that turns a gate on, TSTR / ATTR onto VARI --
+|     just enough of its tracks get EMUS = OT, SP12 first, then S950, highest track number
+|     first. It runs in the UI task's message loop, and only when a cheap signature of the
+|     estimate's inputs (vg_sig) differs from the last one checked;
+|   * the toast MAX DSP: EMU LIMIT (1.2 s) is raised there too, the one NOTIFY: right after
+|     the UI handler that caused it, or at the next UI message (a tick at 60 Hz) when the
+|     cause was not the UI's (a sequencer Part switch). Never from the frame path.
+| The frame hook gains nothing: no per-frame estimate, no step-down, no toast.
+
+| vg_scan: vg_eng[t] = the DSP engine track t's settings run (0 OT / 1 S950 / 2 SP12), for
+| the current Part: 0 unless its current machine is ST / FL, that machine's gate is on
+| (rp_gate_m: VARI, or AUTO on a VARI sample, the sample's tempo in range) and the project
+| tempo is in range; then the engine of its EMUS value -- in the TSNS slot, or in the park
+| while the swap is still to come (rp_prev[2t+m] == 0: the gate came on since the last
+| poll). Keeps every register.
+vg_scan:
+        lea     -24(%sp),%sp
+        movem.l %d0-%d3/%a0-%a1,(%sp)
+        bsr     rp_sync                 | rp_prev must describe this Part
+        lea     vg_eng(%pc),%a1
+        clr.l   (%a1)
+        clr.l   4(%a1)
+        move.l  (TEMPO24).l,%d0
+        cmpi.l  #BPM24_MIN,%d0
+        blt.s   .vs_out                 | the project tempo out of range: every VARI track
+        cmpi.l  #BPM24_MAX,%d0          |   plays as OFF, no engine anywhere
+        bgt.s   .vs_out
+        moveq   #0,%d1
+1:      bsr     db_mach                 | d2 = m
+        moveq   #1,%d0
+        cmp.l   %d0,%d2
+        bhi.s   3f                      | not ST / FL
+        bsr     rp_gate_m
+        tst.l   %d0
+        beq.s   3f
+        lea     rp_prev(%pc),%a0
+        move.l  %d1,%d0
+        add.l   %d0,%d0
+        add.l   %d2,%d0
+        tst.b   0(%a0,%d0.l)
+        bne.s   2f
+        bsr     db_park2                | the swap still to come: EMUS is parked
+        bra.s   4f
+2:      bsr     db_tsns
+4:      bsr     emus_idx
+        move.b  %d0,0(%a1,%d1.l)
+3:      addq.l  #1,%d1
+        moveq   #8,%d0
+        cmp.l   %d0,%d1
+        blt.s   1b
+.vs_out:
+        movem.l (%sp),%d0-%d3/%a0-%a1
+        lea     24(%sp),%sp
+        rts
+
+| vg_fxsum: d0 = g (0: T1-T4, DSP core 1 / 4: T5-T8, core 0) -> d0 = the prices of the
+| current Part's FX1 and FX2 types on the core's four tracks. Keeps all but d0.
+vg_fxsum:
+        lea     -16(%sp),%sp
+        movem.l %d1-%d2/%a0-%a1,(%sp)
+        bsr     part_base
+        adda.l  #OFF_FX1,%a0
+        adda.l  %d0,%a0                 | -> FX1 of the core's first track (FX2 at + 8)
+        lea     vg_fxp(%pc),%a1
+        moveq   #0,%d0
+        moveq   #3,%d2
+1:      mvz.b   (%a0),%d1
+        andi.l  #0x1f,%d1
+        add.l   %d1,%d1
+        mvz.w   0(%a1,%d1.l),%d1
+        add.l   %d1,%d0
+        mvz.b   8(%a0),%d1
+        andi.l  #0x1f,%d1
+        add.l   %d1,%d1
+        mvz.w   0(%a1,%d1.l),%d1
+        add.l   %d1,%d0
+        addq.l  #1,%a0
+        subq.l  #1,%d2
+        bpl.s   1b
+        movem.l (%sp),%d1-%d2/%a0-%a1
+        lea     16(%sp),%sp
+        rts
+
+| vg_est: d0 = g -> d0 = the core's estimate: base + its FX + the engines vg_scan left in
+| vg_eng for its four tracks. Keeps all but d0.
+vg_est:
+        lea     -20(%sp),%sp
+        movem.l %d1-%d3/%a0-%a1,(%sp)
+        move.l  %d0,%d3
+        bsr     vg_fxsum
+        lea     vg_base(%pc),%a0
+        add.l   0(%a0,%d3.l),%d0
+        lea     vg_eng(%pc),%a0
+        adda.l  %d3,%a0
+        lea     vg_engp(%pc),%a1
+        moveq   #3,%d2
+1:      mvz.b   (%a0)+,%d1
+        lsl.l   #2,%d1
+        add.l   0(%a1,%d1.l),%d0
+        subq.l  #1,%d2
+        bpl.s   1b
+        movem.l (%sp),%d1-%d3/%a0-%a1
+        lea     20(%sp),%sp
+        rts
+
+| vg_room: d1 = track -> d0 = the room its core has for its engine: the budget minus the
+| estimate without that track's own engine. Interrupts masked across. Keeps all but d0.
 vg_room:
+        lea     -16(%sp),%sp
+        movem.l %d1-%d3/%a0,(%sp)
+        move.w  %sr,%d3
+        move.w  #0x2700,%sr
+        bsr     vg_scan
+        move.l  %d1,%d2
+        andi.l  #4,%d2                  | g
+        move.l  %d2,%d0
+        bsr     vg_est
+        lea     vg_eng(%pc),%a0
+        mvz.b   0(%a0,%d1.l),%d1
+        lsl.l   #2,%d1
+        lea     vg_engp(%pc),%a0
+        sub.l   0(%a0,%d1.l),%d0        | the core without this track's engine
+        lea     vg_budget(%pc),%a0
+        move.l  0(%a0,%d2.l),%d1
+        sub.l   %d0,%d1
+        move.l  %d1,%d0
+        move.w  %d3,%sr
+        movem.l (%sp),%d1-%d3/%a0
+        lea     16(%sp),%sp
+        rts
+
+| d0 = the project tempo's state: Z set when it is in 30..300 BPM. Keeps all but d0.
+vg_tempo_ok:
+        move.l  (TEMPO24).l,%d0
+        cmpi.l  #BPM24_MIN,%d0
+        blt.s   1f
+        cmpi.l  #BPM24_MAX,%d0
+        bgt.s   1f
+        moveq   #0,%d0
+        rts
+1:      moveq   #1,%d0
+        rts
+
+| vg_cap (P2EDIT, the EMUS step, spec §6b item 2): d0 = the stop asked for, dearer than d3
+| = the stop EMUS is on now, d1 = track -> d0 = the highest stop from d3 up to it whose
+| engine fits the track's core (the room vg_room leaves). Stopped short: the toast is
+| flagged. A project tempo out of range: the track is no VARI track (no engine), granted.
+| Keeps all but d0.
+vg_cap:
+        lea     -20(%sp),%sp
+        movem.l %d1-%d4/%a0,(%sp)
+        move.l  %d0,%d2
+        bsr     vg_tempo_ok
+        bne.s   3f
+        bsr     vg_room                 | d0 = room
+        lea     vg_engp(%pc),%a0
+1:      cmp.l   %d3,%d2
+        ble.s   3f                      | back on the stop it is on: it stays there
+        move.l  %d2,%d4
+        lsl.l   #2,%d4
+        cmp.l   0(%a0,%d4.l),%d0
+        bge.s   3f                      | fits
+        subq.l  #1,%d2
+        moveq   #1,%d4
+        move.b  %d4,(vg_toast).l        | refused (as far as it went): MAX DSP: EMU LIMIT
+        bra.s   1b
+3:      move.l  %d2,%d0
+        movem.l (%sp),%d1-%d4/%a0
+        lea     20(%sp),%sp
+        rts
+
+| vg_fix: d0 = the tracks it may step (bit t). The current Part: while a core's estimate
+| is over its budget, the next track of that core -- SP12 first, then S950, highest track
+| number first, within the mask -- gets EMUS = OT (vg_step_ot): just enough (spec §6b
+| item 3). Stock FX alone over the budget: every emu track of the core steps, then
+| nothing more. -> d0 = 1 when it stepped anything (the toast flagged), else 0.
+| Interrupts masked inside (the frame hook's swaps and this never interleave); nothing
+| while a bulk write holds the Part (vem_depth: the net runs after it). Data writes only.
+| Keeps all but d0.
+vg_fix:
+        lea     -36(%sp),%sp
+        movem.l %d1-%d7/%a0-%a1,(%sp)
+        move.w  %sr,%d7
+        move.w  #0x2700,%sr
+        move.l  %d0,%d6                 | the mask
+        moveq   #0,%d5                  | stepped?
+        tst.b   (vem_depth).l
+        bne.s   .vx_out
+        bsr     vg_scan
+        lea     vg_eng(%pc),%a0
+        lea     vg_budget(%pc),%a1
+        moveq   #0,%d4                  | g = 0 (core 1), then 4 (core 0)
+.vx_core:
+        move.l  %d4,%d0
+        bsr     vg_est
+        cmp.l   0(%a1,%d4.l),%d0
+        ble.s   .vx_next                | fits
+        moveq   #2,%d3                  | SP12 first, then S950
+1:      moveq   #3,%d2                  | the core's highest track first
+2:      move.l  %d4,%d1
+        add.l   %d2,%d1
+        btst    %d1,%d6
+        beq.s   3f
+        mvz.b   0(%a0,%d1.l),%d0
+        cmp.l   %d3,%d0
+        beq.s   4f
+3:      subq.l  #1,%d2
+        bpl.s   2b
+        subq.l  #1,%d3
+        bne.s   1b
+        bra.s   .vx_next                | no emu track left to step
+4:      bsr     vg_step_ot              | d1 = t
+        clr.b   0(%a0,%d1.l)
+        moveq   #1,%d5
+        bra.s   .vx_core
+.vx_next:
+        addq.l  #4,%d4
+        moveq   #8,%d0
+        cmp.l   %d0,%d4
+        blt.s   .vx_core
+        tst.l   %d5
+        beq.s   .vx_out
+        move.b  %d5,(vg_toast).l
+.vx_out:
+        move.w  %d7,%sr
+        move.l  %d5,%d0
+        movem.l (%sp),%d1-%d7/%a0-%a1
+        lea     36(%sp),%sp
+        rts
+
+| vg_step_ot: d1 = track: its EMUS becomes OT (stored 1) in the current Part, where it
+| lives now: the TSNS slot of its current machine, or that machine's park while the swap
+| into VARI is still to come (rp_prev 0). The working DB and its SRAM copy with the
+| writer's dirty flags, as the swap writes them; the live byte too when the slot holds it
+| and the live bytes are this Part's (APPLIED_B / APPLIED_P: during a sequencer Part switch
+| the UI task moves PART_B a step before the frame applies the new Part). The swap's own
+| rules then keep PTCH/QUAN and TSNS/EMUS consistent. Keeps every register.
+vg_step_ot:
+        lea     -28(%sp),%sp
+        movem.l %d0-%d3/%a0-%a2,(%sp)
+        bsr     db_mach                 | d2 = m
+        bsr     part_base               | a0 = the Part's block
+        moveq   #0,%d0
+        move.b  (PART_B).l,%d0
+        move.l  #PART_STRIDE,%d3
+        mulu.l  %d3,%d0
+        lea     (SHADOW_ADJ).l,%a1
+        adda.l  %d0,%a1                 | a1 = its SRAM copy
+        moveq   #30,%d3
+        mulu.l  %d1,%d3
+        addi.l  #OFF_P2,%d3             | d3 = the track's page-2 row
+        lea     rp_prev(%pc),%a2
+        move.l  %d1,%d0
+        add.l   %d0,%d0
+        add.l   %d2,%d0
+        tst.b   0(%a2,%d0.l)
+        bne.s   1f
+        addi.l  #PARK2_ST,%d3           | the park
+        tst.l   %d2
+        beq.s   2f
+        subq.l  #PARK2_ST-PARK2_FL,%d3
+2:      moveq   #1,%d0
+        move.b  %d0,0(%a0,%d3.l)
+        move.b  %d0,0(%a1,%d3.l)
+        bra.s   3f
+1:      move.l  %d2,%d0                 | the slot
+        add.l   %d0,%d0
+        add.l   %d2,%d0
+        add.l   %d0,%d0                 | 6m
+        add.l   %d0,%d3
+        addq.l  #TSNS_SLOT2,%d3
+        moveq   #1,%d0
+        move.b  %d0,0(%a0,%d3.l)
+        move.b  %d0,0(%a1,%d3.l)
+        moveq   #0,%d0                  | the live bytes' Part: APPLIED_B / APPLIED_P
+        move.b  (APPLIED_B).l,%d0
+        move.l  #BANK_STRIDE,%d2
+        mulu.l  %d2,%d0
+        addi.l  #BANK0_DB,%d0
+        moveq   #0,%d2
+        move.b  (APPLIED_P).l,%d2
+        move.l  #PART_STRIDE,%d3
+        mulu.l  %d3,%d2
+        add.l   %d2,%d0
+        cmpa.l  %d0,%a0
+        bne.s   3f                      | another Part's live bytes: the apply brings ours
+        move.l  %d1,%d0
+        lsl.l   #3,%d0
+        move.l  %d1,%d2
+        lsl.l   #6,%d2
+        add.l   %d2,%d0                 | 72t
+        lea     (LIVE_P2+TSNS_SLOT2).l,%a2
+        moveq   #1,%d2
+        move.b  %d2,0(%a2,%d0.l)        | the live EMUS byte: the next trig latches OT
+3:      move.b  (PART_B).l,%d0          | the writer's own dirty flags (as the swap's)
+        movea.l (DB_PTR).l,%a1
+        movea.l %a1,%a0
+        adda.l  #DIRTY_PARTS,%a0
+        bset    %d0,(%a0)
+        lea     (DIRTY_SRAM).l,%a0
+        bset    %d0,(%a0)
+        moveq   #1,%d3
+        movea.l %a1,%a0
+        adda.l  #DIRTY_DB2,%a0
+        move.l  %d3,(%a0)
+        lea     (DIRTY_GLOBAL).l,%a0
+        move.l  %d3,(%a0)
+        movem.l (%sp),%d0-%d3/%a0-%a2
+        lea     28(%sp),%sp
+        rts
+
+| vg_fx_try (the FX choosers' YES, spec §6b item 2): d0 = 0 FX1 / 8 FX2, a0 -> its cursor
+| row, a1 -> its rows. -> d0 = 1 (refused, the toast flagged) when the type under the
+| cursor would put the panel track's core over the budget AND emulated engines are what
+| tip it (the core's base + FX with the new type alone fits); else 0 (stock applies it).
+| The same type as now: 0 (stock does nothing). Keeps all but d0.
+vg_fx_try:
         lea     -28(%sp),%sp
         movem.l %d1-%d5/%a0-%a1,(%sp)
-        move.l  %d1,%d4                 | the asking track
-        move.l  %d1,%d2
-        andi.l  #4,%d2                  | g = 0 (T1-T4, core 1) / 4 (T5-T8, core 0)
-        lea     vg_budget(%pc),%a0
-        move.l  0(%a0,%d2.l),%d0
-        lea     vg_base(%pc),%a0
-        sub.l   0(%a0,%d2.l),%d0        | budget - base
-        moveq   #0,%d3                  | k = 0..3: track g + k
-1:      lea     vg_fxp(%pc),%a0
-        lea     (FX1_IDS).l,%a1
-        adda.l  %d2,%a1
-        mvz.b   0(%a1,%d3.l),%d1        | FX1
+        move.l  (%a0),%d1
+        lsl.l   #2,%d1
+        movea.l 0(%a1,%d1.l),%a1
+        move.l  (%a1),%d1               | the new type id (stock reads it so)
+        move.l  %d0,%d4
+        moveq   #0,%d2
+        move.b  (UI_TRACK).l,%d2
+        bsr     part_base
+        adda.l  #OFF_FX1,%a0
+        adda.l  %d4,%a0
+        mvs.b   0(%a0,%d2.l),%d3        | the type now (stock compares so)
+        moveq   #0,%d0
+        cmp.l   %d3,%d1
+        beq.s   .ft_out                 | the same: stock returns at once
+        move.w  %sr,%d5
+        move.w  #0x2700,%sr
+        bsr     vg_scan
+        move.l  %d2,%d4
+        andi.l  #4,%d4                  | g
+        move.l  %d4,%d0
+        bsr     vg_fxsum
+        lea     vg_fxp(%pc),%a1
+        andi.l  #0x1f,%d3
+        add.l   %d3,%d3
+        mvz.w   0(%a1,%d3.l),%d3
+        sub.l   %d3,%d0
         andi.l  #0x1f,%d1
         add.l   %d1,%d1
-        mvz.w   0(%a0,%d1.l),%d1
-        sub.l   %d1,%d0
-        mvz.b   8(%a1,%d3.l),%d1        | FX2
-        andi.l  #0x1f,%d1
-        add.l   %d1,%d1
-        mvz.w   0(%a0,%d1.l),%d1
-        sub.l   %d1,%d0
-        move.l  %d2,%d5
-        add.l   %d3,%d5                 | the track
-        cmp.l   %d4,%d5
-        beq.s   2f                      | the asker: the caller prices the engine it asks for
-        move.l  (FRAME_IDX).l,%d1
-        andi.l  #1,%d1
-        lsl.l   #3,%d1
-        add.l   %d5,%d1
-        lea     (MACH_RT).l,%a1
-        mvz.b   0(%a1,%d1.l),%d1
-        moveq   #1,%d5
-        cmp.l   %d5,%d1
-        bhi.s   2f                      | not ST / FL: renders no engine
-        move.l  %d2,%d5
-        add.l   %d3,%d5
-        move.l  %d5,%d1
-        lsl.l   #3,%d1                  | 8 t
-        lsl.l   #5,%d5                  | 32 t
-        add.l   %d5,%d1                 | 40 t
-        lea     (RENDER+36).l,%a1
-        move.l  0(%a1,%d1.l),%d1
-        andi.l  #12,%d1                 | its engine << 2
+        mvz.w   0(%a1,%d1.l),%d1
+        add.l   %d1,%d0                 | the core's FX with the new type
+        lea     vg_base(%pc),%a1
+        add.l   0(%a1,%d4.l),%d0
+        lea     vg_budget(%pc),%a1
+        move.l  0(%a1,%d4.l),%d3
+        cmp.l   %d3,%d0
+        bgt.s   2f                      | stock FX alone over: nothing is refused
+        lea     vg_eng(%pc),%a0
+        adda.l  %d4,%a0
         lea     vg_engp(%pc),%a1
-        sub.l   0(%a1,%d1.l),%d0
-2:      addq.l  #1,%d3
-        moveq   #4,%d1
-        cmp.l   %d1,%d3
-        blt     1b
+        moveq   #3,%d2
+1:      mvz.b   (%a0)+,%d1
+        lsl.l   #2,%d1
+        add.l   0(%a1,%d1.l),%d0
+        subq.l  #1,%d2
+        bpl.s   1b
+        cmp.l   %d3,%d0
+        ble.s   2f                      | fits
+        moveq   #1,%d0
+        move.b  %d0,(vg_toast).l
+        bra.s   3f
+2:      moveq   #0,%d0
+3:      move.w  %d5,%sr
+.ft_out:
         movem.l (%sp),%d1-%d5/%a0-%a1
         lea     28(%sp),%sp
         rts
 
-| vg_ask: d1 = track, d0 = the engine the user's own action asks for (0 OT / 1 S950 /
-| 2 SP12). When it would engage a DSP engine (S950 / SP12, project tempo in 30..300 BPM)
-| and the core cannot fit it now -- its estimate with this track counted on that engine
-| over the budget -- toast the engine the guard would use instead, the next cheaper one
-| that fits (vg_latch's rule): "MAX DSP: S950 USED" or "MAX DSP: OT USED". Keeps every
-| register.
-vg_ask:
-        lea     -20(%sp),%sp
-        movem.l %d0-%d2/%a0-%a1,(%sp)
+| The FX choosers' YES handlers (0x400526e4 FX1, 0x40052474 FX2; key handlers, UI task):
+| the type is applied only when it fits (vg_fx_try). Refused: nothing changes, the chooser
+| stays open on it, the toast shows from the loop tail.
+vh_fx1:
+        moveq   #0,%d0
+        lea     (FX1_CURSOR).l,%a0
+        lea     (FX1_LIST).l,%a1
+        bsr     vg_fx_try
         tst.l   %d0
-        beq.s   .va_out                 | OT: no DSP engine, always fits
-        move.l  (TEMPO24).l,%d2
-        cmpi.l  #BPM24_MIN,%d2
-        blt.s   .va_out                 | out of range: the track plays as OFF, no engine
-        cmpi.l  #BPM24_MAX,%d2
-        bgt.s   .va_out
-        move.l  %d0,%d2                 | d2 = the engine the guard would use
-        bsr     vg_room
-        lea     vg_engp(%pc),%a0
-1:      move.l  %d2,%d1
-        lsl.l   #2,%d1
-        cmp.l   0(%a0,%d1.l),%d0
-        bge.s   2f                      | it fits
-        subq.l  #1,%d2
-        bne.s   1b                      | OT: nothing cheaper
-2:      cmp.l   (%sp),%d2
-        beq.s   .va_out                 | the engine asked for fits: nothing to say
-        lea     str_max_ot(%pc),%a0
-        tst.l   %d2
+        beq.s   vb_fx1
+        rts
+vb_fx1:
+        lea     -68(%sp),%sp            | displaced
+        movem.l %d2-%d7/%a2-%fp,(%sp)   | displaced
+        jmp     (0x400526ec).l
+vh_fx2:
+        moveq   #8,%d0
+        lea     (FX2_CURSOR).l,%a0
+        lea     (FX2_LIST).l,%a1
+        bsr     vg_fx_try
+        tst.l   %d0
+        beq.s   vb_fx2
+        rts
+vb_fx2:
+        lea     -68(%sp),%sp            | displaced
+        movem.l %d2-%d7/%a2-%fp,(%sp)   | displaced
+        jmp     (0x4005247c).l
+
+| vg_tick: `jmp` from 0x40062d1c, the UI task's message-loop tail (C, stock: every message
+| the UI task takes -- keys, encoders, and DTIM1's 60 Hz tick, type 5 -- ends here, at one
+| stack depth, no handler in flight; stock's own message cases 27/29/31 raise NOTIFY at
+| this level and branch here). The safety net: when the inputs' signature differs from
+| the last one checked, vg_fix. Then the toast when flagged (a refusal in the handler that
+| just ran, or the net): MAX DSP: EMU LIMIT, 1.2 s. The ONLY NOTIFY of this unit.
+| d0/d1/a0/a1 are free at this point (the loop's next act is a call); the rest is kept.
+vg_tick:
+        tst.l   (DB_PTR).l
+        beq.s   2f                      | no bank blob yet (early boot)
+        tst.b   (vem_depth).l
+        bne.s   2f                      | a bulk write holds the Part (not the UI task's)
+        bsr     vg_sig
+        cmp.l   (vg_last).l,%d0
+        beq.s   2f                      | nothing the estimate reads has changed
+        move.l  %d0,(vg_last).l
+        moveq   #-1,%d0
+        bsr     vg_fix
+        tst.l   %d0
+        beq.s   2f
+        bsr     vg_sig                  | it stepped: the signature of the fixed settings
+        move.l  %d0,(vg_last).l
+2:      tst.b   (vg_toast).l
         beq.s   3f
-        lea     str_max_s950(%pc),%a0
-3:      moveq   #TOAST_DUR,%d0
-        move.l  %d0,-(%sp)
-        move.l  %a0,-(%sp)
-        jsr     (NOTIFY).l              | NOTIFY(text, 0x30): self-timing, closes itself
+        clr.b   (vg_toast).l
+        pea     (TOAST_DUR).w
+        pea     str_emu_limit(%pc)
+        jsr     (NOTIFY).l              | NOTIFY(text, 0x48): self-timing, closes itself
         addq.l  #8,%sp
-.va_out:
-        movem.l (%sp),%d0-%d2/%a0-%a1
-        lea     20(%sp),%sp
-        rts
+3:      tst.l   (UI_FLUSH).l            | displaced: the loop's own test, its beq follows
+        jmp     (UI_TAIL_BACK).l
 
-| vg_gates -> d0 = bit t set: track t's current machine is on VARI in the Part DB
-| (rp_ui_gate). Keeps everything else.
-vg_gates:
-        lea     -8(%sp),%sp
-        movem.l %d1-%d2,(%sp)
-        moveq   #0,%d2
-        moveq   #7,%d1
-1:      bsr     rp_ui_gate
-        tst.l   %d0
-        beq.s   2f
-        bset    %d1,%d2
-2:      subq.l  #1,%d1
+| vg_sig -> d0: a cheap signature of everything vg_scan and vg_est read: the current Part
+| (its block), its 16 FX type bytes, whether the project tempo is in range, and per track
+| its machine and, on ST / FL, that machine's TSTR; when TSTR is AUTO or VARI (the only
+| values that can open the gate) also its sample slot, that sample's TSMODE and tempo, the
+| rp_prev byte, the TSNS slot and the park. h = 33 h + x over them (any one input changing
+| changes it but for a collision). rp_sync first: rp_prev must describe this Part. About
+| 15 instructions per track off AUTO / VARI, 50 on them. Uses d0, d1, a0, a1 (the tail's).
+vg_sig:
+        lea     -20(%sp),%sp
+        movem.l %d2-%d5/%a2,(%sp)
+        bsr     rp_sync
+        bsr     part_base
+        move.l  %a0,%d0                 | h
+        movea.l %a0,%a2
+        adda.l  #OFF_FX1,%a0
+        moveq   #3,%d2
+1:      move.l  %d0,%d1
+        lsl.l   #5,%d0
+        add.l   %d1,%d0
+        add.l   (%a0)+,%d0              | the FX types, four bytes at a time
+        subq.l  #1,%d2
         bpl.s   1b
-        move.l  %d2,%d0
-        movem.l (%sp),%d1-%d2
-        lea     8(%sp),%sp
-        rts
-
-| vg_entered: d0 = vg_gates before a UI edit, called after it (and after the domains were
-| polled, so a track that entered VARI holds its EMUS in the TSNS slot): every track the
-| edit put on VARI asks for its EMUS engine (vg_ask). Keeps every register.
-vg_entered:
-        lea     -16(%sp),%sp
-        movem.l %d0-%d3,(%sp)
-        move.l  %d0,%d3
-        moveq   #0,%d1
-1:      btst    %d1,%d3
-        bne.s   2f                      | on VARI before: not entering
-        bsr     rp_ui_gate
-        tst.l   %d0
+        move.l  %d0,%d2
+        bsr     vg_tempo_ok
+        add.l   %d0,%d2
+        moveq   #0,%d1                  | t
+.sg_t:  move.l  %d2,%d0
+        lsl.l   #5,%d2
+        add.l   %d0,%d2
+        movea.l %a2,%a0
+        adda.l  #OFF_MACH,%a0
+        mvz.b   0(%a0,%d1.l),%d3        | m
+        add.l   %d3,%d2
+        moveq   #1,%d0
+        cmp.l   %d0,%d3
+        bhi     .sg_n                   | not ST / FL
+        moveq   #30,%d4
+        mulu.l  %d1,%d4
+        move.l  %d3,%d0
+        add.l   %d0,%d0
+        add.l   %d3,%d0
+        add.l   %d0,%d0                 | 6m
+        add.l   %d0,%d4
+        movea.l %a2,%a0
+        adda.l  %d4,%a0
+        adda.l  #OFF_P2,%a0             | -> machine m's page-2 row
+        mvz.b   TSTR_SLOT2(%a0),%d0
+        add.l   %d0,%d2
+        moveq   #VARI,%d5
+        cmp.l   %d5,%d0
+        beq.s   1f
+        moveq   #TSTR_AUTO,%d5
+        cmp.l   %d5,%d0
+        bne     .sg_n                   | the gate cannot open
+1:      mvz.b   TSNS_SLOT2(%a0),%d0
+        lsl.l   #8,%d0
+        add.l   %d0,%d2                 | the TSNS / EMUS slot
+        move.l  %d1,%d0
+        lsl.l   #2,%d0
+        add.l   %d1,%d0
+        add.l   %d3,%d0
+        movea.l %a2,%a0
+        adda.l  #OFF_SLOT5,%a0
+        mvz.b   0(%a0,%d0.l),%d0        | the sample slot
+        move.l  %d0,%d5
+        swap    %d0
+        add.l   %d0,%d2
+        move.l  #SET_STRIDE,%d0
+        mulu.l  %d0,%d5
+        lea     (SET_STATIC).l,%a1
+        tst.l   %d3
         beq.s   2f
-        bsr     db_mach                 | d2 = its machine
-        bsr     db_tsns                 | its EMUS
-        bsr     emus_idx
-        bsr     vg_ask
-2:      addq.l  #1,%d1
-        moveq   #7,%d0
+        lea     (SET_FLEX).l,%a1
+2:      adda.l  %d5,%a1
+        move.l  0x110(%a1),%d0          | the sample's TSMODE
+        lsl.l   #4,%d0
+        add.l   %d0,%d2
+        add.l   0x114(%a1),%d2          | its tempo
+        lea     rp_prev(%pc),%a1
+        move.l  %d1,%d0
+        add.l   %d0,%d0
+        add.l   %d3,%d0
+        mvz.b   0(%a1,%d0.l),%d0
+        swap    %d0
+        lsl.l   #8,%d0
+        add.l   %d0,%d2                 | rp_prev
+        movea.l %a2,%a0
+        moveq   #30,%d0
+        mulu.l  %d1,%d0
+        adda.l  %d0,%a0
+        adda.l  #OFF_P2,%a0
+        moveq   #PARK2_ST,%d0
+        tst.l   %d3
+        beq.s   3f
+        moveq   #PARK2_FL,%d0
+3:      mvz.b   0(%a0,%d0.l),%d0
+        lsl.l   #3,%d0
+        add.l   %d0,%d2                 | the park
+.sg_n:  addq.l  #1,%d1
+        moveq   #8,%d0
         cmp.l   %d0,%d1
-        bls.s   1b
-        movem.l (%sp),%d0-%d3
-        lea     16(%sp),%sp
+        blt     .sg_t
+        move.l  %d2,%d0
+        movem.l (%sp),%d2-%d5/%a2
+        lea     20(%sp),%sp
         rts
 
 | d1 = track, d2 = machine -> d0 = the Part's TSNS byte for that machine (signed).
@@ -1477,6 +1587,7 @@ rp_ui_gate:
 rp_swap:
         lea     -12(%sp),%sp
         movem.l %d2-%d3/%a0,(%sp)
+        bsr     rp_sync                 | rp_prev must describe the current Part
         bsr     db_mach                 | d2 = m
         moveq   #1,%d0
         cmp.l   %d0,%d2
@@ -1506,6 +1617,35 @@ rp_swap:
         or.l    %d3,%d0
 .sp_out:
         movem.l (%sp),%d2-%d3/%a0
+        lea     12(%sp),%sp
+        rts
+
+| rp_sync: rp_prev describes one Part (rp_pb / rp_pp: its bank blob and part). When the
+| current Part is another, forget it, so the next poll ADOPTS the new Part as it is. A
+| sequencer Part switch moves PART_B (UI message 20) a step BEFORE the frame applies the
+| new Part, and a bank switch moves the bank pointer (message 21): until VEM5 the frame
+| hook then polled the new Part's bytes against the old Part's rp_prev, read a gate
+| difference as a TSTR change, and SWAPPED the new Part's PTCH/QUAN and TSNS/EMUS (C,
+| ot_emu, IMPL §12). Called by rp_swap, rp_poll_all and the guard (vg_scan, vg_sig).
+| Keeps every register.
+rp_sync:
+        lea     -12(%sp),%sp
+        movem.l %d1-%d2/%a0,(%sp)
+        move.l  (DB_PTR).l,%d1
+        cmp.l   (rp_pb).l,%d1
+        bne.s   1f
+        move.b  (PART_B).l,%d1
+        cmp.b   (rp_pp).l,%d1
+        beq.s   2f
+1:      move.w  %sr,%d2                 | another Part: switch over in one piece (the UI
+        move.w  #0x2700,%sr             | task's call and the frame hook's never interleave)
+        move.l  (DB_PTR).l,%d1
+        move.l  %d1,(rp_pb).l
+        move.b  (PART_B).l,%d1
+        move.b  %d1,(rp_pp).l
+        bsr     rp_forget
+        move.w  %d2,%sr
+2:      movem.l (%sp),%d1-%d2/%a0
         lea     12(%sp),%sp
         rts
 
@@ -1651,8 +1791,6 @@ rp_swap_m:
 .sm_adopt:
         moveq   #0,%d5
 .sm_seen:
-        lea     vg_down(%pc),%a0        | in or out of VARI: no step-down to show
-        clr.b   0(%a0,%d1.l)
         | a change on the panel's track: its captions now (the page's text pass may
         | run before the widget's next poll)
         moveq   #0,%d0
@@ -1703,6 +1841,7 @@ rp_poll_all:
         movem.l %d0-%d4,(%sp)
         move.w  %sr,%d4
         move.w  #0x2700,%sr
+        bsr     rp_sync
         moveq   #0,%d1
 1:      bsr     db_mach
         move.l  %d2,%d0                 | the current machine
@@ -1980,14 +2119,8 @@ str_ot:
         .ascii  "OT\0"
 str_sp12:
         .ascii  "SP12\0"
-str_ot_dn:
-        .ascii  "OT!\0"
-str_s95_dn:
-        .ascii  "S95!\0"
-str_max_s950:                           | the guard's toast (spec §6a): 100 px of the stock
-        .ascii  "MAX DSP: S950 USED\0"   | toast font, box 115 of the screen's 128 (IMPL §11)
-str_max_ot:
-        .ascii  "MAX DSP: OT USED\0"
+str_emu_limit:                          | the guard's toast (spec §6b item 4); its width in
+        .ascii  "MAX DSP: EMU LIMIT\0"  | the stock toast font is measured by the tests (IMPL §12)
 rk_ratios:                              | p, q per QUAN index
         .byte   1,2, 2,3, 3,4, 4,5, 1,1, 5,4, 4,3, 3,2, 2,1
 emus_stops:                             | the stored value per stop: OT, S950, SP12
@@ -2014,25 +2147,22 @@ vg_fxp:                                 | price per stock FX type id 0..31 (half
         .word   VG_FX_PHASER, VG_FX_FLANGER, VG_FX_CHORUS, VG_FX_COMB
         .word   VG_FX_PLATE, VG_FX_SPRING_HERE, VG_FX_DARK, 0
         .word   VG_FX_COMPRESSOR, 0, 0, 0, VG_FX_LOFI, 0, 0, 0
-vg_engp:                                | engine price by increment bits 2-3 (as a byte offset)
-        .long   0, VG_S950, VG_SP12, VG_S950    | (3 is never written; the kernel would run RPS9)
+vg_engp:                                | engine price by engine 0 OT / 1 S950 / 2 SP12 (x 4)
+        .long   0, VG_S950, VG_SP12, VG_S950    | (3 is never stored; the kernel would run RPS9)
 vg_base:                                | by g = 0 (T1-T4, core 1) / 4 (T5-T8, core 0)
         .long   VG_BASE_C1+VG_SC, VG_BASE_C0+VG_SC
 vg_budget:
         .long   VG_BUDGET_C1, VG_BUDGET_C0
-vg_fxc:                                 | per core: FX1 ids, FX2 ids (4 tracks each), their price
-        .long   -1, -1, 0, -1, -1, 0
-vg_stamp:                               | per track: the start of its sound (vg_clock, 31 bits)
-        .long   0, 0, 0, 0, 0, 0, 0, 0
-vg_est:                                 | the estimate of the core being rendered (modelled cycles)
+vg_last:                                | the signature the safety net last checked
         .long   0
-vg_clock:                               | starts so far
+rp_pb:                                  | the bank blob and part rp_prev describes (rp_sync)
         .long   0
-vg_free:                                | per g: room for four SP12 voices this frame
-        .byte   0, 0, 0, 0, 0, 0, 0, 0
-vg_down:                                | per track: its engine was stepped down by the guard
-        .byte   0, 0, 0, 0, 0, 0, 0, 0
-vg_key:                                 | the last vg_core call: frame << 4 | track
+rp_pp:
         .byte   0xff
+        .balign 2
+vg_eng:                                 | vg_scan: the engine each track's settings run
+        .byte   0, 0, 0, 0, 0, 0, 0, 0
+vg_toast:                               | MAX DSP: EMU LIMIT is due (vg_tick raises it)
+        .byte   0
         .balign 4
 vem_end:

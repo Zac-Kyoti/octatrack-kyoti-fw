@@ -7,20 +7,24 @@
             integers; p/q is the QUAN ratio, RATE still applies. AUTO plays a sample
             whose TIMESTRETCH (audio editor, ATTR) is VARI the same way.
     QUAN    the PTCH knob on a VARI track: 1/2 2/3 3/4 4/5 1/1 5/4 4/3 3/2 2/1
-    EMUS    the TSNS knob on a VARI track: OT / S950 / SP12 (left to right, six detents
+    EMUS    the TSNS knob on a VARI track: OT / S950 / SP12 (left to right, four detents
             per step), the engine the DSP kernel renders the track with, taken at each trig
-    GUARD   a DSP load estimate per core (base + stock FX + the engines the voices carry);
-            above its budget the core's emu voices step down (SP12 -> S950 -> OT), at the
-            trig or at once; EMUS keeps the user's choice on the dial and reads the engine
-            played, marked (OT! / S95!). Turning EMUS, or TSTR / ATTR TIMESTRETCH onto VARI,
-            to an engine the core cannot fit now toasts MAX DSP: S950 USED / OT USED
+    GUARD   a DSP load estimate per core from the SETTINGS (base + the Part's FX types + the
+            engines of its VARI tracks' EMUS); a change that would put a core over its
+            budget is refused (EMUS stops at the highest engine that fits; an FX type does
+            not land when emulated engines tip the core); a safety net, run in the UI task
+            when a signature of those settings changes, sets just enough EMUS to OT however
+            a core got over (SP12 first, then S950, highest track first); each shows
+            MAX DSP: EMU LIMIT (1.2 s). Nothing steps down at run time; EMUS shows what plays
 
 COLDFIRE. One unit, vem_cf (varispeed_emus.s), the standalone builder's own
-(tools/build_varispeed_emus.py). 19 detours: the render's increment store (the frame hook),
+(tools/build_varispeed_emus.py). 22 detours: the render's increment store (the frame hook),
 P2EDIT's delta conversion (EMUS steps), SRC SETUP's open (the EMUS detent count restarts),
 five in the audio editor's ATTR page, the four
 SETUP-page dial resolvers, the two Part applies, RELOAD PART, and hold wrappers on the
-bulk writers (SRC page paste, track paste, the PART menu's paste core and CLEAR). The
+bulk writers (SRC page paste, track paste, the PART menu's paste core and CLEAR); the
+guard's: the UI task's message-loop tail (its safety net and its toast) and the FX1 / FX2
+choosers' YES. The
 STATIC and FLEX descriptors: TSTR count 4 -> 5 with stock's 5-position select and this
 unit's formatter; PTCH's widget and encoder step; TSNS's widget. The domain swap keeps
 PTCH / TSNS of each machine in NEIGHBOR's '---' bytes of the same track (claimed below).
@@ -31,7 +35,7 @@ one-time memory clear (A P:0x46, B P:0x47; their `do` words differ). Two table b
 (81 + 384 words). Core-private Y $A00-$FFF. It needs a given-up effect for its words, as
 the standalone gives up SPRING REV.
 
-PLACE. DRAM (the default; ~4.7 KB) or CAVE (the classic cave, where the standalone puts it).
+PLACE. DRAM (the default; ~5.3 KB) or CAVE (the classic cave, where the standalone puts it).
 The ledger refuses this module beside any other that writes the STATIC / FLEX TSTR words
 or the same sites (REPITCH_REPEAT98_KYOTI and octabam's REPITCH do): one design at a time.
 
@@ -66,7 +70,7 @@ U = "vem_cf"
 LINKED = (
     Linked(U, os.path.join(_HERE, "varispeed_emus.s"),
            reference=(0x400d6500,
-                      "e19b17c03f939e3985af07c8a56bdebffcf6be7dd8d2a88716848e43c40270dc")),
+                      "1838f12aaf8267d48fea8b0c8dda9024aae74337ffe39f68d3b30018216bf4fc")),
 )
 
 _X = bytes.fromhex
@@ -95,6 +99,12 @@ DETOURS = (
     Detour(0x40029a4c, _X("4fefffec48d7043c"), U, "vh_partpaste", "PART menu paste core (PASTE, UNDO): hold, forget",
            pad_to=8),
     Detour(0x4004a9d0, _X("4feffff048d70c0c"), U, "vh_partclear", "PART menu CLEAR: hold, forget", pad_to=8),
+    Detour(0x40062d1c, _X("4ab946c7c72c"), U, "vg_tick",
+           "UI task's message-loop tail: the guard's due check, its toast (the only NOTIFY)"),
+    Detour(0x400526e4, _X("4fefffbc48d77cfc"), U, "vh_fx1", "FX1 chooser YES: refused if it overloads",
+           pad_to=8),
+    Detour(0x40052474, _X("4fefffbc48d77cfc"), U, "vh_fx2", "FX2 chooser YES: refused if it overloads",
+           pad_to=8),
 )
 
 _u32 = lambda v: v.to_bytes(4, "big")

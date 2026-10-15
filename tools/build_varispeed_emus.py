@@ -8,15 +8,18 @@ STATIC / FLEX TSTR gets a fifth position, VARI: the track plays dry at
 (project BPM x p) / (sample BPM x q), p/q the QUAN ratio on the PTCH knob, exact in
 integers, RATE still applying; its TSNS knob becomes EMUS (OT / S950 / SP12), the DSP
 engine latched at each trig. The audio editor's ATTR TIMESTRETCH gains VARI. A DSP load
-guard (spec §6) steps emu voices down to cheaper engines while a DSP core's estimated
-load is over its budget; EMUS then reads the engine played, marked, and a user's own
-EMUS / TSTR / ATTR edit that asks for more than the core has raises a toast (§6a).
+guard (spec §6b) keeps each DSP core's estimated load -- a property of the settings --
+within its budget: EMUS and FX-type changes that would overload a core are refused at
+their UI handlers, and one safety net -- run in the UI task's message loop when a
+signature of the estimate's inputs changes -- steps just enough tracks to OT however a
+core got over (Part change, reload, loads, machine, paste, sample, TSTR / ATTR onto
+VARI); the toast MAX DSP: EMU LIMIT is raised from that loop only.
 Spec: reference/handoffs/REPITCH_REWRITE_SPEC.md (clean-room); facts:
 REPITCH_REWRITE_SCOPE.md + REPITCH_REWRITE_SCOPE_EMUS.md; this build:
 reference/handoffs/REPITCH_REWRITE_IMPL.md.
 
   ColdFire: octabam-modules/varispeed-emus/varispeed_emus.s, one unit linked at the
-            classic cave's proven start (0x400d6500), 19 detours, 12 descriptor pokes.
+            classic cave's proven start (0x400d6500), 22 detours, 12 descriptor pokes.
   DSP:      the hardware-proven RPS9/RPSP kernel (tools/patch_repitch_dsp.asm via
             tools/repitch_dsp_src.py) in SPRING REVERB's P module and X data, its voice
             and boot hooks, SPRING removed from both FX choosers -- the old builder's DSP
@@ -33,7 +36,7 @@ middle of what it displaces; the cave must be zero in stock and inside the class
 cave from 0x400d6500; no reference into 0x80006a40..0x80006abf; the unit must link to
 the same bytes for -mcpu=5407 and 54455 (octabam assembles DRAM units for 54455).
 
-Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM5)
+Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM6)
 """
 import hashlib, importlib.util, json, os, pathlib, struct, subprocess, sys
 from kyoti_status import gate, seal
@@ -54,7 +57,7 @@ OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx"
 OUT_BIN = ROOT / "out/OCTATRACK_VARISPEED_EMUS.bin"
 SYMS_JSON = ROOT / "out/varispeed_emus_syms.json"
 WORK = ROOT / "out/vem_build"
-VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM5"
+VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM6"
 # A TEST variant (the harness's deliberately wrong builds): VEM_VARIANT=<tag> and
 # VEM_VARIANT_SRC=<.s> build out/vem_variants/mainos_varispeed_emus_<tag>.bin from that
 # source, with every check, and no wrap. Never a flash candidate.
@@ -100,11 +103,20 @@ DETOURS = {
     0x4002b654: ("4fefffbc48d77cfc", "vh_trkpaste", "jmp"),
     0x40029a4c: ("4fefffec48d7043c", "vh_partpaste", "jmp"),
     0x4004a9d0: ("4feffff048d70c0c", "vh_partclear", "jmp"),
+    # ---- the DSP load guard (spec §6b; IMPL §12)
+    # the UI task's message-loop tail (every message ends here): the guard's due check and
+    # the only place its toast is raised
+    0x40062d1c: ("4ab946c7c72c", "vg_tick", "jmp"),
+    # the FX1 / FX2 choosers' YES (the only applies of a chosen FX type): refused when
+    # emulated engines would tip the core over
+    0x400526e4: ("4fefffbc48d77cfc", "vh_fx1", "jmp"),
+    0x40052474: ("4fefffbc48d77cfc", "vh_fx2", "jmp"),
 }
 # Each body replays its site's displaced bytes and jumps back here: the builder checks
 # the jump target equals site + displaced length.
 RETURNS = {"vem_frame": None, "vb_srcpaste": 0x40027e54, "vb_trkpaste": 0x4002b65c,
-           "vb_partpaste": 0x40029a54, "vb_partclear": 0x4004a9d8, "vb_reload": 0x4004aabc}
+           "vb_partpaste": 0x40029a54, "vb_partclear": 0x4004a9d8, "vb_reload": 0x4004aabc,
+           "vb_fx1": 0x400526ec, "vb_fx2": 0x4005247c}
 
 # descriptor pokes (u32): addr -> (stock value, new value or symbol, what)
 POKES = {
@@ -164,6 +176,34 @@ CONTEXT = {
     0x4005a324: "4a836f0c23c3460d1e6c",
     # the window it opens is centred on the 128 x 64 screen: x = (128 - w) / 2
     0x40058184: "203c000000809083",
+    # ---- the guard of spec §6b (IMPL §12.1)
+    # the UI task's loop: receive from the UI queue 0x460d17ae, dispatch by type (78)
+    0x40061cd2: "4879460d17ae4eb940000d002440588f101253807180784db880",
+    # ... the tail every case reaches, its test and the branch back to the receive
+    0x40062d1a: "508f4ab946c7c72c6700efae",
+    # stock's own message cases raise NOTIFY at this level (27/29: "%s" 0x78; 31: 0x30)
+    0x40062cba: "487800782f024eb94005a2b84fef00106050",
+    # DTIM1's ISR posts message type 5 (0x400a7279) to the UI queue: the 60 Hz tick
+    0x40055ce4: "4879400a72794879460d17ae4e92",
+    0x400a7278: "1205",
+    # the FX1 chooser's YES: cursor 0x460d5c94, rows 0x400d6060, the Part's +0x8ed80 byte,
+    # the same type returns at once (0x4005293a)
+    0x400526ec: "77b9800000037fb9800000002439460d5c94247946c8245647f9400d6060",
+    0x40052722: "d1fc0008ed807110b2806700020c",
+    # the FX2 chooser's YES: cursor 0x460d5ca8, rows 0x400d6090, +0x8ed88
+    0x4005247c: "77b9800000037fb9800000002439460d5ca8247946c8245647f9400d6090",
+    0x400524b2: "d1fc0008ed887110b2806700021c",
+    # their only references: the choosers' YES records ({0x31, 0, press})
+    0x400bc148: "3100400526e4",
+    0x400bc372: "310040052474",
+    # the three Part applies write their (bank, part) to 0x80001828 / 0x80001829 (whose
+    # live bytes these are, vg_step_ot)
+    0x400090a4: "300d1f40004a13c080001828320e1f41004b13c18000",
+    0x40009e10: "13c68000182813c580001829",
+    # the bank blobs: bank b at 0x400e21e0 + b * 0x9b340 (UI message 21); PART_B moves at
+    # UI message 20 (rp_sync's case)
+    0x4006229a: "203c0009b3404c0208000680400e21e0",
+    0x400621e2: "13c08000000313c0100b14cf",
 }
 
 

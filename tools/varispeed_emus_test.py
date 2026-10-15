@@ -16,9 +16,9 @@ Tests (one forked scenario each):
   swap      both pairs swap together, fresh parks (QUAN 1/1, EMUS OT), round trip
   fresh0    a TSNS of 0 survives a VARI round trip (TSNS back verbatim)
   adopt     a forgotten rp_prev adopts a Part already in VARI (no swap), both machines
-  p2edit    EMUS through P2EDIT (direct calls): six detents in one direction per stop, a
+  p2edit    EMUS through P2EDIT (direct calls): four detents in one direction per stop, a
             reversal restarts the count, a pushed (x7) report counts one detent, a report of
-            12 detents moves two stops, 1/64/127 only, snapping, the count restarts on
+            8 detents moves two stops, 1/64/127 only, snapping, the count restarts on
             another track and at SRC SETUP's open (emus_open); gate off = stock;
             TSTR 0..4 through P2EDIT and the swap it starts
   widget    emus_widget / quant_widget arguments (snapped value, formatter), captions;
@@ -29,30 +29,32 @@ Tests (one forked scenario each):
   o2        SRC page paste + undo, track paste, PART paste / clear / undo, RELOAD PART:
             the target adopts what was written, nothing swaps
   old56     TSTR 5/6 and TSMODE 5/6 (projects saved with REPITCH_REPEAT98_KYOTI) do not crash
-  guard_*   the DSP load guard (spec §6), on the REAL export MMTESTDT (T1-T8 STATIC, part 0):
-            T5-T8 (DSP core 0) on VARI SP12 on slot 0's sample, trigs poked into the
-            playing pattern at steps 1/3/5/7, FX2 DARK x4, FX1 DJ EQ x2 or x3 -- all by
-            runtime pokes. x2: nothing steps down (and the DSP increments equal VEM3's,
-            VEM_IMG_REF); x3: the latch steps the later sounds down; mid-note: a third DJ EQ
-            steps the most recently started down at once, a silent voice before them;
-            restore only at the next trig. The readout (spec §6a item 1): the dial stays on
-            the EMUS choice, the readout names the engine played, marked (emus_fmt_ot_dn /
-            emus_fmt_s95_dn: OT! / S95!). No toast from any of it. EVERY expectation comes
-            from GuardModel, an independent model of the rules fed with the VG_* block read
-            from varispeed_emus.s, and each scenario checks that it still discriminates (it
-            steps something down; the oldest-first / silence-ignoring rules would differ).
-  toast_*   the guard's toast (spec §6a item 2), MMTESTDT, T5-T7 VARI SP12 + DJ EQ: the user's
-            own action on T8 -- EMUS turned through P2EDIT (toast_emus: S950 fits, SP12 does
-            not; toast_emus_ot: neither fits), TSTR BEAT -> VARI through P2EDIT (toast_tstr),
-            ATTR TIMESTRETCH BEAT -> VARI under AUTO through the value-up key handler
-            (toast_attr). NOTIFY captured (and still run) per action: the text, 0x30, the
-            stock toast open; no toast where the model says the engine fits.
+  net_*     the DSP load guard's safety net (spec §6b, "6b simplified"), on the REAL export
+            MMTESTDT (T1-T8 STATIC, part 0), T5-T8 = DSP core 0, all by runtime pokes: settings
+            over budget at the start (net_load), a sequencer Part change (net_part, with the
+            rp_sync check of the switched Part's PTCH), RELOAD PART (net_reload), a track paste
+            (net_paste), a machine change (net_machine), a sample attribute turning a gate on
+            (net_gate), SETUP TSTR (net_tstr, net_tstr_order, net_tstr_fit) and ATTR TIMESTRETCH
+            (net_attr) onto VARI: just enough EMUS to OT, SP12 first, then S950, highest track
+            first; the engine each plays from its next trig; one toast
+  ref_*     the two refusals: EMUS through P2EDIT (ref_emus, ref_emus_ot: stops at the highest
+            stop that fits), the FX choosers' YES (ref_fx; ref_fx_alone on a test build whose
+            core-0 budget is 2600: stock FX alone over is not refused)
+  under     under budget nothing is refused or changed, no toast
+            EVERY expectation comes from NetModel, an independent model fed with the VG_* block
+            read from varispeed_emus.s; each scenario checks that it tells the right rule from
+            the wrong ones it names. NOTIFY is captured (and still run) and watched: MAX DSP:
+            EMU LIMIT must come from vg_tick, on the UI task's stack.
   panel_*   EMUS through the REAL panel path, transport stopped: SRC SETUP opened with its
             keys, encoder F reports into the panel UART (the parser, its coalescing, the UI
             task, the page's encoder table, P2EDIT), every stored value logged at P2EDIT's
             store (0x4003a5ba). slow / fast / multi / jitter / bounce / held turns, and
             reset (the page closed and re-opened, a track change and back, mid-count). The
-            first hardware build (140C_VEM1) fails these: one stop per report, any sign.
+            first hardware build (140C_VEM1) fails these (one stop per report, any sign), and
+            VEM2-VEM5 (six detents per stop) too.
+
+Test builds (--build-variants): lowbudget (VG_BUDGET_C0 2600, for ref_fx_alone) and the
+deliberately wrong builds w_* (out/vem_variants/), each of which must fail its tests.
 
 EMUS order (2026-10-14): OT (stored 1, left), S950 (64, middle), SP12 (127, right).
 """
@@ -93,8 +95,11 @@ NAME11 = {0: 0x400d3074, 1: 0x400d3206}
 FL, ST, PU, THRU = 1, 0, 4, 2
 PARK1 = {ST: 18, FL: 23}
 PARK2 = {ST: 23, FL: 21}
-CAP_AT, CAP_BUF, FMT_BUF = 0x400d7800, 0x400d7900, 0x400d7a00   # zero cave tail of this image
-NCAP_AT, NCAP_BUF = 0x400d7b00, 0x400d7b80        # the NOTIFY capture (count, text, dur), same tail
+# the test stubs: in the zero cave tail behind the unit (the classic cave ends 0x400d7c3c)
+_TAIL = max(0x400d7800, (json.loads(SYMS.read_text())["end"] + 0x3f) & ~0x3f)
+CAP_AT, CAP_BUF, FMT_BUF = _TAIL, _TAIL + 0x60, _TAIL + 0x80
+NCAP_AT, NCAP_BUF = _TAIL + 0x90, _TAIL + 0xe0      # the NOTIFY capture (count, text, dur)
+assert NCAP_BUF + 12 <= 0x400d7c3c, "no room for the test stubs behind the unit"
 NOTIFY, NOTIF_H, NOTIF_T = 0x4005a2b8, 0x460d1e70, 0x460d1e6c    # the stock toast, its handle, countdown
 NOTIFY_STOCK = bytes.fromhex("2f032f02242f000c")  # its first 8 bytes (the stub replays them)
 STATIC0_BPM = 0x100d5b30 + 0x114                # static slot 0 (T1's STATIC slot): 120 BPM
@@ -287,26 +292,27 @@ def scenarios():
     held = lambda v: poke(20, [b(ENC_F_HELD + i, x) for i, x in enumerate(v.to_bytes(4, "big"))])
     ed = lambda *ds: [call(20, P2EDIT, 5, d) for d in ds]
     s.dump(20, tsns, 1, "e0")                                  # fresh park: OT
-    s.add(ed(1, 1, 1, 1, 1)); s.dump(20, tsns, 1, "e5")        # five detents: no step yet
-    s.add(ed(1)); s.dump(20, tsns, 1, "e6")                    # the sixth: S950
-    s.add(ed(-1)); s.dump(20, tsns, 1, "e7")                   # turned back: restart, no step
-    s.add(ed(1)); s.dump(20, tsns, 1, "e8")                    # and again
-    s.add(ed(-1, 1, -1, 1)); s.dump(20, tsns, 1, "e9")         # jitter: nothing moves
-    s.add(ed(12)); s.dump(20, tsns, 1, "e10")                  # 12 detents in one report: two stops (SP12)
-    s.add(held(1), ed(1, 1, 1, 1)); s.dump(20, tsns, 1, "e11") # pushed: x7 units = one detent each
-    s.add(ed(-1, -1, -1, -1, -1)); s.dump(20, tsns, 1, "e12")  # pushed, turned back: five
-    s.add(ed(-1)); s.dump(20, tsns, 1, "e13")                  # the sixth pushed detent: S950
+    s.add(ed(8)); s.dump(20, tsns, 1, "e8")                    # 8 detents in one report: two stops (SP12)
+    s.add(ed(-1, -1, -1)); s.dump(20, tsns, 1, "e9")           # three back: no step yet
+    s.add(ed(-1)); s.dump(20, tsns, 1, "e10")                  # the fourth: S950
+    s.add(ed(1)); s.dump(20, tsns, 1, "e11")                   # turned back: restart, no step
+    s.add(ed(-1, 1, -1, 1)); s.dump(20, tsns, 1, "e12")        # jitter: nothing moves
+    s.add(held(1), ed(1, 1, 1)); s.dump(20, tsns, 1, "e13")    # pushed: x7 units = one detent each; with
+                                                               # the jitter's last +1, the fourth: SP12
+    s.add(ed(1)); s.dump(20, tsns, 1, "e14")                   # one more pushed: no step (SP12 is the end)
+    s.add(ed(-1, -1, -1)); s.dump(20, tsns, 1, "e15")          # pushed, turned back: three
+    s.add(ed(-1)); s.dump(20, tsns, 1, "e16")                  # the fourth: S950
     s.add(held(0))
-    s.add(poke(20, p2(0, FL, 5, 30)), ed(-1)); s.dump(20, tsns, 1, "e14")    # 30 snaps to OT (1)
-    s.add(poke(20, p2(0, FL, 5, 100)), ed(1)); s.dump(20, tsns, 1, "e15")    # 100 snaps to SP12 (127)
-    s.add(ed(-1, -1, -1, -1, -1)); s.dump(20, tsns, 1, "e16")  # five back: no step
+    s.add(poke(20, p2(0, FL, 5, 30)), ed(-1)); s.dump(20, tsns, 1, "e17")    # 30 snaps to OT (1)
+    s.add(poke(20, p2(0, FL, 5, 100)), ed(1)); s.dump(20, tsns, 1, "e18")    # 100 snaps to SP12 (127)
+    s.add(ed(-1, -1, -1)); s.dump(20, tsns, 1, "e19")          # three back: no step
     s.add(poke(20, [b(UI_TRACK, 1)]), call(20, P2EDIT, 5, 1))  # T2 (not VARI): stock, and the count's owner changes
     s.dump(20, PBASE + O_P2 + 30 * 1 + 6 * FL + 5, 1, "gateoff")
-    s.add(poke(20, [b(UI_TRACK, 0)]), ed(-1)); s.dump(20, tsns, 1, "e17")    # back on T1: counting from 0
-    s.add(ed(-1, -1, -1, -1)); s.dump(20, tsns, 1, "e18")      # five
+    s.add(poke(20, [b(UI_TRACK, 0)]), ed(-1)); s.dump(20, tsns, 1, "e20")    # back on T1: counting from 0
+    s.add(ed(-1, -1)); s.dump(20, tsns, 1, "e21")              # three
     s.add(call(20, S.get("emus_open", 0x400326d4), *ENC_SETUP_ARGS))          # SRC SETUP opens
-    s.add(ed(-1)); s.dump(20, tsns, 1, "e19")                  # counting from 0 again
-    s.add(ed(-1, -1, -1, -1, -1)); s.dump(20, tsns, 1, "e20")  # the sixth since the open: S950
+    s.add(ed(-1)); s.dump(20, tsns, 1, "e22")                  # counting from 0 again
+    s.add(ed(-1, -1, -1)); s.dump(20, tsns, 1, "e23")          # the fourth since the open: S950
     s.add(poke(20, [b(UI_TRACK, 2)]), call(20, P2EDIT, 4, 1))
     s.dump(20, PBASE + O_P2 + 30 * 2 + 6 * FL + 4, 1, "tstr1")
     s.add(call(20, P2EDIT, 4, 1))
@@ -450,97 +456,142 @@ def scenarios():
     s.cp(1400, "end")
     sc[s.name] = s
 
-    # ---- the DSP load guard: MMTESTDT, T5-T8 (DSP core 0) on VARI, FX2 DARK x4
-    SP = {t: "SP12" for t in GT}
-    X2 = {4: "DJEQ", 5: "DJEQ"}
-    X3 = {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"}
-    # x2: 4 x SP12 + DARK x4 + DJ EQ x2 fits: nothing steps down, the increments are VEM3's
-    for nm, img in (("guard_x2", None), ("guard_x2_ref", IMG_REF)):
-        s = guard_scn(nm, SP, X2, img=img)
-        g_dump(s, G_F1, "f1")
-        g_dump(s, G_FRAMES - 20, "end")
-        sc[s.name] = s
-    # x3: over budget from the start: the latch steps the later sounds down (and no toast:
-    # the guard acting on its own says nothing)
-    s = guard_scn("guard_x3", SP, X3)
-    s.add("-:poke:" + ";".join(ncap_stub()))
-    g_dump(s, G_F1, "f1")
-    g_dump(s, G_FRAMES - 20, "end")
-    s.dump(G_FRAMES - 20, NCAP_BUF, 12, "end.ncap")
+    # ---- the DSP load guard (spec §6b, "6b simplified"): MMTESTDT, T5-T8 = DSP core 0.
+    # Every expectation comes from NetModel (the VG_* block of varispeed_emus.s), and each
+    # scenario checks that the model tells the right rule from the wrong ones it names.
+    SP4 = {t: "SP12" for t in GT}
+    # the safety net at the start: settings over budget when the run begins (as a loaded
+    # project would be): S950 on T5, SP12 on T6-T8, DJ EQ x4 -> T8, T7 to OT (SP12 first,
+    # highest first), T5 S950 and T6 SP12 kept
+    s = net_scn("net_load", {4: "S950", 5: "SP12", 6: "SP12", 7: "SP12"},
+                {4: "DJEQ", 5: "DJEQ", 6: "DJEQ", 7: "DJEQ"})
+    s.dump(2800, mmpart(0), PSTRIDE, "after.part")
+    s.net = dict(kind="load")
     sc[s.name] = s
-    # the latch's S950 -> OT as well: EMUS SP12 SP12 S950 S950, FX1 DJ EQ x3 + FILTER; the
-    # readout of the stepped-down tracks (dial on their choice, the playing engine marked)
-    s = guard_scn("guard_latch", {4: "SP12", 5: "SP12", 6: "S950", 7: "S950"},
-                  {4: "DJEQ", 5: "DJEQ", 6: "DJEQ", 7: "FILTER"})
-    g_dump(s, G_F1, "f1")
-    w = G_F1 + 1
-    s.add(poke(w, install))
-    for tag, t in (("w5", 4), ("w6", 5), ("w7", 6), ("w8", 7)):
-        s.add(poke(w, [b(UI_TRACK, t)]), call(w, S["emus_widget"], 10, 20, 11, EM[s.guard["emus"][t]], 0, 0, 0x12345678))
-        s.dump(w, CAP_BUF, 32, tag)
-    s.add(poke(w, restore))
+    # a sequencer Part change: part 0 fits (SP12 x4, DJ EQ x2); pattern 1, poked to use part 1,
+    # is cued at frame 100 and plays from bar 2. Part 1 (poked, consistent as a saved Part):
+    # T5 NOT VARI (TSTR OFF, PTCH 70 with a QUAN 109 parked, TSNS 30 with EMUS 127 parked),
+    # T6-T8 VARI SP12, DJ EQ x4 -> T8, T7 to OT in part 1 before it plays; T5's PTCH stays 70
+    # (until VEM5 the poll swapped it: rp_sync)
+    s = net_scn("net_part", SP4, {4: "DJEQ", 5: "DJEQ"}, frames=8400,
+                extra=part1_setup() + [b(MMDB + 1 * 0x8ed8 + 0x8e57, 1)] + trig_masks(1))
+    s.add(call(100, 0x400a1030, 0, 1))                    # cue bank 0 pattern 1 (seq_goto_pattern)
+    g_dump(s, 5000, "pre")
+    for f in (5200, 8300):
+        s.dump(f, mmpart(1), PSTRIDE, f"p1_{f}.part")
+        s.dump(f, mmpart(0), PSTRIDE, f"p0_{f}.part")
+    s.dump(8300, 0x80000000, 8, "ui.end")
+    s.net = dict(kind="part")
     sc[s.name] = s
-    # mid-note: x2 (all SP12), a third DJ EQ at G_F1 -> the most recently started step down
-    # at once; the readout marker; the DJ EQ removed at G_F2 -> nothing restores until each
-    # stepped-down track's next trig
-    for nm, silent in (("guard_mid", None), ("guard_silent", 5)):
-        s = guard_scn(nm, SP, X2)
-        s.add("-:poke:" + ";".join(ncap_stub()))     # the guard's own step-down: no toast
-        if silent is not None:                       # T6's voice stops (stock's voice reset)
-            s.add(call(G_F1 - 4, 0x40006820, silent))
-        g_dump(s, G_F1 - 1, "pre")
-        s.add(poke(G_F1, mm_fx({6: "DJEQ"}, {})))
-        g_dump(s, G_F1 + 3, "mid")
-        if silent is None:
-            w = G_F1 + 20
-            s.add(poke(w, install))
-            for tag, t in (("w8", 7), ("w7", 6), ("w5", 4)):
-                s.add(poke(w, [b(UI_TRACK, t)]), call(w, S["emus_widget"], 10, 20, 11, EM["SP12"], 0, 0, 0x12345678))
-                s.dump(w, CAP_BUF, 32, tag)
-            s.add(poke(w, restore))
-            for fn in ("emus_fmt_ot_dn", "emus_fmt_s95_dn"):
-                s.add(poke(w + 1, [b(FMT_BUF + i, 0) for i in range(8)]), call(w + 1, S[fn], FMT_BUF, EM["SP12"]))
-                s.dump(w + 1, FMT_BUF, 8, fn)
-        s.add(poke(G_F2, mm_fx({6: "NONE"}, {})))
-        g_dump(s, G_F2 + 3, "rm")
-        g_dump(s, G_FRAMES - 20, "end")
-        s.dump(G_FRAMES - 20, NCAP_BUF, 12, "end.ncap")
-        if silent is None:
-            w = G_FRAMES - 10
-            s.add(poke(w, install + [b(UI_TRACK, 7)]), call(w, S["emus_widget"], 10, 20, 11, EM["SP12"], 0, 0, 0x12345678))
-            s.dump(w, CAP_BUF, 32, "w8end")
-            s.add(poke(w, restore))
-        s.silent = silent
+    # RELOAD PART: part 0 fits (SP12 x4, DJ EQ x2); its saved copy (poked, flagged saved) has
+    # S950 on T5 and DJ EQ x4 -> after the reload T8, T7 to OT
+    s = net_scn("net_reload", SP4, {4: "DJEQ", 5: "DJEQ"},
+                extra=saved_setup({4: "S950", 5: "SP12", 6: "SP12", 7: "SP12"},
+                                  {t: "DJEQ" for t in GT}))
+    s.add(call(2600, RELOAD, 0))
+    s.dump(2800, mmpart(0), PSTRIDE, "after.part")
+    s.net = dict(kind="reload")
+    sc[s.name] = s
+    # a track paste: T5-T7 VARI SP12 + DJ EQ (fits, 3240); T8 not VARI (AUTO on a BEAT-less
+    # slot). T5's whole track pasted onto T8 -> 4 x SP12 + DJ EQ x4: T8, T7, T6 to OT
+    s = net_scn("net_paste", {4: "SP12", 5: "SP12", 6: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
+                tstr={7: 1}, slots={7: 7})
+    s.add(call(2600, 0x40029754, 0x460bf218, 0, 4), call(2600, 0x4002b654, 0x460bf218, 0, 7))
+    s.dump(2800, mmpart(0), PSTRIDE, "after.part")
+    s.net = dict(kind="paste")
+    sc[s.name] = s
+    # a machine change: T5-T7 VARI SP12 + DJ EQ x3; T8 STATIC, not VARI, its FLEX side stored
+    # VARI with EMUS SP12 (rp_prev forgotten, as after a load). T8 -> FLEX: T8 (FLEX) to OT
+    s = net_scn("net_machine", {4: "SP12", 5: "SP12", 6: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
+                tstr={7: 1}, slots={7: 7}, extra=flex_side(7, "SP12"))
+    s.add(poke(2600, mm_byte(O_MACH + 7, FL)), call(2600, SET_MACHINE3, 0, 7, ST))
+    s.dump(2800, mmpart(0), PSTRIDE, "after.part")
+    s.net = dict(kind="machine")
+    sc[s.name] = s
+    # a sample change turning a gate on (no UI): T8 AUTO on STATIC slot 1 (TIMESTRETCH NORMAL),
+    # EMUS SP12 parked; slot 1's TIMESTRETCH poked to VARI at 2600 -> T8 enters, to OT
+    s = net_scn("net_gate", {4: "SP12", 5: "SP12", 6: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
+                tstr={7: 1}, park={7: "SP12"})
+    s.add(poke(2600, lpoke(STATIC_SET + 0x448 * G_SLOT[7] + 0x110, 4)))
+    s.dump(2800, mmpart(0), PSTRIDE, "after.part")
+    s.net = dict(kind="gate")
+    sc[s.name] = s
+    # SETUP TSTR onto VARI through P2EDIT: T8 BEAT, EMUS SP12 parked -> T8 enters on OT. Then
+    # (net_tstr_order) T6 enters with T8 already on SP12: the net steps T8, not T6
+    s = net_scn("net_tstr", {4: "SP12", 5: "SP12", 6: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
+                tstr={7: 3}, park={7: "SP12"})
+    s.add(poke(2599, [b(UI_TRACK, 7)] + lpoke(PAGE_M, ST) + lpoke(ENC_F_HELD, 0)), call(2600, P2EDIT, 4, 1))
+    s.dump(2800, mmpart(0), PSTRIDE, "after.part")
+    s.net = dict(kind="tstr", enter=7)
+    sc[s.name] = s
+    s = net_scn("net_tstr_order", {4: "SP12", 6: "SP12", 7: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
+                tstr={5: 3}, park={5: "SP12"})
+    s.add(poke(2599, [b(UI_TRACK, 5)] + lpoke(PAGE_M, ST) + lpoke(ENC_F_HELD, 0)), call(2600, P2EDIT, 4, 1))
+    s.dump(2800, mmpart(0), PSTRIDE, "after.part")
+    s.net = dict(kind="tstr", enter=5)
+    sc[s.name] = s
+    # SETUP TSTR onto VARI that fits: T8 BEAT, S950 parked -> enters on S950, nothing changes
+    s = net_scn("net_tstr_fit", {4: "SP12", 5: "SP12", 6: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
+                tstr={7: 3}, park={7: "S950"})
+    s.add(poke(2599, [b(UI_TRACK, 7)] + lpoke(PAGE_M, ST) + lpoke(ENC_F_HELD, 0)), call(2600, P2EDIT, 4, 1))
+    s.dump(2800, mmpart(0), PSTRIDE, "after.part")
+    s.net = dict(kind="tstr", enter=7)
+    sc[s.name] = s
+    # ATTR TIMESTRETCH BEAT -> VARI (the value-up key handler) on STATIC slot 1 with T7, T8 on
+    # AUTO there, both SP12 parked; T5, T6 VARI SP12 -> both enter, T8 to OT, T7 keeps SP12
+    s = net_scn("net_attr", {4: "SP12", 5: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
+                tstr={6: 1, 7: 1}, park={6: "SP12", 7: "SP12"}, slots={6: 1, 7: 1},
+                extra=lpoke(STATIC_SET + 0x448 * 1 + 0x110, 3))
+    s.add(poke(2600, lpoke(ATTR_SLOT, 1) + lpoke(ATTR_MACH, 0) + lpoke(ATTR_ROW, 2) + lpoke(ATTR_MODE, 0)),
+          call(2600, ATTR_UP))
+    s.dump(2800, mmpart(0), PSTRIDE, "after.part")
+    s.dump(2800, STATIC_SET + 0x448 * 1 + 0x110, 4, "after.tsmode")
+    s.net = dict(kind="attr")
+    sc[s.name] = s
+    # the EMUS refusal (P2EDIT): T5-T7 SP12 + DJ EQ x3, T8 VARI on OT. +4 S950 (fits), +4 SP12
+    # (refused: stays S950), -4 OT, +8 (two stops asked: S950); with SPATIALIZER on T8's FX1
+    # S950 does not fit either
+    for nm, fx8 in (("ref_emus", "NONE"), ("ref_emus_ot", "SPATIALIZER")):
+        acts = [("a1", 5, 4), ("a2", 5, 4), ("a3", 5, -4), ("a4", 5, 8)]
+        s = net_scn(nm, {4: "SP12", 5: "SP12", 6: "SP12", 7: "OT"},
+                    {4: "DJEQ", 5: "DJEQ", 6: "DJEQ", 7: fx8})
+        s.add(poke(2599, [b(UI_TRACK, 7)] + lpoke(PAGE_M, ST) + lpoke(ENC_F_HELD, 0)))
+        for i, (tag, slot, d) in enumerate(acts):
+            fr = 2600 + 100 * i
+            s.add(poke(fr, ncap_reset()), call(fr, P2EDIT, slot, d))
+            s.dump(fr + 90, NCAP_BUF, 12, f"{tag}.ncap")        # after the UI loop's next passes
+            s.dump(fr + 90, mmpart(0) + O_P2 + 30 * 7, 30, f"{tag}.p2")
+        s.net = dict(kind="emus", acts=acts)
         sc[s.name] = s
-
-    # ---- the guard's toast (spec §6a item 2): the user's own actions on T8, T5-T7 VARI SP12
-    T3 = {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"}
-    ed2 = lambda fr, slot, d: call(fr, P2EDIT, slot, d)
-    emus_turns = [(T_F0, "a1", [ed2(T_F0, 5, 6)], "S950"),          # OT -> S950 (six detents)
-                  (T_F0 + 1, "a2", [ed2(T_F0 + 1, 5, 6)], "SP12"),  # S950 -> SP12
-                  (T_F0 + 2, "a3", [ed2(T_F0 + 2, 5, -6)], "S950"), # back to S950
-                  (T_F0 + 3, "a4", [ed2(T_F0 + 3, 5, -6)], "OT"),   # back to OT
-                  (T_F0 + 4, "a5", [ed2(T_F0 + 4, 5, 3)], None)]    # half a stop: no new stop, nothing
-    # EMUS on T8 (OT, VARI), FX1 NONE: S950 fits, SP12 does not -> "MAX DSP: S950 USED"
-    sc["toast_emus"] = toast_scn("toast_emus", {4: "SP12", 5: "SP12", 6: "SP12", 7: "OT"}, T3, emus_turns)
-    # the same with SPATIALIZER on T8's FX1: neither fits -> "MAX DSP: OT USED"
-    sc["toast_emus_ot"] = toast_scn("toast_emus_ot", {4: "SP12", 5: "SP12", 6: "SP12", 7: "OT"},
-                                    {**T3, 7: "SPATIALIZER"}, emus_turns)
-    # TSTR on T8 (BEAT, EMUS SP12 parked) -> VARI: does not fit; back to BEAT: nothing; EMUS
-    # S950 parked, -> VARI again: fits, nothing
-    tstr_steps = [(T_F0, "t1", [ed2(T_F0, 4, 1)], "SP12"),
-                  (T_F0 + 10, "t2", [ed2(T_F0 + 10, 4, -1)], None),
-                  (T_F0 + 20, "t3", [poke(T_F0 + 20, mm_byte(O_P2 + 30 * 7 + PARK2[ST], EM["S950"])),
-                                     ed2(T_F0 + 20, 4, 1)], "S950")]
-    sc["toast_tstr"] = toast_scn("toast_tstr", {4: "SP12", 5: "SP12", 6: "SP12"}, T3, tstr_steps,
-                                 tstr={7: 3}, park={7: "SP12"})
-    # ATTR TIMESTRETCH BEAT -> VARI on T8's sample (STATIC slot 1) with T8 on AUTO, EMUS SP12
-    # parked: the value-up key handler, the audio editor set on that sample's row 2
-    tsm = STATIC_SET + 0x448 * G_SLOT[7] + 0x110
-    attr = [(T_F0, "r1", [poke(T_F0, lpoke(ATTR_SLOT, G_SLOT[7]) + lpoke(ATTR_MACH, 0) + lpoke(ATTR_ROW, 2) +
-                               lpoke(ATTR_MODE, 0)), call(T_F0, ATTR_UP)], "SP12")]
-    sc["toast_attr"] = toast_scn("toast_attr", {4: "SP12", 5: "SP12", 6: "SP12"}, T3, attr,
-                                 tstr={7: 1}, park={7: "SP12"}, extra=lpoke(tsm, 3))
+    # the FX refusal (the choosers' YES): T5-T8 SP12, FX1 DJ EQ on T5-T7, FX2 DARK on T5-T7,
+    # T8's FX1 / FX2 NONE (3191). FX2 DARK on T8 (refused), FX2 SPATIALIZER (lands), FX1
+    # COMPRESSOR (refused), FX1 SPATIALIZER (lands)
+    fxa = [("f1", 2, "DARK"), ("f2", 2, "SPATIALIZER"), ("f3", 1, "COMPRESSOR"), ("f4", 1, "SPATIALIZER")]
+    s = net_scn("ref_fx", SP4, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ", 7: "NONE"}, fx2={7: "NONE"})
+    fx_actions(s, 7, fxa)
+    sc[s.name] = s
+    # the same rules where stock FX alone are over the budget (a test build whose core-0
+    # budget is 2600, VEM_IMG_LOW): T8 VARI S950, FX1 DJ EQ on T5, T6, FX2 DARK x4 (2338).
+    # T7 FX1 DJ EQ: refused (2685; stock alone 2586 fits); T8 FX1 SPATIALIZER: lands; T7 FX1
+    # DJ EQ again: stock alone 2663 > 2600, NOT refused -- and the net then steps T8 to OT,
+    # and nothing more (2663 is still over)
+    if IMG_LOW.exists():
+        s = net_scn("ref_fx_alone", {7: "S950"}, {4: "DJEQ", 5: "DJEQ"}, img=IMG_LOW,
+                    tstr={4: 0, 5: 0, 6: 0})
+        fx_actions(s, None, [("f1", 1, "DJEQ", 6), ("f2", 1, "SPATIALIZER", 7), ("f3", 1, "DJEQ", 6)])
+        s.budget0 = LOW_BUDGET
+        sc[s.name] = s
+    # under budget, nothing refused or changed: SP12 x4 + DJ EQ x2 (3111): EMUS T8 SP12 -> S950
+    # -> SP12, FX1 SPATIALIZER on T8 (3188), the heavy Part apply of the same Part, RELOAD
+    # PART (nothing saved: a no-op); no toast, every EMUS as set
+    s = net_scn("under", SP4, {4: "DJEQ", 5: "DJEQ"})
+    s.add(poke(2599, [b(UI_TRACK, 7)] + lpoke(PAGE_M, ST) + lpoke(ENC_F_HELD, 0)),
+          call(2600, P2EDIT, 5, -4), call(2700, P2EDIT, 5, 4))
+    s.add(poke(2800, lpoke(FX_CUR[1], fx_row(1, "SPATIALIZER"))), call(2800, FX_YES[1], 0x31, 1))
+    s.add(call(2900, 0x40009094, 0, 0), call(3000, RELOAD, 0))
+    s.dump(3100, mmpart(0), PSTRIDE, "after.part")
+    s.net = dict(kind="under")
+    sc[s.name] = s
 
     # panel_*: the real panel path, transport stopped. T1 FLEX on VARI, EMUS OT (1), TSNS 30
     # parked, rp_prev 1 (in the domain already); SRC SETUP opened with its keys on T1.
@@ -554,9 +605,9 @@ def scenarios():
 
 
 # ------------------------------------------------------------------------- the DSP load guard
-def vg_constants():
+def vg_constants(src=SRC):
     """The VG_* block of varispeed_emus.s: the one source of every price and budget."""
-    return {k: int(v, 0) for k, v in re.findall(r"^\s*\.equ\s+(VG_\w+),\s*(0x[0-9a-fA-F]+|\d+)", SRC.read_text(), re.M)}
+    return {k: int(v, 0) for k, v in re.findall(r"^\s*\.equ\s+(VG_\w+),\s*(0x[0-9a-fA-F]+|\d+)", src.read_text(), re.M)}
 
 
 VG = vg_constants()
@@ -565,6 +616,10 @@ FXID = {"NONE": 0x00, "FILTER": 0x04, "SPATIALIZER": 0x05, "DELAY": 0x08, "EQ": 
         "DARK": 0x16, "COMPRESSOR": 0x18, "LOFI": 0x1c}
 ENG = {"OT": 0, "S950": 1, "SP12": 2}
 ENG_NAME = {v: k for k, v in ENG.items()}
+# the test build whose core-0 budget is lowered (the "stock FX alone over" branch): built from
+# this source by the test itself (VEM_VARIANT=lowbudget), see main()
+LOW_BUDGET = 2600
+IMG_LOW = ROOT / "out/vem_variants/mainos_varispeed_emus_lowbudget.bin"
 
 
 def fx_price(name):
@@ -575,151 +630,195 @@ def eng_price(e):
     return (0, VG["VG_S950"], VG["VG_SP12"], VG["VG_S950"])[e]
 
 
-class GuardModel:
-    """An independent model of spec §6 / IMPL §10.2 for ONE DSP core (T5-T8 = core 0 here),
-    built from the VG_* block alone: the estimate, the latch, the mid-note step-down (silent
-    first, then the most recently started) and the UI's "does it fit" (spec §6a). The rule
-    switches (oldest, silent_first) model the deliberately wrong builds: a scenario must
-    tell them apart from the right rule, or it cannot catch them."""
-    def __init__(self, core0=True):
-        self.base = VG["VG_BASE_C0" if core0 else "VG_BASE_C1"] + VG["VG_SC"]
-        self.budget = VG["VG_BUDGET_C0" if core0 else "VG_BUDGET_C1"]
-        self.eng, self.stamp, self.clock = {}, {}, 0
+class NetModel:
+    """An independent model of spec §6b / "6b simplified" for DSP core 0 (T5-T8), built from
+    the VG_* block alone. The estimate is a property of the settings: base + the FX1 / FX2
+    prices + the engine of every VARI track's EMUS. fix(): just enough tracks to OT, SP12
+    first, then S950, highest track number first (`order` names the wrong rules the tests
+    must tell apart). cap(): EMUS stops at the highest stop that fits. fx_refused(): an FX
+    type is refused when the estimate with it is over and stock FX alone fit."""
+    def __init__(self, budget=None):
+        self.base = VG["VG_BASE_C0"] + VG["VG_SC"]
+        self.budget = budget or VG["VG_BUDGET_C0"]
 
-    def copy(self):
-        m = GuardModel()
-        m.base, m.budget, m.eng, m.stamp, m.clock = self.base, self.budget, dict(self.eng), dict(self.stamp), self.clock
-        return m
+    def stock(self, fx):
+        return self.base + sum(fx_price(a) + fx_price(b) for a, b in fx.values())
 
-    @staticmethod
-    def fxsum(fx):
-        return sum(fx_price(f) for pair in fx for f in pair)
+    def est(self, fx, eng):
+        return self.stock(fx) + sum(eng_price(e) for e in eng.values())
 
-    def est(self, fx):
-        return self.base + self.fxsum(fx) + sum(eng_price(e) for e in self.eng.values())
+    def fix(self, fx, eng, order="right"):
+        eng, stepped = dict(eng), []
+        while self.est(fx, eng) > self.budget:
+            c = [t for t, e in eng.items() if e]
+            if not c:
+                break
+            if order == "right":
+                v = max(c, key=lambda t: (eng[t], t))          # SP12 first, then the highest track
+            elif order == "low_first":
+                v = max(c, key=lambda t: (eng[t], -t))
+            elif order == "s950_first":
+                v = max(c, key=lambda t: (-eng[t], t))
+            eng[v] = 0
+            stepped.append(v)
+        return eng, stepped
 
-    def free(self, fx):
-        return self.base + self.fxsum(fx) + 4 * VG["VG_SP12"] <= self.budget
-
-    def latch(self, fx, t, want):
-        self.eng[t] = 0
+    def cap(self, fx, eng, t, want):
+        room = self.budget - self.est(fx, {k: e for k, e in eng.items() if k != t})
         e = want
-        while e and self.est(fx) + eng_price(e) > self.budget:
-            e -= 1
-        self.eng[t] = e
-        self.clock += 1
-        self.stamp[t] = self.clock
-        return e
-
-    def mid(self, fx, silent=(), oldest=False, silent_first=True):
-        if self.free(fx):
-            return
-        while self.est(fx) > self.budget:
-            cands = [t for t, e in self.eng.items() if e]
-            if not cands:
-                return
-            age = (lambda t: -self.stamp.get(t, 0)) if oldest else (lambda t: self.stamp.get(t, 0))
-            v = max(cands, key=lambda t: ((t in silent) and silent_first, age(t), t))
-            self.eng[v] -= 1
-
-    def ask(self, fx, t, want):
-        """spec §6a: the engine the guard would use for track t asking `want` now (the core's
-        estimate with t counted on that engine, the latch's step-down) -- the toast's word."""
-        room = self.budget - self.base - self.fxsum(fx) - sum(eng_price(e) for k, e in self.eng.items() if k != t)
-        e = want
-        while e and eng_price(e) > room:
+        while e > eng.get(t, 0) and eng_price(e) > room:
             e -= 1
         return e
+
+    def fx_refused(self, fx, eng):
+        return self.est(fx, eng) > self.budget and self.stock(fx) <= self.budget
 
 
 MMDB = 0x400e21e0
 MMP, MMSH = MMDB + 0x8ed80, 0x100a4ece         # MMTESTDT's part 0 (the playing one) and its SRAM copy
 MM_LIVE_SLOT = 0x8000082f                      # the live sample-slot byte, + 72t (the voice loop's own)
 GT = (4, 5, 6, 7)                              # T5-T8: DSP core 0
-G_STEPS = {4: 1, 5: 3, 6: 5, 7: 7}             # their trigs, poked into pattern 0 (16 steps, 120 BPM)
+G_STEPS = {4: 1, 5: 3, 6: 5, 7: 7}             # their trigs, poked into the pattern (16 steps, 120 BPM)
 G_SLOT = {4: 0, 5: 1, 6: 0, 7: 1}              # the two STATIC slots with a sample (146.6 / 120 BPM)
-G_F1, G_F2, G_FRAMES = 2600, 3500, 8200        # mid-bar: after T8's first trig; bar 2 from ~5512
-
-
-def mm_byte(off, v):
-    return [b(MMP + off, v), b(MMSH + off, v)]
-
-
-def mm_fx(fx1, fx2):
-    """{t: name} -> the Part's FX ids and the live ones (0x80000ec4 / 0x80000ecc)."""
-    out = []
-    for t, n in fx1.items():
-        out += mm_byte(t, FXID[n]) + [b(0x80000ec4 + t, FXID[n])]
-    for t, n in fx2.items():
-        out += mm_byte(8 + t, FXID[n]) + [b(0x80000ecc + t, FXID[n])]
-    return out
-
-
-def mm_setup(emus, fx1, tstr=None, park=None, extra=()):
-    """Before the transport: T5-T8 VARI on a sample (or the TSTR given per track), EMUS per
-    track (or parked: STATIC's TSNS park, for a track that is not on VARI yet), trigs, FX2
-    DARK x4, FX1 as given (the rest NONE)."""
-    pk = list(extra)
-    tstr, park = tstr or {}, park or {}
-    for t in GT:
-        ts = tstr.get(t, 4)
-        pk += mm_byte(O_P2 + 30 * t + 4, ts) + [b(LIVE_P2 + 72 * t + 4, ts)]           # TSTR (VARI)
-        if t in emus:
-            pk += mm_byte(O_P2 + 30 * t + 5, EM[emus[t]]) + [b(LIVE_P2 + 72 * t + 5, EM[emus[t]])]
-        if t in park:
-            pk += mm_byte(O_P2 + 30 * t + PARK2[ST], EM[park[t]])
-        pk += mm_byte(O_SLOT5 + 5 * t, G_SLOT[t]) + [b(MM_LIVE_SLOT + 72 * t, G_SLOT[t])]
-        st = G_STEPS[t] - 1
-        pk.append(b(MMDB + t * 0x91a + 7 - st // 8, 1 << (st % 8)))                       # trig mask
-    pk += mm_fx({t: fx1.get(t, "NONE") for t in GT}, {t: "DARK" for t in GT})
-    return "-:poke:" + ";".join(pk)
-
-
-def guard_scn(name, emus, fx1, frames=G_FRAMES, img=None):
-    s = Scn(name, frames, proj=MM, img=img)
-    s.add(mm_setup(emus, fx1))
-    s.guard = dict(emus=emus, fx1=fx1)
-    return s
-
-
-# the toast tests (spec §6a item 2): T5-T7 on VARI SP12 with DJ EQ on their FX1 (latched in
-# bar 1 by frame ~2,000), then the user's own action on T8 at T_F0..: EMUS turned through
-# P2EDIT, TSTR onto VARI through P2EDIT, ATTR TIMESTRETCH BEAT -> VARI under AUTO through
-# the ATTR value-up key handler. NOTIFY is captured (and still runs) from the start.
-T_F0 = 2600
-STATIC_SET = 0x100d5b30                          # STATIC sample settings records, stride 0x448
-ATTR_UP = 0x4006edc8                             # the audio editor's value-up key handler
+G_FRAMES = 8200                                # bar 2 from ~5512
+STATIC_SET = 0x100d5b30                        # STATIC sample settings records, stride 0x448
+ATTR_UP = 0x4006edc8                           # the audio editor's value-up key handler
 ATTR_SLOT, ATTR_MACH, ATTR_ROW, ATTR_MODE = 0x46c8d19c, 0x46c8d1a0, 0x460e5e74, 0x460e5e5c
+RELOAD, SET_MACHINE3 = 0x4004aab4, 0x400972fc
+FX_YES = {1: 0x400526e4, 2: 0x40052474}        # the FX choosers' YES handlers (key handlers)
+FX_CUR = {1: 0x460d5c94, 2: 0x460d5ca8}        # their cursor rows
+FX_LIST = {1: 0x400d6060, 2: 0x400d6090}       # their rows (-> P, whose long is the type id)
+
+
+def mmpart(part):
+    return MMDB + 0x8ed80 + part * PSTRIDE
+
+
+def mm_byte(off, v, part=0):
+    return [b(mmpart(part) + off, v), b(MMSH + part * PSTRIDE + off, v)]
 
 
 def lpoke(a, v):
     return [b(a + i, x) for i, x in enumerate((v & 0xffffffff).to_bytes(4, "big"))]
 
 
-def toast_scn(name, emus, fx1, actions, tstr=None, park=None, extra=()):
-    """actions: [(frame, tag, [steps], (track, engine asked))]; each runs with the capture
-    reset first and dumps it after (tag.ncap), with T8's EMUS / TSTR bytes and the toast pair."""
-    s = Scn(name, 4200, proj=MM)
-    s.add(mm_setup(emus, fx1, tstr, park, extra), "-:poke:" + ";".join(ncap_stub()))
-    g_dump(s, T_F0 - 1, "pre")
-    s.add(poke(T_F0 - 1, [b(UI_TRACK, 7)] + lpoke(PAGE_M, ST) + lpoke(ENC_F_HELD, 0)))
-    for fr, tag, steps, _ in actions:
-        s.add(poke(fr, ncap_reset()))
-        s.add(*steps)
-        s.dump(fr, NCAP_BUF, 12, f"{tag}.ncap")
-        s.dump(fr, NOTIF_T, 8, f"{tag}.toast")     # 0x460d1e6c countdown, 0x460d1e70 handle
-        s.dump(fr, MMP + O_P2 + 30 * 7, 30, f"{tag}.p2")
-        s.dump(fr, STATIC_SET + 0x448 * G_SLOT[7] + 0x110, 4, f"{tag}.tsmode")
-    s.toast = dict(emus=emus, fx1=fx1, actions=actions)
+def fx_row(bus, name):
+    """the chooser row of an FX type in THIS image (the DSP install edits FX2's rows)"""
+    img = IMG.read_bytes()
+    L = lambda a: struct.unpack(">I", img[a - 0x40000400:a - 0x40000400 + 4])[0]
+    i = 0
+    while (p := L(FX_LIST[bus] + 4 * i)):
+        if L(p) == FXID[name]:
+            return i
+        i += 1
+    raise KeyError(f"FX{bus} offers no {name}")
+
+
+def trig_masks(pattern):
+    out = []
+    for t in GT:
+        st = G_STEPS[t] - 1
+        out.append(b(MMDB + pattern * 0x8ed8 + t * 0x91a + 7 - st // 8, 1 << (st % 8)))
+    return out
+
+
+def track_cfg(t, part, emus=None, tstr=4, park=None, slot=None, m=ST, live=False):
+    """track t's STATIC (m) row: TSTR, EMUS in the TSNS slot (on VARI) or parked, the slot"""
+    pk = mm_byte(O_P2 + 30 * t + 6 * m + 4, tstr, part)
+    if live:
+        pk.append(b(LIVE_P2 + 72 * t + 4, tstr))
+    if emus is not None:
+        pk += mm_byte(O_P2 + 30 * t + 6 * m + 5, EM[emus], part)
+        if live:
+            pk.append(b(LIVE_P2 + 72 * t + 5, EM[emus]))
+    if park is not None:
+        pk += mm_byte(O_P2 + 30 * t + PARK2[m], EM[park], part)
+    sl = G_SLOT[t] if slot is None else slot
+    pk += mm_byte(O_SLOT5 + 5 * t + m, sl, part)
+    if live:
+        pk.append(b(MM_LIVE_SLOT + 72 * t, sl))
+    return pk
+
+
+def fx_cfg(fx1, fx2, part=0, live=False):
+    out = []
+    for t in GT:
+        for off, n in ((t, fx1.get(t, "NONE")), (8 + t, fx2.get(t, "DARK"))):
+            out += mm_byte(off, FXID[n], part)
+            if live:
+                out.append(b((0x80000ec4 if off < 8 else 0x80000ecc) + t, FXID[n]))
+    return out
+
+
+def part1_setup():
+    """part 1 (not playing), consistent as a saved Part: T5 not VARI (PTCH 70, QUAN 109
+    parked; TSNS 30, EMUS 127 parked), T6-T8 VARI SP12, FX1 DJ EQ x4, FX2 DARK x4"""
+    pk = mm_byte(O_P1 + 30 * 4 + 0, 70, 1) + mm_byte(O_P1 + 30 * 4 + PARK1[ST], 109, 1)
+    pk += track_cfg(4, 1, tstr=0, park="SP12") + mm_byte(O_P2 + 30 * 4 + 5, 30, 1)
+    for t in (5, 6, 7):
+        pk += track_cfg(t, 1, emus="SP12")
+    pk += [x for t in GT for x in mm_byte(O_MACH + t, ST, 1)]
+    return pk + fx_cfg({t: "DJEQ" for t in GT}, {}, part=1)
+
+
+SAVED = MMDB + 0x9504a                          # the saved copy of part 0 (RELOAD's source)
+
+
+def saved_setup(emus, fx1):
+    """part 0's saved copy (poked, and flagged saved): T5-T8 VARI on emus, FX1 fx1, FX2 DARK"""
+    pk = [b(MMDB + 0x9b312 + 0, 1)]
+    for t in GT:
+        for off, v in ((O_P2 + 30 * t + 4, 4), (O_P2 + 30 * t + 5, EM[emus[t]]), (O_SLOT5 + 5 * t, G_SLOT[t]),
+                       (O_MACH + t, ST), (t, FXID[fx1.get(t, "NONE")]), (8 + t, FXID["DARK"])):
+            pk.append(b(SAVED + off, v))
+    return pk
+
+
+def flex_side(t, emus):
+    """track t's FLEX row stored on VARI with EMUS in the slot (FLEX slot 7, 120 BPM)"""
+    return (mm_byte(O_P2 + 30 * t + 6 * FL + 4, 4) + mm_byte(O_P2 + 30 * t + 6 * FL + 5, EM[emus]) +
+            mm_byte(O_SLOT5 + 5 * t + FL, 7))
+
+
+def net_scn(name, emus, fx1, fx2=None, tstr=None, park=None, slots=None, extra=(), frames=G_FRAMES, img=None):
+    """Before the transport (rp_prev forgotten, so the first polls adopt): T5-T8 on the
+    settings given -- a track in `emus` on VARI (or the TSTR in `tstr`) with that EMUS in its
+    slot, any other on the TSTR in `tstr` (else OFF); parks; slots; trigs at steps 1/3/5/7;
+    FX1 as given, FX2 DARK unless given. NOTIFY captured (and still run) from the start."""
+    tstr, park, slots, fx2 = tstr or {}, park or {}, slots or {}, fx2 or {}
+    pk = list(extra)
+    for t in GT:
+        ts = tstr.get(t, 4 if t in emus else 0)
+        pk += track_cfg(t, 0, emus=emus.get(t), tstr=ts, park=park.get(t), slot=slots.get(t), live=True)
+    pk += trig_masks(0) + fx_cfg(fx1, fx2, live=True)
+    s = Scn(name, frames, proj=MM, img=img)
+    s.add("-:poke:" + ";".join(pk), "-:poke:" + ";".join(ncap_stub()))
+    s.cfg = dict(emus=emus, fx1=fx1, fx2=fx2, tstr=tstr, park=park)
+    s.dump(frames - 20, NCAP_BUF, 12, "end.ncap")
+    g_dump(s, frames - 20, "end")
     return s
 
 
+def fx_actions(s, track, acts):
+    """the FX choosers' YES on `track` (or each action's own), the cursor on the type named"""
+    s.add(poke(2599, ncap_reset()))
+    out = []
+    for i, a in enumerate(acts):
+        tag, bus, name = a[:3]
+        t = a[3] if len(a) > 3 else track
+        fr = 2600 + 100 * i
+        s.add(poke(fr, ncap_reset() + [b(UI_TRACK, t)] + lpoke(FX_CUR[bus], fx_row(bus, name))),
+              call(fr, FX_YES[bus], 0x31, 1))
+        s.dump(fr + 90, NCAP_BUF, 12, f"{tag}.ncap")
+        s.dump(fr + 90, mmpart(0), 16, f"{tag}.fx")
+        out.append((tag, bus, name, t))
+    s.net = dict(kind="fx", acts=out)
+
+
 def g_dump(s, frame, tag):
-    """voice +0 (sounding), render +36 (the carried engine), the guard's state"""
+    """voice +0 (sounding), render +36 (the carried engine)"""
     d = OUTD / s.name
-    s.add(f"{frame}:dump:0x800049d8,{168 * 8:#x}={d / (tag + '.voice')};0x80004898,{40 * 8:#x}={d / (tag + '.render')};"
-          f"{S['vg_down']:#x},8={d / (tag + '.down')};{S['vg_stamp']:#x},32={d / (tag + '.stamp')};"
-          f"{S['vg_est']:#x},4={d / (tag + '.est')}")
+    s.add(f"{frame}:dump:0x800049d8,{168 * 8:#x}={d / (tag + '.voice')};0x80004898,{40 * 8:#x}={d / (tag + '.render')}")
 
 
 # SRC SETUP on the panel's track: [SRC] pressed twice (0x22), as on the unit
@@ -731,24 +830,25 @@ TRACK_KEY = lambda t, k: [(t, f"key {0x10 + k:#x} down"), (t + 100, f"key {0x10 
 ENC = lambda t0, dt, ds: [(t0 + dt * i, f"enc 5 {d}") for i, d in enumerate(ds)]
 O, S9, SP = "OT", "S950", "SP12"
 PANEL = {
-    # single detents, 150 ms apart: seven right, seven left
-    "slow": (ENC(1500, 150, [1] * 7 + [-1] * 7), [O] * 5 + [S9] * 2 + [S9] * 5 + [O] * 2),
-    # a fast spin, a report every 3 ms: twelve right, twelve left -- never more than one stop per six
-    "fast": (ENC(1500, 3, [1] * 12) + ENC(1900, 3, [-1] * 12), [O] * 5 + [S9] * 6 + [SP] + [SP] * 5 + [S9] * 6 + [O]),
+    # single detents, 150 ms apart: seven right, seven left (four detents per stop)
+    "slow": (ENC(1500, 150, [1] * 7 + [-1] * 7), [O] * 3 + [S9] * 4 + [S9] * 3 + [O] * 4),
+    # a fast spin, a report every 3 ms: twelve right, twelve left -- never more than one stop per four
+    "fast": (ENC(1500, 3, [1] * 12) + ENC(1900, 3, [-1] * 12),
+             [O] * 3 + [S9] * 4 + [SP] * 5 + [SP] * 3 + [S9] * 4 + [O] * 5),
     # reports carrying several detents (the panel's count, or the parser's coalescing)
     "multi": (ENC(1500, 150, [3, 3, 6, -2, -4, -12]), [O, S9, SP, SP, S9, O]),
     # an encoder at rest bouncing +1 / -1: nothing moves
     "jitter": (ENC(1500, 40, [1, -1] * 6), [O] * 12),
     # a right turn with a back-bounce every third report: each bounce restarts the count
     "bounce": (ENC(1500, 40, [1, 1, -1] * 6), [O] * 18),
-    # the encoder pushed while turning (P2EDIT's x7): still six detents per stop
+    # the encoder pushed while turning (P2EDIT's x7): still four detents per stop
     "held": ([(1400, "key 0x3d down")] + ENC(1500, 150, [1] * 7 + [-1] * 7) + [(3700, "key 0x3d up")],
-             [O] * 5 + [S9] * 2 + [S9] * 5 + [O] * 2),
-    # half a count, then the page closed and re-opened; then half a count, a track change
-    # and back (each re-opens the page): the count restarts every time
-    "reset": (ENC(1500, 150, [1] * 3) + CLOSE_SETUP(2200) + REOPEN_SETUP(2700) + ENC(3300, 150, [1] * 9)
-              + TRACK_KEY(4800, 1) + TRACK_KEY(5300, 0) + ENC(5900, 150, [1] * 6),
-              [O] * 3 + [O] * 5 + [S9] + [S9] * 3 + [S9] * 5 + [SP]),
+             [O] * 3 + [S9] * 4 + [S9] * 3 + [O] * 4),
+    # three detents, then the page closed and re-opened; then five, a track change and back
+    # (each re-opens the page), then four: the count restarts every time
+    "reset": (ENC(1500, 150, [1] * 3) + CLOSE_SETUP(2200) + REOPEN_SETUP(2700) + ENC(3300, 150, [1] * 5)
+              + TRACK_KEY(4300, 1) + TRACK_KEY(4800, 0) + ENC(5400, 150, [1] * 4),
+              [O] * 3 + [O] * 3 + [S9] * 2 + [S9] * 3 + [SP]),
 }
 
 
@@ -764,7 +864,8 @@ def run(sc, jobs):
         groups.setdefault((s.proj["project"], str(s.img or IMG)), []).append(s)
     procs = []
     for (pname, img), ss in groups.items():
-        args = base(ss[0].proj, ss[0].img) + ["--dsp", "--main-level", "64", "--scenario-jobs", str(jobs)]
+        args = base(ss[0].proj, ss[0].img) + ["--dsp", "--main-level", "64", "--scenario-jobs", str(jobs),
+                                              "--watch-pc", f"{NOTIFY:#x}"]
         for s in ss:
             (OUTD / s.name).mkdir(parents=True, exist_ok=True)
             a = f"{OUTD / s.name / 'log.txt'} --sequencer --internal-clock --frames {s.frames}"
@@ -854,12 +955,13 @@ def check(name, s):
         t.eq("adopted: slots and parks unchanged", (a.p1(0, FL), a.p2(0, FL), a.park(0, 1, FL), a.park(0, 2, FL)), (109, 127, 70, 30))
         t.eq("adopted: rp_prev[T1] FL / ST", (a.rp(0, FL), a.rp(0, ST)), (1, 0))
     elif name == "p2edit":
-        want = {"e0": "OT", "e5": "OT", "e6": "S950", "e7": "S950", "e8": "S950", "e9": "S950", "e10": "SP12",
-                "e11": "SP12", "e12": "SP12", "e13": "S950", "e14": "OT", "e15": "SP12", "e16": "SP12",
-                "e17": "SP12", "e18": "SP12", "e19": "SP12", "e20": "S950"}
+        want = {"e0": "OT", "e8": "SP12", "e9": "SP12", "e10": "S950", "e11": "S950", "e12": "S950",
+                "e13": "SP12", "e14": "SP12", "e15": "SP12", "e16": "S950", "e17": "OT", "e18": "SP12",
+                "e19": "SP12", "e20": "SP12", "e21": "SP12", "e22": "SP12", "e23": "S950"}
         got = {k: EM_NAME.get((d / k).read_bytes()[0], (d / k).read_bytes()[0]) for k in want}
-        t.eq("EMUS through P2EDIT: +1x5 | +1 | -1 | +1 | -1 +1 -1 +1 | +12 | pushed +1x4 | pushed -1x5 | pushed -1 | "
-             "30 -1 | 100 +1 | -1x5 | (T2) -1 | -1x4 | (open) -1 | -1x5", got, want)
+        t.eq("EMUS through P2EDIT, FOUR detents per stop: +8 | -1x3 | -1 | +1 | -1 +1 -1 +1 | pushed +1x3 | "
+             "pushed +1 | pushed -1x3 | pushed -1 | 30 -1 | 100 +1 | -1x3 | (T2) -1 | -1x2 | (open) -1 | -1x3",
+             got, want)
         t.eq("gate off: stock step (64 + 1)", (d / "gateoff").read_bytes()[0], 65)
         t.eq("TSTR through P2EDIT: BEAT +1 -> VARI, +1 stays", ((d / "tstr1").read_bytes()[0], (d / "tstr2").read_bytes()[0]), (4, 4))
         a = cp["after"]
@@ -955,10 +1057,8 @@ def check(name, s):
         t.eq("not VARI: rp_prev T1..T4", [e.rp(k, FL) for k in range(4)], [0, 0, 0, 0])
     if getattr(s, "latch", False):
         latch_check(t, d)
-    if hasattr(s, "guard"):
-        guard_check(t, s, d)
-    if hasattr(s, "toast"):
-        toast_check(t, s, d)
+    if hasattr(s, "net"):
+        net_check(t, s, d, log)
     return t
 
 
@@ -993,10 +1093,7 @@ def g_state(d, tag):
     v = (d / f"{tag}.voice").read_bytes()
     r = (d / f"{tag}.render").read_bytes()
     return dict(sounding={t: v[168 * t] != 0 for t in range(8)},
-                eng={t: (struct.unpack(">I", r[40 * t + 36:40 * t + 40])[0] >> 2) & 3 for t in range(8)},
-                down=list((d / f"{tag}.down").read_bytes()),
-                stamp=struct.unpack(">8I", (d / f"{tag}.stamp").read_bytes()),
-                est=struct.unpack(">I", (d / f"{tag}.est").read_bytes())[0])
+                eng={t: (struct.unpack(">I", r[40 * t + 36:40 * t + 40])[0] >> 2) & 3 for t in range(8)})
 
 
 def seg(per, t, lo, hi):
@@ -1033,177 +1130,186 @@ def toast_px(text):
     return w
 
 
-def toast_name(e):
-    return None if e is None else {0: "MAX DSP: OT USED", 1: "MAX DSP: S950 USED"}[e]
+def emus_at(part, t, m=ST):
+    """the byte in track t's machine-m TSNS slot (EMUS on VARI) and its park"""
+    return part[O_P2 + 30 * t + 6 * m + 5], part[O_P2 + 30 * t + PARK2[m]]
 
 
-def guard_check(t, s, d):
-    """Every expectation derives from the VG_* block through GuardModel (the spec's rules),
-    never from hand-written engines: a price change moves the expectations with it. Each
-    scenario also checks that it still DISCRIMINATES -- that it steps something down, and
-    that the wrong rules (oldest first, silence ignored) would give another result -- so a
-    price change that makes it toothless fails loudly instead of passing quietly."""
+def notify_hits(log):
+    """--watch-pc 0x4005a2b8 hits -> [(ret, text, dur, sp)]"""
+    out = []
+    for l in log.splitlines():
+        m = re.match(r"\s+\[\s*\d+\] at 0x4005a2b8 .*\[sp (\S+): (\S+) (\S+) (\S+)", l)
+        if m:
+            out.append((int(m[2], 16), int(m[3], 16), int(m[4], 16), int(m[1], 16)))
+    return out
+
+
+UI_STACK = (0x460d6de4, 0x460d8de4)              # the UI task's stack (its TCB's, 0x2000 B)
+
+
+def toast_ctx(t, log):
+    """spec §6b item 4: MAX DSP: EMU LIMIT only from the UI task's message loop (vg_tick)"""
+    if "str_emu_limit" not in S:                 # an older build (VEM5): no such toast
+        return []
+    ours = [h for h in notify_hits(log) if h[1] == S["str_emu_limit"]]
+    bad = [h for h in ours if not (S["vg_tick"] <= h[0] < S["vg_sig"] and UI_STACK[0] <= h[3] < UI_STACK[1])]
+    t.eq("every MAX DSP: EMU LIMIT came from vg_tick, on the UI task's stack", [hex(h[0]) for h in bad], [])
+    t.eq("... with 1.2 s (0x48)", sorted({h[2] for h in ours}), [0x48] if ours else [])
+    return ours
+
+
+def net_check(t, s, d, log):
+    """The safety net and the refusals, every expectation from NetModel."""
+    c, n = s.cfg, s.net
+    m = NetModel(getattr(s, "budget0", None))
+    fx = {k: (c["fx1"].get(k, "NONE"), c["fx2"].get(k, "DARK")) for k in GT}
+    eng0 = {k: ENG[e] for k, e in c["emus"].items()}
+    ours = toast_ctx(t, log)
+    end_count = ncap(d, "end.ncap")[0] if (d / "end.ncap").exists() else None
+    kind = n["kind"]
     per = core0_engines(d)
-    g = s.guard
     trigs = {k: [fr for fr, _, tr in per.get(k, []) if tr] for k in GT}
     t.notes.append("trig frames " + " ".join(f"T{k + 1}:{v[:3]}" for k, v in trigs.items()))
-    if any(len(trigs[k]) < 2 for k in GT):
-        t.fails.append("each of T5-T8 must trigger twice (bars 1 and 2): the run is too short or the trigs were not set")
-        return
-    first_done = max(trigs[k][0] for k in GT)
-    fx0 = [(g["fx1"].get(k, "NONE"), "DARK") for k in GT]
-    # the latch, bar 1 (in trig order) and bar 2 (same FX unless changed)
-    m = GuardModel()
-    order = sorted(GT, key=lambda k: trigs[k][0])
-    want = {k: ENG[g["emus"][k]] for k in GT}
-    bar1 = {k: m.latch(fx0, k, want[k]) for k in order}
     nm = lambda e: ENG_NAME[e]
-    t.notes.append("the model's latch, bar 1: " + " ".join(f"T{k + 1} {nm(bar1[k])}" for k in GT) +
-                   f" (est {m.est(fx0)}, budget {m.budget})")
-    name = s.name
-    if name in ("guard_x2", "guard_x2_ref", "guard_x3", "guard_latch"):
-        down = {k: bar1[k] < want[k] for k in GT}
-        if name in ("guard_x2", "guard_x2_ref"):
-            t.eq("spec §6 item 6: 4 x SP12 + DARK x4 + DJ EQ x2 does not step down (the model)", any(down.values()), False)
-        elif name == "guard_x3":
-            t.eq("spec §6 item 6: 4 x SP12 + DARK x4 + DJ EQ x3 steps down at the latch (the model)", any(down.values()), True)
+
+    def after(eng_after, dump="after.part", partno=0):
+        p = (d / dump).read_bytes()
+        mach = lambda k: p[O_MACH + k] if p[O_MACH + k] in (ST, FL) else ST
+        got = {k + 1: EM_NAME.get(emus_at(p, k, mach(k))[0], emus_at(p, k, mach(k))[0]) for k in eng_after}
+        t.eq(f"EMUS after ({dump}, each track's current machine)", got, {k + 1: nm(e) for k, e in eng_after.items()})
+        return p
+
+    def played(eng_after, lo):
+        for k, e in eng_after.items():
+            nxt = [fr for fr in trigs[k] if fr >= lo]
+            if not nxt:
+                t.fails.append(f"T{k + 1}: no trig after frame {lo}")
+                continue
+            t.eq(f"T{k + 1} plays {nm(e)} from its trig at frame {nxt[0]}",
+                 [nm(x) for x in seg(per, k, nxt[0], s.frames - 30)], [nm(e)])
+
+    def discriminates(eng_in, fxx, wrong=("low_first", "s950_first")):
+        right = m.fix(fxx, eng_in)[0]
+        t.eq("the model steps something here", right != eng_in, True)
+        for w in wrong:
+            t.eq(f"the right order differs from '{w}' here", m.fix(fxx, eng_in, w)[0] != right, True)
+        return right
+
+    if kind in ("load", "reload", "paste", "machine", "gate", "tstr", "attr", "part"):
+        if kind == "load":
+            fxx, eng_in = fx, eng0
+        elif kind == "reload":
+            fxx = {k: ("DJEQ", "DARK") for k in GT}
+            eng_in = {4: 1, 5: 2, 6: 2, 7: 2}
+        elif kind == "paste":
+            fxx = {**fx, 7: fx[4]}
+            eng_in = {**eng0, 7: eng0[4]}
+        elif kind == "machine":
+            fxx, eng_in = fx, {**eng0, 7: ENG["SP12"]}
+        elif kind in ("gate", "attr"):
+            fxx = fx
+            eng_in = {**eng0, **{k: ENG[c["park"][k]] for k in c["park"]}}
+        elif kind == "tstr":
+            fxx, eng_in = fx, {**eng0, n["enter"]: ENG[c["park"][n["enter"]]]}
+        else:                                   # part: part 1
+            fxx = {k: ("DJEQ", "DARK") for k in GT}
+            eng_in = {5: 2, 6: 2, 7: 2}
+        if s.name == "net_tstr_fit":
+            want = m.fix(fxx, eng_in)[0]
+            t.eq("the model: it fits, nothing steps", want, eng_in)
+        elif s.name == "net_tstr_order":
+            want = m.fix(fxx, eng_in)[0]
+            t.eq("the model steps the highest SP12 track (T8), not the one entering (T6)", want[7] == 0 and want[5] == 2, True)
+            discriminates(eng_in, fxx, ("low_first",))
+        elif kind == "machine" or kind == "gate" or kind == "tstr":
+            want = discriminates(eng_in, fxx, ("low_first",))
         else:
-            t.eq("the scenario steps an S950 voice to OT at the latch (the model)",
-                 any(want[k] == 1 and bar1[k] == 0 for k in GT), True)
-        for k in GT:
-            lo, hi = trigs[k][0] + 1, trigs[k][1] - 1
-            t.eq(f"T{k + 1} bar 1: the engine it plays, from its first trig (the model's latch)",
-                 [nm(e) for e in seg(per, k, lo, hi)], [nm(bar1[k])])
-            t.eq(f"T{k + 1} bar 2: the same at its next trig", [nm(e) for e in seg(per, k, trigs[k][1], s.frames - 30)],
-                 [nm(bar1[k])])
-        if name != "guard_x2_ref":
-            st = g_state(d, "f1")
-            t.eq("vg_down T5..T8 (stepped down at the latch)", st["down"][4:8], [int(down[k]) for k in GT])
-            if not m.free(fx0):              # a free core keeps no estimate (nothing can overrun)
-                t.eq("the estimate (vg_est) = the model's", st["est"], m.est(fx0))
-        if name == "guard_x3":
-            t.eq("no toast: the guard acting on its own at the latch says nothing", ncap(d, "end.ncap")[0], 0)
-        if name == "guard_latch":
-            # spec §6a item 1: the dial stays on the user's choice, the readout names the
-            # engine played, marked
-            ef = S["emus_fmt"]
-            fdn = {0: S["emus_fmt_ot_dn"], 1: S["emus_fmt_s95_dn"]}
-            for tag, k in (("w5", 4), ("w6", 5), ("w7", 6), ("w8", 7)):
-                c = captured(d, tag)
-                exp = (EM[g["emus"][k]], fdn[bar1[k]] if down[k] else ef)
-                t.eq(f"{tag}: T{k + 1} EMUS {g['emus'][k]}, playing {nm(bar1[k])}: the dial on the choice, "
-                     f"the readout {'marked' if down[k] else 'plain'}", (c["value"], c["fmt"]), exp)
-            t.eq("the scenario shows an OT! readout", any(down[k] and bar1[k] == 0 for k in GT), True)
-        if name == "guard_x2":
-            ref = vem_passes(OUTD / "guard_x2_ref" / "log.txt.vem")
-            new = vem_passes(d / "log.txt.vem")
-            for c in (0, 1):
-                n = min(len(ref[c]), len(new[c]))
-                diff = [i for i in range(n) if new[c][i][:4] != ref[c][i][:4]]
-                t.eq(f"core {c}: every pass (l:$40, LC, track) equals VEM3's ({n} passes)", (diff[:3], len(ref[c]) == len(new[c])), ([], True))
-        return
-    # mid-note: x2 at the start, a third DJ EQ at G_F1
-    pre, mid, rm, end = (g_state(d, k) for k in ("pre", "mid", "rm", "end"))
-    t.eq("bar 1: the model's latch (x2)", {k + 1: nm(pre["eng"][k]) for k in GT}, {k + 1: nm(bar1[k]) for k in GT})
-    silent = {k for k in GT if not pre["sounding"][k]}
-    t.notes.append(f"sounding at G_F1: {[k + 1 for k in GT if pre['sounding'][k]]}, silent {[k + 1 for k in sorted(silent)]}")
-    fx1 = [(("DJEQ" if k == 6 else g["fx1"].get(k, "NONE")), "DARK") for k in GT]
-    wrong_old, wrong_sil = m.copy(), m.copy()
-    m.mid(fx1, silent)
-    wrong_old.mid(fx1, silent, oldest=True)
-    wrong_sil.mid(fx1, silent, silent_first=False)
-    exp = dict(m.eng)
-    stepped = [k for k in GT if exp[k] < bar1[k]]
-    t.notes.append("the model, mid-note: " + " ".join(f"T{k + 1} {nm(exp[k])}" for k in GT) +
-                   f" | oldest first: {' '.join(nm(wrong_old.eng[k]) for k in GT)}"
-                   f" | silence ignored: {' '.join(nm(wrong_sil.eng[k]) for k in GT)}")
-    t.eq("the scenario steps something down mid-note (the model)", bool(stepped), True)
-    if name == "guard_mid":
-        t.eq("the scenario tells most-recent-first from oldest-first (the models differ)", exp != wrong_old.eng, True)
-    if name == "guard_silent":
-        t.eq("T6 silent (its voice stopped at G_F1 - 4)", 5 in silent, True)
-        t.eq("the scenario tells silent-first from silence ignored (the models differ)", exp != wrong_sil.eng, True)
-    t.eq("mid-note: the core's engines = the model's (silent first, then the most recently started)",
-         {k + 1: nm(mid["eng"][k]) for k in GT}, {k + 1: nm(exp[k]) for k in GT})
-    t.eq("mid-note: vg_down = the stepped-down tracks", mid["down"][4:8], [int(exp[k] < want[k]) for k in GT])
-    t.eq("mid-note: vg_est = the model's estimate", mid["est"], m.est(fx1))
-    # at once: the DSP sees it within three frames of the poke, and before that nothing moved
-    for k in stepped:
-        first = min((fr for fr, e, _ in per[k] if fr >= G_F1 - 50 and e != bar1[k]), default=None)
-        t.eq(f"T{k + 1}: stepped down at once (first cheaper pass within 3 frames of the poke at {G_F1})",
-             first is not None and G_F1 <= first <= G_F1 + 3, True)
-        t.notes.append(f"T{k + 1} first cheaper pass at frame {first}")
-    t.eq("before the third DJ EQ: no step-down", {k + 1: seg(per, k, first_done + 1, G_F1 - 1) for k in GT},
-         {k + 1: [bar1[k]] for k in GT})
-    # removed at G_F2: nothing comes back until each track's next trig
-    t.eq("DJ EQ removed: the stepped-down engines stay (no restore mid-note)", {k + 1: nm(rm["eng"][k]) for k in GT},
-         {k + 1: nm(exp[k]) for k in GT})
-    m2 = m.copy()                                    # bar 2: each trig latches again, x2
-    bar2 = {k: m2.latch(fx0, k, want[k]) for k in sorted(GT, key=lambda k: trigs[k][1])}
-    for k in stepped:
-        nxt = trigs[k][1]
-        t.eq(f"T{k + 1}: cheaper until its next trig (frame {nxt})", seg(per, k, G_F1 + 4, nxt - 1), [exp[k]])
-        t.eq(f"T{k + 1}: back on {nm(bar2[k])} (the model's bar-2 latch) from its next trig on",
-             seg(per, k, nxt, s.frames - 30), [bar2[k]])
-    t.eq("end: the model's bar-2 engines, nothing marked", ({k + 1: nm(end["eng"][k]) for k in GT}, end["down"][4:8]),
-         ({k + 1: nm(bar2[k]) for k in GT}, [int(bar2[k] < want[k]) for k in GT]))
-    t.eq("no toast: the guard's own step-down (mid-note) and its restore say nothing", ncap(d, "end.ncap")[0], 0)
-    if name == "guard_mid":
-        ef, fdn = S["emus_fmt"], {0: S["emus_fmt_ot_dn"], 1: S["emus_fmt_s95_dn"]}
-        for tag, k in (("w8", 7), ("w7", 6), ("w5", 4)):
-            c = captured(d, tag)
-            down = exp[k] < want[k]
-            t.eq(f"{tag}: T{k + 1} (EMUS SP12, playing {nm(exp[k])}): the dial stays on SP12, the readout "
-                 f"{'marked' if down else 'plain'}", (c["value"], c["fmt"]), (EM["SP12"], fdn[exp[k]] if down else ef))
-        t.eq("the scenario shows an S95! readout", any(exp[k] == 1 for k in stepped), True)
-        fd = {fn: (d / fn).read_bytes().split(b"\0")[0].decode() for fn in ("emus_fmt_ot_dn", "emus_fmt_s95_dn")}
-        t.eq("the marked readouts (the choice's value passed in)", fd, {"emus_fmt_ot_dn": "OT!", "emus_fmt_s95_dn": "S95!"})
-        c = captured(d, "w8end")
-        t.eq(f"w8end: T8 back on {nm(bar2[7])}, the plain readout", (c["value"], c["fmt"]), (EM["SP12"], ef))
+            want = discriminates(eng_in, fxx, ("low_first", "s950_first") if 1 in eng_in.values() else ("low_first",))
+        t.notes.append(f"the model: est {m.est(fxx, eng_in)} -> {m.est(fxx, want)} (budget {m.budget}): "
+                       + " ".join(f"T{k + 1} {nm(e)}" for k, e in sorted(want.items())))
+        stepped = want != eng_in
+        if kind == "part":
+            p1 = (d / "p1_8300.part").read_bytes()
+            got = {k + 1: EM_NAME.get(emus_at(p1, k)[0], emus_at(p1, k)[0]) for k in (5, 6, 7)}
+            t.eq("part 1's EMUS after the switch", got, {k + 1: nm(want[k]) for k in (5, 6, 7)})
+            t.eq("part 1's T5 (not VARI): PTCH 70 / QUAN 109 parked, TSNS 30 / EMUS 127 parked, untouched",
+                 (p1[O_P1 + 30 * 4], p1[O_P1 + 30 * 4 + PARK1[ST]], p1[O_P2 + 30 * 4 + 5], p1[O_P2 + 30 * 4 + PARK2[ST]]),
+                 (70, 109, 30, 127))
+            p0 = (d / "p0_8300.part").read_bytes()
+            t.eq("part 0 untouched (EMUS SP12 x4)", [EM_NAME.get(emus_at(p0, k)[0]) for k in GT], ["SP12"] * 4)
+            ui = (d / "ui.end").read_bytes()
+            t.eq("part 1 is current at the end", ui[3], 1)
+            played({k: want[k] for k in (5, 6, 7)}, 5400)
+            played({4: 0}, 5400)
+        else:
+            p = after(want)
+            if kind == "attr":
+                t.eq("slot 1's TIMESTRETCH is VARI", struct.unpack(">I", (d / "after.tsmode").read_bytes())[0], 4)
+            if kind in ("tstr", "machine", "paste"):
+                k = n.get("enter", 7)
+                if kind == "machine":
+                    t.eq("T8 on FLEX", p[O_MACH + 7], FL)
+                    t.eq("T8's FLEX EMUS", EM_NAME.get(emus_at(p, 7, FL)[0]), nm(want[7]))
+                else:
+                    t.eq(f"T{k + 1} on VARI", p[O_P2 + 30 * k + 4], 4)
+            played({k: e for k, e in want.items() if kind != "machine" or k != 7}, 5400)
+        t.eq("toasts by the end", end_count, 1 if stepped else 0)
+        t.eq("MAX DSP: EMU LIMIT raised", len(ours), 1 if stepped else 0)
+    elif kind == "emus":
+        eng = dict(eng0)
+        stop = eng.get(7, 0)
+        nt = 0
+        for tag, slot, dl in n["acts"]:
+            asked = max(0, min(2, stop + (1 if dl > 0 else -1) * (abs(dl) // 4)))
+            got_stop = m.cap(fx, {**eng, 7: stop}, 7, asked) if asked > stop else asked
+            refused = got_stop < asked
+            p2b = (d / f"{tag}.p2").read_bytes()
+            cn = ncap(d, f"{tag}.ncap")[0]
+            t.eq(f"{tag} ({dl:+d} detents, asks {nm(asked)}): stored", EM_NAME.get(p2b[5], p2b[5]), nm(got_stop))
+            t.eq(f"{tag}: toast", cn, 1 if refused else 0)
+            nt += refused
+            stop = got_stop
+        t.eq("MAX DSP: EMU LIMIT raised, once per refusal", len(ours), nt)
+        t.eq("the scenario refuses a dearer stop (the model)", m.cap(fx, eng0, 7, 2) < 2, True)
+    elif kind == "fx":
+        fxs = dict(fx)
+        eng = dict(eng0)
+        seen = []
+        for tag, bus, name, k in n["acts"]:
+            new = dict(fxs)
+            new[k] = (name, fxs[k][1]) if bus == 1 else (fxs[k][0], name)
+            refused = m.fx_refused(new, eng)
+            fxb = (d / f"{tag}.fx").read_bytes()
+            have = fxb[k] if bus == 1 else fxb[8 + k]
+            t.eq(f"{tag} T{k + 1} FX{bus} -> {name} (est {m.est(new, eng)}, stock alone {m.stock(new)}): "
+                 f"{'refused' if refused else 'lands'}", have, FXID[fxs[k][bus - 1]] if refused else FXID[name])
+            stepped = False
+            if not refused:
+                fxs = new
+                eng2, st = m.fix(fxs, eng)
+                stepped = bool(st)
+                eng = eng2
+            t.eq(f"{tag}: toast", ncap(d, f"{tag}.ncap")[0], 1 if (refused or stepped) else 0)
+            seen.append((refused, stepped))
+        t.eq("MAX DSP: EMU LIMIT raised, once per refusal or step-down", len(ours),
+             sum(1 for r, st in seen if r or st))
+        t.eq("the scenario refuses an FX type and lands another (the model)",
+             (any(r for r, _ in seen), any(not r for r, _ in seen)), (True, True))
+        if s.name == "ref_fx_alone":
+            t.eq("stock FX alone over: not refused, and the net then steps the emu track (the model)",
+                 seen[-1], (False, True))
+            t.eq("the end: every emu track on OT, nothing more (the model)", {k + 1: nm(e) for k, e in eng.items()},
+                 {k + 1: "OT" for k in eng})
+    elif kind == "under":
+        p = (d / "after.part").read_bytes()
+        t.eq("under budget: EMUS SP12 x4 kept", [EM_NAME.get(emus_at(p, k)[0]) for k in GT], ["SP12"] * 4)
+        t.eq("under budget: T8's FX1 SPATIALIZER landed", p[7], FXID["SPATIALIZER"])
+        t.eq("under budget: no toast", (end_count, len(ours)), (0, 0))
+        t.eq("under budget: the model fits throughout",
+             (m.est(fx, eng0) <= m.budget, m.est({**fx, 7: ("SPATIALIZER", "DARK")}, eng0) <= m.budget), (True, True))
+        played({k: 2 for k in GT}, 2)
 
-
-def toast_check(t, s, d):
-    """spec §6a item 2. The expected toast of every action comes from GuardModel.ask on the
-    model's own bar-1 latch (checked against the image's carried engines first)."""
-    g = s.toast
-    fx = [(g["fx1"].get(k, "NONE"), "DARK") for k in GT]
-    m = GuardModel()
-    for k in GT:                                     # bar 1 in trig order: T5..T8 (steps 1/3/5/7)
-        if k in g["emus"]:
-            m.latch(fx, k, ENG[g["emus"][k]])
-    pre = g_state(d, "pre")
-    t.eq("before the actions: the carried engines = the model's latch",
-         {k + 1: ENG_NAME[pre["eng"][k]] for k in GT}, {k + 1: ENG_NAME[m.eng.get(k, 0)] for k in GT})
-    texts = {S["str_max_s950"]: img_str(S["str_max_s950"]), S["str_max_ot"]: img_str(S["str_max_ot"])}
-    t.eq("the toast texts in the image", sorted(texts.values()), ["MAX DSP: OT USED", "MAX DSP: S950 USED"])
-    t.eq("their width in the stock toast font: the box (text + 15 px) fits the 128 px screen",
-         {v: toast_px(v) + 15 <= 128 for v in texts.values()}, {v: True for v in texts.values()})
-    seen = []
-    for fr, tag, _, asked in g["actions"]:
-        e = None if asked is None else m.ask(fx, 7, ENG[asked])
-        exp = toast_name(e) if (e is not None and e < ENG[asked]) else None
-        seen.append((asked, exp))
-        c, txt, dur = ncap(d, f"{tag}.ncap")
-        got = None if c == 0 else (texts.get(txt, f"text @{txt:#x}") if c == 1 else f"{c} toasts")
-        t.eq(f"{tag} (frame {fr}, asks {asked}): the toast", got, exp)
-        if exp:
-            cd, h = struct.unpack(">2I", (d / f"{tag}.toast").read_bytes())
-            t.eq(f"{tag}: NOTIFY(text, 0x30), the stock toast open (handle, countdown)", (dur, h != 0, cd), (0x30, True, 0x30))
-        p2b = (d / f"{tag}.p2").read_bytes()
-        tsm = struct.unpack(">I", (d / f"{tag}.tsmode").read_bytes())[0]
-        if s.name.startswith("toast_emus"):
-            t.eq(f"{tag}: the stored EMUS", EM_NAME.get(p2b[5], p2b[5]), asked or "OT")
-        elif s.name == "toast_tstr":
-            t.eq(f"{tag}: T8's TSTR", p2b[4], 3 if asked is None else 4)
-        elif s.name == "toast_attr":
-            t.eq(f"{tag}: the sample's TIMESTRETCH", tsm, 4)
-    kinds = {x for _, x in seen if x}
-    quiet = [a for a, x in seen if a not in (None, "OT") and x is None]
-    want_kind = {"toast_emus": "MAX DSP: S950 USED", "toast_emus_ot": "MAX DSP: OT USED",
-                 "toast_tstr": "MAX DSP: S950 USED", "toast_attr": "MAX DSP: S950 USED"}[s.name]
-    t.eq(f"the scenario raises '{want_kind}' (the model)", want_kind in kinds, True)
-    if s.name in ("toast_emus", "toast_tstr"):
-        t.eq("the scenario has an emu engine that fits: no toast (the model)", bool(quiet), True)
 
 
 def panel_trace(log):
@@ -1274,20 +1380,24 @@ def latch_check(t, d):
 
 
 def cost(frames=3000):
-    """The guard's own ColdFire cost (spec §6 item 5), measured. ot_emu --coverage counts every
-    ColdFire PC executed from the transport start; summed per frame over the unit (this image and
-    VEM3, each with its own symbols) and over the guard's routines (vg_core .. emus_idx: the
-    per-core pass and the latch). The guard's inline part (reading the carried engine, the two
-    calls) is in vem_frame: the unit's VEM4G - VEM3 difference includes it."""
+    """The guard's ColdFire cost (spec §6 item 5), measured. ot_emu --coverage counts every
+    ColdFire PC executed from the transport start; summed per frame over the unit (this image
+    and VEM3, each with its own symbols) and, for this image, over the guard's parts: the UI
+    loop's tail (vg_tick) with the signature (vg_sig) -- once per UI message, ~60 Hz -- and
+    the estimate / step-down (vg_scan .. vg_step_ot), run only when the signature changed;
+    its cost per change event = those instructions / the calls of vg_fix. The frame hook's
+    own share is the unit minus both."""
     import varispeed_emus_harness as H
     ref_syms = json.loads((IMG_REF.parent / "varispeed_emus_vem3_syms.json").read_text())
     imgs = {"new": (IMG, json.loads(SYMS.read_text())), "VEM3": (IMG_REF, ref_syms)}
+    fit = net_scn("cost_fit", {t: "SP12" for t in GT}, {4: "DJEQ", 5: "DJEQ"})
+    over = net_scn("cost_over", {4: "S950", 5: "SP12", 6: "SP12", 7: "SP12"}, {t: "DJEQ" for t in GT})
     cases = {
-        "otdemo_stock": (OTD, []),                       # no VARI track: the guard never runs
+        "otdemo_stock": (OTD, []),                       # no VARI track
         "otdemo_7sp12": (OTD, H.scenario_steps(dict(tempo=None, pre=True,
                                 tracks={t: dict(mode="VARI", emus="SP12") for t in range(7)}), "new")),
-        "mm_x2": (MM, [mm_setup({t: "SP12" for t in GT}, {4: "DJEQ", 5: "DJEQ"})]),
-        "mm_x3": (MM, [mm_setup({t: "SP12" for t in GT}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"})]),
+        "mm_4sp12_fit": (MM, fit.steps[:1]),             # SP12 x4 + DJ EQ x2: fits, nothing steps
+        "mm_over": (MM, over.steps[:1]),                 # over at the start: the net steps T8, T7 once
     }
     d = OUTD / "cost"
     d.mkdir(parents=True, exist_ok=True)
@@ -1305,23 +1415,78 @@ def cost(frames=3000):
     rows = {}
     for (c, i), _ in procs.items():
         sy = imgs[i][1]
+        g = sy["syms"]
         cov = [l.split() for l in open(d / f"{c}_{i}.cov")]
         cov = [(int(a, 16), int(n)) for a, n in cov]
         log = (d / f"{c}_{i}.log").read_text()
         n = int(re.search(r"frames run : (\d+)", log).group(1))
-        unit = sum(k for a, k in cov if sy["cave"] <= a < sy["end"]) / n
-        g = sy["syms"]
-        guard = sum(k for a, k in cov if g.get("vg_core", 0) <= a < g.get("emus_idx", 0)) / n if "vg_core" in g else 0.0
-        total = sum(k for a, k in cov) / n
-        rows[(c, i)] = (unit, guard, total)
-    print(f"{'scenario':16} {'image':6} {'unit/frame':>11} {'vg_*/frame':>11} {'all CF/frame':>13}")
+        rng = lambda lo, hi: sum(k for a, k in cov if lo <= a < hi)
+        unit = rng(sy["cave"], sy["end"])
+        if "vg_tick" in g and "vg_sig" in g:
+            nxt = min(v for v in g.values() if v > g["vg_sig"])
+            tail = rng(g["vg_tick"], nxt)
+            net = rng(g["vg_scan"], g["vg_fx_try"])
+            fixes = dict(cov).get(g["vg_fix"], 0)
+            ticks = dict(cov).get(g["vg_tick"], 0)
+        else:
+            tail = net = fixes = ticks = 0
+        rows[(c, i)] = dict(unit=unit / n, tail=tail / n, net=net / n, frame=(unit - tail - net) / n,
+                            fixes=fixes, ticks=ticks, net_total=net, total=sum(k for a, k in cov) / n,
+                            tail_per_tick=tail / ticks if ticks else 0)
+    print(f"{'scenario':14} {'image':5} {'unit/fr':>8} {'frame/fr':>9} {'tail/fr':>8} {'net/fr':>7} "
+          f"{'ticks':>6} {'tail/tick':>9} {'fixes':>6} {'net/fix':>8} {'allCF/fr':>9}")
     for c in cases:
         for i in imgs:
-            u, gg, tt = rows[(c, i)]
-            print(f"{c:16} {i:6} {u:11.1f} {gg:11.1f} {tt:13.1f}")
-        print(f"{'':16} {'delta':6} {rows[(c, 'new')][0] - rows[(c, 'VEM3')][0]:11.1f} {'':11} "
-              f"{rows[(c, 'new')][2] - rows[(c, 'VEM3')][2]:13.1f}")
+            r = rows[(c, i)]
+            print(f"{c:14} {i:5} {r['unit']:8.1f} {r['frame']:9.1f} {r['tail']:8.1f} {r['net']:7.1f} "
+                  f"{r['ticks']:6d} {r['tail_per_tick']:9.1f} {r['fixes']:6d} "
+                  f"{(r['net_total'] / r['fixes'] if r['fixes'] else 0):8.1f} {r['total']:9.1f}")
+        print(f"{'':14} {'delta':5} {rows[(c, 'new')]['unit'] - rows[(c, 'VEM3')]['unit']:8.1f} "
+              f"{rows[(c, 'new')]['frame'] - rows[(c, 'VEM3')]['frame']:9.1f}")
     (d / "cost.json").write_text(json.dumps({f"{c} {i}": v for (c, i), v in rows.items()}, indent=1))
+
+
+# deliberately wrong builds (and the low-budget test build): edits of varispeed_emus.s
+VARIANTS = {
+    "lowbudget": [(".equ    VG_BUDGET_C0, 3350", ".equ    VG_BUDGET_C0, 2600")],
+    "w_low_first": [("2:      move.l  %d4,%d1\n        add.l   %d2,%d1",
+                     "2:      moveq   #3,%d1\n        sub.l   %d2,%d1\n        add.l   %d4,%d1")],
+    "w_s950_first": [("        moveq   #2,%d3                  | SP12 first, then S950",
+                      "        moveq   #1,%d3"),
+                     ("        subq.l  #1,%d3\n        bne.s   1b\n        bra.s   .vx_next",
+                      "        addq.l  #1,%d3\n        moveq   #3,%d0\n        cmp.l   %d0,%d3\n"
+                      "        bne.s   1b\n        bra.s   .vx_next")],
+    "w_no_cap": [("        bsr     vg_cap                  | dearer: the highest stop up to it that fits\n",
+                  "        nop\n")],
+    "w_no_fxref": [("        bsr     vg_fx_try\n", "        moveq   #0,%d0\n")],
+    "w_no_sync": [("rp_sync:\n        lea     -8(%sp),%sp", "rp_sync:\n        rts\n        lea     -8(%sp),%sp")],
+    "w_6det": [(".equ    EM_DETENTS, 4", ".equ    EM_DETENTS, 6")],
+    "w_toast_direct": [("        move.b  %d4,(vg_toast).l        | refused (as far as it went): MAX DSP: EMU LIMIT",
+                        "        move.l  %d0,-(%sp)\n        pea     (TOAST_DUR).w\n        pea     str_emu_limit(%pc)\n"
+                        "        jsr     (NOTIFY).l\n        addq.l  #8,%sp\n        move.l  (%sp)+,%d0\n"
+                        "        lea     vg_engp(%pc),%a0")],
+    "w_no_net": [("        moveq   #-1,%d0\n        bsr     vg_fix\n        tst.l   %d0\n        beq.s   2f",
+                  "        moveq   #0,%d0\n        tst.l   %d0\n        beq.s   2f")],
+}
+
+
+def build_variants(tags):
+    out = ROOT / "out/vem_variants"
+    (out / "src").mkdir(parents=True, exist_ok=True)
+    for tag in tags:
+        txt = SRC.read_text()
+        for old, new in VARIANTS[tag]:
+            if txt.count(old) < 1:
+                sys.exit(f"variant {tag}: the source has no {old[:50]!r}")
+            txt = txt.replace(old, new)
+        src = out / "src" / f"{tag}.s"
+        src.write_text(txt)
+        r = subprocess.run([sys.executable, str(ROOT / "tools/build_varispeed_emus.py")], cwd=ROOT,
+                           env=dict(os.environ, KYOTI_ALLOW_WIP="1", VEM_VARIANT=tag, VEM_VARIANT_SRC=str(src)),
+                           capture_output=True, text=True)
+        print(f"variant {tag}: {'built' if r.returncode == 0 else 'FAILED'}")
+        if r.returncode:
+            print(r.stdout[-2000:], r.stderr[-2000:])
 
 
 def main():
@@ -1330,7 +1495,10 @@ def main():
     ap.add_argument("--jobs", type=int, default=9)
     ap.add_argument("--reuse", action="store_true")
     ap.add_argument("--cost", action="store_true", help="the guard's ColdFire cost per frame (this image vs VEM3)")
+    ap.add_argument("--build-variants", default="", help="build test images: all, or tags (comma-separated)")
     a = ap.parse_args()
+    if a.build_variants:
+        return build_variants(list(VARIANTS) if a.build_variants == "all" else a.build_variants.split(","))
     if a.cost:
         return cost()
     sc = scenarios()
