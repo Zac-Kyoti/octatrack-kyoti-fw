@@ -280,3 +280,22 @@ in every situation that does not overrun.
    - **Stepping order and restore.**
    - **A FLASHING §4 hardware item:** the audit's crash setup no longer crashes, and nothing
      steps down at normal loads.
+
+### 6a. Guard UX (the user, 2026-10-15, after VEM4G)
+
+1. **The dial stays on the user's EMUS choice.** While the guard holds a track below it, only the
+   readout changes, to the engine actually playing with a `!` (`S95!`, `OT!`). When the guard
+   restores the track at a later trig, the readout returns to the choice.
+2. **A toast, only when the user's own UI action meets the limit:** turning EMUS to an engine
+   that does not fit, or switching a track into VARI (SETUP TSTR, or ATTR TIMESTRETCH under
+   AUTO) whose EMUS does not fit.
+   - "Does not fit" means: at that moment, with this track's engine counted as the one asked
+     for, the core's estimate is over budget.
+   - The text is exactly `MAX DSP: S950 USED` or `MAX DSP: OT USED`, naming the engine the guard
+     would use.
+   - If that text cannot be shown in full in a stock toast, do not cut it: report the measured
+     limit and stop for the user's decision.
+   - Raise the toast only from those UI handlers, the way this repo's other modules raise
+     toasts from key handlers.
+3. **No toast ever from the frame path,** and none when the guard acts on its own (CLAUDE.md:
+   UI and kernel primitives from the frame path crashed a unit).
