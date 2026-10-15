@@ -66,6 +66,7 @@ SHADOW = 0x100a4ece - 0x8ed80
 LIVE_P1, LIVE_P2, BASE_W = 0x80000810, 0x80000830, 0x80000a50
 SET_FLEX, SET_STATIC, SET_STRIDE = 0x100b14f0, 0x100d5b30, 0x448
 SET_TEMPO = 0x4009c708
+VOICE = 0x800049d8                  # per-track voice state, stride 168; +8 = the sample settings it plays
 SLOT = PRJ["slots"]                 # the track's sample slot (dumped from the loaded project)
 MACH = PRJ["m"]                     # its machine: 1 FLEX / 0 STATIC
 PICKUP, SET_MACHINE = 4, 0x400972fc  # machine select's refresher (part, track)
@@ -174,6 +175,7 @@ def run(image, scens, frames, jobs, tag):
         log = d / f"{name}.log"
         a = f"{log} --sequencer --internal-clock --frames {frames}"
         a += f" --step -:dump:0x46c82456,4={d / (name + '.dbptr')};0x80000003,1={d / (name + '.part')}"
+        a += f" --step {frames - 5}:dump:{VOICE:#x},{168 * 8:#x}={d / (name + '.voice')}"
         for s in steps:
             a += f" --step {s}"
         args += ["--scenario", a]
@@ -241,8 +243,10 @@ def compare(a, b, cfg, label, ymask=0xffffff, only=None):
             frame = i // (2 * ntrk)
             if not st["started"]:
                 # set before the transport: from frame 10 (the first-sight frames aside, see
-                # the whole-run list); otherwise from the track's first trig after SKIP_FRAMES
-                if (cfg.get("pre") and frame >= 10) or (frame >= SKIP_FRAMES and x[4] and x[1] == 1):
+                # the whole-run list); a PICKUP track (it never trigs in these patterns): from
+                # SKIP_FRAMES; otherwise from the track's first trig after SKIP_FRAMES
+                pu = cfg["tracks"].get(t, {}).get("mode") == "PICKUP"
+                if (cfg.get("pre") and frame >= 10) or (frame >= SKIP_FRAMES and (pu or (x[4] and x[1] == 1))):
                     st["started"] = True
                 else:
                     continue
@@ -261,7 +265,27 @@ def compare(a, b, cfg, label, ymask=0xffffff, only=None):
             res["tracks"][t] = st
             if st["diff"]:
                 res["ok"] = False
+    res["compared"] = sum(st["n"] for st in res["tracks"].values())
+    if not res["compared"]:                 # nothing compared proves nothing
+        res["ok"] = False
+        res.setdefault("notes", []).append("NOTHING COMPARED: no compared track reached its start")
     return res
+
+
+def not_vari(log, cfg):
+    """VARISPEED (--plain): the AUTO tracks of a scenario whose voice, at the run's end,
+    plays another sample than the slot the scenario set to VARI (a sample lock): they are
+    NOT VARI tracks (the runtime gate), so they play stock, and VARISPEED leaves stock's
+    increment untouched (no mask, spec §7) where the oracle masks it. They are compared
+    against stock 1.40C instead, every bit."""
+    v = pathlib.Path(str(log)[:-4] + ".voice").read_bytes()
+    base = SET_FLEX if MACH == 1 else SET_STATIC
+    out = set()
+    for t, c in cfg["tracks"].items():
+        ptr = int.from_bytes(v[168 * t + 8:168 * t + 12], "big")
+        if c["mode"] == "AUTO" and ptr != base + SLOT[t] * SET_STRIDE:
+            out.add(t)
+    return out
 
 
 def matrix(quick):
@@ -481,25 +505,41 @@ def main():
         if not scens:
             continue
         logs = {}
-        for img in (ia, ib):
+        # VARISPEED, the VARI group: scenarios with AUTO tracks also run on stock, for the
+        # tracks that turn out not to play as VARI (not_vari)
+        auto = PLAIN and tag == "eq" and any(c["mode"] == "AUTO" for v in scens.values()
+                                              for c in v["tracks"].values())
+        for img in (ia, ib) + (("stock",) if auto else ()):
             st = {}
             for n, cfg in scens.items():
-                # the stock reference of an out-of-range case: TSTR OFF, same values
-                c = cfg if img != "stock" else dict(cfg, tracks={t: dict(v, mode="OFF")
-                                                                for t, v in cfg["tracks"].items()})
+                # the stock reference of an out-of-range case: TSTR OFF, same values (the
+                # VARI group's stock run: the same values, AUTO as AUTO)
+                # (2026-10-15: this used to apply to EVERY stock run, so the VARISPEED stock
+                # group's PICKUP tracks ran as FLEX on TSTR OFF on stock: only "oor" wants it)
+                c = cfg if not (img == "stock" and tag == "oor") else \
+                    dict(cfg, tracks={t: dict(v, mode="OFF") for t, v in cfg["tracks"].items()})
                 st[n] = scenario_steps(c, img)
             if a.reuse:
                 logs[img] = {n: OUTD / tag / img / f"{n}.log" for n in scens}
             else:
                 print(f"[{tag}] running {img}: {len(scens)} scenarios ...", flush=True)
                 logs[img] = run(img, st, a.frames, a.jobs, tag)
+        pairs = []
         for n in scens:
-            la, lb = logs[ia][n], logs[ib][n]
+            nv = not_vari(logs[ia][n], scens[n]) if auto else set()
+            if nv:
+                o = (only.get(n) if only.get(n) is not None else set(scens[n]["tracks"])) - nv
+                pairs.append((n, ib, o, ""))
+                pairs.append((n, "stock", nv, " -- not VARI (its voice plays another sample)"))
+            else:
+                pairs.append((n, ib, only.get(n), ""))
+        for n, ref, o, why in pairs:
+            la, lb = logs[ia][n], logs[ref][n]
             ok_run = all("run ended REACHED" in p.read_text() for p in (la, lb) if p.exists())
             r = compare(parse(str(la) + ".vem"), parse(str(lb) + ".vem"), scens[n],
-                        f"{tag}:{n} {ia} vs {ib} [{PRJ['project']}]"
-                        + (f" (tracks {','.join(f'T{t + 1}' for t in sorted(only[n]))})" if only.get(n) else ""),
-                        0xfffffc if tag == "oor" and not PLAIN else 0xffffff, only.get(n))
+                        f"{tag}:{n} {ia} vs {ref} [{PRJ['project']}]"
+                        + (f" (tracks {','.join(f'T{t + 1}' for t in sorted(o))}{why})" if o else ""),
+                        0xfffffc if tag == "oor" and not PLAIN else 0xffffff, o)
             r["reached"] = ok_run
             results.append(r)
             tr = " ".join(f"T{t + 1}:{s['n']}/{s['diff']}{'' if s['started'] else '(no trig)'}"
@@ -515,7 +555,7 @@ def main():
                       + ", ".join(f"frame {f} T{t} LC{lc} {a_}/{b_}" for f, t, lc, a_, b_ in w[:4]))
             if r["tagged"]:
                 print(f"      {r['tagged']} passes of the new image carry an engine tag out of range")
-            if PLAIN and ib == "stock":
+            if PLAIN and ref == "stock":
                 print(f"      stock's own engine bits (y:$40 bits 0-1) nonzero on {r['ref_tagged']} compared "
                       f"pass(es): {'carried through unmasked' if r['ok'] else 'see the differences'}")
             for nt in r.get("notes", []):
