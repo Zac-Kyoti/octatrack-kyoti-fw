@@ -106,7 +106,7 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | REPITCH DSP kernel gate (kept for the rewrite) | `tools/repitch_dsp_*` (bit-exact against the reference engine) |
 | DSP assembly | `tools/dsp_xasm.py` over `vendor/dsp56300`'s `dsp_asm` |
 | a final build | `tools/build_<feature>.py` → `.syx` (MIDI) + `.bin` (CF card); see `BUILD_KYOTI.md` |
-| the combined image | `tools/build_kyoti.py` — **KYOTI V1.4, FINAL 2026-10-14** (without REPITCH; V1.0 withdrawn; see §6) |
+| the combined image | `tools/build_kyoti.py` — builds **KYOTI V1.5 (WIP)**; **KYOTI V1.4, FINAL 2026-10-14**, builds from `19348d9` (see §6) |
 | octabam's remixer (`make remix`) | `sh tools/octabam_remixer.sh` — its own clone at `~/Documents/octabam`, fast-forwarded to octabam's `main` on every launch; `refs/octabam` stays the pinned research harness |
 | each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final, eight images) |
 | DIRECT JUMP V6.4, the OT↔AR parity build | `tools/build_direct_jump_v6_4.py` — WIP **by design**: kept buildable at the user's request (hardware-confirmed image `4a6c1b5e…`), never to be promoted |
@@ -180,10 +180,22 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   - Open: not in KYOTI yet. SIDE-CHAIN's key bus has left the voice's Y (WIP, 2026-10-15), but
     both still need SPRING REV's program words, so a combined image gives up a second effect for
     one of them. ERASE_EMPTY_TRIGLESS_LOCKS must also skip these tracks (an empty trigless lock is
-    a tie here). KYOTI V1.5 is planned without BLACKPYRAMIDS_303: V1.4 + VARISPEED + SIDE-CHAIN,
-    composed once VARISPEED is on main.
+    a tie here). KYOTI V1.5 is built without BLACKPYRAMIDS_303 (below).
 
-- **KYOTI V1.4** (`tools/build_kyoti.py`, 2026-10-13) — V1.3 without REPITCH_REPEAT98_KYOTI,
+- **KYOTI V1.5 (WIP 2026-10-15, not flashed, not promoted)** — V1.4 + VARISPEED (`0cc30d7`) + the
+  15 Oct SIDE-CHAIN.
+  - **Layout:** VARISPEED's unit is CAVE's first piece, at its own address 0x400d6500. MUTE
+    MODE's menu piece and `rtm_mask` move to SAFE. RELOAD_FROM_PROJECT goes to DRAM (one 6 KB
+    page), as in V1.2–V1.3.
+  - **Builds:** mainos `6f6f3268…`, syx `8950f824…`.
+  - **Composer checks:** every delta is disjoint; outside the caves each feature equals its
+    standalone; VARISPEED's bytes are identical to its standalone.
+  - **Emulator:**
+    - VARISPEED's suite passes 9/11 on it. `static` and `spring` assert a standalone-only
+      image.
+    - The DRAM arena after boot equals RELOAD linked there.
+    - The SIDE-CHAIN project's mix equals the SIDE-CHAIN standalone's (per-slot RMS).
+- **KYOTI V1.4** (`tools/build_kyoti.py` at `19348d9`, 2026-10-13) — V1.3 without REPITCH_REPEAT98_KYOTI,
   ROM-only (RELOAD back in the proven cave, EMPTY_PATTERN_LED_FIX in SAFE_CAVE). **FINAL
   2026-10-14**, mainos `72710a3c…`, syx `568b2efb…`; flashed by the user: everything works.
 - **KYOTI V1.3** — FINAL 2026-10-10 until 2026-10-13, syx `9f6d2374…`, mainos

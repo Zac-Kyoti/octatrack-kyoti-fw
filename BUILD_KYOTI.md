@@ -65,17 +65,25 @@ no-assembler patch below or wrap it as its builder's header shows.
 
 ### The combined image: KYOTI V1.4
 
-Every FINAL feature except BLACKPYRAMIDS_303 in one image:
+Every FINAL feature except BLACKPYRAMIDS_303 in one image. Since 15 Oct 2026 the composer on
+`main` builds KYOTI V1.5 (WIP, below), so build V1.4 from the commit it was promoted at:
 
 ```sh
+git worktree add ../octatrack-kyoti-fw-v14 19348d9     # then inside it, with vendor/, out/raw/, downloads/
+                                                       # and refs/octabam linked in by ABSOLUTE path:
 python3 tools/build_kyoti.py
 ```
 
 It writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.4.syx` and `.bin` (OS VERSION `KYOTI V1.4`).
 
-> **Sample memory.** This image is ROM-only: the sample/recorder pool is untouched. An
+> **Sample memory.** V1.4 is ROM-only: the sample/recorder pool is untouched. An
 > octabam-built image (octabam's own remixer) reserves a fixed **10 MiB** whenever any module
 > runs from DRAM.
+
+**KYOTI V1.5 (WIP, not promoted):** V1.4 plus VARISPEED, with the 15 Oct 2026 SIDECHAIN_COMPRESSOR.
+`KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py` writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.5.syx`
+and `.bin` (OS VERSION `KYOTI V1.5`). RELOAD_FROM_PROJECT runs from DRAM there, as in V1.2–V1.3:
+one 6 KB page of the 85.5 MB pool.
 
 KYOTI V1.0 was withdrawn on 2026-10-06; V1.1 replaced it, V1.2 (with REPITCH) replaced V1.1,
 V1.3 replaced V1.2, whose SPRING reclaim overwrote PLATE REVERB's page (`reference/kb/caves.md` §0),

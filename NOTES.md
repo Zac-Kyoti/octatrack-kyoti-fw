@@ -36475,3 +36475,24 @@ open, Sam's PR #2, and an optimization pass over BLACKPYRAMIDS_303's Octatrack-s
 * **Note:** on this `main`, `python3 tools/build_bugbuilds.py` (the final seven) stops at
   SIDECHAIN_COMPRESSOR. Its builder no longer matches its FINAL pin since the WIP keybus change
   (687869a). This is not caused by this commit.
+- **2026-10-15 cont: KYOTI V1.5 BUILT (WIP, NOT flashed, not promoted): V1.4 + VARISPEED + the 15 Oct SIDE-CHAIN, no
+  BLACKPYRAMIDS_303** (VARISPEED pushed by the repitch-rewrite session as 0cc30d7, the user's OK).
+  - **Composer:** build_kyoti.py now V1.5. V1.4 stays FINAL (mainos_kyoti_v1.4.bin, built from 19348d9; BUILD_KYOTI.md).
+  - **Layout:**
+    - VARISPEED's builder takes no KYOTI_PLACE, so its 2,388 B unit is CAVE's first piece at its own 0x400d6500
+      (asserted after the allocation; frame-ISR code, so ROM).
+    - CAVE: VARISPEED 2388 + DIRECT JUMP 2026 + softmute 1086 + partreapply 402, 42 B left.
+    - patch_mutemode (208) and rtm_mask move to SAFE (904 B left).
+    - patch_reload3 (2,088 B) goes to DRAM, as in V1.2-V1.3: one 6 KB arena page, loader + payload 1,536 B
+      appended.
+  - **run_builder:** passes KYOTI_ALLOW_WIP=1 to every builder when the composite itself runs with it (V1.5
+    carries two WIP features); without it any WIP feature still refuses, and seal() keeps V1.5 off the pin.
+  - **Composer checks:** 9,314 B changed = the sum of the feature deltas (DISJOINT); each feature outside its caves
+    = its standalone (VARISPEED: 0 B differ); 65 code spans, no branch into any; B1/B2.
+  - **Emulator:**
+    - VARISPEED's suite on the composite: 9/11. `static` and `spring` assert a standalone image (stock DSP and
+      choosers, SPRING offered); out/vari/run_k15.py swaps SPRING for DARK so the scenarios build. o2
+      covers RELOAD PART and paste/clear/undo next to RELOAD_FROM_PROJECT.
+    - The DRAM arena after boot equals RELOAD linked at 0x40a955e0.
+    - sctest6 with MON off: per-slot RMS equals the SIDE-CHAIN standalone's.
+  - **Builds:** mainos 6f6f3268a5a34fda…, syx 8950f824cd2761f8…, CF .bin ac2d3e8faff404a9… (`KYOTI V1.5`).
