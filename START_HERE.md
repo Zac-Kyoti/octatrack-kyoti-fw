@@ -159,14 +159,22 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   Bugbuild `BUG_BP303` (mainos `0de8be5c…`, syx `55b38837…`): emulator-verified, not flashed.
   - The octabam module is ported (`octabam-modules/blackpyramids-303/`); its octabam PR
     (with `Module.dsp_source`) is drafted, not sent. Not flashed in octabam form.
-  - **WIP 2026-10-15 (not flashed, not promoted): an optimization pass over the Octatrack-side
-    code, with the sound unchanged.**
-    - What changed: the Y table is pre-packed, the continuous words are remade only when their own
-      knobs change, and the DSP record unpack is one instruction a word shorter.
-    - Results: ColdFire −688 instructions a frame with two voices; DSP −1.6 cycles a sample.
-    - Checked: the records are byte-identical to the old `record.c`'s, `host_check` is BIT-EXACT,
-      and `verify_ot303` passes.
-    - Builds: standalone mainos `504aed6a…`, syx `d4808a7b…`; `BUG_BP303` mainos `0e1aff99…`.
+  - **WIP 2026-10-15 (not flashed, not promoted): two optimization passes, every output word
+    unchanged.**
+    - **The Octatrack-side code:** the Y table is pre-packed, the continuous words are remade
+      only when their own knobs change, and the record unpack is shorter. ColdFire −688
+      instructions a frame with two voices.
+    - **The DSP engine:** the second half-band is unrolled, the tanh index and fraction use
+      one-word shifts, the glide and YY4 go through the walkers, GD8 is read once, and the
+      raw-path test is folded per payload.
+    - **Together:** saw 473 → 455, square 620 → 598 cycles a sample on the corrected bench (about
+      3.7 %).
+    - **Checked:**
+      - the records are byte-identical to the old `record.c`'s;
+      - `engine_check` and `host_check` are BIT-EXACT;
+      - `verify_ot303` passes;
+      - the ot_emu audio is sample-identical to FINAL's.
+    - **Builds:** standalone mainos `42c0da93…`, syx `eee3f936…`; `BUG_BP303` mainos `1df0fd21…`.
     - The FINAL pins still name `3624a1e7…` / `0de8be5c…`.
   - Open: a square-wave voice on core 0 under the heaviest FX stack may overrun (§4 there).
   - Open: not in KYOTI yet. SIDE-CHAIN's key bus has left the voice's Y (WIP, 2026-10-15), but

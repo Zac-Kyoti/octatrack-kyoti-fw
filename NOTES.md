@@ -36426,3 +36426,27 @@ open, Sam's PR #2, and an optimization pass over BLACKPYRAMIDS_303's Octatrack-s
   output copy (3 X accesses a sample is the floor). The octabam module is regenerated (runtime 28,704 B, sha256
   2b3b045d…). Builds (WIP, NOT flashed): standalone mainos 504aed6aafa92427…, CF .bin 33dfa28be8d908b5…, syx
   d4808a7b00ccdadf… (`140C_BP303`); BUG_BP303 mainos 0e1aff9980b97baf…, syx c8e130c14cfa6809….
+- **2026-10-15 cont: PR #2 merged by the user (rebase) as cccdb77.** SIDE-CHAIN rebuilt on it: the same WIP image
+  (9f7899d4…), emu_sc_dsp3 + emu_sc_sctap ALL GOOD; the Sam reply now pins cccdb77 (~/Documents/octabam-note-to-sam-pr2.md).
+- **2026-10-15 cont: BLACKPYRAMIDS_303 engine pass (92438b7, WIP; the user OK'd touching the Open303 port if low risk
+  and sound-neutral).** P was the wall (1027 of 1028 words), so word-saving changes paid for one unroll:
+  - the tanh index/fraction as one-word shifts on one accumulator half (asr #15 + lsl #1 = (x>>14)&~1;
+    lsl #9 + lsr #1 = (x&$7fff)<<8) in ODRIVE, fast square, slow square;
+  - GLIDE through the walkers ((r2+4), (r6+6)) and YY4 as (r4+8), one-word for absolute moves;
+  - ODRIVE keeps GD8 from x1 (`tfr x1,b y:(r0)+,x1`);
+  - host.asm RAWCHK, payload A only, emptied for B by hwprobe_image.source();
+  - the second half-band's 22 taps unrolled (no DO a sample).
+  A 1026 / B 1022 words.
+  Bench fix: host_probe priced a DO step's extra instruction at pc+1 (the loop-address operand decoded as an opcode),
+  so costs moved with where loops ended (an apparent +3 cycles on B after a 1-word shift); now pc + the DO's length,
+  and OT_PCPROF=FILE dumps a per-address profile.
+  On the corrected bench: FINAL 3624a1e7 saw 473.2 / square 620.3 (worst note 514.9 / 669.9) -> 455.1 / 598.0
+  (495.6 / 646.1). engine_check (OT303_DSP=new: the old dsp_asm mis-encodes GLIDE's `tfr b,a x:(r0)+,x0`) and
+  host_check BIT-EXACT; verify_ot303 ALL GOOD (voiced frame 6354 -> 6290); ot_emu BOTLI: all 8 output slots
+  sample-identical to the FINAL image over 661,278 frames; BUG_BP303 interlock DISJOINT + verify ALL GOOD.
+  Not done (no gain or no room): zsqb/zsqc unrolls (+16/+33 words), short branches (dsp_asm emits long only), the
+  output pointer and MEGS/RC1W (no free register, no short displacement in reach), `move #>$ffffff,m0` (no
+  register holds it).
+  Builds (WIP, NOT flashed): standalone mainos 42c0da934c399a2e…, CF .bin 0399a1f3…, syx eee3f936b1c58ec7…;
+  BUG_BP303 mainos 1df0fd2130f21e47…, syx ef5abf570dd0658b…. The octabam module is regenerated (runtime unchanged,
+  2b3b045d…; DSP words new).
