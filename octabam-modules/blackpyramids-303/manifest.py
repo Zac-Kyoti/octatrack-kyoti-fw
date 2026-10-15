@@ -18,7 +18,7 @@ unused bytes while the track is a BLKPYRAMD and put back when it leaves.
 COLDFIRE. One DRAM unit, bp_runtime (~28 KB): tools/ot303/cf/{machine.s,control.c,record.c,
 params.c} and the voice's Y table, generated into one GNU-as unit by tools/ot303/octabam_module.py
 (the C as `m68k-elf-gcc -S` output, libgcc's __muldi3 as words). Its `reference` is the standalone
-image's runtime: linked alone at 0x40a955e0 it is those bytes, sha256 56b37d91..., for -mcpu=5407
+image's runtime: linked alone at 0x40a955e0 it is those bytes, sha256 2b3b045d..., for -mcpu=5407
 and 54455 alike (the generator refuses to write it otherwise). 43 detours, 7 pokes and the FLEX
 renderer slot (0x400d6438 -> ot_render), every one the standalone builder's
 (tools/build_blackpyramids_303.py).
@@ -49,7 +49,7 @@ _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 H = bytes.fromhex
 
 RUNTIME_AT = 0x40A955E0        # the standalone image's DRAM reserve (tools/ot303/dram.py RESERVE)
-RUNTIME_SHA256 = "56b37d91a92df9eab77e721b1cbbee229dd22ab31f054a2d6396e17a8f8f5366"
+RUNTIME_SHA256 = "2b3b045d06f5bfdb57b0a969e2595458a5a6c08949588d3c74116f0a4ce5a1da"
 
 DETOURS = (
     Detour(0x400334D8, H("2f02222f0008"), "bp_runtime", "ot_machine_name", "chooser row 5's name"),
@@ -123,8 +123,9 @@ MODULE = Module(
         ("SYNTH MACHINE", "the same FLEX renderer slot (0x400d6438) and MIDI note site (0x4000e746)"),
         ("TAPE ECHO", "it replaces SPRING REV, whose words are the voice"),
         ("SCALE QUANTIZER", "the same MIDI note site (0x4000e746)"),
-        ("SIDECHAIN_COMPRESSOR", "its DSP code also lives in SPRING REV, and its key bus "
-                                 "(Y:$7f0-$9ff) lies inside the voice's Y"),
+        ("SIDECHAIN_COMPRESSOR", "in the author's images both take SPRING REV's program words, and "
+                                 "octabam does not yet place a DSP section beside a source machine "
+                                 "(its key bus left the voice's Y on 15 Oct 2026)"),
     ),
     linked=(
         Linked("bp_runtime", os.path.join(_HERE, "bp_runtime.s"), dram=True,

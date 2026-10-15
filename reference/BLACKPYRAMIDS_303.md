@@ -166,15 +166,19 @@ is full in stock, so the voice takes **SPRING REVERB's** module space.
 | DSP P (each payload) | 1,027 words, in SPRING REV's module (DARK REV's 35-word helper moved beside it) | 1,028 |
 | DSP X | 216 working words at `X:$7b24–$7bfb` (stock's unreferenced top, outside the DMA partitions), copied from SPRING's X records at the first frame | — |
 | DSP Y | 2,119 words `$7a5–$feb`: tables and the voice state, streamed from the ColdFire | — |
-| ColdFire | a 27 KB DRAM runtime (a 16-page arena reserve, loader appended after the OS), 42 detours, 7 pokes, the FLEX renderer slot | — |
+| ColdFire | a 28 KB DRAM runtime (a 16-page arena reserve, loader appended after the OS), 43 detours, 7 pokes, the FLEX renderer slot; about 1,200 instructions a frame per voice in ot_emu, of ~29,000 for the whole frame (15 Oct 2026: the Y table pre-packed, the continuous words made only when their knobs change; −340 a voice) | — |
 
 **Cycles per sample** (emulator cycle table, host and engine together; on the chip ×1.16,
 from the METER on DIAG8):
 
 | | average | worst frame (a note starting) | ≈ on the chip (worst) |
 |---|---|---|---|
-| WAVE 0 (saw only) | 471 | 511 | ~595 |
-| WAVE > 0 (the square path) | 616 | 666 | ~775 |
+| WAVE 0 (saw only) | 470 | 510 | ~592 |
+| WAVE > 0 (the square path) | 615 | 663 | ~769 |
+
+(`tools/ot303/host_check.py`, 15 Oct 2026 source: 1.6 cycles a sample below the FINAL build
+`3624a1e7…`, whose figures were 471/511 and 616/666; the record unpack in `host.asm` is one
+instruction a word shorter. The voice itself is unchanged.)
 
 Each core has about **3,120 usable cycles per sample**. Measured on the unit with an earlier
 426-cycle build of the voice (DIAG13 and the worst-case test, 2026-10-11):

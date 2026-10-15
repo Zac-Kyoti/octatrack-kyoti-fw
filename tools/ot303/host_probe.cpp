@@ -291,9 +291,9 @@ int main(int argc, char** argv) {
             if (voice && !tablesChecked) {
                 int bad = 0;
                 for (uint32_t i = 0; i < ot_ylen; i++) {
-                    uint32_t a = YB + i;
-                    if (a >= sym("CB") && a < sym("CHH") + 2) { bad += ot_ytab[i] != 0; continue; }   // the host's Y scratch (zeros in the image)
-                    bad += (mem.get(MemArea_Y, a) & 0xffffff) != ot_ytab[i];
+                    uint32_t a = YB + i, w = ((ot_ytab_pk[i] >> 8) & 0xffff00u) | (ot_ytab_pk[i] & 0xffu);   // unpacked
+                    if (a >= sym("CB") && a < sym("CHH") + 2) { bad += w != 0; continue; }   // the host's Y scratch (zeros in the image)
+                    bad += (mem.get(MemArea_Y, a) & 0xffffff) != w;
                 }
                 for (int i = 0; i <= 512; i++) { bad += gyy(sym("TH") + 2 * i) != twin::T.th[i]; bad += gyy(sym("TH") + 2 * i + 1) != twin::T.dth[i]; }
                 for (int i = 0; i <= twin::LT_N; i++) {

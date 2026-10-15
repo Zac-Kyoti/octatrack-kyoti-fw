@@ -15,9 +15,15 @@ static uint32_t pk(ot_w v) {
     return ((u & 0xffff00u) << 8) | (u & 0xffu);
 }
 
+/* the knobs ot_params_cont reads: only a change in one of these makes the continuous words again
+ * (a PTCH lock or LFO changes k every step or frame and leaves them as they were) */
+#define OT_CONT_KNOBS ((1u << OT_CUT) | (1u << OT_RES) | (1u << OT_ENV) | (1u << OT_WAVE) | \
+                       (1u << OT_SLID) | (1u << OT_VOL))
+
 void ot_record(volatile uint32_t *rec, struct ot_voice *v, const uint8_t k[12], unsigned ev, uint32_t gl) {
     unsigned same = v->have != 0;
-    for (unsigned i = 0; i < 12; ++i) if (v->k[i] != k[i]) { same = 0; v->k[i] = k[i]; }
+    for (unsigned i = 0; i < 12; ++i)
+        if (v->k[i] != k[i]) { if (OT_CONT_KNOBS & (1u << i)) same = 0; v->k[i] = k[i]; }
     if (!same) {
         ot_params_cont(k, &v->c);
         if (!v->have) { v->rs = v->c.rs; v->bg = v->c.bg; v->ag_8 = v->c.ag_8; }
@@ -43,6 +49,9 @@ void ot_record(volatile uint32_t *rec, struct ot_voice *v, const uint8_t k[12], 
     if (cnt > OT_CHUNK) cnt = OT_CHUNK;
     rec[27] = pk((ot_w)(ot_ybeg + off));
     rec[28] = pk((ot_w)cnt);
-    for (unsigned i = 0; i < OT_CHUNK; ++i) rec[29 + i] = i < cnt ? pk((ot_w)ot_ytab[off + i]) : 0;
+    const uint32_t *src = &ot_ytab_pk[off];             /* packed at build time: a plain copy */
+    volatile uint32_t *dst = &rec[29];
+    for (uint32_t i = cnt; i; --i) *dst++ = *src++;
+    for (uint32_t i = OT_CHUNK - cnt; i; --i) *dst++ = 0;
     v->chunk = off + cnt >= ot_ylen ? 0 : v->chunk + 1;
 }

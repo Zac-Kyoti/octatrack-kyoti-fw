@@ -324,15 +324,19 @@ hq_mrest:
         rts
 
 ; ---- x1 record word pairs at r4 -> 24-bit words at y:(r1)+ (the high word's low 16 bits are
-; bits 23-8, the low word's low 8 bits are bits 7-0). Uses a b x0; r4, r1 advance.
+; bits 23-8, the low word's low 8 bits are bits 7-0). Uses a b y1; r4, r1 advance.
+; The add is the or: a1's low 8 bits are 0 after the shift and b1 <= $ff after the mask (and acts on
+; b1 alone; b0 is 0 after the load), so nothing carries into or out of a1, and a1 is stored as it is
+; (whatever a2 and b2 hold). y1 is free here: the voice path's engine reloads it, and the code after
+; CONT does not read it (that path has always reached CONT with the engine's y1).
 hq_unp:
+        move    #>$ff,y1
         do      x1,hq_upend
         move    x:(r4)+,a
         asl     #8,a,a
         move    x:(r4)+,b
-        and     #>$ff,b
-        move    b1,x0
-        or      x0,a
+        and     y1,b
+        add     b,a
         move    a1,y:(r1)+
 hq_upend:
         rts
