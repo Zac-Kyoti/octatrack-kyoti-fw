@@ -44,15 +44,14 @@
 ; hardware; SIDECHAIN3 takes $7f0-$9ff on both cores):
 ;   Y:STBASE + x:$418   per-track RPSP slot ($20 words): the mid's residual
 ;                       ring (modulo-addressed, so it starts the slot), then the state
-;   Y:ZM1               m1, kept over a pass (the last free word of track 3's slot)
 ;   Y:TABTAG            table tag; != TAGVAL => copy the tables in (once/core)
 ;   Y:SPTAB, Y:R9TAB    the virtual-ADC tables, 32 phases each (8 / 16 taps),
 ;                       from their 16 stored half-rows in X (rows 16-31 mirror)
 ;   Y:BTAB              the render's step table: row j = the L taps' (T, D) pairs, rows
 ;                       BROW words apart (the tail of each row is padding)
 ;
-; REGISTERS. Uses a, b, x0, x1, y0, y1, r1, r4, r6, r7, m1 and m7 (both kept and
-; restored), n1, n2, n4, n5, n6, n7; r5 is parked in n1 during an RPSP tick. Leaves
+; REGISTERS. Uses a, b, x0, x1, y0, y1, r1, r4, r6, r7, m1 and m7 (kept in n5 and n7,
+; restored), n1, n2, n4, n6; r5 is parked in n1 during an RPSP tick. Leaves
 ; r0, r2 and m6 alone; r3 advances by two words per output. An (Rn)+Nn update always
 ; takes its own Nn. m1 is $7f from zqtok on: an XY dual move needs its X pointer in
 ; r0-r3, and the ring's own modulo register is m6. r1 and r6 (m6 = $7f) wrap at a
@@ -80,9 +79,8 @@ S_RH    equ     $13     ;   unsigned Q23 (this pass's); the smoothed read shift 
 S_LS    equ     $14     ;   truncation), Q22 frames
 S_TAU   equ     $15     ; time of the next tick (from the start of the next interval, Q20)
 S_RW    equ     $16     ; the ring slot (absolute address) of the next output
-S_M7    equ     $17     ; m7, kept over a pass
-S_TAG   equ     $18
-S_SIZE  equ     $19     ; (track 3's slot ends in ZM1 at +$1e and TABTAG at +$1f)
+S_TAG   equ     $17
+S_SIZE  equ     $18     ; (track 3's slot ends in TABTAG at +$1f)
 ; in the output loop r6 rests on OH: these are the fields' displacements from it
 D_PF    equ     S_PF-S_OH
 D_HM    equ     S_HM-S_OH
@@ -90,10 +88,8 @@ D_PKW   equ     S_PKW-S_OH
 D_RF    equ     S_RF-S_OH
 D_TAU   equ     S_TAU-S_OH
 D_RW    equ     S_RW-S_OH
-D_M7    equ     S_M7-S_OH
 NWALK   equ     $1000000-(S_RB-S_OH)    ; r6 back from RB to OH
 STTAG   equ     STBASE+S_TAG
-ZM1     equ     STBASE+$7e
 R9B     equ     128-R9SW                ; RPS9's first tap, from r2, mod 128
 LSMUL   equ     ((1<<LSSH)-1)<<(23-LSSH)        ; (2^LSSH - 1) / 2^LSSH, Q23
 BRM1    equ     BR-1
@@ -117,8 +113,7 @@ zqtok:
 ; So at the pass that starts the new sound, the 16 frames before its first
 ; frame become silence, and RPSP's slot starts clean (tag cleared: zqsp).
         move    x:>$419,r4              ; this track's unpacked per-voice record
-        move    x:>$418,n6              ; the track offset
-        move    m1,y:>ZM1               ; restored at zqdone
+        move    m1,n5                   ; restored at zqdone
         move    x:(r4+$1e),a            ; its word +$1E (m4 is linear: x:$419 + $1E can
         move    #$7f,m1                 ;  straddle a 128-word block)
         jclr    #12,a1,zqnh             ; a trig starts in this frame?
@@ -129,6 +124,7 @@ zqtok:
                                         ; reaches this code -- rev 14 missed every trig
                                         ; landing on a frame boundary that way.)
         move    x:(r5),a                ; the new sound's first frame (ring word offset)
+        move    x:>$418,n6              ; the track offset
         sub     #<32,a
         and     #>$7e,a
         move    a1,n2
@@ -198,7 +194,11 @@ zqnh:
         and     y1,b    a1,x:(r3)+
         move    b1,x:(r3)+
 zq9e:
-        bra     zqdone
+        move    n5,m1                   ; (zqdone's tail, inline: no branch)
+        move    #$0,r7
+        move    x:(r5),n6
+        move    y:(r5)+,a
+        rts
 
 ; ============================================================ RPSP (SP-1200)
 ; Rev 17: the mid (L + R)/2 goes through the SP -- the virtual ADC (8 taps) at
@@ -213,18 +213,20 @@ zqsp:
         move    r7,b                    ; an empty pass: nothing to render, and x:(r5)
         tst     b                       ; is not this track's -- the slot waits for a
         beq     zqdone                  ; real pass (on the unit an empty pass is mode 0)
+        move    x:>$418,n6              ; the track offset
         move    #>STBASE,r6
-        move    #>TAGSP,x1
+        move    r7,n2                   ; n2 = the pass count
         move    (r6)+n6                 ; r6 = this track's slot (m6 = $7f: the slot does
-        move    r7,n2                   ;  not straddle 128 words); n2 = the pass count
+        move    #$40,r4                 ;  not straddle 128 words)
         move    y:(r6+S_TAG),b
-        cmp     x1,b
+        cmp     #>TAGSP,b
         beq     zqsok
         clr     b                       ; stale, first use or a trig: clean ring + state
         move    r6,r1
         do      #S_SIZE,zqsz
         move    b,y:(r1)+
 zqsz:
+        move    #>TAGSP,x1
         move    x1,y:(r6+S_TAG)
         move    #>$7e,x0
         move    r6,y:(r6+S_RW)          ; the ring starts the slot
@@ -253,11 +255,9 @@ zqsnj:
 ; u x r); the side's offset behind the OT = c + 1 frames + MS_SIDE_DELAY
 ; increments + the smoothed read shift, its integer part doubled (ring words;
 ; the fraction stays one)
-        move    x:>$40,a
-        and     #<1,a
-        move    y:>$40,x0
-        move    x0,y:(r6+S_RF)
-        move    x0,a0                   ; a = r as 24.24
+        move    l:(r4),a                ; a = l:$40 = r as 24.24 (r4 = $40)
+        and     #<1,a                   ; (a1 only; a0 stays)
+        move    a0,y:(r6+S_RF)
         asr     a                       ; a0 = RH = r x 2^23, unsigned (a1 = 0)
         move    a0,y0
         move    y0,y:(r6+S_RH)
@@ -273,7 +273,7 @@ zqsnj:
         move    a1,y:(r6+S_OH)
         move    a0,y:(r6+S_OL)
         move    r2,y:(r6+S_RB)
-        move    m7,y:(r6+S_M7)          ; restored at zqoe
+        move    m7,n7                   ; restored at zqoe
         move    #RINGM1,m7
         move    y:(r6+S_RW),r7
         move    y:(r6+S_TAU),r4         ; r4 = tau through the pass; n4 = one interval
@@ -283,15 +283,15 @@ zqsnj:
         do      n2,zqoe
         jset    #20,r4,zqout            ; tau >= 1 (tau < PSP < 2 always): no tick here
 ; ---- a tick at u = tau (PSP > 1: at most one per output interval). r1 walks the
-; tick block RF, PHI, RH, LS; r4 is the ADC's table pointer and r5 the render's
-; until zqout (tau in n7, the output table in n1).
+; tick block RF, PHI, RH, LS; r5 is the ADC's and then the render's table pointer
+; (the output table parked in n1).
         lua     (r6+D_RF),r1
         move    r4,b
         asl     #3,b,a                  ; a1 = u = tau, Q23
         add     #>PSPQ20,b              ; tau += PSP (the out block's (r4)-n4 takes this interval)
         move    a,x1    y:(r1)+,y0      ; x1 = u (x1 is free until the render); y0 = RF
         move    y:(r1),a
-        add     y0,a    b1,n7           ; phi = frac(phi + r)
+        add     y0,a    b1,r4           ; phi = frac(phi + r); r4 = tau + PSP
         lsr     a       a1,y:(r1)+
         move    a1,y0                   ; Q24 phi >> 1 = the same phi as Q23
         mpyi    #>PSPH,y0,b             ; (PSP/2)*phi = PSP*phi * 2^46: the read shift
@@ -316,25 +316,25 @@ zqsnj:
         lsl     #3,b                    ; x 8 taps
         add     #>SPTAB,b
         move    a1,n2
-        move    b1,r4
+        move    b1,r5
         lua     (r2)+n2,r1              ; (r2 is 128-aligned: m1 = $7f wraps r1 in the ring)
         move    y:(r6+D_HM),y1          ; the step it replaces
 ; ---- the mid's virtual ADC: 8 taps over L + R (the sum, halved below)
-        clr     a       x:(r1)+,x0      y:(r4)+,y0
+        clr     a       x:(r1)+,x0      y:(r5)+,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     y0,x0,a x:(r1)+,x0      y:(r4)+,y0
+        mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     y0,x0,a x:(r1)+,x0      y:(r4)+,y0
+        mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     y0,x0,a x:(r1)+,x0      y:(r4)+,y0
+        mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     y0,x0,a x:(r1)+,x0      y:(r4)+,y0
+        mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     y0,x0,a x:(r1)+,x0      y:(r4)+,y0
+        mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     y0,x0,a x:(r1)+,x0      y:(r4)+,y0
+        mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
         mac     y0,x0,a x:(r1)+,x0
-        mac     y0,x0,a x:(r1)+,x0      y:(r4)+,y0
+        mac     y0,x0,a x:(r1)+,x0      y:(r5)+,y0
         mac     y0,x0,a x:(r1)+,x0
         mac     y0,x0,a
 ; ---- the step: 12 bits of (L + R)/2; the render's row j = floor(uR) and fraction
@@ -353,14 +353,47 @@ zqsnj:
         lsr     b       a,y1            ; frac(uR), Q23; y1 = the step / 2
         move    b,x0    y:(r5)+,a       ; x0 = frac(uR); T
         move    y:(r5)+,y0              ; D
-        do      #BL,zqbl
+; the L taps, unrolled (a DO cost 5 cycles a tick, and the last tap restores r5 for free)
         mac     y0,x0,a y:(r7),b        ; a = weight/2 = T + frac D; b = the ring
         move    a,x1    y:(r5)+,a       ; next T
         mac     y1,x1,b y:(r5)+,y0      ; b += step/2 x weight/2; next D
         move    b,y:(r7)+
-zqbl:
-        move    n1,r5
-        move    n7,r4                   ; tau + PSP
+        mac     y0,x0,a y:(r7),b        ; a = weight/2 = T + frac D; b = the ring
+        move    a,x1    y:(r5)+,a       ; next T
+        mac     y1,x1,b y:(r5)+,y0      ; b += step/2 x weight/2; next D
+        move    b,y:(r7)+
+        mac     y0,x0,a y:(r7),b        ; a = weight/2 = T + frac D; b = the ring
+        move    a,x1    y:(r5)+,a       ; next T
+        mac     y1,x1,b y:(r5)+,y0      ; b += step/2 x weight/2; next D
+        move    b,y:(r7)+
+        mac     y0,x0,a y:(r7),b        ; a = weight/2 = T + frac D; b = the ring
+        move    a,x1    y:(r5)+,a       ; next T
+        mac     y1,x1,b y:(r5)+,y0      ; b += step/2 x weight/2; next D
+        move    b,y:(r7)+
+        mac     y0,x0,a y:(r7),b        ; a = weight/2 = T + frac D; b = the ring
+        move    a,x1    y:(r5)+,a       ; next T
+        mac     y1,x1,b y:(r5)+,y0      ; b += step/2 x weight/2; next D
+        move    b,y:(r7)+
+        mac     y0,x0,a y:(r7),b        ; a = weight/2 = T + frac D; b = the ring
+        move    a,x1    y:(r5)+,a       ; next T
+        mac     y1,x1,b y:(r5)+,y0      ; b += step/2 x weight/2; next D
+        move    b,y:(r7)+
+        mac     y0,x0,a y:(r7),b        ; a = weight/2 = T + frac D; b = the ring
+        move    a,x1    y:(r5)+,a       ; next T
+        mac     y1,x1,b y:(r5)+,y0      ; b += step/2 x weight/2; next D
+        move    b,y:(r7)+
+        mac     y0,x0,a y:(r7),b        ; a = weight/2 = T + frac D; b = the ring
+        move    a,x1    y:(r5)+,a       ; next T
+        mac     y1,x1,b y:(r5)+,y0      ; b += step/2 x weight/2; next D
+        move    b,y:(r7)+
+        mac     y0,x0,a y:(r7),b        ; a = weight/2 = T + frac D; b = the ring
+        move    a,x1    y:(r5)+,a       ; next T
+        mac     y1,x1,b y:(r5)+,y0      ; b += step/2 x weight/2; next D
+        move    b,y:(r7)+
+        mac     y0,x0,a y:(r7),b
+        move    a,x1
+        mac     y1,x1,b n1,r5           ; the output table back
+        move    b,y:(r7)+
 ; ---- out: the mid = the current step + what the render still owes this output
 ; (4 x the slot, limited); the side, clean: (L - R)/2 at the OT's position less the
 ; offset, linear between its two frames. l:(r5) = (ring words, fraction): less (2 int,
@@ -397,10 +430,10 @@ zqout:
 zqoe:
         move    r7,y:(r6+D_RW)
         move    r4,y:(r6+D_TAU)
-        move    y:(r6+D_M7),m7
+        move    n7,m7
 
 zqdone:
-        move    y:>ZM1,m1
+        move    n5,m1
         move    #$0,r7                  ; the stock kernel's `do r7` skips
 zqstk:
         move    x:(r5),n6               ; displaced from the hook site

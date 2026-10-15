@@ -159,7 +159,7 @@ def constants(payload="A"):
     L, R = m.RENDER["L"], m.RENDER["R"]
     # the asm computes the RPSP row as phase x 8 and the RPS9 row as phase x 16; the
     # render's fraction as (u << 4), i.e. R = 16; RPS9's 15 taps after the first are unrolled
-    assert (spn, r9n, R) == (8, 16, 16), "patch_repitch_dsp.asm's arithmetic"
+    assert (spn, r9n, R, L) == (8, 16, 16, 10), "patch_repitch_dsp.asm's arithmetic (and its unrolled render: L = 10)"
     tag = ((sum((i + 1) * w for i, w in enumerate(sp + r9 + bl)) + Y_LAYOUT) * 2654435761) & 0xFFFFFF | 1
     (x1, _), (x2, _) = XRUNS[payload]
     c = dict(
