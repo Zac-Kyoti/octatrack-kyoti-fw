@@ -112,8 +112,8 @@ def expected_y():
     for j in range(R):
         for mm_ in range(L):
             k = (L - 1 - mm_) * R + j
-            want[c["BTAB"] + 2 * (L * j + mm_)] = int(T[k]) & 0xFFFFFF
-            want[c["BTAB"] + 2 * (L * j + mm_) + 1] = (int(T[k + 1]) - int(T[k])) & 0xFFFFFF
+            want[c["BTAB"] + c["BROW"] * j + 2 * mm_] = int(T[k]) & 0xFFFFFF
+            want[c["BTAB"] + c["BROW"] * j + 2 * mm_ + 1] = (int(T[k + 1]) - int(T[k])) & 0xFFFFFF
     return want
 
 
