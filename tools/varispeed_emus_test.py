@@ -16,7 +16,10 @@ Tests (one forked scenario each):
   swap      both pairs swap together, fresh parks (QUAN 1/1, EMUS OT), round trip
   fresh0    a TSNS of 0 survives a VARI round trip (TSNS back verbatim)
   adopt     a forgotten rp_prev adopts a Part already in VARI (no swap), both machines
-  p2edit    EMUS: one detent = one stop, 1/64/127 only, held x7, snapping, gate off = stock;
+  p2edit    EMUS through P2EDIT (direct calls): six detents in one direction per stop, a
+            reversal restarts the count, a pushed (x7) report counts one detent, a report of
+            12 detents moves two stops, 1/64/127 only, snapping, the count restarts on
+            another track and at SRC SETUP's open (emus_open); gate off = stock;
             TSTR 0..4 through P2EDIT and the swap it starts
   widget    emus_widget / quant_widget arguments (snapped value, formatter), captions;
             emus_fmt, tstr_fmt, quant_fmt strings
@@ -26,6 +29,14 @@ Tests (one forked scenario each):
   o2        SRC page paste + undo, track paste, PART paste / clear / undo, RELOAD PART:
             the target adopts what was written, nothing swaps
   old56     TSTR 5/6 and TSMODE 5/6 (projects saved with REPITCH_REPEAT98_KYOTI) do not crash
+  panel_*   EMUS through the REAL panel path, transport stopped: SRC SETUP opened with its
+            keys, encoder F reports into the panel UART (the parser, its coalescing, the UI
+            task, the page's encoder table, P2EDIT), every stored value logged at P2EDIT's
+            store (0x4003a5ba). slow / fast / multi / jitter / bounce / held turns, and
+            reset (the page closed and re-opened, a track change and back, mid-count). The
+            first hardware build (140C_VEM1) fails these: one stop per report, any sign.
+
+EMUS order (2026-10-14): OT (stored 1, left), S950 (64, middle), SP12 (127, right).
 """
 import argparse, json, os, pathlib, struct, subprocess, sys
 
@@ -34,6 +45,8 @@ SCR = ROOT / "out/vem"
 EMU = pathlib.Path(os.environ.get("VEM_EMU", SCR / "octabam/out/emu/ot_emu"))
 IMG = pathlib.Path(os.environ.get("VEM_IMG", ROOT / "out/mainos_varispeed_emus.bin"))
 SYMS = pathlib.Path(os.environ.get("VEM_SYMS", ROOT / "out/varispeed_emus_syms.json"))
+EM = {"OT": 1, "S950": 64, "SP12": 127}           # EMUS stops, left to right
+EM_NAME = {v: k for k, v in EM.items()}
 CARD = SCR / "img/otdemo.img"
 OUTD = pathlib.Path(os.environ.get("VEM_TEST_OUT", SCR / "tests"))
 S = json.loads(SYMS.read_text())["syms"]
@@ -45,6 +58,10 @@ O_MACH, O_P1, O_P2, O_SLOT5 = 0x22, 0x2a, 0x1da, 0x2ca
 LIVE_P1, LIVE_P2, BASE_W = 0x80000810, 0x80000830, 0x80000a50
 UI_TRACK, PAGE_M = 0x80000000, 0x460d5c30
 P2EDIT, SET_MACHINE, KNOB = 0x4003a474, 0x400972fc, 0x400479b4
+P2_STORE = 0x4003a5ba                            # P2EDIT's DB store (d2 = the value stored)
+ENC_F_HELD = 0x46c7d8ee + 24 * (0x38 + 5)        # encoder F's push (P2EDIT's x7 test)
+ENC_SETUP_ARGS = (0x400d31ae, 0xffffffff, 0x400bb704)   # SRC SETUP's open -> 0x400326d4(P, -1, recs)
+SETUP_OPEN_SITE = 0x400585f4                     # that call (R2: jsr emus_open)
 KNOB_STOCK = bytes.fromhex("4fefffd048d7")
 DESC = (0x400d3000, 0x300)                       # STATIC/FLEX descriptor heads (the captions)
 NAME0 = {0: 0x400d3032, 1: 0x400d31c4}
@@ -115,8 +132,9 @@ def cap_stub():
 
 
 class Scn:
-    def __init__(self, name, frames):
+    def __init__(self, name, frames, live=None):
         self.name, self.frames, self.steps, self.cps = name, frames, [], []
+        self.live = live                 # panel scenarios: [(emulated ms, live line)], no transport
 
     def add(self, *s):
         for x in s:
@@ -207,23 +225,35 @@ def scenarios():
     s.cp(30, "a")
     sc[s.name] = s
 
-    # p2edit: EMUS through the editor; TSTR through the editor
+    # p2edit: EMUS through the editor (direct P2EDIT calls); TSTR through the editor
     s = Scn("p2edit", 60)
     tsns = PBASE + O_P2 + 30 * 0 + 6 * FL + 5
     s.add(poke(2, p2(0, FL, 4, 4) + p2(1, FL, 4, 1) + p2(1, FL, 5, 64) + p2(2, FL, 4, 3) +
                park(0, 2, FL, 0)))
     s.add(poke(20, [b(UI_TRACK, 0), b(PAGE_M, 0), b(PAGE_M + 1, 0), b(PAGE_M + 2, 0), b(PAGE_M + 3, FL)]))
-    seq = [("e0", None, None)] + [(f"e{i + 1}", d, pre) for i, (d, pre) in enumerate(
-        [(1, None), (1, None), (-1, None), (-1, None), (-1, None), (7, None), (1, 30), (-1, 50),
-         (-1, 100), (1, 90), (-7, None)])]
-    for tag, d, pre in seq:
-        if pre is not None:
-            s.add(poke(20, p2(0, FL, 5, pre)))
-        if d is not None:
-            s.add(call(20, P2EDIT, 5, d))
-        s.dump(20, tsns, 1, tag)
-    s.add(poke(20, [b(UI_TRACK, 1)]), call(20, P2EDIT, 5, 1))
+    held = lambda v: poke(20, [b(ENC_F_HELD + i, x) for i, x in enumerate(v.to_bytes(4, "big"))])
+    ed = lambda *ds: [call(20, P2EDIT, 5, d) for d in ds]
+    s.dump(20, tsns, 1, "e0")                                  # fresh park: OT
+    s.add(ed(1, 1, 1, 1, 1)); s.dump(20, tsns, 1, "e5")        # five detents: no step yet
+    s.add(ed(1)); s.dump(20, tsns, 1, "e6")                    # the sixth: S950
+    s.add(ed(-1)); s.dump(20, tsns, 1, "e7")                   # turned back: restart, no step
+    s.add(ed(1)); s.dump(20, tsns, 1, "e8")                    # and again
+    s.add(ed(-1, 1, -1, 1)); s.dump(20, tsns, 1, "e9")         # jitter: nothing moves
+    s.add(ed(12)); s.dump(20, tsns, 1, "e10")                  # 12 detents in one report: two stops (SP12)
+    s.add(held(1), ed(1, 1, 1, 1)); s.dump(20, tsns, 1, "e11") # pushed: x7 units = one detent each
+    s.add(ed(-1, -1, -1, -1, -1)); s.dump(20, tsns, 1, "e12")  # pushed, turned back: five
+    s.add(ed(-1)); s.dump(20, tsns, 1, "e13")                  # the sixth pushed detent: S950
+    s.add(held(0))
+    s.add(poke(20, p2(0, FL, 5, 30)), ed(-1)); s.dump(20, tsns, 1, "e14")    # 30 snaps to OT (1)
+    s.add(poke(20, p2(0, FL, 5, 100)), ed(1)); s.dump(20, tsns, 1, "e15")    # 100 snaps to SP12 (127)
+    s.add(ed(-1, -1, -1, -1, -1)); s.dump(20, tsns, 1, "e16")  # five back: no step
+    s.add(poke(20, [b(UI_TRACK, 1)]), call(20, P2EDIT, 5, 1))  # T2 (not VARI): stock, and the count's owner changes
     s.dump(20, PBASE + O_P2 + 30 * 1 + 6 * FL + 5, 1, "gateoff")
+    s.add(poke(20, [b(UI_TRACK, 0)]), ed(-1)); s.dump(20, tsns, 1, "e17")    # back on T1: counting from 0
+    s.add(ed(-1, -1, -1, -1)); s.dump(20, tsns, 1, "e18")      # five
+    s.add(call(20, S.get("emus_open", 0x400326d4), *ENC_SETUP_ARGS))          # SRC SETUP opens
+    s.add(ed(-1)); s.dump(20, tsns, 1, "e19")                  # counting from 0 again
+    s.add(ed(-1, -1, -1, -1, -1)); s.dump(20, tsns, 1, "e20")  # the sixth since the open: S950
     s.add(poke(20, [b(UI_TRACK, 2)]), call(20, P2EDIT, 4, 1))
     s.dump(20, PBASE + O_P2 + 30 * 2 + 6 * FL + 4, 1, "tstr1")
     s.add(call(20, P2EDIT, 4, 1))
@@ -366,22 +396,80 @@ def scenarios():
                [b(0x100b14f0 + 3 * 0x448 + 0x113, 5), b(0x100b14f0 + 10 * 0x448 + 0x113, 6)]))
     s.cp(1400, "end")
     sc[s.name] = s
+
+    # panel_*: the real panel path, transport stopped. T1 FLEX on VARI, EMUS OT (1), TSNS 30
+    # parked, rp_prev 1 (in the domain already); SRC SETUP opened with its keys on T1.
+    for name, (lines, want) in PANEL.items():
+        s = Scn(f"panel_{name}", 0, live=OPEN_SETUP + lines)
+        s.add("-:poke:" + ";".join([b(UI_TRACK, 0)] + p2(0, FL, 4, 4) + p2(0, FL, 5, EM["OT"]) +
+                                   park(0, 2, FL, 30) + [b(S["rp_prev"] + 2 * 0 + FL, 1)]))
+        s.want = want
+        sc[s.name] = s
     return sc
+
+
+# SRC SETUP on the panel's track: [SRC] pressed twice (0x22), as on the unit
+OPEN_SETUP = [(1000, "key 0x22 down"), (1100, "key 0x22 up"), (1150, "key 0x22 down"), (1250, "key 0x22 up")]
+CLOSE_SETUP = lambda t: [(t, "key 0x22 down"), (t + 100, "key 0x22 up")]
+REOPEN_SETUP = lambda t: [(t, "key 0x22 down"), (t + 100, "key 0x22 up"), (t + 150, "key 0x22 down"),
+                          (t + 250, "key 0x22 up")]
+TRACK_KEY = lambda t, k: [(t, f"key {0x10 + k:#x} down"), (t + 100, f"key {0x10 + k:#x} up")]
+ENC = lambda t0, dt, ds: [(t0 + dt * i, f"enc 5 {d}") for i, d in enumerate(ds)]
+O, S9, SP = "OT", "S950", "SP12"
+PANEL = {
+    # single detents, 150 ms apart: seven right, seven left
+    "slow": (ENC(1500, 150, [1] * 7 + [-1] * 7), [O] * 5 + [S9] * 2 + [S9] * 5 + [O] * 2),
+    # a fast spin, a report every 3 ms: twelve right, twelve left -- never more than one stop per six
+    "fast": (ENC(1500, 3, [1] * 12) + ENC(1900, 3, [-1] * 12), [O] * 5 + [S9] * 6 + [SP] + [SP] * 5 + [S9] * 6 + [O]),
+    # reports carrying several detents (the panel's count, or the parser's coalescing)
+    "multi": (ENC(1500, 150, [3, 3, 6, -2, -4, -12]), [O, S9, SP, SP, S9, O]),
+    # an encoder at rest bouncing +1 / -1: nothing moves
+    "jitter": (ENC(1500, 40, [1, -1] * 6), [O] * 12),
+    # a right turn with a back-bounce every third report: each bounce restarts the count
+    "bounce": (ENC(1500, 40, [1, 1, -1] * 6), [O] * 18),
+    # the encoder pushed while turning (P2EDIT's x7): still six detents per stop
+    "held": ([(1400, "key 0x3d down")] + ENC(1500, 150, [1] * 7 + [-1] * 7) + [(3700, "key 0x3d up")],
+             [O] * 5 + [S9] * 2 + [S9] * 5 + [O] * 2),
+    # half a count, then the page closed and re-opened; then half a count, a track change
+    # and back (each re-opens the page): the count restarts every time
+    "reset": (ENC(1500, 150, [1] * 3) + CLOSE_SETUP(2200) + REOPEN_SETUP(2700) + ENC(3300, 150, [1] * 9)
+              + TRACK_KEY(4800, 1) + TRACK_KEY(5300, 0) + ENC(5900, 150, [1] * 6),
+              [O] * 3 + [O] * 5 + [S9] + [S9] * 3 + [S9] * 5 + [SP]),
+}
 
 
 def run(sc, jobs):
     OUTD.mkdir(parents=True, exist_ok=True)
-    args = [str(EMU), "--image", str(IMG), "--card", str(CARD), "--set", "KYOTI", "--project", "OTDEMO",
-            "--load-ms", "20000", "--dsp", "--main-level", "64", "--scenario-jobs", str(jobs)]
-    for s in sc.values():
-        (OUTD / s.name).mkdir(parents=True, exist_ok=True)
-        a = f"{OUTD / s.name / 'log.txt'} --sequencer --internal-clock --frames {s.frames}"
-        for st in s.steps:
-            a += f" --step {st}"
-        args += ["--scenario", a]
-    with open(OUTD / "parent.log", "w") as f:
-        subprocess.run(args, env=dict(os.environ, OT_VEM_LOG="%o"), stdout=f, stderr=subprocess.STDOUT,
-                       timeout=7200)
+    seq = [s for s in sc.values() if s.live is None]
+    pan = [s for s in sc.values() if s.live is not None]
+    base = [str(EMU), "--image", str(IMG), "--card", str(CARD), "--set", "KYOTI", "--project", "OTDEMO",
+            "--load-ms", "20000"]
+    if seq:
+        args = base + ["--dsp", "--main-level", "64", "--scenario-jobs", str(jobs)]
+        for s in seq:
+            (OUTD / s.name).mkdir(parents=True, exist_ok=True)
+            a = f"{OUTD / s.name / 'log.txt'} --sequencer --internal-clock --frames {s.frames}"
+            for st in s.steps:
+                a += f" --step {st}"
+            args += ["--scenario", a]
+        with open(OUTD / "parent.log", "w") as f:
+            subprocess.run(args, env=dict(os.environ, OT_VEM_LOG="%o"), stdout=f, stderr=subprocess.STDOUT,
+                           timeout=7200)
+    if pan:
+        # the panel group: a watch at P2EDIT's entry, its store and SRC SETUP's open site
+        args = base + ["--watch-pc", f"{P2EDIT:#x},{P2_STORE:#x},{SETUP_OPEN_SITE:#x}", "--scenario-jobs", str(jobs)]
+        for s in pan:
+            d = OUTD / s.name
+            d.mkdir(parents=True, exist_ok=True)
+            end = max(t for t, _ in s.live) + 500
+            (d / "panel.script").write_text("".join(f"{t} {l}\n" for t, l in sorted(s.live, key=lambda x: x[0]))
+                                            + f"{end} quit\n")
+            a = f"{d / 'log.txt'} --live-script {d / 'panel.script'}"
+            for st in s.steps:
+                a += f" --step {st}"
+            args += ["--scenario", a]
+        with open(OUTD / "parent_panel.log", "w") as f:
+            subprocess.run(args, stdout=f, stderr=subprocess.STDOUT, timeout=7200)
 
 
 # ------------------------------------------------------------------------- checks
@@ -406,6 +494,8 @@ def check(name, s):
     d = OUTD / name
     t = T(name)
     log = (d / "log.txt").read_text() if (d / "log.txt").exists() else ""
+    if getattr(s, "live", None) is not None:
+        return panel_check(t, s, log)
     t.eq("run reached its frame count", "run ended REACHED" in log, True)
     t.eq("no call failed to return", "DID NOT RETURN" in log, False)
     if not t.fails or name == "old56":
@@ -419,16 +509,16 @@ def check(name, s):
         a, bb, c, dd = cp["a"], cp["b"], cp["c"], cp["d"]
         t.eq("before: PTCH / TSNS / parks", (a.p1(0, FL), a.p2(0, FL), a.park(0, 1, FL), a.park(0, 2, FL)), (70, 30, 0, 0))
         t.eq("before: rp_prev[T1][FL]", a.rp(0, FL), 0)
-        t.eq("VARI: QUAN / EMUS / parks (fresh: 64 / 64)", (bb.p1(0, FL), bb.p2(0, FL), bb.park(0, 1, FL), bb.park(0, 2, FL)), (64, 64, 70, 30))
+        t.eq("VARI: QUAN / EMUS / parks (fresh: 1/1 = 64 / OT = 1)", (bb.p1(0, FL), bb.p2(0, FL), bb.park(0, 1, FL), bb.park(0, 2, FL)), (64, 1, 70, 30))
         t.eq("VARI: rp_prev[T1][FL]", bb.rp(0, FL), 1)
-        t.eq("VARI: live PTCH / base word / live TSNS", (bb.live[0], bb.base[0:2], bb.live[0x25]), (64, b"\x40\x00", 64))
+        t.eq("VARI: live PTCH / base word / live TSNS", (bb.live[0], bb.base[0:2], bb.live[0x25]), (64, b"\x40\x00", 1))
         t.eq("VARI: SRAM copy follows", bb.shadow_ok(), True)
         t.eq("VARI: captions (FLEX)", (bb.name(NAME0[FL]), bb.name(NAME11[FL])), ("QUAN", "EMUS"))
         t.eq("VARI: STATIC untouched (parks, rp_prev)", (bb.park(0, 1, ST), bb.park(0, 2, ST), bb.rp(0, ST)), (0, 0, 0))
         for f in (12, 13, 14):
             e = cp[f"edge{f}"]
             pair = (e.p1(0, FL), e.p2(0, FL))
-            t.eq(f"frame {f}: the two pairs together", pair in ((70, 30), (64, 64)), True)
+            t.eq(f"frame {f}: the two pairs together", pair in ((70, 30), (64, 1)), True)
         t.eq("left (BEAT): PTCH / TSNS back, QUAN / EMUS parked", (c.p1(0, FL), c.p2(0, FL), c.park(0, 1, FL), c.park(0, 2, FL)), (70, 30, 109, 127))
         t.eq("left: rp_prev, captions", (c.rp(0, FL), c.name(NAME0[FL]), c.name(NAME11[FL])), (0, "PTCH", "TSNS"))
         t.eq("left: live PTCH / TSNS", (c.live[0], c.base[0:2], c.live[0x25]), (70, b"\x46\x00", 30))
@@ -436,25 +526,28 @@ def check(name, s):
         t.eq("back in VARI: SRAM copy follows", dd.shadow_ok(), True)
     elif name == "fresh0":
         i, o = cp["in"], cp["out"]
-        t.eq("TSNS 0 -> EMUS enters as OT (64), 0 parked", (i.p2(0, FL), i.park(0, 2, FL)), (64, 0))
-        t.eq("left: TSNS back verbatim (0)", (o.p2(0, FL), o.park(0, 2, FL)), (0, 64))
+        t.eq("TSNS 0 -> EMUS enters as OT (1), 0 parked", (i.p2(0, FL), i.park(0, 2, FL)), (1, 0))
+        t.eq("left: TSNS back verbatim (0)", (o.p2(0, FL), o.park(0, 2, FL)), (0, 1))
     elif name == "adopt":
         a = cp["a"]
         t.eq("adopted: slots and parks unchanged", (a.p1(0, FL), a.p2(0, FL), a.park(0, 1, FL), a.park(0, 2, FL)), (109, 127, 70, 30))
         t.eq("adopted: rp_prev[T1] FL / ST", (a.rp(0, FL), a.rp(0, ST)), (1, 0))
     elif name == "p2edit":
-        want = {"e0": 64, "e1": 127, "e2": 127, "e3": 64, "e4": 1, "e5": 1, "e6": 64, "e7": 64, "e8": 1,
-                "e9": 64, "e10": 127, "e11": 64}
-        got = {k: (d / k).read_bytes()[0] for k in want}
-        t.eq("EMUS through P2EDIT: 64 +1 +1 -1 -1 -1 +7 | 30+1 50-1 100-1 90+1 | -7", got, want)
+        want = {"e0": "OT", "e5": "OT", "e6": "S950", "e7": "S950", "e8": "S950", "e9": "S950", "e10": "SP12",
+                "e11": "SP12", "e12": "SP12", "e13": "S950", "e14": "OT", "e15": "SP12", "e16": "SP12",
+                "e17": "SP12", "e18": "SP12", "e19": "SP12", "e20": "S950"}
+        got = {k: EM_NAME.get((d / k).read_bytes()[0], (d / k).read_bytes()[0]) for k in want}
+        t.eq("EMUS through P2EDIT: +1x5 | +1 | -1 | +1 | -1 +1 -1 +1 | +12 | pushed +1x4 | pushed -1x5 | pushed -1 | "
+             "30 -1 | 100 +1 | -1x5 | (T2) -1 | -1x4 | (open) -1 | -1x5", got, want)
         t.eq("gate off: stock step (64 + 1)", (d / "gateoff").read_bytes()[0], 65)
         t.eq("TSTR through P2EDIT: BEAT +1 -> VARI, +1 stays", ((d / "tstr1").read_bytes()[0], (d / "tstr2").read_bytes()[0]), (4, 4))
         a = cp["after"]
-        t.eq("T3 entered VARI from the editor: EMUS 64, TSNS 64 parked, rp_prev 1", (a.p2(2, FL), a.park(2, 2, FL), a.rp(2, FL)), (64, 64, 1))
+        t.eq("T3 entered VARI from the editor: EMUS OT (1), TSNS 64 parked, rp_prev 1", (a.p2(2, FL), a.park(2, 2, FL), a.rp(2, FL)), (1, 64, 1))
     elif name == "widget":
         ef = S["emus_fmt"]
         qf = S["quant_fmt"]
-        for tag, val, fmt in (("ew30", 1, ef), ("ew100", 127, ef), ("ew64", 64, ef), ("ew1", 1, ef), ("ewneg", -1, ef),
+        for tag, val, fmt in (("ew30", EM["OT"], ef), ("ew100", EM["SP12"], ef), ("ew64", EM["S950"], ef),
+                              ("ew1", EM["OT"], ef), ("ewneg", -1, ef),
                               ("qw50", 49, qf), ("qw124", 124, qf)):
             c = captured(d, tag)
             t.eq(f"{tag}: KNOB(x, y, idx, value, flags, fmt, canvas)",
@@ -467,7 +560,7 @@ def check(name, s):
         t.eq("off VARI: PTCH widget passes the stock dial through", (c["value"], c["fmt"]), (77, 0x4003b4b0))
         t.eq("off VARI: captions", (off.name(NAME0[FL]), off.name(NAME11[FL])), ("PTCH", "TSNS"))
         ef_ = {v: (d / f"ef{v}").read_bytes().split(b"\0")[0].decode() for v in (1, 42, 43, 64, 85, 86, 127, -1)}
-        t.eq("emus_fmt", ef_, {1: "S950", 42: "S950", 43: "OT", 64: "OT", 85: "OT", 86: "SP12", 127: "SP12", -1: "???"})
+        t.eq("emus_fmt", ef_, {1: "OT", 42: "OT", 43: "S950", 64: "S950", 85: "S950", 86: "SP12", 127: "SP12", -1: "???"})
         tf = [(d / f"tf{v}").read_bytes().split(b"\0")[0].decode() for v in range(7)]
         t.eq("tstr_fmt 0..6", tf, ["OFF", "AUTO", "NORM", "BEAT", "VARI", "???", "???"])
         qf_ = [(d / f"qf{v}").read_bytes().split(b"\0")[0].decode() for v in (4, 64, 124)]
@@ -488,9 +581,9 @@ def check(name, s):
         c = captured(d, "pu_ew")
         t.eq("PICKUP: EMUS widget = stock dial, no poll", (c["value"], c["fmt"]), (33, 0))
         t.eq("x5 STATIC (not VARI): its bytes untouched", stv(x["x5"]), (80, 40, 0, 0))
-        t.eq("x6 STATIC entered VARI: QUAN / EMUS fresh, its own parks", stv(x["x6"]), (64, 64, 80, 40))
-        t.eq("x7 back on FLEX: STATIC kept", stv(x["x7"]), (64, 64, 80, 40))
-        t.eq("x8 STATIC again: unchanged", stv(x["x8"]), (64, 64, 80, 40))
+        t.eq("x6 STATIC entered VARI: QUAN / EMUS fresh (1/1, OT), its own parks", stv(x["x6"]), (64, 1, 80, 40))
+        t.eq("x7 back on FLEX: STATIC kept", stv(x["x7"]), (64, 1, 80, 40))
+        t.eq("x8 STATIC again: unchanged", stv(x["x8"]), (64, 1, 80, 40))
         t.eq("rp_prev T1 ST / FL at the end", (x["x9"].rp(0, ST), x["x9"].rp(0, FL)), (1, 1))
     elif name == "o2":
         o0 = cp["o0"]
@@ -541,6 +634,37 @@ def check(name, s):
         t.eq("not VARI: rp_prev T1..T4", [e.rp(k, FL) for k in range(4)], [0, 0, 0, 0])
     if getattr(s, "latch", False):
         latch_check(t, d)
+    return t
+
+
+def panel_trace(log):
+    """watch hits -> [(delta, stored)] per P2EDIT call, and the SRC SETUP opens."""
+    import re
+    rows, cur, opens = [], None, 0
+    sgn = lambda x: (int(x, 16) ^ 0x80000000) - 0x80000000
+    for l in log.splitlines():
+        m = re.match(r"\s+\[\s*\d+\] at (0x[0-9a-f]+) d0=\S+ .*\[sp \S+ (\S+) (\S+) (\S+) \S+ \S+\] d2-7 (\S+)", l)
+        if not m:
+            continue
+        pc = int(m[1], 16)
+        if pc == P2EDIT:
+            cur = sgn(m[4])
+        elif pc == P2_STORE and cur is not None:
+            rows.append((cur, sgn(m[5])))
+            cur = None
+        elif pc == SETUP_OPEN_SITE:
+            opens += 1
+    return rows, opens
+
+
+def panel_check(t, s, log):
+    t.eq("live script ran to its end", "ended on quit" in log, True)
+    rows, opens = panel_trace(log)
+    got = [EM_NAME.get(v, v) for _, v in rows]
+    t.notes.append("reports " + " ".join(f"{dl:+d}" for dl, _ in rows))
+    t.eq(f"{s.name}: the value after each report (EMUS OT / S950 / SP12)", got, s.want)
+    if s.name == "panel_reset":
+        t.eq("SRC SETUP opens (keys, re-open, track away and back)", opens, 4)
     return t
 
 

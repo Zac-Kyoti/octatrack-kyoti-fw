@@ -7,12 +7,13 @@
             integers; p/q is the QUAN ratio, RATE still applies. AUTO plays a sample
             whose TIMESTRETCH (audio editor, ATTR) is VARI the same way.
     QUAN    the PTCH knob on a VARI track: 1/2 2/3 3/4 4/5 1/1 5/4 4/3 3/2 2/1
-    EMUS    the TSNS knob on a VARI track: S950 / OT / SP12, the engine the DSP kernel
-            renders the track with, taken at each trig
+    EMUS    the TSNS knob on a VARI track: OT / S950 / SP12 (left to right, six detents
+            per step), the engine the DSP kernel renders the track with, taken at each trig
 
 COLDFIRE. One unit, vem_cf (varispeed_emus.s), the standalone builder's own
-(tools/build_varispeed_emus.py). 18 detours: the render's increment store (the frame hook),
-P2EDIT's delta conversion (EMUS steps), five in the audio editor's ATTR page, the four
+(tools/build_varispeed_emus.py). 19 detours: the render's increment store (the frame hook),
+P2EDIT's delta conversion (EMUS steps), SRC SETUP's open (the EMUS detent count restarts),
+five in the audio editor's ATTR page, the four
 SETUP-page dial resolvers, the two Part applies, RELOAD PART, and hold wrappers on the
 bulk writers (SRC page paste, track paste, the PART menu's paste core and CLEAR). The
 STATIC and FLEX descriptors: TSTR count 4 -> 5 with stock's 5-position select and this
@@ -60,7 +61,7 @@ U = "vem_cf"
 LINKED = (
     Linked(U, os.path.join(_HERE, "varispeed_emus.s"),
            reference=(0x400d6500,
-                      "ff79f35e8cc1ae87140a114135c4224bc6824c1085e26a6268a28efb3ca748bd")),
+                      "cd003bfae275d041ad868a3323a2e68d0819a3a6897b4ca2c4823f229aaf07b0")),
 )
 
 _X = bytes.fromhex
@@ -68,7 +69,9 @@ DETOURS = (
     Detour(0x40004100, _X("a1c0eca027400024"), U, "vem_frame",
            "render, second pass: the increment store (VARI speed, dry, engine tag, mask)", pad_to=8),
     Detour(0x4003a566, _X("4eb94003249c"), U, "emus_p2step",
-           "P2EDIT's delta conversion: one EMUS stop per detent", kind="jsr"),
+           "P2EDIT's delta conversion: one EMUS stop per six detents", kind="jsr"),
+    Detour(0x400585f4, _X("4eb9400326d4"), U, "emus_open",
+           "SRC SETUP's open, its encoder set-up: the EMUS detent count restarts", kind="jsr"),
     Detour(0x4006e71c, _X("4879400b94f660000154"), U, "attr_label",
            "ATTR TIMESTRETCH label: 4 -> VARI", pad_to=10),
     Detour(0x4006ee48, _X("202801106608"), U, "attr_up", "ATTR TIMESTRETCH up: ... BEAT -> VARI"),
@@ -140,7 +143,7 @@ MODULE = Module(
     key="VARISPEED_EMUS",
     kind=Kind.HYBRID,
     doc="STATIC/FLEX TSTR VARI: dry, tempo-locked varispeed (QUAN ratios on PTCH) with "
-        "S950 / OT / SP12 engines on the TSNS knob (EMUS).",
+        "OT / S950 / SP12 engines on the TSNS knob (EMUS).",
     linked=LINKED if Setting is not None else tuple(dataclasses.replace(u, dram=True) for u in LINKED),
     detours=DETOURS,
     pokes=POKES,

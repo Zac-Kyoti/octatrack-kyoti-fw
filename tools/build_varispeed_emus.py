@@ -6,14 +6,14 @@ Build VARISPEED_EMUS on TOP OF STOCK 1.40C (WIP).
 
 STATIC / FLEX TSTR gets a fifth position, VARI: the track plays dry at
 (project BPM x p) / (sample BPM x q), p/q the QUAN ratio on the PTCH knob, exact in
-integers, RATE still applying; its TSNS knob becomes EMUS (S950 / OT / SP12), the DSP
+integers, RATE still applying; its TSNS knob becomes EMUS (OT / S950 / SP12), the DSP
 engine latched at each trig. The audio editor's ATTR TIMESTRETCH gains VARI.
 Spec: reference/handoffs/REPITCH_REWRITE_SPEC.md (clean-room); facts:
 REPITCH_REWRITE_SCOPE.md + REPITCH_REWRITE_SCOPE_EMUS.md; this build:
 reference/handoffs/REPITCH_REWRITE_IMPL.md.
 
   ColdFire: octabam-modules/varispeed-emus/varispeed_emus.s, one unit linked at the
-            classic cave's proven start (0x400d6500), 18 detours, 12 descriptor pokes.
+            classic cave's proven start (0x400d6500), 19 detours, 12 descriptor pokes.
   DSP:      the hardware-proven RPS9/RPSP kernel (tools/patch_repitch_dsp.asm via
             tools/repitch_dsp_src.py) in SPRING REVERB's P module and X data, its voice
             and boot hooks, SPRING removed from both FX choosers -- the old builder's DSP
@@ -30,7 +30,7 @@ middle of what it displaces; the cave must be zero in stock and inside the class
 cave from 0x400d6500; no reference into 0x80006a40..0x80006abf; the unit must link to
 the same bytes for -mcpu=5407 and 54455 (octabam assembles DRAM units for 54455).
 
-Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM1)
+Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM2)
 """
 import hashlib, importlib.util, json, os, pathlib, struct, subprocess, sys
 from kyoti_status import gate, seal
@@ -51,7 +51,7 @@ OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx"
 OUT_BIN = ROOT / "out/OCTATRACK_VARISPEED_EMUS.bin"
 SYMS_JSON = ROOT / "out/varispeed_emus_syms.json"
 WORK = ROOT / "out/vem_build"
-VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM1"
+VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM2"
 # A TEST variant (the harness's deliberately wrong builds): VEM_VARIANT=<tag> and
 # VEM_VARIANT_SRC=<.s> build out/vem_variants/mainos_varispeed_emus_<tag>.bin from that
 # source, with every check, and no wrap. Never a flash candidate.
@@ -73,6 +73,9 @@ DETOURS = {
     0x40004100: ("a1c0eca027400024", "vem_frame", "jmp"),
     # EMUS: P2EDIT's only delta conversion
     0x4003a566: ("4eb94003249c", "emus_p2step", "jsr"),
+    # EMUS: SRC SETUP's open, its encoder set-up call (every open, and a track change's
+    # re-open): the detent count restarts
+    0x400585f4: ("4eb9400326d4", "emus_open", "jsr"),
     # audio editor ATTR, TIMESTRETCH row: label else, up row 2, down row 2, both tails
     0x4006e71c: ("4879400b94f660000154", "attr_label", "jmp"),
     0x4006ee48: ("202801106608", "attr_up", "jmp"),
@@ -119,6 +122,11 @@ POKES = {
 CONTEXT = {
     # P2EDIT around R1: d2 = the old byte (mvs.b), a3 = slot2, d3 = delta, d4 = track
     0x4003a55a: "d1fc0008ef5a75102f032f0b4eb94003249c41eb00062235",
+    # P2EDIT's x7: the delta is multiplied by 7 while [0x46c7d8ee + 24 * (slot2 + 0x38)]
+    # (the encoder's push) is set -- emus_p2step reads the same flag for encoder F
+    0x4003a480: "262f0028200b0680000000382200eb89e7889280068146c7d8ee20414a9067082003e78890832600",
+    # SRC SETUP's open around R2: the encoder set-up's arguments (P, -1, the records)
+    0x400585e0: "4879400bb7044878ffff41f9400d5f382f304c004eb9400326d4",
     # the stock 5-position select: bound `moveq #4` and its icon table operand
     0x40046b08: "7004b0856500",
     # the render around H1: the second-pass test and the voice record pointer

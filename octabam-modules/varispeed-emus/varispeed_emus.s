@@ -6,14 +6,14 @@
 | STATIC and FLEX get a fifth TSTR position, VARI (raw 4). A VARI track plays dry
 | (no grains, no stretch) at the speed (project BPM x p) / (sample BPM x q), p/q the QUAN
 | ratio picked with the PTCH knob, exact in integers; RATE still applies. Its TSNS knob
-| becomes EMUS (S950 / OT / SP12), the engine the DSP kernel (rpk_dsp.asm) renders the
-| track with, latched at each trig. Spec: reference/handoffs/REPITCH_REWRITE_SPEC.md;
+| becomes EMUS (OT / S950 / SP12, left to right), the engine the DSP kernel (rpk_dsp.asm)
+| renders the track with, latched at each trig; six detents in one direction step it once. Spec: reference/handoffs/REPITCH_REWRITE_SPEC.md;
 | facts: REPITCH_REWRITE_SCOPE.md + REPITCH_REWRITE_SCOPE_EMUS.md (clean-room).
 |
 | Two parts:
 |   PART 1, NEW CORE (written for VARISPEED_EMUS): the frame hook vem_frame, the TSTR
-|     formatter, the audio-editor ATTR hooks, the EMUS widget / formatter / step, the
-|     hold wrappers of the bulk writers.
+|     formatter, the audio-editor ATTR hooks, the EMUS widget / formatter / step and its
+|     page-open reset, the hold wrappers of the bulk writers.
 |   PART 2, RETAINED (REPITCH_REWRITE_RETAINED.s, extended): QUAN, the domain swap -- now
 |     per machine, with a second pair (TSNS<->EMUS) -- the Part-DB gate, the Part-apply
 |     bookkeeping and RELOAD PART.
@@ -35,6 +35,7 @@
         .global emus_widget
         .global emus_fmt
         .global emus_p2step
+        .global emus_open
         .global vh_srcpaste
         .global vh_trkpaste
         .global vh_partpaste
@@ -60,6 +61,8 @@
         .global vem_depth
         .global rk_ratios
         .global emus_stops
+        .global em_tally
+        .global em_ctx
         .global vem_end
 
 | ---------------------------------------------------------------------------- stock
@@ -92,6 +95,8 @@
         .equ    STEP_PTCH, 0x40032d08   | stock slot-0 encoder step handler
         .equ    ENC_A_HELD, 0x46c7de2e  | encoder A's press state
         .equ    ACCUM, 0x4003249c       | P2EDIT's delta -> steps conversion
+        .equ    ENC_SETUP, 0x400326d4   | a page's encoder set-up (SRC SETUP's open calls it)
+        .equ    ENC_F_HELD, 0x46c7d8ee+24*(0x38+5) | encoder F's push held (P2EDIT's x7 test)
         .equ    SPRINTF, 0x40013a08
         .equ    STR_UNK, 0x400b442a     | "???"
         .equ    STR_ERROR, 0x400b94f6   | "ERROR"
@@ -122,6 +127,7 @@
         .equ    PARK2_FL, 21            | NEIGHBOR p2 slot 3: FLEX's TSNS park
         .equ    TSNS_SLOT2, 5
         .equ    TSTR_SLOT2, 4
+        .equ    EM_DETENTS, 6           | EMUS: detents in one direction per stop
 
 | ============================================================================
 | PART 1 -- NEW CORE
@@ -320,8 +326,8 @@ voice_set:
         movea.l %d1,%a1
         rts
 
-| d0 = an EMUS value (signed byte) -> d0 = its stop index: 0 S950 (..42 and any
-| negative), 1 OT (43..85), 2 SP12 (86..). Keeps everything else.
+| d0 = an EMUS value (signed byte) -> d0 = its stop index: 0 OT (..42 and any
+| negative), 1 S950 (43..85), 2 SP12 (86..). Keeps everything else.
 emus_idx:
         tst.l   %d0
         bmi.s   1f
@@ -485,7 +491,7 @@ live_tsns:
         move.l  (%sp)+,%d1
         rts
 
-| emus_fmt(buf, v): S950 / OT / SP12 by bucket; a negative value "???".
+| emus_fmt(buf, v): OT / S950 / SP12 by bucket; a negative value "???".
 emus_fmt:
         move.l  8(%sp),%d0
         bmi.s   1f
@@ -501,9 +507,15 @@ emus_fmt:
 
 | emus_p2step(slot2, delta): `jsr` redirected from P2EDIT's only delta conversion
 | (0x4003a566, stock `jsr 0x4003249c`), returning the steps P2EDIT adds to the
-| stored byte. On an ST/FL VARI track's slot 5 every nonzero step (a held encoder's
-| x7 too) moves ONE stop; the return is (stop - old), so P2EDIT stores the stop
-| itself. Everything else: stock's conversion. P2EDIT's own registers (d2 = old
+| stored byte. On an ST/FL VARI track's slot 5, EM_DETENTS detents in one direction
+| move ONE stop; a detent the other way restarts the count, so jitter cannot flip it.
+| Detents, not units: the panel's report is a signed detent count that P2EDIT has
+| multiplied by 7 while the encoder is pushed, so a pushed report counts |units| / 7;
+| a report of several detents (a fast turn) counts them all, never more. The count
+| (em_tally) belongs to one track / machine / part (em_ctx) and restarts when that
+| changes or SRC SETUP opens (emus_open). The return is (stop - old), so P2EDIT
+| stores the stop itself (a non-stop value snaps to its bucket's stop on the first
+| detent). Everything else: stock's conversion. P2EDIT's own registers (d2 = old
 | value, d3, d4, d5, a2-a5) are kept: C ABI, d0/d1/a0/a1 only.
 emus_p2step:
         moveq   #TSNS_SLOT2,%d0
@@ -515,48 +527,99 @@ emus_p2step:
         bls.s   1f
 .ep_stock:
         jmp     (ACCUM).l
-1:      move.l  8(%sp),-(%sp)           | stock's accumulator first: its fractional
-        move.l  8(%sp),-(%sp)           | tally decides whether this is a detent
-        jsr     (ACCUM).l
+1:      move.l  8(%sp),-(%sp)           | stock's accumulator first: it keeps its own
+        move.l  8(%sp),-(%sp)           | state and its hold-off; for TSNS one unit is
+        jsr     (ACCUM).l               | one step, so d0 = the units of this report
         addq.l  #8,%sp
         tst.l   %d0
-        beq.s   .ep_out                 | no step this time
-        lea     -12(%sp),%sp
-        movem.l %d2-%d4,(%sp)
-        move.l  %d0,%d4                 | the steps' sign is all that counts
+        beq     .ep_out                 | nothing this time
+        lea     -16(%sp),%sp
+        movem.l %d2-%d5,(%sp)
+        move.l  %d0,%d4                 | units, signed
         moveq   #0,%d1
         move.b  (UI_TRACK).l,%d1
-        bsr     rp_swap_ui              | settle the domain before deciding
         move.l  (PAGE_M).l,%d2
+| the count's owner: track | machine << 8 | part << 16
+        move.l  %d2,%d0
+        lsl.l   #8,%d0
+        or.l    %d1,%d0
+        moveq   #0,%d3
+        move.b  (PART_B).l,%d3
+        swap    %d3
+        or.l    %d3,%d0
+        cmp.l   (em_ctx).l,%d0
+        beq.s   2f
+        move.l  %d0,(em_ctx).l
+        clr.b   (em_tally).l            | another track / machine / part: start over
+2:      bsr     rp_swap_ui              | settle the domain before deciding
         bsr     rp_gate_m
         tst.l   %d0
-        bne.s   2f
+        bne.s   3f
         move.l  %d4,%d0                 | not VARI: stock's steps
-        bra.s   .ep_ret
-2:      bsr     db_tsns                 | d0 = the stored byte now (d1 track, d2 m)
-        move.l  %d0,%d3
-        bsr     emus_idx
-        tst.l   %d4
-        bmi.s   3f
-        addq.l  #1,%d0
-        moveq   #2,%d1
-        cmp.l   %d1,%d0
-        ble.s   4f
-        move.l  %d1,%d0
-        bra.s   4f
-3:      subq.l  #1,%d0
+        bra     .ep_ret
+3:      move.l  %d4,%d5                 | d5 = detents = |units|, / 7 when pushed
         bpl.s   4f
+        neg.l   %d5
+4:      tst.l   (ENC_F_HELD).l
+        beq.s   5f
+        moveq   #7,%d0
+        divu.l  %d0,%d5
+        bne.s   5f
+        moveq   #1,%d5
+5:      mvs.b   (em_tally).l,%d3        | signed: the direction and the count so far
+        tst.l   %d4
+        bmi.s   .ep_down
+        tst.l   %d3
+        bpl.s   6f
+        moveq   #0,%d3                  | turned back: restart
+6:      add.l   %d5,%d3
+        moveq   #0,%d5                  | d5 = stops to move
+7:      moveq   #EM_DETENTS,%d0
+        cmp.l   %d0,%d3
+        blt.s   .ep_count
+        sub.l   %d0,%d3
+        addq.l  #1,%d5
+        bra.s   7b
+.ep_down:
+        tst.l   %d3
+        ble.s   6f
+        moveq   #0,%d3                  | turned back: restart
+6:      sub.l   %d5,%d3
+        moveq   #0,%d5
+7:      moveq   #-EM_DETENTS,%d0
+        cmp.l   %d0,%d3
+        bgt.s   .ep_count
+        sub.l   %d0,%d3
+        subq.l  #1,%d5
+        bra.s   7b
+.ep_count:
+        move.b  %d3,(em_tally).l
+        bsr     db_tsns                 | d0 = the stored byte now (d1 track, d2 m)
+        bsr     emus_idx
+        add.l   %d5,%d0
+        bpl.s   8f
         moveq   #0,%d0
-4:      lea     emus_stops(%pc),%a0
+8:      moveq   #2,%d1
+        cmp.l   %d1,%d0
+        ble.s   9f
+        move.l  %d1,%d0
+9:      lea     emus_stops(%pc),%a0
         mvz.b   0(%a0,%d0.l),%d0
         sub.l   (%sp),%d0               | - P2EDIT's old value (its d2): P2EDIT adds
                                         | this to its d2 and stores the stop itself,
                                         | even if a swap just moved the byte under it
 .ep_ret:
-        movem.l (%sp),%d2-%d4
-        lea     12(%sp),%sp
+        movem.l (%sp),%d2-%d5
+        lea     16(%sp),%sp
 .ep_out:
         rts
+
+| emus_open: `jsr` redirected from SRC SETUP's open (0x400585f4, stock `jsr 0x400326d4`,
+| the page's encoder set-up). It runs at every open of the page: entering it, and the
+| re-open a track change makes. A half-turned EMUS count never carries over.
+emus_open:
+        clr.b   (em_tally).l
+        jmp     (ENC_SETUP).l
 
 | d1 = track, d2 = machine -> d0 = the Part's TSNS byte for that machine (signed).
 db_tsns:
@@ -861,7 +924,7 @@ rp_swap_ui:
 |   PTCH (p1 slot 0) <-> its park (ST: NEIGHBOR p1 s0, FL: NEIGHBOR p1 s5), an entering
 |     value below 4 (a fresh park) becoming 64 = 1/1, either way;
 |   TSNS (p2 slot 5) <-> its park (ST: NEIGHBOR p2 s5, FL: NEIGHBOR p2 s3), a fresh
-|     park (0) entering EMUS as 64 = OT; TSNS comes back verbatim.
+|     park (0) entering EMUS as 1 = OT; TSNS comes back verbatim.
 | in the working DB and the SRAM part copy, with the writer's own dirty flags. The
 | NEIGHBOR bytes are '---' parameters stock saves with the Part and never applies.
 | First sight (0xff or any non 0/1/HOLD value) adopts without swapping; HOLD (a RELOAD
@@ -945,7 +1008,7 @@ rp_swap_m:
         beq.s   2f                      | leaving VARI: TSNS verbatim
         tst.l   %d3
         bne.s   2f
-        moveq   #64,%d3                 | entering EMUS from a fresh park: OT
+        moveq   #1,%d3                  | entering EMUS from a fresh park: OT
 2:      move.b  %d3,(%a0,%d6.l)
         move.b  %d0,(%a0,%d7.l)
         move.b  %d3,(%a1,%d6.l)
@@ -1292,7 +1355,7 @@ rp_apply2:
 tstr_tab:
         .long   STR_OFF, STR_AUTO, STR_NORM, STR_BEAT, str_vari
 emus_tab:
-        .long   str_s950, str_ot, str_sp12
+        .long   str_ot, str_s950, str_sp12
 cap_tab:
         .ascii  "PTCHTSNS"              | off VARI
         .ascii  "QUANEMUS"              | on VARI
@@ -1316,10 +1379,10 @@ str_sp12:
         .ascii  "SP12\0"
 rk_ratios:                              | p, q per QUAN index
         .byte   1,2, 2,3, 3,4, 4,5, 1,1, 5,4, 4,3, 3,2, 2,1
-emus_stops:                             | the stored value per stop: S950, OT, SP12
+emus_stops:                             | the stored value per stop: OT, S950, SP12
         .byte   1, 64, 127
 emus_mode:                              | the DSP engine per stop (bits 2-3 of the increment)
-        .byte   1, 0, 2
+        .byte   0, 1, 2
         .balign 4
 rp_prev:                                | [2t + m]: 0/1 gate, 0xff forgotten, 0xfe HOLD
         .byte   0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff
@@ -1328,5 +1391,10 @@ vem_depth:                              | nested holds
         .byte   0
 rk_acc:                                 | QUAN fine-detent tally, signed
         .byte   0
+em_tally:                               | EMUS detent count, signed (sign = direction)
+        .byte   0
+        .balign 4
+em_ctx:                                 | the count's owner: track | m << 8 | part << 16
+        .long   0
         .balign 4
 vem_end:

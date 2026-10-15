@@ -12,8 +12,8 @@ entry (payload A P:0x40b core 0, B P:0x20e core 1), logged by the scratch ot_emu
 OT_VEM_LOG patch (tools/varispeed_emus_ot_emu.patch). Never disassembles, diffs or traces
 the oracle's code; the observation point is the unchanged DSP kernel's entry.
 
-    new     VARI (TSTR 4) + EMUS S950 / OT / SP12     out/mainos_varispeed_emus.bin
-    oracle  TSTR 5 (RPS9) / 4 (RPCH) / 6 (RPSP)       out/oracle/shipped_repitch_repeat98_kyoti_FINAL.bin
+    new     VARI (TSTR 4) + EMUS OT / S950 / SP12     out/mainos_varispeed_emus.bin
+    oracle  TSTR 4 (RPCH) / 5 (RPS9) / 6 (RPSP)       out/oracle/shipped_repitch_repeat98_kyoti_FINAL.bin
     stock   for the out-of-range cases: TSTR OFF      out/raw/section_3_MAIN_OS.bin
 
 Per track the comparison starts at its first trig pass after the value pokes (the new
@@ -59,8 +59,8 @@ SLOT = PRJ["slots"]                 # the track's sample slot (dumped from the l
 MACH = PRJ["m"]                     # its machine: 1 FLEX / 0 STATIC
 PICKUP, SET_MACHINE = 4, 0x400972fc  # machine select's refresher (part, track)
 QUAN = [4 + 15 * i for i in range(9)]          # the 9 stops: 1/2 .. 2/1
-EMUS = {"S950": 1, "OT": 64, "SP12": 127}
-ORACLE_TSTR = {"S950": 5, "OT": 4, "SP12": 6}
+EMUS = {"OT": 1, "S950": 64, "SP12": 127}      # the EMUS stops, left to right (2026-10-14)
+ORACLE_TSTR = {"OT": 4, "S950": 5, "SP12": 6}
 T_SET, T_VAL = 2, 40                            # poke frames (after the transport start)
 SKIP_FRAMES = 60                                # compare from each track's first trig after this
 
