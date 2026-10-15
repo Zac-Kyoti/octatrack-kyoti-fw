@@ -29,7 +29,9 @@ apply exactly once; nothing else moves):
     and zqrp's tag check alone says whether Y is current, wherever this remix put
     the blocks.
 The XY dual moves with an ALU op stay as the standalone has them: octabam's
-assembler gains them (sambanks/octabam#561, Sam Banks, 4 Oct 2026).
+assembler gains them (sambanks/octabam#561, Sam Banks, 4 Oct 2026). The standalone
+kernel has no `rep` since the VEM DSP optimisation (its trig clear is a DO, as
+octabam requires since 86a9a611), so no substitution is needed for it.
 """
 import pathlib
 import re
@@ -51,7 +53,7 @@ MARK2 = "$" + "fab2e0"                  # ... and ptable2's
 def tables():
     """The two blocks, and each table's offset in its block."""
     sp, _ = dsrc.half_table(dsrc.m.MODE_RPSP)
-    r9, _ = dsrc.half_table(dsrc.m.MODE_RPS9)
+    r9, _ = dsrc.r9_stored()
     bl = dsrc.render_half()
     off = dict(XBL=0, XSP=0, XR9=len(sp))
     return bl, sp + r9, off
@@ -67,15 +69,25 @@ def constants():
 
 
 SUBS = [
-    # zqinit: block 2 first (the RPSP half-rows; the RPS9 rows follow), then block 1
-    # (the render's half-table)
+    # zqinit: block 1 first (the render's half-table), then block 2 (the RPSP half-rows;
+    # the RPS9 rows follow)
     ("""zqinit:
         move    r7,n2
-        move    #>XSP,r1
+        move    #>XBL,r1
 """,
      """zqinit:
         move    r7,n2
-        move    #>@MARK2@,r1            ; block 2: the RPSP half-rows; the RPS9 rows follow
+        move    #>@MARK@,r1             ; block 1: the render's half-table
+"""),
+    ("""        do      #BHALF,zqi3             ; T[k] stored for k = 0..LR/2; T[LR-k] = -1/2 - T[k]
+        move    x:(r1)+,x0
+""",
+     """        do      #BHALF,zqi3             ; T[k] stored for k = 0..LR/2; T[LR-k] = -1/2 - T[k]
+        move    p:(r1)+,x0
+"""),
+    ("""        move    #>XSP,r1
+""",
+     """        move    #>@MARK2@,r1            ; block 2: the RPSP half-rows; the RPS9 rows follow
 """),
     ("""        do      #SPHALF,zqi1
         move    x:(r1)+,x0
@@ -88,28 +100,6 @@ SUBS = [
 """,
      """        do      #R9HALF,zqi2
         move    p:(r1)+,x0
-"""),
-    ("""zqi2:
-        move    #>XBL,r1
-""",
-     """zqi2:
-        move    #>@MARK@,r1             ; block 1: the render's half-table
-"""),
-    ("""        do      #BHALF,zqi3             ; T[k] stored for k = 0..LR/2; T[LR-k] = -1/2 - T[k]
-        move    x:(r1)+,x0
-""",
-     """        do      #BHALF,zqi3             ; T[k] stored for k = 0..LR/2; T[LR-k] = -1/2 - T[k]
-        move    p:(r1)+,x0
-"""),
-    # zqtok's ring clear: octabam refuses `rep` in a DSP source since 86a9a611
-    # (tools/build/norep.py; rep cannot be interrupted and holds off payload B's
-    # host-command vectors). Sam Banks, Zac-Kyoti/octatrack-kyoti-fw#1.
-    ("""        rep     #<32
-        move    a,x:(r1)+
-""",
-     """        do      #<32,>zqnorep1          ; interruptible, unlike rep (octabam tools/build/norep.py)
-        move    a,x:(r1)+
-zqnorep1:
 """),
 ]
 

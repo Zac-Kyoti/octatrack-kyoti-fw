@@ -115,7 +115,12 @@ int main(int argc, char** argv)
 	// emulator's opcodecycles table, as the load audit counts), over every pass
 	std::map<uint32_t, std::pair<uint64_t, uint64_t>> pchistStore;
 	std::map<uint32_t, std::pair<uint64_t, uint64_t>>* pchist = std::getenv("RK_PCHIST") ? &pchistStore : nullptr;
-	if(pchist) dsp.setHostStepped(true);
+	// RK_FRAMECYC=FILE: per frame, the instructions executed INSIDE the cave and their datasheet
+	// cycles (same table as RK_PCHIST): "instr cycles" per line -- the worst-case price per voice
+	const char* frameCycPath = std::getenv("RK_FRAMECYC");
+	std::vector<std::pair<uint64_t, uint64_t>> frameCyc;
+	const bool stepped = pchist || frameCycPath;
+	if(stepped) dsp.setHostStepped(true);
 	uint64_t pos = 0;                                       // source position, 24.24
 	size_t written = 0;
 	while(true) {
@@ -141,7 +146,7 @@ int main(int argc, char** argv)
 		// RK_MODE_SWITCH=N: frames N..2N-1 run in RPCH (mode 0), as a user switching away and back
 		static const int sw = std::getenv("RK_MODE_SWITCH") ? std::atoi(std::getenv("RK_MODE_SWITCH")) : 0;
 		const uint32_t pm = (sw && fr >= size_t(sw) && fr < size_t(2 * sw)) ? 0 : mode;
-		uint64_t frameCount = 0;
+		uint64_t frameCount = 0, caveInstr = 0, caveCyc = 0;
 		auto& R = dsp.regs();
 		R.r[3].var = OUT;
 		for(int visit = 0; visit < 2; ++visit) {
@@ -173,8 +178,9 @@ int main(int argc, char** argv)
 				// RK_PCHIST: executions and datasheet cycles per P address (the interpreter does not
 				// advance getCycles(), so price the instruction from the shared opcode-cycle table)
 				if(pchist) { auto& e = (*pchist)[hpc]; ++e.first; e.second += dsp.calcOpcodeCycles(hpc); }
+				if(frameCycPath && hpc >= caveOrg && hpc < caveOrg + cave.size()) { ++caveInstr; caveCyc += dsp.calcOpcodeCycles(hpc); }
 				dsp.execInterpreter();
-				if(pchist) while(dsp.doLoopEnd()) {}   // host-stepped: a DO loop's body is one step per instruction
+				if(stepped) while(dsp.doLoopEnd()) {}   // host-stepped: a DO loop's body is one step per instruction
 			}
 			if(dsp.getPC().toWord() != stop) { std::printf("pass did not finish (pc %06x)\n", dsp.getPC().toWord()); return 1; }
 			frameCount += dsp.getInstructionCounter() - before;
@@ -189,6 +195,7 @@ int main(int argc, char** argv)
 				if(k != 6 && (R.m[k].var & 0xffffff) != 0xffffff) { std::printf("m%d left at %06x\n", k, R.m[k].var & 0xffffff); return 1; }
 		}
 		counts.push_back(frameCount);
+		frameCyc.emplace_back(caveInstr, caveCyc);
 		if(std::getenv("RK_STATE")) {
 			static FILE* sf = std::fopen(std::getenv("RK_STATE"), "w");
 			for(uint32_t k = 0; k < 10; ++k) std::fprintf(sf, "%06x ", mem.get(MemArea_Y, 0xa00 + trk + k) & 0xffffff);
@@ -206,6 +213,10 @@ int main(int argc, char** argv)
 	if(argc == 16) {
 		std::ofstream c(argv[15]);
 		for(auto n : counts) c << n << "\n";
+	}
+	if(frameCycPath) {
+		std::ofstream fc(frameCycPath);
+		for(const auto& [i, c] : frameCyc) fc << i << " " << c << "\n";
 	}
 	if(pchist) {
 		std::ofstream h(std::getenv("RK_PCHIST"));

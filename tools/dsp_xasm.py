@@ -98,6 +98,7 @@ def _norm(text, syms):
     """Canonical operand tokens for comparing source with disassembly."""
     t = text.lower().replace("<", "").replace(">", "")
     t = re.sub(r"^movem\b", "move", t.strip())
+    t = re.sub(r"\b[a-z]+_([0-9a-f]{6})\b", r"$\1", t)     # the disassembler's func_001429: an address
     for name in sorted(syms, key=len, reverse=True):
         t = re.sub(rf"\b{re.escape(name.lower())}\b", f"${syms[name]:x}", t)
     toks = re.findall(r"[a-z_][a-z0-9_.]*|\$[0-9a-f]+|#|[-+()]|,|:|\d+", t)
@@ -229,6 +230,11 @@ def assemble(src, org):
             out_lines.append(f"        {op}     >$100")
             continue
         parts = rest.split()
+        if op == "tfr" and parts and parts[0] in ("a,b", "b,a"):
+            # dsp_asm encodes TFR's other-accumulator source as JJJ = 001 (= rnd); it is 000
+            specials.append((len(out_lines), "tfr", (parts, body)))
+            out_lines.append("        nop")
+            continue
         if len(parts) == 3 and parts[1].startswith("x:") and parts[2].startswith("y:") and op != "move":
             specials.append((len(out_lines), "xy", (op, parts, body)))
             out_lines.append("        nop")
@@ -268,6 +274,18 @@ def assemble(src, org):
         elif kind == "movem":
             words[a - org] = pay[0]
             expect[a] = pay[1]
+        elif kind == "tfr":
+            parts, body = pay
+            alu = 0x01 | (0x08 if parts[0] == "a,b" else 0)          # TFR: 0 JJJ=000 D 001
+            if len(parts) == 1:
+                mv = [0x200000]                                   # no parallel move
+            else:
+                rr = _rr_form("tfr", parts)
+                mv = [_rr_word(rr, "move", parts[1:])] if rr else _one(f"move {' '.join(parts[1:])}")
+            if len(mv) != 1 or (mv[0] & 0xff) != 0:
+                raise AsmError(f"cannot build tfr for: {body}")
+            words[a - org] = (mv[0] & 0xffff00) | alu
+            expect[a] = body
         elif kind == "rr":
             words[a - org] = _rr_word(*pay[:3])
             expect[a] = pay[3]
