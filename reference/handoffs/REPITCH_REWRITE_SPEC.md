@@ -351,3 +351,27 @@ shows. When something must give, the step-down is always to **OT**.
    - Nothing refused or changed under budget.
    - The harness stays identical on every existing scenario.
    - The toast only from UI handlers.
+
+#### 6b, simplified (the user, 2026-10-15): two refusals and one safety net
+
+Item 3's list of per-path hooks (Part change, reload, project and bank load, machine change,
+gate changes) is replaced by **one safety net**:
+
+- **The two refusals of item 2 stay,** at their UI handlers: EMUS, and the FX type.
+- **The safety net:** a single check of the per-core settings estimate, run only when the
+  settings have changed (keep a cheap signature of the inputs, and recompute only when it
+  differs). It finds over-budget cores however they got there:
+  - Part change or reload;
+  - project or bank load, including projects from earlier builds, stock or the old module;
+  - a machine change that activates a different per-machine setting;
+  - copy/paste of FX pages, tracks or Parts;
+  - a sample or tempo change that turns a gate on;
+  - TSTR or ATTR → VARI.
+
+  It sets just enough EMUS to OT on that core (SP12 first, then S950, highest track number
+  first), using the existing swap/park rules.
+- **The toast after a safety-net step-down:** raised from the UI task straight away if the change
+  came from a UI handler, or later from a proven-safe UI-task point otherwise. Never from the
+  frame path.
+
+The behaviour the user sees is item 3's; only the mechanism is simpler.
