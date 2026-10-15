@@ -299,3 +299,55 @@ in every situation that does not overrun.
      toasts from key handlers.
 3. **No toast ever from the frame path,** and none when the guard acts on its own (CLAUDE.md:
    UI and kernel primitives from the frame path crashed a unit).
+
+### 6b. The guard redesigned: refuse, never step down at run time (the user, 2026-10-15, after flashing VEM5)
+
+This replaces §6 items 3–4 and all of §6a. The VEM5 guard stepped voices down at trigs and
+mid-note, marked the readout `S95!` / `OT!`, and moved nothing the user could see. The user does
+not want that. The new principle: **a change that would overload the DSP is not allowed.** The
+control does not take the position the user was going for, and the toast `MAX DSP: EMU LIMIT`
+shows. When something must give, the step-down is always to **OT**.
+
+1. **The load is a property of the settings, not of playback.** VEM4G measured that the DSP runs
+   a track's S950/SP12 engine on every pass whose increment carries it, sounding or not. So per
+   core: base + the FX prices + the engine price of every track that is a VARI track (the §2
+   gate: VARI or AUTO+VARI, ST/FL, tempos in range) with EMUS on S950 or SP12. Prices and
+   budgets are as now (`VG_*`: SP12 218, S950 99, budgets 3,350 for T5–T8 and 3,930 for T1–T4).
+   Nothing in the frame path steps anything down any more. The engine latch at the trig stays
+   exactly as it is.
+2. **Refused** (the value stays as it was, toast):
+   - **EMUS turned toward an engine that does not fit.** The knob stops at the highest position
+     that fits. Turning toward a cheaper engine is always allowed.
+   - **An FX type that does not fit**, on a track's FX1 or FX2. The selection does not land on
+     that effect. This applies only when emulated engines are what tip the core over: if stock
+     FX alone exceed the budget (no S950/SP12 track counted on that core), nothing is refused.
+3. **Allowed, but EMUS steps to OT** (a real change of the EMUS value, so the display always
+   matches what plays; toast):
+   - **SETUP TSTR or ATTR TIMESTRETCH (under AUTO) → VARI** on a track whose EMUS engine does not
+     fit: the track goes to VARI and its EMUS becomes OT.
+   - **Changes that cannot sensibly be refused:** Part change, Part reload (stock RELOAD PART and
+     the KYOTI chords), project or bank load, a machine change that brings a VARI setting along,
+     and any other way the settings land over budget (for example a sample or tempo change that
+     turns a track's gate on). Just enough tracks on that core get EMUS = OT: **SP12 tracks
+     first, then S950, highest track number first.**
+4. **The toast, `MAX DSP: EMU LIMIT`, for 1.2 s** (1.5 × stock's 0.8 s).
+   - Raise it only from UI-task handlers (keys, encoder, editors), never from the frame path
+     (CLAUDE.md).
+   - When a step-down happens outside the UI task (a pattern change that switches Part from
+     the sequencer), set a flag and raise the toast later from a safe UI-task point. If there
+     is none, no toast for that case: say so in the report.
+5. **Removed:**
+   - the run-time step-down, at the trig and mid-note;
+   - the `S95!` / `OT!` readout;
+   - the MAX DSP: S950/OT USED toasts.
+
+   EMUS always shows its stored value, which is what plays.
+6. **EMUS feel:** **4 detents per step** (was 6; the user: "at least 1/3 less turning").
+   Reversal still restarts the count.
+7. **Tests:**
+   - Every refusal (EMUS, FX).
+   - TSTR/ATTR → VARI stepping EMUS to OT.
+   - Part change, reload and project load over budget stepping the right tracks to OT.
+   - Nothing refused or changed under budget.
+   - The harness stays identical on every existing scenario.
+   - The toast only from UI handlers.
