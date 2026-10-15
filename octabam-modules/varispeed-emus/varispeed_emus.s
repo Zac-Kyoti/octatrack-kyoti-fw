@@ -34,7 +34,15 @@
         .global attr_tail
         .global emus_widget
         .global emus_fmt
-        .global emus_fmt_dn
+        .global emus_fmt_ot_dn
+        .global emus_fmt_s95_dn
+        .global vg_room
+        .global vg_ask
+        .global vg_gates
+        .global vg_entered
+        .global rp_gate_v
+        .global str_max_ot
+        .global str_max_s950
         .global vg_core
         .global vg_latch
         .global vg_est
@@ -130,6 +138,12 @@
         .equ    RENDER, 0x80004898      | per-track render state, stride 40; +36 = the increment
         .equ    FX1_IDS, 0x80000ec4     | live FX1 type id per track (8 bytes; FX2 ids follow at +8)
         .equ    FRAME_IDX, 0x800000e0   | long: this frame's buffer, 0 / 1 alternating
+        .equ    MACH_RT, 0x80000eb4     | the voice loop's machine bytes, + 8 frame + t (0xff: no trig yet)
+        .equ    NOTIFY, 0x4005a2b8      | FUN_4005a2b8(text, dur): the stock toast. KEY / ENCODER
+                                        | HANDLERS ONLY (it posts to the kernel; CLAUDE.md, NOTES
+                                        | "Session 93"): never from the frame path
+        .equ    TOAST_DUR, 0x30         | 0.8 s in 1/60 s units, stock's own house length (dur > 0
+                                        | only: dur <= 0 is the modal path that hung a unit)
 
 | ---------------------------------------------------------------------------- ours
         .equ    VARI, 4                 | TSTR / TSMODE raw value
@@ -616,10 +630,11 @@ vg_latch:
         move.l  %d3,0(%a0,%d2.l*4)
         rts
 
-| vg_mark: the readout's marker (draw path only). d1 = track, d0 = the EMUS setting's
-| index (= its engine), a1 = the formatter. While the guard has stepped this track down
-| and it plays a cheaper engine than the setting: d0 = the playing engine's index, a1 =
-| emus_fmt_dn. Uses d2, a0.
+| vg_mark: the readout's marker (draw path only; spec §6a item 1). d1 = track, d0 = the
+| EMUS setting's index (= its engine), a1 = the formatter. While the guard has stepped this
+| track down and it plays a cheaper engine than the setting, a1 = the marked formatter of
+| the engine it PLAYS (emus_fmt_ot_dn / emus_fmt_s95_dn: OT! / S95!). d0 is left alone: the
+| dial stays on the user's choice, only the readout changes. Uses d2, a0.
 vg_mark:
         lea     vg_down(%pc),%a0
         tst.b   0(%a0,%d1.l)
@@ -633,8 +648,10 @@ vg_mark:
         cmp.l   %d0,%d2
         bcc.s   1f                      | not below the setting (a pending EMUS change
                                         | is not a step-down)
-        move.l  %d2,%d0
-        lea     emus_fmt_dn(%pc),%a1
+        lea     emus_fmt_ot_dn(%pc),%a1
+        tst.l   %d2
+        beq.s   1f
+        lea     emus_fmt_s95_dn(%pc),%a1
 1:      rts
 
 | d0 = an EMUS value (signed byte) -> d0 = its stop index: 0 OT (..42 and any
@@ -697,7 +714,17 @@ attr_up:
 2:      moveq   #3,%d1
         cmp.l   %d1,%d0
         bne.s   .au_out                 | VARI and anything unknown: no change
+| BEAT -> VARI: tracks under AUTO playing this sample may enter VARI. The gates before,
+| the edit, the poll (their domains swap), then each track that entered asks for its EMUS
+| engine (vg_entered: the toast if it does not fit, spec §6a item 2). A key handler.
+        bsr     vg_gates
+        move.l  %d0,-(%sp)
         moveq   #VARI,%d0
+        move.l  %d0,0x110(%a0)
+        bsr     rp_refresh
+        move.l  (%sp)+,%d0
+        bsr     vg_entered
+        jmp     (ATTR_TAIL_UP).l
 .au_st: move.l  %d0,0x110(%a0)
 .au_out:
         bsr     rp_refresh
@@ -773,7 +800,8 @@ emus_widget:
         tst.l   %d0
         bmi.s   .ew_frame               | an empty cell keeps the bare frame
         bsr     emus_idx
-        bsr     vg_mark                 | stepped down by the load guard: what it plays
+        bsr     vg_mark                 | stepped down by the load guard: the readout
+                                        | shows what it plays, the dial keeps the choice
         lea     emus_stops(%pc),%a0
         mvz.b   0(%a0,%d0.l),%d0
 .ew_frame:
@@ -803,20 +831,15 @@ live_tsns:
         move.l  (%sp)+,%d1
         rts
 
-| emus_fmt_dn(buf, v): the readout while the load guard has the track on a cheaper
-| engine than its EMUS setting: that engine, marked, within the readout's width (OT! /
-| S95!); v is the engine's stop value (the dial points at it).
-emus_fmt_dn:
-        move.l  8(%sp),%d0
-        bmi.s   1f
-        bsr     emus_idx
-        lsl.l   #2,%d0
-        lea     emus_tab_dn(%pc),%a0
-        move.l  (%a0,%d0.l),%d0
-        move.l  %d0,8(%sp)
-        jmp     (SPRINTF).l
-1:      lea     (STR_UNK).l,%a0
-        move.l  %a0,8(%sp)
+| emus_fmt_ot_dn(buf, v) / emus_fmt_s95_dn(buf, v): the readout while the load guard has
+| the track on a cheaper engine than its EMUS setting: the engine it plays, marked, within
+| the readout's width (OT! / S95!). v is the setting's stop (the dial stays on it).
+emus_fmt_ot_dn:
+        lea     str_ot_dn(%pc),%a0
+        bra.s   1f
+emus_fmt_s95_dn:
+        lea     str_s95_dn(%pc),%a0
+1:      move.l  %a0,8(%sp)
         jmp     (SPRINTF).l
 
 | emus_fmt(buf, v): OT / S950 / SP12 by bucket; a negative value "???".
@@ -843,16 +866,23 @@ emus_fmt:
 | (em_tally) belongs to one track / machine / part (em_ctx) and restarts when that
 | changes or SRC SETUP opens (emus_open). The return is (stop - old), so P2EDIT
 | stores the stop itself (a non-stop value snaps to its bucket's stop on the first
-| detent). Everything else: stock's conversion. P2EDIT's own registers (d2 = old
-| value, d3, d4, d5, a2-a5) are kept: C ABI, d0/d1/a0/a1 only.
+| detent). A move to a new stop whose engine does not fit the track's DSP core now
+| raises the toast (vg_ask, spec §6a item 2). TSTR (slot 4) keeps stock's conversion; a
+| step that puts the track on VARI asks for its parked EMUS engine the same way
+| (.ep_tstr). Everything else: stock's conversion. P2EDIT's own registers (d2 = old
+| value, d3, d4, d5, a2-a5) are kept: C ABI, d0/d1/a0/a1 only. This is P2EDIT, the
+| SRC SETUP page's encoder handler (UI task), where the toast is legal.
 emus_p2step:
-        moveq   #TSNS_SLOT2,%d0
-        cmp.l   4(%sp),%d0
-        bne.s   .ep_stock
         move.l  (PAGE_M).l,%d0
         moveq   #1,%d1
         cmp.l   %d1,%d0
-        bls.s   1f
+        bhi.s   .ep_stock               | not ST / FL
+        moveq   #TSNS_SLOT2,%d0
+        cmp.l   4(%sp),%d0
+        beq.s   1f
+        moveq   #TSTR_SLOT2,%d0
+        cmp.l   4(%sp),%d0
+        beq     .ep_tstr
 .ep_stock:
         jmp     (ACCUM).l
 1:      move.l  8(%sp),-(%sp)           | stock's accumulator first: it keeps its own
@@ -924,13 +954,17 @@ emus_p2step:
         move.b  %d3,(em_tally).l
         bsr     db_tsns                 | d0 = the stored byte now (d1 track, d2 m)
         bsr     emus_idx
+        move.l  %d0,%d3                 | the stop it is on
         add.l   %d5,%d0
         bpl.s   8f
         moveq   #0,%d0
-8:      moveq   #2,%d1
-        cmp.l   %d1,%d0
+8:      moveq   #2,%d4
+        cmp.l   %d4,%d0
         ble.s   9f
-        move.l  %d1,%d0
+        move.l  %d4,%d0
+9:      cmp.l   %d3,%d0
+        beq.s   9f
+        bsr     vg_ask                  | a new stop: the toast if its engine does not fit
 9:      lea     emus_stops(%pc),%a0
         mvz.b   0(%a0,%d0.l),%d0
         sub.l   (%sp),%d0               | - P2EDIT's old value (its d2): P2EDIT adds
@@ -942,12 +976,202 @@ emus_p2step:
 .ep_out:
         rts
 
+| TSTR (slot 4) on ST / FL: stock's steps, unchanged. When they take the track onto VARI
+| (its gate off now, on with the new TSTR -- VARI, or AUTO on a VARI sample), ask for the
+| engine its parked EMUS names (vg_ask: the toast if it does not fit). The new value is
+| P2EDIT's own: old (d2) + steps, clamped to the five positions.
+.ep_tstr:
+        move.l  8(%sp),-(%sp)
+        move.l  8(%sp),-(%sp)
+        jsr     (ACCUM).l               | d0 = the steps
+        addq.l  #8,%sp
+        tst.l   %d0
+        beq.s   .et_out
+        lea     -12(%sp),%sp
+        movem.l %d0/%d2-%d3,(%sp)
+        add.l   %d2,%d0                 | the new TSTR
+        bpl.s   1f
+        moveq   #0,%d0
+1:      moveq   #VARI,%d1
+        cmp.l   %d1,%d0
+        ble.s   2f
+        move.l  %d1,%d0
+2:      move.l  %d0,%d3
+        moveq   #0,%d1
+        move.b  (UI_TRACK).l,%d1
+        move.l  (PAGE_M).l,%d2
+        bsr     rp_swap_ui              | settle the domain first (as the EMUS path does)
+        btst    #1,%d0
+        bne.s   3f                      | on VARI already: not entering it
+        move.l  %d3,%d0
+        bsr     rp_gate_v
+        tst.l   %d0
+        beq.s   3f                      | the new TSTR does not put it on VARI
+        bsr     db_park2                | its EMUS, parked until the swap
+        bsr     emus_idx
+        bsr     vg_ask
+3:      movem.l (%sp),%d0/%d2-%d3
+        lea     12(%sp),%sp
+.et_out:
+        rts
+
 | emus_open: `jsr` redirected from SRC SETUP's open (0x400585f4, stock `jsr 0x400326d4`,
 | the page's encoder set-up). It runs at every open of the page: entering it, and the
 | re-open a track change makes. A half-turned EMUS count never carries over.
 emus_open:
         clr.b   (em_tally).l
         jmp     (ENC_SETUP).l
+
+| ---------------------------------------------------------------------------
+| THE GUARD'S TOAST (spec §6a item 2). UI TASK ONLY: called from P2EDIT (emus_p2step,
+| an encoder handler) and the ATTR value-up key handler (attr_up), never from the frame
+| path (vem_frame / vg_core / vg_latch call none of this). The guard acting on its own
+| (vg_core's step-down, vg_latch's grant) raises nothing.
+|
+| vg_room: d1 = track -> d0 = the room its DSP core has for that track's engine now, in
+| the guard's own model and units (VG_*): budget - (base + the core's FX1 / FX2 prices +
+| the engine each OTHER ST / FL track of the core carries, render state +36 bits 2-3, as
+| vg_core counts them). Read fresh from the live state (the frame hook's own sums are
+| kept only while a VARI track plays on that core). Keeps everything but d0.
+vg_room:
+        lea     -28(%sp),%sp
+        movem.l %d1-%d5/%a0-%a1,(%sp)
+        move.l  %d1,%d4                 | the asking track
+        move.l  %d1,%d2
+        andi.l  #4,%d2                  | g = 0 (T1-T4, core 1) / 4 (T5-T8, core 0)
+        lea     vg_budget(%pc),%a0
+        move.l  0(%a0,%d2.l),%d0
+        lea     vg_base(%pc),%a0
+        sub.l   0(%a0,%d2.l),%d0        | budget - base
+        moveq   #0,%d3                  | k = 0..3: track g + k
+1:      lea     vg_fxp(%pc),%a0
+        lea     (FX1_IDS).l,%a1
+        adda.l  %d2,%a1
+        mvz.b   0(%a1,%d3.l),%d1        | FX1
+        andi.l  #0x1f,%d1
+        add.l   %d1,%d1
+        mvz.w   0(%a0,%d1.l),%d1
+        sub.l   %d1,%d0
+        mvz.b   8(%a1,%d3.l),%d1        | FX2
+        andi.l  #0x1f,%d1
+        add.l   %d1,%d1
+        mvz.w   0(%a0,%d1.l),%d1
+        sub.l   %d1,%d0
+        move.l  %d2,%d5
+        add.l   %d3,%d5                 | the track
+        cmp.l   %d4,%d5
+        beq.s   2f                      | the asker: the caller prices the engine it asks for
+        move.l  (FRAME_IDX).l,%d1
+        andi.l  #1,%d1
+        lsl.l   #3,%d1
+        add.l   %d5,%d1
+        lea     (MACH_RT).l,%a1
+        mvz.b   0(%a1,%d1.l),%d1
+        moveq   #1,%d5
+        cmp.l   %d5,%d1
+        bhi.s   2f                      | not ST / FL: renders no engine
+        move.l  %d2,%d5
+        add.l   %d3,%d5
+        move.l  %d5,%d1
+        lsl.l   #3,%d1                  | 8 t
+        lsl.l   #5,%d5                  | 32 t
+        add.l   %d5,%d1                 | 40 t
+        lea     (RENDER+36).l,%a1
+        move.l  0(%a1,%d1.l),%d1
+        andi.l  #12,%d1                 | its engine << 2
+        lea     vg_engp(%pc),%a1
+        sub.l   0(%a1,%d1.l),%d0
+2:      addq.l  #1,%d3
+        moveq   #4,%d1
+        cmp.l   %d1,%d3
+        blt     1b
+        movem.l (%sp),%d1-%d5/%a0-%a1
+        lea     28(%sp),%sp
+        rts
+
+| vg_ask: d1 = track, d0 = the engine the user's own action asks for (0 OT / 1 S950 /
+| 2 SP12). When it would engage a DSP engine (S950 / SP12, project tempo in 30..300 BPM)
+| and the core cannot fit it now -- its estimate with this track counted on that engine
+| over the budget -- toast the engine the guard would use instead, the next cheaper one
+| that fits (vg_latch's rule): "MAX DSP: S950 USED" or "MAX DSP: OT USED". Keeps every
+| register.
+vg_ask:
+        lea     -20(%sp),%sp
+        movem.l %d0-%d2/%a0-%a1,(%sp)
+        tst.l   %d0
+        beq.s   .va_out                 | OT: no DSP engine, always fits
+        move.l  (TEMPO24).l,%d2
+        cmpi.l  #BPM24_MIN,%d2
+        blt.s   .va_out                 | out of range: the track plays as OFF, no engine
+        cmpi.l  #BPM24_MAX,%d2
+        bgt.s   .va_out
+        move.l  %d0,%d2                 | d2 = the engine the guard would use
+        bsr     vg_room
+        lea     vg_engp(%pc),%a0
+1:      move.l  %d2,%d1
+        lsl.l   #2,%d1
+        cmp.l   0(%a0,%d1.l),%d0
+        bge.s   2f                      | it fits
+        subq.l  #1,%d2
+        bne.s   1b                      | OT: nothing cheaper
+2:      cmp.l   (%sp),%d2
+        beq.s   .va_out                 | the engine asked for fits: nothing to say
+        lea     str_max_ot(%pc),%a0
+        tst.l   %d2
+        beq.s   3f
+        lea     str_max_s950(%pc),%a0
+3:      moveq   #TOAST_DUR,%d0
+        move.l  %d0,-(%sp)
+        move.l  %a0,-(%sp)
+        jsr     (NOTIFY).l              | NOTIFY(text, 0x30): self-timing, closes itself
+        addq.l  #8,%sp
+.va_out:
+        movem.l (%sp),%d0-%d2/%a0-%a1
+        lea     20(%sp),%sp
+        rts
+
+| vg_gates -> d0 = bit t set: track t's current machine is on VARI in the Part DB
+| (rp_ui_gate). Keeps everything else.
+vg_gates:
+        lea     -8(%sp),%sp
+        movem.l %d1-%d2,(%sp)
+        moveq   #0,%d2
+        moveq   #7,%d1
+1:      bsr     rp_ui_gate
+        tst.l   %d0
+        beq.s   2f
+        bset    %d1,%d2
+2:      subq.l  #1,%d1
+        bpl.s   1b
+        move.l  %d2,%d0
+        movem.l (%sp),%d1-%d2
+        lea     8(%sp),%sp
+        rts
+
+| vg_entered: d0 = vg_gates before a UI edit, called after it (and after the domains were
+| polled, so a track that entered VARI holds its EMUS in the TSNS slot): every track the
+| edit put on VARI asks for its EMUS engine (vg_ask). Keeps every register.
+vg_entered:
+        lea     -16(%sp),%sp
+        movem.l %d0-%d3,(%sp)
+        move.l  %d0,%d3
+        moveq   #0,%d1
+1:      btst    %d1,%d3
+        bne.s   2f                      | on VARI before: not entering
+        bsr     rp_ui_gate
+        tst.l   %d0
+        beq.s   2f
+        bsr     db_mach                 | d2 = its machine
+        bsr     db_tsns                 | its EMUS
+        bsr     emus_idx
+        bsr     vg_ask
+2:      addq.l  #1,%d1
+        moveq   #7,%d0
+        cmp.l   %d0,%d1
+        bls.s   1b
+        movem.l (%sp),%d0-%d3
+        lea     16(%sp),%sp
+        rts
 
 | d1 = track, d2 = machine -> d0 = the Part's TSNS byte for that machine (signed).
 db_tsns:
@@ -965,6 +1189,22 @@ db_tsns:
         mvs.b   0(%a0,%d0.l),%d0
         movem.l (%sp),%d1/%d3/%a0
         lea     12(%sp),%sp
+        rts
+
+| d1 = track, d2 = machine (0 ST / 1 FL) -> d0 = machine m's parked TSNS-pair byte (signed):
+| off VARI, its EMUS (0 = never written: enters as OT). Keeps everything else.
+db_park2:
+        move.l  %a0,-(%sp)
+        bsr     part_base
+        moveq   #30,%d0
+        mulu.l  %d1,%d0
+        adda.l  %d0,%a0
+        adda.l  #OFF_P2+PARK2_ST,%a0
+        tst.l   %d2
+        beq.s   1f
+        subq.l  #PARK2_ST-PARK2_FL,%a0
+1:      mvs.b   (%a0),%d0
+        movea.l (%sp)+,%a0
         rts
 
 | ---------------------------------------------------------------------------
@@ -1162,6 +1402,7 @@ rp_gate_m:
         addi.l  #OFF_P2+TSTR_SLOT2,%d3
         moveq   #0,%d0
         move.b  (%a0,%d3.l),%d0         | SETUP TSTR, the Part's own copy
+.gm_test:                               | (rp_gate_v enters here: d0 = TSTR, a1 = settings)
         moveq   #VARI,%d3
         cmp.l   %d3,%d0
         beq.s   .gm_tempo
@@ -1185,6 +1426,38 @@ rp_gate_m:
         movem.l (%sp),%d1/%d3/%a0-%a1
         lea     16(%sp),%sp
         rts
+
+| rp_gate_v: rp_gate_m with d0 = a SETUP TSTR value in place of the Part's (what a TSTR
+| edit is about to store). d1 = track, d2 = machine. UI task. Keeps everything but d0.
+rp_gate_v:
+        lea     -16(%sp),%sp
+        movem.l %d1/%d3/%a0-%a1,(%sp)   | rp_gate_m's frame: it leaves through .gm_out
+        move.l  %d0,-(%sp)
+        moveq   #7,%d0
+        cmp.l   %d0,%d1
+        bhi.s   1f
+        moveq   #1,%d0
+        cmp.l   %d0,%d2
+        bhi.s   1f
+        bsr     part_base
+        move.l  %d1,%d3
+        lsl.l   #2,%d3
+        add.l   %d1,%d3                 | 5t
+        add.l   %d2,%d3
+        addi.l  #OFF_SLOT5,%d3
+        moveq   #0,%d0
+        move.b  (%a0,%d3.l),%d0         | the sample slot byte
+        move.l  #SET_STRIDE,%d3
+        mulu.l  %d0,%d3
+        lea     (SET_STATIC).l,%a1
+        tst.l   %d2
+        beq.s   2f
+        lea     (SET_FLEX).l,%a1
+2:      adda.l  %d3,%a1
+        move.l  (%sp)+,%d0
+        bra     .gm_test
+1:      addq.l  #4,%sp
+        bra     .gm_no
 
 | d1 = track -> d0 = rp_gate_m for its current DB machine (0 off ST/FL). Keeps all else.
 rp_ui_gate:
@@ -1686,8 +1959,6 @@ tstr_tab:
         .long   STR_OFF, STR_AUTO, STR_NORM, STR_BEAT, str_vari
 emus_tab:
         .long   str_ot, str_s950, str_sp12
-emus_tab_dn:
-        .long   str_ot_dn, str_s95_dn, str_sp12
 cap_tab:
         .ascii  "PTCHTSNS"              | off VARI
         .ascii  "QUANEMUS"              | on VARI
@@ -1713,6 +1984,10 @@ str_ot_dn:
         .ascii  "OT!\0"
 str_s95_dn:
         .ascii  "S95!\0"
+str_max_s950:                           | the guard's toast (spec §6a): 100 px of the stock
+        .ascii  "MAX DSP: S950 USED\0"   | toast font, box 115 of the screen's 128 (IMPL §11)
+str_max_ot:
+        .ascii  "MAX DSP: OT USED\0"
 rk_ratios:                              | p, q per QUAN index
         .byte   1,2, 2,3, 3,4, 4,5, 1,1, 5,4, 4,3, 3,2, 2,1
 emus_stops:                             | the stored value per stop: OT, S950, SP12

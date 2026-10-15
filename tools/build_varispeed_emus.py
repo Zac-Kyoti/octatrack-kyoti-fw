@@ -9,7 +9,8 @@ STATIC / FLEX TSTR gets a fifth position, VARI: the track plays dry at
 integers, RATE still applying; its TSNS knob becomes EMUS (OT / S950 / SP12), the DSP
 engine latched at each trig. The audio editor's ATTR TIMESTRETCH gains VARI. A DSP load
 guard (spec §6) steps emu voices down to cheaper engines while a DSP core's estimated
-load is over its budget.
+load is over its budget; EMUS then reads the engine played, marked, and a user's own
+EMUS / TSTR / ATTR edit that asks for more than the core has raises a toast (§6a).
 Spec: reference/handoffs/REPITCH_REWRITE_SPEC.md (clean-room); facts:
 REPITCH_REWRITE_SCOPE.md + REPITCH_REWRITE_SCOPE_EMUS.md; this build:
 reference/handoffs/REPITCH_REWRITE_IMPL.md.
@@ -32,7 +33,7 @@ middle of what it displaces; the cave must be zero in stock and inside the class
 cave from 0x400d6500; no reference into 0x80006a40..0x80006abf; the unit must link to
 the same bytes for -mcpu=5407 and 54455 (octabam assembles DRAM units for 54455).
 
-Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM4)
+Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM5)
 """
 import hashlib, importlib.util, json, os, pathlib, struct, subprocess, sys
 from kyoti_status import gate, seal
@@ -53,7 +54,7 @@ OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx"
 OUT_BIN = ROOT / "out/OCTATRACK_VARISPEED_EMUS.bin"
 SYMS_JSON = ROOT / "out/varispeed_emus_syms.json"
 WORK = ROOT / "out/vem_build"
-VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM4"
+VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM5"
 # A TEST variant (the harness's deliberately wrong builds): VEM_VARIANT=<tag> and
 # VEM_VARIANT_SRC=<.s> build out/vem_variants/mainos_varispeed_emus_<tag>.bin from that
 # source, with every check, and no wrap. Never a flash candidate.
@@ -155,6 +156,14 @@ CONTEXT = {
     # machine type (ST, FL, PU share 0x40004008: the only renders that carry an engine)
     0x4000d3ea: "2e3c80000eb4",
     0x400d6434: "4000400840004008400044244000466c40004008400047f0400047f0400047f0",
+    # ---- the guard's toast (spec §6a; IMPL §11): NOTIFY(text, dur), raised from P2EDIT and
+    # the ATTR value-up handler only. Its entry (closes an open toast, measures the text in
+    # the toast font 0x400ba862, opens a textpx + 15 wide window), and dur > 0 = the
+    # self-timing countdown (dur <= 0 takes the modal path that hung a unit: never used)
+    0x4005a2b8: "2f032f02242f000c262f00104ab9460d1e7067044ebac91e2f024878ffff4879400ba8624eb940012f30",
+    0x4005a324: "4a836f0c23c3460d1e6c",
+    # the window it opens is centred on the 128 x 64 screen: x = (128 - w) / 2
+    0x40058184: "203c000000809083",
 }
 
 

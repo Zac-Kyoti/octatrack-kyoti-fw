@@ -11,7 +11,9 @@
             per step), the engine the DSP kernel renders the track with, taken at each trig
     GUARD   a DSP load estimate per core (base + stock FX + the engines the voices carry);
             above its budget the core's emu voices step down (SP12 -> S950 -> OT), at the
-            trig or at once, and EMUS shows the engine played, marked (OT! / S95!)
+            trig or at once; EMUS keeps the user's choice on the dial and reads the engine
+            played, marked (OT! / S95!). Turning EMUS, or TSTR / ATTR TIMESTRETCH onto VARI,
+            to an engine the core cannot fit now toasts MAX DSP: S950 USED / OT USED
 
 COLDFIRE. One unit, vem_cf (varispeed_emus.s), the standalone builder's own
 (tools/build_varispeed_emus.py). 19 detours: the render's increment store (the frame hook),
@@ -29,7 +31,7 @@ one-time memory clear (A P:0x46, B P:0x47; their `do` words differ). Two table b
 (81 + 384 words). Core-private Y $A00-$FFF. It needs a given-up effect for its words, as
 the standalone gives up SPRING REV.
 
-PLACE. DRAM (the default; ~4 KB) or CAVE (the classic cave, where the standalone puts it).
+PLACE. DRAM (the default; ~4.7 KB) or CAVE (the classic cave, where the standalone puts it).
 The ledger refuses this module beside any other that writes the STATIC / FLEX TSTR words
 or the same sites (REPITCH_REPEAT98_KYOTI and octabam's REPITCH do): one design at a time.
 
@@ -64,7 +66,7 @@ U = "vem_cf"
 LINKED = (
     Linked(U, os.path.join(_HERE, "varispeed_emus.s"),
            reference=(0x400d6500,
-                      "d4622c9eaeb22b7661ad19f9a15941ccb0831be91134e9999036b898bac42f58")),
+                      "e19b17c03f939e3985af07c8a56bdebffcf6be7dd8d2a88716848e43c40270dc")),
 )
 
 _X = bytes.fromhex
