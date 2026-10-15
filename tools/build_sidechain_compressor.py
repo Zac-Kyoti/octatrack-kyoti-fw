@@ -13,8 +13,8 @@ choosers, sctap publish tap, scdet detector redirect) PLUS:
       scdet      now also scales the staged key by KEY GAIN and runs a
                  one-pole-pair Chamberlin SVF (KEY FLT: <64 LP, >64 HP, 64
                  bypass); when MON is on it also publishes MON_ON/MON_KEY
-                 (Y:0x800+track*0x80+0x40/0x41, this track's own otherwise-
-                 dead keybus gen-2 slot) for moncommit to read.
+                 (Y:0x7df0+track*2 +0/+1, below the keybus at Y:0x7e00, both
+                 in the first internal FX2 slot's unused tail) for moncommit.
       moncommit  a THIRD hook, spliced at the DISPATCHER's per-track COMMIT
                  step (NOT inside the compressor module -- Session 55/57
                  found the old proc-end splice shared an unmapped, buggy

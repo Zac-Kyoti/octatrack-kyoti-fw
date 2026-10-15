@@ -81,21 +81,23 @@
 ; write-vs-read race, guarded the same way XBUS's is: four buffers, reader
 ; always two generations behind the writer.
 ;
-; keybus (Y, this core's private memory; Session 115 layout):
-;   slot(track) = $800 + track*$40, track = ABSOLUTE 0..7, so $800..$9ff:
+; keybus (Y, this core's private memory; 2026-10-15 layout):
+;   slot(track) = $7e00 + track*$40, track = ABSOLUTE 0..7, so $7e00..$7fff:
 ;     +$00..$1f  gen 0 = the per-frame publish (sctap) -- only this core's
 ;                own 4 tracks are ever written here
 ;     +$20..$3f  gen 1 = the SC LISTEN stash -- scdet writes the *processed*
 ;                key there (indexed by the SOURCE track, any of 0..7),
 ;                moncommit copies it to the dry buffer
-;   MON_ON/MON_KEY[track] = Y:$7f0 + track*2 (+0 / +1), $7f0..$7ff.
-;   Until Session 115 this was $800 + track*$80 with MON at +$40/$41, i.e.
-;   $a00..$bff on payload A (tracks 5-8) -- exactly where REPITCH keeps its
-;   per-track RPSP ring and SP table (Y:$a00.., tools/repitch_dsp_src.py), so
-;   the combined image overwrote REPITCH's state on tracks 5-8 every block.
-;   Y:$795..$fff is free on stock on both cores (measured; payload B's modules
-;   end at $7a4), and REPITCH owns $a00..$fff: SIDE-CHAIN now stays in
-;   $7f0..$9ff.
+;   MON_ON/MON_KEY[track] = Y:$7df0 + track*2 (+0 / +1), $7df0..$7dff.
+;   Both sit in the tail of the first internal FX2 slot (Y:$4000..$7fff):
+;   stock never writes past slot+$3da2 (octabam's stock.SLOT_EXTENT, DARK REV
+;   the highest), and the cross-core window already uses the same +$3e00
+;   offset in the shared slots (hardware-confirmed since Session 115). Both
+;   boot loops zero Y:$4000..$bfff before the first frame. Only long
+;   immediates name these addresses, so no instruction changed size.
+;   History: Session 115 put the keybus at $800..$9ff and MON at $7f0 (before
+;   that $800 + track*$80 hit REPITCH's Y:$a00..). 2026-10-15 moved both here
+;   to free Y:$7f0..$9ff for BLACKPYRAMIDS_303's voice ($7a5..$feb).
 ;   This is SAME-CORE-ONLY and unaffected by cross-core KEY (see the design
 ;   note above scdet's r5 computation); only its addresses moved.
 ;
@@ -127,7 +129,8 @@
 ; Session 77 with a cross-core publish into the shared window) -------------
 ; Clobber budget for THIS splice (audited, step 2's own header): stock
 ; reloads a,b,r0,r1,n1,x0 right after each rejoin -- everything added below
-; stays strictly within that set, on purpose (this hook runs unconditionally
+; stays strictly within that set, plus r6, which the displaced instruction
+; at the end reloads itself, on purpose (this hook runs unconditionally
 ; for every track every block, the hottest path in this whole file, so an
 ; unaudited register here has a much bigger blast radius than anything in
 ; scdet, which only runs for tracks actually using COMPRESSOR).
@@ -143,19 +146,8 @@
 ; a STRUCTURAL condition (some track always dispatches first; sctap already
 ; runs for it unconditionally) rather than an elected one.
 sctap:
-        move    x:>$420,a               ; a1 = track index 0..7
-        asl     #6,a,a                  ; a1 = index * $40 (Session 115)
-        move    a1,n1
-        move    #>$800,r1
-        lua     (r1)+n1,r1              ; r1 -> keybus slot (gen 0)
-        move    #0,r0
-        do      #<$20,>zz01
-        move    x:(r0)+,x0
-        move    x0,y:(r1)+
-zz01:
 ; -- generation counter advance (Session 77), gated on core-local track 0 --
-        move    x:>$420,a               ; a1 = track index (reload; a/r0/r1/n1/x0
-                                        ; all spent by the loop above)
+        move    x:>$420,a               ; a1 = track index 0..7
         cmp     #>@COREBASE@,a
         bne     zz30                    ; not this core's local index 0 -> skip
 ; GSEED holds the exact sentinel $10000 once this core has ever run this
@@ -187,8 +179,9 @@ zz29:
         move    b1,a                   ; (q3) a = clean wrapped value
         move    a,y:(r1)
 zz30:
-; -- publish this track's own audio into the shared window --
+; -- this track's shared-window slot -> r6 --
 ; SBASE + (local_index*4 + gen) * $20, local_index = track - @COREBASE@
+; r6 is free here: the displaced `move x:>$208,r6` at the end reloads it.
         move    x:>$420,a
         sub     #>@COREBASE@,a          ; a1 = local index 0..3 (plain subtract,
                                         ; not a masking op -- no staleness risk)
@@ -202,12 +195,25 @@ zz30:
         asl     #5,a,a                  ; a = combined * $20
         move    a1,n1
         move    #>@SBASE@,r1
-        lua     (r1)+n1,r1              ; r1 -> this track's shared-window slot
+        lua     (r1)+n1,r6              ; r6 -> this track's shared-window slot
+; -- this track's keybus slot (gen 0) -> r1 --
+        move    x:>$420,a               ; a1 = track index 0..7
+        asl     #6,a,a                  ; a1 = index * $40
+        move    a1,n1
+        move    #>$7e00,r1
+        lua     (r1)+n1,r1              ; r1 -> keybus slot (gen 0)
+; -- one pass over the block: each word to the keybus and to the window --
+; (2026-10-15: was two loops, `move x:(r0)+,x0` / `move x0,y:(rN)+` each,
+; 4 instructions a word; now 2. The XY move stores a's old word to the
+; window and loads the next into a, so the loop reads X:$20 once past the
+; block, which is internal X RAM and harmless. sctap already writes an
+; accumulator to Y (GCNT above): no new move class in this context.)
         move    #0,r0
-        do      #<$20,>zz31
-        move    x:(r0)+,x0
-        move    x0,y:(r1)+
-zz31:
+        move    x:(r0)+,a               ; a = word 0
+        do      #<$20,>zz01
+        move    a,y:(r1)+               ; keybus
+        move    x:(r0)+,a   a,y:(r6)+   ; window; a = next word
+zz01:
         move    x:>$208,r6              ; --- displaced (move #$6,n6 stays stock) ---
         rts
 
@@ -272,7 +278,7 @@ scdet:
 ; the source track happens to live on this core or the other one.
         asl     #6,a,a
         move    a1,n1
-        move    #>$800,r1
+        move    #>$7e00,r1
         lua     (r1)+n1,r1
         move    r1,r5                 ; r5 = slot base (SC LISTEN stash)
 ; -- same-core vs foreign-core source select (Session 77) --
@@ -289,7 +295,7 @@ scdet:
         move    r4,a
         asl     #6,a,a
         move    a1,n1
-        move    #>$800,r1
+        move    #>$7e00,r1
         lua     (r1)+n1,r1            ; r1 -> keybus[abs] gen 0
         move    #$40,r0
         do      #<$20,>zz02
@@ -580,10 +586,8 @@ zz10:
 ;    -- including its own undocumented envelope/gain math -- has returned)
 ;    can independently redo the substitution outside any shared execution
 ;    context with the compressor's own code. MON_ON/MON_KEY live at
-;    Y:(0x800 + track*0x80 + 0x40/0x41) -- the gen-2 slot of THIS track's own
-;    keybus stride, never written by sctap/scdet's gen-0/gen-1 use, so no new
-;    memory-safety question versus what's already proven (NOTES.md Session 17
-;    / octabam BUS.md: Y >= 0x800 is safe).
+;    Y:$7df0 + track*2 (+0/+1), below the keybus (layout and its evidence at
+;    the top of this file); sctap/scdet's gen-0/gen-1 writes never reach it.
 ;
 ;    REGISTER DISCIPLINE (Session 59, hardware-forced): this tail runs
 ;    strictly BEFORE this routine's own rts, so anything left in a register
@@ -626,7 +630,7 @@ zz15:
         move    x:>$420,b              ; b = MY track 0..7
         asl     #1,b,b
         move    b1,n1
-        move    #>$7f0,r1              ; MONB (MON_ON[my track], Session 115)
+        move    #>$7df0,r1              ; MONB (MON_ON[my track], Session 115)
         lua     (r1)+n1,r1
         move    #1,b
         move    b,y:(r1)+              ; MON_ON = 1 ; r1 -> MON_KEY[my track]
@@ -695,7 +699,7 @@ zz18:
         move    x:>$420,a
         asl     #1,a,a
         move    a1,n1
-        move    #>$7f0,r1
+        move    #>$7df0,r1
         lua     (r1)+n1,r1
         move    #0,b
         move    b,y:(r1)
@@ -727,7 +731,7 @@ zz18:
 ;
 ; UNINITIALIZED-SLOT HAZARD (found post-Session-59-flash: transport still
 ; broken with the register fix alone): this hook runs for EVERY track's
-; commit, every frame -- but Y:0x800+track*0x80+0x40 (MON_ON) is only ever
+; commit, every frame -- but MON_ON (then Y:0x800+track*0x80+0x40) is only ever
 ; WRITTEN by `scdet`, which only runs for the one track actively processing a
 ; COMPRESSOR. For every other track this slot is real, never-zeroed DSP
 ; memory: dumping the actual baseline .mem (tools/emu_sc_dsp3_moncommit.py's
@@ -751,7 +755,7 @@ moncommit:
         move    x:>$420,a             ; a = my track 0..7
         asl     #1,a,a
         move    a1,n1
-        move    #>$7f0,r1
+        move    #>$7df0,r1
         lua     (r1)+n1,r1            ; r1 -> MON_ON[my track]
         move    y:(r1)+,b             ; b = MON_ON ; r1 now -> MON_KEY[my track]
         cmp     #>$10000,b             ; (q2) exact match vs scdet's ON sentinel,
@@ -764,7 +768,7 @@ mc09:
         move    y:(r1),b              ; b = MON_KEY 0..7 (still via r1, no r2/n2 needed)
         asl     #6,b,b
         move    b1,n1                 ; reuse n1 (stock resets it right after us anyway)
-        move    #>$820,r1             ; reuse r1
+        move    #>$7e20,r1             ; reuse r1
         lua     (r1)+n1,r1            ; r1 -> keybus[key] gen 1
         move    #0,r3                  ; reuse r3 (stock resets it right after us anyway)
         do      #<$20,>mc11

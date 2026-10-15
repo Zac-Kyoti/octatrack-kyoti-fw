@@ -64,9 +64,9 @@ else:
     CAVE_ORG = 0x1012
     COMP_MOD, COMP_PROC = 0x1864, 0x1871
     COMMIT_HOOK = 0x303
-KB_BASE = 0x800
-KB_STRIDE = 0x40     # Session 115: keybus slot(track) = $800 + track*$40 (was *$80)
-MON_BASE = 0x7f0     # Session 115: MON_ON/MON_KEY[track] = Y:$7f0 + track*2 (was slot+$40/$41)
+KB_BASE = 0x7e00
+KB_STRIDE = 0x40     # keybus slot(track) = $7e00 + track*$40 (2026-10-15; $800 since Session 115)
+MON_BASE = 0x7df0    # MON_ON/MON_KEY[track] = Y:$7df0 + track*2 (2026-10-15; $7f0 since Session 115)
 Q23 = 1 << 23
 NW = 30                                 # dsp_host caps n7 at 15 frames = 30 words
 
@@ -641,8 +641,8 @@ def main():
     (g1,) = run(mem, scdet, [('y', SLOT + 0x20, SLOT + 0x40)], P(key=KEYV, mon=0), pokey=pk_sig, audio=0)
     check("MON=0: keybus[0] gen1 untouched", all(v == 0 for v in g1))
 
-    # 6. MON publish (scdet -> MON_ON[my track]/MON_KEY[my track], Y:0x800+
-    #    MON_BASE+track*2 +0/+1 since Session 115 -- the moncommit hook's only input) ------------
+    # 6. MON publish (scdet -> MON_ON[my track]/MON_KEY[my track], Y:MON_BASE+track*2
+    #    +0/+1 -- the moncommit hook's only input) -----------------------------------------------
     print("\nMON publish (scdet -> MON_ON/MON_KEY for moncommit):")
     MYTRACK = 3
     MON_ADDR = MON_BASE + MYTRACK * 2
