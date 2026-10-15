@@ -29,6 +29,15 @@ Tests (one forked scenario each):
   o2        SRC page paste + undo, track paste, PART paste / clear / undo, RELOAD PART:
             the target adopts what was written, nothing swaps
   old56     TSTR 5/6 and TSMODE 5/6 (projects saved with REPITCH_REPEAT98_KYOTI) do not crash
+  guard_*   the DSP load guard (spec §6), on the REAL export MMTESTDT (T1-T8 STATIC, part 0):
+            T5-T8 (DSP core 0) on VARI SP12 on slot 0's sample, trigs poked into the
+            playing pattern at steps 1/3/5/7, FX2 DARK x4, FX1 DJ EQ x2 or x3 -- all by
+            runtime pokes. x2: nothing steps down (and the DSP increments equal VEM3's,
+            VEM_IMG_REF); x3: the latch steps the last two down; mid-note: a third DJ EQ
+            steps the most recently started down at once, a silent voice before them; the
+            readout marker through emus_widget / emus_fmt_dn; restore only at the next trig.
+            Expectations from an independent model of the guard (the VG_* constants are
+            read from varispeed_emus.s) and, where all voices sound, written out by hand.
   panel_*   EMUS through the REAL panel path, transport stopped: SRC SETUP opened with its
             keys, encoder F reports into the panel UART (the parser, its coalescing, the UI
             task, the page's encoder table, P2EDIT), every stored value logged at P2EDIT's
@@ -38,7 +47,7 @@ Tests (one forked scenario each):
 
 EMUS order (2026-10-14): OT (stored 1, left), S950 (64, middle), SP12 (127, right).
 """
-import argparse, json, os, pathlib, struct, subprocess, sys
+import argparse, json, os, pathlib, re, struct, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCR = ROOT / "out/vem"
@@ -48,6 +57,12 @@ SYMS = pathlib.Path(os.environ.get("VEM_SYMS", ROOT / "out/varispeed_emus_syms.j
 EM = {"OT": 1, "S950": 64, "SP12": 127}           # EMUS stops, left to right
 EM_NAME = {v: k for k, v in EM.items()}
 CARD = SCR / "img/otdemo.img"
+# the guard tests: a second REAL hardware export (T1-T8 STATIC, part 0, pattern 0, 120 BPM)
+MM = dict(card=SCR / "img/mmtestdt.img", set="MMTESTDT", project="test")
+OTD = dict(card=CARD, set="KYOTI", project="OTDEMO")
+# the image the guard's under-budget runs are compared with, pass for pass (VEM3)
+IMG_REF = pathlib.Path(os.environ.get("VEM_IMG_REF", ROOT / "out/vem_variants/mainos_varispeed_emus_vem3.bin"))
+SRC = ROOT / "octabam-modules/varispeed-emus/varispeed_emus.s"
 OUTD = pathlib.Path(os.environ.get("VEM_TEST_OUT", SCR / "tests"))
 S = json.loads(SYMS.read_text())["syms"]
 
@@ -132,9 +147,10 @@ def cap_stub():
 
 
 class Scn:
-    def __init__(self, name, frames, live=None):
+    def __init__(self, name, frames, live=None, proj=OTD, img=None):
         self.name, self.frames, self.steps, self.cps = name, frames, [], []
         self.live = live                 # panel scenarios: [(emulated ms, live line)], no transport
+        self.proj, self.img = proj, img  # the card / project; another image (the guard's reference run)
 
     def add(self, *s):
         for x in s:
@@ -397,6 +413,57 @@ def scenarios():
     s.cp(1400, "end")
     sc[s.name] = s
 
+    # ---- the DSP load guard: MMTESTDT, T5-T8 (DSP core 0) on VARI, FX2 DARK x4
+    SP = {t: "SP12" for t in GT}
+    X2 = {4: "DJEQ", 5: "DJEQ"}
+    X3 = {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"}
+    # x2: 4 x SP12 + DARK x4 + DJ EQ x2 fits: nothing steps down, the increments are VEM3's
+    for nm, img in (("guard_x2", None), ("guard_x2_ref", IMG_REF)):
+        s = guard_scn(nm, SP, X2, img=img)
+        g_dump(s, G_F1, "f1")
+        g_dump(s, G_FRAMES - 20, "end")
+        sc[s.name] = s
+    # x3: over budget from the start: the latch steps the later sounds down
+    s = guard_scn("guard_x3", SP, X3)
+    g_dump(s, G_F1, "f1")
+    g_dump(s, G_FRAMES - 20, "end")
+    sc[s.name] = s
+    # the latch's S950 -> OT as well: EMUS SP12 SP12 S950 S950, FX1 DJ EQ x3 + FILTER
+    s = guard_scn("guard_latch", {4: "SP12", 5: "SP12", 6: "S950", 7: "S950"},
+                  {4: "DJEQ", 5: "DJEQ", 6: "DJEQ", 7: "FILTER"})
+    g_dump(s, G_F1, "f1")
+    sc[s.name] = s
+    # mid-note: x2 (all SP12), a third DJ EQ at G_F1 -> the most recently started step down
+    # at once; the readout marker; the DJ EQ removed at G_F2 -> nothing restores until each
+    # stepped-down track's next trig
+    for nm, silent in (("guard_mid", None), ("guard_silent", 5)):
+        s = guard_scn(nm, SP, X2)
+        if silent is not None:                       # T6's voice stops (stock's voice reset)
+            s.add(call(G_F1 - 4, 0x40006820, silent))
+        g_dump(s, G_F1 - 1, "pre")
+        s.add(poke(G_F1, mm_fx({6: "DJEQ"}, {})))
+        g_dump(s, G_F1 + 3, "mid")
+        if silent is None:
+            w = G_F1 + 20
+            s.add(poke(w, install))
+            for tag, t in (("w8", 7), ("w7", 6), ("w5", 4)):
+                s.add(poke(w, [b(UI_TRACK, t)]), call(w, S["emus_widget"], 10, 20, 11, EM["SP12"], 0, 0, 0x12345678))
+                s.dump(w, CAP_BUF, 32, tag)
+            s.add(poke(w, restore))
+            for v in (1, 64, -1):
+                s.add(poke(w + 1, [b(FMT_BUF + i, 0) for i in range(8)]), call(w + 1, S["emus_fmt_dn"], FMT_BUF, v))
+                s.dump(w + 1, FMT_BUF, 8, f"fd{v}")
+        s.add(poke(G_F2, mm_fx({6: "NONE"}, {})))
+        g_dump(s, G_F2 + 3, "rm")
+        g_dump(s, G_FRAMES - 20, "end")
+        if silent is None:
+            w = G_FRAMES - 10
+            s.add(poke(w, install + [b(UI_TRACK, 7)]), call(w, S["emus_widget"], 10, 20, 11, EM["SP12"], 0, 0, 0x12345678))
+            s.dump(w, CAP_BUF, 32, "w8end")
+            s.add(poke(w, restore))
+        s.silent = silent
+        sc[s.name] = s
+
     # panel_*: the real panel path, transport stopped. T1 FLEX on VARI, EMUS OT (1), TSNS 30
     # parked, rp_prev 1 (in the domain already); SRC SETUP opened with its keys on T1.
     for name, (lines, want) in PANEL.items():
@@ -406,6 +473,112 @@ def scenarios():
         s.want = want
         sc[s.name] = s
     return sc
+
+
+# ------------------------------------------------------------------------- the DSP load guard
+def vg_constants():
+    """The VG_* block of varispeed_emus.s: the one source of every price and budget."""
+    return {k: int(v, 0) for k, v in re.findall(r"^\s*\.equ\s+(VG_\w+),\s*(0x[0-9a-fA-F]+|\d+)", SRC.read_text(), re.M)}
+
+
+VG = vg_constants()
+FXID = {"NONE": 0x00, "FILTER": 0x04, "SPATIALIZER": 0x05, "DELAY": 0x08, "EQ": 0x0c, "DJEQ": 0x0d,
+        "PHASER": 0x10, "FLANGER": 0x11, "CHORUS": 0x12, "COMB": 0x13, "PLATE": 0x14, "SPRING": 0x15,
+        "DARK": 0x16, "COMPRESSOR": 0x18, "LOFI": 0x1c}
+ENG = {"OT": 0, "S950": 1, "SP12": 2}
+ENG_NAME = {v: k for k, v in ENG.items()}
+
+
+def fx_price(name):
+    return VG["VG_FX_SPRING_HERE"] if name == "SPRING" else VG[f"VG_FX_{name}"]
+
+
+def eng_price(e):
+    return (0, VG["VG_S950"], VG["VG_SP12"], VG["VG_S950"])[e]
+
+
+class GuardModel:
+    """An independent model of spec §6 for ONE DSP core (T5-T8 = core 0 here): the
+    estimate, the latch, the mid-note step-down (silent first, then most recent)."""
+    def __init__(self, core0=True):
+        self.base = VG["VG_BASE_C0" if core0 else "VG_BASE_C1"] + VG["VG_SC"]
+        self.budget = VG["VG_BUDGET_C0" if core0 else "VG_BUDGET_C1"]
+        self.eng, self.stamp, self.clock = {}, {}, 0
+
+    def est(self, fx):
+        return self.base + sum(fx_price(f) for pair in fx for f in pair) + sum(eng_price(e) for e in self.eng.values())
+
+    def latch(self, fx, t, want):
+        self.eng[t] = 0
+        e = want
+        while e and self.est(fx) + eng_price(e) > self.budget:
+            e -= 1
+        self.eng[t] = e
+        self.clock += 1
+        self.stamp[t] = self.clock
+        return e
+
+    def mid(self, fx, silent=()):
+        if self.base + sum(fx_price(f) for pair in fx for f in pair) + 4 * VG["VG_SP12"] <= self.budget:
+            return
+        while self.est(fx) > self.budget:
+            cands = [t for t, e in self.eng.items() if e]
+            if not cands:
+                return
+            v = max(cands, key=lambda t: ((t in silent), self.stamp.get(t, 0), t))
+            self.eng[v] -= 1
+
+
+MMDB = 0x400e21e0
+MMP, MMSH = MMDB + 0x8ed80, 0x100a4ece         # MMTESTDT's part 0 (the playing one) and its SRAM copy
+MM_LIVE_SLOT = 0x8000082f                      # the live sample-slot byte, + 72t (the voice loop's own)
+GT = (4, 5, 6, 7)                              # T5-T8: DSP core 0
+G_STEPS = {4: 1, 5: 3, 6: 5, 7: 7}             # their trigs, poked into pattern 0 (16 steps, 120 BPM)
+G_SLOT = {4: 0, 5: 1, 6: 0, 7: 1}              # the two STATIC slots with a sample (146.6 / 120 BPM)
+G_F1, G_F2, G_FRAMES = 2600, 3500, 8200        # mid-bar: after T8's first trig; bar 2 from ~5512
+
+
+def mm_byte(off, v):
+    return [b(MMP + off, v), b(MMSH + off, v)]
+
+
+def mm_fx(fx1, fx2):
+    """{t: name} -> the Part's FX ids and the live ones (0x80000ec4 / 0x80000ecc)."""
+    out = []
+    for t, n in fx1.items():
+        out += mm_byte(t, FXID[n]) + [b(0x80000ec4 + t, FXID[n])]
+    for t, n in fx2.items():
+        out += mm_byte(8 + t, FXID[n]) + [b(0x80000ecc + t, FXID[n])]
+    return out
+
+
+def mm_setup(emus, fx1):
+    """Before the transport: T5-T8 VARI on a sample, EMUS per track, trigs, FX2 DARK x4,
+    FX1 as given (the rest NONE)."""
+    pk = []
+    for t in GT:
+        pk += mm_byte(O_P2 + 30 * t + 4, 4) + [b(LIVE_P2 + 72 * t + 4, 4)]            # TSTR VARI
+        pk += mm_byte(O_P2 + 30 * t + 5, EM[emus[t]]) + [b(LIVE_P2 + 72 * t + 5, EM[emus[t]])]
+        pk += mm_byte(O_SLOT5 + 5 * t, G_SLOT[t]) + [b(MM_LIVE_SLOT + 72 * t, G_SLOT[t])]
+        st = G_STEPS[t] - 1
+        pk.append(b(MMDB + t * 0x91a + 7 - st // 8, 1 << (st % 8)))                       # trig mask
+    pk += mm_fx({t: fx1.get(t, "NONE") for t in GT}, {t: "DARK" for t in GT})
+    return "-:poke:" + ";".join(pk)
+
+
+def guard_scn(name, emus, fx1, frames=G_FRAMES, img=None):
+    s = Scn(name, frames, proj=MM, img=img)
+    s.add(mm_setup(emus, fx1))
+    s.guard = dict(emus=emus, fx1=fx1)
+    return s
+
+
+def g_dump(s, frame, tag):
+    """voice +0 (sounding), render +36 (the carried engine), the guard's state"""
+    d = OUTD / s.name
+    s.add(f"{frame}:dump:0x800049d8,{168 * 8:#x}={d / (tag + '.voice')};0x80004898,{40 * 8:#x}={d / (tag + '.render')};"
+          f"{S['vg_down']:#x},8={d / (tag + '.down')};{S['vg_stamp']:#x},32={d / (tag + '.stamp')};"
+          f"{S['vg_est']:#x},4={d / (tag + '.est')}")
 
 
 # SRC SETUP on the panel's track: [SRC] pressed twice (0x22), as on the unit
@@ -442,22 +615,29 @@ def run(sc, jobs):
     OUTD.mkdir(parents=True, exist_ok=True)
     seq = [s for s in sc.values() if s.live is None]
     pan = [s for s in sc.values() if s.live is not None]
-    base = [str(EMU), "--image", str(IMG), "--card", str(CARD), "--set", "KYOTI", "--project", "OTDEMO",
-            "--load-ms", "20000"]
-    if seq:
-        args = base + ["--dsp", "--main-level", "64", "--scenario-jobs", str(jobs)]
-        for s in seq:
+    def base(proj=OTD, img=None):
+        return [str(EMU), "--image", str(img or IMG), "--card", str(proj["card"]), "--set", proj["set"],
+                "--project", proj["project"], "--load-ms", "20000"]
+    groups = {}
+    for s in seq:                        # one load per card / project / image, forked per scenario
+        groups.setdefault((s.proj["project"], str(s.img or IMG)), []).append(s)
+    procs = []
+    for (pname, img), ss in groups.items():
+        args = base(ss[0].proj, ss[0].img) + ["--dsp", "--main-level", "64", "--scenario-jobs", str(jobs)]
+        for s in ss:
             (OUTD / s.name).mkdir(parents=True, exist_ok=True)
             a = f"{OUTD / s.name / 'log.txt'} --sequencer --internal-clock --frames {s.frames}"
             for st in s.steps:
                 a += f" --step {st}"
             args += ["--scenario", a]
-        with open(OUTD / "parent.log", "w") as f:
-            subprocess.run(args, env=dict(os.environ, OT_VEM_LOG="%o"), stdout=f, stderr=subprocess.STDOUT,
-                           timeout=7200)
+        tag = "" if (pname, img) == ("OTDEMO", str(IMG)) else f"_{pname}_{pathlib.Path(img).stem}"
+        procs.append(subprocess.Popen(args, env=dict(os.environ, OT_VEM_LOG="%o"),
+                                      stdout=open(OUTD / f"parent{tag}.log", "w"), stderr=subprocess.STDOUT))
+    for pr in procs:
+        pr.wait(timeout=7200)
     if pan:
         # the panel group: a watch at P2EDIT's entry, its store and SRC SETUP's open site
-        args = base + ["--watch-pc", f"{P2EDIT:#x},{P2_STORE:#x},{SETUP_OPEN_SITE:#x}", "--scenario-jobs", str(jobs)]
+        args = base() + ["--watch-pc", f"{P2EDIT:#x},{P2_STORE:#x},{SETUP_OPEN_SITE:#x}", "--scenario-jobs", str(jobs)]
         for s in pan:
             d = OUTD / s.name
             d.mkdir(parents=True, exist_ok=True)
@@ -634,7 +814,145 @@ def check(name, s):
         t.eq("not VARI: rp_prev T1..T4", [e.rp(k, FL) for k in range(4)], [0, 0, 0, 0])
     if getattr(s, "latch", False):
         latch_check(t, d)
+    if hasattr(s, "guard"):
+        guard_check(t, s, d)
     return t
+
+
+def vem_passes(path):
+    """The VEM log -> {core: [(x418, lc, x40, y40, trig)]}, one entry per voice pass."""
+    out = {0: [], 1: []}
+    for line in open(path):
+        f = line.split()
+        if len(f) < 8:
+            continue
+        e = (int(f[2], 16), int(f[3], 16), int(f[4], 16), int(f[5], 16), (int(f[7], 16) >> 12) & 1)
+        L = out[int(f[0])]
+        if L and L[-1][:2] == e[:2]:     # an interrupt at the kernel entry: one pass logged twice
+            L[-1] = e
+        else:
+            L.append(e)
+    return out
+
+
+def core0_engines(d):
+    """T5-T8's second passes: {t: [(frame, engine, trig)]} (core 0, track offset / 0x20)."""
+    P = vem_passes(d / "log.txt.vem")[0]
+    ntrk = len({p[0] for p in P[:200]}) or 1
+    per = {}
+    for i, p in enumerate(P):
+        if p[1] == 1:
+            per.setdefault(4 + p[0] // 0x20, []).append((i // (2 * ntrk), p[3] & 3, p[4]))
+    return per
+
+
+def g_state(d, tag):
+    v = (d / f"{tag}.voice").read_bytes()
+    r = (d / f"{tag}.render").read_bytes()
+    return dict(sounding={t: v[168 * t] != 0 for t in range(8)},
+                eng={t: (struct.unpack(">I", r[40 * t + 36:40 * t + 40])[0] >> 2) & 3 for t in range(8)},
+                down=list((d / f"{tag}.down").read_bytes()),
+                stamp=struct.unpack(">8I", (d / f"{tag}.stamp").read_bytes()),
+                est=struct.unpack(">I", (d / f"{tag}.est").read_bytes())[0])
+
+
+def seg(per, t, lo, hi):
+    """the engines track t played on its second passes in frames lo..hi"""
+    return sorted({e for fr, e, _ in per.get(t, []) if lo <= fr <= hi})
+
+
+def guard_check(t, s, d):
+    per = core0_engines(d)
+    g = s.guard
+    trigs = {k: [fr for fr, _, tr in per.get(k, []) if tr] for k in GT}
+    t.notes.append("trig frames " + " ".join(f"T{k + 1}:{v[:3]}" for k, v in trigs.items()))
+    if any(len(trigs[k]) < 2 for k in GT):
+        t.fails.append("each of T5-T8 must trigger twice (bars 1 and 2): the run is too short or the trigs were not set")
+        return
+    first_done = max(trigs[k][0] for k in GT)
+    fx0 = [(g["fx1"].get(k, "NONE"), "DARK") for k in GT]
+    # the latch, bar 1 (in trig order) and bar 2 (same FX unless changed)
+    m = GuardModel()
+    order = sorted(GT, key=lambda k: trigs[k][0])
+    want = {k: ENG[g["emus"][k]] for k in GT}
+    bar1 = {k: m.latch(fx0, k, want[k]) for k in order}
+    name = s.name
+    if name in ("guard_x2", "guard_x2_ref", "guard_x3", "guard_latch"):
+        hand = {"guard_x2": {4: "SP12", 5: "SP12", 6: "SP12", 7: "SP12"},
+                "guard_x2_ref": {4: "SP12", 5: "SP12", 6: "SP12", 7: "SP12"},
+                "guard_x3": {4: "SP12", 5: "SP12", 6: "S950", 7: "S950"},
+                "guard_latch": {4: "SP12", 5: "S950", 6: "S950", 7: "OT"}}[name]
+        t.eq("the model's latch (T5..T8, trig order)", {k + 1: ENG_NAME[e] for k, e in bar1.items()},
+             {k + 1: v for k, v in hand.items()})
+        for k in GT:
+            lo, hi = trigs[k][0] + 1, trigs[k][1] - 1
+            t.eq(f"T{k + 1} bar 1: the engine it plays, from its first trig", [ENG_NAME[e] for e in seg(per, k, lo, hi)],
+                 [hand[k]])
+            t.eq(f"T{k + 1} bar 2: the same at its next trig", [ENG_NAME[e] for e in seg(per, k, trigs[k][1], s.frames - 30)],
+                 [hand[k]])
+        if name != "guard_x2_ref":
+            st = g_state(d, "f1")
+            down = {k: bar1[k] < want[k] for k in GT}
+            t.eq("vg_down T5..T8 (stepped down at the latch)", st["down"][4:8], [int(down[k]) for k in GT])
+            if name != "guard_x2":           # x2: the core is free (room for four SP12), no estimate kept
+                t.eq("the estimate (vg_est) = the model's", st["est"], m.est(fx0))
+        if name == "guard_x2":
+            ref = vem_passes(OUTD / "guard_x2_ref" / "log.txt.vem")
+            new = vem_passes(d / "log.txt.vem")
+            for c in (0, 1):
+                n = min(len(ref[c]), len(new[c]))
+                diff = [i for i in range(n) if new[c][i][:4] != ref[c][i][:4]]
+                t.eq(f"core {c}: every pass (l:$40, LC, track) equals VEM3's ({n} passes)", (diff[:3], len(ref[c]) == len(new[c])), ([], True))
+        return
+    # mid-note: x2 at the start (no step), a third DJ EQ at G_F1
+    pre, mid, rm, end = (g_state(d, k) for k in ("pre", "mid", "rm", "end"))
+    t.eq("bar 1: all four on SP12 (x2 fits)", {k + 1: ENG_NAME[pre["eng"][k]] for k in GT}, {k + 1: "SP12" for k in GT})
+    silent = {k for k in GT if not pre["sounding"][k]}
+    t.notes.append(f"sounding at G_F1: {[k + 1 for k in GT if pre['sounding'][k]]}, silent {[k + 1 for k in sorted(silent)]}")
+    fx1 = [(("DJEQ" if k == 6 else g["fx1"].get(k, "NONE")), "DARK") for k in GT]
+    m.mid(fx1, silent)
+    exp = dict(m.eng)
+    t.eq("mid-note: the core's engines = the model's (silent first, then the most recently started)",
+         {k + 1: ENG_NAME[mid["eng"][k]] for k in GT}, {k + 1: ENG_NAME[exp[k]] for k in GT})
+    if name == "guard_mid" and not silent:
+        t.eq("mid-note, all sounding: T8 (the latest) SP12 -> S950 -> OT, then T7 SP12 -> S950",
+             {k + 1: ENG_NAME[mid["eng"][k]] for k in GT}, {5: "SP12", 6: "SP12", 7: "S950", 8: "OT"})
+    if name == "guard_silent":
+        t.eq("T6 silent (its voice stopped at G_F1 - 4)", 5 in silent, True)
+        if silent == {5}:
+            t.eq("a silent voice first: T6 SP12 -> S950 -> OT, then the latest sounding, T8 -> S950",
+                 {k + 1: ENG_NAME[mid["eng"][k]] for k in GT}, {5: "SP12", 6: "OT", 7: "SP12", 8: "S950"})
+    t.eq("mid-note: vg_down = the stepped-down tracks", mid["down"][4:8], [int(exp[k] < want[k]) for k in GT])
+    t.eq("mid-note: vg_est = the model's estimate", mid["est"], m.est(fx1))
+    # at once: the DSP sees it within two frames of the poke, and before that nothing moved
+    stepped = [k for k in GT if exp[k] < want[k]]
+    for k in stepped:
+        first = min((fr for fr, e, _ in per[k] if fr >= G_F1 - 50 and e != want[k]), default=None)
+        t.eq(f"T{k + 1}: stepped down at once (first cheaper pass within 3 frames of the poke at {G_F1})",
+             first is not None and G_F1 <= first <= G_F1 + 3, True)
+        t.notes.append(f"T{k + 1} first cheaper pass at frame {first}")
+    t.eq("before the third DJ EQ: no step-down", sorted({e for k in GT for fr, e, _ in per[k] if first_done < fr < G_F1}), [2])
+    # removed at G_F2: nothing comes back until each track's next trig
+    t.eq("DJ EQ removed: the stepped-down engines stay (no restore mid-note)", {k + 1: ENG_NAME[rm["eng"][k]] for k in GT},
+         {k + 1: ENG_NAME[exp[k]] for k in GT})
+    for k in stepped:
+        nxt = trigs[k][1]
+        t.eq(f"T{k + 1}: cheaper until its next trig (frame {nxt})", seg(per, k, G_F1 + 4, nxt - 1), [exp[k]])
+        t.eq(f"T{k + 1}: back on {g['emus'][k]} from its next trig on", seg(per, k, nxt, s.frames - 30), [want[k]])
+    t.eq("end: all back on SP12, nothing marked", ({k + 1: ENG_NAME[end["eng"][k]] for k in GT}, end["down"][4:8]),
+         ({k + 1: "SP12" for k in GT}, [0, 0, 0, 0]))
+    if name == "guard_mid":
+        ef, efd = S["emus_fmt"], S["emus_fmt_dn"]
+        stop = {0: EM["OT"], 1: EM["S950"], 2: EM["SP12"]}
+        for tag, k in (("w8", 7), ("w7", 6), ("w5", 4)):
+            c = captured(d, tag)
+            down = exp[k] < want[k]
+            t.eq(f"{tag}: the readout of T{k + 1} (EMUS SP12, playing {ENG_NAME[exp[k]]})", (c["value"], c["fmt"]),
+                 (stop[exp[k]], efd if down else ef))
+        fd = {v: (d / f"fd{v}").read_bytes().split(b"\0")[0].decode() for v in (1, 64, -1)}
+        t.eq("emus_fmt_dn: the marked readout", fd, {1: "OT!", 64: "S95!", -1: "???"})
+        c = captured(d, "w8end")
+        t.eq("w8end: T8 back on SP12, the plain readout", (c["value"], c["fmt"]), (EM["SP12"], ef))
 
 
 def panel_trace(log):
@@ -704,12 +1022,66 @@ def latch_check(t, d):
     t.eq("mid-note EMUS change (frame 500): engine unchanged until the trig", pre, [0])
 
 
+def cost(frames=3000):
+    """The guard's own ColdFire cost (spec §6 item 5), measured. ot_emu --coverage counts every
+    ColdFire PC executed from the transport start; summed per frame over the unit (VEM4G and
+    VEM3, each with its own symbols) and over the guard's routines (vg_core .. emus_idx: the
+    per-core pass and the latch). The guard's inline part (reading the carried engine, the two
+    calls) is in vem_frame: the unit's VEM4G - VEM3 difference includes it."""
+    import varispeed_emus_harness as H
+    ref_syms = json.loads((IMG_REF.parent / "varispeed_emus_vem3_syms.json").read_text())
+    imgs = {"VEM4G": (IMG, json.loads(SYMS.read_text())), "VEM3": (IMG_REF, ref_syms)}
+    cases = {
+        "otdemo_stock": (OTD, []),                       # no VARI track: the guard never runs
+        "otdemo_7sp12": (OTD, H.scenario_steps(dict(tempo=None, pre=True,
+                                tracks={t: dict(mode="VARI", emus="SP12") for t in range(7)}), "new")),
+        "mm_x2": (MM, [mm_setup({t: "SP12" for t in GT}, {4: "DJEQ", 5: "DJEQ"})]),
+        "mm_x3": (MM, [mm_setup({t: "SP12" for t in GT}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"})]),
+    }
+    d = OUTD / "cost"
+    d.mkdir(parents=True, exist_ok=True)
+    procs = {}
+    for c, (proj, steps) in cases.items():
+        for i, (img, _) in imgs.items():
+            a = [str(EMU), "--image", str(img), "--card", str(proj["card"]), "--set", proj["set"], "--project",
+                 proj["project"], "--load-ms", "20000", "--sequencer", "--internal-clock", "--frames", str(frames),
+                 "--dsp", "--main-level", "64", "--coverage", str(d / f"{c}_{i}.cov")]
+            for st in steps:
+                a += ["--step", st]
+            procs[(c, i)] = subprocess.Popen(a, stdout=open(d / f"{c}_{i}.log", "w"), stderr=subprocess.STDOUT)
+    for p in procs.values():
+        p.wait(timeout=7200)
+    rows = {}
+    for (c, i), _ in procs.items():
+        sy = imgs[i][1]
+        cov = [l.split() for l in open(d / f"{c}_{i}.cov")]
+        cov = [(int(a, 16), int(n)) for a, n in cov]
+        log = (d / f"{c}_{i}.log").read_text()
+        n = int(re.search(r"frames run : (\d+)", log).group(1))
+        unit = sum(k for a, k in cov if sy["cave"] <= a < sy["end"]) / n
+        g = sy["syms"]
+        guard = sum(k for a, k in cov if g.get("vg_core", 0) <= a < g.get("emus_idx", 0)) / n if "vg_core" in g else 0.0
+        total = sum(k for a, k in cov) / n
+        rows[(c, i)] = (unit, guard, total)
+    print(f"{'scenario':16} {'image':6} {'unit/frame':>11} {'vg_*/frame':>11} {'all CF/frame':>13}")
+    for c in cases:
+        for i in imgs:
+            u, gg, tt = rows[(c, i)]
+            print(f"{c:16} {i:6} {u:11.1f} {gg:11.1f} {tt:13.1f}")
+        print(f"{'':16} {'delta':6} {rows[(c, 'VEM4G')][0] - rows[(c, 'VEM3')][0]:11.1f} {'':11} "
+              f"{rows[(c, 'VEM4G')][2] - rows[(c, 'VEM3')][2]:13.1f}")
+    (d / "cost.json").write_text(json.dumps({f"{c} {i}": v for (c, i), v in rows.items()}, indent=1))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="")
     ap.add_argument("--jobs", type=int, default=9)
     ap.add_argument("--reuse", action="store_true")
+    ap.add_argument("--cost", action="store_true", help="the guard's ColdFire cost per frame (VEM4G vs VEM3)")
     a = ap.parse_args()
+    if a.cost:
+        return cost()
     sc = scenarios()
     if a.only:
         sc = {k: v for k, v in sc.items() if k in a.only.split(",")}

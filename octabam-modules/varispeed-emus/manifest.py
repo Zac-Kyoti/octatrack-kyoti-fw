@@ -9,6 +9,9 @@
     QUAN    the PTCH knob on a VARI track: 1/2 2/3 3/4 4/5 1/1 5/4 4/3 3/2 2/1
     EMUS    the TSNS knob on a VARI track: OT / S950 / SP12 (left to right, six detents
             per step), the engine the DSP kernel renders the track with, taken at each trig
+    GUARD   a DSP load estimate per core (base + stock FX + the engines the voices carry);
+            above its budget the core's emu voices step down (SP12 -> S950 -> OT), at the
+            trig or at once, and EMUS shows the engine played, marked (OT! / S95!)
 
 COLDFIRE. One unit, vem_cf (varispeed_emus.s), the standalone builder's own
 (tools/build_varispeed_emus.py). 19 detours: the render's increment store (the frame hook),
@@ -26,7 +29,7 @@ one-time memory clear (A P:0x46, B P:0x47; their `do` words differ). Two table b
 (81 + 384 words). Core-private Y $A00-$FFF. It needs a given-up effect for its words, as
 the standalone gives up SPRING REV.
 
-PLACE. DRAM (the default; ~2.9 KB) or CAVE (the classic cave, where the standalone puts it).
+PLACE. DRAM (the default; ~4 KB) or CAVE (the classic cave, where the standalone puts it).
 The ledger refuses this module beside any other that writes the STATIC / FLEX TSTR words
 or the same sites (REPITCH_REPEAT98_KYOTI and octabam's REPITCH do): one design at a time.
 
@@ -61,7 +64,7 @@ U = "vem_cf"
 LINKED = (
     Linked(U, os.path.join(_HERE, "varispeed_emus.s"),
            reference=(0x400d6500,
-                      "cd003bfae275d041ad868a3323a2e68d0819a3a6897b4ca2c4823f229aaf07b0")),
+                      "c650b4ad0c40c957f5413817985dc1e4cba2e80e583d1f5b7082ec37178c3528")),
 )
 
 _X = bytes.fromhex

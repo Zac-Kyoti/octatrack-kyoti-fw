@@ -7,7 +7,9 @@ Build VARISPEED_EMUS on TOP OF STOCK 1.40C (WIP).
 STATIC / FLEX TSTR gets a fifth position, VARI: the track plays dry at
 (project BPM x p) / (sample BPM x q), p/q the QUAN ratio on the PTCH knob, exact in
 integers, RATE still applying; its TSNS knob becomes EMUS (OT / S950 / SP12), the DSP
-engine latched at each trig. The audio editor's ATTR TIMESTRETCH gains VARI.
+engine latched at each trig. The audio editor's ATTR TIMESTRETCH gains VARI. A DSP load
+guard (spec §6) steps emu voices down to cheaper engines while a DSP core's estimated
+load is over its budget.
 Spec: reference/handoffs/REPITCH_REWRITE_SPEC.md (clean-room); facts:
 REPITCH_REWRITE_SCOPE.md + REPITCH_REWRITE_SCOPE_EMUS.md; this build:
 reference/handoffs/REPITCH_REWRITE_IMPL.md.
@@ -30,7 +32,7 @@ middle of what it displaces; the cave must be zero in stock and inside the class
 cave from 0x400d6500; no reference into 0x80006a40..0x80006abf; the unit must link to
 the same bytes for -mcpu=5407 and 54455 (octabam assembles DRAM units for 54455).
 
-Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM3)
+Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM4G)
 """
 import hashlib, importlib.util, json, os, pathlib, struct, subprocess, sys
 from kyoti_status import gate, seal
@@ -51,7 +53,7 @@ OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx"
 OUT_BIN = ROOT / "out/OCTATRACK_VARISPEED_EMUS.bin"
 SYMS_JSON = ROOT / "out/varispeed_emus_syms.json"
 WORK = ROOT / "out/vem_build"
-VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM3"
+VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM4G"
 # A TEST variant (the harness's deliberately wrong builds): VEM_VARIANT=<tag> and
 # VEM_VARIANT_SRC=<.s> build out/vem_variants/mainos_varispeed_emus_<tag>.bin from that
 # source, with every check, and no wrap. Never a flash candidate.
@@ -136,6 +138,23 @@ CONTEXT = {
     0x4000d52e: "1012780fc08414c0",
     # stock's 4-entry TSTR string table (OFF AUTO NORM BEAT)
     0x400a7e2e: "400b4e78400b571e400b5728400b572d",
+    # ---- the DSP load guard's stock facts (REPITCH_REWRITE_IMPL.md §10.1)
+    # the live FX type ids 0x80000ec4[t] (FX1) / 0x80000ecc[t] (FX2): every frame they go
+    # into the frame's per-track DSP record (+54 / +56) ...
+    0x40004d2e: "421512164881354100362044d1fc8000011014280dbc4882",
+    # ... and the Part applies copy them from the Part (+0 FX1, +8 FX2)
+    0x4000220e: "41f980000ec4d3c6119168002243d3fc40170f6841f980000eccd3c611916800",
+    # the voice state 0x800049d8 + 168t: +0 = sounding (the stream engine outputs silence
+    # when it is 0; the voice reset clears it)
+    0x40007978: "223c000000a84c0108002440d5fc8000",
+    0x400079b2: "4a126616",
+    0x40006856: "41f9800049d8420013808800",
+    # the frame index 0x800000e0: the DSP's buffer word, read at every frame ISR
+    0x4000aaee: "41f9800000e023d0800000e430392000001c714023c0800000e0",
+    # the voice loop's machine bytes 0x80000eb4 + 8 * frame + t, and the render table by
+    # machine type (ST, FL, PU share 0x40004008: the only renders that carry an engine)
+    0x4000d3ea: "2e3c80000eb4",
+    0x400d6434: "4000400840004008400044244000466c40004008400047f0400047f0400047f0",
 }
 
 
