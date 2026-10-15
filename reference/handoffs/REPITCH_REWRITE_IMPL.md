@@ -7,8 +7,11 @@ Nothing was flashed, promoted or pushed. KYOTI's combined image was not touched.
 
 Marks: **C** = confirmed on our image (objdump, or an emulator run); **I** = inferred.
 
-**Current build: `140C_VEM6` (§12, 2026-10-15), the guard redesigned (spec §6b, "6b
-simplified"): refusals and one safety net, no run-time step-down. Not flashed.**
+**Current builds (2026-10-15, both WIP, neither flashed): `140C_VEM7` (§13), VEM6 with the
+"6b, answers" change (TSTR / ATTR onto VARI over budget steps THAT track's EMUS to OT); and
+`140C_VARI1` (§14), VARISPEED, the plain build from the same source (spec §7), standalone
+and Bugbuild `BUG_VARI`.** `140C_VEM6` (§12): the guard redesigned (spec §6b, "6b
+simplified"): refusals and one safety net, no run-time step-down.
 `140C_VEM5` (§11) is the image on the user's MKI. Earlier: `140C_VEM2` (§8), the two fixes from the first hardware test; `140C_VEM3` (§9);
 `140C_VEM4G` (§10), the DSP load guard; `140C_VEM4` (commit `10ac83e`, §11.1), the optimized
 kernels with the guard at their prices.
@@ -1406,4 +1409,260 @@ every FX2 of T5-T8. "Toast" = `MAX DSP: EMU LIMIT`, readable in full, about 1.2 
    section about REPITCH.
 3. ot_emu's `main.cpp` (option names) and `rtos.cpp` (the task table, the load loop): no
    keyword hits in either file.
+4. The oracle was run only through the harness.
+
+---
+
+## 13. VEM7, 2026-10-15 (clean side): the entering track goes to OT (spec "6b, answers")
+
+Same worktree, clean side. Read for this section: the spec (all; "6b, answers" and §7 new),
+this file §8, §12, `CLAUDE.md`, our module sources, builders, manifest, tests and harness,
+`tools/build_bugbuilds.py`, `tools/kyoti_status.py`, `tools/githooks/threads.txt`, octabam's
+`tools/remix/schema.py` (`Linked.include`), `platform_build.py` and `build_bus.py` (only their
+assembler / include lines, grepped), and the stock image (objdump). **Nothing was flashed,
+promoted or pushed.** KYOTI's combined image was not touched.
+
+**A new build exists: `140C_VEM7`, WIP, not flashed.** Built twice, same hashes.
+
+| file | sha256 |
+|---|---|
+| `out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx` (MIDI DIN) | `3a35a08592c6164d43ef7a246fa8fa29b3a1ff3b3bcd3b764b4742021d974ef7` |
+| `out/OCTATRACK_VARISPEED_EMUS.bin` (CF card) | `09698bc6e0a2e48fc9d89d3707bf17ca1076d4d4bde1ba6f6c673d432ed292f2` |
+| `out/mainos_varispeed_emus.bin` | `cb25bbaede331d0b3e1badd77cb13504881f8abe5599808f7fb170d541bc0e1a` |
+| `out/elek_varispeed_emus.bin` | `5ce784b8723273d24c05ba91efcdd4fbdc74580e23add5376206294f3b9b11ef` |
+
+OS VERSION reads `140C_VEM7`. Unit: **4,888 B** at `0x400d6500..0x400d7818` (1,060 B of the
+classic cave left), the same bytes for `-mcpu=5407` and `54455`, sha256 `37f72b04…` (manifest
+reference updated). 22 detours, 12 descriptor pokes, 9,583 bytes differ from stock. Against VEM6
+the image differs only in the unit, the detour target words and the descriptor pokes: **the DSP
+payloads are byte-identical to VEM6's** (checked byte by byte). VEM6's MAIN OS is kept as
+`out/vem_variants/mainos_varispeed_emus_vem6.bin` (`5480ba2c…`) with its symbols.
+
+### 13.1 What changed
+
+- **TSTR or ATTR TIMESTRETCH (under AUTO) onto VARI over budget: THAT track's EMUS goes to OT**,
+  with the toast. Mechanism (all UI task):
+  - `vg_note` (d1 = track): when the track's gate (`rp_ui_gate`, its current machine) is off,
+    its bit is set in `vg_pend`. Called by `emus_p2step` for P2EDIT's TSTR slot (slot 4, ST / FL;
+    the panel's track) before stock's conversion, and by `attr_up` for every track just before
+    the BEAT -> VARI store (the only ATTR edit that can open a gate).
+  - `vg_tick` (the loop tail right after that handler): if `vg_pend` is set, it is cleared and
+    `vg_entered` keeps the noted tracks whose gate is on now (the edit put them on VARI); then
+    **`vg_fix` with exactly those tracks as its mask**. `vg_fix` already took a track mask (VEM6
+    called it with -1): over budget, it steps only the entering tracks, SP12 first, then S950,
+    highest track first, just enough. Then the usual signature check and the net (mask -1) for
+    whatever is still over, in the net's order. One toast for both.
+  - Several tracks entering by one ATTR edit: the net's order **among them** (net_attr: T7, T8
+    enter, T8 steps).
+- **RELOAD PART: no special code, confirmed.** The guard has no RELOAD path; `rp_reload` is only
+  the retained hold/forget wrapper (`rp_prev` bookkeeping). A reload whose result is over budget
+  changes the signature, and the net acts (`net_reload`, unchanged).
+- `rp_gate_v` removed: dead since VEM6 (its only caller, `.ep_tstr`, went in §12.3).
+- **One source for two builds** (spec §7): `varispeed_emus.s` gained the assembly switch
+  `VEM_EMUS` (default 1, set in the source: octabam defsyms are link-time). With 1 it is
+  VARISPEED_EMUS -- the switch commit (`dc3844f`) links to VEM6's unit bytes exactly
+  (`236e5218…`); with 0 it is VARISPEED (§14). Everything VARISPEED_EMUS's alone sits inside
+  `.if VEM_EMUS`: EMUS, the engine tag and latch, the stock-track mask, the guard, the TSNS
+  pair of the swap, the TSNS caption.
+- **Builder.** The ColdFire sites, pokes, context bytes, the unit link and the guarded splice
+  that both builders use moved to `tools/varispeed_buildlib.py` (not a builder: no gate);
+  `tools/build_varispeed_emus.py` adds EMUS's and the guard's own tables and keeps the DSP
+  install. Checked: the refactored builder builds VEM6's image (`5480ba2c…`) from VEM6's source.
+  Default label `140C_VEM7`.
+- A stock fact checked for this: the ATTR tail's redraw `0x4006dbdc` does not read d1
+  (`attr_up` now leaves d1 = -1 after its note loop).
+
+### 13.2 Tests
+
+**(b) `tools/varispeed_emus_test.py`: 34/34 PASS** (`out/vem7/tests_all.txt`): VEM6's 33 and the
+new `net_attr_order`. `NetModel.enter_fix(fx, eng, entering)` models the rule (the entering
+tracks first, the net's order for the rest); the tstr / attr scenarios take their expectation
+from it, and the `_order` ones check that it differs from the net's order:
+
+| test | setup and action | result (VEM7) |
+|---|---|---|
+| `net_tstr` | T8 BEAT -> VARI (SP12 parked), T5-T7 SP12, DJ EQ x3 (3,458) | T8 -> OT (here also the net's choice) |
+| `net_tstr_order` | T6 BEAT -> VARI (SP12 parked) with T5, T7, T8 on SP12 (3,458) | **T6 -> OT, T8 keeps SP12** (VEM6: T8 -> OT); T6 plays OT from its next trig; one toast |
+| `net_tstr_fit` | S950 that fits | nothing, no toast |
+| `net_attr` | T7, T8 on AUTO enter (both SP12 parked) | T8 -> OT, T7 SP12 |
+| `net_attr_order` (new) | T6, T7 on AUTO enter (SP12 parked) with T5, T8 VARI SP12 (3,458) | **T7 -> OT** (the highest ENTERING track), T8 keeps SP12 (the net would take T8) |
+
+**Deliberately wrong builds** (`out/vem7/variants.txt`), each against its tests:
+
+| build | wrong rule | fails | passes |
+|---|---|---|---|
+| `w_enter_net` (new) | the entering track gets the net's order (VEM6) | `net_tstr_order`, `net_attr_order` | the other 9 `net_*` / `under` |
+| `w_low_first` | lowest track first | 8 (all `net_*` but `net_tstr`, `net_tstr_order`: one entering track has no order) | `under`, those two |
+| `w_s950_first` | S950 before SP12 | `net_load`, `net_reload` | `net_part` |
+
+The other six (`w_no_cap`, `w_no_fxref`, `w_no_sync`, `w_6det`, `w_toast_direct`, `w_no_net`) were
+still running when this was written (`out/vem7/run_all.sh` appends to `out/vem7/variants.txt`).
+Expected change for `w_no_net`: `net_tstr`, `net_tstr_order`, `net_attr`, `net_attr_order` now
+pass under it (the entering step is not the net).
+
+**(a) Harness**, oracle = the shipped FINAL (`90b4a1c1…`), outputs in `out/vem7/`: quick **9/9
+identical**, full OTDEMO **35/35 identical**, full MMTESTDT (`--frames 6000`) **35/35
+identical**; all three print **exactly VEM6's lines** (`diff` empty, whole-run counts included).
+
+**(c) DSP**: payloads byte-identical to VEM6's; `repitch_dsp_boot_check.py
+out/mainos_varispeed_emus.bin`: **PASS** on both payloads (`out/vem7/dsp_boot.txt`).
+
+**(d) octabam**: the module (reference `37f72b04…`) was not rebuilt this session; the VARISPEED
+module was (§14).
+
+### 13.3 FLASHING §4 (draft) -- changes to §12.7 for VEM7
+
+OS VERSION `140C_VEM7`. §12.7 stands, with items 4 and 5 replaced:
+4. **TSTR onto VARI:** T5-T7 SP12 + DJ EQ on their FX1; T8 on BEAT with EMUS SP12 from before.
+   Set TSTR to VARI: T8 is on VARI, **its EMUS reads OT**, toast. Then T5, T7, T8 on SP12 (DJ EQ
+   on T5-T7) and T6 on BEAT with SP12 from before: set T6's TSTR to VARI: **T6's EMUS reads OT**,
+   T8 keeps SP12, toast.
+5. **ATTR onto VARI:** T5, T8 VARI SP12, DJ EQ on T5-T7; T6, T7 on AUTO with the same sample,
+   both SP12 from before; the sample's TIMESTRETCH BEAT -> VARI in the audio editor: **T7 reads
+   OT**, T6 and T8 keep SP12, toast.
+
+### 13.4 Open questions
+
+- **ATTR TEMPO** (or a sample change) that brings an AUTO / VARI track into range is not "TSTR or
+  ATTR TIMESTRETCH": it keeps the net's order. Say if it should count as entering.
+- The engine still follows at the next trig (unchanged latch, §12.6).
+
+---
+
+## 14. VARISPEED, 2026-10-15 (clean side): the plain build (spec §7)
+
+Same session as §13. **Nothing was flashed, promoted or pushed.** VARISPEED is WIP: not on
+`kyoti_status.FINAL`, no README entry.
+
+**New builds exist: VARISPEED standalone `140C_VARI1` and its Bugbuild `BUG_VARI`, both WIP, not
+flashed.** The standalone was built twice, same hashes.
+
+| file | sha256 |
+|---|---|
+| `out/OCTATRACK_OS1.40C_VARISPEED.syx` (MIDI DIN) | `78cfad333ff231adda18f415d9585deae7c09a9668882903b30b4b3afd97f64d` |
+| `out/OCTATRACK_VARISPEED.bin` (CF card) | `ed3e19d9cc39386fb14493760818e7dbc9529e5524ee9c2a2d7d409edced2837` |
+| `out/mainos_varispeed.bin` | `ce7e69fd15235433c22cd7bc5265ecce6329ccb7eb7d521632259f680134671b` |
+| `out/elek_varispeed.bin` | `434898ad6553cfbd1ce20f4740c829d67f77724df6a6d95a050c596bf261c0e3` |
+| `out/Bugbuilds/OCTATRACK_OS1.40C_VARISPEED_BATCH_BUGFIXES.syx` (`BUG_VARI`) | `f2f37df360f19f7667c6a78fead813fd5b47da322e29dfaa4e76cc365bca4a68` |
+| `out/Bugbuilds/OCTATRACK_VARISPEED_BATCH_BUGFIXES.bin` | `15e5585b5228d1e8d760db16892dbf304c860e1868f409d765a71b14da63f8b4` |
+| `out/Bugbuilds/mainos_varispeed_batch_bugfixes.bin` | `ea2b4f604307c3dec2507a74ca6819b6b470620a050783eee709973fbef1ab20` |
+
+### 14.1 What is in, what is out
+
+One source: `octabam-modules/varispeed-emus/varispeed_emus.s` assembled with **`VEM_EMUS = 0`**
+(`as --defsym VEM_EMUS=0`). The unit: **2,388 B** at `0x400d6500..0x400d6e54` (3,560 B of the
+classic cave left), the same bytes for `-mcpu=5407` and `54455`, sha256 `afd1eed1…`.
+**2,231 bytes differ from stock**, every one of them the unit's, a detour's or a poke's (the
+builder refuses anything else).
+
+- **In** (the shared code, unchanged from VARISPEED_EMUS): TSTR five positions with stock's
+  select and `tstr_fmt` (`VARI`); ATTR TIMESTRETCH `VARI` (label, up, down, the tails' poll);
+  the gate (VARI, or AUTO on a VARI sample; sample and project tempo in 30..300 BPM); the exact
+  ratio `floor(inc x N / D)`, the octave fold above 2x, the clamp at 2.0 - 16 LSB, dry, RATE
+  applied; out of range = OFF (dry flag, stock increment); QUAN on PTCH (`quant_widget`,
+  `quant_step`, `quant_fmt`, the four dial resolvers) with the per-machine PTCH parks and
+  `rp_prev[2t+m]`; the item-11 fix; the hold / forget wrappers of SRC paste, track paste, the
+  PART menu's paste core and CLEAR, RELOAD PART; the Part-apply forgets; `rp_sync`.
+- **The VARI increment:** `inc & ~15`, exactly VARISPEED_EMUS's on EMUS = OT (it clears bits
+  0-3 and ORs in engine 0). Every other increment: stock's, untouched.
+- **Out:** EMUS (`emus_widget`, `emus_fmt`, `emus_p2step`, `emus_open`, the TSNS widget pokes,
+  the P2EDIT and SRC SETUP detours); the TSNS <-> EMUS pair of the swap (TSNS stays TSNS; the
+  NEIGHBOR byte VARISPEED_EMUS parks TSNS in is never touched; no live TSNS write); the TSNS
+  caption (stock's); the engine tag and latch; the bits-2-3 mask on every other increment; the
+  load guard (refusals, net, `vg_tick`, the FX choosers' detours, the toast); the DSP kernel and
+  both DSP hooks -- **the DSP payloads, SPRING REVERB and both FX choosers are stock**.
+- **17 detours** (the frame hook, five ATTR, four dial resolvers, two Part applies, RELOAD PART,
+  four bulk writers) and **10 descriptor pokes** (TSTR count / widget / formatter, PTCH widget /
+  step, STATIC and FLEX).
+
+### 14.2 Builders
+
+- **`tools/build_varispeed.py`** -> `out/mainos_varispeed.bin`, `out/OCTATRACK_OS1.40C_VARISPEED.syx`,
+  `out/OCTATRACK_VARISPEED.bin`, `out/elek_varispeed.bin`, `out/varispeed_syms.json`; OS VERSION
+  `140C_VARI1`. `gate()` first (WIP), `seal()` after the image. The same discipline as
+  VARISPEED_EMUS's builder, through `tools/varispeed_buildlib.py` (every context span, detour site
+  and poke asserted stock; no branch into a displaced span; the cave zero and inside the classic
+  cave; no reference into `0x80006a40..0x80006abf`; 5407 == 54455; each body jumps back behind
+  its site; EFT wrap and re-parse). Its own checks: none of VARISPEED_EMUS's symbols in the unit;
+  no changed byte outside the unit, the detours and the pokes; the octabam form (below)
+  assembles to the same bytes (5407 and 54455); the module's `reference` matches. Test variants:
+  `VARI_VARIANT` / `VARI_VARIANT_SRC` (no wrap).
+- **`tools/build_bugbuilds.py --wip VARISPEED`** (with `KYOTI_ALLOW_WIP=1`; refuses with exit 2
+  without it, `out/vari/bug_noenv.txt`): composes only `BUG_VARI` from `WIP_FEATURES`, prints
+  a WIP banner, runs the WIP builder, skips the promotion check and **never calls `seal()`**.
+  The fixes relocate above the unit: `patch_partreapply` 402 B @ `0x400d6e54`,
+  `patch_pattern_led` 158 B @ `0x400d6fe8`, `patch_trigscale` 62 B @ `0x400d7b00`; interlock
+  DISJOINT, ALL PRESERVED, NO STRAYS; 2,794 B vs stock; 2,936 B of the cave zone left.
+  VARISPEED's zero-valued runtime state at the unit's tail (`vem_depth`, `rk_acc`, `rp_pb` and
+  the padding) is reserved from the fix caves, read from `out/varispeed_syms.json`.
+  **The default run is unchanged**: `python3 tools/build_bugbuilds.py` without the flag (no
+  `KYOTI_ALLOW_WIP`) built the seven final Bugbuilds, each "image matches the promoted FINAL
+  build", "no problems flagged" (`out/vari/bugbuilds_final7.txt`).
+- **octabam** (`octabam-modules/varispeed/`): `varispeed.s` is two lines, `.equ VEM_EMUS, 0` and
+  `.include "remix.inc"`; `manifest.py`'s `Linked.include` writes the shared source's text
+  (`../varispeed-emus/varispeed_emus.s`) as that `remix.inc` (gas resolves `.include` against
+  the working directory and `-I` only, not the including file's folder, so a relative include
+  of the sibling cannot work; `Linked.include` is octabam's own mechanism for generated
+  assembler text). `kind` CF_PATCH, no DSP section, PLACE DRAM / CAVE like VARISPEED_EMUS,
+  claims the 16 PTCH parks only. The ledger keeps it apart from VARISPEED_EMUS (same sites).
+  The folder needs `varispeed-emus/` beside it. **Built** in the scratch octabam (`a67a1112`,
+  `REMIX=varispeed BUILD=79 XBUS=1 SPEC=1 python3 tools/build/build_bus.py`, a scratch remix of
+  the stock effects WITH SPRING REV, `out/bus_vari.log`): `VARISPEED vari_cf: matches the
+  author's build at 0x400d6500 (2,388 B)`, DRAM unit at `0x40a955e0`, 17 detours, 6 symbol
+  refs, 4 pokes, "stock rows kept: ... SPRING REV ..."; image `5b9ead44…`
+  (`out/vem/img/octabam_vari_bus.bin`).
+
+### 14.3 Tests
+
+- **`tools/varispeed_test.py`: 11/11 PASS** (`out/vari/tests_all.txt`): `static` (DSP payloads A
+  and B byte-identical to stock; both FX choosers' tables stock; FX2 offers SPRING; the five
+  VARISPEED_EMUS-only sites stock; TSNS widgets 0; no stray byte; 17 detours / 10 pokes; no
+  VARISPEED_EMUS symbol), `swap` (PTCH <-> QUAN with a fresh 1/1, TSNS / live TSNS / the NEIGHBOR
+  TSNS-park byte never move, captions QUAN + stock TSNS), `adopt`, `p2edit` (TSNS on a VARI track
+  steps as stock: 65 / 63 / 71; TSTR BEAT +1 -> VARI, +1 stays; T3 enters with QUAN 64), `widget`,
+  `item11`, `o2`, `o2late`, `o2rev`, `old56`, `spring` (FX2 SPRING REVERB chosen on T1 lands:
+  Part byte and live id 0x15).
+- **Harness `--plain`** (VARI vs the oracle's TSTR 4 = VARISPEED_EMUS on OT; stock TSTR and
+  PICKUP vs stock 1.40C; out of range vs stock OFF; every bit of l:$40): **quick 6/6 identical**
+  (`out/vari/harness_quick.txt`); stock's own engine bits are nonzero on 13,163 compared passes
+  of `stock_tstr_0` and come through unmasked. Full OTDEMO / MMTESTDT, the wrong builds
+  (`w_mask` must differ on the stock group, `w_lowbits` on the VARI group), the Bugbuild and the
+  octabam image (quick sets), and the VARISPEED tests on the Bugbuild were **still running** when
+  this was written (`out/vari/run_all.sh`; results in `out/vari/*.txt`).
+- **DSP boot check:** not relevant (no kernel); the DSP payloads are byte-identical to stock.
+
+### 14.4 FLASHING §4 (draft) -- VARISPEED
+
+OS VERSION `140C_VARI1` (or `BUG_VARI`). Power-cycle once first.
+1. **Stock untouched:** FX2 still offers SPRING REV and it sounds; an everyday project without
+   VARI sounds as on stock; no toast ever.
+2. **VARI:** a FLEX loop with matching ATTR TEMPO; TSTR has five positions, the fifth `VARI`. On
+   VARI PTCH reads `QUAN`, TSNS still reads `TSNS`. Change the project tempo: speed and pitch
+   move together, in time.
+3. **QUAN:** 1/2 ... 2/1, one ratio per three detents; 2/1 an octave up.
+4. **RATE:** reverse plays backwards at the same speed; RATE locks work.
+5. **Leaving VARI:** TSTR to BEAT: PTCH shows its value from before VARI; TSNS is whatever it was
+   set to (it never swaps).
+6. **AUTO + ATTR:** TIMESTRETCH `VARI` after BEAT; an AUTO track on that sample plays VARI.
+7. **Out of range** (sample tempo outside 30-300 BPM): plays as OFF, PTCH as pitch.
+8. **Machine round trips, paste, PART menu, RELOAD PART, save / reload:** as §6 items 7-9 (QUAN
+   only).
+9. **`BUG_VARI` only:** FLASHING §4's BATCH_BUGFIXES checks, plus a Part change with VARI tracks.
+
+### 14.5 Open questions
+
+- None on the design. Hardware is untested; the emulator does not draw SRC SETUP.
+
+### 14.6 Blacklist statement (this session, §13 and §14)
+
+**I opened no blacklisted file.** Disclosures:
+1. The memory index (`MEMORY.md`) was injected into context at start, as for earlier clean
+   sessions; I opened no memory file and took nothing from it.
+2. **A grep touched a blacklisted file's contents, nothing of it was seen:** `grep -rn "include="
+   refs/octabam/modules/*/manifest.py | grep -v "/repitch"` searched every module manifest,
+   `refs/octabam/modules/repitch/manifest.py` included; its lines (if any matched) were removed
+   by the `grep -v` before display. Nothing from it reached me.
+3. A grep of `refs/octabam/tools/build/build_bus.py` for keywords printed one comment line naming
+   Jannik Aßfalg and an octabam PR number (attribution only). `ls -d refs/octabam/modules/*repitch*`
+   printed the folder name `refs/octabam/modules/repitch`.
 4. The oracle was run only through the harness.
