@@ -30,7 +30,7 @@ middle of what it displaces; the cave must be zero in stock and inside the class
 cave from 0x400d6500; no reference into 0x80006a40..0x80006abf; the unit must link to
 the same bytes for -mcpu=5407 and 54455 (octabam assembles DRAM units for 54455).
 
-Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM2)
+Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM3)
 """
 import hashlib, importlib.util, json, os, pathlib, struct, subprocess, sys
 from kyoti_status import gate, seal
@@ -51,7 +51,7 @@ OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx"
 OUT_BIN = ROOT / "out/OCTATRACK_VARISPEED_EMUS.bin"
 SYMS_JSON = ROOT / "out/varispeed_emus_syms.json"
 WORK = ROOT / "out/vem_build"
-VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM2"
+VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM3"
 # A TEST variant (the harness's deliberately wrong builds): VEM_VARIANT=<tag> and
 # VEM_VARIANT_SRC=<.s> build out/vem_variants/mainos_varispeed_emus_<tag>.bin from that
 # source, with every check, and no wrap. Never a flash candidate.

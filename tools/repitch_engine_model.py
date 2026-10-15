@@ -246,7 +246,8 @@ def sp_channel_filter(ch=SP_CHANNEL):
 # Rev 12: both kernels are least-squares designs (numpy only), one per
 # fractional phase, each with an exact unity DC gain:
 #   RPS9  16 taps fitted to the MF6CN-50's magnitude, a 6th-order Butterworth
-#         at 0.4 x FS_AKAI = 16 kHz, over the whole band.
+#         at 0.4 x FS_AKAI = 16 kHz, with a stopband from the recorder's Nyquist
+#         (20 kHz) since 2026-10-14 (fir_target).
 #   RPSP  12 taps: FLAT to 10 kHz, then a 7-pole (42 dB/oct, E-mu's "on the
 #         order of 42 dB per octave") Butterworth shape through the transition
 #         (rev 13: corner 10.95 kHz, weight 0.7 -- the overall response lands
@@ -343,7 +344,18 @@ def fir_target(mode, f):
     """What each phase of the kernel is fitted to: (desired magnitude, weight)."""
     f = np.asarray(f, dtype=float)
     if mode == MODE_RPS9:
-        return 1 / np.sqrt(1 + (f / (0.4 * FS_AKAI)) ** 12), np.ones_like(f)
+        # The record filter (MF6CN-50: 6th-order Butterworth at 0.4 x FS_AKAI) AND, since
+        # 2026-10-14, nothing at or above the virtual recorder's Nyquist (0.5 x FS_AKAI =
+        # 20 kHz): a 40 kHz recorder cannot hold it. The filter alone left source content at
+        # 20-22 kHz at -12..-17 dB, which pitched down landed where a real S950 has nothing
+        # (15-16.5 kHz at 0.75x). Stop weight 30: >= 40 dB above 20 kHz (RPSP's convention),
+        # the band to 16 kHz within 0.7 dB of the MF6 shape, 18.5-20 kHz free (it rolls off
+        # ~5 dB faster than the MF6 there). The fold-back a real recorder makes of that
+        # content is not modelled (VARISPEED_EMUS_S950_RATE_SCOPE.md, option B).
+        nyq = 0.5 * FS_AKAI
+        want = np.where(f < nyq, 1 / np.sqrt(1 + (f / (0.4 * FS_AKAI)) ** 12), 0.0)
+        w = np.where(f < nyq - 1500.0, 1.0, np.where(f >= nyq, 30.0, 0.0))
+        return want, w
     d = FIR[mode]
     shape = 1 / np.sqrt(1 + (f / d["corner"]) ** (2 * d["poles"]))
     want = np.where(f <= d["flat"], 1.0, np.where(f >= d["stop"], 0.0, shape)) / render_response(f)

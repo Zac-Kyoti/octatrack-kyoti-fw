@@ -546,3 +546,24 @@ octabam's `docs/firmware/PANEL.md` (grepped first, no keyword hits); and `ot_emu
 Disclosures: the memory index (`MEMORY.md`) was injected into context at start, as before.
 I opened no memory file and took nothing from it. The scratch octabam's build log lists
 other modules' names, none of them read.
+
+## 9. VEM3, 2026-10-14 (dirty side, DSP table only): S950 above 20 kHz
+
+The user asked for this right after VEM2. The S950 (RPS9) virtual record filter left source
+content at 20–22 kHz at −12…−17 dB. A 40 kHz recorder cannot hold it, and pitched down it
+landed where a real S950 has nothing: 15–16.5 kHz at 0.75×. `repitch_engine_model.fir_target`
+now adds a stopband from 0.5 × FS_AKAI (20 kHz):
+
+- **The filter:** weight 30, and 18.5–20 kHz left free. The result is ≥ 40 dB rejection above
+  20 kHz (shipped: −11.5 dB), with the band up to 16 kHz within 0.7 dB of the MF6 shape. It
+  rolls off about 5 dB faster than the MF6 between 16 and 20 kHz.
+- **What changed:** only the tables (tools/repitch_dsp_src.py and the octabam
+  `rpk_dsp_ptable.py`, regenerated). The kernel code is unchanged apart from the table tag
+  (TAGVAL `$504a23` → `$1974ed`), so the boot copy reloads the new tables.
+- **The effect** (beat, against OT): at 78 BPM, 15–16.5 kHz goes −8.4 → −24.4 dB and
+  12–15 kHz goes −1.4 → −3.3 dB. At 104 and 156 BPM, nothing changes by more than 2.5 dB
+  (above 16.5 kHz at 104).
+- **Checks:** engine check 80/80 bit-exact, mode switch 8/8; boot check PASS; octabam check
+  264/264; RPS9 52.2 instructions per sample (unchanged).
+- **Build:** OS VERSION `140C_VEM3`. syx `6a39fa79…`, CF bin `68a60119…`, MAIN OS `22848483…`.
+  NOT flashed.
