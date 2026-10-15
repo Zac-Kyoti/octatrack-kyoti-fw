@@ -1495,10 +1495,12 @@ from it, and the `_order` ones check that it differs from the net's order:
 | `w_low_first` | lowest track first | 8 (all `net_*` but `net_tstr`, `net_tstr_order`: one entering track has no order) | `under`, those two |
 | `w_s950_first` | S950 before SP12 | `net_load`, `net_reload` | `net_part` |
 
-The other six (`w_no_cap`, `w_no_fxref`, `w_no_sync`, `w_6det`, `w_toast_direct`, `w_no_net`) were
-still running when this was written (`out/vem7/run_all.sh` appends to `out/vem7/variants.txt`).
-Expected change for `w_no_net`: `net_tstr`, `net_tstr_order`, `net_attr`, `net_attr_order` now
-pass under it (the entering step is not the net).
+| `w_no_cap` | EMUS never refused | `ref_emus`, `ref_emus_ot` | `ref_fx` |
+| `w_no_fxref` | FX never refused | `ref_fx` | `ref_emus` |
+| `w_no_sync` | no `rp_sync` | `net_part` | `net_load` |
+| `w_6det` | six detents | `p2edit`, `panel_slow`, `_fast`, `_held`, `_reset` | `panel_multi`, `_jitter` |
+| `w_toast_direct` | NOTIFY raised in P2EDIT | `ref_emus`, `ref_emus_ot` | `net_load` |
+| `w_no_net` | the net never runs | `net_load`, `net_part`, `net_reload`, `net_paste`, `net_machine`, `net_gate` | `net_tstr*`, `net_attr*` (the entering step is not the net, VEM7), `ref_emus` |
 
 **(a) Harness**, oracle = the shipped FINAL (`90b4a1c1…`), outputs in `out/vem7/`: quick **9/9
 identical**, full OTDEMO **35/35 identical**, full MMTESTDT (`--frames 6000`) **35/35
@@ -1625,10 +1627,19 @@ builder refuses anything else).
 - **Harness `--plain`** (VARI vs the oracle's TSTR 4 = VARISPEED_EMUS on OT; stock TSTR and
   PICKUP vs stock 1.40C; out of range vs stock OFF; every bit of l:$40): **quick 6/6 identical**
   (`out/vari/harness_quick.txt`); stock's own engine bits are nonzero on 13,163 compared passes
-  of `stock_tstr_0` and come through unmasked. Full OTDEMO / MMTESTDT, the wrong builds
-  (`w_mask` must differ on the stock group, `w_lowbits` on the VARI group), the Bugbuild and the
-  octabam image (quick sets), and the VARISPEED tests on the Bugbuild were **still running** when
-  this was written (`out/vari/run_all.sh`; results in `out/vari/*.txt`).
+  of `stock_tstr_0` and come through unmasked. **Full OTDEMO 17/18, full MMTESTDT
+  (`--frames 6000`) 18/18 identical.** The one difference is by design: `auto_OT`, T5 only, every
+  pass, and only in y:$40 bits 0-1 (`f1a1bf` vs `f1a1bc`). T5 is §4 item 2's track: its Part says
+  AUTO + a VARI sample but its voice plays another sample (the gate and the voice disagree), so
+  it is NOT engaged and plays stock. VARISPEED_EMUS masks a stock increment's bits 2-3 (so the
+  oracle shows 0); VARISPEED leaves stock's increment untouched (spec §7), so stock's own bits
+  come through. Every engaged VARI track is bit-identical.
+- **Wrong builds (quick plain):** `w_mask` **differs** on `stock_tstr_0` and the three `oor_*`
+  (2/6 identical: the VARI ones); `w_lowbits` **differs** on `vari_OT_Tp_q0` and `pre_OT` (4/6:
+  the stock ones). Each fails exactly the group it breaks.
+- **The Bugbuild** (`BUG_VARI`): quick plain **6/6 identical**; `tools/varispeed_test.py` on it
+  (`VEM_IMG` = the Bugbuild, the emulator tests) **10/10 PASS** (`out/vari/tests_bug.txt`).
+- **The octabam image** (DRAM unit): quick plain **6/6 identical**.
 - **DSP boot check:** not relevant (no kernel); the DSP payloads are byte-identical to stock.
 
 ### 14.4 FLASHING §4 (draft) -- VARISPEED
