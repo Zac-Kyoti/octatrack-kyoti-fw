@@ -178,12 +178,13 @@
         .equ    VG_FX_COMPRESSOR, 89    | id 0x18
         .equ    VG_FX_LOFI, 313         | id 0x1c
 | The emulation engines, per voice the DSP renders with them: the worst case over the
-| playback ratios of tools/repitch_dsp_profile.py (VEM3's kernel, 2026-10-14), its "~hw"
-| column (a one-word instruction 2 cycles, a displaced access +2): RPSP 269.8, RPS9 108.6.
-| Its datasheet column (146.5 / 57.3) cannot reproduce the user's brackets below (IMPL
-| §10.3); this one does. Replace both when the optimized kernels land.
-        .equ    VG_S950, 109
-        .equ    VG_SP12, 270
+| playback ratios 0.5-1.99x, both payloads, of tools/repitch_dsp_profile.py, its "~hw"
+| column (a one-word instruction 2 cycles, a displaced access +2). VEM3's kernel: RPSP 269.8,
+| RPS9 108.6 (its datasheet column, 146.5 / 57.3, cannot reproduce the user's brackets below,
+| IMPL §10.3; this one does). The optimized kernels (VEM4, VARISPEED_EMUS_DSP_OPT.md),
+| re-profiled 2026-10-15: RPSP 217.2, RPS9 99.0.
+        .equ    VG_S950, 99
+        .equ    VG_SP12, 218
 | Budgets: the CLEAN points of the user's hardware brackets (4 SP12 voices, DARK on every
 | FX2, DJ EQ added on FX1) -- spec §6 item 2. The guard acts above them.
         .equ    VG_BUDGET_C1, 3930      | T1-T4 (crash ~4,310)
