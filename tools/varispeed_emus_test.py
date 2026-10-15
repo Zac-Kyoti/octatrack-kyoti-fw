@@ -61,6 +61,13 @@ Tests (one forked scenario each):
             first hardware build (140C_VEM1) fails these (one stop per report, any sign), and
             VEM2-VEM5 (six detents per stop) too.
 
+VEM9: every guard scenario's FX (and so its load) is SOLVED from the VG_* constants
+(solve_fx: the first FX assignment, among the types this image's choosers offer, for which
+NetModel says the scenario does what it is for -- over budget by the steps it tests, under
+budget for the controls, the refusals it replays), so a price or budget change can never turn
+a test into a no-op; no such assignment is an error. A missing or stale low-budget test image
+fails the run (ref_fx_alone) instead of skipping it.
+
 Test builds (--build-variants): lowbudget (VG_BUDGET_C0 2600, for ref_fx_alone) and the
 deliberately wrong builds w_* (out/vem_variants/), each of which must fail its tests
 (w_enter_net: every track entering VARI gets the net's order, as VEM6 did; w_indirect_net: an
@@ -473,22 +480,35 @@ def scenarios():
     # ---- the DSP load guard (spec §6b, "6b simplified"): MMTESTDT, T5-T8 = DSP core 0.
     # Every expectation comes from NetModel (the VG_* block of varispeed_emus.s), and each
     # scenario checks that the model tells the right rule from the wrong ones it names.
+    # VEM9: every scenario's FX are SOLVED from the VG_* constants (solve_fx), so it is over /
+    # under budget by construction at whatever prices and budgets the source holds.
     SP4 = {t: "SP12" for t in GT}
+    E = lambda d: {k: ENG[v] for k, v in d.items()}
+    M = NetModel()
+
+    def gscn(name, emus, pred, fixed=None, prefer="min", **kw):
+        fx = solve_fx(lambda f: pred(M, f), fixed, prefer)
+        f1, f2 = fx_split(fx)
+        s = net_scn(name, emus, f1, f2, **kw)
+        s.notes = [f"FX solved from VG_*: " + " ".join(f"T{t + 1} {a}/{b}" for t, (a, b) in fx.items())]
+        return s
     # the safety net at the start: settings over budget when the run begins (as a loaded
-    # project would be): S950 on T5, SP12 on T6-T8, DJ EQ x4 -> T8, T7 to OT (SP12 first,
-    # highest first), T5 S950 and T6 SP12 kept
-    s = net_scn("net_load", {4: "S950", 5: "SP12", 6: "SP12", 7: "SP12"},
-                {4: "DJEQ", 5: "DJEQ", 6: "DJEQ", 7: "DJEQ"})
+    # project would be): S950 on T5, SP12 on T6-T8 -> SP12 first, highest first, just enough
+    LOAD = {4: "S950", 5: "SP12", 6: "SP12", 7: "SP12"}
+    s = gscn("net_load", LOAD, lambda m, f: g_over(m, f, None, E(LOAD), ("low_first", "s950_first")))
     s.dump(2800, mmpart(0), PSTRIDE, "after.part")
     s.net = dict(kind="load")
     sc[s.name] = s
-    # a sequencer Part change: part 0 fits (SP12 x4, DJ EQ x2); pattern 1, poked to use part 1,
-    # is cued at frame 100 and plays from bar 2. Part 1 (poked, consistent as a saved Part):
-    # T5 NOT VARI (TSTR OFF, PTCH 70 with a QUAN 109 parked, TSNS 30 with EMUS 127 parked),
-    # T6-T8 VARI SP12, DJ EQ x4 -> T8, T7 to OT in part 1 before it plays; T5's PTCH stays 70
-    # (until VEM5 the poll swapped it: rp_sync)
-    s = net_scn("net_part", SP4, {4: "DJEQ", 5: "DJEQ"}, frames=8400,
-                extra=part1_setup() + [b(MMDB + 1 * 0x8ed8 + 0x8e57, 1)] + trig_masks(1))
+    # a sequencer Part change: part 0 fits (SP12 x4); pattern 1, poked to use part 1, is cued at
+    # frame 100 and plays from bar 2. Part 1 (poked, consistent as a saved Part): T5 NOT VARI
+    # (TSTR OFF, PTCH 70 with a QUAN 109 parked, TSNS 30 with EMUS 127 parked), T6-T8 VARI SP12,
+    # over budget -> just enough of T8, T7, T6 to OT in part 1 before it plays; T5's PTCH stays
+    # 70 (until VEM5 the poll swapped it: rp_sync)
+    P1 = E({5: "SP12", 6: "SP12", 7: "SP12"})
+    fxp1 = solve_fx(lambda f: g_over(M, f, None, P1))
+    s = gscn("net_part", SP4, lambda m, f: m.est(f, E(SP4)) <= m.budget, prefer="max", frames=8400,
+             extra=part1_setup(*fx_split(fxp1)) + [b(MMDB + 1 * 0x8ed8 + 0x8e57, 1)] + trig_masks(1))
+    s.cfg["fx_p1"] = fxp1
     s.add(call(100, 0x400a1030, 0, 1))                    # cue bank 0 pattern 1 (seq_goto_pattern)
     g_dump(s, 5000, "pre")
     for f in (5200, 8300):
@@ -497,35 +517,39 @@ def scenarios():
     s.dump(8300, 0x80000000, 8, "ui.end")
     s.net = dict(kind="part")
     sc[s.name] = s
-    # RELOAD PART: part 0 fits (SP12 x4, DJ EQ x2); its saved copy (poked, flagged saved) has
-    # S950 on T5 and DJ EQ x4 -> after the reload T8, T7 to OT
-    s = net_scn("net_reload", SP4, {4: "DJEQ", 5: "DJEQ"},
-                extra=saved_setup({4: "S950", 5: "SP12", 6: "SP12", 7: "SP12"},
-                                  {t: "DJEQ" for t in GT}))
+    # RELOAD PART: part 0 fits (SP12 x4); its saved copy (poked, flagged saved) has S950 on T5,
+    # SP12 on T6-T8, over budget -> after the reload, the net's order
+    fxs = solve_fx(lambda f: g_over(M, f, None, E(LOAD), ("low_first", "s950_first")))
+    s = gscn("net_reload", SP4, lambda m, f: m.est(f, E(SP4)) <= m.budget, prefer="max",
+             extra=saved_setup(LOAD, *fx_split(fxs)))
+    s.cfg.update(fx_saved=fxs, eng_saved=E(LOAD))
     s.add(call(2600, RELOAD, 0))
     s.dump(2800, mmpart(0), PSTRIDE, "after.part")
     s.net = dict(kind="reload")
     sc[s.name] = s
-    # a track paste: T5-T7 VARI SP12 + DJ EQ (fits, 3240); T8 not VARI (AUTO on a BEAT-less
-    # slot). T5's whole track pasted onto T8 -> 4 x SP12 + DJ EQ x4: T8, T7, T6 to OT
-    s = net_scn("net_paste", {4: "SP12", 5: "SP12", 6: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
-                tstr={7: 1}, slots={7: 7})
+    # a track paste: T5-T7 VARI SP12 (fits); T8 not VARI (AUTO on a BEAT-less slot), its FX
+    # NONE. T5 (the heaviest FX this image offers) pasted whole onto T8 -> over: the net's order
+    T3 = E({4: "SP12", 5: "SP12", 6: "SP12"})
+    heavy = {(4, bus): max(fx_avail(bus), key=fx_price) for bus in (1, 2)}
+    s = gscn("net_paste", {4: "SP12", 5: "SP12", 6: "SP12"},
+             lambda m, f: m.est(f, T3) <= m.budget and g_over(m, {**f, 7: f[4]}, None, {**T3, 7: 2}),
+             fixed={**heavy, (7, 1): "NONE", (7, 2): "NONE"}, tstr={7: 1}, slots={7: 7})
     s.add(call(2600, 0x40029754, 0x460bf218, 0, 4), call(2600, 0x4002b654, 0x460bf218, 0, 7))
     s.dump(2800, mmpart(0), PSTRIDE, "after.part")
     s.net = dict(kind="paste")
     sc[s.name] = s
-    # a machine change: T5-T7 VARI SP12 + DJ EQ x3; T8 STATIC, not VARI, its FLEX side stored
-    # VARI with EMUS SP12 (rp_prev forgotten, as after a load). T8 -> FLEX: T8 (FLEX) to OT
-    s = net_scn("net_machine", {4: "SP12", 5: "SP12", 6: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
-                tstr={7: 1}, slots={7: 7}, extra=flex_side(7, "SP12"))
+    # a machine change: T5-T7 VARI SP12 (fits); T8 STATIC, not VARI, its FLEX side stored VARI
+    # with EMUS SP12 (rp_prev forgotten, as after a load). T8 -> FLEX: over, the net's order
+    s = gscn("net_machine", {4: "SP12", 5: "SP12", 6: "SP12"}, lambda m, f: g_over(m, f, T3, {**T3, 7: 2}),
+             tstr={7: 1}, slots={7: 7}, extra=flex_side(7, "SP12"))
     s.add(poke(2600, mm_byte(O_MACH + 7, FL)), call(2600, SET_MACHINE3, 0, 7, ST))
     s.dump(2800, mmpart(0), PSTRIDE, "after.part")
     s.net = dict(kind="machine")
     sc[s.name] = s
     # a sample change turning a gate on (no UI): T8 AUTO on STATIC slot 1 (TIMESTRETCH NORMAL),
     # EMUS SP12 parked; slot 1's TIMESTRETCH poked to VARI at 2600 -> T8 enters, to OT
-    s = net_scn("net_gate", {4: "SP12", 5: "SP12", 6: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
-                tstr={7: 1}, park={7: "SP12"})
+    s = gscn("net_gate", {4: "SP12", 5: "SP12", 6: "SP12"}, lambda m, f: g_over(m, f, T3, {**T3, 7: 2}),
+             tstr={7: 1}, park={7: "SP12"})
     s.add(poke(2600, lpoke(STATIC_SET + 0x448 * G_SLOT[7] + 0x110, 4)))
     s.dump(2800, mmpart(0), PSTRIDE, "after.part")
     s.net = dict(kind="gate")
@@ -533,30 +557,34 @@ def scenarios():
     # SETUP TSTR onto VARI through P2EDIT: T8 BEAT, EMUS SP12 parked -> T8 enters on OT. Then
     # (net_tstr_order) T6 enters with T8 already on SP12: T6 itself goes to OT, T8 keeps SP12
     # (VEM7; VEM6 stepped T8, the net's order)
-    s = net_scn("net_tstr", {4: "SP12", 5: "SP12", 6: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
-                tstr={7: 3}, park={7: "SP12"})
+    s = gscn("net_tstr", {4: "SP12", 5: "SP12", 6: "SP12"},
+             lambda m, f: g_enter(m, f, T3, {**T3, 7: 2}, [7], False), tstr={7: 3}, park={7: "SP12"})
     s.add(poke(2599, [b(UI_TRACK, 7)] + lpoke(PAGE_M, ST) + lpoke(ENC_F_HELD, 0)), call(2600, P2EDIT, 4, 1))
     s.dump(2800, mmpart(0), PSTRIDE, "after.part")
     s.net = dict(kind="tstr", enter=7)
     sc[s.name] = s
-    s = net_scn("net_tstr_order", {4: "SP12", 6: "SP12", 7: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
-                tstr={5: 3}, park={5: "SP12"})
+    T3o = E({4: "SP12", 6: "SP12", 7: "SP12"})
+    s = gscn("net_tstr_order", {4: "SP12", 6: "SP12", 7: "SP12"},
+             lambda m, f: g_enter(m, f, T3o, {**T3o, 5: 2}, [5], True), tstr={5: 3}, park={5: "SP12"})
     s.add(poke(2599, [b(UI_TRACK, 5)] + lpoke(PAGE_M, ST) + lpoke(ENC_F_HELD, 0)), call(2600, P2EDIT, 4, 1))
     s.dump(2800, mmpart(0), PSTRIDE, "after.part")
     s.net = dict(kind="tstr", enter=5)
     sc[s.name] = s
     # SETUP TSTR onto VARI that fits: T8 BEAT, S950 parked -> enters on S950, nothing changes
-    s = net_scn("net_tstr_fit", {4: "SP12", 5: "SP12", 6: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
-                tstr={7: 3}, park={7: "S950"})
+    # (the tightest fit the FX allow)
+    s = gscn("net_tstr_fit", {4: "SP12", 5: "SP12", 6: "SP12"}, lambda m, f: m.est(f, {**T3, 7: 1}) <= m.budget,
+             prefer="max", tstr={7: 3}, park={7: "S950"})
     s.add(poke(2599, [b(UI_TRACK, 7)] + lpoke(PAGE_M, ST) + lpoke(ENC_F_HELD, 0)), call(2600, P2EDIT, 4, 1))
     s.dump(2800, mmpart(0), PSTRIDE, "after.part")
     s.net = dict(kind="tstr", enter=7)
     sc[s.name] = s
     # ATTR TIMESTRETCH BEAT -> VARI (the value-up key handler) on STATIC slot 1 with T7, T8 on
-    # AUTO there, both SP12 parked; T5, T6 VARI SP12 -> both enter, T8 to OT, T7 keeps SP12
-    s = net_scn("net_attr", {4: "SP12", 5: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
-                tstr={6: 1, 7: 1}, park={6: "SP12", 7: "SP12"}, slots={6: 1, 7: 1},
-                extra=lpoke(STATIC_SET + 0x448 * 1 + 0x110, 3))
+    # AUTO there, both SP12 parked; T5, T6 VARI SP12 -> both enter, over: T8 first
+    T2 = E({4: "SP12", 5: "SP12"})
+    s = gscn("net_attr", {4: "SP12", 5: "SP12"},
+             lambda m, f: g_enter(m, f, T2, {**T2, 6: 2, 7: 2}, [6, 7], False),
+             tstr={6: 1, 7: 1}, park={6: "SP12", 7: "SP12"}, slots={6: 1, 7: 1},
+             extra=lpoke(STATIC_SET + 0x448 * 1 + 0x110, 3))
     s.add(poke(2600, lpoke(ATTR_SLOT, 1) + lpoke(ATTR_MACH, 0) + lpoke(ATTR_ROW, 2) + lpoke(ATTR_MODE, 0)),
           call(2600, ATTR_UP))
     s.dump(2800, mmpart(0), PSTRIDE, "after.part")
@@ -564,11 +592,13 @@ def scenarios():
     s.net = dict(kind="attr")
     sc[s.name] = s
     # the same edit where the net's order and the entering tracks' own step differ: T5, T8 VARI
-    # SP12; T6, T7 on AUTO on STATIC slot 1 (BEAT), both SP12 parked -> both enter, one step
-    # is needed: T7 (the highest ENTERING track) to OT; the net's order would take T8
-    s = net_scn("net_attr_order", {4: "SP12", 7: "SP12"}, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ"},
-                tstr={5: 1, 6: 1}, park={5: "SP12", 6: "SP12"}, slots={5: 1, 6: 1},
-                extra=lpoke(STATIC_SET + 0x448 * 1 + 0x110, 3))
+    # SP12; T6, T7 on AUTO on STATIC slot 1 (BEAT), both SP12 parked -> both enter: the highest
+    # ENTERING track (T7) first; the net's order would take T8
+    T2o = E({4: "SP12", 7: "SP12"})
+    s = gscn("net_attr_order", {4: "SP12", 7: "SP12"},
+             lambda m, f: g_enter(m, f, T2o, {**T2o, 5: 2, 6: 2}, [5, 6], True),
+             tstr={5: 1, 6: 1}, park={5: "SP12", 6: "SP12"}, slots={5: 1, 6: 1},
+             extra=lpoke(STATIC_SET + 0x448 * 1 + 0x110, 3))
     s.add(poke(2600, lpoke(ATTR_SLOT, 1) + lpoke(ATTR_MACH, 0) + lpoke(ATTR_ROW, 2) + lpoke(ATTR_MODE, 0)),
           call(2600, ATTR_UP))
     s.dump(2800, mmpart(0), PSTRIDE, "after.part")
@@ -577,14 +607,17 @@ def scenarios():
     sc[s.name] = s
     # ---- VEM8, spec "6b, option B": a track that becomes a VARI track INDIRECTLY (its gate on,
     # its TSTR untouched) over budget steps ITS OWN EMUS to OT. Each: T5, T7, T8 VARI SP12 on
-    # STATIC slot 0 (146.6 BPM), DJ EQ x3, DARK x4 (3240, fits); T6 (SP12 parked) not on VARI
-    # until the change; with it 3458 > 3350: one step. Its own rule takes T6, the net's would
-    # take T8. Only stock code makes the change; the pre-states are runtime pokes.
-    IND = dict(emus={4: "SP12", 6: "SP12", 7: "SP12"}, fx1={4: "DJEQ", 5: "DJEQ", 6: "DJEQ"})
+    # STATIC slot 0 (146.6 BPM), fits; T6 (SP12 parked) not on VARI until the change; with it
+    # over (FX solved). Its own rule takes T6, the net's would take T8. Only stock code makes the
+    # change; the pre-states are runtime pokes.
+    IND = dict(emus={4: "SP12", 6: "SP12", 7: "SP12"})
+    IND_NAMED = lambda m, f: g_enter(m, f, T3o, {**T3o, 5: 2}, [5], True)
+    IND_NET = lambda m, f: (g_over(m, f, T3o, {**T3o, 5: 2})
+                            and m.fix(f, {**T3o, 5: 2})[0] != m.enter_fix(f, {**T3o, 5: 2}, [5])[0])
     # a sample's ATTR TEMPO moved into range: T6 VARI on slot 1, slot 1's tempo 714 (29.75 BPM,
     # out of range: T6 plays as OFF); the ATTR value-up key on the TEMPO row (3: +6, stock
     # rounds and clamps to 720..7200, 0x40099090) -> 720, T6 enters
-    s = net_scn("net_tempo_order", IND["emus"], IND["fx1"], tstr={5: 4}, park={5: "SP12"},
+    s = gscn("net_tempo_order", IND["emus"], IND_NAMED, tstr={5: 4}, park={5: "SP12"},
                 slots={4: 0, 5: 1, 6: 0, 7: 0}, extra=lpoke(STATIC_SET + 0x448 * 1 + 0x114, 714))
     s.add(poke(2600, lpoke(ATTR_SLOT, 1) + lpoke(ATTR_MACH, 0) + lpoke(ATTR_ROW, 3) + lpoke(ATTR_MODE, 0)),
           call(2600, ATTR_UP))
@@ -595,7 +628,7 @@ def scenarios():
     # a different sample assigned to the track: T6 AUTO on the empty STATIC slot 2 (TIMESTRETCH
     # OFF: not VARI); slot 1's TIMESTRETCH VARI (as set in the audio editor); the audio editor's
     # slot assign (stock 0x40079424) gives T6 slot 1 -> T6 enters
-    s = net_scn("net_slot_order", IND["emus"], IND["fx1"], tstr={5: 1}, park={5: "SP12"},
+    s = gscn("net_slot_order", IND["emus"], IND_NAMED, tstr={5: 1}, park={5: "SP12"},
                 slots={4: 0, 5: 2, 6: 0, 7: 0}, extra=lpoke(STATIC_SET + 0x448 * 1 + 0x110, 4))
     s.add(poke(2600, [b(UI_TRACK, 5), b(UI_TRACK_M, 5), b(PART_M, 0)] + lpoke(ATTR_SLOT, 1) + lpoke(ATTR_MACH, 0)),
           call(2600, SLOT_ASSIGN, 0, 0))
@@ -607,7 +640,7 @@ def scenarios():
     # of range: T6 plays as OFF); stock's load-to-slot (0x40022610 -> disk command 1) loads
     # isaak.wav there; the loader writes the sample's own settings (tempo 2880) -> T6 enters,
     # in the disk task, outside any UI handler
-    s = net_scn("net_sample_order", IND["emus"], IND["fx1"], tstr={5: 4}, park={5: "SP12"},
+    s = gscn("net_sample_order", IND["emus"], IND_NAMED, tstr={5: 4}, park={5: "SP12"},
                 slots={4: 0, 5: 2, 6: 0, 7: 0},
                 extra=lpoke(STATIC_SET + 0x448 * 2 + 0x114, 714) + [b(PATH_AT + i, x) for i, x in enumerate(PATH_B)])
     s.add(call(2600, LOAD_TO_SLOT, 0, 2, PATH_AT))
@@ -621,7 +654,7 @@ def scenarios():
     # on the empty slot 2, slot 1 VARI; T6's PART bytes become slot 1 with EMUS SP12 in its slot
     # (a Part saved on VARI) as a bank read writes them -- the live bytes untouched -- and the
     # heavy apply 100 frames later (it forgets, the next poll adopts) -> the net's order, T8
-    s = net_scn("net_partwrite_order", IND["emus"], IND["fx1"], tstr={5: 1}, park={5: "SP12"},
+    s = gscn("net_partwrite_order", IND["emus"], IND_NET, tstr={5: 1}, park={5: "SP12"},
                 slots={4: 0, 5: 2, 6: 0, 7: 0}, extra=lpoke(STATIC_SET + 0x448 * 1 + 0x110, 4))
     s.add(poke(2600, mm_byte(O_SLOT5 + 5 * 5, 1) + mm_byte(O_P2 + 30 * 5 + 5, EM["SP12"])),
           call(2700, 0x40009094, 0, 0))
@@ -630,52 +663,64 @@ def scenarios():
     sc[s.name] = s
     # ... and a change no single track can be named for keeps the net's order: a machine change
     # (T6 STATIC off VARI -> FLEX, stored VARI SP12) steps T8, not T6
-    s = net_scn("net_machine_order", IND["emus"], IND["fx1"], tstr={5: 0}, extra=flex_side(5, "SP12"))
+    s = gscn("net_machine_order", IND["emus"], IND_NET, tstr={5: 0}, extra=flex_side(5, "SP12"))
     s.add(poke(2600, mm_byte(O_MACH + 5, FL)), call(2600, SET_MACHINE3, 0, 5, ST))
     s.dump(2800, mmpart(0), PSTRIDE, "after.part")
     s.net = dict(kind="machine", enter=5)
     sc[s.name] = s
 
-    # the EMUS refusal (P2EDIT): T5-T7 SP12 + DJ EQ x3, T8 VARI on OT. +4 S950 (fits), +4 SP12
-    # (refused: stays S950), -4 OT, +8 (two stops asked: S950); with SPATIALIZER on T8's FX1
-    # S950 does not fit either
-    for nm, fx8 in (("ref_emus", "NONE"), ("ref_emus_ot", "SPATIALIZER")):
+    # the EMUS refusal (P2EDIT): T5-T7 SP12, T8 VARI on OT. +4 S950, +4 SP12, -4 OT, +8 (two
+    # stops asked). ref_emus: S950 fits, SP12 does not (refused: stays S950); ref_emus_ot: with
+    # SPATIALIZER on T8's FX1, S950 does not fit either (FX solved for each)
+    for nm, fx8, ok in (("ref_emus", "NONE", 1), ("ref_emus_ot", "SPATIALIZER", 0)):
         acts = [("a1", 5, 4), ("a2", 5, 4), ("a3", 5, -4), ("a4", 5, 8)]
-        s = net_scn(nm, {4: "SP12", 5: "SP12", 6: "SP12", 7: "OT"},
-                    {4: "DJEQ", 5: "DJEQ", 6: "DJEQ", 7: fx8})
+        e0 = E({4: "SP12", 5: "SP12", 6: "SP12", 7: "OT"})
+        s = gscn(nm, {4: "SP12", 5: "SP12", 6: "SP12", 7: "OT"},
+                 lambda m, f, ok=ok: m.est(f, e0) <= m.budget and m.cap(f, e0, 7, 2) == ok,
+                 fixed={(7, 1): fx8})
         s.add(poke(2599, [b(UI_TRACK, 7)] + lpoke(PAGE_M, ST) + lpoke(ENC_F_HELD, 0)))
-        for i, (tag, slot, d) in enumerate(acts):
+        for i, (tag, slot, dl) in enumerate(acts):
             fr = 2600 + 100 * i
-            s.add(poke(fr, ncap_reset()), call(fr, P2EDIT, slot, d))
+            s.add(poke(fr, ncap_reset()), call(fr, P2EDIT, slot, dl))
             s.dump(fr + 90, NCAP_BUF, 12, f"{tag}.ncap")        # after the UI loop's next passes
             s.dump(fr + 90, mmpart(0) + O_P2 + 30 * 7, 30, f"{tag}.p2")
         s.net = dict(kind="emus", acts=acts)
         sc[s.name] = s
-    # the FX refusal (the choosers' YES): T5-T8 SP12, FX1 DJ EQ on T5-T7, FX2 DARK on T5-T7,
-    # T8's FX1 / FX2 NONE (3191). FX2 DARK on T8 (refused), FX2 SPATIALIZER (lands), FX1
-    # COMPRESSOR (refused), FX1 SPATIALIZER (lands)
-    fxa = [("f1", 2, "DARK"), ("f2", 2, "SPATIALIZER"), ("f3", 1, "COMPRESSOR"), ("f4", 1, "SPATIALIZER")]
-    s = net_scn("ref_fx", SP4, {4: "DJEQ", 5: "DJEQ", 6: "DJEQ", 7: "NONE"}, fx2={7: "NONE"})
-    fx_actions(s, 7, fxa)
+    # the FX refusal (the choosers' YES): T5-T8 SP12, T8's FX1 / FX2 NONE, the rest AND the four
+    # types chosen solved so that (each with stock FX alone fitting, nothing stepped): an FX2
+    # type on T8 is refused, a lighter FX2 type lands, an FX1 type is refused, a lighter FX1 type
+    # lands (DARK, SPATIALIZER, COMPRESSOR, SPATIALIZER when those do it)
+    want_fx = [(True, False), (False, False), (True, False), (False, False)]
+    plan = {}
+    s = gscn("ref_fx", SP4, lambda m, f: ref_fx_plan(m, f, E(SP4), want_fx, plan),
+             fixed={(7, 1): "NONE", (7, 2): "NONE"})
+    fx_actions(s, 7, plan["acts"])
     sc[s.name] = s
     # the same rules where stock FX alone are over the budget (a test build whose core-0
-    # budget is 2600, VEM_IMG_LOW): T8 VARI S950, FX1 DJ EQ on T5, T6, FX2 DARK x4 (2338).
-    # T7 FX1 DJ EQ: refused (2685; stock alone 2586 fits); T8 FX1 SPATIALIZER: lands; T7 FX1
-    # DJ EQ again: stock alone 2663 > 2600, NOT refused -- and the net then steps T8 to OT,
-    # and nothing more (2663 is still over)
+    # budget is LOW_BUDGET, VEM_IMG_LOW): T8 VARI S950, T7 / T8 FX1 NONE, the rest solved:
+    # T7 FX1 DJ EQ refused (the engine tips it); T8 FX1 SPATIALIZER lands; T7 FX1 DJ EQ again:
+    # stock alone over, NOT refused -- and the net then steps T8 to OT, and nothing more
     low_syms = IMG_LOW.parent / "varispeed_emus_lowbudget_syms.json"
     same = lambda a, b: {k: v for k, v in a.items() if not k.startswith("VG_")} == \
         {k: v for k, v in b.items() if not k.startswith("VG_")}
     if IMG_LOW.exists() and same(json.loads(low_syms.read_text())["syms"], S):   # the same unit, one .equ apart
-        s = net_scn("ref_fx_alone", {7: "S950"}, {4: "DJEQ", 5: "DJEQ"}, img=IMG_LOW,
-                    tstr={4: 0, 5: 0, 6: 0})
-        fx_actions(s, None, [("f1", 1, "DJEQ", 6), ("f2", 1, "SPATIALIZER", 7), ("f3", 1, "DJEQ", 6)])
+        ML = NetModel(LOW_BUDGET)
+        acts = [("f1", 1, "DJEQ", 6), ("f2", 1, "SPATIALIZER", 7), ("f3", 1, "DJEQ", 6)]
+        fx = solve_fx(lambda f: ML.est(f, {7: 1}) <= ML.budget and
+                      g_acts(ML, f, {7: 1}, acts) == [(True, False), (False, False), (False, True)],
+                      fixed={(6, 1): "NONE", (7, 1): "NONE"})
+        s = net_scn("ref_fx_alone", {7: "S950"}, *fx_split(fx), img=IMG_LOW, tstr={4: 0, 5: 0, 6: 0})
+        s.notes = ["FX solved from VG_*: " + " ".join(f"T{t + 1} {a}/{b}" for t, (a, b) in fx.items())]
+        fx_actions(s, None, acts)
         s.budget0 = LOW_BUDGET
         sc[s.name] = s
-    # under budget, nothing refused or changed: SP12 x4 + DJ EQ x2 (3111): EMUS T8 SP12 -> S950
-    # -> SP12, FX1 SPATIALIZER on T8 (3188), the heavy Part apply of the same Part, RELOAD
-    # PART (nothing saved: a no-op); no toast, every EMUS as set
-    s = net_scn("under", SP4, {4: "DJEQ", 5: "DJEQ"})
+    else:                                    # never a silent skip (VEM9): the run fails instead
+        STALE.append("ref_fx_alone")
+    # under budget, nothing refused or changed: SP12 x4, the tightest FX that still fits with
+    # SPATIALIZER on T8's FX1 (solved): EMUS T8 SP12 -> S950 -> SP12, FX1 SPATIALIZER on T8, the
+    # heavy Part apply of the same Part, RELOAD PART (nothing saved: a no-op); no toast
+    s = gscn("under", SP4, lambda m, f: m.est({**f, 7: ("SPATIALIZER", f[7][1])}, E(SP4)) <= m.budget,
+             fixed={(7, 1): "NONE"}, prefer="max")
     s.add(poke(2599, [b(UI_TRACK, 7)] + lpoke(PAGE_M, ST) + lpoke(ENC_F_HELD, 0)),
           call(2600, P2EDIT, 5, -4), call(2700, P2EDIT, 5, 4))
     s.add(poke(2800, lpoke(FX_CUR[1], fx_row(1, "SPATIALIZER"))), call(2800, FX_YES[1], 0x31, 1))
@@ -710,6 +755,7 @@ ENG_NAME = {v: k for k, v in ENG.items()}
 # the test build whose core-0 budget is lowered (the "stock FX alone over" branch): built from
 # this source by the test itself (VEM_VARIANT=lowbudget), see main()
 LOW_BUDGET = 2600
+STALE = []                                     # tests that could not be built (a missing / stale test image)
 IMG_LOW = ROOT / "out/vem_variants/mainos_varispeed_emus_lowbudget.bin"
 
 
@@ -778,6 +824,114 @@ class NetModel:
 
     def fx_refused(self, fx, eng):
         return self.est(fx, eng) > self.budget and self.stock(fx) <= self.budget
+
+
+def fx_avail(bus):
+    """the FX types this image's FX1 / FX2 chooser offers (its rows), in row order"""
+    img = IMG.read_bytes()
+    L = lambda a: struct.unpack(">I", img[a - 0x40000400:a - 0x40000400 + 4])[0]
+    name = {v: k for k, v in FXID.items()}
+    out, i = [], 0
+    while (p := L(FX_LIST[bus] + 4 * i)):
+        if L(p) in name and name[L(p)] not in out:
+            out.append(name[L(p)])
+        i += 1
+    return out
+
+
+def solve_fx(pred, fixed=None, prefer="min"):
+    """VEM9: build a scenario's FX FROM the VG_* constants, so that no price or budget change
+    can turn a test into a no-op. `fixed` = {(t, bus): name}; every other FX1 / FX2 slot of
+    T5-T8 is chosen among the types that slot's chooser offers in this image. Every reachable
+    FX price sum gets one deterministic witness; the sums are tried in ascending ("min") or
+    descending ("max": the tightest fit, for the under-budget controls) order and the first
+    assignment `pred(fx)` accepts is returned as {t: (fx1, fx2)}. No assignment: an error,
+    never a silent pass."""
+    fixed = fixed or {}
+    free = [(t, bus) for t in GT for bus in (1, 2) if (t, bus) not in fixed]
+    opts = {bus: sorted(fx_avail(bus), key=lambda n: (fx_price(n), n)) for bus in (1, 2)}
+    reach = {0: ()}
+    for (t, bus) in free:
+        nxt = {}
+        for sm in sorted(reach):
+            for n in opts[bus]:
+                nxt.setdefault(sm + fx_price(n), reach[sm] + (n,))
+        reach = nxt
+    for sm in sorted(reach, reverse=(prefer == "max")):
+        pick = dict(zip(free, reach[sm]))
+        pick.update(fixed)
+        fx = {t: (pick[(t, 1)], pick[(t, 2)]) for t in GT}
+        if pred(fx):
+            return fx
+    raise SystemExit(f"solve_fx: no FX assignment satisfies the scenario at these VG_* constants ({VG})")
+
+
+def fx_split(fx):
+    return {t: a for t, (a, b) in fx.items()}, {t: b for t, (a, b) in fx.items()}
+
+
+def g_over(m, fx, pre, post, wrong=("low_first",)):
+    """the safety net's scenarios: `pre` fits (nothing steps before the action), `post` is over,
+    the net keeps at least one emu track, and its order differs from each wrong one"""
+    if pre is not None and m.est(fx, pre) > m.budget:
+        return False
+    if m.est(fx, post) <= m.budget:
+        return False
+    right = m.fix(fx, post)[0]
+    return any(right.values()) and all(m.fix(fx, post, w)[0] != right for w in wrong)
+
+
+def g_enter(m, fx, pre, post, entering, differ):
+    """an entering track's own step (VEM7 / VEM8): `pre` fits, `post` is over, at least one emu
+    track kept; `differ`: the entering rule and the net's order step different tracks, else the
+    same"""
+    if m.est(fx, pre) > m.budget or m.est(fx, post) <= m.budget:
+        return False
+    want, net = m.enter_fix(fx, post, entering)[0], m.fix(fx, post)[0]
+    return any(want.values()) and ((want != net) if differ else (want == net))
+
+
+def g_acts(m, fx, eng, acts):
+    """the FX refusal scenarios, as the check replays them: [(refused, stepped)] per action"""
+    fxs, eng, out = dict(fx), dict(eng), []
+    for _, bus, name, k in acts:
+        new = dict(fxs)
+        new[k] = (name, fxs[k][1]) if bus == 1 else (fxs[k][0], name)
+        if new[k] == fxs[k]:
+            return None                                   # the same type: not a test of anything
+        refused = m.fx_refused(new, eng)
+        stepped = False
+        if not refused:
+            fxs = new
+            eng, st = m.fix(fxs, eng)
+            stepped = bool(st)
+        out.append((refused, stepped))
+    return out
+
+
+def ref_fx_plan(m, f, eng, want, plan):
+    """ref_fx: the four chooser actions on T8 (FX2 refused, FX2 lands, FX1 refused, FX1 lands)
+    chosen for this FX; kept in `plan` when the replay gives `want`"""
+    if m.est(f, eng) > m.budget:
+        return False
+    pref = {(2, True): "DARK", (2, False): "SPATIALIZER", (1, True): "COMPRESSOR", (1, False): "SPATIALIZER"}
+    acts, cur = [], dict(f)
+    for tag, bus, refused in (("f1", 2, True), ("f2", 2, False), ("f3", 1, True), ("f4", 1, False)):
+        cands = [pref[(bus, refused)]] + sorted(fx_avail(bus), key=lambda n: (-fx_price(n), n))
+        for n in cands:
+            if n == "NONE" or n not in fx_avail(bus):
+                continue
+            if g_acts(m, cur, eng, [(tag, bus, n, 7)]) == [(refused, False)]:
+                acts.append((tag, bus, n))
+                if not refused:
+                    cur[7] = (n, cur[7][1]) if bus == 1 else (cur[7][0], n)
+                break
+        else:
+            return False
+    if g_acts(m, f, eng, [a + (7,) for a in acts]) != want:
+        return False
+    plan["acts"] = acts
+    return True
 
 
 MMDB = 0x400e21e0
@@ -860,26 +1014,26 @@ def fx_cfg(fx1, fx2, part=0, live=False):
     return out
 
 
-def part1_setup():
+def part1_setup(fx1, fx2):
     """part 1 (not playing), consistent as a saved Part: T5 not VARI (PTCH 70, QUAN 109
-    parked; TSNS 30, EMUS 127 parked), T6-T8 VARI SP12, FX1 DJ EQ x4, FX2 DARK x4"""
+    parked; TSNS 30, EMUS 127 parked), T6-T8 VARI SP12, FX1 / FX2 as given"""
     pk = mm_byte(O_P1 + 30 * 4 + 0, 70, 1) + mm_byte(O_P1 + 30 * 4 + PARK1[ST], 109, 1)
     pk += track_cfg(4, 1, tstr=0, park="SP12") + mm_byte(O_P2 + 30 * 4 + 5, 30, 1)
     for t in (5, 6, 7):
         pk += track_cfg(t, 1, emus="SP12")
     pk += [x for t in GT for x in mm_byte(O_MACH + t, ST, 1)]
-    return pk + fx_cfg({t: "DJEQ" for t in GT}, {}, part=1)
+    return pk + fx_cfg(fx1, fx2, part=1)
 
 
 SAVED = MMDB + 0x9504a                          # the saved copy of part 0 (RELOAD's source)
 
 
-def saved_setup(emus, fx1):
-    """part 0's saved copy (poked, and flagged saved): T5-T8 VARI on emus, FX1 fx1, FX2 DARK"""
+def saved_setup(emus, fx1, fx2):
+    """part 0's saved copy (poked, and flagged saved): T5-T8 VARI on emus, FX1 / FX2 as given"""
     pk = [b(MMDB + 0x9b312 + 0, 1)]
     for t in GT:
         for off, v in ((O_P2 + 30 * t + 4, 4), (O_P2 + 30 * t + 5, EM[emus[t]]), (O_SLOT5 + 5 * t, G_SLOT[t]),
-                       (O_MACH + t, ST), (t, FXID[fx1.get(t, "NONE")]), (8 + t, FXID["DARK"])):
+                       (O_MACH + t, ST), (t, FXID[fx1[t]]), (8 + t, FXID[fx2[t]])):
             pk.append(b(SAVED + off, v))
     return pk
 
@@ -1026,6 +1180,7 @@ def captured(d, tag):
 def check(name, s):
     d = OUTD / name
     t = T(name)
+    t.notes += getattr(s, "notes", [])
     log = (d / "log.txt").read_text() if (d / "log.txt").exists() else ""
     if getattr(s, "live", None) is not None:
         return panel_check(t, s, log)
@@ -1314,8 +1469,7 @@ def net_check(t, s, d, log):
         if kind == "load":
             fxx, eng_in = fx, eng0
         elif kind == "reload":
-            fxx = {k: ("DJEQ", "DARK") for k in GT}
-            eng_in = {4: 1, 5: 2, 6: 2, 7: 2}
+            fxx, eng_in = c["fx_saved"], c["eng_saved"]
         elif kind == "paste":
             fxx = {**fx, 7: fx[4]}
             eng_in = {**eng0, 7: eng0[4]}
@@ -1332,7 +1486,7 @@ def net_check(t, s, d, log):
         elif kind == "tstr":
             fxx, eng_in = fx, {**eng0, n["enter"]: ENG[c["park"][n["enter"]]]}
         else:                                   # part: part 1
-            fxx = {k: ("DJEQ", "DARK") for k in GT}
+            fxx = c["fx_p1"]
             eng_in = {5: 2, 6: 2, 7: 2}
         entering = ([n["enter"]] if kind == "tstr" else sorted(c["park"]) if kind == "attr"
                     else n["enter"] if kind == "indirect" else None)
@@ -1463,7 +1617,7 @@ def net_check(t, s, d, log):
         t.eq("under budget: T8's FX1 SPATIALIZER landed", p[7], FXID["SPATIALIZER"])
         t.eq("under budget: no toast", (end_count, len(ours)), (0, 0))
         t.eq("under budget: the model fits throughout",
-             (m.est(fx, eng0) <= m.budget, m.est({**fx, 7: ("SPATIALIZER", "DARK")}, eng0) <= m.budget), (True, True))
+             (m.est(fx, eng0) <= m.budget, m.est({**fx, 7: ("SPATIALIZER", fx[7][1])}, eng0) <= m.budget), (True, True))
         played({k: 2 for k in GT}, 2)
 
 
@@ -1546,8 +1700,11 @@ def cost(frames=3000):
     import varispeed_emus_harness as H
     ref_syms = json.loads((IMG_REF.parent / "varispeed_emus_vem3_syms.json").read_text())
     imgs = {"new": (IMG, json.loads(SYMS.read_text())), "VEM3": (IMG_REF, ref_syms)}
-    fit = net_scn("cost_fit", {t: "SP12" for t in GT}, {4: "DJEQ", 5: "DJEQ"})
-    over = net_scn("cost_over", {4: "S950", 5: "SP12", 6: "SP12", 7: "SP12"}, {t: "DJEQ" for t in GT})
+    M, sp4 = NetModel(), {t: 2 for t in GT}
+    load = {4: "S950", 5: "SP12", 6: "SP12", 7: "SP12"}
+    fit = net_scn("cost_fit", {t: "SP12" for t in GT},
+                  *fx_split(solve_fx(lambda f: M.est(f, sp4) <= M.budget, prefer="max")))
+    over = net_scn("cost_over", load, *fx_split(solve_fx(lambda f: g_over(M, f, None, {4: 1, 5: 2, 6: 2, 7: 2}))))
     cases = {
         "otdemo_stock": (OTD, []),                       # no VARI track
         "otdemo_7sp12": (OTD, H.scenario_steps(dict(tempo=None, pre=True,
@@ -1696,6 +1853,12 @@ def main():
         for x in t.notes:
             print(f"      ok   {x}")
     (OUTD / "results.json").write_text(json.dumps({t.name: dict(fails=t.fails, notes=t.notes) for t in res}, indent=1))
+    for n in STALE:
+        if not a.only or n in a.only.split(","):
+            t = T(n)
+            t.fails.append("its test image is missing or stale: run --build-variants lowbudget")
+            res.append(t)
+            print(f"FAIL  {n}\n      FAIL {t.fails[0]}")
     bad = [t for t in res if t.fails]
     print(f"\n{len(res) - len(bad)}/{len(res)} tests pass")
     sys.exit(1 if bad else 0)
