@@ -90,6 +90,32 @@ The other levers, not taken:
 Whichever route is taken, SIDE-CHAIN's DSP changes, so it needs a hardware re-test (cross-core
 keys, MON), in KYOTI and in its standalone build.
 
+### 3a. Measured on the unit (DIAGW, 2026-10-14): the shared window's P costs a wait state
+
+DIAGW (branch `ot303-diag15`, `140C_303DW`): DIAG8's timer METER, with each loop run from internal P
+and from the shared window's P at SIDE-CHAIN's planned tail (A `$37DA3`, B `$3FDA3`). Track
+recordings, T2 (core 1) and T6 (core 0), decoded with `tools/ot303/hwrec/meter.py`. In cycles per
+sample, 32 loop iterations a sample:
+
+| loop (3 instructions an iteration) | core 1 | core 0 |
+|---|---|---|
+| nops, internal | 98.2 | 96.9 |
+| nops, shared | 195.1 | 193.6 |
+| `movem p:` reads of internal P, code internal | 258.2 | 256.9 |
+| `movem p:` reads of the shared window, code internal | 290.2 | 288.9 |
+| SIDE-CHAIN's copy loop, internal | 98.2 | 96.9 |
+| the copy loop, shared | 194.7 | 193.2 |
+| `movem p:` of the shared window, code shared | 419.1 | 417.6 |
+
+What this settles:
+- Every instruction word fetched from the shared window costs **one extra cycle**, on both cores.
+- Every `p:` read of it costs one more. Shared code reading shared P costs about one more again.
+- §3's estimate stands: §3's move would add about **+47 cycles/sample per core, always on**
+  (`sctap` +43, `moncommit` +3.8), and +18 to +46 per keyed compressor. Every feature without DSP
+  code, and BLACKPYRAMIDS_303's voice, add 0.
+- (A 417–419 reading between the steps in both recordings matches the mode at 120 and is not
+  analysed further.)
+
 ## 4. Needed whatever option is picked
 
 - **ERASE_EMPTY_TRIGLESS_LOCKS must skip BLACKPYRAMIDS_303 tracks:** an empty trigless lock is
