@@ -19,7 +19,16 @@ the oracle's code; the observation point is the unchanged DSP kernel's entry.
 Per track the comparison starts at its first trig pass after the value pokes (the new
 image latches the engine at a trig, the oracle takes it from TSTR at once).
 
-  python3 tools/varispeed_emus_harness.py [--quick] [--only NAME] [--jobs N]
+  python3 tools/varispeed_emus_harness.py [--quick] [--only NAME] [--jobs N] [--plain]
+
+--plain: VARISPEED, the plain build (out/mainos_varispeed.bin, spec §7), which must equal
+VARISPEED_EMUS on EMUS = OT bit for bit: every track on OT, no EMUS pokes (TSNS stays TSNS);
+  VARI tracks          vs the oracle's TSTR 4 (the shipped image on RPCH = VARISPEED_EMUS
+                       on OT, proven by the default mode), every bit of l:$40
+  stock TSTR / TSMODE  vs STOCK 1.40C, every bit (VARISPEED masks nothing: stock's own
+                       engine-bit garbage must come through; the count is printed)
+  PICKUP (pickup_mix)  vs STOCK, every bit
+  out of range         vs STOCK on TSTR OFF, every bit
 
 Environment: VEM_EMU (the patched ot_emu), VEM_CARD (card image), VEM_OUT (run dir).
 """
@@ -38,8 +47,10 @@ PROJECTS = {
 }
 PRJ = PROJECTS[os.environ.get("VEM_PROJECT", "otdemo")]
 CARD = pathlib.Path(os.environ.get("VEM_CARD", PRJ["card"]))
-OUTD = pathlib.Path(os.environ.get("VEM_OUT", SCR / ("harness_" + os.environ.get("VEM_PROJECT", "otdemo"))))
-IMAGES = {"new": ROOT / "out/mainos_varispeed_emus.bin",
+OUTD = pathlib.Path(os.environ.get("VEM_OUT", SCR / (("harness_plain_" if "--plain" in sys.argv else "harness_")
+                                                     + os.environ.get("VEM_PROJECT", "otdemo"))))
+PLAIN = "--plain" in sys.argv                  # VARISPEED (see the docstring)
+IMAGES = {"new": ROOT / ("out/mainos_varispeed.bin" if PLAIN else "out/mainos_varispeed_emus.bin"),
           "oracle": ROOT / "out/oracle/shipped_repitch_repeat98_kyoti_FINAL.bin",
           "stock": ROOT / "out/raw/section_3_MAIN_OS.bin"}
 for _k, _e in (("new", "VEM_IMG_NEW"), ("oracle", "VEM_IMG_ORACLE")):
@@ -132,7 +143,7 @@ def scenario_steps(cfg, image):
                     s2 += part_only(OFF_P1 + PART * PSTRIDE + 30 * t + pk, c["quan"])
         if "rate" in c:
             s2 += p1(t, m, 3, c["rate"])
-        if image == "new" and c["mode"] in ("VARI", "AUTO"):
+        if image == "new" and c["mode"] in ("VARI", "AUTO") and not PLAIN:
             s2 += p2(t, m, 5, EMUS[e])
             if cfg.get("pre"):
                 s2 += part_only(OFF_P2 + PART * PSTRIDE + 30 * t + (23 if m == 0 else 21), EMUS[e])
@@ -196,11 +207,13 @@ def track_of(core, off):
     return (0 if core == 1 else 4) + off // 0x20
 
 
-def compare(a, b, cfg, label, ymask=0xffffff):
+def compare(a, b, cfg, label, ymask=0xffffff, only=None):
     """a/b: parse() results. Per track, from its first trig pass after SKIP_FRAMES.
     ymask: the y:$40 bits compared (out of range vs stock: all but the engine bits 0-1,
-    which stock leaves arbitrary and the new image must keep 0 -- counted separately)."""
-    res = {"label": label, "tracks": {}, "ok": True, "tagged": 0}
+    which stock leaves arbitrary and the new image must keep 0 -- counted separately).
+    only: the tracks compared (None: all). ref_tagged counts the reference's compared
+    passes whose engine bits (y:$40 bits 0-1) are nonzero."""
+    res = {"label": label, "tracks": {}, "ok": True, "tagged": 0, "ref_tagged": 0}
     for core in (0, 1):
         A, B = a[core], b[core]
         ntrk = max(1, len({e[0] for e in A[:200]}))     # voice passes per frame: 2 per track
@@ -211,6 +224,12 @@ def compare(a, b, cfg, label, ymask=0xffffff):
         per = {}
         for i, (x, y) in enumerate(zip(A, B)):
             t = track_of(core, x[0])
+            if only is not None and t not in only:
+                if (x[0], x[1]) != (y[0], y[1]):
+                    res["ok"] = False
+                    res.setdefault("notes", []).append(f"core {core} pass {i}: pass order differs {x[:2]} {y[:2]}")
+                    break
+                continue
             if (x[2], x[3] & ymask) != (y[2], y[3] & ymask):       # the whole run, transitions too
                 res.setdefault("whole_run", []).append(
                     (i // (2 * ntrk), t + 1, x[1], f"{x[2]:06x}:{x[3]:06x}", f"{y[2]:06x}:{y[3]:06x}"))
@@ -229,6 +248,7 @@ def compare(a, b, cfg, label, ymask=0xffffff):
                     continue
             st["n"] += 1
             st["trigs"] += x[4] and x[1] == 1
+            res["ref_tagged"] += bool(y[3] & 3)
             if ymask != 0xffffff and x[3] & 3:
                 res["tagged"] += 1
                 res["ok"] = False
@@ -291,6 +311,29 @@ def matrix(quick):
                   for t in range(7)}
             sc[f"tempo_edge_{tempo}"] = dict(tempo=tempo, tracks=tr)
     return sc
+
+
+def plain_matrix(quick):
+    """VARISPEED: the matrix with every track on OT (it has no EMUS), one copy of each."""
+    sc = {}
+    full = matrix(False)
+    for k, cfg in full.items():
+        if any(x in k for x in ("_S950", "_SP12")) or (quick and k not in matrix(True) and k != "stock_tstr_0"):
+            continue                    # the quick set: its own + one stock TSTR scenario
+        sc[k] = dict(cfg, tracks={t: dict(c, emus="OT") for t, c in cfg["tracks"].items()})
+    return sc
+
+
+def plain_groups(sc):
+    """VARISPEED: (tag, scenarios, (image a, image b), {name: tracks compared or None}).
+    VARI tracks against the oracle's TSTR 4; stock TSTR / TSMODE and PICKUP tracks against
+    stock 1.40C, every bit."""
+    vari = {k: v for k, v in sc.items() if not k.startswith("stock_tstr")}
+    only_v = {k: {t for t, c in v["tracks"].items() if c["mode"] != "PICKUP"} for k, v in vari.items()}
+    stock = {k: v for k, v in sc.items() if k.startswith("stock_tstr") or k == "pickup_mix"}
+    only_s = {k: (None if k.startswith("stock_tstr") else
+                  {t for t, c in v["tracks"].items() if c["mode"] == "PICKUP"}) for k, v in stock.items()}
+    return [("eq", vari, ("new", "oracle"), only_v), ("stk", stock, ("new", "stock"), only_s)]
 
 
 def oor_matrix():
@@ -418,6 +461,7 @@ def main():
     ap.add_argument("--frames", type=int, default=3000)
     ap.add_argument("--reuse", action="store_true", help="compare existing logs only")
     ap.add_argument("--audio", action="store_true", help="the audio comparison (levels, spectra)")
+    ap.add_argument("--plain", action="store_true", help="VARISPEED, the plain build (see the docstring)")
     a = ap.parse_args()
     if a.audio:
         return main_audio(a.frames, a.jobs)
@@ -426,14 +470,14 @@ def main():
             hashlib.sha256(IMAGES["oracle"].read_bytes()).hexdigest() != ORACLE_SHA:
         sys.exit("the oracle image is not the shipped FINAL (sha256 90b4a1c1...)")
     results = []
-    sc = matrix(a.quick)
+    sc = plain_matrix(a.quick) if PLAIN else matrix(a.quick)
     if a.only:
         sc = {k: v for k, v in sc.items() if a.only in k}
-    groups = [("eq", sc, ("new", "oracle"))]
+    groups = plain_groups(sc) if PLAIN else [("eq", sc, ("new", "oracle"), {})]
     oor = oor_matrix()
     if not a.only or "oor" in a.only:
-        groups.append(("oor", oor, ("new", "stock")))
-    for tag, scens, (ia, ib) in groups:
+        groups.append(("oor", oor, ("new", "stock"), {}))
+    for tag, scens, (ia, ib), only in groups:
         if not scens:
             continue
         logs = {}
@@ -453,8 +497,9 @@ def main():
             la, lb = logs[ia][n], logs[ib][n]
             ok_run = all("run ended REACHED" in p.read_text() for p in (la, lb) if p.exists())
             r = compare(parse(str(la) + ".vem"), parse(str(lb) + ".vem"), scens[n],
-                        f"{tag}:{n} {ia} vs {ib} [{PRJ['project']}]",
-                        0xfffffc if tag == "oor" else 0xffffff)
+                        f"{tag}:{n} {ia} vs {ib} [{PRJ['project']}]"
+                        + (f" (tracks {','.join(f'T{t + 1}' for t in sorted(only[n]))})" if only.get(n) else ""),
+                        0xfffffc if tag == "oor" and not PLAIN else 0xffffff, only.get(n))
             r["reached"] = ok_run
             results.append(r)
             tr = " ".join(f"T{t + 1}:{s['n']}/{s['diff']}{'' if s['started'] else '(no trig)'}"
@@ -470,6 +515,9 @@ def main():
                       + ", ".join(f"frame {f} T{t} LC{lc} {a_}/{b_}" for f, t, lc, a_, b_ in w[:4]))
             if r["tagged"]:
                 print(f"      {r['tagged']} passes of the new image carry an engine tag out of range")
+            if PLAIN and ib == "stock":
+                print(f"      stock's own engine bits (y:$40 bits 0-1) nonzero on {r['ref_tagged']} compared "
+                      f"pass(es): {'carried through unmasked' if r['ok'] else 'see the differences'}")
             for nt in r.get("notes", []):
                 print("     ", nt)
     OUTD.mkdir(parents=True, exist_ok=True)
