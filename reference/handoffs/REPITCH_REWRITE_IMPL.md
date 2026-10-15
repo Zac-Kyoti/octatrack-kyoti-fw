@@ -7,6 +7,10 @@ Nothing was flashed, promoted or pushed. KYOTI's combined image was not touched.
 
 Marks: **C** = confirmed on our image (objdump, or an emulator run); **I** = inferred.
 
+**Current build: `140C_VEM2` (§8, 2026-10-14), the two fixes from the first hardware test.**
+§1-§5 describe `140C_VEM1`, the image flashed on 2026-10-14; where VEM2 changed something,
+§8 says so.
+
 ---
 
 ## 1. What was built
@@ -55,7 +59,8 @@ All in the standalone image; the octabam module declares the same.
 | # | site | displaced | kind | target | purpose |
 |---|---|---|---|---|---|
 | H1 | `0x40004100` | 8 B | jmp | `vem_frame` | the frame core: candidate test, per-machine poll, dry, exact QUAN x tempo x RATE, clamp, engine latch, mask bits 2-3 elsewhere |
-| R1 | `0x4003a566` | 6 B | jsr | `emus_p2step` | P2EDIT's delta conversion: one EMUS stop per detent |
+| R1 | `0x4003a566` | 6 B | jsr | `emus_p2step` | P2EDIT's delta conversion: one EMUS stop per detent (VEM2: per six detents, §8) |
+| R2 | `0x400585f4` | 6 B | jsr | `emus_open` | VEM2 only: SRC SETUP's open, the EMUS detent count restarts (§8) |
 | H2 | `0x4006e71c` | 10 B | jmp | `attr_label` | ATTR TIMESTRETCH 4 -> `VARI`; else `ERROR` as stock |
 | H3 | `0x4006ee48` | 6 B | jmp | `attr_up` | OFF -> NORMAL -> BEAT -> VARI, `rp_refresh` |
 | H4 | `0x4006ef7c` | 6 B | jmp | `attr_down` | VARI -> BEAT -> NORMAL -> OFF, `rp_refresh`; 5/6 stay |
@@ -244,8 +249,8 @@ payload in SPRING's run, both table blocks in SPRING's X data, both hooks wired.
 
 ## 6. Draft hardware checklist (for FLASHING §4)
 
-OS VERSION `140C_VEM1`. Power-cycle once first. SPRING REV is gone from FX2; a project
-that used it loads NONE there.
+OS VERSION `140C_VEM2` (updated for VEM2, §8). Power-cycle once first. SPRING REV is gone
+from FX2; a project that used it loads NONE there.
 
 1. **VARI.** A FLEX loop whose ATTR TEMPO matches it. SRC SETUP: TSTR has five positions,
    the fifth reads `VARI` with a stock icon. On VARI: PTCH's caption reads `QUAN`, TSNS's
@@ -254,9 +259,13 @@ that used it loads NONE there.
    an octave up at double speed, 1/1 sits in the middle.
 2. **RATE.** Reverse RATE plays backwards at the same speed; centre stops; a RATE p-lock
    works.
-3. **EMUS.** Knob hard left `S950`, centre `OT`, hard right `SP12`; one detent per position;
-   nothing in between. Turn it while a long note plays: no change until the next trig, then
-   S950 grit / SP12 dull. 4 tracks of S950/SP12 on one core with DARK REV: no overload.
+3. **EMUS.** Knob hard left `OT`, centre `S950`, hard right `SP12`; nothing in between. Six
+   detents in one direction step one position (the first five show no change); turning back
+   restarts the count, so wiggling the knob never flips it. Turning fast does not skip: a
+   quick spin moves one position per six detents, never more; the same with the encoder
+   pressed. Half a count (three detents) is forgotten when you leave SRC SETUP or change
+   track. Turn it while a long note plays: no change until the next trig, then S950 grit /
+   SP12 dull. 4 tracks of S950/SP12 on one core with DARK REV: no overload.
 4. **Leaving VARI.** TSTR to BEAT: PTCH and TSNS show the values they had before VARI;
    back to VARI: the QUAN and EMUS you set.
 5. **AUTO + ATTR.** Audio editor, ATTR, TIMESTRETCH: `VARI` after BEAT; a track on AUTO with
@@ -275,7 +284,8 @@ that used it loads NONE there.
 9. **Persistence.** Save, power-cycle, reload: QUAN and EMUS as saved; leaving VARI gives the
    saved PTCH / TSNS.
 10. **Old projects.** A project saved with REPITCH_REPEAT98_KYOTI on RPS9/RPSP: loads, no
-   crash (TSTR shows VARI, EMUS OT).
+   crash (TSTR shows VARI; EMUS shows the bucket of that track's TSNS, stock's 64 = S950
+   since VEM2). A project saved with VEM1 shows its EMUS OT as S950 and its S950 as OT (§8.5).
 11. **External MIDI clock.** VARI follows a clock tempo change.
 
 Before the first flash, consider a diagnostic build that shows the gate, machine, `rp_prev`
@@ -354,3 +364,185 @@ and the engine on screen (first scope §5.4).
    scratch, unopened, so the registry would not load them.
 6. **The oracle** was only run through the harness (outputs: DSP inputs, audio, and Part
    bytes in the item-11 differential). No disassembly, diff or trace of its code.
+
+---
+
+## 8. 2026-10-14: VEM2, the two fixes from the first hardware test
+
+The user flashed `140C_VEM1` (§1) on the MKI on 2026-10-14 and reported two things: the EMUS
+order should be OT, S950, SP12 (left to right), and the EMUS knob was "jumping around the
+three values almost chaotically". Spec §2 item 5 was revised (commit `b076cd0`). Clean side,
+same worktree. Nothing was flashed, promoted or pushed.
+
+### 8.1 Why the knob was chaotic (C, stock code and the emulator)
+
+How a turn reaches EMUS, read from the stock image and checked in ot_emu:
+
+1. **The panel link.** The panel UART's command `0x3r` carries encoder r's **signed detent
+   count**. The RX parser (`0x4009228c`, case `0x30` at `0x400924e4`) does not scale it.
+   If the previous report for that encoder is still unread, it adds the count to the pending
+   message (`0x4009250c`). Otherwise it posts a new `{type, encoder, count, stamp}` message
+   (`0x40092526`). **There is no acceleration on the ColdFire side.** A report of more than
+   one detent is the panel's own count, or the parser's coalescing.
+2. **The UI task** (`0x40061dd2`) takes the message under IPL 7, clears the pending flag
+   and calls the encoder dispatch `0x40031944(encoder, count)`. The dispatch tail-jumps to
+   the handler in the live table `0x46c7dede + 20*enc`, which on SRC SETUP is P2EDIT
+   `0x4003a474`. That is **one P2EDIT call per message**. Measured: one entry per report in
+   every sequence below, never two.
+3. **P2EDIT** multiplies the count by 7 while the encoder is pushed
+   (`[0x46c7d8ee + 24*(slot2 + 0x38)]`, `0x4003a49c`). It then calls stock's accumulator
+   `0x4003249c(slot2, delta)`. The divisor comes from the page's set-up `0x400326d4`: the
+   encoder record's `+10` = `0x8000 / max(count, 40)`. For TSNS (count 128) that is `0x100`,
+   so one unit is one value. **Any parameter with fewer than 40 values gets 3.2 detents per
+   value from stock itself**: stock's own 5-position TSTR select needs 3.2 detents per position.
+4. **VEM1's `emus_p2step`** turned every nonzero result into one whole stop, by its sign alone.
+   So:
+   - the three positions sat **one detent apart** (2 detents from end to end), 3.2x more
+     sensitive than stock's own TSTR select;
+   - **every reverse report flipped a whole position.** On the panel path, a `+1 / -1`
+     jitter moved the value on every report (S950 / OT / S950 / OT ... in VEM1's order), and
+     a turn with a back-bounce every third report swung between all three.
+
+The other suspected causes were ruled out. A `--watch-mem` on the TSNS DB byte showed **no
+writer but P2EDIT's own store** (`0x4003a5ba`), so no stock write raced ours and the snap did
+not fight the stored value: the widget only displays it. The handler was never reached twice
+per report. **The cause is the step rule**: any report, of any size and either sign, moved a
+whole stop. The emulator cannot measure how often the MKI's encoders bounce or report
+backwards. Any such report was enough to flip EMUS, and the panel tests below reproduce
+exactly that on the VEM1 image.
+
+**Emulator note (corrects the EMUS scope §4.1).** SRC SETUP opens and draws in ot_emu when the
+panel's track is not T8. OTDEMO comes up on T8, where `0x400584d0` exits early
+(`[0x80000000] == 7 && [0x80000034] != 0`). With `UI_TRACK = 0` poked after the load, `[SRC]`
+pressed twice opens the page. It registers P2EDIT for the encoders, `0x4003c830` draws, and
+`enc 5 ±n` lines in a `--live-script` reach P2EDIT through the real parser.
+
+### 8.2 What changed
+
+- **Order** (spec item 5): `emus_stops` stays `1, 64, 127`, now OT / S950 / SP12;
+  `emus_idx` buckets: 0..42 (and negative) OT, 43..85 S950, 86..127 SP12; `emus_mode`
+  `{0, 1, 2}`; `emus_tab` `OT, S950, SP12`. A fresh park (0) enters EMUS as **1 (OT)**
+  (`rp_swap_m`). The DSP engine numbers are unchanged.
+- **The step** (`emus_p2step`, R1). It still calls stock's accumulator first, which keeps
+  stock's state and its hold-off; for TSNS the result is the report's units. On a VARI track:
+  - **detents** = |units|, divided by 7 when the encoder is pushed (the same flag P2EDIT
+    reads, asserted in the builder's CONTEXT), at least 1;
+  - a signed count `em_tally`: a report in the other direction restarts it at 0 first; it
+    adds the detents; every `EM_DETENTS = 6` makes one stop, clamped at OT and SP12;
+  - a report of n detents counts n, so a fast or coalesced turn moves exactly one stop per
+    six physical detents, never more;
+  - the return is still `stop - old`, so a non-stop value snaps to its bucket's stop on the
+    first detent, and P2EDIT stores the stop itself.
+- **Reset.** The count's owner `em_ctx` (track | machine << 8 | part << 16) is compared on
+  every slot-5 edit on ST/FL, VARI or not; a change restarts the count. The new detour
+  **R2: `0x400585f4` (`jsr 0x400326d4`, SRC SETUP's encoder set-up) -> `jsr emus_open`**
+  clears the count and tail-jumps to stock. In the emulator that site runs at every open of
+  the page: entering it, and the close/re-open stock does on a **track change** (C: a track
+  key on SRC SETUP re-enters `0x400584d0` with the new track and passes `0x400585f4`).
+  Leaving and re-entering the page passes it too.
+- **State**: `em_tally` (byte, after `rk_acc`) and `em_ctx` (long), in the unit, nowhere near
+  `0x80006a40..0x80006abf` (the builder refuses that range). The QUAN tally is unchanged.
+- Builder: R2 in `DETOURS`; two new CONTEXT asserts (P2EDIT's x7 test `0x4003a480..`, SRC
+  SETUP's call `0x400585e0..`); default version `140C_VEM2`; 19 detours. Manifest: the same
+  detour, the docstring, the new unit reference. Harness: `EMUS = {OT: 1, S950: 64, SP12:
+  127}` against the oracle's TSTR 4 / 5 / 6.
+
+Unit: **3,084 B** at `0x400d6500..0x400d710c` (2,864 B of the classic cave left), the same
+bytes for `-mcpu=5407` and `54455`, sha256 `cd003bfa…` (manifest reference updated). 7,959
+bytes differ from stock.
+
+### 8.3 Build
+
+**A new build exists: VARISPEED_EMUS VEM2, WIP, not flashed.** Rebuilt twice, same hashes.
+
+| file | sha256 |
+|---|---|
+| `out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx` (MIDI DIN) | `742b5a9b014454c42631ae3059c5b3b3e3d42f0ba4b7cd7760cd9ccce2c0e776` |
+| `out/OCTATRACK_VARISPEED_EMUS.bin` (CF card) | `9a58af547c176e7991dee765f8edd1bac5ae64c8bf03e8daad058540c41e7dc2` |
+| `out/mainos_varispeed_emus.bin` | `d298fea41fdf1e8cd3e01c2f208175397bdde66f16ebf1e6bd47639913d546da` |
+| `out/elek_varispeed_emus.bin` | `109cbf3162c1c199d34eb7fd0a4302fc56ddae668b4da0db75fd1483fadbf81b` |
+
+OS VERSION reads `140C_VEM2`. The VEM1 MAIN OS (`610846a9…`, the flashed one) is kept for
+comparisons as `out/vem_variants/mainos_varispeed_emus_vem1.bin`; its `.syx` was overwritten
+by this build (same output name).
+
+### 8.4 Tests
+
+**(b) `tools/varispeed_emus_test.py`: 18/18 PASS** (`out/vem/tests/`). The existing 11 have
+the new order (fresh EMUS 1, `emus_fmt` OT/OT/S950/S950/S950/SP12/SP12 at
+1/42/43/64/85/86/127, the widget's stops). `p2edit` was rewritten for the detent rule, as
+direct P2EDIT calls: five detents no step, the sixth S950; one back, no step; one forward
+again, no step; jitter `-1 +1 -1 +1`, no step; one report of 12 detents moves two stops, to
+SP12; pushed (x7) reports count one detent each (4 forward, then 5 back no step, the sixth
+S950); 30 snaps to OT and 100 to SP12 on the first detent; five back, then an edit on T2
+(the owner changes), then back on T1: counting from 0; four more, then `emus_open`: counting
+from 0 again, and the sixth since then steps. Gate off on T2 still steps stock (64 -> 65).
+
+Seven new **`panel_*`** scenarios run through the real panel path: transport stopped,
+OTDEMO, T1 FLEX on VARI, SRC SETUP opened with `[SRC]` x2, every stored value read at
+P2EDIT's store. Expected value after each report:
+
+| scenario | reports | VEM2 (PASS) | VEM1 (FAIL) |
+|---|---|---|---|
+| slow | 7x `+1` then 7x `-1`, 150 ms apart | OT x5, S950 ... S950, OT x2 | one stop every report |
+| fast | 12x `+1` then 12x `-1`, **3 ms** apart (each reached P2EDIT on its own: no coalescing in the emulator) | S950 at the 6th, SP12 at the 12th; back the same way | one stop every report |
+| multi | `+3 +3 +6 -2 -4 -12` | OT S950 SP12 SP12 S950 OT | one stop per report whatever its size (clamped at the ends) |
+| jitter | `+1 -1` x6 | OT throughout | flips on **every** report |
+| bounce | `+1 +1 -1` x6 | OT throughout (each bounce restarts) | swings across all three |
+| held | encoder pushed, 7 right, 7 left | as slow | as slow on VEM1 |
+| reset | 3 right, page closed + reopened, 9 right, T2 and back, 6 right | 3 + 5 no step, S950 at the 6th since the reopen, SP12 at the 6th since the track change; 4 page opens seen | SP12 by the 2nd report |
+
+On the VEM1 image (`VEM_IMG=out/vem_variants/mainos_varispeed_emus_vem1.bin`, its syms) the
+run gives **6/18**: all seven `panel_*` fail as in the table, and so do the order-dependent
+checks (swap, fresh0, p2edit, widget, item11). The octabam-built image (below) passes swap,
+fresh0, p2edit, latch and all seven `panel_*` (11/11, its symbols shifted to the DRAM unit).
+
+**(a) Harness**, oracle = the shipped FINAL (`90b4a1c1…`), EMUS OT/S950/SP12 against its
+TSTR 4/5/6:
+- quick set: **9/9 identical** (`out/vem/harness2_quick.txt`);
+- full set, OTDEMO: **35/35 identical**: 32 equivalence scenarios, the 3 `pre_*`
+  included, plus 3 out-of-range scenarios against stock OFF (`out/vem/harness2_otdemo.txt`);
+- full set, MMTESTDT (STATIC), `--frames 6000`: **35/35 identical**, 3,493-11,980 passes on
+  T1 (`out/vem/harness2_mmtestdt.txt`);
+- the octabam-built image, quick set: **9/9 identical** (`out/vem/harness2_octabam.txt`).
+
+The whole-run differences are the ones listed in §3 (a) (the trig latch; the transition and
+adoption frames), nothing else.
+
+**(c) DSP checks** (kernel unchanged): `repitch_dsp_engine_check.py` 80/80 bit-exact + mode
+switch 8/8, 0 FAIL; `repitch_dsp_boot_check.py out/mainos_varispeed_emus.bin` PASS on both
+payloads; `repitch_dsp_octabam_check.py` 264/264 PASS (`out/vem/dsp2_*.txt`).
+
+**(d) octabam module.** Rebuilt in the scratch octabam (`out/vem/octabam`, `a67a1112`,
+`REMIX=varispeed-emus BUILD=79 XBUS=1 SPEC=1 python3 tools/build/build_bus.py`, log
+`out/bus_vem2.log`): `vem_cf: matches the author's build at 0x400d6500 (3,084 B)`, 19
+detours including `jsr 0x400585f4 -> emus_open`; image `2a231962…`
+(`out/vem/img/octabam_vem2_bus.bin`). The scratch remix's docstring now gives the new order.
+
+### 8.5 Open points
+
+- **Projects saved with VEM1.** The stored values keep their bytes, so VEM1's OT (64) now
+  reads S950 and its S950 (1) reads OT; SP12 is unchanged. No conversion, as the spec
+  asks.
+- **Bounce versus the restart rule.** As the spec asks, a single reverse report restarts the
+  count. If the unit's encoder reports backwards often during a forward turn (once every
+  few detents), EMUS could feel stuck. `panel_bounce` shows that case: `+1 +1 -1`, never
+  reaching six. The emulator cannot say how often the MKI does this. If the hardware test
+  shows it, a gentler rule (a reverse report subtracts instead of restarting) is a
+  one-line change.
+- The hardware checklist (§6) has the new item 3, plus item 10 adjusted.
+- The ACCUM hold-off flag (`0x46c7d244 + 20*slot + 12`) is still honoured. When it is set,
+  the report is ignored and the count does not move.
+
+### 8.6 Blacklist statement (this session)
+
+I opened nothing on the spec §1 blacklist. Read: the spec (all), this file, the EMUS scope
+(the P2EDIT/EMUS parts and its headings), `CLAUDE.md`, our module sources, builder, tests,
+harness and manifest. Also read: the stock image (objdump and `out/clean-room/stock.dis`);
+`reference/kb/memory-map.md` (key/encoder tables) and `reference/kb/octabam-index.md` §
+`docs/firmware/PANEL.md`, both grepped and checked to sit outside the blacklisted section;
+octabam's `docs/firmware/PANEL.md` (grepped first, no keyword hits); and `ot_emu`'s
+`main.cpp` (options, the live script, watches). The oracle was run only through the harness.
+Disclosures: the memory index (`MEMORY.md`) was injected into context at start, as before.
+I opened no memory file and took nothing from it. The scratch octabam's build log lists
+other modules' names, none of them read.
