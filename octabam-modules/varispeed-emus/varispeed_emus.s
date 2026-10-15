@@ -1,7 +1,18 @@
 | SPDX-License-Identifier: MIT
 | SPDX-FileCopyrightText: 2026 Zac-Kyoti
 |
-| VARISPEED_EMUS -- the ColdFire half (one link unit).
+| VARISPEED_EMUS -- the ColdFire half (one link unit) -- and VARISPEED, the plain build.
+|
+| ONE SOURCE, TWO BUILDS (spec §7), chosen by the assembly switch VEM_EMUS below:
+|   VEM_EMUS = 1  VARISPEED_EMUS (tools/build_varispeed_emus.py, this module's manifest):
+|                 everything described here.
+|   VEM_EMUS = 0  VARISPEED (tools/build_varispeed.py, octabam-modules/varispeed/): VARI with
+|                 QUAN and nothing emulated -- no EMUS (TSNS stays TSNS, no second park pair),
+|                 no engine tag or latch, no mask on stock tracks' increments, no load guard;
+|                 the DSP is stock (SPRING REVERB stays). A VARI track's increment is the one
+|                 VARISPEED_EMUS computes for EMUS = OT, bit for bit.
+| A fix to the shared code lands in both. Everything that is VARISPEED_EMUS's alone sits
+| inside `.if VEM_EMUS`.
 |
 | STATIC and FLEX get a fifth TSTR position, VARI (raw 4). A VARI track plays dry
 | (no grains, no stretch) at the speed (project BPM x p) / (sample BPM x q), p/q the QUAN
@@ -38,34 +49,6 @@
         .global attr_up
         .global attr_down
         .global attr_tail
-        .global emus_widget
-        .global emus_fmt
-        .global vg_fix
-        .global vg_scan
-        .global vg_room
-        .global vg_fx_try
-        .global vg_tick
-        .global vh_fx1
-        .global vh_fx2
-        .global vg_eng
-        .global vg_toast
-        .global vg_sig
-        .global vg_last
-        .global rp_pb
-        .global rp_pp
-        .global rp_sync
-        .global vg_sig
-        .global vg_last
-        .global rp_pb
-        .global rp_pp
-        .global rp_sync
-        .global vg_fxp
-        .global vg_engp
-        .global vg_budget
-        .global vg_base
-        .global str_emu_limit
-        .global emus_p2step
-        .global emus_open
         .global vh_srcpaste
         .global vh_trkpaste
         .global vh_partpaste
@@ -87,15 +70,50 @@
         .global rp_forget
         .global rp_apply1
         .global rp_apply2
-        .global vb_fx1
-        .global vb_fx2
+        .global rp_sync
+        .global rp_pb
+        .global rp_pp
         .global rp_prev
         .global vem_depth
         .global rk_ratios
+        .global vem_end
+
+| ---------------------------------------------------------------------------- the build
+| The switch (see the head of this file). Its default lives HERE: octabam's defsyms are
+| link-time (`ld --defsym`), too late for `.if`, so a plain assembly is VARISPEED_EMUS;
+| VARISPEED sets it to 0 before the source is read (`as --defsym VEM_EMUS=0`, or the
+| octabam wrapper octabam-modules/varispeed/varispeed.s).
+        .ifndef VEM_EMUS
+        .equ    VEM_EMUS, 1
+        .endif
+
+        .if VEM_EMUS
+        .global emus_widget
+        .global emus_fmt
+        .global vg_fix
+        .global vg_scan
+        .global vg_room
+        .global vg_fx_try
+        .global vg_tick
+        .global vh_fx1
+        .global vh_fx2
+        .global vg_eng
+        .global vg_toast
+        .global vg_sig
+        .global vg_last
+        .global vg_fxp
+        .global vg_engp
+        .global vg_budget
+        .global vg_base
+        .global str_emu_limit
+        .global emus_p2step
+        .global emus_open
+        .global vb_fx1
+        .global vb_fx2
         .global emus_stops
         .global em_tally
         .global em_ctx
-        .global vem_end
+        .endif
 
 | ---------------------------------------------------------------------------- stock
         .equ    UI_TRACK, 0x80000000    | byte: the panel's track
@@ -240,9 +258,11 @@
 |        a5 -> this frame's machine byte, 52(sp) = track
 |   out: d0 = the increment, 36(a3) = d0, acc0 = 0 (MACSR untouched)
 |   free: d1-d5, d7, a0-a2, a4, a5 (written before read up to the epilogue)
-| A track that is not a VARI candidate and whose rp_prev byte is 0 costs the test and
-| the mask. Bits 2-3 of every increment carry the DSP engine: 0 everywhere but on a
-| VARI track, where they are the engine latched at its last trig.
+| A track that is not a VARI candidate and whose rp_prev byte is 0 costs the test (and,
+| in VARISPEED_EMUS, the mask). VARISPEED_EMUS: bits 2-3 of every increment carry the DSP
+| engine: 0 everywhere but on a VARI track, where they are the engine latched at its last
+| trig. VARISPEED: a VARI track's increment has bits 0-3 clear (VARISPEED_EMUS's on OT,
+| bit for bit); every other increment is stock's, untouched.
 vem_frame:
         .word   0xa1c0                  | movclr.l %acc0,%d0 (displaced)
         asr.l   %d6,%d0                 | displaced: d0 = stock's increment
@@ -370,6 +390,7 @@ vem_frame:
         bls.s   1f
         move.l  #INC_MAX,%d0
 1:
+        .if VEM_EMUS
 | The engine: latched when this track's new sound starts (the trig byte's bit 4 is
 | still set during this second pass; the voice loop clears it at 0x4000d534), carried
 | in 36(a3) bits 2-3 on every other frame. Nothing here steps an engine down (spec §6b
@@ -407,9 +428,16 @@ vem_frame:
         lsl.l   #2,%d1
         or.l    %d1,%d0
         bra.s   .vf_store
+        .else
+        moveq   #-16,%d4                | bits 0-3 clear: VARISPEED_EMUS's increment on OT
+        and.l   %d4,%d0                 |   (engine 0), bit for bit
+        bra.s   .vf_store
+        .endif
 .vf_plain:
         move.l  %d7,%d0
+        .if VEM_EMUS
         andi.l  #0xfffffff3,%d0         | bits 2-3 are the DSP engine: never stock's
+        .endif                          | (VARISPEED: stock's increment, untouched)
 .vf_store:
         move.l  %d0,36(%a3)
         jmp     (RENDER_BACK).l
@@ -423,6 +451,7 @@ voice_set:
         movea.l %d1,%a1
         rts
 
+        .if VEM_EMUS
 | d0 = an EMUS value (signed byte) -> d0 = its stop index: 0 OT (..42 and any
 | negative), 1 S950 (43..85), 2 SP12 (86..). Keeps everything else.
 emus_idx:
@@ -438,6 +467,7 @@ emus_idx:
         rts
 2:      moveq   #1,%d0
         rts
+        .endif
 
 | ---------------------------------------------------------------------------
 | tstr_fmt(buf, v): the STATIC / FLEX TSTR readout (descriptor formatter column; PICKUP
@@ -520,6 +550,7 @@ attr_tail:
         movea.l (%sp)+,%a2
         jmp     (ATTR_REDRAW).l
 
+        .if VEM_EMUS
 | ---------------------------------------------------------------------------
 | EMUS -- the TSNS slot (SRC SETUP slot 11) of a VARI track.
 |
@@ -1316,6 +1347,7 @@ db_park2:
 1:      mvs.b   (%a0),%d0
         movea.l (%sp)+,%a0
         rts
+        .endif                          | VEM_EMUS: EMUS and the DSP load guard
 
 | ---------------------------------------------------------------------------
 | Bulk writers (the user's O2): SRC page paste, track paste and the PART menu (paste,
@@ -1666,6 +1698,7 @@ rp_swap_ui:
 |     value below 4 (a fresh park) becoming 64 = 1/1, either way;
 |   TSNS (p2 slot 5) <-> its park (ST: NEIGHBOR p2 s5, FL: NEIGHBOR p2 s3), a fresh
 |     park (0) entering EMUS as 1 = OT; TSNS comes back verbatim.
+|     (VARISPEED_EMUS only. VARISPEED swaps PTCH <-> QUAN alone: TSNS stays TSNS.)
 | in the working DB and the SRAM part copy, with the writer's own dirty flags. The
 | NEIGHBOR bytes are '---' parameters stock saves with the Part and never applies.
 | First sight (0xff or any non 0/1/HOLD value) adopts without swapping; HOLD (a RELOAD
@@ -1729,6 +1762,7 @@ rp_swap_m:
         move.b  %d0,(%a0,%d7.l)
         move.b  %d3,(%a1,%d6.l)
         move.b  %d0,(%a1,%d7.l)
+        .if VEM_EMUS
         move.l  %d3,-(%sp)              | the new PTCH-slot value, for the live bytes
 | TSNS <-> EMUS
         moveq   #30,%d5
@@ -1759,6 +1793,9 @@ rp_swap_m:
         move.b  %d3,(%a1,%d6.l)
         move.b  %d0,(%a1,%d7.l)
         move.l  (%sp)+,%d5              | the new PTCH-slot value
+        .else
+        move.l  %d3,%d5                 | the new PTCH-slot value
+        .endif
         tst.l   4*2(%sp)                | the caller's d3: live?
         beq.s   3f
         move.l  %d1,%d0
@@ -1768,8 +1805,10 @@ rp_swap_m:
         add.l   %d6,%d0                 | 72t
         lea     (LIVE_P1).l,%a1
         move.b  %d5,(%a1,%d0.l)         | live PTCH-slot byte
+        .if VEM_EMUS
         lea     (LIVE_P2+TSNS_SLOT2).l,%a1
         move.b  %d3,(%a1,%d0.l)         | live TSNS byte (page 2 has no base word)
+        .endif
         | The BASE word, not the lane: the lane is rebuilt from it every frame.
         lea     (BASE_W).l,%a1
         move.l  %d5,%d0
@@ -1815,7 +1854,8 @@ rp_swap_m:
         lea     36(%sp),%sp
         rts
 
-| d0 = gate, d2 = machine (0/1): machine m's two captions, PTCH/QUAN and TSNS/EMUS.
+| d0 = gate, d2 = machine (0/1): machine m's two captions, PTCH/QUAN and TSNS/EMUS
+| (VARISPEED: PTCH/QUAN only; TSNS keeps stock's caption).
 | The descriptor table is image SDRAM; bytes 4..5 of each name field stay 0. Keeps all.
 caption_m:
         lea     -12(%sp),%sp
@@ -1823,6 +1863,7 @@ caption_m:
         lea     cap_tab(%pc),%a0
         tst.l   %d0
         beq.s   1f
+        .if VEM_EMUS
         addq.l  #8,%a0
 1:      move.l  (%a0)+,%d0              | PTCH / QUAN
         move.l  (%a0),%d1               | TSNS / EMUS
@@ -1833,6 +1874,15 @@ caption_m:
         bra.s   3f
 2:      move.l  %d0,(NAME0_FL).l
         move.l  %d1,(NAME11_FL).l
+        .else
+        addq.l  #4,%a0
+1:      move.l  (%a0),%d0               | PTCH / QUAN
+        tst.l   %d2
+        bne.s   2f
+        move.l  %d0,(NAME0_ST).l
+        bra.s   3f
+2:      move.l  %d0,(NAME0_FL).l
+        .endif
 3:      movem.l (%sp),%d0-%d1/%a0
         lea     12(%sp),%sp
         rts
@@ -2099,11 +2149,17 @@ rp_apply2:
         .balign 4
 tstr_tab:
         .long   STR_OFF, STR_AUTO, STR_NORM, STR_BEAT, str_vari
+        .if VEM_EMUS
 emus_tab:
         .long   str_ot, str_s950, str_sp12
 cap_tab:
         .ascii  "PTCHTSNS"              | off VARI
         .ascii  "QUANEMUS"              | on VARI
+        .else
+cap_tab:
+        .ascii  "PTCH"                  | off VARI
+        .ascii  "QUAN"                  | on VARI
+        .endif
 q_labels:
         .ascii  "1/2\0"
         .ascii  "2/3\0"
@@ -2116,6 +2172,7 @@ q_labels:
         .ascii  "2/1\0"
 str_vari:
         .ascii  "VARI\0"
+        .if VEM_EMUS
 str_s950:
         .ascii  "S950\0"
 str_ot:
@@ -2124,12 +2181,15 @@ str_sp12:
         .ascii  "SP12\0"
 str_emu_limit:                          | the guard's toast (spec §6b item 4); its width in
         .ascii  "MAX DSP: EMU LIMIT\0"  | the stock toast font is measured by the tests (IMPL §12)
+        .endif
 rk_ratios:                              | p, q per QUAN index
         .byte   1,2, 2,3, 3,4, 4,5, 1,1, 5,4, 4,3, 3,2, 2,1
+        .if VEM_EMUS
 emus_stops:                             | the stored value per stop: OT, S950, SP12
         .byte   1, 64, 127
 emus_mode:                              | the DSP engine per stop (bits 2-3 of the increment)
         .byte   0, 1, 2
+        .endif
         .balign 4
 rp_prev:                                | [2t + m]: 0/1 gate, 0xff forgotten, 0xfe HOLD
         .byte   0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff
@@ -2138,6 +2198,7 @@ vem_depth:                              | nested holds
         .byte   0
 rk_acc:                                 | QUAN fine-detent tally, signed
         .byte   0
+        .if VEM_EMUS
 em_tally:                               | EMUS detent count, signed (sign = direction)
         .byte   0
         .balign 4
@@ -2158,14 +2219,19 @@ vg_budget:
         .long   VG_BUDGET_C1, VG_BUDGET_C0
 vg_last:                                | the signature the safety net last checked
         .long   0
+        .else
+        .balign 4
+        .endif
 rp_pb:                                  | the bank blob and part rp_prev describes (rp_sync)
         .long   0
 rp_pp:
         .byte   0xff
         .balign 2
+        .if VEM_EMUS
 vg_eng:                                 | vg_scan: the engine each track's settings run
         .byte   0, 0, 0, 0, 0, 0, 0, 0
 vg_toast:                               | MAX DSP: EMU LIMIT is due (vg_tick raises it)
         .byte   0
+        .endif
         .balign 4
 vem_end:
