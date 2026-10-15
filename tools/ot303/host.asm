@@ -1,5 +1,5 @@
 ; SPDX-License-Identifier: MIT
-; SPDX-FileCopyrightText: 2026 Zac-Kyoti
+; SPDX-FileCopyrightText: 2026 Zac Kyoti
 ; ===========================================================================
 ; OT-303 machine -- the DSP host (reference/handoffs/OT303_SCOPE.md §12 items 1b, 2). Appended to
 ; tools/ot303/ot303_engine.asm by tools/ot303/hwprobe_image.py (HOST=1), placed in SPRING REV's

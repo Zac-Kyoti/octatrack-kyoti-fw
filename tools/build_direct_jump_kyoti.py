@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 DIRECT JUMP V7.0 -- Session 107/108: the CLOCK-LOCKED landing (see
 octabam-modules/direct-jump-kyoti/patch_directjump_v7.s header and

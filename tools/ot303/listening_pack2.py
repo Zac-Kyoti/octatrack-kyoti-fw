@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 Phase 1c: listening pack round 2 -- voicing at the chosen 2x, and the accent circuit.
 # Renders: out/ot303/voicing (voice_study zdf2 / o303, see the scope's §10 "Phase 1c").

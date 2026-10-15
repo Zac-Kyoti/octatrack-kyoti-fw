@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Zac-Kyoti
+// SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
 // repitch-kyoti rev 17: run one payload's boot path on dsp56kEmu -- from its
 // entry P:0x40 (the one-time memory clear) to the head of its frame loop -- and

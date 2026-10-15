@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # Fetch Open303 at its pinned commit into out/ot303/refs and build the voice-study harness.
 set -eu

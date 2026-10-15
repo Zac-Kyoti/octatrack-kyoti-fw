@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 listening pack round 11, from the round 10 results: the oscillator free-running in both
 # note-start tests (Low, Line); clicks on Hot's transients in MT9's voice; Locks: MT8's punch, MT9's

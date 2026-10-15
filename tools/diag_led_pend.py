@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 Session 107: the LED-predicate trace (V6 handoff section 2.3).
 

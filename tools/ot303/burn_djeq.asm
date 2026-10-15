@@ -1,5 +1,5 @@
 ; SPDX-License-Identifier: MIT
-; SPDX-FileCopyrightText: 2026 Zac-Kyoti
+; SPDX-FileCopyrightText: 2026 Zac Kyoti
 ;
 ; OT-303 Phase 0b -- a cycle-burn knob on DJ EQ (diagnostic image only).
 ; reference/handoffs/OT303_SCOPE.md §8 Phase 0, §10.

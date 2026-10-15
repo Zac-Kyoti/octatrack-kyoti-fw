@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 A thin, verifying layer over dsp_asm (vendor/dsp56300 dsp_host) for DSP56300
 source that needs what dsp_asm gets wrong or lacks. Added for repitch-kyoti

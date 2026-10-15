@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 Phase 2b: the DSP engine against the integer twin, bit for bit, on dsp56kEmu.
 #   python3 tools/ot303/engine_check.py [SCENE ...]

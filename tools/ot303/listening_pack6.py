@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 Phase 2: listening pack round 6 -- Open303's own algorithm as the DSP will run it
 # (o303q: the TB_303 filter transcribed, 4x, BLEP oscillator, 23+79-tap half-bands, tables, 24-bit),

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * SPDX-FileCopyrightText: 2026 Zac-Kyoti
+ * SPDX-FileCopyrightText: 2026 Zac Kyoti
  *
  * OT-303: the twelve knobs -> the DSP engine's host words (tools/ot303/twin.h's Engine fields), in
  * integer fixed point. One source for the ColdFire (tools/ot303/cf/control.c sends them in the

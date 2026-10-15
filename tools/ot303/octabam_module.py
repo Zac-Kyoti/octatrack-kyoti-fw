@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 Writes the generated half of octabam-modules/blackpyramids-303/ from the sources the standalone
 build uses (tools/build_blackpyramids_303.py), and proves each piece is the standalone's bytes:

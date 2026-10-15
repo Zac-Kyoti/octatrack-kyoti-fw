@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 repitch-kyoti: an INDEPENDENT reference SP-1200 and a "junk" measurement, for
 checking RPSP against the machine rather than against its own model

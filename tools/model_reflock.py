@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 Session 107/108 -- V7 step 2: MODEL FIRST.  Does a closed-form "position since START"
 reproduce the engine's own never-switched reference trace, tick for tick?

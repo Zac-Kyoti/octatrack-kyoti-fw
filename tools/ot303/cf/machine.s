@@ -1,5 +1,5 @@
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti; ported from octabam modules/analog-bassdrum/machine.s
+| SPDX-FileCopyrightText: 2026 Zac Kyoti; ported from octabam modules/analog-bassdrum/machine.s
 | (repeat98, MIT), which measured these seams (and Machinedrum's before it).
 |
 | OT-303 registration: machine row 5 in the track's machine chooser and in SRC SETUP, stored as FLEX

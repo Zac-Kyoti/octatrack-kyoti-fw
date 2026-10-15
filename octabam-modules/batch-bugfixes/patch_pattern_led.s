@@ -1,5 +1,5 @@
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti
+| SPDX-FileCopyrightText: 2026 Zac Kyoti
 | patch_pattern_led -- stock bug: a pattern whose only content is parameter locks
 | (no trigs anywhere) reads as EMPTY -> its grid LED stays unlit under [PTN], the
 | slot looks unused.  Reported for MIDI-track p-locks; the same code path also

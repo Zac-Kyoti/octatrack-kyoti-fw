@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """BLACKPYRAMIDS_303's DSP voice in an OT image: octabam's integrate step for a DSP source machine
 (build_bus.py calls integrate() last, after every DSP pass has written both payloads).
 

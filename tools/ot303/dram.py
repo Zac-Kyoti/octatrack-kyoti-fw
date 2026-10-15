@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti; the arena geometry is octabam's (tools/remix/arena.py,
+# SPDX-FileCopyrightText: 2026 Zac Kyoti; the arena geometry is octabam's (tools/remix/arena.py,
 # Sam Banks, MIT), measured there and re-asserted here against our own image.
 #
 # OT-303's DRAM runtime: a reserve of RESERVE_PAGES pages taken off the bottom of the stock audio page

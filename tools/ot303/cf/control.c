@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * SPDX-FileCopyrightText: 2026 Zac-Kyoti; registration and render ABI derived from octabam
+ * SPDX-FileCopyrightText: 2026 Zac Kyoti; registration and render ABI derived from octabam
  * modules/analog-bassdrum/control.c (repeat98, MIT), which measured the seams.
  *
  * OT-303 machine, ColdFire side: the page descriptor, the Part validator wrapper, the admission

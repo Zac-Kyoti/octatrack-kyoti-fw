@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 TEST BUILD -- the MUTEMODE build (stock 1.40C + MIDI manual-trig fix + SOFT MUTE behind the
 PERSONALIZE "MUTE MODE" toggle) with a THIRD mode, "DT", added.

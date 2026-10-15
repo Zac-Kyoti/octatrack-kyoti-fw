@@ -1,5 +1,5 @@
 ; SPDX-License-Identifier: MIT
-; SPDX-FileCopyrightText: 2026 Zac-Kyoti
+; SPDX-FileCopyrightText: 2026 Zac Kyoti
 ; ===========================================================================
 ; OT-303 hardware probe -- the wrapper (DIAGNOSTIC image only; reference/handoffs/OT303_SCOPE.md).
 ; Appended to tools/ot303/ot303_engine.asm (its layout equates and the `ot303` routine) by

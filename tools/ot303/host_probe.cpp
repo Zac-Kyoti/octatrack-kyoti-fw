@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Zac-Kyoti
+// SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
 // OT-303 machine host (tools/ot303/host.asm) on dsp56kEmu, entered the way the firmware enters the
 // source seam, against the integer twin; the records come from the ColdFire's own code

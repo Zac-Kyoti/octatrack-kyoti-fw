@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * SPDX-FileCopyrightText: 2026 Zac-Kyoti
+ * SPDX-FileCopyrightText: 2026 Zac Kyoti
  *
  * OT-303: the control record an OT-303 track sends the DSP each frame (tools/ot303/host.asm reads
  * it). One source for the ColdFire (control.c's renderer) and the bench (host_probe.cpp drives the

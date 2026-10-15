@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Zac-Kyoti
+// SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
 // OT-303 listening pack round 13 (tools/ot303/listening_pack13.py): the machine as MT13 plays it (params.c's
 // words, the host's note rules, the integer twin; the saw free-running, VOL 99 = drive +2.5 dB) and

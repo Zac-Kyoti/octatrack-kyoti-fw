@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 Phase 0a: the DSP cost of every stock effect, per track instance, measured under the
 # firmware in octabam's ColdFire+DSP port (ot_emu --dsp-stopwatch at the dispatcher's call

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 Session 79 continued a sixteenth time: before flashing the STEP_IN_PAT fix, test it
 against a project with differently-scaled/differently-lengthed tracks first (the user's

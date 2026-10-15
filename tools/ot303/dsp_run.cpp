@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Zac-Kyoti
+// SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
 // OT-303 Phase 2b: a minimal DSP56300 runner on dsp56kEmu (vendor/dsp56300) for code snippets.
 //   dsp_run CODE.bin ORG ENTRY STOP [INIT.txt]

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 Session 101: the FIRE oracle. Every prior phase oracle judged commits by STEP-ADVANCE
 instants (0x400a3d78). Hardware says V5.7 still sounds fractional while every counter

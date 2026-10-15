@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Zac-Kyoti
+// SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
 // OT-303 item 2, the whole chain against Open303 (pinned 313bf0d9, MIT): one acid line (notes, ties,
 // rests, slides into held and into closed gates, accents by an ACC lock, the square) three ways:

@@ -102,6 +102,6 @@ and has not itself been flashed yet.
 
 ## Licence
 
-MIT, © 2026 Zac-Kyoti, for this repository's code. It builds on Jannik Aßfalg's Repitch
+MIT, © 2026 Zac Kyoti, for this repository's code. It builds on Jannik Aßfalg's Repitch
 from octabam (see octabam's `THIRD_PARTY.md` and this repository's `CREDITS.md`). No Elektron
 bytes are included or distributed.

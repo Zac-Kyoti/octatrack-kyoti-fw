@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 DIAG8 METER: decode a recording of a track whose 303 knob sat in the METER band (64-127).
 # Each render writes ticks << 7 (timer 0, CLK/2) in its first sample and -(KCNT << 16) in the rest

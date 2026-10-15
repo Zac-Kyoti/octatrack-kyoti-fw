@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 listening pack round 8: the fatness candidates (reference/handoffs/OT303_SCOPE.md, "Research
 # (2026-10-12)") and MT7's saw restart, each against the machine as MT7 plays it, blind, two at a time.

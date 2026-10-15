@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * SPDX-FileCopyrightText: 2026 Zac-Kyoti
+ * SPDX-FileCopyrightText: 2026 Zac Kyoti
  *
  * OT-303: the control record (record.h).
  */

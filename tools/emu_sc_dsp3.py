@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 Isolation check of the step-3 side-chain DSP hooks (tools/patch_sc_dsp3.asm)
 under octabam's dsp_host / dsp56kEmu.

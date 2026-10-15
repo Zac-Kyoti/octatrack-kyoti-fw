@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """Carry code in DRAM for the combined KYOTI image (tools/build_kyoti.py), sized to what it needs.
 
 Why. The OS image's free ROM is ~8 KB, shared, and the parameter-page descriptor table

@@ -1,5 +1,5 @@
 ; SPDX-License-Identifier: MIT
-; SPDX-FileCopyrightText: 2026 Zac-Kyoti
+; SPDX-FileCopyrightText: 2026 Zac Kyoti
 ; ===========================================================================
 ; repitch-kyoti rev 17 -- DSP side: the "virtual sampler" behind RPS9 / RPSP.
 ; Model (the ground truth this must match): tools/repitch_engine_model.py.

@@ -1,5 +1,5 @@
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti
+| SPDX-FileCopyrightText: 2026 Zac Kyoti
 |
 | repitch-kyoti, gate 1 (ColdFire only) -- scope: reference/handoffs/REPITCH_KYOTI_SCOPE.md
 |

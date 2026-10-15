@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 OT-303 hardware probe, DIAGNOSTIC 14 (DIAG14): the OT-303 DSP engine on the unit, hosted at the
 per-track SOURCE seam (octabam ANALOG BD's host; reference/handoffs/OT303_SCOPE.md §11-12). DIAG13

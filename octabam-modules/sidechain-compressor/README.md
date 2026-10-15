@@ -109,4 +109,4 @@ unit's 338 B of `.text` are identical with and without the line, for 5407 and 54
 
 ## Licence
 
-MIT, © 2026 Zac-Kyoti. No Elektron bytes are included or distributed.
+MIT, © 2026 Zac Kyoti. No Elektron bytes are included or distributed.

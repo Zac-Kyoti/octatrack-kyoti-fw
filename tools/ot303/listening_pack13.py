@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 listening pack round 13, from MT12 on the unit: the bass lost as RES rises (a clip sweeping RES
 # 0 -> 127: as built / makeup gain by RES / feedback high-pass 350 Hz / a gentler RES curve) and the pops on

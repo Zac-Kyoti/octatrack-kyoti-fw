@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 Phase 2b: listening pack round 7 -- the lean engine (the integer twin, tools/ot303/twin.h,
 # with the option-3 savings) against the approved voice (round 6's pick).

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 OT-303 Phase 0b -- DIAGNOSTIC image: a cycle-burn knob on DJ EQ, to measure on hardware how much
 DSP time each core has left (reference/handoffs/OT303_SCOPE.md §8 Phase 0, §10).

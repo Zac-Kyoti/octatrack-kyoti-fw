@@ -1,5 +1,5 @@
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti
+| SPDX-FileCopyrightText: 2026 Zac Kyoti
 | rpk_glyphs -- the seven TSTR position glyphs of REPITCH_REPEAT98_KYOTI's 7-position
 | selector, as the octabam module links them (the standalone builder generates the same
 | bytes in tools/build_repitch_repeat98_kyoti.py, make_glyphs()). Stock's visual

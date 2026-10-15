@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Zac-Kyoti
+// SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
 // OT-303 knob -> host-word compiler (tools/ot303/cf/params.c) against Open303 (pinned 313bf0d9, MIT).
 //   params_check gen OUT.h   writes the constants params.c uses (params_const.h), from Open303's own

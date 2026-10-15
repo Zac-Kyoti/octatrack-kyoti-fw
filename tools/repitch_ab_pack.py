@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 A/B listening pack for REPITCH_REPEAT98_KYOTI's sound decisions: one source, every
 candidate design rendered by the float reference model (tools/repitch_engine_model.py)

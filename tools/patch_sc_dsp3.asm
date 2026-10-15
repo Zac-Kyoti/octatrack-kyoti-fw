@@ -1,5 +1,5 @@
 ; SPDX-License-Identifier: MIT
-; SPDX-FileCopyrightText: 2026 Zac-Kyoti
+; SPDX-FileCopyrightText: 2026 Zac Kyoti
 ; ===========================================================================
 ; SIDE-CHAIN COMPRESSOR -- step 3 DSP code.
 ;

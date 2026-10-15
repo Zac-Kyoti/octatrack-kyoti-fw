@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 REPITCH_REPEAT98_KYOTI's DSP kernel in octabam's form, generated from the
 hardware-tested one (tools/patch_repitch_dsp.asm + tools/repitch_dsp_src.py).

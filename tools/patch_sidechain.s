@@ -1,5 +1,5 @@
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti
+| SPDX-FileCopyrightText: 2026 Zac Kyoti
     .text
 | =====================================================================
 |  SIDE-CHAIN COMPRESSOR  --  step 1 of 4: menu only (the DSP still

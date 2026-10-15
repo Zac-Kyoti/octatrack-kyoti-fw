@@ -1,5 +1,5 @@
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti
+| SPDX-FileCopyrightText: 2026 Zac Kyoti
 |
 | patch_reload3.s -- RELOAD, redesigned around direct chords (Session 85).
 |
@@ -20,7 +20,7 @@
 | Full rationale, measurements and open risks: reference/RELOAD_REDESIGN.md
 
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti
+| SPDX-FileCopyrightText: 2026 Zac Kyoti
 |
 | patch_reload2 -- "RELOAD FROM PROJECT", scaled-down / SEQ-focused variant
 | (NOTES.md "Session 43" / "44" / "47").

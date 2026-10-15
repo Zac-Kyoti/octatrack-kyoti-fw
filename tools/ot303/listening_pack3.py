@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 Phase 2: listening pack round 3 -- the DSP twin.
 #   ABX 1  the DSP twin (2x, BLEP osc, closed-form ladder, half-band, tables, 24-bit) vs the

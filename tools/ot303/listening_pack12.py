@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 listening pack round 12, from the round 11 results: a tie-breaker on the note start (round 10
 # kept free-running on Low and Line, round 11 kept notes starting on the step on Hot), with MT10's planned

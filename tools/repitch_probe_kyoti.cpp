@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Zac-Kyoti
+// SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
 // repitch-kyoti gate-1 oracle, rev 5: the patched image's increment builder,
 // TSTR resolver, dial shims, Part-DB display gate and the domain swap, run

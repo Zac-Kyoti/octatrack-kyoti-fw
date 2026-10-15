@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 item 2, the whole chain against Open303 (tools/ot303/chain_check.cpp): renders one acid line
 # as Open303, as the approved voice with Open303's note logic (twinv), and as the machine (ours:

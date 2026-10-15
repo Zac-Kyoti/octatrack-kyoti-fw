@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 Phase 2: listening pack round 4 -- the top end, then the corrector.
 #   pick   Hot, Accents: Open303 as shipped vs the DSP voice with the safe resonance curve

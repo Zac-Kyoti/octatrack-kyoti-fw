@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 listening pack round 9, from the user's round 8 notes: the note start against a kick
 # (free-running vs MT7's restart), envelope edges three ways (none / 1 ms + 2 ms / 2 ms + 4 ms), the

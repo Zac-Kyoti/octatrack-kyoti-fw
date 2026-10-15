@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 Thin wrapper around **octabam's full-firmware emulator** (route A):
 `refs/octabam/tools/emu_rtos.py`.  It runs the OS's *own* scheduler — the handoff

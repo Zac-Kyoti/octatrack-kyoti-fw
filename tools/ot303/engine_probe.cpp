@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Zac-Kyoti
+// SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
 // OT-303 Phase 2b: the DSP engine (tools/ot303/ot303_engine.asm, assembled) on dsp56kEmu against its
 // contract, the integer twin (tools/ot303/twin.h), word for word.

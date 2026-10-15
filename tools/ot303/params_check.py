@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 knob -> host-word compiler: regenerate tools/ot303/cf/params_const.h from Open303 and hold
 # tools/ot303/cf/params.c against Open303 (tools/ot303/params_check.cpp).

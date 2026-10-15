@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 listening pack round 10, from the round 9 results: the note start again over a beat that
 # is audible on any speaker (a kick with a bright click; round 9's sub-only kick was not), and MT9's

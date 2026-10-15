@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 Phase 1: the listening pack's clips, from tools/ot303/run_study.sh renders.
 #   out/ot303/listen/clips/*.wav   16-bit mono 44.1 kHz, TPDF-dithered, 10 s excerpts

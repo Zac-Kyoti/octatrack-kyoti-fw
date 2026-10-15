@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 Frequency response of the SP-1200's fixed output filters (panel channels 3-6),
 computed from the component values on E-mu's schematic "SP1200 MAIN - Output

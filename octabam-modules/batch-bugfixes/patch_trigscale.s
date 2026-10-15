@@ -1,5 +1,5 @@
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti
+| SPDX-FileCopyrightText: 2026 Zac Kyoti
 | patch_trigscale -- fix the MIDI manual-trig stall (Plays Free + Direct + Per-Track scale)
 |
 | Root cause (NOTES.md "Session 5 part 3"): FUN_4009b5c8's SCALE_MODE("Per Track")-gated

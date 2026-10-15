@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Zac-Kyoti
+// SPDX-FileCopyrightText: 2026 Zac Kyoti
 // OT-303 first decimation stage 4x->2x (176.4 -> 88.2 kHz): 23-tap half-band (12 odd taps + centre 0.5),
 // scipy remez, pass 0-22 kHz, stop from 63.1 kHz (aliases land >= 25.1 kHz, which the 79-tap stage removes).
 static const int HB4_N = 23;

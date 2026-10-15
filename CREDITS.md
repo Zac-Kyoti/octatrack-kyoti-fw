@@ -147,18 +147,6 @@ too, and has its own section above.)
   `reference/kb/techniques.md`. `octamachine` is a feasibility study for running
   Machinedrum firmware on Octatrack hardware — out of scope here except for its
   host-side statement of the Octatrack's own platform requirements.
-  **REPITCH KYOTI starts from Jannik's Repitch module for octabam**
-  (`modules/repitch/`, hosted in octabam, MIT, © 2026 Sam Banks as octabam's licence
-  states). The varispeed idea itself — speed = project BPM ÷ sample BPM — is the
-  standard one, but the ColdFire skeleton is his code, adapted: the tempo-source
-  routine, all seven of his hook sites (increment builder, TSTR resolver, audio-editor
-  ATTR) and the TSTR label formatter
-  (`octabam-modules/repitch-repeat98-kyoti/patch_repitch_kyoti.s`), and the
-  scaffold of our ColdFire test oracle (`tools/repitch_probe_kyoti.cpp`, from his
-  `tools/harness/repitch_probe.cpp`). Ours: QUAN and its exact-ratio fold, the
-  PTCH/QUAN swap, the 7-position TSTR widget, and all of RPS9/RPSP on the DSP.
-  REPITCH_REPEAT98_KYOTI was removed from every build here on 2026-10-13; its ColdFire core
-  is being rewritten without his code (`reference/handoffs/REPITCH_REWRITE_SPEC.md`).
 
 ## The DSP56300 emulator core
 
@@ -191,11 +179,11 @@ Full attribution and every design decision: [`reference/BLACKPYRAMIDS_303.md`](r
 - **AudioRealism ABL3** — its manuals only: drive reached by turning the volume up, and gate trim
   (release), behind the drive and release candidates.
 - **ANALOG BD for octabam** — repeat98 (Jannik Aßfalg), MIT. The machine-registration pattern
-  (a sixth machine row stored as FLEX plus a signature) and the per-track source seam on SPRING
-  REV's DSP space, ported. **SYNTH** (Tim Hastie) was studied for the FLEX-renderer approach.
+  (a sixth machine row stored as FLEX plus a signature) and the per-track source seam,
+  ported. **SYNTH** (Tim Hastie) was studied for the FLEX-renderer approach.
 - **Research consulted, no code:** Vadim Zavalishin, *The Art of VA Filter Design*; Andy Sloane's
   x0xb0x measurements ([a1k0n/303](https://github.com/a1k0n/303)); Robin Whittle's Devil Fish notes.
-- **Zac-Kyoti** — the concept and the sonic direction:
+- **Zac Kyoti** — the concept and the sonic direction:
   - **filter voicing** (the linear ladder, the 16 kHz top);
   - **body under resonance** (the 350 Hz feedback high-pass);
   - **declick and edge tuning** (soft attack and its fade with RES, the 2 ms release, the 1 ms
@@ -205,7 +193,7 @@ Full attribution and every design decision: [`reference/BLACKPYRAMIDS_303.md`](r
   - **the "liquid" / "creamy" trade-offs**;
   - **the free-running note start.**
 
-  All of these were tuned by ear over thirteen blind listening rounds. Zac-Kyoti also designed the
+  All of these were tuned by ear over thirteen blind listening rounds. Zac Kyoti also designed the
   grid mapping and every control range, and tested on an MKI. The implementation was written with
   AI assistance (Claude) under the author's direction.
 

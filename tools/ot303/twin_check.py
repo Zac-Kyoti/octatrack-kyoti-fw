@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 Phase 2b: the integer twin (tools/ot303/twin.h) against the approved voice
 # (voice_study render SCENE o303q 4 hb2 blep:1,tab:1,q:1,stbits:24,top:16000).

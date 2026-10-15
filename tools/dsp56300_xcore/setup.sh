@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # Reproduces the dual-core DSP56300 emulator (Session 77, cross-core
 # SIDECHAIN handoff) into vendor/dsp56300 -- gitignored like the rest of

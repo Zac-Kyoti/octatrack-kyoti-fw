@@ -135,5 +135,5 @@ Either can be selected without the other; the sites are disjoint.
 
 ## Licence
 
-MIT, © 2026 Zac-Kyoti. No Elektron bytes are included or distributed: the build
+MIT, © 2026 Zac Kyoti. No Elektron bytes are included or distributed: the build
 reads *your own* copy of OS 1.40C and produces a modified image from it.

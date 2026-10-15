@@ -1,5 +1,5 @@
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti; derived from octabam's tools/remix/loader.S (Sam Banks,
+| SPDX-FileCopyrightText: 2026 Zac Kyoti; derived from octabam's tools/remix/loader.S (Sam Banks,
 | MIT), whose design is Em's Octakit loader (emuyia/ems-octakit, runtime/loader.S).
 |
 | OT-303's boot loader: appended after the stock OS image (0x4010fdf0, the byte after it) and

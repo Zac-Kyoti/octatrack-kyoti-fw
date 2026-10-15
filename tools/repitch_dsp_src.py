@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 repitch-kyoti rev 17: the complete DSP source = generated constants +
 tools/patch_repitch_dsp.asm, and the table DATA that goes into X memory.

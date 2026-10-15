@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303: expand `NAME macro` .. `endm` blocks (no parameters) before tools/dsp_xasm.py, which has
 # no macros. A line holding only NAME is replaced by the block's lines. Labels inside a macro

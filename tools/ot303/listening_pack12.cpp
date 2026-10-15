@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Zac-Kyoti
+// SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
 // OT-303 listening pack round 12 (tools/ot303/listening_pack12.py): the machine as MT9 plays it -- the
 // ColdFire's params.c words, the DSP host's note rules (tools/ot303/chain_check.cpp's "ours" path) on

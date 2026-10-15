@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 on the DSP: one payload's words and addresses (no image I/O), for either wrapper:
 #   the hardware probe (tools/ot303/hwprobe.asm; tools/build_ot303_hwprobe.py, bench hwprobe_check.py)

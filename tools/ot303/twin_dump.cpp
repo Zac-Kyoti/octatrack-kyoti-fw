@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Zac-Kyoti
+// SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
 // OT-303: the lean engine's constants and tables from the integer twin, as "NAME hex [hex ...]" lines,
 // for the builders that place the DSP engine in a firmware image (tools/ot303/hwprobe_image.py).

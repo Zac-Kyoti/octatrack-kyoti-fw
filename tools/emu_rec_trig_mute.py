@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 Validate REC_TRIG_MUTE (out/mainos_rec_trig_mute.bin) in octabam's full-firmware emulator.
 

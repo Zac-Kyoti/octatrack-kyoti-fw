@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 Phase 1, linear half: exact frequency responses of the TB-303 filter variants.
 # reference/handoffs/OT303_SCOPE.md §9 "The filter study".

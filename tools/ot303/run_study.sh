@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 # OT-303 Phase 1: render the time-domain matrix into out/ot303/renders (parallel).
 set -eu
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"

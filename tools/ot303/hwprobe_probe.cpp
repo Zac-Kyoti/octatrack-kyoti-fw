@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Zac-Kyoti
+// SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
 // OT-303 hardware probe (DIAG14) on dsp56kEmu: the source-seam glue and the DJ EQ remote
 // (tools/ot303/hwprobe.asm) entered the way the firmware enters them, against the integer twin.

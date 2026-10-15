@@ -1,5 +1,5 @@
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti
+| SPDX-FileCopyrightText: 2026 Zac Kyoti
 | patch_partreapply -- stock bug family: "Part params carry over after a pattern->Part
 | change" (Elektronauts "Octatrack OS Bug Reports" / "Playback gets carried over...",
 | NOTES.md "Session 49"). A pattern change that links a different Part does not fully

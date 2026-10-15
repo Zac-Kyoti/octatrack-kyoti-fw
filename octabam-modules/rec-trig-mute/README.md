@@ -48,4 +48,4 @@ Mechanism and every proof: `reference/handoffs/REC_TRIG_MUTE_SCOPE.md` in OT Kyo
 
 ## Licence
 
-MIT, © 2026 Zac-Kyoti. No Elektron bytes are included or distributed.
+MIT, © 2026 Zac Kyoti. No Elektron bytes are included or distributed.

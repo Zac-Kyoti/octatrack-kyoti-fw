@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303: the image edits both OT-303 builders share (tools/build_ot303_hwprobe.py, the DIAG probe;
 # tools/build_blackpyramids_303.py, the machine), every one asserting the stock words it replaces:

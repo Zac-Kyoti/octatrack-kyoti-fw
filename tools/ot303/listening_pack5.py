@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 Phase 2: listening pack round 5 -- confirmation of the final voicing against Open303.
 # Final voicing (out/ot303/final/*.final.f32): 2x, no Heun, stage saturation 0.5, k = min(16.998792 r,

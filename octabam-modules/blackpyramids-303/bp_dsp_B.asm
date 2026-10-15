@@ -2,7 +2,7 @@
 ; (tools/ot303/ot303_engine.asm + host.asm, macros expanded, layout substituted); tools/dsp_xasm.py
 ; assembles it into bp_dsp_data.py's words. Do not edit.
 ; SPDX-License-Identifier: MIT
-; SPDX-FileCopyrightText: 2026 Zac-Kyoti
+; SPDX-FileCopyrightText: 2026 Zac Kyoti
 ; SPDX-FileCopyrightText: 2009 Robin Schmidt (Open303, MIT: the algorithm and constants ported here; tools/ot303/LICENSE.Open303.txt)
 ; ===========================================================================
 ; OT-303 Phase 2b -- the DSP engine (DSP56300), standalone.
@@ -764,7 +764,7 @@ zdvb:
         move    x1,a
         rts
 ; SPDX-License-Identifier: MIT
-; SPDX-FileCopyrightText: 2026 Zac-Kyoti
+; SPDX-FileCopyrightText: 2026 Zac Kyoti
 ; ===========================================================================
 ; OT-303 machine -- the DSP host (reference/handoffs/OT303_SCOPE.md §12 items 1b, 2). Appended to
 ; tools/ot303/ot303_engine.asm by tools/ot303/hwprobe_image.py (HOST=1), placed in SPRING REV's

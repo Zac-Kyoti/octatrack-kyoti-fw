@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 Phase 1: compare the voice renders (tools/ot303/run_study.sh) against their
 # references. Metrics, all delay-insensitive or delay-compensated:

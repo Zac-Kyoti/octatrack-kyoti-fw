@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 Phase 0b: verify the burn-probe image under the firmware (ot_emu, BOTLI playing).
 #   inert      BURN 0 on every DJ EQ: per call = stock DJ EQ + the 8-instruction guard

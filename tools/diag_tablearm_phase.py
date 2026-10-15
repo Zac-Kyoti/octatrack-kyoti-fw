@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 Session 101: the TABLE-ARM oracle -- timing of writes into DAT_80001904, the 8x8 int
 array feeding the audible live-nibble computation (Session 70 12th/13th pass; write gate

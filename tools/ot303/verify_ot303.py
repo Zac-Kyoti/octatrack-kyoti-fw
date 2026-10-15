@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 machine test image (tools/build_blackpyramids_303.py, MT5) under the firmware (ot_emu, the BOTLI project).
 #   ui       panel events (transport stopped): FUNC+SRC (SRC SETUP) -> the bottom row -> YES on T2

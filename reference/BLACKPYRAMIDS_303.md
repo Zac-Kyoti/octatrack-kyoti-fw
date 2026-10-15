@@ -216,8 +216,7 @@ Any lighter stack, or the saw, fits.
 - **ANALOG BD for octabam** — repeat98 (Jannik Aßfalg), MIT. The machine registration
   pattern and the DSP route, ported:
   - a sixth machine row stored as FLEX plus a signature in NEIGHBOR's unused bytes;
-  - the per-track source seam;
-  - giving up SPRING REV's module, with DARK REV's helper moved.
+  - the per-track source seam.
 - **octabam** — sambanks, MIT. The DRAM-runtime pattern (arena reserve and boot loader) and the
   emulators every image was verified on. **SYNTH** (Tim Hastie) was studied for the
   FLEX-renderer approach.
@@ -230,7 +229,7 @@ Any lighter stack, or the saw, fits.
   Open303's model.
 - **Test tooling only, not in the image:** the dsp56300 emulator core (GPLv3, via octabam),
   for the DSP benches.
-- **Zac-Kyoti** — the concept, the sonic direction and the tuning: they set the goals, judged
+- **Zac Kyoti** — the concept, the sonic direction and the tuning: they set the goals, judged
   every candidate blind by ear over thirteen listening rounds, and chose and refined the
   values. Specifically:
   - **The concept and requirements:** a 303 as a track machine, one per DSP core, no
@@ -247,7 +246,7 @@ Any lighter stack, or the saw, fits.
     - specified the edge timings (soft attack 1 ms, normal release 2 ms);
     - heard the soft attack's clicks at high resonance, which led to its fade-out with RES;
     - picked the 1 ms glide on lock and LFO jumps.
-  - **"Liquid", "creamy", "balls":**
+  - **"Liquid", "creamy", "weight":**
     - asked for the JC-303 / ABL3 research and the fatness candidates;
     - weighed drive against detail and liquidity across the Line, Hot and Locks scenes;
     - settled the soft clip at +2.5 dB by default and up to +4.5 dB;

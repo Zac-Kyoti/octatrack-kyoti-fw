@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 Shared dsp_asm/dsp56kDisassemble helper -- used by both build_sidechain_compressor.py's
 sc_assemble() and emu_sc_dsp3.py's assemble() so the two never drift (same

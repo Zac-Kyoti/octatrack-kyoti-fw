@@ -1,5 +1,5 @@
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti
+| SPDX-FileCopyrightText: 2026 Zac Kyoti
 |
 | repitch-kyoti: stock RELOAD PART (FUN_4004aab4(part)) as a Part apply.
 |

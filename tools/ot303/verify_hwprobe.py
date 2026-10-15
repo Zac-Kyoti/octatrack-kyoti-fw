@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 hardware probe (DIAG14) under the firmware (ot_emu, the BOTLI project playing): DJ EQ on all
 # four FX1 slots of a core, page 2 poked per run; the voice at the per-track source seam.

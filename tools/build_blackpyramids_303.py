@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 BLACKPYRAMIDS_303: a TB-303 voice as a track machine (shown as BLKPYRAMD), Open303's algorithm on the
 DSP56300. The design, the voicing decisions and the resources: reference/BLACKPYRAMIDS_303.md; the

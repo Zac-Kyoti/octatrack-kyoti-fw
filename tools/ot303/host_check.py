@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 #
 # OT-303 machine host (tools/ot303/host.asm) on the bench: both payloads' placements
 # (tools/ot303/hwprobe_image.py, host=True) run on dsp56kEmu as the firmware enters the source seam
