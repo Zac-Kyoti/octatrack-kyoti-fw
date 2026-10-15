@@ -56,7 +56,12 @@ def main():
         words, syms, _ = dsrc.assemble(ORG, tag)
         dis = dsp_xasm.disassemble(words, ORG)
         name = {v: k for k, v in syms.items()}
-        addrs = sorted(dis)
+        addrs, a = [], ORG                      # every instruction in order (the disassembler
+        while a < ORG + len(words):             # prints no line for a nop: it is one too)
+            addrs.append(a)
+            if a not in dis:
+                dis[a] = ("nop", 1)
+            a += dis[a][1]
         for a, b in zip(addrs, addrs[1:]):
             hit = writes(dis[a][0]) & addressing(dis[b][0])
             if hit:
