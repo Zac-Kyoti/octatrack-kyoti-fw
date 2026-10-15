@@ -34,6 +34,8 @@ Two roles:
 - `reference/handoffs/REPITCH_*.md` **except this file and the scope file the clean agent
   writes**, especially `REPITCH_REWRITE_OVERLAP.md`
 - `NOTES.md` sessions and `CREDITS.md` paragraphs about repitch / RPCH / REPITCH
+- `reference/handoffs/KYOTI_LOAD_AUDIT.md` (it names the old core's routines; §6 below carries
+  the numbers)
 - Claude's auto-memory files under `~/.claude/projects/*/memory/` (the Octatrack topic files
   and their archive record the old implementation)
 - **any built image that contains REPITCH** (the standalone, the KYOTI combined images, the
@@ -220,16 +222,28 @@ From the EMUS scope's open questions (`REPITCH_REWRITE_SCOPE_EMUS.md`):
 
 ## 6. The DSP load guard (added 2026-10-14, the user's request)
 
-Source: `reference/handoffs/KYOTI_LOAD_AUDIT.md` (ours; §3 and §4 are allowed reading for clean
-agents, and so is every section of it, since it predates nothing of Jannik's). Shipped behaviour
+Source: our KYOTI load audit (2026-10-05). Its numbers are copied below. Clean agents do NOT open
+`reference/handoffs/KYOTI_LOAD_AUDIT.md`: its per-feature table names the old ColdFire core's
+routines and hook site. Shipped behaviour
 today: four SP12 voices on one DSP core beside heavy stock FX can overrun the DSP on the unit. The
 audio squeals or pops and the sequencer stops. The guard must prevent that, and must change nothing
 in every situation that does not overrun.
 
 1. **Model, per DSP core, recomputed every frame.** The estimate is the sum of:
-   - a base: the four-track loop with all FX NONE, audit §4;
-   - the stock price of each FX1/FX2 effect on that core's four tracks, audit §4's table,
-     modelled cycles;
+   - a base: the four-track loop with all FX NONE: 574 modelled cycles on core 1, 477 on core 0;
+   - the stock price of each FX1/FX2 effect on that core's four tracks, in modelled cycles per
+     sample (measured on core 1; use them for both):
+
+     | effect | cycles | effect | cycles | effect | cycles |
+     |---|---|---|---|---|---|
+     | DJ EQ | 347 | LO-FI | 313 | CHORUS | 312 |
+     | SPRING | 306 | FILTER | 267 | DARK | 267 |
+     | PLATE | 240 | PHASER | 223 | EQ | 200 |
+     | FLANGER | 146 | COMB | 111 | COMPRESSOR | 89 |
+     | SPATIALIZER | 77 | DELAY | 0 (ColdFire) | NONE | 0 |
+
+     (SPRING is gone in this image. SIDECHAIN_COMPRESSOR, when it shares an image, adds a fixed
+     56 per core.)
    - the price of each **sounding** voice's engine: SP12 and S950 at the per-voice worst case
      from `tools/repitch_dsp_profile.py`; OT costs 0.
 
@@ -237,7 +251,8 @@ in every situation that does not overrun.
    optimized in parallel, so their prices will change. Find which tracks run on which core, and
    how the ColdFire knows a track's FX types and whether its voice is sounding, from the stock
    image.
-2. **Budget per core:** the hardware brackets of audit §3.
+2. **Budget per core:** the user's hardware brackets (4 SP12 voices sounding, DARK on every
+   FX2, DJ EQ added on FX1):
    - Core with T5–T8 (fails first): clean ≈ 3,350, crash ≈ 3,740 modelled cycles.
    - The other core: clean ≈ 3,930, crash ≈ 4,310.
 
