@@ -375,3 +375,41 @@ gate changes) is replaced by **one safety net**:
   frame path.
 
 The behaviour the user sees is item 3's; only the mechanism is simpler.
+
+#### 6b, answers (the user, 2026-10-15, after VEM6)
+
+- **TSTR or ATTR → VARI on a track whose engine does not fit:** that track's own EMUS goes to OT,
+  not the net's order. The user acts on that track. Every other over-budget case keeps the net's
+  order.
+- **RELOAD PART** gets no special code. The net acts on a reload only if the result is over budget,
+  which on this firmware means a project-wide sample setting changed after the Part was saved
+  (a sample's tempo or TIMESTRETCH, or the sample in a slot). Projects from earlier builds or
+  the old module are out of scope (the user does not care about them).
+
+## 7. VARISPEED: the plain build (the user, 2026-10-15)
+
+A second feature from the same code: **VARISPEED**. It is VARI with QUAN and nothing emulated.
+
+- **Kept, exactly as VARISPEED_EMUS:**
+  - TSTR 5 positions (`VARI`), ATTR `VARI`;
+  - the gate, the exact tempo ratio, QUAN on PTCH with its swap and park rules;
+  - the per-machine state, the paste/clear/undo wrappers, the item-11 fix, `rp_sync`;
+  - the octave fold above 2x;
+  - out of range = OFF.
+
+  A VARI track's increment is computed exactly as VARISPEED_EMUS computes it for EMUS = OT, so
+  VARI plays bit-identically to VARISPEED_EMUS on OT.
+- **Removed:**
+  - the DSP kernel and both DSP hooks; SPRING REVERB stays in the image, untouched;
+  - EMUS and the TSNS takeover (TSNS stays TSNS; no second park pair);
+  - the load guard, its refusals, its safety net and its toast;
+  - the engine tag and latch;
+  - the bits-2-3 mask on stock tracks' increments: stock tracks are untouched.
+- **Builds:**
+  - a standalone, `tools/build_varispeed.py` → `OCTATRACK_OS1.40C_VARISPEED`;
+  - a Bugbuild, `BUG_VARI`, composed by `tools/build_bugbuilds.py`. The composer only takes
+    promoted bases, so add an explicit opt-in for one WIP base, keeping its refusals for
+    everything else. With `KYOTI_ALLOW_WIP=1 ... --wip VARISPEED` it builds that one Bugbuild,
+    clearly WIP. Nothing changes for the seven final Bugbuilds: their hashes must stay their pins.
+- **Source:** shared with VARISPEED_EMUS, one source with an assembly switch, so fixes cannot
+  diverge. (octabam `defsyms` are link-time: `.ifdef` gates need source defaults.)
