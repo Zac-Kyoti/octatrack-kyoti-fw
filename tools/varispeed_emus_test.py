@@ -38,7 +38,13 @@ Tests (one forked scenario each):
             SETUP TSTR (net_tstr, net_tstr_order, net_tstr_fit) and ATTR TIMESTRETCH (net_attr,
             net_attr_order) onto VARI over budget: THE ENTERING track's EMUS to OT (VEM7, spec
             "6b, answers"; among several entering, the net's order), the net's order for what
-            is still over; the engine each plays from its next trig; one toast
+            is still over; the engine each plays from its next trig; one toast. VEM8 (spec
+            "6b, option B"): a track that becomes a VARI track INDIRECTLY -- its gate on, its
+            TSTR untouched -- steps its own EMUS too: a sample's ATTR TEMPO moved into range
+            (net_tempo_order), a slot assigned to it (net_slot_order), a sample loaded into its
+            slot by the disk task (net_sample_order); a machine change (net_machine_order) and a
+            Part rewritten ahead of its apply (net_partwrite_order, a load's bank read) keep the
+            net's order
   ref_*     the two refusals: EMUS through P2EDIT (ref_emus, ref_emus_ot: stops at the highest
             stop that fits), the FX choosers' YES (ref_fx; ref_fx_alone on a test build whose
             core-0 budget is 2600: stock FX alone over is not refused)
@@ -57,7 +63,9 @@ Tests (one forked scenario each):
 
 Test builds (--build-variants): lowbudget (VG_BUDGET_C0 2600, for ref_fx_alone) and the
 deliberately wrong builds w_* (out/vem_variants/), each of which must fail its tests
-(w_enter_net: a track entering VARI by TSTR / ATTR gets the net's order, as VEM6 did).
+(w_enter_net: every track entering VARI gets the net's order, as VEM6 did; w_indirect_net: an
+indirect entry gets it, as VEM7 did; w_name_all: every gate that comes on is named, loads and
+machine changes included; w_no_live: a slot change is named without the live-slot test).
 
 EMUS order (2026-10-14): OT (stored 1, left), S950 (64, middle), SP12 (127, right).
 """
@@ -103,6 +111,9 @@ _TAIL = max(0x400d7800, (json.loads(SYMS.read_text())["end"] + 0x3f) & ~0x3f)
 CAP_AT, CAP_BUF, FMT_BUF = _TAIL, _TAIL + 0x60, _TAIL + 0x80
 NCAP_AT, NCAP_BUF = _TAIL + 0x90, _TAIL + 0xe0      # the NOTIFY capture (count, text, dur)
 assert NCAP_BUF + 12 <= 0x400d7c3c, "no room for the test stubs behind the unit"
+PATH_AT = _TAIL + 0x100                          # a sample path for LOAD_TO_SLOT (VEM8's net_sample_order)
+PATH_B = b"../AUDIO/ELEKTRON/isaak.wav\0"          # STATIC slot 1's file on MMTESTDT's card
+assert PATH_AT + len(PATH_B) <= 0x400d7c3c, "no room for the path behind the unit"
 NOTIFY, NOTIF_H, NOTIF_T = 0x4005a2b8, 0x460d1e70, 0x460d1e6c    # the stock toast, its handle, countdown
 NOTIFY_STOCK = bytes.fromhex("2f032f02242f000c")  # its first 8 bytes (the stub replays them)
 STATIC0_BPM = 0x100d5b30 + 0x114                # static slot 0 (T1's STATIC slot): 120 BPM
@@ -564,6 +575,67 @@ def scenarios():
     s.dump(2800, STATIC_SET + 0x448 * 1 + 0x110, 4, "after.tsmode")
     s.net = dict(kind="attr")
     sc[s.name] = s
+    # ---- VEM8, spec "6b, option B": a track that becomes a VARI track INDIRECTLY (its gate on,
+    # its TSTR untouched) over budget steps ITS OWN EMUS to OT. Each: T5, T7, T8 VARI SP12 on
+    # STATIC slot 0 (146.6 BPM), DJ EQ x3, DARK x4 (3240, fits); T6 (SP12 parked) not on VARI
+    # until the change; with it 3458 > 3350: one step. Its own rule takes T6, the net's would
+    # take T8. Only stock code makes the change; the pre-states are runtime pokes.
+    IND = dict(emus={4: "SP12", 6: "SP12", 7: "SP12"}, fx1={4: "DJEQ", 5: "DJEQ", 6: "DJEQ"})
+    # a sample's ATTR TEMPO moved into range: T6 VARI on slot 1, slot 1's tempo 714 (29.75 BPM,
+    # out of range: T6 plays as OFF); the ATTR value-up key on the TEMPO row (3: +6, stock
+    # rounds and clamps to 720..7200, 0x40099090) -> 720, T6 enters
+    s = net_scn("net_tempo_order", IND["emus"], IND["fx1"], tstr={5: 4}, park={5: "SP12"},
+                slots={4: 0, 5: 1, 6: 0, 7: 0}, extra=lpoke(STATIC_SET + 0x448 * 1 + 0x114, 714))
+    s.add(poke(2600, lpoke(ATTR_SLOT, 1) + lpoke(ATTR_MACH, 0) + lpoke(ATTR_ROW, 3) + lpoke(ATTR_MODE, 0)),
+          call(2600, ATTR_UP))
+    s.dump(2800, mmpart(0), PSTRIDE, "after.part")
+    s.dump(2800, STATIC_SET + 0x448 * 1 + 0x110, 8, "after.rec")
+    s.net = dict(kind="indirect", enter=[5], how="tempo")
+    sc[s.name] = s
+    # a different sample assigned to the track: T6 AUTO on the empty STATIC slot 2 (TIMESTRETCH
+    # OFF: not VARI); slot 1's TIMESTRETCH VARI (as set in the audio editor); the audio editor's
+    # slot assign (stock 0x40079424) gives T6 slot 1 -> T6 enters
+    s = net_scn("net_slot_order", IND["emus"], IND["fx1"], tstr={5: 1}, park={5: "SP12"},
+                slots={4: 0, 5: 2, 6: 0, 7: 0}, extra=lpoke(STATIC_SET + 0x448 * 1 + 0x110, 4))
+    s.add(poke(2600, [b(UI_TRACK, 5), b(UI_TRACK_M, 5), b(PART_M, 0)] + lpoke(ATTR_SLOT, 1) + lpoke(ATTR_MACH, 0)),
+          call(2600, SLOT_ASSIGN, 0, 0))
+    s.dump(2800, mmpart(0), PSTRIDE, "after.part")
+    s.dump(2800, MM_LIVE_SLOT + 72 * 5, 1, "after.live_slot")
+    s.net = dict(kind="indirect", enter=[5], how="slot")
+    sc[s.name] = s
+    # a sample loaded into its slot: T6 VARI on STATIC slot 2 (empty) whose tempo reads 714 (out
+    # of range: T6 plays as OFF); stock's load-to-slot (0x40022610 -> disk command 1) loads
+    # isaak.wav there; the loader writes the sample's own settings (tempo 2880) -> T6 enters,
+    # in the disk task, outside any UI handler
+    s = net_scn("net_sample_order", IND["emus"], IND["fx1"], tstr={5: 4}, park={5: "SP12"},
+                slots={4: 0, 5: 2, 6: 0, 7: 0},
+                extra=lpoke(STATIC_SET + 0x448 * 2 + 0x114, 714) + [b(PATH_AT + i, x) for i, x in enumerate(PATH_B)])
+    s.add(call(2600, LOAD_TO_SLOT, 0, 2, PATH_AT))
+    s.dump(4800, mmpart(0), PSTRIDE, "after.part")
+    s.dump(4800, STATIC_SET + 0x448 * 2, 0x118, "after.rec2")
+    s.net = dict(kind="indirect", enter=[5], how="load")
+    sc[s.name] = s
+    # ... and a Part rewritten wholesale keeps the net's order even inside the window where its
+    # bytes have changed and the apply has not yet come (C, ot_emu: during a project load the
+    # UI task's tail ran between the current bank's read and its Part apply). Modelled: T6 AUTO
+    # on the empty slot 2, slot 1 VARI; T6's PART bytes become slot 1 with EMUS SP12 in its slot
+    # (a Part saved on VARI) as a bank read writes them -- the live bytes untouched -- and the
+    # heavy apply 100 frames later (it forgets, the next poll adopts) -> the net's order, T8
+    s = net_scn("net_partwrite_order", IND["emus"], IND["fx1"], tstr={5: 1}, park={5: "SP12"},
+                slots={4: 0, 5: 2, 6: 0, 7: 0}, extra=lpoke(STATIC_SET + 0x448 * 1 + 0x110, 4))
+    s.add(poke(2600, mm_byte(O_SLOT5 + 5 * 5, 1) + mm_byte(O_P2 + 30 * 5 + 5, EM["SP12"])),
+          call(2700, 0x40009094, 0, 0))
+    s.dump(2800, mmpart(0), PSTRIDE, "after.part")
+    s.net = dict(kind="partwrite", enter=5)
+    sc[s.name] = s
+    # ... and a change no single track can be named for keeps the net's order: a machine change
+    # (T6 STATIC off VARI -> FLEX, stored VARI SP12) steps T8, not T6
+    s = net_scn("net_machine_order", IND["emus"], IND["fx1"], tstr={5: 0}, extra=flex_side(5, "SP12"))
+    s.add(poke(2600, mm_byte(O_MACH + 5, FL)), call(2600, SET_MACHINE3, 0, 5, ST))
+    s.dump(2800, mmpart(0), PSTRIDE, "after.part")
+    s.net = dict(kind="machine", enter=5)
+    sc[s.name] = s
+
     # the EMUS refusal (P2EDIT): T5-T7 SP12 + DJ EQ x3, T8 VARI on OT. +4 S950 (fits), +4 SP12
     # (refused: stays S950), -4 OT, +8 (two stops asked: S950); with SPATIALIZER on T8's FX1
     # S950 does not fit either
@@ -719,6 +791,10 @@ STATIC_SET = 0x100d5b30                        # STATIC sample settings records,
 ATTR_UP = 0x4006edc8                           # the audio editor's value-up key handler
 ATTR_SLOT, ATTR_MACH, ATTR_ROW, ATTR_MODE = 0x46c8d19c, 0x46c8d1a0, 0x460e5e74, 0x460e5e5c
 RELOAD, SET_MACHINE3 = 0x4004aab4, 0x400972fc
+SLOT_ASSIGN = 0x40079424                       # assign the audio editor's slot (ATTR_SLOT / ATTR_MACH)
+                                               # to the panel's track (0x100b14cc): Part + live slot
+LOAD_TO_SLOT = 0x40022610                      # (machine, slot, path): the slot's path, then disk command 1
+UI_TRACK_M, PART_M = 0x100b14cc, 0x100b14cf    # the panel's track / part, as the slot assign reads them
 FX_YES = {1: 0x400526e4, 2: 0x40052474}        # the FX choosers' YES handlers (key handlers)
 FX_CUR = {1: 0x460d5c94, 2: 0x460d5ca8}        # their cursor rows
 FX_LIST = {1: 0x400d6060, 2: 0x400d6090}       # their rows (-> P, whose long is the type id)
@@ -1234,7 +1310,7 @@ def net_check(t, s, d, log):
             t.eq(f"the right order differs from '{w}' here", m.fix(fxx, eng_in, w)[0] != right, True)
         return right
 
-    if kind in ("load", "reload", "paste", "machine", "gate", "tstr", "attr", "part"):
+    if kind in ("load", "reload", "paste", "machine", "gate", "tstr", "attr", "part", "indirect", "partwrite"):
         if kind == "load":
             fxx, eng_in = fx, eng0
         elif kind == "reload":
@@ -1244,7 +1320,12 @@ def net_check(t, s, d, log):
             fxx = {**fx, 7: fx[4]}
             eng_in = {**eng0, 7: eng0[4]}
         elif kind == "machine":
-            fxx, eng_in = fx, {**eng0, 7: ENG["SP12"]}
+            fxx, eng_in = fx, {**eng0, n.get("enter", 7): ENG["SP12"]}
+        elif kind == "partwrite":
+            fxx, eng_in = fx, {**eng0, n["enter"]: ENG[c["park"][n["enter"]]]}
+        elif kind == "indirect":
+            fxx = fx
+            eng_in = {**eng0, **{k: ENG[c["park"][k]] for k in n["enter"]}}
         elif kind in ("gate", "attr"):
             fxx = fx
             eng_in = {**eng0, **{k: ENG[c["park"][k]] for k in c["park"]}}
@@ -1253,13 +1334,15 @@ def net_check(t, s, d, log):
         else:                                   # part: part 1
             fxx = {k: ("DJEQ", "DARK") for k in GT}
             eng_in = {5: 2, 6: 2, 7: 2}
-        entering = [n["enter"]] if kind == "tstr" else sorted(c["park"]) if kind == "attr" else None
+        entering = ([n["enter"]] if kind == "tstr" else sorted(c["park"]) if kind == "attr"
+                    else n["enter"] if kind == "indirect" else None)
         if s.name == "net_tstr_fit":
             want = m.fix(fxx, eng_in)[0]
             t.eq("the model: it fits, nothing steps", want, eng_in)
-        elif kind in ("tstr", "attr"):
+        elif kind in ("tstr", "attr", "indirect"):
             # VEM7: the entering track's own EMUS first; the net's order is the wrong rule
-            # wherever it would step another track (the *_order scenarios)
+            # wherever it would step another track (the *_order scenarios). VEM8 (option B):
+            # the same for a track that enters indirectly (kind "indirect")
             want = m.enter_fix(fxx, eng_in, entering)[0]
             t.eq("the model steps something here", want != eng_in, True)
             net = m.fix(fxx, eng_in)[0]
@@ -1269,8 +1352,13 @@ def net_check(t, s, d, log):
                      ([k for k in entering if want[k] == 0 and eng_in[k]] != [], want != net), (True, True))
             else:
                 t.eq("the model: here the entering track is also the net's choice", want, net)
-        elif kind == "machine" or kind == "gate":
+        elif kind in ("machine", "gate", "partwrite"):
             want = discriminates(eng_in, fxx, ("low_first",))
+            if s.name in ("net_machine_order", "net_partwrite_order"):
+                # VEM8: a machine change names no single track: the net's order, which here
+                # differs from stepping the track that changed
+                t.eq("the model: the net's order differs here from stepping the track that changed",
+                     want != m.enter_fix(fxx, eng_in, [n["enter"]])[0], True)
         else:
             want = discriminates(eng_in, fxx, ("low_first", "s950_first") if 1 in eng_in.values() else ("low_first",))
         t.notes.append(f"the model: est {m.est(fxx, eng_in)} -> {m.est(fxx, want)} (budget {m.budget}): "
@@ -1296,11 +1384,30 @@ def net_check(t, s, d, log):
             if kind in ("tstr", "machine", "paste"):
                 k = n.get("enter", 7)
                 if kind == "machine":
-                    t.eq("T8 on FLEX", p[O_MACH + 7], FL)
-                    t.eq("T8's FLEX EMUS", EM_NAME.get(emus_at(p, 7, FL)[0]), nm(want[7]))
+                    t.eq(f"T{k + 1} on FLEX", p[O_MACH + k], FL)
+                    t.eq(f"T{k + 1}'s FLEX EMUS", EM_NAME.get(emus_at(p, k, FL)[0]), nm(want[k]))
                 else:
                     t.eq(f"T{k + 1} on VARI", p[O_P2 + 30 * k + 4], 4)
-            played({k: e for k, e in want.items() if kind != "machine" or k != 7}, 5400)
+            if kind == "partwrite":
+                k = n["enter"]
+                t.eq(f"T{k + 1}'s STATIC slot 1 (the 'bank read'), TSTR AUTO untouched",
+                     (p[O_SLOT5 + 5 * k], p[O_P2 + 30 * k + 4]), (1, 1))
+            if kind == "indirect":
+                k = n["enter"][0]
+                ts = c["tstr"][k]
+                t.eq(f"T{k + 1}'s TSTR untouched ({ts})", p[O_P2 + 30 * k + 4], ts)
+                if n["how"] == "tempo":
+                    r = (d / "after.rec").read_bytes()
+                    t.eq("slot 1's tempo: 714 -> 720 by the ATTR TEMPO key (stock's clamp)",
+                         struct.unpack(">I", r[4:8])[0], 720)
+                elif n["how"] == "slot":
+                    t.eq(f"T{k + 1}'s STATIC slot: 2 -> 1 by the slot assign", p[O_SLOT5 + 5 * k], 1)
+                    t.eq(f"T{k + 1}'s live slot byte (written by the assign)", (d / "after.live_slot").read_bytes()[0], 1)
+                else:
+                    r = (d / "after.rec2").read_bytes()
+                    t.eq("slot 2 loaded: its path, its tempo 714 -> 2880 (the loader's)",
+                         (r[:0x104].split(b"\0")[0], struct.unpack(">I", r[0x114:0x118])[0]), (PATH_B[:-1], 2880))
+            played({k: e for k, e in want.items() if kind != "machine" or k != n.get("enter", 7)}, 5400)
         t.eq("toasts by the end", end_count, 1 if stepped else 0)
         t.eq("MAX DSP: EMU LIMIT raised", len(ours), 1 if stepped else 0)
     elif kind == "emus":
@@ -1520,11 +1627,25 @@ VARIANTS = {
                         "        move.l  %d0,-(%sp)\n        pea     (TOAST_DUR).w\n        pea     str_emu_limit(%pc)\n"
                         "        jsr     (NOTIFY).l\n        addq.l  #8,%sp\n        move.l  (%sp)+,%d0\n"
                         "        lea     vg_engp(%pc),%a0")],
-    "w_enter_net": [("        bsr     vg_entered              | the tracks it put on VARI\n        tst.l   %d0\n"
-                     "        beq.s   1f\n        bsr     vg_fix                  | over budget: THEIR EMUS to OT first",
-                     "        moveq   #0,%d0\n        tst.l   %d0\n        beq.s   1f\n        nop")],
-    "w_no_net": [("        moveq   #-1,%d0\n        bsr     vg_fix\n        tst.l   %d0\n        beq.s   2f",
-                  "        moveq   #0,%d0\n        tst.l   %d0\n        beq.s   2f")],
+    # VEM6's rule: every track entering VARI gets the net's order (neither VEM7's TSTR / ATTR step
+    # nor VEM8's indirect one)
+    "w_enter_net": [("5:      move.l  %d1,%d0\n        beq.s   6f\n        bsr     vg_fix                  | over budget: THEIR EMUS to OT first",
+                     "5:      moveq   #0,%d0\n        beq.s   6f\n        nop")],
+    # VEM7's rule: an INDIRECT entry (its TSTR untouched) gets the net's order (option B off)
+    "w_indirect_net": [("        bsr     vg_new                  | the tracks that came onto VARI indirectly\n        move.l  %d0,%d1",
+                        "        bsr     vg_new                  | the tracks that came onto VARI indirectly\n        moveq   #0,%d1")],
+    # option B over-applied: EVERY track whose gate came on is named (no machine / TSTR / slot test,
+    # no bulk test: Part changes, loads, pastes, machine changes would step the changed track)
+    "w_name_all": [("        moveq   #-1,%d6                 | a bulk change since: as if every gate had been on",
+                    "        mvz.b   (vg_gon).l,%d6"),
+                   ("        move.l  %d2,%d0\n        andi.l  #0xffffff00,%d0\n        bne.s   .vn_n                   | its machine or TSTR changed\n"
+                    "        tst.l   %d2\n        beq.s   3f",
+                    "        bra.s   3f")],
+    # option B without the live-slot test: a slot byte that changed in the Part alone (a bank
+    # read before its apply) would name the track
+    "w_no_live": [("        cmp.b   (%a0),%d0\n        bne.s   .vn_n\n", "")],
+    "w_no_net": [("6:      moveq   #-1,%d0\n        bsr     vg_fix                  | the net's order for whatever is still over\n        or.l    %d0,%d2",
+                  "6:      moveq   #0,%d0\n        or.l    %d0,%d2")],
 }
 
 

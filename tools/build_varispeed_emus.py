@@ -11,10 +11,13 @@ engine latched at each trig. The audio editor's ATTR TIMESTRETCH gains VARI. A D
 guard (spec §6b) keeps each DSP core's estimated load -- a property of the settings --
 within its budget: EMUS and FX-type changes that would overload a core are refused at
 their UI handlers; a TSTR / ATTR TIMESTRETCH edit that puts a track on VARI over budget
-steps THAT track's EMUS to OT (VEM7, spec "6b, answers"); and one safety net -- run in
-the UI task's message loop when a signature of the estimate's inputs changes -- steps
-just enough tracks to OT however else a core got over (Part change, reload, loads,
-machine, paste, sample); the toast MAX DSP: EMU LIMIT is raised from that loop only.
+steps THAT track's EMUS to OT (VEM7, spec "6b, answers"), and so does a track that
+becomes a VARI track indirectly -- its gate on with its TSTR untouched: a sample's ATTR
+TEMPO, a slot assign, a sample loaded into its slot (VEM8, spec "6b, option B"); and one
+safety net -- run in the UI task's message loop when a signature of the estimate's inputs
+changes -- steps just enough tracks to OT however else a core got over (Part change,
+reload, loads, machine, paste), in its order; the toast MAX DSP: EMU LIMIT is raised from
+that loop only.
 Spec: reference/handoffs/REPITCH_REWRITE_SPEC.md (clean-room); facts:
 REPITCH_REWRITE_SCOPE.md + REPITCH_REWRITE_SCOPE_EMUS.md; this build:
 reference/handoffs/REPITCH_REWRITE_IMPL.md.
@@ -40,7 +43,7 @@ middle of what it displaces; the cave must be zero in stock and inside the class
 cave from 0x400d6500; no reference into 0x80006a40..0x80006abf; the unit must link to
 the same bytes for -mcpu=5407 and 54455 (octabam assembles DRAM units for 54455).
 
-Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM7)
+Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM8)
 """
 import hashlib, importlib.util, json, os, pathlib, struct, subprocess, sys
 from kyoti_status import gate, seal
@@ -61,7 +64,7 @@ OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx"
 OUT_BIN = ROOT / "out/OCTATRACK_VARISPEED_EMUS.bin"
 SYMS_JSON = ROOT / "out/varispeed_emus_syms.json"
 WORK = ROOT / "out/vem_build"
-VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM7"
+VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM8"
 # A TEST variant (the harness's deliberately wrong builds): VEM_VARIANT=<tag> and
 # VEM_VARIANT_SRC=<.s> build out/vem_variants/mainos_varispeed_emus_<tag>.bin from that
 # source, with every check, and no wrap. Never a flash candidate.

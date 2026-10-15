@@ -103,6 +103,11 @@
         .global vg_pend
         .global vg_note
         .global vg_entered
+        .global vg_new
+        .global vg_tkey
+        .global vg_gon
+        .global vg_bulk
+        .global vg_key
         .global vg_sig
         .global vg_last
         .global vg_fxp
@@ -132,6 +137,7 @@
         .equ    SHADOW_ADJ, 0x100a4ece-0x8ed80 | SRAM part copy, same DB-relative offsets
         .equ    LIVE_P1, 0x80000810     | live page-1 byte, + 72t + flat
         .equ    LIVE_P2, 0x80000830     | live page-2 byte, + 72t + slot2
+        .equ    LIVE_SLOT, 0x8000082f   | live sample-slot byte, + 72t (C: 0x40079604 writes it)
         .equ    BASE_W, 0x80000a50      | page-1 base words, + 64t + 2 flat, ui<<8
         .equ    SET_STATIC, 0x100d5b30  | sample settings records, stride 0x448
         .equ    SET_FLEX, 0x100b14f0
@@ -1233,38 +1239,153 @@ vg_entered:
         lea     12(%sp),%sp
         rts
 
+| vg_new (vg_tick, when the signature changed; spec "6b, option B", VEM8): d0 = the tracks
+| that became VARI tracks INDIRECTLY since the last check, so that each can be named as the
+| one the change was made to: its gate (its current machine's, rp_ui_gate, with the project
+| tempo in range) is on now and was off then, its machine and that machine's TSTR are what
+| they were (TSTR untouched), and nothing since has rewritten Parts wholesale. What that
+| leaves is a change of what its slot plays -- the sample's ATTR TEMPO or TIMESTRETCH, a
+| sample loaded into the slot -- or of which slot it plays: the slot byte, but only when the
+| live slot byte already agrees with it (a UI assign writes both, C: 0x40079424 at
+| 0x400795c0 / 0x40079610; a bank read during a project load rewrites the Part alone and
+| the Part apply comes after it, C: ot_emu, IMPL §15). Not named, so the net's order applies:
+| a Part apply, a bulk write (paste, PART menu, RELOAD PART) or another current Part since the
+| last check (rp_forget sets vg_bulk; rp_sync forgets on another Part), a machine change, a
+| TSTR change (P2EDIT's TSTR is VEM7's: vg_note / vg_entered). Keeps the snapshot (vg_gon,
+| vg_key) for the next check. Keeps all but d0.
+vg_new:
+        lea     -36(%sp),%sp
+        movem.l %d1-%d7/%a0-%a1,(%sp)
+        move.w  %sr,%d7
+        move.w  #0x2700,%sr             | the flag is set from the frame path too
+        mvz.b   (vg_bulk).l,%d6
+        clr.b   (vg_bulk).l
+        move.w  %d7,%sr
+        tst.l   %d6
+        beq.s   1f
+        moveq   #-1,%d6                 | a bulk change since: as if every gate had been on
+        bra.s   2f
+1:      mvz.b   (vg_gon).l,%d6          | the gates at the last check
+2:      bsr     vg_tempo_ok
+        move.l  %d0,%d5                 | 0: the project tempo in range
+        moveq   #0,%d3                  | named
+        moveq   #0,%d4                  | the gates now
+        lea     vg_key(%pc),%a1
+        moveq   #0,%d1                  | t
+.vn_t:  bsr     vg_tkey                 | d0 = its key now
+        move.l  (%a1),%d2
+        move.l  %d0,(%a1)+
+        eor.l   %d0,%d2                 | what changed in it
+        tst.l   %d5
+        bne.s   .vn_n                   | the project tempo out of range: no gate
+        bsr     rp_ui_gate
+        tst.l   %d0
+        beq.s   .vn_n
+        bset    %d1,%d4                 | on now
+        btst    %d1,%d6
+        bne.s   .vn_n                   | on before (or a bulk change)
+        move.l  %d2,%d0
+        andi.l  #0xffffff00,%d0
+        bne.s   .vn_n                   | its machine or TSTR changed
+        tst.l   %d2
+        beq.s   3f                      | its slot unchanged: what the slot plays changed
+        mvz.b   -1(%a1),%d0             | its slot changed: named when the live byte agrees
+        move.l  %d1,%d2
+        lsl.l   #3,%d2
+        movea.l %d2,%a0                 | 8t
+        lsl.l   #3,%d2
+        adda.l  %d2,%a0                 | + 64t
+        adda.l  #LIVE_SLOT,%a0
+        cmp.b   (%a0),%d0
+        bne.s   .vn_n
+3:      bset    %d1,%d3
+.vn_n:  addq.l  #1,%d1
+        moveq   #8,%d0
+        cmp.l   %d0,%d1
+        blt.s   .vn_t
+        move.b  %d4,(vg_gon).l
+        move.l  %d3,%d0
+        movem.l (%sp),%d1-%d7/%a0-%a1
+        lea     36(%sp),%sp
+        rts
+
+| vg_tkey: d1 = track -> d0 = its key in the current Part: machine << 16 | that machine's
+| TSTR << 8 | its slot byte (ST / FL); machine << 16 alone above FL. Keeps all but d0.
+vg_tkey:
+        lea     -20(%sp),%sp
+        movem.l %d1-%d4/%a0,(%sp)
+        bsr     db_mach                 | d2 = m
+        bsr     part_base               | a0 = the Part
+        move.l  %d2,%d0
+        lsl.l   #8,%d0
+        moveq   #1,%d3
+        cmp.l   %d3,%d2
+        bhi.s   1f                      | THRU / NEIGHBOR / PICKUP
+        moveq   #30,%d3
+        mulu.l  %d1,%d3
+        move.l  %d2,%d4
+        add.l   %d4,%d4
+        add.l   %d2,%d4
+        add.l   %d4,%d4                 | 6m
+        add.l   %d4,%d3
+        addi.l  #OFF_P2+TSTR_SLOT2,%d3
+        mvz.b   0(%a0,%d3.l),%d4
+        or.l    %d4,%d0                 | TSTR
+        lsl.l   #8,%d0
+        move.l  %d1,%d3
+        lsl.l   #2,%d3
+        add.l   %d1,%d3
+        add.l   %d2,%d3                 | 5t + m
+        addi.l  #OFF_SLOT5,%d3
+        mvz.b   0(%a0,%d3.l),%d4
+        or.l    %d4,%d0                 | the slot
+        bra.s   2f
+1:      lsl.l   #8,%d0
+2:      movem.l (%sp),%d1-%d4/%a0
+        lea     20(%sp),%sp
+        rts
+
 | vg_tick: `jmp` from 0x40062d1c, the UI task's message-loop tail (C, stock: every message
 | the UI task takes -- keys, encoders, and DTIM1's 60 Hz tick, type 5 -- ends here, at one
 | stack depth, no handler in flight; stock's own message cases 27/29/31 raise NOTIFY at
 | this level and branch here). The safety net: when the inputs' signature differs from
-| the last one checked, vg_fix. Before that, the tracks a TSTR / ATTR edit just put on VARI
-| (vg_pend, vg_entered) get the first step: vg_fix on them alone, so on an over-budget core
-| THEIR EMUS goes to OT (VEM7). Then the toast when flagged (a refusal in the handler that
-| just ran, the entering track's step, or the net): MAX DSP: EMU LIMIT, 1.2 s. The ONLY
-| NOTIFY of this unit.
+| the last one checked, vg_fix. Before the net, the tracks that ONE track's change put on
+| VARI get the first step: vg_fix on them alone, so on an over-budget core THEIR EMUS goes
+| to OT -- a TSTR / ATTR TIMESTRETCH edit (VEM7: vg_pend, vg_entered) and any other change
+| that turned a track's gate on with its TSTR untouched (option B, VEM8: vg_new); among
+| several, the net's order. The net then takes whatever is still over, in its order. Then
+| the toast when flagged (a refusal in the handler that just ran, the entering track's step,
+| or the net): MAX DSP: EMU LIMIT, 1.2 s. The ONLY NOTIFY of this unit.
 | d0/d1/a0/a1 are free at this point (the loop's next act is a call); the rest is kept.
 vg_tick:
         tst.l   (DB_PTR).l
         beq.s   2f                      | no bank blob yet (early boot)
         tst.b   (vem_depth).l
         bne.s   2f                      | a bulk write holds the Part (not the UI task's)
-        move.b  (vg_pend).l,%d0         | a TSTR / ATTR edit just ran
-        beq.s   1f
-        clr.b   (vg_pend).l
-        bsr     vg_entered              | the tracks it put on VARI
-        tst.l   %d0
-        beq.s   1f
-        bsr     vg_fix                  | over budget: THEIR EMUS to OT first
-1:      bsr     vg_sig
+        move.l  %d2,-(%sp)
+        moveq   #0,%d2                  | stepped?
+        bsr     vg_sig
         cmp.l   (vg_last).l,%d0
-        beq.s   2f                      | nothing the estimate reads has changed
+        beq.s   4f                      | nothing the estimate reads has changed
         move.l  %d0,(vg_last).l
-        moveq   #-1,%d0
-        bsr     vg_fix
-        tst.l   %d0
-        beq.s   2f
+        bsr     vg_new                  | the tracks that came onto VARI indirectly
+        move.l  %d0,%d1
+        mvz.b   (vg_pend).l,%d0         | a TSTR / ATTR edit just ran
+        beq.s   5f
+        bsr     vg_entered              | the tracks it put on VARI
+        or.l    %d0,%d1
+5:      move.l  %d1,%d0
+        beq.s   6f
+        bsr     vg_fix                  | over budget: THEIR EMUS to OT first
+        move.l  %d0,%d2
+6:      moveq   #-1,%d0
+        bsr     vg_fix                  | the net's order for whatever is still over
+        or.l    %d0,%d2
+        beq.s   4f
         bsr     vg_sig                  | it stepped: the signature of the fixed settings
         move.l  %d0,(vg_last).l
+4:      clr.b   (vg_pend).l
+        move.l  (%sp)+,%d2
 2:      tst.b   (vg_toast).l
         beq.s   3f
         clr.b   (vg_toast).l
@@ -2168,6 +2289,10 @@ rp_forget:
         move.l  %d1,(%a0)+
         move.l  %d1,(%a0)+
         move.l  %d1,(%a0)
+        .if VEM_EMUS
+        moveq   #1,%d1                  | the guard: Parts were rewritten wholesale, so no
+        move.b  %d1,(vg_bulk).l         |   single track can be named (vg_new)
+        .endif
         rts
 rp_apply1:
         bsr.s   rp_forget
@@ -2269,6 +2394,13 @@ vg_toast:                               | MAX DSP: EMU LIMIT is due (vg_tick rai
         .byte   0
 vg_pend:                                | tracks noted off VARI before a TSTR / ATTR edit (bit t)
         .byte   0
+vg_gon:                                 | vg_new: each track's gate at the last check (bit t)
+        .byte   0
+vg_bulk:                                | vg_new: Parts rewritten wholesale since (rp_forget)
+        .byte   1
+        .balign 4
+vg_key:                                 | vg_new: each track's key at the last check (vg_tkey)
+        .long   0, 0, 0, 0, 0, 0, 0, 0
         .endif
         .balign 4
 vem_end:
