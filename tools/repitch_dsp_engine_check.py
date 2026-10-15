@@ -48,7 +48,7 @@ import repitch_engine_model as m         # noqa: E402
 
 VEND = ROOT / "vendor/dsp56300"
 PROBE = ROOT / "out/repitch_dsp_engine_probe"
-WORK = ROOT / ("out/repitch_engine_check" + ("" if m.MS_OUT == "ch6" else f"_{m.MS_OUT}"))   # per RPK_OUT build
+WORK = ROOT / "out/repitch_engine_check_sp12st"
 SR = 44100
 
 
@@ -239,7 +239,10 @@ def main():
                     cnt = WORK / f"{tag}_{sname}_{ratio}_{mname}.cnt"
                     dsp = run_probe(tag, base, hook, stop, org, b0, b1, mode, rint, rfrac, inp, o, cnt)
                     twin = model_run(mode, src, rint, rfrac, exact=exact, sched=SCHED).reshape(-1)
-                    flt = np.round(model_run(mode, src, rint, rfrac, sched=SCHED).reshape(-1) * (1 << 23)).astype(np.int64)
+                    # (the design's output limited to the 24-bit word the DSP writes: the render's
+                    # overshoot on a full-scale sound is no arithmetic difference)
+                    flt = np.clip(np.round(model_run(mode, src, rint, rfrac, sched=SCHED).reshape(-1) * (1 << 23)),
+                                  -(1 << 23), (1 << 23) - 1).astype(np.int64)
                     k = min(len(dsp), len(twin))
                     d = dsp[:k] - twin[:k]
                     frac = float(np.mean(d != 0))

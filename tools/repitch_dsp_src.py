@@ -13,14 +13,14 @@ REVERB's own X data tables (five modules per payload that only SPRING's code
 references -- the canary run of NOTES Session 112), and zqinit copies them to
 Y. Run 1 (three adjacent 72-word modules) holds the render's half-table; run
 2 (116 + 384 words) the RPSP and RPS9 half-rows, in that order (zqinit's r1 runs
-on from one to the next). Rev 17 (RPSP = mid + side, raw outputs 7/8 by default): no cutoff
-table, no aux blocks; the RPSP kernel is 8 taps (the mid's).
+on from one to the next). RPSP is full stereo since 2026-10-15 (raw outputs 7/8, 8-tap
+ADC per channel; reference/handoffs/VARISPEED_EMUS_SP12_STEREO.md); rev 17's mid/side
+is at the tag ref/sp12-midside-vem7.
 
     python3 tools/repitch_dsp_src.py [A|B] [ORG]   -> assembles, prints size + tag
 """
 import os
 import pathlib
-import re
 import sys
 
 import numpy as np
@@ -33,20 +33,20 @@ import repitch_engine_model as m         # noqa: E402
 ASM = HERE / "patch_repitch_dsp.asm"
 
 # Y:$795..$FFF is free on stock (octabam, hardware); SIDECHAIN3 owns $800-$9FF.
-# Per-track RPSP slots at STBASE + x:$418 ($20 words: the render's residual
-# ring, modulo-addressed so it starts the slot, then the state); the tag in the
-# last word of track 3's slot; the RPSP table (32 x 8 = $100 words), the RPS9
+# Per-track RPSP slots at STBASE + x:$418 ($20 words: the render's stereo ring, 2L words
+# with L and R interleaved, modulo-addressed so it starts the slot, then the state); the
+# tag in the last word of track 3's slot; the RPSP table (32 x 8 = $100 words), the RPS9
 # table (32 x 16 = $200), the render's step table at $E00 (R rows of BROW words: the L
-# taps' (T, D) pairs, then padding, so a row starts at BTAB + BROW j; to $FFF). zqinit
-# builds T in a scratch run inside the RPS9 table's place before it copies that table.
+# taps' (T', D) pairs, then padding, so a row starts at BTAB + BROW j; to $FFF). zqinit
+# builds T' in a scratch run inside the RPS9 table's place before it copies that table.
 STBASE, TABTAG, SPTAB, R9TAB, BTAB, YEND = 0xA00, 0xA7F, 0xA80, 0xC00, 0xE00, 0x1000
 BROW = 32                                 # the render table's row stride (2L = 20 words used)
 TTMP = R9TAB                              # zqinit's scratch run of the render's T (161 words)
 # the tag says the Y tables' CONTENTS and LAYOUT are this build's: Y_LAYOUT moves it when the
 # copy changes shape (2: rev 17's first cut, the cutoff table in Y; 3: no cutoff table; 4: the render's
-# table transposed)
-Y_LAYOUT = 6                              # 6: the VEM DSP optimisation (padded render rows, RPS9 transposed)
-TAGSP = 0x5A5A09                          # "this slot is this layout's" (rev 11: ...02, 12: ...03, 13: ...04, 14: ...05, 17 first cut: ...06, aligned: ...07, VEM DSP optimisation: ...09)
+# table transposed; 6: the VEM DSP optimisation, padded render rows, RPS9 transposed)
+Y_LAYOUT = 7                              # 7: SP12 stereo (the render's table holds T' = T + 1/2)
+TAGSP = 0x5A5A0A                          # "this slot is this layout's" (rev 11: ...02, 12: ...03, 13: ...04, 14: ...05, 17 first cut: ...06, aligned: ...07, VEM DSP optimisation: ...09, SP12 stereo: ...0A)
 
 # SPRING REVERB's exclusive X data modules, per payload: (address, words), and
 # the two contiguous runs they form. X:0x8cf0 / 0x87b0 (27 words) is shared
@@ -102,12 +102,20 @@ def r9_stored():
     return [r9[n * p + t] for t in range(n) for p in range(16)], n
 
 
-def render_half():
-    """The render's step table T[0..LR/2] (zqinit rebuilds the rest and D)."""
+def render_tp():
+    """T' = T + 1/2 (Q23) = (1 - Gc) / 2, the render's step response / 2, k = 0..LR: the
+    stereo kernel's ring holds outputs, not residuals (repitch_engine_model.DspExact)."""
     T, _ = m.render_q23()
+    return T + (1 << 22)
+
+
+def render_half():
+    """The render's step table T'[0..LR/2] (zqinit rebuilds the rest, T'[LR-k] = 1/2 - T'[k],
+    and D)."""
+    Tp = render_tp()
     n = m.RENDER["L"] * m.RENDER["R"]
-    assert all(T[n - k] == -(1 << 22) - T[k] for k in range(n // 2 + 1)), "T is not antisymmetric"
-    return [int(v) & 0xFFFFFF for v in T[:n // 2 + 1]]
+    assert all(Tp[n - k] == (1 << 22) - Tp[k] for k in range(n // 2 + 1)), "T' is not antisymmetric"
+    return [int(v) & 0xFFFFFF for v in Tp[:n // 2 + 1]]
 
 
 def x_data(payload):
@@ -122,42 +130,6 @@ def x_data(payload):
     data = {r1 + i: w for i, w in enumerate(run1)}
     data.update({r2 + i: w for i, w in enumerate(run2)})
     return data
-
-
-CHB = 0xFE0                               # (ch12, dropped from the DSP kernel: the model's constants only)
-VARIANTS = ("ch6", "raw", "ch12")
-
-
-def variant_text(text, out=None):
-    """Keep the ';@ name,name' ... ';@' blocks of patch_repitch_dsp.asm that name this build."""
-    out = out or m.MS_OUT
-    keep, res = True, []
-    for line in text.splitlines(keepends=True):
-        mm = re.match(r";@(.*)$", line)
-        if mm:
-            names = [n.strip() for n in mm.group(1).split(",") if n.strip()]
-            assert set(names) <= set(VARIANTS), line
-            keep = not names or out in names
-            continue
-        if keep:
-            res.append(line)
-    return "".join(res)
-
-
-def dyn_consts():
-    """Channels 1/2: the two decays per pass, the opening's start, g's polynomial / 16."""
-    pc = m.dyn_poly()[::-1]                     # PC0 .. PC4
-    c = dict(DKQ=q23(m.DYN_K), DFQ=q23(m.DYN_F), DP=q23(m.DYN_P / 8), CHB=CHB)
-    c.update({f"PC{i}": q23(v / 16) for i, v in enumerate(pc)})
-    return c
-
-
-def ms_filter():
-    """MS_CHANNEL's filter (rev 17's mid; channel 6 since 2026-10-08) as the DSP runs it:
-    section 1 = b (x + x[n-1]) + q s1[n-1]; section 2, at half scale and doubled by an asl = g/2 s1 + (-a1/2) s2[n-1] + (-a2/2) s2[n-2]."""
-    (b0, b1, b2, a1, a2), (g, _, _, c1, c2) = m.sp_channel_filter(m.MS_CHANNEL)
-    assert b0 == b1 and b2 == 0 and a2 == 0, "section 1 is the real pole with a zero at Nyquist"
-    return dict(FB=q23(b0), FQ=q23(-a1), FG2=q23(g / 2), FNA1=q23(-c1 / 2), FNA2=q23(-c2 / 2))
 
 
 def constants(payload="A"):
@@ -177,38 +149,32 @@ def constants(payload="A"):
         R9N=r9n, R9NM1=r9n - 1, R9HALF=16 * r9n, R9END=R9TAB + 32 * r9n - 1, R9RUN=16,
         R9SW=4 * (r9n // 2 - 1) + 2,                 # first tap: k_i - 2c - 1 frames, in words
         SPC2=2 * (spn // 2 - 1) + 1,                 # first tap: floor(pos) - 2c - 1 frames
-        PSPQ20=int(round(m.PSP * (1 << 20))),        # SP tick period, output samples, Q20
-        PSPM1=int(round(m.PSP * (1 << 20))) - (1 << 20),   # ... minus the interval it ticks in
+        PSPQ23=int(round(m.PSP * (1 << 20))) << 3,   # SP tick period, output samples, Q23 (Q20's value:
+                                                      # the model's PSP_TICK; < 2^24 as the AGU adds it)
         PSPH=q23(m.PSP / 2),                          # PSP/2, Q23 (the lag term)
-        RINGM1=L - 1,                                 # the mid's residual ring: L words, modulo L
+        RINGN=2 * L, RINGM1=2 * L - 1,                # the stereo ring: 2L words (L, R), modulo 2L
         BL=L, BR=R, BROW=BROW, BPAD=BROW - 2 * L, BHALF=L * R // 2 + 1, BPAIRS=L * R, BEND=BTAB + BROW * R,
         TTMP=TTMP, TTEND=TTMP + L * R,                # zqinit's scratch run of T[0..LR]
-        TTAP0=TTMP + (L - 1) * R,                     # row 0's tap 0: segment (L-1)R
-        BTNEG=(-(R + 1)) & 0xFFFFFF,                  # after T[k], T[k+1]: on to T[k-R]
+        BTSTEP=R - 1,                                 # after T'[k], T'[k+1]: on to T'[k+R]
         BRSH=BROW.bit_length() - 1,                   # x BROW as a shift
         XSP=x2, XR9=x2 + len(sp), XBL=x1,
-        SIDEC=spn // 2,                               # the side reads c + 1 frames behind, as the ADC
-        KD=q23(m.MS_SIDE_DELAY / 16),                 # ... MS_SIDE_DELAY increments more (x RH = r x 2^23)
-        LS0=int(round(m.PSP_LAG / 2 * (1 << 22))),    # ... + the smoothed read shift, Q22, from its mean
-        LSSH=m.MS_LAG_SHIFT,
-        **(ms_filter() if m.MS_OUT == "ch6" else {}),
-        **(dyn_consts() if m.MS_OUT == "ch12" else {}),
     )
-    # modulo-L addressing needs the ring at a multiple of the next power of two
-    assert L <= 0x10 and STBASE % 0x20 == 0, "the residual ring must fit a 16-aligned slot"
+    assert (1 << 23) < c["PSPQ23"] < (1 << 24), "1 < PSP < 2, as a 24-bit AGU offset"
+    # modulo-2L addressing needs the ring at a multiple of the next power of two (32)
+    assert 2 * L <= 0x20 and STBASE % 0x20 == 0, "the stereo ring must fit a 32-aligned slot"
     assert TABTAG < SPTAB and SPTAB + 32 * spn <= R9TAB and R9TAB + 32 * r9n <= BTAB
     assert c["BEND"] <= YEND and 2 * L <= BROW and BROW & (BROW - 1) == 0
+    # the tick finds row j as ((u - 1) >> 14) & $fe0 (patch_repitch_dsp.asm, RPSP): BTAB = $E00
+    assert (BTAB, BROW, R) == (0xE00, 32, 16), "the render row's bit trick wants BTAB $E00, 32-word rows, R = 16"
+    assert 2 * L == 0x14 and STBASE + 0x60 + 0x1B < TABTAG, "the slot's state starts at $14 and ends before TABTAG"
     assert R9TAB <= TTMP and TTMP + L * R + 1 <= R9TAB + 32 * r9n     # the scratch run, before R9TAB is copied
     return c
 
 
 def source(payload="A", ch12=None):
-    if m.MS_OUT != "raw":
-        raise ValueError(f"RPK_OUT={m.MS_OUT}: the DSP kernel builds RPSP's raw outputs 7/8 only "
-                         "(ch6 / ch12 were dropped with the VEM DSP optimisation; git history has them)")
     c = constants(payload)
     head = "".join(f"{k:<8}equ     ${v & 0xFFFFFF:x}\n" for k, v in c.items())
-    return head + variant_text(ASM.read_text()), c
+    return head + ASM.read_text(), c
 
 
 def assemble(org, payload="A", ch12=None):
