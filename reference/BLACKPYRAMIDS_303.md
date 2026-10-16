@@ -24,8 +24,8 @@ Builder: [`tools/build_blackpyramids_303.py`](../tools/build_blackpyramids_303.p
   - **CUT**: 200 Hz–10 kHz, exponential;
   - **RES**: 0–100 %;
   - **ENV**: env mod;
-  - **DEC**: filter-envelope decay, 200 ms–2 s, exponential (default 38 ≈ 400 ms);
-  - **ACC**: accent amount, 0 = no accent.
+  - **DEC**: filter-envelope decay, 50 ms–2 s, exponential (default 72 ≈ 400 ms);
+  - **ACC**: the accent scale for the steps you accent (127 = each lock's amount, 0 = no accents).
 - **SETUP page:**
   - **WAVE**: saw (0) → square (127), a continuous blend at equal loudness;
   - **TUNE**: A4 = 400–480 Hz, 64 = 440 Hz;
@@ -34,7 +34,8 @@ Builder: [`tools/build_blackpyramids_303.py`](../tools/build_blackpyramids_303.p
   - **VOL**: 0 off; 1–64 clean (−30 dB to full); 65–127 the same level driven into a soft clip,
     up to +4.5 dB. The default is 99 = +2.5 dB.
 - **Notes:** a trig plays a note with the knobs at that step, so p-lock PTCH for a melody.
-- **Accent:** p-lock ACC on the step.
+- **Accent:** p-lock ACC on the step (the lock is that step's amount, scaled by the ACC knob). A
+  note without an ACC lock is never accented. Live MIDI notes with velocity above 100 are accented.
 - **Slide:** an OT slide trig on a note glides into it from the previous note without
   retriggering. The previous note holds into it.
 - **Ties:** trigless locks and/or trigless trigs straight after a note hold it, in any mix.
@@ -164,7 +165,14 @@ Control decisions (the author's):
   LFOs and p-locks never write the live byte, so they're untouched.
 - **VOL:** clean lower half, driven upper half.
 - **Ties:** both trigless kinds.
-- **Accent:** an ACC p-lock.
+- **Accent (MT27, 15 Oct 2026):** as on a real 303, accent is marked per step and the ACC knob is a
+  global control. A step is accented only by an ACC p-lock; it plays at lock × ACC / 127, so the ACC
+  knob scales every accent at once (default 127: the locks at face value; 0: no accents). An
+  unlocked note is never accented, whatever the knob says, so DEC always applies to it. A live MIDI
+  note with velocity above 100 is accented at the knob's amount; the track and chromatic keys are
+  not, and a TRIG + YES preview takes its step's lock. The knob's value is read from the Part,
+  because the live byte and the engine's base value show a playing step's lock instead.
+  Before MT27, any ACC value above 0 accented a note, so a knob above 0 accented every note.
 - **Name:** BLKPYRAMD, with a "3" glyph.
 - **WAVE:** checked flat in loudness (within 0.8 dB) across the knob.
 

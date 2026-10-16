@@ -288,17 +288,19 @@ ot_live_req_hook:
         movem.l %d2-%d6/%a2,(%sp)
         jmp     (0x40005038).l
 
-| a MIDI chromatic note (0x4000e746: d2 = the track, (a3) = the note, a5 = the mailboxes, d4 -> the
+| a MIDI chromatic note (0x4000e746: d2 = the track, (a3) = the note, 1(a3) its velocity, a5 = the mailboxes, d4 -> the
 | staged PTCH lock, a2 -> the held note): post the START; on an OT-303 track skip FLEX's PTCH lock
 | (control.c keeps the note as a pitch offset)
 ot_live_midi_hook:
         moveq   #29,%d1
         move.l  %d1,(%a5,%d2.l*4)
+        mvz.b   1(%a3),%d0              | MT27: the velocity (the message is status, note, velocity)
+        move.l  %d0,-(%sp)
         mvz.b   (%a3),%d0
         move.l  %d0,-(%sp)
         move.l  %d2,-(%sp)
         jsr     ot_live_midi
-        addq.l  #8,%sp
+        lea     12(%sp),%sp
         tst.l   %d0
         beq.s   1f
         jmp     (0x4000e75a).l

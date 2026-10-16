@@ -30,10 +30,11 @@
 
 /* SRC (page 1) then SRC SETUP (page 2), stored with the track (params.h has the ranges). PTCH 36 = C3.
  * Open303's
- * defaults: CUT 30 (500 Hz), RES 64, ENV 32, DEC 72 (405 ms; 50 ms .. 2 s since MT25), SLID 38 (60 ms); ACC 0 (an accent is
+ * defaults: CUT 30 (500 Hz), RES 64, ENV 32, DEC 72 (405 ms; 50 ms .. 2 s since MT25), SLID 38 (60 ms); ACC 127 (MT27: the
+ * accent SCALE, full; a step is accented only by an ACC p-lock, and plays lock x ACC / 127; was ACC 0: an accent is
  * an ACC lock), GATE 63 (half a step), VOL 99 (driven +2.5 dB, MT10's default sound). The 12th slot is
  * hidden (MT13's OSC test switch is gone: the saw runs free, the user's choice on the unit). */
-const uint8_t ot_defaults[12] = {36, 30, 64, 32, 72, 0, 0, 64, 38, 63, 99, 0};
+const uint8_t ot_defaults[12] = {36, 30, 64, 32, 72, 127, 0, 64, 38, 63, 99, 0};
 static const char *const ot_names[12] = {
     "PTCH", "CUT", "RES", "ENV", "DEC", "ACC", "WAVE", "TUNE", "SLID", "GATE", "VOL", ""
 };
@@ -277,19 +278,19 @@ int ot_validate_part(uint8_t *part) {
  * long at +0, bit s - 32),
  * the length and scale of the pattern (+0x8e53/+0x8e54) or, in PER TRACK mode (+0x8e55), the
  * track's (+0x50/+0x51); ticks per step 0x400aba50[scale], tempo 0x80001814 = BPM x 24. */
-struct ot_qn { uint32_t gl; uint8_t step, slide, call; };
+struct ot_qn { uint32_t gl; uint8_t step, slide, call, acc; };
 #define QN 4u
-static struct ot_qn q[8][QN] = {{{0, 0, 0, 0}}};
+static struct ot_qn q[8][QN] = {{{0, 0, 0, 0, 0}}};
 static uint8_t qn[8] = {0}, qcall[8] = {0}, qlast[8] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, qlen[8] = {0};
 static uint32_t qctx[8] = {0};          /* the step being scheduled: 1 << 24 | bank << 16 | pattern << 8 | step */
 static struct ot_voice voice[8] = {{{0}, 0, {0}, 0, 0, 0, 0, 0, 0, 0}};
 /* MT26: a push-and-turn (coarse) knob step. The editor writes such a step to the engine's base value at
  * once, without the 1/16-a-frame slew it gives a normal turn (0x40055190: the knob's coarse flag
  * 0x46c7d244 + 20 k + 8 -> 0x400551bc), so CUT / ENV jumped several values. Only the knob writes the
- * live byte (0x80000810 + 72 t + slot): when it moves and the lane's value jumped more than one knob
- * value in that frame, the value sent is slewed the editor's way (1/16 a frame) until it arrives. A
- * normal turn arrives slewed already; an LFO or a p-lock leaves the live byte alone and is sent as is;
- * a note's frame ends a glide. */
+ * Part's value (the live byte and the base word also show a playing step's p-lock): when it moves and
+ * the lane's value jumped more than one knob value in that frame, the value sent is slewed the
+ * editor's way (1/16 a frame) until it arrives. A normal turn arrives slewed already; an LFO or a
+ * p-lock leaves the Part alone and is sent as is; a note's frame ends a glide. */
 struct ot_cg { uint16_t s, lane; uint8_t live, gliding, have; };
 static struct ot_cg cg[8][2] = {{{0, 0, 0, 0, 0}}};
 static unsigned coarse_glide(struct ot_cg *g, unsigned live, unsigned lane, unsigned ev) {
@@ -311,6 +312,9 @@ static unsigned coarse_glide(struct ot_cg *g, unsigned live, unsigned lane, unsi
  * 0x200 ping + 64 track, hw 0x15 high byte: 0 ANLG, 1 RTRG, 2/3 the trigless-trig pair) is switched
  * to its analog twin for that frame (no reset; ATK still fades in a note from silence). */
 static uint32_t snd_until[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+/* MT27: the accent of the note each track last started (0: none), and lock x scale / 127 */
+static uint8_t acc_now[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+static unsigned acc_amount(unsigned lock, unsigned scale) { return (lock * scale + 63u) / 127u; }
 /* MT21, short AMP HOLD / REL: the AMP envelope can close while this voice still sounds (its gate is
  * longer); the next trig then opened it in one sample (ATK 0) onto a sounding voice: a pop (a sample
  * restarts from its start there). While the voice sounds, a trig's AMP gets at least ATK 1 (a linear
@@ -387,7 +391,8 @@ void ot_note(unsigned track) {
     unsigned hold = i < len && step_bit(trk, 0x00, n) && step_bit(trk, 0x48, n);
     uint32_t gl = hold ? (count + 1) * sl : (count - 1) * sl + ot_gate_samples(knob_now(track, OT_GATE), sl);
     gl = gl < 1 ? 1 : gl > 0x7ffffeu ? 0x7ffffeu : gl;
-    struct ot_qn e = {gl, (uint8_t)s, (uint8_t)step_bit(trk, 0x48, s), qcall[track]};
+    unsigned acc = U8(trk + 0x59 + 32u * s + OT_ACC);      /* MT27: the step's ACC p-lock (0xff: none) */
+    struct ot_qn e = {gl, (uint8_t)s, (uint8_t)step_bit(trk, 0x48, s), qcall[track], (uint8_t)(acc > 127 ? 0 : acc)};
     unsigned k = qn[track];
     if (k && q[track][k - 1].step == s && q[track][k - 1].call == qcall[track]) q[track][k - 1] = e;   /* the same call again */
     else {
@@ -404,8 +409,8 @@ void ot_note(unsigned track) {
  * key-up / note-off / YES release (0x40 in the mailbox: ot_live_release). A pending note lapses after
  * LIVE_TTL frames, so a later pattern or Part flag never plays it. */
 #define LIVE_TTL 2756u                    /* frames: 1 s */
-struct ot_live { uint32_t pending; int32_t semis; uint8_t release, sounding, ptch, armed, abs, note; };
-static struct ot_live live[8] = {{0, 0, 0, 0, 0, 0, 0, 0}};
+struct ot_live { uint32_t pending; int32_t semis; uint8_t release, sounding, ptch, armed, abs, note, vacc; };
+static struct ot_live live[8] = {{0, 0, 0, 0, 0, 0, 0, 0, 0}};
 /* the frames each DSP core's voice has been sent records since boot (T1-T4, T5-T8): the DSP takes the
  * table chunks in order, so two full passes of chunks guarantee its tables (it renders silence and
  * drops notes until then). Nothing plays a track while the transport is stopped and idle, so the
@@ -422,7 +427,7 @@ void ot_live_req(uint32_t ret, unsigned t, unsigned cmd) {
     for (unsigned i = 0; i < 6; ++i)
         if (ret == live_rets[i]) {
             if (ret != 0x4004fcc6u) { live[t].semis = 0; live[t].abs = 0; }   /* the chromatic keys set theirs first */
-            live[t].pending = ot_frames + LIVE_TTL; live[t].armed = 0;
+            live[t].pending = ot_frames + LIVE_TTL; live[t].armed = 0; live[t].vacc = 0;
             ++ot_live_reqs;
             return;
         }
@@ -441,14 +446,16 @@ int ot_live_chrom(unsigned t, unsigned raw, uint32_t ret) {
     live[t].semis = (int32_t)((raw - 4u) / 5u) - 12;
     live[t].abs = ret != CHROM_MIDI_RET;
     live[t].note = (uint8_t)chrom_abs(raw);
-    live[t].pending = ot_frames + LIVE_TTL; live[t].armed = 0;
+    live[t].pending = ot_frames + LIVE_TTL; live[t].armed = 0; live[t].vacc = 0;
     return 1;
 }
-/* a MIDI chromatic note (0x4000e746: notes 72-96, 84 = the track's pitch): 1 on an OT-303 track */
-int ot_live_midi(unsigned t, unsigned note) {
+/* a MIDI chromatic note (0x4000e746: notes 72-96, 84 = the track's pitch): 1 on an OT-303 track. MT27: a
+ * velocity above 100 accents it, by the ACC knob (the accent scale) */
+#define ACC_VELOCITY 100u
+int ot_live_midi(unsigned t, unsigned note, unsigned vel) {
     if (t >= 8 || !signed_track(part_base(), t)) return 0;
     live[t].semis = (int32_t)(note & 0xffu) - 84; live[t].abs = 0;
-    live[t].pending = ot_frames + LIVE_TTL; live[t].armed = 0;
+    live[t].pending = ot_frames + LIVE_TTL; live[t].armed = 0; live[t].vacc = (vel & 0x7fu) > ACC_VELOCITY;
     ++ot_live_reqs;
     return 1;
 }
@@ -553,6 +560,15 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
         volatile uint32_t *record = (volatile uint32_t *)(uintptr_t)(0x80001c90u + (ping & 1) * 0xa80u + 336u * track);
         unsigned ev = 0; uint32_t gl = 0;
         unsigned flag = U8(0x46104d0cu + track);
+        /* MT27: the ACC knob is the accent SCALE: its value in the Part (the knob writes it; a p-lock or an
+         * LFO never does -- the live byte and the base word show a step's lock while it plays). A sequencer
+         * note is accented only by its step's ACC p-lock, at lock x scale / 127; a live note by MIDI
+         * velocity (at the scale) or by a lock the preview carries in fp; anything else is not. */
+        volatile uint8_t *pb = part_base();
+        unsigned acc_scale = *knob(pb, track, OT_ACC);
+        acc_scale = acc_scale > 127u ? 127u : acc_scale;
+        unsigned acc_lane = p[OT_ACC];
+        p[OT_ACC] = acc_now[track];
         ++core_frames[track >= 4];
         if (live[track].pending && (int32_t)(ot_frames - live[track].pending) > 0) live[track].pending = 0;   /* lapsed */
         if ((flag & 16) && live[track].pending && !dsp_ready(track)) {
@@ -566,6 +582,7 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
             int32_t pt = live[track].abs ? (int32_t)live[track].note : (int32_t)p[OT_PTCH] + live[track].semis;
             pt = pt < 0 ? 0 : pt > (int32_t)OT_PTCH_MAX ? (int32_t)OT_PTCH_MAX : pt;
             p[OT_PTCH] = (uint8_t)pt;
+            p[OT_ACC] = (uint8_t)(live[track].vacc ? acc_scale : acc_lane != acc_scale ? acc_amount(acc_lane, acc_scale) : 0u);
             live[track].pending = 0; live[track].armed = 0; live[track].release = 0; live[track].sounding = 1; live[track].ptch = (uint8_t)pt;
             ev = OT_EV_NOTE; gl = OT_GL_HELD;
             ++ot_live_notes;
@@ -587,6 +604,7 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
                 ++ot_trigs;
                 ev = OT_EV_NOTE | (e.slide ? OT_EV_SLIDE : 0);
                 gl = e.gl;
+                p[OT_ACC] = (uint8_t)acc_amount(e.acc, acc_scale);
                 live[track].sounding = 0;                    /* a sequencer note takes the voice */
                 trace(2, track, e.step, (unsigned)U8(0x46104d0cu + track) << 8 | qd);
             } else {
@@ -594,6 +612,7 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
                 trace(2, track, 0xff, (unsigned)U8(0x46104d0cu + track) << 8 | qd);
             }
         }
+        if (ev & OT_EV_NOTE) acc_now[track] = p[OT_ACC];  /* the sounding note's accent (its release) */
         if (ev) { ot_evptch[ot_evn & 31] = p[OT_PTCH]; ot_evlog[ot_evn++ & 31] = track << 28 | ev << 24 | (gl & 0xffffffu); }
         volatile uint16_t *amp = (volatile uint16_t *)(uintptr_t)(0x80000110u + 0x200u * (ping & 1u) + 64u * track);
         if ((amp[0x1e] & 0x10u) && (int32_t)(snd_until[track] - ot_frames) > 0) {
@@ -612,8 +631,8 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
          * only the high byte made a turn step half a semitone at a time. */
         unsigned cut_q8 = fp[OT_CUT] > 0x7f00u ? 0x7f00u : fp[OT_CUT];
         unsigned env_q8 = fp[OT_ENV] > 0x7f00u ? 0x7f00u : fp[OT_ENV];
-        cut_q8 = coarse_glide(&cg[track][0], U8(0x80000810u + 72u * track + OT_CUT), cut_q8, ev);
-        env_q8 = coarse_glide(&cg[track][1], U8(0x80000810u + 72u * track + OT_ENV), env_q8, ev);
+        cut_q8 = coarse_glide(&cg[track][0], *knob(pb, track, OT_CUT), cut_q8, ev);
+        env_q8 = coarse_glide(&cg[track][1], *knob(pb, track, OT_ENV), env_q8, ev);
         ot_record(record, &voice[track], p, ev, gl, cut_q8, env_q8);
     }
     U32(0x80001c80u) = (uint32_t)(uintptr_t)(cursor + 4 + 2 * n);
