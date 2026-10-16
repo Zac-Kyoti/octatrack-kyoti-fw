@@ -438,3 +438,11 @@ selector, keeps the net's order.
 **VARISPEED_EMUS also gets a Bugbuild:** `BUG_VEM…`, composed by `tools/build_bugbuilds.py` through
 the same explicit WIP opt-in as VARISPEED (`--wip VARISPEED_EMUS`). It is never sealed, and the
 final Bugbuilds are untouched.
+
+#### 6b, option B extended: answers (the user, 2026-10-15, after VEM10)
+
+1. **A track already on VARI under its old machine,** which a slot pick moves onto its other
+   machine's heavier VARI setting, counts as named: its own EMUS steps to OT. This is VEM10's
+   behaviour.
+2. **The equal-slot pick** (the machine changes, and the slot assign does not run because the
+   other machine already holds that slot) counts as a slot pick. This is VEM10's behaviour.
