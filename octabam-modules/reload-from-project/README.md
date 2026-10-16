@@ -8,6 +8,10 @@ chords, no modal window and no timeout:
 - **`[PTN]` + `[TRACK n]`** — reload that track's card-saved sequence, Part untouched
 - **`[BANK]` + `[TRACK n]`** — the same, and re-apply the saved Part
 
+`[CUE]` + `[TRACK n]` is stock cue behaviour, not a reload. The eight stock refs to
+the `0x40083dc4` detour are CUE's held-modifier TRACK slots (`0x400bf122`); without a
+panel PTN held gate that path toasted `TRK SEQ RELOADED` (16 Oct 2026, MKII).
+
 It reloads the pattern that is *playing*, on an audio or a MIDI track, and never
 restarts the sequence or the internal metronome. A stock-style toast confirms when
 the reload has **finished** — and says so if the trigs did not land.
