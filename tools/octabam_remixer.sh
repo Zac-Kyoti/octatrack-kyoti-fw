@@ -5,8 +5,8 @@
 # octabam_remixer.sh -- open octabam's remixer, updated to octabam's latest `main` first.
 #
 # The remixer runs from its OWN clone (default ~/Documents/octabam), never from refs/octabam:
-# refs/octabam is this repo's pinned research harness (98 tools import it; REPITCH and
-# SIDECHAIN's builders read from it), so it moves only by `tools/refs/sync.py`, on purpose.
+# refs/octabam is this repo's pinned research harness (98 tools import it; the DSP
+# builders read from it), so it moves only by `tools/refs/sync.py`, on purpose.
 #
 # Every run: fetch, fast-forward to origin/main, update submodules, rebuild the toolchain
 # only when setup.sh changed and re-provision Python only when pyproject/uv.lock changed
