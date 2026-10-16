@@ -106,7 +106,7 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | VARISPEED_EMUS DSP kernel gate | `tools/varispeed_emus_dsp_*` (bit-exact against the reference engine) |
 | DSP assembly | `tools/dsp_xasm.py` over `vendor/dsp56300`'s `dsp_asm` |
 | a final build | `tools/build_<feature>.py` → `.syx` (MIDI) + `.bin` (CF card); see `BUILD_KYOTI.md` |
-| the combined image | `tools/build_kyoti.py` — builds **KYOTI V1.5 (WIP)**; **KYOTI V1.4, FINAL 2026-10-14**, builds from `19348d9` (see §6) |
+| the combined image | `tools/build_kyoti.py` — builds **KYOTI V1.5, FINAL 2026-10-16**; V1.4 (FINAL until then) builds from `19348d9` (see §6) |
 | octabam's remixer (`make remix`) | `sh tools/octabam_remixer.sh` — its own clone at `~/Documents/octabam`, fast-forwarded to octabam's `main` on every launch; `refs/octabam` stays the pinned research harness |
 | each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final; `--only NAME` builds one) |
 | DIRECT JUMP V6.4, the OT↔AR parity build | `tools/build_direct_jump_v6_4.py` — WIP **by design**: kept buildable at the user's request (hardware-confirmed image `4a6c1b5e…`), never to be promoted |
@@ -179,17 +179,19 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
     - **Builds:** standalone mainos `42c0da93…`, syx `eee3f936…`; `BUG_BP303` mainos `1df0fd21…`.
     - The FINAL pins still name `3624a1e7…` / `0de8be5c…`.
   - Open: a square-wave voice on core 0 under the heaviest FX stack may overrun (§4 there).
-  - Open: not in KYOTI yet. SIDE-CHAIN's key bus has left the voice's Y (WIP, 2026-10-15), but
+  - Open: not in KYOTI yet. SIDE-CHAIN's key bus has left the voice's Y (FINAL 2026-10-16), but
     both still need SPRING REV's program words, so a combined image gives up a second effect for
     one of them. ERASE_EMPTY_TRIGLESS_LOCKS must also skip these tracks (an empty trigless lock is
     a tie here). KYOTI V1.5 is built without BLACKPYRAMIDS_303 (below).
 
-- **KYOTI V1.5 (WIP 2026-10-15, not flashed, not promoted)** — V1.4 + VARISPEED (`0cc30d7`; the
-  same bytes as the FINAL VARISPEED of 2026-10-15) + the 15 Oct SIDE-CHAIN.
+- **KYOTI V1.5** — **FINAL 2026-10-16** (the user's instruction), **not flashed yet**: every
+  feature in it is confirmed on its own, the combined image is not. V1.4 + VARISPEED + the
+  SIDE-CHAIN of 2026-10-16.
   - **Layout:** VARISPEED's unit is CAVE's first piece, at its own address 0x400d6500. MUTE
     MODE's menu piece and `rtm_mask` move to SAFE. RELOAD_FROM_PROJECT goes to DRAM (one 6 KB
     page), as in V1.2–V1.3.
-  - **Builds:** mainos `6f6f3268…`, syx `8950f824…`.
+  - **Builds:** mainos `6f6f3268…`, syx `8950f824…`, CF `.bin` `ac2d3e8f…`; it builds without the
+    opt-in and seals.
   - **Composer checks:** every delta is disjoint; outside the caves each feature equals its
     standalone; VARISPEED's bytes are identical to its standalone.
   - **Emulator:**
@@ -199,7 +201,7 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
     - The SIDE-CHAIN project's mix equals the SIDE-CHAIN standalone's (per-slot RMS).
 - **KYOTI V1.4** (`tools/build_kyoti.py` at `19348d9`, 2026-10-13) — V1.3 without its earlier varispeed module,
   ROM-only (RELOAD back in the proven cave, EMPTY_PATTERN_LED_FIX in SAFE_CAVE). **FINAL
-  2026-10-14**, mainos `72710a3c…`, syx `568b2efb…`; flashed by the user: everything works.
+  2026-10-14 until 2026-10-16** (replaced by V1.5), mainos `72710a3c…`, syx `568b2efb…`; flashed by the user: everything works.
 - **KYOTI V1.3** — FINAL 2026-10-10 until 2026-10-13, syx `9f6d2374…`, mainos
   `d14555ec…`; flashed by the user: everything works, PLATE REVERB fixed. It is V1.2 with
   SPRING's reclaim bounded by its real record (P..P+0x192); V1.2 (syx `cd5a723b…`, FINAL
@@ -219,28 +221,21 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   replacement under discussion (octabam remix). The octabam images OBKYOTI6–12 are clean.
 - **DIRECT_JUMP_KYOTI** — not yet on hardware: MIDI tracks, and Program Change on fast
   re-cues.
-- **SIDECHAIN_COMPRESSOR, WIP 2026-10-15 (not flashed, not promoted):**
+- **SIDECHAIN_COMPRESSOR** — **FINAL 2026-10-16**; the user flashed the 15 Oct build
+  and tested it: all checks pass.
   - **The change:** the DSP keybus and MON words moved from Y:`$800–$9ff`/`$7f0` to
     Y:`$7e00–$7fff`/`$7df0` (the first internal FX2 slot's unused tail), freeing `$7f0–$9ff` for
     BLACKPYRAMIDS_303's voice. `sctap` now copies each block in one pass, at 2 instructions a word
     (ot_emu: 96 instructions a call against 163).
-  - **Verified (emulator only):** `tools/emu_sc_sctap.py` (a model, and word for word against
-    `8265344`'s tap), `emu_sc_dsp3.py`, and ot_emu, where the mix equals the promoted build's.
-  - **Builds:** standalone mainos `9f7899d4…`, `BUG_SC3X` mainos `5513f93b…`. They are WIP, so
-    `kyoti_status` FINAL still pins the old images. KYOTI V1.4's pin breaks with them, and its
-    FINAL image is unchanged.
-  - **To check on the unit:**
-    - KEY ducking on the same core and across cores;
-    - MON;
-    - DARK REV and PLATE REV in FX2 on T1 and T5 (the slot whose tail now holds the keybus),
-      long settings, with a keyed COMPRESSOR running: no cross-talk.
-  - **Sam's PR #2 on our repo** (`scmonbody`, for LOAD METER's composed hook): reviewed, merges
-    cleanly on top, not merged yet (the user merges it). octabam's pin moves to the merge commit.
+  - **Pins:** standalone mainos `9f7899d4…` (syx `b26551a2…`, CF `.bin` `1d5c7ad4…`); `BUG_SC3X`
+    mainos `5513f93b…` (syx `6cf980e1…`). The full `build_bugbuilds.py` run passes again.
+  - **Sam's PR #2 on our repo** (`scmonbody`, MON's body exported for octabam's LOAD METER):
+    merged 2026-10-15 (`cccdb77`).
 - **SIDECHAIN_COMPRESSOR** — `sc_norm` (FINAL 2026-10-08, syx `d21762d0…`): a COMPRESSOR saved
   on stock firmware (KEY byte 127) comes up with its side-chain OFF. User flashed the standalone
   and KYOTI V1.1 `370d7705…`: no issues. Not specifically tried on hardware: a project saved on
-  stock firmware (the reset is emulator-verified). octabam: draft PR sambanks/octabam#648
-  (pin 45ab46c; draft until an octabam-built image is flashed).
+  stock firmware (the reset is emulator-verified). octabam: sambanks/octabam#648 merged
+  2026-10-09 (pin 45ab46c).
   `NOTES.md` Session 126.
 - **VARISPEED / VARISPEED_EMUS** (`tools/build_varispeed.py`, `tools/build_varispeed_emus.py`)
   — **FINAL 2026-10-15**; the user flashed both and tested them: everything works.
@@ -254,7 +249,7 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   - **Tests:** `tools/varispeed_emus_test.py` 45/45, `tools/varispeed_test.py` 11/11.
   - **Record:** `reference/handoffs/VARISPEED_SPEC.md` and `VARISPEED_IMPL.md`; the SP12 mid/side
     design is kept at tag `ref/sp12-midside-vem7` (`SP12_MIDSIDE_REFERENCE.md`).
-  - **KYOTI:** V1.5 (WIP) carries this VARISPEED. VARISPEED_EMUS is not in KYOTI: it needs
+  - **KYOTI:** V1.5 carries this VARISPEED. VARISPEED_EMUS is not in KYOTI: it needs
     SPRING REVERB's DSP space, as SIDE-CHAIN and BLACKPYRAMIDS_303 do.
   - **Open:** the S950 recording-rate option is parked (`VARISPEED_EMUS_S950_RATE_SCOPE.md`).
 - **octabam port** — the six modules, REC_TRIG_MUTE and SIDECHAIN_COMPRESSOR (+ MUTE_MODES'

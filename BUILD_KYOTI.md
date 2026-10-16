@@ -66,31 +66,25 @@ those), as
 alone. MIDI_PLAYS_FREE_FIX writes only its `mainos_` image; to flash it on its own, use the
 no-assembler patch below or wrap it as its builder's header shows.
 
-### The combined image: KYOTI V1.4
+### The combined image: KYOTI V1.5
 
-Every FINAL feature except BLACKPYRAMIDS_303, VARISPEED and VARISPEED_EMUS in one image. Since 15 Oct 2026 the composer on
-`main` builds KYOTI V1.5 (WIP, below), so build V1.4 from the commit it was promoted at:
+Every FINAL feature except BLACKPYRAMIDS_303 and VARISPEED_EMUS in one image:
 
 ```sh
-git worktree add ../octatrack-kyoti-fw-v14 19348d9     # then inside it, with vendor/, out/raw/, downloads/
-                                                       # and refs/octabam linked in by ABSOLUTE path:
 python3 tools/build_kyoti.py
 ```
 
-It writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.4.syx` and `.bin` (OS VERSION `KYOTI V1.4`).
+It writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.5.syx` and `.bin` (OS VERSION `KYOTI V1.5`).
 
-> **Sample memory.** V1.4 is ROM-only: the sample/recorder pool is untouched. An
-> octabam-built image (octabam's own remixer) reserves a fixed **10 MiB** whenever any module
-> runs from DRAM.
-
-**KYOTI V1.5 (WIP, not promoted):** V1.4 plus VARISPEED, with the 15 Oct 2026 SIDECHAIN_COMPRESSOR.
-`KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py` writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.5.syx`
-and `.bin` (OS VERSION `KYOTI V1.5`). RELOAD_FROM_PROJECT runs from DRAM there, as in V1.2–V1.3:
-one 6 KB page of the 85.5 MB pool.
+> **Sample memory.** RELOAD_FROM_PROJECT runs from DRAM in V1.5, as in V1.2–V1.3: one 6 KB
+> page of the 85.5 MB pool. An octabam-built image (octabam's own remixer) reserves a fixed
+> **10 MiB** whenever any module runs from DRAM.
 
 KYOTI V1.0 was withdrawn on 2026-10-06; V1.1 replaced it, V1.2 (with an earlier varispeed module) replaced V1.1,
 V1.3 replaced V1.2, whose SPRING reclaim overwrote PLATE REVERB's page (`reference/kb/caves.md` §0),
-and V1.4 replaces V1.3 without that module.
+V1.4 replaced V1.3 without that module, and V1.5 replaces V1.4, adding VARISPEED. V1.4 still
+builds from the commit it was promoted at (`git worktree add ../octatrack-kyoti-fw-v14 19348d9`,
+with `vendor/`, `out/raw/`, `downloads/` and `refs/octabam` linked in by absolute path).
 
 Every build is a **guarded binary patch**: it asserts the stock bytes at each splice
 site, checks that its code caves are free and non-overlapping, takes every detour target

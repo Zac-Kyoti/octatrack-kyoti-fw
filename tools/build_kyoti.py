@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-KYOTI V1.5 (WIP) -- every FINAL feature in one image except BLACKPYRAMIDS_303 and VARISPEED_EMUS.
+KYOTI V1.5 -- every FINAL feature in one image except BLACKPYRAMIDS_303 and VARISPEED_EMUS.
 
     MUTE MODE (OT / OTFX / OTFX-T / DT-T)      QUANTIZE LIVE REC toggle
     SIDE-CHAIN COMPRESSOR (cross-core)         TRIGLESS-LOCK AUTO-REMOVE
@@ -10,14 +10,13 @@ KYOTI V1.5 (WIP) -- every FINAL feature in one image except BLACKPYRAMIDS_303 an
     REC TRIG MUTE ([TRK]+[NO]/[YES], CC 80)    VARISPEED (TSTR VARI + QUAN)
     the bug fixes: MIDI_PLAYS_FREE_FIX, PATTERN LED, PART_CHANGE_CARRYOVER_FIX
 
-V1.5 vs V1.4 (2026-10-15, WIP until the author promotes it; V1.4 stays the FINAL image, built
-from 19348d9 and pinned in tools/kyoti_status.py as mainos_kyoti_v1.4.bin):
+V1.5 vs V1.4 (FINAL 2026-10-16; it replaces V1.4, which still builds from 19348d9):
 - VARISPEED (tools/build_varispeed.py, the plain build: ColdFire only, the DSP stock) joins. Its
   one 2,388 B unit takes the start of the proven cave, 0x400d6500, its standalone address, so
   its builder runs unchanged.
 - RELOAD_FROM_PROJECT moves to DRAM again (as in V1.2-V1.3, hardware-confirmed there): key-handler
   and sys-task code, carried by the loader (tools/dram/), one 6 KB arena page.
-- SIDECHAIN_COMPRESSOR is the 2026-10-15 WIP build (keybus Y:$7e00, one-pass sctap).
+- SIDECHAIN_COMPRESSOR is the 2026-10-16 FINAL build (keybus Y:$7e00, one-pass sctap).
 SPRING REVERB is still given up by SIDE-CHAIN alone.
 
 V1.4 vs V1.3: V1.2's earlier varispeed module is removed (2026-10-13; VARISPEED and
@@ -114,9 +113,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
 import dram                                    # noqa: E402  (tools/dram/dram.py)
 
 gate(__file__, note="""
-KYOTI V1.5 (WIP): every FINAL feature plus VARISPEED in one image, nothing placed in the
-parameter-page descriptor table (V1.0, withdrawn 2026-10-06, crashed because it did).
-RELOAD_FROM_PROJECT in DRAM. V1.4 is the FINAL image until this one is promoted.
+KYOTI V1.5: every FINAL feature except BLACKPYRAMIDS_303 and VARISPEED_EMUS in one image,
+nothing placed in the parameter-page descriptor table (V1.0, withdrawn 2026-10-06, crashed
+because it did). RELOAD_FROM_PROJECT in DRAM.
 """)
 
 VERSTR = "KYOTI V1.5"
@@ -202,7 +201,7 @@ FEATURES = {
                       {"patch_directjump_v7": "patch_directjump_v7.bin"}),
     "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "mainos_rec_trig_mute.bin", "prep",
                       {"rtm_mask": 4}),
-    # WIP, not on hardware yet. Its builder takes no placement: the plan puts its unit at its own
+    # FINAL 2026-10-15. Its builder takes no placement: the plan puts its unit at its own
     # address (asserted after the allocation).
     "VARISPEED": ("build_varispeed.py", "mainos_varispeed.bin", "prep",
                   {"patch_varispeed": "vari_build/vem_5407.bin"}),
@@ -271,7 +270,7 @@ def run_builder(sb, feat, place):
     env = dict(os.environ, KYOTI_PLACE=json.dumps(place))
     env.pop("KYOTI_ALLOW_WIP", None)
     # A WIP builder runs only when asked for by name (--with), or when this composite is itself a WIP
-    # build the user allowed (KYOTI_ALLOW_WIP=1: V1.5 carries VARISPEED and the WIP SIDE-CHAIN). The
+    # build the user allowed (KYOTI_ALLOW_WIP=1, e.g. a feature under test). The
     # composite's own seal() keeps such an image off the FINAL pin either way.
     if feat in WIP_FEATURES or os.environ.get("KYOTI_ALLOW_WIP") == "1":
         env["KYOTI_ALLOW_WIP"] = "1"
