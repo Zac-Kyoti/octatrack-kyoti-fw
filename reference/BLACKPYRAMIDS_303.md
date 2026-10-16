@@ -25,7 +25,7 @@ Builder: [`tools/build_blackpyramids_303.py`](../tools/build_blackpyramids_303.p
   - **RES**: 0–100 %;
   - **ENV**: env mod;
   - **DEC**: filter-envelope decay, 50 ms–2 s, exponential (default 72 ≈ 400 ms);
-  - **ACC**: the accent scale for the steps you accent (127 = each lock's amount, 0 = no accents).
+  - **ACC**: the accent scale for the steps you accent (127 = each lock's amount, 0 = no accents; default 100).
 - **SETUP page:**
   - **WAVE**: saw (0) → square (127), a continuous blend at equal loudness;
   - **TUNE**: A4 = 400–480 Hz, 64 = 440 Hz;
@@ -34,9 +34,8 @@ Builder: [`tools/build_blackpyramids_303.py`](../tools/build_blackpyramids_303.p
   - **VOL**: 0 off; 1–64 clean (−30 dB to full); 65–127 the same level driven into a soft clip,
     up to +4.5 dB. The default is 99 = +2.5 dB.
 - **Notes:** a trig plays a note with the knobs at that step, so p-lock PTCH for a melody.
-- **Accent:** p-lock ACC on the step (the lock is that step's amount, scaled by the ACC knob: 100,
-  the default, plays it as locked; lower cuts every accent, higher pushes them up). A note without an
-  ACC lock is never accented. Live MIDI notes with velocity above 100 are accented.
+- **Accent:** p-lock ACC on the step (the lock is that step's amount, scaled by the ACC knob: lock ×
+  ACC / 127; the knob defaults to 100). A note without an ACC lock is never accented. Live MIDI notes with velocity above 100 are accented.
 - **Slide:** an OT slide trig on a note glides into it from the previous note without
   retriggering. The previous note holds into it.
 - **Ties:** trigless locks and/or trigless trigs straight after a note hold it, in any mix.
@@ -172,13 +171,12 @@ Control decisions (the author's):
 - **VOL:** clean lower half, driven upper half.
 - **Ties:** both trigless kinds.
 - **Accent (MT27, 15 Oct 2026):** as on a real 303, accent is marked per step and the ACC knob is a
-  global control. A step is accented only by an ACC p-lock; it plays at lock × ACC / 100, at most 127
-  (MT30, 16 Oct 2026), so the ACC knob scales every accent at once: default 100 plays the locks at
-  face value, 0 none, above 100 pushes them up. MT27 had default 127 and lock × ACC / 127: a lock
-  can only be set by turning from the knob's value, so with the knob at 127 a lock could not be
-  turned up, and turning right made none (the likely "ACC lock not working" on the unit). An
+  global control. A step is accented only by an ACC p-lock; it plays at lock × ACC / 127, so the ACC
+  knob scales every accent at once (127: the locks at face value; 0: no accents). The default is 100
+  (MT30, 16 Oct 2026; MT27 had 127): a lock is set by turning from the knob's value, so at 127 a lock
+  could not be turned up, and turning right made none (the likely "ACC lock not working" on the unit). An
   unlocked note is never accented, whatever the knob says, so DEC always applies to it. A live MIDI
-  note with velocity above 100 is accented, the velocity taking a lock's place (MT30); the track and chromatic keys are
+  note with velocity above 100 is accented at the knob's amount; the track and chromatic keys are
   not, and a TRIG + YES preview takes its step's lock. The knob's value is read from the Part,
   because the live byte and the engine's base value show a playing step's lock instead.
   Before MT27, any ACC value above 0 accented a note, so a knob above 0 accented every note.
