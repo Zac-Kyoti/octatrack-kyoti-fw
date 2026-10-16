@@ -36539,3 +36539,22 @@ open, Sam's PR #2, and an optimization pass over BLACKPYRAMIDS_303's Octatrack-s
   REPITCH_REPEAT98_KYOTI) merged 2026-10-14; octabam had already dropped Jannik's REPITCH.
 * **KYOTI:** V1.5 (WIP) carries this VARISPEED, the same bytes as at `0cc30d7`. VARISPEED_EMUS is
   not in KYOTI (SPRING REVERB's DSP space).
+- **2026-10-16 cont: SIDECHAIN_COMPRESSOR (15 Oct keybus) and KYOTI V1.5 FINAL** (`ef20dd6`, `7065160`).
+  - **SIDE-CHAIN:** the user flashed the 15 Oct build from the ot303 worktree and tested it: all
+    checks pass. On main it rebuilds byte-identical: standalone mainos `9f7899d4…` (syx `b26551a2…`),
+    `BUG_SC3X` mainos `5513f93b…` (syx `6cf980e1…`). Both pinned. The full `build_bugbuilds.py`
+    run (nine images) passes again without the opt-in.
+  - **KYOTI V1.5:** promoted on the user's instruction and pinned in place of V1.4 (V1.4 still
+    builds from `19348d9`). Mainos `6f6f3268…`, syx `8950f824…`, as the ot303 session built it on
+    2026-10-15. It builds without the opt-in and seals. **Not flashed:** every feature in it is
+    confirmed on its own, the combined image is not (README says so).
+  - **Bookkeeping:** START_HERE now records Sam's PR #2 as merged (`cccdb77`) and octabam #648 as
+    merged.
+  - **octabam:** the SIDE-CHAIN pin bump is sambanks/octabam#774. It moves from `bf5bfc0` (Sam's
+    fork) to `7065160` (our repo), which carries MON's body, the keybus move and the one-pass tap.
+    `make check` passes for `sidechain-compressor` and `kyoti-mute-sidechain`. The other Kyoti
+    pins (mute-modes `bf5bfc0`, the rest `77f132f` / `329b801` / `0bc14c71`) still point at commits
+    from before the old varispeed module's folder was deleted.
+  - **octabam VARISPEED / VARISPEED_EMUS:** a branch `varispeed-modules` (`52a5b53d`) in
+    `out/octabam-final`, pinned to `a049681`; `make check` passes for both remixes. Not pushed,
+    no PR.
