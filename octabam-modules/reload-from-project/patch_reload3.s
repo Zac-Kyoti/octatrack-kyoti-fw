@@ -425,9 +425,16 @@
 | ================= Session 85: the chord redesign =================
 | Measured, see reference/RELOAD_REDESIGN.md. Both detour sites open with the
 | same 6-byte prologue and take a 6-byte jmp with no padding.
-    .equ PTN_TRK_H,      0x40083dc4     | [PTN]-overlay TRACK handler. All 8 refs to it
-    .equ PTN_TRK_RES,    0x40083dca     | are the 8 [PTN] overlay track slots, so
-                                        | arriving here IS [PTN]+[TRACK]: no held test.
+    .equ PTN_TRK_H,      0x40083dc4     | TRACK handler at the site all 8 stock refs
+    .equ PTN_TRK_RES,    0x40083dca     | point at. Those refs live in CUE's held-
+                                        | modifier sub-map table (0x400bf122, from
+                                        | CUE key 0x2a's sub-map 0x400bf2a0) -- NOT a
+                                        | [PTN] overlay. [PTN] never redirects TRACK
+                                        | keys here (Session 85); [CUE]+[TRACK] does.
+                                        | So arriving here is NOT uniquely a reload
+                                        | chord: gate on the panel PTN held bit.
+    .equ KROWS,          0x46100b18     | panel matrix held rows; code = row*8+bit
+    .equ KPTN,           0x2e           | PATTERN: row 5, bit 6
     .equ TRK_BASE_H,     0x40040250     | base TRACK handler ([BANK] does NOT override
     .equ TRK_BASE_RES,   0x40040256     | track keys, so the chord lands here)
     .equ PTN_HELD_FLAG,  0x46c7dd3e     | is_key_held([PTN]) = 0x46c7d8ee + 0x2e*24.
@@ -565,11 +572,20 @@
 | OWN mechanism rather than a detour on the [PTN] handler: set PTN_CONSUMED, which
 | stock's release path already tests and skips the window on.
 | Displaces 6 B: move.l %d2,-(%sp) ; move.l 8(%sp),%d2
+|
+| 16 Oct 2026: the eight stock refs to this site are CUE's sub-map TRACK slots
+| (0x400bf122), not a [PTN] overlay. Without a PTN held gate, [CUE]+[TRACK n]
+| reloaded and toasted "TRK SEQ RELOADED". [PTN]+[TRACK] still mostly arrives
+| through rl3_bank_trk (base TRACK + PTN_HELD_FLAG); this site stays as a
+| secondary route for any context that does land here with PTN held.
     .global rl3_ptn_trk
 rl3_ptn_trk:
     moveq   #1,%d0
     cmp.l   8(%sp),%d0                 | event == press ?
     bne.w   r3p_stock
+    move.b  KROWS+(KPTN>>3),%d0        | panel row for PTN (not the key-cache
+    btst    #(KPTN&7),%d0              | field: that is sticky for sub-map keys)
+    beq.w   r3p_stock                  | [CUE]+[TRACK] (etc.): stock, no reload
     moveq   #0,%d0
     move.b  7(%sp),%d0                 | low byte of the keycode long at 4(sp)
     bsr.w   rl3_do_ptn

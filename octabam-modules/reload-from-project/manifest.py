@@ -68,7 +68,7 @@ HOOKS = (
 # source's default), linked at 0x400d6500 -- the address the standalone,
 # hardware-confirmed image uses: 2088 bytes. octabam re-links it there on every build
 # and compares.
-REFERENCE = (0x400d6500, "592f4c6ad2e3b58b8cf9046c36ec531c8e100d72d194cdc20eae5075a99d0d71")
+REFERENCE = (0x400d6500, "9fe81ebe6640b9a0365c93880073fed2690b0a8b8962f08be3b41573d642248a")
 
 MODULE = Module(
     name="reload-from-project",
