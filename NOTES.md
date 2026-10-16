@@ -36599,3 +36599,11 @@ From the author's notes on the unit, ColdFire words only (the DSP code stays the
   `0ab8e12f…`, syx `be7cdb5d…`). `build_bugbuilds.py` had lost the BLACKPYRAMIDS_303 entry and the
   longer-image diff in `0cc30d7` (rebuilt from an older copy); both restored, all ten Bugbuilds match
   their pins.
+- **2026-10-16 cont (`ot303`): MT34 (WIP, not flashed) -- a RES level trim.** Twin: the voice is +6.7 / +9.2 /
+  +10.7 dB louder at RES 0 than at RES 127 (CUT 20 / 45 / 80), half of it gone by RES 4–8, ~0 from RES ~48–64.
+  Round 17 (RES 0 held 2.8 s, then swept; 10–50 % of the boost off, labelled): the author picked 15 %.
+  `OT_RTRIM[128]` (Q14, params_check gen from the CUT-45 boost) multiplies SC in params.c; record.c eases SC
+  (`v->sc`, ot_ease) as it does RS, so RES locks / LFOs don't step it (VOL changes ease too, ~2 ms);
+  host_probe's twin takes `vv.sc`. Twin: RES-0 hold −1.06 dB, RES 127 unchanged, the firmware matches the
+  simulated 15 % to −98 dB; clean clipping in round 17's scene 3,508 → 2,402. Builds: standalone mainos
+  `e7bde666…`, CF .bin `32e781bb…`, syx `a6471188…` (WIP; the FINAL pin stays `31909095…`).

@@ -312,7 +312,7 @@ struct ot_qn { uint32_t gl; uint8_t step, slide, call, acc; };
 static struct ot_qn q[8][QN] = {{{0, 0, 0, 0, 0}}};
 static uint8_t qn[8] = {0}, qcall[8] = {0}, qlast[8] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, qlen[8] = {0};
 static uint32_t qctx[8] = {0};          /* the step being scheduled: 1 << 24 | bank << 16 | pattern << 8 | step */
-static struct ot_voice voice[8] = {{{0}, 0, {0}, 0, 0, 0, 0, 0, 0, 0}};
+static struct ot_voice voice[8] = {{{0}, 0, {0}, 0, 0, 0, 0, 0, 0, 0, 0}};
 /* MT26: a push-and-turn (coarse) knob step. The editor writes such a step to the engine's base value at
  * once, without the 1/16-a-frame slew it gives a normal turn (0x40055190: the knob's coarse flag
  * 0x46c7d244 + 20 k + 8 -> 0x400551bc), so CUT / ENV jumped several values. Only the knob writes the

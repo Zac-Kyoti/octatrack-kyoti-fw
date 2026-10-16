@@ -76,6 +76,17 @@ static double waveGainDb(int w) {
     return b * (6.0797 + b * (-3.5570 + b * (7.9781 + b * (-15.7193 + b * 7.0159))));
 }
 static unsigned wgainQ14(int w) { return (unsigned)std::llround(std::pow(10.0, waveGainDb(w) / 20.0) * 16384.0); }
+// MT34 (round 17): a level trim at the bottom of RES. The voice is louder at low RES than from RES ~48 up (the
+// boost below, measured on the twin: CUT 45, ENV 70, clean VOL 64, RMS dB over RES 127); RES_TRIM of it comes
+// off, as a gain on SC by RES (OT_RTRIM, Q14): -1.4 dB at RES 0, -0.7 at 8, -0.2 at 32, none from ~96.
+#define RES_TRIM 0.15
+static double resBoostDb(int r) {
+    static const double R[] = {0, 2, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48, 64, 80, 96, 127};
+    static const double D[] = {9.2, 7.6, 6.4, 5.5, 4.8, 3.7, 2.9, 2.3, 1.9, 1.3, 0.9, 0.6, 0.3, 0.1, 0.0, 0.0};
+    for (int i = 1; i < 16; i++) if (r <= R[i]) return D[i - 1] + (D[i] - D[i - 1]) * (r - R[i - 1]) / (R[i] - R[i - 1]);
+    return 0.0;
+}
+static unsigned rtrimQ14(int r) { return (unsigned)std::llround(std::pow(10.0, -RES_TRIM * resBoostDb(r) / 20.0) * 16384.0); }
 
 static int gen(const char* path) {
     Open303 o; o.setSampleRate(FS);
@@ -132,6 +143,8 @@ static int gen(const char* path) {
     for (int j = 0; j < 128; j++) std::fprintf(f, "%s%s%d", j ? "," : "", j % 8 ? " " : "\n    ", scWord(j));
     std::fprintf(f, "};\nstatic const int32_t OT_GD8[63] = {");
     for (int j = 0; j < 63; j++) std::fprintf(f, "%s%s%d", j ? "," : "", j % 8 ? " " : "\n    ", gd8Word(65 + j));
+    std::fprintf(f, "};\n/* MT34: the RES level trim, Q14 (round 17: 15 %% of the low-RES boost) */\nstatic const uint16_t OT_RTRIM[128] = {");
+    for (int j = 0; j < 128; j++) std::fprintf(f, "%s%s%u", j ? "," : "", j % 8 ? " " : "\n    ", rtrimQ14(j));
     std::fprintf(f, "};\n/* MT29: the WAVE gain, Q14 (tools/ot303/wave_loudness.py) */\nstatic const uint16_t OT_WGAIN[128] = {");
     for (int j = 0; j < 128; j++) std::fprintf(f, "%s%s%u", j ? "," : "", j % 8 ? " " : "\n    ", wgainQ14(j));
     std::fprintf(f, "};\n#endif\n");
@@ -163,7 +176,7 @@ static Ref reference(const uint8_t k[12]) {
     r.c.rs = q23(rs);
     r.c.ag_8 = q23((1.0 - rs * rs) / 8.0);
     r.c.bg = q23(rs * (1.0 + rs) * 8.0 / 17.0);
-    r.c.sc = scWord(k[OT_VOL]);
+    r.c.sc = (int32_t)(((int64_t)scWord(k[OT_VOL]) * rtrimQ14(k[OT_RES]) + 8192) >> 14);   // MT34: the RES trim
     r.c.rc1 = rc1Word(k[OT_RES]); r.c.gd8 = gd8Word(k[OT_VOL]);
     double b = o.oscillator.blend;
     const double G = wgainQ14(k[OT_WAVE]) / 16384.0;   // MT29: not Open303's -- the WAVE gain

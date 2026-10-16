@@ -84,7 +84,7 @@ void ot_params_cont_q8(const uint8_t k[12], unsigned cut_q8, unsigned env_q8, st
     /* volume: (VOL / 127)^2 */
     /* MT13: VOL 0 silent, 1..64 -30 dB .. the top level, 65..127 the top level driven 0 .. +4.5 dB (the
      * output drive / 8; 0: none, the DSP skips it); the soft attack faded by RES (MT10) */
-    c->sc = OT_SC[k[OT_VOL] & 127];
+    c->sc = (ot_w)(((int64_t)OT_SC[k[OT_VOL] & 127] * OT_RTRIM[k[OT_RES] & 127] + 8192) >> 14);   /* MT34: the RES trim */
     c->gd8 = k[OT_VOL] > 64 ? OT_GD8[(k[OT_VOL] & 127) - 65] : 0;
     c->rc1 = k[OT_RES] >= 115 ? 0 : OT_RC1[k[OT_RES] > 100 ? k[OT_RES] - 100 : 0];
     /* waveform: blend b = WAVE / 127; osc/2 = G (-(1 - b)/2 saw + b/4 tanh(..) + b sqDC / 4); MT29: G the WAVE

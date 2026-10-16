@@ -39,6 +39,7 @@ struct ot_voice {
     uint32_t chunk;         /* the next table chunk */
     uint32_t seq;           /* the next record's number */
     ot_w rs, bg, ag_8;      /* MT20: the resonance words as sent, eased toward c's over a few frames */
+    ot_w sc;                /* MT34: the level as sent, eased the same way (it follows RES through the trim) */
     uint32_t cut_q8, env_q8; /* MT24: CUT and ENV with their fraction (8.8) the words were made from */
 };
 
