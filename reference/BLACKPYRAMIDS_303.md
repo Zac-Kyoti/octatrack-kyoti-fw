@@ -143,6 +143,7 @@ anything not listed is Open303 as shipped.
 | Oscillator grit (saw curve + noise) | — | not added | round 8: indifferent |
 | Makeup gain by RES | — | not added | round 13: "way too heavy" |
 | WAVE gain | — | **+2.66 dB at WAVE 87, +1.8 dB at 127 (MT29)** | round 14: kept over none in all five (two sweeps, saw against WAVE 64 / 96 / 127), blind order |
+| Output stage headroom, driven VOL | hard clip before the drive | **4× headroom into the drive (MT33)** | round 15 (scene 2): bright accents at VOL 65–127 were chopped flat before the soft clip; now the drive rounds them. Below the old ceiling the same to −107 dB; clean VOL unchanged (still clips on bright accents; a knee for it was round 16) |
 
 Control decisions (the author's):
 - **PTCH:** a semitone per value, C0–C8, with note names. Earlier there were two values per

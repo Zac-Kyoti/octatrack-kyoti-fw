@@ -49,7 +49,7 @@ _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 H = bytes.fromhex
 
 RUNTIME_AT = 0x40A955E0        # the standalone image's DRAM reserve (tools/ot303/dram.py RESERVE)
-RUNTIME_SHA256 = "8cf897e7484f14f98acc17299ceb3734d726a83cd3bc7f4ac2d58ab41a4b1c16"
+RUNTIME_SHA256 = "4abd25fcc484b6adaa0981122bce75a7615b0789ed9fe7a880b59084aba91bd6"
 
 DETOURS = (
     Detour(0x400334D8, H("2f02222f0008"), "bp_runtime", "ot_machine_name", "chooser row 5's name"),

@@ -56,11 +56,17 @@ static int32_t rc1Word(int res) {
 // MT13 (the user: most of VOL's travel useful, the drive over its top half): VOL 0 silent; 1..64 clean,
 // -30 dB .. the top level (MT10's VOL 119, (119/127)^2); 65..127 the top level driven, 0 .. +4.5 dB
 // linear in dB (99 = +2.5 dB, the default: MT10's sound at its default)
+// MT33 (round 15, the driven half): VOL 65..127 runs the output stage DRIVE_ROOM times lower and the drive's
+// gain DRIVE_ROOM times higher -- the same tanh(g y) below the old ceiling, but what used to hard-clip at the
+// output stage (bright settings, accents) now reaches the soft clip instead of being chopped flat first.
+// Clean VOL (1..64) is unchanged: linear, hard clip at the ceiling.
+#define DRIVE_ROOM 4.0
 static double volTop() { return std::pow(119.0 / 127.0, 2.0); }
 static int32_t scWord(int vol) {
-    return vol == 0 ? 0 : vol >= 64 ? q23(volTop()) : q23(volTop() * std::pow(10.0, -30.0 * (64 - vol) / 63.0 / 20.0));
+    return vol == 0 ? 0 : vol > 64 ? q23(volTop() / DRIVE_ROOM) : vol == 64 ? q23(volTop())
+                                   : q23(volTop() * std::pow(10.0, -30.0 * (64 - vol) / 63.0 / 20.0));
 }
-static int32_t gd8Word(int vol) { return vol > 64 ? q23(std::pow(10.0, 4.5 * (vol - 64) / 63.0 / 20.0) / 8.0) : 0; }
+static int32_t gd8Word(int vol) { return vol > 64 ? q23(DRIVE_ROOM * std::pow(10.0, 4.5 * (vol - 64) / 63.0 / 20.0) / 8.0) : 0; }
 
 // MT29: the WAVE gain (dB, b = WAVE / 127), holding the loudness of the saw across the blend: fitted by
 // tools/ot303/wave_loudness.py (ISO 532-1 N5 against WAVE 0, the mean over 21 CUT / RES / VOL settings, two
