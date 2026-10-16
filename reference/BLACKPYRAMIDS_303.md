@@ -142,6 +142,7 @@ anything not listed is Open303 as shipped.
 | Square shaper drive | 36.9 dB | the same | round 9: 32 and 28 dB lost |
 | Oscillator grit (saw curve + noise) | — | not added | round 8: indifferent |
 | Makeup gain by RES | — | not added | round 13: "way too heavy" |
+| WAVE gain | — | **+2.66 dB at WAVE 87, +1.8 dB at 127 (MT29)** | round 14: kept over none in all five (two sweeps, saw against WAVE 64 / 96 / 127), blind order |
 
 Control decisions (the author's):
 - **PTCH:** a semitone per value, C0–C8, with note names. Earlier there were two values per
@@ -174,7 +175,7 @@ Control decisions (the author's):
   because the live byte and the engine's base value show a playing step's lock instead.
   Before MT27, any ACC value above 0 accented a note, so a knob above 0 accented every note.
 - **Name:** BLKPYRAMD, with a "3" glyph.
-- **WAVE (MT29, 15 Oct 2026, WIP, round 14 pending):** the author heard the square end, and more the
+- **WAVE (MT29, 15 Oct 2026, WIP; round 14: kept in all five blind comparisons):** the author heard the square end, and more the
   blends, as quieter than the saw. RMS and K-weighted level had read flat (within 0.8 dB), but ISO 532-1
   loudness (`tools/ot303/wave_loudness.py`: every WAVE value, 21 CUT / RES / VOL / register settings)
   puts the blends up to 2.2 phon below the saw on average (WAVE 80–90; −3.1 at worst) and the square
