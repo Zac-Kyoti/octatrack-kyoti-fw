@@ -58,9 +58,9 @@ from remix.schema import (Category, Claims, Detour, DspHook, DspRange, DspSectio
                           Linked, Module, Poke, Proof, SymbolRef)
 
 try:                                    # module settings (octabam since 2026-10): PLACE
-    from remix.schema import Apply, Option, Setting
+    from remix.schema import Apply, Option, Setting, Store
 except ImportError:                     # an older octabam: DRAM, no setting
-    Apply = Option = Setting = None
+    Apply = Option = Setting = Store = None
 
 # This module's own directory, relative to the build's cwd (octabam's repo root), however
 # the folder is reached (checked out directly, symlinked, or a submodule of this repo).
@@ -160,7 +160,7 @@ _SETTINGS = {} if Setting is None else dict(
     settings=(Setting(1, "PLACE", Option(*PLACES), default="DRAM", apply=Apply.BUILD,
                       doc="DRAM: vem_cf in octabam's platform runtime; CAVE: in the ColdFire "
                           "free region (where the standalone image puts it)"),),
-    variant=_variant)
+    variant=_variant, store=Store("kyoti.varispeed-emus"))
 
 MODULE = Module(
     name="varispeed-emus",
