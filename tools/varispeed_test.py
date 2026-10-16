@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 VARISPEED (the plain build, spec §7) -- its tests, run in ot_emu on the built image
 (out/mainos_varispeed.bin, or VEM_IMG) with the REAL hardware-exported project OTDEMO
@@ -167,7 +167,7 @@ def _emus_scenarios(names):
     others need placeholders to build, and are not taken)."""
     keep = E.S
     try:
-        E.S = dict(keep, emus_widget=0, emus_fmt=0)
+        E.S = dict(keep, emus_widget=0, emus_fmt=0, vg_gon=0)
         all_ = E.scenarios()
     finally:
         E.S = keep

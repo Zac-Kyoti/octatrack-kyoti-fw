@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 VARISPEED_EMUS listening check: the three engines (OT, S950, SP12) at several project tempos on
 the two pack-10 loops, rendered the way the unit renders them.

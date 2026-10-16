@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 S950 recording-rate listening pack (scope: reference/handoffs/VARISPEED_EMUS_S950_RATE_SCOPE.md).
 

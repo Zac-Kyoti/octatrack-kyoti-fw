@@ -1,5 +1,5 @@
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti
+| SPDX-FileCopyrightText: 2026 Zac Kyoti
 |
 | VARISPEED_EMUS -- the ColdFire half (one link unit) -- and VARISPEED, the plain build.
 |

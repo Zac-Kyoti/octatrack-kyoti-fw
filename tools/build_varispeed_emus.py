@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-Build VARISPEED_EMUS on TOP OF STOCK 1.40C (WIP).
+Build VARISPEED_EMUS on TOP OF STOCK 1.40C.
 
 STATIC / FLEX TSTR gets a fifth position, VARI: the track plays dry at
 (project BPM x p) / (sample BPM x q), p/q the QUAN ratio on the PTCH knob, exact in
@@ -44,7 +44,7 @@ middle of what it displaces; the cave must be zero in stock and inside the class
 cave from 0x400d6500; no reference into 0x80006a40..0x80006abf; the unit must link to
 the same bytes for -mcpu=5407 and 54455 (octabam assembles DRAM units for 54455).
 
-Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM10)
+Usage:  python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM10)
 """
 import hashlib, importlib.util, json, os, pathlib, struct, subprocess, sys
 from kyoti_status import gate, seal

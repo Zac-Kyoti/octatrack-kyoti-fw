@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """VARISPEED_EMUS -- tempo-locked varispeed for STATIC and FLEX, with sampler emulations.
 
     TSTR    OFF AUTO NORM BEAT VARI (STATIC / FLEX; PICKUP keeps its own)
@@ -47,7 +47,7 @@ or the same sites: one design at a time.
 MEASURED. The unit, linked at the standalone image's address, is that image's bytes
 (5407 and 54455 alike). On the standalone image, in ot_emu with real hardware-exported
 projects: its behaviour tests (reference/handoffs/VARISPEED_IMPL.md). On hardware: the
-author's MKI, 15 Oct 2026 (the standalone image 140C_VEM10 and its Bugbuild).
+author's MKI, 15 Oct 2026 (the VEM10 build).
 """
 
 import dataclasses
@@ -195,6 +195,6 @@ MODULE = Module(
     author="Zac-Kyoti",
     author_url="https://github.com/Zac-Kyoti/octatrack-kyoti-fw",
     proof=Proof.HARDWARE,
-    proof_note="the author's MKI, 15 Oct 2026 (the standalone image 140C_VEM10 and its Bugbuild)",
+    proof_note="the author's MKI, 15 Oct 2026 (the VEM10 build)",
     **_SETTINGS,
 )

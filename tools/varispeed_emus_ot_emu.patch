@@ -1,5 +1,5 @@
 SPDX-License-Identifier: MIT
-SPDX-FileCopyrightText: 2026 Zac-Kyoti
+SPDX-FileCopyrightText: 2026 Zac Kyoti
 
 VARISPEED_EMUS harness (tools/varispeed_emus_harness.py): ot_emu logs every arrival at the
 DSP voice kernel's entry (payload A P:0x40b on core 0, B P:0x20e on core 1) -- core,

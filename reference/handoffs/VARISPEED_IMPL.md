@@ -35,7 +35,7 @@ kernels with the guard at their prices.
 
 OS VERSION reads `140C_VEM1`. The builder is deterministic (rebuilt three times, same hashes).
 
-**Sources** (all with `SPDX-License-Identifier: MIT` / `SPDX-FileCopyrightText: 2026 Zac-Kyoti`):
+**Sources** (all with `SPDX-License-Identifier: MIT` / `SPDX-FileCopyrightText: 2026 Zac Kyoti`):
 
 | file | what |
 |---|---|

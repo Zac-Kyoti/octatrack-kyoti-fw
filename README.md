@@ -148,6 +148,43 @@ voicing decision and full attribution: [`reference/BLACKPYRAMIDS_303.md`](refere
 **Final build:** [`tools/build_blackpyramids_303.py`](tools/build_blackpyramids_303.py) →
 `OCTATRACK_OS1.40C_BLACKPYRAMIDS_303`
 
+### VARISPEED
+
+Tempo-locked varispeed for STATIC and FLEX tracks. SRC SETUP's `TSTR` gets a fifth position,
+**VARI**: the sample plays dry, tape-style, its speed and pitch moving together and locked to
+the project tempo. RATE still applies. On `TSTR` AUTO, a sample whose TIMESTRETCH (audio
+editor → ATTR) is VARI plays the same way.
+
+- **`QUAN`:** on a VARI track `PTCH` becomes `QUAN`, a ratio on the tempo-locked speed:
+  1/2, 2/3, 3/4, 4/5, 1/1, 5/4, 4/3, 3/2, 2/1. Leaving VARI gives `PTCH` its value back.
+- Above twice the sample's own speed, it folds down an octave.
+- A sample or project tempo outside 30–300 BPM plays as `TSTR` OFF.
+
+**Hardware:** confirmed.\
+**Final build:** [`tools/build_varispeed.py`](tools/build_varispeed.py) →
+`OCTATRACK_OS1.40C_VARISPEED`
+
+### VARISPEED_EMUS
+
+VARISPEED with two sampler emulations. On a VARI track `TSNS` becomes **`EMUS`**, which picks
+the engine the track plays through:
+
+- `OT`: the Octatrack's own playback, as in VARISPEED
+- `S950`: the Akai S900/S950, 12-bit at its 40 kHz rate
+- `SP12`: the E-mu SP-1200, 12-bit at 26.04 kHz through its raw outputs, in stereo
+
+A change of engine takes effect at the track's next trig. The engines run on the DSP. A
+change that would overload a DSP core is refused and shows `MAX DSP: EMU LIMIT`: an `EMUS`
+turn stops at the heaviest engine that fits, an FX type doesn't land, and a track coming
+onto VARI plays `OT`.
+
+The DSP space comes from **SPRING REVERB**, which leaves both FX lists; a project that still
+uses it loads it as NONE.
+
+**Hardware:** confirmed.\
+**Final build:** [`tools/build_varispeed_emus.py`](tools/build_varispeed_emus.py) →
+`OCTATRACK_OS1.40C_VARISPEED_EMUS`
+
 ### RELOAD_FROM_PROJECT
 
 Reload one track's sequence from the CF card **without stopping the transport**:
@@ -225,7 +262,7 @@ Three fixes to stock bugs. Each has its own build.
 
 ### Each feature + BATCH_BUGFIXES
 
-One image per feature above, with all three BATCH_BUGFIXES folded in — eight images, for
+One image per feature above, with all three BATCH_BUGFIXES folded in — ten images, for
 flashing a single feature without giving up the bug fixes. The features are not combined
 with each other.
 
@@ -236,7 +273,8 @@ flashed as such.\
 
 ### KYOTI V1.4
 
-Every feature above except BLACKPYRAMIDS_303, and all three BATCH_BUGFIXES, in **one image**. The boot splash and
+Every feature above except BLACKPYRAMIDS_303, VARISPEED and VARISPEED_EMUS, and all three
+BATCH_BUGFIXES, in **one image**. The boot splash and
 SYSTEM STATUS → OS VERSION read `KYOTI V1.4`. It replaces KYOTI V1.3, V1.2 and V1.1, and the
 withdrawn V1.0 (see below).
 

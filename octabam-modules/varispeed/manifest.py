@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """VARISPEED -- tempo-locked varispeed for STATIC and FLEX (VARI + QUAN, nothing emulated).
 
     TSTR    OFF AUTO NORM BEAT VARI (STATIC / FLEX; PICKUP keeps its own)
@@ -32,8 +32,8 @@ MEASURED. The unit, linked at the standalone image's address, is that image's by
 (tools/build_varispeed.py assembles this wrapper too and refuses a difference). On the
 standalone image in ot_emu with real hardware-exported projects: VARI increments bit-identical
 with VARISPEED_EMUS's on OT, stock tracks' with stock 1.40C (reference/handoffs/
-VARISPEED_IMPL.md §14). On hardware: the author's MKI, 15 Oct 2026 (the standalone image
-140C_VARI1 and its Bugbuild).
+VARISPEED_IMPL.md §14). On hardware: the author's MKI, 15 Oct 2026 (the VARI1
+build).
 """
 
 import dataclasses
@@ -150,6 +150,6 @@ MODULE = Module(
     author="Zac-Kyoti",
     author_url="https://github.com/Zac-Kyoti/octatrack-kyoti-fw",
     proof=Proof.HARDWARE,
-    proof_note="the author's MKI, 15 Oct 2026 (the standalone image 140C_VARI1 and its Bugbuild)",
+    proof_note="the author's MKI, 15 Oct 2026 (the VARI1 build)",
     **_SETTINGS,
 )

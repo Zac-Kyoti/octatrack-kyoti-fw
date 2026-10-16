@@ -53,12 +53,16 @@ FINAL = {
         "mainos_direct_jump_kyoti_batch_bugfixes.bin":       "2cc151e7f9fa7568eca7d1e50d06ed179ff36ffa28f85fe59ce27295917ca21a",
         "mainos_rec_trig_mute_batch_bugfixes.bin":           "fd65e293657e3caa895064255c7dad76882c21640c6eebdc1cf812074744c658",
         "mainos_blackpyramids_303_batch_bugfixes.bin":       "0de8be5c17949be2ec506fa22384ba0d6903a4da60d59feb3d7ef40ac9555458",
+        "mainos_varispeed_batch_bugfixes.bin":               "ea2b4f604307c3dec2507a74ca6819b6b470620a050783eee709973fbef1ab20",
+        "mainos_varispeed_emus_batch_bugfixes.bin":          "6a07848158f0d1f6f529937f015a99fa860ad269b423e0b7dd4c6401a9ddaf17",
     },
     "build_kyoti.py": {
         "mainos_kyoti_v1.4.bin":                             "72710a3ca63c8f69a13346621aa623982951cd71de244f1c06eedcd516681613",
     },
     "build_blackpyramids_303.py":          "3624a1e74d2759ff5cafd7bcd0882f8b2406c9509a4d8136d60cee6336be14d5",
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
+    "build_varispeed.py":                  "ce7e69fd15235433c22cd7bc5265ecce6329ccb7eb7d521632259f680134671b",
+    "build_varispeed_emus.py":             "9926d55730fe02bb7683b9784941e18409cb8307110482f549f2684e4cec978f",
 }
 
 _RULE = "  " + "-" * 72

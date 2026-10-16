@@ -15,7 +15,7 @@ reproducible from the stock file.
 - **Your own copy of the official OS 1.40C** — from
   <https://www.elektron.se/support-downloads/octatrack-mkii>. The same image serves MKI
   and MKII.
-- *For SIDECHAIN_COMPRESSOR only* — the DSP56300 toolchain
+- *For SIDECHAIN_COMPRESSOR and VARISPEED_EMUS* — the DSP56300 toolchain
   built into `vendor/dsp56300/`, and the external-RE clone cache
   (`python3 tools/refs/sync.py`). Every other build is ColdFire-only.
 
@@ -44,10 +44,12 @@ One command per final feature. Each writes its image to `out/`:
 | ERASE_EMPTY_TRIGLESS_LOCKS | `python3 tools/build_erase_empty_trigless_locks.py` | `1.40C` |
 | REC_TRIG_MUTE | `python3 tools/build_rec_trig_mute.py` | `140C_RTM` |
 | BLACKPYRAMIDS_303 | `python3 tools/build_blackpyramids_303.py` | `140C_BP303` |
+| VARISPEED | `python3 tools/build_varispeed.py` | `140C_VARI1` |
+| VARISPEED_EMUS | `python3 tools/build_varispeed_emus.py` | `140C_VEM10` |
 | BATCH_BUGFIXES: MIDI_PLAYS_FREE_FIX | `python3 tools/build_midi_plays_free_fix.py` | `1.40C` |
 | BATCH_BUGFIXES: EMPTY_PATTERN_LED_FIX | `python3 tools/build_empty_pattern_led_fix.py` | `1.40C` |
 | BATCH_BUGFIXES: PART_CHANGE_CARRYOVER_FIX | `python3 tools/build_part_change_carryover_fix.py` | `1.40C` |
-| each feature + BATCH_BUGFIXES (eight images) | `python3 tools/build_bugbuilds.py` | `BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303` |
+| each feature + BATCH_BUGFIXES (ten images) | `python3 tools/build_bugbuilds.py` | `BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303`, `BUG_VARI`, `BUG_VEM10` |
 
 Each build writes four files to `out/`, named after the feature:
 
@@ -58,14 +60,15 @@ OCTATRACK_OS1.40C_<FEATURE>.syx       flash over MIDI DIN
 OCTATRACK_<FEATURE>.bin               flash from the CF card (faster)
 ```
 
-`build_bugbuilds.py` writes its eight images to `out/Bugbuilds/`, as
+`build_bugbuilds.py` writes its ten images to `out/Bugbuilds/` (`--only NAME,...` builds just
+those), as
 `OCTATRACK_OS1.40C_<FEATURE>_BATCH_BUGFIXES.syx` and `.bin`, and leaves the images above
 alone. MIDI_PLAYS_FREE_FIX writes only its `mainos_` image; to flash it on its own, use the
 no-assembler patch below or wrap it as its builder's header shows.
 
 ### The combined image: KYOTI V1.4
 
-Every FINAL feature except BLACKPYRAMIDS_303 in one image. Since 15 Oct 2026 the composer on
+Every FINAL feature except BLACKPYRAMIDS_303, VARISPEED and VARISPEED_EMUS in one image. Since 15 Oct 2026 the composer on
 `main` builds KYOTI V1.5 (WIP, below), so build V1.4 from the commit it was promoted at:
 
 ```sh
@@ -85,9 +88,9 @@ It writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.4.syx` and `.bin` (OS VERSION `K
 and `.bin` (OS VERSION `KYOTI V1.5`). RELOAD_FROM_PROJECT runs from DRAM there, as in V1.2–V1.3:
 one 6 KB page of the 85.5 MB pool.
 
-KYOTI V1.0 was withdrawn on 2026-10-06; V1.1 replaced it, V1.2 (with REPITCH) replaced V1.1,
+KYOTI V1.0 was withdrawn on 2026-10-06; V1.1 replaced it, V1.2 (with an earlier varispeed module) replaced V1.1,
 V1.3 replaced V1.2, whose SPRING reclaim overwrote PLATE REVERB's page (`reference/kb/caves.md` §0),
-and V1.4 replaces V1.3 without REPITCH.
+and V1.4 replaces V1.3 without that module.
 
 Every build is a **guarded binary patch**: it asserts the stock bytes at each splice
 site, checks that its code caves are free and non-overlapping, takes every detour target

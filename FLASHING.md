@@ -115,8 +115,10 @@ unit that boots; if it doesn't, use §3b.
 | DIRECT_JUMP_KYOTI | `140C_KDJ7` |
 | REC_TRIG_MUTE | `140C_RTM` |
 | BLACKPYRAMIDS_303 | `140C_BP303` |
+| VARISPEED | `140C_VARI1` |
+| VARISPEED_EMUS | `140C_VEM10` |
 | ERASE_EMPTY_TRIGLESS_LOCKS and the BATCH_BUGFIXES builds | `1.40C` (stock string — check by behaviour) |
-| a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303`) |
+| a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303`, `BUG_VARI`, `BUG_VEM10`) |
 
 PERSONALIZE is reset by every flash, so features are off until you re-enable them. A
 quick check for each:
@@ -148,6 +150,15 @@ quick check for each:
   T2 as well is refused with `ONE 303 PER CORE!`; on T5 it is allowed. Stopped, right after
   power-on: the track key plays a held note; TRIG + YES on a step replays it every time; a
   MIDI note on the track's channel plays (AUDIO NOTE IN on).
+- **VARISPEED** — a FLEX loop whose ATTR TEMPO matches it, TSTR on `VARI` (SRC SETUP, the
+  fifth position): PTCH reads `QUAN`. Change the project tempo: the loop speeds up and slows
+  down with its pitch and stays in time. QUAN `2/1` plays it an octave up at double speed.
+  TSTR back to BEAT: PTCH shows its old value.
+- **VARISPEED_EMUS** — as VARISPEED, and TSNS reads `EMUS` on a VARI track: `OT`, `S950`,
+  `SP12` from low to high. Retrigger after a turn: `S950` adds grit, `SP12` sounds duller and
+  crunchier. FX menus no longer offer SPRING REVERB. Put `SP12` on all four tracks of one core
+  with a heavy FX stack: a turn or an FX choice that would overload the DSP is refused with
+  `MAX DSP: EMU LIMIT`.
 - **MIDI_PLAYS_FREE_FIX** — a PLAYS FREE MIDI track, trig quantize DIRECT, SCALE MODE PER
   TRACK, notes on steps 1 and 2: a manual trig keeps it running instead of stalling.
 - **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is a p-lock on a MIDI track:

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 REPITCH REWRITE -- RETAINED DSP INSTALL (clean-room input, extracted 2026-10-14).
 

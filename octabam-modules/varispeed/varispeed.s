@@ -1,5 +1,5 @@
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti
+| SPDX-FileCopyrightText: 2026 Zac Kyoti
 |
 | VARISPEED (octabam) -- the VARISPEED_EMUS source with its assembly switch at 0: VARI and
 | QUAN, nothing emulated. remix.inc is that source's text (../varispeed-emus/varispeed_emus.s),

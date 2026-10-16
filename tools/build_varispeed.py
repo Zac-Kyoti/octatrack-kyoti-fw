@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-Build VARISPEED on TOP OF STOCK 1.40C (WIP).
+Build VARISPEED on TOP OF STOCK 1.40C.
 
 VARISPEED is VARI with QUAN and nothing emulated (spec §7): STATIC / FLEX TSTR gets a fifth
 position, VARI; a VARI track plays dry at (project BPM x p) / (sample BPM x q), p/q the QUAN
@@ -32,12 +32,12 @@ two-line wrapper (`.equ VEM_EMUS, 0` + `.include "remix.inc"`, the remix.inc bei
 shared source's text): this builder assembles that wrapper too and refuses unless it gives
 the same bytes, then checks the module's `reference`.
 
-Usage:  KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed.py [VERSTR]   (default 140C_VARI1)
+Usage:  python3 tools/build_varispeed.py [VERSTR]   (default 140C_VARI1)
 """
 import hashlib, json, os, pathlib, shutil, sys
 from kyoti_status import gate, seal
 
-gate(__file__, note="VARISPEED: VARI + QUAN, nothing emulated (spec §7). Not on hardware yet.")
+gate(__file__, note="VARISPEED: VARI + QUAN, nothing emulated (spec §7).")
 
 import varispeed_buildlib as L
 

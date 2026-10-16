@@ -36496,3 +36496,46 @@ open, Sam's PR #2, and an optimization pass over BLACKPYRAMIDS_303's Octatrack-s
     - The DRAM arena after boot equals RELOAD linked at 0x40a955e0.
     - sctest6 with MON off: per-slot RMS equals the SIDE-CHAIN standalone's.
   - **Builds:** mainos 6f6f3268a5a34fda…, syx 8950f824cd2761f8…, CF .bin ac2d3e8faff404a9… (`KYOTI V1.5`).
+
+## Session 130 (2026-10-15, `repitch-rewrite`): VARISPEED and VARISPEED_EMUS FINAL, published; the old module's names out of every live file
+
+* **Hardware:** the user flashed VARISPEED (VARI1) and VARISPEED_EMUS (VEM10) and tested both:
+  everything works. Promoted on the user's instruction.
+* **FINAL pins** (`tools/kyoti_status.py`):
+  * `build_varispeed.py`: mainos `ce7e69fd…` (syx `78cfad33…`, `140C_VARI1`);
+  * `build_varispeed_emus.py`: mainos `9926d557…` (syx `1427a9af…`, `140C_VEM10`);
+  * Bugbuilds `mainos_varispeed_batch_bugfixes.bin` `ea2b4f60…` (syx `f2f37df3…`, `BUG_VARI`) and
+    `mainos_varispeed_emus_batch_bugfixes.bin` `6a078481…` (syx `e0b173fb…`, `BUG_VEM10`).
+  * Both bases moved from `WIP_FEATURES` to `FEATURES` in `build_bugbuilds.py`, which gained
+    `--only NAME,...`. A full run still stops at SIDECHAIN_COMPRESSOR, whose WIP keybus change
+    no longer matches its pin.
+  * Every image is byte-identical to the files the user flashed; all four build without the
+    opt-in and seal.
+* **Names.** A visitor who builds sees no REPITCH or REPITCH_REPEAT98_KYOTI. History (old NOTES
+  sessions, the `REPITCH_KYOTI_*` handoffs, git log) is left as it was.
+  * The kernel and its tools: `tools/patch_repitch_dsp.asm` → `varispeed_emus_dsp.asm`,
+    `repitch_dsp_*` → `varispeed_emus_dsp_*`, `repitch_engine_model` → `varispeed_emus_model`,
+    and the pack and listen tools likewise.
+  * The clean-room record: `REPITCH_REWRITE_*` → `VARISPEED_*`; the fidelity and channel 1/2
+    scopes → `VARISPEED_EMUS_*`.
+  * The octabam DSP files: `rpk_dsp*` → `vem_dsp*`.
+  * Engine labels: RPS9/RPSP/RPCH → S950/SP12/OT. The env var `RPK_OUT` → `VEM_OUT`. The commit
+    guard's thread `repitch` → `varispeed`.
+  * Paths in NOTES and the handoffs were updated; their text was not.
+  * README, BUILD_KYOTI, FLASHING, START_HERE, CLAUDE.md and `build_kyoti.py`'s docstring name
+    the old module nowhere. No Jannik attribution on the Varispeed builds or modules.
+  * Mentions kept, in other threads' files: `tools/ot303/hwprobe_image.py`,
+    `tools/patch_sc_dsp3.asm`, `tools/load_audit/la_run.py`, `tools/octabam_remixer.sh`.
+* **Merged `origin/main`** (KYOTI V1.5 WIP, BP303). `dsp_xasm.py`: both sides had fixed XY+ALU
+  dual moves with write halves; ours kept. BP303 builds the same image with either version.
+* **Checks after the renames:**
+  * engine 80/80 + switch 8/8;
+  * octabam form 264/264, and octabam's dsp_asm gives the same 396 words;
+  * boot and stall checks PASS, generator current;
+  * `varispeed_emus_test.py` 45/45, `varispeed_test.py` 11/11. The plain suite needed a
+    `vg_gon` placeholder: VEM10's guard-state dump sits in the shared scenario list.
+* **octabam modules:** `octabam-modules/varispeed/` and `varispeed-emus/` gained README.md; their
+  proof is HARDWARE ("the author's MKI, 15 Oct 2026"). octabam's #721 (removing
+  REPITCH_REPEAT98_KYOTI) merged 2026-10-14; octabam had already dropped Jannik's REPITCH.
+* **KYOTI:** V1.5 (WIP) carries this VARISPEED, the same bytes as at `0cc30d7`. VARISPEED_EMUS is
+  not in KYOTI (SPRING REVERB's DSP space).

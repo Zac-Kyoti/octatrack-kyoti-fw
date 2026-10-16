@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 VARISPEED_EMUS -- tests of the new behaviour (spec §5, the EMUS scope's §6.4 / §8.3), run
 in ot_emu on the built image (out/mainos_varispeed_emus.bin, or VEM_IMG) with the REAL

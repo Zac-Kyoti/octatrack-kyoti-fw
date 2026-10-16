@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 Bugbuilds -- each finished FEATURE build, with all three BUG FIXES folded in.
 
-Seven composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
+Nine composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
 not written alongside, the standalone per-feature images in out/):
 
     MUTE_MODES        + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
@@ -14,15 +14,18 @@ not written alongside, the standalone per-feature images in out/):
     RELOAD_FROM_PROJECT            + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     DIRECT_JUMP_KYOTI      + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     REC_TRIG_MUTE          + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
+    VARISPEED              + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
+    VARISPEED_EMUS         + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
 
 Method -- compose onto the finished feature image, do not re-implement it.
 Each feature builder is run first (so the base is current), then the bug-fix caves are
 linked into free space in that image and their detours applied.  SIDE-CHAIN in particular
 is never re-derived: its DSP payloads, COMPRESSOR descriptor and FX2 chooser edits come
 through untouched, and its cave stays at its own address so the descriptor's formatter
-pointers stay valid.
+pointers stay valid. VARISPEED_EMUS's DSP payload edits (the S950 / SP12 kernel in SPRING
+REVERB's modules) come through the same way.
 
-MIDI_PLAYS_FREE_FIX (patch_trigscale) is added to ALL SEVEN images: no feature builder carries a copy
+MIDI_PLAYS_FREE_FIX (patch_trigscale) is added to ALL NINE images: no feature builder carries a copy
 any more.  Each of them used to (RELOAD_FROM_PROJECT's sat at 0x400d7bfc, the rest at 0x400d7b00), and
 every copy wrote the same site 0x4009b6f2 -- which octabam's remix ledger refuses, so no two
 of those features could ever be selected into one remix.  The fix is its own contribution
@@ -36,7 +39,7 @@ RELOAD_FROM_PROJECT, whose own cave starts at 0x400d6500, so the allocator moves
     patch_partreapply   0x400d6500   402 B   (RELOAD_FROM_PROJECT: relocated above its own cave)
     patch_pattern_led   0x400d6694   158 B   (RELOAD_FROM_PROJECT: likewise)
     (never below 0x400d6500 -- 0x400d64ca.. is a runtime record table, kb/caves.md 2b)
-    patch_trigscale     0x400d7b00    62 B   (added to all seven)
+    patch_trigscale     0x400d7b00    62 B   (added to all nine)
 
 Verification (every image, every run):
   * the feature's builder is promoted (on kyoti_status.FINAL), its rebuilt image still matches, and it is re-run
@@ -50,19 +53,19 @@ Verification (every image, every run):
     delta -- and those two deltas are disjoint.  That is the interlock proof: every
     changed byte has exactly one owner and no owner's bytes were altered.
 
-Usage:  python3 tools/build_bugbuilds.py [--no-rebuild]
+Usage:  python3 tools/build_bugbuilds.py [--no-rebuild] [--only NAME[,NAME...]]
+
+--only builds just those Bugbuilds (FEATURES names, e.g. --only VARISPEED,VARISPEED_EMUS).
 
 WIP OPT-IN, for one base at a time:
 
-    KYOTI_ALLOW_WIP=1 python3 tools/build_bugbuilds.py --wip VARISPEED
-    KYOTI_ALLOW_WIP=1 python3 tools/build_bugbuilds.py --wip VARISPEED_EMUS
+    KYOTI_ALLOW_WIP=1 python3 tools/build_bugbuilds.py --wip NAME
 
-builds ONLY that base's Bugbuild (WIP_FEATURES below; VARISPEED -> BUG_VARI, VARISPEED_EMUS ->
-BUG_VEM10: its DSP payload edits come through untouched, as SIDECHAIN's do), with every
-check above except the promotion ones: its builder is WIP and is run with the opt-in, the
-result is announced as WIP, and it is NEVER sealed (kyoti_status.seal is not called, so it
-can never pass for a promoted image). Without KYOTI_ALLOW_WIP=1 it refuses. A run without
---wip is unchanged: the seven final Bugbuilds, and any base not on FINAL is skipped.
+builds ONLY that base's Bugbuild (WIP_FEATURES below, empty while no WIP base is wired in),
+with every check above except the promotion ones: its builder is WIP and is run with the
+opt-in, the result is announced as WIP, and it is NEVER sealed (kyoti_status.seal is not
+called, so it can never pass for a promoted image). Without KYOTI_ALLOW_WIP=1 it refuses. A
+run without --wip is unchanged: the final Bugbuilds, and any base not on FINAL is skipped.
 """
 import os, pathlib, subprocess, sys
 import hashlib
@@ -122,18 +125,17 @@ FEATURES = {
     "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "out/mainos_direct_jump_kyoti.bin", "BUG_DJV7", "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.0.1, clock-locked jumps)."),
     "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "out/mainos_rec_trig_mute.bin", "BUG_RTM",
                       "[TRACK]+[NO]/[YES] mute/unmute recorder trigs; MIDI CC 80; '..' edge icon."),
-}
-# WIP bases, composed ONLY with the explicit opt-in `--wip NAME` (and KYOTI_ALLOW_WIP=1): one
-# per run, never sealed, never part of the default run above.
-WIP_FEATURES = {
     "VARISPEED": ("build_varispeed.py", "out/mainos_varispeed.bin", "BUG_VARI",
-                  "STATIC/FLEX TSTR VARI: tempo-locked varispeed, QUAN ratios on PTCH (WIP)."),
+                  "STATIC/FLEX TSTR VARI: tempo-locked varispeed, QUAN ratios on PTCH."),
     # carries DSP payload changes (the S950 / SP12 kernel in SPRING REVERB's modules, SPRING off
     # both FX choosers), composed as the SIDECHAIN base is: the image as built, the fixes only
     # in the ColdFire cave zone, every feature byte preserved (the interlock proof)
     "VARISPEED_EMUS": ("build_varispeed_emus.py", "out/mainos_varispeed_emus.bin", "BUG_VEM10",
-                       "STATIC/FLEX TSTR VARI + EMUS (OT / S950 / SP12), DSP load guard (WIP)."),
+                       "STATIC/FLEX TSTR VARI + EMUS (OT / S950 / SP12), DSP load guard."),
 }
+# WIP bases, composed ONLY with the explicit opt-in `--wip NAME` (and KYOTI_ALLOW_WIP=1): one
+# per run, never sealed, never part of the default run above.
+WIP_FEATURES = {}
 # Bytes a feature writes AT RUNTIME that are zero in its image: no bug-fix cave may cover
 # them, though free_runs() would otherwise count them free.
 RESERVED = {"REC_TRIG_MUTE": [(0x400d7c3a, 1)]}       # RTM_MASK (build_rec_trig_mute.py)
@@ -472,8 +474,15 @@ def main():
         print("  " + "-" * 72 + "\n")
         compose(wip, *WIP_FEATURES[wip], stock, rebuild, wip=True)
     else:
+        only = None
+        if "--only" in sys.argv:
+            k = sys.argv.index("--only")
+            only = (sys.argv[k + 1] if k + 1 < len(sys.argv) else "").split(",")
+            if not only or set(only) - set(FEATURES):
+                sys.exit(f"--only {','.join(only)}: names must be among {', '.join(FEATURES)}")
         for name, (builder, basepath, verstr, blurb) in FEATURES.items():
-            compose(name, builder, basepath, verstr, blurb, stock, rebuild)
+            if only is None or name in only:
+                compose(name, builder, basepath, verstr, blurb, stock, rebuild)
 
     print("════════════════════ summary ════════════════════")
     if PROBLEMS:
