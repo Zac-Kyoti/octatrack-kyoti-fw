@@ -36558,3 +36558,10 @@ open, Sam's PR #2, and an optimization pass over BLACKPYRAMIDS_303's Octatrack-s
   - **octabam VARISPEED / VARISPEED_EMUS:** a branch `varispeed-modules` (`52a5b53d`) in
     `out/octabam-final`, pinned to `a049681`; `make check` passes for both remixes. Not pushed,
     no PR.
+- **2026-10-16 cont: octabam VARISPEED PR sent:** sambanks/octabam#775, branch
+  `Zac-Kyoti/octabam:kyoti-varispeed` (`2593f6d3`). VARISPEED only, as the user asked; VARISPEED_EMUS
+  stays out of octabam for now (its branch `varispeed-modules` is local, `out/octabam-final`). The
+  submodule is pinned to `b7b6a0f`. `make check REMIX=varispeed` passes on `c3f37e53`.
+  - The other Kyoti pins (`bf5bfc0`, `77f132f`, `329b801`, `0bc14c71`) differ from main in their
+    module folders only by the SPDX / copyright name (Zac-Kyoti → Zac Kyoti), with no code
+    difference. No bump sent.
