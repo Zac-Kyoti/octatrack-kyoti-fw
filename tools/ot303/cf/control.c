@@ -81,12 +81,15 @@ int ot_fmt_ptch(char *buf, int v) {
  * the same turn; a turn without FUNC clears it. Not stock's generic handler (0x4003240c) for the
  * count: it tallies 256 a detent against a step of 270 on this knob (ot_emu), so it swallows a
  * detent now and then; its own tally (0x46c7d244 + 20 k) is left alone. Without FUNC the knob is
- * that handler's, as before. */
+ * that handler's, as before. MT28: the knob pushed while turned (the flag the generic handler reads,
+ * 0x46c7d8ee + 24 (k + 56), which makes a stock knob move 7 a detent) takes the same octave path. */
 #define OCT_DETENTS 3
 static int oct_tally = 0;
 int ot_ptch_step(int k, int turn, int v) {
     int (*generic)(int, int, int) = (int (*)(int, int, int))0x4003240cu;
-    if (!U32(0x46c7dd26u) || U32(0x800000a0u)) { oct_tally = 0; return generic(k, turn, v); }
+    unsigned func = U32(0x46c7dd26u) && !U32(0x800000a0u);
+    unsigned pushed = U32(0x46c7d8eeu + 24u * (unsigned)(k + 56)) != 0;
+    if (!func && !pushed) { oct_tally = 0; return generic(k, turn, v); }
     if ((oct_tally ^ turn) < 0) oct_tally = 0;
     oct_tally += turn;
     if (oct_tally > -OCT_DETENTS && oct_tally < OCT_DETENTS) return v;

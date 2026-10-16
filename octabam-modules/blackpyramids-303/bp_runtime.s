@@ -686,6 +686,72 @@ control__signed_track:
 	rts
 	.size	control__signed_track, .-control__signed_track
 	.align	2
+	.globl	ot_ptch_step
+	.type	ot_ptch_step, @function
+ot_ptch_step:
+	move.l	%d3,-(%sp)
+	moveq	#24,%d3
+	move.l	%d2,-(%sp)
+	move.l	12(%sp),%d2
+	move.l	%d2,%d0
+	add.l	#56,%d0
+	muls.l	%d3,%d0
+	move.l	16(%sp),%d1
+	move.l	20(%sp),%a1
+	move.l	%d0,%a0
+	add.l	#1187502318,%a0
+	tst.l	1187503398
+	jeq	.Lcontrol_9
+	tst.l	-2147483488
+	jne	.Lcontrol_9
+	move.l	(%a0),%d0
+.Lcontrol_10:
+	move.l	control__oct_tally.l,%d0
+	move.l	%d0,%d2
+	eor.l	%d1,%d2
+	jmi	.Lcontrol_11
+	add.l	%d0,%d1
+.Lcontrol_11:
+	move.l	%d1,%d0
+	mov3q.l	#4,%d2
+	addq.l	#2,%d0
+	cmp.l	%d0,%d2
+	jcc	.Lcontrol_22
+	tst.l	%d1
+	jle	.Lcontrol_15
+	moveq	#12,%d0
+.Lcontrol_14:
+	add.l	%a1,%d0
+	clr.l	control__oct_tally.l
+	moveq	#96,%d3
+	cmp.l	%d0,%d3
+	jcc	.Lcontrol_8
+	move.l	%a1,%d0
+.Lcontrol_8:
+	move.l	(%sp)+,%d2
+	move.l	(%sp)+,%d3
+	rts
+.Lcontrol_9:
+	tst.l	(%a0)
+	jne	.Lcontrol_10
+	move.l	%a1,20(%sp)
+	move.l	%d1,16(%sp)
+	move.l	%d2,12(%sp)
+	move.l	(%sp)+,%d2
+	clr.l	control__oct_tally.l
+	move.l	(%sp)+,%d3
+	jmp	1073947660
+.Lcontrol_15:
+	moveq	#-12,%d0
+	jra	.Lcontrol_14
+.Lcontrol_22:
+	move.l	(%sp)+,%d2
+	move.l	%a1,%d0
+	move.l	%d1,control__oct_tally.l
+	move.l	(%sp)+,%d3
+	rts
+	.size	ot_ptch_step, .-ot_ptch_step
+	.align	2
 	.type	control__flex_values, @function
 control__flex_values:
 	lea	(-32,%sp),%sp
@@ -700,24 +766,24 @@ control__flex_values:
 	add.l	#497,%d1
 	mvz.b	(%a0,%d1.l),%d1
 	cmp.l	%d1,%d6
-	jne	.Lcontrol_9
+	jne	.Lcontrol_24
 	add.l	%a0,%d4
 	sub.l	%a0,%a0
 	lea	control__flex_bits.l,%a4
 	clr.l	%d1
 	clr.l	%d2
 	add.l	#489,%d4
-.Lcontrol_10:
+.Lcontrol_25:
 	mvz.b	(%a4)+,%d3
 	lea	(%a0,%d4.l),%a1
 	cmp.l	%d3,%d1
-	jcc	.Lcontrol_16
-.Lcontrol_14:
+	jcc	.Lcontrol_31
+.Lcontrol_29:
 	move.l	%a0,%d0
 	mov3q.l	#2,%d6
 	addq.l	#1,%a0
 	cmp.l	%d0,%d6
-	jcs	.Lcontrol_17
+	jcs	.Lcontrol_32
 	move.b	-426(%a1),%d0
 	moveq	#127,%d6
 	lea	(-426,%a1),%a2
@@ -727,8 +793,8 @@ control__flex_values:
 	addq.l	#7,%d1
 	or.l	%d0,%d2
 	cmp.l	%d3,%d1
-	jcs	.Lcontrol_14
-.Lcontrol_16:
+	jcs	.Lcontrol_29
+.Lcontrol_31:
 	mov3q.l	#1,%d0
 	lsl.l	%d3,%d0
 	sub.l	%d3,%d1
@@ -737,12 +803,12 @@ control__flex_values:
 	lsr.l	%d3,%d2
 	move.b	%d0,(%a3)+
 	cmp.l	#control__flex_bits+12,%a4
-	jne	.Lcontrol_10
-.Lcontrol_8:
+	jne	.Lcontrol_25
+.Lcontrol_23:
 	movem.l	(%sp),#7292
 	lea	(32,%sp),%sp
 	rts
-.Lcontrol_17:
+.Lcontrol_32:
 	move.l	%a1,%a2
 	moveq	#127,%d6
 	move.b	(%a2),%d0
@@ -752,23 +818,23 @@ control__flex_values:
 	addq.l	#7,%d1
 	or.l	%d0,%d2
 	cmp.l	%d3,%d1
-	jcs	.Lcontrol_14
-	jra	.Lcontrol_16
-.Lcontrol_9:
+	jcs	.Lcontrol_29
+	jra	.Lcontrol_31
+.Lcontrol_24:
 	move.l	#1074606604,%a1
 	move.l	%a3,%a0
 	sub.l	%a3,%a1
 	lea	(12,%a3),%a3
-.Lcontrol_11:
+.Lcontrol_26:
 	move.b	(%a1,%a0.l),%d0
 	move.b	%d0,(%a0)+
 	cmp.l	%a3,%a0
-	jeq	.Lcontrol_8
+	jeq	.Lcontrol_23
 	move.b	(%a1,%a0.l),%d0
 	move.b	%d0,(%a0)+
 	cmp.l	%a3,%a0
-	jne	.Lcontrol_11
-	jra	.Lcontrol_8
+	jne	.Lcontrol_26
+	jra	.Lcontrol_23
 	.size	control__flex_values, .-control__flex_values
 	.align	2
 	.type	control__step_len, @function
@@ -785,11 +851,11 @@ control__step_len:
 	move.b	(%a2),%d0
 	move.b	(%a1),%d1
 	tst.b	(%a0)
-	jeq	.Lcontrol_26
+	jeq	.Lcontrol_41
 	move.l	20(%sp),%a0
 	move.b	80(%a0),%d0
 	move.b	81(%a0),%d1
-.Lcontrol_26:
+.Lcontrol_41:
 	mvz.b	%d0,%d0
 	mvz.b	%d1,%d2
 	moveq	#63,%d3
@@ -797,24 +863,24 @@ control__step_len:
 	subq.l	#1,%a1
 	move.l	%d2,%a0
 	cmp.l	%a1,%d3
-	jcs	.Lcontrol_38
-.Lcontrol_27:
+	jcs	.Lcontrol_53
+.Lcontrol_42:
 	mov3q.l	#6,%d2
 	cmp.l	%a0,%d2
-	jcs	.Lcontrol_31
+	jcs	.Lcontrol_46
 	ext.w	%d1
 	mvz.w	%d1,%d1
 	lsl.l	#2,%d1
 	move.l	%d1,%a0
 	add.l	#1074444883,%a0
-.Lcontrol_28:
+.Lcontrol_43:
 	move.l	-2147477484,%a1
 	move.l	%a1,%d1
 	add.l	#-720,%d1
 	cmp.l	#6480,%d1
-	jls	.Lcontrol_29
+	jls	.Lcontrol_44
 	move.w	#2880,%a1
-.Lcontrol_29:
+.Lcontrol_44:
 	mvz.b	(%a0),%d1
 	move.l	#2646000,%d3
 	move.l	%a1,%d2
@@ -825,12 +891,12 @@ control__step_len:
 	move.l	%d1,(%a0)
 	lea	(12,%sp),%sp
 	rts
-.Lcontrol_31:
+.Lcontrol_46:
 	move.l	#1074444891,%a0
-	jra	.Lcontrol_28
-.Lcontrol_38:
+	jra	.Lcontrol_43
+.Lcontrol_53:
 	moveq	#16,%d0
-	jra	.Lcontrol_27
+	jra	.Lcontrol_42
 	.size	control__step_len, .-control__step_len
 	.align	2
 	.type	control__take, @function
@@ -842,7 +908,7 @@ control__take:
 	move.b	(%a2,%d0.l),%d2
 	mvz.b	%d2,%d0
 	tst.b	%d2
-	jeq	.Lcontrol_39
+	jeq	.Lcontrol_54
 	move.l	20(%sp),%d1
 	lea	control__q.l,%a1
 	move.l	24(%sp),%a0
@@ -853,13 +919,13 @@ control__take:
 	move.l	%d4,4(%a0)
 	mov3q.l	#1,%d4
 	cmp.l	%d0,%d4
-	jeq	.Lcontrol_41
+	jeq	.Lcontrol_56
 	mvz.w	22(%sp),%d1
 	mov3q.l	#1,%a1
 	lsl.l	#5,%d1
 	move.l	%d1,%a0
 	add.l	#control__q,%a0
-.Lcontrol_42:
+.Lcontrol_57:
 	move.l	8(%a0),%d3
 	move.l	12(%a0),%d4
 	addq.l	#8,%a0
@@ -867,13 +933,13 @@ control__take:
 	move.l	%d3,-8(%a0)
 	move.l	%d4,-4(%a0)
 	cmp.l	%d0,%a1
-	jcs	.Lcontrol_42
-.Lcontrol_41:
+	jcs	.Lcontrol_57
+.Lcontrol_56:
 	move.l	20(%sp),%d4
 	subq.l	#1,%d2
 	mov3q.l	#1,%d0
 	move.b	%d2,(%a2,%d4.l)
-.Lcontrol_39:
+.Lcontrol_54:
 	movem.l	(%sp),#1052
 	lea	(16,%sp),%sp
 	rts
@@ -888,58 +954,6 @@ ot_fmt_ptch:
 	.short	0x60ff	| jra ot_note_name (Bcc.L)
 	.long	ot_note_name - .
 	.size	ot_fmt_ptch, .-ot_fmt_ptch
-	.align	2
-	.globl	ot_ptch_step
-	.type	ot_ptch_step, @function
-ot_ptch_step:
-	move.l	%d2,-(%sp)
-	move.l	8(%sp),%a0
-	move.l	12(%sp),%d0
-	move.l	16(%sp),%d1
-	tst.l	1187503398
-	jeq	.Lcontrol_55
-	tst.l	-2147483488
-	jne	.Lcontrol_55
-	move.l	control__oct_tally.l,%a0
-	move.l	%a0,%d2
-	eor.l	%d0,%d2
-	jmi	.Lcontrol_57
-	add.l	%a0,%d0
-.Lcontrol_57:
-	move.l	%d0,%a0
-	mov3q.l	#4,%d2
-	addq.l	#2,%a0
-	cmp.l	%a0,%d2
-	jcc	.Lcontrol_68
-	tst.l	%d0
-	jle	.Lcontrol_61
-	moveq	#12,%d0
-.Lcontrol_60:
-	add.l	%d1,%d0
-	clr.l	control__oct_tally.l
-	moveq	#96,%d2
-	cmp.l	%d0,%d2
-	jcc	.Lcontrol_54
-	move.l	%d1,%d0
-.Lcontrol_54:
-	move.l	(%sp)+,%d2
-	rts
-.Lcontrol_55:
-	move.l	%d1,16(%sp)
-	move.l	%d0,12(%sp)
-	move.l	%a0,8(%sp)
-	move.l	(%sp)+,%d2
-	clr.l	control__oct_tally.l
-	jmp	1073947660
-.Lcontrol_61:
-	moveq	#-12,%d0
-	jra	.Lcontrol_60
-.Lcontrol_68:
-	move.l	(%sp)+,%d2
-	move.l	%d0,control__oct_tally.l
-	move.l	%d1,%d0
-	rts
-	.size	ot_ptch_step, .-ot_ptch_step
 	.align	2
 	.type	control__coarse_glide, @function
 control__coarse_glide:

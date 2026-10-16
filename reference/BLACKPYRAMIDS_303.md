@@ -148,7 +148,7 @@ Control decisions (the author's):
   semitone, and a C0–C6 spread. FUNC + turn steps by octaves and keeps the note, three detents an
   octave (one a detent was too quick on the unit); stock FLEX's
   FUNC + PTCH jumps to −64 / 0 / +64 instead. PERSONALIZE's DISABLE FUNC+ENC turns it off, as on
-  stock.
+  stock. Pushing the knob while turning it (MT28) takes the same octave steps.
 - **DEC:** 50 ms–2 s (MT25, 15 Oct 2026: snappier plucks; the default moved from 38 to 72 so it still
   starts at about 400 ms). Before that it was 200 ms–2 s (MT16, Open303's plugin range), and before
   that 30 ms–3 s, which crowded the audible part into the bottom half of the knob. An accented note
