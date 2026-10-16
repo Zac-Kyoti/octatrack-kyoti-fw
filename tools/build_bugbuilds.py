@@ -4,7 +4,7 @@
 """
 Bugbuilds -- each finished FEATURE build, with all three BUG FIXES folded in.
 
-Nine composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
+Ten composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
 not written alongside, the standalone per-feature images in out/):
 
     MUTE_MODES        + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
@@ -14,6 +14,7 @@ not written alongside, the standalone per-feature images in out/):
     RELOAD_FROM_PROJECT            + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     DIRECT_JUMP_KYOTI      + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     REC_TRIG_MUTE          + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
+    BLACKPYRAMIDS_303      + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     VARISPEED              + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     VARISPEED_EMUS         + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
 
@@ -25,7 +26,7 @@ through untouched, and its cave stays at its own address so the descriptor's for
 pointers stay valid. VARISPEED_EMUS's DSP payload edits (the S950 / SP12 kernel in SPRING
 REVERB's modules) come through the same way.
 
-MIDI_PLAYS_FREE_FIX (patch_trigscale) is added to ALL NINE images: no feature builder carries a copy
+MIDI_PLAYS_FREE_FIX (patch_trigscale) is added to ALL TEN images: no feature builder carries a copy
 any more.  Each of them used to (RELOAD_FROM_PROJECT's sat at 0x400d7bfc, the rest at 0x400d7b00), and
 every copy wrote the same site 0x4009b6f2 -- which octabam's remix ledger refuses, so no two
 of those features could ever be selected into one remix.  The fix is its own contribution
@@ -39,7 +40,7 @@ RELOAD_FROM_PROJECT, whose own cave starts at 0x400d6500, so the allocator moves
     patch_partreapply   0x400d6500   402 B   (RELOAD_FROM_PROJECT: relocated above its own cave)
     patch_pattern_led   0x400d6694   158 B   (RELOAD_FROM_PROJECT: likewise)
     (never below 0x400d6500 -- 0x400d64ca.. is a runtime record table, kb/caves.md 2b)
-    patch_trigscale     0x400d7b00    62 B   (added to all nine)
+    patch_trigscale     0x400d7b00    62 B   (added to all ten)
 
 Verification (every image, every run):
   * the feature's builder is promoted (on kyoti_status.FINAL), its rebuilt image still matches, and it is re-run
@@ -125,6 +126,8 @@ FEATURES = {
     "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "out/mainos_direct_jump_kyoti.bin", "BUG_DJV7", "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.0.1, clock-locked jumps)."),
     "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "out/mainos_rec_trig_mute.bin", "BUG_RTM",
                       "[TRACK]+[NO]/[YES] mute/unmute recorder trigs; MIDI CC 80; '..' edge icon."),
+    "BLACKPYRAMIDS_303": ("build_blackpyramids_303.py", "out/mainos_blackpyramids_303.bin", "BUG_BP303",
+                          "BLKPYRAMD: a TB-303 voice as a track machine (one per DSP core)."),
     "VARISPEED": ("build_varispeed.py", "out/mainos_varispeed.bin", "BUG_VARI",
                   "STATIC/FLEX TSTR VARI: tempo-locked varispeed, QUAN ratios on PTCH."),
     # carries DSP payload changes (the S950 / SP12 kernel in SPRING REVERB's modules, SPRING off
@@ -308,8 +311,11 @@ def apply_bugfixes(img, which, label, addrs):
 
 
 def delta(a, b):
-    """Byte positions where a and b differ -> {offset: value_in_b}."""
-    return {i: b[i] for i in range(len(a)) if a[i] != b[i]}
+    """Byte positions where a and b differ -> {offset: value_in_b}. A longer b (BLACKPYRAMIDS_303
+    appends its DRAM loader and runtime after the OS) counts every byte past a's end as changed."""
+    d = {i: b[i] for i in range(min(len(a), len(b))) if a[i] != b[i]}
+    d.update({i: b[i] for i in range(len(a), len(b))})
+    return d
 
 
 def wrap(mainos, name, verstr, blurb):
