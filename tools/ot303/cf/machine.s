@@ -15,6 +15,7 @@
         .global ot_slic_a, ot_slic_b, ot_slic_c, ot_pmtr_pb
         .global ot_live_req_hook, ot_live_midi_hook, ot_live_chrom_hook, ot_live_rel_hook, ot_oneshot_hook
         .global ot_rec_chrom_hook, ot_rec_midi_hook, ot_idle_hook
+        .global ot_plock_hook
         .global ot_led_hook, ot_slices_hook, ot_slots_hook, ot_oct_hook, ot_chrom_key_hook, ot_chrom_limit_hook, ot_chrom_img_hook, ot_page_key_hook
 
         .equ    OT_ROW, 5
@@ -637,3 +638,34 @@ ot_page_key_hook:
         bne.s   2f
         jmp     (0x4004fdee).l
 2:      jmp     (0x4004ff96).l
+
+| MT31: the p-lock editor's test for an existing lock (0x40050ce2: d0 = the lock, sign-extended, -1 none;
+| d5 the knob, d2 the page, d6 the step, d3 the track, a0 + a2 + 0x59 the lock byte, a1 the bank). Tells
+| control.c ot_plock_new the step of every held trig's handler call; for a trig with no lock yet it may
+| return the value the lock starts from (OT-303 PTCH, FUNC / push): written as the lock, marked as stock's
+| new lock is (0x46c7d48c[step] |= 1 << track), and the handler path takes it. Otherwise as stock.
+ot_plock_hook:
+        lea     -16(%sp),%sp
+        movem.l %d0-%d1/%a0-%a1,(%sp)
+        move.l  %d0,-(%sp)
+        move.l  %d6,-(%sp)
+        move.l  %d2,-(%sp)
+        move.l  %d5,-(%sp)
+        jsr     ot_plock_new
+        lea     16(%sp),%sp
+        move.l  %d0,4(%sp)              | into the d1 slot
+        movem.l (%sp),%d0-%d1/%a0-%a1
+        lea     16(%sp),%sp
+        cmpi.l  #-1,%d0
+        bne.s   1f                      | a lock: the handler path
+        tst.l   %d1
+        bmi.s   2f                      | stock's new lock
+        move.b  %d1,(0x59,%a2,%a0.l)
+        moveq   #1,%d0
+        lsl.l   %d3,%d0
+        lea     (0x46c7d48c).l,%a0
+        move.b  (0,%a0,%d6.l),%d1
+        or.l    %d1,%d0
+        move.b  %d0,(0,%a0,%d6.l)
+1:      jmp     (0x40050d8e).l
+2:      jmp     (0x40050cea).l

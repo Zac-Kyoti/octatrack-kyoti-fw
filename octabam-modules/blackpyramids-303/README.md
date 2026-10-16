@@ -27,7 +27,7 @@ leaves the machine.
 | `bp_image.py` | the DSP integrate step (`Module.dsp_source`) | hand-written; the standalone's `tools/ot303/dsp_patch.py` |
 | `bp_dsp_data.py` | both payloads' voice words and X words | generated |
 | `bp_dsp_A.asm`, `bp_dsp_B.asm` | the DSP source as assembled, per payload | generated |
-| `manifest.py` | 43 detours, 7 pokes, the FLEX renderer `SymbolRef` | the standalone builder's lists |
+| `manifest.py` | 44 detours, 7 pokes, the FLEX renderer `SymbolRef` | the standalone builder's lists |
 
 Regenerate after changing `tools/ot303/`: `python3 tools/build_blackpyramids_303.py`, then
 `python3 tools/ot303/octabam_module.py`. The generator refuses to write `bp_runtime.s` unless,

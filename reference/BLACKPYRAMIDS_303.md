@@ -150,7 +150,11 @@ Control decisions (the author's):
   semitone, and a C0–C6 spread. FUNC + turn steps by octaves and keeps the note, three detents an
   octave (one a detent was too quick on the unit); stock FLEX's
   FUNC + PTCH jumps to −64 / 0 / +64 instead. PERSONALIZE's DISABLE FUNC+ENC turns it off, as on
-  stock. Pushing the knob while turning it (MT28) takes the same octave steps.
+  stock. Pushing the knob while turning it (MT28) takes the same octave steps. With several trigs held (MT31, 16 Oct 2026), FUNC or push + turn
+  moves every held trig's PTCH lock by the same octave, from its own value; a trig with no lock yet
+  starts from the knob's value. Before, the stock editor's call per held trig made each tally a
+  detent, so only the last trig moved, and a new lock's first detent moved a semitone (stock starts a
+  new lock at knob + turn without the handler).
 - **DEC:** 50 ms–2 s (MT25, 15 Oct 2026: snappier plucks; the default moved from 38 to 72 so it still
   starts at about 400 ms). Before that it was 200 ms–2 s (MT16, Open303's plugin range), and before
   that 30 ms–3 s, which crowded the audible part into the bottom half of the knob. An accented note
@@ -200,7 +204,7 @@ is full in stock, so the voice takes **SPRING REVERB's** module space.
 | DSP P (each payload) | 1,026 words (A) / 1,022 (B), in SPRING REV's module (DARK REV's 35-word helper moved beside it) | 1,028 |
 | DSP X | 216 working words at `X:$7b24–$7bfb` (stock's unreferenced top, outside the DMA partitions), copied from SPRING's X records at the first frame | — |
 | DSP Y | 2,119 words `$7a5–$feb`: tables and the voice state, streamed from the ColdFire | — |
-| ColdFire | a 30 KB DRAM runtime (a 16-page arena reserve, loader appended after the OS), 43 detours, 7 pokes, the FLEX renderer slot; about 1,200 instructions a frame per voice in ot_emu, of ~29,000 for the whole frame (15 Oct 2026: the Y table pre-packed, the continuous words made only when their knobs change; −340 a voice) | — |
+| ColdFire | a 30 KB DRAM runtime (a 16-page arena reserve, loader appended after the OS), 44 detours, 7 pokes, the FLEX renderer slot; about 1,200 instructions a frame per voice in ot_emu, of ~29,000 for the whole frame (15 Oct 2026: the Y table pre-packed, the continuous words made only when their knobs change; −340 a voice) | — |
 
 **Cycles per sample** (emulator cycle table, host and engine together; on the chip ×1.16,
 from the METER on DIAG8):
@@ -331,7 +335,7 @@ now goes through the field, with its image byte-identical.
   - the C's cross-file tail calls are written as `Bcc.L` words, because gas's 54455 table refuses
     the mnemonic although the chip runs it;
   - ld's tail merge of `""` is kept as a `.set`.
-- **The manifest:** this builder's 43 detours and 7 pokes, plus the FLEX renderer `SymbolRef`.
+- **The manifest:** this builder's 44 detours and 7 pokes, plus the FLEX renderer `SymbolRef`.
 - **DSP:** `bp_image.py` writes `bp_dsp_data.py`'s words: this builder's `dsp_patch.py`, with the
   same asserts.
 - **Conflicts:** ANALOG BD, SPRING REV, SYNTH MACHINE, TAPE ECHO, SCALE QUANTIZER and

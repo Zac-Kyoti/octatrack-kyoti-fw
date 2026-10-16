@@ -104,6 +104,7 @@ DETOURS = (
     (0x4004FBA8, H("7218b28a650001ba6d0001b6"), "ot_chrom_limit_hook", "jmp", 12),  # MT23: idx up to 52
     (0x40044968, H("7201b2b9460d16fc6616"), "ot_chrom_img_hook", "jmp", 10),  # MT23: the full keyboard image
     (0x4004FDE4, H("4ab9460d16fc660001aa"), "ot_page_key_hook", "jmp", 10),  # the PAGE key: a 17th note on every octave
+    (0x40050CE2, H("72ffb280660000a6"), "ot_plock_hook", "jmp", 8),     # MT31: held trigs' PTCH locks
 )
 POKES = (
     (0x40079248, H("48780005"), H("48780006"), "machine chooser has six rows, OT-303 the last"),

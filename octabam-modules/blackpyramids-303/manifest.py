@@ -19,7 +19,7 @@ COLDFIRE. One DRAM unit, bp_runtime (~28 KB): tools/ot303/cf/{machine.s,control.
 params.c} and the voice's Y table, generated into one GNU-as unit by tools/ot303/octabam_module.py
 (the C as `m68k-elf-gcc -S` output, libgcc's __muldi3 as words). Its `reference` is the standalone
 image's runtime: linked alone at 0x40a955e0 it is those bytes, sha256 a7a784c6..., for -mcpu=5407
-and 54455 alike (the generator refuses to write it otherwise). 43 detours, 7 pokes and the FLEX
+and 54455 alike (the generator refuses to write it otherwise). 44 detours, 7 pokes and the FLEX
 renderer slot (0x400d6438 -> ot_render), every one the standalone builder's
 (tools/build_blackpyramids_303.py).
 
@@ -49,7 +49,7 @@ _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 H = bytes.fromhex
 
 RUNTIME_AT = 0x40A955E0        # the standalone image's DRAM reserve (tools/ot303/dram.py RESERVE)
-RUNTIME_SHA256 = "5edc4b7fccddeb468a4720703f7fe9194be79c915035dd385642b05b03931506"
+RUNTIME_SHA256 = "fa020b65ae7fcd5893e715dda61b7b450bc586f1aa4ba0f218f9ea658d4cd477"
 
 DETOURS = (
     Detour(0x400334D8, H("2f02222f0008"), "bp_runtime", "ot_machine_name", "chooser row 5's name"),
@@ -95,6 +95,7 @@ DETOURS = (
     Detour(0x4004FBA8, H("7218b28a650001ba6d0001b6"), "bp_runtime", "ot_chrom_limit_hook", "idx up to 52", pad_to=12),
     Detour(0x40044968, H("7201b2b9460d16fc6616"), "bp_runtime", "ot_chrom_img_hook", "the full keyboard image", pad_to=10),
     Detour(0x4004FDE4, H("4ab9460d16fc660001aa"), "bp_runtime", "ot_page_key_hook", "the PAGE key: a 17th note on every octave", pad_to=10),
+    Detour(0x40050CE2, H("72ffb280660000a6"), "bp_runtime", "ot_plock_hook", "MT31: held trigs' PTCH locks", pad_to=8),
 )
 
 POKES = (

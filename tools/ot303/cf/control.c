@@ -85,18 +85,32 @@ int ot_fmt_ptch(char *buf, int v) {
  * that handler's, as before. MT28: the knob pushed while turned (the flag the generic handler reads,
  * 0x46c7d8ee + 24 (k + 56), which makes a stock knob move 7 a detent) takes the same octave path. */
 #define OCT_DETENTS 3
-static int oct_tally = 0;
+/* MT31: with trigs held, the p-lock editor (0x40050c7c..) calls the handler once per held trig, lowest
+ * step first, all in one pass per detent; machine.s ot_plock_hook passes the step of each call (pl_step,
+ * pl_have). A detent is tallied once, at the pass's first call (a step not above the last one); the
+ * pass's other calls take the same outcome. Before MT31 each held trig's call tallied: with three held,
+ * only the third trig's call ever reached the octave. */
+static int oct_tally = 0, oct_jump = 0;
+static unsigned pl_have = 0, pl_step = 0, pl_last = 0, pl_last_ok = 0;
+static unsigned ptch_coarse(int k) {
+    unsigned func = U32(0x46c7dd26u) && !U32(0x800000a0u);
+    return func || U32(0x46c7d8eeu + 24u * (unsigned)(k + 56)) != 0;
+}
 int ot_ptch_step(int k, int turn, int v) {
     int (*generic)(int, int, int) = (int (*)(int, int, int))0x4003240cu;
-    unsigned func = U32(0x46c7dd26u) && !U32(0x800000a0u);
-    unsigned pushed = U32(0x46c7d8eeu + 24u * (unsigned)(k + 56)) != 0;
-    if (!func && !pushed) { oct_tally = 0; return generic(k, turn, v); }
-    if ((oct_tally ^ turn) < 0) oct_tally = 0;
-    oct_tally += turn;
-    if (oct_tally > -OCT_DETENTS && oct_tally < OCT_DETENTS) return v;
-    int o = v + (oct_tally > 0 ? 12 : -12);
-    oct_tally = 0;
-    return o < 0 || o > (int)OT_PTCH_MAX ? v : o;
+    unsigned locked = pl_have, step = pl_step;
+    pl_have = 0;
+    if (!ptch_coarse(k)) { oct_tally = 0; pl_last_ok = 0; return generic(k, turn, v); }
+    unsigned same_pass = locked && pl_last_ok && step > pl_last;
+    pl_last = step; pl_last_ok = locked;
+    if (!same_pass) {
+        if ((oct_tally ^ turn) < 0) oct_tally = 0;
+        oct_tally += turn;
+        oct_jump = 0;
+        if (oct_tally <= -OCT_DETENTS || oct_tally >= OCT_DETENTS) { oct_jump = oct_tally > 0 ? 12 : -12; oct_tally = 0; }
+    }
+    int o = v + oct_jump;
+    return !oct_jump || o < 0 || o > (int)OT_PTCH_MAX ? v : o;
 }
 /* The stock FLEX page descriptor, renamed: twelve knobs (an empty name hides a slot; +0xa2 a knob's
  * minimum, +0xd2 its number of values, +0x102 its value formatter, +0x162 its step handler); PTCH
@@ -138,6 +152,18 @@ void ot_ui_tick(void) {
 static const uint8_t flex_bits[12] = {7, 7, 7, 7, 7, 7, 2, 1, 1, 1, 2, 7};
 static volatile uint8_t *knob(volatile uint8_t *part, unsigned t, unsigned k) {
     return part + (k < 6 ? 0x2a : 0x1da) + 30 * t + 6 + k % 6;
+}
+/* MT31: ot_plock_hook (machine.s), at the p-lock editor's test for an existing lock (0x40050ce2), for
+ * every held trig: its step (the handler's call follows), and for a trig with no lock yet the value its
+ * lock starts from, or -1. Stock starts a new lock at the knob + the raw turn without calling the
+ * handler, so FUNC / push + turn on PTCH moved the first detent a semitone; on an OT-303 track, PTCH
+ * (page 1) with FUNC or push, the lock starts at the knob's value and goes through the handler. */
+int ot_plock_new(unsigned k, unsigned page, unsigned step, int lock) {
+    unsigned t = U8(0x100b14ccu);
+    if (page || k != OT_PTCH || t >= 8 || !signed_track(part_base(), t)) return -1;
+    if (lock == -1 && !ptch_coarse((int)k)) return -1;          /* stock's new lock: no handler call */
+    pl_have = 1; pl_step = step;                                  /* the handler's call follows */
+    return lock == -1 ? *knob(part_base(), t, OT_PTCH) : -1;
 }
 static volatile uint8_t *stash(volatile uint8_t *part, unsigned t, unsigned i) {   /* i = 0..8 */
     return i < 3 ? part + SIG + 30 * t + 3 + i : part + 0x1da + 30 * t + 18 + (i - 3);
