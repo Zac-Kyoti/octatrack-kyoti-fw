@@ -106,9 +106,9 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | REPITCH DSP kernel gate (kept for the rewrite) | `tools/repitch_dsp_*` (bit-exact against the reference engine) |
 | DSP assembly | `tools/dsp_xasm.py` over `vendor/dsp56300`'s `dsp_asm` |
 | a final build | `tools/build_<feature>.py` → `.syx` (MIDI) + `.bin` (CF card); see `BUILD_KYOTI.md` |
-| the combined image | `tools/build_kyoti.py` — **KYOTI V1.4, FINAL 2026-10-14** (without REPITCH; V1.0 withdrawn; see §6) |
+| the combined image | `tools/build_kyoti.py` — builds **KYOTI V1.5 (WIP)**; **KYOTI V1.4, FINAL 2026-10-14**, builds from `19348d9` (see §6) |
 | octabam's remixer (`make remix`) | `sh tools/octabam_remixer.sh` — its own clone at `~/Documents/octabam`, fast-forwarded to octabam's `main` on every launch; `refs/octabam` stays the pinned research harness |
-| each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final, seven images) |
+| each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final, eight images) |
 | DIRECT JUMP V6.4, the OT↔AR parity build | `tools/build_direct_jump_v6_4.py` — WIP **by design**: kept buildable at the user's request (hardware-confirmed image `4a6c1b5e…`), never to be promoted |
 | external RE research | `python3 tools/refs/sync.py` (clone or refresh the tracked repos into `refs/`) · `python3 tools/refs/whatsnew.py` |
 
@@ -142,6 +142,7 @@ builder's FINAL entry and the old builder is deleted. There is no superseded tie
 | QUANTIZE_LIVE_REC_TOGGLE | `build_quantize_live_rec_toggle.py` | `octabam-modules/quantize-live-rec-toggle` |
 | ERASE_EMPTY_TRIGLESS_LOCKS | `build_erase_empty_trigless_locks.py` | `octabam-modules/erase-empty-trigless-locks` |
 | REC_TRIG_MUTE | `build_rec_trig_mute.py` | `octabam-modules/rec-trig-mute` |
+| BLACKPYRAMIDS_303 (shown as BLKPYRAMD; working name OT-303) | `build_blackpyramids_303.py` (sources `tools/ot303/`) | `octabam-modules/blackpyramids-303` (with the `Module.dsp_source` PR, drafted; `reference/BLACKPYRAMIDS_303.md` §6) |
 | BATCH_BUGFIXES: MIDI_PLAYS_FREE_FIX · EMPTY_PATTERN_LED_FIX · PART_CHANGE_CARRYOVER_FIX | `build_midi_plays_free_fix.py` · `build_empty_pattern_led_fix.py` · `build_part_change_carryover_fix.py` | `octabam-modules/batch-bugfixes` |
 
 The assembly sources keep their historical names (`patch_directjump_v7.s`,
@@ -152,7 +153,49 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
-- **KYOTI V1.4** (`tools/build_kyoti.py`, 2026-10-13) — V1.3 without REPITCH_REPEAT98_KYOTI,
+- **BLACKPYRAMIDS_303** (`tools/build_blackpyramids_303.py`) — **FINAL 2026-10-14**, mainos
+  `3624a1e7…`, CF `.bin` `8fb372af…`, syx `5a63cf20…`, `140C_BP303`; flashed by the user:
+  everything works (the voice, the grid, live play, chromatic with PAGE, FUNC + PTCH octaves).
+  Bugbuild `BUG_BP303` (mainos `0de8be5c…`, syx `55b38837…`): emulator-verified, not flashed.
+  - The octabam module is ported (`octabam-modules/blackpyramids-303/`); its octabam PR
+    (with `Module.dsp_source`) is drafted, not sent. Not flashed in octabam form.
+  - **WIP 2026-10-15 (not flashed, not promoted): two optimization passes, every output word
+    unchanged.**
+    - **The Octatrack-side code:** the Y table is pre-packed, the continuous words are remade
+      only when their own knobs change, and the record unpack is shorter. ColdFire −688
+      instructions a frame with two voices.
+    - **The DSP engine:** the second half-band is unrolled, the tanh index and fraction use
+      one-word shifts, the glide and YY4 go through the walkers, GD8 is read once, and the
+      raw-path test is folded per payload.
+    - **Together:** saw 473 → 455, square 620 → 598 cycles a sample on the corrected bench (about
+      3.7 %).
+    - **Checked:**
+      - the records are byte-identical to the old `record.c`'s;
+      - `engine_check` and `host_check` are BIT-EXACT;
+      - `verify_ot303` passes;
+      - the ot_emu audio is sample-identical to FINAL's.
+    - **Builds:** standalone mainos `42c0da93…`, syx `eee3f936…`; `BUG_BP303` mainos `1df0fd21…`.
+    - The FINAL pins still name `3624a1e7…` / `0de8be5c…`.
+  - Open: a square-wave voice on core 0 under the heaviest FX stack may overrun (§4 there).
+  - Open: not in KYOTI yet. SIDE-CHAIN's key bus has left the voice's Y (WIP, 2026-10-15), but
+    both still need SPRING REV's program words, so a combined image gives up a second effect for
+    one of them. ERASE_EMPTY_TRIGLESS_LOCKS must also skip these tracks (an empty trigless lock is
+    a tie here). KYOTI V1.5 is built without BLACKPYRAMIDS_303 (below).
+
+- **KYOTI V1.5 (WIP 2026-10-15, not flashed, not promoted)** — V1.4 + VARISPEED (`0cc30d7`) + the
+  15 Oct SIDE-CHAIN.
+  - **Layout:** VARISPEED's unit is CAVE's first piece, at its own address 0x400d6500. MUTE
+    MODE's menu piece and `rtm_mask` move to SAFE. RELOAD_FROM_PROJECT goes to DRAM (one 6 KB
+    page), as in V1.2–V1.3.
+  - **Builds:** mainos `6f6f3268…`, syx `8950f824…`.
+  - **Composer checks:** every delta is disjoint; outside the caves each feature equals its
+    standalone; VARISPEED's bytes are identical to its standalone.
+  - **Emulator:**
+    - VARISPEED's suite passes 9/11 on it. `static` and `spring` assert a standalone-only
+      image.
+    - The DRAM arena after boot equals RELOAD linked there.
+    - The SIDE-CHAIN project's mix equals the SIDE-CHAIN standalone's (per-slot RMS).
+- **KYOTI V1.4** (`tools/build_kyoti.py` at `19348d9`, 2026-10-13) — V1.3 without REPITCH_REPEAT98_KYOTI,
   ROM-only (RELOAD back in the proven cave, EMPTY_PATTERN_LED_FIX in SAFE_CAVE). **FINAL
   2026-10-14**, mainos `72710a3c…`, syx `568b2efb…`; flashed by the user: everything works.
 - **KYOTI V1.3** — FINAL 2026-10-10 until 2026-10-13, syx `9f6d2374…`, mainos
@@ -174,6 +217,23 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   replacement under discussion (octabam remix). The octabam images OBKYOTI6–12 are clean.
 - **DIRECT_JUMP_KYOTI** — not yet on hardware: MIDI tracks, and Program Change on fast
   re-cues.
+- **SIDECHAIN_COMPRESSOR, WIP 2026-10-15 (not flashed, not promoted):**
+  - **The change:** the DSP keybus and MON words moved from Y:`$800–$9ff`/`$7f0` to
+    Y:`$7e00–$7fff`/`$7df0` (the first internal FX2 slot's unused tail), freeing `$7f0–$9ff` for
+    BLACKPYRAMIDS_303's voice. `sctap` now copies each block in one pass, at 2 instructions a word
+    (ot_emu: 96 instructions a call against 163).
+  - **Verified (emulator only):** `tools/emu_sc_sctap.py` (a model, and word for word against
+    `8265344`'s tap), `emu_sc_dsp3.py`, and ot_emu, where the mix equals the promoted build's.
+  - **Builds:** standalone mainos `9f7899d4…`, `BUG_SC3X` mainos `5513f93b…`. They are WIP, so
+    `kyoti_status` FINAL still pins the old images. KYOTI V1.4's pin breaks with them, and its
+    FINAL image is unchanged.
+  - **To check on the unit:**
+    - KEY ducking on the same core and across cores;
+    - MON;
+    - DARK REV and PLATE REV in FX2 on T1 and T5 (the slot whose tail now holds the keybus),
+      long settings, with a keyed COMPRESSOR running: no cross-talk.
+  - **Sam's PR #2 on our repo** (`scmonbody`, for LOAD METER's composed hook): reviewed, merges
+    cleanly on top, not merged yet (the user merges it). octabam's pin moves to the merge commit.
 - **SIDECHAIN_COMPRESSOR** — `sc_norm` (FINAL 2026-10-08, syx `d21762d0…`): a COMPRESSOR saved
   on stock firmware (KEY byte 127) comes up with its side-chain OFF. User flashed the standalone
   and KYOTI V1.1 `370d7705…`: no issues. Not specifically tried on hardware: a project saved on

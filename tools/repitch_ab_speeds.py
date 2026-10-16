@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 RPSP stereo options at several speeds (listening pack 7): for each source and QUAN
 ratio, the clean reference, mid + side (rev 17 as built), the left channel in mono and

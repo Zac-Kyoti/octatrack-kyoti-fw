@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """Load-audit runner (KYOTI_LOAD_AUDIT.md): one ot_emu run of a real exported project, FX and
 TSTR set by RUNTIME pokes (the Part bytes in the bank blob + the live FX id arrays
 0x80000ec4/0x80000ecc) -- nothing on disk is edited -- with each DSP core's four-track loop

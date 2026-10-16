@@ -92,4 +92,4 @@ toast, the transport kept running, and the knob repaint. Nothing tested on an MK
 
 ## Licence
 
-MIT, © 2026 Zac-Kyoti. No Elektron bytes are included or distributed.
+MIT, © 2026 Zac Kyoti. No Elektron bytes are included or distributed.

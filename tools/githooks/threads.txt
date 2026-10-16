@@ -52,3 +52,11 @@ reference/handoffs/REC_TRIG_MUTE_*
 [load-audit]
 tools/load_audit/*
 reference/handoffs/KYOTI_LOAD_AUDIT*
+
+[ot303]
+tools/ot303/*
+tools/*ot303*
+tools/*blackpyramids*
+reference/handoffs/OT303_*
+reference/BLACKPYRAMIDS_303*
+octabam-modules/blackpyramids-303/*

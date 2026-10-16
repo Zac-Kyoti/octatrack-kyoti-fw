@@ -1,5 +1,5 @@
 ; SPDX-License-Identifier: MIT
-; SPDX-FileCopyrightText: 2026 Zac-Kyoti
+; SPDX-FileCopyrightText: 2026 Zac Kyoti
 ; ===========================================================================
 ; VARISPEED_EMUS (repitch-kyoti rev 17) -- DSP side: the "virtual sampler" behind
 ; S950 (RPS9) and SP12 (RPSP). Model (the ground truth this must match, bit for bit):

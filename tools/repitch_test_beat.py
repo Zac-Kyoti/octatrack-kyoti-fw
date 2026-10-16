@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 A synthetic boom-bap drum loop for listening tests (tools/repitch_ab_pack.py): two bars,
 swung 16ths, kick / snare (with a ghost) / closed and open hats, a short stereo room.

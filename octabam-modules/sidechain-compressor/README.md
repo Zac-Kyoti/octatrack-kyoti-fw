@@ -11,6 +11,8 @@ detector. Four controls join RMS on page 2:
 | **MON** | ON: hear the processed key on this track instead (audition) |
 
 **Hardware-confirmed in this octabam form** (the author's MKI, 2026-10-04, see Measured).
+The 15 Oct 2026 DSP changes (the keybus move and the one-pass tap below) are emulator-verified
+only.
 
 ## Contents
 
@@ -33,6 +35,10 @@ leaves its dispatch entry as it is, and the module's DSP code runs only from thr
 | `sctap` | `P:0x004a7` | `P:0x0029c` | dispatcher, every track, every block: publish the track's audio to this core's keybus and to the cross-core window |
 | `scdet` | `P:0x01ab1` | `P:0x01871` | COMPRESSOR proc+0: the detector reads the KEY track through KGN and KFLT; the result is stashed for MON |
 | `moncommit` | `P:0x0050e` | `P:0x00303` | dispatcher, per-track commit: with MON on, the stashed key replaces the track's output |
+
+`moncommit` replays the displaced `move x:>$206,r0` before entering
+`scmonbody`. A composed dispatcher hook may call `scmonbody` after replaying
+that instruction itself. The body preserves `r0` for the stock output commit.
 
 The values that differ per core (own and foreign core base, the window addresses, the
 branch sense) are `DspSection.subst`. The 48 table words are one `ptable`. The source
@@ -62,9 +68,12 @@ was set on this firmware and is never changed.
 **With MUTE_MODES:** a muted KEY track keeps feeding the compressor. MUTE_MODES carries
 that variant when this module is in the remix.
 
-**Not with BusDelay or BusVerb.** The keybus (core-private `Y:$7f0–$9ff`) and the
-cross-core window (the last `$202` words of each core's half) overlap theirs. The ledger
-refuses the pair. A later version is planned to move both.
+**Not with BusDelay or BusVerb.** The cross-core window (the last `$202` words of each
+core's half) overlaps theirs, so the ledger refuses the pair. The keybus and MON words
+moved on 15 Oct 2026, from `Y:$7f0–$9ff` to `Y:$7df0–$7fff` on both cores. That is the tail
+of the first internal FX2 slot, past stock's highest write at slot `+$3da2`, at the same
+`+$3e00` offset the window has in the shared slots. The move frees `$7f0–$9ff`, including
+BusDelay's private `Y:$903`, for other modules.
 
 ## Placement in octabam (PLACE)
 
@@ -81,6 +90,19 @@ The DRAM runtime is assembled for the 54455, so `tools/patch_sidechain.s` no lon
 carries `.cpu 5407`; every builder passes `-mcpu=5407` on the command line, and the
 unit's 338 B of `.text` are identical with and without the line, for 5407 and 54455.
 `DRAM` has not run on a unit.
+
+## The tap, since 15 Oct 2026
+
+`sctap` used to copy the block twice, to the keybus and then to the cross-core window. Each
+copy was a loop of `move x:(r0)+,x0` / `move x0,y:(rN)+`, so 4 instructions a word. It now
+computes both addresses first, then makes one pass of 2 instructions a word:
+`move a,y:(r1)+` to the keybus, and the XY move `move x:(r0)+,a  a,y:(r6)+`, which writes
+the window and loads the next word. `r6` is free there because the displaced
+`move x:>$208,r6` reloads it on the way out.
+- **Speed:** in `ot_emu`, 96 instructions a call where the old tap took 163, with 4 calls a
+  block per core. That is about 17 fewer instructions a sample on each core.
+- **Size:** the section is 4 words shorter (384).
+- **Output:** the words it writes are the same.
 
 ## Measured
 
@@ -104,9 +126,20 @@ unit's 338 B of `.text` are identical with and without the line, for 5407 and 54
   in-range KEY (T8) is kept; keyed audio is bit-identical to the build before. On hardware
   the standalone and KYOTI V1.1 with `sc_norm` were flashed with no issues; a project saved
   on stock firmware was not specifically tried.
+- The 15 Oct 2026 changes, emulator only:
+  - **`tools/emu_sc_sctap.py`:** 6 blocks of 4 tracks, on a counter that crosses
+    `$800000`. Every keybus and window word is as modelled, and no other Y word changes.
+    With `--ref` it compares against the old tap (`8265344`): all of internal Y and the
+    shared window are equal, with the keybus compared at each version's address.
+  - **`tools/emu_sc_dsp3.py`:** ALL GOOD with the new addresses, and with `--patched`
+    against the built image.
+  - **`ot_emu`**, with the standalone image, a project with KEY = T2 and MON on and off:
+    the mix is sample-identical to the promoted build over the run's common
+    591,712 frames. `--dsp-watch` shows `sctap` writing Y:`$7e00`/`$7f00` with the values
+    it used to write at `$800`/`$900`, and nothing writes `$800` any more.
 - Before that, on the standalone image and the KYOTI V1.0 combined image: KEY ducking,
   MON, a muted KEY with MUTE_MODES (Session 117).
 
 ## Licence
 
-MIT, © 2026 Zac-Kyoti. No Elektron bytes are included or distributed.
+MIT, © 2026 Zac Kyoti. No Elektron bytes are included or distributed.

@@ -1,5 +1,5 @@
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti
+| SPDX-FileCopyrightText: 2026 Zac Kyoti
 |
 | patch_qlrec -- surface QUANTIZE LIVE REC (PERSONALIZE) to the front panel.
 |

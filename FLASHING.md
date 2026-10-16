@@ -111,10 +111,12 @@ unit that boots; if it doesn't, use §3b.
 |---|---|
 | MUTE_MODES, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT, QUANTIZE_LIVE_REC_TOGGLE | `140C_KYOTI` |
 | KYOTI V1.4 (every feature in one image) | `KYOTI V1.4` |
+| KYOTI V1.5 (WIP: V1.4 + VARISPEED, the 15 Oct SIDE-CHAIN) | `KYOTI V1.5` |
 | DIRECT_JUMP_KYOTI | `140C_KDJ7` |
 | REC_TRIG_MUTE | `140C_RTM` |
+| BLACKPYRAMIDS_303 | `140C_BP303` |
 | ERASE_EMPTY_TRIGLESS_LOCKS and the BATCH_BUGFIXES builds | `1.40C` (stock string — check by behaviour) |
-| a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`) |
+| a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303`) |
 
 PERSONALIZE is reset by every flash, so features are off until you re-enable them. A
 quick check for each:
@@ -127,7 +129,9 @@ quick check for each:
   playing a kick. The compressed track ducks on the kick; `MON` lets you hear the key.
   A project saved on stock firmware with a COMPRESSOR in it: that compressor's page 2
   reads `KEY OFF`, `KFLT` and `KGN` centred, `MON OFF`, and it compresses as it did on
-  stock; a KEY you set on this firmware is kept.
+  stock; a KEY you set on this firmware is kept. With a keyed COMPRESSOR running, DARK REV
+  and PLATE REV in FX2 on T1 and on T5 (long settings) ring clean, with no other track's
+  audio in them.
 - **RELOAD_FROM_PROJECT** — save the bank, change a track's trigs, then `[PTN]` +
   `[TRACK n]` while playing: the saved trigs come back without the transport stopping.
 - **QUANTIZE_LIVE_REC_TOGGLE** — hold `[REC]`, tap `[PLAY]` → toast; tap `[PLAY]` again
@@ -138,6 +142,12 @@ quick check for each:
   `[TRACK]`, press `[NO]` → toast `REC TRIGS MUTED`, the edge icon shows `..▶`, the
   current recording finishes and the next cycle does not record. `[TRACK]` + `[YES]` →
   `REC TRIGS UNMUTED`, recording resumes. Stopped, a muted track shows `..■`.
+- **BLACKPYRAMIDS_303** — double-tap T1, pick `BLKPYRAMD`, put trigs on a few steps: each plays
+  a 303 note. P-lock `PTCH` and `ACC` on a step; put a trigless trig after a note (it holds) and a
+  slide trig on the next note (it glides). FX menus no longer offer SPRING REVERB. Choosing it on
+  T2 as well is refused with `ONE 303 PER CORE!`; on T5 it is allowed. Stopped, right after
+  power-on: the track key plays a held note; TRIG + YES on a step replays it every time; a
+  MIDI note on the track's channel plays (AUDIO NOTE IN on).
 - **MIDI_PLAYS_FREE_FIX** — a PLAYS FREE MIDI track, trig quantize DIRECT, SCALE MODE PER
   TRACK, notes on steps 1 and 2: a manual trig keeps it running instead of stalling.
 - **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is a p-lock on a MIDI track:

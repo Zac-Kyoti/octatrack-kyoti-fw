@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 Side-chain step-3 DSP coefficient tables -- shared by build_sidechain_compressor.py and
 emu_sc_dsp3.py so the two never drift.

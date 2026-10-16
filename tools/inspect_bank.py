@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """Static reader for an Octatrack bank file (`bankNN.work` / `.strd`).
 
 Reads the raw on-CF format directly (no firmware, no emulation), using the

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 tools/emu_pattern_led.py, ported to octabam's NATIVE C++ ColdFire port
 (`refs/octabam/tools/emu/ot_emu`) instead of route A (Unicorn + a Python

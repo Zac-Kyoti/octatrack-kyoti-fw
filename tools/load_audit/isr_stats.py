@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """Summarise ot_emu's OT_ISR_OUT / OT_TICK_OUT episode files (ot_emu_load_audit.patch):
 one line per file, instructions per episode -- mean, p50, p99, p99.9, max. The frame ISR is
 the IPL-5 episodes above ~5,000 instructions; the small ones are other level-5+ interrupts."""

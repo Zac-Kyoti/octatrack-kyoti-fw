@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 DIRECT JUMP V6 -- Session 105 (2026-09-26): the AR's DIRECT JUMP behaviour, reproduced through OT's own landing.
 

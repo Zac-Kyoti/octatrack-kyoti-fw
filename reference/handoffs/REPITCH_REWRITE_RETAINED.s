@@ -1,5 +1,5 @@
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti
+| SPDX-FileCopyrightText: 2026 Zac Kyoti
 |
 | REPITCH REWRITE -- RETAINED CODE (clean-room input, redacted 2026-10-13).
 | Zac Kyoti's own routines from the shipped module, unchanged: QUAN (bucket, widget,

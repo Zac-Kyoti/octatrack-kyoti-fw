@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 RELOAD FROM PROJECT -- scaled-down / SEQ-focused variant (NOTES.md "Session 43"
 / "44" / "47").

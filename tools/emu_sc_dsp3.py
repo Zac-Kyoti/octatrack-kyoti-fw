@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 Isolation check of the step-3 side-chain DSP hooks (tools/patch_sc_dsp3.asm)
 under octabam's dsp_host / dsp56kEmu.
@@ -64,9 +64,9 @@ else:
     CAVE_ORG = 0x1012
     COMP_MOD, COMP_PROC = 0x1864, 0x1871
     COMMIT_HOOK = 0x303
-KB_BASE = 0x800
-KB_STRIDE = 0x40     # Session 115: keybus slot(track) = $800 + track*$40 (was *$80)
-MON_BASE = 0x7f0     # Session 115: MON_ON/MON_KEY[track] = Y:$7f0 + track*2 (was slot+$40/$41)
+KB_BASE = 0x7e00
+KB_STRIDE = 0x40     # keybus slot(track) = $7e00 + track*$40 (2026-10-15; $800 since Session 115)
+MON_BASE = 0x7df0    # MON_ON/MON_KEY[track] = Y:$7df0 + track*2 (2026-10-15; $7f0 since Session 115)
 Q23 = 1 << 23
 NW = 30                                 # dsp_host caps n7 at 15 frames = 30 words
 
@@ -123,14 +123,17 @@ def assemble():
                              .replace("@KGNA@", f"${sc_tables.kgn_smooth_a():x}")
         a = SCRATCH / "sc3_test.asm"; a.write_text(txt)
         o = SCRATCH / "sc3_test.bin"
-        sh(DSP_ASM, "-in", a, "-org", f"{CAVE_ORG:x}", "-out", o)
+        sym = SCRATCH / "sc3_test.sym"
+        sh(DSP_ASM, "-in", a, "-org", f"{CAVE_ORG:x}", "-out", o, "-sym", sym)
         raw = o.read_bytes()
-        return [int.from_bytes(raw[i:i + 3], "little") for i in range(0, len(raw), 3)]
+        syms = {name: int(addr, 16) for name, addr in
+                (line.split() for line in sym.read_text().splitlines() if line.strip())}
+        return ([int.from_bytes(raw[i:i + 3], "little") for i in range(0, len(raw), 3)], syms)
 
-    code = build(CAVE_ORG, CAVE_ORG)
+    code, _ = build(CAVE_ORG, CAVE_ORG)
     n = len(code)
     gtab_off, ftab_off = n, n + sc_tables.GAIN_N
-    code = build(CAVE_ORG + gtab_off, CAVE_ORG + ftab_off)
+    code, syms = build(CAVE_ORG + gtab_off, CAVE_ORG + ftab_off)
     assert len(code) == n, "code size shifted between sizing passes"
     words = code + GAIN_T + FLT_T
     total = len(words)
@@ -154,6 +157,9 @@ def assemble():
     # branch happened to have a displacement of 12).
     rts = dsp_asm_util.find_rts(d, CAVE_ORG)
     sctap, scdet, sctail = CAVE_ORG, CAVE_ORG + rts[0] + 1, CAVE_ORG + rts[3] + 1
+    if syms.get("scmonbody") != sctail + 2:
+        sys.exit(f"scmonbody is at {syms.get('scmonbody')!r}, expected the first word after "
+                 f"moncommit's two-word displaced load at 0x{sctail + 2:x}")
     global RTS_ADDR
     RTS_ADDR = CAVE_ORG + rts[0]                       # sctap's own rts -- a safe -init
     return words, sctap, scdet, sctail, gtab_off, ftab_off
@@ -641,8 +647,8 @@ def main():
     (g1,) = run(mem, scdet, [('y', SLOT + 0x20, SLOT + 0x40)], P(key=KEYV, mon=0), pokey=pk_sig, audio=0)
     check("MON=0: keybus[0] gen1 untouched", all(v == 0 for v in g1))
 
-    # 6. MON publish (scdet -> MON_ON[my track]/MON_KEY[my track], Y:0x800+
-    #    MON_BASE+track*2 +0/+1 since Session 115 -- the moncommit hook's only input) ------------
+    # 6. MON publish (scdet -> MON_ON[my track]/MON_KEY[my track], Y:MON_BASE+track*2
+    #    +0/+1 -- the moncommit hook's only input) -----------------------------------------------
     print("\nMON publish (scdet -> MON_ON/MON_KEY for moncommit):")
     MYTRACK = 3
     MON_ADDR = MON_BASE + MYTRACK * 2

@@ -111,6 +111,43 @@ still uses it loads it as NONE.
 **Final build:** [`tools/build_sidechain_compressor.py`](tools/build_sidechain_compressor.py) →
 `OCTATRACK_OS1.40C_SIDECHAIN_COMPRESSOR`
 
+### BLACKPYRAMIDS_303
+
+A TB-303 voice as a track machine, shown as **BLKPYRAMD**: the sixth row of a track's machine
+list (double-tap the track, or `[FUNC]` + `[SRC]` → MACHINE). One per DSP core: one on T1–T4,
+one on T5–T8.
+
+- **SRC:** `PTCH` (C0–C8, a semitone a step, shown as note names; `FUNC` + turn steps by octaves) · `CUT` · `RES` · `ENV` ·
+  `DEC` (200 ms–2 s) · `ACC`. **SETUP:** `WAVE` (saw → square) · `TUNE` · `SLID` (slide time) ·
+  `GATE` (note length) · `VOL` (clean up to 64, driven above; the default adds +2.5 dB).
+- **Notes:** each trig plays a note with the knobs at that step; p-lock `PTCH` for a melody.
+- **Accent:** p-lock `ACC` on the step (0 = no accent).
+- **Slide:** an OT slide trig glides into its note from the previous one, without a retrigger.
+- **Ties:** trigless locks and/or trigless trigs right after a note hold it. A trigless trig
+  still resets LFOs and FX envelopes as on stock, so a trigless trig after a note also ties it.
+- **Live:** the track key, chromatic keys and MIDI notes play it, held while the key or note is
+  down. TRIG + YES previews a step, and one-shot trigs play once until re-armed.
+- **Chromatic mode:** four octaves of absolute notes. `[FUNC]` + `[LEFT]` / `[RIGHT]` pick the
+  octave (the page LEDs show it); trig 1 plays C1, C2, C3 or C4, `[PAGE]` the note above trig 16.
+  SLOTS and SLICES modes have nothing to play here: their LEDs stay dark.
+- AMP, FX1, FX2, LFOs (`PMTR` lists the six SRC knobs), scenes, p-locks and trig conditions
+  work as on any track.
+
+**Limits:**
+- SPRING REVERB is removed: its DSP space holds the voice.
+- On a stock OS, the track opens as a FLEX track.
+
+**Credits:** the voice is an adaptation of [Open303](https://github.com/RobinSchmidt/Open303)
+(MIT) by Robin Schmidt. The machine registration follows repeat98's ANALOG BD for octabam. The
+Octatrack port, design and voicing are by Zac Kyoti, tuned by ear: filter, bass under
+resonance, declicking, drive and saturation. So is the hardware testing. The design, every
+voicing decision and full attribution: [`reference/BLACKPYRAMIDS_303.md`](reference/BLACKPYRAMIDS_303.md) and
+[`CREDITS.md`](CREDITS.md).
+
+**Hardware:** confirmed.\
+**Final build:** [`tools/build_blackpyramids_303.py`](tools/build_blackpyramids_303.py) →
+`OCTATRACK_OS1.40C_BLACKPYRAMIDS_303`
+
 ### RELOAD_FROM_PROJECT
 
 Reload one track's sequence from the CF card **without stopping the transport**:
@@ -188,7 +225,7 @@ Three fixes to stock bugs. Each has its own build.
 
 ### Each feature + BATCH_BUGFIXES
 
-One image per feature above, with all three BATCH_BUGFIXES folded in — seven images, for
+One image per feature above, with all three BATCH_BUGFIXES folded in — eight images, for
 flashing a single feature without giving up the bug fixes. The features are not combined
 with each other.
 
@@ -199,7 +236,7 @@ flashed as such.\
 
 ### KYOTI V1.4
 
-Every feature above and all three BATCH_BUGFIXES in **one image**. The boot splash and
+Every feature above except BLACKPYRAMIDS_303, and all three BATCH_BUGFIXES, in **one image**. The boot splash and
 SYSTEM STATUS → OS VERSION read `KYOTI V1.4`. It replaces KYOTI V1.3, V1.2 and V1.1, and the
 withdrawn V1.0 (see below).
 

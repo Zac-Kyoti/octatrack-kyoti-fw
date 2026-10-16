@@ -35845,3 +35845,654 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
 * **2026-10-14: KYOTI V1.4 PROMOTED to FINAL.** The user flashed syx `568b2efb…`: everything good.
   Pinned mainos `72710a3c…` (replaces V1.3's `d14555ec…`); it rebuilds and seals without the opt-in.
   README's Hardware line reads confirmed. octabam removal PR: sambanks/octabam#721.
+## Session 124 (2026-10-04, `ot303`) — OT-303 synth machine: scoped, Phase 1 filter study and Phase 0a effect costs (no build)
+
+New thread `ot303` (worktree `../octatrack-kyoti-fw-ot303`): a TB-303 synthesis machine from
+Open303 (MIT) / jc303 (GPLv3 additions, reference only). Scope + user decisions:
+`reference/handoffs/OT303_SCOPE.md` (§0a decisions, §9 the 4× question, §10 results).
+
+- **Decisions (user):**
+  - DSP-resident voice, max two instances = one per core.
+  - **No degradation**: every stock-legal configuration stays clean, and there are no FX
+    restrictions anywhere.
+  - Donating effects is allowed; keeping SPRING is preferred (try the FX2-slot tails
+    `slot+$3da3..$3fff` first).
+  - Oversampling may drop below 4× if inaudible.
+  - A saturating filter is the ideal.
+  - THRU-mode host as a test vehicle only; machine type 5 is the final goal.
+- **Phase 1 (offline, `tools/ot303/`):**
+  - `voice_study` is bit-exact to `rosic::Open303` (4 scenes).
+  - Open303's TB_303 mode = Zavalishin's diode ladder (VA Filter Design eq. 5.18,
+    ω_c = 2 × stage rate) + 150 Hz feedback HP. Its §6.9 tanh form linearises to it.
+  - The ZDF candidate's error, the rate cost and the saturating + Heun results: scope §10.
+  - Open303's own fitted filter departs from the model more (hot: 1.2 / 5.9 dB) than any of
+    our rates do.
+  - Heun matters more than 3×→4×.
+- **Phase 0a (emulator):** every stock effect's DSP cost, BOTLI playing on stock 1.40C.
+  - `ot_emu --dsp-stopwatch` at the four dispatcher call sites (core 1 FX1 `P:0x2cc`, FX2
+    `0x302`; core 0 FX1 `0x4d7`, FX2 `0x50d`).
+  - Live FX ids poked at frame 5 with `--step 5:poke:` (the pinned refs/octabam port has no
+    `--step`; a private copy of the remixer clone's port `8d0ad6f4` does).
+  - Table in scope §10: DJ EQ 300 instr/sample is the most expensive; FILTER 207 = 192
+    hardware cycles → ~0.93 cycles/instr.
+  - Worst legal config per core (DJ EQ × 8 slots) ≈ 2,230 cycles of 3,120 → ≈ 890 spare.
+- **Corrected:** "two stock reverbs on one core glitch" (repeated in this scope's first
+  draft) is octabam's *reverb in FX1*, which stock's menu forbids.
+- **Next:**
+  - Phase 0b: a burn-probe hardware image (BURN knob on DJ EQ page 2) to confirm the spare
+    under the worst config on both cores.
+  - Phase 1: listening ABX pack + saturation drive voicing, and the asymmetric accent-sweep
+    RC (Whittle's component values; check against x0xb0x).
+- **S124 cont: Phase 0b burn-probe image BUILT, emulator-verified, NOT flashed.**
+  - Builder: `tools/build_ot303_burnprobe.py` (WIP), syx `d2abc4d3b541ceb7…`, `140C_303BP`.
+  - What it is: a BURN knob on DJ EQ page 2 slot 6 (octabam's burn body, 24 cycles/sample
+    per step). `X:$235[$0d]` → the routine in SPRING's words → `bra` into stock DJ EQ.
+    SPRING is nulled and gone from the choosers. 107 bytes changed.
+  - Verified (`verify_burnprobe.py`): exact on both cores and both slots.
+  - Emulator trap: an id poke keeps the previous effect's page-2 bytes, so zero the lanes
+    first (the menu loads defaults).
+  - Procedure: scope §10 Phase 0b.
+- **S124 cont: listening pack** published as a private artifact (https://claude.ai/artifact/VM8mZ61ARuDkp2QbmsxfNX).
+  - ABX of 2×/3×/4× against the ideal 8× (saturating, D1 + Heun).
+  - Voicing: Open303 / linear / D0.5 / D1 / D2 at 4×; 3 scenes.
+  - Clips come from `tools/ot303/listening_pack.py` (10 s, 16-bit, RMS-matched at −23 dBFS).
+  - The user pastes the results back.
+- **Burn-test project:** the user asked for a generated busy project. Declined (CLAUDE.md:
+  never fabricate a project blob), and not needed: FX cost is independent of the audio
+  content, and the burn only runs on a playing track. Recipe given: one long looping sample
+  on all 8 tracks, DJ EQ ×16.
+- **S124 cont (2026-10-05): listening results.**
+  - ABX 2× vs ideal 8× (saturating D1): Hot 6/10, Sweep 6/10, Squelch 3/10, all at chance,
+    so 2× + Heun is sufficient.
+  - Favourites: Hot = Drive 0.5; Sweep and Squelch = Open303 as shipped. The voicing target
+    is now Open303's fitted response plus a drive parameter.
+  - Next: fit the ZDF mapping to Open303, then ABX that against Open303.
+  - Listening pack fixes: the AudioContext re-check + test tone (v2); `<meta charset>` in
+    the page (v3; the local `python -m http.server` sent no charset → "Â·").
+- **S124 cont (2026-10-05): round-2 voicing results.**
+  - Keeps: Sweep = st0.5, Hot = Open303, Squelch = linear, Accents = linear. Seconds: linear,
+    input pair, st0.5, st0.5.
+  - The circuit accent won both A/Bs.
+  - Decision: 2× + Heun, built-in D 0.5 stage saturation (no DRIVE knob), Open303-style top
+    end above ~3 kHz (to A/B), circuit accent with an ACCENT-dependent discharge.
+  - Next: Phase 2, the fixed-point twin. Scope §10.
+- **S124 cont (2026-10-05): Phase 2, the DSP-shaped voice.**
+  - Built in `voice_study`: FNested (TPT diode ladder in closed form, 5 reciprocals per
+    pass), OscBlep, the 79-tap HalfBand, Tables, Quant.
+  - Twin vs the approved voice: 0.3–0.5 / 1.3–1.75 dB. 24-bit is free (0.00).
+  - Found: at RES 100 (k 16.9988) the true saturating model self-oscillates in Hot (onset at
+    k 16.8–16.9), so the ceiling is now k 16.5. The round-2 st0.5 Hot clip was oscillating.
+  - `compare.align` sign bug fixed.
+  - Cost ~600 instructions with Heun, ~390 without.
+  - Round 3 pack published. Scope §11.
+- **S124 cont (2026-10-06): round 3 → top end.**
+  - ABX twin vs approved, Hot: p 0.172. Hot pick: Open303, "a little more rounded".
+  - Cause: high-fc resonance near the self-oscillation edge, plus the slower circuit-accent
+    charge; not the filter model (the linear model + Open303 accent matches Open303's top
+    to 0.1 dB).
+  - Added `ktab` (Δ 4.5 is the only oscillation-safe curve, RK4-checked) and `acctc` (12 ms
+    lands 2.9 dB under Open303 at 14–18 kHz).
+  - Round 4 published. Scope §11.
+- **S124 cont (2026-10-06): round 4.**
+  - Hot = 25 ms accent charge; Accents = Open303; corrector inaudible (3/10, 7/10) →
+    dropped.
+  - Found that the k ceiling had scaled every RES by 3%; now k = min(16.998792 r, 16.5),
+    RK4-safe in all scenes.
+  - Round 5 confirmation (Accents, Squelch: Open303 vs final) published.
+- **S124 cont (2026-10-06): round 5 → Open303's own algorithm.** Accents/Squelch kept Open303.
+  - Engine switched to the TB_303 filter transcribed (FO303Q, bit-exact to rosic) at 4×, with
+    BLEP, a 23+79-tap half-band chain and 24-bit; ±0.1 dB vs Open303 below 14 kHz.
+  - RES ceiling dropped: Open303 never self-oscillates, and a k 16.5 cap bites from RES 85%
+    under its skew.
+  - Fixed top rounding: 16 or 13 kHz (decimator-folded).
+  - Round 6 published. ~320 instructions per sample.
+- **S124 cont (2026-10-06): round 6, VOICING FINAL.**
+  - Hot = 16 kHz rounding. ABX vs Open303 with the stronger 13 kHz rounding: Squelch 8/10
+    (p 0.055, borderline), Accents 5/10.
+  - Final voice = Open303's TB_303 voice at 4× (transcribed), BLEP, half-band chain with a
+    16 kHz rounding, 24-bit. Scope §11.
+  - Next: Phase 2b, an integer-exact twin, then the DSP asm bit-exact to it.
+- **S124 cont (2026-10-06): BURN TEST ON HARDWARE.**
+  - Heavy (DJ EQ ×16): core 1 N1 = 26 (624–648 cycles spare); core 0 N0 = 12 (288–312).
+  - Light: both 127+.
+  - The emulator's ~890 was optimistic: DJ EQ ≥ 1.15–1.3 cycles/instruction, and core 0 has
+    the mixdown/DELAY-return load.
+  - Core 1 fits one OT-303; core 0 does not in the worst legal config without a cheaper
+    engine or a donated DJ EQ.
+  - User decision needed. Scope §11.
+- **S124 cont (2026-10-06/07): lean engine, integer twin, DSP engine bit-exact (no build).**
+  - User: option 3 (lean engine) + option 1 (one instance on T1–4) as the baseline + option 4
+    (two instances, core 0 caveated for the heaviest FX configs).
+  - Integer twin `tools/ot303/twin.h`: needed a 48-bit filter envelope (24-bit drifted Hot's
+    resonance) and convergent `rnd` on recursive states (truncation built DC in the slow post
+    filters). Lean savings: coefficient tables over log2(cutoff), 15+43-tap half-bands (was
+    23+79), square only when used. Round 7 ABX lean vs approved: all at chance → accepted.
+  - DSP engine `tools/ot303/ot303_engine.asm` (543 words): **bit-exact with the twin on
+    dsp56kEmu in all five scenes** (`tools/ot303/engine_check.py`). 360 instructions/sample
+    saw, 472 square — above the 240/280 estimate (control and post filters). Scope §11.
+  - dsp_asm traps found (operand orders → mpysu, dropped parallel moves on immediate shifts /
+    long-immediate ops / X:R-R:Y classes, bare `tfr a,b` → `rnd b`); `dsp_xasm` catches them;
+    it now builds XY+ALU with write halves (`ec96d45`, REPITCH unchanged). SR RM = 0 on stock.
+  - Next: trig handling and host words in the DSP, the THRU hook question, a hardware cost
+    measurement of the real engine.
+- **S124 cont (2026-10-07): v4 cycle tuning; hardware probe image BUILT (NOT flashed).**
+  - Cycles, not instructions (emulator cycle table): v3 was 508/690, v4 364/498, now 366/500
+    after S48/M48 became Y pairs (no address on the unit has both X and Y free for L moves:
+    Y `$795..$FFF` is free, X there is the curve bank). Layout is base-relative (XB/YS/LT).
+  - `tools/build_ot303_hwprobe.py` (WIP) → `OCTATRACK_OS1.40C_OT303_HWPROBE.syx`
+    (`3868cd3c…`, version `140C_303HP`): DJ EQ page 2 = BURN (slot 6) + 303 (slot 7); the engine
+    + a 16-step Hot riff replace the track's audio; SPRING removed. Placement: SPRING's P up to
+    DARK REV's helper (756/820) + 79 after it; SPRING's five X records (716 = X block + packed
+    b0/kp); LT built in 15 calls into Y `$7a5`. **Square is cost-only** (tanh's data does not fit:
+    the full engine needs ~80 words more than SPRING gives → scope §11 memory note).
+  - Bench `hwprobe_check.py`: both payloads, split dispatcher calls, 4 bars bit-exact vs the
+    twin; 393/528 cycles/sample incl. wrapper. Firmware `verify_hwprobe.py` (ot_emu, BOTLI):
+    +11 instr/call inert, engine only on its track, SPRING → stub, DARK REV as stock (its 4th
+    track varies call to call in stock too). ot_emu's `--audio-out` capture is all zeros (stock too).
+- **S124 cont: probe 1 on HW = dirty** (T2 crackle, T6 grind, mains pops with the track muted,
+  light config). DIAG2 built (`140C_303D2`, syx `bac0c74e…`, NOT flashed): mode bands on the 303
+  knob (TONE / ENG+TONE / RIFF / WATCH / NOPS / READS / SQUARE), m0–m7 saved/restored (probe 1
+  forced them linear), LT above Y:$800, DJ EQ bypassed while 303 is up. Scope §11 decision table.
+- **S124 cont: DIAG2 on HW** — TONE clean; ENG+TONE / RIFF / NOPS dirty (track + master LEFT);
+  WATCH (riff + ~1,900 cycles of reads first) CLEAN; NOPS stopped the voice (rep #400).
+  = octabam's read-back pull hazard (FAILURE_MODES "Junk on main R"): the call's END time decides.
+  Firmware emulator: engine memory = bench word for word; stock calls DJ EQ with m0–m7 linear.
+  DIAG3 built (`140C_303D3`, syx `4d5bfc65…`, NOT flashed): BURN after the render to map the
+  clean range, no long REP. ANALOG BD's source-seam host + pre-boot X record noted for the product.
+- **S124 cont: DIAG3 on HW + recordings** — T6 clean after a power cycle (= bench spectra
+  within 0.2 dB: the engine is right on the chip); T2 junk = torn read-back (sample halves from
+  different moments, L/R one word apart), octabam's "Junk on main R". BURN after the render no
+  help; WATCH (later engine start) was. Lead: the engine's X traffic starves the pull's DMA.
+  DIAG4 built (`140C_303D4`, syx `cf9cbb74…`, NOT flashed): RIFF + PRE (303 − 32), XREADS / YREADS
+  modes. Scripts `tools/ot303/hwrec/`.
+- **S124 cont: DIAG4 on HW = REP.** X/Y read modes clean; riff clean only with PRE ≥ 4 (engine
+  started ≥ ~1,500 cycles into the call); square junks. Stock DSP P code has NO `rep` at all; the
+  engine had three (MAC 21, DIV 24 ×2). REP holds off interrupts → host-port handlers late → the
+  CF transfer slips a word (the recorded junk; a crash garbled the project name, power cycle
+  restored). DIAG5 built (`140C_303D5`, syx `2d206465…`, NOT flashed): REPs → DO loops (bit-exact,
+  same cost), builder refuses REP. **Rule: no REP in any DSP code here.**
+- **S124 cont: DIAG5 on HW** — T2 (core 1) clean everywhere, no crash (REP was all of core 1).
+  T6 (core 0): PRE map 32–41 dirty (+ master junk muted), 42/45/46 clean, 38/43/44/47 near-clean,
+  48 dirty, crash at 49 (PRE 17). Engine-specific (tone + BURN 127 fine) and core-0-specific. Stack
+  ruled out (SP 7 at the deepest point, both cores). Only core 0 runs ESAI DMA (boot `P:$3001d`:
+  DMA2 TX `X:$8000`, DMA3 RX `X:$8100–$833f`); the engine's X block was `X:$89a4–$8cef`, same memory
+  block. **DIAG6** built (`140C_303D6`, syx `a7a5a821…`, NOT flashed): core 0's block relocated to
+  `X:$3224–$356f` (Analog BD's free region) by `hq_reloc` on the first call; band 16–31 =
+  XHAM+TONE (hard X reads of the old block, no engine). Bench bit-exact, ot_emu ALL GOOD.
+- **S124 cont: DIAG6 on HW** — T2 clean (XHAM harmless on core 1); T6 tone 1–15 fine (copy OK),
+  **XHAM at 16 = instant silence + sequencer crash** (only a power cycle recovers; project reload
+  doesn't). → hard core reads of X:$8000–$8FFF on core 0 starve the ESAI DMA. Rule: keep core-0
+  hot data out of that block. DIAG7 (`140C_303D7`, syx `ed314ad4…`, NOT flashed) = DIAG6 minus
+  XHAM (1–31 TONE) so the relocated riff on T6 can be reached; copy paced.
+- **S124 cont: DIAG7 on HW** — relocation changed nothing (T6 32–48 dirty + master junk, crash ≥49):
+  the memory-block lead is dropped for the riff. **DIAG8** (`140C_303D8`, syx `21b91d89…`, NOT
+  flashed): 303 ≥ 64 = METER (core timer 0 per render → audio, `tools/ot303/hwrec/meter.py`
+  decodes; modes: engine / nops / X×3 regions / Y×3 regions); PRE and square removed (32–63 plain
+  riff); tone moved into region 1; dsp_xasm knows M_TCR0..M_TCSR0.
+- **S124 cont: DIAG8 on HW** — METER: engine 426 cycles/sample on BOTH cores; X/Y reads = nops;
+  budget is not it. T6 track recording of the dirty riff is bit-clean. MAIN recording with T6 MUTED
+  holds the muted riff on ~29 % of frames (every other frame): core 0's master mix uses stale mix
+  params on some frames. Lead: engine memory traffic delays host DMA 0/1 into core 0. **DIAG9**
+  (`140C_303D9`, syx `91aa7f8c…`, NOT flashed): 303 48–63 = riff rendered per sample after DSTR
+  shows no host block in flight (bounded); 32–47 plain riff for A/B; relocation + calibration
+  modes dropped.
+- **S124 cont: DIAG9 on HW** — yielding riff crashed at 48 (DSTR polls ran to their cap). T6 muted:
+  tone and tone+BURN ≤40 → master silent; riff → dirt. So the leak needs the ENGINE's work. Manual
+  §10.3.2: core beats DMA on a shared internal partition. **DIAG10** (`140C_303DA`, syx `d17059df…`,
+  NOT flashed): 303 ≥ 64 = 8 STRESS workloads (div / mac / Y rd / Y wr / XY rd / mac+XY / engine /
+  X rd) before a tone; listen to the master with T6 muted.
+- **S124 cont: DIAG10 on HW** — riff (32) crashed the sequencer before the STRESS bands → their
+  "no leak" is void; knob still changed sound after the crash (DSP alive). Riff crash is RANDOM in
+  time (49 / 48 / 32). **DIAG11** (`140C_303DB`, syx `0550c632…`, NOT flashed): safest-first knob:
+  stress 16–47, ENG+TONE 48–71 (riff work, tone heard), riff/8 72–87, riff 88–103, X reads 104+.
+  BURN inert. Asks: work or sound?
+- **S124 cont: DIAG11 + track tests on HW** — riff can be fully clean on T5/T8 until a disturbance
+  flips core 0 into a PERSISTENT state (silent / L / R / stereo); T6/T7 dirty. Crash = sequencer stuck
+  on step 1-2 (octabam's documented core-0 handshake failure). Lead: core beats DMA on a shared
+  partition (FM §10.3.2); our X sat in the ESAI DMA's 8K block ($89a4) and in DIAG7 the host buffers'
+  ($3224). **DIAG12** (`140C_303DC`, syx `aa516fb9…`, NOT flashed): A's run 1 in T6's own FX1
+  instance block X:$6424-$64fb (no-DMA partition), re-copied when DJ EQ's word r7+4 loses our mark.
+  T6 only.
+- **S124 cont: DIAG12 on HW = T6 CLEAN** (riff clean, muted master silent, no flips through sweeps,
+  ENG+TONE muted silent). Cause CONFIRMED: dense core access to a DMA-used internal partition stalls
+  core 0's ESAI / host DMA (FM §10.3.2) → the CF↔core-0 handoff slips (persistent L/R/silent states,
+  mute leaks, sequencer stuck on step 1-2). **Rule: no dense DSP working data in a DMA partition**
+  (core 0: X:$8000-$8FFF, the $2xxx/$4xxx host-buffer blocks); use the host's FX instance block (r7).
+  Next: 10-min soak, r7-relative product placement, then BURN cost measurements.
+- **S124 cont: soak clean** (10 min T6; T1, T5 clean; no crash). Partition size 4K-8K (from DIAG7
+  fail / DIAG12 pass). **DIAG13** (`140C_303DD`, syx `70395721…`, NOT flashed): run 1 at X:$7b24 on
+  BOTH cores (stock's unreferenced X:$7a92-$7fff), any track; BURN back for cost measurements;
+  303 1-31 tone, 32-127 riff.
+- **S124 cont: DIAG13 on HW** — T3/T6/T8 clean + muted-silent; T2+T6 together clean. Light: core 1
+  BURN to 127, core 0 breaks at 116. Heavy (DJ EQ FX1+FX2 everywhere, tracks IDLE): core 0 breaks
+  at 34 (~790 spare; 36 = squeal crash), core 1 at 47 (~1,100; silent crash 57). Next: heavy with all
+  tracks PLAYING (6 Oct burn test had core 0 at ~300 spare). Note to Sam drafted:
+  ~/Documents/octabam-note-to-sam-4.md (not sent).
+- **S124 cont: WORST CASE on HW (DIAG13)** — all 8 tracks playing Flex + DJ EQ FX1+FX2 everywhere,
+  voices on T2+T6: core 1 breaks at 23 (~528 spare), core 0 at 10 (~216 spare); vs 6 Oct no-voice
+  26/12 → the voice costs ~DJ EQ + 70-100. **Two OT-303s fit the heaviest legal config.** Handoff:
+  OT303_SCOPE.md §12 (status, rules, next steps).
+- **S124 cont: DIAG14 BUILT (NOT flashed)** — item 1a of the real host: the voice at the per-track
+  SOURCE seam (A P:$39c / B P:$1a2 → jsr, on at P:$426 / P:$221; 16 samples L/R into X:0, upstream
+  of AMP/FX1/FX2; ring base x:$20b += $80 except payload A's raw path, bit 18). DJ EQ page 2 = remote:
+  303 up claims the track for its core (OWN/LIVE at X:$7b05/6, first claim wins, lapses 2 frames after
+  release); tables build at the seam on the claimed track (its sample heard meanwhile). DARK REV's
+  helper moved to SPRING's end (3 callers retargeted, octabam's digest matched) → 1,028 contiguous
+  words, 1,004 used. Bench bit-exact (3 tracks, handover, raw path), seam voice 385 cycles/sample;
+  ot_emu ALL GOOD (glue +7 instr/track, DARK/PLATE = stock, the voice passes stock AMP even on an
+  idle track). dsp56kEmu keeps accumulators left-aligned (<< 8) — set `regs().a` accordingly.
+  `out/OCTATRACK_OS1.40C_OT303_DIAG14.syx` sha256 85cfe103893e9484a570f2e0e7f2d00df5384906117c56272882fed786963fe9
+  (`140C_303DE`). Plan approved: 1b (ColdFire machine, ANALOG BD-style) next; tables stay in place.
+  Note to Sam sent.
+- **S124 cont: DIAG14 on HW — checks 1–6 PASS** (seam voice on T2/T6/both/T1/T5 clean, muted MAIN
+  silent; tone; release returns the sample; claim handover T2→T3; DARK/PLATE REV as stock after the
+  helper move; worst-case BURN not tried). User: the voice is much quieter than samples near 0 dB →
+  measured −6 dBFS peaks (output word = Open303/4, riff SC = 0.501); 1b default SC = 0.89 (+5 dB,
+  no scene saturates), VOL = SC on the SETUP page later. Next: 1b, the ColdFire machine.
+- **S124 cont: OT-303 machine test image MT1 BUILT (NOT flashed)** — item 1b. `tools/build_ot303.py`
+  → `out/OCTATRACK_OS1.40C_OT303_MT1.syx` sha256 16d2a800c715e93c73915bc3c382ff829e02d5c294b7dda3725e48fce8d75278
+  (`140C_303T1`). "OT-303" = machine row 6 (FLEX + 'OT',1 in NEIGHBOR bytes, one per core, toast on a
+  second), registration ported from octabam ANALOG BD (16 detours + 6 pokes, all re-asserted against
+  our image; 2,750 B in the classic cave from 0x400d6500); FLEX renderer slot → control record (w0
+  $3303 / w2 $0909 / w3 trig / knobs) → DSP host `tools/ot303/host.asm` at the source seam; trigs step
+  the built-in bar at their sample; knobs stored + sent, unused; SC 0.89 (+5 dB). Shared DSP edits →
+  `tools/ot303/dsp_patch.py` (DIAG14 rebuilds identically). Bench `host_check.py` bit-exact (claims,
+  trigs in open gates; 389 cycles/sample); ot_emu `verify_mt1.py` ALL GOOD (panel chooser: T2 lands,
+  T3 refused, T6 lands; voice on OT-303 tracks only; DARK/PLATE = stock). ot_emu 8d0ad6f4 ignores
+  track keys (current track poked); trigs in the first 15 frames after assignment are silent (tables).
+- **S124 cont: MT1 on HW + MT2 BUILT (NOT flashed).** MT1: tests 1-4, 6 OK. T2+T6 sounded "awful,
+  like one voice with IMD" = same built-in bar from the same start → sample-identical voices summed
+  (+6 dB) at −1 dBFS each → clipping (a level effect, not a voice bug). Test 5: OT-303 → FLEX left
+  FLEX with the OT-303 defaults (STRT/LEN 64 loop a portion; SETUP out of range = missing knobs) —
+  MT1 (and ANALOG BD) never restore FLEX's bytes. Label "OT-303>OT-303" (descriptor PB/PLAYBACK
+  overwritten), sample name in the track box, side letter "F". MT2: FLEX's 12 values packed into
+  NEIGHBOR's 9 unused bytes (7 bits each + mark) on assignment, restored on leaving (both copies);
+  label PLAYBACK>OT-303; slot lookups 0x4004c1c0 (track box) / 0x4003d552 (label builder) return an
+  "OT-303" record. `out/OCTATRACK_OS1.40C_OT303_MT2.syx` sha256 b3329243eca1bf836129922e6780185e3f4ee73bdf7b3eed77bb4de92d33d8f8
+  (`140C_303T2`). verify_ot303.py ALL GOOD incl. the panel round trip (Part = stock byte for byte);
+  screenshots confirm label, box, knobs. Side letter: a type-indexed glyph, not found yet (not the
+  name tables 0x400a78c8 / 0x400a78b4, no letter immediates).
+- **S124 cont: MT2 on HW — all items pass. MT3 BUILT (NOT flashed):** the side columns' machine
+  glyph. Drawer 0x40040088 (per track d4, type a4) pushes a 3x4 glyph from a table copied from
+  0x400a81a4 (S F T N P; 0x400bb3a6 = M for a MASTER T8) into 0x400128a8; detour 0x4004012c gives an
+  OT-303 track a "3" (user's choice; "M" rejected: stock's MASTER mark). Glyph = {w, h, planes, ink,
+  mask}, a column per word, rows bottom-up. `out/OCTATRACK_OS1.40C_OT303_MT3.syx` sha256
+  2246eba98e4174c49afac7f80e2d409761b2f86af3e08aaa96f97bed2ceba3bb (`140C_303T3`); verify_ot303.py
+  ALL GOOD; screenshot shows 3 on T7, M kept on the master T8.
+- **S124 cont: MT3 confirmed on HW. Item 2 started; DRAM runtime MT4 BUILT (NOT flashed).** Item 2
+  decisions (all at once; PTCH 64 = C2; Devil Fish ranges where the voicing allows: CUT 200 Hz-10 kHz
+  — Open303 clamps the instantaneous cutoff at 200 Hz — DEC 30 ms-3 s; full list in scope §12).
+  `tools/ot303/cf/params.c` (knobs -> host words, fixed point; constants from Open303 by
+  params_check.py) within 3 LSB of Open303 everywhere. Sequencer RE: step handler 0x4009d1e8
+  (track, bank, pattern, step), masks per track (+0x08 trigless, +0x40 swing, +0x48 slide), event
+  codes 0x46c7a810, tempo 0x80001814, ticks/step 0x400aba50. ColdFire space ran out (SAFE_CAVE
+  0x400d24d0 refused: the live tail of a 1,024-entry curve table at 0x400d1ce0 indexed by u16>>6).
+  User chose a DRAM runtime: tools/ot303/dram.py (16 arena pages, octabam's arena geometry) +
+  cf/loader.S (octabam/Octakit-derived) appended at 0x4010fdf0 from the boot site 0x4000050c.
+  MT4 = MT3 from DRAM, `out/OCTATRACK_OS1.40C_OT303_MT4.syx` sha256
+  bd23955a0affd2854779e78fce15d2b1b54e379adb1bf46a9f3533669eb7e493 (`140C_303T4`); verify_ot303.py
+  ALL GOOD incl. the DRAM audit (loader once, reserve intact, only the runtime writes there).
+- **S124 cont: MT4 FLASHED, nominal on HW (DRAM boot path confirmed). MT4 report: pattern + Part
+  changes retrigger the riff** (two 1/32s on the last step of the old pattern, one on the new pattern's
+  first step, no trigs placed; sometimes ~1 s of repeated retriggers; mild pops at Part changes; the
+  303 sometimes starts late after a Part change). Cause: the renderer's trig flag `0x46104d0c[t]` & 16
+  is the frame builder's copy (0x4000c62e) of the per-track trigger byte `0x46104d15[t]`, which the
+  trig apply, track starts and Part loads all set: not proof of a sequencer note. The late start:
+  the old owner's claim took up to 2 frames to age out and the new track's first note fell in that
+  silent window. **MT5 BUILT (NOT flashed): item 2.** The step hook (detour 0x4009d1e8, 8 B replayed)
+  queues a note step's gate/slide (look-ahead: trigless = tie, a note before a slide trig held to the
+  end of the next step); the renderer plays a flag only with a queued note (live-played notes do not
+  sound yet; stray flags counted). The record (cf/record.c, 84 longs) carries 12 continuous words, 11
+  note words and a chunk of the voice's Y image: the DSP no longer builds tables (host.asm 990 -> 946
+  words); the square works. The owner's own stock record frees the voice at once. Bench host_check:
+  bit-exact (974,960 samples, 130 notes, slides into open/closed gates, square, junk in the transport's
+  top bits — found the signature compare looked at A2: now `eor`); saw 399 cyc/sample (worst frame
+  435), square 533 (worst 598). chain_check: ours vs TwinVoice null -84.5 dB. verify_ot303 ALL GOOD
+  (notes' gates/slides/PTCH locks as the line implies; the Y image arrives intact on both cores).
+  `out/OCTATRACK_OS1.40C_OT303_MT5.syx` sha256 1d87b686c514084916199e01424ff836ce217e70686896ff337809fec03e9e1f
+  (`140C_303T5`).
+- **S124 cont (2026-10-12): MT5 FLASHED. Report:** (1) a full 16-trig bar drops step 2 every other bar;
+  (2) CUT/ENV/DEC p-locks crack; (3) trigless ties do nothing; (4) a track double-tap on an OT-303
+  opens an empty sample list; (5) toast wanted "ONE 303 PER CORE!"; (6) PLAYBACK SETUP shows 5 of 6
+  machines. **Causes:** an ot_emu trace shows the step handler 0x4009d1e8 is called right AFTER the
+  previous step's trig fires (one step ahead, not "~3 frames before its step" as memory-map.md says),
+  so MT5's single pending slot raced the renderer: on the unit the next step overwrote it before the
+  trig was seen (the trig took the next step's data, the next trig found none; a tie step's TIE
+  swallowed the note before it). The handler's trig conditions run inside it; it writes event code 29
+  (0x46c7a810[t], at 0x4009d422) only for a note that will fire. Double-tap: the machine window reads
+  the raw type at 0x400788c4 (type < 2 = sample list). PLAYBACK SETUP list = 0x4007ec60(list,
+  visible, count) at 0x400585f4 (visible 5). Clicks: chain_check `locks` modes (CUT/ENV/DEC locked
+  per step): our onset clicks equal Open303's within ~1 dB everywhere; Open303's only anti-click
+  measures are the 200 Hz amp declicker, rc2 (accent attack 15 ms), the pitch slew and the idle reset
+  (rc1 has tau 0) and we have them; it does nothing for knob jumps. Further smoothing = a sound change
+  (A/B). **MT6 BUILT (NOT flashed):** notes queue at 0x4009d422 (ot_note_hook), the entry hook tracks
+  the step being scheduled (pruning, continuity clears; the next pattern's own Part decides OT-303),
+  trigs take the oldest; record w1 = a sequence number, the DSP treats a record whose number is its
+  track's last or the one before as old (silence, no claim); double-tap detour 0x400788c4 (ot_row_type);
+  poke 0x400585fe 5 -> 6; toast text. One-shot trigs (code 61) not played (the frame builder can drop
+  them). ot_emu reproduction of a pattern+Part change (cue 0x400a0570(0, 1, 0, -1, 0) at a frame, the
+  pattern's Part link +0x8e57) runs clean. Host 976/1028 words; bench bit-exact incl. 12 frames of
+  frozen slots holding a note; verify ALL GOOD (T2: 16 notes with PTCH locks and FILL on two steps, in
+  order, none skipped; T6 ties/holds/slides/locks in order); screenshots: PLAYBACK SETUP six rows, the
+  double-tap machine list. `out/OCTATRACK_OS1.40C_OT303_MT6.syx` sha256
+  63398fdcd180a3b691cdd4b51a0fca1f2c6501d9361d7fa8b340ebd2878adc4d (`140C_303T6`).
+- **S124 cont (2026-10-12): research + MT6 on HW + MT7 + listening pack round 8.** JC-303 adds no
+  declick DSP (its mod mode exposes Open303's rc1 soft attack, feedback HPF, shaper drive, amp decays);
+  ABL3 manuals: VCO grit/noise models, VOL to +9 dB with internal clipping, VCA clicks, Gate Trim, Low
+  Cut. Findings + ranked suggestions in OT303_SCOPE.md (feedback HPF direction corrected after
+  measuring: raising it keeps bass). MT6 on HW: FLEX preview missing knobs, DEC/ties not heard (AMP
+  HOLD/REL 127 already), late/galloping low notes. Findings: Open303's idle reset is commented out (its
+  oscillator runs free); stock calls a track's renderer every frame once installed (0x400d61f0[t],
+  written only at 0x4000bff0 and init); a tied note's reference render sustains. **MT7 BUILT (NOT
+  flashed):** PTCH 64 = C3; saw restart from silence 22 samples before its edge (onset 1-2 ms at any
+  pitch); SETUP FLEX preview from the stash (0x4003ce02 detour), not editable there; DIAG readout (gate
+  in eighths of a step) in SETUP's 12th slot. `out/OCTATRACK_OS1.40C_OT303_MT7.syx` sha256
+  bc0c5a966fb2c5e5e7c9cea9c3278f646d176db65206e9e2e850a607a2aa2cb1 (`140C_303T7`), commit 1c77a6a.
+  Pack round 8 (tools/ot303/listening_pack8.{cpp,py}; twin.h gained off-by-default GRIT/NOISE/RC1):
+  12 blind two-way picks, published to the listening-pack artifact (version 9).
+- **S124 cont: MT7 on HW + round 8 results -> MT8 + round 9.** STATIC preview garbage = stock's LEN
+  formatter 0x4003b2ec + slice checks 0x40044dbe/0x4004fee2 read the CURRENT machine's SLIC byte
+  (OT-303's TUNE) -> detoured to FLEX's stash. DIAG stayed 4 with ties on the unit (emulator 12) ->
+  DIAG now encodes the look-ahead's view (next step's trig kinds). PTCH two steps a semitone C1..C6
+  (default 48). `out/OCTATRACK_OS1.40C_OT303_MT8.syx` sha256
+  23a9c4383a779b4356982b319fc3c41b6534c188038b55b76a21373c0e67240b (`140C_303T8`), commit e04397e, NOT
+  flashed. Pack round 9 published (artifact v10) with the round 8 key.
+- **S124 cont: MT8 on HW + round 9 -> MT9 + round 10.** Ties were trigless locks on the unit; user
+  chose ties = trigless locks (+0x10), PTCH a semitone a step from C0 (36 = C3). Round 9 picks built
+  into the DSP: soft attack 1 ms (rc1 on the cutoff's envelope), normal release 2 ms, output drive
+  tanh(1.68 y) via the square's tanh table (engine macros SOFTATK/ODRIVE, emptied for DIAG14 which
+  still rebuilds 85cfe103). ERASE_EMPTY_TRIGLESS_LOCKS must skip OT-303 tracks in any combined build.
+  An edit-script slip built MT9 sources under MT8's names; those outputs were deleted (the flashed MT8
+  rebuilds from e04397e). `out/OCTATRACK_OS1.40C_OT303_MT9.syx` sha256
+  060f2a5526ef7c4b1bbc1c73149a96aab8ab0199a17bd98b91edd7f0970973d6, then (before flashing) rebuilt so trigless
+  trigs tie too (a trigless trig ended a tie): b39fa0df58441a6cbea61fb79bc09da60b56d92a68f58ede7a8d0a6fdba06a52
+  (`140C_303T9`), NOT flashed. Pack
+  round 10 published (v11).
+- **S124 cont: round 10 results -> round 11.** Free-running won both note-start tests; Hot kept MT8
+  ("fast clicks" in MT9). Measured: the clicks = soft attack + restart (onset HF 0.45 -> 0.92), but a
+  free-running saw alone gives 0.91 (amp onset steps a mid-cycle saw), so round 11 (v12,
+  listening_pack11) tests Hot's note start, soft attack 1 ms vs none, drive 0/+2.5/+4.5 dB. Pack 10's
+  "MT8" clip had the 2 ms release too. README notes for release (the trigless-trig tie trade-off,
+  ERASE skip) logged in OT303_SCOPE.md. No firmware change yet; MT9 still NOT flashed.
+- **S124 cont: round 11 results -> round 12.** Hot kept on-the-step with no soft attack; soft attack kept on
+  Locks/Line; drive none (Locks) / +2.5 dB (Line). User: tie-breaker round for the note start; drive on
+  VOL's top (110-127 up to +4.5 dB, VOL 119 = +2.5 dB). Round 12 (v13, listening_pack12): step vs free,
+  soft attack faded by RES (100..115), drive +2.5 dB, over the kick. No firmware change; MT9 NOT flashed.
+- **S124 cont: round 12 -> MT10.** Free-running won 3/4. MT10: no saw restart; RC1 (soft attack, faded by
+  RES 100..115) and GD8 (drive on VOL 110..127, 119 = +2.5 dB, 0 = clean) as record cont words 13-14
+  every frame (record: 14 cont, note longs 16-26, chunk 27-28, OT_CHUNK 55); ODRIVE bypass branch-free
+  (asm_macros forbids labels in macros: `teq y1,a`). Benches all bit-exact, DIAG14 still 85cfe103, verify
+  ALL GOOD incl. a DSP-memory check of RC1W/GD8. `out/OCTATRACK_OS1.40C_OT303_MT10.syx` sha256
+  865b890bf602f900f74b89d9275f3618b85388a3aac2ce1732e4da4a116e13e0 (`140C303T10`), NOT flashed.
+- **S124 cont: MT11 -- PTCH C0..C6 with note names.** User's change: note = 12 + (PTCH*73 >> 7), default 64 = C3.
+  The page descriptor's +0x102 per-knob field is the value formatter f(buf, value) (stock FLEX PTCH
+  0x4003b4b0 -> sprintf 0x40013a08); OT-303's PTCH points at control.c ot_fmt_ptch. LCD in ot_emu shows
+  C0/C#3/C6. `out/OCTATRACK_OS1.40C_OT303_MT11.syx` sha256
+  1b636369e58c59c8af97e0be1acfd50e21a5e75779b73dede990e87840a5b9d2 (`140C303T11`), NOT flashed (replaces MT10, unflashed).
+- **S124 cont: MT12 -- PTCH a semitone a value, knob 0..72.** User wants equal steps. Descriptor +0xd2 = value
+  count (emulator: encoder stops at 72); PTCH count 73, default 36 = C3. `out/OCTATRACK_OS1.40C_OT303_MT12.syx`
+  sha256 0a515c5d7b810b7afc5de31c5bb6e50fb520614f1d3f79b0ef1c92823510cc36 (`140C303T12`), NOT flashed (replaces MT11).
+- **S124 cont (2026-10-13): MT12 on HW ("working very well") -> MT13 + round 13.** PTCH 0..96 (C0..C8);
+  VOL remap (0 off, 1..64 -30..0 dB, 65..127 drive to +4.5 dB, default 99); DIAG gone, slot 12 = OSC
+  FREE/SYNC (EV bit 2, host restart from silence); LFO PMTR names via detour 0x4003BFF0 (PMTR formatter
+  0x4003bf64 reads PB_TABLE by stored type). DEC verified end to end (C_MEG per DEC on the DSP). Onset
+  measured: SYNC ~1 ms, free up to a cycle late. Bass vs RES: -4.7 dB at RES 8, ~-10 dB from 64. Spatializer
+  crackle: probable stock ring-offset bug at mid-play selection (subagent; scope doc). DSP P now 1028/1028.
+  `out/OCTATRACK_OS1.40C_OT303_MT13.syx` sha256 d9219dbd5f150902990642a749c89f799becafc1699abec843f769e234fadd9d
+  (`140C303T13`), NOT flashed. Round 13 pack (v14): bass candidates, lock-jump glides.
+- **S124 cont: round 13 -> MT14.** Bass: fb350 (RES 0 identical to as built; the "flabby" start is level + drive);
+  pops: glide 1 ms (not built: DSP full). MT14 = MT13 + feedback HPF 350 Hz (host builds; DIAG14 still 85cfe103).
+  `out/OCTATRACK_OS1.40C_OT303_MT14.syx` sha256 60f9e18d84b0e5d182c02581783e5aa3467f182301c7360250b0f6846fffc7a3
+  (`140C303T14`), NOT flashed.
+- **S124 cont: MT14 on HW (good; free-running final) -> MT15.** OSC switch + restart removed; GLIDE macro (cutoff +
+  env amount, per sample, tau 1 ms; targets X:XB+$a4..); MLIN shortens zsend (host builds only, DIAG14 85cfe103).
+  1026/1028 words, saw 471 cycles. WAVE loudness within 0.8 dB across the knob. DEC 71 = Open303 VST's 400 ms.
+  `out/OCTATRACK_OS1.40C_OT303_MT15.syx` sha256 ce4f91dfe0364a51acecf9c70c7eeffcb5918b6f93474d835ad423f62f6697d8
+  (`140C303T15`), NOT flashed.
+- **S124 cont: MT16 -- DEC 200 ms .. 2 s** (Open303 VST's range), default 38 = 398 ms. ColdFire only.
+  `out/OCTATRACK_OS1.40C_OT303_MT16.syx` sha256 a756180e5007776f53e69d4abe41e6b2201c4aa39d724e402967c2016096ff15
+  (`140C303T16`), NOT flashed (replaces MT15).
+- **S124 cont: MT17 -- named BLKPYRAMD (BlackPyramid_303).** `out/OCTATRACK_OT303_MT17.bin` sha256
+  7aec32ecbd7b1d991ed3828d316af38c68908207a0a9cbefab02045aa2f8ac52, syx 33cef9be0f4ffeeeff3c28712156d8fc5428469600f600defe1c3f57f504a56b
+  (`140C303T17`), NOT flashed.
+- **S124 cont: landing prep -- BLACKPYRAMID_303.** Branch rebased onto origin/main (32f2bcb; conflicts: threads.txt,
+  kb/caves.md, both kept); all 13 FINAL builders still match their pins. Builder renamed
+  tools/build_blackpyramid_303.py (outputs OCTATRACK_OS1.40C_BLACKPYRAMID_303.syx / OCTATRACK_BLACKPYRAMID_303.bin,
+  `140C_BP303`; mainos 20093b86… = MT17's bytes); Open303's MIT notice added (tools/ot303/LICENSE.Open303.txt + SPDX
+  lines); reference/BLACKPYRAMID_303.md (use, voice, every voicing decision, resources, attribution, octabam plan);
+  README/CREDITS/BUILD_KYOTI/FLASHING/START_HERE/CLAUDE.md entries; threads [ot303] extended. NOT promoted, NOT pushed:
+  promote after the author flashes the release image. Octabam module: needs an upstream generic DSP-source-machine
+  schema (ANALOG BD's ab_image is hard-wired); plan in the design doc §6.
+- **S124 cont: MT18 -- live play, one-shots, TRIG+YES.** Live STARTs (0x1d to the voice mailbox 0x46c80354) never
+  went through ot_note: stray flags. Hooks: 0x40005030 (voice request; callers TRACKS/SLOTS/SLICES keys, chromatic,
+  preview, MIDI 36-43 by return address), 0x4000E746 (MIDI chromatic: semis note-84, FLEX's PTCH lock skipped),
+  0x4004FC84 (chromatic key: semis idx-12, lock skipped), 0x4000B4F6 (frame builder's release 0x40), 0x4009D4A8
+  (one-shot code 61 -> ot_note when armed: bit clear in 0x8000184e). Renderer: a pending live note plays on the flag,
+  held (GL 0x7fffff); key-up sends EV bit 2 (new host.asm gate-off: EVC := 0 at the frame's start, a no-op on a
+  closed gate -- the first try, a slide with GL 1, retriggered a closed gate: a blip); sequencer notes only while
+  0x800065b8 == 1 (long). TRIG+YES "worked once" because grid-rec re-scheduled the stopped playhead's step. While
+  stopped and idle nothing renders the track, so the DSP has no tables until the first START: a live note waits
+  for two chunk passes (core_frames). host 1027/1028 (lua for the record offsets). Benches bit-exact (19 releases),
+  verify ALL GOOD, ot_emu T6: keys/chromatic/MIDI/preview pitches, held gate open, released gate closed; T2 in
+  BOTLI plays PTCH 1 unlocked (the project's own modulation; sequencer too). chain_check's DEC copy was stale since
+  MT16 (fixed; firmware fine). Open: live-recorded chromatic/MIDI notes store FLEX-unit PTCH locks.
+  `out/OCTATRACK_BLACKPYRAMID_303.bin` sha256 0f2bcb69e14fe68bd4d8775deba930d6132c5f13c12bd3f434155b1db5ab3d16,
+  syx 7043be96117c97b0b8ff5aac17b5e2ce540f97181e177c8b15e245bdd24c9a1a (`140C_BP303`), NOT flashed.
+- **S124 cont: MT19 -- live-recorded chromatic / MIDI notes store this machine's PTCH.** 0x40042158(track, param,
+  value, step, ..) writes the lock; the chromatic key (0x4004fd0c..fd20) and MIDI (0x40062604, pea 5 note - 356) pass
+  FLEX's 64 + 5 semis; hooks convert to knob + semis on OT-303 tracks (ot_rec_pitch). ot_emu T6 live rec: key an
+  octave down -> lock 24, centre -> 36; MIDI 72/84 the same. verify ALL GOOD.
+- **S124 cont: MT20 -- AMP ATK clicks, RES steps.** Subagent: stock AMP (DSP P:0x426.., per sample) resets the level
+  to ~0 (P:0x655-0x65a) at the trig sample when ATK > 0 in mode RTRG, no fade; our voice may still sound -> click
+  (GATE 127 / accents / slides: -5..-28 dBFS jumps). Fix (CF): AMP record 0x80000110 + 0x200 ping + 64 t, hw 0x15
+  high byte 1/2 -> ^1 (ANLG twin) on trig frames while snd_until (gate + 7 tau of the release) says the voice
+  sounds. ot_emu ATK 8 vs 0: overlapping trigs sample-identical, slides too; notes from silence keep the fade-in.
+  RES pops: no stock cause found (LEN's record never reaches the DSP; turning RES changes only RS/BG/AG_8); RS/BG/AG_8
+  now eased per frame in record.c (ot_ease, 1/6 a frame); host_probe twin takes the eased words; benches bit-exact.
+  If pops remain on HW: a diag moving RES to another slot. verify ALL GOOD, DIAG14 85cfe103.
+  `out/OCTATRACK_BLACKPYRAMID_303.bin` sha256 3453fb2a1b33f235315283f068cbb958cefa226f06b18e7457b58b917ad014c9,
+  syx cd9a522e06d5cb3c97f2304b36cf47631596ba2303c1b5f14f7ad747d8a6f292 (`140C_BP303`), NOT flashed.
+- **S124 cont: MT20 flashed ("working well", attack fixed) -> MT21, short HOLD/REL pops.** The AMP envelope closes
+  (HOLD+REL) under a still-sounding voice; with ATK 0 the next trig snapped it 0 -> 1 onto the sound (ot_emu: output
+  step 0 -> -0.23..-0.46 FS). Fix (CF): while the voice sounds (snd_until), the trig frame's AMP ATK is raised to 1
+  (hw0 0x0100: linear ~240-sample fade) for 24 frames, beside MT20's ANLG switch. ot_emu: no gain jumps; HOLD/REL
+  127 and notes from silence sample-identical to MT20. verify ALL GOOD.
+  `out/OCTATRACK_BLACKPYRAMID_303.bin` sha256 1222cb3257b6e8f5ac12caca38cfc264e0afe825ffa88218ea4fb984ccda5cb2,
+  syx a0e58e9b68676525d3e200ad7e35420ef34df9c76d4a195e4a8819788a22f019 (`140C_BP303`), NOT flashed.
+- **S124 cont: MT22 -- the first trigs after the transport starts.** The DSP's tables arrived only while the track
+  rendered (a playing voice), so the first notes after power-on were lost (user confirmed). The packer calls the silent
+  renderer 0x400047f0 for idle tracks every frame (tables 0x400d61d0/0x400d61f0 rebuilt each frame); hooked: an
+  OT-303 track whose core is not dsp_ready renders through ot_render (records with no note). ot_emu: idle after boot
+  -> STG 2, YBEG..$fec complete in 82 frames, then the hook stops; PLAY after 2 s: 9 notes sent, 9 hq_start arrivals.
+  verify ALL GOOD. `out/OCTATRACK_BLACKPYRAMID_303.bin` sha256 fe6970d0ead8ecfc3ff029f29d990167d39f51ed5cb191240e3bb59a7d1c24fe.
+- **S124 cont: MT23 -- trig-key modes.** Subagent RE: tmode 0x460d16f0 (0 TRACKS, 1 CHROM, 2 SLOTS, 3 SLICES), octave
+  0x460d16fc (stock 0/1 toggle at 0x40045918, FUNC+UP 0x34 / DOWN 0x21), idx limit 24 at 0x4004fba8, LED routine
+  0x40043fdc (no-slot dark path 0x400441cc). On OT-303 tracks: SLOTS/SLICES LEDs dark + handlers 0x4004fa54/0x4004f8dc
+  inert; CHROMATIC octave 0..3, idx <= 51, absolute notes PTCH 12 + idx (C1..), live-record locks the same; other tracks
+  keep 0/1 (sanitised at 0x40050254); full keyboard image (0x40044968). ot_emu T6: SLOTS/SLICES no notes, trig LEDs 0;
+  CHROM key 1 -> 12 / 48 (oct 3) / 36 (oct 2), key 13 at oct 3 -> 60; live rec locks 12, 24; T1 FLEX toggles 1/0/1.
+  verify ALL GOOD. `out/OCTATRACK_BLACKPYRAMID_303.bin` sha256 d31dbf17c5633fff1bcadfada81cc2fdf50a1bb1baad63ee21b71bc37c2972cf,
+  syx 6af0dfb6ec0f72bab312c9b4d0e96339a5b3733a4a03161a4a580afc5dce1656 (`140C_BP303`), NOT flashed.
+- **S124 cont: renamed BLACKPYRAMIDS_303 (the user: "BlackPyramids_303"); octave arrows as stock.** Feature name,
+  builder tools/build_blackpyramids_303.py, outputs OCTATRACK_OS1.40C_BLACKPYRAMIDS_303.syx / OCTATRACK_BLACKPYRAMIDS_303.bin,
+  doc reference/BLACKPYRAMIDS_303.md, octabam key blackpyramids-303; the unit still shows BLKPYRAMD. Chromatic octave:
+  UP up, DOWN down, wrapping at the ends as stock's 0/1 toggle (ot_emu: oct 3 + UP -> C1, + DOWN -> C4).
+  `out/OCTATRACK_BLACKPYRAMIDS_303.bin` sha256 98f98e7d14da426d1c89f44a8d4dcf1bef7910a4453514785656aafc0857ae21 (`140C_BP303`), NOT flashed. Earlier entries keep the old name.
+
+- **S124 cont: FUNC + PTCH steps by octaves (the user's design: D#2 -> D#3 -> back to D#2).** Descriptor +0x162 is the
+  per-knob step handler, called (knob, turn, value) by every editor (page 0x40055140, locks 0x400509ae/0x40050c34,
+  scenes 0x4005331e/0x400538ee, SETUP 0x4003aa50), result clamped to min..min+count-1; 0 = generic 0x4003240c.
+  ot_ptch_step: FUNC (0x46c7dd26) held and PERSONALIZE DISABLE FUNC+ENC (0x800000a0) off -> +-12 by the turn's sign,
+  refused past C0/C8; else the generic. Stock FLEX's own (0x40032d08) jumps to 0/64/127 (table 0x400a8150). Not
+  through the generic's tally: on PTCH it counts 256 a detent against a step of 270 (encoder 0 +8 = 0x10e in ot_emu;
+  CUT's is 0x100), so it swallows detents (first one back after a reversal lost: D#5 stayed D#5); the plain knob keeps
+  that tally (3 plain detents from rest -> +2 in ot_emu, before and after this change; unverified on the unit).
+  ot_emu T6 (scratchpad livenotes/run8.py): 36 -> plain x3 38 -> FUNC +1 50, +1 62, -1 50 -> plain -1 50 ->
+  FUNC +1 x5 62 74 86 86 86 -> FUNC -1 x8 .. 2 2 -> plain +3 4. verify ALL GOOD.
+  `out/OCTATRACK_BLACKPYRAMIDS_303.bin` sha256 7e138f4bd47ddefad224112c9cb82c726226222517d40aa1c21c711cf33a2239,
+  syx faac6f92966264427cb62d1d8c0b8ee9197a0bf1e0e6b81fde4a0d9e6c2d5593 (`140C_BP303`), NOT flashed.
+- **S124 cont: flashed 7e138f4b (user: FUNC + PTCH octaves work, too quick; the chromatic octave arrows backwards).**
+  Arrows swapped: key 0x21 up, 0x34 down (still wrapping). FUNC + PTCH: OCT_DETENTS 3 detents an octave, own tally
+  (oct_tally, .data): a reversal restarts it, a turn without FUNC clears it. ot_emu T6 (run8.py q1..q7): FUNC +1 x2 36,
+  +1 48, +1 x3 60, -1 60, -1 x2 48; plain +1 (swallowed by stock's tally) then FUNC +1 x2 48, +1 60. CH (run7.py):
+  key 1 -> 12; 0x34 x3 (oct 3, 2, 1) key 1 -> 24, key 13 -> 36; 0x34 -> oct 0 key 1 -> 12; 0x21 -> oct 1 key 1 -> 24.
+  verify ALL GOOD. `out/OCTATRACK_BLACKPYRAMIDS_303.bin` sha256 232b693689e8d7e99aea0f17f35d03f7d4e27341d4ea4a048e764da4a9c5cf4c,
+  syx 9361321554fa989eec9f44b190c29b193df80e0170c4b35d528d76c9f55c6591 (`140C_BP303`), NOT flashed.
+- **S124 cont: flashed 232b6936; CHROMATIC's PAGE key on every octave.** Key codes (lcd_view): LEFT 0x34, RIGHT 0x21,
+  PAGE 0x1b -- so the swapped arrows are RIGHT up, LEFT down. PAGE's chromatic branch (FUN_4004ffc4 -> 0x4004fd74)
+  plays idx 16 through 0x4004fb94 only when the octave is 0 (`tstl 0x460d16fc; bne` at 0x4004fde4). Detour 43
+  `ot_page_key_hook` there: on an OT-303 track idx 16 + 12 oct (E2..E5), limit 51 -> 52; other tracks run stock's
+  test. ot_emu T6 (scratchpad livenotes/run9.py): PAGE at oct 0..3 -> 28 40 52 64, trig 16 at oct 3 -> 63.
+  verify ALL GOOD. `out/OCTATRACK_BLACKPYRAMIDS_303.bin` sha256 8fb372af1148eaf63272a7970ee864d66ff08f5bcabc493dd1113e7995d3226a,
+  syx 5a63cf2068ef79b98b895f164e50bb01a641f84ca23aa8aeaa545f5a733d663a (`140C_BP303`), NOT flashed.
+- **S124 cont: BLACKPYRAMIDS_303 PROMOTED TO FINAL (2026-10-14, the user: "Flashed, everything working as expected").**
+  Rebased onto origin/main dc210cd (REPITCH removal, KYOTI V1.4 FINAL; conflicts in CLAUDE.md / START_HERE.md only,
+  both sides kept); backup branch ot303-pre-rebase-2026-10-14. The rebased build is byte-identical to the flashed one:
+  mainos 3624a1e74d2759ff5cafd7bcd0882f8b2406c9509a4d8136d60cee6336be14d5 (pinned), CF .bin 8fb372af…, syx 5a63cf20….
+  README: Hardware confirmed; KYOTI V1.4 entry now says it excludes BLACKPYRAMIDS_303.
+- **S124 cont: BUG_BP303 -- BLACKPYRAMIDS_303 + BATCH_BUGFIXES (pinned FINAL in build_bugbuilds, 2026-10-14, the
+  user's instruction).** build_bugbuilds.py: the eighth feature; delta() now counts bytes past stock's end (the
+  appended loader + runtime) so the interlock proof covers them. Fixes at their preferred caves (BP uses none of
+  0x400d6500..0x400d7c3c); interlock 39347 + 563 -> 39910 B DISJOINT, ALL PRESERVED, NO STRAYS; the seven other
+  images still match their pins. verify_ot303.py on the composite (OT303_IMAGE=Bugbuilds/...): ALL GOOD.
+  mainos 0de8be5c17949be2ec506fa22384ba0d6903a4da60d59feb3d7ef40ac9555458, CF .bin ac64aab9…, syx 55b38837…
+  (`BUG_BP303`). NOT flashed.
+- **S124 cont: the octabam module `octabam-modules/blackpyramids-303/` (2026-10-14, the user: "prepare this feature as
+  an octabam module ... draft a PR").** tools/ot303/octabam_module.py generates `bp_runtime.s` (machine.s + the C as
+  gcc -S + libgcc __muldi3 as words), `bp_dsp_{A,B}.asm`, `bp_dsp_data.py`; it refuses to write unless the unit linked
+  alone at 0x40a955e0 is the standalone runtime (28,576 B, sha256 56b37d91…) for -mcpu=5407 AND 54455. What it took:
+  (1) every operand naming another file's / section's symbol gets `.l` (one unit lets gas relax jsr/lea to PC-rel);
+  (2) gas pseudo-branches to another file (`jra ot_note_name`) were Bcc.L: written as `.short 0x60ff; .long sym - .`
+  because gas -mcpu=54455 refuses bra.l (the chip runs it: the standalone does on the unit); (3) ld's SEC_MERGE tail
+  merge put "" on "ACC"'s NUL -> `.set`; (4) ld pads .data to 4 for the later empty .data inputs. bp_image.py = the
+  DSP integrate (dsp_patch.py's edits, same asserts) through a NEW octabam field `Module.dsp_source`, which replaces
+  build_bus.py's hard-wired ANALOG BD hook (ANALOG BD's test image unchanged: ece7075f… before and after). Manifest:
+  43 detours + 7 pokes taken from the builder module itself, FLEX renderer SymbolRef, conflicts ANALOG BD / SPRING REV
+  / SYNTH MACHINE (same renderer slot + 0x4000e746) / TAPE ECHO (replaces SPRING) / SCALE QUANTIZER (0x4000e746) /
+  SIDECHAIN_COMPRESSOR. Scratch octabam (out/octabam-bp, upstream df298c51 + branch blackpyramids-303): `make bus
+  REMIX=test/blackpyramids-303` -> runtime "matches the author's build at 0x40a955e0", both payloads' voice = the
+  standalone's; image vs standalone differs only in octabam's loader/arena/chooser relocation/own DSP edits (a Part
+  naming SPRING keeps SPRING's page there, as ANALOG BD). verify_ot303.py on it (OT303_LOADER_WRITERS=0x400209a4:
+  octabam's loader zero-fills the reserve with stock 0x40020984 first): ALL GOOD. octabam gates: selftest OK (+ the
+  test remix in its give-up table), verify-remix all pass (verify_dram_boot: reserve == linked runtime), verify_docs
+  one problem, pre-existing upstream (docs/site/index.md -> reference/modules.md). Not flashed in octabam form.
+
+## 2026-10-15 (`ot303`) — SIDECHAIN_COMPRESSOR keybus move + one-pass tap (WIP); Sam's PR #2; BLACKPYRAMIDS_303 optimization pass (WIP); KYOTI V1.5 waits for VARISPEED
+
+The user's plan: KYOTI V1.5 = V1.4 + plain VARISPEED + SIDECHAIN_COMPRESSOR, only SPRING REV given up, no
+BLACKPYRAMIDS_303 (VARISPEED is CF-only, so SPRING keeps only SIDE-CHAIN's section). Then any SIDE-CHAIN work still
+open, Sam's PR #2, and an optimization pass over BLACKPYRAMIDS_303's Octatrack-side code with the sound unchanged.
+
+- **Sam's PR #2** (Zac-Kyoti/octatrack-kyoti-fw, `codex/sidechain-load-meter-hook`, 8b2e3c9): exports `scmonbody`
+  (moncommit + 2) so LOAD METER's OTOP hook, which takes the same dispatcher site (A P:$50E / B P:$303), can call
+  SIDE-CHAIN's MON body after replaying the displaced load. Builds the promoted image byte for byte, emu_sc_dsp3 ALL
+  GOOD, merges cleanly with main and with the commits below (scmonbody = moncommit + 2 on the new code too). NOT
+  merged by this session: the user merges it (the auto-mode classifier refused a local merge of the external
+  commit). Review note for Sam: the body also clobbers a, b, x0, r1, n1, r3 and the loop registers. Reply draft:
+  ~/Documents/octabam-note-to-sam-pr2.md (pin placeholder <MERGE>).
+- **SIDECHAIN_COMPRESSOR (687869a, WIP):** keybus Y:$800-$9ff -> $7e00-$7fff, MON $7f0 -> $7df0, both cores: the first
+  internal FX2 slot's tail (stock's highest write slot+$3da2, octabam stock.SLOT_EXTENT; the same +$3e00 offset as
+  the cross-core window in the shared slots, hardware-confirmed since S115; both boot loops zero Y:$4000-$bfff).
+  Only long immediates name them: 7 words a payload. Frees $7f0-$9ff (BP's voice Y, BusDelay's private $903).
+  sctap: one pass, `move a,y:(r1)+` + XY `move x:(r0)+,a a,y:(r6)+` (r6 reloaded by the displaced instruction), 2
+  instructions a word for both copies (was 4); 384 words (was 388). ot_emu --dsp-stopwatch over the hook: 96
+  instructions a call (was 163), 4 calls a block a core => ~17 a sample a core.
+  Verified: new tools/emu_sc_sctap.py (model: 6 blocks x 4 tracks, a counter crossing $800000, 642 words, no
+  stray Y write; --ref 8265344: all of internal Y + the shared window equal, keybus at each version's address);
+  emu_sc_dsp3.py ALL GOOD (+ --patched); ot_emu sctest6 (KEY=T2, MON on/off): the mix equals the promoted build's
+  over the common 591,712 frames (the keybus-only build was byte-identical; the tap build's run ends a frame
+  apart); --dsp-watch: sctap writes $7e00 (core 1) / $7f00 (core 0) with the values it wrote at $800/$900, $800
+  no longer written. octabam scratch (da2def4d + submodule 687869a): check-remix test/sidechain-compressor and
+  test/kyoti-mute-sidechain pass; the ledger takes DspRange y $7df0 +$210.
+  Builds (WIP, NOT flashed): standalone mainos 9f7899d4756cc8fb…, syx b26551a2b13e9676… (`140C_KYOTI`); BUG_SC3X
+  mainos 5513f93b658c0ded…, syx 6cf980e13320ec47…. HW checks: ducking same/cross core, MON, DARK/PLATE on T1 and
+  T5 FX2 (the slot whose tail holds the keybus) with a keyed COMPRESSOR: no cross-talk.
+  KYOTI V1.4's FINAL pin now breaks (it carries SIDE-CHAIN): its flashed image is unchanged; the next KYOTI is V1.5.
+- **KYOTI V1.5: NOT built.** Plain VARISPEED (tools/build_varispeed.py, 140C_VARI1, syx 78cfad33…) lives only on the
+  repitch-rewrite branch (another session's, unpushed, the user's OK to push pending). That session will push it
+  and message this one; then build_kyoti.py gets VERSTR "KYOTI V1.5", VARISPEED as a feature, outputs under
+  out/KYOTI_WIP/ until promoted.
+- **BLACKPYRAMIDS_303 optimization pass (e2fde9a, WIP).** Measured first (ot_emu, BOTLI line on T2 + T6): the
+  engine is ~6,030 instructions a frame, the host glue ~550-750 (8 %); ColdFire: BP's runtime ~3,000 of 29,934
+  instructions a frame (two voices), the hottest part ot_record's table chunk (55 words packed every frame, 13
+  instructions a word). The engine (Open303's port) is excluded by the user. Changes: the Y table packed at
+  build time (ot_ytab_pk; the chunk a plain copy, 5 instructions a word); the continuous words made again only
+  when CUT/RES/ENV/WAVE/SLID/VOL change (they were remade on any of the 12 knobs, so a PTCH lock or LFO forced
+  the 64-bit compile); host.asm hq_unp masks with y1 and adds (y1 dead at CONT: stock writes it first on both
+  payloads). Results: records byte-identical to the old record.c over 200,000 random frames x 2 voices;
+  host_check BIT-EXACT (saw 471.8 -> 470.2, square 616.9 -> 615.3 cycles/sample, note frames -2.7);
+  verify_ot303 ALL GOOD (voiced frame 6354 -> 6341); ColdFire 29,934 -> 29,246 instructions a frame. Not worth
+  doing: the stock-track seam path (54.6 cycles a call: dsp_asm emits long branches only, nothing to drop), the
+  output copy (3 X accesses a sample is the floor). The octabam module is regenerated (runtime 28,704 B, sha256
+  2b3b045d…). Builds (WIP, NOT flashed): standalone mainos 504aed6aafa92427…, CF .bin 33dfa28be8d908b5…, syx
+  d4808a7b00ccdadf… (`140C_BP303`); BUG_BP303 mainos 0e1aff9980b97baf…, syx c8e130c14cfa6809….
+- **2026-10-15 cont: PR #2 merged by the user (rebase) as cccdb77.** SIDE-CHAIN rebuilt on it: the same WIP image
+  (9f7899d4…), emu_sc_dsp3 + emu_sc_sctap ALL GOOD; the Sam reply now pins cccdb77 (~/Documents/octabam-note-to-sam-pr2.md).
+- **2026-10-15 cont: BLACKPYRAMIDS_303 engine pass (92438b7, WIP; the user OK'd touching the Open303 port if low risk
+  and sound-neutral).** P was the wall (1027 of 1028 words), so word-saving changes paid for one unroll:
+  - the tanh index/fraction as one-word shifts on one accumulator half (asr #15 + lsl #1 = (x>>14)&~1;
+    lsl #9 + lsr #1 = (x&$7fff)<<8) in ODRIVE, fast square, slow square;
+  - GLIDE through the walkers ((r2+4), (r6+6)) and YY4 as (r4+8), one-word for absolute moves;
+  - ODRIVE keeps GD8 from x1 (`tfr x1,b y:(r0)+,x1`);
+  - host.asm RAWCHK, payload A only, emptied for B by hwprobe_image.source();
+  - the second half-band's 22 taps unrolled (no DO a sample).
+  A 1026 / B 1022 words.
+  Bench fix: host_probe priced a DO step's extra instruction at pc+1 (the loop-address operand decoded as an opcode),
+  so costs moved with where loops ended (an apparent +3 cycles on B after a 1-word shift); now pc + the DO's length,
+  and OT_PCPROF=FILE dumps a per-address profile.
+  On the corrected bench: FINAL 3624a1e7 saw 473.2 / square 620.3 (worst note 514.9 / 669.9) -> 455.1 / 598.0
+  (495.6 / 646.1). engine_check (OT303_DSP=new: the old dsp_asm mis-encodes GLIDE's `tfr b,a x:(r0)+,x0`) and
+  host_check BIT-EXACT; verify_ot303 ALL GOOD (voiced frame 6354 -> 6290); ot_emu BOTLI: all 8 output slots
+  sample-identical to the FINAL image over 661,278 frames; BUG_BP303 interlock DISJOINT + verify ALL GOOD.
+  Not done (no gain or no room): zsqb/zsqc unrolls (+16/+33 words), short branches (dsp_asm emits long only), the
+  output pointer and MEGS/RC1W (no free register, no short displacement in reach), `move #>$ffffff,m0` (no
+  register holds it).
+  Builds (WIP, NOT flashed): standalone mainos 42c0da934c399a2e…, CF .bin 0399a1f3…, syx eee3f936b1c58ec7…;
+  BUG_BP303 mainos 1df0fd2130f21e47…, syx ef5abf570dd0658b…. The octabam module is regenerated (runtime unchanged,
+  2b3b045d…; DSP words new).
+
+## Session 129 (2026-10-15, `repitch-rewrite` → `vari-push`): VARISPEED, the plain build, pushed (WIP, NOT flashed)
+
+* **What:** VARISPEED = VARI on TSTR (5 positions) + QUAN on PTCH, ATTR `VARI`, the octave fold
+  above 2x, OFF outside 30–300 BPM. No emulators, no DSP change (SPRING stays), no EMUS, no load
+  guard. It is the clean-room rewrite's plain build (spec `reference/handoffs/REPITCH_REWRITE_SPEC.md`
+  §7, report `REPITCH_REWRITE_IMPL.md` §14). It shares `octabam-modules/varispeed-emus/varispeed_emus.s`
+  with VARISPEED_EMUS (assembled with `VEM_EMUS=0`).
+* **Builds:**
+  - standalone `tools/build_varispeed.py`: `140C_VARI1`, syx
+    `78cfad333ff231adda18f415d9585deae7c09a9668882903b30b4b3afd97f64d`;
+  - Bugbuild `KYOTI_ALLOW_WIP=1 python3 tools/build_bugbuilds.py --wip VARISPEED`: `BUG_VARI`, syx
+    `f2f37df360f19f7667c6a78fead813fd5b47da322e29dfaa4e76cc365bca4a68`.
+
+  Both were rebuilt byte-identical on this commit's tree. The octabam module is
+  `octabam-modules/varispeed/`, which needs `varispeed-emus/` beside it.
+* **Verified in the emulator:** tests 11/11 (10/10 on the Bugbuild); harness full OTDEMO 19/19,
+  MMTESTDT (6,000 frames) 17/19 (the two misses compare nothing by design); stock and PICKUP tracks
+  bit-identical to stock 1.40C. Not on hardware yet.
+* **Pushed for:** the KYOTI V1.5 compose (the BLACKPYRAMIDS/SIDECHAIN session).
+* **Not pushed:** VARISPEED_EMUS (VEM9 and its history), the deletion of the old REPITCH folder, and
+  tag `ref/sp12-midside-vem7`. They stay on branch `repitch-rewrite`.
+* **Note:** on this `main`, `python3 tools/build_bugbuilds.py` (the final seven) stops at
+  SIDECHAIN_COMPRESSOR. Its builder no longer matches its FINAL pin since the WIP keybus change
+  (687869a). This is not caused by this commit.
+- **2026-10-15 cont: KYOTI V1.5 BUILT (WIP, NOT flashed, not promoted): V1.4 + VARISPEED + the 15 Oct SIDE-CHAIN, no
+  BLACKPYRAMIDS_303** (VARISPEED pushed by the repitch-rewrite session as 0cc30d7, the user's OK).
+  - **Composer:** build_kyoti.py now V1.5. V1.4 stays FINAL (mainos_kyoti_v1.4.bin, built from 19348d9; BUILD_KYOTI.md).
+  - **Layout:**
+    - VARISPEED's builder takes no KYOTI_PLACE, so its 2,388 B unit is CAVE's first piece at its own 0x400d6500
+      (asserted after the allocation; frame-ISR code, so ROM).
+    - CAVE: VARISPEED 2388 + DIRECT JUMP 2026 + softmute 1086 + partreapply 402, 42 B left.
+    - patch_mutemode (208) and rtm_mask move to SAFE (904 B left).
+    - patch_reload3 (2,088 B) goes to DRAM, as in V1.2-V1.3: one 6 KB arena page, loader + payload 1,536 B
+      appended.
+  - **run_builder:** passes KYOTI_ALLOW_WIP=1 to every builder when the composite itself runs with it (V1.5
+    carries two WIP features); without it any WIP feature still refuses, and seal() keeps V1.5 off the pin.
+  - **Composer checks:** 9,314 B changed = the sum of the feature deltas (DISJOINT); each feature outside its caves
+    = its standalone (VARISPEED: 0 B differ); 65 code spans, no branch into any; B1/B2.
+  - **Emulator:**
+    - VARISPEED's suite on the composite: 9/11. `static` and `spring` assert a standalone image (stock DSP and
+      choosers, SPRING offered); out/vari/run_k15.py swaps SPRING for DARK so the scenarios build. o2
+      covers RELOAD PART and paste/clear/undo next to RELOAD_FROM_PROJECT.
+    - The DRAM arena after boot equals RELOAD linked at 0x40a955e0.
+    - sctest6 with MON off: per-slot RMS equals the SIDE-CHAIN standalone's.
+  - **Builds:** mainos 6f6f3268a5a34fda…, syx 8950f824cd2761f8…, CF .bin ac2d3e8faff404a9… (`KYOTI V1.5`).

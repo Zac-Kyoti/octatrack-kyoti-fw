@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 A thin, verifying layer over dsp_asm (vendor/dsp56300 dsp_host) for DSP56300
 source that needs what dsp_asm gets wrong or lacks. Added for repitch-kyoti
@@ -22,7 +22,8 @@ Extensions accepted here:
     NAME    equ     expr            textual constant (python int expression)
             dc      v[,v...]        raw data words (expr each)
             movem   p:(rN)+,D       program-memory read, D in x0 x1 y0 y1 a b
-            <alu>   x:...,R y:...,R XY dual move with an ALU op
+            <alu>   x:...,R y:...,R XY dual move with an ALU op (either half may be
+                                    a write: R,x:... / R,y:...)
 
 THE CHECK: the finished blob is disassembled and every instruction is
 compared, operand for operand, with the source (labels resolved). Any
@@ -94,9 +95,15 @@ def disassemble(words, org):
     return out
 
 
+# the disassembler names some peripheral registers; the source writes their addresses
+PERIPH = {"m_tcr0": 0xffff8c, "m_tcpr0": 0xffff8d, "m_tlr0": 0xffff8e, "m_tcsr0": 0xffff8f, "m_dstr": 0xfffff4}
+
+
 def _norm(text, syms):
     """Canonical operand tokens for comparing source with disassembly."""
     t = text.lower().replace("<", "").replace(">", "")
+    for name, v in PERIPH.items():
+        t = re.sub(rf"\b{name}\b", f"${v:x}", t)
     t = re.sub(r"^movem\b", "move", t.strip())
     t = re.sub(r"\b[a-z]+_([0-9a-f]{6})\b", r"$\1", t)     # the disassembler's func_001429: an address
     for name in sorted(syms, key=len, reverse=True):
@@ -235,8 +242,9 @@ def assemble(src, org):
             specials.append((len(out_lines), "tfr", (parts, body)))
             out_lines.append("        nop")
             continue
+        # XY dual move with an ALU op, read or write halves (`x:(r1)+,x0 a,y:(r5)+`)
         if (len(parts) == 3 and re.match(r"^(\w+,)?x:", parts[1]) and re.match(r"^(\w+,)?y:", parts[2])
-                and op != "move"):                  # XY dual move (either direction) with an ALU op
+                and op != "move"):
             specials.append((len(out_lines), "xy", (op, parts, body)))
             out_lines.append("        nop")
             continue

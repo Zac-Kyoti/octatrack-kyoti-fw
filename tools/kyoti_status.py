@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 The build gate: everything is WORK IN PROGRESS until the author promotes it.
 
@@ -52,10 +52,12 @@ FINAL = {
         "mainos_reload_from_project_batch_bugfixes.bin":     "a9b162479518c828f5e5a1d4a6e30e57c9ebc48d199dfabcfe66fe48426e3467",
         "mainos_direct_jump_kyoti_batch_bugfixes.bin":       "2cc151e7f9fa7568eca7d1e50d06ed179ff36ffa28f85fe59ce27295917ca21a",
         "mainos_rec_trig_mute_batch_bugfixes.bin":           "fd65e293657e3caa895064255c7dad76882c21640c6eebdc1cf812074744c658",
+        "mainos_blackpyramids_303_batch_bugfixes.bin":       "0de8be5c17949be2ec506fa22384ba0d6903a4da60d59feb3d7ef40ac9555458",
     },
     "build_kyoti.py": {
         "mainos_kyoti_v1.4.bin":                             "72710a3ca63c8f69a13346621aa623982951cd71de244f1c06eedcd516681613",
     },
+    "build_blackpyramids_303.py":          "3624a1e74d2759ff5cafd7bcd0882f8b2406c9509a4d8136d60cee6336be14d5",
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
 }
 

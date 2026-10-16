@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 Session 49 -- differential test for report #1 (Elektronauts, Open_Mike + a second
 reporter): switching from a pattern/Part with a PICKUP machine on a track to a

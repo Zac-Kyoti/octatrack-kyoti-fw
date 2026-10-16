@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 repitch-kyoti: render the same material through RPCH, RPS9 and RPSP on the
 emulated DSP, measure what each mode changes, and write WAVs to listen to.

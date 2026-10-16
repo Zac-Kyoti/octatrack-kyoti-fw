@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 VARISPEED_EMUS's DSP kernel (S950 / SP12) in octabam's form, generated from the
 hardware-tested one (tools/patch_repitch_dsp.asm + tools/repitch_dsp_src.py).

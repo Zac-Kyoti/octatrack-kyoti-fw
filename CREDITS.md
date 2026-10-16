@@ -147,20 +147,6 @@ too, and has its own section above.)
   `reference/kb/techniques.md`. `octamachine` is a feasibility study for running
   Machinedrum firmware on Octatrack hardware — out of scope here except for its
   host-side statement of the Octatrack's own platform requirements.
-  **REPITCH_REPEAT98_KYOTI started from Jannik's Repitch module for
-  octabam** (`modules/repitch/`, MIT, © 2026 Sam Banks as octabam's licence states): its
-  ColdFire skeleton was his code, adapted (the tempo-source routine, his seven hook sites and
-  the TSTR label formatter), as was the scaffold of its ColdFire test oracle. At Jannik's
-  request it was removed from every build on 2026-10-13, and its files were deleted on
-  2026-10-14. Its successor, **VARISPEED_EMUS**, is a clean-room rewrite with none of his
-  code. The ColdFire core was re-derived from the stock image by agents that never saw his
-  module (`reference/handoffs/REPITCH_REWRITE_SPEC.md`, `..._SCOPE*.md`, `..._IMPL.md`). It
-  keeps our own parts: QUAN, the PTCH/QUAN swap, and the S950/SP-1200 DSP kernel.
-  **Prior art:** Jannik's module was the first to publish the firmware locations a varispeed
-  mode on this OS comes down to: the playback increment's final store (`0x40004100`), the
-  audio editor's TIMESTRETCH row (`0x4006e71c` label, `0x4006ef7c` down), the TSTR count, and
-  stock's unused 5-position select (`0x40046ab4`). VARISPEED_EMUS uses those too. Our agents
-  re-derived them from the stock image without seeing his module, but he found them first.
 
 ## The DSP56300 emulator core
 
@@ -178,6 +164,38 @@ too, and has its own section above.)
   others — none of them the Octatrack), pulls this same repo in as a
   submodule; reviewed 2026-09-16 and not tracked separately since it adds
   nothing beyond that submodule for this project's purposes.
+
+## BLACKPYRAMIDS_303 — the TB-303 machine
+
+Full attribution and every design decision: [`reference/BLACKPYRAMIDS_303.md`](reference/BLACKPYRAMIDS_303.md) §5.
+
+- **[RobinSchmidt/Open303](https://github.com/RobinSchmidt/Open303)** — © 2009 Robin Schmidt, MIT.
+  The voice is Open303's TB_303 algorithm ported to the DSP56300: the oscillator blend and square
+  shaper, the TeeBee ladder and its fitted coefficients, the envelopes, accent, slide, pre/post
+  voicing and the knob formulas. Licence kept in `tools/ot303/LICENSE.Open303.txt`.
+- **[midilab/jc303](https://github.com/midilab/jc303)** — GPLv3, Open303 in JUCE. Reference only, no
+  code: its soft attack, movable feedback high-pass, square drive and overdrive suggested
+  candidates that were then A/B-tested by ear.
+- **AudioRealism ABL3** — its manuals only: drive reached by turning the volume up, and gate trim
+  (release), behind the drive and release candidates.
+- **ANALOG BD for octabam** — repeat98 (Jannik Aßfalg), MIT. The machine-registration pattern
+  (a sixth machine row stored as FLEX plus a signature) and the per-track source seam,
+  ported. **SYNTH** (Tim Hastie) was studied for the FLEX-renderer approach.
+- **Research consulted, no code:** Vadim Zavalishin, *The Art of VA Filter Design*; Andy Sloane's
+  x0xb0x measurements ([a1k0n/303](https://github.com/a1k0n/303)); Robin Whittle's Devil Fish notes.
+- **Zac Kyoti** — the concept and the sonic direction:
+  - **filter voicing** (the linear ladder, the 16 kHz top);
+  - **body under resonance** (the 350 Hz feedback high-pass);
+  - **declick and edge tuning** (soft attack and its fade with RES, the 2 ms release, the 1 ms
+    glide on lock jumps);
+  - **drive and saturation** (one output soft clip, +2.5 dB by default and up to +4.5 dB on
+    VOL's top, nothing inside the filter);
+  - **the "liquid" / "creamy" trade-offs**;
+  - **the free-running note start.**
+
+  All of these were tuned by ear over thirteen blind listening rounds. Zac Kyoti also designed the
+  grid mapping and every control range, and tested on an MKI. The implementation was written with
+  AI assistance (Claude) under the author's direction.
 
 ## Community reverse-engineering & documentation
 

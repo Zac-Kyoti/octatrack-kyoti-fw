@@ -286,6 +286,12 @@ any adoption of this route inherits.
   The emulator measures DRAM-resident code at the same per-frame cost as ROM code
   (`reference/handoffs/KYOTI_LOAD_AUDIT.md`).
 
+**OT-303 (MT4, 2026-10-11, ours, emulator-verified):** a standalone DRAM runtime on this route with a
+16-page (96 KiB) bottom reserve and a raw (unpacked) payload behind a minimal octabam-derived loader
+(`tools/ot303/dram.py`, `tools/ot303/cf/loader.S`). Note: `0x400d24d0..0x400d2ce0` is **not** free
+space — it is the zero tail of a 1,024-entry curve table at `0x400d1ce0` that stock indexes at runtime
+(`0x4000352a`, `u16 >> 6`); code there would change the curve's tail.
+
 ## 5b. The OTHER way past the ceiling — a payload on the CF card
 
 > source: `refs/octemu/custom/usb-audio.py` (+ `custom/coldfire/usb-audio*.s`) @ `6a9ff68`

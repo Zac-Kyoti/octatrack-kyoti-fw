@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Zac-Kyoti
+// SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
 // SUPERSEDED (Session 110, rev 11): tests rev 10's kernel contracts; the rev-11
 // engine is checked by tools/repitch_dsp_engine_probe.cpp + _engine_check.py.

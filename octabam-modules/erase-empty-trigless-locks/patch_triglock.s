@@ -1,5 +1,5 @@
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti
+| SPDX-FileCopyrightText: 2026 Zac Kyoti
 | patch_triglock -- Section 13 (NOTES.md): a trigless lock (a step holding p-locks and no
 | trig) whose last remaining p-lock is erased stays lit on the 16-step trig row forever.
 |

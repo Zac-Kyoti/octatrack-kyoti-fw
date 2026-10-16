@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Zac-Kyoti
+// SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
 // repitch-kyoti rev 11 (rev 14: two visits per frame, the trig flag, the AMP
 // level, X-memory tables): run the BUILT DSP cave (virtual sampler) inside the

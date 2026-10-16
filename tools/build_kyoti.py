@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 Zac-Kyoti
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-KYOTI V1.4 -- every FINAL feature in one image.
+KYOTI V1.5 -- every FINAL feature in one image, plus VARISPEED (WIP).
 
     MUTE MODE (OT / OTFX / OTFX-T / DT-T)      QUANTIZE LIVE REC toggle
     SIDE-CHAIN COMPRESSOR (cross-core)         TRIGLESS-LOCK AUTO-REMOVE
     RELOAD FROM PROJECT (RELOAD_FROM_PROJECT chords)       DIRECT JUMP V7.0.1
-    REC TRIG MUTE ([TRK]+[NO]/[YES], CC 80)
+    REC TRIG MUTE ([TRK]+[NO]/[YES], CC 80)    VARISPEED (TSTR VARI + QUAN)
     the bug fixes: MIDI_PLAYS_FREE_FIX, PATTERN LED, PART_CHANGE_CARRYOVER_FIX
+
+V1.5 vs V1.4 (2026-10-15, WIP until the author promotes it; V1.4 stays the FINAL image, built
+from 19348d9 and pinned in tools/kyoti_status.py as mainos_kyoti_v1.4.bin):
+- VARISPEED (tools/build_varispeed.py, the plain build: ColdFire only, the DSP stock) joins. Its
+  one 2,388 B unit takes the start of the proven cave, 0x400d6500, its standalone address, so
+  its builder runs unchanged.
+- RELOAD_FROM_PROJECT moves to DRAM again (as in V1.2-V1.3, hardware-confirmed there): key-handler
+  and sys-task code, carried by the loader (tools/dram/), one 6 KB arena page.
+- SIDECHAIN_COMPRESSOR is the 2026-10-15 WIP build (keybus Y:$7e00, one-pass sctap).
+SPRING REVERB is still given up by SIDE-CHAIN alone.
 
 V1.4 vs V1.3: REPITCH_REPEAT98_KYOTI is removed (2026-10-13: it is being rewritten clean-room,
 without the code it took from Jannik Aßfalg's octabam Repitch; reference/handoffs/
@@ -35,8 +45,8 @@ unreachable.
 
 RAM. A plan may put pieces in "DRAM": linked at an arena reserve and carried by octabam's
 platform loader (vendored in tools/dram/, MIT), sized in whole 6 KB arena pages of the 85.5 MB
-sample/recorder pool. V1.2-V1.3 used it for RELOAD_FROM_PROJECT; V1.4's plan is ROM-only, so
-no loader is appended.
+sample/recorder pool. V1.2-V1.3 used it for RELOAD_FROM_PROJECT, V1.4 was ROM-only, and V1.5 uses
+it for RELOAD_FROM_PROJECT again (VARISPEED needs the proven cave's room).
 
 Boot splash and SYSTEM STATUS -> OS VERSION read VERSTR below.
 
@@ -105,12 +115,13 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
 import dram                                    # noqa: E402  (tools/dram/dram.py)
 
 gate(__file__, note="""
-KYOTI V1.4: every FINAL feature in one image, nothing placed in the parameter-page
-descriptor table. V1.0 (withdrawn 2026-10-06) crashed because it did. ROM-only.
+KYOTI V1.5 (WIP): every FINAL feature plus VARISPEED in one image, nothing placed in the
+parameter-page descriptor table (V1.0, withdrawn 2026-10-06, crashed because it did).
+RELOAD_FROM_PROJECT in DRAM. V1.4 is the FINAL image until this one is promoted.
 """)
 
-VERSTR = "KYOTI V1.4"
-TAG = "KYOTI_V1.4"
+VERSTR = "KYOTI V1.5"
+TAG = "KYOTI_V1.5"
 BASE = 0x40000400
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
@@ -150,16 +161,18 @@ RECLAIM_WHOLE = {"SPRING": (0x400d575e, 0x400d58f0), "PERS1": (0x400b2a34, 0x400
 
 # --- the placement plan: zone -> pieces, packed in this order --------------------------
 #   engine / ISR / tick-path code: CAVE and SAFE only.  ROM-only: a "DRAM" zone (pieces
-#   linked at the arena reserve, carried by tools/dram/'s loader) is supported, unused since V1.4.
+#   linked at the arena reserve, carried by tools/dram/'s loader): RELOAD_FROM_PROJECT, as in V1.2-V1.3.
 PLAN = {
-    "CAVE":  ["patch_reload3", "patch_directjump_v7", "patch_softmute", "patch_partreapply",
-              "patch_mutemode",
-              "rtm_mask"],                         # REC_TRIG_MUTE's state byte, written at runtime
+    "DRAM":  ["patch_reload3"],                    # key-handler + sys-task code; DRAM-proven in V1.2-V1.3
+    "CAVE":  ["patch_varispeed",                   # first: 0x400d6500, VARISPEED's own address (frame ISR)
+              "patch_directjump_v7", "patch_softmute", "patch_partreapply"],
     "SAFE":  ["personalize_getters", "personalize_setters", "personalize_labels",
               "patch_sidechain",                   # COMPRESSOR page formatters
               "patch_trigscale",                   # MIDI_PLAYS_FREE_FIX
               "patch_qlrec",                       # [PLAY]/[REC] key handlers
-              "patch_pattern_led"],                # EMPTY_PATTERN_LED_FIX (CAVE is full since V1.2)
+              "patch_pattern_led",                 # EMPTY_PATTERN_LED_FIX (CAVE is full since V1.2)
+              "patch_mutemode",                    # V1.5: CAVE holds VARISPEED's unit
+              "rtm_mask"],                         # REC_TRIG_MUTE's state byte, written at runtime
     "ENC":   ["patch_triglock"],                   # LIVE-erase key path only
     "SPRING": [], "PERS1": [], "PERS2": [],
 }
@@ -190,7 +203,12 @@ FEATURES = {
                       {"patch_directjump_v7": "patch_directjump_v7.bin"}),
     "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "mainos_rec_trig_mute.bin", "prep",
                       {"rtm_mask": 4}),
+    # WIP, not on hardware yet. Its builder takes no placement: the plan puts its unit at its own
+    # address (asserted after the allocation).
+    "VARISPEED": ("build_varispeed.py", "mainos_varispeed.bin", "prep",
+                  {"patch_varispeed": "vari_build/vem_5407.bin"}),
 }
+VARISPEED_AT = 0x400d6500           # tools/varispeed_buildlib.py CAVE
 # Features that are WIP (not promoted, or demoted): only with --with NAME.
 WIP_FEATURES = {}
 # REC_TRIG_MUTE's code regions: four dead stock routines (build_rec_trig_mute.py REGIONS),
@@ -253,7 +271,10 @@ def run_builder(sb, feat, place):
     builder = FEATURES[feat][0]
     env = dict(os.environ, KYOTI_PLACE=json.dumps(place))
     env.pop("KYOTI_ALLOW_WIP", None)
-    if feat in WIP_FEATURES:                 # asked for by name with --with: its builder is WIP
+    # A WIP builder runs only when asked for by name (--with), or when this composite is itself a WIP
+    # build the user allowed (KYOTI_ALLOW_WIP=1: V1.5 carries VARISPEED and the WIP SIDE-CHAIN). The
+    # composite's own seal() keeps such an image off the FINAL pin either way.
+    if feat in WIP_FEATURES or os.environ.get("KYOTI_ALLOW_WIP") == "1":
         env["KYOTI_ALLOW_WIP"] = "1"
     r = subprocess.run([sys.executable, f"tools/{builder}"], cwd=sb, env=env,
                        capture_output=True, text=True)
@@ -359,7 +380,7 @@ def wip_variant(flag):
     """--with / --without images are never the promoted one: refuse them up front without the
     opt-in, instead of after a full build at seal()."""
     if os.environ.get("KYOTI_ALLOW_WIP") != "1":
-        sys.exit(f"\n  Refusing to build: {flag} makes a WIP image, not KYOTI V1.4.\n"
+        sys.exit(f"\n  Refusing to build: {flag} makes a WIP image, not KYOTI V1.5.\n"
                  f"  If you meant it, set KYOTI_ALLOW_WIP=1:\n\n"
                  f"      KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py {flag} ...\n")
 
@@ -378,17 +399,17 @@ def apply_with(argv):
         sys.exit(f"--with: unknown or non-WIP feature(s) {bad}; choose from {sorted(WIP_FEATURES)}")
     for a in add:
         FEATURES[a] = WIP_FEATURES[a]
-    VERSTR = ("KV14+" + "".join(a[:3] for a in add))[:10]
-    TAG = "KYOTI_V1.4_WITH_" + "_".join(add)
+    VERSTR = ("KV15+" + "".join(a[:3] for a in add))[:10]
+    TAG = "KYOTI_V1.5_WITH_" + "_".join(add)
     OUTDIR = ROOT / "out/KYOTI_WIP" / TAG
     SANDBOX = OUTDIR / "_sandbox"
     print(f"  WIP IMAGE: with {', '.join(add)}  ->  OS VERSION {VERSTR!r}, {OUTDIR.relative_to(ROOT)}\n")
 
 
 def apply_without(argv):
-    """--without NAME[,NAME]: a BISECTION image -- KYOTI V1.4 minus those features, built
-    by the same method.  It gets its own OS VERSION ("KV14-NO-" + a short code per removed
-    feature, e.g. KV14-NO-SC) and its own directory out/KYOTI_BISECT/<tag>/, so it can never be
+    """--without NAME[,NAME]: a BISECTION image -- KYOTI V1.5 minus those features, built
+    by the same method.  It gets its own OS VERSION ("KV15-NO-" + a short code per removed
+    feature, e.g. KV15-NO-SC) and its own directory out/KYOTI_BISECT/<tag>/, so it can never be
     mistaken for, or overwrite, the real image."""
     global VERSTR, TAG, OUTDIR, SANDBOX
     if "--without" not in argv:
@@ -407,9 +428,9 @@ def apply_without(argv):
     short = {"MUTE_MODES": "MM", "QUANTIZE_LIVE_REC_TOGGLE": "QL", "SIDECHAIN_COMPRESSOR": "SC", "ERASE_EMPTY_TRIGLESS_LOCKS": "TL",
              "RELOAD_FROM_PROJECT": "RL", "DIRECT_JUMP_KYOTI": "DJ",
              "MIDI_PLAYS_FREE_FIX": "PF", "EMPTY_PATTERN_LED_FIX": "PL", "PART_CHANGE_CARRYOVER_FIX": "PR",
-             "REC_TRIG_MUTE": "RTM"}
-    VERSTR = ("KV14-NO-" + "".join(short[d] for d in drop))[:10]
-    TAG = "KYOTI_V1.4_WITHOUT_" + "_".join(drop)
+             "REC_TRIG_MUTE": "RTM", "VARISPEED": "VS"}
+    VERSTR = ("KV15-NO-" + "".join(short[d] for d in drop))[:10]
+    TAG = "KYOTI_V1.5_WITHOUT_" + "_".join(drop)
     OUTDIR = ROOT / "out/KYOTI_BISECT" / TAG
     SANDBOX = OUTDIR / "_sandbox"
     print(f"  BISECTION IMAGE: without {', '.join(drop)}  ->  OS VERSION {VERSTR!r}, "
@@ -494,6 +515,9 @@ def main():
             at += size[key]
         print(f"  {z:7s} {cls:7s} " + ", ".join(f"{k} {size[k]}@{place[k]:08x}" for k in keys if k in size)
               + (f"   [{hi - at} B left]" if z != "DRAM" else "   [linked at the arena reserve]"))
+    if "patch_varispeed" in place and place["patch_varispeed"] != VARISPEED_AT:
+        sys.exit(f"patch_varispeed allocated at 0x{place['patch_varispeed']:08x}; its builder links it at "
+                 f"0x{VARISPEED_AT:08x} only (CAVE's first piece)")
     dlo, dhi = DESCRIPTOR_TABLE
     for k in place:
         if zone_of[k] not in DESCRIPTOR_TABLE_OK and place[k] < dhi and dlo < place[k] + size[k]:
@@ -752,7 +776,7 @@ def main():
     # --- write + wrap -----------------------------------------------------------------------
     mainos = OUTDIR / f"mainos_{TAG.lower()}.bin"
     mainos.write_bytes(bytes(comp))
-    seal(__file__, mainos)       # FINAL pins mainos_kyoti_v1.4.bin; --with/--without images are WIP
+    seal(__file__, mainos)       # FINAL pins mainos_kyoti_v1.4.bin (19348d9); V1.5 and --with/--without images are WIP
     cmap = {"verstr": VERSTR, "zones": {z: [hex(lo), hex(hi), cls] for z, (lo, hi, cls, _) in ZONES.items()},
             "pieces": {k: {"zone": zone_of[k], "at": hex(place[k]), "size": size[k]} for k in place},
             "dram": dram_report,

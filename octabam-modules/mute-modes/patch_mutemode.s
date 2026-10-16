@@ -1,5 +1,5 @@
 | SPDX-License-Identifier: MIT
-| SPDX-FileCopyrightText: 2026 Zac-Kyoti
+| SPDX-FileCopyrightText: 2026 Zac Kyoti
 | patch_mutemode -- the "MUTE MODE" PERSONALIZE entry (a multi-value text option, not a
 | checkbox).  Modeled on the stock LED BRIGHTNESS item (FUN_40068c80 getter / FUN_4006907c
 | setter): a getter returns a char* shown in the right-hand column, a setter takes
