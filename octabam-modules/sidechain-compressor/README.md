@@ -11,8 +11,8 @@ detector. Four controls join RMS on page 2:
 | **MON** | ON: hear the processed key on this track instead (audition) |
 
 **Hardware-confirmed in this octabam form** (the author's MKI, 2026-10-04, see Measured).
-The 15 Oct 2026 DSP changes (the keybus move and the one-pass tap below) are emulator-verified
-only.
+The 15 Oct 2026 DSP changes (the keybus move and the one-pass tap below) are hardware-confirmed
+in the standalone image (the author's MKI, 2026-10-16); not yet flashed in this octabam form.
 
 ## Contents
 
