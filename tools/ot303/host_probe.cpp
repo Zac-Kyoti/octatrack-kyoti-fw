@@ -276,7 +276,11 @@ int main(int argc, char** argv) {
                 uint32_t* slot = slots[isB0][f & 1];
                 if (!(isA0 && f >= STALE0 && f < STALE1)) {
                     unsigned ev0 = isA0 ? evA : evB; uint32_t gl0 = isA0 ? glA : glB;
-                    ot_record(slot, isA0 ? &va : &vb, isA0 ? kA : kB, ev0, gl0);
+                    const uint8_t* kk = isA0 ? kA : kB;                       // MT24: a fraction half the time
+                    const unsigned fr = (f >> 11) & 1 ? (f * 37u) & 0xffu : 0u;
+                    const unsigned cq = kk[OT_CUT] < 127 ? (kk[OT_CUT] << 8) + fr : 0x7f00u;
+                    const unsigned eq = kk[OT_ENV] < 127 ? (kk[OT_ENV] << 8) + fr : 0x7f00u;
+                    ot_record(slot, isA0 ? &va : &vb, kk, ev0, gl0, cq, eq);
                 } else staleFrames++;
                 std::memcpy(rec, slot, sizeof rec);
                 putRecord();
@@ -325,10 +329,10 @@ int main(int argc, char** argv) {
             if (!voice) continue;
             (isA ? aFrames : bFrames)++;
             if (isB && takeover < 0) takeover = f;
-            ot_cont c; ot_params_cont(k, &c);
-            const ot_voice& vv = isA ? va : vb;                              // MT20 / MT24: the eased words, as sent
-            e.CS = c.cs; e.ES8T = vv.es8; e.RS = vv.rs; e.BG = vv.bg; e.SC = c.sc; e.SQ = c.sq != 0;
-            e.W1 = c.w1; e.W2 = c.w2; e.W3 = c.w3; e.L016T = vv.l0_16; e.AG_8 = vv.ag_8;
+            const ot_voice& vv = isA ? va : vb;                              // MT20: the eased resonance words, as sent
+            const ot_cont& c = vv.c;                                         // MT24: made with CUT / ENV's fraction
+            e.CS = c.cs; e.ES8T = c.es8; e.RS = vv.rs; e.BG = vv.bg; e.SC = c.sc; e.SQ = c.sq != 0;
+            e.W1 = c.w1; e.W2 = c.w2; e.W3 = c.w3; e.L016T = c.l0_16; e.AG_8 = vv.ag_8;
             e.RC1 = c.rc1; e.GD8 = c.gd8;                                   // MT10: from RES and VOL, every frame
             ot_note n{}; if (ev & 1) ot_params_note(k, &n);
             long trg = (ev & 1) ? off : BIG;

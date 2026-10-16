@@ -38,6 +38,8 @@ struct ot_note {
 };
 
 void ot_params_cont(const uint8_t k[12], struct ot_cont *c);
+/* the same with CUT and ENV in 8.8 (a fraction between knob values; MT24): k's CUT / ENV are ignored */
+void ot_params_cont_q8(const uint8_t k[12], unsigned cut_q8, unsigned env_q8, struct ot_cont *c);
 void ot_params_note(const uint8_t k[12], struct ot_note *n);
 /* the note PTCH plays: MIDI 12 (C0) + PTCH, the knob 0..96 (C0 .. C8, a semitone a value; MT13, the
  * user's choice); a larger value (a CC, an old project) plays C8 */

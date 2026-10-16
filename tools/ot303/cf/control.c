@@ -30,10 +30,10 @@
 
 /* SRC (page 1) then SRC SETUP (page 2), stored with the track (params.h has the ranges). PTCH 36 = C3.
  * Open303's
- * defaults: CUT 30 (500 Hz), RES 64, ENV 32, DEC 38 (398 ms; 200 ms .. 2 s since MT16), SLID 38 (60 ms); ACC 0 (an accent is
+ * defaults: CUT 30 (500 Hz), RES 64, ENV 32, DEC 72 (405 ms; 50 ms .. 2 s since MT25), SLID 38 (60 ms); ACC 0 (an accent is
  * an ACC lock), GATE 63 (half a step), VOL 99 (driven +2.5 dB, MT10's default sound). The 12th slot is
  * hidden (MT13's OSC test switch is gone: the saw runs free, the user's choice on the unit). */
-const uint8_t ot_defaults[12] = {36, 30, 64, 32, 38, 0, 0, 64, 38, 63, 99, 0};
+const uint8_t ot_defaults[12] = {36, 30, 64, 32, 72, 0, 0, 64, 38, 63, 99, 0};
 static const char *const ot_names[12] = {
     "PTCH", "CUT", "RES", "ENV", "DEC", "ACC", "WAVE", "TUNE", "SLID", "GATE", "VOL", ""
 };
@@ -585,7 +585,12 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
             if (ev & OT_EV_NOTE) snd_until[track] = gl >= OT_GL_HELD ? ot_frames + 0x40000000u : ot_frames + gl / 16u + 2u + rel;
             else if (ev & OT_EV_OFF) snd_until[track] = ot_frames + rel;
         }
-        ot_record(record, &voice[track], p, ev, gl);
+        /* MT24: CUT and ENV with the lane's fraction. The page editor slews a turned page-1 knob's base
+         * value toward the new one 1/16 a frame (memory-map.md, "Page 1: the base words"), in 8.8; taking
+         * only the high byte made a turn step half a semitone at a time. */
+        unsigned cut_q8 = fp[OT_CUT] > 0x7f00u ? 0x7f00u : fp[OT_CUT];
+        unsigned env_q8 = fp[OT_ENV] > 0x7f00u ? 0x7f00u : fp[OT_ENV];
+        ot_record(record, &voice[track], p, ev, gl, cut_q8, env_q8);
     }
     U32(0x80001c80u) = (uint32_t)(uintptr_t)(cursor + 4 + 2 * n);
     return 0;

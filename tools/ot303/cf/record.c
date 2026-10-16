@@ -5,21 +5,10 @@
  */
 #include "record.h"
 
-ot_w ot_ease_by(ot_w s, ot_w t, int32_t div) {
+ot_w ot_ease(ot_w s, ot_w t) {
     int32_t d = t - s;
     if (d > -8 && d < 8) return t;
-    return s + d / div;
-}
-ot_w ot_ease(ot_w s, ot_w t) { return ot_ease_by(s, t, 6); }
-
-/* MT24: a knob turned by hand moves CUT and ENV one value (of 128) at a time, about half a semitone of
- * cutoff, which the DSP's 1 ms glide (MT15) let through as audible steps. Such small steps (1 or 2
- * values, outside a note's start) are eased here, 1/16 a frame (tau ~6 ms), so a turn sweeps; a
- * bigger jump or any change at a note (a p-lock) is sent at once, for the DSP's own 1 ms glide. */
-#define OT_TURN_STEP 2
-#define OT_TURN_DIV 16
-static unsigned small_step(unsigned a, unsigned b) {
-    return (a > b ? a - b : b - a) <= OT_TURN_STEP;
+    return s + d / 6;
 }
 static uint32_t pk(ot_w v) {
     uint32_t u = (uint32_t)v & 0xffffffu;
@@ -31,24 +20,22 @@ static uint32_t pk(ot_w v) {
 #define OT_CONT_KNOBS ((1u << OT_CUT) | (1u << OT_RES) | (1u << OT_ENV) | (1u << OT_WAVE) | \
                        (1u << OT_SLID) | (1u << OT_VOL))
 
-void ot_record(volatile uint32_t *rec, struct ot_voice *v, const uint8_t k[12], unsigned ev, uint32_t gl) {
-    unsigned turn = v->have && !(ev & OT_EV_NOTE) && small_step(k[OT_CUT], v->k[OT_CUT]) &&
-                    small_step(k[OT_ENV], v->k[OT_ENV]);
-    unsigned same = v->have != 0;
+void ot_record(volatile uint32_t *rec, struct ot_voice *v, const uint8_t k[12], unsigned ev, uint32_t gl,
+               unsigned cut_q8, unsigned env_q8) {
+    unsigned same = v->have != 0 && v->cut_q8 == cut_q8 && v->env_q8 == env_q8;
     for (unsigned i = 0; i < 12; ++i)
         if (v->k[i] != k[i]) { if (OT_CONT_KNOBS & (1u << i)) same = 0; v->k[i] = k[i]; }
+    v->cut_q8 = cut_q8; v->env_q8 = env_q8;
     if (!same) {
-        ot_params_cont(k, &v->c);
-        if (!v->have) { v->rs = v->c.rs; v->bg = v->c.bg; v->ag_8 = v->c.ag_8; v->es8 = v->c.es8; v->l0_16 = v->c.l0_16; }
+        ot_params_cont_q8(k, cut_q8, env_q8, &v->c);
+        if (!v->have) { v->rs = v->c.rs; v->bg = v->c.bg; v->ag_8 = v->c.ag_8; }
         v->have = 1;
     }
     const struct ot_cont *c = &v->c;
     /* MT20: RES steps (and locks) ease in instead of jumping at the frame: each word moves 1/6 of
      * the way a frame (tau ~2 ms; the engine glides the cutoff and env amount itself, per sample) */
     v->rs = ot_ease(v->rs, c->rs); v->bg = ot_ease(v->bg, c->bg); v->ag_8 = ot_ease(v->ag_8, c->ag_8);
-    if (turn) { v->es8 = ot_ease_by(v->es8, c->es8, OT_TURN_DIV); v->l0_16 = ot_ease_by(v->l0_16, c->l0_16, OT_TURN_DIV); }
-    else { v->es8 = c->es8; v->l0_16 = c->l0_16; }
-    const ot_w cw[14] = {c->cs, v->es8, v->rs, v->bg, c->sc, c->sq, c->w1, c->w1, c->w2, c->w3, c->rc1, c->gd8, v->l0_16, v->ag_8};
+    const ot_w cw[14] = {c->cs, c->es8, v->rs, v->bg, c->sc, c->sq, c->w1, c->w1, c->w2, c->w3, c->rc1, c->gd8, c->l0_16, v->ag_8};
     rec[0] = 0x33030000u | (++v->seq & 0xffffu);
     rec[1] = 0x09090000u | (ev & 7u);
     for (unsigned i = 0; i < 14; ++i) rec[2 + i] = pk(cw[i]);

@@ -49,6 +49,10 @@ static void meg(int64_t x, struct ot_note *n) {
 }
 
 void ot_params_cont(const uint8_t k[12], struct ot_cont *c) {
+    ot_params_cont_q8(k, (unsigned)k[OT_CUT] << 8, (unsigned)k[OT_ENV] << 8, c);
+}
+
+void ot_params_cont_q8(const uint8_t k[12], unsigned cut_q8, unsigned env_q8, struct ot_cont *c) {
     /* slide: the pitch slew limiter, tau = 0.2 * (1.5625 SLID) ms; SLID 0 = no slew.
      * x = 1 / (13.78125 SLID) = 2^39 / (1764 SLID) as Q32, by two 32-bit divides */
     unsigned s = k[OT_SLID];
@@ -59,7 +63,8 @@ void ot_params_cont(const uint8_t k[12], struct ot_cont *c) {
         c->cs = q23(expm1q(x, 32, -1), 32);
     }
     /* cutoff 200 * 50^f Hz and env mod: Open303's measured mapping (scaler and offset lines), Q28 */
-    int64_t fc = (((uint32_t)k[OT_CUT] << 24) + 63) / 127, e = (((uint32_t)k[OT_ENV] << 24) + 63) / 127;   /* Q24 */
+    /* Q24; with an integer knob (cut_q8 = CUT << 8) the same words as before MT24 */
+    int64_t fc = (((uint32_t)cut_q8 << 16) + 63) / 127, e = (((uint32_t)env_q8 << 16) + 63) / 127;
     int64_t cc = OT_A0 + ((OT_A1 * fc) >> 24);
     int64_t slo = ((OT_SLOF * e) >> 24) + OT_SLOC, shi = ((OT_SHIF * e) >> 24) + OT_SHIC;
     int64_t sc = slo + (((shi - slo) * cc) >> 28);
@@ -122,7 +127,7 @@ void ot_params_note(const uint8_t k[12], struct ot_note *n) {
         n->agf = 0xffffff;
         n->k8_on = clamp24(OT_K8_BASE + (ot_w)(((a << 22) + 63) / 127));   /* (0.45 + 4 acc) / 8 */
     } else {
-        /* decay 200 * 10^f ms (MT16: Open303 VST's 200 ms .. 2 s): x = 2^(-f log2 10) / 8820 */
+        /* decay 50 * 40^f ms (MT25: 50 ms .. 2 s; MT16 had Open303 VST's 200 ms .. 2 s): x = X0 2^(-f log2 40) */
         int64_t e2 = exp2q(-(int32_t)(k[OT_DEC] * OT_DEC_ARG24));
         meg((OT_X0 * e2) >> 30, n);
         n->m_amp_off = OT_M_AMP_OFF_N;                      /* release 2 ms (MT9) */

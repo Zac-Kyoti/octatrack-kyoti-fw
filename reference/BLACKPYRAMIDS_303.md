@@ -148,8 +148,16 @@ Control decisions (the author's):
   octave (one a detent was too quick on the unit); stock FLEX's
   FUNC + PTCH jumps to −64 / 0 / +64 instead. PERSONALIZE's DISABLE FUNC+ENC turns it off, as on
   stock.
-- **DEC:** 200 ms–2 s, Open303's plugin range. It was first 30 ms–3 s, which crowded the audible
-  part into the bottom half of the knob.
+- **DEC:** 50 ms–2 s (MT25, 15 Oct 2026: snappier plucks; the default moved from 38 to 72 so it still
+  starts at about 400 ms). Before that it was 200 ms–2 s (MT16, Open303's plugin range), and before
+  that 30 ms–3 s, which crowded the audible part into the bottom half of the knob. An accented note
+  ignores DEC, as on Open303 and the real 303: its decay is a fixed 200 ms.
+- **CUT and ENV turned by hand (MT24):** when you turn a page-1 knob, the editor slews its base
+  value toward the new one by 1/16 a frame, with 8 bits of fraction (`kb/memory-map.md`, "Page 1:
+  the base words"). The renderer used only the whole part (`fp >> 8`), so a turn reached the voice
+  as a late half-semitone step, after the slew's ~58 ms. CUT and ENV now carry the fraction
+  (`ot_params_cont_q8`), so a turn sweeps as on a stock track, and a p-lock still jumps at once
+  onto the 1 ms glide.
 - **VOL:** clean lower half, driven upper half.
 - **Ties:** both trigless kinds.
 - **Accent:** an ACC p-lock.
