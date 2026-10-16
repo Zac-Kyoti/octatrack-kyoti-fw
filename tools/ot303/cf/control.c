@@ -282,7 +282,7 @@ struct ot_qn { uint32_t gl; uint8_t step, slide, call; };
 static struct ot_qn q[8][QN] = {{{0, 0, 0, 0}}};
 static uint8_t qn[8] = {0}, qcall[8] = {0}, qlast[8] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, qlen[8] = {0};
 static uint32_t qctx[8] = {0};          /* the step being scheduled: 1 << 24 | bank << 16 | pattern << 8 | step */
-static struct ot_voice voice[8] = {{{0}, 0, {0}, 0, 0, 0, 0, 0}};
+static struct ot_voice voice[8] = {{{0}, 0, {0}, 0, 0, 0, 0, 0, 0, 0}};
 /* MT20, AMP ATK > 0: stock's AMP (mode RTRG) drops the track's level to ~0 at every trig, no fade --
  * a sample restarts there, this voice may still sound (a long gate, an accent's tail, a slide, a held
  * live note): a click. While the voice is estimated to sound, the frame's AMP record (0x80000110 +

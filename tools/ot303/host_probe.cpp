@@ -326,9 +326,9 @@ int main(int argc, char** argv) {
             (isA ? aFrames : bFrames)++;
             if (isB && takeover < 0) takeover = f;
             ot_cont c; ot_params_cont(k, &c);
-            const ot_voice& vv = isA ? va : vb;                              // MT20: the eased resonance words, as sent
-            e.CS = c.cs; e.ES8T = c.es8; e.RS = vv.rs; e.BG = vv.bg; e.SC = c.sc; e.SQ = c.sq != 0;
-            e.W1 = c.w1; e.W2 = c.w2; e.W3 = c.w3; e.L016T = c.l0_16; e.AG_8 = vv.ag_8;
+            const ot_voice& vv = isA ? va : vb;                              // MT20 / MT24: the eased words, as sent
+            e.CS = c.cs; e.ES8T = vv.es8; e.RS = vv.rs; e.BG = vv.bg; e.SC = c.sc; e.SQ = c.sq != 0;
+            e.W1 = c.w1; e.W2 = c.w2; e.W3 = c.w3; e.L016T = vv.l0_16; e.AG_8 = vv.ag_8;
             e.RC1 = c.rc1; e.GD8 = c.gd8;                                   // MT10: from RES and VOL, every frame
             ot_note n{}; if (ev & 1) ot_params_note(k, &n);
             long trg = (ev & 1) ? off : BIG;

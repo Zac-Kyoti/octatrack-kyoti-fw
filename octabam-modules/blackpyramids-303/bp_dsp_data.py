@@ -2,7 +2,7 @@
 # tools/ot303/{ot303_engine.asm,host.asm} through tools/ot303/hwprobe_image.py (host=True) -- the
 # standalone build's words; bp_dsp_<payload>.asm is the source as assembled. Do not edit.
 RUNTIME_ADDR = 0x40a955e0
-RUNTIME_SHA256 = '2b3b045d06f5bfdb57b0a969e2595458a5a6c08949588d3c74116f0a4ce5a1da'
+RUNTIME_SHA256 = 'c60e91e9e075df70db8907e2e7140c58d744ff9f84fcefdf65535fb9228d4829'
 PAYLOAD = {
     'A': dict(
         org=0x01252, seam=0x0039c, seam_entry=0x014bc, cont=0x00426,
