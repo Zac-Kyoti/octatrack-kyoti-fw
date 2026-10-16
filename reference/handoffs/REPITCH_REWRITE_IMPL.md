@@ -7,6 +7,8 @@ Nothing was flashed, promoted or pushed. KYOTI's combined image was not touched.
 
 Marks: **C** = confirmed on our image (objdump, or an emulator run); **I** = inferred.
 
+**Newest (2026-10-15, WIP, not flashed): `140C_VEM10` and its Bugbuild `BUG_VEM10` (§17): a slot pick that changes the machine names that track; VEM9 (§16) and VEM8 (§15) before it.**
+
 **Current builds (2026-10-15, both WIP, neither flashed): `140C_VEM7` (§13), VEM6 with the
 "6b, answers" change (TSTR / ATTR onto VARI over budget steps THAT track's EMUS to OT); and
 `140C_VARI1` (§14), VARISPEED, the plain build from the same source (spec §7), standalone
@@ -1935,3 +1937,217 @@ The same pattern as VEM8 (§15.3). The harness was not run here (the coordinator
 9/9, full OTDEMO 35/35). No DSP file was touched.
 
 **Blacklist:** nothing opened (as §15.6).
+
+---
+
+## 17. VEM10, 2026-10-15 (clean side): a slot pick that changes the machine names that track (spec "6b, option B extended")
+
+Same worktree, clean side. Read for this section: the spec (all; "6b, option B extended" new),
+this file §15-§16, `CLAUDE.md`, our module source, builders, manifest, tests and harness,
+`tools/build_bugbuilds.py`, `tools/githooks/threads.txt`, octabam's `docs/remixer/PLACEMENT.md`
+(its DRAM table only, grepped for the keywords first: no hits), ot_emu's `main.cpp` (the `call`
+step only, grepped first: no hits), and the stock image (objdump, `out/clean-room/stock.dis`).
+**Nothing was flashed, promoted or pushed.** KYOTI's combined image was not touched. The DSP
+kernel, its tables and its generator were not touched.
+
+**New builds exist: `140C_VEM10` (standalone) and `BUG_VEM10` (its Bugbuild), both WIP, not
+flashed.** Each built twice, the same hashes.
+
+| file | sha256 |
+|---|---|
+| `out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx` (MIDI DIN, `140C_VEM10`) | `1427a9afe0db1ed3d575c455c86219c4730234cce07ac9f2c34a70617396b087` |
+| `out/OCTATRACK_VARISPEED_EMUS.bin` (CF card) | `07f0d38a8e6efd6361bbce5ded20fad3fa1fa651fa9818781c8da944d63ae137` |
+| `out/mainos_varispeed_emus.bin` | `9926d55730fe02bb7683b9784941e18409cb8307110482f549f2684e4cec978f` |
+| `out/elek_varispeed_emus.bin` | `005020c94da13505d6fd2ecd5ed0eb1c74f813d2602f3c3caffe997fe4dd27fc` |
+| `out/Bugbuilds/OCTATRACK_OS1.40C_VARISPEED_EMUS_BATCH_BUGFIXES.syx` (`BUG_VEM10`) | `e0b173fb6d2f0e90d2371e7df275c0ccaefbace0d2a16e3d1bf797b93891314c` |
+| `out/Bugbuilds/OCTATRACK_VARISPEED_EMUS_BATCH_BUGFIXES.bin` | `7b120d641dc0971019f9257583a0b4c7d8393c210afcd4c389ed87e3a6b1b30c` |
+| `out/Bugbuilds/mainos_varispeed_emus_batch_bugfixes.bin` | `6a07848158f0d1f6f529937f015a99fa860ad269b423e0b7dd4c6401a9ddaf17` |
+
+Unit: **5,260 B** at `0x400d6500..0x400d798c` (688 B of the classic cave left), the same bytes
+for `-mcpu=5407` and `54455`, sha256 `4b4a2ec8…` (manifest reference updated). **24 detours**
+(VEM9's 22 + two `jsr` sites), 12 descriptor pokes; 9,736 bytes differ from stock. The DSP half
+of the builder is unchanged (boot check below).
+
+### 17.1 Facts found (C = objdump of `section_3_MAIN_OS.bin` or an ot_emu run; I = inferred)
+
+1. **Two machine / slot choosers reach the slot assign `0x40079424`**, its only callers
+   (`0x4005a7fe`, `0x40079770`). Each is a YES-key handler, a `{0x31, 0, handler}` record like
+   the FX choosers' (C: `0x400bb682` -> `0x4005a5a8`, the SRC menu's; `0x400cf72c` ->
+   `0x400796a0`, the audio editor's). Each branches on its own **column**:
+   - **SRC menu `0x4005a5a8`**: `0x460d1a48 == 0` (machine column) -> `0x4005a5c2`: the
+     machine byte := `PAGE_M` (`0x4005a61c`), `0x400972fc(part, track, old)` (`0x4005a676`).
+     This is **the machine selector**. `0x460d1a48 == 1` (slot column) -> `0x4005a758`:
+     `jsr 0x4003d014` (`0x4005a760`; it selects `PAGE_M`'s slot row `0x460d5c44` STATIC /
+     `0x460d5c58` FLEX into `0x46c8d1a0` / `0x46c8d19c` through `0x4006de34`); then, by
+     `0x4005a7f0`: the same machine, or another machine whose slot byte differs from the slot
+     picked -> the slot assign (`0x4005a7fe`), then the record check `0x40031d18` and the
+     machine := `PAGE_M` again (`0x4005a826..0x4005a8b0`); another machine whose slot byte
+     already holds the slot -> straight to `0x4005a826` (**a machine change with no slot
+     assign**). Any other column value: out (`0x4005a75c`).
+   - **Audio editor chooser `0x400796a0`**: `0x460e739a == 1` (slot column) falls into
+     `0x400796d6` (`move.l 0x460e738e,%d4`, the chooser's machine), then the same structure
+     (`0x40079760`: slot assign at `0x40079770`, or with the slot byte equal straight to
+     `0x400798fe`); any other column -> `0x400798fe` -> `0x400797cc`, the machine write
+     (`0x4007981e`) and `0x400972fc` (`0x40079878`): its machine path.
+2. **The slot assign** (`0x40079424`): the picked machine's slot byte already equal to the slot
+   -> out at `0x40079672` (no machine write); a FLEX / STATIC record whose `+8` is nonzero (44-B
+   records at `0x46c922c4` / `0x46c90a78`) -> the refusal path `0x40079684` (`0x40021d94`), no
+   machine write; otherwise the machine byte := the picked machine at `0x40079522` (always,
+   even when unchanged), `0x400972fc`, then the slot byte (`0x400795c0`), its SRAM copy and
+   the live slot byte (`0x40079610`).
+3. **What tells them apart:** only a slot column passes `0x4005a760` / `0x400796d6`; a machine
+   column reaches neither (the branches above). Both causes end in the same `0x400972fc` with
+   the same Part bytes, so the bytes alone cannot tell them apart (C: `0x400972fc` is also
+   called by the SRC paste, RELOAD, the Part switch `0x40062204` and three disk-side sites
+   `0x40093f56`, `0x40094140`, `0x40096b58`). Hence a mark at the slot columns.
+4. **A machine change writes no live slot byte for ST / FL** (C, objdump + ot_emu): in
+   `0x400972fc` the per-track apply `0x40001f18` is only on the PICKUP branch (`0x4009733a..
+   0x400973e4`); ot_emu, MMTESTDT: after the SRC menu's straight path (STATIC -> FLEX slot 7,
+   no slot assign) the live slot byte still read 0 (the STATIC slot) 200 frames later. So
+   VEM8's live-slot test cannot be applied to a slot pick's machine change.
+5. **MMTESTDT's FLEX slots are all empty** (C, ot_emu: every FLEX record's `+8` is 1, the
+   settings records empty with tempo 2880). The slot assign then takes its refusal path,
+   which in ot_emu does not return (`0x40021d94`: "DID NOT RETURN -- unimplemented opcode at
+   0x4003b108", a stock path waiting on UI). After `0x40022610(1, 7, path)` (disk command 0)
+   FLEX slot 7's `+8` is 0 and the assign runs (net_slotmach_order).
+
+### 17.2 The change (`varispeed_emus.s`, PART 1, the guard; all inside `.if VEM_EMUS`)
+
+- **`vg_pick_src`** (`0x4005a760`: `jsr 0x4003d014` -> `jsr vg_pick_src`; it marks, then
+  `jmp 0x4003d014`) and **`vg_pick_ae`** (`0x400796d6`: `move.l 0x460e738e,%d4` -> `jsr
+  vg_pick_ae`; it marks, loads d4, `rts`): each sets the chooser's track (`0x100b14cc`) in the
+  byte **`vg_pick`**. UI task (key handlers); every other register kept.
+- **`vg_new`**: a track with its `vg_pick` bit set whose machine changed (key bits 16-23) and
+  whose gate is on now is **named** -- its own EMUS goes to OT first (`vg_fix` with the named
+  mask, as for VEM8). Its gate under the old machine does not matter (on -> on included:
+  the new machine's VARI setting is the entry), and there is no live-slot test (17.1 item 4).
+  A bulk change since the last check (`vg_bulk`) clears the pick: nothing is named, as before.
+  Everything else in `vg_new` is VEM8's.
+- **`vg_tick`** clears `vg_pick` at its common tail (every loop tail, the early exits too), so
+  a pick counts only for the message whose handler set it.
+- **Net's order kept** for: the machine selector (both choosers' machine columns), every other
+  machine change (`0x400972fc` from pastes, RELOAD, the Part switch, the disk side), and all of
+  VEM8's net cases.
+- Cost: nothing in the frame path; `vg_new` +2 instructions per track (+3 more for a picked one) on a signature change;
+  the two marks only on a slot column's YES.
+- Builder: the two `jsr` detours; the column tests, the straight path and the slot assign's
+  exit / machine write asserted as stock context (`0x4005a5b8`, `0x4005a758`, `0x4005a614`,
+  `0x4005a7f0`, `0x400796ca`, `0x400794b6`, `0x40079520`). Default label `140C_VEM10`. The
+  octabam manifest gained the two Detours (kind `jsr`) and the new reference; the module was
+  not rebuilt in octabam this session.
+
+### 17.3 Builds
+
+- **Standalone:** `KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py 140C_VEM10` (hashes
+  above; twice, identical).
+- **Bugbuild `BUG_VEM10`:** `KYOTI_ALLOW_WIP=1 python3 tools/build_bugbuilds.py --wip
+  VARISPEED_EMUS` (new `WIP_FEATURES` entry; refuses without the opt-in as `--wip VARISPEED`
+  does; announced WIP, never sealed). The base's DSP payload edits come through as the
+  SIDECHAIN base's do: the image as built, the fixes in the ColdFire cave zone only. **Every
+  zero byte inside the unit** (`cave..end`, from `out/varispeed_emus_syms.json`, whose
+  `unit_sha256` must match the base) is reserved from the fix caves (the runtime state --
+  `vg_key`, `vg_last`, `vg_eng`, the flags, `em_ctx`, `rp_pb` -- and the tables' zero words).
+  The fixes relocate above the unit: `patch_partreapply` 402 B @ `0x400d798c`,
+  `patch_pattern_led` 158 B @ `0x400d7b20`, `patch_trigscale` 62 B @ `0x400d7bc0`; interlock
+  **DISJOINT, ALL PRESERVED, NO STRAYS** (feature 9,736 B + fixes 563 B = 10,299 B); 112 B of
+  the cave zone left.
+- **`--wip VARISPEED` unchanged:** `BUG_VARI` syx `f2f37df3…bca4a68`, mainos `ea2b4f60…` --
+  byte-identical to §14 (its reserved ranges are computed as before).
+- **The final seven** (`python3 tools/build_bugbuilds.py`, no `KYOTI_ALLOW_WIP`): all seven
+  built, each "image matches the promoted FINAL build", "no problems flagged" (SIDECHAIN
+  included: this branch predates main's newer SIDECHAIN) -- `out/vem10/bugbuilds_final7.txt`.
+- **Plain VARISPEED byte-identical:** `tools/build_varispeed.py` on the VEM10 source: syx
+  `78cfad333ff231adda18f415d9585deae7c09a9668882903b30b4b3afd97f64d`, mainos `ce7e69fd…`,
+  `140C_VARI1`: identical to §14 (everything new is inside `.if VEM_EMUS`).
+
+### 17.4 Tests
+
+**(b) `tools/varispeed_emus_test.py`: 45/45 PASS on the standalone** (`out/vem10/tests_all.txt`):
+VEM9's 39 unchanged (`net_machine_order` included) and six new, all on the real MMTESTDT export,
+by runtime pokes, through the choosers' **real YES handlers** (column, machine and slot row poked
+as the panel leaves them); every expectation from `NetModel` (`enter_fix` for a named track,
+`fix` for the net), FX solved from `VG_*` as in VEM9 (here T5 FLANGER / FLANGER, T6 PHASER /
+PHASER, T7-T8 DJ EQ / DJ EQ: 3,164 fits, T6 entering on SP12 makes 3,351 > 3,350). Common: T5,
+T7, T8 VARI SP12 on STATIC slot 0; the right rule takes T6, the net's would take T8.
+
+| test | the change | result (VEM10) |
+|---|---|---|
+| `net_slotmach_order` | T6 STATIC (TSTR OFF), FLEX side VARI SP12 on FLEX slot 3; isaak.wav loaded into FLEX slot 7 at frame 10 (`0x40022610(1, 7, path)`); the SRC menu's slot column picks FLEX slot 7 (through the slot assign) | **T6 -> FLEX slot 7, its FLEX EMUS OT**, T8 keeps SP12; one toast; vg_gon showed T6 off before |
+| `net_slotmach_same_order` | the same with T6's FLEX slot already 7 (no slot assign: `0x4005a826`) | **T6 -> OT**, T8 SP12; one toast |
+| `net_slotmach_rev_order` | T6 FLEX (stock's machine change at frame 100), its STATIC side VARI with SP12 (slot + park) on slot 0; the SRC menu picks STATIC slot 1 | **T6 -> STATIC slot 1, OT**, T8 SP12; T6 plays OT from its next trig |
+| `net_slotmach_ae_order` | the same through the audio editor's chooser (`0x400796a0`, column `0x460e739a` = 1) | **T6 -> OT**, T8 SP12 |
+| `net_slotmach_vv_order` | as `_rev`, T6's FLEX side on VARI with EMUS OT (vg_gon: T6 ON before) | **T6 -> OT** (its new machine's VARI is the entry), T8 SP12 |
+| `net_selmach_order` | T6 STATIC (TSTR OFF), FLEX stored VARI SP12; the SRC menu's **machine column** picks FLEX | the net's order: **T8 -> OT**, T6's FLEX EMUS SP12; one toast |
+
+**Deliberately wrong builds** (`out/vem10/variants.txt`, all 15 rebuilt on the VEM10 source):
+
+| build | wrong rule | fails |
+|---|---|---|
+| `w_slotmach_net` (new) | a slot pick's machine change gets the net's order (VEM9) | the five `net_slotmach_*` |
+| `w_mach_named` (new) | every machine change is named (no pick test) | `net_machine_order`, `net_selmach_order` |
+| `w_indirect_net` | no indirect entry named (VEM7) | `net_tempo/slot/sample_order` + the five `net_slotmach_*` |
+| `w_name_all` | every gate that comes on is named | `net_partwrite_order`, `net_machine_order`, `net_selmach_order` |
+| `w_no_live` | VEM8's slot change without the live test | `net_partwrite_order` |
+| `w_enter_net` | every entering track the net's order (VEM6) | `net_tstr_order`, `net_attr_order`, the three VEM8 ones, the five `net_slotmach_*` |
+| `w_low_first` | lowest track first | `net_load`, `_part`, `_reload`, `_paste`, `_machine`, `_attr`, `_attr_order`, `_partwrite_order`, `_machine_order`, `_selmach_order` |
+| `w_s950_first`, `w_no_cap`, `w_no_fxref`, `w_no_sync`, `w_6det`, `w_toast_direct` | as §16 | as §16 |
+| `w_no_net` | the net never runs | `net_load`, `_part`, `_reload`, `_paste`, `_machine`, `_partwrite_order`, `_machine_order`, `_selmach_order` |
+
+**The same suite on `BUG_VEM10`: 45/45 PASS** (`out/vem10/tests_bug.txt`; `VEM_IMG` = the
+Bugbuild, `VEM_SYMS` = the standalone's symbols -- the unit is the same bytes at the same
+address). The Bugbuild's fix caves fill the zero tail the tests put their stubs in, so the
+stubs go to `VEM_STUB_AT=0x47fd8000` (high SDRAM above anything PLACEMENT.md's DRAM table saw
+written; checked by the KNOB / NOTIFY captures and the sample path working: `widget`,
+`ref_emus`, `net_sample_order` pass). `ref_fx_alone` runs, as always, on the low-budget
+standalone variant, not on the Bugbuild.
+
+**(a) Harness**, oracle = the shipped FINAL (`90b4a1c1…`), outputs in `out/vem10/`: quick
+**9/9 identical** on the standalone and **9/9** on `BUG_VEM10`; full OTDEMO **35/35**; full
+MMTESTDT (`--frames 6000`) **34/35**, the one being the known empty `tempo_edge_720` ("NOTHING
+COMPARED"). Every line, whole-run counts included, is **exactly VEM9's** (`out/vem9/`; `diff`
+empty on all four).
+
+**(c) DSP:** `repitch_dsp_boot_check.py`: **PASS** on both payloads, on the standalone and on
+`BUG_VEM10` (`out/vem10/dsp_boot*.txt`).
+
+### 17.5 FLASHING §4 (draft) -- changes to §12.7 / §13.3 / §15.4 for VEM10
+
+OS VERSION `140C_VEM10` (or `BUG_VEM10`). §12.7 with §13.3 and §15.4 stands; add:
+16. **Slot pick that changes the machine:** T5, T7, T8 VARI SP12 with DJ EQ on T5-T7's FX1 and
+    DARK on every FX2 (§15.4's set-up); T6 FLEX, its STATIC side on VARI with EMUS SP12 from
+    before. On the SRC menu ([FUNC]+[SRC]) go to the slot list and pick a STATIC slot with a
+    sample in range: **T6 becomes STATIC, its EMUS reads OT**, T8 keeps SP12, toast. The same
+    with a STATIC slot that T6's STATIC side already holds (the machine changes, no new slot):
+    the same result. The same from the audio editor's machine / slot chooser.
+17. **The machine selector keeps the net's order:** the same set-up; on the SRC menu's machine
+    list pick STATIC: **T8 reads OT**, T6 keeps SP12, toast.
+18. **`BUG_VEM10` only:** FLASHING §4's BATCH_BUGFIXES checks, plus a Part change with VARI
+    tracks.
+
+### 17.6 Open questions
+
+- **On -> on counts as an entry:** a track already on VARI under its old machine (EMUS OT, say)
+  that a slot pick moves to its other machine's VARI SP12 is named too (`net_slotmach_vv_order`):
+  the user acted on that track. Say if only off -> on should count.
+- **The equal-slot pick** (the other machine's slot byte already on the slot picked: the
+  machine changes with no slot assign) is treated as a slot pick: the user picked a slot from
+  the list. Say if only the slot assign `0x40079424` itself should count.
+- The audio editor's chooser (`0x400796a0`) is covered like the SRC menu's; its screen was not
+  identified beyond its code and its YES record (`0x400cf72c`).
+- Hardware untested: ot_emu does not draw the SRC menu; on the unit a slot list picking an
+  empty slot opens stock's own path (`0x40021d94`), which the emulator cannot finish (17.1
+  item 5), so that case is not tested here (it changes no machine).
+- The engine still follows at the next trig (unchanged latch).
+
+### 17.7 Blacklist statement (this session)
+
+**I opened no blacklisted file.** Disclosures:
+1. The memory index (`MEMORY.md`) was injected into this agent's context at start, as for
+   earlier clean sessions; it summarizes the old module's history (including a few of its
+   addresses and its RELOAD / swap bug fixes). I opened no memory file and used nothing from it;
+   every fact above is from objdump of the stock image or ot_emu.
+2. `refs/octabam/docs/remixer/PLACEMENT.md` and ot_emu's `main.cpp` were grepped for the
+   keywords first (no hits) and read only for the DRAM table / the `call` step. `ls
+   refs/octabam/docs/firmware/` printed the file name `REPITCH.md` (not opened).
+3. `CLAUDE.md` was read whole (one line names the old thread, nothing of the module).
+4. The oracle was run only through the harness.
