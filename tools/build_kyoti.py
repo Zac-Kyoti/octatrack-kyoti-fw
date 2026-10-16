@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-KYOTI V1.5 -- every FINAL feature in one image, plus VARISPEED (WIP).
+KYOTI V1.5 (WIP) -- every FINAL feature in one image except BLACKPYRAMIDS_303 and VARISPEED_EMUS.
 
     MUTE MODE (OT / OTFX / OTFX-T / DT-T)      QUANTIZE LIVE REC toggle
     SIDE-CHAIN COMPRESSOR (cross-core)         TRIGLESS-LOCK AUTO-REMOVE
@@ -20,19 +20,18 @@ from 19348d9 and pinned in tools/kyoti_status.py as mainos_kyoti_v1.4.bin):
 - SIDECHAIN_COMPRESSOR is the 2026-10-15 WIP build (keybus Y:$7e00, one-pass sctap).
 SPRING REVERB is still given up by SIDE-CHAIN alone.
 
-V1.4 vs V1.3: REPITCH_REPEAT98_KYOTI is removed (2026-10-13: it is being rewritten clean-room,
-without the code it took from Jannik Aßfalg's octabam Repitch; reference/handoffs/
-REPITCH_REWRITE_SPEC.md). The image is ROM-only again and SPRING REVERB is removed by SIDE-CHAIN
+V1.4 vs V1.3: V1.2's earlier varispeed module is removed (2026-10-13; VARISPEED and
+VARISPEED_EMUS replace it, reference/handoffs/VARISPEED_SPEC.md). The image is ROM-only again and SPRING REVERB is removed by SIDE-CHAIN
 alone. RELOAD_FROM_PROJECT returns from DRAM to the proven cave; EMPTY_PATTERN_LED_FIX moves to
 SAFE_CAVE to make room (V1.2's RELOAD and DIRECT JUMP fixes grew both, so V1.1's ROM plan no longer
 fits as it was).
 
 V1.3 vs V1.2: PLATE REVERB works again. V1.2 reclaimed SPRING REVERB's descriptor 0x38 bytes
-early (from its entry start E, not from P = E+0x38), so REPITCH's widget clone overwrote PLATE's
+early (from its entry start E, not from P = E+0x38), so that module's widget clone overwrote PLATE's
 own tail: its 12 encoder-handler pointers (P+0x15a) and its enable nibbles (P+0x18a/P+0x18e).
 The PLATE page showed random slots and its knobs did nothing (reference/kb/caves.md §0).
 
-V1.2 vs V1.1: REPITCH_REPEAT98_KYOTI rev 17 (FINAL 2026-10-08) joins; RELOAD_FROM_PROJECT's
+V1.2 vs V1.1: the earlier varispeed module (rev 17, FINAL 2026-10-08) joins; RELOAD_FROM_PROJECT's
 displaced mvz.w replayed zero-extended; DIRECT JUMP guards every step-length lookup.
 
 V1.1 vs V1.0 (withdrawn 2026-10-06). V1.0 used five midisc pads -- CAVE2, RELOAD_CAVE,
@@ -700,7 +699,7 @@ def main():
 
     # descriptor table: outside a reclaimed record, change only what a standalone changes.
     # (The pointer check above cannot see readers that index from a neighbour's P -- V1.2
-    # put REPITCH's widget over PLATE's encoder handlers and enable nibbles that way.)
+    # put a widget clone over PLATE's encoder handlers and enable nibbles that way.)
     dlo, dhi = DESCRIPTOR_TABLE
     alone_sites = sorted({i for feat in FEATURES
                           for i in delta(stock, (sb1 / "out" / FEATURES[feat][1]).read_bytes())
