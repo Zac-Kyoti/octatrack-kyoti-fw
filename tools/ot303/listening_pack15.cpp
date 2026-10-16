@@ -6,7 +6,10 @@
 // line, as built or with the voice's output stage given K times the headroom: the amp scaler SC / K and the
 // drive gain x K (at clean VOL the drive stage switched on at unity), so tanh(g y) sees what the hard clip
 // before it used to chop.
-//   listening_pack15 OUT.f32 CUT RES ENV VOL ACC K
+//   listening_pack15 OUT.f32 CUT RES ENV VOL ACC K [KNEE]
+// KNEE (round 16, clean VOL): the output stage gets K x headroom with the drive off, and the voice comes out
+// through a soft knee instead, simulated in double after the engine: linear up to KNEE (of full scale), then
+// KNEE + (1 - KNEE) tanh((|y| - KNEE) / (1 - KNEE)) toward the ceiling (slope 1 at the knee).
 // ACC: the accented steps' amount (the knob x lock / 127, as the renderer sends it). Writes mono float, 44.1 kHz.
 #include <algorithm>
 #include <cmath>
@@ -34,6 +37,7 @@ int main(int argc, char** argv) {
     const int CUT = std::atoi(argv[2]), RES = std::atoi(argv[3]), ENV = std::atoi(argv[4]), VOL = std::atoi(argv[5]),
               ACCV = std::atoi(argv[6]);
     const double K = std::atof(argv[7]);
+    const double KNEE = argc > 8 ? std::atof(argv[8]) : 0.0;
     auto waveAt = [&](long) -> int { return 0; };
     twin::Engine e; e.init(HB2_43_16, 22, 16000.0, HB1_15_18, 8); e.meg48 = true; e.inc48 = false; e.FBS = 4;
     e.C2 = 0x7fce80;
@@ -60,7 +64,10 @@ int main(int argc, char** argv) {
             e.CS = c.cs; e.BG = c.bg; e.SC = c.sc; e.SQ = c.sq != 0;
             e.W1 = c.w1; e.W2 = c.w2; e.W3 = c.w3;
             e.RC1 = c.rc1; e.GD8 = c.gd8;
-            if (K > 1 && c.sc) {                      // the candidate: K x headroom, the soft clip always on
+            if (KNEE > 0 && c.sc) {                   // round 16: K x headroom, no drive, the knee below
+                e.SC = twin::W(std::lround(c.sc / K));
+                e.GD8 = 0;
+            } else if (K > 1 && c.sc) {               // the candidate: K x headroom, the soft clip always on
                 e.SC = twin::W(std::lround(c.sc / K));
                 e.GD8 = c.gd8 ? twin::W(std::lround(c.gd8 * K)) : twin::q23(K / 8.0);
             }
@@ -82,7 +89,13 @@ int main(int argc, char** argv) {
             }
         }
         e.tick();
-        out[t] = float(twin::f23(e.outW));
+        double y = twin::f23(e.outW);
+        if (KNEE > 0) {
+            y *= K;
+            double a = std::fabs(y);
+            if (a > KNEE) y = (y < 0 ? -1 : 1) * (KNEE + (1 - KNEE) * std::tanh((a - KNEE) / (1 - KNEE)));
+        }
+        out[t] = float(y);
         evc--;
     }
     std::fprintf(stderr, "saturations %ld\n", twin::g_sat);
