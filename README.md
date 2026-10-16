@@ -117,11 +117,14 @@ A TB-303 voice as a track machine, shown as **BLKPYRAMD**: the sixth row of a tr
 list (double-tap the track, or `[FUNC]` + `[SRC]` → MACHINE). One per DSP core: one on T1–T4,
 one on T5–T8.
 
-- **SRC:** `PTCH` (C0–C8, a semitone a step, shown as note names; `FUNC` + turn steps by octaves) · `CUT` · `RES` · `ENV` ·
-  `DEC` (200 ms–2 s) · `ACC`. **SETUP:** `WAVE` (saw → square) · `TUNE` · `SLID` (slide time) ·
+- **SRC:** `PTCH` (C0–C8, a semitone a step, shown as note names; `FUNC` + turn or push + turn
+  steps by octaves, on every held trig too) · `CUT` · `RES` · `ENV` · `DEC` (50 ms–2 s) · `ACC`.
+  **SETUP:** `WAVE` (saw → square, at equal loudness) · `TUNE` · `SLID` (slide time) ·
   `GATE` (note length) · `VOL` (clean up to 64, driven above; the default adds +2.5 dB).
 - **Notes:** each trig plays a note with the knobs at that step; p-lock `PTCH` for a melody.
-- **Accent:** p-lock `ACC` on the step (0 = no accent).
+- **Accent:** p-lock `ACC` on the steps to accent, as a 303 marks them; the `ACC` knob scales
+  every accent at once (127 plays the locks as set, 0 none; default 100). A note without an `ACC`
+  lock is never accented. A MIDI note with velocity above 100 is accented.
 - **Slide:** an OT slide trig glides into its note from the previous one, without a retrigger.
 - **Ties:** trigless locks and/or trigless trigs right after a note hold it. A trigless trig
   still resets LFOs and FX envelopes as on stock, so a trigless trig after a note also ties it.

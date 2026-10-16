@@ -36565,3 +36565,37 @@ open, Sam's PR #2, and an optimization pass over BLACKPYRAMIDS_303's Octatrack-s
   - The other Kyoti pins (`bf5bfc0`, `77f132f`, `329b801`, `0bc14c71`) differ from main in their
     module folders only by the SPDX / copyright name (Zac-Kyoti → Zac Kyoti), with no code
     difference. No bump sent.
+
+## 2026-10-16 (`ot303`) — BLACKPYRAMIDS_303 MT24–MT33 after the 14 Oct flash; promoted FINAL
+
+From the author's notes on the unit, ColdFire words only (the DSP code stays the 15 Oct engine pass):
+- MT24/MT26: CUT and ENV carry the page editor's 8.8 slew fraction (a hand turn sweeps); a push-turn
+  (coarse) jump is slewed the editor's way (1/16 a frame), detected on the Part byte.
+- MT25: DEC 50 ms–2 s (default 72 ≈ 400 ms). MT27/MT30: accents per step, as on a 303 -- a step is
+  accented only by an ACC p-lock, at lock × ACC / 127; the ACC default is 100 (at 127 a lock could not
+  be turned up from the knob, the likely "ACC lock not working"); MIDI velocity > 100 accents at the
+  knob's amount. MT30's lock × ACC / 100 was not wanted and reverted.
+- MT28/MT31: push + turn on PTCH steps by octaves as FUNC + turn. With trigs held, the p-lock editor
+  (0x40050c7c) calls the handler once per held trig in one pass (lowest step first), and stock starts a
+  new lock at knob + turn without the handler: detour 0x40050ce2 (`ot_plock_hook`) tallies once per
+  pass and starts a new PTCH lock at the knob's value (ot_emu: three held, 3 / 6 detents -> +12 / +24
+  on all, down -24, one pre-locked keeps its offset; a plain turn as stock).
+- MT29: a WAVE gain (`OT_WGAIN`, Q14; +2.66 dB at WAVE 87, +1.8 dB at 127). RMS / BS.1770 had read flat
+  (< 1 dB); ISO 532-1 N5 over every WAVE value and 21 settings (`tools/ot303/wave_loudness.py`,
+  MoSQITo) put the blends 2.2 phon below the saw. Round 14: kept in all five blind comparisons.
+- MT32: `ot_frames` counted once per OT-303 track; with two voices MT20/MT21's windows and the live
+  TTL ran at half length. Now once a frame (tracks render in order).
+- MT33: driven VOL (65–127): the amp scaler / 4, the drive gain × 4 -- the same tanh(g y), but bright
+  low-RES accents no longer hard-clip at the output store (`move a,y0` after the amp) before the drive
+  (twin: ~22,000 clipped samples -> 0; elsewhere the same to −107 dB). Round 15 picked it for the driven
+  half; the author did not want the soft curve on clean VOL. Clean VOL unchanged: a 4,320-setting
+  sweep clips 2–4 % of samples at RES ~0 with accents, ≤ 0.2 % at RES ≥ 64, ~0 unaccented.
+- Open: a clean-VOL knee (round 16, simulated: linear to −3 / −1 dBFS, then tanh into the ceiling);
+  no Y room for a second table (free Y $795..$FFF is ~36 words beyond the voice's), so it would be
+  computed from the tanh table in ODRIVE (one path; driven = threshold 0), ~12–14 more P words
+  (re-roll the second half-band: about +2 % cycles).
+- Promoted on the author's instruction after flashing: `build_blackpyramids_303.py` mainos
+  `319090956edf…` (CF .bin `faef6874…`, syx `bfeccdfb…`); `BUG_BP303` mainos `9808251738f7…` (.bin
+  `0ab8e12f…`, syx `be7cdb5d…`). `build_bugbuilds.py` had lost the BLACKPYRAMIDS_303 entry and the
+  longer-image diff in `0cc30d7` (rebuilt from an older copy); both restored, all ten Bugbuilds match
+  their pins.

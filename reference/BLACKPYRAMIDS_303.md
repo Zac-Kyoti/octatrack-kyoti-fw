@@ -19,8 +19,9 @@ Builder: [`tools/build_blackpyramids_303.py`](../tools/build_blackpyramids_303.p
   columns mark the track with a **3**.
 - **SRC page (p-lockable, LFO and scene targets):**
   - **PTCH**: C0–C8, one semitone per value, shown as note names (C3 = 36, the default);
-    FUNC + turn steps a whole octave every three detents and keeps the note (D#2 → D#3), and does
-    nothing past C0 or C8;
+    FUNC + turn, or the knob pushed while turned, steps a whole octave every three detents and keeps
+    the note (D#2 → D#3), and does nothing past C0 or C8; with trigs held it moves every held trig's
+    lock the same octave;
   - **CUT**: 200 Hz–10 kHz, exponential;
   - **RES**: 0–100 %;
   - **ENV**: env mod;
@@ -32,7 +33,9 @@ Builder: [`tools/build_blackpyramids_303.py`](../tools/build_blackpyramids_303.p
   - **SLID**: slide time, 0–198 ms;
   - **GATE**: note length, (GATE + 1)/128 of a step;
   - **VOL**: 0 off; 1–64 clean (−30 dB to full); 65–127 the same level driven into a soft clip,
-    up to +4.5 dB. The default is 99 = +2.5 dB.
+    up to +4.5 dB. The default is 99 = +2.5 dB. Clean VOL hard-clips at the ceiling on bright,
+    low-RES accents (a sweep of 4,320 settings: RES around 0 with accents, 2–4 % of samples; RES
+    64 and up at most 0.2 %); driven VOL rounds those peaks instead (MT33).
 - **Notes:** a trig plays a note with the knobs at that step, so p-lock PTCH for a melody.
 - **Accent:** p-lock ACC on the step (the lock is that step's amount, scaled by the ACC knob: lock ×
   ACC / 127; the knob defaults to 100). A note without an ACC lock is never accented. Live MIDI notes with velocity above 100 are accented.
@@ -213,8 +216,8 @@ from the METER on DIAG8):
 | WAVE 0 (saw only) | 455 | 496 | ~575 |
 | WAVE > 0 (the square path) | 598 | 646 | ~749 |
 
-(`tools/ot303/host_check.py`, 15 Oct 2026 source, WIP. On the same bench the FINAL build `3624a1e7…`
-measures 473/515 and 620/670. The bench's accounting was corrected the same day: it priced the
+(`tools/ot303/host_check.py`, the FINAL build of 16 Oct 2026; MT24–MT33 changed only ColdFire words,
+not these figures. On the same bench the 14 Oct build `3624a1e7…` measures 473/515 and 620/670. The bench's accounting was corrected the same day: it priced the
 instruction a DO runs with by decoding the DO's loop address as an opcode. The earlier figures
 here, 471/511 and 616/666, came from it.)
 
@@ -345,7 +348,7 @@ now goes through the field, with its image byte-identical.
     chooser relocation, and its own DSP payload edits).
   - A Part naming SPRING REV keeps SPRING's page (as with ANALOG BD) rather than the NONE page
     shown here.
-- **Not flashed in that form.**
+- **Not flashed in that form.** Regenerated for the FINAL build of 16 Oct 2026 (runtime 31,180 B).
 
 - **Why FLEX plus a signature, not a sixth machine type:** the OS knows five machine types. A sixth
   would have to be taught to the Part validator, the project file (a stock OS would reset the

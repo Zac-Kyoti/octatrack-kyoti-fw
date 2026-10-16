@@ -149,7 +149,11 @@ quick check for each:
   slide trig on the next note (it glides). FX menus no longer offer SPRING REVERB. Choosing it on
   T2 as well is refused with `ONE 303 PER CORE!`; on T5 it is allowed. Stopped, right after
   power-on: the track key plays a held note; TRIG + YES on a step replays it every time; a
-  MIDI note on the track's channel plays (AUDIO NOTE IN on).
+  MIDI note on the track's channel plays (AUDIO NOTE IN on). Hold three trigs and push-turn
+  `PTCH`: all three locks move by the same octave and the display follows. An `ACC` lock of 127
+  with the knob at 127 is the strongest accent; at 0 the step plays unaccented. Sweep `WAVE` on a
+  held line: the level holds. A bright line (CUT high, RES 0) with full accents at VOL 99:
+  rounded, no fizz.
 - **VARISPEED** — a FLEX loop whose ATTR TEMPO matches it, TSTR on `VARI` (SRC SETUP, the
   fifth position): PTCH reads `QUAN`. Change the project tempo: the loop speeds up and slows
   down with its pitch and stays in time. QUAN `2/1` plays it an octave up at double speed.

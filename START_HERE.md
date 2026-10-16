@@ -155,29 +155,20 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
-- **BLACKPYRAMIDS_303** (`tools/build_blackpyramids_303.py`) — **FINAL 2026-10-14**, mainos
-  `3624a1e7…`, CF `.bin` `8fb372af…`, syx `5a63cf20…`, `140C_BP303`; flashed by the user:
-  everything works (the voice, the grid, live play, chromatic with PAGE, FUNC + PTCH octaves).
-  Bugbuild `BUG_BP303` (mainos `0de8be5c…`, syx `55b38837…`): emulator-verified, not flashed.
-  - The octabam module is ported (`octabam-modules/blackpyramids-303/`); its octabam PR
-    (with `Module.dsp_source`) is drafted, not sent. Not flashed in octabam form.
-  - **WIP 2026-10-15 (not flashed, not promoted): two optimization passes, every output word
-    unchanged.**
-    - **The Octatrack-side code:** the Y table is pre-packed, the continuous words are remade
-      only when their own knobs change, and the record unpack is shorter. ColdFire −688
-      instructions a frame with two voices.
-    - **The DSP engine:** the second half-band is unrolled, the tanh index and fraction use
-      one-word shifts, the glide and YY4 go through the walkers, GD8 is read once, and the
-      raw-path test is folded per payload.
-    - **Together:** saw 473 → 455, square 620 → 598 cycles a sample on the corrected bench (about
-      3.7 %).
-    - **Checked:**
-      - the records are byte-identical to the old `record.c`'s;
-      - `engine_check` and `host_check` are BIT-EXACT;
-      - `verify_ot303` passes;
-      - the ot_emu audio is sample-identical to FINAL's.
-    - **Builds:** standalone mainos `42c0da93…`, syx `eee3f936…`; `BUG_BP303` mainos `1df0fd21…`.
-    - The FINAL pins still name `3624a1e7…` / `0de8be5c…`.
+- **BLACKPYRAMIDS_303** (`tools/build_blackpyramids_303.py`) — **FINAL 2026-10-16**, mainos
+  `31909095…`, CF `.bin` `faef6874…`, syx `bfeccdfb…`, `140C_BP303`. Flashed by the user, who
+  asked for the promotion; the 14 Oct build before it was confirmed in full (the voice, the
+  grid, live play, chromatic with PAGE, FUNC + PTCH octaves). Bugbuild `BUG_BP303` (mainos
+  `98082517…`, `.bin` `0ab8e12f…`, syx `be7cdb5d…`): emulator-verified, not flashed.
+  - Since 14 Oct (MT24–MT33, ColdFire words only; the DSP code is the 15 Oct engine pass, bit-exact):
+    CUT / ENV sweep when turned (and glide on push-turn); DEC 50 ms–2 s; per-step ACC locks scaled by
+    the ACC knob (default 100), MIDI velocity > 100 accents; push-turn PTCH octaves, on every held
+    trig too; a WAVE gain for equal loudness (ISO 532-1, round 14); one frame count a frame with two
+    voices; driven VOL gets 4× output-stage headroom into the drive (round 15).
+  - The octabam module (`octabam-modules/blackpyramids-303/`) is regenerated for this build; its
+    octabam PR (with `Module.dsp_source`) is drafted, not sent. Not flashed in octabam form.
+  - Open: clean VOL still hard-clips on bright, low-RES accents; a DSP knee for it is round 16
+    (simulated, the author's pick pending), and needs ~12–14 DSP program words.
   - Open: a square-wave voice on core 0 under the heaviest FX stack may overrun (§4 there).
   - Open: not in KYOTI yet. SIDE-CHAIN's key bus has left the voice's Y (FINAL 2026-10-16), but
     both still need SPRING REV's program words, so a combined image gives up a second effect for
