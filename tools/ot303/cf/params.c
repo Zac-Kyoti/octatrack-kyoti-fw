@@ -87,11 +87,14 @@ void ot_params_cont_q8(const uint8_t k[12], unsigned cut_q8, unsigned env_q8, st
     c->sc = OT_SC[k[OT_VOL] & 127];
     c->gd8 = k[OT_VOL] > 64 ? OT_GD8[(k[OT_VOL] & 127) - 65] : 0;
     c->rc1 = k[OT_RES] >= 115 ? 0 : OT_RC1[k[OT_RES] > 100 ? k[OT_RES] - 100 : 0];
-    /* waveform: blend b = WAVE / 127; osc/2 = -(1 - b)/2 saw + b/4 tanh(..) + b sqDC / 4 */
+    /* waveform: blend b = WAVE / 127; osc/2 = G (-(1 - b)/2 saw + b/4 tanh(..) + b sqDC / 4); MT29: G the WAVE
+     * gain (Q14), which holds the saw's loudness across the blend (Open303 has none: the blends sound up to
+     * 2-3 dB quieter) */
     uint32_t w = k[OT_WAVE];
-    c->w1 = -(ot_w)((((127 - w) << 22) + 63) / 127);
-    c->w2 = (ot_w)(((w << 21) + 63) / 127);
-    c->w3 = -(ot_w)(((w * (uint32_t)OT_SQDC4_MAG_Q30 + 63) / 127 + 64) >> 7);
+    int64_t g = OT_WGAIN[w & 127];
+    c->w1 = -(ot_w)(((int64_t)((((127 - w) << 22) + 63) / 127) * g + 8192) >> 14);
+    c->w2 = (ot_w)(((int64_t)(((w << 21) + 63) / 127) * g + 8192) >> 14);
+    c->w3 = -(ot_w)(((int64_t)((((w * (uint32_t)OT_SQDC4_MAG_Q30 + 63) / 127 + 64) >> 7)) * g + 8192) >> 14);
     c->sq = w ? 1 : 0;
 }
 

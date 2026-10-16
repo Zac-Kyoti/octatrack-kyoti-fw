@@ -62,6 +62,15 @@ static int32_t scWord(int vol) {
 }
 static int32_t gd8Word(int vol) { return vol > 64 ? q23(std::pow(10.0, 4.5 * (vol - 64) / 63.0 / 20.0) / 8.0) : 0; }
 
+// MT29: the WAVE gain (dB, b = WAVE / 127), holding the loudness of the saw across the blend: fitted by
+// tools/ot303/wave_loudness.py (ISO 532-1 N5 against WAVE 0, the mean over 21 CUT / RES / VOL settings, two
+// passes); +2.66 dB at WAVE 87, +1.8 dB at 127. As Q14 (OT_WGAIN), which params.c and the reference apply.
+static double waveGainDb(int w) {
+    const double b = w / 127.0;
+    return b * (6.0797 + b * (-3.5570 + b * (7.9781 + b * (-15.7193 + b * 7.0159))));
+}
+static unsigned wgainQ14(int w) { return (unsigned)std::llround(std::pow(10.0, waveGainDb(w) / 20.0) * 16384.0); }
+
 static int gen(const char* path) {
     Open303 o; o.setSampleRate(FS);
     o.normalAmpRelease = NORMAL_RELEASE_MS;
@@ -117,6 +126,8 @@ static int gen(const char* path) {
     for (int j = 0; j < 128; j++) std::fprintf(f, "%s%s%d", j ? "," : "", j % 8 ? " " : "\n    ", scWord(j));
     std::fprintf(f, "};\nstatic const int32_t OT_GD8[63] = {");
     for (int j = 0; j < 63; j++) std::fprintf(f, "%s%s%d", j ? "," : "", j % 8 ? " " : "\n    ", gd8Word(65 + j));
+    std::fprintf(f, "};\n/* MT29: the WAVE gain, Q14 (tools/ot303/wave_loudness.py) */\nstatic const uint16_t OT_WGAIN[128] = {");
+    for (int j = 0; j < 128; j++) std::fprintf(f, "%s%s%u", j ? "," : "", j % 8 ? " " : "\n    ", wgainQ14(j));
     std::fprintf(f, "};\n#endif\n");
     std::fclose(f);
     std::printf("wrote %s\n", path);
@@ -149,7 +160,8 @@ static Ref reference(const uint8_t k[12]) {
     r.c.sc = scWord(k[OT_VOL]);
     r.c.rc1 = rc1Word(k[OT_RES]); r.c.gd8 = gd8Word(k[OT_VOL]);
     double b = o.oscillator.blend;
-    r.c.w1 = q23(-(1.0 - b) / 2.0); r.c.w2 = q23(b / 4.0); r.c.w3 = q23(b * sqDC() / 4.0); r.c.sq = b > 0.0;
+    const double G = wgainQ14(k[OT_WAVE]) / 16384.0;   // MT29: not Open303's -- the WAVE gain
+    r.c.w1 = q23(-(1.0 - b) / 2.0 * G); r.c.w2 = q23(b / 4.0 * G); r.c.w3 = q23(b * sqDC() / 4.0 * G); r.c.sq = b > 0.0;
     r.n.inc_t = q23(2.0 * o.oscFreq * o.pitchWheelFactor / (4 * FS));
     r.n.c_meg = q23(o.mainEnv.c);
     int64_t m48 = (int64_t)std::nearbyint(0.5 / o.mainEnv.c * 140737488355328.0);
