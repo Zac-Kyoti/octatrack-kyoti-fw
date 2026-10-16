@@ -64,7 +64,7 @@ hooked, because H1 computes the repitch increment from RATE alone, exactly (§2.
   - `tstr_fmt` with its table and strings: about 80 B.
   - H2: about 50 B with `REPITCH\0RPS9\0RPSP\0`.
   - H3/H4: about 2 × 45 B.
-- **Retained ColdFire code.** `REPITCH_REWRITE_RETAINED.s` assembles to 1184 B. `patch_repitch_reload.s`
+- **Retained ColdFire code.** `VARISPEED_RETAINED.s` assembles to 1184 B. `patch_repitch_reload.s`
   is 46 B. `rpk_glyphs.s` is 644 B. All three were measured with `m68k-elf-as -mcpu=54455`.
 - **Total ColdFire about 2.4 KB.** That is too much for octabam's floating ROM run beside the other
   KYOTI modules. The module README says the shipped module, at about 2.6 KB, did not fit either.
@@ -456,7 +456,7 @@ must report IDENTICAL for the first and catch the second. Poison the scratch RAM
 
 ### 5.2 DSP
 
-`rpk_dsp.asm` is unchanged. Re-run its existing bit-exact and boot checks; they must still pass
+`vem_dsp.asm` is unchanged. Re-run its existing bit-exact and boot checks; they must still pass
 (spec §5).
 
 ### 5.3 Load
@@ -511,15 +511,15 @@ and the DSP timing (CLAUDE.md).
 
 | source | used for |
 |---|---|
-| `reference/handoffs/REPITCH_REWRITE_SPEC.md` (all) | requirements, interfaces, protocol |
+| `reference/handoffs/VARISPEED_SPEC.md` (all) | requirements, interfaces, protocol |
 | `CLAUDE.md` (all) | rules |
 | `START_HERE.md` | onboarding, filtered with `grep -v` on the keyword set |
 | `reference/kb/caves.md` (all) | §0 descriptor table, §1/§2/§2b caves, §5 DRAM units |
 | `reference/kb/memory-map.md` L40–50, 254–280, 510–520, 600–640, 733, 1125–1200 | frame ISR `0x4000aad0`; tempo chain; voice state `0x800049d8`/`0xA8`; page-1/page-2 publish path; base words `0x80000a50`; copier `0x4000cb2a`. All re-verified (C). Lines carrying the keyword set were skipped. |
 | `reference/kb/techniques.md` L480–520 | CF METER frame budget |
 | `COVERAGE.md`, `ARCHITECTURE.md`, `file-format.md` | grep lines only |
-| `REPITCH_REWRITE_RETAINED.s` (all) | interfaces; equates `SET_STATIC`/`SET_FLEX`/`DB_PTR`/`PTCH_FMT`/`KNOB`/`STEP_PTCH`, each re-checked where used (C via the descriptor dump) |
-| `octabam-modules/repitch-repeat98-kyoti/` | `rpk_glyphs.s`, `patch_repitch_reload.s`, `rpk_dsp_ptable.py`, `README.md` (all); `rpk_dsp.asm` lines 1–140 (DSP entry state, `l:$40`/`y:$40` tag, `P:0x40b`/`P:0x20e`) |
+| `VARISPEED_RETAINED.s` (all) | interfaces; equates `SET_STATIC`/`SET_FLEX`/`DB_PTR`/`PTCH_FMT`/`KNOB`/`STEP_PTCH`, each re-checked where used (C via the descriptor dump) |
+| `octabam-modules/repitch-repeat98-kyoti/` | `rpk_glyphs.s`, `patch_repitch_reload.s`, `vem_dsp_ptable.py`, `README.md` (all); `vem_dsp.asm` lines 1–140 (DSP entry state, `l:$40`/`y:$40` tag, `P:0x40b`/`P:0x20e`) |
 | `tools/load_audit/la_run.py`, `tools/emu_rtos.py`, `tools/load_audit/ot_emu_load_audit.patch` (header, OT_RW hunk) | emulator method, Part poke offsets |
 | `~/Documents/octabam/tools/emu/ot_emu/main.cpp` | option parsing only (grep) |
 | `reference/handoffs/REC_TRIG_MUTE_SCOPE.md` L385–405 | filtered |
@@ -579,11 +579,11 @@ I did not open any blacklisted file. Two disclosures:
 failed, and the `grep -l -i 'repitch|rpch|repeat98'` that followed ran in the repository root. It
 printed only **file names**, no contents. Names seen:
 - `tools/repitch_ot_emu_trace.patch`
-- `tools/repitch_test_beat.py`, `tools/repitch_ab_speeds.py`
-- `tools/repitch_probe_kyoti.cpp`, `tools/repitch_dsp_*`
-- `tools/build_repitch_repeat98_kyoti.py`, `tools/patch_repitch_dsp.asm`
-- `tools/repitch_engine_model.py`, `tools/repitch_sp_reference.py`
-- `tools/repitch_ab_pack.py`, `tools/repitch_ch12_listen.py`
+- `tools/varispeed_emus_test_beat.py`, `tools/varispeed_emus_ab_speeds.py`
+- `tools/repitch_probe_kyoti.cpp`, `tools/varispeed_emus_dsp_*`
+- `tools/build_repitch_repeat98_kyoti.py`, `tools/varispeed_emus_dsp.asm`
+- `tools/varispeed_emus_model.py`, `tools/varispeed_emus_sp_reference.py`
+- `tools/varispeed_emus_ab_pack.py`, `tools/varispeed_emus_ch12_listen.py`
 - plus NOTES/README/CREDITS and similar.
 
 **(2) The session's auto-loaded memory index.** The memory index (`MEMORY.md`) was injected into this

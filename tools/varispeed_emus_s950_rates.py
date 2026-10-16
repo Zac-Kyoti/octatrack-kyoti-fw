@@ -29,8 +29,8 @@ import sys
 import numpy as np
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import repitch_ab_pack as p              # noqa: E402
-import repitch_engine_model as m         # noqa: E402
+import varispeed_emus_ab_pack as p              # noqa: E402
+import varispeed_emus_model as m         # noqa: E402
 import varispeed_emus_listen as vl       # noqa: E402
 
 SR = 44100
@@ -83,16 +83,16 @@ def s950_full(src, fs_v, speed):
 
 def s950_cheap(src, fs_v, speed):
     m.FS_AKAI = fs_v
-    m.FIR[m.MODE_RPS9]["taps"] = 24
+    m.FIR[m.MODE_S950]["taps"] = 24
     for n in ("fir_table", "fir_q23"):
         f = getattr(m, n, None)
         if hasattr(f, "cache_clear"):
             f.cache_clear()
     try:
-        return p.run(m.MODE_RPS9, src, speed, [0])
+        return p.run(m.MODE_S950, src, speed, [0])
     finally:
         m.FS_AKAI = 40000.0
-        m.FIR[m.MODE_RPS9]["taps"] = 16
+        m.FIR[m.MODE_S950]["taps"] = 16
         for n in ("fir_table", "fir_q23"):
             f = getattr(m, n, None)
             if hasattr(f, "cache_clear"):
@@ -123,7 +123,7 @@ def main():
             speed = bpm / a.bpm
             inc0 = vl.increment(bpm, a.bpm, 0)
             clips[(bpm, "ot")] = vl.render(src, inc0, 0)
-            clips[(bpm, "s40")] = vl.render(src, vl.increment(bpm, a.bpm, m.MODE_RPS9), m.MODE_RPS9)
+            clips[(bpm, "s40")] = vl.render(src, vl.increment(bpm, a.bpm, m.MODE_S950), m.MODE_S950)
             full40 = s950_full(src, 40000.0, speed)
             n = min(len(full40), len(clips[(bpm, "s40")]))
             d = np.max(np.abs(np.array(bands(full40[:n])) - np.array(bands(clips[(bpm, "s40")][:n]))))

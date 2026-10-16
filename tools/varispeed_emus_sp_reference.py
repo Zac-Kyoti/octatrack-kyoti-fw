@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-repitch-kyoti: an INDEPENDENT reference SP-1200 and a "junk" measurement, for
-checking RPSP against the machine rather than against its own model
-(Session 111: RPSP vs this reference on the user's isaak.wav, NOTES).
+VARISPEED_EMUS: an INDEPENDENT reference SP-1200 and a "junk" measurement, for
+checking SP12 against the machine rather than against its own model
+(Session 111: SP12 vs this reference on the user's isaak.wav, NOTES).
 
 The reference shares no engine code. Only the record-filter TARGET magnitude
-(the spec) is taken from tools/repitch_engine_model.py:
+(the spec) is taken from tools/varispeed_emus_model.py:
   record filter (zero-phase, FFT) -> sampled on a true 26.04 kHz grid (windowed
   sinc) -> 12-bit floor -> drop-sample playback (stored index = floor(k * r))
   -> staircase at 26.04 kHz -> an ideal converter (brick wall at 20 kHz, 44.1 kHz).
@@ -17,9 +17,9 @@ The reference shares no engine code. Only the record-filter TARGET magnitude
 junk(y, clean): y minus the best 96-tap linear filter of a clean pitch-down --
 what no filter can explain (drop-sample, 12-bit, staircase images, folds).
 
-    python3 tools/repitch_sp_reference.py SOURCE.wav RATIO [OUT_DIR]
-        prints junk-to-music per band for the reference SP and RPSP's float model,
-        and writes WAVs (clean, RPSP, reference, and each one's junk) to OUT_DIR.
+    python3 tools/varispeed_emus_sp_reference.py SOURCE.wav RATIO [OUT_DIR]
+        prints junk-to-music per band for the reference SP and SP12's float model,
+        and writes WAVs (clean, SP12, reference, and each one's junk) to OUT_DIR.
 """
 import math
 import pathlib
@@ -30,7 +30,7 @@ import numpy as np
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import repitch_engine_model as m   # noqa: E402  (record-filter target + RPSP's float model)
+import varispeed_emus_model as m   # noqa: E402  (record-filter target + SP12's float model)
 
 SR = 44100.0
 FSP = 20e6 / 768
@@ -51,7 +51,7 @@ def save(path, y):
 
 
 def record_filter(x):
-    n = len(x); f = np.fft.rfftfreq(n, 1 / SR); d = m.FIR[m.MODE_RPSP]
+    n = len(x); f = np.fft.rfftfreq(n, 1 / SR); d = m.FIR[m.MODE_SP12]
     shape = 1 / np.sqrt(1 + (f / d["corner"]) ** (2 * d["poles"]))
     H = np.where(f <= d["flat"], 1.0, np.where(f >= d["stop"], 0.0, shape))
     return np.fft.irfft(np.fft.rfft(x, axis=0) * H[:, None], n, axis=0)
@@ -125,15 +125,15 @@ if __name__ == "__main__":
     n = int(min(5.0, (len(src) - 200) / r / SR) * SR)
     clean = clean_pitch(src, r, n)
     ref = sp_render(src, r, n)
-    rpsp = m.run(m.MODE_RPSP, src, r)[:n]
-    n = min(len(clean), len(ref), len(rpsp)); clean, ref, rpsp = clean[:n], ref[:n], rpsp[:n]
+    sp12 = m.run(m.MODE_SP12, src, r)[:n]
+    n = min(len(clean), len(ref), len(sp12)); clean, ref, sp12 = clean[:n], ref[:n], sp12[:n]
     print("junk-to-music (dB):", " ".join(f"{a/1e3:g}-{b/1e3:g}k".rjust(9) for a, b in BANDS))
-    for name, y in (("reference SP-1200", ref), ("RPSP float model", rpsp)):
+    for name, y in (("reference SP-1200", ref), ("SP12 float model", sp12)):
         print(f"{name:20}" + " ".join(f"{v:9.1f}" for v in junk_to_music(y, clean)))
     if out:
         out.mkdir(parents=True, exist_ok=True)
-        for name, y in (("clean", clean), ("rpsp", rpsp), ("reference_sp", ref)):
+        for name, y in (("clean", clean), ("sp12", sp12), ("reference_sp", ref)):
             save(out / f"{name}_{r:g}.wav", y)
-        save(out / f"rpsp_junk_{r:g}.wav", junk(rpsp, clean))
+        save(out / f"sp12_junk_{r:g}.wav", junk(sp12, clean))
         save(out / f"reference_sp_junk_{r:g}.wav", junk(ref, clean))
         print(f"WAVs in {out}")

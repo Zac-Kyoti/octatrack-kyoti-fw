@@ -2,12 +2,12 @@
 // SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
 // SUPERSEDED (Session 110, rev 11): tests rev 10's kernel contracts; the rev-11
-// engine is checked by tools/repitch_dsp_engine_probe.cpp + _engine_check.py.
+// engine is checked by tools/varispeed_emus_dsp_engine_probe.cpp + _engine_check.py.
 //
-// repitch-kyoti LISTENING render: streams a stereo source through the REAL
+// VARISPEED_EMUS LISTENING render: streams a stereo source through the REAL
 // stock voice-engine kernel on dsp56kEmu, block by block -- unpatched (stock
-// = RPCH) or patched with the repitch cave and a mode -- and writes the
-// output. Driven by tools/repitch_dsp_listen.py.
+// = OT) or patched with the S950/SP12 cave and a mode -- and writes the
+// output. Driven by tools/varispeed_emus_dsp_listen.py.
 //
 // What is real and what is modelled:
 //   REAL      the kernel (P:0x40b..0x41b, both the stock 2-tap interpolator
@@ -16,7 +16,7 @@
 //             (offset, fraction) table -- rebuilt here per block from a
 //             running phase, the same quantities P:0x3fc..0x40a computes
 //
-// usage: repitch_dsp_render MOD MODBASE HOOK STOP CAVE CAVEORG BSR0 BSR1
+// usage: varispeed_emus_dsp_render MOD MODBASE HOOK STOP CAVE CAVEORG BSR0 BSR1
 //                           PATCHED(0/1) MODE INC IN.raw OUT.raw
 //   IN/OUT: interleaved stereo int32 holding 24-bit samples.
 #include <cmath>

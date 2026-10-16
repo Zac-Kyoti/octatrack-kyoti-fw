@@ -31,8 +31,9 @@ FLEX TSTR words or the same sites: one design at a time.
 MEASURED. The unit, linked at the standalone image's address, is that image's bytes
 (tools/build_varispeed.py assembles this wrapper too and refuses a difference). On the
 standalone image in ot_emu with real hardware-exported projects: VARI increments bit-identical
-with VARISPEED_EMUS's on OT (the shipped REPITCH_REPEAT98_KYOTI's TSTR 4), stock tracks' with
-stock 1.40C (reference/handoffs/REPITCH_REWRITE_IMPL.md §14). Not yet on hardware.
+with VARISPEED_EMUS's on OT, stock tracks' with stock 1.40C (reference/handoffs/
+VARISPEED_IMPL.md §14). On hardware: the author's MKI, 15 Oct 2026 (the standalone image
+140C_VARI1 and its Bugbuild).
 """
 
 import dataclasses
@@ -148,8 +149,7 @@ MODULE = Module(
     category=Category.MACHINES,
     author="Zac-Kyoti",
     author_url="https://github.com/Zac-Kyoti/octatrack-kyoti-fw",
-    proof=Proof.PORT,
-    proof_note="ot_emu: the standalone image (tools/build_varispeed.py) against VARISPEED_EMUS's "
-               "oracle on OT and stock 1.40C; not yet on hardware",
+    proof=Proof.HARDWARE,
+    proof_note="the author's MKI, 15 Oct 2026 (the standalone image 140C_VARI1 and its Bugbuild)",
     **_SETTINGS,
 )

@@ -2,23 +2,23 @@
 // SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
 // SUPERSEDED (Session 110, rev 11): tests rev 10's kernel contracts; the rev-11
-// engine is checked by tools/repitch_dsp_engine_probe.cpp + _engine_check.py.
+// engine is checked by tools/varispeed_emus_dsp_engine_probe.cpp + _engine_check.py.
 //
-// repitch-kyoti DSP oracle: the REAL stock voice-engine kernel, run from its
+// VARISPEED_EMUS DSP oracle: the REAL stock voice-engine kernel, run from its
 // prologue hook site to the per-voice loop's closing NOP, unpatched and
-// patched, on dsp56kEmu. Built and driven by tools/repitch_dsp_check.py.
+// patched, on dsp56kEmu. Built and driven by tools/varispeed_emus_dsp_check.py.
 //
 // The reference is never a hand model of DSP arithmetic -- it is stock itself
 // run on transformed input:
-//   RPCH (mode 0)  patched                == stock
-//   RPS9 (mode 1)  patched                == stock on the 12-bit ring
-//   RPSP (mode 2)  patched                == stock on the 12-bit ring with
+//   OT (mode 0)  patched                == stock
+//   S950 (mode 1)  patched                == stock on the 12-bit ring
+//   SP12 (mode 2)  patched                == stock on the 12-bit ring with
 //                                            every fraction zeroed
-//   RPSP, and independently of the kernel: out = q12(L0), q12(R0) per entry
+//   SP12, and independently of the kernel: out = q12(L0), q12(R0) per entry
 // plus the side effects (ring, fraction table) and the registers the outer
 // per-voice loop relies on afterwards (r0 r2 r3 r4 r5 r7 m6, and the stack).
 //
-// usage: repitch_dsp_probe MOD.bin MODBASE HOOK STOP CAVE.bin CAVEORG BSR0 BSR1
+// usage: varispeed_emus_dsp_probe MOD.bin MODBASE HOOK STOP CAVE.bin CAVEORG BSR0 BSR1
 //        (all numbers hex). Exit 0 iff every case passes.
 #include <cstdint>
 #include <cstdio>
@@ -104,7 +104,7 @@ Result run(const Image& im, bool patched, const Case& c)
 	// m6 is set by EXECUTING stock's own `move #$7f,m6` (057fa6, P:0x3a9),
 	// then a short jmp to the hook site: poking R.m[6] directly does not
 	// reach the emulator's cached address-generation mode, and a ring that
-	// silently stops wrapping fails RPS9/RPSP while RPCH still "passes"
+	// silently stops wrapping fails S950/SP12 while OT still "passes"
 	// (both sides read the same wrong words).
 	constexpr TWord PRELUDE = 0xf00;
 	dsp.memWriteP(PRELUDE, 0x057fa6);
@@ -127,7 +127,7 @@ Result run(const Image& im, bool patched, const Case& c)
 
 bool regsMatch(const Result& a, const Result& b)
 {
-	// r1 is scratch here (RPSP walks it; stock resets it at P:0x3f9 before
+	// r1 is scratch here (SP12 walks it; stock resets it at P:0x3f9 before
 	// its next use), and r6 is set by the kernel's own last sample -- the
 	// rest are what the outer per-voice loop carries into the next voice.
 	for(int k : {0, 2, 3, 4, 5, 7})
@@ -181,7 +181,7 @@ int main(int argc, char** argv)
 			static char names[9][48];
 			static int k = 0;
 			std::snprintf(names[k], sizeof names[k], "n=%-2u mode %u (%s)", n, mode,
-			              mode == 0 ? "RPCH" : mode == 1 ? "RPS9" : "RPSP");
+			              mode == 0 ? "OT" : mode == 1 ? "S950" : "SP12");
 			c.name = names[k++];
 			cases.push_back(c);
 		}
@@ -206,13 +206,13 @@ int main(int argc, char** argv)
 		if(mode == 2)                      // exact ZOH of 12-bit samples, kernel-independent
 			for(uint32_t i = 0; i < c.n; ++i) {
 				const uint32_t o = c.offs[i];
-				need(pat.out[2 * i] == (c.ring[o & 0x7f] & MASK12), "RPSP L != q12(L0)");
-				need(pat.out[2 * i + 1] == (c.ring[(o + 1) & 0x7f] & MASK12), "RPSP R != q12(R0)");
+				need(pat.out[2 * i] == (c.ring[o & 0x7f] & MASK12), "SP12 L != q12(L0)");
+				need(pat.out[2 * i + 1] == (c.ring[(o + 1) & 0x7f] & MASK12), "SP12 R != q12(R0)");
 			}
-		if(mode == 0)                      // RPCH must BE stock, not just match a reference
-			need(pat.out == stockRun.out && pat.ring == c.ring && pat.fracs == c.fracs, "RPCH != stock");
+		if(mode == 0)                      // OT must BE stock, not just match a reference
+			need(pat.out == stockRun.out && pat.ring == c.ring && pat.fracs == c.fracs, "OT != stock");
 		if(mode == 1)
-			need(pat.out != stockRun.out, "RPS9 changed nothing");
+			need(pat.out != stockRun.out, "S950 changed nothing");
 		if(!why.empty()) {
 			std::printf("      %s -- r6 stock %06x patched %06x\n", why.c_str(), stockRun.r[6], pat.r[6]);
 			if(!pat.out.empty())

@@ -2,16 +2,16 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-repitch-kyoti rev 13: the "virtual sampler" engine, as a float reference model.
+VARISPEED_EMUS (kernel rev 13): the "virtual sampler" engine, as a float reference model.
 
-The ground truth the DSP code (tools/patch_repitch_dsp.asm) must match, and
-the single place its tables are designed (tools/repitch_dsp_src.py imports
+The ground truth the DSP code (tools/varispeed_emus_dsp.asm) must match, and
+the single place its tables are designed (tools/varispeed_emus_dsp_src.py imports
 fir_q23() and appends the tables to the DSP cave as data). Sources and
-reasoning: reference/handoffs/REPITCH_FIDELITY_SCOPE.md; the OT-side
+reasoning: reference/handoffs/VARISPEED_EMUS_FIDELITY_SCOPE.md; the OT-side
 measurements behind the plumbing: NOTES Session 110; rev 12's tonal
 correction and rev 13's band-limited render: NOTES Session 111.
 
-  RPSP (E-mu SP-1200)   stored samples on a fixed 26.04 kHz grid; a fixed
+  SP12 (E-mu SP-1200)   stored samples on a fixed 26.04 kHz grid; a fixed
                         26.04 kHz output clock steps through them by the pitch
                         ratio (repeat/skip: a phase accumulator); 12-bit; the
                         DAC output is a staircase, heard as on the raw outputs
@@ -19,12 +19,12 @@ correction and rev 13's band-limited render: NOTES Session 111.
                         below for a future selectable channel). FULL STEREO since
                         2026-10-15 (VARISPEED_EMUS_SP12_STEREO.md): L and R each
                         run the whole path, on one shared clock and tick schedule.
-  RPS9 (Akai S900/950)  each voice's DAC clock runs at (recording rate x ratio)
+  S950 (Akai S900/950)  each voice's DAC clock runs at (recording rate x ratio)
                         into a steep filter that follows that clock and removes
                         the staircase's images, so what leaves the machine is
                         the source band-limited by the RECORD filter (6th order
                         at 0.4 x FS_AKAI = 16 kHz), stored at 12 bits, pitched cleanly.
-                        That is what RPS9 reproduces. (Emulating the clock
+                        That is what S950 reproduces. (Emulating the clock
                         literally at 44.1 kHz folds the staircase's ultrasonic
                         images into the audible band -- -25 dB at 18 kHz for a
                         6 kHz tone, worse pitched up -- which the real machine
@@ -41,8 +41,8 @@ position p_i advancing by the increment r. The engine only READS the ring:
     OT's floor(p) -- the frame after it is NOT delivered when the fraction is
     0 (the stock kernel weights it 0); reading it put stale audio into the
     last output of every frame (measured in ot_emu, Session 110);
-  * RPS9: output i = 12-bit(ADC at p_i - c - 1);
-  * RPSP: output i is the staircase averaged over [i-1, i) (a box: cheap, and
+  * S950: output i = 12-bit(ADC at p_i - c - 1);
+  * SP12: output i is the staircase averaged over [i-1, i) (a box: cheap, and
     it keeps a 26 kHz staircase from folding at 44.1 kHz); a tick at time
     i-1+u stores 12-bit(ADC at p_i - (1-u)*r - PSP*phi - c - 1), phi being the SP's
     accumulator fraction so repeats/skips land on its 26.04 kHz grid. (p_i - r is
@@ -53,7 +53,7 @@ position p_i advancing by the increment r. The engine only READS the ring:
     6-8 dB of rejection at 26-31 kHz let the staircase's images above 22 kHz
     fold back into the audible band. Each tick spreads its step over the next
     L outputs (a ring of residuals); the render's own passband response is
-    folded out of RPSP's ADC kernel (kernel x render = the SP's record filter).
+    folded out of SP12's ADC kernel (kernel x render = the SP's record filter).
 
 Tempo lock is untouched: the engine never changes where the OT reads.
 """
@@ -65,20 +65,20 @@ import numpy as np
 
 SR = 44100.0
 FS_SP = 20e6 / 768                 # 26,041.67 Hz: E-mu's 20 MHz crystal / 768
-FS_AKAI = 40000.0                  # the virtual recording rate for RPS9: bandwidth 0.4 x = 16 kHz (the S900's maximum)
+FS_AKAI = 40000.0                  # the virtual recording rate for S950: bandwidth 0.4 x = 16 kHz (the S900's maximum)
 PSP = SR / FS_SP                   # 1.69344 output samples per SP tick = source frames per SP grid step
-# the DSP's fixed-point copies (tools/repitch_dsp_src.py), used by the model
+# the DSP's fixed-point copies (tools/varispeed_emus_dsp_src.py), used by the model
 # when it is checked against the DSP: the tick period is Q20, the lag Q23/2
 PSP_TICK = round(PSP * (1 << 20)) / (1 << 20)
 PSP_LAG = round(PSP / 2 * (1 << 23)) * 2 / (1 << 23)
-MODE_RPS9, MODE_RPSP = 1, 2
-SP_CHANNEL = 7                     # which SP-1200 output RPSP is heard on: 7 (= 8) raw, no filter.
-# 2026-10-15: RPSP is FULL STEREO again (the user's decision; Engine's default, ms=False, and the
+MODE_S950, MODE_SP12 = 1, 2
+SP_CHANNEL = 7                     # which SP-1200 output SP12 is heard on: 7 (= 8) raw, no filter.
+# 2026-10-15: SP12 is FULL STEREO again (the user's decision; Engine's default, ms=False, and the
 # only form DspExact and the DSP kernel implement): each channel runs the SP path below on one
 # shared clock. What follows to DYN_K is the MID/SIDE design it replaced (rev 17 .. VEM7, kept at the
 # tag ref/sp12-midside-vem7, reference/handoffs/SP12_MIDSIDE_REFERENCE.md); Engine(ms=True) still
-# renders it for the old listening-pack tools (repitch_ab_pack.py, repitch_ab_speeds.py) only.
-# Rev 17 (listening pack 3, the user's pick, 2026-10-06): RPSP is MID + SIDE. The mid (L+R)/2
+# renders it for the old listening-pack tools (varispeed_emus_ab_pack.py, varispeed_emus_ab_speeds.py) only.
+# Rev 17 (listening pack 3, the user's pick, 2026-10-06): SP12 is MID + SIDE. The mid (L+R)/2
 # runs the SP-1200 path -- 8-tap virtual ADC, 26.04 kHz drop-sample, 12-bit, the 10-tap
 # render -- then an SP output channel's fixed filter (MS_CHANNEL); the side (L-R)/2 is read cleanly (the OT's
 # own 2-tap read) as far behind the OT as the mid path delays the mid; L = mid + side,
@@ -103,20 +103,20 @@ SP_CHANNEL = 7                     # which SP-1200 output RPSP is heard on: 7 (=
 # samples shorter (0.40 vs 0.63 below 1 kHz, 0.39 vs 0.55 at 3 kHz), so MS_SIDE_DELAY
 # drops from 5.97 to 5.77.
 #
-# Three output builds, chosen with RPK_OUT in the environment (2026-10-08): "raw" = outputs 7/8,
+# Three output builds, chosen with VEM_OUT in the environment (2026-10-08): "raw" = outputs 7/8,
 # no filter and no side average -- THE DEFAULT, the user's final pick (listening pack 10,
 # 2026-10-08); "ch6" = channel 6 above (OBKYOTI16); "ch12"
 # = channels 1/2: the SSM2044 4-pole whose cutoff each trig throws open and a fixed RC closes
 # (DYN_* below). Raw and ch12 read the side 5.83 outputs behind (pack 9's measured "no filter"
 # offset, 6.47 - channel 5's 0.64); ch12's filter runs on the mid AND the side with the same
 # coefficients, so it adds no mid/side misalignment.
-MS_OUT = os.environ.get("RPK_OUT", "raw")
-assert MS_OUT in ("ch6", "raw", "ch12"), f"RPK_OUT={MS_OUT!r}: ch6, raw or ch12"
+MS_OUT = os.environ.get("VEM_OUT", "raw")
+assert MS_OUT in ("ch6", "raw", "ch12"), f"VEM_OUT={MS_OUT!r}: ch6, raw or ch12"
 MS_CHANNEL = {"ch6": 6, "raw": 7, "ch12": 12}[MS_OUT]
 MS_SIDE_DELAY = {"ch6": 5.77, "raw": 5.83, "ch12": 5.83}[MS_OUT]
 MS_LAG_SHIFT = 4
 
-# Channels 1/2 (RPK_OUT=ch12). The circuit, from libmd12 (github.com/Mudb0y/libmd12, MIT; its
+# Channels 1/2 (VEM_OUT=ch12). The circuit, from libmd12 (github.com/Mudb0y/libmd12, MIT; its
 # ngspice netlists of the SP-1200 / SP-12 service-manual schematics, the OS's timing from E-mu's
 # own Z80 code, the sweep fitted to a measured SP-12 within 0.024 octaves): every note on
 # channels 1/2 pulls the filter's control line low for 8 housekeeping ticks (8.8-10.1 ms), which
@@ -249,15 +249,15 @@ def sp_channel_filter(ch=SP_CHANNEL):
 
 # The "virtual ADC": one short kernel per stored sample that is the machine's
 # record filter and the fractional-position read in one. Evaluated only where a
-# stored sample is needed (each 26 kHz SP tick; each RPS9 output), so its cost
+# stored sample is needed (each 26 kHz SP tick; each S950 output), so its cost
 # does not grow with the pitch ratio, and the ring is never modified.
 #
 # Rev 12: both kernels are least-squares designs (numpy only), one per
 # fractional phase, each with an exact unity DC gain:
-#   RPS9  16 taps fitted to the MF6CN-50's magnitude, a 6th-order Butterworth
+#   S950  16 taps fitted to the MF6CN-50's magnitude, a 6th-order Butterworth
 #         at 0.4 x FS_AKAI = 16 kHz, with a stopband from the recorder's Nyquist
 #         (20 kHz) since 2026-10-14 (fir_target).
-#   RPSP  12 taps: FLAT to 10 kHz, then a 7-pole (42 dB/oct, E-mu's "on the
+#   SP12  12 taps: FLAT to 10 kHz, then a 7-pole (42 dB/oct, E-mu's "on the
 #         order of 42 dB per octave") Butterworth shape through the transition
 #         (rev 13: corner 10.95 kHz, weight 0.7 -- the overall response lands
 #         within 1.5 dB of the estimated real SP out 7/8 to 15 kHz) and >= 40 dB
@@ -265,24 +265,24 @@ def sp_channel_filter(ch=SP_CHANNEL):
 #         into the audible band). Divided throughout by the render's passband
 #         response (rev 12: the box's sinc(f/44100) droop), which the real SP
 #         does not have.
-# (rev 11: Kaiser-windowed sinc, 16 taps @ 13 kHz / 8 taps @ 11 kHz; RPSP's 8
+# (rev 11: Kaiser-windowed sinc, 16 taps @ 13 kHz / 8 taps @ 11 kHz; SP12's 8
 # taps rolled off 2-3 dB early and the box's droop stacked on top.)
 # Rev 14 stores every row again (16 of 32; rows 16..31 are their mirrors), as rev
 # 12 did: rev 13's packing (9 of 32 rows, odd rows interpolated) was measurable on
 # worst-case tones (-55..-61 dBFS), so the user had full fidelity restored.
 PHASES = 32
-FIR = {MODE_RPS9: dict(taps=16),
-       MODE_RPSP: dict(taps=8, flat=10000.0, stop=17500.0, w_trans=0.7, w_stop=30.0,
+FIR = {MODE_S950: dict(taps=16),
+       MODE_SP12: dict(taps=8, flat=10000.0, stop=17500.0, w_trans=0.7, w_stop=30.0,
                        poles=7, corner=10950.0)}
 
 
 def box_droop(f):
-    """Rev 11/12's RPSP renderer: the staircase averaged over one 44.1 kHz
+    """Rev 11/12's SP12 renderer: the staircase averaged over one 44.1 kHz
     period. Kept for comparison; rev 13 renders through RENDER."""
     return np.sinc(np.asarray(f) / SR)
 
 
-# ------------------------------------------------------------ RPSP render
+# ------------------------------------------------------------ SP12 render
 # The staircase's 44.1 kHz render. A kernel g over the last L output periods,
 # piecewise constant in 1/R-sample pieces and symmetric (linear phase, delay
 # L/2), designed by least squares on its continuous spectrum: flat to `flat`,
@@ -352,12 +352,12 @@ def render_q23():
 def fir_target(mode, f):
     """What each phase of the kernel is fitted to: (desired magnitude, weight)."""
     f = np.asarray(f, dtype=float)
-    if mode == MODE_RPS9:
+    if mode == MODE_S950:
         # The record filter (MF6CN-50: 6th-order Butterworth at 0.4 x FS_AKAI) AND, since
         # 2026-10-14, nothing at or above the virtual recorder's Nyquist (0.5 x FS_AKAI =
         # 20 kHz): a 40 kHz recorder cannot hold it. The filter alone left source content at
         # 20-22 kHz at -12..-17 dB, which pitched down landed where a real S950 has nothing
-        # (15-16.5 kHz at 0.75x). Stop weight 30: >= 40 dB above 20 kHz (RPSP's convention),
+        # (15-16.5 kHz at 0.75x). Stop weight 30: >= 40 dB above 20 kHz (SP12's convention),
         # the band to 16 kHz within 0.7 dB of the MF6 shape, 18.5-20 kHz free (it rolls off
         # ~5 dB faster than the MF6 there). The fold-back a real recorder makes of that
         # content is not modelled (VARISPEED_EMUS_S950_RATE_SCOPE.md, option B).
@@ -418,7 +418,7 @@ def fir_q23(mode):
 def design_post(mode):
     """SP: the chosen output channel's filter (none for 7/8, rev 12's choice,
     and the only one the DSP implements). Akai: none (see the header)."""
-    return sp_channel_filter() if mode == MODE_RPSP else []
+    return sp_channel_filter() if mode == MODE_SP12 else []
 
 
 def response(secs, f):
@@ -483,18 +483,18 @@ def q12(v):
 
 class Engine:
     side_avg = MS_OUT == "ch6"   # rev 17's side average (packs switch it off: the build before it)
-    """One track's voice in RPS9 or RPSP. The ring holds float stereo frames
+    """One track's voice in S950 or SP12. The ring holds float stereo frames
     as the OT delivered them. Rev 14: render() is called once per hook VISIT
     (two per 16-sample frame, whatever the pass split) with the frame's trig
-    flag and the OT's AMP level. RPSP is full stereo (2026-10-15, the default);
+    flag and the OT's AMP level. SP12 is full stereo (2026-10-15, the default);
     ch12 (a channel 1/2 stage) and ms (rev 17's mid/side) are the old designs,
     for the listening-pack tools only."""
     RING = 64
 
     def __init__(self, mode, ch12=False, ms=False):
         self.mode = mode
-        self.ms = ms and mode == MODE_RPSP
-        self.ch12 = ch12 and mode == MODE_RPSP and not self.ms
+        self.ms = ms and mode == MODE_SP12
+        self.ch12 = ch12 and mode == MODE_SP12 and not self.ms
         self.ring = np.zeros((self.RING, 2))
         self.fir = fir_q23(mode) / float(1 << 23)
         self.taps = self.fir.shape[1]
@@ -563,7 +563,7 @@ class Engine:
         new sound (a trig frame's second pass, LC = 1). Then the 16 ring frames
         before its first frame become silence -- they hold the last sound's
         unscaled audio, which the engines would otherwise replay at the new
-        trig's full level (the rev 13 crack) -- and RPSP starts clean."""
+        trig's full level (the rev 13 crack) -- and SP12 starts clean."""
         if not trig or lc != 1:
             return False
         f0 = table[0][0]
@@ -577,7 +577,7 @@ class Engine:
         r: the increment; lc: the voice module's loop counter (2: the frame's
         first pass, 1: its second). Returns the visit's stereo output samples."""
         self.visit(table, trig, lc)
-        if self.mode == MODE_RPS9:
+        if self.mode == MODE_S950:
             # read c+1 frames behind the OT so every tap is at or before floor(p_i):
             # the OT does NOT deliver floor(p)+1 when the fraction is 0 (the stock
             # kernel gives it zero weight) -- measured in ot_emu, Session 110
@@ -616,7 +616,7 @@ class Engine:
 
 
     def render_ms(self, table, r):
-        """Rev 17 RPSP: the mid through the SP path and MS_CHANNEL's filter, the side clean."""
+        """Rev 17 SP12: the mid through the SP path and MS_CHANNEL's filter, the side clean."""
         out = []
         if self.prev is not None and table and (table[0][0] - self.prev[0]) % 64 > 2:
             self.prev = table[0]
@@ -660,10 +660,10 @@ class Engine:
         return np.array(out).reshape(-1, 2)
 
 
-# ------------------------------------------------------ RPSP channel 1/2 (rev 14)
+# ------------------------------------------------------ SP12 channel 1/2 (rev 14)
 # The SP-1200's channels 1 and 2 = the same 12-bit staircase through an SSM2044
 # 4-pole low-pass whose cutoff the channel's level envelope pushes open on each
-# hit (reference/handoffs/REPITCH_SP_CH12_SCOPE.md). Resonance 0 (Rossum's
+# hit (reference/handoffs/VARISPEED_EMUS_SP_CH12_SCOPE.md). Resonance 0 (Rossum's
 # "classic" setting): four identical one-pole stages, unity DC gain. The chip's
 # cutoff control is exponential, so
 #     pole frequency = CH12_F_REST x 2^(depth x env),   env in 0..1
@@ -692,7 +692,7 @@ def ch12_g(octaves, f_rest=CH12_F_REST):
 
 class Ch12:
     """The channel 1/2 stage for one track: envelope + SSM2044-style 4-pole.
-    Fed the rendered RPSP output sample by sample; hit() at each trig; for
+    Fed the rendered SP12 output sample by sample; hit() at each trig; for
     envelope A, amp(level) with the OT's AMP level (0..1) each sample."""
 
     def __init__(self, env="B", f_rest=CH12_F_REST, depth=CH12_DEPTH):
@@ -763,12 +763,12 @@ def ch12_response(octaves, f, f_rest=CH12_F_REST):
 # ------------------------------------------------------------ DSP-exact twin
 class DspExact:
     """The same engine in the DSP's integer arithmetic, bit for bit: what
-    tools/repitch_dsp_engine_check.py compares the emulated DSP against. The
+    tools/varispeed_emus_dsp_engine_check.py compares the emulated DSP against. The
     float Engine above is the design; this is the implementation's contract.
-    Samples are 24-bit ints (Q23); `consts` is repitch_dsp_src.constants().
-    render() is one hook visit (patch_repitch_dsp.asm, zqrp).
+    Samples are 24-bit ints (Q23); `consts` is varispeed_emus_dsp_src.constants().
+    render() is one hook visit (varispeed_emus_dsp.asm, zqrp).
 
-    RPSP is FULL STEREO (2026-10-15; VARISPEED_EMUS_SP12_STEREO.md): both channels run
+    SP12 is FULL STEREO (2026-10-15; VARISPEED_EMUS_SP12_STEREO.md): both channels run
     the SP path on one clock. The render's residuals live in a "full-form" ring: slot m
     holds what output (now + m) will be, / 4 -- the held step at the time the slot was
     last read, plus every later tick's share -- so a read slot is reset to the current
@@ -789,7 +789,7 @@ class DspExact:
         self.cc = self.taps // 2 - 1
         T, self.D = render_q23()
         self.Tp = T + (1 << 22)                                 # (1 - Gc) / 2: the step response / 2
-        self.clean = True                                       # RPSP slot tag invalid
+        self.clean = True                                       # SP12 slot tag invalid
         self.sp_reset()
 
     def sp_reset(self):
@@ -822,7 +822,7 @@ class DspExact:
     def visit(self, table, flags, lc):
         """zqtok: bit 12 of the per-voice word on the frame's second pass (LC = 1)
         zeroes the 16 ring frames before the pass's first frame and clears the
-        RPSP slot's tag."""
+        SP12 slot's tag."""
         if not flags & 0x1000 or lc != 1:
             return
         f0 = table[0][0]                                       # (the DSP reads x:(r5))
@@ -837,7 +837,7 @@ class DspExact:
         lc: the voice module's loop counter (2, then 1)."""
         c = self.c
         self.visit(table, flags, lc)
-        if self.mode == MODE_RPS9:
+        if self.mode == MODE_S950:
             out = []
             for k, f in table:
                 out.append(self.adc(k - 2 * self.cc - 1, f >> 19))
@@ -916,7 +916,7 @@ def run(mode, src, r, block=16):
     return np.concatenate(out)
 
 
-# the targets rev 12 was designed to (NOTES Session 111): RPSP overall at 1/1
+# the targets rev 12 was designed to (NOTES Session 111): SP12 overall at 1/1
 # should land near a real SP-1200's raw outputs 7/8 (estimated: E-mu's steep
 # anti-alias filter x the 26.04 kHz staircase's droop, no output filter)
 REAL_SP78 = {5e3: -0.5, 8e3: -1.5, 10e3: -3.4, 12e3: -9.4, 13e3: -14.4, 15e3: -26.4}
@@ -924,20 +924,20 @@ REPORT_F = np.array([1e3, 5e3, 8e3, 10e3, 12e3, 13e3, 14e3, 15e3, 16e3, 18e3, 20
 
 
 def response_report(quantised=True):
-    """The virtual-ADC responses at 1/1 against their targets, and RPSP's
-    render, as printed by this module and by tools/repitch_dsp_engine_check.py.
+    """The virtual-ADC responses at 1/1 against their targets, and SP12's
+    render, as printed by this module and by tools/varispeed_emus_dsp_engine_check.py.
     'worst' is the worst phase in the direction that matters (least gain in the
-    passband, most in the stopband); at 1/1 RPSP's ticks visit every phase."""
+    passband, most in the stopband); at 1/1 SP12's ticks visit every phase."""
     f = REPORT_F
     lines = []
 
     def row(label, v, fs=f):
         return f"  {label:<28}" + " ".join(f"{x/1e3:g}k {y:+6.1f}" for x, y in zip(fs, v))
 
-    for mode, name in ((MODE_RPS9, "RPS9"), (MODE_RPSP, "RPSP")):
+    for mode, name in ((MODE_S950, "S950"), (MODE_SP12, "SP12")):
         tab = fir_q23(mode) / float(1 << 23) if quantised else fir_table(mode)
         db = np.array([20 * np.log10(np.maximum(fir_response(tab, ph, f), 1e-9)) for ph in range(PHASES)])
-        if mode == MODE_RPS9:
+        if mode == MODE_S950:
             want = 20 * np.log10(fir_target(mode, f)[0])
             lines.append(f"{name}: {tab.shape[1]}-tap kernel vs the MF6CN-50 shape (6th-order Butterworth @ "
                          f"{0.4 * FS_AKAI / 1e3:g} kHz), at 1/1")

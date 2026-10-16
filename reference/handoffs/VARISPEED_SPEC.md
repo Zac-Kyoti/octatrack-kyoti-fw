@@ -14,7 +14,7 @@ none of his hook sites or mechanisms. Keep it that way.
 Two roles:
 
 - **Dirty:** the session that has read Jannik's code or his firmware notes. It writes this spec,
-  reviews results against behaviour, and alone keeps `REPITCH_REWRITE_OVERLAP.md`.
+  reviews results against behaviour, and alone keeps `VARISPEED_OVERLAP.md`.
 - **Clean:** a fresh agent that does the firmware RE (scope) and the implementation, working
   from the **stock 1.40C image** and this project's general knowledge.
 
@@ -27,12 +27,12 @@ Two roles:
 - `reference/kb/octabam-index.md`, section `` ## `docs/firmware/REPITCH.md` `` (it ends at the
   next `## ` heading)
 - in this repo: `octabam-modules/repitch-repeat98-kyoti/patch_repitch_kyoti.s` and
-  `manifest.py` (use the redacted `REPITCH_REWRITE_RETAINED.s` instead)
+  `manifest.py` (use the redacted `VARISPEED_RETAINED.s` instead)
 - `tools/repitch_probe_kyoti.cpp`, `tools/repitch_ot_emu_trace.patch`, and any other `tools/*repitch*`
   file not on the allowed list below (the old standalone builder is deleted on `main`; do not
   dig it out of git history)
 - `reference/handoffs/REPITCH_*.md` **except this file and the scope file the clean agent
-  writes**, especially `REPITCH_REWRITE_OVERLAP.md`
+  writes**, especially `VARISPEED_OVERLAP.md`
 - `NOTES.md` sessions and `CREDITS.md` paragraphs about repitch / RPCH / REPITCH
 - `reference/handoffs/KYOTI_LOAD_AUDIT.md` (it names the old core's routines; §6 below carries
   the numbers)
@@ -56,19 +56,19 @@ comments mention the old ColdFire routine names in passing; names alone are fine
   octabam's general firmware docs (PARAM_PAGES, STORAGE, …) minus repitch paragraphs, and
   octabam's toolchain and schema
 - the DSP-side tools (ours, checked 2026-10-14 to carry nothing of his but file names):
-  `tools/patch_repitch_dsp.asm`, `tools/repitch_dsp_src.py`, `tools/repitch_engine_model.py`,
-  `tools/repitch_dsp_check.py`, `tools/repitch_dsp_engine_check.py`,
-  `tools/repitch_dsp_engine_probe.cpp`, `tools/repitch_dsp_octabam.py`,
-  `tools/repitch_dsp_octabam_check.py`, `tools/repitch_dsp_boot_check.py`,
-  `tools/repitch_dsp_boot_probe.cpp`, `tools/repitch_dsp_probe.cpp`, `tools/repitch_dsp_render.cpp`,
-  `tools/repitch_dsp_listen.py`, `tools/repitch_dsp_profile.py`, and `tools/dsp_xasm.py`
-- `REPITCH_REWRITE_DSP_INSTALL.py`: the old builder's DSP half, extracted verbatim (ours)
+  `tools/varispeed_emus_dsp.asm`, `tools/varispeed_emus_dsp_src.py`, `tools/varispeed_emus_model.py`,
+  `tools/varispeed_emus_dsp_check.py`, `tools/varispeed_emus_dsp_engine_check.py`,
+  `tools/varispeed_emus_dsp_engine_probe.cpp`, `tools/varispeed_emus_dsp_octabam.py`,
+  `tools/varispeed_emus_dsp_octabam_check.py`, `tools/varispeed_emus_dsp_boot_check.py`,
+  `tools/varispeed_emus_dsp_boot_probe.cpp`, `tools/varispeed_emus_dsp_probe.cpp`, `tools/varispeed_emus_dsp_render.cpp`,
+  `tools/varispeed_emus_dsp_listen.py`, `tools/varispeed_emus_dsp_profile.py`, and `tools/dsp_xasm.py`
+- `VARISPEED_DSP_INSTALL.py`: the old builder's DSP half, extracted verbatim (ours)
 - the oracle `out/oracle/shipped_repitch_repeat98_kyoti_FINAL.bin` (sha256 `90b4a1c1…`), the
   shipped FINAL image: run it **only** through the §5 black-box harness, which compares outputs.
   Never disassemble it, diff it, or trace its ColdFire code
-- our own code: `REPITCH_REWRITE_RETAINED.s` (redacted from the shipped module),
+- our own code: `VARISPEED_RETAINED.s` (redacted from the shipped module),
   `octabam-modules/repitch-repeat98-kyoti/rpk_glyphs.s`, `patch_repitch_reload.s`,
-  `rpk_dsp.asm`, `rpk_dsp_ptable.py`, and the module's `README.md`
+  `vem_dsp.asm`, `vem_dsp_ptable.py`, and the module's `README.md`
 - other features' code in this repo (DIRECT_JUMP, MUTE_MODES, …) as examples of how we hook
 
 A firmware fact the clean agent rediscovers on its own (including a site that may turn out to
@@ -136,11 +136,11 @@ One build only: VARI + S950 + SP12, with the DSP kernel. There is no VARI-only v
 6. **DSP mode tag** (our own design; the DSP kernel depends on it, unchanged). The Q26
    increment that reaches the DSP voice command carries the engine in **bits 2-3**: 0 = OT,
    1 = S950, 2 = SP12. The DSP rebuilds the increment as a net `>>2`, so bits 0-1 never arrive.
-   On the DSP the mode lands in `y:$40` bits 0-1, where `rpk_dsp.asm` reads it.
+   On the DSP the mode lands in `y:$40` bits 0-1, where `vem_dsp.asm` reads it.
    - On a VARI track: clear bits 0-3, then OR in the latched engine << 2.
    - On **every other increment the firmware builds**: bits 2-3 must be 0 (clean scope §2.5
      measured a stock track whose bits 2-3 read as SP12).
-7. **DSP kernel**: `rpk_dsp.asm` (the hardware-proven kernel) unchanged, with its two hooks and Y
+7. **DSP kernel**: `vem_dsp.asm` (the hardware-proven kernel) unchanged, with its two hooks and Y
    claim as in the module README. It runs its engines only for S950/SP12. Every other voice pass
    costs its short mode check.
 8. **Cost**: a track not on VARI should cost near nothing extra per frame.
@@ -154,7 +154,7 @@ One build only: VARI + S950 + SP12, with the DSP kernel. There is no VARI-only v
     round, and its dial-draw poll reached PICKUP tracks. Neither may happen, for PTCH/QUAN or for
     TSNS/EMUS. Add a test for both.
 
-## 3. Interfaces to the retained code (`REPITCH_REWRITE_RETAINED.s`)
+## 3. Interfaces to the retained code (`VARISPEED_RETAINED.s`)
 
 The retained code is ours and may be changed where VARISPEED_EMUS needs it: the gate range (VARI
 is raw 4 only, not 4..6), the second swapped pair, and item 11's fix.
@@ -180,7 +180,7 @@ is raw 4 only, not 4..6), the second swapped pair, and item 11's fix.
 
 ## 4. Decided (the user, 2026-10-14)
 
-From the EMUS scope's open questions (`REPITCH_REWRITE_SCOPE_EMUS.md`):
+From the EMUS scope's open questions (`VARISPEED_SCOPE_EMUS.md`):
 - **O1:** per-machine parks, gate and `rp_prev` (STATIC and FLEX each have their own), so a
   machine change never swaps. FLEX's PTCH park moving is fine: old projects get no conversion.
 - **O2:** fix the paste/clear/undo class now: hold/forget wrappers on SRC page paste, track
@@ -217,7 +217,7 @@ From the EMUS scope's open questions (`REPITCH_REWRITE_SCOPE_EMUS.md`):
   instead.
 - New behaviour has its own tests: EMUS swap and adoption, the engine latch at trig (a mid-note
   EMUS change does not switch the engine), item 11, and item 10 (no crash).
-- The DSP-side checks (`rpk_dsp.asm` bit-exact vs the engine model) are unchanged and still pass.
+- The DSP-side checks (`vem_dsp.asm` bit-exact vs the engine model) are unchanged and still pass.
 - Hardware: a VARISPEED_EMUS checklist in FLASHING §4 on the MKI before any promotion.
 
 ## 6. The DSP load guard (added 2026-10-14, the user's request)
@@ -245,7 +245,7 @@ in every situation that does not overrun.
      (SPRING is gone in this image. SIDECHAIN_COMPRESSOR, when it shares an image, adds a fixed
      56 per core.)
    - the price of each **sounding** voice's engine: SP12 and S950 at the per-voice worst case
-     from `tools/repitch_dsp_profile.py`; OT costs 0.
+     from `tools/varispeed_emus_dsp_profile.py`; OT costs 0.
 
    Keep every price and budget as a named constant in one place. The DSP kernels are being
    optimized in parallel, so their prices will change. Find which tracks run on which core, and

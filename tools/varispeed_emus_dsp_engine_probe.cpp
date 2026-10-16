@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
-// repitch-kyoti rev 11 (rev 14: two visits per frame, the trig flag, the AMP
+// VARISPEED_EMUS DSP kernel rev 11 (rev 14: two visits per frame, the trig flag, the AMP
 // level, X-memory tables): run the BUILT DSP cave (virtual sampler) inside the
 // real stock voice-engine module on dsp56kEmu, frame after frame, the way the
 // firmware drives it (measured in ot_emu, NOTES Sessions 110 and 112):
@@ -16,10 +16,10 @@
 //     word +$1E carries the trig flag (bit 12), x:$20a -> an AMP state block
 //     whose +8 is the level. RK_SCHED = a file of per-frame "k flags level"
 //     (hex); RK_XDATA = a file of "addr word" (hex) loaded into X (the tables)
-// Driven by tools/repitch_dsp_engine_check.py, which compares the output with
-// tools/repitch_engine_model.py.
+// Driven by tools/varispeed_emus_dsp_engine_check.py, which compares the output with
+// tools/varispeed_emus_model.py.
 //
-// usage: repitch_dsp_engine_probe MOD MODBASE HOOK STOP CAVE CAVEORG BSR0 BSR1
+// usage: varispeed_emus_dsp_engine_probe MOD MODBASE HOOK STOP CAVE CAVEORG BSR0 BSR1
 //                                 MODE RINT RFRAC TRACKOFF IN.raw OUT.raw [COUNT.txt]
 //   RINT/RFRAC: the increment's integer part and 24-bit fraction (hex)
 //   IN/OUT: interleaved stereo int32 holding 24-bit samples.
@@ -128,7 +128,7 @@ int main(int argc, char** argv)
 		// when that fraction is nonzero (measured). Deliver exactly that, and POISON
 		// the next frames: any read of an undelivered frame shows up as noise.
 		// (floor(p_last)+1 IS delivered when that fraction is nonzero: the stock
-		// kernel weights it by the fraction. RPCH needs it; our engine never reads it.)
+		// kernel weights it by the fraction. OT needs it; our engine never reads it.)
 		const uint64_t last = pos + (BLOCK - 1) * incEff;
 		const size_t need = size_t(last >> 24) + 1 + ((last & 0xffffff) ? 1 : 0);
 		if(need + 1 > frames) break;
@@ -143,7 +143,7 @@ int main(int argc, char** argv)
 		}
 		const size_t fr = counts.size();
 		const Sched sc = fr < sched.size() ? sched[fr] : Sched{0, 0, 0};
-		// RK_MODE_SWITCH=N: frames N..2N-1 run in RPCH (mode 0), as a user switching away and back
+		// RK_MODE_SWITCH=N: frames N..2N-1 run in OT (mode 0), as a user switching away and back
 		static const int sw = std::getenv("RK_MODE_SWITCH") ? std::atoi(std::getenv("RK_MODE_SWITCH")) : 0;
 		const uint32_t pm = (sw && fr >= size_t(sw) && fr < size_t(2 * sw)) ? 0 : mode;
 		uint64_t frameCount = 0, caveInstr = 0, caveCyc = 0;

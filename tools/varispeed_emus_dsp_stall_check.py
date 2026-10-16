@@ -8,13 +8,13 @@ is loaded.
 The DSP56300 stalls an instruction that generates an address with an R or N register
 the previous instruction wrote (a move, a parallel register move, a LUA); dsp56kEmu
 neither stalls nor prices it, so the profile cannot see one. This reads the assembled
-kernel (tools/repitch_dsp_src.py, both payloads) and lists every pair of instructions,
+kernel (tools/varispeed_emus_dsp_src.py, both payloads) and lists every pair of instructions,
 adjacent in address order, where the first writes rN / nN and the second addresses with
 it ((rN), (rN)+, (rN)+nN, (rN+nN), (rN+disp), and nN as the update or index).
 Post-updates by the AGU itself ((rN)+, (rN)+nN) are not loads and do not count. A
 branch target's other predecessor is a branch, which writes no AGU register.
 
-    python3 tools/repitch_dsp_stall_check.py
+    python3 tools/varispeed_emus_dsp_stall_check.py
 """
 import pathlib
 import re
@@ -22,7 +22,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import dsp_xasm                          # noqa: E402
-import repitch_dsp_src as dsrc           # noqa: E402
+import varispeed_emus_dsp_src as dsrc           # noqa: E402
 
 ORG = 0x1400
 

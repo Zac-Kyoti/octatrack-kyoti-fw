@@ -109,12 +109,12 @@ not need to move.
 **BTAB's rows** now hold the ten `(T', D)` pairs in the order a tick applies them. Pair `i` is tap
 `9 − i`, segment `iR + j`. A tick walks the row up with `r1` and the ring down with `r7`.
 - The row address is `((u − 1) >> 14) & $FE0`, which equals `$E00 + 32j`.
-- This is asserted in `repitch_dsp_src.constants`: `BTAB = $E00`, 32-word rows, `R = 16`.
+- This is asserted in `varispeed_emus_dsp_src.constants`: `BTAB = $E00`, 32-word rows, `R = 16`.
 
 `tau` is Q23 (−1) instead of Q20. `PSPQ23` is `PSPQ20 << 3`, so the tick schedule is the same
 as before to the bit.
 
-## The kernel (`tools/patch_repitch_dsp.asm`, RPSP)
+## The kernel (`tools/varispeed_emus_dsp.asm`, RPSP)
 
 **Per output, 7 instructions:**
 - `jclr`;
@@ -153,11 +153,11 @@ The ADC and the render both reuse registers that the stall check covers.
 
 | gate | result |
 |---|---|
-| `python3 tools/repitch_dsp_engine_check.py` | 80/80 bit-exact with the new `DspExact`; mode switch 8/8 |
-| `python3 tools/repitch_dsp_octabam_check.py` | 264/264; octabam's own `dsp_asm` assembles the generated `rpk_dsp.asm` to the same 396 words |
-| `python3 tools/repitch_dsp_boot_check.py out/mainos_varispeed_emus.bin` | PASS, fresh `140C_VEM8D` build: +3,598 boot instructions, memory outside `Y:$A00–$FFF` identical, tables and tag as the model |
-| `python3 tools/repitch_dsp_stall_check.py` | PASS |
-| `python3 tools/repitch_dsp_octabam.py --check` | current |
+| `python3 tools/varispeed_emus_dsp_engine_check.py` | 80/80 bit-exact with the new `DspExact`; mode switch 8/8 |
+| `python3 tools/varispeed_emus_dsp_octabam_check.py` | 264/264; octabam's own `dsp_asm` assembles the generated `vem_dsp.asm` to the same 396 words |
+| `python3 tools/varispeed_emus_dsp_boot_check.py out/mainos_varispeed_emus.bin` | PASS, fresh `140C_VEM8D` build: +3,598 boot instructions, memory outside `Y:$A00–$FFF` identical, tables and tag as the model |
+| `python3 tools/varispeed_emus_dsp_stall_check.py` | PASS |
+| `python3 tools/varispeed_emus_dsp_octabam.py --check` | current |
 
 **S950 (RPS9) is unchanged:**
 - In the engine check, all 40 RPS9 cases are bit-exact with the same twin code as before.
@@ -176,7 +176,7 @@ its mid of the anti-phase full-scale signal was zero.
 
 ## Costs, before (mid/side, VEM7) and after (stereo)
 
-`tools/repitch_dsp_cost.py`: both payloads; the four signals × 0.5, 0.75, 1, 1.5, 1.99×; a trig
+`tools/varispeed_emus_dsp_cost.py`: both payloads; the four signals × 0.5, 0.75, 1, 1.5, 1.99×; a trig
 every 37 frames. Prices are in-cave, per output sample.
 
 | SP12 per voice | mid/side | stereo | change |
@@ -219,11 +219,11 @@ conservative (it refuses earlier than needed).
 
 ## What changed in the model and the twin
 
-**`tools/repitch_engine_model.py`:**
+**`tools/varispeed_emus_model.py`:**
 - `Engine`'s default is `ms=False`. RPSP's stereo path ticks from `p_i − (1 − u)·r`; the
   `prev` / resync is gone.
 - `Engine(ms=True)` (`render_ms`, `MS_*`, `side_avg`) is kept only so the old listening-pack
-  tools (`repitch_ab_pack.py`, `repitch_ab_speeds.py`) still run. Nothing in the kernel, the
+  tools (`varispeed_emus_ab_pack.py`, `varispeed_emus_ab_speeds.py`) still run. Nothing in the kernel, the
   twin or the gates uses it, and it can be deleted with those tools.
 
 **`DspExact`, rewritten for stereo RPSP:**
@@ -238,7 +238,7 @@ conservative (it refuses earlier than needed).
 
 The mid/side twin, its channel-filter / channel 1/2 code and `cutoff` / `dyn_coef` are gone.
 
-**`tools/repitch_dsp_src.py`:**
+**`tools/varispeed_emus_dsp_src.py`:**
 - `render_tp()`; `render_half()` is now `T'`;
 - constants: `PSPQ23`, `RINGN` / `RINGM1` (20 / 19), `BTSTEP`;
 - removed: `SIDEC`, `KD`, `LS0`, `LSSH`, `PSPQ20`, `PSPM1`, `TTAP0`, `BTNEG`, `variant_text`,
@@ -251,11 +251,11 @@ The mid/side twin, its channel-filter / channel 1/2 code and `cutoff` / `dyn_coe
 - builds the rows in application order (`k = iR + j`, step `R − 1`).
 
 **Tools:**
-- `tools/repitch_dsp_engine_check.py`: the 24-bit limit on the design's output for the
+- `tools/varispeed_emus_dsp_engine_check.py`: the 24-bit limit on the design's output for the
   comparison; work directory `out/repitch_engine_check_sp12st`.
-- `tools/repitch_dsp_boot_check.py`: the expected `BTAB`.
-- `tools/repitch_dsp_profile.py`: `--ratios`.
-- `tools/repitch_dsp_octabam.py`: no `variant_text`; the substitution's new comment.
+- `tools/varispeed_emus_dsp_boot_check.py`: the expected `BTAB`.
+- `tools/varispeed_emus_dsp_profile.py`: `--ratios`.
+- `tools/varispeed_emus_dsp_octabam.py`: no `variant_text`; the substitution's new comment.
 - `tools/dsp_xasm.py`: an XY dual move with an ALU op may now write X memory, as in
   `asl b a,x:(r3)+ y:(r7)+,a`. Before, only X reads were recognised. octabam's `dsp_asm` encodes
   the same words.

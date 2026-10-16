@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-repitch-kyoti rev 14, gate 1: the channel 1/2 listening pack.
+VARISPEED_EMUS DSP kernel rev 14, gate 1: the channel 1/2 listening pack.
 
-RPSP as rev 13 plays it (raw outputs 7/8, the float model), then the same
-through the SSM2044-style channel 1/2 stage (tools/repitch_engine_model.py,
+SP12 as rev 13 plays it (raw outputs 7/8, the float model), then the same
+through the SSM2044-style channel 1/2 stage (tools/varispeed_emus_model.py,
 Ch12) with each envelope candidate, for two ways of triggering:
 
   loop    one trig per loop pass (the user's pattern A02: T2 has a single trig
@@ -13,7 +13,7 @@ Ch12) with each envelope candidate, for two ways of triggering:
   16ths   a trig on every 16th note, as an SP-1200 plays a break chopped onto
           pads (on the OT: slices, one trig per step) -- it opens on every hit
 
-    python3 tools/repitch_ch12_listen.py SOURCE.wav [OUT_DIR]
+    python3 tools/varispeed_emus_ch12_listen.py SOURCE.wav [OUT_DIR]
 
 Writes 16-bit WAVs to OUT_DIR (default out/rev14_listen/) and prints, per
 file, the spectral balance and the fold of rev 13's render vs the box render
@@ -28,7 +28,7 @@ import numpy as np
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import repitch_engine_model as m   # noqa: E402
+import varispeed_emus_model as m   # noqa: E402
 
 SR = 44100
 
@@ -68,8 +68,8 @@ def drum_loop(bpm=120.0, bars=2, seed=7):
     return np.stack([y, np.roll(y, 3)], 1)
 
 
-def rpsp78(src, r, render="rev13"):
-    """rev 13's RPSP (float model). render='box' swaps in rev 11/12's box render."""
+def sp12_78(src, r, render="rev13"):
+    """rev 13's SP12 (float model). render='box' swaps in rev 11/12's box render."""
     if render == "box":
         saved = m.render_gc
         L, R = m.RENDER["L"], m.RENDER["R"]
@@ -78,10 +78,10 @@ def rpsp78(src, r, render="rev13"):
         gc[(L - 1) * R:] = np.linspace(0.0, 1.0, R + 1)
         m.render_gc = lambda: gc
         try:
-            return m.run(m.MODE_RPSP, src, r)
+            return m.run(m.MODE_SP12, src, r)
         finally:
             m.render_gc = saved
-    return m.run(m.MODE_RPSP, src, r)
+    return m.run(m.MODE_SP12, src, r)
 
 
 def ch12(y, hits, env, amp=None, **kw):
@@ -117,7 +117,7 @@ def fold_report(envs=("A", "B", "C"), bpm=120.0):
         ff = SR - m.FS_SP - f0
         row = []
         for render in ("rev13", "box"):
-            y78 = rpsp78(src, 1.0, render)[2000:]
+            y78 = sp12_78(src, 1.0, render)[2000:]
             for env in ("7/8",) + tuple(envs):
                 y = y78 if env == "7/8" else ch12(y78, [h - 2000 for h in hits if h >= 2000], env,
                                                    amp=np.ones(len(y78)) if env == "A" else None)
@@ -134,17 +134,17 @@ def fold_report(envs=("A", "B", "C"), bpm=120.0):
 
 
 def junk_report(src):
-    """Drop-sample junk (tools/repitch_sp_reference.py: what no linear filter of
+    """Drop-sample junk (tools/varispeed_emus_sp_reference.py: what no linear filter of
     a clean pitch-down explains) per band, rev 13's raw 7/8 vs rev 14's channel
     1/2 (envelope A), dB re rev 13's output power in the band. The same channel
     1/2 filter (same trigs, same AMP level) is put on the clean reference first,
     so the fit sees the filter and only the junk is left."""
-    import repitch_sp_reference as ref
+    import varispeed_emus_sp_reference as ref
     lines = ["junk per band, dB re rev 13's output:  " + " ".join(f"{a/1e3:g}-{b/1e3:g}k".rjust(9) for a, b in ref.BANDS)]
     for r, bpm in ((0.5625, 90.0), (0.75, 90.0)):
         n = int(min(4.0, (len(src) - 200) / r / SR) * SR)
         clean = ref.clean_pitch(src, r, n)
-        y78 = m.run(m.MODE_RPSP, src, r)[:n]
+        y78 = m.run(m.MODE_SP12, src, r)[:n]
         n = min(len(clean), len(y78)); clean, y78 = clean[:n], y78[:n]
         P13 = ref.band_power(y78[:, 0])
         j13 = ref.band_power(ref.junk(y78, clean)[:, 0])
@@ -174,7 +174,7 @@ def main():
     cases = [("isaak", 0.75, 90), ("isaak", 1.0, 120), ("drumloop_synthetic", 0.75, 90), ("drumloop_synthetic", 1.0, 120)]
     for name, r, bpm in cases:
         src = np.concatenate([sources[name]] * 2)            # two passes of the loop
-        y78 = rpsp78(src, r)
+        y78 = sp12_78(src, r)
         n = len(y78)
         loop_len = int(round(len(sources[name]) / r))
         hits = {"loop": list(range(0, n, loop_len)),

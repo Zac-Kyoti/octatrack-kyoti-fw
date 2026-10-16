@@ -6,13 +6,13 @@ any kind**. Every gate passes on the final kernel:
 
 | gate | result |
 |---|---|
-| `python3 tools/repitch_dsp_engine_check.py` | 80/80 bit-exact with `DspExact`, mode switch 8/8 |
-| `python3 tools/repitch_dsp_octabam_check.py` | 264/264; octabam's own `dsp_asm` assembles the generated `rpk_dsp.asm` to the same 429 words |
-| `python3 tools/repitch_dsp_boot_check.py out/mainos_varispeed_emus.bin` | PASS (fresh `140C_VEM4D` build) |
-| `python3 tools/repitch_dsp_octabam.py --check` | current |
-| `python3 tools/repitch_dsp_stall_check.py` (new) | PASS: no address register is used right after it is loaded |
+| `python3 tools/varispeed_emus_dsp_engine_check.py` | 80/80 bit-exact with `DspExact`, mode switch 8/8 |
+| `python3 tools/varispeed_emus_dsp_octabam_check.py` | 264/264; octabam's own `dsp_asm` assembles the generated `vem_dsp.asm` to the same 429 words |
+| `python3 tools/varispeed_emus_dsp_boot_check.py out/mainos_varispeed_emus.bin` | PASS (fresh `140C_VEM4D` build) |
+| `python3 tools/varispeed_emus_dsp_octabam.py --check` | current |
+| `python3 tools/varispeed_emus_dsp_stall_check.py` (new) | PASS: no address register is used right after it is loaded |
 
-The twin (`tools/repitch_engine_model.py`, `DspExact`) and the tables' contents are untouched.
+The twin (`tools/varispeed_emus_model.py`, `DspExact`) and the tables' contents are untouched.
 
 **Build:** `KYOTI_ALLOW_WIP=1 python3 tools/build_varispeed_emus.py 140C_VEM4D` →
 `out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx`, sha256
@@ -22,17 +22,17 @@ ColdFire half is whatever this branch has (VEM3's), so it tests the DSP change o
 
 ## How it is measured
 
-`tools/repitch_dsp_cost.py` (new) runs the kernel inside the stock voice module on dsp56kEmu
+`tools/varispeed_emus_dsp_cost.py` (new) runs the kernel inside the stock voice module on dsp56kEmu
 with the engine check's protocol (two hook visits a frame, a trig every 37 frames at every
 split, four signals × five ratios, both payloads: 121,272 frames per engine) and counts, per
 16-output frame, the instructions executed **inside the cave** and their datasheet cycles
-(the emulator's `opcodecycles` table, the same unit as `repitch_dsp_profile.py`; the probe's
+(the emulator's `opcodecycles` table, the same unit as `varispeed_emus_dsp_profile.py`; the probe's
 new `RK_FRAMECYC`). Frame 0 (the table copy, which `zqboot` does at boot) is left out. Prices
 are per output sample (frame / 16) unless marked.
 
 Model caveats, both directions:
 * dsp56kEmu prices **no pipeline stalls**. The kernel has none of the address-register kind
-  (`repitch_dsp_stall_check.py`; the baseline had none either).
+  (`varispeed_emus_dsp_stall_check.py`; the baseline had none either).
 * dsp56kEmu charges +1 for **every** `(Rn)±Nn` in a single (non-XY) move: its "pre-update"
   class lumps post-update-by-Nn with `(Rn+Nn)`. The 56300 manual's pre-update modes are only
   `(Rn+Nn)` and `-(Rn)`, and octabam's `cycle_count.py` prices by words. So the model is, if
@@ -42,7 +42,7 @@ Model caveats, both directions:
   once, so its **worst** frame was under-counted by 32. The baseline worst figures below
   are the octabam form's (a DO, counted in full), i.e. the true ones.
 
-`~hw` is `repitch_dsp_profile.py`'s estimate (2 × words, + 2 for a `(rN+disp)` access):
+`~hw` is `varispeed_emus_dsp_profile.py`'s estimate (2 × words, + 2 for a `(rN+disp)` access):
 drum at 0.75 / 1 / 1.5 / 1.99, payload A.
 
 ## Before / after
@@ -111,7 +111,7 @@ instructions, outside every audio pass).
 
 ## Words used, and where
 
-**P** (standalone, `repitch_dsp_src.cave_org`): **429 words** (was 412), ending right below
+**P** (standalone, `varispeed_emus_dsp_src.cave_org`): **429 words** (was 412), ending right below
 DARK REV's routine: A `P:0x13d9..0x1585`, B `P:0x1199..0x1345`. The first run has 432 words
 of room with SIDECHAIN's 388 kept free: **3 spare**. Layout: `zqrp`/`zqtok`/trig 40, RPS9
 60, RPSP 231, `zqboot` 22, `zqinit` 76. SPRING's ~208 free words after DARK's routine are
@@ -121,7 +121,7 @@ the room. The octabam form is the same 429 words (one contiguous block; octabam 
 **X** (SPRING REVERB's own X tables, rewritten by the builder): **465 words**, unchanged in
 size: run 1 (A `X:0x89a4`, B `X:0x8464`) the render's half-table, 81; run 2 (A `X:0x8afc`,
 B `X:0x85bc`) the RPSP half-rows, 128, then RPS9's, 256 — **now tap-major**
-(`repitch_dsp_src.r9_stored`; octabam's `PTABLE2` follows). `zqinit` alone reads them.
+(`varispeed_emus_dsp_src.r9_stored`; octabam's `PTABLE2` follows). `zqinit` alone reads them.
 
 **Y** (unchanged range `Y:$A00-$FFF`): four RPSP slots of `$20` at `$A00` (`$18` words used
 each: the 10-word residual ring, then OH OL PF HM PKW MASK RB | RF PHI RH LS | TAU RW TAG),
@@ -184,9 +184,9 @@ passes ≈ 0.12), read off the before/after profiles.
 
 **Not cycles, but part of the change**
 * The trig ring clear is a `do`, not a `rep` (interruptible; the standalone and octabam's form
-  are now the same code, so `repitch_dsp_octabam.py` lost its REP substitution).
+  are now the same code, so `varispeed_emus_dsp_octabam.py` lost its REP substitution).
 * RPSP's channel-6 and channel-1/2 builds (`RPK_OUT=ch6/ch12`) are dropped from the DSP
-  kernel; `repitch_dsp_src.source()` refuses them. Git history has them; the model still
+  kernel; `varispeed_emus_dsp_src.source()` refuses them. Git history has them; the model still
   renders them for listening packs.
 * `tools/dsp_xasm.py` encodes `tfr a,b` / `tfr b,a` itself: our `dsp_asm` emits JJJ = 001,
   which is `rnd` (its check caught it; octabam's newer assembler has the fix). It also reads
@@ -220,7 +220,7 @@ passes ≈ 0.12), read off the before/after profiles.
 
 * Flash `140C_VEM4D` (above) and A/B by ear against VEM3: it must sound identical; the
   emulator says so word for word, the hardware has not run it. The octabam module's manifest
-  still calls `rpk_dsp.asm` "a copy of the hardware-proven one" — true again only after that
+  still calls `vem_dsp.asm` "a copy of the hardware-proven one" — true again only after that
   flash (not edited here: the ColdFire session owns the manifest).
 * If the load guard is updated, use the per-voice constants above; re-run
-  `tools/repitch_dsp_cost.py` (both `--form`s) after any kernel change.
+  `tools/varispeed_emus_dsp_cost.py` (both `--form`s) after any kernel change.

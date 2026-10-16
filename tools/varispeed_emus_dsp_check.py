@@ -2,22 +2,22 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-repitch-kyoti DSP oracle driver (rev 10).
+VARISPEED_EMUS DSP oracle driver (kernel rev 10).
 
 SUPERSEDED for the engine itself (Session 110, rev 11): its contracts are rev
 10's (12-bit ring truncation + zeroed fractions) and the rev-11 cave does not
-meet them by design. The rev-11 check is tools/repitch_dsp_engine_check.py.
+meet them by design. The rev-11 check is tools/varispeed_emus_dsp_engine_check.py.
 This module stays for its helpers (PAYLOADS, IMG, voice_module,
 module_words), which the rev-11 tools import.
 
 Extracts the stock voice engine from BOTH payloads of our own image, assembles
-tools/patch_repitch_dsp.asm, encodes each payload's prologue hook with
+tools/varispeed_emus_dsp.asm, encodes each payload's prologue hook with
 build_sidechain_compressor.bsr_long (the convention SIDECHAIN_COMPRESSOR's hardware-confirmed
 hooks use -- NOT dsp_asm's `bsr >$abs`, which takes the operand as a literal
-displacement), builds tools/repitch_dsp_probe.cpp against our vendored
+displacement), builds tools/varispeed_emus_dsp_probe.cpp against our vendored
 dsp56kEmu, and runs it once per payload.
 
-    python3 tools/repitch_dsp_check.py [CAVE_ORG_HEX]
+    python3 tools/varispeed_emus_dsp_check.py [CAVE_ORG_HEX]
 
 The cave org defaults to a test address; the real one is the donor slot the
 builder places it in, and the probe is re-run there by the builder.
@@ -32,9 +32,9 @@ BASE = 0x40000400
 IMG = ROOT / "out/raw/section_3_MAIN_OS.bin"
 ASM = ROOT / "vendor/dsp56300/build/source/dsp_host/dsp_asm"
 DIS = ROOT / "vendor/dsp56300/build/source/disassemble/dsp56kDisassemble"
-SRC = ROOT / "tools/patch_repitch_dsp.asm"
-PROBE_SRC = ROOT / "tools/repitch_dsp_probe.cpp"
-PROBE = ROOT / "out/repitch_dsp_probe"
+SRC = ROOT / "tools/varispeed_emus_dsp.asm"
+PROBE_SRC = ROOT / "tools/varispeed_emus_dsp_probe.cpp"
+PROBE = ROOT / "out/varispeed_emus_dsp_probe"
 VEND = ROOT / "vendor/dsp56300"
 
 # (payload, image va, stream length, voice module P base, hook, stop NOP)
@@ -64,7 +64,7 @@ def voice_module(img, va, ln, base):
 
 
 def assemble(org):
-    out = ROOT / "out/patch_repitch_dsp.bin"
+    out = ROOT / "out/varispeed_emus_dsp.bin"
     r = subprocess.run([str(ASM), "-in", str(SRC), "-org", f"{org:x}", "-out", str(out)],
                        capture_output=True, text=True)
     if r.returncode:
@@ -125,11 +125,11 @@ def main():
             if cave != assemble(org)[0]:
                 sys.exit(f"payload {tag}: image cave at P:{org:05x} != source assembled there")
             print(f"\n(built image: hook P:{hook:05x} -> P:{org:05x}, {n} words, == source)")
-        (ROOT / "out/patch_repitch_dsp.bin").write_bytes(cave)
+        (ROOT / "out/varispeed_emus_dsp.bin").write_bytes(cave)
         print(f"\n=== payload {tag}: voice @P:{base:05x} (file 0x{off:x}), hook {hook:05x} -> "
               f"bsr {b0:06x} {b1:06x} ===")
         r = subprocess.run([str(PROBE), str(mpath), f"{base:x}", f"{hook:x}", f"{stop:x}",
-                            str(ROOT / "out/patch_repitch_dsp.bin"), f"{org:x}", f"{b0:x}", f"{b1:x}"],
+                            str(ROOT / "out/varispeed_emus_dsp.bin"), f"{org:x}", f"{b0:x}", f"{b1:x}"],
                            capture_output=True, text=True)
         print(r.stdout.rstrip())
         if r.returncode:

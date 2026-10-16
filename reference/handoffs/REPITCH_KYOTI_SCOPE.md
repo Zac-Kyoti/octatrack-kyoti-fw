@@ -170,7 +170,7 @@ it is expensive. §2 prices each one.
 > switched-capacitor filter, with **no interpolator**. RPS9 as shipped (linear + 12-bit)
 > therefore models only the 12-bit storage. RPSP also still lacks the ~26 kHz hold
 > this section promised. Both are scoped properly, from manufacturer sources, in
-> [`REPITCH_FIDELITY_SCOPE.md`](REPITCH_FIDELITY_SCOPE.md).
+> [`VARISPEED_EMUS_FIDELITY_SCOPE.md`](VARISPEED_EMUS_FIDELITY_SCOPE.md).
 
 The Akai S900/S950 **did** interpolate; that is exactly why detuning on an Akai does not
 sound like detuning on an SP-1200. So the correct S950 model is the interpolator already

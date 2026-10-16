@@ -32,12 +32,13 @@ reference/handoffs/DIRECTJUMP_*
 reference/AR_*.md
 reference/OT_SEQUENCER_BUGS.md
 
-[repitch]
-tools/*repitch*
+[varispeed]
 tools/*varispeed*
 octabam-modules/varispeed-emus/*
 octabam-modules/varispeed/*
 tools/sp1200_filter_response.py
+reference/handoffs/VARISPEED_*
+reference/handoffs/SP12_MIDSIDE_REFERENCE.md
 reference/handoffs/REPITCH_*
 
 [kyoti-v1]

@@ -20,7 +20,7 @@ Topology read off the schematic (identical for CNL2..CNL5, values differ):
 
 i.e. one RC pole loading a unity-gain Sallen-Key pair, then a second
 Sallen-Key pair: a 5-pole low-pass. Ideal op-amps assumed. Marked 🟡 in the
-scope (REPITCH_FIDELITY_SCOPE.md): the values are the manufacturer's, the
+scope (VARISPEED_EMUS_FIDELITY_SCOPE.md): the values are the manufacturer's, the
 response is our computation.
 """
 import numpy as np

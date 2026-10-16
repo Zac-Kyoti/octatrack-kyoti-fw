@@ -8,8 +8,8 @@ the two pack-10 loops, rendered the way the unit renders them.
   * The increment is the firmware's: floor(2^26 * T / S) in Q26 (T, S = project and sample
     BPM x 24), bits 0-3 cleared and the engine tagged in bits 2-3, then the DSP's net >> 2
     (24.24).
-  * S950 and SP12 use the DSP-exact twin (repitch_engine_model.DspExact), which
-    tools/repitch_dsp_engine_check.py holds bit-for-bit to the kernel the unit runs. OT is the
+  * S950 and SP12 use the DSP-exact twin (varispeed_emus_model.DspExact), which
+    tools/varispeed_emus_dsp_engine_check.py holds bit-for-bit to the kernel the unit runs. OT is the
     stock DSP read: 2-tap linear at the same 24.24 positions.
   * One trig at the start of the loop, AMP held at 0.95: a loop played once, as from a
     sequencer trig.
@@ -27,13 +27,13 @@ import sys
 import numpy as np
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import repitch_ab_pack as p              # noqa: E402  (read_wav / write_wav)
-import repitch_dsp_engine_check as ec    # noqa: E402  (exact_for)
-import repitch_dsp_src as dsrc           # noqa: E402
-import repitch_engine_model as m         # noqa: E402
+import varispeed_emus_ab_pack as p              # noqa: E402  (read_wav / write_wav)
+import varispeed_emus_dsp_engine_check as ec    # noqa: E402  (exact_for)
+import varispeed_emus_dsp_src as dsrc           # noqa: E402
+import varispeed_emus_model as m         # noqa: E402
 
 TEMPOS = (78, 104, 130, 156)            # project BPM against a 104 BPM loop: 3/4, 1/1, 5/4, 3/2
-ENGINES = (("OT", 0), ("S950", m.MODE_RPS9), ("SP12", m.MODE_RPSP))
+ENGINES = (("OT", 0), ("S950", m.MODE_S950), ("SP12", m.MODE_SP12))
 
 
 def increment(project_bpm, sample_bpm, mode):

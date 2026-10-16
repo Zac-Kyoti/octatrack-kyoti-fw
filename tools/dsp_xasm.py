@@ -3,8 +3,8 @@
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 A thin, verifying layer over dsp_asm (vendor/dsp56300 dsp_host) for DSP56300
-source that needs what dsp_asm gets wrong or lacks. Added for repitch-kyoti
-rev 11 (NOTES Session 110).
+source that needs what dsp_asm gets wrong or lacks. Added for the S950/SP12
+DSP kernel, rev 11 (NOTES Session 110).
 
 dsp_asm traps this layer exists for (each measured, 2026-09-28):
   * an ALU op with an XY DUAL move (`mac y0,x0,a x:(r0)+,x0 y:(r4)+,y0`)

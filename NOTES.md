@@ -33154,7 +33154,7 @@ like a knob edit. **Oracle contract 10** locks it in.
   increment bits 2-3 (≤ 12·2⁻²⁶ relative, inaudible). Oracle contracts 1 and 3
   restated precisely to that: *stock with only bits 2-3 cleared*.
 
-### The DSP kernel — `tools/patch_repitch_dsp.asm` (27 words), PROVEN
+### The DSP kernel — `tools/varispeed_emus_dsp.asm` (27 words), PROVEN
 Voice engine: payload A `P:0x3a1`, payload B `P:0x1a4`, **identical code
 relocated by `0x1fd`** (two DSP cores). Exact tail layout: `P:0x40f do
 r7,>$41b` (LA `0x41a`), **`P:0x41b` = NOP** = the outer per-voice `do #2`'s
@@ -33173,7 +33173,7 @@ closing instruction (branches illegal there), `P:0x41c` = after the outer loop
   (stock's `do r7` is unguarded); uses only a, b, x1, r1 (all reloaded by
   stock before next use).
 
-**Oracle: `tools/repitch_dsp_check.py` → `tools/repitch_dsp_probe.cpp`** runs
+**Oracle: `tools/varispeed_emus_dsp_check.py` → `tools/varispeed_emus_dsp_probe.cpp`** runs
 the **real stock kernel** on our vendored `dsp56kEmu`, from the hook to the
 closing NOP, unpatched and patched, both payloads, n ∈ {1, 5, 64} × 3 modes.
 Reference = **stock itself on transformed input** (no hand model of DSP
@@ -33262,7 +33262,7 @@ hardware-proven image** (both buses × 3 tables, both payloads' two dispatch
 entries). Spring is FX2-exclusive, so FX1 needed only `id2e`.
 
 **The DSP oracle now tests the built image itself:**
-`python3 tools/repitch_dsp_check.py out/mainos_repitch_kyoti.bin` reads each
+`python3 tools/varispeed_emus_dsp_check.py out/mainos_repitch_kyoti.bin` reads each
 payload's hook from the image, decodes the bsr, reads the cave words at its
 target, confirms they equal the source assembled at that org, and runs the
 probe on those exact words (the unpatched reference module comes from stock).
@@ -33284,7 +33284,7 @@ different from RPCH.
 covers the ColdFire UI and all three modes audibly running. The user then asked
 whether RPS9 does anything, since it sounds close to RPCH.
 
-**Listening render** (`tools/repitch_dsp_render.cpp` + `tools/repitch_dsp_listen.py`,
+**Listening render** (`tools/varispeed_emus_dsp_render.cpp` + `tools/varispeed_emus_dsp_listen.py`,
 new): streams 16-bit test material through the REAL kernel + cave bytes read out of
 the built image on dsp56kEmu. Modelled: the pre-kernel ring fill and the
 (offset, fraction) table. RPS9−RPCH is a constant ≈ −72 dBFS floor on every
@@ -33299,7 +33299,7 @@ had its own DAC clock (my earlier claim came from one forum post). (2) RPSP ship
 without the agreed ~26 kHz hold. That was not disclosed at the time and is disclosed now.
 
 **Manufacturer sources found** (details, quotes, page refs, derived numbers in
-`reference/handoffs/REPITCH_FIDELITY_SCOPE.md` §1):
+`reference/handoffs/VARISPEED_EMUS_FIDELITY_SCOPE.md` §1):
 - SP-1200 Service Manual (1987): fixed 26.04 kHz playback; pitch word = A0 + 7-bit
   fraction through an adder carry (drop/repeat); 12-bit linear DAC via 4051 demux into
   per-channel S/H; level via an 8-bit multiplying DAC on the reference; exactly 2 ×
@@ -33435,7 +33435,7 @@ scratchpad `ot_emu_rk`, never the shared binary):**
   stock ≈1,410, ~3,120 usable for FX; one FX1 FILTER = 192; simple instruction
   ≈ 2 cycles.
 
-**Design as built** (model `tools/repitch_engine_model.py` = the design + an
+**Design as built** (model `tools/varispeed_emus_model.py` = the design + an
 integer twin that is the DSP's contract; scope status section updated):
 - RPS9 = 12-bit(16-tap polyphase "virtual ADC" at p_i − c − 1), the kernel
   shaped like the MF6CN-50 record filter (6th-order Butterworth @ 12.8 kHz =
@@ -33459,7 +33459,7 @@ halves, encodes branches/movem itself, and disassembles every word back
 against the source. Also: Q24 >> 1 is the same value in Q23 (my first RPSP
 had both scaled products doubled; found by per-pass state comparison).
 
-**Verification:** `tools/repitch_dsp_engine_check.py` 80/80 bit-exact vs the
+**Verification:** `tools/varispeed_emus_dsp_engine_check.py` 80/80 bit-exact vs the
 twin (sweep/noise/drum/full-scale × 1, 0.75, 1.5, 0.5, 1.99 × both modes × both
 payloads), poisoned undelivered frames; mode switch away/back bit-exact. Full
 firmware (`ot_emu`, MMTESTDT, the part's TSTR byte = `0x4017113e` for T1 /
@@ -33478,7 +33478,7 @@ replace) — ≈ one FX1 FILTER per RPSP track, half per RPS9 track.
 sha256 `647f3d215cf222647e8f42a5faa14c29c899e5243bb067ed1affe9e8e6511b79`
 (mainos `52c6b1ad…`), 6223 B changed, 0 strays; DSP cave 667 w on each core
 (A `P:0x13de`, B `P:0x119e`). ColdFire identical to rev 10. **NOT flashed.**
-Listening pack: `out/listen/` (`python3 tools/repitch_dsp_listen.py`).
+Listening pack: `out/listen/` (`python3 tools/varispeed_emus_dsp_listen.py`).
 
 ## Session 111 (2026-09-28, `main`) — repitch-kyoti rev 12: tonal correction of RPS9/RPSP (raw SP outs 7/8, least-squares kernels, Akai @ 40 kHz); 80/80 bit-exact; built, NOT flashed
 
@@ -33499,9 +33499,9 @@ images above 13 kHz. RPSP at 1/1 was 2.5–5 dB darker at 8–12 kHz than a real
 raw outputs 7/8.
 
 **1. RPSP → raw outputs 7/8.** Model `SP_CHANNEL = 7`; the ch 3–6 designs stay in
-`repitch_engine_model.py` (future selectable channel). Removed from the DSP path:
+`varispeed_emus_model.py` (future selectable channel). Removed from the DSP path:
 `zqpost`, the PCOEF copy (X:`$E0-$E4` no longer used), the S_POST* state words
-(state 15 → 7 words), `DspExact.post`, `repitch_dsp_src.post_coefs`.
+(state 15 → 7 words), `DspExact.post`, `varispeed_emus_dsp_src.post_coefs`.
 
 **2. RPSP virtual ADC = 12 taps, weighted least squares per phase** (numpy KKT
 solve, exact unity DC per row; rows 16–31 = rows 15–0 reversed, so the table stays
@@ -33538,7 +33538,7 @@ modelled — it was not asked for; it would add ≈ −1 dB at 13 kHz, −2 at 1
 **DSP / layout.** Y: state `$A00+x:$418` (7 of each `$20` slot), table tag `$A7F`,
 RPSP table `$A80-$BFF` (32 × 12), RPS9 `$C00-$DFF`. State tag `$5A5A03` (rev 11's
 `…02` forces a clean state if old state survives a reflash). The RPSP row is
-phase × 12 (×8 + ×4; `repitch_dsp_src` asserts 12/16 taps). Cave: 674 words (226
+phase × 12 (×8 + ×4; `varispeed_emus_dsp_src` asserts 12/16 taps). Cave: 674 words (226
 code + 448 data) against the 675 limit — rev 11's code had to shrink by 13 words to
 fit 64 more table words: shared m1/y1 setup hoisted out of both mode paths and m1
 restored once at `zqdone`, two `tst`s after `and` dropped (Z comes from a1; a2/a0
@@ -33551,7 +33551,7 @@ RPCH 8 (was 9: one `tst` fewer), RPS9 935 = 58.4/sample (rev 11 936), RPSP
 1086–1174 = 68–73/sample (rev 11 1823 = 114) — RPSP now costs about what RPS9 does.
 
 **Verification (all PASS):**
-- `python3 tools/repitch_dsp_engine_check.py`: **80/80 bit-exact** vs the twin
+- `python3 tools/varispeed_emus_dsp_engine_check.py`: **80/80 bit-exact** vs the twin
   (4 signals × 5 ratios × 2 modes × 2 cores, undelivered frames poisoned); twin vs
   float design −144…−150 dBFS (RPSP), −318 (RPS9). The check now also runs the
   **mode switch away and back** itself (RK_MODE_SWITCH=40, drum, 0.75/1.5, both
@@ -33674,7 +33674,7 @@ step) and the DSP saturates at full scale, as it must; on a hot drum loop 0.011%
 samples clip (the twin-vs-float gap of −55…−77 dBFS in the check is exactly this; at
 half level it is −120 dBFS).
 
-**Verification (all PASS):** `repitch_dsp_engine_check.py` 80/80 bit-exact (both
+**Verification (all PASS):** `varispeed_emus_dsp_engine_check.py` 80/80 bit-exact (both
 cores), mode switch 8/8; model render == direct convolution with g (to the analysis
 grid's 1/64-sample tick quantization); full firmware (`ot_emu`, MMTESTDT, the recipe
 in Session 111 above): 4000 frames per mode, engine on every playing pass, core 1
@@ -33717,7 +33717,7 @@ sound = resonance fully left, frequency centred"; Mix = filtered 1–6 + raw 7/8
 page ("Transpose a sound … you get the aliasing and grit that define the instrument").
 
 **User's call: they expect channel 1/2, not raw 7/8.** Scope:
-`reference/handoffs/REPITCH_SP_CH12_SCOPE.md`. Key finding for DSP space with no new donor:
+`reference/handoffs/VARISPEED_EMUS_SP_CH12_SCOPE.md`. Key finding for DSP space with no new donor:
 SPRING's payload loads **five X data tables per core referenced by no code but SPRING's**
 (A X:0x89a4/0x89ec/0x8a34 ×72, 0x8afc ×116, 0x8b70 ×384; B X:0x8464/0x84ac/0x84f4, 0x85bc,
 0x8630; the 27-word X:0x8cf0/0x87b0 is shared with the next module — off limits): 716 words
@@ -33797,17 +33797,17 @@ trigs on steps 1/10/15, T1 set to RPSP and HOLD 0 / REL 30 by part pokes at 0x40
 - The user's project: T2 AMP ATK 0 / HOLD 127 / REL 127 → the AMP level sits at full for the whole
   loop; T2 has ONE trig (step 1) in A02 and plays isaak.wav (4.0 s) through.
 
-**Gate 1 — model + listening (waiting for the user's pick).** `repitch_engine_model.Ch12`: 4 matched
+**Gate 1 — model + listening (waiting for the user's pick).** `varispeed_emus_model.Ch12`: 4 matched
 one-poles (y += g(x−y), g = 1 − e^(−2πf/SR)), f = 1.0 kHz × 2^(4·env); `CH12_ENV` A (diode + RC on
 the AMP level, τ 0.15 s) / B (5 ms attack, τ 0.10 s) / C (instant, τ 1 ms). At rest −3 dB at
-435 Hz, −49 dB at 4 kHz; open −2.4 dB at 8 kHz. `tools/repitch_ch12_listen.py` → `out/rev14_listen/`
+435 Hz, −49 dB at 4 kHz; open −2.4 dB at 8 kHz. `tools/varispeed_emus_ch12_listen.py` → `out/rev14_listen/`
 (README there): isaak 0.75/1.0 + a synthetic break, "loop" (one trig per pass, the user's pattern)
 vs "16ths" (SP-style chopped), A / A-shortamp / B / C / D-extra (the diode + RC on the audio's own
 level — not SP-authentic, the only variant that opens on each drum hit of a loop played from one
 trig). With one trig per loop B and C leave everything after the first hit −12…−22 dB at 1–4 kHz; A
 with the user's AMP is ≈ a static open filter (−5 dB at 10–20 kHz). **Render decision (measured):
 keep rev 13's band-limited render** — through A and B the box render's fold lines stay at −24…−56 dB
-re a tone (rev 13's: −50…−105); `repitch_ch12_listen.py --fold`.
+re a tone (rev 13's: −50…−105); `varispeed_emus_ch12_listen.py --fold`.
 
 ## Session 112 continued (2026-09-28, `main`) — repitch-kyoti rev 14 BUILT: RPSP = SP-1200 channel 1/2 (envelope A), the trig crack fixed, full tables in SPRING's X, DARK REV restored; 80/80 bit-exact; NOT flashed
 
@@ -33855,7 +33855,7 @@ straddle 128 words. Also: `mac x1,y1,a` / `tfr b,a` mis-encode (use `mac y1,x1,a
 dsp_xasm caught all of them.
 
 **Verification (all PASS):**
-- `repitch_dsp_engine_check.py`: **80/80 bit-exact** (both cores; the probe now does two visits per
+- `varispeed_emus_dsp_engine_check.py`: **80/80 bit-exact** (both cores; the probe now does two visits per
   frame with a split, a trig every 37 frames at varying offsets, and a jumping/decaying AMP level),
   mode switch **8/8**; also 80/80 with `RPK_CH12=0`.
 - RPS9: twin without trigs == rev 12's twin (ratios 1.0/0.75/1.5); full firmware MMTESTDT T1 RPS9,
@@ -33872,7 +33872,7 @@ dsp_xasm caught all of them.
 - Gate 0a rerun on rev 14 (FX cycle incl. DARK REV on both cores): DARK REV runs and calls its
   routine on both cores; SPRING's X ranges are read only by rev 14's own cave (zqinit's copy, the
   cutoff table), never written. Scenes: not exercised (no scripted crossfader in the step list).
-- Junk (`repitch_ch12_listen.py --junk`, isaak at 0.5625/0.75): with the user's A02 (HOLD 127) the
+- Junk (`varispeed_emus_ch12_listen.py --junk`, isaak at 0.5625/0.75): with the user's A02 (HOLD 127) the
   drop-sample junk above 4 kHz drops only by the open filter's roll-off (−1…−6.5 dB); under A the
   filter closes only when the AMP does, so "junk gone between hits" needs a shorter HOLD/REL. With a
   0.25 s release on 16ths −4…−11 dB above 6 kHz (the LTI-fit metric is unreliable for a time-varying
@@ -33993,7 +33993,7 @@ reproducible; the patch dry-run-applies to a clean copy of octabam's `ot_emu` + 
 **Harness lesson:** model what the firmware delivers on EVERY pass, including the ones the engine does
 not act on — an assumption about pass structure is only as good as the probe that mimics it.
 
-**Verification:** `repitch_dsp_engine_check.py` 80/80 bit-exact, mode switch 8/8 (the trig schedule
+**Verification:** `varispeed_emus_dsp_engine_check.py` 80/80 bit-exact, mode switch 8/8 (the trig schedule
 includes offset 0 every 16th trig); `RPK_CH12=0` 80/80. Cave 403 words (A `P:0x13f3..0x1585`),
 RPS9 60.6 / RPSP 170.7–172.9 instr/sample (probe).
 
@@ -34413,7 +34413,7 @@ SBASE−2 (`+$3dfe/$3dff`, still above `+$3da2`).
 
 `sctap` indexes the same-core keybus by the ABSOLUTE track (`x:$420` = 4..7 on core 0, NOTES Session 58 watch), so on
 payload A it wrote `Y:$a00..$bff` — REPITCH's STBASE (`$a00`, the RPSP ring) and SPTAB (`$a80..$bff`)
-(`tools/repitch_dsp_src.py`; REPITCH's header assumed "SIDECHAIN3 takes $800-$9ff"). Confirmed on the flashed V1.0:
+(`tools/varispeed_emus_dsp_src.py`; REPITCH's header assumed "SIDECHAIN3 takes $800-$9ff"). Confirmed on the flashed V1.0:
 `--dsp-watch 0:Y:a80/a00/b80` → the only writer is `P:0x125e`, sctap's copy loop, every block. So RPSP on T5-T8 would
 have rendered from a corrupted table in KYOTI V1.0 (standalone REPITCH has no SIDE-CHAIN, so it never showed).
 **New keybus layout:** slot(t) = `$800 + t*$40` (gen 0 `+$00..$1f`, gen 1 `+$20..$3f`) → `$800..$9ff`; MON_ON/MON_KEY
@@ -35286,13 +35286,13 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
 * **HW test image OBKYOTI8, BUILT, NOT flashed** (out/octabam_kyoti8/): the six KYOTI modules + REC_TRIG_MUTE +
   SIDECHAIN_COMPRESSOR, stock effects less SPRING REV. syx `93c544391a366068063ad8b8257b782c5fe3ece68b12a254447b6a5db13842c2`,
   card `e0a8a5f4…`, mainos `4b03a5ac…`. `check-remix` green, `verify_dram_boot` PASS, 248 B ROM cave left.
-* **REPITCH DSP half** (`7c63d45`, local): `tools/repitch_dsp_octabam.py` generates
+* **REPITCH DSP half** (`7c63d45`, local): `tools/varispeed_emus_dsp_octabam.py` generates
   `octabam-modules/repitch-repeat98-kyoti/rpk_dsp.asm` + `rpk_dsp_ptable.py` from the standalone kernel (asserted
   substitutions): constants resolved; the 593 table words one ptable block (render half +0, cutoff +0x51, RPSP
   +0x91, RPS9 +0x151) read through `p:(rN)`; zqrp loads the one base literal and re-inits when the tag OR the
   stored base (Y:$ff0) differs; zqinit stores the base and the cutoff table's address (Y:$ff1); zqsp adds the
   latter. Manifest: `Kind.HYBRID`, hook `zqrp` (A `0x40b`, B `0x20e`, stock `76e500 5edd00`), claim Y:$a00-$fff.
-  `tools/repitch_dsp_octabam_check.py`: **176/176 bit-exact** with the DSP twin (both payloads, tables in P and in
+  `tools/varispeed_emus_dsp_octabam_check.py`: **176/176 bit-exact** with the DSP twin (both payloads, tables in P and in
   the X curve bank, mode switches); RPS9 61.1 / RPSP 171.2-173.5 instr/sample (standalone 60.6 / 170.7-172.9).
   octabam `make bus` places it (ptable P:0x1252, code P:0x14a3 on A) and stops only at the four XY+ALU lines;
   with those swapped for plain XY moves (diagnostic only) its dsp_asm assembles the 420 words. Octabam branch
@@ -35331,7 +35331,7 @@ Sam merged A–F (#545) and the six modules (#546, pinned to `7f80b85`).
   B 0x8464..0x87af — the 128-word record between our two runs is SPRING's too); his port canary: all 844 words intact.
 * **REPITCH kernel → two blocks** (`a4106b7`, pushed): block 1 = render half-table + cutoff table (145, `$fab1e0`),
   block 2 = RPSP + RPS9 rows (448, `$fab2e0`); zqrp re-inits on tag or either base (Y:$ff0 / $ff2; TABG Y:$ff1); code
-  426 words. `tools/repitch_dsp_octabam_check.py`: **264/264 bit-exact** (P, curve bank, SPRING X data; both payloads);
+  426 words. `tools/varispeed_emus_dsp_octabam_check.py`: **264/264 bit-exact** (P, curve bank, SPRING X data; both payloads);
   RPS9 61.6 / RPSP 171.8–174.0 instr/sample. Octabam puts the code in SPRING's P run and the blocks at A X:0x89a4 / 0x8a35,
   B X:0x8464 / 0x84f5: word for word that build. Test remix gives up SPRING REV only. #561 head `2c153364`, reach green, draft.
 * **HW test image OBKYOTI11, BUILT, NOT flashed** (out/octabam_kyoti11/): every KYOTI module incl. REPITCH and SIDECHAIN,
@@ -35591,8 +35591,8 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
   ADC at 26.04 kHz, 12 bits, the 10-tap band-limited render), then the SP's fixed channel 5 output
   filter; the side (L−R)/2 read clean at the OT position less the mid path's delay (c+1 frames + 7
   increments); L, R = mid ± side. Channel 1/2 (the AMP-following sweep) is gone.
-* **Kernel bit-exact to the model's twin** (`repitch_dsp_engine_check.py`, both payloads;
-  `repitch_dsp_octabam_check.py` 264/264 at all three table placements). Twin vs float design
+* **Kernel bit-exact to the model's twin** (`varispeed_emus_dsp_engine_check.py`, both payloads;
+  `varispeed_emus_dsp_octabam_check.py` 264/264 at all three table placements). Twin vs float design
   −116 dBFS where nothing clips. **Cost, modelled cycles per output sample: RPSP 159 (was 234),
   RPS9 57 (was 77)** — above the ~100–120 estimated before writing it; the design's floor is
   ~140–150 (render 4 Y accesses per tap, side ~27, channel 5 ~17). Net of the skipped stock
@@ -35605,7 +35605,7 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
   dsp_asm mis-sizes a backward `bsr label` (zqboot sits before zqinit for that).
 * **Load audit's REPITCH items, no change to the sound:** `zqboot` runs the table copy at boot,
   hooked into each payload's one-time memory clear (A P:0x46 / B P:0x47, `do b,LA`; it replays
-  all passes but the last, the stock body runs that one). `repitch_dsp_boot_check.py` boots both
+  all passes but the last, the stock body runs that one). `varispeed_emus_dsp_boot_check.py` boots both
   payloads on dsp56kEmu: memory after boot equals the same image without the hook outside
   Y:0xa00–0xfff, tables + tag equal the model (+2,768 instructions at boot). `rate_gate` skips
   `rp_swap` for a voice that is not repitch now and was not last frame.
@@ -35663,7 +35663,7 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
 * **2026-10-08: the mid's output filter is now SP channel 6 (`c3bf748`).** The user heard less
   metallic grit in rev 17 than in rev 16. Cause: rev 16's RPSP was the raw 7/8 output; rev 17's
   mid goes through channel 5, which cuts the aliasing and staircase images above ~10 kHz that
-  made the grit. Listening pack 9 (private `K558pnkGzhFJxpmVQShP1Z`; `repitch_ab_speeds.py
+  made the grit. Listening pack 9 (private `K558pnkGzhFJxpmVQShP1Z`; `varispeed_emus_ab_speeds.py
   --filters`) offered channel 5, channel 6 and no filter (raw ≈ 147 cycles, estimated). **The user
   picked channel 6.** It has the same 3-pole code with new coefficients: −3 dB near 13 kHz and
   −9 dB at 16 kHz (channel 5: 11.6 kHz, −14 dB). Its group delay is ~0.2 outputs shorter, so
@@ -35823,14 +35823,14 @@ syx `0cb2db07…` (the other six Bugbuilds unchanged). User chose to flash KYOTI
 
 * **Why.** Jannik Aßfalg asked for RPS9/RPSP to be separated altogether from his Repitch (his
   octabam module is DSP-free; ours reused his ColdFire core). The user chose a clean-room rewrite
-  of that core (branch `repitch-rewrite`, `reference/handoffs/REPITCH_REWRITE_SPEC.md`) and,
+  of that core (branch `repitch-rewrite`, `reference/handoffs/VARISPEED_SPEC.md`) and,
   meanwhile, removal of the shipped module from every build here and from octabam.
 * **Removed:** `tools/build_repitch_repeat98_kyoti.py` and its FINAL pin; `BUG_RPK17` from
   `build_bugbuilds.py` (now seven images) and its pin; REPITCH from `build_kyoti.py` (FEATURES,
   PLAN_REPITCH, the glyph placement, SHARED_OK, the --with/--without special cases). README,
   BUILD_KYOTI, FLASHING (§4 check + OS VERSION rows), START_HERE, CLAUDE.md's feature list and
   CREDITS updated. **Kept** as the rewrite's sources: `octabam-modules/repitch-repeat98-kyoti/`
-  (DSP kernel, glyphs, RELOAD hook) and `tools/repitch_dsp_*` / engine model. Their default
+  (DSP kernel, glyphs, RELOAD hook) and `tools/varispeed_emus_dsp_*` / engine model. Their default
   paths to `out/mainos_repitch_repeat98_kyoti.bin` now point at nothing until the rewrite builds.
 * **KYOTI V1.4** = V1.3 minus REPITCH. ROM-only again. V1.1's ROM plan no longer fit (V1.2's
   RELOAD/DIRECT JUMP fixes grew them: CAVE overflowed by `patch_pattern_led`), so
@@ -36455,8 +36455,8 @@ open, Sam's PR #2, and an optimization pass over BLACKPYRAMIDS_303's Octatrack-s
 
 * **What:** VARISPEED = VARI on TSTR (5 positions) + QUAN on PTCH, ATTR `VARI`, the octave fold
   above 2x, OFF outside 30–300 BPM. No emulators, no DSP change (SPRING stays), no EMUS, no load
-  guard. It is the clean-room rewrite's plain build (spec `reference/handoffs/REPITCH_REWRITE_SPEC.md`
-  §7, report `REPITCH_REWRITE_IMPL.md` §14). It shares `octabam-modules/varispeed-emus/varispeed_emus.s`
+  guard. It is the clean-room rewrite's plain build (spec `reference/handoffs/VARISPEED_SPEC.md`
+  §7, report `VARISPEED_IMPL.md` §14). It shares `octabam-modules/varispeed-emus/varispeed_emus.s`
   with VARISPEED_EMUS (assembled with `VEM_EMUS=0`).
 * **Builds:**
   - standalone `tools/build_varispeed.py`: `140C_VARI1`, syx

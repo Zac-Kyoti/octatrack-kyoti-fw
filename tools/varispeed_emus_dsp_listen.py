@@ -2,32 +2,32 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-repitch-kyoti: render the same material through RPCH, RPS9 and RPSP on the
+VARISPEED_EMUS: render the same material through OT, S950 and SP12 on the
 emulated DSP, measure what each mode changes, and write WAVs to listen to.
 
-    python3 tools/repitch_dsp_listen.py [out/mainos_repitch_repeat98_kyoti.bin]
+    python3 tools/varispeed_emus_dsp_listen.py [out/mainos_varispeed_emus.bin]
 
 Rev 11: the cave is read out of the BUILT image (the bytes you would flash) and
 checked against the source; every mode runs through the real stock voice
-module with the firmware's streaming protocol (tools/repitch_dsp_engine_probe.cpp).
-RPCH is the stock kernel itself. Output: out/listen/*.wav + REPORT.txt.
+module with the firmware's streaming protocol (tools/varispeed_emus_dsp_engine_probe.cpp).
+OT is the stock kernel itself. Output: out/listen/*.wav + REPORT.txt.
 """
 import pathlib, subprocess, sys, wave
 import numpy as np
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
-import repitch_dsp_check as chk   # noqa: E402
+import varispeed_emus_dsp_check as chk   # noqa: E402
 import build_sidechain_compressor as sc3    # noqa: E402
 
 SR = 44100
 OUTDIR = ROOT / "out/listen"
-RENDER = ROOT / "out/repitch_dsp_render"
+RENDER = ROOT / "out/varispeed_emus_dsp_render"
 VEND = ROOT / "vendor/dsp56300"
 
 
 def build_render():
-    import repitch_dsp_engine_check as ck
+    import varispeed_emus_dsp_engine_check as ck
     ck.build_probe()
     return ck.PROBE
 
@@ -100,7 +100,7 @@ def hats(n):
 
 SIGNALS = {"tone_decay": tone_decay, "drum_loop": drum_loop, "quiet_pad": quiet_pad, "hats": hats}
 RATIOS = {"1x": 1.0, "0.75x": 0.75, "1.5x": 1.5}
-MODES = {"RPCH": 0, "RPS9": 1, "RPSP": 2}
+MODES = {"OT": 0, "S950": 1, "SP12": 2}
 
 
 def write_wav(path, stereo24):
@@ -128,9 +128,9 @@ def hf_share(x, cut=12000):
 
 
 def main():
-    import repitch_dsp_engine_check as ck
-    import repitch_dsp_src as dsrc
-    built = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "out/mainos_repitch_repeat98_kyoti.bin")
+    import varispeed_emus_dsp_engine_check as ck
+    import varispeed_emus_dsp_src as dsrc
+    built = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "out/mainos_varispeed_emus.bin")
     img, stock = built.read_bytes(), chk.IMG.read_bytes()
     tag, va, ln, base, hook, stop = chk.PAYLOADS[0]            # payload A
     mod, _ = chk.voice_module(stock, va, ln, base)
@@ -169,11 +169,11 @@ def main():
                     sys.exit(f"render failed ({sname} {rname} {mname}):\n{r.stdout[-800:]}")
                 outs[mname] = np.frombuffer(o.read_bytes(), dtype="<i4").astype(np.int64)
                 write_wav(OUTDIR / f"{sname}_{rname}_{mname}.wav", outs[mname])
-            ref = outs["RPCH"]
+            ref = outs["OT"]
             m = min(len(v) for v in outs.values())
             sig = rms(ref[:m])
             row = {"signal": sname, "ratio": rname, "sig_dbfs": db(sig)}
-            for mname in ("RPS9", "RPSP"):
+            for mname in ("S950", "SP12"):
                 d = outs[mname][:m] - ref[:m]
                 row[f"{mname}_diff_dbfs"] = db(rms(d))
                 row[f"{mname}_diff_rel"] = db(rms(d)) - db(sig)
@@ -182,16 +182,16 @@ def main():
                 row[f"{mname}_hf"] = hf_share(outs[mname][:m])
             report.append(row)
 
-    lines = ["signal      ratio  level    RPS9 vs RPCH        RPSP vs RPCH        energy >12 kHz",
-             "                   dBFS     dBFS   rel.dB       dBFS   rel.dB       RPCH    RPS9    RPSP",
-             "(RPS9/RPSP run a few samples behind RPCH by design, so the difference includes that",
+    lines = ["signal      ratio  level    S950 vs OT        SP12 vs OT        energy >12 kHz",
+             "                   dBFS     dBFS   rel.dB       dBFS   rel.dB       OT    S950    SP12",
+             "(S950/SP12 run a few samples behind OT by design, so the difference includes that",
              " small time offset; the >12 kHz column is the clean measure of what each mode does)"]
     for r in report:
         def cell(mn):
             return ("   identical     " if r[f"{mn}_identical"]
                     else f"{r[f'{mn}_diff_dbfs']:7.1f} {r[f'{mn}_diff_rel']:7.1f}  ")
-        lines.append(f"{r['signal']:<11} {r['ratio']:<6} {r['sig_dbfs']:6.1f}  {cell('RPS9')}  {cell('RPSP')}"
-                     f"  {100*r['RPCH_hf']:5.2f}%  {100*r['RPS9_hf']:5.2f}%  {100*r['RPSP_hf']:5.2f}%")
+        lines.append(f"{r['signal']:<11} {r['ratio']:<6} {r['sig_dbfs']:6.1f}  {cell('S950')}  {cell('SP12')}"
+                     f"  {100*r['OT_hf']:5.2f}%  {100*r['S950_hf']:5.2f}%  {100*r['SP12_hf']:5.2f}%")
     text = "\n".join(lines)
     print(text)
     (OUTDIR / "REPORT.txt").write_text(text + "\n")

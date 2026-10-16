@@ -2,22 +2,22 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-repitch-kyoti rev 17: the complete DSP source = generated constants +
-tools/patch_repitch_dsp.asm, and the table DATA that goes into X memory.
-Everything numeric comes from tools/repitch_engine_model.py, so the DSP and
-its reference model cannot drift apart. Used by tools/build_repitch_repeat98_kyoti.py
+VARISPEED_EMUS DSP kernel (rev 17): the complete DSP source = generated constants +
+tools/varispeed_emus_dsp.asm, and the table DATA that goes into X memory.
+Everything numeric comes from tools/varispeed_emus_model.py, so the DSP and
+its reference model cannot drift apart. Used by tools/build_varispeed_emus.py
 and the DSP harnesses.
 
 Since rev 14 the tables are not in the P cave: they are written over SPRING
 REVERB's own X data tables (five modules per payload that only SPRING's code
 references -- the canary run of NOTES Session 112), and zqinit copies them to
 Y. Run 1 (three adjacent 72-word modules) holds the render's half-table; run
-2 (116 + 384 words) the RPSP and RPS9 half-rows, in that order (zqinit's r1 runs
-on from one to the next). RPSP is full stereo since 2026-10-15 (raw outputs 7/8, 8-tap
+2 (116 + 384 words) the SP12 and S950 half-rows, in that order (zqinit's r1 runs
+on from one to the next). SP12 is full stereo since 2026-10-15 (raw outputs 7/8, 8-tap
 ADC per channel; reference/handoffs/VARISPEED_EMUS_SP12_STEREO.md); rev 17's mid/side
 is at the tag ref/sp12-midside-vem7.
 
-    python3 tools/repitch_dsp_src.py [A|B] [ORG]   -> assembles, prints size + tag
+    python3 tools/varispeed_emus_dsp_src.py [A|B] [ORG]   -> assembles, prints size + tag
 """
 import os
 import pathlib
@@ -28,23 +28,23 @@ import numpy as np
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import dsp_xasm                          # noqa: E402
-import repitch_engine_model as m         # noqa: E402
+import varispeed_emus_model as m         # noqa: E402
 
-ASM = HERE / "patch_repitch_dsp.asm"
+ASM = HERE / "varispeed_emus_dsp.asm"
 
 # Y:$795..$FFF is free on stock (octabam, hardware); SIDECHAIN3 owns $800-$9FF.
-# Per-track RPSP slots at STBASE + x:$418 ($20 words: the render's stereo ring, 2L words
+# Per-track SP12 slots at STBASE + x:$418 ($20 words: the render's stereo ring, 2L words
 # with L and R interleaved, modulo-addressed so it starts the slot, then the state); the
-# tag in the last word of track 3's slot; the RPSP table (32 x 8 = $100 words), the RPS9
+# tag in the last word of track 3's slot; the SP12 table (32 x 8 = $100 words), the S950
 # table (32 x 16 = $200), the render's step table at $E00 (R rows of BROW words: the L
 # taps' (T', D) pairs, then padding, so a row starts at BTAB + BROW j; to $FFF). zqinit
-# builds T' in a scratch run inside the RPS9 table's place before it copies that table.
+# builds T' in a scratch run inside the S950 table's place before it copies that table.
 STBASE, TABTAG, SPTAB, R9TAB, BTAB, YEND = 0xA00, 0xA7F, 0xA80, 0xC00, 0xE00, 0x1000
 BROW = 32                                 # the render table's row stride (2L = 20 words used)
 TTMP = R9TAB                              # zqinit's scratch run of the render's T (161 words)
 # the tag says the Y tables' CONTENTS and LAYOUT are this build's: Y_LAYOUT moves it when the
 # copy changes shape (2: rev 17's first cut, the cutoff table in Y; 3: no cutoff table; 4: the render's
-# table transposed; 6: the VEM DSP optimisation, padded render rows, RPS9 transposed)
+# table transposed; 6: the VEM DSP optimisation, padded render rows, S950 transposed)
 Y_LAYOUT = 7                              # 7: SP12 stereo (the render's table holds T' = T + 1/2)
 TAGSP = 0x5A5A0A                          # "this slot is this layout's" (rev 11: ...02, 12: ...03, 13: ...04, 14: ...05, 17 first cut: ...06, aligned: ...07, VEM DSP optimisation: ...09, SP12 stereo: ...0A)
 
@@ -73,7 +73,7 @@ def cave_org(payload, n):
     return org
 
 
-# Rev 14-16's channel 1/2 build switch (RPK_CH12) is gone with channel 1/2 itself (rev 17).
+# Rev 14-16's channel 1/2 build switch (VEM_CH12) is gone with channel 1/2 itself (rev 17).
 CH12 = False
 
 
@@ -95,16 +95,16 @@ def half_table(mode):
 
 
 def r9_stored():
-    """RPS9's 16 stored half-rows in the order zqinit copies them: tap-major (the
+    """S950's 16 stored half-rows in the order zqinit copies them: tap-major (the
     VEM DSP optimisation's table is transposed: tap t of phase p at R9TAB + 32 t + p, so
     a phase's taps are walked with a stride of 32 and its row base is R9TAB + phase)."""
-    r9, n = half_table(m.MODE_RPS9)
+    r9, n = half_table(m.MODE_S950)
     return [r9[n * p + t] for t in range(n) for p in range(16)], n
 
 
 def render_tp():
     """T' = T + 1/2 (Q23) = (1 - Gc) / 2, the render's step response / 2, k = 0..LR: the
-    stereo kernel's ring holds outputs, not residuals (repitch_engine_model.DspExact)."""
+    stereo kernel's ring holds outputs, not residuals (varispeed_emus_model.DspExact)."""
     T, _ = m.render_q23()
     return T + (1 << 22)
 
@@ -120,8 +120,8 @@ def render_half():
 
 def x_data(payload):
     """{X address: word} for one payload: run 1 = the render's half-table,
-    run 2 = RPSP half-rows then RPS9 half-rows."""
-    sp, _ = half_table(m.MODE_RPSP)
+    run 2 = SP12 half-rows then S950 half-rows."""
+    sp, _ = half_table(m.MODE_SP12)
     r9, _ = r9_stored()
     bl = render_half()
     (r1, n1), (r2, n2) = XRUNS[payload]
@@ -133,13 +133,13 @@ def x_data(payload):
 
 
 def constants(payload="A"):
-    sp, spn = half_table(m.MODE_RPSP)
+    sp, spn = half_table(m.MODE_SP12)
     r9, r9n = r9_stored()
     bl = render_half()
     L, R = m.RENDER["L"], m.RENDER["R"]
-    # the asm computes the RPSP row as phase x 8 and the RPS9 row as phase x 16; the
-    # render's fraction as (u << 4), i.e. R = 16; RPS9's 15 taps after the first are unrolled
-    assert (spn, r9n, R, L) == (8, 16, 16, 10), "patch_repitch_dsp.asm's arithmetic (and its unrolled render: L = 10)"
+    # the asm computes the SP12 row as phase x 8 and the S950 row as phase x 16; the
+    # render's fraction as (u << 4), i.e. R = 16; S950's 15 taps after the first are unrolled
+    assert (spn, r9n, R, L) == (8, 16, 16, 10), "varispeed_emus_dsp.asm's arithmetic (and its unrolled render: L = 10)"
     tag = ((sum((i + 1) * w for i, w in enumerate(sp + r9 + bl)) + Y_LAYOUT) * 2654435761) & 0xFFFFFF | 1
     (x1, _), (x2, _) = XRUNS[payload]
     c = dict(
@@ -164,7 +164,7 @@ def constants(payload="A"):
     assert 2 * L <= 0x20 and STBASE % 0x20 == 0, "the stereo ring must fit a 32-aligned slot"
     assert TABTAG < SPTAB and SPTAB + 32 * spn <= R9TAB and R9TAB + 32 * r9n <= BTAB
     assert c["BEND"] <= YEND and 2 * L <= BROW and BROW & (BROW - 1) == 0
-    # the tick finds row j as ((u - 1) >> 14) & $fe0 (patch_repitch_dsp.asm, RPSP): BTAB = $E00
+    # the tick finds row j as ((u - 1) >> 14) & $fe0 (varispeed_emus_dsp.asm, SP12): BTAB = $E00
     assert (BTAB, BROW, R) == (0xE00, 32, 16), "the render row's bit trick wants BTAB $E00, 32-word rows, R = 16"
     assert 2 * L == 0x14 and STBASE + 0x60 + 0x1B < TABTAG, "the slot's state starts at $14 and ends before TABTAG"
     assert R9TAB <= TTMP and TTMP + L * R + 1 <= R9TAB + 32 * r9n     # the scratch run, before R9TAB is copied
@@ -189,7 +189,7 @@ if __name__ == "__main__":
     try:
         words, syms, c = assemble(org, pl)
     except dsp_xasm.AsmError as e:
-        sys.exit(f"repitch DSP source: {e}")
+        sys.exit(f"VARISPEED_EMUS DSP source: {e}")
     xd = x_data(pl)
     print(f"payload {pl}: {len(words)} P words at P:{org:05x} (code only); "
           f"{len(xd)} X words; TAGVAL {c['TAGVAL']:06x}")

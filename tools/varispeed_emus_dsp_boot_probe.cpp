@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Zac Kyoti
 //
-// repitch-kyoti rev 17: run one payload's boot path on dsp56kEmu -- from its
+// VARISPEED_EMUS DSP kernel (rev 17): run one payload's boot path on dsp56kEmu -- from its
 // entry P:0x40 (the one-time memory clear) to the head of its frame loop -- and
-// dump memory, so tools/repitch_dsp_boot_check.py can compare a patched image
+// dump memory, so tools/varispeed_emus_dsp_boot_check.py can compare a patched image
 // (zqboot hooked into the clear) with stock word for word.
 //
-// usage: repitch_dsp_boot_probe PAYLOAD.mem STOP OUT.bin
+// usage: varispeed_emus_dsp_boot_probe PAYLOAD.mem STOP OUT.bin
 //   PAYLOAD.mem: tools/dsp_modmap.py's --dumpmem format ([u8 space][u32 addr]
 //   [u32 count] + count u32 words, space 0xff ends); STOP: the P address to stop
 //   at (hex). Every data register, address register and memory word not loaded

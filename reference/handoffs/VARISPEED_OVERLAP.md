@@ -1,6 +1,6 @@
 # REPITCH rewrite: overlap with Jannik's REPITCH (DIRTY: clean agents must not read this)
 
-Written 2026-10-13 by the dirty side, after the clean scope (`REPITCH_REWRITE_SCOPE.md`) came
+Written 2026-10-13 by the dirty side, after the clean scope (`VARISPEED_SCOPE.md`) came
 back. It compares the sites the clean agent derived from the stock image with the sites Jannik
 Aßfalg's octabam REPITCH uses (`modules/repitch/`, and adapted into the shipped
 REPITCH_REPEAT98_KYOTI). Its purpose is an honest answer to "how much of the *where* is forced",
@@ -48,7 +48,7 @@ only (`tools/repitch_*`, builder, DSP asm, engine model, NOTES/README/CREDITS), 
 auto-memory index was in its context at start (no addresses of his in it). It read the module
 README (allowed), which names the old hook kinds. Its design uses neither.
 
-## Addendum 2026-10-14: the VARISPEED_EMUS revision (`REPITCH_REWRITE_SCOPE_EMUS.md`)
+## Addendum 2026-10-14: the VARISPEED_EMUS revision (`VARISPEED_SCOPE_EMUS.md`)
 
 - **TSTR now matches his data changes exactly**: count 4 → 5, widget → the unmodified 5-position
   select `0x40046ab4`, and a new formatter. The descriptor format forces this: it is stock's
@@ -61,7 +61,7 @@ README (allowed), which names the old hook kinds. Its design uses neither.
   that is ours and also in the retained code), seeing file names only, and the memory index in
   its context.
 
-## Addendum 2026-10-14: the implementation (`REPITCH_REWRITE_IMPL.md`)
+## Addendum 2026-10-14: the implementation (`VARISPEED_IMPL.md`)
 
 - As implemented: one ColdFire unit (2,952 B at `0x400d6500`), 18 detours, 12 descriptor pokes.
   The scope's sites, plus the O2 wrappers on the PART menu's paste core `0x40029a4c` and CLEAR

@@ -94,8 +94,8 @@ there.
 
 ## Checks for whichever is built
 
-- `repitch_dsp_engine_check.py`: the kernel bit-exact against its twin at the new table or
+- `varispeed_emus_dsp_engine_check.py`: the kernel bit-exact against its twin at the new table or
   structure.
-- `repitch_dsp_profile.py`: cycles per voice.
+- `varispeed_emus_dsp_profile.py`: cycles per voice.
 - The KYOTI load-audit setup on hardware (four S950 voices + DARK REV per core).
 - An A/B pack of the built kernel (the twin), not the float model.

@@ -5,22 +5,22 @@
 VARISPEED_EMUS's DSP prices per voice: what the load guard budgets with.
 
 Runs the kernel inside the stock voice module on dsp56kEmu with the engine check's
-protocol (tools/repitch_dsp_engine_check.py: two hook visits per frame, a trig every
+protocol (tools/varispeed_emus_dsp_engine_check.py: two hook visits per frame, a trig every
 37 frames at a varying split, the four test signals at the five ratios) and counts,
 per 16-output frame, the instructions executed INSIDE the cave and their datasheet
-cycles (the emulator's opcodecycles table, as tools/repitch_dsp_profile.py prices
+cycles (the emulator's opcodecycles table, as tools/varispeed_emus_dsp_profile.py prices
 them; the probe's RK_FRAMECYC). The first frame (the one-time table copy, which
 zqboot runs at boot on the unit) is left out.
 
-  * S950 (RPS9) and SP12 (RPSP): median and worst frame, per output sample;
-  * the RPCH / stock exit (zqrp's mode check), which every voice pass on every
+  * S950 (S950) and SP12 (SP12): median and worst frame, per output sample;
+  * the OT / stock exit (zqrp's mode check), which every voice pass on every
     track pays: per pass, plus the hook's bsr (outside the cave, priced here).
 
-    python3 tools/repitch_dsp_cost.py [--form standalone|octabam] [--payload A|B|both] [--quick]
+    python3 tools/varispeed_emus_dsp_cost.py [--form standalone|octabam] [--payload A|B|both] [--quick]
 
 --form standalone (the default) is the kernel tools/build_varispeed_emus.py installs
-(tools/repitch_dsp_src.py at cave_org); octabam is the generated rpk_dsp.asm, its
-tables in SPRING's X data (repitch_dsp_octabam_check's XS placement).
+(tools/varispeed_emus_dsp_src.py at cave_org); octabam is the generated vem_dsp.asm, its
+tables in SPRING's X data (varispeed_emus_dsp_octabam_check's XS placement).
 """
 import argparse
 import os
@@ -31,7 +31,7 @@ import numpy as np
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
-import repitch_dsp_octabam_check as oc    # noqa: E402
+import varispeed_emus_dsp_octabam_check as oc    # noqa: E402
 
 ec = oc.ec
 RATIOS = (1.0, 0.75, 1.5, 0.5, 1.99)
@@ -68,7 +68,7 @@ def main():
     ap.add_argument("--payload", default="both", choices=("A", "B", "both"))
     ap.add_argument("--quick", action="store_true", help="drum only, three ratios")
     a = ap.parse_args()
-    ec.WORK = ROOT / f"out/repitch_dsp_cost_{a.form}"
+    ec.WORK = ROOT / f"out/varispeed_emus_dsp_cost_{a.form}"
     ec.WORK.mkdir(parents=True, exist_ok=True)
     ec.build_probe()
     ec.SCHED = ec.schedule(4000)
@@ -79,7 +79,7 @@ def main():
     if a.quick:
         sigs = {"drum": sigs["drum"]}
     ratios = (1.0, 0.75, 1.99) if a.quick else RATIOS
-    res = {"RPS9": [], "RPSP": []}
+    res = {"S950": [], "SP12": []}
     stock = []
     for tag, va, ln, base, hook, stop in ec.chk.PAYLOADS:
         if a.payload not in ("both", tag):
@@ -94,12 +94,12 @@ def main():
             inp = ec.WORK / f"{sname}.raw"
             inp.write_bytes(src.astype("<i4").tobytes())
             for ratio in ratios:
-                for mode, mname in ((1, "RPS9"), (2, "RPSP")):
+                for mode, mname in ((1, "S950"), (2, "SP12")):
                     res[mname].append(frames(tag, base, hook, stop, org, b0, b1, mode, ratio, inp,
                                              f"{tag}_{sname}_{ratio}_{mname}"))
             if sname == "drum":
-                # mode 0 = RPCH: every pass takes zqrp's stock exit (two passes a frame)
-                f = frames(tag, base, hook, stop, org, b0, b1, 0, 1.0, inp, f"{tag}_{sname}_RPCH")
+                # mode 0 = OT: every pass takes zqrp's stock exit (two passes a frame)
+                f = frames(tag, base, hook, stop, org, b0, b1, 0, 1.0, inp, f"{tag}_{sname}_OT")
                 stock.append(f)
     print(f"VARISPEED_EMUS DSP prices, {a.form} kernel, payload {a.payload}; datasheet cycles "
           f"(dsp56kEmu opcodecycles), in-cave only\n")
@@ -112,7 +112,7 @@ def main():
               f"{c.max():11.2f}  {allf[:, 0].max():7d} {allf[:, 1].max():8d}")
     s = np.concatenate(stock)
     pi, pc = s[:, 0] / 2.0, s[:, 1] / 2.0
-    print(f"\nRPCH / stock exit (zqrp, every voice pass): {np.median(pi):.1f} instr, {np.median(pc):.1f} "
+    print(f"\nOT / stock exit (zqrp, every voice pass): {np.median(pi):.1f} instr, {np.median(pc):.1f} "
           f"cycles in the cave per pass (max {pi.max():.1f} / {pc.max():.1f}); + the hook's bsr "
           f"({BSR_CYC} cycles) = {np.median(pc) + BSR_CYC:.1f} cycles per pass")
 

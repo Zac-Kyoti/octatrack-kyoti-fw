@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-Where REPITCH_REPEAT98_KYOTI's DSP kernel spends its time, per output sample.
+Where VARISPEED_EMUS's DSP kernel spends its time, per output sample.
 
-Runs the octabam kernel (rpk_dsp.asm, its tables in SPRING REVERB's X data as
-OBKYOTI11/12 place them) in tools/repitch_dsp_engine_check.py's probe with
+Runs the octabam kernel (vem_dsp.asm, its tables in SPRING REVERB's X data as
+OBKYOTI11/12 place them) in tools/varispeed_emus_dsp_engine_check.py's probe with
 RK_PCHIST, then prices every executed instruction three ways:
 
   instr   one per instruction executed (what the probe's .cnt and octabam's
@@ -21,7 +21,7 @@ RK_PCHIST, then prices every executed instruction three ways:
           modelled as 2 x words, + 2 for a displaced access. A floor; only a
           hardware burn measures the real figure.
 
-    python3 tools/repitch_dsp_profile.py [--mode RPSP|RPS9] [--payload A|B] [--top N] [--ratios 0.5,1.99]
+    python3 tools/varispeed_emus_dsp_profile.py [--mode SP12|S950] [--payload A|B] [--top N] [--ratios 0.5,1.99]
 """
 import argparse
 import os
@@ -34,10 +34,10 @@ import numpy as np
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 import dsp_xasm                           # noqa: E402
-import repitch_dsp_octabam_check as oc    # noqa: E402
+import varispeed_emus_dsp_octabam_check as oc    # noqa: E402
 
 ec = oc.ec
-ec.WORK = ROOT / "out/repitch_dsp_profile"
+ec.WORK = ROOT / "out/varispeed_emus_dsp_profile"
 RATIOS = (0.75, 1.0, 1.5, 1.99)
 DISP = re.compile(r"\(r\d\+[^)]*\)")      # (rN+disp); (rN+nN) is not a displacement
 
@@ -48,13 +48,13 @@ def est_hw(text, nwords):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", default="RPSP", choices=("RPSP", "RPS9"))
+    ap.add_argument("--mode", default="SP12", choices=("SP12", "S950"))
     ap.add_argument("--payload", default="A", choices=("A", "B"))
     ap.add_argument("--top", type=int, default=25)
     ap.add_argument("--ratios", default=",".join(map(str, RATIOS)), help="comma-separated (default: %(default)s)")
     a = ap.parse_args()
     ratios = tuple(float(x) for x in a.ratios.split(","))
-    mode = {"RPS9": 1, "RPSP": 2}[a.mode]
+    mode = {"S950": 1, "SP12": 2}[a.mode]
     ec.WORK.mkdir(parents=True, exist_ok=True)
     ec.build_probe()
     ec.SCHED = ec.schedule(4000)

@@ -28,7 +28,7 @@ Tests (one forked scenario each):
   latch     an EMUS change mid-note does not switch the engine until the next trig (DSP)
   o2        SRC page paste + undo, track paste, PART paste / clear / undo, RELOAD PART:
             the target adopts what was written, nothing swaps
-  old56     TSTR 5/6 and TSMODE 5/6 (projects saved with REPITCH_REPEAT98_KYOTI) do not crash
+  old56     TSTR 5/6 and TSMODE 5/6 (values this OS never writes itself) do not crash
   net_*     the DSP load guard's safety net (spec §6b, "6b simplified"), on the REAL export
             MMTESTDT (T1-T8 STATIC, part 0), T5-T8 = DSP core 0, all by runtime pokes: settings
             over budget at the start (net_load), a sequencer Part change (net_part, with the

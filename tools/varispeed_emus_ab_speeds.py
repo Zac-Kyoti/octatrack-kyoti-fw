@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-RPSP stereo options at several speeds (listening pack 7): for each source and QUAN
+SP12 stereo options at several speeds (listening pack 7): for each source and QUAN
 ratio, the clean reference, mid + side (rev 17 as built), the left channel in mono and
 the (L + R) / 2 sum in mono, each through the SP path and channel 5. Rendered by the
-float design (tools/repitch_engine_model.py; the DSP matches it to -114 dBFS) at the
+float design (tools/varispeed_emus_model.py; the DSP matches it to -114 dBFS) at the
 OT's own increment (24.24 with the mode tag), sliced in eighth notes as the other packs.
 
-    python3 tools/repitch_ab_speeds.py OUTDIR name=source.wav[,...] --bpm 104
+    python3 tools/varispeed_emus_ab_speeds.py OUTDIR name=source.wav[,...] --bpm 104
 """
 import argparse
 import json
@@ -19,8 +19,8 @@ import sys
 import numpy as np
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import repitch_ab_pack as p              # noqa: E402
-import repitch_engine_model as m         # noqa: E402
+import varispeed_emus_ab_pack as p              # noqa: E402
+import varispeed_emus_model as m         # noqa: E402
 
 SR = 44100
 RATIOS = (("3/4", 0.75), ("1/1", 1.0), ("5/4", 1.25), ("3/2", 1.5))
@@ -28,7 +28,7 @@ RATIOS = (("3/4", 0.75), ("1/1", 1.0), ("5/4", 1.25), ("3/2", 1.5))
 
 def tagged(ratio):
     inc = int(round(ratio * (1 << 24)))
-    return ((inc >> 24 << 24) | ((inc & 0xFFFFFF) & ~3) | m.MODE_RPSP) / float(1 << 24)
+    return ((inc >> 24 << 24) | ((inc & 0xFFFFFF) & ~3) | m.MODE_SP12) / float(1 << 24)
 
 
 def main():
@@ -54,39 +54,39 @@ def main():
             trig = [t for t in (int(round(j * slice_len / r)) for j in range(int(len(src) / slice_len) + 1)) if t < n_out]
             mid = (src[:, :1] + src[:, 1:]) / 2
             if a.outputs:
-                # pack 10: the three output builds (RPK_OUT), channels 1/2 also with one trig
+                # pack 10: the three output builds (VEM_OUT), channels 1/2 also with one trig
                 # for the whole loop (what the SP does to an unchopped break)
-                clips = {"ref": p.rpch(src, r, n_out)}
+                clips = {"ref": p.ot_ref(src, r, n_out)}
                 saved = m.MS_OUT, m.MS_CHANNEL, m.MS_SIDE_DELAY, m.Engine.side_avg
                 for key, build, tr in (("ch6", "ch6", trig), ("raw", "raw", trig), ("ch12", "ch12", trig),
                                        ("ch12one", "ch12", [0])):
                     m.MS_OUT, m.MS_CHANNEL = build, {"ch6": 6, "raw": 7, "ch12": 12}[build]
                     m.MS_SIDE_DELAY = {"ch6": 5.77, "raw": 5.83, "ch12": 5.83}[build]
                     m.Engine.side_avg = build == "ch6"
-                    clips[key] = p.run(m.MODE_RPSP, src, r, tr, ms=True)
+                    clips[key] = p.run(m.MODE_SP12, src, r, tr, ms=True)
                 m.MS_OUT, m.MS_CHANNEL, m.MS_SIDE_DELAY, m.Engine.side_avg = saved
             elif a.filters:
                 # pack 9: the mid's output filter (only coefficients change on the DSP); the
                 # side offset re-measured for each (side - mid within 0.03 samples)
-                clips = {"ref": p.rpch(src, r, n_out)}
+                clips = {"ref": p.ot_ref(src, r, n_out)}
                 orig = m.sp_channel_filter
                 for key, secs, d, avg in (("ch5", orig(5), 5.97, True), ("ch6", orig(6), 5.77, True),
                                           ("raw", [], 5.33, False)):
                     m.sp_channel_filter = lambda ch=None, s=secs: s
                     m.MS_SIDE_DELAY, m.Engine.side_avg = d, avg
-                    clips[key] = p.run(m.MODE_RPSP, src, r, trig, ms=True)
+                    clips[key] = p.run(m.MODE_SP12, src, r, trig, ms=True)
                 m.sp_channel_filter, m.MS_SIDE_DELAY, m.Engine.side_avg = orig, 5.97, True
             elif a.avg:
                 m.Engine.side_avg = False
-                prev = p.run(m.MODE_RPSP, src, r, trig, ms=True)
+                prev = p.run(m.MODE_SP12, src, r, trig, ms=True)
                 m.Engine.side_avg = True
-                clips = {"ref": p.rpch(src, r, n_out), "ms": prev, "msavg": p.run(m.MODE_RPSP, src, r, trig, ms=True)}
+                clips = {"ref": p.ot_ref(src, r, n_out), "ms": prev, "msavg": p.run(m.MODE_SP12, src, r, trig, ms=True)}
             else:
                 clips = {
-                    "ref": p.rpch(src, r, n_out),
-                    "ms": p.run(m.MODE_RPSP, src, r, trig, ms=True),
-                    "monol": p.run(m.MODE_RPSP, np.repeat(src[:, :1], 2, axis=1), r, trig, ms=True),
-                    "monos": p.run(m.MODE_RPSP, np.repeat(mid, 2, axis=1), r, trig, ms=True),
+                    "ref": p.ot_ref(src, r, n_out),
+                    "ms": p.run(m.MODE_SP12, src, r, trig, ms=True),
+                    "monol": p.run(m.MODE_SP12, np.repeat(src[:, :1], 2, axis=1), r, trig, ms=True),
+                    "monos": p.run(m.MODE_SP12, np.repeat(mid, 2, axis=1), r, trig, ms=True),
                 }
             target = p.active_rms(clips["ref"])
             g = {k: target / p.active_rms(y) for k, y in clips.items()}

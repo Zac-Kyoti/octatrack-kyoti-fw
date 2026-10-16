@@ -17,7 +17,7 @@
 | STATIC and FLEX get a fifth TSTR position, VARI (raw 4). A VARI track plays dry
 | (no grains, no stretch) at the speed (project BPM x p) / (sample BPM x q), p/q the QUAN
 | ratio picked with the PTCH knob, exact in integers; RATE still applies. Its TSNS knob
-| becomes EMUS (OT / S950 / SP12, left to right), the engine the DSP kernel (rpk_dsp.asm)
+| becomes EMUS (OT / S950 / SP12, left to right), the engine the DSP kernel (vem_dsp.asm)
 | renders the track with, latched at each trig; four detents in one direction step it once.
 | A DSP load guard (spec §6b) keeps each DSP core's estimated load, a property of the
 | settings, under its budget: a change that would overload it is refused (EMUS, the FX
@@ -25,14 +25,14 @@
 | cannot be refused (Part change, reload, load, machine, sample...) steps just enough
 | tracks to OT;
 | each raises the toast MAX DSP: EMU LIMIT from the UI task's message loop. Spec:
-| reference/handoffs/REPITCH_REWRITE_SPEC.md; facts: REPITCH_REWRITE_SCOPE.md +
-| REPITCH_REWRITE_SCOPE_EMUS.md (clean-room); this build: REPITCH_REWRITE_IMPL.md §12.
+| reference/handoffs/VARISPEED_SPEC.md; facts: VARISPEED_SCOPE.md +
+| VARISPEED_SCOPE_EMUS.md (clean-room); this build: VARISPEED_IMPL.md §12.
 |
 | Two parts:
 |   PART 1, NEW CORE (written for VARISPEED_EMUS): the frame hook vem_frame, the TSTR
 |     formatter, the audio-editor ATTR hooks, the EMUS widget / formatter / step and its
 |     page-open reset, the DSP load guard, the hold wrappers of the bulk writers.
-|   PART 2, RETAINED (REPITCH_REWRITE_RETAINED.s, extended): QUAN, the domain swap -- now
+|   PART 2, RETAINED (VARISPEED_RETAINED.s, extended): QUAN, the domain swap -- now
 |     per machine, with a second pair (TSNS<->EMUS) -- the Part-DB gate, the Part-apply
 |     bookkeeping and RELOAD PART.
 |
@@ -216,7 +216,7 @@
 | Spec §6 item 1 (the cost model) and §6b (the guard). Every price and budget the guard
 | uses is HERE and nowhere else (the tests read this block). Unit: MODELLED DSP cycles
 | per output sample, the unit of the KYOTI load audit as the spec carries it (the audit
-| itself is not read here: clean-room). Reports: REPITCH_REWRITE_IMPL.md §10, §12.
+| itself is not read here: clean-room). Reports: VARISPEED_IMPL.md §10, §12.
 | The estimate of a core is a property of the SETTINGS (spec §6b item 1): base + the
 | prices of its four tracks' FX1 / FX2 types + the engine of each of its tracks that is
 | a VARI track with EMUS on S950 / SP12.
@@ -248,12 +248,12 @@
         .equ    VG_FX_LOFI, 313         | id 0x1c
 | The emulation engines, per VARI track whose EMUS selects them (the DSP runs the engine on
 | every pass whose increment carries it, sounding or not, IMPL §10.1): the worst case over the
-| playback ratios 0.5-1.99x, both payloads, of tools/repitch_dsp_profile.py, its "~hw"
-| column (a one-word instruction 2 cycles, a displaced access +2). VEM3's kernel: RPSP 269.8,
-| RPS9 108.6 (its datasheet column, 146.5 / 57.3, cannot reproduce the user's brackets below,
+| playback ratios 0.5-1.99x, both payloads, of tools/varispeed_emus_dsp_profile.py, its "~hw"
+| column (a one-word instruction 2 cycles, a displaced access +2). VEM3's kernel: SP12 269.8,
+| S950 108.6 (its datasheet column, 146.5 / 57.3, cannot reproduce the user's brackets below,
 | IMPL §10.3; this one does). The optimized kernels (VEM4, VARISPEED_EMUS_DSP_OPT.md),
-| re-profiled 2026-10-15: RPSP 217.2, RPS9 99.0. SP12 in full stereo (VEM9,
-| VARISPEED_EMUS_SP12_STEREO.md), 2026-10-15: RPSP 186.4 (RPS9 unchanged).
+| re-profiled 2026-10-15: SP12 217.2, S950 99.0. SP12 in full stereo (VEM9,
+| VARISPEED_EMUS_SP12_STEREO.md), 2026-10-15: SP12 186.4 (S950 unchanged).
         .equ    VG_S950, 99
         .equ    VG_SP12, 187
 | Budgets: the CLEAN points of the user's hardware brackets (4 SP12 voices, DARK on every
@@ -1661,7 +1661,7 @@ vb_partclear:
         jmp     (0x4004a9d8).l
 
 | RELOAD PART (stock 0x4004aab4(part)) copies the saved Part in and refreshes, through
-| neither Part apply: the same hold/forget (patch_repitch_reload.s's design, 16 bytes).
+| neither Part apply: the same hold/forget (16 bytes).
 rp_reload:
         bsr     vh_enter
         move.l  4(%sp),-(%sp)           | the part argument, again
@@ -1697,7 +1697,7 @@ vh_leave:
         bra     rp_forget               | rts to our caller, d0 kept
 
 | ============================================================================
-| PART 2 -- RETAINED (REPITCH_REWRITE_RETAINED.s), extended for VARISPEED_EMUS:
+| PART 2 -- RETAINED (VARISPEED_RETAINED.s), extended for VARISPEED_EMUS:
 |   * per machine: rp_prev[2t + m], m = 0 ST / 1 FL, each with its own parks, its own
 |     gate (rp_gate_m: VARI = raw 4 only, AUTO + TSMODE 4) and its own captions, so a
 |     machine change never swaps anything (spec item 11);
@@ -2422,7 +2422,7 @@ vg_fxp:                                 | price per stock FX type id 0..31 (half
         .word   VG_FX_PLATE, VG_FX_SPRING_HERE, VG_FX_DARK, 0
         .word   VG_FX_COMPRESSOR, 0, 0, 0, VG_FX_LOFI, 0, 0, 0
 vg_engp:                                | engine price by engine 0 OT / 1 S950 / 2 SP12 (x 4)
-        .long   0, VG_S950, VG_SP12, VG_S950    | (3 is never stored; the kernel would run RPS9)
+        .long   0, VG_S950, VG_SP12, VG_S950    | (3 is never stored; the kernel would run S950)
 vg_base:                                | by g = 0 (T1-T4, core 1) / 4 (T5-T8, core 0)
         .long   VG_BASE_C1+VG_SC, VG_BASE_C0+VG_SC
 vg_budget:

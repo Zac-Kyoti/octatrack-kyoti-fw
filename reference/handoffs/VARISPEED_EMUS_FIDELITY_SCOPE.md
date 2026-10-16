@@ -2,7 +2,7 @@
 
 Written Session 109 (2026-09-28). **Rev 11 implements it; rev 12 corrects its tone; rev 13 fixes RPSP's render; rev 14 makes RPSP channel 1/2 and fixes the trig crack — see the status sections.** This scope follows the
 shipped rev 10 (`eb8f022`: RPCH / RPS9 / RPSP, hardware-confirmed working) and the
-listening render that showed how little RPS9 changes (`tools/repitch_dsp_listen.py`).
+listening render that showed how little RPS9 changes (`tools/varispeed_emus_dsp_listen.py`).
 It supersedes `REPITCH_KYOTI_SCOPE.md` §2's machine descriptions, which were wrong
 about the Akai (see §2 below).
 
@@ -21,7 +21,7 @@ source (forum, press), used only where flagged.
 ## ⏩ Implementation status — rev 14 BUILT (Session 112, 2026-09-28): channel 1/2, full tables, the trig crack
 
 **Built, verified in emulation, NOT flashed** (rev 13 is on the unit). Detail: NOTES "Session 112"
-and "Session 112 continued"; the channel 1/2 design: `REPITCH_SP_CH12_SCOPE.md`.
+and "Session 112 continued"; the channel 1/2 design: `VARISPEED_EMUS_SP_CH12_SCOPE.md`.
 - **RPSP = the SP-1200's channel 1/2**: rev 13's staircase through an SSM2044-style 4-pole
   (resonance 0) whose cutoff the track's own AMP envelope opens (envelope A). `RPK_CH12=0`
   builds rev 13's raw 7/8 sound (with the other two changes).
@@ -65,7 +65,7 @@ things (NOTES "Session 111"):
 
 - **RPSP is heard as the raw outputs 7/8** — no output filter (Q2 answered: 7/8,
   the community's usual "dirtiest drums" choice; ch 3–6 stay modelled in
-  `tools/repitch_engine_model.py` for a future selectable channel). The DSP's
+  `tools/varispeed_emus_model.py` for a future selectable channel). The DSP's
   filter stage is gone and RPSP got cheaper.
 - **RPSP's virtual ADC = 12 taps, least squares** (no windowed sinc): flat to
   10 kHz, a 7-pole (42 dB/oct, E-mu's own description) shape through the transition,
@@ -119,11 +119,11 @@ and why (details: NOTES "Session 110"):
   T5–8) with a heavy reverb is the case to watch on hardware.
 - **Memory:** P = the last 667 words of SPRING's module (SIDECHAIN3's first
   388 still free); Y:`$A00-$DFF` (octabam: free on stock; SC3 keeps `$800-$9FF`).
-- **Verification:** `tools/repitch_dsp_engine_check.py` — 80/80 bit-exact
+- **Verification:** `tools/varispeed_emus_dsp_engine_check.py` — 80/80 bit-exact
   (4 signals × 5 ratios × 2 modes × 2 cores) against the model's integer twin,
   with undelivered ring frames poisoned; mode switch away and back bit-exact;
   full firmware in `ot_emu` with the part's TSTR set: tag on every playing
-  pass, levels equal to RPCH, no clicks. Listening pack: `tools/repitch_dsp_listen.py`.
+  pass, levels equal to RPCH, no clicks. Listening pack: `tools/varispeed_emus_dsp_listen.py`.
 
 ## 0. Summary
 
@@ -393,7 +393,7 @@ Per voice, per 44.1 kHz output sample, per channel (L/R):
   §1 (the ground truth the DSP must match), plus a listening pack against RPCH/rev 10.
   No firmware.
 - **Gate 2: engine tier 1** (both modes) on the emulated DSP via
-  `tools/repitch_dsp_render.cpp`, matching the model to the LSB, then build + flash.
+  `tools/varispeed_emus_dsp_render.cpp`, matching the model to the LSB, then build + flash.
 - **Gate 3: filters** (RPSP fixed channels, RPS9 tracking post- and pre-filters).
 - **Gate 4: UI** (Q1/Q2) and the wider mode channel.
 - **Gate 5 (optional): SSM2044 dynamic channel** with a ColdFire note-on signal.

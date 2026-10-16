@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-A synthetic boom-bap drum loop for listening tests (tools/repitch_ab_pack.py): two bars,
+A synthetic boom-bap drum loop for listening tests (tools/varispeed_emus_ab_pack.py): two bars,
 swung 16ths, kick / snare (with a ghost) / closed and open hats, a short stereo room.
 Every sound is synthesised here (numpy only), so the clip carries no third-party audio.
 
-    python3 tools/repitch_test_beat.py out/ab_pack2/beat.wav --bpm 104
+    python3 tools/varispeed_emus_test_beat.py out/ab_pack2/beat.wav --bpm 104
 """
 import argparse
 import math

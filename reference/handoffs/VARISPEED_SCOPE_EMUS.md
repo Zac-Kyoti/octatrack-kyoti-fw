@@ -1,7 +1,7 @@
 # VARISPEED_EMUS: scope addendum (EMUS, the second pair, the trig latch, item 11)
 
-Written 2026-10-14 by a **clean** agent. It extends `REPITCH_REWRITE_SCOPE.md` (the "first scope")
-for the 5-position design in `REPITCH_REWRITE_SPEC.md` (revised 2026-10-14). Sources: the stock
+Written 2026-10-14 by a **clean** agent. It extends `VARISPEED_SCOPE.md` (the "first scope")
+for the 5-position design in `VARISPEED_SPEC.md` (revised 2026-10-14). Sources: the stock
 1.40C image (`section_3_MAIN_OS.bin`, sha256 `164f3122…`, re-checked), stock-only emulator runs,
 `reference/kb/*`, and the allowed own code. §9 lists every source and the blacklist statement.
 Nothing was implemented, built, flashed or committed.
@@ -89,7 +89,7 @@ implementation must check that this poke exists.
   - `tstr_fmt` (5 entries): about 70 B.
   - H2: about 45 B.
   - H3/H4: about 90 B.
-- **Retained, grown, about 1.6 KB.** Measured today: `REPITCH_REWRITE_RETAINED.s` 0x4a0 = 1184 B, `patch_repitch_reload.s` 46 B. The additions:
+- **Retained, grown, about 1.6 KB.** Measured today: `VARISPEED_RETAINED.s` 0x4a0 = 1184 B, `patch_repitch_reload.s` 46 B. The additions:
   - `emus_widget` about 70 B;
   - `emus_fmt` plus strings about 55 B;
   - `emus_p2step` about 80 B;
@@ -332,7 +332,7 @@ One detent is one value; a held encoder (`×7`) still moves one value. Relying o
 - **State.**
   - Render state `+36` (`0x80004898 + 40t`) has a single writer, `0x40004104`, which H1 replaces, and is reused by stock on the next first pass (`0x40004072`).
   - It is outside `0x80006a40..0x80006abf`, and stock depends on it every frame, so it is reliable (C for the readers and writer). No byte is added.
-  - The first pass of a trig frame (the old sound's tail) still reuses the old `+36`, so the old tail keeps the old engine. That is what the DSP's trig guard expects: it acts only on the second pass, `LC = 1` (`rpk_dsp.asm` header).
+  - The first pass of a trig frame (the old sound's tail) still reuses the old `+36`, so the old tail keeps the old engine. That is what the DSP's trig guard expects: it acts only on the second pass, `LC = 1` (`vem_dsp.asm` header).
 - **Alternative:** an 8-byte latch array in our unit's data, next to `rp_prev`. Equivalent, plus 8 B and one store. Use it only if the `+36` round trip turns out not to be exact; a C check of `0x40004072` shows it is.
 
 ### 5.3 Transition frame
@@ -539,10 +539,10 @@ If the gate of the written machine changes, the next poll swaps data that is alr
 
 | source | used for |
 |---|---|
-| `reference/handoffs/REPITCH_REWRITE_SPEC.md` (all) | requirements, protocol |
-| `reference/handoffs/REPITCH_REWRITE_SCOPE.md` (all) | base scope |
-| `reference/handoffs/REPITCH_REWRITE_RETAINED.s` (all) | `rp_swap`, `rp_ui_gate`, QUAN, `rp_caption`, `rp_forget`, the offset equates |
-| `octabam-modules/repitch-repeat98-kyoti/`: `patch_repitch_reload.s`, `README.md` (all); `rpk_dsp.asm` L1–160 and the `x:$419` lines | the reload wrapper, DSP entry state, the trig bit, `y:$40` |
+| `reference/handoffs/VARISPEED_SPEC.md` (all) | requirements, protocol |
+| `reference/handoffs/VARISPEED_SCOPE.md` (all) | base scope |
+| `reference/handoffs/VARISPEED_RETAINED.s` (all) | `rp_swap`, `rp_ui_gate`, QUAN, `rp_caption`, `rp_forget`, the offset equates |
+| `octabam-modules/repitch-repeat98-kyoti/`: `patch_repitch_reload.s`, `README.md` (all); `vem_dsp.asm` L1–160 and the `x:$419` lines | the reload wrapper, DSP entry state, the trig bit, `y:$40` |
 | `CLAUDE.md`, `START_HERE.md` (filtered with `grep -v` on the keyword set) | rules |
 | `reference/kb/caves.md` (all) | §0 descriptor table, §5 DRAM |
 | `reference/kb/memory-map.md` L555–600, L800–850, L1100–1240 (see §9.4) | lock indices, keycodes, publish path, page-2 lane |
@@ -609,7 +609,7 @@ Binary: `../octatrack-kyoti-fw-octabam-port/out/la/octabam/out/emu/ot_emu` (load
 2. **A kb paragraph I should have skipped.** I read `reference/kb/memory-map.md` L1100–1240, the publish-path section, which contains one sentence matching the keyword set (L1179). It says a page-1 write behind the editor must go to the base word, and that "repitch-kyoti's PTCH/QUAN swap did exactly that from rev 5 to rev 15 (fixed rev 16)". The task told me to skip such sections. The same fact is in the retained code's comment; nothing else from that sentence was used.
 3. **Names only.**
    - `ls octabam-modules/repitch-repeat98-kyoti/` printed the names `manifest.py` and `patch_repitch_kyoti.s`; neither was opened.
-   - `rpk_dsp.asm`'s header names `tools/patch_repitch_kyoti.s` and `rate_hook` (the spec allows names).
+   - `vem_dsp.asm`'s header names `tools/patch_repitch_kyoti.s` and `rate_hook` (the spec allows names).
    - `la_run.py` L18 names the old TSTR values.
 4. **Other material listed but not used.**
    - `ls …/out/la/img` showed `obkyoti11.bin`, an octabam KYOTI image that contains the shipped module. I did not run, disassemble, diff or read it.

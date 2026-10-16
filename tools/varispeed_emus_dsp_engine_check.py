@@ -2,30 +2,30 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-repitch-kyoti rev 14: the DSP virtual sampler against its reference model.
+VARISPEED_EMUS DSP kernel (rev 14): the DSP virtual sampler against its reference model.
 
-    python3 tools/repitch_dsp_engine_check.py
+    python3 tools/varispeed_emus_dsp_engine_check.py
 
-Builds the cave exactly as tools/build_repitch_repeat98_kyoti.py places it (payload A
+Builds the cave exactly as tools/build_varispeed_emus.py places it (payload A
 and B), runs it inside the real stock voice module on dsp56kEmu with the
-firmware's streaming protocol (tools/repitch_dsp_engine_probe.cpp; ring frames
+firmware's streaming protocol (tools/varispeed_emus_dsp_engine_probe.cpp; ring frames
 the firmware would not have delivered yet are POISONED), and runs
-tools/repitch_engine_model.py on the same input with the same table. Checks:
+tools/varispeed_emus_model.py on the same input with the same table. Checks:
 
-  * both modes BIT-EXACT with repitch_engine_model.DspExact, the model's
+  * both modes BIT-EXACT with varispeed_emus_model.DspExact, the model's
     integer twin (the DSP's arithmetic, step for step), driven the way the
     firmware drives it since rev 14: two hook visits per frame (split k /
     16-k), a trig every TRIG_EVERY frames at a varying offset (the per-voice
     flag word, bit 12 -- the frame's second pass (LC = 1) zeroes the ring
-    history, RPSP starts clean; an empty pass is mode 0, as on the unit;
+    history, SP12 starts clean; an empty pass is mode 0, as on the unit;
     trig offsets include 0, the case rev 14 first missed), and an AMP level that jumps at each trig and decays
     (channel 1/2's input);
   * the twin against the float design, reported as a difference level (a
     tick position computed in 24.24 fixed point can put a 12-bit step on the
     other side of a 1/2048 boundary now and then);
-  * MODE SWITCH away and back (RK_MODE_SWITCH): passes N..2N-1 run in RPCH,
-    as a user turning TSTR to RPCH and back; the engine's passes stay
-    bit-exact with a twin that simply skipped those passes, and the RPCH
+  * MODE SWITCH away and back (RK_MODE_SWITCH): passes N..2N-1 run in OT,
+    as a user turning TSTR to OT and back; the engine's passes stay
+    bit-exact with a twin that simply skipped those passes, and the OT
     passes are the stock interpolator's output (not ours);
   * r0 untouched, r3 advanced 2 words per output, m-registers restored (probe);
   * instructions per 16-sample pass = the engine's cost, reported per sample;
@@ -41,14 +41,14 @@ import numpy as np
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
-import repitch_dsp_check as chk          # noqa: E402  (payload table, stock module reader)
+import varispeed_emus_dsp_check as chk          # noqa: E402  (payload table, stock module reader)
 import build_sidechain_compressor as sc3           # noqa: E402
-import repitch_dsp_src as dsrc           # noqa: E402
-import repitch_engine_model as m         # noqa: E402
+import varispeed_emus_dsp_src as dsrc           # noqa: E402
+import varispeed_emus_model as m         # noqa: E402
 
 VEND = ROOT / "vendor/dsp56300"
-PROBE = ROOT / "out/repitch_dsp_engine_probe"
-WORK = ROOT / "out/repitch_engine_check_sp12st"
+PROBE = ROOT / "out/varispeed_emus_dsp_engine_probe"
+WORK = ROOT / "out/varispeed_emus_engine_check"
 SR = 44100
 
 
@@ -57,7 +57,7 @@ def build_probe():
     libs = [f"{VEND}/build/source/dsp56kEmu/libdsp56kEmu.a",
             f"{VEND}/build/source/dsp56kBase/libdsp56kBase.a",
             f"{VEND}/build/source/asmjit/libasmjit.a"]
-    r = subprocess.run(["c++", "-std=c++17", "-O2", *inc, str(ROOT / "tools/repitch_dsp_engine_probe.cpp"),
+    r = subprocess.run(["c++", "-std=c++17", "-O2", *inc, str(ROOT / "tools/varispeed_emus_dsp_engine_probe.cpp"),
                         *libs, "-o", str(PROBE)], capture_output=True, text=True)
     if r.returncode:
         sys.exit(f"probe build failed:\n{r.stderr[-3000:]}")
@@ -106,7 +106,7 @@ def schedule(nframes):
 def model_run(mode, src24, rint, rfrac, exact=None, skip=(), sched=None):
     """Mirror of the probe's protocol. exact=None: the float design model
     (returns floats); exact=(consts, fir_rows): the DSP-exact twin (returns
-    24-bit ints). Frames in `skip` are not rendered (the track is in RPCH):
+    24-bit ints). Frames in `skip` are not rendered (the track is in OT):
     they come back as zeros and leave the engine's state alone."""
     inc = (rint << 24) | ((rfrac & ~3) | mode)
     tagged = (rfrac & ~3) | mode
@@ -168,7 +168,7 @@ def exact_for(mode, c):
 
 
 def switch_check(tag, base, hook, stop, org, b0, b1, c, src):
-    """Away (RPCH) and back: N passes in the mode, N in RPCH, the rest in the
+    """Away (OT) and back: N passes in the mode, N in OT, the rest in the
     mode again. Returns [(label, ok, detail)]."""
     N = 40
     res = []
@@ -176,7 +176,7 @@ def switch_check(tag, base, hook, stop, org, b0, b1, c, src):
     for ratio in (0.75, 1.5):
         inc = int(round(ratio * (1 << 24)))
         rint, rfrac = inc >> 24, inc & 0xFFFFFF
-        for mode, mname in ((1, "RPS9"), (2, "RPSP")):
+        for mode, mname in ((1, "S950"), (2, "SP12")):
             o = WORK / f"{tag}_switch_{ratio}_{mname}.raw"
             dsp = run_probe(tag, base, hook, stop, org, b0, b1, mode, rint, rfrac, WORK / "drum.raw", o,
                             WORK / "switch.cnt", env={**os.environ, "RK_MODE_SWITCH": str(N)})
@@ -186,7 +186,7 @@ def switch_check(tag, base, hook, stop, org, b0, b1, c, src):
             k = min(len(dsp), len(twin))
             eng = [i for i in range(k) if not N <= i < 2 * N]
             same = all(np.array_equal(dsp[i], twin[i]) for i in eng)
-            # RPCH passes: the stock 2-tap interpolator at the same positions (not our
+            # OT passes: the stock 2-tap interpolator at the same positions (not our
             # engine, which would be c+1 frames late and 12-bit): within a few LSBs
             tagged = (rint << 24) | ((rfrac & ~3) | mode)
             err = 0.0
@@ -199,7 +199,7 @@ def switch_check(tag, base, hook, stop, org, b0, b1, c, src):
             ok = same and err < 2 ** -14
             res.append((f"{tag} drum {ratio} {mname}", ok,
                         f"engine passes {'bit-exact' if same else 'DIFFER'} across the switch; "
-                        f"RPCH passes vs a 2-tap interpolator max {20 * math.log10(max(err, 1e-12)):.0f} dBFS"))
+                        f"OT passes vs a 2-tap interpolator max {20 * math.log10(max(err, 1e-12)):.0f} dBFS"))
     return res
 
 
@@ -212,7 +212,7 @@ def main():
     img = chk.IMG.read_bytes()
     report = []
     switches = []
-    cost = {"RPS9": [], "RPSP": []}
+    cost = {"S950": [], "SP12": []}
     worst_cost = 0
     for tag, va, ln, base, hook, stop in chk.PAYLOADS:
         mod, _ = chk.voice_module(img, va, ln, base)
@@ -233,7 +233,7 @@ def main():
             for ratio in (1.0, 0.75, 1.5, 0.5, 1.99):
                 inc = int(round(ratio * (1 << 24)))
                 rint, rfrac = inc >> 24, inc & 0xFFFFFF
-                for mode, mname in ((1, "RPS9"), (2, "RPSP")):
+                for mode, mname in ((1, "S950"), (2, "SP12")):
                     exact = exact_for(mode, c)
                     o = WORK / f"{tag}_{sname}_{ratio}_{mname}.raw"
                     cnt = WORK / f"{tag}_{sname}_{ratio}_{mname}.cnt"

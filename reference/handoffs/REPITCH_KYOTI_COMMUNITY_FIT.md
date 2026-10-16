@@ -4,14 +4,14 @@ Written Session 110 continued (2026-09-28), at the user's request, to be citable
 Answers: *why did RPS9/RPSP land on these specific parameters, and does that match what
 the sampling community actually considers the iconic sound of each machine?* No code
 changed to produce this — it is a summary of rev 11's design choices
-(`reference/handoffs/REPITCH_FIDELITY_SCOPE.md`, `tools/repitch_engine_model.py`)
+(`reference/handoffs/VARISPEED_EMUS_FIDELITY_SCOPE.md`, `tools/varispeed_emus_model.py`)
 checked against community sources (search-engine summaries of Gearspace, the dxarmy
 SP-1200 forum, MPC-Forums, and plugin-maker writeups — the forum pages themselves
 blocked direct fetching, so treat these as consensus impressions, not measurements).
 
 > **FINAL — rev 16, hardware-confirmed 2026-09-29** (`tools/build_repitch_repeat98_kyoti.py`). This page
 > describes rev 11; since rev 14 RPSP is heard through the SP-1200's channel 1/2 filter
-> (`REPITCH_SP_CH12_SCOPE.md`), and rev 12 retuned RPS9 (`REPITCH_FIDELITY_SCOPE.md`).
+> (`VARISPEED_EMUS_SP_CH12_SCOPE.md`), and rev 12 retuned RPS9 (`VARISPEED_EMUS_FIDELITY_SCOPE.md`).
 
 ---
 

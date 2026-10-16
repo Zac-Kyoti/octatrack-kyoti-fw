@@ -2,23 +2,23 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-A/B listening pack for REPITCH_REPEAT98_KYOTI's sound decisions: one source, every
-candidate design rendered by the float reference model (tools/repitch_engine_model.py)
+A/B listening pack for VARISPEED_EMUS's sound decisions: one source, every
+candidate design rendered by the float reference model (tools/varispeed_emus_model.py)
 under the same OT protocol, level-matched, written as WAVs plus a manifest.
 
 The source is a drum break played the way an SP-1200 user plays one: chopped IN ORDER at
 every eighth note (each slice is its own trig, so a new sound starts there, as from a
 pad), tuned down by --ratio. Positions advance continuously, as the OT plays an in-order
 chop; each trig runs the engine's own trig bookkeeping (silence behind the new sound, a
-clean RPSP state) and starts the per-hit filter sweep where a variant has one. AMP is
+clean SP12 state) and starts the per-hit filter sweep where a variant has one. AMP is
 held at 0.95 between trigs (a track's default envelope).
 
-Variants (see VARIANTS): the shipping RPSP, lean mono candidates (the left channel on
+Variants (see VARIANTS): the shipping SP12, lean mono candidates (the left channel on
 both sides), shorter input / render kernels, Yeh's measured channel 1/2 sweep, a fixed
-channel 3/4 filter, and RPS9 stereo vs mono. A clean varispeed (the OT's own 2-tap
-read, RPCH) is the level reference.
+channel 3/4 filter, and S950 stereo vs mono. A clean varispeed (the OT's own 2-tap
+read, OT) is the level reference.
 
-    python3 tools/repitch_ab_pack.py SOURCE.wav --bpm 95 --ratio 0.84 --out out/ab_pack1
+    python3 tools/varispeed_emus_ab_pack.py SOURCE.wav --bpm 95 --ratio 0.84 --out out/ab_pack1
 """
 import argparse
 import json
@@ -31,7 +31,7 @@ import numpy as np
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
-import repitch_engine_model as m          # noqa: E402
+import varispeed_emus_model as m          # noqa: E402
 
 SR = 44100
 # Yeh, Nolting, Smith 2007 (ICMC slides, "Dynamic filters"): the SP-12's VCF channel,
@@ -65,13 +65,13 @@ def write_wav(path, x):
 
 def configure(taps=12, L=10):
     """Point the model at a candidate's kernel sizes (both are design parameters)."""
-    m.FIR[m.MODE_RPSP]["taps"] = taps
+    m.FIR[m.MODE_SP12]["taps"] = taps
     m.RENDER["L"] = L
     m.render_kernel.cache_clear()
 
 
 def run(mode, src, ratio, trig_at, *, ch12=False, post_ch=None, sweep=None, ms=False):
-    """The OT protocol (as repitch_dsp_engine_check.model_run, float path), with trigs
+    """The OT protocol (as varispeed_emus_dsp_engine_check.model_run, float path), with trigs
     at the given output-sample indices. post_ch: a fixed SP channel filter (3..6);
     sweep: a per-hit channel 1/2 stage (Yeh's numbers); ms: rev 17's design (mid + side,
     channel 5) -- the model's default since rev 17, so the older designs pass False."""
@@ -119,18 +119,18 @@ def run(mode, src, ratio, trig_at, *, ch12=False, post_ch=None, sweep=None, ms=F
 
 
 def run_exact(src, ratio, trig_at):
-    """Rev 17 as the DSP renders it: the bit-exact twin (repitch_engine_model.DspExact,
-    which tools/repitch_dsp_engine_check.py holds the kernel to), fed 24-bit samples and
+    """Rev 17 as the DSP renders it: the bit-exact twin (varispeed_emus_model.DspExact,
+    which tools/varispeed_emus_dsp_engine_check.py holds the kernel to), fed 24-bit samples and
     the OT's 24.24 positions with the mode tag, trigs as run()'s."""
-    import repitch_dsp_src as dsrc
+    import varispeed_emus_dsp_src as dsrc
     c = dsrc.constants("A")
     rows = [[v - (1 << 24) if v & 0x800000 else v for v in row]
-            for row in (m.fir_q23(m.MODE_RPSP) & 0xFFFFFF).tolist()]
-    eng = m.DspExact(m.MODE_RPSP, c, rows)
+            for row in (m.fir_q23(m.MODE_SP12) & 0xFFFFFF).tolist()]
+    eng = m.DspExact(m.MODE_SP12, c, rows)
     x = np.clip(np.round(src * (1 << 23)), -(1 << 23), (1 << 23) - 1).astype(np.int64)
     inc = int(round(ratio * (1 << 24)))
     rint, rfrac = inc >> 24, inc & 0xFFFFFF
-    tagged = (rfrac & ~3) | m.MODE_RPSP
+    tagged = (rfrac & ~3) | m.MODE_SP12
     inc_eff = (rint << 24) | tagged
     frames = len(x)
     trigs = sorted(set(trig_at))
@@ -159,8 +159,8 @@ def run_exact(src, ratio, trig_at):
     return np.concatenate(out).astype(float) / (1 << 23)
 
 
-def rpch(src, ratio, n):
-    """The OT's own read (RPCH / stock): 2-tap linear interpolation."""
+def ot_ref(src, ratio, n):
+    """The OT's own read (OT / stock): 2-tap linear interpolation."""
     p = np.arange(n) * ratio
     i = np.floor(p).astype(int)
     f = (p - i)[:, None]
@@ -178,19 +178,19 @@ def active_rms(x):
 
 VARIANTS = [
     # key, label, kwargs for run(), configure(), source channels, estimated cost note
-    ("ref", "Reference: clean varispeed (RPCH, the OT's own read)", None, None, "stereo", "~0 extra"),
-    ("now", "RPSP today (rev 16): stereo, 12-tap input, 10-tap render, ch 1/2 following AMP",
-     dict(mode=m.MODE_RPSP, ch12=True), dict(taps=12, L=10), "stereo", "234 measured"),
+    ("ref", "Reference: clean varispeed (OT, the OT's own read)", None, None, "stereo", "~0 extra"),
+    ("now", "SP12 today (rev 16): stereo, 12-tap input, 10-tap render, ch 1/2 following AMP",
+     dict(mode=m.MODE_SP12, ch12=True), dict(taps=12, L=10), "stereo", "234 measured"),
     ("lean10", "Lean: left channel on both sides, 8-tap input, 10-tap render, ch 1/2 as today",
-     dict(mode=m.MODE_RPSP, ch12=True), dict(taps=8, L=10), "left", "~85 est."),
+     dict(mode=m.MODE_SP12, ch12=True), dict(taps=8, L=10), "left", "~85 est."),
     ("lean6", "Lean, 6-tap render: as above with a shorter output render",
-     dict(mode=m.MODE_RPSP, ch12=True), dict(taps=8, L=6), "left", "~75 est."),
+     dict(mode=m.MODE_SP12, ch12=True), dict(taps=8, L=6), "left", "~75 est."),
     ("yeh", "Lean, 6-tap render, ch 1/2 swept per hit as Yeh measured (14.15 kHz to 1.15 kHz, 0.085 s)",
-     dict(mode=m.MODE_RPSP, sweep=YEH), dict(taps=8, L=6), "left", "~75 est."),
+     dict(mode=m.MODE_SP12, sweep=YEH), dict(taps=8, L=6), "left", "~75 est."),
     ("ch34", "Lean, 6-tap render, fixed channel 3/4 filter instead of ch 1/2",
-     dict(mode=m.MODE_RPSP, post_ch=3), dict(taps=8, L=6), "left", "~60 est."),
-    ("rps9", "RPS9 today: stereo", dict(mode=m.MODE_RPS9), dict(taps=12, L=10), "stereo", "58 measured"),
-    ("rps9m", "RPS9 mono: left channel on both sides", dict(mode=m.MODE_RPS9), dict(taps=12, L=10), "left",
+     dict(mode=m.MODE_SP12, post_ch=3), dict(taps=8, L=6), "left", "~60 est."),
+    ("s950", "S950 today: stereo", dict(mode=m.MODE_S950), dict(taps=12, L=10), "stereo", "58 measured"),
+    ("s950m", "S950 mono: left channel on both sides", dict(mode=m.MODE_S950), dict(taps=12, L=10), "left",
      "~40 est."),
 ]
 
@@ -202,12 +202,12 @@ def mid_side(src, ratio, trig_at, ch):
     cancels; the side just does not get the SP's grit."""
     mid = (src[:, :1] + src[:, 1:]) / 2
     side = (src[:, 0] - src[:, 1]) / 2
-    y = run(m.MODE_RPSP, np.repeat(mid, 2, axis=1), ratio, trig_at, post_ch=ch)[:, 0]
-    clean = rpch(np.repeat(mid, 2, axis=1), ratio, len(y))[:, 0]
+    y = run(m.MODE_SP12, np.repeat(mid, 2, axis=1), ratio, trig_at, post_ch=ch)[:, 0]
+    clean = ot_ref(np.repeat(mid, 2, axis=1), ratio, len(y))[:, 0]
     seg = slice(0, min(len(y), 4 * SR))
     xc = [np.dot(y[seg][lag:], clean[seg][:len(y[seg]) - lag]) for lag in range(0, 64)]
     lag = int(np.argmax(xc))                              # the SP path's latency, in samples
-    s = rpch(np.stack([side, side], 1), ratio, len(y))[:, 0]
+    s = ot_ref(np.stack([side, side], 1), ratio, len(y))[:, 0]
     s = np.concatenate([np.zeros(lag), s])[:len(y)]
     return np.stack([y + s, y - s], 1)
 
@@ -215,46 +215,46 @@ def mid_side(src, ratio, trig_at, ch):
 SETS = {
     "1": None,                                            # VARIANTS above
     "2": [
-        ("ref", "Reference: clean varispeed (RPCH, the OT's own read)", None, None, "stereo", "~0 extra"),
-        ("now", "RPSP today: stereo, channel 1/2 following AMP",
-         dict(mode=m.MODE_RPSP, ch12=True), dict(taps=12, L=10), "stereo", "234 measured"),
+        ("ref", "Reference: clean varispeed (OT, the OT's own read)", None, None, "stereo", "~0 extra"),
+        ("now", "SP12 today: stereo, channel 1/2 following AMP",
+         dict(mode=m.MODE_SP12, ch12=True), dict(taps=12, L=10), "stereo", "234 measured"),
         ("st34", "Stereo, fixed channel 3/4 filter (no sweep)",
-         dict(mode=m.MODE_RPSP, post_ch=3), dict(taps=12, L=10), "stereo", "~120 est."),
+         dict(mode=m.MODE_SP12, post_ch=3), dict(taps=12, L=10), "stereo", "~120 est."),
         ("st56", "Stereo, fixed channel 5/6 filter (lighter, about 10 kHz)",
-         dict(mode=m.MODE_RPSP, post_ch=5), dict(taps=12, L=10), "stereo", "~120 est."),
+         dict(mode=m.MODE_SP12, post_ch=5), dict(taps=12, L=10), "stereo", "~120 est."),
         ("ms34", "SP mid + clean side, fixed channel 3/4 filter",
          dict(ms=3), dict(taps=8, L=10), "stereo", "~75 est."),
         ("mono34", "Left channel on both sides, fixed channel 3/4 filter",
-         dict(mode=m.MODE_RPSP, post_ch=3), dict(taps=8, L=10), "left", "~65 est."),
+         dict(mode=m.MODE_SP12, post_ch=3), dict(taps=8, L=10), "left", "~65 est."),
     ],
     "3": [
-        ("ref", "Reference: clean varispeed (RPCH, the OT's own read)", None, None, "stereo", "~0 extra"),
-        ("now", "RPSP today: stereo, channel 1/2 following AMP",
-         dict(mode=m.MODE_RPSP, ch12=True), dict(taps=12, L=10), "stereo", "234 measured"),
+        ("ref", "Reference: clean varispeed (OT, the OT's own read)", None, None, "stereo", "~0 extra"),
+        ("now", "SP12 today: stereo, channel 1/2 following AMP",
+         dict(mode=m.MODE_SP12, ch12=True), dict(taps=12, L=10), "stereo", "234 measured"),
         ("st56", "Stereo, fixed channel 5/6 filter (the target sound)",
-         dict(mode=m.MODE_RPSP, post_ch=5), dict(taps=12, L=10), "stereo", "~120 est."),
+         dict(mode=m.MODE_SP12, post_ch=5), dict(taps=12, L=10), "stereo", "~120 est."),
         ("ms56", "SP mid + clean side, channel 5/6, full output render",
          dict(ms=5), dict(taps=8, L=10), "stereo", "~85 est."),
         ("ms56s", "SP mid + clean side, channel 5/6, short output render",
          dict(ms=5), dict(taps=8, L=6), "stereo", "~75 est."),
     ],
     "4": [
-        ("ref", "Reference: clean varispeed (RPCH, the OT's own read)", None, None, "stereo", "~0 extra"),
-        ("now", "RPSP today (rev 16): stereo, channel 1/2 following AMP",
-         dict(mode=m.MODE_RPSP, ch12=True), dict(taps=12, L=10), "stereo", "234 measured"),
+        ("ref", "Reference: clean varispeed (OT, the OT's own read)", None, None, "stereo", "~0 extra"),
+        ("now", "SP12 today (rev 16): stereo, channel 1/2 following AMP",
+         dict(mode=m.MODE_SP12, ch12=True), dict(taps=12, L=10), "stereo", "234 measured"),
         ("ms56", "The design you chose (pack 3): SP mid + clean side, channel 5, full render",
          dict(ms=5), dict(taps=8, L=10), "stereo", "design"),
         ("rev17", "Rev 17 as built: the DSP's own arithmetic, bit for bit",
          dict(exact=True), dict(taps=8, L=10), "stereo", "159 measured"),
     ],
     "5": [
-        ("ref", "Reference: clean varispeed (RPCH, the OT's own read)", None, None, "stereo", "~0 extra"),
+        ("ref", "Reference: clean varispeed (OT, the OT's own read)", None, None, "stereo", "~0 extra"),
         ("ms56", "Your pick from pack 3", dict(ms=5), dict(taps=8, L=10), "stereo", "design"),
         ("rev17b", "Rev 17, side aligned to the mid at every ratio (the DSP's arithmetic)",
          dict(exact=True), dict(taps=8, L=10), "stereo", "164 measured"),
     ],
     "6": [
-        ("ref", "Reference: clean varispeed (RPCH, the OT's own read)", None, None, "stereo", "~0 extra"),
+        ("ref", "Reference: clean varispeed (OT, the OT's own read)", None, None, "stereo", "~0 extra"),
         ("ms", "SP mid + clean side, aligned (rev 17 as built)", dict(exact=True), dict(taps=8, L=10), "stereo",
          "164 measured"),
         ("monol", "Left channel on both sides, SP + channel 5", dict(mono=True), dict(taps=8, L=10), "stereo",
@@ -289,14 +289,14 @@ def main():
         src = src0 if chans == "stereo" else np.repeat(src0[:, :1], 2, axis=1)
         print(f"rendering {key}: {label}", flush=True)
         if kw is None:
-            y = rpch(src, a.ratio, n_out)
+            y = ot_ref(src, a.ratio, n_out)
         else:
             configure(**cfg)
             kw = dict(kw)
             if kw.get("exact"):
                 y = run_exact(src, a.ratio, trig_at)
             elif kw.get("mono"):
-                y = run(m.MODE_RPSP, np.repeat(src[:, :1], 2, axis=1), a.ratio, trig_at, ms=True)
+                y = run(m.MODE_SP12, np.repeat(src[:, :1], 2, axis=1), a.ratio, trig_at, ms=True)
             elif "ms" in kw:
                 y = mid_side(src, a.ratio, trig_at, kw["ms"])
             else:

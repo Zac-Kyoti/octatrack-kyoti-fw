@@ -2,20 +2,20 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-REPITCH_REPEAT98_KYOTI rev 17: the table copy at boot (zqboot), checked.
+VARISPEED_EMUS DSP kernel (rev 17): the table copy at boot (zqboot), checked.
 
 For each payload, runs the boot path -- entry P:0x40, the one-time memory clear,
 to the head of the frame loop (P:0x4b) -- of a built image, and of the same image
-with REPITCH's two boot-hook words put back (`do b,LA`: the boot as it would run
+with the kernel's two boot-hook words put back (`do b,LA`: the boot as it would run
 without zqboot; octabam's own image patches the clear's operands, so stock is not
-that baseline), on dsp56kEmu (tools/repitch_dsp_boot_probe.cpp), from identical
+that baseline), on dsp56kEmu (tools/varispeed_emus_dsp_boot_probe.cpp), from identical
 garbage, and requires:
   * every memory word the probe dumps (X and Y 0..0xffff, Y in the shared
-    window) equal after the boot, except Y:0xa00..0xfff (REPITCH's own);
+    window) equal after the boot, except Y:0xa00..0xfff (the kernel's own);
   * Y:TABTAG = TAGVAL and the copied tables equal to the reference model's
-    (tools/repitch_engine_model.py via tools/repitch_dsp_src.py), word for word.
+    (tools/varispeed_emus_model.py via tools/varispeed_emus_dsp_src.py), word for word.
 
-    python3 tools/repitch_dsp_boot_check.py [out/mainos_repitch_repeat98_kyoti.bin]
+    python3 tools/varispeed_emus_dsp_boot_check.py [out/mainos_varispeed_emus.bin]
 """
 import pathlib
 import struct
@@ -27,12 +27,12 @@ import numpy as np
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 import dsp_modmap as mm                    # noqa: E402
-import repitch_dsp_src as dsrc             # noqa: E402
-import repitch_engine_model as m           # noqa: E402
+import varispeed_emus_dsp_src as dsrc             # noqa: E402
+import varispeed_emus_model as m           # noqa: E402
 
 VEND = ROOT / "vendor/dsp56300"
-WORK = ROOT / "out/repitch_dsp_boot"
-PROBE = WORK / "repitch_dsp_boot_probe"
+WORK = ROOT / "out/varispeed_emus_dsp_boot"
+PROBE = WORK / "varispeed_emus_dsp_boot_probe"
 STOP = 0x4b                                # both payloads: the frame loop's head
 BOOT_HOOK = {"A": (0x46, (0x06cf00, 0x000049)), "B": (0x47, (0x06cf00, 0x00004a))}
 
@@ -43,7 +43,7 @@ def build_probe():
     libs = [f"{VEND}/build/source/dsp56kEmu/libdsp56kEmu.a",
             f"{VEND}/build/source/dsp56kBase/libdsp56kBase.a",
             f"{VEND}/build/source/asmjit/libasmjit.a"]
-    r = subprocess.run(["c++", "-std=c++17", "-O2", *inc, str(ROOT / "tools/repitch_dsp_boot_probe.cpp"),
+    r = subprocess.run(["c++", "-std=c++17", "-O2", *inc, str(ROOT / "tools/varispeed_emus_dsp_boot_probe.cpp"),
                         *libs, "-o", str(PROBE)], capture_output=True, text=True)
     if r.returncode:
         sys.exit(f"probe build failed:\n{r.stderr[-3000:]}")
@@ -103,10 +103,10 @@ def expected_y():
     """{Y address: word} of what zqinit must leave."""
     c = dsrc.constants("A")
     want = {c["TABTAG"]: c["TAGVAL"]}
-    q = m.fir_q23(m.MODE_RPSP) & 0xFFFFFF                   # row-major: phase p, tap t at 8 p + t
+    q = m.fir_q23(m.MODE_SP12) & 0xFFFFFF                   # row-major: phase p, tap t at 8 p + t
     for i, w in enumerate(q.reshape(-1)):
         want[c["SPTAB"] + i] = int(w)
-    q = m.fir_q23(m.MODE_RPS9) & 0xFFFFFF                   # transposed: tap t of phase p at 32 t + p
+    q = m.fir_q23(m.MODE_S950) & 0xFFFFFF                   # transposed: tap t of phase p at 32 t + p
     for p_ in range(q.shape[0]):
         for t in range(q.shape[1]):
             want[c["R9TAB"] + 32 * t + p_] = int(q[p_, t])
@@ -121,7 +121,7 @@ def expected_y():
 
 
 def main():
-    built = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "out/mainos_repitch_repeat98_kyoti.bin"
+    built = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "out/mainos_varispeed_emus.bin"
     img = built.read_bytes()
     base = unhooked(img)
     if base == img:

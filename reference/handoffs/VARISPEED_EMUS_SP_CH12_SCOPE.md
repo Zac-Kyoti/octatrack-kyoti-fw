@@ -6,7 +6,7 @@ sound."* Constraint: ideally **no further effect donated** (SPRING is already go
 **RPCH and RPS9 are locked** (the user: "they sound great") — nothing here may change their
 output. No code was written for this scope.
 
-Markers as in `REPITCH_FIDELITY_SCOPE.md`: ✅ manufacturer (E-mu / Rossum) · 🟡 derived by us ·
+Markers as in `VARISPEED_EMUS_FIDELITY_SCOPE.md`: ✅ manufacturer (E-mu / Rossum) · 🟡 derived by us ·
 📎 forum / secondary · ❓ unknown.
 
 > **FINAL — rev 16, hardware-confirmed 2026-09-29** (`tools/build_repitch_repeat98_kyoti.py`, tier FINAL,
@@ -208,11 +208,11 @@ in Y:`$F48–$F7F` (free on stock per octabam's probe, beside our `$E00–$F40`)
   tables are untouched at runtime.
 - **0b — hit/envelope observables** (emulator trace): where the DSP holds each track's AMP
   envelope and start command; readable from our hook; timing vs the frame.
-- **1 — model and listening**: the SSM2044 stage in `tools/repitch_engine_model.py` (float +
+- **1 — model and listening**: the SSM2044 stage in `tools/varispeed_emus_model.py` (float +
   integer twin) with 2–3 envelope candidates from §1c. Render `isaak.wav` (90 and 120 BPM) and
   a drum loop through each, next to the rev 13 7/8 render. **You pick one.** Also decide the
   render: the rev 13 render or the cheap box.
-- **2 — DSP**: tables to X, the filter, the hit signal; `repitch_dsp_engine_check.py` bit-exact
+- **2 — DSP**: tables to X, the filter, the hit signal; `varispeed_emus_dsp_engine_check.py` bit-exact
   (the twin gains the filter), mode switch, full firmware in `ot_emu`. RPCH/RPS9 outputs must be
   sample-identical to rev 13.
 - **3 — build, flash, listen.**

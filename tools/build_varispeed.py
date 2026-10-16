@@ -12,7 +12,7 @@ TIMESTRETCH gains VARI. PTCH <-> QUAN swap with per-machine parks, the paste / c
 and RELOAD PART holds, rp_sync. A VARI track's increment is VARISPEED_EMUS's on EMUS = OT,
 bit for bit. No EMUS (TSNS stays TSNS), no engine tag or latch, no mask on stock tracks'
 increments, no load guard, and no DSP change: SPRING REVERB stays, both FX choosers stock.
-Spec: reference/handoffs/REPITCH_REWRITE_SPEC.md §7; this build: REPITCH_REWRITE_IMPL.md §14.
+Spec: reference/handoffs/VARISPEED_SPEC.md §7; this build: VARISPEED_IMPL.md §14.
 
   ColdFire: octabam-modules/varispeed-emus/varispeed_emus.s -- the VARISPEED_EMUS source,
             assembled with VEM_EMUS = 0 (one source, so a fix lands in both); one unit at

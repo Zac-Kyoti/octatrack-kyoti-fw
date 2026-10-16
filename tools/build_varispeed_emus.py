@@ -19,19 +19,19 @@ safety net -- run in the UI task's message loop when a signature of the estimate
 changes -- steps just enough tracks to OT however else a core got over (Part change,
 reload, loads, machine, paste), in its order; the toast MAX DSP: EMU LIMIT is raised from
 that loop only.
-Spec: reference/handoffs/REPITCH_REWRITE_SPEC.md (clean-room); facts:
-REPITCH_REWRITE_SCOPE.md + REPITCH_REWRITE_SCOPE_EMUS.md; this build:
-reference/handoffs/REPITCH_REWRITE_IMPL.md.
+Spec: reference/handoffs/VARISPEED_SPEC.md (clean-room); facts:
+VARISPEED_SCOPE.md + VARISPEED_SCOPE_EMUS.md; this build:
+reference/handoffs/VARISPEED_IMPL.md.
 
   ColdFire: octabam-modules/varispeed-emus/varispeed_emus.s (VEM_EMUS = 1, its default),
             one unit linked at the classic cave's proven start (0x400d6500), 24 detours,
             12 descriptor pokes; the sites, pokes and splice it shares with VARISPEED
             (tools/build_varispeed.py, the same source with VEM_EMUS = 0) are in
             tools/varispeed_buildlib.py.
-  DSP:      the hardware-proven RPS9/RPSP kernel (tools/patch_repitch_dsp.asm via
-            tools/repitch_dsp_src.py) in SPRING REVERB's P module and X data, its voice
+  DSP:      the hardware-proven S950/SP12 kernel (tools/varispeed_emus_dsp.asm via
+            tools/varispeed_emus_dsp_src.py) in SPRING REVERB's P module and X data, its voice
             and boot hooks, SPRING removed from both FX choosers -- the old builder's DSP
-            half, copied in verbatim from reference/handoffs/REPITCH_REWRITE_DSP_INSTALL.py.
+            half, copied in verbatim from reference/handoffs/VARISPEED_DSP_INSTALL.py.
 
     out/mainos_varispeed_emus.bin                   patched MAIN OS
     out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx        MIDI DIN
@@ -125,7 +125,7 @@ CONTEXT.update({
     0x400585e0: "4879400bb7044878ffff41f9400d5f382f304c004eb9400326d4",
     # the voice loop clears the trig byte's bits 4-7 after the second pass (the engine latch)
     0x4000d52e: "1012780fc08414c0",
-    # ---- the DSP load guard's stock facts (REPITCH_REWRITE_IMPL.md §10.1)
+    # ---- the DSP load guard's stock facts (VARISPEED_IMPL.md §10.1)
     # the live FX type ids 0x80000ec4[t] (FX1) / 0x80000ecc[t] (FX2): every frame they go
     # into the frame's per-track DSP record (+54 / +56) ...
     0x40004d2e: "421512164881354100362044d1fc8000011014280dbc4882",
@@ -195,11 +195,11 @@ CONTEXT.update({
 
 
 # ---------------------------------------------------------------------------
-# DSP: copied VERBATIM from reference/handoffs/REPITCH_REWRITE_DSP_INSTALL.py (the old
+# DSP: copied VERBATIM from reference/handoffs/VARISPEED_DSP_INSTALL.py (the old
 # builder's DSP half, ours), below the marker; the module scope it assumes is above.
 # ---------------------------------------------------------------------------
-# ---- begin REPITCH_REWRITE_DSP_INSTALL.py ----
-DSP_SRC = HERE / "patch_repitch_dsp.asm"
+# ---- begin VARISPEED_DSP_INSTALL.py ----
+DSP_SRC = HERE / "varispeed_emus_dsp.asm"
 DSP_ASM = ROOT / "vendor/dsp56300/build/source/dsp_host/dsp_asm"
 DSP_DIS = ROOT / "vendor/dsp56300/build/source/disassemble/dsp56kDisassemble"
 VOICE_HOOK = {"A": 0x0040b, "B": 0x0020e}      # the kernel prologue, per payload
@@ -211,20 +211,20 @@ SPRING_SIG = [0x22ee00, 0x0140c0, 0x000040]    # spring's init, the sidechain's 
 
 
 def dsp_assemble(org, payload):
-    """The rev-14 engine: constants + patch_repitch_dsp.asm through
+    """The rev-14 engine: constants + varispeed_emus_dsp.asm through
     tools/dsp_xasm.py (every word disassembled back and checked)."""
     import dsp_xasm
-    import repitch_dsp_src
+    import varispeed_emus_dsp_src
     try:
-        words, syms, _ = repitch_dsp_src.assemble(org, payload)
+        words, syms, _ = varispeed_emus_dsp_src.assemble(org, payload)
     except dsp_xasm.AsmError as e:
         sys.exit(f"DSP cave: {e}")
     return words, syms
 
 
-# SPRING REVERB's X data modules the tables go into (repitch_dsp_src.SPRING_X),
+# SPRING REVERB's X data modules the tables go into (varispeed_emus_dsp_src.SPRING_X),
 # asserted stock by content before they are rewritten; DARK REVERB's routine in
-# SPRING's P module (repitch_dsp_src.DARK_SUB), asserted stock AFTER the build.
+# SPRING's P module (varispeed_emus_dsp_src.DARK_SUB), asserted stock AFTER the build.
 X_STOCK_SHA = ["dbbbb85c7676e526", "65cd65b39fcb59e2", "24bed15804f05d8a", "2f169dfb83d9765b", "14716e3d630dd7aa"]
 DARK_SHA = {"A": "4e1de47f64f651fd", "B": "e10bdef29d036c96"}
 
@@ -242,7 +242,7 @@ def dsp_install(img, touched):
         touched.update(range(off, off + 3))
 
     import hashlib
-    import repitch_dsp_src as dsrc
+    import varispeed_emus_dsp_src as dsrc
     orgs = {}
     for tag, d in sc3.DSP.items():
         start = d["cave_org"]
@@ -252,7 +252,7 @@ def dsp_install(img, touched):
         if len(mod) != 1 or mod[0][2] != sc3.DONOR_WORDS:      # (sp, addr, count, data)
             sys.exit(f"payload {tag}: no {sc3.DONOR_WORDS}-word P module at P:0x{start:05x}")
         if start != dsrc.SPRING_P[tag]:
-            sys.exit(f"payload {tag}: SPRING at P:0x{start:05x}, repitch_dsp_src says 0x{dsrc.SPRING_P[tag]:05x}")
+            sys.exit(f"payload {tag}: SPRING at P:0x{start:05x}, varispeed_emus_dsp_src says 0x{dsrc.SPRING_P[tag]:05x}")
         so = sc3.dsp_module_fileoff(img, d["va"], d["ln"], start)
         sig = [sc3.rd3(img, so + 3 * i) for i in range(3)]
         if sig != SPRING_SIG:
@@ -361,7 +361,7 @@ def dsp_install(img, touched):
                                       else "SPRING REVERB was never offered here")
               + "; id2e -> NONE (old projects load the NONE page)")
     return orgs
-# ---- end REPITCH_REWRITE_DSP_INSTALL.py ----
+# ---- end VARISPEED_DSP_INSTALL.py ----
 
 
 def main():
@@ -383,7 +383,7 @@ def main():
     L.splice(img, blob, syms, DETOURS, POKES, CONTEXT, RETURNS)
 
     # ---- DSP -----------------------------------------------------------------------
-    print("\n=== DSP: the RPS9/RPSP kernel (SPRING REVERB donor) ===")
+    print("\n=== DSP: the S950/SP12 kernel (SPRING REVERB donor) ===")
     touched = set()
     orgs = dsp_install(img, touched)
 

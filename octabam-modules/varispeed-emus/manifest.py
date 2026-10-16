@@ -34,7 +34,7 @@ STATIC and FLEX descriptors: TSTR count 4 -> 5 with stock's 5-position select an
 unit's formatter; PTCH's widget and encoder step; TSNS's widget. The domain swap keeps
 PTCH / TSNS of each machine in NEIGHBOR's '---' bytes of the same track (claimed below).
 
-DSP. The S950 / SP12 kernel (rpk_dsp.asm, a copy of the hardware-proven one), two hooks:
+DSP. The S950 / SP12 kernel (vem_dsp.asm, a copy of the hardware-proven one), two hooks:
 zqrp at the voice kernel's prologue (A P:0x40b, B P:0x20e), zqboot at each payload's
 one-time memory clear (A P:0x46, B P:0x47; their `do` words differ). Two table blocks
 (81 + 384 words). Core-private Y $A00-$FFF. It needs a given-up effect for its words, as
@@ -42,13 +42,12 @@ the standalone gives up SPRING REV.
 
 PLACE. DRAM (the default; ~5.3 KB) or CAVE (the classic cave, where the standalone puts it).
 The ledger refuses this module beside any other that writes the STATIC / FLEX TSTR words
-or the same sites (REPITCH_REPEAT98_KYOTI and octabam's REPITCH do): one design at a time.
+or the same sites: one design at a time.
 
 MEASURED. The unit, linked at the standalone image's address, is that image's bytes
 (5407 and 54455 alike). On the standalone image, in ot_emu with real hardware-exported
-projects: bit-identical DSP increments with the shipped REPITCH_REPEAT98_KYOTI where the
-designs coincide, and the new behaviour's tests (reference/handoffs/REPITCH_REWRITE_IMPL.md).
-Not yet on hardware.
+projects: its behaviour tests (reference/handoffs/VARISPEED_IMPL.md). On hardware: the
+author's MKI, 15 Oct 2026 (the standalone image 140C_VEM10 and its Bugbuild).
 """
 
 import dataclasses
@@ -67,7 +66,7 @@ except ImportError:                     # an older octabam: DRAM, no setting
 # the folder is reached (checked out directly, symlinked, or a submodule of this repo).
 _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 
-_spec = importlib.util.spec_from_file_location("vem_dsp_ptable", os.path.join(_HERE, "rpk_dsp_ptable.py"))
+_spec = importlib.util.spec_from_file_location("vem_dsp_ptable", os.path.join(_HERE, "vem_dsp_ptable.py"))
 _pt = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_pt)
 
@@ -175,7 +174,7 @@ MODULE = Module(
     symbol_refs=SYMBOL_REFS,
     keeps=KEEPS,
     dsp=DspSection(
-        asm=os.path.join(_HERE, "rpk_dsp.asm"),
+        asm=os.path.join(_HERE, "vem_dsp.asm"),
         priority=32,
         ptable=tuple(_pt.PTABLE),
         ptable2=tuple(_pt.PTABLE2),
@@ -195,8 +194,7 @@ MODULE = Module(
     category=Category.MACHINES,
     author="Zac-Kyoti",
     author_url="https://github.com/Zac-Kyoti/octatrack-kyoti-fw",
-    proof=Proof.PORT,
-    proof_note="ot_emu: the standalone image (tools/build_varispeed_emus.py) against the shipped "
-               "REPITCH_REPEAT98_KYOTI and its own behaviour tests; not yet on hardware",
+    proof=Proof.HARDWARE,
+    proof_note="the author's MKI, 15 Oct 2026 (the standalone image 140C_VEM10 and its Bugbuild)",
     **_SETTINGS,
 )

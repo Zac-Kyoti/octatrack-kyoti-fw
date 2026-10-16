@@ -38,7 +38,7 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | `NOTES.md` | the full chronological RE log — every finding, every session, every dead end |
 | `reference/kb/*.md` | the distilled knowledge base — address map, file format, DSP, container, techniques, caves; ours merged with external RE |
 | `reference/MERGE.md` | the combined image (`tools/build_kyoti.py`): its cave layout across zones, the evidence for each zone, the resolved merge blockers |
-| `reference/handoffs/*.md` | design contracts and scopes: `DIRECTJUMP_V7_DESIGN.md` (DIRECT_JUMP_KYOTI), `REPITCH_*` (REPITCH, being rewritten: `REPITCH_REWRITE_SPEC.md`), `RELOAD3_SEQFAIL_HANDOFF.md` |
+| `reference/handoffs/*.md` | design contracts and scopes: `DIRECTJUMP_V7_DESIGN.md` (DIRECT_JUMP_KYOTI), `REPITCH_*` (REPITCH, being rewritten: `VARISPEED_SPEC.md`), `RELOAD3_SEQFAIL_HANDOFF.md` |
 | `reference/RELOAD_REDESIGN.md` | RELOAD_FROM_PROJECT's chord design and the measured keymap facts |
 | `reference/OT_SEQUENCER_BUGS.md` | every stock sequencer bug we have determined, and the measured NOT-bugs |
 | `reference/AR_*.md` | the Analog Rytm's sequencer and pattern-commit arithmetic (DIRECT_JUMP_KYOTI research) |
@@ -103,7 +103,7 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | Ghidra headless | JDK 21 + Ghidra 12.1.2 paths in the memory file; project `ghidra_project octamax`, `-process section_3_MAIN_OS.bin -noanalysis`; helpers in `tools/ghidra/`, dumps land in `out/ghidra/` |
 | ColdFire emulation | `tools/emu_rtos.py` (Unicorn on real image bytes, via octabam's emulator in `refs/octabam/`) |
 | DIRECT_JUMP_KYOTI timing gate | `tools/diag_reflock.py` + `tools/cmp_reflock.py` (equality with a never-switched reference run) |
-| REPITCH DSP kernel gate (kept for the rewrite) | `tools/repitch_dsp_*` (bit-exact against the reference engine) |
+| REPITCH DSP kernel gate (kept for the rewrite) | `tools/varispeed_emus_dsp_*` (bit-exact against the reference engine) |
 | DSP assembly | `tools/dsp_xasm.py` over `vendor/dsp56300`'s `dsp_asm` |
 | a final build | `tools/build_<feature>.py` → `.syx` (MIDI) + `.bin` (CF card); see `BUILD_KYOTI.md` |
 | the combined image | `tools/build_kyoti.py` — builds **KYOTI V1.5 (WIP)**; **KYOTI V1.4, FINAL 2026-10-14**, builds from `19348d9` (see §6) |
@@ -243,8 +243,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 - **REPITCH_REPEAT98_KYOTI** — **REMOVED 2026-10-13**: its standalone builder, Bugbuild and
   KYOTI slot are gone, and octabam is asked to drop its module. Jannik asked for RPS9/RPSP to be
   separated altogether from his Repitch, so the ColdFire core (the part from his module) is
-  being rewritten clean-room: `reference/handoffs/REPITCH_REWRITE_SPEC.md` (branch
-  `repitch-rewrite`). The module folder, DSP kernel and `tools/repitch_dsp_*` stay as the
+  being rewritten clean-room: `reference/handoffs/VARISPEED_SPEC.md` (branch
+  `repitch-rewrite`). The module folder, DSP kernel and `tools/varispeed_emus_dsp_*` stay as the
   rewrite's sources. Last state (rev 17, FINAL 2026-10-08, `140C_RPK17`, `BUG_RPK17`): RPSP =
   the SP's mid through raw outputs 7/8, the side clean; 146 modelled cycles per RPSP voice (rev 16:
   ≈ 235), RPS9 57. On hardware (octabam images OBKYOTI15/16, same kernel with a filter): four RPSP

@@ -2,7 +2,7 @@
 
 Written 2026-10-14 by the **clean** implementation agent, in the worktree
 `octatrack-kyoti-fw-repitch-rewrite` (branch `repitch-rewrite`). It follows
-`REPITCH_REWRITE_SPEC.md`, `REPITCH_REWRITE_SCOPE.md` and `REPITCH_REWRITE_SCOPE_EMUS.md`.
+`VARISPEED_SPEC.md`, `VARISPEED_SCOPE.md` and `VARISPEED_SCOPE_EMUS.md`.
 Nothing was flashed, promoted or pushed. KYOTI's combined image was not touched.
 
 Marks: **C** = confirmed on our image (objdump, or an emulator run); **I** = inferred.
@@ -42,7 +42,7 @@ OS VERSION reads `140C_VEM1`. The builder is deterministic (rebuilt three times,
 | `tools/build_varispeed_emus.py` | the standalone builder (WIP, `KYOTI_ALLOW_WIP=1`) |
 | `octabam-modules/varispeed-emus/varispeed_emus.s` | the ColdFire half, one link unit: PART 1 new core, PART 2 the retained code extended |
 | `octabam-modules/varispeed-emus/manifest.py` | the octabam module |
-| `octabam-modules/varispeed-emus/rpk_dsp.asm`, `rpk_dsp_ptable.py` | verbatim copies of the kernel files (header added) |
+| `octabam-modules/varispeed-emus/vem_dsp.asm`, `vem_dsp_ptable.py` | verbatim copies of the kernel files (header added) |
 | `tools/varispeed_emus_harness.py` | the black-box equivalence harness (spec §5) |
 | `tools/varispeed_emus_test.py` | the new-behaviour tests |
 | `tools/varispeed_emus_ot_emu.patch` | the scratch ot_emu patch both use (DSP voice-entry log) |
@@ -59,7 +59,7 @@ be zero and inside `0x400d6500..0x400d7c3c`; the unit may not reference
 `0x80006a40..0x80006abf`; the 5-position select `0x40046ab4` must still be unreferenced in
 stock; each body must jump back to its site + the displaced length; the module manifest's
 `reference` must equal the unit (refused otherwise); EFT wrap + re-parse. The DSP half is
-`REPITCH_REWRITE_DSP_INSTALL.py`, copied in verbatim between markers.
+`VARISPEED_DSP_INSTALL.py`, copied in verbatim between markers.
 
 ## 2. Hooks as implemented
 
@@ -176,11 +176,11 @@ image engages one frame earlier. Nothing else differs.
 
 ### (c) DSP-side checks: all pass, unchanged kernel
 
-- `tools/repitch_dsp_engine_check.py`: 89 PASS, 0 FAIL (RPS9/RPSP bit-exact with the
+- `tools/varispeed_emus_dsp_engine_check.py`: 89 PASS, 0 FAIL (RPS9/RPSP bit-exact with the
   DSP-exact twin on both payloads; 52.2 / 112.8 instr/sample).
-- `tools/repitch_dsp_boot_check.py out/mainos_varispeed_emus.bin`: PASS on both payloads
+- `tools/varispeed_emus_dsp_boot_check.py out/mainos_varispeed_emus.bin`: PASS on both payloads
   (memory outside Y:$A00-$FFF identical; tables + tag as the model).
-- `tools/repitch_dsp_octabam_check.py`: 264/264 PASS.
+- `tools/varispeed_emus_dsp_octabam_check.py`: 264/264 PASS.
 
 ### (d) octabam module
 
@@ -303,13 +303,13 @@ and the engine on screen (first scope §5.4).
 ## 7. Provenance
 
 ### 7.1 Files read
-- The spec, both scopes, `REPITCH_REWRITE_RETAINED.s`, `REPITCH_REWRITE_DSP_INSTALL.py` (all).
+- The spec, both scopes, `VARISPEED_RETAINED.s`, `VARISPEED_DSP_INSTALL.py` (all).
 - `CLAUDE.md` (all), `START_HERE.md` and `FLASHING.md` §4 (filtered with `grep -v` on the
   keyword set), `reference/kb/caves.md` (all), `reference/handoffs/KYOTI_LOAD_AUDIT.md`
   L340-400 (filtered; the OTDEMO card's provenance).
 - Allowed own code: `octabam-modules/repitch-repeat98-kyoti/README.md`,
-  `patch_repitch_reload.s`, `rpk_dsp.asm` (header and the table reads), `rpk_dsp_ptable.py`
-  (head); `tools/repitch_dsp_src.py` (head), the heads of the four DSP check tools.
+  `patch_repitch_reload.s`, `vem_dsp.asm` (header and the table reads), `vem_dsp_ptable.py`
+  (head); `tools/varispeed_emus_dsp_src.py` (head), the heads of the four DSP check tools.
 - Examples: `tools/build_rec_trig_mute.py`, `tools/build_sidechain_compressor.py`,
   `tools/kyoti_status.py` (`seal`), `tools/dram/dram.py`,
   `octabam-modules/sidechain-compressor/manifest.py`, `tools/load_audit/la_run.py` (filtered).
@@ -355,9 +355,9 @@ and the engine on screen (first scope §5.4).
    RELOAD PART bypassing `rp_forget`, DSP revisions). Nothing was taken from it; the related
    facts here come from the retained code and the image.
 2. **Names only:** `ls tools/` printed the names of blacklisted tools
-   (`repitch_ab_pack.py`, `repitch_ab_speeds.py`, `repitch_ch12_listen.py`,
-   `repitch_probe_kyoti.cpp`, `repitch_ot_emu_trace.patch`, `repitch_sp_reference.py`,
-   `repitch_test_beat.py`); `ls reference/handoffs` printed `REPITCH_REWRITE_OVERLAP.md`;
+   (`varispeed_emus_ab_pack.py`, `varispeed_emus_ab_speeds.py`, `varispeed_emus_ch12_listen.py`,
+   `repitch_probe_kyoti.cpp`, `repitch_ot_emu_trace.patch`, `varispeed_emus_sp_reference.py`,
+   `varispeed_emus_test_beat.py`); `ls reference/handoffs` printed `VARISPEED_OVERLAP.md`;
    `ls octabam-modules/repitch-repeat98-kyoti/` printed `manifest.py`,
    `patch_repitch_kyoti.s`; `ls refs/octabam/out` printed `kv1_rpk_card.img` (not used).
 3. **Fragments:** a keyword `grep -n` on `tools/build_kyoti.py` and `la_run.py`, cut to 12
@@ -518,9 +518,9 @@ TSTR 4/5/6:
 The whole-run differences are the ones listed in §3 (a) (the trig latch; the transition and
 adoption frames), nothing else.
 
-**(c) DSP checks** (kernel unchanged): `repitch_dsp_engine_check.py` 80/80 bit-exact + mode
-switch 8/8, 0 FAIL; `repitch_dsp_boot_check.py out/mainos_varispeed_emus.bin` PASS on both
-payloads; `repitch_dsp_octabam_check.py` 264/264 PASS (`out/vem/dsp2_*.txt`).
+**(c) DSP checks** (kernel unchanged): `varispeed_emus_dsp_engine_check.py` 80/80 bit-exact + mode
+switch 8/8, 0 FAIL; `varispeed_emus_dsp_boot_check.py out/mainos_varispeed_emus.bin` PASS on both
+payloads; `varispeed_emus_dsp_octabam_check.py` 264/264 PASS (`out/vem/dsp2_*.txt`).
 
 **(d) octabam module.** Rebuilt in the scratch octabam (`out/vem/octabam`, `a67a1112`,
 `REMIX=varispeed-emus BUILD=79 XBUS=1 SPEC=1 python3 tools/build/build_bus.py`, log
@@ -560,14 +560,14 @@ other modules' names, none of them read.
 
 The user asked for this right after VEM2. The S950 (RPS9) virtual record filter left source
 content at 20–22 kHz at −12…−17 dB. A 40 kHz recorder cannot hold it, and pitched down it
-landed where a real S950 has nothing: 15–16.5 kHz at 0.75×. `repitch_engine_model.fir_target`
+landed where a real S950 has nothing: 15–16.5 kHz at 0.75×. `varispeed_emus_model.fir_target`
 now adds a stopband from 0.5 × FS_AKAI (20 kHz):
 
 - **The filter:** weight 30, and 18.5–20 kHz left free. The result is ≥ 40 dB rejection above
   20 kHz (shipped: −11.5 dB), with the band up to 16 kHz within 0.7 dB of the MF6 shape. It
   rolls off about 5 dB faster than the MF6 between 16 and 20 kHz.
-- **What changed:** only the tables (tools/repitch_dsp_src.py and the octabam
-  `rpk_dsp_ptable.py`, regenerated). The kernel code is unchanged apart from the table tag
+- **What changed:** only the tables (tools/varispeed_emus_dsp_src.py and the octabam
+  `vem_dsp_ptable.py`, regenerated). The kernel code is unchanged apart from the table tag
   (TAGVAL `$504a23` → `$1974ed`), so the boot copy reloads the new tables.
 - **The effect** (beat, against OT): at 78 BPM, 15–16.5 kHz goes −8.4 → −24.4 dB and
   12–15 kHz goes −1.4 → −3.3 dB. At 104 and 156 BPM, nothing changes by more than 2.5 dB
@@ -583,7 +583,7 @@ now adds a stopband from 0.5 × FS_AKAI (20 kHz):
 
 Same worktree, clean side. Read for this section: the spec (all), this file §1-9, both scopes,
 `CLAUDE.md`, `reference/kb/caves.md` (§0-§2b, filtered), `reference/kb/file-format.md` (the
-pattern/track layout), our module sources, builder, tests, harness, `tools/repitch_dsp_profile.py`,
+pattern/track layout), our module sources, builder, tests, harness, `tools/varispeed_emus_dsp_profile.py`,
 `tools/load_audit/{la_run.py (filtered), isr_stats.py, ot_emu_load_audit.patch}`, the stock image.
 **Nothing was flashed, promoted or pushed.** KYOTI's combined image was not touched.
 
@@ -696,7 +696,7 @@ All in `varispeed_emus.s` (PART 1, "THE DSP LOAD GUARD"), three routines, about 
 | `VG_BASE_C1` / `VG_BASE_C0` | 574 / 477 | spec §6 item 1 (re-measured 577 / 482) |
 | `VG_SC` | 0 | spec: SIDECHAIN_COMPRESSOR adds 56 per core; not in this image |
 | `VG_FX_*` | DJ EQ 347, LO-FI 313, CHORUS 312, SPRING 306 (`VG_FX_SPRING_HERE` 0: the stub), FILTER 267, DARK 267, PLATE 240, PHASER 223, EQ 200, FLANGER 146, COMB 111, COMPRESSOR 89, SPATIALIZER 77, DELAY 0, NONE 0 | spec §6 item 1 |
-| `VG_SP12` / `VG_S950` | **270 / 109** | `tools/repitch_dsp_profile.py`, worst ratio, its `~hw` column (see below) |
+| `VG_SP12` / `VG_S950` | **270 / 109** | `tools/varispeed_emus_dsp_profile.py`, worst ratio, its `~hw` column (see below) |
 | `VG_BUDGET_C1` / `VG_BUDGET_C0` | 3930 / 3350 | spec §6 item 2, the clean points |
 
 **Which engine price (a deviation from the instructions; please decide).** The profile reports
@@ -755,7 +755,7 @@ One bug was caught by the tests during the work: the free test branched on the f
 estimate; fixed before the runs above.
 
 **(c) DSP:** the payloads are byte-identical to VEM3's (so the engine and octabam checks stand);
-`repitch_dsp_boot_check.py out/mainos_varispeed_emus.bin`: PASS on both payloads.
+`varispeed_emus_dsp_boot_check.py out/mainos_varispeed_emus.bin`: PASS on both payloads.
 
 **(d) octabam:** `make bus` equivalent in the scratch octabam (`a67a1112`): `vem_cf: matches the
 author's build at 0x400d6500 (4,016 B)`, the unit in DRAM at `0x40a955e0`, 19 detours.
@@ -854,7 +854,7 @@ samples that keep sounding (loops), DARK REV on every FX2:
    the load audit (that it rated the old kernel's DSP load high, and a SIDECHAIN tap bug) and the
    old module's history. Nothing here was taken from it: every fact in 10.1 comes from the image
    and our own emulator runs, every number from the spec, the profile or our measurements.
-2. **Allowed files that mention the audit:** `tools/repitch_dsp_profile.py`'s docstring names
+2. **Allowed files that mention the audit:** `tools/varispeed_emus_dsp_profile.py`'s docstring names
    the audit's section 2 as the source of its "modelled cycles" unit and quotes a per-voice
    budget ("about 60-75 per voice for four voices beside stock's heaviest FX on core 0"); the
    kernel's header says rev 17 followed "the DSP load audit's budget". `tools/load_audit/la_run.py`
@@ -1013,7 +1013,7 @@ S950) and `guard_mid` (`S95!`, the dial on SP12; `w8end` plain on SP12 after the
   identical**; both print **exactly** the lines VEM4G's runs printed (`out/vg/harness_*.txt`,
   `diff` empty), whole-run difference counts included.
 
-**(c) DSP**: payloads byte-identical to VEM4's; `repitch_dsp_boot_check.py
+**(c) DSP**: payloads byte-identical to VEM4's; `varispeed_emus_dsp_boot_check.py
 out/mainos_varispeed_emus.bin`: **PASS** on both payloads.
 
 **(d) octabam**: not rebuilt this session (the manifest's reference is updated; the builder
@@ -1303,7 +1303,7 @@ identical over its compared range; only the whole-run counts of a few scenarios 
 adoptions; the UI task now does ~600-1,600 more instructions around the run's first messages,
 which shifts them by a frame in the emulator).
 
-**(c) DSP**: payloads unchanged; `repitch_dsp_boot_check.py out/mainos_varispeed_emus.bin`:
+**(c) DSP**: payloads unchanged; `varispeed_emus_dsp_boot_check.py out/mainos_varispeed_emus.bin`:
 **PASS** on both payloads.
 
 **ColdFire cost** (C, ot_emu, `--cost`: coverage over 3,000 frames, against VEM3 (no guard),
@@ -1508,7 +1508,7 @@ from it, and the `_order` ones check that it differs from the net's order:
 identical**, full OTDEMO **35/35 identical**, full MMTESTDT (`--frames 6000`) **35/35
 identical**; all three print **exactly VEM6's lines** (`diff` empty, whole-run counts included).
 
-**(c) DSP**: payloads byte-identical to VEM6's; `repitch_dsp_boot_check.py
+**(c) DSP**: payloads byte-identical to VEM6's; `varispeed_emus_dsp_boot_check.py
 out/mainos_varispeed_emus.bin`: **PASS** on both payloads (`out/vem7/dsp_boot.txt`).
 
 **(d) octabam**: the module (reference `37f72b04…`) was not rebuilt this session; the VARISPEED
@@ -1820,7 +1820,7 @@ identical**, full OTDEMO **35/35 identical**, full MMTESTDT (`--frames 6000`) **
 "NOTHING COMPARED" in VEM7's re-run too: since `4d1d54f` an empty compared set fails, and at 30 BPM
 no compared track reaches its start in 6,000 frames. A harness limit, not a difference.
 
-**(c) DSP**: `repitch_dsp_boot_check.py out/mainos_varispeed_emus.bin`: **PASS** on both payloads
+**(c) DSP**: `varispeed_emus_dsp_boot_check.py out/mainos_varispeed_emus.bin`: **PASS** on both payloads
 (`out/vem8/dsp_boot.txt`).
 
 **VARISPEED**: rebuilt twice on the VEM8 source: syx `78cfad33…`, identical to §14.
@@ -2107,7 +2107,7 @@ MMTESTDT (`--frames 6000`) **34/35**, the one being the known empty `tempo_edge_
 COMPARED"). Every line, whole-run counts included, is **exactly VEM9's** (`out/vem9/`; `diff`
 empty on all four).
 
-**(c) DSP:** `repitch_dsp_boot_check.py`: **PASS** on both payloads, on the standalone and on
+**(c) DSP:** `varispeed_emus_dsp_boot_check.py`: **PASS** on both payloads, on the standalone and on
 `BUG_VEM10` (`out/vem10/dsp_boot*.txt`).
 
 ### 17.5 FLASHING §4 (draft) -- changes to §12.7 / §13.3 / §15.4 for VEM10

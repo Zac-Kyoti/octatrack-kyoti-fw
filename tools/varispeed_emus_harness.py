@@ -13,7 +13,7 @@ OT_VEM_LOG patch (tools/varispeed_emus_ot_emu.patch). Never disassembles, diffs 
 the oracle's code; the observation point is the unchanged DSP kernel's entry.
 
     new     VARI (TSTR 4) + EMUS OT / S950 / SP12     out/mainos_varispeed_emus.bin
-    oracle  TSTR 4 (RPCH) / 5 (RPS9) / 6 (RPSP)       out/oracle/shipped_repitch_repeat98_kyoti_FINAL.bin
+    oracle  TSTR 4 (OT) / 5 (S950) / 6 (SP12)       out/oracle/predecessor_FINAL.bin
     stock   for the out-of-range cases: TSTR OFF      out/raw/section_3_MAIN_OS.bin
 
 Per track the comparison starts at its first trig pass after the value pokes (the new
@@ -23,7 +23,7 @@ image latches the engine at a trig, the oracle takes it from TSTR at once).
 
 --plain: VARISPEED, the plain build (out/mainos_varispeed.bin, spec §7), which must equal
 VARISPEED_EMUS on EMUS = OT bit for bit: every track on OT, no EMUS pokes (TSNS stays TSNS);
-  VARI tracks          vs the oracle's TSTR 4 (the shipped image on RPCH = VARISPEED_EMUS
+  VARI tracks          vs the oracle's TSTR 4 (the shipped image on OT = VARISPEED_EMUS
                        on OT, proven by the default mode), every bit of l:$40
   stock TSTR / TSMODE  vs STOCK 1.40C, every bit (VARISPEED masks nothing: stock's own
                        engine-bit garbage must come through; the count is printed)
@@ -51,7 +51,7 @@ OUTD = pathlib.Path(os.environ.get("VEM_OUT", SCR / (("harness_plain_" if "--pla
                                                      + os.environ.get("VEM_PROJECT", "otdemo"))))
 PLAIN = "--plain" in sys.argv                  # VARISPEED (see the docstring)
 IMAGES = {"new": ROOT / ("out/mainos_varispeed.bin" if PLAIN else "out/mainos_varispeed_emus.bin"),
-          "oracle": ROOT / "out/oracle/shipped_repitch_repeat98_kyoti_FINAL.bin",
+          "oracle": ROOT / "out/oracle/predecessor_FINAL.bin",
           "stock": ROOT / "out/raw/section_3_MAIN_OS.bin"}
 for _k, _e in (("new", "VEM_IMG_NEW"), ("oracle", "VEM_IMG_ORACLE")):
     if os.environ.get(_e):                  # the harness's own oracle check: stock vs stock,
