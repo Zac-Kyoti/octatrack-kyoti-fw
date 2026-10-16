@@ -18,7 +18,7 @@ unused bytes while the track is a BLKPYRAMD and put back when it leaves.
 COLDFIRE. One DRAM unit, bp_runtime (~28 KB): tools/ot303/cf/{machine.s,control.c,record.c,
 params.c} and the voice's Y table, generated into one GNU-as unit by tools/ot303/octabam_module.py
 (the C as `m68k-elf-gcc -S` output, libgcc's __muldi3 as words). Its `reference` is the standalone
-image's runtime: linked alone at 0x40a955e0 it is those bytes, sha256 b9e105e7..., for -mcpu=5407
+image's runtime: linked alone at 0x40a955e0 it is those bytes, sha256 9dac55d8..., for -mcpu=5407
 and 54455 alike (the generator refuses to write it otherwise). 43 detours, 7 pokes and the FLEX
 renderer slot (0x400d6438 -> ot_render), every one the standalone builder's
 (tools/build_blackpyramids_303.py).
@@ -49,7 +49,7 @@ _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 H = bytes.fromhex
 
 RUNTIME_AT = 0x40A955E0        # the standalone image's DRAM reserve (tools/ot303/dram.py RESERVE)
-RUNTIME_SHA256 = "b9e105e7331deb89abd55a77bac37eebec4a8539cbfe626ad87dea1fee6c9273"
+RUNTIME_SHA256 = "9dac55d87d823506b44907a48d92438e55375daabed0a03057547d11e7f3f130"
 
 DETOURS = (
     Detour(0x400334D8, H("2f02222f0008"), "bp_runtime", "ot_machine_name", "chooser row 5's name"),

@@ -283,6 +283,28 @@ static struct ot_qn q[8][QN] = {{{0, 0, 0, 0}}};
 static uint8_t qn[8] = {0}, qcall[8] = {0}, qlast[8] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, qlen[8] = {0};
 static uint32_t qctx[8] = {0};          /* the step being scheduled: 1 << 24 | bank << 16 | pattern << 8 | step */
 static struct ot_voice voice[8] = {{{0}, 0, {0}, 0, 0, 0, 0, 0, 0, 0}};
+/* MT26: a push-and-turn (coarse) knob step. The editor writes such a step to the engine's base value at
+ * once, without the 1/16-a-frame slew it gives a normal turn (0x40055190: the knob's coarse flag
+ * 0x46c7d244 + 20 k + 8 -> 0x400551bc), so CUT / ENV jumped several values. Only the knob writes the
+ * live byte (0x80000810 + 72 t + slot): when it moves and the lane's value jumped more than one knob
+ * value in that frame, the value sent is slewed the editor's way (1/16 a frame) until it arrives. A
+ * normal turn arrives slewed already; an LFO or a p-lock leaves the live byte alone and is sent as is;
+ * a note's frame ends a glide. */
+struct ot_cg { uint16_t s, lane; uint8_t live, gliding, have; };
+static struct ot_cg cg[8][2] = {{{0, 0, 0, 0, 0}}};
+static unsigned coarse_glide(struct ot_cg *g, unsigned live, unsigned lane, unsigned ev) {
+    if (!g->have) { g->s = g->lane = (uint16_t)lane; g->live = (uint8_t)live; g->have = 1; return lane; }
+    int32_t jump = (int32_t)lane - (int32_t)g->lane;
+    if (live != g->live && (jump > 256 || jump < -256) && !(ev & OT_EV_NOTE)) g->gliding = 1;
+    if (ev & OT_EV_NOTE) g->gliding = 0;
+    if (g->gliding) {
+        int32_t d = (int32_t)lane - (int32_t)g->s;
+        if (d > -16 && d < 16) { g->s = (uint16_t)lane; g->gliding = 0; }
+        else g->s = (uint16_t)((int32_t)g->s + d / 16);
+    } else g->s = (uint16_t)lane;
+    g->live = (uint8_t)live; g->lane = (uint16_t)lane;
+    return g->s;
+}
 /* MT20, AMP ATK > 0: stock's AMP (mode RTRG) drops the track's level to ~0 at every trig, no fade --
  * a sample restarts there, this voice may still sound (a long gate, an accent's tail, a slide, a held
  * live note): a click. While the voice is estimated to sound, the frame's AMP record (0x80000110 +
@@ -590,6 +612,8 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
          * only the high byte made a turn step half a semitone at a time. */
         unsigned cut_q8 = fp[OT_CUT] > 0x7f00u ? 0x7f00u : fp[OT_CUT];
         unsigned env_q8 = fp[OT_ENV] > 0x7f00u ? 0x7f00u : fp[OT_ENV];
+        cut_q8 = coarse_glide(&cg[track][0], U8(0x80000810u + 72u * track + OT_CUT), cut_q8, ev);
+        env_q8 = coarse_glide(&cg[track][1], U8(0x80000810u + 72u * track + OT_ENV), env_q8, ev);
         ot_record(record, &voice[track], p, ev, gl, cut_q8, env_q8);
     }
     U32(0x80001c80u) = (uint32_t)(uintptr_t)(cursor + 4 + 2 * n);

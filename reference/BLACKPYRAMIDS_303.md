@@ -158,6 +158,10 @@ Control decisions (the author's):
   as a late half-semitone step, after the slew's ~58 ms. CUT and ENV now carry the fraction
   (`ot_params_cont_q8`), so a turn sweeps as on a stock track, and a p-lock still jumps at once
   onto the 1 ms glide.
+- **Push-and-turn (MT26):** a coarse step skips the editor's slew (it writes the base value at once),
+  so CUT and ENV still jumped several values. When the knob's live byte moves and the value jumps
+  more than one knob value in that frame, the renderer slews it the editor's way (1/16 a frame).
+  LFOs and p-locks never write the live byte, so they're untouched.
 - **VOL:** clean lower half, driven upper half.
 - **Ties:** both trigless kinds.
 - **Accent:** an ACC p-lock.
