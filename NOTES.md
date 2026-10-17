@@ -36624,3 +36624,5 @@ From the author's notes on the unit, ColdFire words only (the DSP code stays the
   ALL GOOD, ANALOG BD byte-identical against main (`f78ded1b…` both); selftest all pass but `stock_labels.json
   is stale: unicorn not installed` (the scratch tree's venv after `uv sync --frozen`, not the change). refhash and
   `make reach` were run on the earlier base only (said so in the PR).
+- **2026-10-16 cont: the MT34 FINAL (`06232561…`) is flashed -- the user: "all good".** START_HERE, the module README
+  and the octabam PR #779 text corrected (they had said it was promoted unflashed).

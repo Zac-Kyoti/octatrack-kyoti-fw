@@ -156,9 +156,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 > Check this against the tree before trusting it; it has gone stale before.
 
 - **BLACKPYRAMIDS_303** (`tools/build_blackpyramids_303.py`) — **FINAL 2026-10-16 (MT34)**, mainos
-  `891e4fd0…`, CF `.bin` `06232561…`, syx `803a4911…`, `140C_BP303`. Promoted on the user's
-  instruction, **not flashed yet**; MT33 before it (`faef6874…`) is flashed, and the 14 Oct build
-  was confirmed in full (the voice, the grid, live play, chromatic with PAGE, FUNC + PTCH octaves).
+  `891e4fd0…`, CF `.bin` `06232561…`, syx `803a4911…`, `140C_BP303`. **Flashed by the user: all
+  good** (2026-10-16); the 14 Oct build was confirmed in full (the voice, the grid, live play, chromatic with PAGE, FUNC + PTCH octaves).
   Bugbuild `BUG_BP303` (mainos `8531b6ff…`, `.bin` `f0a7bc78…`, syx `54ec5e77…`): emulator-verified,
   not flashed.
   - Since 14 Oct (MT24–MT33, ColdFire words only; the DSP code is the 15 Oct engine pass, bit-exact):

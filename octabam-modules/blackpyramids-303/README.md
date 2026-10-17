@@ -47,8 +47,8 @@ instead.
 ## Measured
 
 - **The standalone image** (`tools/build_blackpyramids_303.py`, `140C_BP303`, FINAL 16 Oct 2026,
-  mainos `891e4fd0…`) is promoted on the author's word; the build before it (the same but for the
-  RES trim) is flashed on the author's MKI. The 14 Oct build was confirmed in full on the unit: the voice, the grid (notes, accents, slides,
+  mainos `891e4fd0…`) runs on the author's MKI: all good. The 14 Oct build was confirmed in full on
+  the unit: the voice, the grid (notes, accents, slides,
   ties), every knob, live play, chromatic with PAGE and FUNC + PTCH octaves.
 - **Since 14 Oct, ColdFire words only** (the DSP code is the 15 Oct engine pass, bit-exact against
   the integer twin): CUT / ENV sweep when turned; DEC 50 ms–2 s; per-step ACC locks scaled by the
