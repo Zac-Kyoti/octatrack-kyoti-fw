@@ -168,7 +168,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
     voices; driven VOL gets 4× output-stage headroom into the drive (round 15); a level trim below
     RES 20, −1.4 dB at RES 0 (round 17; MT34).
   - The octabam module (`octabam-modules/blackpyramids-303/`) is regenerated for this build; its
-    octabam PR (with `Module.dsp_source`) is drafted, not sent. Not flashed in octabam form.
+    octabam PR (with `Module.dsp_source`) is **sent: sambanks/octabam#779** (branch
+    `Zac-Kyoti/octabam:kyoti-blackpyramids-303`, pin `15404de`, on `c3f37e53`). Not flashed in octabam form.
   - Open: clean VOL still hard-clips on bright, low-RES accents; a DSP knee for it is round 16
     (simulated, the author's pick pending), and needs ~12–14 DSP program words.
   - Open: a square-wave voice on core 0 under the heaviest FX stack may overrun (§4 there).

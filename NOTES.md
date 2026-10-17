@@ -36617,3 +36617,10 @@ From the author's notes on the unit, ColdFire words only (the DSP code stays the
   `8531b6ff2483…` (.bin `f0a7bc78…`, syx `54ec5e77…`), verify_ot303 ALL GOOD; all ten Bugbuilds match their pins.
   From RES 20 up the level word is bit-for-bit MT33's (OT_RTRIM = 16384); VOL changes now ease ~2 ms. The octabam
   module is regenerated (runtime 31,512 B); its octabam PR is sent from this pin (below).
+- **2026-10-16 cont: octabam BLACKPYRAMIDS_303 PR sent:** sambanks/octabam#779, branch
+  `Zac-Kyoti/octabam:kyoti-blackpyramids-303` (`5f81f488`), pin `15404de`, rebased onto Sam's `c3f37e53` (conflicts
+  in CHANGELOG / README / build_bus.py's second platform link: Sam's new 7-tuple + comparison kept, under the
+  `if _pres:` guard). On that base: `make bus` (runtime = the author's, 31,512 B), verify-remix pass, verify_ot303
+  ALL GOOD, ANALOG BD byte-identical against main (`f78ded1b…` both); selftest all pass but `stock_labels.json
+  is stale: unicorn not installed` (the scratch tree's venv after `uv sync --frozen`, not the change). refhash and
+  `make reach` were run on the earlier base only (said so in the PR).
