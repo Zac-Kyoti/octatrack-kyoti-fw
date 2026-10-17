@@ -147,7 +147,7 @@ anything not listed is Open303 as shipped.
 | Makeup gain by RES | — | not added | round 13: "way too heavy" |
 | WAVE gain | — | **+2.66 dB at WAVE 87, +1.8 dB at 127 (MT29)** | round 14: kept over none in all five (two sweeps, saw against WAVE 64 / 96 / 127), blind order |
 | Output stage headroom, driven VOL | hard clip before the drive | **4× headroom into the drive (MT33)** | round 15 (scene 2): bright accents at VOL 65–127 were chopped flat before the soft clip; now the drive rounds them. Below the old ceiling the same to −107 dB; clean VOL unchanged (still clips on bright accents; a knee for it was round 16) |
-| Level at the bottom of RES | up to ~9 dB louder at RES 0 than from RES ~48 up | **a trim below RES 20 (MT34, WIP)**: −1.4 dB at RES 0, −0.8 at 4, −0.5 at 8, −0.1 at 16, none from RES 20 (the knob above untouched), eased with RES | round 17 (RES 0 held 2.8 s, then swept; 10–50 % of the boost): 15 % picked at RES 0, then the author chose this form, ending at RES 20, over the proportional one. Clean clipping in that scene 3,508 → 2,402 samples |
+| Level at the bottom of RES | up to ~9 dB louder at RES 0 than from RES ~48 up | **a trim below RES 20 (MT34)**: −1.4 dB at RES 0, −0.8 at 4, −0.5 at 8, −0.1 at 16, none from RES 20 (the knob above untouched), eased with RES | round 17 (RES 0 held 2.8 s, then swept; 10–50 % of the boost): 15 % picked at RES 0, then the author chose this form, ending at RES 20, over the proportional one. Clean clipping in that scene 3,508 → 2,402 samples |
 
 Control decisions (the author's):
 - **PTCH:** a semitone per value, C0–C8, with note names. Earlier there were two values per
@@ -349,7 +349,7 @@ now goes through the field, with its image byte-identical.
     chooser relocation, and its own DSP payload edits).
   - A Part naming SPRING REV keeps SPRING's page (as with ANALOG BD) rather than the NONE page
     shown here.
-- **Not flashed in that form.** Regenerated for the FINAL build of 16 Oct 2026 (runtime 31,180 B).
+- **Not flashed in that form.** Regenerated for the FINAL build of 16 Oct 2026 (MT34, runtime 31,512 B).
 
 - **Why FLEX plus a signature, not a sixth machine type:** the OS knows five machine types. A sixth
   would have to be taught to the Part validator, the project file (a stock OS would reset the

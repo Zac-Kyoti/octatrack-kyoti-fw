@@ -36612,3 +36612,8 @@ From the author's notes on the unit, ColdFire words only (the DSP code stays the
     Same RES-0 cut and clipping (2,402 vs 2,403 simulated); from RES 20 on the output equals as built (−96 dB);
     the level still falls monotonically (a gentler slope below 20). Builds: mainos `891e4fd0…`, CF .bin
     `06232561…`, syx `803a4911…` (WIP, not flashed).
+- **2026-10-16 cont (`ot303`): MT34 (the RES-20 trim) PROMOTED FINAL on the author's instruction, not flashed.**
+  `build_blackpyramids_303.py` → `891e4fd00b07…` (CF .bin `06232561…`, syx `803a4911…`); `BUG_BP303` →
+  `8531b6ff2483…` (.bin `f0a7bc78…`, syx `54ec5e77…`), verify_ot303 ALL GOOD; all ten Bugbuilds match their pins.
+  From RES 20 up the level word is bit-for-bit MT33's (OT_RTRIM = 16384); VOL changes now ease ~2 ms. The octabam
+  module is regenerated (runtime 31,512 B); its octabam PR is sent from this pin (below).

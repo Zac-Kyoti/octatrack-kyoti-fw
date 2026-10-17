@@ -155,16 +155,18 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
-- **BLACKPYRAMIDS_303** (`tools/build_blackpyramids_303.py`) — **FINAL 2026-10-16**, mainos
-  `31909095…`, CF `.bin` `faef6874…`, syx `bfeccdfb…`, `140C_BP303`. Flashed by the user, who
-  asked for the promotion; the 14 Oct build before it was confirmed in full (the voice, the
-  grid, live play, chromatic with PAGE, FUNC + PTCH octaves). Bugbuild `BUG_BP303` (mainos
-  `98082517…`, `.bin` `0ab8e12f…`, syx `be7cdb5d…`): emulator-verified, not flashed.
+- **BLACKPYRAMIDS_303** (`tools/build_blackpyramids_303.py`) — **FINAL 2026-10-16 (MT34)**, mainos
+  `891e4fd0…`, CF `.bin` `06232561…`, syx `803a4911…`, `140C_BP303`. Promoted on the user's
+  instruction, **not flashed yet**; MT33 before it (`faef6874…`) is flashed, and the 14 Oct build
+  was confirmed in full (the voice, the grid, live play, chromatic with PAGE, FUNC + PTCH octaves).
+  Bugbuild `BUG_BP303` (mainos `8531b6ff…`, `.bin` `f0a7bc78…`, syx `54ec5e77…`): emulator-verified,
+  not flashed.
   - Since 14 Oct (MT24–MT33, ColdFire words only; the DSP code is the 15 Oct engine pass, bit-exact):
     CUT / ENV sweep when turned (and glide on push-turn); DEC 50 ms–2 s; per-step ACC locks scaled by
     the ACC knob (default 100), MIDI velocity > 100 accents; push-turn PTCH octaves, on every held
     trig too; a WAVE gain for equal loudness (ISO 532-1, round 14); one frame count a frame with two
-    voices; driven VOL gets 4× output-stage headroom into the drive (round 15).
+    voices; driven VOL gets 4× output-stage headroom into the drive (round 15); a level trim below
+    RES 20, −1.4 dB at RES 0 (round 17; MT34).
   - The octabam module (`octabam-modules/blackpyramids-303/`) is regenerated for this build; its
     octabam PR (with `Module.dsp_source`) is drafted, not sent. Not flashed in octabam form.
   - Open: clean VOL still hard-clips on bright, low-RES accents; a DSP knee for it is round 16

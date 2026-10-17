@@ -153,7 +153,8 @@ quick check for each:
   `PTCH`: all three locks move by the same octave and the display follows. An `ACC` lock of 127
   with the knob at 127 is the strongest accent; at 0 the step plays unaccented. Sweep `WAVE` on a
   held line: the level holds. A bright line (CUT high, RES 0) with full accents at VOL 99:
-  rounded, no fizz.
+  rounded, no fizz. Sweep RES up from 0: a touch less boom below RES 20, the same from 20 up;
+  RES locks between 0 and 20 on alternate steps do not click.
 - **VARISPEED** — a FLEX loop whose ATTR TEMPO matches it, TSTR on `VARI` (SRC SETUP, the
   fifth position): PTCH reads `QUAN`. Change the project tempo: the loop speeds up and slows
   down with its pitch and stays in time. QUAN `2/1` plays it an octave up at double speed.
