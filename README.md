@@ -195,7 +195,7 @@ Reload one track's sequence from the CF card **without stopping the transport**:
 - **`[PTN]` + `[TRACK n]`** — reload that track's card-saved sequence, Part untouched
 - **`[BANK]` + `[TRACK n]`** — the same, and re-apply the saved Part
 
-It reloads the pattern that is playing, on an audio or a MIDI track, and never restarts
+`[CUE]` + `[TRACK n]` stays stock. It reloads the pattern that is playing, on an audio or a MIDI track, and never restarts
 the sequence or the metronome. A toast confirms when the reload has finished, and says
 so if the trigs did not land.
 

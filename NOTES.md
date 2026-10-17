@@ -36654,3 +36654,10 @@ RELOAD_REDESIGN.md (no bytes change). Octabam pin move for `reload-from-project`
   docstring / THIRD_PARTY row. `make check-remix` reload-from-project + mods: all runnable checks pass (verify_set,
   verify_usb_align skip: no project); verify_dram_boot reserve == linked runtime (2,102 B); verify-docs 0 problems.
   DIRECT_JUMP_KYOTI's pin (also 329b801) not moved.
+- **2026-10-16 cont: PROMOTED FINAL (the user's instruction; MKI not yet flashed, Ilia's MKII confirmed):**
+  `build_reload_from_project.py` → `607a7d73…`, `BUG_RL3` → `ee380bb6…`, KYOTI V1.5 → `8ec9997e…`
+  (syx `f559cb86…`). Without the opt-in: standalone and KYOTI seal; all ten Bugbuilds match their pins.
+  (BUG_BP303 needs `out/ot303/dsp56300_new` — a fresh worktree has none; linked from `ot303` for the run.)
+  DIRECT_JUMP_KYOTI checked for the same mistake: its `[PTN]`-layer YES record `0x400bf0be` really is
+  `[PTN]`'s (layer `0x400bf0f2`, pushed by `0x4004346c` / popped by `0x40043418`, both called only from
+  the PTN handler `0x4005a044`); octabam's pin `329b801` = our main for that module except name-form lines.

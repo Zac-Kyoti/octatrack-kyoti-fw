@@ -183,8 +183,9 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   - **Layout:** VARISPEED's unit is CAVE's first piece, at its own address 0x400d6500. MUTE
     MODE's menu piece and `rtm_mask` move to SAFE. RELOAD_FROM_PROJECT goes to DRAM (one 6 KB
     page), as in V1.2–V1.3.
-  - **Builds:** mainos `6f6f3268…`, syx `8950f824…`, CF `.bin` `ac2d3e8f…`; it builds without the
-    opt-in and seals.
+  - **Builds:** mainos `8ec9997e…`, syx `f559cb86…`, CF `.bin` `e0f7d460…`; it builds without the
+    opt-in and seals. Re-pinned 2026-10-16 with RELOAD_FROM_PROJECT's `[CUE]`+`[TRACK]` fix
+    (PR #3); the first V1.5 pin was mainos `6f6f3268…`, syx `8950f824…`.
   - **Composer checks:** every delta is disjoint; outside the caves each feature equals its
     standalone; VARISPEED's bytes are identical to its standalone.
   - **Emulator:**
@@ -205,6 +206,10 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 - **DIRECT_JUMP_KYOTI / RELOAD_FROM_PROJECT standalones and their Bugbuilds** — re-pinned
   2026-10-08 with the review fixes; same sources as V1.2/V1.3, not flashed on their own. The
   DIRECT JUMP standalone now folds in MIDI_PLAYS_FREE_FIX.
+- **RELOAD_FROM_PROJECT** — re-pinned **FINAL 2026-10-16** (the user's instruction) with PR #3
+  (Ilia Murzinov): `[CUE]` + `[TRACK n]` no longer reloads a track. Confirmed on Ilia's MKII,
+  not yet on the author's MKI. Standalone mainos `607a7d73…` (syx `2602870e…`), `BUG_RL3`
+  mainos `ee380bb6…` (syx `d97adc6e…`).
 - **KYOTI V1.0** (`tools/build_kyoti.py`) — **WITHDRAWN 2026-10-06** (was FINAL 2026-09-30,
   syx `5106f7fb…`). Its midisc pads are live stock parameter-page tables. Confirmed crashes:
   - an encoder on an FX page set to NONE;
