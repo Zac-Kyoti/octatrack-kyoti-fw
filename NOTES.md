@@ -36661,3 +36661,32 @@ RELOAD_REDESIGN.md (no bytes change). Octabam pin move for `reload-from-project`
   DIRECT_JUMP_KYOTI checked for the same mistake: its `[PTN]`-layer YES record `0x400bf0be` really is
   `[PTN]`'s (layer `0x400bf0f2`, pushed by `0x4004346c` / popped by `0x40043418`, both called only from
   the PTN handler `0x4005a044`); octabam's pin `329b801` = our main for that module except name-form lines.
+
+## 2026-10-16 (`sc-tail`) — SIDECHAIN_COMPRESSOR vs full-slot FX2 effects; keybus layout per build
+
+**Finding.** SIDE-CHAIN's cross-core window (`Y:$33dfe..$33fff` / `$3bdfe..$3bfff`) is the tail of T7's / T3's
+FX2 slot, and the 15 Oct keybus (`Y:$7df0..$7fff`) the tail of T5's / T1's. Both rely on stock's extent
+(`+$3da2`). Effects that fill the slot break that: octabam MINIVERB (16,384-word ring), GATE VERB (16,120,
+to `+$3EF7`), WAVE (eight 2,048-word frames); on Modwerk also eVerb and Airwindows Chorus (BBD stops at
+`+$2039`; Tape Echo has no DSP ring). Neither ledger refuses the pairs: octabam's extent check (LOAD METER's)
+runs only over `fixed` modules (`owns_fx2_buffers` / `ybase` != NEVER), and SIDE-CHAIN is neither; Modwerk's
+older copy has no extent check. `make bus` of a scratch remix SIDECHAIN_COMPRESSOR + MINIVERB + GATE VERB
+(octabam `c3f37e53`, SC pin `bf5bfc0`) builds without a word.
+**Emulator (octabam rig_render, T7 FX2, tone in, `-dumpy 33dfe,34000`, with and without SIDE-CHAIN):** MINIVERB
+wrote all 514 window words, GSEED/GCNT included; GATE VERB the first 250 (`$33dfe..$33ef7`). Identical
+without SIDE-CHAIN (rig_render calls the effects directly, so `sctap` never ran): the reverbs' own writes.
+`sctap` writes the same words every block by design. Not yet heard on hardware.
+**HW test image `140C_SCTAIL1`** (that scratch remix; out/SCTAIL1/ in this worktree): card .bin `693d7875…`,
+syx `7f65f8ee…`, mainos `3558dc08…`, plus `SCT-REVERBS 1.RMX`. NOT flashed. Steps given to the user: loud T5,
+empty T7 with Mini Verb (MIX 127) on FX2 -> ghost of T5 = clash; T6 and stock DELAY as controls; Gate Verb;
+T1/T3 for core B.
+**Fix for octabam (`8e00275`):** the keybus/MON words are build tokens `@KEYB@`/`@KEYB1@`/`@MONB@`. Standalone /
+KYOTI keep `$7e00/$7e20/$7df0` (build_sidechain_compressor.py `KEYBUS`); the octabam manifest sets Session 115's
+`$800/$820/$7f0` and declares `Y $7f0 +$210` again, keeping `scmonbody` (PR #2) and the one-pass tap.
+Standalone `9f7899d4…`, KYOTI V1.5 `8ec9997e…` and all ten Bugbuilds match their FINAL pins (BUG_BP303 with
+`out/ot303/dsp56300_new` linked from `ot303`). emu_sc_dsp3 ALL GOOD both layouts; `emu_sc_sctap --layout
+octabam --ref 8b2e3c9`: 0 Y words differ (the two-loop tap at the same addresses).
+**octabam #774** (ours) converted to draft with an explanation comment (issuecomment-6228992494); to be
+re-pointed at this commit. **Modwerk SC 0.1.3** prep paused uncommitted in ~/Documents/modwerk-sc013 (it
+carried the slot-tail keybus; Modwerk's base `stock_hook_resources.c` would refuse full-slot FX on T1/T5
+beside a live SC).
