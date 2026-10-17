@@ -36607,3 +36607,8 @@ From the author's notes on the unit, ColdFire words only (the DSP code stays the
   host_probe's twin takes `vv.sc`. Twin: RES-0 hold −1.06 dB, RES 127 unchanged, the firmware matches the
   simulated 15 % to −98 dB; clean clipping in round 17's scene 3,508 → 2,402. Builds: standalone mainos
   `e7bde666…`, CF .bin `32e781bb…`, syx `a6471188…` (WIP; the FINAL pin stays `31909095…`).
+  - Then the author chose the RES-20 form over the proportional one: below RES 20, 20 % of the boost above its
+    RES-20 value comes off (−1.4 dB at RES 0, −0.8 at 4, −0.5 at 8, −0.1 at 16), nothing from RES 20 (RES_END).
+    Same RES-0 cut and clipping (2,402 vs 2,403 simulated); from RES 20 on the output equals as built (−96 dB);
+    the level still falls monotonically (a gentler slope below 20). Builds: mainos `891e4fd0…`, CF .bin
+    `06232561…`, syx `803a4911…` (WIP, not flashed).

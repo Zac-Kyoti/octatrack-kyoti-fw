@@ -76,17 +76,23 @@ static double waveGainDb(int w) {
     return b * (6.0797 + b * (-3.5570 + b * (7.9781 + b * (-15.7193 + b * 7.0159))));
 }
 static unsigned wgainQ14(int w) { return (unsigned)std::llround(std::pow(10.0, waveGainDb(w) / 20.0) * 16384.0); }
-// MT34 (round 17): a level trim at the bottom of RES. The voice is louder at low RES than from RES ~48 up (the
-// boost below, measured on the twin: CUT 45, ENV 70, clean VOL 64, RMS dB over RES 127); RES_TRIM of it comes
-// off, as a gain on SC by RES (OT_RTRIM, Q14): -1.4 dB at RES 0, -0.7 at 8, -0.2 at 32, none from ~96.
-#define RES_TRIM 0.15
+// MT34 (round 17, the author's RES-20 form): a level trim at the bottom of RES. The voice is louder at low RES
+// than from RES ~48 up (the boost below, measured on the twin: CUT 45, ENV 70, clean VOL 64, RMS dB over
+// RES 127). Below RES_END, RES_TRIM of the boost above its RES_END value comes off, as a gain on SC by RES
+// (OT_RTRIM, Q14): -1.4 dB at RES 0, -0.8 at 4, -0.5 at 8, -0.1 at 16, none from RES 20 (the knob above is
+// untouched; the level still falls all the way, a little more gently below 20).
+#define RES_TRIM 0.20
+#define RES_END 20
 static double resBoostDb(int r) {
     static const double R[] = {0, 2, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48, 64, 80, 96, 127};
     static const double D[] = {9.2, 7.6, 6.4, 5.5, 4.8, 3.7, 2.9, 2.3, 1.9, 1.3, 0.9, 0.6, 0.3, 0.1, 0.0, 0.0};
     for (int i = 1; i < 16; i++) if (r <= R[i]) return D[i - 1] + (D[i] - D[i - 1]) * (r - R[i - 1]) / (R[i] - R[i - 1]);
     return 0.0;
 }
-static unsigned rtrimQ14(int r) { return (unsigned)std::llround(std::pow(10.0, -RES_TRIM * resBoostDb(r) / 20.0) * 16384.0); }
+static unsigned rtrimQ14(int r) {
+    double db = r < RES_END ? -RES_TRIM * (resBoostDb(r) - resBoostDb(RES_END)) : 0.0;
+    return (unsigned)std::llround(std::pow(10.0, db / 20.0) * 16384.0);
+}
 
 static int gen(const char* path) {
     Open303 o; o.setSampleRate(FS);
@@ -143,7 +149,7 @@ static int gen(const char* path) {
     for (int j = 0; j < 128; j++) std::fprintf(f, "%s%s%d", j ? "," : "", j % 8 ? " " : "\n    ", scWord(j));
     std::fprintf(f, "};\nstatic const int32_t OT_GD8[63] = {");
     for (int j = 0; j < 63; j++) std::fprintf(f, "%s%s%d", j ? "," : "", j % 8 ? " " : "\n    ", gd8Word(65 + j));
-    std::fprintf(f, "};\n/* MT34: the RES level trim, Q14 (round 17: 15 %% of the low-RES boost) */\nstatic const uint16_t OT_RTRIM[128] = {");
+    std::fprintf(f, "};\n/* MT34: the RES level trim, Q14 (round 17: RES 0..19, none from 20) */\nstatic const uint16_t OT_RTRIM[128] = {");
     for (int j = 0; j < 128; j++) std::fprintf(f, "%s%s%u", j ? "," : "", j % 8 ? " " : "\n    ", rtrimQ14(j));
     std::fprintf(f, "};\n/* MT29: the WAVE gain, Q14 (tools/ot303/wave_loudness.py) */\nstatic const uint16_t OT_WGAIN[128] = {");
     for (int j = 0; j < 128; j++) std::fprintf(f, "%s%s%u", j ? "," : "", j % 8 ? " " : "\n    ", wgainQ14(j));
