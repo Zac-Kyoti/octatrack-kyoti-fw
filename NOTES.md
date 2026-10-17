@@ -36648,4 +36648,9 @@ CUE+T1 → `0x40083dc4` → `rl3_do_ptn` → toast (bug reproduced); after — C
 **Rebuilt, all WIP (not promoted, not flashed on the author's MKI):** standalone mainos `607a7d73…` (syx
 `2602870e…`, CF .bin `e949ef14…`); BUG_RL3 mainos `ee380bb6…` (syx `d97adc6e…`); KYOTI V1.5 mainos `8ec9997e…` (syx
 `f559cb86…`, CF .bin `e0f7d460…`). Labels corrected in the builders, manifest, module README, MERGE.md and
-RELOAD_REDESIGN.md (no bytes change). Octabam pin move for `reload-from-project` sent (below).
+RELOAD_REDESIGN.md (no bytes change). Octabam pin move for `reload-from-project`: see the next entry.
+- **2026-10-16 cont: octabam pin move sent:** sambanks/octabam#780, branch `Zac-Kyoti/octabam:kyoti-reload-pin-223ac58`
+  (`0414f6b9`, on Sam's `c3f37e53`): `modules/reload-from-project/upstream` 329b801 → 223ac58, module README / manifest
+  docstring / THIRD_PARTY row. `make check-remix` reload-from-project + mods: all runnable checks pass (verify_set,
+  verify_usb_align skip: no project); verify_dram_boot reserve == linked runtime (2,102 B); verify-docs 0 problems.
+  DIRECT_JUMP_KYOTI's pin (also 329b801) not moved.
