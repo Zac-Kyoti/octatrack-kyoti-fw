@@ -664,7 +664,7 @@ def main():
         for i in range(8):
             rec = 0x400bf122 + i * 26
             if int.from_bytes(comp[o(rec) + 2:o(rec) + 6], "big") != 0x40083dc4:
-                flag(f"B2: [PTN]-overlay TRACK slot {i} no longer points at 0x40083dc4")
+                flag(f"B2: [CUE] sub-map TRACK slot {i} no longer points at 0x40083dc4")
         ov = [i for i in range(o(0x400bf000), o(0x400bf300)) if comp[i] != stock[i]]
         if any(not (o(ptn_yes) + 2 <= i < o(ptn_yes) + 6) for i in ov):
             flag("B2: the [PTN] overlay changed outside the YES record's press field")

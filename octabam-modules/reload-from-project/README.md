@@ -31,8 +31,8 @@ Standalone image: `tools/build_reload_from_project.py` → `RELOAD_FROM_PROJECT`
 
 | site | symbol | what it is |
 |---|---|---|
-| `0x40083dc4` | `rl3_ptn_trk` | `[PTN]` + `[TRACK n]` |
-| `0x40040250` | `rl3_bank_trk` | `[BANK]` + `[TRACK n]` |
+| `0x40083dc4` | `rl3_ptn_trk` | `[CUE]`'s held sub-map TRACK handler: reloads only with `[PTN]` held, else stock |
+| `0x40040250` | `rl3_bank_trk` | `[PTN]` / `[BANK]` + `[TRACK n]` (the base TRACK handler) |
 | `0x4007af42` | `rl3_bank_show` | `[BANK]` display |
 | `0x4007b3e0` | `rl3_bank_rel` | `[BANK]` release (8-byte span) |
 | `0x40023c62` | `rl_done` | the FINISHED toast |

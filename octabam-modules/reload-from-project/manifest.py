@@ -55,7 +55,7 @@ _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 # span would be left half-rewritten.
 HOOKS = (
     # (site, stock bytes, symbol, span, what)
-    (0x40083dc4, "2f02242f0008",     "rl3_ptn_trk",   6, "[PTN] + [TRACK n]"),
+    (0x40083dc4, "2f02242f0008",     "rl3_ptn_trk",   6, "[CUE] sub-map TRACK, [PTN] held"),
     (0x40040250, "2f02222f0008",     "rl3_bank_trk",  6, "[BANK] + [TRACK n]"),
     (0x4007af42, "487a04c442a7",     "rl3_bank_show", 6, "[BANK] display"),
     (0x4007b3e0, "7002b0b9460e73c6", "rl3_bank_rel",  8, "[BANK] release"),
@@ -66,7 +66,7 @@ HOOKS = (
 # ---- the author's oracle -------------------------------------------------------
 # patch_reload3.s, m68k-elf-as -mcpu=5407 or 54455 (identical bytes; RL_DONE is the
 # source's default), linked at 0x400d6500 -- the address the standalone,
-# hardware-confirmed image uses: 2088 bytes. octabam re-links it there on every build
+# hardware-confirmed image uses: 2102 bytes. octabam re-links it there on every build
 # and compares.
 REFERENCE = (0x400d6500, "9fe81ebe6640b9a0365c93880073fed2690b0a8b8962f08be3b41573d642248a")
 

@@ -231,6 +231,12 @@ own track index. Event `1` = press. Track index = keycode − `0x10`.
 
 ### Detour A — `[PTN]` + `[TRACK]` → `0x40083dc4`
 
+> **Correction (16 Oct 2026, PR #3):** wrong. The 8 records at `0x400bf122` are the
+> TRACK slots of `[CUE]`'s held sub-map (`0x400bf2a0`, referenced only from the `0x2a`
+> records of both keymaps), not a `[PTN]` overlay, so `[CUE]`+`[TRACK]` reloaded. The
+> detour now reloads only when the panel row shows `[PTN]` held; `[PTN]`+`[TRACK]`
+> reaches the reload through Detour B's base handler, as Session 85 measured.
+
 **Reachable ONLY via this chord.** All 8 references to `0x40083dc4` are exactly
 the 8 `[PTN]`-overlay track slots (`0x400bf124` … `0x400bf1da`), so arriving here
 *is* the gesture — **no held-flag test needed at all.**

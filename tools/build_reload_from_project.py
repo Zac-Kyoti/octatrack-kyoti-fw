@@ -320,14 +320,15 @@ def main():
         if bytes(img[a:a + 8]) != bytes(stock[a:a + 8]):
             sys.exit(f"{what} 0x{addr:08x} was modified -- this build must poke no layer records")
     print("  all [PTN]/[BANK] handlers and overlay records verified untouched")
-    # the 8 [PTN]-overlay TRACK slots must still point at the handler we detour,
-    # not at us -- we detour the handler, we do not repoint the records.
+    # the 8 TRACK slots of [CUE]'s held sub-map (0x400bf2a0 -> 0x400bf122; Session 85
+    # called them the [PTN] overlay's, wrongly) must still point at the handler we
+    # detour, not at us -- we detour the handler, we do not repoint the records.
     for i in range(8):
         rec = 0x400bf122 + i * 26
         a = o(rec + 2)
         if int.from_bytes(bytes(img[a:a + 4]), "big") != 0x40083dc4:
-            sys.exit(f"[PTN]-overlay TRACK slot {i} (0x{rec:08x}) no longer points at 0x40083dc4")
-    print("  all 8 [PTN]-overlay TRACK slots still point at 0x40083dc4 (we detour it, not them)")
+            sys.exit(f"[CUE] sub-map TRACK slot {i} (0x{rec:08x}) no longer points at 0x40083dc4")
+    print("  all 8 [CUE] sub-map TRACK slots still point at 0x40083dc4 (we detour it, not them)")
 
     # Session 98: the 0x80006a40..0x80006abf scratch block is overwritten on hardware
     # (QUANTIZE_LIVE_REC_TOGGLE Sessions 94-96; RELOAD_FROM_PROJECT's own request bytes, handoff section 10). The reload

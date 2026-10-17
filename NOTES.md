@@ -36626,3 +36626,26 @@ From the author's notes on the unit, ColdFire words only (the DSP code stays the
   `make reach` were run on the earlier base only (said so in the PR).
 - **2026-10-16 cont: the MT34 FINAL (`06232561…`) is flashed -- the user: "all good".** START_HERE, the module README
   and the octabam PR #779 text corrected (they had said it was promoted unflashed).
+
+## 2026-10-16 (`reload-cue`) — RELOAD_FROM_PROJECT: [CUE]+[TRACK] reloaded a track (PR #3, Ilia Murzinov)
+
+**Bug (reported + fixed by Ilia Murzinov, PR #3, MKII):** `[CUE]` + `[TRACK n]` toasted `TRK SEQ RELOADED`.
+**Confirmed from the stock image:** the 8 records at `0x400bf122` (press → `0x40083dc4`) are the TRACK slots of
+the sub-map `0x400bf2a0`, which is referenced only from the `[CUE]` (`0x2a`) records of both keymaps
+(`0x400bfc38`, `0x400c021c`), not a `[PTN]` overlay (the real `[PTN]` layer is `0x400bf0f2`: trigs, NO, YES).
+`0x40083dc4` is stock's CUE-a-track path (→ `0x4007d5f8(track)`).
+**How it happened:** Session 85 (RELOAD_REDESIGN.md, Detour A) labelled `0x400bf122` the `[PTN]` overlay's
+without tracing which key's record owns the sub-map, and concluded "arriving here IS [PTN]+[TRACK]: no held
+test". Session 85 then *measured* that `[PTN]` never redirects the TRACK keys — the evidence that the label was
+wrong — but kept the detour "as insurance" with no held test, so `[CUE]`+`[TRACK]` landed in the reload.
+**Fix (PR #3, rebase-merged `b6cd4eb`):** `rl3_ptn_trk` reloads only when the panel row `0x46100b18[5]` bit 6
+(PATTERN) is set; else stock. Unit 2088 → 2102 B; module REFERENCE `9fe81ebe…` reproduces.
+**Emulator (ot_emu --live-script, kv1_mm_card / kyoti_testMM, standalone, real panel bytes):** before —
+CUE+T1 → `0x40083dc4` → `rl3_do_ptn` → toast (bug reproduced); after — CUE+T1 → `0x40083dc4` → stock
+`0x4007d5f8(0)`, no reload. PTN+T2 (via base handler `rl3_bank_trk` → `rl3_do_ptn` → toast), BANK+T3
+(→ `PART_RELOAD`) and plain T4 (→ stock) identical before/after. The pre-fix build reproduces the FINAL pin
+`4961e628…`. KYOTI V1.5 differs from its pin only in five reload `jmp` target bytes + the appended DRAM payload.
+**Rebuilt, all WIP (not promoted, not flashed on the author's MKI):** standalone mainos `607a7d73…` (syx
+`2602870e…`, CF .bin `e949ef14…`); BUG_RL3 mainos `ee380bb6…` (syx `d97adc6e…`); KYOTI V1.5 mainos `8ec9997e…` (syx
+`f559cb86…`, CF .bin `e0f7d460…`). Labels corrected in the builders, manifest, module README, MERGE.md and
+RELOAD_REDESIGN.md (no bytes change). Octabam pin move for `reload-from-project` sent (below).

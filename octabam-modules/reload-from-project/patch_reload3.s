@@ -607,9 +607,9 @@ rl3_bank_trk:
     cmp.l   8(%sp),%d0                 | event == press ?
     bne.w   r3b_stock
 |   Session 85: BOTH chords are tested here, because the [PTN] overlay was measured
-|   NOT to redirect the TRACK keys (see PTN_HELD_FLAG). rl3_ptn_trk is kept as well,
-|   for the case where the overlay IS active in some UI context -- both routes run
-|   the same body, so whichever fires, the behaviour is identical.
+|   NOT to redirect the TRACK keys (see PTN_HELD_FLAG). This is the [PTN]+[TRACK]
+|   route. rl3_ptn_trk (0x40083dc4) is [CUE]'s sub-map TRACK handler, not [PTN]'s
+|   (16 Oct 2026); it reloads only when [PTN] is held too, through the same body.
     tst.l   PTN_HELD_FLAG
     beq.b   r3b_try_bank
     moveq   #0,%d0

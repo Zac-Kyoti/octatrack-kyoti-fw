@@ -402,7 +402,7 @@ Verified numerically on 2026-09-23 against stock. Sorted by address.
 | `0x40062216` | PARTREAPPLY | tail | jsr (6) | 54 B after the head; same function, same owner |
 | `0x4007af42` | RELOAD3 | `rl3_bank_show` | jmp (6) | |
 | `0x4007b3e0` | RELOAD3 | `rl3_bank_rel` | jmp (8) | |
-| `0x40083dc4` | RELOAD3 | `rl3_ptn_trk` | jmp (6) | the `[PTN]`-overlay TRACK handler — detoured, *not* slot-poked |
+| `0x40083dc4` | RELOAD3 | `rl3_ptn_trk` | jmp (6) | `[CUE]`'s sub-map TRACK handler (was mislabelled `[PTN]`-overlay; PR #3) — detoured, *not* slot-poked |
 | `0x40085864` | RELOAD3 | `rl_job` | jmp (8) | |
 | `0x4009a464` | Bug-2 | `cave` | jmp (6) | |
 | `0x4009b6f2` | Bug-1 | `cave` | jmp+6nop (18) | byte-identical in every build; the shared base |
