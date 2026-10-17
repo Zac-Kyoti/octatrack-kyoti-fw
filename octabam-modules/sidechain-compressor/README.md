@@ -11,8 +11,9 @@ detector. Four controls join RMS on page 2:
 | **MON** | ON: hear the processed key on this track instead (audition) |
 
 **Hardware-confirmed in this octabam form** (the author's MKI, 2026-10-04, see Measured).
-The 15 Oct 2026 DSP changes (the keybus move and the one-pass tap below) are hardware-confirmed
-in the standalone image (the author's MKI, 2026-10-16); not yet flashed in this octabam form.
+The one-pass tap (15 Oct 2026, below) is hardware-confirmed in the standalone image (the
+author's MKI, 2026-10-16); in this octabam form it leaves every Y and shared-window word as the
+code before it did (emulator), and has not been flashed.
 
 ## Contents
 
@@ -69,11 +70,21 @@ was set on this firmware and is never changed.
 that variant when this module is in the remix.
 
 **Not with BusDelay or BusVerb.** The cross-core window (the last `$202` words of each
-core's half) overlaps theirs, so the ledger refuses the pair. The keybus and MON words
-moved on 15 Oct 2026, from `Y:$7f0–$9ff` to `Y:$7df0–$7fff` on both cores. That is the tail
-of the first internal FX2 slot, past stock's highest write at slot `+$3da2`, at the same
-`+$3e00` offset the window has in the shared slots. The move frees `$7f0–$9ff`, including
-BusDelay's private `Y:$903`, for other modules.
+core's half) overlaps theirs, so the ledger refuses the pair.
+
+**Where the keybus lives is a build choice.** The DSP names the keybus and MON words only
+through `@KEYB@`, `@KEYB1@` and `@MONB@`. This manifest sets Session 115's `Y:$7f0–$9ff`
+(`$800`/`$820`/`$7f0`), which no FX2 slot reaches. The standalone and KYOTI images put them
+in the tail of the first internal FX2 slot, `Y:$7df0–$7fff` (15 Oct 2026), past stock's
+highest write at slot `+$3da2`; that frees `$7f0–$9ff` for BLACKPYRAMIDS_303. It is not
+used here because MINIVERB, GATE VERB and WAVE write that tail: their FX2 buffers fill the
+slot (GATE VERB to `+$3EF7`).
+
+**The window has the same problem (open).** It is the tail of T7's and T3's FX2 slot, so
+MINIVERB, GATE VERB or WAVE on T3 or T7 writes into it, and this module overwrites that part
+of their buffer every block. In octabam's DSP host on the `test/sct-reverbs` scratch remix, MINIVERB
+on T7 wrote all 514 window words, GATE VERB the first 250. The ledger does not refuse
+these pairs yet. Not yet heard on hardware; a later version moves the window.
 
 ## Placement in octabam (PLACE)
 
@@ -131,8 +142,10 @@ the window and loads the next word. `r6` is free there because the displaced
     `$800000`. Every keybus and window word is as modelled, and no other Y word changes.
     With `--ref` it compares against the old tap (`8265344`): all of internal Y and the
     shared window are equal, with the keybus compared at each version's address.
-  - **`tools/emu_sc_dsp3.py`:** ALL GOOD with the new addresses, and with `--patched`
-    against the built image.
+    `--layout octabam --ref 8b2e3c9` (this manifest's addresses, against the two-loop tap
+    at the same addresses): 0 Y words differ.
+  - **`tools/emu_sc_dsp3.py`:** ALL GOOD with the new addresses, with `--layout octabam`,
+    and with `--patched` against the built image.
   - **`ot_emu`**, with the standalone image, a project with KEY = T2 and MON on and off:
     the mix is sample-identical to the promoted build over the run's common
     591,712 frames. `--dsp-watch` shows `sctap` writing Y:`$7e00`/`$7f00` with the values

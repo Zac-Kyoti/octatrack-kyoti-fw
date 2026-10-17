@@ -64,9 +64,12 @@ else:
     CAVE_ORG = 0x1012
     COMP_MOD, COMP_PROC = 0x1864, 0x1871
     COMMIT_HOOK = 0x303
-KB_BASE = 0x7e00
-KB_STRIDE = 0x40     # keybus slot(track) = $7e00 + track*$40 (2026-10-15; $800 since Session 115)
-MON_BASE = 0x7df0    # MON_ON/MON_KEY[track] = Y:$7df0 + track*2 (2026-10-15; $7f0 since Session 115)
+# --layout octabam: the keybus/MON layout octabam's manifest builds ($800/$7f0, Session 115's);
+# the default is the standalone builder's (the FX2 slot tail, 2026-10-15).
+OCTABAM_LAYOUT = "--layout" in sys.argv and sys.argv[sys.argv.index("--layout") + 1] == "octabam"
+KB_BASE = 0x800 if OCTABAM_LAYOUT else 0x7e00
+KB_STRIDE = 0x40     # keybus slot(track) = KB_BASE + track*$40 ($800 since Session 115, $7e00 since 2026-10-15)
+MON_BASE = 0x7f0 if OCTABAM_LAYOUT else 0x7df0   # MON_ON/MON_KEY[track] = Y:MON_BASE + track*2
 Q23 = 1 << 23
 NW = 30                                 # dsp_host caps n7 at 15 frames = 30 words
 
@@ -117,6 +120,8 @@ def assemble():
                              .replace("@SBASE@", "$3be00").replace("@FSBASE@", "$33e00") \
                              .replace("@GCNT@", "$3bdff").replace("@GSEED@", "$3bdfe") \
                              .replace("@FOREIGN_BR@", "bne zz24") \
+                             .replace("@KEYB@", f"${KB_BASE:x}").replace("@KEYB1@", f"${KB_BASE + 0x20:x}") \
+                             .replace("@MONB@", f"${MON_BASE:x}") \
                              .replace("$fab1e0", f"${gt:x}").replace("@FTAB_R1@", f"move    #>${ft:x},r1") \
                              .replace("@LPEDGE@", f"${sc_tables.lp_edge():x}") \
                              .replace("@HPEDGE@", f"${sc_tables.hp_edge():x}") \

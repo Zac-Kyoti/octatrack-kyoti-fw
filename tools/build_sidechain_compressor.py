@@ -176,6 +176,11 @@ SLOTS = [
 # real proc address again. `spring_proc` is that stock proc address, kept only
 # for the pre-write sanity assert (so a future firmware revision that moved it
 # fails loud instead of silently splicing over the wrong bytes).
+# The keybus and MON words (patch_sc_dsp3.asm's header): this image's layout, the tail of
+# the first internal FX2 slot (2026-10-15). octabam's manifest picks Session 115's
+# $800/$820/$7f0 instead, beside effects that use the whole slot.
+KEYBUS = dict(keyb="$7e00", keyb1="$7e20", monb="$7df0")
+
 DSP = {
     # Cross-core tokens (Session 77, NOTES.md): @KADJ@ is retired now that KEY
     # is a flat 0..8 track picker (`sub #>1,a` in patch_sc_dsp3.asm itself,
@@ -284,6 +289,8 @@ def sc_assemble(tok, org):
                .replace("@SBASE@", tok["sbase"]).replace("@FSBASE@", tok["fsbase"])
                .replace("@GCNT@", tok["gcnt"]).replace("@GSEED@", tok["gseed"])
                .replace("@FOREIGN_BR@", tok["foreign_br"])
+               .replace("@KEYB@", KEYBUS["keyb"]).replace("@KEYB1@", KEYBUS["keyb1"])
+               .replace("@MONB@", KEYBUS["monb"])
                .replace("$fab1e0", f"${gt:x}").replace("@FTAB_R1@", f"move    #>${ft:x},r1")
                .replace("@LPEDGE@", f"${sc_tables.lp_edge():x}")
                .replace("@HPEDGE@", f"${sc_tables.hp_edge():x}")

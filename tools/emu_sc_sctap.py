@@ -33,6 +33,8 @@ SEED = 0x7fff80
 
 
 def keybus_base(src):
+    if "@KEYB@" in src:                     # a build token (2026-10-16): emu_sc_dsp3's layout
+        return E.KB_BASE
     import re
     m = re.search(r"slot\(track\) = \$([0-9a-f]+) \+ track\*\$40", src)
     return int(m.group(1), 16)

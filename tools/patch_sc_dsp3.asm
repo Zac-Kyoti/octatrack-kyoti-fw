@@ -98,6 +98,16 @@
 ;   History: Session 115 put the keybus at $800..$9ff and MON at $7f0 (before
 ;   that $800 + track*$80 hit REPITCH's Y:$a00..). 2026-10-15 moved both here
 ;   to free Y:$7f0..$9ff for BLACKPYRAMIDS_303's voice ($7a5..$feb).
+;
+;   THE LAYOUT IS A BUILD CHOICE (2026-10-16): the code names these words only
+;   through @KEYB@ (gen 0 base), @KEYB1@ (= @KEYB@ + $20, gen 1) and @MONB@.
+;     standalone/KYOTI  $7e00 / $7e20 / $7df0 (above; the FX2 slot tail)
+;     octabam/Modwerk   $800  / $820  / $7f0  (Session 115's: $7f0..$9ff)
+;   The slot tail is only free where every FX2 effect is stock: MINIVERB,
+;   GATE VERB and WAVE (octabam) write their whole 16,384-word FX2 slot (or,
+;   GATE VERB, up to +$3EF7), so beside them the tail of T1/T5's slot is not
+;   SIDE-CHAIN's. The standalone and KYOTI images carry none of them; octabam
+;   and Modwerk keep Y:$7f0..$9ff, which no FX2 slot reaches.
 ;   This is SAME-CORE-ONLY and unaffected by cross-core KEY (see the design
 ;   note above scdet's r5 computation); only its addresses moved.
 ;
@@ -200,7 +210,7 @@ zz30:
         move    x:>$420,a               ; a1 = track index 0..7
         asl     #6,a,a                  ; a1 = index * $40
         move    a1,n1
-        move    #>$7e00,r1
+        move    #>@KEYB@,r1
         lua     (r1)+n1,r1              ; r1 -> keybus slot (gen 0)
 ; -- one pass over the block: each word to the keybus and to the window --
 ; (2026-10-15: was two loops, `move x:(r0)+,x0` / `move x0,y:(rN)+` each,
@@ -278,7 +288,7 @@ scdet:
 ; the source track happens to live on this core or the other one.
         asl     #6,a,a
         move    a1,n1
-        move    #>$7e00,r1
+        move    #>@KEYB@,r1
         lua     (r1)+n1,r1
         move    r1,r5                 ; r5 = slot base (SC LISTEN stash)
 ; -- same-core vs foreign-core source select (Session 77) --
@@ -295,7 +305,7 @@ scdet:
         move    r4,a
         asl     #6,a,a
         move    a1,n1
-        move    #>$7e00,r1
+        move    #>@KEYB@,r1
         lua     (r1)+n1,r1            ; r1 -> keybus[abs] gen 0
         move    #$40,r0
         do      #<$20,>zz02
@@ -630,7 +640,7 @@ zz15:
         move    x:>$420,b              ; b = MY track 0..7
         asl     #1,b,b
         move    b1,n1
-        move    #>$7df0,r1              ; MONB (MON_ON[my track], Session 115)
+        move    #>@MONB@,r1              ; MONB (MON_ON[my track], Session 115)
         lua     (r1)+n1,r1
         move    #1,b
         move    b,y:(r1)+              ; MON_ON = 1 ; r1 -> MON_KEY[my track]
@@ -699,7 +709,7 @@ zz18:
         move    x:>$420,a
         asl     #1,a,a
         move    a1,n1
-        move    #>$7df0,r1
+        move    #>@MONB@,r1
         lua     (r1)+n1,r1
         move    #0,b
         move    b,y:(r1)
@@ -759,7 +769,7 @@ scmonbody:
         move    x:>$420,a             ; a = my track 0..7
         asl     #1,a,a
         move    a1,n1
-        move    #>$7df0,r1
+        move    #>@MONB@,r1
         lua     (r1)+n1,r1            ; r1 -> MON_ON[my track]
         move    y:(r1)+,b             ; b = MON_ON ; r1 now -> MON_KEY[my track]
         cmp     #>$10000,b             ; (q2) exact match vs scdet's ON sentinel,
@@ -772,7 +782,7 @@ mc09:
         move    y:(r1),b              ; b = MON_KEY 0..7 (still via r1, no r2/n2 needed)
         asl     #6,b,b
         move    b1,n1                 ; reuse n1 (stock resets it right after us anyway)
-        move    #>$7e20,r1             ; reuse r1
+        move    #>@KEYB1@,r1             ; reuse r1
         lua     (r1)+n1,r1            ; r1 -> keybus[key] gen 1
         move    #0,r3                  ; reuse r3 (stock resets it right after us anyway)
         do      #<$20,>mc11

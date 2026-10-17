@@ -7,7 +7,9 @@
             MON   ON = hear the processed key instead of the track (audition)
 
 Hardware-confirmed in this octabam form (the author's MKI, 2026-10-04; see MEASURED). The
-DSP's 2026-10-15 keybus move and one-pass tap are emulator-verified only (README.md).
+2026-10-15 one-pass tap is hardware-confirmed in the standalone image (2026-10-16); in this
+layout it leaves Y and the shared window word for word as the code before it did
+(tools/emu_sc_sctap.py --layout octabam --ref 8b2e3c9).
 
 COLDFIRE. One ROM unit, sc_cf (tools/patch_sidechain.s, 338 B): KEY's and KFLT's
 formatters, KEY's list widget, and sc_norm, reached by a `jsr` detour at the first
@@ -35,11 +37,13 @@ sense) come from DspSection.subst; the 16 + 32 table words are one ptable, read 
 KEY GAIN site through the source's single base literal and at the KEY FLT site as
 `lua (r1+$10),r1` + `nop` from that same base (r1 is not written between the two reads).
 
-CLAIMS. Core-private Y $7df0-$7fff (MON words, keybus: the tail of the first internal FX2
-slot, past stock's highest write at slot+$3da2) on both cores, and the last $202
-words of each core's half of the shared window (A $33dfe.., B $3bdfe..). BusDelay and
-BusVerb use that window, so the ledger refuses this module beside them: a later version
-moves the window.
+CLAIMS. Core-private Y $7f0-$9ff (MON words, keybus) on both cores: @KEYB@/@KEYB1@/@MONB@
+below. The standalone image keeps them in the tail of the first internal FX2 slot instead,
+which MINIVERB, GATE VERB and WAVE write here. And the last $202 words of each core's half
+of the shared window (A $33dfe.., B $3bdfe..), the tail of T7's and T3's FX2 slot. BusDelay
+and BusVerb use that window, so the ledger refuses this module beside them. MINIVERB, GATE
+VERB and WAVE write it too (their whole slot, GATE VERB to +$3EF7), which the ledger does not
+see yet: a later version moves the window.
 
 MEASURED. The ColdFire unit, linked at the standalone image's own address, is that
 image's bytes (5407 and 54455 alike). The DSP source is the standalone's
@@ -81,7 +85,10 @@ _SAME = {"@LPEDGE@": f"${_sc.lp_edge():x}",
          "@KGNA@": f"${_sc.kgn_smooth_a():x}",
          # `nop`: a cycle between writing r1 and reading through it, and the same
          # two words as the standalone's `move #>FTAB,r1`, so nothing after it moves.
-         "@FTAB_R1@": "lua     (r1+$10),r1\n        nop"}
+         "@FTAB_R1@": "lua     (r1+$10),r1\n        nop",
+         # The keybus and MON words at Session 115's Y:$7f0..$9ff, which no FX2 slot reaches
+         # (the standalone builder's KEYBUS puts them in the first internal slot's tail).
+         "@KEYB@": "$800", "@KEYB1@": "$820", "@MONB@": "$7f0"}
 assert _sc.GAIN_N == 0x10, "@FTAB_R1@'s offset is the KEY GAIN table's length"
 
 # At the standalone image's own address (tools/build_sidechain_compressor.py).
@@ -177,8 +184,7 @@ MODULE = Module(
         },
     ),
     claims=Claims(dsp_ranges=(
-        DspRange("y", 0x7df0, 0x210, "MON words ($7df0..$7dff) and the keybus ($7e00..$7fff), "
-                                     "the tail of the first internal FX2 slot (stock writes end at +$3da2)"),
+        DspRange("y", 0x7f0, 0x210, "MON words ($7f0..$7ff) and the keybus ($800..$9ff)"),
         DspRange("y", 0x3dfe, 0x202, "the cross-core key window: GSEED, GCNT, "
                                      "4 tracks x 4 generations x 32 words",
                  half_relative=True),
