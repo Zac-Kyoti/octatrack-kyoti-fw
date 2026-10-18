@@ -36694,3 +36694,11 @@ beside a live SC).
   an empty T7 with Mini Verb on FX2 plays a reverby ghost of the loud T5; the same with Gate Verb; Mini Verb
   moved to T6 FX2, and stock DELAY on T7, are silent; T1 loud + Mini Verb on an empty T3 gives the same ghost
   (core B). All as predicted from the window overlap. octabam #774 still unreviewed (pin `8e00275`, ready).
+- **2026-10-18 cont: step 3 sent** (the user approved both texts). sambanks/octabam#785 (`Zac-Kyoti/octabam:ledger-window-extent`,
+  `7f05c7e6` on `c3f37e53`): the ledger's buffered-effect extent check now covers a module whose declared ranges land
+  in a shared-window FX2 slot, and resolves half-relative ranges per payload -> SIDECHAIN_COMPRESSOR refused beside
+  MINIVERB / GATE VERB / WAVE, allowed beside every stock effect; selftest 284 PASS incl. the new case; ledger.check
+  over all 71 remixes identical before/after. Asks Sam about a "slot-filling effects stop at +$3DFD (<= 15,870
+  words)" rule. repeat98/modwerk#696: the same finding for Modwerk (MiniVerb, eVerb, Air Chorus; card builds; USB
+  probably safe: no buffer policies in controller_policy.c), SC 0.1.3 conflicts as the stopgap, the rule asked of
+  @repeat98 (MiniVerb, Air Chorus) and @user1303836 (eVerb). Owners: GATE VERB / WAVE = Sam.
