@@ -36690,3 +36690,7 @@ octabam --ref 8b2e3c9`: 0 Y words differ (the two-loop tap at the same addresses
 re-pointed at this commit. **Modwerk SC 0.1.3** prep paused uncommitted in ~/Documents/modwerk-sc013 (it
 carried the slot-tail keybus; Modwerk's base `stock_hook_resources.c` would refuse full-slot FX on T1/T5
 beside a live SC).
+- **2026-10-18: CLASH CONFIRMED ON HARDWARE** (the user's MKI, `140C_SCTAIL1` flashed, no COMPRESSOR anywhere):
+  an empty T7 with Mini Verb on FX2 plays a reverby ghost of the loud T5; the same with Gate Verb; Mini Verb
+  moved to T6 FX2, and stock DELAY on T7, are silent; T1 loud + Mini Verb on an empty T3 gives the same ghost
+  (core B). All as predicted from the window overlap. octabam #774 still unreviewed (pin `8e00275`, ready).
