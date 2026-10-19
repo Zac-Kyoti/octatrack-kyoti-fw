@@ -36702,3 +36702,22 @@ beside a live SC).
   words)" rule. repeat98/modwerk#696: the same finding for Modwerk (MiniVerb, eVerb, Air Chorus; card builds; USB
   probably safe: no buffer policies in controller_policy.c), SC 0.1.3 conflicts as the stopgap, the rule asked of
   @repeat98 (MiniVerb, Air Chorus) and @user1303836 (eVerb). Owners: GATE VERB / WAVE = Sam.
+- **2026-10-19: octabam review round (#774 / #775 / #779 / #780 / #785).** #774 and #780 MERGED (Sam fixed the
+  THIRD_PARTY row on #774 himself); #785 MERGED and Sam ADOPTED the rule "an effect that fills its FX2 slot stops at
+  +$3DFD (buffer_words <= 15,870)" (his #787 put it under SLOT_EXTENT and fixed SC's README note). Open asks from Sam:
+  a PR retuning GATE VERB (16,120 -> 15,870, delay scale ~0.969) and WAVE to the rule, MINIVERB after Jannik.
+  - **#788** (new): MUTE_MODES pin bf5bfc0 (fork) -> 8e00275; files differ only in SPDX lines. make reach: all pass.
+  - **#775 VARISPEED:** 0x4004a9d0 (Part Clear) is STORE's: VARISPEED is now a STORE client (`8fe11df`:
+    octabam-modules/varispeed/varispeed_store.s, vs_st_partclear = flag + vh_enter, vs_st_partsaved = flag -> vh_leave;
+    stock Part Clear tail-jumps into Part Save 0x4004a908 whose only exit 0x4004a9c4 is STORE's partsaved site; KITS'
+    CLEARING pattern), 16 detours, requires STORE; shared source gains only `.global vh_enter/vh_leave` (VARISPEED,
+    VARISPEED_EMUS, KYOTI V1.5, BUG_VARI, BUG_VEM10 match their pins). octabam side: STORE CLIENTS row (no CLIENT_IDS;
+    ans_tab now only for clients with an id), test remix + STORE, usage fragment, THIRD_PARTY mount. Rebased on
+    e14fcf34; make reach TESTS=1 all pass; ledger with VARISPEED added to the 4 official remixes: 0 findings.
+    VARISPEED_EMUS still has its own 0x4004a9d0 detour (not in octabam yet) -- same fix needed if it goes there.
+  - **#779 BLACKPYRAMIDS_303:** squashed + rebased on e14fcf34; pin 15404de -> `7d9e121` (text only, Thread ot303:
+    the SC key bus is in the voice's Y again in octabam; standalone 891e4fd0 unchanged); docstring 44 detours;
+    THIRD_PARTY nine mounts + Open303 row (MIT, Robin Schmidt 2009); usage fragment; refhash 24/24, make reach
+    TESTS=1 all pass. Octabam-form HW image built, NOT flashed: `140C_OBBP1` (sc-tail out/OBBP1/: card .bin
+    ff29778e…, syx a38dc0ec…, mainos eb922e1e…, BLACKPYRAMIDS-3.RMX).
+  - Pipeline lessons -> memory `octabam-module-pr-checklist`.
