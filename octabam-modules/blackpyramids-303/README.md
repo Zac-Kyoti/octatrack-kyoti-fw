@@ -47,8 +47,9 @@ instead.
 
 ## Measured
 
-- **The standalone image** (`tools/build_blackpyramids_303.py`, `140C_BP303`, FINAL 16 Oct 2026,
-  mainos `891e4fd0…`) runs on the author's MKI: all good. The 14 Oct build was confirmed in full on
+- **The standalone image** (`tools/build_blackpyramids_303.py`, `140C_BP303`, FINAL 19 Oct 2026,
+  mainos `d393da41…`): its runtime and DSP words are this form's, flashed below. The 16 Oct FINAL
+  (`891e4fd0…`) ran on the author's MKI: all good. The 14 Oct build was confirmed in full on
   the unit: the voice, the grid (notes, accents, slides,
   ties), every knob, live play, chromatic with PAGE and FUNC + PTCH octaves.
 - **Since 14 Oct, ColdFire words only** (the DSP code is the 15 Oct engine pass, bit-exact against
@@ -65,7 +66,10 @@ instead.
   - the image differs from the standalone only in octabam's platform plumbing (loader, arena
     reserve, chooser relocation, its own DSP payload edits);
   - the standalone's emulator check (`tools/ot303/verify_ot303.py`, ot_emu) passes on it.
-- **Not flashed** in this form.
+- **Flashed in this form** on the author's MKI (19 Oct 2026, `make image REMIX=test/blackpyramids-303`):
+  the 16 Oct form worked well except that switching the track to another machine and back reset the
+  knobs; with the fix (the knobs parked in NEIGHBOR's unused bytes) every check passes: the knobs kept
+  away and back and after a save and power cycle, and SRC SETUP's BLKPYRAMD row editing them.
 
 ## Limits
 

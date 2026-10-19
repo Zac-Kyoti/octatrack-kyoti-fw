@@ -351,7 +351,8 @@ now goes through the field, with its image byte-identical.
     chooser relocation, and its own DSP payload edits).
   - A Part naming SPRING REV keeps SPRING's page (as with ANALOG BD) rather than the NONE page
     shown here.
-- **Not flashed in that form.** Regenerated for the FINAL build of 16 Oct 2026 (MT34, runtime 31,512 B).
+- **Flashed in that form** (19 Oct 2026, the user's MKI: every check passes). Regenerated for the FINAL build of
+  19 Oct 2026 (MT35, runtime 32,364 B); octabam merged the 16 Oct form as sambanks/octabam#779.
 
 - **Why FLEX plus a signature, not a sixth machine type:** the OS knows five machine types. A sixth
   would have to be taught to the Part validator, the project file (a stock OS would reset the

@@ -36,7 +36,8 @@ module and no ANALOG BD (each owns the source seam, SPRING's words or DSP memory
 
 MEASURED. The standalone image (140C_BP303, mainos 3624a1e7...) on the author's MKI, 2026-10-14:
 everything works -- the voice, the grid, live play, chromatic with PAGE, FUNC + PTCH octaves.
-This octabam form: the runtime and both DSP payloads are the standalone's bytes; not yet flashed.
+This octabam form: the runtime and both DSP payloads are the standalone's bytes; flashed on the
+author's MKI 2026-10-19 with the knob-keeping fix (FINAL 19 Oct, mainos d393da41...): all checks pass.
 """
 
 import os

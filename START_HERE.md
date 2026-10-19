@@ -155,10 +155,15 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
-- **BLACKPYRAMIDS_303** (`tools/build_blackpyramids_303.py`) — **FINAL 2026-10-16 (MT34)**, mainos
-  `891e4fd0…`, CF `.bin` `06232561…`, syx `803a4911…`, `140C_BP303`. **Flashed by the user: all
-  good** (2026-10-16); the 14 Oct build was confirmed in full (the voice, the grid, live play, chromatic with PAGE, FUNC + PTCH octaves).
-  Bugbuild `BUG_BP303` (mainos `8531b6ff…`, `.bin` `f0a7bc78…`, syx `54ec5e77…`): emulator-verified,
+- **BLACKPYRAMIDS_303** (`tools/build_blackpyramids_303.py`) — **FINAL 2026-10-19 (MT35)**, mainos
+  `d393da41…`, CF `.bin` `ae0637dc…`, syx `78a14827…`, `140C_BP303`. MT35 keeps the machine's knobs
+  across machine changes (parked in NEIGHBOR's unused bytes; before, switching away and back reset
+  them) and makes SRC SETUP's BLKPYRAMD row on another machine's track edit those, not FLEX's bytes.
+  **Flashed by the user in octabam form (OBBP3, the same runtime and DSP words): all checks pass**
+  (2026-10-19: knobs kept away and back, after save + power cycle, the SRC SETUP row; OBBP2 before it
+  "works well" but for the reset). MT34 (16 Oct, `891e4fd0…`) was all good on the unit; the 14 Oct
+  build was confirmed in full (the voice, the grid, live play, chromatic with PAGE, FUNC + PTCH octaves).
+  Bugbuild `BUG_BP303` (mainos `4a9c19db…`, `.bin` `6280ddf2…`, syx `672afb80…`): emulator-verified,
   not flashed.
   - Since 14 Oct (MT24–MT33, ColdFire words only; the DSP code is the 15 Oct engine pass, bit-exact):
     CUT / ENV sweep when turned (and glide on push-turn); DEC 50 ms–2 s; per-step ACC locks scaled by
@@ -167,8 +172,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
     voices; driven VOL gets 4× output-stage headroom into the drive (round 15); a level trim below
     RES 20, −1.4 dB at RES 0 (round 17; MT34).
   - The octabam module (`octabam-modules/blackpyramids-303/`) is regenerated for this build; its
-    octabam PR (with `Module.dsp_source`) is **sent: sambanks/octabam#779** (branch
-    `Zac-Kyoti/octabam:kyoti-blackpyramids-303`, pin `15404de`, on `c3f37e53`). Not flashed in octabam form.
+    octabam PR (with `Module.dsp_source`) **sambanks/octabam#779 is MERGED** (pin `7d9e121`, MT34); the
+    MT35 pin move is a follow-up PR.
   - Open: clean VOL still hard-clips on bright, low-RES accents; a DSP knee for it is round 16
     (simulated, the author's pick pending), and needs ~12–14 DSP program words.
   - Open: a square-wave voice on core 0 under the heaviest FX stack may overrun (§4 there).
