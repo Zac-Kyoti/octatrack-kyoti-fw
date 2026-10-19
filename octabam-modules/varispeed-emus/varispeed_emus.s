@@ -54,6 +54,8 @@
         .global vh_trkpaste
         .global vh_partpaste
         .global vh_partclear
+        .global vh_enter                | for VARISPEED's STORE client (octabam: varispeed_store.s)
+        .global vh_leave
         .global rp_reload
         .global quant_widget
         .global quant_fmt

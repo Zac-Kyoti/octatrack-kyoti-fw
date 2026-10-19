@@ -16,8 +16,9 @@ stays, and there is no load guard.
 
 | file | what it is |
 |---|---|
-| `manifest.py` | the octabam module declaration: one linked unit, 17 detours, four pokes, six symbol refs |
+| `manifest.py` | the octabam module declaration: two linked units, 16 detours, four pokes, six symbol refs; requires STORE |
 | `varispeed.s` | two lines: `.equ VEM_EMUS, 0` and `.include "remix.inc"`, where `remix.inc` is the text of `../varispeed-emus/varispeed_emus.s` (`Linked.include`) |
+| `varispeed_store.s` | octabam only: the STORE handlers for the PART menu's CLEAR (`vs_st_partclear`, `vs_st_partsaved`) |
 
 This folder needs `varispeed-emus/` beside it: the two modules assemble one source, so a fix
 to the shared code lands in both. A VARI track's increment equals VARISPEED_EMUS's on
@@ -31,8 +32,13 @@ wrapper too and refuses a build whose bytes differ.
 The render's increment store (`0x40004100`) is the frame hook. The other detours cover:
 - five sites in the audio editor's ATTR page and the four SETUP dial resolvers;
 - both Part applies and RELOAD PART;
-- hold wrappers on the bulk writers (SRC page paste, track paste, the PART menu's paste core
-  and CLEAR).
+- hold wrappers on the bulk writers (SRC page paste, track paste, the PART menu's paste core).
+
+The PART menu's CLEAR (`0x4004a9d0`) is STORE's site in octabam, so there VARISPEED is a STORE
+client: `partclear` holds (and sets a flag), and the `partsaved` that ends the clear forgets
+(stock Part Clear tail-jumps into Part Save, whose only exit is STORE's `partsaved` site).
+A SAVE PART without a CLEAR finds the flag clear and does nothing. The standalone image has
+no STORE and keeps its own detour on CLEAR (`vh_partclear`).
 
 STATIC's and FLEX's TSTR count goes 4 → 5, using stock's 5-position select and this unit's
 formatter. PTCH gets a new widget and encoder step. The PTCH/QUAN swap keeps each machine's

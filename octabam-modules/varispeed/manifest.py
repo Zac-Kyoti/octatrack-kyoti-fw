@@ -14,12 +14,15 @@ assembled with its switch VEM_EMUS = 0, so a fix to the shared code lands in bot
 (TSNS stays TSNS), no sampler engines, no load guard, no DSP section: SPRING REVERB stays.
 A VARI track's increment is VARISPEED_EMUS's on EMUS = OT, bit for bit.
 
-COLDFIRE. One unit, vari_cf: varispeed.s, two lines -- `.equ VEM_EMUS, 0` and
+COLDFIRE. Unit vari_cf: varispeed.s, two lines -- `.equ VEM_EMUS, 0` and
 `.include "remix.inc"` -- whose remix.inc (Linked.include) is the text of
-../varispeed-emus/varispeed_emus.s, so this folder needs that one beside it. 17 detours: the
+../varispeed-emus/varispeed_emus.s, so this folder needs that one beside it. 16 detours: the
 render's increment store (the frame hook), five in the audio editor's ATTR page, the four
 SETUP-page dial resolvers, the two Part applies, RELOAD PART, and hold wrappers on the bulk
-writers (SRC page paste, track paste, the PART menu's paste core and CLEAR). The STATIC and
+writers (SRC page paste, track paste, the PART menu's paste core). The PART menu's CLEAR
+holds and forgets as a STORE client instead (unit vari_store, varispeed_store.s: partclear
+holds, the partsaved that ends the clear forgets), because STORE owns 0x4004a9d0; so this
+module requires STORE. The standalone image keeps its own detour there. The STATIC and
 FLEX descriptors: TSTR count 4 -> 5 with stock's 5-position select and this unit's
 formatter; PTCH's widget and encoder step. The PTCH <-> QUAN swap keeps PTCH of each
 machine in NEIGHBOR's '---' bytes of the same track (claimed below).
@@ -65,6 +68,8 @@ LINKED = (
            reference=(0x400d6500,
                       "afd1eed15b32c93e615cfcdf3e26c21b5c56854c65cb5457cb4a88836f4cab9b"),
            include=_shared_source),
+    # STORE's partclear / partsaved handlers (vs_st_*), octabam only: no standalone twin.
+    Linked("vari_store", os.path.join(_HERE, "varispeed_store.s")),
 )
 
 _X = bytes.fromhex
@@ -88,8 +93,9 @@ DETOURS = (
     Detour(0x4002b654, _X("4fefffbc48d77cfc"), U, "vh_trkpaste", "track paste (+ undo): hold, forget", pad_to=8),
     Detour(0x40029a4c, _X("4fefffec48d7043c"), U, "vh_partpaste", "PART menu paste core (PASTE, UNDO): hold, forget",
            pad_to=8),
-    Detour(0x4004a9d0, _X("4feffff048d70c0c"), U, "vh_partclear", "PART menu CLEAR: hold, forget", pad_to=8),
 )
+# The PART menu's CLEAR (0x4004a9d0) is STORE's site: vari_store's vs_st_partclear /
+# vs_st_partsaved hold and forget there (STORE's CLIENTS lists them).
 
 _u32 = lambda v: v.to_bytes(4, "big")
 POKES = (
@@ -146,6 +152,7 @@ MODULE = Module(
     symbol_refs=SYMBOL_REFS,
     keeps=KEEPS,
     claims=Claims(part_window=_PARKS),
+    requires=("STORE",),
     category=Category.MACHINES,
     author="Zac-Kyoti",
     author_url="https://github.com/Zac-Kyoti/octatrack-kyoti-fw",
