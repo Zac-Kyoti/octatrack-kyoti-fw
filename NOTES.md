@@ -36761,3 +36761,8 @@ beside a live SC).
   `MT35/` mainos `d393da41…`, syx `78a14827…`, card .bin `ae0637dc…` (version 140C_BP303); octabam form `OBBP3/`
   (#779 tree, submodule at the MT35 commit) card .bin `dd1fa61c…`, syx `71d6b394…`. Next: the user's check results,
   promotion on their word, #779's pin moved (no new octabam PR: #779 is still open).
+- **2026-10-19 cont: octabam follow-up PR sambanks/octabam#814** (branch Zac-Kyoti/octabam:kyoti-bp303-keep-knobs,
+  head `c8024552` on main `70e78920`): BLACKPYRAMIDS_303 pin `7d9e121` -> `5af46f8`, THIRD_PARTY pin, CHANGELOG
+  Unreleased entry, wrapper README (32,364 B, hardware record) + proof_note (this form flashed 19 Oct), usage note.
+  Gates: verify-docs 0 problems, mkdocs strict, refhash 24/24, reach every gate passed; `make bus` = the flashed
+  OBBP3 MAIN OS (`26a1c285…`). Waiting on Sam.
