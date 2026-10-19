@@ -90,7 +90,9 @@ Builder: [`tools/build_blackpyramids_303.py`](../tools/build_blackpyramids_303.p
     machine's units, PTCH knob + semitones. Stock's FLEX value was 64 + 5 × semitones, written via
     `0x40042158` from `0x4004fd1a` and from the MIDI path at `0x40062604`.)
   - The track is stored as FLEX plus a signature. FLEX's own settings are kept aside and put
-    back when the track leaves the machine. On a stock OS the project opens with the track as
+    back when the track leaves the machine. The machine's own knobs are kept in the same unused
+    NEIGHBOR bytes while the track is another machine, so switching away and back keeps them, as
+    with stock machines; SRC SETUP's BLKPYRAMD row shows and edits them there (MT35). On a stock OS the project opens with the track as
     a FLEX track.
   - In a combined build with ERASE_EMPTY_TRIGLESS_LOCKS, that feature must skip these tracks:
     an empty trigless lock is a tie here. Not built yet, because no combined image contains

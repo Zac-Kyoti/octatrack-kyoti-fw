@@ -13,12 +13,13 @@ section 5 in Zac-Kyoti/octatrack-kyoti-fw.
 
 STORAGE. The track is a FLEX track with a signature ('O','T',1) in NEIGHBOR bytes stock never uses,
 so a stock OS opens the project with the track as FLEX; FLEX's own values are kept in NEIGHBOR's
-unused bytes while the track is a BLKPYRAMD and put back when it leaves.
+unused bytes while the track is a BLKPYRAMD and put back when it leaves, and the machine's own
+knobs are kept there while the track is another machine, so it comes back as it was left.
 
-COLDFIRE. One DRAM unit, bp_runtime (~28 KB): tools/ot303/cf/{machine.s,control.c,record.c,
+COLDFIRE. One DRAM unit, bp_runtime (~32 KB): tools/ot303/cf/{machine.s,control.c,record.c,
 params.c} and the voice's Y table, generated into one GNU-as unit by tools/ot303/octabam_module.py
 (the C as `m68k-elf-gcc -S` output, libgcc's __muldi3 as words). Its `reference` is the standalone
-image's runtime: linked alone at 0x40a955e0 it is those bytes, sha256 a7a784c6..., for -mcpu=5407
+image's runtime: linked alone at 0x40a955e0 it is those bytes, sha256 8c634a1e..., for -mcpu=5407
 and 54455 alike (the generator refuses to write it otherwise). 44 detours, 7 pokes and the FLEX
 renderer slot (0x400d6438 -> ot_render), every one the standalone builder's
 (tools/build_blackpyramids_303.py).
@@ -49,7 +50,7 @@ _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 H = bytes.fromhex
 
 RUNTIME_AT = 0x40A955E0        # the standalone image's DRAM reserve (tools/ot303/dram.py RESERVE)
-RUNTIME_SHA256 = "f0f46837bd92c5b1e5aa599528bdae6b9334fbddb9ba60646e0ce01c23d51c43"
+RUNTIME_SHA256 = "8c634a1eb638eec7b7054163ce79fe328d275e02acf615bfd8c6060a810cf6cf"
 
 DETOURS = (
     Detour(0x400334D8, H("2f02222f0008"), "bp_runtime", "ot_machine_name", "chooser row 5's name"),

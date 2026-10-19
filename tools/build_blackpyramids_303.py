@@ -10,7 +10,8 @@ reference/handoffs/OT303_SCOPE.md.
 The machine is the sixth row of a track's machine chooser and of SRC SETUP, on any track, one per DSP
 core (T1-4, T5-8). The track is stored as FLEX plus a signature in unused NEIGHBOR page bytes, so a
 stock OS loads the project as a FLEX track (FLEX's own values are kept in NEIGHBOR's unused bytes and
-put back when the track leaves the machine). Its FLEX renderer sends the DSP a control record (the
+put back when the track leaves the machine; the machine's own knobs are kept there while the track
+is another machine, MT35). Its FLEX renderer sends the DSP a control record (the
 signature, the note, the knobs compiled into the engine's words, a chunk of the voice's tables)
 instead of sample data; the voice runs at the per-track source seam, upstream of stock AMP, FX1 and
 FX2. Registration follows octabam's ANALOG BD (repeat98, MIT).

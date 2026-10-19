@@ -4,8 +4,9 @@
 |
 | OT-303 registration: machine row 5 in the track's machine chooser and in SRC SETUP, stored as FLEX
 | plus the signature 'O','T',1 in unused NEIGHBOR page bytes (part + 0x2a + 18 + 30 t), on any track,
-| one per DSP core. A new assignment seeds both Part copies with the OT-303 defaults (FLEX's values
-| stashed beside the signature, put back when the track leaves OT-303); reselecting keeps the patch. Each stub is reached by a detour (tools/build_blackpyramids_303.py) and replays the stock
+| one per DSP core. An assignment seeds both Part copies with the OT-303's knobs from when the track
+| last left it, or the defaults (FLEX's values stashed beside the signature, put back when the track
+| leaves OT-303, its knobs parked in their place); reselecting keeps the patch. Each stub is reached by a detour (tools/build_blackpyramids_303.py) and replays the stock
 | instructions it displaced. ANALOG BD's engine browser is not ported (no detours on the pool).
         .text
         .global ot_machine_name, ot_src_names, ot_main_commit, ot_src_commit, ot_src_commit2
@@ -166,7 +167,8 @@ ot_setup_open:
         pea     (0x400bb704).l
         jmp     (0x400585e6).l
 
-| SETUP's editor and drawer use the track's FLEX slot for row 5 (d2/d6 = the row; replays d * 6)
+| SETUP's editor and drawer use the track's FLEX slot for row 5 (d2/d6 = the row; replays d * 6); the editor
+| takes NEIGHBOR's on a track that is not an OT-303 (the parked knobs, MT35)
 ot_setup_edit6:
         cmpi.l  #FLEX,%d2               | FLEX's row on an OT-303 track shows FLEX's stash: not editable
         bne.s   2f                      | here (its bytes are the OT-303's SETUP knobs)
@@ -180,9 +182,16 @@ ot_setup_edit6:
         lea     16(%sp),%sp
         beq.s   2f
         jmp     (0x4003a624).l
-2:      cmpi.l  #OT_ROW,%d2
-        bne.s   1f
-        moveq   #FLEX,%d2
+2:      cmpi.l  #OT_ROW,%d2               | the OT-303 row: FLEX's bytes on an OT-303 track, the parked
+        bne.s   1f                      | knobs (NEIGHBOR's SETUP bytes) on another (control.c)
+        lea     -12(%sp),%sp
+        movem.l %d1/%a0-%a1,(%sp)
+        move.l  %d4,-(%sp)
+        jsr     ot_setup_edit_row
+        addq.l  #4,%sp
+        move.l  %d0,%d2
+        movem.l (%sp),%d1/%a0-%a1
+        lea     12(%sp),%sp
 1:      move.l  %d2,%d0
         lsl.l   #3,%d0
         add.l   %d2,%d2
@@ -190,12 +199,15 @@ ot_setup_edit6:
         jmp     (0x4003a536).l
 ot_setup_draw6:
         clr.l   (ot_preview_flex).l
+        clr.l   (ot_preview_ot).l
         cmpi.l  #FLEX,%d6
         bne.s   2f
         moveq   #1,%d7
         move.l  %d7,(ot_preview_flex).l
 2:      cmpi.l  #OT_ROW,%d6
         bne.s   1f
+        moveq   #1,%d7
+        move.l  %d7,(ot_preview_ot).l
         moveq   #FLEX,%d6
 1:      move.l  %d6,%d7
         lsl.l   #3,%d7

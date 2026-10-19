@@ -27,6 +27,8 @@
 #define FLEX_DEFAULTS 0x400d320cu   /* the stock FLEX page descriptor's twelve defaults (E + 0x96) */
 #define SLOT_REC 0x40031d18u        /* stock (machine, slot) -> the sample slot's record, name at +24 */
 #define STASH_MARK 0x55u
+#define PARK_MARK 0x50u             /* NEIGHBOR's page-1 byte 0 on a track that left the OT-303 (never 'O') */
+#define NEIGHBOR 3u
 
 /* SRC (page 1) then SRC SETUP (page 2), stored with the track (params.h has the ranges). PTCH 36 = C3.
  * Open303's
@@ -196,12 +198,32 @@ static void flex_restore(volatile uint8_t *part, unsigned t) {
     for (unsigned k = 0; k < 12; ++k) *knob(part, t, k) = v[k];
     for (unsigned i = 0; i < 9; ++i) *stash(part, t, i) = 0;   /* NEIGHBOR's stock defaults */
 }
+/* The OT-303's own knobs while the track is another machine (MT35; before, leaving the machine dropped
+ * them and coming back seeded the defaults, unlike every stock machine): the same twelve NEIGHBOR bytes,
+ * which hold nothing else then. Page 1 byte 0 the mark, bytes 1..5 PTCH .. DEC; the SETUP block's bytes
+ * 0..4 WAVE .. VOL, in their SETUP order, so SRC SETUP edits the OT-303 row there on such a track
+ * (machine.s ot_setup_edit6), and byte 5 ACC. One value a byte, each <= 127 (the stock validator's
+ * rule); a track with no mark takes the defaults. */
+static volatile uint8_t *parked(volatile uint8_t *part, unsigned t, unsigned k) {   /* k = 0..10 */
+    return k < OT_ACC ? part + SIG + 30 * t + 1 + k
+                      : part + 0x1da + 30 * t + 18 + (k == OT_ACC ? 5 : k - OT_WAVE);
+}
+static unsigned parked_value(const volatile uint8_t *part, unsigned t, unsigned k) {
+    if (k > OT_VOL || part[SIG + 30 * t] != PARK_MARK) return ot_defaults[k];
+    unsigned v = *parked((volatile uint8_t *)part, t, k);
+    return v > (k == OT_PTCH ? OT_PTCH_MAX : 127u) ? ot_defaults[k] : v;
+}
+static void park_defaults(volatile uint8_t *part, unsigned t) {
+    for (unsigned k = 0; k <= OT_VOL; ++k) *parked(part, t, k) = ot_defaults[k];
+    part[SIG + 30 * t] = PARK_MARK;
+}
 /* SRC SETUP previews the machine under its cursor with that machine's six bytes (0x4003ce02 reads
  * Part + 0x1da + 30 track + 6 row + k; machine.s ot_setup_value). An OT-303's SETUP knobs live in
  * FLEX's bytes, so on an OT-303 track the FLEX row would show OT-303's values in FLEX's slots (MT6 on
  * the unit: missing knobs): it shows FLEX's own, from the stash. machine.s ot_setup_draw6 sets
- * ot_preview_flex when the drawn row is FLEX itself (not the OT-303 row, which reads the same bytes). */
-uint32_t ot_preview_flex = 0;
+ * ot_preview_flex when the drawn row is FLEX itself (not the OT-303 row, which reads the same bytes), and
+ * ot_preview_ot for the OT-303 row: on another machine's track that shows the parked knobs (MT35). */
+uint32_t ot_preview_flex = 0, ot_preview_ot = 0;
 /* A setup byte stock reads for the track's current machine (machine.s ot_slic_a/b/c: the LEN label's
  * formatter 0x4003b33c and two slice checks 0x40044dbe, 0x4004fee2 read its SLIC byte, Part + 0x1da +
  * 30 track + 6 type + 1). An OT-303 is stored as FLEX, and FLEX's bytes hold OT-303's SETUP knobs
@@ -219,27 +241,47 @@ unsigned ot_setup_byte(uint32_t addr) {
 unsigned ot_setup_value(uint32_t off, unsigned k, unsigned row6) {
     const volatile uint8_t *b = (const volatile uint8_t *)(uintptr_t)(U32(BANK) + PART_OFF + 0x1da + off + row6 + k);
     unsigned pidx = off / PART_STRIDE, t = (off % PART_STRIDE) / 30;
-    if (ot_preview_flex && row6 == 6 && k < 6 && pidx < 4 && t < 8) {
+    if ((ot_preview_flex || ot_preview_ot) && row6 == 6 && k < 6 && pidx < 4 && t < 8) {
         const volatile uint8_t *part = (const volatile uint8_t *)(uintptr_t)(U32(BANK) + PART_OFF + pidx * PART_STRIDE);
-        if (signed_track(part, t)) { uint8_t v[12]; flex_values(part, t, v); return v[6 + k]; }
+        unsigned is = signed_track(part, t);
+        if (ot_preview_flex && is) { uint8_t v[12]; flex_values(part, t, v); return v[6 + k]; }
+        if (ot_preview_ot && !is) return parked_value(part, t, OT_WAVE + k);   /* the OT-303 row elsewhere */
     }
     return *b;
 }
-/* machine.s's commits: sign = 1 makes track t of this Part an OT-303 (FLEX stashed, the OT-303
- * defaults seeded), 0 makes it something else (FLEX put back); both copies (the Part and its SRAM
- * mirror); nothing changes when the track already is / is not one. */
+/* machine.s ot_setup_edit6: the bytes SRC SETUP edits for the OT-303 row on track t -- FLEX's on an
+ * OT-303 track (its knobs live there), else the parked block (NEIGHBOR's SETUP bytes; a track with
+ * none gets the defaults first, in both copies, so the edit lands beside them). */
+unsigned ot_setup_edit_row(unsigned t) {
+    volatile uint8_t *part = part_base();
+    if (t >= 8 || signed_track(part, t)) return 1;
+    volatile uint8_t *copies[2] = {part, part - (U32(BANK) + PART_OFF) + SRAM_PART};
+    for (unsigned c = 0; c < 2; ++c) {
+        volatile uint8_t *s = copies[c] + SIG + 30 * t;
+        if (s[0] == 'O' && s[1] == 'T' && s[2] == 1) return 1;   /* stale signature (a stock OS changed the type) */
+        if (s[0] != PARK_MARK) park_defaults(copies[c], t);
+    }
+    return NEIGHBOR;
+}
+/* machine.s's commits: sign = 1 makes track t of this Part an OT-303 (FLEX stashed, its parked knobs
+ * or the defaults seeded), 0 makes it something else (FLEX put back, its knobs parked); both copies (the
+ * Part and its SRAM mirror); nothing changes when the track already is / is not one. */
 void ot_assign(volatile uint8_t *part, unsigned t, unsigned sign) {
     volatile uint8_t *copies[2] = {part, part - (U32(BANK) + PART_OFF) + SRAM_PART};
     for (unsigned c = 0; c < 2; ++c) {
         volatile uint8_t *p = copies[c], *s = p + SIG + 30 * t;
         unsigned is = s[0] == 'O' && s[1] == 'T' && s[2] == 1;
+        uint8_t v[12];
         if (sign && !is) {
+            for (unsigned k = 0; k < 12; ++k) v[k] = (uint8_t)parked_value(p, t, k);
             flex_stash(p, t);
-            for (unsigned k = 0; k < 12; ++k) *knob(p, t, k) = ot_defaults[k];
+            for (unsigned k = 0; k < 12; ++k) *knob(p, t, k) = v[k];
             s[0] = 'O'; s[1] = 'T'; s[2] = 1;
         } else if (!sign && is) {
+            for (unsigned k = 0; k <= OT_VOL; ++k) v[k] = *knob(p, t, k);
             flex_restore(p, t);
-            s[0] = s[1] = s[2] = 0;
+            for (unsigned k = 0; k <= OT_VOL; ++k) *parked(p, t, k) = v[k];
+            s[0] = PARK_MARK;
         }
     }
 }

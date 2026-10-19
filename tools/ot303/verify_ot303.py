@@ -10,7 +10,12 @@
 #            (This ot_emu ignores the track keys: the current track is poked.)
 #   flex     the round trip through the panel: T2 -> OT-303 -> back (SRC SETUP, four rows up, YES)
 #            leaves both Part copies byte for byte as stock had them (FLEX's twelve values stashed and
-#            put back, the stash and the signature cleared); the page's label is stock's PB / PLAYBACK
+#            put back) but NEIGHBOR's twelve unused bytes, which hold the OT-303's knobs parked (MT35:
+#            the mark, then the defaults); the page's label is stock's PB / PLAYBACK
+#   park     MT35, the machine keeps its knobs as stock machines do: T2 (STATIC) -> OT-303, WAVE turned
+#            in SRC SETUP, -> STATIC -> OT-303 again comes back with that WAVE (STATIC's and FLEX's bytes
+#            as loaded while away); an OT-303 with all eleven knobs poked -> FLEX -> OT-303 gets them all
+#            back; SRC SETUP's OT-303 row on a STATIC track edits the parked knobs, not FLEX's bytes
 #   seq      the sequencer playing, T2 and T6 made OT-303 and given a test line by pokes into the
 #            loaded Part and pattern (no file edited): notes, a tie (trigless trig), a note held into
 #            a slide, a slide after a rest, a tied slide. The stopwatch over each track's source: the
@@ -109,6 +114,53 @@ def ui(S, track, pre, back=False, image=None):
         p = emu(image or IMAGE, ['--mem-dump', spans, '--step', '-:poke:' + ';'.join(pokes), '--live-script', evf], td)
         got = {k: open(os.path.join(td, k + '.bin'), 'rb').read() for k in dumps if os.path.exists(os.path.join(td, k + '.bin'))}
         return p, got
+
+
+def panel(ev, pokes=()):
+    """one panel run on T2 (the current track poked, as ui()): `ev` (delay, event) pairs, then both
+    Part copies dumped"""
+    with tempfile.TemporaryDirectory() as td:
+        t, lines = 0, []
+        for d, e in ev + [(800, 'quit')]:
+            t += d; lines.append(f'{t} {e}\n')
+        evf = os.path.join(td, 'events.txt'); open(evf, 'w').writelines(lines)
+        dumps = {'part': (PART, 6322), 'shadow': (SHADOW, 6322)}
+        spans = ';'.join(f'{a:#x},{n}={os.path.join(td, k)}.bin' for k, (a, n) in dumps.items())
+        pk = ['0x100b14cc=0x1', '0x80000000=0x1'] + list(pokes)
+        p = emu(IMAGE, ['--mem-dump', spans, '--step', '-:poke:' + ';'.join(pk), '--live-script', evf], td)
+        return p, {k: open(os.path.join(td, k + '.bin'), 'rb').read() for k in dumps if os.path.exists(os.path.join(td, k + '.bin'))}
+
+
+# MT35: SRC SETUP opened, rows, YES + NO; the OT-303's knobs in a Part, and NEIGHBOR's twelve bytes
+# (page 1, SETUP) where they are parked: 'P', PTCH .. DEC, WAVE .. VOL, ACC
+SETUP = [(600, 'key 0x2d down'), (300, 'key 0x22 down'), (300, 'key 0x22 up'), (300, 'key 0x2d up')]
+DOWN = lambda n: sum((key(0x20, 250, 250) for _ in range(n)), [])
+UP = lambda n: sum((key(0x33, 250, 250) for _ in range(n)), [])
+YES = key(0x31) + key(0x32)
+WAVE2 = [(600, 'enc 0 3'), (300, 'enc 0 3')]              # SETUP knob A two turns: WAVE 0 -> 6 (ot_emu)
+CUSTOM = bytes([50, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 0])
+PARK_ORDER = (0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 5)
+
+
+def knobs_of(b, t=1):
+    return bytes(b[0x2a + 30 * t + 6 + k] for k in range(6)) + bytes(b[0x1da + 30 * t + 6 + k] for k in range(6))
+
+
+def parked_of(b, t=1):
+    return bytes(b[60 + 30 * t:66 + 30 * t]) + bytes(b[0x1da + 30 * t + 18:0x1da + 30 * t + 24])
+
+
+def parked(kn):
+    return bytes([0x50]) + bytes(kn[k] for k in PARK_ORDER)
+
+
+def custom_pokes(t=1):
+    out = []
+    for base in (PART, SHADOW):
+        out.append(f'{base + 0x22 + t:#x}=1')
+        out += [f'{base + 60 + 30 * t + i:#x}={c:#x}' for i, c in enumerate(b'OT\x01')]
+        out += [f'{base + (0x2a if k < 6 else 0x1da) + 30 * t + 6 + k % 6:#x}={v:#x}' for k, v in enumerate(CUSTOM)]
+    return out
 
 
 def run(image, core, sw, pokes=(), fxslot=None, fxid=None, pcw=None, dump=None, frames=FRAMES, peek=None):
@@ -229,7 +281,11 @@ def main():
     want_rc1 = 0 if DEFAULTS[2] >= 115 else tab('OT_RC1')[max(0, DEFAULTS[2] - 100)]
     want_gd8 = tab('OT_GD8')[DEFAULTS[10] - 65] if DEFAULTS[10] > 64 else 0
     jobs = {('ui', 'T2'): (1, ()), ('ui', 'T3'): (2, (1,)), ('ui', 'T6'): (5, (1,)),
-            ('ui', 'back'): (1, (), True), ('ui', 'stock'): (1, (), False, STOCK), ('dram', ''): None}
+            ('ui', 'back'): (1, (), True), ('ui', 'stock'): (1, (), False, STOCK), ('dram', ''): None,
+            ('park', 'away'): (SETUP + DOWN(6) + YES + SETUP + WAVE2 + key(0x32) + SETUP + UP(5) + YES,),
+            ('park', 'return'): (SETUP + DOWN(6) + YES + SETUP + WAVE2 + key(0x32) + SETUP + UP(5) + YES + SETUP + DOWN(6) + YES,),
+            ('park', 'pokes'): (SETUP + UP(4) + YES + SETUP + DOWN(4) + YES, custom_pokes()),
+            ('park', 'edit'): (SETUP + DOWN(6) + WAVE2 + key(0x32),)}
     for core in (1, 0):
         jobs[('src-stock', core)] = (STOCK, core, SRC[core])
         jobs[('src-inert', core)] = (IMAGE, core, SRC[core], (), None, None, None, counters)
@@ -240,7 +296,8 @@ def main():
             jobs[(name, core)] = (IMAGE, core, FX2[core], (), 2, fx)
             jobs[(name + '-stock', core)] = (STOCK, core, FX2[core], (), 2, fx)
     with cf.ThreadPoolExecutor(len(jobs)) as ex:
-        fut = {k: ex.submit(ui, S, *v) if k[0] == 'ui' else ex.submit(dram_audit) if k[0] == 'dram' else ex.submit(run, *v)
+        fut = {k: ex.submit(ui, S, *v) if k[0] == 'ui' else ex.submit(panel, *v) if k[0] == 'park'
+               else ex.submit(dram_audit) if k[0] == 'dram' else ex.submit(run, *v)
                for k, v in jobs.items()}
         res = {k: f.result() for k, f in fut.items()}
     ok = True
@@ -278,17 +335,38 @@ def main():
                 and names[:6] == ['PTCH', 'CUT', 'RES', 'ENV', 'DEC', 'ACC']
     # the FLEX round trip against stock's Part as loaded
     (pb, gb), (ps, gs) = res[('ui', 'back')], res[('ui', 'stock')]
+    t = 1
+    nb = [60 + 30 * t + i for i in range(6)] + [0x1da + 30 * t + 18 + i for i in range(6)]
     for c in ('part', 'shadow'):
         a, b = gs.get(c, b''), gb.get(c, b'')
-        diff = [i for i in range(min(len(a), len(b))) if a[i] != b[i]]
-        t = 1
+        diff = [i for i in range(min(len(a), len(b))) if a[i] != b[i] and i not in nb]
         flex = [b[0x2a + 30 * t + 6 + k] for k in range(6)] + [b[0x1da + 30 * t + 6 + k] for k in range(6)] if b else []
-        print(f'flex round trip, {c}: {len(diff)} bytes differ from stock {[hex(i) for i in diff[:8]]}; T2 type {b[0x22 + t] if b else None}, '
-              f'FLEX knobs {flex}, signature {b[60 + 30 * t:63 + 30 * t]!r}' if b else f'flex round trip, {c}: no dump')
-        ok &= len(a) == len(b) == 6322 and not diff
+        print(f'flex round trip, {c}: {len(diff)} bytes differ from stock outside NEIGHBOR\'s {[hex(i) for i in diff[:8]]}; '
+              f'T2 type {b[0x22 + t] if b else None}, FLEX knobs {flex}, NEIGHBOR {list(parked_of(b)) if b else None} '
+              f'(the defaults parked: {parked_of(b) == parked(DEFAULTS) if b else None})')
+        ok &= len(a) == len(b) == 6322 and not diff and parked_of(b) == parked(DEFAULTS)
     ok &= pb.returncode == 0 and 'ended on quit' in pb.stdout
+    # MT35: the knobs kept across machine changes
+    wave6 = DEFAULTS[:6] + bytes([6]) + DEFAULTS[7:]
+    stock_part = gs.get('part', b'')
+    want = {'away': (0, knobs_of(stock_part), parked(wave6)), 'return': (1, wave6, None),
+            'pokes': (1, CUSTOM, None), 'edit': (0, knobs_of(stock_part), parked(wave6))}
+    for name, (typ, kn, nbw) in want.items():
+        p, got = res[('park', name)]
+        for c in ('part', 'shadow'):
+            b = got.get(c, b'')
+            if len(b) != 6322:
+                print(f'park {name}, {c}: no dump (rc {p.returncode})'); ok = False; continue
+            sig = bytes(b[60 + 30 * t:63 + 30 * t]) == b'OT\x01'
+            good = b[0x22 + t] == typ and sig == (typ == 1) and knobs_of(b) == kn and (nbw is None or parked_of(b) == nbw)
+            if c == 'part' and name in ('away', 'edit'):     # nothing else of the Part moved
+                good &= all(b[i] == stock_part[i] for i in range(6322) if i not in nb)
+            print(f'park {name:6} {c:6}: type {b[0x22 + t]} {"OT-303" if sig else "-"} knobs {list(knobs_of(b))} '
+                  f'NEIGHBOR {list(parked_of(b))}: {"as wanted" if good else "WRONG"}')
+            ok &= good
+        ok &= p.returncode == 0 and 'ILLEGAL' not in p.stdout and 'ended on quit' in p.stdout
     # ---- sequencer
-    for k, v in sorted(((k, v) for k, v in res.items() if k[0] not in ('ui', 'dram')), key=lambda kv: (kv[0][1], kv[0][0])):
+    for k, v in sorted(((k, v) for k, v in res.items() if k[0] not in ('ui', 'dram', 'park')), key=lambda kv: (kv[0][1], kv[0][0])):
         print(f'{k[0]:10} core {k[1]}: rc {v[1]}  last 8 {v[0][-8:] if v[0] else None}')
         ok &= v[1] == 0 and bool(v[0])
     if not ok:
