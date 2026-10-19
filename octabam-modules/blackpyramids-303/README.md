@@ -72,8 +72,10 @@ instead.
 - A square-wave voice on T5–T8 beside DJ EQ in both FX slots of all eight tracks may crackle
   (the cycle estimate is in `reference/BLACKPYRAMIDS_303.md` §4).
 - It refuses SIDECHAIN_COMPRESSOR. In the author's images both take SPRING REV's program words,
-  and octabam does not yet place a DSP section beside a source machine. Their Y memory no longer
-  collides: SIDE-CHAIN's key bus moved out of the voice's Y on 15 Oct 2026.
+  and octabam does not yet place a DSP section beside a source machine. Their Y memory meets too:
+  in octabam SIDE-CHAIN keeps its key bus at Y:$7f0–$9ff, inside the voice's Y (the author's
+  standalone images move it to the tail of the first internal FX2 slot, which octabam cannot,
+  beside effects that fill their slot).
 
 ## Credits
 

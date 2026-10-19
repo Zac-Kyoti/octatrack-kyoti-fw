@@ -125,8 +125,8 @@ MODULE = Module(
         ("TAPE ECHO", "it replaces SPRING REV, whose words are the voice"),
         ("SCALE QUANTIZER", "the same MIDI note site (0x4000e746)"),
         ("SIDECHAIN_COMPRESSOR", "in the author's images both take SPRING REV's program words, and "
-                                 "octabam does not yet place a DSP section beside a source machine "
-                                 "(its key bus left the voice's Y on 15 Oct 2026)"),
+                                 "octabam does not yet place a DSP section beside a source machine; "
+                                 "in octabam its key bus is also in the voice's Y (Y:$7f0-$9ff)"),
     ),
     linked=(
         Linked("bp_runtime", os.path.join(_HERE, "bp_runtime.s"), dram=True,
