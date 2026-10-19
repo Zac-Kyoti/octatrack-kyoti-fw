@@ -383,6 +383,43 @@ def ref_onepole(src, kflt, tracker=0):
     return out, tracker
 
 
+def _sat24(v):
+    return max(-Q23, min(Q23 - 1, v))
+
+
+def ref_mon_weights(pos, on):
+    """moncommit's mix weight g for each of a block's 16 pairs, as the .asm computes it:
+    g starts at pos * 1/4 (saturated; 4 -> just under 1.0) and moves 1/64 per pair, each
+    step through an accumulator and a saturating move to y1. The fast paths (pos 0 off,
+    pos 4 on) return a constant 0 / 1.0."""
+    pos = pos if 0 <= s24(pos) <= 4 else 0
+    if (not on and pos == 0) or (on and pos == 4):
+        return [0 if not on else Q23 - 1] * 16
+    step = 0x20000 if on else -0x20000
+    g, out = _sat24(pos << 21), []
+    for _ in range(16):
+        g = _sat24(g + step)
+        out.append(g)
+    return out
+
+
+def ref_mon(dry, key, pos, on):
+    """moncommit's output block and its new MON_FADE: dry + g*(key - dry) per sample, in
+    the .asm's arithmetic (halve the difference, fractional mpy, asl, add dry, take a1)."""
+    pos = pos if 0 <= s24(pos) <= 4 else 0
+    if not on and pos == 0:
+        return list(dry), 0
+    if on and pos == 4:
+        return list(key), 4
+    ws = ref_mon_weights(pos, on)
+    out = []
+    for k in range(32):
+        d, s = s24(dry[k]), s24(key[k])
+        x0 = (s - d) >> 1
+        out.append(_sat24(d + ((x0 * ws[k >> 1]) >> 22)) & 0xFFFFFF)
+    return out, pos + (1 if on else -1)
+
+
 # ---- signals ---------------------------------------------------------------
 def sine(n, cyc):
     import math
@@ -652,33 +689,83 @@ def main():
     (g1,) = run(mem, scdet, [('y', SLOT + 0x20, SLOT + 0x40)], P(key=KEYV, mon=0), pokey=pk_sig, audio=0)
     check("MON=0: keybus[0] gen1 untouched", all(v == 0 for v in g1))
 
-    # 6. MON publish (scdet -> MON_ON[my track]/MON_KEY[my track], Y:MON_BASE+track*2
-    #    +0/+1 -- the moncommit hook's only input) -----------------------------------------------
-    print("\nMON publish (scdet -> MON_ON/MON_KEY for moncommit):")
+    # 6. MON publish (scdet -> MON_ON[my track], Y:MON_BASE+track*2; the word after it is
+    #    MON_FADE, moncommit's, since 2026-10-19) and the stash, now indexed by MY track ------
+    print("\nMON publish (scdet -> MON_ON for moncommit; stash at keybus[my track] gen 1):")
     MYTRACK = 3
     MON_ADDR = MON_BASE + MYTRACK * 2
+    MYSTASH = KB_BASE + MYTRACK * KB_STRIDE + 0x20
     mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
                    [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [0xdead, 0xdead])])
-    (pub,) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2)], P(key=KEYV, mon=1), pokey=pk_sig, audio=0)
-    # MON_ON is only ever gated by `tst` (nonzero = on) in moncommit, never
-    # compared for an exact value -- `move #1,b`'s short-immediate encoding
-    # is left-aligned (this file's own documented dsp_asm quirk, q2) and
-    # actually loads 0x10000, not 1. Harmless (still nonzero) -- left as-is,
-    # matching moncommit's own compensating exact-match check against
-    # $10000, not because the cave is still short on words (Session 76
-    # continued: the SPRING REVERB donor swap left ~800 words of slack).
-    check("MON=1: MON_ON!=0, MON_KEY==key track", pub[0] != 0 and pub[1] == K,
-          f"got={pub}")
+    (pub, x40, st, src) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2), ('x', 0x40, 0x60),
+                                           ('y', MYSTASH, MYSTASH + 0x20),
+                                           ('y', SLOT + 0x20, SLOT + 0x40)],
+                              P(key=KEYV, kflt=40, mon=1), pokey=pk_sig, audio=0)
+    # `move #1,b`'s short immediate is left-aligned (q2): the ON sentinel is $10000, which
+    # moncommit matches exactly.
+    check("MON=1: MON_ON == $10000, MON_FADE untouched", pub == [0x10000, 0xdead], f"got={pub}")
+    check("MON=1: keybus[my track] gen1 == processed X:$40", st == x40,
+          f"st[:3]={[hex(v) for v in st[:3]]} x40[:3]={[hex(v) for v in x40[:3]]}")
+    check("MON=1: the SOURCE track's gen1 is not written", all(v == 0 for v in src))
+
+    for fade, want_stash in ((0, False), (2, True)):
+        mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
+                       [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [0x10000, fade])])
+        (pub, x40, st) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2), ('x', 0x40, 0x60),
+                                          ('y', MYSTASH, MYSTASH + 0x20)],
+                             P(key=KEYV, kflt=40, mon=0), pokey=pk_sig, audio=0)
+        check(f"MON=0, MON_FADE={fade}: MON_ON published OFF, MON_FADE untouched",
+              pub == [0, fade], f"got={pub}")
+        check(f"MON=0, MON_FADE={fade}: stash {'written (fade-out source)' if want_stash else 'untouched'}",
+              (st == x40) if want_stash else all(v == 0 for v in st),
+              f"st[:3]={[hex(v) for v in st[:3]]}")
 
     mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
-                   [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [1, K])])
-    (pub,) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2)], P(key=KEYV, mon=0), pokey=pk_sig, audio=0)
-    check("MON=0: MON_ON published OFF", pub[0] == 0, f"got={pub}")
-
-    mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
-                   [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [1, K])])
+                   [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [0x10000, 4])])
     (pub,) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2)], P(key=0, mon=1), pokey=pk_sig, audio=0)
-    check("KEY=0: MON_ON published OFF (even with MON=1)", pub[0] == 0, f"got={pub}")
+    check("KEY=0: MON_ON published OFF (even with MON=1)", pub == [0, 4], f"got={pub}")
+
+    # 7. moncommit: the MON crossfade (2026-10-19) ------------------------------------------
+    print("\nmoncommit (MON declick: 64-sample linear crossfade, MON_ON consumed):")
+    DRY = sine(0x20, 2)
+    KEYA = [(-s24(v) // 2) & 0xFFFFFF for v in sine(0x20, 5)]
+    R0_IN = 0x1234
+    PBLK = 0x300      # dsp_host writes its -params block at x:$208+6: keep it off X:0..$1f
+    for mon_on, fade, tag in ((0x10000, 0, "ON from 0: fade in, block 1"),
+                              (0x10000, 3, "ON from 3: fade in, last block"),
+                              (0x10000, 4, "ON at 4: plain copy"),
+                              (0, 0, "OFF at 0: dry"),
+                              (0, 4, "OFF from 4: fade out, block 1"),
+                              (0, 1, "OFF from 1: fade out, last block"),
+                              (0x123456, 4, "garbage MON_ON: fades out"),
+                              (0x10000, 0x654321, "garbage MON_FADE: reads as 0"),
+                              (0x10000, 0xfffffe, "negative MON_FADE: reads as 0"),
+                              (0, 0x654321, "OFF, garbage MON_FADE: dry, cleared")):
+        mem = base_mem(words, scdet, sctail, False,
+                       [(1, 0, DRY), (1, 0x206, [R0_IN]), (1, 0x208, [PBLK])],
+                       [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [mon_on, fade]), (2, MYSTASH, KEYA)])
+        (x0, pub) = run(mem, sctail, [('x', 0, 0x20), ('y', MON_ADDR, MON_ADDR + 2)], P())
+        exp, pos = ref_mon(DRY, KEYA, fade, mon_on == 0x10000)
+        bad = [k for k in range(32) if x0[k] != exp[k]]
+        check(f"{tag:34s}", x0 == exp and pub == [0, pos],
+              f"bad={bad[:6]} state={pub} exp=[0, {pos}] got[:4]={[s24(v) for v in x0[:4]]} "
+              f"exp[:4]={[s24(v) for v in exp[:4]]} last={s24(x0[31])}/{s24(exp[31])}")
+    r0 = read_r0(base_mem(words, scdet, sctail, False, [(1, 0, DRY), (1, 0x206, [R0_IN]), (1, 0x208, [PBLK])],
+                          [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [0x10000, 1]),
+                           (2, MYSTASH, KEYA)]), sctail, P())
+    check("r0 == x:$206 after a fading block (stock's commit pointer)", r0 == R0_IN,
+          f"got=0x{r0:x}")
+
+    # a full fade in and out, block by block: the weight never steps
+    g, pos = [], 0
+    for blk in range(10):
+        on = blk < 5
+        g += ref_mon_weights(pos, on)
+        _, pos = ref_mon(DRY, KEYA, pos, on)
+    steps = [abs(b - a) for a, b in zip(g, g[1:])]
+    check("model: 10-block on/off weight sequence moves at most 1/64 per pair",
+          max(steps) <= (Q23 >> 6) + 1 and g[0] == 0x20000 and g[-1] == 0,
+          f"max step 0x{max(steps):x}, first 0x{g[0]:x}, last 0x{g[-1]:x}")
 
     print()
     if fails:

@@ -1,6 +1,7 @@
 # SIDECHAIN_COMPRESSOR: MON declick + HP/LP key filters (scope, 2026-10-19)
 
-Status: **scope only. Nothing built, nothing flashed.** Read against origin/main `99a1319`
+Status: **§1 (MON declick) built, emulator-verified, NOT flashed** (NOTES 2026-10-19). §2–3: scope,
+with the layout decided (§3). Read against origin/main `99a1319`
 (`tools/patch_sc_dsp3.asm`, `tools/patch_sidechain.s`, `tools/sc_tables.py`,
 `tools/build_sidechain_compressor.py`, `octabam-modules/sidechain-compressor/`,
 `octabam-modules/mute-modes/patch_softmute.s`).
@@ -11,8 +12,8 @@ Status: **scope only. Nothing built, nothing flashed.** Read against origin/main
    control, so a very fast fade is fine. The aim is cosmetic: no pop.
 2. **Replace the bipolar KFLT with two filters**: a high-pass (rumble) and a low-pass (top),
    which together can isolate a band. No resonant peaks. HP about −18 dB/oct, LP gentler
-   (−12 or "−8"). The two must not cross. The user's proposed page 2:
-   `RMS · KEY · KGN · KFHP · KFLP · MON`.
+   (−12 or "−8"). The two must not cross. The user's first proposal
+   was `RMS · KEY · KGN · KFHP · KFLP · MON`; decided: §3.
 
 ---
 
@@ -37,16 +38,17 @@ A crossfade needs both signals in the same block, so three supporting changes ar
 
 | change | why |
 |---|---|
-| `scdet` stashes the processed key **every block while KEY ≠ OFF**, not only while MON is on | so a MON-off fade has a live key to fade *from* (today the stash stops the instant MON turns off) |
+| `scdet` stashes the processed key while MON is on **or a fade-out is still running** | so a MON-off fade has a live key to fade *from* (today the stash stops the instant MON turns off) |
 | the gen-1 stash is indexed by the **consumer** track (`x:$420`), not the source track | today two COMPRESSORs keying the same source share one stash slot (the last writer wins). "Always stash" would make a MON-off compressor overwrite a MON-on one's audition. Indexing by consumer fixes that, and `MON_KEY` is then no longer needed |
-| the freed `MON_KEY[track]` word holds `g` | no new memory, no change to the declared Y range ($7f0..$7ff in octabam, $7df0..$7dff standalone) |
+| the freed `MON_KEY[track]` word holds the fade position, `MON_FADE` (0–4 blocks) | no new memory, no change to the declared Y range ($7f0..$7ff in octabam, $7df0..$7dff standalone) |
 
-**Heartbeat instead of a sticky flag.** `scdet` writes the current block's `GCNT` value into
-`MON_ON` (instead of the `$10000` sentinel), and `moncommit` treats "≠ this block's GCNT" as
-OFF and fades out. This also fixes a **suspected existing bug (unverified)**. With MON on,
-changing the track's effect away from COMPRESSOR stops `scdet` running, nothing clears
-`MON_ON`, and `moncommit` should keep replaying a frozen 16-sample stash (a buzz). This is
-cheap to confirm first in `ot_emu` or on the unit: MON ON, then change FX1 to FILTER.
+**`MON_ON` is consumed, not sticky** (built; simpler than the GCNT heartbeat first scoped,
+which would alias every 4 blocks). `scdet` arms it (`$10000`) every block MON is on;
+`moncommit` reads it and clears it. If `scdet` stops running, the next block fades out. This
+fixes an **existing bug, confirmed by code reading** (only `scdet` writes `MON_ON`): with MON
+on, changing the track's effect away from COMPRESSOR leaves `MON_ON` set, and `moncommit`
+replays a frozen 16-sample stash (a buzz) until the effect comes back. Not yet seen on the
+unit.
 
 Edge cases:
 - **KEY → OFF while MON is on**: the stash stops updating, so the ≤4-block fade-out replays
@@ -165,67 +167,47 @@ LP knob 16 = 160 Hz, 48 = 640, 64 = 1.28 kHz, 96 = 5.1 kHz, 112 = 10.2 kHz.
 
 ---
 
-## 3. Page layout: the decision the user needs to make
+## 3. Page layout (decided 2026-10-19)
+
+**`RMS · MON · KEY · KGN · KFHP · KFLP`** (slots 6–11), MON stored **inverted**; a new major
+version, with a README disclaimer that older SIDECHAIN projects sound different.
 
 Stock COMPRESSOR's page-2 descriptor, read from our image (E `0x400d5a4a`):
 
-| slot | stock | today |
-|---|---|---|
-| 6 | RMS | RMS |
-| 7 | hidden switch, count 2, **default 1** (DSP never reads it: `asr #$10` drops bits 8–15) | empty |
-| 8 | default `0x7f` | KEY |
-| 9 | default 0 | KFLT |
-| 10 | default 0 | KGN |
-| 11 | default 0 | MON |
+| slot | stock | today | new |
+|---|---|---|---|
+| 6 | RMS | RMS | RMS |
+| 7 | hidden switch, count 2, **default 1** (DSP never reads it: `asr #$10` drops bits 8–15) | empty | **MON**, stored 1 = OFF, 0 = ON |
+| 8 | default `0x7f` | KEY | KEY (unchanged) |
+| 9 | default 0 | KFLT | KGN |
+| 10 | default 0 | KGN | KFHP |
+| 11 | default 0 | MON | KFLP |
 
-Display position = slot, so the proposed `RMS · KEY · KGN · KFHP · KFLP · MON` means
-**KEY → slot 7, KGN → 8, KFHP → 9, KFLP → 10, MON stays 11.** Consequences:
-
-1. **Every stock-saved compressor has slot 7 = 1, which would read as KEY = T1.** That would
-   key every existing stock project's compressors to T1.
-2. **Every compressor saved on SIDECHAIN so far** (the user's, and Modwerk users') would load
-   with KGN = old KEY (0–8 ≈ −24 dB), KFHP = old KFLT, KFLP = old KGN. Its KEY would be
-   slot 7 = 1 = T1 as well.
-3. P-locks and scene locks on the old slots remap the same way.
-4. **MUTE_MODES reads KEY at record offset +38 (slot 8)** (`p1_key`, `SC_KEY` builds). It
-   must move in every form: KYOTI, octabam mute-modes, and **Modwerk MM 0.2.1, which Jannik
-   maintains**.
-
-No byte in the record can tell old from new. Every scheme I tried for translating old
-settings misfires on some legitimate new setting.
-
-**Option A (recommended): the proposed order, fail-safe OFF.** KEY in slot 7 with **OFF at
-positions 0 and 1** (default 1; the list reads OFF, OFF, T1…T8). Every stock-saved and every
-older SIDECHAIN compressor then comes up with the side-chain OFF. Nothing ducks unexpectedly.
-`sc_norm` can be dropped: it was a 171 instr/frame check plus two detours. The costs: old
-SIDECHAIN setups must be re-dialled, and there is one doubled OFF detent at the left end of
-KEY.
-
-**Option B: compatible order** `RMS · KFHP · KEY · KFLP · KGN · MON`. KEY, KGN and MON keep
-their slots, and HP takes slot 7, where stock's 1 is harmless (lowest HP). Old setups keep
-their key, but **old KFLT is misread as KFLP**. The usual 64 ("bypass") becomes LP ≈ 1.3 kHz,
-a silent change in how old projects duck. `sc_norm` and MUTE_MODES stay as they are. The
-order is less tidy.
-
-**Optional add-on (ask): filter the compressor's own signal when KEY = OFF.** A side-chain
-HPF on the compressor's own input is the most common real-world use (no bass pumping). Today
-KEY OFF bypasses everything. It is cheap: copy the input to `x:$40` and run the filters,
-skipping when both are OFF to stay bit-identical to stock. But it makes the legacy problem
-bite. Stock-saved records have slot 10 = 0, which would be an LP at 80 Hz on their own
-detector. So it needs a stock-signature `sc_norm` (`1/7f/0/0/0`) and a decision on old
-SIDECHAIN records.
+- **Why MON is inverted:** slot 7 holds 1 in every compressor saved on stock or on SIDECHAIN
+  so far (stock's default, never visible). Stored plainly, every old compressor with a KEY would
+  come up monitoring. Inverted, all of them come up MON OFF. A custom formatter shows ON/OFF;
+  check on hardware that the switch graphic does not draw backwards (fallback: a plain
+  two-step knob).
+- **KEY stays in slot 8**, so MUTE_MODES' `p1_key` (+38) is unchanged in every form, and
+  `sc_norm`'s stock check (KEY > 8) still works. `sc_norm` gains slot 7 (reset to 1 = MON OFF)
+  and the new defaults (KGN 64, KFHP 0 = OFF, KFLP 127 = OFF).
+- **Old SIDECHAIN compressors load as:** KEY kept; KGN = old KFLT (64 → unity; an old LP/HP
+  setting → some gain between −24 and +24 dB); KFHP = old KGN (usually 64 → HP ≈ 300 Hz);
+  KFLP = old MON (0/1 → LP ≈ 80 Hz, pushed to ≈ 600 Hz by the no-crossing rule). Audible
+  and fixable by re-dialling; this is what the disclaimer covers. P-locks and scene locks on
+  slots 9–11 remap the same way.
+- **KEY OFF is stock** (decided): no filtering of the compressor's own signal.
 
 ---
 
 ## 4. Build-family flags
 
 **Standalone / KYOTI**
-- New descriptor writes for slots 7–11, slot 7's enable-bitmap nibble, and `key_list_fix` on
-  slot 7 (it replaces stock's switch widget there). Option A removes `sc_norm` and its
-  detours at `0x4000cae8`/`0x40003d1c`, which frees CF cave bytes. The Hz formatters add
-  some.
-- KYOTI re-pins SIDECHAIN and MUTE_MODES (the `p1_key` offset). Bugbuilds BUG_SC3X and
-  BUG_MUTEDT change. KYOTI's ColdFire caves are tight: check room for the formatters, or net them against `sc_norm`'s removal.
+- New descriptor writes for slots 7 and 9–11, slot 7's enable-bitmap nibble, MON's inverted
+  formatter on slot 7 (stock's switch widget is already there), `sc_norm` extended to slot 7.
+  The Hz formatters add some CF bytes.
+- KYOTI re-pins SIDECHAIN; BUG_SC3X changes. MUTE_MODES is untouched (KEY stays in slot 8).
+  KYOTI's ColdFire caves are tight: check room for the formatters.
 - The DSP fits SPRING's donor in both.
 
 **octabam**
@@ -235,7 +217,6 @@ SIDECHAIN records.
   VARISPEED: octabam's DSP placer is shared, and P space is contested.
 - The new r7 words (`$1c..`) are per-instance state that the ledger does not model as a
   `DspRange`. Check whether octabam wants a claim kind for it, or a note.
-- MUTE_MODES' `SC_KEY` variant changes with the KEY slot (`p1_key`).
 - The usage fragment `docs/site/usage/sidechain-compressor.md` and its screenshots change.
   The usual PR checklist applies: THIRD_PARTY pin row, rebase, then the gates.
 
@@ -246,7 +227,7 @@ SIDECHAIN records.
   need owner (Jannik) review and rework**, not an author bot update. The Y range stays
   `0x7f0 + 0x210`.
 - It is a settings-breaking change for Modwerk users' saved projects (§3): version it as a
-  major bump, with a release note, and with the MM change landing in step.
+  major bump, with a release note. MM needs no change.
 - Qualification, UI captures and the `sidechain-*-proofs` all re-run.
 - Ordering: SC 0.1.3 (window move, waiting on the user's MODWERK_SC013 test) should land
   first. Then this.
@@ -255,14 +236,12 @@ SIDECHAIN records.
 
 ## 5. Suggested order of work
 
-1. Confirm or refute the stale-MON buzz (emulator, no flash).
-2. MON declick alone: the smaller change, DSP-only, no layout change. Emulator gates, then
-   HW.
+1. ~~Confirm the stale-MON buzz~~ (confirmed by code reading; fixed by the declick's consume).
+2. ~~MON declick alone~~ built and emulator-verified 2026-10-19; HW test pending.
 3. RE canary for r7 `$1c..$70` on both payloads.
 4. Filter prototype in `emu_sc_dsp3.py` against a numpy reference (bit-exact), plus an A/B
    pack: Butterworth vs the one-pole cascade, on a kick + bass loop.
-5. Layout (A or B) plus the MUTE_MODES `p1_key` move, then standalone → KYOTI → octabam →
-   Modwerk.
+5. Layout (§3, decided), then standalone → KYOTI → octabam → Modwerk.
 
 ## Sources
 

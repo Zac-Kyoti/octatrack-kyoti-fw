@@ -36766,3 +36766,48 @@ beside a live SC).
   Unreleased entry, wrapper README (32,364 B, hardware record) + proof_note (this form flashed 19 Oct), usage note.
   Gates: verify-docs 0 problems, mkdocs strict, refhash 24/24, reach every gate passed; `make bus` = the flashed
   OBBP3 MAIN OS (`26a1c285…`). Waiting on Sam.
+
+## 2026-10-19 (`sc-keyfilt`) — SIDECHAIN_COMPRESSOR: MON declick (built, emulator-verified, NOT flashed); key-filter + page-2 layout scoped and decided
+
+**Scope:** `reference/handoffs/SIDECHAIN_KEYFILT_MON_SCOPE.md`. User decisions: page 2 becomes
+`RMS · MON · KEY · KGN · KFHP · KFLP` (MON in slot 7 stored inverted, KEY stays in slot 8 so MUTE_MODES and
+`sc_norm`'s stock check are untouched), a new major version with a README disclaimer for older SIDECHAIN projects;
+KEY OFF stays exactly stock (no own-signal filtering). Filters (HP 18 / LP 12 dB/oct Butterworth, TPT) not built.
+
+**MON declick (`tools/patch_sc_dsp3.asm`, WIP):**
+- `moncommit` crossfades instead of swapping: `out = dry + g·(key − dry)`, g moving 1/64 per sample pair, 64 samples
+  (4 blocks, ~1.45 ms). The word after `MON_ON` (was `MON_KEY`) is `MON_FADE`, 0..4; anything else reads as 0.
+  Fast paths at 0 (dry, untouched) and 4 (the old plain copy). Registers a, b, x0, x1, y1, r1, n1, r3: `func_00034f`
+  (A P:0x55a, B P:0x34f, identical, our disassembly) loads x1/y1/x0 itself and writes a/b before reading them; r1/n1/r3
+  are reset by the three stock instructions before it; r0 untouched; no y0/r2/n2. `scmonbody` (Sam's export for a
+  composed load-meter hook, cccdb77) now also clobbers x1/y1 -- tell octabam.
+- `MON_ON` is **consumed** (cleared by `moncommit` every block) and re-armed by `scdet` every block MON is on. Fixes an
+  existing bug, by code reading (not seen on the unit): MON on, then change the track's effect away from COMPRESSOR
+  (or anything that stops `scdet`) left `MON_ON` set and `moncommit` replaying a frozen 16-sample stash.
+- The gen-1 stash is indexed by the **consumer** track (was the source), and `scdet` writes it while MON is on or
+  `MON_FADE` ≠ 0, so a fade-out has a live key. Two COMPRESSORs keying one track no longer share a stash.
+- Cave 456 words (was 432) of SPRING's 1063; no Y range or address changed.
+
+**Verified (emulator only):** `emu_sc_dsp3.py` ALL GOOD (default, `--layout octabam`, `--patched` against the built
+image) with new checks: MON_ON/MON_FADE publish, consumer-indexed stash, stash during fade-out only, and ten
+`moncommit` cases bit-exact against a Python model (fade in/out from each end, fast paths, garbage MON_ON/MON_FADE,
+r0 = x:$206 after). The harness writes its `-params` block at `x:$208`+6 = X:6.., over the track buffer: the moncommit
+cases move `x:$208` to $300 (a harness artefact, not a code issue). `emu_sc_sctap.py` ALL GOOD.
+Chained run (`out/mon_declick/chain.py`, this worktree): the real old and new `moncommit`, block after block in dsp_host
+over the SIDECHAIN_TEST pool (fatty.wav dry, mdkick.wav key), MON toggled every 0.25 s, fade state carried. Peak
+4th-difference at the toggles: old 0.09–1.31, new 0.007–0.014; the material's own maximum away from toggles is 0.022
+(both). WAVs: `out/mon_declick/chain_{old,new}.wav`.
+A whole-project `ot_emu` run was attempted and abandoned: `sctest6_card.img` renders silent (staged without samples);
+re-staged with `stage_card.py --audio` (all four pool samples) it is still silent with both the octabam REMIXER clone's
+ot_emu and the patched one in ot303's out/vem. Not pursued further.
+`build_varispeed_emus.py` and `build_kyoti.py` still build with the larger cave (WIP, exit 0; outputs not for flashing).
+
+**Build (WIP, NOT flashed):** standalone `out/OCTATRACK_OS1.40C_SIDECHAIN_COMPRESSOR.syx`
+`48404ab5d27a3adc8f53ffc911c33600e4de767565deb334fe526a5a4a4bccaf`, mainos `56c28965…`.
+HW checks owed: (1) MON toggled repeatedly while playing, same core and cross core -- no click, a very fast fade;
+(2) ducking with MON off unchanged; (3) MON on, then FX1 → FILTER: the track returns to its own sound (the old image
+should buzz -- worth one look to confirm the old bug); (4) MON on, KEY → OFF: own sound, no buzz; (5) two COMPRESSORs
+keying the same track, MON on one: it hears its own KFLT/KGN; (6) transport start/stop and pattern changes with MON on
+(the S59 class); (7) DARK/PLATE REV on T3/T7 still clean.
+**Not done:** octabam (shared asm: check-remix + pin move later), Modwerk (`resident_dsp.py` patches our MON consume
+text -- owner review; with the major version), KYOTI/BUG_SC3X re-pins (on promotion).

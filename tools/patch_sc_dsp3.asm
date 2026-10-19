@@ -86,9 +86,11 @@
 ;     +$00..$1f  gen 0 = the per-frame publish (sctap) -- only this core's
 ;                own 4 tracks are ever written here
 ;     +$20..$3f  gen 1 = the SC LISTEN stash -- scdet writes the *processed*
-;                key there (indexed by the SOURCE track, any of 0..7),
-;                moncommit copies it to the dry buffer
-;   MON_ON/MON_KEY[track] = Y:$7df0 + track*2 (+0 / +1), $7df0..$7dff.
+;                key there, indexed by the CONSUMER track (2026-10-19;
+;                it was the source track), and moncommit mixes it into the
+;                dry buffer
+;   MON_ON/MON_FADE[track] = Y:$7df0 + track*2 (+0 / +1), $7df0..$7dff
+;   (MON_FADE was MON_KEY until 2026-10-19).
 ;   Both sit in the tail of the first internal FX2 slot (Y:$4000..$7fff):
 ;   stock never writes past slot+$3da2 (octabam's stock.SLOT_EXTENT, DARK REV
 ;   the highest), and the cross-core window already uses the same +$3e00
@@ -264,7 +266,7 @@ scdet:
 ; this is definitely the SPLIT-BLOCK'S SECOND call, not the frame's only
 ; one (which always arrives with r0=0) -- skip straight to `zz16`'s own
 ; exit (still redirects the stock detector to `x:$40`) without touching
-; KEY GAIN/KEY FLT/the gen-1 stash or MON_ON/MON_KEY a second time.
+; KEY GAIN/KEY FLT/the gen-1 stash or MON_ON a second time.
 ;
 ; WORD BUDGET: this check (4w: move/tst/bne) pushed the cave 1 word over
 ; SPATIALIZER's 261w donor. Paid for by `r4` (proven free for the whole
@@ -277,15 +279,12 @@ scdet:
         move    n6,b
         tst     b
         bne     zz16
-; r5 = SOURCE track's own same-core-private gen-1 stash slot base (SC
-; LISTEN). UNCHANGED for a foreign-core KEY selection (Session 77 design
-; note, NOTES.md "Session 77"): this is the CONSUMER's own private scratch,
-; addressed purely by the source track's index 0..7 -- keybus spans all 8
-; index positions in every core's own private Y memory, but a core's own
-; sctap only ever WRITES its own 4 tracks' gen-0 slots, leaving every other
-; index's gen-1 slot (never touched by gen-0 publish, never touched by any
-; OTHER hook here) equally free for this per-consumer stash purpose whether
-; the source track happens to live on this core or the other one.
+; r5 = the gen-1 stash slot base (SC LISTEN) of THIS track, the consumer
+; (2026-10-19, MON declick). It used to be the SOURCE track's slot, so two
+; COMPRESSORs keying the same track shared one stash; now that the stash is
+; also written while MON fades out, each consumer needs its own. A core only
+; ever runs its own 4 tracks' scdet, and gen 1 is written by nothing else.
+        move    x:>$420,a               ; a = MY track 0..7 (r4 still holds the key)
         asl     #6,a,a
         move    a1,n1
         move    #>@KEYB@,r1
@@ -590,12 +589,12 @@ zz12:
                                        ; can never fire on a stale flag
 
 zz10:
-; -- SC LISTEN : if on, stash the processed key -> keybus[key] gen 1, and
-;    publish MON_ON[track]/MON_KEY[track] so the dispatcher-level `moncommit`
+; -- SC LISTEN : if on, stash the processed key -> keybus[my track] gen 1, and
+;    publish MON_ON[track] so the dispatcher-level `moncommit`
 ;    hook (spliced at the per-track COMMIT step, well after this WHOLE module
 ;    -- including its own undocumented envelope/gain math -- has returned)
 ;    can independently redo the substitution outside any shared execution
-;    context with the compressor's own code. MON_ON/MON_KEY live at
+;    context with the compressor's own code. MON_ON/MON_FADE live at
 ;    Y:$7df0 + track*2 (+0/+1), below the keybus (layout and its evidence at
 ;    the top of this file); sctap/scdet's gen-0/gen-1 writes never reach it.
 ;
@@ -614,12 +613,35 @@ zz10:
 ;    the ColdFire side's button/LED handling kept working independently).
 ;    Do not reintroduce n0/x1/any register beyond the proven set here without
 ;    a fresh hardware test.
+;
+;    MON declick (2026-10-19): MON_ON[my track] is now a per-block ARM that
+;    moncommit consumes (reads, then clears) every block, and the word after
+;    it, MON_FADE[my track], is moncommit's fade position (0..4 blocks; it
+;    used to be MON_KEY -- the stash is indexed by this track now, see r5).
+;    While MON is off the stash is still written as long as MON_FADE is not 0,
+;    so the fade-out has a live key to fade from. Registers: a, b, x0, r0, r1,
+;    n1 only (the proven set above); r5 is reset by stock (`move r4,r5`).
+        move    x:>$420,b              ; b = MY track 0..7
+        asl     #1,b,b
+        move    b1,n1
+        move    #>@MONB@,r1
+        lua     (r1)+n1,r1             ; r1 -> MON_ON[my track]
         move    x:(r6+$e),b           ; (q1)
         asr     #$8,b,b
         move    b1,a                 ; (q3)
         and     #>$ff,a
         tst     a
-        beq     zz17                   ; MON off -> publish OFF, then join zz16
+        beq     zz17                   ; MON off
+        move    #1,b                   ; (q2) stores $10000, moncommit's exact match
+        move    b,y:(r1)               ; MON_ON = armed for this block
+        bra     zz27
+zz17:
+        move    #0,b
+        move    b,y:(r1)+              ; MON_ON = 0 ; r1 -> MON_FADE[my track]
+        move    y:(r1),a
+        tst     a
+        beq     zz16                   ; not fading out: no stash needed
+zz27:
         move    r5,r1
         move    #$20,n1
         lua     (r1)+n1,r1
@@ -628,38 +650,6 @@ zz10:
         move    x:(r0)+,x0
         move    x0,y:(r1)+
 zz15:
-; publish MON_ON[my track]=1 and MON_KEY[my track]=redirect track in ONE
-; address pass (r1 -> MON_ON, post-incremented to MON_KEY). Used to
-; recompute the redirect track fresh here rather than thread a live
-; register across the whole routine -- now threaded anyway via `r4`
-; (Session 75, see the word-budget note above `zz16`'s own check): `r4`
-; is free for the whole routine except its own final `move #$61,r4`
-; (every exit path does that AFTER this point, never before), so reading
-; it back here is safe and saves the 3-instruction re-derivation.
-        move    r4,a                   ; a = absolute key track 0..7 (kept until the end)
-        move    x:>$420,b              ; b = MY track 0..7
-        asl     #1,b,b
-        move    b1,n1
-        move    #>@MONB@,r1              ; MONB (MON_ON[my track], Session 115)
-        lua     (r1)+n1,r1
-        move    #1,b
-        move    b,y:(r1)+              ; MON_ON = 1 ; r1 -> MON_KEY[my track]
-        move    a,y:(r1)               ; MON_KEY[my track] = key track (still in a)
-        bra     zz16
-zz17:
-; MON off -> publish MON_ON[my track] = 0.  Shared with zz20 via `bsr zz18`
-; (zz18 is placed at the END of scdet, after zz20's own rts, specifically so
-; the ONE extra internal rts it introduces lands AFTER the rts
-; build_sidechain_compressor.py's sc_assemble() counts on to find moncommit's start --
-; that index was bumped rts[2]->rts[3] there to match. This used to be
-; duplicated inline instead (fear of disturbing that indexing), which cost
-; ~9 words per copy for a 1-word `jsr`; reclaimed to make room for the
-; moncommit MON_ON exact-match fix below (see moncommit's own header comment).
-; `bsr` (PC-relative, 2 words), not `jsr` (Session 76 continued): the SPRING
-; REVERB donor's cave_org sits past 0xfff, past dsp_asm's own absolute-jsr
-; range -- confirmed by direct test, `bsr` has no such limit since it's a
-; displacement, not an absolute address.
-        bsr     zz18
 zz16:
 ; SIDECHAIN3 split-detector-offset bug (found this session, investigating a
 ; real reported artifact -- an alternating loud/quiet pattern between
@@ -697,14 +687,16 @@ zz16:
         move    #$61,r4             ; --- displaced ---
         rts
 zz20:
-; KEY OFF -> publish MON_ON[my track] = 0 (no key selected, nothing to show)
+; KEY OFF -> publish MON_ON[my track] = 0 (no key selected, nothing to show).
+; moncommit then fades out from the last stash (at most 4 blocks of it).
+; `bsr` (PC-relative), not `jsr`: the cave sits past dsp_asm's short-jsr range.
         bsr     zz18
         move    #$61,r4             ; --- displaced ; r0 unchanged ---
         rts
 
-; shared by zz17/zz20 (see comment at zz17). Deliberately placed AFTER
-; scdet's other two rts (zz16's, zz20's) so it becomes the THIRD internal
-; rts, matching sc_assemble()'s updated rts[3] lookup for moncommit's start.
+; zz20's MON-off publish. Deliberately placed AFTER scdet's other two rts
+; (zz16's, zz20's) so it becomes the THIRD internal rts, matching
+; sc_assemble()'s rts[3] lookup for moncommit's start.
 zz18:
         move    x:>$420,a
         asl     #1,a,a
@@ -760,30 +752,107 @@ zz18:
 ; actually `$10000`, not `1`; matching it exactly by chance is not plausible
 ; for garbage in this value range (the dumped baseline's own garbage sits in
 ; the millions, Q23-audio-scale, nowhere near $10000 = 65536).
+;
+; MON DECLICK (2026-10-19): a linear crossfade instead of a hard swap.
+; MON_FADE[my track] (the word after MON_ON) counts 0..4 blocks; the mix
+; weight g ramps per SAMPLE PAIR, 1/64 per pair, so a full fade is 64 samples
+; (4 blocks, ~1.45 ms) and continuous across block boundaries:
+;   out = dry + g*(key - dry)        dry = X:0.. (this track), key = the stash
+; At 0 (dry) and 4 (key) the fast paths below are the old behaviour.
+; MON_ON is CONSUMED here (cleared after the read): scdet re-arms it every
+; block it runs with MON on, so when scdet stops running -- KEY to OFF, or
+; the effect changed away from COMPRESSOR -- the next block fades out. Before
+; this, a set MON_ON stayed set and replayed a frozen stash forever.
+; MON_FADE outside 0..4 (cold-RAM garbage) reads as 0.
+; Registers: a, b, x0, x1, y1, r1, n1, r3. func_00034f, called right after
+; the three stock instructions that follow this hook, loads x1, y1 and x0
+; itself and writes a and b before reading them (disassembled, both
+; payloads: A P:0x55a, B P:0x34f); r1/n1/r3 are reset by those three. r0 is
+; never touched. y0, r2 and n2 are NOT used (r2/n2 broke transport, S59).
+; mpy x0,y1 is the operand order stock uses there (true signed mpy).
 moncommit:
         move    x:>$206,r0           ; --- displaced --- (must survive untouched)
 ; Exported callable entry for a composed hook. The caller must have replayed
 ; the displaced x:$206 load first; this body preserves r0 for the stock
 ; dispatcher and returns after optionally replacing the committed audio.
+; It clobbers a, b, x0, x1, y1, r1, n1, r3.
 scmonbody:
         move    x:>$420,a             ; a = my track 0..7
         asl     #1,a,a
         move    a1,n1
         move    #>@MONB@,r1
         lua     (r1)+n1,r1            ; r1 -> MON_ON[my track]
-        move    y:(r1)+,b             ; b = MON_ON ; r1 now -> MON_KEY[my track]
+        move    y:(r1),b              ; b = MON_ON (exact $10000 = armed this block)
+        clr     a
+        move    a,y:(r1)+             ; consume ; r1 -> MON_FADE[my track]
+        move    y:(r1),a              ; a = fade position
+        tst     a
+        blt     mc20                  ; garbage -> 0
+        cmp     #>4,a
+        ble     mc21
+mc20:
+        clr     a
+mc21:
         cmp     #>$10000,b             ; (q2) exact match vs scdet's ON sentinel,
-        beq     mc09                   ; NOT "nonzero" -- see hazard note above.
-        rts                            ; no match (incl. garbage or real OFF=0) -> done.
-                                        ; (`bne` is not a valid dsp_asm mnemonic, so the
-                                        ; match case below jumps IN instead of skipping
-                                        ; OVER.)
-mc09:
-        move    y:(r1),b              ; b = MON_KEY 0..7 (still via r1, no r2/n2 needed)
-        asl     #6,b,b
-        move    b1,n1                 ; reuse n1 (stock resets it right after us anyway)
+        beq     mc22                   ; NOT "nonzero" -- see hazard note above.
+; -- MON off: fade out, or nothing --
+        tst     a
+        bne     mc23
+        move    a,y:(r1)              ; MON_FADE = 0 (also clears any garbage)
+        rts                            ; dry: the track's own audio, untouched
+mc23:
+        move    a,b
+        sub     #>1,b
+        move    b,y:(r1)              ; MON_FADE = one block further out
+        move    #>$fe0000,x1          ; step -1/64 per pair
+        bra     mc24
+; -- MON on: fade in, or the plain copy --
+mc22:
+        cmp     #>4,a
+        beq     mc25                  ; fully in -> plain copy
+        move    a,b
+        add     #>1,b
+        move    b,y:(r1)              ; MON_FADE = one block further in
+        move    #>$20000,x1           ; step +1/64 per pair
+mc24:
+        asl     #$15,a,a              ; a = position * 1/4 (4 -> +1.0, saturated below)
+        move    a,y1                  ; y1 = g at the start of this block
+        move    x:>$420,a
+        asl     #6,a,a
+        move    a1,n1
+        move    #>@KEYB1@,r1
+        lua     (r1)+n1,r1            ; r1 -> keybus[my track] gen 1 (the stash)
+        move    #0,r3
+        do      #<$10,>mc26
+        move    y1,a
+        add     x1,a
+        move    a,y1                  ; g += step (the move saturates at +1.0)
+        move    x:(r3),b              ; L: b = dry
+        move    y:(r1)+,a             ;    a = key
+        sub     b,a
+        asr     #1,a,a                ;    (key - dry)/2 fits 24 bits
+        move    a,x0
+        mpy     x0,y1,a
+        asl     #1,a,a                ;    g*(key - dry)
+        add     b,a
+        move    a,x:(r3)+
+        move    x:(r3),b              ; R: the same
+        move    y:(r1)+,a
+        sub     b,a
+        asr     #1,a,a
+        move    a,x0
+        mpy     x0,y1,a
+        asl     #1,a,a
+        add     b,a
+        move    a,x:(r3)+
+mc26:
+        rts
+mc25:
+        move    x:>$420,a
+        asl     #6,a,a
+        move    a1,n1                 ; reuse n1 (stock resets it right after us anyway)
         move    #>@KEYB1@,r1             ; reuse r1
-        lua     (r1)+n1,r1            ; r1 -> keybus[key] gen 1
+        lua     (r1)+n1,r1            ; r1 -> keybus[my track] gen 1
         move    #0,r3                  ; reuse r3 (stock resets it right after us anyway)
         do      #<$20,>mc11
         move    y:(r1)+,x0
