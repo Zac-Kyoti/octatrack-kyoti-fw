@@ -36742,3 +36742,11 @@ beside a live SC).
   browser/native comparison, proof suites, cycle re-derivation and pr:ready wait for it. The beta base (resident
   engine) needs `npm run octatrack:base … --write` with the beta flags. **Modwerk MiniVerb 0.2.3**
   (~/Documents/modwerk-mv, branch miniverb-0.2.3, 1 local commit): the same three lines; packages/evidence to come.
+- **2026-10-19 cont: #792 / #793 / #788 MERGED** (Sam took the WAVE proposal as is). #775 and #779 conflicted after
+  #797 (USB run-time settings) and #755 (MIDI loopback): both squashed and rebased onto `9ae811b3`. #797 changed
+  `Linked.include` to `(modules, remix)` -- VARISPEED's one-argument `_shared_source` adapted in octabam's wrapper as
+  Sam did for MUTE_MODES (no re-pin); #779's build_bus.py hunk takes the new call. #779: refhash 24/24, reach TESTS=1
+  green; #775: reach TESTS=1 green (one run was contaminated by the selftest's temp `xhfixture` module left by a
+  stopped run). Both MERGEABLE, pushed, descriptions updated. **BP303 octabam-form HW image `140C_OBBP2`** (sc-tail
+  out/OBBP2/: card .bin `f41b950f…`, syx `58d0baa1…`, MAIN OS `eb922e1e…` = OBBP1's, unchanged by the rebase) --
+  NOT flashed. #794 MINIVERB still waits on repeat98.
