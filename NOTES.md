@@ -36750,3 +36750,14 @@ beside a live SC).
   stopped run). Both MERGEABLE, pushed, descriptions updated. **BP303 octabam-form HW image `140C_OBBP2`** (sc-tail
   out/OBBP2/: card .bin `f41b950f…`, syx `58d0baa1…`, MAIN OS `eb922e1e…` = OBBP1's, unchanged by the rebase) --
   NOT flashed. #794 MINIVERB still waits on repeat98.
+- **2026-10-19: BLACKPYRAMIDS_303 MT35 (knobs kept across machine changes) -- BUILT, emulator ALL GOOD, FLASHED by the
+  user (19 Oct; no per-check results reported yet), pushed as WIP (not promoted: builder still pinned to 891e4fd0).** User report (OBBP2 on the unit; in every BP303 FINAL): T -> another machine -> back reset BLKPYRAMD's
+  knobs to the defaults (stock machines keep theirs). Cause: the knobs live in FLEX's bytes and nothing kept them on
+  leaving. Fix (control.c ot_assign / ot_setup_edit_row / ot_setup_value, machine.s ot_setup_edit6/draw6): on leaving,
+  the eleven knobs are parked in NEIGHBOR's twelve unused bytes ('P', PTCH..DEC | WAVE..VOL, ACC), put back on return
+  (no mark: defaults); SRC SETUP's BLKPYRAMD row on another machine's track shows/edits the parked knobs (it used to
+  write FLEX's SETUP bytes). verify_ot303.py: flex round trip expects the defaults parked + four park cases; ALL GOOD
+  on the standalone and the octabam form. Runtime 31,512 -> 32,364 B. Images (bp-park out/): standalone
+  `MT35/` mainos `d393da41…`, syx `78a14827…`, card .bin `ae0637dc…` (version 140C_BP303); octabam form `OBBP3/`
+  (#779 tree, submodule at the MT35 commit) card .bin `dd1fa61c…`, syx `71d6b394…`. Next: the user's check results,
+  promotion on their word, #779's pin moved (no new octabam PR: #779 is still open).
