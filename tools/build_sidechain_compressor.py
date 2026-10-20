@@ -322,26 +322,31 @@ def sc_assemble(tok, org):
                         "-pc", f"{org:x}", "-le"], capture_output=True, text=True).stdout
     if " dc " in d or "InvalidInstruction" in d or "mpysu" in d or "macsu" in d:
         sys.exit(f"cave did not round-trip clean:\n{d}")
-    # rts[0] = sctap's own rts (sctap/scdet boundary).
-    # scdet has THREE internal rts as of the zz18 shared OFF-publish sub
-    # (patch_sc_dsp3.asm, called via `jsr` from zz17 and zz20): rts[1] =
-    # zz16's (the KEY-present exit), rts[2] = zz20's (the KEY-OFF exit,
-    # unchanged position from before zz18 existed), rts[3] = zz18's own --
-    # placed deliberately AFTER zz20's in the source so it lands last and
-    # moncommit (HOOK 3, immediately following) starts right after it.
-    # Found via dsp_asm_util.find_rts() (disassembler-parsed instruction
-    # boundaries), NOT a raw word scan for 0x00000c -- that also matches a
-    # 2-word branch's own displacement operand (Session 76 continued yet
-    # again: a new branch with a displacement of exactly 12 silently
-    # mis-located moncommit by one rts index before this fix -- caught only
-    # because emu_sc_dsp3_moncommit.py failed after a full rebuild, not by
-    # this same round-trip check above, which only rejects invalid opcodes).
+    # and tools/dsp_xasm.py's operand-for-operand check: same words, or refuse
+    import dsp_xasm
+    try:
+        xw, _ = dsp_xasm.assemble((ROOT / "out/patch_sc_dsp3.asm").read_text(), org)
+    except dsp_xasm.AsmError as e:
+        sys.exit(f"dsp_xasm refused the cave: {e}")
+    if xw[:len(code)] != code:
+        sys.exit("dsp_xasm and dsp_asm disagree on the cave's words")
+    bad = dsp_asm_util.mnemonic_mismatches((ROOT / "out/patch_sc_dsp3.asm").read_text(), d)
+    if bad:
+        sys.exit("dsp_asm encoded instructions as something else:\n" +
+                 "\n".join(f"  #{i}: {s}  ->  {x}" for i, s, x in bad))
+    # The routines by name (dsp_asm's .sym lists every label), not by counting rts.
+    # The old rule still holds for sctap: scdet starts right after sctap's own rts.
     rts = dsp_asm_util.find_rts(d, org)
-    moncommit = org + rts[3] + 1
-    if syms.get("scmonbody") != moncommit + 2:
-        sys.exit(f"scmonbody is at {syms.get('scmonbody')!r}, expected the first word after "
+    for name in ("sctap", "scdet", "moncommit", "scmonbody"):
+        if name not in syms:
+            sys.exit(f"patch_sc_dsp3.asm has no `{name}` label")
+    if syms["sctap"] != org or syms["scdet"] != org + rts[0] + 1:
+        sys.exit("sctap must open the cave and scdet follow sctap's rts")
+    moncommit = syms["moncommit"]
+    if syms["scmonbody"] != moncommit + 2:
+        sys.exit(f"scmonbody is at {syms['scmonbody']!r}, expected the first word after "
                  f"moncommit's two-word displaced load at 0x{moncommit + 2:x}")
-    return words, org, org + rts[0] + 1, moncommit
+    return words, org, syms["scdet"], moncommit
 
 
 def dsp_module_fileoff(img, va, ln, p_addr):

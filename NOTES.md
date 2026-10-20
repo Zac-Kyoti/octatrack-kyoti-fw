@@ -36811,3 +36811,24 @@ keying the same track, MON on one: it hears its own KFLT/KGN; (6) transport star
 (the S59 class); (7) DARK/PLATE REV on T3/T7 still clean.
 **Not done:** octabam (shared asm: check-remix + pin move later), Modwerk (`resident_dsp.py` patches our MON consume
 text -- owner review; with the major version), KYOTI/BUG_SC3X re-pins (on promotion).
+
+## 2026-10-19 (`sc-declick`) — SIDECHAIN_COMPRESSOR declick-only test build (no key filters): BUILT, emulator-verified, NOT flashed
+
+The user asked for the pushed FINAL SIDECHAIN with only this session's MON bugfix, MON declick and
+KEY declick -- no key-filter machinery, no page-2 change, no major version. Branch `sc-declick`
+(worktree ../octatrack-kyoti-fw-sc-declick) starts at 7286615 (MON declick, flashed 48404ab5,
+all HW checks pass) and adds:
+- **KEY declick** (as in the major version, 0d3baee): r7+$2c = key in use, $2d = change
+  waiting; while MON_FADE != 0 a new KEY waits, MON is forced off, then the new key fades in.
+  No scinit hook: a key in use outside 0..8 (another effect's words after an FX change) is
+  replaced at once, and one inside 0..8 can at most cost a dip while MON_FADE != 0. So the
+  hook list stays FINAL's (sctap, scdet, moncommit), page 2 stays RMS · KEY KFLT KGAIN MON.
+- **Builder guards** from a30138c: dsp_xasm word-for-word cross-check, mnemonic check
+  (dsp_asm's acc-acc tfr/cmp mis-encodings), routines located by symbol. FINAL's own code
+  passes both (no mis-encoded instruction was shipping).
+- emu_sc_dsp3: KEY declick cases (wait / take / KEY->OFF / cold key in use); ALL GOOD.
+
+DSP cave 492 words (FINAL 384, MON declick 456, major version 695); ColdFire unchanged from
+FINAL. Still clashes with VARISPEED_EMUS's SC3_WORDS=388 reservation (as 456 did) -- no
+image has both. Image: out/OCTATRACK_OS1.40C_SC_DECLICK.syx (version 140C_SCDK1),
+syx 677c3a2c…, mainos 4bf06683…. WIP, not promoted, nothing pushed.

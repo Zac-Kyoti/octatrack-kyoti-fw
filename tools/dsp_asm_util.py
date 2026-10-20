@@ -35,3 +35,23 @@ def find_rts(dis_text, cave_org):
     """Return word-offsets (relative to cave_org) of every real standalone
     `rts` instruction in dsp56kDisassemble's -le text output."""
     return sorted(int(m.group(1), 16) - cave_org for m in _RTS_LINE.finditer(dis_text))
+
+
+def mnemonic_mismatches(asm_text, disasm_text):
+    """Instructions dsp_asm encoded as something else (2026-10-19: `tfr a,b` came back as
+    `rnd b`, `cmp b,a` as `maxm a,b`; the opcode round trip did not notice). Compares the
+    first word of every source instruction with the disassembly, in order. Returns
+    [(index, source, disassembly)]; an empty list is clean."""
+    import re
+    src = []
+    for line in asm_text.splitlines():
+        s = line.split(";")[0].strip()
+        if not s or s.endswith(":"):
+            continue
+        src.append(s)
+    dis = [re.sub(r"\s+", " ", l[8:].split(";")[0]).strip()
+           for l in disasm_text.splitlines() if re.match(r"^[0-9a-f]{6}: ", l)]
+    out = [(i, a, b) for i, (a, b) in enumerate(zip(src, dis)) if a.split()[0] != b.split()[0]]
+    if len(dis) < len(src):
+        out.append((len(dis), "(source continues)", "(disassembly ended)"))
+    return out

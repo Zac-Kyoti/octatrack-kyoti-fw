@@ -258,6 +258,11 @@ def base_mem(words, scdet, moncommit, patch_tail, xseed, yseed):
     # itself) -- centralized here instead of touching every call site.
     if S17 is not None and not any(sp == 1 and addr == S17 for sp, addr, w in (xseed or [])):
         mods.append([1, S17, [0]])
+    # the KEY declick's key in use (r7+$2c) and its flag ($2d): steady state on KEY 1 (the key
+    # most tests select) unless the caller seeds them
+    if S17 is not None and not any(sp == 1 and addr <= S17 + 0x15 < addr + len(w)
+                                   for sp, addr, w in (xseed or [])):
+        mods.append([1, S17 + 0x15, [1, 0]])
     m = SCRATCH / "sc3_iso.mem"
     save_mem(m, mods)
     return m
@@ -724,6 +729,33 @@ def main():
                    [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [0x10000, 4])])
     (pub,) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2)], P(key=0, mon=1), pokey=pk_sig, audio=0)
     check("KEY=0: MON_ON published OFF (even with MON=1)", pub == [0, 4], f"got={pub}")
+
+    # 6b. KEY declick (2026-10-19): while MON is audible a KEY change waits (old key runs,
+    # MON forced off this block); with MON silent it is taken at once
+    print("\nKEY declick (a KEY change waits for MON to fade out):")
+    SLOT2 = KB_BASE + 1 * KB_STRIDE
+    sig2 = [((s24(v) * 3) // 4) & 0xFFFFFF for v in sine(0x20, 7)]
+    pk2 = pk_sig + "," + ",".join(f"{SLOT2 + i:x}={sig2[i]:x}" for i in range(0x20))
+    KIN = r7 + 0x2c
+    ref = {}
+    for k in (1, 2):                    # each key, steady (in use, MON silent): the reference
+        mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20), (1, KIN, [k, 0])],
+                       [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [0, 0])])
+        (ref[k],) = run(mem, scdet, [('x', 0x40, 0x60)], P(key=k, mon=1), pokey=pk2, audio=0)
+    check("the two keys' outputs differ (the test can tell them apart)", ref[1] != ref[2])
+    for tag, kin, fade, key, x_exp, kin_exp, flag_exp, on_exp in (
+            ("MON audible, KEY 1 -> 2: waits", 1, 4, 2, ref[1], 1, 1, 0),
+            ("MON silent, KEY 1 -> 2: taken", 1, 0, 2, ref[2], 2, 0, 0x10000),
+            ("MON audible, KEY 1 -> OFF: old key fades out", 1, 4, 0, ref[1], 1, 1, 0),
+            ("cold key in use: taken at once", 0x123456, 4, 2, ref[2], 2, 0, 0x10000)):
+        mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20), (1, KIN, [kin, 0])],
+                       [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [0, fade])])
+        (x40, kf2, pub) = run(mem, scdet, [('x', 0x40, 0x60), ('x', KIN, KIN + 2),
+                                           ('y', MON_ADDR, MON_ADDR + 1)],
+                              P(key=key, mon=1), pokey=pk2, audio=0)
+        check(f"{tag:46s}", x40 == x_exp and kf2[0] == kin_exp and bool(kf2[1]) == bool(flag_exp)
+              and pub == [on_exp],
+              f"key in use/flag {kf2}, MON_ON {pub}, out {'ok' if x40 == x_exp else 'differs'}")
 
     # 7. moncommit: the MON crossfade (2026-10-19) ------------------------------------------
     print("\nmoncommit (MON declick: 64-sample linear crossfade, MON_ON consumed):")

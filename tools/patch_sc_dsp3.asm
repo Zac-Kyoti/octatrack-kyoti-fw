@@ -241,6 +241,41 @@ scdet:
         move    x:(r6+$d),b            ; (q1) KEY|KFLT word
         asr     #$10,b,b
         move    b1,a                  ; (q3) a = KEY 0..8, a0 clean
+; KEY DECLICK (2026-10-19): r7+$2c = the key in use. While MON is audible
+; (MON_FADE[my track] != 0) a new KEY waits: the old key keeps running and MON is forced off
+; this block (r7+$2d = 1), so MON fades out on the live old key; with MON_FADE at 0 the new
+; key is taken and MON fades back in -- a ~3 ms dip through the track's own sound instead of
+; a hard swap between two keys. A key in use outside 0..8 (cold memory, or another effect's
+; words after an FX change) is replaced at once; one inside 0..8 can only cost one dip,
+; and only while MON_FADE is not 0. r7+$2c/$2d: free while COMPRESSOR runs (the r7 canary,
+; 1366dc3, hardware 2026-10-19). Registers a, b, x0, r1, n1.
+        move    x:(r7+$2c),b          ; (q1) b = the key in use
+        move    a,x0
+        cmp     x0,b
+        beq     zz70                  ; unchanged
+        tst     b
+        blt     zz71
+        cmp     #>8,b
+        bgt     zz71                  ; not a key: take the new one
+        move    x:>$420,b
+        asl     #1,b,b
+        move    b1,n1
+        move    #>@MONB@,r1
+        lua     (r1)+n1,r1
+        lua     (r1+1),r1
+        move    y:(r1),b              ; MON_FADE[my track]
+        tst     b
+        beq     zz71                  ; MON not audible: take the new key now
+        move    x:(r7+$2c),b          ; (q1) keep the old key ...
+        move    b,a
+        move    #1,b                  ; (q2) $10000: only tested for non-zero
+        bra     zz72                  ; ... and force MON off
+zz71:
+        move    x0,x:(r7+$2c)         ; the new key is in use
+zz70:
+        clr     b
+zz72:
+        move    b,x:(r7+$2d)
         tst     a
         beq     zz20                   ; KEY OFF -> self-detect, skip all
         sub     #>1,a                   ; KEY 1..8 -> absolute track 0..7, FLAT --
@@ -626,6 +661,9 @@ zz10:
         move    b1,n1
         move    #>@MONB@,r1
         lua     (r1)+n1,r1             ; r1 -> MON_ON[my track]
+        move    x:(r7+$2d),b          ; (q1) a KEY change waiting: MON off this block
+        tst     b
+        bne     zz17
         move    x:(r6+$e),b           ; (q1)
         asr     #$8,b,b
         move    b1,a                 ; (q3)
