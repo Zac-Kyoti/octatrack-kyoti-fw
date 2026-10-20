@@ -257,11 +257,7 @@ scdet:
         blt     zz71
         cmp     #>8,b
         bgt     zz71                  ; not a key: take the new one
-        move    x:>$420,b
-        asl     #1,b,b
-        move    b1,n1
-        move    #>@MONB@,r1
-        lua     (r1)+n1,r1
+        bsr     zz18
         lua     (r1+1),r1
         move    y:(r1),b              ; MON_FADE[my track]
         tst     b
@@ -656,11 +652,7 @@ zz10:
 ;    While MON is off the stash is still written as long as MON_FADE is not 0,
 ;    so the fade-out has a live key to fade from. Registers: a, b, x0, r0, r1,
 ;    n1 only (the proven set above); r5 is reset by stock (`move r4,r5`).
-        move    x:>$420,b              ; b = MY track 0..7
-        asl     #1,b,b
-        move    b1,n1
-        move    #>@MONB@,r1
-        lua     (r1)+n1,r1             ; r1 -> MON_ON[my track]
+        bsr     zz18                   ; r1 -> MON_ON[my track]
         move    x:(r7+$2d),b          ; (q1) a KEY change waiting: MON off this block
         tst     b
         bne     zz17
@@ -727,22 +719,21 @@ zz16:
 zz20:
 ; KEY OFF -> publish MON_ON[my track] = 0 (no key selected, nothing to show).
 ; moncommit then fades out from the last stash (at most 4 blocks of it).
-; `bsr` (PC-relative), not `jsr`: the cave sits past dsp_asm's short-jsr range.
-        bsr     zz18
         move    #$61,r4             ; --- displaced ; r0 unchanged ---
-        rts
-
-; zz20's MON-off publish. Deliberately placed AFTER scdet's other two rts
-; (zz16's, zz20's) so it becomes the THIRD internal rts, matching
-; sc_assemble()'s rts[3] lookup for moncommit's start.
-zz18:
-        move    x:>$420,a
-        asl     #1,a,a
-        move    a1,n1
-        move    #>@MONB@,r1
-        lua     (r1)+n1,r1
+        bsr     zz18
         move    #0,b
         move    b,y:(r1)
+        rts
+
+; r1 -> MON_ON[my track]; uses b and n1. Shared by the KEY declick, the MON tail and zz20
+; (2026-10-19 word pass). `bsr` (PC-relative), not `jsr`: the cave sits past dsp_asm's
+; short-jsr range; and dsp_asm encodes no backward bsr, so this stays after its callers.
+zz18:
+        move    x:>$420,b
+        asl     #1,b,b
+        move    b1,n1
+        move    #>@MONB@,r1
+        lua     (r1)+n1,r1
         rts
 
 ; ---- HOOK 3 : dispatcher-level MON commit (replaces the old proc-end splice)
@@ -815,15 +806,18 @@ moncommit:
 ; dispatcher and returns after optionally replacing the committed audio.
 ; It clobbers a, b, x0, x1, y1, r1, n1, r3.
 scmonbody:
+; The stash pointer is computed once, past the dry exit (2026-10-19 word pass): this hook runs
+; for every track every block, and most of them leave there. r3 -> MON_ON/MON_FADE until the
+; fade position is written, then the dry pointer.
         move    x:>$420,a             ; a = my track 0..7
         asl     #1,a,a
         move    a1,n1
         move    #>@MONB@,r1
-        lua     (r1)+n1,r1            ; r1 -> MON_ON[my track]
-        move    y:(r1),b              ; b = MON_ON (exact $10000 = armed this block)
+        lua     (r1)+n1,r3            ; r3 -> MON_ON[my track]
+        move    y:(r3),b              ; b = MON_ON (exact $10000 = armed this block)
         clr     a
-        move    a,y:(r1)+             ; consume ; r1 -> MON_FADE[my track]
-        move    y:(r1),a              ; a = fade position
+        move    a,y:(r3)+             ; consume ; r3 -> MON_FADE[my track]
+        move    y:(r3),a              ; a = fade position
         tst     a
         blt     mc20                  ; garbage -> 0
         cmp     #>4,a
@@ -834,63 +828,49 @@ mc21:
         cmp     #>$10000,b             ; (q2) exact match vs scdet's ON sentinel,
         beq     mc22                   ; NOT "nonzero" -- see hazard note above.
 ; -- MON off: fade out, or nothing --
-        tst     a
-        bne     mc23
-        move    a,y:(r1)              ; MON_FADE = 0 (also clears any garbage)
-        rts                            ; dry: the track's own audio, untouched
-mc23:
-        move    a,b
-        sub     #>1,b
-        move    b,y:(r1)              ; MON_FADE = one block further out
         move    #>$fe0000,x1          ; step -1/64 per pair
-        bra     mc24
-; -- MON on: fade in, or the plain copy --
+        tst     a
+        bne     mc24
+        move    a,y:(r3)              ; MON_FADE = 0 (also clears any garbage)
+        rts                            ; dry: the track's own audio, untouched
 mc22:
-        cmp     #>4,a
-        beq     mc25                  ; fully in -> plain copy
-        move    a,b
-        add     #>1,b
-        move    b,y:(r1)              ; MON_FADE = one block further in
-        move    #>$20000,x1           ; step +1/64 per pair
+        move    #>$20000,x1           ; MON on: step +1/64 per pair
 mc24:
-        asl     #$15,a,a              ; a = position * 1/4 (4 -> +1.0, saturated below)
-        move    a,y1                  ; y1 = g at the start of this block
-        move    x:>$420,a
-        asl     #6,a,a
-        move    a1,n1
+        move    x:>$420,b
+        asl     #6,b,b
+        move    b1,n1
         move    #>@KEYB1@,r1
         lua     (r1)+n1,r1            ; r1 -> keybus[my track] gen 1 (the stash)
+        move    x1,b
+        asr     #$11,b,b              ; b = the step's sign, -1 or +1
+        add     a,b                   ; b = the next fade position
+        cmp     #>4,b
+        bgt     mc25                  ; MON on and fully in: plain copy, MON_FADE stays 4
+        move    b,y:(r3)              ; MON_FADE = one block further out / in
+        asl     #$15,a,a              ; a = position * 1/4 (4 -> +1.0, saturated below)
+        move    a,y1
         move    #0,r3
-        do      #<$10,>mc26
         move    y1,a
         add     x1,a
-        move    a,y1                  ; g += step (the move saturates at +1.0)
-        move    x:(r3),b              ; L: b = dry
-        move    y:(r1)+,a             ;    a = key
+        move    a,y1                  ; g for pair 0 (the move saturates at +1.0)
+        do      #<$10,>mc26
+        do      #<2,>mc27             ; L, then R (dsp_asm emits no `nop`, so the outer
+        move    x:(r3),b              ; loop's step comes last: two loops may not end on
+        move    y:(r1)+,a             ; one address)
         sub     b,a
-        asr     #1,a,a                ;    (key - dry)/2 fits 24 bits
+        asr     #1,a,a                ; (key - dry)/2 fits 24 bits
         move    a,x0
         mpy     x0,y1,a
-        asl     #1,a,a                ;    g*(key - dry)
+        asl     #1,a,a                ; g*(key - dry)
         add     b,a
         move    a,x:(r3)+
-        move    x:(r3),b              ; R: the same
-        move    y:(r1)+,a
-        sub     b,a
-        asr     #1,a,a
-        move    a,x0
-        mpy     x0,y1,a
-        asl     #1,a,a
-        add     b,a
-        move    a,x:(r3)+
+mc27:
+        move    y1,a
+        add     x1,a
+        move    a,y1                  ; g for the next pair
 mc26:
         rts
 mc25:
-        move    x:>$420,a
-        asl     #6,a,a
-        move    a1,n1                 ; reuse n1 (stock resets it right after us anyway)
-        move    #>@KEYB1@,r1             ; reuse r1
-        lua     (r1)+n1,r1            ; r1 -> keybus[my track] gen 1
         move    #0,r3                  ; reuse r3 (stock resets it right after us anyway)
         do      #<$20,>mc11
         move    y:(r1)+,x0

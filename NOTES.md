@@ -36832,3 +36832,17 @@ DSP cave 492 words (FINAL 384, MON declick 456, major version 695); ColdFire unc
 FINAL. Still clashes with VARISPEED_EMUS's SC3_WORDS=388 reservation (as 456 did) -- no
 image has both. Image: out/OCTATRACK_OS1.40C_SC_DECLICK.syx (version 140C_SCDK1),
 syx 677c3a2c…, mainos 4bf06683…. WIP, not promoted, nothing pushed.
+
+**Word pass (same day, user asked):** 492 -> 465 words. moncommit computes MON_ON's pointer
+once into r3 (r1 keeps the stash), the stash pointer once past the dry exit, the fade-in/out
+steps merged (next position = position + sign of the step; > 4 = MON on and fully in -> plain
+copy), and the L/R fade loop as a nested `do #2` (from the major version). scdet's three MON
+pointer lookups (KEY declick, MON tail, KEY-OFF publish) share one `bsr zz18`. Same registers
+as before (moncommit a b x0 x1 y1 r1 n1 r3; scdet a b x0 r1 n1). emu_sc_dsp3 ALL GOOD.
+Load (la_run, OTDEMO, COMPx8 keyed cross-core + DJEQx8, modelled cycles/sample per core loop,
+core 1 mean): FINAL 2528.8, 492-word 2540.6, first 463-word cut 2545.3 (stash pointer on the
+dry path: every track paid), 465-word 2543.3; MON on 2566.8 / 2578.8 / 2580.8 / 2582.3. The
+remaining +2.7 vs 492 is mostly the MON tail's `bsr zz18` (inlining it: +5 words). Image
+140C_SCDK2: out/OCTATRACK_OS1.40C_SC_DECLICK.syx c86f596a…, mainos 462798bd…; NOT flashed.
+The same moncommit and scdet changes apply to the major version (its moncommit already has
+the nested loop): about -24 words there, not applied.
