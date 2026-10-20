@@ -854,9 +854,9 @@ mc24:
         add     x1,a
         move    a,y1                  ; g for pair 0 (the move saturates at +1.0)
         do      #<$10,>mc26
-        do      #<2,>mc27             ; L, then R (dsp_asm emits no `nop`, so the outer
-        move    x:(r3),b              ; loop's step comes last: two loops may not end on
-        move    y:(r1)+,a             ; one address)
+        do      #<2,>mc27             ; L, then R (the outer loop's step comes last,
+        move    x:(r3),b              ; so the two loops never end on one address; a
+        move    y:(r1)+,a             ; `nop` there would cost a cycle a pair)
         sub     b,a
         asr     #1,a,a                ; (key - dry)/2 fits 24 bits
         move    a,x0

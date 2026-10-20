@@ -36846,3 +36846,6 @@ remaining +2.7 vs 492 is mostly the MON tail's `bsr zz18` (inlining it: +5 words
 140C_SCDK2: out/OCTATRACK_OS1.40C_SC_DECLICK.syx c86f596a…, mainos 462798bd…; NOT flashed.
 The same moncommit and scdet changes apply to the major version (its moncommit already has
 the nested loop): about -24 words there, not applied.
+
+
+**2026-10-19, octabam issue sambanks/octabam#815 posted** (the Sam list, re-verified on main 8250be0c): MIDI SCALES/LOOPBACK/PART STATE one-arg `include` after #797; WAVE LOAD `meter.s:91` bne.s out of range (WAVE_LOAD block); TEMPO BUS duplicate `NAMES_ff` with no server engines; DSP.md/MODULES.md r7 table (FX1 $6100+$300k, FX2 $6200+$300k); dsp_asm label-prefix substitution (`>endb` with `end:` defined -> `$102b`, silently; both our vendored copy and octabam's); heads-up on scmonbody x1/y1, r7 state, section size. CORRECTION: dsp_asm DOES emit `nop` (000000) -- the earlier "no nop" note was wrong; the comment at the MON fade loop now just states the loop-end rule. Images unchanged.
