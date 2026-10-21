@@ -36849,3 +36849,19 @@ the nested loop): about -24 words there, not applied.
 
 
 **2026-10-19, octabam issue sambanks/octabam#815 posted** (the Sam list, re-verified on main 8250be0c): MIDI SCALES/LOOPBACK/PART STATE one-arg `include` after #797; WAVE LOAD `meter.s:91` bne.s out of range (WAVE_LOAD block); TEMPO BUS duplicate `NAMES_ff` with no server engines; DSP.md/MODULES.md r7 table (FX1 $6100+$300k, FX2 $6200+$300k); dsp_asm label-prefix substitution (`>endb` with `end:` defined -> `$102b`, silently; both our vendored copy and octabam's); heads-up on scmonbody x1/y1, r7 state, section size. CORRECTION: dsp_asm DOES emit `nop` (000000) -- the earlier "no nop" note was wrong; the comment at the MON fade loop now just states the loop-end rule. Images unchanged.
+
+## 2026-10-20 (`sc-declick`) — SIDECHAIN_COMPRESSOR MON + KEY declick PROMOTED FINAL (flashed 140C_SCDK2)
+
+The user flashed 140C_SCDK2 (syx c86f596a…) and promoted it. FINAL pins:
+- `build_sidechain_compressor.py` mainos `462798bdda90083643e0f9f674d5b125661c21bd75e68361168469d619e3d2d7`
+  (= the flashed image's MAIN OS)
+- Bugbuild `mainos_sidechain_compressor_batch_bugfixes.bin` `3fc9a7ec20073ceac3eb588823ef06e797a13f12bdac7b5b9f42e596df45203f` (BUG_SC3X)
+- KYOTI V1.5 `mainos_kyoti_v1.5.bin` `70bfb8af4702608a5ccaab12fdc05c480140b7e9aa12c65b76890e80d3dc333f`
+  (version name unchanged: 'KYOTI V1.5'; syx 275c60c3…, card .bin 0eb6baa8…). Diff vs the
+  previous V1.5 (8ec9997e…): only SIDECHAIN's DSP, on both payloads -- 397 cave words from
+  scdet's KEY declick on, and the moncommit hook's bsr displacement. KYOTI V1.5 with this SC
+  was not flashed itself.
+Every other Bugbuild re-sealed unchanged in the same run. emu_sc_dsp3 ALL GOOD, also
+`--layout octabam`. README, the octabam module's README and manifest docstring describe the
+declick (hardware: standalone; octabam form not flashed). Previous FINAL rebuildable from tag
+`ref/sidechain-compressor-2026-10-16` (5bab16e).

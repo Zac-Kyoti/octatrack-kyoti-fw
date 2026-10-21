@@ -9,7 +9,8 @@
 Hardware-confirmed in this octabam form (the author's MKI, 2026-10-04; see MEASURED). The
 2026-10-15 one-pass tap is hardware-confirmed in the standalone image (2026-10-16); in this
 layout it leaves Y and the shared window word for word as the code before it did
-(tools/emu_sc_sctap.py --layout octabam --ref 8b2e3c9).
+(tools/emu_sc_sctap.py --layout octabam --ref 8b2e3c9). The 2026-10-20 MON and KEY declick
+is hardware-confirmed in the standalone image (2026-10-20), not yet in this form.
 
 COLDFIRE. One ROM unit, sc_cf (tools/patch_sidechain.s, 338 B): KEY's and KFLT's
 formatters, KEY's list widget, and sc_norm, reached by a `jsr` detour at the first
@@ -29,9 +30,12 @@ addresses on the two payloads:
     sctap      dispatcher, every track every block: publish the track's audio to this
                core's keybus (core-private Y) and to the cross-core window
     scdet      COMPRESSOR proc+0: replace the detector input with the KEY track's audio,
-               through KGN and KFLT; stash it for MON
+               through KGN and KFLT; stash it for MON. While MON is audible, a new KEY
+               waits until MON has faded out (state at COMPRESSOR's r7+$2c/$2d, words
+               stock COMPRESSOR leaves free)
     moncommit  dispatcher, per-track commit: with MON on, the stashed key replaces the
-               track's output
+               track's output, crossfading over 64 samples either way. Registers a, b,
+               x0, x1, y1, r1, n1, r3 (`scmonbody`, for a composed caller)
 The per-core values (own and foreign core base, the window addresses, the branch
 sense) come from DspSection.subst; the 16 + 32 table words are one ptable, read at the
 KEY GAIN site through the source's single base literal and at the KEY FLT site as

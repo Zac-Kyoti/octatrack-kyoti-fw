@@ -16,7 +16,8 @@ V1.5 vs V1.4 (FINAL 2026-10-16; it replaces V1.4, which still builds from 19348d
   its builder runs unchanged.
 - RELOAD_FROM_PROJECT moves to DRAM again (as in V1.2-V1.3, hardware-confirmed there): key-handler
   and sys-task code, carried by the loader (tools/dram/), one 6 KB arena page.
-- SIDECHAIN_COMPRESSOR is the 2026-10-16 FINAL build (keybus Y:$7e00, one-pass sctap).
+- SIDECHAIN_COMPRESSOR is the 2026-10-20 FINAL build (keybus Y:$7e00, one-pass sctap, MON and
+  KEY declick).
 SPRING REVERB is still given up by SIDE-CHAIN alone.
 
 V1.4 vs V1.3: V1.2's earlier varispeed module is removed (2026-10-13; VARISPEED and

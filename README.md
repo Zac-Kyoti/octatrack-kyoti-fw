@@ -102,7 +102,8 @@ An external key input for the stock DynamiX **COMPRESSOR**, on the effect's page
 - `KEY` — which of the eight audio tracks drives the compression, even while it is muted
 - `KGN` — trims the key signal
 - `KFLT` — filters the key: below centre low-pass, above centre high-pass, centre off
-- `MON` — auditions the filtered key
+- `MON` — auditions the filtered key; switching it, or changing `KEY` while it is on,
+  fades instead of clicking
 
 The DSP space comes from **SPRING REVERB**, which leaves the FX2 list; a project that
 still uses it loads it as NONE.

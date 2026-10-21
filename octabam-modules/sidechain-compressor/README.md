@@ -8,7 +8,7 @@ detector. Four controls join RMS on page 2:
 | **KEY** | OFF (stock: the track's own signal), or T1–T8 |
 | **KFLT** | the key's filter: 64 bypass, below low-pass, above high-pass |
 | **KGN** | the key's gain, about −24 to +24 dB; 64 is unity |
-| **MON** | ON: hear the processed key on this track instead (audition) |
+| **MON** | ON: hear the processed key on this track instead (audition); switching it, or changing KEY while it is on, fades instead of clicking |
 
 **Hardware-confirmed in this octabam form** (the author's MKI, 2026-10-04, see Measured).
 The one-pass tap (15 Oct 2026, below) is hardware-confirmed in the standalone image (the
@@ -34,8 +34,8 @@ leaves its dispatch entry as it is, and the module's DSP code runs only from thr
 | hook | payload A | payload B | what it does |
 |---|---|---|---|
 | `sctap` | `P:0x004a7` | `P:0x0029c` | dispatcher, every track, every block: publish the track's audio to this core's keybus and to the cross-core window |
-| `scdet` | `P:0x01ab1` | `P:0x01871` | COMPRESSOR proc+0: the detector reads the KEY track through KGN and KFLT; the result is stashed for MON |
-| `moncommit` | `P:0x0050e` | `P:0x00303` | dispatcher, per-track commit: with MON on, the stashed key replaces the track's output |
+| `scdet` | `P:0x01ab1` | `P:0x01871` | COMPRESSOR proc+0: the detector reads the KEY track through KGN and KFLT; the result is stashed for MON. While MON is audible, a new KEY waits for MON to fade out |
+| `moncommit` | `P:0x0050e` | `P:0x00303` | dispatcher, per-track commit: with MON on, the stashed key replaces the track's output, with a 64-sample crossfade either way |
 
 `moncommit` replays the displaced `move x:>$206,r0` before entering
 `scmonbody`. A composed dispatcher hook may call `scmonbody` after replaying
@@ -150,6 +150,13 @@ the window and loads the next word. `r6` is free there because the displaced
     the mix is sample-identical to the promoted build over the run's common
     591,712 frames. `--dsp-watch` shows `sctap` writing Y:`$7e00`/`$7f00` with the values
     it used to write at `$800`/`$900`, and nothing writes `$800` any more.
+- The 20 Oct 2026 MON and KEY declick: on hardware in the standalone image (the author's
+  MKI, 140C_SCDK2); this octabam form not flashed. `tools/emu_sc_dsp3.py` ALL GOOD, also
+  with `--layout octabam`: the crossfade bit-exact against its model, MON consumed every
+  block (an effect changed with MON on fades out instead of replaying a frozen stash), and a
+  KEY change held while MON fades. The KEY declick keeps its state at COMPRESSOR's
+  r7+$2c/$2d (free while COMPRESSOR runs: an r7 canary, emulator and hardware). `scmonbody`
+  now also uses x1 and y1 (a, b, x0, x1, y1, r1, n1, r3).
 - Before that, on the standalone image and the KYOTI V1.0 combined image: KEY ducking,
   MON, a muted KEY with MUTE_MODES (Session 117).
 
