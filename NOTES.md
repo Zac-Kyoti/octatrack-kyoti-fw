@@ -36865,3 +36865,17 @@ Every other Bugbuild re-sealed unchanged in the same run. emu_sc_dsp3 ALL GOOD, 
 `--layout octabam`. README, the octabam module's README and manifest docstring describe the
 declick (hardware: standalone; octabam form not flashed). Previous FINAL rebuildable from tag
 `ref/sidechain-compressor-2026-10-16` (5bab16e).
+
+**2026-10-20 (cont.)** octabam: Sam closed #815 with #826 (+ #820 for the MIDI modules). Pin PR
+**sambanks/octabam#827** (fork branch sidechain-declick-pin, head 21127620, base main 930201bb):
+SC mount 8e00275 -> 8e3f638 + THIRD_PARTY row; make docs no changes, verify-docs 0 problems,
+reach all gates, check-remix test/sidechain-compressor + test/kyoti-mute-sidechain +
+octabam-inserts pass. Pairwise survey at 465 words: NEW conflicts CHARACTER (SPRING+PLATE
+remixes: largest opening 406) and RESONATOR (SPRING-only: 465+373 > 820); CF METER, EUCLID,
+TRANSIENT place. Octabam-form images (not flashed), out/octabam_sc_declick/: OCTABAM21 =
+test/sidechain-compressor (.bin bb3df73a…, syx a48d8f59…), OCTABAM22 = test/kyoti-mute-sidechain
+(.bin ea584d03…, syx 1d790926…). Local main checkout re-synced to FINAL: RELOAD/VARISPEED/
+VARISPEED_EMUS standalones + Bugbuilds rebuilt (all seal), MIDI_PLAYS_FREE_FIX wrapped,
+REPITCH_REPEAT98_KYOTI and KYOTI V1.0-V1.3 outputs removed; BLACKPYRAMIDS_303 left alone (its
+session's). Modwerk: resident_dsp.py's REVIEWED SC entry (pinned asm SHA + MON-consume patches)
+no longer applies -> SC 0.1.3 needs an owner-reviewed resident change; waits for #827.
