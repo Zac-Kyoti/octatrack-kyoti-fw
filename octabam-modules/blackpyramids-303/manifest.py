@@ -1,27 +1,28 @@
-"""BLACKPYRAMIDS_303 -- a TB-303 voice as a track machine, shown as BLKPYRAMD: Robin Schmidt's
-Open303 algorithm on the DSP56300, one voice per DSP core (T1-T4, T5-T8), played by the OT's own
-sequencer (trigs = notes, p-locked PTCH = melody, ACC = accent, slide trigs = slides, trigless
-trigs/locks = ties), live from the track key, chromatic keys and MIDI, upstream of stock AMP, FX1
-and FX2.
+"""BLACKPYRAMIDS_303 -- a TB-303 voice as a track machine, shown as BLKPYRAMD: built on Robin Schmidt's
+Open303 algorithm and recalibrated on the TB-303's own circuit, on the DSP56300 (24-bit fixed point, the filter
+4x oversampled at 176.4 kHz), one voice per DSP core (T1-T4, T5-T8), played by the OT's own sequencer (trigs =
+notes, p-locked PTCH = melody, ACC = accent, slide trigs = slides, trigless trigs/locks = ties), live from the
+track key, chromatic keys and MIDI, upstream of stock AMP, FX1 and FX2.
 
-CREDIT. The voice is Open303 (Robin Schmidt, MIT). The machine registration follows repeat98's
-ANALOG BD for octabam (MIT): the same chooser and SRC SETUP seams, the FLEX-plus-signature track,
-SPRING REV's P words with DARK REV's helper moved, the source seam. The design, the voicing (filter,
-bass under resonance, declicking, drive and saturation, by ear), the sequencer and live-play
-plumbing and the hardware testing are Zac Kyoti's. Full attribution: reference/BLACKPYRAMIDS_303.md
-section 5 in Zac-Kyoti/octatrack-kyoti-fw.
+CREDIT. The filter, oscillator and envelope algorithms are Open303's (Robin Schmidt, MIT); since 2026-10-21 the
+voice is recalibrated on the TB-303's circuit (Roland's service notes, the x0xb0x schematics, Robin Whittle's
+notes) and fitted against Din Sync's recordings of a real TB-303 (measurement only). The machine registration
+follows repeat98's ANALOG BD for octabam (MIT): the same chooser and SRC SETUP seams, the FLEX-plus-signature
+track, SPRING REV's P words with DARK REV's helper moved, the source seam. The design, the calibration and
+voicing, the sequencer and live-play plumbing and the hardware testing are Zac Kyoti's. What is Open303's and what
+is new, and full attribution: reference/BLACKPYRAMIDS_303.md in Zac-Kyoti/octatrack-kyoti-fw.
 
 STORAGE. The track is a FLEX track with a signature ('O','T',1) in NEIGHBOR bytes stock never uses,
 so a stock OS opens the project with the track as FLEX; FLEX's own values are kept in NEIGHBOR's
 unused bytes while the track is a BLKPYRAMD and put back when it leaves, and the machine's own
 knobs are kept there while the track is another machine, so it comes back as it was left.
 
-COLDFIRE. One DRAM unit, bp_runtime (~32 KB): tools/ot303/cf/{machine.s,control.c,record.c,
-params.c} and the voice's Y table, generated into one GNU-as unit by tools/ot303/octabam_module.py
-(the C as `m68k-elf-gcc -S` output, libgcc's __muldi3 as words). Its `reference` is the standalone
-image's runtime: linked alone at 0x40a955e0 it is those bytes, sha256 8c634a1e..., for -mcpu=5407
-and 54455 alike (the generator refuses to write it otherwise). 44 detours, 7 pokes and the FLEX
-renderer slot (0x400d6438 -> ot_render), every one the standalone builder's
+COLDFIRE. One DRAM unit, bp_runtime (~39 KB): tools/ot303/cf/{machine.s,control.c,record.c,
+params.c} with the voice's tables (body_tables.h) and Y table, generated into one GNU-as unit by
+tools/ot303/octabam_module.py (the C as `m68k-elf-gcc -S` output, libgcc's __muldi3 as words). Its
+`reference` is the standalone image's runtime: linked alone at 0x40a955e0 it is those bytes, sha256
+2c430200..., for -mcpu=5407 and 54455 alike (the generator refuses to write it otherwise). The detours,
+pokes and the FLEX renderer slot (0x400d6438 -> ot_render) are the standalone builder's
 (tools/build_blackpyramids_303.py).
 
 DSP. bp_image.py, octabam's DSP-source integrate step (Module.dsp_source): the voice over SPRING REV's
@@ -34,10 +35,9 @@ the ColdFire record, never part of an upload.
 A REMIX WITH THIS MODULE gives up SPRING REV (the voice is its code) and carries no other DSP
 module and no ANALOG BD (each owns the source seam, SPRING's words or DSP memory the voice uses).
 
-MEASURED. The standalone image (140C_BP303, mainos 3624a1e7...) on the author's MKI, 2026-10-14:
-everything works -- the voice, the grid, live play, chromatic with PAGE, FUNC + PTCH octaves.
-This octabam form: the runtime and both DSP payloads are the standalone's bytes; flashed on the
-author's MKI 2026-10-19 with the knob-keeping fix (FINAL 19 Oct, mainos d393da41...): all checks pass.
+MEASURED. The standalone image of this voice (FINAL 21 Oct 2026, mainos ecc85887...) on the author's MKI:
+all good. This octabam form: the runtime and both DSP payloads are the standalone's bytes; not flashed in this
+form (the previous voice's octabam form was, 19 Oct 2026: all checks pass).
 """
 
 import os
@@ -51,7 +51,7 @@ _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 H = bytes.fromhex
 
 RUNTIME_AT = 0x40A955E0        # the standalone image's DRAM reserve (tools/ot303/dram.py RESERVE)
-RUNTIME_SHA256 = "8c634a1eb638eec7b7054163ce79fe328d275e02acf615bfd8c6060a810cf6cf"
+RUNTIME_SHA256 = "2c430200e84d545404f4e9b64aab8bf5fc277b6bcb209b7650be6bd59b3f34e3"
 
 DETOURS = (
     Detour(0x400334D8, H("2f02222f0008"), "bp_runtime", "ot_machine_name", "chooser row 5's name"),

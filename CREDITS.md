@@ -167,12 +167,22 @@ too, and has its own section above.)
 
 ## BLACKPYRAMIDS_303 — the TB-303 machine
 
-Full attribution and every design decision: [`reference/BLACKPYRAMIDS_303.md`](reference/BLACKPYRAMIDS_303.md) §5.
+Full attribution, what is Open303's and what is new, and every design decision:
+[`reference/BLACKPYRAMIDS_303.md`](reference/BLACKPYRAMIDS_303.md) §5 and its table "What is Open303's, and what is new".
 
 - **[RobinSchmidt/Open303](https://github.com/RobinSchmidt/Open303)** — © 2009 Robin Schmidt, MIT.
-  The voice is Open303's TB_303 algorithm ported to the DSP56300: the oscillator blend and square
-  shaper, the TeeBee ladder and its fitted coefficients, the envelopes, accent, slide, pre/post
-  voicing and the knob formulas. Licence kept in `tools/ot303/LICENSE.Open303.txt`.
+  The voice's algorithms, ported to the DSP56300: the oscillator blend and square shaper, the TeeBee
+  ladder and its fitted coefficients, the envelopes, accent, slide, the voicing filters' structure and
+  the knob formulas. Since 2026-10-21 many of the values they run with are the TB-303 circuit's or fitted
+  against a real 303's recordings. Licence kept in `tools/ot303/LICENSE.Open303.txt`.
+- **The TB-303's circuit** — Roland's TB-303 service notes and the x0xb0x schematics: the couplings
+  around the filter, the accent sweep circuit and its time constants, the VCA and accent decays, the
+  slide RC. Values read from them; no schematic reproduced.
+- **Robin Whittle** — the Devil Fish notes and "TB-303 unique" pages: the accent sweep circuit, the gate
+  (3.5 of 6 clocks), the slide.
+- **Din Sync** — *TB-303 reference recordings for x0xb0x*
+  ([dinsync.info](http://www.dinsync.info/2010/02/tb-303-reference-recordings-for-x0xb0x.html)): the
+  calibration target. Measurement only; the recordings are not in this repository.
 - **[midilab/jc303](https://github.com/midilab/jc303)** — GPLv3, Open303 in JUCE. Reference only, no
   code: its soft attack, movable feedback high-pass, square drive and overdrive suggested
   candidates that were then A/B-tested by ear.
@@ -182,20 +192,26 @@ Full attribution and every design decision: [`reference/BLACKPYRAMIDS_303.md`](r
   (a sixth machine row stored as FLEX plus a signature) and the per-track source seam,
   ported. **SYNTH** (Tim Hastie) was studied for the FLEX-renderer approach.
 - **Research consulted, no code:** Vadim Zavalishin, *The Art of VA Filter Design*; Andy Sloane's
-  x0xb0x measurements ([a1k0n/303](https://github.com/a1k0n/303)); Robin Whittle's Devil Fish notes.
+  x0xb0x measurements ([a1k0n/303](https://github.com/a1k0n/303)); Marko Brajković's OCTA303 (MIT,
+  [braikomarko-hub/acidtrack-modules](https://github.com/braikomarko-hub/acidtrack-modules)), studied as a
+  reference during the recalibration, with no code, tables or values taken from it.
 - **Zac Kyoti** — the concept and the sonic direction:
   - **filter voicing** (the linear ladder, the 16 kHz top);
-  - **body under resonance** (the 350 Hz feedback high-pass);
+  - **body under resonance** (the 350 Hz feedback high-pass, then in the recalibration the circuit's
+    55 Hz loop);
   - **declick and edge tuning** (soft attack and its fade with RES, the 2 ms release, the 1 ms
-    glide on lock jumps);
-  - **drive and saturation** (one output soft clip, +2.5 dB by default and up to +4.5 dB on
-    VOL's top, nothing inside the filter);
+    glide on lock jumps, the click-free VOL crossing);
+  - **drive and saturation** (one output soft clip on VOL's top half, its range chosen by ear and
+    raised 3 dB in the recalibration; nothing inside the filter);
   - **the "liquid" / "creamy" trade-offs**;
-  - **the free-running note start.**
+  - **the free-running note start;**
+  - **the recalibration** (2026-10-21): its goals, the circuit and the real 303 as the reference, every
+    behaviour built before judging the whole, and each choice by ear over ten rounds, with the knob
+    philosophy (the real 303's ranges, even spacing, no dead travel, one octave of CUT beyond).
 
-  All of these were tuned by ear over thirteen blind listening rounds. Zac Kyoti also designed the
-  grid mapping and every control range, and tested on an MKI. The implementation was written with
-  AI assistance (Claude) under the author's direction.
+  All of these were tuned by ear over seventeen blind listening rounds and ten more for the
+  recalibration. Zac Kyoti also designed the grid mapping and every control range, and tested on an
+  MKI. The implementation was written with AI assistance (Claude) under the author's direction.
 
 ## Community reverse-engineering & documentation
 

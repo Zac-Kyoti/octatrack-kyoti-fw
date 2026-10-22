@@ -114,18 +114,23 @@ still uses it loads it as NONE.
 
 ### BLACKPYRAMIDS_303
 
-A TB-303 voice as a track machine, shown as **BLKPYRAMD**: the sixth row of a track's machine
-list (double-tap the track, or `[FUNC]` + `[SRC]` → MACHINE). One per DSP core: one on T1–T4,
-one on T5–T8.
+A TB-303 voice as a track machine, shown as **BLKPYRAMD**, running on the Octatrack's DSP in 24-bit fixed
+point with its filter 4× oversampled at 176.4 kHz. Built on Open303 and recalibrated on the TB-303's own
+circuit against recordings of a real 303. It is the sixth row of a track's machine list (double-tap the
+track, or `[FUNC]` + `[SRC]` → MACHINE). One per DSP core: one on T1–T4, one on T5–T8.
 
 - **SRC:** `PTCH` (C0–C8, a semitone a step, shown as note names; `FUNC` + turn or push + turn
-  steps by octaves, on every held trig too) · `CUT` · `RES` · `ENV` · `DEC` (50 ms–2 s) · `ACC`.
-  **SETUP:** `WAVE` (saw → square, at equal loudness) · `TUNE` · `SLID` (slide time) ·
-  `GATE` (note length) · `VOL` (clean up to 64, driven above; the default adds +2.5 dB).
+  steps by octaves, on every held trig too) · `CUT` (0–100 the real 303's whole range, evenly; 101–127
+  an octave beyond, where the top of `RES` is eased) · `RES` · `ENV` · `DEC` (50 ms–2 s) · `ACC`.
+  `RES`, `ENV` and `ACC` cover the real 303's range; `RES` and `ACC` are spaced so every step does as much.
+  **SETUP:** `WAVE` (saw → square, at equal loudness) · `TUNE` · `SLID` (slide time; default the 303's) ·
+  `GATE` (note length; default the 303's) · `VOL` (clean up to 64, driven above, rising smoothly; the
+  default 99 adds about +5 dB).
 - **Notes:** each trig plays a note with the knobs at that step; p-lock `PTCH` for a melody.
 - **Accent:** p-lock `ACC` on the steps to accent, as a 303 marks them; the `ACC` knob scales
-  every accent at once (127 plays the locks as set, 0 none; default 100). A note without an `ACC`
-  lock is never accented. A MIDI note with velocity above 100 is accented.
+  every accent at once (127 plays the locks as set, 0 none; default 100). Accents in a row stack into the
+  303's rising sweep. A note without an `ACC` lock is never accented. A MIDI note with velocity above 100
+  is accented.
 - **Slide:** an OT slide trig glides into its note from the previous one, without a retrigger.
 - **Ties:** trigless locks and/or trigless trigs right after a note hold it. A trigless trig
   still resets LFOs and FX envelopes as on stock, so a trigless trig after a note also ties it.
@@ -141,12 +146,13 @@ one on T5–T8.
 - SPRING REVERB is removed: its DSP space holds the voice.
 - On a stock OS, the track opens as a FLEX track.
 
-**Credits:** the voice is an adaptation of [Open303](https://github.com/RobinSchmidt/Open303)
-(MIT) by Robin Schmidt. The machine registration follows repeat98's ANALOG BD for octabam. The
-Octatrack port, design and voicing are by Zac Kyoti, tuned by ear: filter, bass under
-resonance, declicking, drive and saturation. So is the hardware testing. The design, every
-voicing decision and full attribution: [`reference/BLACKPYRAMIDS_303.md`](reference/BLACKPYRAMIDS_303.md) and
-[`CREDITS.md`](CREDITS.md).
+**Credits:** built on [Open303](https://github.com/RobinSchmidt/Open303) (MIT) by Robin Schmidt: its
+filter, oscillator and envelope algorithms. The recalibration takes its values from the TB-303's circuit
+(Roland's service notes, the x0xb0x schematics, Robin Whittle's notes) and Din Sync's recordings of a real
+TB-303. The machine registration follows repeat98's ANALOG BD for octabam. The Octatrack port, design,
+calibration and voicing are by Zac Kyoti, every choice made by ear, as is the hardware testing. What is
+Open303's and what is new, every voicing decision and full attribution:
+[`reference/BLACKPYRAMIDS_303.md`](reference/BLACKPYRAMIDS_303.md) and [`CREDITS.md`](CREDITS.md).
 
 **Hardware:** confirmed.\
 **Final build:** [`tools/build_blackpyramids_303.py`](tools/build_blackpyramids_303.py) →

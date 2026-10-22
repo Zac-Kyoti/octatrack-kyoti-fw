@@ -36879,3 +36879,42 @@ VARISPEED_EMUS standalones + Bugbuilds rebuilt (all seal), MIDI_PLAYS_FREE_FIX w
 REPITCH_REPEAT98_KYOTI and KYOTI V1.0-V1.3 outputs removed; BLACKPYRAMIDS_303 left alone (its
 session's). Modwerk: resident_dsp.py's REVIEWED SC entry (pinned asm SHA + MON-consume patches)
 no longer applies -> SC 0.1.3 needs an owner-reviewed resident change; waits for #827.
+
+## 2026-10-20 / 21 (`bp-body`) — BLACKPYRAMIDS_303: the voice recalibrated on the TB-303's circuit, promoted FINAL
+
+- **Why:** the author wanted the voice's clarity and articulation with a real 303's body, low-mid weight, rubber,
+  squelch and chirp, none of the whistle, excess sub or lost low-note definition, and every behaviour built
+  before the whole was judged. Full record: `reference/handoffs/OT303_VOICE_CALIBRATION.md`; what is Open303's
+  and what is new: `reference/BLACKPYRAMIDS_303.md` (new table at the top). Tools: `tools/ot303/body/`.
+- **Yardstick:** Din Sync's 400 real-TB-303 notes (measurement only, `out/dinsync/raw/`), `realref2.py`
+  (third-octave bands x windows from 15 ms, 40 dB floor, global gain), knob laws fitted per version; the 303
+  against itself 1.07 dB. MT35 5.86 dB.
+- **The circuit** (service notes, x0xb0x, Whittle): input coupling ~0.7 Hz, ~92 Hz after the ladder (56–96 Hz),
+  VCA coupling, accent τ 68 ms, the accent sweep capacitor (charge 85 -> 50 ms, discharge 150 -> 100 ms with
+  RES), VCA τ ~1.35 s, slide 22.7 ms, gate 3.5 / 6 clocks, a near-linear ladder (~64 mVpp).
+- **Fits:** the circuit base (55 Hz loop) 2.30; the filter floor 200 -> 100 Hz 2.07 (70 and 50 Hz alike: built
+  at 70 Hz, 26 entries an octave, the ColdFire scaling its cutoff words); the accent sweep wired to the pots
+  (split, timing and threshold read from the pot positions the engine values stand for; threshold fitted 60 %)
+  2.06; as built 2.36, tone only 1.91. Ladder saturation: the recordings prefer none (0.5: 2.38).
+- **The author's choices** (rounds B1–B10): 55 Hz loop; level and ring as fitted; no saturation; the floor and
+  the pot-wired sweep; knobs on the real 303's ranges with no dead travel, RES / ACC spaced evenly by effect
+  (sound-neutral: old and new layouts render identically at the ends, score unchanged), CUT evenly in octaves +
+  one octave beyond on 101–127 with a RES guard there (RES > 100 eased, at CUT 127 RES 127 = RES 115), DEC kept
+  50 ms–2 s, GATE 74 / SLID 73 the 303's; loudness steadier than a 303's across CUT (option C, tone unchanged);
+  +3 dB into the VOL drive ramped from VOL 65 (no hard clipping; +6 dB clipped the hottest accents).
+- **VOL 64 / 65 click** (found on the unit): the engine's output smoothing sits ahead of the drive and held the
+  old level when the path switched in one frame (and the ColdFire eased the level while the drive switched at
+  once). Fixed in `record.c`: the level and the drive trade over ~4 ms, product held; switch noise on loud
+  notes 17–20 dB lower going up, 7–8 dB down (residual 41–49 dB under the note). `host_probe` now takes the
+  cutoff, level and drive words from the record itself (its VOL moves cross 64 / 65).
+- **Test images** `140C_BPB1C`..`140C_BPB8` (calibration record §6); BPB4, BPB6, BPB7 and BPB8 flashed; BPB8 all
+  good -> **promoted FINAL 2026-10-21 (the author's instruction):** `tools/build_blackpyramids_303.py` mainos
+  `ecc858879c32…` (= BPB8's), CF `.bin` `88045b78…`, syx `acbe9aac…`, `140C_BP303`. The ColdFire sources keep only
+  this voice (no OT_BODY switch); tools default to it; the voice's data in `tools/ot303/body/data/`, generated
+  `cf/body_tables.h` + `cf/body_dsp.json`. Bugbuild `BUG_BP303` re-pinned (mainos `31e99207…`); all ten
+  Bugbuilds match without opt-in. `host_check.py` BIT-EXACT both payloads (cycles 455.1 / 598.0, MT35's);
+  `verify_ot303.py` ALL GOOD; headroom: VOL 99 no hard saturation anywhere in the engine.
+- **octabam module** regenerated (runtime 39,736 B, `2c430200…`, = the standalone's), README / manifest updated;
+  pin move by an octabam PR. This octabam form not flashed.
+- Kept on record, not built: the full resonance easing in the extension, VOL 1–64 through the drive, light
+  ladder saturation (P words via re-rolling the second half-band, ~+60 cycles, core-0 worst case unchecked).

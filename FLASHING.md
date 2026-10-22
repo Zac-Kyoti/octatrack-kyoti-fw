@@ -154,7 +154,11 @@ quick check for each:
   with the knob at 127 is the strongest accent; at 0 the step plays unaccented. Sweep `WAVE` on a
   held line: the level holds. A bright line (CUT high, RES 0) with full accents at VOL 99:
   rounded, no fizz. Sweep RES up from 0: a touch less boom below RES 20, the same from 20 up;
-  RES locks between 0 and 20 on alternate steps do not click.
+  RES locks between 0 and 20 on alternate steps do not click. A line with accents on neighbouring steps
+  at high RES: the accents stack into a rising sweep. Sweep CUT from 0 to 127: still clearly audible at
+  0, brighter all the way, one octave more above 100; at CUT 127 with RES 127 the resonance stays below
+  piercing. Turn VOL across 64 / 65 and back while a note holds: no click or pop. Turn RES and ACC
+  through their range: every part of the knob changes the sound.
 - **VARISPEED** — a FLEX loop whose ATTR TEMPO matches it, TSTR on `VARI` (SRC SETUP, the
   fifth position): PTCH reads `QUAN`. Change the project tempo: the loop speeds up and slows
   down with its pitch and stays in time. QUAN `2/1` plays it an octave up at double speed.

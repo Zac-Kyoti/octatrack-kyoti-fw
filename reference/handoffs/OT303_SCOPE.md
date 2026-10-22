@@ -1,5 +1,9 @@
 # OT-303 — feasibility scope
 
+> 2026-10-21: the machine shipped as BLACKPYRAMIDS_303 (`reference/BLACKPYRAMIDS_303.md`); its voice was then
+> recalibrated on the TB-303's circuit (`OT303_VOICE_CALIBRATION.md`). This file is the original scope and the
+> development record up to MT35.
+
 Written 2026-10-04. **Nothing is built.** This is a feasibility study for a new synthesis
 machine, "OT-303", based on Robin Schmidt's Open303 and midilab's jc303, with a
 303-flavoured grid on the tracks that use it. Scoped against **stock OS 1.40C**: how it

@@ -1,13 +1,48 @@
 # BLACKPYRAMIDS_303 — design and voicing
 
-A TB-303 voice as an Octatrack MKI track machine, shown on the unit as **BLKPYRAMD**. This is
-the reference for what the machine does, how the voice is built, every by-ear decision that
-shaped it, what it costs, and where each part came from. The full development record (test
-images MT1–MT17, listening rounds 1–13, the hardware diagnostics) is
-[`reference/handoffs/OT303_SCOPE.md`](handoffs/OT303_SCOPE.md); "OT-303" was the working name.
+A TB-303 voice as an Octatrack MKI track machine, shown on the unit as **BLKPYRAMD**. It runs on the
+DSP56300 in 24-bit fixed point, its filter 4× oversampled at 176.4 kHz. This is the reference for what
+the machine does, how the voice is built, every decision that shaped it, what it costs, and where each
+part came from. The development record of the machine (test images MT1–MT35, listening rounds 1–17,
+the hardware diagnostics) is [`reference/handoffs/OT303_SCOPE.md`](handoffs/OT303_SCOPE.md); "OT-303" was
+the working name. The voice's recalibration on the TB-303's circuit (2026-10-20/21, listening rounds
+B1–B10) is [`reference/handoffs/OT303_VOICE_CALIBRATION.md`](handoffs/OT303_VOICE_CALIBRATION.md).
 
 Builder: [`tools/build_blackpyramids_303.py`](../tools/build_blackpyramids_303.py). Sources:
-[`tools/ot303/`](../tools/ot303/).
+[`tools/ot303/`](../tools/ot303/). The voice's tables and constants:
+[`tools/ot303/body/`](../tools/ot303/body/) (generator, data, checks).
+
+## What is Open303's, and what is new
+
+BLACKPYRAMIDS_303 began as a port of Robin Schmidt's Open303 to the DSP56300. On 2026-10-21 its voice was
+recalibrated on the TB-303's own circuit (Roland's service notes, the x0xb0x schematics, Robin Whittle's
+notes) and fitted against Din Sync's recordings of a real TB-303, with every choice made by the author's ear.
+In short: **the filter, oscillator and envelope algorithms are Open303's; the engine, most of the values
+that shape the sound, the accent sweep, the output stage and every knob layout are new.**
+
+Against the recordings (400 notes at known knob settings; lower is closer; the same 303 recorded twice
+differs by 1.07 dB): the previous voice (MT35) 5.86 dB, this voice **1.91 dB in tone** (2.36 dB with level,
+since its loudness by cutoff is deliberately steadier than a 303's).
+
+| part | Open303 | BLACKPYRAMIDS_303 | where the new value comes from |
+|---|---|---|---|
+| Engine | double-precision floating point, 4× oversampled, a 12th-order elliptic decimator | **24-bit fixed point on the DSP56300**, the filter 4× oversampled at **176.4 kHz**, 15- and 43-tap half-band decimators with a 16 kHz top rounding; an integer twin it matches bit for bit | written for the Octatrack |
+| Oscillator | polyBLEP saw, tanh-shaped square | the same, blended saw → square by WAVE at equal loudness | Open303; WAVE gain by ear (round 14) |
+| Filter | the TeeBee ladder (TB_303 mode), fitted b0 / k formulas | **the same ladder and formulas**, held in a table | Open303 |
+| Lowest cutoff | 200 Hz (the cutoff knob's bottom) | the filter closes to **70 Hz** (the real 303 closes below 200 Hz) | fitted |
+| Input coupling (before the filter) | 44.5 Hz high-pass | **0.7 Hz** | the circuit |
+| Resonance-loop high-pass | 150 Hz | **55 Hz** | the circuit (the low end of its 56–96 Hz spread), by ear (B5) |
+| Output coupling (after the filter) | 24 Hz high-pass | **110 Hz** | the circuit (the VCA's input coupling), fitted |
+| Resonance amount | Open303's law, make-up gain by its formulas | the same law and formulas, × a fitted curve by cutoff (0.7 at 200 Hz, 1.02 at 1.2 kHz), a fitted ring term, make-up × 1.3 | fitted |
+| Accent sweep | a fast cutoff boost (RC 15 ms), decay 200 ms | the boost's RC **8.9 ms**, decay **τ 68 ms**, plus **the 303's accent sweep capacitor**: a direct path and a slow capacitor path, split by the RES pot; charge 85 → 50 ms and discharge 150 → 100 ms with RES; it conducts above 60 % of the ACCENT pot. Not in Open303 | the circuit; the RC, the threshold and the two amounts fitted |
+| Accent loudness | Open303's VCA boost | × 0.83 | fitted |
+| VCA decay | τ 1.23 s | **τ 1.35 s** | the circuit |
+| Level against cutoff | none | a gentle curve: CUT changes the tone and the level stays usable (a 303 gets ~20 dB quieter from fully open to closed) | the author's choice (B8) |
+| Note edges | no soft attack, 1 ms release | soft attack 1 ms (fading out above RES 100), normal release 2 ms | by ear (rounds 9, 11) |
+| Output | none | a soft drive on VOL 65–127, up to about +7 dB, ramped in from VOL 65 and handed over click-free at 64 / 65 | by ear (rounds 8–11, 15, B10) |
+| Knob jumps | instant | cutoff and env glide (τ 1 ms), resonance steps eased | by ear (round 13) |
+| Knobs | the plugin's ranges | every 303 knob covers the real 303's range: CUT evenly in octaves on 0–100 plus an octave beyond on 101–127 (the top of RES eased there), RES and ACC spaced evenly by what they do, ENV and DEC the 303's; SLID and GATE default to the 303's (22.7 ms, 3.5 of 6 clocks) | the author's (no dead knob travel, nothing past a 303 except CUT's top) |
+| Playing it | — | the Octatrack machine: the sequencer, accents and slides as a 303 marks them, ties, live play, chromatic, storage | new |
 
 ---
 
@@ -22,20 +57,30 @@ Builder: [`tools/build_blackpyramids_303.py`](../tools/build_blackpyramids_303.p
     FUNC + turn, or the knob pushed while turned, steps a whole octave every three detents and keeps
     the note (D#2 → D#3), and does nothing past C0 or C8; with trigs held it moves every held trig's
     lock the same octave;
-  - **CUT**: 200 Hz–10 kHz, exponential;
-  - **RES**: 0–100 %;
-  - **ENV**: env mod;
-  - **DEC**: filter-envelope decay, 50 ms–2 s, exponential (default 72 ≈ 400 ms);
-  - **ACC**: the accent scale for the steps you accent (127 = each lock's amount, 0 = no accents; default 100).
+  - **CUT**: 0–100 is the real 303's whole cutoff range (a base cutoff of about 206 Hz–1.6 kHz), evenly in
+    octaves (0.28 semitone a step); 101–127 goes one octave further (to about 3.2 kHz). The default 44 is the
+    previous default sound;
+  - **RES**: the real 303's range, spaced so that every step adds the same amount of resonance (the knob's
+    middle is about half the boost). With CUT above 100, RES above 100 is eased toward RES 100 as CUT rises
+    (at CUT 127, RES 127 rings like RES 115 elsewhere), so a held high resonance cannot turn piercing; RES 0–100
+    and CUT 0–100 are never touched;
+  - **ENV**: env mod, the real 303's range;
+  - **DEC**: filter-envelope decay, 50 ms–2 s, exponential (default 72 ≈ 400 ms); the real 303's range is
+    0–105, above it longer than a 303;
+  - **ACC**: the accent scale for the steps you accent (127 = each lock's amount, 0 = no accents; default
+    100), spaced so that every step adds the same amount of accent, its top the real 303's full ACCENT; the
+    accent sweep comes in from 60 % of it, as the 303's does.
 - **SETUP page:**
   - **WAVE**: saw (0) → square (127), a continuous blend at equal loudness;
   - **TUNE**: A4 = 400–480 Hz, 64 = 440 Hz;
-  - **SLID**: slide time, 0–198 ms;
-  - **GATE**: note length, (GATE + 1)/128 of a step;
-  - **VOL**: 0 off; 1–64 clean (−30 dB to full); 65–127 the same level driven into a soft clip,
-    up to +4.5 dB. The default is 99 = +2.5 dB. Clean VOL hard-clips at the ceiling on bright,
-    low-RES accents (a sweep of 4,320 settings: RES around 0 with accents, 2–4 % of samples; RES
-    64 and up at most 0.2 %); driven VOL rounds those peaks instead (MT33).
+  - **SLID**: slide time, 0–198 ms; the default 73 is the 303's slide (τ 22.7 ms: 103.3 kΩ × 0.22 µF);
+  - **GATE**: note length, (GATE + 1)/128 of a step; the default 74 is the 303's gate (3.5 of the step's
+    6 clocks, Whittle);
+  - **VOL**: 0 off; 1–64 clean (−30 dB to full); 65–127 driven into a soft clip: the drive rises from 0 dB
+    at 65 to about +5.3 dB at the default 99 and +7.1 dB at 127 (a plain line, against VOL 64), smoothly.
+    Crossing 64 / 65 the level and the drive hand over in about 4 ms, so there is no click. Clean VOL can
+    still hard-clip on bright, low-RES accents (the 4,320-setting sweep: 87 of 1,440 accented notes touch
+    the ceiling at VOL 64); driven VOL never clips hard anywhere in the engine (the same sweep at VOL 99).
 - **Notes:** a trig plays a note with the knobs at that step, so p-lock PTCH for a melody.
 - **Accent:** p-lock ACC on the step (the lock is that step's amount, scaled by the ACC knob: lock ×
   ACC / 127; the knob defaults to 100). A note without an ACC lock is never accented. Live MIDI notes with velocity above 100 are accented.
@@ -101,12 +146,15 @@ Builder: [`tools/build_blackpyramids_303.py`](../tools/build_blackpyramids_303.p
 ## 2. The voice
 
 Open303's TB_303 algorithm (Robin Schmidt, 2009, MIT), ported to the DSP56300's 24-bit fixed
-point, 4× oversampled (176.4 kHz).
+point, 4× oversampled (176.4 kHz), and since 2026-10-21 recalibrated on the TB-303's circuit
+(the values: "What is Open303's, and what is new" above).
 
 ```
-saw (polyBLEP) ─┬─ blend (WAVE) ─ pre-HP 44.5 Hz ─ TeeBee ladder (4×) ─ half-band 4×→2× (15 taps)
-square (tanh)  ─┘     resonance feedback ─ one-pole HP 350 Hz ┘       ─ half-band 2×→1× (43 taps, 16 kHz top rounding)
-  ─ allpass 14 Hz ─ HP 24 Hz ─ notch ─ VCA (amp envelope, de-clicker) ─ soft clip (VOL top) ─ track
+saw (polyBLEP) ─┬─ blend (WAVE) ─ input coupling 0.7 Hz ─ TeeBee ladder (4×) ─ half-band 4×→2× (15 taps)
+square (tanh)  ─┘     resonance feedback ─ one-pole HP 55 Hz ┘           ─ half-band 2×→1× (43 taps, 16 kHz top rounding)
+  ─ allpass 14 Hz ─ output coupling 110 Hz ─ notch ─ VCA (amp envelope, de-clicker) ─ soft drive (VOL 65–127) ─ track
+
+cutoff = base (CUT, ENV's offset) + ENV × filter envelope + accent RC + the accent sweep capacitor (ColdFire, a frame at a time)
 ```
 
 - **Filter.** The ladder is transcribed from Open303's `rosic_TeeBeeFilter.h`: an explicit
@@ -115,41 +163,83 @@ square (tanh)  ─┘     resonance feedback ─ one-pole HP 350 Hz ┘       �
   Filter Design*, eq. 5.18) plus a one-pole high-pass in the resonance loop, checked term by term.
 - **Oscillator.** A BLEP saw. The square is Open303's tanh-shaped saw, from a 513-point tanh
   table.
-- **Envelopes.** Open303's main envelope (the filter decay), the accent's RC "wow" path, the
-  VCA decay and release, the slide (a pitch slew), and the accent switch, all as Open303.
+- **Envelopes.** Open303's main envelope (the filter decay), the accent's RC path, the VCA decay
+  and release, the slide (a pitch slew), and the accent switch, as Open303, with the 303's time
+  constants (the accent decay τ 68 ms, the VCA τ 1.35 s, the accent RC 8.9 ms).
+- **The accent sweep capacitor (not in Open303).** The 303 sends its accent envelope to the cutoff two
+  ways, set by the second gang of the RES pot: directly (strongest with RES down) and through a
+  capacitor that charges on each accent and drains slowly (strongest with RES up), so accents in a row
+  stack into the 303's rising "wow". It conducts only above about 60 % of the ACCENT pot. The ColdFire
+  runs it a frame at a time ([`cf/record.c`](../tools/ot303/cf/record.c)): charge 85 → 50 ms and discharge
+  150 → 100 ms with RES (the circuit), the threshold and the two paths' amounts fitted against the
+  recordings. It reads the pot positions the knob values stand for, through the fitted laws.
+- **The cutoff table** covers 70 Hz–20 kHz in 215 entries (26 an octave); the ColdFire scales its
+  cutoff words to it, so the DSP code is unchanged.
 - **Decimation.** Not Open303's 12th-order elliptic, which won't fit: a 15-tap then a 43-tap
   half-band, with a fixed one-pole top rounding at 16 kHz folded into the second.
 - **Integer twin.** [`tools/ot303/twin.h`](../tools/ot303/twin.h) is the contract. The DSP
   code matches it bit for bit, on both payloads, in every bench.
 - **Parameters.** The ColdFire compiles the knobs into the engine's words each frame
-  ([`cf/params.c`](../tools/ot303/cf/params.c)): Open303's own formulas in fixed point, held
-  within 3 LSB of Open303's double-precision values by
-  [`params_check.cpp`](../tools/ot303/params_check.cpp). The voice's tables (2,119 Y words)
+  ([`cf/params.c`](../tools/ot303/cf/params.c)): Open303's own formulas in fixed point (held within
+  3 LSB of Open303's double-precision values by [`params_check.cpp`](../tools/ot303/params_check.cpp)
+  for the previous voice), with the recalibration's tables on top
+  ([`cf/body_tables.h`](../tools/ot303/cf/body_tables.h), generated by
+  [`tools/ot303/body/gen_body.py`](../tools/ot303/body/gen_body.py)). The voice's tables (2,119 Y words)
   are streamed to the DSP in the control record, so the DSP builds none at boot.
 
 ## 3. Voicing decisions — what changed from Open303, and why
 
 Every change was picked blind, two to four versions at a time, by the author's ear (listening
-rounds 1–13). The A/B pages are `tools/ot303/listening_pack*.py`. Open303 is the baseline;
-anything not listed is Open303 as shipped.
+rounds 1–17, then B1–B10 for the 2026-10-21 recalibration). The A/B pages of rounds 1–17 are
+`tools/ot303/listening_pack*.py`. Open303 is the baseline; anything not listed (here or in "What is
+Open303's, and what is new") is Open303 as shipped.
 
 | what | Open303 | here | how it was decided |
 |---|---|---|---|
 | Filter model | TB_303 ladder | the same | rounds 1–5: a saturating diode ladder (ZDF), stage saturation, a component-level "circuit accent" (Whittle's diode + 47 kΩ values) and an RES ceiling were all tried; Open303 or its linear twin won at normal settings |
 | Top end | 12th-order elliptic decimator | half-bands with 16 kHz rounding | round 6: picked over 13 kHz; ABX against Open303 at chance (Accents 5/10) |
 | Lean engine (15 + 43 taps, 24-bit) | — | as listed | round 7: ABX against the reference voice at chance in all four scenes |
-| Feedback high-pass | 150 Hz | **350 Hz** | round 13 (twice): keeps bass as RES rises (−5 dB at the top instead of −10); RES 0 unchanged. A 250 Hz version had lost to 150 Hz in round 8, before the bass loss was the question |
+| Feedback high-pass | 150 Hz | **55 Hz** (2026-10-21; 350 Hz from round 13 until then) | round 13 (twice) chose 350 Hz to keep bass as RES rose. The recalibration put the input and output couplings where the circuit has them; with those, 55 Hz (the circuit's low end) gave the most body, at a 303's bass loss under high RES (B5) |
 | Soft attack (the filter envelope's onset smoothed) | none (`rc1` at 0) | **1 ms, fading out from RES 100 to none at RES 115** | round 9 picked 1 ms; round 11 heard clicks on high-resonance material (the smoothed cutoff "rings" the filter), so it fades out with RES |
 | Normal (non-accent) release | 1 ms | **2 ms** | round 9 |
-| Output drive | none | **tanh soft clip on VOL's top half, up to +4.5 dB; +2.5 dB at the default** | rounds 8–11: +4.5 dB picked on Hot, +2.5 dB on Line, none on Locks; the author then put it on the VOL knob |
+| Output drive | none | **tanh soft clip on VOL's top half; +3 dB more since 2026-10-21, ramped in from VOL 65: about +5.3 dB at the default, +7.1 dB at 127** | rounds 8–11: +4.5 dB picked on Hot, +2.5 dB on Line, none on Locks; the author then put it on the VOL knob. B10: +3 dB more brings typical lines up with no hard clipping anywhere in the engine; +6 dB began to clip the hottest accents |
 | Note start | free-running oscillator | **free-running** | rounds 10 and 12 (blind, over a kick), then MT13's FREE/SYNC switch on the unit. A restart from silence measured tighter (attack within ~1 ms of the trig, against up to a cycle late) but lost by ear every time |
 | Lock and LFO jumps | instant | **cutoff and env amount glide, τ 1 ms, per sample** | round 13: 1 ms over 3 ms and over none. The mean click above 3 kHz drops 3 dB (and 5.7 dB above 8 kHz); gliding resonance as well measured no better |
 | Square shaper drive | 36.9 dB | the same | round 9: 32 and 28 dB lost |
 | Oscillator grit (saw curve + noise) | — | not added | round 8: indifferent |
-| Makeup gain by RES | — | not added | round 13: "way too heavy" |
+| Makeup gain by RES | Open303's formulas | **× 1.3** on Open303's (fitted, 2026-10-21) | round 13: a heavier makeup was "way too heavy"; the fitted one is part of the recalibration |
 | WAVE gain | — | **+2.66 dB at WAVE 87, +1.8 dB at 127 (MT29)** | round 14: kept over none in all five (two sweeps, saw against WAVE 64 / 96 / 127), blind order |
 | Output stage headroom, driven VOL | hard clip before the drive | **4× headroom into the drive (MT33)** | round 15 (scene 2): bright accents at VOL 65–127 were chopped flat before the soft clip; now the drive rounds them. Below the old ceiling the same to −107 dB; clean VOL unchanged (still clips on bright accents; a knee for it was round 16) |
 | Level at the bottom of RES | up to ~9 dB louder at RES 0 than from RES ~48 up | **a trim below RES 20 (MT34)**: −1.4 dB at RES 0, −0.8 at 4, −0.5 at 8, −0.1 at 16, none from RES 20 (the knob above untouched), eased with RES | round 17 (RES 0 held 2.8 s, then swept; 10–50 % of the boost): 15 % picked at RES 0, then the author chose this form, ending at RES 20, over the proportional one. Clean clipping in that scene 3,508 → 2,402 samples |
+
+### The recalibration (2026-10-21)
+
+The author's goal: the clarity and articulation the voice had, with a real 303's body, low-mid weight,
+rubber and squelch, and none of the whistle, excess sub-bass or lost low-note definition. Each behaviour
+was built, scored against Din Sync's recordings, and chosen by ear before the whole was judged; the full
+record is [`OT303_VOICE_CALIBRATION.md`](handoffs/OT303_VOICE_CALIBRATION.md). The author's decisions:
+
+- **The circuit as the base:** the couplings where the TB-303 has them; the 55 Hz loop over 75 and 95 Hz
+  (B5): the most body, at a 303's bass loss under high RES.
+- **Level follows the filter** as fitted, and **the ring** (resonance decay) as fitted (B5).
+- **No ladder saturation**: the real 303's ladder runs a tiny signal, and the recordings moved further away
+  with any (B7).
+- **The filter floor** at 70 Hz and **the accent sweep wired to the pots** as the circuit is, its threshold
+  fitted at 60 % of ACCENT (B8).
+- **The knobs** (the author's rule: the fit judges sound and response only; the knob layout is a separate,
+  playability choice): each covers the real 303's range with no dead travel; RES and ACC spaced evenly by
+  what they do; CUT evenly in octaves, with one octave beyond the 303 on 101–127 (B9) and the top of RES
+  eased there; DEC kept at 50 ms–2 s (short plucks come from the AMP page).
+- **Loudness against cutoff** steadier than a 303's: CUT changes the tone, and the bottom of the knob stays
+  usable (B8). The tone and its shape in time are unchanged by it (the tone-only score is the same).
+- **The drive:** +3 dB into the existing soft drive at VOL 65–127, ramped in (B10), and the VOL 64 / 65
+  crossing made click-free: the level and the drive used to change in different frames, and the engine's
+  output smoothing, ahead of the drive, held the old level for a few samples (a pop going up, a click
+  going down).
+
+Kept on record, not built: the full resonance easing in CUT's extension (every RES value eased to 3/4 by
+CUT 127), and running VOL 1–64 through the soft drive too (which would remove the last faint switching
+residual at the cost of rounding clean VOL's loudest peaks).
 
 Control decisions (the author's):
 - **PTCH:** a semitone per value, C0–C8, with note names. Earlier there were two values per
@@ -164,7 +254,8 @@ Control decisions (the author's):
 - **DEC:** 50 ms–2 s (MT25, 15 Oct 2026: snappier plucks; the default moved from 38 to 72 so it still
   starts at about 400 ms). Before that it was 200 ms–2 s (MT16, Open303's plugin range), and before
   that 30 ms–3 s, which crowded the audible part into the bottom half of the knob. An accented note
-  ignores DEC, as on Open303 and the real 303: its decay is a fixed 200 ms.
+  ignores DEC, as on Open303 and the real 303: its decay is fixed (τ 68 ms since 2026-10-21, the 303's;
+  Open303's 200 ms before).
 - **CUT and ENV turned by hand (MT24):** when you turn a page-1 knob, the editor slews its base
   value toward the new one by 1/16 a frame, with 8 bits of fraction (`kb/memory-map.md`, "Page 1:
   the base words"). The renderer used only the whole part (`fp >> 8`), so a turn reached the voice
@@ -209,7 +300,7 @@ is full in stock, so the voice takes **SPRING REVERB's** module space.
 | DSP P (each payload) | 1,026 words (A) / 1,022 (B), in SPRING REV's module (DARK REV's 35-word helper moved beside it) | 1,028 |
 | DSP X | 216 working words at `X:$7b24–$7bfb` (stock's unreferenced top, outside the DMA partitions), copied from SPRING's X records at the first frame | — |
 | DSP Y | 2,119 words `$7a5–$feb`: tables and the voice state, streamed from the ColdFire | — |
-| ColdFire | a 30 KB DRAM runtime (a 16-page arena reserve, loader appended after the OS), 44 detours, 7 pokes, the FLEX renderer slot; about 1,200 instructions a frame per voice in ot_emu, of ~29,000 for the whole frame (15 Oct 2026: the Y table pre-packed, the continuous words made only when their knobs change; −340 a voice) | — |
+| ColdFire | a 39.7 KB DRAM runtime (a 96 KiB, 16-page arena reserve, loader appended after the OS), 44 detours, 7 pokes, the FLEX renderer slot; about 1,200 instructions a frame per voice in ot_emu for the previous voice, of ~29,000 for the whole frame (15 Oct 2026). The 2026-10-21 voice adds a little per-frame work (the accent sweep capacitor, the knob tapers, the VOL hand-over; 32-bit arithmetic, no 64-bit divides): not re-measured | — |
 
 **Cycles per sample** (emulator cycle table, host and engine together; on the chip ×1.16,
 from the METER on DIAG8):
@@ -219,8 +310,8 @@ from the METER on DIAG8):
 | WAVE 0 (saw only) | 455 | 496 | ~575 |
 | WAVE > 0 (the square path) | 598 | 646 | ~749 |
 
-(`tools/ot303/host_check.py`, the FINAL build of 16 Oct 2026; MT24–MT33 changed only ColdFire words,
-not these figures. On the same bench the 14 Oct build `3624a1e7…` measures 473/515 and 620/670. The bench's accounting was corrected the same day: it priced the
+(`tools/ot303/host_check.py`, the FINAL build of 16 Oct 2026; MT24–MT35 and the 2026-10-21 voice changed only
+ColdFire and data words, not these figures: the 2026-10-21 bench reads 455.1 / 598.0. On the same bench the 14 Oct build `3624a1e7…` measures 473/515 and 620/670. The bench's accounting was corrected the same day: it priced the
 instruction a DO runs with by decoding the DO's loop address as an opcode. The earlier figures
 here, 471/511 and 616/666, came from it.)
 
@@ -256,11 +347,20 @@ Any lighter stack, or the saw, fits.
 
 - **Open303** — © 2009 Robin Schmidt, MIT
   ([github.com/RobinSchmidt/Open303](https://github.com/RobinSchmidt/Open303), pinned
-  `313bf0d9`). The voice's algorithm and constants: the oscillator blend and square shaper,
-  the TeeBee ladder and its fitted coefficient formulas, the envelopes, accent, slide, the
-  pre/post voicing filters, and the knob-to-parameter formulas (including the plugin's 400 ms
-  default decay and its 200 ms–2 s range). Its licence:
+  `313bf0d9`). The voice's algorithms: the oscillator blend and square shaper, the TeeBee ladder
+  and its fitted coefficient formulas, the envelopes, accent, slide, the voicing filters' structure
+  and the knob-to-parameter formulas. Since 2026-10-21 many of the values those algorithms run with
+  are the circuit's or fitted (the table at the top). Its licence:
   [`tools/ot303/LICENSE.Open303.txt`](../tools/ot303/LICENSE.Open303.txt).
+- **The TB-303's circuit** — Roland's TB-303 service notes and the x0xb0x schematics: the couplings around
+  the filter, the accent sweep circuit and its time constants, the VCA and accent decays, the slide RC
+  (103.3 kΩ × 0.22 µF). Values read from them; no schematic is reproduced.
+- **Robin Whittle**, the Devil Fish notes and "TB-303 unique" pages: the accent sweep circuit, the gate
+  (3.5 of the step's 6 clocks), the slide.
+- **Din Sync**, *TB-303 reference recordings for x0xb0x*
+  ([dinsync.info](http://www.dinsync.info/2010/02/tb-303-reference-recordings-for-x0xb0x.html)): the
+  calibration target, 400 notes of a real TB-303 at known knob positions. Measurement only: the
+  recordings are not part of this repository.
 - **jc303** — midilab, GPLv3, Open303 in JUCE
   ([github.com/midilab/jc303](https://github.com/midilab/jc303)). **Reference only, no
   code.** It suggested the candidates we A/B-tested:
@@ -282,13 +382,13 @@ Any lighter stack, or the saw, fits.
   - Vadim Zavalishin, *The Art of VA Filter Design* (the ladder's structure);
   - Andy Sloane's measurements of a component-exact x0xb0x
     ([github.com/a1k0n/303](https://github.com/a1k0n/303), facts only);
-  - Robin Whittle's Devil Fish notes (the circuit accent tried and dropped in rounds 1–5).
-  No 303 schematic was copied into the voice: its circuit behaviour arrives through
-  Open303's model.
+  - Marko Brajković's OCTA303 (MIT, [braikomarko-hub/acidtrack-modules](https://github.com/braikomarko-hub/acidtrack-modules)),
+    another 303 for the Octatrack, also calibrated on Din Sync's recordings: studied as a reference during
+    the recalibration. No code, tables or values were taken from it.
 - **Test tooling only, not in the image:** the dsp56300 emulator core (GPLv3, via octabam),
   for the DSP benches.
 - **Zac Kyoti** — the concept, the sonic direction and the tuning: they set the goals, judged
-  every candidate blind by ear over thirteen listening rounds, and chose and refined the
+  every candidate blind by ear over seventeen listening rounds and ten more for the recalibration, and chose and refined the
   values. Specifically:
   - **The concept and requirements:** a 303 as a track machine, one per DSP core, no
     degradation of stock, no FX restrictions, the filter design as the priority.
@@ -298,7 +398,8 @@ Any lighter stack, or the saw, fits.
     - accepted the lean engine by ABX.
   - **Warmth and body under resonance:** identified the bass loss as RES rises. Chose the 350 Hz
     feedback high-pass over makeup gain and a gentler RES curve, judging how much low end
-    survives without the low-RES sound getting heavier.
+    survives without the low-RES sound getting heavier; in the recalibration, chose the circuit's
+    55 Hz loop for body, accepting a 303's bass loss under high RES.
   - **Declicking and edges:**
     - asked for Open303's declick measures to be examined;
     - specified the edge timings (soft attack 1 ms, normal release 2 ms);
@@ -307,24 +408,34 @@ Any lighter stack, or the saw, fits.
   - **"Liquid", "creamy", "weight":**
     - asked for the JC-303 / ABL3 research and the fatness candidates;
     - weighed drive against detail and liquidity across the Line, Hot and Locks scenes;
-    - settled the soft clip at +2.5 dB by default and up to +4.5 dB;
+    - settled the soft clip at +2.5 dB by default and up to +4.5 dB (+3 dB more, ramped, in the
+      recalibration);
     - moved it onto VOL's upper half so most of the knob's travel is usable;
     - kept the square's shaper and left out grit.
-  - **Saturation:** kept saturation out of the filter and put a single output soft clip after
-    the voice, its range chosen by ear.
+  - **Saturation:** kept saturation out of the filter (again in the recalibration) and put a single
+    output soft clip after the voice, its range chosen by ear.
   - **Timing:** chose the free-running oscillator by ear over a measurably tighter restart, after
     blind rounds and an on-unit FREE/SYNC comparison.
   - **Playability:**
     - the grid mapping: notes, ACC accents, slide trigs, ties on both trigless kinds, with
       trigless trigs keeping their stock reset;
-    - PTCH C0–C8 a semitone per step with note names, DEC 200 ms–2 s, the VOL map, the WAVE
+    - PTCH C0–C8 a semitone per step with note names, DEC 50 ms–2 s, the VOL map, the WAVE
       loudness check;
     - the name and glyph.
+  - **The recalibration (2026-10-21):** set its goals (body, low-mid weight, rubber and squelch with the
+    voice's clarity, none of the whistle or excess sub), asked for the circuit and the real 303's
+    recordings to be the reference, required every behaviour built before judging the whole, and chose
+    each by ear over ten rounds (B1–B10): the 55 Hz loop, the fitted level and ring, no ladder saturation,
+    the filter floor, the accent sweep on the pots, the knob philosophy (the real 303's ranges, even
+    spacing, no dead travel, one octave of CUT beyond with its resonance guard), loudness steadier than a
+    303's across CUT, the extra drive and the click-free VOL crossing.
   - **Hardware testing** on an MKI: 17 test images, 14 diagnostic probes, recordings and METER
-    readings. These found the REP and DMA-contention failures and the sequencer races.
+    readings, then the recalibration's eight test images. These found the REP and DMA-contention
+    failures, the sequencer races and the VOL 64 / 65 click.
 
-  The candidates, the DSP assembly, the integer twin, the ColdFire runtime, the benches and
-  the listening packs were written with AI assistance (Claude), under the author's direction.
+  The candidates, the DSP assembly, the integer twin, the ColdFire runtime, the benches, the
+  calibration tools and the listening packs were written with AI assistance (Claude), under the author's
+  direction.
 
 ## 6. Octabam module — status
 
@@ -351,8 +462,10 @@ now goes through the field, with its image byte-identical.
     chooser relocation, and its own DSP payload edits).
   - A Part naming SPRING REV keeps SPRING's page (as with ANALOG BD) rather than the NONE page
     shown here.
-- **Flashed in that form** (19 Oct 2026, the user's MKI: every check passes). Regenerated for the FINAL build of
-  19 Oct 2026 (MT35, runtime 32,364 B); octabam merged the 16 Oct form as sambanks/octabam#779.
+- **Flashed in that form** for the previous voice (19 Oct 2026, the user's MKI: every check passes). Regenerated
+  for the FINAL build of 21 Oct 2026 (the recalibrated voice, runtime 39,736 B, sha256 `2c430200…`), which is
+  confirmed on the unit in its standalone form; this octabam form is not flashed yet. octabam merged the 16 Oct
+  form as sambanks/octabam#779.
 
 - **Why FLEX plus a signature, not a sixth machine type:** the OS knows five machine types. A sixth
   would have to be taught to the Part validator, the project file (a stock OS would reset the
