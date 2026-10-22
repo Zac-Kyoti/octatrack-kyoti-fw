@@ -243,8 +243,9 @@ so if the trigs did not land.
 ### QUANTIZE_LIVE_REC_TOGGLE
 
 Reach the QUANTIZE LIVE REC setting from the front panel. Hold **`[REC]`** and tap
-**`[PLAY]`**: a toast shows the setting. Tap `[PLAY]` again **while the toast is up** to
-invert it. Once the toast has gone (1 s), a tap just shows the setting again. The first
+**`[PLAY]`**: a toast shows the setting, `LIVE REC: QUANTIZED` or `LIVE REC: UNQUANTIZED`.
+Tap `[PLAY]` again **while the toast is up** to invert it; if PERSONALIZE is open, its check
+mark follows. Once the toast has gone (1 s), a tap just shows the setting again. The first
 `[REC]` + `[PLAY]` still starts live recording as on stock.
 
 **Hardware:** confirmed.\

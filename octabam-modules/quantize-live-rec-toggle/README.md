@@ -69,7 +69,8 @@ shared-RAM window and does not survive live audio on hardware.
 Hardware-confirmed on the author's **MKI**: the show-then-invert gesture works on this
 version, with the tick hook removed (2026-09-25), and a setting changed with it survives
 a power cycle (2026-09-30). The `LIVE REC:` toast text and the PERSONALIZE live
-redraw (2026-10-22) are not yet tested on hardware.
+redraw were confirmed on the MKI in the standalone image (2026-10-22); this octabam form of
+that version has not been flashed.
 Nothing tested on an MKII.
 
 196 bytes, sha256 `0d309f11b76a5dbd…` linked at `0x400d7400`.

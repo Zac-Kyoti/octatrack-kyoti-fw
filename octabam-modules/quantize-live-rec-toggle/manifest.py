@@ -31,7 +31,9 @@ The cave is position-independent, so it may land anywhere the allocator puts it.
 
 MEASURED: hardware-confirmed on the author's MKI: the show-then-invert gesture works
 on this version, with the tick hook removed (2026-09-25), and a setting changed with it
-survives a power cycle (2026-09-30). The standalone image is tools/build_quantize_live_rec_toggle.py.
+survives a power cycle (2026-09-30). The "LIVE REC: QUANTIZED/UNQUANTIZED" toasts and the
+PERSONALIZE live redraw: confirmed on the MKI in the standalone image (2026-10-22), this
+octabam form not flashed. The standalone image is tools/build_quantize_live_rec_toggle.py.
 """
 
 import os

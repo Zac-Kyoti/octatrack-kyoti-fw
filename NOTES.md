@@ -36955,6 +36955,7 @@ older one-knob KFLT filter). The two are the same effect and never share an imag
 - KYOTI V1.6 (SIDECHAIN_COMPRESSOR_BW instead of the light one) is built in this worktree but
   committed separately and not published (WIP until the user flashes/promotes it).
 ## 2026-10-22 (`qlrec-toast`) — QUANTIZE_LIVE_REC_TOGGLE: new toast text + PERSONALIZE live redraw (BUILT, emulator-verified, NOT flashed)
+## 2026-10-22 (`qlrec-toast`) — QUANTIZE_LIVE_REC_TOGGLE: new toast text + PERSONALIZE live redraw, PROMOTED FINAL
 
 - **The author's asks:** toasts `LIVE REC: QUANTIZED` / `LIVE REC: UNQUANTIZED` (were `QUANT LIVE REC ON/OFF`),
   and with PERSONALIZE on screen the QUANTIZE LIVE REC check mark must follow the gesture (the Session 51
@@ -36980,3 +36981,9 @@ older one-knob KFLT filter). The two are the same effect and never share an imag
 - **Builds (WIP, NOT flashed):** standalone `140C_QLR2` — syx `3992b796…`, bin `138bd153…`, mainos `2012abd8…`.
   The KYOTI V1.5 trial build fits (`patch_qlrec` 196 B in SAFE, 884 B left) and was deleted (it carried the FINAL's
   version string). On promotion: re-pin the standalone, KYOTI V1.5, BUG_QLREC, and the octabam module.
+- **Flashed 2026-10-22** (`140C_QLR2`, syx `3992b796…`) on the author's MKI: "all good" — the new toast text, and the
+  PERSONALIZE check mark following the gesture. **PROMOTED FINAL** on the author's instruction (re-pinned in
+  `tools/kyoti_status.py`): standalone mainos `2012abd8…` (same bytes as the flashed `140C_QLR2`; the version string
+  is applied at wrap), BUG_QLREC `df4a2498…`, KYOTI V1.5 `7b50baac…` (syx `cb0ee292…`, card .bin `0f1b4fec…`; version
+  name unchanged). README entry updated (toast text, check mark). The octabam form is not flashed and octabam's
+  pin of this repo is not moved yet; that needs a pin PR on sambanks/octabam.
