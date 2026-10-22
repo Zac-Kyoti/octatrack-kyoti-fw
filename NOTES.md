@@ -37000,3 +37000,8 @@ or either DSP payload. Promoted that build on the user's instruction: mainos
 `bc86d2b73ffd2701bd5ac07043aa51557e990441b2fb5d1712dee124140a6ba1`, syx `ea11c681…`, card .bin
 `ab3d153b…`. V1.5 builds from tag `ref/kyoti-v1.5-2026-10-22` (9c890bb). Docs: README, FLASHING,
 BUILD_KYOTI, START_HERE.
+- **2026-10-22: KYOTI V1.6 with this version flashed** (syx `ea11c681…`) on the author's MKI: all good. **octabam
+  pin PR [sambanks/octabam#861](https://github.com/sambanks/octabam/pull/861)** moves `modules/quantize-live-rec-toggle/upstream`
+  `77f132f` -> `9c890bb` (BATCH_BUGFIXES / ERASE_EMPTY_TRIGLESS_LOCKS stay on `77f132f`; THIRD_PARTY row 79 names both).
+  Gates on `ff9c5f84`: check-remix (module, octabam-core, octabam-inserts, kyoti-fixes), `make reach RUN=1 KEEP=1`,
+  verify-docs: all pass. Octabam form not flashed. Waiting on Sam.
