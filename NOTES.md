@@ -37005,3 +37005,19 @@ BUILD_KYOTI, START_HERE.
   `77f132f` -> `9c890bb` (BATCH_BUGFIXES / ERASE_EMPTY_TRIGLESS_LOCKS stay on `77f132f`; THIRD_PARTY row 79 names both).
   Gates on `ff9c5f84`: check-remix (module, octabam-core, octabam-inserts, kyoti-fixes), `make reach RUN=1 KEEP=1`,
   verify-docs: all pass. Octabam form not flashed. Waiting on Sam.
+
+**2026-10-22 (cont.)** octabam **PR sambanks/octabam#862** (fork branch sidechain-compressor-bw, head
+1e3c1adb, base main ff9c5f84): new mount modules/sidechain-compressor-bw + registry change (two
+versions of one stock effect may share its FX2 id when both declare replaces= it and one names
+the other in conflicts), sidechain-compressor + mute-modes pins to 9abc70e, test remixes
+test/sidechain-compressor-bw + test/kyoti-mute-sidechain-bw, usage page, screenshots,
+THIRD_PARTY, gen_pages "bw". It asks Sam to choose: the user prefers B-W REPLACING the light
+version (then the registry change is not needed and the PR becomes a plain swap) but is fine
+with both. No official remix carries the light version (octabam-inserts excludes it). Pairwise
+survey on ff9c5f84, beside the light version vs beside B-W: B-W loses EUCLID, SHATTER,
+TRANSIENT (SPRING-only remixes) and VOID (SPRING+PLATE); all fit with all three reverbs freed;
+CHARACTER and RESONATOR already fail beside the light version. Gates: verify-docs 0, selftest
+OK, check-remix x4 OK, reach 6/7 -- refhash: artifacts identical, rc=1 reports differ only in the
+"LEFT STOCK" line naming the new module. Modwerk SC 0.1.3 (with B-W or light, per Sam) waits on
+#862: resident_dsp.py's MON-consume patches must go (our code consumes MON_ON itself).
+KYOTI V1.6 and B-W notified to the qlrec-toast session (kyoti-m4-78).
