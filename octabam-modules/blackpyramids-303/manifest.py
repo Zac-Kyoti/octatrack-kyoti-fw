@@ -114,7 +114,7 @@ MODULE = Module(
     name="blackpyramids-303",
     key="BLACKPYRAMIDS_303",
     kind=Kind.HYBRID,
-    doc="BLKPYRAMD: a TB-303 voice (Open303) as a track machine, one per DSP core, played by the "
+    doc="BLKPYRAMD: a TB-303 voice (built on Open303, recalibrated on the TB-303 circuit) as a track machine, one per DSP core, played by the "
         "sequencer, the chromatic keys and MIDI.",
     pressure_blocker="a DSP source engine, outside the FX pressure pricer (cycles: the author's "
                      "reference/BLACKPYRAMIDS_303.md section 4)",
