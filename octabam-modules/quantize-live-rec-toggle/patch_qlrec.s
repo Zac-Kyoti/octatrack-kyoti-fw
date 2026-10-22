@@ -131,8 +131,20 @@
 | ---- still open from Session 51 (not addressed here) ----
 |   * An occasional small, textless box flashes where the toast was, right
 |     after it closes.
-|   * The PERSONALIZE menu does not live-redraw the row while you are looking
-|     at it (the VALUE is correct; the on-screen widget is stale).
+
+| ---- PERSONALIZE live redraw (2026-10-22) ----
+| Until now the PERSONALIZE row kept its old check mark until the menu was
+| re-opened (the VALUE was right, the widget stale).  The cause: PERSONALIZE's
+| key handler 0x40068fd0 only calls the setter; it is the PROJECT menu's key
+| dispatcher 0x400650a0 that redraws, by tail-jumping to FUN_40064d7c after
+| every screen key handler.  Our flip runs in the [PLAY] handler, so nothing
+| redrew.  qp_flip now calls FUN_40064d7c itself when the current menu screen
+| (0x400cbf40, an index into the menu-state table 0x400cbdac, stride 0x14) is
+| 12 = PERSONALIZE (its record 0x400cbe9c: draw 0x40068e00, key 0x40068fd0).
+| FUN_40064d7c returns at once when the menu window 0x400cbf4c is 0 (menu
+| closed), and stock calls it from about ten other key handlers (0x4004d8d8,
+| 0x40062d98, 0x40066978, 0x40069b24, ...), so a key-handler call is a stock use.
+| It runs before NOTIFY, so the toast is drawn over the redrawn menu.
 |
 | Detours (applied by build_quantize_live_rec_toggle.py) -- TWO, both key handlers:
 |   0x40061778  6 B  `jsr 0x4009b5c0`           -> jmp qlr_play
@@ -153,6 +165,10 @@
     .equ NOTIF_T,      0x460d1e6c        | its remaining duration; 0 == expired
     .equ PROJ_GATE,    0x4009b5c0        | displaced from 0x40061778
     .equ PLAY_RESUME,  0x4006177e        | 0x40061778 + 6  (tst.l %d0 ; bne.s ...)
+    .equ MENU_SCR,     0x400cbf40        | current PROJECT-menu screen (menu-state index)
+    .equ SCR_PERSONAL, 12                | PERSONALIZE's index (record 0x400cbe9c)
+    .equ MENU_REDRAW,  0x40064d7c        | FUN_40064d7c -- redraw the current screen;
+                                          |   no-op while the menu window 0x400cbf4c is 0
 
     | The toast's life == the window in which a press flips, because they are
     | the same thing: the OS's own countdown.  At the 59.999 Hz UI tick derived
@@ -245,6 +261,11 @@ qp_flip:
     move.l  %d0,QLR
     move.l  %d0,QLR_SH                   | battery-SRAM shadow
     jsr     CKSUM                        | re-checksum the 'ANDY' block
+|   PERSONALIZE on screen? redraw it, so its row shows the new value now
+    moveq   #SCR_PERSONAL,%d0
+    cmp.l   MENU_SCR,%d0
+    bne.b   qp_open
+    jsr     MENU_REDRAW
 |   fall through: show the setting we just wrote
 
 |   --- (re)open the toast on the CURRENT setting, and restart its 0.8 s ---
@@ -289,14 +310,16 @@ qlr_recrel:
 qr_done:
     rts
 
-|   "QUANT LIVE REC ON/OFF" (17/18 ch) -- chosen to fit the 128 px screen;
-|   FUN_4005a2b8 sizes the window to textpx+15, and the full "QUANTIZE LIVE
-|   REC OFF" (21 ch) overruns it.
+|   FUN_4005a2b8 sizes the window to textpx+15 (textpx = FUN_40012f30 over the
+|   font 0x400ba862).  Measured with that font: "LIVE REC: QUANTIZED" = 114 px,
+|   "LIVE REC: UNQUANTIZED" = 126 px, within the 128 px screen (stock shows
+|   127 px "NOT A STEREO SAMPLE!" and 129 px "NO FREE STATIC SLOTS!").
+|   (2026-10-22, the user's wording; was "QUANT LIVE REC ON/OFF".)
 qlr_msg_on:
-    .asciz "QUANT LIVE REC ON"
+    .asciz "LIVE REC: QUANTIZED"
     .align 2
 qlr_msg_off:
-    .asciz "QUANT LIVE REC OFF"
+    .asciz "LIVE REC: UNQUANTIZED"
     .align 2
 
     .ifdef QLR_DIAG

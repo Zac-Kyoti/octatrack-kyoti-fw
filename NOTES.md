@@ -36954,3 +36954,29 @@ older one-knob KFLT filter). The two are the same effect and never share an imag
   SIDECHAIN_COMPRESSOR) + README; the light module's README/manifest say "light version".
 - KYOTI V1.6 (SIDECHAIN_COMPRESSOR_BW instead of the light one) is built in this worktree but
   committed separately and not published (WIP until the user flashes/promotes it).
+## 2026-10-22 (`qlrec-toast`) — QUANTIZE_LIVE_REC_TOGGLE: new toast text + PERSONALIZE live redraw (BUILT, emulator-verified, NOT flashed)
+
+- **The author's asks:** toasts `LIVE REC: QUANTIZED` / `LIVE REC: UNQUANTIZED` (were `QUANT LIVE REC ON/OFF`),
+  and with PERSONALIZE on screen the QUANTIZE LIVE REC check mark must follow the gesture (the Session 51
+  "stale widget" item, parked since then).
+- **Width:** NOTIFY sizes its window to `FUN_40012f30(font 0x400ba862, text)` + 15. Measured with that font's
+  width table: QUANTIZED 114 px, UNQUANTIZED 126 px on the 128 px screen. The model reproduces Session 51's
+  overrun (`QUANTIZE LIVE REC OFF` = 129 px), and stock already shows 127 / 129 px toasts.
+- **Why the row was stale (C, own reading):** PERSONALIZE's key handler `0x40068fd0` only calls the setter. The
+  PROJECT menu's dispatcher `0x400650a0` redraws by tail-jumping to `FUN_40064d7c` after every screen key
+  handler. Menu-state table `0x400cbdac` (stride 0x14 `{enter, exit, draw, key, enc}`), current index
+  `0x400cbf40`, window `0x400cbf4c`; PERSONALIZE = index 12 (record `0x400cbe9c`: draw `0x40068e00`, key
+  `0x40068fd0`). `FUN_40064d7c` returns at once with the window closed; stock calls it from about ten other key
+  handlers (`0x4004d8d8`, `0x40062d98`, `0x40066978`, `0x40069b24`, …).
+- **Fix:** `qp_flip`, after the checksum: if `0x400cbf40 == 12`, `jsr 0x40064d7c`, then NOTIFY as before (toast
+  drawn over the redrawn menu). It runs in the [PLAY] key-handler context only. The cave is 176 → 196 B and
+  still position-independent; manifest re-pinned (`OFF_RECREL` 0x84).
+- **Emulator (route A, `tools/emu_qlrec.py`, new):** ALL PASS. Show-only press: no change and no redraw. Flip:
+  value + shadow inverted, correct toast, PERSONALIZE's draw ran, and its getter read the new value before
+  NOTIFY. [REC] release closed the toast. With the menu closed, a flip does not draw. Route A does not
+  composite windows onto the LCD plane, so what the unit shows is still a hardware question. Control: the
+  FINAL image (`0832cd9d…`) fails exactly the four new checks (old toast text ×2, no PERSONALIZE draw on the
+  flip) and passes the rest, so the harness tells the two builds apart.
+- **Builds (WIP, NOT flashed):** standalone `140C_QLR2` — syx `3992b796…`, bin `138bd153…`, mainos `2012abd8…`.
+  The KYOTI V1.5 trial build fits (`patch_qlrec` 196 B in SAFE, 884 B left) and was deleted (it carried the FINAL's
+  version string). On promotion: re-pin the standalone, KYOTI V1.5, BUG_QLREC, and the octabam module.

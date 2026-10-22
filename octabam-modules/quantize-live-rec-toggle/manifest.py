@@ -1,8 +1,11 @@
 """QUANTIZE_LIVE_REC_TOGGLE -- reach the QUANTIZE LIVE REC setting from the front
 panel instead of PERSONALIZE.
 
-Hold [REC] and tap [PLAY]: a toast shows the current setting. Tap [PLAY] again
-WHILE THAT TOAST IS UP to invert it; tap again to invert it back. Once the toast
+Hold [REC] and tap [PLAY]: a toast shows the current setting ("LIVE REC:
+QUANTIZED" / "LIVE REC: UNQUANTIZED"). Tap [PLAY] again WHILE THAT TOAST IS UP to
+invert it; tap again to invert it back. If PERSONALIZE is on screen, its row
+redraws at once (the cave calls the menu's own redraw, FUN_40064d7c, as stock's
+menu key dispatcher does after every key). Once the toast
 has gone (1 s), the next tap just shows the setting again. The first [REC]+[PLAY]
 still starts live recording exactly as on stock. This is the all-or-nothing
 live-record quantize, not the per-track TRIG QUANT.
@@ -53,20 +56,21 @@ RETIRED_TICK_STOCK = bytes.fromhex("45f946c7dfba")
 
 # ---- cave layout -------------------------------------------------------------
 OFF_PLAY = 0x0
-OFF_RECREL = 0x74
+OFF_RECREL = 0x84
 
-# patch_qlrec.s, m68k-elf-as -mcpu=5407, linked at 0x400d7400: 176 bytes,
-# sha256 52c26af67443e470147844a52009d09f.  Position-independent -- verified
+# patch_qlrec.s, m68k-elf-as -mcpu=5407, linked at 0x400d7400: 196 bytes,
+# sha256 0d309f11b76a5dbd951fdaf5c97a74be.  Position-independent -- verified
 # byte-identical at 0x400d7700 and 0x400d7100.
 PINNED = bytes.fromhex(
-    "4ab9460d1726670000604ab9460d1e70670000046004600000262039800000ac"
-    "0a800000000102800000000123c0800000ac23c0100fff3c4eb94001f23c2039"
-    "800000ac41fa00444a80670441fa004e4878003c2f084eb94005a2b8508f4ab9"
-    "460d172a67024e754eb94009b5c04ef94006177e42b9460d17264ab9460d1e70"
-    "67064eb940056bec4e755155414e54204c49564520524543204f4e005155414e"
-    "54204c49564520524543204f46460000"
+    "4ab9460d1726670000704ab9460d1e70670000046004600000362039800000ac"
+    "0a800000000102800000000123c0800000ac23c0100fff3c4eb94001f23c700c"
+    "b0b9400cbf4066064eb940064d7c2039800000ac41fa00444a80670441fa0050"
+    "4878003c2f084eb94005a2b8508f4ab9460d172a67024e754eb94009b5c04ef9"
+    "4006177e42b9460d17264ab9460d1e7067064eb940056bec4e754c4956452052"
+    "45433a205155414e54495a4544004c495645205245433a20554e5155414e5449"
+    "5a454400"
 )
-assert len(PINNED) == 176, len(PINNED)
+assert len(PINNED) == 196, len(PINNED)
 assert PINNED[OFF_PLAY:OFF_PLAY + 6] == bytes.fromhex("4ab9460d1726")   # qlr_play: REC held?
 
 

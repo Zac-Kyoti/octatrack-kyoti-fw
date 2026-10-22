@@ -139,8 +139,9 @@ quick check for each:
   audio in them.
 - **RELOAD_FROM_PROJECT** — save the bank, change a track's trigs, then `[PTN]` +
   `[TRACK n]` while playing: the saved trigs come back without the transport stopping.
-- **QUANTIZE_LIVE_REC_TOGGLE** — hold `[REC]`, tap `[PLAY]` → toast; tap `[PLAY]` again
-  while it is up → the setting inverts.
+- **QUANTIZE_LIVE_REC_TOGGLE** — hold `[REC]`, tap `[PLAY]` → toast `LIVE REC: QUANTIZED` or
+  `LIVE REC: UNQUANTIZED`; tap `[PLAY]` again while it is up → the setting inverts. With
+  PROJECT → PERSONALIZE open, the QUANTIZE LIVE REC check mark changes at the same moment.
 - **ERASE_EMPTY_TRIGLESS_LOCKS** — make a trigless lock with one p-lock, erase that lock
   in live record: the step goes dark.
 - **REC_TRIG_MUTE** — a track with recorder trigs on every pattern cycle: hold its

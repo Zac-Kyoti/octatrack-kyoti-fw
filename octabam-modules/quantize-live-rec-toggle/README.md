@@ -3,8 +3,10 @@
 Reach the **QUANTIZE LIVE REC** setting from the front panel instead of digging
 through PERSONALIZE.
 
-Hold **`[REC]`** and tap **`[PLAY]`**: a toast shows the current setting. Tap
-`[PLAY]` again **while that toast is up** to invert it; tap again to invert it back.
+Hold **`[REC]`** and tap **`[PLAY]`**: a toast shows the current setting —
+`LIVE REC: QUANTIZED` or `LIVE REC: UNQUANTIZED`. Tap `[PLAY]` again **while that
+toast is up** to invert it; tap again to invert it back. If the PERSONALIZE menu is
+on screen, its QUANTIZE LIVE REC check mark updates at once.
 Once the toast has gone (1 s), the next tap just shows the setting again. The first
 `[REC]` + `[PLAY]` still starts live recording exactly as on stock.
 
@@ -35,6 +37,12 @@ rather than the generic installer's hook.
 
 The cave is **position-independent** (verified at `0x400d7700` and `0x400d7100`).
 
+After a flip, if the current PROJECT-menu screen (`0x400cbf40`) is PERSONALIZE
+(index 12 of the menu-state table `0x400cbdac`), the cave calls `FUN_40064d7c` —
+the redraw stock's menu key dispatcher (`0x400650a0`) runs after every screen key
+handler, and that ten other stock key handlers also call. It returns at once when
+the menu window `0x400cbf4c` is closed.
+
 ## ⚠️ Do not hook `0x400522ca`
 
 Timing here comes from **the OS, not from us**: "is the toast still up" is read from
@@ -60,10 +68,11 @@ shared-RAM window and does not survive live audio on hardware.
 
 Hardware-confirmed on the author's **MKI**: the show-then-invert gesture works on this
 version, with the tick hook removed (2026-09-25), and a setting changed with it survives
-a power cycle (2026-09-30).
+a power cycle (2026-09-30). The `LIVE REC:` toast text and the PERSONALIZE live
+redraw (2026-10-22) are not yet tested on hardware.
 Nothing tested on an MKII.
 
-176 bytes, sha256 `52c26af67443e470…` linked at `0x400d7400`.
+196 bytes, sha256 `0d309f11b76a5dbd…` linked at `0x400d7400`.
 
 ## Licence
 

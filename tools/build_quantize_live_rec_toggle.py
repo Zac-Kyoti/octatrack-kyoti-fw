@@ -4,13 +4,14 @@
 """
 QUANTIZE LIVE REC front-panel toggle.
 
-  [REC] held + [PLAY]                   opens a "QUANT LIVE REC ON/OFF" toast
-                                        showing the CURRENT setting -- nothing
-                                        changes yet
+  [REC] held + [PLAY]                   opens a "LIVE REC: QUANTIZED" /
+                                        "LIVE REC: UNQUANTIZED" toast showing
+                                        the CURRENT setting -- nothing changes yet
   [PLAY] again WHILE THAT TOAST IS UP   inverts the PERSONALIZE "QUANTIZE LIVE
                                         REC" row (0x800000ac); the toast
                                         re-opens on the new value.  Again, and
-                                        it inverts again.
+                                        it inverts again.  If PERSONALIZE is
+                                        on screen, its row redraws at once.
   [PLAY] once the toast has gone        just shows the current setting again
 
   The gesture is TOAST-GATED, not a double-tap: a press flips iff the toast is
