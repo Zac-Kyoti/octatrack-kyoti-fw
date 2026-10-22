@@ -69,7 +69,8 @@ instead.
   - both DSP payloads' voice, helper, seam, X and dispatch words are the standalone's;
   - the image differs from the standalone only in octabam's platform plumbing (loader, arena
     reserve, chooser relocation, its own DSP payload edits);
-  - not flashed in this form for the 21 Oct voice (the 19 Oct form was: every check passes).
+  - flashed in this form on the author's MKI, 21 Oct 2026: all good (the 19 Oct form, with the previous
+    voice: every check passes).
 
 ## Limits
 

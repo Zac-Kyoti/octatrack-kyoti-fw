@@ -36,8 +36,8 @@ A REMIX WITH THIS MODULE gives up SPRING REV (the voice is its code) and carries
 module and no ANALOG BD (each owns the source seam, SPRING's words or DSP memory the voice uses).
 
 MEASURED. The standalone image of this voice (FINAL 21 Oct 2026, mainos ecc85887...) on the author's MKI:
-all good. This octabam form: the runtime and both DSP payloads are the standalone's bytes; not flashed in this
-form (the previous voice's octabam form was, 19 Oct 2026: all checks pass).
+all good. This octabam form: the runtime and both DSP payloads are the standalone's bytes; flashed on the
+author's MKI, 21 Oct 2026 (remixes/test/blackpyramids-303): all good.
 """
 
 import os

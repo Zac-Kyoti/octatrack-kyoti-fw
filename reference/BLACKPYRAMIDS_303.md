@@ -464,7 +464,7 @@ now goes through the field, with its image byte-identical.
     shown here.
 - **Flashed in that form** for the previous voice (19 Oct 2026, the user's MKI: every check passes). Regenerated
   for the FINAL build of 21 Oct 2026 (the recalibrated voice, runtime 39,736 B, sha256 `2c430200…`), which is
-  confirmed on the unit in its standalone form; this octabam form is not flashed yet. octabam merged the 16 Oct
+  confirmed on the unit in its standalone form and in this octabam form (21 Oct 2026: all good). octabam merged the 16 Oct
   form as sambanks/octabam#779.
 
 - **Why FLEX plus a signature, not a sixth machine type:** the OS knows five machine types. A sixth

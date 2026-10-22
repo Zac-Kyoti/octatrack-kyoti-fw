@@ -36927,3 +36927,5 @@ no longer applies -> SC 0.1.3 needs an owner-reviewed resident change; waits for
   variable the check flags that store, on the previous pin too). Main checkout fast-forwarded, the final
   BLACKPYRAMIDS_303 and BUG_BP303 files copied into its `out/` (it cannot build BP itself: the DSP toolchain
   lives in the ot303 worktrees).
+- **2026-10-21: the octabam form flashed** (`remixes/test/blackpyramids-303`, the recalibrated voice) on the author's
+  MKI: all good. Module docs and #855 updated; #855 sent (ready for review).
