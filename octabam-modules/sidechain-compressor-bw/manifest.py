@@ -152,8 +152,7 @@ MODULE = Module(
               doc="the key's high-pass, 18 dB/oct: OFF, then 20 Hz to 19.6 kHz"),
         Param(b"KWID", 127, count=128, active=True, link=True,
               formatter_word=("scbw_cf", "lp_fmt"), widget_word=0,
-              doc="the key's low-pass, 12 dB/oct, as a distance above KBAS: 0.5 to 9.9 "
-                  "octaves, then OFF; with KBAS OFF a plain low-pass from 20 Hz"),
+              doc="the key's low-pass, 12 dB/oct: 0.5-9.9 octaves above KBAS (20 Hz if OFF), then OFF"),
     ),
     linked=LINKED,
     # sc_norm: a COMPRESSOR saved before SIDE-CHAIN existed holds stock's slot 8..11 defaults
