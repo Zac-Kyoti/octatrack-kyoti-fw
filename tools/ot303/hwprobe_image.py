@@ -54,6 +54,44 @@ SC_HOST = 0x71eb85
 # only start values: the record rewrites both every frame (from RES and VOL, tools/ot303/cf/params.c)
 import math
 FB_HZ = 350.0                       # the machine's feedback high-pass (MT14; Open303 150)
+# the voice's DSP constants (tools/ot303/cf/body_dsp.json, from tools/ot303/body/gen_body.py; use_body() sets them at
+# import, for the machine's host payloads; None = the twin's own constants, as the hardware-probe payloads keep)
+HP1_HZ = None                       # the pre-filter high-pass (twin: 44.486 Hz)
+DECL_HZ = None                      # Open303's amp declicker low-pass (twin: 200 Hz)
+HP2_HZ = None                       # the post-filter high-pass (twin: 24.167 Hz)
+C2_MS = None                        # the accent RC's time constant, ms (twin: C2 0x7fce80)
+KP_PTS = None                       # the resonance law: the kp table x m(fc), m linear in log fc between (Hz, m) points
+LT_CFG = None                       # the cutoff table: (floor Hz, entries an octave) (twin: 200 Hz, 32; twin.h set_lt)
+
+
+def use_body(path=None):
+    """the voice's DSP constants (tools/ot303/body/gen_body.py writes tools/ot303/cf/body_dsp.json)"""
+    global FB_HZ, HP1_HZ, HP2_HZ, C2_MS, KP_PTS, LT_CFG
+    import json
+    j = json.load(open(path or ROOT / 'tools' / 'ot303' / 'cf' / 'body_dsp.json'))
+    FB_HZ, HP1_HZ, HP2_HZ, C2_MS, KP_PTS = j['fb_hz'], j['hp1_hz'], j['hp2_hz'], j['c2_ms'], [tuple(p) for p in j['kp_pts']]
+    LT_CFG = (j['lt_base'], j['lt_spo']) if 'lt_base' in j else None
+    return j
+
+
+def kp_mult(hz):
+    """tools/ot303/body/bp_render.cpp kpMult: m(fc), held outside the points"""
+    l = math.log(hz)
+    if l <= math.log(KP_PTS[0][0]):
+        return KP_PTS[0][1]
+    if l >= math.log(KP_PTS[-1][0]):
+        return KP_PTS[-1][1]
+    for (f0, m0), (f1, m1) in zip(KP_PTS, KP_PTS[1:]):
+        if l <= math.log(f1):
+            a, b = math.log(f0), math.log(f1)
+            return m0 + (m1 - m0) * (l - a) / (b - a)
+    return 1.0
+
+
+def lround(v):
+    """C's lround (half away from zero), saturated to a word"""
+    v = max(-8388608.0, min(8388607.0, v))
+    return int(math.floor(abs(v) + 0.5)) * (1 if v >= 0 else -1)
 
 
 def q23f(v):
@@ -125,13 +163,14 @@ def write_ytab(path):
     return y
 
 
-def twin_constants():
+def twin_constants(host=False):
     exe = ROOT / 'out' / 'ot303' / 'twin_dump'
     src = ROOT / 'tools' / 'ot303' / 'twin_dump.cpp'
     if not exe.exists() or exe.stat().st_mtime < max(src.stat().st_mtime, (ROOT / 'tools/ot303/twin.h').stat().st_mtime):
         subprocess.run(['c++', '-std=c++17', '-O1', '-w', f'-I{ROOT}/tools/ot303', str(src), '-o', str(exe)], check=True)
     out = {}
-    for line in subprocess.run([str(exe)], capture_output=True, text=True, check=True).stdout.splitlines():
+    env = dict(os.environ, OT_LT='%r %r' % LT_CFG) if (host and LT_CFG) else None   # the voice's cutoff table: host only
+    for line in subprocess.run([str(exe)], capture_output=True, text=True, check=True, env=env).stdout.splitlines():
         f = line.split()
         v = [int(x, 16) for x in f[1:]]
         out[f[0]] = v if len(v) > 1 else v[0]
@@ -201,13 +240,28 @@ def build(tag, host=False):
     if line is not None and f'bra     func_{d["djeq_proc"]:06x}' not in line:
         raise ValueError(f'payload {tag}: exit branch disassembles as {line!r}')
 
-    T = twin_constants()
+    T = twin_constants(host)
     if host:
         # MT14 (listening round 13, the user's pick): the resonance feedback's high-pass 150 -> 350 Hz, so
         # less bass is fed back and cancelled as RES rises (about -5 dB at the top instead of -10); RES 0
         # is unchanged (no feedback). The hardware-probe build keeps Open303's 150 Hz.
         fx = math.exp(-2.0 * math.pi * FB_HZ / 176400.0)
         T = dict(T, FBB=q23f(0.5 * (1 + fx)), FBA=q23f(fx))
+        if HP1_HZ is not None:
+            hx = math.exp(-2.0 * math.pi * HP1_HZ / 176400.0)
+            T = dict(T, HP1B=q23f(0.5 * (1 + hx)), HP1A=q23f(hx))
+        if DECL_HZ is not None:                    # twin.h SVF::design(f, 44100, 1/sqrt(0.5), 0, 8, 1)
+            g = math.tan(math.pi * DECL_HZ / 44100.0); k = 1.0 / math.sqrt(0.5)
+            a1 = 1.0 / (1.0 + g * (g + k)); a2 = g * a1; a3 = g * a2
+            assert a3 * 256 < 1.0, f'declicker {DECL_HZ} Hz: a3 x 2^8 = {a3 * 256:.3f} overflows the stored word'
+            T = dict(T, DA1=q23f(a1), DA2=q23f(a2), DA3=q23f(a3 * 256), DA2B=q23f(a2))
+        if HP2_HZ is not None:                     # fs 44100 (twin.h HP2)
+            hx = math.exp(-2.0 * math.pi * HP2_HZ / 44100.0)
+            T = dict(T, HP2B=q23f(0.5 * (1 + hx)), HP2A=q23f(hx))
+        if KP_PTS is not None:                     # the kp table (the Y image) x m(fc), 32 entries an octave from 200 Hz
+            kp = [((v ^ 0x800000) - 0x800000) for v in T['KP']]
+            base, spo = LT_CFG or (200.0, 32.0)
+            T = dict(T, KP=[lround(v * kp_mult(base * 2.0 ** (i / spo))) & 0xffffff for i, v in enumerate(kp)])
     x = {}
 
     def X(name, v):
@@ -226,6 +280,9 @@ def build(tag, host=False):
     for i, v in enumerate(T['HB2C']):
         X(S['HB2C'] + i, v)
     for n in ('CS', 'C2', 'ES8', 'RS', 'BG', 'SC'):
+        if host and n == 'C2' and C2_MS is not None:
+            X(n, q23f(math.exp(-1.0 / (C2_MS * 44.1))))
+            continue
         X(n, SC_HOST if host and n == 'SC' else HOST[n])
     for n, v in zip(('C_MEG', 'M_AMP', 'AG8', 'AGFM', 'K8'), VARS[3]):
         X(n, v)
@@ -281,6 +338,9 @@ def build(tag, host=False):
     assert TH + 1026 <= LT and LT >= 0x800 and LT + 860 <= YS and S['YS'] + 0xab <= 0x1000 and TH >= 0x7a5
     return dict(org=d['org'], words=words, syms=S, ysyms=ysyms, x=x, y=y, xd=d['xd'], djeq_proc=d['djeq_proc'],
                 entry=S.get('hq_entry'), seam_entry=S['sg_entry'], seam=d['seam'], cont=d['cont'], rawp=d['rawp'])
+
+
+use_body()                          # the machine's voice (the host payloads read it; the hardware probe's keep the twin's)
 
 
 if __name__ == '__main__':

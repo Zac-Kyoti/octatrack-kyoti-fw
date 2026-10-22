@@ -41,6 +41,12 @@ struct ot_voice {
     ot_w rs, bg, ag_8;      /* MT20: the resonance words as sent, eased toward c's over a few frames */
     ot_w sc;                /* MT34: the level as sent, eased the same way (it follows RES through the trim) */
     uint32_t cut_q8, env_q8; /* MT24: CUT and ENV with their fraction (8.8) the words were made from */
+    int32_t wmeg, wcap;     /* body: the accent envelope and the accent sweep capacitor, Q30 */
+    int32_t wamt;           /* body: the sounding note's ACCENT above the threshold, Q16 (0: none) */
+    int32_t wgl;            /* body: the gate's samples left (a slide into a closed gate retriggers, as the host) */
+    uint32_t drv;           /* body: the path (0 clean, 1 the soft drive, 3 leaving it) */
+    uint32_t split;         /* body: the level / drive trade while the path changes, Q16 (1 = settled; 0 = never set) */
+    ot_w sco;               /* body: the level last sent */
 };
 
 /* the frame's record: the continuous words from knobs k (made again only when they change), a

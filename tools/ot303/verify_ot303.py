@@ -40,9 +40,10 @@ EMU = os.path.join(ROOT, 'out', 'ot303', 'ot_emu_8d0ad6f4')
 CARD = os.path.join(os.path.realpath(os.path.join(ROOT, 'refs', 'octabam')), 'out', 'botli_card2.img')
 IMAGE = os.path.join(ROOT, 'out', os.environ.get('OT303_IMAGE', 'mainos_blackpyramids_303.bin'))
 STOCK = os.path.join(ROOT, 'out', 'raw', 'section_3_MAIN_OS.bin')
-ELF = os.path.join(ROOT, 'out', 'ot303', 'cf', 'ot303_runtime.elf')
-LOADER = os.path.join(ROOT, 'out', 'ot303', 'cf', 'loader.elf')
-RUNTIME = os.path.join(ROOT, 'out', 'ot303', 'cf', 'ot303_runtime.bin')
+CFD = os.environ.get('OT303_CF', 'cf')          # the runtime's build folder
+ELF = os.path.join(ROOT, 'out', 'ot303', CFD, 'ot303_runtime.elf')
+LOADER = os.path.join(ROOT, 'out', 'ot303', CFD, 'loader.elf')
+RUNTIME = os.path.join(ROOT, 'out', 'ot303', CFD, 'ot303_runtime.bin')
 FRAMES = int(os.environ.get('MT1_FRAMES', '3000'))
 SEQ_FRAMES = int(os.environ.get('MT1_SEQ_FRAMES', '16000'))   # BOTLI's T2/T6 trigs after step 1 (whose trigs land while the tables build)
 PART = 0x40170f60                     # BOTLI's Part 1 in RAM (bank 0x400e21e0 + 0x8ed80, read under ot_emu)
@@ -50,7 +51,7 @@ SHADOW = 0x100a4ece
 SRC = {1: '1:1a2:221', 0: '0:39c:426'}
 FX2 = {1: '1:302:303', 0: '0:50d:50e'}
 IDS = {1: 0x80000ec4, 2: 0x80000ecc}
-DEFAULTS = bytes([36, 30, 64, 32, 72, 100, 0, 64, 38, 63, 99, 0])
+DEFAULTS = bytes([36, 44, 64, 32, 72, 100, 0, 64, 73, 74, 99, 0])   # control.c's ot_defaults (CUT 44 = engine 30; SLID 73, GATE 74: the 303's)
 BANK0 = 0x400e21e0                    # BOTLI plays bank 0, pattern 0 (PER TRACK scale; T2/T6: 16 steps, 1x)
 # the test line, steps 0..15: N note, T trigless lock, G trigless trig (both tie, MT9), S note with a slide
 # trig, . empty

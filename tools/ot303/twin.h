@@ -21,6 +21,8 @@
 // (the note list, slide/accent decisions), never for audio.
 #pragma once
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -71,25 +73,39 @@ static inline W divq(W num, W den) {                        // 24-step div: floo
 static const int LT_STEPS = 32;                             // per octave
 static const double LT_OCT = 6.6438561897747253;            // log2(20000/200)
 static const int LT_N = 214;                                // entries 0..213 (212.6 needed)
+// body study (off by default: the DSP's table): the table's bottom (Hz) and span (octaves) -- a lower floor moves
+// L16 = 0 down; L0_16 then carries log2(200 / LT_BASE) / 16 more so every cutoff above the old floor is unchanged
+static const int LT_NMAX = 320;
+// LT_SPO: the table's entries an octave (the DSP indexes 1/32 of L16's unit, so the ColdFire scales its cutoff words by
+// LT_SPO / 32 to match); LT_TOP: the clamp, octaves above LT_BASE
+static double LT_BASE = 200.0, LT_TOP = LT_OCT, LT_SPO = LT_STEPS;
+static int LT_NN = LT_N;
 struct Tables {
-    W b0[LT_N + 1], db0[LT_N + 1], kp[LT_N + 1], dkp[LT_N + 1];   // b0 (fs 1), kpoly/64
+    W b0[LT_NMAX + 1], db0[LT_NMAX + 1], kp[LT_NMAX + 1], dkp[LT_NMAX + 1];   // b0 (fs 1), kpoly/64
     W th[513], dth[513];                                           // tanh over [-8, 8), 1/32 step
     void build() {
-        for (int i = 0; i <= LT_N; i++) {
-            double fc = 200.0 * std::pow(2.0, (double)i / LT_STEPS);
+        for (int i = 0; i <= LT_NN; i++) {
+            double fc = LT_BASE * std::pow(2.0, (double)i / LT_SPO);
             double fx = fc / (176400.0 * std::sqrt(2.0));
             double b = (0.00045522346 + 6.1922189 * fx) / (1.0 + 12.358354 * fx + 4.4156345 * (fx * fx));
             double k = fx*(fx*(fx*(fx*(fx*(fx+7198.6997)-5837.7917)-476.47308)+614.95611)+213.87126)+16.998792;
             b0[i] = q23(b); kp[i] = q23(k / 64.0);
         }
-        for (int i = 0; i < LT_N; i++) { db0[i] = b0[i + 1] - b0[i]; dkp[i] = kp[i + 1] - kp[i]; }
-        db0[LT_N] = dkp[LT_N] = 0;
+        for (int i = 0; i < LT_NN; i++) { db0[i] = b0[i + 1] - b0[i]; dkp[i] = kp[i + 1] - kp[i]; }
+        db0[LT_NN] = dkp[LT_NN] = 0;
         for (int i = 0; i <= 512; i++) th[i] = q23(std::tanh(-8.0 + i / 32.0));
         for (int i = 0; i < 512; i++) dth[i] = th[i + 1] - th[i];
         dth[512] = 0;
     }
 };
 static Tables T;
+// the body study's table (twin_dump, host_probe, bp_cf): floor Hz, entries an octave; the clamp stays at 20 kHz
+static inline void set_lt(double base, double spo) {
+    LT_BASE = base; LT_SPO = spo; LT_TOP = std::log2(20000.0 / base);
+    LT_NN = LT_N;                                           // the DSP's 215 entries
+    if (LT_TOP * LT_SPO > LT_NN) { std::fprintf(stderr, "set_lt: %g Hz at %g an octave needs more than %d entries\n", base, spo, LT_NN); std::exit(2); }
+    T.build();
+}
 
 // one interpolated lookup: v[i] + f * dv[i], f = the low bits of the index word as Q23
 static inline A lerp(const W* v, const W* dv, int i, W f) { return acc(v[i]) + mpy(f, dv[i]); }
@@ -197,6 +213,7 @@ struct Engine {
     // diagnostic: the oscillator from outside (the reference's, in double); returns osc (not /2)
     double (*oscHook)(void*) = nullptr; void* oscCtx = nullptr;
     bool exactCoef = false;     // diagnostic: b0/kpoly from the formulas (double) instead of tables
+    double satD = 0;            // body study: ladder-input saturation drive (0 = off, the DSP engine as built)
 
     void init(const double* hb2odd, int hb2n, double topHz, const double* hb1odd = nullptr, int hb1n = 0) {
         T.build();
@@ -281,7 +298,7 @@ struct Engine {
         // log cutoff, clamped to 200 Hz .. 20 kHz, then the coefficient tables
         A l = acc(L0_16) + mpy(ES8, MEGF) + mpy(AG8, RC2);
         W L16 = st(l, "L16");
-        const W LMAX = q23(LT_OCT / 16.0);
+        const W LMAX = q23(LT_TOP * (LT_SPO / LT_STEPS) / 16.0);
         if (L16 < 0) L16 = 0;
         if (L16 > LMAX) L16 = LMAX;
         int i = L16 >> 14;                                     // 1/32 octave per entry
@@ -289,7 +306,7 @@ struct Engine {
         W B0 = st(lerp(T.b0, T.db0, i, f), "b0");
         W KP = st(lerp(T.kp, T.dkp, i, f), "kp64");
         if (exactCoef) {
-            double fc = 200.0 * std::pow(2.0, f23(L16) * 16.0), fx = fc / (176400.0 * std::sqrt(2.0));
+            double fc = LT_BASE * std::pow(2.0, f23(L16) * 16.0 * (LT_STEPS / LT_SPO)), fx = fc / (176400.0 * std::sqrt(2.0));
             B0 = q23((0.00045522346 + 6.1922189 * fx) / (1.0 + 12.358354 * fx + 4.4156345 * (fx * fx)));
             KP = q23((fx*(fx*(fx*(fx*(fx*(fx+7198.6997)-5837.7917)-476.47308)+614.95611)+213.87126)+16.998792) / 64.0);
         }
@@ -331,6 +348,10 @@ struct Engine {
             fby = str(mpy(FB_B, fbin) - mpy(FB_B, fbx) + mpy(FB_A, fby), "fby");
             fbx = fbin;
             W y0 = st(sh(acc(hpy), -2) - sh(acc(fby), FBS - 3), "y0");
+            if (satD > 0) {                                       // body study (off by default): the ladder-input soft clip,
+                double v = f23(y0) * 8.0;                         // inside the resonance loop: tanh(D v) / D on the input pair
+                y0 = q23(std::tanh(satD * v) / satD / 8.0);
+            }
             Y1 = str(acc(Y1) + mpy(B2, y0) - mpy(B2, Y1) + mpy(B2, Y2), "y1");
             Y2 = str(acc(Y2) + mpy(B0, Y1) - mpy(B2, Y2) + mpy(B0, Y3), "y2");
             Y3 = str(acc(Y3) + mpy(B0, Y2) - mpy(B2, Y3) + mpy(B0, Y4), "y3");

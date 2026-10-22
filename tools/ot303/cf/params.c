@@ -10,6 +10,10 @@
  * multiplies (libgcc's __muldi3), no 64-bit division, no floating point.
  */
 #include "params.h"
+/* BLACKPYRAMIDS_303 body (the new voice): reference/handoffs/BP_BODY_STUDY.md, tools/ot303/body/gen_body.py */
+#include "body_tables.h"
+uint32_t ot_body_res_q8 = 0xffffffffu;                      /* record.c: the tapered RES, 8.8, for the next cont */
+uint32_t ot_body_acc_q8 = 0xffffffffu;                      /* record.c: the tapered ACCENT, 8.8, for the next note */
 #include "params_const.h"
 
 static ot_w clamp24(int64_t v) {
@@ -72,19 +76,40 @@ void ot_params_cont_q8(const uint8_t k[12], unsigned cut_q8, unsigned env_q8, st
     int64_t l = ((OT_LOG50 * fc) >> 24) - ((sc * off) >> 28);
     c->l0_16 = q23(l, 28 + 4);
     c->es8 = q23(sc, 28 + 3);
+    /* body: the cutoff table starts at OT_LT_BASE_HZ, OT_LT_SPO entries an octave (the DSP indexes 1/32 of the word's
+     * octave unit): the base moves up by log2(200 / floor) and every cutoff word scales by OT_LT_SPO / 32 */
+    c->l0_16 = clamp24((((int64_t)c->l0_16 + OT_LT_OFF_Q23) * OT_LT_SCALE_Q20) >> 20);
+    c->es8 = clamp24(((int64_t)c->es8 * OT_LT_SCALE_Q20) >> 20);
     /* resonance: rs = (1 - e^-3r) / (1 - e^-3) */
-    int64_t y = exp2q(-(int32_t)(k[OT_RES] * OT_RES_ARG24));
+    /* the 303-matched RES taper, 8.8 (record.c), and the ring law: rs x (1 - ring_d RES/127 (fc / 1 kHz)^q) */
+    uint32_t rq8 = ot_body_res_q8 != 0xffffffffu ? ot_body_res_q8 : (uint32_t)k[OT_RES] << 8;
+    int64_t y = exp2q(-(int32_t)(((int64_t)rq8 * OT_RES_ARG24) >> 8));
     int64_t rs = ((((int64_t)1 << 30) - y) * OT_RES_K) >> 30;
+    {
+        unsigned ci = cut_q8 >> 8, cf = cut_q8 & 255u; if (ci > 127) { ci = 127; cf = 256; }
+        int64_t rf = OT_RINGF[ci] + (((int64_t)(OT_RINGF[ci + 1] - OT_RINGF[ci]) * cf) >> 8);          /* Q20 */
+        uint32_t r16 = (rq8 << 16) / (127u * 256u);          /* RES / 127, Q16 (a 32-bit divide) */
+        int64_t m = ((int64_t)1 << 20) - ((((OT_RING_D_Q20 * (int64_t)r16) >> 16) * rf) >> 20);       /* Q20 */
+        rs = (rs * m) >> 20;
+    }
     if (rs > ((int64_t)1 << 30)) rs = (int64_t)1 << 30;
     c->rs = q23(rs, 30);
     int64_t rs2 = (rs * rs) >> 30;
     c->ag_8 = q23(((int64_t)1 << 30) - rs2, 33);
     int64_t p = (rs * (((int64_t)1 << 30) + rs)) >> 30;    /* rs (1 + rs), Q30 */
     c->bg = q23((p * OT_RCP17X8) >> 32, 30);                /* * 8 / 17 */
+    c->bg = clamp24(((int64_t)c->bg * OT_G_MULT_Q20) >> 20);  /* body: the make-up gain x g_mult */
     /* volume: (VOL / 127)^2 */
     /* MT13: VOL 0 silent, 1..64 -30 dB .. the top level, 65..127 the top level driven 0 .. +4.5 dB (the
      * output drive / 8; 0: none, the DSP skips it); the soft attack faded by RES (MT10) */
     c->sc = (ot_w)(((int64_t)OT_SC[k[OT_VOL] & 127] * OT_RTRIM[k[OT_RES] & 127] + 8192) >> 14);   /* MT34: the RES trim */
+    {   /* body: the level follows the cutoff, (fc / 1 kHz)^lg_p, and the output runs 4.4 dB lower (no hard clips) */
+        unsigned ci = cut_q8 >> 8, cf = cut_q8 & 255u; if (ci > 127) { ci = 127; cf = 256; }
+        int64_t lg = OT_LG[ci] + (((int64_t)(OT_LG[ci + 1] - OT_LG[ci]) * cf) >> 8);                   /* Q20 */
+        c->sc = clamp24((((int64_t)c->sc * lg) >> 20) * OT_SC_MULT_Q20 >> 20);
+        /* more level into the VOL drive (VOL 65..127; ramped from VOL 65, so no jump) */
+        if (k[OT_VOL] > 64) c->sc = clamp24(((int64_t)c->sc * OT_DRIVE_Q20[(k[OT_VOL] & 127) - 65]) >> 20);
+    }
     c->gd8 = k[OT_VOL] > 64 ? OT_GD8[(k[OT_VOL] & 127) - 65] : 0;
     c->rc1 = k[OT_RES] >= 115 ? 0 : OT_RC1[k[OT_RES] > 100 ? k[OT_RES] - 100 : 0];
     /* waveform: blend b = WAVE / 127; osc/2 = G (-(1 - b)/2 saw + b/4 tanh(..) + b sqDC / 4); MT29: G the WAVE
@@ -124,11 +149,14 @@ void ot_params_note(const uint8_t k[12], struct ot_note *n) {
     /* accent: on when ACC > 0, amount ACC / 127 (Open303 triggerNote / slideToNote) */
     uint32_t a = k[OT_ACC];
     if (a) {
-        meg(OT_X_ACC, n);                                   /* accent decay 200 ms */
+        meg(OT_X_ACC_BODY, n);                              /* body: the 303's accent decay (tau 68 ms, service notes) */
         n->m_amp_off = OT_M_AMP_OFF_A;                      /* accent release 50 ms */
-        n->ag8 = (ot_w)(((a << 20) + 63) / 127);            /* accentGain / 8 */
+        /* body: the tapered ACCENT in 8.8 (record.c), a << 8 when called without it */
+        uint32_t aq8 = ot_body_acc_q8 != 0xffffffffu && ot_body_acc_q8 ? ot_body_acc_q8 : a << 8;
+        n->ag8 = (ot_w)(((aq8 << 12) + 63) / 127);          /* accentGain / 8 */
+        n->ag8 = clamp24(((int64_t)n->ag8 * OT_LT_SCALE_Q20) >> 20);   /* the cutoff table's scale */
         n->agf = 0xffffff;
-        n->k8_on = clamp24(OT_K8_BASE + (ot_w)(((a << 22) + 63) / 127));   /* (0.45 + 4 acc) / 8 */
+        n->k8_on = clamp24(OT_K8_BASE + (ot_w)(((aq8 << 14) + 63) / 127));   /* (0.45 + 4 acc) / 8 */
     } else {
         /* decay 50 * 40^f ms (MT25: 50 ms .. 2 s; MT16 had Open303 VST's 200 ms .. 2 s): x = X0 2^(-f log2 40) */
         int64_t e2 = exp2q(-(int32_t)(k[OT_DEC] * OT_DEC_ARG24));
@@ -138,7 +166,8 @@ void ot_params_note(const uint8_t k[12], struct ot_note *n) {
         n->agf = 0;
         n->k8_on = OT_K8_BASE;                              /* 0.45 / 8 */
     }
-    n->m_amp_on = OT_M_AMP_ON;
+    n->m_amp_on = OT_M_AMP_ON_BODY;                         /* body: the 303's VCA decay (tau 1.35 s) */
+    n->k8_on = clamp24(((int64_t)n->k8_on * OT_K8_MULT_Q20) >> 20);   /* body: the accent VCA amount */
     n->amp2 = OT_AMP2;
 }
 

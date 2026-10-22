@@ -5,6 +5,7 @@
 // for the builders that place the DSP engine in a firmware image (tools/ot303/hwprobe_image.py).
 // The values are the ones engine_probe.cpp writes on the bench; this prints them instead.
 #include <cstdio>
+#include <cstdlib>
 #include "halfband4x.h"
 #include "halfband2x.h"
 #include "twin.h"
@@ -20,7 +21,14 @@ int main() {
     twin::Engine e;
     e.init(HB2_43_16, 22, 16000.0, HB1_15_18, 8);
     e.meg48 = true; e.inc48 = false; e.FBS = 4;
-    one("LMAX", twin::q23(twin::LT_OCT / 16.0)); one("S70", e.S70); one("C437", e.C437);
+    double lmax = twin::LT_OCT / 16.0;
+    if (const char* lt = std::getenv("OT_LT")) {            // the body study's table: "FLOOR_HZ ENTRIES_AN_OCTAVE"
+        double base, spo;
+        if (std::sscanf(lt, "%lf %lf", &base, &spo) != 2) return 2;
+        twin::set_lt(base, spo);
+        lmax = twin::LT_TOP * (spo / twin::LT_STEPS) / 16.0;
+    }
+    one("LMAX", twin::q23(lmax)); one("S70", e.S70); one("C437", e.C437);
     one("HP1B", e.HP1_B); one("HP1A", e.HP1_A); one("FBB", e.FB_B); one("FBA", e.FB_A);
     one("APB", e.AP_B); one("APA", e.AP_A); one("HP2B", e.HP2_B); one("HP2A", e.HP2_A); one("TOPA", e.TOP_A);
     one("NA1", e.notch.a1); one("NA2", e.notch.a2); one("NA3", e.notch.a3); one("NKK", e.notch.kk);

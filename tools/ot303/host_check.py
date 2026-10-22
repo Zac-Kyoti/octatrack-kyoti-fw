@@ -31,16 +31,17 @@ def main():
     libs = [f'{VEND}/build/source/dsp56kEmu/libdsp56kEmu.a', f'{VEND}/build/source/dsp56kBase/libdsp56kBase.a',
             f'{VEND}/build/source/asmjit/libasmjit.a']
     cf = ROOT / 'tools/ot303/cf'
+    body = []                                   # (the voice's DSP constants: hwprobe_image reads them at import)
     H.write_ytab(OUT / 'ytab.c')
     objs = []
     for src in (cf / 'params.c', cf / 'record.c', OUT / 'ytab.c'):
         obj = OUT / (src.stem + '.o')
-        r = subprocess.run(['cc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', f'-I{cf}', '-c', str(src), '-o', str(obj)],
+        r = subprocess.run(['cc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', *body, f'-I{cf}', '-c', str(src), '-o', str(obj)],
                            capture_output=True, text=True)
         if r.returncode:
             sys.exit(f'{src.name} build failed:\n' + r.stderr[-3000:])
         objs.append(str(obj))
-    r = subprocess.run(['c++', '-std=c++17', '-O2', '-w', *inc, f'-I{cf}', str(ROOT / 'tools/ot303/host_probe.cpp'), *objs, *libs,
+    r = subprocess.run(['c++', '-std=c++17', '-O2', '-w', *body, *inc, f'-I{cf}', str(ROOT / 'tools/ot303/host_probe.cpp'), *objs, *libs,
                         '-o', str(probe)], capture_output=True, text=True)
     if r.returncode:
         sys.exit('probe build failed:\n' + r.stderr[-3000:])
@@ -51,6 +52,8 @@ def main():
         d.mkdir(exist_ok=True)
         (d / 'p1.bin').write_bytes(w24(b['words'])); (d / 'p1.org').write_text(f'{b["org"]:x}\n')
         (d / 'cont.txt').write_text(f'{b["cont"]:x}\n'); (d / 'rawp.txt').write_text(f'{b["rawp"]:x}\n')
+        (d / 'kp.txt').write_text(''.join(f'{f!r} {m!r}\n' for f, m in (H.KP_PTS or [])))
+        (d / 'lt.txt').write_text('%r %r\n' % H.LT_CFG if H.LT_CFG else '')
         (d / 'x.txt').write_text(''.join(f'{a:x} {v:x}\n' for a, v in sorted(b['x'].items())))
         (d / 'syms.txt').write_text(''.join(f'{k} {v & 0xffffff:x} {"Y" if k in b["ysyms"] else "X"}\n'
                                             for k, v in sorted(b['syms'].items())))

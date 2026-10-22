@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-BLACKPYRAMIDS_303: a TB-303 voice as a track machine (shown as BLKPYRAMD), Open303's algorithm on the
-DSP56300. The design, the voicing decisions and the resources: reference/BLACKPYRAMIDS_303.md; the
+BLACKPYRAMIDS_303: a TB-303 voice as a track machine (shown as BLKPYRAMD), built on Open303's algorithm on the
+DSP56300 and recalibrated on the TB-303's own circuit (2026-10-21). The voice's constants and tables come from
+tools/ot303/body/gen_body.py (tools/ot303/cf/body_tables.h, body_dsp.json); what is Open303's and what is new:
+reference/BLACKPYRAMIDS_303.md. The design, the voicing decisions and the resources: reference/BLACKPYRAMIDS_303.md; the
 development record (MT1-MT17, the listening rounds, the hardware diagnostics):
 reference/handoffs/OT303_SCOPE.md.
 

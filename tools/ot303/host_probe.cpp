@@ -166,6 +166,33 @@ int main(int argc, char** argv) {
     const long BIG = 0x7fffff;
     // the DSP host's note state, modelled
     long evc = BIG; int half = 0; twin::W moff = 0;
+    // the new voice's resonance law (DIR/kp.txt: "Hz m" points; tools/ot303/body/bp_render.cpp kpMult): the twin's
+    // kp table x m(fc), computed here on its own, so the table check holds the ColdFire's stream to it
+    { std::ifstream f(dir + "/lt.txt"); double base, spo; if (f >> base >> spo) twin::set_lt(base, spo); }   // the body table
+    {
+        std::ifstream f(dir + "/kp.txt"); std::vector<double> kf, km; double a, b;
+        while (f >> a >> b) { kf.push_back(a); km.push_back(b); }
+        if (!kf.empty()) {
+            auto mult = [&](double hz) {
+                double l = std::log(hz);
+                if (l <= std::log(kf.front())) return km.front();
+                if (l >= std::log(kf.back())) return km.back();
+                for (size_t i = 1; i < kf.size(); i++)
+                    if (l <= std::log(kf[i])) {
+                        double u = std::log(kf[i - 1]), v = std::log(kf[i]);
+                        return km[i - 1] + (km[i] - km[i - 1]) * (l - u) / (v - u);
+                    }
+                return 1.0;
+            };
+            for (int i = 0; i <= twin::LT_N; i++) {
+                double v = twin::T.kp[i] * mult(twin::LT_BASE * std::pow(2.0, (double)i / twin::LT_SPO));
+                v = std::min(std::max(v, -8388608.0), 8388607.0);
+                twin::T.kp[i] = twin::W(std::lround(v));
+            }
+            for (int i = 0; i < twin::LT_N; i++) twin::T.dkp[i] = twin::T.kp[i + 1] - twin::T.kp[i];
+            twin::T.dkp[twin::LT_N] = 0;
+        }
+    }
     const uint32_t YB = sym("YBEG"), YE = sym("YEND");
     if (YE - YB != ot_ylen || YB != ot_ybeg) { std::printf("the Y image's bounds differ from ytab.c\n"); return 1; }
 
@@ -232,6 +259,9 @@ int main(int argc, char** argv) {
         e.C2 = X("C2"); e.C_MEG = X("C_MEG"); e.M_AMP = X("M_AMP"); e.AG8 = X("AG8"); e.AGF = X("AGFM") != 0; e.K8 = X("K8");
         e.MEGS = X("MEGS");                                         // the soft attack's state (RC1, GD8: the record's)
         e.FB_B = X("FBB"); e.FB_A = X("FBA");                       // the machine's feedback high-pass (MT14: 350 Hz)
+        e.HP1_B = X("HP1B"); e.HP1_A = X("HP1A");                   // the pre-filter high-pass and the amp declicker, from
+        e.decl.a1 = X("DA1"); e.decl.a2 = X("DA2"); e.decl.a3 = X("DA3");   // the payload too (the body study changes them)
+        e.HP2_B = X("HP2B"); e.HP2_A = X("HP2A");                   // the post-filter high-pass (the new voice: 110 Hz)
         e.glide = true; e.GLD = X("GLD"); e.ES8 = X("ES8"); e.L0_16 = gyy(sym("L0_16"));   // MT15: the glide's state
         e.INC_T = 0;
         moff = gx(sym("XM") + sym("D_MOFF"));
@@ -331,9 +361,14 @@ int main(int argc, char** argv) {
             if (isB && takeover < 0) takeover = f;
             const ot_voice& vv = isA ? va : vb;                              // MT20: the eased resonance words, as sent
             const ot_cont& c = vv.c;                                         // MT24: made with CUT / ENV's fraction
-            e.CS = c.cs; e.ES8T = c.es8; e.RS = vv.rs; e.BG = vv.bg; e.SC = vv.sc; e.SQ = c.sq != 0;
-            e.W1 = c.w1; e.W2 = c.w2; e.W3 = c.w3; e.L016T = c.l0_16; e.AG_8 = vv.ag_8;
-            e.RC1 = c.rc1; e.GD8 = c.gd8;                                   // MT10: from RES and VOL, every frame
+            e.CS = c.cs; e.ES8T = c.es8; e.RS = vv.rs; e.BG = vv.bg; e.SQ = c.sq != 0;
+            { uint32_t u = rec[2 + 4]; e.SC = sx(((u >> 8) & 0xffff00u) | (u & 0xffu)); }      // the record's level and
+            // drive (the new voice trades them over a few frames crossing VOL 64 / 65; else vv.sc and c.gd8)
+            e.W1 = c.w1; e.W2 = c.w2; e.W3 = c.w3; e.AG_8 = vv.ag_8;
+            { uint32_t u = rec[2 + 12]; e.L016T = sx(((u >> 8) & 0xffff00u) | (u & 0xffu)); }   // the record's cutoff word
+            // (the new voice's accent sweep capacitor moves it; else c.l0_16)
+            e.RC1 = c.rc1;                                                  // MT10: from RES and VOL, every frame
+            { uint32_t u = rec[2 + 11]; e.GD8 = sx(((u >> 8) & 0xffff00u) | (u & 0xffu)); }
             ot_note n{}; if (ev & 1) ot_params_note(k, &n);
             long trg = (ev & 1) ? off : BIG;
             if (ev & OT_EV_OFF) { evc = 0; releases++; }

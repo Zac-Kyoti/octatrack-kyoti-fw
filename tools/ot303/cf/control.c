@@ -36,7 +36,9 @@
  * accent SCALE; a step is accented only by an ACC p-lock, and plays lock x ACC / 127; MT30: the default 100, not
  * 127, so a lock can be turned up from the knob's value; before MT27 ACC 0: an accent was an ACC lock), GATE 63 (half a step), VOL 99 (driven +2.5 dB, MT10's default sound). The 12th slot is
  * hidden (MT13's OSC test switch is gone: the saw runs free, the user's choice on the unit). */
-const uint8_t ot_defaults[12] = {36, 30, 64, 32, 72, 100, 0, 64, 38, 63, 99, 0};
+/* body: the same default sound on the new CUT knob (44 = engine 30), and the 303's gate (GATE 74: 75/128 of a step,
+ * its 3.5 of 6 clocks) and slide (SLID 73: tau 22.8 ms, its 103.3k x 0.22 uF) */
+const uint8_t ot_defaults[12] = {36, 44, 64, 32, 72, 100, 0, 64, 73, 74, 99, 0};
 static const char *const ot_names[12] = {
     "PTCH", "CUT", "RES", "ENV", "DEC", "ACC", "WAVE", "TUNE", "SLID", "GATE", "VOL", ""
 };
@@ -354,7 +356,7 @@ struct ot_qn { uint32_t gl; uint8_t step, slide, call, acc; };
 static struct ot_qn q[8][QN] = {{{0, 0, 0, 0, 0}}};
 static uint8_t qn[8] = {0}, qcall[8] = {0}, qlast[8] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, qlen[8] = {0};
 static uint32_t qctx[8] = {0};          /* the step being scheduled: 1 << 24 | bank << 16 | pattern << 8 | step */
-static struct ot_voice voice[8] = {{{0}, 0, {0}, 0, 0, 0, 0, 0, 0, 0, 0}};
+static struct ot_voice voice[8] = {{{0}, 0, {0}, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
 /* MT26: a push-and-turn (coarse) knob step. The editor writes such a step to the engine's base value at
  * once, without the 1/16-a-frame slew it gives a normal turn (0x40055190: the knob's coarse flag
  * 0x46c7d244 + 20 k + 8 -> 0x400551bc), so CUT / ENV jumped several values. Only the knob writes the
