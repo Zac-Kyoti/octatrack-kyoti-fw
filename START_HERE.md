@@ -167,7 +167,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   what is Open303's and what is new: `reference/BLACKPYRAMIDS_303.md`. Tools: `tools/ot303/body/`.
   Bugbuild `BUG_BP303` (mainos `31e99207…`, `.bin` `13f52793…`, syx `5e9e92eb…`): built, not flashed.
   - The octabam module (`octabam-modules/blackpyramids-303/`) is regenerated for this build (runtime
-    39,736 B, `2c430200…`); its pin move is an octabam PR (this form not flashed yet).
+    39,736 B, `2c430200…`); its pin move is **sambanks/octabam#855 (draft, pin `b74c2f8`)**: every octabam gate
+    passed, the emulator check ALL GOOD on its image; this form not flashed yet.
   - Kept on record, not built: the full resonance easing in CUT's extension, VOL 1–64 through the drive,
     light ladder saturation (`OT303_VOICE_CALIBRATION.md` §7).
   - Open: clean VOL can still hard-clip on bright, low-RES accents (driven VOL never does).

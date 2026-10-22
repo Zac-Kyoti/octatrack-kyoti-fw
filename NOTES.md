@@ -36918,3 +36918,12 @@ no longer applies -> SC 0.1.3 needs an owner-reviewed resident change; waits for
   pin move by an octabam PR. This octabam form not flashed.
 - Kept on record, not built: the full resonance easing in the extension, VOL 1–64 through the drive, light
   ladder saturation (P words via re-rolling the second half-band, ~+60 cycles, core-0 worst case unchecked).
+- **octabam #855 (draft):** pin `5af46f8` -> `b74c2f8` (b74c2f8 only changes the module table's line), on octabam
+  `69a44477`: THIRD_PARTY pin, CHANGELOG Unreleased, the wrapper README / manifest (`proof_note`: this octabam form
+  not flashed with the new voice), the usage page's knob table, README regenerated. `make docs`, `verify-docs`
+  (73 modules, 87 remixes, 0 problems), mkdocs strict, `make reach RUN=1 KEEP=1 TESTS=1`: every gate passed.
+  `make bus REMIX=test/blackpyramids-303` MAIN OS `d30581d6…`; `verify_ot303.py` on it ALL GOOD with
+  `OT303_LOADER_WRITERS=0x400209a4` (octabam's loader zero-fills the reserve before depacking; without the
+  variable the check flags that store, on the previous pin too). Main checkout fast-forwarded, the final
+  BLACKPYRAMIDS_303 and BUG_BP303 files copied into its `out/` (it cannot build BP itself: the DSP toolchain
+  lives in the ot303 worktrees).
