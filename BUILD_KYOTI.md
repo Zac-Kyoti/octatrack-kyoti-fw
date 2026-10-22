@@ -67,17 +67,18 @@ those), as
 alone. MIDI_PLAYS_FREE_FIX writes only its `mainos_` image; to flash it on its own, use the
 no-assembler patch below or wrap it as its builder's header shows.
 
-### The combined image: KYOTI V1.5
+### The combined image: KYOTI V1.6
 
-Every FINAL feature except BLACKPYRAMIDS_303 and VARISPEED_EMUS in one image:
+Every FINAL feature except BLACKPYRAMIDS_303, VARISPEED_EMUS and the light SIDECHAIN_COMPRESSOR
+(SIDECHAIN_COMPRESSOR_BW instead) in one image:
 
 ```sh
 python3 tools/build_kyoti.py
 ```
 
-It writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.5.syx` and `.bin` (OS VERSION `KYOTI V1.5`).
+It writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.6.syx` and `.bin` (OS VERSION `KYOTI V1.6`).
 
-> **Sample memory.** RELOAD_FROM_PROJECT runs from DRAM in V1.5, as in V1.2–V1.3: one 6 KB
+> **Sample memory.** RELOAD_FROM_PROJECT runs from DRAM in V1.5–V1.6, as in V1.2–V1.3: one 6 KB
 > page of the 85.5 MB pool. An octabam-built image (octabam's own remixer) reserves a fixed
 > **10 MiB** whenever any module runs from DRAM.
 

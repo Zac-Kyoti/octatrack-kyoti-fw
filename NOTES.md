@@ -36987,3 +36987,16 @@ older one-knob KFLT filter). The two are the same effect and never share an imag
   is applied at wrap), BUG_QLREC `df4a2498…`, KYOTI V1.5 `7b50baac…` (syx `cb0ee292…`, card .bin `0f1b4fec…`; version
   name unchanged). README entry updated (toast text, check mark). The octabam form is not flashed and octabam's
   pin of this repo is not moved yet; that needs a pin PR on sambanks/octabam.
+
+## 2026-10-22 (`sc-bw`) — KYOTI V1.6 PROMOTED FINAL (flashed: all good)
+
+KYOTI V1.6 = V1.5 with SIDECHAIN_COMPRESSOR_BW in place of the light SIDECHAIN_COMPRESSOR. The user
+flashed the first V1.6 build (mainos `6a6d04b6…`, syx `99863134…`): all good. Meanwhile the
+`qlrec-toast` session promoted QUANTIZE_LIVE_REC_TOGGLE (140C_QLR2) and re-pinned V1.5 (9c890bb), so
+V1.6 rebuilt on main carries the newer QLR: patch_qlrec 176 -> 196 B moves patch_pattern_led,
+patch_mutemode and rtm_mask 20 B up SAFE (624 B left). Diff vs the flashed V1.6: only those units
+(0x400d2834..) and one-byte pointers to them at their detour/reference sites; nothing in B-W's unit
+or either DSP payload. Promoted that build on the user's instruction: mainos
+`bc86d2b73ffd2701bd5ac07043aa51557e990441b2fb5d1712dee124140a6ba1`, syx `ea11c681…`, card .bin
+`ab3d153b…`. V1.5 builds from tag `ref/kyoti-v1.5-2026-10-22` (9c890bb). Docs: README, FLASHING,
+BUILD_KYOTI, START_HERE.
