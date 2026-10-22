@@ -6,6 +6,10 @@
             KGN   the key's gain, about -24..+24 dB around 64
             MON   ON = hear the processed key instead of the track (audition)
 
+The light version: a smaller DSP section, but its one-knob KFLT isolates the key less well
+than SIDECHAIN_COMPRESSOR_BW's base-width filter (Sidechain Compressor B-W,
+octabam-modules/sidechain-compressor-bw). The same effect: one per remix.
+
 Hardware-confirmed in this octabam form (the author's MKI, 2026-10-04; see MEASURED). The
 2026-10-15 one-pass tap is hardware-confirmed in the standalone image (2026-10-16); in this
 layout it leaves Y and the shared window word for word as the code before it did
@@ -124,7 +128,8 @@ MODULE = Module(
     key="SIDECHAIN_COMPRESSOR",
     kind=Kind.DSP_EFFECT,
     doc="Stock COMPRESSOR with a side-chain KEY from any of T1-T8, a key filter, "
-        "key gain and a key listen switch on page 2.",
+        "key gain and a key listen switch on page 2 (the light version; "
+        "SIDECHAIN_COMPRESSOR_BW has the base-width key filter).",
     menu=MenuEntry(fx2_id=0x18, donor_desc=E, abbr=b"COMP", fullname=b"COMPRESSOR",
                    replaces="COMPRESSOR", stock_dsp=True),
     # Slots 0-6 are stock COMPRESSOR's, unchanged: on a stock_dsp clone a Param() keeps the

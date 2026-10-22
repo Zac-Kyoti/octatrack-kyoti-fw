@@ -108,9 +108,39 @@ An external key input for the stock DynamiX **COMPRESSOR**, on the effect's page
 The DSP space comes from **SPRING REVERB**, which leaves the FX2 list; a project that
 still uses it loads it as NONE.
 
+This is the **light** version: it takes less of the DSP's word space, but its one-knob key
+filter does not isolate the key as well as the base-width filter of SIDECHAIN_COMPRESSOR_BW
+below. The two never go into one image.
+
 **Hardware:** confirmed.\
 **Final build:** [`tools/build_sidechain_compressor.py`](tools/build_sidechain_compressor.py) →
 `OCTATRACK_OS1.40C_SIDECHAIN_COMPRESSOR`
+
+### SIDECHAIN_COMPRESSOR_BW
+
+**Sidechain Compressor B-W**: the same external key input for the stock DynamiX
+**COMPRESSOR**, with a base-width key filter. Page 2:
+
+- `MON` — auditions the filtered key in place of the track; switching it, or changing `KEY`
+  while it is on, fades instead of clicking
+- `KEY` — which of the eight audio tracks drives the compression, even while it is muted
+- `KGN` — the key's gain, about −24 to +24 dB; centre is unity
+- `KBAS` — the filter's base: a high-pass (18 dB/oct) at `OFF` or 20 Hz to 19.6 kHz, shown in
+  **Hz** (`40`, `1.2k` = 1.2 kHz)
+- `KWID` — the filter's width: a low-pass (12 dB/oct) set this many **octaves** above `KBAS`,
+  `0.5` to `9.9` or `OFF`. With `KBAS` at `OFF` it counts up from 20 Hz: a plain low-pass
+
+The base-width filter was added to isolate the key better — a kick's fundamental, for
+example, with `KBAS` cutting the sub-sonic rumble below it — which reduces distortion and keeps
+the compression smooth at short attack and release settings. The two knobs cannot cross.
+
+The DSP space comes from **SPRING REVERB**, as above. A project saved with
+SIDECHAIN_COMPRESSOR, or with KYOTI V1.5 or earlier, keeps each compressor's `KEY`; set its
+`KGN`, `KBAS`, `KWID` and `MON` again.
+
+**Hardware:** confirmed.\
+**Final build:** [`tools/build_sidechain_compressor_bw.py`](tools/build_sidechain_compressor_bw.py) →
+`OCTATRACK_OS1.40C_SIDECHAIN_COMPRESSOR_BW`
 
 ### BLACKPYRAMIDS_303
 
@@ -272,7 +302,7 @@ Three fixes to stock bugs. Each has its own build.
 
 ### Each feature + BATCH_BUGFIXES
 
-One image per feature above, with all three BATCH_BUGFIXES folded in — ten images, for
+One image per feature above, with all three BATCH_BUGFIXES folded in — eleven images, for
 flashing a single feature without giving up the bug fixes. The features are not combined
 with each other.
 
@@ -283,7 +313,7 @@ flashed as such.\
 
 ### KYOTI V1.5
 
-Every feature above except BLACKPYRAMIDS_303 and VARISPEED_EMUS, and all three BATCH_BUGFIXES,
+Every feature above except BLACKPYRAMIDS_303, VARISPEED_EMUS and SIDECHAIN_COMPRESSOR_BW, and all three BATCH_BUGFIXES,
 in **one image**. The boot splash and SYSTEM STATUS → OS VERSION read `KYOTI V1.5`. It
 replaces KYOTI V1.4, V1.3, V1.2 and V1.1, and the withdrawn V1.0 (see below).
 

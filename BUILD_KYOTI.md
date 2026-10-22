@@ -15,7 +15,7 @@ reproducible from the stock file.
 - **Your own copy of the official OS 1.40C** — from
   <https://www.elektron.se/support-downloads/octatrack-mkii>. The same image serves MKI
   and MKII.
-- *For SIDECHAIN_COMPRESSOR and VARISPEED_EMUS* — the DSP56300 toolchain
+- *For SIDECHAIN_COMPRESSOR, SIDECHAIN_COMPRESSOR_BW and VARISPEED_EMUS* — the DSP56300 toolchain
   built into `vendor/dsp56300/`, and the external-RE clone cache
   (`python3 tools/refs/sync.py`). Every other build is ColdFire-only.
 
@@ -39,6 +39,7 @@ One command per final feature. Each writes its image to `out/`:
 | MUTE_MODES | `python3 tools/build_mute_modes.py` | `140C_KYOTI` |
 | DIRECT_JUMP_KYOTI | `python3 tools/build_direct_jump_kyoti.py` | `140C_KDJ7` |
 | SIDECHAIN_COMPRESSOR | `python3 tools/build_sidechain_compressor.py` | `140C_KYOTI` |
+| SIDECHAIN_COMPRESSOR_BW | `python3 tools/build_sidechain_compressor_bw.py` | `140C_KYOTI` |
 | RELOAD_FROM_PROJECT | `python3 tools/build_reload_from_project.py` | `140C_KYOTI` |
 | QUANTIZE_LIVE_REC_TOGGLE | `python3 tools/build_quantize_live_rec_toggle.py` | `140C_KYOTI` |
 | ERASE_EMPTY_TRIGLESS_LOCKS | `python3 tools/build_erase_empty_trigless_locks.py` | `1.40C` |

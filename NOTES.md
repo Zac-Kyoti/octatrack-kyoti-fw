@@ -36929,3 +36929,28 @@ no longer applies -> SC 0.1.3 needs an owner-reviewed resident change; waits for
   lives in the ot303 worktrees).
 - **2026-10-21: the octabam form flashed** (`remixes/test/blackpyramids-303`, the recalibrated voice) on the author's
   MKI: all good. Module docs and #855 updated; #855 sent (ready for review).
+
+## 2026-10-22 (`sc-bw`) — SIDECHAIN_COMPRESSOR_BW ("Sidechain Compressor B-W") PROMOTED FINAL (flashed as 140C_SCKF4)
+
+The user flashed the major version's base-width build (140C_SCKF4, sc-keyfilt 827b214: page 2
+RMS · MON · KEY · KGN · KBAS · KWID) -- "everything works as expected", load fine at 1 COMPRESSOR
++ 7 DJ EQ and 4 + 4 per core -- and promoted it under a new name, **SIDECHAIN_COMPRESSOR_BW**,
+beside SIDECHAIN_COMPRESSOR, which stays FINAL as the **light** version (smaller DSP section, the
+older one-knob KFLT filter). The two are the same effect and never share an image.
+- Own sources, copied from sc-keyfilt 827b214 under new names so the light FINAL keeps its files:
+  tools/build_sidechain_compressor_bw.py, tools/patch_sc_bw_dsp3.asm, tools/patch_sidechain_bw.s
+  (unit `patch_sidechain_bw`), tools/emu_sc_bw_dsp3.py (scratch out/dsp/bw), tools/sc_keyfilt.py.
+  The rebuilt standalone is byte-identical to the flashed SCKF4: mainos
+  `91926080396df9053aaff580a725daacdeacd672a4ecfddf34053daaf9efe69d` = FINAL pin.
+- Bugbuild `BUG_SCBW`: mainos_sidechain_compressor_bw_batch_bugfixes.bin
+  `e4800e20eaefb6cbe950e2ef48870a19da790c71d9f3b808bf92ba1c213f85ef` (fix caves 0x400d6500..6694,
+  0x400d7b00: clear of the B-W unit 0x400d7000..7258). Not flashed as such.
+- emu_sc_bw_dsp3 ALL GOOD (both layouts). Docs: README (B-W entry with the units -- KBAS in Hz,
+  KWID in octaves above KBAS -- and why: better key isolation, less distortion and smoother
+  compression at short attack/release; the light entry says it is the light version), FLASHING
+  §4, BUILD_KYOTI, START_HERE §5, CLAUDE.md feature names.
+- octabam: new module octabam-modules/sidechain-compressor-bw (manifest: unit `scbw_cf`, ColdFire
+  reference 4984aba2…, four hooks incl. scinit, store octabam.sidechain-compressor-bw, conflicts
+  SIDECHAIN_COMPRESSOR) + README; the light module's README/manifest say "light version".
+- KYOTI V1.6 (SIDECHAIN_COMPRESSOR_BW instead of the light one) is built in this worktree but
+  committed separately and not published (WIP until the user flashes/promotes it).

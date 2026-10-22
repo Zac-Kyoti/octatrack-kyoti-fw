@@ -138,6 +138,7 @@ builder's FINAL entry and the old builder is deleted. There is no superseded tie
 | MUTE_MODES | `build_mute_modes.py` | `octabam-modules/mute-modes` |
 | DIRECT_JUMP_KYOTI | `build_direct_jump_kyoti.py` | `octabam-modules/direct-jump-kyoti` |
 | SIDECHAIN_COMPRESSOR | `build_sidechain_compressor.py` | `octabam-modules/sidechain-compressor` (octabam #565; on hardware 2026-10-04) |
+| SIDECHAIN_COMPRESSOR_BW (Sidechain Compressor B-W) | `build_sidechain_compressor_bw.py` (sources `patch_sc_bw_dsp3.asm`, `patch_sidechain_bw.s`, model `sc_keyfilt.py`) | `octabam-modules/sidechain-compressor-bw` |
 | RELOAD_FROM_PROJECT | `build_reload_from_project.py` | `octabam-modules/reload-from-project` |
 | QUANTIZE_LIVE_REC_TOGGLE | `build_quantize_live_rec_toggle.py` | `octabam-modules/quantize-live-rec-toggle` |
 | ERASE_EMPTY_TRIGLESS_LOCKS | `build_erase_empty_trigless_locks.py` | `octabam-modules/erase-empty-trigless-locks` |

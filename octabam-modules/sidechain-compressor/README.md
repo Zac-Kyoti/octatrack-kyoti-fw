@@ -1,7 +1,13 @@
 # SIDECHAIN_COMPRESSOR
 
 Stock **COMPRESSOR** with a **side-chain KEY**: any track, T1 to T8, can drive its
-detector. Four controls join RMS on page 2:
+detector. Four controls join RMS on page 2.
+
+This is the **light** version: its DSP section is smaller (465 words), but its one-knob key
+filter (KFLT, 6 dB/oct) does not isolate the key as well as the base-width filter of
+**SIDECHAIN_COMPRESSOR_BW** (Sidechain Compressor B-W, `../sidechain-compressor-bw`), which
+reduces distortion and keeps the compression smooth at short attack and release settings. The
+two are the same effect: one per remix.
 
 | knob | what it does |
 |---|---|
