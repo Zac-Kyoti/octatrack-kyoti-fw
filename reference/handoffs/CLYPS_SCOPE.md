@@ -298,11 +298,21 @@ machine/FX back the same way.
 
 **Scene locks come too** (the user, 2026-10-23): the track's 16 scene rows
 (`+0x662+(s·8+t)·0x20`, 512 B) and its per-scene bytes (`+0x1662+10s+t`), about 682 B per audio
-track. MIDI tracks have no scene locks. Open (O20): should the LFO designer wave
-(`+0x1702+16t` + slope `+0x1782+2t`, 18 B) come too? Stock leaves it behind, so an LFO set to a
-designer wave would play the destination Part's.
+track. MIDI tracks have no scene locks.
 
-Part-slice originals with scene locks: 512 × 682 + 512 × 68 ≈ **384 KB**.
+**The LFO designer wave comes too** (decided, was O20): `+0x1702+16t` + slope `+0x1782+2t`, 18 B
+(MIDI: `+0x1792+16m` / `+0x1812+2m`).
+
+**Stock TRACK COPY leaves it behind** (C, re-read 2026-10-23: `0x40029754` copies the record plus six
+Part blocks of 0x1e/0x18/0x1e/5/0x1e/0xc B into clipboard `+0x91f..+0x9a1`, and nothing else). A
+pasted track keeps WAVE = designer but plays the destination track's designer. It shows only when
+pasting to another track, or into a pattern on another Part.
+- **Probable stock bug, not yet observed.** The user's 2-minute hardware check is in NOTES.
+- If confirmed, it is a BATCH_BUGFIXES candidate (working name TRACK_PASTE_DESIGNER_FIX). Copy,
+  paste and the undo snapshot each carry the 18 B as well. It is ~60–100 B of code.
+- In KYOTI it has to compose with VARISPEED's detour on `0x4002b654`.
+
+Part-slice originals with scene locks and designer: 512 × 700 + 512 × 86 ≈ **393 KB**.
 
 **How to choose it per load (decided 2026-10-23).**
 - The view header has a mode field reading `SEQ`.
@@ -360,7 +370,6 @@ through in Clyps mode: it switches between audio and MIDI tracks, and the view a
 |---|---|---|---|
 | **O16** | The 4 page LEDs beside [PAGE] in Clyps mode (dies `0x48..0x4f`) | steady, in the grid's own colours: **red** = the active track plays its original (nothing to restore); **green** = Clyps changed it ([PAGE] restores); **yellow** = restore cued. While [FUNC] is held they show the same for the whole pattern (restore-all). Plus a 16-dot strip in the view header for all tracks | the user's idea: all 4 red = original, all 4 flashing red = not original |
 | **O17** | A project-wide "restore everything" | not in v1 | a gesture that restores all originals in all patterns |
-| **O20** | FULL loads: does the LFO designer wave come too? | yes (18 B; avoids stock's gap) | no, as stock |
 | **O10** | Encoders in the view | swallowed, as in stock lists | passed through |
 | **O11** | Arranger running | Clyps does nothing (RELOAD's `ARR_ACT` gate) | works |
 | **O12** | Standalone [BANK] alone | carry RELOAD's SELECT-BANK-on-release deferral | stock [BANK]; SELECT BANK flashes when the chord starts with [BANK] |

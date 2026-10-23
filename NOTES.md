@@ -37662,3 +37662,14 @@ ignored). Base: the user's OT DEMO export, bank 1.
 User decisions this round: a DJ-on load lands like DIRECT_JUMP_KYOTI; [YES] with the chord held =
 DJ toggle; saved sequences are destroyed by a power cycle or a project reload; O1 (keep vs restore)
 is open, with the "originals" proposal in scope §1.5b.
+
+**Session 131 cont. (3) (2026-10-23)** — CLYPS decisions: FULL loads (sequence + machine/FX, scene
+locks and LFO designer included; [FUNC] held = momentary `FULL` highlight); [FUNC]+[PAGE] =
+restore all; held/latched states; keep + guaranteed originals (≈ 9 MiB DRAM). Single-track Part
+apply `0x40001f18(bank, part, t)` found (C), to be used for FULL landings.
+**Candidate stock bug:** TRACK COPY `0x40029754` leaves the LFO designer behind (C: clipboard
+`+0x91f..+0x9a1` holds only the six Part blocks), so a pasted track with WAVE = designer plays the
+destination track's designer. Not yet observed on the unit. The user's check: on T1 set an LFO WAVE
+to the designer, draw an obvious shape, aim it at volume with high depth; leave T2's designer
+different; GRID REC copy T1, paste onto T2; does T2's LFO follow T1's shape? If not → a
+BATCH_BUGFIXES candidate (TRACK_PASTE_DESIGNER_FIX, working name); MIDI tracks likewise.
