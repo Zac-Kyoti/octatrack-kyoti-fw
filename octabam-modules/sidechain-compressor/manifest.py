@@ -22,10 +22,14 @@ old MON; MON comes up OFF), so it sounds different until KGN, KBAS, KWID and MON
 Hardware-confirmed in the standalone image (the author's MKI, 2026-10-22, 140C_SCKF4: page 2,
 the KBAS / KWID readouts and ranges, the kick-fundamental case at short attack and release,
 MON and KEY declick, load with 1 + 7 and 4 + 4 COMPRESSOR / DJ EQ per core) and in the KYOTI
-V1.6 combined image. This octabam form is not flashed yet.
+V1.6 combined image. The KEY switch and KWID's clip (2026-10-23): hardware-confirmed in the
+standalone image. This octabam form is not flashed yet.
 
-COLDFIRE. One ROM unit, sc_cf (tools/patch_sidechain.s, 600 B): MON's inverted ON/OFF, KEY's
-formatter and list widget, KBAS's Hz and KWID's octave formatters, and sc_norm, reached by a
+COLDFIRE. Two ROM units. sc_ui (tools/ui_switch.s, 616 B; shared with VARISPEED's QUAN): KEY's
+widget, a 9-position rotary switch (stock CHORUS TAPS's switch, as Spectrum's LADR, in 22.5-degree
+steps: stock's five glyphs and four of its own), and KWID's, the stock knob plus the link clip to
+KBAS, which the FX SETUP window does not draw itself. sc_cf (tools/patch_sidechain.s, 600 B): MON's
+inverted ON/OFF, KEY's formatter, KBAS's Hz and KWID's octave formatters, and sc_norm, reached by a
 `jsr` detour at the first instruction of both page-2 copiers (0x4000cae8, its twin
 0x40003d1c). A COMPRESSOR saved on stock firmware holds stock's slot 8..11 defaults
 0x7f/0/0/0, i.e. KEY 127; sc_norm resets any COMPRESSOR whose KEY is above 8 to MON OFF,
@@ -100,19 +104,22 @@ LINKED = (
     Linked("sc_cf", os.path.join(_TOOLS, "patch_sidechain.s"),
            reference=(0x400d7000,
                       "4984aba27a91d2bc526219f82f1b3311ef5716443d2b682d3c04204a815a2f9f")),
+    Linked("sc_ui", os.path.join(_TOOLS, "ui_switch.s"),
+           reference=(0x400d7260,
+                      "74a4eb39abff1ac1037855c337be281cf922100dc539a5d39b3d7662655be8d7")),
 )
 
-# PLACE: where octabam links sc_cf. CAVE (the default) is the ColdFire free
-# region, as the standalone image; DRAM puts it in octabam's platform runtime
-# (as rl3 and dj7), still re-linked at 0x400d7000 and compared with the bytes
-# above. The store id is octabam.sidechain-compressor, the id octabam already files this effect's
+# PLACE: where octabam links sc_cf and sc_ui. CAVE (the default) is the ColdFire free
+# region, as the standalone image; DRAM puts them in octabam's platform runtime
+# (as rl3 and dj7), still re-linked at 0x400d7000 / 0x400d7260 and compared with the
+# bytes above. The store id is octabam.sidechain-compressor, the id octabam already files this effect's
 # page defaults under (its module directory).
 # tools/build_sidechain_compressor.py does not read this manifest.
 PLACES = ("CAVE", "DRAM")
 
 
 def _variant(values):
-    """PLACE -> sc_cf's placement."""
+    """PLACE -> sc_cf's and sc_ui's placement."""
     if values["PLACE"] == "DRAM":
         return {"linked": tuple(dataclasses.replace(u, dram=True) for u in LINKED)}
     return {}
@@ -144,7 +151,7 @@ MODULE = Module(
               labels=("ON", "OFF"),
               doc="ON: this track plays its processed key instead (audition); stored 1 = OFF"),
         Param(b"KEY", 0, count=9, active=True,
-              formatter_word=("sc_cf", "key_fmt"), widget_word=("sc_cf", "key_list_fix"),
+              formatter_word=("sc_cf", "key_fmt"), widget_word=("sc_ui", "sw9_widget"),
               labels=("OFF", "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"),
               doc="the track whose audio drives the detector; OFF = stock (self)"),
         Param(b"KGN", 64, count=128, active=True,
@@ -154,7 +161,7 @@ MODULE = Module(
               formatter_word=("sc_cf", "hp_fmt"), widget_word=0,
               doc="the key's high-pass, 18 dB/oct: OFF, then 20 Hz to 19.6 kHz"),
         Param(b"KWID", 127, count=128, active=True, link=True,
-              formatter_word=("sc_cf", "lp_fmt"), widget_word=0,
+              formatter_word=("sc_cf", "lp_fmt"), widget_word=("sc_ui", "clip_knob"),
               doc="the key's low-pass, 12 dB/oct: 0.5-9.9 octaves above KBAS (20 Hz if OFF), then OFF"),
     ),
     linked=LINKED,

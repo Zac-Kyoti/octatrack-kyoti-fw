@@ -35,7 +35,8 @@
 |      clip_knob   (x, y, idx, value, flags, fmt, canvas): the knob with the clip on its left
 |
 | An includer that needs neither sets UIS_NO_SW3 / UIS_NO_CLIP before including this file
-| (VARISPEED: no sw3_draw, no clip_knob; VARISPEED_EMUS: no clip_knob).
+| (VARISPEED: no sw3_draw, no clip_knob; VARISPEED_EMUS: no clip_knob), and UIS_LOCAL to keep
+| its copy's symbols local (octabam links DRAM units together: SIDECHAIN's sc_ui exports them).
 
         .equ    SW5,      0x40047254    | stock 5-position switch widget
         .equ    SW3,      0x40047424    | stock 3-position switch widget
@@ -47,6 +48,7 @@
         .equ    SPRINTF,  0x40013a08
         .equ    STR_D,    0x400b465d    | "%d"
 
+        .ifndef UIS_LOCAL               | an includer's private copy exports nothing
         .global sw9_widget
         .global sw9_draw
         .ifndef UIS_NO_SW3
@@ -54,6 +56,7 @@
         .endif
         .ifndef UIS_NO_CLIP
         .global clip_knob
+        .endif
         .endif
 
         .text

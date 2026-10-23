@@ -48,7 +48,8 @@ author's MKI on 4 Oct 2026).
 | file | what it is |
 |---|---|
 | `manifest.py` | the octabam module declaration: one ROM unit, two `jsr` detours, the COMPRESSOR row, four DSP hooks |
-| `../../tools/patch_sidechain.s` | the ColdFire unit `sc_cf`: MON's, KEY's, KBAS's and KWID's formatters, KEY's list widget, `sc_norm` |
+| `../../tools/patch_sidechain.s` | the ColdFire unit `sc_cf`: MON's, KEY's, KBAS's and KWID's formatters, `sc_norm` |
+| `../../tools/ui_switch.s` | the ColdFire unit `sc_ui` (shared with VARISPEED): KEY's 9-position rotary switch, KWID's knob with the link clip |
 | `../../tools/patch_sc_dsp3.asm` | the DSP code: `sctap`, `scdet` (key filters, KEY declick), `moncommit` (MON crossfade), `scinit` |
 | `../../tools/sc_keyfilt.py` | the key filters' table, constants and bit-exact model |
 | `../../tools/sc_tables.py` | the KEY GAIN table |
@@ -82,10 +83,10 @@ because another effect in the slot may have used those words.
 | slot | label | formatter | widget |
 |---|---|---|---|
 | 7 | MON (stored inverted: 1 = OFF) | `sc_cf:mon_fmt` | stock switch `0x40046f10` |
-| 8 | KEY | `sc_cf:key_fmt` | `sc_cf:key_list_fix` |
+| 8 | KEY | `sc_cf:key_fmt` | `sc_ui:sw9_widget`: a 9-position rotary switch |
 | 9 | KGN | stock bipolar `0x4003c7a0` | 0 (a plain knob) |
 | 10 | KBAS | `sc_cf:hp_fmt` | 0 |
-| 11 | KWID | `sc_cf:lp_fmt` | 0 |
+| 11 | KWID | `sc_cf:lp_fmt` | `sc_ui:clip_knob`: the stock knob and the link clip to KBAS |
 
 KEY stays in slot 8, so MUTE_MODES' muted-KEY exemption works as before. `sc_norm` resets a
 COMPRESSOR saved on stock firmware (KEY above 8) to MON OFF, KEY OFF, KGN 64, KBAS OFF, KWID
@@ -93,10 +94,10 @@ OFF. A COMPRESSOR saved with the previous version: see "Changed on 22 Oct 2026" 
 
 ## Placement in octabam (PLACE)
 
-| PLACE | `sc_cf` |
+| PLACE | `sc_cf`, `sc_ui` |
 |---|---|
 | `CAVE` (default) | the ColdFire free region, as in the standalone image |
-| `DRAM` | octabam's platform runtime; still re-linked at `0x400d7000` and compared with the author's bytes |
+| `DRAM` | octabam's platform runtime; still re-linked at `0x400d7000` / `0x400d7260` and compared with the author's bytes |
 
 ## Claims
 
