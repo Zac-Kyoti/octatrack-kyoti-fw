@@ -2,18 +2,18 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-KYOTI V1.6 -- every FINAL feature in one image except BLACKPYRAMIDS_303, VARISPEED_EMUS and
-SIDECHAIN_COMPRESSOR (the light version; SIDECHAIN_COMPRESSOR_BW takes its place).
+KYOTI V1.6 -- every FINAL feature in one image except BLACKPYRAMIDS_303 and VARISPEED_EMUS.
 
     MUTE MODE (OT / OTFX / OTFX-T / DT-T)      QUANTIZE LIVE REC toggle
-    SIDECHAIN COMPRESSOR B-W (cross-core)      TRIGLESS-LOCK AUTO-REMOVE
+    SIDE-CHAIN COMPRESSOR (cross-core)         TRIGLESS-LOCK AUTO-REMOVE
     RELOAD FROM PROJECT (RELOAD_FROM_PROJECT chords)       DIRECT JUMP V7.0.1
     REC TRIG MUTE ([TRK]+[NO]/[YES], CC 80)    VARISPEED (TSTR VARI + QUAN)
     the bug fixes: MIDI_PLAYS_FREE_FIX, PATTERN LED, PART_CHANGE_CARRYOVER_FIX
 
-V1.6 vs V1.5 (FINAL 2026-10-22, flashed; V1.5 builds from tag ref/kyoti-v1.5-2026-10-22): SIDECHAIN_COMPRESSOR_BW (Sidechain
-Compressor B-W, FINAL 2026-10-22: base-width key filter KBAS / KWID, MON on page 2's slot 7)
-replaces SIDECHAIN_COMPRESSOR. Its ColdFire unit is 600 B (338 before), still in SAFE; its DSP
+V1.6 vs V1.5 (FINAL 2026-10-22, flashed; V1.5 builds from tag ref/kyoti-v1.5-2026-10-22): SIDECHAIN_COMPRESSOR
+is the base-width version (FINAL 2026-10-22: base-width key filter KBAS / KWID, MON on page 2's
+slot 7; the previous one-knob KFLT version builds, WIP, as SIDECHAIN_COMPRESSOR light). Its
+ColdFire unit is 600 B (338 before), still in SAFE; its DSP
 section, 677 words, still in SPRING REVERB's P module. MUTE MODE's muted-KEY exemption follows
 it (KEY stays in slot 8). A COMPRESSOR saved under V1.5 loads with a different page 2 (README).
 
@@ -121,8 +121,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
 import dram                                    # noqa: E402  (tools/dram/dram.py)
 
 gate(__file__, note="""
-KYOTI V1.6: every FINAL feature except BLACKPYRAMIDS_303, VARISPEED_EMUS and the light
-SIDECHAIN_COMPRESSOR (SIDECHAIN_COMPRESSOR_BW instead) in one image,
+KYOTI V1.6: every FINAL feature except BLACKPYRAMIDS_303 and VARISPEED_EMUS in one image,
 nothing placed in the parameter-page descriptor table (V1.0, withdrawn 2026-10-06, crashed
 because it did). RELOAD_FROM_PROJECT in DRAM.
 """)
@@ -174,7 +173,7 @@ PLAN = {
     "CAVE":  ["patch_varispeed",                   # first: 0x400d6500, VARISPEED's own address (frame ISR)
               "patch_directjump_v7", "patch_softmute", "patch_partreapply"],
     "SAFE":  ["personalize_getters", "personalize_setters", "personalize_labels",
-              "patch_sidechain_bw",                # COMPRESSOR page formatters (B-W)
+              "patch_sidechain",                   # COMPRESSOR page formatters
               "patch_trigscale",                   # MIDI_PLAYS_FREE_FIX
               "patch_qlrec",                       # [PLAY]/[REC] key handlers
               "patch_pattern_led",                 # EMPTY_PATTERN_LED_FIX (CAVE is full since V1.2)
@@ -202,8 +201,8 @@ FEATURES = {
                      "patch_mutemode": "patch_mutemode_dt.bin",
                      "personalize_labels": 68, "personalize_getters": 68,
                      "personalize_setters": 68}),
-    "SIDECHAIN_COMPRESSOR_BW": ("build_sidechain_compressor_bw.py", "mainos_sidechain_compressor_bw.bin", "prep",
-                                {"patch_sidechain_bw": "patch_sidechain_bw.bin"}),
+    "SIDECHAIN_COMPRESSOR": ("build_sidechain_compressor.py", "mainos_sidechain_compressor.bin", "prep",
+                             {"patch_sidechain": "patch_sidechain.bin"}),
     "RELOAD_FROM_PROJECT": ("build_reload_from_project.py", "mainos_reload_from_project.bin", "prep",
                 {"patch_reload3": "patch_reload3.bin"}),
     "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "mainos_direct_jump_kyoti.bin", "prep",
@@ -231,10 +230,10 @@ FLAGS = {"DIRECT_JUMP_KYOTI": {"dj_mode_in_cave": True,
 def flags_for(feat):
     """FLAGS, plus the ones that depend on what else is in the image.  MUTE MODE's SIDE-CHAIN
     KEY exemption (Session 116: a muted KEY track keeps feeding the key and MON, whatever
-    MUTE MODE says) only exists when SIDE-CHAIN does -- a --without SIDECHAIN_COMPRESSOR_BW image
+    MUTE MODE says) only exists when SIDE-CHAIN does -- a --without SIDECHAIN_COMPRESSOR image
     drops it too."""
     f = dict(FLAGS.get(feat, {}))
-    if feat == "MUTE_MODES" and "SIDECHAIN_COMPRESSOR_BW" in FEATURES:
+    if feat == "MUTE_MODES" and "SIDECHAIN_COMPRESSOR" in FEATURES:
         f["mutemode_sc_key"] = True
     return f
 # bytes two features may both write, with identical values (SPRING REVERB's removal)
@@ -428,11 +427,11 @@ def apply_without(argv):
         sys.exit(f"--without: unknown feature(s) {bad}; choose from {sorted(FEATURES)}")
     for d in drop:
         del FEATURES[d]
-    if "SIDECHAIN_COMPRESSOR_BW" not in FEATURES:
+    if "SIDECHAIN_COMPRESSOR" not in FEATURES:
         del RECLAIM_WHOLE["SPRING"]          # nothing removes SPRING any more: not dead
     if "MUTE_MODES" not in FEATURES:
         del RECLAIM_WHOLE["PERS1"], RECLAIM_WHOLE["PERS2"]
-    short = {"MUTE_MODES": "MM", "QUANTIZE_LIVE_REC_TOGGLE": "QL", "SIDECHAIN_COMPRESSOR_BW": "SC", "ERASE_EMPTY_TRIGLESS_LOCKS": "TL",
+    short = {"MUTE_MODES": "MM", "QUANTIZE_LIVE_REC_TOGGLE": "QL", "SIDECHAIN_COMPRESSOR": "SC", "ERASE_EMPTY_TRIGLESS_LOCKS": "TL",
              "RELOAD_FROM_PROJECT": "RL", "DIRECT_JUMP_KYOTI": "DJ",
              "MIDI_PLAYS_FREE_FIX": "PF", "EMPTY_PATTERN_LED_FIX": "PL", "PART_CHANGE_CARRYOVER_FIX": "PR",
              "REC_TRIG_MUTE": "RTM", "VARISPEED": "VS"}

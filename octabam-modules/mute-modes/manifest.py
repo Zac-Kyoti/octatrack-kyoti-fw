@@ -23,10 +23,9 @@ tools/build_mute_modes.py: TableGrow(count=16, insert_at=2) relocates each of th
 firmware keys off a PERSONALIZE row's position (every reference to the menu's
 cursor/scroll/count/row state is inside 0x40068e00..0x40069074, NOTES.md Session 19).
 
-SC_KEY. Beside SIDECHAIN_COMPRESSOR or SIDECHAIN_COMPRESSOR_BW (both keep KEY in page 2's
-slot 8), a muted track that a COMPRESSOR uses as its KEY keeps feeding it, the way stock mute
-does (Session 116): mm_softmute's remix.inc carries `.set SC_KEY,1` when either is in the
-remix and is empty otherwise (the source
+SC_KEY. Beside SIDECHAIN_COMPRESSOR, a muted track that a COMPRESSOR uses as its KEY keeps
+feeding it, the way stock mute does (Session 116): mm_softmute's remix.inc carries
+`.set SC_KEY,1` when SIDECHAIN_COMPRESSOR is in the remix and is empty otherwise (the source
 tests it with `.ifdef`). Its `reference` names the variant: with SC_KEY, the bytes of the
 KYOTI V1.0 combined image (tools/build_kyoti.py, --defsym SC_KEY=1) at their address there.
 
@@ -52,21 +51,17 @@ _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 
 H = bytes.fromhex
 
-SC = ("SIDECHAIN_COMPRESSOR", "SIDECHAIN_COMPRESSOR_BW")    # KEY in slot 8 in both
-
-
-def _with_sc(modules):
-    return any(k in modules for k in SC)
+SC = "SIDECHAIN_COMPRESSOR"
 
 
 def _sc_key_inc(modules):
-    """remix.inc for mm_softmute: SC_KEY only beside a SIDECHAIN_COMPRESSOR."""
-    return ".set SC_KEY,1\n" if _with_sc(modules) else "| no SIDECHAIN_COMPRESSOR: no SC_KEY\n"
+    """remix.inc for mm_softmute: SC_KEY only beside SIDECHAIN_COMPRESSOR."""
+    return ".set SC_KEY,1\n" if SC in modules else "| no SIDECHAIN_COMPRESSOR: no SC_KEY\n"
 
 
 def _softmute_ref(modules):
     """The variant the author ratified for this selection."""
-    if _with_sc(modules):   # tools/build_kyoti.py's placement in KYOTI V1.0
+    if SC in modules:       # tools/build_kyoti.py's placement in KYOTI V1.0
         return (0x400d74e4, "8814aa2ca49df775371b17c6c14116494bca7c40febd2dca94c7e90fec7e2009")
     return (0x400d7400, "d56d848e51e96f9561028741a46e509872981fdce6b2e17ee55831d47db5d356")
 

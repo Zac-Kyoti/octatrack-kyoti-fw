@@ -2,31 +2,72 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-SIDECHAIN_COMPRESSOR_BW ("Sidechain Compressor B-W") -- the stock COMPRESSOR with a side-chain
-KEY from any track and a base-width key filter, built on its own beside SIDECHAIN_COMPRESSOR
-(the light version, tools/build_sidechain_compressor.py: same hooks and slots, the older
-one-knob KFLT filter, a smaller DSP section). The two never go into one image.
+SIDECHAIN_COMPRESSOR, the light version -- WIP, NOT RECOMMENDED. The FINAL SIDECHAIN_COMPRESSOR
+until 2026-10-22 (mainos 462798bd..., hardware-confirmed): page 2 RMS . KEY . KFLT . KGAIN . MON
+with the one-knob KFLT key filter. Replaced by the base-width version
+(tools/build_sidechain_compressor.py), which reorders page 2; kept buildable behind the WIP gate
+on the author's request, for anyone who needs the old page-2 layout. Its sources carry the
+_light suffix (tools/patch_sc_dsp3_light.asm, tools/patch_sidechain_light.s; tests
+tools/emu_sc_dsp3_light.py); the image is byte-identical to that FINAL. Outputs
+out/*_sidechain_compressor_light.* and OCTATRACK_OS1.40C_SIDECHAIN_COMPRESSOR_LIGHT.
 
-Page 2: RMS (stock) . MON . KEY . KGN . KBAS . KWID
-  MON   audition the processed key (slot 7, stored inverted: 1 = OFF), with a 64-sample
-        crossfade; a KEY change made while MON is audible waits for MON to fade out
-  KEY   OFF (stock self-detect) or T1..T8, either core
-  KGN   key gain, about -24..+24 dB
-  KBAS  the key's HP, 18 dB/oct Butterworth: OFF, 20 Hz..19.6 kHz (readout in Hz)
-  KWID  the key's LP, 12 dB/oct Butterworth, as a distance above KBAS: 1/2..9.9 octaves, OFF
-        (readout in octaves); with KBAS OFF a plain LP counted from 20 Hz
-The base-width filter isolates the key better (e.g. a kick's fundamental without its
-sub-sonic rumble), which reduces distortion and keeps the compression smooth at short attack
-and release settings. tools/sc_keyfilt.py is the filters' bit-exact model.
+The original header follows.
 
-Sources: tools/patch_sc_bw_dsp3.asm (DSP: sctap, scdet + key filters + KEY declick,
-moncommit MON crossfade, scinit on COMPRESSOR's init), tools/patch_sidechain_bw.s
-(ColdFire: formatters, KEY list widget, sc_norm). DSP space: SPRING REVERB's P module.
-Tests: tools/emu_sc_bw_dsp3.py. History: NOTES.md "sc-keyfilt" (2026-10-19..21).
+SIDE-CHAIN COMPRESSOR -- step 3 of 4: KEY GAIN, KEY FLT and SC LISTEN in the DSP.
 
-Usage:   python3 tools/build_sidechain_compressor_bw.py [VERSTR]      (default "140C_KYOTI")
-Outputs: out/mainos_sidechain_compressor_bw.bin, out/elek_sidechain_compressor_bw.bin,
-         out/OCTATRACK_OS1.40C_SIDECHAIN_COMPRESSOR_BW.syx, out/OCTATRACK_SIDECHAIN_COMPRESSOR_BW.bin
+Everything build_sidechain2.py ships (Bug-1 fix, a DSP donor pulled from the FX
+choosers, sctap publish tap, scdet detector redirect) PLUS:
+
+  * three more COMPRESSOR page-2 parameters -- KFLT (slot 9), KGAIN (slot 10),
+    MON / "SC LISTEN" (slot 11) -- next to KEY (slot 8) and RMS (slot 6).
+  * the DSP cave is tools/patch_sc_dsp3_light.asm (a superset of patch_sc_dsp.asm):
+      scdet      now also scales the staged key by KEY GAIN and runs a
+                 one-pole-pair Chamberlin SVF (KEY FLT: <64 LP, >64 HP, 64
+                 bypass); when MON is on it also publishes MON_ON/MON_KEY
+                 (Y:0x7df0+track*2 +0/+1, below the keybus at Y:0x7e00, both
+                 in the first internal FX2 slot's unused tail) for moncommit.
+      moncommit  a THIRD hook, spliced at the DISPATCHER's per-track COMMIT
+                 step (NOT inside the compressor module -- Session 55/57
+                 found the old proc-end splice shared an unmapped, buggy
+                 timing dependency with the compressor's own undocumented
+                 envelope/gain math; Session 58 redesigned around it entirely
+                 rather than keep chasing it). Runs strictly after this
+                 track's whole FX1+FX2 processing has already returned, and
+                 if MON_ON says so, overwrites X:0 with a fresh re-fetch of
+                 keybus[key] gen 1 before this track's audio is committed.
+  * two coefficient tables (tools/sc_tables.py: 16-word gain, 32-word f) are
+    appended to the cave; the KEY GAIN table literal and @FTAB_R1@ in the .asm are resolved to their
+    absolute P addresses in a first sizing pass.
+
+Session 76 continued: donor swapped from SPATIALIZER (261 stock words, no slack
+left) to SPRING REVERB (id 0x15, FX2-exclusive) -- its module measures 1063
+words in each payload (`refs/octabam/tools/build/dsp_modmap.py` module walk,
+init to next-module boundary), so SPATIALIZER is now fully RESTORED as a
+selectable effect (nothing here touches it any more) and SPRING REVERB gets
+the same "null dispatch -> shared generic empty-FX stub" backward-compat
+treatment SPATIALIZER used to get, for any older project that still
+references it by id -- audibly a silent passthrough, and (since Session 91)
+a NONE page in the UI too. Cave + tables must fit within SPRING REVERB's 1063-word
+P region in each payload (currently ~230 + 48, i.e. still nowhere near full).
+
+Session 77 (cross-core SIDECHAIN, NOTES.md): KEY widened 0..4 -> 0..8 (any
+of the 8 tracks, flat, not just this track's own 4 same-core siblings) and
+patch_sc_dsp3.asm's sctap/scdet extended with the shared-window publish +
+per-core generation counter + foreign-core read (see that file's own header
+for the full design). This is a REAL divergence from the archived,
+hardware-shipped single-core image -- the output name changed from
+SIDECHAIN3 to SIDECHAIN_COMPRESSOR accordingly, so re-running this script no
+longer reproduces the old shipped bytes under the old name. Not yet
+hardware-tested; see NOTES.md "Session 77" for exactly what is and isn't
+validated (emulator-proven: same-core path unregressed, generation-counter
+seed/advance, publish/foreign-read address arithmetic, and a real dual-core
+smoke test under tools/dsp56300_xcore/'s dsp_host_xcore, including a
+-skew fuzz. NOT proven: an actual live cross-core race under real
+per-track/per-block dispatch, or anything on real hardware).
+
+Usage:   KYOTI_ALLOW_WIP=1 python3 tools/build_sidechain_compressor_light.py [VERSTR]      (default "140C_SCLT")
+Outputs: out/mainos_sidechain_compressor_light.bin, out/elek_sidechain_compressor_light.bin,
+         out/OCTATRACK_OS1.40C_SIDECHAIN_COMPRESSOR_LIGHT.syx, out/OCTATRACK_SIDECHAIN_COMPRESSOR_LIGHT.bin
 """
 import os, pathlib, subprocess, sys
 from kyoti_status import gate, seal
@@ -34,7 +75,6 @@ from kyoti_status import gate, seal
 gate(__file__)
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import sc_tables
-import sc_keyfilt
 import dsp_asm_util
 import kyoti_place                   # combined-image placement (build_kyoti.py); no-op standalone
 
@@ -45,18 +85,18 @@ STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 DSP_ASM = ROOT / "vendor/dsp56300/build/source/dsp_host/dsp_asm"
 DIS = ROOT / "vendor/dsp56300/build/source/disassemble/dsp56kDisassemble"
-OUT = ROOT / "out/mainos_sidechain_compressor_bw.bin"
-ELEK = ROOT / "out/elek_sidechain_compressor_bw.bin"
-OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_SIDECHAIN_COMPRESSOR_BW.syx"
-OUT_BIN = ROOT / "out/OCTATRACK_SIDECHAIN_COMPRESSOR_BW.bin"
-VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_KYOTI"
+OUT = ROOT / "out/mainos_sidechain_compressor_light.bin"
+ELEK = ROOT / "out/elek_sidechain_compressor_light.bin"
+OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_SIDECHAIN_COMPRESSOR_LIGHT.syx"
+OUT_BIN = ROOT / "out/OCTATRACK_SIDECHAIN_COMPRESSOR_LIGHT.bin"
+VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_SCLT"
 
 # ======================= ColdFire =======================
 # sc_norm (2026-10-08): a COMPRESSOR saved before SIDE-CHAIN existed holds stock's slot-8..11
-# defaults 0x7f/0/0/0 -> its side-chain comes up OFF (patch_sidechain_bw.s). Spliced over the
+# defaults 0x7f/0/0/0 -> its side-chain comes up OFF (patch_sidechain_light.s). Spliced over the
 # first instruction of both page-2 copiers, `lea 0x80000a50,%a3`, which sc_norm replays.
 CF_PATCHES = [
-    ("patch_sidechain_bw", kyoti_place.at("patch_sidechain_bw", 0x400d7000), [
+    ("patch_sidechain_light", kyoti_place.at("patch_sidechain_light", 0x400d7000), [
         (0x4000cae8, "sc_norm", "47f980000a50", 6, "jsr"),   # frame builder's copier
         (0x40003d1c, "sc_norm", "47f980000a50", 6, "jsr"),   # its twin
     ]),
@@ -108,25 +148,22 @@ SWITCH_FN = 0x40046f10
 LIST_FN = 0x40046450
 
 # descriptor slot -> (name, count, default, A-formatter, current-bytes to assert)
-#   A-formatter: "key_fmt"/"kfilt_fmt" resolved from patch_sidechain_bw.elf, else a literal
+#   A-formatter: "key_fmt"/"kfilt_fmt" resolved from patch_sidechain_light.elf, else a literal
 #   bnew: descriptor field B to WRITE (0 = plain knob widget, unchanged from
 #   before; SWITCH_FN = render as a stock bipolar switch instead)
 SLOTS = [
-    # major version (2026-10-19): page 2 = RMS (6, stock) MON KEY KGN KBAS KWID (the key
-    # filters as a base-width pair since 2026-10-21; they were KFHP/KFLP).
-    # MON in slot 7, stored inverted (1 = OFF): stock's slot-7 default is 1, so a compressor
-    # saved before comes up MON off. Slot 7's stock B (0x400475f8) is replaced by the switch.
-    (7,  b"MON\x00\x00\x00",  2,   1,  "mon_fmt",
-     dict(name="000000000000", cnt="00000002", dflt="01", b="400475f8"), SWITCH_FN),
-    # KEY: OFF + T1..T8 (Session 77), list widget (Session 76 continued yet again (8/9))
+    # count 5->9 (Session 77, cross-core SIDECHAIN): OFF + T1..T8 flat, not
+    # OFF + 4 same-core siblings -- see patch_sidechain_light.s's own header and
+    # NOTES.md "Session 77". key_list_fix's own count-agnostic trampoline
+    # (Session 76 continued yet again (8/9)) needs no change for this.
     (8,  b"KEY\x00\x00\x00", 9,   0,  "key_fmt",
      dict(name="000000000000", cnt="00000080", dflt="7f", b="00000000"), "key_list_fix"),
-    (9,  b"KGN\x00\x00\x00",  128, 64, FMT_BIPOLAR,
+    (9,  b"KFLT\x00\x00",     128, 64, "kfilt_fmt",
      dict(name="000000000000", cnt="00000002", dflt="00", b="400475f8"), 0),
-    (10, b"KBAS\x00\x00",     128, 0,  "hp_fmt",
+    (10, b"KGN\x00\x00\x00",  128, 64, FMT_BIPOLAR,
      dict(name="000000000000", cnt="00000080", dflt="00", b="00000000"), 0),
-    (11, b"KWID\x00\x00",     128, 127, "lp_fmt",
-     dict(name="000000000000", cnt="00000080", dflt="00", b="00000000"), 0),
+    (11, b"MON\x00\x00\x00",  2,   0,  FMT_ONOFF,
+     dict(name="000000000000", cnt="00000080", dflt="00", b="00000000"), SWITCH_FN),
 ]
 
 # ======================= DSP (SPRING REVERB donor) ======================
@@ -150,34 +187,34 @@ SLOTS = [
 # real proc address again. `spring_proc` is that stock proc address, kept only
 # for the pre-write sanity assert (so a future firmware revision that moved it
 # fails loud instead of silently splicing over the wrong bytes).
-# The keybus and MON words (patch_sc_bw_dsp3.asm's header): this image's layout, the tail of
+# The keybus and MON words (patch_sc_dsp3.asm's header): this image's layout, the tail of
 # the first internal FX2 slot (2026-10-15). octabam's manifest picks Session 115's
 # $800/$820/$7f0 instead, beside effects that use the whole slot.
 KEYBUS = dict(keyb="$7e00", keyb1="$7e20", monb="$7df0")
 
 DSP = {
     # Cross-core tokens (Session 77, NOTES.md): @KADJ@ is retired now that KEY
-    # is a flat 0..8 track picker (`sub #>1,a` in patch_sc_bw_dsp3.asm itself,
+    # is a flat 0..8 track picker (`sub #>1,a` in patch_sc_dsp3.asm itself,
     # identical on both payloads). corebase/fcorebase/sbase/fsbase/gcnt/gseed/
     # foreign_br are the new per-payload build tokens -- see the asm file's
     # own header for what each means; SBASE_A/GCNT_A/GSEED_A etc. below are
     # the literal addresses chosen for the shared-window buffer layout.
     # Session 115: the window is the LAST $200 words of bank track 3's FX2
     # slot on each core (A $30000+$3e00, B $38000+$3e00), not +$100 -- the old
-    # place was inside DARK/PLATE REVERB's delay lines (patch_sc_bw_dsp3.asm's
+    # place was inside DARK/PLATE REVERB's delay lines (patch_sc_dsp3.asm's
     # header and NOTES.md "Session 115" have the measurement).
     "A": dict(va=0x400e2324, ln=0x136cb, cave_org=0x01252, spring_proc=0x012be,
               corebase="4", fcorebase="0", sbase="$33e00", fsbase="$3be00",
               gcnt="$33dff", gseed="$33dfe", foreign_br="beq zz24",
-              disp_hook=0x004a7, comp_proc=0x01ab1, commit_hook=0x0050e, comp_init=0x01aa4,
+              disp_hook=0x004a7, comp_proc=0x01ab1, commit_hook=0x0050e,
               stub_init=0x007c8, stub_proc=0x007c9),
     "B": dict(va=0x400f59ef, ln=0x12d05, cave_org=0x01012, spring_proc=0x0107e,
               corebase="0", fcorebase="4", sbase="$3be00", fsbase="$33e00",
               gcnt="$3bdff", gseed="$3bdfe", foreign_br="bne zz24",
-              disp_hook=0x0029c, comp_proc=0x01871, commit_hook=0x00303, comp_init=0x01864,
+              disp_hook=0x0029c, comp_proc=0x01871, commit_hook=0x00303,
               stub_init=0x00588, stub_proc=0x00589),
 }
-SC_SRC = ROOT / "tools/patch_sc_bw_dsp3.asm"
+SC_SRC = ROOT / "tools/patch_sc_dsp3_light.asm"
 DONOR_WORDS = 1063
 NOP = 0x000000
 
@@ -210,7 +247,7 @@ def jsr_short(addr):
     # NOTE: build_merged.py still assumes the OLD SPATIALIZER cave_org, which
     # this file no longer uses at all -- it needs the same donor-swap pass
     # before its next real build (Session 76 continued left this for later,
-    # scope was build_sidechain_compressor.py/patch_sc_bw_dsp3.asm only).
+    # scope was build_sidechain_compressor.py/patch_sc_dsp3.asm only).
     assert addr <= 0xFFF, f"jsr target 0x{addr:x} too big for the short form"
     return 0x0D0000 | addr
 
@@ -250,11 +287,11 @@ def cf_assemble(name, at):
 
 
 def sc_assemble(tok, org):
-    """assemble patch_sc_bw_dsp3.asm at `org`, append the gain/f tables.
+    """assemble patch_sc_dsp3.asm at `org`, append the gain/f tables.
     Two passes so the two `move #>table,r1` widths don't shift.
     `tok` is one payload's DSP dict entry (corebase/fcorebase/sbase/fsbase/
     gcnt/gseed/foreign_br -- the cross-core build tokens).
-    Returns (words, sctap, scdet, moncommit, scinit). The `scmonbody` symbol is
+    Returns (words, sctap, scdet, moncommit). The `scmonbody` symbol is
     checked against the parsed `moncommit` entry so hook composition cannot
     silently drift when the wrapper changes."""
     def one(gt, ft):
@@ -269,11 +306,9 @@ def sc_assemble(tok, org):
                .replace("@LPEDGE@", f"${sc_tables.lp_edge():x}")
                .replace("@HPEDGE@", f"${sc_tables.hp_edge():x}")
                .replace("@KGNA@", f"${sc_tables.kgn_smooth_a():x}"))
-        for k, v in sc_keyfilt.asm_tokens().items():
-            src = src.replace(k, v)
-        a = ROOT / "out/patch_sc_bw_dsp3.asm"; a.write_text(src)
-        o = ROOT / "out/patch_sc_bw_dsp3.bin"
-        sym = ROOT / "out/patch_sc_bw_dsp3.sym"
+        a = ROOT / "out/patch_sc_dsp3_light.asm"; a.write_text(src)
+        o = ROOT / "out/patch_sc_dsp3_light.bin"
+        sym = ROOT / "out/patch_sc_dsp3_light.sym"
         r = subprocess.run([str(DSP_ASM), "-in", str(a), "-org", f"{org:x}", "-out", str(o),
                             "-sym", str(sym)],
                            capture_output=True, text=True, cwd=ROOT)
@@ -288,42 +323,41 @@ def sc_assemble(tok, org):
     n = len(code)
     code, syms = one(org + n, org + n + sc_tables.GAIN_N)
     assert len(code) == n, "cave size shifted between the two sizing passes"
-    words = code + sc_tables.gain_table() + sc_keyfilt.GT
+    words = code + sc_tables.gain_table() + sc_tables.flt_table()
     if len(words) > DONOR_WORDS:
         sys.exit(f"cave {len(words)} words > SPRING REVERB donor's {DONOR_WORDS}")
     # round-trip the code region; reject mpysu/macsu (dsp_asm's `mpy x0,y0` trap)
-    (ROOT / "out/patch_sc_bw_dsp3_code.bin").write_bytes(
+    (ROOT / "out/patch_sc_dsp3_light_code.bin").write_bytes(
         b"".join(w.to_bytes(3, "little") for w in code))
-    d = subprocess.run([str(DIS), "-in", str(ROOT / "out/patch_sc_bw_dsp3_code.bin"),
+    d = subprocess.run([str(DIS), "-in", str(ROOT / "out/patch_sc_dsp3_light_code.bin"),
                         "-pc", f"{org:x}", "-le"], capture_output=True, text=True).stdout
     if " dc " in d or "InvalidInstruction" in d or "mpysu" in d or "macsu" in d:
         sys.exit(f"cave did not round-trip clean:\n{d}")
     # and tools/dsp_xasm.py's operand-for-operand check: same words, or refuse
     import dsp_xasm
     try:
-        xw, _ = dsp_xasm.assemble((ROOT / "out/patch_sc_bw_dsp3.asm").read_text(), org)
+        xw, _ = dsp_xasm.assemble((ROOT / "out/patch_sc_dsp3_light.asm").read_text(), org)
     except dsp_xasm.AsmError as e:
         sys.exit(f"dsp_xasm refused the cave: {e}")
     if xw[:len(code)] != code:
         sys.exit("dsp_xasm and dsp_asm disagree on the cave's words")
-    bad = dsp_asm_util.mnemonic_mismatches((ROOT / "out/patch_sc_bw_dsp3.asm").read_text(), d)
+    bad = dsp_asm_util.mnemonic_mismatches((ROOT / "out/patch_sc_dsp3_light.asm").read_text(), d)
     if bad:
         sys.exit("dsp_asm encoded instructions as something else:\n" +
                  "\n".join(f"  #{i}: {s}  ->  {x}" for i, s, x in bad))
-    # The routines by name (dsp_asm's .sym lists every label). Until 2026-10-19 they were
-    # found by counting rts; the key filters' subroutines added rts inside scdet. The old
-    # rule still holds for sctap: scdet starts right after sctap's own rts.
+    # The routines by name (dsp_asm's .sym lists every label), not by counting rts.
+    # The old rule still holds for sctap: scdet starts right after sctap's own rts.
     rts = dsp_asm_util.find_rts(d, org)
-    for name in ("sctap", "scdet", "moncommit", "scmonbody", "scinit"):
+    for name in ("sctap", "scdet", "moncommit", "scmonbody"):
         if name not in syms:
-            sys.exit(f"patch_sc_bw_dsp3.asm has no `{name}` label")
+            sys.exit(f"patch_sc_dsp3.asm has no `{name}` label")
     if syms["sctap"] != org or syms["scdet"] != org + rts[0] + 1:
         sys.exit("sctap must open the cave and scdet follow sctap's rts")
     moncommit = syms["moncommit"]
     if syms["scmonbody"] != moncommit + 2:
         sys.exit(f"scmonbody is at {syms['scmonbody']!r}, expected the first word after "
                  f"moncommit's two-word displaced load at 0x{moncommit + 2:x}")
-    return words, org, syms["scdet"], moncommit, syms["scinit"]
+    return words, org, syms["scdet"], moncommit
 
 
 def dsp_module_fileoff(img, va, ln, p_addr):
@@ -387,10 +421,10 @@ def main():
             print(f"    0x{site:08x} -> {name}:{sym} 0x{s[sym]:08x}")
     if max(b for _, b in spans) > CF_FREE_END:
         sys.exit("CF cave past free zone")
-    fmt_sym = syms["patch_sidechain_bw"]
+    fmt_sym = syms["patch_sidechain_light"]
 
     # ---------------- ColdFire: COMPRESSOR descriptor (KEY/KFLT/KGAIN/MON) ----
-    print("\n=== ColdFire: COMPRESSOR descriptor slots 7..11 ===")
+    print("\n=== ColdFire: COMPRESSOR descriptor slots 8..11 ===")
     for slot, name, cnt, dflt, fmt, cur, bnew in SLOTS:
         na, ca, da, aa, ba = (E + 0x4e + 6 * slot, E + 0xd2 + 4 * slot, E + 0x96 + slot,
                               E + 0x102 + 4 * slot, E + 0x132 + 4 * slot)
@@ -418,24 +452,15 @@ def main():
     # against stock: slots 8-11's nibbles here all read 0 (RMS's slot 6, in
     # the neighbouring P+0x18e word, reads 1). Without this poke KEY/KFLT/
     # KGAIN/MON compile clean and never appear on screen.
-    # Nibble per slot, slot 0 / 8 in the low nibble. Value 1 = drawn; value 3 adds bit 1, the
-    # link bracket to the knob on the left (stock FILTER BASE/WDTH): WDTH is counted from BASE.
-    # Stock draws that bracket only on main pages, not in the FX SETUP window page 2 sits in
-    # (2026-10-21: the drawer, FUN_4004d948, skips it while a window is open, and the SETUP
-    # page's knobs come from another routine), so it does not show yet; the bit is harmless.
     ea = E + 0x38 + 0x18a
     assert int.from_bytes(img[o(ea):o(ea) + 4], "big") == 0, "enable bitmap (slots 8-11) not 0"
-    img[o(ea):o(ea) + 4] = (0x3111).to_bytes(4, "big")
-    print(f"  enable bitmap 0x{ea:08x}  slots 8-11 -> 0x00003111 (KWID linked to KBAS)")
-    eb = E + 0x38 + 0x18e
-    assert int.from_bytes(img[o(eb):o(eb) + 4], "big") == 0x01111111, "enable bitmap (slots 0-7) not stock"
-    img[o(eb):o(eb) + 4] = (0x11111111).to_bytes(4, "big")
-    print(f"  enable bitmap 0x{eb:08x}  slots 0-7 -> 0x11111111 (slot 7 MON drawn)")
+    img[o(ea):o(ea) + 4] = (0x1111).to_bytes(4, "big")
+    print(f"  enable bitmap 0x{ea:08x}  slots 8-11 -> 0x00001111 (all on)")
 
     # ---------------- DSP (both payloads) ----------------
     print("\n=== DSP: SPRING REVERB donor + sctap / scdet / moncommit ===")
     for tag, d in DSP.items():
-        words, sctap, scdet, moncommit, scinit = sc_assemble(d, d["cave_org"])
+        words, sctap, scdet, moncommit = sc_assemble(d, d["cave_org"])
         print(f"  payload {tag}: cave {len(words)}w @ P:0x{d['cave_org']:05x}  "
               f"sctap=0x{sctap:x} scdet=0x{scdet:x} moncommit=0x{moncommit:x}")
 
@@ -471,16 +496,6 @@ def main():
         img[cp:cp + 3] = w3(op)
         img[cp + 3:cp + 6] = w3(disp)
         print(f"    COMPRESSOR P:0x{d['comp_proc']:05x} -> bsr 0x{scdet:x}")
-
-        # COMPRESSOR init (2026-10-19): `move #>$20c5,x0`, replayed by scinit, which also
-        # restarts the key filters (another effect in the slot may have used their words)
-        ci = dsp_module_fileoff(img, d["va"], d["ln"], d["comp_init"])
-        assert (rd3(img, ci), rd3(img, ci + 3)) == (0x44f400, 0x0020c5), \
-            f"payload {tag} comp init: {rd3(img,ci):06x} {rd3(img,ci+3):06x}"
-        op, disp = bsr_long(d["comp_init"], scinit)
-        img[ci:ci + 3] = w3(op)
-        img[ci + 3:ci + 6] = w3(disp)
-        print(f"    COMPRESSOR init P:0x{d['comp_init']:05x} -> bsr 0x{scinit:x}")
 
         # dispatcher-level commit hook (payload A P:0x50e / payload B P:0x303,
         # both `move x:>$206,r0` -- confirmed identical detour bytes in both
@@ -597,11 +612,10 @@ def main():
         sys.exit(f'version "{VERSTR}" does not fit')
     subprocess.run(["python3", "tools/make_bin.py", str(ELEK), "-o", str(OUT_BIN)], check=True, cwd=ROOT)
     print(f"\n  {OUT_SYX.name}  +  {OUT_BIN.name}")
-    print("  Test: COMPRESSOR on a track -> FX page 2: RMS MON KEY KGN KBAS KWID.")
-    print("        Kick on T1, pad+COMPRESSOR on T2, KEY=T1 -> pad ducks. BASE = the key's")
-    print("        high-pass (OFF, 20 Hz-19.6 kHz), KWID its low-pass as a distance above")
-    print("        KBAS (0.5-9.9 octaves, OFF; a plain LP with KBAS OFF); KGN drives a")
-    print("        quiet key; MON = ON auditions the filtered key. SPATIALIZER is back as a normal")
+    print("  Test: COMPRESSOR on a track -> FX page 2: RMS (gap) KEY KFLT KGAIN MON.")
+    print("        Kick on T1, pad+COMPRESSOR on T2, KEY=T1 -> pad ducks. KFLT left =")
+    print("        low-pass the key (isolate the thump); KGAIN drives a quiet key;")
+    print("        MON = ON auditions the filtered key. SPATIALIZER is back as a normal")
     print("        selectable effect; SPRING REVERB now passes through instead, and an")
     print("        old project that still uses it loads a NONE page (no knobs/labels).")
     print("  Revert = flash downloads/extracted/OCTATRACK_OS1.40C.syx")

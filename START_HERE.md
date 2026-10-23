@@ -110,6 +110,7 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | octabam's remixer (`make remix`) | `sh tools/octabam_remixer.sh` — its own clone at `~/Documents/octabam`, fast-forwarded to octabam's `main` on every launch; `refs/octabam` stays the pinned research harness |
 | each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final; `--only NAME` builds one) |
 | DIRECT JUMP V6.4, the OT↔AR parity build | `tools/build_direct_jump_v6_4.py` — WIP **by design**: kept buildable at the user's request (hardware-confirmed image `4a6c1b5e…`), never to be promoted |
+| SIDECHAIN_COMPRESSOR light, the earlier version (one-knob KFLT) | `tools/build_sidechain_compressor_light.py` — WIP **by design**: kept buildable at the user's request (the FINAL image until 2026-10-22, `462798bd…`), never to be promoted; sources `*_light` |
 | external RE research | `python3 tools/refs/sync.py` (clone or refresh the tracked repos into `refs/`) · `python3 tools/refs/whatsnew.py` |
 
 ## 5. How work is organised
@@ -137,8 +138,7 @@ builder's FINAL entry and the old builder is deleted. There is no superseded tie
 |---|---|---|
 | MUTE_MODES | `build_mute_modes.py` | `octabam-modules/mute-modes` |
 | DIRECT_JUMP_KYOTI | `build_direct_jump_kyoti.py` | `octabam-modules/direct-jump-kyoti` |
-| SIDECHAIN_COMPRESSOR | `build_sidechain_compressor.py` | `octabam-modules/sidechain-compressor` (octabam #565; on hardware 2026-10-04) |
-| SIDECHAIN_COMPRESSOR_BW (Sidechain Compressor B-W) | `build_sidechain_compressor_bw.py` (sources `patch_sc_bw_dsp3.asm`, `patch_sidechain_bw.s`, model `sc_keyfilt.py`) | `octabam-modules/sidechain-compressor-bw` |
+| SIDECHAIN_COMPRESSOR | `build_sidechain_compressor.py` (base-width key filter since 2026-10-22; model `sc_keyfilt.py`; the earlier version: `build_sidechain_compressor_light.py`, WIP) | `octabam-modules/sidechain-compressor` (octabam #565; the earlier version on hardware 2026-10-04) |
 | RELOAD_FROM_PROJECT | `build_reload_from_project.py` | `octabam-modules/reload-from-project` |
 | QUANTIZE_LIVE_REC_TOGGLE | `build_quantize_live_rec_toggle.py` | `octabam-modules/quantize-live-rec-toggle` |
 | ERASE_EMPTY_TRIGLESS_LOCKS | `build_erase_empty_trigless_locks.py` | `octabam-modules/erase-empty-trigless-locks` |
@@ -180,8 +180,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
     must also skip these tracks (an empty trigless lock is a tie here). KYOTI V1.5 is built without it.
 
 - **KYOTI V1.6** — **FINAL 2026-10-22**, flashed (all good, before QUANTIZE_LIVE_REC_TOGGLE's
-  2026-10-22 toasts, which it now carries): V1.5 with SIDECHAIN_COMPRESSOR_BW in place of the light
-  SIDECHAIN_COMPRESSOR (its 600 B unit in SAFE, 624 B left). mainos `bc86d2b7…`, syx `ea11c681…`.
+  2026-10-22 toasts, which it now carries): V1.5 with the base-width SIDECHAIN_COMPRESSOR in place of
+  the earlier one (its 600 B unit in SAFE, 624 B left). mainos `bc86d2b7…`, syx `ea11c681…`.
 - **KYOTI V1.5** — superseded 2026-10-22 (tag `ref/kyoti-v1.5-2026-10-22`); was **FINAL 2026-10-16**: every
   feature in it is confirmed on its own, the combined image is not. V1.4 + VARISPEED + the
   SIDE-CHAIN of 2026-10-16.

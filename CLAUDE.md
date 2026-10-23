@@ -160,8 +160,9 @@ built and waiting.
   `seal()` prints into `FINAL`, and give the feature its `README.md` / `BUILD_KYOTI.md`
   entry. An update to a final feature replaces the old final — in place, or by taking the
   old builder's FINAL entry and deleting the old builder. **There is no superseded tier:
-  do not keep old versions around** (git history has them) — the one exception is what the
-  user asks to keep available: DIRECT JUMP V6.4 (`tools/build_direct_jump_v6_4.py`), WIP
+  do not keep old versions around** (git history has them) — the exceptions are what the
+  user asks to keep available: DIRECT JUMP V6.4 (`tools/build_direct_jump_v6_4.py`) and the
+  earlier SIDECHAIN_COMPRESSOR, "light" (`tools/build_sidechain_compressor_light.py`), WIP
   on purpose and never to be promoted. A new builder needs no tier
   declaration — it is WIP until promoted. Use a short-lived topic branch for risky work.
 - **README.md is a feature catalogue, kept short (the user's rule, 2026-09-30).** It holds
@@ -173,7 +174,7 @@ built and waiting.
   changes. History goes in `NOTES.md`, hardware checks in `FLASHING.md` §4, build commands
   in `BUILD_KYOTI.md`, the frontier in `START_HERE.md` §6.
 - **Feature names** — use them in builders, output images, docs and octabam keys:
-  MUTE_MODES, DIRECT_JUMP_KYOTI, SIDECHAIN_COMPRESSOR, SIDECHAIN_COMPRESSOR_BW, RELOAD_FROM_PROJECT,
+  MUTE_MODES, DIRECT_JUMP_KYOTI, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT,
   QUANTIZE_LIVE_REC_TOGGLE, ERASE_EMPTY_TRIGLESS_LOCKS,
   REC_TRIG_MUTE, BLACKPYRAMIDS_303, VARISPEED, VARISPEED_EMUS, and BATCH_BUGFIXES
   (MIDI_PLAYS_FREE_FIX, EMPTY_PATTERN_LED_FIX, PART_CHANGE_CARRYOVER_FIX).

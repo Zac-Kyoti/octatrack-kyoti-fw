@@ -1,67 +1,60 @@
-"""SIDECHAIN_COMPRESSOR -- stock COMPRESSOR with a side-chain KEY from any track.
+"""SIDECHAIN_COMPRESSOR -- stock COMPRESSOR with a side-chain KEY from any track and a base-width
+key filter.
 
     page 2  RMS (stock, slot 6), then
+            MON   ON = hear the processed key instead of the track (audition); slot 7,
+                  stored inverted (1 = OFF); switching it, or changing KEY while it is
+                  on, crossfades over 64 samples instead of clicking
             KEY   OFF / T1..T8: the track whose audio drives the detector
-            KFLT  the key's filter: 64 = bypass, below = low-pass, above = high-pass
             KGN   the key's gain, about -24..+24 dB around 64
-            MON   ON = hear the processed key instead of the track (audition)
+            KBAS  the key's high-pass, 18 dB/oct Butterworth: OFF, 20 Hz..19.6 kHz (in Hz)
+            KWID  the key's low-pass, 12 dB/oct Butterworth, as a distance above KBAS:
+                  0.5..9.9 octaves, OFF (in octaves); with KBAS OFF a plain low-pass
+                  counted from 20 Hz
 
-The light version: a smaller DSP section, but its one-knob KFLT isolates the key less well
-than SIDECHAIN_COMPRESSOR_BW's base-width filter (Sidechain Compressor B-W,
-octabam-modules/sidechain-compressor-bw). The same effect: one per remix.
+CHANGED 2026-10-22. The base-width filter replaced the previous version's one-knob KFLT: it
+isolates the key better (a kick's fundamental without its sub-sonic rumble, say), which
+reduces distortion and keeps the compression smooth at short attack and release settings. Page
+2 was RMS KEY KFLT KGN MON; a COMPRESSOR saved with that version keeps its KEY, but its other
+page-2 values now land on different knobs (KGN = the old KFLT, KBAS = the old KGN, KWID = the
+old MON; MON comes up OFF), so it sounds different until KGN, KBAS, KWID and MON are set again.
 
-Hardware-confirmed in this octabam form (the author's MKI, 2026-10-04; see MEASURED). The
-2026-10-15 one-pass tap is hardware-confirmed in the standalone image (2026-10-16); in this
-layout it leaves Y and the shared window word for word as the code before it did
-(tools/emu_sc_sctap.py --layout octabam --ref 8b2e3c9). The 2026-10-20 MON and KEY declick
-is hardware-confirmed in the standalone image (2026-10-20), not yet in this form.
+Hardware-confirmed in the standalone image (the author's MKI, 2026-10-22, 140C_SCKF4: page 2,
+the KBAS / KWID readouts and ranges, the kick-fundamental case at short attack and release,
+MON and KEY declick, load with 1 + 7 and 4 + 4 COMPRESSOR / DJ EQ per core) and in the KYOTI
+V1.6 combined image. This octabam form is not flashed yet.
 
-COLDFIRE. One ROM unit, sc_cf (tools/patch_sidechain.s, 338 B): KEY's and KFLT's
-formatters, KEY's list widget, and sc_norm, reached by a `jsr` detour at the first
-instruction of both page-2 copiers (0x4000cae8, its twin 0x40003d1c). A COMPRESSOR saved
-on stock firmware holds stock's slot 8..11 defaults 0x7f/0/0/0, i.e. KEY 127; sc_norm
-resets any COMPRESSOR whose KEY is above 8 to KEY OFF, KFLT 64, KGN 64, MON OFF, in the
-current part's working store and in the live lane, each judged by its own FX id, so the
-side-chain stays off until the user sets it up. A KEY of 0..8 is never touched. The page-2 slots are written as raw descriptor words
-(Param.formatter_word / widget_word), as the standalone builder writes them: this unit's
-symbols for KEY's formatter and widget and KFLT's formatter, stock's bipolar formatter
-for KGN and ON/OFF formatter and switch for MON, and widget 0 (a plain knob) for KFLT
-and KGN.
+COLDFIRE. One ROM unit, sc_cf (tools/patch_sidechain.s, 600 B): MON's inverted ON/OFF, KEY's
+formatter and list widget, KBAS's Hz and KWID's octave formatters, and sc_norm, reached by a
+`jsr` detour at the first instruction of both page-2 copiers (0x4000cae8, its twin
+0x40003d1c). A COMPRESSOR saved on stock firmware holds stock's slot 8..11 defaults
+0x7f/0/0/0, i.e. KEY 127; sc_norm resets any COMPRESSOR whose KEY is above 8 to MON OFF,
+KEY OFF, KGN 64, KBAS OFF, KWID OFF, in the current part's working store and in the live lane,
+each judged by its own FX id. A KEY of 0..8 is never touched.
 
-DSP. MenuEntry(replaces="COMPRESSOR", stock_dsp=True): the effect IS stock COMPRESSOR,
-its dispatch entry untouched. This module's code runs from three DspHooks, at different
-addresses on the two payloads:
+DSP. MenuEntry(replaces="COMPRESSOR", stock_dsp=True): the effect IS stock COMPRESSOR, its
+dispatch entry untouched. This module's code (tools/patch_sc_dsp3.asm; tools/sc_keyfilt.py is
+the filters' bit-exact model) runs from four DspHooks:
     sctap      dispatcher, every track every block: publish the track's audio to this
                core's keybus (core-private Y) and to the cross-core window
-    scdet      COMPRESSOR proc+0: replace the detector input with the KEY track's audio,
-               through KGN and KFLT; stash it for MON. While MON is audible, a new KEY
-               waits until MON has faded out (state at COMPRESSOR's r7+$2c/$2d, words
-               stock COMPRESSOR leaves free)
-    moncommit  dispatcher, per-track commit: with MON on, the stashed key replaces the
-               track's output, crossfading over 64 samples either way. Registers a, b,
-               x0, x1, y1, r1, n1, r3 (`scmonbody`, for a composed caller)
-The per-core values (own and foreign core base, the window addresses, the branch
-sense) come from DspSection.subst; the 16 + 32 table words are one ptable, read at the
-KEY GAIN site through the source's single base literal and at the KEY FLT site as
-`lua (r1+$10),r1` + `nop` from that same base (r1 is not written between the two reads).
+    scdet      COMPRESSOR proc+0: the detector reads the KEY track's audio through KGN and
+               the key filters (a TPT one-pole HP x a TPT SVF HP at KBAS, a TPT SVF LP KWID
+               above it; coefficients from a 49-word table and `div`, recomputed only while
+               a cutoff glides); a KEY change made while MON is audible waits for MON to fade
+    moncommit  dispatcher, per-track commit: MON's crossfade to the stashed key; MON_ON is
+               consumed every block. `scmonbody` uses a, b, x0, x1, y1, r1, n1, r3
+    scinit     COMPRESSOR init: the key filters start over (another effect in the slot may
+               have used their r7 words)
+State at COMPRESSOR's r7+$1c..$2d (free while COMPRESSOR runs: an r7 canary, emulator and
+hardware, 2026-10-19). The 16 + 49 table words are one ptable.
 
-CLAIMS. Core-private Y $7f0-$9ff (MON words, keybus) on both cores: @KEYB@/@KEYB1@/@MONB@
-below. The standalone image keeps them in the tail of the first internal FX2 slot instead,
-which MINIVERB, GATE VERB and WAVE write here. And the last $202 words of each core's half
-of the shared window (A $33dfe.., B $3bdfe..), the tail of T7's and T3's FX2 slot. BusDelay
-and BusVerb use that window, so the ledger refuses this module beside them. MINIVERB, GATE
-VERB and WAVE write it too (their whole slot, GATE VERB to +$3EF7), which the ledger does not
-see yet: a later version moves the window.
+CLAIMS. Core-private Y $7f0-$9ff (MON words, keybus) on both cores, and the last $202 words of
+each core's half of the shared window (A $33dfe.., B $3bdfe..).
 
-MEASURED. The ColdFire unit, linked at the standalone image's own address, is that
-image's bytes (5407 and 54455 alike). The DSP source is the standalone's
-(tools/patch_sc_dsp3.asm), with the same per-core values; octabam assembles and places
-it itself: on both payloads its code is the standalone's instruction for instruction except
-the two table loads, and the 48 table words are identical. On the author's MKI, this octabam
-form (2026-10-04, with all six KYOTI modules and REC_TRIG_MUTE): COMPRESSOR's two pages,
-KEY ducking on one core and across cores both ways, KFLT, KGN, MON, no reverb cross-talk on
-T7, a muted KEY in each MUTE MODE and the first kick after PLAY. Before that, the standalone
-and KYOTI V1.0: KEY ducking, MON, a muted KEY with MUTE_MODES.
+MEASURED. The ColdFire unit, linked at the standalone image's own address, is that image's
+bytes. The DSP source is the standalone's, with the same per-core values; tools/emu_sc_dsp3.py
+--layout octabam (these addresses) is ALL GOOD: the filters bit-exact against the model, the
+crossfade, the KEY hold.
 """
 
 import dataclasses
@@ -82,37 +75,39 @@ _TOOLS = os.path.normpath(os.path.join(_HERE, "..", "..", "tools"))
 _spec = importlib.util.spec_from_file_location("kyoti_sc_tables", os.path.join(_TOOLS, "sc_tables.py"))
 _sc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_sc)
+# The key filters' table and constants (tools/sc_keyfilt.py, the DSP's bit-exact model).
+_kspec = importlib.util.spec_from_file_location("kyoti_sc_keyfilt", os.path.join(_TOOLS, "sc_keyfilt.py"))
+_kf = importlib.util.module_from_spec(_kspec)
+_kspec.loader.exec_module(_kf)
 
 E = 0x400d5a4a                  # stock COMPRESSOR's descriptor
 FMT_BIPOLAR = 0x4003c7a0        # stock "-N" / "+N" about 64
 FMT_ONOFF = 0x4003c14c          # stock "ON" / "OFF"
 SWITCH_FN = 0x40046f10          # stock 2-position switch (FILTER's HOLD)
 
-_SAME = {"@LPEDGE@": f"${_sc.lp_edge():x}",
-         "@HPEDGE@": f"${_sc.hp_edge():x}",
-         "@KGNA@": f"${_sc.kgn_smooth_a():x}",
+_SAME = {"@KGNA@": f"${_sc.kgn_smooth_a():x}",
+         **_kf.asm_tokens(),
          # `nop`: a cycle between writing r1 and reading through it, and the same
          # two words as the standalone's `move #>FTAB,r1`, so nothing after it moves.
          "@FTAB_R1@": "lua     (r1+$10),r1\n        nop",
          # The keybus and MON words at Session 115's Y:$7f0..$9ff, which no FX2 slot reaches
          # (the standalone builder's KEYBUS puts them in the first internal slot's tail).
          "@KEYB@": "$800", "@KEYB1@": "$820", "@MONB@": "$7f0"}
-assert _sc.GAIN_N == 0x10, "@FTAB_R1@'s offset is the KEY GAIN table's length"
+assert _sc.GAIN_N == 0x10, "@FTAB_R1@'s offset is the KEY GAIN table's length (the key-filter table follows it)"
 
 # At the standalone image's own address (tools/build_sidechain_compressor.py).
 LINKED = (
     Linked("sc_cf", os.path.join(_TOOLS, "patch_sidechain.s"),
            reference=(0x400d7000,
-                      "76a4badcef6024b7de8bd6f05930146bdb6a47ffd577da340a6c252c316ff854")),
+                      "4984aba27a91d2bc526219f82f1b3311ef5716443d2b682d3c04204a815a2f9f")),
 )
 
 # PLACE: where octabam links sc_cf. CAVE (the default) is the ColdFire free
 # region, as the standalone image; DRAM puts it in octabam's platform runtime
 # (as rl3 and dj7), still re-linked at 0x400d7000 and compared with the bytes
-# above. The store id is octabam.sidechain-compressor, the id octabam already
-# files this effect's page defaults under (its module directory), so a module
-# store changes nothing there. tools/build_sidechain_compressor.py does not read
-# this manifest.
+# above. The store id is octabam.sidechain-compressor, the id octabam already files this effect's
+# page defaults under (its module directory).
+# tools/build_sidechain_compressor.py does not read this manifest.
 PLACES = ("CAVE", "DRAM")
 
 
@@ -127,13 +122,15 @@ MODULE = Module(
     name="sidechain-compressor",
     key="SIDECHAIN_COMPRESSOR",
     kind=Kind.DSP_EFFECT,
-    doc="Stock COMPRESSOR with a side-chain KEY from any of T1-T8, a key filter, "
-        "key gain and a key listen switch on page 2 (the light version; "
-        "SIDECHAIN_COMPRESSOR_BW has the base-width key filter).",
+    doc="Stock COMPRESSOR with a side-chain KEY from any of T1-T8, "
+        "key gain, a base-width key filter (KBAS high-pass in Hz, KWID low-pass in octaves above "
+        "it) and a key listen switch on page 2.",
     menu=MenuEntry(fx2_id=0x18, donor_desc=E, abbr=b"COMP", fullname=b"COMPRESSOR",
                    replaces="COMPRESSOR", stock_dsp=True),
     # Slots 0-6 are stock COMPRESSOR's, unchanged: on a stock_dsp clone a Param() keeps the
-    # donor's enable nibble and every other field (octabam #571). Slot 7 is stock's empty one.
+    # donor's enable nibble and every other field (octabam #571). Page 2 since the major
+    # version: RMS MON KEY KGN KBAS KWID. MON sits in stock's hidden slot 7, stored inverted
+    # (1 = OFF), so a compressor saved before comes up with MON off.
     params=tuple(Param(doc=d) for d in (
         "stock: attack time",
         "stock: release time",
@@ -141,21 +138,24 @@ MODULE = Module(
         "stock: ratio",
         "stock: make-up gain",
         "stock: dry/wet mix",
-        "stock: the detector's RMS setting")) + (Param(),) + (
+        "stock: the detector's RMS setting")) + (
+        Param(b"MON", 1, count=2, active=True,
+              formatter_word=("sc_cf", "mon_fmt"), widget_word=SWITCH_FN,
+              labels=("ON", "OFF"),
+              doc="ON: this track plays its processed key instead (audition); stored 1 = OFF"),
         Param(b"KEY", 0, count=9, active=True,
               formatter_word=("sc_cf", "key_fmt"), widget_word=("sc_cf", "key_list_fix"),
               labels=("OFF", "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"),
               doc="the track whose audio drives the detector; OFF = stock (self)"),
-        Param(b"KFLT", 64, count=128, active=True,
-              formatter_word=("sc_cf", "kfilt_fmt"), widget_word=0,   # a plain knob, not the donor's switch
-              doc="the key's filter: 64 bypass, below low-pass, above high-pass"),
         Param(b"KGN", 64, count=128, active=True,
-              formatter_word=FMT_BIPOLAR, widget_word=0,
+              formatter_word=FMT_BIPOLAR, widget_word=0,   # a plain knob, not the donor's widget
               doc="the key's gain, about -24..+24 dB; 64 = unity"),
-        Param(b"MON", 0, count=2, active=True,
-              formatter_word=FMT_ONOFF, widget_word=SWITCH_FN,
-              labels=("OFF", "ON"),
-              doc="ON: this track plays its processed key instead (audition)"),
+        Param(b"KBAS", 0, count=128, active=True,
+              formatter_word=("sc_cf", "hp_fmt"), widget_word=0,
+              doc="the key's high-pass, 18 dB/oct: OFF, then 20 Hz to 19.6 kHz"),
+        Param(b"KWID", 127, count=128, active=True, link=True,
+              formatter_word=("sc_cf", "lp_fmt"), widget_word=0,
+              doc="the key's low-pass, 12 dB/oct: 0.5-9.9 octaves above KBAS (20 Hz if OFF), then OFF"),
     ),
     linked=LINKED,
     # sc_norm: a COMPRESSOR saved before SIDE-CHAIN existed holds stock's slot 8..11 defaults
@@ -172,7 +172,7 @@ MODULE = Module(
         asm=os.path.join(_TOOLS, "patch_sc_dsp3.asm"),
         priority=30,
         ybase=YBase.NEVER,            # COMPRESSOR is on FX1; the bases come from subst
-        ptable=tuple(_sc.gain_table()) + tuple(_sc.flt_table()),
+        ptable=tuple(_sc.gain_table()) + tuple(_kf.GT),
         hooks=(
             DspHook({"A": 0x004a7, "B": 0x0029c}, (0x66f000, 0x000208), "sctap",
                     "dispatcher: publish every track's audio"),
@@ -180,6 +180,8 @@ MODULE = Module(
                     "COMPRESSOR proc+0: the detector reads the KEY track"),
             DspHook({"A": 0x0050e, "B": 0x00303}, (0x60f000, 0x000206), "moncommit",
                     "dispatcher, per-track commit: MON"),
+            DspHook({"A": 0x01aa4, "B": 0x01864}, (0x44f400, 0x0020c5), "scinit",
+                    "COMPRESSOR init: the key filters start over"),
         ),
         subst={
             "A": {"@COREBASE@": "4", "@FCOREBASE@": "0",

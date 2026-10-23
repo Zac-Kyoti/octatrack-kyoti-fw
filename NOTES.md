@@ -37021,3 +37021,24 @@ OK, check-remix x4 OK, reach 6/7 -- refhash: artifacts identical, rc=1 reports d
 "LEFT STOCK" line naming the new module. Modwerk SC 0.1.3 (with B-W or light, per Sam) waits on
 #862: resident_dsp.py's MON-consume patches must go (our code consumes MON_ON itself).
 KYOTI V1.6 and B-W notified to the qlrec-toast session (kyoti-m4-78).
+
+## 2026-10-23 (`sc-replace`) — the base-width build REPLACES SIDECHAIN_COMPRESSOR (no separate B-W feature); the earlier version is WIP "light"
+
+The user and Sam (octabam #862, closed: "go for it on the replace") chose replacement: the
+base-width compressor is SIDECHAIN_COMPRESSOR, keeps that name, and SIDECHAIN_COMPRESSOR_BW is gone.
+- Files: the base-width sources took the original names (tools/build_sidechain_compressor.py,
+  patch_sc_dsp3.asm, patch_sidechain.s, emu_sc_dsp3.py); the earlier version moved to
+  tools/build_sidechain_compressor_light.py, patch_sc_dsp3_light.asm, patch_sidechain_light.s,
+  emu_sc_dsp3_light.py -- WIP by design at the user's request (CLAUDE.md, START_HERE), default
+  OS VERSION 140C_SCLT, its image byte-identical to the old FINAL (mainos 462798bd…; also tag
+  ref/sidechain-compressor-light-2026-10-22 = fc050c4).
+- Every image is byte-identical to what was promoted/flashed: SIDECHAIN_COMPRESSOR mainos
+  91926080… (the flashed SCKF4), BUG_SC3X e4800e20…, KYOTI V1.6 bc86d2b7…, VARISPEED_EMUS
+  9926d557… -- all seal without the opt-in. emu_sc_dsp3 (both layouts) and emu_sc_dsp3_light ALL GOOD.
+- Docs: README's SIDECHAIN_COMPRESSOR entry = the base-width version, with a "Changed on 22 Oct
+  2026" note (old saves keep KEY; KGN = old KFLT, KBAS = old KGN, KWID = old MON, MON OFF -- the
+  sound changes until those are set again) and a link to the WIP light builder; FLASHING, BUILD_KYOTI,
+  START_HERE, CLAUDE.md follow. octabam-modules/sidechain-compressor = the base-width module (unit
+  sc_cf, store octabam.sidechain-compressor, no conflicts) with the same change note;
+  octabam-modules/sidechain-compressor-bw removed; MUTE_MODES' octabam manifest back to its
+  single SIDECHAIN_COMPRESSOR key (f094c37 reverted). Modwerk: the new compressor ships as 0.2.0.

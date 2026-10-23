@@ -15,7 +15,7 @@ reproducible from the stock file.
 - **Your own copy of the official OS 1.40C** — from
   <https://www.elektron.se/support-downloads/octatrack-mkii>. The same image serves MKI
   and MKII.
-- *For SIDECHAIN_COMPRESSOR, SIDECHAIN_COMPRESSOR_BW and VARISPEED_EMUS* — the DSP56300 toolchain
+- *For SIDECHAIN_COMPRESSOR and VARISPEED_EMUS* — the DSP56300 toolchain
   built into `vendor/dsp56300/`, and the external-RE clone cache
   (`python3 tools/refs/sync.py`). Every other build is ColdFire-only.
 
@@ -39,7 +39,7 @@ One command per final feature. Each writes its image to `out/`:
 | MUTE_MODES | `python3 tools/build_mute_modes.py` | `140C_KYOTI` |
 | DIRECT_JUMP_KYOTI | `python3 tools/build_direct_jump_kyoti.py` | `140C_KDJ7` |
 | SIDECHAIN_COMPRESSOR | `python3 tools/build_sidechain_compressor.py` | `140C_KYOTI` |
-| SIDECHAIN_COMPRESSOR_BW | `python3 tools/build_sidechain_compressor_bw.py` | `140C_KYOTI` |
+| SIDECHAIN_COMPRESSOR light (the earlier version; WIP, not recommended) | `KYOTI_ALLOW_WIP=1 python3 tools/build_sidechain_compressor_light.py` | `140C_SCLT` |
 | RELOAD_FROM_PROJECT | `python3 tools/build_reload_from_project.py` | `140C_KYOTI` |
 | QUANTIZE_LIVE_REC_TOGGLE | `python3 tools/build_quantize_live_rec_toggle.py` | `140C_KYOTI` |
 | ERASE_EMPTY_TRIGLESS_LOCKS | `python3 tools/build_erase_empty_trigless_locks.py` | `1.40C` |
@@ -69,8 +69,7 @@ no-assembler patch below or wrap it as its builder's header shows.
 
 ### The combined image: KYOTI V1.6
 
-Every FINAL feature except BLACKPYRAMIDS_303, VARISPEED_EMUS and the light SIDECHAIN_COMPRESSOR
-(SIDECHAIN_COMPRESSOR_BW instead) in one image:
+Every FINAL feature except BLACKPYRAMIDS_303 and VARISPEED_EMUS in one image:
 
 ```sh
 python3 tools/build_kyoti.py

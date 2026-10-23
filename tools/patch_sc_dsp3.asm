@@ -238,17 +238,15 @@ zz01:
 ;        see the FULL accumulator -- normalise with `move acc1,otheracc` first.
 scdet:
         move    r0,n6                   ; --- displaced: dry-path anchor ---
-        move    x:(r6+$d),b            ; (q1) KEY|KFLT word
+        move    x:(r6+$d),b            ; (q1) KEY|KGN word
         asr     #$10,b,b
         move    b1,a                  ; (q3) a = KEY 0..8, a0 clean
-; KEY DECLICK (2026-10-19): r7+$2c = the key in use. While MON is audible
+; KEY DECLICK (2026-10-19, major version): r7+$2c = the key in use. While MON is audible
 ; (MON_FADE[my track] != 0) a new KEY waits: the old key keeps running and MON is forced off
 ; this block (r7+$2d = 1), so MON fades out on the live old key; with MON_FADE at 0 the new
 ; key is taken and MON fades back in -- a ~3 ms dip through the track's own sound instead of
-; a hard swap between two keys. A key in use outside 0..8 (cold memory, or another effect's
-; words after an FX change) is replaced at once; one inside 0..8 can only cost one dip,
-; and only while MON_FADE is not 0. r7+$2c/$2d: free while COMPRESSOR runs (the r7 canary,
-; 1366dc3, hardware 2026-10-19). Registers a, b, x0, r1, n1.
+; a hard swap between two keys. A key in use outside 0..8 (cold memory) is replaced at once.
+; scinit sets it to 0. Registers a, b, x0, r1, n1.
         move    x:(r7+$2c),b          ; (q1) b = the key in use
         move    a,x0
         cmp     x0,b
@@ -331,17 +329,13 @@ zz72:
                                         ; core (which half is "foreign" flips
                                         ; between payloads -- see the header's
                                         ; token table)
-; -- same-core copy (UNCHANGED from step 3) --
+; -- same-core source: keybus[abs] gen 0 (2026-10-19: no copy any more; the filter loop
+;    reads the key from Y itself, through KEY GAIN, and writes X:$40) --
         move    r4,a
         asl     #6,a,a
         move    a1,n1
         move    #>@KEYB@,r1
         lua     (r1)+n1,r1            ; r1 -> keybus[abs] gen 0
-        move    #$40,r0
-        do      #<$20,>zz02
-        move    y:(r1)+,x0
-        move    x0,x:(r0)+
-zz02:
         bra     zz25
 zz24:
 ; -- foreign-core copy (Session 77): shared-window relay, 2 generations
@@ -373,14 +367,10 @@ zz24:
         move    a1,n1
         move    #>@FSBASE@,r1
         lua     (r1)+n1,r1              ; r1 -> foreign track's shared-window slot
-        move    #$40,r0
-        do      #<$20,>zz26
-        move    y:(r1)+,x0
-        move    x0,x:(r0)+
-zz26:
 zz25:
+        move    r1,x:(r7+$2b)           ; the key's 32 words in Y, for the filter loop
 
-; -- KEY GAIN : x:(r6+$e) bits 16-23, 0..127 ; 64 = unity --
+; -- KEY GAIN : x:(r6+$d) bits 8-15 (slot 9, major version), 0..127 ; 64 = unity --
 ; Session 76 continued yet again (KGN smoothing): applying the raw table
 ; gain uniformly across the block produced an instantaneous STEP in x:$40
 ; every time a knob sweep crossed a table-bucket boundary -- inaudible with
@@ -406,9 +396,10 @@ zz25:
 ; multiplier, so folding it into the same smoothed path is free -- and
 ; necessary: a reintroduced skip would let this state go stale across a
 ; unity-parked gap exactly like KEY FLT's pre-fix OFF gap did.
-        move    x:(r6+$e),b           ; (q1) KGAIN|MON word
-        asr     #$10,b,b
-        move    b1,a                 ; (q3) a = KEY GAIN 0..127
+        move    x:(r6+$d),b           ; (q1) KEY|KGN word
+        asr     #$8,b,b
+        move    b1,a                 ; (q3)
+        and     #>$ff,a               ; a = KEY GAIN 0..127
         asr     #$3,a,a               ; a1 = gain table index 0..15
         move    a1,n1
         move    #>$fab1e0,r1
@@ -428,196 +419,311 @@ zz21:
         add     y1,b                  ; b = applied + coeff*diff = updated applied
 zz22:
         move    b,x:(r7+$17)          ; persist
-        move    b,x1                  ; x1 = smoothed gain, this block's multiply
-        move    #$40,r0
-        do      #<$20,>zz04
-        move    x:(r0),x0
-        mpy     x1,x0,a
-        asl     #6,a,a                ; * 64
-        move    a,x:(r0)+
-zz04:
+        lua     (r5+$20),r1
+        move    b,y:(r1)              ; the gain heads the loop's Y scratch (the filter
+                                      ; loop applies it: gain/64 x key, then * 64)
 
-; -- KEY FLT : x:(r6+$d) bits 8-15, 0..127 ; 64 = bypass ; <64 LP ; >64 HP --
-; Session 76 continued (third pass): ONE-POLE tracker, not the old 2-pole
-; Chamberlin SVF. Single state var (r7+$16, "tracker"), single coefficient
-; (x1, Q23 "a"): tracker += a*(in - tracker); LP output = tracker; HP output
-; = in - tracker (n0 marks LP vs HP for the per-sample select, same as
-; before). r7+$17 (the old "bp" integrator) is no longer used by this cave.
-;
-; WHY: the previous two attempts at a click-free OFF boundary both failed on
-; hardware -- a dry/wet amplitude blend near OFF corrupted the REAL
-; compressor's own detector (comb-filtering a signal against a phase-shifted
-; copy of itself, read continuously by an envelope follower -> audible ring
-; modulation on the TARGET track, not just a click); a wider version of the
-; same blend would only have spread that same corruption further, not fixed
-; it (NOTES.md, this session). The fix isn't a wider or smoother blend --
-; it's a topology whose FEEDBACK is coefficient-weighted. This one-pole
-; system's only feedback term is `a*(in-tracker)`: at a=0 the tracker never
-; moves (frozen); at a's Q23 ceiling the tracker becomes `in` itself, EVERY
-; sample, with NO dependence on its own history -- unlike the old SVF, where
-; `hp = in - lp - 2*bp` used `lp`/`bp` UNWEIGHTED, so stale state mattered
-; at full strength no matter how small the tuning coefficient got. A single
-; real pole also can't resonate (no q parameter needed, no discriminant to
-; satisfy, no "q >= 1.688" hardware-forced tuning like the old SVF needed --
-; Session 64's ringing bug straightforwardly cannot recur here), AND a
-; one-pole coefficient in [0, Q23-ceiling] is unconditionally stable -- no
-; upper bound like the old SVF's q=2 hit around ~5-6 kHz when pushed toward
-; a bright/transparent LP setting (worked out, not shipped, two sessions
-; ago). That headroom is what lets LP's near-OFF step target genuine near-
-; unity instead of a compromise value.
-;
-; THE EDGE OVERRIDE (not a blend -- a coefficient choice, one signal, always):
-; FTAB's normal 40-2200 Hz curve (unchanged, same shape as every prior
-; session) is shared by both LP (idx 0..31, low->high freq) and HP (idx
-; 0..31, low->high freq) -- so FTAB[31] (2200 Hz) is also HP's own deepest
-; setting, and FTAB[0] (40 Hz) is also LP's own deepest setting; pushing
-; either toward "transparent" in the table itself would detune the OTHER
-; mode's tuned end. Instead: idx==31 in the LP branch and idx==0 in the HP
-; branch each get a ONE-TIME coefficient override (checked once per call,
-; before the loop even starts -- zero per-sample cost) instead of the normal
-; FTAB fetch. LP's override is the Q23 ceiling (~unity, as close to a true
-; identity tracker as this format allows). HP's is ~8 Hz -- can't reach LP's
-; exact-identity limit (a highpass, even at its most transparent, still has
-; to track something to subtract; that's what "highpass" means, not a defect
-; of this design) but is slow and small enough that any residual error from
-; reusing whatever the tracker last held decays gently, not abruptly -- the
-; user's own real-hardware anecdote (stock FILTER's BASE control audibly
-; reaching transparent in a single raw-value step, 126->127) is the same
-; principle: the LAST step near an extreme doesn't need to be gradual if the
-; coefficient it lands on is inherently well-behaved.
-        move    x:(r6+$d),b           ; (q1)
-        asr     #$8,b,b
-        move    b1,a                 ; (q3) a1 = (KEY<<8)|KFLT, a0 clean
-        and     #>$ff,a              ; a = KEY FLT 0..127
-        cmp     #>$40,a
-        bne     zz11                   ; not bypass -> continue to LP/HP dispatch
-; HP re-entry declick (Session 76 continued yet again -- hardware feedback:
-; OFF<->HP still popped after the one-pole redesign fixed everything else).
-; Mark that this block was OFF; consumed by the HP branch below, at zz09.
-        move    #1,b
-        move    b,x:(r7+$14)
-        bra     zz10
-zz11:
-        move    a1,b                  ; b = KEY FLT (b0 clean)
-        cmp     #>$40,b
-        blt     zz05                   ; KEY FLT < 64 -> LP
-;   HP : idx = (KEY FLT - 64) >> 1 (0..31) ; marker n0 = 0
-        move    b,a
-        sub     #>$40,a
-        asr     #$1,a,a
-        move    a1,n1
-        move    #0,n0
-        move    n1,a                   ; (q3) a = idx, clean (re-load from n1)
-        tst     a
-        bne     zz06                    ; not the edge idx -> normal FTAB fetch
-        move    #>@HPEDGE@,x1           ; edge -> ~8 Hz, near-transparent HP
-        bra     zz09
-zz05:
-;   LP : idx = KEY FLT >> 1 (0..31) ; marker n0 != 0
-        asr     #$1,b,b
-        move    b,n1
-        move    #>$10,n0
-        move    b1,a                   ; (q3) a = idx, clean
-        cmp     #>$1f,a
-        bne     zz06                    ; not the edge idx -> normal FTAB fetch
-        move    #>@LPEDGE@,x1           ; edge -> Q23 ceiling, ~unity LP
-        bra     zz09
-zz06:
+; -- KEY FILTERS (2026-10-19, major version; tools/sc_keyfilt.py is the bit-exact model) --
+; KBAS x:(r6+$e) bits 16-23 (0 = OFF, 1..127), KWID bits 8-15 (0..126, 127 = OFF): a
+; base-width pair (2026-10-21). HP 18 dB/oct = TPT one-pole HP x TPT state-variable HP
+; (k 1) at KBAS; LP 12 dB/oct = TPT SVF LP (k sqrt 2) KWID above it (above 20 Hz with KBAS
+; OFF: a plain LP); Butterworth, on one grid, 20 Hz * 2^(g/16). OFF is a cutoff out of the
+; way (~5 Hz / ~19.6 kHz), so no code path switches as a knob moves (the old KFLT's centre
+; pop cannot happen); the settled-OFF bypass below is continuous. The two cannot cross.
+; Positions glide per block; coefficients are recomputed only in a block
+; where a position moved: G from the 49-word table (interpolated), a1 = 1/D by `div`.
+; State, in this instance's r7 block (free while COMPRESSOR runs: r7 canary, emulator +
+; hardware, 2026-10-19; another effect in the slot reuses it, hence scinit):
+;   r7+$1c s1   $1d/$1e HP ic1/ic2   $1f/$20 LP ic1/ic2
+;   $21 g1   $22..$24 HP a1 a2 a3   $25..$27 LP a1 a2 a3
+;   $28 Vh  $29 Vl (positions, (g+32)<<15)   $2a @KFMAGIC@ once set up (scinit clears it)
+;   $2b the key source's Y address, this block (same-core keybus or the shared window)
+;   $2c the key in use, $2d "a KEY change is waiting" (the KEY declick, at scdet's top)
+; dsp_asm encodes no backward branch or bsr: every subroutine sits after its callers. It also
+; mis-encodes accumulator-to-accumulator `tfr` and `cmp` (tfr a,b -> rnd b, cmp b,a -> maxm
+; a,b): those go through `move` (the values are clean 24-bit) or a data register. The
+; builders' mnemonic round trip (dsp_asm_util.mnemonic_mismatches) refuses any such swap.
+; Registers: a, b, x0, x1, y0, y1, r0, r1, n1, r4 (r4 is reloaded at every scdet exit,
+; r0 by the redirect at zz16). r5 (the stash base) is not touched.
         @FTAB_R1@
-        move    p:(r1+n1),x1          ; x1 = a coefficient (Q23)
-zz09:
-;   NOTE: do NOT gate on the stock "first-block" bit (r7+$f) here -- it can go
-;   warm from ordinary stock compressor activity before OUR code has ever run
-;   a KEY FLT block (e.g. KFLT sits at bypass for a while, then gets turned to
-;   LP/HP for the first time). $16 is untouched by stock's own init (0x1864's
-;   zero-fill list is $11/$12/$13/$1a/$1b/$f only -- confirmed by
-;   disassembly), so reading it on the stock bit's word risks seeding the
-;   tracker from garbage. Own the gate: $18 is ALSO untouched by stock and
-;   by every other hook here, so use it as OUR single "have I ever seeded the
-;   tracker myself" latch, set only below, never by anything else.
-;
-;   HP re-entry declick: only HP needs a reseed on the block right after OFF
-;   -- HP's output is `in - tracker`, so continuity with whatever bypass was
-;   just outputting (raw, unfiltered `in`) requires tracker==0 on that first
-;   post-OFF sample, NOT the current input sample (seeding to the input
-;   sample would give hp[0]=0, a jump TO silence -- worse, not better). LP's
-;   output IS the tracker itself, where seeding to the input sample would be
-;   the right target -- but LP measured clean on real hardware without any
-;   of this (user confirmed, Session 76 continued yet again), so it is
-;   deliberately left on the plain warm-continuation path below, untouched.
-;   n0 (0=HP / $10=LP, set above) gates this to HP only; r7+$14 is set only
-;   in the bypass branch above and consumed (cleared) here, or expired at
-;   this routine's own tail below on the next filtered block either mode
-;   takes -- so a bypass-then-LP-then-HP sequence can never fire this on a
-;   stale flag from an old, already-superseded OFF period.
-        move    n0,a                  ; a = 0 (HP) / $10 (LP)
+        move    x:(r6+$e),b           ; (q1) KBAS|KWID word
+        asr     #$10,b,b
+        move    b1,a                  ; (q3) a = KBAS 0..127
         tst     a
-        bne     zz23                   ; LP -> normal warm-continuation path
-        move    x:(r7+$14),a          ; HP: was the previous block OFF?
-        tst     a
-        beq     zz23                   ; no -> normal warm-continuation path
-        move    #0,b
-        move    b,x:(r7+$14)          ; one-shot, consumed
-        move    b,y1                  ; tracker := 0 -> hp[0] = in[0], continuous
-        bra     zz08
-zz23:
-        move    x:(r7+$18),a
-        tst     a
-        bne     zz07
-        move    #0,y1                 ; never seeded -> tracker = 0
-        bra     zz08
-zz07:
-        move    x:(r7+$16),y1        ; warm: tracker
-zz08:
-; SIDECHAIN3 ringing bug (Session 74, NOTES.md): this loop used to run `do n7`,
-; matching the STOCK compressor's own per-call sample count -- but `n7` is
-; segment-scoped for a mid-block trig split (the dispatcher sets it to
-; `x:0x20c` or `x:0x20d`, each < 16, confirmed by fresh disassembly of both
-; payloads' `P:0x4a7`/`0x29c` dispatch sites), while the sibling loops right
-; below (zz02/zz04/zz15, and the gen-0 copy-in above) all hardcode a FIXED
-; 32-word/16-pair extent. On a split frame this filtered only the first `n7`
-; pairs of `x:$40`, leaving the rest of the SAME buffer holding unfiltered
-; (KEY-GAIN-only) key audio from the fixed-extent stages that already ran --
-; a hard filtered/raw splice published straight to MON via the SC LISTEN
-; gen-1 stash (zz15) on every trig that lands mid-block. `x:0x40` is always a
-; FULLY VALID 16-sample block regardless of split (sctap publishes it before
-; any split-handling runs, at the very top of the dispatch), so there is no
-; reason this filter needs to track the compressor's own per-call segment
-; count -- fix is to always process the whole block, matching the other
-; three loops instead of the one outlier.
+        beq     zz40
+        sub     #>1,a
+        move    a1,x0
+        move    #>@KFHSTEP@,x1
+        mpy     x1,x0,a               ; 2 * (n-1) * HSTEP, in a0
+        asl     #$17,a,a              ; a1 = (n-1) * HSTEP
+        add     #>$100000,a           ; + V of g 0
+        bra     zz41
+zz40:
+        clr     a                     ; OFF: g -32
+zz41:
+        move    a,y0                  ; y0 = Vh target
+        move    x:(r6+$e),b           ; (q1)
+        asr     #$8,b,b
+        move    b1,a                  ; (q3)
+        and     #>$ff,a               ; a = KWID 0..127
+        cmp     #>$7f,a
+        beq     zz42
+        move    a1,x0
+        move    #>@KFWSTEP@,x1
+        mpy     x1,x0,a
+        asl     #$17,a,a              ; a1 = m * WSTEP
+        add     #>@KFWMIN@,a          ; + half an octave: the width
+        move    y0,b
+        tst     b
+        bne     zz43
+        move    #>$100000,b           ; KBAS OFF: counted from 20 Hz, a plain LP
+zz43:
+        add     b,a                   ; Vl = base + width
+        cmp     #>$5f8000,a
+        ble     zz39
+zz42:
+        move    #>$5f8000,a           ; OFF, or past the top: g 159
+zz39:
+        move    a,y1                  ; y1 = Vl target
+        lua     (r7+$1c),r4           ; r4 -> the filter block
+        move    x:(r4+$e),b           ; (q1)
+        cmp     #>@KFMAGIC@,b
+        beq     zz44
+; first block after scinit (or never set up): zero the sections, positions straight to target
+        clr     b
+        move    r4,r0
+        do      #<5,>zz62
+        move    b,x:(r0)+
+zz62:
+        move    y0,x:(r4+$c)
+        move    y1,x:(r4+$d)
+        move    #>@KFMAGIC@,b
+        move    b,x:(r4+$e)
+        bra     zz46
+zz44:
+        move    #0,r0                 ; r0 = "a position moved"
+        move    x:(r4+$c),x0
+        tfr     y0,a
+        sub     x0,a                  ; a = Vh target - Vh
+        bsr     zz52
+        cmp     x0,a
+        beq     zz45
+        move    #1,r0
+zz45:
+        move    a,x:(r4+$c)
+        move    x:(r4+$d),x0
+        tfr     y1,a
+        sub     x0,a
+        bsr     zz52
+        cmp     x0,a
+        beq     zz49
+        move    #1,r0
+zz49:
+        move    a,x:(r4+$d)
+        move    r0,b
+        tst     b
+        beq     zz47                  ; nothing moved: the coefficients stand
+        move    x:(r4+$c),y0
+        move    x:(r4+$d),y1
+zz46:
+; coefficients: HP one-pole g1 and SVF (k 1) from Vh, LP SVF (k sqrt 2) from Vl
+        tfr     y0,a
+        bsr     zz54                  ; x0 = G16(Vh)
+        move    x0,y0
+        tfr     y0,b
+        add     #>$80000,b            ; 1/16 + G16
+        move    b,x0
+        tfr     y0,a
+        bsr     zz56
+        move    a0,x:(r4+5)           ; g1 = G16 / (1/16 + G16)
+        move    #>@KFK16H@,x1
+        bsr     zz58                  ; x0 = a1, x1 = a2
+        move    x0,x:(r4+6)
+        move    x1,x:(r4+7)
+        move    #>$400000,a
+        asl     #1,a,a                ; 1.0
+        sub     x0,a
+        sub     x1,a                  ; a3 = 1 - a1 - a2 (k 1)
+        move    a,x:(r4+8)
+        tfr     y1,a
+        bsr     zz54                  ; x0 = G16(Vl)
+        move    x0,y0
+        move    #>@KFK16L@,x1
+        bsr     zz58
+        move    x0,x:(r4+9)
+        move    x1,x:(r4+$a)
+        move    #>@KFKHL@,y0
+        mpy     x1,y0,b
+        asl     #1,b,b                ; k * a2 (k/2 * a2 * 2)
+        move    b,y0
+        move    #>$400000,a
+        asl     #1,a,a
+        sub     x0,a
+        sub     y0,a                  ; a3 = 1 - a1 - k a2
+        move    a,x:(r4+$b)
+zz47:
+; the filters, per sample, on the mono key: u = (L + R) / 16, out = 8 * LP, both channels.
+; 2026-10-19 cycle pass: the 7 coefficients are copied once per block to Y (this track's gen-1
+; stash slot, r5+$20: scratch until the MON tail rewrites it), so states (X, r1) and
+; coefficients (Y, r4) load in one instruction; no displaced address in the loop. The SVFs
+; use z = v3 - v1 - P and h2' = h2 + 2P (P = a2 h1 + a3 v3), which keeps w out of the
+; registers; integer for integer the model's arithmetic. Parallel moves take a1, so a value
+; with fraction bits in a0 is truncated exactly where the model's >> 23 truncates.
+; both knobs at OFF and their positions settled there: bypass (the model's rule, see
+; sc_keyfilt.py): out = 8u; HP sections left at 0, the LP's ic2 = the last u, so a knob
+; turned away from OFF picks up without a step. Plain ducking (filters OFF) costs about what
+; the old KFLT bypass did.
+        move    x:(r4+$c),b           ; (q1)
+        tst     b
+        bne     zz61
+        move    x:(r4+$d),b           ; (q1)
+        cmp     #>$5f8000,b
+        bne     zz61
+        lua     (r5+$20),r1
+        move    y:(r1),y1             ; y1 = gain/64
+        move    x:(r7+$2b),r1         ; the key, in Y
         move    #$40,r0
-        do      #<$10,>zz13
+        do      #<$10,>zz63
+        move    y:(r1)+,x0
+        mpy     x0,y1,a     y:(r1)+,x0
+        asl     #$6,a,a
+        mpy     x0,y1,b     a,x0
+        asl     #$6,b,b
+        tfr     x0,a        b,y0
+        add     y0,a
+        asr     #$4,a,a
+        move    a,x0                  ; x0 = u
+        tfr     x0,a
+        asl     #$3,a,a
+        move    a,x:(r0)+
+        move    a,x:(r0)+
+zz63:
+        clr     b
+        move    b,x:(r4)+
+        move    b,x:(r4)+
+        move    b,x:(r4)+
+        move    b,x:(r4)+
+        move    x0,x:(r4)             ; l2 = the last u
+        bra     zz10
+zz61:
+        lua     (r4+5),r0
+        lua     (r5+$21),r1
+        do      #<7,>zz60
         move    x:(r0)+,x0
-        move    x:(r0)-,a
-        tfr     x0,b
-        add     b,a
-        asr     #$1,a,a               ; a = (L + R) / 2 = filter input
-        move    a,x0                  ; x0 = in (kept for HP's own output)
-        sub     y1,a                   ; a = in - tracker = diff
-        move    a,y0                   ; y0 = diff (mpy operand slot)
-        mpy     x1,y0,b               ; b = a * diff
-        add     y1,b                  ; b = tracker + a*diff = updated tracker
-        move    b,y1                  ; y1 = tracker (persists)
-        move    x0,a                  ; a = in
-        sub     b,a                    ; a = in - tracker = hp (default candidate)
-        move    a,x0                   ; x0 = hp (default)
-        move    n0,a                 ; marker: 0 = HP (keep x0=hp), != 0 = LP
-        tst     a
-        beq     zz14
-        move    y1,x0                ; LP -> override with tracker
-zz14:
-        move    x0,x:(r0)+
-        move    x0,x:(r0)+
-zz13:
-zz12:
-        move    y1,x:(r7+$16)
-        move    #1,a
-        move    a,x:(r7+$18)          ; latch: tracker is now genuinely ours
-        move    #0,b
-        move    b,x:(r7+$14)          ; expire "just bypassed" -- HP consumed it
-                                       ; above already if this was that block; LP
-                                       ; or any later block clears it here so it
-                                       ; can never fire on a stale flag
+        move    x0,y:(r1)+
+zz60:
+        move    r4,r1                 ; X: s1 h1 h2 l1 l2
+        lua     (r5+$20),r4           ; Y: gain g1 ha1 ha2 ha3 la1 la2 la3
+        move    x:(r7+$2b),r5         ; Y: the key (r5 is the stash base again below)
+        move    #>$fffffc,n1          ; -4: back from l2 to s1
+        move    #$40,r0
+        do      #<$10,>zz48
+        move    y:(r4)+,y1                  ; y1 = gain/64
+        move    y:(r5)+,x0                  ; x0 = L
+        mpy     x0,y1,a     y:(r5)+,x0      ; a = gain/64 L ; x0 = R
+        asl     #$6,a,a
+        mpy     x0,y1,b     a,x0            ; b = gain/64 R ; x0 = gain L (saturated)
+        asl     #$6,b,b
+        tfr     x0,a        b,y0            ; y0 = gain R (saturated)
+        add     y0,a        y:(r4)+,y1      ; a = L + R ; y1 = g1
+        move    x:(r1),b                    ; b = s1
+        asr     #$4,a,a
+        sub     b,a         a,x0            ; x0 = u ; a1 = d = u - s1
+        move    a,y0
+        mpy     y1,y0,a                     ; a1 = v = d g1
+        add     a,b         a,y0            ; b1 = lp1 = s1 + v ; y0 = v
+        add     y0,b        b,x1            ; b1 = s1' = lp1 + v ; x1 = lp1
+        tfr     x0,a        b,x:(r1)+       ; a = u ; s1'
+        sub     x1,a                        ; a = w (this dsp_asm takes no ALU op with an XY move)
+        move    x:(r1)+,x1  y:(r4)+,y0      ; x1 = h1 ; y0 = ha1
+        move    x:(r1)-,b   y:(r4)+,y1      ; b = h2 ; y1 = ha2
+        sub     b,a                         ; a = v3
+        mpy     x1,y0,b     a,x0            ; b = ha1 h1 ; x0 = v3
+        mac     x0,y1,b     y:(r4)+,y0      ; b1 = v1 ; y0 = ha3
+        mpy     y1,x1,a     b,y1            ; a = ha2 h1 ; y1 = v1
+        mac     y0,x0,a                     ; a1 = P
+        tfr     y1,b        a,y0            ; b = v1 ; y0 = P
+        asl     b
+        sub     x1,b                        ; b = h1' = 2 v1 - h1
+        tfr     x0,a        b,x:(r1)+       ; a = v3 ; h1'
+        sub     y1,a        x:(r1),b        ; a = v3 - v1 ; b = h2
+        sub     y0,a                        ; a = z = v3 - v1 - P (the HP)
+        add     y0,b
+        add     y0,b                        ; b = h2' = h2 + 2P
+        move    b,x:(r1)+   y:(r4)+,y0      ; h2' ; y0 = la1
+        move    x:(r1)+,x1  y:(r4)+,y1      ; x1 = l1 ; y1 = la2
+        move    x:(r1)-,b                   ; b = l2
+        sub     b,a                         ; a = v3
+        mpy     x1,y0,b     a,x0
+        mac     x0,y1,b     y:(r4)+,y0      ; b1 = v1 ; y0 = la3
+        mpy     y1,x1,a     b,y1            ; y1 = v1
+        mac     y0,x0,a                     ; a1 = P
+        tfr     y1,b        a,y0            ; y0 = P
+        asl     b
+        sub     x1,b                        ; b = l1'
+        move    b,x:(r1)+                   ; l1'
+        move    x:(r1),b                    ; b = l2
+        add     y0,b                        ; b = v2 = l2 + P, the LP output
+        add     y0,b        b,x0            ; b = l2' = l2 + 2P ; x0 = v2
+        tfr     x0,a        b,x:(r1)+n1     ; a = v2 ; l2' ; r1 back to s1
+        asl     #$3,a,a
+        move    a,x:(r0)+                   ; saturated
+        move    a,x:(r0)+
+        lua     (r4-8),r4
+zz48:
+        lua     (r4-$20),r5           ; r5 = the stash base again, for the MON tail
+        bra     zz10
+; glide: a = target - V, x0 = V -> a = the new V (clean). Snap within @KFSNAP@.
+zz52:
+        move    a,b
+        abs     b
+        cmp     #>@KFSNAP@,b
+        blt     zz53
+        move    a,x1
+        move    #>@KFGA@,y0
+        mpy     x1,y0,a
+zz53:
+        add     x0,a
+        move    a,x1
+        tfr     x1,a
+        rts
+; G16 at position a (clean), r1 = the table: x0 = GT[j] + frac (GT[j+1] - GT[j])
+zz54:
+        move    a,b
+        asr     #$11,a,a
+        move    a1,n1                 ; j
+        and     #>$1ffff,b
+        asl     #6,b,b
+        move    b,x1                  ; frac
+        lua     (r1)+n1,r0
+        move    p:(r0)+,x0
+        move    p:(r0),a
+        sub     x0,a
+        move    a,y0
+        mpy     x1,y0,a
+        add     x0,a
+        move    a,x0
+        rts
+; SVF a1, a2 from G16 (y0), k/16 (x1): x0 = a1 = (1/256)/(D/256), x1 = a2 = G a1
+zz58:
+        mpy     y0,y0,a
+        mac     x1,y0,a
+        add     #>$8000,a
+        move    a,x0                  ; D/256
+        move    #>$8000,a
+        bsr     zz56
+        move    a0,x0                 ; a1
+        mpy     y0,x0,a
+        asl     #4,a,a
+        move    a,x1                  ; a2
+        rts
+; a0 = floor(a * 2^23 / x0), 0 < a < x0
+zz56:
+        andi    #$fe,ccr
+        do      #<$18,>zz57
+        div     x0,a
+zz57:
+        rts
 
 zz10:
 ; -- SC LISTEN : if on, stash the processed key -> keybus[my track] gen 1, and
@@ -656,12 +762,13 @@ zz10:
         move    x:(r7+$2d),b          ; (q1) a KEY change waiting: MON off this block
         tst     b
         bne     zz17
-        move    x:(r6+$e),b           ; (q1)
+        move    x:(r6+$c),b           ; (q1) RMS|MON word
         asr     #$8,b,b
         move    b1,a                 ; (q3)
         and     #>$ff,a
         tst     a
-        beq     zz17                   ; MON off
+        bne     zz17                   ; MON off: slot 7 stores 1 = OFF, 0 = ON (stock's
+                                       ; slot-7 default is 1, so old compressors load OFF)
         move    #1,b                   ; (q2) stores $10000, moncommit's exact match
         move    b,y:(r1)               ; MON_ON = armed for this block
         bra     zz27
@@ -876,4 +983,20 @@ mc25:
         move    y:(r1)+,x0
         move    x0,x:(r3)+
 mc11:
+        rts
+
+; ---- HOOK 4 : COMPRESSOR init (A P:0x1aa4, B P:0x1864; 2026-10-19, major version) --------
+; Stock init's first instruction, `move #>$20c5,x0`, is replaced by a bsr here and replayed
+; last. The dispatcher calls init whenever an instance is (re)assigned the effect; the slot's
+; previous effect may have used r7+$1c.. (the r7 canary: CHORUS and PLATE do), so the key
+; filters start over: $2a is cleared, and scdet's first block zeroes the sections and puts
+; the positions straight on target. KEY GAIN's smoother ($17) goes cold too (it snaps).
+; Registers: x0 only, which the displaced instruction then sets as stock does.
+scinit:
+        move    #0,x0
+        move    x0,x:(r7+$2a)
+        move    x0,x:(r7+$17)
+        move    x0,x:(r7+$2c)         ; key in use: OFF
+        move    x0,x:(r7+$2d)
+        move    #>$20c5,x0           ; --- displaced ---
         rts

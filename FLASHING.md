@@ -109,7 +109,8 @@ unit that boots; if it doesn't, use §3b.
 
 | build | OS VERSION |
 |---|---|
-| MUTE_MODES, SIDECHAIN_COMPRESSOR, SIDECHAIN_COMPRESSOR_BW, RELOAD_FROM_PROJECT, QUANTIZE_LIVE_REC_TOGGLE | `140C_KYOTI` |
+| MUTE_MODES, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT, QUANTIZE_LIVE_REC_TOGGLE | `140C_KYOTI` |
+| SIDECHAIN_COMPRESSOR light (the earlier version, WIP) | `140C_SCLT` |
 | KYOTI V1.6 (the features in one image) | `KYOTI V1.6` |
 | KYOTI V1.5 (the previous one) | `KYOTI V1.5` |
 | KYOTI V1.4 (the previous one) | `KYOTI V1.4` |
@@ -119,7 +120,7 @@ unit that boots; if it doesn't, use §3b.
 | VARISPEED | `140C_VARI1` |
 | VARISPEED_EMUS | `140C_VEM10` |
 | ERASE_EMPTY_TRIGLESS_LOCKS and the BATCH_BUGFIXES builds | `1.40C` (stock string — check by behaviour) |
-| a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_SCBW`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303`, `BUG_VARI`, `BUG_VEM10`) |
+| a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303`, `BUG_VARI`, `BUG_VEM10`) |
 
 PERSONALIZE is reset by every flash, so features are off until you re-enable them. A
 quick check for each:
@@ -128,14 +129,14 @@ quick check for each:
   reverb: the dry sound cuts, the tail rings out, and unmuting picks up in time.
 - **DIRECT_JUMP_KYOTI** — hold `[PTN]`, tap `[YES]` → toast `ON`. While playing, cue
   another pattern: it takes over on the next step, in time with the metronome.
-- **SIDECHAIN_COMPRESSOR_BW** — as SIDECHAIN_COMPRESSOR below, with page 2 reading `RMS MON KEY
-  KGN KBAS KWID`. Turn `KBAS` and `KWID` through their ranges (Hz, then octaves); with `MON` on,
+- **SIDECHAIN_COMPRESSOR** — COMPRESSOR on a track, page 2 (`RMS MON KEY KGN KBAS KWID`) →
+  `KEY` = another track playing a kick. The compressed track ducks on the kick; `MON` lets you
+  hear the key. Turn `KBAS` and `KWID` through their ranges (Hz, then octaves); with `MON` on,
   raising `KBAS` moves the whole band up, and `KBAS OFF` + `KWID` sweeps a plain low-pass.
-- **SIDECHAIN_COMPRESSOR** — COMPRESSOR on a track, page 2 → `KEY` = another track
-  playing a kick. The compressed track ducks on the kick; `MON` lets you hear the key.
   A project saved on stock firmware with a COMPRESSOR in it: that compressor's page 2
-  reads `KEY OFF`, `KFLT` and `KGN` centred, `MON OFF`, and it compresses as it did on
-  stock; a KEY you set on this firmware is kept. With a keyed COMPRESSOR running, DARK REV
+  reads `MON OFF`, `KEY OFF`, `KGN` centred, `KBAS` and `KWID` `OFF`, and it compresses as it
+  did on stock; a KEY you set on this firmware is kept. A COMPRESSOR saved with the earlier
+  version (before 22 Oct 2026) keeps its KEY; its other page-2 knobs need setting again. With a keyed COMPRESSOR running, DARK REV
   and PLATE REV in FX2 on T1 and on T5 (long settings) ring clean, with no other track's
   audio in them.
 - **RELOAD_FROM_PROJECT** — save the bank, change a track's trigs, then `[PTN]` +

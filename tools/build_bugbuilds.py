@@ -4,13 +4,12 @@
 """
 Bugbuilds -- each finished FEATURE build, with all three BUG FIXES folded in.
 
-Eleven composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
+Ten composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
 not written alongside, the standalone per-feature images in out/):
 
     MUTE_MODES        + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     QUANTIZE_LIVE_REC_TOGGLE              + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     SIDECHAIN_COMPRESSOR   + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
-    SIDECHAIN_COMPRESSOR_BW + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     ERASE_EMPTY_TRIGLESS_LOCKS           + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     RELOAD_FROM_PROJECT            + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
     DIRECT_JUMP_KYOTI      + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
@@ -119,9 +118,8 @@ FEATURES = {
               "Hold [REC] + [PLAY] -> toast shows QUANTIZE LIVE REC; tap [PLAY] "
               "again while it is up to invert it.  (Stateless rewrite after the "
               "0x400522ca tick hook crashed hardware; hardware-confirmed 2026-09-25.)"),
-    "SIDECHAIN_COMPRESSOR": ("build_sidechain_compressor.py", "out/mainos_sidechain_compressor.bin", "BUG_SC3X", "COMPRESSOR FX page 2: KEY / KFLT / KGAIN / MON, cross-core."),
-    "SIDECHAIN_COMPRESSOR_BW": ("build_sidechain_compressor_bw.py", "out/mainos_sidechain_compressor_bw.bin", "BUG_SCBW",
-                                "COMPRESSOR FX page 2: MON / KEY / KGN / KBAS / KWID (base-width key filter), cross-core."),
+    "SIDECHAIN_COMPRESSOR": ("build_sidechain_compressor.py", "out/mainos_sidechain_compressor.bin", "BUG_SC3X",
+                             "COMPRESSOR FX page 2: MON / KEY / KGN / KBAS / KWID (base-width key filter), cross-core."),
     "ERASE_EMPTY_TRIGLESS_LOCKS": ("build_erase_empty_trigless_locks.py", "out/mainos_erase_empty_trigless_locks.bin", "BUG_TRIGLK",
                  "A trigless lock whose last param is LIVE-erased clears from the trig row."),
     "RELOAD_FROM_PROJECT": ("build_reload_from_project.py", "out/mainos_reload_from_project.bin", "BUG_RL3",
