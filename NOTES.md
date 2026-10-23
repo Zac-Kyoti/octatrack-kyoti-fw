@@ -37097,3 +37097,10 @@ Re-pinned on the user's instruction (emulator-verified; test image to flash 140C
 out/OCTATRACK_OS1.40C_SC_CLIPFIX.syx 4881ce14…, .bin b9d66c3b…): SIDECHAIN_COMPRESSOR mainos
 `92b60f34…`, BUG_SC3X `e9046feb…`, KYOTI V1.6 `39021805…`; octabam manifest's sc_ui reference
 `157f883f…` (ui_switch.bin at 0x400d7260). emu_sc_dsp3 ALL GOOD.
+
+**2026-10-23 (cont.)** octabam: #869 (the base-width pin 1df3033) was MERGED by Sam (14c0aee0), then the
+ui-switch thread's #873 (pin 9b2e35a: rotary switches + link clips) on top. The clip fix goes as
+**sambanks/octabam#875** (fork branch sidechain-clip-fix, c5329aaf on 838a3cf2): SIDECHAIN pin
+9b2e35a -> 554ca1c, THIRD_PARTY, new setup/chooser screenshots; gates: verify-docs 0, check-remix
+x2 OK, reach every gate passed. (A force-push + body edit briefly went to merged #869 by mistake;
+its title/body and branch were restored to the merged state.)
