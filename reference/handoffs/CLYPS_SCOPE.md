@@ -527,12 +527,34 @@ parts before the landing differ by construction, so read "locked from".
 | A6n vs R5 | the same | step 20 (t114), copy only | t192: wrong until the master wrap (old index 4 kept) |
 | A6 vs R5 | the same | step 20, copy **+ STEP = 20, STEP−1 = 19** | **t115**, the tick after the landing |
 
-**So the one-track rule (same scale)** is: at the track's window start, in phase D, copy the record,
-then set STEP / STEP−1 to the phase-continuous index (steps elapsed since the pattern's last
-restart, mod the new length). Stock does the rest: it re-reads the length at each wrap and
-restarts at the master wrap.
+| A7 vs R7 | A14's T6 with its scale set to 2x in RAM (tps 3) onto A15's 1x T6 | t66, copy only | t192: wrong until the master wrap |
+| A7f vs R7 | the same | t66, copy **+ STEP 23, STEP−1 22, TICKS 0, TRK_SCALE 0** | **t67** |
+| A8 vs R8 (JAM2) | **MIDI**: pattern 1's 32-step M2 onto pattern 2's empty 16-step M2 | t66, copy only | before the landing (t55); identical after it |
 
-Not run yet: a track faster than the master, master length INF, a cross-bank source, DJ on.
+**The one-track landing rule.** It is measured on every case above, and agrees with DIRECT JUMP V7's
+position model.
+- **When.** The landing tick L must be a window start for both the old and the new tick rate
+  (t′ ≡ 0 mod lcm(tps_old, tps_new)), so that no old event is still pending and the new step is
+  built on L. At a master wrap, the copy at `0x400a43a0` on the commit tick is the same thing:
+  stock's re-home does the rest.
+- **What, in phase D (`0x400a1f72`) of L:**
+  1. copy the record (plus the length/scale fix, §4.6);
+  2. STEP = (t′ / tps_new + 1) mod len_new, and STEP−1 = STEP − 1;
+  3. TICKS = t′ mod tps_new (0 at L);
+  4. TRK_SCALE = the new scale (`0x8000663e[t]`).
+
+  RELOAD, CNTDN and ARMED are unchanged.
+- **t′, with DJ off (phase-continuous, O9):** ticks since the master's last restart,
+  t′ = (m_step − 1)·tps_M + m_tick + 1, from `0x800065b2` / `0x800065b6` (the master lags the
+  tracks by one tick).
+- **t′, with DJ on:** DJ's clock-locked T since START, reduced mod the master cycle
+  (`dj_T`, `dj_bparams`).
+- **Stock re-reads** the length at each wrap (`0x400a3d7a`) and restarts every track at the master
+  wrap.
+
+Not run yet: master length INF, a cross-bank source (pure data, low risk), DJ on, and a
+CHANGE-point trigger (the arithmetic is above; the trigger is our phase-G evaluation of stock's
+gate rule).
 
 **DIRECT JUMP on** (decided). DJ re-lands the whole sequencer through phase D (`0x80006687`), which
 Clyps must never write. What Clyps can reuse from DJ for a single-track clock-locked landing:

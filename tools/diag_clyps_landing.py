@@ -83,6 +83,9 @@ def main(argv):
     ap.add_argument("--clyp-step", type=int, default=-1,
                     help="also set the track's STEP to N (and STEP-1 to N-1) at the copy: the "
                          "phase-continuous position when the new length moves the index")
+    ap.add_argument("--clyp-arr", action="append", default=[],
+                    help="NAME=VAL: also write the track's byte in a per-track engine array at the "
+                         "copy (names: step step_m1 ticks armed cntdn reload trk_scale)")
     ap.add_argument("--dj", type=int, default=0)
     ap.add_argument("--ticks", type=int, default=300)
     ap.add_argument("--tag", default="clyps")
@@ -185,6 +188,9 @@ def main(argv):
         dst_bank = rd(0x800065BD, 1)
         off, ln = trk_span(t)
         uc.mem_write(slab(dst_bank, dst_pat) + off, bytes(uc.mem_read(slab(bank, s_) + off, ln)))
+        for spec in a.clyp_arr:
+            nm, val = spec.split("=")
+            uc.mem_write(ARRAYS[nm] + t, bytes([int(val, 0) & 0xFF]))
         if a.clyp_step >= 0:
             uc.mem_write(0x800064D0 + t, bytes([a.clyp_step & 0xFF]))
             uc.mem_write(0x800064E0 + t, bytes([(a.clyp_step - 1) & 0xFF]))
