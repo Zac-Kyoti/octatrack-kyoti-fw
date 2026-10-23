@@ -20,7 +20,7 @@ release settings. tools/sc_keyfilt.py is the filters' bit-exact model.
 
 Sources: tools/patch_sc_dsp3.asm (DSP: sctap, scdet + key filters + KEY declick, moncommit
 MON crossfade, scinit on COMPRESSOR's init), tools/patch_sidechain.s (ColdFire: formatters,
-KEY list widget, sc_norm). DSP space: SPRING REVERB's P module. Tests: tools/emu_sc_dsp3.py.
+sc_norm), tools/ui_switch.s (KEY's rotary switch, KWID's link clip; shared with VARISPEED). DSP space: SPRING REVERB's P module. Tests: tools/emu_sc_dsp3.py.
 History: NOTES.md "sc-keyfilt", "sc-bw", "sc-replace" (2026-10-19..23).
 
 Usage:   python3 tools/build_sidechain_compressor.py [VERSTR]      (default "140C_KYOTI")
@@ -59,6 +59,8 @@ CF_PATCHES = [
         (0x4000cae8, "sc_norm", "47f980000a50", 6, "jsr"),   # frame builder's copier
         (0x40003d1c, "sc_norm", "47f980000a50", 6, "jsr"),   # its twin
     ]),
+    # the panel drawings shared with VARISPEED: KEY's rotary switch, KWID's link clip
+    ("ui_switch", kyoti_place.at("ui_switch", 0x400d7260), []),
 ]
 CF_FREE_END = 0x400d7c3c
 E = 0x400d5a4a
@@ -82,29 +84,6 @@ FMT_ONOFF = 0x4003c14c          # stock "ON" / "OFF"
 # reference actually uses.
 SWITCH_FN = 0x40046f10
 
-# Stock N-way scrolling-list draw callback (LFO page-2 TRIG's own B, E=
-# 0x400d37be per refs/octabam/docs/firmware/PARAM_PAGES.md -- LFO shares
-# COMPRESSOR's own page-class 0x400328e4). Picked over LFO MULT's own B
-# (0x400467a4, structurally near-identical opening preamble on disassembly,
-# so not ruled out as the SAME family, but the user specifically wants
-# TRIG's visual behaviour -- "nothing but a simple list that gets scrolled
-# through" -- not MULT's, and TRIG is the one actually asked for). Unlike
-# CHORUS TAPS's own tick-selector (0x40047254, `moveq #4,%d0 / cmpl
-# %d2,%d0` -- the option count compiled directly into the function, single
-# use per octabam's own inventory, PARAM_PAGES.md SS7), TRIG's disassembly
-# (`m68k-elf-objdump`, this session) shows NO compiled-in count comparison
-# anywhere -- every option-count-shaped value it touches comes from its own
-# stack parameters, not a literal. That matters beyond just "looks right
-# today": KEY is headed for cross-core (any of 8 tracks, count 9 not 5) --
-# a hardcoded-count renderer like CHORUS TAPS's would need re-picking (or
-# re-deriving) later, where a genuinely count-agnostic one, if that's what
-# this is, would not. NOT hardware-cross-verified the way SWITCH_FN was (5
-# independent real 2-position switches, before this project trusted it) --
-# this is one confirmed disassembly read, not a cross-reference. Cosmetic-
-# only risk if wrong (a menu render, not DSP/audio), unlike everything else
-# this project touches -- worth trying and looking at, not worth blocking
-# on more RE first.
-LIST_FN = 0x40046450
 
 # descriptor slot -> (name, count, default, A-formatter, current-bytes to assert)
 #   A-formatter: "key_fmt"/"kfilt_fmt" resolved from patch_sidechain.elf, else a literal
@@ -117,15 +96,18 @@ SLOTS = [
     # saved before comes up MON off. Slot 7's stock B (0x400475f8) is replaced by the switch.
     (7,  b"MON\x00\x00\x00",  2,   1,  "mon_fmt",
      dict(name="000000000000", cnt="00000002", dflt="01", b="400475f8"), SWITCH_FN),
-    # KEY: OFF + T1..T8 (Session 77), list widget (Session 76 continued yet again (8/9))
+    # KEY: OFF + T1..T8 (Session 77), a 9-position rotary switch (tools/ui_switch.s, 2026-10-23:
+    # Spectrum's LADR knob in 22.5-degree steps; a scrolling list until then)
     (8,  b"KEY\x00\x00\x00", 9,   0,  "key_fmt",
-     dict(name="000000000000", cnt="00000080", dflt="7f", b="00000000"), "key_list_fix"),
+     dict(name="000000000000", cnt="00000080", dflt="7f", b="00000000"), "sw9_widget"),
     (9,  b"KGN\x00\x00\x00",  128, 64, FMT_BIPOLAR,
      dict(name="000000000000", cnt="00000002", dflt="00", b="400475f8"), 0),
     (10, b"KBAS\x00\x00",     128, 0,  "hp_fmt",
      dict(name="000000000000", cnt="00000080", dflt="00", b="00000000"), 0),
+    # KWID: the stock knob + the link clip to KBAS (tools/ui_switch.s clip_knob: the FX SETUP
+    # window does not draw enable-nibble bit 1's clip itself)
     (11, b"KWID\x00\x00",     128, 127, "lp_fmt",
-     dict(name="000000000000", cnt="00000080", dflt="00", b="00000000"), 0),
+     dict(name="000000000000", cnt="00000080", dflt="00", b="00000000"), "clip_knob"),
 ]
 
 # ======================= DSP (SPRING REVERB donor) ======================
@@ -386,7 +368,7 @@ def main():
             print(f"    0x{site:08x} -> {name}:{sym} 0x{s[sym]:08x}")
     if max(b for _, b in spans) > CF_FREE_END:
         sys.exit("CF cave past free zone")
-    fmt_sym = syms["patch_sidechain"]
+    fmt_sym = {**syms["patch_sidechain"], **syms["ui_switch"]}
 
     # ---------------- ColdFire: COMPRESSOR descriptor (KEY/KFLT/KGAIN/MON) ----
     print("\n=== ColdFire: COMPRESSOR descriptor slots 7..11 ===")
@@ -420,8 +402,8 @@ def main():
     # Nibble per slot, slot 0 / 8 in the low nibble. Value 1 = drawn; value 3 adds bit 1, the
     # link bracket to the knob on the left (stock FILTER BASE/WDTH): WDTH is counted from BASE.
     # Stock draws that bracket only on main pages, not in the FX SETUP window page 2 sits in
-    # (2026-10-21: the drawer, FUN_4004d948, skips it while a window is open, and the SETUP
-    # page's knobs come from another routine), so it does not show yet; the bit is harmless.
+    # (the drawer, FUN_4004d948, skips it while a window is open, and the SETUP window's knobs
+    # come from its own loop, 0x400377f8): KWID's widget, clip_knob, draws it there.
     ea = E + 0x38 + 0x18a
     assert int.from_bytes(img[o(ea):o(ea) + 4], "big") == 0, "enable bitmap (slots 8-11) not 0"
     img[o(ea):o(ea) + 4] = (0x3111).to_bytes(4, "big")
