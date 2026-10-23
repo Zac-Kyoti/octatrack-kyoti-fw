@@ -580,7 +580,8 @@ attr_tail:
 |
 | emus_widget: STATIC / FLEX slot-11 widget column (stock 0 = the default dial). Args
 | (x, y, index, value, flags, fmt, canvas). Off ST/FL or off VARI: the stock dial. On
-| VARI: the dial snapped to the value's stop, read out by emus_fmt. The caption is
+| VARI: a 3-position rotary switch (tools/ui_switch.s sw3_draw: stock SPRING TYPE's,
+| 9:00 / 12:00 / 3:00) on the value's stop, read out by emus_fmt. The caption is
 | drawn after the widget in the same pass (0x4003ce7a), so writing it here is enough.
 emus_widget:
         move.l  %d2,-(%sp)              | (args now 8..32)
@@ -613,10 +614,11 @@ emus_widget:
         bsr     live_tsns               | swapped: the fresh EMUS value
 1:      lea     emus_fmt(%pc),%a1
         tst.l   %d0
-        bmi.s   .ew_frame               | an empty cell keeps the bare frame
-        bsr     emus_idx                | the readout is the stored value: what plays
-        lea     emus_stops(%pc),%a0
-        mvz.b   0(%a0,%d0.l),%d0
+        bmi.s   .ew_frame               | an empty cell keeps the bare frame (the dial's)
+        move.l  %d0,%d1                 | the readout is the stored value: what plays
+        bsr     emus_idx                | d0 = its stop 0..2
+        move.l  (%sp)+,%d2
+        bra     sw3_draw
 .ew_frame:
         move.l  32(%sp),-(%sp)          | canvas
         move.l  %a1,-(%sp)              | formatter
@@ -2253,9 +2255,10 @@ qdial4:                                 | 0x40037c06, record in a3
 
 | PTCH's widget, STATIC / FLEX slot-0 widget column. Args (x, y, index, value, flags,
 | fmt, canvas). Off ST/FL (item 11): the stock dial and no poll. Off VARI: the stock
-| dial, rebuilt with the fresh live byte when this very draw swapped. On VARI: the
-| dial snapped to the 9 QUAN stops (4 + 15*idx) read out by quant_fmt; the stored
-| value stays the stock editor's, so locks are untouched.
+| dial, rebuilt with the fresh live byte when this very draw swapped. On VARI: a
+| 9-position rotary switch (tools/ui_switch.s, Spectrum's LADR knob in 22.5-degree steps)
+| on the value's QUAN stop, read out by quant_fmt; the stored value stays the stock
+| editor's, so locks are untouched.
 quant_widget:
         move.l  %d2,-(%sp)              | (args now 8..32)
         moveq   #0,%d1
@@ -2294,12 +2297,11 @@ quant_widget:
         move.b  (%a0),%d0               | swapped: the fresh QUAN value
 1:      lea     quant_fmt(%pc),%a1
         tst.l   %d0
-        bmi.s   .qw_frame               | an empty cell keeps the bare frame
-        bsr     rk_bucket
-        moveq   #15,%d1
-        mulu.l  %d0,%d1
-        moveq   #4,%d0
-        add.l   %d1,%d0
+        bmi.s   .qw_frame               | an empty cell keeps the bare frame (the dial's)
+        move.l  %d0,%d1                 | quant_fmt reads the value
+        bsr     rk_bucket               | d0 = its stop 0..8
+        move.l  (%sp)+,%d2
+        bra     sw9_draw
 .qw_frame:
         move.l  32(%sp),-(%sp)          | canvas
         move.l  %a1,-(%sp)              | the path's formatter
@@ -2456,5 +2458,14 @@ vg_pick:                                | vg_new: a slot pick's track (bit t), t
 vg_key:                                 | vg_new: each track's key at the last check (vg_tkey)
         .long   0, 0, 0, 0, 0, 0, 0, 0
         .endif
+
+| QUAN's and EMUS's rotary switch: tools/ui_switch.s, shared with SIDECHAIN_COMPRESSOR
+| (the builders put it on the include path; no clip_knob here, no sw3_draw without EMUS).
+        .equ    UIS_NO_CLIP, 1
+        .if     VEM_EMUS == 0
+        .equ    UIS_NO_SW3, 1
+        .endif
+        .include "ui_switch.s"
+
         .balign 4
 vem_end:
