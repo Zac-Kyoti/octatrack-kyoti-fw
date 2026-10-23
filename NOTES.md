@@ -37042,3 +37042,10 @@ base-width compressor is SIDECHAIN_COMPRESSOR, keeps that name, and SIDECHAIN_CO
   sc_cf, store octabam.sidechain-compressor, no conflicts) with the same change note;
   octabam-modules/sidechain-compressor-bw removed; MUTE_MODES' octabam manifest back to its
   single SIDECHAIN_COMPRESSOR key (f094c37 reverted). Modwerk: the new compressor ships as 0.2.0.
+
+**2026-10-23 (cont.)** octabam **PR sambanks/octabam#869** (fork branch sidechain-compressor-basewidth,
+head b3e57bfb, base main 002ff713): SIDECHAIN_COMPRESSOR pin 8e3f638 -> 1df3033 (the base-width
+version), wrapper proof -> check (this octabam form not flashed), module README + usage page with
+the "Changed on 22 Oct 2026" note, new screenshots, test-remix READMEs, THIRD_PARTY. Gates:
+verify-docs 0 problems, mkdocs strict clean, check-remix test/sidechain-compressor +
+test/kyoti-mute-sidechain OK, make reach every gate passed. Supersedes the closed #862.
