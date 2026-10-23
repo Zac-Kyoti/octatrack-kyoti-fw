@@ -37607,3 +37607,24 @@ is not edited) and `tools/emu_sc_shared.py`.
   same way, not flashed as such). Every FINAL builder matches its pin without the opt-in under the new
   table check (13 builders + 9 Bugbuilds; BLACKPYRAMIDS_303's two FINAL images checked directly: table stock).
   V1.6 builds from tag ref/kyoti-v1.6-2026-10-29 (8868867). README: KYOTI V1.7 + a "Before you flash" line.
+## Session 131 (2026-10-22, `trkseq`) — TRACK_SEQ_SELECT scoped (research only, no build)
+User ask: `[PTN]`+`[BANK]` → modal list of the active track's sequence in the 16 patterns of a bank
+(LEFT/RIGHT bank, UP/DOWN, YES/NO, trig pick), a trig-LED view (green / half / off / red / flashing
+red), the pick cued to land like a pattern change, the Part untouched; phase 2 = named sequences.
+Scope: `reference/handoffs/TRACK_SEQ_SELECT_SCOPE.md`. Static reads only, by five parallel research
+passes plus spot-checks (`0x4002b3b4`, `0x40029b9c`, the gate `0x400a4352..`).
+Key facts:
+- All 16 banks are resident, so a load is a RAM memcpy of a 0x91a / 0x8b0 record.
+- Stock's sequence-only write `0x4002b3b4` / `0x4002b2f4` + `0x40029b9c` is our model; PASTE TRACK
+  is not (it writes the Part).
+- A key held during a layer rebuild keeps its old handlers (`0x400312e2`), so [PTN]/[BANK] releases
+  always reach stock and are suppressed via `PTN_CONSUMED` / `BANK_SEL = 2`.
+- Windows: `FUN_4005829c(w,h,dx,dy,prio,close_cb)`, priority eviction, a close_cb that is never
+  cleared; CHOOSE PROJECT (`0x400647a0`) is the template.
+- LED layer stack `0x4007e760` / `0x4007e81c` / `0x4007e998`, dim level 7; stock never flashes a cued
+  pattern.
+- The gate never reads SCALE_MODE; the wrap body re-homes every track.
+- Names: the bank file has no free serialised byte (exact chunk lengths, checksum), so they go in a
+  sidecar file; editor `FUN_4007e664`.
+- KB corrections are listed in §9 (window constructor arguments, arrow codes, `0x40027e00`, [PTN]'s
+  layer), to apply with the first code commit.

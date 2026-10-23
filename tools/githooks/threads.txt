@@ -61,3 +61,6 @@ tools/*blackpyramids*
 reference/handoffs/OT303_*
 reference/BLACKPYRAMIDS_303*
 octabam-modules/blackpyramids-303/*
+
+[trkseq]
+reference/handoffs/TRACK_SEQ_SELECT_*

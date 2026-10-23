@@ -332,3 +332,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 - **KYOTI load audit** (Session 125) — `reference/handoffs/KYOTI_LOAD_AUDIT.md`: ranked DSP/ColdFire
   costs of every feature, the hardware test plan (HW-A first, no flash), and **a KYOTI V1.0 crash on
   the MASTER track's PLAYBACK/LFO page** (emulator; section 8), not fixed yet.
+- **TRACK_SEQ_SELECT** (working name; Session 131, 2026-10-22) — scope only, nothing built:
+  `[PTN]`+`[BANK]` opens a list of the active track's sequence in each of a bank's 16 patterns, plus
+  a trig-LED view, and loads the chosen one onto that track, cued like a pattern change.
+  `reference/handoffs/TRACK_SEQ_SELECT_SCOPE.md`; 14 open decisions in its §2, and phase 1 is the
+  landing oracle (it needs a fixture project exported from the device).
