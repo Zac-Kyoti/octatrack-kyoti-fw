@@ -128,7 +128,7 @@ A full-screen window, 128 × 64. It has a 7-px header row and two columns of eig
 | [YES] `0x31` | load the cursor slot, then close (§1.1) | DIRECT JUMP toggle |
 | [NO] `0x32` | close, no load | swallowed |
 | [FUNC]+[YES] | **save** the active track's sequence; view stays; header shows `SAVED` | same |
-| [FUNC]+[NO] | **reload** the saved sequence (a load, so it closes as in §1.1); nothing if none saved | same, cued (yellow) |
+| [FUNC]+[NO] | **reload** the saved sequence **immediately** (O3, decided), then close as in §1.1; nothing if none saved | same, immediately |
 | TRIG 1–16 | load that slot, close (§1.1) | load (cue), yellow → red |
 | TRACK 1–8 | change active track; view and grid follow; bank kept | same |
 | [PTN] / [BANK] | swallowed (their held state still counts as "chord held") | — |
@@ -142,8 +142,8 @@ These rules apply to the shown bank and the active track.
 
 | LED | meaning |
 |---|---|
-| green, full (15) | the slot holds sequence data (O6: recorder trigs count?) |
-| green, half (7, stock's dim level) | only trigless trigs or trigless locks |
+| green, full (15) | the slot has sample trigs (audio) or note trigs (MIDI) |
+| green, half (7, stock's dim level) | data, but no sample/note trigs: only trigless trigs, trigless locks or recorder trigs |
 | off | empty |
 | **red** | the sequence playing on the track; for a clyp, its source slot |
 | **yellow** (red + green full; stock's own colour for a cued pattern) | cued; visible only while the chord is held after a pick |
@@ -208,7 +208,8 @@ Clyps therefore keeps a backup:
 **Timing.**
 - Transport stopped: the load is immediate.
 - Running, DIRECT JUMP off: cued, landing where a stock pattern change cued now would land (§3.4).
-  At a master wrap that is step 1; at a CHANGE point the rule is O9.
+  At a master wrap that is step 1. At a CHANGE point it is phase-continuous (O9): the track lands
+  where it would be had the sequence been in the pattern since its last restart.
 - Running, DIRECT JUMP on (decided): it lands like a DIRECT_JUMP_KYOTI jump, at the next master
   step, at the clock-locked position, as if that sequence had been playing since START. That is
   the "great in combo with direct jump" case.
@@ -255,6 +256,13 @@ Clyps therefore keeps a backup:
 - **[YES] with the chord held (was O5):** passes to DIRECT JUMP's [PTN]+[YES] toggle.
 - **Saved sequences (was O7):** they last only while the unit runs its project. A power cycle or a
   project reload destroys them.
+- **O9, CHANGE-point landings:** phase-continuous. The track lands where it would be had the
+  sequence been in the pattern since its last restart, so it stays in step with the other tracks.
+  At a master wrap that is step 1, the same as stock.
+- **O3, [FUNC]+[NO]:** immediate. The saved sequence lands at the track's next step, at the
+  phase-continuous position.
+- **O6, full green:** sample trigs (audio) or note trigs (MIDI) only. A slot holding only
+  recorder trigs, trigless trigs or locks is half green.
 - **Recorder trigs:** they are part of each audio track's record (REC1–3 masks), so every load,
   save and restore carries them. A pattern has 16 track records, recorder trigs included.
 
@@ -265,10 +273,7 @@ Clyps therefore keeps a backup:
 | **O1** | Leaving a pattern after Clyps loads (the user is torn and uses both) | **keep** (stock-like: what is on the grid stays) **plus automatic originals** (§1.5b), restored on demand | restore on leave; or an AUTO-RESTORE mode toggle over the same originals |
 | **O1b** | Edits made to a loaded sequence | stay, as stock edits do; the original still means "before Clyps touched it" | lost on leave (restore model) |
 | **O2** | A bank written to the card while clyps play | with keep: what is heard, as stock | with restore: the own sequences (bank-writer hook) |
-| **O3** | [FUNC]+[NO] timing | like any Clyps load (cued; immediate when stopped) | always immediate |
-| **O6** | Full green: do recorder trigs count? | yes | note trigs only |
-| **O8** | LEFT/RIGHT in grid-only mode | change the bank, with a short stock toast `BANK B` | swallowed |
-| **O9** | A landing at a CHANGE point before the master end (DJ off) | **phase-continuous**: the track lands where it would be had the sequence been in the pattern since its last restart, so it stays in step with the other tracks. At a master wrap this is step 1, the same as stock | the track restarts at step 1 alone, out of phase with the rest |
+| **O8** | LEFT/RIGHT in the grid-only state: the chord still held after a trig pick closed the view (the user's 2026-10-22 spec: the LED view "will remain open, until the user releases Pattern + Bank") | change the bank the grid shows, with a short stock toast `BANK B` | swallowed |
 | **O13** | Originals pool size (§1.5b) | 128 (~290 KB) | 256 (~590 KB) |
 | **O14** | Restore-all gesture | chord held + [NO] | another gesture |
 | **O15** | AUTO-RESTORE mode toggle | offer it (same storage, different trigger) | manual restores only |
@@ -446,9 +451,9 @@ The position is the memory-map model `step = (⌊t′/tps_t⌋ + 1) mod len_t`.
   toast or layer push/pop (CLAUDE.md, Session 93).
 - **Classifier** (stock's `FUN_4009a464` skips `+0x10..0x17` and reads no locks, the bug
   EMPTY_PATTERN_LED_FIX fixed).
-  - **Full**: `+0x00` non-zero, plus `+0x20..0x37` (O6).
-  - Else **half**: `+0x08..0x1f` non-zero, or any lock ≠ `0xff` (the AND-8-longs scan from
-    `patch_pattern_led.s`).
+  - **Full**: `+0x00` (sample / note trigs) non-zero, and nothing else (O6, decided).
+  - Else **half**: `+0x08..0x37` non-zero (trigless layers, recorder trigs), or any lock ≠ `0xff`
+    (the AND-8-longs scan from `patch_pattern_led.s`).
   - Else **empty**.
   - MIDI: masks `+0x00`/`+0x08`, locks `+0x30`.
   - Cost: ≤ ~13k instructions for 16 slots. Cache it, and re-classify on bank/track/side change and
