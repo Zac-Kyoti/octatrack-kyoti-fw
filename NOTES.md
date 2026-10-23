@@ -37066,3 +37066,21 @@ test/kyoti-mute-sidechain OK, make reach every gate passed. Supersedes the close
   mainos 88d49307…); SC KEY switch + KBAS-KWID clip a3aadad (syx 38b4751e…, mainos 4d6ffd01…); VARISPEED QUAN
   (syx f061eb4f…, mainos ce4f7696…) + VARISPEED_EMUS QUAN/EMUS (syx 048d48bc…, mainos dbf8cd68…) 6d1b9e4. VEM cave:
   152 B left. octabam forms not updated (SC module still uses key_list_fix; varispeed modules need ui_switch.s).
+- **PROMOTED FINAL 2026-10-23** (the user flashed BP303 b1a96edd…, SC 38b4751e…, VARISPEED f061eb4f…,
+  VARISPEED_EMUS 048d48bc…: "all good"). Pins: BP303 mainos 88d49307…, VARISPEED ce4f7696…, VARISPEED_EMUS
+  dbf8cd68…; SIDECHAIN 5c8cd7ad… (syx ae95a895…) -- NOT the flashed 4d6ffd01…: that one was built before
+  ui_switch.s packed its glyphs (the four pixel arrays share their blank columns, -36 B, for VARISPEED_EMUS);
+  rebuilding the flashed form from today's source with the arrays unpacked gives 4d6ffd01… exactly, so the
+  code and pixels are the flashed ones; all nine KEY positions + the clip re-rendered on the packed build.
+- Bugbuilds re-pinned: BUG_SC3X 05e55cd3…, BUG_BP303 afc4e27b…, BUG_VARI c3af514f…, BUG_VEM10 9e0e3f92….
+  build_bugbuilds.py: SAFE_CAVE (0x400d24d0..0x400d2cdc) is the fallback when the cave has no room
+  (BUG_VEM10: partreapply + pattern_led go there; the others keep their bytes); VARISPEED's runtime bytes
+  are every zero byte of its unit, as VARISPEED_EMUS's (its old "tail is state" rule broke when
+  ui_switch.s joined the unit's end).
+- KYOTI V1.6 re-pinned (mainos c2376adb…, syx cdabef89…), not flashed: CAVE had 46 B, VARISPEED's unit grew
+  508 B. KYOTI places SC's ui_switch in SAFE (8 B left) and builds VARISPEED with UIS_SW9_AT (QUAN jumps to
+  that unit's sw9_draw, no copy): VARISPEED stays 2,388 B, CAVE 42 B left. Rendered under ot_emu.
+- octabam forms: SIDECHAIN gets a second unit sc_ui (tools/ui_switch.s, reference 0x400d7260 74a4eb39…);
+  VARISPEED's remix.inc inlines ui_switch.s (GAS does not search the including file's directory) and the
+  includer's copy keeps its symbols local (UIS_LOCAL: DRAM units share one link); BP303 runtime regenerated
+  (a6c4efba…). VARISPEED_EMUS is not an octabam module (the user).

@@ -174,6 +174,7 @@ PLAN = {
               "patch_directjump_v7", "patch_softmute", "patch_partreapply"],
     "SAFE":  ["personalize_getters", "personalize_setters", "personalize_labels",
               "patch_sidechain",                   # COMPRESSOR page formatters
+              "ui_switch",                         # SIDE-CHAIN KEY's switch + KWID's clip (UI task)
               "patch_trigscale",                   # MIDI_PLAYS_FREE_FIX
               "patch_qlrec",                       # [PLAY]/[REC] key handlers
               "patch_pattern_led",                 # EMPTY_PATTERN_LED_FIX (CAVE is full since V1.2)
@@ -202,7 +203,7 @@ FEATURES = {
                      "personalize_labels": 68, "personalize_getters": 68,
                      "personalize_setters": 68}),
     "SIDECHAIN_COMPRESSOR": ("build_sidechain_compressor.py", "mainos_sidechain_compressor.bin", "prep",
-                             {"patch_sidechain": "patch_sidechain.bin"}),
+                             {"patch_sidechain": "patch_sidechain.bin", "ui_switch": "ui_switch.bin"}),
     "RELOAD_FROM_PROJECT": ("build_reload_from_project.py", "mainos_reload_from_project.bin", "prep",
                 {"patch_reload3": "patch_reload3.bin"}),
     "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "mainos_direct_jump_kyoti.bin", "prep",
@@ -235,7 +236,13 @@ def flags_for(feat):
     f = dict(FLAGS.get(feat, {}))
     if feat == "MUTE_MODES" and "SIDECHAIN_COMPRESSOR" in FEATURES:
         f["mutemode_sc_key"] = True
+    if feat == "VARISPEED" and "SIDECHAIN_COMPRESSOR" in FEATURES:
+        # QUAN's rotary switch is SIDE-CHAIN's ui_switch unit (no copy in VARISPEED's unit:
+        # the proven cave cannot hold it). A stand-in address while sizing (a jmp's size does
+        # not depend on it); pass 2 gives the allocated sw9_draw.
+        f["uis_sw9_at"] = UIS_SIZING_AT
     return f
+UIS_SIZING_AT = 0x400d7260          # ui_switch's standalone address (build_sidechain_compressor.py)
 # bytes two features may both write, with identical values (SPRING REVERB's removal)
 SHARED_OK = set()
 
@@ -533,6 +540,12 @@ def main():
         if e1 > a2:
             sys.exit(f"pieces overlap: {k1} 0x{a1:08x}..0x{e1:08x} / {k2} 0x{a2:08x}")
 
+    # QUAN's switch (flags_for): sw9_draw's offset in the ui_switch unit, from pass 1
+    uis_sw9 = None
+    if "VARISPEED" in FEATURES and "SIDECHAIN_COMPRESSOR" in FEATURES:
+        u = nm(sb1 / "out" / "ui_switch.elf")
+        uis_sw9 = place["ui_switch"] + u["sw9_draw"] - u["sw9_widget"]
+
     # --- pass 2: every feature at its allocated addresses ---------------------------------
     print("\n=== pass 2: builders at the allocated addresses ===")
     sbs = {"stock": make_sandbox("stock", stock), "prep": make_sandbox("prep", prep)}
@@ -541,6 +554,8 @@ def main():
     for feat, (builder, _img, base, keys) in FEATURES.items():
         p = {k: place[k] for k in keys}
         p.update(flags_for(feat))
+        if "uis_sw9_at" in p:
+            p["uis_sw9_at"] = uis_sw9
         for k in keys:
             if zone_of.get(k) == "DRAM":
                 p[k + "_dram"] = True
@@ -559,6 +574,10 @@ def main():
             for z, (lo, hi) in RECLAIM_WHOLE.items():
                 if any(lo <= i + BASE < hi for i in deltas[feat]):
                     sys.exit(f"{feat} writes into reclaim zone {z}")
+
+    if uis_sw9 is not None and syms["ui_switch"]["sw9_draw"] != uis_sw9:
+        sys.exit(f"VARISPEED jumps to 0x{uis_sw9:08x}; ui_switch's sw9_draw is at "
+                 f"0x{syms['ui_switch']['sw9_draw']:08x}")
 
     # --- relocation changed only caves and pointers into them -------------------------
     print("\n=== each feature vs its standalone build ===")

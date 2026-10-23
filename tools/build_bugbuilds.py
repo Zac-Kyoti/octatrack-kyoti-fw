@@ -85,6 +85,11 @@ STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 # 24-byte records (fields +0x10/+0x14 written by 0x40001732; 0x400d64e2 its terminator) --
 # reference/kb/caves.md 2b.  Every flashed build starts at 0x400d6500.
 FREE_START, FREE_END = 0x400d6500, 0x400d7c3c
+# The fallback when nothing in the cave fits (2026-10-23: VARISPEED_EMUS leaves 152 B): midisc's
+# SAFE_CAVE, hardware-proven in every KYOTI image since V1.1 (build_kyoti.py ZONES["SAFE"]; stock
+# references 0x400d2cdc). Only ever used when the cave has no room, so the other Bugbuilds keep
+# their bytes.
+SAFE_START, SAFE_END = 0x400d24d0, 0x400d2cdc
 
 o = lambda a: a - BASE
 
@@ -146,27 +151,21 @@ RESERVED = {"REC_TRIG_MUTE": [(0x400d7c3a, 1)]}       # RTM_MASK (build_rec_trig
 
 
 def reserved(name, img=None):
-    """RESERVED, plus VARISPEED's runtime state at its unit's tail: vem_depth, rk_acc and rp_pb
-    are zero in the image and written at run time (rp_pp between them is 0xff), read from the
-    builder's symbols so they follow the unit.
-    VARISPEED_EMUS: EVERY zero byte inside its unit (cave .. end, from the builder's symbols;
-    the runtime state -- vg_key, vg_last, vg_eng, the flags, em_ctx, rp_pb ... -- and the zero
-    words of its tables alike), so no fix cave can start inside the unit."""
+    """RESERVED, plus, for VARISPEED and VARISPEED_EMUS, EVERY zero byte inside the unit (cave ..
+    end, from the builder's symbols): the runtime state -- vem_depth, rk_acc, rp_pb, vg_key,
+    vg_last, vg_eng, the flags, em_ctx, ui_switch's sw_st ... -- and the zero words of its tables
+    and glyphs alike, so no fix cave can start inside the unit. (VARISPEED reserved only its tail
+    state until 2026-10-23, when tools/ui_switch.s joined the unit after it.)"""
     out = list(RESERVED.get(name, []))
-    if name == "VARISPEED":
+    if name in ("VARISPEED", "VARISPEED_EMUS"):
         import json
-        sy = json.loads((ROOT / "out/varispeed_syms.json").read_text())
-        g = sy["syms"]
-        out += [(g["vem_depth"], g["rp_pp"] - g["vem_depth"]), (g["rp_pp"] + 1, sy["end"] - g["rp_pp"] - 1)]
-    elif name == "VARISPEED_EMUS":
-        import json
-        sy = json.loads((ROOT / "out/varispeed_emus_syms.json").read_text())
+        sy = json.loads((ROOT / f"out/{name.lower()}_syms.json").read_text())
         if img is None:
-            sys.exit("reserved(VARISPEED_EMUS) needs the base image")
+            sys.exit(f"reserved({name}) needs the base image")
         if not any(img[o(sy["cave"]):o(sy["end"])]):
-            sys.exit("VARISPEED_EMUS: no unit in the base image at its symbols' address")
+            sys.exit(f"{name}: no unit in the base image at its symbols' address")
         if hashlib.sha256(img[o(sy["cave"]):o(sy["end"])]).hexdigest() != sy["unit_sha256"]:
-            sys.exit("VARISPEED_EMUS: out/varispeed_emus_syms.json does not describe the base image's unit")
+            sys.exit(f"{name}: out/{name.lower()}_syms.json does not describe the base image's unit")
         a = sy["cave"]
         while a < sy["end"]:
             if img[o(a)] == 0:
@@ -192,10 +191,10 @@ def flag(msg):
     print(f"  !! {msg}")
 
 
-def free_runs(img):
-    """Zero runs of >=16 B inside the cave free zone of `img`."""
+def free_runs(img, lo=FREE_START, hi=FREE_END):
+    """Zero runs of >=16 B inside the cave free zone (or lo..hi) of `img`."""
     runs, cur = [], None
-    for i in range(o(FREE_START), o(FREE_END)):
+    for i in range(o(lo), o(hi)):
         if img[i] == 0:
             if cur is None:
                 cur = i
@@ -203,8 +202,8 @@ def free_runs(img):
             if cur is not None and i - cur >= 16:
                 runs.append([cur + BASE, i + BASE])
             cur = None
-    if cur is not None and o(FREE_END) - cur >= 16:
-        runs.append([cur + BASE, FREE_END])
+    if cur is not None and o(hi) - cur >= 16:
+        runs.append([cur + BASE, hi])
     return runs
 
 
@@ -282,7 +281,8 @@ def apply_bugfixes(img, which, label, addrs):
     for stem in which:
         at, detours = addrs[stem], BUGFIX[stem][1]
         blob, syms = link(stem, at)
-        if at < FREE_START or at + len(blob) > FREE_END:
+        if not (FREE_START <= at and at + len(blob) <= FREE_END
+                or SAFE_START <= at and at + len(blob) <= SAFE_END):
             sys.exit(f"{label}: {stem} cave 0x{at:08x}+{len(blob)} escapes the free zone")
         co = o(at)
         if any(img[co:co + len(blob)]):
@@ -377,6 +377,7 @@ def compose(name, builder, basepath, verstr, blurb, stock, rebuild, wip=False):
             already.append(stem)
             addrs[stem] = resolve_present(img, stem)     # honour where IT put it
     runs = free_runs(img)
+    safe = free_runs(img, SAFE_START, SAFE_END)
     res = reserved(name, bytes(img))        # (from the base, before any fix is written)
     for at, n in res:                       # carve out runtime-written bytes
         cut = []
@@ -389,6 +390,8 @@ def compose(name, builder, basepath, verstr, blurb, stock, rebuild, wip=False):
     for stem in sorted(need, key=lambda s: -len(link(s, BUGFIX[s][0])[0])):
         size = len(link(stem, BUGFIX[stem][0])[0])
         at = place(runs, size, BUGFIX[stem][0])
+        if at is None:                      # the cave is full: SAFE_CAVE
+            at = place(safe, size, SAFE_START)
         if at is None:
             sys.exit(f"{name}: no free run fits {stem} ({size} B). Free: "
                      + ", ".join(f"0x{r[0]:08x}+{r[1]-r[0]}" for r in runs))

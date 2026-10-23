@@ -156,6 +156,16 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
+- **Link clips + rotary switches** — **FINAL 2026-10-23** (the user flashed the four standalones: all good):
+  BLACKPYRAMIDS_303 draws the clip CUT–RES and DEC–ACC; SIDECHAIN_COMPRESSOR's KEY is a 9-position rotary
+  switch (Spectrum's LADR knob, 22.5-degree steps) and KWID carries the clip to KBAS in the FX SETUP window;
+  VARISPEED's QUAN is the 9-position switch, VARISPEED_EMUS's EMUS the 3-position one. Shared source
+  `tools/ui_switch.s`. Standalones: BP303 mainos `88d49307…` (syx `b1a96edd…`), SIDECHAIN mainos `5c8cd7ad…`
+  (syx `ae95a895…`; the flashed `4d6ffd01…` / `38b4751e…` differs only in the glyph data's packing),
+  VARISPEED mainos `ce4f7696…` (syx `f061eb4f…`), VARISPEED_EMUS mainos `dbf8cd68…` (syx `048d48bc…`, 152 B
+  of the cave left). Bugbuilds re-pinned (BUG_VEM10's bug fixes now partly in SAFE_CAVE). KYOTI V1.6
+  re-pinned (QUAN uses SIDE-CHAIN's switch unit; not flashed). octabam: see `NOTES.md` "ui-switch".
+
 - **BLACKPYRAMIDS_303** (`tools/build_blackpyramids_303.py`) — **FINAL 2026-10-21: the recalibrated voice**,
   mainos `ecc85887…`, CF `.bin` `88045b78…`, syx `acbe9aac…`, `140C_BP303`. **Flashed by the user
   (as `140C_BPB8`, the same mainos): all good.** The voice is recalibrated on the TB-303's circuit and fitted
@@ -167,6 +177,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   words only; the DSP code and its cycles are MT35's. Record: `reference/handoffs/OT303_VOICE_CALIBRATION.md`;
   what is Open303's and what is new: `reference/BLACKPYRAMIDS_303.md`. Tools: `tools/ot303/body/`.
   Bugbuild `BUG_BP303` (mainos `31e99207…`, `.bin` `13f52793…`, syx `5e9e92eb…`): built, not flashed.
+  **Re-promoted 2026-10-23 with the CUT–RES / DEC–ACC link clips** (flashed: all good): mainos `88d49307…`,
+  syx `b1a96edd…`; `BUG_BP303` mainos `afc4e27b…`, syx `7062a6b7…`.
   - The octabam module (`octabam-modules/blackpyramids-303/`) is regenerated for this build (runtime
     39,736 B, `2c430200…`); its pin move is **sambanks/octabam#855 (draft, pin `b74c2f8`)**: every octabam gate
     passed, the emulator check ALL GOOD on its image; **this octabam form flashed 2026-10-21: all good**.
@@ -182,6 +194,9 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 - **KYOTI V1.6** — **FINAL 2026-10-22**, flashed (all good, before QUANTIZE_LIVE_REC_TOGGLE's
   2026-10-22 toasts, which it now carries): V1.5 with the base-width SIDECHAIN_COMPRESSOR in place of
   the earlier one (its 600 B unit in SAFE, 624 B left). mainos `bc86d2b7…`, syx `ea11c681…`.
+  **Re-pinned 2026-10-23** with the rotary switches and KWID's clip: SIDE-CHAIN's `ui_switch` unit (616 B)
+  in SAFE (8 B left), VARISPEED's QUAN jumps to it (`UIS_SW9_AT`), so VARISPEED's unit stays 2,388 B in
+  CAVE (42 B left). mainos `c2376adb…`, syx `cdabef89…`. Rendered under ot_emu (KEY, clip, QUAN); not flashed.
 - **KYOTI V1.5** — superseded 2026-10-22 (tag `ref/kyoti-v1.5-2026-10-22`); was **FINAL 2026-10-16**: every
   feature in it is confirmed on its own, the combined image is not. V1.4 + VARISPEED + the
   SIDE-CHAIN of 2026-10-16.
@@ -246,6 +261,9 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
     `ea2b4f60…`, syx `f2f37df3…`.
   - **VARISPEED_EMUS:** mainos `9926d557…`, syx `1427a9af…`, `140C_VEM10`, SPRING REVERB removed.
     Bugbuild `BUG_VEM10`: mainos `6a078481…`, syx `e0b173fb…`.
+  - **Re-promoted 2026-10-23 with QUAN / EMUS as rotary switches** (flashed: all good): VARISPEED mainos
+    `ce4f7696…` (syx `f061eb4f…`), `BUG_VARI` mainos `c3af514f…` (syx `8628f941…`); VARISPEED_EMUS mainos
+    `dbf8cd68…` (syx `048d48bc…`), `BUG_VEM10` mainos `9e0e3f92…` (syx `02580a87…`).
   - **Sources:** one ColdFire source, `octabam-modules/varispeed-emus/varispeed_emus.s` (switch
     `VEM_EMUS`); the DSP kernel `tools/varispeed_emus_dsp.asm` and its gates
     `tools/varispeed_emus_dsp_*`.
