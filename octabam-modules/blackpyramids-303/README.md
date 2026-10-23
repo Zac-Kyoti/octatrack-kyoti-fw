@@ -50,9 +50,10 @@ instead.
 
 ## Measured
 
-- **The standalone image** (`tools/build_blackpyramids_303.py`, `140C_BP303`, FINAL 21 Oct 2026, mainos
-  `ecc85887…`): its runtime and DSP words are this form's. Flashed on the author's MKI (as `140C_BPB8`, the
-  same mainos): all good. Earlier finals: 19 Oct (MT35, `d393da41…`), flashed in this octabam form: all
+- **The standalone image** (`tools/build_blackpyramids_303.py`, `140C_BP303`, FINAL 23 Oct 2026, mainos
+  `88d49307…`): its runtime and DSP words are this form's. Flashed on the author's MKI: all good. It is the
+  21 Oct voice (mainos `ecc85887…`, flashed as `140C_BPB8`: all good) with the link clips CUT–RES and
+  DEC–ACC on the SRC page (bit 1 of RES's and ACC's enable nibbles, the slots stock FLEX links). Earlier finals: 19 Oct (MT35, `d393da41…`), flashed in this octabam form: all
   checks pass; 14 Oct, confirmed in full on the unit (the voice, the grid, live play, chromatic with PAGE,
   FUNC + PTCH octaves).
 - **The 21 Oct voice** (data and ColdFire words only; the DSP code is MT35's, bit-exact against the integer
@@ -70,7 +71,7 @@ instead.
   - the image differs from the standalone only in octabam's platform plumbing (loader, arena
     reserve, chooser relocation, its own DSP payload edits);
   - flashed in this form on the author's MKI, 21 Oct 2026: all good (the 19 Oct form, with the previous
-    voice: every check passes).
+    voice: every check passes). The 23 Oct form (the clips) is not flashed in octabam.
 
 ## Limits
 

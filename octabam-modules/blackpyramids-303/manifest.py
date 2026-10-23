@@ -21,7 +21,7 @@ COLDFIRE. One DRAM unit, bp_runtime (~39 KB): tools/ot303/cf/{machine.s,control.
 params.c} with the voice's tables (body_tables.h) and Y table, generated into one GNU-as unit by
 tools/ot303/octabam_module.py (the C as `m68k-elf-gcc -S` output, libgcc's __muldi3 as words). Its
 `reference` is the standalone image's runtime: linked alone at 0x40a955e0 it is those bytes, sha256
-2c430200..., for -mcpu=5407 and 54455 alike (the generator refuses to write it otherwise). The detours,
+a6c4efba..., for -mcpu=5407 and 54455 alike (the generator refuses to write it otherwise). The detours,
 pokes and the FLEX renderer slot (0x400d6438 -> ot_render) are the standalone builder's
 (tools/build_blackpyramids_303.py).
 
@@ -35,9 +35,11 @@ the ColdFire record, never part of an upload.
 A REMIX WITH THIS MODULE gives up SPRING REV (the voice is its code) and carries no other DSP
 module and no ANALOG BD (each owns the source seam, SPRING's words or DSP memory the voice uses).
 
-MEASURED. The standalone image of this voice (FINAL 21 Oct 2026, mainos ecc85887...) on the author's MKI:
-all good. This octabam form: the runtime and both DSP payloads are the standalone's bytes; flashed on the
-author's MKI, 21 Oct 2026 (remixes/test/blackpyramids-303): all good.
+MEASURED. The standalone image of this voice (FINAL 23 Oct 2026, mainos 88d49307...: the 21 Oct voice,
+mainos ecc85887..., plus the link clips CUT-RES and DEC-ACC on the SRC page) on the author's MKI: all good.
+This octabam form: the runtime and both DSP payloads are the standalone's bytes; the 21 Oct form flashed on
+the author's MKI, 21 Oct 2026 (remixes/test/blackpyramids-303): all good. The 23 Oct form (the clips) is
+not flashed in octabam.
 """
 
 import os
@@ -51,7 +53,7 @@ _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 H = bytes.fromhex
 
 RUNTIME_AT = 0x40A955E0        # the standalone image's DRAM reserve (tools/ot303/dram.py RESERVE)
-RUNTIME_SHA256 = "2c430200e84d545404f4e9b64aab8bf5fc277b6bcb209b7650be6bd59b3f34e3"
+RUNTIME_SHA256 = "a6c4efba4b65bcd101fd3e1a369e121dab3da1e3a1c769bbb4b587d8bff21f43"
 
 DETOURS = (
     Detour(0x400334D8, H("2f02222f0008"), "bp_runtime", "ot_machine_name", "chooser row 5's name"),

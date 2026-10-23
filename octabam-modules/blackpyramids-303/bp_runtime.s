@@ -1208,7 +1208,7 @@ control__page:
 .Lcontrol_97:
 	mvz.w	#273,%d1
 	move.l	#control__desc+56,%d0
-	move.l	#286331153,%a0
+	move.l	#288428817,%a0
 	move.l	%a0,control__desc+454.l
 	move.l	%d1,control__desc+450.l
 	move.l	%d0,ot_desc_p.l
