@@ -37628,3 +37628,20 @@ Key facts:
   sidecar file; editor `FUN_4007e664`.
 - KB corrections are listed in §9 (window constructor arguments, arrow codes, `0x40027e00`, [PTN]'s
   layer), to apply with the first code commit.
+
+**Session 131 cont. (2026-10-23)** — The user's answers turn the scope into **CLYPS**
+(`reference/handoffs/CLYPS_SCOPE.md`, renamed from `TRACK_SEQ_SELECT_SCOPE.md`). Terms: Clyps mode /
+Clyps view / Clyps grid.
+- **View:** all 16 slots visible (2 × 8); UP/DOWN wrap 16→1.
+- **Grid:** cued = yellow (red + green, stock's own cue pair), playing = red.
+- **Closing:** YES or a trig, with the chord not held, closes Clyps; with the chord held the grid
+  keeps picking.
+- **Saved sequences:** [FUNC]+[YES]/[NO] = 16 per-track saved sequences (DRAM; they survive pattern,
+  bank and project changes but not a power cycle).
+- **Model correction given to the user:** a plain copy loses the playing pattern's own slot. The
+  scope now keeps a per-track backup, restores the own sequences when the pattern is left, and
+  writes backups (not clyps) to the card. The hook point is the single bank writer `0x400917c8` (5
+  callers, including SAVE AS NEW `0x4008505c`). Its O1/O2 are open.
+- **Placement:** buffers 72,864 B, so Clyps is a DRAM unit standalone too.
+- **Font:** `0x400ba876` is ≈ 4 px a character (RELOAD's measured widths), so a 64-px column holds
+  ≈ 15 characters.

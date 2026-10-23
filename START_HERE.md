@@ -332,8 +332,9 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 - **KYOTI load audit** (Session 125) — `reference/handoffs/KYOTI_LOAD_AUDIT.md`: ranked DSP/ColdFire
   costs of every feature, the hardware test plan (HW-A first, no flash), and **a KYOTI V1.0 crash on
   the MASTER track's PLAYBACK/LFO page** (emulator; section 8), not fixed yet.
-- **TRACK_SEQ_SELECT** (working name; Session 131, 2026-10-22) — scope only, nothing built:
-  `[PTN]`+`[BANK]` opens a list of the active track's sequence in each of a bank's 16 patterns, plus
-  a trig-LED view, and loads the chosen one onto that track, cued like a pattern change.
-  `reference/handoffs/TRACK_SEQ_SELECT_SCOPE.md`; 14 open decisions in its §2, and phase 1 is the
-  landing oracle (it needs a fixture project exported from the device).
+- **CLYPS** (Session 131, 2026-10-22/23) — scope rev 2 only, nothing built. `[PTN]`+`[BANK]` enters
+  Clyps mode: a Clyps view (all 16 of a bank's sequences for the active track, 2 × 8) and a Clyps grid
+  (trig LEDs). It loads a chosen sequence onto the track as a non-destructive "clyp", restored when
+  the pattern is left. [FUNC]+[YES]/[NO] = 16 per-track saved sequences, kept in DRAM.
+  `reference/handoffs/CLYPS_SCOPE.md`; 12 open decisions in §2. Phase 1 = the landing/restore
+  oracles, which need a fixture exported from the device.

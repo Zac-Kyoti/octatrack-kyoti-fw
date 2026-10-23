@@ -63,4 +63,4 @@ reference/BLACKPYRAMIDS_303*
 octabam-modules/blackpyramids-303/*
 
 [trkseq]
-reference/handoffs/TRACK_SEQ_SELECT_*
+reference/handoffs/CLYPS_*
