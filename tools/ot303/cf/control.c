@@ -132,9 +132,10 @@ static uint32_t page(void) {
             put32(desc + 0x132 + 4 * i, 0);
             put32(desc + 0x162 + 4 * i, i == OT_PTCH ? (uint32_t)(uintptr_t)ot_ptch_step : 0);
         }
-        /* one nibble a knob, low first (knobs 8..11, then 0..7): bit 0 on (stock FLEX also sets 2 and 4 on
-         * some, meaning unknown); the first eleven on */
-        put32(desc + 0x1c2, 0x0111); put32(desc + 0x1c6, 0x11111111u);
+        /* one nibble a knob, low first (knobs 8..11, then 0..7): bit 0 on (stock FLEX also sets 4 on some,
+         * meaning unknown); the first eleven on. Bit 1 draws the link clip to the knob on the left: RES to
+         * CUT and ACC to DEC, on the slots stock FLEX links (STRT/LEN, RTRG/RTIM) */
+        put32(desc + 0x1c2, 0x0111); put32(desc + 0x1c6, 0x11311311u);
         ot_desc_p = (uint32_t)(uintptr_t)(desc + 0x38);
     }
     return ot_desc_p;
