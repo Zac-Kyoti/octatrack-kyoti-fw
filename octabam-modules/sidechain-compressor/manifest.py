@@ -106,7 +106,7 @@ LINKED = (
                       "4984aba27a91d2bc526219f82f1b3311ef5716443d2b682d3c04204a815a2f9f")),
     Linked("sc_ui", os.path.join(_TOOLS, "ui_switch.s"),
            reference=(0x400d7260,
-                      "74a4eb39abff1ac1037855c337be281cf922100dc539a5d39b3d7662655be8d7")),
+                      "157f883fd800e900676cad96bdf79b50ed497877b27936316a454c18a6cb2371")),
 )
 
 # PLACE: where octabam links sc_cf and sc_ui. CAVE (the default) is the ColdFire free

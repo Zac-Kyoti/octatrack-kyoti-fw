@@ -37084,3 +37084,16 @@ test/kyoti-mute-sidechain OK, make reach every gate passed. Supersedes the close
   VARISPEED's remix.inc inlines ui_switch.s (GAS does not search the including file's directory) and the
   includer's copy keeps its symbols local (UIS_LOCAL: DRAM units share one link); BP303 runtime regenerated
   (a6c4efba…). VARISPEED_EMUS is not an octabam module (the user).
+
+## 2026-10-23 (`sc-replace`) — SIDECHAIN_COMPRESSOR: KWID's link clip one row lower (re-pinned)
+
+The user saw the KBAS-KWID link clip (tools/ui_switch.s clip_knob, the ui-switch thread's 9b2e35a)
+one pixel too high on COMPRESSOR's page 2. It is drawn in the FX SETUP window, where the main
+drawer's (x - 4, y + 15) does not carry over. Measured on the emulator LCD against stock FILTER's
+BASE/WDTH clip (two clear rows under the labels, then the glyph): y + 15 left one clear row;
+y + 16 moved the glyph UP (this blit's y grows upward), so the fix is y + 14 -- now row for row as
+stock. One moveq immediate; VARISPEED and VARISPEED_EMUS (UIS_NO_CLIP) seal unchanged.
+Re-pinned on the user's instruction (emulator-verified; test image to flash 140C_SCCLP,
+out/OCTATRACK_OS1.40C_SC_CLIPFIX.syx 4881ce14…, .bin b9d66c3b…): SIDECHAIN_COMPRESSOR mainos
+`92b60f34…`, BUG_SC3X `e9046feb…`, KYOTI V1.6 `39021805…`; octabam manifest's sc_ui reference
+`157f883f…` (ui_switch.bin at 0x400d7260). emu_sc_dsp3 ALL GOOD.

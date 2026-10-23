@@ -28,7 +28,8 @@
 |    drawer (FUN_4004d948) blits it after the knob on the right, at (x - 4, y + 15) of that
 |    knob (0x4004e81c). The FX SETUP window draws its six knobs in its own loop
 |    (0x400377f8..0x4003791c), which has no clip code. clip_knob is a widget (B) column:
-|    the stock knob, then the clip at the same place as the main drawer's. (A hook in that
+|    the stock knob, then the clip where the main drawer puts it relative to the labels:
+|    (x - 4, y + 14) of the knob here (the main drawer's y + 15 lands one row high). (A hook in that
 |    loop was the other way; its widget return 0x40037890 is next to a branch target,
 |    0x40037894, so it cannot take a 6-byte jsr.)
 |
@@ -150,9 +151,12 @@ clip_knob:
         move.l  28(%sp),-(%sp)
         jsr     (KNOB).l
         lea     28(%sp),%sp
-        moveq   #15,%d0
+        moveq   #14,%d0
         add.l   8(%sp),%d0
-        move.l  %d0,-(%sp)              | y + 15
+        move.l  %d0,-(%sp)              | y + 14: the main drawer's y + 15 put the clip one
+                                        | row too high here (2026-10-23, measured on the LCD
+                                        | against FILTER's BASE/WDTH clip: two clear rows
+                                        | under the labels; this blit's y grows upward)
         moveq   #-4,%d0
         add.l   8(%sp),%d0
         move.l  %d0,-(%sp)              | x - 4
