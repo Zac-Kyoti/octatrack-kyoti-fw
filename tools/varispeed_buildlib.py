@@ -100,14 +100,26 @@ def run(*cmd, **kw):
     return r
 
 
-def link_unit(src, work, cpu, at, tag, asdefs=(), incdir=None):
+def octabam_shared_source(src):
+    """The remix.inc octabam's VARISPEED unit assembles (octabam-modules/varispeed/manifest.py
+    _shared_source): the source's text with tools/ui_switch.s in place of its `.include`."""
+    line = '        .include "ui_switch.s"\n'
+    text = pathlib.Path(src).read_text()
+    if text.count(line) != 1:
+        sys.exit(f"{src}: expected one `.include \"ui_switch.s\"`")
+    return text.replace(line, (ROOT / "tools/ui_switch.s").read_text())
+
+
+def link_unit(src, work, cpu, at, tag, asdefs=(), incdir=None, tools_inc=True):
     """Assemble + link the unit at `at`. asdefs: (name, value) for `as --defsym` (the
-    assembly switch); incdir: an `as -I` directory (tools/ is always on the path: the unit
-    includes tools/ui_switch.s). -> (bytes, {symbol: address})."""
+    assembly switch); incdir: an `as -I` directory; tools_inc: tools/ on the path too (the unit
+    includes tools/ui_switch.s; off for the octabam form, which inlines it). -> (bytes, {symbol:
+    address})."""
     work.mkdir(parents=True, exist_ok=True)
     o, e, b = (work / f"vem_{tag}.{x}" for x in ("o", "elf", "bin"))
     run("m68k-elf-as", f"-mcpu={cpu}", *[f"--defsym={n}={v}" for n, v in asdefs],
-        *(["-I", incdir] if incdir else []), "-I", ROOT / "tools", "-o", o, src)
+        *(["-I", incdir] if incdir else []), *(["-I", ROOT / "tools"] if tools_inc else []),
+        "-o", o, src)
     run("m68k-elf-ld", "-e", "vem_frame", f"-Ttext=0x{at:x}", "-o", e, o)
     run("m68k-elf-objcopy", "-O", "binary", e, b)
     syms = {}

@@ -16,7 +16,8 @@ A VARI track's increment is VARISPEED_EMUS's on EMUS = OT, bit for bit.
 
 COLDFIRE. Unit vari_cf: varispeed.s, two lines -- `.equ VEM_EMUS, 0` and
 `.include "remix.inc"` -- whose remix.inc (Linked.include) is the text of
-../varispeed-emus/varispeed_emus.s, so this folder needs that one beside it. 16 detours: the
+../varispeed-emus/varispeed_emus.s with ../../tools/ui_switch.s (QUAN's rotary switch, shared
+with SIDECHAIN_COMPRESSOR) in place of its `.include`, so this folder needs both beside it. 16 detours: the
 render's increment store (the frame hook), five in the audio editor's ATTR page, the four
 SETUP-page dial resolvers, the two Part applies, RELOAD PART, and hold wrappers on the bulk
 writers (SRC page paste, track paste, the PART menu's paste core). The PART menu's CLEAR
@@ -54,12 +55,22 @@ except ImportError:                     # an older octabam: DRAM, no setting
 # the folder is reached (checked out directly, symlinked, or a submodule of this repo).
 _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 _SHARED = os.path.join(_HERE, os.pardir, "varispeed-emus", "varispeed_emus.s")
+# QUAN's rotary switch, shared with SIDECHAIN_COMPRESSOR: the source `.include`s it from the
+# assembler's path (tools/ in the standalone builders); here its text is put in its place.
+_UI_SWITCH = os.path.join(_HERE, os.pardir, os.pardir, "tools", "ui_switch.s")
+_UI_INCLUDE = '        .include "ui_switch.s"\n'
 
 
 def _shared_source(_modules):
-    """remix.inc: the VARISPEED_EMUS source, which varispeed.s assembles with VEM_EMUS = 0."""
+    """remix.inc: the VARISPEED_EMUS source, which varispeed.s assembles with VEM_EMUS = 0, with
+    tools/ui_switch.s in place of its `.include`."""
     with open(_SHARED) as f:
-        return f.read()
+        text = f.read()
+    with open(_UI_SWITCH) as f:
+        ui = f.read()
+    if text.count(_UI_INCLUDE) != 1:
+        raise ValueError("varispeed_emus.s: expected one `.include \"ui_switch.s\"`")
+    return text.replace(_UI_INCLUDE, ui)
 
 
 U = "vari_cf"

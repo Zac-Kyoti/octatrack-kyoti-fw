@@ -2301,7 +2301,11 @@ quant_widget:
         move.l  %d0,%d1                 | quant_fmt reads the value
         bsr     rk_bucket               | d0 = its stop 0..8
         move.l  (%sp)+,%d2
+        .ifdef  UIS_SW9_AT
+        jmp     (UIS_SW9_AT).l          | KYOTI: SIDECHAIN's ui_switch unit has it
+        .else
         bra     sw9_draw
+        .endif
 .qw_frame:
         move.l  32(%sp),-(%sp)          | canvas
         move.l  %a1,-(%sp)              | the path's formatter
@@ -2461,11 +2465,16 @@ vg_key:                                 | vg_new: each track's key at the last c
 
 | QUAN's and EMUS's rotary switch: tools/ui_switch.s, shared with SIDECHAIN_COMPRESSOR
 | (the builders put it on the include path; no clip_knob here, no sw3_draw without EMUS).
+| UIS_SW9_AT (KYOTI, which also carries SIDECHAIN's ui_switch unit): its sw9_draw, and no
+| copy here.
+        .ifndef UIS_SW9_AT
+        .equ    UIS_LOCAL, 1
         .equ    UIS_NO_CLIP, 1
         .if     VEM_EMUS == 0
         .equ    UIS_NO_SW3, 1
         .endif
         .include "ui_switch.s"
+        .endif
 
         .balign 4
 vem_end:

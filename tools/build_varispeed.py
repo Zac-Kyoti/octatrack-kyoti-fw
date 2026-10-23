@@ -40,6 +40,7 @@ from kyoti_status import gate, seal
 gate(__file__, note="VARISPEED: VARI + QUAN, nothing emulated (spec §7).")
 
 import varispeed_buildlib as L
+import kyoti_place
 
 ROOT = L.ROOT
 STOCK_SECT = L.STOCK_SECT
@@ -65,6 +66,11 @@ if VARIANT:
     OUT.parent.mkdir(parents=True, exist_ok=True)
 
 SWITCH = (("VEM_EMUS", 0),)
+# KYOTI (tools/build_kyoti.py) carries SIDECHAIN's ui_switch unit too: QUAN's switch jumps to
+# its sw9_draw instead of carrying a copy (the proven cave has no room for both).
+UIS_AT = kyoti_place.at("uis_sw9_at", None)
+if UIS_AT is not None:
+    SWITCH += (("UIS_SW9_AT", UIS_AT),)
 # VARISPEED_EMUS's own symbols: none may be in this unit (nothing emulated, no guard)
 EMUS_ONLY = ("emus_widget", "emus_fmt", "emus_p2step", "emus_open", "emus_idx", "emus_stops",
              "vg_tick", "vg_fix", "vg_scan", "vg_sig", "vh_fx1", "vh_fx2", "vg_note",
@@ -111,12 +117,16 @@ def main():
         print(f"  test variant {VARIANT}: no wrap")
         return
 
+    if UIS_AT is not None:               # the KYOTI form: not the octabam module's bytes
+        L.wrap(OUT, ELEK, OUT_SYX, OUT_BIN, VERSTR)
+        return
     # the octabam module's form: the wrapper + remix.inc (the shared source's text)
     inc = WORK / "octabam_inc"
     inc.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(SRC, inc / "remix.inc")
+    (inc / "remix.inc").write_text(L.octabam_shared_source(SRC))
     for cpu in ("5407", "54455"):        # the ROM-cave form and the DRAM form's chip
-        wb, wsyms = L.link_unit(WRAPPER, WORK, cpu, L.CAVE, f"octabam_{cpu}", incdir=inc)
+        wb, wsyms = L.link_unit(WRAPPER, WORK, cpu, L.CAVE, f"octabam_{cpu}", incdir=inc,
+                                tools_inc=False)
         if wb != blob or wsyms != syms:
             sys.exit(f"{WRAPPER.relative_to(ROOT)} (+ remix.inc, -mcpu={cpu}) does not assemble "
                      "to this unit -- refusing")
