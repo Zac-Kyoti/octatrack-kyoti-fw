@@ -37049,3 +37049,20 @@ version), wrapper proof -> check (this octabam form not flashed), module README 
 the "Changed on 22 Oct 2026" note, new screenshots, test-remix READMEs, THIRD_PARTY. Gates:
 verify-docs 0 problems, mkdocs strict clean, check-remix test/sidechain-compressor +
 test/kyoti-mute-sidechain OK, make reach every gate passed. Supersedes the closed #862.
+
+## 2026-10-23 (`ui-switch`) — link clips + rotary switches (BP303, SIDECHAIN, VARISPEED)
+- Spectrum91 (octabam) uses no special code: its clips are `Param(link=True)` = enable-nibble bit 1, drawn by the main
+  drawer FUN_4004d948 (glyph 0x400baabe at x-4, y+15 of the right knob); LADR is `Formatter.STEPPED` = stock CHORUS
+  TAPS widget B = 0x40047254 (glyph table 0x400bde2a, entry value+1, 17x11 glyphs, `cmp #4`).
+- Glyphs are stored bottom-up (bit 31 of a column long = the bottom row; the blit is y-up). The 7 stock glyphs are a
+  270-degree pointer sweep 7:30..4:30 in 45-degree steps; SW5 uses 1..5 (9:00..3:00), SW3 (0x40047424) 1/3/5.
+- FX SETUP window knobs: their own loop 0x400377f8..0x4003791c (x = 53 + 20*col, y = 29 - 27*row, flags 0/8), no
+  clip code. A detour at its widget return 0x40037890 is NOT possible: 0x40037894 is a branch target (0x40037868).
+  No stock FX sets bit 1 on a page-2 slot.
+- tools/ui_switch.s (new, shared): sw9_draw/sw9_widget (9 positions in 22.5-degree steps on SW5: odd positions lend
+  table entry k+1 one of 4 new glyphs for the call), sw3_draw (SW3), sw_fmt pass-through, clip_knob (stock knob +
+  clip, for KWID). VARISPEED(_EMUS) `.include` it (tools/ on the as path; UIS_NO_CLIP / UIS_NO_SW3).
+- WIP builds, rendered under ot_emu (scratch MenuPort scripts), NOT flashed: BP303 clips 6724b8b (syx b1a96edd…,
+  mainos 88d49307…); SC KEY switch + KBAS-KWID clip a3aadad (syx 38b4751e…, mainos 4d6ffd01…); VARISPEED QUAN
+  (syx f061eb4f…, mainos ce4f7696…) + VARISPEED_EMUS QUAN/EMUS (syx 048d48bc…, mainos dbf8cd68…) 6d1b9e4. VEM cave:
+  152 B left. octabam forms not updated (SC module still uses key_list_fix; varispeed modules need ui_switch.s).
