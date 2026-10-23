@@ -196,7 +196,7 @@ directly indexed, so the store can never fill.
 |---|---|
 | Clyps view | a 17th entry, `ORIG`, in the cursor cycle after slot 16. It is present only when the active track has an original on the playing pattern. Select it, then [YES] in the latched state |
 | Clyps grid | **[PAGE]** (`0x1b`), the key after the 16 trigs whose [FUNC] function is SCALE SETUP: this track's original (§1.1) |
-| whole pattern | O14: restore every track of the playing pattern that has an original, on one landing. The user proposed chord + [PAGE], but in the held state [PAGE] alone already restores this track. Proposal: **[FUNC]+[PAGE]** = all tracks |
+| whole pattern | **[FUNC]+[PAGE]** (decided): restore every track of the playing pattern that has an original, on one landing |
 
 An original belongs to its pattern: you play that pattern to restore it. A project-wide "restore
 everything" is O17.
@@ -243,7 +243,7 @@ everything" is O17.
 
 ---
 
-### 1.7 "Sequence + machine/FX" loads (O18, the user's idea, 2026-10-23; research done, not decided)
+### 1.7 "Sequence + machine/FX" loads — FULL loads (decided 2026-10-23: yes, scene locks included)
 
 **What it would carry.** Exactly the per-track Part slice that stock's own TRACK COPY/PASTE carries
 (C, `0x40029754` / `0x4002b654`; MIDI `0x40029614` / `0x4002b470`).
@@ -296,9 +296,27 @@ same). The Part shows as edited.
 × 64 = **104,448 B**. That is small next to the sequence originals. A restore brings the old
 machine/FX back the same way.
 
-**How to choose it per load** (open, O19; MKI has no [PART] key):
-- [FUNC] + trig = sequence + machine/FX, trig alone = sequence only;
-- or a mode toggle shown in the header.
+**Scene locks come too** (the user, 2026-10-23): the track's 16 scene rows
+(`+0x662+(s·8+t)·0x20`, 512 B) and its per-scene bytes (`+0x1662+10s+t`), about 682 B per audio
+track. MIDI tracks have no scene locks. Open (O20): should the LFO designer wave
+(`+0x1702+16t` + slope `+0x1782+2t`, 18 B) come too? Stock leaves it behind, so an LFO set to a
+designer wave would play the destination Part's.
+
+Part-slice originals with scene locks: 512 × 682 + 512 × 68 ≈ **384 KB**.
+
+**How to choose it per load (decided 2026-10-23).**
+- The view header has a mode field reading `SEQ`.
+- **Holding [FUNC] highlights `FULL` instead; releasing [FUNC] drops back to `SEQ`.**
+- A trig picked while [FUNC] is held is a FULL load. A plain trig is a SEQ load.
+- [FUNC]+[YES], [FUNC]+[NO] and [FUNC]+[PAGE] keep their own meanings (save, reload saved,
+  restore-all). The `FULL` label applies to trig picks.
+
+**A restore undoes what Clyps did:** the track's sequence original, plus its Part-slice original
+when a FULL load made one.
+
+**The [MIDI/PART] key** (MKI's combined key; [FUNC]+[MIDI] opens Parts). Plain [MIDI] passes
+through in Clyps mode: it switches between audio and MIDI tracks, and the view and grid follow
+(`0x80000012`). [FUNC]+[MIDI] does nothing in Clyps mode, because Clyps owns [FUNC] while open.
 
 ## 2. Decisions
 
@@ -329,7 +347,10 @@ machine/FX back the same way.
   automatic originals with guaranteed recovery (§1.5). There is no automatic restore mode.
 - **O8 and the two states:** held / latched (§1.1). LEFT/RIGHT change the bank throughout Clyps
   mode, and there is no grid-only state.
-- **Restoring:** the `ORIG` entry on screen, and [PAGE] on the grid.
+- **Restoring:** the `ORIG` entry on screen, [PAGE] on the grid, and **[FUNC]+[PAGE] = restore all**
+  (was O14).
+- **FULL loads (was O18/O19):** yes, scene locks included. Holding [FUNC] momentarily highlights
+  `FULL` in the header, so [FUNC] + trig is a FULL load (§1.7).
 - **Recorder trigs:** they are part of each audio track's record (REC1–3 masks), so every load,
   save and restore carries them. A pattern has 16 track records, recorder trigs included.
 
@@ -337,11 +358,9 @@ machine/FX back the same way.
 
 | # | question | recommendation | alternative |
 |---|---|---|---|
-| **O14** | Restore-all gesture | [FUNC]+[PAGE] (because [PAGE] alone restores this track) | chord + [PAGE] as the user proposed; then something else must restore one track on the grid |
-| **O16** | How to show which tracks have originals | the 4 page LEDs (beside [PAGE]; dies `0x48..0x4f`, red/green/yellow) as the active track's `ORIG` indicator in Clyps mode, plus a 16-dot strip in the view header | see §1.5 |
+| **O16** | The 4 page LEDs beside [PAGE] in Clyps mode (dies `0x48..0x4f`) | steady, in the grid's own colours: **red** = the active track plays its original (nothing to restore); **green** = Clyps changed it ([PAGE] restores); **yellow** = restore cued. While [FUNC] is held they show the same for the whole pattern (restore-all). Plus a 16-dot strip in the view header for all tracks | the user's idea: all 4 red = original, all 4 flashing red = not original |
 | **O17** | A project-wide "restore everything" | not in v1 | a gesture that restores all originals in all patterns |
-| **O18** | **"Sequence + machine/FX" loads** (§1.7) | feasible: stock's slice (136 B audio / 68 B MIDI) + the single-track apply `0x40001f18` at the landing. Mind the shared Part | sequence only |
-| **O19** | How to pick sequence-only vs full per load | [FUNC] + trig = full | a header mode toggle |
+| **O20** | FULL loads: does the LFO designer wave come too? | yes (18 B; avoids stock's gap) | no, as stock |
 | **O10** | Encoders in the view | swallowed, as in stock lists | passed through |
 | **O11** | Arranger running | Clyps does nothing (RELOAD's `ARR_ACT` gate) | works |
 | **O12** | Standalone [BANK] alone | carry RELOAD's SELECT-BANK-on-release deferral | stock [BANK]; SELECT BANK flashes when the chord starts with [BANK] |
@@ -665,7 +684,7 @@ Keep the 12 trailer bytes with the original, so a restore can undo it. Respect t
 | UI follow-up | ~150 B |
 | records, strings | ~1.2 KB |
 | **code** | **≈ 5 KB** |
-| **buffers** | saved 36,432 B + originals 9,326,592 B ≈ **9.0 MiB** |
+| **buffers** | saved 36,432 B + sequence originals 9,326,592 B + Part-slice originals ≈ 393,216 B ≈ **9.3 MiB** |
 
 The buffers need RAM, so **Clyps is a DRAM unit, standalone and in KYOTI**. It uses octabam's
 loader route (`tools/dram/`, as `build_kyoti.py` already does for RELOAD). The reserve is about
