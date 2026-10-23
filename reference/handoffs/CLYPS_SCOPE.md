@@ -142,7 +142,7 @@ A full-screen window, 128 × 64. It has a 7-px header row and two columns of eig
 | [FUNC]+[NO] | **reload** the saved sequence **immediately** (O3); nothing if none is saved; then as §1.1 |
 | TRACK 1–8 | change the active track; view and grid follow; bank kept |
 | [PTN] / [BANK] | their held state is the chord; no stock action |
-| [FUNC] `0x2d` | swallowed; only its held flag `0x46c7dd26` is read (to be confirmed) |
+| [FUNC] `0x2d` | our layer lists it (so stock's FUNC sub-map `0x400bfa1e`, which maps [PAGE] to SCALE and sits above any layer pushed before it, is never linked); its held flag `0x46c7dd26` is read (C: set for every press at `0x4003192c`) |
 | encoders | swallowed (O10) |
 | all else (PLAY, STOP, CUE, mutes, MIDI, …) | passed through |
 
@@ -202,8 +202,9 @@ An original belongs to its pattern: you play that pattern to restore it. A proje
 everything" is O17.
 
 **Showing which tracks have originals (O16, open; the TRACK LEDs are already busy).** Candidates:
-- the [PAGE] key's LED, if it has one usable (research running): lit when the active track has an
-  original;
+- the **4 page LEDs** beside [PAGE] (C: dies `0x48..0x4f`, red/green/yellow, LED-layer slot 7,
+  painter `0x4004d1a8`). The key itself has no separate LED. In Clyps mode they would be lit when
+  the active track has an original, and yellow while its restore is cued;
 - a 16-dot strip in the view header, one dot per track of the playing pattern that has one;
 - a `*` beside the `ORIG` entry, or on the playing pattern's own row.
 
@@ -241,6 +242,63 @@ everything" is O17.
 - **Unlike the Analog Rytm**, these are per track, independent of pattern and bank, and never saved.
 
 ---
+
+### 1.7 "Sequence + machine/FX" loads (O18, the user's idea, 2026-10-23; research done, not decided)
+
+**What it would carry.** Exactly the per-track Part slice that stock's own TRACK COPY/PASTE carries
+(C, `0x40029754` / `0x4002b654`; MIDI `0x40029614` / `0x4002b470`).
+
+Audio, **136 B** per track, read from the source pattern's linked Part (working copy):
+
+| Part offset | size | field |
+|---|---|---|
+| `+0x00+t` / `+0x08+t` | 1 each | FX1 / FX2 id |
+| `+0x12+2t` | 2 | track level, and probably CUE level |
+| `+0x22+t` | 1 | machine type |
+| `+0x2a+30t` / `+0x1da+30t` | 30 each | machine page 1 / page 2, all 5 machines |
+| `+0x11a+24t` | 24 | AMP / LFO / FX1 / FX2 page 1 |
+| `+0x2f2+30t` | 30 | LFO PMTR/WAVE, AMP/FX page 2, MULT/TRIG |
+| `+0x2ca+5t` | 5 | slot record |
+| `+0x602+12t` | 12 | recorder setup |
+
+MIDI, **68 B** per track: `+0x3e2+32m` (page values) and `+0x4e2+36m` (channel, bank, program, …).
+
+Stock does not carry:
+- **scene locks** (`+0x662+(s·8+t)·0x20`, 512 B per track) or the per-scene track bytes;
+- **the LFO designer** (`+0x1702+16t`). An LFO set to a designer wave would play the destination
+  Part's designer: a gap stock has too.
+
+**How it would land on time.** A single-track apply exists: **`0x40001f18(bank, part, t)`** (C).
+It publishes one track's lanes, FX ids, levels and recorder setup, and its only call is memcpy.
+At the landing tick:
+1. copy the slice into the playing Part's working copy;
+2. call it;
+3. set the voice-restart bit `0x8000184c` if the machine changed.
+
+The SRAM copy, the dirty bits and the UI refresh are deferred to the UI task. Do not write the
+slice early: machine type, slot and the recorder gate are read straight from the Part at trig time.
+
+Risks:
+- PICKUP setup (`0x40000e50` / `0x40006820`) is UI-context, not ISR-safe;
+- VARISPEED's `rp` hold/forget on `0x4002b654` (KYOTI);
+- features that read FX ids (SIDECHAIN).
+
+Whole-Part re-apply `0x40009094` would also work, but it snaps in-flight slides on every track;
+`0x40001f18` touches only the one track. An FX type change makes the DSP re-init only that
+track's effect (its tail is cut, as stock does on a live FX change).
+
+**⚠️ The musical consequence: a Part is shared.** The slice is written into the Part linked to
+the playing pattern, and every other pattern in that bank linked to the same Part then plays that
+track with the new machine/FX. That is how the Octatrack's Parts work (stock PASTE TRACK does the
+same). The Part shows as edited.
+
+**Originals for it.** Kept per (bank, part, track): 16 × 4 × 16 = 1,024 places, (8 × 136 + 8 × 68)
+× 64 = **104,448 B**. That is small next to the sequence originals. A restore brings the old
+machine/FX back the same way.
+
+**How to choose it per load** (open, O19; MKI has no [PART] key):
+- [FUNC] + trig = sequence + machine/FX, trig alone = sequence only;
+- or a mode toggle shown in the header.
 
 ## 2. Decisions
 
@@ -280,9 +338,10 @@ everything" is O17.
 | # | question | recommendation | alternative |
 |---|---|---|---|
 | **O14** | Restore-all gesture | [FUNC]+[PAGE] (because [PAGE] alone restores this track) | chord + [PAGE] as the user proposed; then something else must restore one track on the grid |
-| **O16** | How to show which tracks have originals | [PAGE] LED for the active track + a 16-dot strip in the view header | see §1.5 |
+| **O16** | How to show which tracks have originals | the 4 page LEDs (beside [PAGE]; dies `0x48..0x4f`, red/green/yellow) as the active track's `ORIG` indicator in Clyps mode, plus a 16-dot strip in the view header | see §1.5 |
 | **O17** | A project-wide "restore everything" | not in v1 | a gesture that restores all originals in all patterns |
-| **O18** | **"Sequence + machine/FX" loads** (the user's idea, 2026-10-23): bring the source track's machine and FX from its Part with the sequence; the destination Part shows edited | research running: stock's TRACK COPY/PASTE already defines a track's Part slice | sequence only |
+| **O18** | **"Sequence + machine/FX" loads** (§1.7) | feasible: stock's slice (136 B audio / 68 B MIDI) + the single-track apply `0x40001f18` at the landing. Mind the shared Part | sequence only |
+| **O19** | How to pick sequence-only vs full per load | [FUNC] + trig = full | a header mode toggle |
 | **O10** | Encoders in the view | swallowed, as in stock lists | passed through |
 | **O11** | Arranger running | Clyps does nothing (RELOAD's `ARR_ACT` gate) | works |
 | **O12** | Standalone [BANK] alone | carry RELOAD's SELECT-BANK-on-release deferral | stock [BANK]; SELECT BANK flashes when the chord starts with [BANK] |
@@ -675,6 +734,12 @@ To be applied with the first code commit:
 - Arrows: UP `0x33`, DOWN `0x20`, LEFT `0x34`, RIGHT `0x21`.
 - `0x40027e00` is an undo-kind clear, not a dirty flag.
 - [PTN] does push a keymap layer, `0x400bf0f2`.
+- **`0x40009094` is 1,492 B and only moves parameters**: it ends at `0x40009664` with `jmp 0x40000c3c`.
+  The eDMA re-arm, tempo republish and INTC unmask belong to the next function, `0x4000966c`
+  (engine restart), which calls `0x40009094` last. memory-map.md merged the two.
+- [FUNC] (`0x2d`) has a dispatcher record (press `0x4004e954`, sub-map `0x400bfa1e`), and its held
+  flag is `0x46c7dd26`. The "not located" note is obsolete.
+- MKI has no [PART] key (T1). On MKII it is `0x1d` → `0x4002e7c8`.
 
 ---
 
