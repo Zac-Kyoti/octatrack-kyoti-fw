@@ -515,8 +515,24 @@ RAM after the load with stock-style slab and record copies, and no file is writt
   DJ-on case. Mid-pattern landings need our own one-track re-home to that position (the DJ-style
   `dj_bparams`/`dj_tprime` arithmetic).
 
-Not run yet: MIDI tracks (OT DEMO has no MIDI trigs), a track faster than the master, master
-length INF, a cross-bank source, DJ on.
+**Mid-pattern landings (O9 phase-continuous), MEASURED 2026-10-23.** The reference is a
+never-switched run of an in-RAM copy of A15 holding the new T6 from START. The copy is in **phase
+D (`0x400a1f72`) of the tick in which the track's next step is built** (its window start). The
+parts before the landing differ by construction, so read "locked from".
+
+| run | load | landing | locked from |
+|---|---|---|---|
+| A4 vs R4 | A08's 16-step T6 (same length) | step 12 (t66), copy only | before the landing (t49); identical after it |
+| A5 vs R5 | A14's 64-step T6 | step 12 (t66): index unchanged, copy only | **t67**, the tick after the landing |
+| A6n vs R5 | the same | step 20 (t114), copy only | t192: wrong until the master wrap (old index 4 kept) |
+| A6 vs R5 | the same | step 20, copy **+ STEP = 20, STEP−1 = 19** | **t115**, the tick after the landing |
+
+**So the one-track rule (same scale)** is: at the track's window start, in phase D, copy the record,
+then set STEP / STEP−1 to the phase-continuous index (steps elapsed since the pattern's last
+restart, mod the new length). Stock does the rest: it re-reads the length at each wrap and
+restarts at the master wrap.
+
+Not run yet: a track faster than the master, master length INF, a cross-bank source, DJ on.
 
 **DIRECT JUMP on** (decided). DJ re-lands the whole sequencer through phase D (`0x80006687`), which
 Clyps must never write. What Clyps can reuse from DJ for a single-track clock-locked landing:

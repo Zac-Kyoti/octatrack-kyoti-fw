@@ -80,6 +80,9 @@ def main(argv):
                     help="PAT:OFF=VAL poke one pattern-slab byte after the copies (e.g. 14:0x8e56=4)")
     ap.add_argument("--clyp", default="", help="K:S:T harness clyp armed at tick K")
     ap.add_argument("--clyp-pc", type=lambda v: int(v, 0), default=0x400A43A0)
+    ap.add_argument("--clyp-step", type=int, default=-1,
+                    help="also set the track's STEP to N (and STEP-1 to N-1) at the copy: the "
+                         "phase-continuous position when the new length moves the index")
     ap.add_argument("--dj", type=int, default=0)
     ap.add_argument("--ticks", type=int, default=300)
     ap.add_argument("--tag", default="clyps")
@@ -182,6 +185,9 @@ def main(argv):
         dst_bank = rd(0x800065BD, 1)
         off, ln = trk_span(t)
         uc.mem_write(slab(dst_bank, dst_pat) + off, bytes(uc.mem_read(slab(bank, s_) + off, ln)))
+        if a.clyp_step >= 0:
+            uc.mem_write(0x800064D0 + t, bytes([a.clyp_step & 0xFF]))
+            uc.mem_write(0x800064E0 + t, bytes([(a.clyp_step - 1) & 0xFF]))
         st["clyp"] = [st["tick"], hex(addr), dst_bank, dst_pat, s_, t,
                       rd(0x800065B2, 2), rd(0x800065B6, 1)]
 
