@@ -83,7 +83,7 @@ Evidence: static reads of our own `section_3_MAIN_OS.bin`, confidence **C** unle
 |---|---|
 | [YES], a trig, or [FUNC]+[NO] (a load), chord **not** held | load; close the view **and** the grid |
 | a trig, chord **still held** | load; close the view; the **grid stays** while the chord is held |
-| [YES], chord still held | not a load (O5) |
+| [YES], chord still held | not a load: DIRECT JUMP's [PTN]+[YES] toggle |
 | [NO] | close the view and, unless the chord is held, the grid; no load |
 | any window that evicts ours | same teardown as [NO] |
 
@@ -125,7 +125,7 @@ A full-screen window, 128 × 64. It has a 7-px header row and two columns of eig
 |---|---|---|
 | UP / DOWN `0x33`/`0x20` | cursor, wrapping, auto-repeat | swallowed |
 | LEFT / RIGHT `0x34`/`0x21` | bank −/+, wrapping | bank −/+; a short stock toast names the bank (O8) |
-| [YES] `0x31` | load the cursor slot, then close (§1.1) | see O5 |
+| [YES] `0x31` | load the cursor slot, then close (§1.1) | DIRECT JUMP toggle |
 | [NO] `0x32` | close, no load | swallowed |
 | [FUNC]+[YES] | **save** the active track's sequence; view stays; header shows `SAVED` | same |
 | [FUNC]+[NO] | **reload** the saved sequence (a load, so it closes as in §1.1); nothing if none saved | same, cued (yellow) |
@@ -153,7 +153,38 @@ When the saved sequence is what's playing, no slot is red, and the view header s
 For the playing pattern's own slot, the grid and view always describe its **own** sequence (from
 the backup, §1.5), not the clyp on the track.
 
-### 1.5 Loading — non-destructive
+### 1.5b Originals — an open proposal (2026-10-23)
+
+The user sees the benefits of both models below (keep vs restore) and would use both. Proposed
+way to have both:
+
+- **The base rule is keep.** It is stock-like: a load is an edit, and the grid holds what you
+  did, whether you leave the pattern or come back.
+- **Clyps also keeps originals, automatically.** The first time Clyps replaces a track in a
+  pattern, it keeps what that track held just before. That is the RAM state, unsaved edits
+  included, keyed by (bank, pattern, track).
+  - **First one wins:** later loads and edits never replace the original.
+  - Plain edits made without Clyps are never captured.
+  - The pool is cleared by a power cycle or a project reload.
+- **Ways back:**
+
+| gesture | does |
+|---|---|
+| a 17th cell `ORIG` in the view, after slot 16 in the cursor cycle (present only when this track has an original) + [YES] | restore this track's original, cued like any load |
+| chord held + [NO] (O14) | restore every track of the playing pattern that has an original, on one landing |
+| AUTO-RESTORE mode (O15) | leaving a pattern restores its originals: the restore model, as a toggle |
+
+- **Restoring a track drops its original.**
+- **When the pool is full**, the load still happens, with a toast that no original was kept.
+- **Optional:** in Clyps mode the TRACK LEDs show which tracks differ from their originals (O16),
+  and a `SAV` cell beside `ORIG` makes the saved sequence pickable from the list.
+- **Cost:** ~2.3 KB per original (O13), about 600–900 B more code, and the same landing machinery
+  as any load.
+
+The text of §1.5 below describes the restore model (rev 2). It stays here as the AUTO-RESTORE
+behaviour, until O1 is settled.
+
+### 1.5 Loading — non-destructive (the restore model; O1 is open)
 
 The user's model (2026-10-23): a clyp replaces the pattern's own sequence on the track, *and* the
 original stays available by picking its own slot again.
@@ -177,10 +208,10 @@ Clyps therefore keeps a backup:
 **Timing.**
 - Transport stopped: the load is immediate.
 - Running, DIRECT JUMP off: cued, landing where a stock pattern change cued now would land (§3.4).
-  The track restarts at step 1 there.
-- Running, DIRECT JUMP on: lands at DJ's next landing (the next master step) at the clock-locked
-  position, as if that sequence had been playing all along (O4). That is the "great in combo with
-  direct jump" case.
+  At a master wrap that is step 1; at a CHANGE point the rule is O9.
+- Running, DIRECT JUMP on (decided): it lands like a DIRECT_JUMP_KYOTI jump, at the next master
+  step, at the clock-locked position, as if that sequence had been playing since START. That is
+  the "great in combo with direct jump" case.
 - **One cue per track, last pick wins.** Re-picking the sequence already playing cancels the cue.
   A pattern change landing first drops pending cues.
 
@@ -195,8 +226,9 @@ Clyps therefore keeps a backup:
 
 ### 1.6 Saved sequences ([FUNC]+[YES] / [FUNC]+[NO])
 
-- **16 buffers**, one per audio track and one per MIDI track, kept in DRAM: cleared at boot, kept
-  across pattern and bank changes, and **kept across a project load** (O7).
+- **16 buffers**, one per audio track and one per MIDI track, kept in DRAM. They are kept across
+  pattern and bank changes, and **destroyed by a power cycle or a project reload** (decided
+  2026-10-23).
 - **[FUNC]+[YES]** copies what the active track is playing now: the clyp or the own sequence,
   including edits, plus its resolved length/scale.
 - **[FUNC]+[NO]** loads the buffer onto the active track as a clyp. It follows the same timing,
@@ -217,23 +249,30 @@ Clyps therefore keeps a backup:
 - NORMAL destination: convert to PER TRACK only when needed (rev 1 D4).
 - Saved sequences: [FUNC]+[YES] / [FUNC]+[NO], 16 buffers, not across power cycles.
 - Naming: phase 2, kept on the radar.
-- A clyp does not permanently overwrite a pattern (the backup + restore model, §1.5). This is the
-  user's model, with the backup added to make it hold for the playing pattern's own slot.
+- **DIRECT JUMP on (was O4):** a Clyps load lands like a DIRECT_JUMP_KYOTI jump. It lands at the
+  next master step, at the clock-locked position the sequence would have if it had been playing
+  since START.
+- **[YES] with the chord held (was O5):** passes to DIRECT JUMP's [PTN]+[YES] toggle.
+- **Saved sequences (was O7):** they last only while the unit runs its project. A power cycle or a
+  project reload destroys them.
+- **Recorder trigs:** they are part of each audio track's record (REC1–3 masks), so every load,
+  save and restore carries them. A pattern has 16 track records, recorder trigs included.
 
 ### Open — recommendation first
 
 | # | question | recommendation | alternative |
 |---|---|---|---|
-| **O1** | Leaving a pattern with clyps on it | **restore the own sequences** (Clyps never permanently changes a pattern) | keep the clyps in the pattern as ordinary edits; the backups are then dropped and the originals are lost |
-| **O1b** | Edits made to a clyp, then the pattern is left | **lost** unless saved with [FUNC]+[YES] (follows from O1) | an edited clyp becomes the pattern's own sequence |
-| **O2** | A bank written to the card while clyps play | **write the own sequences** (one hook in the bank writer) | write what is heard |
-| **O3** | [FUNC]+[NO] timing | like any Clyps load (cued; immediate when stopped) | always immediate, phase-continuous |
-| **O4** | DIRECT JUMP on | **land at DJ's next step, clock-locked** | always the stock change gate |
-| **O5** | [YES] while the chord is held | **pass to DIRECT JUMP's [PTN]+[YES] toggle** (in images with DJ), so DJ can be switched without leaving the grid; otherwise ignored | always ignored |
+| **O1** | Leaving a pattern after Clyps loads (the user is torn and uses both) | **keep** (stock-like: what is on the grid stays) **plus automatic originals** (§1.5b), restored on demand | restore on leave; or an AUTO-RESTORE mode toggle over the same originals |
+| **O1b** | Edits made to a loaded sequence | stay, as stock edits do; the original still means "before Clyps touched it" | lost on leave (restore model) |
+| **O2** | A bank written to the card while clyps play | with keep: what is heard, as stock | with restore: the own sequences (bank-writer hook) |
+| **O3** | [FUNC]+[NO] timing | like any Clyps load (cued; immediate when stopped) | always immediate |
 | **O6** | Full green: do recorder trigs count? | yes | note trigs only |
-| **O7** | Saved sequences across a project load | **kept** ("always available"); their sample locks then name the new project's slots | cleared on project load |
 | **O8** | LEFT/RIGHT in grid-only mode | change the bank, with a short stock toast `BANK B` | swallowed |
-| **O9** | A mid-pattern CHANGE point (DJ off) | the track restarts at step 1, as on a pattern change | keeps its step |
+| **O9** | A landing at a CHANGE point before the master end (DJ off) | **phase-continuous**: the track lands where it would be had the sequence been in the pattern since its last restart, so it stays in step with the other tracks. At a master wrap this is step 1, the same as stock | the track restarts at step 1 alone, out of phase with the rest |
+| **O13** | Originals pool size (§1.5b) | 128 (~290 KB) | 256 (~590 KB) |
+| **O14** | Restore-all gesture | chord held + [NO] | another gesture |
+| **O15** | AUTO-RESTORE mode toggle | offer it (same storage, different trigger) | manual restores only |
+| **O16** | TRACK LEDs show which tracks differ from their originals | yes, in Clyps mode | no |
 | **O10** | Encoders in the view | swallowed, as in stock lists | passed through |
 | **O11** | Arranger running | Clyps does nothing (RELOAD's `ARR_ACT` gate) | works |
 | **O12** | Standalone [BANK] alone | carry RELOAD's SELECT-BANK-on-release deferral | stock [BANK]; SELECT BANK flashes when the chord starts with [BANK] |
@@ -358,7 +397,31 @@ The builder reads the **blob slab**, and captures locks at build time.
 **Edge case:** a PER TRACK track faster than the master finishes from the outgoing slab (the HOLD
 bit, cleared at `0x400a3d1c`), so its copy waits for its own late landing.
 
-**DIRECT JUMP on** (O4). DJ re-lands the whole sequencer through phase D (`0x80006687`), which
+**MEASURED 2026-10-23 (emulator, stock image).** Harness: `tools/diag_clyps_landing.py` +
+`tools/cmp_clyps.py`. The base is the user's real OT DEMO export. Each test pattern is built in
+RAM after the load with stock-style slab and record copies, and no file is written.
+
+| run | setup | result |
+|---|---|---|
+| A1 vs B1 | PER TRACK A15 (master 32): T6 from A14 (64 steps, 3 trigs) in place of its own (16 steps, 9 trigs). Copy at the **wrap-body entry `0x400a43a0` on the master-wrap tick**. Reference: a stock change to A16 = A15 with A14's T6 | **IDENTICAL at all 450 ticks**: state and live events, including the next master wrap |
+| C1 vs B1 | control: no load | FAIL (never locks) |
+| D1 vs B1 | control: the same copy one tick later (phase D of tick 187) | FAIL: the first new step's event (step 0 at t192) is lost, then it locks from t193. One tick late is too late |
+| A2 vs B2 | NORMAL A10 (16 steps): T1 from A12 | **IDENTICAL at all 260 ticks** |
+| A3 vs B3 | CHANGE = 4 on A15 | FAIL, as expected: the stock change lands at the CHANGE point (t42) and **restarts every track at step 1**. With no pending stock change, the wrap body runs only at the master wrap (t186) |
+
+**So:**
+- **At a master wrap:** a Clyps landing is one record copy at `0x400a43a0`. Stock's own wrap body
+  then re-homes and purges, so no per-track code of ours is needed.
+- **At a CHANGE point:** the stock reference is the wrong target, because it restarts all tracks.
+  A one-track rule is needed (O9). The recommended phase-continuous rule has an exact oracle: a
+  never-switched run of the pattern that holds the clyp from START. That is the same oracle as the
+  DJ-on case. Mid-pattern landings need our own one-track re-home to that position (the DJ-style
+  `dj_bparams`/`dj_tprime` arithmetic).
+
+Not run yet: MIDI tracks (OT DEMO has no MIDI trigs), a track faster than the master, master
+length INF, a cross-bank source, DJ on.
+
+**DIRECT JUMP on** (decided). DJ re-lands the whole sequencer through phase D (`0x80006687`), which
 Clyps must never write. What Clyps can reuse from DJ for a single-track clock-locked landing:
 - `dj_T`, running ticks since START, counted whether DJ is on or off;
 - `dj_bparams`, per-track tps/len as stock's landing loader `0x400a2124` resolves them;
@@ -470,7 +533,7 @@ A **load** onto track t from source S (a slot, or SAVED) does the following:
    `home_valid[t]` is cleared (the own sequence is back). If S is SAVED, the source is saved[t].
 3. **Then:**
    - stopped: copy in the key handler;
-   - running: write `cue[t]`; the phase-G hook (or DJ's landing, O4) copies, re-homes, purges and
+   - running: write `cue[t]`; the phase-G hook (or DJ's landing when DJ is on) copies, re-homes, purges and
      resets on the landing tick (§3.4);
    - either way: set `src[t]`, then run the UI follow-up.
 
@@ -520,8 +583,8 @@ It is restored with the backups when the pattern is left. Respect the clamps (`0
 - **[FUNC]+[YES]** copies the playing pattern's track-t record (what is heard) plus its resolved
   length/scale → saved[t], and sets `saved_valid`. The header flashes `SAVED`; no toast is needed.
 - **[FUNC]+[NO]** is a load with S = SAVED (§4.5). It does nothing if `!saved_valid`.
-- **The buffers live in the DRAM reserve**, which is not cleared until boot, so they survive project
-  loads (O7).
+- **The buffers live in the DRAM reserve.** Boot clears them, and so does a hook beside project
+  load: they last only while the unit runs its project.
 
 ---
 
@@ -530,7 +593,7 @@ It is restored with the backups when the pattern is left. Respect the clamps (`0
 | feature | if nothing is done | rule |
 |---|---|---|
 | RELOAD_FROM_PROJECT | with the chord held, TRACK triggers a TRK SEQ reload; both own [BANK]'s press/release sites; a RELOAD of a track with a backup | our layer owns TRACK; in KYOTI, recognise the chord inside `rl3_bank_show`/`rl3_bank_rel`; RELOAD drops that track's backup |
-| DIRECT_JUMP_KYOTI | [PTN]+[YES] toggles DJ; a DJ jump changes the playing pattern | O5 routes [YES] with the chord held to DJ; a jump triggers the restore and drops cues; O4 uses DJ's landing for Clyps loads; never write `0x80006687` |
+| DIRECT_JUMP_KYOTI | [PTN]+[YES] toggles DJ; a DJ jump changes the playing pattern | [YES] with the chord held goes to DJ's toggle; a jump drops cues (and restores, under AUTO-RESTORE); Clyps loads use DJ's landing when DJ is on; never write `0x80006687` |
 | REC_TRIG_MUTE | holding TRACK links its YES/NO sub-map over us | our TRACK records carry no sub-map (verify) |
 | EMPTY_PATTERN_LED_FIX | — | we never call `FUN_4009a464` |
 | BLACKPYRAMIDS_303 | an empty trigless lock is a tie there | half green is cosmetic only |
@@ -575,7 +638,7 @@ The ROM keeps only the guarded detours:
   - **The user builds the fixture on the device** with stock track copy/paste, then exports it.
   - Variants: NORMAL and PER TRACK; CHANGE OFF/4/master; a faster-than-master track; INF master;
     MIDI; a cross-bank source; stopped.
-  - DJ-on runs (O4) are graded against a never-switched reference of pattern 2.
+  - DJ-on runs are graded against a never-switched reference of pattern 2.
 - **The restore oracle.** Load clyps, edit one, change pattern, come back: pattern 1's slab, its
   SRAM mirror and a card save all equal the pre-Clyps bytes. Also a bank save while clyps play, and
   SAVE AS NEW.

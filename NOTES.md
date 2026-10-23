@@ -37645,3 +37645,20 @@ Clyps view / Clyps grid.
 - **Placement:** buffers 72,864 B, so Clyps is a DRAM unit standalone too.
 - **Font:** `0x400ba876` is ≈ 4 px a character (RELOAD's measured widths), so a 64-px column holds
   ≈ 15 characters.
+
+**Session 131 cont. (2) (2026-10-23)** — CLYPS landing oracle, phase 1 (emulator, stock image).
+`tools/diag_clyps_landing.py` (recorder: diag_reflock's, plus in-RAM `--copypat`/`--copytrk`/`--setb`
+setup on a real export and a harness-side `--clyp`) and `tools/cmp_clyps.py` (A vs B, pattern number
+ignored). Base: the user's OT DEMO export, bank 1.
+- **A1 vs B1** (PER TRACK A15, master 32, T6 ← A14's 64-step T6; copy at the wrap-body entry
+  `0x400a43a0` on the master-wrap tick, vs a stock change to an in-RAM copy holding that T6):
+  IDENTICAL, 450/450 ticks.
+- **Controls fail:** no load never locks. The copy one tick late (phase D of t187) loses step 0's
+  event at t192, then locks from t193.
+- **A2 vs B2** (NORMAL A10, T1 ← A12): IDENTICAL, 260/260.
+- **CHANGE = 4** (A3 vs B3): the stock change lands at t42 and restarts **every** track. With no
+  pending change, the wrap body runs only at the master wrap. So mid-pattern Clyps landings need a
+  one-track rule (scope O9: phase-continuous, oracle = a never-switched run of the clyp's pattern).
+User decisions this round: a DJ-on load lands like DIRECT_JUMP_KYOTI; [YES] with the chord held =
+DJ toggle; saved sequences are destroyed by a power cycle or a project reload; O1 (keep vs restore)
+is open, with the "originals" proposal in scope §1.5b.
