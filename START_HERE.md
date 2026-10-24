@@ -46,6 +46,7 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | `COVERAGE.md` | this project's own RE coverage: what is mapped vs still dark, per manual chapter |
 | `ARCHITECTURE.md` | memory map, container format, boot/upgrade chain |
 | `octabam-modules/` | the features packaged as octabam modules — one self-contained folder each |
+| `modwerk-modules/` | the source Modwerk ships for each of our modules (its own copy; no builder here reads it) |
 
 ## 3. Hard constraints (do not relearn these the hard way)
 

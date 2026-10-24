@@ -1,0 +1,8 @@
+{
+ "schema": 1,
+ "subscribe": [
+  {"event": "ev_voice_bind", "fn": "mm_voice_bind", "order": 50, "replaces": "fresh_bind"},
+  {"event": "module_tick", "fn": "mm_restore"}
+ ],
+ "raise": ["ev_mute_keep"]
+}

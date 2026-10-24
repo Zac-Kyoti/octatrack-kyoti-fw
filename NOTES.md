@@ -37104,3 +37104,24 @@ ui-switch thread's #873 (pin 9b2e35a: rotary switches + link clips) on top. The 
 9b2e35a -> 554ca1c, THIRD_PARTY, new setup/chooser screenshots; gates: verify-docs 0, check-remix
 x2 OK, reach every gate passed. (A force-push + body edit briefly went to merged #869 by mistake;
 its title/body and branch were restored to the merged state.)
+
+## 2026-10-23 (`modwerk-modules`) — `modwerk-modules/`: the Modwerk copies of our modules
+
+The user's rule: a Modwerk module is its own thing, like an octabam module, and a change made for
+Modwerk never touches the final builds. `modwerk-modules/<id>/` holds the MIT source Modwerk ships
+and its Modwerk-form `manifest.py` (stock expectations as address/length/SHA-256 guards; no PLACE
+setting or Store, which Modwerk's schema lacks). Modwerk's GPL gates/tools, docs and LCD captures
+are not copied (LICENSE item 4).
+
+- `quantize-live-rec-toggle/`: the source of Modwerk PR repeat98/modwerk#846 (0.1.1), byte for byte
+  the side-branch commit `3ead7f9` (`modwerk-qlr`: shadow stored before the setting word so the USB
+  package repeats no stock run). The final QUANTIZE_LIVE_REC_TOGGLE and octabam (pin `9c890bb`) keep
+  the old order.
+- `mute-modes/`: mirrored from Modwerk `main` `c8fcb805` (0.2.1), with Modwerk's `MODWERK_EVENTS`
+  blocks and `runtime.json`.
+- `sidechain-compressor/`: the final sources (`tools/` as of `f57cfaf`) and a Modwerk-form
+  manifest for 0.2.0. Modwerk's toolchain image builds it alone natively: `sc_cf` 600 B and `sc_ui`
+  616 B match the author's builds, 677 DSP words on both cores, four hooks (image `05a74725…`, not
+  flashed). Not submitted: Modwerk's beta base pins the 0.1.x SC sources in `resident_dsp.py` and
+  `stock_hook_controllers.py` and patches the DSP text, so 0.2.0 needs the base updated; the user
+  chose to ask Jannik first whether he does the base side or we do.
