@@ -12,4 +12,4 @@ They are their own copies. Nothing in this repository builds from them: the stan
 
 Each folder holds the module's MIT sources and its Modwerk-form `manifest.py`. Modwerk's own files for these modules (its test gates and measurement tools under GPL-3.0-or-later, its documentation, thumbnails and LCD captures) stay on Modwerk and are not copied here.
 
-Modwerk-form manifests differ from octabam's: every stock expectation is an address/length/SHA-256 guard read from the builder's own OS file, so no stock bytes are carried, and Modwerk's remix schema has no build settings or stores.
+In a Modwerk-form manifest `author` is the GitHub login (`Zac-Kyoti`), which Modwerk checks against the module's catalogue entry; the site shows the name from `author.name` there ("Zac Kyoti"). Modwerk-form manifests also differ from octabam's: every stock expectation is an address/length/SHA-256 guard read from the builder's own OS file, so no stock bytes are carried, and Modwerk's remix schema has no build settings or stores.
