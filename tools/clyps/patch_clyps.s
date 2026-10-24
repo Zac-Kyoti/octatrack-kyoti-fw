@@ -73,17 +73,19 @@
 
 | ---- the view's geometry (window-local, y = 0 is the bottom row; text occupies y..y+4). Measured
 | in the emulator by rendering stock's own compositor output (tools/clyps_render.py).
-    .equ WIN_W,       106               | leaves stock's track columns visible at both edges
-    .equ WIN_H,       64
-    .equ WIN_DX,      -1                | x = (128 - 106) / 2 + 1 - 1 = 11 .. 116
-    .equ FONT_S,      0x400ba84e        | 5 px, the knob-label size; digits 4 px on a 5 px advance
-    .equ DIGIT_W,     5
+    .equ WIN_W,       112               | screen columns 8..119: on stock's own border lines
+    .equ WIN_H,       64                | (the main playback window's and ATTR's), the user's spec
+    .equ WIN_DX,      -1                | x = (128 - 112) / 2 + 1 - 1 = 8
+    .equ FONT_S,      0x400ba876        | the interface font: 3 px glyphs, 1 px apart, 5 rows
+    .equ DIGIT_W,     4                 | digit advance
     .equ ROW_PITCH,   6
-    .equ ROW0_Y,      49                | row r text at 49 - 6r (r = 0..7)
-    .equ HDR_Y,       57                | dark header: border 63, black 62, text 57..61, black 56,
-    .equ SEP_Y,       55                | separator line 55 (the user: one black row above and below)
-    .equ FOOT_Y,      1
-    .equ SUM_GAP,     6                 | gap between the slot number and its summary
+    .equ ROW0_Y,      47                | row r text at 47 - 6r (r = 0..7), text occupies y..y+4
+    .equ HDR_Y,       58                | header: lit band 57..63 (63 = the border), text 58..62:
+                                        | exactly one lit row above and below the inverted text
+    .equ LOAD_X,      77                | "LOAD: SEQ" (32 px) right-aligned to x = 108
+    .equ LOADF_X,     49                | "LOAD: SEQ+MCH/FX" (60 px), [FUNC] held
+    .equ COL1_X,      58                | column 0 at x = 4
+    .equ SUM_GAP,     5                 | gap between the slot number and its summary
     .equ COL1_X,      55                | column 0 at x = 3
 
     .text
@@ -790,23 +792,26 @@ cd_ta:
     pea     3
     bsr.w   cl_text
     lea     12(%sp),%sp
-    pea     SEP_Y                       | the separator under the header
-    pea     WIN_W-1
-    pea     SEP_Y
-    clr.l   -(%sp)
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
-|   footer: the load mode ([FUNC] held = the FULL label; FULL loads arrive in a later phase)
+|   the load mode, right-aligned in the header ([FUNC] held = the FULL label; FULL loads arrive
+|   in a later phase)
     lea     cl_s_seq,%a0
+    moveq   #LOAD_X,%d0
     tst.b   cl_fn
     beq.b   cd_mode
     lea     cl_s_full,%a0
+    moveq   #LOADF_X,%d0
 cd_mode:
     move.l  %a0,-(%sp)
-    pea     FOOT_Y
-    pea     3
+    pea     HDR_Y
+    move.l  %d0,-(%sp)
     bsr.w   cl_text
     lea     12(%sp),%sp
+    pea     WIN_H-2                     | the band, inverted with its text
+    pea     WIN_W-2
+    pea     HDR_Y-1
+    pea     1
+    bsr.w   cl_xor
+    lea     16(%sp),%sp
 |   the 16 cells
     jsr     cl_trk
     move.l  %d0,-(%sp)
@@ -815,7 +820,7 @@ cd_mode:
     move.l  %d0,%d7                     | d7 = record offset
     moveq   #0,%d2                      | d2 = slot 0..15
 cd_cell:
-    moveq   #3,%d3                      | d3 = column x
+    moveq   #4,%d3                      | d3 = column x
     cmpi.l  #8,%d2
     bcs.b   cd_c0
     moveq   #COL1_X,%d3
@@ -900,7 +905,7 @@ cd_sum:
     subq.l  #1,%d0
     move.l  %d0,-(%sp)                  | y0
     move.l  %d3,%d0
-    subq.l  #1,%d0
+    subq.l  #2,%d0
     move.l  %d0,-(%sp)                  | x0
     bsr.w   cl_xor
     lea     16(%sp),%sp
@@ -1055,11 +1060,11 @@ cl_src:     .space 32                   | per track: (bank, pattern) the sequenc
 cl_home:    .fill 32, 1, 0xff           | per track: the playing (bank, pattern) at that load
 cl_buf:     .space 32
 
-cl_fmt_hdr: .asciz "%c%d  BANK %c"
+cl_fmt_hdr: .asciz "%c%d BANK %c"
 cl_fmt_num: .asciz "%d"
 cl_fmt_trg: .asciz "%d TRIGS"
 cl_s_lck:   .asciz "LOCKS"
 cl_s_emp:   .asciz "---"
 cl_s_seq:   .asciz "LOAD: SEQ"
-cl_s_full:  .asciz "LOAD: SEQ + MACHINE/FX"
+cl_s_full:  .asciz "LOAD: SEQ+MCH/FX"
     .align 2

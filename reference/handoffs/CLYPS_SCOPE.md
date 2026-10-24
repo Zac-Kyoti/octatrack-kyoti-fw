@@ -834,6 +834,16 @@ The ROM keeps only the guarded detours:
   - LEFT/RIGHT delay 20 / repeat 10 (stock 30 / 30).
 
   Gate 28/28.
+- **Hardware report on `140C_CLYP3` (2026-10-23):** text too big (not the interface font), window
+  too narrow, header not lit, footer unwanted.
+- **`140C_CLYP4`:**
+  - font `0x400ba876`: the interface font, 3-px glyphs 1 px apart, 5 rows tall, used at 506 stock
+    sites;
+  - a 112 × 64 window on stock's border lines (screen columns 8–119);
+  - a lit header band with inverted text, exactly one lit row above and below it;
+  - `LOAD: SEQ` right-aligned in the header (32 px). [FUNC] held shows `LOAD: SEQ+MCH/FX` (60 px).
+    The full `SEQ+MACHINE/FX` (76 px) collides with `T8 BANK A`;
+  - render `CLYPS_view_v4.png`. Gate 28/28.
 - **Screen rendering in the emulator** (`tools/clyps_render.py`). Stock's compositor
   `0x40013abc` (the UI task runs it when RDRAW is set) is called directly. Read its double-buffered
   target `[0x400b9710]` **before** the call. It has the LCD plane's rotated layout.
