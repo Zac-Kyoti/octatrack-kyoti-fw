@@ -124,7 +124,27 @@ core 0). `g` glides per block the way KGN does today, so a sweep with MON on is 
 correctly. If not, store the coefficients, either at a coarser grid with interpolation or
 whole: about 3 words × 160 steps × 2 filters, which is too big, so interpolation it would be.
 
-### Ranges and the no-crossing rule
+### Base-width (decided 2026-10-21; replaces the absolute knobs and the no-crossing rule below)
+
+On the major-version test image (140C_SCKF2) the KFLP readout could "cross" KFHP: it showed its
+own knob (e.g. 100 Hz) while the DSP ran the LP an octave above the HP (2 kHz). The user chose
+Elektron's base-width scheme (stock FILTER and DELAY BASE/WDTH, Digitone FLTR page 2), labelled KBAS / KWID, and full
+ranges:
+
+| knob | 0 | 1 … 126 | 127 | readout |
+|---|---|---|---|---|
+| **KBAS** (slot 10, was KFHP) | **OFF** | g = (n−1)·159/126 → 20 Hz … 19.6 kHz | 19.6 kHz | Hz |
+| **KWID** (slot 11, was KFLP) | ½ octave | width = 8 + m·151/126 grid steps → ½ … 9.9 octaves above KBAS | **OFF** | octaves, `0.5`…`9.9` |
+
+- The LP sits at KBAS + KWID (from 20 Hz with KBAS OFF: a plain LP, 28 Hz … 19.6 kHz), capped at
+  OFF. The two cannot cross, no knob moves another, and both readouts are what the DSP runs (KBAS
+  rounded to the grid step, within 0.4 semitone).
+- Narrowest band ½ octave (−3 dB at its centre) instead of one octave; the kick-fundamental use
+  case (KBAS ≈ 30–40 Hz cuts the rumble, KWID ≈ 1.2–1.5 octaves keeps the fundamental) is kept.
+  Moving KBAS drags the LP along (accepted by the user).
+- Cost vs 140C_SCKF2: DSP +5 words (672 → 677), ColdFire +38 B (562 → 600, the octave
+  formatter shares the kHz printer), block-rate cycles only.
+
 
 One shared log grid, **16 steps/octave (¾ semitone)**: `f(g) = 20 Hz · 2^(g/16)`.
 
@@ -158,6 +178,10 @@ LP knob 16 = 160 Hz, 48 = 640, 64 = 1.28 kHz, 96 = 5.1 kHz, 112 = 10.2 kHz.
   touches only `$f..$1b` (our disassembly, A `P:0x1aa4`). So `$1c..$70` look free, but **this
   needs a canary** (emulator `--dsp-watch`, then hardware), as with every "unreferenced"
   memory in this project. S76 shelved a cascade for exactly this lack of state.
+  **Canary result (2026-10-19, emulator):** nothing else wrote `$1c..$70` while COMPRESSOR ran
+  (core 0 FX1 and core 1 FX2, ~56–58k checks each on OT DEMO); an effect switch DOES reuse
+  them (CHORUS, PLATE), so the filter state is reset from a detour on COMPRESSOR's init
+  (A `P:0x1aa4` / B `P:0x1864`). Hardware canary (`tools/build_sc_r7_canary.py`) pending.
 - **DSP P size**: about +100 code words and a ~160-word `g` table, against the current 384 +
   48 words. The standalone and KYOTI images have SPRING's 1063-word donor to themselves
   (≈630 words slack), so it fits.
@@ -191,9 +215,9 @@ Stock COMPRESSOR's page-2 descriptor, read from our image (E `0x400d5a4a`):
 - **KEY stays in slot 8**, so MUTE_MODES' `p1_key` (+38) is unchanged in every form, and
   `sc_norm`'s stock check (KEY > 8) still works. `sc_norm` gains slot 7 (reset to 1 = MON OFF)
   and the new defaults (KGN 64, KFHP 0 = OFF, KFLP 127 = OFF).
-- **Old SIDECHAIN compressors load as:** KEY kept; KGN = old KFLT (64 → unity; an old LP/HP
-  setting → some gain between −24 and +24 dB); KFHP = old KGN (usually 64 → HP ≈ 300 Hz);
-  KFLP = old MON (0/1 → LP ≈ 80 Hz, pushed to ≈ 600 Hz by the no-crossing rule). Audible
+- **Old SIDECHAIN compressors load as** (base-width, 2026-10-21): KEY kept; KGN = old KFLT (64 →
+  unity; an old LP/HP setting → some gain between −24 and +24 dB); KBAS = old KGN (usually 64 →
+  HP ≈ 630 Hz); KWID = old MON (0/1 → ½ octave: LP ≈ 890 Hz). Audible
   and fixable by re-dialling; this is what the disclaimer covers. P-locks and scene locks on
   slots 9–11 remap the same way.
 - **KEY OFF is stock** (decided): no filtering of the compressor's own signal.
@@ -242,6 +266,19 @@ Stock COMPRESSOR's page-2 descriptor, read from our image (E `0x400d5a4a`):
 4. Filter prototype in `emu_sc_dsp3.py` against a numpy reference (bit-exact), plus an A/B
    pack: Butterworth vs the one-pole cascade, on a kick + bass loop.
 5. Layout (§3, decided), then standalone → KYOTI → octabam → Modwerk.
+
+**Decided 2026-10-19 (after the MON declick passed on hardware):** the **KEY declick** ships in
+the same major version as the filters, not as its own build. The MON declick is **not promoted**
+until that major version has been tested on hardware.
+
+KEY declick design (scoped, not built): with MON on, a KEY change between two tracks is a hard
+swap of the monitored key (MON off has no click: the detector input changes and the compressor's
+own attack/release smooth it). Fix: a dip through the track's own sound. When the KEY parameter
+differs from the key in use and MON is faded in, `scdet` keeps the old key and stops arming
+`MON_ON`; once `MON_FADE` reaches 0 it adopts the new key and MON fades back in (~3 ms in all).
+The key in use is packed into the `MON_FADE` word (no new memory); `moncommit` masks the fade
+bits. KEY's effect on the ducking lags ~1.5 ms during such a change. A true key-to-key crossfade
+would need two filter states running during the fade: not planned.
 
 ## Sources
 

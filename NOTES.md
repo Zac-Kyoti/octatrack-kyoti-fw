@@ -36811,6 +36811,165 @@ keying the same track, MON on one: it hears its own KFLT/KGN; (6) transport star
 (the S59 class); (7) DARK/PLATE REV on T3/T7 still clean.
 **Not done:** octabam (shared asm: check-remix + pin move later), Modwerk (`resident_dsp.py` patches our MON consume
 text -- owner review; with the major version), KYOTI/BUG_SC3X re-pins (on promotion).
+- **2026-10-19 cont: MON declick FLASHED by the user (standalone `48404ab5…`): all seven HW checks pass** (MON toggling
+  same/cross core, ducking with MON off, MON on + FX1 → FILTER, MON on + KEY → OFF, two compressors on one key,
+  transport/pattern changes with MON on, DARK/PLATE on T3/T7). Not promoted (WIP until the user says so).
+- **2026-10-19 cont: r7 canary for the key-filter state (diagnostic `tools/build_sc_r7_canary.py`, WIP, never to
+  be promoted).** Question: is `r7+$1c..$70` of a COMPRESSOR instance free while it runs (stock COMPRESSOR touches
+  `$f..$1b`)? Static: no absolute X:$6xxx reference in either payload; `r7+$1c..$70` is used only by other effects'
+  modules, on their own instances (loops over `(r7)+` are invisible to a static scan). Runtime canary: `scdet` fills
+  the 85 words with `$a5a5a5` once per track, then each call sums (word - pattern) in a `do` loop; failures are counted
+  in Y:$7dc0 + track*4 (+0 fills, +1 passes, +2 failed passes, +3 last sum), the region is not refilled, and
+  `moncommit` commits a 2.76 kHz square wave (~-20 dBFS) on a failed track. `tools/emu_sc_r7_canary.py`: controls ALL
+  GOOD. Two dsp_asm/dsp56kEmu traps found writing it: **dsp_asm silently drops Tcc's address-register pair**
+  (`tne x0,b r1,r5` assembles as `tne x0,b`), and **`tne` as a `do` loop's last instruction only took effect on the
+  final iteration** in dsp56kEmu (hardware unknown; avoided). Also: **`--dsp-peek` wants an uppercase space and a
+  decimal length** (`1:Y:7dc0,32`; lowercase `y` reads X, `0x80` reads 0 words), and `--step` poke values are decimal
+  unless written `0x..`.
+  **ot_emu, OTDEMO (ot303 out/vem card + patched emulator), 30,000 frames:** T5 FX1 COMPRESSOR (core 0, X:$6100):
+  58,616 passes, 0 failures; T1 FX2 COMPRESSOR (core 1, X:$6200): 55,861, 0 -- with seven FLEX tracks and EQ / CHORUS /
+  FILTER / FLANGER / DJ EQ / PLATE / DELAY elsewhere. Poking FX ids into the Part reached the DSP lane for T5 only; a
+  lane poke for T3/T7 held one block, so those ran COMPRESSOR once and went back to CHORUS / PLATE, which then wrote
+  `+$1c..$41` / `+$1c..$50` of the same blocks: **an effect switch reuses these words, so the filter state must be
+  reset by a detour on COMPRESSOR's init (A P:0x1aa4 / B P:0x1864), not only by a latch** (today's `$16/$18` latch has
+  the same hole: a brief KFLT glitch after switching back). **Measured r7 blocks:** bank track k FX1 = X:$6100+$300k,
+  FX2 = $6200+$300k (T3 FX1 $6700, T7 FX2 $6800) -- octabam DSP.md's "FX2 k = $6000+(2+2k)*$100" is wrong for k >= 1.
+  **HW canary image (NOT flashed):** `out/sc_r7_canary/OCTATRACK_OS1.40C_SC_R7_CANARY.syx`
+  `ac36f8a306e255aa7211348552b2b6a879d1281fb1980ac87511a06916fc2139` (OS version 140C_SCR7C, mainos `cf9f705b…`).
+- **2026-10-19 cont: r7 canary FLASHED by the user (`ac36f8a3…`, 140C_SCR7C): "I could not generate a whine"** --
+  no COMPRESSOR track ever switched to the failure tone. The user ran every step of the plan: COMPRESSORs on T1 FX1,
+  T3 FX2, T6 FX1, T8 FX2 (both cores, both slots, one per track); DARK REV / PLATE / CHORUS / FLANGER / DJ EQ / LO-FI /
+  SPATIALIZER elsewhere; FLEX and STATIC samples on every track plus a recorder trig; KEY on some compressors with MON
+  on and off; several minutes of play with pattern changes, mutes, scenes / crossfader and p-locks on the compressors. With the emulator result: `r7+$1c..$70` is the key filters' state,
+  reset from a detour on COMPRESSOR's init.
+- **2026-10-19 cont: key filters, step 1 -- reference model + A/B (no DSP code yet).** `tools/sc_keyfilt.py`: the
+  49-word table GT (tan(pi f/fs)/16 every 4 grid steps, g -32..160; grid 20 Hz * 2^(g/16)) and a bit-exact integer
+  model of the planned DSP code: position V = (g+32)<<15 gliding 5 ms per block (snap below 2^7, straight to target
+  after a reset), G16 linearly interpolated, TPT coefficients recomputed only in a block where V moved: SVF a1 =
+  (1/256)/(D/256) by `div` (dsp_host: `andi #$fe,ccr` + a `do #24` of `div x0,a` gives a0 = floor(N*2^23/D) for
+  0 < N < D; dsp_asm wants `andi`, not `and`, for the CCR), a2 = G a1, a3 = 1 - a1 - k a2; one-pole g1 = G16/(1/16+G16).
+  Per sample u = (L+R)/16, one-pole HP -> SVF HP (k 1) -> SVF LP (k sqrt 2), out = 8x saturated. Checks (scipy,
+  `out/keyfilt/eval.py`): within ~0.1 dB of ideal Butterworth across settings; max pole radius 0.999685 over every grid
+  point; no gain above 0 dB anywhere; section states <= 0.48 at full-scale squares (0.97 with only 12 dB headroom, hence
+  /16). A/B (Butterworth model vs a float one-pole cascade, generic compressor) published for the user:
+  https://claude.ai/artifact/VtWZPuzKDZG4VnDDfzZR2v (renders `out/keyfilt/ab_render.py`). Isolation margins (job element
+  over the loudest other): kick +5.5 / +5.3 dB (bass shares the range), clap band +6.6 / +1.9, hats -0.9 / -0.7 at the
+  planned 4.7 kHz HP top; HP 9.8 kHz gives hats +5.6. Proposed: KFHP 1..127 = 20 Hz..9.9 kHz (fractional grid steps,
+  same table). Waiting on the user: filter type, HP top.
+- **2026-10-19 cont: user decided: Butterworth** (not the cascade). KFHP top (4.7 vs 9.9 kHz) asked back: researched for
+  the user -- compressor side-chain HPs mostly stop at 100-400 Hz (SSL Bus+ 300 Hz, Empress 400, Lindell 100/300),
+  gates higher (Drawmer DS201 4 kHz; DS404 10 kHz), de-essers key 800 Hz-8 kHz (dbx 902/520, 12 dB/oct), full-range
+  designs exist (Rockruepel Sidechain.one to 20 kHz). Recommended 9.9 kHz (no table cost; 0.85 vs 0.75 semitone a
+  step); waiting on the user. The DSP code is written with the HP top as one constant.
+- **2026-10-19 cont: key filters in the DSP (a30138c, WIP, ColdFire side not done -- not for flashing).**
+  `patch_sc_dsp3.asm`: KFLT replaced by the Butterworth block (bit-exact vs `tools/sc_keyfilt.py` in emu_sc_dsp3,
+  incl. 24 chained blocks with the DSP's own state carried), KGN read from slot 9, MON from slot 7 inverted, HOOK 4
+  `scinit` on COMPRESSOR init (A P:0x1aa4 / B P:0x1864, replays `move #>$20c5,x0`, clears r7+$2a and $17). KFHP top
+  kept at 4.7 kHz (user: keying itself is not our concern; compressor SC HPs stop at 100-400 Hz). **Toolchain finds:**
+  our vendored `dsp_asm` (built 20 Sep) mis-encodes `tfr a,b`/`tfr b,a` (as `rnd`), `cmp a,b`/`cmp b,a` (as
+  `max`/`maxm`) and `cmpm a,b`/`b,a` (as `not`); add/sub/addl/addr/subl/max between accumulators are right. octabam's
+  dsp_asm (built 9 Oct) encodes all six correctly; `dsp_xasm` re-encodes `tfr` and refuses the `cmp` forms, so
+  BLACKPYRAMIDS_303 (dsp_xasm) is safe, and the shipped SIDECHAIN source has none of them. dsp_asm also has no
+  backward branch/bsr, and drops Tcc's register pair. The SC builder now refuses any mnemonic swap
+  (`dsp_asm_util.mnemonic_mismatches`) and cross-checks the cave with dsp_xasm; emu_sc_dsp3 does the first.
+  Routines are found by symbol (rts counting broke with the new subroutines).
+  **Cost (ot_emu --dsp-stopwatch, executed instructions, sctest6 re-staged with audio, T5 FX2 COMPRESSOR, page 2 poked
+  in the live lane 0x80000968 + the Part store; matrix script `tools/sc_cost_matrix.sh`):** per scdet call (one
+  16-sample block): FINAL `9f7899d4` KEY OFF 17, KFLT bypass 274, KFLT LP 617, + MON 689, cross-core 625; MON-declick
+  `48404ab5` +2 each; new: KEY OFF 17, steady 1524, + MON 1593, cross-core 1532, first block 1669, knob moving <= 1708.
+  moncommit per track per block: 11 idle / 84 MON copy (FINAL) -> 21 / 93, fades <= 370 for 4 blocks. sctap 96
+  unchanged. scinit 6, once per effect assignment. P words: FINAL 384 (code 336 + 48 table; sctap 64, scdet 245,
+  moncommit 27), declick 456 (moncommit 95), new 649 (code 584: scdet 419, scinit 6; tables 16 + 49).
+  **Conflict found: VARISPEED_EMUS reserves only 388 words (`SC3_WORDS`) for SIDE-CHAIN in SPRING's P module**
+  (its cave ends below DARK REV's routine at A P:0x1586 / B P:0x1346: 820 words from SPRING's start). Already broken by
+  the flashed MON declick (456); the new 649 + VEM's 396 cannot share the 820. No current image has both (KYOTI carries
+  plain VARISPEED), and VEM's guard checks the constant, not the real size. Needs a decision before any KYOTI with
+  VARISPEED_EMUS, and a check of octabam's placement for the pair.
+- **2026-10-19 cont: SIDECHAIN_COMPRESSOR major version -- first flashable test image (WIP, NOT flashed).**
+  ColdFire: page 2 = RMS · MON · KEY · KGN · KFHP · KFLP. Slot 7 MON (count 2, default 1 = OFF, stored inverted,
+  `mon_fmt` -> stock ON/OFF, stock switch widget 0x40046f10 in place of slot 7's stock 0x400475f8), slot 9 KGN
+  (bipolar), slot 10 KFHP / 11 KFLP (`hp_fmt` / `lp_fmt`: OFF, 20..990, 1.0k..9.9k, 10k..19k; a 16-entry 2^(i/16)
+  table). Enable nibbles: slots 0-7 `11111111` (slot 7 drawn), 8-11 `00003111` (KFLP bit 1 = the link bracket to
+  KFHP, PARAM_PAGES.md: stock FILTER BASE/WDTH). `sc_norm` (KEY > 8) -> MON OFF, KEY OFF, KGN 64, KFHP OFF, KFLP OFF.
+  ColdFire unit 338 -> 562 B (KYOTI's SAFE cave keeps 680 B; build_kyoti exit 0). Checked in ot_emu: every formatter
+  called on the real code (23 values, all as intended); sc_norm on a poked KEY 127 resets lane and store to
+  `0 1 0 64 0 127`; OTDEMO's SIDECHAIN-saved T1 FX2 (KEY T8, 0/0/0) loads as KEY T8, KGN -24 dB, HP OFF, LP 80 Hz
+  (the documented old-project behaviour).
+  DSP: KEY declick (r7+$2c key in use, $2d "waiting": a KEY change waits while MON_FADE != 0, the old key runs and MON
+  is forced off; KEY -> OFF fades out on the live key; scinit clears both); cycle pass (dc6dcb6) + bypass. dsp_asm
+  traps found on the way: no ALU op with an XY dual move (`mpy` + XY comes out as `mpysu`, refused by the round trip),
+  no `nop` emitted (two loops ended on one address: caught by the mnemonic check), plus the earlier ones; octabam's
+  newer dsp_asm (9 Oct) encodes all of these right -- updating our vendored toolchain is a separate, byte-identity-
+  checked job. emu_sc_dsp3 ALL GOOD (standalone + octabam layout + --patched), emu_sc_sctap ALL GOOD.
+  **Cost (la_run meter, OTDEMO, 4 keyed COMPRESSORs FX1 + DJ EQ FX2 per core, keyed cross-core):** scdet per keyed
+  COMPRESSOR, per sample: filters on 54.0 instr / 66.3 modelled cycles (first DSP version 81.6 / 103.6; current FINAL
+  with KFLT LP 33.6 / 42.7), both OFF 19.9 / 29.1, MON on 58.0 / 70.1. Core 0: 2,512 mean / 2,597 peak (stock all-DJ-EQ
+  3,131 / 3,268, hardware-clean; current FINAL with the same config 2,393 / 2,480). P words 695 (FINAL 384).
+  **Image:** `out/OCTATRACK_OS1.40C_SIDECHAIN_COMPRESSOR.syx` `b04c68c5c0c534d3be70d3b87ee8495433b797e7748ef677c698706c45d3cea8`
+  (mainos `5d52675e…`, version 140C_KYOTI). Standalone only; KYOTI not rebuilt for flashing.
+- **2026-10-19 cont: octabam coexistence survey for the major version (DSP word space).** Scratch clone
+  `out/octabam-kf` at sambanks/octabam main `8250be0c` (20 Oct; 67 modules), SIDECHAIN submodule at d909918 (manifest
+  ported: GT ptable + KF tokens, scinit DspHook A 0x1aa4 / B 0x1864, page 2 MON KEY KGN KFHP KFLP with KFLP link=True,
+  CF reference re-hashed). `make bus` on pair remixes (module + SIDECHAIN + the stock effects) in three harvests -- all
+  three reverbs given up (region 2,724 w), SPRING + PLATE (1,622), SPRING only (820 + 208 runs) -- against the
+  current SIDECHAIN (8e00275) and no SIDECHAIN; scripts `survey.py` / `survey2.py` there. New SIDECHAIN section 695 w
+  (old 384). **Every module fits beside it when the remix gives up all three reverbs.** New word-space conflicts
+  (fit with the old SIDECHAIN, not with the new): SPRING-only remixes: CF METER (+ CF METER IDLE / WAVE LOAD, which
+  require it), EUCLID, TRANSIENT; SPRING + PLATE remixes: CHARACTER. Already failing with the old SIDECHAIN: TESTGEN,
+  VOCODER (SPRING only); BBD, LOFI2, MODULATION, SPECTRUM, WAVE (SPRING + PLATE; SPRING only they do not fit alone).
+  Non-space conflicts, unchanged from today: DELAY SERVER / REVERB SERVER (their core-private Y overlaps SIDECHAIN's
+  Y:$7f0-$9ff keybus/MON -> every bus remix: octabam-bus, test/bus, SEND, CHARACTER TXTR's remix), LOAD METER (both
+  claim the B P:0x303 commit hook -> octabam-inserts), BLACKPYRAMIDS_303 (declared conflict), ANALOG BD (composes
+  with stock effects only). octabam-core / test/mods harvest nothing (SIDECHAIN needs a reverb given up, as today).
+  Untestable on this main: MIDI SCALES, MIDI LOOPBACK (+ MIDI PART STATE) fail in their own test remixes (TypeError),
+  WAVE LOAD's remixes fail in cfmeter/meter.s, TEMPO BUS links only in a bus remix.
+
+## 2026-10-19 (`sc-keyfilt`) — major version: the declick build's word pass ported (695 -> 672 words), NOT flashed
+
+The `sc-declick` word pass (dca491c) applied here: moncommit pointers once (stash past the dry
+exit), fade steps merged (its nested L/R loop was already here), scdet's three MON pointer
+lookups share `bsr zz18`. emu_sc_dsp3 ALL GOOD (filters bit-exact, KEY declick, scinit,
+moncommit). Load (la_run OTDEMO, COMPx8 keyed + DJEQx8, core 1 mean, modelled cycles/sample):
+b04c68c5 2647.7 -> 2650.4 (MON on 2686.0 -> 2689.5); core 0 2511.8 -> 2514.6. ColdFire
+unchanged (the manifest's sc_cf reference 380c1428… stands). Image 140C_SCKF2:
+out/OCTATRACK_OS1.40C_SC_MAJOR.syx 7e9d80b5…, card .bin f527ee8f…; supersedes b04c68c5
+(never flashed). WIP, unpushed.
+
+
+**2026-10-19, octabam issue sambanks/octabam#815 posted** (the Sam list, re-verified on main 8250be0c): MIDI SCALES/LOOPBACK/PART STATE one-arg `include` after #797; WAVE LOAD `meter.s:91` bne.s out of range (WAVE_LOAD block); TEMPO BUS duplicate `NAMES_ff` with no server engines; DSP.md/MODULES.md r7 table (FX1 $6100+$300k, FX2 $6200+$300k); dsp_asm label-prefix substitution (`>endb` with `end:` defined -> `$102b`, silently; both our vendored copy and octabam's); heads-up on scmonbody x1/y1, r7 state, section size. CORRECTION: dsp_asm DOES emit `nop` (000000) -- the earlier "no nop" note was wrong; the comment at the MON fade loop now just states the loop-end rule. Images unchanged.
+
+## 2026-10-21 (`sc-keyfilt`) — major version: key filters as a base-width pair (BASE / WDTH), test image 140C_SCKF3, NOT flashed
+
+User feedback on 140C_SCKF2 (flashed): KFLP's Hz readout showed its own knob while the DSP ran
+the LP at max(KFLP, KFHP + 1 octave), so the two could visually cross (HP 1 kHz, LP "100 Hz"
+running at ~2 kHz); and the link clip did not draw. Decided: Elektron's base-width scheme, full
+ranges, WDTH in octaves, BASE OFF = a plain LP, clip paused.
+- **BASE** (slot 10): OFF, 1..127 = g (n-1)*159/126 = 20 Hz..19.6 kHz (was 20 Hz..4.7 kHz); Hz.
+- **WDTH** (slot 11): 0..126 = 1/2 .. 9.9 octaves above BASE (from 20 Hz with BASE OFF),
+  127 = OFF; LP = base + width, capped at OFF. Readout "0.5".."9.9" (tenths, equal to the model
+  for every m); BASE readout rounds to the grid step (BASE 14: "40", DSP 41 Hz).
+- sc_keyfilt.targets() rewritten (no octave clamp); DSP target block +5 words (tokens
+  @KFWSTEP@ / @KFWMIN@, HSTEP 41349, WSTEP 39269); lp_fmt -> octaves sharing hz_k's tenths
+  printer (hz_tenths); labels BASE / WDTH (builder, octabam manifest). Link bit kept (harmless).
+- emu_sc_dsp3 ALL GOOD (12 base-width cases bit-exact incl. the kick band BASE 14 / WDTH 10 =
+  41-97 Hz, half-octave narrowest, LP past the top). Emulator LCD capture: labels BASE/WDTH,
+  readouts "40" and "1.2".
+- Sizes: DSP 672 -> 677 words, ColdFire 562 -> 600 B. Load (la_run OTDEMO COMPx8 keyed +
+  DJEQx8, core 1 mean): filters on 2650.4 -> 2652.1, MON on 2689.5 -> 2691.2, both OFF
+  2477.7 -> 2475.4.
+- CLIP RE: the glyph 0x400baabe is drawn only by the main-page drawer FUN_4004d948
+  (0x4004e440 / 0x4004e830), gated by enable bit 1 and "no window open" (fp-88 from
+  0x460d1aec / 0x460d16f0). Forcing that gate for COMPRESSOR (scratch, emulator only) changed
+  nothing: the FX SETUP page's knobs come from another routine with no clip code. Paused.
+- Old SC projects (README disclaimer at promotion): BASE = old KGN (64 -> HP ~630 Hz), WDTH =
+  old MON (0/1 -> LP ~890/930 Hz).
+Image: out/OCTATRACK_OS1.40C_SC_MAJOR.syx (140C_SCKF3), card out/OCTATRACK_SC_MAJOR.bin.
+
+**2026-10-21 (cont.)** User correction: the knob labels are **KBAS** (slot 10) and **KWID** (slot
+11), not BASE / WDTH (builder, octabam manifest, model, comments, scope doc). Rebuilt as
+**140C_SCKF4** (supersedes SCKF3, never flashed): out/OCTATRACK_OS1.40C_SC_MAJOR.syx 50f6f2cb…, card
+out/OCTATRACK_SC_MAJOR.bin c7db5609…; sizes unchanged (677 w, 600 B); emu_sc_dsp3 ALL GOOD; LCD
+capture shows KBAS "40" / KWID "1.2". NOT flashed.
 
 ## 2026-10-19 (`sc-declick`) — SIDECHAIN_COMPRESSOR declick-only test build (no key filters): BUILT, emulator-verified, NOT flashed
 
