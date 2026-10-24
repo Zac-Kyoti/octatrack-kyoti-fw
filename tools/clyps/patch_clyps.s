@@ -69,6 +69,22 @@
     .equ PTN_RESUME,  0x4005a04a        | after `move.l 8(sp),d0 ; moveq #1,d1`
     .equ BANKP_RESUME,0x4007af86        | after `tst.l 0x460e73bc`
     .equ BANKR_RESUME,0x4007b3e8        | after `moveq #2,d0 ; cmp.l 0x460e73c6,d0`
+    .equ RUNNING,     0x800065b8        | long: 1 while the transport runs
+    .equ PEND_BANK,   0x800065bf
+    .equ PEND_PAT,    0x800065c0
+    .equ MASTER_STEP, 0x800065b2        | u16: the master step, ++ at each master tick 0
+    .equ TICK_CTR,    0x800065b6        | byte: master ticks within the step
+    .equ SCALE_IX,    0x8000663d        | byte: the live master scale index
+    .equ LEN_TBL,     0x400aba50        | long[scale]: ticks per step (2 = 1x = 6)
+    .equ QUANT_TBL,   0x400d80dc        | long[17]: CHANGE lengths in steps, [0] = -1 (off)
+    .equ PROJ_QUANT,  0x8000004e        | byte: the project default CHANGE index
+    .equ STEP_ARR,    0x800064d0        | byte[16]: per-track step   (audio 0..7, MIDI 8..15)
+    .equ STEPM1_ARR,  0x800064e0        | byte[16]: per-track step - 1 (mod len)
+    .equ TICKS_ARR,   0x800064f0        | byte[16]: per-track ticks within the step
+    .equ TSCALE_ARR,  0x8000663e        | byte[16]: per-track scale cache
+    .equ LAND_RESUME, 0x400a1f78        | after `move.b 0x80006687,%d0` (stock's ble.w follows)
+    .equ UIT_RESUME,  0x40062d22        | after `tst.l 0x46c7c72c` (stock's beq.w follows)
+    .equ WRAP_RESUME, 0x400a43a6        | after `move.l (a2),d0 ; moveq #1,d2 ; or.l d2,d0`
     .equ PRIO,        3                 | menus' rank: toasts / the name editor open over it
 
 | ---- the view's geometry (window-local, y = 0 is the bottom row; text occupies y..y+4). Measured
@@ -92,7 +108,7 @@
     .equ SUM_GAP,     5                 | gap between the slot number and its summary
 
     .text
-    .global cl_ptn, cl_bankp, cl_bankr
+    .global cl_ptn, cl_bankp, cl_bankr, cl_land, cl_uitail, cl_wrap
 
 | ================================================================ detours
 | [PTN] key handler 0x4005a044 (press, release, hold). Replaces 6 B:
@@ -544,14 +560,75 @@ crf_lp:
     addq.l  #4,%sp
     rts
 
-| ================================================================ the load (phase 2: at once)
-| cl_load(n): the shown bank's pattern n -> the playing pattern, active track
+| ================================================================ loads
+| cl_load(n): the shown bank's pattern n onto the active track of the playing pattern.
+| Stopped: at once. Running: cued (scope §1.5a); the sequencer tick lands it (cl_land).
 cl_load:
+    lea     -12(%sp),%sp
+    movem.l %d2-%d3/%a2,(%sp)
+    move.l  16(%sp),%d2                 | d2 = source pattern
+    jsr     cl_trk
+    move.l  %d0,%d3                     | d3 = track
+    moveq   #0,%d0
+    move.b  cl_bank,%d0
+    lsl.l   #8,%d0
+    or.l    %d2,%d0                     | d0 = bank<<8 | pattern
+    tst.l   RUNNING
+    bne.b   lo_cue
+    move.l  %d0,%d1
+    move.l  %d2,-(%sp)
+    lsr.l   #8,%d1
+    move.l  %d1,-(%sp)
+    move.l  %d3,-(%sp)
+    jsr     cl_apply                    | at once
+    lea     12(%sp),%sp
+    move.l  %d3,-(%sp)
+    jsr     cl_post_ui
+    addq.l  #4,%sp
+    bra.b   lo_out
+lo_cue:
+|   re-picking what already plays (its source, or the pattern's own slot) cancels the cue
+    lea     cl_cue,%a2
+    move.l  %d3,%d1
+    add.l   %d1,%d1
+    move.l  %d0,-(%sp)
+    jsr     cl_playing
+    move.l  %d0,%d1                     | d1 = playing
+    move.l  (%sp)+,%d0                  | d0 = picked
+    cmp.l   %d0,%d1
+    beq.b   lo_cancel
+    move.l  %d3,%d1
+    add.l   %d1,%d1
+    move.w  %d0,(%a2,%d1.l)             | cue[t] = bank<<8 | pattern
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    lsl.l   #8,%d0
+    move.b  ACT_PAT,%d0
+    lea     cl_cueh,%a0
+    move.w  %d0,(%a0,%d1.l)             | the pattern it is aimed at
+    lea     cl_arm,%a0
+    clr.b   (%a0,%d3.l)
+    jsr     cl_count
+    bra.b   lo_out
+lo_cancel:
+    move.l  %d3,%d1
+    add.l   %d1,%d1
+    moveq   #-1,%d0
+    move.w  %d0,(%a2,%d1.l)
+    jsr     cl_count
+lo_out:
+    movem.l (%sp),%d2-%d3/%a2
+    lea     12(%sp),%sp
+    rts
+
+| cl_apply(t, sbank, spat) -> d0 = 1 copied, 0 own slot. The record, its length/scale (scope
+| §4.6) and the provenance. Writes RAM only (slab + our state): safe in the sequencer tick.
+cl_apply:
     lea     -32(%sp),%sp
     movem.l %d2-%d7/%a2-%a3,(%sp)
-    move.l  36(%sp),%d7                 | d7 = source pattern
-    jsr     cl_trk
-    move.l  %d0,%d6                     | d6 = track 0..15
+    move.l  36(%sp),%d6                 | d6 = track 0..15
+    move.l  40(%sp),%d2                 | d2 = source bank
+    move.l  44(%sp),%d7                 | d7 = source pattern
     move.l  %d6,-(%sp)
     jsr     cl_toff
     addq.l  #4,%sp
@@ -566,14 +643,12 @@ cl_load:
     addq.l  #8,%sp
     movea.l %a0,%a2                     | a2 = destination slab
     move.l  %d7,-(%sp)
-    moveq   #0,%d0
-    move.b  cl_bank,%d0
-    move.l  %d0,-(%sp)
+    move.l  %d2,-(%sp)
     jsr     cl_slab
     addq.l  #8,%sp
     movea.l %a0,%a3                     | a3 = source slab
     cmpa.l  %a2,%a3
-    beq.w   cl_ld_own                   | the playing pattern's own slot: nothing to copy
+    beq.w   ap_own                      | the playing pattern's own slot: nothing to copy
     move.l  %d5,-(%sp)
     move.l  %a3,%d0
     add.l   %d4,%d0
@@ -583,79 +658,462 @@ cl_load:
     move.l  %d0,-(%sp)
     jsr     MEMCPY
     lea     12(%sp),%sp
-|   length / scale (scope §1.5a, §4.6). Track len/scale bytes: audio +0x50/+0x51, MIDI +0x28/+0x29.
+|   length / scale. Track len/scale bytes: audio +0x50/+0x51, MIDI +0x28/+0x29.
     moveq   #0x50,%d3
     cmpi.l  #8,%d6
-    bcs.b   ld_lsoff
+    bcs.b   ap_lsoff
     moveq   #0x28,%d3
-ld_lsoff:
+ap_lsoff:
     add.l   %d4,%d3                     | d3 = offset of this record's len byte
     lea     (%a2,%d3.l),%a0             | a0 -> the destination record's len byte
     movea.l %a3,%a1
     adda.l  #TRAILER,%a1                | a1 -> the source trailer
     tst.b   T_SMODE(%a1)
-    bne.b   ld_srcpt
+    bne.b   ap_srcpt
     move.b  T_LEN(%a1),%d0              | NORMAL source: its own length is the pattern's
     move.b  %d0,(%a0)
     move.b  T_SCALE(%a1),%d0
     move.b  %d0,1(%a0)
-ld_srcpt:
+ap_srcpt:
     movea.l %a2,%a1
     adda.l  #TRAILER,%a1                | a1 -> the destination trailer
     tst.b   T_SMODE(%a1)
-    bne.b   ld_mirror                   | PER TRACK destination: done
+    bne.b   ap_prov                     | PER TRACK destination: done
     move.b  (%a0),%d0
     cmp.b   T_LEN(%a1),%d0
-    bne.b   ld_conv
+    bne.b   ap_conv
     move.b  1(%a0),%d0
     cmp.b   T_SCALE(%a1),%d0
-    beq.b   ld_mirror                   | NORMAL, same len/scale: nothing to convert
-ld_conv:
+    beq.b   ap_prov                     | NORMAL, same len/scale: nothing to convert
+ap_conv:
     jsr     cl_convert                  | a2 = slab, d3 = len-byte offset (kept)
-ld_mirror:
-|   the SRAM mirror holds the UI bank only
-    move.b  PLAY_BANK,%d0
-    cmp.b   UI_BANK,%d0
-    bne.b   ld_dirty
-    moveq   #0,%d0
-    move.b  ACT_PAT,%d0
-    move.l  #PATSTRIDE,%d1
-    muls.l  %d1,%d0
-    addi.l  #SRAM_PAT,%d0
-    pea     PATSTRIDE                   | the whole slab: covers a NORMAL->PER TRACK conversion
-    move.l  %a2,-(%sp)
-    move.l  %d0,-(%sp)
-    jsr     MEMCPY
-    lea     12(%sp),%sp
-ld_dirty:
-    move.l  %d6,%d0
-    andi.l  #7,%d0
-    move.l  %d0,-(%sp)
-    jsr     SEQ_DIRTY                   | dirty flags + the refresh stock's undo-restore runs
-    addq.l  #4,%sp
-|   provenance: this track now plays (cl_bank, n) on the playing pattern
+ap_prov:
+|   provenance: this track now plays (sbank, spat) on the playing pattern
     move.l  %d6,%d0
     add.l   %d0,%d0
     lea     cl_src,%a0
-    move.b  cl_bank,%d1
-    move.b  %d1,(%a0,%d0.l)
+    move.b  %d2,(%a0,%d0.l)
     move.b  %d7,1(%a0,%d0.l)
     lea     cl_home,%a0
     move.b  PLAY_BANK,%d1
     move.b  %d1,(%a0,%d0.l)
     move.b  ACT_PAT,%d1
     move.b  %d1,1(%a0,%d0.l)
-    bra.b   ld_out
-cl_ld_own:
+    moveq   #1,%d0
+    bra.b   ap_out
+ap_own:
     move.l  %d6,%d0                     | back to its own: provenance off
     add.l   %d0,%d0
     lea     cl_home,%a0
     moveq   #-1,%d1
     move.b  %d1,(%a0,%d0.l)
-ld_out:
+    moveq   #0,%d0
+ap_out:
     movem.l (%sp),%d2-%d7/%a2-%a3
     lea     32(%sp),%sp
     rts
+
+| cl_post_ui(t): what a load owes the UI side (never from the tick): the SRAM mirror, which holds
+| the UI bank only (the whole slab: covers a NORMAL->PER TRACK conversion), and stock's dirty
+| flags + refresh (the undo-restore's own 0x40029b9c).
+cl_post_ui:
+    move.b  PLAY_BANK,%d0
+    cmp.b   UI_BANK,%d0
+    bne.b   pu_dirty
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  %d0,-(%sp)
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     cl_slab
+    addq.l  #8,%sp
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  #PATSTRIDE,%d1
+    muls.l  %d1,%d0
+    addi.l  #SRAM_PAT,%d0
+    pea     PATSTRIDE
+    move.l  %a0,-(%sp)
+    move.l  %d0,-(%sp)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
+pu_dirty:
+    move.l  4(%sp),%d0
+    andi.l  #7,%d0
+    move.l  %d0,-(%sp)
+    jsr     SEQ_DIRTY
+    addq.l  #4,%sp
+    rts
+
+| ================================================================ the landing (sequencer tick)
+| Measured rule (scope §3.4), stated in what each hook sees:
+|  * MASTER WRAP (or a stock pattern change): stock's wrap body, entry 0x400a43a0 in phase G
+|    (cl_wrap). A stock change landing there drops every cue (O8); a plain wrap lands every cue,
+|    copy only -- the wrap body re-homes every track right after (the A1/A2 oracle).
+|  * CHANGE point mid-pattern: phase D, 0x400a1f72 (cl_land, replaces `move.b 0x80006687,%d0`,
+|    6 B; stock's ble.w follows on those flags, so the replay comes LAST). Phase G of the previous
+|    tick has already advanced the master: TICK_CTR == 0 means this is the first tick of master
+|    step s = MASTER_STEP; CHANGE N > 0 and s % N == 0 arms every cue. An armed track lands on the
+|    first tick that is a window start for its old AND new rate, phase-continuous:
+|    t0 = (MASTER_STEP - 1) * tps_M + TICK_CTR,  STEP = (t0 / tps + 1) mod len,  TICKS = t0 mod tps
+|    (the A4..A8 oracles: t0 66 -> step 23 at 2x, t0 114 -> step 20).
+cl_land:
+    tst.b   cl_nq
+    beq.w   la_out                      | nothing cued: one byte test per tick
+    tst.l   RUNNING
+    beq.w   la_out
+|   mid-function in stock's tick handler: every register may be live -- save them all
+    lea     -60(%sp),%sp
+    movem.l %d0-%d7/%a0-%a6,(%sp)
+|   tps_M and t0
+    moveq   #0,%d0
+    move.b  SCALE_IX,%d0
+    jsr     cl_tps
+    move.l  %d0,%d5                     | d5 = tps_M
+    moveq   #0,%d3
+    move.w  MASTER_STEP,%d3             | d3 = s
+    moveq   #0,%d1
+    move.b  TICK_CTR,%d1
+    move.l  %d3,%d0
+    subq.l  #1,%d0
+    muls.l  %d5,%d0
+    add.l   %d1,%d0
+    move.l  %d0,%d7                     | d7 = t0
+    tst.l   %d1
+    bne.w   la_tracks                   | not the first tick of a master step
+    tst.l   %d3
+    beq.w   la_tracks
+|   the playing pattern's CHANGE
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  %d0,-(%sp)
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     cl_slab
+    addq.l  #8,%sp
+    adda.l  #TRAILER,%a0
+    move.b  6(%a0),%d0                  | +0x8e56: CHANGE index (signed), < 0 = project default
+    extb.l  %d0
+    bpl.b   la_q
+    moveq   #0,%d0
+    move.b  PROJ_QUANT,%d0
+la_q:
+    cmpi.l  #16,%d0
+    bhi.w   la_tracks
+    lea     QUANT_TBL,%a1
+    move.l  (%a1,%d0.l*4),%d1           | N
+    ble.w   la_tracks                   | CHANGE off: only the master wrap lands (cl_wrap)
+    move.l  %d3,%d0
+    remu.l  %d1,%d2:%d0                 | d2 = s mod N
+    tst.l   %d2
+    bne.w   la_tracks
+|   a stock change cued for this same point lands it at the wrap body: leave that to cl_wrap
+    move.b  PEND_PAT,%d0
+    cmp.b   ACT_PAT,%d0
+    bne.w   la_tracks
+    move.b  PEND_BANK,%d0
+    cmp.b   PLAY_BANK,%d0
+    bne.w   la_tracks
+|   arm every cue
+    lea     cl_cue,%a0
+    lea     cl_arm,%a1
+    moveq   #0,%d0
+la_arml:
+    move.w  (%a0)+,%d1
+    cmpi.w  #-1,%d1
+    beq.b   la_armn
+    moveq   #1,%d1
+    move.b  %d1,(%a1,%d0.l)
+la_armn:
+    addq.l  #1,%d0
+    cmpi.l  #16,%d0
+    bne.b   la_arml
+
+| every armed track whose old and new rates both start a window at t0
+la_tracks:
+    moveq   #0,%d6                      | d6 = track
+la_tl:
+    lea     cl_arm,%a0
+    tst.b   (%a0,%d6.l)
+    beq.w   la_tn
+|   the cue must still aim at the playing pattern
+    move.l  %d6,%d0
+    add.l   %d0,%d0
+    lea     cl_cueh,%a0
+    move.w  (%a0,%d0.l),%d1
+    moveq   #0,%d2
+    move.b  PLAY_BANK,%d2
+    lsl.l   #8,%d2
+    move.b  ACT_PAT,%d2
+    cmp.w   %d2,%d1
+    beq.b   la_aimed
+    jsr     cl_dropone                  | d6 = track
+    bra.w   la_tn
+la_aimed:
+|   old rate
+    lea     TSCALE_ARR,%a0
+    moveq   #0,%d0
+    move.b  (%a0,%d6.l),%d0
+    jsr     cl_tps                      | d0 -> ticks per step
+    move.l  %d7,%d1
+    remu.l  %d0,%d2:%d1
+    tst.l   %d2
+    bne.w   la_tn                       | old window not at its start: wait
+|   new rate: the source record's (after the copy's NORMAL/PER TRACK rule -- peek it first)
+    move.l  %d6,%d0
+    add.l   %d0,%d0
+    lea     cl_cue,%a0
+    moveq   #0,%d1
+    move.w  (%a0,%d0.l),%d1
+    move.l  %d1,%d0
+    andi.l  #0xff,%d0
+    move.l  %d0,-(%sp)                  | spat
+    lsr.l   #8,%d1
+    move.l  %d1,-(%sp)                  | sbank
+    move.l  %d6,-(%sp)
+    jsr     cl_newrate                  | d0 = new tps, d1 = new len, d2 = new scale index
+    lea     12(%sp),%sp
+    move.l  %d0,%a3                     | a3 = tps_new
+    move.l  %d1,%a4                     | a4 = len_new
+    move.l  %d2,%a5                     | a5 = scale_new
+    move.l  %d7,%d1
+    remu.l  %d0,%d2:%d1
+    tst.l   %d2
+    bne.w   la_tn                       | new window not at its start: wait
+    jsr     cl_landone                  | d6 = track: copy + clear the cue
+|   phase-continuous counters
+    move.l  %d7,%d0
+    move.l  %a3,%d1
+    divu.l  %d1,%d0                     | t0 / tps
+    addq.l  #1,%d0
+    move.l  %a4,%d1
+    remu.l  %d1,%d2:%d0                 | d2 = STEP
+    lea     STEP_ARR,%a0
+    move.b  %d2,(%a0,%d6.l)
+    add.l   %d1,%d2
+    subq.l  #1,%d2
+    remu.l  %d1,%d0:%d2                 | d0 = (STEP + len - 1) mod len
+    lea     STEPM1_ARR,%a0
+    move.b  %d0,(%a0,%d6.l)
+    move.l  %d7,%d0
+    move.l  %a3,%d1
+    remu.l  %d1,%d2:%d0
+    lea     TICKS_ARR,%a0
+    move.b  %d2,(%a0,%d6.l)             | 0 at a window start
+    move.l  %a5,%d0
+    lea     TSCALE_ARR,%a0
+    move.b  %d0,(%a0,%d6.l)
+la_tn:
+    addq.l  #1,%d6
+    cmpi.l  #16,%d6
+    bne.w   la_tl
+la_done:
+    movem.l (%sp),%d0-%d7/%a0-%a6
+    lea     60(%sp),%sp
+la_out:
+    move.b  0x80006687,%d0              | displaced; stock's ble.w follows on these flags
+    jmp     LAND_RESUME
+
+| Phase G, the wrap body's entry 0x400a43a0 (replaces `move.l (a2),d0 ; moveq #1,d2 ;
+| or.l d2,d0`, 6 B). Reached at a master wrap and when a stock pattern change lands.
+cl_wrap:
+    tst.b   cl_nq
+    beq.b   wr_out
+    lea     -60(%sp),%sp
+    movem.l %d0-%d7/%a0-%a6,(%sp)
+    move.b  PEND_PAT,%d0
+    cmp.b   ACT_PAT,%d0
+    bne.b   wr_drop
+    move.b  PEND_BANK,%d0
+    cmp.b   PLAY_BANK,%d0
+    bne.b   wr_drop
+    moveq   #0,%d6                      | a plain wrap: every cue lands, copy only
+wr_l:
+    move.l  %d6,%d0
+    add.l   %d0,%d0
+    lea     cl_cue,%a0
+    move.w  (%a0,%d0.l),%d1
+    cmpi.w  #-1,%d1
+    beq.b   wr_n
+    lea     cl_cueh,%a0
+    move.w  (%a0,%d0.l),%d1
+    moveq   #0,%d2
+    move.b  PLAY_BANK,%d2
+    lsl.l   #8,%d2
+    move.b  ACT_PAT,%d2
+    cmp.w   %d2,%d1
+    beq.b   wr_land
+    jsr     cl_dropone                  | aimed at a pattern no longer playing
+    bra.b   wr_n
+wr_land:
+    jsr     cl_landone
+wr_n:
+    addq.l  #1,%d6
+    cmpi.l  #16,%d6
+    bne.b   wr_l
+    bra.b   wr_done
+wr_drop:
+    jsr     cl_dropall                  | the pattern is changing: the cues' destination goes
+wr_done:
+    movem.l (%sp),%d0-%d7/%a0-%a6
+    lea     60(%sp),%sp
+wr_out:
+    move.l  (%a2),%d0                   | displaced
+    moveq   #1,%d2
+    or.l    %d2,%d0
+    jmp     WRAP_RESUME
+
+| d0 = scale index -> d0 = ticks per step (out-of-range scale reads as 1x, as DIRECT JUMP does)
+cl_tps:
+    cmpi.l  #6,%d0
+    bls.b   tp_ok
+    moveq   #2,%d0
+tp_ok:
+    lea     LEN_TBL,%a0
+    move.l  (%a0,%d0.l*4),%d0
+    rts
+
+| cl_newrate(t, sbank, spat) -> d0 = tps, d1 = len, d2 = scale index the track will have after
+| cl_apply: the source's own (NORMAL source: its pattern's), unless the destination is NORMAL and
+| matches it, in which case the pattern's -- the same thing.
+cl_newrate:
+    move.l  4(%sp),%d0
+    move.l  %d0,-(%sp)
+    jsr     cl_toff
+    addq.l  #4,%sp
+    move.l  %d0,%d2                     | record offset
+    move.l  12(%sp),-(%sp)              | spat
+    move.l  12(%sp),-(%sp)              | sbank
+    jsr     cl_slab
+    addq.l  #8,%sp
+    movea.l %a0,%a1
+    adda.l  #TRAILER,%a1
+    tst.b   T_SMODE(%a1)
+    beq.b   nr_norm
+    moveq   #0x50,%d0
+    move.l  4(%sp),%d1
+    cmpi.l  #8,%d1
+    bcs.b   nr_a
+    moveq   #0x28,%d0
+nr_a:
+    add.l   %d2,%d0
+    moveq   #0,%d1
+    move.b  (%a0,%d0.l),%d1             | len
+    moveq   #0,%d2
+    move.b  1(%a0,%d0.l),%d2            | scale
+    bra.b   nr_tps
+nr_norm:
+    moveq   #0,%d1
+    move.b  T_LEN(%a1),%d1
+    moveq   #0,%d2
+    move.b  T_SCALE(%a1),%d2
+nr_tps:
+    move.l  %d1,-(%sp)
+    move.l  %d2,%d0
+    jsr     cl_tps
+    move.l  (%sp)+,%d1
+    tst.l   %d1
+    bne.b   nr_out
+    moveq   #16,%d1                     | never divide by a zero length
+nr_out:
+    rts
+
+| cl_landone (d6 = track): copy the cue onto the playing pattern, clear it, owe the UI follow-up
+cl_landone:
+    move.l  %d6,%d0
+    add.l   %d0,%d0
+    lea     cl_cue,%a0
+    moveq   #0,%d1
+    move.w  (%a0,%d0.l),%d1
+    move.l  %d1,%d0
+    andi.l  #0xff,%d0
+    move.l  %d0,-(%sp)
+    lsr.l   #8,%d1
+    move.l  %d1,-(%sp)
+    move.l  %d6,-(%sp)
+    jsr     cl_apply
+    lea     12(%sp),%sp
+    jsr     cl_dropone
+    move.w  cl_post,%d0
+    moveq   #1,%d1
+    lsl.l   %d6,%d1
+    or.l    %d1,%d0
+    move.w  %d0,cl_post                 | the UI side writes the SRAM mirror + dirty flags
+    rts
+
+| cl_dropone (d6 = track): forget its cue
+cl_dropone:
+    move.l  %d6,%d0
+    add.l   %d0,%d0
+    lea     cl_cue,%a0
+    moveq   #-1,%d1
+    move.w  %d1,(%a0,%d0.l)
+    lea     cl_arm,%a0
+    clr.b   (%a0,%d6.l)
+    bra.w   cl_count
+
+cl_dropall:
+    lea     cl_cue,%a0
+    moveq   #-1,%d1
+    moveq   #16,%d0
+da_l:
+    move.w  %d1,(%a0)+
+    subq.l  #1,%d0
+    bne.b   da_l
+    lea     cl_arm,%a0
+    moveq   #16,%d0
+da_l2:
+    clr.b   (%a0)+
+    subq.l  #1,%d0
+    bne.b   da_l2
+| cl_nq = number of cues pending (the tick's one-byte fast path)
+cl_count:                               | uses d0, d1, a0, a1 only
+    lea     cl_cue,%a0
+    lea     cl_cue+32,%a1
+    moveq   #0,%d0
+cn_l:
+    move.w  (%a0)+,%d1
+    cmpi.w  #-1,%d1
+    beq.b   cn_n
+    addq.l  #1,%d0
+cn_n:
+    cmpa.l  %a1,%a0
+    bne.b   cn_l
+    move.b  %d0,cl_nq
+    rts
+
+| ================================================================ the UI tail
+| The UI task's message loop, common tail 0x40062d1c (replaces `tst.l 0x46c7c72c`, 6 B; stock's
+| beq.w follows on those flags). Runs after every UI message. Does what a landing owes the UI.
+cl_uitail:
+    move.w  cl_post,%d0
+    beq.b   ut_out
+    lea     -8(%sp),%sp
+    movem.l %d2-%d3,(%sp)
+    clr.w   cl_post
+    moveq   #0,%d2
+    move.l  %d0,%d3
+ut_l:
+    btst    %d2,%d3
+    beq.b   ut_n
+    move.l  %d2,-(%sp)
+    jsr     cl_post_ui
+    addq.l  #4,%sp
+ut_n:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   ut_l
+    tst.b   cl_open
+    beq.b   ut_closed
+    clr.l   -(%sp)
+    jsr     LED_PAINT                   | yellow -> red on the grid
+    addq.l  #4,%sp
+ut_closed:
+    movem.l (%sp),%d2-%d3
+    lea     8(%sp),%sp
+ut_out:
+    tst.l   RDRAW                       | displaced; stock's beq.w follows on these flags
+    jmp     UIT_RESUME
 
 | NORMAL -> PER TRACK, preserving every other track (scope §4.6). a2 = slab; d3 = this record's
 | len-byte offset (its own len/scale are already written and are kept).
@@ -964,6 +1422,12 @@ cl_paint:
     lea     LED_OFF,%a5
     jsr     cl_playing
     move.l  %d0,%d6                     | bank<<8 | pattern playing
+    jsr     cl_trk
+    add.l   %d0,%d0
+    lea     cl_cue,%a0
+    moveq   #0,%d0
+    move.w  (%a0,%d0.l),%d0
+    movea.l %d0,%a2                     | a2 = the active track's cue (0xffff = none)
     moveq   #0,%d2
 cp_lp:
     lea     LED_TBL,%a0
@@ -974,6 +1438,8 @@ cp_lp:
     move.b  cl_bank,%d0
     lsl.l   #8,%d0
     or.l    %d2,%d0
+    cmp.l   %a2,%d0
+    beq.b   cp_cued
     cmp.l   %d6,%d0
     bne.b   cp_notplay
     pea     15                          | red: playing
@@ -983,6 +1449,18 @@ cp_lp:
     jsr     (%a4)
     move.l  %d4,(%sp)
     jsr     (%a5)
+    addq.l  #8,%sp
+    bra.b   cp_next
+cp_cued:
+    pea     15                          | yellow: cued (red + green, stock's own cue colours)
+    move.l  %d3,-(%sp)
+    jsr     (%a3)
+    move.l  %d4,(%sp)
+    jsr     (%a3)
+    move.l  %d3,(%sp)
+    jsr     (%a4)
+    move.l  %d4,(%sp)
+    jsr     (%a4)
     addq.l  #8,%sp
     bra.b   cp_next
 cp_notplay:
@@ -1012,7 +1490,7 @@ cp_off:
 cp_next:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
-    bne.b   cp_lp
+    bne.w   cp_lp
     movem.l (%sp),%d2-%d6/%a2-%a5
     lea     36(%sp),%sp
     rts
@@ -1080,6 +1558,12 @@ cl_cls:     .space 16
 cl_src:     .space 32                   | per track: (bank, pattern) the sequence came from
 cl_home:    .fill 32, 1, 0xff           | per track: the playing (bank, pattern) at that load
 cl_buf:     .space 32
+cl_cue:     .fill 16, 2, 0xffff         | per track: the cued (bank<<8 | pattern), 0xffff = none
+cl_cueh:    .fill 16, 2, 0xffff         | per track: the playing (bank<<8 | pattern) it aims at
+cl_arm:     .space 16                   | per track: the gate has passed; waiting for a window start
+cl_post:    .short 0                    | tracks whose landing the UI side has not followed up yet
+cl_nq:      .byte 0                     | cues pending (the tick's fast path)
+            .align 2
 
 cl_corners: .short 0,63, 1,63, 0,62, WIN_W-1,63, WIN_W-2,63, WIN_W-1,62
 cl_fmt_hdr: .asciz "%c%d BANK %c"

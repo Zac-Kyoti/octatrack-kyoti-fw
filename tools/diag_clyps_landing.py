@@ -86,6 +86,9 @@ def main(argv):
     ap.add_argument("--clyp-arr", action="append", default=[],
                     help="NAME=VAL: also write the track's byte in a per-track engine array at the "
                          "copy (names: step step_m1 ticks armed cntdn reload trk_scale)")
+    ap.add_argument("--keys-at", default="",
+                    help="K:KEYS -- from tick K on, press real keys through set_key_state (the CLYPS "
+                         "image's own code then cues and lands): HEX+ press, HEX- release")
     ap.add_argument("--dj", type=int, default=0)
     ap.add_argument("--ticks", type=int, default=300)
     ap.add_argument("--tag", default="clyps")
@@ -160,7 +163,7 @@ def main(argv):
     rt.exact_clock()
     u.mem_write(DJ_MODE, (1 if a.dj else 0).to_bytes(4, "big"))
 
-    st = dict(tick=0, states=[], fires=[], commits=[], cues=[], calls=[], clyp=None)
+    st = dict(tick=0, states=[], fires=[], commits=[], cues=[], calls=[], clyp=None, keys_at=None, keys_end=None)
     pend = list(cues)
 
     def on_tick(uc, addr, size, user):
@@ -222,8 +225,16 @@ def main(argv):
     u.hook_add(er.eb.UC_HOOK_CODE, on_builder, begin=BUILDER_M, end=BUILDER_M)
     u.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_commit, begin=STEP_ARR, end=STEP_ARR)
     rt.start_transport_live()
+    keys_done = not a.keys_at
     spins = 0
     while st["tick"] < a.ticks and spins < 400:
+        if not keys_done and st["tick"] >= int(a.keys_at.split(":")[0]):
+            st["keys_at"] = st["tick"]
+            for k in a.keys_at.split(":", 1)[1].split():
+                rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+                rt.call_as_main(0x40031734, args=(int(k[:-1], 16), 1 if k.endswith("+") else 0), budget=600000)
+            st["keys_end"] = st["tick"]
+            keys_done = True
         before = st["tick"]
         rt.run(ms=60)
         spins += 1
@@ -236,10 +247,11 @@ def main(argv):
     if not out.is_absolute():
         out = ROOT / out
     out.write_text(json.dumps(dict(meta=meta, cues=st["cues"], commits=st["commits"],
-                                   clyp=st["clyp"], states=st["states"], fires=st["fires"],
+                                   clyp=st["clyp"], keys=[st["keys_at"], st["keys_end"]],
+                                   states=st["states"], fires=st["fires"],
                                    calls=st["calls"])))
     print(f"wrote {out}: ticks={st['tick']} cues={st['cues']} commits={st['commits']} "
-          f"clyp={st['clyp']}")
+          f"clyp={st['clyp']} keys at ticks {st['keys_at']}..{st['keys_end']}")
     return 0
 
 

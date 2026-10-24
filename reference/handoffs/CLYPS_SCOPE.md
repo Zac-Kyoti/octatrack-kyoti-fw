@@ -853,6 +853,17 @@ The ROM keeps only the guarded detours:
   - rows 4 above / 3 below in the odd 54-row field;
   - highlights 2–54 and 57–109 (1 px to the frame both sides, 2 px between);
   - render `CLYPS_view.png`. Gate 28/28.
+- **CLYP5 flashed: "looks good".**
+- **`140C_CLYP6`: cued landings while playing.** Detours at `0x400a1f72` (phase D),
+  `0x400a43a0` (wrap body) and `0x40062d1c` (the UI loop tail, the follow-up).
+  - **Exact against the oracles, driven by real key presses:**
+    - a master wrap equals a stock pattern change (C1w vs B1, 450/450 ticks);
+    - a CHANGE = 4 landing of a 64-step sequence (C2c vs R5) and of a 2x one (C3s vs R7) is
+      locked from the tick right after the landing.
+  - **First cut one tick early (corrected).** It treated the tick *before* the boundary as the
+    landing tick. Phase G advances the master counters, so phase D sees TICK_CTR == 0 on the first
+    tick of step s, and t0 = (MASTER_STEP − 1)·tps_M + TICK_CTR.
+  - **DIRECT JUMP timing:** with the KYOTI integration (this image has no DJ).
 - **Screen rendering in the emulator** (`tools/clyps_render.py`). Stock's compositor
   `0x40013abc` (the UI task runs it when RDRAW is set) is called directly. Read its double-buffered
   target `[0x400b9710]` **before** the call. It has the LCD plane's rotated layout.

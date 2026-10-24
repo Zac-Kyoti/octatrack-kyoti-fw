@@ -18,6 +18,9 @@ Detours (each asserts its stock bytes):
   0x4005a044  [PTN] key handler      move.l 8(sp),d0 ; moveq #1,d1          -> cl_ptn
   0x4007af80  [BANK] press handler   tst.l 0x460e73bc                        -> cl_bankp
   0x4007b3e0  [BANK] release handler moveq #2,d0 ; cmp.l 0x460e73c6,d0 (8 B) -> cl_bankr
+  0x400a1f72  sequencer tick, phase D  move.b 0x80006687,d0               -> cl_land (cued landings)
+  0x40062d1c  UI task loop tail        tst.l 0x46c7c72c                   -> cl_uitail (follow-up)
+  0x400a43a0  wrap body entry (phase G) move.l (a2),d0 ; moveq #1,d2 ; or.l d2,d0 -> cl_wrap
 Code + its keymap layer, LED layer and state: one blob in the classic cave at 0x400d6500
 (reference/kb/caves.md: stock-zero 0x400d64da..0x400d7c3c).
 
@@ -50,6 +53,9 @@ DETOURS = [  # (site, symbol, stock bytes, length)
     (0x4005a044, "cl_ptn", "202f00087201", 6),
     (0x4007af80, "cl_bankp", "4ab9460e73bc", 6),
     (0x4007b3e0, "cl_bankr", "7002b0b9460e73c6", 8),
+    (0x400a1f72, "cl_land", "103980006687", 6),   # seq tick phase D: move.b 0x80006687,d0
+    (0x40062d1c, "cl_uitail", "4ab946c7c72c", 6),  # UI task loop tail: tst.l 0x46c7c72c
+    (0x400a43a0, "cl_wrap", "201274018082", 6),    # wrap body entry: move.l (a2),d0; moveq #1,d2; or.l d2,d0
 ]
 
 
