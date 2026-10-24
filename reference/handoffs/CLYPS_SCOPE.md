@@ -817,6 +817,26 @@ The ROM keeps only the guarded detours:
   - **TRACK keys.** Their stock handler selects the track on **release**, so press, hold and
     release are all forwarded to `0x40040250`.
 - **Hardware checklist:** FLASHING.md §4, CLYPS.
+- **Hardware report on `140C_CLYP2` (2026-10-23).** Every checklist gesture works. Requests:
+  - an ATTR-style window that leaves the track columns visible, with a 1-px border;
+  - a dark header with exactly 1 black px above and below its text;
+  - a small font;
+  - slots 8/16 were blank and row 9 was 1 px left (both fixed);
+  - no `>` marker;
+  - a load-mode label;
+  - LEFT/RIGHT at least twice as fast.
+- **`140C_CLYP3`** (syx `63e92f85…`, CF `.bin` `edc18b58…`), NOT flashed:
+  - a 106 × 64 window (screen columns 11–116);
+  - font `0x400ba84e` (5 px), 2 × 8 rows at a 6-px pitch;
+  - a header/separator layout verified pixel-exact in the emulator;
+  - footer `LOAD: SEQ`. `LOAD MODE: SEQ + MACHINE/FX` measures 123 px against 104 inside, so
+    the label is `LOAD: SEQ + MACHINE/FX` (98 px);
+  - LEFT/RIGHT delay 20 / repeat 10 (stock 30 / 30).
+
+  Gate 28/28.
+- **Screen rendering in the emulator** (`tools/clyps_render.py`). Stock's compositor
+  `0x40013abc` (the UI task runs it when RDRAW is set) is called directly. Read its double-buffered
+  target `[0x400b9710]` **before** the call. It has the LCD plane's rotated layout.
 
 ## 9. KB corrections found by this scope
 

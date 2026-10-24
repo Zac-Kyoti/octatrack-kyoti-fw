@@ -71,9 +71,20 @@
     .equ BANKR_RESUME,0x4007b3e8        | after `moveq #2,d0 ; cmp.l 0x460e73c6,d0`
     .equ PRIO,        3                 | menus' rank: toasts / the name editor open over it
 
-    .equ ROW_PITCH,   7
-    .equ ROW0_Y,      49                | y = 0 is the bottom row; row r text at 49 - 7r
-    .equ HDR_Y,       57
+| ---- the view's geometry (window-local, y = 0 is the bottom row; text occupies y..y+4). Measured
+| in the emulator by rendering stock's own compositor output (tools/clyps_render.py).
+    .equ WIN_W,       106               | leaves stock's track columns visible at both edges
+    .equ WIN_H,       64
+    .equ WIN_DX,      -1                | x = (128 - 106) / 2 + 1 - 1 = 11 .. 116
+    .equ FONT_S,      0x400ba84e        | 5 px, the knob-label size; digits 4 px on a 5 px advance
+    .equ DIGIT_W,     5
+    .equ ROW_PITCH,   6
+    .equ ROW0_Y,      49                | row r text at 49 - 6r (r = 0..7)
+    .equ HDR_Y,       57                | dark header: border 63, black 62, text 57..61, black 56,
+    .equ SEP_Y,       55                | separator line 55 (the user: one black row above and below)
+    .equ FOOT_Y,      1
+    .equ SUM_GAP,     6                 | gap between the slot number and its summary
+    .equ COL1_X,      55                | column 0 at x = 3
 
     .text
     .global cl_ptn, cl_bankp, cl_bankr
@@ -173,10 +184,10 @@ ce_noundo:
     move.b  %d0,cl_cur
     pea     cl_close                    | close_cb: eviction lands in the same teardown
     pea     PRIO
-    clr.l   -(%sp)
-    clr.l   -(%sp)
-    pea     64
-    pea     128
+    clr.l   -(%sp)                      | dy
+    pea     WIN_DX
+    pea     WIN_H
+    pea     WIN_W
     jsr     WIN_NEW
     lea     24(%sp),%sp
     move.l  %d0,cl_win
@@ -691,6 +702,30 @@ cv_m:
     rts
 
 | ================================================================ the Clyps view
+| text(x, y, str) in the small font onto the window surface (a4); keeps d2-d7/a2-a6
+cl_text:
+    move.l  12(%sp),-(%sp)              | str
+    pea     -1                          | mode
+    move.l  16(%sp),-(%sp)              | y
+    move.l  16(%sp),-(%sp)              | x
+    move.l  %a4,-(%sp)
+    pea     FONT_S
+    jsr     TEXT
+    lea     24(%sp),%sp
+    rts
+
+| xor(x0, y0, x1, y1) on the window surface (a4)
+cl_xor:
+    pea     -1
+    move.l  20(%sp),-(%sp)              | y1
+    move.l  20(%sp),-(%sp)              | x1
+    move.l  20(%sp),-(%sp)              | y0
+    move.l  20(%sp),-(%sp)              | x0
+    move.l  %a4,-(%sp)
+    jsr     RECT
+    lea     24(%sp),%sp
+    rts
+
 cl_draw:
     tst.b   cl_open
     beq.w   cd_out
@@ -698,17 +733,40 @@ cl_draw:
     movem.l %d2-%d7/%a2-%a4,(%sp)
     movea.l cl_win,%a4
     lea     0x24(%a4),%a4               | a4 = the window's surface
-    lea     TEXT,%a3
-|   clear all
+|   clear, then a 1 px border (xor on a cleared surface = set)
     clr.l   -(%sp)
-    pea     63
-    pea     127
+    pea     WIN_H-1
+    pea     WIN_W-1
     clr.l   -(%sp)
     clr.l   -(%sp)
     move.l  %a4,-(%sp)
     jsr     RECT
     lea     24(%sp),%sp
-|   header: "T6  BANK A" + mode label, inverted
+    pea     WIN_H-1                     | top
+    pea     WIN_W-1
+    pea     WIN_H-1
+    clr.l   -(%sp)
+    bsr.w   cl_xor
+    lea     16(%sp),%sp
+    clr.l   -(%sp)                      | bottom
+    pea     WIN_W-1
+    clr.l   -(%sp)
+    clr.l   -(%sp)
+    bsr.w   cl_xor
+    lea     16(%sp),%sp
+    pea     WIN_H-2                     | left
+    clr.l   -(%sp)
+    pea     1
+    clr.l   -(%sp)
+    bsr.w   cl_xor
+    lea     16(%sp),%sp
+    pea     WIN_H-2                     | right
+    pea     WIN_W-1
+    pea     1
+    pea     WIN_W-1
+    bsr.w   cl_xor
+    lea     16(%sp),%sp
+|   header: "T6  BANK A", inverted in a band one row taller than the text above and below
     jsr     cl_trk
     moveq   #'T',%d1
     cmpi.l  #8,%d0
@@ -728,37 +786,28 @@ cd_ta:
     jsr     SPRINTF
     lea     20(%sp),%sp
     pea     cl_buf
-    pea     -1
     pea     HDR_Y
-    pea     2
-    move.l  %a4,-(%sp)
-    pea     FONT
-    jsr     (%a3)
-    lea     24(%sp),%sp
+    pea     3
+    bsr.w   cl_text
+    lea     12(%sp),%sp
+    pea     SEP_Y                       | the separator under the header
+    pea     WIN_W-1
+    pea     SEP_Y
+    clr.l   -(%sp)
+    bsr.w   cl_xor
+    lea     16(%sp),%sp
+|   footer: the load mode ([FUNC] held = the FULL label; FULL loads arrive in a later phase)
     lea     cl_s_seq,%a0
     tst.b   cl_fn
     beq.b   cd_mode
     lea     cl_s_full,%a0
 cd_mode:
     move.l  %a0,-(%sp)
-    pea     -1
-    pea     HDR_Y
-    pea     108
-    move.l  %a4,-(%sp)
-    pea     FONT
-    jsr     (%a3)
-    lea     24(%sp),%sp
-    pea     -1
-    pea     63
-    pea     127
-    pea     HDR_Y-1
-    clr.l   -(%sp)
-    move.l  %a4,-(%sp)
-    jsr     RECT                        | invert the header band
-    lea     24(%sp),%sp
+    pea     FOOT_Y
+    pea     3
+    bsr.w   cl_text
+    lea     12(%sp),%sp
 |   the 16 cells
-    jsr     cl_playing
-    move.l  %d0,%d6                     | d6 = bank<<8 | pattern playing on the track
     jsr     cl_trk
     move.l  %d0,-(%sp)
     jsr     cl_toff
@@ -766,11 +815,11 @@ cd_mode:
     move.l  %d0,%d7                     | d7 = record offset
     moveq   #0,%d2                      | d2 = slot 0..15
 cd_cell:
-|   x = (slot / 8) * 64 + 2 ; y = ROW0_Y - (slot % 8) * 7
-    move.l  %d2,%d3
-    lsr.l   #3,%d3
-    lsl.l   #6,%d3
-    addq.l  #2,%d3                      | d3 = x
+    moveq   #3,%d3                      | d3 = column x
+    cmpi.l  #8,%d2
+    bcs.b   cd_c0
+    moveq   #COL1_X,%d3
+cd_c0:
     move.l  %d2,%d4
     andi.l  #7,%d4
     moveq   #ROW_PITCH,%d0
@@ -778,23 +827,31 @@ cd_cell:
     moveq   #ROW0_Y,%d0
     sub.l   %d4,%d0
     move.l  %d0,%d4                     | d4 = y
-|   marker: '>' when this is the playing slot of the shown bank
-    moveq   #' ',%d5
-    moveq   #0,%d0
-    move.b  cl_bank,%d0
-    lsl.l   #8,%d0
-    or.l    %d2,%d0
-    cmp.l   %d6,%d0
-    bne.b   cd_mk
-    moveq   #'>',%d5
-cd_mk:
+|   the slot number, right-aligned by position (a space is narrower than a digit)
+    move.l  %d2,%d0
+    addq.l  #1,%d0
+    move.l  %d0,-(%sp)
+    pea     cl_fmt_num
+    pea     cl_buf
+    jsr     SPRINTF
+    lea     12(%sp),%sp
+    move.l  %d3,%d0
+    cmpi.l  #9,%d2
+    bcc.b   cd_two
+    addq.l  #DIGIT_W,%d0                | one digit: start one digit in
+cd_two:
+    pea     cl_buf
+    move.l  %d4,-(%sp)
+    move.l  %d0,-(%sp)
+    bsr.w   cl_text
+    lea     12(%sp),%sp
+|   the summary: "n TRIGS" / "LOCKS" / "---"
     lea     cl_cls,%a0
     moveq   #0,%d0
     move.b  (%a0,%d2.l),%d0
     beq.b   cd_empty
     subq.l  #1,%d0
     beq.b   cd_half
-|   full: count the trigs of the note mask
     move.l  %d2,-(%sp)
     moveq   #0,%d0
     move.b  cl_bank,%d0
@@ -808,60 +865,45 @@ cd_mk:
     bsr.w   cl_popc
     move.l  (%sp)+,%d0
     bsr.w   cl_popc
-    move.l  %d1,-(%sp)                  | sprintf(buf, "%2d%c%d TRIGS", n, mk, count)
-    move.l  %d5,-(%sp)
-    move.l  %d2,%d0
-    addq.l  #1,%d0
-    move.l  %d0,-(%sp)
+    move.l  %d1,-(%sp)
     pea     cl_fmt_trg
     pea     cl_buf
     jsr     SPRINTF
-    lea     20(%sp),%sp
-    bra.b   cd_txt
+    lea     12(%sp),%sp
+    lea     cl_buf,%a0
+    bra.b   cd_sum
 cd_half:
-    lea     cl_fmt_lck,%a0
-    bra.b   cd_fmt
+    lea     cl_s_lck,%a0
+    bra.b   cd_sum
 cd_empty:
-    lea     cl_fmt_emp,%a0
-cd_fmt:
-    move.l  %d5,-(%sp)                  | sprintf(buf, fmt, n, mk)
-    move.l  %d2,%d0
-    addq.l  #1,%d0
-    move.l  %d0,-(%sp)
+    lea     cl_s_emp,%a0
+cd_sum:
     move.l  %a0,-(%sp)
-    pea     cl_buf
-    jsr     SPRINTF
-    lea     16(%sp),%sp
-cd_txt:
-    pea     cl_buf
-    pea     -1
     move.l  %d4,-(%sp)
-    move.l  %d3,-(%sp)
-    move.l  %a4,-(%sp)
-    pea     FONT
-    jsr     (%a3)
-    lea     24(%sp),%sp
-|   the cursor: an inverted bar over this cell
+    move.l  %d3,%d0
+    addi.l  #2*DIGIT_W+SUM_GAP,%d0
+    move.l  %d0,-(%sp)
+    bsr.w   cl_text
+    lea     12(%sp),%sp
+|   the cursor: an inverted bar over the cell, one row above and below the text
     moveq   #0,%d0
     move.b  cl_cur,%d0
     cmp.l   %d2,%d0
     bne.b   cd_next
-    pea     -1
     move.l  %d4,%d0
     addq.l  #5,%d0
     move.l  %d0,-(%sp)                  | y1
     move.l  %d3,%d0
-    addi.l  #59,%d0
+    addi.l  #WIN_W/2-6,%d0
     move.l  %d0,-(%sp)                  | x1
     move.l  %d4,%d0
     subq.l  #1,%d0
     move.l  %d0,-(%sp)                  | y0
     move.l  %d3,%d0
-    subq.l  #2,%d0
+    subq.l  #1,%d0
     move.l  %d0,-(%sp)                  | x0
-    move.l  %a4,-(%sp)
-    jsr     RECT
-    lea     24(%sp),%sp
+    bsr.w   cl_xor
+    lea     16(%sp),%sp
 cd_next:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
@@ -974,8 +1016,8 @@ cl_keys:
     .endr
     KREC 0x33, cl_k_ud, 0, cl_k_ud, 15, 4
     KREC 0x20, cl_k_ud, 0, cl_k_ud, 15, 4
-    KREC 0x34, cl_k_lr, 0, cl_k_lr, 30, 30
-    KREC 0x21, cl_k_lr, 0, cl_k_lr, 30, 30
+    KREC 0x34, cl_k_lr, 0, cl_k_lr, 20, 10   | the user: bank cycling at least 2x stock's 30-tick repeat
+    KREC 0x21, cl_k_lr, 0, cl_k_lr, 20, 10   | (non-zero delay: the add/remove rule above holds)
     KREC 0x31, cl_k_yes, 0, 0, 0, 0
     KREC 0x32, cl_k_no, 0, 0, 0, 0
     KREC 0x2e, cl_k_chord, cl_k_chord, 0, 30, 0
@@ -1014,9 +1056,10 @@ cl_home:    .fill 32, 1, 0xff           | per track: the playing (bank, pattern)
 cl_buf:     .space 32
 
 cl_fmt_hdr: .asciz "%c%d  BANK %c"
-cl_fmt_trg: .asciz "%2d%c%d TRIGS"
-cl_fmt_lck: .asciz "%2d%cLOCKS ONLY"
-cl_fmt_emp: .asciz "%2d%c---"
-cl_s_seq:   .asciz "SEQ"
-cl_s_full:  .asciz "FULL"
+cl_fmt_num: .asciz "%d"
+cl_fmt_trg: .asciz "%d TRIGS"
+cl_s_lck:   .asciz "LOCKS"
+cl_s_emp:   .asciz "---"
+cl_s_seq:   .asciz "LOAD: SEQ"
+cl_s_full:  .asciz "LOAD: SEQ + MACHINE/FX"
     .align 2
