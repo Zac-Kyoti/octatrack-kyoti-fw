@@ -206,6 +206,23 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **CLYPS (WIP, phase 2 test image `140C_CLYP2`)** — loads land at once in this image, not
+  cued (that comes later). Test with the transport **stopped** first, then playing.
+  1. Hold `[PTN]`, press `[BANK]`: a full-screen table `T<n>  BANK <x>` with 16 entries in two
+     columns (2 × 8) appears; the trigs show the same slots (full green = sample/note trigs,
+     half green = other data only, off = empty, red = the sequence on the track). No SELECT
+     PATTERN / SELECT BANK, no toast, on either release. Repeat with `[BANK]` first: SELECT
+     BANK may flash for a moment in this image (no release deferral yet).
+  2. Chord held: UP/DOWN move the inverted cursor through 1–16 and wrap; LEFT/RIGHT change
+     the bank (wraps A↔P), and the table and LEDs follow; a TRACK key changes the track.
+  3. Chord held, tap a trig: that slot's sequence plays on the track, the LED turns red, Clyps
+     stays. Release the chord: Clyps closes.
+  4. Chord, release it without loading: Clyps stays open. `[NO]` closes it; or move the cursor
+     and `[YES]`: it loads and closes; or tap a trig: it loads and closes.
+  5. After each close: the panel behaves as stock (`[PTN]` alone → SELECT PATTERN, `[BANK]`
+     alone → SELECT BANK, trigs edit, every key responds). Repeat steps 1–4 several times in a
+     row in both chord orders.
+  Note anything about the table's layout and legibility (font, spacing, the header).
 
 ---
 

@@ -791,6 +791,33 @@ The ROM keeps only the guarded detours:
 6. **KYOTI** integration.
 7. **Phase 2: names.**
 
+## 8b. Phase 2 status (2026-10-23)
+
+- **Built:** `tools/build_clyps.py` (WIP) → `out/OCTATRACK_OS1.40C_CLYPS.syx` (`140C_CLYP2`, sha256
+  `8d6a0ef9…`), CF `.bin` `d7a458aa…`, mainos `0e163f38…`. `tools/clyps/patch_clyps.s` is
+  3,606 B in the classic cave at `0x400d6500`, with detours at `0x4005a044`, `0x4007af80` and
+  `0x4007b3e0`.
+- **Contents:** Clyps mode, the 2 × 8 view, the grid, and the held / latched states.
+  - Loads apply at once (no cued landing yet).
+  - Not in it yet: originals, saved sequences, FULL loads, page LEDs, RELOAD's [BANK] deferral.
+- **Emulator gate** `tools/diag_clyps_ui.py`: real key events through `set_key_state`
+  `0x40031734`, 28/28 checks on OT DEMO. It covers:
+  - both chord orders; held load; latched [YES] / [NO];
+  - bank wrap; TRACK selection;
+  - layer lists back to baseline;
+  - the grid LEDs;
+  - the stock [PTN]/[BANK] controls.
+
+  Route A does not run the UI redraw, so the screen layout is **hardware-only**.
+- **Two bugs the gate found, both fixed:**
+  - **Key timing mismatch.** A key record's hold delay must equal the base keymap's. A key
+    pressed under one layer and released under another, with a different delay, leaves its
+    timer record in the repeat list `0x460d1660`. Its next press then links the record to
+    itself, and the UI task loops forever.
+  - **TRACK keys.** Their stock handler selects the track on **release**, so press, hold and
+    release are all forwarded to `0x40040250`.
+- **Hardware checklist:** FLASHING.md §4, CLYPS.
+
 ## 9. KB corrections found by this scope
 
 To be applied with the first code commit:
