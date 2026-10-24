@@ -65,3 +65,4 @@ octabam-modules/blackpyramids-303/*
 [trkseq]
 reference/handoffs/CLYPS_*
 tools/*clyps*
+tools/clyps/*
