@@ -843,7 +843,16 @@ The ROM keeps only the guarded detours:
   - a lit header band with inverted text, exactly one lit row above and below it;
   - `LOAD: SEQ` right-aligned in the header (32 px). [FUNC] held shows `LOAD: SEQ+MCH/FX` (60 px).
     The full `SEQ+MACHINE/FX` (76 px) collides with `T8 BANK A`;
-  - render `CLYPS_view_v4.png`. Gate 28/28.
+  - gate 28/28.
+- **CLYP4 flashed (2026-10-23); the user's notes:** header 2 px taller, rounded top corners
+  (card), rows centred, and symmetric columns. Column 2's highlight had overlapped column 1's:
+  a stale duplicate `.equ COL1_X, 55` silently won.
+- **`140C_CLYP5`**, pixel-checked in the emulator:
+  - header band 9 rows (2 lit rows above and below the text, border included);
+  - corners rounded (3 px cleared each);
+  - rows 4 above / 3 below in the odd 54-row field;
+  - highlights 2–54 and 57–109 (1 px to the frame both sides, 2 px between);
+  - render `CLYPS_view.png`. Gate 28/28.
 - **Screen rendering in the emulator** (`tools/clyps_render.py`). Stock's compositor
   `0x40013abc` (the UI task runs it when RDRAW is set) is called directly. Read its double-buffered
   target `[0x400b9710]` **before** the call. It has the LCD plane's rotated layout.

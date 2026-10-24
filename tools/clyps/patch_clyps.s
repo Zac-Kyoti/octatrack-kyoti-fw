@@ -79,14 +79,17 @@
     .equ FONT_S,      0x400ba876        | the interface font: 3 px glyphs, 1 px apart, 5 rows
     .equ DIGIT_W,     4                 | digit advance
     .equ ROW_PITCH,   6
-    .equ ROW0_Y,      47                | row r text at 47 - 6r (r = 0..7), text occupies y..y+4
-    .equ HDR_Y,       58                | header: lit band 57..63 (63 = the border), text 58..62:
-                                        | exactly one lit row above and below the inverted text
+    .equ HDR_Y,       57                | header: lit band 55..63 (63 = the border), text 57..61:
+                                        | two lit rows above and below the inverted text
+    .equ BODY_TOP,    54                | the rows' field: y 1..54 (border at 0, band from 55)
+    .equ ROW0_Y,      46                | row r text at 46 - 6r: the 47-row block 4..50, centred in
+                                        | 1..54 (4 rows above, 3 below: the field is odd by one)
     .equ LOAD_X,      77                | "LOAD: SEQ" (32 px) right-aligned to x = 108
     .equ LOADF_X,     49                | "LOAD: SEQ+MCH/FX" (60 px), [FUNC] held
-    .equ COL1_X,      58                | column 0 at x = 4
+    .equ COL0_X,      4                 | highlight x0 = col - 2, x1 = col + 50: column 0 2..54,
+    .equ COL1_X,      59                | column 1 57..109 -- one px to the frame (0 / 111) on both
+                                        | outer sides, a 2 px gap between the columns
     .equ SUM_GAP,     5                 | gap between the slot number and its summary
-    .equ COL1_X,      55                | column 0 at x = 3
 
     .text
     .global cl_ptn, cl_bankp, cl_bankr
@@ -808,10 +811,28 @@ cd_mode:
     lea     12(%sp),%sp
     pea     WIN_H-2                     | the band, inverted with its text
     pea     WIN_W-2
-    pea     HDR_Y-1
+    pea     HDR_Y-2
     pea     1
     bsr.w   cl_xor
     lea     16(%sp),%sp
+|   round the two top corners (a card): clear (0,63) (1,63) (0,62) and their mirror images
+    lea     cl_corners,%a2
+    moveq   #6,%d2
+cd_corner:
+    clr.l   -(%sp)                      | mode 0 = clear
+    move.w  (%a2)+,%d0
+    ext.l   %d0
+    move.w  (%a2)+,%d1
+    ext.l   %d1
+    move.l  %d1,-(%sp)                  | y1 = y
+    move.l  %d0,-(%sp)                  | x1 = x
+    move.l  %d1,-(%sp)                  | y0
+    move.l  %d0,-(%sp)                  | x0
+    move.l  %a4,-(%sp)
+    jsr     RECT
+    lea     24(%sp),%sp
+    subq.l  #1,%d2
+    bne.b   cd_corner
 |   the 16 cells
     jsr     cl_trk
     move.l  %d0,-(%sp)
@@ -820,7 +841,7 @@ cd_mode:
     move.l  %d0,%d7                     | d7 = record offset
     moveq   #0,%d2                      | d2 = slot 0..15
 cd_cell:
-    moveq   #4,%d3                      | d3 = column x
+    moveq   #COL0_X,%d3                 | d3 = column x
     cmpi.l  #8,%d2
     bcs.b   cd_c0
     moveq   #COL1_X,%d3
@@ -1060,6 +1081,7 @@ cl_src:     .space 32                   | per track: (bank, pattern) the sequenc
 cl_home:    .fill 32, 1, 0xff           | per track: the playing (bank, pattern) at that load
 cl_buf:     .space 32
 
+cl_corners: .short 0,63, 1,63, 0,62, WIN_W-1,63, WIN_W-2,63, WIN_W-1,62
 cl_fmt_hdr: .asciz "%c%d BANK %c"
 cl_fmt_num: .asciz "%d"
 cl_fmt_trg: .asciz "%d TRIGS"
