@@ -213,9 +213,9 @@ quick check for each:
   2. Stopped: chord held, tap a trig → that sequence is on the track at once (red); releasing
      the chord closes Clyps. Latched (released without loading): `[YES]` loads the cursor slot,
      a trig loads, `[NO]` closes.
-  3. Playing, CHANGE off (SCALE SETUP): chord held, tap a trig → the slot lights **yellow**; at
+  3. Playing, CHAIN AFTER at its default (the pattern length): chord held, tap a trig → the slot lights **yellow**; at
      the end of the pattern it turns **red** and the new sequence plays from step 1, on time.
-  4. Playing, CHANGE = 4 (PER TRACK): the yellow slot lands at the next 4-step boundary and plays
+  4. Playing, CHAIN AFTER = 4 (PER TRACK pattern): the yellow slot lands at the next 4-step CHAIN AFTER point and plays
      **in step with the other tracks** (not from its step 1), e.g. a 64-step sequence loaded at
      step 9 continues from its step 9.
   5. Playing, a 2x-scale track loaded onto a 1x track: lands on time at the double rate.

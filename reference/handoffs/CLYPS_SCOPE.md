@@ -9,6 +9,13 @@ Rev 1 (2026-10-22, as `TRACK_SEQ_SELECT_SCOPE.md`) was the first pass. Rev 2 add
 
 ## Terms (the user's, 2026-10-23 — use them everywhere)
 
+> **Octatrack term (2026-10-24):** the pattern-change quantisation setting is **CHAIN AFTER**.
+> The firmware names it so (`0x400b5f37`, under PATTERN CHANGE in the project's sequencer
+> settings, next to SILENCE TRACKS and LFO AUTO CHANGE). The project value is at `0x8000004e`;
+> each pattern also stores its own at slab `+0x8e56` (< 0 = use the project's), indexing the step
+> table `0x400d80dc`. Earlier revisions of this doc called it "CHANGE" (other RE projects' label).
+> That is not an Octatrack term, so do not use it.
+
 | term | meaning |
 |---|---|
 | **Clyps** | the feature (was TRACK_SEQ_SELECT) |
@@ -213,7 +220,7 @@ everything" is O17.
 **Timing.**
 - Transport stopped: the load is immediate.
 - Running, DIRECT JUMP off: cued, landing where a stock pattern change cued now would land (§3.4).
-  At a master wrap that is step 1. At a CHANGE point it is phase-continuous (O9): the track lands
+  At a master wrap that is step 1. At a CHAIN AFTER point it is phase-continuous (O9): the track lands
   where it would be had the sequence been in the pattern since its last restart.
 - Running, DIRECT JUMP on (decided): it lands like a DIRECT_JUMP_KYOTI jump, at the next master
   step, at the clock-locked position, as if that sequence had been playing since START. That is
@@ -346,7 +353,7 @@ through in Clyps mode: it switches between audio and MIDI tracks, and the view a
 - **[YES] with the chord held (was O5):** passes to DIRECT JUMP's [PTN]+[YES] toggle.
 - **Saved sequences (was O7):** they last only while the unit runs its project. A power cycle or a
   project reload destroys them.
-- **O9, CHANGE-point landings:** phase-continuous. The track lands where it would be had the
+- **O9, CHAIN AFTER point landings:** phase-continuous. The track lands where it would be had the
   sequence been in the pattern since its last restart, so it stays in step with the other tracks.
   At a master wrap that is step 1, the same as stock.
 - **O3, [FUNC]+[NO]:** immediate. The saved sequence lands at the track's next step, at the
@@ -383,7 +390,7 @@ through in Clyps mode: it switches between audio and MIDI tracks, and the view a
 - **Pattern slab** = `0x400e21e0 + bank·0x9b340 + pattern·0x8ed8`.
   - 8 audio records at `t·0x91a`, 8 MIDI records at `0x48d0 + m·0x8b0`.
   - Trailer `+0x8e50..+0x8e5b`: `+0x8e50` u16 master length (−1 = INF), `+0x52` master scale,
-    `+0x53/+0x54` pattern length/scale, `+0x55` SCALE_MODE, `+0x56` CHANGE, `+0x57` Part link,
+    `+0x53/+0x54` pattern length/scale, `+0x55` SCALE_MODE, `+0x56` CHAIN AFTER, `+0x57` Part link,
     `+0x58` tempo.
   - All 16 banks are resident.
 - **A track record is self-contained and position-independent.** Stock's track paste memcpys it
@@ -504,12 +511,12 @@ RAM after the load with stock-style slab and record copies, and no file is writt
 | C1 vs B1 | control: no load | FAIL (never locks) |
 | D1 vs B1 | control: the same copy one tick later (phase D of tick 187) | FAIL: the first new step's event (step 0 at t192) is lost, then it locks from t193. One tick late is too late |
 | A2 vs B2 | NORMAL A10 (16 steps): T1 from A12 | **IDENTICAL at all 260 ticks** |
-| A3 vs B3 | CHANGE = 4 on A15 | FAIL, as expected: the stock change lands at the CHANGE point (t42) and **restarts every track at step 1**. With no pending stock change, the wrap body runs only at the master wrap (t186) |
+| A3 vs B3 | CHAIN AFTER = 4 on A15 | FAIL, as expected: the stock change lands at the CHAIN AFTER point (t42) and **restarts every track at step 1**. With no pending stock change, the wrap body runs only at the master wrap (t186) |
 
 **So:**
 - **At a master wrap:** a Clyps landing is one record copy at `0x400a43a0`. Stock's own wrap body
   then re-homes and purges, so no per-track code of ours is needed.
-- **At a CHANGE point:** the stock reference is the wrong target, because it restarts all tracks.
+- **At a CHAIN AFTER point:** the stock reference is the wrong target, because it restarts all tracks.
   A one-track rule is needed (O9). The recommended phase-continuous rule has an exact oracle: a
   never-switched run of the pattern that holds the clyp from START. That is the same oracle as the
   DJ-on case. Mid-pattern landings need our own one-track re-home to that position (the DJ-style
@@ -553,7 +560,7 @@ position model.
   wrap.
 
 Not run yet: master length INF, a cross-bank source (pure data, low risk), DJ on, and a
-CHANGE-point trigger (the arithmetic is above; the trigger is our phase-G evaluation of stock's
+CHAIN AFTER point trigger (the arithmetic is above; the trigger is our phase-G evaluation of stock's
 gate rule).
 
 **DIRECT JUMP on** (decided). DJ re-lands the whole sequencer through phase D (`0x80006687`), which
@@ -756,7 +763,7 @@ The ROM keeps only the guarded detours:
   load of T6 from pattern 4 at step k. Run B plays pattern 1 and cues a stock change to pattern 2,
   where pattern 2 = pattern 1 with T6 pasted from pattern 4. Events after the landing must be equal.
   - **The user builds the fixture on the device** with stock track copy/paste, then exports it.
-  - Variants: NORMAL and PER TRACK; CHANGE OFF/4/master; a faster-than-master track; INF master;
+  - Variants: NORMAL and PER TRACK; CHAIN AFTER default/4/master; a faster-than-master track; INF master;
     MIDI; a cross-bank source; stopped.
   - DJ-on runs are graded against a never-switched reference of pattern 2.
 - **The originals oracle.** Load clyps onto several tracks, edit one, leave and come back, then
@@ -772,7 +779,7 @@ The ROM keeps only the guarded detours:
 - [ ] Both chord orders and both release orders: no SELECT window, no toast.
 - [ ] Every key in §1.3, held and latched; PLAY/STOP/mutes pass through.
 - [ ] Grid: full, half, off, red, yellow; bank and track changes.
-- [ ] Landing on time by ear, NORMAL and PER TRACK, CHANGE OFF/4/master, DJ on and off.
+- [ ] Landing on time by ear, NORMAL and PER TRACK, CHAIN AFTER default/4/master, DJ on and off.
 - [ ] Leave the pattern and return: the own sequences are back; SAVE then reload project: no clyp
       was saved.
 - [ ] [FUNC]+[YES] on T6 in bank A, then [FUNC]+[NO] in bank F: the saved sequence plays there.
@@ -858,7 +865,7 @@ The ROM keeps only the guarded detours:
   `0x400a43a0` (wrap body) and `0x40062d1c` (the UI loop tail, the follow-up).
   - **Exact against the oracles, driven by real key presses:**
     - a master wrap equals a stock pattern change (C1w vs B1, 450/450 ticks);
-    - a CHANGE = 4 landing of a 64-step sequence (C2c vs R5) and of a 2x one (C3s vs R7) is
+    - a CHAIN AFTER = 4 landing of a 64-step sequence (C2c vs R5) and of a 2x one (C3s vs R7) is
       locked from the tick right after the landing.
   - **First cut one tick early (corrected).** It treated the tick *before* the boundary as the
     landing tick. Phase G advances the master counters, so phase D sees TICK_CTR == 0 on the first

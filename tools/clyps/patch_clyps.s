@@ -76,8 +76,8 @@
     .equ TICK_CTR,    0x800065b6        | byte: master ticks within the step
     .equ SCALE_IX,    0x8000663d        | byte: the live master scale index
     .equ LEN_TBL,     0x400aba50        | long[scale]: ticks per step (2 = 1x = 6)
-    .equ QUANT_TBL,   0x400d80dc        | long[17]: CHANGE lengths in steps, [0] = -1 (off)
-    .equ PROJ_QUANT,  0x8000004e        | byte: the project default CHANGE index
+    .equ QUANT_TBL,   0x400d80dc        | long[17]: CHAIN AFTER lengths in steps, [0] = -1 (off)
+    .equ PROJ_QUANT,  0x8000004e        | byte: the project default CHAIN AFTER index
     .equ STEP_ARR,    0x800064d0        | byte[16]: per-track step   (audio 0..7, MIDI 8..15)
     .equ STEPM1_ARR,  0x800064e0        | byte[16]: per-track step - 1 (mod len)
     .equ TICKS_ARR,   0x800064f0        | byte[16]: per-track ticks within the step
@@ -750,10 +750,10 @@ pu_dirty:
 |  * MASTER WRAP (or a stock pattern change): stock's wrap body, entry 0x400a43a0 in phase G
 |    (cl_wrap). A stock change landing there drops every cue (O8); a plain wrap lands every cue,
 |    copy only -- the wrap body re-homes every track right after (the A1/A2 oracle).
-|  * CHANGE point mid-pattern: phase D, 0x400a1f72 (cl_land, replaces `move.b 0x80006687,%d0`,
+|  * CHAIN AFTER point mid-pattern: phase D, 0x400a1f72 (cl_land, replaces `move.b 0x80006687,%d0`,
 |    6 B; stock's ble.w follows on those flags, so the replay comes LAST). Phase G of the previous
 |    tick has already advanced the master: TICK_CTR == 0 means this is the first tick of master
-|    step s = MASTER_STEP; CHANGE N > 0 and s % N == 0 arms every cue. An armed track lands on the
+|    step s = MASTER_STEP; CHAIN AFTER N > 0 and s % N == 0 arms every cue. An armed track lands on the
 |    first tick that is a window start for its old AND new rate, phase-continuous:
 |    t0 = (MASTER_STEP - 1) * tps_M + TICK_CTR,  STEP = (t0 / tps + 1) mod len,  TICKS = t0 mod tps
 |    (the A4..A8 oracles: t0 66 -> step 23 at 2x, t0 114 -> step 20).
@@ -783,7 +783,7 @@ cl_land:
     bne.w   la_tracks                   | not the first tick of a master step
     tst.l   %d3
     beq.w   la_tracks
-|   the playing pattern's CHANGE
+|   the playing pattern's CHAIN AFTER
     moveq   #0,%d0
     move.b  ACT_PAT,%d0
     move.l  %d0,-(%sp)
@@ -792,7 +792,7 @@ cl_land:
     jsr     cl_slab
     addq.l  #8,%sp
     adda.l  #TRAILER,%a0
-    move.b  6(%a0),%d0                  | +0x8e56: CHANGE index (signed), < 0 = project default
+    move.b  6(%a0),%d0                  | +0x8e56: CHAIN AFTER index (signed), < 0 = project default
     extb.l  %d0
     bpl.b   la_q
     moveq   #0,%d0
@@ -802,7 +802,7 @@ la_q:
     bhi.w   la_tracks
     lea     QUANT_TBL,%a1
     move.l  (%a1,%d0.l*4),%d1           | N
-    ble.w   la_tracks                   | CHANGE off: only the master wrap lands (cl_wrap)
+    ble.w   la_tracks                   | CHAIN AFTER at its default: only the master wrap lands (cl_wrap)
     move.l  %d3,%d0
     remu.l  %d1,%d2:%d0                 | d2 = s mod N
     tst.l   %d2
