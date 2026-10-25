@@ -9,7 +9,7 @@ in the default web browser.
 import base64, html, pathlib, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-title, shots = sys.argv[1], [a.split("=", 1) for a in sys.argv[2:]]
+title, shots = sys.argv[1], [a.rsplit("=", 1) for a in sys.argv[2:]]
 cards = "".join(
     f'<figure><img src="data:image/png;base64,{base64.b64encode(pathlib.Path(p).read_bytes()).decode()}">'
     f"<figcaption>{html.escape(c)}</figcaption></figure>" for c, p in shots)

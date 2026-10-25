@@ -871,6 +871,18 @@ The ROM keeps only the guarded detours:
     landing tick. Phase G advances the master counters, so phase D sees TICK_CTR == 0 on the first
     tick of step s, and t0 = (MASTER_STEP − 1)·tps_M + TICK_CTR.
   - **DIRECT JUMP timing:** with the KYOTI integration (this image has no DJ).
+- **CLYP6 flashed (2026-10-25).**
+  - Hardware steps 1–10 pass, except that **MIDI tracks were not detected**. Clyps read the long
+    flag `0x80000012` with a **byte** read (its high byte, always 0), so on the MIDI side it
+    showed and loaded audio tracks.
+  - **RELOAD_FROM_PROJECT has the same byte read** (`patch_reload3.s` `rl3_arm_n`,
+    `move.b MIDI_MODE`). Reported to the user, not fixed in this thread.
+- **`140C_CLYP7`:** the flag is read as a long; bank repeat is delay 15 / repeat 6.
+  - New gate scenario M on JAM2 (which loads with the MIDI tracks showing): M2 loads byte-exact.
+  - OT DEMO gate 28/28; MIDI render `M2 BANK A` correct.
+- **Open, asked of the user:** what a slot shows after a load onto the playing pattern. The keep
+  rule shows the loaded copy in the playing pattern's own slot; the user expected that slot to
+  keep showing the pattern's own (pre-load) sequence.
 - **Screen rendering in the emulator** (`tools/clyps_render.py`). Stock's compositor
   `0x40013abc` (the UI task runs it when RDRAW is set) is called directly. Read its double-buffered
   target `[0x400b9710]` **before** the call. It has the LCD plane's rotated layout.

@@ -17,7 +17,8 @@
     .equ ACT_PAT,     0x800065be
     .equ UI_BANK,     0x80000002        | the bank the SRAM mirror holds
     .equ CUR_TRACK,   0x80000000        | active track 0..7
-    .equ MIDI_MODE,   0x80000012        | != 0 -> MIDI tracks
+    .equ MIDI_MODE,   0x80000012        | LONG, != 0 -> MIDI tracks (stock: tst.l / clr.l / move.l;
+                                        | a byte read sees its high byte, always 0 -- the CLYP6 bug)
     .equ BLOB,        0x400e21e0
     .equ BANKSTRIDE,  0x9b340
     .equ PATSTRIDE,   0x8ed8
@@ -420,7 +421,7 @@ cl_trk:
     moveq   #0,%d0
     move.b  CUR_TRACK,%d0
     andi.l  #7,%d0
-    tst.b   MIDI_MODE
+    tst.l   MIDI_MODE
     beq.b   ct_out
     addq.l  #8,%d0
 ct_out:
@@ -1520,8 +1521,8 @@ cl_keys:
     .endr
     KREC 0x33, cl_k_ud, 0, cl_k_ud, 15, 4
     KREC 0x20, cl_k_ud, 0, cl_k_ud, 15, 4
-    KREC 0x34, cl_k_lr, 0, cl_k_lr, 20, 10   | the user: bank cycling at least 2x stock's 30-tick repeat
-    KREC 0x21, cl_k_lr, 0, cl_k_lr, 20, 10   | (non-zero delay: the add/remove rule above holds)
+    KREC 0x34, cl_k_lr, 0, cl_k_lr, 15, 6    | the user: bank cycling fast (stock repeats every 30 ticks)
+    KREC 0x21, cl_k_lr, 0, cl_k_lr, 15, 6    | (non-zero delay: the add/remove rule above holds)
     KREC 0x31, cl_k_yes, 0, 0, 0, 0
     KREC 0x32, cl_k_no, 0, 0, 0, 0
     KREC 0x2e, cl_k_chord, cl_k_chord, 0, 30, 0

@@ -52,7 +52,7 @@ def main(argv):
     sys.path.insert(0, str(OCTABAM / "tools" / "emu"))
     import emu_rtos as er
     import lcd_view
-    card, staged = er.stage_project(a.project, "OCTABAM", a.name, tree="out/_emu_clyps_ui")
+    card, staged = er.stage_project(a.project, "OCTABAM", a.name, tree=f"out/_emu_clyps_ui_{a.name}")
     r, rt = er.attach(image, card, ips=3990.0, pit_clock_hz=264e6, quantum=4096, step_quantum=32, tick=True)
     if not rt.gate_m6a()[0]:
         rt.run(ms=1000, until=lambda x: x.gate_m6a()[0])
@@ -216,6 +216,38 @@ def main(argv):
         shot("D2_selbank")
         key(BANK, 0)
         tap(NO)
+
+    if "M" in a.only:
+        # --- M: the MIDI side (needs a project with MIDI trigs on pattern 1, e.g. JAM2)
+        print("M: MIDI key; TRACK 2; chord; slots; trig 2 loads pattern 2's M2; release")
+        print(f"      MKI/MKII probe 0x46c8d18c = 0x{rd(0x46C8D18C, 4):08x}", flush=True)
+        # stock's own audio <-> MIDI toggle, 0x40055548 -- what the MKI [MIDI] release reaches
+        # (the emulator's probe word skips that path on a key tap)
+        rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+        if rd(0x80000012, 4) == 0:         # some projects load with the MIDI tracks showing
+            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+            rt.call_as_main(0x40055548, args=(0x35, 0), budget=600000)
+            rt.run(ms=60)
+        check(rd(0x80000012, 4) != 0, "stock's toggle switched to the MIDI tracks (0x80000012)")
+        tap(0x11)
+        check(rd(0x80000000, 1) == 1, "TRACK 2 selects M2")
+        mrec = lambda pat, m: bytes(u.mem_read(BLOB + bank * BANKSTRIDE + pat * PATSTRIDE + 0x48D0 + m * 0x8B0, 0x8B0))
+        key(PTN, 1)
+        key(BANK, 1)
+        cls = list(bytes(u.mem_read(syms["cl_cls"], 16)))
+        trigs = [bin(int.from_bytes(mrec(p, 1)[:8], "big")).count("1") for p in range(16)]
+        atrigs = [bin(int.from_bytes(rec(p, 1)[:8], "big")).count("1") for p in range(16)]
+        print(f"      (audio T2 trigs per pattern {atrigs}: must NOT be what the slots show)", flush=True)
+        print(f"      M2 trigs per pattern {trigs}  classes {cls}", flush=True)
+        check(all((cls[p] == 2) == (trigs[p] > 0) for p in range(16)), "slots classify the MIDI records")
+        src = mrec(1, 1)
+        key(0x01, 1)
+        key(0x01, 0)
+        check(mrec(act, 1) == src, "trig 2 loaded pattern 2's M2 onto the playing pattern's M2")
+        key(BANK, 0)
+        key(PTN, 0)
+        s = state()
+        check(s["open"] == 0 and s["layers"] == base["layers"] and s["leds"] == base["leds"], "closed, layer lists at baseline")
 
     print(f"\nscreens: {shots}")
     print("VERDICT:", "PASS" if not fails else f"FAIL ({len(fails)}): " + "; ".join(fails))
