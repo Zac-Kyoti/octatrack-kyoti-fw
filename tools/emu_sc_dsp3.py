@@ -78,6 +78,7 @@ KB_BASE = 0x800 if OCTABAM_LAYOUT else 0x7e00
 KB_STRIDE = 0x40     # keybus slot(track) = KB_BASE + track*$40 ($800 since Session 115, $7e00 since 2026-10-15)
 MON_BASE = 0x7f0 if OCTABAM_LAYOUT else 0x7df0   # MON_ON/MON_KEY[track] = Y:MON_BASE + track*2
 Q23 = 1 << 23
+MON_N = 16                              # moncommit's fade length in blocks (4 until 2026-10-24)
 NW = 30                                 # dsp_host caps n7 at 15 frames = 30 words
 
 fails = []
@@ -381,14 +382,14 @@ def _sat24(v):
 
 def ref_mon_weights(pos, on):
     """moncommit's mix weight g for each of a block's 16 pairs, as the .asm computes it:
-    g starts at pos * 1/4 (saturated; 4 -> just under 1.0) and moves 1/64 per pair, each
-    step through an accumulator and a saturating move to y1. The fast paths (pos 0 off,
-    pos 4 on) return a constant 0 / 1.0."""
-    pos = pos if 0 <= s24(pos) <= 4 else 0
-    if (not on and pos == 0) or (on and pos == 4):
+    g starts at pos / MON_N (saturated; MON_N -> just under 1.0) and moves 1/(16 MON_N) per
+    pair, each step through an accumulator and a saturating move to y1. The fast paths (pos 0
+    off, pos MON_N on) return a constant 0 / 1.0."""
+    pos = pos if 0 <= s24(pos) <= MON_N else 0
+    if (not on and pos == 0) or (on and pos == MON_N):
         return [0 if not on else Q23 - 1] * 16
-    step = 0x20000 if on else -0x20000
-    g, out = _sat24(pos << 21), []
+    step = Q23 // (16 * MON_N) * (1 if on else -1)
+    g, out = _sat24(pos * (Q23 // MON_N)), []
     for _ in range(16):
         g = _sat24(g + step)
         out.append(g)
@@ -398,11 +399,11 @@ def ref_mon_weights(pos, on):
 def ref_mon(dry, key, pos, on):
     """moncommit's output block and its new MON_FADE: dry + g*(key - dry) per sample, in
     the .asm's arithmetic (halve the difference, fractional mpy, asl, add dry, take a1)."""
-    pos = pos if 0 <= s24(pos) <= 4 else 0
+    pos = pos if 0 <= s24(pos) <= MON_N else 0
     if not on and pos == 0:
         return list(dry), 0
-    if on and pos == 4:
-        return list(key), 4
+    if on and pos == MON_N:
+        return list(key), MON_N
     ws = ref_mon_weights(pos, on)
     out = []
     for k in range(32):
@@ -654,9 +655,9 @@ def main():
               f"st[:3]={[hex(v) for v in st[:3]]}")
 
     mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
-                   [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [0x10000, 4])])
+                   [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [0x10000, MON_N])])
     (pub,) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2)], P(key=0, mon=True), pokey=pk_sig, audio=0)
-    check("KEY=0: MON_ON published OFF (even with MON=1)", pub == [0, 4], f"got={pub}")
+    check("KEY=0: MON_ON published OFF (even with MON=1)", pub == [0, MON_N], f"got={pub}")
 
     # 6b. KEY declick (2026-10-19): while MON is audible a KEY change waits (old key runs,
     # MON forced off this block); with MON silent it is taken at once
@@ -668,10 +669,10 @@ def main():
     exp2, _ = kf_ref(sig2, 33, 64)
     KIN = KFB + 16
     for tag, kin, fade, key, x_exp, kin_exp, flag_exp, on_exp in (
-            ("MON audible, KEY 1 -> 2: waits", 1, 4, 2, exp1, 1, 1, 0),
+            ("MON audible, KEY 1 -> 2: waits", 1, MON_N, 2, exp1, 1, 1, 0),
             ("MON silent, KEY 1 -> 2: taken", 1, 0, 2, exp2, 2, 0, 0x10000),
-            ("MON audible, KEY 1 -> OFF: old key fades out", 1, 4, 0, exp1, 1, 1, 0),
-            ("cold key in use: taken at once", 0x123456, 4, 2, exp2, 2, 0, 0x10000)):
+            ("MON audible, KEY 1 -> OFF: old key fades out", 1, MON_N, 0, exp1, 1, 1, 0),
+            ("cold key in use: taken at once", 0x123456, MON_N, 2, exp2, 2, 0, 0x10000)):
         mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20), (1, KIN, [kin, 0])],
                        [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [0, fade])])
         (x40, kf2, pub) = run(mem, scdet, [('x', 0x40, 0x60), ('x', KIN, KIN + 2),
@@ -682,18 +683,18 @@ def main():
               f"key in use/flag {kf2}, MON_ON {pub}, out {'ok' if x40 == x_exp else 'differs'}")
 
     # 7. moncommit: the MON crossfade (2026-10-19) ------------------------------------------
-    print("\nmoncommit (MON declick: 64-sample linear crossfade, MON_ON consumed):")
+    print(f"\nmoncommit (MON declick: {16 * MON_N}-sample linear crossfade, MON_ON consumed):")
     DRY = sine(0x20, 2)
     KEYA = [(-s24(v) // 2) & 0xFFFFFF for v in sine(0x20, 5)]
     R0_IN = 0x1234
     PBLK = 0x300      # dsp_host writes its -params block at x:$208+6: keep it off X:0..$1f
     for mon_on, fade, tag in ((0x10000, 0, "ON from 0: fade in, block 1"),
-                              (0x10000, 3, "ON from 3: fade in, last block"),
-                              (0x10000, 4, "ON at 4: plain copy"),
+                              (0x10000, MON_N - 1, "ON from N-1: fade in, last block"),
+                              (0x10000, MON_N, "ON at N: plain copy"),
                               (0, 0, "OFF at 0: dry"),
-                              (0, 4, "OFF from 4: fade out, block 1"),
+                              (0, MON_N, "OFF from N: fade out, block 1"),
                               (0, 1, "OFF from 1: fade out, last block"),
-                              (0x123456, 4, "garbage MON_ON: fades out"),
+                              (0x123456, MON_N, "garbage MON_ON: fades out"),
                               (0x10000, 0x654321, "garbage MON_FADE: reads as 0"),
                               (0x10000, 0xfffffe, "negative MON_FADE: reads as 0"),
                               (0, 0x654321, "OFF, garbage MON_FADE: dry, cleared")):
@@ -714,13 +715,13 @@ def main():
 
     # a full fade in and out, block by block: the weight never steps
     g, pos = [], 0
-    for blk in range(10):
-        on = blk < 5
+    for blk in range(2 * MON_N + 2):
+        on = blk < MON_N + 1
         g += ref_mon_weights(pos, on)
         _, pos = ref_mon(DRY, KEYA, pos, on)
     steps = [abs(b - a) for a, b in zip(g, g[1:])]
-    check("model: 10-block on/off weight sequence moves at most 1/64 per pair",
-          max(steps) <= (Q23 >> 6) + 1 and g[0] == 0x20000 and g[-1] == 0,
+    check(f"model: full on/off weight sequence moves at most 1/{16 * MON_N} per pair",
+          max(steps) <= Q23 // (16 * MON_N) + 1 and g[0] == Q23 // (16 * MON_N) and g[-1] == 0,
           f"max step 0x{max(steps):x}, first 0x{g[0]:x}, last 0x{g[-1]:x}")
 
     print()

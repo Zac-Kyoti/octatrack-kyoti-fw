@@ -242,7 +242,7 @@ scdet:
 ; KEY DECLICK (2026-10-19, major version): r7+$2c = the key in use. While MON is audible
 ; (MON_FADE[my track] != 0) a new KEY waits: the old key keeps running and MON is forced off
 ; this block (r7+$2d = 1), so MON fades out on the live old key; with MON_FADE at 0 the new
-; key is taken and MON fades back in -- a ~3 ms dip through the track's own sound instead of
+; key is taken and MON fades back in -- a ~12 ms dip through the track's own sound instead of
 ; a hard swap between two keys. A key in use outside 0..8 (cold memory) is replaced at once.
 ; scinit sets it to 0. Registers a, b, x0, r1, n1.
         move    x:(r7+$2c),b          ; (q1) b = the key in use
@@ -751,7 +751,7 @@ zz10:
 ;
 ;    MON declick (2026-10-19): MON_ON[my track] is now a per-block ARM that
 ;    moncommit consumes (reads, then clears) every block, and the word after
-;    it, MON_FADE[my track], is moncommit's fade position (0..4 blocks; it
+;    it, MON_FADE[my track], is moncommit's fade position (0..16 blocks; it
 ;    used to be MON_KEY -- the stash is indexed by this track now, see r5).
 ;    While MON is off the stash is still written as long as MON_FADE is not 0,
 ;    so the fade-out has a live key to fade from. Registers: a, b, x0, r0, r1,
@@ -823,7 +823,7 @@ zz16:
         rts
 zz20:
 ; KEY OFF -> publish MON_ON[my track] = 0 (no key selected, nothing to show).
-; moncommit then fades out from the last stash (at most 4 blocks of it).
+; moncommit then fades out from the last stash (at most 16 blocks of it).
         move    #$61,r4             ; --- displaced ; r0 unchanged ---
         bsr     zz18
         move    #0,b
@@ -888,16 +888,17 @@ zz18:
 ; the millions, Q23-audio-scale, nowhere near $10000 = 65536).
 ;
 ; MON DECLICK (2026-10-19): a linear crossfade instead of a hard swap.
-; MON_FADE[my track] (the word after MON_ON) counts 0..4 blocks; the mix
-; weight g ramps per SAMPLE PAIR, 1/64 per pair, so a full fade is 64 samples
-; (4 blocks, ~1.45 ms) and continuous across block boundaries:
+; MON_FADE[my track] (the word after MON_ON) counts 0..16 blocks; the mix
+; weight g ramps per SAMPLE PAIR, 1/256 per pair, so a full fade is 256 samples
+; (16 blocks, ~5.8 ms; 64 samples until 2026-10-24, which left a KEY change with MON
+; on a soft click) and continuous across block boundaries:
 ;   out = dry + g*(key - dry)        dry = X:0.. (this track), key = the stash
-; At 0 (dry) and 4 (key) the fast paths below are the old behaviour.
+; At 0 (dry) and 16 (key) the fast paths below are the old behaviour.
 ; MON_ON is CONSUMED here (cleared after the read): scdet re-arms it every
 ; block it runs with MON on, so when scdet stops running -- KEY to OFF, or
 ; the effect changed away from COMPRESSOR -- the next block fades out. Before
 ; this, a set MON_ON stayed set and replayed a frozen stash forever.
-; MON_FADE outside 0..4 (cold-RAM garbage) reads as 0.
+; MON_FADE outside 0..16 (cold-RAM garbage) reads as 0.
 ; Registers: a, b, x0, x1, y1, r1, n1, r3. func_00034f, called right after
 ; the three stock instructions that follow this hook, loads x1, y1 and x0
 ; itself and writes a and b before reading them (disassembled, both
@@ -925,7 +926,7 @@ scmonbody:
         move    y:(r3),a              ; a = fade position
         tst     a
         blt     mc20                  ; garbage -> 0
-        cmp     #>4,a
+        cmp     #>$10,a
         ble     mc21
 mc20:
         clr     a
@@ -933,13 +934,13 @@ mc21:
         cmp     #>$10000,b             ; (q2) exact match vs scdet's ON sentinel,
         beq     mc22                   ; NOT "nonzero" -- see hazard note above.
 ; -- MON off: fade out, or nothing --
-        move    #>$fe0000,x1          ; step -1/64 per pair
+        move    #>$ff8000,x1          ; step -1/256 per pair
         tst     a
         bne     mc24
         move    a,y:(r3)              ; MON_FADE = 0 (also clears any garbage)
         rts                            ; dry: the track's own audio, untouched
 mc22:
-        move    #>$20000,x1           ; MON on: step +1/64 per pair
+        move    #>$8000,x1            ; MON on: step +1/256 per pair
 mc24:
         move    x:>$420,b
         asl     #6,b,b
@@ -947,12 +948,12 @@ mc24:
         move    #>@KEYB1@,r1
         lua     (r1)+n1,r1            ; r1 -> keybus[my track] gen 1 (the stash)
         move    x1,b
-        asr     #$11,b,b              ; b = the step's sign, -1 or +1
+        asr     #$f,b,b               ; b = the step's sign, -1 or +1
         add     a,b                   ; b = the next fade position
-        cmp     #>4,b
-        bgt     mc25                  ; MON on and fully in: plain copy, MON_FADE stays 4
+        cmp     #>$10,b
+        bgt     mc25                  ; MON on and fully in: plain copy, MON_FADE stays 16
         move    b,y:(r3)              ; MON_FADE = one block further out / in
-        asl     #$15,a,a              ; a = position * 1/4 (4 -> +1.0, saturated below)
+        asl     #$13,a,a              ; a = position * 1/16 (16 -> +1.0, saturated below)
         move    a,y1
         move    #0,r3
         move    y1,a
