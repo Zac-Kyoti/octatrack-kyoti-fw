@@ -206,22 +206,46 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
-- **CLYPS (WIP, test image `140C_CLYP6`)** — Clyps mode, view and grid; loads cued while
-  playing. Not yet in it: DIRECT JUMP timing, originals, saved sequences, FULL loads.
-  1. Hold `[PTN]`, press `[BANK]` (and the other order): the Clyps view and the trig grid
-     open; no SELECT PATTERN / SELECT BANK or toast on either release.
-  2. Stopped: chord held, tap a trig → that sequence is on the track at once (red); releasing
-     the chord closes Clyps. Latched (released without loading): `[YES]` loads the cursor slot,
-     a trig loads, `[NO]` closes.
-  3. Playing, CHAIN AFTER at its default (the pattern length): chord held, tap a trig → the slot lights **yellow**; at
-     the end of the pattern it turns **red** and the new sequence plays from step 1, on time.
-  4. Playing, CHAIN AFTER = 4 (PER TRACK pattern): the yellow slot lands at the next 4-step CHAIN AFTER point and plays
-     **in step with the other tracks** (not from its step 1), e.g. a 64-step sequence loaded at
-     step 9 continues from its step 9.
-  5. Playing, a 2x-scale track loaded onto a 1x track: lands on time at the double rate.
-  6. Re-picking the slot already playing cancels a cue (yellow goes away); a stock pattern
-     change landing first drops the cue.
-  7. After each close the panel behaves as stock; repeat in a loop in both chord orders.
+- **CLYPS (WIP, test image `140C_CLYP6`)** — not in it yet: DIRECT JUMP timing, originals
+  (`ORIG` / `[PAGE]`), saved sequences (`[FUNC]`+`[YES]`/`[NO]`), FULL loads, the page LEDs. Use
+  a project with a few patterns whose tracks differ (lengths, a 2x track, one pattern in
+  PER TRACK mode with CHAIN AFTER = 4).
+  A. Opening and closing
+     1. Hold `[PTN]`, press `[BANK]`: the Clyps window opens (header `T<n> BANK <x>`,
+        `LOAD: SEQ`, 2 × 8 slots); the trigs light (full green = sample/note trigs, half green
+        = other data only, off = empty, red = the sequence on the track). Release: no SELECT
+        PATTERN, no SELECT BANK, no toast. Repeat with `[BANK]` first (SELECT BANK may flash
+        for a moment: no release deferral in this image).
+     2. Released without loading: the window stays (latched). `[NO]` closes it.
+     3. After every close: `[PTN]` alone → SELECT PATTERN, `[BANK]` alone → SELECT BANK,
+        trigs edit, every key responds.
+  B. In Clyps (held or latched)
+     4. UP/DOWN move the cursor 1 → 16 and wrap; LEFT/RIGHT change the bank A ↔ P and wrap,
+        holding repeats quickly; the slots and trig LEDs follow.
+     5. A TRACK key changes the track; the header (`T<n>` / `M<n>` on the MIDI side), slots
+        and LEDs follow.
+     6. Holding `[FUNC]` shows `LOAD: SEQ+MCH/FX` in the header (label only for now).
+  C. Loads, transport STOPPED
+     7. Chord held, tap a trig: that slot's sequence is on the track at once, its LED red;
+        Clyps stays until you release the chord, then closes.
+     8. Latched: move the cursor, `[YES]` → loads it and closes; or tap a trig → loads, closes.
+     9. The bank shows unsaved changes afterwards (a load is an edit); stock reload brings the
+        saved sequence back.
+  D. Loads, transport PLAYING
+     10. Pattern with CHAIN AFTER at its default: chord held, tap a trig → the slot turns
+         **yellow**; at the end of the pattern it turns **red** and the new sequence plays from
+         step 1, on time.
+     11. PER TRACK pattern, CHAIN AFTER = 4: the load lands at the next 4-step point and plays
+         **in step with the other tracks**; e.g. a 64-step sequence picked around step 9 enters
+         at its own step 9 (or the next 4-step point), not at step 1.
+     12. A 2x-scale track loaded onto a 1x track (and the reverse): lands on time at its own rate.
+     13. Pick a slot, then the slot already playing: the yellow cue is cancelled.
+     14. Cue a sequence, then cue a stock pattern change that lands first: the Clyps cue is
+         dropped.
+     15. Cue on several tracks (change track with TRACK keys between picks): all land at the
+         same point.
+  E. Stress: repeat A–D in a loop, both chord orders, holding and releasing in different
+     orders. Nothing sticks: no stuck window, no dead keys, no frozen panel.
 
 ---
 
