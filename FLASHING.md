@@ -141,6 +141,12 @@ quick check for each:
   audio in them.
 - **RELOAD_FROM_PROJECT** — save the bank, change a track's trigs, then `[PTN]` +
   `[TRACK n]` while playing: the saved trigs come back without the transport stopping.
+  **MIDI tracks (fix of 2026-10-25):** in a pattern, give MIDI track 2 and audio track 2 a few
+  trigs each, SAVE the project, then change both tracks' trigs (unsaved). On the MIDI tracks
+  (`[MIDI]`), `[PTN]` + `[TRACK 2]` → `TRK SEQ RELOADED`: M2 is back to its saved trigs, and
+  audio T2 (back on the audio side) still has your unsaved change. Same with `[BANK]` +
+  `[TRACK 2]` (sequence + the saved Part; change a MIDI track setting after saving the Part to
+  see the Part come back). On the audio side `[PTN]` + `[TRACK 2]` still reloads T2 only.
 - **QUANTIZE_LIVE_REC_TOGGLE** — hold `[REC]`, tap `[PLAY]` → toast `LIVE REC: QUANTIZED` or
   `LIVE REC: UNQUANTIZED`; tap `[PLAY]` again while it is up → the setting inverts. With
   PROJECT → PERSONALIZE open, the QUANTIZE LIVE REC check mark changes at the same moment.

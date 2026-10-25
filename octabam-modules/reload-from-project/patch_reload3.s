@@ -197,7 +197,7 @@
     .equ CUR_BANK,  0x80000002          | UI-side bank; NOT ACT_PAT's partner (see above)
     .equ CUR_PART,  0x80000003          | the Part the sounding pattern is assigned to (byte)
     .equ CUR_TRACK, 0x80000000          | UI-selected track (byte 0..7 ; mirror 0x100b14cc)
-    .equ MIDI_MODE, 0x80000012          | != 0 -> the MIDI pages are up (track index means MIDI track)
+    .equ MIDI_MODE, 0x80000012          | LONG, != 0 -> the MIDI pages are up (track index means MIDI track)
     .equ RELOAD_NOW,0x46c8028a          | step engine polls this at 0x400a2530
     .equ POPUP2,    0x4005a0e0          | FUN_4005a0e0(text) -- bare text box, no timeout
     .equ CLOSE_CB,  0x40056bc0          | FUN_40056bc0 -- close the 0x460d1e64 popup
@@ -1082,8 +1082,11 @@ rl3_arm_n:
     .ifdef RL_DIAG
     move.b  %d0,rl_dc+2                | DIAG: track, as the chord armed it
     .endif
-    moveq   #0,%d0
-    move.b  MIDI_MODE,%d0
+|   2026-10-25: MIDI_MODE (0x80000012) is a LONG -- stock only ever reads and writes it with
+|   tst.l / clr.l / move.l (the [MIDI] toggle 0x40055548). This used to be `move.b`, i.e. its
+|   high byte, which is always 0: on the MIDI tracks [PTN]+[TRACK n] / [BANK]+[TRACK n] reloaded
+|   AUDIO track n. Found by CLYPS (the same mistake), reproduced by tools/diag_reload_midi.py.
+    move.l  MIDI_MODE,%d0
     beq.b   rat_aud
     moveq   #1,%d0
 rat_aud:

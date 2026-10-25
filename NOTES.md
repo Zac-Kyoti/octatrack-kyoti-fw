@@ -37284,3 +37284,26 @@ are not copied (LICENSE item 4).
   flashed). Not submitted: Modwerk's beta base pins the 0.1.x SC sources in `resident_dsp.py` and
   `stock_hook_controllers.py` and patches the DSP text, so 0.2.0 needs the base updated; the user
   chose to ask Jannik first whether he does the base side or we do.
+
+## Session 132 (2026-10-25, `reload-midi`) — RELOAD_FROM_PROJECT reloaded the AUDIO track on the MIDI side (FIXED, WIP, NOT flashed)
+Found while building CLYPS (the same mistake there). `0x80000012`, the "MIDI tracks are showing"
+flag, is a LONG: stock only uses tst.l / clr.l / move.l on it (the [MIDI] toggle `0x40055548`
+sets it with `move.l #1`). `rl3_arm_n` read it with `move.b`, i.e. its high byte, which is always 0.
+So on the MIDI tracks `[PTN]+[TRACK n]` and `[BANK]+[TRACK n]` reloaded AUDIO track n's sequence,
+and the toast said RELOADED. The Part half (`0x4004aab4`, the whole Part) was never affected. It
+has been in every build since the chord redesign.
+- **Fix:** `move.l MIDI_MODE,%d0` (one instruction, 2 B shorter).
+- **Gate:** `tools/diag_reload_midi.py` (JAM2, which loads with the MIDI tracks showing). It blanks
+  M2's and T2's trig masks in RAM, then drives real key events.
+  - FINAL (`ee380bb6…` standalone mainos `607a7d73…`): FAIL — M2 stays blank, T2 reloaded.
+  - Fixed: PASS — M2 is back to its **saved** bytes (`bank01.strd`; the project loads `.work`,
+    which differs), and T2 is untouched.
+  - `--chord bank`: PASS, and the Part reload runs once, for the playing pattern's Part.
+- **Builds (WIP until re-promoted):**
+  - standalone `140C_RL3MD`;
+  - Bugbuild `BUG_RL3`;
+  - KYOTI V1.6 (mainos `c2692220…`). Its diff vs the promoted V1.6 `39021805…` is two detour targets
+    (`0x40023c67`, `0x40085869`, shifted by the 2 B) and RELOAD's DRAM payload only.
+- **Hardware check:** FLASHING.md §4, RELOAD_FROM_PROJECT, "MIDI tracks".
+- **Afterwards:** re-pin RELOAD, BUG_RL3 and KYOTI V1.6 on promotion; the octabam
+  reload-from-project pin needs the same fix.
