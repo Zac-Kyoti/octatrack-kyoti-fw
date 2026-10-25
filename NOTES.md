@@ -37307,3 +37307,8 @@ has been in every build since the chord redesign.
 - **Hardware check:** FLASHING.md §4, RELOAD_FROM_PROJECT, "MIDI tracks".
 - **Afterwards:** re-pin RELOAD, BUG_RL3 and KYOTI V1.6 on promotion; the octabam
   reload-from-project pin needs the same fix.
+- **2026-10-25, promoted (the user's instruction)** after the standalone `140C_RL3MD` was flashed
+  and passed the FLASHING §4 MIDI check ("all good"). Pins: standalone `439aa320…`, `BUG_RL3`
+  `0881b726…`, KYOTI V1.6 `c2692220…`. In this worktree, seven Bugbuilds were rebuilt and match
+  their pins. The BLACKPYRAMIDS_303 Bugbuild needs the DSP assembler under the main checkout's
+  `out/`, so the remaining three are checked there.

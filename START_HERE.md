@@ -227,6 +227,15 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 - **DIRECT_JUMP_KYOTI / RELOAD_FROM_PROJECT standalones and their Bugbuilds** — re-pinned
   2026-10-08 with the review fixes; same sources as V1.2/V1.3, not flashed on their own. The
   DIRECT JUMP standalone now folds in MIDI_PLAYS_FREE_FIX.
+- **RELOAD_FROM_PROJECT** — **FINAL 2026-10-25: the MIDI-side fix.**
+  - The MIDI-tracks flag `0x80000012` is a long and was read as a byte, so on the MIDI tracks the
+    chords reloaded the audio track.
+  - Confirmed on the author's MKI with the standalone: on the MIDI tracks the chords reload the
+    MIDI track, and the audio track is left alone.
+  - Pins: standalone mainos `439aa320…`, `BUG_RL3` mainos `0881b726…`, KYOTI V1.6 mainos
+    `c2692220…` (syx `94d84ff6…`).
+  - Emulator gate `tools/diag_reload_midi.py`.
+  - The octabam reload-from-project pin needs the same fix.
 - **RELOAD_FROM_PROJECT** — re-pinned **FINAL 2026-10-16** (the user's instruction) with PR #3
   (Ilia Murzinov): `[CUE]` + `[TRACK n]` no longer reloads a track. Confirmed on Ilia's MKII,
   not yet on the author's MKI. Standalone mainos `607a7d73…` (syx `2602870e…`), `BUG_RL3`
