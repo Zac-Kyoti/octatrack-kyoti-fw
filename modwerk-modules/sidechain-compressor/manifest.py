@@ -58,7 +58,7 @@ the filters' bit-exact model) runs from four DspHooks:
     scinit     COMPRESSOR init: the key filters start over (another effect in the slot may
                have used their r7 words)
 State at COMPRESSOR's r7+$1c..$2d (free while COMPRESSOR runs: an r7 canary, emulator and
-hardware, 2026-10-19). The 16 + 49 table words are one ptable.
+hardware, 2026-10-19). The 16 KEY GAIN words are the ptable and the 49 key-filter words the ptable2.
 
 CLAIMS. Core-private Y $7f0-$9ff (MON words, keybus) on both cores, and the last $202 words of
 each core's half of the shared window (A $33dfe.., B $3bdfe..).
@@ -97,13 +97,9 @@ SWITCH_FN = 0x40046f10          # stock 2-position switch (FILTER's HOLD)
 
 _SAME = {"@KGNA@": f"${_sc.kgn_smooth_a():x}",
          **_kf.asm_tokens(),
-         # `nop`: a cycle between writing r1 and reading through it, and the same
-         # two words as the standalone's `move #>FTAB,r1`, so nothing after it moves.
-         "@FTAB_R1@": "lua     (r1+$10),r1\n        nop",
          # The keybus and MON words at Session 115's Y:$7f0..$9ff, which no FX2 slot reaches
          # (the standalone builder's KEYBUS puts them in the first internal slot's tail).
          "@KEYB@": "$800", "@KEYB1@": "$820", "@MONB@": "$7f0"}
-assert _sc.GAIN_N == 0x10, "@FTAB_R1@'s offset is the KEY GAIN table's length (the key-filter table follows it)"
 
 # At the standalone image's own address (tools/build_sidechain_compressor.py).
 LINKED = (
@@ -172,7 +168,8 @@ MODULE = Module(
         asm=os.path.join(_TOOLS, "patch_sc_dsp3.asm"),
         priority=30,
         ybase=YBase.NEVER,            # COMPRESSOR is on FX1; the bases come from subst
-        ptable=tuple(_sc.gain_table()) + tuple(_kf.GT),
+        ptable=tuple(_sc.gain_table()),
+        ptable2=tuple(_kf.GT),
         hooks=(
             DspHook({"A": 0x004a7, "B": 0x0029c}, stock_dsp_words("A", 0x004a7, 2, "92441a8fc9f1dd20359d87c8342e3d5653d8c853a274358df0cfc0451c57115b"), "sctap",
                     "dispatcher: publish every track's audio"),

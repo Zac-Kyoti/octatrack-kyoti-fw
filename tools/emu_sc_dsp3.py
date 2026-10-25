@@ -53,6 +53,9 @@ SYMS = {}
 # --patched: regenerate payload B's .mem from out/mainos_sidechain_compressor.bin -- the
 #   cave is over the real donor and the three detours are live.
 PATCHED = "--patched" in sys.argv
+# --ftab-lua: the key-filter table base as octabam's wrapper had it until 2026-10-24,
+#   `lua (r1+$10),r1` from the KEY GAIN base (wrong since the gain store moved r1 to r5+$20).
+FTAB_LUA = "--ftab-lua" in sys.argv
 if PATCHED:
     MEM_B = SCRATCH / "payload_B_sc3.mem"
     CAVE_ORG = 0x1012                   # SPRING REVERB P addr, payload B (Session 76 continued)
@@ -125,7 +128,8 @@ def assemble():
                              .replace("@FOREIGN_BR@", "bne zz24") \
                              .replace("@KEYB@", f"${KB_BASE:x}").replace("@KEYB1@", f"${KB_BASE + 0x20:x}") \
                              .replace("@MONB@", f"${MON_BASE:x}") \
-                             .replace("$fab1e0", f"${gt:x}").replace("@FTAB_R1@", f"move    #>${ft:x},r1") \
+                             .replace("$fab1e0", f"${gt:x}").replace("move    #>$fab2e0,r1", "lua     (r1+$10),r1\n        nop" if FTAB_LUA
+                                                                     else f"move    #>${ft:x},r1") \
                              .replace("@LPEDGE@", f"${sc_tables.lp_edge():x}") \
                              .replace("@HPEDGE@", f"${sc_tables.hp_edge():x}") \
                              .replace("@KGNA@", f"${sc_tables.kgn_smooth_a():x}")
@@ -154,7 +158,8 @@ def assemble():
     d = sh(DIS, "-in", SCRATCH / "sc3_code.bin", "-pc", f"{CAVE_ORG:x}", "-le")
     if " dc " in d or "InvalidInstruction" in d or "mpysu" in d or "macsu" in d:
         sys.exit(f"cave did not round-trip clean:\n{d}")
-    bad = dsp_asm_util.mnemonic_mismatches((SCRATCH / "sc3_test.asm").read_text(), d)
+    # (the disassembler lists no line for --ftab-lua's nop, so the round trip would misalign)
+    bad = [] if FTAB_LUA else dsp_asm_util.mnemonic_mismatches((SCRATCH / "sc3_test.asm").read_text(), d)
     if bad:
         sys.exit("dsp_asm encoded instructions as something else:\n" +
                  "\n".join(f"  #{i}: {s}  ->  {x}" for i, s, x in bad))

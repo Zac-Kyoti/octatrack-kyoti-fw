@@ -26,12 +26,10 @@
 ;   the KEY GAIN table's base -- the one 6-hex-digit `fab1e0` literal below
 ;            (octabam's ptable marker, so it appears nowhere else in this file):
 ;            absolute P addr of the 16-word KEY GAIN table (gain/64, Q23); the
-;            32-word KEY FLT table (a = 1-exp(-2pi fc/fs), Q23) follows it
-;   FTAB_R1 (the token at zz06, in @s)  r1 = the KEY FLT table: `move #>FTAB,r1` (the standalone
-;            builder, unchanged bytes), or `lua (r1+$10),r1` from the KEY GAIN
-;            base still in r1 (octabam: one table literal; r1 is not written
-;            between the two reads, and the KEY GAIN read runs on every path
-;            to zz06)
+;            49-word key-filter table follows it in the standalone
+;   the key-filter table's base -- the one `fab2e0` literal below (octabam's ptable2
+;            marker; the standalone builder writes its own address). It cannot come from
+;            the KEY GAIN base: the gain store points r1 at r5+$20 first.
 ;   @LPEDGE@ literal Q23 immediate, LP's near-OFF edge-override coefficient
 ;   @HPEDGE@ literal Q23 immediate, HP's near-OFF edge-override coefficient
 ;   @KGNA@   literal Q23 immediate, KEY GAIN's block-rate smoothing coefficient
@@ -445,7 +443,7 @@ zz22:
 ; builders' mnemonic round trip (dsp_asm_util.mnemonic_mismatches) refuses any such swap.
 ; Registers: a, b, x0, x1, y0, y1, r0, r1, n1, r4 (r4 is reloaded at every scdet exit,
 ; r0 by the redirect at zz16). r5 (the stash base) is not touched.
-        @FTAB_R1@
+        move    #>$fab2e0,r1
         move    x:(r6+$e),b           ; (q1) KBAS|KWID word
         asr     #$10,b,b
         move    b1,a                  ; (q3) a = KBAS 0..127

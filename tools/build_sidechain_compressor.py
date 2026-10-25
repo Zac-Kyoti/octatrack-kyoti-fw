@@ -246,7 +246,7 @@ def sc_assemble(tok, org):
                .replace("@FOREIGN_BR@", tok["foreign_br"])
                .replace("@KEYB@", KEYBUS["keyb"]).replace("@KEYB1@", KEYBUS["keyb1"])
                .replace("@MONB@", KEYBUS["monb"])
-               .replace("$fab1e0", f"${gt:x}").replace("@FTAB_R1@", f"move    #>${ft:x},r1")
+               .replace("$fab1e0", f"${gt:x}").replace("$fab2e0", f"${ft:x}")
                .replace("@LPEDGE@", f"${sc_tables.lp_edge():x}")
                .replace("@HPEDGE@", f"${sc_tables.hp_edge():x}")
                .replace("@KGNA@", f"${sc_tables.kgn_smooth_a():x}"))
