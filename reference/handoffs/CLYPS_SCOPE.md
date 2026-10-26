@@ -59,9 +59,9 @@
      per-unit bss.
 4. **Later:** an octabam module; names (§10); the TRACK_PASTE_DESIGNER_FIX Bugfix candidate
    (NOTES Session 131 cont. (3); the user still has to observe it on stock).
-5. **Open with the user:** what a slot shows after a load onto the playing pattern (§8b end).
-   Picking the playing pattern's own slot after a load is still a no-op; `ORIG` / [PAGE] is the
-   way back.
+5. **Decided (the user, 2026-10-25):** after a load onto the playing pattern, its own slot shows
+   the loaded copy (the keep rule, as built). Picking that slot is a no-op; `ORIG` / [PAGE] is the
+   way back to what it held before.
 
 **Traps already paid for.** Read them before writing code.
 - **Key records must copy T1's hold delay/repeat for every key they override** (T1 `0x400bfc10`).
@@ -1045,9 +1045,8 @@ The ROM keeps only the guarded detours:
     / [NO] / [PAGE] (sub-maps chain, §0 traps; fixed with our `cl_fsub`); the project-load hook sat
     on `0x40090504`, which a LOAD PROJECT never runs (moved to `0x400905d4`).
   - **Renders:** `out/clyps/v9/` (SAVED box, ORIG box, `SAVED` while the saved sequence plays).
-- **Open, asked of the user:** what a slot shows after a load onto the playing pattern. The keep
-  rule shows the loaded copy in the playing pattern's own slot; the user expected that slot to
-  keep showing the pattern's own (pre-load) sequence.
+- **Decided (the user, 2026-10-25):** after a load onto the playing pattern, its own slot shows the
+  loaded copy (the keep rule, as built). What it held before is reached through `ORIG` / [PAGE].
 - **Screen rendering in the emulator** (`tools/clyps_render.py`). Stock's compositor
   `0x40013abc` (the UI task runs it when RDRAW is set) is called directly. Read its double-buffered
   target `[0x400b9710]` **before** the call. It has the LCD plane's rotated layout.
