@@ -493,6 +493,20 @@ p-locks read as empty, because `FUN_4009a464` scans only trig masks) is precisel
 - Verified end to end: 32 slots written from the host, then loaded, previewed and
   trigged on the unit.
 
+### The `.ot` attribute file — what the firmware writes (2026-10-25, C, our reading)
+
+The serializer `0x40089940..` (checksum accumulated in `0x460fab5c`) writes, from the 1096-byte slot struct
+(`0x100b14f0 + id·1096` FLEX/PICKUP, `0x100d5b30 + id·1096` STATIC): the header constants at `0x400d1670..`, then
+`+296` (1 B), `+276`, `+284`, `+288` (tempo constants, 4 B each), **`+272` the TIMESTRETCH mode (4 B)**, `+292`
+(4), `+268` (2), `+297` (1), the trim trio `+300/+304/+308`, 64 slice records of 12 B from `+312`, the slice count
+`+1092`, and the checksum. No analysis data (onsets or transients) is persisted; BEAT's snap candidates are found
+live by the timestretch task (`memory-map.md`). ⚠️ An earlier outside reading ("only slices, trim and checksum")
+read only the tail at `0x40089cc8`.
+**Consequence for VARISPEED:** ATTR TIMESTRETCH = VARI is saved as **4** here, and a Part's TSTR VARI is saved as 4
+too. Stock 1.40C stores the mode unchecked and plays 4 as NORMAL stretch. Its TSTR formatter `0x4003b6a4` bounds
+with `cmp #4; bcc` (off by one), so a 4 indexes one past its 4-string table: expect junk text, not a crash
+(not hardware-checked).
+
 ⚠️ **CRLF trap:** these project files are CRLF, and a regex `^KEY=.*$` **eats the
 `\r`**. Anchor on `[^\r\n]*` instead. (Relevant to any of our tooling that parses
 `project.work` / `markers.work` by line.)

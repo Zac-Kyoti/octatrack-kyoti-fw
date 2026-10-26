@@ -37346,3 +37346,75 @@ has been in every build since the chord redesign.
   smoothing raises it. Dropped (the user: no added latency).
 - **Promoted 2026-10-25** after `140C_SCKD3` passed on the author's MKI. KYOTI: `patch_qlrec`
   moved to the SPRING zone (UI-path code ran there in V1.2-V1.3) so SAFE fits SC's 698 B.
+
+## 2026-10-25 (`ts-sram`) — the stock timestretch task owns SRAM `0x80006924..0x80007873`; MUTE_MODES' SHADOW moved out (WIP, NOT flashed)
+
+**Trigger:** Bryan T (USB-audio work) reported that the code at `0x400983xx–0x400989xx` uses SRAM
+`0x80006964..0x80007873` through static `lea`/`movea` sites, and that several of our modules keep state
+there: MUTE MODES `0x80006c66`, DIRECT JUMP `0x80006a40-44`, RELOAD2 `0x80006a50-53`, QLREC `0x80006a5c/60`.
+A second, older note of his maps the grain engine. Both were checked against our image before use.
+
+**What the code is (C, our disassembly).** It is the stock **timestretch helper task**: prio 1, TCB
+`0x46105508`, entry `0x40098a5c`, created at `0x40098a2c` (the kb task table's "❓" row). It loops over the
+8 tracks during playback, not only when a sample is analyzed:
+- **splice search** `0x4009871c`: W1 512 × 16-bit at `0x80006964`, W2 1024 at `0x80006d64`, a ×4-decimated
+  copy at `0x80007574..0x80007873`, lag weights from ROM `0x400d7e7c`; result → `0x80006924 + 8t`;
+- **transient detector** `0x400985ac` → `0x40098388`: 768 × 32-bit at `0x80006974`. Its threshold table
+  is ROM `0x400d7c7c` (128 entries), indexed by **TSNS** (lane raw byte 5). Hits go into the BEAT marker
+  ring at `0x80003c88 + 64t`, which answers Bryan's open question about who writes that list.
+
+Nothing in the area persists between calls, but the task rewrites all of it with audio on every grain.
+That is the "0x80006a40+ is overwritten on hardware" of Sessions 95 and 98: route A never streams samples,
+so the emulator never showed it.
+
+**Our modules (all 26 FINAL images scanned for changed words pointing into the range).** DIRECT JUMP,
+RELOAD and QLREC were already out (cave state since Sessions 95-98; Bryan's addresses survive only in
+comments). **MUTE_MODES' SHADOW `0x80006c66` was live** in the standalone, BUG_MM, KYOTI V1.6, and the
+octabam/Modwerk forms. `pre` (frame ISR, level 5) wrote it every frame in every mode, OT included (route
+A: 300 writes in 300 frames). OTFX read it back for the mute edge.
+- **MUTE_MODES → timestretch:** Python model of the splice search on 1,263 grains of real audio, with
+  the worst case of the write landing in every search. The lag changes on 3.0% of grains (OT, `clr.b`)
+  or 5.6% (OTFX, T2 muted). When it changes, the normalized-correlation loss has median ~0 and max 4%.
+  Moving the grain by one sample changes the lag 3.7% of the time on its own. The transient detector's
+  hit is at -96 dB. Verdict: inaudible, and the lag stays clamped, so no crash path.
+- **Timestretch → MUTE_MODES (the real bug):** in OTFX, audio bytes in SHADOW can mask a newly muted
+  track's 0->1 edge, so its note-off never fires (the mute doesn't take). Reproduced in route A by poking
+  `0xff` there before muting T3 (`tools/emu_mute_modes_shadow.py`, old image: FAIL, no note-off).
+
+**Fix (branch `ts-sram`, commit held until hardware + promotion):** SHADOW is a byte at the end of
+`patch_softmute`'s own unit, like KEYMASK (cave/DRAM RAM). Operands are forced to `(SHADOW).l`, because
+GAS otherwise relaxes the reads to PC-relative and shifts the unit. Each image differs from its FINAL
+only in the seven SHADOW operands:
+- standalone SHADOW `0x400d77c8`: a new byte, unit 968 → 970 B;
+- KYOTI `0x400d7a7d`: KEYMASK's alignment pad, so no unit moves.
+The old source reproduces every pin (MM `b5e24316…`, BUG_MM `2c5600dc…`, KYOTI `0dda8919…`). The Modwerk
+copy got the same edit, and the octabam manifest references are recomputed (plain 970 B `ca7792be…`,
+SC_KEY 1086 B `9be6df77…`; the old ones `d56d848e…` / `8814aa2c…` reproduce from the old source).
+`seal()` (`tools/kyoti_status.py`) now refuses, for every builder, any changed word pointing into
+`0x80006924..0x80007873` (`KYOTI_ALLOW_STOCK_SRAM=1` for a coincidental byte pattern). It flags exactly
+the three old MUTE_MODES images and nothing else, so it ships with the MUTE_MODES promotion.
+
+**Emulator (route A, logic only), `tools/emu_mute_modes_shadow.py`, OT DEMO:** new standalone ALL PASS;
+new KYOTI V1.6 ALL PASS; old standalone 1 FAIL (the replayed clobber).
+- OT: SHADOW 0, no write to `0x80006c66`.
+- OTFX, T2 muted: SHADOW 0x02, one note-off (T2), REL_STATE 0x02.
+- `0xff` poked at `0x80006c66`, then T3 muted: T3's note-off fires, SHADOW 0x06.
+The other Bugbuilds match their pins (BUG_BP303 not buildable in this worktree; it has no MUTE_MODES).
+
+**Builds (WIP, NOT flashed, worktree `octatrack-kyoti-fw-ts-sram`):**
+- standalone `140C_MMSH1`: mainos `560de340…`, syx `894ce79b…`, CF `.bin` `d69afad4…`;
+- BUG_MM: mainos `2b5f7c70…`, syx `46a75da2…`;
+- KYOTI V1.6: mainos `ee59be31…`, syx `dd9dbec2…`, CF `.bin` `be300060…`.
+
+**Also from the check (KB updated: `memory-map.md` Timestretch, `caves.md` §1, `file-format.md` `.ot`):**
+- `0x4000f938` (called at `0x40000512`) loads the whole image tail `0x401086f4..0x4010fdf0` into SRAM
+  `0x80000000..0x80007873`. That is why the tail's zero runs have no references: they are SRAM's
+  initial values.
+- The `.ot` serializer writes the TIMESTRETCH mode (`+272`) and more; Bryan's "slices, trim and
+  checksum only" read just the tail at `0x40089cc8`.
+- Bryan's crossfade table (exact sin² law, complementary), the 512/6143 constants and the voice structs
+  all check out.
+- **VARISPEED:** VARI is raw TSTR 4. It is saved in the Part and, as an ATTR, in the sample's `.ot`.
+  Stock resolve (`0x40007da8..dbc`) stores the mode unchecked and plays 4 as NORMAL. Stock's TSTR
+  formatter `0x4003b6a4` bounds off by one (`cmp #4; bcc`), so it probably shows junk text. FLASHING §5
+  and both VARISPEED READMEs now say to clear VARI before reverting to stock.

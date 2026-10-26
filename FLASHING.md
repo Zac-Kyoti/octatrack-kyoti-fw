@@ -195,7 +195,13 @@ quick check for each:
 Reflash the official one with the **same steps in §3**, sending
 `downloads/extracted/OCTATRACK_OS1.40C.syx`. Your CF card and projects are not affected.
 Nothing the features store survives a revert except the PERSONALIZE block, which an EMPTY
-RESET clears.
+RESET clears, and one VARISPEED setting:
+
+- **VARISPEED / VARISPEED_EMUS / KYOTI: set every VARI back to OFF, AUTO, NORM or BEAT
+  before reverting, and save.** A track's `TSTR` VARI is saved in the Part, and a sample's
+  audio-editor TIMESTRETCH VARI is saved in its `.ot` file. Stock firmware does not know
+  the value: it plays such a track with NORMAL timestretch instead of tape-style, and its
+  `TSTR` field may show junk text.
 
 ---
 

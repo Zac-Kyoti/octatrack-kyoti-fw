@@ -209,7 +209,7 @@ hook on `task_create`; we previously had only the entry points):
 | 2 | `0x460ffd44` | `0x400921c4` | `0x460fdd44` +0x2000 | ❓ |
 | 2 | `0x460e0e38` | `0x4009203c` | `0x460dee38` +0x2000 | ❓ (ping-pongs with sys) |
 | 1 | `0x460ddde4` | `0x4008445c` | `0x460d9de4` +0x4000 | **engine** — 46-opcode dispatcher, queue **`0x460d17ce`**; **RELOAD BANK = types `0x14` and `6`** |
-| 1 | `0x46105508` | `0x40098a5c` | `0x4610555c` +0x2000 | ❓ |
+| 1 | `0x46105508` | `0x40098a5c` | `0x4610555c` +0x2000 | **timestretch helper** (C, our reading 2026-10-25): per track, the splice search `0x4009871c` (result → `0x80006924`+8t) and the transient detector `0x400985ac` (→ the marker ring at voice+12); work area SRAM `0x80006924..0x80007873` — see the SRAM section below |
 | 1 | `0x46c7bed8` | `0x40061a94` | `0x460d6de4` +0x2000 | sys: serial + SPI start-up, then creates storage, UI, p3 |
 | 0 | `0x46c7ae84` | `0x4001f834` | top `0x46c7becc` | main: init list, then `bras .` at `0x4001fc9c` = **idle** |
 
@@ -743,6 +743,21 @@ EDITOR; `FUNC+DOWN` inserts a row (`arranger_row_editor` increments the count wi
 | `FUN_400836d8` | C | voice release phase handler; `phase==1` branch. No-op for FLEX/STATIC. | NOTES L2683, L2760 |
 | `0x46c7ff42` | L | Per-voice **pre-FX amp** array. Stride 4, 8 voices. Filled every frame by `FUN_4000d16c` at `0x4000d36e`. Sits right below `_DAT_46c7ff64`. Candidate lever for the 4th mute mode. | NOTES Session 14 |
 | `FUN_4000d16c` | C | Per-frame voice-parameter fill (writes `0x46c7ff42[t]`) | NOTES Session 14 |
+
+### Timestretch: the helper task, its SRAM, the markers (new 2026-10-25)
+
+> source: our disassembly of `section_3_MAIN_OS.bin`, checking Bryan T's notes (USB-audio work, Sept–Oct 2026).
+> confidence: **C** unless marked. NOTES "2026-10-25 (`ts-sram`)".
+
+| Addr | Conf | What |
+|---|---|---|
+| task `0x40098a5c` | C | **Timestretch helper**: prio 1, TCB `0x46105508`, created at `0x40098a2c`. Loops over the 8 tracks while they play (FLEX/STATIC/PICKUP voices); sleeps on semaphore `0x4610755c`. Lowest working priority, so every interrupt and every other task preempts it. |
+| `0x4009871c` | C | **Splice search** (SOLA-style): window W1 = 512 × 16-bit at `0x80006964`, W2 = 1024 at `0x80006d64` (from P and P−256), ×4-decimated copy at `0x80007574..0x80007873`. Coarse search over 128 lags weighted by the ROM table `0x400d7e7c` (≈−0.8 at the edges to −1.0 at the centre), then a 12-lag fine search. Result = lag − 256, clamped. Written under IPL 7 to `0x80006924 + 8t` {position, lag}, read back by `0x4009870c`. |
+| `0x400985ac` → `0x40098388` | C | **Transient detector**: 768 × 32-bit samples at `0x80006974`, biquad + envelope. Threshold = the 128-entry monotonic ROM table `0x400d7c7c`, indexed by the lane's raw byte 5 = **TSNS** (`0x80000510 + 384·buf + 48t + 29`; +28 is TSTR, which VARISPEED's hook confirms). Hits go into a 4-entry ring at voice+12's block, `0x80003c88 + 64t` (+12..+24, index at +8; store at `0x40098698`). These are BEAT mode's snap candidates. |
+| `0x80006924..0x80007873` | C | **The helper's work area.** Nothing in it persists between calls (each call fills before it reads), so writes between calls are harmless and writes during one corrupt it. In return it rewrites the whole area with audio on every grain. **Not patch RAM.** It caused the Session 95/98 losses at `0x80006a40+`, and MUTE_MODES' SHADOW (`0x80006c66`) lived there until 2026-10-25. |
+| `0x80004000..0x800047ff` | C | Crossfade gains: 512 × u32, T[i] = round(2³¹·sin²(π/2·(i+1)/513)), exactly complementary (T[i] + T[511−i] = 2³¹). Fade length 512 source samples (`0x400084bc`, `0x40008a94`). |
+| voice +24 (`a2@(24)`) | C | Resolved timestretch mode, set at `0x40007dbc`: 0 OFF · 1 AUTO · 2 NORMAL · 3 BEAT. A window ≤ 6143 samples forces OFF; AUTO takes the sample's attribute `+0x110`; PICKUP with 0 → NORMAL. **Stored unchecked**; the engine tests only 0, 1 and 3, so any other value plays as NORMAL. |
+| `0x4000f938` | C | **Boot SRAM loader** (called from `0x40000512`): image `0x401086f4..0x4010c57b` → SRAM `0x80000000..`, zeroes to `0x80004000`; image `0x4010c57c..0x4010fdef` → `0x80004000..0x80007873`, zeroes to `0x80008000`. So the whole image tail is SRAM's initial contents; see `caves.md` §1. |
 
 ## Mute / solo / cue
 

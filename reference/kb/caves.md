@@ -100,6 +100,10 @@ the image that points into them:
 | `0x400d24d0 .. 0x400d2ce0` | 2,064 B | 1 | ⚠️ contested — octabam's `modules/menushortcut` pins 300 B here; our KB calls it `SAFE_CAVE` (midisc's). |
 | `0x4010c350 .. 0x4010c57e` | 558 B | 2 | ❓ **unclaimed** — but it sits between the two proven-live tail runs, so treat it as live until a canary clears it. |
 
+**Why the tail has no references (2026-10-25, C):** it is **on-chip SRAM's initial image**. The boot routine `0x4000f938` (called from `0x40000512`) copies `0x401086f4..0x4010c57b` to SRAM `0x80000000..` and `0x4010c57c..0x4010fdef` to `0x80004000..0x80007873` (each half zero-filled to its 16 KB end). Only the loop's bounds point into it. Every byte there is the boot value of a stock SRAM variable (the timestretch crossfade table at `0x4010c57c`, the voice structs, the kernel's lists, the PERSONALIZE block); a zero run is a run of zero-initialised variables. Patching it changes stock state at boot, before a single patch instruction runs. Octalab's hardware failure at `0x401087e4` (= SRAM `0x800000f0`) is consistent with that, though it does not fully explain why the bytes read back changed after boot.
+
+**Also live: right after the classic cave.** The two timestretch ROM tables at `0x400d7c7c` (TSNS thresholds, 512 B) and `0x400d7e7c` (splice-lag weights, 512 B) are stock data (`memory-map.md`, Timestretch). No build may extend past `0x400d7c3c` into them.
+
 **⛔ The tail of the image is not free space.** This is the single most expensive
 lesson available here, and octalab paid it on hardware so we do not have to:
 
