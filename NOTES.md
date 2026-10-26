@@ -37428,3 +37428,15 @@ The other Bugbuilds match their pins (BUG_BP303 not buildable in this worktree; 
 - **2026-10-26:** flashed and all good on the author's MKI: KYOTI V1.6 `0dda8919…` (with
   `patch_qlrec` in SPRING's reclaimed record), octabam OCTABAM33 (pin `b0d49bf`, PR #886
   merged), Modwerk 0.2.0's native image MW_SC021 (`131142e1…`).
+- **2026-10-26: octabam PR [sambanks/octabam#928](https://github.com/sambanks/octabam/pull/928)**
+  (fork branch `kyoti-mute-modes-a1e0288`, base `f8141428`) moves the mute-modes pin `8e00275` → `a1e0288`
+  (module README note, manifest docstring, THIRD_PARTY row). The body carries the note for Sam: stock owns
+  `0x80006924..0x80007873` (the usb README's "no module above `0x80006907`" was false while MUTE_MODES used
+  `0x80006c66`), and a suggestion that the ledger refuse `sram` claims there.
+  - Gates on the rebased tree: make docs no change; verify-docs 0 problems; `make check` for
+    test/mute-modes, test/kyoti-mute-sidechain and test/kyoti-mute-jump all pass; `make reach RUN=1 KEEP=1`
+    every gate passed. Before the rebase, octabam-bus, cxosc-core and octabam also passed. octabam needed
+    numpy added to the scratch venv: `uv.lock` still lacks it (#906's finding).
+  - This octabam form has not been flashed.
+  - Modwerk's MUTE MODES (Jannik's form, pinned to an octabam commit) follows once #928 merges; our
+    `modwerk-modules/mute-modes` copy already has the edit.

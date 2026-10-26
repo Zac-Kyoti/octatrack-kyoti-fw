@@ -160,8 +160,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 - **MUTE_MODES: SHADOW out of the stock timestretch task's SRAM** — **FINAL 2026-10-26** (the user flashed the
   standalone `140C_MMSH1`, BUG_MM and KYOTI V1.6: all good). SHADOW lives in the unit; `seal()` refuses any
   builder's reference into `0x80006924..0x80007873`. Pins: standalone mainos `560de340…`, BUG_MM `2b5f7c70…`
-  (syx `46a75da2…`), KYOTI V1.6 mainos `ee59be31…` (syx `dd9dbec2…`). octabam pin PR for `mute-modes` and the
-  Modwerk MM update: see NOTES "2026-10-25 (`ts-sram`)".
+  (syx `46a75da2…`), KYOTI V1.6 mainos `ee59be31…` (syx `dd9dbec2…`). octabam pin PR **sambanks/octabam#928** (waiting on Sam);
+  Modwerk MM update after it merges: see NOTES "2026-10-25 (`ts-sram`)".
 
 - **Link clips + rotary switches** — **FINAL 2026-10-23** (the user flashed the four standalones: all good):
   BLACKPYRAMIDS_303 draws the clip CUT–RES and DEC–ACC; SIDECHAIN_COMPRESSOR's KEY is a 9-position rotary
