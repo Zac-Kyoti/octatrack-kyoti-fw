@@ -37323,3 +37323,26 @@ has been in every build since the chord redesign.
     has not been flashed.
   - Found on the way, reported in the PR body: octabam's `uv.lock` has no numpy (pyproject's emu
     extra lists it), so `verify_transient.py` fails `make check REMIX=octabam` on main.
+
+### 2026-10-24..25 — SIDECHAIN_COMPRESSOR: octabam/Modwerk table bug, MON 2/3, KEY step handler
+
+- **Bug (octabam + Modwerk forms):** `@FTAB_R1@` was `lua (r1+$10),r1` from the KEY GAIN base,
+  but the gain store (`lua (r5+$20),r1`) runs first, so the key filters read P memory at r5+$30:
+  KBAS/KWID silence, jumps and squeals on OCTABAM31 and MW_SC020. Fix: `move #>$fab2e0,r1` in
+  the source (octabam's ptable2 marker; octabam refuses markers in subst values), the manifests
+  split ptable (16) / ptable2 (49). The octabam image changes two DSP words per core. Confirmed
+  on hardware as OCTABAM32. The tests had run with KBAS/KWID OFF, which hid it.
+- **KEY click with MON on:** the 64-sample fade per side was too short; now 16 blocks.
+- **MON:** 2 = OFF / 3 = ON with count 4 and min 0 (octabam writes min 0 for page-2 counts),
+  `mon_step` clamps, `mon_fmt`/`mon_widget` show bit 0 (the FX SETUP loop 0x400377f8 passes the
+  raw Part byte to the widget, 16(%sp)); `sc_norm` sets MON 2 unless it is 2/3. DSP `and #>$1`.
+- **KEY push-turn:** the FX1/FX2 page-2 editors (0x4003abe4 / 0x4003a9dc) call
+  P+0x12a+4*(enc+6) as `handler(enc, delta, value)` and clamp; 0 = generic 0x4003240c, which
+  multiplies delta by 7 while the encoder's held flag (0x46c7d8ee + 24*(0x38+enc)) is set.
+  `key_step` calls the unscaled tally 0x4003249c (as SRC SETUP's editor does).
+- **Attack-onset click:** gain is per sample (no zipper); ATK 0 is a 0.11 ms one-pole. Key
+  latency: 0 (same core, earlier track) / 16 (same core, later) / 32 samples (cross-core).
+  Without lookahead the simultaneous-trig blip cannot fall below ~+10 dB at ATK 0; gain
+  smoothing raises it. Dropped (the user: no added latency).
+- **Promoted 2026-10-25** after `140C_SCKD3` passed on the author's MKI. KYOTI: `patch_qlrec`
+  moved to the SPRING zone (UI-path code ran there in V1.2-V1.3) so SAFE fits SC's 698 B.

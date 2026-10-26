@@ -5,8 +5,8 @@ Stock **COMPRESSOR** with a **side-chain KEY** from any track, T1 to T8, and a
 
 | knob | what it does | readout |
 |---|---|---|
-| **MON** | ON: hear the processed key on this track instead (audition); switching it, or changing KEY while it is on, fades instead of clicking | `ON` / `OFF` |
-| **KEY** | OFF (stock: the track's own signal), or T1–T8 | `OFF`, `T1`…`T8` |
+| **MON** | ON: hear the processed key on this track instead (audition); switching it, or changing KEY while it is on, fades (256 samples, about 6 ms) instead of clicking | `OFF` (left) / `ON` (right) |
+| **KEY** | OFF (stock: the track's own signal), or T1–T8; one position per detent, also with the encoder pressed | `OFF`, `T1`…`T8` |
 | **KGN** | the key's gain, about −24 to +24 dB; 64 is unity | `-64`…`+63` |
 | **KBAS** | the filter's base: a high-pass, 18 dB/oct Butterworth, at OFF or 20 Hz to 19.6 kHz | **Hz**: `40`, `990`, `1.2k` (kHz) |
 | **KWID** | the filter's width: a low-pass, 12 dB/oct Butterworth, this many **octaves** above KBAS, 0.5 to 9.9, or OFF. With KBAS OFF it counts up from 20 Hz: a plain low-pass | **octaves**: `0.5`…`9.9`, `OFF` |
@@ -16,6 +16,19 @@ the sub-sonic rumble below it (KBAS about 30–40 Hz, KWID about 1.2–1.5) — 
 distortion and keeps the compression smooth at short attack and release settings. The two
 knobs cannot cross, and each readout is what the DSP runs (KBAS rounded to the filter's step,
 within 0.4 semitone).
+
+## Changed on 25 Oct 2026: MON, KEY and the octabam table fix
+
+- MON shows OFF on the left and ON on the right. A COMPRESSOR saved with any earlier version
+  of this module comes up with MON OFF.
+- KEY moves one position per detent when the encoder is pressed and turned (stock moves 7).
+- Switching MON, or changing KEY while MON is on, fades over 256 samples (64 before).
+- The octabam form read the key filters' coefficients from the wrong memory, so KBAS and KWID
+  gave silence, level jumps and squeals (OCTABAM31, 24 Oct 2026). The key-filter table is now
+  its own `ptable2`, loaded by its own literal as in the standalone image.
+
+**Hardware-confirmed:** the table fix in this octabam form (the author's MKI, OCTABAM32,
+25 Oct 2026); MON, KEY and the fades in the standalone image (`140C_SCKD3`, 25 Oct 2026).
 
 ## Changed on 22 Oct 2026: the base-width key filter
 
@@ -39,16 +52,14 @@ before. The previous version still builds, as a WIP standalone image only and no
 **Hardware-confirmed in the standalone image** (the author's MKI, 22 Oct 2026, build
 `140C_SCKF4`): page 2, the KBAS and KWID ranges and readouts, the kick-fundamental case at short
 attack and release, MON and KEY declick, and the DSP load with 1 + 7 and 4 + 4
-COMPRESSOR / DJ EQ per core; and in the KYOTI V1.6 combined image (22 Oct 2026). This octabam
-form of this version has not been flashed yet (the previous version's octabam form ran on the
-author's MKI on 4 Oct 2026).
+COMPRESSOR / DJ EQ per core; and in the KYOTI V1.6 combined image (22 Oct 2026).
 
 ## Contents
 
 | file | what it is |
 |---|---|
 | `manifest.py` | the octabam module declaration: one ROM unit, two `jsr` detours, the COMPRESSOR row, four DSP hooks |
-| `../../tools/patch_sidechain.s` | the ColdFire unit `sc_cf`: MON's, KEY's, KBAS's and KWID's formatters, `sc_norm` |
+| `../../tools/patch_sidechain.s` | the ColdFire unit `sc_cf`: MON's and KEY's step handlers, MON's switch, the MON, KEY, KBAS and KWID formatters, `sc_norm` |
 | `../../tools/ui_switch.s` | the ColdFire unit `sc_ui` (shared with VARISPEED): KEY's 9-position rotary switch, KWID's knob with the link clip |
 | `../../tools/patch_sc_dsp3.asm` | the DSP code: `sctap`, `scdet` (key filters, KEY declick), `moncommit` (MON crossfade), `scinit` |
 | `../../tools/sc_keyfilt.py` | the key filters' table, constants and bit-exact model |
@@ -82,22 +93,23 @@ because another effect in the slot may have used those words.
 
 | slot | label | formatter | widget |
 |---|---|---|---|
-| 7 | MON (stored inverted: 1 = OFF) | `sc_cf:mon_fmt` | stock switch `0x40046f10` |
-| 8 | KEY | `sc_cf:key_fmt` | `sc_ui:sw9_widget`: a 9-position rotary switch |
+| 7 | MON: 2 = OFF, 3 = ON (count 4; step handler `sc_cf:mon_step` keeps it on 2..3) | `sc_cf:mon_fmt` | `sc_cf:mon_widget`: the stock switch `0x40046f10` |
+| 8 | KEY (step handler `sc_cf:key_step`: no push-turn speed-up) | `sc_cf:key_fmt` | `sc_ui:sw9_widget`: a 9-position rotary switch |
 | 9 | KGN | stock bipolar `0x4003c7a0` | 0 (a plain knob) |
 | 10 | KBAS | `sc_cf:hp_fmt` | 0 |
 | 11 | KWID | `sc_cf:lp_fmt` | `sc_ui:clip_knob`: the stock knob and the link clip to KBAS |
 
 KEY stays in slot 8, so MUTE_MODES' muted-KEY exemption works as before. `sc_norm` resets a
 COMPRESSOR saved on stock firmware (KEY above 8) to MON OFF, KEY OFF, KGN 64, KBAS OFF, KWID
-OFF. A COMPRESSOR saved with the previous version: see "Changed on 22 Oct 2026" above.
+OFF, and sets MON OFF wherever it is not 2 or 3 (a COMPRESSOR saved with an earlier version).
+A COMPRESSOR saved before 22 Oct 2026: see "Changed on 22 Oct 2026" above.
 
 ## Placement in octabam (PLACE)
 
 | PLACE | `sc_cf`, `sc_ui` |
 |---|---|
 | `CAVE` (default) | the ColdFire free region, as in the standalone image |
-| `DRAM` | octabam's platform runtime; still re-linked at `0x400d7000` / `0x400d7260` and compared with the author's bytes |
+| `DRAM` | octabam's platform runtime; still re-linked at `0x400d7000` / `0x400d7300` and compared with the author's bytes |
 
 ## Claims
 
@@ -112,7 +124,10 @@ cores, and the last `$202` words of each core's half of the shared window (A `$3
 - `tools/emu_sc_dsp3.py` is ALL GOOD, also with `--layout octabam` (these addresses): the key
   filters bit-exact against `tools/sc_keyfilt.py` (incl. 24 chained blocks and the bypass in and
   out), the MON crossfade, MON consumed every block, the KEY hold, `scinit`.
-- DSP section: 677 words (code 612 + the 65-word ptable); the ColdFire unit 600 B.
+- DSP section: 677 words (code 612, the 16-word ptable and the 49-word ptable2); the ColdFire
+  units 698 B (`sc_cf`) and 616 B (`sc_ui`).
+- `tools/emu_sc_dsp3.py --ftab-lua` replays the broken table load of 24 Oct: every key-filter
+  case fails, as heard on hardware.
 - Load, modelled (`ot_emu`, OTDEMO, a keyed COMPRESSOR on every track + DJ EQ): about 2,652
   cycles a sample on core 1 with the filters on, 2,475 with both off.
 

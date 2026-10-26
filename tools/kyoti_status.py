@@ -37,7 +37,7 @@ ALLOW_ENV = "KYOTI_ALLOW_WIP"
 FINAL = {
     "build_mute_modes.py":                 "b5e24316e4dc5824657818f26cf1891e02ac26ae9094f101a7703f5beb74d6ba",
     "build_direct_jump_kyoti.py":          "3fa14332d95eda55f56de5935afbd988a7179666ae9d8bc2614c1cc7c9f8a896",
-    "build_sidechain_compressor.py":       "92b60f345aae7a56a9b236ab965db9c553d44e44a6bdb52329b9a634d9cdf0ad",
+    "build_sidechain_compressor.py":       "44465569a6118a9a7936c83d0f728a5f8c81122c42433a7cdaf267206e99f2fc",
     "build_reload_from_project.py":        "439aa3208ace780007139b561b0c2938ae7c4a3cfac3c286c8c691b59d71caae",
     "build_quantize_live_rec_toggle.py":   "2012abd83f75336ddc73925f0a3ebb8de16ed3ea24b4c28d226e35ef99c2a6f4",
     "build_erase_empty_trigless_locks.py": "83690ffbd97ad51281630acc8597f6423715885d2a712915df2edc39bb9b6a1c",
@@ -47,7 +47,7 @@ FINAL = {
     "build_bugbuilds.py": {
         "mainos_mute_modes_batch_bugfixes.bin":              "2c5600dc4dd30812a54ddfec8904f7762593e7c6233638fa2ae40319602ead47",
         "mainos_quantize_live_rec_toggle_batch_bugfixes.bin":"df4a24981ace4a163723ab394bf564c9ccd8b4593ba40c9d5461da36fbd226a4",
-        "mainos_sidechain_compressor_batch_bugfixes.bin":    "e9046feb4dff64889262716636de6baf3873fb83cf18f930e4801f2145ba0303",
+        "mainos_sidechain_compressor_batch_bugfixes.bin":    "4febe2e60f3ca36df8bac50e291c99f54450adbce188d0f08c5a954b9f48f917",
         "mainos_erase_empty_trigless_locks_batch_bugfixes.bin":"db348f68a32adcc195208e46f6c964d0a5714ba41c1d8c4f2fad6beb2d122922",
         "mainos_reload_from_project_batch_bugfixes.bin":     "0881b726f3617ebfdc6681e988670cf5c24f4001cae5d3fcc0e6bc8b42944db8",
         "mainos_direct_jump_kyoti_batch_bugfixes.bin":       "2cc151e7f9fa7568eca7d1e50d06ed179ff36ffa28f85fe59ce27295917ca21a",
@@ -57,7 +57,7 @@ FINAL = {
         "mainos_varispeed_emus_batch_bugfixes.bin":          "9e0e3f92088be7f968c2fdc8665b69cfe4c13b19b8229ed5831a297687a509e5",
     },
     "build_kyoti.py": {
-        "mainos_kyoti_v1.6.bin":                             "c2692220a740358bbafefca5dadd842fade6e843ed72d81197acb23a88ee8e2a",
+        "mainos_kyoti_v1.6.bin":                             "0dda89194db3317f61a6ad7c1d68eb025919918d6362869d39cbf361fe3d9a21",
     },
     "build_blackpyramids_303.py":          "88d49307f481d014b7d5b4c024e918d5b0480c87318eb71798869b300948f62b",
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",

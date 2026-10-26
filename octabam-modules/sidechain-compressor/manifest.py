@@ -23,12 +23,14 @@ Hardware-confirmed in the standalone image (the author's MKI, 2026-10-22, 140C_S
 the KBAS / KWID readouts and ranges, the kick-fundamental case at short attack and release,
 MON and KEY declick, load with 1 + 7 and 4 + 4 COMPRESSOR / DJ EQ per core) and in the KYOTI
 V1.6 combined image. The KEY switch and KWID's clip (2026-10-23): hardware-confirmed in the
-standalone image. This octabam form is not flashed yet.
+standalone image. This octabam form: the key-filter table fix (ptable2) hardware-confirmed
+(OCTABAM32, 2026-10-25); MON 2/3, KEY's step handler and the 256-sample fade (2026-10-25)
+hardware-confirmed in the standalone image (140C_SCKD3), not yet in this form.
 
 COLDFIRE. Two ROM units. sc_ui (tools/ui_switch.s, 616 B; shared with VARISPEED's QUAN): KEY's
 widget, a 9-position rotary switch (stock CHORUS TAPS's switch, as Spectrum's LADR, in 22.5-degree
 steps: stock's five glyphs and four of its own), and KWID's, the stock knob plus the link clip to
-KBAS, which the FX SETUP window does not draw itself. sc_cf (tools/patch_sidechain.s, 600 B): KEY's
+KBAS, which the FX SETUP window does not draw itself. sc_cf (tools/patch_sidechain.s, 698 B): MON's step handler, label and switch, KEY's step handler and
 formatter, KBAS's Hz and KWID's octave formatters, and sc_norm, reached by a
 `jsr` detour at the first instruction of both page-2 copiers (0x4000cae8, its twin
 0x40003d1c). A COMPRESSOR saved on stock firmware holds stock's slot 8..11 defaults
@@ -99,15 +101,15 @@ _SAME = {"@KGNA@": f"${_sc.kgn_smooth_a():x}",
 LINKED = (
     Linked("sc_cf", os.path.join(_TOOLS, "patch_sidechain.s"),
            reference=(0x400d7000,
-                      "4984aba27a91d2bc526219f82f1b3311ef5716443d2b682d3c04204a815a2f9f")),
+                      "976f9f958bf378f54d92f66719f9f59388aec7170efbe78c80b74d7ac7771a35")),
     Linked("sc_ui", os.path.join(_TOOLS, "ui_switch.s"),
-           reference=(0x400d7260,
-                      "157f883fd800e900676cad96bdf79b50ed497877b27936316a454c18a6cb2371")),
+           reference=(0x400d7300,
+                      "b2c45834b780a1e8b361c1104fca7a875ad25fdcc89a578b6d13d2ec9d2d6978")),
 )
 
 # PLACE: where octabam links sc_cf and sc_ui. CAVE (the default) is the ColdFire free
 # region, as the standalone image; DRAM puts them in octabam's platform runtime
-# (as rl3 and dj7), still re-linked at 0x400d7000 / 0x400d7260 and compared with the
+# (as rl3 and dj7), still re-linked at 0x400d7000 / 0x400d7300 and compared with the
 # bytes above. The store id is octabam.sidechain-compressor, the id octabam already files this effect's
 # page defaults under (its module directory).
 # tools/build_sidechain_compressor.py does not read this manifest.

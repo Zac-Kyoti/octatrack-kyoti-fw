@@ -100,9 +100,10 @@ reset.\
 An external key input for the stock DynamiX **COMPRESSOR**, with a base-width key filter, on
 the effect's page 2:
 
-- `MON` — auditions the filtered key in place of the track; switching it, or changing `KEY`
-  while it is on, fades instead of clicking
-- `KEY` — which of the eight audio tracks drives the compression, even while it is muted
+- `MON` — `OFF` (left) / `ON` (right): auditions the filtered key in place of the track;
+  switching it, or changing `KEY` while it is on, fades instead of clicking
+- `KEY` — which of the eight audio tracks drives the compression, even while it is muted; one
+  position per detent, also with the encoder pressed
 - `KGN` — the key's gain, about −24 to +24 dB; centre is unity
 - `KBAS` — the filter's base: a high-pass (18 dB/oct) at `OFF` or 20 Hz to 19.6 kHz, shown in
   **Hz** (`40`, `1.2k` = 1.2 kHz)
@@ -115,6 +116,9 @@ smooth at short attack and release settings. The two knobs cannot cross.
 
 The DSP space comes from **SPRING REVERB**, which leaves the FX2 list; a project that
 still uses it loads it as NONE.
+
+> **Changed on 25 Oct 2026.** `MON` shows `OFF` on the left and `ON` on the right (it was the
+> other way round), and a COMPRESSOR saved with any earlier version comes up with `MON` `OFF`.
 
 > **Changed on 22 Oct 2026.** The base-width filter replaced the earlier one-knob `KFLT`,
 > and page 2 was laid out again (it was `RMS KEY KFLT KGN MON`). A COMPRESSOR saved with the

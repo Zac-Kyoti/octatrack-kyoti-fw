@@ -227,6 +227,22 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 - **DIRECT_JUMP_KYOTI / RELOAD_FROM_PROJECT standalones and their Bugbuilds** — re-pinned
   2026-10-08 with the review fixes; same sources as V1.2/V1.3, not flashed on their own. The
   DIRECT JUMP standalone now folds in MIDI_PLAYS_FREE_FIX.
+- **SIDECHAIN_COMPRESSOR** — **FINAL 2026-10-25: MON, KEY and the octabam table fix.**
+  - MON stores 2 = OFF (left) / 3 = ON (right): count 4, `mon_step` keeps it on 2..3, `sc_norm`
+    sets any other value OFF, so a COMPRESSOR saved with an earlier version loads MON OFF.
+  - KEY has its own step handler (`key_step`, P+0x12a + 4·8): stock's generic one multiplies a
+    pressed turn by 7 (`0x4003240c`); `key_step` uses the unscaled tally `0x4003249c`.
+  - MON/KEY fade 16 blocks (256 samples) instead of 4: a KEY change with MON on clicked softly.
+  - The octabam/Modwerk forms loaded the key-filter table from a register the gain store had
+    moved (KBAS/KWID garbage on OCTABAM31 / MW_SC020); now `ptable2` + its own literal.
+    `tools/emu_sc_dsp3.py --ftab-lua` replays the bug.
+  - The attack-onset click (fast ATK) was investigated and dropped: only lookahead (added
+    latency) helps the simultaneous-trig case.
+  - Confirmed on the author's MKI: `140C_SCKD3` (standalone) and OCTABAM32 (table fix).
+  - Pins: standalone mainos `44465569…` (syx `88c4553c…`), `BUG_SC3X` mainos `4febe2e6…`
+    (syx `1a4b92ab…`), KYOTI V1.6 mainos `0dda8919…` (syx `e44f980c…`; not flashed with
+    this change: SC's units grew to 698 B, and `patch_qlrec` moved to SPRING's reclaimed
+    record to make room).
 - **RELOAD_FROM_PROJECT** — **FINAL 2026-10-25: the MIDI-side fix.**
   - The MIDI-tracks flag `0x80000012` is a long and was read as a byte, so on the MIDI tracks the
     chords reloaded the audio track.
