@@ -66,9 +66,10 @@ HOOKS = (
 # ---- the author's oracle -------------------------------------------------------
 # patch_reload3.s, m68k-elf-as -mcpu=5407 or 54455 (identical bytes; RL_DONE is the
 # source's default), linked at 0x400d6500 -- the address the standalone,
-# hardware-confirmed image uses: 2102 bytes. octabam re-links it there on every build
-# and compares.
-REFERENCE = (0x400d6500, "9fe81ebe6640b9a0365c93880073fed2690b0a8b8962f08be3b41573d642248a")
+# hardware-confirmed image uses: 2100 bytes (2102 before the 25 Oct 2026 MIDI-tracks fix:
+# MIDI_MODE is a long, read with move.l). octabam re-links it there on every build and
+# compares.
+REFERENCE = (0x400d6500, "0d784ccd58d02f490e729a4a49b18bf7b9b159343c1bd75bc1ef70a8de99bb19")
 
 MODULE = Module(
     name="reload-from-project",
