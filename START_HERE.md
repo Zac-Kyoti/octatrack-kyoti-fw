@@ -332,9 +332,9 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 - **KYOTI load audit** (Session 125) — `reference/handoffs/KYOTI_LOAD_AUDIT.md`: ranked DSP/ColdFire
   costs of every feature, the hardware test plan (HW-A first, no flash), and **a KYOTI V1.0 crash on
   the MASTER track's PLAYBACK/LFO page** (emulator; section 8), not fixed yet.
-- **CLYPS** (Session 131, 2026-10-22/23) — scope rev 2 only, nothing built. `[PTN]`+`[BANK]` enters
-  Clyps mode: a Clyps view (all 16 of a bank's sequences for the active track, 2 × 8) and a Clyps grid
-  (trig LEDs). It loads a chosen sequence onto the track as a non-destructive "clyp", restored when
-  the pattern is left. [FUNC]+[YES]/[NO] = 16 per-track saved sequences, kept in DRAM.
-  `reference/handoffs/CLYPS_SCOPE.md`; 12 open decisions in §2. Phase 1 = the landing/restore
-  oracles, which need a fixture exported from the device.
+- **CLYPS** (Sessions 131+, worktree `trkseq`, WIP, unpushed) — `[PTN]`+`[BANK]` per-track
+  sequence picker: the view, the grid, held/latched states, cued phase-continuous landings.
+  - Latest test image `140C_CLYP7` (syx `61f9bd90…`), NOT flashed. The user still has to run
+    FLASHING §4 CLYPS steps 11–16 on it.
+  - **Start at `reference/handoffs/CLYPS_SCOPE.md` §0**: the state, the next steps (DRAM move →
+    saved sequences → originals/ORIG → FULL loads → page LEDs → KYOTI/DJ), and the traps.
