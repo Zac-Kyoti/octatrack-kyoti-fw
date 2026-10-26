@@ -1,4 +1,123 @@
-# CLYPS — scope (rev 2, 2026-10-23; research only, nothing built)
+# CLYPS — scope and build record (WIP; latest test image `140C_CLYP7`)
+
+## §0 Start here (handoff, 2026-10-25) — read this first, then §1–§4
+
+**Where it stands.**
+- **Worktree / branch:** `../octatrack-kyoti-fw-trkseq`, branch `trkseq`. Commits are local, not
+  pushed. Clyps is WIP, nothing is promoted, and there is no README entry.
+- **Latest image:** `140C_CLYP7` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
+  Syx `61f9bd90…`, NOT flashed.
+- **CLYP6 on the user's unit:** FLASHING §4 CLYPS steps 1–10 passed. MIDI tracks were not seen;
+  that bug is fixed in CLYP7.
+- **Pending:** the user still has to run **steps 11–16** (cued landings with CHAIN AFTER = 4,
+  2x tracks, cancel, a stock change first, several tracks) on CLYP7, and step 5 again on the MIDI
+  side.
+- **Built and gated:** Clyps mode; the 2×8 view (v5 layout, user-approved); the grid;
+  held/latched states; stopped loads; cued loads at master wrap and at CHAIN AFTER points
+  (phase-continuous); yellow cue / red playing.
+- **Gates:**
+  - UI: `diag_clyps_ui.py`, 28/28 on OT DEMO, plus scenario M on JAM2.
+  - Landing: real key presses, exact against the oracles (§3.4, §8b).
+- **Code:** `tools/clyps/patch_clyps.s` = 5,064 B in the classic cave `0x400d6500`, **884 B left**.
+  Five detours: `0x4005a044` [PTN], `0x4007af80` / `0x4007b3e0` [BANK] press / release,
+  `0x400a1f72` phase D, `0x400a43a0` wrap body, and `0x40062d1c` UI tail.
+
+**Next, in this order** (decisions are all in §1.1–§1.7 and §2):
+1. **The DRAM move.** It is needed: about 9.6 MiB of buffers, and the cave is full.
+   - One source, two sections: `.rom` for the sequencer-tick code (`cl_land`, `cl_wrap`,
+     `cl_landone`, `cl_apply`, `cl_convert`, `cl_newrate`, `cl_tps`, `cl_count`/drop) and the
+     cue/arm state it touches; `.dram` for everything else (UI, layer and records, drawing,
+     strings).
+   - Link both with one linker script, so they can call each other.
+   - `build_kyoti.py` keeps ISR code out of DRAM by policy; octabam's OBKYOTI images ran DJ's
+     tick hooks from DRAM on the MKI, but keep to the policy anyway.
+   - Extend `tools/dram/dram.py`'s `build()` with a `bss=` size: pages =
+     max(stage pages, ceil((raw + bss) / 6144)). Keep the default backward-compatible
+     (`build_kyoti.py` uses it).
+   - The buffers live past `raw`, uninitialised. All *valid* bitmaps live inside `raw`, so they
+     are zeroed at every boot by the depack.
+2. **Saved sequences** (§1.6): 16 × one record. [FUNC]+[YES] saves what plays; [FUNC]+[NO]
+   loads it **immediately**, at the track's next window start, phase-continuous (arm with no
+   gate). A power cycle or project reload destroys them, so they need a project-load hook to
+   clear the valid bits.
+3. **Originals** (§1.5):
+   - 4,096 slots, (bank, pattern, track) → `ORIG_BASE + i·0x91a`, plus a 512 B valid bitmap.
+   - Capture inside `cl_apply` before the copy, first one wins.
+   - Keep the 12 trailer bytes + all 16 len/scale pairs per pattern, so a NORMAL→PER TRACK
+     conversion can be undone.
+   - `ORIG` display is option (a): the cursor runs 16 → ORIG → 1, and the header's right side
+     shows `ORIG` as a dark box with lit letters.
+   - [PAGE] restores the active track; [FUNC]+[PAGE] restores the whole pattern. A restore is the
+     whole pre-Clyps state.
+4. **FULL loads** (§1.7):
+   - [FUNC] held = `LOAD: SEQ+MCH/FX`, and a trig picked then is a FULL load.
+   - The Part slice is stock TRACK PASTE's 136 B (audio) / 68 B (MIDI), plus scene locks
+     (`+0x662+(s·8+t)·0x20`, `+0x1662+10s+t`) and the LFO designer (`+0x1702+16t`, `+0x1782+2t`).
+   - Apply at the landing with the single-track apply `0x40001f18(bank, part, t)`; set
+     `0x8000184c` bit t if the machine changed.
+   - Part-slice originals are keyed per (bank, part, track).
+5. **Page LEDs** (O16): dies `0x48..0x4f`, slot 7, painter `0x4004d1a8`. Red = playing its
+   original, green = changed, yellow = restore cued; with [FUNC] held, the same for the whole
+   pattern.
+6. **KYOTI integration:**
+   - DIRECT JUMP-timed landings: the next master step, clock-locked; reuse `dj_T`/`dj_bparams`.
+   - Share the [BANK] sites with RELOAD's deferral (`rl3_bank_show` / `rl3_bank_rel`).
+   - The TRACK keys' `TRK_BASE` must go to a stub, not RELOAD's detour at `0x40040250`.
+   - [YES] with the chord held = DJ toggle.
+7. **Later:** an octabam module; names (§10); the TRACK_PASTE_DESIGNER_FIX Bugfix candidate
+   (NOTES Session 131 cont. (3); the user still has to observe it on stock).
+
+**Traps already paid for.** Read them before writing code.
+- **Key records must copy T1's hold delay/repeat for every key they override** (T1 `0x400bfc10`).
+  A key pressed under one layer and released under another, with a differing delay, leaves its
+  timer record in the repeat list `0x460d1660`. The next press links it to itself, and the UI
+  task hangs.
+- **TRACK keys select on RELEASE.** Forward press, hold and release to the base handler.
+  Forward [FUNC]'s press/release to stock (`0x4004e954` / `0x400568e4`).
+- **A key's held flag is set only AFTER its press handler**; track [FUNC] by its own events.
+- **`0x80000012` (MIDI tracks showing) is a LONG.** `0x80000000` is the active track of the
+  current side (stock swaps `0x80000000`/`0x80000001` on the toggle).
+- **Landing tick.** In phase D the master counters are already advanced by the previous tick's
+  phase G. A landing happens on `TICK_CTR == 0`, with
+  t0 = (MASTER_STEP − 1)·tps_M + TICK_CTR, STEP = (t0/tps + 1) mod len, STEP−1 = (STEP+len−1)
+  mod len, TICKS = t0 mod tps. Land only on a window start of both the old and the new rate. A
+  master wrap uses the wrap-body hook (copy only; stock re-homes).
+- **Tick hooks sit mid-function:** save **all** registers (d0–d7/a0–a6) and replay the displaced
+  instruction last (stock branches on its flags).
+- **ColdFire (as `-mcpu=5407`) lacks** cmpi to memory, `not.b`, `exg`, `cmpa.w`, movem with
+  `-(sp)` / `(sp)+`, and d16 offsets beyond 32767 (use a trailer register: slab + `0x8e50`).
+  Watch for `.b` branches out of range, and **duplicate `.equ`s: the last one wins silently**
+  (cost one hardware round).
+- **The UI is drawn into our own window** (`0x4005829c(w,h,dx,dy,prio,cb)`, prio 3, close_cb =
+  the one idempotent teardown). Never draw from tick context. Follow-ups go through the UI-tail
+  hook.
+- **Font:** `0x400ba876` (3×5 glyphs, 4 px advance). Measure widths from its table at
+  `0x400c246a` (+1 px spacing).
+- **Window geometry:** 112×64, `dx = −1` (screen columns 8–119). Header band 9 rows; rows at a
+  6 px pitch from `ROW0_Y` 46; columns at x 4 / 59, highlights 2–54 and 57–109.
+- **Renders:** the user wants every render **opened in the web browser** (`tools/clyps_view_html.py`).
+  The emulator does not compose the screen by itself: `tools/clyps_render.py` calls the
+  compositor `0x40013abc`, reading its double-buffered target `[0x400b9710]` **before** the call.
+  The emulator boots with a SET DATE/TIME window up; send [NO] (`32`) first.
+- **Emulator fixtures:** never ask the user for a project. Use the real exports in
+  `~/Desktop/OT Backup/KYOTI/` (OT DEMO: varied lengths, no MIDI trigs; JAM2: MIDI trigs, loads
+  with the MIDI tracks showing). Build cases in RAM with stock-style copies
+  (`--copypat`/`--copytrk`/`--setb`).
+- **Builds:** `KYOTI_ALLOW_WIP=1 python3 tools/build_clyps.py 140C_CLYPn`. Then run the UI gate
+  (OT DEMO, plus `--only M` on JAM2) and, for any landing change, the landing runs C1w/C2c/C3s
+  (§8b). Before handing over a build, give its sha256 and say it is not yet flashed.
+- **Terms:** Clyps mode / view / grid; CHAIN AFTER (never "CHANGE").
+
+**Tools.**
+- `tools/build_clyps.py`: the builder.
+- `tools/diag_clyps_ui.py`: the UI gate; `--only ABCDM`.
+- `tools/diag_clyps_landing.py` (`--keys-at` for real-code runs, `--clyp` for harness copies)
+  and `tools/cmp_clyps.py`: the landing oracle.
+- `tools/clyps_render.py` and `tools/clyps_view_html.py`: renders.
+- Reference outputs in `out/clyps/`: B1, R5, R7 (references), C1w/C2c/C3s (real-code runs).
+
+---
+
 
 Rev 1 (2026-10-22, as `TRACK_SEQ_SELECT_SCOPE.md`) was the first pass. Rev 2 adds:
 - the user's name and terms;
