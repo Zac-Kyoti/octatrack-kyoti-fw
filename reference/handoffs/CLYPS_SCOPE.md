@@ -208,6 +208,16 @@ directly indexed, so the store can never fill.
 An original belongs to its pattern: you play that pattern to restore it. A project-wide "restore
 everything" is O17.
 
+**`ORIG` on screen (decided 2026-10-25, option a).**
+- **The cursor cycle.** It is 1 → 16 → `ORIG` → 1. `ORIG` is present only when the active track
+  has an original on the playing pattern.
+- **On screen.** On `ORIG` no slot is highlighted, and the header's right side shows `ORIG` as a
+  dark box with lit letters, in place of `LOAD: SEQ`.
+- **Restoring.** Latched: [YES] restores and closes. Held: [PAGE]. It is cued like any load.
+- **What comes back.** A restore always puts the track back to its pre-Clyps state: the sequence,
+  plus machine/FX/scene locks/designer if a FULL load had changed them. There is no SEQ / FULL
+  choice, because [FUNC] near `ORIG` is already save ([FUNC]+[YES]) and restore-all ([FUNC]+[PAGE]).
+
 **Showing which tracks have originals (O16, open; the TRACK LEDs are already busy).** Candidates:
 - the **4 page LEDs** beside [PAGE] (C: dies `0x48..0x4f`, red/green/yellow, LED-layer slot 7,
   painter `0x4004d1a8`). The key itself has no separate LED. In Clyps mode they would be lit when
