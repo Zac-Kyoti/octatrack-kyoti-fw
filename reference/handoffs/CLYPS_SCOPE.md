@@ -38,7 +38,9 @@
     bank loader (project load).
 
 **Next, in this order** (decisions are all in §1.1–§1.7 and §2):
-1. **FULL loads** (§1.7):
+1. **FULL loads** (§1.7). First map the engine task's dispatcher for queue `0x460d17ae` (§1.7
+   "where the slice must be applied": stock posts the Part change to the engine; it never applies
+   Part data in the tick).
    - [FUNC] held = `LOAD: SEQ+MCH/FX`, and a trig picked then is a FULL load (our FUNC sub-map
      `cl_fsub` does not list the trigs, so trig records stay ours).
    - The Part slice is stock TRACK PASTE's 136 B (audio) / 68 B (MIDI), plus scene locks
@@ -435,6 +437,31 @@ track's effect (its tail is cut, as stock does on a live FX change).
 the playing pattern, and every other pattern in that bank linked to the same Part then plays that
 track with the new machine/FX. That is how the Octatrack's Parts work (stock PASTE TRACK does the
 same). The Part shows as edited.
+
+**Measured 2026-10-25 (static, our image) — where the slice must be applied.**
+- **Part base** = bank base + `0x8ed80` + part·`0x18b2` (right after the 16 pattern slabs; bank base
+  `0x400e21e0` + bank·`0x9b340`, so every bank's 4 Parts are resident). Every offset in the table
+  above is relative to it: stock TRACK COPY `0x40029754` reads FX1 `+0x00+t`, FX2 `+0x08+t`, machine
+  `+0x22+t`, levels `+0x12+2t`, then the six blocks (C). A pattern's Part = slab `+0x8e57`.
+- **Stock never applies Part data in the tick.** When a pattern change lands, the wrap body
+  (`0x400a4540..0x400a45a6`) posts two messages to the engine task's queue `0x460d17ae` through the
+  kernel post `0x40000c3c`: `{0x15, bank}` (`0x400d8167`) and `{0x14, part}` (`0x400d8169`, the new
+  pattern's `+0x8e57`). The engine task applies the Part afterwards. (So the kernel post IS legal
+  from this tick: stock does it.)
+- **`0x40001f18(bank, part, t)`** touches only engine state (`0x80000110…`, `0x80000c50…`,
+  `0x80000ec4/ecc`, `0x80001828…`, `0x800010d5`) and memcpy; no kernel call. Its six callers
+  (`0x40043d1a`, `0x40094096`, `0x40094158`, `0x40096c3e`, `0x40096d9a`, `0x400973da`) all pass
+  (`0x100b14ce`, `0x100b14cf`, t); `0x400973da` sets `0x8000184c` bit t first (a machine change).
+  Which task runs them is **not mapped**.
+- **So the scope's "call it at the landing tick" is not stock-like.** Choice to make before
+  building (recommendation first):
+  1. **A message to the engine task**, as stock does for a pattern change: find the engine
+     dispatcher for queue `0x460d17ae` and either an existing single-track opcode or a place to
+     add ours, posted from our landing. Timing = stock's own Part change.
+  2. Call `0x40001f18` in the tick at the landing (the scope's original plan): earliest, but it
+     writes engine state from IPL 2 while the engine task may be mid-update.
+  3. Apply in the UI-tail follow-up: safe context, but up to one UI loop late, so the first trig
+     may still play the old machine.
 
 **Originals for it.** Kept per (bank, part, track): 16 × 4 × 16 = 1,024 places, (8 × 136 + 8 × 68)
 × 64 = **104,448 B**. That is small next to the sequence originals. A restore brings the old
