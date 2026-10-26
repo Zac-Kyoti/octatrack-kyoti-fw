@@ -37312,3 +37312,14 @@ has been in every build since the chord redesign.
   `0881b726…`, KYOTI V1.6 `c2692220…`. In this worktree, seven Bugbuilds were rebuilt and match
   their pins. The BLACKPYRAMIDS_303 Bugbuild needs the DSP assembler under the main checkout's
   `out/`, so the remaining three are checked there.
+- **2026-10-25: octabam PR [sambanks/octabam#906](https://github.com/sambanks/octabam/pull/906)**
+  (fork branch `kyoti-reload-midi-6a2da8d`, base `90f4fea6`) moves the reload-from-project pin
+  `223ac58` → `6a2da8d`.
+  - Our module manifest's reference was updated first: 2100 B, `0d784ccd…` (`6a2da8d`). The
+    builders don't use it, and every FINAL build is unchanged.
+  - Gates: make docs no change; verify-docs 0; `make check` for test/reload-from-project,
+    octabam-bus and octabam all pass; `make reach RUN=1 KEEP=1` every gate passed.
+  - Our MIDI gate on the octabam-built image (`5e4998ba…`): both chords PASS. That octabam form
+    has not been flashed.
+  - Found on the way, reported in the PR body: octabam's `uv.lock` has no numpy (pyproject's emu
+    extra lists it), so `verify_transient.py` fails `make check REMIX=octabam` on main.

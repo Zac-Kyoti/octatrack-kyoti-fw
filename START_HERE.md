@@ -235,7 +235,7 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   - Pins: standalone mainos `439aa320…`, `BUG_RL3` mainos `0881b726…`, KYOTI V1.6 mainos
     `c2692220…` (syx `94d84ff6…`).
   - Emulator gate `tools/diag_reload_midi.py`.
-  - The octabam reload-from-project pin needs the same fix.
+  - octabam: pin PR sambanks/octabam#906 (`6a2da8d`); waiting on Sam.
 - **RELOAD_FROM_PROJECT** — re-pinned **FINAL 2026-10-16** (the user's instruction) with PR #3
   (Ilia Murzinov): `[CUE]` + `[TRACK n]` no longer reloads a track. Confirmed on Ilia's MKII,
   not yet on the author's MKI. Standalone mainos `607a7d73…` (syx `2602870e…`), `BUG_RL3`
