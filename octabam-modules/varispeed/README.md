@@ -12,6 +12,8 @@ On a VARI track PTCH becomes **QUAN**, the ratio p/q: `1/2 2/3 3/4 4/5 1/1 5/4 4
 Leaving VARI gives PTCH back its value. TSNS stays TSNS. The DSP is stock: SPRING REVERB
 stays, and there is no load guard.
 
+**Before going back to stock firmware**, set every VARI back to OFF, AUTO, NORM or BEAT and save. TSTR VARI is saved in the Part and ATTR TIMESTRETCH VARI in the sample's `.ot` file, both as the raw value 4; stock 1.40C stores it unchecked and plays it as NORMAL timestretch, and its TSTR formatter (bound off by one) may show junk text. (`reference/kb/file-format.md`, the `.ot` attribute file.)
+
 ## Contents
 
 | file | what it is |

@@ -32,6 +32,8 @@ refused, with the toast `MAX DSP: EMU LIMIT`:
 A safety net in the UI task sets just enough EMUS to OT if a core gets over budget in any
 other way. Nothing ever steps down while a sound plays.
 
+**Before going back to stock firmware**, set every VARI back to OFF, AUTO, NORM or BEAT and save. TSTR VARI is saved in the Part and ATTR TIMESTRETCH VARI in the sample's `.ot` file, both as the raw value 4; stock 1.40C stores it unchecked and plays it as NORMAL timestretch, and its TSTR formatter (bound off by one) may show junk text. (`reference/kb/file-format.md`, the `.ot` attribute file.)
+
 ## Contents
 
 | file | what it is |
