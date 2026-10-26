@@ -87,9 +87,11 @@ def arena_writes(pages):
     return out
 
 
-def build(raw, work, img):
+def build(raw, work, img, bss=0):
     """`raw` = the DRAM image, linked at ARENA_BASE (already contiguous, units in order).
     `img` = the composed OS image (bytearray, stock length), patched in place.
+    `bss` = bytes reserved right after `raw`, uninitialised (never depacked, never hashed): the
+    boot stage goes above them, so nothing the loader writes lands in them. 0 = as before.
     Returns (append bytes, report dict). The caller appends the bytes to `img`."""
     work = pathlib.Path(work)
     work.mkdir(parents=True, exist_ok=True)
@@ -98,10 +100,14 @@ def build(raw, work, img):
     if depack.depack(stream) != raw:
         sys.exit("dram: the packed payload does not depack to the runtime -- refusing")
     blob = SIGNATURE + stream
-    stage = (base + len(raw) + STAGE_ALIGN - 1) & ~(STAGE_ALIGN - 1)
+    if bss < 0 or bss & 3:
+        sys.exit(f"dram: bss {bss} must be a non-negative multiple of 4")
+    stage = (base + len(raw) + bss + STAGE_ALIGN - 1) & ~(STAGE_ALIGN - 1)
     stage_end = stage + len(blob)
     pages = (stage_end - base + PAGE - 1) // PAGE
     ceiling = base + pages * PAGE
+    if pages >= PAGES:
+        sys.exit(f"dram: {pages} pages do not fit the {PAGES}-page arena -- refusing")
 
     # the arena geometry and the boot redirect, every operand asserted stock
     o = lambda a: a - IMG_BASE
@@ -128,7 +134,7 @@ def build(raw, work, img):
     _run(["m68k-elf-ld", f"-Ttext=0x{LOADER_AT:x}", "-o", work / "loader.elf", work / "loader.o"], work)
     _run(["m68k-elf-objcopy", "-O", "binary", work / "loader.elf", work / "append.bin"], work)
     append = (work / "append.bin").read_bytes()
-    report = dict(base=base, raw=len(raw), packed=len(blob), stage=stage, stage_end=stage_end,
+    report = dict(base=base, raw=len(raw), bss=bss, packed=len(blob), stage=stage, stage_end=stage_end,
                   pages=pages, reserve_bytes=pages * PAGE, ceiling=ceiling,
                   arena_base_after=ceiling, pages_left=PAGES - pages, append=len(append),
                   raw_sha256=hashlib.sha256(raw).hexdigest())
