@@ -31,6 +31,24 @@
 |      0(%sp) = return addr   4(%sp) = buf   8(%sp) = value
 |  Convention: %d0/%d1/%a0/%a1 are scratch; %d2+ must be preserved
 |  (FUN_4003c7a0 saves %d2), so this routine touches only %d0/%d1/%a1.
+| key_step: KEY's step handler (descriptor P+0x12a + 4*8). Stock's generic handler
+|  (0x4003240c) multiplies a turn by 7 while the encoder is held down; this one asks the
+|  unscaled tally (0x4003249c, as stock's SRC SETUP editor does) for the steps and adds them
+|  to the value, so a pressed turn moves KEY one position per detent, like a plain one.
+|  handler(enc, delta, value) -> new value (the caller clamps it). d0/d1/a0/a1 only.
+    .equ STEP_TALLY, 0x4003249c
+
+    .balign 2
+    .global key_step
+key_step:
+    move.l  8(%sp),-(%sp)               | delta
+    move.l  8(%sp),-(%sp)               | enc
+    jsr     STEP_TALLY
+    addq.l  #8,%sp
+    add.l   12(%sp),%d0                 | + the current value
+    rts
+
+    .balign 2
     .global key_fmt
 key_fmt:
     move.l  4(%sp),%a1             | a1 = buf
@@ -62,9 +80,8 @@ kf_fmt:
 | =====================================================================
 |  Page 2 since the major version (2026-10-19): RMS · MON · KEY · KGN · KBAS · KWID.
 |
-|  mon_fmt: slot 7 is stored inverted (1 = OFF, 0 = ON): stock's slot-7 default is 1, so
-|  every compressor saved before comes up with MON off. Flips the value and tail-jumps to
-|  the stock ON/OFF formatter.
+|  MON (slot 7) uses the stock ON/OFF formatter directly: 0 = OFF, 1 = ON (stored inverted
+|  until 2026-10-25, so a compressor saved with that version comes up with MON flipped).
 |
 |  hp_fmt: KBAS, the HP's frequency on the DSP's grid f = 20 Hz * 2^(g/16)
 |  (tools/sc_keyfilt.py): 0 = OFF, n = g round((n-1) * 159/126). Shown as "20".."990",
@@ -74,16 +91,6 @@ kf_fmt:
 |  tenths = round(5 + m * 151/126 * 10/16) = (3068 m + 22528) >> 12 (equal for every m).
 |  A-array callbacks: void fmt(char *buf, int value). d0/d1/a0/a1 only.
 | =====================================================================
-    .equ FMT_ONOFF, 0x4003c14c          | stock "OFF" / "ON"
-
-    .balign 2
-    .global mon_fmt
-mon_fmt:
-    moveq   #1,%d0
-    sub.l   8(%sp),%d0
-    move.l  %d0,8(%sp)                  | 1 - value
-    jmp     FMT_ONOFF
-
     .balign 2
     .global hp_fmt
 hp_fmt:
@@ -323,14 +330,14 @@ sn_lane:
     movea.l (%sp)+,%a1
     rts
 
-| a1 -> a page-2 block (slot 6).  KEY > 8 -> the major version's defaults: MON OFF (slot 7
-| stored 1), KEY OFF, KGN 64, KBAS OFF (0), KWID OFF (127).
+| a1 -> a page-2 block (slot 6).  KEY > 8 -> the major version's defaults: MON OFF (0),
+| KEY OFF, KGN 64, KBAS OFF (0), KWID OFF (127).
 sn_fix:
     moveq   #0,%d1
     move.b  (2,%a1),%d1
     cmpi.l  #8,%d1
     bls.s   sn_done                     | 0..8: the user's own setting
-    move.b  #1,(1,%a1)
+    clr.b   (1,%a1)
     clr.b   (2,%a1)
     move.b  #64,(3,%a1)
     clr.b   (4,%a1)

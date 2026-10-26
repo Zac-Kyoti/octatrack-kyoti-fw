@@ -765,8 +765,8 @@ zz10:
         move    b1,a                 ; (q3)
         and     #>$ff,a
         tst     a
-        bne     zz17                   ; MON off: slot 7 stores 1 = OFF, 0 = ON (stock's
-                                       ; slot-7 default is 1, so old compressors load OFF)
+        beq     zz17                   ; MON off: slot 7 is 0 = OFF, 1 = ON (stored
+                                       ; inverted until 2026-10-25)
         move    #1,b                   ; (q2) stores $10000, moncommit's exact match
         move    b,y:(r1)               ; MON_ON = armed for this block
         bra     zz27

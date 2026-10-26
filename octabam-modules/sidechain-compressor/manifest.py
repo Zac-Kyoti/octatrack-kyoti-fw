@@ -3,8 +3,8 @@ key filter.
 
     page 2  RMS (stock, slot 6), then
             MON   ON = hear the processed key instead of the track (audition); slot 7,
-                  stored inverted (1 = OFF); switching it, or changing KEY while it is
-                  on, crossfades over 64 samples instead of clicking
+                  OFF (left) / ON (right); switching it, or changing KEY while it is on,
+                  crossfades over 256 samples instead of clicking
             KEY   OFF / T1..T8: the track whose audio drives the detector
             KGN   the key's gain, about -24..+24 dB around 64
             KBAS  the key's high-pass, 18 dB/oct Butterworth: OFF, 20 Hz..19.6 kHz (in Hz)
@@ -28,8 +28,8 @@ standalone image. This octabam form is not flashed yet.
 COLDFIRE. Two ROM units. sc_ui (tools/ui_switch.s, 616 B; shared with VARISPEED's QUAN): KEY's
 widget, a 9-position rotary switch (stock CHORUS TAPS's switch, as Spectrum's LADR, in 22.5-degree
 steps: stock's five glyphs and four of its own), and KWID's, the stock knob plus the link clip to
-KBAS, which the FX SETUP window does not draw itself. sc_cf (tools/patch_sidechain.s, 600 B): MON's
-inverted ON/OFF, KEY's formatter, KBAS's Hz and KWID's octave formatters, and sc_norm, reached by a
+KBAS, which the FX SETUP window does not draw itself. sc_cf (tools/patch_sidechain.s, 600 B): KEY's
+formatter, KBAS's Hz and KWID's octave formatters, and sc_norm, reached by a
 `jsr` detour at the first instruction of both page-2 copiers (0x4000cae8, its twin
 0x40003d1c). A COMPRESSOR saved on stock firmware holds stock's slot 8..11 defaults
 0x7f/0/0/0, i.e. KEY 127; sc_norm resets any COMPRESSOR whose KEY is above 8 to MON OFF,
@@ -132,8 +132,8 @@ MODULE = Module(
                    replaces="COMPRESSOR", stock_dsp=True),
     # Slots 0-6 are stock COMPRESSOR's, unchanged: on a stock_dsp clone a Param() keeps the
     # donor's enable nibble and every other field (octabam #571). Page 2 since the major
-    # version: RMS MON KEY KGN KBAS KWID. MON sits in stock's hidden slot 7, stored inverted
-    # (1 = OFF), so a compressor saved before comes up with MON off.
+    # version: RMS MON KEY KGN KBAS KWID. MON sits in stock's hidden slot 7, 0 = OFF, 1 = ON
+    # (stored inverted until 2026-10-25).
     params=tuple(Param(doc=d) for d in (
         "stock: attack time",
         "stock: release time",
@@ -142,12 +142,13 @@ MODULE = Module(
         "stock: make-up gain",
         "stock: dry/wet mix",
         "stock: the detector's RMS setting")) + (
-        Param(b"MON", 1, count=2, active=True,
-              formatter_word=("sc_cf", "mon_fmt"), widget_word=SWITCH_FN,
-              labels=("ON", "OFF"),
-              doc="ON: this track plays its processed key instead (audition); stored 1 = OFF"),
+        Param(b"MON", 0, count=2, active=True,
+              formatter_word=FMT_ONOFF, widget_word=SWITCH_FN,
+              labels=("OFF", "ON"),
+              doc="ON: this track plays its processed key instead (audition)"),
         Param(b"KEY", 0, count=9, active=True,
               formatter_word=("sc_cf", "key_fmt"), widget_word=("sc_ui", "sw9_widget"),
+              word_12a=("sc_cf", "key_step"),   # a pressed turn steps like a plain one
               labels=("OFF", "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"),
               doc="the track whose audio drives the detector; OFF = stock (self)"),
         Param(b"KGN", 64, count=128, active=True,

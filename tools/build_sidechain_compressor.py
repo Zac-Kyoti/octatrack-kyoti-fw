@@ -7,7 +7,7 @@ key filter (2026-10-22/23: it replaced the previous version's one-knob KFLT; tha
 builds, WIP, from tools/build_sidechain_compressor_light.py).
 
 Page 2: RMS (stock) . MON . KEY . KGN . KBAS . KWID
-  MON   audition the processed key (slot 7, stored inverted: 1 = OFF), with a 64-sample
+  MON   audition the processed key (slot 7, 0 = OFF, 1 = ON), with a 256-sample
         crossfade; a KEY change made while MON is audible waits for MON to fade out
   KEY   OFF (stock self-detect) or T1..T8, either core
   KGN   key gain, about -24..+24 dB
@@ -92,9 +92,9 @@ SWITCH_FN = 0x40046f10
 SLOTS = [
     # major version (2026-10-19): page 2 = RMS (6, stock) MON KEY KGN KBAS KWID (the key
     # filters as a base-width pair since 2026-10-21; they were KFHP/KFLP).
-    # MON in slot 7, stored inverted (1 = OFF): stock's slot-7 default is 1, so a compressor
-    # saved before comes up MON off. Slot 7's stock B (0x400475f8) is replaced by the switch.
-    (7,  b"MON\x00\x00\x00",  2,   1,  "mon_fmt",
+    # MON in slot 7: 0 = OFF (left), 1 = ON (right), default OFF (stored inverted until
+    # 2026-10-25). Slot 7's stock B (0x400475f8) is replaced by the switch.
+    (7,  b"MON\x00\x00\x00",  2,   0,  FMT_ONOFF,
      dict(name="000000000000", cnt="00000002", dflt="01", b="400475f8"), SWITCH_FN),
     # KEY: OFF + T1..T8 (Session 77), a 9-position rotary switch (tools/ui_switch.s, 2026-10-23:
     # Spectrum's LADR knob in 22.5-degree steps; a scrolling list until then)
@@ -412,6 +412,12 @@ def main():
     assert int.from_bytes(img[o(eb):o(eb) + 4], "big") == 0x01111111, "enable bitmap (slots 0-7) not stock"
     img[o(eb):o(eb) + 4] = (0x11111111).to_bytes(4, "big")
     print(f"  enable bitmap 0x{eb:08x}  slots 0-7 -> 0x11111111 (slot 7 MON drawn)")
+    # KEY's step handler (P+0x12a + 4*slot; 0 = stock's generic, which turns 7x while the
+    # encoder is pressed): key_step, the unscaled tally, so a pressed turn steps one by one.
+    ka = E + 0x38 + 0x12a + 4 * 8
+    assert int.from_bytes(img[o(ka):o(ka) + 4], "big") == 0, "KEY step handler not 0"
+    img[o(ka):o(ka) + 4] = fmt_sym["key_step"].to_bytes(4, "big")
+    print(f"  step handler 0x{ka:08x}  KEY -> key_step 0x{fmt_sym['key_step']:08x}")
 
     # ---------------- DSP (both payloads) ----------------
     print("\n=== DSP: SPRING REVERB donor + sctap / scdet / moncommit ===")

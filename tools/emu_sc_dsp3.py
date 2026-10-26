@@ -446,9 +446,9 @@ def main():
     pk = ",".join(f"{SLOT + i:x}={MARK[i]:x}" for i in range(0x20))
 
     def P(key=0, kgn=64, hp=0, lp=127, mon=False):
-        # major version layout: 6 RMS, 7 MON (stored 1 = OFF, 0 = ON), 8 KEY, 9 KGN,
-        # 10 KBAS, 11 KWID (a base-width pair since 2026-10-21)
-        return f"0,0,0,0,0,0,0,{0 if mon else 1},{key},{kgn},{hp},{lp}"
+        # major version layout: 6 RMS, 7 MON (0 = OFF, 1 = ON; inverted until 2026-10-25),
+        # 8 KEY, 9 KGN, 10 KBAS, 11 KWID (a base-width pair since 2026-10-21)
+        return f"0,0,0,0,0,0,0,{1 if mon else 0},{key},{kgn},{hp},{lp}"
 
     def kf_ref(src, hp=0, lp=127, kf=None, kgn=64, prev=0):
         """the DSP's X:$40 after KEY GAIN and the key filters (sc_keyfilt's model)."""
