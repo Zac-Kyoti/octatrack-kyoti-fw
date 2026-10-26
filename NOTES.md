@@ -37418,3 +37418,10 @@ The other Bugbuilds match their pins (BUG_BP303 not buildable in this worktree; 
   Stock resolve (`0x40007da8..dbc`) stores the mode unchecked and plays 4 as NORMAL. Stock's TSTR
   formatter `0x4003b6a4` bounds off by one (`cmp #4; bcc`), so it probably shows junk text. FLASHING §5
   and both VARISPEED READMEs now say to clear VARI before reverting to stock.
+- **2026-10-26, promoted (the user's instruction).** The user flashed all three WIP images
+  (standalone `140C_MMSH1` syx `894ce79b…`, BUG_MM syx `46a75da2…`, KYOTI V1.6 syx `dd9dbec2…`) and
+  reported "all good". Pins: `build_mute_modes.py` `560de340…`, BUG_MM `2b5f7c70…`, KYOTI V1.6 `ee59be31…`.
+  Without the opt-in: MUTE_MODES and KYOTI seal, nine Bugbuilds match their pins (BUG_BP303 needs
+  `out/ot303/dsp56300_new`, which no checkout has; it carries no MUTE_MODES code), and the three
+  BATCH_BUGFIXES standalones seal. The new `seal()` stock-SRAM check passed on every one of those
+  builds.
