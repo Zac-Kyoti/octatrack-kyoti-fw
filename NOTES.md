@@ -37673,3 +37673,17 @@ destination track's designer. Not yet observed on the unit. The user's check: on
 to the designer, draw an obvious shape, aim it at volume with high depth; leave T2's designer
 different; GRID REC copy T1, paste onto T2; does T2's LFO follow T1's shape? If not → a
 BATCH_BUGFIXES candidate (TRACK_PASTE_DESIGNER_FIX, working name); MIDI tracks likewise.
+
+**Session 131 cont. (4) (2026-10-25, `trkseq`)** — CLYPS: DRAM move, saved sequences, originals.
+`140C_CLYP9` built, NOT flashed (syx `9bd97e27…`; CLYP7 was never flashed and is superseded).
+- Code split: tick path in the classic cave (2,130 B), the rest linked at the arena reserve and
+  carried by the boot loader; 9.6 MB of buffers via the new `dram.build(bss=)` (1,563 pages).
+  The split alone (CLYP8) is tick-for-tick identical to CLYP7 on the landing runs.
+- Saved sequences ([FUNC]+[YES] / [FUNC]+[NO], immediate), originals (first replacement wins,
+  `ORIG` cursor entry, [PAGE], [FUNC]+[PAGE], NORMAL→PER TRACK undone byte for byte), cleared on a
+  project load. UI gate 61/61; running restores lock the tick after landing.
+- User decision: with the [PTN]+[BANK] chord held, [YES] must not toggle DIRECT JUMP; [PTN]+[YES]
+  in Clyps mode does.
+- Found: a key's sub-maps chain across layers (stock's FUNC sub-map took [FUNC]+[YES]); LOAD
+  PROJECT reads banks through `0x400905d4(ctx, mask, …)`, not `0x40090504`; route A never ages
+  the TRACK double-tap timer `0x460d5de0`. Details: CLYPS_SCOPE.md §0 traps, §8b, §9.

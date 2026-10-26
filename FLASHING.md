@@ -206,10 +206,12 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
-- **CLYPS (WIP, test image `140C_CLYP6`)** — not in it yet: DIRECT JUMP timing, originals
-  (`ORIG` / `[PAGE]`), saved sequences (`[FUNC]`+`[YES]`/`[NO]`), FULL loads, the page LEDs. Use
-  a project with a few patterns whose tracks differ (lengths, a 2x track, one pattern in
-  PER TRACK mode with CHAIN AFTER = 4).
+- **CLYPS (WIP, test image `140C_CLYP9`)** — not in it yet: DIRECT JUMP timing, FULL loads, the
+  page LEDs. New since CLYP7: its code and ~9.6 MB of buffers live in DRAM (the FREE MEM / MEMORY
+  page still reads the stock total), saved sequences (F), originals (G). Use a project with a few
+  patterns whose tracks differ (lengths, a 2x track, one pattern in PER TRACK mode with CHAIN
+  AFTER = 4, one in NORMAL mode). Save the project on the card before you start.
+  0. Boot: the unit starts normally and plays a project; samples load as usual.
   A. Opening and closing
      1. Hold `[PTN]`, press `[BANK]`: the Clyps window opens (header `T<n> BANK <x>`,
         `LOAD: SEQ`, 2 × 8 slots); the trigs light (full green = sample/note trigs, half green
@@ -225,6 +227,8 @@ quick check for each:
      5. A TRACK key changes the track; the header (`T<n>` / `M<n>` on the MIDI side), slots
         and LEDs follow.
      6. Holding `[FUNC]` shows `LOAD: SEQ+MCH/FX` in the header (label only for now).
+     6a. With the chord held, `[YES]` does nothing. Latched, hold `[PTN]` and tap `[YES]`: nothing
+         loads and Clyps stays (DIRECT JUMP's toggle in KYOTI; this image has no DIRECT JUMP).
   C. Loads, transport STOPPED
      7. Chord held, tap a trig: that slot's sequence is on the track at once, its LED red;
         Clyps stays until you release the chord, then closes.
@@ -244,8 +248,30 @@ quick check for each:
          dropped.
      15. Cue on several tracks (change track with TRACK keys between picks): all land at the
          same point.
-  E. Stress: repeat A–D in a loop, both chord orders, holding and releasing in different
-     orders. Nothing sticks: no stuck window, no dead keys, no frozen panel.
+  F. Saved sequences (one per track)
+     16. In Clyps, `[FUNC]`+`[YES]`: the header shows a dark `SAVED` box (until the next key);
+         Clyps stays.
+     17. Load another slot onto the track, then `[FUNC]`+`[NO]`: the saved sequence is back.
+         Stopped: at once. Playing: at the track's next step, in step with the other tracks
+         (not from step 1). While it plays, the header shows `SAVED` and no slot is red.
+     18. Change bank and pattern, `[FUNC]`+`[NO]` there: the saved sequence plays on that track.
+         `[FUNC]`+`[NO]` on a track with nothing saved does nothing.
+  G. Originals
+     19. Load a slot onto a track, then UP from slot 1 (or DOWN past 16): the cursor reaches
+         `ORIG` (no slot highlighted, a dark `ORIG` box in the header). Latched: `[YES]` puts the
+         track back as it was before Clyps and closes. A track Clyps never touched has no `ORIG`.
+     20. Load two different slots one after the other onto the same track, edit a trig, then
+         `[PAGE]`: the track is back as it was before the FIRST load (edits gone).
+     21. Load onto three tracks, then `[FUNC]`+`[PAGE]`: all three come back on one landing.
+     22. Playing: `[PAGE]` is cued like a load (lands at the end of the pattern / the next
+         CHAIN AFTER point, in step).
+     23. A NORMAL pattern: load a slot with another length (the pattern turns PER TRACK), then
+         `[PAGE]`: the pattern is NORMAL again and plays as before.
+  H. Lifetime
+     24. LOAD PROJECT (or reload it): no `ORIG`, `[FUNC]`+`[NO]` does nothing.
+     25. Power cycle: the same; the saved project's own sequences are intact.
+  E. Stress: repeat A–D and F–G in a loop, both chord orders, holding and releasing in
+     different orders. Nothing sticks: no stuck window, no dead keys, no frozen panel.
 
 ---
 
