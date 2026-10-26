@@ -224,8 +224,10 @@ quick check for each:
   B. In Clyps (held or latched)
      4. UP/DOWN move the cursor 1 → 16 and wrap; LEFT/RIGHT change the bank A ↔ P and wrap,
         holding repeats quickly; the slots and trig LEDs follow.
-     5. A TRACK key changes the track; the header (`T<n>` / `M<n>` on the MIDI side), slots
-        and LEDs follow.
+     5. A TRACK key changes the track; the header, slots and LEDs follow. Then press `[MIDI]`
+        and open Clyps on the MIDI side: the header reads `M<n>`, and the slots and trigs show
+        the MIDI tracks' sequences (CLYP6 showed the audio tracks here). Load one: it lands on
+        the MIDI track. (Double-tapping a TRACK key runs stock's double tap and closes Clyps.)
      6. Holding `[FUNC]` shows `LOAD: SEQ+MCH/FX` in the header (label only for now).
      6a. With the chord held, `[YES]` does nothing. Latched, hold `[PTN]` and tap `[YES]`: nothing
          loads and Clyps stays (DIRECT JUMP's toggle in KYOTI; this image has no DIRECT JUMP).
@@ -260,8 +262,9 @@ quick check for each:
      19. Load a slot onto a track, then UP from slot 1 (or DOWN past 16): the cursor reaches
          `ORIG` (no slot highlighted, a dark `ORIG` box in the header). Latched: `[YES]` puts the
          track back as it was before Clyps and closes. A track Clyps never touched has no `ORIG`.
-     20. Load two different slots one after the other onto the same track, edit a trig, then
-         `[PAGE]`: the track is back as it was before the FIRST load (edits gone).
+     20. Load two different slots one after the other onto the same track, close Clyps, edit a
+         trig, open Clyps again, `[PAGE]`: the track is back as it was before the FIRST load
+         (the edit is gone too).
      21. Load onto three tracks, then `[FUNC]`+`[PAGE]`: all three come back on one landing.
      22. Playing: `[PAGE]` is cued like a load (lands at the end of the pattern / the next
          CHAIN AFTER point, in step).
