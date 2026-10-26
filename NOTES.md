@@ -37425,3 +37425,6 @@ The other Bugbuilds match their pins (BUG_BP303 not buildable in this worktree; 
   `out/ot303/dsp56300_new`, which no checkout has; it carries no MUTE_MODES code), and the three
   BATCH_BUGFIXES standalones seal. The new `seal()` stock-SRAM check passed on every one of those
   builds.
+- **2026-10-26:** flashed and all good on the author's MKI: KYOTI V1.6 `0dda8919…` (with
+  `patch_qlrec` in SPRING's reclaimed record), octabam OCTABAM33 (pin `b0d49bf`, PR #886
+  merged), Modwerk 0.2.0's native image MW_SC021 (`131142e1…`).

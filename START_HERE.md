@@ -246,9 +246,10 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
     latency) helps the simultaneous-trig case.
   - Confirmed on the author's MKI: `140C_SCKD3` (standalone) and OCTABAM32 (table fix).
   - Pins: standalone mainos `44465569…` (syx `88c4553c…`), `BUG_SC3X` mainos `4febe2e6…`
-    (syx `1a4b92ab…`), KYOTI V1.6 mainos `0dda8919…` (syx `e44f980c…`; not flashed with
-    this change: SC's units grew to 698 B, and `patch_qlrec` moved to SPRING's reclaimed
-    record to make room).
+    (syx `1a4b92ab…`), KYOTI V1.6 mainos `0dda8919…` (syx `e44f980c…`; SC's units grew to
+    698 B, so `patch_qlrec` moved to SPRING's reclaimed record; flashed 26 Oct 2026, all good).
+  - octabam: PR #886 (pin `b0d49bf`) merged 26 Oct 2026; its form flashed as OCTABAM33, all good.
+    Modwerk 0.2.0's native image flashed as MW_SC021, all good (PR to Jannik pending).
 - **RELOAD_FROM_PROJECT** — **FINAL 2026-10-25: the MIDI-side fix.**
   - The MIDI-tracks flag `0x80000012` is a long and was read as a byte, so on the MIDI tracks the
     chords reloaded the audio track.
