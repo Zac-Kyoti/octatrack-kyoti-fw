@@ -48,6 +48,45 @@ key_step:
     add.l   12(%sp),%d0                 | + the current value
     rts
 
+    .equ FMT_ONOFF, 0x4003c14c          | stock "OFF" / "ON"
+    .equ SWITCH_FN, 0x40046f10          | stock 2-position switch, (.., value at 16(%sp), ..)
+
+    .balign 2
+    .global mon_step
+mon_step:                               | as key_step, then kept on 2..3
+    move.l  8(%sp),-(%sp)
+    move.l  8(%sp),-(%sp)
+    jsr     STEP_TALLY
+    addq.l  #8,%sp
+    add.l   12(%sp),%d0
+    moveq   #2,%d1
+    cmp.l   %d1,%d0
+    bge.s   ms_lo
+    move.l  %d1,%d0
+ms_lo:
+    moveq   #3,%d1
+    cmp.l   %d1,%d0
+    ble.s   ms_hi
+    move.l  %d1,%d0
+ms_hi:
+    rts
+
+    .balign 2
+    .global mon_fmt
+mon_fmt:
+    moveq   #1,%d0
+    and.l   8(%sp),%d0
+    move.l  %d0,8(%sp)                  | bit 0: 2 -> OFF, 3 -> ON
+    jmp     FMT_ONOFF
+
+    .balign 2
+    .global mon_widget
+mon_widget:
+    moveq   #1,%d0
+    and.l   16(%sp),%d0
+    move.l  %d0,16(%sp)                 | bit 0: 2 -> left, 3 -> right
+    jmp     SWITCH_FN
+
     .balign 2
     .global key_fmt
 key_fmt:
@@ -80,8 +119,10 @@ kf_fmt:
 | =====================================================================
 |  Page 2 since the major version (2026-10-19): RMS · MON · KEY · KGN · KBAS · KWID.
 |
-|  MON (slot 7) uses the stock ON/OFF formatter directly: 0 = OFF, 1 = ON (stored inverted
-|  until 2026-10-25, so a compressor saved with that version comes up with MON flipped).
+|  MON (slot 7): 2 = OFF (left), 3 = ON (right), default 2. 0 and 1 are what a compressor
+|  saved before holds (stock's hidden 1, or the inverted MON of 2026-10-19..25), so sc_norm
+|  turns them into OFF. The count is 4 (octabam writes min 0); mon_step keeps a turn on 2..3,
+|  and mon_fmt / mon_widget show bit 0 (the switch reads the raw value: 2 = left).
 |
 |  hp_fmt: KBAS, the HP's frequency on the DSP's grid f = 20 Hz * 2^(g/16)
 |  (tools/sc_keyfilt.py): 0 = OFF, n = g round((n-1) * 159/126). Shown as "20".."990",
@@ -330,14 +371,22 @@ sn_lane:
     movea.l (%sp)+,%a1
     rts
 
-| a1 -> a page-2 block (slot 6).  KEY > 8 -> the major version's defaults: MON OFF (0),
-| KEY OFF, KGN 64, KBAS OFF (0), KWID OFF (127).
+| a1 -> a page-2 block (slot 6).  KEY > 8 -> the major version's defaults: MON OFF (2),
+| KEY OFF, KGN 64, KBAS OFF (0), KWID OFF (127).  KEY 0..8 is the user's own setting; only a
+| MON other than 2/3 (saved before 2026-10-25) is set OFF.
 sn_fix:
     moveq   #0,%d1
     move.b  (2,%a1),%d1
     cmpi.l  #8,%d1
-    bls.s   sn_done                     | 0..8: the user's own setting
-    clr.b   (1,%a1)
+    bhi.s   sn_reset
+    move.b  (1,%a1),%d1
+    subq.l  #2,%d1
+    cmpi.l  #1,%d1
+    bls.s   sn_done                     | 2 or 3: this version's MON
+    move.b  #2,(1,%a1)
+    rts
+sn_reset:
+    move.b  #2,(1,%a1)
     clr.b   (2,%a1)
     move.b  #64,(3,%a1)
     clr.b   (4,%a1)

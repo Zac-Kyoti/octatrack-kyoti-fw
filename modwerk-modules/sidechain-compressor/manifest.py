@@ -125,8 +125,8 @@ MODULE = Module(
                    replaces="COMPRESSOR", stock_dsp=True),
     # Slots 0-6 are stock COMPRESSOR's, unchanged: on a stock_dsp clone a Param() keeps the
     # donor's enable nibble and every other field (octabam #571). Page 2 since the major
-    # version: RMS MON KEY KGN KBAS KWID. MON sits in stock's hidden slot 7, 0 = OFF, 1 = ON
-    # (stored inverted until 2026-10-25).
+    # version: RMS MON KEY KGN KBAS KWID. MON sits in stock's hidden slot 7: 2 = OFF, 3 = ON; sc_norm
+    # turns an older compressor's 0/1 into OFF.
     params=tuple(Param(active=None, doc=d) for d in (
         "stock: attack time",
         "stock: release time",
@@ -135,9 +135,10 @@ MODULE = Module(
         "stock: make-up gain",
         "stock: dry/wet mix",
         "stock: the detector's RMS setting")) + (
-        Param(b"MON", 0, count=2, active=True,
-              formatter_word=FMT_ONOFF, widget_word=SWITCH_FN,
-              labels=("OFF", "ON"),
+        Param(b"MON", 2, count=4, active=True,
+              formatter_word=("sc_cf", "mon_fmt"), widget_word=("sc_cf", "mon_widget"),
+              word_12a=("sc_cf", "mon_step"),   # 2 = OFF, 3 = ON; 0/1 = saved before, OFF
+              labels=("OFF", "ON", "OFF", "ON"),
               doc="ON: this track plays its processed key instead (audition)"),
         Param(b"KEY", 0, count=9, active=True,
               formatter_word=("sc_cf", "key_fmt"), widget_word=("sc_ui", "sw9_widget"),

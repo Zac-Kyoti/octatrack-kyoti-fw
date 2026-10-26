@@ -446,9 +446,9 @@ def main():
     pk = ",".join(f"{SLOT + i:x}={MARK[i]:x}" for i in range(0x20))
 
     def P(key=0, kgn=64, hp=0, lp=127, mon=False):
-        # major version layout: 6 RMS, 7 MON (0 = OFF, 1 = ON; inverted until 2026-10-25),
+        # major version layout: 6 RMS, 7 MON (2 = OFF, 3 = ON since 2026-10-25),
         # 8 KEY, 9 KGN, 10 KBAS, 11 KWID (a base-width pair since 2026-10-21)
-        return f"0,0,0,0,0,0,0,{1 if mon else 0},{key},{kgn},{hp},{lp}"
+        return f"0,0,0,0,0,0,0,{3 if mon else 2},{key},{kgn},{hp},{lp}"
 
     def kf_ref(src, hp=0, lp=127, kf=None, kgn=64, prev=0):
         """the DSP's X:$40 after KEY GAIN and the key filters (sc_keyfilt's model)."""
@@ -612,7 +612,7 @@ def main():
     mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)], None)
     (x40, g1) = run(mem, scdet, [('x', 0x40, 0x60), ('y', SLOT + 0x20, SLOT + 0x40)],
                     P(key=KEYV, hp=33, lp=64, mon=True), pokey=pk_sig, audio=0)
-    check("MON=1: keybus[0] gen1 == processed X:$40", g1 == x40,
+    check("MON ON: keybus[0] gen1 == processed X:$40", g1 == x40,
           f"g1[:3]={[hex(v) for v in g1[:3]]} x40[:3]={[hex(v) for v in x40[:3]]}")
     # MON off: the loop borrows the first 8 words of this track's gen-1 slot (gain, coefficients)
     # scratch (2026-10-19 cycle pass); moncommit reads the slot only while MON is on or fading,
@@ -620,7 +620,7 @@ def main():
     mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)], None)
     (g1, blk) = run(mem, scdet, [('y', SLOT + 0x20, SLOT + 0x40), ('x', KFB, KFB + 15)],
                     P(key=KEYV, hp=33, lp=64, mon=False), pokey=pk_sig, audio=0)
-    check("MON=0: gen1 = the gain + 7 coefficients (scratch), the rest untouched",
+    check("MON OFF: gen1 = the gain + 7 coefficients (scratch), the rest untouched",
           g1[0] == GAIN_T[8] and g1[1:8] == blk[5:12] and all(v == 0 for v in g1[8:]))
 
     # 6. MON publish (scdet -> MON_ON[my track], Y:MON_BASE+track*2; the word after it is
@@ -637,10 +637,10 @@ def main():
                               P(key=KEYV, hp=33, lp=64, mon=True), pokey=pk_sig, audio=0)
     # `move #1,b`'s short immediate is left-aligned (q2): the ON sentinel is $10000, which
     # moncommit matches exactly.
-    check("MON=1: MON_ON == $10000, MON_FADE untouched", pub == [0x10000, 0xdead], f"got={pub}")
-    check("MON=1: keybus[my track] gen1 == processed X:$40", st == x40,
+    check("MON ON: MON_ON == $10000, MON_FADE untouched", pub == [0x10000, 0xdead], f"got={pub}")
+    check("MON ON: keybus[my track] gen1 == processed X:$40", st == x40,
           f"st[:3]={[hex(v) for v in st[:3]]} x40[:3]={[hex(v) for v in x40[:3]]}")
-    check("MON=1: the SOURCE track's gen1 is not written", all(v == 0 for v in src))
+    check("MON ON: the SOURCE track's gen1 is not written", all(v == 0 for v in src))
 
     for fade, want_stash in ((0, False), (2, True)):
         mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
@@ -648,16 +648,16 @@ def main():
         (pub, x40, st) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2), ('x', 0x40, 0x60),
                                           ('y', MYSTASH, MYSTASH + 0x20)],
                              P(key=KEYV, hp=33, lp=64, mon=False), pokey=pk_sig, audio=0)
-        check(f"MON=0, MON_FADE={fade}: MON_ON published OFF, MON_FADE untouched",
+        check(f"MON OFF, MON_FADE={fade}: MON_ON published OFF, MON_FADE untouched",
               pub == [0, fade], f"got={pub}")
-        check(f"MON=0, MON_FADE={fade}: stash {'written (fade-out source)' if want_stash else 'not written past the coefficient scratch'}",
+        check(f"MON OFF, MON_FADE={fade}: stash {'written (fade-out source)' if want_stash else 'not written past the coefficient scratch'}",
               (st == x40) if want_stash else all(v == 0 for v in st[8:]),
               f"st[:3]={[hex(v) for v in st[:3]]}")
 
     mem = base_mem(words, scdet, sctail, False, [(1, 0x40, [0] * 0x20)],
                    [(1, 0x420, [MYTRACK]), (2, MON_ADDR, [0x10000, MON_N])])
     (pub,) = run(mem, scdet, [('y', MON_ADDR, MON_ADDR + 2)], P(key=0, mon=True), pokey=pk_sig, audio=0)
-    check("KEY=0: MON_ON published OFF (even with MON=1)", pub == [0, MON_N], f"got={pub}")
+    check("KEY=0: MON_ON published OFF (even with MON ON)", pub == [0, MON_N], f"got={pub}")
 
     # 6b. KEY declick (2026-10-19): while MON is audible a KEY change waits (old key runs,
     # MON forced off this block); with MON silent it is taken at once

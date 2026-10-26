@@ -176,12 +176,13 @@ PLAN = {
               "patch_sidechain",                   # COMPRESSOR page formatters
               "ui_switch",                         # SIDE-CHAIN KEY's switch + KWID's clip (UI task)
               "patch_trigscale",                   # MIDI_PLAYS_FREE_FIX
-              "patch_qlrec",                       # [PLAY]/[REC] key handlers
               "patch_pattern_led",                 # EMPTY_PATTERN_LED_FIX (CAVE is full since V1.2)
               "patch_mutemode",                    # V1.5: CAVE holds VARISPEED's unit
               "rtm_mask"],                         # REC_TRIG_MUTE's state byte, written at runtime
     "ENC":   ["patch_triglock"],                   # LIVE-erase key path only
-    "SPRING": [], "PERS1": [], "PERS2": [],
+    # SPRING REVERB's dead descriptor record (UI-path code ran there in V1.2-V1.3): [PLAY]/[REC]
+    # key handlers, moved out of SAFE when SIDE-CHAIN's units grew (2026-10-25)
+    "SPRING": ["patch_qlrec"], "PERS1": [], "PERS2": [],
 }
 
 # --- the features: name -> (builder, image, base, placement keys, standalone blob files) --
@@ -242,7 +243,7 @@ def flags_for(feat):
         # not depend on it); pass 2 gives the allocated sw9_draw.
         f["uis_sw9_at"] = UIS_SIZING_AT
     return f
-UIS_SIZING_AT = 0x400d7260          # ui_switch's standalone address (build_sidechain_compressor.py)
+UIS_SIZING_AT = 0x400d7300          # ui_switch's standalone address (build_sidechain_compressor.py)
 # bytes two features may both write, with identical values (SPRING REVERB's removal)
 SHARED_OK = set()
 

@@ -60,7 +60,7 @@ CF_PATCHES = [
         (0x40003d1c, "sc_norm", "47f980000a50", 6, "jsr"),   # its twin
     ]),
     # the panel drawings shared with VARISPEED: KEY's rotary switch, KWID's link clip
-    ("ui_switch", kyoti_place.at("ui_switch", 0x400d7260), []),
+    ("ui_switch", kyoti_place.at("ui_switch", 0x400d7300), []),
 ]
 CF_FREE_END = 0x400d7c3c
 E = 0x400d5a4a
@@ -92,10 +92,11 @@ SWITCH_FN = 0x40046f10
 SLOTS = [
     # major version (2026-10-19): page 2 = RMS (6, stock) MON KEY KGN KBAS KWID (the key
     # filters as a base-width pair since 2026-10-21; they were KFHP/KFLP).
-    # MON in slot 7: 0 = OFF (left), 1 = ON (right), default OFF (stored inverted until
-    # 2026-10-25). Slot 7's stock B (0x400475f8) is replaced by the switch.
-    (7,  b"MON\x00\x00\x00",  2,   0,  FMT_ONOFF,
-     dict(name="000000000000", cnt="00000002", dflt="01", b="400475f8"), SWITCH_FN),
+    # MON in slot 7: 2 = OFF (left), 3 = ON (right), default 2; count 4 with min 0, mon_step
+    # keeps a turn on 2..3 and sc_norm turns an older compressor's 0/1 into OFF (patch_sidechain.s).
+    # Slot 7's stock B (0x400475f8) is replaced by the switch.
+    (7,  b"MON\x00\x00\x00",  4,   2,  "mon_fmt",
+     dict(name="000000000000", cnt="00000002", dflt="01", b="400475f8"), "mon_widget"),
     # KEY: OFF + T1..T8 (Session 77), a 9-position rotary switch (tools/ui_switch.s, 2026-10-23:
     # Spectrum's LADR knob in 22.5-degree steps; a scrolling list until then)
     (8,  b"KEY\x00\x00\x00", 9,   0,  "key_fmt",
@@ -414,10 +415,12 @@ def main():
     print(f"  enable bitmap 0x{eb:08x}  slots 0-7 -> 0x11111111 (slot 7 MON drawn)")
     # KEY's step handler (P+0x12a + 4*slot; 0 = stock's generic, which turns 7x while the
     # encoder is pressed): key_step, the unscaled tally, so a pressed turn steps one by one.
-    ka = E + 0x38 + 0x12a + 4 * 8
-    assert int.from_bytes(img[o(ka):o(ka) + 4], "big") == 0, "KEY step handler not 0"
-    img[o(ka):o(ka) + 4] = fmt_sym["key_step"].to_bytes(4, "big")
-    print(f"  step handler 0x{ka:08x}  KEY -> key_step 0x{fmt_sym['key_step']:08x}")
+    # MON's (slot 7): mon_step, which also keeps the value on 2..3.
+    for sl, fn in ((7, "mon_step"), (8, "key_step")):
+        ka = E + 0x38 + 0x12a + 4 * sl
+        assert int.from_bytes(img[o(ka):o(ka) + 4], "big") == 0, f"slot {sl} step handler not 0"
+        img[o(ka):o(ka) + 4] = fmt_sym[fn].to_bytes(4, "big")
+        print(f"  step handler 0x{ka:08x}  slot {sl} -> {fn} 0x{fmt_sym[fn]:08x}")
 
     # ---------------- DSP (both payloads) ----------------
     print("\n=== DSP: SPRING REVERB donor + sctap / scdet / moncommit ===")

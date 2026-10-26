@@ -763,10 +763,9 @@ zz10:
         move    x:(r6+$c),b           ; (q1) RMS|MON word
         asr     #$8,b,b
         move    b1,a                 ; (q3)
-        and     #>$ff,a
-        tst     a
-        beq     zz17                   ; MON off: slot 7 is 0 = OFF, 1 = ON (stored
-                                       ; inverted until 2026-10-25)
+        and     #>$1,a                 ; MON: 2 = OFF, 3 = ON (sc_norm turns anything
+        tst     a                      ; else into 2 before the frame reaches the DSP)
+        beq     zz17
         move    #1,b                   ; (q2) stores $10000, moncommit's exact match
         move    b,y:(r1)               ; MON_ON = armed for this block
         bra     zz27
