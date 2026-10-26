@@ -1,77 +1,84 @@
-# CLYPS — scope and build record (WIP; latest test image `140C_CLYP7`)
+# CLYPS — scope and build record (WIP; latest test image `140C_CLYP9`)
 
 ## §0 Start here (handoff, 2026-10-25) — read this first, then §1–§4
 
 **Where it stands.**
 - **Worktree / branch:** `../octatrack-kyoti-fw-trkseq`, branch `trkseq`. Commits are local, not
   pushed. Clyps is WIP, nothing is promoted, and there is no README entry.
-- **Latest image:** `140C_CLYP7` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
-  Syx `61f9bd90…`, NOT flashed.
-- **CLYP6 on the user's unit:** FLASHING §4 CLYPS steps 1–10 passed. MIDI tracks were not seen;
-  that bug is fixed in CLYP7.
-- **Pending:** the user still has to run **steps 11–16** (cued landings with CHAIN AFTER = 4,
-  2x tracks, cancel, a stock change first, several tracks) on CLYP7, and step 5 again on the MIDI
-  side.
-- **Built and gated:** Clyps mode; the 2×8 view (v5 layout, user-approved); the grid;
-  held/latched states; stopped loads; cued loads at master wrap and at CHAIN AFTER points
-  (phase-continuous); yellow cue / red playing.
+- **Latest image:** `140C_CLYP9` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
+  NOT flashed. See §8b for its sha256.
+- **On the user's unit:** CLYP6 (FLASHING §4 steps 1–10 passed; MIDI tracks not seen, fixed in
+  CLYP7). CLYP7 was never flashed: CLYP9 replaces it.
+- **Pending on hardware (CLYP9):** FLASHING §4 CLYPS step 0 (boot with the 9.6 MB reserve), steps
+  11–15 (cued landings), step 5 on the MIDI side, and the new F/G/H (saved sequences, originals,
+  lifetime).
+- **Built and gated:**
+  - Clyps mode; the 2×8 view (v5 layout, user-approved); the grid; held/latched states;
+  - stopped and cued loads (master wrap, CHAIN AFTER points, phase-continuous);
+  - **the DRAM move** (step 1 below, done);
+  - **saved sequences** (step 2, done): [FUNC]+[YES] / [FUNC]+[NO];
+  - **originals** (step 3, done): capture on the first replacement, the `ORIG` cursor entry,
+    [PAGE], [FUNC]+[PAGE], the NORMAL→PER TRACK undo, cleared on a project load;
+  - [YES] with the chord held does nothing; [PTN]+[YES] in Clyps mode = DJ toggle hook (user,
+    2026-10-25).
 - **Gates:**
-  - UI: `diag_clyps_ui.py`, 28/28 on OT DEMO, plus scenario M on JAM2.
-  - Landing: real key presses, exact against the oracles (§3.4, §8b).
-- **Code:** `tools/clyps/patch_clyps.s` = 5,064 B in the classic cave `0x400d6500`, **884 B left**.
-  Five detours: `0x4005a044` [PTN], `0x4007af80` / `0x4007b3e0` [BANK] press / release,
-  `0x400a1f72` phase D, `0x400a43a0` wrap body, and `0x40062d1c` UI tail.
+  - UI: `diag_clyps_ui.py --only ABCDYENP` on OT DEMO, plus `--only M` on JAM2.
+  - Landing: real key presses, exact against the oracles (§3.4, §8b): C1w/C2c/C3s, plus C4v
+    (saved, immediate), C5o / C6o (restore at a wrap / a CHAIN AFTER point), against C1 (no load).
+- **Code:** `tools/clyps/patch_clyps.s`, one source, two sections:
+  - `.text` (ROM, classic cave `0x400d6500`, ~2.1 KB, ~3.8 KB left): the tick path (`cl_land`,
+    `cl_wrap`, `cl_landone`, `cl_apply`, `cl_srcrec`, `cl_oidx`, `cl_capture`, `cl_release`,
+    `cl_convert`, `cl_newrate`, `cl_tps`, the drop/count helpers) and the cue state;
+  - `.dram` (linked at the arena reserve `0x40a955e0`, ~5.5 KB): everything else;
+  - buffers `CL_BSS_SIZE` = 9,591,200 B after `.dram` (4,096 originals, 16 saved, 256 pattern
+    snapshots); their valid marks live inside `.dram`, so every boot's depack zeroes them;
+  - reserve 1,563 pages (9.6 MB) of the 14,602-page sample arena.
+  - Seven detours: `0x4005a044` [PTN], `0x4007af80` / `0x4007b3e0` [BANK] press / release,
+    `0x400a1f72` phase D, `0x400a43a0` wrap body, `0x40062d1c` UI tail, `0x400905d4` the masked
+    bank loader (project load).
 
 **Next, in this order** (decisions are all in §1.1–§1.7 and §2):
-1. **The DRAM move.** It is needed: about 9.6 MiB of buffers, and the cave is full.
-   - One source, two sections: `.rom` for the sequencer-tick code (`cl_land`, `cl_wrap`,
-     `cl_landone`, `cl_apply`, `cl_convert`, `cl_newrate`, `cl_tps`, `cl_count`/drop) and the
-     cue/arm state it touches; `.dram` for everything else (UI, layer and records, drawing,
-     strings).
-   - Link both with one linker script, so they can call each other.
-   - `build_kyoti.py` keeps ISR code out of DRAM by policy; octabam's OBKYOTI images ran DJ's
-     tick hooks from DRAM on the MKI, but keep to the policy anyway.
-   - Extend `tools/dram/dram.py`'s `build()` with a `bss=` size: pages =
-     max(stage pages, ceil((raw + bss) / 6144)). Keep the default backward-compatible
-     (`build_kyoti.py` uses it).
-   - The buffers live past `raw`, uninitialised. All *valid* bitmaps live inside `raw`, so they
-     are zeroed at every boot by the depack.
-2. **Saved sequences** (§1.6): 16 × one record. [FUNC]+[YES] saves what plays; [FUNC]+[NO]
-   loads it **immediately**, at the track's next window start, phase-continuous (arm with no
-   gate). A power cycle or project reload destroys them, so they need a project-load hook to
-   clear the valid bits.
-3. **Originals** (§1.5):
-   - 4,096 slots, (bank, pattern, track) → `ORIG_BASE + i·0x91a`, plus a 512 B valid bitmap.
-   - Capture inside `cl_apply` before the copy, first one wins.
-   - Keep the 12 trailer bytes + all 16 len/scale pairs per pattern, so a NORMAL→PER TRACK
-     conversion can be undone.
-   - `ORIG` display is option (a): the cursor runs 16 → ORIG → 1, and the header's right side
-     shows `ORIG` as a dark box with lit letters.
-   - [PAGE] restores the active track; [FUNC]+[PAGE] restores the whole pattern. A restore is the
-     whole pre-Clyps state.
-4. **FULL loads** (§1.7):
-   - [FUNC] held = `LOAD: SEQ+MCH/FX`, and a trig picked then is a FULL load.
+1. **FULL loads** (§1.7):
+   - [FUNC] held = `LOAD: SEQ+MCH/FX`, and a trig picked then is a FULL load (our FUNC sub-map
+     `cl_fsub` does not list the trigs, so trig records stay ours).
    - The Part slice is stock TRACK PASTE's 136 B (audio) / 68 B (MIDI), plus scene locks
      (`+0x662+(s·8+t)·0x20`, `+0x1662+10s+t`) and the LFO designer (`+0x1702+16t`, `+0x1782+2t`).
    - Apply at the landing with the single-track apply `0x40001f18(bank, part, t)`; set
      `0x8000184c` bit t if the machine changed.
-   - Part-slice originals are keyed per (bank, part, track).
-5. **Page LEDs** (O16): dies `0x48..0x4f`, slot 7, painter `0x4004d1a8`. Red = playing its
+   - Part-slice originals are keyed per (bank, part, track): add them to the bss (~393 KB) and
+     to `cl_release`'s restore.
+2. **Page LEDs** (O16): dies `0x48..0x4f`, slot 7, painter `0x4004d1a8`. Red = playing its
    original, green = changed, yellow = restore cued; with [FUNC] held, the same for the whole
    pattern.
-6. **KYOTI integration:**
+3. **KYOTI integration:**
    - DIRECT JUMP-timed landings: the next master step, clock-locked; reuse `dj_T`/`dj_bparams`.
+   - [PTN]+[YES] in Clyps mode: link DJ's toggle (`--defsym DJ_TOGGLE=…`); the chord held: nothing.
    - Share the [BANK] sites with RELOAD's deferral (`rl3_bank_show` / `rl3_bank_rel`).
    - The TRACK keys' `TRK_BASE` must go to a stub, not RELOAD's detour at `0x40040250`.
-   - [YES] with the chord held = DJ toggle.
-7. **Later:** an octabam module; names (§10); the TRACK_PASTE_DESIGNER_FIX Bugfix candidate
+   - DRAM: Clyps must be the LAST DRAM unit (its bss follows its `.dram`), or `dram.build` needs
+     per-unit bss.
+4. **Later:** an octabam module; names (§10); the TRACK_PASTE_DESIGNER_FIX Bugfix candidate
    (NOTES Session 131 cont. (3); the user still has to observe it on stock).
+5. **Open with the user:** what a slot shows after a load onto the playing pattern (§8b end).
+   Picking the playing pattern's own slot after a load is still a no-op; `ORIG` / [PAGE] is the
+   way back.
 
 **Traps already paid for.** Read them before writing code.
 - **Key records must copy T1's hold delay/repeat for every key they override** (T1 `0x400bfc10`).
   A key pressed under one layer and released under another, with a differing delay, leaves its
   timer record in the repeat list `0x460d1660`. The next press links it to itself, and the UI
   task hangs.
+- **A key's sub-maps CHAIN across layers; they are not overridden.** The rebuild `0x4003125c`
+  appends each layer's sub-map for a key after the lower ones, and the press links the chain at the
+  end of the layer list. Stock's FUNC sub-map `0x400bfa1e` therefore always links above our layer
+  while [FUNC] is held; [FUNC]+[YES] reached stock's `0x4005e3d8` (CLYP9 first cut). Fix: our own
+  sub-map `cl_fsub` on our [FUNC] record: it links after stock's and wins.
+- **TRACK double tap.** Stock's TRACK press reads a second press of the same key as a double tap
+  while its timer `0x460d5de0` ≤ 14 (event 3). Route A never advances that timer: the gate ages it
+  before each TRACK press. On hardware a real double tap opens stock's window and evicts Clyps.
+- **The project load is the masked bank loader `0x400905d4(ctx, mask, …)`** (bit n = bank n), not
+  `0x40090504` (it never ran in a LOAD PROJECT). Measured masks: `0xffff` on a first load,
+  `0xfffe` on a reload of the same project.
 - **TRACK keys select on RELEASE.** Forward press, hold and release to the base handler.
   Forward [FUNC]'s press/release to stock (`0x4004e954` / `0x400568e4`).
 - **A key's held flag is set only AFTER its press handler**; track [FUNC] by its own events.
@@ -220,7 +227,8 @@ closes both**.
 |---|---|---|
 | TRIG 1–16 | load that slot: cued (DJ off) or instant (DJ on). The view's cursor jumps to it. Clyps stays | load, then close |
 | [PAGE] (`0x1b`) | load this track's original (§1.5) | load the original, then close |
-| [YES] | DIRECT JUMP's [PTN]+[YES] toggle | load the cursor entry (a slot or `ORIG`), then close |
+| [YES] | nothing (DIRECT JUMP must not toggle while the chord is held) | load the cursor entry (a slot or `ORIG`), then close |
+| [PTN]+[YES] ([PTN] held, [BANK] not) | — | DIRECT JUMP on/off; Clyps stays; never a load |
 | [NO] | swallowed | close, no load |
 | [FUNC]+[NO] | load the saved sequence, immediately | the same, then close |
 | releasing the chord | if any load was made during this hold: close. Otherwise: go to latched | — |
@@ -479,7 +487,9 @@ through in Clyps mode: it switches between audio and MIDI tracks, and the view a
 - **DIRECT JUMP on (was O4):** a Clyps load lands like a DIRECT_JUMP_KYOTI jump. It lands at the
   next master step, at the clock-locked position the sequence would have if it had been playing
   since START.
-- **[YES] with the chord held (was O5):** passes to DIRECT JUMP's [PTN]+[YES] toggle.
+- **[YES] and DIRECT JUMP (was O5; changed by the user 2026-10-25):** with the [PTN]+[BANK] chord
+  held, [YES] does nothing: DIRECT JUMP must not toggle there. In Clyps mode with only [PTN] held,
+  [PTN]+[YES] is DIRECT JUMP's toggle, and it never loads.
 - **Saved sequences (was O7):** they last only while the unit runs its project. A power cycle or a
   project reload destroys them.
 - **O9, CHAIN AFTER point landings:** phase-continuous. The track lands where it would be had the
@@ -847,7 +857,7 @@ Keep the 12 trailer bytes with the original, so a restore can undo it. Respect t
 | feature | if nothing is done | rule |
 |---|---|---|
 | RELOAD_FROM_PROJECT | with the chord held, TRACK triggers a TRK SEQ reload; both own [BANK]'s press/release sites; a RELOAD of a track that has an original | our layer owns TRACK; in KYOTI, recognise the chord inside `rl3_bank_show`/`rl3_bank_rel`; a RELOAD leaves the original alone (it is still "before Clyps") |
-| DIRECT_JUMP_KYOTI | [PTN]+[YES] toggles DJ; a DJ jump changes the playing pattern | [YES] with the chord held goes to DJ's toggle; a jump drops cues; Clyps loads use DJ's landing when DJ is on; never write `0x80006687` |
+| DIRECT_JUMP_KYOTI | [PTN]+[YES] toggles DJ; a DJ jump changes the playing pattern | with the chord held [YES] does nothing; [PTN]+[YES] in Clyps mode is DJ's toggle; a jump drops cues; Clyps loads use DJ's landing when DJ is on; never write `0x80006687` |
 | REC_TRIG_MUTE | holding TRACK links its YES/NO sub-map over us | our TRACK records carry no sub-map (verify) |
 | EMPTY_PATTERN_LED_FIX | — | we never call `FUN_4009a464` |
 | BLACKPYRAMIDS_303 | an empty trigless lock is a tie there | half green is cosmetic only |
@@ -1009,6 +1019,32 @@ The ROM keeps only the guarded detours:
 - **`140C_CLYP7`:** the flag is read as a long; bank repeat is delay 15 / repeat 6.
   - New gate scenario M on JAM2 (which loads with the MIDI tracks showing): M2 loads byte-exact.
   - OT DEMO gate 28/28; MIDI render `M2 BANK A` correct.
+- **`140C_CLYP8` (2026-10-25), the DRAM move, not flashed.** One source, two sections: the tick
+  path in the cave (1,512 B), the rest in DRAM (3,584 B) through the boot loader (`tools/dram/`,
+  `dram.build(bss=)` added; KYOTI V1.6 rebuilds sealed). Behaviour-identical to CLYP7: C1w/C2c/C3s
+  equal the stored CLYP7 runs tick for tick (state, fires, commits, builder calls); UI gate 28/28;
+  JAM2 M passes. Superseded by CLYP9 before any flash.
+- **`140C_CLYP9` (2026-10-25), NOT flashed.** Syx `9bd97e27cce2a61341f552eb1a9e3c448d8a752459a81b449e76154cfdcd3ada`,
+  CF `.bin` `4ac0cdc0…`, mainos `1fc43991…`. Saved sequences, originals, the project-load clear,
+  the [YES] / DIRECT JUMP rule. Cave 2,130 B (3,818 left); DRAM 5,472 B + 9,591,200 B buffers =
+  1,563 pages.
+  - **Gates:** UI `--only ABCDYENP` on OT DEMO, 61/61. E: save byte for byte; the first load keeps
+    the original, later loads and a saved load do not replace it; `ORIG` in the UP/DOWN cycle;
+    [PAGE] / [FUNC]+[PAGE] restore byte for byte. N: a NORMAL pattern converted by a 64-step load
+    and restored: the whole slab is back, 0 bytes differ. P: a second LOAD PROJECT drops every
+    original and saved sequence. Y: the chord + [YES] does nothing; [PTN]+[YES] latched never
+    loads. JAM2 `--only M` passes.
+  - **Landings with transport running** (against C1, the never-switched A15):
+    - C4v (A14's T6 at the wrap, then [FUNC]+[NO] at t252, immediate): identical from t247 to
+      t451. Without it (C1w8) T6 diverges from t282.
+    - C6o (CHAIN AFTER = 4, [PAGE] at t130): locked from t139, the tick after its landing.
+    - C5o ([PAGE] cued to the wrap t378): identical from t384; for the first step after the wrap
+      only T6's STEP−1 differs (31 vs 15). Stock's re-home after a pattern change leaves it the
+      same way, so it is left as stock does it.
+  - **Bugs found and fixed in the gate before handing over:** stock's FUNC sub-map took [FUNC]+[YES]
+    / [NO] / [PAGE] (sub-maps chain, §0 traps; fixed with our `cl_fsub`); the project-load hook sat
+    on `0x40090504`, which a LOAD PROJECT never runs (moved to `0x400905d4`).
+  - **Renders:** `out/clyps/v9/` (SAVED box, ORIG box, `SAVED` while the saved sequence plays).
 - **Open, asked of the user:** what a slot shows after a load onto the playing pattern. The keep
   rule shows the loaded copy in the playing pattern's own slot; the user expected that slot to
   keep showing the pattern's own (pre-load) sequence.
@@ -1031,6 +1067,13 @@ To be applied with the first code commit:
 - [FUNC] (`0x2d`) has a dispatcher record (press `0x4004e954`, sub-map `0x400bfa1e`), and its held
   flag is `0x46c7dd26`. The "not located" note is obsolete.
 - MKI has no [PART] key (T1). On MKII it is `0x1d` → `0x4002e7c8`.
+- A key's sub-maps chain across layers in the rebuild `0x4003125c` (they are appended, never
+  overridden), and a press links the chain at the end of the layer list (`0x40031766`).
+- Stock's TRACK press `0x40040250`: a second press of the same key while `0x460d5de0` ≤ 14 is a
+  double tap (event 3 to `0x40083ab4`).
+- LOAD PROJECT reads banks through the masked loader `0x400905d4(ctx, mask, …)` (bit n = bank n;
+  callers `0x400853d8`, `0x40084d60`, `0x40085452`); `0x40090504` (kb/octabam-index L92's "project
+  load") did not run in an emulator LOAD PROJECT.
 
 ---
 

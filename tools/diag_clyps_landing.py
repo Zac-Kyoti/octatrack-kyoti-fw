@@ -86,9 +86,10 @@ def main(argv):
     ap.add_argument("--clyp-arr", action="append", default=[],
                     help="NAME=VAL: also write the track's byte in a per-track engine array at the "
                          "copy (names: step step_m1 ticks armed cntdn reload trk_scale)")
-    ap.add_argument("--keys-at", default="",
+    ap.add_argument("--keys-at", action="append", default=[],
                     help="K:KEYS -- from tick K on, press real keys through set_key_state (the CLYPS "
-                         "image's own code then cues and lands): HEX+ press, HEX- release")
+                         "image's own code then cues and lands): HEX+ press, HEX- release. Repeatable: "
+                         "the groups run in tick order")
     ap.add_argument("--dj", type=int, default=0)
     ap.add_argument("--ticks", type=int, default=300)
     ap.add_argument("--tag", default="clyps")
@@ -225,29 +226,36 @@ def main(argv):
     u.hook_add(er.eb.UC_HOOK_CODE, on_builder, begin=BUILDER_M, end=BUILDER_M)
     u.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_commit, begin=STEP_ARR, end=STEP_ARR)
     rt.start_transport_live()
-    keys_done = not a.keys_at
+    groups = sorted(((int(g.split(":", 1)[0]), g.split(":", 1)[1].split()) for g in a.keys_at),
+                    key=lambda g: g[0])
+    st["key_groups"] = []
     spins = 0
     while st["tick"] < a.ticks and spins < 400:
-        if not keys_done and st["tick"] >= int(a.keys_at.split(":")[0]):
-            st["keys_at"] = st["tick"]
-            for k in a.keys_at.split(":", 1)[1].split():
+        if groups and st["tick"] >= groups[0][0]:
+            _, ks = groups.pop(0)
+            t0 = st["tick"]
+            if st["keys_at"] is None:
+                st["keys_at"] = t0
+            for k in ks:
                 rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
                 rt.call_as_main(0x40031734, args=(int(k[:-1], 16), 1 if k.endswith("+") else 0), budget=600000)
             st["keys_end"] = st["tick"]
-            keys_done = True
+            st["key_groups"].append([t0, st["tick"], " ".join(ks)])
+            continue
         before = st["tick"]
         rt.run(ms=60)
         spins += 1
         if st["tick"] == before:
             break
 
-    meta = dict(image=a.image, project=a.project, start=a.start, setup=setup, cues=cues,
+    meta = dict(image=a.image, project=a.project, start=a.start, setup=setup, cues=cues, keys_at=a.keys_at,
                 clyp_req=clyp, clyp_pc=hex(a.clyp_pc), dj=a.dj, bank=bank, ticks=st["tick"])
     out = pathlib.Path(a.out)
     if not out.is_absolute():
         out = ROOT / out
     out.write_text(json.dumps(dict(meta=meta, cues=st["cues"], commits=st["commits"],
                                    clyp=st["clyp"], keys=[st["keys_at"], st["keys_end"]],
+                                   key_groups=st["key_groups"],
                                    states=st["states"], fires=st["fires"],
                                    calls=st["calls"])))
     print(f"wrote {out}: ticks={st['tick']} cues={st['cues']} commits={st['commits']} "
