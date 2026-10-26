@@ -134,6 +134,15 @@ built and waiting.
   DIRECT_JUMP_KYOTI keeps all its state in the cave too, and
   `build_direct_jump_kyoti.py` refuses the same range. NOTES "Sessions 94-96",
   "Session 98".
+  **Cause found (2026-10-25):** `0x80006924..0x80007873` is the work area of the stock
+  **timestretch task** (prio 1, entry `0x40098a5c`). It refills the area with audio on
+  every grain while tracks play, and route A never streams samples, so the emulator shows
+  none of it. MUTE_MODES' SHADOW (`0x80006c66`) lived there too and has moved into its
+  unit. **`seal()` (`tools/kyoti_status.py`) now refuses, for every builder, any changed
+  word in an image that points into that range.** Keep patch state in the patch's own unit
+  (cave, or a DRAM unit's `.data`; its `.bss` is not zeroed). The image tail
+  `0x401086f4..0x4010fdf0` is SRAM's boot image (`0x4000f938`), not free space either:
+  `reference/kb/memory-map.md` (Timestretch), `caves.md` §1.
 - **When hardware and the emulator disagree, build a diagnostic, don't reason.**
   Three flashes of this one were spent on theories that all survived static
   analysis and emulation; a build whose toast *named* the failing condition

@@ -108,13 +108,64 @@ def gate(builder, note=""):
     print()
 
 
+# On-chip SRAM that stock code owns at runtime: a patch must not keep state there, however
+# quiet a static scan says it is. 0x80006924..0x80007873 is the stock timestretch task's
+# (prio 1, entry 0x40098a5c): per-track splice results at 0x80006924, then the splice
+# search's windows and the transient detector's samples, refilled with audio on every
+# grain whenever a track plays. It explains the "0x80006a40+ is overwritten on hardware"
+# losses of Sessions 95 and 98, and MUTE_MODES' SHADOW lived there until 2026-10-25.
+STOCK_SRAM = ((0x80006924, 0x80007874, "the stock timestretch task's work area"),)
+STOCK_SRAM_ENV = "KYOTI_ALLOW_STOCK_SRAM"
+_STOCK = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "out", "raw", "section_3_MAIN_OS.bin")
+
+
+def stock_sram_refs(img):
+    """Every 32-bit word the build changed or appended (vs stock) that points into
+    STOCK_SRAM: [(image offset, value, what)]. Stock's own references are left alone."""
+    import re
+    with open(_STOCK, "rb") as f:
+        stock = f.read()
+    hits = []
+    for m in re.finditer(rb"\x80\x00[\x69-\x78]", img):
+        i = m.start()
+        if i % 2 or i + 4 > len(img):
+            continue
+        v = int.from_bytes(img[i:i + 4], "big")
+        for lo, hi, what in STOCK_SRAM:
+            if lo <= v < hi and img[i:i + 4] != stock[i:i + 4]:
+                hits.append((i, v, what))
+    return hits
+
+
+def _check_stock_sram(builder, image):
+    if not os.path.exists(_STOCK):
+        print(f"  (stock SRAM check skipped: {os.path.relpath(_STOCK)} missing)")
+        return
+    with open(image, "rb") as f:
+        hits = stock_sram_refs(f.read())
+    if not hits:
+        return
+    lines = [f"0x{0x40000400 + i:08x}: 0x{v:08x}  ({what})" for i, v, what in hits[:12]]
+    out = sys.stdout if os.environ.get(STOCK_SRAM_ENV) == "1" else sys.stderr
+    _banner([f"{os.path.basename(builder)}  --  points into stock-owned SRAM"] + lines, out)
+    if os.environ.get(STOCK_SRAM_ENV) != "1":
+        print(f"\n  Refusing to build: patch code references SRAM that stock code overwrites at\n"
+              f"  runtime (CLAUDE.md, the scratch-RAM rule). Keep the state in the patch's own\n"
+              f"  unit (cave or DRAM .data). If a hit is only a coincidental byte pattern, set\n"
+              f"  {STOCK_SRAM_ENV}=1.\n", file=sys.stderr)
+        sys.exit(2)
+
+
 def seal(builder, image):
-    """After a FINAL builder writes its image: is it still the promoted one?
+    """After a builder writes its image: refuse references into stock-owned SRAM (every
+    builder), then, for a FINAL builder, is it still the promoted one?
 
     A build placed at other addresses for the combined image (KYOTI_PLACE set, see
     tools/kyoti_place.py) cannot match its standalone promotion, so it is not checked
     here; the combined builder is gated on its own.
     """
+    _check_stock_sram(builder, image)
     name = os.path.basename(builder)
     if name not in FINAL or os.environ.get("KYOTI_PLACE"):
         return
