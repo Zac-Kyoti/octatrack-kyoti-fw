@@ -39,7 +39,10 @@
     `0x400a1f72` phase D, `0x400a43a0` wrap body, `0x40062d1c` UI tail, `0x400905d4` the masked
     bank loader (project load).
 
-**Next, in this order** (decisions are all in §1.1–§1.7 and §2):
+**Next, in this order** (decisions are all in §1.0–§1.7 and §2):
+0. **§1.0 step 2: stock [PTN] / [BANK] inside Clyps** (RE first: stock's pending-bank flow after
+   [BANK] + trig, SELECT PATTERN / SELECT BANK windows over the prio-3 Clyps view, detecting a real
+   pattern change to close Clyps, RELOAD3's SELECT-BANK-on-release code as the model).
 1. **FULL loads** (§1.7). Route: DIRECT JUMP's engine hand-off after a slice copy at the landing
    tick; first check whether the light Part apply `0x40009e00` disturbs the other tracks
    mid-pattern (§1.7 "Plan").
@@ -211,6 +214,34 @@ Evidence: static reads of our own `section_3_MAIN_OS.bin`, confidence **C** unle
 ---
 
 ## 1. Behaviour
+
+### 1.0 The 2026-10-27 model (the user) — supersedes §1.1 / §1.3 where they differ
+
+**What the user must always see:** (a) the pattern they are on, (b) the sequence they are about to
+load into that pattern's track.
+- **Slots = patterns.** Bank A slot 1 = pattern A1.
+- **Highlight** (inverted bar) = the pattern you are on. It moves only when the pattern changes, and
+  is shown only while viewing that pattern's bank.
+- **Select box** (1 px frame) = what a load takes. The arrows move it; shown only in its own bank.
+  A move made in another bank brings the box into it (same slot number). `ORIG` stays the cursor
+  entry after slot 16 (header box).
+- **A trig** moves the box to that slot and loads it (cued while running). **[YES]** loads the box.
+- **After a load** your pattern's slot reads its source, `A14 6 TRG` / `A14 LOCKS` / `A14 ---` /
+  `SAVED`, until the track is edited or restored; then the plain summary. Names (§10) replace this.
+- **Grid LEDs:** red = your pattern (**red wins**); flashing yellow = the cued sequence (solid once
+  it plays); solid yellow = the select box; green full / half = data; off = empty.
+- **Only [NO] closes Clyps**, or (step 2) a real pattern / bank + pattern selection. No held /
+  latched states; releasing the chord does nothing.
+- **[BANK] held + arrows** page the shown bank (L/R and U/D, ±1, wrapping); the slot selector rests.
+- **Step 2 — stock [PTN] / [BANK] inside Clyps** (the user's answers, 2026-10-27):
+  - [PTN] and [BANK] behave as in stock; a pattern selection made that way is a real pattern
+    change (all tracks), or bank + pattern; it closes Clyps;
+  - selecting a bank on the trig grid ([BANK] + trig) does NOT leave Clyps, and never changes the
+    bank by itself: as in stock, a real bank change needs a pattern selection with it;
+  - SELECT BANK on [BANK]'s release, not its press (RELOAD_FROM_PROJECT's inversion; the user
+    remembered it as DIRECT JUMP's).
+- **Removed:** the held / latched states, close-on-load, the [BANK]-alone Clyps bank pick (CLYPA).
+
 
 ### 1.1 Entering and leaving Clyps mode (the user's rule, 2026-10-23)
 

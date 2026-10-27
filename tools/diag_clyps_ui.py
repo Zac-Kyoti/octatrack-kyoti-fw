@@ -7,7 +7,7 @@ CLYPS phase 2 -- the UI gate (emulator; logic only: route A has no real UI tick 
 Drives real key events through stock's per-key dispatcher set_key_state(code, event)
 (0x40031734; event 1 = press, 0 = release) on the CLYPS image, with a real exported project
 loaded and the transport stopped, and checks after every step:
-  * Clyps' own state (cl_open / cl_held / cl_loaded / cl_bank / cl_cur, from the build's symbols);
+  * Clyps' own state (cl_open / cl_bank / cl_sbank / cl_cur, from the build's symbols);
   * the keymap layer list (0x460d165c) and the LED layer list (0x460e7624) return to the baseline
     when Clyps closes -- the RELOAD2 failure class;
   * PTN_CONSUMED / BANK_SEL / the SHOW_WIN slot: no SELECT window on any chord path;
@@ -16,7 +16,7 @@ loaded and the transport stopped, and checks after every step:
   * E: saved sequences ([FUNC]+[YES] / [FUNC]+[NO]) and originals (the bank as loaded: always
     there, the ORIG cursor entry, [PAGE] after a load AND after a grid edit, [FUNC]+[PAGE]),
     byte for byte;
-  * K: bank picking: [BANK] alone + a trig picks the shown bank and stays in Clyps;
+  * G: the source label on your pattern's slot after a load / a saved load (screens);
   * N: a NORMAL pattern converted to PER TRACK by a load, and the restore that undoes it: the
     whole slab comes back byte for byte;
   * P: a project load drops the saved sequences and retakes the originals;
@@ -77,9 +77,9 @@ def main(argv):
         return out
 
     def state():
-        return dict(open=rd(syms["cl_open"], 1), held=rd(syms["cl_held"], 1), loaded=rd(syms["cl_loaded"], 1),
+        return dict(open=rd(syms["cl_open"], 1), sbank=rd(syms["cl_sbank"], 1),
                     bank=rd(syms["cl_bank"], 1), cur=rd(syms["cl_cur"], 1), win=rd(syms["cl_win"], 4),
-                    flash=rd(syms["cl_flash"], 1), bpick=rd(syms["cl_bpick"], 1), bswal=rd(syms["cl_bswal"], 1),
+                    flash=rd(syms["cl_flash"], 1),
                     layers=chain(LAYERS), leds=chain(LEDS), consumed=rd(PTN_CONSUMED, 4),
                     banksel=rd(BANK_SEL, 4), showwin=rd(WIN_SLOT, 4))
 
@@ -146,92 +146,102 @@ def main(argv):
           f"{rd(syms['cl_nproj'], 1)}; snapshots 0x{snapok():04x}")
     shot("00_base")
 
+    def closed_ok(what):
+        s_ = state()
+        check(s_["open"] == 0 and s_["layers"] == base["layers"] and s_["leds"] == base["leds"]
+              and s_["showwin"] == 0, what + ": closed, layer lists at baseline, no SELECT window")
+
     if "A" in a.only:
-        # --- A: [PTN] then [BANK], held, trig 4 loads, release closes
-        print("A: PTN then BANK; held; trig 4; release")
-        src = rec(3)
+        # --- A: open; the highlight / red = the pattern you are on; releases do not close; [NO] does
+        print("A: PTN then BANK; opens on your pattern; release: stays; NO closes")
         key(PTN, 1)
         key(BANK, 1)
         s = state()
         shot("A1_open")
-        check(s["open"] == 1 and s["held"] == 1, "Clyps open, held")
-        check(syms["cl_layer"] in s["layers"] and s["layers"][-1] == syms["cl_layer"], "our keymap layer is last")
-        check(s["leds"] and s["leds"][-1] == syms["cl_led"], "our LED layer is last")
-        check(s["showwin"] == 0, "no SELECT window")
-        leds = bytes(u.mem_read(0x460BA98C, 17))
-        tbl = [rd(0x400A74CE + 4 * n, 4) for n in range(16)]
-        bit = lambda die: (leds[die // 8] >> (die % 8)) & 1
+        check(s["open"] == 1, "Clyps open")
+        check(s["layers"][-1] == syms["cl_layer"] and s["leds"][-1] == syms["cl_led"], "our keymap and LED layers are last")
+        check(s["bank"] == bank and s["sbank"] == bank and s["cur"] == act, "the view and the box start on your pattern")
+        check(led(act) == (1, 0), f"slot {act + 1} (your pattern) is red, red wins over the box")
         cls = list(bytes(u.mem_read(syms["cl_cls"], 16)))
-        red = [n for n in range(16) if bit(tbl[n])]
-        grn = [n for n in range(16) if bit(tbl[n] + 1)]
-        print(f"      classes {cls}  red {red}  green {grn}", flush=True)
-        check(red == [act] and act not in grn, f"grid: red on the playing slot {act + 1} only")
-        check(sorted(grn) == [n for n in range(16) if cls[n] and n != act], "grid: green on every slot with data")
+        check(all(led(n)[0] == 0 and led(n)[1] == (1 if cls[n] else 0) for n in range(16) if n != act),
+              "every other slot: green where there is data, no red")
+        key(BANK, 0)
+        key(PTN, 0)
+        s = state()
+        check(s["open"] == 1 and s["showwin"] == 0, "releasing the chord: Clyps stays, no SELECT window")
+        tap(NO)
+        closed_ok("[NO]")
+
+    if "B" in a.only:
+        # --- B: BANK first; a trig selects AND loads; Clyps stays; the box LED is yellow
+        print("B: BANK then PTN; trig 4 selects + loads; stays; NO")
+        src = rec(3)
+        key(BANK, 1)
+        key(PTN, 1)
+        check(state()["open"] == 1 and state()["showwin"] == 0, "Clyps open (BANK first), SELECT BANK closed again")
+        key(PTN, 0)
+        key(BANK, 0)
         key(3, 1)
         key(3, 0)
         s = state()
-        check(s["open"] == 1 and s["loaded"] == 1, "trig 4 in the held state: loaded, still open")
-        check(rec(act) == src, "the playing pattern's active-track record == pattern 4's")
-        shot("A2_loaded")
-        key(BANK, 0)
-        key(PTN, 0)
-        s = state()
-        shot("A3_closed")
-        check(s["open"] == 0, "release after a load closes Clyps")
-        check(s["layers"] == base["layers"], "keymap layer list back to baseline")
-        check(s["leds"] == base["leds"], "LED layer list back to baseline")
-        check(s["showwin"] == 0, "no SELECT window after the releases")
-
-    if "B" in a.only:
-        # --- B: [BANK] then [PTN], release -> latched, DOWN DOWN, YES
-        print("B: BANK then PTN; release -> latched; DOWN x2; YES")
-        key(BANK, 1)
-        key(PTN, 1)
-        s = state()
-        check(s["open"] == 1, "Clyps open (BANK first)")
-        check(s["showwin"] == 0, "SELECT BANK closed again")
-        key(PTN, 0)
-        key(BANK, 0)
-        s = state()
-        check(s["open"] == 1 and s["held"] == 0, "released with no load: latched")
-        cur0 = s["cur"]
-        tap(DOWN)
-        tap(DOWN)
-        s = state()
-        check(s["cur"] == (cur0 + 2) % 16, f"DOWN x2: cursor {cur0} -> {s['cur']}")
-        shot("B1_latched")
-        target = s["cur"]
-        src = rec(target)
-        tap(YES)
-        s = state()
-        check(s["open"] == 0, "[YES] in latched: closed")
-        check(rec(act) == src, f"[YES] loaded slot {target + 1}")
-        check(s["layers"] == base["layers"] and s["leds"] == base["leds"], "layer lists back to baseline")
+        check(s["open"] == 1 and s["cur"] == 3 and s["sbank"] == bank, "trig 4: the box on slot 4, Clyps stays")
+        check(rec(act) == src, "trig 4 loaded pattern 4's sequence")
+        check(led(3) == (1, 1), "slot 4 (the box) is yellow")
+        check(led(act) == (1, 0), "your pattern is still red")
+        shot("B1_loaded")
+        tap(NO)
+        closed_ok("[NO]")
 
     if "C" in a.only:
-        # --- C: chord, LEFT/RIGHT, TRACK 3, NO
-        print("C: chord; LEFT; RIGHT; TRACK 3; release; NO")
+        # --- C: the box moves with the arrows; [BANK] held + arrows page the banks; TRACK keys
+        print("C: arrows move the box; BANK+arrows page; highlight / box only in their bank; TRACK 3; NO")
         key(PTN, 1)
         key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
         s0 = state()
-        tap(LEFT)
+        tap(DOWN)
+        tap(DOWN)
         s = state()
-        check(s["cur"] == s0["cur"] ^ 8 and s["bank"] == s0["bank"], "LEFT: the same row of the other column, bank kept")
-        shot("C1_left")
+        check(s["cur"] == (s0["cur"] + 2) % 16 and s["bank"] == s0["bank"], "DOWN x2: the box moves, bank kept")
+        c1 = s["cur"]
+        tap(LEFT)
+        check(state()["cur"] == c1 ^ 8, "LEFT: the other column")
         tap(RIGHT)
-        check(state()["cur"] == s0["cur"], "RIGHT: back")
+        check(state()["cur"] == c1, "RIGHT: back")
+        check(led(c1) == (1, 1) or c1 == act, "the box's slot is yellow")
+        shot("C1_box")
+        key(BANK, 1)
+        tap(RIGHT)
+        check(state()["bank"] == (s0["bank"] + 1) % 16 and state()["cur"] == c1, "[BANK]+RIGHT: next bank, box kept")
+        tap(DOWN)
+        check(state()["bank"] == (s0["bank"] + 2) % 16, "[BANK]+DOWN: next bank")
+        tap(UP)
+        tap(LEFT)
+        check(state()["bank"] == s0["bank"], "[BANK]+UP, [BANK]+LEFT: back")
+        tap(LEFT)
+        b2 = state()["bank"]
+        check(b2 == (s0["bank"] + 15) % 16, "[BANK]+LEFT wraps A -> P")
+        key(BANK, 0)
+        s = state()
+        check(s["open"] == 1 and s["showwin"] == 0, "[BANK] released: still in Clyps, no SELECT BANK")
+        check(all(led(n) != (1, 0) for n in range(16)) and all(led(n) != (1, 1) for n in range(16)),
+              "another bank: no red (your pattern) and no yellow (the box) on the grid")
+        shot("C2_otherbank")
+        tap(DOWN)
+        s = state()
+        check(s["sbank"] == b2 and s["cur"] == (c1 + 1) % 16, "an arrow in another bank brings the box into it")
+        key(BANK, 1)
+        tap(RIGHT)
+        key(BANK, 0)
         before = rec(act, 2)
         tap(0x12)
         check(rd(0x80000000, 1) == 2, "TRACK 3 selects track 3")
         check(rd(0x460FAB40, 4) == 0, "no track key left marked held (0x460fab40)")
-        shot("C2_track3")
-        key(BANK, 0)
-        key(PTN, 0)
-        check(state()["open"] == 1, "latched")
+        check(state()["open"] == 1 and rec(act, 2) == before, "Clyps stays, nothing loaded")
         tap(NO)
-        s = state()
-        check(s["open"] == 0 and rec(act, 2) == before, "[NO]: closed, nothing loaded")
-        check(s["layers"] == base["layers"] and s["leds"] == base["leds"], "layer lists back to baseline")
+        closed_ok("[NO]")
+        tap(0x10)
 
     if "D" in a.only:
         # --- D: stock controls
@@ -251,10 +261,8 @@ def main(argv):
 
     if "M" in a.only:
         # --- M: the MIDI side (needs a project with MIDI trigs on pattern 1, e.g. JAM2)
-        print("M: MIDI key; TRACK 2; chord; slots; trig 2 loads pattern 2's M2; release")
+        print("M: MIDI key; TRACK 2; chord; slots; trig 2 loads pattern 2's M2; NO")
         print(f"      MKI/MKII probe 0x46c8d18c = 0x{rd(0x46C8D18C, 4):08x}", flush=True)
-        # stock's own audio <-> MIDI toggle, 0x40055548 -- what the MKI [MIDI] release reaches
-        # (the emulator's probe word skips that path on a key tap)
         rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
         if rd(0x80000012, 4) == 0:         # some projects load with the MIDI tracks showing
             rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
@@ -268,104 +276,91 @@ def main(argv):
         key(BANK, 1)
         cls = list(bytes(u.mem_read(syms["cl_cls"], 16)))
         trigs = [bin(int.from_bytes(mrec(p, 1)[:8], "big")).count("1") for p in range(16)]
-        atrigs = [bin(int.from_bytes(rec(p, 1)[:8], "big")).count("1") for p in range(16)]
-        print(f"      (audio T2 trigs per pattern {atrigs}: must NOT be what the slots show)", flush=True)
         print(f"      M2 trigs per pattern {trigs}  classes {cls}", flush=True)
         check(all((cls[p] == 2) == (trigs[p] > 0) for p in range(16)), "slots classify the MIDI records")
+        key(BANK, 0)
+        key(PTN, 0)
         src = mrec(1, 1)
         key(0x01, 1)
         key(0x01, 0)
         check(mrec(act, 1) == src, "trig 2 loaded pattern 2's M2 onto the playing pattern's M2")
-        key(BANK, 0)
-        key(PTN, 0)
-        s = state()
-        check(s["open"] == 0 and s["layers"] == base["layers"] and s["leds"] == base["leds"], "closed, layer lists at baseline")
+        tap(NO)
+        closed_ok("[NO]")
 
     if "Y" in a.only:
-        # --- Y: [YES] and DIRECT JUMP's toggle (the user, 2026-10-25): with the chord held [YES] does
-        # nothing; latched, [PTN]+[YES] is the toggle (none in this image) and never loads
-        print("Y: chord held + YES: nothing; latched [PTN]+[YES]: no load; then [YES] loads")
+        # --- Y: [YES] loads the box; the chord + [YES] and [PTN]+[YES] never load
+        print("Y: chord + YES: nothing; PTN+YES: nothing; YES loads the box; NO")
         before = rec(act)
         key(PTN, 1)
         key(BANK, 1)
         tap(YES)
-        s = state()
-        check(s["open"] == 1 and s["loaded"] == 0 and rec(act) == before, "chord held, [YES]: nothing")
+        check(state()["open"] == 1 and rec(act) == before, "chord held, [YES]: nothing")
         key(BANK, 0)
-        key(PTN, 0)
-        check(state()["open"] == 1, "latched")
-        key(PTN, 1)
         tap(YES)
-        s = state()
-        check(s["open"] == 1 and rec(act) == before, "[PTN]+[YES] in Clyps: no load, Clyps stays")
+        check(state()["open"] == 1 and rec(act) == before, "[PTN]+[YES]: no load, Clyps stays")
         key(PTN, 0)
-        s = state()
-        check(s["open"] == 1 and s["showwin"] == 0, "[PTN] released: still latched, no SELECT PATTERN")
+        q = next(n for n in range(16) if n != act and rec(n) != before)
+        while state()["cur"] != q:
+            tap(DOWN)
+        tap(YES)
+        check(state()["open"] == 1 and rec(act) == rec(q), f"[YES]: the box's slot {q + 1} loaded, Clyps stays")
         tap(NO)
-        s = state()
-        check(s["open"] == 0 and s["layers"] == base["layers"] and s["leds"] == base["leds"], "[NO]: closed, layer lists at baseline")
+        closed_ok("[NO]")
 
     if "E" in a.only:
-        # --- E: saved sequences and originals (the bank as loaded), transport stopped
+        # --- E: originals (the bank as loaded) and saved sequences
         print("E: ORIG always there; [PAGE] undoes a load and a grid edit; [FUNC]+[YES] / [FUNC]+[NO]; restore-all")
         tap(0x10)
         act = rd(0x800065BE, 1)
+        key(PTN, 1)                        # earlier scenarios loaded onto tracks: every track back first
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        key(FUNC, 1)
+        tap(PAGE)
+        key(FUNC, 0)
+        tap(NO)
         pre = {t: rec(act, t) for t in range(3)}
         p = next(q for q in range(16) if q != act and all(rec(q, t) != pre[t] for t in range(3)))
         print(f"      playing {act}, source slot {p}, snapshots 0x{snapok():04x}", flush=True)
         check(snapok() == 0xFFFF, "every bank has its load snapshot")
-        check(all(oslot(act, t) == pre[t] for t in range(3)), "T1-T3 equal their originals (untouched since the load)")
+        check(all(oslot(act, t) == pre[t] for t in range(3)), "T1-T3 equal their originals")
         key(PTN, 1)
         key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        while state()["cur"] != 0:
+            tap(UP)
         tap(UP)
         check(state()["cur"] == 16, "ORIG is in the cycle with no load made (UP from slot 1)")
+        shot("E0_orig")
         tap(PAGE)
-        s = state()
-        check(s["open"] == 1 and s["loaded"] == 0 and rec(act, 0) == pre[0], "[PAGE] on an original track: nothing")
+        check(state()["open"] == 1 and rec(act, 0) == pre[0], "[PAGE] on an original track: nothing")
         key(FUNC, 1)
         tap(YES)
         s = state()
         check(svalid()[0] == 1 and saved(0) == pre[0], "[FUNC]+[YES]: T1's sequence saved, byte for byte")
         check(s["open"] == 1 and s["flash"] == 1, "Clyps stays; the header shows SAVED")
-        shot("E1_saved")
         key(FUNC, 0)
-        check(state()["flash"] == 1, "SAVED still shown after [FUNC] is released")
         key(p, 1)
         key(p, 0)
-        check(rec(act, 0) == rec(p, 0), f"trig {p + 1}: loaded")
-        check(oslot(act, 0) == pre[0], "the original is untouched by the load")
-        for _ in range(16 - p):
-            tap(DOWN)
-        check(state()["cur"] == 16, "DOWN past slot 16: the ORIG entry")
-        shot("E2_orig")
-        tap(DOWN)
-        check(state()["cur"] == 0, "DOWN from ORIG wraps to slot 1")
-        key(BANK, 0)
-        key(PTN, 0)
-        check(state()["open"] == 0, "release after a load closes")
-        key(PTN, 1)
-        key(BANK, 1)
-        key(BANK, 0)
-        key(PTN, 0)
+        check(rec(act, 0) == rec(p, 0) and oslot(act, 0) == pre[0], f"trig {p + 1}: loaded; the original untouched")
+        shot("E1_loaded")
         key(FUNC, 1)
         tap(NO)
         key(FUNC, 0)
-        s = state()
-        check(s["open"] == 0 and rec(act, 0) == pre[0], "[FUNC]+[NO] in latched: the saved sequence is back, closed")
-        # a grid edit (one trig bit flipped in the slab, as an edit would): no longer original
+        check(state()["open"] == 1 and rec(act, 0) == pre[0], "[FUNC]+[NO]: the saved sequence is back, Clyps stays")
+        shot("E2_saved_back")
+        tap(NO)
         ad = BLOB + bank * BANKSTRIDE + act * PATSTRIDE
         u.mem_write(ad, bytes([rd(ad, 1) ^ 0x80]))
-        check(rec(act, 0) != pre[0], "edited (trig bit flipped)")
+        check(rec(act, 0) != pre[0], "edited (a trig bit flipped)")
         key(PTN, 1)
         key(BANK, 1)
-        tap(PAGE)
-        s = state()
-        check(rec(act, 0) == pre[0] and s["open"] == 1 and s["loaded"] == 1, "held: [PAGE] undoes the edit; Clyps stays")
         key(BANK, 0)
         key(PTN, 0)
-        check(state()["open"] == 0, "released: closed")
-        key(PTN, 1)
-        key(BANK, 1)
+        tap(PAGE)
+        check(rec(act, 0) == pre[0] and state()["open"] == 1, "[PAGE] undoes the edit; Clyps stays")
         for t in range(3):
             tap(0x10 + t)
             key(p, 1)
@@ -375,50 +370,33 @@ def main(argv):
         tap(PAGE)
         key(FUNC, 0)
         check(all(rec(act, t) == pre[t] for t in range(3)), "[FUNC]+[PAGE]: all three back")
-        key(BANK, 0)
-        key(PTN, 0)
-        s = state()
-        check(s["open"] == 0 and s["layers"] == base["layers"] and s["leds"] == base["leds"], "closed, layer lists at baseline")
+        check(state()["open"] == 1, "Clyps stays")
+        tap(NO)
+        closed_ok("[NO]")
         tap(0x10)
 
-    if "K" in a.only:
-        # --- K: bank picking ([BANK] alone + a trig), Clyps stays
-        print("K: latched; [BANK] alone: bank LEDs; trig 3 picks bank C; trigs wait; release; chord again")
-        before = rec(act)
+    if "G" in a.only:
+        # --- G: the source label on your pattern's slot (screens; the label text is drawn there)
+        print("G: load slot 3 onto T1: your slot reads 'A3 n TRG'; FUNC+NO saved: 'SAVED'; PAGE: plain")
+        tap(0x10)
         key(PTN, 1)
         key(BANK, 1)
         key(BANK, 0)
         key(PTN, 0)
-        s = state()
-        check(s["open"] == 1 and s["held"] == 0, "latched")
-        b0 = s["bank"]
-        key(BANK, 1)
-        s = state()
-        check(s["bpick"] == 1 and s["showwin"] == 0, "[BANK] alone: bank picking, no SELECT BANK")
-        check(led(b0) == (1, 0), f"the shown bank ({chr(65 + b0)}) is red")
-        shot("K1_banks")
+        key(FUNC, 1)
+        tap(YES)
+        key(FUNC, 0)
         key(2, 1)
         key(2, 0)
-        s = state()
-        check(s["bank"] == 2 and s["bpick"] == 0 and s["open"] == 1 and rec(act) == before,
-              "trig 3: bank C shown, no load, Clyps stays, the Clyps grid back")
-        shot("K2_bankC")
-        key(5, 1)
-        key(5, 0)
-        s = state()
-        check(s["bank"] == 2 and rec(act) == before, "another trig while [BANK] is still held: nothing")
-        key(BANK, 0)
-        s = state()
-        check(s["open"] == 1 and s["bswal"] == 0 and s["showwin"] == 0, "[BANK] released: still in Clyps")
-        key(PTN, 1)
-        key(BANK, 1)
-        s = state()
-        check(s["held"] == 1 and s["bpick"] == 0, "the chord again: held, not bank picking")
-        key(BANK, 0)
-        key(PTN, 0)
+        shot("G1_source")
+        key(FUNC, 1)
         tap(NO)
-        s = state()
-        check(s["open"] == 0 and s["layers"] == base["layers"] and s["leds"] == base["leds"], "[NO]: closed, layer lists at baseline")
+        key(FUNC, 0)
+        shot("G2_saved")
+        tap(PAGE)
+        shot("G3_plain")
+        tap(NO)
+        closed_ok("[NO]")
 
     if "N" in a.only:
         # --- N: a NORMAL destination converted by a load, undone by the restore
@@ -437,10 +415,11 @@ def main(argv):
             check(before == oslab(nrm), f"pattern {nrm} equals its original")
             key(PTN, 1)
             key(BANK, 1)
-            key(src, 1)
-            key(src, 0)
             key(BANK, 0)
             key(PTN, 0)
+            key(src, 1)
+            key(src, 0)
+            tap(NO)
             s9 = slab(nrm)
             plen = before[0x8E53]
             check(s9[0x8E55] == 1 and int.from_bytes(s9[0x8E50:0x8E52], "big") == plen
@@ -453,6 +432,7 @@ def main(argv):
             tap(PAGE)
             key(BANK, 0)
             key(PTN, 0)
+            tap(NO)
             after = slab(nrm)
             diff = [i for i in range(PATSTRIDE) if after[i] != before[i]]
             check(not diff, f"[PAGE]: the whole slab is back, byte for byte ({len(diff)} bytes differ"
