@@ -5,8 +5,9 @@
 | track's sequence in each pattern of a bank) and the Clyps grid (trig LEDs), with the held /
 | latched states of scope §1.1. A load copies the source track record into the playing pattern:
 | at once when stopped, cued while running (§1.5a). Saved sequences ([FUNC]+[YES] / [FUNC]+[NO],
-| §1.6) and originals (§1.5: the first Clyps replacement of a (bank, pattern, track) keeps what it
-| held; [PAGE] / the ORIG entry / [FUNC]+[PAGE] put it back).
+| §1.6). Originals (§1.5, redefined by the user 2026-10-26): a track's original is what it held when
+| its bank was last loaded (power-on, LOAD PROJECT, a reload); Clyps snapshots every bank as it is
+| loaded, and the ORIG entry / [PAGE] / [FUNC]+[PAGE] put a track back from that snapshot.
 |
 | Calling conventions (stock, C): args on the stack, caller pops; d0-d1/a0-a1 scratch,
 | d2-d7/a2-a6 preserved. Key handlers are called as handler(code@4, event@8):
@@ -91,11 +92,16 @@
     .equ PRIO,        3                 | menus' rank: toasts / the name editor open over it
     .equ BANKS_RESUME,0x400905dc        | the masked bank loader 0x400905d4(ctx, mask, ...) after its
                                         | `lea -328(sp),sp ; movem.l d2-d7/a2-a6,(sp)` (8 B)
+    .equ SRAM_RESTORE,0x4000fbb4        | (bank): the SRAM mirror -> RAM (power-on resume: the
+                                        | current bank's unsaved edits; one caller 0x40025808)
+    .equ BANK_HASDATA,0x4000fd78        | (bank) -> d0 != 0: stock's bank LEDs light it green
+    .equ BANKSZ,      0x9b340           | one bank: 16 slabs + its Parts; 16 banks end at the arena
+    .equ RESET_BANKS, 0x4000fd34        | (flag): every bank to defaults (bank 0 init, copied over 1..15)
+    .equ CL_MAGIC,    0x434c5950        | 'CLYP': the DRAM part is loaded (cl_magic)
 | sources other than a slot: the bank byte of a cue / provenance code (bank << 8 | pattern)
-    .equ SRC_ORIG,    0xfd              | the track's original on the playing pattern
+    .equ SRC_ORIG,    0xfd              | the track's original (the load snapshot) on the playing pattern
     .equ SRC_SAVED,   0xfe              | the track's saved sequence
     .equ NSLOT,       16                | cursor 16 = the ORIG entry (scope §1.5, option a)
-    .equ SNAP_W,      40                | per pattern: trailer +0x50..+0x55, then 16 len/scale pairs
 
 | ---- the view's geometry (window-local, y = 0 is the bottom row; text occupies y..y+4). Measured
 | in the emulator by rendering stock's own compositor output (tools/clyps_render.py).
@@ -108,17 +114,8 @@
     .equ HDR_Y,       57                | header: lit band 55..63 (63 = the border), text 57..61:
                                         | two lit rows above and below the inverted text
     .equ BODY_TOP,    54                | the rows' field: y 1..54 (border at 0, band from 55)
-.ifdef ROW17
-| ROW17 (a layout proposal, render only): `17 ORIG` as a 9th row under the second column. Nine
-| rows with 1 px gaps and a cursor bar one row above and below the text need 55 rows: the header
-| gives one lit row under its text (2 above incl. the border, 1 below) and the rows fill 1..55.
-    .equ ROW0_Y,      50                | row r text at 50 - 6r: r = 8 at 2..6
-    .equ HDR_LIT_LO,  HDR_Y-1           | the band's lowest lit row (56)
-.else
     .equ ROW0_Y,      46                | row r text at 46 - 6r: the 47-row block 4..50, centred in
                                         | 1..54 (4 rows above, 3 below: the field is odd by one)
-    .equ HDR_LIT_LO,  HDR_Y-2           | the band's lowest lit row (55)
-.endif
     .equ LOAD_X,      77                | "LOAD: SEQ" (32 px) right-aligned to x = 108
     .equ LOADF_X,     49                | "LOAD: SEQ+MCH/FX" (60 px), [FUNC] held
     .equ COL0_X,      4                 | highlight x0 = col - 2, x1 = col + 50: column 0 2..54,
@@ -137,7 +134,7 @@
 | boot loader (tools/dram/). The buffers (CL_BSS_SIZE) follow `.dram`'s end, uninitialised.
 | Calls between the two are absolute (jsr / lea abs.l): a pc-relative branch across them fails
 | the link (R_68K_PC16 overflow), so nothing slips through.
-    .global cl_ptn, cl_bankp, cl_bankr, cl_land, cl_uitail, cl_wrap, cl_projload
+    .global cl_ptn, cl_bankp, cl_bankr, cl_land, cl_uitail, cl_wrap, cl_projload, cl_rstall
     .section .dram,"ax"
 
 | ================================================================ detours
@@ -255,6 +252,8 @@ ce_bank:
     move.b  %d0,cl_held
     clr.b   cl_loaded
     clr.b   cl_flash
+    clr.b   cl_bpick
+    clr.b   cl_bswal
     pea     cl_layer
     jsr     LAYER_PUSH
     pea     cl_led
@@ -271,6 +270,8 @@ cl_close:
     beq.b   cc_out
     clr.b   cl_open
     clr.b   cl_held
+    clr.b   cl_bpick
+    clr.b   cl_bswal
     tst.l   cl_win
     beq.b   cc_nowin
     pea     cl_win
@@ -304,13 +305,13 @@ cr_out:
 
 | ================================================================ keymap handlers
 | UP 0x33 / DOWN 0x20: cursor 0..15, wrapping, auto-repeat (hold events)
-| UP 0x33 / DOWN 0x20: cursor 1..16 -> ORIG (only while the active track holds an original on the
-| playing pattern) -> 1, wrapping both ways, auto-repeat (hold events)
+| UP 0x33 / DOWN 0x20: cursor 1..16 -> ORIG -> 1, wrapping both ways, auto-repeat (hold events).
+| ORIG is in the cycle whenever the playing bank has its load snapshot (always, after a load).
 cl_k_ud:
     tst.l   8(%sp)
     beq.b   ku_out
     clr.b   cl_flash
-    jsr     cl_hasorig
+    jsr     cl_origok
     addi.l  #NSLOT,%d0
     movea.l %d0,%a1                     | a1 = entries in the cycle (16 or 17)
     moveq   #0,%d0
@@ -335,33 +336,44 @@ ku_set:
 ku_out:
     rts
 
-| LEFT 0x34 / RIGHT 0x21: bank A..P, wrapping
+| LEFT 0x34 / RIGHT 0x21: the same row of the other column (1 <-> 9 ... 8 <-> 16); nothing on ORIG.
+| The bank is picked with [BANK] + a trig (cl_k_chord / cl_k_trig), as in stock (the user,
+| 2026-10-26).
 cl_k_lr:
-    tst.l   8(%sp)
-    beq.b   kl_out
+    move.l  8(%sp),%d0
+    cmpi.l  #1,%d0
+    bne.b   kl_out
     clr.b   cl_flash
     moveq   #0,%d0
-    move.b  cl_bank,%d0
-    move.l  4(%sp),%d1
-    cmpi.l  #0x34,%d1
-    bne.b   kl_right
-    addi.l  #15,%d0
-    bra.b   kl_set
-kl_right:
-    addq.l  #1,%d0
-kl_set:
-    andi.l  #15,%d0
-    move.b  %d0,cl_bank
-    jsr     cl_refresh
+    move.b  cl_cur,%d0
+    cmpi.l  #NSLOT,%d0
+    bcc.b   kl_out
+    eori.l  #8,%d0
+    move.b  %d0,cl_cur
+    bra.w   cl_draw
 kl_out:
     rts
 
-| TRIG 1-16 (codes 0x00..0x0f): load that slot of the shown bank
+| TRIG 1-16 (codes 0x00..0x0f): load that slot of the shown bank. While [BANK] alone is held (bank
+| picking), the trig picks the shown bank instead: the view follows, the Clyps grid comes back, and
+| further trigs wait for [BANK]'s release (no accidental load).
 cl_k_trig:
     move.l  8(%sp),%d0
     cmpi.l  #1,%d0
     bne.b   kt_out
     clr.b   cl_flash
+    tst.b   cl_bswal
+    bne.b   kt_out
+    tst.b   cl_bpick
+    beq.b   kt_load
+    move.l  4(%sp),%d0
+    andi.l  #15,%d0
+    move.b  %d0,cl_bank
+    clr.b   cl_bpick
+    moveq   #1,%d0
+    move.b  %d0,cl_bswal
+    bra.w   cl_refresh
+kt_load:
     move.l  4(%sp),%d0
     andi.l  #15,%d0
     move.b  %d0,cl_cur
@@ -471,10 +483,18 @@ cl_k_track:
     rts
 
 | [PTN] / [BANK] pressed or released while Clyps is open (keys pressed AFTER our layer went up
-| reach these records; the chord keys held when it went up reach stock, see the detours)
+| reach these records; the chord keys held when it went up reach stock, see the detours).
+| [BANK] pressed without [PTN]: bank picking (the trigs show the banks, cl_paint) until a trig
+| picks one or [BANK] is released. [PTN] pressed with [BANK] held: the chord again (held state).
 cl_k_chord:
     move.l  8(%sp),%d0
-    beq.w   cl_chord_rel                | release
+    bne.b   kc_press
+    move.l  4(%sp),%d1
+    cmpi.l  #0x2f,%d1
+    bne.w   cl_chord_rel
+    jsr     cl_bkend                    | [BANK] released: bank picking ends
+    bra.w   cl_chord_rel
+kc_press:
     cmpi.l  #1,%d0
     bne.b   kc_out
 |   whatever happens next, a later release of this key under stock's own record (after Clyps
@@ -484,17 +504,35 @@ cl_k_chord:
     moveq   #2,%d1
     move.l  %d1,BANK_SEL
     move.l  4(%sp),%d1
-    move.l  BANK_HELD,%d0               | [PTN] pressed: is [BANK] held?
     cmpi.l  #0x2e,%d1
-    beq.b   kc_test
-    move.l  PTN_HELD,%d0                | [BANK] pressed: is [PTN] held?
-kc_test:
-    tst.l   %d0
+    beq.b   kc_ptn
+    tst.l   PTN_HELD                    | [BANK] pressed: is [PTN] held?
+    bne.b   kc_chord
+    moveq   #1,%d0
+    move.b  %d0,cl_bpick                | [BANK] alone: bank picking
+    clr.b   cl_bswal
+    clr.l   -(%sp)
+    jsr     LED_PAINT
+    addq.l  #4,%sp
+    rts
+kc_ptn:
+    tst.l   BANK_HELD                   | [PTN] pressed: is [BANK] held?
     beq.b   kc_out
+    jsr     cl_bkend
+kc_chord:
     moveq   #1,%d0
     move.b  %d0,cl_held                 | the chord again: held state, no loads yet
     clr.b   cl_loaded
 kc_out:
+    rts
+
+| bank picking off; the Clyps grid back
+cl_bkend:
+    clr.b   cl_bpick
+    clr.b   cl_bswal
+    clr.l   -(%sp)
+    jsr     LED_PAINT
+    addq.l  #4,%sp
     rts
 
 | [FUNC]: phase 2 only redraws (the FULL label arrives with FULL loads)
@@ -640,7 +678,7 @@ cl_refresh:
     move.b  cl_cur,%d0
     cmpi.l  #NSLOT,%d0
     bcs.b   crf_cur
-    jsr     cl_hasorig
+    jsr     cl_origok
     tst.l   %d0
     bne.b   crf_cur
     clr.b   cl_cur
@@ -753,39 +791,62 @@ lo_out:
     lea     16(%sp),%sp
     rts
 
-| d0 = 1 when the active track holds an original on the playing pattern
-cl_hasorig:
-    jsr     cl_trk
-| cl_hasot (d0 = track): the same for any track
-cl_hasot:
-    move.l  %d0,-(%sp)
-    jsr     cl_oidx                     | d0 = the pattern's valid word
-    move.l  (%sp)+,%d1
-    btst    %d1,%d0
-    beq.b   ho_no
-    moveq   #1,%d0
-    rts
-ho_no:
+| cl_diff (d0 = track) -> d0 = 1 when the playing pattern's record of the track differs from its
+| original (the load snapshot); 0 when equal or when there is no snapshot. Keeps d2-d7/a2-a6.
+cl_diff:
+    lea     -8(%sp),%sp
+    movem.l %d2-%d3,(%sp)
+    move.l  %d0,%d2
+    jsr     cl_origok
+    tst.l   %d0
+    beq.b   df_out
+    move.l  %d2,-(%sp)
+    jsr     cl_toff
+    addq.l  #4,%sp
+    move.l  %d0,%d3                     | d3 = record offset
+    move.l  %d1,-(%sp)                  | its length
     moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    jsr     cl_snapslab
+    adda.l  %d3,%a0
+    move.l  %a0,-(%sp)                  | the original record
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  %d0,-(%sp)
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     cl_slab
+    addq.l  #8,%sp
+    adda.l  %d3,%a0                     | a0 = the playing record
+    movea.l (%sp)+,%a1
+    move.l  (%sp)+,%d0
+    jsr     cl_cmpw
+df_out:
+    movem.l (%sp),%d2-%d3
+    lea     8(%sp),%sp
     rts
 
-| cl_restore: the active track's original back (cued like any load). d0 = 1 if it holds one.
+| cl_restore: the active track's original back (cued like any load). d0 = 1 if it differed.
 cl_restore:
-    jsr     cl_hasorig
+    jsr     cl_trk
+    move.l  %d0,-(%sp)
+    jsr     cl_diff
+    move.l  (%sp)+,%d1
     tst.l   %d0
     beq.b   rs_out
-    jsr     cl_trk
     clr.l   -(%sp)
     pea     SRC_ORIG<<8
-    move.l  %d0,-(%sp)
+    move.l  %d1,-(%sp)
     jsr     cl_cueload
     lea     12(%sp),%sp
     moveq   #1,%d0
 rs_out:
     rts
 
-| cl_restoreall: every track of the playing pattern that holds an original, on one landing.
-| d0 = 1 if any did.
+| cl_restoreall: every track of the playing pattern that differs from its original, on one
+| landing. d0 = 1 if any did.
 cl_restoreall:
     lea     -8(%sp),%sp
     movem.l %d2-%d3,(%sp)
@@ -793,7 +854,7 @@ cl_restoreall:
     moveq   #0,%d3                      | d3 = any
 ra_l:
     move.l  %d2,%d0
-    jsr     cl_hasot
+    jsr     cl_diff
     tst.l   %d0
     beq.b   ra_n
     moveq   #1,%d3
@@ -884,15 +945,23 @@ ls_none:
 
 | The masked bank loader 0x400905d4(ctx, mask, ...) (storage task): bit n of mask = bank n is read
 | from the card. Every LOAD PROJECT goes through it (measured, emulator: mask 0xffff on a first
-| load from 0x400853d8, 0xfffe on a reload of the same project from 0x40084d60; bank 0 comes back
-| another way there; 0x40090504 never runs). The originals of a reloaded bank describe data that is
-| gone: drop them. Eight banks or more = a project load: the saved sequences, the provenance and
-| every cue go too (scope §1.5 / §1.6). Then the loader's first two instructions, replayed.
+| load from 0x400853d8, 0xfffe on the power-on / reload resume from 0x40084d60, whose current bank
+| comes back from the SRAM mirror instead: cl_sramrest). Entry: the banks being read lose their
+| snapshot, and eight banks or more = a project load: the saved sequences, the provenance and every
+| cue go (scope §1.6). The return goes through cl_ldexit, which snapshots every bank just read: the
+| new originals. Then the loader's first two instructions, replayed.
 cl_projload:
     move.l  8(%sp),%d0
     andi.l  #0xffff,%d0                 | d0 = the bank mask
+    move.w  %d0,cl_ldmask
+    moveq   #0,%d1
+    move.w  cl_snapok,%d1
+    not.l   %d0
+    and.l   %d0,%d1
+    move.w  %d1,cl_snapok               | no originals for these banks until the load is done
+    moveq   #0,%d0
+    move.w  cl_ldmask,%d0
     moveq   #0,%d1                      | d1 = banks in it
-    movea.l %d0,%a1
 pl_cnt:
     tst.l   %d0
     beq.b   pl_counted
@@ -904,33 +973,12 @@ pl_cnt:
     bra.b   pl_cnt
 pl_counted:
     cmpi.l  #8,%d1
-    bcc.b   pl_all
-    move.l  %a1,%d0                     | a few banks: their originals only
-    lea     cl_ovalid,%a0
-    moveq   #16,%d1
-pl_bank:
-    lsr.l   #1,%d0
-    bcc.b   pl_keep
-    clr.l   (%a0)
-    clr.l   4(%a0)
-    clr.l   8(%a0)
-    clr.l   12(%a0)
-    clr.l   16(%a0)
-    clr.l   20(%a0)
-    clr.l   24(%a0)
-    clr.l   28(%a0)
-pl_keep:
-    lea     32(%a0),%a0                 | 16 patterns x u16 per bank
-    subq.l  #1,%d1
-    bne.b   pl_bank
-    bra.b   pl_go
-pl_all:
-    lea     cl_ovalid,%a0
-    move.l  #(512+16)/4,%d0             | cl_ovalid + cl_svalid
-pl_l:
+    bcs.b   pl_go
+    lea     cl_svalid,%a0               | a project load: no saved sequence survives
     clr.l   (%a0)+
-    subq.l  #1,%d0
-    bne.b   pl_l
+    clr.l   (%a0)+
+    clr.l   (%a0)+
+    clr.l   (%a0)+
     lea     cl_home,%a0
     moveq   #-1,%d1
     moveq   #8,%d0
@@ -945,14 +993,82 @@ pl_h:
     move.b  %d0,cl_nproj
     jsr     cl_dropall
 pl_go:
+    move.l  (%sp),cl_ldret              | the loader returns through cl_ldexit
+    move.l  #cl_ldexit,(%sp)
     lea     -328(%sp),%sp               | displaced
     movem.l %d2-%d7/%a2-%a6,(%sp)
     jmp     BANKS_RESUME
 
+| the masked loader's return: snapshot every bank it read, then back to its caller (d0 kept)
+cl_ldexit:
+    lea     -12(%sp),%sp
+    movem.l %d0/%d2-%d3,(%sp)
+    moveq   #0,%d2                      | d2 = bank
+    moveq   #0,%d3
+    move.w  cl_ldmask,%d3
+le_l:
+    btst    %d2,%d3
+    beq.b   le_n
+    move.l  %d2,-(%sp)
+    jsr     cl_snapbank
+    addq.l  #4,%sp
+le_n:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   le_l
+    movem.l (%sp),%d0/%d2-%d3
+    lea     12(%sp),%sp
+    move.l  cl_ldret,-(%sp)
+    rts
+
+| 0x40025808 `jsr 0x4000fbb4` (the power-on resume: the current bank's unsaved edits, SRAM -> RAM)
+| -> here: the same call, then that bank's snapshot (whatever wrote the bank last, its snapshot is
+| taken last)
+cl_sramrest:
+    move.l  4(%sp),-(%sp)
+    jsr     SRAM_RESTORE
+    addq.l  #4,%sp
+    move.l  4(%sp),-(%sp)
+    jsr     cl_snapbank
+    addq.l  #4,%sp
+    rts
+
+| cl_snapall: every bank -> its snapshot
+cl_snapall:
+    move.l  %d2,-(%sp)
+    moveq   #0,%d2
+sa_l:
+    move.l  %d2,-(%sp)
+    jsr     cl_snapbank
+    addq.l  #4,%sp
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   sa_l
+    move.l  (%sp)+,%d2
+    rts
+
+| cl_snapbank(bank): the bank as it is now -> its snapshot (the originals); mark it valid
+cl_snapbank:
+    move.l  4(%sp),%d0
+    move.l  #BANKSZ,%d1
+    muls.l  %d1,%d0
+    pea     BANKSZ
+    movea.l #BLOB,%a0
+    pea     (%a0,%d0.l)
+    movea.l #SNAPB,%a0
+    pea     (%a0,%d0.l)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
+    move.l  4(%sp),%d1
+    moveq   #0,%d0
+    move.w  cl_snapok,%d0
+    bset    %d1,%d0
+    move.w  %d0,cl_snapok
+    rts
+
     .text
 | cl_apply(t, sbank, spat) -> d0 = 1 copied, 0 not (the playing pattern's own slot, or no saved
-| sequence / original to put back). The record, its length/scale (scope §4.6), the original (the
-| first replacement keeps it, §1.5) and the provenance. Writes RAM only (slab + our state): safe in
+| sequence / original to put back). The record, its length/scale (scope §4.6) and the provenance. Writes RAM only (slab + our state): safe in
 | the sequencer tick. sbank = SRC_SAVED / SRC_ORIG: the saved sequence / the original of t.
 cl_apply:
     lea     -40(%sp),%sp
@@ -992,9 +1108,6 @@ ap_src:
     movea.l %a0,%a3                     | a3 = the source record
     movea.l %d0,%a4                     | a4 = its length
     movea.l %d1,%a5                     | a5 = its scale
-    cmpi.l  #SRC_ORIG,%d2
-    beq.b   ap_copy
-    jsr     cl_capture                  | the first replacement keeps the original
 ap_copy:
     move.l  %d5,-(%sp)
     move.l  %a3,-(%sp)
@@ -1025,8 +1138,8 @@ ap_wlen:
     cmpi.l  #SRC_ORIG,%d2
     bne.b   ap_dst
 ap_back:
-    jsr     cl_release                  | put back: the original is dropped (and the pattern's
-    move.l  %d6,%d0                     | conversion undone with its last one); provenance off
+    jsr     cl_back                     | put back: with every track original again, the pattern's
+    move.l  %d6,%d0                     | length / scale / mode too; provenance off
     add.l   %d0,%d0
     lea     cl_home,%a0
     moveq   #-1,%d1
@@ -1075,8 +1188,8 @@ ap_out:
 
 | cl_srcrec(t, sbank, spat) -> a0 = the source record (0 = none), d0 = its resolved length, d1 =
 | its resolved scale. sbank 0..15: a slot (a NORMAL pattern's length / scale are the pattern's);
-| SRC_SAVED: saved[t] (resolved when saved); SRC_ORIG: the playing pattern's original of t
-| (resolved through the pattern's snapshot). Uses d0-d1/a0-a1 only.
+| SRC_SAVED: saved[t] (resolved when saved); SRC_ORIG: t's record in the playing pattern's load
+| snapshot (resolved through that snapshot's trailer). Uses d0-d1/a0-a1 only.
 cl_srcrec:
     move.l  8(%sp),%d0
     cmpi.l  #SRC_SAVED,%d0
@@ -1112,17 +1225,27 @@ sr_saved:
     adda.l  %d0,%a0
     bra.b   sr_rec
 sr_orig:
-    move.l  4(%sp),%d0
-    jsr     cl_oidx                     | a0 = the slot, a1 = the snapshot, d0 = the valid word
-    move.l  4(%sp),%d1
-    btst    %d1,%d0
+    jsr     cl_origok
+    tst.l   %d0
     beq.b   sr_none
-    tst.b   5(%a1)                      | the pattern was NORMAL before Clyps: its length / scale
-    bne.b   sr_rec
+    move.l  4(%sp),-(%sp)
+    jsr     cl_toff
+    addq.l  #4,%sp
+    move.l  %d0,-(%sp)                  | the record offset
     moveq   #0,%d0
-    move.b  3(%a1),%d0
+    move.b  PLAY_BANK,%d0
     moveq   #0,%d1
-    move.b  4(%a1),%d1
+    move.b  ACT_PAT,%d1
+    jsr     cl_snapslab                 | a0 = the playing pattern's slab, as loaded
+    movea.l %a0,%a1
+    adda.l  #TRAILER,%a1
+    adda.l  (%sp)+,%a0                  | a0 = the original record
+    tst.b   T_SMODE(%a1)
+    bne.b   sr_rec                      | PER TRACK when loaded: the record's own bytes
+    moveq   #0,%d0                      | NORMAL when loaded: the pattern's length / scale
+    move.b  T_LEN(%a1),%d0
+    moveq   #0,%d1
+    move.b  T_SCALE(%a1),%d1
     rts
 sr_none:
     suba.l  %a0,%a0
@@ -1142,150 +1265,127 @@ sr_ra:
     move.b  1(%a1),%d1
     rts
 
-| cl_oidx (d0 = t) -> a0 = the original slot of (playing bank, pattern, t), a1 = that pattern's
-| snapshot, d1 = 2 x the pattern index (its valid word: cl_ovalid + d1), d0 = that word (bit t = an
-| original is held). Keeps d2-d7/a2-a6.
-cl_oidx:
-    lea     -8(%sp),%sp
-    movem.l %d2/%a2,(%sp)
-    move.l  %d0,%d2                     | d2 = t
+| d0 = 1 when the playing bank has its load snapshot (the originals). Uses d0-d1.
+cl_origok:
     moveq   #0,%d1
     move.b  PLAY_BANK,%d1
-    lsl.l   #4,%d1
     moveq   #0,%d0
-    move.b  ACT_PAT,%d0
-    add.l   %d0,%d1                     | d1 = p = bank * 16 + pattern
-    move.l  %d1,%d0
-    lsl.l   #4,%d0
-    add.l   %d2,%d0                     | p * 16 + t
-    move.l  #TRAC_A,%d2
-    muls.l  %d2,%d0
-    movea.l #ORIG_BASE,%a0
-    adda.l  %d0,%a0
-    moveq   #SNAP_W,%d0
+    move.w  cl_snapok,%d0
+    btst    %d1,%d0
+    beq.b   ok_no
+    moveq   #1,%d0
+    rts
+ok_no:
+    moveq   #0,%d0
+    rts
+
+| cl_snapslab (d0 = bank, d1 = pattern) -> a0 = that pattern's slab in the load snapshot. d0-d1/a0.
+cl_snapslab:
+    move.l  %d1,-(%sp)
+    move.l  #BANKSZ,%d1
     muls.l  %d1,%d0
-    movea.l #SNAP_BASE,%a1
-    adda.l  %d0,%a1
-    add.l   %d1,%d1
-    lea     cl_ovalid,%a2
-    moveq   #0,%d0
-    move.w  (%a2,%d1.l),%d0
-    movem.l (%sp),%d2/%a2
-    lea     8(%sp),%sp
+    movea.l #SNAPB,%a0
+    adda.l  %d0,%a0
+    move.l  (%sp)+,%d0
+    move.l  #PATSTRIDE,%d1
+    muls.l  %d1,%d0
+    adda.l  %d0,%a0
     rts
 
-| cl_capture (d6 = t, a2 = the playing slab, d4 / d5 = the record's offset / length): keep what the
-| track holds now as its original, unless one is held already (the first one wins). A pattern's
-| first original also snapshots its trailer +0x50..+0x55 and every track's length / scale, so a
-| NORMAL -> PER TRACK conversion can be undone (scope §4.6).
-cl_capture:
-    lea     -12(%sp),%sp
-    movem.l %d2-%d3/%a3,(%sp)
-    move.l  %d6,%d0
-    jsr     cl_oidx
-    btst    %d6,%d0
-    bne.b   cap_out                     | held already
-    move.l  %d0,%d2                     | d2 = the valid word
-    move.l  %d1,%d3                     | d3 = its offset
-    movea.l %a1,%a3                     | a3 = the snapshot
-    move.l  %d5,-(%sp)
-    move.l  %a2,%d0
-    add.l   %d4,%d0
-    move.l  %d0,-(%sp)
-    move.l  %a0,-(%sp)
-    jsr     MEMCPY
-    lea     12(%sp),%sp
-    tst.l   %d2
-    bne.b   cap_set                     | the pattern's snapshot is taken already
-    movea.l %a2,%a0
-    adda.l  #TRAILER,%a0
-    moveq   #6,%d0
-cap_tr:
-    move.b  (%a0)+,(%a3)+
+| cl_cmpw (a0, a1, d0 = an even byte count) -> d0 = 0 equal, 1 not; a0/a1 advance. Uses d1.
+cl_cmpw:
+    lsr.l   #1,%d0
+    beq.b   cw_eq
+cw_l:
+    move.w  (%a0)+,%d1
+    cmp.w   (%a1)+,%d1
+    bne.b   cw_ne
     subq.l  #1,%d0
-    bne.b   cap_tr
-    moveq   #0,%d0                      | audio tracks: +0x50 / +0x51
-cap_a:
-    move.l  #TRAC_A,%d1
-    muls.l  %d0,%d1
-    lea     0x50(%a2,%d1.l),%a0
-    move.b  (%a0)+,(%a3)+
-    move.b  (%a0)+,(%a3)+
-    addq.l  #1,%d0
-    cmpi.l  #8,%d0
-    bne.b   cap_a
-    moveq   #0,%d0                      | MIDI tracks: +0x28 / +0x29
-cap_m:
-    move.l  #TRAC_M,%d1
-    muls.l  %d0,%d1
-    addi.l  #MIDI_BASE+0x28,%d1
-    lea     (%a2,%d1.l),%a0
-    move.b  (%a0)+,(%a3)+
-    move.b  (%a0)+,(%a3)+
-    addq.l  #1,%d0
-    cmpi.l  #8,%d0
-    bne.b   cap_m
-cap_set:
-    bset    %d6,%d2
-    lea     cl_ovalid,%a0
-    move.w  %d2,(%a0,%d3.l)
-cap_out:
-    movem.l (%sp),%d2-%d3/%a3
-    lea     12(%sp),%sp
+    bne.b   cw_l
+cw_eq:
+    moveq   #0,%d0
+    rts
+cw_ne:
+    moveq   #1,%d0
     rts
 
-| cl_release (d6 = t, a2 = the playing slab): t's original has been put back -- drop it. With the
-| pattern's last one gone, a NORMAL -> PER TRACK conversion Clyps made is undone from the snapshot:
-| the pattern is as it was before Clyps.
-cl_release:
-    lea     -8(%sp),%sp
-    movem.l %d2/%a3,(%sp)
-    move.l  %d6,%d0
-    jsr     cl_oidx
-    bclr    %d6,%d0
-    lea     cl_ovalid,%a0
-    move.w  %d0,(%a0,%d1.l)
-    tst.l   %d0
-    bne.b   rl_out                      | other originals remain
-    tst.b   5(%a1)
-    bne.b   rl_out                      | it was PER TRACK: nothing was converted
-    movea.l %a2,%a0
-    adda.l  #TRAILER,%a0
-    tst.b   T_SMODE(%a0)
-    beq.b   rl_out                      | still NORMAL: nothing was converted
-    move.b  (%a1),%d2                   | master length (u16), master scale, SCALE_MODE
-    move.b  %d2,T_MLEN(%a0)
-    move.b  1(%a1),%d2
-    move.b  %d2,T_MLEN+1(%a0)
-    move.b  2(%a1),%d2
-    move.b  %d2,T_MSCALE(%a0)
-    move.b  5(%a1),%d2
-    move.b  %d2,T_SMODE(%a0)
-    lea     6(%a1),%a3                  | every track's length / scale
+| cl_back (a2 = the playing slab): an original has been put back. When every track of the pattern
+| equals its original again (its length / scale bytes aside: a conversion rewrote them), the
+| pattern's own length / scale / mode (+0x50..+0x55) and every track's length / scale come back
+| from the snapshot too: a NORMAL -> PER TRACK conversion is undone, the slab is as loaded.
+cl_back:
+    lea     -20(%sp),%sp
+    movem.l %d2-%d5/%a3,(%sp)
     moveq   #0,%d0
-rl_a:
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    jsr     cl_snapslab
+    movea.l %a0,%a3                     | a3 = the snapshot slab
+    moveq   #0,%d2                      | d2 = track
+bk_l:
+    move.l  %d2,-(%sp)
+    jsr     cl_toff
+    addq.l  #4,%sp
+    move.l  %d0,%d3                     | d3 = record offset
+    move.l  %d1,%d4                     | d4 = record length
+    moveq   #0x50,%d5
+    cmpi.l  #8,%d2
+    bcs.b   bk_a
+    moveq   #0x28,%d5                   | d5 = the len byte's offset in the record
+bk_a:
+    lea     (%a2,%d3.l),%a0
+    lea     (%a3,%d3.l),%a1
+    move.l  %d5,%d0
+    jsr     cl_cmpw                     | up to the length / scale bytes
+    tst.l   %d0
+    bne.w   bk_out
+    addq.l  #2,%a0
+    addq.l  #2,%a1
+    move.l  %d4,%d0
+    sub.l   %d5,%d0
+    subq.l  #2,%d0
+    jsr     cl_cmpw                     | after them
+    tst.l   %d0
+    bne.w   bk_out
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   bk_l
+    movea.l %a2,%a0                     | every track original: the rest comes back
+    adda.l  #TRAILER,%a0
+    movea.l %a3,%a1
+    adda.l  #TRAILER,%a1
+    moveq   #6,%d0
+bk_tr:
+    move.b  (%a1)+,(%a0)+
+    subq.l  #1,%d0
+    bne.b   bk_tr
+    moveq   #0,%d0
+bk_pa:
     move.l  #TRAC_A,%d1
     muls.l  %d0,%d1
+    lea     0x50(%a3,%d1.l),%a1
     lea     0x50(%a2,%d1.l),%a0
-    move.b  (%a3)+,(%a0)+
-    move.b  (%a3)+,(%a0)+
+    move.b  (%a1)+,(%a0)+
+    move.b  (%a1)+,(%a0)+
     addq.l  #1,%d0
     cmpi.l  #8,%d0
-    bne.b   rl_a
+    bne.b   bk_pa
     moveq   #0,%d0
-rl_m:
+bk_pm:
     move.l  #TRAC_M,%d1
     muls.l  %d0,%d1
     addi.l  #MIDI_BASE+0x28,%d1
+    lea     (%a3,%d1.l),%a1
     lea     (%a2,%d1.l),%a0
-    move.b  (%a3)+,(%a0)+
-    move.b  (%a3)+,(%a0)+
+    move.b  (%a1)+,(%a0)+
+    move.b  (%a1)+,(%a0)+
     addq.l  #1,%d0
     cmpi.l  #8,%d0
-    bne.b   rl_m
-rl_out:
-    movem.l (%sp),%d2/%a3
-    lea     8(%sp),%sp
+    bne.b   bk_pm
+bk_out:
+    movem.l (%sp),%d2-%d5/%a3
+    lea     20(%sp),%sp
     rts
 
     .section .dram,"ax"
@@ -1729,6 +1829,22 @@ cv_m:
     lea     24(%sp),%sp
     rts
 
+| The four `jsr 0x4000fd34` sites (every bank to defaults: a new project, the start of a load) ->
+| here. The reset may be the last thing to write the banks (measured in the emulator: a reload
+| whose loader pass came BEFORE the reset), so the originals are retaken after it: whatever wrote
+| the banks last defines them. In ROM because 0x4001fb1e may run before the boot loader has put
+| the DRAM part in place: the snapshot is only taken once cl_magic says it is there.
+cl_rstall:
+    move.l  4(%sp),-(%sp)
+    jsr     RESET_BANKS
+    addq.l  #4,%sp
+    move.l  cl_magic,%d0
+    cmpi.l  #CL_MAGIC,%d0
+    bne.b   rs_skip
+    jmp     cl_snapall                  | returns to our caller
+rs_skip:
+    rts
+
     .section .dram,"ax"
 | ================================================================ the Clyps view
 | text(x, y, str) in the small font onto the window surface (a4); keeps d2-d7/a2-a6
@@ -1827,14 +1943,12 @@ cd_ta:
     moveq   #LOADF_X,%d0
     tst.b   cl_fn
     bne.b   cd_mode
-.ifndef ROW17
     lea     cl_s_orig,%a0
     moveq   #BOX_R-1-ORIG_W,%d0
     moveq   #0,%d1
     move.b  cl_cur,%d1
     cmpi.l  #NSLOT,%d1
     beq.b   cd_box
-.endif
     lea     cl_s_saved,%a0
     moveq   #BOX_R-1-SAVED_W,%d0
     tst.b   cl_flash
@@ -1866,7 +1980,7 @@ cd_mode:
 cd_band:
     pea     WIN_H-2                     | the band, inverted with its text
     pea     WIN_W-2
-    pea     HDR_LIT_LO
+    pea     HDR_Y-2
     pea     1
     bsr.w   cl_xor
     lea     16(%sp),%sp
@@ -1912,12 +2026,6 @@ cd_cell:
 cd_c0:
     move.l  %d2,%d4
     andi.l  #7,%d4
-.ifdef ROW17
-    cmpi.l  #NSLOT,%d2
-    bne.b   cd_row
-    moveq   #8,%d4                      | ORIG: the 9th row of the second column
-cd_row:
-.endif
     moveq   #ROW_PITCH,%d0
     muls.l  %d0,%d4
     moveq   #ROW0_Y,%d0
@@ -1942,17 +2050,6 @@ cd_two:
     bsr.w   cl_text
     lea     12(%sp),%sp
 |   the summary: "n TRIGS" / "LOCKS" / "---"
-.ifdef ROW17
-    cmpi.l  #NSLOT,%d2
-    bne.b   cd_slot
-    jsr     cl_hasorig
-    lea     cl_s_orig,%a0
-    tst.l   %d0
-    bne.b   cd_sum
-    lea     cl_s_emp,%a0
-    bra.b   cd_sum
-cd_slot:
-.endif
     lea     cl_cls,%a0
     moveq   #0,%d0
     move.b  (%a0,%d2.l),%d0
@@ -2013,11 +2110,7 @@ cd_sum:
     lea     16(%sp),%sp
 cd_next:
     addq.l  #1,%d2
-.ifdef ROW17
-    cmpi.l  #NSLOT+1,%d2
-.else
     cmpi.l  #16,%d2
-.endif
     bne.w   cd_cell
     moveq   #1,%d0
     move.l  %d0,RDRAW
@@ -2047,6 +2140,8 @@ cl_paint:
     lea     LED_BRI,%a3
     lea     LED_ON,%a4
     lea     LED_OFF,%a5
+    tst.b   cl_bpick
+    bne.w   cp_banks
     jsr     cl_playing
     move.l  %d0,%d6                     | bank<<8 | pattern playing
     jsr     cl_trk
@@ -2118,9 +2213,55 @@ cp_next:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
     bne.w   cp_lp
+cp_done:
     movem.l (%sp),%d2-%d6/%a2-%a5
     lea     36(%sp),%sp
     rts
+
+| bank picking ([BANK] alone held): stock's bank colours (0x4007afe8), with the SHOWN bank as the
+| current one: red = the shown bank, green = a bank with data (stock's 0x4000fd78), off = empty
+cp_banks:
+    moveq   #0,%d2
+cb_lp:
+    lea     LED_TBL,%a0
+    move.l  (%a0,%d2.l*4),%d3           | d3 = red die, d4 = green die
+    move.l  %d3,%d4
+    addq.l  #1,%d4
+    pea     15
+    move.l  %d3,-(%sp)
+    jsr     (%a3)
+    move.l  %d4,(%sp)
+    jsr     (%a3)
+    addq.l  #8,%sp
+    moveq   #0,%d0
+    move.b  cl_bank,%d0
+    cmp.l   %d2,%d0
+    bne.b   cb_other
+    move.l  %d3,-(%sp)
+    jsr     (%a4)                       | the shown bank: red
+    move.l  %d4,(%sp)
+    jsr     (%a5)
+    addq.l  #4,%sp
+    bra.b   cb_next
+cb_other:
+    move.l  %d3,-(%sp)
+    jsr     (%a5)
+    move.l  %d2,(%sp)
+    jsr     BANK_HASDATA
+    move.l  %d4,(%sp)
+    tst.l   %d0
+    beq.b   cb_off
+    jsr     (%a4)                       | a bank with data: green
+    bra.b   cb_pop
+cb_off:
+    jsr     (%a5)
+cb_pop:
+    addq.l  #4,%sp
+cb_next:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   cb_lp
+    bra.b   cp_done
 
 | ================================================================ data (both parts run from RAM)
     .align 2
@@ -2147,8 +2288,8 @@ cl_keys:
     .endr
     KREC 0x33, cl_k_ud, 0, cl_k_ud, 15, 4
     KREC 0x20, cl_k_ud, 0, cl_k_ud, 15, 4
-    KREC 0x34, cl_k_lr, 0, cl_k_lr, 15, 6    | the user: bank cycling fast (stock repeats every 30 ticks)
-    KREC 0x21, cl_k_lr, 0, cl_k_lr, 15, 6    | (non-zero delay: the add/remove rule above holds)
+    KREC 0x34, cl_k_lr, 0, 0, 15, 6      | the other column, no repeat (the delay stays non-zero:
+    KREC 0x21, cl_k_lr, 0, 0, 15, 6      | the add/remove rule above holds)
     KREC 0x31, cl_k_yes, 0, 0, 0, 0
     KREC 0x32, cl_k_no, 0, 0, 0, 0
     KREC 0x2e, cl_k_chord, cl_k_chord, 0, 30, 0
@@ -2170,8 +2311,8 @@ cl_fkeys:
     KREC 0x1b, cl_k_page, 0, 0, 0, 0     | [FUNC]+[PAGE] restore all
     KREC 0x33, cl_k_ud, 0, cl_k_ud, 15, 4
     KREC 0x20, cl_k_ud, 0, cl_k_ud, 15, 4
-    KREC 0x34, cl_k_lr, 0, cl_k_lr, 15, 5
-    KREC 0x21, cl_k_lr, 0, cl_k_lr, 15, 5
+    KREC 0x34, cl_k_lr, 0, 0, 15, 5
+    KREC 0x21, cl_k_lr, 0, 0, 15, 5
     KREC 0x2e, cl_k_chord, cl_k_chord, 0, 0, 0
     KREC 0x2f, cl_k_chord, cl_k_chord, 0, 0, 0
     .irp c, 0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17
@@ -2205,13 +2346,18 @@ cl_bank:    .byte 0
 cl_cur:     .byte 0
 cl_fn:      .byte 0                     | [FUNC] held (our own press/release record)
 cl_flash:   .byte 0                     | the header shows SAVED (a save) until the next key
+cl_bpick:   .byte 0                     | [BANK] alone held: the trigs pick the shown bank
+cl_bswal:   .byte 0                     | a bank was picked: trigs wait for [BANK]'s release
 cl_nproj:   .byte 0                     | project loads seen (the emulator gate reads it)
             .align 2
 cl_cls:     .space 16
 | the valid marks: inside the loaded image, so every boot's depack zeroes them (the buffers they
 | describe are not)
-cl_ovalid:  .space 512                  | u16 per (bank, pattern): bit t = track t holds an original
+cl_magic:   .long CL_MAGIC              | the DRAM part is in place (the boot loader put it there)
 cl_svalid:  .space 16                   | per track: a saved sequence is held
+cl_snapok:  .short 0                    | bit b: bank b's load snapshot (its originals) is valid
+cl_ldmask:  .short 0                    | the masked loader in progress: its banks
+cl_ldret:   .long 0                     | ... and its caller's return address
 cl_buf:     .space 32
 
 | the tick's state: in the ROM part, beside the code that writes it
@@ -2240,11 +2386,10 @@ cl_s_orig:  .asciz "ORIG"
 cl_s_saved: .asciz "SAVED"
     .align 4
 | the buffers: past the loaded image, uninitialised (dram.build's bss); read only behind a valid
-| mark. Every (bank, pattern, track) has its own original slot, so the store can never fill
-| (scope §1.5: guaranteed recovery). MIDI records are shorter and use the same stride.
+| mark. The snapshot is every bank as loaded (16 slabs + its Parts each: the Parts are there for
+| FULL restores), so every track's original is always there.
 cl_bss:
-    .equ ORIG_BASE,   cl_bss                    | 4096 x TRAC_A, index (bank * 16 + pattern) * 16 + t
-    .equ SAVED_BASE,  cl_bss + 4096*TRAC_A      | 16 x TRAC_A
-    .equ SNAP_BASE,   SAVED_BASE + 16*TRAC_A    | 256 x SNAP_W: trailer +0x50..+0x55, 16 len/scale
-    .equ CL_BSS_SIZE, 4096*TRAC_A + 16*TRAC_A + 256*SNAP_W
+    .equ SNAPB,       cl_bss                    | 16 x BANKSZ: the banks as loaded (the originals)
+    .equ SAVED_BASE,  cl_bss + 16*BANKSZ        | 16 x TRAC_A: the saved sequences
+    .equ CL_BSS_SIZE, 16*BANKSZ + 16*TRAC_A
     .global CL_BSS_SIZE, cl_bss

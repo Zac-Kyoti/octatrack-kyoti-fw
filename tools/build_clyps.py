@@ -10,9 +10,10 @@ user promotes it.
   held   (chord held)    trig = load, Clyps stays; releasing the chord after a load closes.
   latched (released, nothing loaded)  trig = load + close; [YES] = load the cursor entry + close;
                                       [NO] = close.
-  UP/DOWN cursor 1..16 -> ORIG (wraps), LEFT/RIGHT bank (wraps), TRACK keys change the track.
+  UP/DOWN cursor 1..16 -> ORIG (wraps), LEFT/RIGHT the other column, [BANK] + trig picks the bank,
+  TRACK keys change the track.
   [FUNC]+[YES] save the track's sequence; [FUNC]+[NO] load it back at once (next window start).
-  [PAGE] the track's original back; [FUNC]+[PAGE] every track's, on one landing.
+  [PAGE] the track's original (as loaded) back; [FUNC]+[PAGE] every changed track's, one landing.
   grid: full green = sample/note trigs, half green = other data only, off = empty, red = playing,
   yellow = cued. Stopped: loads at once; running: cued (master wrap / CHAIN AFTER, phase-continuous).
 
@@ -24,7 +25,12 @@ Detours (each asserts its stock bytes):
   0x40062d1c  UI task loop tail        tst.l 0x46c7c72c                   -> cl_uitail (follow-up)
   0x400a43a0  wrap body entry (phase G) move.l (a2),d0 ; moveq #1,d2 ; or.l d2,d0 -> cl_wrap
   0x400905d4  masked bank loader entry lea -328(sp),sp ; movem.l ... (8 B)   -> cl_projload
-              (a reloaded bank drops its originals; 8+ banks = a project load: everything)
+              (its return snapshots the banks it read: the originals; 8+ banks = a project load:
+              the saved sequences and cues go)
+  0x40025808  power-on resume         jsr 0x4000fbb4 (SRAM -> RAM, current bank) -> jsr cl_sramrest
+              (the same call, then that bank's snapshot)
+  0x4001fb1e, 0x4006bafe, 0x4007ec4c, 0x400909dc  jsr 0x4000fd34 (every bank to defaults)
+              -> jsr cl_rstall (the same call, then every bank's snapshot once DRAM is in place)
 One source, two parts, linked together:
   ROM   `.text`  the sequencer-tick code (phase D, the wrap body, the copy) and the cue state it
                  touches, in the classic cave at 0x400d6500 (reference/kb/caves.md: stock-zero
@@ -75,6 +81,11 @@ DETOURS = [  # (site, symbol, stock bytes, length[, opcode: jmp unless given])
     (0x40062d1c, "cl_uitail", "4ab946c7c72c", 6),  # UI task loop tail: tst.l 0x46c7c72c
     (0x400a43a0, "cl_wrap", "201274018082", 6),    # wrap body entry: move.l (a2),d0; moveq #1,d2; or.l d2,d0
     (0x400905d4, "cl_projload", "4feffeb848d77cfc", 8),  # masked bank loader entry (every LOAD PROJECT)
+    (0x40025808, "cl_sramrest", "4eb94000fbb4", 6, "4eb9"),  # power-on resume: jsr 0x4000fbb4 (SRAM -> RAM)
+    (0x4001fb1e, "cl_rstall", "4eb94000fd34", 6, "4eb9"),    # the four jsr 0x4000fd34 (every bank
+    (0x4006bafe, "cl_rstall", "4eb94000fd34", 6, "4eb9"),    # to defaults): the originals are retaken
+    (0x4007ec4c, "cl_rstall", "4eb94000fd34", 6, "4eb9"),    # after it (cl_rstall is ROM: 0x4001fb1e
+    (0x400909dc, "cl_rstall", "4eb94000fd34", 6, "4eb9"),    # may run before the DRAM part exists)
 ]
 
 

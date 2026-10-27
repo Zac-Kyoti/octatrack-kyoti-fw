@@ -1,12 +1,14 @@
-# CLYPS — scope and build record (WIP; latest test image `140C_CLYP9`)
+# CLYPS — scope and build record (WIP; latest test image `140C_CLYPA`)
 
 ## §0 Start here (handoff, 2026-10-25) — read this first, then §1–§4
 
 **Where it stands.**
 - **Worktree / branch:** `../octatrack-kyoti-fw-trkseq`, branch `trkseq`. Commits are local, not
   pushed. Clyps is WIP, nothing is promoted, and there is no README entry.
-- **Latest image:** `140C_CLYP9` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
-  NOT flashed. See §8b for its sha256.
+- **Latest image:** `140C_CLYPA` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
+  NOT flashed. See §8b for its sha256. CLYP9 was never flashed either.
+- **How the user tests now (2026-10-26):** a few changes at a time, a short list per image, not
+  the whole FLASHING checklist.
 - **On the user's unit:** CLYP6 (FLASHING §4 steps 1–10 passed; MIDI tracks not seen, fixed in
   CLYP7). CLYP7 was never flashed: CLYP9 replaces it.
 - **Pending on hardware (CLYP9):** FLASHING §4 CLYPS step 0 (boot with the 9.6 MB reserve), steps
@@ -272,12 +274,13 @@ A full-screen window, 128 × 64. It has a 7-px header row and two columns of eig
 | key | action |
 |---|---|
 | UP / DOWN `0x33`/`0x20` | cursor through 1–16 (and `ORIG`, §1.5), wrapping, auto-repeat |
-| LEFT / RIGHT `0x34`/`0x21` | bank −/+, wrapping A↔P; view and grid follow |
+| LEFT / RIGHT `0x34`/`0x21` | the same row of the other column (1↔9 … 8↔16); nothing on `ORIG` (the user, 2026-10-26: no bank change on the arrows) |
 | TRIG 1–16, [PAGE], [YES], [NO] | §1.1 |
 | [FUNC]+[YES] | **save** the active track's sequence; Clyps stays; the header shows `SAVED` |
 | [FUNC]+[NO] | **reload** the saved sequence **immediately** (O3); nothing if none is saved; then as §1.1 |
 | TRACK 1–8 | change the active track; view and grid follow; bank kept |
 | [PTN] / [BANK] | their held state is the chord; no stock action |
+| [BANK] alone (held) + trig | **bank picking** (the user, 2026-10-26), as in stock: the trigs show the banks (shown bank red, banks with data green, empty off); a trig picks the shown bank, the view follows and the Clyps grid comes back, Clyps mode stays; further trigs wait for [BANK]'s release |
 | [FUNC] `0x2d` | our layer lists it (so stock's FUNC sub-map `0x400bfa1e`, which maps [PAGE] to SCALE and sits above any layer pushed before it, is never linked); its held flag `0x46c7dd26` is read (C: set for every press at `0x4003192c`) |
 | encoders | swallowed (O10) |
 | all else (PLAY, STOP, CUE, mutes, MIDI, …) | passed through |
@@ -298,6 +301,24 @@ When the saved sequence is what's playing, no slot is red, and the view header s
 
 Every slot shows what it holds now, the playing pattern's own slot included. A track's original
 appears as the `ORIG` entry (§1.5).
+
+### 1.5′ Originals, redefined (the user, 2026-10-26) — supersedes the capture model below
+
+- **A track's original is the state it had when its bank was loaded**: at power-on, at LOAD
+  PROJECT, at a project reload. It is always available, not only after a Clyps switch.
+- **Any change makes a track not original**: a trig edit on the grid, a Clyps load, a saved
+  sequence put back. `ORIG` (cursor entry, latched [YES]) / [PAGE] bring it back; [FUNC]+[PAGE]
+  brings back every changed track of the playing pattern.
+- The original includes the track's machines/FX (its Part slice). Restoring those arrives with
+  FULL loads (§1.7); the snapshot already holds the Parts.
+- **Saved sequences** (§1.6) are for the in-between states: neither the original nor another slot
+  (edit the grid, like it, [FUNC]+[YES]; [FUNC]+[NO] puts it back on that track at any time).
+- **Mechanism (CLYPA):** Clyps snapshots every bank (16 slabs + its Parts, `0x9b340` B each, 9.7 MB)
+  right after it is written by a load: at the return of the masked bank loader `0x400905d4`, and
+  after stock's power-on SRAM restore `0x4000fbb4` (call site `0x40025808`). A track is original
+  when its record equals the snapshot. When a restore makes every track of a pattern original
+  again (length/scale bytes aside), the pattern's length/scale/mode and every track's length/scale
+  come back too, so a NORMAL→PER TRACK conversion is undone.
 
 ### 1.5 Loads are edits, and Clyps keeps originals (decided 2026-10-23)
 
@@ -505,6 +526,14 @@ through in Clyps mode: it switches between audio and MIDI tracks, and the view a
 (`0x80000012`). [FUNC]+[MIDI] does nothing in Clyps mode, because Clyps owns [FUNC] while open.
 
 ## 2. Decisions
+
+### Settled (2026-10-26, the user)
+
+- Originals = the state as loaded (power-on / LOAD PROJECT / reload), always available (§1.5′).
+- LEFT/RIGHT jump to the same row of the other column; no bank change on the arrows.
+- The bank is picked as in stock: [BANK] alone + a trig, without leaving Clyps mode.
+- No 17th `ORIG` row: `ORIG` stays the cursor entry with the header box (ROW17 proposal dropped).
+- The playing pattern's own slot shows the loaded copy after a load (2026-10-25).
 
 ### Settled (2026-10-23)
 
@@ -1077,6 +1106,19 @@ The ROM keeps only the guarded detours:
     / [NO] / [PAGE] (sub-maps chain, §0 traps; fixed with our `cl_fsub`); the project-load hook sat
     on `0x40090504`, which a LOAD PROJECT never runs (moved to `0x400905d4`).
   - **Renders:** `out/clyps/v9/` (SAVED box, ORIG box, `SAVED` while the saved sequence plays).
+- **`140C_CLYPA` (2026-10-27), NOT flashed.** Syx `44176784addb11e9a616242b8982bbea7e414e7b1fd6e64717717f61001206fc`,
+  CF `.bin` `1e7524f8…`. The user's 2026-10-26 changes (§1.5′, §1.3):
+  - originals = every bank as loaded: snapshots (10.2 MB, 1,664 pages) at the masked loader's
+    return, after the power-on SRAM restore (`0x40025808`), and after each `0x4000fd34` reset
+    (four call sites, ROM stub `cl_rstall` guarded by `cl_magic`: `0x4001fb1e` may run before the
+    DRAM part exists); `ORIG` always in the cycle; [PAGE] undoes a load or a grid edit;
+  - LEFT/RIGHT = the other column; [BANK] alone + trig picks the shown bank in Clyps mode.
+  - Gates: UI `--only ABCDYEKNP` 71/71 (OT DEMO), M on JAM2; C1w = B1 exactly; C6o (ORIG from
+    the snapshot) locks at t139.
+  - Found: a reload runs as "loader pass → `reset_all_banks` → maybe another pass"; in one
+    emulator flow the reset came last and left the banks at defaults. Hence the re-snapshot after
+    every reset. The snapshot copy (10 MB per pass) adds an estimated 0.1–0.2 s per pass to a
+    project load on hardware (not measured).
 - **Decided (the user, 2026-10-25):** after a load onto the playing pattern, its own slot shows the
   loaded copy (the keep rule, as built). What it held before is reached through `ORIG` / [PAGE].
 - **Screen rendering in the emulator** (`tools/clyps_render.py`). Stock's compositor

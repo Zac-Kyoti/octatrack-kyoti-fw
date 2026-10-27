@@ -13,11 +13,13 @@ loaded and the transport stopped, and checks after every step:
   * PTN_CONSUMED / BANK_SEL / the SHOW_WIN slot: no SELECT window on any chord path;
   * the playing pattern's track record after a load equals the source record;
   * stock controls: a lone [PTN] tap and a lone [BANK] tap still open their SELECT windows;
-  * E: saved sequences ([FUNC]+[YES] / [FUNC]+[NO]) and originals (first one wins, the ORIG
-    cursor entry, [PAGE], [FUNC]+[PAGE] restore-all), byte for byte;
+  * E: saved sequences ([FUNC]+[YES] / [FUNC]+[NO]) and originals (the bank as loaded: always
+    there, the ORIG cursor entry, [PAGE] after a load AND after a grid edit, [FUNC]+[PAGE]),
+    byte for byte;
+  * K: bank picking: [BANK] alone + a trig picks the shown bank and stays in Clyps;
   * N: a NORMAL pattern converted to PER TRACK by a load, and the restore that undoes it: the
     whole slab comes back byte for byte;
-  * P: a project load drops the saved sequences and the originals;
+  * P: a project load drops the saved sequences and retakes the originals;
   * Y: [YES] with the chord held does nothing; [PTN]+[YES] in Clyps mode never loads.
 Screens are written as PNGs (the firmware's 1-bpp plane at 0x46c7e0ea, octabam's lcd_view).
 
@@ -77,7 +79,7 @@ def main(argv):
     def state():
         return dict(open=rd(syms["cl_open"], 1), held=rd(syms["cl_held"], 1), loaded=rd(syms["cl_loaded"], 1),
                     bank=rd(syms["cl_bank"], 1), cur=rd(syms["cl_cur"], 1), win=rd(syms["cl_win"], 4),
-                    flash=rd(syms["cl_flash"], 1),
+                    flash=rd(syms["cl_flash"], 1), bpick=rd(syms["cl_bpick"], 1), bswal=rd(syms["cl_bswal"], 1),
                     layers=chain(LAYERS), leds=chain(LEDS), consumed=rd(PTN_CONSUMED, 4),
                     banksel=rd(BANK_SEL, 4), showwin=rd(WIN_SLOT, 4))
 
@@ -117,9 +119,18 @@ def main(argv):
 
     fails = []
     slab = lambda pat, b=None: bytes(u.mem_read(BLOB + (bank if b is None else b) * BANKSTRIDE + pat * PATSTRIDE, PATSTRIDE))
-    ovw = lambda pat: rd(syms["cl_ovalid"] + 2 * (bank * 16 + pat), 2)
-    oslot = lambda pat, t: bytes(u.mem_read(syms["cl_bss"] + ((bank * 16 + pat) * 16 + t) * TRAC_A, TRAC_A))
-    saved = lambda t: bytes(u.mem_read(syms["cl_bss"] + 4096 * TRAC_A + t * TRAC_A, TRAC_A))
+    BANKSZ = 0x9B340
+    snapok = lambda: rd(syms["cl_snapok"], 2)
+    oslot = lambda pat, t, b=None: bytes(u.mem_read(syms["cl_bss"] + (bank if b is None else b) * BANKSZ
+                                                    + pat * PATSTRIDE + t * TRAC_A, TRAC_A))
+    oslab = lambda pat, b=None: bytes(u.mem_read(syms["cl_bss"] + (bank if b is None else b) * BANKSZ + pat * PATSTRIDE, PATSTRIDE))
+    saved = lambda t: bytes(u.mem_read(syms["cl_bss"] + 16 * BANKSZ + t * TRAC_A, TRAC_A))
+    led_tbl = [rd(0x400A74CE + 4 * n, 4) for n in range(16)]
+
+    def led(n):
+        leds = bytes(u.mem_read(0x460BA98C, 17))
+        bit = lambda die: (leds[die // 8] >> (die % 8)) & 1
+        return bit(led_tbl[n]), bit(led_tbl[n] + 1)       # (red, green)
     svalid = lambda: list(bytes(u.mem_read(syms["cl_svalid"], 16)))
 
     def check(cond, what):
@@ -132,7 +143,7 @@ def main(argv):
     print(f"baseline: layers {[hex(x) for x in base['layers']]} leds {[hex(x) for x in base['leds']]}")
     act = rd(0x800065BE, 1)
     print(f"playing pattern {act}, bank {bank}, track {rd(0x80000000, 1)}; project loads seen by Clyps: "
-          f"{rd(syms['cl_nproj'], 1)}")
+          f"{rd(syms['cl_nproj'], 1)}; snapshots 0x{snapok():04x}")
     shot("00_base")
 
     if "A" in a.only:
@@ -202,12 +213,13 @@ def main(argv):
         print("C: chord; LEFT; RIGHT; TRACK 3; release; NO")
         key(PTN, 1)
         key(BANK, 1)
-        b0 = state()["bank"]
+        s0 = state()
         tap(LEFT)
-        check(state()["bank"] == (b0 + 15) % 16, "LEFT: bank - 1 (wraps)")
+        s = state()
+        check(s["cur"] == s0["cur"] ^ 8 and s["bank"] == s0["bank"], "LEFT: the same row of the other column, bank kept")
         shot("C1_left")
         tap(RIGHT)
-        check(state()["bank"] == b0, "RIGHT: back")
+        check(state()["cur"] == s0["cur"], "RIGHT: back")
         before = rec(act, 2)
         tap(0x12)
         check(rd(0x80000000, 1) == 2, "TRACK 3 selects track 3")
@@ -294,16 +306,22 @@ def main(argv):
         check(s["open"] == 0 and s["layers"] == base["layers"] and s["leds"] == base["leds"], "[NO]: closed, layer lists at baseline")
 
     if "E" in a.only:
-        # --- E: saved sequences and originals, transport stopped (PER TRACK playing pattern)
-        print("E: [FUNC]+[YES] save; trig load keeps the original; ORIG entry; [FUNC]+[NO]; [PAGE]; restore-all")
+        # --- E: saved sequences and originals (the bank as loaded), transport stopped
+        print("E: ORIG always there; [PAGE] undoes a load and a grid edit; [FUNC]+[YES] / [FUNC]+[NO]; restore-all")
         tap(0x10)
         act = rd(0x800065BE, 1)
         pre = {t: rec(act, t) for t in range(3)}
         p = next(q for q in range(16) if q != act and all(rec(q, t) != pre[t] for t in range(3)))
-        print(f"      playing {act}, source slot {p}, originals word 0x{ovw(act):04x}", flush=True)
-        check((ovw(act) & 7) == 0, "no original yet for T1-T3 on the playing pattern")
+        print(f"      playing {act}, source slot {p}, snapshots 0x{snapok():04x}", flush=True)
+        check(snapok() == 0xFFFF, "every bank has its load snapshot")
+        check(all(oslot(act, t) == pre[t] for t in range(3)), "T1-T3 equal their originals (untouched since the load)")
         key(PTN, 1)
         key(BANK, 1)
+        tap(UP)
+        check(state()["cur"] == 16, "ORIG is in the cycle with no load made (UP from slot 1)")
+        tap(PAGE)
+        s = state()
+        check(s["open"] == 1 and s["loaded"] == 0 and rec(act, 0) == pre[0], "[PAGE] on an original track: nothing")
         key(FUNC, 1)
         tap(YES)
         s = state()
@@ -315,15 +333,13 @@ def main(argv):
         key(p, 1)
         key(p, 0)
         check(rec(act, 0) == rec(p, 0), f"trig {p + 1}: loaded")
-        check(ovw(act) & 1 and oslot(act, 0) == pre[0], "the load kept T1's original, byte for byte")
+        check(oslot(act, 0) == pre[0], "the original is untouched by the load")
         for _ in range(16 - p):
             tap(DOWN)
         check(state()["cur"] == 16, "DOWN past slot 16: the ORIG entry")
         shot("E2_orig")
         tap(DOWN)
         check(state()["cur"] == 0, "DOWN from ORIG wraps to slot 1")
-        tap(UP)
-        check(state()["cur"] == 16, "UP from slot 1: ORIG")
         key(BANK, 0)
         key(PTN, 0)
         check(state()["open"] == 0, "release after a load closes")
@@ -331,49 +347,78 @@ def main(argv):
         key(BANK, 1)
         key(BANK, 0)
         key(PTN, 0)
-        check(state()["open"] == 1, "latched")
         key(FUNC, 1)
         tap(NO)
         key(FUNC, 0)
         s = state()
-        check(s["open"] == 0, "[FUNC]+[NO] in latched: loaded, closed")
-        check(rec(act, 0) == pre[0], "[FUNC]+[NO]: the saved sequence is back on T1")
-        check(ovw(act) & 1 and oslot(act, 0) == pre[0], "the original is still the first one")
+        check(s["open"] == 0 and rec(act, 0) == pre[0], "[FUNC]+[NO] in latched: the saved sequence is back, closed")
+        # a grid edit (one trig bit flipped in the slab, as an edit would): no longer original
+        ad = BLOB + bank * BANKSTRIDE + act * PATSTRIDE
+        u.mem_write(ad, bytes([rd(ad, 1) ^ 0x80]))
+        check(rec(act, 0) != pre[0], "edited (trig bit flipped)")
         key(PTN, 1)
         key(BANK, 1)
-        key(p, 1)
-        key(p, 0)
         tap(PAGE)
         s = state()
-        check(rec(act, 0) == pre[0] and not (ovw(act) & 1), "held: trig, then [PAGE]: the original is back and dropped")
-        check(s["open"] == 1 and s["loaded"] == 1, "held: Clyps stays")
+        check(rec(act, 0) == pre[0] and s["open"] == 1 and s["loaded"] == 1, "held: [PAGE] undoes the edit; Clyps stays")
         key(BANK, 0)
         key(PTN, 0)
         check(state()["open"] == 0, "released: closed")
-        key(PTN, 1)
-        key(BANK, 1)
-        tap(PAGE)
-        s = state()
-        check(s["open"] == 1 and s["loaded"] == 0, "[PAGE] with no original: nothing")
-        key(BANK, 0)
-        key(PTN, 0)
-        tap(NO)
         key(PTN, 1)
         key(BANK, 1)
         for t in range(3):
             tap(0x10 + t)
             key(p, 1)
             key(p, 0)
-        check((ovw(act) & 7) == 7 and all(oslot(act, t) == pre[t] for t in range(3)), "T1-T3 loaded: three originals")
+        check(all(rec(act, t) == rec(p, t) for t in range(3)), "T1-T3 loaded")
         key(FUNC, 1)
         tap(PAGE)
         key(FUNC, 0)
-        check((ovw(act) & 7) == 0 and all(rec(act, t) == pre[t] for t in range(3)), "[FUNC]+[PAGE]: all three back")
+        check(all(rec(act, t) == pre[t] for t in range(3)), "[FUNC]+[PAGE]: all three back")
         key(BANK, 0)
         key(PTN, 0)
         s = state()
         check(s["open"] == 0 and s["layers"] == base["layers"] and s["leds"] == base["leds"], "closed, layer lists at baseline")
         tap(0x10)
+
+    if "K" in a.only:
+        # --- K: bank picking ([BANK] alone + a trig), Clyps stays
+        print("K: latched; [BANK] alone: bank LEDs; trig 3 picks bank C; trigs wait; release; chord again")
+        before = rec(act)
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        s = state()
+        check(s["open"] == 1 and s["held"] == 0, "latched")
+        b0 = s["bank"]
+        key(BANK, 1)
+        s = state()
+        check(s["bpick"] == 1 and s["showwin"] == 0, "[BANK] alone: bank picking, no SELECT BANK")
+        check(led(b0) == (1, 0), f"the shown bank ({chr(65 + b0)}) is red")
+        shot("K1_banks")
+        key(2, 1)
+        key(2, 0)
+        s = state()
+        check(s["bank"] == 2 and s["bpick"] == 0 and s["open"] == 1 and rec(act) == before,
+              "trig 3: bank C shown, no load, Clyps stays, the Clyps grid back")
+        shot("K2_bankC")
+        key(5, 1)
+        key(5, 0)
+        s = state()
+        check(s["bank"] == 2 and rec(act) == before, "another trig while [BANK] is still held: nothing")
+        key(BANK, 0)
+        s = state()
+        check(s["open"] == 1 and s["bswal"] == 0 and s["showwin"] == 0, "[BANK] released: still in Clyps")
+        key(PTN, 1)
+        key(BANK, 1)
+        s = state()
+        check(s["held"] == 1 and s["bpick"] == 0, "the chord again: held, not bank picking")
+        key(BANK, 0)
+        key(PTN, 0)
+        tap(NO)
+        s = state()
+        check(s["open"] == 0 and s["layers"] == base["layers"] and s["leds"] == base["leds"], "[NO]: closed, layer lists at baseline")
 
     if "N" in a.only:
         # --- N: a NORMAL destination converted by a load, undone by the restore
@@ -389,6 +434,7 @@ def main(argv):
             check(rd(0x800065BE, 1) == nrm, f"playing pattern {nrm}")
             tap(0x10)
             before = slab(nrm)
+            check(before == oslab(nrm), f"pattern {nrm} equals its original")
             key(PTN, 1)
             key(BANK, 1)
             key(src, 1)
@@ -409,34 +455,63 @@ def main(argv):
             key(PTN, 0)
             after = slab(nrm)
             diff = [i for i in range(PATSTRIDE) if after[i] != before[i]]
-            check(not diff and ovw(nrm) == 0, f"[PAGE]: the whole slab is back, byte for byte ({len(diff)} bytes differ"
+            check(not diff, f"[PAGE]: the whole slab is back, byte for byte ({len(diff)} bytes differ"
                   + (f", first at +0x{diff[0]:x})" if diff else ")"))
             rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
             rt.seq_select_live(bank, act)
             rt.run(ms=300)
 
     if "P" in a.only:
-        # --- P: a project load drops the saved sequences and the originals
-        print("P: save + load, then LOAD PROJECT again")
+        # --- P: a project load drops the saved sequences and retakes the originals. The edit before
+        # the load is made in RAM, not through a Clyps load: a load marks the bank dirty, and a
+        # reload with unsaved changes takes a path this harness does not drive to its end (measured:
+        # the banks are reset to defaults by 0x4000fd34 and never read back).
+        print("P: save, a RAM edit, then LOAD PROJECT again")
         tap(0x10)
         act = rd(0x800065BE, 1)
-        p = next(q for q in range(16) if q != act and rec(q, 0) != rec(act, 0))
         key(PTN, 1)
         key(BANK, 1)
         key(FUNC, 1)
         tap(YES)
         key(FUNC, 0)
-        key(p, 1)
-        key(p, 0)
         key(BANK, 0)
         key(PTN, 0)
+        tap(NO)
+        ad = BLOB + bank * BANKSTRIDE + act * PATSTRIDE
+        u.mem_write(ad, bytes([rd(ad, 1) ^ 0x80]))
         n0 = rd(syms["cl_nproj"], 1)
-        check(svalid()[0] == 1 and ovw(act) & 1, "a saved sequence and an original are held")
+        check(svalid()[0] == 1 and rec(act, 0) != oslot(act, 0), "a saved sequence is held; T1 differs from its original")
+        trace = []
+        def on_call(uc, addr, size, user):
+            sp = uc.reg_read(er.eb.UC_M68K_REG_A7)
+            trace.append(f"{names.get(addr, hex(addr))}({', '.join(hex(rd(sp + 4 * k, 4)) for k in range(1, 3))}) "
+                         f"ret 0x{rd(sp, 4):08x} @{rt.sample}")
+        names = {0x4000FD34: "reset_all_banks", 0x4000FC78: "init_bank", 0x400905D4: "masked_loader",
+                 syms["cl_ldexit"]: "cl_ldexit(snapshot)", 0x4000FBB4: "sram_to_ram", 0x4000FAF0: "ram_to_sram",
+                 0x4008DED0: "bank_reader"}
+        hooks = [u.hook_add(er.eb.UC_HOOK_CODE, on_call, begin=ad_, end=ad_) for ad_ in names]
         rt.load_project_live("OCTABAM", staged, run_ms=6000)
-        rt.run(ms=300)
-        ov = bytes(u.mem_read(syms["cl_ovalid"], 512))
-        check(rd(syms["cl_nproj"], 1) == n0 + 1, "the project load went through cl_projload")
-        check(not any(ov) and not any(svalid()), "after the load: no original, no saved sequence")
+        for waited in range(1, 16):
+            rt.run(ms=1000)
+            if snapok() == 0xFFFF and all(oslab(0, b) == slab(0, b) for b in range(16)):
+                break
+        print(f"      settled after {waited} s more; dialog up: 0x{rd(0x460E5CD0, 4):08x}", flush=True)
+        for h_ in hooks:
+            u.hook_del(h_)
+        print("      calls during the load:\n        " + "\n        ".join(trace[:60]), flush=True)
+        check(rd(syms["cl_nproj"], 1) >= n0 + 1, f"the project load went through cl_projload ({rd(syms['cl_nproj'], 1) - n0} pass(es))")
+        check(not any(svalid()), "after the load: no saved sequence")
+        check(snapok() == 0xFFFF, f"every bank has its snapshot again (0x{snapok():04x})")
+        same = [b for b in range(16) if oslab(0, b) == slab(0, b)]
+        print(f"      banks whose pattern 1 equals its snapshot after the load: {same}", flush=True)
+        for b in (0, 1):
+            x, y = slab(0, b), oslab(0, b)
+            d = [k for k in range(PATSTRIDE) if x[k] != y[k]]
+            if d:
+                print(f"      bank {b} pattern 1: {len(d)} bytes differ, first +0x{d[0]:x}: ram {x[d[0]:d[0]+8].hex()} "
+                      f"snapshot {y[d[0]:d[0]+8].hex()}", flush=True)
+        check(len(same) == 16, "the snapshot is the bank as it is after the load (all 16 banks)")
+        check(rec(act, 0) == oslot(act, 0), "T1 equals its original after the load")
         check(state()["open"] == 0, "Clyps closed")
 
     print(f"\nscreens: {shots}")
