@@ -28,7 +28,17 @@ A/B detour encodings. Session 77 (cross-core SIDECHAIN) added per-payload
 cross-core tokens (corebase/fcorebase/sbase/fsbase/gcnt/gseed/foreign_br,
 see patch_sc_dsp3.asm's own header) but this file still only exercises the
 SAME-CORE KEY path numerically -- the cross-core publish/read path has its
-own dedicated test, tools/emu_sc_dsp3_xcore.py (dual-core, via dsp_host_xcore).
+own test, tools/emu_sc_dsp3_xcore.py (the counter, the window publish and the foreign read).
+
+    --layout octabam  the keybus, MON and window addresses from
+                      octabam-modules/sidechain-compressor/manifest.py (payload B's subst);
+                      the default is the standalone builder's
+    --manifest PATH   the same from another copy of that manifest (implies --layout octabam):
+                      a candidate layout, tested before it is committed
+    --org HEX         the cave's P address (default 0x1012, SPRING REV's P in payload B).
+                      dsp_host keeps P and Y apart, so a cave in the shared window
+                      (0x30000..0x3ffff, where P, X and Y alias on the chip) is also checked
+                      here against both payloads' window words
 """
 import pathlib, re, struct, subprocess, sys
 import sc_tables
@@ -68,15 +78,85 @@ else:
     # thing. No longer constrained to stay under 0xfff for a short-jsr's sake
     # -- zz17/zz20's internal calls into zz18 are `bsr` (PC-relative) now,
     # not `jsr`, precisely because the donor swap moved the cave past 0xfff.
-    CAVE_ORG = 0x1012
+    CAVE_ORG = int(sys.argv[sys.argv.index("--org") + 1], 16) if "--org" in sys.argv else 0x1012
     COMP_MOD, COMP_PROC = 0x1864, 0x1871
     COMMIT_HOOK = 0x303
-# --layout octabam: the keybus/MON layout octabam's manifest builds ($800/$7f0, Session 115's);
-# the default is the standalone builder's (the FX2 slot tail, 2026-10-15).
-OCTABAM_LAYOUT = "--layout" in sys.argv and sys.argv[sys.argv.index("--layout") + 1] == "octabam"
-KB_BASE = 0x800 if OCTABAM_LAYOUT else 0x7e00
-KB_STRIDE = 0x40     # keybus slot(track) = KB_BASE + track*$40 ($800 since Session 115, $7e00 since 2026-10-15)
-MON_BASE = 0x7f0 if OCTABAM_LAYOUT else 0x7df0   # MON_ON/MON_KEY[track] = Y:MON_BASE + track*2
+SPRING_ORG, SPRING_WORDS = 0x1012, 1063     # the donor's P in payload B and its size
+
+# --layout octabam: the addresses octabam's manifest builds (the keybus and MON at Session
+# 115's $800/$7f0); the default is the standalone builder's (the FX2 slot tail, 2026-10-15).
+OCTABAM_LAYOUT = ("--manifest" in sys.argv or
+                  "--layout" in sys.argv and sys.argv[sys.argv.index("--layout") + 1] == "octabam")
+MANIFEST = (pathlib.Path(sys.argv[sys.argv.index("--manifest") + 1]).resolve() if "--manifest" in sys.argv
+            else ROOT / "octabam-modules/sidechain-compressor/manifest.py")
+# tools/build_sidechain_compressor.py's DSP["A"] / DSP["B"] values
+STANDALONE = {
+    "A": {"@COREBASE@": "4", "@FCOREBASE@": "0", "@SBASE@": "$33e00", "@FSBASE@": "$3be00",
+          "@GCNT@": "$33dff", "@GSEED@": "$33dfe", "@FOREIGN_BR@": "beq zz24",
+          "@KEYB@": "$7e00", "@KEYB1@": "$7e20", "@MONB@": "$7df0"},
+    "B": {"@COREBASE@": "0", "@FCOREBASE@": "4", "@SBASE@": "$3be00", "@FSBASE@": "$33e00",
+          "@GCNT@": "$3bdff", "@GSEED@": "$3bdfe", "@FOREIGN_BR@": "bne zz24",
+          "@KEYB@": "$7e00", "@KEYB1@": "$7e20", "@MONB@": "$7df0"},
+}
+LAYOUT_TOKENS = ("@COREBASE@", "@FCOREBASE@", "@SBASE@", "@FSBASE@", "@GCNT@", "@GSEED@",
+                 "@FOREIGN_BR@", "@KEYB@", "@KEYB1@", "@MONB@")
+
+
+def manifest_subst(path=MANIFEST):
+    """{payload: {token: value}} from the manifest's DspSection(subst=...), read with ast
+    (the manifest imports octabam's remix.schema, which this repo does not have). Literal
+    entries, and `**NAME` of a module-level literal dict (`_SAME`); other spreads (the key
+    filters' tokens) are sc_keyfilt's, which assemble() applies itself."""
+    import ast
+    tree = ast.parse(path.read_text())
+
+    def lit(d, env):
+        out = {}
+        for k, v in zip(d.keys, d.values):
+            if k is None:
+                if isinstance(v, ast.Name) and v.id in env:
+                    out.update(env[v.id])
+            elif isinstance(k, ast.Constant) and isinstance(v, ast.Constant):
+                out[k.value] = v.value
+        return out
+    env = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Dict)):
+            env[node.targets[0].id] = lit(node.value, env)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg == "subst" and isinstance(node.value, ast.Dict):
+            subst = {k.value: lit(v, env) for k, v in zip(node.value.keys, node.value.values)}
+            for pl, toks in subst.items():
+                missing = [t for t in LAYOUT_TOKENS if t not in toks]
+                if missing:
+                    sys.exit(f"{path}: payload {pl}'s subst lacks {missing}")
+            return subst
+    sys.exit(f"no DspSection(subst=...) in {path}")
+
+
+LAYOUT = manifest_subst() if OCTABAM_LAYOUT else STANDALONE
+
+
+def addr(tok, payload="B"):
+    return int(LAYOUT[payload][tok].lstrip("$"), 16)
+
+
+KB_BASE = addr("@KEYB@")
+KB_STRIDE = 0x40     # keybus slot(track) = KB_BASE + track*$40
+MON_BASE = addr("@MONB@")   # MON_ON/MON_FADE[track] = Y:MON_BASE + track*2
+assert addr("@KEYB1@") == KB_BASE + 0x20, "@KEYB1@ must be @KEYB@ + $20"
+# payload B's window words (this file runs payload B)
+SBASE, FSBASE, GCNT, GSEED = (addr(t) for t in ("@SBASE@", "@FSBASE@", "@GCNT@", "@GSEED@"))
+
+
+def window_spans():
+    """[(lo, hi, what)] of every window word either payload's code touches."""
+    out = []
+    for pl in LAYOUT:
+        s, g, c = addr("@SBASE@", pl), addr("@GSEED@", pl), addr("@GCNT@", pl)
+        out += [(s, s + 0x200, f"{pl} publish"), (g, g + 1, f"{pl} GSEED"), (c, c + 1, f"{pl} GCNT")]
+    return out
 Q23 = 1 << 23
 MON_N = 16                              # moncommit's fade length in blocks (4 until 2026-10-24)
 NW = 30                                 # dsp_host caps n7 at 15 frames = 30 words
@@ -120,16 +200,11 @@ def assemble():
     return (words, sctap, scdet, sctail, gtab_off, ftab_off)."""
     # pass 1: placeholder table addrs to size the code
     def build(gt, ft):
-        # payload B's cross-core tokens (Session 77) -- same literals as
-        # build_sidechain_compressor.py's DSP["B"] entry.
-        txt = SRC.read_text() \
-                             .replace("@COREBASE@", "0").replace("@FCOREBASE@", "4") \
-                             .replace("@SBASE@", "$3be00").replace("@FSBASE@", "$33e00") \
-                             .replace("@GCNT@", "$3bdff").replace("@GSEED@", "$3bdfe") \
-                             .replace("@FOREIGN_BR@", "bne zz24") \
-                             .replace("@KEYB@", f"${KB_BASE:x}").replace("@KEYB1@", f"${KB_BASE + 0x20:x}") \
-                             .replace("@MONB@", f"${MON_BASE:x}") \
-                             .replace("$fab1e0", f"${gt:x}").replace("move    #>$fab2e0,r1", "lua     (r1+$10),r1\n        nop" if FTAB_LUA
+        # payload B's layout tokens (LAYOUT: the standalone builder's or the manifest's)
+        txt = SRC.read_text()
+        for tok in LAYOUT_TOKENS:
+            txt = txt.replace(tok, LAYOUT["B"][tok])
+        txt = txt.replace("$fab1e0", f"${gt:x}").replace("move    #>$fab2e0,r1", "lua     (r1+$10),r1\n        nop" if FTAB_LUA
                                                                      else f"move    #>${ft:x},r1") \
                              .replace("@LPEDGE@", f"${sc_tables.lp_edge():x}") \
                              .replace("@HPEDGE@", f"${sc_tables.hp_edge():x}") \
@@ -152,8 +227,13 @@ def assemble():
     assert len(code) == n, "code size shifted between sizing passes"
     words = code + GAIN_T + sc_keyfilt.GT
     total = len(words)
-    if total > 1063:
-        sys.exit(f"cave {total} words > SPRING REVERB donor's 1063")
+    if CAVE_ORG == SPRING_ORG and total > SPRING_WORDS:
+        sys.exit(f"cave {total} words > SPRING REVERB donor's {SPRING_WORDS}")
+    if 0x30000 <= CAVE_ORG + total and CAVE_ORG < 0x40000:
+        for lo, hi, what in window_spans():
+            if CAVE_ORG < hi and lo < CAVE_ORG + total:
+                sys.exit(f"cave P:0x{CAVE_ORG:x}..0x{CAVE_ORG + total:x} overlaps the window's "
+                         f"{what} 0x{lo:x}..0x{hi:x} (P, X and Y alias there)")
     # round-trip sanity on the code region
     (SCRATCH / "sc3_code.bin").write_bytes(b"".join(w.to_bytes(3, "little") for w in words[:n]))
     d = sh(DIS, "-in", SCRATCH / "sc3_code.bin", "-pc", f"{CAVE_ORG:x}", "-le")
@@ -426,6 +506,9 @@ def main():
             sys.exit(f"missing {t}")
 
     words, sctap, scdet, sctail, gtab_off, ftab_off = assemble()
+    print(f"layout {'octabam (' + MANIFEST.name + ')' if OCTABAM_LAYOUT else 'standalone'}: "
+          f"keybus ${KB_BASE:x}  MON ${MON_BASE:x}  window B ${SBASE:x}/${FSBASE:x}  "
+          f"GCNT ${GCNT:x}  GSEED ${GSEED:x}")
     print(f"{'[--patched] ' if PATCHED else ''}cave {len(words)}w @ P:0x{CAVE_ORG:x}   "
           f"sctap=0x{sctap:x} scdet=0x{scdet:x} sctail=0x{sctail:x}   "
           f"GTAB +0x{gtab_off:x}  FTAB +0x{ftab_off:x}\n")

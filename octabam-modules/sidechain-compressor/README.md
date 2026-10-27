@@ -124,6 +124,11 @@ cores, and the last `$202` words of each core's half of the shared window (A `$3
 - `tools/emu_sc_dsp3.py` is ALL GOOD, also with `--layout octabam` (these addresses): the key
   filters bit-exact against `tools/sc_keyfilt.py` (incl. 24 chained blocks and the bypass in and
   out), the MON crossfade, MON consumed every block, the KEY hold, `scinit`.
+- `tools/emu_sc_dsp3_xcore.py` (the generation counter, the window publish, the foreign read)
+  and `tools/emu_sc_sctap.py` (every Y and window word `sctap` writes) are ALL GOOD with
+  `--layout octabam`. All three read this manifest's `subst`; `--manifest PATH` tests another
+  copy of it (a moved window) and `--org HEX` puts the code elsewhere in P, refusing a
+  placement in the shared window that overlaps either payload's window words.
 - DSP section: 677 words (code 612, the 16-word ptable and the 49-word ptable2); the ColdFire
   units 698 B (`sc_cf`) and 616 B (`sc_ui`).
 - `tools/emu_sc_dsp3.py --ftab-lua` replays the broken table load of 24 Oct: every key-filter

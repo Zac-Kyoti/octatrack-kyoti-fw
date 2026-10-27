@@ -18,6 +18,7 @@ Checks:
   --ref REV  the same wrapper against sctap as assembled from REV's patch_sc_dsp3.asm (e.g.
          a commit before a change to sctap): every Y word equal, the keybus compared at each
          version's own address.
+  --layout octabam, --org HEX  emu_sc_dsp3.py's options: the manifest's addresses, the cave's P.
 """
 import pathlib, struct, subprocess, sys, tempfile
 
@@ -28,7 +29,8 @@ import emu_sc_dsp3 as E                      # noqa: E402  (its assembler, paths
 WRAP = 0x1f00
 NBLK = 6
 DONE = 0x6f00                                # a Y flag: the wrapper runs its sequence once
-COREBASE, SBASE, GCNT, GSEED = 0, 0x3be00, 0x3bdff, 0x3bdfe
+COREBASE = int(E.LAYOUT["B"]["@COREBASE@"])
+SBASE, GCNT, GSEED = E.SBASE, E.GCNT, E.GSEED      # emu_sc_dsp3's layout (--layout octabam)
 SEED = 0x7fff80
 
 

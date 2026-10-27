@@ -37440,3 +37440,24 @@ The other Bugbuilds match their pins (BUG_BP303 not buildable in this worktree; 
   - This octabam form has not been flashed.
   - Modwerk's MUTE MODES (Jannik's form, pinned to an octabam commit) follows once #928 merges; our
     `modwerk-modules/mute-modes` copy already has the edit.
+
+## 2026-10-27 (`sc-window`) — SIDECHAIN_COMPRESSOR's emulator tests follow the octabam manifest's window (octabam#934)
+
+Sam (octabam#934, 2026-10-27) asked to test SIDECHAIN_COMPRESSOR beside `remixes/octabam`'s demand
+loader (`docs/proposals/DEMAND_LOAD.md`, #903/#904/#907/#909) with SPRING REV kept: his side moves the
+key window and places the hooks, then sends us a PR. The A half (`$33dfe..$33fff`) overlaps the
+loader's DLCOPY/stub (`P:0x33dc3..0x33fd2`), and the B half (`$3bdfe..`) TRANSIENT's home at `0x3be00`.
+
+- The window is named only by `@SBASE@ @FSBASE@ @GCNT@ @GSEED@`, as long immediates, with no alignment.
+  GCNT/GSEED are read by their own core only, so they need not be in the shared window. The ColdFire
+  never touches it. Code from the window's P costs one cycle a fetched word (DIAGW, `KYOTI_BP303_SCOPE.md`
+  §3a): about +47 cycles a sample per core, always on.
+- `tools/emu_sc_dsp3.py`: `--layout octabam` reads every layout token from the manifest's `subst`
+  (ast; the manifest imports octabam's `remix.schema`), `--manifest PATH` tests a candidate copy,
+  `--org HEX` moves the cave (the SPRING 1,063-word cap applies at `0x1012` only) and refuses a cave
+  in `0x30000..0x3ffff` that overlaps either payload's window words. `emu_sc_sctap.py` uses the same
+  layout. `tools/emu_sc_dsp3_xcore.py` (removed in the 2026-09-29 reorganisation) is restored on it,
+  with the major-version params, the KEY declick state seeded, and foreign-read patterns that survive KGN's 6 dropped bits.
+- All three ALL GOOD in both layouts; with a candidate manifest (A's window at `$3effe..`) and the cave
+  at `P:0x3b000` too; a cave at `0x3bc00` is refused (overlaps B's publish). No image changes; no build.
+
