@@ -108,8 +108,17 @@
     .equ HDR_Y,       57                | header: lit band 55..63 (63 = the border), text 57..61:
                                         | two lit rows above and below the inverted text
     .equ BODY_TOP,    54                | the rows' field: y 1..54 (border at 0, band from 55)
+.ifdef ROW17
+| ROW17 (a layout proposal, render only): `17 ORIG` as a 9th row under the second column. Nine
+| rows with 1 px gaps and a cursor bar one row above and below the text need 55 rows: the header
+| gives one lit row under its text (2 above incl. the border, 1 below) and the rows fill 1..55.
+    .equ ROW0_Y,      50                | row r text at 50 - 6r: r = 8 at 2..6
+    .equ HDR_LIT_LO,  HDR_Y-1           | the band's lowest lit row (56)
+.else
     .equ ROW0_Y,      46                | row r text at 46 - 6r: the 47-row block 4..50, centred in
                                         | 1..54 (4 rows above, 3 below: the field is odd by one)
+    .equ HDR_LIT_LO,  HDR_Y-2           | the band's lowest lit row (55)
+.endif
     .equ LOAD_X,      77                | "LOAD: SEQ" (32 px) right-aligned to x = 108
     .equ LOADF_X,     49                | "LOAD: SEQ+MCH/FX" (60 px), [FUNC] held
     .equ COL0_X,      4                 | highlight x0 = col - 2, x1 = col + 50: column 0 2..54,
@@ -1818,12 +1827,14 @@ cd_ta:
     moveq   #LOADF_X,%d0
     tst.b   cl_fn
     bne.b   cd_mode
+.ifndef ROW17
     lea     cl_s_orig,%a0
     moveq   #BOX_R-1-ORIG_W,%d0
     moveq   #0,%d1
     move.b  cl_cur,%d1
     cmpi.l  #NSLOT,%d1
     beq.b   cd_box
+.endif
     lea     cl_s_saved,%a0
     moveq   #BOX_R-1-SAVED_W,%d0
     tst.b   cl_flash
@@ -1855,7 +1866,7 @@ cd_mode:
 cd_band:
     pea     WIN_H-2                     | the band, inverted with its text
     pea     WIN_W-2
-    pea     HDR_Y-2
+    pea     HDR_LIT_LO
     pea     1
     bsr.w   cl_xor
     lea     16(%sp),%sp
@@ -1901,6 +1912,12 @@ cd_cell:
 cd_c0:
     move.l  %d2,%d4
     andi.l  #7,%d4
+.ifdef ROW17
+    cmpi.l  #NSLOT,%d2
+    bne.b   cd_row
+    moveq   #8,%d4                      | ORIG: the 9th row of the second column
+cd_row:
+.endif
     moveq   #ROW_PITCH,%d0
     muls.l  %d0,%d4
     moveq   #ROW0_Y,%d0
@@ -1925,6 +1942,17 @@ cd_two:
     bsr.w   cl_text
     lea     12(%sp),%sp
 |   the summary: "n TRIGS" / "LOCKS" / "---"
+.ifdef ROW17
+    cmpi.l  #NSLOT,%d2
+    bne.b   cd_slot
+    jsr     cl_hasorig
+    lea     cl_s_orig,%a0
+    tst.l   %d0
+    bne.b   cd_sum
+    lea     cl_s_emp,%a0
+    bra.b   cd_sum
+cd_slot:
+.endif
     lea     cl_cls,%a0
     moveq   #0,%d0
     move.b  (%a0,%d2.l),%d0
@@ -1985,7 +2013,11 @@ cd_sum:
     lea     16(%sp),%sp
 cd_next:
     addq.l  #1,%d2
+.ifdef ROW17
+    cmpi.l  #NSLOT+1,%d2
+.else
     cmpi.l  #16,%d2
+.endif
     bne.w   cd_cell
     moveq   #1,%d0
     move.l  %d0,RDRAW

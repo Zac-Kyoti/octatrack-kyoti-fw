@@ -57,6 +57,13 @@ ELEK = ROOT / "out/elek_clyps.bin"
 OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_CLYPS.syx"
 OUT_BIN = ROOT / "out/OCTATRACK_CLYPS.bin"
 VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_CLYPS"
+# CLYPS_VARIANT=NAME: assemble with --defsym NAME=1 (a layout proposal, e.g. ROW17) into
+# out/clyps_variant_NAME/ -- render-only: no seal, no .syx, the main outputs untouched
+VARIANT = os.environ.get("CLYPS_VARIANT", "")
+if VARIANT:
+    _vd = ROOT / f"out/clyps_variant_{VARIANT}"
+    _vd.mkdir(parents=True, exist_ok=True)
+    OUT = _vd / "mainos_clyps.bin"
 
 CAVE = 0x400d6500
 FREE_END = 0x400d7c3c
@@ -75,7 +82,11 @@ def assemble():
     """-> (ROM bytes at CAVE, DRAM bytes at dram.ARENA_BASE, symbols)"""
     o, elf = ROOT / "out/patch_clyps.o", ROOT / "out/patch_clyps.elf"
     rom, dr = ROOT / "out/patch_clyps.bin", ROOT / "out/patch_clyps_dram.bin"
-    subprocess.run(["m68k-elf-as", "-mcpu=5407", "-o", o, SRC], check=True, cwd=ROOT)
+    if VARIANT:
+        o, elf = OUT.parent / "patch_clyps.o", OUT.parent / "patch_clyps.elf"
+        rom, dr = OUT.parent / "patch_clyps.bin", OUT.parent / "patch_clyps_dram.bin"
+    subprocess.run(["m68k-elf-as", "-mcpu=5407", "-o", o, SRC]
+                   + (["--defsym", f"{VARIANT}=1"] if VARIANT else []), check=True, cwd=ROOT)
     r = subprocess.run(["m68k-elf-ld", f"-Ttext=0x{CAVE:x}", f"--section-start=.dram=0x{dram.ARENA_BASE:x}",
                         "-o", elf, o], cwd=ROOT, capture_output=True, text=True)
     if r.returncode:
@@ -128,7 +139,7 @@ def main():
         if img[o(rec):o(rec) + 26] != stock[o(rec):o(rec) + 26]:
             sys.exit(f"stock layer record 0x{rec:08x} modified")
     bss = syms["CL_BSS_SIZE"]
-    append, rep = dram.build(dblob, ROOT / "out/_dram_clyps", img, bss=bss)
+    append, rep = dram.build(dblob, (OUT.parent / "_dram") if VARIANT else ROOT / "out/_dram_clyps", img, bss=bss)
     print(f"  DRAM: {rep['raw']:,} B linked at 0x{rep['base']:08x} + {bss:,} B buffers "
           f"(0x{syms['cl_bss']:08x}..0x{syms['cl_bss'] + bss:08x}); packed {rep['packed']:,} B, stage "
           f"0x{rep['stage']:08x}; reserve {rep['pages']:,} pages ({rep['reserve_bytes']:,} B), "
@@ -136,6 +147,10 @@ def main():
           f"0x{dram.LOADER_AT:08x}")
     img += append
     OUT.write_bytes(bytes(img))
+    if VARIANT:
+        (OUT.parent / "clyps_syms.txt").write_text("".join(f"{k} 0x{v:08x}\n" for k, v in sorted(syms.items())))
+        print(f"  variant {VARIANT}: {OUT} (render only, not sealed, no .syx)")
+        return
     seal(__file__, OUT)
     print(f"  {OUT.name}: {sum(a != b for a, b in zip(stock, img))} bytes changed vs stock, "
           f"+{len(img) - len(stock):,} B appended")
