@@ -206,6 +206,21 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **CLYPS — CLYPA walk-through (the user tests a few changes at a time).** Image `140C_CLYPA`.
+  The full list below stays as the reference.
+  1. Boot a project. Open Clyps (`[PTN]`+`[BANK]`), press UP from slot 1: `ORIG` is there with
+     nothing loaded. `[PAGE]` on an untouched track does nothing.
+  2. Close Clyps, edit a trig on the grid, reopen, `[PAGE]`: the edit is undone. The same after a
+     Clyps load onto the track.
+  3. LEFT/RIGHT move the cursor to the same row of the other column (1↔9 … 8↔16); the bank does
+     not change. On `ORIG` they do nothing.
+  4. Latched Clyps, hold `[BANK]` alone: the trigs show the banks (the shown bank red, banks with
+     data green). Tap a trig: the view shows that bank and the Clyps LEDs come back; Clyps stays.
+     More trigs while `[BANK]` is still held do nothing. Release `[BANK]`: still in Clyps.
+  5. Change a few tracks, then reload the project (or LOAD PROJECT): `ORIG` is now the state just
+     loaded. Saved sequences are gone.
+  Note the project-load time: Clyps copies ~10 MB per load pass.
+
 - **CLYPS (WIP, test image `140C_CLYP9`)** — not in it yet: DIRECT JUMP timing, FULL loads, the
   page LEDs. New since CLYP7: its code and ~9.6 MB of buffers live in DRAM (the FREE MEM / MEMORY
   page still reads the stock total), saved sequences (F), originals (G). Use a project with a few
