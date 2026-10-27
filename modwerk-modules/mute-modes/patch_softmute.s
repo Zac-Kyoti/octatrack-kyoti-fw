@@ -1416,8 +1416,16 @@ tf_sil:
 
 | Session 116: SIDE-CHAIN KEY tracks, rebuilt every frame by p1_key (RAM: the cave is loaded to
 | SDRAM with the image, like DIRECT JUMP's DJ_MODE). 0 until the first active-mode frame.
+|
+| SHADOW: `pre`'s per-frame "silenced" set, here in the unit (RAM, like KEYMASK) since
+| 25 Oct 2026. Its old home, SRAM 0x80006c66, lies inside the work area of a stock
+| timestretch task, which refills that area with audio on every grain while tracks play:
+| OTFX could read back an audio byte and skip a mute's note-off, and this hook's
+| per-frame write landed in the task's splice-search window. It takes KEYMASK's
+| alignment pad, as in the octabam form.
     .balign 2
 KEYMASK: .byte 0
+SHADOW: .byte 0
     .ifdef MODWERK_EVENTS
     .balign 4
     .global raise_ev_mute_keep
@@ -1427,13 +1435,6 @@ raise_ev_mute_keep:
     .balign 2
     .else
     .set    tf_sil, tf_skip             | no SIDE-CHAIN: the silenced branches are stock's skip, as before
-    .endif
-
-| SHADOW: `pre`'s per-frame "silenced" set, here in the unit (RAM, like KEYMASK) since
-| 25 Oct 2026. Its old home, SRAM 0x80006c66, lies inside 0x80006924..0x80007873, the work
-| area of the stock timestretch task (prio 1, entry 0x40098a5c): its splice search fills
-| 0x80006964.. with audio on every grain, so SHADOW read back audio bytes in OTFX, and this
-| hook's per-frame write landed in the search window. In this Modwerk form it follows the
-| KEYMASK block. NOTES "2026-10-25 (`ts-sram`)".
-SHADOW: .byte 0
+SHADOW: .byte 0                         | see the note above KEYMASK
     .balign 2
+    .endif

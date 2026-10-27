@@ -62,8 +62,8 @@ def _sc_key_inc(modules):
 def _softmute_ref(modules):
     """The variant the author ratified for this selection."""
     if SC in modules:       # tools/build_kyoti.py's placement in KYOTI V1.0
-        return (0x400d74e4, "8814aa2ca49df775371b17c6c14116494bca7c40febd2dca94c7e90fec7e2009")
-    return (0x400d7400, "d56d848e51e96f9561028741a46e509872981fdce6b2e17ee55831d47db5d356")
+        return (0x400d74e4, "9be6df774dda7c6996a94c6138a002b26e667fb458abaccd4388ebf97f3ae43d")
+    return (0x400d7400, "ca7792be6239c6c3c1d4882ef3c8fdd718a05d7e90f36d8eae0c1971cb9a9689")
 
 # The PERSONALIZE pointer arrays (16 u32 each in 1.40C) and the code that names them.
 LABELS, GETTERS, SETTERS = 0x400b2a34, 0x400b2a74, 0x400b2ac0
