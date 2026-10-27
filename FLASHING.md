@@ -206,20 +206,18 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
-- **CLYPS — CLYPA walk-through (the user tests a few changes at a time).** Image `140C_CLYPA`.
-  The full list below stays as the reference.
-  1. Boot a project. Open Clyps (`[PTN]`+`[BANK]`), press UP from slot 1: `ORIG` is there with
-     nothing loaded. `[PAGE]` on an untouched track does nothing.
-  2. Close Clyps, edit a trig on the grid, reopen, `[PAGE]`: the edit is undone. The same after a
-     Clyps load onto the track.
-  3. LEFT/RIGHT move the cursor to the same row of the other column (1↔9 … 8↔16); the bank does
-     not change. On `ORIG` they do nothing.
-  4. Latched Clyps, hold `[BANK]` alone: the trigs show the banks (the shown bank red, banks with
-     data green). Tap a trig: the view shows that bank and the Clyps LEDs come back; Clyps stays.
-     More trigs while `[BANK]` is still held do nothing. Release `[BANK]`: still in Clyps.
-  5. Change a few tracks, then reload the project (or LOAD PROJECT): `ORIG` is now the state just
-     loaded. Saved sequences are gone.
-  Note the project-load time: Clyps copies ~10 MB per load pass.
+- **CLYPS — CLYPB walk-through (the 2026-10-27 model, step 1).** Image `140C_CLYPB`.
+  `[PTN]` / `[BANK]` alone do nothing inside Clyps yet (stock's behaviour there is step 2).
+  1. Open Clyps (`[PTN]`+`[BANK]`): it opens on your pattern's bank; your pattern's slot has the
+     inverted bar and its trig is red. Releasing the chord does not close Clyps; only `[NO]` does.
+  2. Arrows move the 1 px select box (UP/DOWN through 1–16 and `ORIG`, LEFT/RIGHT across); its
+     trig is solid yellow. The bar stays on your pattern.
+  3. Tap a trig: the box jumps there and that sequence loads (stopped: at once; playing: its trig
+     flashes yellow until it lands, then solid). Your slot now reads e.g. `A4 4 TRG`. Clyps stays.
+  4. Hold `[BANK]` + arrows: the banks page (both arrow pairs, wrapping). In another bank there is
+     no bar and no box; your pattern's red is gone from the grid there.
+  5. `[YES]` loads the box; `[PAGE]` / `ORIG` put the track back; `[FUNC]`+`[YES]` / `[FUNC]`+`[NO]`
+     save / reload; none of them close Clyps.
 
 - **CLYPS (WIP, test image `140C_CLYP9`)** — not in it yet: DIRECT JUMP timing, FULL loads, the
   page LEDs. New since CLYP7: its code and ~9.6 MB of buffers live in DRAM (the FREE MEM / MEMORY
