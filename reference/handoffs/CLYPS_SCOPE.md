@@ -1,12 +1,12 @@
-# CLYPS — scope and build record (WIP; latest test image `140C_CLYPA`)
+# CLYPS — scope and build record (WIP; latest test image `140C_CLYPB`)
 
 ## §0 Start here (handoff, 2026-10-25) — read this first, then §1–§4
 
 **Where it stands.**
 - **Worktree / branch:** `../octatrack-kyoti-fw-trkseq`, branch `trkseq`. Commits are local, not
   pushed. Clyps is WIP, nothing is promoted, and there is no README entry.
-- **Latest image:** `140C_CLYPA` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
-  NOT flashed. See §8b for its sha256. CLYP9 was never flashed either.
+- **Latest image:** `140C_CLYPB` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
+  NOT flashed (syx `4a708dac…`, §8b). CLYP9 and CLYPA were never flashed either.
 - **How the user tests now (2026-10-26):** a few changes at a time, a short list per image, not
   the whole FLASHING checklist.
 - **On the user's unit:** CLYP6 (FLASHING §4 steps 1–10 passed; MIDI tracks not seen, fixed in
@@ -1150,6 +1150,12 @@ The ROM keeps only the guarded detours:
     emulator flow the reset came last and left the banks at defaults. Hence the re-snapshot after
     every reset. The snapshot copy (10 MB per pass) adds an estimated 0.1–0.2 s per pass to a
     project load on hardware (not measured).
+- **`140C_CLYPB` (2026-10-27), NOT flashed.** Syx `4a708dacb23e60309d84482aba8fc30ea6bdb8f4973e99b6bec2a4a2edb2422b`,
+  CF `.bin` `81cd0139…`. §1.0 step 1: highlight = your pattern, 1 px select box, trig = select +
+  load, source label, red-wins LEDs with a flashing cue (ROM tick `cl_blink`, hardware-only: route
+  A runs no LED ticks), only [NO] closes, [BANK] held + arrows page. Gate A B C D Y E G N P 60/60,
+  M on JAM2. Renders `out/clyps/vB/`: with 1 px gaps the box lines sit in the gap rows, touching
+  the neighbours' text.
 - **Decided (the user, 2026-10-25):** after a load onto the playing pattern, its own slot shows the
   loaded copy (the keep rule, as built). What it held before is reached through `ORIG` / [PAGE].
 - **Screen rendering in the emulator** (`tools/clyps_render.py`). Stock's compositor
