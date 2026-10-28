@@ -1,12 +1,12 @@
-# CLYPS — scope and build record (WIP; latest test image `140C_CLYPD`)
+# CLYPS — scope and build record (WIP; latest test image `140C_CLYPE`)
 
 ## §0 Start here (handoff, 2026-10-25) — read this first, then §1–§4
 
 **Where it stands.**
 - **Worktree / branch:** `../octatrack-kyoti-fw-trkseq`, branch `trkseq`. Commits are local, not
   pushed. Clyps is WIP, nothing is promoted, and there is no README entry.
-- **Latest image:** `140C_CLYPD` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
-  NOT flashed (syx `8eb80153…`, §8b). CLYP9 and CLYPA–CLYPC were never flashed either.
+- **Latest image:** `140C_CLYPE` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
+  NOT flashed (syx `017a8760…`, §8b). CLYP9 and CLYPA–CLYPD were never flashed either.
 - **How the user tests now (2026-10-26):** a few changes at a time, a short list per image, not
   the whole FLASHING checklist.
 - **On the user's unit:** CLYP6 (FLASHING §4 steps 1–10 passed; MIDI tracks not seen, fixed in
@@ -1178,6 +1178,13 @@ The ROM keeps only the guarded detours:
   the cursor stops at count − 1, and [YES] copies count + 1 bytes back from its space-padded
   working copy `0x460e743c`). Names follow loads, temp saves and ORIG; DRAM only for now
   (+82 KB, 1,677 pages). Gates: A B C D Y E T G R N P 81/81, M on JAM2. Renders `out/clyps/vD/`.
+- **`140C_CLYPE` (2026-10-27), NOT flashed.** Syx `017a876092915c1dbdec585aa80501b1a7c943c3d4c4af70544eae56957b9864`,
+  CF `.bin` `232c8364…`. The "edited" mark (the user): a 3 × 3 box outline at col + 9..11, rows
+  y + 1..3 (the gap between the number and the label), on a slot whose sequence (active track)
+  differs from its load snapshot: the record with its length / scale bytes aside, plus its
+  effective length / scale (`cl_edited` / `cl_efflen`). So: none after power-on / a load; on after
+  a swap or a trig edit; off when the original is back by any route. Gate 81/81; renders
+  `out/clyps/vE/`.
 - **Decided (the user, 2026-10-25):** after a load onto the playing pattern, its own slot shows the
   loaded copy (the keep rule, as built). What it held before is reached through `ORIG` / [PAGE].
 - **Screen rendering in the emulator** (`tools/clyps_render.py`). Stock's compositor

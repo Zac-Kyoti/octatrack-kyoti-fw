@@ -140,6 +140,9 @@
     .equ COL1_X,      59                | column 1 57..109 -- one px to the frame (0 / 111) on both
                                         | outer sides, a 2 px gap between the columns
     .equ SUM_GAP,     5                 | gap between the slot number and its summary
+    .equ ED_X,        9                 | the "edited" glyph: a 3 x 3 box outline at col + 9..11, rows
+                                        | y + 1..3 -- in the gap between the number (ends col + 6) and
+                                        | the label (col + 13), vertically centred on the text
     .equ BOX_R,       109               | a dark header box's right column (text ends at 107)
     .equ ORIG_W,      15                | "ORIG", "SAVED": widths from the font's table 0x400c246a
     .equ SAVED_W,     19
@@ -2364,6 +2367,53 @@ cd_two:
     move.l  %d0,-(%sp)
     bsr.w   cl_text
     lea     12(%sp),%sp
+|   the "edited" glyph: this sequence differs from its original (the user, 2026-10-27)
+    moveq   #0,%d0
+    move.b  cl_bank,%d0
+    move.l  %d2,%d1
+    jsr     cl_edited
+    tst.l   %d0
+    beq.w   cd_noed
+    moveq   #3,%d5                      | top and bottom rows: y + 3, y + 1
+cd_edh:
+    move.l  %d4,%d0
+    add.l   %d5,%d0
+    move.l  %d0,-(%sp)
+    move.l  %d3,%d0
+    addi.l  #ED_X+2,%d0
+    move.l  %d0,-(%sp)
+    move.l  %d4,%d0
+    add.l   %d5,%d0
+    move.l  %d0,-(%sp)
+    move.l  %d3,%d0
+    addi.l  #ED_X,%d0
+    move.l  %d0,-(%sp)
+    bsr.w   cl_xor
+    lea     16(%sp),%sp
+    subq.l  #2,%d5
+    bpl.b   cd_edh                      | 3, then 1
+    moveq   #0,%d5                      | the sides: (col + 9, y + 2) and (col + 11, y + 2)
+cd_edv:
+    move.l  %d4,%d0
+    addq.l  #2,%d0
+    move.l  %d0,-(%sp)
+    move.l  %d3,%d0
+    addi.l  #ED_X,%d0
+    add.l   %d5,%d0
+    move.l  %d0,-(%sp)
+    move.l  %d4,%d0
+    addq.l  #2,%d0
+    move.l  %d0,-(%sp)
+    move.l  %d3,%d0
+    addi.l  #ED_X,%d0
+    add.l   %d5,%d0
+    move.l  %d0,-(%sp)
+    bsr.w   cl_xor
+    lea     16(%sp),%sp
+    addq.l  #2,%d5
+    cmpi.l  #4,%d5
+    bne.b   cd_edv
+cd_noed:
 |   a named sequence shows its name; else the summary: "n TRIGS" / "LOCKS" / "---"; on the
 |   highlighted slot (the pattern you are on), while the track plays a sequence Clyps put there
 |   unedited: its source, "A14 6 TRG" / "SAVED"
@@ -2527,6 +2577,83 @@ cl_nptr:
     muls.l  %d1,%d0
     movea.l #NAMES,%a0
     adda.l  %d0,%a0
+    rts
+
+| cl_edited (d0 = bank, d1 = pattern) -> d0 = 1 when the active track's sequence there differs from
+| its original (the load snapshot): the record (its length / scale bytes aside), or its EFFECTIVE
+| length / scale (the record's own in PER TRACK, the pattern's in NORMAL -- so a NORMAL -> PER
+| TRACK conversion does not mark the untouched tracks). 0 = original, or no snapshot. Keeps
+| d2-d7/a2-a6.
+cl_edited:
+    lea     -28(%sp),%sp
+    movem.l %d2-%d6/%a2-%a3,(%sp)
+    move.l  %d0,%d2                     | d2 = bank
+    move.l  %d1,%d3                     | d3 = pattern
+    moveq   #0,%d0
+    move.w  cl_snapok,%d0
+    btst    %d2,%d0
+    beq.b   ed_no
+    jsr     cl_trk
+    move.l  %d0,%d4                     | d4 = track
+    move.l  %d4,-(%sp)
+    jsr     cl_toff
+    addq.l  #4,%sp
+    move.l  %d0,%d5                     | d5 = record offset
+    move.l  %d3,-(%sp)
+    move.l  %d2,-(%sp)
+    jsr     cl_slab
+    addq.l  #8,%sp
+    movea.l %a0,%a2                     | a2 = the slab now
+    move.l  %d2,%d0
+    move.l  %d3,%d1
+    jsr     cl_snapslab
+    movea.l %a0,%a3                     | a3 = the slab as loaded
+    lea     (%a2,%d5.l),%a0
+    lea     (%a3,%d5.l),%a1
+    move.l  %d4,%d0
+    jsr     cl_same
+    tst.l   %d0
+    bne.b   ed_yes
+    movea.l %a2,%a0
+    bsr.b   cl_efflen
+    move.l  %d0,%d6
+    movea.l %a3,%a0
+    bsr.b   cl_efflen
+    cmp.l   %d6,%d0
+    bne.b   ed_yes
+ed_no:
+    moveq   #0,%d0
+    bra.b   ed_out
+ed_yes:
+    moveq   #1,%d0
+ed_out:
+    movem.l (%sp),%d2-%d6/%a2-%a3
+    lea     28(%sp),%sp
+    rts
+
+| cl_efflen (a0 = a slab, d5 = the record's offset, d4 = its track) -> d0 = length << 8 | scale as
+| it plays: the record's own in PER TRACK, the pattern's in NORMAL. Uses d0-d1/a1.
+cl_efflen:
+    movea.l %a0,%a1
+    adda.l  #TRAILER,%a1
+    tst.b   T_SMODE(%a1)
+    bne.b   ef_rec
+    moveq   #0,%d0
+    move.b  T_LEN(%a1),%d0
+    lsl.l   #8,%d0
+    move.b  T_SCALE(%a1),%d0
+    rts
+ef_rec:
+    moveq   #0x50,%d1
+    cmpi.l  #8,%d4
+    bcs.b   ef_a
+    moveq   #0x28,%d1
+ef_a:
+    add.l   %d5,%d1
+    moveq   #0,%d0
+    move.b  (%a0,%d1.l),%d0
+    lsl.l   #8,%d0
+    move.b  1(%a0,%d1.l),%d0
     rts
 
 | cl_srclbl -> a0 = the label for the highlighted slot when the active track plays a sequence

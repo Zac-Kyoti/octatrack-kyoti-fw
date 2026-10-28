@@ -63,6 +63,9 @@ def main(argv):
     for i, k in enumerate(a.keys.split()):
         if k.startswith("call:"):
             call(int(k[5:], 16))
+        elif k.startswith("pokex:"):                   # pokex:ADDR=HEXBYTES
+            ad, hx = k[6:].split("=", 1)
+            rt.uc.mem_write(int(ad, 16), bytes.fromhex(hx))
         elif k.startswith("poke:"):                    # poke:ADDR=TEXT (ASCII; '_' = space)
             ad, txt = k[5:].split("=", 1)
             rt.uc.mem_write(int(ad, 16), txt.replace("_", " ").encode())
