@@ -37475,3 +37475,22 @@ loader's DLCOPY/stub (`P:0x33dc3..0x33fd2`), and the B half (`$3bdfe..`) TRANSIE
     and the table-owner record the USB base trusts. The PR asks Jannik for: the table-owner declaration and the
     base regeneration; an approval record waiving only the load and stress benchmarks (the cost is unchanged);
     playmodes #764 is red on main too.
+
+## 2026-10-28 (`sc-window`) — PR #4 merged: SIDECHAIN_COMPRESSOR's opt-in shared form for octabam's demand loader
+
+octabam could not fit SIDECHAIN_COMPRESSOR resident beside its demand loader (21 words left), so SC is
+demand-loaded in octabam `main` (#954; DLPUMP's five-effect fix #961): one 1,711-word block (shared code,
+tables, a zeroed key window) at the top of T4's FX2 block while any COMPRESSOR is in use, resident stubs at
+its four hooks. Sam's PR #4 (rebase-merged, `dabf228`, `b320105`) adds `FORM = PER_CORE | SHARED`
+(manifest Setting 2, default unchanged), `tools/sc_shared.py` (rewrites `patch_sc_dsp3.asm`'s text; the asm
+is not edited) and `tools/emu_sc_shared.py`.
+
+- The shared form's foreign read takes the KEY track's core's own counter `f` and reads generation `f - 1`
+  (ours: this core's counter − 2, which assumes lock-step). Accepted by the user; the per-core form keeps its scheme.
+- On our `dsp_host`: `emu_sc_shared.py` ALL GOOD (83/83); `emu_sc_dsp3.py`, `emu_sc_dsp3_xcore.py`,
+  `emu_sc_sctap.py` ALL GOOD in both layouts on the PR branch. (Sam's 20 MON / 4 GCNT failures were his
+  `-dumpy` argument shim.)
+- No standalone, KYOTI, Bugbuild or Modwerk builder reads `sc_shared.py` or the manifest: no image changes.
+- Next: the user flashes octabam `main` (`make bus REMIX=octabam`) on the MKI with Sam's #934 checklist;
+  octabam re-pins the submodule from the sambanks fork (`6c9180d`) to `b320105`. Not run on a unit yet.
+
