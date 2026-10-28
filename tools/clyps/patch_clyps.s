@@ -91,6 +91,15 @@
     .equ WRAP_RESUME, 0x400a43a6        | after `move.l (a2),d0 ; moveq #1,d2 ; or.l d2,d0`
     .equ PRIO,        3                 | menus' rank: toasts / the name editor open over it
     .equ CL_BLINK,    15                | the cue flash period, UI ticks (stock's bank-load blink)
+    .equ YES_RESUME,  0x4005e4d0        | stock [YES] after its first 8 B
+    .equ NO_PRESSP,   0x4005e262        | stock [NO], its press path / release path
+    .equ NO_RELP,     0x4005e276
+    .equ LIVE_REC,    0x460d172a        | LIVE REC on (stock's [NO] + TRACK / knob erase live then)
+    .equ TOAST,       0x4005a2b8        | (text, dur): stock's block toast (legal from a key handler)
+    .equ TOAST_DUR,   0x30              | stock's standard duration
+    .equ SCLK,        0x4610757c        | the audio engine's time accumulator: ~127 M units / s
+                                        | (2880 per sample at 44.1 kHz, measured in the emulator)
+    .equ TAP_T,       38102400          | a quick tap: under ~300 ms
     .equ BANKS_RESUME,0x400905dc        | the masked bank loader 0x400905d4(ctx, mask, ...) after its
                                         | `lea -328(sp),sp ; movem.l d2-d7/a2-a6,(sp)` (8 B)
     .equ SRAM_RESTORE,0x4000fbb4        | (bank): the SRAM mirror -> RAM (power-on resume: the
@@ -136,6 +145,7 @@
 | Calls between the two are absolute (jsr / lea abs.l): a pc-relative branch across them fails
 | the link (R_68K_PC16 overflow), so nothing slips through.
     .global cl_ptn, cl_bankp, cl_bankr, cl_land, cl_uitail, cl_wrap, cl_projload, cl_rstall
+    .global cl_yes, cl_no
     .section .dram,"ax"
 
 | ================================================================ detours
@@ -390,7 +400,7 @@ cl_k_yes:
     cmpi.l  #1,%d0
     bne.b   ky_out
     tst.b   cl_fn
-    bne.b   ky_save
+    bne.b   ky_out                      | [FUNC]+[YES]: nothing in Clyps (temp save lives outside)
     clr.b   cl_flash
     tst.l   PTN_HELD
     beq.b   ky_noptn
@@ -412,16 +422,10 @@ ky_noptn:
 ky_orig:
     jsr     cl_restore
     bra.w   cl_refresh
-ky_save:
-    jsr     cl_save
-    moveq   #1,%d0
-    move.b  %d0,cl_flash                | the header shows SAVED until the next key
-    bra.w   cl_draw
 ky_out:
     rts
 
-| [NO]: close Clyps (the only key that does). [FUNC]+[NO] -> the saved sequence, at once (the
-| track's next window start); nothing if none.
+| [NO]: close Clyps (the only key that does). [FUNC]+[NO]: nothing (temp reload lives outside).
 cl_k_no:
     move.l  8(%sp),%d0
     cmpi.l  #1,%d0
@@ -429,8 +433,6 @@ cl_k_no:
     clr.b   cl_flash
     tst.b   cl_fn
     beq.w   cl_close
-    jsr     cl_loadsaved
-    bra.w   cl_refresh
 kn_out:
     rts
 
@@ -814,13 +816,12 @@ ra_n:
     lea     8(%sp),%sp
     rts
 
-| cl_save ([FUNC]+[YES]): what the active track plays now -> its saved sequence, with its resolved
-| length / scale written into the copy's own bytes (a NORMAL pattern's are the pattern's)
-cl_save:
+| cl_savet(t): what track t plays now -> its saved sequence (the temp save), with its resolved length
+| / scale written into the copy's own bytes (a NORMAL pattern's are the pattern's)
+cl_savet:
     lea     -12(%sp),%sp
     movem.l %d2-%d3/%a2,(%sp)
-    jsr     cl_trk
-    move.l  %d0,%d2                     | d2 = track
+    move.l  16(%sp),%d2                 | d2 = track
     move.l  %d2,-(%sp)
     jsr     cl_toff
     addq.l  #4,%sp
@@ -867,22 +868,168 @@ sv_valid:
     lea     12(%sp),%sp
     rts
 
-| cl_loadsaved ([FUNC]+[NO]): the active track's saved sequence, armed at once. d0 = 1 if one is
-| held.
-cl_loadsaved:
-    jsr     cl_trk
+| ================================================================ temp save / reload (outside Clyps)
+| The user, 2026-10-27, as on other Elektrons: hold [YES] + TRACK = temp save that track; hold [NO] +
+| TRACK = reload it (at its next step, in step: the cue path, armed at once). Stock's ARM / DISARM
+| (a plain [YES] / [NO]) moves to a QUICK TAP: it runs (stock's press, then its release) when the
+| key is released within TAP_T and no TRACK key was pressed meanwhile; a longer hold without a
+| TRACK key does nothing. Stock untouched: with the arranger running, and in LIVE REC (where stock's
+| [NO] + TRACK / knob erase live -- its NO sub-map 0x400bfbfc). Inside Clyps our layer owns
+| [YES] / [NO], so none of this is reachable there (the user: not a Clyps gesture).
+
+| 0x4005e4c8 stock [YES] (replaces `move.l 4(sp),d1 ; move.l 8(sp),d0`, 8 B)
+cl_yes:
+    moveq   #0,%d1                      | key 0 = [YES]
+    bra.b   cl_yn
+| 0x4005e25c stock [NO] (replaces `move.l 8(sp),d0 ; beq.s 0x4005e276`, 6 B)
+cl_no:
+    moveq   #1,%d1                      | key 1 = [NO]
+cl_yn:
+    tst.l   ARR_ACT
+    bne.w   yn_stock
+    tst.l   LIVE_REC
+    bne.w   yn_stock
+    move.l  %d2,-(%sp)                  | 0 d2, 4 ret, 8 code, 12 event
+    move.l  %d1,%d2                     | d2 = which key
+    move.l  12(%sp),%d0
+    cmpi.l  #1,%d0
+    beq.b   yn_press
+    tst.l   %d0
+    bne.b   yn_done                     | hold events: none (delay 0)
+    lea     cl_ynact,%a0                | release
+    tst.b   (%a0,%d2.l)
+    beq.b   yn_stock2                   | its press was not ours: stock's release
+    clr.b   (%a0,%d2.l)
+    jsr     cl_ynpop
+    lea     cl_ynused,%a0
+    tst.b   (%a0,%d2.l)
+    bne.b   yn_done                     | a chord was made: nothing else
+    move.l  SCLK,%d0
+    lea     cl_ynt0,%a0
+    sub.l   (%a0,%d2.l*4),%d0
+    cmpi.l  #TAP_T,%d0
+    bcc.b   yn_done                     | held too long: nothing
+    pea     1                           | a quick tap: stock's press ...
+    move.l  12(%sp),-(%sp)
+    jsr     cl_ynstock
+    addq.l  #8,%sp
+    clr.l   -(%sp)                      | ... then its release
+    move.l  12(%sp),-(%sp)
+    jsr     cl_ynstock
+    addq.l  #8,%sp
+yn_done:
+    move.l  (%sp)+,%d2
+    rts
+yn_press:
+    lea     cl_ynact,%a0
+    moveq   #1,%d0
+    move.b  %d0,(%a0,%d2.l)
+    lea     cl_ynused,%a0
+    clr.b   (%a0,%d2.l)
+    lea     cl_ynt0,%a0
+    move.l  SCLK,%d0
+    move.l  %d0,(%a0,%d2.l*4)
+    pea     cl_tlayer                   | the TRACK keys: save / reload while it is held
+    jsr     LAYER_PUSH
+    addq.l  #4,%sp
+    bra.b   yn_done                     | stock's press waits for the release
+yn_stock2:
+    move.l  %d2,%d1
+    move.l  (%sp)+,%d2
+yn_stock:                               | d1 = which key; the stack as at the handler's entry
+    tst.l   %d1
+    bne.b   yn_nostock
+    move.l  4(%sp),%d1                  | [YES]: the displaced instructions, then stock
+    move.l  8(%sp),%d0
+    jmp     YES_RESUME
+yn_nostock:
+    move.l  8(%sp),%d0                  | [NO]: the displaced test, then stock's own branch
+    beq.b   yn_norel
+    jmp     NO_PRESSP
+yn_norel:
+    jmp     NO_RELP
+
+| cl_ynstock(code, event), d2 = which key: stock's [YES] / [NO] as if unpatched
+cl_ynstock:
+    move.l  %d2,%d1
+    bra.b   yn_stock
+
+| pop the TRACK layer once neither [YES] nor [NO] is held
+cl_ynpop:
+    tst.b   cl_ynact
+    bne.b   yp_out
+    tst.b   cl_ynact+1
+    bne.b   yp_out
+    pea     cl_tlayer
+    jsr     LAYER_POP
+    addq.l  #4,%sp
+yp_out:
+    rts
+
+| TRACK 1-8 while [YES] / [NO] is held (cl_tlayer): save / reload that track (the MIDI track when
+| the MIDI tracks are showing). The track is not selected; the release and holds are swallowed.
+cl_k_tsave:
+    move.l  8(%sp),%d0
+    cmpi.l  #1,%d0
+    bne.w   ts_out
+    move.l  %d2,-(%sp)
+    move.l  8(%sp),%d2
+    subi.l  #0x10,%d2
+    andi.l  #7,%d2
+    tst.l   MIDI_MODE
+    beq.b   ts_a
+    addq.l  #8,%d2                      | d2 = track 0..15
+ts_a:
+    tst.b   cl_ynact
+    beq.b   ts_no
+    moveq   #1,%d0                      | [YES] held: save
+    move.b  %d0,cl_ynused
+    move.l  %d2,-(%sp)
+    jsr     cl_savet
+    addq.l  #4,%sp
+    lea     cl_fmt_tsv,%a0
+    bra.b   ts_toast
+ts_no:
+    tst.b   cl_ynact+1
+    beq.b   ts_done
+    moveq   #1,%d0                      | [NO] held: reload
+    move.b  %d0,cl_ynused+1
     lea     cl_svalid,%a0
-    tst.b   (%a0,%d0.l)
-    beq.b   ls_none
-    pea     1                           | now
+    lea     cl_fmt_tno,%a1
+    tst.b   (%a0,%d2.l)
+    beq.b   ts_toast1
+    pea     1                           | armed at once: its next step, in step
     pea     SRC_SAVED<<8
-    move.l  %d0,-(%sp)
+    move.l  %d2,-(%sp)
     jsr     cl_cueload
     lea     12(%sp),%sp
-    moveq   #1,%d0
-    rts
-ls_none:
-    moveq   #0,%d0
+    lea     cl_fmt_trl,%a0
+    bra.b   ts_toast
+ts_toast1:
+    movea.l %a1,%a0
+ts_toast:
+    move.l  %d2,%d0                     | "TRK 3 SAVED" / "MIDI TRK 3 RELOADED" / "TRK 3: SAVE FIRST" (the user)
+    lea     cl_s_none,%a1
+    cmpi.l  #8,%d0
+    bcs.b   ts_l
+    lea     cl_s_midi,%a1
+    subq.l  #8,%d0
+ts_l:
+    move.l  %a1,%d1
+    addq.l  #1,%d0
+    move.l  %d0,-(%sp)
+    move.l  %d1,-(%sp)
+    move.l  %a0,-(%sp)
+    pea     cl_buf
+    jsr     SPRINTF
+    lea     16(%sp),%sp
+    pea     TOAST_DUR
+    pea     cl_buf
+    jsr     TOAST
+    addq.l  #8,%sp
+ts_done:
+    move.l  (%sp)+,%d2
+ts_out:
     rts
 
 | The masked bank loader 0x400905d4(ctx, mask, ...) (storage task): bit n of mask = bank n is read
@@ -2128,12 +2275,19 @@ cd_sum:
     move.l  %d5,-(%sp)                  | x0
     bsr.w   cl_xor
     lea     16(%sp),%sp
-|   the select box: a 1 px frame on the same rectangle (only in the box's bank). Over the
-|   highlight it shows as a dark frame inside the lit bar.
+|   the select box: a 1 px frame on the same rectangle (only in the box's bank; not over the
+|   highlight, where the bar alone shows it)
 cd_sbox:
     move.b  cl_bank,%d0
     cmp.b   cl_sbank,%d0
     bne.w   cd_next
+    cmp.b   PLAY_BANK,%d0               | on the highlight: the bar alone (the user, 2026-10-27)
+    bne.b   cd_frame
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    cmp.l   %d2,%d0
+    beq.w   cd_next
+cd_frame:
     moveq   #0,%d0
     move.b  cl_cur,%d0
     cmp.l   %d2,%d0
@@ -2473,8 +2627,8 @@ cl_keys:
 | record it was pressed with (0x400312e2). +12 / +16 are written by stock: RAM.
 cl_fsub:    .long 0, cl_fkeys, 0, 0, 0
 cl_fkeys:
-    KREC 0x31, cl_k_yes, 0, 0, 0, 0      | [FUNC]+[YES] save
-    KREC 0x32, cl_k_no, 0, 0, 0, 0       | [FUNC]+[NO] the saved sequence
+    KREC 0x31, cl_k_yes, 0, 0, 0, 0      | [FUNC]+[YES]: nothing in Clyps
+    KREC 0x32, cl_k_no, 0, 0, 0, 0       | [FUNC]+[NO]: nothing in Clyps
     KREC 0x1b, cl_k_page, 0, 0, 0, 0     | [FUNC]+[PAGE] restore all
     KREC 0x33, cl_k_ud, 0, cl_k_ud, 15, 4
     KREC 0x20, cl_k_ud, 0, cl_k_ud, 15, 4
@@ -2520,6 +2674,18 @@ cl_cls:     .space 16
 cl_lastp:   .short 0xffff               | the pattern you were on at the last redraw (cl_uitail)
 cl_magic:   .long CL_MAGIC              | the DRAM part is in place (the boot loader put it there)
 cl_svalid:  .space 16                   | per track: a saved sequence is held
+cl_ynact:   .byte 0, 0                  | [YES] / [NO] held (their press was ours)
+cl_ynused:  .byte 0, 0                  | ... and a TRACK key was pressed meanwhile (a chord)
+            .align 2
+cl_ynt0:    .long 0, 0                  | ... and SCLK at its press
+| the TRACK keys while [YES] / [NO] is held. Delay 30 = the base keymap's (T1 0x400bfc10).
+cl_tlayer:  .long 0, cl_tkeys, 0, 0, 0
+cl_tkeys:
+    .irp c, 0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17
+    KREC \c, cl_k_tsave, 0, 0, 30, 0
+    .endr
+    .byte 0xff, 0
+    .align 2
 cl_snapok:  .short 0                    | bit b: bank b's load snapshot (its originals) is valid
 cl_ldmask:  .short 0                    | the masked loader in progress: its banks
 cl_ldret:   .long 0                     | ... and its caller's return address
@@ -2553,6 +2719,11 @@ cl_s_saved: .asciz "SAVED"
 cl_fmt_srct:.asciz "%c%d %d TRG"
 cl_fmt_srcl:.asciz "%c%d LOCKS"
 cl_fmt_srce:.asciz "%c%d ---"
+cl_fmt_tsv: .asciz "%sTRK %d SAVED"
+cl_fmt_trl: .asciz "%sTRK %d RELOADED"
+cl_fmt_tno: .asciz "%sTRK %d: SAVE FIRST"       | toast window = text + 15 px: 126 px at most (MIDI TRK 8)
+cl_s_midi:  .asciz "MIDI "
+cl_s_none:  .byte 0
     .align 4
 | the buffers: past the loaded image, uninitialised (dram.build's bss); read only behind a valid
 | mark. The snapshot is every bank as loaded (16 slabs + its Parts each: the Parts are there for

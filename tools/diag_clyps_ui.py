@@ -17,6 +17,7 @@ loaded and the transport stopped, and checks after every step:
     there, the ORIG cursor entry, [PAGE] after a load AND after a grid edit, [FUNC]+[PAGE]),
     byte for byte;
   * G: the source label on your pattern's slot after a load / a saved load (screens);
+  * T: temp save / reload outside Clyps ([YES] / [NO] + TRACK), ARM / DISARM on a quick tap only;
   * N: a NORMAL pattern converted to PER TRACK by a load, and the restore that undoes it: the
     whole slab comes back byte for byte;
   * P: a project load drops the saved sequences and retakes the originals;
@@ -139,6 +140,10 @@ def main(argv):
             fails.append(what)
 
     rt.run(ms=300)
+    # the emulator boots with the SET DATE/TIME dialog up (its layer 0x400d0ed6): [NO] dismisses it
+    # first, or the first stock [NO] of a scenario would, and the baseline would be wrong
+    tap(NO)
+    rt.run(ms=200)
     base = state()
     print(f"baseline: layers {[hex(x) for x in base['layers']]} leds {[hex(x) for x in base['leds']]}")
     act = rd(0x800065BE, 1)
@@ -148,6 +153,9 @@ def main(argv):
 
     def closed_ok(what):
         s_ = state()
+        if s_["layers"] != base["layers"] or s_["leds"] != base["leds"]:
+            print(f"      layers {[hex(x) for x in s_['layers']]} leds {[hex(x) for x in s_['leds']]} "
+                  f"(cl_tlayer 0x{syms['cl_tlayer']:08x}, cl_layer 0x{syms['cl_layer']:08x})", flush=True)
         check(s_["open"] == 0 and s_["layers"] == base["layers"] and s_["leds"] == base["leds"]
               and s_["showwin"] == 0, what + ": closed, layer lists at baseline, no SELECT window")
 
@@ -336,21 +344,12 @@ def main(argv):
         shot("E0_orig")
         tap(PAGE)
         check(state()["open"] == 1 and rec(act, 0) == pre[0], "[PAGE] on an original track: nothing")
-        key(FUNC, 1)
-        tap(YES)
-        s = state()
-        check(svalid()[0] == 1 and saved(0) == pre[0], "[FUNC]+[YES]: T1's sequence saved, byte for byte")
-        check(s["open"] == 1 and s["flash"] == 1, "Clyps stays; the header shows SAVED")
-        key(FUNC, 0)
         key(p, 1)
         key(p, 0)
         check(rec(act, 0) == rec(p, 0) and oslot(act, 0) == pre[0], f"trig {p + 1}: loaded; the original untouched")
         shot("E1_loaded")
-        key(FUNC, 1)
-        tap(NO)
-        key(FUNC, 0)
-        check(state()["open"] == 1 and rec(act, 0) == pre[0], "[FUNC]+[NO]: the saved sequence is back, Clyps stays")
-        shot("E2_saved_back")
+        tap(PAGE)
+        check(state()["open"] == 1 and rec(act, 0) == pre[0], "[PAGE]: the load undone, Clyps stays")
         tap(NO)
         ad = BLOB + bank * BANKSTRIDE + act * PATSTRIDE
         u.mem_write(ad, bytes([rd(ad, 1) ^ 0x80]))
@@ -377,26 +376,95 @@ def main(argv):
 
     if "G" in a.only:
         # --- G: the source label on your pattern's slot (screens; the label text is drawn there)
-        print("G: load slot 3 onto T1: your slot reads 'A3 n TRG'; FUNC+NO saved: 'SAVED'; PAGE: plain")
+        print("G: temp save T1; load slot 3: your slot reads 'A3 n TRG'; NO+T1 reload: 'SAVED'; PAGE: plain")
         tap(0x10)
+        key(YES, 1)
+        tap(0x10)
+        key(YES, 0)
         key(PTN, 1)
         key(BANK, 1)
         key(BANK, 0)
         key(PTN, 0)
-        key(FUNC, 1)
-        tap(YES)
-        key(FUNC, 0)
         key(2, 1)
         key(2, 0)
         shot("G1_source")
-        key(FUNC, 1)
         tap(NO)
-        key(FUNC, 0)
+        key(NO, 1)
+        tap(0x10)
+        key(NO, 0)
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
         shot("G2_saved")
         tap(PAGE)
         shot("G3_plain")
         tap(NO)
         closed_ok("[NO]")
+
+    if "T" in a.only:
+        # --- T: temp save / reload outside Clyps: hold [YES] / [NO] + TRACK; ARM / DISARM on a quick tap
+        print("T: YES+T2 save; edit; NO+T2 reload; NO+T3 nothing saved; quick taps arm / disarm; long hold: nothing")
+        SCLK, ARMA, ARMB = 0x4610757C, 0x46C7FF64, 0x46C803D4
+        arm = lambda: (rd(ARMA, 2), rd(ARMB, 2))
+        tap(0x10)
+        act = rd(0x800065BE, 1)
+        c0 = rd(SCLK, 4)
+        rt.run(ms=500)
+        c1 = rd(SCLK, 4)
+        print(f"      the tap clock 0x4610757c: {c0} -> {c1} over 500 ms (stopped transport)", flush=True)
+        pre2 = rec(act, 1)
+        m0 = arm()
+        key(YES, 1)
+        tap(0x11)
+        key(YES, 0)
+        check(svalid()[1] == 1 and saved(1) == pre2, "[YES]+TRACK 2: T2 saved, byte for byte")
+        check(arm() == m0, f"... and nothing armed (arm masks {m0} -> {arm()})")
+        check(rd(0x80000000, 1) == 0, "... and the track selection is unchanged (T1)")
+        check(state()["open"] == 0, "... Clyps not involved")
+        ad = BLOB + bank * BANKSTRIDE + act * PATSTRIDE + TRAC_A
+        u.mem_write(ad, bytes([rd(ad, 1) ^ 0x80]))
+        check(rec(act, 1) != pre2, "T2 edited")
+        key(NO, 1)
+        tap(0x11)
+        key(NO, 0)
+        check(rec(act, 1) == pre2, "[NO]+TRACK 2: T2's temp save is back (stopped: at once)")
+        check(arm() == m0, "... and nothing disarmed")
+        pre3 = rec(act, 2)
+        key(NO, 1)
+        tap(0x12)
+        key(NO, 0)
+        check(svalid()[2] == 0 and rec(act, 2) == pre3, "[NO]+TRACK 3 with nothing saved: nothing (SAVE FIRST toast)")
+        key(YES, 1)
+        key(YES, 0)
+        m1 = arm()
+        print(f"      quick [YES] tap: arm masks {m0} -> {m1}", flush=True)
+        check(m1 != m0, "a quick [YES] tap arms (stock's ARM)")
+        key(NO, 1)
+        key(NO, 0)
+        m2 = arm()
+        print(f"      quick [NO] tap: arm masks {m1} -> {m2}", flush=True)
+        key(YES, 1)
+        u.mem_write(SCLK, ((rd(SCLK, 4) + 2 * 38102400) & 0xFFFFFFFF).to_bytes(4, "big"))
+        key(YES, 0)
+        check(arm() == m2, f"[YES] held ~600 ms with no TRACK key: nothing armed ({m2} -> {arm()})")
+        key(NO, 1)
+        key(NO, 0)
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        sv = saved(1)
+        key(FUNC, 1)
+        tap(YES)
+        tap(NO)
+        key(FUNC, 0)
+        s = state()
+        check(s["open"] == 1 and saved(1) == sv and rec(act, 1) == pre2, "inside Clyps: [FUNC]+[YES] / [FUNC]+[NO] do nothing")
+        tap(NO)
+        closed_ok("[NO]")
+        s = state()
+        check(s["layers"] == base["layers"], "the YES / NO TRACK layer is gone again")
 
     if "N" in a.only:
         # --- N: a NORMAL destination converted by a load, undone by the restore
@@ -449,14 +517,9 @@ def main(argv):
         print("P: save, a RAM edit, then LOAD PROJECT again")
         tap(0x10)
         act = rd(0x800065BE, 1)
-        key(PTN, 1)
-        key(BANK, 1)
-        key(FUNC, 1)
-        tap(YES)
-        key(FUNC, 0)
-        key(BANK, 0)
-        key(PTN, 0)
-        tap(NO)
+        key(YES, 1)                        # temp save T1, outside Clyps
+        tap(0x10)
+        key(YES, 0)
         ad = BLOB + bank * BANKSTRIDE + act * PATSTRIDE
         u.mem_write(ad, bytes([rd(ad, 1) ^ 0x80]))
         n0 = rd(syms["cl_nproj"], 1)

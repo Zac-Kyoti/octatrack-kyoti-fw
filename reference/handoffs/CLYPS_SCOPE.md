@@ -1,12 +1,12 @@
-# CLYPS — scope and build record (WIP; latest test image `140C_CLYPB`)
+# CLYPS — scope and build record (WIP; latest test image `140C_CLYPC`)
 
 ## §0 Start here (handoff, 2026-10-25) — read this first, then §1–§4
 
 **Where it stands.**
 - **Worktree / branch:** `../octatrack-kyoti-fw-trkseq`, branch `trkseq`. Commits are local, not
   pushed. Clyps is WIP, nothing is promoted, and there is no README entry.
-- **Latest image:** `140C_CLYPB` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
-  NOT flashed (syx `4a708dac…`, §8b). CLYP9 and CLYPA were never flashed either.
+- **Latest image:** `140C_CLYPC` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
+  NOT flashed (syx `6868f7ed…`, §8b). CLYP9, CLYPA and CLYPB were never flashed either.
 - **How the user tests now (2026-10-26):** a few changes at a time, a short list per image, not
   the whole FLASHING checklist.
 - **On the user's unit:** CLYP6 (FLASHING §4 steps 1–10 passed; MIDI tracks not seen, fixed in
@@ -579,6 +579,8 @@ through in Clyps mode: it switches between audio and MIDI tracks, and the view a
 - **DIRECT JUMP on (was O4):** a Clyps load lands like a DIRECT_JUMP_KYOTI jump. It lands at the
   next master step, at the clock-locked position the sequence would have if it had been playing
   since START.
+- **Temp save / reload (the user, 2026-10-27):** outside Clyps only: hold [YES] + TRACK = save,
+  hold [NO] + TRACK = reload; stock ARM / DISARM on a quick tap only (a long hold does nothing).
 - **[YES] and DIRECT JUMP (was O5; changed by the user 2026-10-25):** with the [PTN]+[BANK] chord
   held, [YES] does nothing: DIRECT JUMP must not toggle there. In Clyps mode with only [PTN] held,
   [PTN]+[YES] is DIRECT JUMP's toggle, and it never loads.
@@ -1156,6 +1158,20 @@ The ROM keeps only the guarded detours:
   A runs no LED ticks), only [NO] closes, [BANK] held + arrows page. Gate A B C D Y E G N P 60/60,
   M on JAM2. Renders `out/clyps/vB/`: with 1 px gaps the box lines sit in the gap rows, touching
   the neighbours' text.
+- **`140C_CLYPC` (2026-10-27), NOT flashed.** Syx `6868f7ed5497b64697dbda9995704acab2c714e293de37c0224f15460907f30d`,
+  CF `.bin` `d73d0c9c…`. The user's 2026-10-27 changes:
+  - temp save / reload moved OUT of Clyps: hold [YES] + TRACK = save, hold [NO] + TRACK = reload
+    (cue path, armed at once); toasts `TRK n SAVED` / `TRK n RELOADED` / `TRK n: SAVE FIRST`
+    (`MIDI TRK n …`; window ≤ 126 px). Detours on stock [YES] `0x4005e4c8` / [NO] `0x4005e25c`;
+    our TRACK layer `cl_tlayer` while one is held.
+  - Stock ARM / DISARM only on a QUICK TAP (< ~300 ms of SCLK `0x4610757c`, 127,008,000 / s,
+    measured running with the transport stopped), replayed as stock's press + release. Stock
+    untouched with the arranger running and in LIVE REC (`0x460d172a`: stock [NO] + TRACK / knob
+    erase live through its NO sub-map `0x400bfbfc`).
+  - [FUNC]+[YES] / [FUNC]+[NO] inside Clyps do nothing; no frame when the box is on the highlight.
+  - Gates: A B C D Y E T G N P 71/71 (OT DEMO), M on JAM2. The gate now dismisses the emulator's
+    boot SET DATE/TIME dialog (layer `0x400d0ed6`) before its baseline.
+  - Not verified: the quick [NO] tap's disarm against a stock run (it replays stock's handler).
 - **Decided (the user, 2026-10-25):** after a load onto the playing pattern, its own slot shows the
   loaded copy (the keep rule, as built). What it held before is reached through `ORIG` / [PAGE].
 - **Screen rendering in the emulator** (`tools/clyps_render.py`). Stock's compositor

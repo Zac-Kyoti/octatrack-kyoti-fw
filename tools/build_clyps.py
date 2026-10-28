@@ -12,7 +12,8 @@ user promotes it.
                                       [NO] = close.
   UP/DOWN cursor 1..16 -> ORIG (wraps), LEFT/RIGHT the other column, [BANK] + trig picks the bank,
   TRACK keys change the track.
-  [FUNC]+[YES] save the track's sequence; [FUNC]+[NO] load it back at once (next window start).
+  Outside Clyps: hold [YES] + TRACK = temp save that track, hold [NO] + TRACK = reload it (next
+  step, in step); a quick tap of [YES] / [NO] is stock's ARM / DISARM.
   [PAGE] the track's original (as loaded) back; [FUNC]+[PAGE] every changed track's, one landing.
   grid: full green = sample/note trigs, half green = other data only, off = empty, red = playing,
   yellow = cued. Stopped: loads at once; running: cued (master wrap / CHAIN AFTER, phase-continuous).
@@ -29,6 +30,9 @@ Detours (each asserts its stock bytes):
               the saved sequences and cues go)
   0x40025808  power-on resume         jsr 0x4000fbb4 (SRAM -> RAM, current bank) -> jsr cl_sramrest
               (the same call, then that bank's snapshot)
+  0x4005e4c8  stock [YES]             move.l 4(sp),d1 ; move.l 8(sp),d0     -> cl_yes
+  0x4005e25c  stock [NO]              move.l 8(sp),d0 ; beq.s (6 B)          -> cl_no
+              (outside Clyps: hold + TRACK = temp save / reload; ARM / DISARM on a quick tap)
   0x4001fb1e, 0x4006bafe, 0x4007ec4c, 0x400909dc  jsr 0x4000fd34 (every bank to defaults)
               -> jsr cl_rstall (the same call, then every bank's snapshot once DRAM is in place)
 One source, two parts, linked together:
@@ -81,6 +85,8 @@ DETOURS = [  # (site, symbol, stock bytes, length[, opcode: jmp unless given])
     (0x40062d1c, "cl_uitail", "4ab946c7c72c", 6),  # UI task loop tail: tst.l 0x46c7c72c
     (0x400a43a0, "cl_wrap", "201274018082", 6),    # wrap body entry: move.l (a2),d0; moveq #1,d2; or.l d2,d0
     (0x400905d4, "cl_projload", "4feffeb848d77cfc", 8),  # masked bank loader entry (every LOAD PROJECT)
+    (0x4005e4c8, "cl_yes", "222f0004202f0008", 8),        # stock [YES]: + TRACK = temp save; arm on a tap
+    (0x4005e25c, "cl_no", "202f00086714", 6),             # stock [NO]: + TRACK = reload; disarm on a tap
     (0x40025808, "cl_sramrest", "4eb94000fbb4", 6, "4eb9"),  # power-on resume: jsr 0x4000fbb4 (SRAM -> RAM)
     (0x4001fb1e, "cl_rstall", "4eb94000fd34", 6, "4eb9"),    # the four jsr 0x4000fd34 (every bank
     (0x4006bafe, "cl_rstall", "4eb94000fd34", 6, "4eb9"),    # to defaults): the originals are retaken
