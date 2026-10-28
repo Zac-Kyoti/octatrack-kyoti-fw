@@ -111,6 +111,37 @@ A COMPRESSOR saved before 22 Oct 2026: see "Changed on 22 Oct 2026" above.
 | `CAVE` (default) | the ColdFire free region, as in the standalone image |
 | `DRAM` | octabam's platform runtime; still re-linked at `0x400d7000` / `0x400d7300` and compared with the author's bytes |
 
+## One copy for both cores (FORM)
+
+| `FORM` | what is built |
+|---|---|
+| `PER_CORE` (default) | the DSP source as every other build assembles it: one copy per payload |
+| `SHARED` | `tools/sc_shared.py`'s form: one copy that runs on both cores, for octabam's demand loader |
+
+`SHARED` is opt-in and only octabam's demand-loaded remix sets it. `tools/patch_sc_dsp3.asm`
+is not edited; the standalone, KYOTI and Modwerk builders do not read `sc_shared.py`, and with
+`PER_CORE` octabam's images are byte-identical to the previous pin's (`test/sidechain-compressor`
+and `test/kyoti-mute-sidechain`; the build report gains the setting's line).
+
+What the shared form changes, and why (`tools/sc_shared.py` has the full description):
+
+- The per-core values come from the track (`x:$420`), not from per-payload tokens.
+- The cross-core key window is indexed by the absolute track and sits behind the tables, as
+  zero words the manifest appends to the `ptable2`, so it is copied (cleared) with the code on
+  every load and the reverb guard covers it. This needs octabam's window placement, which puts
+  the tables right behind the code; the form is not for a harvested placement.
+- The generation counters sit behind the window, zeroed with it; GSEED is gone.
+- A foreign key reads the KEY track's core's own counter and takes the previous generation,
+  instead of this core's counter minus two. Under the loader both counters stop while the code
+  is withdrawn, so the rate-locked assumption would not hold across loads.
+
+`tools/emu_sc_shared.py` runs both forms under `dsp_host` and compares them (ALL GOOD, 83
+checks, 28 Oct 2026): `sctap`'s keybus and every window word for both cores' tracks, the
+counters, nothing else written; `scdet`'s X:$40 for every KEY track from both cores, with each
+foreign key at all four counter values, and a one-off counter reading a different generation.
+Two deliberate breaks were caught (the foreign generation 32 checks, the core-local gate 4).
+Not run on a unit.
+
 ## Claims
 
 Core-private Y `$7f0`–`$9ff` (MON words and the keybus) on both
