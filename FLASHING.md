@@ -207,11 +207,11 @@ quick check for each:
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
 - **CLYPS — CLYPE walk-through.** Image `140C_CLYPE`. As CLYPD (below), plus the "edited" mark:
-  1. After power-on or a project load, open Clyps: no slot has the small square left of its label.
-  2. Load a sequence onto your pattern: your slot gets the square. Edit a trig in another pattern
+  1. After power-on or a project load, open Clyps: no slot has the small "x" left of its number.
+  2. Load a sequence onto your pattern: your slot gets the x. Edit a trig in another pattern
      (outside Clyps), come back: that slot has it too.
   3. `[PAGE]` / `ORIG` (or a temp reload of the original, or a reload from the project): the
-     square goes away. Edit the trig back by hand: it goes away too (the slot equals its original).
+     x goes away. Edit the trig back by hand: it goes away too (the slot equals its original).
 - **CLYPS — CLYPD walk-through** (names; still valid in CLYPE):
   1. In Clyps, put the box on a slot and press `[FUNC]`+`[BANK]` (EDIT): stock's name editor
      opens, titled `RENAME SEQUENCE`. It stops taking characters after 9. Check the screen under
