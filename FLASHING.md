@@ -206,18 +206,15 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
-- **CLYPS — CLYPC walk-through.** Image `140C_CLYPC`. As CLYPB, plus:
-  1. With the box on your own pattern you see the bar only (no frame). Move the box into another
-     bank (`[BANK]`+arrows, then an arrow): the box shows there, without the bar.
-  2. Outside Clyps: hold `[YES]`, tap a TRACK key: `TRK n SAVED`; nothing arms, the track is not
-     selected. Change that track, then hold `[NO]` + its TRACK key: `TRK n RELOADED`, it is back
-     (playing: at its next step, in step). A track with nothing saved: `TRK n: SAVE FIRST`. On
-     the MIDI side: `MIDI TRK n …`.
-  3. A quick tap of `[YES]` / `[NO]` arms / disarms as stock did (now on the release). Hold
-     `[YES]` or `[NO]` for a second with no TRACK key and let go: nothing arms or disarms.
-  4. In LIVE REC, `[NO]` + TRACK still erases the track live (stock); with the arranger running,
-     `[YES]` / `[NO]` are stock.
-  5. Inside Clyps, `[FUNC]`+`[YES]` / `[FUNC]`+`[NO]` do nothing.
+- **CLYPS — CLYPD walk-through.** Image `140C_CLYPD`. As CLYPC, plus sequence names:
+  1. In Clyps, put the box on a slot and press `[FUNC]`+`[BANK]` (EDIT): stock's name editor
+     opens, titled `RENAME SEQUENCE`. It stops taking characters after 9. Check the screen under
+     the editor looks normal (an emulator render showed odd text there).
+  2. Type a name, `[YES]`: you are back in Clyps and the slot shows the name instead of its trig
+     count. `[NO]` in the editor keeps the old name. On `ORIG`, `[FUNC]`+`[BANK]` does nothing.
+  3. Load that slot onto your pattern: your slot shows the name too. A temp save / reload of the
+     track keeps it; `ORIG` / `[PAGE]` brings back the name it had when loaded (none, for now).
+  4. Names are not saved yet: a project load or a power cycle clears them.
 
 - **CLYPS (WIP, test image `140C_CLYP9`)** — not in it yet: DIRECT JUMP timing, FULL loads, the
   page LEDs. New since CLYP7: its code and ~9.6 MB of buffers live in DRAM (the FREE MEM / MEMORY
