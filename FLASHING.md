@@ -206,18 +206,18 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
-- **CLYPS — CLYPB walk-through (the 2026-10-27 model, step 1).** Image `140C_CLYPB`.
-  `[PTN]` / `[BANK]` alone do nothing inside Clyps yet (stock's behaviour there is step 2).
-  1. Open Clyps (`[PTN]`+`[BANK]`): it opens on your pattern's bank; your pattern's slot has the
-     inverted bar and its trig is red. Releasing the chord does not close Clyps; only `[NO]` does.
-  2. Arrows move the 1 px select box (UP/DOWN through 1–16 and `ORIG`, LEFT/RIGHT across); its
-     trig is solid yellow. The bar stays on your pattern.
-  3. Tap a trig: the box jumps there and that sequence loads (stopped: at once; playing: its trig
-     flashes yellow until it lands, then solid). Your slot now reads e.g. `A4 4 TRG`. Clyps stays.
-  4. Hold `[BANK]` + arrows: the banks page (both arrow pairs, wrapping). In another bank there is
-     no bar and no box; your pattern's red is gone from the grid there.
-  5. `[YES]` loads the box; `[PAGE]` / `ORIG` put the track back; `[FUNC]`+`[YES]` / `[FUNC]`+`[NO]`
-     save / reload; none of them close Clyps.
+- **CLYPS — CLYPC walk-through.** Image `140C_CLYPC`. As CLYPB, plus:
+  1. With the box on your own pattern you see the bar only (no frame). Move the box into another
+     bank (`[BANK]`+arrows, then an arrow): the box shows there, without the bar.
+  2. Outside Clyps: hold `[YES]`, tap a TRACK key: `TRK n SAVED`; nothing arms, the track is not
+     selected. Change that track, then hold `[NO]` + its TRACK key: `TRK n RELOADED`, it is back
+     (playing: at its next step, in step). A track with nothing saved: `TRK n: SAVE FIRST`. On
+     the MIDI side: `MIDI TRK n …`.
+  3. A quick tap of `[YES]` / `[NO]` arms / disarms as stock did (now on the release). Hold
+     `[YES]` or `[NO]` for a second with no TRACK key and let go: nothing arms or disarms.
+  4. In LIVE REC, `[NO]` + TRACK still erases the track live (stock); with the arranger running,
+     `[YES]` / `[NO]` are stock.
+  5. Inside Clyps, `[FUNC]`+`[YES]` / `[FUNC]`+`[NO]` do nothing.
 
 - **CLYPS (WIP, test image `140C_CLYP9`)** — not in it yet: DIRECT JUMP timing, FULL loads, the
   page LEDs. New since CLYP7: its code and ~9.6 MB of buffers live in DRAM (the FREE MEM / MEMORY
