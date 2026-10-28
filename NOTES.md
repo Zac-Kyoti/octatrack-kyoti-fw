@@ -37461,3 +37461,17 @@ loader's DLCOPY/stub (`P:0x33dc3..0x33fd2`), and the B half (`$3bdfe..`) TRANSIE
 - All three ALL GOOD in both layouts; with a candidate manifest (A's window at `$3effe..`) and the cave
   at `P:0x3b000` too; a cave at `0x3bc00` is refused (overlaps B's publish). No image changes; no build.
 
+- **2026-10-27: octabam #928 merged** (`08bffd52`). **Modwerk Mute Modes 0.2.2-experimental: PR
+  [repeat98/modwerk#1007](https://github.com/repeat98/modwerk/pull/1007)** (fork branch `mute-modes-0.2.2`, head
+  `98ac9958`, owner review).
+  - Source: our `modwerk-modules/mute-modes` at `c5b24d0`. SHADOW sits right after KEYMASK, so the SC_KEY unit
+    equals the octabam form (`9be6df77…`).
+  - The user flashed Modwerk's native card image of the module alone, `MW_MM022` (MAIN `446ece69…`, card `.bin`
+    `ebc5c3e3…`, in this worktree's `out/modwerk_mm022/`): about ten minutes, all checks passed (four modes,
+    solo, OTFX mutes of a timestretched loop, Part and project reload, power cycle).
+  - Native probe: counts identical to 0.2.1. `module:verify`: 0 mismatches of 162 selections. USB package
+    `40f5cc11…`.
+  - Not automatic, because a Mute Modes change touches Modwerk's reviewed table recipe (`candidate-recipes.json`)
+    and the table-owner record the USB base trusts. The PR asks Jannik for: the table-owner declaration and the
+    base regeneration; an approval record waiving only the load and stress benchmarks (the cost is unchanged);
+    playmodes #764 is red on main too.
