@@ -206,6 +206,21 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **CLYPS — CLYPF walk-through.** Image `140C_CLYPF`. As CLYPE (below), plus the new layout and
+  names saved with the project. **Use a throwaway copy of a project for steps 4–5.**
+  1. Layout: the "x" sits left of each number; the bars / boxes are narrower and the x is outside
+     them; column 2's x is clear of column 1's bar / box; the select box is a full box, also
+     right under the highlight.
+  2. Name a slot (`[FUNC]`+`[BANK]` in Clyps), then SAVE PROJECT. Power-cycle, open Clyps: the
+     name is there. Rename it, then RELOAD PROJECT: the saved name is back. Same with SAVE BANK /
+     RELOAD BANK.
+  3. LOAD another project and back: each project keeps its own names.
+  4. EXPORT TO SET the throwaway project: the export finishes with no error; load the exported
+     copy: its names are there.
+  5. DELETE PROJECT the throwaway project: it is deleted with no "COULD NOT COMPLETELY DELETE"
+     message (that message means our files were left behind -- tell me).
+  On the card, each project folder now has clyps01..16.work / .strd files (2.5 KB each).
+
 - **CLYPS — CLYPE walk-through.** Image `140C_CLYPE`. As CLYPD (below), plus the "edited" mark:
   1. After power-on or a project load, open Clyps: no slot has the small "x" left of its number.
   2. Load a sequence onto your pattern: your slot gets the x. Edit a trig in another pattern
