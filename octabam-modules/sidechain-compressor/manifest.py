@@ -85,6 +85,10 @@ _spec.loader.exec_module(_sc)
 _kspec = importlib.util.spec_from_file_location("kyoti_sc_keyfilt", os.path.join(_TOOLS, "sc_keyfilt.py"))
 _kf = importlib.util.module_from_spec(_kspec)
 _kspec.loader.exec_module(_kf)
+# The shared form (tools/sc_shared.py), used only with FORM = SHARED.
+_shspec = importlib.util.spec_from_file_location("kyoti_sc_shared", os.path.join(_TOOLS, "sc_shared.py"))
+_sh = importlib.util.module_from_spec(_shspec)
+_shspec.loader.exec_module(_sh)
 
 E = 0x400d5a4a                  # stock COMPRESSOR's descriptor
 FMT_BIPOLAR = 0x4003c7a0        # stock "-N" / "+N" about 64
@@ -114,13 +118,39 @@ LINKED = (
 # page defaults under (its module directory).
 # tools/build_sidechain_compressor.py does not read this manifest.
 PLACES = ("CAVE", "DRAM")
+# FORM: PER_CORE (the default) is the source as every other build assembles it, one copy per
+# payload. SHARED is tools/sc_shared.py's form, one copy for both cores with its key window and
+# counters behind its tables, for octabam's demand loader (octabam docs/proposals/SC_DEMAND_LOAD.md).
+# It needs octabam's window placement (the tables right behind the code), so it is not for a
+# remix that places SIDECHAIN_COMPRESSOR in harvested P.
+FORMS = ("PER_CORE", "SHARED")
 
 
 def _variant(values):
     """PLACE -> sc_cf's and sc_ui's placement."""
+    over = {}
     if values["PLACE"] == "DRAM":
-        return {"linked": tuple(dataclasses.replace(u, dram=True) for u in LINKED)}
-    return {}
+        over["linked"] = tuple(dataclasses.replace(u, dram=True) for u in LINKED)
+    if values.get("FORM", "PER_CORE") == "SHARED":
+        over.update(_shared(MODULE))
+    return over
+
+
+def _shared(module):
+    """FORM = SHARED: the dsp section and claims of the shared form."""
+    src = open(module.dsp.asm).read()
+    out = os.path.join("out", "sc_shared", "patch_sc_dsp3_shared.asm")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    text = _sh.shared_form(src)
+    if not os.path.exists(out) or open(out).read() != text:
+        with open(out, "w") as fh:
+            fh.write(text)
+    # one value per token for both payloads: the per-core tokens only land in comments
+    tokens = {**module.dsp.subst["B"], **{t: "(shared form)" for t in _sh.UNUSED_TOKENS}}
+    fields = {"asm": out, "ptable2": tuple(module.dsp.ptable2) + _sh.SHARED_PTABLE2_TAIL,
+              "subst": {"A": dict(tokens), "B": dict(tokens)}}
+    claims = Claims(dsp_ranges=tuple(r for r in module.claims.dsp_ranges if not r.half_relative))
+    return {"dsp": dataclasses.replace(module.dsp, **fields), "claims": claims}
 
 
 MODULE = Module(
@@ -211,6 +241,10 @@ MODULE = Module(
     store=Store("octabam.sidechain-compressor"),
     settings=(Setting(1, "PLACE", Option(*PLACES), default="CAVE", apply=Apply.BUILD,
                       doc="CAVE: sc_cf in the ColdFire free region (the standalone image's "
-                          "placement); DRAM: in octabam's platform runtime"),),
+                          "placement); DRAM: in octabam's platform runtime"),
+              Setting(2, "FORM", Option(*FORMS), default="PER_CORE", apply=Apply.BUILD,
+                      doc="PER_CORE: one copy of the DSP code per payload, as every other build; "
+                          "SHARED: one copy for both cores, with its key window behind its tables "
+                          "(octabam's demand loader, window placement only)"),),
     variant=_variant,
 )
