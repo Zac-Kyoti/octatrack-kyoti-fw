@@ -37503,3 +37503,10 @@ is not edited) and `tools/emu_sc_shared.py`.
     settings). We replied asking for anchored rows (MUTE MODE after PREVIEW WITHOUT FX, catalog order breaking ties,
     LED BRIGHTNESS kept last). The case: no firmware code depends on a row's index (Session 19); his plan already
     splices before LED BRIGHTNESS; and every other form of the module uses index 2. Awaiting his answer.
+- **2026-10-28: test image OCTABAM35 BUILT, NOT flashed.** `~/Documents/octabam` fast-forwarded by
+  `tools/octabam_remixer.sh --no-open` to octabam `main` `bc144523` (contains #954 and #961; the SC
+  submodule is the sambanks fork `6c9180d`, the same content as our `b320105`), then
+  `make image REMIX=octabam BUILD=35`. The build report has `sidechain-compressor FORM = SHARED`, `PLACE = DRAM`.
+  `out/OCTATRACK_OS1.40C_OCTABAM35.syx` sha256 `478940f4…`, card `OCTATRACK_OCTABAM35.bin` `94d48c47…`,
+  `OCTABAM 35.RMX` `6deccdf3…`. For Sam's #934 checklist.
+
