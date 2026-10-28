@@ -140,9 +140,11 @@
     .equ COL1_X,      59                | column 1 57..109 -- one px to the frame (0 / 111) on both
                                         | outer sides, a 2 px gap between the columns
     .equ SUM_GAP,     5                 | gap between the slot number and its summary
-    .equ ED_X,        9                 | the "edited" glyph: a 3 x 3 box outline at col + 9..11, rows
-                                        | y + 1..3 -- in the gap between the number (ends col + 6) and
-                                        | the label (col + 13), vertically centred on the text
+    .equ ED_X0,       3                 | the "edited" mark: a 3 x 3 "x" (the four corners + the centre)
+    .equ ED_X1,       55                | at rows y + 1..3, centred in the blank space LEFT of the slot
+                                        | number (the user, 2026-10-27): column 1 x 3..5 (between the
+                                        | frame and the digit at x 8), column 2 x 55..57 (the 4 px left
+                                        | of the two-digit numbers at 59; slot 9 aligned with them)
     .equ BOX_R,       109               | a dark header box's right column (text ends at 107)
     .equ ORIG_W,      15                | "ORIG", "SAVED": widths from the font's table 0x400c246a
     .equ SAVED_W,     19
@@ -2367,52 +2369,35 @@ cd_two:
     move.l  %d0,-(%sp)
     bsr.w   cl_text
     lea     12(%sp),%sp
-|   the "edited" glyph: this sequence differs from its original (the user, 2026-10-27)
+|   the "edited" mark: this sequence differs from its original (the user, 2026-10-27)
     moveq   #0,%d0
     move.b  cl_bank,%d0
     move.l  %d2,%d1
     jsr     cl_edited
     tst.l   %d0
     beq.w   cd_noed
-    moveq   #3,%d5                      | top and bottom rows: y + 3, y + 1
-cd_edh:
-    move.l  %d4,%d0
-    add.l   %d5,%d0
+    lea     cl_xpix,%a2                 | five (dx, dy) pixels
+    moveq   #5,%d5
+cd_edp:
+    moveq   #ED_X0,%d6
+    cmpi.l  #8,%d2
+    bcs.b   cd_edc
+    moveq   #ED_X1,%d6
+cd_edc:
+    move.b  (%a2)+,%d0
+    extb.l  %d0
+    add.l   %d0,%d6                     | x
+    move.b  (%a2)+,%d0
+    extb.l  %d0
+    add.l   %d4,%d0                     | y
     move.l  %d0,-(%sp)
-    move.l  %d3,%d0
-    addi.l  #ED_X+2,%d0
+    move.l  %d6,-(%sp)
     move.l  %d0,-(%sp)
-    move.l  %d4,%d0
-    add.l   %d5,%d0
-    move.l  %d0,-(%sp)
-    move.l  %d3,%d0
-    addi.l  #ED_X,%d0
-    move.l  %d0,-(%sp)
+    move.l  %d6,-(%sp)
     bsr.w   cl_xor
     lea     16(%sp),%sp
-    subq.l  #2,%d5
-    bpl.b   cd_edh                      | 3, then 1
-    moveq   #0,%d5                      | the sides: (col + 9, y + 2) and (col + 11, y + 2)
-cd_edv:
-    move.l  %d4,%d0
-    addq.l  #2,%d0
-    move.l  %d0,-(%sp)
-    move.l  %d3,%d0
-    addi.l  #ED_X,%d0
-    add.l   %d5,%d0
-    move.l  %d0,-(%sp)
-    move.l  %d4,%d0
-    addq.l  #2,%d0
-    move.l  %d0,-(%sp)
-    move.l  %d3,%d0
-    addi.l  #ED_X,%d0
-    add.l   %d5,%d0
-    move.l  %d0,-(%sp)
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
-    addq.l  #2,%d5
-    cmpi.l  #4,%d5
-    bne.b   cd_edv
+    subq.l  #1,%d5
+    bne.b   cd_edp
 cd_noed:
 |   a named sequence shows its name; else the summary: "n TRIGS" / "LOCKS" / "---"; on the
 |   highlighted slot (the pattern you are on), while the track plays a sequence Clyps put there
@@ -3033,6 +3018,7 @@ cl_nq:      .byte 0                     | cues pending (the tick's fast path)
     .section .dram,"ax"
 
 cl_corners: .short 0,63, 1,63, 0,62, WIN_W-1,63, WIN_W-2,63, WIN_W-1,62
+cl_xpix:    .byte 0,1, 2,1, 1,2, 0,3, 2,3   | the "x": corners and centre of a 3 x 3 at rows y + 1..3
 cl_fmt_hdr: .asciz "%c%d BANK %c"
 cl_fmt_num: .asciz "%d"
 cl_fmt_trg: .asciz "%d TRIGS"
