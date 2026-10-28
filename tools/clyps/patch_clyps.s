@@ -100,6 +100,14 @@
     .equ SCLK,        0x4610757c        | the audio engine's time accumulator: ~127 M units / s
                                         | (2880 per sample at 44.1 kHz, measured in the emulator)
     .equ TAP_T,       38102400          | a quick tap: under ~300 ms
+    .equ TEXT_EDIT,   0x4007e664        | (maxchars, title, buf, layout, done_cb(confirmed)): stock's name
+                                        | editor (RENAME PART, project naming: layout 0 = the full one);
+                                        | its window is prio 5, so the Clyps view (3) stays under it.
+                                        | maxchars = the characters it lets you type: the cursor stops at
+                                        | maxchars - 1 (0x4007e57e), and [YES] writes maxchars + 1 bytes
+                                        | back (0x4007e3a4; RENAME PART: 6 into 7-byte names)
+    .equ NAME_W,      10                | a sequence name: 9 characters + NUL (9 x 4 - 1 = 35 px: the
+                                        | 37 px a slot has after its number)
     .equ BANKS_RESUME,0x400905dc        | the masked bank loader 0x400905d4(ctx, mask, ...) after its
                                         | `lea -328(sp),sp ; movem.l d2-d7/a2-a6,(sp)` (8 B)
     .equ SRAM_RESTORE,0x4000fbb4        | (bank): the SRAM mirror -> RAM (power-on resume: the
@@ -476,7 +484,65 @@ cl_k_chord:
     move.l  %d1,PTN_CONSUMED
     moveq   #2,%d1
     move.l  %d1,BANK_SEL
+    tst.b   cl_fn
+    beq.b   kc_out
+    move.l  4(%sp),%d1
+    cmpi.l  #0x2f,%d1
+    beq.w   cl_rename                   | [FUNC]+[BANK] (EDIT): name the box's sequence
 kc_out:
+    rts
+
+| [FUNC]+[BANK] in Clyps: stock's name editor (as project naming) on the sequence under the select
+| box (nothing on ORIG). It edits a scratch copy; its [YES] stores it (cl_named), its [NO] keeps the
+| old name; either way the Clyps view is under it again.
+cl_rename:
+    tst.b   cl_namesok
+    beq.b   rn_out
+    moveq   #0,%d0
+    move.b  cl_cur,%d0
+    cmpi.l  #NSLOT,%d0
+    bcc.b   rn_out
+    move.l  %d0,%d1
+    moveq   #0,%d0
+    move.b  cl_sbank,%d0
+    jsr     cl_nidx                     | d0 = the name's index (bank, pattern, active track)
+    move.l  %d0,cl_nedit
+    jsr     cl_nptr                     | a0 = its name
+    lea     cl_nbuf,%a1
+    moveq   #NAME_W,%d0
+rn_cp:
+    move.b  (%a0)+,(%a1)+
+    subq.l  #1,%d0
+    bne.b   rn_cp
+    clr.b   cl_nbuf+NAME_W-1
+    pea     cl_named
+    clr.l   -(%sp)                      | layout 0: the full editor, as project naming
+    pea     cl_nbuf
+    pea     cl_s_rename
+    pea     NAME_W-1                    | 9 characters: input stops there, and the copy back
+    jsr     TEXT_EDIT                   | (10 bytes) fills cl_nbuf exactly
+    lea     20(%sp),%sp
+rn_out:
+    rts
+
+| the editor's done_cb(confirmed): [YES] stores the name; the view and grid redraw (Clyps stays)
+cl_named:
+    tst.l   4(%sp)
+    beq.b   nd_draw
+    move.l  cl_nedit,%d0
+    jsr     cl_nptr
+    lea     cl_nbuf,%a1
+    moveq   #NAME_W,%d0
+nd_cp:
+    move.b  (%a1)+,(%a0)+
+    subq.l  #1,%d0
+    bne.b   nd_cp
+    clr.b   -1(%a0)
+nd_draw:
+    tst.b   cl_open
+    beq.b   nd_out
+    jsr     cl_refresh
+nd_out:
     rts
 
 | [FUNC]: redraws (the FULL label arrives with FULL loads)
@@ -864,6 +930,28 @@ sv_valid:
     lea     cl_svalid,%a0
     moveq   #1,%d0
     move.b  %d0,(%a0,%d2.l)
+    tst.b   cl_namesok                  | and its name
+    beq.b   sv_out
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    lsl.l   #4,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    add.l   %d1,%d0
+    lsl.l   #4,%d0
+    add.l   %d2,%d0
+    jsr     cl_nptr
+    move.l  %d2,%d0
+    moveq   #NAME_W,%d1
+    muls.l  %d1,%d0
+    movea.l #SNAMES,%a1
+    adda.l  %d0,%a1
+    moveq   #NAME_W,%d0
+sv_nl:
+    move.b  (%a0)+,(%a1)+
+    subq.l  #1,%d0
+    bne.b   sv_nl
+sv_out:
     movem.l (%sp),%d2-%d3/%a2
     lea     12(%sp),%sp
     rts
@@ -1062,8 +1150,16 @@ pl_cnt:
     bra.b   pl_cnt
 pl_counted:
     cmpi.l  #8,%d1
-    bcs.b   pl_go
-    lea     cl_svalid,%a0               | a project load: no saved sequence survives
+    bcs.w   pl_go
+    movea.l #NAMES,%a0                  | a project load: the names go (they live in memory only, for
+    move.l  #(4096*NAME_W+16*NAME_W)/4,%d0 | now) -- every sequence's and every saved one's
+pl_n:
+    clr.l   (%a0)+
+    subq.l  #1,%d0
+    bne.b   pl_n
+    moveq   #1,%d0
+    move.b  %d0,cl_namesok
+    lea     cl_svalid,%a0               | ... and no saved sequence survives
     clr.l   (%a0)+
     clr.l   (%a0)+
     clr.l   (%a0)+
@@ -1148,6 +1244,19 @@ cl_snapbank:
     pea     (%a0,%d0.l)
     jsr     MEMCPY
     lea     12(%sp),%sp
+    tst.b   cl_namesok                  | the bank's names as loaded, too (ORIG restores them)
+    beq.b   sb_ok
+    move.l  4(%sp),%d0
+    move.l  #256*NAME_W,%d1
+    muls.l  %d1,%d0
+    pea     256*NAME_W
+    movea.l #NAMES,%a0
+    pea     (%a0,%d0.l)
+    movea.l #NAMESNAP,%a0
+    pea     (%a0,%d0.l)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
+sb_ok:
     move.l  4(%sp),%d1
     moveq   #0,%d0
     move.w  cl_snapok,%d0
@@ -1205,6 +1314,7 @@ ap_copy:
     move.l  %d0,-(%sp)
     jsr     MEMCPY
     lea     12(%sp),%sp
+    jsr     cl_nload                    | the name comes with the sequence
 |   length / scale: the source's, resolved. Track len/scale bytes: audio +0x50/+0x51, MIDI +0x28/+0x29.
     moveq   #0x50,%d3
     cmpi.l  #8,%d6
@@ -1273,6 +1383,60 @@ ap_none:
 ap_out:
     movem.l (%sp),%d2-%d7/%a2-%a5
     lea     40(%sp),%sp
+    rts
+
+| cl_nload (d6 = t, d2 = sbank or SRC_*, d7 = spat): the source's name -> the playing pattern's
+| name of t (a slot's, the saved sequence's, or the one it had when loaded). Keeps d2-d7/a2-a6.
+cl_nload:
+    tst.b   cl_namesok
+    beq.b   nl_out
+    moveq   #0,%d0                      | the destination
+    move.b  PLAY_BANK,%d0
+    lsl.l   #4,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    add.l   %d1,%d0
+    lsl.l   #4,%d0
+    add.l   %d6,%d0
+    moveq   #NAME_W,%d1
+    muls.l  %d1,%d0
+    movea.l #NAMES,%a1
+    adda.l  %d0,%a1                     | a1 = the destination name
+    cmpi.l  #SRC_SAVED,%d2
+    beq.b   nl_saved
+    cmpi.l  #SRC_ORIG,%d2
+    beq.b   nl_orig
+    move.l  %d2,%d0                     | a slot
+    lsl.l   #4,%d0
+    add.l   %d7,%d0
+    lsl.l   #4,%d0
+    add.l   %d6,%d0
+    moveq   #NAME_W,%d1
+    muls.l  %d1,%d0
+    movea.l #NAMES,%a0
+    adda.l  %d0,%a0
+    bra.b   nl_cp
+nl_saved:
+    move.l  %d6,%d0
+    moveq   #NAME_W,%d1
+    muls.l  %d1,%d0
+    movea.l #SNAMES,%a0
+    adda.l  %d0,%a0
+    bra.b   nl_cp
+nl_orig:
+    move.l  %a1,%d0                     | the same index in the names as loaded
+    subi.l  #NAMES,%d0
+    movea.l #NAMESNAP,%a0
+    adda.l  %d0,%a0
+nl_cp:
+    cmpa.l  %a0,%a1
+    beq.b   nl_out                      | its own slot
+    moveq   #NAME_W,%d0
+nl_l:
+    move.b  (%a0)+,(%a1)+
+    subq.l  #1,%d0
+    bne.b   nl_l
+nl_out:
     rts
 
 | cl_srcrec(t, sbank, spat) -> a0 = the source record (0 = none), d0 = its resolved length, d1 =
@@ -2200,8 +2364,19 @@ cd_two:
     move.l  %d0,-(%sp)
     bsr.w   cl_text
     lea     12(%sp),%sp
-|   the summary: "n TRIGS" / "LOCKS" / "---"; on the highlighted slot (the pattern you are on),
-|   while the track plays a sequence Clyps put there unedited: its source, "A14 6 TRG" / "SAVED"
+|   a named sequence shows its name; else the summary: "n TRIGS" / "LOCKS" / "---"; on the
+|   highlighted slot (the pattern you are on), while the track plays a sequence Clyps put there
+|   unedited: its source, "A14 6 TRG" / "SAVED"
+    tst.b   cl_namesok
+    beq.b   cd_noname
+    moveq   #0,%d0
+    move.b  cl_bank,%d0
+    move.l  %d2,%d1
+    jsr     cl_nidx
+    jsr     cl_nptr
+    tst.b   (%a0)
+    bne.w   cd_sum                      | the name
+cd_noname:
     move.b  cl_bank,%d0
     cmp.b   PLAY_BANK,%d0
     bne.b   cd_plain
@@ -2333,6 +2508,25 @@ cd_next:
     movem.l (%sp),%d2-%d7/%a2-%a4
     lea     36(%sp),%sp
 cd_out:
+    rts
+
+| cl_nidx (d0 = bank, d1 = pattern) -> d0 = the name index of (bank, pattern, the active track).
+| Keeps d2-d7/a2-a6.
+cl_nidx:
+    lsl.l   #4,%d0
+    add.l   %d1,%d0
+    lsl.l   #4,%d0
+    move.l  %d0,-(%sp)
+    jsr     cl_trk
+    add.l   (%sp)+,%d0
+    rts
+
+| cl_nptr (d0 = a name index) -> a0 = that name (NAME_W bytes, NUL-terminated; "" = none). d0-d1/a0.
+cl_nptr:
+    moveq   #NAME_W,%d1
+    muls.l  %d1,%d0
+    movea.l #NAMES,%a0
+    adda.l  %d0,%a0
     rts
 
 | cl_srclbl -> a0 = the label for the highlighted slot when the active track plays a sequence
@@ -2674,6 +2868,11 @@ cl_cls:     .space 16
 cl_lastp:   .short 0xffff               | the pattern you were on at the last redraw (cl_uitail)
 cl_magic:   .long CL_MAGIC              | the DRAM part is in place (the boot loader put it there)
 cl_svalid:  .space 16                   | per track: a saved sequence is held
+cl_namesok: .byte 0                     | the names are cleared (at the first project load) and usable
+            .align 2
+cl_nedit:   .long 0                     | the name being edited (its index)
+cl_nbuf:    .space NAME_W               | the editor's scratch copy
+            .align 2
 cl_ynact:   .byte 0, 0                  | [YES] / [NO] held (their press was ours)
 cl_ynused:  .byte 0, 0                  | ... and a TRACK key was pressed meanwhile (a chord)
             .align 2
@@ -2719,6 +2918,7 @@ cl_s_saved: .asciz "SAVED"
 cl_fmt_srct:.asciz "%c%d %d TRG"
 cl_fmt_srcl:.asciz "%c%d LOCKS"
 cl_fmt_srce:.asciz "%c%d ---"
+cl_s_rename:.asciz "RENAME SEQUENCE"
 cl_fmt_tsv: .asciz "%sTRK %d SAVED"
 cl_fmt_trl: .asciz "%sTRK %d RELOADED"
 cl_fmt_tno: .asciz "%sTRK %d: SAVE FIRST"       | toast window = text + 15 px: 126 px at most (MIDI TRK 8)
@@ -2731,5 +2931,9 @@ cl_s_none:  .byte 0
 cl_bss:
     .equ SNAPB,       cl_bss                    | 16 x BANKSZ: the banks as loaded (the originals)
     .equ SAVED_BASE,  cl_bss + 16*BANKSZ        | 16 x TRAC_A: the saved sequences
-    .equ CL_BSS_SIZE, 16*BANKSZ + 16*TRAC_A
+    .equ NAMES,       SAVED_BASE + 16*TRAC_A    | 4096 x NAME_W: (bank, pattern, track) -> its name
+    .equ SNAMES,      NAMES + 4096*NAME_W       | 16 x NAME_W: the saved sequences' names (right after
+                                                | NAMES: one clear covers both)
+    .equ NAMESNAP,    SNAMES + 16*NAME_W        | 4096 x NAME_W: the names as loaded (ORIG)
+    .equ CL_BSS_SIZE, 16*BANKSZ + 16*TRAC_A + 4096*NAME_W + 16*NAME_W + 4096*NAME_W
     .global CL_BSS_SIZE, cl_bss

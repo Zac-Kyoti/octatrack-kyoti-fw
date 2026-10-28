@@ -17,6 +17,7 @@ loaded and the transport stopped, and checks after every step:
     there, the ORIG cursor entry, [PAGE] after a load AND after a grid edit, [FUNC]+[PAGE]),
     byte for byte;
   * G: the source label on your pattern's slot after a load / a saved load (screens);
+  * R: naming ([FUNC]+[BANK] in Clyps): stock's editor; the name follows loads, temp saves, ORIG;
   * T: temp save / reload outside Clyps ([YES] / [NO] + TRACK), ARM / DISARM on a quick tap only;
   * N: a NORMAL pattern converted to PER TRACK by a load, and the restore that undoes it: the
     whole slab comes back byte for byte;
@@ -465,6 +466,62 @@ def main(argv):
         closed_ok("[NO]")
         s = state()
         check(s["layers"] == base["layers"], "the YES / NO TRACK layer is gone again")
+
+    if "R" in a.only:
+        # --- R: naming ([FUNC]+[BANK] = EDIT in Clyps): stock's editor on the box's sequence
+        print("R: name slot 3 'BASS1'; YES stores, Clyps stays; NO keeps; the name follows a load, a temp save, ORIG")
+        EDITOR = 0x460E7612
+        nidx = lambda b, pt, t: (b * 16 + pt) * 16 + t
+        name = lambda base_, i: bytes(u.mem_read(base_ + i * 10, 10)).split(b"\0")[0]
+        NAMES = syms["cl_bss"] + 16 * BANKSZ + 16 * TRAC_A
+        SNAMES = NAMES + 4096 * 10
+        tap(0x10)
+        act = rd(0x800065BE, 1)
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        while state()["cur"] != 2:
+            tap(DOWN)
+        key(FUNC, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(FUNC, 0)
+        check(rd(EDITOR, 4) != 0, "[FUNC]+[BANK]: the name editor is up")
+        check(rd(0x400D0730, 4) == 9, f"its input limit is 9 characters (max-length word {rd(0x400D0730, 4)})")
+        shot("R1_editor")
+        # type into the editor's own working copy (space-padded, 0x460e743c; it copies it back on [YES])
+        u.mem_write(0x460E743C, b"BASS1".ljust(9, b" "))
+        tap(YES)
+        s = state()
+        check(rd(EDITOR, 4) == 0 and s["open"] == 1, "[YES]: the editor closed, Clyps still open")
+        check(name(NAMES, nidx(bank, 2, 0)) == b"BASS1", f"slot 3 of T1 is named 'BASS1' ({name(NAMES, nidx(bank, 2, 0))})")
+        key(FUNC, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(FUNC, 0)
+        u.mem_write(0x460E743C, b"XXXX".ljust(9, b" "))
+        tap(NO)
+        s = state()
+        check(rd(EDITOR, 4) == 0 and s["open"] == 1 and name(NAMES, nidx(bank, 2, 0)) == b"BASS1",
+              "[NO] in the editor: the old name kept, Clyps still open")
+        key(2, 1)
+        key(2, 0)
+        check(name(NAMES, nidx(bank, act, 0)) == b"BASS1", "loading slot 3: your slot now carries 'BASS1'")
+        tap(NO)
+        closed_ok("[NO]")
+        key(YES, 1)
+        tap(0x10)
+        key(YES, 0)
+        check(name(SNAMES, 0) == b"BASS1", "a temp save of T1 carries the name")
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        tap(PAGE)
+        check(name(NAMES, nidx(bank, act, 0)) == b"", "[PAGE]: back to the name it had when loaded (none)")
+        tap(NO)
+        closed_ok("[NO]")
 
     if "N" in a.only:
         # --- N: a NORMAL destination converted by a load, undone by the restore

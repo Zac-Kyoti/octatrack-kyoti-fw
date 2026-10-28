@@ -1,12 +1,12 @@
-# CLYPS — scope and build record (WIP; latest test image `140C_CLYPC`)
+# CLYPS — scope and build record (WIP; latest test image `140C_CLYPD`)
 
 ## §0 Start here (handoff, 2026-10-25) — read this first, then §1–§4
 
 **Where it stands.**
 - **Worktree / branch:** `../octatrack-kyoti-fw-trkseq`, branch `trkseq`. Commits are local, not
   pushed. Clyps is WIP, nothing is promoted, and there is no README entry.
-- **Latest image:** `140C_CLYPC` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
-  NOT flashed (syx `6868f7ed…`, §8b). CLYP9, CLYPA and CLYPB were never flashed either.
+- **Latest image:** `140C_CLYPD` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
+  NOT flashed (syx `8eb80153…`, §8b). CLYP9 and CLYPA–CLYPC were never flashed either.
 - **How the user tests now (2026-10-26):** a few changes at a time, a short list per image, not
   the whole FLASHING checklist.
 - **On the user's unit:** CLYP6 (FLASHING §4 steps 1–10 passed; MIDI tracks not seen, fixed in
@@ -1172,6 +1172,12 @@ The ROM keeps only the guarded detours:
   - Gates: A B C D Y E T G N P 71/71 (OT DEMO), M on JAM2. The gate now dismisses the emulator's
     boot SET DATE/TIME dialog (layer `0x400d0ed6`) before its baseline.
   - Not verified: the quick [NO] tap's disarm against a stock run (it replays stock's handler).
+- **`140C_CLYPD` (2026-10-27), NOT flashed.** Syx `8eb80153765279d97e8887e8e8c1c0654775ff0b2c638b599ff47b8c659d7180`,
+  CF `.bin` `3a7e3912…`. Sequence names (§10.0): [FUNC]+[BANK] in Clyps opens stock's editor
+  `0x4007e664` on the box's sequence (9 characters; its first argument is the character count:
+  the cursor stops at count − 1, and [YES] copies count + 1 bytes back from its space-padded
+  working copy `0x460e743c`). Names follow loads, temp saves and ORIG; DRAM only for now
+  (+82 KB, 1,677 pages). Gates: A B C D Y E T G R N P 81/81, M on JAM2. Renders `out/clyps/vD/`.
 - **Decided (the user, 2026-10-25):** after a load onto the playing pattern, its own slot shows the
   loaded copy (the keep rule, as built). What it held before is reached through `ORIG` / [PAGE].
 - **Screen rendering in the emulator** (`tools/clyps_render.py`). Stock's compositor
@@ -1203,7 +1209,27 @@ To be applied with the first code commit:
 
 ---
 
-## 10. Phase 2 — named sequences (on the radar, not designed in detail)
+## 10. Phase 2 — named sequences
+
+### 10.0 Decided (the user, 2026-10-27) and built (CLYPD)
+
+- **Entry:** [FUNC]+[BANK] (EDIT), only inside Clyps. It names the sequence under the select box
+  (nothing on `ORIG`).
+- **Editor:** stock's own, as project naming: `0x4007e664(size, title, buf, layout 0, done_cb)`,
+  title `RENAME SEQUENCE`. Its window is priority 5, so the Clyps view (priority 3) stays under it.
+  [YES] stores the name and drops back to Clyps; [NO] keeps the old one.
+- **Shown:** a named slot shows its name in place of its trig summary.
+- **Length:** 9 characters. Every letter and digit of the slot font is 3 px (+1): 35 px of the
+  37 a slot has after its number. Only `# $ @ ~` are wider.
+- **Names follow the sequence** (built, not yet asked of the user): a load copies the source's
+  name onto your pattern's slot (none = cleared), a temp save / reload carries it, `ORIG`
+  restores the name the slot had at load time.
+- **Persistence: none yet.** Names live in DRAM and are cleared by a project load and lost at
+  power-off. Next: a sidecar file in the project folder (below), read at load and written with
+  SAVE PROJECT, so names are exactly as saved as the sequences.
+
+### 10.1 Earlier notes
+
 
 **Not in the bank file.**
 - The loader requires exact chunk lengths (−51 at `0x4008cf66`), and a 16-bit checksum covers every

@@ -8,7 +8,8 @@ composer 0x40013abc() itself -- what the UI task does when RDRAW (0x46c7c72c) is
 writes the plane as a PNG (octabam's lcd_view).
 
   python3 tools/clyps_render.py --project DIR --name NAME --keys "2e+ 2f+ 33 33" --out x.png
-      keys: HEX+ = press, HEX- = release, HEX = tap; "call:ADDR" = call_as_main(ADDR)
+      keys: HEX+ = press, HEX- = release, HEX = tap; "call:ADDR" = call_as_main(ADDR);
+            "poke:ADDR=TEXT" writes ASCII there ('_' = space), e.g. into the name editor
 """
 import argparse
 import os
@@ -62,6 +63,9 @@ def main(argv):
     for i, k in enumerate(a.keys.split()):
         if k.startswith("call:"):
             call(int(k[5:], 16))
+        elif k.startswith("poke:"):                    # poke:ADDR=TEXT (ASCII; '_' = space)
+            ad, txt = k[5:].split("=", 1)
+            rt.uc.mem_write(int(ad, 16), txt.replace("_", " ").encode())
         elif k.endswith("+"):
             call(SET_KEY, int(k[:-1], 16), 1)
         elif k.endswith("-"):
