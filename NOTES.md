@@ -37494,3 +37494,12 @@ is not edited) and `tools/emu_sc_shared.py`.
 - Next: the user flashes octabam `main` (`make bus REMIX=octabam`) on the MKI with Sam's #934 checklist;
   octabam re-pins the submodule from the sambanks fork (`6c9180d`) to `b320105`. Not run on a unit yet.
 
+- **2026-10-28, #1007:** Jannik accepts the fix. It ships with one more base rebuild after #943/#944; he adds the
+  table-owner declaration, the approval record and the beta base. #1010 tracks dropping the package-hash pin.
+  - At his request, `loader_mute_keep_fixture.cpp` now seeds and reads SHADOW in the installed unit (pushed
+    `40a7626f`). Ran locally: passes, and pointing it back at `0x80006c66` fails.
+  - **PERSONALIZE placement:** his follow-up base plan (`ot_personalize_rows`, shared with Track Mutes #931 and
+    Play Start #947) would move MUTE MODE to the END of PERSONALIZE over USB. The user objects (it splits the mute
+    settings). We replied asking for anchored rows (MUTE MODE after PREVIEW WITHOUT FX, catalog order breaking ties,
+    LED BRIGHTNESS kept last). The case: no firmware code depends on a row's index (Session 19); his plan already
+    splices before LED BRIGHTNESS; and every other form of the module uses index 2. Awaiting his answer.
