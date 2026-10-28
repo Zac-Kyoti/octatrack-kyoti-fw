@@ -106,6 +106,26 @@
                                         | maxchars = the characters it lets you type: the cursor stops at
                                         | maxchars - 1 (0x4007e57e), and [YES] writes maxchars + 1 bytes
                                         | back (0x4007e3a4; RENAME PART: 6 into 7-byte names)
+| names on the card: per bank, <project>/clypsNN.work and clypsNN.strd (NN 01..16), kept in step
+| with stock's own bankNN.work / .strd -- written, copied, restored, deleted and exported with them.
+| All of it runs in stock's project worker task (0x4008445c, prio 1), where stock does its own bank
+| file I/O; every error of ours is swallowed, never stock's result. Facts: research 2026-10-27
+| (scope §10.2).
+    .equ FOPEN,       0x40016864        | (h, path, mode, buf, bufsize) -> 1 / < 0 (-12 missing)
+    .equ FREAD,       0x40016564        | (h, dst, n) -> 1 / 0 EOF / < 0
+    .equ FWRITE,      0x400166b8        | (h, src, n) -> 1 / < 0
+    .equ FCLOSE,      0x4001677c        | (h) -> 1 / < 0; "w": the file gets exactly what was written
+    .equ FCOPY,       0x40016388        | (dst, src, allow_empty) -> 1 / -12 src missing; unlinks dst
+    .equ FS_SIZE,     0x46c8241e        | -> size(fd)
+    .equ FS_UNLINK,   0x46c82432        | -> unlink(path)
+    .equ PROJDIR,     0x40025230        | (0, 0) -> "<set>/<project>" (a static buffer: use at once)
+    .equ FBUF,        0x460a8f60        | the worker's 64 KB file buffer (free at our hook points)
+    .equ FBUFSZ,      4096
+    .equ S_R,         0x400b3289        | "r"
+    .equ S_W,         0x400b328b        | "w"
+    .equ DEL_ONE,     0x4008ec08        | DELETE PROJECT's own (file), a1 = its context: unlink if present
+    .equ EXP_ONE,     0x4009115c        | EXPORT TO SET's own (src, dst, set, name, required, cb)
+    .equ NF_SIZE,     8+256*10          | "CLYP", u16 version 1, u16 256, then 256 names of 10 B
     .equ NAME_W,      10                | a sequence name: 9 characters + NUL (9 x 4 - 1 = 35 px: the
                                         | 37 px a slot has after its number)
     .equ BANKS_RESUME,0x400905dc        | the masked bank loader 0x400905d4(ctx, mask, ...) after its
@@ -128,26 +148,22 @@
     .equ WIN_DX,      -1                | x = (128 - 112) / 2 + 1 - 1 = 8
     .equ FONT_S,      0x400ba876        | the interface font: 3 px glyphs, 1 px apart, 5 rows
     .equ DIGIT_W,     4                 | digit advance
-    .equ ROW_PITCH,   6
+    .equ ROW_PITCH,   6                 | 5 px text + 1 px between rows (2 px tried and dropped by the
+                                        | user, 2026-10-27)
     .equ HDR_Y,       57                | header: lit band 55..63 (63 = the border), text 57..61:
                                         | two lit rows above and below the inverted text
     .equ BODY_TOP,    54                | the rows' field: y 1..54 (border at 0, band from 55)
     .equ ROW0_Y,      46                | row r text at 46 - 6r: the 47-row block 4..50, centred in
-                                        | 1..54 (4 rows above, 3 below: the field is odd by one)
+                                        | 1..54 (4 rows above, 3 below: the field is odd by one); a bar /
+                                        | box (text +- 1) stays inside the field (cl_bary clips anyway)
     .equ LOAD_X,      77                | "LOAD: SEQ" (32 px) right-aligned to x = 108
     .equ LOADF_X,     49                | "LOAD: SEQ+MCH/FX" (60 px), [FUNC] held
-| A cell, from its column x "col" (the 2-digit number field): bar edge (col - 5), the "edited" mark
-| (col - 4..-2), 1 px, the number (col..col + 6), 5 px, the label (col + 12, up to 35 px: a 9-character
-| name; the source label is "A14 64TRG"), 1 px, bar edge (col + 47). Column 1: bar 2..54; column 2:
-| bar 56..108, mark 57..59 -- 2 px clear of column 1's bar / box (the user, 2026-10-27), 1 px
-| between the bars.
-    .equ COL0_X,      7
-    .equ COL1_X,      61
-    .equ SUM_GAP,     4                 | the number field (2 x DIGIT_W) + 4 = the label at col + 12
-    .equ HL_X0,       -5                | the bar / box: col - 5 .. col + 47
-    .equ HL_X1,       47
-    .equ ED_X,        -4                | the "edited" mark: a 3 x 3 "x" (the four corners + the centre)
-                                        | at col - 4..-2, rows y + 1..3, left of the slot number
+| The cells (the user, 2026-10-27), x from the frame (0) to the right: 2 px, the "edited" x (3..5),
+| 2 px, the bar / box edge (8), 1 px, the slot number (column 1 has only single digits: x 10), 3 px,
+| the label (16, up to 35 px: a 9-character name), 1 px, the edge (52); 2 px, column 2's x (55..57),
+| 2 px, its edge (60), 1 px, its numbers (62..68), 3 px, its label (72), 1 px, its edge (108), 2 px,
+| the frame (111). Per column (cl_colx): the 2-digit number field's x, the bar / box edges, the x's x.
+    .equ SUM_GAP,     2                 | the number field (2 x DIGIT_W) + 2 = the label at col + 10
     .equ BOX_R,       109               | a dark header box's right column (text ends at 107)
     .equ ORIG_W,      15                | "ORIG", "SAVED": widths from the font's table 0x400c246a
     .equ SAVED_W,     19
@@ -162,6 +178,7 @@
 | the link (R_68K_PC16 overflow), so nothing slips through.
     .global cl_ptn, cl_bankp, cl_bankr, cl_land, cl_uitail, cl_wrap, cl_projload, cl_rstall
     .global cl_yes, cl_no
+    .global cl_hwrite, cl_hstorep, cl_hstoreb, cl_hrestp, cl_hrestb, cl_hdel, cl_hexp
     .section .dram,"ax"
 
 | ================================================================ detours
@@ -1196,6 +1213,9 @@ pl_go:
 cl_ldexit:
     lea     -12(%sp),%sp
     movem.l %d0/%d2-%d3,(%sp)
+.ifndef NOFILES
+    jsr     cl_nload_all                | the names from the card first (they are part of the original)
+.endif
     moveq   #0,%d2                      | d2 = bank
     moveq   #0,%d3
     move.w  cl_ldmask,%d3
@@ -2194,6 +2214,74 @@ cl_xor:
     lea     24(%sp),%sp
     rts
 
+| set(x0, y0, x1, y1) on the window surface (a4): the same as cl_xor, mode 1 (set: stock's
+| 0x40012254 ORs for mode bit 0, XORs for mode < 0, clears otherwise)
+cl_set:
+    pea     1
+    move.l  20(%sp),-(%sp)              | y1
+    move.l  20(%sp),-(%sp)              | x1
+    move.l  20(%sp),-(%sp)              | y0
+    move.l  20(%sp),-(%sp)              | x0
+    move.l  %a4,-(%sp)
+    jsr     RECT
+    lea     24(%sp),%sp
+    rts
+
+| cl_cell (d2 = slot) -> a3 = its column's cl_colx entry, d3 = its 2-digit number field's x, d4 = its
+| text row y. Uses d0.
+cl_cell:
+    lea     cl_colx,%a3
+    cmpi.l  #8,%d2
+    bcs.b   cc_c
+    addq.l  #8,%a3
+cc_c:
+    moveq   #0,%d3
+    move.w  (%a3),%d3
+    move.l  %d2,%d4
+    andi.l  #7,%d4
+    moveq   #ROW_PITCH,%d0
+    muls.l  %d0,%d4
+    moveq   #ROW0_Y,%d0
+    sub.l   %d4,%d0
+    move.l  %d0,%d4
+    rts
+
+| cl_bary (d4 = text y) -> d0 = the bar's y0 (y - 1), d1 = its y1 (y + 5), clipped to 1..BODY_TOP
+cl_bary:
+    move.l  %d4,%d0
+    subq.l  #1,%d0
+    bgt.b   by_lo
+    moveq   #1,%d0
+by_lo:
+    move.l  %d4,%d1
+    addq.l  #5,%d1
+    cmpi.l  #BODY_TOP,%d1
+    ble.b   by_hi
+    moveq   #BODY_TOP,%d1
+by_hi:
+    rts
+
+| the select box's horizontal edge at y = d4 + d0, x d5..d6; its vertical edge at x = d0, y d4..d4+4
+cd_hline:
+    add.l   %d4,%d0
+    move.l  %d0,-(%sp)
+    move.l  %d6,-(%sp)
+    move.l  %d0,-(%sp)
+    move.l  %d5,-(%sp)
+    bsr.w   cl_set
+    lea     16(%sp),%sp
+    rts
+cd_vline:
+    move.l  %d4,%d1
+    addq.l  #4,%d1
+    move.l  %d1,-(%sp)
+    move.l  %d0,-(%sp)
+    move.l  %d4,-(%sp)
+    move.l  %d0,-(%sp)
+    bsr.w   cl_set
+    lea     16(%sp),%sp
+    rts
+
 cl_draw:
     tst.b   cl_open
     beq.w   cd_out
@@ -2334,7 +2422,7 @@ cd_corner:
     lea     24(%sp),%sp
     subq.l  #1,%d2
     bne.b   cd_corner
-|   the 16 cells
+|   the 16 cells (bars XORed with their text; the select box after them, cd_box)
     jsr     cl_trk
     move.l  %d0,-(%sp)
     jsr     cl_toff
@@ -2342,18 +2430,7 @@ cd_corner:
     move.l  %d0,%d7                     | d7 = record offset
     moveq   #0,%d2                      | d2 = slot 0..15
 cd_cell:
-    moveq   #COL0_X,%d3                 | d3 = column x
-    cmpi.l  #8,%d2
-    bcs.b   cd_c0
-    moveq   #COL1_X,%d3
-cd_c0:
-    move.l  %d2,%d4
-    andi.l  #7,%d4
-    moveq   #ROW_PITCH,%d0
-    muls.l  %d0,%d4
-    moveq   #ROW0_Y,%d0
-    sub.l   %d4,%d0
-    move.l  %d0,%d4                     | d4 = y
+    bsr.w   cl_cell                     | a3 = the column's entry, d3 = its number field, d4 = y
 |   the slot number, right-aligned by position (a space is narrower than a digit)
     move.l  %d2,%d0
     addq.l  #1,%d0
@@ -2382,8 +2459,8 @@ cd_two:
     lea     cl_xpix,%a2                 | five (dx, dy) pixels
     moveq   #5,%d5
 cd_edp:
-    move.l  %d3,%d6
-    subq.l  #-ED_X,%d6
+    moveq   #0,%d6
+    move.w  6(%a3),%d6                  | the x's x
     move.b  (%a2)+,%d0
     extb.l  %d0
     add.l   %d0,%d6                     | x
@@ -2463,81 +2540,69 @@ cd_sum:
     bsr.w   cl_text
     lea     12(%sp),%sp
 |   the cell's rectangle: x d5..d6, y d4-1 .. d4+5 (one row above and below the text)
-    move.l  %d3,%d5
-    subq.l  #-HL_X0,%d5
-    move.l  %d3,%d6
-    addi.l  #HL_X1,%d6
+    moveq   #0,%d5
+    move.w  2(%a3),%d5
+    moveq   #0,%d6
+    move.w  4(%a3),%d6
 |   the highlight: an inverted bar over the pattern you are on (only in its bank)
     move.b  cl_bank,%d0
     cmp.b   PLAY_BANK,%d0
-    bne.b   cd_sbox
+    bne.b   cd_next
     moveq   #0,%d0
     move.b  ACT_PAT,%d0
     cmp.l   %d2,%d0
-    bne.b   cd_sbox
-    move.l  %d4,%d0
-    addq.l  #5,%d0
-    move.l  %d0,-(%sp)                  | y1
+    bne.b   cd_next
+    bsr.w   cl_bary                     | d0 = y0, d1 = y1, clipped to the field 1..54
+    move.l  %d1,-(%sp)                  | y1
     move.l  %d6,-(%sp)                  | x1
-    move.l  %d4,%d0
-    subq.l  #1,%d0
     move.l  %d0,-(%sp)                  | y0
     move.l  %d5,-(%sp)                  | x0
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
-|   the select box: a 1 px frame on the same rectangle (only in the box's bank; not over the
-|   highlight, where the bar alone shows it)
-cd_sbox:
-    move.b  cl_bank,%d0
-    cmp.b   cl_sbank,%d0
-    bne.w   cd_next
-    cmp.b   PLAY_BANK,%d0               | on the highlight: the bar alone (the user, 2026-10-27)
-    bne.b   cd_frame
-    moveq   #0,%d0
-    move.b  ACT_PAT,%d0
-    cmp.l   %d2,%d0
-    beq.w   cd_next
-cd_frame:
-    moveq   #0,%d0
-    move.b  cl_cur,%d0
-    cmp.l   %d2,%d0
-    bne.w   cd_next
-    move.l  %d4,%d0                     | top edge
-    addq.l  #5,%d0
-    move.l  %d0,-(%sp)
-    move.l  %d6,-(%sp)
-    move.l  %d0,-(%sp)
-    move.l  %d5,-(%sp)
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
-    move.l  %d4,%d0                     | bottom edge
-    subq.l  #1,%d0
-    move.l  %d0,-(%sp)
-    move.l  %d6,-(%sp)
-    move.l  %d0,-(%sp)
-    move.l  %d5,-(%sp)
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
-    move.l  %d4,%d0                     | left edge (corners belong to top / bottom)
-    addq.l  #4,%d0
-    move.l  %d0,-(%sp)
-    move.l  %d5,-(%sp)
-    move.l  %d4,-(%sp)
-    move.l  %d5,-(%sp)
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
-    move.l  %d4,%d0                     | right edge
-    addq.l  #4,%d0
-    move.l  %d0,-(%sp)
-    move.l  %d6,-(%sp)
-    move.l  %d4,-(%sp)
-    move.l  %d6,-(%sp)
     bsr.w   cl_xor
     lea     16(%sp),%sp
 cd_next:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
     bne.w   cd_cell
+|   the select box: a full 1 px frame, SET after every bar -- a box in the row next to the highlight
+|   shares a pixel row with its bar, where an XOR would cancel (the user: "it's a full box").
+|   Only in the box's bank, not over the highlight (the bar alone shows it there).
+    move.b  cl_bank,%d0
+    cmp.b   cl_sbank,%d0
+    bne.w   cd_boxed
+    moveq   #0,%d2
+    move.b  cl_cur,%d2
+    cmpi.l  #NSLOT,%d2
+    bcc.w   cd_boxed
+    cmp.b   PLAY_BANK,%d0
+    bne.b   cd_sbx
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    cmp.l   %d2,%d0
+    beq.w   cd_boxed
+cd_sbx:
+    bsr.w   cl_cell
+    moveq   #0,%d5
+    move.w  2(%a3),%d5
+    moveq   #0,%d6
+    move.w  4(%a3),%d6
+    move.l  %d4,%d0                     | top (y + 5) -- not on the top row, where the band stands
+    addq.l  #5,%d0                      | for it -- and bottom (y - 1), not on the bottom row (frame)
+    cmpi.l  #BODY_TOP,%d0
+    bgt.b   cd_notop
+    moveq   #5,%d0
+    bsr.w   cd_hline
+cd_notop:
+    move.l  %d4,%d0
+    subq.l  #1,%d0
+    ble.b   cd_nobot
+    moveq   #-1,%d0
+    bsr.w   cd_hline
+cd_nobot:
+    move.l  %d5,%d0                     | left and right, y .. y + 4
+    bsr.w   cd_vline
+    move.l  %d6,%d0
+    bsr.w   cd_vline
+cd_boxed:
     moveq   #1,%d0
     move.l  %d0,RDRAW
     movem.l (%sp),%d2-%d7/%a2-%a4
@@ -2890,6 +2955,403 @@ cp_next:
     lea     36(%sp),%sp
     rts
 
+| ================================================================ names on the card (worker task)
+    .section .dram,"ax"
+| cl_cpath(dst, n 0..15, ext): "<set>/<project>/clypsNN.ext" into dst
+cl_cpath:
+    move.l  12(%sp),-(%sp)              | ext
+    move.l  12(%sp),%d0
+    addq.l  #1,%d0
+    move.l  %d0,-(%sp)                  | NN
+    clr.l   -(%sp)
+    clr.l   -(%sp)
+    jsr     PROJDIR
+    addq.l  #8,%sp
+    move.l  %d0,-(%sp)                  | the project folder
+    pea     cl_fmt_cpath
+    move.l  20(%sp),-(%sp)              | dst
+    jsr     SPRINTF
+    lea     20(%sp),%sp
+    rts
+
+| cl_nwrite(n): bank n's names -> clypsNN.work (errors ignored)
+cl_nwrite:
+    lea     -152(%sp),%sp               | 0 handle (24), 24 path (128)
+    pea     cl_s_work
+    move.l  160(%sp),-(%sp)
+    pea     32(%sp)
+    jsr     cl_cpath
+    lea     12(%sp),%sp
+    pea     FBUFSZ
+    pea     FBUF
+    pea     S_W
+    pea     36(%sp)                     | path
+    pea     16(%sp)                     | handle
+    jsr     FOPEN
+    lea     20(%sp),%sp
+    tst.l   %d0
+    ble.b   nw_out
+    pea     8
+    pea     cl_nfhdr
+    pea     8(%sp)
+    jsr     FWRITE
+    lea     12(%sp),%sp
+    move.l  156(%sp),%d0
+    move.l  #256*NAME_W,%d1
+    muls.l  %d1,%d0
+    addi.l  #NAMES,%d0
+    pea     256*NAME_W
+    move.l  %d0,-(%sp)
+    pea     8(%sp)
+    jsr     FWRITE
+    lea     12(%sp),%sp
+    pea     (%sp)
+    jsr     FCLOSE
+    addq.l  #4,%sp
+nw_out:
+    lea     152(%sp),%sp
+    rts
+
+| cl_nread(n): clypsNN.work -> bank n's names; missing, the wrong size or a bad header -> none
+cl_nread:
+    lea     -160(%sp),%sp               | 0 handle (24), 24 path (128), 152 header (8)
+    move.l  164(%sp),%d0
+    move.l  #256*NAME_W,%d1
+    muls.l  %d1,%d0
+    addi.l  #NAMES,%d0
+    move.l  %d0,-(%sp)                  | the bank's names (kept at 0(sp) below: offsets + 4)
+    movea.l %d0,%a0                     | none, until the file says otherwise
+    move.l  #256*NAME_W/4,%d0
+rd_clr:
+    clr.l   (%a0)+
+    subq.l  #1,%d0
+    bne.b   rd_clr
+    pea     cl_s_work
+    move.l  172(%sp),-(%sp)
+    pea     36(%sp)
+    jsr     cl_cpath
+    lea     12(%sp),%sp
+    pea     FBUFSZ
+    pea     FBUF
+    pea     S_R
+    pea     40(%sp)
+    pea     20(%sp)
+    jsr     FOPEN
+    lea     20(%sp),%sp
+    tst.l   %d0
+    ble.w   rd_out
+    move.l  4(%sp),-(%sp)               | size(fd) must be exactly NF_SIZE
+    movea.l FS_SIZE,%a0
+    jsr     (%a0)
+    addq.l  #4,%sp
+    cmpi.l  #NF_SIZE,%d0
+    bne.b   rd_close
+    pea     8
+    pea     160(%sp)
+    pea     12(%sp)
+    jsr     FREAD
+    lea     12(%sp),%sp
+    cmpi.l  #1,%d0
+    bne.b   rd_close
+    move.l  156(%sp),%d0
+    cmpi.l  #0x434c5950,%d0             | "CLYP"
+    bne.b   rd_close
+    move.l  160(%sp),%d0
+    cmpi.l  #0x00010100,%d0             | version 1, 256 names
+    bne.b   rd_close
+    pea     256*NAME_W
+    move.l  4(%sp),-(%sp)
+    pea     12(%sp)
+    jsr     FREAD
+    lea     12(%sp),%sp
+    cmpi.l  #1,%d0
+    beq.b   rd_term
+    movea.l (%sp),%a0                   | a short read: none after all
+    move.l  #256*NAME_W/4,%d0
+rd_clr2:
+    clr.l   (%a0)+
+    subq.l  #1,%d0
+    bne.b   rd_clr2
+rd_term:
+    movea.l (%sp),%a0                   | every name ends within its 10 bytes
+    moveq   #0,%d0
+    move.w  #256,%d0
+rd_t:
+    clr.b   NAME_W-1(%a0)
+    lea     NAME_W(%a0),%a0
+    subq.l  #1,%d0
+    bne.b   rd_t
+rd_close:
+    pea     4(%sp)
+    jsr     FCLOSE
+    addq.l  #4,%sp
+rd_out:
+    lea     164(%sp),%sp
+    rts
+
+| cl_ncopy(n, from_ext, to_ext): clypsNN.from -> clypsNN.to; the source missing -> the destination is
+| removed too, so .work and .strd stay mirrors of stock's own (errors ignored)
+cl_ncopy:
+    lea     -256(%sp),%sp               | 0 src path (128), 128 dst path (128)
+    move.l  264(%sp),-(%sp)
+    move.l  264(%sp),-(%sp)
+    pea     8(%sp)
+    jsr     cl_cpath                    | src
+    lea     12(%sp),%sp
+    move.l  268(%sp),-(%sp)
+    move.l  264(%sp),-(%sp)
+    pea     136(%sp)
+    jsr     cl_cpath                    | dst
+    lea     12(%sp),%sp
+    clr.l   -(%sp)
+    pea     4(%sp)
+    pea     136(%sp)
+    jsr     FCOPY
+    lea     12(%sp),%sp
+    cmpi.l  #-12,%d0
+    bne.b   nc_out
+    pea     128(%sp)
+    movea.l FS_UNLINK,%a0
+    jsr     (%a0)
+    addq.l  #4,%sp
+nc_out:
+    lea     256(%sp),%sp
+    rts
+
+| cl_ncopy_mask(mask, from, to)
+cl_ncopy_mask:
+    move.l  %d2,-(%sp)
+    moveq   #0,%d2
+cm_l:
+    move.l  8(%sp),%d0
+    btst    %d2,%d0
+    beq.b   cm_n
+    move.l  16(%sp),-(%sp)
+    move.l  16(%sp),-(%sp)
+    move.l  %d2,-(%sp)
+    jsr     cl_ncopy
+    lea     12(%sp),%sp
+cm_n:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   cm_l
+    move.l  (%sp)+,%d2
+    rts
+
+| the loader's return (cl_ldexit): the names of the banks just read -- all 16 on a project load (the
+| power-on resume reads every bank but the current one from the card; its names come from its
+| clypsNN.work too)
+cl_nload_all:
+    tst.b   cl_namesok
+    beq.b   na_out
+    move.l  %d2,-(%sp)
+    moveq   #0,%d2
+na_l:
+    moveq   #0,%d0
+    move.w  cl_ldmask,%d0
+    move.l  %d0,%d1
+    andi.l  #0xffff,%d1
+    cmpi.l  #0xfe00,%d1                 | (cheap "8 banks or more": the project loads are 0xffff
+    bcc.b   na_rd                       | and ~(1 << current))
+    btst    %d2,%d0
+    beq.b   na_n
+na_rd:
+    move.l  %d2,-(%sp)
+    jsr     cl_nread
+    addq.l  #4,%sp
+na_n:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   na_l
+    move.l  (%sp)+,%d2
+na_out:
+    rts
+
+| ---- the hooks (each replays what it replaced; its own registers saved around the work)
+| 0x400919d6, the bank writer's common exit (`move.l d2,d0 ; movem.l -324(fp),d2-d7/a2-a5`):
+| bankNN.work were written for the mask fp@(12) -> clypsNN.work too, unless nothing was written
+| (mask 0, d2 -53 outside a project, -7 no project folder)
+cl_hwrite:
+    lea     -56(%sp),%sp
+    movem.l %d0-%d7/%a0-%a5,(%sp)
+    tst.b   cl_namesok
+    beq.b   hw_done
+    cmpi.l  #-53,%d2
+    beq.b   hw_done
+    cmpi.l  #-7,%d2
+    beq.b   hw_done
+    moveq   #0,%d3
+    move.w  14(%fp),%d3                 | the mask
+    beq.b   hw_done
+    moveq   #0,%d2
+hw_l:
+    btst    %d2,%d3
+    beq.b   hw_n
+    move.l  %d2,-(%sp)
+    jsr     cl_nwrite
+    addq.l  #4,%sp
+hw_n:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   hw_l
+hw_done:
+    movem.l (%sp),%d0-%d7/%a0-%a5
+    lea     56(%sp),%sp
+    move.l  %d2,%d0
+    movem.l -324(%fp),%d2-%d7/%a2-%a5
+    jmp     0x400919de
+
+| 0x4008f0a2, SAVE PROJECT's .work -> .strd copies (0x4008ee74) done: ours too
+cl_hstorep:
+    lea     -56(%sp),%sp
+    movem.l %d0-%d7/%a0-%a5,(%sp)
+    cmpi.l  #-53,%d2
+    beq.b   sp_done
+    pea     cl_s_strd
+    pea     cl_s_work
+    pea     0xffff
+    jsr     cl_ncopy_mask
+    lea     12(%sp),%sp
+sp_done:
+    movem.l (%sp),%d0-%d7/%a0-%a5
+    lea     56(%sp),%sp
+    move.l  %d2,%d0
+    movem.l -560(%fp),%d2-%d7/%a2-%a5
+    jmp     0x4008f0aa
+
+| 0x4008f3ae, RELOAD PROJECT's .strd -> .work restore (0x4008f180) done: ours too
+cl_hrestp:
+    lea     -56(%sp),%sp
+    movem.l %d0-%d7/%a0-%a5,(%sp)
+    cmpi.l  #-53,%d2
+    beq.b   rp_done
+    pea     cl_s_work
+    pea     cl_s_strd
+    pea     0xffff
+    jsr     cl_ncopy_mask
+    lea     12(%sp),%sp
+rp_done:
+    movem.l (%sp),%d0-%d7/%a0-%a5
+    lea     56(%sp),%sp
+    move.l  %d2,%d0
+    movem.l -560(%fp),%d2-%d7/%a2-%a5
+    jmp     0x4008f3b6
+
+| 0x4008ee66, SAVE BANK's copies (0x4008eda4, mask d6) done (`move.l d4,d0 ; movem.l (sp),...`)
+cl_hstoreb:
+    lea     -56(%sp),%sp
+    movem.l %d0-%d7/%a0-%a5,(%sp)
+    cmpi.l  #-53,%d4
+    beq.b   sb_done
+    pea     cl_s_strd
+    pea     cl_s_work
+    move.l  %d6,-(%sp)
+    jsr     cl_ncopy_mask
+    lea     12(%sp),%sp
+sb_done:
+    movem.l (%sp),%d0-%d7/%a0-%a5
+    lea     56(%sp),%sp
+    move.l  %d4,%d0
+    movem.l (%sp),%d2-%d7/%a2-%a6
+    jmp     0x4008ee6c
+
+| 0x4008f172, RELOAD BANK's restore (0x4008f0b0, mask d6) done
+cl_hrestb:
+    lea     -56(%sp),%sp
+    movem.l %d0-%d7/%a0-%a5,(%sp)
+    cmpi.l  #-53,%d4
+    beq.b   rb_done
+    pea     cl_s_work
+    pea     cl_s_strd
+    move.l  %d6,-(%sp)
+    jsr     cl_ncopy_mask
+    lea     12(%sp),%sp
+rb_done:
+    movem.l (%sp),%d0-%d7/%a0-%a5
+    lea     56(%sp),%sp
+    move.l  %d4,%d0
+    movem.l (%sp),%d2-%d7/%a2-%a6
+    jmp     0x4008f178
+
+| 0x4008ed5e, DELETE PROJECT after its known files, before the folder goes: ours too (with its own
+| helper, a1 = its context d5), or the folder would not be empty
+cl_hdel:
+    lea     -56(%sp),%sp
+    movem.l %d0-%d7/%a0-%a5,(%sp)
+    moveq   #0,%d2
+hd_l:
+    moveq   #0,%d3                      | .work, then .strd
+hd_e:
+    pea     cl_s_work
+    tst.l   %d3
+    beq.b   hd_w
+    addq.l  #4,%sp
+    pea     cl_s_strd
+hd_w:
+    move.l  %d2,%d0
+    addq.l  #1,%d0
+    move.l  %d0,-(%sp)
+    pea     cl_fmt_cname
+    pea     cl_tname
+    jsr     SPRINTF
+    lea     16(%sp),%sp
+    pea     cl_tname
+    movea.l %d5,%a1
+    jsr     DEL_ONE
+    addq.l  #4,%sp
+    addq.l  #1,%d3
+    cmpi.l  #2,%d3
+    bne.b   hd_e
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   hd_l
+    movem.l (%sp),%d0-%d7/%a0-%a5
+    lea     56(%sp),%sp
+    move.l  24(%sp),-(%sp)              | displaced
+    move.l  32(%sp),-(%sp)
+    jmp     0x4008ed66
+
+| 0x400914de, EXPORT TO SET after the arrangements: ours too, not required (a4 set, d7 name, d6 cb)
+cl_hexp:
+    lea     -56(%sp),%sp
+    movem.l %d0-%d7/%a0-%a5,(%sp)
+    moveq   #0,%d2
+he_l:
+    moveq   #0,%d3
+he_e:
+    pea     cl_s_work
+    tst.l   %d3
+    beq.b   he_w
+    addq.l  #4,%sp
+    pea     cl_s_strd
+he_w:
+    move.l  %d2,%d0
+    addq.l  #1,%d0
+    move.l  %d0,-(%sp)
+    pea     cl_fmt_cname
+    pea     cl_tname
+    jsr     SPRINTF
+    lea     16(%sp),%sp
+    move.l  %d6,-(%sp)                  | cb
+    clr.l   -(%sp)                      | not required
+    move.l  %d7,-(%sp)
+    move.l  %a4,-(%sp)
+    pea     cl_tname
+    pea     cl_tname
+    jsr     EXP_ONE
+    lea     24(%sp),%sp
+    addq.l  #1,%d3
+    cmpi.l  #2,%d3
+    bne.b   he_e
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   he_l
+    movem.l (%sp),%d0-%d7/%a0-%a5
+    lea     56(%sp),%sp
+    move.l  %d6,-(%sp)                  | displaced
+    pea     1
+    jmp     0x400914e4
+
 | ================================================================ data (both parts run from RAM)
     .align 2
 cl_layer:   .long 0, cl_keys, cl_encs, 0, 0     | +16 is written -1 by the push
@@ -3019,6 +3481,9 @@ cl_nq:      .byte 0                     | cues pending (the tick's fast path)
 
 cl_corners: .short 0,63, 1,63, 0,62, WIN_W-1,63, WIN_W-2,63, WIN_W-1,62
 cl_xpix:    .byte 0,1, 2,1, 1,2, 0,3, 2,3   | the "x": corners and centre of a 3 x 3 at rows y + 1..3
+            .align 2
+cl_colx:    .short 6, 8, 52, 3          | column 1: number field, bar / box 8..52, its x at 3..5
+            .short 62, 60, 108, 55      | column 2: numbers 62..68, bar / box 60..108, its x at 55..57
 cl_fmt_hdr: .asciz "%c%d BANK %c"
 cl_fmt_num: .asciz "%d"
 cl_fmt_trg: .asciz "%d TRIGS"
@@ -3032,6 +3497,14 @@ cl_fmt_srct:.asciz "%c%d %dTRG"          | <= 34 px: "A14 64TRG"
 cl_fmt_srcl:.asciz "%c%d LOCKS"
 cl_fmt_srce:.asciz "%c%d ---"
 cl_s_rename:.asciz "RENAME SEQUENCE"
+cl_fmt_cpath:.asciz "%s/clyps%02d.%s"
+cl_fmt_cname:.asciz "clyps%02d.%s"
+cl_s_work:  .asciz "work"
+cl_s_strd:  .asciz "strd"
+            .align 2
+cl_nfhdr:   .ascii "CLYP"
+            .short 1, 256
+cl_tname:   .space 16
 cl_fmt_tsv: .asciz "%sTRK %d SAVED"
 cl_fmt_trl: .asciz "%sTRK %d RELOADED"
 cl_fmt_tno: .asciz "%sTRK %d: SAVE FIRST"       | toast window = text + 15 px: 126 px at most (MIDI TRK 8)

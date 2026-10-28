@@ -88,6 +88,14 @@ DETOURS = [  # (site, symbol, stock bytes, length[, opcode: jmp unless given])
     (0x4005e4c8, "cl_yes", "222f0004202f0008", 8),        # stock [YES]: + TRACK = temp save; arm on a tap
     (0x4005e25c, "cl_no", "202f00086714", 6),             # stock [NO]: + TRACK = reload; disarm on a tap
     (0x40025808, "cl_sramrest", "4eb94000fbb4", 6, "4eb9"),  # power-on resume: jsr 0x4000fbb4 (SRAM -> RAM)
+    # names on the card (clypsNN.work / .strd), kept in step with stock's bank files:
+    (0x400919d6, "cl_hwrite", "20024cee3cfc", 6),     # bank writer exit: + clypsNN.work
+    (0x4008f0a2, "cl_hstorep", "20024cee3cfc", 6),    # SAVE PROJECT .work -> .strd: + ours
+    (0x4008ee66, "cl_hstoreb", "20044cd77cfc", 6),    # SAVE BANK: + ours
+    (0x4008f3ae, "cl_hrestp", "20024cee3cfc", 6),     # RELOAD PROJECT .strd -> .work: + ours
+    (0x4008f172, "cl_hrestb", "20044cd77cfc", 6),     # RELOAD BANK: + ours
+    (0x4008ed5e, "cl_hdel", "2f2f00182f2f0020", 8),   # DELETE PROJECT: + ours, before rmdir
+    (0x400914de, "cl_hexp", "2f0648780001", 6),       # EXPORT TO SET: + ours (not required)
     (0x4001fb1e, "cl_rstall", "4eb94000fd34", 6, "4eb9"),    # the four jsr 0x4000fd34 (every bank
     (0x4006bafe, "cl_rstall", "4eb94000fd34", 6, "4eb9"),    # to defaults): the originals are retaken
     (0x4007ec4c, "cl_rstall", "4eb94000fd34", 6, "4eb9"),    # after it (cl_rstall is ROM: 0x4001fb1e
@@ -138,7 +146,8 @@ def main():
     img[o(CAVE):o(CAVE) + len(blob)] = blob
     print(f"  patch_clyps {len(blob)} B @ 0x{CAVE:08x}..0x{CAVE + len(blob) - 1:08x} "
           f"({FREE_END - CAVE - len(blob)} B left)")
-    for site, sym, exp, n, *op in DETOURS:
+    detours = [d for d in DETOURS if not (VARIANT == "NOFILES" and d[1].startswith("cl_h"))]
+    for site, sym, exp, n, *op in detours:
         exp = bytes.fromhex(exp)
         if bytes(img[o(site):o(site) + len(exp)]) != exp:
             sys.exit(f"detour 0x{site:08x} ({sym}): {bytes(img[o(site):o(site)+len(exp)]).hex()} "

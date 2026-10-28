@@ -18,6 +18,7 @@ loaded and the transport stopped, and checks after every step:
     byte for byte;
   * G: the source label on your pattern's slot after a load / a saved load (screens);
   * R: naming ([FUNC]+[BANK] in Clyps): stock's editor; the name follows loads, temp saves, ORIG;
+  * S: names on the card: SAVE PROJECT / CARD SYNC / RELOAD PROJECT / LOAD PROJECT round trips;
   * T: temp save / reload outside Clyps ([YES] / [NO] + TRACK), ARM / DISARM on a quick tap only;
   * N: a NORMAL pattern converted to PER TRACK by a load, and the restore that undoes it: the
     whole slab comes back byte for byte;
@@ -53,7 +54,7 @@ def main(argv):
     ap.add_argument("--budget", type=int, default=4_000_000, help="steps per key call")
     a = ap.parse_args(argv)
     image = str(pathlib.Path(a.image).resolve())
-    syms = {k: int(v, 16) for k, v in (l.split() for l in (ROOT / "out/clyps_syms.txt").read_text().splitlines())}
+    syms = {k: int(v, 16) for k, v in (l.split() for l in pathlib.Path(os.environ.get("CLYPS_SYMS", ROOT / "out/clyps_syms.txt")).read_text().splitlines())}
     shots = pathlib.Path(a.shots)
     shots.mkdir(parents=True, exist_ok=True)
 
@@ -522,6 +523,110 @@ def main(argv):
         check(name(NAMES, nidx(bank, act, 0)) == b"", "[PAGE]: back to the name it had when loaded (none)")
         tap(NO)
         closed_ok("[NO]")
+
+    if "S" in a.only:
+        # --- S: names on the card (clypsNN.work / .strd), round trips through stock's own operations
+        print("S: name 'BASS1'; SAVE PROJECT; rename 'TEMP' + CARD SYNC; RELOAD PROJECT -> 'BASS1'; LOAD PROJECT -> 'BASS1'")
+        NAMES = syms["cl_bss"] + 16 * BANKSZ + 16 * TRAC_A
+        nm = lambda pt, t=0: bytes(u.mem_read(NAMES + ((bank * 16 + pt) * 16 + t) * 10, 10)).split(b"\0")[0]
+
+        def name_slot3(text):
+            key(PTN, 1)
+            key(BANK, 1)
+            key(BANK, 0)
+            key(PTN, 0)
+            while state()["cur"] != 2:
+                tap(DOWN)
+            key(FUNC, 1)
+            key(BANK, 1)
+            key(BANK, 0)
+            key(FUNC, 0)
+            u.mem_write(0x460E743C, text.ljust(9, b" "))
+            tap(YES)
+            tap(NO)
+
+        trace = []
+        if os.environ.get("CLYPS_TRACE"):
+            tnames = {syms[k]: k for k in ("cl_hwrite", "cl_nwrite", "cl_hstorep", "cl_ncopy", "cl_hrestp",
+                                           "cl_hstoreb", "cl_hrestb", "cl_nread", "cl_ldexit", "cl_named")}
+            tnames.update({0x40016864: "FOPEN", 0x400166b8: "FWRITE", 0x4001677c: "FCLOSE", 0x40016388: "FCOPY",
+                           0x400919de: "writer.resume", 0x4008f0aa: "store.resume", 0x400005a6: "sched.rte"})
+
+            def thk(uc, addr, size, user):
+                sp_ = uc.reg_read(er.eb.UC_M68K_REG_A7)
+                trace.append(f"{tnames[addr]:14} sp={sp_:08x} task={rt._name(rt._cur()) if hasattr(rt, '_cur') else '?'}")
+                del trace[:-80]
+            for ad_ in tnames:
+                u.hook_add(er.eb.UC_HOOK_CODE, thk, begin=ad_, end=ad_)
+
+        def dump_fault():
+            # who was being switched to, and what each task's saved frame holds
+            sp_ = u.reg_read(er.eb.UC_M68K_REG_A7)
+            print(f"      fault: a7=0x{sp_:08x} pc=0x{rt.pc:08x} cur TCB 0x{rt._cur():08x} ({rt._name(rt._cur())})", flush=True)
+            print("      bytes at a7-16: " + bytes(u.mem_read(sp_ - 16, 48)).hex(" ", 4), flush=True)
+            for tcb, nm_ in ((0x460ddde4, "worker"), (0x460bcc2c, "storage"), (0x460d59d4, "UI"), (0x460d4f80, "keyrep"),
+                             (0x46c7bed8, "sys"), (0x46c7ae84, "main"), (0x46c7fb0c, "midi"), (0x460fab80, "p2a"),
+                             (0x460ffd44, "p2b"), (0x460e0e38, "p2c"), (0x46105508, "p1b")):
+                a7_ = rd(tcb + 0x48, 4)
+                try:
+                    fr = bytes(u.mem_read(a7_, 8)).hex(" ", 2)
+                except Exception:
+                    fr = "unreadable"
+                print(f"        {nm_:8} TCB 0x{tcb:08x}: saved a7 0x{a7_:08x} frame {fr}", flush=True)
+
+        def worker(fn, ms, args=()):
+            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+            rt.call_as_main(fn, args=args, budget=600000)
+            try:
+                rt.run(ms=ms)
+            except Exception:
+                print("      trace:\n        " + "\n        ".join(trace[-60:]), flush=True)
+                dump_fault()
+                raise
+
+        if os.environ.get("CLYPS_SETTLE"):
+            rt.run(ms=int(os.environ["CLYPS_SETTLE"]))   # bisect: let the boot load's worker finish first
+        tap(0x10)
+        name_slot3(b"BASS1")
+        check(nm(2) == b"BASS1", "slot 3 named 'BASS1'")
+        worker(0x40022850, 8000)          # SAVE PROJECT (op 17): bank .work + .strd copies
+        name_slot3(b"TEMP")
+        # CARD SYNC (op 7): the current bank's .work -> clyps01.work = TEMP. Entered past its own
+        # project-folder check (0x400255ec does card FAT lookups, which block the main task the
+        # harness runs posters on -- emu_rtos.load_project_live's warning; it crashed this gate)
+        worker(0x40022CFC, 8000, args=(0,))
+        check(nm(2) == b"TEMP", "renamed 'TEMP' (and synced to clyps01.work)")
+        rt.load_project_live("OCTABAM", staged, run_ms=6000)
+        rt.run(ms=2000)
+        check(nm(2) == b"TEMP", f"LOAD PROJECT after the sync reads 'TEMP': clyps01.work was written ({nm(2)})")
+        n0 = rd(syms["cl_nproj"], 1)
+        worker(0x400227C8, 8000)          # RELOAD PROJECT (op 19: .strd -> .work), then its op-4 load
+        for waited in range(1, 16):
+            if rd(syms["cl_nproj"], 1) != n0 and snapok() == 0xFFFF:
+                break
+            rt.run(ms=1000)
+        print(f"      reload: project loads {n0} -> {rd(syms['cl_nproj'], 1)} after {waited} s", flush=True)
+        if rd(syms["cl_nproj"], 1) == n0:
+            print("      (the reload's own load was not posted here: LOAD PROJECT instead)", flush=True)
+            rt.load_project_live("OCTABAM", staged, run_ms=6000)
+            rt.run(ms=2000)
+        check(nm(2) == b"BASS1", f"after RELOAD PROJECT: 'BASS1' again, from clyps01.strd ({nm(2)})")
+        rt.load_project_live("OCTABAM", staged, run_ms=6000)
+        rt.run(ms=2000)
+        check(nm(2) == b"BASS1", f"after LOAD PROJECT: 'BASS1' from clyps01.work ({nm(2)})")
+        # the bank path: SAVE BANK (op 18: .work + clyps01.work -> .strd), RELOAD BANK (op 20 + op 6)
+        name_slot3(b"BANKX")
+        worker(0x40022808, 8000, args=(1,))      # SAVE BANK: its argument is the bank mask (1 << bank A)
+        name_slot3(b"TEMP2")
+        worker(0x40022CFC, 8000, args=(0,))      # CARD SYNC: clyps01.work = TEMP2
+        n0 = rd(syms["cl_nproj"], 1)
+        worker(0x40022778, 8000, args=(1,))      # RELOAD BANK A: .strd -> .work, then its op-6 load
+        for waited in range(1, 16):
+            if nm(2) == b"BANKX":
+                break
+            rt.run(ms=1000)
+        check(nm(2) == b"BANKX", f"after SAVE BANK, a sync and RELOAD BANK: 'BANKX' from clyps01.strd ({nm(2)})")
+        check(state()["open"] == 0, "Clyps closed")
 
     if "N" in a.only:
         # --- N: a NORMAL destination converted by a load, undone by the restore

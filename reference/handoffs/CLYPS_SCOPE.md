@@ -1,12 +1,12 @@
-# CLYPS — scope and build record (WIP; latest test image `140C_CLYPE`)
+# CLYPS — scope and build record (WIP; latest test image `140C_CLYPF`)
 
 ## §0 Start here (handoff, 2026-10-25) — read this first, then §1–§4
 
 **Where it stands.**
 - **Worktree / branch:** `../octatrack-kyoti-fw-trkseq`, branch `trkseq`. Commits are local, not
   pushed. Clyps is WIP, nothing is promoted, and there is no README entry.
-- **Latest image:** `140C_CLYPE` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
-  NOT flashed (syx `8830a239…`, §8b). CLYP9 and CLYPA–CLYPD were never flashed either.
+- **Latest image:** `140C_CLYPF` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
+  NOT flashed (syx `b3eacd36…`, §8b). CLYP9 and CLYPA–CLYPE were never flashed either.
 - **How the user tests now (2026-10-26):** a few changes at a time, a short list per image, not
   the whole FLASHING checklist.
 - **On the user's unit:** CLYP6 (FLASHING §4 steps 1–10 passed; MIDI tracks not seen, fixed in
@@ -1187,6 +1187,13 @@ The ROM keeps only the guarded detours:
   effective length / scale (`cl_edited` / `cl_efflen`). So: none after power-on / a load; on after
   a swap or a trig edit; off when the original is back by any route. Gate 81/81; renders
   `out/clyps/vE/`.
+- **`140C_CLYPF` (2026-10-27), NOT flashed.** Syx `b3eacd36a5357a9f6886c5cb4b901717ec45f8db15c5cf624d3688c06178ccd8`,
+  CF `.bin` `220560c1…`. Names on the card (§10.2) and the user's layout: per column (`cl_colx`)
+  the x at 3..5 / 55..57, bar / box 8..52 / 60..108, numbers at 10 / 62..68, labels at 16 / 72
+  (3 px from the number: the only fit for 9-character names with 2 px to the right frame); the
+  select box drawn SET after every bar (a full box, also next to the highlight); rows at 6 px
+  (7 px tried, dropped). Gates: A B C D Y E T G R S N P 88/88, M on JAM2. A "fault" chased for a
+  while was the harness (§10.2 harness lesson), not Clyps.
 - **Decided (the user, 2026-10-25):** after a load onto the playing pattern, its own slot shows the
   loaded copy (the keep rule, as built). What it held before is reached through `ORIG` / [PAGE].
 - **Screen rendering in the emulator** (`tools/clyps_render.py`). Stock's compositor
@@ -1236,6 +1243,36 @@ To be applied with the first code commit:
 - **Persistence: none yet.** Names live in DRAM and are cleared by a project load and lost at
   power-off. Next: a sidecar file in the project folder (below), read at load and written with
   SAVE PROJECT, so names are exactly as saved as the sequences.
+
+### 10.2 Names on the card (CLYPF, 2026-10-27)
+
+- **Files:** per bank, `<project>/clypsNN.work` and `clypsNN.strd` (NN 01–16): 2,568 B each, the
+  header `CLYP` + u16 1 + u16 256, then 256 names × 10 B (16 patterns × 16 tracks). Per bank
+  because SAVE BANK / RELOAD BANK touch one bank.
+- **Kept in step with stock's own bank files**, all in the project worker task (`0x4008445c`,
+  prio 1, 16 KB stack; it peaks at 2.85 KB during a SAVE that creates them, measured):
+  - written at the bank writer's exit `0x400919d6` for its mask (every `.work` write: SAVE, CARD
+    SYNC, SAVE AS NEW, flushes);
+  - copied `.work → .strd` at SAVE PROJECT (`0x4008f0a2`) and SAVE BANK (`0x4008ee66`, mask d6);
+  - restored `.strd → .work` at RELOAD PROJECT (`0x4008f3ae`) and RELOAD BANK (`0x4008f172`);
+    a missing source removes the destination, so the two stay mirrors;
+  - read at the loader's return (`cl_ldexit`, before the snapshot: names are part of the
+    original), all 16 on a project load (the power-on resume too), else the reloaded banks;
+  - deleted with DELETE PROJECT (`0x4008ed5e`, stock's own `0x4008ec08`, before the folder goes);
+    exported with EXPORT TO SET (`0x400914de`, stock's own `0x4009115c`, not required).
+  - Every error of ours is swallowed: never stock's result. A file of the wrong size or header
+    reads as no names.
+- **Gate S (emulator):** name → SAVE PROJECT → rename + CARD SYNC → LOAD reads the rename (the
+  `.work` write) → RELOAD PROJECT restores the saved name (`.strd`) → LOAD reads it; SAVE BANK →
+  rename + sync → RELOAD BANK restores the bank's saved name. DELETE PROJECT and EXPORT TO SET
+  are NOT run in the emulator (their stock code does card FAT work on the main task, which this
+  harness cannot drive): hardware test with a throwaway project.
+- **Harness lesson:** never `call_as_main` a poster that touches the card first (CARD SYNC's
+  `0x40022cd4` runs `0x400255ec`): it corrupts the emulator's task frames. Enter it past the
+  check (`0x40022cfc`, arg 0). SAVE PROJECT / RELOAD PROJECT / SAVE BANK / RELOAD BANK posters only
+  post; SAVE BANK's and RELOAD BANK's argument is the bank mask.
+- **Limitation (accepted by the user):** names typed after the last `.work` write are lost at
+  power-off (stock restores the current bank's unsaved edits from SRAM; Clyps cannot).
 
 ### 10.1 Earlier notes
 
