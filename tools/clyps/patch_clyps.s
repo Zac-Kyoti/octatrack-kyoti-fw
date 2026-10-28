@@ -136,15 +136,18 @@
                                         | 1..54 (4 rows above, 3 below: the field is odd by one)
     .equ LOAD_X,      77                | "LOAD: SEQ" (32 px) right-aligned to x = 108
     .equ LOADF_X,     49                | "LOAD: SEQ+MCH/FX" (60 px), [FUNC] held
-    .equ COL0_X,      4                 | highlight x0 = col - 2, x1 = col + 50: column 0 2..54,
-    .equ COL1_X,      59                | column 1 57..109 -- one px to the frame (0 / 111) on both
-                                        | outer sides, a 2 px gap between the columns
-    .equ SUM_GAP,     5                 | gap between the slot number and its summary
-    .equ ED_X0,       3                 | the "edited" mark: a 3 x 3 "x" (the four corners + the centre)
-    .equ ED_X1,       55                | at rows y + 1..3, centred in the blank space LEFT of the slot
-                                        | number (the user, 2026-10-27): column 1 x 3..5 (between the
-                                        | frame and the digit at x 8), column 2 x 55..57 (the 4 px left
-                                        | of the two-digit numbers at 59; slot 9 aligned with them)
+| A cell, from its column x "col" (the 2-digit number field): bar edge (col - 5), the "edited" mark
+| (col - 4..-2), 1 px, the number (col..col + 6), 5 px, the label (col + 12, up to 35 px: a 9-character
+| name; the source label is "A14 64TRG"), 1 px, bar edge (col + 47). Column 1: bar 2..54; column 2:
+| bar 56..108, mark 57..59 -- 2 px clear of column 1's bar / box (the user, 2026-10-27), 1 px
+| between the bars.
+    .equ COL0_X,      7
+    .equ COL1_X,      61
+    .equ SUM_GAP,     4                 | the number field (2 x DIGIT_W) + 4 = the label at col + 12
+    .equ HL_X0,       -5                | the bar / box: col - 5 .. col + 47
+    .equ HL_X1,       47
+    .equ ED_X,        -4                | the "edited" mark: a 3 x 3 "x" (the four corners + the centre)
+                                        | at col - 4..-2, rows y + 1..3, left of the slot number
     .equ BOX_R,       109               | a dark header box's right column (text ends at 107)
     .equ ORIG_W,      15                | "ORIG", "SAVED": widths from the font's table 0x400c246a
     .equ SAVED_W,     19
@@ -2379,11 +2382,8 @@ cd_two:
     lea     cl_xpix,%a2                 | five (dx, dy) pixels
     moveq   #5,%d5
 cd_edp:
-    moveq   #ED_X0,%d6
-    cmpi.l  #8,%d2
-    bcs.b   cd_edc
-    moveq   #ED_X1,%d6
-cd_edc:
+    move.l  %d3,%d6
+    subq.l  #-ED_X,%d6
     move.b  (%a2)+,%d0
     extb.l  %d0
     add.l   %d0,%d6                     | x
@@ -2464,9 +2464,9 @@ cd_sum:
     lea     12(%sp),%sp
 |   the cell's rectangle: x d5..d6, y d4-1 .. d4+5 (one row above and below the text)
     move.l  %d3,%d5
-    subq.l  #2,%d5
+    subq.l  #-HL_X0,%d5
     move.l  %d3,%d6
-    addi.l  #WIN_W/2-6,%d6
+    addi.l  #HL_X1,%d6
 |   the highlight: an inverted bar over the pattern you are on (only in its bank)
     move.b  cl_bank,%d0
     cmp.b   PLAY_BANK,%d0
@@ -3028,7 +3028,7 @@ cl_s_seq:   .asciz "LOAD: SEQ"
 cl_s_full:  .asciz "LOAD: SEQ+MCH/FX"
 cl_s_orig:  .asciz "ORIG"
 cl_s_saved: .asciz "SAVED"
-cl_fmt_srct:.asciz "%c%d %d TRG"
+cl_fmt_srct:.asciz "%c%d %dTRG"          | <= 34 px: "A14 64TRG"
 cl_fmt_srcl:.asciz "%c%d LOCKS"
 cl_fmt_srce:.asciz "%c%d ---"
 cl_s_rename:.asciz "RENAME SEQUENCE"

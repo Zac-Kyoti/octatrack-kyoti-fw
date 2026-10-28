@@ -6,7 +6,7 @@
 - **Worktree / branch:** `../octatrack-kyoti-fw-trkseq`, branch `trkseq`. Commits are local, not
   pushed. Clyps is WIP, nothing is promoted, and there is no README entry.
 - **Latest image:** `140C_CLYPE` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
-  NOT flashed (syx `4a65c3d4…`, §8b). CLYP9 and CLYPA–CLYPD were never flashed either.
+  NOT flashed (syx `8830a239…`, §8b). CLYP9 and CLYPA–CLYPD were never flashed either.
 - **How the user tests now (2026-10-26):** a few changes at a time, a short list per image, not
   the whole FLASHING checklist.
 - **On the user's unit:** CLYP6 (FLASHING §4 steps 1–10 passed; MIDI tracks not seen, fixed in
@@ -1178,10 +1178,11 @@ The ROM keeps only the guarded detours:
   the cursor stops at count − 1, and [YES] copies count + 1 bytes back from its space-padded
   working copy `0x460e743c`). Names follow loads, temp saves and ORIG; DRAM only for now
   (+82 KB, 1,677 pages). Gates: A B C D Y E T G R N P 81/81, M on JAM2. Renders `out/clyps/vD/`.
-- **`140C_CLYPE` (2026-10-27), NOT flashed.** Syx `4a65c3d4161b0c9f3ab451aaac9e46b666dbd8371251d51138a292167f8cb80e`,
+- **`140C_CLYPE` (2026-10-27), NOT flashed.** Syx `8830a239212372d1855433995ea4176377a81b9abad5dd5dbc93adb27798d22c`,
   CF `.bin` `5cdf1ff0…`. The "edited" mark (the user, revised): a 3 × 3 "x" (corners + centre) at
-  rows y + 1..3, centred in the blank space LEFT of the number (column 1 x 3..5, column 2 x
-  55..57, slot 9 aligned with 10–16), on a slot whose sequence (active track)
+  rows y + 1..3, left of the number at col − 4..−2 in both columns; the columns re-laid out so
+  column 2's mark is 2 px clear of column 1's bar / box (bars 2–54 and 56–108, number → label
+  5 px, labels ≤ 35 px: 9-character names; source label `A14 64TRG`), on a slot whose sequence (active track)
   differs from its load snapshot: the record with its length / scale bytes aside, plus its
   effective length / scale (`cl_edited` / `cl_efflen`). So: none after power-on / a load; on after
   a swap or a trig edit; off when the original is back by any route. Gate 81/81; renders
