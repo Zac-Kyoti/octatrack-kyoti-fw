@@ -7,7 +7,7 @@ KYOTI V1.6 -- every FINAL feature in one image except BLACKPYRAMIDS_303 and VARI
     MUTE MODE (OT / OTFX / OTFX-T / DT-T)      QUANTIZE LIVE REC toggle
     SIDE-CHAIN COMPRESSOR (cross-core)         TRIGLESS-LOCK AUTO-REMOVE
     RELOAD FROM PROJECT (RELOAD_FROM_PROJECT chords)       DIRECT JUMP V7.0.1
-    REC TRIG MUTE ([TRK]+[NO]/[YES], CC 80)    VARISPEED (TSTR VARI + QUAN)
+    REC TRIG MUTE ([TRACK]+[REC], CC 80)       VARISPEED (TSTR VARI + QUAN)
     the bug fixes: MIDI_PLAYS_FREE_FIX, PATTERN LED, PART_CHANGE_CARRYOVER_FIX
 
 V1.6 vs V1.5 (FINAL 2026-10-22, flashed; V1.5 builds from tag ref/kyoti-v1.5-2026-10-22): SIDECHAIN_COMPRESSOR
@@ -85,7 +85,7 @@ evidence behind them:
            The builders see these zeroed (a PREPARED base); the composite is
            checked to hold no reference into them from anything but our caves.
 
-REC_TRIG_MUTE needs no zone for its code: it overwrites four stock routines nothing can
+REC_TRIG_MUTE needs no zone for its code: it overwrites three stock routines nothing can
 reach (its builder proves that on the image it is given, and the composite is re-scanned
 below).  Its one runtime-written byte is the CAVE piece "rtm_mask".
 
@@ -219,11 +219,10 @@ FEATURES = {
 VARISPEED_AT = 0x400d6500           # tools/varispeed_buildlib.py CAVE
 # Features that are WIP (not promoted, or demoted): only with --with NAME.
 WIP_FEATURES = {}
-# REC_TRIG_MUTE's code regions: four dead stock routines (build_rec_trig_mute.py REGIONS),
-# and the only references allowed into them -- the [TRK]-held layer's YES / NO records
-RTM_REGIONS = [(0x40083488, 0x40083544), (0x40032bd4, 0x40032d08),
-               (0x4005a0e0, 0x4005a14c), (0x4009e7dc, 0x4009e884)]
-RTM_RECORD_FIELDS = (0x400d15e4, 0x400d15e8, 0x400d15fe, 0x400d1602)
+# REC_TRIG_MUTE's code regions: three dead stock routines (build_rec_trig_mute.py REGIONS),
+# and the only references allowed into them -- the base keymaps' [REC] records
+RTM_REGIONS = [(0x40032bd4, 0x40032d08), (0x4005a0e0, 0x4005a14c), (0x4009e7dc, 0x4009e884)]
+RTM_RECORD_FIELDS = (0x400c003c, 0x400c0040, 0x400c0620, 0x400c0624)
 # builder flags that are not addresses
 FLAGS = {"DIRECT_JUMP_KYOTI": {"dj_mode_in_cave": True,
                               "dj_trigscale": False}}   # MIDI_PLAYS_FREE_FIX is its own feature here
@@ -766,8 +765,8 @@ def main():
         elif comp[o(rm):o(rm) + 4] != bytes(4):
             flag(f"REC_TRIG_MUTE: rtm_mask 0x{rm:08x} is not 0 in the image")
         else:
-            print(f"  REC_TRIG_MUTE: its 4 reused stock routines are reachable only through the "
-                  f"[TRK]-layer records; rtm_mask at 0x{rm:08x}, image value 0")
+            print(f"  REC_TRIG_MUTE: its 3 reused stock routines are reachable only through the "
+                  f"[REC] keymap records; rtm_mask at 0x{rm:08x}, image value 0")
 
     # the classic cave floor: the runtime record table below 0x400d6500 stays stock
     if comp[o(0x400d64ca):o(0x400d6500)] != stock[o(0x400d64ca):o(0x400d6500)]:
