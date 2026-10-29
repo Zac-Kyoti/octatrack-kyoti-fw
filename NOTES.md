@@ -37509,4 +37509,18 @@ is not edited) and `tools/emu_sc_shared.py`.
   `make image REMIX=octabam BUILD=35`. The build report has `sidechain-compressor FORM = SHARED`, `PLACE = DRAM`.
   `out/OCTATRACK_OS1.40C_OCTABAM35.syx` sha256 `478940f4…`, card `OCTATRACK_OCTABAM35.bin` `94d48c47…`,
   `OCTABAM 35.RMX` `6deccdf3…`. For Sam's #934 checklist.
+- **2026-10-28: OCTABAM35 FLASHED on the author's MKI: FAILS.** Sweeping SC's KEY lets bits of other tracks' audio
+  through the COMPRESSOR track, usually for a bar or two. After sweeping away from the key track and back, the
+  COMPRESSOR track is often doubled or carries delayed echoes ("more trigs than are on the track"), with low ghosts of
+  unrelated tracks. Removing DARK REV, or the COMPRESSOR, does not clear it; only a sequencer stop and start does. The
+  leak also happens while SC acts as stock COMPRESSOR. `SC KEY OFF:` appeared once (DARK REV on the FX2 of a track on the
+  other core); it did not reappear (toasts are once per collision by design). Page 2 still shows SC's controls while the key
+  is off, with no sign that it is off.
+  - Not yet known: whether the unit was power-cycled after the upgrade (octabam FAILURE_MODES: "power-cycle after every
+    upgrade before judging anything").
+  - Leading hypothesis (🟡 inferred, not measured): a DSP frame overrun when DLCOPY copies SC's 1,711-word block (three sends
+    a load; Sam measured a 99.8 % peak at a block copy on an MKII) desynchronises the ColdFire–DSP frame handshake, which a
+    transport restart clears (FAILURE_MODES "Static that stays after knob moves", the same signature). It would also explain
+    the leak with SC unbound: the state was already corrupted by a load, and removing DARK REV triggers a reload.
+  - The stubs (`build_bus.py` `_hook_stub_words`) read correctly: unbound, each replays the stock words.
 
