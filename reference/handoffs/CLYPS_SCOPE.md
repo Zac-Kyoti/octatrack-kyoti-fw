@@ -5,7 +5,7 @@
 **Where it stands.**
 - **Worktree / branch:** `../octatrack-kyoti-fw-trkseq`, branch `trkseq`. Commits are local, not
   pushed. Clyps is WIP, nothing is promoted, and there is no README entry.
-- **Latest image:** `140C_CLYPH` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
+- **Latest image:** `140C_CLYPI` (see "2026-10-29" below); before it `140C_CLYPH` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
   **BUILT 2026-10-28, NOT flashed** (the user flashes it next round): CLYPG (step 0 below: stock
   [PTN] / [BANK] inside Clyps, the BANK box, [MIDI] follows, no MIDI load modes) + step 1, FULL
   loads (§1.7 "Built"). Walk-through: FLASHING §4 "CLYPH walk-through" (it includes CLYPG's).
@@ -44,6 +44,32 @@
   - Seven detours: `0x4005a044` [PTN], `0x4007af80` / `0x4007b3e0` [BANK] press / release,
     `0x400a1f72` phase D, `0x400a43a0` wrap body, `0x40062d1c` UI tail, `0x400905d4` the masked
     bank loader (project load).
+
+**2026-10-29: CLYPH FLASHED; the user's changes → `140C_CLYPI` (built, not flashed).**
+- **Rounded boxes:** the highlight bar and the select box lose one pixel at each corner.
+- **Header outlines** (1 px, dark on the lit band, rounded): round `BANK A` while [BANK] alone is held
+  (no longer when the chord is held, so entering Clyps shows none); round the right label, after
+  an unboxed `LOAD: `: `SEQ` / `SEQ + MCH/FX` ([FUNC]); box on ORIG: `ORIG SEQ` / `ORIG SEQ + MCH/FX`
+  ([FUNC]) / `ORIG` (MIDI); the [PTN]+[BANK] chord held: `ORIG PTN + PART`. Beside the two long
+  ones the left reads only `T6` (the user's choice). MIDI: no label except on ORIG.
+- **[BANK] outside Clyps acts on release** (RELOAD_FROM_PROJECT's inversion, `cl_bankp` →
+  `cl_bkdefer` / `cl_bankr` → `cl_bkrel`): the press pushes only the trig overlay; a plain tap's
+  release opens SELECT BANK; a chord begun with [BANK] flashes nothing.
+- **Grid LEDs:** red = your pattern, **solid** yellow = cued, **flashing red** = the select box
+  (`cl_blink`); priority red > yellow > box.
+- **[PAGE] (SCALE)** = ORIG SEQ of the active track; **[FUNC]+[PAGE]** = ORIG SEQ+MCH/FX (MIDI always
+  both). **Chord + [PAGE]** = **ORIG PTN + PART** (`cl_restorepat`): all 16 tracks' original
+  sequences + slices, plus the Part bytes in no slice (`cl_slR`: `+0x10` 2 B, per-scene bytes 8–9,
+  the 144 B tail) at the first landing, the pattern's length / scale / mode with the last track:
+  the pattern and its whole Part as loaded. Chord begun outside Clyps (it opened Clyps) → Clyps
+  closes after; begun inside → stays (the user). The Part source is the load snapshot, not stock's
+  saved Part (the user's choice): it equals stock RELOAD PART only if the Part had no unsaved edits
+  at load and was not saved since. Not restored: the pattern's Part assignment if it was changed.
+- **Page LEDs** (slot 7, `cl_ppaint`): stock's step indicator, except while the box is on ORIG or the
+  chord is held: then the 4th LED (dies `0x4e` / `0x4f`) shows red = original, yellow = restore
+  cued, flashing red = changed (track; with the chord: the whole pattern incl. the Part).
+- **Wording:** `SEQ + MCH/FX`, `ORIG PTN + PART` (the user).
+- **"SAVED":** explained to the user (the temp-save provenance label); keep / drop is theirs.
 
 **Handoff 2026-10-28 (start here).** Read §1.0 (the 2026-10-27 model), §10.0/§10.2 (names), the
 traps below (incl. the harness lesson in §10.2), then continue with step 0 below. The user tests a

@@ -37731,3 +37731,12 @@ flashes it next round; CLYPG was never flashed): FULL loads (scope §1.7 "Built"
 - Harness traps: a [BANK] tap with no arrow now opens SELECT BANK (the gate paged with zero
   arrows and the overlay ate the next trig); `diag_clyps_landing.py` stages into one fixed tree
   (no parallel runs); a wait loop on `pgrep -f <name>` matches its own command line.
+
+**Session 131 cont. (8) (2026-10-29, `trkseq`)** — CLYPH FLASHED by the user; their changes built as
+`140C_CLYPI`, NOT flashed (scope §0 "2026-10-29"): rounded bar / box; header outlines (BANK while
+[BANK] alone is held, `LOAD: ` + outlined SEQ / SEQ + MCH/FX / ORIG SEQ / ORIG SEQ + MCH/FX / ORIG /
+ORIG PTN + PART; `T6` alone beside the two long ones); [BANK] outside Clyps acts on release
+(RELOAD_FROM_PROJECT's inversion); grid red / solid yellow cue / flashing red box; [PAGE] = ORIG SEQ,
+[FUNC]+[PAGE] = ORIG SEQ+MCH/FX; chord + [PAGE] = ORIG PTN + PART (pattern + whole Part as loaded;
+closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord status. Gates: full
+(A..K) + F 22/22 + M 8/8 pass. Harness: E / F post one tail message before a held-flag check.

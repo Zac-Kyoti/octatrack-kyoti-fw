@@ -206,6 +206,21 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **CLYPS — CLYPI walk-through.** Image `140C_CLYPI` (CLYPH + your 2026-10-29 changes).
+  1. Looks: the highlight bar and the select box have their 4 corner pixels off. Header: an
+     outline (no fill) round `BANK X` while you hold `[BANK]` alone; `LOAD: ` then an outlined
+     `SEQ` / `SEQ + MCH/FX` (`[FUNC]`); on ORIG `LOAD: ORIG SEQ` / `ORIG SEQ + MCH/FX` / MIDI `ORIG`.
+  2. `[BANK]` outside Clyps: nothing on press; SELECT BANK on release. `[BANK]`+trig still picks a
+     bank. Entering Clyps `[BANK]` first: no SELECT BANK flash, and no box round `BANK X`.
+  3. Grid: your pattern red, a cued load solid yellow, the select box flashing red.
+  4. `[PAGE]`: this track's original sequence; `[FUNC]`+`[PAGE]`: with its machine / FX.
+  5. Hold `[PTN]`+`[BANK]` (from outside): Clyps opens showing `LOAD: ORIG PTN + PART` (left side
+     `T6` only); the 4th page LED: red if the pattern is all original, flashing red if not. Press
+     `[PAGE]`: the whole pattern and its Part come back (cued while playing), and Clyps closes.
+     Same chord pressed inside Clyps + `[PAGE]`: the same restore, Clyps stays open.
+  6. Box on ORIG: the 4th page LED red (original) / flashing red (changed) / yellow (restore cued);
+     move off ORIG and let go of the chord: the page LEDs step as normal again.
+
 - **CLYPS — CLYPH full test list.** Image `140C_CLYPH` (CLYPG + FULL loads; CLYPG was never
   flashed, so its items are in here). Use a **throwaway copy** of a project with: patterns using
   different Parts (different machines / FX on a track), one PER TRACK pattern with CHAIN AFTER = 4,
