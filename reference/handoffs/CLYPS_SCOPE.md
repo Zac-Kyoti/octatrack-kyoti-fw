@@ -6,7 +6,9 @@
 - **Worktree / branch:** `../octatrack-kyoti-fw-trkseq`, branch `trkseq`. Commits are local, not
   pushed. Clyps is WIP, nothing is promoted, and there is no README entry.
 - **Latest image:** `140C_CLYPF` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
-  NOT flashed (syx `b3eacd36…`, §8b). CLYP9 and CLYPA–CLYPE were never flashed either.
+  Syx `b3eacd36…`. **FLASHED 2026-10-28: the user ran the CLYPF walk-through (FLASHING §4: layout,
+  names across SAVE / RELOAD project and bank, power cycle, LOAD another project, EXPORT TO SET,
+  DELETE PROJECT on a throwaway project): all passed.**
 - **How the user tests now (2026-10-26):** a few changes at a time, a short list per image, not
   the whole FLASHING checklist.
 - **On the user's unit:** CLYP6 (FLASHING §4 steps 1–10 passed; MIDI tracks not seen, fixed in
@@ -38,6 +40,13 @@
   - Seven detours: `0x4005a044` [PTN], `0x4007af80` / `0x4007b3e0` [BANK] press / release,
     `0x400a1f72` phase D, `0x400a43a0` wrap body, `0x40062d1c` UI tail, `0x400905d4` the masked
     bank loader (project load).
+
+**Handoff 2026-10-28 (start here).** Read §1.0 (the 2026-10-27 model), §10.0/§10.2 (names), the
+traps below (incl. the harness lesson in §10.2), then continue with step 0 below. The user tests a
+few changes per image with a short walk-through (FLASHING §4 "CLYPx walk-through"), not the full
+list; give renders in the browser for any layout change (tools/clyps_render.py + clyps_view_html.py).
+Gate: `CLYPS_SYMS=… python3 tools/diag_clyps_ui.py --image … --only ABCDYETGRSNP` on OT DEMO (88
+checks) + `--only M` on JAM2; landing runs C1w/C6o (§8b) for tick-path changes.
 
 **Next, in this order** (decisions are all in §1.0–§1.7 and §2):
 0. **§1.0 step 2: stock [PTN] / [BANK] inside Clyps** (RE first: stock's pending-bank flow after
@@ -1187,7 +1196,7 @@ The ROM keeps only the guarded detours:
   effective length / scale (`cl_edited` / `cl_efflen`). So: none after power-on / a load; on after
   a swap or a trig edit; off when the original is back by any route. Gate 81/81; renders
   `out/clyps/vE/`.
-- **`140C_CLYPF` (2026-10-27), NOT flashed.** Syx `b3eacd36a5357a9f6886c5cb4b901717ec45f8db15c5cf624d3688c06178ccd8`,
+- **`140C_CLYPF` (2026-10-27), FLASHED 2026-10-28, the user's walk-through all passed.** Syx `b3eacd36a5357a9f6886c5cb4b901717ec45f8db15c5cf624d3688c06178ccd8`,
   CF `.bin` `220560c1…`. Names on the card (§10.2) and the user's layout: per column (`cl_colx`)
   the x at 3..5 / 55..57, bar / box 8..52 / 60..108, numbers at 10 / 62..68, labels at 16 / 72
   (3 px from the number: the only fit for 9-character names with 2 px to the right frame); the
