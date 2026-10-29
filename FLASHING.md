@@ -206,25 +206,64 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
-- **CLYPS — CLYPH walk-through.** Image `140C_CLYPH`: everything in CLYPG (its steps below) plus
-  FULL loads (sequence + machine/FX). Use a throwaway copy of a project: FULL loads change Parts.
-  1. Audio track, in Clyps: hold `[FUNC]`: the header reads `LOAD: SEQ+MCH/FX`. Still holding it,
-     tap the trig of a slot whose pattern uses another Part (or another bank's pattern) with a
-     different machine / FX on this track: the sequence AND the machine, FX, page values, scene
-     locks and LFO designer come with it. The pages show the new values; Part shows as edited.
-  2. A plain trig (no `[FUNC]`): the sequence only, the machine / FX stay.
-  3. While playing: the same, cued; the machine/FX change lands with the sequence (at the wrap or
-     the CHAIN AFTER point), the other tracks keep playing undisturbed. Try a FLEX → STATIC or
-     THRU change, and one to / from PICKUP.
-  4. Move the box to `ORIG`: it reads `ORIG SEQ`; hold `[FUNC]`: `ORIG SEQ+MCH/FX`. `[YES]` puts
-     the original sequence back; `[FUNC]`+`[YES]` puts back the sequence and the original
-     machine / FX.
-  5. MIDI side: any load (trig, `[YES]`, `ORIG`, `[PAGE]`, a temp reload) brings the track's
-     settings with the sequence (channel, bank, program, the page values, LFO designer). Tell me
-     if anything stays behind -- e.g. the arpeggiator's note sequence, which may live elsewhere in
-     the Part. `ORIG` reads plain `ORIG`; `[FUNC]` changes nothing.
-  6. Temp save / reload outside Clyps on a MIDI track (`[YES]`+TRACK, then change its channel,
-     then `[NO]`+TRACK): the channel comes back too.
+- **CLYPS — CLYPH full test list.** Image `140C_CLYPH` (CLYPG + FULL loads; CLYPG was never
+  flashed, so its items are in here). Use a **throwaway copy** of a project with: patterns using
+  different Parts (different machines / FX on a track), one PER TRACK pattern with CHAIN AFTER = 4,
+  one NORMAL pattern, a 2x-scale track, and MIDI tracks with different channels / programs.
+  A. Boot and basics
+     1. The unit boots and plays a project; samples load as usual.
+     2. Open with `[PTN]` held + `[BANK]`, and again with `[BANK]` held + `[PTN]`: no SELECT window
+        or toast; letting go of both keys keeps Clyps open; `[NO]` closes it.
+     3. After closing: stock `[PTN]` / `[BANK]` taps open their windows, trigs edit, no key stuck.
+  B. `[BANK]` / `[PTN]` inside Clyps (new in CLYPG)
+     4. Hold `[BANK]`: `BANK X` in the header is boxed and inverted (like `ORIG`); the arrows page
+        the bank; let go: box gone, no SELECT BANK.
+     5. Tap `[BANK]`: SELECT BANK opens over Clyps and stays; `[NO]` closes it, Clyps stays. Tap
+        `[BANK]` twice: the second tap closes it.
+     6. `[BANK]` held + trig: bank pending (`BANK X: SELECT PTN`), Clyps stays, nothing changes yet;
+        then a trig: real bank + pattern change, Clyps closes. Once with `[BANK]` let go between.
+     7. Tap `[PTN]`: SELECT PATTERN over Clyps; `[NO]` closes it. `[PTN]` + trig: real pattern
+        change for all tracks, Clyps closes.
+     8. The `[PTN]`+`[BANK]` chord pressed again inside Clyps: nothing.
+  C. MIDI side
+     9. In Clyps, `[MIDI]`: view and grid switch side at once; again: back.
+     10. MIDI side: no `LOAD: SEQ` in the header; `[FUNC]` changes nothing; `ORIG` reads `ORIG`.
+  D. Loads, stopped
+     11. Plain trig on an audio track: sequence only; machine / FX unchanged.
+     12. `[FUNC]` held: header `LOAD: SEQ+MCH/FX`; `[FUNC]` + trig on a slot whose pattern has
+         another Part / machine: sequence + machine, FX, page values, scene locks, LFO designer;
+         the pages show the new values; Part marked edited. `[FUNC]`+`[YES]` on the box: the same.
+     13. MIDI track: a plain trig brings channel, bank, program, page values with the sequence.
+         Tell me if anything stays behind (e.g. the arpeggiator note sequence).
+  E. Loads, playing (never confirmed on hardware so far)
+     14. Default CHAIN AFTER: trig -> slot flashes yellow, lands at the end of the pattern, red.
+     15. PER TRACK pattern, CHAIN AFTER = 4: lands at the next 4-step point, in step with the other
+         tracks (a 64-step sequence picked near step 9 enters at its own step 9-ish, not step 1).
+     16. A 2x track onto a 1x track and the reverse: lands on time at its own rate.
+     17. Pick a slot, then pick the slot already playing: the cue is cancelled.
+     18. Cue a load, then a stock pattern change that lands first: the Clyps cue is dropped.
+     19. Cue on several tracks (TRACK keys between picks): all land together.
+     20. `[FUNC]` + trig while playing: the machine / FX change lands with the sequence; the other
+         tracks play on undisturbed. Try FLEX -> STATIC or THRU, and to / from PICKUP.
+  F. Originals
+     21. Box on `ORIG`: `ORIG SEQ`; with `[FUNC]`: `ORIG SEQ+MCH/FX`. After a FULL load, `[YES]` puts
+         the sequence back (machine stays new); `[FUNC]`+`[YES]` puts both back.
+     22. `[PAGE]` undoes a load and a grid edit on the track; `[FUNC]`+`[PAGE]` restores every changed
+         track of the pattern on one landing; playing: cued like a load.
+     23. NORMAL pattern: load a slot of another length (it turns PER TRACK), then `[PAGE]`: NORMAL
+         again, plays as before.
+     24. The "x" left of a slot number: appears after a change, goes after a restore.
+  G. Saved sequences (outside Clyps)
+     25. Hold `[YES]` + TRACK n: `TRK n SAVED` toast. Change the track, hold `[NO]` + TRACK n:
+         `TRK n RELOADED`, at once (stopped) / at its next step in step (playing). Nothing saved:
+         `TRK n: SAVE FIRST`. Quick `[YES]` / `[NO]` taps still ARM / DISARM.
+     26. MIDI track: save, change its channel, reload: the channel comes back too.
+  H. Names (passed in CLYPF; one quick check)
+     27. A named slot keeps its name after a load / ORIG / save + reload project.
+  I. Lifetime and stress
+     28. LOAD PROJECT, and a power cycle: saved sequences gone, `ORIG` = the project as loaded.
+     29. Repeat B, D, E in a loop, both chord orders, different release orders: no stuck window,
+         dead key or frozen panel.
 
 - **CLYPS — CLYPG walk-through.** Image `140C_CLYPG`. As CLYPF (below), plus stock `[PTN]` /
   `[BANK]` inside Clyps and the BANK box. Open Clyps with the chord and let go of both keys first.
