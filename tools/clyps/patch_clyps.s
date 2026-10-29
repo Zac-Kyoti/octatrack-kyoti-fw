@@ -45,6 +45,14 @@
     .equ WIN_ONCLOSE, 0x460d1e60
     .equ BANK_TEARDOWN,0x4007b408       | SELECT BANK's onClose: pops its layers
     .equ DISMISS,     0x40056a70        | dismiss the SHOW_WIN popup (runs its onClose)
+    .equ BANK_TAP,    0x460e73c2        | [BANK] "tap eligible": set on press (unless latched), hold
+    .equ BANK_PICK,   0x460e73b8        | the bank a [BANK] + trig picked (BANK_SEL 1)
+    .equ BANK_LATCH,  0x460e73bc        | SELECT BANK latched (a tap's release)
+    .equ BANK_LAYER,  0x400cff14        | [BANK]'s keymap layer: the trigs pick a bank, then a pattern
+    .equ BANK_LEDL,   0x400cff28        | ... and its LED layer
+    .equ SHOW_WIN,    0x40059f8c        | (title, ticks, sticky, onClose): the SELECT window
+    .equ BANK_TITLE,  0x400b7302        | "SELECT BANK"
+    .equ WIN_STICKY,  0x40031200        | the SHOW_WIN window stays (no countdown)
     .equ ARR_ACT,     0x460d1aec        | arranger running
     .equ POPUP,       0x460e5cd0        | a blocking MLNOTIFY dialog is up
     .equ LAYER_PUSH,  0x40031494
@@ -168,6 +176,8 @@
     .equ ORIG_W,      15                | "ORIG", "SAVED": widths from the font's table 0x400c246a
     .equ SAVED_W,     19
     .equ MID_X,       47                | "SAVED" (the saved sequence plays) between the two labels
+    .equ BKBOX_L,     12                | [BANK] held: a dark box round "BANK A" (x 14..35: "T6 " is
+    .equ BKBOX_R,     37                | 11 px for T and M alike), 2 dark columns each side, as ORIG's
 
 | Two sections, linked together (tools/build_clyps.py): `.text` = the ROM part in the classic cave
 | (the sequencer-tick code -- phase D, the wrap body -- and the cue state it touches: ISR code
@@ -224,7 +234,8 @@ cb_stock:
     jmp     BANKP_RESUME
 
 | [BANK] release handler 0x4007b3e0. Replaces 8 B: moveq #2,d0 ; cmp.l 0x460e73c6,d0. Nothing of
-| ours any more (no chord states: only [NO] closes Clyps); kept so the site stays claimed.
+| ours (no chord states: only [NO] or a stock pattern pick closes Clyps); kept so the site stays
+| claimed. cl_k_chord's [BANK] release enters here when a trig picked something during the hold.
 cl_bankr:
     moveq   #2,%d0
     cmp.l   BANK_SEL,%d0
@@ -261,6 +272,9 @@ ce_noundo:
     move.l  %d0,BANK_SEL                | [BANK] release -> dismiss (nothing up: no-op)
     moveq   #1,%d0
     move.l  %d0,PTN_CONSUMED            | [PTN] release -> teardown only
+    clr.b   cl_bkarm                    | BANK_SEL 2 is ours now, not a pick
+    clr.b   cl_ptfwd
+    clr.b   cl_bkfwd
     move.b  PLAY_BANK,%d0
     move.b  %d0,cl_bank
     move.b  %d0,cl_sbank
@@ -317,8 +331,10 @@ cc_out:
 | changes. The select box (1 px frame) = what a [YES] loads: (cl_sbank, cl_cur), cl_cur 16 = ORIG.
 | [BANK] held: the arrows page the shown bank instead (the slot selector rests).
 
-| bank paging: d0 = +1 / -1
+| bank paging: d0 = +1 / -1. A [BANK] pressed in Clyps that pages opens no SELECT BANK on release.
 cl_page:
+    moveq   #1,%d1
+    move.b  %d1,cl_bkused
     moveq   #0,%d1
     move.b  cl_bank,%d1
     add.l   %d0,%d1
@@ -498,24 +514,107 @@ cl_k_track:
     rts
 
 | [PTN] / [BANK] pressed while Clyps is open (keys pressed AFTER our layer went up reach these
-| records): swallowed for now -- [BANK] held is the paging modifier (read from its held flag);
-| stock's SELECT PATTERN / SELECT BANK inside Clyps are the next step. A later release under
-| stock's own record (after Clyps closes) must not open SELECT PATTERN / SELECT BANK.
+| records, and their hold / release come back here, even after Clyps has closed). Scope §1.0
+| step 2: both behave as in stock.
+|  * [PTN]: stock's own handler for every event: its press pushes the pattern-pick layer, a tap
+|    opens SELECT PATTERN on release. A pattern picked that way is a real pattern change and closes
+|    Clyps (cl_uitail).
+|  * [BANK]: stock's press without SELECT BANK (the overlay that makes the trigs pick a bank IS
+|    pushed). Held, the arrows page the shown bank instead (the header boxes "BANK A"). The release
+|    of a plain tap opens SELECT BANK (RELOAD_FROM_PROJECT's inversion). A bank picked on the grid
+|    stays pending, as in stock; the pattern picked after it is a real change and closes Clyps.
+|  * the chord's second key ([PTN] with [BANK] held, or the reverse): swallowed.
+|  * [FUNC]+[BANK]: name the box's sequence; [FUNC]+[PTN]: nothing.
 cl_k_chord:
     move.l  8(%sp),%d0
-    cmpi.l  #1,%d0
-    bne.b   kc_out
-    moveq   #1,%d1
-    move.l  %d1,PTN_CONSUMED
-    moveq   #2,%d1
-    move.l  %d1,BANK_SEL
-    tst.b   cl_fn
-    beq.b   kc_out
     move.l  4(%sp),%d1
     cmpi.l  #0x2f,%d1
-    beq.w   cl_rename                   | [FUNC]+[BANK] (EDIT): name the box's sequence
+    beq.b   kc_bank
+|   [PTN]
+    cmpi.l  #1,%d0
+    bne.b   kc_pfwd
+    clr.b   cl_ptfwd
+    tst.b   cl_fn
+    bne.w   kc_out
+    tst.l   BANK_HELD
+    beq.b   kc_pgo
+    moveq   #1,%d1                      | the chord again: nothing, and no SELECT BANK either
+    move.b  %d1,cl_bkused
+    rts
+kc_pgo:
+    moveq   #1,%d1
+    move.b  %d1,cl_ptfwd
+kc_pfwd:
+    tst.b   cl_ptfwd
+    beq.w   kc_out
+    tst.l   %d0
+    bne.w   cp_stock
+    clr.b   cl_ptfwd                    | the release ends the gesture
+    bra.w   cp_stock                    | stock's [PTN] handler; (code, event) still at 4 / 8(sp)
+|   [BANK]
+kc_bank:
+    cmpi.l  #1,%d0
+    beq.b   kc_bpress
+    tst.b   cl_bkfwd
+    beq.w   kc_out
+    tst.l   %d0
+    beq.w   kc_brel
+    moveq   #1,%d0                      | hold: tap-eligible again (stock's hold 0x4007af24)
+    move.l  %d0,BANK_TAP
+    rts
+kc_bpress:
+    clr.b   cl_bkfwd
+    tst.b   cl_fn
+    bne.w   cl_rename                   | [FUNC]+[BANK] (EDIT): name the box's sequence
+    tst.l   PTN_HELD
+    beq.b   kc_bgo
+    moveq   #1,%d1                      | the chord again: nothing, and no SELECT PATTERN on [PTN]'s
+    move.l  %d1,PTN_CONSUMED            | release
+    rts
+kc_bgo:
+    moveq   #1,%d0
+    move.b  %d0,cl_bkfwd
+    move.b  %d0,cl_bkarm
+    clr.b   cl_bkused
+|   stock's press (0x4007af80 and its tail 0x4007af30) without SHOW_WIN. SHOW_WIN would first have
+|   dismissed whatever SELECT window is up (a latched SELECT BANK / PATTERN: its onClose pops its
+|   layers): do that here.
+    tst.l   BANK_LATCH
+    seq     %d0
+    andi.l  #1,%d0
+    move.l  %d0,BANK_TAP                | a second tap on a latched SELECT BANK closes it
+    jsr     DISMISS
+    clr.l   BANK_SEL
+    clr.l   BANK_PICK
+    clr.l   BANK_LATCH
+    pea     BANK_LAYER
+    jsr     LAYER_PUSH
+    pea     BANK_LEDL
+    jsr     LED_PUSH
+    clr.l   (%sp)
+    jsr     LED_PAINT
+    addq.l  #8,%sp
 kc_out:
     rts
+kc_brel:
+    clr.b   cl_bkfwd
+    tst.l   BANK_SEL
+    bne.w   cl_bankr                    | a trig picked a bank (or a pattern): stock's own release
+    tst.b   cl_bkused
+    bne.b   kc_btear                    | the arrows paged the view: no SELECT BANK
+    tst.l   BANK_TAP
+    beq.b   kc_btear                    | the tap that closes a latched SELECT BANK (closed at press)
+    pea     BANK_TEARDOWN               | a plain tap: SELECT BANK, now, as stock's press shows it,
+    clr.l   -(%sp)                      | then latched as stock's release latches it
+    pea     0xf0
+    pea     BANK_TITLE
+    jsr     SHOW_WIN
+    lea     16(%sp),%sp
+    moveq   #1,%d0
+    move.l  %d0,BANK_LATCH
+    jmp     WIN_STICKY
+kc_btear:
+    jmp     BANK_TEARDOWN               | no window: pop the overlay the press pushed
 
 | [FUNC]+[BANK] in Clyps: stock's name editor (as project naming) on the sequence under the select
 | box (nothing on ORIG). It edits a scratch copy; its [YES] stores it (cl_named), its [NO] keeps the
@@ -720,6 +819,7 @@ cl_refresh:
 crf_cur:
     jsr     cl_trk
     move.l  %d0,%d3                     | d3 = track
+    move.b  %d0,cl_lastt
     move.l  %d3,-(%sp)
     jsr     cl_toff
     addq.l  #4,%sp
@@ -2032,7 +2132,33 @@ cn_n:
 | beq.w follows on those flags). Runs after every UI message. Does what a landing owes the UI.
 cl_uitail:
     tst.b   cl_open
-    beq.b   ut_post
+    beq.w   ut_post
+|   a pattern picked the stock way inside Clyps (scope §1.0 step 2) closes it: [PTN] + trig / a
+|   trig on SELECT PATTERN (0x40056b2c sets PTN_CONSUMED -1; Clyps' entry leaves it 1, stock's press
+|   0), or the pattern after a [BANK] + trig bank pick (BANK_SEL 2, armed by cl_k_chord's [BANK]
+|   press; Clyps' entry writes 2 itself and disarms)
+    moveq   #-1,%d0
+    cmp.l   PTN_CONSUMED,%d0
+    beq.b   ut_pick
+    tst.b   cl_bkarm
+    beq.b   ut_box
+    moveq   #2,%d0
+    cmp.l   BANK_SEL,%d0
+    bne.b   ut_box
+ut_pick:
+    clr.b   cl_bkarm
+    jsr     cl_close
+    bra.b   ut_post
+ut_box:
+    tst.l   BANK_HELD                   | [BANK]'s held flag is set / cleared after its handlers: the
+    sne     %d0                         | header's BANK box follows it here
+    cmp.b   cl_bkbox,%d0
+    beq.b   ut_pat
+    jsr     cl_draw
+ut_pat:
+    jsr     cl_trk                      | the active track changed under Clyps -- the [MIDI] key
+    cmp.b   cl_lastt,%d0                | (audio <-> MIDI side) is not ours: the view and grid follow
+    bne.b   ut_refr
     moveq   #0,%d0                      | the pattern you are on changed: the highlight follows
     move.b  PLAY_BANK,%d0
     lsl.l   #8,%d0
@@ -2040,6 +2166,7 @@ cl_uitail:
     cmp.w   cl_lastp,%d0
     beq.b   ut_post
     move.w  %d0,cl_lastp
+ut_refr:
     jsr     cl_refresh
 ut_post:
     move.w  cl_post,%d0
@@ -2348,12 +2475,18 @@ cd_ta:
     lea     12(%sp),%sp
 |   the header's right side, first match: [FUNC] held = the FULL label (FULL loads arrive in a
 |   later phase); the cursor on ORIG = a dark ORIG box; a save just made = a dark SAVED box; else
-|   the load mode. d5 = the dark box's left column, 0 = none.
+|   the load mode. d5 = the dark box's left column, 0 = none. The MIDI side has no load modes (the
+|   user, 2026-10-28: a MIDI load always takes everything): no LOAD label, [FUNC] changes nothing.
+    jsr     cl_trk
+    move.l  %d0,%d6                     | d6 >= 8: the MIDI side (d6 is free until the cells)
     moveq   #0,%d5
+    cmpi.l  #8,%d6
+    bcc.b   cd_nofn
     lea     cl_s_full,%a0
     moveq   #LOADF_X,%d0
     tst.b   cl_fn
     bne.b   cd_mode
+cd_nofn:
     lea     cl_s_orig,%a0
     moveq   #BOX_R-1-ORIG_W,%d0
     moveq   #0,%d1
@@ -2364,6 +2497,8 @@ cd_ta:
     moveq   #BOX_R-1-SAVED_W,%d0
     tst.b   cl_flash
     bne.b   cd_box
+    cmpi.l  #8,%d6
+    bcc.b   cd_mid                      | MIDI: no LOAD label
     lea     cl_s_seq,%a0
     moveq   #LOAD_X,%d0
     bra.b   cd_mode
@@ -2376,9 +2511,13 @@ cd_mode:
     move.l  %d0,-(%sp)
     bsr.w   cl_text
     lea     12(%sp),%sp
-|   "SAVED" between the labels while the active track plays its saved sequence (no slot is red)
+|   "SAVED" between the labels while the active track plays its saved sequence (no slot is red);
+|   on the audio side not while [FUNC] shows the long FULL label
+    cmpi.l  #8,%d6
+    bcc.b   cd_mid
     tst.b   cl_fn
     bne.b   cd_band
+cd_mid:
     jsr     cl_playing
     lsr.l   #8,%d0
     cmpi.l  #SRC_SAVED,%d0
@@ -2404,6 +2543,18 @@ cd_band:
     bsr.w   cl_xor
     lea     16(%sp),%sp
 cd_nobox:
+|   [BANK] held (the arrows page the bank): "BANK A" in a dark box like ORIG's (the user, 2026-10-28)
+    tst.l   BANK_HELD
+    sne     %d0
+    move.b  %d0,cl_bkbox
+    beq.b   cd_nobk
+    pea     WIN_H-2
+    pea     BKBOX_R
+    pea     HDR_Y-1
+    pea     BKBOX_L
+    bsr.w   cl_xor
+    lea     16(%sp),%sp
+cd_nobk:
 |   round the two top corners (a card): clear (0,63) (1,63) (0,62) and their mirror images
     lea     cl_corners,%a2
     moveq   #6,%d2
@@ -3381,8 +3532,8 @@ cl_keys:
     KREC 0x21, cl_k_lr, 0, 0, 15, 6      | the add/remove rule above holds)
     KREC 0x31, cl_k_yes, 0, 0, 0, 0
     KREC 0x32, cl_k_no, 0, 0, 0, 0
-    KREC 0x2e, cl_k_chord, cl_k_chord, 0, 30, 0
-    KREC 0x2f, cl_k_chord, cl_k_chord, 0, 30, 0
+    KREC 0x2e, cl_k_chord, cl_k_chord, cl_k_chord, 30, 0    | holds: stock's tap-eligible re-arm
+    KREC 0x2f, cl_k_chord, cl_k_chord, cl_k_chord, 30, 0
     KREC 0x2d, cl_k_func, cl_k_func, 0, 0, 0, cl_fsub
     KREC 0x1b, cl_k_page, 0, 0, 0, 0     | [PAGE]: the original back ([FUNC]+[PAGE]: every track's)
     .byte 0xff, 0
@@ -3434,6 +3585,12 @@ cl_bank:    .byte 0
 cl_cur:     .byte 0
 cl_fn:      .byte 0                     | [FUNC] held (our own press/release record)
 cl_flash:   .byte 0                     | the header shows SAVED (a save) until the next key
+cl_lastt:   .byte 0                     | the track (0..15, MIDI 8..15) at the last cl_refresh
+cl_bkbox:   .byte 0                     | the header was drawn with [BANK] held (its BANK box)
+cl_ptfwd:   .byte 0                     | a [PTN] pressed in Clyps: its events go to stock's handler
+cl_bkfwd:   .byte 0                     | a [BANK] pressed in Clyps: stock's gesture, ours to finish
+cl_bkarm:   .byte 0                     | ... BANK_SEL 2 from now on is a pick (closes Clyps)
+cl_bkused:  .byte 0                     | ... the arrows paged during it: no SELECT BANK on release
 cl_nproj:   .byte 0                     | project loads seen (the emulator gate reads it)
             .align 2
 cl_cls:     .space 16

@@ -206,6 +206,26 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **CLYPS — CLYPG walk-through.** Image `140C_CLYPG`. As CLYPF (below), plus stock `[PTN]` /
+  `[BANK]` inside Clyps and the BANK box. Open Clyps with the chord and let go of both keys first.
+  1. Hold `[BANK]`: the header's `BANK A` turns into a dark box with lit letters (like `ORIG`).
+     With it held, the arrows page the shown bank. Let go: the box goes, and no SELECT BANK
+     appears.
+  2. Tap `[BANK]` (no arrows): SELECT BANK opens over the Clyps view and stays. `[NO]` closes it;
+     Clyps is still open. Tap `[BANK]` again, then tap it once more: the second tap closes it.
+  3. Hold `[BANK]`, tap a trig: that bank is picked (`BANK x: SELECT PTN`), Clyps stays open and
+     the playing bank has not changed. Tap another trig: a real bank + pattern change (cued if
+     running), and Clyps closes. Try it once with `[BANK]` let go between the two trigs too.
+  4. Tap `[PTN]`: SELECT PATTERN opens over Clyps; `[NO]` closes it, Clyps stays. Hold `[PTN]` and
+     tap a trig: a real pattern change for all tracks, and Clyps closes.
+  5. In Clyps, press the `[PTN]`+`[BANK]` chord again: nothing happens (no window, no change).
+  6. After each of the above, outside Clyps: the trigs edit the sequence as normal, and a stock
+     `[PTN]` / `[BANK]` tap still opens its window (nothing left stuck).
+  7. In Clyps, press `[MIDI]`: the view and the grid switch to the MIDI track (slots, red / green)
+     at once; press it again: back to the audio track.
+  8. On the MIDI side: the header's right side shows no `LOAD: SEQ`, and holding `[FUNC]` changes
+     nothing there. (A MIDI load still copies the sequence only; the track settings come later.)
+
 - **CLYPS — CLYPF walk-through.** Image `140C_CLYPF`. As CLYPE (below), plus the new layout and
   names saved with the project. **Use a throwaway copy of a project for steps 4–5.**
   1. Layout: the "x" sits left of each number; the bars / boxes are narrower and the x is outside

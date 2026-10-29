@@ -76,6 +76,12 @@ def main(argv):
         else:
             call(SET_KEY, int(k, 16), 1)
             call(SET_KEY, int(k, 16), 0)
+        if not k.startswith(("call:", "poke")):
+            # the UI tail (0x40062d1c) runs after every SYS message on hardware, a key included: a
+            # type-0 message goes straight to it (the loop's range check), as in diag_clyps_ui.py
+            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+            rt.uc.mem_write(er.SYS_MSG_SCRATCH, bytes([0, 0]))
+            rt.post_message(er.SYS_QUEUE, er.SYS_MSG_SCRATCH)
         rt.run(ms=60)
         if a.each:
             snap(out.with_name(f"{out.stem}_{i:02d}{out.suffix}"))

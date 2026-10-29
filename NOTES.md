@@ -37697,3 +37697,23 @@ alongside stock's bank files; the "edited" x; the user's cell layout. Harness le
 call_as_main a poster that touches the card first (CARD SYNC 0x40022cd4) -- it corrupts the
 emulator's task frames (looked like a Clyps stack bug for hours). Next: scope §0 step 0 (stock
 [PTN] / [BANK] inside Clyps). Details: CLYPS_SCOPE.md §0, §1.0, §10.
+
+**Session 131 cont. (6) (2026-10-28, `trkseq`)** — CLYPS `140C_CLYPG` BUILT, NOT flashed: scope §0
+step 0 (stock [PTN] / [BANK] inside Clyps), the BANK box, the [MIDI] key inside Clyps, no load modes
+on the MIDI side.
+- RE (scope §1.0 "Step 2 as built"): [BANK]'s press opens SELECT BANK and pushes layer `0x400cff14`
+  (trigs pick a bank, state 1, then a pattern, state 2); [PTN]'s press pushes `0x400bf0f2` (trig =
+  pick `0x40056b2c`, consumed := −1). SHOW_WIN `0x40059f8c` is a prio-10 window: the Clyps view stays
+  under it.
+- In Clyps: [PTN] = stock's handler; [BANK] = stock's press minus SELECT BANK (shown on a plain tap's
+  release; none after arrow paging); a bank picked on the grid stays pending; a stock pattern pick
+  closes Clyps (UI tail). The header boxes `BANK A` while [BANK] is held. The UI tail refreshes the
+  view / grid when the active track changes under Clyps ([MIDI] is not our key). MIDI side: no
+  `LOAD: SEQ` label, [FUNC] changes nothing (the user: a MIDI load always takes everything; the
+  MIDI Part slice arrives with FULL loads).
+- Scoped (not built): `ORIG SEQ` / `ORIG SEQ+MCH/FX` (§1.7); names follow stock track / pattern
+  copy / paste (§10.3).
+- Harness: the gate called set_key_state directly, so Clyps' UI tail ran only when stock posted a
+  message; K and M now post a type-0 SYS message after each key (straight to the tail). Posting
+  it in every scenario made S fault after A..E+G+T (an emulator accumulation effect; every shorter
+  prefix passes), so only K and M do. Gate K (21 checks) new; M gains the [MIDI] check.

@@ -1,14 +1,16 @@
-# CLYPS — scope and build record (WIP; latest test image `140C_CLYPF`)
+# CLYPS — scope and build record (WIP; latest test image `140C_CLYPG`)
 
 ## §0 Start here (handoff, 2026-10-25) — read this first, then §1–§4
 
 **Where it stands.**
 - **Worktree / branch:** `../octatrack-kyoti-fw-trkseq`, branch `trkseq`. Commits are local, not
   pushed. Clyps is WIP, nothing is promoted, and there is no README entry.
-- **Latest image:** `140C_CLYPF` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
-  Syx `b3eacd36…`. **FLASHED 2026-10-28: the user ran the CLYPF walk-through (FLASHING §4: layout,
-  names across SAVE / RELOAD project and bank, power cycle, LOAD another project, EXPORT TO SET,
-  DELETE PROJECT on a throwaway project): all passed.**
+- **Latest image:** `140C_CLYPG` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
+  **BUILT 2026-10-28, NOT flashed**: step 0 below (stock [PTN] / [BANK] inside Clyps) and the BANK
+  box (§1.0). Walk-through: FLASHING §4 "CLYPG walk-through".
+- **On the unit:** `140C_CLYPF`, syx `b3eacd36…`. FLASHED 2026-10-28: the user ran the CLYPF
+  walk-through (FLASHING §4: layout, names across SAVE / RELOAD project and bank, power cycle,
+  LOAD another project, EXPORT TO SET, DELETE PROJECT on a throwaway project): all passed.
 - **How the user tests now (2026-10-26):** a few changes at a time, a short list per image, not
   the whole FLASHING checklist.
 - **On the user's unit:** CLYP6 (FLASHING §4 steps 1–10 passed; MIDI tracks not seen, fixed in
@@ -45,13 +47,20 @@
 traps below (incl. the harness lesson in §10.2), then continue with step 0 below. The user tests a
 few changes per image with a short walk-through (FLASHING §4 "CLYPx walk-through"), not the full
 list; give renders in the browser for any layout change (tools/clyps_render.py + clyps_view_html.py).
-Gate: `CLYPS_SYMS=… python3 tools/diag_clyps_ui.py --image … --only ABCDYETGRSNP` on OT DEMO (88
-checks) + `--only M` on JAM2; landing runs C1w/C6o (§8b) for tick-path changes.
+Gate: `CLYPS_SYMS=… python3 tools/diag_clyps_ui.py --image … --only ABCDYETGRSNPK` on OT DEMO
++ `--only M` on JAM2; landing runs C1w/C6o (§8b) for tick-path changes. Since CLYPG, scenarios K
+and M (and clyps_render.py) post a type-0 SYS message after every key: on hardware each key is a
+message of that loop and Clyps' UI tail runs after it; the loop's range check sends type 0 straight
+to the tail. Without it, what Clyps does from the tail (the BANK box, closing on a pattern pick,
+following the [MIDI] key) only happened when stock posted a message of its own. Only K and M:
+with the posts in every scenario, S faulted at its first key (`rte … not a 4-word frame` /
+unmapped frame read) once enough had run before it (A..E+G+T; every shorter prefix passed, and
+the full run passes without them): an emulator accumulation effect, like the card-poster lesson
+(§10.2). `CLYPS_NOTAIL=1` turns them off in K and M too.
 
 **Next, in this order** (decisions are all in §1.0–§1.7 and §2):
-0. **§1.0 step 2: stock [PTN] / [BANK] inside Clyps** (RE first: stock's pending-bank flow after
-   [BANK] + trig, SELECT PATTERN / SELECT BANK windows over the prio-3 Clyps view, detecting a real
-   pattern change to close Clyps, RELOAD3's SELECT-BANK-on-release code as the model).
+0. **DONE (CLYPG, not flashed): §1.0 step 2, stock [PTN] / [BANK] inside Clyps**, and the BANK box.
+   How it works: §1.0 "Step 2 as built". Next after the user's CLYPG walk-through: step 1.
 1. **FULL loads** (§1.7). Route: DIRECT JUMP's engine hand-off after a slice copy at the landing
    tick; first check whether the light Part apply `0x40009e00` disturbs the other tracks
    mid-pattern (§1.7 "Plan").
@@ -73,7 +82,7 @@ checks) + `--only M` on JAM2; landing runs C1w/C6o (§8b) for tick-path changes.
    - The TRACK keys' `TRK_BASE` must go to a stub, not RELOAD's detour at `0x40040250`.
    - DRAM: Clyps must be the LAST DRAM unit (its bss follows its `.dram`), or `dram.build` needs
      per-unit bss.
-4. **Later:** an octabam module; names (§10); the TRACK_PASTE_DESIGNER_FIX Bugfix candidate
+4. **Later:** an octabam module; names follow stock copy / paste (§10.3); the TRACK_PASTE_DESIGNER_FIX Bugfix candidate
    (NOTES Session 131 cont. (3); the user still has to observe it on stock).
 5. **Decided (the user, 2026-10-25):** after a load onto the playing pattern, its own slot shows
    the loaded copy (the keep rule, as built). Picking that slot is a no-op; `ORIG` / [PAGE] is the
@@ -250,6 +259,47 @@ load into that pattern's track.
   - SELECT BANK on [BANK]'s release, not its press (RELOAD_FROM_PROJECT's inversion; the user
     remembered it as DIRECT JUMP's).
 - **Removed:** the held / latched states, close-on-load, the [BANK]-alone Clyps bank pick (CLYPA).
+- **[BANK] held = the BANK box** (the user, 2026-10-28; built CLYPG): while [BANK] is held (the
+  arrows page the shown bank), the header's `BANK A` gets a dark box with lit letters, the way
+  `ORIG` looks when the box is on it (x 12..37, 2 dark columns each side of the text). It follows
+  [BANK]'s real held flag, redrawn from the UI tail (the flag changes after the key's handler).
+- **[MIDI] inside Clyps** (the user's report, 2026-10-28; fixed CLYPG): the [MIDI] key is not ours,
+  so switching sides left the view and grid on the old side. The UI tail now compares the active
+  track (0..15, MIDI 8..15) with the one `cl_refresh` last drew (`cl_lastt`) and refreshes.
+
+**Step 2 as built (CLYPG, RE 2026-10-28, C on our image).** Stock's two keys:
+- [BANK] press (`0x4007af80` → tail `0x4007af30`): state `0x460e73c6` := 0, tap-eligible
+  `0x460e73c2` := !latched, latched `0x460e73bc` := 0, SHOW_WIN(`SELECT BANK`, 0xf0, 0, teardown
+  `0x4007b408`), push keymap layer `0x400cff14` (trigs → `0x4007b2fc` / `0x4007b434`, [NO] →
+  `0x4007b25c`, [YES] swallowed) and LED layer `0x400cff28`. Hold `0x4007af24`: tap-eligible := 1.
+- [BANK]-layer trig, state 0: bank n picked (`BANK UNAVAILABLE` toast if `[0x4017d516 + n·0x9b340]`
+  ≠ 0), `0x460e73b8` := n, state 1, SHOW_WIN(`BANK %c: SELECT PTN`). State 1: the pattern pick
+  `0x400a1030(bank, pattern)` (or the chain add `0x4009c634` while another trig is held), state 2.
+- [BANK] release `0x4007b3e0`: state 2 or not tap-eligible → DISMISS; else latched := 1 and
+  `0x40031200` (`0x460d1e4c` = 1: SHOW_WIN without countdown).
+- [PTN] (`0x4005a044`, all three events): press = DISMISS, state `0x460d1742` 1, consumed
+  `0x460d173e` 0, push `0x400bf0f2` (trigs → pick `0x40056b2c`, which sets consumed −1) + LED
+  `0x400bebfe`. Release: consumed or not eligible → teardown `0x40043418`; else state 2 +
+  SHOW_WIN(`SELECT PATTERN`, 0xf0, sticky, `0x40043418`).
+- SHOW_WIN = `0x40059f8c(title, ticks, sticky, onClose)`: a priority-10 window (WIN_NEW), over the
+  prio-3 Clyps view, which stays (measured).
+
+Clyps (`cl_k_chord`; keys pressed under our layer return to our record for hold and release, also
+after Clyps closed):
+- [PTN] pressed in Clyps → stock's handler for every event. [PTN] with [BANK] held → swallowed.
+- [BANK] pressed in Clyps → stock's press minus SHOW_WIN (DISMISS any SELECT window first, as
+  SHOW_WIN would); release: something picked → stock's release; the arrows paged → teardown only;
+  a plain tap → SHOW_WIN(`SELECT BANK`) + latched; the tap on a latched window → it closed at the
+  press, teardown. [BANK] with [PTN] held → swallowed (consumed := 1).
+- Closing on a pick (UI tail): consumed = −1 (only stock's pick writes it; Clyps' entry writes 1),
+  or state 2 after a [BANK] pressed in Clyps (Clyps' entry writes 2 itself, so it is armed per
+  gesture).
+- Gate K (emulator, 21 checks): box on / off, SELECT BANK on a tap's release and [NO], paging
+  without a window, held and latched bank + pattern picks (close, layer lists at baseline, the
+  pattern changed), [PTN] tap + [NO], [PTN] + trig, the chord again.
+- **KYOTI note:** with a [PTN] pressed in Clyps, stock's [PTN] layer owns [YES] (a null record), so
+  `cl_k_yes`'s [PTN]+[YES] → DJ_TOGGLE only sees a [PTN] pressed before Clyps opened. DJ's own
+  [PTN]+[YES] route decides it there; check it at KYOTI integration.
 
 
 ### 1.1 Entering and leaving Clyps mode (the user's rule, 2026-10-23)
@@ -451,6 +501,29 @@ everything" is O17.
 ---
 
 ### 1.7 "Sequence + machine/FX" loads — FULL loads (decided 2026-10-23: yes, scene locks included)
+
+**ORIG SEQ / ORIG SEQ+MCH/FX (the user, 2026-10-28; scoped, not built).**
+- With the select box on `ORIG`, its header box reads **`ORIG SEQ`** (was `ORIG`).
+- With [FUNC] held while the box is on `ORIG`, it reads **`ORIG SEQ+MCH/FX`**.
+- `ORIG SEQ` loads the original sequence only (what `ORIG` / [PAGE] do now). `ORIG SEQ+MCH/FX`
+  loads the original sequence plus the track's original machine and effects: the Part slice
+  below, taken from the load snapshot (§1.5′: it already holds every bank's Parts), the same FULL
+  load as from a slot. So [FUNC] on `ORIG` works like [FUNC] on any other slot.
+- Widths (font table `0x400c246a`): `ORIG SEQ` 30 px, `ORIG SEQ+MCH/FX` 58 px; right-aligned to
+  `BOX_R` (text ends at x 107) the long one starts at x 50, clear of `T6 BANK A` (ends x 35).
+- [PAGE] / [FUNC]+[PAGE] keep their meaning (this track / every changed track, sequence only)
+  unless the user decides otherwise when FULL loads are built.
+
+**The MIDI side has no load modes (the user, 2026-10-28).** MIDI tracks have no machines or FX, and
+a MIDI sequence depends on its track's settings, so every MIDI load takes everything.
+- Header: no `LOAD: SEQ` label on the MIDI side, and [FUNC] changes nothing there (no
+  `LOAD: SEQ+MCH/FX`). **Built in CLYPG.** The `ORIG` and `SAVED` boxes stay.
+- Loads: a MIDI load (slot, `ORIG`, saved sequence) = the track record + the MIDI Part slice,
+  68 B (`+0x3e2+32m` page values, `+0x4e2+36m` channel / bank / program / …), always. **Not built
+  yet:** today a MIDI load copies the track record only. It arrives with step 1 (FULL loads), as the
+  MIDI side's only kind of load. Check then whether MIDI tracks have scene locks / arp settings
+  outside those 68 B that should travel too.
+- `ORIG` on the MIDI side: proposed to stay `ORIG` (no `SEQ`, there is no choice); to confirm.
 
 **What it would carry.** Exactly the per-track Part slice that stock's own TRACK COPY/PASTE carries
 (C, `0x40029754` / `0x4002b654`; MIDI `0x40029614` / `0x4002b470`).
@@ -1282,6 +1355,27 @@ To be applied with the first code commit:
   post; SAVE BANK's and RELOAD BANK's argument is the bank mask.
 - **Limitation (accepted by the user):** names typed after the last `.work` write are lost at
   power-off (stock restores the current bank's unsaved edits from SRAM; Clyps cannot).
+
+### 10.3 Names follow stock copy / paste (the user, 2026-10-28; scoped, not built)
+
+Stock's TRACK COPY / PASTE and PATTERN COPY / PASTE must carry sequence names, exactly as they carry
+the sequences: a paste puts the copied name(s) on the destination, so a name always describes the
+sequence under it.
+- **Track:** COPY remembers the source's name (bank, pattern, track) in a clipboard of ours, beside
+  stock's clipboard; PASTE writes it to the destination's (bank, pattern, track) name, or clears it
+  if the source had none. Audio: COPY `0x40029754` / PASTE `0x4002b654`; MIDI: `0x40029614` /
+  `0x4002b470` (C, §1.7). Hook each at its success path, after stock's own copy.
+- **Pattern:** COPY remembers all 16 names of the source pattern (8 audio + 8 MIDI tracks, 160 B);
+  PASTE writes all 16. Pattern COPY / PASTE entry points: not yet located (RE).
+- **To check during the RE:** stock's paste UNDO (a second paste press / the undo slot) must bring
+  the old name(s) back as well; CLEAR TRACK / CLEAR PATTERN probably clear the names (to ask the
+  user); a paste into another bank and after a bank change (the clipboard outlives them); the
+  clipboard is invalid after a project load (stock's too?); a paste onto the playing pattern while
+  a Clyps cue is pending on that track.
+- The "edited" x and `ORIG` need nothing new: they compare against the load snapshot, which holds
+  the names as loaded.
+- Names are written to the card with the bank as now (§10.2), so a paste is saved exactly when the
+  pasted sequence is.
 
 ### 10.1 Earlier notes
 

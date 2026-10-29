@@ -86,6 +86,12 @@ def main(argv):
                     layers=chain(LAYERS), leds=chain(LEDS), consumed=rd(PTN_CONSUMED, 4),
                     banksel=rd(BANK_SEL, 4), showwin=rd(WIN_SLOT, 4))
 
+    # The type-0 tail posts below are made only in the scenarios that test what Clyps does from the
+    # UI tail (K, M). Emulator only: with them in every scenario, S faulted at its first key ('rte
+    # ... not a 4-word frame' / an unmapped frame read) once enough had run before it (A..T+G..R;
+    # every shorter prefix passes, and the full run passes without them).
+    posttail = [False]
+
     def key(code, ev, settle=60):
         print(f"      key 0x{code:02x} {'down' if ev else 'up'}", flush=True)
         rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
@@ -106,6 +112,13 @@ def main(argv):
             print(f"      STALL: {e}; hottest PCs: " +
                   ", ".join(f"0x{pc:08x}x{n}" for pc, n in pcs.most_common(12)), flush=True)
             raise SystemExit(2)
+        # on hardware every key event is a message of the SYS task's loop, and Clyps' UI tail
+        # (0x40062d1c) runs after each one; here set_key_state is called directly. Post a type-0
+        # message: the loop's range check sends it straight to that tail, nothing else runs.
+        if posttail[0] and not os.environ.get("CLYPS_NOTAIL"):     # CLYPS_NOTAIL: the pre-CLYPG harness
+            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+            u.mem_write(er.SYS_MSG_SCRATCH, bytes([0, 0]))
+            rt.post_message(er.SYS_QUEUE, er.SYS_MSG_SCRATCH)
         rt.run(ms=settle)
 
     def tap(code):
@@ -271,7 +284,8 @@ def main(argv):
 
     if "M" in a.only:
         # --- M: the MIDI side (needs a project with MIDI trigs on pattern 1, e.g. JAM2)
-        print("M: MIDI key; TRACK 2; chord; slots; trig 2 loads pattern 2's M2; NO")
+        print("M: MIDI key; TRACK 2; chord; slots; trig 2 loads pattern 2's M2; [MIDI] in Clyps; NO")
+        posttail[0] = True
         print(f"      MKI/MKII probe 0x46c8d18c = 0x{rd(0x46C8D18C, 4):08x}", flush=True)
         rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
         if rd(0x80000012, 4) == 0:         # some projects load with the MIDI tracks showing
@@ -294,8 +308,20 @@ def main(argv):
         key(0x01, 1)
         key(0x01, 0)
         check(mrec(act, 1) == src, "trig 2 loaded pattern 2's M2 onto the playing pattern's M2")
+        # the [MIDI] key inside Clyps (not ours): the view and the grid follow the side
+        lastt = lambda: rd(syms["cl_lastt"], 1)
+        trk = lambda: (rd(0x80000000, 1) & 7) + (8 if rd(0x80000012, 4) else 0)
+        for side in ("audio", "MIDI"):
+            m0 = rd(0x80000012, 4)
+            key(0x35, 1)
+            key(0x35, 0)
+            check(state()["open"] == 1 and (rd(0x80000012, 4) != 0) != (m0 != 0) and lastt() == trk(),
+                  f"[MIDI] in Clyps: on the {side} side, the view and grid follow (track {trk()}, "
+                  f"redrawn for {lastt()})")
+            shot(f"M_side_{side}")
         tap(NO)
         closed_ok("[NO]")
+        posttail[0] = False
 
     if "Y" in a.only:
         # --- Y: [YES] loads the box; the chord + [YES] and [PTN]+[YES] never load
@@ -718,6 +744,111 @@ def main(argv):
         check(len(same) == 16, "the snapshot is the bank as it is after the load (all 16 banks)")
         check(rec(act, 0) == oslot(act, 0), "T1 equals its original after the load")
         check(state()["open"] == 0, "Clyps closed")
+
+    if "K" in a.only:
+        # --- K: stock [PTN] / [BANK] inside Clyps (scope §1.0 step 2). Changes the playing pattern:
+        # it runs last and puts the pattern back.
+        posttail[0] = True
+        print("K: [BANK] in Clyps: box while held, SELECT BANK on a tap's release, bank pick stays, "
+              "bank + pattern closes; [PTN] tap / [PTN] + trig")
+        BANK_LAYER, WIN_ONCLOSE = 0x400CFF14, 0x460D1E60
+        tap(0x10)
+        act = rd(0x800065BE, 1)
+        pbank = rd(0x800065BD, 1)
+
+        def enter():
+            key(PTN, 1)
+            key(BANK, 1)
+            key(BANK, 0)
+            key(PTN, 0)
+            return state()
+        s0 = enter()
+        bkbox = lambda: rd(syms["cl_bkbox"], 1)
+        check(s0["open"] == 1 and bkbox() == 0, "Clyps open; [BANK] released: no BANK box")
+        key(BANK, 1)
+        s = state()
+        shot("K1_bank_held")
+        check(s["showwin"] == 0 and BANK_LAYER in s["layers"], "[BANK] pressed in Clyps: no SELECT BANK yet, "
+              "its trig overlay is up")
+        check(bkbox() != 0, "[BANK] held: the header boxes BANK A")
+        key(BANK, 0)
+        s = state()
+        shot("K2_bank_tap")
+        check(s["open"] == 1 and s["showwin"] != 0 and rd(WIN_ONCLOSE, 4) == 0x4007B408,
+              "a [BANK] tap's release: SELECT BANK, over Clyps")
+        check(bkbox() == 0, "[BANK] released: the box goes")
+        tap(NO)
+        s = state()
+        check(s["open"] == 1 and s["showwin"] == 0 and s["layers"] == s0["layers"] and s["leds"] == s0["leds"],
+              "[NO] on SELECT BANK: it closes, Clyps stays, our layers on top again")
+        key(BANK, 1)
+        tap(RIGHT)
+        key(BANK, 0)
+        s = state()
+        check(s["open"] == 1 and s["showwin"] == 0 and s["layers"] == s0["layers"] and s["bank"] == (s0["bank"] + 1) % 16,
+              "[BANK] + RIGHT: pages, no SELECT BANK on release, overlay gone")
+        # [BANK] held + trig 2 (bank B) -> pending, Clyps stays; trig 3 -> bank B pattern 3, Clyps closes
+        nb = (pbank + 1) % 16
+        key(BANK, 1)
+        tap(nb)
+        s = state()
+        shot("K3_bank_picked")
+        check(s["open"] == 1 and s["banksel"] == 1 and rd(0x800065BD, 1) == pbank,
+              f"[BANK] + trig {nb + 1}: bank pending (stock), Clyps stays, the bank has not changed")
+        tap(2)
+        rt.run(ms=300)
+        check(state()["open"] == 0, "... then trig 3: a bank + pattern selection, Clyps closes")
+        key(BANK, 0)
+        rt.run(ms=300)
+        closed_ok("[BANK] released after the pick")
+        check((rd(0x800065BD, 1), rd(0x800065BE, 1)) == (nb, 2), f"now on bank {nb}, pattern 3 "
+              f"(read {rd(0x800065BD, 1)}, {rd(0x800065BE, 1)})")
+        rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+        rt.seq_select_live(pbank, act)
+        rt.run(ms=300)
+        # a [BANK] tap (latched SELECT BANK), trig = bank, trig = pattern: closes
+        s0 = enter()
+        tap(BANK)
+        tap(pbank)
+        check(state()["open"] == 1 and state()["showwin"] != 0, "latched SELECT BANK, trig picks the bank: Clyps stays")
+        tap((act + 1) % 16)
+        rt.run(ms=300)
+        closed_ok("... and a trig picks the pattern: Clyps closes")
+        check(rd(0x800065BE, 1) == (act + 1) % 16, f"now on pattern {(act + 1) % 16 + 1}")
+        rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+        rt.seq_select_live(pbank, act)
+        rt.run(ms=300)
+        # [PTN] tap: SELECT PATTERN over Clyps; [NO] closes it; [PTN] + trig: a pattern change, closes
+        s0 = enter()
+        tap(PTN)
+        s = state()
+        shot("K4_ptn_tap")
+        check(s["open"] == 1 and s["showwin"] != 0, "a [PTN] tap in Clyps: SELECT PATTERN, Clyps stays")
+        tap(NO)
+        s = state()
+        check(s["open"] == 1 and s["showwin"] == 0 and s["layers"] == s0["layers"],
+              "[NO] on SELECT PATTERN: it closes, Clyps stays")
+        key(PTN, 1)
+        tap((act + 2) % 16)
+        rt.run(ms=300)
+        check(state()["open"] == 0, "[PTN] + trig: a pattern selection, Clyps closes")
+        key(PTN, 0)
+        closed_ok("[PTN] released")
+        check(rd(0x800065BE, 1) == (act + 2) % 16, f"now on pattern {(act + 2) % 16 + 1}")
+        rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+        rt.seq_select_live(pbank, act)
+        rt.run(ms=300)
+        # the chord again inside Clyps: nothing
+        s0 = enter()
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        s = state()
+        check(s["open"] == 1 and s["showwin"] == 0 and s["layers"] == s0["layers"],
+              "the chord pressed again in Clyps: nothing, no SELECT window")
+        tap(NO)
+        closed_ok("[NO]")
 
     print(f"\nscreens: {shots}")
     print("VERDICT:", "PASS" if not fails else f"FAIL ({len(fails)}): " + "; ".join(fails))
