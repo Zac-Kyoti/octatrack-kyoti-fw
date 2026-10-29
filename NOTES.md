@@ -37529,3 +37529,13 @@ is not edited) and `tools/emu_sc_shared.py`.
     `sc_cf`/`sc_ui`, per-core form, no loader) was clean on this unit. Reported on octabam#934 (comment 6484177764),
     offering a `test/sidechain-compressor` build from the same `main`.
 
+- **2026-10-29, #1007:** Jannik AGREED on placement. #1023 gives `ot_personalize_rows` an anchor: a row names the
+  stock row it goes after (MUTE MODE after PREVIEW WITHOUT FX), catalogue order breaks ties, rows without an anchor
+  go last, and LED BRIGHTNESS stays last. Once #1007 is in, our row record only needs the anchor (review #1023's
+  diff when it's up).
+  - After #944 he asked us to refresh #1007. We merged main `3b79e797` (merge, not rebase, so the evidence pin
+    `0d0566ff` stays reachable). Generated assets were taken from main and rebuilt from the merge. The USB package
+    reproduces (`40f5cc11…`), `module:verify` shows 0 mismatches of 162, and the Analog BD header was updated.
+    Pushed `2fae7a97`.
+  - Left for him: table owner and base, the load/stress approval record. The package-rebuild test stops on a
+    standalone recipe, as on main.
