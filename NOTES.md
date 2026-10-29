@@ -37687,3 +37687,13 @@ BATCH_BUGFIXES candidate (TRACK_PASTE_DESIGNER_FIX, working name); MIDI tracks l
 - Found: a key's sub-maps chain across layers (stock's FUNC sub-map took [FUNC]+[YES]); LOAD
   PROJECT reads banks through `0x400905d4(ctx, mask, …)`, not `0x40090504`; route A never ages
   the TRACK double-tap timer `0x460d5de0`. Details: CLYPS_SCOPE.md §0 traps, §8b, §9.
+
+**Session 131 cont. (5) (2026-10-26..28, `trkseq`)** — CLYPS CLYPA..CLYPF; CLYPF FLASHED, the user's
+walk-through all passed. The 2026-10-27 model (scope §1.0): highlight = your pattern, 1 px select box,
+trig = select + load, only [NO] closes, [BANK] + arrows page; originals = banks as loaded (10.2 MB
+snapshot); temp save / reload OUTSIDE Clyps (hold [YES] / [NO] + TRACK; stock ARM / DISARM on a
+quick tap); names via [FUNC]+[BANK] (stock editor, 9 chars) saved per bank in clypsNN.work / .strd
+alongside stock's bank files; the "edited" x; the user's cell layout. Harness lesson: never
+call_as_main a poster that touches the card first (CARD SYNC 0x40022cd4) -- it corrupts the
+emulator's task frames (looked like a Clyps stack bug for hours). Next: scope §0 step 0 (stock
+[PTN] / [BANK] inside Clyps). Details: CLYPS_SCOPE.md §0, §1.0, §10.
