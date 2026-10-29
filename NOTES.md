@@ -37523,4 +37523,9 @@ is not edited) and `tools/emu_sc_shared.py`.
     transport restart clears (FAILURE_MODES "Static that stays after knob moves", the same signature). It would also explain
     the leak with SC unbound: the state was already corrupted by a load, and removing DARK REV triggers a reload.
   - The stubs (`build_bus.py` `_hook_stub_words`) read correctly: unbound, each replays the stock words.
+  - **Follow-up tests (2026-10-28), same unit:** the unit WAS power-cycled after the upgrade; MODULATION loads never produce
+    the ghosts, which come from moving KEY; COMPRESSOR picked with the sequencer stopped, about 5 s wait, then start and KEY
+    moves: same issues. **The overrun-at-load hypothesis above is refuted.** OCTABAM33 (`test/sidechain-compressor`, same
+    `sc_cf`/`sc_ui`, per-core form, no loader) was clean on this unit. Reported on octabam#934 (comment 6484177764),
+    offering a `test/sidechain-compressor` build from the same `main`.
 
