@@ -131,7 +131,7 @@ FEATURES = {
                 "[PTN]+[TRACK n] reload track n's saved sequence; [BANK]+[TRACK n] also re-applies the Part."),
     "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "out/mainos_direct_jump_kyoti.bin", "BUG_DJV7", "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.0.1, clock-locked jumps)."),
     "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "out/mainos_rec_trig_mute.bin", "BUG_RTM",
-                      "[TRACK]+[NO]/[YES] mute/unmute recorder trigs; MIDI CC 80; '..' edge icon."),
+                      "[TRACK]+[REC] toggles a track's recorder trigs muted; MIDI CC 80; '..' edge icon."),
     "BLACKPYRAMIDS_303": ("build_blackpyramids_303.py", "out/mainos_blackpyramids_303.bin", "BUG_BP303",
                           "BLKPYRAMD: a TB-303 voice as a track machine (one per DSP core)."),
     "VARISPEED": ("build_varispeed.py", "out/mainos_varispeed.bin", "BUG_VARI",

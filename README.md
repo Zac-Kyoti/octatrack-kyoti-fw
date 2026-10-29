@@ -257,20 +257,22 @@ deliberately with `FUNC` + `TRIG` is left alone.
 
 ### REC_TRIG_MUTE
 
-Mute a track's recorder trigs without deleting them. Hold **`[TRACK]`** and press **`[NO]`**:
-the held tracks' recorder trigs stop firing — a recording already running finishes — and a
-toast reads `REC TRIGS MUTED`. **`[TRACK]`** + **`[YES]`** brings them back
-(`REC TRIGS UNMUTED`). It works on any screen, with or without grid recording, and holds
+Mute a track's recorder trigs without deleting them. Hold **`[TRACK]`** and press
+**`[REC]`**: that track's recorder trigs stop firing — a recording already running finishes —
+and a toast reads `REC TRIGS MUTED`. Press it again to bring them back (`REC TRIGS UNMUTED`).
+Each track keeps its own state: with several track keys held, each one flips
+(`REC TRIGS TOGGLED` when they end up mixed). While a track key is held, `[REC]` does not
+switch grid recording; on its own `[REC]` works as on stock. It works on any screen and holds
 across pattern changes until you unmute; every track starts unmuted at power-on. A muted
 track shows two dots beside its play/stop icon at the screen edge (`..■` / `..▶`).
 
 MIDI: **CC 80** on a track's channel mutes it (1–127) or unmutes it (0); on the AUTO
-channel it acts on the active track. The keys send CC 80 (1 / 0) on each held track's
-channel. Both need AUDIO CC IN / OUT on, as for every audio-track CC. `[FUNC]` + `[YES]` /
-`[NO]` still arm and disarm one-shot trigs as on stock; `[TRACK]` + `[YES]` / `[NO]` now do
-this instead.
+channel it acts on the active track. The keys send CC 80 (1 muted / 0 unmuted) on each held
+track's channel. Both need AUDIO CC IN / OUT on, as for every audio-track CC. `[TRACK]` +
+`[YES]` / `[NO]` arm and disarm recorder one-shot trigs as on stock.
 
-**Hardware:** confirmed. MIDI CC 80 not specifically tested.\
+**Hardware:** confirmed with the earlier `[TRACK]` + `[NO]` / `[YES]` keys; the `[TRACK]` + `[REC]`
+version not yet. MIDI CC 80 not specifically tested.\
 **Final build:** [`tools/build_rec_trig_mute.py`](tools/build_rec_trig_mute.py) →
 `OCTATRACK_OS1.40C_REC_TRIG_MUTE`
 

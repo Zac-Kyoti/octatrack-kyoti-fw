@@ -5,8 +5,10 @@
 Validate REC_TRIG_MUTE (out/mainos_rec_trig_mute.bin) in octabam's full-firmware emulator.
 
 Boots the image, loads the factory OT DEMO, then drives:
-  1. keys   -- the [TRK]-layer NO / YES handlers with held tracks poked into 0x460fab40:
-               RTM_MASK, the CC 80 sends (FUN_40033e3c args) and the toast text
+  1. keys   -- the [REC] keymap handler (rtm_rec) with held tracks poked into 0x460fab40:
+               the per-track toggle in RTM_MASK, the CC 80 sends (FUN_40033e3c args), the toast text,
+               GRID REC / "REC held" untouched; with no track held, stock [REC] (GRID REC
+               toggles); the [TRACK]-layer YES / NO records stock again (ARM / DISARM REC TRK)
   2. CC in  -- the stock CC handler FUN_4000e79c with a real 3-byte message: track channel,
                AUTO channel, value 0 / >0, AUDIO CC IN off, and that CCs we don't own still
                take stock's path (CC 100 ignored, CC 120 -> 0x8000000c bit 0)
@@ -44,7 +46,9 @@ import lcd_view
 RTM_MASK, HELD, CACHE = 0x400d7c3a, 0x460fab40, 0x400c0cb8
 RENDER = 0x4004bd48                 # the edge renderer; on hardware FUN_40052200's UI-frame
                                     # path polls it (0x4005222e), which route A barely runs
-NO_ENTRY, YES_FIELD = 0x40083488, 0x400d15e4
+REC_FIELDS = (0x400c003c, 0x400c0040, 0x400c0620, 0x400c0624)    # [REC] keymap press/release
+TRK_YES_FIELD, TRK_NO_FIELD = 0x400d15e4, 0x400d15fe                # [TRACK]-layer YES / NO
+GRID_REC, REC_HELD = 0x460d1736, 0x460d1726
 CC_SEND, NOTIFY, CC_HANDLER, BLIT = 0x40033e3c, 0x4005a2b8, 0x4000e79c, 0x400128a8
 CC_IN, AUTO_CH, TRIG_CH, MIDI_TRK_FLAGS = 0x80000049, 0x80000047, 0x8000003f, 0x8000000c
 FLAGWORD = 0x46c7a6c0
@@ -121,9 +125,13 @@ def main():
 
     # ------------------------------------------------------------------ 1. keys
     print("\n1. keys")
-    yes_entry = u32(YES_FIELD)
-    check(yes_entry == S["rtm_yes"], f"[TRK]-layer YES record -> rtm_yes 0x{yes_entry:08x}")
+    recs = [u32(f) for f in REC_FIELDS]
+    check(recs == [S["rtm_rec"]] * 4, f"[REC] keymap fields -> rtm_rec: {[hex(v) for v in recs]}")
+    ty, tn = u32(TRK_YES_FIELD), u32(TRK_NO_FIELD)
+    check((ty, tn) == (0x400834d8, 0x40083488),
+          f"[TRACK]-layer YES / NO records stock: {ty:#010x} / {tn:#010x}")
     check(u8(RTM_MASK) == 0, "RTM_MASK boots 0 (all unmuted)")
+    rec = S["rtm_rec"]
 
     def key(entry, code, event, held):
         sends.clear(); toasts.clear()
@@ -133,18 +141,45 @@ def main():
         w32(HELD, 0)
         return u8(RTM_MASK), list(sends), list(toasts)
 
-    m, s, t = key(NO_ENTRY, 0x32, 1, 0b101)
-    check(m == 0b101, f"T1+T3 held, NO press -> mask {m:#04x}")
+    grid0 = u32(GRID_REC)
+    w32(REC_HELD, 0)
+    m, s, t = key(rec, 0x29, 1, 0b101)
+    check(m == 0b101, f"T1+T3 held, REC press -> mask {m:#04x} (muted)")
     check(s == [(0, RTM_CC, 1), (2, RTM_CC, 1)], f"CC sends {s}")
     check(t == ["REC TRIGS MUTED"], f"toast {t}")
-    m, s, t = key(NO_ENTRY, 0x32, 0, 0b10)
-    check(m == 0b101 and not s and not t, "NO release event -> no change, no send, no toast")
-    m, s, t = key(yes_entry, 0x31, 1, 0b1)
-    check(m == 0b100, f"T1 held, YES press -> mask {m:#04x}")
+    check(u32(GRID_REC) == grid0 and u32(REC_HELD) == 0,
+          f"GRID REC unchanged ({u32(GRID_REC)}), 'REC held' not set ({u32(REC_HELD)})")
+    m, s, t = key(rec, 0x29, 0, 0b101)
+    check(m == 0b101 and not s and not t, "REC release with tracks held -> no change, no send, no toast")
+    m, s, t = key(rec, 0x29, 1, 0b1)
+    check(m == 0b100, f"T1 held (muted), REC press -> mask {m:#04x} (T1 unmuted)")
     check(s == [(0, RTM_CC, 0)], f"CC sends {s}")
     check(t == ["REC TRIGS UNMUTED"], f"toast {t}")
-    m, s, t = key(yes_entry, 0x31, 1, 0)
-    check(m == 0b100 and not s and not t, "nothing held -> no change")
+    m, s, t = key(rec, 0x29, 1, 0b101)
+    check(m == 0b001 and t == ["REC TRIGS TOGGLED"] and s == [(0, RTM_CC, 1), (2, RTM_CC, 0)],
+          f"T1+T3 held, only T3 muted -> each flips (T1 muted, T3 unmuted): mask {m:#04x}, "
+          f"sends {s}, toast {t}")
+    m, s, t = key(rec, 0x29, 1, 0b100)
+    check(m == 0b101 and t == ["REC TRIGS MUTED"] and s == [(2, RTM_CC, 1)],
+          f"T3 held -> T3 muted, T1 untouched: mask {m:#04x}, sends {s}, toast {t}")
+    m, s, t = key(rec, 0x29, 1, 0b101)
+    check(m == 0 and t == ["REC TRIGS UNMUTED"] and s == [(0, RTM_CC, 0), (2, RTM_CC, 0)],
+          f"T1+T3 held, both muted -> both unmuted: mask {m:#04x}, sends {s}, toast {t}")
+    check(u32(GRID_REC) == grid0, "GRID REC still unchanged after five track-held presses")
+    m, s, t = key(rec, 0x29, 1, 0)
+    check(m == 0 and not s and "REC TRIGS MUTED" not in t and "REC TRIGS UNMUTED" not in t,
+          "nothing held, REC press -> no mute change, no send")
+    check(u32(GRID_REC) == (0 if grid0 else 1) and u32(REC_HELD) == 1,
+          f"  ... and stock [REC] ran: GRID REC {grid0} -> {u32(GRID_REC)}, 'REC held' {u32(REC_HELD)}")
+    key(rec, 0x29, 0, 0)
+    check(u32(REC_HELD) == 0, f"nothing held, REC release -> stock clears 'REC held' ({u32(REC_HELD)})")
+    key(rec, 0x29, 1, 0)                                    # GRID REC back as it was
+    key(rec, 0x29, 0, 0)
+    check(u32(GRID_REC) == grid0, f"GRID REC restored ({u32(GRID_REC)})")
+    m, s, t = key(ty, 0x31, 1, 0b1)
+    check(m == 0 and t == ["ARM REC TRK"], f"[TRACK]+[YES] -> stock: toast {t}, mask {m:#04x}")
+    m, s, t = key(tn, 0x32, 1, 0b1)
+    check(m == 0 and t == ["DISARM REC TRK"], f"[TRACK]+[NO] -> stock: toast {t}, mask {m:#04x}")
     w8(RTM_MASK, 0)
 
     # ------------------------------------------------------------------ 2. CC in

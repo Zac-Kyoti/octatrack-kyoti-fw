@@ -4,18 +4,19 @@
 """
 Build REC_TRIG_MUTE on TOP OF STOCK 1.40C (WIP).
 
-[TRK]+[NO] mutes, [TRK]+[YES] unmutes the held tracks' recorder trigs; MIDI CC 80 does the
-same (receive and transmit); the track-edge status glyph shows "..." / "..>" while a muted
-track still has live recorder trigs.  Mechanism and proofs:
+[TRACK]+[REC] toggles the held tracks' recorder trigs muted / unmuted (with a track key held,
+[REC] no longer switches GRID REC; without one it is stock); MIDI CC 80 does the same (receive
+and transmit); the track-edge status glyph shows "..[]" / "..>" on a muted track.  [TRACK]+
+[YES]/[NO] stay stock (ARM / DISARM REC TRK).  Mechanism and proofs:
 reference/handoffs/REC_TRIG_MUTE_SCOPE.md; source: octabam-modules/rec-trig-mute/patch_rec_trig_mute.s
 (the octabam module's own source, one file for every layout).
 
-The code has no cave: it overwrites four stock routines that nothing can reach.  That is
+The code has no cave: it overwrites three stock routines that nothing can reach.  That is
 only safe while it stays true, so every build re-proves it on the image it patches:
   * each region's stock bytes are intact (no other patch got there first),
   * no 4-byte value anywhere in the image, at any byte offset, points into a region, and
-    no PC-relative branch/call/lea/pea from outside lands in one -- except the four
-    [TRK]-layer record fields that are meant to reach .keys,
+    no PC-relative branch/call/lea/pea from outside lands in one (the four [REC] keymap
+    fields this build repoints at rtm_rec are written after the scan),
   * nothing branches into the middle of the bytes each detour displaces,
   * RTM_MASK's byte is free.
 
@@ -50,17 +51,22 @@ OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_REC_TRIG_MUTE.syx"
 OUT_BIN = ROOT / "out/OCTATRACK_REC_TRIG_MUTE.bin"
 VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_RTM"
 
-# the four reused stock routines: section -> (start, end)
+# the three reused stock routines: section -> (start, end)
 REGIONS = {
-    ".keys":  (0x40083488, 0x40083544),   # stock [TRK]-layer NO / YES handlers
-    ".glyph": (0x40032bd4, 0x40032d08),   # orphaned encoder value helper
+    ".main":  (0x40032bd4, 0x40032d08),   # orphaned encoder value helper
     ".draw":  (0x4005a0e0, 0x4005a14c),   # FUN_4005a0e0, bare text popup
     ".ccrx":  (0x4009e7dc, 0x4009e884),   # orphaned arranger-row resolver
 }
-# the only references that may point into a region: the [TRK]-held layer's YES / NO
-# records (0x400d15e2 / 0x400d15fc), press + release fields -> our two entry points
-ALLOWED_REFS = {0x400d15e4: 0x400834d8, 0x400d15e8: 0x400834d8,
-                0x400d15fe: 0x40083488, 0x400d1602: 0x40083488}
+# nothing may point into a region before we patch
+ALLOWED_REFS = {}
+# the base keymaps' [REC] records (T1 0x400bfc3a, T2 0x400c061e), press + release fields:
+# stock's REC handler -> rtm_rec, which passes everything but a track-held press back to it
+REC_FIELDS = {0x400c003c: 0x40048774, 0x400c0040: 0x40048774,
+              0x400c0620: 0x40048774, 0x400c0624: 0x40048774}
+# the [TRACK]-held layer's YES / NO records stay stock (ARM / DISARM REC TRK); an older
+# REC_TRIG_MUTE took them over, so assert it
+TRK_FIELDS = {0x400d15e4: 0x400834d8, 0x400d15e8: 0x400834d8,
+              0x400d15fe: 0x40083488, 0x400d1602: 0x40083488}
 # the one runtime-written byte: classic cave, proven runtime-writable.  In KYOTI V1.0 it is a
 # CAVE piece of its own ("rtm_mask"), so no other piece can ever be packed over it.
 RTM_MASK = kyoti_place.at("rtm_mask", 0x400d7c3a)
@@ -84,7 +90,7 @@ def run(*cmd, **kw):
 def assemble():
     run("m68k-elf-as", "-mcpu=5407", f"--defsym=RTM_MASK=0x{RTM_MASK:x}", "-o", str(OBJ), str(SRC))
     starts = [f"--section-start={s}=0x{a:x}" for s, (a, _) in REGIONS.items()]
-    run("m68k-elf-ld", "-e", "rtm_no", *starts, "-o", str(ELF), str(OBJ))
+    run("m68k-elf-ld", "-e", "rtm_rec", *starts, "-o", str(ELF), str(OBJ))
     blobs = {}
     for s in REGIONS:
         out = ROOT / f"out/patch_rec_trig_mute{s.replace('.', '_')}.bin"
@@ -167,8 +173,6 @@ def main():
     img = bytearray(stock)
     blobs, syms = assemble()
 
-    if syms["rtm_no"] != 0x40083488:
-        sys.exit("rtm_no must sit on 0x40083488, the entry the [TRK]-layer NO record names")
     for s, (lo, hi) in REGIONS.items():
         if len(blobs[s]) > hi - lo:
             sys.exit(f"{s}: {len(blobs[s])} B does not fit 0x{lo:08x}..0x{hi:08x} ({hi - lo} B)")
@@ -176,9 +180,9 @@ def main():
         if bad:
             sys.exit(f"REFUSING {s} 0x{lo:08x}..0x{hi:08x}: still reachable --\n  " +
                      "\n  ".join(bad[:12]))
-    for f, want in ALLOWED_REFS.items():
+    for f, want in {**REC_FIELDS, **TRK_FIELDS}.items():
         if int.from_bytes(img[f - BASE:f - BASE + 4], "big") != want:
-            sys.exit(f"[TRK]-layer record field 0x{f:08x} no longer names 0x{want:08x}")
+            sys.exit(f"keymap record field 0x{f:08x} no longer names 0x{want:08x}")
     for site, (hexb, sym, kind) in SITES.items():
         o = site - BASE
         want = bytes.fromhex(hexb)
@@ -199,8 +203,8 @@ def main():
             img[o:o + 10] = b"\x4e\xb9" + t + bytes([0x67, disp]) + b"\x4e\x71"
         else:
             img[o:o + 6] = (b"\x4e\xb9" if kind == "jsr" else b"\x4e\xf9") + t
-    for f in (0x400d15e4, 0x400d15e8):                  # [TRK]-layer YES press / release
-        img[f - BASE:f - BASE + 4] = syms["rtm_yes"].to_bytes(4, "big")
+    for f in REC_FIELDS:                                # [REC] press / release, T1 + T2
+        img[f - BASE:f - BASE + 4] = syms["rtm_rec"].to_bytes(4, "big")
 
     OUT.write_bytes(bytes(img))
     seal(__file__, OUT)

@@ -313,11 +313,14 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   Octakit and are refused with it until bridges exist (`a7a5291`, `c9a66cf`; live in octabam
   since `f3b12f36`). Scope, findings and the plan:
   `reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md` — start at its §0. `NOTES.md` Session 121.
-- **REC_TRIG_MUTE** (`tools/build_rec_trig_mute.py`) — FINAL since 2026-10-03, standalone
-  (syx `c1cd7381…`) and in KYOTI V1.0. MIDI CC 80 not tried on hardware yet. Not done on
-  purpose: MIDI echo / CC 80 state at power-up. Also as `BUG_RTM` (+ BATCH_BUGFIXES), and
-  as an octabam module (sambanks/octabam #566 merged `fa24fb53`; follow-up #572 open). `reference/handoffs/REC_TRIG_MUTE_SCOPE.md`, `NOTES.md`
-  Sessions 122–123.
+- **REC_TRIG_MUTE** (`tools/build_rec_trig_mute.py`) — FINAL since 2026-10-03 with
+  `[TRACK]` + `[NO]` / `[YES]` (syx `c1cd7381…`), in KYOTI and as `BUG_RTM`. **2026-10-29: the
+  gesture is now `[TRACK]` + `[REC]`, a per-track toggle; `[TRACK]` + `[YES]` / `[NO]` are stock
+  again.** Built (standalone, `BUG_RTM`, KYOTI V1.6), emulator-checked, WIP until flashed and
+  promoted. MIDI CC 80 not tried on hardware yet. Not done on purpose: MIDI echo / CC 80
+  state at power-up. octabam module: sambanks/octabam #566 merged `fa24fb53`; the new gesture
+  goes to Sam as a pin move. `reference/handoffs/REC_TRIG_MUTE_SCOPE.md` §17, `NOTES.md`
+  Sessions 122–123 and 2026-10-29.
 - **KYOTI load audit** (Session 125) — `reference/handoffs/KYOTI_LOAD_AUDIT.md`: ranked DSP/ColdFire
   costs of every feature, the hardware test plan (HW-A first, no flash), and **a KYOTI V1.0 crash on
   the MASTER track's PLAYBACK/LFO page** (emulator; section 8), not fixed yet.

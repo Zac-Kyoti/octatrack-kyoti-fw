@@ -1,23 +1,23 @@
-| REC_TRIG_MUTE -- [TRK]+[NO] mutes / [TRK]+[YES] unmutes the held tracks' recorder trigs.
+| REC_TRIG_MUTE -- [TRACK]+[REC] toggles the held tracks' recorder trigs muted / unmuted.
 |
 | Scope, addresses and every proof: reference/handoffs/REC_TRIG_MUTE_SCOPE.md.
 | The trigs stay in the pattern; the step handler simply stops seeing them, so a recording
 | already running finishes its RLEN and nothing new starts.  Global across pattern / Part /
-| bank changes, volatile (power-up = unmuted).  MIDI CC RTM_CC: value 0 = unmute, 1-127 =
-| mute, received on the track's channel (AUTO channel = active track) and sent 1/0 on each
-| held track's channel when the keys are used -- both gated by the project's AUDIO CC IN/OUT
-| exactly like stock's CC 52/53.  Track-edge status glyph: "..[]" / "..>" on every muted
-| track that is not recording.
+| bank changes, volatile (power-up = unmuted).  Each held track flips its own state.  While a
+| track key is held, [REC] does not switch GRID REC; without one, [REC] is stock.  MIDI CC RTM_CC: value 0 =
+| unmute, 1-127 = mute, received on the track's channel (AUTO channel = active track) and sent
+| 1/0 on each held track's channel when the keys are used -- both gated by the project's
+| AUDIO CC IN/OUT exactly like stock's CC 52/53.  Track-edge status glyph: "..[]" / "..>" on
+| every muted track that is not recording.  [TRACK]+[YES]/[NO] are stock (ARM / DISARM REC TRK).
 |
-| No cave: the code reuses four stock routines nothing can reach (strict reference scan,
+| No cave: the code reuses three stock routines nothing can reach (strict reference scan,
 | stock + KYOTI, done by the builder on every build):
-|   .keys   0x40083488  stock [TRK]-layer NO/YES handlers (NO keeps its entry, YES is repointed)
+|   .main   0x40032bd4  an orphaned encoder value helper
 |   .draw   0x4005a0e0  FUN_4005a0e0, the bare text popup (dead in stock)
-|   .glyph  0x40032bd4  an orphaned encoder value helper
 |   .ccrx   0x4009e7dc  an orphaned arranger-row resolver ("ARR PARSE ERROR")
 | The only runtime-written byte, RTM_MASK, lives in the proven-writable classic cave.
 
-    .globl rtm_no, rtm_yes, rtm_gate, rtm_glyph, rtm_draw, rtm_cc
+    .globl rtm_rec, rtm_gate, rtm_glyph, rtm_draw, rtm_cc
 
 | OCTABAM_UNIT (--defsym; the octabam module octabam-modules/rec-trig-mute): one linked unit
 | octabam places itself -- a single section, RTM_MASK inside it, the step-handler hook a plain
@@ -37,6 +37,7 @@
     .equ RTM_CC,    80
 
     .equ HELD,      0x460fab40      | held track keys, bit t (physical keys, both modes)
+    .equ REC_KEY,   0x40048774      | stock [REC] handler: GRID REC toggle, "REC held"
     .equ NOTIFY,    0x4005a2b8      | FUN_4005a2b8(text, dur) -- key-handler context only
     .equ CC_SEND,   0x40033e3c      | FUN_40033e3c(track, cc, value): AUDIO CC OUT enqueue
     .equ CC_CHK,    0x40033970
@@ -50,28 +51,38 @@
     .equ R_BLIT,    0x4004c024      | renderer: jsr (a5) + lea 16(sp)
     .equ R_SKIP,    0x4004c02a      | renderer: nothing to draw
 
-| ------------------------------------------------------------------ .keys @ 0x40083488
-| handler(keycode@4, event@8), reached through the [TRK]-held layer records: NO (0x400d15fc)
-| keeps naming 0x40083488 = rtm_no; the builder repoints YES (0x400d15e2) at rtm_yes.
-    SECT .keys
-rtm_no:
-    moveq   #1,%d0
-    cmp.l   8(%sp),%d0              | press only
-    bne.s   9f
+| ------------------------------------------------------------------ .main @ 0x40032bd4
+| handler(keycode@4, event@8): the base keymaps' [REC] records (T1 0x400bfc3a, T2 0x400c061e,
+| press + release fields) name stock's REC handler 0x40048774 -> repointed here.  The
+| [TRACK]-held layer has no [REC] record, so with a track key held [REC] still reaches us.
+    SECT .main
+rtm_rec:
     move.l  HELD,%d1
-    beq.s   9f
-    mvz.b   RTM_MASK,%d0
-    or.l    %d1,%d0
+    beq.s   0f                      | no track key held: stock [REC] (GRID REC toggle)
+    tst.l   8(%sp)                  | press, as stock tests it
+    bne.s   1f
+0:  jmp     REC_KEY                 | release (and every unheld event): stock, which only
+                                    | clears "REC held" -- we never set it on our press
+1:  mvz.b   RTM_MASK,%d0            | d0/d1/a0/a1 only: d2-d7 are the caller's
+    eor.l   %d1,%d0                 | every held track flips its own state
     move.b  %d0,RTM_MASK
-    moveq   #1,%d0
+    move.l  %d0,%a0
+    and.l   %d1,%d0                 | the held tracks muted now
+    cmp.l   %d1,%d0
+    beq.s   3f
+    tst.l   %d0
+    beq.s   2f
+    move.l  #S_TOGGLED,%d0          | some muted, some unmuted
+    bra.s   4f
+2:  move.l  #S_UNMUTED,%d0
+    bra.s   4f
+3:  move.l  #S_MUTED,%d0
+4:  move.l  %d0,4(%sp)              | NOTIFY's text, in our caller's frame
+    move.l  %a0,%d0
     bsr.s   rtm_tx
-    move.l  #S_MUTED,%d0
-toast:                              | tail-call NOTIFY(text, 0x30) in our caller's frame
-    move.l  %d0,4(%sp)
-    moveq   #0x30,%d0
+    moveq   #0x30,%d0               | tail-call NOTIFY(text, 0x30)
     move.l  %d0,8(%sp)
     jmp     NOTIFY
-9:  rts
 
 | step handler 0x4009d9a4: `jsr rtm_gate ; beq.s 0x4009da16 ; nop` replaces
 | `tst.l %d3 ; beq.s 0x4009da16 ; move.l #0x91a,%d2`.  d3 = REC1/2/3 bits of track d7.
@@ -93,23 +104,8 @@ rtm_gate:
     rts
     .endif
 
-rtm_yes:
-    moveq   #1,%d0
-    cmp.l   8(%sp),%d0
-    bne.s   9b
-    move.l  HELD,%d1
-    beq.s   9b
-    mvz.b   RTM_MASK,%d0            | d0/d1/a0/a1 only: d2-d7 are the caller's
-    not.l   %d1
-    and.l   %d1,%d0
-    not.l   %d1                     | held mask again, for rtm_tx
-    move.b  %d0,RTM_MASK
-    moveq   #0,%d0
-    bsr.s   rtm_tx
-    move.l  #S_UNMUTED,%d0
-    bra.s   toast
-
-| rtm_tx(d0 = value, d1 = held mask): CC_SEND(t, RTM_CC, value) for every held track
+| rtm_tx(d0 = new RTM_MASK, d1 = held mask): CC_SEND(t, RTM_CC, 1 muted / 0 unmuted) for
+| every held track
 rtm_tx:
     lea     -12(%sp),%sp
     movem.l %d2-%d4,(%sp)
@@ -118,7 +114,11 @@ rtm_tx:
     moveq   #0,%d2
 1:  btst    %d2,%d4
     beq.s   2f
-    move.l  %d3,-(%sp)
+    moveq   #1,%d0
+    btst    %d2,%d3
+    bne.s   3f
+    moveq   #0,%d0
+3:  move.l  %d0,-(%sp)
     pea     RTM_CC
     move.l  %d2,-(%sp)
     jsr     CC_SEND
@@ -131,12 +131,10 @@ rtm_tx:
     lea     12(%sp),%sp
     rts
 
-| ------------------------------------------------------------------ .glyph @ 0x40032bd4
 | renderer 0x4004bee2: `jsr rtm_glyph` replaces `lea CACHE,%a0`.  d3 = track, a4 = state
 | (d2 + 2*d1 + 4*d0; bit 0 = playing, bit 1 = recorder live).  A muted track that is not
 | recording -> a4 = 8 | playing, shown as "..[]" / "..>" whether or not it has recorder trigs
 | (user, 2026-10-02).  Folding it into a4 lets the stock cache redraw on every toggle.
-    SECT .glyph
 rtm_glyph:
     mvz.b   RTM_MASK,%d0
     btst    %d3,%d0
@@ -154,8 +152,6 @@ rtm_glyph:
     .balign 4
 G_DOTSS: .long 0x20000000,0,0x20000000,0,0x70000000,0x70000000,0x70000000 | . . []
 G_DOTSP: .long 0x20000000,0,0x20000000,0,0xf8000000,0x70000000,0x20000000 | . . >
-S_MUTED:   .asciz "REC TRIGS MUTED"
-S_UNMUTED: .asciz "REC TRIGS UNMUTED"
 
 | ------------------------------------------------------------------ .draw @ 0x4005a0e0
 | renderer 0x4004c00c: `jmp rtm_draw` replaces `moveq #3,%d0 ; cmpl %a4,%d0 ; bnes R_SKIP`
@@ -219,6 +215,10 @@ rtm_cc:
     blt.s   3b
     move.b  %d0,RTM_MASK
 9:  jmp     CC_EXIT
+
+S_MUTED:   .asciz "REC TRIGS MUTED"
+S_UNMUTED: .asciz "REC TRIGS UNMUTED"
+S_TOGGLED: .asciz "REC TRIGS TOGGLED"
 
     .ifdef OCTABAM_UNIT                 | in .text, right after the code: the unit lives in DRAM,
 RTM_MASK: .byte 0                   | so it is writable; a .data section would sit 8 KB past

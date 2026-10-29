@@ -1,4 +1,4 @@
-# REC_TRIG_MUTE — scope (2026-10-02, research only, nothing built)
+# REC_TRIG_MUTE — scope (2026-10-02; gesture changed to [TRACK] + [REC] 2026-10-29, §17)
 
 **Ask.** `[TRK]` + `[NO]` mutes the held track's **recorder trigs**: the trigs stay in the pattern,
 but the sequencer stops firing them. `[TRK]` + `[YES]` unmutes them. This works in any mode and on
@@ -584,3 +584,53 @@ hardware test.
 The user flashed KYOTI V1.0 `5106f7fb…` and passed the hardware list. MIDI CC 80 was **not**
 tested on hardware. KYOTI V1.0 was promoted (mainos `82dd6660…`). `NOTES.md` Session 123
 continued.
+
+## 17. `[TRACK]` + `[REC]`, a per-track toggle (2026-10-29)
+
+**Ask (user).** The mute moves to `[TRACK]` + `[REC]` (the REC/COPY key). Each press flips the
+state, and **each track keeps its own state**: with several track keys held, each held track
+flips. While a track key is held, `[REC]` must not switch GRID REC; without one, `[REC]` is
+stock. My call, stated to the user: `[TRACK]` + `[YES]` / `[NO]` go back to stock (ARM / DISARM
+REC TRK, §1), since the feature no longer uses them.
+
+**How `[REC]` reaches us with a track key held.** The `[TRACK]`-held layer's keys table
+(`0x400d1594`: STOP `0x27`, PLAY `0x28`, BANK `0x2f`, YES, NO, `0x18`, then `0xff`) has no
+`[REC]` (`0x29`) record, so the dispatcher falls through to the base keymaps' `[REC]` record:
+T1 `0x400bfc3a`, T2 `0x400c061e`. Both name stock's REC handler `0x40048774` for press and
+release; those four fields are the handler's only references in the image. `0x40048774`
+press: GRID REC toggle (`0x460d1736`), then "REC held" `0x460d1726 = 1`; release: clear
+"REC held" (QUANTIZE_LIVE_REC_TOGGLE detours that release at `0x4004883a`).
+
+**Change.** The four record fields → `rtm_rec`. Track key held (`0x460fab40 != 0`) and a
+press: `RTM_MASK ^= held`, CC 80 per held track with its new value (1 muted / 0 unmuted),
+toast. Everything else, including the release, → `jmp 0x40048774`, so "REC held" handling
+and QLREC's release hook stay stock. The press never sets "REC held", so `[TRACK]` + `[REC]`
+then `[PLAY]` does not start live recording. Repointing data instead of detouring
+`0x40048774` composes with octabam's STEM REC, which detours `0x40048774` itself (`UP` +
+`REC`): `rtm_rec` jumps into its detour.
+
+**Toasts:** `REC TRIGS MUTED` when every held track ends muted, `REC TRIGS UNMUTED` when every
+held track ends unmuted, `REC TRIGS TOGGLED` (new) when they end mixed.
+
+**Space.** The stock `[TRACK]`-layer handlers (`0x40083488..0x40083544`) are live again and no
+longer ours. The code fits in the three other dead regions: `.main` `0x40032bd4` 268/308
+(keys, gate, CC transmit, glyph state, pixels), `.draw` 96/108, `.ccrx` 136/168 (CC receive +
+the three strings). `RTM_MASK` is unchanged (standalone `0x400d7c3a`, KYOTI's CAVE piece).
+Octabam unit 508 B, reference `14f5c3ee…`.
+
+**Checks.**
+- `tools/emu_rec_trig_mute.py` (route A, handlers called directly): the keymap fields, the
+  `[TRACK]`-layer records stock, the toggle cases (mute, unmute, mixed → TOGGLED, one track of
+  two), GRID REC and "REC held" untouched while a track is held, stock `[REC]` without one,
+  stock `ARM REC TRK` / `DISARM REC TRK`; CC, gate and glyph as before.
+- `ot_emu --live-script` with real key events (`out/rtm_live/panel.script`): `[T1]` down,
+  `[REC]` down/up → `rtm_rec`, MUTED toast, release to stock; `[REC]` alone → `0x400487be`
+  (GRID REC on); `[T1]` + `[T3]` + `[REC]` with T1 muted → TOGGLED; `[T1]` + `[YES]` → stock
+  `0x400834d8`. That proves the layer fall-through on the real dispatcher.
+- KYOTI V1.6: the composite differs from the promoted V1.6 only at REC_TRIG_MUTE's sites;
+  the `[TRACK]`-layer handler bodies and records are back to stock, byte for byte.
+
+**Not tested:** hardware. Edge cases worth a look on the unit: `[TRACK]` + `[FUNC]` + `[REC]`
+(the `[FUNC]` layer's copy record should win, so no mute), and screens whose own layer gives
+`[REC]` another job. There `[TRACK]` + `[REC]` does that job instead of muting, as stock's
+`[REC]` would.

@@ -1,19 +1,25 @@
-"""REC_TRIG_MUTE -- [TRACK]+[NO] mutes, [TRACK]+[YES] unmutes the held tracks' recorder trigs.
+"""REC_TRIG_MUTE -- [TRACK]+[REC] toggles the held tracks' recorder trigs muted / unmuted.
 
-The octabam form has not been flashed; the same source is hardware-confirmed as the standalone
-image and inside KYOTI V1.0.
+The octabam form has not been flashed.  The [TRACK]+[REC] gesture (2026-10-29) replaced the
+earlier [TRACK]+[NO] / [TRACK]+[YES]; the earlier form was hardware-confirmed as the standalone
+image and inside KYOTI, the [TRACK]+[REC] form not yet.
 
 The trigs stay in the pattern; the sequencer simply stops seeing them, so a recording
 already running finishes its RLEN and nothing new starts.  Global across pattern / Part /
-bank changes, volatile (power-up = unmuted).  Toasts REC TRIGS MUTED / REC TRIGS UNMUTED.
+bank changes, volatile (power-up = unmuted).  With several track keys held, [REC] mutes them
+all unless all are already muted, which unmutes them.  While a track key is held [REC] does not
+switch GRID REC; without one [REC] is stock.  Toasts REC TRIGS MUTED / REC TRIGS UNMUTED.
 MIDI CC 80: 0 = unmute, 1-127 = mute, on a track's channel (AUTO channel = active track),
 gated by AUDIO CC IN; the keys send CC 80 (1 / 0) on each held track's channel, gated by
 AUDIO CC OUT -- both exactly like stock's CC 52/53.  The track-edge status icon shows
-"..[]" / "..>" on a muted track that is not recording.  [FUNC]+[YES]/[NO] stay stock.
+"..[]" / "..>" on a muted track that is not recording.  [TRACK]+[YES]/[NO] and
+[FUNC]+[YES]/[NO] stay stock.
 
 SITES (our own disassembly of 1.40C; proofs: reference/handoffs/REC_TRIG_MUTE_SCOPE.md):
-  * the [TRACK]-held input layer 0x400d164a: its YES / NO records (0x400d15e2 / 0x400d15fc)
-    name stock's ARM / DISARM REC TRK handlers 0x400834d8 / 0x40083488 -> repointed here;
+  * the base keymaps' [REC] records (T1 0x400bfc3a, T2 0x400c061e): press + release name
+    stock's REC handler 0x40048774 -> repointed here; rtm_rec jumps back to 0x40048774 for
+    everything but a press with a track key held (so a detour on 0x40048774 itself, e.g.
+    STEM REC's UP+REC, still runs).  The [TRACK]-held layer 0x400d164a has no [REC] record;
   * the step handler's recorder-trig test at 0x4009d9a4 (`tst.l %d3` = REC1/2/3 of track
     d7) -- the only producer of recorder events (0x46c7a6c0 has three references);
   * the edge renderer 0x4004bd48: its state cache load (0x4004bee2) and its 4-way draw
@@ -21,14 +27,15 @@ SITES (our own disassembly of 1.40C; proofs: reference/handoffs/REC_TRIG_MUTE_SC
   * the stock CC handler's fall-through for every CC it ignores (0x4000f210).
 
 THE SOURCE is patch_rec_trig_mute.s here, one file for every layout.  The standalone
-(tools/build_rec_trig_mute.py) and KYOTI V1.0 builds reuse four unreachable stock routines for its code; here it
+(tools/build_rec_trig_mute.py) and KYOTI builds reuse three unreachable stock routines for its code; here it
 is one DRAM unit octabam places (--defsym OCTABAM_UNIT: a single section, RTM_MASK inside
 the unit, the step-handler hook a plain jmp so octabam's nop padding can follow it).
 
-MEASURED: the standalone image (syx c1cd7381...) and KYOTI V1.0 (syx 5106f7fb...) are
-hardware-confirmed on the author's MKI -- keys, toasts, the edge icons, recording stopping
-and resuming; MIDI CC 80 not tried on hardware.  This octabam form (the OCTABAM_UNIT variant)
-has not been flashed; its `reference` is the author's build of that form, made by
+MEASURED: the earlier [TRACK]+[NO]/[YES] form was hardware-confirmed on the author's MKI as
+the standalone image and inside KYOTI -- keys, toasts, the edge icons, recording stopping and
+resuming; MIDI CC 80 not tried on hardware.  The [TRACK]+[REC] form is emulator-checked only
+(tools/emu_rec_trig_mute.py).  This octabam form (the OCTABAM_UNIT variant) has not been
+flashed; its `reference` is the author's build of that form, made by
 tools/build_rec_trig_mute.py with octabam's own oracle recipe.
 """
 
@@ -52,24 +59,22 @@ DRAW_STOCK = bytes.fromhex("7003b08c6618")
 CC = 0x4000f210
 CC_STOCK = bytes.fromhex("7c77bc816c5e")
 
-# the [TRACK]-held layer's YES / NO records: press + release handler fields
-TRK_YES = (0x400d15e4, 0x400d15e8)
-TRK_YES_STOCK = 0x400834d8          # ARM REC TRK
-TRK_NO = (0x400d15fe, 0x400d1602)
-TRK_NO_STOCK = 0x40083488           # DISARM REC TRK
+# the base keymaps' [REC] records (T1 0x400bfc3a, T2 0x400c061e): press + release fields
+REC_FIELDS = (0x400c003c, 0x400c0040, 0x400c0620, 0x400c0624)
+REC_STOCK = 0x40048774              # stock [REC]: GRID REC toggle, "REC held"
 
 # ---- the author's oracle -------------------------------------------------------
 # tools/build_rec_trig_mute.py builds this on every run, with octabam's own DRAM-unit oracle
 # recipe (m68k-elf-as -mcpu=54455 --defsym OCTABAM_UNIT=0x1; ld -Ttext=0x40000000 + the same
 # defsym; objcopy -O binary), and refuses if this line no longer matches.
-REFERENCE = (0x40000000, "d49e0d82ec7fe66fad0c3eb67b41c2a1e892af0db6320bae1ae745997edf5f19")
+REFERENCE = (0x40000000, "14f5c3eeae873d8c538bc0f130d57109fce9508e81193ef329d97b30884dc8ca")
 
 
 MODULE = Module(
     name="rec-trig-mute",
     key="REC_TRIG_MUTE",
     kind=Kind.CF_PATCH,
-    doc="[TRACK]+[NO]/[YES] mute/unmute the held tracks' recorder trigs; MIDI CC 80; "
+    doc="[TRACK]+[REC] mutes/unmutes the held tracks' recorder trigs; MIDI CC 80; "
         "'..' beside a muted track's status icon.",
     linked=(
         Linked("rtm", os.path.join(_HERE, "patch_rec_trig_mute.s"), dram=True,
@@ -86,8 +91,7 @@ MODULE = Module(
                "CC handler fall-through: CC 80, else stock's compare replayed"),
     ),
     symbol_refs=tuple(
-        SymbolRef(a, TRK_YES_STOCK, "rtm", "rtm_yes", "[TRACK]-layer YES record") for a in TRK_YES
-    ) + tuple(
-        SymbolRef(a, TRK_NO_STOCK, "rtm", "rtm_no", "[TRACK]-layer NO record") for a in TRK_NO
+        SymbolRef(a, REC_STOCK, "rtm", "rtm_rec", "[REC] keymap record: track held -> toggle")
+        for a in REC_FIELDS
     ),
 )

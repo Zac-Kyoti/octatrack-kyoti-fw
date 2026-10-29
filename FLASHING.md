@@ -153,9 +153,12 @@ quick check for each:
 - **ERASE_EMPTY_TRIGLESS_LOCKS** — make a trigless lock with one p-lock, erase that lock
   in live record: the step goes dark.
 - **REC_TRIG_MUTE** — a track with recorder trigs on every pattern cycle: hold its
-  `[TRACK]`, press `[NO]` → toast `REC TRIGS MUTED`, the edge icon shows `..▶`, the
-  current recording finishes and the next cycle does not record. `[TRACK]` + `[YES]` →
-  `REC TRIGS UNMUTED`, recording resumes. Stopped, a muted track shows `..■`.
+  `[TRACK]`, press `[REC]` → toast `REC TRIGS MUTED`, the edge icon shows `..▶`, GRID REC
+  does not switch, the current recording finishes and the next cycle does not record.
+  `[TRACK]` + `[REC]` again → `REC TRIGS UNMUTED`, recording resumes. Stopped, a muted track
+  shows `..■`. Mute T1 alone, then hold T1 + T3 and press `[REC]` → `REC TRIGS TOGGLED`, T1
+  unmuted and T3 muted. `[REC]` with no track key held still switches GRID REC; `[TRACK]` +
+  `[YES]` / `[NO]` show stock's `ARM REC TRK` / `DISARM REC TRK`.
 - **BLACKPYRAMIDS_303** — double-tap T1, pick `BLKPYRAMD`, put trigs on a few steps: each plays
   a 303 note. P-lock `PTCH` and `ACC` on a step; put a trigless trig after a note (it holds) and a
   slide trig on the next note (it glides). FX menus no longer offer SPRING REVERB. Choosing it on

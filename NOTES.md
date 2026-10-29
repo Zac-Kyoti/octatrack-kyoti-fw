@@ -37539,3 +37539,30 @@ is not edited) and `tools/emu_sc_shared.py`.
     Pushed `2fae7a97`.
   - Left for him: table owner and base, the load/stress approval record. The package-rebuild test stops on a
     standalone recipe, as on main.
+
+## 2026-10-29 (`rec-trig-mute`) — REC_TRIG_MUTE moves to `[TRACK]` + `[REC]`, a per-track toggle (WIP, NOT flashed)
+- **Ask (user):** the mute/unmute on `[TRACK]` + `[REC]` (REC/COPY) instead of `[TRACK]` + `[YES]` / `[NO]`; each press
+  toggles; the state is per track (user, mid-session: "the operation and state is unique to each track"); with a track
+  key held, `[REC]` must not switch GRID REC, without one it is stock. My call (stated): `[TRACK]` + `[YES]` / `[NO]`
+  back to stock ARM / DISARM REC TRK.
+- **Mechanism:** the `[TRACK]`-held layer (`0x400d1594`) has no `[REC]` record, so `[REC]` falls through to the base
+  keymaps' record (T1 `0x400bfc3a`, T2 `0x400c061e`; press + release → `0x40048774`, its only 4 references). Those
+  fields → `rtm_rec`: track held + press → `RTM_MASK ^= held`, CC 80 per held track (own value), toast MUTED / UNMUTED /
+  TOGGLED (new, mixed result); anything else → `jmp 0x40048774`. Data repoint, not a detour, so octabam's STEM REC
+  (detours `0x40048774`, `UP` + `REC`) composes. The stock `[TRACK]`-layer bodies `0x40083488..0x40083544` are live
+  again; the code now fits `.main` `0x40032bd4` 268/308, `.draw` 96/108, `.ccrx` 136/168. Scope §17.
+- **Checks:** `emu_rec_trig_mute.py` (updated: toggle cases, stock `[REC]` without a track, stock ARM/DISARM REC TRK) +
+  `ot_emu --live-script` with real key events on the standalone AND KYOTI V1.6: `[T1]`+`[REC]` → `rtm_rec` → MUTED;
+  release → stock; `[REC]` alone → GRID REC on (`0x400487be`); `[T1]`+`[T3]`+`[REC]` with T1 muted → TOGGLED;
+  `[T1]`+`[YES]` → stock `0x400834d8`. KYOTI V1.6 composite differs from the promoted V1.6 only at REC_TRIG_MUTE's
+  sites; the stock `[TRACK]`-layer handlers and records are back, byte for byte.
+- **Builds (all WIP, NOT flashed; FINAL pins unchanged):**
+  - standalone `140C_RTM`: mainos `c4e790794c65693a7c6394f3485f661ee67fd7ebeea23a278c0fd7b78e248512`,
+    syx `e24525d387029d38f764999368e16827eef2b66b0508d02b1c4fdbfc4477fb3f`
+  - `BUG_RTM`: mainos `130a661bc40df8a56b11c1de8a332547206b403b7aa285837dca68bdb18d6d30`,
+    syx `c0bc26432374bfa38c2ad19edf51de23566e99f55c07980e39b4b1bcc1fa2a64`
+  - KYOTI V1.6 (OS VERSION unchanged): mainos `83e9534a9795d7d565dfa125fe86207a71722756b5065079c3e9a4e963e2687d`,
+    syx `def996989c3b4b52e149685b91f91080ee7a7e9504d7e9d33aa1e205e2fc74e7`
+  - octabam unit reference `14f5c3eeae873d8c538bc0f130d57109fce9508e81193ef329d97b30884dc8ca` (508 B)
+- **Hardware to check:** FLASHING §4 REC_TRIG_MUTE; plus `[TRACK]` + `[FUNC]` + `[REC]` (the FUNC layer's copy should
+  win) and `[TRACK]` + `[REC]` then `[PLAY]` (no live recording: our press never sets "REC held").
