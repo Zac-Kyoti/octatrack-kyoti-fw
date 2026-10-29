@@ -5,9 +5,11 @@
 **Where it stands.**
 - **Worktree / branch:** `../octatrack-kyoti-fw-trkseq`, branch `trkseq`. Commits are local, not
   pushed. Clyps is WIP, nothing is promoted, and there is no README entry.
-- **Latest image:** `140C_CLYPG` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
-  **BUILT 2026-10-28, NOT flashed**: step 0 below (stock [PTN] / [BANK] inside Clyps) and the BANK
-  box (§1.0). Walk-through: FLASHING §4 "CLYPG walk-through".
+- **Latest image:** `140C_CLYPH` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
+  **BUILT 2026-10-28, NOT flashed** (the user flashes it next round): CLYPG (step 0 below: stock
+  [PTN] / [BANK] inside Clyps, the BANK box, [MIDI] follows, no MIDI load modes) + step 1, FULL
+  loads (§1.7 "Built"). Walk-through: FLASHING §4 "CLYPH walk-through" (it includes CLYPG's).
+  CLYPG itself was never flashed.
 - **On the unit:** `140C_CLYPF`, syx `b3eacd36…`. FLASHED 2026-10-28: the user ran the CLYPF
   walk-through (FLASHING §4: layout, names across SAVE / RELOAD project and bank, power cycle,
   LOAD another project, EXPORT TO SET, DELETE PROJECT on a throwaway project): all passed.
@@ -61,9 +63,8 @@ the full run passes without them): an emulator accumulation effect, like the car
 **Next, in this order** (decisions are all in §1.0–§1.7 and §2):
 0. **DONE (CLYPG, not flashed): §1.0 step 2, stock [PTN] / [BANK] inside Clyps**, and the BANK box.
    How it works: §1.0 "Step 2 as built". Next after the user's CLYPG walk-through: step 1.
-1. **FULL loads** (§1.7). Route: DIRECT JUMP's engine hand-off after a slice copy at the landing
-   tick; first check whether the light Part apply `0x40009e00` disturbs the other tracks
-   mid-pattern (§1.7 "Plan").
+1. **DONE (CLYPH, not flashed): FULL loads** (§1.7 "Built"). The rest of this item is the plan as
+   it stood; the built route differs (single-track applies, no Part hand-off).
    - [FUNC] held = `LOAD: SEQ+MCH/FX`, and a trig picked then is a FULL load (our FUNC sub-map
      `cl_fsub` does not list the trigs, so trig records stay ours).
    - The Part slice is stock TRACK PASTE's 136 B (audio) / 68 B (MIDI), plus scene locks
@@ -502,7 +503,42 @@ everything" is O17.
 
 ### 1.7 "Sequence + machine/FX" loads — FULL loads (decided 2026-10-23: yes, scene locks included)
 
-**ORIG SEQ / ORIG SEQ+MCH/FX (the user, 2026-10-28; scoped, not built).**
+**Built (CLYPH, 2026-10-28; emulator-gated, not flashed).**
+- **Choosing:** audio: [FUNC] + trig and [FUNC]+[YES] (the box: a slot, or `ORIG` = `ORIG
+  SEQ+MCH/FX`) are FULL; a plain trig / [YES] is the sequence only. MIDI: every load is FULL (slot,
+  `ORIG`, [PAGE], [FUNC]+[PAGE], the temp reload). [PAGE] / [FUNC]+[PAGE] on audio: sequence only.
+  Stock's FUNC sub-map does not list the trigs, so [FUNC] + trig reaches `cl_k_trig` (C).
+- **The slice** (`cl_slA` / `cl_slM`, table-driven `cl_slice`): audio = FX1/FX2, levels, machine,
+  machine pages 1/2, AMP/LFO/FX page 1, page 2 block, slot record, recorder setup, 16 scene-lock
+  rows, 16 per-scene bytes, LFO designer + slope (682 B); MIDI = page values 32 B, setup 36 B,
+  designer + slope. Part tail `+0x1822` (16 B) is Part-level (a newer bank-file field read only by
+  the file reader/writer `0x4008cc7e` / `0x4008a67e`), not copied.
+- **Sources** (`cl_fullone`): a slot = its pattern's Part (`slab + 0x8e57`); `ORIG` = the playing
+  pattern's Part as loaded (the snapshot, its own Part byte); a saved sequence = the whole Part
+  saved with it (`SAVEPART`, 16 × 0x18b2 B, written by `cl_savet`).
+- **At the landing** (tick, or at once when stopped), in `cl_apply` after the record: the slice
+  into the playing pattern's Part, then that track only is published: audio `0x40001f18(bank,
+  part, t)` (stock's own, engine state + memcpy), with the restart bit `0x8000184c` set first when
+  the machine changed (as stock's machine edit, `0x400973b4`); MIDI `cl_mapply` = stock's
+  whole-Part apply's per-track MIDI body (`0x400094b0..0x400095e0`: engine record `0x46c76dc0 +
+  68m` ← pages + setup, designers `0x46c7738c` / slopes `0x46c7750c` for LFOs on a designer wave,
+  `0x8000666e[m]` / `[8+m]` = bank / part, `0x8000664e[m]` := 0). No kernel call, no Part hand-off.
+- **The UI tail owes** (`cl_postpart`, as stock's TRACK PASTE `0x4002b554..0x4002b59a`): the Part
+  in the SRAM mirror (UI bank), Part-edited bit (bank `+0x95048`, SRAM `0x100b145e`, `bset`), bank
+  changed (`+0x9b332`), `0x100f8598`; a new audio machine → stock's PICKUP setup `0x40097290`
+  (UI-context, reads the UI bank); then stock's Part-reload page redraw (`0x4005e0a8`'s calls).
+- **Gates:** F (OT DEMO, 14 checks: plain trig keeps the slice; [FUNC]+trig = sequence + slice, no
+  other track touched, Part marked edited, Clyps stays; `ORIG SEQ` sequence only; `ORIG
+  SEQ+MCH/FX` both back; playing with CHAIN AFTER = 1 step: the cue lands from the tick with its
+  slice, no other track touched), M (JAM2: a plain MIDI trig brings M2's slice), full 109 + K.
+  Landings: C1wH (plain) and C1wF (FULL, A14 T6 → A15 at the wrap) = B1 at all 450 ticks; C1wP
+  (FULL, A14 set to Part 2 first) = B1 too: the sequencer state is undisturbed. A running UI-gate
+  case needs `internal_clock()` + `frame = True` + `exact_clock()` before the transport starts
+  (as diag_clyps_landing.py does), or the master step never moves.
+- **Not done:** the "edited" x / `cl_diff` still compare the sequence only (a FULL load from a slot
+  with an identical sequence shows no x); stock's paste/undo of names (§10.3).
+
+**ORIG SEQ / ORIG SEQ+MCH/FX (the user, 2026-10-28; built CLYPH).**
 - With the select box on `ORIG`, its header box reads **`ORIG SEQ`** (was `ORIG`).
 - With [FUNC] held while the box is on `ORIG`, it reads **`ORIG SEQ+MCH/FX`**.
 - `ORIG SEQ` loads the original sequence only (what `ORIG` / [PAGE] do now). `ORIG SEQ+MCH/FX`
@@ -523,7 +559,8 @@ a MIDI sequence depends on its track's settings, so every MIDI load takes everyt
   yet:** today a MIDI load copies the track record only. It arrives with step 1 (FULL loads), as the
   MIDI side's only kind of load. Check then whether MIDI tracks have scene locks / arp settings
   outside those 68 B that should travel too.
-- `ORIG` on the MIDI side: proposed to stay `ORIG` (no `SEQ`, there is no choice); to confirm.
+- `ORIG` on the MIDI side: stays `ORIG` (no `SEQ`, there is no choice); built so, to confirm.
+- **Built in CLYPH** (see "Built" above): every MIDI load carries the slice.
 
 **What it would carry.** Exactly the per-track Part slice that stock's own TRACK COPY/PASTE carries
 (C, `0x40029754` / `0x4002b654`; MIDI `0x40029614` / `0x4002b470`).

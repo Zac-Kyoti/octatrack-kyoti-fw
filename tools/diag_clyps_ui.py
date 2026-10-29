@@ -134,6 +134,28 @@ def main(argv):
         return bytes(u.mem_read(BLOB + b * BANKSTRIDE + pat * PATSTRIDE + t * TRAC_A, TRAC_A))
 
     fails = []
+    # FULL loads (scope §1.7): a track's Part slice (as patch_clyps.s cl_slA / cl_slM)
+    PART_OFF, PARTSZ = 0x8ED80, 0x18B2
+    SLA = [(0x000, 1, 1, 1, 0), (0x008, 1, 1, 1, 0), (0x012, 2, 2, 1, 0), (0x022, 1, 1, 1, 0),
+           (0x02A, 30, 30, 1, 0), (0x1DA, 30, 30, 1, 0), (0x11A, 24, 24, 1, 0), (0x2F2, 30, 30, 1, 0),
+           (0x2CA, 5, 5, 1, 0), (0x602, 12, 12, 1, 0), (0x662, 32, 32, 16, 0x100), (0x1662, 1, 1, 16, 10),
+           (0x1702, 16, 16, 1, 0), (0x1782, 2, 2, 1, 0)]
+    SLM = [(0x3E2, 32, 32, 1, 0), (0x4E2, 36, 36, 1, 0), (0x1792, 16, 16, 1, 0), (0x1812, 2, 2, 1, 0)]
+
+    def partbase(b, pat, img=None):
+        img = BLOB if img is None else img
+        pi = rd(img + b * BANKSTRIDE + pat * PATSTRIDE + 0x8E57, 1) & 3
+        return img + b * BANKSTRIDE + PART_OFF + pi * PARTSZ
+
+    def pslice(t, base):
+        segs, k = (SLA, t) if t < 8 else (SLM, t - 8)
+        out = b""
+        for off, stride, size, count, step in segs:
+            o = off + stride * k
+            for _ in range(count):
+                out += bytes(u.mem_read(base + o, size))
+                o += step
+        return out
     slab = lambda pat, b=None: bytes(u.mem_read(BLOB + (bank if b is None else b) * BANKSTRIDE + pat * PATSTRIDE, PATSTRIDE))
     BANKSZ = 0x9B340
     snapok = lambda: rd(syms["cl_snapok"], 2)
@@ -305,9 +327,13 @@ def main(argv):
         key(BANK, 0)
         key(PTN, 0)
         src = mrec(1, 1)
+        msl = pslice(9, partbase(bank, 1))
+        msl_same = msl == pslice(9, partbase(bank, act))
         key(0x01, 1)
         key(0x01, 0)
         check(mrec(act, 1) == src, "trig 2 loaded pattern 2's M2 onto the playing pattern's M2")
+        check(pslice(9, partbase(bank, act)) == msl, "... with its track settings (a MIDI load is always FULL)"
+              + (" -- the two Parts' M2 slices were already equal" if msl_same else ""))
         # the [MIDI] key inside Clyps (not ours): the view and the grid follow the side
         lastt = lambda: rd(syms["cl_lastt"], 1)
         trk = lambda: (rd(0x80000000, 1) & 7) + (8 if rd(0x80000012, 4) else 0)
@@ -744,6 +770,110 @@ def main(argv):
         check(len(same) == 16, "the snapshot is the bank as it is after the load (all 16 banks)")
         check(rec(act, 0) == oslot(act, 0), "T1 equals its original after the load")
         check(state()["open"] == 0, "Clyps closed")
+
+
+    if "F" in a.only:
+        # --- F: FULL loads ([FUNC] + trig; [FUNC]+[YES] on ORIG = ORIG SEQ+MCH/FX), stopped transport
+        print("F: [FUNC]+trig loads the sequence + its Part slice; a plain trig does not; ORIG SEQ+MCH/FX")
+        tap(0x10)
+        act = rd(0x800065BE, 1)
+        t = 0
+        dst = partbase(bank, act)
+        dsl0 = pslice(t, dst)
+        others0 = [pslice(k, dst) for k in range(16) if k != t]
+        cand = [(b, q) for b in range(16) for q in range(16)
+                if (b, q) != (bank, act) and pslice(t, partbase(b, q)) != dsl0 and rec(q, 0, b) != rec(act, 0)]
+        check(bool(cand), f"a source with another T1 slice exists ({len(cand)})")
+        sb, sq = cand[0]
+        ssl, srec = pslice(t, partbase(sb, sq)), rec(sq, 0, sb)
+        print(f"      source bank {sb} pattern {sq + 1}; dest Part @0x{dst:08x}", flush=True)
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        if (sb - bank) % 16:               # a [BANK] tap with no arrow would open SELECT BANK
+            key(BANK, 1)
+            for _ in range((sb - bank) % 16):
+                tap(RIGHT)
+            key(BANK, 0)
+        # a plain trig first, on a slot with another slice: the Part stays
+        plain = next((q for q in range(16) if q != sq and (sb, q) != (bank, act)
+                      and pslice(t, partbase(sb, q)) != dsl0), None)
+        if plain is not None:
+            tap(plain)
+            check(pslice(t, dst) == dsl0, f"plain trig {plain + 1}: the sequence only, the Part slice stays")
+        key(FUNC, 1)
+        print(f"      [FUNC] down: cl_fn {rd(syms['cl_fn'], 1)} layers {[hex(x) for x in state()['layers']]}", flush=True)
+        r0 = rec(act, 0)
+        key(sq, 1)
+        print(f"      trig down: cur {state()['cur']} sbank {state()['sbank']} rec changed {rec(act, 0) != r0} "
+              f"== src {rec(act, 0) == srec} slice == src {pslice(t, dst) == ssl} postf {list(bytes(u.mem_read(syms['cl_postf'], 16)))} "
+              f"layers {[hex(x) for x in state()['layers']]}", flush=True)
+        key(sq, 0)
+        key(FUNC, 0)
+        print(f"      [FUNC] up: cl_fn {rd(syms['cl_fn'], 1)} layers {[hex(x) for x in state()['layers']]}", flush=True)
+        s = state()
+        check(s["open"] == 1, "[FUNC]+trig: Clyps stays open")
+        check(rec(act, 0) == srec, f"[FUNC]+trig {sq + 1}: the sequence")
+        check(pslice(t, dst) == ssl, "... and T1's Part slice (machine, FX, pages, scene locks, designer)")
+        check([pslice(k, dst) for k in range(16) if k != t] == others0, "... every other track's slice untouched")
+        pi = rd(BLOB + bank * BANKSTRIDE + act * PATSTRIDE + 0x8E57, 1) & 3
+        check(rd(BLOB + bank * BANKSTRIDE + 0x95048, 1) >> pi & 1, f"Part {pi + 1} marked edited")
+        # back to ORIG with [FUNC]: the original sequence AND the original slice
+        if (bank - sb) % 16:
+            key(BANK, 1)
+            for _ in range((bank - sb) % 16):
+                tap(RIGHT)
+            key(BANK, 0)
+        n = 0
+        while state()["cur"] != 16 and n < 20:
+            tap(UP)
+            n += 1
+        check(state()["cur"] == 16, "the box on ORIG")
+        tap(YES)
+        check(rec(act, 0) == oslot(act, 0) and pslice(t, dst) == ssl, "ORIG SEQ ([YES]): the sequence, not the slice")
+        key(FUNC, 1)
+        tap(YES)
+        key(FUNC, 0)
+        osl = pslice(t, partbase(bank, act, syms["cl_bss"]))
+        check(rec(act, 0) == oslot(act, 0) and pslice(t, dst) == osl == dsl0,
+              "ORIG SEQ+MCH/FX ([FUNC]+[YES]): the original sequence and slice")
+        # while playing (the tick path): CHAIN AFTER = 1 step, so the cue lands at the next step
+        sl = BLOB + bank * BANKSTRIDE + act * PATSTRIDE
+        q0 = rd(sl + 0x8E56, 1)
+        u.mem_write(sl + 0x8E56, bytes([1]))
+        rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+        rt.internal_clock()                # the sequencer clock, as diag_clyps_landing.py drives it
+        rt.frame = True
+        rt.next_frame = rt.sample + er.FRAME_PERIOD
+        rt.exact_clock()
+        rt.start_transport_live()
+        rt.run(ms=200)
+        running = rd(0x800065B8, 4)
+        key(FUNC, 1)
+        tap(sq)
+        key(FUNC, 0)
+        cue = lambda: rd(syms["cl_cue"], 2)
+        n = 0
+        while cue() != 0xFFFF and n < 60:
+            rt.run(ms=50)
+            n += 1
+            if n % 10 == 1:
+                print(f"      t+{n * 50} ms: master step {rd(0x800065B2, 2)} tick {rd(0x800065B6, 1)} "
+                      f"arm {rd(syms['cl_arm'], 1)} nq {rd(syms['cl_nq'], 1)} cuef {rd(syms['cl_cuef'], 1)} "
+                      f"quant {rd(sl + 0x8E56, 1)} proj {rd(0x8000004E, 1)} act {rd(0x800065BE, 1)}", flush=True)
+        check(running == 1 and cue() == 0xFFFF and rec(act, 0) == srec and pslice(t, dst) == ssl,
+              f"playing: [FUNC]+trig lands at the next step with its slice (running {running}, "
+              f"cue 0x{cue():04x} after {n * 50} ms)")
+        check([pslice(k, dst) for k in range(16) if k != t] == others0, "... every other track's slice untouched")
+        check(state()["open"] == 1, "... Clyps stays open")
+        key(0x27, 1)                       # STOP (not ours)
+        key(0x27, 0)
+        rt.run(ms=300)
+        u.mem_write(sl + 0x8E56, bytes([q0]))
+        check(rd(0x800065B8, 4) == 0, "stopped again")
+        tap(NO)
+        closed_ok("[NO]")
 
     if "K" in a.only:
         # --- K: stock [PTN] / [BANK] inside Clyps (scope §1.0 step 2). Changes the playing pattern:

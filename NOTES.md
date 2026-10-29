@@ -37717,3 +37717,17 @@ on the MIDI side.
   message; K and M now post a type-0 SYS message after each key (straight to the tail). Posting
   it in every scenario made S fault after A..E+G+T (an emulator accumulation effect; every shorter
   prefix passes), so only K and M do. Gate K (21 checks) new; M gains the [MIDI] check.
+
+**Session 131 cont. (7) (2026-10-28, `trkseq`)** — CLYPS `140C_CLYPH` BUILT, NOT flashed (the user
+flashes it next round; CLYPG was never flashed): FULL loads (scope §1.7 "Built").
+- Audio: [FUNC] + trig / [FUNC]+[YES] load the sequence + the track's Part slice (machine, FX,
+  levels, all pages, slot, recorder, 16 scene-lock rows, per-scene bytes, LFO designer); `ORIG SEQ`
+  / `ORIG SEQ+MCH/FX` on the box. MIDI: every load carries its slice (pages, setup, designer).
+- Applied at the landing for that one track: stock's `0x40001f18` (audio; restart bit on a new
+  machine) or `cl_mapply` (stock's per-track MIDI body of `0x40009094`); the UI tail does stock
+  TRACK PASTE's SRAM / edited flags, PICKUP setup and page redraw. Saved sequences keep their Part.
+- Gates: F 14/14 (incl. a running landing from the tick), M 8/8, full 109/109; landings C1wH
+  (plain), C1wF (FULL) and C1wP (FULL from another Part) = stock B1 at all 450 ticks. ROM cave 3,328 B (2,620 left); bss +101 KB (SAVEPART).
+- Harness traps: a [BANK] tap with no arrow now opens SELECT BANK (the gate paged with zero
+  arrows and the overlay ate the next trig); `diag_clyps_landing.py` stages into one fixed tree
+  (no parallel runs); a wait loop on `pgrep -f <name>` matches its own command line.

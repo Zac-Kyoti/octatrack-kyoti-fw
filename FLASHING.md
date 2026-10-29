@@ -206,6 +206,26 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **CLYPS — CLYPH walk-through.** Image `140C_CLYPH`: everything in CLYPG (its steps below) plus
+  FULL loads (sequence + machine/FX). Use a throwaway copy of a project: FULL loads change Parts.
+  1. Audio track, in Clyps: hold `[FUNC]`: the header reads `LOAD: SEQ+MCH/FX`. Still holding it,
+     tap the trig of a slot whose pattern uses another Part (or another bank's pattern) with a
+     different machine / FX on this track: the sequence AND the machine, FX, page values, scene
+     locks and LFO designer come with it. The pages show the new values; Part shows as edited.
+  2. A plain trig (no `[FUNC]`): the sequence only, the machine / FX stay.
+  3. While playing: the same, cued; the machine/FX change lands with the sequence (at the wrap or
+     the CHAIN AFTER point), the other tracks keep playing undisturbed. Try a FLEX → STATIC or
+     THRU change, and one to / from PICKUP.
+  4. Move the box to `ORIG`: it reads `ORIG SEQ`; hold `[FUNC]`: `ORIG SEQ+MCH/FX`. `[YES]` puts
+     the original sequence back; `[FUNC]`+`[YES]` puts back the sequence and the original
+     machine / FX.
+  5. MIDI side: any load (trig, `[YES]`, `ORIG`, `[PAGE]`, a temp reload) brings the track's
+     settings with the sequence (channel, bank, program, the page values, LFO designer). Tell me
+     if anything stays behind -- e.g. the arpeggiator's note sequence, which may live elsewhere in
+     the Part. `ORIG` reads plain `ORIG`; `[FUNC]` changes nothing.
+  6. Temp save / reload outside Clyps on a MIDI track (`[YES]`+TRACK, then change its channel,
+     then `[NO]`+TRACK): the channel comes back too.
+
 - **CLYPS — CLYPG walk-through.** Image `140C_CLYPG`. As CLYPF (below), plus stock `[PTN]` /
   `[BANK]` inside Clyps and the BANK box. Open Clyps with the chord and let go of both keys first.
   1. Hold `[BANK]`: the header's `BANK A` turns into a dark box with lit letters (like `ORIG`).

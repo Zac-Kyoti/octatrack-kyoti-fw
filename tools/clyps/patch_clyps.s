@@ -35,6 +35,32 @@
     .equ T_LEN,       3
     .equ T_SCALE,     4
     .equ T_SMODE,     5                 | 0 = NORMAL
+    .equ T_PART,      7                 | the pattern's Part 0..3 (slab + 0x8e57)
+| FULL loads (scope §1.7): one track's Part slice, applied for that track only
+    .equ PART_OFF,    0x8ed80           | a bank's 4 Parts, after its 16 slabs
+    .equ PARTSZ,      0x18b2
+    .equ SRAM_PART,   0x100a4ece        | the SRAM mirror's Parts (SRAM_PAT + PART_OFF)
+    .equ PEDIT,       0x95048           | bank + : byte, bit p = Part p edited (stock's paste)
+    .equ PEDIT_S,     0x100b145e        | ... its SRAM copy
+    .equ BDIRTY,      0x9b332           | bank + : long 1 = the bank has changed
+    .equ DIRTY2,      0x100f8598        | long 1 (stock's paste sets it with the two above)
+    .equ TRK_APPLY,   0x40001f18        | (bank, part, t): one audio track's Part values -> the engine
+                                        | (engine state + memcpy only: tick-safe)
+    .equ ENG_RESTART, 0x8000184c        | byte, bit t: restart the voice (a new machine, 0x400973b4)
+    .equ PICKUP_SET,  0x40097290        | stock's PICKUP setup after a machine change (UI context)
+    .equ MENG,        0x46c76dc0        | 8 x 68 B: a MIDI track's page values (32) + setup (36)
+    .equ MDES,        0x46c7738c        | 24 x 16 B: the MIDI LFOs' designer waves
+    .equ MSLP,        0x46c7750c        | 24 x u16: ... their slopes
+    .equ MBANK,       0x8000666e        | byte[8] bank / [8+m] Part the MIDI track's values came from
+    .equ MZERO,       0x8000664e        | long[8], cleared by stock's apply
+| stock's UI refresh after a Part change (the tail of its Part-reload shortcut, 0x4005e0a8)
+    .equ PR_A,        0x4004d948        | (-1)
+    .equ PR_B,        0x40032208
+    .equ PR_C,        0x4004d640
+    .equ PR_D,        0x400486cc
+    .equ PR_E,        0x4006dbe8
+    .equ PR_F,        0x40077b00
+    .equ PR_G,        0x4002f2f8
     .equ HELD_BASE,   0x46c7d8ee        | is_key_held(code) = (0x46c7d8ee + code*24) != 0
     .equ FUNC_HELD,   0x46c7dd26        | code 0x2d
     .equ PTN_HELD,    0x46c7dd3e        | code 0x2e
@@ -175,6 +201,8 @@
     .equ BOX_R,       109               | a dark header box's right column (text ends at 107)
     .equ ORIG_W,      15                | "ORIG", "SAVED": widths from the font's table 0x400c246a
     .equ SAVED_W,     19
+    .equ ORIGS_W,     30                | "ORIG SEQ"
+    .equ ORIGF_W,     58                | "ORIG SEQ+MCH/FX"
     .equ MID_X,       47                | "SAVED" (the saved sequence plays) between the two labels
     .equ BKBOX_L,     12                | [BANK] held: a dark box round "BANK A" (x 14..35: "T6 " is
     .equ BKBOX_R,     37                | 11 px for T and M alike), 2 dark columns each side, as ORIG's
@@ -447,9 +475,7 @@ kt_out:
 cl_k_yes:
     move.l  8(%sp),%d0
     cmpi.l  #1,%d0
-    bne.b   ky_out
-    tst.b   cl_fn
-    bne.b   ky_out                      | [FUNC]+[YES]: nothing in Clyps (temp save lives outside)
+    bne.b   ky_out                      | [FUNC]+[YES]: the same, FULL (cl_load / ky_orig read cl_fn)
     clr.b   cl_flash
     tst.l   PTN_HELD
     beq.b   ky_noptn
@@ -469,6 +495,11 @@ ky_noptn:
     addq.l  #4,%sp
     bra.w   cl_refresh
 ky_orig:
+    moveq   #0,%d0
+    tst.b   cl_fn
+    beq.b   ky_os
+    move.l  #0x10000,%d0                | ORIG SEQ+MCH/FX
+ky_os:
     jsr     cl_restore
     bra.w   cl_refresh
 ky_out:
@@ -494,6 +525,7 @@ cl_k_page:
     clr.b   cl_flash
     tst.b   cl_fn
     bne.b   kp_all
+    moveq   #0,%d0                      | the sequence (a MIDI track: everything)
     jsr     cl_restore
     bra.w   cl_refresh
 kp_all:
@@ -861,6 +893,10 @@ cl_load:
     move.b  cl_sbank,%d1
     lsl.l   #8,%d1
     or.l    4(%sp),%d1                  | bank<<8 | pattern
+    tst.b   cl_fn
+    beq.b   ld_seq
+    ori.l   #0x10000,%d1                | [FUNC] held: FULL (audio; a MIDI load always is)
+ld_seq:
     clr.l   -(%sp)                      | cued
     move.l  %d1,-(%sp)
     move.l  %d0,-(%sp)
@@ -868,18 +904,27 @@ cl_load:
     lea     12(%sp),%sp
     rts
 
-| cl_cueload(t, code, now): source `code` (bank<<8 | pattern, SRC_SAVED<<8, SRC_ORIG<<8) onto track
-| t of the playing pattern. Stopped: at once. Running: cued (scope §1.5a), the sequencer tick lands
+| cl_cueload(t, code, now): source `code` (bank<<8 | pattern, SRC_SAVED<<8, SRC_ORIG<<8; + 0x10000 =
+| FULL, with its machine / FX: audio only, a MIDI load always is) onto track t of the playing pattern. Stopped: at once. Running: cued (scope §1.5a), the sequencer tick lands
 | it (cl_land / cl_wrap); now != 0 arms it at once: it lands at the track's next window start,
 | phase-continuous ([FUNC]+[NO], O3).
 cl_cueload:
-    lea     -16(%sp),%sp
-    movem.l %d2-%d4/%a2,(%sp)
-    move.l  20(%sp),%d3                 | d3 = track
-    move.l  24(%sp),%d2                 | d2 = code
-    move.l  28(%sp),%d4                 | d4 = now
+    lea     -20(%sp),%sp
+    movem.l %d2-%d5/%a2,(%sp)
+    move.l  24(%sp),%d3                 | d3 = track
+    move.l  28(%sp),%d2                 | d2 = code
+    move.l  32(%sp),%d4                 | d4 = now
+    move.l  %d2,%d5
+    swap    %d5
+    andi.l  #1,%d5                      | d5 = FULL
+    cmpi.l  #8,%d3
+    bcs.b   lo_aud
+    moveq   #1,%d5                      | MIDI: always everything (the user, 2026-10-28)
+lo_aud:
+    andi.l  #0xffff,%d2
     tst.l   RUNNING
     bne.b   lo_cue
+    move.l  %d5,-(%sp)
     move.l  %d2,%d0
     andi.l  #0xff,%d0
     move.l  %d0,-(%sp)
@@ -888,7 +933,7 @@ cl_cueload:
     move.l  %d0,-(%sp)
     move.l  %d3,-(%sp)
     jsr     cl_apply                    | at once
-    lea     12(%sp),%sp
+    lea     16(%sp),%sp
     move.l  %d3,-(%sp)
     jsr     cl_post_ui
     addq.l  #4,%sp
@@ -909,6 +954,8 @@ lo_cue:
     move.b  ACT_PAT,%d0
     lea     cl_cueh,%a0
     move.w  %d0,(%a0,%d1.l)             | the pattern it is aimed at
+    lea     cl_cuef,%a0
+    move.b  %d5,(%a0,%d3.l)
     lea     cl_arm,%a0
     move.b  %d4,(%a0,%d3.l)             | 0 = wait for the gate; 1 = armed already
     jsr     cl_count
@@ -922,8 +969,8 @@ lo_cancel:
     clr.b   (%a0,%d3.l)
     jsr     cl_count
 lo_out:
-    movem.l (%sp),%d2-%d4/%a2
-    lea     16(%sp),%sp
+    movem.l (%sp),%d2-%d5/%a2
+    lea     20(%sp),%sp
     rts
 
 | cl_diff (d0 = track) -> d0 = 1 when the playing pattern's record of the track differs from its
@@ -963,21 +1010,32 @@ df_out:
     lea     8(%sp),%sp
     rts
 
-| cl_restore: the active track's original back (cued like any load). d0 = 1 if it differed.
+| cl_restore (d0 = 0x10000: with its machine / FX, ORIG SEQ+MCH/FX): the active track's original
+| back (cued like any load). Sequence only (and every MIDI restore): nothing if the sequence is
+| original. With machine / FX: always (its Part slice may differ). d0 = 1 if a load was made.
 cl_restore:
+    move.l  %d0,-(%sp)
     jsr     cl_trk
     move.l  %d0,-(%sp)
+    tst.l   4(%sp)
+    beq.b   rs_diff
+    cmpi.l  #8,%d0
+    bcs.b   rs_go
+rs_diff:
     jsr     cl_diff
-    move.l  (%sp)+,%d1
     tst.l   %d0
     beq.b   rs_out
+rs_go:
+    move.l  4(%sp),%d0
+    ori.l   #SRC_ORIG<<8,%d0
     clr.l   -(%sp)
-    pea     SRC_ORIG<<8
-    move.l  %d1,-(%sp)
+    move.l  %d0,-(%sp)
+    move.l  8(%sp),-(%sp)
     jsr     cl_cueload
     lea     12(%sp),%sp
     moveq   #1,%d0
 rs_out:
+    addq.l  #8,%sp
     rts
 
 | cl_restoreall: every track of the playing pattern that differs from its original, on one
@@ -1052,6 +1110,21 @@ sv_off:
     move.b  T_SCALE(%a0),%d0
     move.b  %d0,1(%a1)
 sv_valid:
+    moveq   #0,%d0                      | the Part it plays with (a FULL reload brings its slice)
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    movea.l #BLOB,%a1
+    jsr     cl_partin
+    move.l  %d2,%d0
+    move.l  #PARTSZ,%d1
+    muls.l  %d1,%d0
+    addi.l  #SAVEPART,%d0
+    pea     PARTSZ
+    move.l  %a0,-(%sp)
+    move.l  %d0,-(%sp)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
     lea     cl_svalid,%a0
     moveq   #1,%d0
     move.b  %d0,(%a0,%d2.l)
@@ -1393,7 +1466,7 @@ sb_ok:
     rts
 
     .text
-| cl_apply(t, sbank, spat) -> d0 = 1 copied, 0 not (the playing pattern's own slot, or no saved
+| cl_apply(t, sbank, spat, full) -> d0 = 1 copied, 0 not (the playing pattern's own slot, or no saved
 | sequence / original to put back). The record, its length/scale (scope §4.6) and the provenance. Writes RAM only (slab + our state): safe in
 | the sequencer tick. sbank = SRC_SAVED / SRC_ORIG: the saved sequence / the original of t.
 cl_apply:
@@ -1443,6 +1516,10 @@ ap_copy:
     jsr     MEMCPY
     lea     12(%sp),%sp
     jsr     cl_nload                    | the name comes with the sequence
+    tst.l   56(%sp)
+    beq.b   ap_seq
+    jsr     cl_fullone                  | FULL: its machine / FX too
+ap_seq:
 |   length / scale: the source's, resolved. Track len/scale bytes: audio +0x50/+0x51, MIDI +0x28/+0x29.
     moveq   #0x50,%d3
     cmpi.l  #8,%d6
@@ -1566,6 +1643,291 @@ nl_l:
     bne.b   nl_l
 nl_out:
     rts
+
+
+| ================================================================ FULL loads (scope §1.7)
+| A FULL load carries the track's Part slice with its sequence: what stock's TRACK COPY / PASTE
+| carries (machine, FX, levels, every page), plus its 16 scene-lock rows, per-scene bytes and LFO
+| designer. It is written into the Part of the playing pattern and published for that one track
+| (audio: stock's TRK_APPLY; MIDI: cl_mapply), at the landing tick like the sequence. The UI tail
+| then owes the SRAM mirror, the edited flags, the PICKUP setup and the page redraw (cl_postpart).
+| Audio: [FUNC] + trig / [FUNC]+[YES]. MIDI: every load (the user, 2026-10-28).
+
+| cl_partin (a1 = BLOB or SNAPB, d0 = bank, d1 = pattern) -> a0 = the pattern's Part in that
+| image, d0 = its index 0..3. Uses d0-d1/a0-a1.
+cl_partin:
+    move.l  %d2,-(%sp)
+    move.l  #BANKSTRIDE,%d2
+    muls.l  %d0,%d2
+    adda.l  %d2,%a1                     | a1 = the bank
+    move.l  #PATSTRIDE,%d2
+    muls.l  %d1,%d2
+    movea.l %a1,%a0
+    adda.l  %d2,%a0
+    adda.l  #TRAILER,%a0
+    moveq   #0,%d0
+    move.b  T_PART(%a0),%d0
+    andi.l  #3,%d0
+    move.l  #PARTSZ,%d2
+    muls.l  %d0,%d2
+    adda.l  #PART_OFF,%a1
+    lea     (%a1,%d2.l),%a0
+    move.l  (%sp)+,%d2
+    rts
+
+| cl_slice(t, dst Part, src Part): track t's slice (cl_slA / cl_slM: off, stride, size, count,
+| step; ends with 0xffff). Uses d0-d1/a0-a1.
+cl_slice:
+    lea     -20(%sp),%sp
+    movem.l %d2-%d5/%a2,(%sp)
+    move.l  24(%sp),%d2
+    lea     cl_slA,%a2
+    cmpi.l  #8,%d2
+    bcs.b   sc_seg
+    subq.l  #8,%d2
+    lea     cl_slM,%a2
+sc_seg:
+    moveq   #0,%d0
+    move.w  (%a2)+,%d0                  | offset
+    cmpi.l  #0xffff,%d0
+    beq.b   sc_out
+    moveq   #0,%d1
+    move.w  (%a2)+,%d1                  | stride
+    muls.l  %d2,%d1
+    add.l   %d1,%d0                     | d0 = offset + stride * t
+    moveq   #0,%d3
+    move.w  (%a2)+,%d3                  | size
+    moveq   #0,%d4
+    move.w  (%a2)+,%d4                  | count
+    moveq   #0,%d1
+    move.w  (%a2)+,%d1                  | step
+sc_rep:
+    movea.l 28(%sp),%a0
+    adda.l  %d0,%a0
+    movea.l 32(%sp),%a1
+    adda.l  %d0,%a1
+    move.l  %d3,%d5
+sc_b:
+    move.b  (%a1)+,(%a0)+
+    subq.l  #1,%d5
+    bne.b   sc_b
+    add.l   %d1,%d0
+    subq.l  #1,%d4
+    bne.b   sc_rep
+    bra.b   sc_seg
+sc_out:
+    movem.l (%sp),%d2-%d5/%a2
+    lea     20(%sp),%sp
+    rts
+
+| cl_fullone (d6 = t, d2 = sbank or SRC_*, d7 = spat): the source's slice of t -> the playing
+| pattern's Part, published for t. Sources: a slot's Part; SRC_ORIG: the playing pattern's Part as
+| loaded (the snapshot); SRC_SAVED: the Part saved with t's saved sequence. Keeps d2-d7/a2-a6.
+cl_fullone:
+    lea     -12(%sp),%sp
+    movem.l %d4/%a2-%a3,(%sp)
+    cmpi.l  #SRC_SAVED,%d2
+    beq.b   fo_saved
+    cmpi.l  #SRC_ORIG,%d2
+    beq.b   fo_orig
+    move.l  %d2,%d0
+    move.l  %d7,%d1
+    movea.l #BLOB,%a1
+    bsr.w   cl_partin
+    bra.b   fo_src
+fo_saved:
+    lea     cl_svalid,%a0
+    tst.b   (%a0,%d6.l)
+    beq.w   fo_out
+    move.l  %d6,%d0
+    move.l  #PARTSZ,%d1
+    muls.l  %d1,%d0
+    movea.l #SAVEPART,%a0
+    adda.l  %d0,%a0
+    bra.b   fo_src
+fo_orig:
+    jsr     cl_origok
+    tst.l   %d0
+    beq.w   fo_out
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    movea.l #SNAPB,%a1
+    bsr.w   cl_partin
+fo_src:
+    movea.l %a0,%a3                     | a3 = the source Part
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    movea.l #BLOB,%a1
+    bsr.w   cl_partin
+    movea.l %a0,%a2                     | a2 = the playing pattern's Part
+    move.l  %d0,%d4                     | d4 = its index
+|   audio: a new machine restarts the voice (as stock's machine edit, 0x400973b4) and owes the
+|   PICKUP setup (UI tail)
+    cmpi.l  #8,%d6
+    bcc.b   fo_copy
+    move.b  0x22(%a2,%d6.l),%d0
+    cmp.b   0x22(%a3,%d6.l),%d0
+    beq.b   fo_copy
+    moveq   #1,%d0
+    lsl.l   %d6,%d0
+    move.b  ENG_RESTART,%d1
+    or.l    %d1,%d0
+    move.b  %d0,ENG_RESTART
+    lea     cl_postm,%a0
+    moveq   #1,%d0
+    move.b  %d0,(%a0,%d6.l)
+fo_copy:
+    move.l  %a3,-(%sp)
+    move.l  %a2,-(%sp)
+    move.l  %d6,-(%sp)
+    bsr.w   cl_slice
+    lea     12(%sp),%sp
+    move.l  %d6,%d0                     | publish it: this track only
+    cmpi.l  #8,%d0
+    bcs.b   fo_t
+    subq.l  #8,%d0
+fo_t:
+    move.l  %d0,-(%sp)                  | t / m
+    move.l  %d4,-(%sp)                  | part
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    cmpi.l  #8,%d6
+    bcc.b   fo_m
+    jsr     TRK_APPLY
+    bra.b   fo_pub
+fo_m:
+    bsr.w   cl_mapply
+fo_pub:
+    lea     12(%sp),%sp
+    lea     cl_postf,%a0
+    moveq   #1,%d0
+    move.b  %d0,(%a0,%d6.l)             | the UI side owes its part (cl_postpart)
+fo_out:
+    movem.l (%sp),%d4/%a2-%a3
+    lea     12(%sp),%sp
+    rts
+
+| cl_mapply(bank, part, m): one MIDI track's Part values -> the engine: stock's whole-Part apply
+| 0x40009094 does this for every m (0x400094b0..0x400095e0), RAM writes only.
+cl_mapply:
+    lea     -20(%sp),%sp
+    movem.l %d2-%d4/%a2-%a3,(%sp)
+    move.l  24(%sp),%d0                 | bank
+    move.l  28(%sp),%d1                 | part
+    move.l  32(%sp),%d2                 | m
+    move.l  #BANKSTRIDE,%d3
+    muls.l  %d0,%d3
+    movea.l #BLOB+PART_OFF,%a2
+    adda.l  %d3,%a2
+    move.l  #PARTSZ,%d3
+    muls.l  %d1,%d3
+    adda.l  %d3,%a2                     | a2 = the Part
+    moveq   #68,%d3
+    muls.l  %d2,%d3
+    movea.l #MENG,%a0
+    adda.l  %d3,%a0                     | a0 = the engine's record m
+    move.l  %d2,%d3
+    lsl.l   #5,%d3
+    movea.l %a2,%a1
+    adda.l  #0x3e2,%a1
+    adda.l  %d3,%a1                     | page values, 32 B
+    moveq   #32,%d4
+cm_p:
+    move.b  (%a1)+,(%a0)+
+    subq.l  #1,%d4
+    bne.b   cm_p
+    moveq   #36,%d3
+    muls.l  %d2,%d3
+    movea.l %a2,%a1
+    adda.l  #0x4e2,%a1
+    adda.l  %d3,%a1                     | setup, 36 B
+    movea.l %a1,%a3
+    adda.l  #9,%a3                      | a3 = its 3 LFO waves
+    moveq   #36,%d4
+cm_s:
+    move.b  (%a1)+,(%a0)+
+    subq.l  #1,%d4
+    bne.b   cm_s
+    moveq   #0,%d4                      | each LFO on a designer wave (> 10): its 16 B and slope
+cm_d:
+    move.b  (%a3,%d4.l),%d0
+    extb.l  %d0
+    moveq   #10,%d1
+    cmp.l   %d1,%d0
+    ble.b   cm_dn
+    subi.l  #11,%d0                     | d0 = the designer it uses
+    movea.l %a2,%a1
+    adda.l  #0x1792,%a1
+    move.l  %d0,%d1
+    lsl.l   #4,%d1
+    adda.l  %d1,%a1
+    move.l  %d2,%d1                     | d1 = 3m + i
+    add.l   %d1,%d1
+    add.l   %d2,%d1
+    add.l   %d4,%d1
+    movea.l #MDES,%a0
+    move.l  %d1,%d3
+    lsl.l   #4,%d3
+    adda.l  %d3,%a0
+    moveq   #16,%d3
+cm_w:
+    move.b  (%a1)+,(%a0)+
+    subq.l  #1,%d3
+    bne.b   cm_w
+    movea.l %a2,%a1
+    adda.l  #0x1812,%a1
+    add.l   %d0,%d0
+    adda.l  %d0,%a1
+    movea.l #MSLP,%a0
+    add.l   %d1,%d1
+    adda.l  %d1,%a0
+    move.w  (%a1),(%a0)
+cm_dn:
+    addq.l  #1,%d4
+    cmpi.l  #3,%d4
+    bne.b   cm_d
+    movea.l #MBANK,%a0
+    move.l  24(%sp),%d0
+    move.b  %d0,(%a0,%d2.l)
+    move.l  28(%sp),%d0
+    move.b  %d0,8(%a0,%d2.l)
+    move.l  %d2,%d0
+    lsl.l   #2,%d0
+    movea.l #MZERO,%a0
+    clr.l   (%a0,%d0.l)
+    movem.l (%sp),%d2-%d4/%a2-%a3
+    lea     20(%sp),%sp
+    rts
+
+| the slices (scope §1.7): off, stride, size, count, step
+cl_slA:
+    .short 0x000, 1, 1, 1, 0            | FX1
+    .short 0x008, 1, 1, 1, 0            | FX2
+    .short 0x012, 2, 2, 1, 0            | levels
+    .short 0x022, 1, 1, 1, 0            | machine
+    .short 0x02a, 30, 30, 1, 0          | machine page 1 (all 5 machines)
+    .short 0x1da, 30, 30, 1, 0          | machine page 2
+    .short 0x11a, 24, 24, 1, 0          | AMP / LFO / FX1 / FX2 page 1
+    .short 0x2f2, 30, 30, 1, 0          | LFO, AMP / FX page 2, MULT / TRIG
+    .short 0x2ca, 5, 5, 1, 0            | slot record
+    .short 0x602, 12, 12, 1, 0          | recorder setup
+    .short 0x662, 32, 32, 16, 0x100     | 16 scene-lock rows
+    .short 0x1662, 1, 1, 16, 10         | per-scene bytes
+    .short 0x1702, 16, 16, 1, 0         | LFO designer
+    .short 0x1782, 2, 2, 1, 0           | ... its slope
+    .short 0xffff
+cl_slM:
+    .short 0x3e2, 32, 32, 1, 0          | page values
+    .short 0x4e2, 36, 36, 1, 0          | setup: channel, bank, program, ...
+    .short 0x1792, 16, 16, 1, 0         | LFO designer
+    .short 0x1812, 2, 2, 1, 0           | ... its slope
+    .short 0xffff
+    .align 2
 
 | cl_srcrec(t, sbank, spat) -> a0 = the source record (0 = none), d0 = its resolved length, d1 =
 | its resolved scale. sbank 0..15: a slot (a NORMAL pattern's length / scale are the pattern's);
@@ -1800,6 +2162,85 @@ pu_dirty:
     move.l  %d0,-(%sp)
     jsr     SEQ_DIRTY
     addq.l  #4,%sp
+    move.l  4(%sp),-(%sp)
+    jsr     cl_postpart
+    addq.l  #4,%sp
+    rts
+
+| cl_postpart(t): what a FULL landing of t owes the UI side, as stock's TRACK PASTE does it
+| (0x4002b554..0x4002b59a): the Part in the SRAM mirror (the UI bank only), the Part-edited and
+| bank-changed flags, then -- for a new audio machine -- stock's PICKUP setup, and the page redraw
+| of stock's Part reload (0x4005e0a8). Nothing if no FULL landing is owed.
+cl_postpart:
+    move.l  4(%sp),%d0
+    lea     cl_postf,%a0
+    tst.b   (%a0,%d0.l)
+    beq.w   pp_out
+    clr.b   (%a0,%d0.l)
+    lea     -16(%sp),%sp
+    movem.l %d2-%d4/%a2,(%sp)
+    move.l  20(%sp),%d2                 | d2 = track
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    movea.l #BLOB,%a1
+    jsr     cl_partin
+    movea.l %a0,%a2                     | a2 = the Part
+    move.l  %d0,%d3                     | d3 = its index
+    moveq   #0,%d4                      | d4 = 1: the UI bank
+    move.b  PLAY_BANK,%d0
+    cmp.b   UI_BANK,%d0
+    bne.b   pp_flags
+    moveq   #1,%d4
+    move.l  #PARTSZ,%d0
+    muls.l  %d3,%d0
+    addi.l  #SRAM_PART,%d0
+    pea     PARTSZ
+    move.l  %a2,-(%sp)
+    move.l  %d0,-(%sp)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
+    bset    %d3,PEDIT_S
+pp_flags:
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  #BANKSTRIDE,%d1
+    muls.l  %d1,%d0
+    movea.l #BLOB,%a0
+    adda.l  %d0,%a0
+    movea.l %a0,%a1
+    adda.l  #PEDIT,%a0
+    bset    %d3,(%a0)                   | a byte: bset, never or.l (the REPITCH lesson, S119)
+    adda.l  #BDIRTY,%a1
+    moveq   #1,%d0
+    move.l  %d0,(%a1)
+    move.l  %d0,DIRTY2
+    tst.l   %d4
+    beq.b   pp_out2                     | another bank than the UI's: nothing on screen to redraw
+    cmpi.l  #8,%d2
+    bcc.b   pp_ref
+    lea     cl_postm,%a0
+    tst.b   (%a0,%d2.l)
+    beq.b   pp_ref
+    clr.b   (%a0,%d2.l)
+    jsr     PICKUP_SET                  | a new machine: stock's PICKUP setup (it reads the UI bank)
+pp_ref:
+    moveq   #1,%d0
+    move.l  %d0,RDRAW
+    pea     -1
+    jsr     PR_A
+    jsr     PR_B
+    jsr     PR_C
+    jsr     PR_D
+    jsr     PR_E
+    jsr     PR_F
+    jsr     PR_G
+    addq.l  #4,%sp
+pp_out2:
+    movem.l (%sp),%d2-%d4/%a2
+    lea     16(%sp),%sp
+pp_out:
     rts
 
     .text
@@ -2064,6 +2505,10 @@ nr_none:
 
 | cl_landone (d6 = track): copy the cue onto the playing pattern, clear it, owe the UI follow-up
 cl_landone:
+    lea     cl_cuef,%a0
+    moveq   #0,%d0
+    move.b  (%a0,%d6.l),%d0
+    move.l  %d0,-(%sp)                  | full
     move.l  %d6,%d0
     add.l   %d0,%d0
     lea     cl_cue,%a0
@@ -2076,7 +2521,7 @@ cl_landone:
     move.l  %d1,-(%sp)
     move.l  %d6,-(%sp)
     jsr     cl_apply
-    lea     12(%sp),%sp
+    lea     16(%sp),%sp
     jsr     cl_dropone
     move.w  cl_post,%d0
     moveq   #1,%d1
@@ -2480,6 +2925,22 @@ cd_ta:
     jsr     cl_trk
     move.l  %d0,%d6                     | d6 >= 8: the MIDI side (d6 is free until the cells)
     moveq   #0,%d5
+    moveq   #0,%d1                      | the box on ORIG: "ORIG SEQ", [FUNC] "ORIG SEQ+MCH/FX"
+    move.b  cl_cur,%d1                  | (the user, 2026-10-28); MIDI: "ORIG" (always everything)
+    cmpi.l  #NSLOT,%d1
+    bne.b   cd_noorig
+    lea     cl_s_orig,%a0
+    moveq   #BOX_R-1-ORIG_W,%d0
+    cmpi.l  #8,%d6
+    bcc.b   cd_box
+    lea     cl_s_origs,%a0
+    moveq   #BOX_R-1-ORIGS_W,%d0
+    tst.b   cl_fn
+    beq.b   cd_box
+    lea     cl_s_origf,%a0
+    moveq   #BOX_R-1-ORIGF_W,%d0
+    bra.b   cd_box
+cd_noorig:
     cmpi.l  #8,%d6
     bcc.b   cd_nofn
     lea     cl_s_full,%a0
@@ -2487,12 +2948,6 @@ cd_ta:
     tst.b   cl_fn
     bne.b   cd_mode
 cd_nofn:
-    lea     cl_s_orig,%a0
-    moveq   #BOX_R-1-ORIG_W,%d0
-    moveq   #0,%d1
-    move.b  cl_cur,%d1
-    cmpi.l  #NSLOT,%d1
-    beq.b   cd_box
     lea     cl_s_saved,%a0
     moveq   #BOX_R-1-SAVED_W,%d0
     tst.b   cl_flash
@@ -3629,6 +4084,9 @@ cl_home:    .fill 32, 1, 0xff           | per track: the playing (bank, pattern)
 cl_cue:     .fill 16, 2, 0xffff         | per track: the cued (bank<<8 | pattern), 0xffff = none
 cl_cueh:    .fill 16, 2, 0xffff         | per track: the playing (bank<<8 | pattern) it aims at
 cl_arm:     .space 16                   | per track: the gate has passed; waiting for a window start
+cl_cuef:    .space 16                   | per track: the cue is FULL (its machine / FX too)
+cl_postf:   .space 16                   | per track: a FULL landing the UI side owes (cl_postpart)
+cl_postm:   .space 8                    | per audio track: ... and its machine changed
 cl_post:    .short 0                    | tracks whose landing the UI side has not followed up yet
 cl_bph:     .byte 0                     | the cue flash phase (cl_blink)
 cl_nq:      .byte 0                     | cues pending (the tick's fast path)
@@ -3649,6 +4107,8 @@ cl_s_emp:   .asciz "---"
 cl_s_seq:   .asciz "LOAD: SEQ"
 cl_s_full:  .asciz "LOAD: SEQ+MCH/FX"
 cl_s_orig:  .asciz "ORIG"
+cl_s_origs: .asciz "ORIG SEQ"
+cl_s_origf: .asciz "ORIG SEQ+MCH/FX"
 cl_s_saved: .asciz "SAVED"
 cl_fmt_srct:.asciz "%c%d %dTRG"          | <= 34 px: "A14 64TRG"
 cl_fmt_srcl:.asciz "%c%d LOCKS"
@@ -3678,5 +4138,7 @@ cl_bss:
     .equ SNAMES,      NAMES + 4096*NAME_W       | 16 x NAME_W: the saved sequences' names (right after
                                                 | NAMES: one clear covers both)
     .equ NAMESNAP,    SNAMES + 16*NAME_W        | 4096 x NAME_W: the names as loaded (ORIG)
-    .equ CL_BSS_SIZE, 16*BANKSZ + 16*TRAC_A + 4096*NAME_W + 16*NAME_W + 4096*NAME_W
+    .equ SAVEPART,    NAMESNAP + 4096*NAME_W    | 16 x PARTSZ: the Part a saved sequence was saved
+                                                | with (its slice goes with a FULL reload)
+    .equ CL_BSS_SIZE, 16*BANKSZ + 16*TRAC_A + 4096*NAME_W + 16*NAME_W + 4096*NAME_W + 16*PARTSZ
     .global CL_BSS_SIZE, cl_bss
