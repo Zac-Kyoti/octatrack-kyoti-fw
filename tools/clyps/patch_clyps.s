@@ -80,8 +80,7 @@
     .equ BANK_TITLE,  0x400b7302        | "SELECT BANK"
     .equ WIN_STICKY,  0x40031200        | the SHOW_WIN window stays (no countdown)
     .equ PAGE_PAINT,  0x4004d1a8        | stock's LED slot 7: the 4 page LEDs (the step indicator)
-    .equ PLED_R,      0x4e              | the 4th page LED: red die (green = 0x4f); LED k = 0x48 + 2k
-    .equ PLED_G,      0x4f
+| the page LEDs: LED k (0..3) = red die 0x48 + 2k, green = + 1
     .equ ARR_ACT,     0x460d1aec        | arranger running
     .equ POPUP,       0x460e5cd0        | a blocking MLNOTIFY dialog is up
     .equ LAYER_PUSH,  0x40031494
@@ -208,7 +207,6 @@
     .equ SEQ_W,       11                | "SEQ"
     .equ SEQF_W,      45                | "SEQ + MCH/FX"
     .equ LOADP_A,     21                | "LOAD: " advance (20 px + 1)
-    .equ MID_X,       47                | "SAVED" (the saved sequence plays) between the two labels
     .equ BKBOX_L,     12                | [BANK] held alone: an outline round "BANK A" (x 14..35: "T6 "
     .equ BKBOX_R,     37                | is 11 px for T and M alike), 1 px clear each side
 
@@ -565,7 +563,7 @@ ky_orig:
     moveq   #0,%d0
     tst.b   cl_fn
     beq.b   ky_os
-    move.l  #0x10000,%d0                | ORIG SEQ+MCH/FX
+    move.l  #0x10000,%d0                | ORIG SEQ + MCH/FX
 ky_os:
     jsr     cl_restore
     bra.w   cl_refresh
@@ -584,7 +582,7 @@ kn_out:
     rts
 
 | [PAGE] (SCALE) 0x1b (the user, 2026-10-29): like the ORIG entry -- this track's original
-| sequence (ORIG SEQ); [FUNC]+[PAGE] = with its machine / FX (ORIG SEQ+MCH/FX; a MIDI track always).
+| sequence (ORIG SEQ); [FUNC]+[PAGE] = with its machine / FX (ORIG SEQ + MCH/FX; a MIDI track always).
 | With the [PTN]+[BANK] chord held: ORIG PTN + PART, the pattern and its Part as loaded; if that chord
 | opened Clyps (begun outside), Clyps then closes; begun inside, it stays.
 cl_k_page:
@@ -1069,7 +1067,7 @@ df_out:
     lea     8(%sp),%sp
     rts
 
-| cl_restore (d0 = 0x10000: with its machine / FX, ORIG SEQ+MCH/FX): the active track's original
+| cl_restore (d0 = 0x10000: with its machine / FX, ORIG SEQ + MCH/FX): the active track's original
 | back (cued like any load). Sequence only (and every MIDI restore): nothing if the sequence is
 | original. With machine / FX: always (its Part slice may differ). d0 = 1 if a load was made.
 cl_restore:
@@ -2778,7 +2776,7 @@ cv_m:
 cl_blink:
 |   (the user, 2026-10-29) red = your pattern, solid yellow = cued (cl_paint), flashing red = the
 |   select box: its red die toggles here, unless the slot is your pattern or the cued one (they win).
-|   The 4th page LED flashes the same way when cl_ppaint left it "flash" (cl_pled 3).
+|   The four page LEDs flash the same way when cl_ppaint left them "flash" (cl_pled 3).
     move.l  %d2,-(%sp)
     moveq   #0,%d0
     move.b  cl_bph,%d0
@@ -2820,12 +2818,16 @@ bl_trk:
     move.l  (%a0,%d2.l*4),%d2           | the red die
     bsr.b   bl_led
 bl_page:
-    moveq   #0,%d0
+    moveq   #0,%d0                      | all four page LEDs flash red together (cl_pled 3)
     move.b  cl_pled,%d0
     cmpi.l  #3,%d0
     bne.b   bl_out
-    moveq   #PLED_R,%d2
+    moveq   #0x48,%d2
+bl_pk:
     bsr.b   bl_led
+    addq.l  #2,%d2
+    cmpi.l  #0x50,%d2
+    bne.b   bl_pk
 bl_out:
     move.l  (%sp)+,%d2
     rts
@@ -3144,7 +3146,7 @@ cd_lt:
     lea     12(%sp),%sp
 |   right: the label ends at x 107 (its outline at 109), "LOAD: " before it
     tst.l   %d5
-    beq.b   cd_mid
+    beq.b   cd_band
     moveq   #108,%d3
     sub.l   %d5,%d3                     | d3 = the label's x
     move.l  %a2,-(%sp)
@@ -3157,20 +3159,6 @@ cd_lt:
     pea     cl_s_load
     pea     HDR_Y
     move.l  %d0,-(%sp)
-    bsr.w   cl_text
-    lea     12(%sp),%sp
-    lea     cl_s_seqb,%a0
-    cmpa.l  %a0,%a2
-    bne.b   cd_band                     | "SAVED" only beside the short "LOAD: SEQ"
-cd_mid:
-|   "SAVED" mid-header while the active track plays its saved sequence (no slot is red)
-    jsr     cl_playing
-    lsr.l   #8,%d0
-    cmpi.l  #SRC_SAVED,%d0
-    bne.b   cd_band
-    pea     cl_s_saved
-    pea     HDR_Y
-    pea     MID_X
     bsr.w   cl_text
     lea     12(%sp),%sp
 cd_band:
@@ -3272,7 +3260,7 @@ cd_edp:
 cd_noed:
 |   a named sequence shows its name; else the summary: "n TRIGS" / "LOCKS" / "---"; on the
 |   highlighted slot (the pattern you are on), while the track plays a sequence Clyps put there
-|   unedited: its source, "A14 6 TRG" / "SAVED"
+|   unedited: its source, "A14 6 TRG" / "SAVED SEQ"
     tst.b   cl_namesok
     beq.b   cd_noname
     moveq   #0,%d0
@@ -3760,37 +3748,40 @@ cp_next:
     rts
 
 | cl_ppaint: LED slot 7, the page LEDs. Stock's step indicator (PAGE_PAINT), except while the box
-| is on ORIG or the [PTN]+[BANK] chord is held (the user, 2026-10-29): then the 4th LED shows that
-| original's status in the grid's colours -- red = playing (original), yellow = its restore is cued,
-| flashing red (cl_blink) = selected but not playing.
+| is on ORIG or the [PTN]+[BANK] chord is held (the user, 2026-10-29): then all four LEDs show that
+| original's status in the grid's colours -- red = playing (original), yellow = its restore is
+| cued, flashing red (cl_blink) = selected but not playing.
 cl_ppaint:
     jsr     cl_pstat
     move.b  %d0,cl_pled
     tst.l   %d0
     beq.w   pp_stock
+    lea     -12(%sp),%sp
+    movem.l %d2-%d4,(%sp)
+    move.l  %d0,%d4                     | d4 = status
+    moveq   #0x48,%d2                   | d2 = LED k's red die (0x48 + 2k), green = + 1
+ppl_k:
+    pea     15
     move.l  %d2,-(%sp)
-    move.l  %d0,%d2
-    jsr     PAGE_PAINT                  | stock's 4 LEDs, then the 4th is ours
-    pea     15
-    pea     PLED_R
+    jsr     LED_BRI
+    addq.l  #1,(%sp)
     jsr     LED_BRI
     addq.l  #8,%sp
-    pea     15
-    pea     PLED_G
-    jsr     LED_BRI
-    addq.l  #8,%sp
-    pea     PLED_R
+    move.l  %d2,-(%sp)
     jsr     LED_ON
-    addq.l  #4,%sp
-    pea     PLED_G
+    addq.l  #1,(%sp)
     lea     LED_OFF,%a0
-    cmpi.l  #2,%d2
+    cmpi.l  #2,%d4
     bne.b   ppl_g
     lea     LED_ON,%a0
 ppl_g:
     jsr     (%a0)
     addq.l  #4,%sp
-    move.l  (%sp)+,%d2
+    addq.l  #2,%d2
+    cmpi.l  #0x50,%d2
+    bne.b   ppl_k
+    movem.l (%sp),%d2-%d4
+    lea     12(%sp),%sp
     rts
 pp_stock:
     jmp     PAGE_PAINT
@@ -4443,7 +4434,7 @@ cl_s_orig:  .asciz "ORIG"
 cl_s_origs: .asciz "ORIG SEQ"
 cl_s_origf: .asciz "ORIG SEQ + MCH/FX"
 cl_s_origp: .asciz "ORIG PTN + PART"
-cl_s_saved: .asciz "SAVED"
+cl_s_saved: .asciz "SAVED SEQ"           | 34 px: the slot label after a temp reload (the user)
 cl_fmt_srct:.asciz "%c%d %dTRG"          | <= 34 px: "A14 64TRG"
 cl_fmt_srcl:.asciz "%c%d LOCKS"
 cl_fmt_srce:.asciz "%c%d ---"

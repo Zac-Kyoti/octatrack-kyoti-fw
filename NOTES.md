@@ -37740,3 +37740,7 @@ ORIG PTN + PART; `T6` alone beside the two long ones); [BANK] outside Clyps acts
 [FUNC]+[PAGE] = ORIG SEQ+MCH/FX; chord + [PAGE] = ORIG PTN + PART (pattern + whole Part as loaded;
 closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord status. Gates: full
 (A..K) + F 22/22 + M 8/8 pass. Harness: E / F post one tail message before a held-flag check.
+- **CLYPJ** (same day, NOT flashed; CLYPI never flashed): all four page LEDs give the ORIG / chord
+  indication together; the temp-reload slot label reads `SAVED SEQ`; no SAVED in the header.
+  Gates F 22, M 8, A..K 113 pass. clyps_render.py now ages the TRACK double-tap timer like the gate
+  (and needs a leading `32` for the boot SET DATE/TIME dialog).

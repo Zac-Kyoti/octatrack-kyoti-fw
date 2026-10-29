@@ -441,7 +441,7 @@ def main(argv):
 
     if "G" in a.only:
         # --- G: the source label on your pattern's slot (screens; the label text is drawn there)
-        print("G: temp save T1; load slot 3: your slot reads 'A3 n TRG'; NO+T1 reload: 'SAVED'; PAGE: plain")
+        print("G: temp save T1; load slot 3: your slot reads 'A3 n TRG'; NO+T1 reload: 'SAVED SEQ'; PAGE: plain")
         tap(0x10)
         key(YES, 1)
         tap(0x10)
@@ -853,7 +853,8 @@ def main(argv):
             b_ = bytes(u.mem_read(0x460BA98C, 17))
             return (b_[die // 8] >> (die % 8)) & 1
         pled = lambda: rd(syms["cl_pled"], 1)
-        check(pled() == 1 and ledbit(0x4E) and not ledbit(0x4F), "box on ORIG, the track original: 4th page LED red")
+        check(pled() == 1 and all(ledbit(0x48 + 2 * k) and not ledbit(0x49 + 2 * k) for k in range(4)),
+              "box on ORIG, the track original: all four page LEDs red")
         key(FUNC, 1)
         tap(sq)
         key(FUNC, 0)
@@ -874,7 +875,7 @@ def main(argv):
         key(BANK, 1)
         tailmsg()
         check(state()["open"] == 1 and rd(syms["cl_hdrst"], 1) == 2 and pled() == 3,
-              "the chord from outside: Clyps opens showing ORIG PTN + PART; 4th page LED flashing red")
+              "the chord from outside: Clyps opens showing ORIG PTN + PART; page LEDs flashing red")
         tap(PAGE)
         key(BANK, 0)
         key(PTN, 0)

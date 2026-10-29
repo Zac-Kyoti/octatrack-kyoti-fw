@@ -70,10 +70,14 @@ def main(argv):
             ad, txt = k[5:].split("=", 1)
             rt.uc.mem_write(int(ad, 16), txt.replace("_", " ").encode())
         elif k.endswith("+"):
+            if 0x10 <= int(k[:-1], 16) <= 0x17:
+                rt.uc.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))   # no double tap (as diag_clyps_ui.py)
             call(SET_KEY, int(k[:-1], 16), 1)
         elif k.endswith("-"):
             call(SET_KEY, int(k[:-1], 16), 0)
         else:
+            if 0x10 <= int(k, 16) <= 0x17:
+                rt.uc.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))
             call(SET_KEY, int(k, 16), 1)
             call(SET_KEY, int(k, 16), 0)
         if not k.startswith(("call:", "poke")):
@@ -87,6 +91,8 @@ def main(argv):
             snap(out.with_name(f"{out.stem}_{i:02d}{out.suffix}"))
     rd = lambda ad, n: int.from_bytes(bytes(rt.uc.mem_read(ad, n)), "big")
     syms = {k: int(v, 16) for k, v in (l.split() for l in (ROOT / "out/clyps_syms.txt").read_text().splitlines())}
+    print(f"saved {list(bytes(rt.uc.mem_read(syms['cl_svalid'], 4)))} src T1 {bytes(rt.uc.mem_read(syms['cl_src'], 2)).hex()} "
+          f"home T1 {bytes(rt.uc.mem_read(syms['cl_home'], 2)).hex()} ynact {bytes(rt.uc.mem_read(syms['cl_ynact'], 4)).hex()}")
     print(f"cl_open {rd(syms['cl_open'], 1)} cl_win 0x{rd(syms['cl_win'], 4):08x} POPUP 0x{rd(0x460E5CD0, 4):08x} "
           f"ARR 0x{rd(0x460D1AEC, 4):08x}")
     print(f"compose target [0x400b9710] = 0x{rd(0x400B9710, 4):08x}; plane 0x{PLANE:08x}")
