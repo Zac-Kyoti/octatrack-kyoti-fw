@@ -132,8 +132,9 @@
                                         | at 0, stock's menus (the Parts menu: 1), SELECT windows (10),
                                         | toasts and the name editor (5) all open over Clyps and leave
                                         | it there (the user, 2026-10-29: Parts over Clyps). Was 3.
-    .equ FL_TICKS,    45                | the load confirmation: 45 UI ticks of 1/60 s = 0.75 s (the user)
-    .equ FL_RATE,     3                 | ... its phase toggles every 4 ticks (mask 3): ~7.5 Hz
+    .equ FL_TICKS,    30                | the load confirmation: 30 UI ticks of 1/60 s = 0.5 s (the user,
+    .equ FL_HALF,     5                 | 2026-10-30), its phase toggling every 5 ticks: 3 inverted /
+                                        | normal cycles (6 Hz)
     .equ TOAST_T,     0x460d1e6c        | stock's toast countdown, read by the UI tick 0x40056c28
     .equ UITICK_RES,  0x40056c2e        | after `move.l 0x460d1e6c,%d0` (stock's beq follows)
     .equ CL_BLINK,    30                | the flash period: stock's trig LED tick (0x400340e4, period 30)
@@ -855,11 +856,13 @@ kf_out:
 
 | ================================================================ the load confirmation
 | (the user, 2026-10-29) after a load, the select box flashes as an inverted bar (text inverted too)
-| for 0.75 s (cl_draw: cl_fph); the ORIG header box likewise. An arrow, bank paging, a TRACK key or
+| for 0.5 s (cl_draw: cl_fph); the ORIG header box likewise. An arrow, bank paging, a TRACK key or
 | closing stops it at once; a new pick restarts it on the new slot.
 cl_flstart:
     moveq   #FL_TICKS,%d0
     move.b  %d0,cl_flk
+    moveq   #FL_HALF,%d0
+    move.b  %d0,cl_fcnt
     moveq   #1,%d0
     move.b  %d0,cl_fph
     rts
@@ -878,8 +881,13 @@ ft_go:
     subq.l  #1,%d0
     move.b  %d0,cl_flk
     beq.b   ft_end
-    andi.l  #FL_RATE,%d0
+    moveq   #0,%d0
+    move.b  cl_fcnt,%d0
+    subq.l  #1,%d0
+    move.b  %d0,cl_fcnt
     bne.b   ft_out
+    moveq   #FL_HALF,%d0
+    move.b  %d0,cl_fcnt
     moveq   #0,%d0
     move.b  cl_fph,%d0
     eori.l  #1,%d0
@@ -4516,6 +4524,7 @@ cl_flash:   .byte 0                     | the header shows SAVED (a save) until 
 cl_lastt:   .byte 0                     | the track (0..15, MIDI 8..15) at the last cl_refresh
 cl_flk:     .byte 0                     | the load confirmation: UI ticks left (0 = none)
 cl_fph:     .byte 0                     | ... its phase: 1 = inverted
+cl_fcnt:    .byte 0                     | ... ticks left in this phase
 cl_ptpop:   .byte 0                     | stock's [PTN] overlay taken down for the chord (cl_k_chord)
 cl_hdrst:   .byte 0                     | the header was drawn for this cl_hstate
 cl_bkdef:   .byte 0                     | a [BANK] press outside Clyps was deferred (SELECT BANK on release)

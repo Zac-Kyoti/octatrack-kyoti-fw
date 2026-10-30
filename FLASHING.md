@@ -206,6 +206,9 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **CLYPS — CLYPO walk-through.** Image `140C_CLYPO` = CLYPN (flashed, all good) with a shorter load
+  confirmation: after a load the select box flashes inverted 3 times in 0.5 s (was ~0.75 s, faster).
+
 - **CLYPS — CLYPN walk-through.** Image `140C_CLYPN` = CLYPM + new header words and the chord's grid.
   1. Header left: `T6 BNK A`, always (never hidden). Right: `LOAD: TRK SEQ`; `[FUNC]`: `LOAD: TRK FULL`;
      on ORIG `LOAD: ORIG TRK SEQ` / `LOAD: ORIG TRK FULL`; MIDI side `LOAD: MIDI TRK`, on ORIG

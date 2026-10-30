@@ -245,13 +245,18 @@ def main(argv):
         check(f0[0] > 0, f"the load confirmation runs after the load (ticks left, phase) = {f0}")
         # route A runs no UI tick (task 0x40056c40's 1/60 s message): call the tick's patched site
         # (0x40056c28 -> cl_uitick -> stock's toast countdown) as one tick does
-        seen = set()
-        for _ in range(50):
+        seen, trace = set(), []
+        for _ in range(35):
             rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
             rt.call_as_main(0x40056C28, budget=600000)
             seen.add(rd(syms["cl_fph"], 1))
+            trace.append(rd(syms["cl_fph"], 1))
+        flips = sum(1 for i in range(1, len(trace)) if trace[i] != trace[i - 1])
+        print(f"      phases per tick: {''.join(map(str, trace))} ({flips} changes)", flush=True)
+        # sampled after each tick: the first inverted span starts at the load (tick 0), so it shows 4
+        check(trace[:30].count(1) == 14 and flips == 5, "... 3 inverted / normal cycles of 5 ticks each")
         check(flk() == (0, 0) and seen == {0, 1}, f"... flashes (phases seen {sorted(seen)}) and ends by "
-              f"itself within 45 ticks = 0.75 s (now {flk()})")
+              f"itself within 30 ticks = 0.5 s (now {flk()})")
         key(3, 1)
         key(3, 0)
         tap(DOWN)

@@ -37762,3 +37762,6 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   off, the grid shows a pattern view of the playing bank (PAT_HASDATA `0x4009a464`), the select box
   hidden until either key is let go; chord + [YES] = ORIG PTN+PART like chord + [PAGE]. Gates full
   127, F+Q 26, M 8. Next: pattern reload from the card + RELOAD_FROM_PROJECT inside Clyps (scope §1.8).
+- **CLYPN flashed** (mostly all good); **CLYPO** (2026-10-30, NOT flashed): the load confirmation is
+  30 UI ticks (0.5 s), phase every 5 ticks: 3 inverted / normal cycles. Gates full 128, F+Q 26, M 8.
+  Order agreed next: the card reloads in Clyps (scope §1.8) before DIRECT JUMP / KYOTI integration.
