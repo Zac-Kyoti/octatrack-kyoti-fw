@@ -396,16 +396,28 @@ def main(argv):
 
     if "Y" in a.only:
         # --- Y: [YES] loads the box; the chord + [YES] and [PTN]+[YES] never load
-        print("Y: chord + YES: nothing; PTN+YES: nothing; YES loads the box; NO")
-        before = rec(act)
+        print("Y: chord + YES = ORIG PTN+PART (closes if the chord opened Clyps); PTN+YES: nothing; YES loads the box; NO")
         key(PTN, 1)
         key(BANK, 1)
         tap(YES)
-        check(state()["open"] == 1 and rec(act) == before, "chord held, [YES]: nothing")
+        check(state()["open"] == 0 and slab(act) == oslab(act),
+              "chord (begun outside) + [YES]: the pattern as loaded (ORIG PTN+PART), Clyps closes")
+        key(BANK, 0)
+        key(PTN, 0)
+        closed_ok("... keys released")
+        before = rec(act)
+        key(PTN, 1)
+        key(BANK, 1)
         key(BANK, 0)
         tap(YES)
         check(state()["open"] == 1 and rec(act) == before, "[PTN]+[YES]: no load, Clyps stays")
         key(PTN, 0)
+        key(PTN, 1)
+        key(BANK, 1)
+        tap(YES)
+        key(BANK, 0)
+        key(PTN, 0)
+        check(state()["open"] == 1 and slab(act) == oslab(act), "the chord pressed inside + [YES]: restore, Clyps stays")
         q = next(n for n in range(16) if n != act and rec(n) != before)
         while state()["cur"] != q:
             tap(DOWN)
@@ -1094,6 +1106,28 @@ def main(argv):
         s = state()
         check(s["open"] == 1 and s["showwin"] == 0 and s["layers"] == s0["layers"],
               "the chord pressed again in Clyps: nothing, no SELECT window")
+        # the chord inside Clyps, either order: never the bank view; the pattern view (the user)
+        PTNL = 0x400BF0F2
+        act = rd(0x800065BE, 1)
+        def pview_ok():
+            return led(act) == (1, 0) and rd(syms["cl_hdrst"], 1) == 2
+        key(BANK, 1)
+        key(PTN, 1)
+        s = state()
+        check(BANK_LAYER not in s["layers"] and pview_ok(),
+              "[BANK] then [PTN] in Clyps: the bank overlay off, the pattern view (your pattern red)")
+        key(PTN, 0)
+        key(BANK, 0)
+        check(state()["layers"] == s0["layers"] and state()["showwin"] == 0, "... released: layers back, no window")
+        key(PTN, 1)
+        key(BANK, 1)
+        s = state()
+        check(PTNL not in s["layers"] and BANK_LAYER not in s["layers"] and pview_ok(),
+              "[PTN] then [BANK] in Clyps: stock's pattern overlay off, the same pattern view")
+        key(BANK, 0)
+        check(PTNL in state()["layers"], "... [BANK] let go first: [PTN]'s overlay back")
+        key(PTN, 0)
+        check(state()["layers"] == s0["layers"] and state()["showwin"] == 0, "... [PTN] let go: layers back, no window")
         tap(NO)
         closed_ok("[NO]")
 

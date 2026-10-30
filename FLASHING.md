@@ -206,6 +206,19 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **CLYPS — CLYPN walk-through.** Image `140C_CLYPN` = CLYPM + new header words and the chord's grid.
+  1. Header left: `T6 BNK A`, always (never hidden). Right: `LOAD: TRK SEQ`; `[FUNC]`: `LOAD: TRK FULL`;
+     on ORIG `LOAD: ORIG TRK SEQ` / `LOAD: ORIG TRK FULL`; MIDI side `LOAD: MIDI TRK`, on ORIG
+     `LOAD: ORIG MIDI TRK`; chord held `LOAD: ORIG PTN+PART`.
+  2. In Clyps, hold `[BANK]` then `[PTN]`, and also `[PTN]` then `[BANK]`: the grid shows the same
+     pattern view both ways (your pattern red, patterns with data green). `[BANK]` alone still
+     shows the bank view. With the chord held a trig does nothing yet (the pattern reload comes next).
+  3. `[PTN]` then `[BANK]`, let go of `[BANK]` first: `[PTN]` + trig is again a stock pattern change.
+  4. While `[PTN]`+`[BANK]` are held (begun outside or inside Clyps) the select box is gone from the
+     slots; let go of either key: it is back on the slot it was on.
+  5. `[PTN]`+`[BANK]` held + `[YES]`: the same ORIG PTN+PART restore as + `[PAGE]`; chord begun
+     outside Clyps: Clyps closes after; begun inside: it stays open.
+
 - **CLYPS — CLYPM walk-through.** Image `140C_CLYPM` = CLYPL (its 4 steps below) + the audio temp
   reload now brings the whole sound back.
   1. On an audio track, hold `[YES]`+TRACK (temp save). Change its machine settings, FX and a scene

@@ -724,6 +724,32 @@ when a FULL load made one.
 through in Clyps mode: it switches between audio and MIDI tracks, and the view and grid follow
 (`0x80000012`). [FUNC]+[MIDI] does nothing in Clyps mode, because Clyps owns [FUNC] while open.
 
+### 1.8 Reloads from the card inside Clyps (the user, 2026-10-30; scoped, not built)
+
+**Pattern reload.** With the [PTN]+[BANK] chord held (begun outside Clyps: it opens Clyps), a trig N
+reloads pattern N **of the playing bank** from the card: its whole sequence data (the slab, all
+16 tracks + its settings) and its Part's saved state. Toast **`PTN A05 RELOADED`** (bank + 2-digit
+pattern). Chord begun outside → Clyps closes after; begun inside → stays. The transport keeps
+running (RELOAD_FROM_PROJECT's way).
+
+**Track reloads (RELOAD_FROM_PROJECT) move into Clyps.** Same chords, only inside Clyps: [PTN] held +
+TRACK n = that track's sequence from the card; [BANK] held + TRACK n = the same plus its Part's saved
+state. Same toasts. In KYOTI, Clyps then **replaces** the RELOAD_FROM_PROJECT module (its chords
+outside Clyps go away); the standalone RELOAD_FROM_PROJECT build stays as it is.
+
+**Plan.** Fork `octabam-modules/reload-from-project/patch_reload3.s` into `tools/clyps/` (Clyps'
+thread; KYOTI drops the module, so no two copies run together): keep its card job (the
+type-0x14 worker detour `0x40085864`, `rl_done` `0x40023c62`, the `.strd` reader, BUSY guards,
+toasts, the S119/S120/S98 lessons), drop its four outside-Clyps chord detours (`0x40083dc4`,
+`0x40040250`, `0x4007af42`, `0x4007b3e0` -- the last is Clyps' own), call it from Clyps' handlers,
+and add a pattern kind: `PART_RELOAD(the pattern's Part)` first (as RELOAD's [BANK] chord does), then
+the job: kind 2 (slab incl. its Part link + Part apply) for the playing pattern, kind 1 (slab, link
+kept) for another pattern; message `PTN A05 RELOADED` on success. Its `PTN_CONSUMED = -1` must not
+look like a pattern pick to Clyps' UI tail (which closes Clyps on -1).
+
+**The chord's grid** (built CLYPN): with both keys held, in either order, the pattern view of the
+playing bank (your pattern red, cued yellow, data green); the bank view only for [BANK] alone.
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)

@@ -37756,3 +37756,9 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   in Clyps (TRACK keys out of `cl_fsub`); [FUNC]+[MIDI] Parts menu over Clyps (window prio 0:
   `WIN_NEW` evicts prio >= p). Gates: full 119, F+Q 26, M 8. Harness: route A runs no UI tick (gate
   B calls `0x40056c28`); `0x40033970` is not a readable mute state.
+- **CLYPN** (2026-10-30, NOT flashed; CLYPM never flashed): header `T6 BNK A` always (never hidden),
+  `LOAD: TRK SEQ` / `TRK FULL` / `ORIG TRK SEQ` / `ORIG TRK FULL` / `MIDI TRK` / `ORIG MIDI TRK` /
+  `ORIG PTN+PART`; the [PTN]+[BANK] chord inside Clyps, either order: stock's [BANK] / [PTN] overlays
+  off, the grid shows a pattern view of the playing bank (PAT_HASDATA `0x4009a464`), the select box
+  hidden until either key is let go; chord + [YES] = ORIG PTN+PART like chord + [PAGE]. Gates full
+  127, F+Q 26, M 8. Next: pattern reload from the card + RELOAD_FROM_PROJECT inside Clyps (scope §1.8).

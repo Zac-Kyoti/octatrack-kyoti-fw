@@ -79,6 +79,9 @@
     .equ SHOW_WIN,    0x40059f8c        | (title, ticks, sticky, onClose): the SELECT window
     .equ BANK_TITLE,  0x400b7302        | "SELECT BANK"
     .equ WIN_STICKY,  0x40031200        | the SHOW_WIN window stays (no countdown)
+    .equ PTN_LAYER,   0x400bf0f2        | stock [PTN]'s keymap layer (trigs pick a pattern)
+    .equ PTN_LEDL,    0x400bebfe        | ... and its LED layer
+    .equ PAT_HASDATA, 0x4009a464        | (pattern, bank) -> != 0: stock lights it green
     .equ PAGE_PAINT,  0x4004d1a8        | stock's LED slot 7: the 4 page LEDs (the step indicator)
 | the page LEDs: LED k (0..3) = red die 0x48 + 2k, green = + 1
     .equ ARR_ACT,     0x460d1aec        | arranger running
@@ -212,15 +215,16 @@
     .equ BOX_R,       109               | a dark header box's right column (text ends at 107)
     .equ ORIG_W,      15                | "ORIG", "SAVED": widths from the font's table 0x400c246a
     .equ SAVED_W,     19
-    .equ ORIGS_W,     45                | "ORIG TRK SEQ"
-    .equ ORIGF_W,     73                | "ORIG TRK SEQ/MCH/FX"
-    .equ ORIGP_W,     50                | "ORIG PTN/PART"
+    .equ ORIGS_W,     45                | "ORIG TRK SEQ"       (the user, 2026-10-30: all of them fit
+    .equ ORIGF_W,     49                | "ORIG TRK FULL"       beside "T6 BNK A", which ends at x 31)
+    .equ ORIGM_W,     49                | "ORIG MIDI TRK"
+    .equ ORIGP_W,     50                | "ORIG PTN+PART"
     .equ SEQ_W,       26                | "TRK SEQ"
-    .equ SEQF_W,      54                | "TRK SEQ/MCH/FX" (beside it the left side reads "T6" only)
+    .equ SEQF_W,      30                | "TRK FULL"
     .equ MTRK_W,      30                | "MIDI TRK"
     .equ LOADP_A,     21                | "LOAD: " advance (20 px + 1)
-    .equ BKBOX_L,     12                | [BANK] held alone: "BANK A" (x 14..35: "T6 " is 11 px for T
-    .equ BKBOX_R,     37                | and M alike) in a dark box, 2 dark columns each side
+    .equ BKBOX_L,     12                | [BANK] held alone: "BNK A" (x 14..31: "T6 " is 11 px for T
+    .equ BKBOX_R,     33                | and M alike) in a dark box, 2 dark columns each side
 
 | Two sections, linked together (tools/build_clyps.py): `.text` = the ROM part in the classic cave
 | (the sequencer-tick code -- phase D, the wrap body -- and the cue state it touches: ISR code
@@ -538,8 +542,8 @@ cl_k_trig:
     cmpi.l  #1,%d0
     bne.b   kt_out
     clr.b   cl_flash
-    tst.l   BANK_HELD
-    bne.b   kt_out
+    tst.l   BANK_HELD                   | [BANK] held (alone: stock's overlay has the trigs; the
+    bne.b   kt_out                      | chord: the pattern reload, not built yet)
     move.l  4(%sp),%d0
     andi.l  #15,%d0
     move.b  %d0,cl_cur
@@ -565,7 +569,8 @@ cl_k_yes:
     tst.l   PTN_HELD
     beq.b   ky_noptn
     tst.l   BANK_HELD
-    bne.b   ky_out                      | the chord: nothing
+    bne.w   kp_pat                      | the chord: ORIG PTN+PART, as chord + [PAGE] (the user,
+                                        | 2026-10-30; closes Clyps when the chord opened it)
 .ifdef DJ_TOGGLE
     jsr     DJ_TOGGLE                   | [PTN]+[YES]: DIRECT JUMP on / off
 .endif
@@ -686,8 +691,16 @@ cl_k_chord:
     bne.w   kc_out
     tst.l   BANK_HELD
     beq.b   kc_pgo
-    moveq   #1,%d1                      | the chord again: nothing, and no SELECT BANK either
-    move.b  %d1,cl_bkused
+    moveq   #1,%d1                      | the chord (again): no SELECT BANK on [BANK]'s release, and
+    move.b  %d1,cl_bkused               | never the bank view while both are held (the user,
+    tst.b   cl_bkfwd                    | 2026-10-30): a [BANK] pressed in Clyps took its overlay
+    beq.b   kc_pch                      | down now
+    clr.b   cl_bkfwd
+    jsr     BANK_TEARDOWN               | its keymap + LED layers off (and a repaint)
+kc_pch:
+    clr.l   -(%sp)
+    jsr     LED_PAINT                   | the pattern view (cl_paint, the chord held)
+    addq.l  #4,%sp
     rts
 kc_pgo:
     moveq   #1,%d1
@@ -703,10 +716,27 @@ kc_pfwd:
 kc_bank:
     cmpi.l  #1,%d0
     beq.b   kc_bpress
+    tst.l   %d0
+    bne.b   kc_bhold
+    tst.b   cl_ptpop                    | released with [PTN] still held: its overlay back
+    beq.b   kc_brl0
+    clr.b   cl_ptpop
+    tst.l   PTN_HELD
+    beq.b   kc_brl0
+    tst.b   cl_ptfwd
+    beq.b   kc_brl0
+    pea     PTN_LAYER
+    jsr     LAYER_PUSH
+    pea     PTN_LEDL
+    jsr     LED_PUSH
+    addq.l  #8,%sp
+kc_brl0:
     tst.b   cl_bkfwd
     beq.w   kc_out
-    tst.l   %d0
-    beq.w   kc_brel
+    bra.w   kc_brel
+kc_bhold:
+    tst.b   cl_bkfwd
+    beq.w   kc_out
     moveq   #1,%d0                      | hold: tap-eligible again (stock's hold 0x4007af24)
     move.l  %d0,BANK_TAP
     rts
@@ -716,8 +746,21 @@ kc_bpress:
     bne.w   cl_rename                   | [FUNC]+[BANK] (EDIT): name the box's sequence
     tst.l   PTN_HELD
     beq.b   kc_bgo
-    moveq   #1,%d1                      | the chord again: nothing, and no SELECT PATTERN on [PTN]'s
-    move.l  %d1,PTN_CONSUMED            | release
+    moveq   #1,%d1                      | the chord (again): no SELECT PATTERN on [PTN]'s release;
+    move.l  %d1,PTN_CONSUMED            | a [PTN] pressed in Clyps: stock's pattern-pick overlay and
+    tst.b   cl_ptfwd                    | its LEDs off while both are held (the trigs and the LEDs
+    beq.b   kc_bch                      | are Clyps' then); back on [BANK]'s release if [PTN] is
+    pea     PTN_LAYER                   | still held. Stock's own teardown at [PTN]'s release pops
+    jsr     LAYER_POP                   | them again: the pops search the lists, a missing layer is
+    pea     PTN_LEDL                    | a no-op (0x4003146c / 0x4007e81c)
+    jsr     LED_POP
+    addq.l  #8,%sp
+    moveq   #1,%d1
+    move.b  %d1,cl_ptpop
+kc_bch:
+    clr.l   -(%sp)
+    jsr     LED_PAINT
+    addq.l  #4,%sp
     rts
 kc_bgo:
     moveq   #1,%d0
@@ -2846,6 +2889,11 @@ cl_blink:
 |   flash. Not over your pattern (red) or the cued slot (yellow). The four page LEDs do the same
 |   when cl_ppaint left them "flash" (cl_pled 3).
     move.l  %d2,-(%sp)
+    tst.l   PTN_HELD                    | the chord held: no box (the pattern view)
+    beq.b   bl_box
+    tst.l   BANK_HELD
+    bne.b   bl_page
+bl_box:
     move.b  cl_sbank,%d0
     cmp.b   cl_bank,%d0
     bne.b   bl_page                     | the box is in another bank
@@ -3075,20 +3123,19 @@ cl_draw:
     move.l  %d0,%d7                     | d7 = header state (free until the cells)
     jsr     cl_trk
     move.l  %d0,%d6                     | d6 >= 8: the MIDI side
-    moveq   #0,%d4                      | d4 = 1: a long label, "BANK A" hidden
+    moveq   #0,%d4                      | d4 = 1 would hide "BNK A": never now (the user, 2026-10-30)
     btst    #1,%d7
     beq.b   cd_r1
     lea     cl_s_origp,%a2
     moveq   #ORIGP_W,%d5
-    moveq   #1,%d4
     bra.b   cd_rl
 cd_r1:
     moveq   #0,%d1
     move.b  cl_cur,%d1
     cmpi.l  #NSLOT,%d1
     bne.b   cd_r2
-    lea     cl_s_orig,%a2
-    moveq   #ORIG_W,%d5
+    lea     cl_s_origm,%a2
+    moveq   #ORIGM_W,%d5
     cmpi.l  #8,%d6
     bcc.b   cd_rl
     lea     cl_s_origs,%a2
@@ -3097,7 +3144,6 @@ cd_r1:
     beq.b   cd_rl
     lea     cl_s_origf,%a2
     moveq   #ORIGF_W,%d5
-    moveq   #1,%d4
     bra.b   cd_rl
 cd_r2:
     lea     cl_s_mtrk,%a2               | MIDI: "MIDI TRK" (the user, 2026-10-29)
@@ -3110,7 +3156,6 @@ cd_r2:
     beq.b   cd_rl
     lea     cl_s_seqf,%a2
     moveq   #SEQF_W,%d5
-    moveq   #1,%d4                      | too long beside "BANK A"
 cd_rl:
 |   left
     move.l  %d6,%d0
@@ -3373,7 +3418,11 @@ cd_next:
     bne.w   cd_cell
 |   the select box: a full 1 px frame, SET after every bar -- a box in the row next to the highlight
 |   shares a pixel row with its bar, where an XOR would cancel (the user: "it's a full box").
-|   Only in the box's bank, not over the highlight (the bar alone shows it there).
+|   Only in the box's bank, not over the highlight (the bar alone shows it there). Not while the
+|   [PTN]+[BANK] chord is held (the user, 2026-10-30): it comes back where it was on its release.
+    move.b  cl_hdrst,%d0
+    btst    #1,%d0
+    bne.w   cd_boxed
     move.b  cl_bank,%d0
     cmp.b   cl_sbank,%d0
     bne.w   cd_boxed
@@ -3426,6 +3475,8 @@ cd_boxed:
     move.l  %d0,RDRAW
     pea     7
     jsr     LED_PAINT                   | the page LEDs (cl_ppaint) follow the view
+    clr.l   (%sp)
+    jsr     LED_PAINT                   | and the grid (the chord's pattern view comes and goes)
     addq.l  #4,%sp
     movem.l (%sp),%d2-%d7/%a2-%a4
     lea     36(%sp),%sp
@@ -3693,6 +3744,9 @@ cl_paint:
     lea     LED_BRI,%a3
     lea     LED_ON,%a4
     lea     LED_OFF,%a5
+    jsr     cl_hstate
+    btst    #1,%d0
+    bne.w   cp_pview                    | the [PTN]+[BANK] chord held: the pattern view
     jsr     cl_trk
     add.l   %d0,%d0
     lea     cl_cue,%a0
@@ -3779,9 +3833,75 @@ cp_next:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
     bne.w   cp_lp
+cp_done:
     movem.l (%sp),%d2-%d6/%a2-%a5
     lea     36(%sp),%sp
     rts
+| the pattern view (the user, 2026-10-30: with [PTN]+[BANK] held, whichever came first): the playing
+| bank's patterns as stock's [PTN] view lights them -- your pattern red, a cued one yellow, those
+| with data green (stock's own test PAT_HASDATA), empty off
+cp_pview:
+    moveq   #0,%d2
+pv_lp:
+    lea     LED_TBL,%a0
+    move.l  (%a0,%d2.l*4),%d3
+    move.l  %d3,%d4
+    addq.l  #1,%d4
+    pea     15
+    move.l  %d3,-(%sp)
+    jsr     (%a3)
+    move.l  %d4,(%sp)
+    jsr     (%a3)
+    addq.l  #8,%sp
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    cmp.l   %d2,%d0
+    bne.b   pv_cue
+    move.l  %d3,-(%sp)                  | red
+    jsr     (%a4)
+    move.l  %d4,(%sp)
+    jsr     (%a5)
+    addq.l  #4,%sp
+    bra.b   pv_next
+pv_cue:
+    tst.l   RUNNING
+    beq.b   pv_data
+    move.b  PEND_BANK,%d0
+    cmp.b   PLAY_BANK,%d0
+    bne.b   pv_data
+    moveq   #0,%d0
+    move.b  PEND_PAT,%d0
+    cmp.l   %d2,%d0
+    bne.b   pv_data
+    move.l  %d3,-(%sp)                  | yellow
+    jsr     (%a4)
+    move.l  %d4,(%sp)
+    jsr     (%a4)
+    addq.l  #4,%sp
+    bra.b   pv_next
+pv_data:
+    move.l  %d3,-(%sp)
+    jsr     (%a5)                       | red off
+    addq.l  #4,%sp
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    move.l  %d2,-(%sp)
+    jsr     PAT_HASDATA
+    addq.l  #8,%sp
+    move.l  %d4,-(%sp)
+    lea     LED_OFF,%a0
+    tst.l   %d0
+    beq.b   pv_g
+    lea     LED_ON,%a0
+pv_g:
+    jsr     (%a0)
+    addq.l  #4,%sp
+pv_next:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.w   pv_lp
+    bra.w   cp_done
 
 | cl_ppaint: LED slot 7, the page LEDs. Stock's step indicator (PAGE_PAINT), except while the box
 | is on ORIG or the [PTN]+[BANK] chord is held (the user, 2026-10-29): then all four LEDs show that
@@ -4396,6 +4516,7 @@ cl_flash:   .byte 0                     | the header shows SAVED (a save) until 
 cl_lastt:   .byte 0                     | the track (0..15, MIDI 8..15) at the last cl_refresh
 cl_flk:     .byte 0                     | the load confirmation: UI ticks left (0 = none)
 cl_fph:     .byte 0                     | ... its phase: 1 = inverted
+cl_ptpop:   .byte 0                     | stock's [PTN] overlay taken down for the chord (cl_k_chord)
 cl_hdrst:   .byte 0                     | the header was drawn for this cl_hstate
 cl_bkdef:   .byte 0                     | a [BANK] press outside Clyps was deferred (SELECT BANK on release)
 cl_chordout:.byte 0                     | Clyps was opened by the chord, still held: chord + SCALE closes
@@ -4459,11 +4580,11 @@ cl_xpix:    .byte 0,1, 2,1, 1,2, 0,3, 2,3   | the "x": corners and centre of a 3
             .align 2
 cl_colx:    .short 6, 8, 52, 3          | column 1: number field, bar / box 8..52, its x at 3..5
             .short 62, 60, 108, 55      | column 2: numbers 62..68, bar / box 60..108, its x at 55..57
-cl_fmt_hdr: .asciz "%c%d BANK %c"
+cl_fmt_hdr: .asciz "%c%d BNK %c"
 cl_fmt_hdrs:.asciz "%c%d"
 cl_s_load:  .asciz "LOAD:"
 cl_s_seqb:  .asciz "TRK SEQ"
-cl_s_seqf:  .asciz "TRK SEQ/MCH/FX"
+cl_s_seqf:  .asciz "TRK FULL"
 cl_s_mtrk:  .asciz "MIDI TRK"
 cl_fmt_num: .asciz "%d"
 cl_fmt_trg: .asciz "%c%02d %02d TR"       | 33 px: "A01 15 TR", as a source label (the user)
@@ -4471,8 +4592,9 @@ cl_s_lck:   .asciz "LOCKS"
 cl_s_emp:   .asciz "---"
 cl_s_orig:  .asciz "ORIG"
 cl_s_origs: .asciz "ORIG TRK SEQ"
-cl_s_origf: .asciz "ORIG TRK SEQ/MCH/FX"
-cl_s_origp: .asciz "ORIG PTN/PART"
+cl_s_origf: .asciz "ORIG TRK FULL"
+cl_s_origm: .asciz "ORIG MIDI TRK"
+cl_s_origp: .asciz "ORIG PTN+PART"
 cl_s_saved: .asciz "SAVED SEQ"           | 34 px: the slot label after a temp reload (the user)
 cl_fmt_srct:.asciz "%c%02d %02d TR"       | 33 px: "B14 06 TR" (the user, 2026-10-29)
 cl_fmt_srcl:.asciz "%c%02d LOCKS"         | 34 px
