@@ -126,7 +126,10 @@
     .equ UIT_RESUME,  0x40062d22        | after `tst.l 0x46c7c72c` (stock's beq.w follows)
     .equ WRAP_RESUME, 0x400a43a6        | after `move.l (a2),d0 ; moveq #1,d2 ; or.l d2,d0`
     .equ PRIO,        3                 | menus' rank: toasts / the name editor open over it
-    .equ CL_BLINK,    15                | the cue flash period, UI ticks (stock's bank-load blink)
+    .equ CL_BLINK,    30                | the flash period: stock's trig LED tick (0x400340e4, period 30)
+    .equ LED_FLASH,   0x40013784        | (die, n): invert the die for n LED ticks -- stock's p-lock
+                                        | flash: its trig tick gives a locked trig's green die 3 ticks
+                                        | every period, so the red trig blinks yellow
     .equ YES_RESUME,  0x4005e4d0        | stock [YES] after its first 8 B
     .equ NO_PRESSP,   0x4005e262        | stock [NO], its press path / release path
     .equ NO_RELP,     0x4005e276
@@ -202,13 +205,13 @@
     .equ ORIG_W,      15                | "ORIG", "SAVED": widths from the font's table 0x400c246a
     .equ SAVED_W,     19
     .equ ORIGS_W,     30                | "ORIG SEQ"
-    .equ ORIGF_W,     64                | "ORIG SEQ + MCH/FX"
-    .equ ORIGP_W,     56                | "ORIG PTN + PART"
+    .equ ORIGF_W,     58                | "ORIG SEQ/MCH/FX"
+    .equ ORIGP_W,     50                | "ORIG PTN/PART"
     .equ SEQ_W,       11                | "SEQ"
-    .equ SEQF_W,      45                | "SEQ + MCH/FX"
+    .equ SEQF_W,      39                | "SEQ/MCH/FX"
     .equ LOADP_A,     21                | "LOAD: " advance (20 px + 1)
-    .equ BKBOX_L,     12                | [BANK] held alone: an outline round "BANK A" (x 14..35: "T6 "
-    .equ BKBOX_R,     37                | is 11 px for T and M alike), 1 px clear each side
+    .equ BKBOX_L,     12                | [BANK] held alone: "BANK A" (x 14..35: "T6 " is 11 px for T
+    .equ BKBOX_R,     37                | and M alike) in a dark box, 2 dark columns each side
 
 | Two sections, linked together (tools/build_clyps.py): `.text` = the ROM part in the classic cave
 | (the sequencer-tick code -- phase D, the wrap body -- and the cue state it touches: ISR code
@@ -563,7 +566,7 @@ ky_orig:
     moveq   #0,%d0
     tst.b   cl_fn
     beq.b   ky_os
-    move.l  #0x10000,%d0                | ORIG SEQ + MCH/FX
+    move.l  #0x10000,%d0                | ORIG SEQ/MCH/FX
 ky_os:
     jsr     cl_restore
     bra.w   cl_refresh
@@ -582,8 +585,8 @@ kn_out:
     rts
 
 | [PAGE] (SCALE) 0x1b (the user, 2026-10-29): like the ORIG entry -- this track's original
-| sequence (ORIG SEQ); [FUNC]+[PAGE] = with its machine / FX (ORIG SEQ + MCH/FX; a MIDI track always).
-| With the [PTN]+[BANK] chord held: ORIG PTN + PART, the pattern and its Part as loaded; if that chord
+| sequence (ORIG SEQ); [FUNC]+[PAGE] = with its machine / FX (ORIG SEQ/MCH/FX; a MIDI track always).
+| With the [PTN]+[BANK] chord held: ORIG PTN/PART, the pattern and its Part as loaded; if that chord
 | opened Clyps (begun outside), Clyps then closes; begun inside, it stays.
 cl_k_page:
     move.l  8(%sp),%d0
@@ -608,7 +611,7 @@ kp_pat:
     bra.w   cl_close
 
 | d0: bit 0 = [BANK] held without [PTN] (the arrows page: "BANK A" boxed), bit 1 = the [PTN]+[BANK]
-| chord held (ORIG PTN + PART). Uses d0.
+| chord held (ORIG PTN/PART). Uses d0.
 cl_hstate:
     moveq   #0,%d0
     tst.l   BANK_HELD
@@ -1067,7 +1070,7 @@ df_out:
     lea     8(%sp),%sp
     rts
 
-| cl_restore (d0 = 0x10000: with its machine / FX, ORIG SEQ + MCH/FX): the active track's original
+| cl_restore (d0 = 0x10000: with its machine / FX, ORIG SEQ/MCH/FX): the active track's original
 | back (cued like any load). Sequence only (and every MIDI restore): nothing if the sequence is
 | original. With machine / FX: always (its Part slice may differ). d0 = 1 if a load was made.
 cl_restore:
@@ -1095,7 +1098,7 @@ rs_out:
     addq.l  #8,%sp
     rts
 
-| cl_restorepat: ORIG PTN + PART (the user, 2026-10-29): the pattern you are on and its Part as
+| cl_restorepat: ORIG PTN/PART (the user, 2026-10-29): the pattern you are on and its Part as
 | loaded. Every track (all 16, whether changed or not) gets its original sequence AND its Part slice,
 | cued like a load (one landing); the first of those landings also copies the Part bytes no track's
 | slice holds (cl_slR, cl_pwhole), so the whole Part is as loaded; the pattern's own length / scale /
@@ -1848,7 +1851,7 @@ fo_copy:
     move.l  %a2,-(%sp)
     move.l  %d6,-(%sp)
     bsr.w   cl_slice
-    cmpi.l  #SRC_ORIG,%d2               | ORIG PTN + PART: the first landing brings the rest of the
+    cmpi.l  #SRC_ORIG,%d2               | ORIG PTN/PART: the first landing brings the rest of the
     bne.b   fo_norest                   | Part too (cl_restorepat)
     tst.b   cl_pwhole
     beq.b   fo_norest
@@ -2671,7 +2674,7 @@ ut_pick:
     bra.b   ut_post
 ut_box:
     jsr     cl_hstate                   | [BANK] / [PTN] held flags change after their handlers: the
-    cmp.b   cl_hdrst,%d0                | header (BANK box, ORIG PTN + PART) and page LED follow here
+    cmp.b   cl_hdrst,%d0                | header (BANK box, ORIG PTN/PART) and page LED follow here
     beq.b   ut_pat
     jsr     cl_draw
 ut_pat:
@@ -2774,14 +2777,11 @@ cv_m:
 | the context of the QLREC crash: LED bits only, CLAUDE.md; ROM, as tick-path code): the active track's cued slot, if it is shown and is not the pattern you are on,
 | alternates yellow / off
 cl_blink:
-|   (the user, 2026-10-29) red = your pattern, solid yellow = cued (cl_paint), flashing red = the
-|   select box: its red die toggles here, unless the slot is your pattern or the cued one (they win).
-|   The four page LEDs flash the same way when cl_ppaint left them "flash" (cl_pled 3).
+|   (the user, 2026-10-29) the select box looks like stock's p-locked trig: red (cl_paint), and every
+|   period its green die is turned on for 3 LED ticks (LED_FLASH, stock's own call): a red / yellow
+|   flash. Not over your pattern (red) or the cued slot (yellow). The four page LEDs do the same
+|   when cl_ppaint left them "flash" (cl_pled 3).
     move.l  %d2,-(%sp)
-    moveq   #0,%d0
-    move.b  cl_bph,%d0
-    eori.l  #1,%d0
-    move.b  %d0,cl_bph
     move.b  cl_sbank,%d0
     cmp.b   cl_bank,%d0
     bne.b   bl_page                     | the box is in another bank
@@ -2815,31 +2815,28 @@ bl_trk:
     cmp.l   %d1,%d0
     beq.b   bl_page                     | cued: yellow wins
     lea     LED_TBL,%a0
-    move.l  (%a0,%d2.l*4),%d2           | the red die
+    move.l  (%a0,%d2.l*4),%d2
+    addq.l  #1,%d2                      | its green die
     bsr.b   bl_led
 bl_page:
-    moveq   #0,%d0                      | all four page LEDs flash red together (cl_pled 3)
+    moveq   #0,%d0
     move.b  cl_pled,%d0
     cmpi.l  #3,%d0
     bne.b   bl_out
-    moveq   #0x48,%d2
+    moveq   #0x49,%d2                   | the four page LEDs' green dies
 bl_pk:
     bsr.b   bl_led
     addq.l  #2,%d2
-    cmpi.l  #0x50,%d2
+    cmpi.l  #0x51,%d2
     bne.b   bl_pk
 bl_out:
     move.l  (%sp)+,%d2
     rts
-bl_led:                                 | d2 = a red die: on in phase 1, off in 0
+bl_led:                                 | d2 = a green die: on for 3 ticks
+    pea     3
     move.l  %d2,-(%sp)
-    lea     LED_ON,%a0
-    tst.b   cl_bph
-    bne.b   bl_on
-    lea     LED_OFF,%a0
-bl_on:
-    jsr     (%a0)
-    addq.l  #4,%sp
+    jsr     LED_FLASH
+    addq.l  #8,%sp
     rts
 
 cl_rstall:
@@ -2928,48 +2925,15 @@ by_hi:
 
 | the select box's horizontal edge at y = d4 + d0, x d5..d6; its vertical edge at x = d0, y d4..d4+4
 cd_hline:
-    add.l   %d4,%d0                     | x d5+1 .. d6-1: the corners left out (rounded, the user)
+    add.l   %d4,%d0
     move.l  %d0,-(%sp)
-    move.l  %d6,%d1
-    subq.l  #1,%d1
-    move.l  %d1,-(%sp)
+    move.l  %d6,-(%sp)
     move.l  %d0,-(%sp)
-    move.l  %d5,%d1
-    addq.l  #1,%d1
-    move.l  %d1,-(%sp)
+    move.l  %d5,-(%sp)
     bsr.w   cl_set
     lea     16(%sp),%sp
     rts
 
-| the highlight bar's 4 corner pixels back (rounded): x d5 / d6, y from cl_bary (d4 = text y)
-cd_round:
-    lea     -8(%sp),%sp
-    bsr.w   cl_bary
-    move.l  %d0,(%sp)                   | y0
-    move.l  %d1,4(%sp)                  | y1
-    move.l  (%sp),%d0
-    bsr.b   cd_px5
-    move.l  (%sp),%d0
-    bsr.b   cd_px6
-    move.l  4(%sp),%d0
-    bsr.b   cd_px5
-    move.l  4(%sp),%d0
-    bsr.b   cd_px6
-    lea     8(%sp),%sp
-    rts
-cd_px5:                                 | xor pixel (d5, d0)
-    move.l  %d5,%d1
-    bra.b   cd_px
-cd_px6:
-    move.l  %d6,%d1
-cd_px:
-    move.l  %d0,-(%sp)
-    move.l  %d1,-(%sp)
-    move.l  %d0,-(%sp)
-    move.l  %d1,-(%sp)
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
-    rts
 cd_vline:
     move.l  %d4,%d1
     addq.l  #4,%d1
@@ -2979,49 +2943,6 @@ cd_vline:
     move.l  %d0,-(%sp)
     bsr.w   cl_set
     lea     16(%sp),%sp
-    rts
-
-| cl_hbox(x0, x1): a header outline (1 px, dark on the lit band: XOR) round text rows HDR_Y..+4,
-| corners left out (rounded)
-cl_hbox:
-    lea     -8(%sp),%sp
-    movem.l %d2-%d3,(%sp)
-    move.l  12(%sp),%d2
-    move.l  16(%sp),%d3
-    move.l  %d3,%d1
-    subq.l  #1,%d1
-    move.l  %d2,%d0
-    addq.l  #1,%d0
-    pea     HDR_Y-1                     | bottom
-    move.l  %d1,-(%sp)
-    pea     HDR_Y-1
-    move.l  %d0,-(%sp)
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
-    move.l  %d3,%d1
-    subq.l  #1,%d1
-    move.l  %d2,%d0
-    addq.l  #1,%d0
-    pea     HDR_Y+5                     | top
-    move.l  %d1,-(%sp)
-    pea     HDR_Y+5
-    move.l  %d0,-(%sp)
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
-    pea     HDR_Y+4                     | left
-    move.l  %d2,-(%sp)
-    pea     HDR_Y
-    move.l  %d2,-(%sp)
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
-    pea     HDR_Y+4                     | right
-    move.l  %d3,-(%sp)
-    pea     HDR_Y
-    move.l  %d3,-(%sp)
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
-    movem.l (%sp),%d2-%d3
-    lea     8(%sp),%sp
     rts
 
 cl_draw:
@@ -3065,10 +2986,10 @@ cl_draw:
     bsr.w   cl_xor
     lea     16(%sp),%sp
 |   header (the user, 2026-10-29): left "T6 BANK A" ("T6" alone beside the two long ORIG labels);
-|   right "LOAD: " + an outlined label: SEQ / SEQ + MCH/FX ([FUNC]) on audio, none on MIDI; the box
-|   on ORIG: ORIG SEQ / ORIG SEQ + MCH/FX ([FUNC]), MIDI: ORIG; the [PTN]+[BANK] chord held:
-|   ORIG PTN + PART. Outlines are 1 px, dark in the lit band, corners left out (rounded); "BANK A"
-|   gets one while [BANK] alone is held (the arrows page the bank).
+|   right "LOAD: " + a label in a dark box (inverted, as the band's text is): SEQ / SEQ/MCH/FX
+|   ([FUNC]) on audio, none on MIDI; the box on ORIG: ORIG SEQ / ORIG SEQ/MCH/FX ([FUNC]), MIDI:
+|   ORIG; the [PTN]+[BANK] chord held: ORIG PTN/PART. "BANK A" gets a dark box while [BANK] alone
+|   is held (the arrows page the bank).
     jsr     cl_hstate
     move.b  %d0,cl_hdrst
     move.l  %d0,%d7                     | d7 = header state (free until the cells)
@@ -3170,21 +3091,25 @@ cd_band:
     lea     16(%sp),%sp
     tst.l   %d5
     beq.b   cd_nob
-    pea     BOX_R
+    pea     WIN_H-2                     | the label: a dark box, lit letters, one lit row below
+    pea     BOX_R                       | (the band's) and one above (the border)
+    pea     HDR_Y-1
     move.l  %d3,%d0
-    subq.l  #2,%d0
+    subq.l  #2,%d0                      | 2 dark columns each side of the text
     move.l  %d0,-(%sp)
-    bsr.w   cl_hbox
-    addq.l  #8,%sp
+    bsr.w   cl_xor
+    lea     16(%sp),%sp
 cd_nob:
     btst    #0,%d7
     beq.b   cd_nobk
     tst.l   %d4
     bne.b   cd_nobk
+    pea     WIN_H-2
     pea     BKBOX_R
+    pea     HDR_Y-1
     pea     BKBOX_L
-    bsr.w   cl_hbox
-    addq.l  #8,%sp
+    bsr.w   cl_xor
+    lea     16(%sp),%sp
 cd_nobk:
 |   round the two top corners (a card): clear (0,63) (1,63) (0,62) and their mirror images
     lea     cl_corners,%a2
@@ -3258,7 +3183,7 @@ cd_edp:
     subq.l  #1,%d5
     bne.b   cd_edp
 cd_noed:
-|   a named sequence shows its name; else the summary: "n TRIGS" / "LOCKS" / "---"; on the
+|   a named sequence shows its name; else the summary: "-nn TRGS-" / "LOCKS" / "---"; on the
 |   highlighted slot (the pattern you are on), while the track plays a sequence Clyps put there
 |   unedited: its source, "A14 6 TRG" / "SAVED SEQ"
     tst.b   cl_namesok
@@ -3341,7 +3266,6 @@ cd_sum:
     move.l  %d5,-(%sp)                  | x0
     bsr.w   cl_xor
     lea     16(%sp),%sp
-    bsr.w   cd_round
 cd_next:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
@@ -3749,8 +3673,8 @@ cp_next:
 
 | cl_ppaint: LED slot 7, the page LEDs. Stock's step indicator (PAGE_PAINT), except while the box
 | is on ORIG or the [PTN]+[BANK] chord is held (the user, 2026-10-29): then all four LEDs show that
-| original's status in the grid's colours -- red = playing (original), yellow = its restore is
-| cued, flashing red (cl_blink) = selected but not playing.
+| original's status in the grid's colours -- red = playing (original, also once ORIG has run),
+| yellow = its restore is cued, red with stock's p-lock yellow flash (cl_blink) = selected, changed.
 cl_ppaint:
     jsr     cl_pstat
     move.b  %d0,cl_pled
@@ -4407,7 +4331,7 @@ cl_arm:     .space 16                   | per track: the gate has passed; waitin
 cl_cuef:    .space 16                   | per track: the cue is FULL (its machine / FX too)
 cl_postf:   .space 16                   | per track: a FULL landing the UI side owes (cl_postpart)
 cl_postm:   .space 8                    | per audio track: ... and its machine changed
-cl_pwhole:  .byte 0                     | ORIG PTN + PART pending: the first landing copies cl_slR too
+cl_pwhole:  .byte 0                     | ORIG PTN/PART pending: the first landing copies cl_slR too
             .align 2
 cl_post:    .short 0                    | tracks whose landing the UI side has not followed up yet
 cl_bph:     .byte 0                     | the cue flash phase (cl_blink)
@@ -4425,15 +4349,15 @@ cl_fmt_hdr: .asciz "%c%d BANK %c"
 cl_fmt_hdrs:.asciz "%c%d"
 cl_s_load:  .asciz "LOAD:"
 cl_s_seqb:  .asciz "SEQ"
-cl_s_seqf:  .asciz "SEQ + MCH/FX"
+cl_s_seqf:  .asciz "SEQ/MCH/FX"
 cl_fmt_num: .asciz "%d"
-cl_fmt_trg: .asciz "%d TRIGS"
+cl_fmt_trg: .asciz "-%02d TRGS-"         | 34 px for 00..99 (the user, 2026-10-29)
 cl_s_lck:   .asciz "LOCKS"
 cl_s_emp:   .asciz "---"
 cl_s_orig:  .asciz "ORIG"
 cl_s_origs: .asciz "ORIG SEQ"
-cl_s_origf: .asciz "ORIG SEQ + MCH/FX"
-cl_s_origp: .asciz "ORIG PTN + PART"
+cl_s_origf: .asciz "ORIG SEQ/MCH/FX"
+cl_s_origp: .asciz "ORIG PTN/PART"
 cl_s_saved: .asciz "SAVED SEQ"           | 34 px: the slot label after a temp reload (the user)
 cl_fmt_srct:.asciz "%c%d %dTRG"          | <= 34 px: "A14 64TRG"
 cl_fmt_srcl:.asciz "%c%d LOCKS"

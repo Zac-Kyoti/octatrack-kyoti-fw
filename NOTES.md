@@ -37744,3 +37744,7 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   indication together; the temp-reload slot label reads `SAVED SEQ`; no SAVED in the header.
   Gates F 22, M 8, A..K 113 pass. clyps_render.py now ages the TRACK double-tap timer like the gate
   (and needs a leading `32` for the boot SET DATE/TIME dialog).
+- **CLYPJ flashed; CLYPK** (2026-10-29, NOT flashed): rounding and header outlines undone (dark
+  inverted boxes on BANK / every right-hand label after `LOAD: `); ` + ` → `/`; the select box and
+  "changed" page LEDs use stock's p-locked-trig flash (`0x40013784(green die, 3)` per 30-tick
+  period, stock trig tick `0x400340e4`); unnamed slots `-NN TRGS-`. Gates F 22, M 8, A..K 113.

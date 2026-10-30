@@ -206,16 +206,29 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **CLYPS — CLYPK walk-through.** Image `140C_CLYPK` (CLYPJ + your changes after flashing it).
+  1. Boxes: the highlight bar and the select box have square corners again.
+  2. Header: `LOAD: ` then `SEQ` / `SEQ/MCH/FX` (`[FUNC]`) in a dark box (square corners). On ORIG:
+     `LOAD: ` then `ORIG SEQ` / `ORIG SEQ/MCH/FX` (`[FUNC]`) / `ORIG` (MIDI) in a dark box; with the
+     chord held: `LOAD: ` + a dark `ORIG PTN/PART`. Holding `[BANK]` alone: `BANK X` in a dark box.
+  3. The select box's trig LED looks like a stock p-locked trig: red, with a short yellow flash
+     at stock's own rate. Compare it with a real p-locked trig outside
+     Clyps (GRID REC). Your pattern stays solid red; a cued load solid yellow.
+  4. Box on ORIG (track changed): all four page LEDs red with the same p-lock yellow flash. Run ORIG
+     (`[YES]`, or `[PAGE]`): solid red. Cued while playing: solid yellow until it lands, then red.
+     Chord held: the same for the whole pattern; chord + `[PAGE]`: solid red after.
+  5. Slots without a name read `-06 TRGS-` (two digits, a leading 0 below 10); `LOCKS` / `---` as before.
+
 - **CLYPS — CLYPJ walk-through.** Image `140C_CLYPJ` (CLYPH + your 2026-10-29 changes; CLYPI was
   never flashed).
   1. Looks: the highlight bar and the select box have their 4 corner pixels off. Header: an
      outline (no fill) round `BANK X` while you hold `[BANK]` alone; `LOAD: ` then an outlined
-     `SEQ` / `SEQ + MCH/FX` (`[FUNC]`); on ORIG `LOAD: ORIG SEQ` / `ORIG SEQ + MCH/FX` / MIDI `ORIG`.
+     `SEQ` / `SEQ/MCH/FX` (`[FUNC]`); on ORIG `LOAD: ORIG SEQ` / `ORIG SEQ/MCH/FX` / MIDI `ORIG`.
   2. `[BANK]` outside Clyps: nothing on press; SELECT BANK on release. `[BANK]`+trig still picks a
      bank. Entering Clyps `[BANK]` first: no SELECT BANK flash, and no box round `BANK X`.
   3. Grid: your pattern red, a cued load solid yellow, the select box flashing red.
   4. `[PAGE]`: this track's original sequence; `[FUNC]`+`[PAGE]`: with its machine / FX.
-  5. Hold `[PTN]`+`[BANK]` (from outside): Clyps opens showing `LOAD: ORIG PTN + PART` (left side
+  5. Hold `[PTN]`+`[BANK]` (from outside): Clyps opens showing `LOAD: ORIG PTN/PART` (left side
      `T6` only); all four page LEDs: red if the pattern is all original, flashing red if not. Press
      `[PAGE]`: the whole pattern and its Part come back (cued while playing), and Clyps closes.
      Same chord pressed inside Clyps + `[PAGE]`: the same restore, Clyps stays open.
@@ -248,7 +261,7 @@ quick check for each:
      10. MIDI side: no `LOAD: SEQ` in the header; `[FUNC]` changes nothing; `ORIG` reads `ORIG`.
   D. Loads, stopped
      11. Plain trig on an audio track: sequence only; machine / FX unchanged.
-     12. `[FUNC]` held: header `LOAD: SEQ + MCH/FX`; `[FUNC]` + trig on a slot whose pattern has
+     12. `[FUNC]` held: header `LOAD: SEQ/MCH/FX`; `[FUNC]` + trig on a slot whose pattern has
          another Part / machine: sequence + machine, FX, page values, scene locks, LFO designer;
          the pages show the new values; Part marked edited. `[FUNC]`+`[YES]` on the box: the same.
      13. MIDI track: a plain trig brings channel, bank, program, page values with the sequence.
@@ -264,7 +277,7 @@ quick check for each:
      20. `[FUNC]` + trig while playing: the machine / FX change lands with the sequence; the other
          tracks play on undisturbed. Try FLEX -> STATIC or THRU, and to / from PICKUP.
   F. Originals
-     21. Box on `ORIG`: `ORIG SEQ`; with `[FUNC]`: `ORIG SEQ + MCH/FX`. After a FULL load, `[YES]` puts
+     21. Box on `ORIG`: `ORIG SEQ`; with `[FUNC]`: `ORIG SEQ/MCH/FX`. After a FULL load, `[YES]` puts
          the sequence back (machine stays new); `[FUNC]`+`[YES]` puts both back.
      22. `[PAGE]` undoes a load and a grid edit on the track; `[FUNC]`+`[PAGE]` restores every changed
          track of the pattern on one landing; playing: cued like a load.
@@ -356,7 +369,7 @@ quick check for each:
         and open Clyps on the MIDI side: the header reads `M<n>`, and the slots and trigs show
         the MIDI tracks' sequences (CLYP6 showed the audio tracks here). Load one: it lands on
         the MIDI track. (Double-tapping a TRACK key runs stock's double tap and closes Clyps.)
-     6. Holding `[FUNC]` shows `LOAD: SEQ + MCH/FX` in the header (label only for now).
+     6. Holding `[FUNC]` shows `LOAD: SEQ/MCH/FX` in the header (label only for now).
      6a. With the chord held, `[YES]` does nothing. Latched, hold `[PTN]` and tap `[YES]`: nothing
          loads and Clyps stays (DIRECT JUMP's toggle in KYOTI; this image has no DIRECT JUMP).
   C. Loads, transport STOPPED

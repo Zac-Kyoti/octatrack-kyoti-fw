@@ -5,7 +5,7 @@
 **Where it stands.**
 - **Worktree / branch:** `../octatrack-kyoti-fw-trkseq`, branch `trkseq`. Commits are local, not
   pushed. Clyps is WIP, nothing is promoted, and there is no README entry.
-- **Latest image:** `140C_CLYPJ` (see "2026-10-29" below); before it `140C_CLYPH` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
+- **Latest image:** `140C_CLYPK` (see "2026-10-29" below); before it `140C_CLYPH` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
   **BUILT 2026-10-28, NOT flashed** (the user flashes it next round): CLYPG (step 0 below: stock
   [PTN] / [BANK] inside Clyps, the BANK box, [MIDI] follows, no MIDI load modes) + step 1, FULL
   loads (§1.7 "Built"). Walk-through: FLASHING §4 "CLYPH walk-through" (it includes CLYPG's).
@@ -45,20 +45,27 @@
     `0x400a1f72` phase D, `0x400a43a0` wrap body, `0x40062d1c` UI tail, `0x400905d4` the masked
     bank loader (project load).
 
-**2026-10-29: CLYPH FLASHED; the user's changes → `140C_CLYPI`, then `140C_CLYPJ` (built, not flashed).**
+**2026-10-29: CLYPH FLASHED; the user's changes → `140C_CLYPI`, then `140C_CLYPJ` (FLASHED), then
+`140C_CLYPK` (built, not flashed): rounding and header outlines undone (dark inverted boxes again,
+on BANK while [BANK] alone is held and on every right-hand label after `LOAD: `);
+` + ` → `/` (`SEQ/MCH/FX`, `ORIG SEQ/MCH/FX`, `ORIG PTN/PART`); the select box LED and the "changed"
+page LEDs use stock's p-locked-trig flash (`0x40013784(green die, 3)` each period 30, as stock's
+trig tick `0x400340e4` does for a locked trig: red with a short yellow flash); unnamed slots read
+`-NN TRGS-` (`-%02d TRGS-`, 34 px). Earlier CLYPI/J
+notes below.**
 - **Rounded boxes:** the highlight bar and the select box lose one pixel at each corner.
 - **Header outlines** (1 px, dark on the lit band, rounded): round `BANK A` while [BANK] alone is held
   (no longer when the chord is held, so entering Clyps shows none); round the right label, after
-  an unboxed `LOAD: `: `SEQ` / `SEQ + MCH/FX` ([FUNC]); box on ORIG: `ORIG SEQ` / `ORIG SEQ + MCH/FX`
-  ([FUNC]) / `ORIG` (MIDI); the [PTN]+[BANK] chord held: `ORIG PTN + PART`. Beside the two long
+  an unboxed `LOAD: `: `SEQ` / `SEQ/MCH/FX` ([FUNC]); box on ORIG: `ORIG SEQ` / `ORIG SEQ/MCH/FX`
+  ([FUNC]) / `ORIG` (MIDI); the [PTN]+[BANK] chord held: `ORIG PTN/PART`. Beside the two long
   ones the left reads only `T6` (the user's choice). MIDI: no label except on ORIG.
 - **[BANK] outside Clyps acts on release** (RELOAD_FROM_PROJECT's inversion, `cl_bankp` →
   `cl_bkdefer` / `cl_bankr` → `cl_bkrel`): the press pushes only the trig overlay; a plain tap's
   release opens SELECT BANK; a chord begun with [BANK] flashes nothing.
 - **Grid LEDs:** red = your pattern, **solid** yellow = cued, **flashing red** = the select box
   (`cl_blink`); priority red > yellow > box.
-- **[PAGE] (SCALE)** = ORIG SEQ of the active track; **[FUNC]+[PAGE]** = ORIG SEQ + MCH/FX (MIDI always
-  both). **Chord + [PAGE]** = **ORIG PTN + PART** (`cl_restorepat`): all 16 tracks' original
+- **[PAGE] (SCALE)** = ORIG SEQ of the active track; **[FUNC]+[PAGE]** = ORIG SEQ/MCH/FX (MIDI always
+  both). **Chord + [PAGE]** = **ORIG PTN/PART** (`cl_restorepat`): all 16 tracks' original
   sequences + slices, plus the Part bytes in no slice (`cl_slR`: `+0x10` 2 B, per-scene bytes 8–9,
   the 144 B tail) at the first landing, the pattern's length / scale / mode with the last track:
   the pattern and its whole Part as loaded. Chord begun outside Clyps (it opened Clyps) → Clyps
@@ -69,7 +76,7 @@
   chord is held: then all four LEDs (dies `0x48..0x4f`) show the same: red = original, yellow =
   restore cued, flashing red = changed (track; with the chord: the whole pattern incl. the Part).
   (CLYPI used only the 4th; the user wants all four alike: CLYPJ.)
-- **Wording:** `SEQ + MCH/FX`, `ORIG PTN + PART` (the user).
+- **Wording:** `SEQ/MCH/FX`, `ORIG PTN/PART` (the user).
 - **"SAVED" (the user, 2026-10-29):** the slot label after a temp reload reads `SAVED SEQ`; no SAVED in
   the header any more (CLYPJ).
 
@@ -93,7 +100,7 @@ the full run passes without them): an emulator accumulation effect, like the car
    How it works: §1.0 "Step 2 as built". Next after the user's CLYPG walk-through: step 1.
 1. **DONE (CLYPH, not flashed): FULL loads** (§1.7 "Built"). The rest of this item is the plan as
    it stood; the built route differs (single-track applies, no Part hand-off).
-   - [FUNC] held = `LOAD: SEQ + MCH/FX`, and a trig picked then is a FULL load (our FUNC sub-map
+   - [FUNC] held = `LOAD: SEQ/MCH/FX`, and a trig picked then is a FULL load (our FUNC sub-map
      `cl_fsub` does not list the trigs, so trig records stay ours).
    - The Part slice is stock TRACK PASTE's 136 B (audio) / 68 B (MIDI), plus scene locks
      (`+0x662+(s·8+t)·0x20`, `+0x1662+10s+t`) and the LFO designer (`+0x1702+16t`, `+0x1782+2t`).
@@ -533,7 +540,7 @@ everything" is O17.
 
 **Built (CLYPH, 2026-10-28; emulator-gated, not flashed).**
 - **Choosing:** audio: [FUNC] + trig and [FUNC]+[YES] (the box: a slot, or `ORIG` = `ORIG
-  SEQ + MCH/FX`) are FULL; a plain trig / [YES] is the sequence only. MIDI: every load is FULL (slot,
+  SEQ/MCH/FX`) are FULL; a plain trig / [YES] is the sequence only. MIDI: every load is FULL (slot,
   `ORIG`, [PAGE], [FUNC]+[PAGE], the temp reload). [PAGE] / [FUNC]+[PAGE] on audio: sequence only.
   Stock's FUNC sub-map does not list the trigs, so [FUNC] + trig reaches `cl_k_trig` (C).
 - **The slice** (`cl_slA` / `cl_slM`, table-driven `cl_slice`): audio = FX1/FX2, levels, machine,
@@ -557,7 +564,7 @@ everything" is O17.
   (UI-context, reads the UI bank); then stock's Part-reload page redraw (`0x4005e0a8`'s calls).
 - **Gates:** F (OT DEMO, 14 checks: plain trig keeps the slice; [FUNC]+trig = sequence + slice, no
   other track touched, Part marked edited, Clyps stays; `ORIG SEQ` sequence only; `ORIG
-  SEQ + MCH/FX` both back; playing with CHAIN AFTER = 1 step: the cue lands from the tick with its
+  SEQ/MCH/FX` both back; playing with CHAIN AFTER = 1 step: the cue lands from the tick with its
   slice, no other track touched), M (JAM2: a plain MIDI trig brings M2's slice), full 109 + K.
   Landings: C1wH (plain) and C1wF (FULL, A14 T6 → A15 at the wrap) = B1 at all 450 ticks; C1wP
   (FULL, A14 set to Part 2 first) = B1 too: the sequencer state is undisturbed. A running UI-gate
@@ -566,14 +573,14 @@ everything" is O17.
 - **Not done:** the "edited" x / `cl_diff` still compare the sequence only (a FULL load from a slot
   with an identical sequence shows no x); stock's paste/undo of names (§10.3).
 
-**ORIG SEQ / ORIG SEQ + MCH/FX (the user, 2026-10-28; built CLYPH).**
+**ORIG SEQ / ORIG SEQ/MCH/FX (the user, 2026-10-28; built CLYPH).**
 - With the select box on `ORIG`, its header box reads **`ORIG SEQ`** (was `ORIG`).
-- With [FUNC] held while the box is on `ORIG`, it reads **`ORIG SEQ + MCH/FX`**.
-- `ORIG SEQ` loads the original sequence only (what `ORIG` / [PAGE] do now). `ORIG SEQ + MCH/FX`
+- With [FUNC] held while the box is on `ORIG`, it reads **`ORIG SEQ/MCH/FX`**.
+- `ORIG SEQ` loads the original sequence only (what `ORIG` / [PAGE] do now). `ORIG SEQ/MCH/FX`
   loads the original sequence plus the track's original machine and effects: the Part slice
   below, taken from the load snapshot (§1.5′: it already holds every bank's Parts), the same FULL
   load as from a slot. So [FUNC] on `ORIG` works like [FUNC] on any other slot.
-- Widths (font table `0x400c246a`): `ORIG SEQ` 30 px, `ORIG SEQ + MCH/FX` 58 px; right-aligned to
+- Widths (font table `0x400c246a`): `ORIG SEQ` 30 px, `ORIG SEQ/MCH/FX` 58 px; right-aligned to
   `BOX_R` (text ends at x 107) the long one starts at x 50, clear of `T6 BANK A` (ends x 35).
 - [PAGE] / [FUNC]+[PAGE] keep their meaning (this track / every changed track, sequence only)
   unless the user decides otherwise when FULL loads are built.
@@ -581,7 +588,7 @@ everything" is O17.
 **The MIDI side has no load modes (the user, 2026-10-28).** MIDI tracks have no machines or FX, and
 a MIDI sequence depends on its track's settings, so every MIDI load takes everything.
 - Header: no `LOAD: SEQ` label on the MIDI side, and [FUNC] changes nothing there (no
-  `LOAD: SEQ + MCH/FX`). **Built in CLYPG.** The `ORIG` and `SAVED` boxes stay.
+  `LOAD: SEQ/MCH/FX`). **Built in CLYPG.** The `ORIG` and `SAVED` boxes stay.
 - Loads: a MIDI load (slot, `ORIG`, saved sequence) = the track record + the MIDI Part slice,
   68 B (`+0x3e2+32m` page values, `+0x4e2+36m` channel / bank / program / …), always. **Not built
   yet:** today a MIDI load copies the track record only. It arrives with step 1 (FULL loads), as the
@@ -1228,7 +1235,7 @@ The ROM keeps only the guarded detours:
     sites;
   - a 112 × 64 window on stock's border lines (screen columns 8–119);
   - a lit header band with inverted text, exactly one lit row above and below it;
-  - `LOAD: SEQ` right-aligned in the header (32 px). [FUNC] held shows `LOAD: SEQ + MCH/FX` (60 px).
+  - `LOAD: SEQ` right-aligned in the header (32 px). [FUNC] held shows `LOAD: SEQ/MCH/FX` (60 px).
     The full `SEQ+MACHINE/FX` (76 px) collides with `T8 BANK A`;
   - gate 28/28.
 - **CLYP4 flashed (2026-10-23); the user's notes:** header 2 px taller, rounded top corners
