@@ -62,8 +62,9 @@ the filters' bit-exact model) runs from four DspHooks:
 State at COMPRESSOR's r7+$1c..$2d (free while COMPRESSOR runs: an r7 canary, emulator and
 hardware, 2026-10-19). The 16 KEY GAIN words are the ptable and the 49 key-filter words the ptable2.
 
-CLAIMS. Core-private Y $7f0-$9ff (MON words, keybus) on both cores, and the last $202 words of
-each core's half of the shared window (A $33dfe.., B $3bdfe..).
+CLAIMS. Core-private Y $7e00-$7fff (keybus, the first internal FX2 slot's tail) and $ff0-$fff
+(MON words) on both cores, and the last $202 words of each core's half of the shared window
+(A $33dfe.., B $3bdfe..).
 
 MEASURED. The ColdFire unit, linked at the standalone image's own address, is that image's
 bytes. The DSP source is the standalone's, with the same per-core values; tools/emu_sc_dsp3.py
@@ -99,9 +100,11 @@ SWITCH_FN = 0x40046f10          # stock 2-position switch (FILTER's HOLD)
 
 _SAME = {"@KGNA@": f"${_sc.kgn_smooth_a():x}",
          **_kf.asm_tokens(),
-         # The keybus and MON words at Session 115's Y:$7f0..$9ff, which no FX2 slot reaches
-         # (the standalone builder's KEYBUS puts them in the first internal slot's tail).
-         "@KEYB@": "$800", "@KEYB1@": "$820", "@MONB@": "$7f0"}
+         # The keybus in the first internal FX2 slot's tail (Y:$7e00..$7fff, +$3E00, past every
+         # +$3DFD ring), as the standalone builder's KEYBUS puts it; the MON words at Y:$ff0..$fff,
+         # which no stock effect writes (emulator, every stock effect on both cores, 30 Oct 2026).
+         # Y:$7f0..$9ff, where both sat before, is the voice of a DSP machine.
+         "@KEYB@": "$7e00", "@KEYB1@": "$7e20", "@MONB@": "$ff0"}
 
 # At the standalone image's own address (tools/build_sidechain_compressor.py).
 LINKED = (
@@ -196,7 +199,8 @@ MODULE = Module(
         },
     ),
     claims=Claims(dsp_ranges=(
-        DspRange("y", 0x7f0, 0x210, "MON words ($7f0..$7ff) and the keybus ($800..$9ff)"),
+        DspRange("y", 0xff0, 0x10, "MON words ($ff0..$fff)"),
+        DspRange("y", 0x7e00, 0x200, "the keybus ($7e00..$7fff, the first internal FX2 slot's tail)"),
         DspRange("y", 0x3dfe, 0x202, "the cross-core key window: GSEED, GCNT, "
                                      "4 tracks x 4 generations x 32 words",
                  half_relative=True),
