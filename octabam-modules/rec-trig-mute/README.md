@@ -20,9 +20,9 @@ arm and disarm one-shot trigs as on stock.
 The same source builds the standalone image (`tools/build_rec_trig_mute.py`) and goes into
 KYOTI. The earlier form (`[TRACK]` + `[NO]` / `[YES]`) is **hardware-confirmed** on the
 author's MKI as the standalone image and in KYOTI (keys, toasts, the edge icons, a running
-recording finishing and nothing new starting). The `[TRACK]` + `[REC]` per-track toggle ran on
-the same MKI (29 Oct 2026, "all good"); the 1 s toast that closes on release is checked in the
-emulator only. MIDI CC 80 has not been tried on hardware. This octabam
+recording finishing and nothing new starting). The `[TRACK]` + `[REC]` form — the per-track
+toggle, and the 1 s toast that closes on release — ran on the same MKI inside KYOTI V1.6 on
+29 Oct 2026 ("all good"). MIDI CC 80 has not been tried on hardware. This octabam
 form — the `OCTABAM_UNIT` variant of the source — has not been flashed. Its `reference` is the
 author's build of that form (linked alone at `0x40000000`, 556 B, sha256 `aa2d1ae3…`), made by
 `tools/build_rec_trig_mute.py` with octabam's own DRAM-unit oracle recipe on every run.

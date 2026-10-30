@@ -1,8 +1,8 @@
 """REC_TRIG_MUTE -- [TRACK]+[REC] toggles the held tracks' recorder trigs muted / unmuted.
 
 The octabam form has not been flashed.  The [TRACK]+[REC] gesture (2026-10-29) replaced the
-earlier [TRACK]+[NO] / [TRACK]+[YES]; both ran on the author's MKI as standalone / KYOTI images
-(the 1 s toast that closes on release: emulator only).
+earlier [TRACK]+[NO] / [TRACK]+[YES]; both ran on the author's MKI (the new one inside KYOTI
+V1.6, with its 1 s toast that closes on release).
 
 The trigs stay in the pattern; the sequencer simply stops seeing them, so a recording
 already running finishes its RLEN and nothing new starts.  Global across pattern / Part /
@@ -34,9 +34,8 @@ the unit, the step-handler hook a plain jmp so octabam's nop padding can follow 
 
 MEASURED: the earlier [TRACK]+[NO]/[YES] form was hardware-confirmed on the author's MKI as
 the standalone image and inside KYOTI -- keys, toasts, the edge icons, recording stopping and
-resuming; MIDI CC 80 not tried on hardware.  The [TRACK]+[REC] toggle ran on the same MKI on
-29 Oct 2026 ("all good"); the toast change after it (1.0 s, closed on release) is
-emulator-checked only (tools/emu_rec_trig_mute.py).  This octabam form (the OCTABAM_UNIT variant) has not been
+resuming; MIDI CC 80 not tried on hardware.  The [TRACK]+[REC] form (toggle + the 1.0 s toast
+closed on release) ran on the same MKI inside KYOTI V1.6 on 29 Oct 2026 ("all good").  This octabam form (the OCTABAM_UNIT variant) has not been
 flashed; its `reference` is the author's build of that form, made by
 tools/build_rec_trig_mute.py with octabam's own oracle recipe.
 """

@@ -272,8 +272,8 @@ channel it acts on the active track. The keys send CC 80 (1 muted / 0 unmuted) o
 track's channel. Both need AUDIO CC IN / OUT on, as for every audio-track CC. `[TRACK]` +
 `[YES]` / `[NO]` arm and disarm recorder one-shot trigs as on stock.
 
-**Hardware:** confirmed (`[TRACK]` + `[REC]`, per-track toggle); the 1-second toast that closes
-on release not yet. MIDI CC 80 not specifically tested.\
+**Hardware:** confirmed in KYOTI V1.6 (`[TRACK]` + `[REC]`, the per-track toggle, the toast).
+MIDI CC 80 not specifically tested.\
 **Final build:** [`tools/build_rec_trig_mute.py`](tools/build_rec_trig_mute.py) →
 `OCTATRACK_OS1.40C_REC_TRIG_MUTE`
 

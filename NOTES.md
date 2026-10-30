@@ -37578,3 +37578,6 @@ is not edited) and `tools/emu_sc_shared.py`.
   `1c4b1604552532808830b81457d9e467e3fea1a84791544a2e32c3abc42e0ffa`; KYOTI V1.6 mainos
   `05460b97f5db0454c2a9c2c936e6b4cccd7433249d30c029b132b674283dc47e`, syx
   `a78205e729e093139720d120a5cfc1bd45a6e3ca943f623638236e4f9658c588`; octabam unit `aa2d1ae3…` (556 B).
+- **2026-10-29 (cont. 2): PROMOTED FINAL** on the user's instruction, after KYOTI V1.6 (syx `a78205e7…`) flashed
+  "all good" (KYOTI was the image both rounds). Pins: `build_rec_trig_mute.py` `72260bfd…`, BUG_RTM `9691e449…`,
+  KYOTI V1.6 `05460b97…`; standalone + BUG_RTM not flashed on their own. All three seal without the opt-in.

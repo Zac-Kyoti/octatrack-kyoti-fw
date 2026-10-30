@@ -670,3 +670,10 @@ and a later release with no toast of ours → nothing closed. `ot_emu --live-scr
 standalone and KYOTI V1.6: `[T1]`+`[REC]` tap, T1 let go 0.3 s later → `rtm_trel` →
 `NOTIFY_CLOSE`. In KYOTI, QLREC's close on the `[REC]` release is gone. Held 2 s → stock's
 countdown closes it at 1.0 s, and the later release finds nothing to close.
+
+## 19. Promoted (2026-10-29)
+
+The user flashed §18's KYOTI V1.6 (syx `a78205e7…`), after §17's: all good. **FINAL**, on the
+user's instruction: standalone mainos `72260bfd…`, `BUG_RTM` `9691e449…`, KYOTI V1.6
+`05460b97…` (the standalone and `BUG_RTM` were not flashed on their own). MIDI CC 80 is still
+untested on hardware. octabam pin move: NOTES 2026-10-29.
