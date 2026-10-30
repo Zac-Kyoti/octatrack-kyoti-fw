@@ -757,9 +757,15 @@ look like a pattern pick to Clyps' UI tail (which closes Clyps on -1).
 - Toasts: sequence only **`TRK X CF SEQ RELOAD`**; sequence + machine/FX **`TRK X CF FULL RELOAD`**;
   the pattern reload **`PTN A05 CF RELOAD`**. (MIDI tracks: proposed `MIDI TRK X CF ...`, as the temp
   save toasts do; to confirm.)
-- To find out first: where the card's saved Part comes from -- parse the Part chunk of the bank's
-  `.strd` (as `PARSEPAT` does the patterns), or the RAM saved-Part copy (bank `+0x9504a`, what stock
-  PART RELOAD uses), and whether they can differ.
+- **The card's Part (RE 2026-10-30, C):** stock's bank reader `0x4008e0c0..0x4008e2c0` reads 16 PTRN
+  chunks (`0x4008cebc(fh, slab, ver)`) into the slabs, then 4 PART chunks (`0x4008be2c(fh, dst, i,
+  ver)`) into the **working** Parts (bank `+0x8ed80`), then 4 more into the **SAVE PART** copies
+  (`+0x9504a`), then the 4 "Part saved" flags (`+0x9b312`), the version-3 extra word and the
+  Part-edited byte (`+0x95048`). So the `.strd` holds both, and they differ whenever a Part was edited
+  after its SAVE PART. "From the card" = the **working** Part chunk of the `.strd` (what a project
+  reload restores). The job parses on past the 16 patterns to that Part chunk into a scratch Part
+  buffer (bss, `0x18b2` B): a track FULL reload copies that track's slice from it (Clyps' FULL
+  machinery: `cl_slice` + `TRK_APPLY` / `cl_mapply`); the pattern reload copies the whole Part.
 - **The standalone RELOAD_FROM_PROJECT gets the same change** (track FULL from the card instead of
   the whole Part, and toasts 1 and 2), rebuilt in all its forms (standalone, KYOTI, Bugbuild,
   octabam) with an octabam PR drafted. **Order: after Clyps** (the user).
