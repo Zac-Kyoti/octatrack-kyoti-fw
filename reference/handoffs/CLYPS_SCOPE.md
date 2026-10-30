@@ -747,6 +747,20 @@ the job: kind 2 (slab incl. its Part link + Part apply) for the playing pattern,
 kept) for another pattern; message `PTN A05 RELOADED` on success. Its `PTN_CONSUMED = -1` must not
 look like a pattern pick to Clyps' UI tail (which closes Clyps on -1).
 
+**Revised by the user, 2026-10-30 (supersedes the track-reload part above).**
+- [BANK]+TRACK must **not** reload the whole Part (that touches unrelated tracks): it is Clyps' own
+  FULL track load (sequence + that track's Part slice: machine, FX, pages, scene locks, designer),
+  with the data **from the card**. [PTN]+TRACK stays sequence-only from the card.
+- Toasts: sequence only **`TRK X CF SEQ RELOAD`**; sequence + machine/FX **`TRK X CF FULL RELOAD`**;
+  the pattern reload **`PTN A05 CF RELOAD`**. (MIDI tracks: proposed `MIDI TRK X CF ...`, as the temp
+  save toasts do; to confirm.)
+- To find out first: where the card's saved Part comes from -- parse the Part chunk of the bank's
+  `.strd` (as `PARSEPAT` does the patterns), or the RAM saved-Part copy (bank `+0x9504a`, what stock
+  PART RELOAD uses), and whether they can differ.
+- **The standalone RELOAD_FROM_PROJECT gets the same change** (track FULL from the card instead of
+  the whole Part, and toasts 1 and 2), rebuilt in all its forms (standalone, KYOTI, Bugbuild,
+  octabam) with an octabam PR drafted. **Order: after Clyps** (the user).
+
 **The chord's grid** (built CLYPN): with both keys held, in either order, the pattern view of the
 playing bank (your pattern red, cued yellow, data green); the bank view only for [BANK] alone.
 
