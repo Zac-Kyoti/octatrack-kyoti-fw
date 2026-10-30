@@ -37566,3 +37566,15 @@ is not edited) and `tools/emu_sc_shared.py`.
   - octabam unit reference `14f5c3eeae873d8c538bc0f130d57109fce9508e81193ef329d97b30884dc8ca` (508 B)
 - **Hardware to check:** FLASHING §4 REC_TRIG_MUTE; plus `[TRACK]` + `[FUNC]` + `[REC]` (the FUNC layer's copy should
   win) and `[TRACK]` + `[REC]` then `[PLAY]` (no live recording: our press never sets "REC held").
+- **2026-10-29 (cont.): user flashed it, "All Good"** (which image not named). Then: toast as long as QLREC's while
+  the chord is held (user chose QLREC's 1.0 s = `0x3c` over DJ's `0x44`) and closed on release. Fifth detour
+  `0x40083e84` (track-key release, `and.l %d0,0x460fab40`) → `rtm_trel` closes our toast once no track key is held
+  (flag `RTM_TOAST` = `RTM_MASK + 1`). **KYOTI clash found in the emulator:** QLREC's `[REC]`-release hook closes every
+  toast, so a `[REC]` tap closed ours after ~0.1 s; `rtm_rec` now does stock's release itself (`clr.l 0x460d1726`)
+  when a track key is held and our toast is up. Emu 43 PASS / 0 FAIL + live-script (standalone + KYOTI). Scope §18.
+  Builds (WIP, NOT flashed): standalone mainos `72260bfd51cb5733ee1bf833f10a27cec370d0ee3e59f80b1ee33c33e4a3a5a3`, syx
+  `a553af0c8faac71d354f1282783e29f4f99991c74a874d1c230f3f09076ef55b`; `BUG_RTM` mainos
+  `9691e449dbecc5f1f91280b586efe8046f57a5922e1754eb6d5afa85975b7db3`, syx
+  `1c4b1604552532808830b81457d9e467e3fea1a84791544a2e32c3abc42e0ffa`; KYOTI V1.6 mainos
+  `05460b97f5db0454c2a9c2c936e6b4cccd7433249d30c029b132b674283dc47e`, syx
+  `a78205e729e093139720d120a5cfc1bd45a6e3ca943f623638236e4f9658c588`; octabam unit `aa2d1ae3…` (556 B).

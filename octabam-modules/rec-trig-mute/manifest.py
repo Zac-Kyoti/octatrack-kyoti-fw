@@ -1,14 +1,14 @@
 """REC_TRIG_MUTE -- [TRACK]+[REC] toggles the held tracks' recorder trigs muted / unmuted.
 
 The octabam form has not been flashed.  The [TRACK]+[REC] gesture (2026-10-29) replaced the
-earlier [TRACK]+[NO] / [TRACK]+[YES]; the earlier form was hardware-confirmed as the standalone
-image and inside KYOTI, the [TRACK]+[REC] form not yet.
+earlier [TRACK]+[NO] / [TRACK]+[YES]; both ran on the author's MKI as standalone / KYOTI images
+(the 1 s toast that closes on release: emulator only).
 
 The trigs stay in the pattern; the sequencer simply stops seeing them, so a recording
 already running finishes its RLEN and nothing new starts.  Global across pattern / Part /
-bank changes, volatile (power-up = unmuted).  With several track keys held, [REC] mutes them
-all unless all are already muted, which unmutes them.  While a track key is held [REC] does not
-switch GRID REC; without one [REC] is stock.  Toasts REC TRIGS MUTED / REC TRIGS UNMUTED.
+bank changes, volatile (power-up = unmuted).  Each held track flips its own state.  While a track key is held [REC] does not
+switch GRID REC; without one [REC] is stock.  Toasts REC TRIGS MUTED / UNMUTED / TOGGLED
+(mixed), 1.0 s like QUANTIZE_LIVE_REC_TOGGLE's, closed when the last track key is released.
 MIDI CC 80: 0 = unmute, 1-127 = mute, on a track's channel (AUTO channel = active track),
 gated by AUDIO CC IN; the keys send CC 80 (1 / 0) on each held track's channel, gated by
 AUDIO CC OUT -- both exactly like stock's CC 52/53.  The track-edge status icon shows
@@ -24,7 +24,8 @@ SITES (our own disassembly of 1.40C; proofs: reference/handoffs/REC_TRIG_MUTE_SC
     d7) -- the only producer of recorder events (0x46c7a6c0 has three references);
   * the edge renderer 0x4004bd48: its state cache load (0x4004bee2) and its 4-way draw
     switch (0x4004c00c);
-  * the stock CC handler's fall-through for every CC it ignores (0x4000f210).
+  * the stock CC handler's fall-through for every CC it ignores (0x4000f210);
+  * the track-key release handler 0x40083e40, where it clears the key's held bit (0x40083e84).
 
 THE SOURCE is patch_rec_trig_mute.s here, one file for every layout.  The standalone
 (tools/build_rec_trig_mute.py) and KYOTI builds reuse three unreachable stock routines for its code; here it
@@ -33,8 +34,9 @@ the unit, the step-handler hook a plain jmp so octabam's nop padding can follow 
 
 MEASURED: the earlier [TRACK]+[NO]/[YES] form was hardware-confirmed on the author's MKI as
 the standalone image and inside KYOTI -- keys, toasts, the edge icons, recording stopping and
-resuming; MIDI CC 80 not tried on hardware.  The [TRACK]+[REC] form is emulator-checked only
-(tools/emu_rec_trig_mute.py).  This octabam form (the OCTABAM_UNIT variant) has not been
+resuming; MIDI CC 80 not tried on hardware.  The [TRACK]+[REC] toggle ran on the same MKI on
+29 Oct 2026 ("all good"); the toast change after it (1.0 s, closed on release) is
+emulator-checked only (tools/emu_rec_trig_mute.py).  This octabam form (the OCTABAM_UNIT variant) has not been
 flashed; its `reference` is the author's build of that form, made by
 tools/build_rec_trig_mute.py with octabam's own oracle recipe.
 """
@@ -58,6 +60,10 @@ DRAW_STOCK = bytes.fromhex("7003b08c6618")
 # CC handler fall-through: `moveq #119,%d6 ; cmp.l %d1,%d6 ; bge 0x4000f274`
 CC = 0x4000f210
 CC_STOCK = bytes.fromhex("7c77bc816c5e")
+# track-key release 0x40083e40: `and.l %d0,0x460fab40` clears the key's held bit -- rtm_trel
+# replays it and closes our toast once no track key is held
+TREL = 0x40083e84
+TREL_STOCK = bytes.fromhex("c1b9460fab40")
 
 # the base keymaps' [REC] records (T1 0x400bfc3a, T2 0x400c061e): press + release fields
 REC_FIELDS = (0x400c003c, 0x400c0040, 0x400c0620, 0x400c0624)
@@ -67,7 +73,7 @@ REC_STOCK = 0x40048774              # stock [REC]: GRID REC toggle, "REC held"
 # tools/build_rec_trig_mute.py builds this on every run, with octabam's own DRAM-unit oracle
 # recipe (m68k-elf-as -mcpu=54455 --defsym OCTABAM_UNIT=0x1; ld -Ttext=0x40000000 + the same
 # defsym; objcopy -O binary), and refuses if this line no longer matches.
-REFERENCE = (0x40000000, "14f5c3eeae873d8c538bc0f130d57109fce9508e81193ef329d97b30884dc8ca")
+REFERENCE = (0x40000000, "aa2d1ae35bcdef288cabd1958185036341a00c7ecc6eb719e136d86e7c042f19")
 
 
 MODULE = Module(
@@ -89,6 +95,8 @@ MODULE = Module(
                "edge renderer: draw '..[]' / '..>' for states 8 / 9"),
         Detour(CC, CC_STOCK, "rtm", "rtm_cc",
                "CC handler fall-through: CC 80, else stock's compare replayed"),
+        Detour(TREL, TREL_STOCK, "rtm", "rtm_trel",
+               "track-key release: close our toast once no track key is held", kind="jsr"),
     ),
     symbol_refs=tuple(
         SymbolRef(a, REC_STOCK, "rtm", "rtm_rec", "[REC] keymap record: track held -> toggle")

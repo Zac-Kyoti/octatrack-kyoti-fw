@@ -17,7 +17,7 @@
 |   .ccrx   0x4009e7dc  an orphaned arranger-row resolver ("ARR PARSE ERROR")
 | The only runtime-written byte, RTM_MASK, lives in the proven-writable classic cave.
 
-    .globl rtm_rec, rtm_gate, rtm_glyph, rtm_draw, rtm_cc
+    .globl rtm_rec, rtm_trel, rtm_gate, rtm_glyph, rtm_draw, rtm_cc
 
 | OCTABAM_UNIT (--defsym; the octabam module octabam-modules/rec-trig-mute): one linked unit
 | octabam places itself -- a single section, RTM_MASK inside it, the step-handler hook a plain
@@ -33,12 +33,16 @@
     .ifndef RTM_MASK                | the builder passes it: kyoti_place "rtm_mask"
     .equ RTM_MASK,  0x400d7c3a      | bit t = track t's recorder trigs muted (byte, image 0)
     .endif
+    .equ RTM_TOAST, RTM_MASK+1      | 1 from our toast until the last track key is released
     .endif
     .equ RTM_CC,    80
 
     .equ HELD,      0x460fab40      | held track keys, bit t (physical keys, both modes)
     .equ REC_KEY,   0x40048774      | stock [REC] handler: GRID REC toggle, "REC held"
+    .equ REC_HELD,  0x460d1726      | "REC held", set by its press, cleared by its release
     .equ NOTIFY,    0x4005a2b8      | FUN_4005a2b8(text, dur) -- key-handler context only
+    .equ NOTIFY_CLOSE, 0x40056bec   | closes the toast (none open: returns) -- key handlers only
+    .equ TOAST_DUR, 0x3c            | 1.0 s (60 ticks), QUANTIZE_LIVE_REC_TOGGLE's length
     .equ CC_SEND,   0x40033e3c      | FUN_40033e3c(track, cc, value): AUDIO CC OUT enqueue
     .equ CC_CHK,    0x40033970
     .equ CC_IN,     0x80000049      | project AUDIO CC IN
@@ -61,8 +65,12 @@ rtm_rec:
     beq.s   0f                      | no track key held: stock [REC] (GRID REC toggle)
     tst.l   8(%sp)                  | press, as stock tests it
     bne.s   1f
-0:  jmp     REC_KEY                 | release (and every unheld event): stock, which only
-                                    | clears "REC held" -- we never set it on our press
+    tst.b   RTM_TOAST               | release while our toast is up and a track key held:
+    beq.s   0f
+    clr.l   REC_HELD                | stock's whole release, minus any hook on it -- in KYOTI
+    rts                             | QUANTIZE_LIVE_REC_TOGGLE's would close our toast here
+0:  jmp     REC_KEY                 | every other event: stock (a release only clears "REC
+                                    | held" -- we never set it on our press)
 1:  mvz.b   RTM_MASK,%d0            | d0/d1/a0/a1 only: d2-d7 are the caller's
     eor.l   %d1,%d0                 | every held track flips its own state
     move.b  %d0,RTM_MASK
@@ -80,7 +88,9 @@ rtm_rec:
 4:  move.l  %d0,4(%sp)              | NOTIFY's text, in our caller's frame
     move.l  %a0,%d0
     bsr.s   rtm_tx
-    moveq   #0x30,%d0               | tail-call NOTIFY(text, 0x30)
+    moveq   #1,%d0
+    move.b  %d0,RTM_TOAST           | rtm_trel closes it when the track keys go up
+    moveq   #TOAST_DUR,%d0          | tail-call NOTIFY(text, TOAST_DUR)
     move.l  %d0,8(%sp)
     jmp     NOTIFY
 
@@ -216,11 +226,25 @@ rtm_cc:
     move.b  %d0,RTM_MASK
 9:  jmp     CC_EXIT
 
+| track-key release 0x40083e40, at 0x40083e84: `jsr rtm_trel` replaces `and.l %d0,HELD` (d0 =
+| ~(1 << t)).  Once no track key is held, our toast closes, as QUANTIZE_LIVE_REC_TOGGLE's closes
+| on [REC] release.  Key-handler context, so NOTIFY_CLOSE is legal; d0/d1/a0/a1 are free here
+| (the caller reloads d0 next), d2-d4 are callee-saved by NOTIFY_CLOSE.
+rtm_trel:
+    and.l   %d0,HELD                | the displaced instruction
+    bne.s   9f                      | a track key is still held
+    tst.b   RTM_TOAST
+    beq.s   9f                      | not our toast
+    clr.b   RTM_TOAST
+    jmp     NOTIFY_CLOSE            | returns at once if it has already timed out
+9:  rts
+
 S_MUTED:   .asciz "REC TRIGS MUTED"
 S_UNMUTED: .asciz "REC TRIGS UNMUTED"
 S_TOGGLED: .asciz "REC TRIGS TOGGLED"
 
     .ifdef OCTABAM_UNIT                 | in .text, right after the code: the unit lives in DRAM,
 RTM_MASK: .byte 0                   | so it is writable; a .data section would sit 8 KB past
-    .even                           | the code (ld's default) -- Sam, octabam PR #566
+RTM_TOAST: .byte 0                  | the code (ld's default) -- Sam, octabam PR #566
+    .even
     .endif

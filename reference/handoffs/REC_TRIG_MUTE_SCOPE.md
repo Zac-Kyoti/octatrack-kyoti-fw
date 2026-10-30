@@ -634,3 +634,39 @@ Octabam unit 508 B, reference `14f5c3ee…`.
 (the `[FUNC]` layer's copy record should win, so no mute), and screens whose own layer gives
 `[REC]` another job. There `[TRACK]` + `[REC]` does that job instead of muting, as stock's
 `[REC]` would.
+
+## 18. The toast while the chord is held (2026-10-29)
+
+**Hardware:** the user flashed §17's build: "All Good" (which of the three images was not
+named).
+
+**Ask (user):** while the chord is held, the toast stays up exactly as long as
+QUANTIZE_LIVE_REC_TOGGLE's and DIRECT_JUMP_KYOTI's. Those differ: QLREC's is `0x3c` = 1.0 s
+(60 ticks of 1/60 s), DJ's `0x44` ≈ 1.13 s. The user chose QLREC's 1.0 s, and closing on
+release like both of them (QLREC on `[REC]` release, DJ on `[PTN]` release).
+
+**Change.**
+- `NOTIFY(text, 0x3c)` instead of stock's `0x30`. `RTM_TOAST` (= `RTM_MASK + 1`, the same
+  writable piece; Bugbuild RESERVED now 2 B) is set with every toast.
+- **Fifth detour:** the track-key release handler `0x40083e40` clears the key's held bit
+  with `and.l %d0,0x460fab40` at `0x40083e84` (6 B). `jsr rtm_trel` replays it. Once no track
+  key is held and `RTM_TOAST` is set, it clears the flag and calls `NOTIFY_CLOSE`
+  (`0x40056bec`). That routine returns at once if the toast already timed out (it tests
+  `0x460d1e70` itself). The flag is therefore stale only between our press and the last
+  track key's release.
+- **Found in the emulator, KYOTI only:** QLREC's `[REC]`-release hook (`0x4004883a`) closes
+  *any* toast, so tapping `[REC]` while holding `[TRACK]` closed ours after ~0.1 s. That was
+  probably what the user saw. Now a `[REC]` release made while a track key is held and
+  `RTM_TOAST` is set does stock's whole release (`clr.l 0x460d1726`) inside `rtm_rec` and
+  returns, skipping any hook on it. STEM REC's release path without UP is the same
+  `0x4004883a` clear, so nothing is lost there.
+- Space: `.main` 292/308, `.draw` 96/108, `.ccrx` 166/168 (`rtm_trel` moved there). The
+  emulator's scratch buffer moved to `.draw`'s tail (`0x4005a148`). Octabam unit 556 B,
+  reference `aa2d1ae3…`.
+
+**Checks:** `emu_rec_trig_mute.py` 43 PASS / 0 FAIL, adding toast length `0x3c`, the flag,
+the toast kept through a `[REC]` release, T1 released with T3 held → kept, last key → closed,
+and a later release with no toast of ours → nothing closed. `ot_emu --live-script` on the
+standalone and KYOTI V1.6: `[T1]`+`[REC]` tap, T1 let go 0.3 s later → `rtm_trel` →
+`NOTIFY_CLOSE`. In KYOTI, QLREC's close on the `[REC]` release is gone. Held 2 s → stock's
+countdown closes it at 1.0 s, and the later release finds nothing to close.

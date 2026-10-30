@@ -67,8 +67,9 @@ REC_FIELDS = {0x400c003c: 0x40048774, 0x400c0040: 0x40048774,
 # REC_TRIG_MUTE took them over, so assert it
 TRK_FIELDS = {0x400d15e4: 0x400834d8, 0x400d15e8: 0x400834d8,
               0x400d15fe: 0x40083488, 0x400d1602: 0x40083488}
-# the one runtime-written byte: classic cave, proven runtime-writable.  In KYOTI V1.0 it is a
-# CAVE piece of its own ("rtm_mask"), so no other piece can ever be packed over it.
+# the runtime-written bytes RTM_MASK and RTM_TOAST (= RTM_MASK + 1): classic cave, proven
+# runtime-writable.  In KYOTI they are a CAVE piece of their own ("rtm_mask", 4 B), so no other
+# piece can ever be packed over them.
 RTM_MASK = kyoti_place.at("rtm_mask", 0x400d7c3a)
 
 # detours: site -> (stock bytes, symbol, kind)
@@ -77,6 +78,7 @@ SITES = {
     0x4004bee2: ("41f9400c0cb8",         "rtm_glyph", "jsr"),    # edge renderer: state
     0x4004c00c: ("7003b08c6618",         "rtm_draw",  "jmp"),    # edge renderer: draw
     0x4000f210: ("7c77bc816c5e",         "rtm_cc",    "jmp"),    # CC handler fall-through
+    0x40083e84: ("c1b9460fab40",         "rtm_trel",  "jsr"),    # track-key release: close toast
 }
 
 
@@ -190,8 +192,8 @@ def main():
             sys.exit(f"detour site 0x{site:08x}: {img[o:o + len(want)].hex()} is not stock {hexb}")
         assert_no_branch_into(img, site, len(want))
     mo = RTM_MASK - BASE
-    if img[mo] != 0:
-        sys.exit(f"RTM_MASK 0x{RTM_MASK:08x} is not free")
+    if img[mo:mo + 2] != bytes(2) or RTM_MASK + 2 > 0x400d7c3c:
+        sys.exit(f"RTM_MASK / RTM_TOAST 0x{RTM_MASK:08x}+2 is not free inside the classic cave")
 
     for s, (lo, hi) in REGIONS.items():                 # region = our code, zero tail
         b = blobs[s]
@@ -214,7 +216,7 @@ def main():
         print(f"  {s:7s} 0x{lo:08x}  {len(blobs[s]):3d} / {hi - lo} B")
     for site, (_, sym, _) in SITES.items():
         print(f"  detour 0x{site:08x} -> {sym} 0x{syms[sym]:08x}")
-    print(f"  RTM_MASK 0x{RTM_MASK:08x}")
+    print(f"  RTM_MASK 0x{RTM_MASK:08x}, RTM_TOAST 0x{RTM_MASK + 1:08x}")
 
     at, sha, n = octabam_oracle()
     import re

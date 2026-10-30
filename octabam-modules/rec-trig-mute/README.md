@@ -4,8 +4,9 @@ Mute a track's recorder trigs without deleting them. Hold **`[TRACK]`** and pres
 **`[REC]`**: that track's recorder trigs stop firing — a recording already running
 finishes — toast `REC TRIGS MUTED`. Press it again to bring them back (`REC TRIGS UNMUTED`).
 Each track keeps its own state: with several track keys held, each one flips
-(`REC TRIGS TOGGLED` when they end up mixed). While a track key is held, `[REC]` does not
-switch grid recording; on its own `[REC]` is stock. Any screen; it holds across pattern
+(`REC TRIGS TOGGLED` when they end up mixed). The toast stays up while the track key is
+held, up to 1 s (QUANTIZE_LIVE_REC_TOGGLE's length), and closes when it is let go. While a
+track key is held, `[REC]` does not switch grid recording; on its own `[REC]` is stock. Any screen; it holds across pattern
 changes until you unmute, and every track starts unmuted at power-on. A muted track shows
 two dots beside its play/stop icon at the screen edge (`..■` / `..▶`).
 
@@ -19,17 +20,18 @@ arm and disarm one-shot trigs as on stock.
 The same source builds the standalone image (`tools/build_rec_trig_mute.py`) and goes into
 KYOTI. The earlier form (`[TRACK]` + `[NO]` / `[YES]`) is **hardware-confirmed** on the
 author's MKI as the standalone image and in KYOTI (keys, toasts, the edge icons, a running
-recording finishing and nothing new starting). The `[TRACK]` + `[REC]` form is checked in the
-emulator only, not yet on hardware. MIDI CC 80 has not been tried on hardware. This octabam
+recording finishing and nothing new starting). The `[TRACK]` + `[REC]` per-track toggle ran on
+the same MKI (29 Oct 2026, "all good"); the 1 s toast that closes on release is checked in the
+emulator only. MIDI CC 80 has not been tried on hardware. This octabam
 form — the `OCTABAM_UNIT` variant of the source — has not been flashed. Its `reference` is the
-author's build of that form (linked alone at `0x40000000`, 508 B, sha256 `14f5c3ee…`), made by
+author's build of that form (linked alone at `0x40000000`, 556 B, sha256 `aa2d1ae3…`), made by
 `tools/build_rec_trig_mute.py` with octabam's own DRAM-unit oracle recipe on every run.
 
 ## Contents
 
 | file | what it is |
 |---|---|
-| `manifest.py` | the module: one DRAM `Linked` unit, four `Detour`s, four `SymbolRef`s |
+| `manifest.py` | the module: one DRAM `Linked` unit, five `Detour`s, four `SymbolRef`s |
 | `patch_rec_trig_mute.s` | the m68k source for every layout; octabam builds it with `--defsym OCTABAM_UNIT` |
 
 ## Sites
@@ -40,11 +42,15 @@ author's build of that form (linked alone at `0x40000000`, 508 B, sha256 `14f5c3
 | `0x4004bee2` | `lea 0x400c0cb8,%a0` | `jsr` | edge renderer: the mute folded into its state cache |
 | `0x4004c00c` | `moveq #3,%d0 ; cmpl %a4,%d0 ; bnes` | `jmp` | edge renderer: `..■` / `..▶` |
 | `0x4000f210` | `moveq #119,%d6 ; cmp.l %d1,%d6 ; bge` | `jmp` | CC handler fall-through: CC 80 |
+| `0x40083e84` | `and.l %d0,0x460fab40` | `jsr` | track-key release: our toast closes once no track key is held |
 | `0x400c003c` / `0x400c0040` | `0x40048774` | data | T1 keymap `[REC]` record, press / release → `rtm_rec` |
 | `0x400c0620` / `0x400c0624` | `0x40048774` | data | T2 keymap `[REC]` record, press / release → `rtm_rec` |
 
 `rtm_rec` hands every event except a press with a track key held back to `0x40048774`, so a
 module that detours the REC handler itself (STEM REC's `UP` + `REC`) still runs behind it.
+One exception: a `[REC]` release while a track key is held and our toast is up does stock's
+release (`clr.l 0x460d1726`) itself, so a release hook (QUANTIZE_LIVE_REC_TOGGLE closes every
+toast there) cannot close the toast while the track key is held.
 
 Compatible by construction with octabam's `cc-map` and with Octakit's CC wrapper: both
 hook the CC handler's **entry** (`0x4000e79c`) and pass CCs they don't own to stock, which

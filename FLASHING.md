@@ -157,7 +157,9 @@ quick check for each:
   does not switch, the current recording finishes and the next cycle does not record.
   `[TRACK]` + `[REC]` again → `REC TRIGS UNMUTED`, recording resumes. Stopped, a muted track
   shows `..■`. Mute T1 alone, then hold T1 + T3 and press `[REC]` → `REC TRIGS TOGGLED`, T1
-  unmuted and T3 muted. `[REC]` with no track key held still switches GRID REC; `[TRACK]` +
+  unmuted and T3 muted. The toast lasts 1 s while the track key stays held (also after
+  `[REC]` is let go), and closes the moment the track key is released. `[REC]` with no track
+  key held still switches GRID REC; `[TRACK]` +
   `[YES]` / `[NO]` show stock's `ARM REC TRK` / `DISARM REC TRK`.
 - **BLACKPYRAMIDS_303** — double-tap T1, pick `BLKPYRAMD`, put trigs on a few steps: each plays
   a 303 note. P-lock `PTCH` and `ACC` on a step; put a trigless trig after a note (it holds) and a

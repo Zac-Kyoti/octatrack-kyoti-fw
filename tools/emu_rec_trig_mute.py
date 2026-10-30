@@ -49,10 +49,11 @@ RENDER = 0x4004bd48                 # the edge renderer; on hardware FUN_4005220
 REC_FIELDS = (0x400c003c, 0x400c0040, 0x400c0620, 0x400c0624)    # [REC] keymap press/release
 TRK_YES_FIELD, TRK_NO_FIELD = 0x400d15e4, 0x400d15fe                # [TRACK]-layer YES / NO
 GRID_REC, REC_HELD = 0x460d1736, 0x460d1726
+TRK_RELEASE, NOTIFY_CLOSE, TRK_PRESSED = 0x40083e40, 0x40056bec, 0x460fab44
 CC_SEND, NOTIFY, CC_HANDLER, BLIT = 0x40033e3c, 0x4005a2b8, 0x4000e79c, 0x400128a8
 CC_IN, AUTO_CH, TRIG_CH, MIDI_TRK_FLAGS = 0x80000049, 0x80000047, 0x8000003f, 0x8000000c
 FLAGWORD = 0x46c7a6c0
-MSG = 0x4009e870                    # test buffer: the zero tail of our own .ccrx region,
+MSG = 0x4005a148                    # test buffer: the zero tail of our own .draw region,
                                     # unused in both the standalone and the KYOTI image
 RTM_CC = 80
 
@@ -102,7 +103,7 @@ def main():
         rt.run(until=lambda s: s.pc == er.MAIN_SPIN)
 
     # hooks: CC sends and toasts
-    sends, toasts, blits = [], [], []
+    sends, toasts, blits, durs, closes = [], [], [], [], []
 
     def on_send(u, adr, size, x):
         sp = u.reg_read(eb.UC_M68K_REG_A7)
@@ -112,6 +113,10 @@ def main():
         sp = u.reg_read(eb.UC_M68K_REG_A7)
         p = struct.unpack(">I", u.mem_read(sp + 4, 4))[0]
         toasts.append(bytes(u.mem_read(p, 24)).split(b"\0")[0].decode(errors="replace"))
+        durs.append(struct.unpack(">I", u.mem_read(sp + 8, 4))[0])
+
+    def on_close(u, adr, size, x):
+        closes.append(adr)
 
     def on_blit(u, adr, size, x):
         sp = u.reg_read(eb.UC_M68K_REG_A7)
@@ -121,6 +126,7 @@ def main():
     uc.hook_add(eb.UC_HOOK_CODE, on_send, begin=CC_SEND, end=CC_SEND)
     uc.hook_add(eb.UC_HOOK_CODE, on_notify, begin=NOTIFY, end=NOTIFY)
     uc.hook_add(eb.UC_HOOK_CODE, on_blit, begin=BLIT, end=BLIT)
+    uc.hook_add(eb.UC_HOOK_CODE, on_close, begin=NOTIFY_CLOSE, end=NOTIFY_CLOSE)
     uc.ctl_flush_tb()
 
     # ------------------------------------------------------------------ 1. keys
@@ -134,7 +140,7 @@ def main():
     rec = S["rtm_rec"]
 
     def key(entry, code, event, held):
-        sends.clear(); toasts.clear()
+        sends.clear(); toasts.clear(); durs.clear()
         w32(HELD, held)
         spin()
         rt.call_as_main(entry, args=(code, event))
@@ -147,10 +153,34 @@ def main():
     check(m == 0b101, f"T1+T3 held, REC press -> mask {m:#04x} (muted)")
     check(s == [(0, RTM_CC, 1), (2, RTM_CC, 1)], f"CC sends {s}")
     check(t == ["REC TRIGS MUTED"], f"toast {t}")
+    check(durs == [0x3c], f"toast length {[hex(x) for x in durs]} (0x3c = 1.0 s, QLREC's)")
+    toast_flag = RTM_MASK + 1
+    check(u8(toast_flag) == 1, f"RTM_TOAST set ({u8(toast_flag)})")
     check(u32(GRID_REC) == grid0 and u32(REC_HELD) == 0,
           f"GRID REC unchanged ({u32(GRID_REC)}), 'REC held' not set ({u32(REC_HELD)})")
     m, s, t = key(rec, 0x29, 0, 0b101)
     check(m == 0b101 and not s and not t, "REC release with tracks held -> no change, no send, no toast")
+    check(u8(toast_flag) == 1 and u32(REC_HELD) == 0,
+          "  ... our toast kept (no release hook runs: KYOTI's QLREC would close it), 'REC held' clear")
+
+    def release(code, held):
+        """the stock track-key release handler, with `held` the mask before the release"""
+        closes.clear()
+        w32(HELD, held)
+        w32(TRK_PRESSED, 0)
+        spin()
+        rt.call_as_main(TRK_RELEASE, args=(code, 0))
+        h = u32(HELD)
+        w32(HELD, 0)
+        return h, len(closes)
+    h, c = release(0x10, 0b101)
+    check(h == 0b100 and c == 0 and u8(toast_flag) == 1,
+          f"T1 released, T3 still held -> toast stays (held {h:#04x}, closes {c}, flag {u8(toast_flag)})")
+    h, c = release(0x12, 0b100)
+    check(h == 0 and c == 1 and u8(toast_flag) == 0,
+          f"T3 released, none held -> our toast closed (closes {c}, flag {u8(toast_flag)})")
+    h, c = release(0x10, 0b1)
+    check(h == 0 and c == 0, f"a later track release with no toast of ours -> nothing closed (closes {c})")
     m, s, t = key(rec, 0x29, 1, 0b1)
     check(m == 0b100, f"T1 held (muted), REC press -> mask {m:#04x} (T1 unmuted)")
     check(s == [(0, RTM_CC, 0)], f"CC sends {s}")

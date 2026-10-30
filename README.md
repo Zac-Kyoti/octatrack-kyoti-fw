@@ -261,8 +261,9 @@ Mute a track's recorder trigs without deleting them. Hold **`[TRACK]`** and pres
 **`[REC]`**: that track's recorder trigs stop firing — a recording already running finishes —
 and a toast reads `REC TRIGS MUTED`. Press it again to bring them back (`REC TRIGS UNMUTED`).
 Each track keeps its own state: with several track keys held, each one flips
-(`REC TRIGS TOGGLED` when they end up mixed). While a track key is held, `[REC]` does not
-switch grid recording; on its own `[REC]` works as on stock. It works on any screen and holds
+(`REC TRIGS TOGGLED` when they end up mixed). The toast stays up while you hold the track
+key, up to 1 second, as QUANTIZE_LIVE_REC_TOGGLE's does, and closes when you let go. While a
+track key is held, `[REC]` does not switch grid recording; on its own `[REC]` works as on stock. It works on any screen and holds
 across pattern changes until you unmute; every track starts unmuted at power-on. A muted
 track shows two dots beside its play/stop icon at the screen edge (`..■` / `..▶`).
 
@@ -271,8 +272,8 @@ channel it acts on the active track. The keys send CC 80 (1 muted / 0 unmuted) o
 track's channel. Both need AUDIO CC IN / OUT on, as for every audio-track CC. `[TRACK]` +
 `[YES]` / `[NO]` arm and disarm recorder one-shot trigs as on stock.
 
-**Hardware:** confirmed with the earlier `[TRACK]` + `[NO]` / `[YES]` keys; the `[TRACK]` + `[REC]`
-version not yet. MIDI CC 80 not specifically tested.\
+**Hardware:** confirmed (`[TRACK]` + `[REC]`, per-track toggle); the 1-second toast that closes
+on release not yet. MIDI CC 80 not specifically tested.\
 **Final build:** [`tools/build_rec_trig_mute.py`](tools/build_rec_trig_mute.py) →
 `OCTATRACK_OS1.40C_REC_TRIG_MUTE`
 

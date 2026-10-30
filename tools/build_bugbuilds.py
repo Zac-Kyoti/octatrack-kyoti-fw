@@ -46,7 +46,7 @@ Verification (every image, every run):
   * the feature's builder is promoted (on kyoti_status.FINAL), its rebuilt image still matches, and it is re-run
     first so the base is built from the current source (--no-rebuild skips that);
   * each cave region is all-zero in the base before it is written, and never covers a byte a
-    feature writes at runtime (RESERVED: REC_TRIG_MUTE's RTM_MASK is zero in the image);
+    feature writes at runtime (RESERVED: REC_TRIG_MUTE's RTM_MASK + RTM_TOAST are zero in the image);
   * each detour site still holds the exact stock bytes (proves no feature took it first);
   * assert_no_branch_into on every detour site (build_erase_empty_trigless_locks.py's guard, promoted here);
   * COMPOSITIONALITY: the composite's byte-delta vs stock is exactly the union of the
@@ -147,7 +147,7 @@ FEATURES = {
 WIP_FEATURES = {}
 # Bytes a feature writes AT RUNTIME that are zero in its image: no bug-fix cave may cover
 # them, though free_runs() would otherwise count them free.
-RESERVED = {"REC_TRIG_MUTE": [(0x400d7c3a, 1)]}       # RTM_MASK (build_rec_trig_mute.py)
+RESERVED = {"REC_TRIG_MUTE": [(0x400d7c3a, 2)]}       # RTM_MASK, RTM_TOAST (build_rec_trig_mute.py)
 
 
 def reserved(name, img=None):

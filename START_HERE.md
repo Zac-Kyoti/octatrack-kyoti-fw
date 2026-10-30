@@ -316,8 +316,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 - **REC_TRIG_MUTE** (`tools/build_rec_trig_mute.py`) — FINAL since 2026-10-03 with
   `[TRACK]` + `[NO]` / `[YES]` (syx `c1cd7381…`), in KYOTI and as `BUG_RTM`. **2026-10-29: the
   gesture is now `[TRACK]` + `[REC]`, a per-track toggle; `[TRACK]` + `[YES]` / `[NO]` are stock
-  again.** Built (standalone, `BUG_RTM`, KYOTI V1.6), emulator-checked, WIP until flashed and
-  promoted. MIDI CC 80 not tried on hardware yet. Not done on purpose: MIDI echo / CC 80
+  again.** The user flashed it: all good. Then the toast was made QLREC's 1.0 s and closes on
+  the track key's release (rebuilt, emulator-checked, not flashed). WIP until promoted. MIDI CC 80 not tried on hardware yet. Not done on purpose: MIDI echo / CC 80
   state at power-up. octabam module: sambanks/octabam #566 merged `fa24fb53`; the new gesture
   goes to Sam as a pin move. `reference/handoffs/REC_TRIG_MUTE_SCOPE.md` §17, `NOTES.md`
   Sessions 122–123 and 2026-10-29.
