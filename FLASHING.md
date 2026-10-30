@@ -206,6 +206,22 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **CLYPS — CLYPP walk-through.** Image `140C_CLYPP` = CLYPO + reloads from the CF card (scope §1.8).
+  Use a throwaway copy of a project and SAVE it first (the reloads read the saved `.strd`).
+  1. In Clyps, change a track's trigs, its machine settings and an FX. Hold `[PTN]` alone and press
+     its TRACK key: toast `TRK n` / `CF SEQ RELOAD`; the trigs are back as saved, the machine / FX
+     settings stay as you changed them. The transport keeps running if it was.
+  2. Change them again. Hold `[BANK]` alone + TRACK: toast `TRK n` / `CF FULL RELOAD`; trigs AND that
+     track's machine, FX, pages, scene locks come back. Other tracks of the same Part keep your
+     changes (not the whole Part). No SELECT BANK after letting go of `[BANK]`.
+  3. MIDI side: the same with `MIDI TRK n` (channel, program, CCs come back with FULL).
+  4. Hold `[PTN]`+`[BANK]` and press a TRACK key: no reload.
+  5. Change several tracks of a pattern and its Part. Hold `[PTN]`+`[BANK]` (from outside Clyps) and
+     press that pattern's trig: toast `PTN A05 CF RELOAD`; the whole pattern and its Part are as saved;
+     Clyps closes. Pressed inside Clyps: the same, Clyps stays. Try another pattern than the
+     playing one too (it reloads that one, of the playing bank).
+  6. A project never saved: stock's "THIS BANK HAS NEVER BEEN SAVED!" message, nothing changes.
+
 - **CLYPS — CLYPO walk-through.** Image `140C_CLYPO` = CLYPN (flashed, all good) with a shorter load
   confirmation: after a load the select box flashes inverted 3 times in 0.5 s (was ~0.75 s, faster).
 

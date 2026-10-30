@@ -37765,3 +37765,11 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
 - **CLYPN flashed** (mostly all good); **CLYPO** (2026-10-30, NOT flashed): the load confirmation is
   30 UI ticks (0.5 s), phase every 5 ticks: 3 inverted / normal cycles. Gates full 128, F+Q 26, M 8.
   Order agreed next: the card reloads in Clyps (scope §1.8) before DIRECT JUMP / KYOTI integration.
+- **CLYPP** (2026-10-30, NOT flashed): reloads from the CF card in Clyps
+  (scope §1.8): [PTN] alone + TRACK = the track's sequence, [BANK] alone + TRACK = sequence + the
+  track's Part slice from the card's WORKING Part chunk (never the whole Part), chord + TRACK nothing,
+  chord + trig N = pattern N of the playing bank (slab + its whole Part). `tools/clyps/clyps_reload.s`
+  is forked from RELOAD_FROM_PROJECT's card job (two new detours `0x40085864`, `0x40023c62`). RE: the
+  .strd holds 16 PTRN, 4 working PART, 4 SAVE PART chunks (`0x4008e0c0..`). Gate L: only bytes the
+  bank file never holds differ (`+0x899`). Gates L 8, full 128, F+Q 26, M 8. Next: DIRECT JUMP /
+  KYOTI integration; RELOAD_FROM_PROJECT's own update after Clyps.

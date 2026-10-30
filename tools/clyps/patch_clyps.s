@@ -543,8 +543,22 @@ cl_k_trig:
     cmpi.l  #1,%d0
     bne.b   kt_out
     clr.b   cl_flash
-    tst.l   BANK_HELD                   | [BANK] held (alone: stock's overlay has the trigs; the
-    bne.b   kt_out                      | chord: the pattern reload, not built yet)
+    tst.l   BANK_HELD                   | [BANK] held alone (from the chord that opened Clyps):
+    beq.b   kt_go                       | nothing; with [PTN] too: the pattern reload
+    tst.l   PTN_HELD
+    beq.b   kt_out
+    clr.l   -(%sp)                      | (no track)
+    move.l  8(%sp),%d0
+    andi.l  #15,%d0
+    move.l  %d0,-(%sp)                  | pattern N of the playing bank, from the card
+    pea     RQ_PTN
+    jsr     cl_rlreq
+    lea     12(%sp),%sp
+    tst.b   cl_chordout                 | the chord opened Clyps: close it (begun inside: stay)
+    beq.b   kt_out
+    clr.b   cl_chordout
+    bra.w   cl_close
+kt_go:
     move.l  4(%sp),%d0
     andi.l  #15,%d0
     move.b  %d0,cl_cur
@@ -659,6 +673,42 @@ hs_out:
 cl_k_track:
     clr.b   cl_flash
     jsr     cl_flstop
+|   a card reload (scope §1.8, the user 2026-10-30): [PTN] alone held = the sequence, [BANK] alone
+|   held = the sequence + its machine / FX (the track's Part slice); both held: nothing. The press
+|   is the reload (not forwarded: no track change, as RELOAD_FROM_PROJECT); the release goes on.
+    move.l  8(%sp),%d0
+    cmpi.l  #1,%d0
+    bne.b   ktr_fwd
+    tst.l   PTN_HELD
+    beq.b   ktr_b
+    tst.l   BANK_HELD
+    bne.b   ktr_fwd
+    moveq   #1,%d0
+    move.l  %d0,PTN_CONSUMED            | no SELECT PATTERN on [PTN]'s release (1, not stock's -1:
+    moveq   #RQ_TRKSEQ,%d1              | -1 closes Clyps as a pattern pick)
+    bra.b   ktr_req
+ktr_b:
+    tst.l   BANK_HELD
+    beq.b   ktr_fwd
+    moveq   #1,%d0
+    move.b  %d0,cl_bkused               | no SELECT BANK on [BANK]'s release
+    moveq   #RQ_TRKFULL,%d1
+ktr_req:
+    move.l  4(%sp),%d0
+    andi.l  #7,%d0
+    tst.l   MIDI_MODE
+    beq.b   ktr_t
+    addq.l  #8,%d0
+ktr_t:
+    move.l  %d0,-(%sp)                  | t
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  %d0,-(%sp)                  | the playing pattern
+    move.l  %d1,-(%sp)
+    jsr     cl_rlreq
+    lea     12(%sp),%sp
+    rts
+ktr_fwd:
     move.l  8(%sp),-(%sp)
     move.l  8(%sp),-(%sp)
     jsr     TRK_BASE
@@ -4437,6 +4487,9 @@ he_w:
     pea     1
     jmp     0x400914e4
 
+    .section .dram,"ax"
+    .include "tools/clyps/clyps_reload.s"
+
 | ================================================================ data (both parts run from RAM)
     .align 2
 cl_layer:   .long 0, cl_keys, cl_encs, 0, 0     | +16 is written -1 by the push
@@ -4635,5 +4688,7 @@ cl_bss:
     .equ NAMESNAP,    SNAMES + 16*NAME_W        | 4096 x NAME_W: the names as loaded (ORIG)
     .equ SAVEPART,    NAMESNAP + 4096*NAME_W    | 16 x PARTSZ: the Part a saved sequence was saved
                                                 | with (its slice goes with a FULL reload)
-    .equ CL_BSS_SIZE, 16*BANKSZ + 16*TRAC_A + 4096*NAME_W + 16*NAME_W + 4096*NAME_W + 16*PARTSZ
+    .equ RQ_SLAB,     SAVEPART + 16*PARTSZ      | the card reload's pattern (clyps_reload.s)
+    .equ RQ_PART,     RQ_SLAB + PATSTRIDE       | ... and its Part, both parsed from the .strd (+2: the bss is a multiple of 4)
+    .equ CL_BSS_SIZE, 16*BANKSZ + 16*TRAC_A + 4096*NAME_W + 16*NAME_W + 4096*NAME_W + 16*PARTSZ + PATSTRIDE + PARTSZ + 2
     .global CL_BSS_SIZE, cl_bss

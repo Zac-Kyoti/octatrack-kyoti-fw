@@ -842,6 +842,99 @@ def main(argv):
         check(state()["open"] == 0, "Clyps closed")
 
 
+    if "L" in a.only:
+        # --- L: reloads from the card (scope §1.8): SAVE PROJECT, edit in RAM, reload, compare
+        print("L: [PTN]+TRACK = card SEQ; [BANK]+TRACK = card FULL (track slice); chord+TRACK nothing; chord+trig = pattern")
+        def worker(fn, ms, args=()):
+            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+            rt.call_as_main(fn, args=args, budget=600000)
+            rt.run(ms=ms)
+        tap(0x10)
+        act = rd(0x800065BE, 1)
+        worker(0x40022850, 8000)          # SAVE PROJECT: the .strd = RAM now
+        dst = partbase(bank, act)
+        # bytes the bank file never holds (scope §10.1): an audio record's pad +0x899 and the slab tail
+        # +0x8e5c..: a card reload legitimately differs there from RAM
+        NOSER = {0x899 + k * TRAC_A for k in range(8)} | set(range(0x8E5C, PATSTRIDE))
+        same_rec = lambda x, y: all(x[i] == y[i] for i in range(len(x)) if i != 0x899)
+        same_slab = lambda x, y: all(x[i] == y[i] for i in range(len(x)) if i not in NOSER)
+        pre0, pre1, preslab = rec(act, 0), rec(act, 1), slab(act)
+        psl0, psl1 = pslice(0, dst), pslice(1, dst)
+        prepart = bytes(u.mem_read(dst, PARTSZ))
+        ad0 = BLOB + bank * BANKSTRIDE + act * PATSTRIDE
+        def edit_rec(t):
+            a_ = ad0 + t * TRAC_A
+            u.mem_write(a_, bytes([rd(a_, 1) ^ 0x81]))
+        def edit_slice(t):
+            a_ = dst + 0x2A + 30 * t
+            u.mem_write(a_, bytes([rd(a_, 1) ^ 0x55]))
+        def settle():
+            rt.run(ms=6000)
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        s0 = state()
+        edit_rec(0)
+        edit_slice(0)
+        hits = []
+        def hk(name):
+            ad_ = syms[name]
+            return u.hook_add(er.eb.UC_HOOK_CODE,
+                              lambda uc, ad, sz, ud: hits.append((name, uc.reg_read(er.eb.UC_M68K_REG_D0) & 0xFFFFFFFF)),
+                              begin=ad_, end=ad_)
+        hks = [hk(n) for n in ("cl_rlreq", "cl_rljob", "rj_ours", "rj_opened", "rj_parsed", "rj_fail", "rj_exit",
+                               "rj_ok", "cl_rldone", "rd_ours") if n in syms]
+        key(PTN, 1)
+        key(0x10, 1)
+        settle()
+        key(0x10, 0)
+        key(PTN, 0)
+        for h_ in hks:
+            u.hook_del(h_)
+        print(f"      path: {[(n, hex(v)) for n, v in hits]}", flush=True)
+        print(f"      toast 0x{rd(0x460D1E70, 4):08x} line1 {bytes(u.mem_read(syms['rq_line1'], 12))}", flush=True)
+        dd = lambda x, y: [hex(i) for i in range(len(x)) if x[i] != y[i]][:12]
+        print(f"      T1 record differs at {dd(rec(act, 0), pre0)}; slice differs at {dd(pslice(0, dst), psl0)}", flush=True)
+        check(same_rec(rec(act, 0), pre0) and pslice(0, dst) != psl0 and state()["open"] == 1,
+              "[PTN] + TRACK 1: T1's sequence from the card; its machine / FX stay; Clyps stays")
+        edit_rec(0)
+        edit_slice(1)
+        key(BANK, 1)
+        key(0x10, 1)
+        settle()
+        key(0x10, 0)
+        key(BANK, 0)
+        print(f"      FULL: T1 record differs at {dd(rec(act, 0), pre0)}; slice differs at {dd(pslice(0, dst), psl0)}", flush=True)
+        check(same_rec(rec(act, 0), pre0) and pslice(0, dst) == psl0, "[BANK] + TRACK 1: T1's sequence AND its Part slice from the card")
+        check(pslice(1, dst) != psl1, "... T2's slice untouched (not the whole Part)")
+        check(state()["open"] == 1 and state()["showwin"] == 0, "... Clyps stays, no SELECT BANK")
+        edit_rec(0)
+        e0 = rec(act, 0)
+        key(PTN, 1)
+        key(BANK, 1)
+        key(0x10, 1)
+        settle()
+        key(0x10, 0)
+        key(BANK, 0)
+        key(PTN, 0)
+        check(rec(act, 0) == e0, "[PTN]+[BANK] + TRACK 1: no reload")
+        edit_rec(2)
+        key(PTN, 1)
+        key(BANK, 1)
+        key(act, 1)
+        settle()
+        key(act, 0)
+        key(BANK, 0)
+        key(PTN, 0)
+        print(f"      toast 0x{rd(0x460D1E70, 4):08x} line1 {bytes(u.mem_read(syms['rq_line1'], 20))}", flush=True)
+        print(f"      slab differs at {dd(slab(act), preslab)}; Part differs at {dd(bytes(u.mem_read(dst, PARTSZ)), prepart)}", flush=True)
+        check(same_slab(slab(act), preslab) and bytes(u.mem_read(dst, PARTSZ)) == prepart,
+              f"chord + trig {act + 1}: the whole pattern and its whole Part from the card")
+        check(state()["open"] == 1, "... begun inside Clyps: Clyps stays")
+        tap(NO)
+        closed_ok("[NO]")
+
     if "Q" in a.only:
         # --- Q: [FUNC]+[MIDI] (the Parts menu) inside Clyps
         print("Q: Parts menu from Clyps")

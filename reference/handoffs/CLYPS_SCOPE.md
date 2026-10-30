@@ -770,6 +770,18 @@ look like a pattern pick to Clyps' UI tail (which closes Clyps on -1).
   the whole Part, and toasts 1 and 2), rebuilt in all its forms (standalone, KYOTI, Bugbuild,
   octabam) with an octabam PR drafted. **Order: after Clyps** (the user).
 
+**Built `140C_CLYPP` (2026-10-30, not flashed):** `tools/clyps/clyps_reload.s` (forked from
+`patch_reload3.s`, `.include`d into the DRAM part): `cl_rlreq` (UI: message first, then the job post),
+`cl_rljob` (detour on the type-0x14 case `0x40085864`, 8 B), `cl_rldone` (doneFn success `0x40023c62`,
+6 B: verify + toast, skips stock's bank reload), `cl_toast2` (2-line block toast). Kinds: 1 track SEQ,
+2 track FULL (the slice from the card's working Part: parses on past the 16 PTRN chunks to that PART
+chunk with stock's `0x4008be2c` into `RQ_PART`), 3 PTN (slab + whole Part; Part apply when it is the
+sounding Part). Gate L (OT DEMO; SAVE PROJECT, edit, reload): SEQ keeps the slice, FULL restores
+T1's slice and not T2's, the chord + TRACK reloads nothing, chord + trig restores slab + Part; the only
+differences from RAM are bytes the bank file never holds (`+0x899` per audio record, slab tail).
+Toasts: track ones are 2 lines ("TRK 8 CF FULL RELOAD" is 130 px: wider than the 128 px screen);
+the pattern one is 1 line.
+
 **The chord's grid** (built CLYPN): with both keys held, in either order, the pattern view of the
 playing bank (your pattern red, cued yellow, data green); the bank view only for [BANK] alone.
 
