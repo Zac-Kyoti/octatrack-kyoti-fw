@@ -319,8 +319,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   toast): all good. Pins: standalone mainos `72260bfd…` (syx `a553af0c…`), BUG_RTM `9691e449…`
   (syx `1c4b1604…`), KYOTI V1.6 mainos `05460b97…` (syx `a78205e7…`); the standalone and
   BUG_RTM were not flashed on their own. MIDI CC 80 not tried on hardware yet. Not done on
-  purpose: MIDI echo / CC 80 state at power-up. octabam: #566 merged `fa24fb53`; the pin move
-  is a new PR (see NOTES 2026-10-29). `reference/handoffs/REC_TRIG_MUTE_SCOPE.md` §17, `NOTES.md`
+  purpose: MIDI echo / CC 80 state at power-up. octabam: #566 merged `fa24fb53`; pin move to
+  `553d8d2` is **sambanks/octabam#977** (open, waiting on Sam; this DRAM form not flashed). `reference/handoffs/REC_TRIG_MUTE_SCOPE.md` §17, `NOTES.md`
   Sessions 122–123 and 2026-10-29.
 - **KYOTI load audit** (Session 125) — `reference/handoffs/KYOTI_LOAD_AUDIT.md`: ranked DSP/ColdFire
   costs of every feature, the hardware test plan (HW-A first, no flash), and **a KYOTI V1.0 crash on

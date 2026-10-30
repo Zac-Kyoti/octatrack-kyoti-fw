@@ -37581,3 +37581,9 @@ is not edited) and `tools/emu_sc_shared.py`.
 - **2026-10-29 (cont. 2): PROMOTED FINAL** on the user's instruction, after KYOTI V1.6 (syx `a78205e7…`) flashed
   "all good" (KYOTI was the image both rounds). Pins: `build_rec_trig_mute.py` `72260bfd…`, BUG_RTM `9691e449…`,
   KYOTI V1.6 `05460b97…`; standalone + BUG_RTM not flashed on their own. All three seal without the opt-in.
+- **2026-10-29: pushed** `df9c914..553d8d2` (main checkout fast-forwarded, the three finals copied into its `out/`,
+  hashes = pins). **octabam PR sambanks/octabam#977** opened (ready, not draft; fork branch `rec-trig-mute-rec-key`,
+  head `a09b9524`, base `7898c9c2`, pin `553d8d2`, proof HARDWARE naming KYOTI V1.6; DRAM form not flashed). Gates on
+  the rebased tree: make bus / check / docs / verify-docs / reach / mkdocs --strict all green. Scratch clone:
+  `rec-trig-mute` worktree `out/octabam-rtm` (own `vendor/`: octabam main now needs `make dsp-repatch` after #975;
+  the shared `~/Documents/octabam/vendor` is older still).
