@@ -751,6 +751,9 @@ look like a pattern pick to Clyps' UI tail (which closes Clyps on -1).
 - [BANK]+TRACK must **not** reload the whole Part (that touches unrelated tracks): it is Clyps' own
   FULL track load (sequence + that track's Part slice: machine, FX, pages, scene locks, designer),
   with the data **from the card**. [PTN]+TRACK stays sequence-only from the card.
+- **Exclusive modifiers (the user, 2026-10-30):** a card reload on TRACK n only with [PTN] alone held
+  (sequence) or [BANK] alone held (FULL) -- never with both: with the [PTN]+[BANK] chord held, a
+  TRACK key reloads nothing (it changes the track, as today). Gate it on the live held flags of both.
 - Toasts: sequence only **`TRK X CF SEQ RELOAD`**; sequence + machine/FX **`TRK X CF FULL RELOAD`**;
   the pattern reload **`PTN A05 CF RELOAD`**. (MIDI tracks: proposed `MIDI TRK X CF ...`, as the temp
   save toasts do; to confirm.)
