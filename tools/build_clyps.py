@@ -24,6 +24,7 @@ Detours (each asserts its stock bytes):
   0x4007b3e0  [BANK] release handler moveq #2,d0 ; cmp.l 0x460e73c6,d0 (8 B) -> cl_bankr
   0x400a1f72  sequencer tick, phase D  move.b 0x80006687,d0               -> cl_land (cued landings)
   0x40062d1c  UI task loop tail        tst.l 0x46c7c72c                   -> cl_uitail (follow-up)
+  0x40056c28  UI tick, 1/60 s           move.l 0x460d1e6c,d0               -> cl_uitick (load flash)
   0x400a43a0  wrap body entry (phase G) move.l (a2),d0 ; moveq #1,d2 ; or.l d2,d0 -> cl_wrap
   0x400905d4  masked bank loader entry lea -328(sp),sp ; movem.l ... (8 B)   -> cl_projload
               (its return snapshots the banks it read: the originals; 8+ banks = a project load:
@@ -83,6 +84,7 @@ DETOURS = [  # (site, symbol, stock bytes, length[, opcode: jmp unless given])
     (0x4007b3e0, "cl_bankr", "7002b0b9460e73c6", 8),
     (0x400a1f72, "cl_land", "103980006687", 6),   # seq tick phase D: move.b 0x80006687,d0
     (0x40062d1c, "cl_uitail", "4ab946c7c72c", 6),  # UI task loop tail: tst.l 0x46c7c72c
+    (0x40056c28, "cl_uitick", "2039460d1e6c", 6),  # UI tick (1/60 s): move.l 0x460d1e6c,d0 (ROM stub)
     (0x400a43a0, "cl_wrap", "201274018082", 6),    # wrap body entry: move.l (a2),d0; moveq #1,d2; or.l d2,d0
     (0x400905d4, "cl_projload", "4feffeb848d77cfc", 8),  # masked bank loader entry (every LOAD PROJECT)
     (0x4005e4c8, "cl_yes", "222f0004202f0008", 8),        # stock [YES]: + TRACK = temp save; arm on a tap

@@ -206,6 +206,32 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **CLYPS — CLYPM walk-through.** Image `140C_CLYPM` = CLYPL (its 4 steps below) + the audio temp
+  reload now brings the whole sound back.
+  1. On an audio track, hold `[YES]`+TRACK (temp save). Change its machine settings, FX and a scene
+     lock, and edit a trig. Hold `[NO]`+TRACK: the sequence AND the machine, FX, page values, scene
+     locks and LFO designer are back as saved (stopped: at once; playing: at its next step).
+  2. The Part shows as edited afterwards (as after any load with machine / FX).
+  3. Load an unnamed sequence from another bank: your pattern's slot reads e.g. `B14 06 TR` (bank,
+     2-digit pattern, 2-digit trig count); `B04 LOCKS` / `B04 ---` for the other kinds.
+  4. Empty slots: `---` sits in the middle of the label (places 4-6).
+  5. Unnamed slots with trigs read like that: `A01 15 TR` (bank, pattern, trig count; no dashes).
+  6. Load confirmation: after a trig or `[YES]` load, the select box flashes as an inverted bar
+     (text inverted) for about 0.75 s. An arrow, `[BANK]`+arrows, or a TRACK key during it stops
+     it at once; another trig restarts it on the new slot. `[YES]` / `[PAGE]` with the box on
+     ORIG flashes the ORIG header box the same way.
+  7. Mutes in Clyps: `[FUNC]`+TRACK mutes / unmutes that track as in stock; Clyps stays open and the
+     active track does not change.
+  8. Parts menu in Clyps: `[FUNC]`+`[MIDI]` opens the Parts menu over Clyps; leave it (`[NO]`): Clyps
+     is still there, as it was. Other stock menus / windows opened from Clyps now also open over it
+     instead of closing it -- tell me if any of them misbehaves that way.
+- **CLYPS — CLYPL walk-through.** Image `140C_CLYPL` (CLYPK, all points passed + new wording).
+  1. Audio: `LOAD: TRK SEQ`; hold `[FUNC]`: `LOAD: TRK SEQ/MCH/FX` (the left side then reads only
+     `T6`, there is no room for `BANK X` beside it).
+  2. Box on ORIG: `LOAD: ORIG TRK SEQ`; with `[FUNC]`: `LOAD: ORIG TRK SEQ/MCH/FX` (left: `T6`).
+  3. MIDI side: `LOAD: MIDI TRK`, the box on `MIDI TRK`; on ORIG: `LOAD: ORIG`.
+  4. Chord held: `LOAD: ORIG PTN/PART` (unchanged).
+
 - **CLYPS — CLYPK walk-through.** Image `140C_CLYPK` (CLYPJ + your changes after flashing it).
   1. Boxes: the highlight bar and the select box have square corners again.
   2. Header: `LOAD: ` then `SEQ` / `SEQ/MCH/FX` (`[FUNC]`) in a dark box (square corners). On ORIG:

@@ -5,7 +5,7 @@
 **Where it stands.**
 - **Worktree / branch:** `../octatrack-kyoti-fw-trkseq`, branch `trkseq`. Commits are local, not
   pushed. Clyps is WIP, nothing is promoted, and there is no README entry.
-- **Latest image:** `140C_CLYPK` (see "2026-10-29" below); before it `140C_CLYPH` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
+- **Latest image:** `140C_CLYPM` (see "2026-10-29" below); before it `140C_CLYPH` (`tools/build_clyps.py`), a standalone image: stock + Clyps only.
   **BUILT 2026-10-28, NOT flashed** (the user flashes it next round): CLYPG (step 0 below: stock
   [PTN] / [BANK] inside Clyps, the BANK box, [MIDI] follows, no MIDI load modes) + step 1, FULL
   loads (§1.7 "Built"). Walk-through: FLASHING §4 "CLYPH walk-through" (it includes CLYPG's).
@@ -51,7 +51,21 @@ on BANK while [BANK] alone is held and on every right-hand label after `LOAD: `)
 ` + ` → `/` (`SEQ/MCH/FX`, `ORIG SEQ/MCH/FX`, `ORIG PTN/PART`); the select box LED and the "changed"
 page LEDs use stock's p-locked-trig flash (`0x40013784(green die, 3)` each period 30, as stock's
 trig tick `0x400340e4` does for a locked trig: red with a short yellow flash); unnamed slots read
-`-NN TRGS-` (`-%02d TRGS-`, 34 px). Earlier CLYPI/J
+`-NN TRGS-` (`-%02d TRGS-`, 34 px). CLYPK FLASHED (all points passed); `140C_CLYPL` (built, not
+flashed): labels `TRK SEQ`, `TRK SEQ/MCH/FX` (left side `T6` only beside it: 54 px), `ORIG TRK SEQ`,
+`ORIG TRK SEQ/MCH/FX` (73 px), MIDI `MIDI TRK` (boxed; MIDI ORIG stays `ORIG`). `140C_CLYPM`: the audio
+temp reload ([NO]+TRACK) is FULL too (the user: a temp save keeps the sound; `SAVEPART` already
+held the Part); source labels `%c%02d %02d TR` (`B14 06 TR`), `B04 LOCKS`, `B04 ---`; an empty
+slot's `---` centred (places 4-6, `EMP_DX` 12); unnamed slots `A01 15 TR` (`%c%02d %02d TR`, the slot's own
+bank / pattern); the load confirmation: the select box (or the ORIG header box) flashes inverted
+for 45 UI ticks (0.75 s), phase every 4 ticks, from a new detour on stock's 1/60 s UI tick
+`0x40056c28` (the toast countdown, task `0x40056c40`; ROM stub `cl_uitick` guarded by `cl_magic`);
+arrows / paging / TRACK / close stop it. Route A runs no UI tick: gate B calls `0x40056c28`
+directly. [FUNC]+TRACK = stock's mute in Clyps (the TRACK keys left out of `cl_fsub`; they had
+shadowed stock's FUNC sub-map `0x40083dfc`); [FUNC]+[MIDI] = stock's Parts menu over Clyps: `0x35`
+left out of `cl_fsub` too, and the Clyps window at **priority 0** (was 3): `WIN_NEW(prio p)`
+`0x4005829c` evicts every window with prio >= p, and the Parts menu opens at 1 (`0x4002e730`), so
+at 3 it closed Clyps. Every stock window now opens over Clyps (gate Q). Earlier CLYPI/J
 notes below.**
 - **Rounded boxes:** the highlight bar and the select box lose one pixel at each corner.
 - **Header outlines** (1 px, dark on the lit band, rounded): round `BANK A` while [BANK] alone is held
@@ -156,7 +170,7 @@ the full run passes without them): an emulator accumulation effect, like the car
   `-(sp)` / `(sp)+`, and d16 offsets beyond 32767 (use a trailer register: slab + `0x8e50`).
   Watch for `.b` branches out of range, and **duplicate `.equ`s: the last one wins silently**
   (cost one hardware round).
-- **The UI is drawn into our own window** (`0x4005829c(w,h,dx,dy,prio,cb)`, prio 3, close_cb =
+- **The UI is drawn into our own window** (`0x4005829c(w,h,dx,dy,prio,cb)`, prio 0 since CLYPM (stock windows open over it; was 3), close_cb =
   the one idempotent teardown). Never draw from tick context. Follow-ups go through the UI-tail
   hook.
 - **Font:** `0x400ba876` (3×5 glyphs, 4 px advance). Measure widths from its table at

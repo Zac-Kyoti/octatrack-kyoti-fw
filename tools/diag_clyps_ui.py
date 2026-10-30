@@ -240,6 +240,23 @@ def main(argv):
         check(rec(act) == src, "trig 4 loaded pattern 4's sequence")
         check(led(3) == (1, 0), "slot 4 (the box) is red (cl_blink flashes it on hardware)")
         check(led(act) == (1, 0), "your pattern is still red")
+        flk = lambda: (rd(syms["cl_flk"], 1), rd(syms["cl_fph"], 1))
+        f0 = flk()
+        check(f0[0] > 0, f"the load confirmation runs after the load (ticks left, phase) = {f0}")
+        # route A runs no UI tick (task 0x40056c40's 1/60 s message): call the tick's patched site
+        # (0x40056c28 -> cl_uitick -> stock's toast countdown) as one tick does
+        seen = set()
+        for _ in range(50):
+            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+            rt.call_as_main(0x40056C28, budget=600000)
+            seen.add(rd(syms["cl_fph"], 1))
+        check(flk() == (0, 0) and seen == {0, 1}, f"... flashes (phases seen {sorted(seen)}) and ends by "
+              f"itself within 45 ticks = 0.75 s (now {flk()})")
+        key(3, 1)
+        key(3, 0)
+        tap(DOWN)
+        check(flk() == (0, 0), "an arrow during the confirmation stops it at once")
+        tap(UP)
         shot("B1_loaded")
         tap(NO)
         closed_ok("[NO]")
@@ -291,6 +308,25 @@ def main(argv):
         check(rd(0x80000000, 1) == 2, "TRACK 3 selects track 3")
         check(rd(0x460FAB40, 4) == 0, "no track key left marked held (0x460fab40)")
         check(state()["open"] == 1 and rec(act, 2) == before, "Clyps stays, nothing loaded")
+        # [FUNC]+TRACK: stock's FUNC sub-map mute 0x40083dfc (it toggles through 0x4007d6a4 /
+        # 0x4007d7b0); our FUNC sub-map no longer shadows it. (0x40033970 is NOT a readable mute
+        # state -- it did not change with a real mute: measured.)
+        def mute_press():
+            hits = []
+            hs = [u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: hits.append(ad), begin=x, end=x)
+                  for x in (0x40083DFC, 0x4007D6A4, 0x4007D7B0)]
+            key(FUNC, 1)
+            tap(0x11)
+            key(FUNC, 0)
+            for h_ in hs:
+                u.hook_del(h_)
+            return hits
+        h1 = mute_press()
+        check(0x40083DFC in h1 and (0x4007D6A4 in h1 or 0x4007D7B0 in h1) and state()["open"] == 1
+              and rd(0x80000000, 1) == 2,
+              f"[FUNC]+TRACK 2 in Clyps: stock's mute handler runs ({[hex(x) for x in h1]}); Clyps stays, track kept")
+        h2 = mute_press()
+        check(0x40083DFC in h2, f"... and again ({[hex(x) for x in h2]})")
         tap(NO)
         closed_ok("[NO]")
         tap(0x10)
@@ -490,10 +526,16 @@ def main(argv):
         ad = BLOB + bank * BANKSTRIDE + act * PATSTRIDE + TRAC_A
         u.mem_write(ad, bytes([rd(ad, 1) ^ 0x80]))
         check(rec(act, 1) != pre2, "T2 edited")
+        tpart = partbase(bank, act)
+        psl2 = pslice(1, tpart)
+        mp = tpart + 0x2A + 30 * 1             # T2's machine page 1, first value
+        u.mem_write(mp, bytes([rd(mp, 1) ^ 0x55]))
+        check(pslice(1, tpart) != psl2, "T2's machine page edited too")
         key(NO, 1)
         tap(0x11)
         key(NO, 0)
         check(rec(act, 1) == pre2, "[NO]+TRACK 2: T2's temp save is back (stopped: at once)")
+        check(pslice(1, tpart) == psl2, "... with its machine / FX / pages as saved (FULL)")
         check(arm() == m0, "... and nothing disarmed")
         pre3 = rec(act, 2)
         key(NO, 1)
@@ -782,6 +824,31 @@ def main(argv):
         check(rec(act, 0) == oslot(act, 0), "T1 equals its original after the load")
         check(state()["open"] == 0, "Clyps closed")
 
+
+    if "Q" in a.only:
+        # --- Q: [FUNC]+[MIDI] (the Parts menu) inside Clyps
+        print("Q: Parts menu from Clyps")
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        s0 = state()
+        key(FUNC, 1)
+        tap(0x35)
+        key(FUNC, 0)
+        s1 = state()
+        print(f"      after [FUNC]+[MIDI]: open {s1['open']} win 0x{s1['win']:08x} layers {[hex(x) for x in s1['layers']]} "
+              f"popup 0x{rd(0x460E5CD0, 4):08x}", flush=True)
+        check(s1["layers"] != s0["layers"], "[FUNC]+[MIDI] in Clyps: stock's Parts menu takes the keys (a layer went up)")
+        shot("Q1_parts")
+        tap(NO)
+        s2 = state()
+        print(f"      after [NO]: open {s2['open']} layers {[hex(x) for x in s2['layers']]}", flush=True)
+        check(s2["open"] == s1["open"], f"[NO] leaves the Parts menu (Clyps open: {s2['open']})")
+        if s2["open"]:
+            check(s2["layers"] == s0["layers"], "... back in Clyps, its layers on top again")
+            tap(NO)
+        closed_ok("closed")
 
     if "F" in a.only:
         # --- F: FULL loads ([FUNC] + trig; [FUNC]+[YES] on ORIG = ORIG SEQ+MCH/FX), stopped transport

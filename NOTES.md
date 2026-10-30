@@ -37748,3 +37748,11 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   inverted boxes on BANK / every right-hand label after `LOAD: `); ` + ` → `/`; the select box and
   "changed" page LEDs use stock's p-locked-trig flash (`0x40013784(green die, 3)` per 30-tick
   period, stock trig tick `0x400340e4`); unnamed slots `-NN TRGS-`. Gates F 22, M 8, A..K 113.
+- **CLYPK flashed (all points passed); CLYPL / CLYPM** (2026-10-29, CLYPM NOT
+  flashed, supersedes unflashed CLYPL): labels `TRK SEQ` / `TRK SEQ/MCH/FX` / `ORIG TRK SEQ` /
+  `ORIG TRK SEQ/MCH/FX` / MIDI `MIDI TRK`; audio temp reload FULL; slot labels `A01 15 TR` and
+  source `B14 06 TR` / `B04 LOCKS` / `B04 ---`, empty `---` centred; load confirmation flash (0.75 s,
+  new detour on stock's 1/60 s UI tick `0x40056c28`, ROM stub `cl_uitick`); [FUNC]+TRACK = stock mute
+  in Clyps (TRACK keys out of `cl_fsub`); [FUNC]+[MIDI] Parts menu over Clyps (window prio 0:
+  `WIN_NEW` evicts prio >= p). Gates: full 119, F+Q 26, M 8. Harness: route A runs no UI tick (gate
+  B calls `0x40056c28`); `0x40033970` is not a readable mute state.

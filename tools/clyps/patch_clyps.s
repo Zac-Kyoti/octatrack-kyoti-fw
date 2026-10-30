@@ -125,7 +125,14 @@
     .equ LAND_RESUME, 0x400a1f78        | after `move.b 0x80006687,%d0` (stock's ble.w follows)
     .equ UIT_RESUME,  0x40062d22        | after `tst.l 0x46c7c72c` (stock's beq.w follows)
     .equ WRAP_RESUME, 0x400a43a6        | after `move.l (a2),d0 ; moveq #1,d2 ; or.l d2,d0`
-    .equ PRIO,        3                 | menus' rank: toasts / the name editor open over it
+    .equ PRIO,        0                 | WIN_NEW(prio p) evicts every window with prio >= p (0x4005829c):
+                                        | at 0, stock's menus (the Parts menu: 1), SELECT windows (10),
+                                        | toasts and the name editor (5) all open over Clyps and leave
+                                        | it there (the user, 2026-10-29: Parts over Clyps). Was 3.
+    .equ FL_TICKS,    45                | the load confirmation: 45 UI ticks of 1/60 s = 0.75 s (the user)
+    .equ FL_RATE,     3                 | ... its phase toggles every 4 ticks (mask 3): ~7.5 Hz
+    .equ TOAST_T,     0x460d1e6c        | stock's toast countdown, read by the UI tick 0x40056c28
+    .equ UITICK_RES,  0x40056c2e        | after `move.l 0x460d1e6c,%d0` (stock's beq follows)
     .equ CL_BLINK,    30                | the flash period: stock's trig LED tick (0x400340e4, period 30)
     .equ LED_FLASH,   0x40013784        | (die, n): invert the die for n LED ticks -- stock's p-lock
                                         | flash: its trig tick gives a locked trig's green die 3 ticks
@@ -200,15 +207,17 @@
 | the label (16, up to 35 px: a 9-character name), 1 px, the edge (52); 2 px, column 2's x (55..57),
 | 2 px, its edge (60), 1 px, its numbers (62..68), 3 px, its label (72), 1 px, its edge (108), 2 px,
 | the frame (111). Per column (cl_colx): the 2-digit number field's x, the bar / box edges, the x's x.
+    .equ EMP_DX,      12                | "---" (11 px) centred in the 35 px label: places 4..6
     .equ SUM_GAP,     2                 | the number field (2 x DIGIT_W) + 2 = the label at col + 10
     .equ BOX_R,       109               | a dark header box's right column (text ends at 107)
     .equ ORIG_W,      15                | "ORIG", "SAVED": widths from the font's table 0x400c246a
     .equ SAVED_W,     19
-    .equ ORIGS_W,     30                | "ORIG SEQ"
-    .equ ORIGF_W,     58                | "ORIG SEQ/MCH/FX"
+    .equ ORIGS_W,     45                | "ORIG TRK SEQ"
+    .equ ORIGF_W,     73                | "ORIG TRK SEQ/MCH/FX"
     .equ ORIGP_W,     50                | "ORIG PTN/PART"
-    .equ SEQ_W,       11                | "SEQ"
-    .equ SEQF_W,      39                | "SEQ/MCH/FX"
+    .equ SEQ_W,       26                | "TRK SEQ"
+    .equ SEQF_W,      54                | "TRK SEQ/MCH/FX" (beside it the left side reads "T6" only)
+    .equ MTRK_W,      30                | "MIDI TRK"
     .equ LOADP_A,     21                | "LOAD: " advance (20 px + 1)
     .equ BKBOX_L,     12                | [BANK] held alone: "BANK A" (x 14..35: "T6 " is 11 px for T
     .equ BKBOX_R,     37                | and M alike) in a dark box, 2 dark columns each side
@@ -386,6 +395,7 @@ ce_noundo:
     moveq   #1,%d0
     move.b  %d0,cl_open
     clr.b   cl_flash
+    jsr     cl_flstop
     pea     cl_layer
     jsr     LAYER_PUSH
     pea     cl_led
@@ -401,6 +411,7 @@ cl_close:
     tst.b   cl_open
     beq.b   cc_out
     clr.b   cl_open
+    jsr     cl_flstop
     tst.l   cl_win
     beq.b   cc_nowin
     pea     cl_win
@@ -431,6 +442,9 @@ cc_out:
 cl_page:
     moveq   #1,%d1
     move.b  %d1,cl_bkused
+    move.l  %d0,-(%sp)
+    jsr     cl_flstop
+    move.l  (%sp)+,%d0
     moveq   #0,%d1
     move.b  cl_bank,%d1
     add.l   %d0,%d1
@@ -475,6 +489,7 @@ ku_down:
     moveq   #0,%d0
 ku_set:
     move.b  %d0,cl_cur
+    jsr     cl_flstop
     move.b  cl_bank,%d0
     move.b  %d0,cl_sbank
     jsr     cl_draw
@@ -506,6 +521,7 @@ kl_sel:
     bcc.b   kl_out
     eori.l  #8,%d0
     move.b  %d0,cl_cur
+    jsr     cl_flstop
     move.b  cl_bank,%d0
     move.b  %d0,cl_sbank
     jsr     cl_draw
@@ -532,6 +548,7 @@ cl_k_trig:
     move.l  %d0,-(%sp)
     jsr     cl_load
     addq.l  #4,%sp
+    jsr     cl_flstart                  | the load confirmation
     bra.w   cl_refresh
 kt_out:
     rts
@@ -561,6 +578,7 @@ ky_noptn:
     move.l  %d0,-(%sp)
     jsr     cl_load
     addq.l  #4,%sp
+    jsr     cl_flstart
     bra.w   cl_refresh
 ky_orig:
     moveq   #0,%d0
@@ -569,6 +587,7 @@ ky_orig:
     move.l  #0x10000,%d0                | ORIG SEQ/MCH/FX
 ky_os:
     jsr     cl_restore
+    jsr     cl_flstart                  | the ORIG box flashes
     bra.w   cl_refresh
 ky_out:
     rts
@@ -602,6 +621,11 @@ cl_k_page:
     move.l  #0x10000,%d0
 kp_one:
     jsr     cl_restore
+    moveq   #0,%d0
+    move.b  cl_cur,%d0
+    cmpi.l  #NSLOT,%d0
+    bne.w   cl_refresh                  | the box elsewhere: nothing to flash
+    jsr     cl_flstart
     bra.w   cl_refresh
 kp_pat:
     jsr     cl_restorepat
@@ -628,6 +652,7 @@ hs_out:
 | track and clears the held mark). After the release the view and the grid follow.
 cl_k_track:
     clr.b   cl_flash
+    jsr     cl_flstop
     move.l  8(%sp),-(%sp)
     move.l  8(%sp),-(%sp)
     jsr     TRK_BASE
@@ -783,6 +808,44 @@ kf_set:
     move.b  %d0,cl_fn
     bra.w   cl_draw
 kf_out:
+    rts
+
+| ================================================================ the load confirmation
+| (the user, 2026-10-29) after a load, the select box flashes as an inverted bar (text inverted too)
+| for 0.75 s (cl_draw: cl_fph); the ORIG header box likewise. An arrow, bank paging, a TRACK key or
+| closing stops it at once; a new pick restarts it on the new slot.
+cl_flstart:
+    moveq   #FL_TICKS,%d0
+    move.b  %d0,cl_flk
+    moveq   #1,%d0
+    move.b  %d0,cl_fph
+    rts
+cl_flstop:
+    clr.b   cl_flk
+    clr.b   cl_fph
+    rts
+| cl_flashtick: one UI tick (cl_uitick, UI task, every 1/60 s while cl_flk != 0)
+cl_flashtick:
+    tst.b   cl_open
+    bne.b   ft_go
+    bra.b   cl_flstop
+ft_go:
+    moveq   #0,%d0
+    move.b  cl_flk,%d0
+    subq.l  #1,%d0
+    move.b  %d0,cl_flk
+    beq.b   ft_end
+    andi.l  #FL_RATE,%d0
+    bne.b   ft_out
+    moveq   #0,%d0
+    move.b  cl_fph,%d0
+    eori.l  #1,%d0
+    move.b  %d0,cl_fph
+    jmp     cl_draw
+ft_end:
+    clr.b   cl_fph
+    jmp     cl_draw
+ft_out:
     rts
 
 | ================================================================ helpers
@@ -1344,7 +1407,8 @@ ts_no:
     tst.b   (%a0,%d2.l)
     beq.b   ts_toast1
     pea     1                           | armed at once: its next step, in step
-    pea     SRC_SAVED<<8
+    pea     0x10000+(SRC_SAVED<<8)      | FULL: the sound as saved -- sequence, machine, FX, pages,
+                                        | scene locks, designer (the user, 2026-10-29)
     move.l  %d2,-(%sp)
     jsr     cl_cueload
     lea     12(%sp),%sp
@@ -2839,6 +2903,22 @@ bl_led:                                 | d2 = a green die: on for 3 ticks
     addq.l  #8,%sp
     rts
 
+| the UI task's 1/60 s tick (0x40056c28, the toast countdown, called once per tick message from
+| task 0x40056c40; replaces `move.l 0x460d1e6c,%d0`, 6 B: stock's beq follows on its flags) drives
+| the load confirmation flash (cl_flashtick). ROM: the tick runs from boot, before the DRAM part is
+| in place; cl_magic says when it is (as cl_rstall).
+    .global cl_uitick
+cl_uitick:
+    move.l  cl_magic,%d0
+    cmpi.l  #CL_MAGIC,%d0
+    bne.b   uk_out
+    tst.b   cl_flk
+    beq.b   uk_out
+    jsr     cl_flashtick
+uk_out:
+    move.l  TOAST_T,%d0                 | displaced; stock's beq follows on these flags
+    jmp     UITICK_RES
+
 cl_rstall:
     move.l  4(%sp),-(%sp)
     jsr     RESET_BANKS
@@ -2986,10 +3066,10 @@ cl_draw:
     bsr.w   cl_xor
     lea     16(%sp),%sp
 |   header (the user, 2026-10-29): left "T6 BANK A" ("T6" alone beside the two long ORIG labels);
-|   right "LOAD: " + a label in a dark box (inverted, as the band's text is): SEQ / SEQ/MCH/FX
-|   ([FUNC]) on audio, none on MIDI; the box on ORIG: ORIG SEQ / ORIG SEQ/MCH/FX ([FUNC]), MIDI:
-|   ORIG; the [PTN]+[BANK] chord held: ORIG PTN/PART. "BANK A" gets a dark box while [BANK] alone
-|   is held (the arrows page the bank).
+|   right "LOAD: " + a label in a dark box (inverted, as the band's text is): TRK SEQ /
+|   TRK SEQ/MCH/FX ([FUNC]) on audio, MIDI TRK on MIDI; the box on ORIG: ORIG TRK SEQ /
+|   ORIG TRK SEQ/MCH/FX ([FUNC]), MIDI: ORIG; the [PTN]+[BANK] chord held: ORIG PTN/PART (the user,
+|   2026-10-29). "BANK A" gets a dark box while [BANK] alone is held (the arrows page the bank).
     jsr     cl_hstate
     move.b  %d0,cl_hdrst
     move.l  %d0,%d7                     | d7 = header state (free until the cells)
@@ -3020,7 +3100,8 @@ cd_r1:
     moveq   #1,%d4
     bra.b   cd_rl
 cd_r2:
-    moveq   #0,%d5                      | d5 = the label's width, 0 = none (MIDI)
+    lea     cl_s_mtrk,%a2               | MIDI: "MIDI TRK" (the user, 2026-10-29)
+    moveq   #MTRK_W,%d5                 | d5 = the label's width
     cmpi.l  #8,%d6
     bcc.b   cd_rl
     lea     cl_s_seqb,%a2
@@ -3029,6 +3110,7 @@ cd_r2:
     beq.b   cd_rl
     lea     cl_s_seqf,%a2
     moveq   #SEQF_W,%d5
+    moveq   #1,%d4                      | too long beside "BANK A"
 cd_rl:
 |   left
     move.l  %d6,%d0
@@ -3091,6 +3173,13 @@ cd_band:
     lea     16(%sp),%sp
     tst.l   %d5
     beq.b   cd_nob
+    tst.b   cl_fph                      | the ORIG box flashing after a restore: its box off in
+    beq.b   cd_hb                       | alternate phases
+    moveq   #0,%d0
+    move.b  cl_cur,%d0
+    cmpi.l  #NSLOT,%d0
+    beq.b   cd_nob
+cd_hb:
     pea     WIN_H-2                     | the label: a dark box, lit letters, one lit row below
     pea     BOX_R                       | (the band's) and one above (the border)
     pea     HDR_Y-1
@@ -3183,9 +3272,9 @@ cd_edp:
     subq.l  #1,%d5
     bne.b   cd_edp
 cd_noed:
-|   a named sequence shows its name; else the summary: "-nn TRGS-" / "LOCKS" / "---"; on the
+|   a named sequence shows its name; else the summary: "A01 15 TR" / "LOCKS" / "---"; on the
 |   highlighted slot (the pattern you are on), while the track plays a sequence Clyps put there
-|   unedited: its source, "A14 6 TRG" / "SAVED SEQ"
+|   unedited: its source, "B14 06 TR" / "SAVED SEQ"
     tst.b   cl_namesok
     beq.b   cd_noname
     moveq   #0,%d0
@@ -3226,11 +3315,18 @@ cd_plain:
     bsr.w   cl_popc
     move.l  (%sp)+,%d0
     bsr.w   cl_popc
-    move.l  %d1,-(%sp)
+    move.l  %d1,-(%sp)                  | trigs
+    move.l  %d2,%d0
+    addq.l  #1,%d0
+    move.l  %d0,-(%sp)                  | the slot's pattern 1..16
+    moveq   #0,%d0
+    move.b  cl_bank,%d0
+    addi.l  #'A',%d0
+    move.l  %d0,-(%sp)                  | its bank
     pea     cl_fmt_trg
     pea     cl_buf
     jsr     SPRINTF
-    lea     12(%sp),%sp
+    lea     20(%sp),%sp
     lea     cl_buf,%a0
     bra.b   cd_sum
 cd_half:
@@ -3243,6 +3339,11 @@ cd_sum:
     move.l  %d4,-(%sp)
     move.l  %d3,%d0
     addi.l  #2*DIGIT_W+SUM_GAP,%d0
+    lea     cl_s_emp,%a1
+    cmpa.l  %a1,%a0
+    bne.b   cd_sx
+    addi.l  #EMP_DX,%d0                 | an empty slot: "---" centred in the 9 places (4..6)
+cd_sx:
     move.l  %d0,-(%sp)
     bsr.w   cl_text
     lea     12(%sp),%sp
@@ -3292,6 +3393,17 @@ cd_sbx:
     move.w  2(%a3),%d5
     moveq   #0,%d6
     move.w  4(%a3),%d6
+    tst.b   cl_fph
+    beq.b   cd_sout
+    bsr.w   cl_bary                     | the load confirmation: the cell inverted, as the highlight
+    move.l  %d1,-(%sp)
+    move.l  %d6,-(%sp)
+    move.l  %d0,-(%sp)
+    move.l  %d5,-(%sp)
+    bsr.w   cl_xor
+    lea     16(%sp),%sp
+    bra.w   cd_boxed
+cd_sout:
     move.l  %d4,%d0                     | top (y + 5) -- not on the top row, where the band stands
     addq.l  #5,%d0                      | for it -- and bottom (y - 1), not on the bottom row (frame)
     cmpi.l  #BODY_TOP,%d0
@@ -4249,10 +4361,10 @@ cl_fkeys:
     KREC 0x21, cl_k_lr, 0, 0, 15, 5
     KREC 0x2e, cl_k_chord, cl_k_chord, 0, 0, 0
     KREC 0x2f, cl_k_chord, cl_k_chord, 0, 0, 0
-    .irp c, 0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17
-    KREC \c, cl_k_track, cl_k_track, cl_k_track, 0, 0
-    .endr
-    KREC 0x35, 0, 0, 0, 0, 0             | [FUNC]+[MIDI] (PARTS): nothing in Clyps mode (scope §1.7)
+|   no TRACK keys here: [FUNC]+TRACK is stock's mute (0x40083dfc, its FUNC sub-map), in Clyps too
+|   (the user, 2026-10-29). Same delays (0), so a TRACK held across [FUNC] leaves no stale timer.
+|   no [MIDI] (0x35) either: [FUNC]+[MIDI] = stock's Parts menu (0x4002e7c8), opening over Clyps
+|   (the user, 2026-10-29; PRIO 0).
     .byte 0xff, 0
     .align 2
 
@@ -4282,6 +4394,8 @@ cl_cur:     .byte 0
 cl_fn:      .byte 0                     | [FUNC] held (our own press/release record)
 cl_flash:   .byte 0                     | the header shows SAVED (a save) until the next key
 cl_lastt:   .byte 0                     | the track (0..15, MIDI 8..15) at the last cl_refresh
+cl_flk:     .byte 0                     | the load confirmation: UI ticks left (0 = none)
+cl_fph:     .byte 0                     | ... its phase: 1 = inverted
 cl_hdrst:   .byte 0                     | the header was drawn for this cl_hstate
 cl_bkdef:   .byte 0                     | a [BANK] press outside Clyps was deferred (SELECT BANK on release)
 cl_chordout:.byte 0                     | Clyps was opened by the chord, still held: chord + SCALE closes
@@ -4348,20 +4462,21 @@ cl_colx:    .short 6, 8, 52, 3          | column 1: number field, bar / box 8..5
 cl_fmt_hdr: .asciz "%c%d BANK %c"
 cl_fmt_hdrs:.asciz "%c%d"
 cl_s_load:  .asciz "LOAD:"
-cl_s_seqb:  .asciz "SEQ"
-cl_s_seqf:  .asciz "SEQ/MCH/FX"
+cl_s_seqb:  .asciz "TRK SEQ"
+cl_s_seqf:  .asciz "TRK SEQ/MCH/FX"
+cl_s_mtrk:  .asciz "MIDI TRK"
 cl_fmt_num: .asciz "%d"
-cl_fmt_trg: .asciz "-%02d TRGS-"         | 34 px for 00..99 (the user, 2026-10-29)
+cl_fmt_trg: .asciz "%c%02d %02d TR"       | 33 px: "A01 15 TR", as a source label (the user)
 cl_s_lck:   .asciz "LOCKS"
 cl_s_emp:   .asciz "---"
 cl_s_orig:  .asciz "ORIG"
-cl_s_origs: .asciz "ORIG SEQ"
-cl_s_origf: .asciz "ORIG SEQ/MCH/FX"
+cl_s_origs: .asciz "ORIG TRK SEQ"
+cl_s_origf: .asciz "ORIG TRK SEQ/MCH/FX"
 cl_s_origp: .asciz "ORIG PTN/PART"
 cl_s_saved: .asciz "SAVED SEQ"           | 34 px: the slot label after a temp reload (the user)
-cl_fmt_srct:.asciz "%c%d %dTRG"          | <= 34 px: "A14 64TRG"
-cl_fmt_srcl:.asciz "%c%d LOCKS"
-cl_fmt_srce:.asciz "%c%d ---"
+cl_fmt_srct:.asciz "%c%02d %02d TR"       | 33 px: "B14 06 TR" (the user, 2026-10-29)
+cl_fmt_srcl:.asciz "%c%02d LOCKS"         | 34 px
+cl_fmt_srce:.asciz "%c%02d ---"
 cl_s_rename:.asciz "RENAME SEQUENCE"
 cl_fmt_cpath:.asciz "%s/clyps%02d.%s"
 cl_fmt_cname:.asciz "clyps%02d.%s"
