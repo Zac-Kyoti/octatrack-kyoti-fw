@@ -801,6 +801,27 @@ the pattern one is 1 line.
 **The chord's grid** (built CLYPN): with both keys held, in either order, the pattern view of the
 playing bank (your pattern red, cued yellow, data green); the bank view only for [BANK] alone.
 
+### 1.9 Multi-track loads (the user, 2026-10-30; scoped, not built)
+
+- **[CUE] in Clyps** does not do stock's cue. Hold [CUE]: the header's left reads **`MULTI BNK A`**
+  (the user's choice: the bank stays); the stock sidebar's active-track tab disappears from the active
+  track; the track LEDs show plain mute / cue states (solid green, flashing green, off).
+- **[CUE] held + TRACK n** toggles track n in the multi group (press again: out, again: in). Members get
+  the sidebar's active-track tab and the active track's LED colours (solid red / yellow / flashing).
+  Any of the 8 audio and 8 MIDI tracks. After [CUE] is released the group is fixed; only [CUE] held
+  changes it.
+- **Loads with a group:** [YES] / a trig loads, into **every member**, that member's own sequence from
+  the chosen slot number (the box's bank / slot); [FUNC] = FULL for all, as for one track. The select
+  box flashes as usual. **ORIG / [PAGE] / [FUNC]+[PAGE]: every member restores its own original**
+  (the user's choice).
+- **A plain TRACK press** (no [CUE]) with a group: changes the view's track (which track's sequences the
+  slots show); the group stays (the user's choice).
+- **[NO]** with a group: dismisses the group; everything back to how it was before (Clyps stays).
+  [NO] without a group closes Clyps as before.
+- To RE: [CUE]'s key code / records (its held sub-map lists the TRACK keys: `0x400bf122`), the track
+  LED painter (an LED slot of the base layer `0x400c0932`), and how the main screen's sidebars draw the
+  active-track tab (from `0x80000000`), to draw it on every member.
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)
