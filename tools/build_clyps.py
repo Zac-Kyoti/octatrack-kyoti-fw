@@ -113,6 +113,9 @@ DETOURS = [  # (site, symbol, stock bytes, length[, opcode: jmp unless given])
     # 0x40083eb0 (LED slot 6, track in d5) -> members (ROM stubs, cl_magic-guarded)
     (0x4003ff06, "cl_act4", "71b980000000", 6, "4eb9"),
     (0x4004008c, "cl_act4", "71b980000000", 6, "4eb9"),
+    # ... and of the tab's lower half (the play-status glyph), 0x4004bd48: MIDI loop (d4), audio (d3)
+    (0x4004bd64, "cl_act4", "71b980000000", 6, "4eb9"),
+    (0x4004be9c, "cl_act3", "71b980000000", 6, "4eb9"),
     (0x40083ef4, "cl_act5", "71b980000000", 6, "4eb9"),
     (0x40083f04, "cl_act5", "71b980000000", 6, "4eb9"),
     (0x40083f24, "cl_act5", "71b980000000", 6, "4eb9"),

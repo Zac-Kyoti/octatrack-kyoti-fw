@@ -37801,3 +37801,11 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   shows `LOAD: SEQ|FULL`, `LOAD: ORIG SEQ|FULL` (proposal, to confirm). KB memory-map rows added
   (`FUN_4003fed8`, `0x460d168c`, slot 6 details). Gates: full 128, F+Q 27, L 8, M+U on JAM2 26 (U 17,
   incl. muted members = yellow), U on OT DEMO 17. syx 368bb03a….
+- **CLYPT flashed (2026-10-31); CLYPV** (NOT flashed): CLYPT's track LEDs were right, but the sidebar tab followed
+  the group only in its upper half (machine glyph); the lower half (play-status glyph) stayed on the active
+  track, with a stray `!` from the mismatched halves. The lower half is a second painter `FUN_4004bd48`
+  (`0x40052200` calls it just before `0x4003fed8`) with its own active tests `0x4004bd64` (d4) / `0x4004be9c`
+  (d3) -> `jsr cl_act4` / new `cl_act3`. Renders calling both painters: a member's tab = stock's active tab
+  pixel for pixel. Lesson: the 2026-10-30 write probe had listed `0x4004bd48`'s writes too (returns
+  `0x4004bf50..0x4004c064`); every writer a probe finds must be accounted for. Also the user's rename: the UI
+  word FULL -> ALL in every Clyps label and toast (all narrower; widths re-measured). syx 527ec87e….

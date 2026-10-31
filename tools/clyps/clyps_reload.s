@@ -609,10 +609,10 @@ rq_hdr:     .space 32
 rq_fh:      .space 64
 rq_path:    .space 128
 rq_line1:   .space 24
-rq_fmt_trk: .asciz "%sTRACK %d %s"         | "TRACK 3 SEQ" / "MIDI TRACK 3 FULL" (the user, 2026-10-30)
+rq_fmt_trk: .asciz "%sTRACK %d %s"         | "TRACK 3 SEQ" / "MIDI TRACK 3 ALL" (the user, 2026-10-30; ALL was FULL until 2026-10-31)
 rq_fmt_ptn: .asciz "PATTERN %c%02d"
 rq_s_seq:   .asciz "SEQ"
-rq_s_full:  .asciz "FULL"
+rq_s_full:  .asciz "ALL"
 rq_s_proj:  .asciz "RELOADED FROM PROJ"     | 105 px
 rq_s_lost1: .asciz "SEQ RELOAD LOST"
 rq_s_lost2: .asciz "NOT RESTORED!"

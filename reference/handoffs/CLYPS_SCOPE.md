@@ -1,4 +1,4 @@
-# CLYPS — scope and build record (WIP; latest test image `140C_CLYPT`)
+# CLYPS — scope and build record (WIP; latest test image `140C_CLYPV`)
 
 ## §0 Start here (handoff, 2026-10-25) — read this first, then §1–§4
 
@@ -46,6 +46,12 @@
     bank loader (project load).
 
 **HANDOFF 2026-10-30 (start here; supersedes the older handoff notes below).**
+- **Update 2026-10-31: CLYPT FLASHED** (track LEDs correct; tab only half right) -> **`140C_CLYPV`** (built,
+  not flashed): the tab's lower half too (§1.9 "CLYPV"), and the UI word FULL -> **ALL** everywhere (the
+  user: labels and toasts; "FULL load" in this document = an ALL load on the unit).
+  Gates (CLYPV): full ABCDYETGRSNPK 128, F+Q 27, L 8, M+U on JAM2 26, U alone 17. **Run U in its own
+  run, not with K:** ...U then K in one run faults in K (`_pop`: unmapped exception-frame read), while
+  each passes alone -- the same emulator accumulation as S with tail posts (traps below).
 - **Update (later 2026-10-30): §1.9 built as `140C_CLYPT`** (CLYPR + the [CUE] group; "CLYPS" skipped:
   it is the builder's default name). NOT flashed; CLYPR was not flashed either (the unit has CLYPQ), so
   CLYPT's walk-through (FLASHING §4) comes after CLYPR's. The sidebar RE item is solved (§1.9 "RE").
@@ -911,6 +917,16 @@ scene keys `0x2b`/`0x2c`, [TEMPO] `0x18` = METRONOME ON / OFF.
   [CUE] held with no member loads nothing; loads / [PAGE] / FULL / [FUNC]+[PAGE] per member, byte
   for byte; a non-member untouched; plain TRACK keeps the group; [MIDI] + TRACK adds a MIDI member;
   [NO] dismisses, [NO] again closes at baseline.
+
+**CLYPV (2026-10-31, not flashed).** CLYPT on hardware: LEDs right, but the tab followed the group only in
+its upper half (machine glyph); the lower half (play-status glyph) stayed on the active track, and the
+mismatched halves showed a stray `!` beside the glyph. The lower half is a second painter, `FUN_4004bd48`
+(called by `0x40052200` just before `0x4003fed8`), with its own two active tests: `0x4004bd64` (MIDI, track
+in `d4`) and `0x4004be9c` (audio, track in `d3`; `a0` = its voice record, live across the site) -> `jsr
+cl_act4` / `cl_act3`. Emulator renders calling both painters in stock's order: a member's tab is now
+pixel-identical to stock's active tab; none while [CUE] is held; back on the active track after [NO].
+Also: FULL -> ALL in every label and toast (widths re-measured: all narrower; group `ORIG ALL` puts
+`LOAD:` at x 57).
 
 ## 2. Decisions
 

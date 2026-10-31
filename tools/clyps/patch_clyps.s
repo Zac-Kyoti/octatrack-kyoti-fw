@@ -219,22 +219,22 @@
     .equ ORIG_W,      15                | "ORIG", "SAVED": widths from the font's table 0x400c246a
     .equ SAVED_W,     19
     .equ ORIGS_W,     45                | "ORIG TRK SEQ"       (the user, 2026-10-30: all of them fit
-    .equ ORIGF_W,     49                | "ORIG TRK FULL"       beside "T6 BNK A", which ends at x 31)
+    .equ ORIGF_W,     45                | "ORIG TRK ALL"        beside "T6 BNK A", which ends at x 31)
     .equ ORIGM_W,     49                | "ORIG MIDI SEQ"
-    .equ ORIGMF_W,    53                | "ORIG MIDI FULL" (2 px clear of "BNK A": the user's choice)
+    .equ ORIGMF_W,    49                | "ORIG MIDI ALL" ("FULL" -> "ALL", the user 2026-10-31)
     .equ ORIGP_W,     50                | "ORIG PTN+PART"
     .equ SEQ_W,       26                | "TRK SEQ"
-    .equ SEQF_W,      30                | "TRK FULL"
+    .equ SEQF_W,      26                | "TRK ALL"
     .equ MTRK_W,      45                | "MIDI TRK SEQ"
-    .equ MTRKF_W,     49                | "MIDI TRK FULL"
+    .equ MTRKF_W,     45                | "MIDI TRK ALL"
     .equ LOADP_A,     21                | "LOAD: " advance (20 px + 1)
     .equ BKBOX_L,     12                | [BANK] held alone: "BNK A" (x 14..31: "T6 " is 11 px for T
     .equ BKBOX_R,     33                | and M alike) in a dark box, 2 dark columns each side
     .equ MULTI_DX,    12                | "MULTI " is 22 px: "BNK A" at x 26..43, 12 right of "T6 "'s
     .equ GSEQ_W,      11                | a group's labels (scope §1.9): "SEQ"
-    .equ GFULL_W,     15                | "FULL"
+    .equ GFULL_W,     11                | "ALL"
     .equ GORIG_W,     30                | "ORIG SEQ"
-    .equ GORIGF_W,    34                | "ORIG FULL": its "LOAD: " at x 53, 9 px clear of "BNK A"
+    .equ GORIGF_W,    30                | "ORIG ALL": its "LOAD: " at x 57, 13 px clear of "BNK A"
 
 | Two sections, linked together (tools/build_clyps.py): `.text` = the ROM part in the classic cave
 | (the sequencer-tick code -- phase D, the wrap body -- and the cue state it touches: ISR code
@@ -3228,12 +3228,17 @@ uk_out:
     move.l  TOAST_T,%d0                 | displaced; stock's beq follows on these flags
     jmp     UITICK_RES
 
-| The active-track test of stock's track sidebars (0x4003fed8, its track in d4: the inverted tab)
-| and track LED painter (0x40083eb0, LED slot 6, its track in d5: the active colours), six sites of
+| The active-track test of stock's track sidebars -- the tab's upper half, the machine glyph
+| (0x4003fed8, its track in d4), and its lower half, the play-status glyph (0x4004bd48: d4 on the MIDI
+| side, d3 on the audio side; CLYPT missed these two: half tabs on hardware) -- and of the track LED
+| painter (0x40083eb0, LED slot 6, its track in d5: the active colours), eight sites of
 | `mvzb 0x80000000,%d0` -> jsr here (scope §1.9). With a Clyps group (cl_gmask: [CUE] held, or
 | members picked) d0 = the track itself when it is a member, -1 otherwise, so every member gets the
 | tab and the colours and the active track only if it is one. Else stock's byte. Keeps all but d0.
 | ROM: both painters run before the DRAM part exists (cl_magic).
+cl_act3:
+    move.l  %d3,%d0
+    bra.b   ca_go
 cl_act4:
     move.l  %d4,%d0
     bra.b   ca_go
@@ -4967,23 +4972,23 @@ cl_fmt_hdr: .asciz "%c%d BNK %c"
 cl_fmt_hdrs:.asciz "%c%d"
 cl_fmt_hdrm:.asciz "MULTI BNK %c"         | 41 px: x 3..43 (scope §1.9)
 cl_s_gseq:  .asciz "SEQ"
-cl_s_gfull: .asciz "FULL"
+cl_s_gfull: .asciz "ALL"
 cl_s_gorig: .asciz "ORIG SEQ"
-cl_s_gorigf:.asciz "ORIG FULL"
+cl_s_gorigf:.asciz "ORIG ALL"
 cl_s_load:  .asciz "LOAD:"
 cl_s_seqb:  .asciz "TRK SEQ"
-cl_s_seqf:  .asciz "TRK FULL"
+cl_s_seqf:  .asciz "TRK ALL"
 cl_s_mtrk:  .asciz "MIDI TRK SEQ"
-cl_s_mtrkf: .asciz "MIDI TRK FULL"
+cl_s_mtrkf: .asciz "MIDI TRK ALL"
 cl_fmt_num: .asciz "%d"
 cl_fmt_trg: .asciz "%c%02d %02d TR"       | 33 px: "A01 15 TR", as a source label (the user)
 cl_s_lck:   .asciz "LOCKS"
 cl_s_emp:   .asciz "---"
 cl_s_orig:  .asciz "ORIG"
 cl_s_origs: .asciz "ORIG TRK SEQ"
-cl_s_origf: .asciz "ORIG TRK FULL"
+cl_s_origf: .asciz "ORIG TRK ALL"
 cl_s_origm: .asciz "ORIG MIDI SEQ"
-cl_s_origmf:.asciz "ORIG MIDI FULL"
+cl_s_origmf:.asciz "ORIG MIDI ALL"
 cl_s_origp: .asciz "ORIG PTN+PART"
 cl_s_saved: .asciz "SAVED SEQ"           | 34 px: the slot label after a temp reload (the user)
 cl_fmt_srct:.asciz "%c%02d %02d TR"       | 33 px: "B14 06 TR" (the user, 2026-10-29)
@@ -4998,8 +5003,8 @@ cl_s_strd:  .asciz "strd"
 cl_nfhdr:   .ascii "CLYP"
             .short 1, 256
 cl_tname:   .space 16
-cl_fmt_tsv: .asciz "%sTRACK %d FULL SAVED"
-cl_fmt_tfull:.asciz "%sTRACK %d FULL"
+cl_fmt_tsv: .asciz "%sTRACK %d ALL SAVED"
+cl_fmt_tfull:.asciz "%sTRACK %d ALL"
 cl_s_saved2:.asciz "SAVED"
 cl_s_reld2: .asciz "RELOADED"
             .align 2

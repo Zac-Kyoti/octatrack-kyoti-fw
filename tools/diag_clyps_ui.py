@@ -388,7 +388,7 @@ def main(argv):
         key(0x01, 1)
         key(0x01, 0)
         key(FUNC, 0)
-        check(pslice(9, partbase(bank, act)) == msl, "[FUNC] + trig 2: with pattern 2's track settings (FULL)"
+        check(pslice(9, partbase(bank, act)) == msl, "[FUNC] + trig 2: with pattern 2's track settings (ALL)"
               + (" -- the two Parts' M2 slices were already equal" if msl_same else ""))
         # the [MIDI] key inside Clyps (not ours): the view and the grid follow the side
         lastt = lambda: rd(syms["cl_lastt"], 1)
@@ -558,7 +558,7 @@ def main(argv):
         tap(0x11)
         key(NO, 0)
         check(rec(act, 1) == pre2, "[NO]+TRACK 2: T2's temp save is back (stopped: at once)")
-        check(pslice(1, tpart) == psl2, "... with its machine / FX / pages as saved (FULL)")
+        check(pslice(1, tpart) == psl2, "... with its machine / FX / pages as saved (ALL)")
         check(arm() == m0, "... and nothing disarmed")
         pre3 = rec(act, 2)
         key(NO, 1)
@@ -850,7 +850,7 @@ def main(argv):
 
     if "L" in a.only:
         # --- L: reloads from the card (scope §1.8): SAVE PROJECT, edit in RAM, reload, compare
-        print("L: [PTN]+TRACK = card SEQ; [BANK]+TRACK = card FULL (track slice); chord+TRACK nothing; chord+trig = pattern")
+        print("L: [PTN]+TRACK = card SEQ; [BANK]+TRACK = card ALL (track slice); chord+TRACK nothing; chord+trig = pattern")
         def worker(fn, ms, args=()):
             rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
             rt.call_as_main(fn, args=args, budget=600000)
@@ -911,7 +911,7 @@ def main(argv):
         settle()
         key(0x10, 0)
         key(BANK, 0)
-        print(f"      FULL: T1 record differs at {dd(rec(act, 0), pre0)}; slice differs at {dd(pslice(0, dst), psl0)}", flush=True)
+        print(f"      ALL: T1 record differs at {dd(rec(act, 0), pre0)}; slice differs at {dd(pslice(0, dst), psl0)}", flush=True)
         check(same_rec(rec(act, 0), pre0) and pslice(0, dst) == psl0, "[BANK] + TRACK 1: T1's sequence AND its Part slice from the card")
         check(pslice(1, dst) != psl1, "... T2's slice untouched (not the whole Part)")
         check(state()["open"] == 1 and state()["showwin"] == 0, "... Clyps stays, no SELECT BANK")
@@ -1052,7 +1052,7 @@ def main(argv):
         key(FUNC, 1)
         tap(sq)
         key(FUNC, 0)
-        check(pslice(t, dst) == ssl and pled() == 0, "[FUNC]+trig again: FULL; the box left ORIG: page LEDs stock's")
+        check(pslice(t, dst) == ssl and pled() == 0, "[FUNC]+trig again: ALL; the box left ORIG: page LEDs stock's")
         tap(PAGE)
         check(rec(act, 0) == oslot(act, 0) and pslice(t, dst) == ssl, "[PAGE] = ORIG SEQ: the sequence only")
         key(FUNC, 1)
@@ -1204,7 +1204,7 @@ def main(argv):
         tap(q)
         key(FUNC, 0)
         check(all(rec(act, k) == rec(q, k) and pslice(k, dst) == pslice(k, partbase(bank, q)) for k in m)
-              and pslice(a0, dst) == sl_a0, f"[FUNC]+trig: FULL into every member; T{a0 + 1}'s slice untouched")
+              and pslice(a0, dst) == sl_a0, f"[FUNC]+trig: ALL into every member; T{a0 + 1}'s slice untouched")
         key(FUNC, 1)
         tap(PAGE)
         key(FUNC, 0)
