@@ -1495,9 +1495,9 @@ ts_a:
     addq.l  #4,%sp
     lea     cl_fmt_tsv,%a0              | audio: "TRACK 3 FULL SAVED", one line
     cmpi.l  #8,%d2
-    bcs.b   ts_toast
+    bcs.w   ts_toast
     lea     cl_s_saved2,%a0             | MIDI: "MIDI TRACK 3 FULL" / "SAVED"
-    bra.b   ts_two
+    bra.w   ts_two
 ts_no:
     tst.b   cl_ynact+1
     beq.w   ts_done
@@ -1506,7 +1506,7 @@ ts_no:
     lea     cl_svalid,%a0
     lea     cl_fmt_tno,%a1
     tst.b   (%a0,%d2.l)
-    beq.b   ts_toast1
+    beq.w   ts_toast1
     pea     1                           | armed at once: its next step, in step
     pea     0x10000+(SRC_SAVED<<8)      | FULL: the sound as saved -- sequence, machine, FX, pages,
                                         | scene locks, designer (the user, 2026-10-29)
@@ -1514,11 +1514,17 @@ ts_no:
     jsr     cl_cueload
     lea     12(%sp),%sp
     lea     cl_s_reld2,%a0              | "TRACK 3 FULL" / "RELOADED" (122 px in one line: too wide)
-    bra.b   ts_two
+    bra.w   ts_two
 ts_toast1:
-    movea.l %a1,%a0
+    movea.l %a1,%a0                     | nothing saved: "TRACK 3: SAVE FIRST" (one line); MIDI:
+    cmpi.l  #8,%d2                      | "MIDI TRACK 3" / "SAVE FIRST" (123 px in one line: too wide)
+    bcs.w   ts_toast
+    lea     cl_fmt_tmid,%a1
+    move.l  %a1,cl_t1f
+    lea     cl_s_savef2,%a0
+    bra.w   ts_two1
 ts_toast:
-    move.l  %d2,%d0                     | "TRK 3 SAVED" / "MIDI TRK 3 RELOADED" / "TRK 3: SAVE FIRST" (the user)
+    move.l  %d2,%d0                     | "TRACK 3 FULL SAVED" / "TRACK 3: SAVE FIRST" (the user)
     lea     cl_s_none,%a1
     cmpi.l  #8,%d0
     bcs.b   ts_l
@@ -1537,9 +1543,12 @@ ts_l:
     pea     cl_buf
     jsr     TOAST
     addq.l  #8,%sp
-    bra.b   ts_done
+    bra.w   ts_done
 | two lines (the user, 2026-10-30): "%sTRACK n FULL" / a0 (SAVED or RELOADED), RELOAD's 2-line toast
 ts_two:
+    lea     cl_fmt_tfull,%a1            | line 1: "%sTRACK n FULL"
+    move.l  %a1,cl_t1f
+ts_two1:
     move.l  %a0,cl_tlines+4
     move.l  %d2,%d0
     lea     cl_s_none,%a1
@@ -1551,7 +1560,7 @@ ts_tl:
     addq.l  #1,%d0
     move.l  %d0,-(%sp)
     move.l  %a1,-(%sp)
-    pea     cl_fmt_tfull
+    move.l  cl_t1f,-(%sp)
     pea     cl_buf
     jsr     SPRINTF
     lea     16(%sp),%sp
@@ -4714,7 +4723,10 @@ cl_s_saved2:.asciz "SAVED"
 cl_s_reld2: .asciz "RELOADED"
             .align 2
 cl_tlines:  .long 0, 0
-cl_fmt_tno: .asciz "%sTRK %d: SAVE FIRST"       | toast window = text + 15 px: 126 px at most (MIDI TRK 8)
+cl_t1f:     .long 0                     | the 2-line toast's first-line format
+cl_fmt_tno: .asciz "%sTRACK %d: SAVE FIRST!"    | 104 px (audio only: MIDI is two lines)
+cl_fmt_tmid:.asciz "%sTRACK %d"
+cl_s_savef2:.asciz "SAVE FIRST!"
 cl_s_midi:  .asciz "MIDI "
 cl_s_none:  .byte 0
     .align 4

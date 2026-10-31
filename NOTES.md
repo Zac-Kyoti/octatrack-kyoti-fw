@@ -37779,3 +37779,5 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   `TRACK n FULL SAVED`, `TRACK n FULL` / `RELOADED` (MIDI two lines). Scope §1.8 lists the standalone
   RELOAD_FROM_PROJECT work (FULL track slice, new toasts, + the pattern reload). Gates L 8, full 128,
   F+Q 26, M 9.
+- **CLYPQ (rebuilt)**: the nothing-saved toast reads `TRACK n: SAVE FIRST!` (MIDI: `MIDI TRACK n` /
+  `SAVE FIRST!`); syx 786ba9ec…, gates full 128, M 9. NOT flashed.

@@ -213,7 +213,8 @@ quick check for each:
   2. Card reload toasts: `TRACK n SEQ` / `RELOADED FROM PROJ`, `TRACK n FULL` / ..., `MIDI TRACK n ...`,
      and `PATTERN A06` / `RELOADED FROM PROJ`.
   3. Temp save / reload toasts: `TRACK n FULL SAVED`; MIDI `MIDI TRACK n FULL` / `SAVED`; reload
-     `TRACK n FULL` / `RELOADED` (MIDI: `MIDI TRACK n FULL` / `RELOADED`).
+     `TRACK n FULL` / `RELOADED` (MIDI: `MIDI TRACK n FULL` / `RELOADED`); nothing saved:
+     `TRACK n: SAVE FIRST!` (MIDI: `MIDI TRACK n` / `SAVE FIRST!`).
 
 - **CLYPS — CLYPP walk-through.** Image `140C_CLYPP` = CLYPO + reloads from the CF card (scope §1.8).
   Use a throwaway copy of a project and SAVE it first (the reloads read the saved `.strd`).
