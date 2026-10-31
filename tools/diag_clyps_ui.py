@@ -1119,6 +1119,122 @@ def main(argv):
         tap(NO)
         closed_ok("[NO]")
 
+    if "U" in a.only:
+        # --- U: the [CUE] group (scope §1.9), stopped transport
+        print("U: [CUE] group: sidebar tabs, track LEDs, loads into every member, ORIG per member, [NO]")
+        CUE, MIDIK = 0x2A, 0x35
+        trk_die = [rd(0x400A9670 + 4 * k, 4) for k in range(8)]
+
+        def ledbit(die):
+            b_ = bytes(u.mem_read(0x460BA98C, 17))
+            return (b_[die // 8] >> (die % 8)) & 1
+        tled = lambda: [(ledbit(d), ledbit(d + 1)) for d in trk_die]
+
+        def callm(addr, *args):
+            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+            rt.call_as_main(addr, args=args, budget=600000)
+
+        def tabs():
+            # stock's sidebars 0x4003fed8: 0x40052200 runs them on every pass on hardware, route A never
+            # does. An inverted tab fills its 8 x 8 edge cell; a plain one holds only its glyph.
+            callm(0x4003FED8)
+            px = lcd_view.pixels(bytes(u.mem_read(PLANE, 1024)))
+            n = []
+            for k in range(8):
+                xs = range(0, 8) if k < 4 else range(120, 128)
+                y0 = 63 - (61 - 15 * (k & 3))
+                n.append(sum(px[y][x] for y in range(y0, y0 + 8) for x in xs))
+            return [k for k in range(8) if n[k] >= 32], n
+        grp = lambda: rd(syms["cl_grp"], 2)
+        gmask = lambda: rd(syms["cl_gmask"], 4)
+        if rd(0x80000012, 4):              # M leaves the MIDI side showing: U starts on the audio side
+            tap(MIDIK)
+        a0 = rd(0x80000000, 1)
+        # stock's colours for each track when active and when not (the painter run with 0x80000000 set)
+        lact, lnone = [], None
+        for k in range(8):
+            u.mem_write(0x80000000, bytes([k]))
+            callm(0x4007E998, 6)
+            lact.append(tled()[k])
+        u.mem_write(0x80000000, b"\xff")
+        callm(0x4007E998, 6)
+        lnone = tled()
+        u.mem_write(0x80000000, bytes([a0]))
+        callm(0x4007E998, 6)
+        m = [k for k in (1, 3, 5, 0, 2) if k != a0][:2]
+        print(f"      active T{a0 + 1}, members T{m[0] + 1} T{m[1] + 1}; colours active {lact} none {lnone}", flush=True)
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        act = rd(0x800065BE, 1)
+        t0, n0 = tabs()
+        check(state()["open"] == 1 and gmask() == 0 and t0 == [a0] and tled()[a0] == lact[a0],
+              f"open, no group: the tab and the active colours on T{a0 + 1} (tabs {t0}, cells {n0})")
+        q = next(q for q in range(16) if q != act and all(rec(q, k) != rec(act, k) for k in m))
+        before = [rec(act, k) for k in range(8)]
+        key(CUE, 1)
+        t1, n1 = tabs()
+        check(rd(syms["cl_cuh"], 1) != 0 and gmask() == 0x10000 and t1 == [] and tled() == lnone,
+              f"[CUE] held: no tab, no active colours (tabs {t1}, cells {n1})")
+        tap(q)
+        check([rec(act, k) for k in range(8)] == before, f"[CUE] held, no member: trig {q + 1} loads nothing")
+        for k in m:
+            tap(0x10 + k)
+        bits = sum(1 << k for k in m)
+        t2, n2 = tabs()
+        led2 = tled()
+        check(grp() == bits and t2 == sorted(m), f"[CUE]+TRACK: members {m} have the tabs (tabs {t2}, cells {n2})")
+        check(all(led2[k] == (lact[k] if k in m else lnone[k]) for k in range(8)),
+              f"... and the active colours, the others plain ({led2})")
+        tap(0x10 + m[1])
+        tap(0x10 + m[1])
+        check(grp() == bits, "[CUE]+TRACK twice: out, then in again")
+        key(CUE, 0)
+        check(gmask() == 0x10000 | bits and tabs()[0] == sorted(m), "[CUE] released: the group stays")
+        shot("U1_group")
+        tap(q)
+        check(all(rec(act, k) == rec(q, k) for k in m) and rec(act, a0) == before[a0],
+              f"trig {q + 1}: every member its own sequence of pattern {q + 1}; T{a0 + 1} untouched")
+        tap(PAGE)
+        check(all(rec(act, k) == oslot(act, k) for k in m), "[PAGE]: every member its own original")
+        dst = partbase(bank, act)
+        sl_a0 = pslice(a0, dst)
+        key(FUNC, 1)
+        tap(q)
+        key(FUNC, 0)
+        check(all(rec(act, k) == rec(q, k) and pslice(k, dst) == pslice(k, partbase(bank, q)) for k in m)
+              and pslice(a0, dst) == sl_a0, f"[FUNC]+trig: FULL into every member; T{a0 + 1}'s slice untouched")
+        key(FUNC, 1)
+        tap(PAGE)
+        key(FUNC, 0)
+        osrc = partbase(bank, act, syms["cl_bss"])
+        check(all(rec(act, k) == oslot(act, k) and pslice(k, dst) == pslice(k, osrc) for k in m),
+              "[FUNC]+[PAGE]: every member its original sequence and slice")
+        tap(0x10 + m[0])
+        check(rd(0x80000000, 1) == m[0] and grp() == bits and state()["open"] == 1,
+              f"plain TRACK {m[0] + 1}: the view's track changes, the group stays")
+        key(CUE, 1)
+        tap(MIDIK)
+        tap(0x10)
+        tap(MIDIK)
+        key(CUE, 0)
+        check(grp() == bits | 0x100 and rd(0x80000012, 4) == 0, "[CUE]+[MIDI]+TRACK 1: MIDI track 1 joins")
+        mrec = lambda pat: bytes(u.mem_read(BLOB + bank * BANKSTRIDE + pat * PATSTRIDE + 0x48D0, 0x8B0))
+        q2 = next((x for x in range(16) if x != act and mrec(x) != mrec(act)), q)
+        differs = mrec(q2) != mrec(act)
+        tap(q2)
+        check(mrec(act) == mrec(q2) and all(rec(act, k) == rec(q2, k) for k in m),
+              f"trig {q2 + 1}: the MIDI member too (its source record differs: {differs})")
+        tap(PAGE)
+        tap(NO)
+        t3, _ = tabs()
+        check(state()["open"] == 1 and grp() == 0 and gmask() == 0 and t3 == [m[0]]
+              and tled()[m[0]] == lact[m[0]], "[NO]: the group is gone, Clyps stays, the tab on the active track")
+        tap(NO)
+        closed_ok("[NO] again")
+        check(gmask() == 0, "closed: no group")
+
     if "K" in a.only:
         # --- K: stock [PTN] / [BANK] inside Clyps (scope §1.0 step 2). Changes the playing pattern:
         # it runs last and puts the pattern back.

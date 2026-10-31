@@ -38,6 +38,8 @@ Detours (each asserts its stock bytes):
               (outside Clyps: hold + TRACK = temp save / reload; ARM / DISARM on a quick tap)
   0x4001fb1e, 0x4006bafe, 0x4007ec4c, 0x400909dc  jsr 0x4000fd34 (every bank to defaults)
               -> jsr cl_rstall (the same call, then every bank's snapshot once DRAM is in place)
+  0x4003ff06, 0x4004008c  track sidebars (tab), 0x40083ef4/f04/f24/f36  track LEDs (slot 6)
+              mvzb 0x80000000,d0 -> jsr cl_act4 / cl_act5 (the [CUE] group's members, scope §1.9)
 One source, two parts, linked together:
   ROM   `.text`  the sequencer-tick code (phase D, the wrap body, the copy) and the cue state it
                  touches, in the classic cave at 0x400d6500 (reference/kb/caves.md: stock-zero
@@ -106,6 +108,15 @@ DETOURS = [  # (site, symbol, stock bytes, length[, opcode: jmp unless given])
     (0x4006bafe, "cl_rstall", "4eb94000fd34", 6, "4eb9"),    # to defaults): the originals are retaken
     (0x4007ec4c, "cl_rstall", "4eb94000fd34", 6, "4eb9"),    # after it (cl_rstall is ROM: 0x4001fb1e
     (0x400909dc, "cl_rstall", "4eb94000fd34", 6, "4eb9"),    # may run before the DRAM part exists)
+    # the [CUE] group (scope §1.9): the active-track test `mvzb 0x80000000,%d0` of the track
+    # sidebars 0x4003fed8 (track in d4; MIDI loop, audio loop) and of the track LED painter
+    # 0x40083eb0 (LED slot 6, track in d5) -> members (ROM stubs, cl_magic-guarded)
+    (0x4003ff06, "cl_act4", "71b980000000", 6, "4eb9"),
+    (0x4004008c, "cl_act4", "71b980000000", 6, "4eb9"),
+    (0x40083ef4, "cl_act5", "71b980000000", 6, "4eb9"),
+    (0x40083f04, "cl_act5", "71b980000000", 6, "4eb9"),
+    (0x40083f24, "cl_act5", "71b980000000", 6, "4eb9"),
+    (0x40083f36, "cl_act5", "71b980000000", 6, "4eb9"),
 ]
 
 

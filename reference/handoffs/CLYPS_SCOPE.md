@@ -1,4 +1,4 @@
-# CLYPS — scope and build record (WIP; latest test image `140C_CLYPG`)
+# CLYPS — scope and build record (WIP; latest test image `140C_CLYPT`)
 
 ## §0 Start here (handoff, 2026-10-25) — read this first, then §1–§4
 
@@ -46,10 +46,16 @@
     bank loader (project load).
 
 **HANDOFF 2026-10-30 (start here; supersedes the older handoff notes below).**
+- **Update (later 2026-10-30): §1.9 built as `140C_CLYPT`** (CLYPR + the [CUE] group; "CLYPS" skipped:
+  it is the builder's default name). NOT flashed; CLYPR was not flashed either (the unit has CLYPQ), so
+  CLYPT's walk-through (FLASHING §4) comes after CLYPR's. The sidebar RE item is solved (§1.9 "RE").
+  New gate scenario U (run it with M on JAM2). Next: the user's CLYPR + CLYPT walk-throughs, the
+  group label wording (§1.9 "Built", my proposal), then item 2 below.
 - **State:** latest image `140C_CLYPR` (syx `25174496…`, commit `01c789c`, branch `trkseq`, all
   unpushed), NOT flashed yet; on the unit: `140C_CLYPQ`. Gates all green: `diag_clyps_ui.py --only
   ABCDYETGRSNPK` (OT DEMO, 128) + `--only FQ` (27) + `--only L` (8, card reloads) + `--only M` on JAM2
-  (9). Run L / F / M / full in parallel with distinct `--name`s (each stages its own card tree).
+  (9). Run L / F / M / full in parallel with distinct `--name`s (each stages its own card tree), and
+  absolute `--shots` paths (the script chdirs into refs/octabam).
 - **What exists** (details in §1.0-§1.9 and the CLYPx walk-throughs in FLASHING §4): the view / grid /
   labels as the user finalised them (dark header boxes, `T6 BNK A`, `LOAD: TRK SEQ|FULL`, `MIDI TRK
   SEQ|FULL`, `ORIG ...`, `ORIG PTN+PART`), FULL loads (§1.7, MIDI too via [FUNC]), originals ([PAGE],
@@ -58,7 +64,7 @@
   Clyps (window prio 0), the load-confirmation flash (detour on the 1/60 s UI tick `0x40056c28`),
   card reloads (§1.8, `tools/clyps/clyps_reload.s`).
 - **Next, in order (agreed with the user):**
-  1. **Multi-track loads with a [CUE] group, §1.9** (decisions recorded there). RE done: [CUE] = key
+  1. **DONE (`140C_CLYPT`): Multi-track loads with a [CUE] group, §1.9** (decisions recorded there). RE done: [CUE] = key
      `0x2a` (its held sub-map `0x400bf2a0`); track LEDs = LED slot 6 painter `0x40083eb0` (tick
      `0x40083fdc`, period 2), which picks "active" by `0x80000000`: replace with a group test in our own
      slot-6 record. **Open RE:** where the main screen draws the sidebar's active-track tab -- not via
@@ -843,7 +849,7 @@ playing bank (your pattern red, cued yellow, data green); the bank view only for
 - The chord + [PAGE] / [YES] begun inside Clyps flashes the `ORIG PTN+PART` box (`cl_ftgt` = 1: the
   header label is the flash target; 0: the select box / highlight).
 
-### 1.9 Multi-track loads (the user, 2026-10-30; scoped, not built)
+### 1.9 Multi-track loads (the user, 2026-10-30; built `140C_CLYPT`, not flashed)
 
 - **[CUE] in Clyps** does not do stock's cue. Hold [CUE]: the header's left reads **`MULTI BNK A`**
   (the user's choice: the bank stays); the stock sidebar's active-track tab disappears from the active
@@ -862,7 +868,49 @@ playing bank (your pattern red, cued yellow, data green); the bank view only for
   [NO] without a group closes Clyps as before.
 - To RE: [CUE]'s key code / records (its held sub-map lists the TRACK keys: `0x400bf122`), the track
   LED painter (an LED slot of the base layer `0x400c0932`), and how the main screen's sidebars draw the
-  active-track tab (from `0x80000000`), to draw it on every member.
+  active-track tab (from `0x80000000`), to draw it on every member. **Done, below.**
+
+**RE (2026-10-30, C).** The sidebars ARE drawn with RECT / TEXT: `FUN_4003fed8` (KB memory-map "Mute /
+solo / cue"), called on every pass of `FUN_40052200` (the function that ages the TRACK double-tap timer
+`0x460d5de0`) and from `0x4004d870`. The earlier trace saw nothing because route A never runs
+`0x40052200`, so a track change is never repainted there. Found by a write watch on the main window's
+edge columns (`0x46c7e0ea`, rows 0-7 / 120-127 of the rotated plane) during a project load
+(`tools/clyps_probe_sidebar.py`). Both of its loops (MIDI `0x4003ff06`, audio `0x4004008c`, track in `d4`)
+and the four colour picks of the track LED painter `0x40083eb0` (`0x40083ef4/f04/f24/f36`, track in
+`d5`) open with the same 6-byte `mvzb 0x80000000,%d0`; it is the only "active" input of either.
+[CUE] = `0x2a`, press `0x4004e978` / release `0x4004e968` (they only set / clear `0x460d168c` and
+redraw), delay 0; its sub-map `0x400bf2a0` = TRACK cue toggle `0x40083dc4`, [YES] `0x400402ec`, the
+scene keys `0x2b`/`0x2c`, [TEMPO] `0x18` = METRONOME ON / OFF.
+
+**Built `140C_CLYPT` (2026-10-30, not flashed).**
+- The six `mvzb 0x80000000,%d0` → `jsr cl_act4` / `cl_act5` (ROM, `cl_magic`-guarded): with a group
+  (`cl_gmask` = `0x10000` | members, bit t, MIDI 8..15; set while Clyps is open and [CUE] is held or
+  the group has members) d0 = the track when a member, -1 otherwise. So stock itself draws the tab on
+  every member and none elsewhere, and gives members the active colours (red; yellow muted; cue
+  flashing) and everyone else the plain ones. No painter is reimplemented; the LEDs are repainted
+  (`LED_PAINT(6)`) on every group change, and the sidebar follows on stock's next pass.
+- Our [CUE] record (`cl_k_cue`, press + release, delay 0 as T1's; stock's cue never runs in Clyps) with
+  its own sub-map `cl_csub` (chained after stock's, wins): TRACK = `cl_k_cuet` (toggle; the MIDI side
+  when [MIDI] shows it), [YES] = nothing. [TEMPO] (metronome) and the scene keys stay stock's.
+- Loads (`cl_load` → `cl_each`) and restores (`cl_restore`: ORIG, [PAGE], [FUNC]+[PAGE]) act on
+  `cl_targets`: the members, or the active track without a group; each member = `cl_cueload(t, …)`
+  as a one-track load (stopped: at once; running: cued, each at its own window start). With [CUE]
+  held and no member picked, a load does nothing. Chord + [PAGE] / [YES] (ORIG PTN+PART) is unchanged.
+- [NO] with members: the group goes (Clyps stays); without: closes Clyps. The group also ends when Clyps
+  closes, and starts empty at every open.
+- Header (measured: font table `0x400c246a`): left `MULTI BNK A` (41 px, x 3..43) while there is a group
+  (not while the [PTN]+[BANK] chord is held: its ORIG PTN+PART is the pattern's). The right label
+  with a group drops `TRK` / `MIDI TRK` (members can be on both sides): `LOAD: SEQ` / `LOAD: FULL`,
+  on ORIG `LOAD: ORIG SEQ` / `LOAD: ORIG FULL` (its `LOAD:` at x 53, 9 px clear). The per-track
+  labels would not fit: `LOAD:` starts at x 34-42 for `ORIG MIDI FULL`, `ORIG PTN+PART`,
+  `MIDI TRK ...`, `ORIG TRK ...`. **This wording is my proposal (to confirm).** The BANK box moves 12 px
+  right (`MULTI_DX`).
+- Not changed: the grid's yellow (cued) and the page LEDs still describe the view's track only.
+- Gate U (`diag_clyps_ui.py --only U`, OT DEMO; also on JAM2 with M): tabs (stock's painter called
+  directly, edge cells counted) and LED colours against stock's own colours for "active" / "none";
+  [CUE] held with no member loads nothing; loads / [PAGE] / FULL / [FUNC]+[PAGE] per member, byte
+  for byte; a non-member untouched; plain TRACK keeps the group; [MIDI] + TRACK adds a MIDI member;
+  [NO] dismisses, [NO] again closes at baseline.
 
 ## 2. Decisions
 

@@ -206,6 +206,25 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **CLYPS — CLYPT walk-through.** Image `140C_CLYPT` = CLYPR + multi-track loads with a `[CUE]` group
+  (scope §1.9). Run CLYPR's three steps below too (CLYPR was never flashed).
+  1. In Clyps, hold `[CUE]`: the header's left reads `MULTI BNK A`, the right `LOAD: SEQ`; the sidebar tab
+     leaves the active track; the track LEDs show only mute / cue (green, off, flashing). Nothing is cued.
+  2. Still holding `[CUE]`, press TRACK 2 and TRACK 4: both get the sidebar tab and the active track's LED
+     colour (red; yellow if muted). TRACK 4 again: out; again: in. Release `[CUE]`: the group stays.
+  3. Pick a slot (trig or `[YES]`): T2 and T4 each load their OWN sequence from that slot; the active track
+     (not a member) keeps its own. Hold `[FUNC]`: `LOAD: FULL`, and a load brings machine / FX too.
+     Transport running: each member lands as a one-track load does.
+  4. Box on ORIG: `LOAD: ORIG SEQ` (`[FUNC]`: `LOAD: ORIG FULL`); `[YES]`, `[PAGE]`, `[FUNC]`+`[PAGE]`: every
+     member gets its own original back.
+  5. A plain TRACK 3: the slots now show T3's sequences; the tabs and LEDs stay on T2 / T4, and loads still go
+     to them.
+  6. Hold `[CUE]`, press `[MIDI]`, TRACK 1, `[MIDI]`, release: MIDI track 1 joins (tab on the MIDI side).
+  7. `[NO]`: the group is gone, the tab and the LED colours are back on the active track, Clyps stays.
+     `[NO]` again closes Clyps. Outside Clyps, `[CUE]`+TRACK cues as in stock.
+  8. Wording to judge: in a group the right label drops `TRK` / `MIDI TRK` (`LOAD: SEQ`, `LOAD: ORIG FULL`):
+     the long per-track labels collide with `MULTI BNK A`.
+
 - **CLYPS — CLYPR walk-through.** Image `140C_CLYPR` = CLYPQ + three fixes.
   1. Put the box on your own pattern's slot (the highlighted one) and load it (`[YES]` or its trig):
      the highlight bar flashes like any other slot.

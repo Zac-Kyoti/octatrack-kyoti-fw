@@ -230,6 +230,11 @@
     .equ LOADP_A,     21                | "LOAD: " advance (20 px + 1)
     .equ BKBOX_L,     12                | [BANK] held alone: "BNK A" (x 14..31: "T6 " is 11 px for T
     .equ BKBOX_R,     33                | and M alike) in a dark box, 2 dark columns each side
+    .equ MULTI_DX,    12                | "MULTI " is 22 px: "BNK A" at x 26..43, 12 right of "T6 "'s
+    .equ GSEQ_W,      11                | a group's labels (scope §1.9): "SEQ"
+    .equ GFULL_W,     15                | "FULL"
+    .equ GORIG_W,     30                | "ORIG SEQ"
+    .equ GORIGF_W,    34                | "ORIG FULL": its "LOAD: " at x 53, 9 px clear of "BNK A"
 
 | Two sections, linked together (tools/build_clyps.py): `.text` = the ROM part in the classic cave
 | (the sequencer-tick code -- phase D, the wrap body -- and the cue state it touches: ISR code
@@ -404,6 +409,9 @@ ce_noundo:
     moveq   #1,%d0
     move.b  %d0,cl_open
     clr.b   cl_flash
+    clr.w   cl_grp                      | no group (scope §1.9)
+    clr.b   cl_cuh
+    jsr     cl_gupd
     jsr     cl_flstop
     pea     cl_layer
     jsr     LAYER_PUSH
@@ -420,6 +428,8 @@ cl_close:
     tst.b   cl_open
     beq.b   cc_out
     clr.b   cl_open
+    clr.w   cl_grp                      | the group ends with Clyps: the tab and the LED colours
+    jsr     cl_gupd                     | go back to the active track
     jsr     cl_flstop
     tst.l   cl_win
     beq.b   cc_nowin
@@ -617,14 +627,90 @@ ky_out:
     rts
 
 | [NO]: close Clyps (the only key that does). [FUNC]+[NO]: nothing (temp reload lives outside).
+| With a group (scope §1.9): dismiss the group instead; Clyps stays.
 cl_k_no:
     move.l  8(%sp),%d0
     cmpi.l  #1,%d0
     bne.b   kn_out
     clr.b   cl_flash
     tst.b   cl_fn
+    bne.b   kn_out
+    tst.w   cl_grp
     beq.w   cl_close
+    clr.w   cl_grp
+    jsr     cl_flstop
+    jsr     cl_gupd
+    bra.w   cl_draw
 kn_out:
+    rts
+
+| [CUE] 0x2a in Clyps (scope §1.9): not stock's cue. While it is held the group can change ([CUE] +
+| TRACK, cl_k_cuet: our sub-map cl_csub, chained after stock's 0x400bf2a0, wins) and the header
+| reads MULTI; the tab and the active LED colours show the members only. Press and release.
+cl_k_cue:
+    clr.b   cl_flash
+    move.l  8(%sp),%d0
+    cmpi.l  #1,%d0
+    seq     %d0
+    move.b  %d0,cl_cuh
+    jsr     cl_gupd
+    bra.w   cl_draw
+
+| [CUE] held + TRACK n: track n (MIDI n + 8 on the MIDI side) in / out of the group. Press only.
+cl_k_cuet:
+    move.l  8(%sp),%d0
+    cmpi.l  #1,%d0
+    bne.b   kcu_out
+    clr.b   cl_flash
+    jsr     cl_flstop
+    move.l  4(%sp),%d0
+    andi.l  #7,%d0
+    tst.l   MIDI_MODE
+    beq.b   kcu_t
+    addq.l  #8,%d0
+kcu_t:
+    move.w  cl_grp,%d1
+    bchg    %d0,%d1
+    move.w  %d1,cl_grp
+    jsr     cl_gupd
+    bra.w   cl_draw
+kcu_out:
+cl_k_nop:
+    rts
+
+| cl_gmask = 0 without a group, else 0x10000 | the members (bit t, MIDI 8..15): the painters' test
+| (cl_act4 / cl_act5). A group = [CUE] held or members picked, while Clyps is open. Then the track
+| LEDs are repainted; the sidebar follows on stock's next 0x40052200 pass. Uses d0, d1, a0, a1.
+cl_gupd:
+    moveq   #0,%d0
+    tst.b   cl_open
+    beq.b   gu_set
+    move.w  cl_grp,%d0
+    tst.b   cl_cuh
+    bne.b   gu_m
+    tst.l   %d0
+    beq.b   gu_set
+gu_m:
+    ori.l   #0x10000,%d0
+gu_set:
+    move.l  %d0,cl_gmask
+    pea     6
+    jsr     LED_PAINT
+    addq.l  #4,%sp
+    moveq   #1,%d0
+    move.l  %d0,RDRAW
+    rts
+
+| d0 != 0: the header shows the group (MULTI; not while the [PTN]+[BANK] chord is held: its
+| ORIG PTN+PART is the whole pattern's). Uses d0.
+cl_ismulti:
+    jsr     cl_hstate
+    btst    #1,%d0
+    bne.b   im_no
+    move.l  cl_gmask,%d0
+    rts
+im_no:
+    moveq   #0,%d0
     rts
 
 | [PAGE] (SCALE) 0x1b (the user, 2026-10-29): like the ORIG entry -- this track's original
@@ -634,7 +720,7 @@ kn_out:
 cl_k_page:
     move.l  8(%sp),%d0
     cmpi.l  #1,%d0
-    bne.b   kn_out
+    bne.w   kn_out
     clr.b   cl_flash
     jsr     cl_hstate
     btst    #1,%d0
@@ -1123,22 +1209,53 @@ crf_lp:
     rts
 
 | ================================================================ loads
-| cl_load(n): the box bank's pattern n onto the active track of the playing pattern
+| cl_load(n): the box bank's pattern n onto the active track of the playing pattern; with a group,
+| onto every member, each its own track of that pattern (scope §1.9)
 cl_load:
-    jsr     cl_trk
-    moveq   #0,%d1
-    move.b  cl_sbank,%d1
-    lsl.l   #8,%d1
-    or.l    4(%sp),%d1                  | bank<<8 | pattern
+    moveq   #0,%d0
+    move.b  cl_sbank,%d0
+    lsl.l   #8,%d0
+    or.l    4(%sp),%d0                  | bank<<8 | pattern
     tst.b   cl_fn
-    beq.b   ld_seq
-    ori.l   #0x10000,%d1                | [FUNC] held: FULL (audio; a MIDI load always is)
-ld_seq:
+    beq.b   cl_each
+    ori.l   #0x10000,%d0                | [FUNC] held: FULL
+|   fall through
+| cl_each (d0 = code): cl_cueload(t, code, cued) on the active track, or on every member of the
+| group (cl_gmask; none while [CUE] is held with no member picked). Keeps d2-d7/a2-a6.
+cl_each:
+    lea     -12(%sp),%sp
+    movem.l %d2-%d4,(%sp)
+    move.l  %d0,%d3                     | d3 = code
+    jsr     cl_targets
+    move.l  %d0,%d4                     | d4 = the tracks
+    moveq   #0,%d2
+ea_l:
+    btst    %d2,%d4
+    beq.b   ea_n
     clr.l   -(%sp)                      | cued
-    move.l  %d1,-(%sp)
-    move.l  %d0,-(%sp)
+    move.l  %d3,-(%sp)
+    move.l  %d2,-(%sp)
     jsr     cl_cueload
     lea     12(%sp),%sp
+ea_n:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   ea_l
+    movem.l (%sp),%d2-%d4
+    lea     12(%sp),%sp
+    rts
+
+| d0 = the tracks a load / restore acts on, bit t (MIDI 8..15): the group's members, or the active
+| track. Uses d0, d1.
+cl_targets:
+    move.l  cl_gmask,%d0
+    bne.b   tg_out
+    jsr     cl_trk
+    moveq   #1,%d1
+    lsl.l   %d0,%d1
+    move.l  %d1,%d0
+tg_out:
+    andi.l  #0xffff,%d0
     rts
 
 | cl_cueload(t, code, now): source `code` (bank<<8 | pattern, SRC_SAVED<<8, SRC_ORIG<<8; + 0x10000 =
@@ -1246,28 +1363,38 @@ df_out:
 
 | cl_restore (d0 = 0x10000: with its machine / FX, ORIG SEQ/MCH/FX): the active track's original
 | back (cued like any load). Sequence only (and every MIDI restore): nothing if the sequence is
-| original. With machine / FX: always (its Part slice may differ). d0 = 1 if a load was made.
+| original. With machine / FX: always (its Part slice may differ). With a group: every member its
+| own original, by the same rule (scope §1.9, the user's choice).
 cl_restore:
-    move.l  %d0,-(%sp)
-    jsr     cl_trk
-    move.l  %d0,-(%sp)
-    tst.l   4(%sp)
+    lea     -12(%sp),%sp
+    movem.l %d2-%d4,(%sp)
+    move.l  %d0,%d3                     | d3 = 0 / 0x10000
+    jsr     cl_targets
+    move.l  %d0,%d4
+    moveq   #0,%d2
+rs_l:
+    btst    %d2,%d4
+    beq.b   rs_n
+    tst.l   %d3
     bne.b   rs_go
-rs_diff:
+    move.l  %d2,%d0
     jsr     cl_diff
     tst.l   %d0
-    beq.b   rs_out
+    beq.b   rs_n
 rs_go:
-    move.l  4(%sp),%d0
+    move.l  %d3,%d0
     ori.l   #SRC_ORIG<<8,%d0
     clr.l   -(%sp)
     move.l  %d0,-(%sp)
-    move.l  8(%sp),-(%sp)
+    move.l  %d2,-(%sp)
     jsr     cl_cueload
     lea     12(%sp),%sp
-    moveq   #1,%d0
-rs_out:
-    addq.l  #8,%sp
+rs_n:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   rs_l
+    movem.l (%sp),%d2-%d4
+    lea     12(%sp),%sp
     rts
 
 | cl_restorepat: ORIG PTN/PART (the user, 2026-10-29): the pattern you are on and its Part as
@@ -3101,6 +3228,39 @@ uk_out:
     move.l  TOAST_T,%d0                 | displaced; stock's beq follows on these flags
     jmp     UITICK_RES
 
+| The active-track test of stock's track sidebars (0x4003fed8, its track in d4: the inverted tab)
+| and track LED painter (0x40083eb0, LED slot 6, its track in d5: the active colours), six sites of
+| `mvzb 0x80000000,%d0` -> jsr here (scope §1.9). With a Clyps group (cl_gmask: [CUE] held, or
+| members picked) d0 = the track itself when it is a member, -1 otherwise, so every member gets the
+| tab and the colours and the active track only if it is one. Else stock's byte. Keeps all but d0.
+| ROM: both painters run before the DRAM part exists (cl_magic).
+cl_act4:
+    move.l  %d4,%d0
+    bra.b   ca_go
+cl_act5:
+    move.l  %d5,%d0
+ca_go:
+    move.l  %d1,-(%sp)
+    move.l  cl_magic,%d1
+    cmpi.l  #CL_MAGIC,%d1
+    bne.b   ca_stock
+    move.l  cl_gmask,%d1
+    beq.b   ca_stock
+    tst.l   MIDI_MODE
+    beq.b   ca_side
+    lsr.l   #8,%d1                      | the MIDI side: members 8..15
+ca_side:
+    btst    %d0,%d1
+    bne.b   ca_out                      | a member: its own index
+    moveq   #-1,%d0
+    bra.b   ca_out
+ca_stock:
+    moveq   #0,%d0
+    move.b  CUR_TRACK,%d0
+ca_out:
+    move.l  (%sp)+,%d1
+    rts
+
 cl_rstall:
     move.l  4(%sp),-(%sp)
     jsr     RESET_BANKS
@@ -3262,8 +3422,33 @@ cl_draw:
     beq.b   cd_r1
     lea     cl_s_origp,%a2
     moveq   #ORIGP_W,%d5
-    bra.b   cd_rl
+    bra.w   cd_rl
 cd_r1:
+|   a group (scope §1.9): the members may be on both sides, so no TRK / MIDI TRK: SEQ / FULL,
+|   ORIG SEQ / ORIG FULL (all of them >= 9 px clear of "MULTI BNK A", which ends at x 43)
+    jsr     cl_ismulti
+    tst.l   %d0
+    beq.b   cd_r1s
+    moveq   #0,%d1
+    move.b  cl_cur,%d1
+    cmpi.l  #NSLOT,%d1
+    bne.b   cd_rg
+    lea     cl_s_gorig,%a2
+    moveq   #GORIG_W,%d5
+    tst.b   cl_fn
+    beq.w   cd_rl
+    lea     cl_s_gorigf,%a2
+    moveq   #GORIGF_W,%d5
+    bra.w   cd_rl
+cd_rg:
+    lea     cl_s_gseq,%a2
+    moveq   #GSEQ_W,%d5
+    tst.b   cl_fn
+    beq.b   cd_rl
+    lea     cl_s_gfull,%a2
+    moveq   #GFULL_W,%d5
+    bra.b   cd_rl
+cd_r1s:
     moveq   #0,%d1
     move.b  cl_cur,%d1
     cmpi.l  #NSLOT,%d1
@@ -3321,6 +3506,12 @@ cd_ta:
     move.l  %d0,-(%sp)
     move.l  %d1,-(%sp)
     pea     cl_fmt_hdr
+    jsr     cl_ismulti
+    tst.l   %d0
+    beq.b   cd_lfmt
+    move.l  #cl_fmt_hdrm,(%sp)          | "MULTI BNK A" (the user's choice: the bank stays)
+    move.l  %d2,4(%sp)                  | ... its one argument: the bank
+cd_lfmt:
     pea     cl_buf
     jsr     SPRINTF
     lea     20(%sp),%sp
@@ -3382,10 +3573,20 @@ cd_nob:
     beq.b   cd_nobk
     tst.l   %d4
     bne.b   cd_nobk
+    moveq   #0,%d2                      | "BNK A" after "MULTI " sits MULTI_DX further right
+    jsr     cl_ismulti
+    tst.l   %d0
+    beq.b   cd_bkx
+    moveq   #MULTI_DX,%d2
+cd_bkx:
     pea     WIN_H-2
-    pea     BKBOX_R
+    moveq   #BKBOX_R,%d0
+    add.l   %d2,%d0
+    move.l  %d0,-(%sp)
     pea     HDR_Y-1
-    pea     BKBOX_L
+    moveq   #BKBOX_L,%d0
+    add.l   %d2,%d0
+    move.l  %d0,-(%sp)
     bsr.w   cl_xor
     lea     16(%sp),%sp
 cd_nobk:
@@ -4628,6 +4829,17 @@ cl_keys:
     KREC 0x2f, cl_k_chord, cl_k_chord, cl_k_chord, 30, 0
     KREC 0x2d, cl_k_func, cl_k_func, 0, 0, 0, cl_fsub
     KREC 0x1b, cl_k_page, 0, 0, 0, 0     | [PAGE]: the original back ([FUNC]+[PAGE]: every track's)
+    KREC 0x2a, cl_k_cue, cl_k_cue, 0, 0, 0, cl_csub    | [CUE]: the group (scope §1.9); delay 0 as T1's
+    .byte 0xff, 0
+    .align 2
+| [CUE]'s sub-map: chained after stock's 0x400bf2a0 (TRACK = cue, [YES], [TEMPO] = metronome, the
+| scene keys 0x2b / 0x2c), it wins for the keys it lists. Delays 0, as stock's. The rest stay stock's.
+cl_csub:    .long 0, cl_ckeys, 0, 0, 0
+cl_ckeys:
+    .irp c, 0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17
+    KREC \c, cl_k_cuet, 0, 0, 0, 0       | [CUE]+TRACK: in / out of the group
+    .endr
+    KREC 0x31, cl_k_nop, 0, 0, 0, 0      | [CUE]+[YES]: nothing (stock's 0x400402ec is a cue action)
     .byte 0xff, 0
     .align 2
 | [FUNC]'s sub-map. A key's sub-maps are not overridden by a higher layer but CHAINED: the rebuild
@@ -4673,6 +4885,9 @@ cl_ledrec:  .long 0, cl_paint, cl_blink
             .align 2
 
 cl_win:     .long 0
+cl_gmask:   .long 0                     | the painters' group test (cl_gupd): 0 = none, else 0x10000 | members
+cl_grp:     .short 0                    | the group's members: bit t, MIDI 8..15 (scope §1.9)
+cl_cuh:     .byte 0                     | [CUE] held (our own press / release record)
 cl_open:    .byte 0
 cl_sbank:   .byte 0                     | the select box's bank (cl_cur its slot, 16 = ORIG)
 cl_bank:    .byte 0
@@ -4750,6 +4965,11 @@ cl_colx:    .short 6, 8, 52, 3          | column 1: number field, bar / box 8..5
             .short 62, 60, 108, 55      | column 2: numbers 62..68, bar / box 60..108, its x at 55..57
 cl_fmt_hdr: .asciz "%c%d BNK %c"
 cl_fmt_hdrs:.asciz "%c%d"
+cl_fmt_hdrm:.asciz "MULTI BNK %c"         | 41 px: x 3..43 (scope §1.9)
+cl_s_gseq:  .asciz "SEQ"
+cl_s_gfull: .asciz "FULL"
+cl_s_gorig: .asciz "ORIG SEQ"
+cl_s_gorigf:.asciz "ORIG FULL"
 cl_s_load:  .asciz "LOAD:"
 cl_s_seqb:  .asciz "TRK SEQ"
 cl_s_seqf:  .asciz "TRK FULL"

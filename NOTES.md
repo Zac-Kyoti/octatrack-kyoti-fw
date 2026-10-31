@@ -37789,3 +37789,15 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   slot 6 painter 0x40083eb0 (tick 0x40083fdc, period 2; active track via 0x80000000); the sidebar tab
   is NOT drawn with RECT/TEXT (no edge draws on a track change): next to find. Gates L 8, full 128,
   F 27, M 9.
+- **CLYPT** (2026-10-30, NOT flashed; CLYPR never flashed, the unit has CLYPQ): multi-track loads with a
+  [CUE] group (scope §1.9 "Built"). Sidebar RE solved: the tabs ARE drawn with RECT / glyph calls, by
+  `FUN_4003fed8`, run on every pass of `FUN_40052200` (route A never runs it, hence no draws on a track
+  change); found by a write watch on the main window's edge columns during a project load
+  (`tools/clyps_probe_sidebar.py`). Its two loops and the track LED painter's four colour picks share
+  one 6-byte active test `mvzb 0x80000000,%d0` -> `jsr cl_act4/cl_act5` (ROM): members get stock's own
+  tab and active colours. Our [CUE] record + sub-map (TRACK = toggle, [YES] = nothing); loads / ORIG /
+  [PAGE] loop the members (`cl_each`, `cl_restore`); [NO] dismisses the group. Header `MULTI BNK A`
+  (41 px, x 3..43): the per-track right labels collide (their `LOAD:` starts at x 34-42), so a group
+  shows `LOAD: SEQ|FULL`, `LOAD: ORIG SEQ|FULL` (proposal, to confirm). KB memory-map rows added
+  (`FUN_4003fed8`, `0x460d168c`, slot 6 details). Gates: full 128, F+Q 27, L 8, M+U on JAM2 26 (U 17,
+  incl. muted members = yellow), U on OT DEMO 17. syx 368bb03a….
