@@ -45,6 +45,40 @@
     `0x400a1f72` phase D, `0x400a43a0` wrap body, `0x40062d1c` UI tail, `0x400905d4` the masked
     bank loader (project load).
 
+**HANDOFF 2026-10-30 (start here; supersedes the older handoff notes below).**
+- **State:** latest image `140C_CLYPR` (syx `25174496…`, commit `01c789c`, branch `trkseq`, all
+  unpushed), NOT flashed yet; on the unit: `140C_CLYPQ`. Gates all green: `diag_clyps_ui.py --only
+  ABCDYETGRSNPK` (OT DEMO, 128) + `--only FQ` (27) + `--only L` (8, card reloads) + `--only M` on JAM2
+  (9). Run L / F / M / full in parallel with distinct `--name`s (each stages its own card tree).
+- **What exists** (details in §1.0-§1.9 and the CLYPx walk-throughs in FLASHING §4): the view / grid /
+  labels as the user finalised them (dark header boxes, `T6 BNK A`, `LOAD: TRK SEQ|FULL`, `MIDI TRK
+  SEQ|FULL`, `ORIG ...`, `ORIG PTN+PART`), FULL loads (§1.7, MIDI too via [FUNC]), originals ([PAGE],
+  ORIG, chord + [PAGE]/[YES] = ORIG PTN+PART), temp save / reload (FULL), names on the card (§10),
+  stock [PTN]/[BANK] inside Clyps with [BANK] on release everywhere, mutes and the Parts menu inside
+  Clyps (window prio 0), the load-confirmation flash (detour on the 1/60 s UI tick `0x40056c28`),
+  card reloads (§1.8, `tools/clyps/clyps_reload.s`).
+- **Next, in order (agreed with the user):**
+  1. **Multi-track loads with a [CUE] group, §1.9** (decisions recorded there). RE done: [CUE] = key
+     `0x2a` (its held sub-map `0x400bf2a0`); track LEDs = LED slot 6 painter `0x40083eb0` (tick
+     `0x40083fdc`, period 2), which picks "active" by `0x80000000`: replace with a group test in our own
+     slot-6 record. **Open RE:** where the main screen draws the sidebar's active-track tab -- not via
+     RECT `0x40012254` / TEXT `0x40012bd8` (an emulator trace of a track change showed no edge draws;
+     probe script idea: hook every call during a TRACK change and filter x <= 8 / >= 120); probably the
+     compositor `0x40013abc`'s own chrome or a bitmap blit.
+  2. **DIRECT JUMP / KYOTI integration** (§0 step 3 below; Clyps replaces RELOAD_FROM_PROJECT in KYOTI).
+  3. **The standalone RELOAD_FROM_PROJECT update** (§1.8: FULL track slice from the card, new toasts,
+     the pattern reload; all build forms + octabam PR) -- after Clyps.
+- **New traps (2026-10-29/30):** route A runs no UI tick: call `0x40056c28` from the gate to drive
+  the flash; the gate posts a type-0 SYS message after keys only in K/M (`posttail`) and via
+  `tailmsg()` before held-flag checks (posting everywhere made S fault); `diag_clyps_landing.py` stages
+  one fixed tree (no parallel runs); a wait loop `pgrep -f <name>` matches itself (use `[n]ame`);
+  `clyps_render.py` needs a leading `32` (the boot SET DATE dialog); card copies differ from RAM only
+  in bytes the bank file never holds (`+0x899` per audio record, slab tail); a toast line holds 113 px
+  (`0x400ba862`, box = text + 15, screen 128); header labels end at x 107, `LOAD: ` = 21 px, `T6 BNK A`
+  ends at x 31; `0x40033970` is not a readable mute state; `WIN_NEW(prio p)` evicts every window with
+  prio >= p; the user tests a few changes per image and wants measurements before wording / layout
+  choices, renders only for layout changes and only if they ask.
+
 **2026-10-29: CLYPH FLASHED; the user's changes → `140C_CLYPI`, then `140C_CLYPJ` (FLASHED), then
 `140C_CLYPK` (built, not flashed): rounding and header outlines undone (dark inverted boxes again,
 on BANK while [BANK] alone is held and on every right-hand label after `LOAD: `);
