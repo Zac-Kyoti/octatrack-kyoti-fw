@@ -37773,3 +37773,9 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   .strd holds 16 PTRN, 4 working PART, 4 SAVE PART chunks (`0x4008e0c0..`). Gate L: only bytes the
   bank file never holds differ (`+0x899`). Gates L 8, full 128, F+Q 26, M 8. Next: DIRECT JUMP /
   KYOTI integration; RELOAD_FROM_PROJECT's own update after Clyps.
+- **CLYPP flashed; CLYPQ** (2026-10-30, NOT flashed): the MIDI side gets SEQ / FULL like audio (plain =
+  sequence only, [FUNC] = with the track's settings; `LOAD: MIDI TRK SEQ|FULL`, `LOAD: ORIG MIDI SEQ|FULL`);
+  toasts `TRACK n SEQ|FULL` / `RELOADED FROM PROJ`, `PATTERN A06` / `RELOADED FROM PROJ`, temp
+  `TRACK n FULL SAVED`, `TRACK n FULL` / `RELOADED` (MIDI two lines). Scope §1.8 lists the standalone
+  RELOAD_FROM_PROJECT work (FULL track slice, new toasts, + the pattern reload). Gates L 8, full 128,
+  F+Q 26, M 9.

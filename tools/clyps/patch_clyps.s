@@ -218,11 +218,13 @@
     .equ SAVED_W,     19
     .equ ORIGS_W,     45                | "ORIG TRK SEQ"       (the user, 2026-10-30: all of them fit
     .equ ORIGF_W,     49                | "ORIG TRK FULL"       beside "T6 BNK A", which ends at x 31)
-    .equ ORIGM_W,     49                | "ORIG MIDI TRK"
+    .equ ORIGM_W,     49                | "ORIG MIDI SEQ"
+    .equ ORIGMF_W,    53                | "ORIG MIDI FULL" (2 px clear of "BNK A": the user's choice)
     .equ ORIGP_W,     50                | "ORIG PTN+PART"
     .equ SEQ_W,       26                | "TRK SEQ"
     .equ SEQF_W,      30                | "TRK FULL"
-    .equ MTRK_W,      30                | "MIDI TRK"
+    .equ MTRK_W,      45                | "MIDI TRK SEQ"
+    .equ MTRKF_W,     49                | "MIDI TRK FULL"
     .equ LOADP_A,     21                | "LOAD: " advance (20 px + 1)
     .equ BKBOX_L,     12                | [BANK] held alone: "BNK A" (x 14..31: "T6 " is 11 px for T
     .equ BKBOX_R,     33                | and M alike) in a dark box, 2 dark columns each side
@@ -1140,11 +1142,8 @@ cl_cueload:
     move.l  32(%sp),%d4                 | d4 = now
     move.l  %d2,%d5
     swap    %d5
-    andi.l  #1,%d5                      | d5 = FULL
-    cmpi.l  #8,%d3
-    bcs.b   lo_aud
-    moveq   #1,%d5                      | MIDI: always everything (the user, 2026-10-28)
-lo_aud:
+    andi.l  #1,%d5                      | d5 = FULL (the MIDI side too since 2026-10-30: the user
+                                        | wants SEQ vs FULL there as on the audio side)
     andi.l  #0xffff,%d2
     tst.l   RUNNING
     bne.b   lo_cue
@@ -1242,9 +1241,7 @@ cl_restore:
     jsr     cl_trk
     move.l  %d0,-(%sp)
     tst.l   4(%sp)
-    beq.b   rs_diff
-    cmpi.l  #8,%d0
-    bcs.b   rs_go
+    bne.b   rs_go
 rs_diff:
     jsr     cl_diff
     tst.l   %d0
@@ -1496,11 +1493,14 @@ ts_a:
     move.l  %d2,-(%sp)
     jsr     cl_savet
     addq.l  #4,%sp
-    lea     cl_fmt_tsv,%a0
-    bra.b   ts_toast
+    lea     cl_fmt_tsv,%a0              | audio: "TRACK 3 FULL SAVED", one line
+    cmpi.l  #8,%d2
+    bcs.b   ts_toast
+    lea     cl_s_saved2,%a0             | MIDI: "MIDI TRACK 3 FULL" / "SAVED"
+    bra.b   ts_two
 ts_no:
     tst.b   cl_ynact+1
-    beq.b   ts_done
+    beq.w   ts_done
     moveq   #1,%d0                      | [NO] held: reload
     move.b  %d0,cl_ynused+1
     lea     cl_svalid,%a0
@@ -1513,8 +1513,8 @@ ts_no:
     move.l  %d2,-(%sp)
     jsr     cl_cueload
     lea     12(%sp),%sp
-    lea     cl_fmt_trl,%a0
-    bra.b   ts_toast
+    lea     cl_s_reld2,%a0              | "TRACK 3 FULL" / "RELOADED" (122 px in one line: too wide)
+    bra.b   ts_two
 ts_toast1:
     movea.l %a1,%a0
 ts_toast:
@@ -1536,6 +1536,30 @@ ts_l:
     pea     TOAST_DUR
     pea     cl_buf
     jsr     TOAST
+    addq.l  #8,%sp
+    bra.b   ts_done
+| two lines (the user, 2026-10-30): "%sTRACK n FULL" / a0 (SAVED or RELOADED), RELOAD's 2-line toast
+ts_two:
+    move.l  %a0,cl_tlines+4
+    move.l  %d2,%d0
+    lea     cl_s_none,%a1
+    cmpi.l  #8,%d0
+    bcs.b   ts_tl
+    lea     cl_s_midi,%a1
+    subq.l  #8,%d0
+ts_tl:
+    addq.l  #1,%d0
+    move.l  %d0,-(%sp)
+    move.l  %a1,-(%sp)
+    pea     cl_fmt_tfull
+    pea     cl_buf
+    jsr     SPRINTF
+    lea     16(%sp),%sp
+    lea     cl_buf,%a0
+    move.l  %a0,cl_tlines
+    pea     2
+    pea     cl_tlines
+    jsr     cl_toast2
     addq.l  #8,%sp
 ts_done:
     move.l  (%sp)+,%d2
@@ -3195,7 +3219,13 @@ cd_r1:
     lea     cl_s_origm,%a2
     moveq   #ORIGM_W,%d5
     cmpi.l  #8,%d6
-    bcc.b   cd_rl
+    bcs.b   cd_ra
+    tst.b   cl_fn
+    beq.b   cd_rl
+    lea     cl_s_origmf,%a2
+    moveq   #ORIGMF_W,%d5
+    bra.b   cd_rl
+cd_ra:
     lea     cl_s_origs,%a2
     moveq   #ORIGS_W,%d5
     tst.b   cl_fn
@@ -3204,10 +3234,16 @@ cd_r1:
     moveq   #ORIGF_W,%d5
     bra.b   cd_rl
 cd_r2:
-    lea     cl_s_mtrk,%a2               | MIDI: "MIDI TRK" (the user, 2026-10-29)
+    lea     cl_s_mtrk,%a2               | MIDI: "MIDI TRK SEQ" / "MIDI TRK FULL" (the user, 2026-10-30)
     moveq   #MTRK_W,%d5                 | d5 = the label's width
     cmpi.l  #8,%d6
-    bcc.b   cd_rl
+    bcs.b   cd_rb
+    tst.b   cl_fn
+    beq.b   cd_rl
+    lea     cl_s_mtrkf,%a2
+    moveq   #MTRKF_W,%d5
+    bra.b   cd_rl
+cd_rb:
     lea     cl_s_seqb,%a2
     moveq   #SEQ_W,%d5
     tst.b   cl_fn
@@ -4647,7 +4683,8 @@ cl_fmt_hdrs:.asciz "%c%d"
 cl_s_load:  .asciz "LOAD:"
 cl_s_seqb:  .asciz "TRK SEQ"
 cl_s_seqf:  .asciz "TRK FULL"
-cl_s_mtrk:  .asciz "MIDI TRK"
+cl_s_mtrk:  .asciz "MIDI TRK SEQ"
+cl_s_mtrkf: .asciz "MIDI TRK FULL"
 cl_fmt_num: .asciz "%d"
 cl_fmt_trg: .asciz "%c%02d %02d TR"       | 33 px: "A01 15 TR", as a source label (the user)
 cl_s_lck:   .asciz "LOCKS"
@@ -4655,7 +4692,8 @@ cl_s_emp:   .asciz "---"
 cl_s_orig:  .asciz "ORIG"
 cl_s_origs: .asciz "ORIG TRK SEQ"
 cl_s_origf: .asciz "ORIG TRK FULL"
-cl_s_origm: .asciz "ORIG MIDI TRK"
+cl_s_origm: .asciz "ORIG MIDI SEQ"
+cl_s_origmf:.asciz "ORIG MIDI FULL"
 cl_s_origp: .asciz "ORIG PTN+PART"
 cl_s_saved: .asciz "SAVED SEQ"           | 34 px: the slot label after a temp reload (the user)
 cl_fmt_srct:.asciz "%c%02d %02d TR"       | 33 px: "B14 06 TR" (the user, 2026-10-29)
@@ -4670,8 +4708,12 @@ cl_s_strd:  .asciz "strd"
 cl_nfhdr:   .ascii "CLYP"
             .short 1, 256
 cl_tname:   .space 16
-cl_fmt_tsv: .asciz "%sTRK %d SAVED"
-cl_fmt_trl: .asciz "%sTRK %d RELOADED"
+cl_fmt_tsv: .asciz "%sTRACK %d FULL SAVED"
+cl_fmt_tfull:.asciz "%sTRACK %d FULL"
+cl_s_saved2:.asciz "SAVED"
+cl_s_reld2: .asciz "RELOADED"
+            .align 2
+cl_tlines:  .long 0, 0
 cl_fmt_tno: .asciz "%sTRK %d: SAVE FIRST"       | toast window = text + 15 px: 126 px at most (MIDI TRK 8)
 cl_s_midi:  .asciz "MIDI "
 cl_s_none:  .byte 0

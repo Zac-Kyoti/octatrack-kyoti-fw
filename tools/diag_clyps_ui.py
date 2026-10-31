@@ -378,11 +378,17 @@ def main(argv):
         key(PTN, 0)
         src = mrec(1, 1)
         msl = pslice(9, partbase(bank, 1))
-        msl_same = msl == pslice(9, partbase(bank, act))
+        dsl = pslice(9, partbase(bank, act))
+        msl_same = msl == dsl
         key(0x01, 1)
         key(0x01, 0)
         check(mrec(act, 1) == src, "trig 2 loaded pattern 2's M2 onto the playing pattern's M2")
-        check(pslice(9, partbase(bank, act)) == msl, "... with its track settings (a MIDI load is always FULL)"
+        check(pslice(9, partbase(bank, act)) == dsl, "... the sequence only: M2's track settings stay (SEQ)")
+        key(FUNC, 1)
+        key(0x01, 1)
+        key(0x01, 0)
+        key(FUNC, 0)
+        check(pslice(9, partbase(bank, act)) == msl, "[FUNC] + trig 2: with pattern 2's track settings (FULL)"
               + (" -- the two Parts' M2 slices were already equal" if msl_same else ""))
         # the [MIDI] key inside Clyps (not ours): the view and the grid follow the side
         lastt = lambda: rd(syms["cl_lastt"], 1)

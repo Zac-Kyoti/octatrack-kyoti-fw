@@ -599,6 +599,12 @@ everything" is O17.
 - [PAGE] / [FUNC]+[PAGE] keep their meaning (this track / every changed track, sequence only)
   unless the user decides otherwise when FULL loads are built.
 
+**Superseded 2026-10-30 (the user): the MIDI side gets SEQ / FULL like the audio side** -- a user may
+want to keep the destination's channel / program and change only the sequence. Plain load = SEQ,
+[FUNC] = FULL; header `LOAD: MIDI TRK SEQ` / `LOAD: MIDI TRK FULL`; on ORIG `LOAD: ORIG MIDI SEQ` /
+`LOAD: ORIG MIDI FULL` (`ORIG MIDI TRK SEQ` does not fit beside `BNK A`). [PAGE] / [FUNC]+[PAGE] the same
+rule. The temp reload and ORIG PTN+PART stay FULL. Built `140C_CLYPQ`. The paragraph below is history.
+
 **The MIDI side has no load modes (the user, 2026-10-28).** MIDI tracks have no machines or FX, and
 a MIDI sequence depends on its track's settings, so every MIDI load takes everything.
 - Header: no `LOAD: SEQ` label on the MIDI side, and [FUNC] changes nothing there (no
@@ -766,6 +772,16 @@ look like a pattern pick to Clyps' UI tail (which closes Clyps on -1).
   reload restores). The job parses on past the 16 patterns to that Part chunk into a scratch Part
   buffer (bss, `0x18b2` B): a track FULL reload copies that track's slice from it (Clyps' FULL
   machinery: `cl_slice` + `TRK_APPLY` / `cl_mapply`); the pattern reload copies the whole Part.
+- **Toasts (the user, 2026-10-30; built CLYPQ), two lines:** `TRACK n SEQ` / `RELOADED FROM PROJ`,
+  `TRACK n FULL` / ..., `MIDI TRACK n SEQ|FULL` / ..., `PATTERN A06` / `RELOADED FROM PROJ`
+  ("RELOADED FROM PROJECT" is 123 px, a toast line holds 113). Temp save / reload (they ARE full:
+  the save keeps the record + the whole Part, the reload applies the record + the track's slice):
+  `TRACK n FULL SAVED` (one line), `MIDI TRACK n FULL` / `SAVED`, `TRACK n FULL` / `RELOADED` (122 px
+  in one line), `MIDI TRACK n FULL` / `RELOADED`.
+- **For the standalone RELOAD_FROM_PROJECT (after Clyps):** the [BANK]+TRACK FULL-from-the-card
+  behaviour (track slice, not the whole Part), the toasts above, AND the pattern reload from the card
+  (`PATTERN A06` / `RELOADED FROM PROJ`) -- its gesture outside Clyps is to be decided then (Clyps uses
+  [PTN]+[BANK] + trig, which in the standalone image is stock's chord).
 - **The standalone RELOAD_FROM_PROJECT gets the same change** (track FULL from the card instead of
   the whole Part, and toasts 1 and 2), rebuilt in all its forms (standalone, KYOTI, Bugbuild,
   octabam) with an octabam PR drafted. **Order: after Clyps** (the user).

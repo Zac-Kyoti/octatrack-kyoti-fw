@@ -206,6 +206,15 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **CLYPS — CLYPQ walk-through.** Image `140C_CLYPQ` = CLYPP + SEQ / FULL on the MIDI side + new toasts.
+  1. MIDI side: header `LOAD: MIDI TRK SEQ`; hold `[FUNC]`: `LOAD: MIDI TRK FULL`. A plain trig loads only
+     the sequence (the track's channel / program / CCs stay); `[FUNC]` + trig brings them too. On ORIG:
+     `LOAD: ORIG MIDI SEQ` / `LOAD: ORIG MIDI FULL` (`[YES]` / `[FUNC]`+`[YES]`, also `[PAGE]` / `[FUNC]`+`[PAGE]`).
+  2. Card reload toasts: `TRACK n SEQ` / `RELOADED FROM PROJ`, `TRACK n FULL` / ..., `MIDI TRACK n ...`,
+     and `PATTERN A06` / `RELOADED FROM PROJ`.
+  3. Temp save / reload toasts: `TRACK n FULL SAVED`; MIDI `MIDI TRACK n FULL` / `SAVED`; reload
+     `TRACK n FULL` / `RELOADED` (MIDI: `MIDI TRACK n FULL` / `RELOADED`).
+
 - **CLYPS — CLYPP walk-through.** Image `140C_CLYPP` = CLYPO + reloads from the CF card (scope §1.8).
   Use a throwaway copy of a project and SAVE it first (the reloads read the saved `.strd`).
   1. In Clyps, change a track's trigs, its machine settings and an FX. Hold `[PTN]` alone and press

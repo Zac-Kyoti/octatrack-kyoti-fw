@@ -17,8 +17,8 @@
 |   * the Part comes from the card: the .strd's WORKING Part chunk (stock's bank reader reads the
 |     16 PTRN chunks, then the 4 working PART chunks, then the 4 SAVE PART copies), parsed with
 |     stock's own 0x4008be2c into our buffer;
-|   * toasts "TRK n" / "CF SEQ RELOAD", "TRK n" / "CF FULL RELOAD" (MIDI: "MIDI TRK n"), and
-|     "PTN A05 CF RELOAD".
+|   * toasts "TRACK n SEQ" / "RELOADED FROM PROJ", "TRACK n FULL" / ... (MIDI: "MIDI TRACK n ..."),
+|     "PATTERN A05" / "RELOADED FROM PROJ" (the user, 2026-10-30).
 | Runs in two contexts: cl_rlreq from a key handler (UI task), cl_rljob / cl_rldone in the project
 | worker task (prio 1). Nothing here runs from a sequencer tick.
 
@@ -60,10 +60,12 @@ cl_rlreq:
     move.b  %d3,rq_pat
     move.b  %d4,rq_t
 |   the message: line 1 / line 2 (one line for the pattern)
+    lea     rq_s_proj,%a0               | line 2 for every kind (the user, 2026-10-30; "RELOADED FROM
+    move.l  %a0,rq_l2p                  | PROJECT" is 123 px: wider than a toast line)
+    moveq   #2,%d0
+    move.b  %d0,rq_nl
     cmpi.l  #RQ_PTN,%d2
     bne.b   rr_trk
-    moveq   #1,%d0
-    move.b  %d0,rq_nl
     move.l  %d3,%d0
     addq.l  #1,%d0
     move.l  %d0,-(%sp)                  | pattern 1..16
@@ -77,8 +79,12 @@ cl_rlreq:
     lea     16(%sp),%sp
     bra.b   rr_post
 rr_trk:
-    moveq   #2,%d0
-    move.b  %d0,rq_nl
+    lea     rq_s_seq,%a0
+    cmpi.l  #RQ_TRKSEQ,%d2
+    beq.b   rr_k
+    lea     rq_s_full,%a0
+rr_k:
+    move.l  %a0,-(%sp)                  | SEQ / FULL
     move.l  %d4,%d0
     andi.l  #7,%d0
     addq.l  #1,%d0
@@ -92,13 +98,7 @@ rr_aud:
     pea     rq_fmt_trk
     pea     rq_line1
     jsr     SPRINTF
-    lea     16(%sp),%sp
-    lea     rq_s_seq,%a0
-    cmpi.l  #RQ_TRKSEQ,%d2
-    beq.b   rr_l2
-    lea     rq_s_full,%a0
-rr_l2:
-    move.l  %a0,rq_l2p
+    lea     20(%sp),%sp
 rr_post:
     moveq   #1,%d0
     move.b  %d0,rq_msg                  | armed before the post (S93)
@@ -609,10 +609,11 @@ rq_hdr:     .space 32
 rq_fh:      .space 64
 rq_path:    .space 128
 rq_line1:   .space 24
-rq_fmt_trk: .asciz "%sTRK %d"
-rq_fmt_ptn: .asciz "PTN %c%02d CF RELOAD"
-rq_s_seq:   .asciz "CF SEQ RELOAD"
-rq_s_full:  .asciz "CF FULL RELOAD"
+rq_fmt_trk: .asciz "%sTRACK %d %s"         | "TRACK 3 SEQ" / "MIDI TRACK 3 FULL" (the user, 2026-10-30)
+rq_fmt_ptn: .asciz "PATTERN %c%02d"
+rq_s_seq:   .asciz "SEQ"
+rq_s_full:  .asciz "FULL"
+rq_s_proj:  .asciz "RELOADED FROM PROJ"     | 105 px
 rq_s_lost1: .asciz "SEQ RELOAD LOST"
 rq_s_lost2: .asciz "NOT RESTORED!"
             .align 2
