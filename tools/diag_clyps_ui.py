@@ -1026,12 +1026,23 @@ def main(argv):
         check(state()["cur"] == 16, "the box on ORIG")
         tap(YES)
         check(rec(act, 0) == oslot(act, 0) and pslice(t, dst) == ssl, "ORIG SEQ ([YES]): the sequence, not the slice")
+        # make the Part's SAVE PART copy equal the Part as loaded, so the restore below makes the Part
+        # equal to it: the edited mark must then clear (the user, 2026-10-30)
+        bb0 = BLOB + bank * BANKSTRIDE
+        pi0 = rd(bb0 + act * PATSTRIDE + 0x8E57, 1) & 3
+        u.mem_write(bb0 + 0x9504A + pi0 * PARTSZ, bytes(u.mem_read(partbase(bank, act, syms["cl_bss"]), PARTSZ)))
+        u.mem_write(bb0 + 0x9B312 + pi0, b"\x01")
         key(FUNC, 1)
         tap(YES)
         key(FUNC, 0)
         osl = pslice(t, partbase(bank, act, syms["cl_bss"]))
         check(rec(act, 0) == oslot(act, 0) and pslice(t, dst) == osl == dsl0,
               "ORIG SEQ+MCH/FX ([FUNC]+[YES]): the original sequence and slice")
+        bb = BLOB + bank * BANKSTRIDE
+        scopy = bytes(u.mem_read(bb + 0x9504A + pi * PARTSZ, PARTSZ))
+        eq = bool(rd(bb + 0x9B312 + pi, 1)) and bytes(u.mem_read(dst, PARTSZ)) == scopy
+        check(bool(rd(bb + 0x95048, 1) >> pi & 1) == (not eq),
+              f"Part {pi + 1}'s edited flag follows its SAVE PART copy (equal now: {eq})")
         def ledbit(die):
             b_ = bytes(u.mem_read(0x460BA98C, 17))
             return (b_[die // 8] >> (die % 8)) & 1

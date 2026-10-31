@@ -206,6 +206,14 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **CLYPS — CLYPR walk-through.** Image `140C_CLYPR` = CLYPQ + three fixes.
+  1. Put the box on your own pattern's slot (the highlighted one) and load it (`[YES]` or its trig):
+     the highlight bar flashes like any other slot.
+  2. On a Part you have saved (SAVE PART), make a FULL load that changes a track's machine / FX, then
+     bring it back (`[FUNC]`+`[YES]` on ORIG, or a FULL load of the original): when the Part is again
+     identical to its saved version, stock's Part-edited mark is gone; while it differs, it shows.
+  3. Hold `[PTN]`+`[BANK]` inside Clyps and press `[PAGE]` (or `[YES]`): the `ORIG PTN+PART` box flashes.
+
 - **CLYPS — CLYPQ walk-through.** Image `140C_CLYPQ` = CLYPP + SEQ / FULL on the MIDI side + new toasts.
   1. MIDI side: header `LOAD: MIDI TRK SEQ`; hold `[FUNC]`: `LOAD: MIDI TRK FULL`. A plain trig loads only
      the sequence (the track's channel / program / CCs stay); `[FUNC]` + trig brings them too. On ORIG:

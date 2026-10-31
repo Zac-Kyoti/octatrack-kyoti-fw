@@ -801,6 +801,14 @@ the pattern one is 1 line.
 **The chord's grid** (built CLYPN): with both keys held, in either order, the pattern view of the
 playing bank (your pattern red, cued yellow, data green); the bank view only for [BANK] alone.
 
+### 1.8b CLYPR fixes (the user, 2026-10-30; built)
+- A load with the box on your own pattern (the highlight) flashes the highlight bar itself.
+- Stock's Part-edited flag (bank `+0x95048`, SRAM `0x100b145e`) after a FULL load follows "differs
+  from its SAVE PART copy" (bank `+0x9504a + part*0x18b2`, valid when `+0x9b312 + part` != 0, the
+  test stock's PART RELOAD makes): identical again → cleared, as after stock's PART RELOAD.
+- The chord + [PAGE] / [YES] begun inside Clyps flashes the `ORIG PTN+PART` box (`cl_ftgt` = 1: the
+  header label is the flash target; 0: the select box / highlight).
+
 ### 1.9 Multi-track loads (the user, 2026-10-30; scoped, not built)
 
 - **[CUE] in Clyps** does not do stock's cue. Hold [CUE]: the header's left reads **`MULTI BNK A`**

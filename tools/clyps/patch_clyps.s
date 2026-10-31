@@ -42,6 +42,8 @@
     .equ SRAM_PART,   0x100a4ece        | the SRAM mirror's Parts (SRAM_PAT + PART_OFF)
     .equ PEDIT,       0x95048           | bank + : byte, bit p = Part p edited (stock's paste)
     .equ PEDIT_S,     0x100b145e        | ... its SRAM copy
+    .equ PSAVED,      0x9b312           | bank + part: != 0 = the Part has a SAVE PART copy
+    .equ PSAVECPY,    0x9504a           | bank + part * PARTSZ: the SAVE PART copies
     .equ BDIRTY,      0x9b332           | bank + : long 1 = the bank has changed
     .equ DIRTY2,      0x100f8598        | long 1 (stock's paste sets it with the two above)
     .equ TRK_APPLY,   0x40001f18        | (bank, part, t): one audio track's Part values -> the engine
@@ -609,7 +611,7 @@ ky_orig:
     move.l  #0x10000,%d0                | ORIG SEQ/MCH/FX
 ky_os:
     jsr     cl_restore
-    jsr     cl_flstart                  | the ORIG box flashes
+    jsr     cl_flhdr                    | the ORIG box flashes
     bra.w   cl_refresh
 ky_out:
     rts
@@ -647,14 +649,17 @@ kp_one:
     move.b  cl_cur,%d0
     cmpi.l  #NSLOT,%d0
     bne.w   cl_refresh                  | the box elsewhere: nothing to flash
-    jsr     cl_flstart
+    jsr     cl_flhdr
     bra.w   cl_refresh
 kp_pat:
     jsr     cl_restorepat
     tst.b   cl_chordout
-    beq.w   cl_refresh
+    beq.b   kp_in
     clr.b   cl_chordout
     bra.w   cl_close
+kp_in:
+    jsr     cl_flhdr                    | begun inside: the ORIG PTN+PART box flashes (the user)
+    bra.w   cl_refresh
 
 | d0: bit 0 = [BANK] held without [PTN] (the arrows page: "BANK A" boxed), bit 1 = the [PTN]+[BANK]
 | chord held (ORIG PTN/PART). Uses d0.
@@ -910,7 +915,13 @@ kf_out:
 | (the user, 2026-10-29) after a load, the select box flashes as an inverted bar (text inverted too)
 | for 0.5 s (cl_draw: cl_fph); the ORIG header box likewise. An arrow, bank paging, a TRACK key or
 | closing stops it at once; a new pick restarts it on the new slot.
-cl_flstart:
+cl_flhdr:                               | the header's label flashes (ORIG / ORIG PTN+PART)
+    moveq   #1,%d0
+    move.b  %d0,cl_ftgt
+    bra.b   cl_fls
+cl_flstart:                             | the select box flashes
+    clr.b   cl_ftgt
+cl_fls:
     moveq   #FL_TICKS,%d0
     move.b  %d0,cl_flk
     moveq   #FL_HALF,%d0
@@ -2453,9 +2464,9 @@ cl_postpart:
     tst.b   (%a0,%d0.l)
     beq.w   pp_out
     clr.b   (%a0,%d0.l)
-    lea     -16(%sp),%sp
-    movem.l %d2-%d4/%a2,(%sp)
-    move.l  20(%sp),%d2                 | d2 = track
+    lea     -20(%sp),%sp
+    movem.l %d2-%d5/%a2,(%sp)
+    move.l  24(%sp),%d2                 | d2 = track
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0
     moveq   #0,%d1
@@ -2464,6 +2475,31 @@ cl_postpart:
     jsr     cl_partin
     movea.l %a0,%a2                     | a2 = the Part
     move.l  %d0,%d3                     | d3 = its index
+|   d5 = 1: the Part now equals its SAVE PART copy (the user, 2026-10-30: then it is not edited,
+|   as after stock's own PART RELOAD, 0x4004ab46): the "saved" flag set (bank +0x9b312 + part, the
+|   test stock's PART RELOAD makes) and the bytes equal (bank +0x9504a + part * PARTSZ)
+    moveq   #0,%d5
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  #BANKSTRIDE,%d1
+    muls.l  %d1,%d0
+    movea.l #BLOB,%a1
+    adda.l  %d0,%a1
+    movea.l %a1,%a0
+    adda.l  #PSAVED,%a0
+    tst.b   (%a0,%d3.l)
+    beq.b   pp_neq
+    move.l  #PARTSZ,%d0
+    muls.l  %d3,%d0
+    adda.l  #PSAVECPY,%a1
+    adda.l  %d0,%a1                     | a1 = the SAVE PART copy
+    movea.l %a2,%a0
+    move.l  #PARTSZ,%d0
+    jsr     cl_cmpw
+    tst.l   %d0
+    bne.b   pp_neq
+    moveq   #1,%d5
+pp_neq:
     moveq   #0,%d4                      | d4 = 1: the UI bank
     move.b  PLAY_BANK,%d0
     cmp.b   UI_BANK,%d0
@@ -2478,6 +2514,9 @@ cl_postpart:
     jsr     MEMCPY
     lea     12(%sp),%sp
     bset    %d3,PEDIT_S
+    tst.l   %d5
+    beq.b   pp_flags
+    bclr    %d3,PEDIT_S
 pp_flags:
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0
@@ -2488,6 +2527,10 @@ pp_flags:
     movea.l %a0,%a1
     adda.l  #PEDIT,%a0
     bset    %d3,(%a0)                   | a byte: bset, never or.l (the REPITCH lesson, S119)
+    tst.l   %d5
+    beq.b   pp_fl2
+    bclr    %d3,(%a0)                   | equal to the SAVE PART copy: not edited
+pp_fl2:
     adda.l  #BDIRTY,%a1
     moveq   #1,%d0
     move.l  %d0,(%a1)
@@ -2514,8 +2557,8 @@ pp_ref:
     jsr     PR_G
     addq.l  #4,%sp
 pp_out2:
-    movem.l (%sp),%d2-%d4/%a2
-    lea     16(%sp),%sp
+    movem.l (%sp),%d2-%d5/%a2
+    lea     20(%sp),%sp
 pp_out:
     rts
 
@@ -3321,12 +3364,10 @@ cd_band:
     lea     16(%sp),%sp
     tst.l   %d5
     beq.b   cd_nob
-    tst.b   cl_fph                      | the ORIG box flashing after a restore: its box off in
-    beq.b   cd_hb                       | alternate phases
-    moveq   #0,%d0
-    move.b  cl_cur,%d0
-    cmpi.l  #NSLOT,%d0
-    beq.b   cd_nob
+    tst.b   cl_ftgt                     | a header flash (ORIG after a restore; ORIG PTN+PART after the
+    beq.b   cd_hb                       | chord + [PAGE] / [YES], begun inside): the label's box off in
+    tst.b   cl_fph                      | alternate phases
+    bne.b   cd_nob
 cd_hb:
     pea     WIN_H-2                     | the label: a dark box, lit letters, one lit row below
     pea     BOX_R                       | (the band's) and one above (the border)
@@ -3538,13 +3579,32 @@ cd_next:
     moveq   #0,%d0
     move.b  ACT_PAT,%d0
     cmp.l   %d2,%d0
+    bne.b   cd_sbx
+    tst.b   cl_ftgt                     | the box on your pattern (the highlight): a load confirmation
+    bne.w   cd_boxed                    | flashes the bar itself -- un-inverted in alternate phases
+    tst.b   cl_fph                      | (the user, 2026-10-30)
     beq.w   cd_boxed
+    bsr.w   cl_cell
+    moveq   #0,%d5
+    move.w  2(%a3),%d5
+    moveq   #0,%d6
+    move.w  4(%a3),%d6
+    bsr.w   cl_bary
+    move.l  %d1,-(%sp)
+    move.l  %d6,-(%sp)
+    move.l  %d0,-(%sp)
+    move.l  %d5,-(%sp)
+    bsr.w   cl_xor
+    lea     16(%sp),%sp
+    bra.w   cd_boxed
 cd_sbx:
     bsr.w   cl_cell
     moveq   #0,%d5
     move.w  2(%a3),%d5
     moveq   #0,%d6
     move.w  4(%a3),%d6
+    tst.b   cl_ftgt                     | a header flash (ORIG / PTN+PART): the box as usual
+    bne.b   cd_sout
     tst.b   cl_fph
     beq.b   cd_sout
     bsr.w   cl_bary                     | the load confirmation: the cell inverted, as the highlight
@@ -4623,6 +4683,7 @@ cl_lastt:   .byte 0                     | the track (0..15, MIDI 8..15) at the l
 cl_flk:     .byte 0                     | the load confirmation: UI ticks left (0 = none)
 cl_fph:     .byte 0                     | ... its phase: 1 = inverted
 cl_fcnt:    .byte 0                     | ... ticks left in this phase
+cl_ftgt:    .byte 0                     | ... 0 = the select box (or the highlight), 1 = the header label
 cl_ptpop:   .byte 0                     | stock's [PTN] overlay taken down for the chord (cl_k_chord)
 cl_hdrst:   .byte 0                     | the header was drawn for this cl_hstate
 cl_bkdef:   .byte 0                     | a [BANK] press outside Clyps was deferred (SELECT BANK on release)

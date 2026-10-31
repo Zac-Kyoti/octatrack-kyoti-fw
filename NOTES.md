@@ -37781,3 +37781,11 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   F+Q 26, M 9.
 - **CLYPQ (rebuilt)**: the nothing-saved toast reads `TRACK n: SAVE FIRST!` (MIDI: `MIDI TRACK n` /
   `SAVE FIRST!`); syx 786ba9ec…, gates full 128, M 9. NOT flashed.
+- **CLYPQ flashed; CLYPR** (2026-10-30, NOT flashed): the highlight bar flashes on a load of your own
+  pattern; stock's Part-edited flag follows "differs from the SAVE PART copy" after FULL loads (gate F
+  exercises both: equal False / True); ORIG PTN+PART box flashes after the chord + [PAGE]/[YES] inside.
+  Multi-track loads ([CUE] group) scoped (§1.9); RE so far: [CUE] = key 0x2a (sub-map 0x400bf2a0: TRACK
+  = stock cue 0x40083dc4, YES 0x400402ec, 0x2b/0x2c 0x4003234c, 0x18 0x40062d58); track LEDs = LED
+  slot 6 painter 0x40083eb0 (tick 0x40083fdc, period 2; active track via 0x80000000); the sidebar tab
+  is NOT drawn with RECT/TEXT (no edge draws on a track change): next to find. Gates L 8, full 128,
+  F 27, M 9.
