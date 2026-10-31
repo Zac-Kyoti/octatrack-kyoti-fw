@@ -206,8 +206,9 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
-- **CLYPS — CLYPV walk-through.** Image `140C_CLYPV` = CLYPT + the whole sidebar tab for the group, and
-  "FULL" renamed "ALL" everywhere in Clyps. (CLYPT flashed 2026-10-31: track LEDs correct; the tab
+- **CLYPS — CLYPW walk-through.** Image `140C_CLYPW` = CLYPT + the whole sidebar tab for the group,
+  "FULL" renamed "ALL" in the Clyps labels, no ALL in the save / reload toasts, one-line toasts where they
+  fit. (CLYPV, the same without the toast change, was never flashed.) (CLYPT flashed 2026-10-31: track LEDs correct; the tab
   followed the group in its upper half only, the play-status half stayed on the active track.)
   1. In Clyps, hold `[CUE]`: no tab anywhere (both halves: machine glyph AND play-status glyph plain), no
      `!` beside a machine glyph.
@@ -215,8 +216,11 @@ quick check for each:
      a stock active-track tab; T8 (or whichever is active) none. TRACK 4 again: out; again: in.
   3. Release `[CUE]`, then `[NO]`: the whole tab is back on the active track.
   4. ALL wording: `[FUNC]` held reads `LOAD: TRK ALL` (MIDI `LOAD: MIDI TRK ALL`); on ORIG `LOAD: ORIG TRK ALL`
-     / `LOAD: ORIG MIDI ALL`; in a group `LOAD: ALL` / `LOAD: ORIG ALL`. Toasts: `TRACK n ALL SAVED`,
-     `TRACK n ALL` / `RELOADED`, `MIDI TRACK n ALL` / `SAVED`, card reload `TRACK n ALL` / `RELOADED FROM PROJ`.
+     / `LOAD: ORIG MIDI ALL`; in a group `LOAD: ALL` / `LOAD: ORIG ALL`.
+  5. Toasts, no ALL, one line where it fits (the toast line is 113 px): `[YES]`+TRACK `TRACK n SAVED`, MIDI
+     `MIDI TRACK n SAVED`; `[NO]`+TRACK `TRACK n RELOADED`, MIDI two lines `MIDI TRACK n` / `RELOADED` (one
+     line would be 1 px too wide). Card reloads in Clyps stay two lines: `TRACK n SEQ` / `RELOADED FROM PROJ`
+     ([PTN]+TRACK) and `TRACK n` / `RELOADED FROM PROJ` ([BANK]+TRACK).
 
 - **CLYPS — CLYPT walk-through.** Image `140C_CLYPT` = CLYPR + multi-track loads with a `[CUE]` group
   (scope §1.9). Run CLYPR's three steps below too (CLYPR was never flashed).

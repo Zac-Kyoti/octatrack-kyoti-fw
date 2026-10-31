@@ -1,4 +1,4 @@
-# CLYPS — scope and build record (WIP; latest test image `140C_CLYPV`)
+# CLYPS — scope and build record (WIP; latest test image `140C_CLYPW`)
 
 ## §0 Start here (handoff, 2026-10-25) — read this first, then §1–§4
 
@@ -46,6 +46,13 @@
     bank loader (project load).
 
 **HANDOFF 2026-10-30 (start here; supersedes the older handoff notes below).**
+- **Update 2026-10-31 (2): `140C_CLYPW`** (built, not flashed; replaces the unflashed CLYPV): the user dropped
+  ALL from the save / reload toasts and wants one line wherever it fits. Measured with the TOAST font
+  `0x400ba862` (widths `0x400c205c`, 1 px gap; digits 5 px, `1` 2 px; a line holds 113 px) -- NOT the header
+  font `0x400ba876`, which reads ~30% narrower and would have said everything fits: `TRACK n SAVED` 75,
+  `MIDI TRACK n SAVED` 96, `TRACK n RELOADED` 93 (one line each); `MIDI TRACK n RELOADED` 114 (two lines),
+  `MIDI TRACK n: SAVE FIRST!` 125 (two, unchanged); card reloads `TRACK n SEQ` / `TRACK n` + `RELOADED FROM
+  PROJ` 151+ (two), `PATTERN A06` + it (two).
 - **Update 2026-10-31: CLYPT FLASHED** (track LEDs correct; tab only half right) -> **`140C_CLYPV`** (built,
   not flashed): the tab's lower half too (§1.9 "CLYPV"), and the UI word FULL -> **ALL** everywhere (the
   user: labels and toasts; "FULL load" in this document = an ALL load on the unit).

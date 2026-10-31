@@ -37809,3 +37809,8 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   pixel for pixel. Lesson: the 2026-10-30 write probe had listed `0x4004bd48`'s writes too (returns
   `0x4004bf50..0x4004c064`); every writer a probe finds must be accounted for. Also the user's rename: the UI
   word FULL -> ALL in every Clyps label and toast (all narrower; widths re-measured). syx 527ec87e….
+- **CLYPW** (2026-10-31, NOT flashed; replaces the unflashed CLYPV): no ALL in the save / reload toasts, one line
+  where it fits. Trap: toasts use the toast font `0x400ba862` (width table `0x400c205c`, digits 5 px), not the
+  header font `0x400ba876`; measuring with the header font said every toast fits. One line now: `TRACK n
+  SAVED`, `MIDI TRACK n SAVED`, `TRACK n RELOADED`; still two: `MIDI TRACK n` / `RELOADED` (114 px > 113), the
+  MIDI SAVE FIRST!, the card reloads (`TRACK n SEQ` / `TRACK n` + `RELOADED FROM PROJ`). syx 29a579ee….
