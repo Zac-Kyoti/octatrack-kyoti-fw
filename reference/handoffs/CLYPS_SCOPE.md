@@ -1,4 +1,4 @@
-# CLYPS — scope and build record (WIP; latest test image `140C_CLYPW`)
+# CLYPS — scope and build record (WIP; latest test image `140C_CLYPX`)
 
 ## §0 Start here (handoff, 2026-10-25) — read this first, then §1–§4
 
@@ -46,6 +46,13 @@
     bank loader (project load).
 
 **HANDOFF 2026-10-30 (start here; supersedes the older handoff notes below).**
+- **Update 2026-10-31 (3): `140C_CLYPX`** (built, not flashed). Hardware on CLYPW: whole tabs right, but a stray
+  `!` beside the glyph wherever the shown tab and the real active track differ (the active track with [CUE]
+  held; every member that is not the active track). Source: a THIRD drawer of `0x40052200`, `FUN_40044804`
+  (KB): a per-track status mark coloured from its own active test `0x4004482a` -> `jsr cl_act4` (nine splice
+  sites now). Reproduced and checked by rendering with `call:40052200` (the real per-pass function), not the
+  painters alone -- do that for any sidebar change. Card reload toast: [BANK]+TRACK `TRACK n ALL` / `MIDI
+  TRACK n ALL` + `RELOADED FROM PROJ` (the user).
 - **Update 2026-10-31 (2): `140C_CLYPW`** (built, not flashed; replaces the unflashed CLYPV): the user dropped
   ALL from the save / reload toasts and wants one line wherever it fits. Measured with the TOAST font
   `0x400ba862` (widths `0x400c205c`, 1 px gap; digits 5 px, `1` 2 px; a line holds 113 px) -- NOT the header

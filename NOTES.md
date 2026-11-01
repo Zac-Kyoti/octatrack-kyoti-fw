@@ -37814,3 +37814,10 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   header font `0x400ba876`; measuring with the header font said every toast fits. One line now: `TRACK n
   SAVED`, `MIDI TRACK n SAVED`, `TRACK n RELOADED`; still two: `MIDI TRACK n` / `RELOADED` (114 px > 113), the
   MIDI SAVE FIRST!, the card reloads (`TRACK n SEQ` / `TRACK n` + `RELOADED FROM PROJ`). syx 29a579ee….
+- **CLYPX** (2026-10-31, NOT flashed): hardware on CLYPW showed a stray `!` beside the machine glyph wherever the
+  shown tab and the real active track differ. A third drawer of `FUN_40052200`, `FUN_40044804`, paints a per-track
+  status mark (4 pixels, `!`-shaped) coloured to blend into the tab or background from its own active test
+  `0x4004482a` -> `jsr cl_act4`. Reproduced only by calling `0x40052200` itself in the render (the painters alone
+  did not show it); a write watch during that call accounts for every sidebar writer: `0x4004bd48`, `0x4003fed8`,
+  `0x40044804`. Card reload toast back to `TRACK n ALL` / `MIDI TRACK n ALL` + `RELOADED FROM PROJ` (the user).
+  syx 35ffcec8….

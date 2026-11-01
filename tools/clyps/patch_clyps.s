@@ -3230,8 +3230,9 @@ uk_out:
 
 | The active-track test of stock's track sidebars -- the tab's upper half, the machine glyph
 | (0x4003fed8, its track in d4), and its lower half, the play-status glyph (0x4004bd48: d4 on the MIDI
-| side, d3 on the audio side; CLYPT missed these two: half tabs on hardware) -- and of the track LED
-| painter (0x40083eb0, LED slot 6, its track in d5: the active colours), eight sites of
+| side, d3 on the audio side; CLYPT missed these two: half tabs on hardware), the status mark beside
+| the glyph (0x40044804, audio, d4; CLYPV missed it: a stray "!") -- and of the track LED painter
+| (0x40083eb0, LED slot 6, its track in d5: the active colours), nine sites of
 | `mvzb 0x80000000,%d0` -> jsr here (scope §1.9). With a Clyps group (cl_gmask: [CUE] held, or
 | members picked) d0 = the track itself when it is a member, -1 otherwise, so every member gets the
 | tab and the colours and the active track only if it is one. Else stock's byte. Keeps all but d0.

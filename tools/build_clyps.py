@@ -38,7 +38,8 @@ Detours (each asserts its stock bytes):
               (outside Clyps: hold + TRACK = temp save / reload; ARM / DISARM on a quick tap)
   0x4001fb1e, 0x4006bafe, 0x4007ec4c, 0x400909dc  jsr 0x4000fd34 (every bank to defaults)
               -> jsr cl_rstall (the same call, then every bank's snapshot once DRAM is in place)
-  0x4003ff06, 0x4004008c  track sidebars (tab), 0x40083ef4/f04/f24/f36  track LEDs (slot 6)
+  0x4003ff06, 0x4004008c  track sidebars (tab, upper half), 0x4004bd64, 0x4004be9c (lower half),
+              0x4004482a (status mark), 0x40083ef4/f04/f24/f36  track LEDs (slot 6)
               mvzb 0x80000000,d0 -> jsr cl_act4 / cl_act5 (the [CUE] group's members, scope §1.9)
 One source, two parts, linked together:
   ROM   `.text`  the sequencer-tick code (phase D, the wrap body, the copy) and the cue state it
@@ -116,6 +117,9 @@ DETOURS = [  # (site, symbol, stock bytes, length[, opcode: jmp unless given])
     # ... and of the tab's lower half (the play-status glyph), 0x4004bd48: MIDI loop (d4), audio (d3)
     (0x4004bd64, "cl_act4", "71b980000000", 6, "4eb9"),
     (0x4004be9c, "cl_act3", "71b980000000", 6, "4eb9"),
+    # ... and the per-track status mark ("!"-shaped pixels beside the glyph, coloured to blend into the
+    # tab or not) of 0x40044804, the third drawer 0x40052200 runs (audio side, track in d4)
+    (0x4004482a, "cl_act4", "71b980000000", 6, "4eb9"),
     (0x40083ef4, "cl_act5", "71b980000000", 6, "4eb9"),
     (0x40083f04, "cl_act5", "71b980000000", 6, "4eb9"),
     (0x40083f24, "cl_act5", "71b980000000", 6, "4eb9"),

@@ -206,6 +206,14 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **CLYPS — CLYPX walk-through.** Image `140C_CLYPX` = CLYPW + no stray `!` beside the machine glyph in the
+  group, and the card reload toast with ALL back.
+  1. In Clyps, hold `[CUE]`: the active track's tab goes away with no `!` beside its glyph.
+  2. Still holding `[CUE]`, TRACK 2 and TRACK 4: whole tabs, no `!`. Add the active track too: whole tab, no `!`.
+  3. Release `[CUE]`, `[NO]`: the tab is back on the active track, no `!` anywhere.
+  4. Card reloads in Clyps: `[BANK]`+TRACK shows `TRACK n ALL` / `RELOADED FROM PROJ` (MIDI side: `MIDI TRACK n
+     ALL` / `RELOADED FROM PROJ`); `[PTN]`+TRACK still `TRACK n SEQ` / `RELOADED FROM PROJ`.
+
 - **CLYPS — CLYPW walk-through.** Image `140C_CLYPW` = CLYPT + the whole sidebar tab for the group,
   "FULL" renamed "ALL" in the Clyps labels, no ALL in the save / reload toasts, one-line toasts where they
   fit. (CLYPV, the same without the toast change, was never flashed.) (CLYPT flashed 2026-10-31: track LEDs correct; the tab
