@@ -206,9 +206,10 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
-- **KYOTI CL1 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.6_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.6_WITH_CLYPS.syx`)
-  = KYOTI V1.6 with Clyps (as CLYPY) in place of RELOAD_FROM_PROJECT, tied to DIRECT JUMP (scope §1.10).
-  1. Boot: OS VERSION `KYOTI CL1`. A Flex list's FREE MEM reads ~10 MB less than on V1.6 (Clyps' buffers).
+- **KYOTI CL2 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.6_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.6_WITH_CLYPS.syx`)
+  = KYOTI V1.6 (main's, `05460b97…`) with Clyps (as CLYPY) in place of RELOAD_FROM_PROJECT, tied to DIRECT
+  JUMP (scope §1.10). (CL1 was built on an older V1.6 -- REC_TRIG_MUTE on [YES]/[NO]: never flash it.)
+  1. Boot: OS VERSION `KYOTI CL2`. A Flex list's FREE MEM reads ~10 MB less than on V1.6 (Clyps' buffers).
   2. Hold `[PTN]`, press `[BANK]`, let go of `[BANK]` only, press `[YES]`: `DIRECT JUMP ON` toast, Clyps stays
      open, nothing loads, no SELECT PATTERN when `[PTN]` is released. Again: `DIRECT JUMP OFF`.
   3. DIRECT JUMP ON, playing: load a slot onto a track in Clyps: it lands at the next step (not at the
@@ -217,8 +218,8 @@ quick check for each:
   5. DIRECT JUMP ON: jump to another pattern while playing: as in V1.6; Clyps loads keep working after it.
   6. RELOAD_FROM_PROJECT's chords outside Clyps are gone ([PTN]/[BANK]+TRACK outside Clyps = stock);
      inside Clyps they are the card reloads, as in CLYPY.
-  7. The rest of KYOTI beside Clyps: `[FUNC]`+TRACK mutes inside Clyps follow MUTE MODE; `[TRACK]`+`[YES]` (track
-     first) = `REC TRIGS MUTED`, `[YES]`+TRACK (YES first) = `TRACK n TEMP SAVED`; a VARI track: an ALL load from
+  7. The rest of KYOTI beside Clyps: `[FUNC]`+TRACK mutes inside Clyps follow MUTE MODE; `[TRACK]`+`[REC]` (outside
+     and inside Clyps) = `REC TRIGS MUTED`; `[YES]`+TRACK (YES first) = `TRACK n TEMP SAVED`; a VARI track: an ALL load from
      a slot whose track has another TSTR / QUAN, then check PTCH / QUAN read right and the pitch follows.
 
 - **CLYPS — CLYPY.** Image `140C_CLYPY` = CLYPX (flashed 2026-10-31, all good) + temp save / reload toasts:

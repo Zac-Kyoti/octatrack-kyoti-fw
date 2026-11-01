@@ -1106,9 +1106,35 @@ def main(argv):
                 print(f"      t+{n * 50} ms: master step {rd(0x800065B2, 2)} tick {rd(0x800065B6, 1)} "
                       f"arm {rd(syms['cl_arm'], 1)} nq {rd(syms['cl_nq'], 1)} cuef {rd(syms['cl_cuef'], 1)} "
                       f"quant {rd(sl + 0x8E56, 1)} proj {rd(0x8000004E, 1)} act {rd(0x800065BE, 1)}", flush=True)
-        check(running == 1 and cue() == 0xFFFF and rec(act, 0) == srec and pslice(t, dst) == ssl,
+        # KYOTI: SIDE-CHAIN's sc_norm (tools/patch_sidechain.s) turns a playing COMPRESSOR's MON (FX page 2,
+        # slot 2: Part +0x2f2 + 30t + 13 / + 19) from an older 0 / 1 into 2 = OFF -- not Clyps' doing
+        def slice_ok(now_, src_):
+            if now_ == src_:
+                return True
+            offs = []
+            for off, stride, size_, count, step in SLA:
+                o_ = off + stride * t
+                for _ in range(count):
+                    offs += [o_ + j for j in range(size_)]
+                    o_ += step
+            mon = {0x2F2 + 30 * t + 13: rd(dst + t, 1), 0x2F2 + 30 * t + 19: rd(dst + 8 + t, 1)}
+            return all(offs[i] in mon and mon[offs[i]] == 0x18 and src_[i] in (0, 1) and now_[i] == 2
+                       for i in range(len(now_)) if now_[i] != src_[i])
+        check(running == 1 and cue() == 0xFFFF and rec(act, 0) == srec and slice_ok(pslice(t, dst), ssl),
               f"playing: [FUNC]+trig lands at the next step with its slice (running {running}, "
-              f"cue 0x{cue():04x} after {n * 50} ms)")
+              f"cue 0x{cue():04x} after {n * 50} ms; record == source {rec(act, 0) == srec}, slice == "
+              f"source {pslice(t, dst) == ssl}, record == original {rec(act, 0) == oslot(act, 0)}; "
+              f"source {sb}/{sq + 1}, act {act + 1}, playing {rd(0x800065BE, 1) + 1})")
+        if pslice(t, dst) != ssl:          # which slice bytes, by Part offset
+            segs, offs = SLA, []
+            for off, stride, size_, count, step in segs:
+                o_ = off + stride * t
+                for _ in range(count):
+                    offs += [o_ + j for j in range(size_)]
+                    o_ += step
+            now_, src_ = pslice(t, dst), ssl
+            bad = [(hex(offs[i]), src_[i], now_[i]) for i in range(len(now_)) if now_[i] != src_[i]]
+            print(f"      slice differs at (Part offset, source, now): {bad[:12]} ({len(bad)} B)", flush=True)
         check([pslice(k, dst) for k in range(16) if k != t] == others0, "... every other track's slice untouched")
         check(state()["open"] == 1, "... Clyps stays open")
         key(0x27, 1)                       # STOP (not ours)

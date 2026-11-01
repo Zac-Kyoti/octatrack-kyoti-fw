@@ -37830,3 +37830,21 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   step; [PTN]+[YES] in Clyps tail-calls dj_toggle. RAM cost 10.2 MB. Gates on the KYOTI image: full 128, F+Q
   27, L 8, M+U 26, new J 10. Default build still = FINAL V1.6 (c2692220…). Aside (told the user): KYOTI's SAFE
   zone is the live tail of the curve table at 0x400d1ce0 (entries 508-1023, read by 0x40003522).
+- **KYOTI CL2** (2026-11-01, WIP, NOT flashed; CL1 never flashed, superseded): CL1 was built in a worktree 30
+  commits behind origin/main (old V1.6: REC_TRIG_MUTE on [YES]/[NO]). trkseq rebased onto origin/main; CL2 = the
+  same Clyps on main's V1.6 (default build still = FINAL 05460b97…). syx 30fdf640…. Gates on CL2: full 128, F+Q
+  27, L+J 16, M+U 26. Gate F's running ALL load now allows one KYOTI-only difference: SIDE-CHAIN's sc_norm turns
+  a playing COMPRESSOR's MON (FX page 2 slot 2, Part +0x2f2+30t+13/19) from an older 0/1 into 2 (OFF).
+- **The curve table under KYOTI's SAFE zone = DELAY's filter coefficients (2026-11-01, RE; KYOTI V1.6 FINAL
+  affected).** `0x400d1ce0` holds 1,024 one-pole coefficients of the stock ColdFire DELAY (`0x400031a0`,
+  called from the eDMA state machine 0x40004b12; gate: FX2 id == 8 = DELAY): HP pole = table[BASE>>6]
+  (+20), LP pole = table[(BASE+WDTH)>>6] (+24); entries 508..1023 are 0 (filter open). KYOTI V1.6 puts ~2 KB of
+  code at 0x400d24d0..0x400d2cdc = entries 508..1022, so every DELAY with BASE+WDTH >= 127 (the stock
+  default BASE 0 / WDTH 127 included) reads a code word as its LP pole: entry 508 = 0x40068ce0 (c ~ 0.50,
+  verified in main's V1.6 image) -> repeats low-passed at ~5 kHz and darker each repeat; other knob sums give
+  0.7-12 kHz or negative c; entry 678 = 0x80000003 (only via slides / LFO / scenes) runs the loop 1 sample
+  instead of 16 (a glitch while held). |H| <= 1: no runaway, no crash. Init 0x40002f44 reads entries 0 and
+  1023 only (stock in V1.6). Emulator (stock image, OT DEMO): the reader ran 4,133 times in 1.5 s and read
+  entries 508 and 764. Fix direction: vacate 0x400d24d0..0x400d2cdc in KYOTI (V1.7) + a seal() check; the
+  Bugbuilds' SAFE fallback (build_bugbuilds.py SAFE_START) has the same problem when it is used. Probe:
+  scratchpad curve/probe.py (subagent, 2026-11-01).
