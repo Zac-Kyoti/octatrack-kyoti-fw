@@ -944,7 +944,7 @@ pixel-identical to stock's active tab; none while [CUE] is held; back on the act
 Also: FULL -> ALL in every label and toast (widths re-measured: all narrower; group `ORIG ALL` puts
 `LOAD:` at x 57).
 
-### 1.10 DIRECT JUMP / KYOTI integration (plan, 2026-10-31; not built)
+### 1.10 DIRECT JUMP / KYOTI integration (2026-10-31; steps 1-5 built as `KYOTI CL1`, not flashed)
 
 **Target:** KYOTI with Clyps in place of RELOAD_FROM_PROJECT (decided 2026-10-30; Clyps carries the card
 reloads). DIRECT JUMP stays as it is (FINAL, ROM, HW-proven); Clyps adapts to it.
@@ -986,6 +986,31 @@ reloads). DIRECT JUMP stays as it is (FINAL, ROM, HW-proven); Clyps adapts to it
    PART RELOAD, where VARISPEED's hold / forget hooks sit: S119's bug class), SIDE-CHAIN (ALL loads
    change FX ids under its tap), REC_TRIG_MUTE ([TRACK]+[YES]/[NO] vs the temp save's [YES]/[NO]+TRACK,
    order-dependent), MUTE_MODES (FUNC+TRACK mutes inside Clyps).
+
+**Built: `KYOTI CL1`** (`KYOTI_ALLOW_WIP=1 KYOTI_VERSTR="KYOTI CL1" python3 tools/build_kyoti.py --with CLYPS`;
+out/KYOTI_WIP/KYOTI_V1.6_WITH_CLYPS/). Steps 1-5 as planned, with one change to step 1: NO ROM stubs at all.
+The loader runs from the boot site `0x4000050c`, before `0x40001e50` (boot continue) starts the tasks, the
+UI and the sequencer, so every hook finds the DRAM unit in place; the whole unit is `.dram`
+(`--defsym CLYPS_ALLDRAM`, the source's five ROM blocks are `ROMSEC`), 17,204 B + 10,434,796 B buffers =
+1,704 arena pages (10.2 MB). The standalone build is byte-identical to CLYPY (`111d6103...`).
+- `build_clyps.py`: a KYOTI mode (KYOTI_PLACE set): all DRAM, linked at `patch_clyps_dram`, DJ's
+  `dj_land` / `dj_toggle` / `dj_state` / `DJ_MODE` as defsyms, no append, no wrap.
+- `build_kyoti.py` (thread kyoti-v1): `WIP_FEATURES["CLYPS"]`; `--with CLYPS` drops RELOAD_FROM_PROJECT;
+  `SUPERSEDE` (Clyps owns `0x400a1f72`, asserted: DJ's bytes there = `jsr dj_land`, Clyps built with
+  that `DJ_LAND`); B2 accepts Clyps' [PTN] / [BANK] handler detours only as jmps into its DRAM unit; the
+  DRAM image takes Clyps' buffers (`dram.build(bss=)`, Clyps last); `KYOTI_VERSTR`. The default build
+  still matches the promoted KYOTI V1.6 (`c2692220...`).
+- Gates on the KYOTI image (`CLYPS_SYMS` from the map's `patch_clyps_dram` symbols): full 128, F+Q 27,
+  L 8, M+U on JAM2 26, and the new **J** (10): [PTN]+[YES] in Clyps toggles DJ (no load, Clyps stays, no
+  SELECT on [PTN]'s release); DJ on, CHAIN AFTER off, master length 64: a cue made at master step 3
+  lands at step 4 (75 ms); a DJ jump (PEND written as stock's pick writes it) lands and drops the
+  pending Clyps cue, neither T1 touched.
+- Step 6 is NOT done: VARISPEED / SIDE-CHAIN / REC_TRIG_MUTE / MUTE_MODES with Clyps are hardware
+  walk-through items (FLASHING §4 "KYOTI CL1").
+- Found on the way, not Clyps': KYOTI's SAFE zone (`0x400d24d0..0x400d2cdc`, ~2 KB of V1.6 code) is
+  entries 508-1023 of a live 1,024-long curve table at `0x400d1ce0` (stock 0 there; the per-voice engine
+  `0x40003522` indexes it with a u16 >> 6, so inputs >= 32,512 read code). caves.md §5 / NOTES S124 said
+  so; build_kyoti.py's zone list was never updated. Told the user.
 
 **Cost to KYOTI users:** Clyps' buffers (the originals = every bank as loaded, the saved sequences,
 the pattern snapshots) take ~10 MB of the sample pool, as in the standalone Clyps images.

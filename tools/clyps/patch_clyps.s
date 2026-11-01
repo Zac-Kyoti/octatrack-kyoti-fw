@@ -243,6 +243,17 @@
 | boot loader (tools/dram/). The buffers (CL_BSS_SIZE) follow `.dram`'s end, uninitialised.
 | Calls between the two are absolute (jsr / lea abs.l): a pc-relative branch across them fails
 | the link (R_68K_PC16 overflow), so nothing slips through.
+| CLYPS_ALLDRAM (KYOTI, scope §1.10): the ROM part goes to `.dram` too -- KYOTI's caves are full, and
+| DRAM is in place before any hook can run (the loader runs from the boot site 0x4000050c, before
+| the tasks, the UI and the sequencer start; DIRECT JUMP's phase-D hook ran from DRAM on the
+| unit in OBKYOTI6-12, caves.md §5).
+    .macro ROMSEC
+    .ifdef CLYPS_ALLDRAM
+    .section .dram,"ax"
+    .else
+    .text
+    .endif
+    .endm
     .global cl_ptn, cl_bankp, cl_bankr, cl_land, cl_uitail, cl_wrap, cl_projload, cl_rstall
     .global cl_yes, cl_no
     .global cl_hwrite, cl_hstorep, cl_hstoreb, cl_hrestp, cl_hrestb, cl_hdel, cl_hexp
@@ -601,8 +612,8 @@ cl_k_yes:
     bne.w   kp_pat                      | the chord: ORIG PTN+PART, as chord + [PAGE] (the user,
                                         | 2026-10-30; closes Clyps when the chord opened it)
 .ifdef DJ_TOGGLE
-    jsr     DJ_TOGGLE                   | [PTN]+[YES]: DIRECT JUMP on / off
-.endif
+    jmp     DJ_TOGGLE                   | [PTN]+[YES]: DIRECT JUMP on / off (a tail call: our
+.endif                                  | (keycode, event) are its arguments, in place)
     rts
 ky_noptn:
     moveq   #0,%d0
@@ -1060,7 +1071,7 @@ cl_trk:
 ct_out:
     rts
 
-    .text
+    ROMSEC
 | cl_slab(bank, pat) -> a0
 cl_slab:
     move.l  4(%sp),%d0
@@ -1862,7 +1873,7 @@ sb_ok:
     move.w  %d0,cl_snapok
     rts
 
-    .text
+    ROMSEC
 | cl_apply(t, sbank, spat, full) -> d0 = 1 copied, 0 not (the playing pattern's own slot, or no saved
 | sequence / original to put back). The record, its length/scale (scope §4.6) and the provenance. Writes RAM only (slab + our state): safe in
 | the sequencer tick. sbank = SRC_SAVED / SRC_ORIG: the saved sequence / the original of t.
@@ -2691,7 +2702,7 @@ pp_out2:
 pp_out:
     rts
 
-    .text
+    ROMSEC
 | ================================================================ the landing (sequencer tick)
 | Measured rule (scope §3.4), stated in what each hook sees:
 |  * MASTER WRAP (or a stock pattern change): stock's wrap body, entry 0x400a43a0 in phase G
@@ -2705,6 +2716,12 @@ pp_out:
 |    t0 = (MASTER_STEP - 1) * tps_M + TICK_CTR,  STEP = (t0 / tps + 1) mod len,  TICKS = t0 mod tps
 |    (the A4..A8 oracles: t0 66 -> step 23 at 2x, t0 114 -> step 20).
 cl_land:
+.ifdef DJ_LAND
+|   KYOTI (scope §1.10): this site is shared with DIRECT JUMP, whose hook dj_land (`jsr`, the same
+|   6 B) runs first. It keeps every register and replays the displaced move itself; ours replays
+|   it again at la_out (the same byte: Clyps never writes 0x80006687).
+    jsr     DJ_LAND
+.endif
     tst.b   cl_nq
     beq.w   la_out                      | nothing cued: one byte test per tick
     tst.l   RUNNING
@@ -2712,6 +2729,16 @@ cl_land:
 |   mid-function in stock's tick handler: every register may be live -- save them all
     lea     -60(%sp),%sp
     movem.l %d0-%d7/%a0-%a6,(%sp)
+.ifdef DJ_STATE
+|   DIRECT JUMP lands on this tick (dj_land just committed: state LANDING): stock re-lands the
+|   whole sequencer right after us, so every pending cue is dropped (scope §1.10, O8's rule)
+    move.b  DJ_STATE,%d0
+    cmpi.b  #2,%d0                      | DJ's ST_LANDING
+    bne.b   la_nodj
+    jsr     cl_dropall
+    bra.w   la_done
+la_nodj:
+.endif
 |   tps_M and t0
     moveq   #0,%d0
     move.b  SCALE_IX,%d0
@@ -2749,6 +2776,15 @@ la_q:
     bhi.w   la_tracks
     lea     QUANT_TBL,%a1
     move.l  (%a1,%d0.l*4),%d1           | N
+.ifdef DJ_MODE
+|   DIRECT JUMP on (scope §1.5a / §1.10): a load lands at the next master step, phase-continuous in
+|   the playing pattern's master cycle (= DJ's clock-locked position once DJ landed that pattern)
+    tst.l   DJ_MODE
+    beq.b   la_qn
+    moveq   #1,%d1
+la_qn:
+    tst.l   %d1                         | the flags of N again for the ble below
+.endif
     ble.w   la_tracks                   | CHAIN AFTER at its default: only the master wrap lands (cl_wrap)
     move.l  %d3,%d0
     remu.l  %d1,%d2:%d0                 | d2 = s mod N
@@ -3088,7 +3124,7 @@ ut_out:
     tst.l   RDRAW                       | displaced; stock's beq.w follows on these flags
     jmp     UIT_RESUME
 
-    .text
+    ROMSEC
 | NORMAL -> PER TRACK, preserving every other track (scope §4.6). a2 = slab; d3 = this record's
 | len-byte offset (its own len/scale are already written and are kept).
 cl_convert:
@@ -4947,7 +4983,7 @@ cl_ldret:   .long 0                     | ... and its caller's return address
 cl_buf:     .space 32
 
 | the tick's state: in the ROM part, beside the code that writes it
-    .text
+    ROMSEC
     .align 2
 cl_src:     .space 32                   | per track: (bank, pattern) the sequence came from
 cl_home:    .fill 32, 1, 0xff           | per track: the playing (bank, pattern) at that load

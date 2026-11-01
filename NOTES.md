@@ -37823,3 +37823,10 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   syx 35ffcec8….
 - **CLYPX flashed, all good (2026-10-31). CLYPY** (NOT flashed): temp toasts `TRACK n TEMP SAVED` (104 px, one line),
   `MIDI TRACK n` / `TEMP SAVED`, `TRACK n` / `TEMP RELOADED`, `MIDI TRACK n` / `TEMP RELOADED`. Gates full 128, M+U 26.
+- **KYOTI CL1** (2026-10-31, WIP, NOT flashed): KYOTI V1.6 with Clyps in place of RELOAD_FROM_PROJECT, tied to
+  DIRECT JUMP (CLYPS_SCOPE §1.10): `build_kyoti.py --with CLYPS`. Clyps is one all-DRAM unit (no ROM bytes: the
+  loader runs at the boot site 0x4000050c before any task / ISR); it owns phase D 0x400a1f72 and calls DJ's
+  dj_land first (SUPERSEDE, asserted); DJ's landing tick drops Clyps cues; DJ on = cues land at every master
+  step; [PTN]+[YES] in Clyps tail-calls dj_toggle. RAM cost 10.2 MB. Gates on the KYOTI image: full 128, F+Q
+  27, L 8, M+U 26, new J 10. Default build still = FINAL V1.6 (c2692220…). Aside (told the user): KYOTI's SAFE
+  zone is the live tail of the curve table at 0x400d1ce0 (entries 508-1023, read by 0x40003522).

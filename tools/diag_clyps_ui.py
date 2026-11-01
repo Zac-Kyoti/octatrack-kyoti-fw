@@ -1119,6 +1119,86 @@ def main(argv):
         tap(NO)
         closed_ok("[NO]")
 
+    if "J" in a.only:
+        # --- J: DIRECT JUMP in KYOTI (scope §1.10): an image built with build_kyoti.py --with CLYPS
+        print("J: DIRECT JUMP: [PTN]+[YES] in Clyps toggles it; DJ on: a cue lands at the next master "
+              "step; a DJ jump drops the cues")
+        if "DJ_MODE" not in syms:
+            check(False, "this image has no DIRECT JUMP (build_kyoti.py --with CLYPS)")
+        else:
+            djm, djs = syms["DJ_MODE"], syms["DJ_STATE"]
+            tap(0x10)
+            act = rd(0x800065BE, 1)
+            key(PTN, 1)
+            key(BANK, 1)
+            key(BANK, 0)                    # [PTN] still held: [PTN]+[YES] = DIRECT JUMP's toggle
+            r0, m0 = rec(act, 0), rd(djm, 4)
+            tap(YES)
+            check(rd(djm, 4) == (m0 ^ 1) and rec(act, 0) == r0 and state()["open"] == 1,
+                  f"[PTN]+[YES] in Clyps: DIRECT JUMP {m0} -> {rd(djm, 4)}, no load, Clyps stays")
+            key(PTN, 0)
+            check(state()["open"] == 1 and state()["showwin"] == 0, "... [PTN] released: Clyps stays, no SELECT")
+            if rd(djm, 4) == 0:
+                key(PTN, 1)
+                tap(YES)
+                key(PTN, 0)
+            check(rd(djm, 4) == 1, "DIRECT JUMP on")
+            # running, CHAIN AFTER at the project default (off: without DJ only the master wrap lands)
+            sl = BLOB + bank * BANKSTRIDE + act * PATSTRIDE
+            q0 = rd(sl + 0x8E56, 1)
+            u.mem_write(sl + 0x8E56, b"\xff")
+            mlen = rd(sl + 0x8E50, 2)
+            q = next(x for x in range(16) if x != act and rec(x, 0) != rec(act, 0))
+            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+            rt.internal_clock()
+            rt.frame = True
+            rt.next_frame = rt.sample + er.FRAME_PERIOD
+            rt.exact_clock()
+            rt.start_transport_live()
+            rt.run(ms=300)
+            cue = lambda: rd(syms["cl_cue"], 2)
+            s0 = rd(0x800065B2, 2)
+            key(q, 1, 0)
+            key(q, 0, 0)
+            s1 = rd(0x800065B2, 2)
+            steps, n = [s1], 0
+            while cue() != 0xFFFF and n < 400:
+                rt.run(ms=5)
+                n += 1
+                if rd(0x800065B2, 2) != steps[-1]:
+                    steps.append(rd(0x800065B2, 2))
+            print(f"      master length {mlen}, cue at master step {s0}->{s1}, landed after {n * 5} ms, "
+                  f"steps seen {steps}", flush=True)
+            check(rd(0x800065B8, 4) == 1 and cue() == 0xFFFF and rec(act, 0) == rec(q, 0) and len(steps) <= 3,
+                  f"DJ on: the cue lands within a master step ({len(steps) - 1} step change(s), {n * 5} ms)")
+            # a DIRECT JUMP pending: the Clyps cue is dropped, the jump lands the new pattern as it is.
+            # The pattern cue is written as stock's [PTN]+trig writes it (a real pick closes Clyps).
+            p2 = next(x for x in range(16) if x not in (act, q))
+            q2 = next(x for x in range(16) if x not in (act, p2) and rec(x, 0) != rec(act, 0))
+            tgt0, cur0 = rec(p2, 0), rec(act, 0)
+            key(q2, 1, 0)
+            key(q2, 0, 0)
+            u.mem_write(0x800065C0, bytes([p2]))              # PEND_PAT: DIRECT JUMP arms on it
+            c1 = cue()
+            n = 0
+            while rd(0x800065BE, 1) != p2 and n < 400:
+                rt.run(ms=5)
+                n += 1
+            print(f"      jump to pattern {p2 + 1} after {n * 5} ms; Clyps cue was 0x{c1:04x}, now "
+                  f"0x{cue():04x}; DJ state {rd(djs, 1)}", flush=True)
+            check(rd(0x800065BE, 1) == p2 and cue() == 0xFFFF and rd(syms["cl_nq"], 1) == 0,
+                  f"a DIRECT JUMP to pattern {p2 + 1} lands and drops the pending Clyps cue")
+            check(rec(p2, 0) == tgt0 and rec(act, 0) == cur0,
+                  "... the cue never landed: both patterns' T1 as they were")
+            key(0x27, 1)                       # STOP
+            key(0x27, 0)
+            rt.run(ms=300)
+            u.mem_write(sl + 0x8E56, bytes([q0]))
+            check(rd(0x800065B8, 4) == 0, "stopped again")
+            if state()["open"]:
+                tap(NO)
+            closed_ok("closed")
+
     if "U" in a.only:
         # --- U: the [CUE] group (scope §1.9), stopped transport
         print("U: [CUE] group: sidebar tabs, track LEDs, loads into every member, ORIG per member, [NO]")

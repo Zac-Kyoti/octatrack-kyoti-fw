@@ -54,11 +54,21 @@ Not in this image: RELOAD_FROM_PROJECT / DIRECT_JUMP_KYOTI (KYOTI work), FULL lo
 
 Usage:   KYOTI_ALLOW_WIP=1 python3 tools/build_clyps.py [VERSTR]   (default "140C_CLYPS")
 Outputs: out/mainos_clyps.bin, out/OCTATRACK_OS1.40C_CLYPS.syx, out/OCTATRACK_CLYPS.bin
+
+In the combined KYOTI image (build_kyoti.py --with CLYPS, scope §1.10; KYOTI_PLACE set): the whole
+unit is DRAM (--defsym CLYPS_ALLDRAM: no ROM bytes, KYOTI's caves are full), linked at
+`patch_clyps_dram` and NOT appended here -- build_kyoti.py carries it with its CL_BSS_SIZE buffers.
+DIRECT JUMP's entries come in as `dj_land` / `dj_toggle` / `dj_state` / `dj_mode`: phase D chains
+dj_land (the shared site 0x400a1f72 is ours there), [PTN]+[YES] tail-calls dj_toggle, DJ's landing
+tick drops our cues, DJ on lands our cues at every master step. Outputs: out/mainos_clyps.bin
+(detours only), out/patch_clyps_dram.bin + .elf.
 """
 import os, pathlib, subprocess, sys
 from kyoti_status import gate, seal
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
 import dram                                    # noqa: E402  (tools/dram/dram.py)
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import kyoti_place                             # noqa: E402  combined-image placement; no-op standalone
 
 gate(__file__)
 
@@ -82,6 +92,9 @@ if VARIANT:
     OUT = _vd / "mainos_clyps.bin"
 
 CAVE = 0x400d6500
+KYOTI = kyoti_place.active()
+DRAM_AT = kyoti_place.at("patch_clyps_dram", dram.ARENA_BASE) if KYOTI else dram.ARENA_BASE
+DJ_SYMS = {"DJ_LAND": "dj_land", "DJ_TOGGLE": "dj_toggle", "DJ_STATE": "dj_state", "DJ_MODE": "dj_mode"}
 FREE_END = 0x400d7c3c
 DETOURS = [  # (site, symbol, stock bytes, length[, opcode: jmp unless given])
     (0x4005a044, "cl_ptn", "202f00087201", 6),
@@ -134,9 +147,15 @@ def assemble():
     if VARIANT:
         o, elf = OUT.parent / "patch_clyps.o", OUT.parent / "patch_clyps.elf"
         rom, dr = OUT.parent / "patch_clyps.bin", OUT.parent / "patch_clyps_dram.bin"
-    subprocess.run(["m68k-elf-as", "-mcpu=5407", "-o", o, SRC]
-                   + (["--defsym", f"{VARIANT}=1"] if VARIANT else []), check=True, cwd=ROOT)
-    r = subprocess.run(["m68k-elf-ld", f"-Ttext=0x{CAVE:x}", f"--section-start=.dram=0x{dram.ARENA_BASE:x}",
+    defs = ["--defsym", f"{VARIANT}=1"] if VARIANT else []
+    if KYOTI:
+        defs += ["--defsym", "CLYPS_ALLDRAM=1"]
+        for sym, key in DJ_SYMS.items():            # DIRECT JUMP's entries, when it is in the image
+            v = kyoti_place.at(key, None)
+            if v is not None:
+                defs += ["--defsym", f"{sym}=0x{int(v):x}"]
+    subprocess.run(["m68k-elf-as", "-mcpu=5407", "-o", o, SRC] + defs, check=True, cwd=ROOT)
+    r = subprocess.run(["m68k-elf-ld", f"-Ttext=0x{CAVE:x}", f"--section-start=.dram=0x{DRAM_AT:x}",
                         "-o", elf, o], cwd=ROOT, capture_output=True, text=True)
     if r.returncode:
         sys.exit(f"link failed (a pc-relative branch between the ROM and DRAM parts?)\n{r.stderr}")
@@ -151,8 +170,10 @@ def assemble():
     subprocess.run(["m68k-elf-objcopy", "-O", "binary", "-j", ".dram", elf, dr], check=True, cwd=ROOT)
     nm = subprocess.run(["m68k-elf-nm", elf], capture_output=True, text=True, check=True).stdout
     syms = {p[2]: int(p[0], 16) for p in (l.split() for l in nm.splitlines()) if len(p) == 3}
-    if syms.get("cl_bss") != dram.ARENA_BASE + dr.stat().st_size:
+    if syms.get("cl_bss") != DRAM_AT + dr.stat().st_size:
         sys.exit("cl_bss is not the DRAM part's end")
+    if KYOTI:                                       # build_kyoti.py reads the symbols beside the blob
+        (ROOT / "out/patch_clyps_dram.elf").write_bytes(pathlib.Path(elf).read_bytes())
     return rom.read_bytes(), dr.read_bytes(), syms
 
 
@@ -163,6 +184,8 @@ def main():
     stock = bytes(img)
     o = lambda a: a - BASE
     blob, dblob, syms = assemble()
+    if KYOTI and blob:
+        sys.exit(f"KYOTI: the all-DRAM layout left {len(blob)} B in .text")
     if CAVE + len(blob) > FREE_END:
         sys.exit(f"patch_clyps ({len(blob)} B) runs past the free zone end 0x{FREE_END:x}")
     if any(img[o(CAVE):o(CAVE) + len(blob)]):
@@ -189,6 +212,14 @@ def main():
         if img[o(rec):o(rec) + 26] != stock[o(rec):o(rec) + 26]:
             sys.exit(f"stock layer record 0x{rec:08x} modified")
     bss = syms["CL_BSS_SIZE"]
+    if KYOTI:
+        # build_kyoti.py links this unit into its DRAM image (with these buffers) and appends the
+        # loader; here only the detours and the blob
+        OUT.write_bytes(bytes(img))
+        (ROOT / "out/clyps_syms.txt").write_text("".join(f"{k} 0x{v:08x}\n" for k, v in sorted(syms.items())))
+        print(f"  KYOTI: all DRAM, {len(dblob):,} B linked at 0x{DRAM_AT:08x} + {bss:,} B buffers; "
+              f"DIRECT JUMP: " + (", ".join(f"{k} 0x{syms[k]:08x}" for k in DJ_SYMS if k in syms) or "none"))
+        return
     append, rep = dram.build(dblob, (OUT.parent / "_dram") if VARIANT else ROOT / "out/_dram_clyps", img, bss=bss)
     print(f"  DRAM: {rep['raw']:,} B linked at 0x{rep['base']:08x} + {bss:,} B buffers "
           f"(0x{syms['cl_bss']:08x}..0x{syms['cl_bss'] + bss:08x}); packed {rep['packed']:,} B, stage "
