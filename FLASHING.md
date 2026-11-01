@@ -206,6 +206,10 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **CLYPS — CLYPY.** Image `140C_CLYPY` = CLYPX (flashed 2026-10-31, all good) + temp save / reload toasts:
+  `[YES]`+TRACK `TRACK n TEMP SAVED` (one line); MIDI `MIDI TRACK n` / `TEMP SAVED`; `[NO]`+TRACK `TRACK n` /
+  `TEMP RELOADED`, MIDI `MIDI TRACK n` / `TEMP RELOADED` (two lines: 122-143 px in one, the line holds 113).
+
 - **CLYPS — CLYPX walk-through.** Image `140C_CLYPX` = CLYPW + no stray `!` beside the machine glyph in the
   group, and the card reload toast with ALL back.
   1. In Clyps, hold `[CUE]`: the active track's tab goes away with no `!` beside its glyph.

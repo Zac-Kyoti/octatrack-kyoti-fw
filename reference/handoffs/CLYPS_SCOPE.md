@@ -1,4 +1,4 @@
-# CLYPS — scope and build record (WIP; latest test image `140C_CLYPX`)
+# CLYPS — scope and build record (WIP; latest test image `140C_CLYPY`)
 
 ## §0 Start here (handoff, 2026-10-25) — read this first, then §1–§4
 
@@ -46,6 +46,8 @@
     bank loader (project load).
 
 **HANDOFF 2026-10-30 (start here; supersedes the older handoff notes below).**
+- **Update 2026-10-31 (4): CLYPX FLASHED, all good.** `140C_CLYPY` (built, not flashed) = temp toasts `TRACK n
+  TEMP SAVED` (one line) / `TRACK n` + `TEMP RELOADED`, MIDI two lines (the user). Next: DIRECT JUMP integration.
 - **Update 2026-10-31 (3): `140C_CLYPX`** (built, not flashed). Hardware on CLYPW: whole tabs right, but a stray
   `!` beside the glyph wherever the shown tab and the real active track differ (the active track with [CUE]
   held; every member that is not the active track). Source: a THIRD drawer of `0x40052200`, `FUN_40044804`

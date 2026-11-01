@@ -1631,8 +1631,13 @@ ts_a:
     move.l  %d2,-(%sp)
     jsr     cl_savet
     addq.l  #4,%sp
-    lea     cl_fmt_tsv,%a0              | "TRACK 3 SAVED" / "MIDI TRACK 3 SAVED": one line (96 px), no
-    bra.w   ts_toast                    | ALL (the user, 2026-10-31)
+    lea     cl_fmt_tsv,%a0              | "TRACK 3 TEMP SAVED": one line (104 px; the user, 2026-10-31)
+    cmpi.l  #8,%d2
+    bcs.w   ts_toast
+    lea     cl_fmt_tmid,%a1             | MIDI: "MIDI TRACK 3" / "TEMP SAVED" (125 px in one line)
+    move.l  %a1,cl_t1f
+    lea     cl_s_tsv2,%a0
+    bra.w   ts_two1
 ts_no:
     tst.b   cl_ynact+1
     beq.w   ts_done
@@ -1648,11 +1653,8 @@ ts_no:
     move.l  %d2,-(%sp)
     jsr     cl_cueload
     lea     12(%sp),%sp
-    lea     cl_fmt_trl,%a0              | "TRACK 3 RELOADED": one line (93 px; the user, 2026-10-31)
-    cmpi.l  #8,%d2
-    bcs.w   ts_toast
-    lea     cl_fmt_tmid,%a1             | MIDI: "MIDI TRACK 3" / "RELOADED" (114 px in one line for
-    move.l  %a1,cl_t1f                  | tracks 2-8: 1 px too wide)
+    lea     cl_fmt_tmid,%a1             | "TRACK 3" / "TEMP RELOADED", MIDI "MIDI TRACK 3" / ...: two
+    move.l  %a1,cl_t1f                  | lines (122 / 143 px in one; the user, 2026-10-31)
     lea     cl_s_reld2,%a0
     bra.w   ts_two1
 ts_toast1:
@@ -1664,7 +1666,7 @@ ts_toast1:
     lea     cl_s_savef2,%a0
     bra.w   ts_two1
 ts_toast:
-    move.l  %d2,%d0                     | "TRACK 3 SAVED" / "TRACK 3 RELOADED" / "TRACK 3: SAVE FIRST!"
+    move.l  %d2,%d0                     | "TRACK 3 TEMP SAVED" / "TRACK 3: SAVE FIRST!"
     lea     cl_s_none,%a1
     cmpi.l  #8,%d0
     bcs.b   ts_l
@@ -1684,8 +1686,8 @@ ts_l:
     jsr     TOAST
     addq.l  #8,%sp
     bra.w   ts_done
-| two lines, MIDI only (what does not fit one toast line, 113 px): cl_t1f "MIDI TRACK n" / a0
-| (RELOADED or SAVE FIRST!), RELOAD's 2-line toast
+| two lines (what does not fit one toast line, 113 px): cl_t1f "%sTRACK n" / a0 (TEMP SAVED, TEMP
+| RELOADED or SAVE FIRST!), RELOAD's 2-line toast
 ts_two1:
     move.l  %a0,cl_tlines+4
     move.l  %d2,%d0
@@ -5004,9 +5006,9 @@ cl_s_strd:  .asciz "strd"
 cl_nfhdr:   .ascii "CLYP"
             .short 1, 256
 cl_tname:   .space 16
-cl_fmt_tsv: .asciz "%sTRACK %d SAVED"    | toast font 0x400ba862: "MIDI TRACK 8 SAVED" 96 px
-cl_fmt_trl: .asciz "%sTRACK %d RELOADED" | audio only: 93 px ("MIDI TRACK 8 RELOADED" 114 > 113)
-cl_s_reld2: .asciz "RELOADED"
+cl_fmt_tsv: .asciz "%sTRACK %d TEMP SAVED" | audio only (toast font 0x400ba862): 104 px
+cl_s_tsv2:  .asciz "TEMP SAVED"
+cl_s_reld2: .asciz "TEMP RELOADED"
             .align 2
 cl_tlines:  .long 0, 0
 cl_t1f:     .long 0                     | the 2-line toast's first-line format

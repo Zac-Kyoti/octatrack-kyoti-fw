@@ -37821,3 +37821,5 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   did not show it); a write watch during that call accounts for every sidebar writer: `0x4004bd48`, `0x4003fed8`,
   `0x40044804`. Card reload toast back to `TRACK n ALL` / `MIDI TRACK n ALL` + `RELOADED FROM PROJ` (the user).
   syx 35ffcec8….
+- **CLYPX flashed, all good (2026-10-31). CLYPY** (NOT flashed): temp toasts `TRACK n TEMP SAVED` (104 px, one line),
+  `MIDI TRACK n` / `TEMP SAVED`, `TRACK n` / `TEMP RELOADED`, `MIDI TRACK n` / `TEMP RELOADED`. Gates full 128, M+U 26.
