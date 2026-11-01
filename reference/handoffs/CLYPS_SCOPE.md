@@ -944,6 +944,52 @@ pixel-identical to stock's active tab; none while [CUE] is held; back on the act
 Also: FULL -> ALL in every label and toast (widths re-measured: all narrower; group `ORIG ALL` puts
 `LOAD:` at x 57).
 
+### 1.10 DIRECT JUMP / KYOTI integration (plan, 2026-10-31; not built)
+
+**Target:** KYOTI with Clyps in place of RELOAD_FROM_PROJECT (decided 2026-10-30; Clyps carries the card
+reloads). DIRECT JUMP stays as it is (FINAL, ROM, HW-proven); Clyps adapts to it.
+
+**What collides (measured: every Clyps site against every KYOTI feature's sources):**
+- `0x400a1f72` phase D: DIRECT JUMP's `dj_land` (jsr) and Clyps' `cl_land` (jmp) -- the same 6 bytes.
+- `0x4005e4c8` stock [YES]: Clyps' `cl_yes`; DJ's builder only asserts it is stock (each KYOTI feature
+  builds in its own sandbox from stock, so that check still holds there); DJ writes the [PTN]-layer
+  YES record `0x400bf0be`, which Clyps does not touch.
+- RELOAD_FROM_PROJECT's sites (`0x4005a044`, `0x4007af80`, `0x4007b3e0`, `0x40085864`, `0x40023c62`,
+  `0x4005e25c`, ...): RELOAD leaves KYOTI.
+- `0x40056c28` (QLREC only names it), `0x40062d1c` (VARISPEED_EMUS, not in KYOTI): no clash.
+- REC_TRIG_MUTE patches the lower-tab painter at `0x4004bee2` / `0x4004c00c`, not Clyps' `0x4004be9c`.
+- **Placement:** KYOTI V1.6's ROM zones are full (CAVE 42 B, SAFE 8 B, ENC 40 B free; SPRING 400 B,
+  PERS1 128 B, PERS2 64 B reclaimable). Clyps' ROM part is 3,544 B.
+
+**Plan.**
+1. **Clyps' ROM part -> DRAM.** Only guarded stubs stay in ROM (the painter tests `cl_act3/4/5`, the
+   tick / wrap / UI-tick entries, `cl_rstall`): each checks `cl_magic`, then jumps into the DRAM body.
+   About 200 B, in SPRING. Tick code in DRAM is HW-proven (OBKYOTI6-12 ran DJ's phase-D hook and
+   REPITCH's frame-ISR half from DRAM; KB caves.md §5); `build_kyoti.py`'s "ISR code: CAVE/SAFE only"
+   line is a choice, and this changes it for Clyps. Clyps is KYOTI's only DRAM unit once RELOAD leaves,
+   so its bss can stay after its `.dram`.
+2. **Phase D shared:** Clyps owns `0x400a1f72`; its stub calls DJ's `dj_land` first (it saves every
+   register and replays the displaced `move.b 0x80006687,%d0`), then Clyps' landing, then replays and
+   resumes. DJ's symbols come in as pass-2 flags (as VARISPEED gets `sw9_draw`); `build_kyoti.py` learns
+   that this one site is Clyps' and that DJ's 6 bytes there are superseded (asserted, not silently).
+3. **DJ on (`DJ_MODE` != 0):** a Clyps load lands at the next master step (Clyps' landing gate reads
+   CHAIN AFTER = 1 step), at the phase-continuous position within the playing pattern's master cycle.
+   That IS the clock-locked "as if since START" position whenever DJ landed the playing pattern (V7
+   lands START-aligned); only a pattern entered by a stock change before DJ was turned on differs,
+   and there the track stays in step with its own pattern.
+4. **A DJ jump drops Clyps cues:** on DJ's landing tick (`dj_state` = LANDING after `dj_land`) Clyps
+   drops every pending cue (stock re-lands the whole sequencer). Clyps never writes `0x80006687`.
+5. **[PTN]+[YES] in Clyps = DJ's toggle** (`cl_k_yes`, `DJ_TOGGLE` = `dj_toggle`, called with the key's
+   own two arguments). A [PTN] pressed inside Clyps gets stock's [PTN] layer, whose YES record DJ
+   already points at `dj_toggle`.
+6. **Then, in the same image, check:** VARISPEED (an ALL load changes TSTR without stock's paste /
+   PART RELOAD, where VARISPEED's hold / forget hooks sit: S119's bug class), SIDE-CHAIN (ALL loads
+   change FX ids under its tap), REC_TRIG_MUTE ([TRACK]+[YES]/[NO] vs the temp save's [YES]/[NO]+TRACK,
+   order-dependent), MUTE_MODES (FUNC+TRACK mutes inside Clyps).
+
+**Cost to KYOTI users:** Clyps' buffers (the originals = every bank as loaded, the saved sequences,
+the pattern snapshots) take ~10 MB of the sample pool, as in the standalone Clyps images.
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)
