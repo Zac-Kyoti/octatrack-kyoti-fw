@@ -37,6 +37,11 @@ at its addresses -- the `reference` pairs below -- for -mcpu=5407 and 54455 alik
 SC_KEY, mm_softmute is byte-identical to the KYOTI V1.0 image at 0x400d74e4, and ran on the
 author's MKI in an octabam-built image with SIDECHAIN_COMPRESSOR (2026-10-04): a muted KEY
 keeps ducking in every MUTE MODE.
+
+2026-11-01: KEYHOLD (SC_KEY only). A muted track that has been a KEY keeps stock's post-FX cut
+until it is unmuted: in DT-T a voice started during its key time was heard to its end once KEY
+moved away. The SC_KEY unit is 1100 B (was 1086), byte-identical to the octabam form, and the
+KYOTI build now places it at 0x400d7640, so its reference changed. WIP, not yet on hardware.
 """
 
 import os
@@ -62,7 +67,7 @@ def _sc_key_inc(modules):
 def _softmute_ref(modules):
     """The variant the author ratified for this selection."""
     if SC in modules:       # tools/build_kyoti.py's placement in KYOTI V1.0
-        return (0x400d74e4, "9be6df774dda7c6996a94c6138a002b26e667fb458abaccd4388ebf97f3ae43d")
+        return (0x400d7640, "2a625eef2e1364373f3f801a0b38257996a28d762fd287149e94cf19361faf06")
     return (0x400d7400, "ca7792be6239c6c3c1d4882ef3c8fdd718a05d7e90f36d8eae0c1971cb9a9689")
 
 # The PERSONALIZE pointer arrays (16 u32 each in 1.40C) and the code that names them.

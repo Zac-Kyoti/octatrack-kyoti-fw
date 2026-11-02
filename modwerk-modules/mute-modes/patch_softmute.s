@@ -291,8 +291,16 @@ pk_next:
     movea.l (%sp)+,%a0
     .endif
     move.b  %d0,KEYMASK                 | for mt_trig / mt_rebind / dt_trig / fresh_bind / trigflag
+| KEYHOLD (2026-11-01): a silenced key track's trigs play (cut post-FX).  When KEY moves away
+| it rejoins the silenced set, and DT-T leaves a running voice alone -- so the voice its key
+| time started was heard to its end (a loop: for good).  So a silenced key track stays HELD:
+| it keeps the post-FX cut while it stays silenced, though it is no longer a key; unmuting
+| (leaving the silenced set) releases it.  Its trigs are dropped as for any silenced track.
     move.l  %d0,%d1
-    and.l   %d2,%d1                     | silenced key tracks ...
+    move.b  KEYHOLD,%d3                 | low byte; %d3's upper bytes (the loop's -1) go below
+    or.l    %d3,%d1                     | key tracks + held ones ...
+    and.l   %d2,%d1                     | ... that are silenced (8 bits) ...
+    move.b  %d1,KEYHOLD                 | (a held track stays held only while silenced)
     lsl.l   #8,%d1
     or.l    %d1,%d5                     | ... get stock's own post-FX mute cut (OT's behaviour)
     not.l   %d0
@@ -1422,9 +1430,10 @@ tf_sil:
 | timestretch task, which refills that area with audio on every grain while tracks play:
 | OTFX could read back an audio byte and skip a mute's note-off, and this hook's
 | per-frame write landed in the task's splice-search window. It takes KEYMASK's
-| alignment pad, as in the octabam form.
+| alignment pad, as in the octabam form. KEYHOLD (2026-11-01) sits between them, as there.
     .balign 2
 KEYMASK: .byte 0
+KEYHOLD: .byte 0                        | silenced tracks still cut post-FX after their key time (p1_key)
 SHADOW: .byte 0
     .ifdef MODWERK_EVENTS
     .balign 4

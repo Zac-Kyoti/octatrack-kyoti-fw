@@ -268,8 +268,16 @@ pk_next:
     bpl.s   pk_loop
     movea.l (%sp)+,%a0
     move.b  %d0,KEYMASK                 | for mt_trig / mt_rebind / dt_trig / fresh_bind / trigflag
+| KEYHOLD (2026-11-01): a silenced key track's trigs play (cut post-FX).  When KEY moves away
+| it rejoins the silenced set, and DT-T leaves a running voice alone -- so the voice its key
+| time started was heard to its end (a loop: for good).  So a silenced key track stays HELD:
+| it keeps the post-FX cut while it stays silenced, though it is no longer a key; unmuting
+| (leaving the silenced set) releases it.  Its trigs are dropped as for any silenced track.
     move.l  %d0,%d1
-    and.l   %d2,%d1                     | silenced key tracks ...
+    move.b  KEYHOLD,%d3                 | low byte; %d3's upper bytes (the loop's -1) go below
+    or.l    %d3,%d1                     | key tracks + held ones ...
+    and.l   %d2,%d1                     | ... that are silenced (8 bits) ...
+    move.b  %d1,KEYHOLD                 | (a held track stays held only while silenced)
     lsl.l   #8,%d1
     or.l    %d1,%d5                     | ... get stock's own post-FX mute cut (OT's behaviour)
     not.l   %d0
@@ -1367,6 +1375,7 @@ tf_sil:
 | SDRAM with the image, like DIRECT JUMP's DJ_MODE). 0 until the first active-mode frame.
     .balign 2
 KEYMASK: .byte 0
+KEYHOLD: .byte 0                        | silenced tracks still cut post-FX after their key time (p1_key)
     .else
     .set    tf_sil, tf_skip             | no SIDE-CHAIN: the silenced branches are stock's skip, as before
     .endif
@@ -1375,7 +1384,7 @@ KEYMASK: .byte 0
 | 25 Oct 2026. Its old home, SRAM 0x80006c66, lies inside 0x80006924..0x80007873, the work
 | area of the stock timestretch task (prio 1, entry 0x40098a5c): its splice search fills
 | 0x80006964.. with audio on every grain, so SHADOW read back audio bytes in OTFX, and this
-| hook's per-frame write landed in the search window. With SC_KEY it takes KEYMASK's old
-| alignment pad, so the unit's size is unchanged. NOTES "2026-10-25 (`ts-sram`)".
+| hook's per-frame write landed in the search window. With SC_KEY it follows KEYMASK and
+| KEYHOLD (2026-11-01: the unit grew 2 B for KEYHOLD and the pad after SHADOW). NOTES "2026-10-25 (`ts-sram`)".
 SHADOW: .byte 0
     .balign 2
