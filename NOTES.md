@@ -37639,3 +37639,6 @@ octabam/Modwerk manifest reference -> KYOTI V1.7's placement (0x400d6e54, ac03f5
 (classic cave, 100 B left). FINAL V1.7 (ea1ffc08…) no longer builds without the opt-in until re-pinned.
 Bugbuilds: 9 of 10 match their pins without the opt-in; BLACKPYRAMIDS_303 could not be built here
 (out/ot303/dsp56300_new/…/dsp_asm missing on this machine; unrelated, its builder untouched).
+- **PROMOTED FINAL (2026-11-02):** the user flashed KYOTI V1.7 + KEYHOLD (syx 7e6e509f…): all tests pass (the
+  KEYHOLD checks, and V1.7's DELAY). build_kyoti.py re-pinned: mainos 46f34fc9…; it rebuilds to that pin
+  without the opt-in. Standalone MUTE_MODES and the Bugbuilds are unchanged.

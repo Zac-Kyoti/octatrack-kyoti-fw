@@ -47,7 +47,8 @@ until it is unmuted: in DT-T a voice started during its key time was heard to it
 moved away. The SC_KEY unit is 1100 B (was 1086); its reference is KYOTI V1.7's placement,
 0x400d6e54; the plain unit is unchanged. Hardware: the octabam form (OCTABAM37,
 octabam bc144523 + this change) on the author's MKI, 1 Nov 2026, DT-T: a muted KEY track stays
-silent when KEY moves away, and the rest is nominal. OTFX-T/OTFX's one-frame blip: port only.
+silent when KEY moves away, and the rest is nominal; KYOTI V1.7 (this placement) on the same
+unit, 2 Nov 2026: the same checks pass. OTFX-T/OTFX's one-frame blip: port only.
 """
 
 import dataclasses

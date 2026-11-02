@@ -57,7 +57,7 @@ FINAL = {
         "mainos_varispeed_emus_batch_bugfixes.bin":          "52823ea6714036808037757ff49e2e6bcf4cc3d2ebe1ced1f2f0810ac9781943",
     },
     "build_kyoti.py": {
-        "mainos_kyoti_v1.7.bin":                             "ea1ffc08cd6231c4f96f2c86c0e4ac02eaf5e5597ec503f1df8a236abd04cca2",
+        "mainos_kyoti_v1.7.bin":                             "46f34fc9f99307847836902a93d60d5f079e0240f1081d1e4f5a658802f577e2",
     },
     "build_blackpyramids_303.py":          "88d49307f481d014b7d5b4c024e918d5b0480c87318eb71798869b300948f62b",
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
