@@ -107,7 +107,7 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | VARISPEED_EMUS DSP kernel gate | `tools/varispeed_emus_dsp_*` (bit-exact against the reference engine) |
 | DSP assembly | `tools/dsp_xasm.py` over `vendor/dsp56300`'s `dsp_asm` |
 | a final build | `tools/build_<feature>.py` → `.syx` (MIDI) + `.bin` (CF card); see `BUILD_KYOTI.md` |
-| the combined image | `tools/build_kyoti.py` — builds **KYOTI V1.6, FINAL 2026-10-22** (flashed); V1.5 (FINAL until then) builds from tag `ref/kyoti-v1.5-2026-10-22` (see §6) |
+| the combined image | `tools/build_kyoti.py` — builds **KYOTI V1.7, FINAL 2026-11-02** (flashed: the DELAY fix); V1.6 (FINAL until then) builds from tag `ref/kyoti-v1.6-2026-10-29`, V1.5 from `ref/kyoti-v1.5-2026-10-22` (see §6) |
 | octabam's remixer (`make remix`) | `sh tools/octabam_remixer.sh` — its own clone at `~/Documents/octabam`, fast-forwarded to octabam's `main` on every launch; `refs/octabam` stays the pinned research harness |
 | each feature + BATCH_BUGFIXES | `tools/build_bugbuilds.py` (final; `--only NAME` builds one) |
 | DIRECT JUMP V6.4, the OT↔AR parity build | `tools/build_direct_jump_v6_4.py` — WIP **by design**: kept buildable at the user's request (hardware-confirmed image `4a6c1b5e…`), never to be promoted |
@@ -157,6 +157,13 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
+- **The stock DELAY's coefficient table (`0x400d24d0..0x400d2ce0`, midisc's "SAFE_CAVE") is not free** —
+  **KYOTI V1.7 FINAL 2026-11-02** (flashed: all tests pass, DELAY repeats as stock). V1.1–V1.6 and BUG_VEM10 kept
+  code there and darkened DELAY repeats. `seal()` refuses any image that changes the range (every builder);
+  V1.7 moves DIRECT JUMP to DRAM (beside RELOAD) and packs the old SAFE pieces into the classic cave; the
+  Bugbuild fallback is a DRAM unit. Pins: KYOTI V1.7 mainos `ea1ffc08…` (syx `89566889…`), BUG_VEM10 mainos
+  `52823ea6…` (syx `ba7697fb…`; not flashed as such). octabam has the same range in its free list:
+  sambanks/octabam#1007. NOTES 2026-11-01/02, `reference/kb/caves.md`.
 - **MUTE_MODES: SHADOW out of the stock timestretch task's SRAM** — **FINAL 2026-10-26** (the user flashed the
   standalone `140C_MMSH1`, BUG_MM and KYOTI V1.6: all good). SHADOW lives in the unit; `seal()` refuses any
   builder's reference into `0x80006924..0x80007873`. Pins: standalone mainos `560de340…`, BUG_MM `2b5f7c70…`

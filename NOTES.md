@@ -37602,3 +37602,8 @@ is not edited) and `tools/emu_sc_shared.py`.
   Not flashed. octabam lists 0x400d24d0..0x400d2ce0 as free ROM (and menushortcut pins 300 B there): upstream
   has the same bug -- a note for Sam, not posted.
   KYOTI V1.7: mainos ea1ffc08…, syx 89566889….
+- **KYOTI V1.7 PROMOTED FINAL (2026-11-02)**: the user flashed it (all tests pass; DELAY repeats as stock).
+  Pins: KYOTI V1.7 mainos ea1ffc08… (syx 89566889…), BUG_VEM10 mainos 52823ea6… (syx ba7697fb…; built the
+  same way, not flashed as such). Every FINAL builder matches its pin without the opt-in under the new
+  table check (13 builders + 9 Bugbuilds; BLACKPYRAMIDS_303's two FINAL images checked directly: table stock).
+  V1.6 builds from tag ref/kyoti-v1.6-2026-10-29 (8868867). README: KYOTI V1.7 + a "Before you flash" line.

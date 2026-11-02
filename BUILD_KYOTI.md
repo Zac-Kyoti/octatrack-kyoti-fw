@@ -67,7 +67,7 @@ those), as
 alone. MIDI_PLAYS_FREE_FIX writes only its `mainos_` image; to flash it on its own, use the
 no-assembler patch below or wrap it as its builder's header shows.
 
-### The combined image: KYOTI V1.6
+### The combined image: KYOTI V1.7
 
 Every FINAL feature except BLACKPYRAMIDS_303 and VARISPEED_EMUS in one image:
 
@@ -75,15 +75,17 @@ Every FINAL feature except BLACKPYRAMIDS_303 and VARISPEED_EMUS in one image:
 python3 tools/build_kyoti.py
 ```
 
-It writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.6.syx` and `.bin` (OS VERSION `KYOTI V1.6`).
+It writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.7.syx` and `.bin` (OS VERSION `KYOTI V1.7`).
 
-> **Sample memory.** RELOAD_FROM_PROJECT runs from DRAM in V1.5–V1.6, as in V1.2–V1.3: one 6 KB
-> page of the 85.5 MB pool. An octabam-built image (octabam's own remixer) reserves a fixed
+> **Sample memory.** RELOAD_FROM_PROJECT runs from DRAM in V1.5–V1.7, as in V1.2–V1.3, and DIRECT JUMP
+> joins it in V1.7: two 6 KB pages (12 KB) of the 85.5 MB pool. An octabam-built image (octabam's own remixer) reserves a fixed
 > **10 MiB** whenever any module runs from DRAM.
 
 KYOTI V1.0 was withdrawn on 2026-10-06; V1.1 replaced it, V1.2 (with an earlier varispeed module) replaced V1.1,
 V1.3 replaced V1.2, whose SPRING reclaim overwrote PLATE REVERB's page (`reference/kb/caves.md` §0),
-V1.4 replaced V1.3 without that module, and V1.5 replaces V1.4, adding VARISPEED. V1.4 still
+V1.4 replaced V1.3 without that module, V1.5 replaced V1.4, adding VARISPEED, V1.6 replaced V1.5, and
+V1.7 replaces V1.6: V1.1–V1.6 kept code on the stock DELAY's coefficient table (`reference/kb/caves.md`,
+the cave table), which darkened DELAY repeats. V1.6 builds from tag `ref/kyoti-v1.6-2026-10-29`. V1.4 still
 builds from the commit it was promoted at (`git worktree add ../octatrack-kyoti-fw-v14 19348d9`,
 with `vendor/`, `out/raw/`, `downloads/` and `refs/octabam` linked in by absolute path).
 

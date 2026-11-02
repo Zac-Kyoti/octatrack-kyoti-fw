@@ -308,18 +308,17 @@ flashed as such.\
 **Final build:** [`tools/build_bugbuilds.py`](tools/build_bugbuilds.py) →
 `out/Bugbuilds/OCTATRACK_OS1.40C_<FEATURE>_BATCH_BUGFIXES`
 
-### KYOTI V1.6
+### KYOTI V1.7
 
 Every feature above except BLACKPYRAMIDS_303 and VARISPEED_EMUS, and all three
 BATCH_BUGFIXES, in **one image**. The boot splash and SYSTEM STATUS → OS VERSION read
-`KYOTI V1.6`. It replaces KYOTI V1.5 and earlier, and the withdrawn V1.0 (see below). A
+`KYOTI V1.7`. It replaces KYOTI V1.6 and earlier, and the withdrawn V1.0 (see below). A
 COMPRESSOR saved with V1.5 or earlier keeps its `KEY`; set its `KGN`, `KBAS`, `KWID` and `MON`
 again.
 
-**Hardware:** confirmed (this combined image, with the QUANTIZE_LIVE_REC_TOGGLE before
-2026-10-22's toasts; that newer one is confirmed on its own).\
+**Hardware:** confirmed (this combined image).\
 **Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) →
-`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.6`
+`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.7`
 
 ---
 
@@ -327,10 +326,14 @@ again.
 
 **KYOTI V1.0 (the earlier all-in-one image) is withdrawn as of 2026-10-06.** It can crash
 the unit when an encoder is turned on an FX page set to NONE, and when T8's PLAYBACK or LFO
-page is shown with T8 as MASTER. If you flashed it, flash KYOTI V1.6 above, one of the
+page is shown with T8 as MASTER. If you flashed it, flash KYOTI V1.7 above, one of the
 single-feature builds, or stock OS 1.40C. None of those has this problem.
 
-**KYOTI V1.2 breaks PLATE REVERB** (a damaged page, and its knobs do nothing). Flash KYOTI V1.6.
+**KYOTI V1.2 breaks PLATE REVERB** (a damaged page, and its knobs do nothing). Flash KYOTI V1.7.
+
+**KYOTI V1.1–V1.6 change the stock DELAY's tone**, and so does the VARISPEED_EMUS + BATCH_BUGFIXES
+image (`BUG_VEM10`) built before 2026-11-02: at most BASE / WDTH settings, the defaults included, the
+repeats are filtered darker than on stock. Flash KYOTI V1.7, or rebuild `BUG_VEM10`.
 
 **This is for personal study.** Updating an Elektron unit with anything other than
 official firmware is risky: it puts the warranty in question and can leave the unit

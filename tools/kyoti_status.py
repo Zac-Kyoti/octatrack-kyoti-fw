@@ -54,10 +54,10 @@ FINAL = {
         "mainos_rec_trig_mute_batch_bugfixes.bin":           "9691e449dbecc5f1f91280b586efe8046f57a5922e1754eb6d5afa85975b7db3",
         "mainos_blackpyramids_303_batch_bugfixes.bin":       "afc4e27b41a65ae123db54bc693383f32faf8e1f19f9cfd040c57e8ce4e2c5ab",
         "mainos_varispeed_batch_bugfixes.bin":               "c3af514f52feb1c46747736d7a6151b5109f664b2561278f37d01e99d8f10663",
-        "mainos_varispeed_emus_batch_bugfixes.bin":          "9e0e3f92088be7f968c2fdc8665b69cfe4c13b19b8229ed5831a297687a509e5",
+        "mainos_varispeed_emus_batch_bugfixes.bin":          "52823ea6714036808037757ff49e2e6bcf4cc3d2ebe1ced1f2f0810ac9781943",
     },
     "build_kyoti.py": {
-        "mainos_kyoti_v1.6.bin":                             "05460b97f5db0454c2a9c2c936e6b4cccd7433249d30c029b132b674283dc47e",
+        "mainos_kyoti_v1.7.bin":                             "ea1ffc08cd6231c4f96f2c86c0e4ac02eaf5e5597ec503f1df8a236abd04cca2",
     },
     "build_blackpyramids_303.py":          "88d49307f481d014b7d5b4c024e918d5b0480c87318eb71798869b300948f62b",
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
