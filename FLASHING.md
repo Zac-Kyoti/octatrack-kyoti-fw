@@ -206,10 +206,10 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
-- **KYOTI CL2 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.6_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.6_WITH_CLYPS.syx`)
-  = KYOTI V1.6 (main's, `05460b97…`) with Clyps (as CLYPY) in place of RELOAD_FROM_PROJECT, tied to DIRECT
-  JUMP (scope §1.10). (CL1 was built on an older V1.6 -- REC_TRIG_MUTE on [YES]/[NO]: never flash it.)
-  1. Boot: OS VERSION `KYOTI CL2`. A Flex list's FREE MEM reads ~10 MB less than on V1.6 (Clyps' buffers).
+- **KYOTI CL3 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = KYOTI V1.7 (FINAL, `ea1ffc08…`: the DELAY fix) with Clyps (as CLYPY) in place of RELOAD_FROM_PROJECT, tied to DIRECT
+  JUMP (scope §1.10). (CL1 / CL2 were built on V1.6: never flash them.)
+  1. Boot: OS VERSION `KYOTI CL3`. A Flex list's FREE MEM reads ~10 MB less than on V1.7 (Clyps' buffers).
   2. Hold `[PTN]`, press `[BANK]`, let go of `[BANK]` only, press `[YES]`: `DIRECT JUMP ON` toast, Clyps stays
      open, nothing loads, no SELECT PATTERN when `[PTN]` is released. Again: `DIRECT JUMP OFF`.
   3. DIRECT JUMP ON, playing: load a slot onto a track in Clyps: it lands at the next step (not at the

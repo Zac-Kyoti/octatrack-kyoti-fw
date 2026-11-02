@@ -37848,3 +37848,7 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   entries 508 and 764. Fix direction: vacate 0x400d24d0..0x400d2cdc in KYOTI (V1.7) + a seal() check; the
   Bugbuilds' SAFE fallback (build_bugbuilds.py SAFE_START) has the same problem when it is used. Probe:
   scratchpad curve/probe.py (subagent, 2026-11-01).
+- **KYOTI CL3** (2026-11-02, WIP, NOT flashed; CL2 superseded): trkseq rebased onto main 4b83b4c (KYOTI V1.7 FINAL);
+  the same Clyps on V1.7 (DIRECT JUMP in DRAM too: Clyps' phase-D site calls dj_land at its DRAM address). syx
+  2c59c6ad…. Gates on CL3: full 128, F+Q 27, L+J 16, M+U 26. Standalone CLYPY unchanged (111d6103…, passes the
+  new DELAY-table seal check); the default build still = FINAL V1.7.

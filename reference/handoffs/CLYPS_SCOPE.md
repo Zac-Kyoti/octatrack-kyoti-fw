@@ -944,7 +944,7 @@ pixel-identical to stock's active tab; none while [CUE] is held; back on the act
 Also: FULL -> ALL in every label and toast (widths re-measured: all narrower; group `ORIG ALL` puts
 `LOAD:` at x 57).
 
-### 1.10 DIRECT JUMP / KYOTI integration (2026-10-31; steps 1-5 built as `KYOTI CL2`, not flashed)
+### 1.10 DIRECT JUMP / KYOTI integration (2026-10-31; steps 1-5 built as `KYOTI CL3` on V1.7, not flashed)
 
 **Target:** KYOTI with Clyps in place of RELOAD_FROM_PROJECT (decided 2026-10-30; Clyps carries the card
 reloads). DIRECT JUMP stays as it is (FINAL, ROM, HW-proven); Clyps adapts to it.
@@ -993,6 +993,11 @@ never flashed, superseded. `trkseq` rebased onto origin/main (one conflict: buil
 main's kept); CL2 = the same Clyps on main's V1.6 (`05460b97...`, which the default build still matches).
 Lesson: `git fetch` + compare with origin/main before building a combined image.
 
+**CL2 -> CL3 (2026-11-02):** KYOTI V1.7 (FINAL: the DELAY-table fix, DIRECT JUMP in DRAM) replaced V1.6;
+trkseq rebased (one conflict in build_kyoti.py: DRAM = RELOAD, DIRECT JUMP, Clyps last; V1.7 strings). CL3 =
+the same Clyps on V1.7 (`KYOTI_VERSTR="KYOTI CL3"`, out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/). In it DIRECT JUMP's
+dj_land is in DRAM too; the SUPERSEDE check holds unchanged.
+
 **Built: `KYOTI CL2`** (`KYOTI_ALLOW_WIP=1 KYOTI_VERSTR="KYOTI CL2" python3 tools/build_kyoti.py --with CLYPS`;
 out/KYOTI_WIP/KYOTI_V1.6_WITH_CLYPS/). Steps 1-5 as planned, with one change to step 1: NO ROM stubs at all.
 The loader runs from the boot site `0x4000050c`, before `0x40001e50` (boot continue) starts the tasks, the
@@ -1012,7 +1017,7 @@ UI and the sequencer, so every hook finds the DRAM unit in place; the whole unit
   lands at step 4 (75 ms); a DJ jump (PEND written as stock's pick writes it) lands and drops the
   pending Clyps cue, neither T1 touched.
 - Step 6 is NOT done: VARISPEED / SIDE-CHAIN / REC_TRIG_MUTE / MUTE_MODES with Clyps are hardware
-  walk-through items (FLASHING §4 "KYOTI CL2").
+  walk-through items (FLASHING §4 "KYOTI CL3").
 - Found on the way, not Clyps': KYOTI's SAFE zone (`0x400d24d0..0x400d2cdc`, ~2 KB of V1.6 code) is
   entries 508-1023 of a live 1,024-long curve table at `0x400d1ce0` (stock 0 there; the per-voice engine
   `0x40003522` indexes it with a u16 >> 6, so inputs >= 32,512 read code). caves.md §5 / NOTES S124 said
