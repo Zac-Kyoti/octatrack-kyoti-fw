@@ -40,8 +40,10 @@ keeps ducking in every MUTE MODE.
 
 2026-11-01: KEYHOLD (SC_KEY only). A muted track that has been a KEY keeps stock's post-FX cut
 until it is unmuted: in DT-T a voice started during its key time was heard to its end once KEY
-moved away. The SC_KEY unit is 1100 B (was 1086), byte-identical to the octabam form, and the
-KYOTI build now places it at 0x400d7640, so its reference changed. WIP, not yet on hardware.
+moved away. The SC_KEY unit is 1100 B (was 1086), byte-identical to the octabam form; its
+reference is KYOTI V1.7's placement, 0x400d6e54. Hardware: the octabam form (OCTABAM37,
+octabam bc144523 + this change) on the author's MKI, 1 Nov 2026, DT-T: a muted KEY track stays
+silent when KEY moves away, and the rest is nominal. OTFX-T/OTFX's one-frame blip: port only.
 """
 
 import os
@@ -67,7 +69,7 @@ def _sc_key_inc(modules):
 def _softmute_ref(modules):
     """The variant the author ratified for this selection."""
     if SC in modules:       # tools/build_kyoti.py's placement in KYOTI V1.0
-        return (0x400d7640, "2a625eef2e1364373f3f801a0b38257996a28d762fd287149e94cf19361faf06")
+        return (0x400d6e54, "ac03f5590ca69f7d29f1034720e9a8d83c6500953b80c729d4aed400125285d8")
     return (0x400d7400, "ca7792be6239c6c3c1d4882ef3c8fdd718a05d7e90f36d8eae0c1971cb9a9689")
 
 # The PERSONALIZE pointer arrays (16 u32 each in 1.40C) and the code that names them.

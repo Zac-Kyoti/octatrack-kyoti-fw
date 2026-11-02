@@ -37607,3 +37607,35 @@ is not edited) and `tools/emu_sc_shared.py`.
   same way, not flashed as such). Every FINAL builder matches its pin without the opt-in under the new
   table check (13 builders + 9 Bugbuilds; BLACKPYRAMIDS_303's two FINAL images checked directly: table stock).
   V1.6 builds from tag ref/kyoti-v1.6-2026-10-29 (8868867). README: KYOTI V1.7 + a "Before you flash" line.
+
+## 2026-11-01 (`mm-keyhold`) — MUTE_MODES KEYHOLD: a muted SIDE-CHAIN KEY track stays cut after its key time (octabam#934)
+
+**Report (octabam#934, OCTABAM35 = octabam main bc144523 on the MKI):** moving KEY let a muted track play
+("doubling", "echoes", cleared only by transport restart). Not the demand loader: OCTABAM36
+(`test/sidechain-compressor`, same main) was clean, but it carries no MUTE_MODES. The user then found the
+octabam images run MUTE_MODES with SC_KEY, default DT-T; MUTE MODE OT does not show it. Case: T1 COMPRESSOR
+(FX2), T5 kick, T7 muted one-shot (trig on step 1, one pattern long); KEY had rested on T7, then T6/T8 ->
+T7 audible for 16 steps (a loop: for good).
+
+**Mechanism [C, port + code].** p1_key takes a silenced KEY track out of the silenced set (trigs pass) and
+gives back its D5 mute bit (stock's post-FX cut). When KEY moves away it rejoins the silenced set; DT-T
+never touches a running voice ("rides its own amp envelope"), so the voice started during its key time is
+heard to its end. OTFX-T / OTFX: one frame gets through before the note-off / dry cut (T7 900 Hz, 40 ms
+peak -42.7 / -62.5 dBFS; full level -28). Reproduced in octabam's port at bc144523 (scratch clone in
+main's out/sc-leak/, dsp56300 at the pin, local live-script main-level patch) with a tone fixture
+(usb_sig_project: T_N = 200+100N Hz) and GATE 0x800000dc poked: KEY set to T7 by poking the Part byte +
+live lane (0x80000810 + t*72 + 0x32 FX1 / +0x38 FX2, KEY +2), then T8 mid-pattern -> T7 at -28 dBFS.
+Port traps: FX1 key twice stays on page 1 (page 2 = FUNC+FX1); KEY's rotary switch is not one position per
+fixed count (7 x +4 landed on T8), so set KEY by poke; --live-script never posts --main-level.
+
+**Fix (SC_KEY only):** KEYHOLD byte, hold = (KEYMASK | hold) & silenced; held tracks keep the D5 cut while
+silenced, trigs dropped as before, unmuting releases. mm_softmute SC_KEY 1086 -> 1100 B; plain unit and
+standalone MUTE_MODES unchanged (FINAL 560de340… still matches); Modwerk copy byte-identical. Port, all four
+modes: no leak, no blip; unmute brings T7 back (OTFX-T at its next trig); a plain DT-T mute still rides.
+**Hardware:** OCTABAM37 (bc144523 + this change; syx c8cfc8c2…) on the MKI, DT-T: fixed, rest nominal.
+octabam/Modwerk manifest reference -> KYOTI V1.7's placement (0x400d6e54, ac03f559…).
+
+**KYOTI V1.7 + KEYHOLD (WIP, NOT flashed):** mainos 46f34fc9…, syx 7e6e509f…, softmute 1100@0x400d6e54
+(classic cave, 100 B left). FINAL V1.7 (ea1ffc08…) no longer builds without the opt-in until re-pinned.
+Bugbuilds: 9 of 10 match their pins without the opt-in; BLACKPYRAMIDS_303 could not be built here
+(out/ot303/dsp56300_new/…/dsp_asm missing on this machine; unrelated, its builder untouched).
