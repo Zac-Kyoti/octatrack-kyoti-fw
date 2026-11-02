@@ -2,13 +2,21 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-KYOTI V1.6 -- every FINAL feature in one image except BLACKPYRAMIDS_303 and VARISPEED_EMUS.
+KYOTI V1.7 -- every FINAL feature in one image except BLACKPYRAMIDS_303 and VARISPEED_EMUS.
 
     MUTE MODE (OT / OTFX / OTFX-T / DT-T)      QUANTIZE LIVE REC toggle
     SIDE-CHAIN COMPRESSOR (cross-core)         TRIGLESS-LOCK AUTO-REMOVE
     RELOAD FROM PROJECT (RELOAD_FROM_PROJECT chords)       DIRECT JUMP V7.0.1
     REC TRIG MUTE ([TRACK]+[REC], CC 80)       VARISPEED (TSTR VARI + QUAN)
     the bug fixes: MIDI_PLAYS_FREE_FIX, PATTERN LED, PART_CHANGE_CARRYOVER_FIX
+
+V1.7 vs V1.6 (WIP 2026-11-01; V1.6 builds from the commit before this one): the DELAY sounds as in stock
+again. V1.1-V1.6 kept ~2 KB of code in midisc's "SAFE_CAVE" 0x400d24d0..0x400d2cdc, which is entries
+508..1022 of the stock DELAY's filter-coefficient table (0x400d1ce0; stock 0 = filter open): every DELAY
+with BASE+WDTH >= 127, the default included, low-passed its repeats with a code word as the pole. SAFE is
+gone (no zone may touch the table; seal() refuses any image that changes it); DIRECT JUMP moves to DRAM
+(beside RELOAD_FROM_PROJECT, the same 6 KB arena page) and the classic cave takes the eight SAFE pieces.
+No feature changes; only addresses.
 
 V1.6 vs V1.5 (FINAL 2026-10-22, flashed; V1.5 builds from tag ref/kyoti-v1.5-2026-10-22): SIDECHAIN_COMPRESSOR
 is the base-width version (FINAL 2026-10-22: base-width key filter KBAS / KWID, MON on page 2's
@@ -121,13 +129,13 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
 import dram                                    # noqa: E402  (tools/dram/dram.py)
 
 gate(__file__, note="""
-KYOTI V1.6: every FINAL feature except BLACKPYRAMIDS_303 and VARISPEED_EMUS in one image,
+KYOTI V1.7: every FINAL feature except BLACKPYRAMIDS_303 and VARISPEED_EMUS in one image,
 nothing placed in the parameter-page descriptor table (V1.0, withdrawn 2026-10-06, crashed
 because it did). RELOAD_FROM_PROJECT in DRAM.
 """)
 
-VERSTR = "KYOTI V1.6"
-TAG = "KYOTI_V1.6"
+VERSTR = "KYOTI V1.7"
+TAG = "KYOTI_V1.7"
 BASE = 0x40000400
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
@@ -143,7 +151,6 @@ o = lambda a: a - BASE
 ZONES = {
     "CAVE":  (0x400d6500, 0x400d7c3c, "proven",
               "this project's cave (from 0x400d6500 as every flashed build; 0xff from 0x400d7c3c)"),
-    "SAFE":  (0x400d24d0, 0x400d2cdc, "midisc", "SAFE_CAVE; stock references 0x400d2cdc"),
     "ENC":   (0x400c45b0, 0x400c4700, "midisc", "ENC_UNLOCK_CAVE"),
     "SPRING": (0x400d5760, 0x400d58f0, "reclaim",
                "SPRING REVERB's CF descriptor record P 0x400d575e..; dead once SIDE-CHAIN removes SPRING"),
@@ -152,6 +159,12 @@ ZONES = {
     "PERS2": (0x400b2ac0, 0x400b2b00, "reclaim",
               "stock PERSONALIZE setters; dead once MUTE MODE relocates them"),
 }
+# midisc's "SAFE_CAVE" 0x400d24d0..0x400d2cdc is NOT a zone any more (V1.7): it is entries 508..1022 of the
+# stock DELAY's one-pole coefficient table at 0x400d1ce0 (stock 0 = filter open). V1.1-V1.6 kept ~2 KB of
+# code there, and every DELAY with BASE+WDTH >= 127 (the default included) read a code word as its LP pole:
+# darker repeats (NOTES 2026-11-01). No zone may overlap it (asserted), and seal() refuses any image that
+# changes it (tools/kyoti_status.py STOCK_TABLES).
+DELAY_TABLE = (0x400d1ce0, 0x400d2ce0)
 # The parameter-page descriptor table: live data, zeros included (reference/kb/caves.md §0).
 # No zone may overlap it except SPRING, whose entry this image makes unreachable (asserted).
 # A record is the 0x192 bytes from P = E + 0x38 -- the pointer id2e holds and every reader
@@ -166,18 +179,23 @@ RECLAIM_WHOLE = {"SPRING": (0x400d575e, 0x400d58f0), "PERS1": (0x400b2a34, 0x400
                  "PERS2": (0x400b2ac0, 0x400b2b00)}
 
 # --- the placement plan: zone -> pieces, packed in this order --------------------------
-#   engine / ISR / tick-path code: CAVE and SAFE only.  ROM-only: a "DRAM" zone (pieces
-#   linked at the arena reserve, carried by tools/dram/'s loader): RELOAD_FROM_PROJECT, as in V1.2-V1.3.
+#   ROM: CAVE (the proven cave), ENC, and the reclaim zones. DRAM: pieces linked at the arena reserve,
+#   carried by tools/dram/'s loader, which runs from the boot site 0x4000050c before any task or ISR:
+#   RELOAD_FROM_PROJECT (V1.2-V1.3, V1.5-V1.6) and, from V1.7, DIRECT JUMP -- its phase-D hook ran from
+#   DRAM on the unit in OBKYOTI6-12 (reference/kb/caves.md §5) -- so that the classic cave takes what sat
+#   on DELAY's table (SAFE, above).
 PLAN = {
-    "DRAM":  ["patch_reload3"],                    # key-handler + sys-task code; DRAM-proven in V1.2-V1.3
+    "DRAM":  ["patch_reload3",                     # key-handler + sys-task code; DRAM-proven in V1.2-V1.3
+              "patch_directjump_v7"],              # V1.7: out of CAVE (2,026 B), into the same arena page
     "CAVE":  ["patch_varispeed",                   # first: 0x400d6500, VARISPEED's own address (frame ISR)
-              "patch_directjump_v7", "patch_softmute", "patch_partreapply"],
-    "SAFE":  ["personalize_getters", "personalize_setters", "personalize_labels",
+              "patch_softmute", "patch_partreapply",
+              # V1.7: everything that sat in SAFE (DELAY's table) until V1.6
+              "personalize_getters", "personalize_setters", "personalize_labels",
               "patch_sidechain",                   # COMPRESSOR page formatters
               "ui_switch",                         # SIDE-CHAIN KEY's switch + KWID's clip (UI task)
               "patch_trigscale",                   # MIDI_PLAYS_FREE_FIX
-              "patch_pattern_led",                 # EMPTY_PATTERN_LED_FIX (CAVE is full since V1.2)
-              "patch_mutemode",                    # V1.5: CAVE holds VARISPEED's unit
+              "patch_pattern_led",                 # EMPTY_PATTERN_LED_FIX
+              "patch_mutemode",
               "rtm_mask"],                         # REC_TRIG_MUTE's state byte, written at runtime
     "ENC":   ["patch_triglock"],                   # LIVE-erase key path only
     # SPRING REVERB's dead descriptor record (UI-path code ran there in V1.2-V1.3): [PLAY]/[REC]
@@ -393,7 +411,7 @@ def wip_variant(flag):
     """--with / --without images are never the promoted one: refuse them up front without the
     opt-in, instead of after a full build at seal()."""
     if os.environ.get("KYOTI_ALLOW_WIP") != "1":
-        sys.exit(f"\n  Refusing to build: {flag} makes a WIP image, not KYOTI V1.6.\n"
+        sys.exit(f"\n  Refusing to build: {flag} makes a WIP image, not KYOTI V1.7.\n"
                  f"  If you meant it, set KYOTI_ALLOW_WIP=1:\n\n"
                  f"      KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py {flag} ...\n")
 
@@ -412,8 +430,8 @@ def apply_with(argv):
         sys.exit(f"--with: unknown or non-WIP feature(s) {bad}; choose from {sorted(WIP_FEATURES)}")
     for a in add:
         FEATURES[a] = WIP_FEATURES[a]
-    VERSTR = ("KV15+" + "".join(a[:3] for a in add))[:10]
-    TAG = "KYOTI_V1.6_WITH_" + "_".join(add)
+    VERSTR = ("KV17+" + "".join(a[:3] for a in add))[:10]
+    TAG = "KYOTI_V1.7_WITH_" + "_".join(add)
     OUTDIR = ROOT / "out/KYOTI_WIP" / TAG
     SANDBOX = OUTDIR / "_sandbox"
     print(f"  WIP IMAGE: with {', '.join(add)}  ->  OS VERSION {VERSTR!r}, {OUTDIR.relative_to(ROOT)}\n")
@@ -442,8 +460,8 @@ def apply_without(argv):
              "RELOAD_FROM_PROJECT": "RL", "DIRECT_JUMP_KYOTI": "DJ",
              "MIDI_PLAYS_FREE_FIX": "PF", "EMPTY_PATTERN_LED_FIX": "PL", "PART_CHANGE_CARRYOVER_FIX": "PR",
              "REC_TRIG_MUTE": "RTM", "VARISPEED": "VS"}
-    VERSTR = ("KV16-NO-" + "".join(short[d] for d in drop))[:10]
-    TAG = "KYOTI_V1.6_WITHOUT_" + "_".join(drop)
+    VERSTR = ("KV17-NO-" + "".join(short[d] for d in drop))[:10]
+    TAG = "KYOTI_V1.7_WITHOUT_" + "_".join(drop)
     OUTDIR = ROOT / "out/KYOTI_BISECT" / TAG
     SANDBOX = OUTDIR / "_sandbox"
     print(f"  BISECTION IMAGE: without {', '.join(drop)}  ->  OS VERSION {VERSTR!r}, "
@@ -476,6 +494,9 @@ def main():
             if r:
                 sys.exit(f"zone {z}: stock references into it: "
                          + ", ".join(f"0x{a:08x}->0x{v:08x}" for a, v in r[:6]))
+        if lo < DELAY_TABLE[1] and DELAY_TABLE[0] < hi:
+            sys.exit(f"zone {z} 0x{lo:08x}..0x{hi:08x} lies in DELAY's coefficient table "
+                     f"0x{DELAY_TABLE[0]:08x}..0x{DELAY_TABLE[1]:08x} (live data, zeros included)")
         dlo, dhi = DESCRIPTOR_TABLE
         if lo < dhi and dlo < hi and z not in DESCRIPTOR_TABLE_OK:
             sys.exit(f"zone {z} 0x{lo:08x}..0x{hi:08x} lies in the parameter-page descriptor table "
@@ -670,12 +691,13 @@ def main():
         djm, djlo, djhi = dj.get("DJ_MODE"), place["patch_directjump_v7"], \
             place["patch_directjump_v7"] + size["patch_directjump_v7"]
         widened = all(comp[o(s) + 3] == 0x70 for s in (0x4001f322, 0x4001f3be, 0x4001fb24))
-        dj_blob = bytes(comp[o(djlo):o(djhi)])
+        in_dram = zone_of["patch_directjump_v7"] == "DRAM"        # V1.7
+        dj_blob = dram_blob["patch_directjump_v7"] if in_dram else bytes(comp[o(djlo):o(djhi)])
         raw_ref = any(struct.unpack(">I", dj_blob[i:i + 4])[0] == 0x800000D8
                       for i in range(0, len(dj_blob) - 3, 2))
         if djm is None or not (djlo <= djm < djhi) or raw_ref:
             flag(f"B1: DJ_MODE is not in DIRECT JUMP's cave (sym {djm}, raw ref {raw_ref})")
-        elif comp[o(djm):o(djm) + 4] != b"\x00\x00\x00\x00":
+        elif dj_blob[djm - djlo:djm - djlo + 4] != b"\x00\x00\x00\x00":
             flag("B1: DJ_MODE's image word is not 0")
         else:
             print(f"  B1: DJ_MODE at 0x{djm:08x} in DIRECT JUMP's cave, image value 0 "
