@@ -74,6 +74,12 @@ if DIAG:
 
 CAVE_DJ = kyoti_place.at("patch_directjump_v7", 0x400d7000)     # V7.0.1: moved down from 0x400d7400 (the hand-off needs room; zero in stock, vetted zone)
 FREE_END = 0x400d7c3c
+# build_kyoti.py may carry this unit in DRAM (tools/dram/, as RELOAD_FROM_PROJECT's): linked at the DRAM
+# address it is given and NOT written into this image -- only its detours and the [PTN]-layer record are;
+# the combined builder appends it behind the loader. KYOTI V1.7 does, to free the classic cave for the
+# pieces that sat on DELAY's coefficient table (0x400d24d0..). DJ's phase-D hook ran from DRAM on the unit
+# in OBKYOTI6-12 (reference/kb/caves.md §5). Unset in every standalone run: byte-for-byte as before.
+DRAM = bool(kyoti_place.at("patch_directjump_v7_dram", False))
 # MIDI_PLAYS_FREE_FIX, folded in standalone; a combined build (KYOTI) brings it as its own
 # feature and turns this off.
 WITH_TRIGSCALE = kyoti_place.at("dj_trigscale", True)
@@ -146,12 +152,18 @@ def main():
         if bad:
             sys.exit(f"{name} references the 0x80006a40+ scratch block at blob offsets "
                      f"{[hex(i) for i in bad]} -- Session 98 forbids it")
-        co = o(at)
-        if any(img[co:co + len(blob)]):
-            sys.exit(f"cave 0x{at:08x} ({name}) not free: {bytes(img[co:co+16]).hex()}")
-        spans.append((at, at + len(blob), name))
-        img[co:co + len(blob)] = blob
-        print(f"  {name:20s} {len(blob):3d} B @ 0x{at:08x} .. 0x{at+len(blob)-1:08x}")
+        if DRAM and name == "patch_directjump_v7":
+            if BASE <= at < BASE + len(img):
+                sys.exit(f"patch_directjump_v7_dram: 0x{at:08x} is inside the OS image, not DRAM")
+            print(f"  {name:20s} {len(blob):3d} B linked at 0x{at:08x} (DRAM: carried by the combined "
+                  f"image's loader, not written here)")
+        else:
+            co = o(at)
+            if any(img[co:co + len(blob)]):
+                sys.exit(f"cave 0x{at:08x} ({name}) not free: {bytes(img[co:co+16]).hex()}")
+            spans.append((at, at + len(blob), name))
+            img[co:co + len(blob)] = blob
+            print(f"  {name:20s} {len(blob):3d} B @ 0x{at:08x} .. 0x{at+len(blob)-1:08x}")
         for site, sym, exp, n, kind in detours:
             exp = bytes.fromhex(exp)
             do = o(site)
@@ -194,7 +206,7 @@ def main():
     for (a1, b1, n1), (a2, b2, n2) in zip(spans, spans[1:]):
         if b1 > a2:
             sys.exit(f"cave overlap: {n1} 0x{a1:x}..0x{b1:x} / {n2} 0x{a2:x}..0x{b2:x}")
-    if spans[-1][1] > FREE_END:
+    if spans and spans[-1][1] > FREE_END:
         sys.exit(f"cave runs past the free zone end (0x{spans[-1][1]:x} > 0x{FREE_END:x})")
     print("  no overlaps; all within the free cave")
 
