@@ -157,15 +157,45 @@ def _check_stock_sram(builder, image):
         sys.exit(2)
 
 
+# Stock data that LOOKS free and is read at runtime: an image may not change a byte of it.
+#   0x400d24d0..0x400d2ce0 = entries 508..1023 of the stock DELAY's one-pole coefficient table at
+#   0x400d1ce0 (FX2 DELAY, 0x400031a0: LP pole = table[(BASE+WDTH)>>6], HP = table[BASE>>6]); stock 0 =
+#   filter open. KYOTI V1.1-V1.6 kept ~2 KB of code there ("SAFE"): every DELAY with BASE+WDTH >= 127
+#   (the default included) read a code word as its LP pole -> darker repeats (NOTES 2026-11-01,
+#   reference/kb/caves.md §5).
+STOCK_TABLES = [(0x400d24d0, 0x400d2ce0, "DELAY's coefficient table, entries 508..1023 (0x400d1ce0)")]
+
+
+def _check_stock_tables(builder, image):
+    if not os.path.exists(_STOCK):
+        print(f"  (stock table check skipped: {os.path.relpath(_STOCK)} missing)")
+        return
+    with open(_STOCK, "rb") as f:
+        stock = f.read()
+    with open(image, "rb") as f:
+        img = f.read()
+    for lo, hi, what in STOCK_TABLES:
+        a, b = lo - 0x40000400, hi - 0x40000400
+        if img[a:b] != stock[a:b]:
+            first = next(i for i in range(a, b) if img[i] != stock[i])
+            _banner([f"{os.path.basename(builder)}  --  writes into a live stock table",
+                     f"0x{lo:08x}..0x{hi:08x}: {what}",
+                     f"first changed byte 0x{0x40000400 + first:08x}"], sys.stderr)
+            print("\n  Refusing to build: that range looks free but stock reads it at runtime.\n",
+                  file=sys.stderr)
+            sys.exit(2)
+
+
 def seal(builder, image):
-    """After a builder writes its image: refuse references into stock-owned SRAM (every
-    builder), then, for a FINAL builder, is it still the promoted one?
+    """After a builder writes its image: refuse references into stock-owned SRAM and changes
+    to live stock tables (every builder), then, for a FINAL builder, is it still the promoted one?
 
     A build placed at other addresses for the combined image (KYOTI_PLACE set, see
     tools/kyoti_place.py) cannot match its standalone promotion, so it is not checked
     here; the combined builder is gated on its own.
     """
     _check_stock_sram(builder, image)
+    _check_stock_tables(builder, image)
     name = os.path.basename(builder)
     if name not in FINAL or os.environ.get("KYOTI_PLACE"):
         return

@@ -71,6 +71,8 @@ run without --wip is unchanged: the final Bugbuilds, and any base not on FINAL i
 import os, pathlib, subprocess, sys
 import hashlib
 from kyoti_status import gate, seal, FINAL
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
+import dram                                    # noqa: E402  (tools/dram/dram.py)
 
 gate(__file__)
 
@@ -85,11 +87,13 @@ STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 # 24-byte records (fields +0x10/+0x14 written by 0x40001732; 0x400d64e2 its terminator) --
 # reference/kb/caves.md 2b.  Every flashed build starts at 0x400d6500.
 FREE_START, FREE_END = 0x400d6500, 0x400d7c3c
-# The fallback when nothing in the cave fits (2026-10-23: VARISPEED_EMUS leaves 152 B): midisc's
-# SAFE_CAVE, hardware-proven in every KYOTI image since V1.1 (build_kyoti.py ZONES["SAFE"]; stock
-# references 0x400d2cdc). Only ever used when the cave has no room, so the other Bugbuilds keep
-# their bytes.
-SAFE_START, SAFE_END = 0x400d24d0, 0x400d2cdc
+# The fallback when nothing in the cave fits (VARISPEED_EMUS leaves ~160 B): a DRAM unit behind
+# tools/dram/'s loader (as KYOTI's RELOAD_FROM_PROJECT), one 6 KB arena page. Until 2026-11-01 it was
+# midisc's "SAFE_CAVE" 0x400d24d0..0x400d2cdc -- which is the stock DELAY's coefficient table (entries
+# 508..1022, stock 0): BUG_VEM10 put PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX there, so every
+# DELAY with BASE+WDTH >= 127 read code as its filter pole. seal() now refuses that range.
+# The pieces that can land here run on the UI task (partreapply: the UI loop's bug-3 hooks; pattern_led:
+# the LED painters' content predicate); trigscale (step handler) fits the cave in every base so far.
 
 o = lambda a: a - BASE
 
@@ -281,11 +285,11 @@ def apply_bugfixes(img, which, label, addrs):
     for stem in which:
         at, detours = addrs[stem], BUGFIX[stem][1]
         blob, syms = link(stem, at)
-        if not (FREE_START <= at and at + len(blob) <= FREE_END
-                or SAFE_START <= at and at + len(blob) <= SAFE_END):
+        in_dram = at >= dram.ARENA_BASE           # linked there; the loader carries it (main())
+        if not (FREE_START <= at and at + len(blob) <= FREE_END or in_dram):
             sys.exit(f"{label}: {stem} cave 0x{at:08x}+{len(blob)} escapes the free zone")
         co = o(at)
-        if any(img[co:co + len(blob)]):
+        if not in_dram and any(img[co:co + len(blob)]):
             sys.exit(f"{label}: cave for {stem} at 0x{at:08x} is NOT free in the base image: "
                      f"{bytes(img[co:co+16]).hex()}")
         for site, sym, expect_hex, n, kind in detours:
@@ -295,7 +299,8 @@ def apply_bugfixes(img, which, label, addrs):
                 sys.exit(f"{label}: detour site 0x{site:08x} for {stem} is not stock: "
                          f"{got.hex()} != {expect.hex()} (the feature may already own it)")
             assert_no_branch_into(img, site, n)
-        img[co:co + len(blob)] = blob
+        if not in_dram:
+            img[co:co + len(blob)] = blob
         for site, sym, expect_hex, n, kind in detours:
             tgt = syms[sym] if sym else at
             if kind == "jsr":
@@ -377,7 +382,7 @@ def compose(name, builder, basepath, verstr, blurb, stock, rebuild, wip=False):
             already.append(stem)
             addrs[stem] = resolve_present(img, stem)     # honour where IT put it
     runs = free_runs(img)
-    safe = free_runs(img, SAFE_START, SAFE_END)
+    dram_at, dram_pieces = dram.ARENA_BASE, []
     res = reserved(name, bytes(img))        # (from the base, before any fix is written)
     for at, n in res:                       # carve out runtime-written bytes
         cut = []
@@ -390,11 +395,11 @@ def compose(name, builder, basepath, verstr, blurb, stock, rebuild, wip=False):
     for stem in sorted(need, key=lambda s: -len(link(s, BUGFIX[s][0])[0])):
         size = len(link(stem, BUGFIX[stem][0])[0])
         at = place(runs, size, BUGFIX[stem][0])
-        if at is None:                      # the cave is full: SAFE_CAVE
-            at = place(safe, size, SAFE_START)
-        if at is None:
-            sys.exit(f"{name}: no free run fits {stem} ({size} B). Free: "
-                     + ", ".join(f"0x{r[0]:08x}+{r[1]-r[0]}" for r in runs))
+        if at is None:                      # the cave is full: a DRAM unit (above)
+            if stem == "patch_trigscale":
+                sys.exit(f"{name}: no cave run fits {stem} ({size} B), and it is step-handler code")
+            at, dram_at = dram_at, (dram_at + size + 3) & ~3
+            dram_pieces.append(stem)
         addrs[stem] = at
     moved = [f"{s} -> 0x{addrs[s]:08x} (preferred 0x{BUGFIX[s][0]:08x} was taken)"
              for s in need if addrs[s] != BUGFIX[s][0]]
@@ -449,6 +454,16 @@ def compose(name, builder, basepath, verstr, blurb, stock, rebuild, wip=False):
     left = sum(r[1] - r[0] for r in free_runs(img))
     print(f"  cave zone: {left} B still free")
 
+    if dram_pieces:                     # after the interlock proof (it compares stock-length images)
+        raw = bytearray()
+        for stem in dram_pieces:
+            off = addrs[stem] - dram.ARENA_BASE
+            raw += bytes(off - len(raw)) + link(stem, addrs[stem])[0]
+        append, r = dram.build(bytes(raw), OUTDIR / "_dram" / name.lower(), img)
+        img.extend(append)
+        print(f"  DRAM: {', '.join(dram_pieces)} -- {r['raw']:,} B linked at 0x{r['base']:08x}; "
+              f"{r['pages']} arena page(s) = {r['reserve_bytes']:,} B of the sample pool; "
+              f"loader + payload {r['append']:,} B at 0x{dram.LOADER_AT:08x}")
     mainos = OUTDIR / f"mainos_{name.lower()}_batch_bugfixes.bin"
     mainos.write_bytes(bytes(img))
     if not wip:                         # a WIP Bugbuild is never sealed

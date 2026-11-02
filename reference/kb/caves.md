@@ -97,7 +97,7 @@ the image that points into them:
 | `0x401087e4 .. 0x4010c315` | 15,153 B | **0** | ⛔ **NOT USABLE — live at runtime.** Hardware-proven. |
 | `0x4010cdd1 .. 0x4010fdf0` | 12,319 B | **0** | ⛔ **NOT USABLE** — same region class, same verdict until a canary says otherwise. |
 | `0x400d64da .. 0x400d7c3c` | 5,986 B | 2 | ⚠️ the "classic cave" — **contested and effectively full**; see §2. **This is where our builds live — from `0x400d6500` only** (§2b). |
-| `0x400d24d0 .. 0x400d2ce0` | 2,064 B | 1 | ⚠️ contested — octabam's `modules/menushortcut` pins 300 B here; our KB calls it `SAFE_CAVE` (midisc's). |
+| `0x400d24d0 .. 0x400d2ce0` | 2,064 B | 1 | ☠ **NOT FREE** (C, 2026-11-01): entries 508..1023 of the stock DELAY's coefficient table `0x400d1ce0`, read every frame by any FX2 DELAY with BASE+WDTH >= 127 (see §5 below). Was midisc's `SAFE_CAVE`; KYOTI V1.1-V1.6 and octabam (`modules/menushortcut`, its free list) put code here. |
 | `0x4010c350 .. 0x4010c57e` | 558 B | 2 | ❓ **unclaimed** — but it sits between the two proven-live tail runs, so treat it as live until a canary clears it. |
 
 **Why the tail has no references (2026-10-25, C):** it is **on-chip SRAM's initial image**. The boot routine `0x4000f938` (called from `0x40000512`) copies `0x401086f4..0x4010c57b` to SRAM `0x80000000..` and `0x4010c57c..0x4010fdef` to `0x80004000..0x80007873` (each half zero-filled to its 16 KB end). Only the loop's bounds point into it. Every byte there is the boot value of a stock SRAM variable (the timestretch crossfade table at `0x4010c57c`, the voice structs, the kernel's lists, the PERSONALIZE block); a zero run is a run of zero-initialised variables. Patching it changes stock state at boot, before a single patch instruction runs. Octalab's hardware failure at `0x401087e4` (= SRAM `0x800000f0`) is consistent with that, though it does not fully explain why the bytes read back changed after boot.
@@ -295,6 +295,15 @@ any adoption of this route inherits.
 (`tools/ot303/dram.py`, `tools/ot303/cf/loader.S`). Note: `0x400d24d0..0x400d2ce0` is **not** free
 space — it is the zero tail of a 1,024-entry curve table at `0x400d1ce0` that stock indexes at runtime
 (`0x4000352a`, `u16 >> 6`); code there would change the curve's tail.
+
+**What the table is (C, 2026-11-01, NOTES):** the one-pole coefficients of the stock ColdFire DELAY
+(`0x400031a0`, run from the eDMA state machine `0x40004b12`; gate: FX2 id 8 = DELAY). HP pole =
+`table[BASE>>6]` (+20), LP pole = `table[(BASE+WDTH)>>6]` (+24), BASE / WDTH = the FX2 page-1 knobs << 8,
+bounded to 0..0x7f00 (index <= 1016). Entries 508..1023 are 0 = filter open. Boot init `0x40002f44` reads
+entries 0 and 1023 directly. **Any code in `0x400d24d0..0x400d2ce0` becomes a DELAY coefficient**: the
+stock default BASE 0 / WDTH 127 reads entry 508. KYOTI V1.1-V1.6 had ~2 KB there (entry 508 =
+`0x40068ce0`, c ~ 0.50: repeats low-passed at ~5 kHz, darker each repeat); V1.7 vacates it, and
+`seal()` (`tools/kyoti_status.py` STOCK_TABLES) refuses any image that changes it.
 
 ## 5b. The OTHER way past the ceiling — a payload on the CF card
 

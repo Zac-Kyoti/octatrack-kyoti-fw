@@ -37587,3 +37587,18 @@ is not edited) and `tools/emu_sc_shared.py`.
   the rebased tree: make bus / check / docs / verify-docs / reach / mkdocs --strict all green. Scratch clone:
   `rec-trig-mute` worktree `out/octabam-rtm` (own `vendor/`: octabam main now needs `make dsp-repatch` after #975;
   the shared `~/Documents/octabam/vendor` is older still).
+- **KYOTI V1.7 (WIP, 2026-11-01, worktree delay-safe): the DELAY sounds as in stock again.** midisc's "SAFE_CAVE"
+  0x400d24d0..0x400d2cdc is entries 508..1022 of the stock DELAY's coefficient table 0x400d1ce0 (see the
+  curve-table entry above; caves.md §5 / the cave table). V1.1-V1.6 and BUG_VEM10 (9e0e3f92…, FINAL) kept code
+  there. Fix: `seal()` (kyoti_status.py STOCK_TABLES) refuses any image that changes 0x400d24d0..0x400d2ce0, for
+  every builder; build_kyoti.py drops the SAFE zone (and refuses any zone over the table), moves DIRECT JUMP to
+  DRAM (build_direct_jump_kyoti.py `patch_directjump_v7_dram`, as RELOAD's; standalone image unchanged,
+  3fa14332…) and packs the eight SAFE pieces into the classic cave (112 B left). RAM: 2 arena pages (12 KB).
+  build_bugbuilds.py's fallback is a DRAM unit instead of SAFE: BUG_VEM10 now carries PART_CHANGE_CARRYOVER_FIX +
+  EMPTY_PATTERN_LED_FIX in one 6 KB page (52823ea6…, WIP). Verified: table == stock in both images; DIRECT JUMP
+  from DRAM passes the V7 reference-lock oracle exactly as the standalone FINAL (OT DEMO, 0->2 at t100, 2->0 at
+  t190: both segments LOCKED from the first tick after the landing, in phase, PENDING identical); the seven
+  other Bugbuilds rebuild to their FINAL pins; the default KYOTI is no longer V1.6 (V1.6 builds from 8868867).
+  Not flashed. octabam lists 0x400d24d0..0x400d2ce0 as free ROM (and menushortcut pins 300 B there): upstream
+  has the same bug -- a note for Sam, not posted.
+  KYOTI V1.7: mainos ea1ffc08…, syx 89566889….

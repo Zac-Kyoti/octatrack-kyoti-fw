@@ -111,6 +111,7 @@ unit that boots; if it doesn't, use §3b.
 |---|---|
 | MUTE_MODES, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT, QUANTIZE_LIVE_REC_TOGGLE | `140C_KYOTI` |
 | SIDECHAIN_COMPRESSOR light (the earlier version, WIP) | `140C_SCLT` |
+| KYOTI V1.7 (WIP: V1.6 + the DELAY fix) | `KYOTI V1.7` |
 | KYOTI V1.6 (the features in one image) | `KYOTI V1.6` |
 | KYOTI V1.5 (the previous one) | `KYOTI V1.5` |
 | KYOTI V1.4 (the previous one) | `KYOTI V1.4` |
@@ -124,6 +125,19 @@ unit that boots; if it doesn't, use §3b.
 
 PERSONALIZE is reset by every flash, so features are off until you re-enable them. A
 quick check for each:
+
+- **KYOTI V1.7 walk-through** (WIP, 2026-11-01; `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.7.syx` in the delay-safe
+  worktree). V1.6's features unchanged; only addresses move (NOTES 2026-11-01).
+  1. A track with FX2 = DELAY at its defaults (BASE 0, WDTH 127), FB up: the repeats stay as bright as on
+     stock 1.40C. On V1.6 they were low-passed around 5 kHz and darkened with every repeat.
+  2. Sweep BASE and WDTH: the tone moves smoothly; no setting turns the echo thin / phasey.
+  3. DIRECT JUMP (now from DRAM): `[PTN]`+`[YES]` -> `DIRECT JUMP ON`; cued patterns land on the next step, in
+     time, as on V1.6.
+  4. The moved pieces, one look each: PERSONALIZE lists MUTE MODE and switching it works; COMPRESSOR page 2
+     (MON switch, KEY, KBAS, KWID); MIDI PLAYS FREE; the pattern LEDs under `[PTN]`; `[TRACK]`+`[REC]`
+     `REC TRIGS MUTED`.
+  5. `BUG_VEM10` (rebuilt, WIP): the same DELAY check; a pattern change between Parts with PICKUP/FLEX
+     plays the right sample; the pattern LEDs under `[PTN]`.
 
 - **MUTE_MODES** — PERSONALIZE → MUTE MODE → `OTFX`. Mute a track playing through a
   reverb: the dry sound cuts, the tail rings out, and unmuting picks up in time.
