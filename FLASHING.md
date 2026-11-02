@@ -215,7 +215,7 @@ quick check for each:
   3. DIRECT JUMP ON, playing: load a slot onto a track in Clyps: it lands at the next step (not at the
      pattern's end), in time with the other tracks. An ALL load (`[FUNC]`) too.
   4. DIRECT JUMP OFF, playing: a load lands at the pattern's end (or its CHAIN AFTER point), as in CLYPY.
-  5. DIRECT JUMP ON: jump to another pattern while playing: as in V1.6; Clyps loads keep working after it.
+  5. DIRECT JUMP ON: jump to another pattern while playing: as in V1.7; Clyps loads keep working after it.
   6. RELOAD_FROM_PROJECT's chords outside Clyps are gone ([PTN]/[BANK]+TRACK outside Clyps = stock);
      inside Clyps they are the card reloads, as in CLYPY.
   7. The rest of KYOTI beside Clyps: `[FUNC]`+TRACK mutes inside Clyps follow MUTE MODE; `[TRACK]`+`[REC]` (outside
