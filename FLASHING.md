@@ -206,6 +206,23 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL4 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL3 + the user's 2026-11-02 changes (scope §1.11).
+  1. Header: `LOAD: TRK SEQ` on the left (`[FUNC]`: `LOAD: TRK FULL`), `T6 BNK A` on the right; the MIDI side reads the
+     same. `[BANK]` held alone boxes `BNK A`.
+  2. No 17th ORIG slot: UP / DOWN cycle the 16 slots. The box on your own pattern's slot (where Clyps opens) reads
+     `LOAD: ORIG TRK SEQ` / `ORIG TRK FULL` ([FUNC]); `[YES]` or that slot's trig brings the original back.
+  3. A `[CUE]` group: `LOAD: TRK SEQS` / `LOAD: TRKS FULL`; on your own slot `ORIG SEQS` / `ORIG FULL`.
+  4. Outside and inside Clyps: hold TRACK, press `[YES]` -> `TEMP TRK SAVED`; hold TRACK, press `[NO]` -> `TEMP TRK
+     RELOADED` (sequence + machine / FX as saved). While playing it lands on the track's next step, and works again
+     after more edits. Two TRACK keys held: both. Right after power-on / a project load / SAVE PROJECT, with no temp
+     save made, a reload brings the track's original (as loaded / saved).
+  5. Stock ARM / DISARM REC TRK on TRACK + `[YES]` / `[NO]`: only with the Recording Setup menu open (then no temp
+     save / reload). Open Recording Setup over Clyps: arrows, trigs and `[YES]` act on the menu, Clyps stays as it was.
+  6. A temp reload in Clyps: the slot reads `SAVED TRK`.
+  7. SAVE PROJECT, then make edits: ORIG (and a temp reload) bring back the project as saved, not as loaded.
+  8. Card reloads in Clyps: `TRK SEQ` / `RELOADED FROM PROJ` and `TRK FULL` / `RELOADED FROM PROJ`, either side.
+
 - **KYOTI CL3 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = KYOTI V1.7 (FINAL, `ea1ffc08…`: the DELAY fix) with Clyps (as CLYPY) in place of RELOAD_FROM_PROJECT, tied to DIRECT
   JUMP (scope §1.10). (CL1 / CL2 were built on V1.6: never flash them.)

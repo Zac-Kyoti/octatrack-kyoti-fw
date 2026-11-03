@@ -460,7 +460,11 @@ def main(argv):
         while state()["cur"] != 0:
             tap(UP)
         tap(UP)
-        check(state()["cur"] == 16, "ORIG is in the cycle with no load made (UP from slot 1)")
+        check(state()["cur"] == 15, "16 slots: UP from slot 1 wraps to slot 16 (no 17th ORIG entry, 2026-11-02)")
+        while state()["cur"] != act:
+            tap(UP)
+        check(rd(syms["cl_hdrst"], 1) == 0 and state()["cur"] == act and state()["sbank"] == bank,
+              "the box on your own pattern's slot = the ORIG entry")
         shot("E0_orig")
         tap(PAGE)
         check(state()["open"] == 1 and rec(act, 0) == pre[0], "[PAGE] on an original track: nothing")
@@ -500,11 +504,11 @@ def main(argv):
 
     if "G" in a.only:
         # --- G: the source label on your pattern's slot (screens; the label text is drawn there)
-        print("G: temp save T1; load slot 3: your slot reads 'A3 n TRG'; NO+T1 reload: 'SAVED SEQ'; PAGE: plain")
+        print("G: temp save T1; load slot 3: your slot reads 'A3 n TRG'; T1+NO reload: 'SAVED TRK'; PAGE: plain")
         tap(0x10)
-        key(YES, 1)
-        tap(0x10)
-        key(YES, 0)
+        key(0x10, 1)
+        tap(YES)
+        key(0x10, 0)
         key(PTN, 1)
         key(BANK, 1)
         key(BANK, 0)
@@ -513,9 +517,9 @@ def main(argv):
         key(2, 0)
         shot("G1_source")
         tap(NO)
-        key(NO, 1)
-        tap(0x10)
-        key(NO, 0)
+        key(0x10, 1)
+        tap(NO)
+        key(0x10, 0)
         key(PTN, 1)
         key(BANK, 1)
         key(BANK, 0)
@@ -527,74 +531,111 @@ def main(argv):
         closed_ok("[NO]")
 
     if "T" in a.only:
-        # --- T: temp save / reload outside Clyps: hold [YES] / [NO] + TRACK; ARM / DISARM on a quick tap
-        print("T: YES+T2 save; edit; NO+T2 reload; NO+T3 nothing saved; quick taps arm / disarm; long hold: nothing")
-        SCLK, ARMA, ARMB = 0x4610757C, 0x46C7FF64, 0x46C803D4
+        # --- T: temp save / reload (the user, 2026-11-02): TRACK held + [YES] = save, + [NO] = reload, outside
+        # and inside Clyps; stock ARM / DISARM REC TRK only while the Recording Setup menu is open
+        print("T: T2+YES save; edit; T2+NO reload (stopped, then twice while playing); T3+NO nothing saved; "
+              "T2+T4 together; inside Clyps; Recording Setup open: stock ARM")
+        ARMA, ARMB = 0x46C7FF64, 0x46C803D4
         arm = lambda: (rd(ARMA, 2), rd(ARMB, 2))
+
+        def chord(trk, k):                  # TRACK(s) held first, then [YES] / [NO]
+            for t_ in trk:
+                key(0x10 + t_, 1)
+            tap(k)
+            for t_ in trk:
+                key(0x10 + t_, 0)
         tap(0x10)
         act = rd(0x800065BE, 1)
-        c0 = rd(SCLK, 4)
-        rt.run(ms=500)
-        c1 = rd(SCLK, 4)
-        print(f"      the tap clock 0x4610757c: {c0} -> {c1} over 500 ms (stopped transport)", flush=True)
         pre2 = rec(act, 1)
         m0 = arm()
-        key(YES, 1)
-        tap(0x11)
-        key(YES, 0)
-        check(svalid()[1] == 1 and saved(1) == pre2, "[YES]+TRACK 2: T2 saved, byte for byte")
-        check(arm() == m0, f"... and nothing armed (arm masks {m0} -> {arm()})")
-        check(rd(0x80000000, 1) == 0, "... and the track selection is unchanged (T1)")
-        check(state()["open"] == 0, "... Clyps not involved")
+        chord([1], YES)
+        check(svalid()[1] == 1 and saved(1) == pre2, "T2 + [YES]: T2 saved, byte for byte")
+        check(arm() == m0, f"... and nothing armed (stock's ARM is off outside Recording Setup: {m0} -> {arm()})")
+        print(f"      active track after the chord: T{rd(0x80000000, 1) + 1}", flush=True)
         ad = BLOB + bank * BANKSTRIDE + act * PATSTRIDE + TRAC_A
-        u.mem_write(ad, bytes([rd(ad, 1) ^ 0x80]))
+        edit = lambda: u.mem_write(ad, bytes([rd(ad, 1) ^ 0x80]))
+        edit()
         check(rec(act, 1) != pre2, "T2 edited")
         tpart = partbase(bank, act)
         psl2 = pslice(1, tpart)
         mp = tpart + 0x2A + 30 * 1             # T2's machine page 1, first value
         u.mem_write(mp, bytes([rd(mp, 1) ^ 0x55]))
-        check(pslice(1, tpart) != psl2, "T2's machine page edited too")
-        key(NO, 1)
-        tap(0x11)
-        key(NO, 0)
-        check(rec(act, 1) == pre2, "[NO]+TRACK 2: T2's temp save is back (stopped: at once)")
+        chord([1], NO)
+        check(rec(act, 1) == pre2, "T2 + [NO]: T2's temp save is back (stopped: at once)")
         check(pslice(1, tpart) == psl2, "... with its machine / FX / pages as saved (ALL)")
         check(arm() == m0, "... and nothing disarmed")
         pre3 = rec(act, 2)
-        key(NO, 1)
-        tap(0x12)
-        key(NO, 0)
-        check(svalid()[2] == 0 and rec(act, 2) == pre3, "[NO]+TRACK 3 with nothing saved: nothing (SAVE FIRST toast)")
-        key(YES, 1)
-        key(YES, 0)
-        m1 = arm()
-        print(f"      quick [YES] tap: arm masks {m0} -> {m1}", flush=True)
-        check(m1 != m0, "a quick [YES] tap arms (stock's ARM)")
-        key(NO, 1)
-        key(NO, 0)
-        m2 = arm()
-        print(f"      quick [NO] tap: arm masks {m1} -> {m2}", flush=True)
-        key(YES, 1)
-        u.mem_write(SCLK, ((rd(SCLK, 4) + 2 * 38102400) & 0xFFFFFFFF).to_bytes(4, "big"))
-        key(YES, 0)
-        check(arm() == m2, f"[YES] held ~600 ms with no TRACK key: nothing armed ({m2} -> {arm()})")
-        key(NO, 1)
-        key(NO, 0)
+        check(svalid()[2] == 1 and saved(2) == oslot(act, 2), "T3's temp save is preloaded with its original")
+        a3 = BLOB + bank * BANKSTRIDE + act * PATSTRIDE + 2 * TRAC_A
+        u.mem_write(a3, bytes([rd(a3, 1) ^ 0x80]))
+        chord([2], NO)
+        check(rec(act, 2) == pre3, "T3 edited, T3 + [NO] with no temp save made: its original back (preloaded)")
+        pre4 = rec(act, 3)
+        chord([1, 3], YES)
+        check(svalid()[3] == 1 and saved(3) == pre4 and saved(1) == pre2, "T2 + T4 + [YES]: both saved")
+        # playing: each reload is a cue landing at the track's next step -- twice, an edit before each
+        rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+        rt.internal_clock()
+        rt.frame = True
+        rt.next_frame = rt.sample + er.FRAME_PERIOD
+        rt.exact_clock()
+        rt.start_transport_live()
+        rt.run(ms=300)
+        for n_ in (1, 2):
+            edit()
+            chord([1], NO)
+            rt.run(ms=600)
+            check(rec(act, 1) == pre2, f"playing: T2 + [NO] reload #{n_} lands the temp save "
+                  f"(cue 0x{rd(syms['cl_cue'] + 2, 2):04x})")
+        key(0x27, 1)
+        key(0x27, 0)
+        rt.run(ms=300)
+        # inside Clyps: the same chords
         key(PTN, 1)
         key(BANK, 1)
         key(BANK, 0)
         key(PTN, 0)
+        edit()
+        chord([1], NO)
+        check(state()["open"] == 1 and rec(act, 1) == pre2, "inside Clyps: T2 + [NO] reloads, Clyps stays")
+        edit()
+        e2 = rec(act, 1)
+        chord([1], YES)
+        check(saved(1) == e2, "inside Clyps: T2 + [YES] saves")
+        edit()
+        chord([1], NO)
+        check(rec(act, 1) == e2, "... and that save reloads")
+        # the Recording Setup menu over Clyps: its keys are stock's, TRACK + [YES] / [NO] = ARM / DISARM
+        rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+        rt.call_as_main(0x4002FEC4, budget=600000)
+        rt.run(ms=100)
+        rs = rd(0x460D10CC, 4)
         sv = saved(1)
-        key(FUNC, 1)
-        tap(YES)
-        tap(NO)
-        key(FUNC, 0)
-        s = state()
-        check(s["open"] == 1 and saved(1) == sv and rec(act, 1) == pre2, "inside Clyps: [FUNC]+[YES] / [FUNC]+[NO] do nothing")
+        calls = {"arm": 0, "disarm": 0}       # stock's ARM / DISARM REC TRK reached (a code hook: the
+        def on_arm(uc, ad, sz, ud):           # masks they write are per-frame state, cleared in between)
+            calls["arm" if ad == 0x400834D8 else "disarm"] += 1
+        hk = [u.hook_add(er.eb.UC_HOOK_CODE, on_arm, begin=x_, end=x_) for x_ in (0x400834D8, 0x40083488)]
+        chord([1], YES)
+        a1_ = dict(calls)
+        chord([1], NO)
+        for h_ in hk:
+            u.hook_del(h_)
+        check(rs != 0 and a1_["arm"] >= 1 and a1_["disarm"] == 0 and saved(1) == sv,
+              f"Recording Setup open: T2 + [YES] reaches stock's ARM REC TRK ({a1_}), no temp save")
+        check(calls["disarm"] >= 1, f"... T2 + [NO] reaches stock's DISARM ({calls})")
+        c0, b0 = state()["cur"], state()["bank"]
+        r0 = rec(act, 0)
+        tap(DOWN)
+        tap(4)
+        check(state()["cur"] == c0 and state()["bank"] == b0 and rec(act, 0) == r0,
+              f"... DOWN and a trig leave Clyps alone")
+        tap(NO)                                # closes the menu (its layer's [NO])
+        rt.run(ms=100)
+        check(rd(0x460D10CC, 4) == 0 and state()["open"] == 1, "[NO] closes Recording Setup; Clyps still open")
+        tap(DOWN)
+        check(state()["cur"] == (c0 + 1) % 16, "... and Clyps has its keys back")
         tap(NO)
         closed_ok("[NO]")
-        s = state()
-        check(s["layers"] == base["layers"], "the YES / NO TRACK layer is gone again")
 
     if "R" in a.only:
         # --- R: naming ([FUNC]+[BANK] = EDIT in Clyps): stock's editor on the box's sequence
@@ -639,9 +680,9 @@ def main(argv):
         check(name(NAMES, nidx(bank, act, 0)) == b"BASS1", "loading slot 3: your slot now carries 'BASS1'")
         tap(NO)
         closed_ok("[NO]")
-        key(YES, 1)
-        tap(0x10)
-        key(YES, 0)
+        key(0x10, 1)
+        tap(YES)
+        key(0x10, 0)
         check(name(SNAMES, 0) == b"BASS1", "a temp save of T1 carries the name")
         key(PTN, 1)
         key(BANK, 1)
@@ -717,7 +758,12 @@ def main(argv):
         tap(0x10)
         name_slot3(b"BASS1")
         check(nm(2) == b"BASS1", "slot 3 named 'BASS1'")
+        ae = BLOB + bank * BANKSTRIDE + rd(0x800065BE, 1) * PATSTRIDE + TRAC_A
+        u.mem_write(ae, bytes([rd(ae, 1) ^ 0x80]))      # an unsaved edit on T2 before the save
         worker(0x40022850, 8000)          # SAVE PROJECT (op 17): bank .work + .strd copies
+        a_ = rd(0x800065BE, 1)
+        check(oslot(a_, 1) == rec(a_, 1) and saved(1) == rec(a_, 1),
+              "SAVE PROJECT: T2's original and temp save = T2 as saved (the user, 2026-11-02)")
         name_slot3(b"TEMP")
         # CARD SYNC (op 7): the current bank's .work -> clyps01.work = TEMP. Entered past its own
         # project-folder check (0x400255ec does card FAT lookups, which block the main task the
@@ -807,9 +853,9 @@ def main(argv):
         print("P: save, a RAM edit, then LOAD PROJECT again")
         tap(0x10)
         act = rd(0x800065BE, 1)
-        key(YES, 1)                        # temp save T1, outside Clyps
-        tap(0x10)
-        key(YES, 0)
+        key(0x10, 1)                        # temp save T1, outside Clyps
+        tap(YES)
+        key(0x10, 0)
         ad = BLOB + bank * BANKSTRIDE + act * PATSTRIDE
         u.mem_write(ad, bytes([rd(ad, 1) ^ 0x80]))
         n0 = rd(syms["cl_nproj"], 1)
@@ -833,7 +879,9 @@ def main(argv):
             u.hook_del(h_)
         print("      calls during the load:\n        " + "\n        ".join(trace[:60]), flush=True)
         check(rd(syms["cl_nproj"], 1) >= n0 + 1, f"the project load went through cl_projload ({rd(syms['cl_nproj'], 1) - n0} pass(es))")
-        check(not any(svalid()), "after the load: no saved sequence")
+        a2 = rd(0x800065BE, 1)
+        check(all(svalid()) and all(saved(t_) == rec(a2, t_) for t_ in range(8)),
+              "after the load: every temp save = the track as loaded (its original; the user, 2026-11-02)")
         check(snapok() == 0xFFFF, f"every bank has its snapshot again (0x{snapok():04x})")
         same = [b for b in range(16) if oslab(0, b) == slab(0, b)]
         print(f"      banks whose pattern 1 equals its snapshot after the load: {same}", flush=True)
@@ -1020,10 +1068,10 @@ def main(argv):
                 tap(RIGHT)
             key(BANK, 0)
         n = 0
-        while state()["cur"] != 16 and n < 20:
+        while state()["cur"] != act and n < 20:
             tap(UP)
             n += 1
-        check(state()["cur"] == 16, "the box on ORIG")
+        check(state()["cur"] == act and state()["sbank"] == bank, "the box on ORIG (your own pattern's slot)")
         tap(YES)
         check(rec(act, 0) == oslot(act, 0) and pslice(t, dst) == ssl, "ORIG SEQ ([YES]): the sequence, not the slice")
         # make the Part's SAVE PART copy equal the Part as loaded, so the restore below makes the Part

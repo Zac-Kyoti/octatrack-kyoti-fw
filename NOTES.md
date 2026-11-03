@@ -37852,3 +37852,13 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   the same Clyps on V1.7 (DIRECT JUMP in DRAM too: Clyps' phase-D site calls dj_land at its DRAM address). syx
   2c59c6ad…. Gates on CL3: full 128, F+Q 27, L+J 16, M+U 26. Standalone CLYPY unchanged (111d6103…, passes the
   new DELAY-table seal check); the default build still = FINAL V1.7.
+- **CLYPZ / KYOTI CL4** (2026-11-02, NOT flashed; CL3 flashed by the user): header swapped (LOAD: left, BNK right,
+  widths at runtime), MIDI labels = audio, ALL -> FULL, group TRK SEQS / TRKS FULL / ORIG SEQS / ORIG FULL; no 17th
+  ORIG entry (your own slot is ORIG: `cl_onorig`); SAVE PROJECT retakes the originals; temp save / reload = TRACK +
+  [YES] / [NO] inside and outside Clyps (TRACK-held sub-map 0x400d164a records -> cl_tsy / cl_tsn; stock ARM /
+  DISARM only with Recording Setup open, 0x460d10cc), toasts TEMP TRK SAVED / RELOADED, temp saves preloaded with
+  the originals (`cl_presave`); fixed: a temp reload while playing was cancelled by the re-pick rule once the
+  source was "saved" (`cl_asplays`); Recording Setup over Clyps: Clyps forwards its keys to the base keymap
+  (FWDCHK). Trap: a held key's sub-map is linked into the layer chain above ours, so "a layer above Clyps" is NOT a
+  menu test. Card toasts TRK SEQ / TRK FULL + RELOADED FROM PROJ; slot label SAVED TRK. Gates on CL4: full 115, T
+  20, F+Q 27, L+J 16, M+U 26. KYOTI CL4 syx 4e02aa9d…; standalone CLYPZ in out/.

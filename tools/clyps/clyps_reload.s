@@ -79,26 +79,14 @@ cl_rlreq:
     lea     16(%sp),%sp
     bra.b   rr_post
 rr_trk:
-    lea     rq_s_seq,%a0
-    cmpi.l  #RQ_TRKSEQ,%d2
+    pea     rq_s_seq                    | "TRK SEQ" / "TRK ALL", either side (the user, 2026-11-02: no track
+    cmpi.l  #RQ_TRKSEQ,%d2              | numbers); line 2 "RELOADED FROM PROJ"
     beq.b   rr_k
-    lea     rq_s_full,%a0
+    move.l  #rq_s_full,(%sp)
 rr_k:
-    move.l  %a0,-(%sp)                  | " SEQ" / " ALL"
-    move.l  %d4,%d0
-    andi.l  #7,%d0
-    addq.l  #1,%d0
-    move.l  %d0,-(%sp)                  | track 1..8
-    lea     cl_s_none,%a0
-    cmpi.l  #8,%d4
-    bcs.b   rr_aud
-    lea     cl_s_midi,%a0               | "MIDI "
-rr_aud:
-    move.l  %a0,-(%sp)
-    pea     rq_fmt_trk
     pea     rq_line1
-    jsr     SPRINTF
-    lea     20(%sp),%sp
+    jsr     SPRINTF                     | (no % in either string)
+    addq.l  #8,%sp
 rr_post:
     moveq   #1,%d0
     move.b  %d0,rq_msg                  | armed before the post (S93)
@@ -609,11 +597,10 @@ rq_hdr:     .space 32
 rq_fh:      .space 64
 rq_path:    .space 128
 rq_line1:   .space 24
-rq_fmt_trk: .asciz "%sTRACK %d%s"          | "TRACK 3 SEQ" / "TRACK 3 ALL" (the user, 2026-10-31); line 2
                                         | "RELOADED FROM PROJ": one line would be 151+ px (toast font)
 rq_fmt_ptn: .asciz "PATTERN %c%02d"
-rq_s_seq:   .asciz " SEQ"
-rq_s_full:  .asciz " ALL"                | the track + its machine / FX (the user, 2026-10-31)
+rq_s_seq:   .asciz "TRK SEQ"
+rq_s_full:  .asciz "TRK FULL"             | the track + its machine / FX
 rq_s_proj:  .asciz "RELOADED FROM PROJ"     | 105 px
 rq_s_lost1: .asciz "SEQ RELOAD LOST"
 rq_s_lost2: .asciz "NOT RESTORED!"

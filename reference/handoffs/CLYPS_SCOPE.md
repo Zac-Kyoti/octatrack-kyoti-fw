@@ -1026,6 +1026,33 @@ UI and the sequencer, so every hook finds the DRAM unit in place; the whole unit
 **Cost to KYOTI users:** Clyps' buffers (the originals = every bank as loaded, the saved sequences,
 the pattern snapshots) take ~10 MB of the sample pool, as in the standalone Clyps images.
 
+### 1.11 The user's 2026-11-02 changes (built: `140C_CLYPZ`, `KYOTI CL4`; not flashed)
+- **Header swapped:** `LOAD: <label>` left (x 3, label boxed at x 22..), `T6 BNK A` / `MULTI BNK A` right-aligned to
+  x 107 (widths at runtime, `cl_textw`, font table `0x400c246a`). Labels: `TRK SEQ` / `TRK FULL`, the MIDI side the
+  same; ORIG `ORIG TRK SEQ` / `ORIG TRK FULL`; a group `TRK SEQS` / `TRKS FULL`, ORIG `ORIG SEQS` / `ORIG FULL`
+  (`ORIG TRK SEQS` / `ORIG TRKS FULL` would overlap `MULTI BNK A` by 8 / 12 px: my choice, to confirm); chord
+  `ORIG PTN+PART`. Each label's [FUNC] form is the next string (`cl_s_*` pairs).
+- **No 17th ORIG entry:** the box on the playing pattern's own slot, when it has an original (`cl_onorig`), is
+  ORIG: header, [YES], its trig, page LEDs, the flash. 16-slot cycle. Lost: nothing (loading your own slot was a
+  no-op); ORIG is only reachable while the view shows the playing bank ([PAGE] works from anywhere).
+- **SAVE PROJECT retakes the originals** (`cl_hstorep` -> `cl_snapall`), as a project load does.
+- **Temp save / reload = TRACK held + [YES] / [NO]**, inside and outside Clyps: the TRACK-held sub-map
+  `0x400d164a`'s YES / NO records (press + release, stock ARM / DISARM REC TRK `0x400834d8` / `0x40083488`) ->
+  `cl_tsy` / `cl_tsn`, which run stock's only while the Recording Setup menu is open (`0x460d10cc`). Every held
+  track (`0x460fab40`); toasts `TEMP TRK SAVED` / `TEMP TRK RELOADED` (no numbers; `SAVE FIRST!` if nothing was
+  saved). The [YES]/[NO]-first gesture, its detours `0x4005e4c8` / `0x4005e25c` and `cl_tlayer` are gone.
+- **Temp saves preloaded** (`cl_presave`): every track's temp save := what it plays now at each originals retake
+  (power-on resume, project load / reload, SAVE PROJECT, the bank reset). The playing pattern's tracks.
+- **Bug fixed:** a temp reload while playing was cancelled once the track's source was "saved" (the re-pick rule
+  in `cl_cueload`); a re-pick now cancels only when the record equals its source (`cl_asplays`), never for FULL.
+- **Recording Setup over Clyps:** its layer lists only [NO], [FUNC], [MIDI], the scene keys, the encoder pushes;
+  the rest fell through to Clyps. While it is open Clyps' key handlers forward to the base keymap (`FWDCHK`,
+  `cl_fwdbase`), as stock. Not "any layer above ours": a held key's sub-map is linked into the same chain.
+- **Card-reload toasts:** `TRK SEQ` / `TRK FULL` + `RELOADED FROM PROJ`. Slot label after a temp reload `SAVED TRK`.
+- Gates: T rewritten (stopped + two playing reloads, two tracks, inside Clyps, Recording Setup: stock ARM / DISARM
+  reached via a code hook -- its masks are per-frame state), E/F use the own slot, P/S check the preload and SAVE
+  PROJECT's retake.
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)

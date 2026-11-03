@@ -33,9 +33,8 @@ Detours (each asserts its stock bytes):
               the saved sequences and cues go)
   0x40025808  power-on resume         jsr 0x4000fbb4 (SRAM -> RAM, current bank) -> jsr cl_sramrest
               (the same call, then that bank's snapshot)
-  0x4005e4c8  stock [YES]             move.l 4(sp),d1 ; move.l 8(sp),d0     -> cl_yes
-  0x4005e25c  stock [NO]              move.l 8(sp),d0 ; beq.s (6 B)          -> cl_no
-              (outside Clyps: hold + TRACK = temp save / reload; ARM / DISARM on a quick tap)
+  0x400d15e2 / 0x400d15fc  the TRACK-held sub-map's [YES] / [NO] records -> cl_tsy / cl_tsn (temp save / reload)
+              (TRACK held + [YES] / [NO], inside and outside Clyps; stock ARM / DISARM while Recording Setup is open)
   0x4001fb1e, 0x4006bafe, 0x4007ec4c, 0x400909dc  jsr 0x4000fd34 (every bank to defaults)
               -> jsr cl_rstall (the same call, then every bank's snapshot once DRAM is in place)
   0x4003ff06, 0x4004008c  track sidebars (tab, upper half), 0x4004bd64, 0x4004be9c (lower half),
@@ -107,8 +106,6 @@ DETOURS = [  # (site, symbol, stock bytes, length[, opcode: jmp unless given])
     (0x40023c62, "cl_rldone", "71f9460bd910", 6),      # doneFn success: our toast, no bank reload
     (0x400a43a0, "cl_wrap", "201274018082", 6),    # wrap body entry: move.l (a2),d0; moveq #1,d2; or.l d2,d0
     (0x400905d4, "cl_projload", "4feffeb848d77cfc", 8),  # masked bank loader entry (every LOAD PROJECT)
-    (0x4005e4c8, "cl_yes", "222f0004202f0008", 8),        # stock [YES]: + TRACK = temp save; arm on a tap
-    (0x4005e25c, "cl_no", "202f00086714", 6),             # stock [NO]: + TRACK = reload; disarm on a tap
     (0x40025808, "cl_sramrest", "4eb94000fbb4", 6, "4eb9"),  # power-on resume: jsr 0x4000fbb4 (SRAM -> RAM)
     # names on the card (clypsNN.work / .strd), kept in step with stock's bank files:
     (0x400919d6, "cl_hwrite", "20024cee3cfc", 6),     # bank writer exit: + clypsNN.work
@@ -138,6 +135,13 @@ DETOURS = [  # (site, symbol, stock bytes, length[, opcode: jmp unless given])
     (0x40083f24, "cl_act5", "71b980000000", 6, "4eb9"),
     (0x40083f36, "cl_act5", "71b980000000", 6, "4eb9"),
 ]
+
+
+# TRACK held + [YES] / [NO] (the user, 2026-11-02): the TRACK-held sub-map 0x400d164a's records, press and
+# release fields, stock ARM / DISARM REC TRK -> cl_tsy / cl_tsn (which call stock's while the Recording Setup
+# menu is open). (record, field offsets, stock handler, symbol)
+SUBMAP = [(0x400d15e2, (2, 6), 0x400834d8, "cl_tsy"),     # code 0x31 [YES]
+          (0x400d15fc, (2, 6), 0x40083488, "cl_tsn")]     # code 0x32 [NO]
 
 
 def assemble():
@@ -202,6 +206,14 @@ def main():
         img[o(site):o(site) + n] = (bytes.fromhex(op[0]) if op else b"\x4e\xf9") + syms[sym].to_bytes(4, "big") \
             + b"\x4e\x71" * ((n - 6) // 2)
         print(f"    0x{site:08x} -> {sym} 0x{syms[sym]:08x}")
+    for rec, fields, stock_h, sym in SUBMAP:
+        if img[o(rec)] != {0x400d15e2: 0x31, 0x400d15fc: 0x32}[rec]:
+            sys.exit(f"sub-map record 0x{rec:08x} is not stock")
+        for f in fields:
+            if int.from_bytes(img[o(rec) + f:o(rec) + f + 4], "big") != stock_h:
+                sys.exit(f"sub-map record 0x{rec:08x}+{f} is not stock 0x{stock_h:08x}")
+            img[o(rec) + f:o(rec) + f + 4] = syms[sym].to_bytes(4, "big")
+        print(f"    0x{rec:08x} (TRACK-held sub-map) -> {sym} 0x{syms[sym]:08x}")
     # the 0x80006a40..0x80006abf scratch block is not ours (CLAUDE.md)
     hits = [at + i for at, b in ((CAVE, blob), (dram.ARENA_BASE, dblob)) for i in range(0, len(b) - 3, 2)
             if 0x80006a40 <= int.from_bytes(b[i:i + 4], "big") < 0x80006ac0]

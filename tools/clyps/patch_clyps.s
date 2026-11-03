@@ -143,15 +143,16 @@
     .equ LED_FLASH,   0x40013784        | (die, n): invert the die for n LED ticks -- stock's p-lock
                                         | flash: its trig tick gives a locked trig's green die 3 ticks
                                         | every period, so the red trig blinks yellow
-    .equ YES_RESUME,  0x4005e4d0        | stock [YES] after its first 8 B
-    .equ NO_PRESSP,   0x4005e262        | stock [NO], its press path / release path
-    .equ NO_RELP,     0x4005e276
-    .equ LIVE_REC,    0x460d172a        | LIVE REC on (stock's [NO] + TRACK / knob erase live then)
+    .equ CUE_TRK,     0x40083dc4        | stock [CUE] + TRACK: cue toggle
+    .equ RSETUP_WIN,  0x460d10cc        | the Recording Setup menu's window (0 = closed; opener 0x4002fec4)
+    .equ ARM_REC,     0x400834d8        | stock ARM REC TRK (TRACK + [YES]), DISARM REC TRK (+ [NO])
+    .equ DISARM_REC,  0x40083488
+    .equ HELD_TRK,    0x460fab40        | held TRACK keys, bit t (stock's TRACK press / release)
+    .equ LAYERS_HEAD, 0x460d165c        | the keymap layer chain: base first, then each pushed layer
     .equ TOAST,       0x4005a2b8        | (text, dur): stock's block toast (legal from a key handler)
     .equ TOAST_DUR,   0x30              | stock's standard duration
     .equ SCLK,        0x4610757c        | the audio engine's time accumulator: ~127 M units / s
                                         | (2880 per sample at 44.1 kHz, measured in the emulator)
-    .equ TAP_T,       38102400          | a quick tap: under ~300 ms
     .equ TEXT_EDIT,   0x4007e664        | (maxchars, title, buf, layout, done_cb(confirmed)): stock's name
                                         | editor (RENAME PART, project naming: layout 0 = the full one);
                                         | its window is prio 5, so the Clyps view (3) stays under it.
@@ -191,7 +192,6 @@
 | sources other than a slot: the bank byte of a cue / provenance code (bank << 8 | pattern)
     .equ SRC_ORIG,    0xfd              | the track's original (the load snapshot) on the playing pattern
     .equ SRC_SAVED,   0xfe              | the track's saved sequence
-    .equ NSLOT,       16                | cursor 16 = the ORIG entry (scope §1.5, option a)
 
 | ---- the view's geometry (window-local, y = 0 is the bottom row; text occupies y..y+4). Measured
 | in the emulator by rendering stock's own compositor output (tools/clyps_render.py).
@@ -199,6 +199,7 @@
     .equ WIN_H,       64                | (the main playback window's and ATTR's), the user's spec
     .equ WIN_DX,      -1                | x = (128 - 112) / 2 + 1 - 1 = 8
     .equ FONT_S,      0x400ba876        | the interface font: 3 px glyphs, 1 px apart, 5 rows
+    .equ FONT_WTAB,   0x400c246a        | ... its width table, one byte per character code
     .equ DIGIT_W,     4                 | digit advance
     .equ ROW_PITCH,   6                 | 5 px text + 1 px between rows (2 px tried and dropped by the
                                         | user, 2026-10-27)
@@ -216,25 +217,7 @@
     .equ EMP_DX,      12                | "---" (11 px) centred in the 35 px label: places 4..6
     .equ SUM_GAP,     2                 | the number field (2 x DIGIT_W) + 2 = the label at col + 10
     .equ BOX_R,       109               | a dark header box's right column (text ends at 107)
-    .equ ORIG_W,      15                | "ORIG", "SAVED": widths from the font's table 0x400c246a
-    .equ SAVED_W,     19
-    .equ ORIGS_W,     45                | "ORIG TRK SEQ"       (the user, 2026-10-30: all of them fit
-    .equ ORIGF_W,     45                | "ORIG TRK ALL"        beside "T6 BNK A", which ends at x 31)
-    .equ ORIGM_W,     49                | "ORIG MIDI SEQ"
-    .equ ORIGMF_W,    49                | "ORIG MIDI ALL" ("FULL" -> "ALL", the user 2026-10-31)
-    .equ ORIGP_W,     50                | "ORIG PTN+PART"
-    .equ SEQ_W,       26                | "TRK SEQ"
-    .equ SEQF_W,      26                | "TRK ALL"
-    .equ MTRK_W,      45                | "MIDI TRK SEQ"
-    .equ MTRKF_W,     45                | "MIDI TRK ALL"
     .equ LOADP_A,     21                | "LOAD: " advance (20 px + 1)
-    .equ BKBOX_L,     12                | [BANK] held alone: "BNK A" (x 14..31: "T6 " is 11 px for T
-    .equ BKBOX_R,     33                | and M alike) in a dark box, 2 dark columns each side
-    .equ MULTI_DX,    12                | "MULTI " is 22 px: "BNK A" at x 26..43, 12 right of "T6 "'s
-    .equ GSEQ_W,      11                | a group's labels (scope §1.9): "SEQ"
-    .equ GFULL_W,     11                | "ALL"
-    .equ GORIG_W,     30                | "ORIG SEQ"
-    .equ GORIGF_W,    30                | "ORIG ALL": its "LOAD: " at x 57, 13 px clear of "BNK A"
 
 | Two sections, linked together (tools/build_clyps.py): `.text` = the ROM part in the classic cave
 | (the sequencer-tick code -- phase D, the wrap body -- and the cue state it touches: ISR code
@@ -253,6 +236,11 @@
     .else
     .text
     .endif
+    .endm
+    .macro FWDCHK                       | a menu over Clyps: this key is the base keymap's (cl_under)
+    jsr     cl_under
+    tst.l   %d0
+    bne.w   cl_fwdbase
     .endm
     .global cl_ptn, cl_bankp, cl_bankr, cl_land, cl_uitail, cl_wrap, cl_projload, cl_rstall
     .global cl_yes, cl_no
@@ -486,6 +474,7 @@ cl_page:
 | A move made in another bank than the box's brings the box into the shown bank (same slot).
 | [BANK] held: UP = previous bank, DOWN = next bank.
 cl_k_ud:
+    FWDCHK
     tst.l   8(%sp)
     beq.b   ku_out
     clr.b   cl_flash
@@ -498,9 +487,8 @@ cl_k_ud:
     moveq   #-1,%d0
     bra.w   cl_page
 ku_sel:
-    jsr     cl_origok
-    addi.l  #NSLOT,%d0
-    movea.l %d0,%a1                     | a1 = entries in the cycle (16 or 17)
+    moveq   #16,%d0                     | 16 slots (no ORIG entry since 2026-11-02: your own slot is it)
+    movea.l %d0,%a1                     | a1 = entries in the cycle
     moveq   #0,%d0
     move.b  cl_cur,%d0
     move.l  4(%sp),%d1
@@ -532,6 +520,7 @@ ku_out:
 | LEFT 0x34 / RIGHT 0x21: the box to the same row of the other column (1 <-> 9 ... 8 <-> 16);
 | nothing on ORIG. [BANK] held: LEFT = previous bank, RIGHT = next bank.
 cl_k_lr:
+    FWDCHK
     move.l  8(%sp),%d0
     cmpi.l  #1,%d0
     bne.b   kl_out
@@ -547,8 +536,6 @@ cl_k_lr:
 kl_sel:
     moveq   #0,%d0
     move.b  cl_cur,%d0
-    cmpi.l  #NSLOT,%d0
-    bcc.b   kl_out
     eori.l  #8,%d0
     move.b  %d0,cl_cur
     jsr     cl_flstop
@@ -564,9 +551,10 @@ kl_out:
 | TRIG 1-16 (codes 0x00..0x0f): the box to that slot of the shown bank, and load it (cued while
 | running). [BANK] held: nothing yet (stock's bank select inside Clyps is the next step).
 cl_k_trig:
+    FWDCHK
     move.l  8(%sp),%d0
     cmpi.l  #1,%d0
-    bne.b   kt_out
+    bne.w   kt_out
     clr.b   cl_flash
     tst.l   BANK_HELD                   | [BANK] held alone (from the chord that opened Clyps):
     beq.b   kt_go                       | nothing; with [PTN] too: the pattern reload
@@ -589,6 +577,11 @@ kt_go:
     move.b  %d0,cl_cur
     move.b  cl_bank,%d1
     move.b  %d1,cl_sbank
+    jsr     cl_onorig                   | your own pattern's slot: its original back (as [YES] there)
+    tst.l   %d0
+    bne.w   ky_orig
+    move.l  4(%sp),%d0
+    andi.l  #15,%d0
     move.l  %d0,-(%sp)
     jsr     cl_load
     addq.l  #4,%sp
@@ -602,6 +595,7 @@ kt_out:
 | ([PTN] held, [BANK] not) -> DIRECT JUMP's toggle in an image that has it (--defsym DJ_TOGGLE=
 | its entry), nothing here; never a load. [FUNC]+[YES] -> save (§1.6).
 cl_k_yes:
+    FWDCHK
     move.l  8(%sp),%d0
     cmpi.l  #1,%d0
     bne.b   ky_out                      | [FUNC]+[YES]: the same, FULL (cl_load / ky_orig read cl_fn)
@@ -616,10 +610,11 @@ cl_k_yes:
 .endif                                  | (keycode, event) are its arguments, in place)
     rts
 ky_noptn:
+    jsr     cl_onorig                   | your own pattern's slot = the original
+    tst.l   %d0
+    bne.b   ky_orig
     moveq   #0,%d0
     move.b  cl_cur,%d0
-    cmpi.l  #NSLOT,%d0
-    beq.b   ky_orig
     move.l  %d0,-(%sp)
     jsr     cl_load
     addq.l  #4,%sp
@@ -659,6 +654,7 @@ kn_out:
 | TRACK, cl_k_cuet: our sub-map cl_csub, chained after stock's 0x400bf2a0, wins) and the header
 | reads MULTI; the tab and the active LED colours show the members only. Press and release.
 cl_k_cue:
+    FWDCHK
     clr.b   cl_flash
     move.l  8(%sp),%d0
     cmpi.l  #1,%d0
@@ -669,6 +665,11 @@ cl_k_cue:
 
 | [CUE] held + TRACK n: track n (MIDI n + 8 on the MIDI side) in / out of the group. Press only.
 cl_k_cuet:
+    jsr     cl_under                    | a menu over Clyps: stock's [CUE] + TRACK (its sub-map 0x400bf2a0)
+    tst.l   %d0
+    beq.b   kcu_ours
+    jmp     CUE_TRK
+kcu_ours:
     move.l  8(%sp),%d0
     cmpi.l  #1,%d0
     bne.b   kcu_out
@@ -714,6 +715,51 @@ gu_set:
 
 | d0 != 0: the header shows the group (MULTI; not while the [PTN]+[BANK] chord is held: its
 | ORIG PTN+PART is the whole pattern's). Uses d0.
+| cl_under -> d0 != 0 while the Recording Setup menu is open over Clyps (its window 0x460d10cc; its
+| opener 0x4002fec4 pushes a layer listing only [NO], [FUNC], [MIDI], the scene keys and the encoder
+| pushes). The keys it does not list fall through to our layer; in stock they reach the base keymap,
+| so FWDCHK sends them there (cl_fwdbase): the menu works as on stock and Clyps underneath is left
+| alone (the user, 2026-11-02). Not "any layer above ours": a held key's sub-map (TRACK, [FUNC], [CUE])
+| is linked into the same chain above us. Uses d0.
+cl_under:
+    move.l  RSETUP_WIN,%d0
+    rts
+
+| cl_fwdbase(code, event): the base keymap's record for `code` (the first layer of the chain), its
+| press / release / hold handler by the event, as a tail call; none: nothing. Uses d0, d1, a0, a1.
+cl_fwdbase:
+    movea.l LAYERS_HEAD,%a0
+    movea.l 4(%a0),%a0                  | its key records (26 B each, ended by 0xff)
+fb_l:
+    moveq   #0,%d0
+    move.b  (%a0),%d0
+    cmpi.l  #0xff,%d0
+    beq.b   fb_none
+    cmp.l   4(%sp),%d0
+    beq.b   fb_hit
+    lea     26(%a0),%a0
+    bra.b   fb_l
+fb_hit:
+    move.l  8(%sp),%d0
+    cmpi.l  #1,%d0
+    beq.b   fb_p
+    tst.l   %d0
+    beq.b   fb_r
+    move.l  10(%a0),%d1                 | a hold
+    bra.b   fb_go
+fb_p:
+    move.l  2(%a0),%d1
+    bra.b   fb_go
+fb_r:
+    move.l  6(%a0),%d1
+fb_go:
+    tst.l   %d1
+    beq.b   fb_none
+    movea.l %d1,%a1
+    jmp     (%a1)
+fb_none:
+    rts
+
 cl_ismulti:
     jsr     cl_hstate
     btst    #1,%d0
@@ -724,11 +770,47 @@ im_no:
     moveq   #0,%d0
     rts
 
+| d0 != 0: the select box is on the playing pattern's own slot and it has an original -- that slot is
+| the ORIG entry (the user, 2026-11-02: no 17th slot; loading your own slot was a no-op anyway).
+| Uses d0, d1, a0, a1.
+cl_onorig:
+    move.b  cl_sbank,%d0
+    cmp.b   PLAY_BANK,%d0
+    bne.b   oo_no
+    move.b  cl_cur,%d0
+    cmp.b   ACT_PAT,%d0
+    bne.b   oo_no
+    jmp     cl_origok
+oo_no:
+    moveq   #0,%d0
+    rts
+
+| cl_textw (a0 = string) -> d0 = its width in the interface font (widths 0x400c246a, 1 px apart).
+| Uses d0, d1, a0, a1.
+cl_textw:
+    moveq   #0,%d0
+    lea     FONT_WTAB,%a1
+tw_l:
+    moveq   #0,%d1
+    move.b  (%a0)+,%d1
+    beq.b   tw_e
+    move.b  (%a1,%d1.l),%d1
+    addq.l  #1,%d1
+    add.l   %d1,%d0
+    bra.b   tw_l
+tw_e:
+    tst.l   %d0
+    beq.b   tw_o
+    subq.l  #1,%d0
+tw_o:
+    rts
+
 | [PAGE] (SCALE) 0x1b (the user, 2026-10-29): like the ORIG entry -- this track's original
 | sequence (ORIG SEQ); [FUNC]+[PAGE] = with its machine / FX (ORIG SEQ/MCH/FX; a MIDI track always).
 | With the [PTN]+[BANK] chord held: ORIG PTN/PART, the pattern and its Part as loaded; if that chord
 | opened Clyps (begun outside), Clyps then closes; begun inside, it stays.
 cl_k_page:
+    FWDCHK
     move.l  8(%sp),%d0
     cmpi.l  #1,%d0
     bne.w   kn_out
@@ -742,10 +824,9 @@ cl_k_page:
     move.l  #0x10000,%d0
 kp_one:
     jsr     cl_restore
-    moveq   #0,%d0
-    move.b  cl_cur,%d0
-    cmpi.l  #NSLOT,%d0
-    bne.w   cl_refresh                  | the box elsewhere: nothing to flash
+    jsr     cl_onorig
+    tst.l   %d0
+    beq.w   cl_refresh                  | the box elsewhere: nothing to flash
     jsr     cl_flhdr
     bra.w   cl_refresh
 kp_pat:
@@ -775,6 +856,7 @@ hs_out:
 | does (press marks the key held in 0x460fab40 and handles double taps; the RELEASE selects the
 | track and clears the held mark). After the release the view and the grid follow.
 cl_k_track:
+    FWDCHK
     clr.b   cl_flash
     jsr     cl_flstop
 |   a card reload (scope §1.8, the user 2026-10-30): [PTN] alone held = the sequence, [BANK] alone
@@ -834,6 +916,7 @@ ktr_fwd:
 |  * the chord's second key ([PTN] with [BANK] held, or the reverse): swallowed.
 |  * [FUNC]+[BANK]: name the box's sequence; [FUNC]+[PTN]: nothing.
 cl_k_chord:
+    FWDCHK
     move.l  8(%sp),%d0
     move.l  4(%sp),%d1
     cmpi.l  #0x2f,%d1
@@ -939,8 +1022,6 @@ cl_rename:
     beq.b   rn_out
     moveq   #0,%d0
     move.b  cl_cur,%d0
-    cmpi.l  #NSLOT,%d0
-    bcc.b   rn_out
     move.l  %d0,%d1
     moveq   #0,%d0
     move.b  cl_sbank,%d0
@@ -1174,14 +1255,10 @@ cf_full:
 cl_refresh:
     lea     -16(%sp),%sp
     movem.l %d2-%d4/%a2,(%sp)
-    moveq   #0,%d0                      | the one cursor choke point: ORIG only while it exists
+    moveq   #0,%d0                      | the one cursor choke point: 16 slots
     move.b  cl_cur,%d0
-    cmpi.l  #NSLOT,%d0
-    bcs.b   crf_cur
-    jsr     cl_origok
-    tst.l   %d0
-    bne.b   crf_cur
-    clr.b   cl_cur
+    andi.l  #15,%d0
+    move.b  %d0,cl_cur
 crf_cur:
     jsr     cl_trk
     move.l  %d0,%d3                     | d3 = track
@@ -1302,11 +1379,19 @@ cl_cueload:
     bra.b   lo_out
 lo_cue:
     lea     cl_cue,%a2
-|   re-picking the slot that already plays (its source, or the pattern's own slot) cancels the cue
+|   re-picking the slot that already plays (its source, or the pattern's own slot) cancels the cue --
+|   only while the track plays it unedited; an ALL load is always re-applied (its slice may differ).
+|   (2026-11-02: a second temp reload after an edit was cancelled this way: toast, no data.)
     move.l  %d3,%d0
     jsr     cl_playt                    | d0 = playing
     cmp.l   %d2,%d0
+    bne.b   lo_set
+    tst.l   %d5
+    bne.b   lo_set
+    jsr     cl_asplays                  | d3 = track, d2 = code -> d0 = 0: the record equals the source
+    tst.l   %d0
     beq.b   lo_cancel
+lo_set:
     move.l  %d3,%d1
     add.l   %d1,%d1
     move.w  %d2,(%a2,%d1.l)             | cue[t] = code
@@ -1333,6 +1418,43 @@ lo_cancel:
 lo_out:
     movem.l (%sp),%d2-%d5/%a2
     lea     20(%sp),%sp
+    rts
+
+| cl_asplays (d3 = track, d2 = code bank<<8 | pattern / SRC_*<<8) -> d0 = 0 when the playing pattern's
+| record of the track equals that source's record (cl_same: length / scale bytes aside), 1 otherwise or
+| without a source. Uses d0, d1, a0, a1.
+cl_asplays:
+    moveq   #0,%d0
+    move.b  %d2,%d0
+    move.l  %d0,-(%sp)                  | spat
+    move.l  %d2,%d0
+    lsr.l   #8,%d0
+    andi.l  #0xff,%d0
+    move.l  %d0,-(%sp)                  | sbank
+    move.l  %d3,-(%sp)
+    jsr     cl_srcrec
+    lea     12(%sp),%sp
+    move.l  %a0,%d0
+    beq.b   ap_ne
+    move.l  %a0,-(%sp)                  | the source record
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  %d0,-(%sp)
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     cl_slab
+    addq.l  #8,%sp
+    move.l  %a0,-(%sp)
+    move.l  %d3,-(%sp)
+    jsr     cl_toff
+    addq.l  #4,%sp
+    movea.l (%sp)+,%a0
+    adda.l  %d0,%a0                     | a0 = the playing record
+    movea.l (%sp)+,%a1
+    move.l  %d3,%d0
+    jmp     cl_same
+ap_ne:
+    moveq   #1,%d0
     rts
 
 | cl_diff (d0 = track) -> d0 = 1 when the playing pattern's record of the track differs from its
@@ -1523,207 +1645,109 @@ sv_out:
     lea     12(%sp),%sp
     rts
 
-| ================================================================ temp save / reload (outside Clyps)
-| The user, 2026-10-27, as on other Elektrons: hold [YES] + TRACK = temp save that track; hold [NO] +
-| TRACK = reload it (at its next step, in step: the cue path, armed at once). Stock's ARM / DISARM
-| (a plain [YES] / [NO]) moves to a QUICK TAP: it runs (stock's press, then its release) when the
-| key is released within TAP_T and no TRACK key was pressed meanwhile; a longer hold without a
-| TRACK key does nothing. Stock untouched: with the arranger running, and in LIVE REC (where stock's
-| [NO] + TRACK / knob erase live -- its NO sub-map 0x400bfbfc). Inside Clyps our layer owns
-| [YES] / [NO], so none of this is reachable there (the user: not a Clyps gesture).
-
-| 0x4005e4c8 stock [YES] (replaces `move.l 4(sp),d1 ; move.l 8(sp),d0`, 8 B)
-cl_yes:
-    moveq   #0,%d1                      | key 0 = [YES]
-    bra.b   cl_yn
-| 0x4005e25c stock [NO] (replaces `move.l 8(sp),d0 ; beq.s 0x4005e276`, 6 B)
-cl_no:
-    moveq   #1,%d1                      | key 1 = [NO]
-cl_yn:
-    tst.l   ARR_ACT
-    bne.w   yn_stock
-    tst.l   LIVE_REC
-    bne.w   yn_stock
-    move.l  %d2,-(%sp)                  | 0 d2, 4 ret, 8 code, 12 event
-    move.l  %d1,%d2                     | d2 = which key
-    move.l  12(%sp),%d0
+| ================================================================ temp save / reload
+| The user, 2026-11-02: TRACK held + [YES] = temp save, TRACK held + [NO] = temp reload, outside and
+| inside Clyps. The TRACK-held sub-map 0x400d164a (both base keymaps' TRACK records use it; Clyps' TRACK
+| records carry none, so it chains there too) has its [YES] / [NO] records' press + release fields,
+| stock's ARM / DISARM REC TRK 0x400834d8 / 0x40083488, pointed here (build_clyps.py SUBMAP). Stock's
+| ARM / DISARM still run while the Recording Setup menu is open (its window 0x460d10cc), and only then.
+| Every held track (0x460fab40, bit t; the MIDI tracks while they are showing); one toast, "TEMP TRK
+| SAVED" / "TEMP TRK RELOADED" (the user, 2026-11-02: no track numbers). A reload is FULL: the sequence and
+| the track's Part slice as saved, landing at the track's next step (in step) while playing.
+cl_tsy:
+    moveq   #0,%d1
+    bra.b   cl_tsyn
+cl_tsn:
+    moveq   #1,%d1
+cl_tsyn:
+    tst.l   RSETUP_WIN
+    beq.b   ty_ours
+    tst.l   %d1                         | Recording Setup open: stock's own, untouched
+    bne.b   ty_dis
+    jmp     ARM_REC
+ty_dis:
+    jmp     DISARM_REC
+ty_ours:
+    move.l  8(%sp),%d0
     cmpi.l  #1,%d0
-    beq.b   yn_press
-    tst.l   %d0
-    bne.b   yn_done                     | hold events: none (delay 0)
-    lea     cl_ynact,%a0                | release
-    tst.b   (%a0,%d2.l)
-    beq.b   yn_stock2                   | its press was not ours: stock's release
-    clr.b   (%a0,%d2.l)
-    jsr     cl_ynpop
-    lea     cl_ynused,%a0
-    tst.b   (%a0,%d2.l)
-    bne.b   yn_done                     | a chord was made: nothing else
-    move.l  SCLK,%d0
-    lea     cl_ynt0,%a0
-    sub.l   (%a0,%d2.l*4),%d0
-    cmpi.l  #TAP_T,%d0
-    bcc.b   yn_done                     | held too long: nothing
-    pea     1                           | a quick tap: stock's press ...
-    move.l  12(%sp),-(%sp)
-    jsr     cl_ynstock
-    addq.l  #8,%sp
-    clr.l   -(%sp)                      | ... then its release
-    move.l  12(%sp),-(%sp)
-    jsr     cl_ynstock
-    addq.l  #8,%sp
-yn_done:
-    move.l  (%sp)+,%d2
-    rts
-yn_press:
-    lea     cl_ynact,%a0
-    moveq   #1,%d0
-    move.b  %d0,(%a0,%d2.l)
-    lea     cl_ynused,%a0
-    clr.b   (%a0,%d2.l)
-    lea     cl_ynt0,%a0
-    move.l  SCLK,%d0
-    move.l  %d0,(%a0,%d2.l*4)
-    pea     cl_tlayer                   | the TRACK keys: save / reload while it is held
-    jsr     LAYER_PUSH
-    addq.l  #4,%sp
-    bra.b   yn_done                     | stock's press waits for the release
-yn_stock2:
-    move.l  %d2,%d1
-    move.l  (%sp)+,%d2
-yn_stock:                               | d1 = which key; the stack as at the handler's entry
+    bne.w   ty_out                      | the release: nothing
+    lea     -16(%sp),%sp
+    movem.l %d2-%d5,(%sp)
+    move.l  %d1,%d4                     | d4 = 0 save, 1 reload
+    move.l  HELD_TRK,%d3
+    andi.l  #0xff,%d3                   | d3 = the held tracks
+    move.l  %d3,%d0
+    moveq   #0,%d1
+    jsr     cl_popc                     | d1 = how many
     tst.l   %d1
-    bne.b   yn_nostock
-    move.l  4(%sp),%d1                  | [YES]: the displaced instructions, then stock
-    move.l  8(%sp),%d0
-    jmp     YES_RESUME
-yn_nostock:
-    move.l  8(%sp),%d0                  | [NO]: the displaced test, then stock's own branch
-    beq.b   yn_norel
-    jmp     NO_PRESSP
-yn_norel:
-    jmp     NO_RELP
-
-| cl_ynstock(code, event), d2 = which key: stock's [YES] / [NO] as if unpatched
-cl_ynstock:
-    move.l  %d2,%d1
-    bra.b   yn_stock
-
-| pop the TRACK layer once neither [YES] nor [NO] is held
-cl_ynpop:
-    tst.b   cl_ynact
-    bne.b   yp_out
-    tst.b   cl_ynact+1
-    bne.b   yp_out
-    pea     cl_tlayer
-    jsr     LAYER_POP
-    addq.l  #4,%sp
-yp_out:
+    beq.w   ty_done
+    moveq   #0,%d2
+    moveq   #0,%d5                      | d5 = how many were done
+ty_l:
+    btst    %d2,%d3
+    beq.b   ty_n
+    move.l  %d2,%d0
+    tst.l   MIDI_MODE
+    beq.b   ty_t
+    addq.l  #8,%d0
+ty_t:
+    jsr     cl_tsone                    | d0 = track, d4 = kind -> d0 = 1 if done
+    add.l   %d0,%d5
+ty_n:
+    addq.l  #1,%d2
+    cmpi.l  #8,%d2
+    bne.b   ty_l
+    pea     TOAST_DUR                   | one toast, whatever the tracks (the user, 2026-11-02)
+    pea     cl_s_ttsv                   | "TEMP TRK SAVED" (81 px)
+    tst.l   %d4
+    beq.b   ty_toast
+    move.l  #cl_s_ttrl,(%sp)            | "TEMP TRK RELOADED" (99 px)
+    tst.l   %d5
+    bne.b   ty_toast
+    move.l  #cl_s_savef2,(%sp)          | nothing saved for any held track: "SAVE FIRST!"
+ty_toast:
+    jsr     TOAST
+    addq.l  #8,%sp
+ty_view:
+    tst.b   cl_open                     | inside Clyps: the view follows (SAVED TRK, the grid)
+    beq.b   ty_done
+    jsr     cl_refresh
+ty_done:
+    movem.l (%sp),%d2-%d5
+    lea     16(%sp),%sp
+ty_out:
     rts
 
-| TRACK 1-8 while [YES] / [NO] is held (cl_tlayer): save / reload that track (the MIDI track when
-| the MIDI tracks are showing). The track is not selected; the release and holds are swallowed.
-cl_k_tsave:
-    move.l  8(%sp),%d0
-    cmpi.l  #1,%d0
-    bne.w   ts_out
+| cl_tsone (d0 = track 0..15, d4 = 0 save / 1 reload): that track's temp save or reload (no toast).
+| d0 = 1 if something was saved / reloaded. Keeps d2-d7 / a2-a6.
+cl_tsone:
     move.l  %d2,-(%sp)
-    move.l  8(%sp),%d2
-    subi.l  #0x10,%d2
-    andi.l  #7,%d2
-    tst.l   MIDI_MODE
-    beq.b   ts_a
-    addq.l  #8,%d2                      | d2 = track 0..15
+    move.l  %d0,%d2                     | d2 = track 0..15
 ts_a:
-    tst.b   cl_ynact
-    beq.b   ts_no
-    moveq   #1,%d0                      | [YES] held: save
-    move.b  %d0,cl_ynused
-    move.l  %d2,-(%sp)
+    tst.l   %d4
+    bne.b   ts_no
+    move.l  %d2,-(%sp)                  | save
     jsr     cl_savet
     addq.l  #4,%sp
-    lea     cl_fmt_tsv,%a0              | "TRACK 3 TEMP SAVED": one line (104 px; the user, 2026-10-31)
-    cmpi.l  #8,%d2
-    bcs.w   ts_toast
-    lea     cl_fmt_tmid,%a1             | MIDI: "MIDI TRACK 3" / "TEMP SAVED" (125 px in one line)
-    move.l  %a1,cl_t1f
-    lea     cl_s_tsv2,%a0
-    bra.w   ts_two1
+    bra.b   ts_done
 ts_no:
-    tst.b   cl_ynact+1
-    beq.w   ts_done
-    moveq   #1,%d0                      | [NO] held: reload
-    move.b  %d0,cl_ynused+1
-    lea     cl_svalid,%a0
-    lea     cl_fmt_tno,%a1
+    lea     cl_svalid,%a0               | reload
     tst.b   (%a0,%d2.l)
-    beq.w   ts_toast1
+    beq.b   ts_none
     pea     1                           | armed at once: its next step, in step
     pea     0x10000+(SRC_SAVED<<8)      | FULL: the sound as saved -- sequence, machine, FX, pages,
                                         | scene locks, designer (the user, 2026-10-29)
     move.l  %d2,-(%sp)
     jsr     cl_cueload
     lea     12(%sp),%sp
-    lea     cl_fmt_tmid,%a1             | "TRACK 3" / "TEMP RELOADED", MIDI "MIDI TRACK 3" / ...: two
-    move.l  %a1,cl_t1f                  | lines (122 / 143 px in one; the user, 2026-10-31)
-    lea     cl_s_reld2,%a0
-    bra.w   ts_two1
-ts_toast1:
-    movea.l %a1,%a0                     | nothing saved: "TRACK 3: SAVE FIRST" (one line); MIDI:
-    cmpi.l  #8,%d2                      | "MIDI TRACK 3" / "SAVE FIRST" (123 px in one line: too wide)
-    bcs.w   ts_toast
-    lea     cl_fmt_tmid,%a1
-    move.l  %a1,cl_t1f
-    lea     cl_s_savef2,%a0
-    bra.w   ts_two1
-ts_toast:
-    move.l  %d2,%d0                     | "TRACK 3 TEMP SAVED" / "TRACK 3: SAVE FIRST!"
-    lea     cl_s_none,%a1
-    cmpi.l  #8,%d0
-    bcs.b   ts_l
-    lea     cl_s_midi,%a1
-    subq.l  #8,%d0
-ts_l:
-    move.l  %a1,%d1
-    addq.l  #1,%d0
-    move.l  %d0,-(%sp)
-    move.l  %d1,-(%sp)
-    move.l  %a0,-(%sp)
-    pea     cl_buf
-    jsr     SPRINTF
-    lea     16(%sp),%sp
-    pea     TOAST_DUR
-    pea     cl_buf
-    jsr     TOAST
-    addq.l  #8,%sp
-    bra.w   ts_done
-| two lines (what does not fit one toast line, 113 px): cl_t1f "%sTRACK n" / a0 (TEMP SAVED, TEMP
-| RELOADED or SAVE FIRST!), RELOAD's 2-line toast
-ts_two1:
-    move.l  %a0,cl_tlines+4
-    move.l  %d2,%d0
-    lea     cl_s_none,%a1
-    cmpi.l  #8,%d0
-    bcs.b   ts_tl
-    lea     cl_s_midi,%a1
-    subq.l  #8,%d0
-ts_tl:
-    addq.l  #1,%d0
-    move.l  %d0,-(%sp)
-    move.l  %a1,-(%sp)
-    move.l  cl_t1f,-(%sp)
-    pea     cl_buf
-    jsr     SPRINTF
-    lea     16(%sp),%sp
-    lea     cl_buf,%a0
-    move.l  %a0,cl_tlines
-    pea     2
-    pea     cl_tlines
-    jsr     cl_toast2
-    addq.l  #8,%sp
 ts_done:
+    moveq   #1,%d0
     move.l  (%sp)+,%d2
-ts_out:
+    rts
+ts_none:
+    moveq   #0,%d0
+    move.l  (%sp)+,%d2
+    rts
     rts
 
 | The masked bank loader 0x400905d4(ctx, mask, ...) (storage task): bit n of mask = bank n is read
@@ -1810,6 +1834,7 @@ le_n:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
     bne.b   le_l
+    jsr     cl_presave                  | the temp saves = the originals (the user, 2026-11-02)
     movem.l (%sp),%d0/%d2-%d3
     lea     12(%sp),%sp
     move.l  cl_ldret,-(%sp)
@@ -1825,9 +1850,9 @@ cl_sramrest:
     move.l  4(%sp),-(%sp)
     jsr     cl_snapbank
     addq.l  #4,%sp
-    rts
+    jmp     cl_presave                  | the temp saves = the originals (the user, 2026-11-02)
 
-| cl_snapall: every bank -> its snapshot
+| cl_snapall: every bank -> its snapshot, then the temp saves (cl_presave)
 cl_snapall:
     move.l  %d2,-(%sp)
     moveq   #0,%d2
@@ -1838,6 +1863,21 @@ sa_l:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
     bne.b   sa_l
+    move.l  (%sp)+,%d2
+|   fall through: the temp saves follow the originals
+| cl_presave: every track's temp save := what it plays now (its record + the Part), i.e. its original
+| at the points the originals are taken -- power-on, a project load / reload, SAVE PROJECT, every bank
+| reset (the user, 2026-11-02: a temp reload works even before any temp save). Data only (no UI).
+cl_presave:
+    move.l  %d2,-(%sp)
+    moveq   #0,%d2
+ps_l:
+    move.l  %d2,-(%sp)
+    jsr     cl_savet
+    addq.l  #4,%sp
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   ps_l
     move.l  (%sp)+,%d2
     rts
 
@@ -3198,8 +3238,6 @@ bl_box:
     bne.b   bl_page                     | the box is in another bank
     moveq   #0,%d2
     move.b  cl_cur,%d2
-    cmpi.l  #NSLOT,%d2
-    bcc.b   bl_page                     | the box is on ORIG
     move.b  PLAY_BANK,%d0
     cmp.b   cl_bank,%d0
     bne.b   bl_cue
@@ -3451,88 +3489,58 @@ cl_draw:
     pea     WIN_W-1
     bsr.w   cl_xor
     lea     16(%sp),%sp
-|   header (the user, 2026-10-29): left "T6 BANK A" ("T6" alone beside the two long ORIG labels);
-|   right "LOAD: " + a label in a dark box (inverted, as the band's text is): TRK SEQ /
-|   TRK SEQ/MCH/FX ([FUNC]) on audio, MIDI TRK on MIDI; the box on ORIG: ORIG TRK SEQ /
-|   ORIG TRK SEQ/MCH/FX ([FUNC]), MIDI: ORIG; the [PTN]+[BANK] chord held: ORIG PTN/PART (the user,
-|   2026-10-29). "BANK A" gets a dark box while [BANK] alone is held (the arrows page the bank).
+|   header (the user, 2026-11-02): left "LOAD: " + a label in a dark box; right "T6 BNK A" ("MULTI BNK A" with a
+|   group), right-aligned to x 107. Labels: TRK SEQ / TRK ALL ([FUNC]), the MIDI side the same; the box on
+|   your own pattern's slot (it has an original): ORIG TRK SEQ / ORIG TRK ALL; a group: SEQ / ALL / ORIG SEQ /
+|   ORIG ALL; the [PTN]+[BANK] chord held: ORIG PTN+PART. "BNK A" is boxed while [BANK] alone is held.
+|   Each label's [FUNC] form is the string right after it (cl_s_* pairs). Widths: cl_textw.
     jsr     cl_hstate
     move.b  %d0,cl_hdrst
     move.l  %d0,%d7                     | d7 = header state (free until the cells)
     jsr     cl_trk
     move.l  %d0,%d6                     | d6 >= 8: the MIDI side
-    moveq   #0,%d4                      | d4 = 1 would hide "BNK A": never now (the user, 2026-10-30)
     btst    #1,%d7
     beq.b   cd_r1
     lea     cl_s_origp,%a2
-    moveq   #ORIGP_W,%d5
-    bra.w   cd_rl
+    bra.b   cd_rl
 cd_r1:
-|   a group (scope §1.9): the members may be on both sides, so no TRK / MIDI TRK: SEQ / FULL,
-|   ORIG SEQ / ORIG FULL (all of them >= 9 px clear of "MULTI BNK A", which ends at x 43)
+    jsr     cl_onorig
+    move.l  %d0,%d4                     | d4 = the box is on the original (your own pattern's slot)
     jsr     cl_ismulti
     tst.l   %d0
     beq.b   cd_r1s
-    moveq   #0,%d1
-    move.b  cl_cur,%d1
-    cmpi.l  #NSLOT,%d1
-    bne.b   cd_rg
-    lea     cl_s_gorig,%a2
-    moveq   #GORIG_W,%d5
-    tst.b   cl_fn
-    beq.w   cd_rl
-    lea     cl_s_gorigf,%a2
-    moveq   #GORIGF_W,%d5
-    bra.w   cd_rl
-cd_rg:
     lea     cl_s_gseq,%a2
-    moveq   #GSEQ_W,%d5
-    tst.b   cl_fn
-    beq.b   cd_rl
-    lea     cl_s_gfull,%a2
-    moveq   #GFULL_W,%d5
-    bra.b   cd_rl
+    tst.l   %d4
+    beq.b   cd_rf
+    lea     cl_s_gorig,%a2
+    bra.b   cd_rf
 cd_r1s:
-    moveq   #0,%d1
-    move.b  cl_cur,%d1
-    cmpi.l  #NSLOT,%d1
-    bne.b   cd_r2
-    lea     cl_s_origm,%a2
-    moveq   #ORIGM_W,%d5
-    cmpi.l  #8,%d6
-    bcs.b   cd_ra
-    tst.b   cl_fn
-    beq.b   cd_rl
-    lea     cl_s_origmf,%a2
-    moveq   #ORIGMF_W,%d5
-    bra.b   cd_rl
-cd_ra:
-    lea     cl_s_origs,%a2
-    moveq   #ORIGS_W,%d5
-    tst.b   cl_fn
-    beq.b   cd_rl
-    lea     cl_s_origf,%a2
-    moveq   #ORIGF_W,%d5
-    bra.b   cd_rl
-cd_r2:
-    lea     cl_s_mtrk,%a2               | MIDI: "MIDI TRK SEQ" / "MIDI TRK FULL" (the user, 2026-10-30)
-    moveq   #MTRK_W,%d5                 | d5 = the label's width
-    cmpi.l  #8,%d6
-    bcs.b   cd_rb
-    tst.b   cl_fn
-    beq.b   cd_rl
-    lea     cl_s_mtrkf,%a2
-    moveq   #MTRKF_W,%d5
-    bra.b   cd_rl
-cd_rb:
     lea     cl_s_seqb,%a2
-    moveq   #SEQ_W,%d5
+    tst.l   %d4
+    beq.b   cd_rf
+    lea     cl_s_origs,%a2
+cd_rf:
     tst.b   cl_fn
     beq.b   cd_rl
-    lea     cl_s_seqf,%a2
-    moveq   #SEQF_W,%d5
+cd_rskip:                               | [FUNC]: the ALL form, the next string
+    tst.b   (%a2)+
+    bne.b   cd_rskip
 cd_rl:
-|   left
+    movea.l %a2,%a0
+    jsr     cl_textw
+    move.l  %d0,%d5                     | d5 = the label's width
+|   left: "LOAD: " at x 3, the label after it
+    pea     cl_s_load
+    pea     HDR_Y
+    pea     3
+    bsr.w   cl_text
+    lea     12(%sp),%sp
+    move.l  %a2,-(%sp)
+    pea     HDR_Y
+    pea     3+LOADP_A
+    bsr.w   cl_text
+    lea     12(%sp),%sp
+|   right: "T6 BNK A" / "MULTI BNK A", ending at x 107
     move.l  %d6,%d0
     moveq   #'T',%d1
     cmpi.l  #8,%d0
@@ -3541,8 +3549,6 @@ cd_rl:
     subq.l  #8,%d0
 cd_ta:
     addq.l  #1,%d0
-    tst.l   %d4
-    bne.b   cd_lshort
     moveq   #0,%d2
     move.b  cl_bank,%d2
     addi.l  #'A',%d2
@@ -3559,35 +3565,13 @@ cd_lfmt:
     pea     cl_buf
     jsr     SPRINTF
     lea     20(%sp),%sp
-    bra.b   cd_lt
-cd_lshort:
-    move.l  %d0,-(%sp)
-    move.l  %d1,-(%sp)
-    pea     cl_fmt_hdrs
-    pea     cl_buf
-    jsr     SPRINTF
-    lea     16(%sp),%sp
-cd_lt:
-    pea     cl_buf
-    pea     HDR_Y
-    pea     3
-    bsr.w   cl_text
-    lea     12(%sp),%sp
-|   right: the label ends at x 107 (its outline at 109), "LOAD: " before it
-    tst.l   %d5
-    beq.b   cd_band
+    lea     cl_buf,%a0
+    jsr     cl_textw
     moveq   #108,%d3
-    sub.l   %d5,%d3                     | d3 = the label's x
-    move.l  %a2,-(%sp)
+    sub.l   %d0,%d3                     | d3 = its x
+    pea     cl_buf
     pea     HDR_Y
     move.l  %d3,-(%sp)
-    bsr.w   cl_text
-    lea     12(%sp),%sp
-    move.l  %d3,%d0
-    subi.l  #LOADP_A,%d0
-    pea     cl_s_load
-    pea     HDR_Y
-    move.l  %d0,-(%sp)
     bsr.w   cl_text
     lea     12(%sp),%sp
 cd_band:
@@ -3597,40 +3581,34 @@ cd_band:
     pea     1
     bsr.w   cl_xor
     lea     16(%sp),%sp
-    tst.l   %d5
-    beq.b   cd_nob
     tst.b   cl_ftgt                     | a header flash (ORIG after a restore; ORIG PTN+PART after the
     beq.b   cd_hb                       | chord + [PAGE] / [YES], begun inside): the label's box off in
     tst.b   cl_fph                      | alternate phases
     bne.b   cd_nob
 cd_hb:
     pea     WIN_H-2                     | the label: a dark box, lit letters, one lit row below
-    pea     BOX_R                       | (the band's) and one above (the border)
-    pea     HDR_Y-1
-    move.l  %d3,%d0
-    subq.l  #2,%d0                      | 2 dark columns each side of the text
+    move.l  %d5,%d0                     | (the band's) and one above (the border); 2 dark columns
+    addi.l  #3+LOADP_A+1,%d0            | each side of the text
     move.l  %d0,-(%sp)
+    pea     HDR_Y-1
+    pea     3+LOADP_A-2
     bsr.w   cl_xor
     lea     16(%sp),%sp
 cd_nob:
     btst    #0,%d7
     beq.b   cd_nobk
-    tst.l   %d4
-    bne.b   cd_nobk
-    moveq   #0,%d2                      | "BNK A" after "MULTI " sits MULTI_DX further right
-    jsr     cl_ismulti
-    tst.l   %d0
-    beq.b   cd_bkx
-    moveq   #MULTI_DX,%d2
-cd_bkx:
+    lea     cl_buf,%a0                  | the box around the last 5 characters, "BNK A"
+cd_bkend:
+    tst.b   (%a0)+
+    bne.b   cd_bkend
+    subq.l  #6,%a0
+    jsr     cl_textw
     pea     WIN_H-2
-    moveq   #BKBOX_R,%d0
-    add.l   %d2,%d0
-    move.l  %d0,-(%sp)
+    pea     BOX_R
     pea     HDR_Y-1
-    moveq   #BKBOX_L,%d0
-    add.l   %d2,%d0
-    move.l  %d0,-(%sp)
+    moveq   #106,%d1
+    sub.l   %d0,%d1
+    move.l  %d1,-(%sp)
     bsr.w   cl_xor
     lea     16(%sp),%sp
 cd_nobk:
@@ -3817,8 +3795,6 @@ cd_next:
     bne.w   cd_boxed
     moveq   #0,%d2
     move.b  cl_cur,%d2
-    cmpi.l  #NSLOT,%d2
-    bcc.w   cd_boxed
     cmp.b   PLAY_BANK,%d0
     bne.b   cd_sbx
     moveq   #0,%d0
@@ -4361,10 +4337,9 @@ cl_pstat:
     jsr     cl_hstate
     btst    #1,%d0
     bne.b   pst_pat
-    moveq   #0,%d0
-    move.b  cl_cur,%d0
-    cmpi.l  #NSLOT,%d0
-    bne.w   pst_none
+    jsr     cl_onorig                   | the box on your own pattern's slot (its original)
+    tst.l   %d0
+    beq.w   pst_none
     jsr     cl_trk
     move.l  %d0,%d2
     add.l   %d0,%d0
@@ -4697,6 +4672,7 @@ cl_hstorep:
     pea     0xffff
     jsr     cl_ncopy_mask
     lea     12(%sp),%sp
+    jsr     cl_snapall                  | the originals = the project as saved (the user, 2026-11-02)
 sp_done:
     movem.l (%sp),%d0-%d7/%a0-%a5
     lea     56(%sp),%sp
@@ -4965,18 +4941,6 @@ cl_namesok: .byte 0                     | the names are cleared (at the first pr
 cl_nedit:   .long 0                     | the name being edited (its index)
 cl_nbuf:    .space NAME_W               | the editor's scratch copy
             .align 2
-cl_ynact:   .byte 0, 0                  | [YES] / [NO] held (their press was ours)
-cl_ynused:  .byte 0, 0                  | ... and a TRACK key was pressed meanwhile (a chord)
-            .align 2
-cl_ynt0:    .long 0, 0                  | ... and SCLK at its press
-| the TRACK keys while [YES] / [NO] is held. Delay 30 = the base keymap's (T1 0x400bfc10).
-cl_tlayer:  .long 0, cl_tkeys, 0, 0, 0
-cl_tkeys:
-    .irp c, 0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17
-    KREC \c, cl_k_tsave, 0, 0, 30, 0
-    .endr
-    .byte 0xff, 0
-    .align 2
 cl_snapok:  .short 0                    | bit b: bank b's load snapshot (its originals) is valid
 cl_ldmask:  .short 0                    | the masked loader in progress: its banks
 cl_ldret:   .long 0                     | ... and its caller's return address
@@ -5010,26 +4974,22 @@ cl_colx:    .short 6, 8, 52, 3          | column 1: number field, bar / box 8..5
 cl_fmt_hdr: .asciz "%c%d BNK %c"
 cl_fmt_hdrs:.asciz "%c%d"
 cl_fmt_hdrm:.asciz "MULTI BNK %c"         | 41 px: x 3..43 (scope §1.9)
-cl_s_gseq:  .asciz "SEQ"
-cl_s_gfull: .asciz "ALL"
-cl_s_gorig: .asciz "ORIG SEQ"
-cl_s_gorigf:.asciz "ORIG ALL"
+cl_s_gseq:  .asciz "TRK SEQS"
+cl_s_gfull: .asciz "TRKS FULL"
+cl_s_gorig: .asciz "ORIG SEQS"
+cl_s_gorigf:.asciz "ORIG FULL"
 cl_s_load:  .asciz "LOAD:"
 cl_s_seqb:  .asciz "TRK SEQ"
-cl_s_seqf:  .asciz "TRK ALL"
-cl_s_mtrk:  .asciz "MIDI TRK SEQ"
-cl_s_mtrkf: .asciz "MIDI TRK ALL"
+cl_s_seqf:  .asciz "TRK FULL"
 cl_fmt_num: .asciz "%d"
 cl_fmt_trg: .asciz "%c%02d %02d TR"       | 33 px: "A01 15 TR", as a source label (the user)
 cl_s_lck:   .asciz "LOCKS"
 cl_s_emp:   .asciz "---"
 cl_s_orig:  .asciz "ORIG"
 cl_s_origs: .asciz "ORIG TRK SEQ"
-cl_s_origf: .asciz "ORIG TRK ALL"
-cl_s_origm: .asciz "ORIG MIDI SEQ"
-cl_s_origmf:.asciz "ORIG MIDI ALL"
+cl_s_origf: .asciz "ORIG TRK FULL"
 cl_s_origp: .asciz "ORIG PTN+PART"
-cl_s_saved: .asciz "SAVED SEQ"           | 34 px: the slot label after a temp reload (the user)
+cl_s_saved: .asciz "SAVED TRK"           | 34 px: the slot label after a temp reload (the user, 2026-11-02)
 cl_fmt_srct:.asciz "%c%02d %02d TR"       | 33 px: "B14 06 TR" (the user, 2026-10-29)
 cl_fmt_srcl:.asciz "%c%02d LOCKS"         | 34 px
 cl_fmt_srce:.asciz "%c%02d ---"
@@ -5042,17 +5002,10 @@ cl_s_strd:  .asciz "strd"
 cl_nfhdr:   .ascii "CLYP"
             .short 1, 256
 cl_tname:   .space 16
-cl_fmt_tsv: .asciz "%sTRACK %d TEMP SAVED" | audio only (toast font 0x400ba862): 104 px
-cl_s_tsv2:  .asciz "TEMP SAVED"
-cl_s_reld2: .asciz "TEMP RELOADED"
             .align 2
-cl_tlines:  .long 0, 0
-cl_t1f:     .long 0                     | the 2-line toast's first-line format
-cl_fmt_tno: .asciz "%sTRACK %d: SAVE FIRST!"    | 104 px (audio only: MIDI is two lines)
-cl_fmt_tmid:.asciz "%sTRACK %d"
 cl_s_savef2:.asciz "SAVE FIRST!"
-cl_s_midi:  .asciz "MIDI "
-cl_s_none:  .byte 0
+cl_s_ttsv:  .asciz "TEMP TRK SAVED"        | toast font 0x400ba862: 81 px
+cl_s_ttrl:  .asciz "TEMP TRK RELOADED"     | 99 px
     .align 4
 | the buffers: past the loaded image, uninitialised (dram.build's bss); read only behind a valid
 | mark. The snapshot is every bank as loaded (16 slabs + its Parts each: the Parts are there for

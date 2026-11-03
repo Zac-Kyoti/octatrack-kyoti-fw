@@ -92,7 +92,7 @@ def main(argv):
     rd = lambda ad, n: int.from_bytes(bytes(rt.uc.mem_read(ad, n)), "big")
     syms = {k: int(v, 16) for k, v in (l.split() for l in (ROOT / "out/clyps_syms.txt").read_text().splitlines())}
     print(f"saved {list(bytes(rt.uc.mem_read(syms['cl_svalid'], 4)))} src T1 {bytes(rt.uc.mem_read(syms['cl_src'], 2)).hex()} "
-          f"home T1 {bytes(rt.uc.mem_read(syms['cl_home'], 2)).hex()} ynact {bytes(rt.uc.mem_read(syms['cl_ynact'], 4)).hex()}")
+          f"home T1 {bytes(rt.uc.mem_read(syms['cl_home'], 2)).hex()}")
     print(f"cl_open {rd(syms['cl_open'], 1)} cl_win 0x{rd(syms['cl_win'], 4):08x} POPUP 0x{rd(0x460E5CD0, 4):08x} "
           f"ARR 0x{rd(0x460D1AEC, 4):08x}")
     print(f"compose target [0x400b9710] = 0x{rd(0x400B9710, 4):08x}; plane 0x{PLANE:08x}")
