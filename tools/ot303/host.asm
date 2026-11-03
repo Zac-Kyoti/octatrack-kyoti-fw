@@ -56,7 +56,7 @@ PB      equ     XB-$1c          ; X, 28 words before the engine's block (run 1's
 ; r5 = XM through the wrapper: one-word moves x:(r5+d), -64 <= d <= 63, reach the engine's host
 ; words below it and the wrapper's words above it. (Address registers take two words either way.)
 XM      equ     XB+$40
-MSAV    equ     XB+$35          ; m0..m7 on entry (the gap after XW)
+MSAV    equ     XB-$34          ; m0..m7 on entry: X:$7b0c-$7b13, below run 1 (the copy does not reach it)
 WB      equ     XB+$70          ; X, 76 words after the engine's block
 RBUF    equ     WB+16           ; 16: the engine's output
 CDST    equ     WB+32           ; 12: the continuous X words' addresses (CS .. GD8, in record order)
@@ -148,9 +148,25 @@ sg_ours:
         move    x:(r4+$3),b                     ; the event bits
         and     #>$ffff,b
         move    b1,x:>TRF
-        move    m1,x1                           ; run 1 into place first (MSAV is inside it): m1
-        move    #>$ffffff,x0                    ; linear for the copy, then as found
-        move    x0,m1
+; ---- m0-m7: saved as found into MSAV, then m0, m1, m2, m4 and m5 linear (m1 first: r1 is the save pointer;
+; the engine sets m3, m6 and m7 itself, and the host never addresses through r3, r6 or r7). Before RELOC: it leaves m1 linear for the copy. Uses
+; x0 x1 r1.
+        move    m1,x0
+        move    #>$ffffff,x1
+        move    x1,m1
+        move    #>MSAV,r1
+        move    m0,x:(r1)+
+        move    x0,x:(r1)+
+        move    m2,x:(r1)+
+        move    m3,x:(r1)+
+        move    m4,x:(r1)+
+        move    m5,x:(r1)+
+        move    m6,x:(r1)+
+        move    m7,x:(r1)+
+        move    x1,m0
+        move    x1,m2
+        move    x1,m4
+        move    x1,m5
 ; ---- RELOC: the engine's run-1 block (216 words: its X working set and the wrapper's words) runs
 ; at X:$7b24-$7bfb, in stock's unreferenced X:$7a92-$7fff: a memory partition with no DMA on either
 ; core. The loader puts the words XD above, in SPRING's records. SIGA (X:$7b04, unused) marks the
@@ -177,28 +193,6 @@ hq_rla:
         move    #>$5a5a5a,a
         move    a,x:>SIGA
 hq_rldone:
-        move    x1,m1
-; ---- m0-m7: saved as found into MSAV, then all linear (m1 first: r1 is the save pointer). Uses
-; x0 x1 r1.
-        move    m1,x0
-        move    #>$ffffff,x1
-        move    x1,m1
-        move    #>MSAV,r1
-        move    m0,x:(r1)+
-        move    x0,x:(r1)+
-        move    m2,x:(r1)+
-        move    m3,x:(r1)+
-        move    m4,x:(r1)+
-        move    m5,x:(r1)+
-        move    m6,x:(r1)+
-        move    m7,x:(r1)+
-        move    x1,m0
-        move    x1,m2
-        move    x1,m3
-        move    x1,m4
-        move    x1,m5
-        move    x1,m6
-        move    x1,m7
 ; the next track's ring base, as the stock source would leave it (payload A: not on the raw path,
 ; bit 18 of the track word; an OT-303 track is FLEX, but the stock rule is kept)
         RAWCHK

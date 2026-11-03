@@ -165,13 +165,15 @@ int main(int argc, char** argv) {
             if (dsp.getPC().toWord() != stopA) { std::printf("segment %ld: did not return (pc %06x)\n", seg, dsp.getPC().toWord()); return 1; }
             uint64_t ni = dsp.getInstructionCounter() - i0; instr += ni; if (k == 16 && ni > worst16) worst16 = ni;
             if (k == 16 && callCycles > worstCyc16) worstCyc16 = callCycles;
-            if ((R.r[3].var & 0xffffff) != OUTB + uint32_t(k)) {
-                std::printf("r3 = %06x after %d samples (OUTP %06x, r0 %06x r2 %06x r6 %06x r1 %06x r4 %06x r5 %06x r7 %06x)\n",
+            // The exit contract the host relies on: OUTP advanced by the samples rendered, and the modifiers it
+            // addresses through (m0 m1 m2 m4 m5) linear. r3, m3, m6 and m7 are the engine's (host.asm never uses them).
+            if ((gx(sym("OUTP")) & 0xffffff) != OUTB + uint32_t(k)) {
+                std::printf("OUTP: r3 = %06x after %d samples (OUTP %06x, r0 %06x r2 %06x r6 %06x r1 %06x r4 %06x r5 %06x r7 %06x)\n",
                             R.r[3].var & 0xffffff, k, gx(sym("OUTP")) & 0xffffff, R.r[0].var & 0xffffff, R.r[2].var & 0xffffff,
                             R.r[6].var & 0xffffff, R.r[1].var & 0xffffff, R.r[4].var & 0xffffff, R.r[5].var & 0xffffff, R.r[7].var & 0xffffff);
                 return 1;
             }
-            for (int m = 0; m < 8; m++) if ((R.m[m].var & 0xffffff) != 0xffffff) { std::printf("m%d left at %06x\n", m, R.m[m].var & 0xffffff); return 1; }
+            for (int m : {0, 1, 2, 4, 5}) if ((R.m[m].var & 0xffffff) != 0xffffff) { std::printf("m%d left at %06x\n", m, R.m[m].var & 0xffffff); return 1; }
             for (int j = 0; j < k; j++) {
                 e.tick();
                 int32_t d = gx(OUTB + j);

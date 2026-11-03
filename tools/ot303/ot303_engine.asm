@@ -14,7 +14,7 @@
 ; ENTRY ot303: renders r7 (>= 1) output samples into x:(r3)+ (one word each).
 ; The host (ColdFire, later the hook) has written the HOST words; a note trigger has
 ; written S48H/L, M48H/L, AMP2 (later: the DSP does that itself from a trig flag).
-; Clobbers a b x y r0-r7 n0-n7; restores m0-m7 = $ffffff; r3 advances r7 words.
+; Clobbers a b x y r0-r7 n0-n7 m3 m6 m7; leaves m0 m1 m2 m4 m5 = $ffffff; OUTP advances r7 words.
 ;
 ; v4 (cycle-tuned against the emulator's cycle table, which counts an absolute address or a long
 ; immediate as extra cycles and a long branch as 5). Every once-per-sample word is read by one of
@@ -216,16 +216,14 @@ GLIDE   macro
         move    b,y:(r6+6)
         endm
 MLIN    macro
-; ---- the modifiers linear for the host (the hardware probe's build spells out eight long immediates)
+; ---- the modifiers the host addresses through (r1, r2, r4, r5) linear again; m0 already is on every path
+; here, and the host never addresses through r3, r6 or r7 (the hardware probe's build spells out eight long
+; immediates)
         move    #>$ffffff,x0
-        move    x0,m0
         move    x0,m1
         move    x0,m2
-        move    x0,m3
         move    x0,m4
         move    x0,m5
-        move    x0,m6
-        move    x0,m7
         endm
 
 ot303:
@@ -524,7 +522,6 @@ zsend:
         move    r7,x:>P_R7
         move    n2,x:>P_N2
         move    n7,x:>P_N7
-        move    x:>OUTP,r3
         MLIN
         rts
 
