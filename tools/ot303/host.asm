@@ -109,6 +109,8 @@ RAWCHK  macro
         endm
 
 ; ---- the source seam (jsr from A P:$39c / B P:$1a2)
+; The steps that run from one place each (m0-m7 saved and restored, the tables, a note's start, the gate's
+; end, RELOC) are written where they run, not called: no bsr/rts, and an early exit branches to the code after.
 sg_entry:
         move    a,x:>$20e                       ; the stock instruction the jsr replaced
         move    x:>$418,b
@@ -117,22 +119,19 @@ sg_entry:
         move    x:>LIVE,b                       ; the core's first track: the claim ages
         tst     b
         beq     sg_sig
-        move    #>1,x0
-        sub     x0,b
+        sub     #<$1,b                          ; x0 is reloaded below before it is read
         move    b1,x:>LIVE
         bne     sg_sig
         move    b1,x:>OWN                       ; b = 0: the voice is free
 sg_sig:
         move    x:>$209,r4                      ; this track's record
-        move    #>$003303,x0
         move    x:(r4),b
         and     #>$ffff,b
-        eor     x0,b                            ; Z on B1 alone (the transport's top bits are not ours)
+        eor     #>$003303,b                     ; Z on B1 alone (the transport's top bits are not ours)
         bne     sg_stock
-        move    #>$000909,x0
         move    x:(r4+$2),b
         and     #>$ffff,b
-        eor     x0,b
+        eor     #>$000909,b
         beq     sg_ours
 sg_stock:
         move    x:>$418,b                       ; the voice's own track now stock (a Part change,
@@ -152,16 +151,60 @@ sg_ours:
         move    m1,x1                           ; run 1 into place first (MSAV is inside it): m1
         move    #>$ffffff,x0                    ; linear for the copy, then as found
         move    x0,m1
-        bsr     hq_reloc
+; ---- RELOC: the engine's run-1 block (216 words: its X working set and the wrapper's words) runs
+; at X:$7b24-$7bfb, in stock's unreferenced X:$7a92-$7fff: a memory partition with no DMA on either
+; core. The loader puts the words XD above, in SPRING's records. SIGA (X:$7b04, unused) marks the
+; copy done until power-off; the copy also frees the voice (OWN, LIVE) and clears the record numbers. m1 is linear. Uses a, r1, n1.
+        move    x:>SIGA,a
+        cmp     #>$5a5a5a,a
+        beq     hq_rldone
+        move    #>NXD,n1
+        move    #>OLD1,r1
+        do      #216,hq_rla
+        move    x:(r1),a
+        nop                                     ; one read of the loader's block in four cycles
+        move    a,x:(r1+n1)
+        nop
+        move    (r1)+
+hq_rla:
+        clr     a
+        move    a,x:>OWN
+        move    a,x:>LIVE
+        move    a,x:>LSEQ
+        move    a,x:>LSEQ1
+        move    a,x:>LSEQ2
+        move    a,x:>LSEQ3
+        move    #>$5a5a5a,a
+        move    a,x:>SIGA
+hq_rldone:
         move    x1,m1
-        bsr     hq_msave
+; ---- m0-m7: saved as found into MSAV, then all linear (m1 first: r1 is the save pointer). Uses
+; x0 x1 r1.
+        move    m1,x0
+        move    #>$ffffff,x1
+        move    x1,m1
+        move    #>MSAV,r1
+        move    m0,x:(r1)+
+        move    x0,x:(r1)+
+        move    m2,x:(r1)+
+        move    m3,x:(r1)+
+        move    m4,x:(r1)+
+        move    m5,x:(r1)+
+        move    m6,x:(r1)+
+        move    m7,x:(r1)+
+        move    x1,m0
+        move    x1,m2
+        move    x1,m3
+        move    x1,m4
+        move    x1,m5
+        move    x1,m6
+        move    x1,m7
 ; the next track's ring base, as the stock source would leave it (payload A: not on the raw path,
 ; bit 18 of the track word; an OT-303 track is FLEX, but the stock rule is kept)
         RAWCHK
 sg_ring:
         move    x:>$20b,b
-        move    #>$80,x0
-        add     x0,b
+        add     #>$80,b                         ; x0 is reloaded below before it is read
         move    b1,x:>$20b
 sg_noring:
 ; the record's number: new, or an old record (silence, no claim)
@@ -195,10 +238,30 @@ sg_claim:
         move    x0,x:>LIVE
         move    #>XM,r5
         move    x:(r5+D_STG),a
-        move    #>2,x0
-        cmp     x0,a
+        cmp     x0,a                            ; x0 is still 2
         beq     sg_voice
-        bsr     hq_init                         ; a table chunk; this frame is silent
+; ---- the tables: the record's chunk, when it is the next one (D_EXP); the last one starts the
+; voice (STG 2). r5 = XM.
+        move    #>CHH,r1
+        lua     (r4+W_CHK),r4
+        move    #>2,x1
+        bsr     hq_unp                          ; r4 -> the chunk's words
+        move    #>CHH,r1
+        move    x:(r5+D_EXP),x0
+        move    y:(r1)+,a
+        cmp     x0,a
+        bne     sg_silent                        ; not the next one
+        move    y:(r1),x1
+        move    a1,r1
+        add     x1,a
+        move    a1,x:(r5+D_EXP)
+        bsr     hq_unp
+        move    x:(r5+D_EXP),a
+        move    #>YEND,x0
+        cmp     x0,a
+        blt     sg_silent
+        move    #>2,x0
+        move    x0,x:(r5+D_STG)
 sg_silent:
         clr     a
         move    #0,r0
@@ -211,8 +274,8 @@ sg_voice:
         move    x0,x:(r5+D_REM)
         move    #0,x0
         move    x0,x:(r5+D_OUTA)
-; the record's words: the continuous ones, then the note's (they follow) when a note starts here
-        move    x:>$209,r4
+; the record's words: the continuous ones, then the note's (they follow) when a note starts here.
+; r4 still holds the record's address (sg_sig).
         move    #>CB,r1
         lua     (r4+W_CONT),r4
         move    #>14,x1
@@ -245,12 +308,52 @@ hq_loop:
         move    x:(r5+D_EVC),a
         tst     a
         bne     hq_noeoff
-        bsr     hq_gateoff
+; ---- the gate's end: the amp envelope releases (MOFF), the declicker's MEG feed stops (K8 0)
+        move    #>$7fffff,x0
+        move    x0,x:(r5+D_EVC)
+        move    x:(r5+D_HALF),a
+        tst     a
+        beq     hq_noeoff
+        clr     a
+        move    a,x:(r5+D_HALF)
+        move    a,x:(r5-N_K8)
+        move    x:(r5+D_MOFF),x0
+        move    x0,x:(r5-N_MAMP)
 hq_noeoff:
         move    x:(r5+D_TRG),a
         tst     a
         bne     hq_notrg
-        bsr     hq_start
+; ---- a note at its sample: the words both kinds take, then (unless it slides into an open gate)
+; the retrigger: the pitch slew, the main envelope and the amp envelope restart. r5 = XM.
+        move    #>$7fffff,x0
+        move    x0,x:(r5+D_TRG)
+        move    #>NB,r1
+        move    #>NDST,r2
+        move    #>6,x1
+        bsr     hq_copy                         ; C_MEG AG8 AGFM K8, MOFF, GL -> EVC
+        move    #>YS,r4
+        move    y:(r1)+,x1                      ; M_AMP (the gate open)
+        move    y:(r1)+,x0                      ; INC_T
+        move    x0,y:(r4+E_INCT)
+        move    x:>TRF,a
+        btst    #1,a1
+        bcc     hq_trig
+        move    x:(r5+D_HALF),b
+        tst     b
+        bne     hq_notrg                        ; a slide into an open gate
+hq_trig:
+        move    x1,x:(r5-N_MAMP)
+        move    x0,y:(r4+E_S48H)
+        clr     a
+        move    a,y:(r4+E_S48L)
+        move    y:(r1)+,x0
+        move    x0,y:(r4+E_M48H)
+        move    y:(r1)+,x0
+        move    x0,y:(r4+E_M48L)
+        move    y:(r1)+,x0
+        move    x0,y:(r4+E_AMP2)
+        move    #>1,x0
+        move    x0,x:(r5+D_HALF)
 hq_notrg:
         move    x:(r5+D_REM),b
         move    x:(r5+D_EVC),x1
@@ -285,35 +388,7 @@ hq_cpend:
         bne     hq_loop
 ; m0-m7 back as found; drop the seam's return: the stock source is skipped
 sg_out:
-        bsr     hq_mrest
-        move    ssh,x0
-        dc      $0af080,CONT                    ; jmp >CONT (checked by disassembly)
-
-; ---- m0-m7: saved as found into MSAV, then all linear (m1 first: r1 is the save pointer). Uses
-; x0 x1 r1.
-hq_msave:
-        move    m1,x0
-        move    #>$ffffff,x1
-        move    x1,m1
-        move    #>MSAV,r1
-        move    m0,x:(r1)+
-        move    x0,x:(r1)+
-        move    m2,x:(r1)+
-        move    m3,x:(r1)+
-        move    m4,x:(r1)+
-        move    m5,x:(r1)+
-        move    m6,x:(r1)+
-        move    m7,x:(r1)+
-        move    x1,m0
-        move    x1,m2
-        move    x1,m3
-        move    x1,m4
-        move    x1,m5
-        move    x1,m6
-        move    x1,m7
-        rts
 ; ---- m0-m7 back from MSAV (m1..m7 through r0, m0 still linear, m0 last). Uses r0.
-hq_mrest:
         move    #>MSAV,r0
         move    (r0)+
         move    x:(r0)+,m1
@@ -324,7 +399,8 @@ hq_mrest:
         move    x:(r0)+,m6
         move    x:(r0)+,m7
         move    x:>MSAV,m0
-        rts
+        move    ssh,x0
+        dc      $0c0000+CONT                    ; jmp <CONT: CONT is below $1000 (checked by disassembly)
 
 ; ---- x1 record word pairs at r4 -> 24-bit words at y:(r1)+ (the high word's low 16 bits are
 ; bits 23-8, the low word's low 8 bits are bits 7-0). Uses a b y1; r4, r1 advance.
@@ -352,106 +428,5 @@ hq_copy:
 hq_cyend:
         rts
 
-; ---- the tables: the record's chunk, when it is the next one (D_EXP); the last one starts the
-; voice (STG 2). r5 = XM.
-hq_init:
-        move    x:>$209,r4
-        move    #>CHH,r1
-        lua     (r4+W_CHK),r4
-        move    #>2,x1
-        bsr     hq_unp                          ; r4 -> the chunk's words
-        move    #>CHH,r1
-        move    x:(r5+D_EXP),x0
-        move    y:(r1)+,a
-        cmp     x0,a
-        bne     hq_evret                        ; not the next one
-        move    y:(r1),x1
-        move    a1,r1
-        add     x1,a
-        move    a1,x:(r5+D_EXP)
-        bsr     hq_unp
-        move    x:(r5+D_EXP),a
-        move    #>YEND,x0
-        cmp     x0,a
-        blt     hq_evret
-        move    #>2,x0
-        move    x0,x:(r5+D_STG)
-        rts
-
-; ---- a note at its sample: the words both kinds take, then (unless it slides into an open gate)
-; the retrigger: the pitch slew, the main envelope and the amp envelope restart. r5 = XM.
-hq_start:
-        move    #>$7fffff,x0
-        move    x0,x:(r5+D_TRG)
-        move    #>NB,r1
-        move    #>NDST,r2
-        move    #>6,x1
-        bsr     hq_copy                         ; C_MEG AG8 AGFM K8, MOFF, GL -> EVC
-        move    #>YS,r4
-        move    y:(r1)+,x1                      ; M_AMP (the gate open)
-        move    y:(r1)+,x0                      ; INC_T
-        move    x0,y:(r4+E_INCT)
-        move    x:>TRF,a
-        btst    #1,a1
-        bcc     hq_trig
-        move    x:(r5+D_HALF),b
-        tst     b
-        bne     hq_evret                        ; a slide into an open gate
-hq_trig:
-        move    x1,x:(r5-N_MAMP)
-        move    x0,y:(r4+E_S48H)
-        clr     a
-        move    a,y:(r4+E_S48L)
-        move    y:(r1)+,x0
-        move    x0,y:(r4+E_M48H)
-        move    y:(r1)+,x0
-        move    x0,y:(r4+E_M48L)
-        move    y:(r1)+,x0
-        move    x0,y:(r4+E_AMP2)
-        move    #>1,x0
-        move    x0,x:(r5+D_HALF)
-hq_evret:
-        rts
-; ---- the gate's end: the amp envelope releases (MOFF), the declicker's MEG feed stops (K8 0)
-hq_gateoff:
-        move    #>$7fffff,x0
-        move    x0,x:(r5+D_EVC)
-        move    x:(r5+D_HALF),a
-        tst     a
-        beq     hq_evret
-        clr     a
-        move    a,x:(r5+D_HALF)
-        move    a,x:(r5-N_K8)
-        move    x:(r5+D_MOFF),x0
-        move    x0,x:(r5-N_MAMP)
-        rts
 
 
-; ---- RELOC: the engine's run-1 block (216 words: its X working set and the wrapper's words) runs
-; at X:$7b24-$7bfb, in stock's unreferenced X:$7a92-$7fff: a memory partition with no DMA on either
-; core. The loader puts the words XD above, in SPRING's records. SIGA (X:$7b04, unused) marks the
-; copy done until power-off; the copy also frees the voice (OWN, LIVE) and clears the record numbers. m1 is linear. Uses a, r1, n1.
-hq_reloc:
-        move    x:>SIGA,a
-        cmp     #>$5a5a5a,a
-        beq     hq_rldone
-        move    #>NXD,n1
-        move    #>OLD1,r1
-        do      #216,hq_rla
-        move    x:(r1),a
-        nop                                     ; one read of the loader's block in four cycles
-        move    a,x:(r1+n1)
-        nop
-        move    (r1)+
-hq_rla:
-        clr     a
-        move    a,x:>OWN
-        move    a,x:>LIVE
-        move    a,x:>LSEQ
-        move    a,x:>LSEQ1
-        move    a,x:>LSEQ2
-        move    a,x:>LSEQ3
-        move    #>$5a5a5a,a
-        move    a,x:>SIGA
-hq_rldone:
-        rts
