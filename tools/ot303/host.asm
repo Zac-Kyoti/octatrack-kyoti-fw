@@ -312,6 +312,7 @@ hq_noeoff:
         move    x:(r5+D_TRG),a
         tst     a
         bne     hq_notrg
+hq_start:                                       ; (a label only: the note start's first word, for verify_ot303's pcwatch)
 ; ---- a note at its sample: the words both kinds take, then (unless it slides into an open gate)
 ; the retrigger: the pitch slew, the main envelope and the amp envelope restart. r5 = XM.
         move    #>$7fffff,x0
