@@ -206,6 +206,12 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL6 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL5 (its list below still applies; CL5 was never flashed) + one fix:
+  1. Save the project with its Parts saved. Edit a Part that the playing pattern does NOT use (its mark shows).
+     In Clyps, hold `[PTN]`+`[BANK]` and press the trig of a pattern on that Part: that Part comes back from the
+     card and its edited mark goes; the Part you are hearing is not touched.
+
 - **KYOTI CL5 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL4 (its list below still applies, CL4 was never flashed) with the user's corrections:
   1. Header order: `T6 LOAD: TRK SEQ` ... `BNK A` on the right; a group: `MULTI LOAD: TRK SEQS`.

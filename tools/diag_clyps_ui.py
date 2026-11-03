@@ -987,6 +987,33 @@ def main(argv):
         check(same_slab(slab(act), preslab) and bytes(u.mem_read(dst, PARTSZ)) == prepart,
               f"chord + trig {act + 1}: the whole pattern and its whole Part from the card")
         check(state()["open"] == 1, "... begun inside Clyps: Clyps stays")
+        # another pattern, on a Part that is not sounding: that Part from the card, its edited mark follows
+        # (equal to its SAVE PART copy -> cleared), and no other Part touched (the user, 2026-11-02)
+        bb = BLOB + bank * BANKSTRIDE
+        plink = lambda q_: rd(bb + q_ * PATSTRIDE + 0x8E57, 1) & 3
+        q = next((x for x in range(16) if x != act and plink(x) != plink(act)), None)
+        if q is None:
+            check(False, "OT DEMO has a pattern on another Part than the playing one")
+        else:
+            pq = plink(q)
+            pbase = bb + 0x8ED80 + pq * PARTSZ
+            cardq = bytes(u.mem_read(pbase, PARTSZ))            # untouched since the SAVE PROJECT above
+            u.mem_write(bb + 0x9504A + pq * PARTSZ, cardq)      # its SAVE PART copy = the card's Part
+            u.mem_write(bb + 0x9B312 + pq, b"\x01")
+            u.mem_write(pbase + 0x2A, bytes([rd(pbase + 0x2A, 1) ^ 0x55]))   # an edit, marked edited
+            u.mem_write(bb + 0x95048, bytes([rd(bb + 0x95048, 1) | (1 << pq)]))
+            others = {k: bytes(u.mem_read(bb + 0x8ED80 + k * PARTSZ, PARTSZ)) for k in range(4) if k != pq}
+            key(PTN, 1)
+            key(BANK, 1)
+            key(q, 1)
+            settle()
+            key(q, 0)
+            key(BANK, 0)
+            key(PTN, 0)
+            check(bytes(u.mem_read(pbase, PARTSZ)) == cardq and not rd(bb + 0x95048, 1) >> pq & 1,
+                  f"chord + trig {q + 1} (Part {pq + 1}, not sounding): its Part from the card, edited mark cleared")
+            check(all(bytes(u.mem_read(bb + 0x8ED80 + k * PARTSZ, PARTSZ)) == v for k, v in others.items()),
+                  "... and no other Part touched")
         tap(NO)
         closed_ok("[NO]")
 

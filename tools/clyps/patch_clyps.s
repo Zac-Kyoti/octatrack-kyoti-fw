@@ -2663,6 +2663,76 @@ pu_dirty:
     addq.l  #4,%sp
     rts
 
+| cl_pmark (d3 = Part index, a2 = that Part, of the playing bank): stock's Part-edited mark follows
+| "differs from its SAVE PART copy" (bank +0x9504a + part * PARTSZ, valid when +0x9b312 + part != 0, the
+| test stock's PART RELOAD makes); the Part's SRAM copy when the playing bank is the UI's; the bank
+| marked changed. -> d4 = 1: the playing bank is the UI's. Data only (UI task or the card worker).
+| Keeps d2, d3, a2.
+cl_pmark:
+    move.l  %d5,-(%sp)
+|   d5 = 1: the Part now equals its SAVE PART copy (the user, 2026-10-30: then it is not edited,
+|   as after stock's own PART RELOAD, 0x4004ab46): the "saved" flag set (bank +0x9b312 + part, the
+|   test stock's PART RELOAD makes) and the bytes equal (bank +0x9504a + part * PARTSZ)
+    moveq   #0,%d5
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  #BANKSTRIDE,%d1
+    muls.l  %d1,%d0
+    movea.l #BLOB,%a1
+    adda.l  %d0,%a1
+    movea.l %a1,%a0
+    adda.l  #PSAVED,%a0
+    tst.b   (%a0,%d3.l)
+    beq.b   pm_neq
+    move.l  #PARTSZ,%d0
+    muls.l  %d3,%d0
+    adda.l  #PSAVECPY,%a1
+    adda.l  %d0,%a1                     | a1 = the SAVE PART copy
+    movea.l %a2,%a0
+    move.l  #PARTSZ,%d0
+    jsr     cl_cmpw
+    tst.l   %d0
+    bne.b   pm_neq
+    moveq   #1,%d5
+pm_neq:
+    moveq   #0,%d4                      | d4 = 1: the UI bank
+    move.b  PLAY_BANK,%d0
+    cmp.b   UI_BANK,%d0
+    bne.b   pm_flags
+    moveq   #1,%d4
+    move.l  #PARTSZ,%d0
+    muls.l  %d3,%d0
+    addi.l  #SRAM_PART,%d0
+    pea     PARTSZ
+    move.l  %a2,-(%sp)
+    move.l  %d0,-(%sp)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
+    bset    %d3,PEDIT_S
+    tst.l   %d5
+    beq.b   pm_flags
+    bclr    %d3,PEDIT_S
+pm_flags:
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  #BANKSTRIDE,%d1
+    muls.l  %d1,%d0
+    movea.l #BLOB,%a0
+    adda.l  %d0,%a0
+    movea.l %a0,%a1
+    adda.l  #PEDIT,%a0
+    bset    %d3,(%a0)                   | a byte: bset, never or.l (the REPITCH lesson, S119)
+    tst.l   %d5
+    beq.b   pm_fl2
+    bclr    %d3,(%a0)                   | equal to the SAVE PART copy: not edited
+pm_fl2:
+    adda.l  #BDIRTY,%a1
+    moveq   #1,%d0
+    move.l  %d0,(%a1)
+    move.l  %d0,DIRTY2
+    move.l  (%sp)+,%d5
+    rts
+
 | cl_postpart(t): what a FULL landing of t owes the UI side, as stock's TRACK PASTE does it
 | (0x4002b554..0x4002b59a): the Part in the SRAM mirror (the UI bank only), the Part-edited and
 | bank-changed flags, then -- for a new audio machine -- stock's PICKUP setup, and the page redraw
@@ -2684,66 +2754,7 @@ cl_postpart:
     jsr     cl_partin
     movea.l %a0,%a2                     | a2 = the Part
     move.l  %d0,%d3                     | d3 = its index
-|   d5 = 1: the Part now equals its SAVE PART copy (the user, 2026-10-30: then it is not edited,
-|   as after stock's own PART RELOAD, 0x4004ab46): the "saved" flag set (bank +0x9b312 + part, the
-|   test stock's PART RELOAD makes) and the bytes equal (bank +0x9504a + part * PARTSZ)
-    moveq   #0,%d5
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
-    move.l  #BANKSTRIDE,%d1
-    muls.l  %d1,%d0
-    movea.l #BLOB,%a1
-    adda.l  %d0,%a1
-    movea.l %a1,%a0
-    adda.l  #PSAVED,%a0
-    tst.b   (%a0,%d3.l)
-    beq.b   pp_neq
-    move.l  #PARTSZ,%d0
-    muls.l  %d3,%d0
-    adda.l  #PSAVECPY,%a1
-    adda.l  %d0,%a1                     | a1 = the SAVE PART copy
-    movea.l %a2,%a0
-    move.l  #PARTSZ,%d0
-    jsr     cl_cmpw
-    tst.l   %d0
-    bne.b   pp_neq
-    moveq   #1,%d5
-pp_neq:
-    moveq   #0,%d4                      | d4 = 1: the UI bank
-    move.b  PLAY_BANK,%d0
-    cmp.b   UI_BANK,%d0
-    bne.b   pp_flags
-    moveq   #1,%d4
-    move.l  #PARTSZ,%d0
-    muls.l  %d3,%d0
-    addi.l  #SRAM_PART,%d0
-    pea     PARTSZ
-    move.l  %a2,-(%sp)
-    move.l  %d0,-(%sp)
-    jsr     MEMCPY
-    lea     12(%sp),%sp
-    bset    %d3,PEDIT_S
-    tst.l   %d5
-    beq.b   pp_flags
-    bclr    %d3,PEDIT_S
-pp_flags:
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
-    move.l  #BANKSTRIDE,%d1
-    muls.l  %d1,%d0
-    movea.l #BLOB,%a0
-    adda.l  %d0,%a0
-    movea.l %a0,%a1
-    adda.l  #PEDIT,%a0
-    bset    %d3,(%a0)                   | a byte: bset, never or.l (the REPITCH lesson, S119)
-    tst.l   %d5
-    beq.b   pp_fl2
-    bclr    %d3,(%a0)                   | equal to the SAVE PART copy: not edited
-pp_fl2:
-    adda.l  #BDIRTY,%a1
-    moveq   #1,%d0
-    move.l  %d0,(%a1)
-    move.l  %d0,DIRTY2
+    jsr     cl_pmark                    | its screen copy and stock's edited mark; d4 = 1: the UI bank
     tst.l   %d4
     beq.b   pp_out2                     | another bank than the UI's: nothing on screen to redraw
     cmpi.l  #8,%d2

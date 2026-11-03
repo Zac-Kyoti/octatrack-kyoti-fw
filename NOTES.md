@@ -37866,3 +37866,7 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   BNK A` (`MULTI LOAD: ...`), group ORIG `ORIG SEQS` / `ORIGS FULL`, SAVE BANK retakes those banks' originals
   (+ temp saves when the playing bank is saved), the TRACK release after TRACK + [YES] / [NO] selects nothing (clear
   0x460fab44, stock's "select on release"). Gates on CL5: full 115, T 21, F+Q 27, L+J 16, M+U 26. syx 27c9999c….
+- **KYOTI CL6** (2026-11-02, NOT flashed; CL5 never flashed): `[PTN]`+`[BANK]` + trig N on a pattern whose Part is not
+  the sounding one restored that Part from the card but left stock's edited mark; now `cl_pmark` (factored out of
+  `cl_postpart`) recomputes it for the Part pattern N links to, and no other. Gate L's new check fails on CL5
+  (control) and passes on CL6. Gates on CL6: full 115, T 21, F+Q 27, L+J 18, M+U 26. syx bba0fbb5….

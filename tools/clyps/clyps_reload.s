@@ -329,7 +329,18 @@ rj_pshare:
     moveq   #0,%d0
     move.b  RL_CURPART,%d0
     cmp.l   %d2,%d0
-    bne.b   rj_ok                       | another Part than the one sounding: nothing to apply
+    beq.b   rj_papply                   | the Part sounding: applied, and cl_postpart marks it
+|   another Part than the one sounding: nothing to apply, but stock's edited mark follows the reload --
+|   of the Part pattern P links to (as just reloaded) and no other (the user, 2026-11-02)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  %d5,%d1
+    movea.l #BLOB,%a1
+    jsr     cl_partin                   | a0 = P's Part, d0 = its index (= d2)
+    movea.l %a0,%a2
+    move.l  %d2,%d3
+    jsr     cl_pmark
+    bra.w   rj_ok
 rj_papply:
     move.l  %d2,-(%sp)
     moveq   #0,%d0
