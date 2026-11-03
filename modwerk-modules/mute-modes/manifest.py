@@ -45,6 +45,15 @@ reference is KYOTI V1.7's placement, 0x400d6e54. Hardware: the octabam form (OCT
 octabam bc144523 + this change) on the author's MKI, 1 Nov 2026, DT-T: a muted KEY track stays
 silent when KEY moves away, and the rest is nominal; KYOTI V1.7 (this placement) on the same
 unit, 2 Nov 2026: the same checks pass. OTFX-T/OTFX's one-frame blip: port only.
+
+2026-11-03: the hold, in every unit (Sam's question on octabam#1013). `pre` leaves before p1_key
+in MUTE MODE OT, so a hold could outlive an unmute there; and stock plays a muted track's trigs
+under its post-FX cut, so a track still muted when MUTE MODE left OT for DT-T was heard to the
+end of the voice OT had started (a loop: for good), and OTFX-T/OTFX let one frame through. Now
+OT holds every track: a track still muted when MUTE MODE leaves OT keeps OT's cut until it is
+unmuted. The byte is inverted (UNHELD) and sits before SHADOW, so OT's `clr.b SHADOW` became one
+`clr.w` over both (OT keeps its instruction count). The plain unit gets the hold too (p1_hold):
+970 -> 996 B; the SC_KEY unit is 1106 B at 0x400d6e54. WIP, not yet on hardware.
 """
 
 import os
@@ -70,8 +79,8 @@ def _sc_key_inc(modules):
 def _softmute_ref(modules):
     """The variant the author ratified for this selection."""
     if SC in modules:       # tools/build_kyoti.py's placement in KYOTI V1.0
-        return (0x400d6e54, "ac03f5590ca69f7d29f1034720e9a8d83c6500953b80c729d4aed400125285d8")
-    return (0x400d7400, "ca7792be6239c6c3c1d4882ef3c8fdd718a05d7e90f36d8eae0c1971cb9a9689")
+        return (0x400d6e54, "e622ca6bab46462649fac798861b0678438c65231d5a4dfb890c0b47dd079630")
+    return (0x400d7400, "64d876ca3a39f4fb0593f8a5faa36f1b862ba432331c6c1da064408789f0641a")
 
 # The PERSONALIZE pointer arrays (16 u32 each in 1.40C) and the code that names them.
 LABELS, GETTERS, SETTERS = 0x400b2a34, 0x400b2a74, 0x400b2ac0

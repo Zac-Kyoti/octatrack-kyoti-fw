@@ -136,7 +136,14 @@ pre:
                                          | `cmpi #3 / beq` here (two per frame) was on its own
                                          | enough to break OT's bit-identity.
     .endif
-    clr.b   (SHADOW).l                      | OT (or unknown): stock; keep the shadow clean for later
+    clr.w   (UNHELD).l                      | OT (or unknown): stock. UNHELD = 0 (every track held)
+                                         | and SHADOW = 0, one word (2026-11-03, octabam#1013):
+                                         | stock plays a muted track's trigs under its post-FX
+                                         | cut, so a track still muted when MUTE MODE leaves OT
+                                         | keeps that cut until it is unmuted (p1_key / p1_hold)
+                                         | and DT-T never uncovers the voice. One instruction, as
+                                         | the old `clr.b SHADOW` (ColdFire has no move #imm to an
+                                         | absolute address, hence the inverted byte).
     bra     p1_done
 p1_active:
     .endif
@@ -176,7 +183,7 @@ p1_ns_clear:
     .ifdef SC_KEY
     bra     p1_key
     .else
-    bra     p1_edge
+    bra     p1_hold
     .endif
 
 p1_solo:
@@ -218,7 +225,7 @@ p1_solo_fold:
     .ifdef SC_KEY
     bra     p1_key
     .else
-    bra     p1_edge
+    bra     p1_hold
     .endif
 
     .ifdef SC_KEY
@@ -268,20 +275,43 @@ pk_next:
     bpl.s   pk_loop
     movea.l (%sp)+,%a0
     move.b  %d0,KEYMASK                 | for mt_trig / mt_rebind / dt_trig / fresh_bind / trigflag
-| KEYHOLD (2026-11-01): a silenced key track's trigs play (cut post-FX).  When KEY moves away
+| HOLD (2026-11-01): a silenced key track's trigs play (cut post-FX).  When KEY moves away
 | it rejoins the silenced set, and DT-T leaves a running voice alone -- so the voice its key
 | time started was heard to its end (a loop: for good).  So a silenced key track stays HELD:
 | it keeps the post-FX cut while it stays silenced, though it is no longer a key; unmuting
 | (leaving the silenced set) releases it.  Its trigs are dropped as for any silenced track.
+| 2026-11-03 (octabam#1013): `pre` also holds every track while MUTE MODE is OT, so a track
+| still muted when MUTE MODE leaves OT is held the same way (p1_hold without SIDE-CHAIN).
+| The byte is stored inverted (UNHELD: bit set = not held) so OT can set it with a clr.
     move.l  %d0,%d1
-    move.b  KEYHOLD,%d3                 | low byte; %d3's upper bytes (the loop's -1) go below
+    move.b  UNHELD,%d3                  | low byte; %d3's upper bytes go below
+    not.l   %d3                         | -> held
     or.l    %d3,%d1                     | key tracks + held ones ...
     and.l   %d2,%d1                     | ... that are silenced (8 bits) ...
-    move.b  %d1,KEYHOLD                 | (a held track stays held only while silenced)
+    not.l   %d1
+    move.b  %d1,UNHELD                  | (a held track stays held only while silenced)
+    not.l   %d1                         | upper bytes back to 0
     lsl.l   #8,%d1
     or.l    %d1,%d5                     | ... get stock's own post-FX mute cut (OT's behaviour)
     not.l   %d0
     and.l   %d0,%d2                     | and the soft modes never see them
+    bra     p1_edge
+    .endif
+
+    .ifndef SC_KEY
+| ---- the hold with no SIDE-CHAIN (2026-11-03): p1_key's hold, without key tracks. A track
+| muted when MUTE MODE left OT (`pre` holds every track there) keeps stock's post-FX cut while
+| it stays silenced; it is still in the silenced set, so its trigs drop as for any silenced
+| track. Unmuting releases it. UNHELD is inverted, as there. %d1 is hook 1's own.
+p1_hold:
+    move.b  UNHELD,%d1
+    not.l   %d1                         | -> held (low byte); the and.l clears the upper bytes
+    and.l   %d2,%d1                     | held tracks that are still silenced ...
+    not.l   %d1
+    move.b  %d1,UNHELD                  | (a held track stays held only while silenced)
+    not.l   %d1                         | upper bytes back to 0
+    lsl.l   #8,%d1
+    or.l    %d1,%d5                     | ... keep stock's own post-FX mute cut
     bra     p1_edge
     .endif
 
@@ -1373,18 +1403,24 @@ tf_sil:
 
 | Session 116: SIDE-CHAIN KEY tracks, rebuilt every frame by p1_key (RAM: the cave is loaded to
 | SDRAM with the image, like DIRECT JUMP's DJ_MODE). 0 until the first active-mode frame.
+| UNHELD is word-aligned with SHADOW right after it: `pre`'s OT branch clears both with one
+| clr.w (2026-11-03), the instruction count OT had.
     .balign 2
+UNHELD: .byte 0xff                      | NOT held (inverted): held tracks keep the post-FX cut (p1_key / p1_hold)
+SHADOW: .byte 0                         | see the note below
 KEYMASK: .byte 0
-KEYHOLD: .byte 0                        | silenced tracks still cut post-FX after their key time (p1_key)
     .else
     .set    tf_sil, tf_skip             | no SIDE-CHAIN: the silenced branches are stock's skip, as before
+    .balign 2
+UNHELD: .byte 0xff                      | as above, without key tracks (p1_hold; 2026-11-03)
+SHADOW: .byte 0                         | see the note below
     .endif
 
 | SHADOW: `pre`'s per-frame "silenced" set, here in the unit (RAM, like KEYMASK) since
 | 25 Oct 2026. Its old home, SRAM 0x80006c66, lies inside 0x80006924..0x80007873, the work
 | area of the stock timestretch task (prio 1, entry 0x40098a5c): its splice search fills
 | 0x80006964.. with audio on every grain, so SHADOW read back audio bytes in OTFX, and this
-| hook's per-frame write landed in the search window. With SC_KEY it follows KEYMASK and
-| KEYHOLD (2026-11-01: the unit grew 2 B for KEYHOLD and the pad after SHADOW). NOTES "2026-10-25 (`ts-sram`)".
-SHADOW: .byte 0
+| hook's per-frame write landed in the search window. It follows UNHELD (and, with SC_KEY, comes
+| before KEYMASK): 2026-11-01 the SC_KEY unit grew 2 B for the hold, 2026-11-03 the hold moved
+| first and the plain unit got one too. NOTES "2026-10-25 (`ts-sram`)".
     .balign 2
