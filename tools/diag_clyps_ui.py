@@ -551,7 +551,8 @@ def main(argv):
         chord([1], YES)
         check(svalid()[1] == 1 and saved(1) == pre2, "T2 + [YES]: T2 saved, byte for byte")
         check(arm() == m0, f"... and nothing armed (stock's ARM is off outside Recording Setup: {m0} -> {arm()})")
-        print(f"      active track after the chord: T{rd(0x80000000, 1) + 1}", flush=True)
+        check(rd(0x80000000, 1) == 0, f"... and T1 stays the active track: releasing T2 after the chord selects "
+              f"nothing (now T{rd(0x80000000, 1) + 1}; the user, 2026-11-02)")
         ad = BLOB + bank * BANKSTRIDE + act * PATSTRIDE + TRAC_A
         edit = lambda: u.mem_write(ad, bytes([rd(ad, 1) ^ 0x80]))
         edit()

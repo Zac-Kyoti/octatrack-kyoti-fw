@@ -206,6 +206,13 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL5 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL4 (its list below still applies, CL4 was never flashed) with the user's corrections:
+  1. Header order: `T6 LOAD: TRK SEQ` ... `BNK A` on the right; a group: `MULTI LOAD: TRK SEQS`.
+  2. A group on your own slot: `LOAD: ORIG SEQS` / `LOAD: ORIGS FULL` ([FUNC]).
+  3. TRACK + `[YES]` / `[NO]` (temp save / reload): releasing TRACK leaves the active track as it was.
+  4. SAVE BANK, then edit a pattern of that bank: ORIG brings back the bank as saved.
+
 - **KYOTI CL4 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL3 + the user's 2026-11-02 changes (scope §1.11).
   1. Header: `LOAD: TRK SEQ` on the left (`[FUNC]`: `LOAD: TRK FULL`), `T6 BNK A` on the right; the MIDI side reads the

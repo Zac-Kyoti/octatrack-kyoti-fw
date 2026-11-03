@@ -37862,3 +37862,7 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   (FWDCHK). Trap: a held key's sub-map is linked into the layer chain above ours, so "a layer above Clyps" is NOT a
   menu test. Card toasts TRK SEQ / TRK FULL + RELOADED FROM PROJ; slot label SAVED TRK. Gates on CL4: full 115, T
   20, F+Q 27, L+J 16, M+U 26. KYOTI CL4 syx 4e02aa9d…; standalone CLYPZ in out/.
+- **KYOTI CL5** (2026-11-02, NOT flashed; CL4 never flashed): the user's corrections -- header order `T6 LOAD: <label>
+  BNK A` (`MULTI LOAD: ...`), group ORIG `ORIG SEQS` / `ORIGS FULL`, SAVE BANK retakes those banks' originals
+  (+ temp saves when the playing bank is saved), the TRACK release after TRACK + [YES] / [NO] selects nothing (clear
+  0x460fab44, stock's "select on release"). Gates on CL5: full 115, T 21, F+Q 27, L+J 16, M+U 26. syx 27c9999c….

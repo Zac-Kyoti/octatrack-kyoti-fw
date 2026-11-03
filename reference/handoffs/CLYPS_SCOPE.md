@@ -1049,6 +1049,11 @@ the pattern snapshots) take ~10 MB of the sample pool, as in the standalone Clyp
   the rest fell through to Clyps. While it is open Clyps' key handlers forward to the base keymap (`FWDCHK`,
   `cl_fwdbase`), as stock. Not "any layer above ours": a held key's sub-map is linked into the same chain.
 - **Card-reload toasts:** `TRK SEQ` / `TRK FULL` + `RELOADED FROM PROJ`. Slot label after a temp reload `SAVED TRK`.
+- **CL5 corrections (the user):** header order `T6 LOAD: <label> BNK A` (`MULTI LOAD: ...`; label at x 35 / 47,
+  "BNK A" right-aligned; the longest box ends at x 86, the [BANK] box starts at 88); group ORIG `ORIG SEQS` /
+  `ORIGS FULL`; SAVE BANK retakes those banks' originals (`cl_hstoreb` -> `cl_snapmask`; temp saves too when the
+  playing bank is one); the TRACK release after a temp chord selects nothing (`cl_tsy` clears `0x460fab44`, the
+  press's "select on release" that `0x40083e40` tests).
 - Gates: T rewritten (stopped + two playing reloads, two tracks, inside Clyps, Recording Setup: stock ARM / DISARM
   reached via a code hook -- its masks are per-frame state), E/F use the own slot, P/S check the preload and SAVE
   PROJECT's retake.

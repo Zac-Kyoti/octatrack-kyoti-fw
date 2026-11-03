@@ -147,6 +147,7 @@
     .equ RSETUP_WIN,  0x460d10cc        | the Recording Setup menu's window (0 = closed; opener 0x4002fec4)
     .equ ARM_REC,     0x400834d8        | stock ARM REC TRK (TRACK + [YES]), DISARM REC TRK (+ [NO])
     .equ DISARM_REC,  0x40083488
+    .equ SEL_PEND,    0x460fab44        | a TRACK press's "select on release" (0x40083e40 tests + clears it)
     .equ HELD_TRK,    0x460fab40        | held TRACK keys, bit t (stock's TRACK press / release)
     .equ LAYERS_HEAD, 0x460d165c        | the keymap layer chain: base first, then each pushed layer
     .equ TOAST,       0x4005a2b8        | (text, dur): stock's block toast (legal from a key handler)
@@ -1671,6 +1672,7 @@ ty_ours:
     move.l  8(%sp),%d0
     cmpi.l  #1,%d0
     bne.w   ty_out                      | the release: nothing
+    clr.l   SEL_PEND                    | the TRACK keys' release then selects no track (the user, 2026-11-02)
     lea     -16(%sp),%sp
     movem.l %d2-%d5,(%sp)
     move.l  %d1,%d4                     | d4 = 0 save, 1 reload
@@ -1851,6 +1853,33 @@ cl_sramrest:
     jsr     cl_snapbank
     addq.l  #4,%sp
     jmp     cl_presave                  | the temp saves = the originals (the user, 2026-11-02)
+
+| cl_snapmask(mask): those banks -> their snapshots (SAVE BANK); the temp saves too when the playing bank
+| is one of them
+cl_snapmask:
+    lea     -8(%sp),%sp
+    movem.l %d2-%d3,(%sp)
+    move.l  12(%sp),%d3
+    moveq   #0,%d2
+sm_l:
+    btst    %d2,%d3
+    beq.b   sm_n
+    move.l  %d2,-(%sp)
+    jsr     cl_snapbank
+    addq.l  #4,%sp
+sm_n:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   sm_l
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    btst    %d0,%d3
+    beq.b   sm_out
+    jsr     cl_presave
+sm_out:
+    movem.l (%sp),%d2-%d3
+    lea     8(%sp),%sp
+    rts
 
 | cl_snapall: every bank -> its snapshot, then the temp saves (cl_presave)
 cl_snapall:
@@ -3489,11 +3518,12 @@ cl_draw:
     pea     WIN_W-1
     bsr.w   cl_xor
     lea     16(%sp),%sp
-|   header (the user, 2026-11-02): left "LOAD: " + a label in a dark box; right "T6 BNK A" ("MULTI BNK A" with a
-|   group), right-aligned to x 107. Labels: TRK SEQ / TRK ALL ([FUNC]), the MIDI side the same; the box on
-|   your own pattern's slot (it has an original): ORIG TRK SEQ / ORIG TRK ALL; a group: SEQ / ALL / ORIG SEQ /
-|   ORIG ALL; the [PTN]+[BANK] chord held: ORIG PTN+PART. "BNK A" is boxed while [BANK] alone is held.
-|   Each label's [FUNC] form is the string right after it (cl_s_* pairs). Widths: cl_textw.
+|   header (the user, 2026-11-02): "T6 LOAD: <label> BNK A" -- the track ("MULTI" with a group) at x 3, then
+|   "LOAD: " and the label in a dark box, "BNK A" right-aligned to x 107 (boxed while [BANK] alone is held).
+|   Labels: TRK SEQ / TRK FULL ([FUNC]), the MIDI side the same; the box on your own pattern's slot (it has an
+|   original): ORIG TRK SEQ / ORIG TRK FULL; a group: TRK SEQS / TRKS FULL / ORIG SEQS / ORIGS FULL; the
+|   [PTN]+[BANK] chord held: ORIG PTN+PART. Each label's [FUNC] form is the next string (cl_s_* pairs).
+|   Widths at runtime (cl_textw); the longest label's box ends at x 86, "BNK A"'s box starts at 88.
     jsr     cl_hstate
     move.b  %d0,cl_hdrst
     move.l  %d0,%d7                     | d7 = header state (free until the cells)
@@ -3522,25 +3552,14 @@ cd_r1s:
 cd_rf:
     tst.b   cl_fn
     beq.b   cd_rl
-cd_rskip:                               | [FUNC]: the ALL form, the next string
+cd_rskip:                               | [FUNC]: the FULL form, the next string
     tst.b   (%a2)+
     bne.b   cd_rskip
 cd_rl:
     movea.l %a2,%a0
     jsr     cl_textw
     move.l  %d0,%d5                     | d5 = the label's width
-|   left: "LOAD: " at x 3, the label after it
-    pea     cl_s_load
-    pea     HDR_Y
-    pea     3
-    bsr.w   cl_text
-    lea     12(%sp),%sp
-    move.l  %a2,-(%sp)
-    pea     HDR_Y
-    pea     3+LOADP_A
-    bsr.w   cl_text
-    lea     12(%sp),%sp
-|   right: "T6 BNK A" / "MULTI BNK A", ending at x 107
+|   the track: "T6 " / "M6 " / "MULTI " at x 3
     move.l  %d6,%d0
     moveq   #'T',%d1
     cmpi.l  #8,%d0
@@ -3549,29 +3568,53 @@ cd_rl:
     subq.l  #8,%d0
 cd_ta:
     addq.l  #1,%d0
+    move.l  %d0,-(%sp)
+    move.l  %d1,-(%sp)
+    pea     cl_fmt_hdrt                 | "%c%d "
+    jsr     cl_ismulti
+    tst.l   %d0
+    beq.b   cd_lfmt
+    move.l  #cl_s_multi,(%sp)           | "MULTI " (a group; the user's choice)
+cd_lfmt:
+    pea     cl_buf
+    jsr     SPRINTF
+    lea     16(%sp),%sp
+    pea     cl_buf
+    pea     HDR_Y
+    pea     3
+    bsr.w   cl_text
+    lea     12(%sp),%sp
+    lea     cl_buf,%a0
+    jsr     cl_textw
+    move.l  %d0,%d3
+    addq.l  #4,%d3                      | d3 = "LOAD: "'s x (3 + the width + 1)
+    pea     cl_s_load
+    pea     HDR_Y
+    move.l  %d3,-(%sp)
+    bsr.w   cl_text
+    lea     12(%sp),%sp
+    addi.l  #LOADP_A,%d3                | d3 = the label's x
+    move.l  %a2,-(%sp)
+    pea     HDR_Y
+    move.l  %d3,-(%sp)
+    bsr.w   cl_text
+    lea     12(%sp),%sp
+|   right: "BNK A", ending at x 107
     moveq   #0,%d2
     move.b  cl_bank,%d2
     addi.l  #'A',%d2
     move.l  %d2,-(%sp)
-    move.l  %d0,-(%sp)
-    move.l  %d1,-(%sp)
-    pea     cl_fmt_hdr
-    jsr     cl_ismulti
-    tst.l   %d0
-    beq.b   cd_lfmt
-    move.l  #cl_fmt_hdrm,(%sp)          | "MULTI BNK A" (the user's choice: the bank stays)
-    move.l  %d2,4(%sp)                  | ... its one argument: the bank
-cd_lfmt:
+    pea     cl_fmt_hdrb                 | "BNK %c"
     pea     cl_buf
     jsr     SPRINTF
-    lea     20(%sp),%sp
+    lea     12(%sp),%sp
     lea     cl_buf,%a0
     jsr     cl_textw
-    moveq   #108,%d3
-    sub.l   %d0,%d3                     | d3 = its x
+    moveq   #108,%d2
+    sub.l   %d0,%d2                     | d2 = its x
     pea     cl_buf
     pea     HDR_Y
-    move.l  %d3,-(%sp)
+    move.l  %d2,-(%sp)
     bsr.w   cl_text
     lea     12(%sp),%sp
 cd_band:
@@ -3587,28 +3630,24 @@ cd_band:
     bne.b   cd_nob
 cd_hb:
     pea     WIN_H-2                     | the label: a dark box, lit letters, one lit row below
-    move.l  %d5,%d0                     | (the band's) and one above (the border); 2 dark columns
-    addi.l  #3+LOADP_A+1,%d0            | each side of the text
+    move.l  %d3,%d0                     | (the band's) and one above (the border); 2 dark columns
+    add.l   %d5,%d0                     | each side of the text
+    addq.l  #1,%d0
     move.l  %d0,-(%sp)
     pea     HDR_Y-1
-    pea     3+LOADP_A-2
+    move.l  %d3,%d0
+    subq.l  #2,%d0
+    move.l  %d0,-(%sp)
     bsr.w   cl_xor
     lea     16(%sp),%sp
 cd_nob:
     btst    #0,%d7
     beq.b   cd_nobk
-    lea     cl_buf,%a0                  | the box around the last 5 characters, "BNK A"
-cd_bkend:
-    tst.b   (%a0)+
-    bne.b   cd_bkend
-    subq.l  #6,%a0
-    jsr     cl_textw
-    pea     WIN_H-2
+    pea     WIN_H-2                     | [BANK] alone held: "BNK A" in a dark box
     pea     BOX_R
     pea     HDR_Y-1
-    moveq   #106,%d1
-    sub.l   %d0,%d1
-    move.l  %d1,-(%sp)
+    subq.l  #2,%d2
+    move.l  %d2,-(%sp)
     bsr.w   cl_xor
     lea     16(%sp),%sp
 cd_nobk:
@@ -4709,6 +4748,9 @@ cl_hstoreb:
     move.l  %d6,-(%sp)
     jsr     cl_ncopy_mask
     lea     12(%sp),%sp
+    move.l  %d6,-(%sp)                  | the originals = those banks as saved (the user, 2026-11-02)
+    jsr     cl_snapmask
+    addq.l  #4,%sp
 sb_done:
     movem.l (%sp),%d0-%d7/%a0-%a5
     lea     56(%sp),%sp
@@ -4971,13 +5013,13 @@ cl_xpix:    .byte 0,1, 2,1, 1,2, 0,3, 2,3   | the "x": corners and centre of a 3
             .align 2
 cl_colx:    .short 6, 8, 52, 3          | column 1: number field, bar / box 8..52, its x at 3..5
             .short 62, 60, 108, 55      | column 2: numbers 62..68, bar / box 60..108, its x at 55..57
-cl_fmt_hdr: .asciz "%c%d BNK %c"
-cl_fmt_hdrs:.asciz "%c%d"
-cl_fmt_hdrm:.asciz "MULTI BNK %c"         | 41 px: x 3..43 (scope §1.9)
+cl_fmt_hdrt:.asciz "%c%d "
+cl_s_multi: .asciz "MULTI "               | a group (scope §1.9)
+cl_fmt_hdrb:.asciz "BNK %c"
 cl_s_gseq:  .asciz "TRK SEQS"
 cl_s_gfull: .asciz "TRKS FULL"
 cl_s_gorig: .asciz "ORIG SEQS"
-cl_s_gorigf:.asciz "ORIG FULL"
+cl_s_gorigf:.asciz "ORIGS FULL"
 cl_s_load:  .asciz "LOAD:"
 cl_s_seqb:  .asciz "TRK SEQ"
 cl_s_seqf:  .asciz "TRK FULL"
