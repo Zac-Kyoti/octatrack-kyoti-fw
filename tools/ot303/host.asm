@@ -63,13 +63,15 @@ CDST    equ     WB+32           ; 12: the continuous X words' addresses (CS .. G
 NDST    equ     WB+44           ; 6: the note words' X addresses (C_MEG AG8 AGFM K8, WB's MOFF, EVC)
 OLD1    equ     PB+XD           ; the loader's copy of PB..PB+215 (X run 1)
 SIGA    equ     XB-$3c          ; X:$7b04, below run 1 in the unreferenced region: the copy's mark
-OWN     equ     XB-$3b          ; the core's voice: its track's x:$418 + 1 ($1 $21 $41 $61), 0 = none
-LIVE    equ     XB-$3a          ; frames the claim lasts without a refresh
 TRF     equ     XB-$39          ; this frame's event bits (the record's w3); bit 7: an old record
-LSEQ    equ     XB-$38          ; 4: each track's last record number taken (x:$418 / $20)
-LSEQ1   equ     XB-$37
-LSEQ2   equ     XB-$36
-LSEQ3   equ     XB-$35
+; The claim and the record numbers live in run 1, in the engine block's gap after XC (XB+$49-$4f), as zeros
+; in the loader's copy: RELOC's copy itself frees the voice and clears the numbers.
+OWN     equ     XB+$49          ; the core's voice: its track's x:$418 + 1 ($1 $21 $41 $61), 0 = none
+LIVE    equ     XB+$4a          ; frames the claim lasts without a refresh
+LSEQ    equ     XB+$4b          ; 4: each track's last record number taken (x:$418 / $20)
+LSEQ1   equ     XB+$4c
+LSEQ2   equ     XB+$4d
+LSEQ3   equ     XB+$4e
 ; Y staging, in the gap between the coefficient table and the state block (the image's zeros:
 ; written by the chunks only before the voice runs)
 CB      equ     YS-$3c          ; 14: the continuous words
@@ -183,14 +185,7 @@ sg_ours:
         nop
         move    (r1)+
 hq_rla:
-        clr     a
-        move    a,x:>OWN
-        move    a,x:>LIVE
-        move    a,x:>LSEQ
-        move    a,x:>LSEQ1
-        move    a,x:>LSEQ2
-        move    a,x:>LSEQ3
-        move    #>$5a5a5a,a
+        move    #>$5a5a5a,a                     ; OWN, LIVE and LSEQ came with the copy, as zeros
         move    a,x:>SIGA
 hq_rldone:
 ; the next track's ring base, as the stock source would leave it (payload A: not on the raw path,

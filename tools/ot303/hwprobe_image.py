@@ -213,7 +213,7 @@ def build(tag, host=False):
     src, ysyms = source(tag, host)
     src = asm_macros.expand(src)
     labels_ok(src)
-    words, syms = dsp_xasm.assemble(src, d['org'])
+    words, syms = dsp_xasm.assemble(src, d['org'], short_branches=dsp_xasm.STOCK_SHORT)  # one-word branches where they reach (stock's ops only)
     if len(words) > CODE_N:
         raise ValueError(f'payload {tag}: {len(words)} words; SPRING\'s module leaves {CODE_N} beside DARK REV\'s helper')
     consts = {}
