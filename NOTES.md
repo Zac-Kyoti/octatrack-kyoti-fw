@@ -37642,3 +37642,19 @@ Bugbuilds: 9 of 10 match their pins without the opt-in; BLACKPYRAMIDS_303 could 
 - **PROMOTED FINAL (2026-11-02):** the user flashed KYOTI V1.7 + KEYHOLD (syx 7e6e509f…): all tests pass (the
   KEYHOLD checks, and V1.7's DELAY). build_kyoti.py re-pinned: mainos 46f34fc9…; it rebuilds to that pin
   without the opt-in. Standalone MUTE_MODES and the Bugbuilds are unchanged.
+
+## Session 2026-11-03 -- Modwerk SC 0.2.2: ColdFire units join the DRAM runtime (repeat98/modwerk#1175)
+
+**Report (#1175):** Synth + Sidechain Compressor + Mute Modes (+ Play Modes, Apply Scene, Direct Jump) left COMPRESSOR
+as the only FX2 effect. Modwerk's full-FX2 build ran 8 bytes short (Mute Modes' PERSONALIZE setters: 68 needed,
+60 left) and `composeSelection` fell back to the module-only FX2 menu without a word. Jannik fixes the silent
+fallback; he asked us for the placement change. Same session found #1176: Modwerk's overflow 0x400d24d0..0x400d2ce0
+is stock DELAY's coefficient table (cf. KYOTI V1.7) -- Jannik's.
+
+**Change (Modwerk side, branch sc-dram-when-present on keybus-7e00):** `modwerk-modules/sidechain-compressor/placement.json`
+names sc_cf + sc_ui; Modwerk links them into the DRAM runtime only when another module already carries one (that
+runtime is a fixed ~10 MB sample-memory reserve, so SC alone never starts paying it). Native: compose_map join +
+raw descriptor words resolved after the DRAM link; browser: same placement order (SC leads while stock FX2 stays).
+SC .text is identical for -mcpu=5407 and 54455. module:verify 0/162 mismatches; SC alone byte-identical to 0.2.1.
+**Hardware (MKI):** OCTATRACK_MWSCDJ (SC + Direct Jump, SC in DRAM; .bin abd1c2c9…) and OCTATRACK_MW1175 (the six
+modules; b4eaa770…): all tests pass.

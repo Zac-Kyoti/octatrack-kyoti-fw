@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "moduleId": "sidechain-compressor",
+  "joinRuntime": ["sc_cf", "sc_ui"],
+  "note": "Linked into the DRAM runtime when another selected module already carries one, and into the menu cave otherwise: a set with DRAM code gets 1,314 bytes of cave back, and a set without it takes no sample-memory reservation."
+}
