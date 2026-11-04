@@ -148,10 +148,7 @@ FEATURES = {
 }
 # WIP bases, composed ONLY with the explicit opt-in `--wip NAME` (and KYOTI_ALLOW_WIP=1): one
 # per run, never sealed, never part of the default run above.
-WIP_FEATURES = {
-    # 2026-11-03: MUTE_MODES with the OT-exit hold (octabam#1013), until it is promoted
-    "MUTE_MODES": FEATURES["MUTE_MODES"],
-}
+WIP_FEATURES = {}
 # Bytes a feature writes AT RUNTIME that are zero in its image: no bug-fix cave may cover
 # them, though free_runs() would otherwise count them free.
 RESERVED = {"REC_TRIG_MUTE": [(0x400d7c3a, 2)]}       # RTM_MASK, RTM_TOAST (build_rec_trig_mute.py)

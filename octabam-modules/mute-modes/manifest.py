@@ -57,7 +57,9 @@ end of the voice OT had started (a loop: for good), and OTFX-T/OTFX let one fram
 OT holds every track: a track still muted when MUTE MODE leaves OT keeps OT's cut until it is
 unmuted. The byte is inverted (UNHELD) and sits before SHADOW, so OT's `clr.b SHADOW` became one
 `clr.w` over both (OT keeps its instruction count). The plain unit gets the hold too (p1_hold):
-970 -> 996 B; the SC_KEY unit is 1106 B at 0x400d6e54. WIP, not yet on hardware.
+970 -> 996 B; the SC_KEY unit is 1106 B at 0x400d6e54. Hardware: the author's MKI, 3 Nov 2026,
+KYOTI V1.7 (this placement), standalone MUTE_MODES, BUG_MUTEDT and the octabam form (OCTABAM39,
+octabam bc144523 + this change): all checks pass.
 """
 
 import dataclasses

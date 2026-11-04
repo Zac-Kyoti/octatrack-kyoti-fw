@@ -37658,3 +37658,24 @@ raw descriptor words resolved after the DRAM link; browser: same placement order
 SC .text is identical for -mcpu=5407 and 54455. module:verify 0/162 mismatches; SC alone byte-identical to 0.2.1.
 **Hardware (MKI):** OCTATRACK_MWSCDJ (SC + Direct Jump, SC in DRAM; .bin abd1c2c9…) and OCTATRACK_MW1175 (the six
 modules; b4eaa770…): all tests pass.
+
+## 2026-11-03 (`mm-keyhold`) — MUTE_MODES: a track still muted when MUTE MODE leaves OT stays cut (octabam#1013)
+
+**Question (Sam, octabam#1013, from the source):** with MUTE MODE OT, `pre` returns before p1_key and nothing
+else writes KEYHOLD; can a bit set under DT-T outlive an unmute in OT? **[C, port]** Not in his order (unmute in
+OT -> back to DT-T -> mute): the first active frame with the track unmuted clears it. It does when the track is
+muted again *in OT* and MUTE MODE then returns (KEYHOLD 0x40 left; that track kept the hard cut). Clearing the bit
+in OT alone (first attempt, never pushed) exposed an older leak in **every** image, standalone too: stock plays a
+muted track's trigs under its post-FX cut, so OT -> DT-T with a track muted uncovered that voice to its end (T7
+-28 dBFS, a loop for good); OTFX-T/OTFX one blip (-64/-83 dB).
+**Fix (user's choice: hold all, every image):** OT holds every track; a track still muted when MUTE MODE leaves
+OT keeps OT's post-FX cut until it is unmuted (as an ex-KEY track already did). Byte inverted (UNHELD, 0xff =
+nothing held) and word-aligned before SHADOW: OT's `clr.b SHADOW` -> one `clr.w` (ColdFire has no `move #imm`
+to an absolute address). p1_key: +3 `not.l`; plain unit gets p1_hold (970 -> 996 B); SC_KEY unit 1106 B at
+0x400d6e54 (KYOTI cave: later units +8 B, 92 B left). References: plain 0x400d7400 `64d876ca…`, SC `e622ca6b…`.
+**Port** (octabam bc144523 + change = OCTABAM39, scratch main's out/sc-leak/, runs/sam/): re-mute-in-OT case and
+the no-KEY leak (standalone FINAL vs new) silent in OT+FX/DT-T/OTFX, UNHELD 0xbf; Sam's order unchanged; the
+KEYHOLD regression keeps every tone level (0.0 dB). Sample diffs vs OCTABAM37 are not 0 (layout moved).
+- **PROMOTED FINAL (2026-11-03):** the user flashed KYOTI V1.7 (syx dd15ff9a…), MUTE_MODES (syx ade9e85c…), BUG_MUTEDT
+  (syx 2cdcc460…) and OCTABAM39 (d0537e02…): all tests pass. Pins: MUTE_MODES 7d48737d…, BUG_MUTEDT 857d80d3…, KYOTI
+  V1.7 4c0a4c40…; all rebuild without the opt-in.

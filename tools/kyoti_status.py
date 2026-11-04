@@ -35,7 +35,7 @@ ALLOW_ENV = "KYOTI_ALLOW_WIP"
 # builder -> sha256 of the image it built when the author promoted it.  A builder that
 # writes several images maps to {image file name: sha256}, one per promoted image.
 FINAL = {
-    "build_mute_modes.py":                 "560de34072690afd7238226790342eb2bce7e08f88093d2fe273032a145979e2",
+    "build_mute_modes.py":                 "7d48737df97465df74bebad88e2b92592b96beed1c1e066b597c840c03cbb137",
     "build_direct_jump_kyoti.py":          "3fa14332d95eda55f56de5935afbd988a7179666ae9d8bc2614c1cc7c9f8a896",
     "build_sidechain_compressor.py":       "44465569a6118a9a7936c83d0f728a5f8c81122c42433a7cdaf267206e99f2fc",
     "build_reload_from_project.py":        "439aa3208ace780007139b561b0c2938ae7c4a3cfac3c286c8c691b59d71caae",
@@ -45,7 +45,7 @@ FINAL = {
     "build_empty_pattern_led_fix.py":      "0e50306d8c242cf0365f2df3e09998be5db3b92a4cc95d5d17e590d9cc36b266",
     "build_rec_trig_mute.py":              "72260bfd51cb5733ee1bf833f10a27cec370d0ee3e59f80b1ee33c33e4a3a5a3",
     "build_bugbuilds.py": {
-        "mainos_mute_modes_batch_bugfixes.bin":              "2b5f7c70ed6fdc3635d82d14db0e8a2d0335c09af0efc7578fef0649f43a6c85",
+        "mainos_mute_modes_batch_bugfixes.bin":              "857d80d3d84f0eecb9bbc23944f83d03f5cf2d6f5934247c183710bb440196b4",
         "mainos_quantize_live_rec_toggle_batch_bugfixes.bin":"df4a24981ace4a163723ab394bf564c9ccd8b4593ba40c9d5461da36fbd226a4",
         "mainos_sidechain_compressor_batch_bugfixes.bin":    "4febe2e60f3ca36df8bac50e291c99f54450adbce188d0f08c5a954b9f48f917",
         "mainos_erase_empty_trigless_locks_batch_bugfixes.bin":"db348f68a32adcc195208e46f6c964d0a5714ba41c1d8c4f2fad6beb2d122922",
@@ -57,7 +57,7 @@ FINAL = {
         "mainos_varispeed_emus_batch_bugfixes.bin":          "52823ea6714036808037757ff49e2e6bcf4cc3d2ebe1ced1f2f0810ac9781943",
     },
     "build_kyoti.py": {
-        "mainos_kyoti_v1.7.bin":                             "46f34fc9f99307847836902a93d60d5f079e0240f1081d1e4f5a658802f577e2",
+        "mainos_kyoti_v1.7.bin":                             "4c0a4c4019151a231879c615f47ac8a8c3d895c5ccbf5569b8b41c8713e029e3",
     },
     "build_blackpyramids_303.py":          "88d49307f481d014b7d5b4c024e918d5b0480c87318eb71798869b300948f62b",
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",

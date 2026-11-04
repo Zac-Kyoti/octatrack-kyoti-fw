@@ -161,17 +161,23 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   **KYOTI V1.7 FINAL 2026-11-02** (flashed: all tests pass, DELAY repeats as stock). V1.1–V1.6 and BUG_VEM10 kept
   code there and darkened DELAY repeats. `seal()` refuses any image that changes the range (every builder);
   V1.7 moves DIRECT JUMP to DRAM (beside RELOAD) and packs the old SAFE pieces into the classic cave; the
-  Bugbuild fallback is a DRAM unit. Pins: KYOTI V1.7 mainos `46f34fc9…` (syx `7e6e509f…`, re-pinned for MUTE_MODES
-  KEYHOLD, below), BUG_VEM10 mainos
+  Bugbuild fallback is a DRAM unit. Pins: KYOTI V1.7 mainos `4c0a4c40…` (syx `dd15ff9a…`, re-pinned for MUTE_MODES'
+  OT-exit hold, below), BUG_VEM10 mainos
   `52823ea6…` (syx `ba7697fb…`; not flashed as such). octabam has the same range in its free list:
   sambanks/octabam#1007. NOTES 2026-11-01/02, `reference/kb/caves.md`.
+- **MUTE_MODES: a track still muted when MUTE MODE leaves OT stays cut** — **FINAL 2026-11-03** (the user flashed
+  KYOTI V1.7, standalone MUTE_MODES, BUG_MUTEDT and OCTABAM39: all tests pass). Stock plays a muted track's trigs
+  under its post-FX cut, so OT -> DT-T uncovered that voice to its end (OTFX-T/OTFX: one blip), and a KEYHOLD bit
+  could outlive an unmute in OT (Sam, octabam#1013). OT now holds every track (UNHELD byte, one `clr.w` with SHADOW).
+  Pins: standalone mainos `7d48737d…` (syx `ade9e85c…`), BUG_MUTEDT mainos `857d80d3…` (syx `2cdcc460…`), KYOTI above.
+  octabam pin PR + Modwerk #1007 update: next. NOTES 2026-11-03 (`mm-keyhold`).
 - **MUTE_MODES KEYHOLD (with SIDECHAIN_COMPRESSOR)** — **FINAL 2026-11-02** (KYOTI V1.7 re-pinned; the user flashed it
   and OCTABAM37: all tests pass). A muted track that has been a KEY stays cut post-FX until unmuted; in DT-T the
   voice it started as a key was heard to its end once KEY moved away (octabam#934). Standalone MUTE_MODES unchanged.
   octabam `mute-modes` pin PR: next. NOTES 2026-11-01 (`mm-keyhold`).
 - **MUTE_MODES: SHADOW out of the stock timestretch task's SRAM** — **FINAL 2026-10-26** (the user flashed the
   standalone `140C_MMSH1`, BUG_MM and KYOTI V1.6: all good). SHADOW lives in the unit; `seal()` refuses any
-  builder's reference into `0x80006924..0x80007873`. Pins: standalone mainos `560de340…`, BUG_MM `2b5f7c70…`
+  builder's reference into `0x80006924..0x80007873`. Pins (then): standalone mainos `560de340…`, BUG_MM `2b5f7c70…`
   (syx `46a75da2…`), KYOTI V1.6 mainos `ee59be31…` (syx `dd9dbec2…`). octabam pin PR sambanks/octabam#928 MERGED; Modwerk
   Mute Modes 0.2.2 is **repeat98/modwerk#1007** (owner review, waiting on Jannik): see NOTES "2026-10-25 (`ts-sram`)".
 
