@@ -37679,3 +37679,26 @@ KEYHOLD regression keeps every tone level (0.0 dB). Sample diffs vs OCTABAM37 ar
 - **PROMOTED FINAL (2026-11-03):** the user flashed KYOTI V1.7 (syx dd15ff9a…), MUTE_MODES (syx ade9e85c…), BUG_MUTEDT
   (syx 2cdcc460…) and OCTABAM39 (d0537e02…): all tests pass. Pins: MUTE_MODES 7d48737d…, BUG_MUTEDT 857d80d3…, KYOTI
   V1.7 4c0a4c40…; all rebuild without the opt-in.
+## Session (bp-reclaim, 2026-11-03): BLACKPYRAMIDS_303 voice 90 words smaller, bit-exact (WIP)
+
+Why: in Modwerk card builds BLACKPYRAMIDS_303 (1,026 / 1,022 words + DARK REV's 35-word helper) and
+SIDECHAIN_COMPRESSOR (677) did not fit PLATE REV + SPRING REV (1,657 contiguous), so SC cost DARK REV.
+Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
+- host.asm: the six steps that run from one place are written where they run (no bsr/rts); three
+  reloads of unchanged values and four constant loads folded into their ALU ops; jmp <CONT; MSAV moved to
+  X:$7b0c (below run 1) so m0-m7 are saved before RELOC; OWN/LIVE/LSEQ0-3 into run 1's gap after XC
+  (XB+$49-$4e, zeros in the loader's copy: RELOC's copy clears them); the engine's exit sets only m1 m2
+  m4 m5 and no longer reloads r3 (engine_probe.cpp checks that contract).
+- tools/dsp_xasm.py: opt-in one-word branches (short_branches=STOCK_SHORT: bra bsr beq bne bge ble blt
+  bgt bmi, never bcc/bcs); SC 44465569 and VARISPEED_EMUS dbf8cd68 rebuild their FINAL images.
+- Checks (C): host_check identical to the baseline (claims model incl.), engine_check bit-exact in
+  every scene; cycles/sample saw 454.5 -> 450.6, square 597.4 -> 590.7, stock record 54.6 -> 47.8.
+  verify_ot303 (octabam's out/emu/ot_emu copied as out/ot303/ot_emu_8d0ad6f4): every functional line
+  equal to FINAL 88d49307; both fail the same DARK REV core-1 timing compare against stock (an emulator
+  effect: FINAL fails it too with that copy).
+- **Hardware (user, MKI, 2026-11-03): WIP RECLAIM1 (mainos 5b7dfb2f..., syx 9bd8a78f...) flashed --
+  "All tests pass, sounds as it should"** (both cores' voices with slides/accents/ties and every knob,
+  stock tracks, DARK REV + PLATE REV on FX2, Part change, project save/reload, power cycle, FLEX
+  round trip). First one-word branches of ours on the chip. Not promoted (user's call).
+- octabam-modules/blackpyramids-303 regenerated (bp_dsp_data.py, bp_dsp_A/B.asm; runtime a6c4efba
+  unchanged).
