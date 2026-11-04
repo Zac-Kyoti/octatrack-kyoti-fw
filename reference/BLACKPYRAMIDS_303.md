@@ -297,7 +297,7 @@ is full in stock, so the voice takes **SPRING REVERB's** module space.
 
 | | used | of |
 |---|---|---|
-| DSP P (each payload) | 1,026 words (A) / 1,022 (B), in SPRING REV's module (DARK REV's 35-word helper moved beside it) | 1,028 |
+| DSP P (each payload) | 936 words (A) / 932 (B), in SPRING REV's module (DARK REV's 35-word helper moved beside it); 1,026 / 1,022 before 2026-11-03 | 1,028 |
 | DSP X | 216 working words at `X:$7b24–$7bfb` (stock's unreferenced top, outside the DMA partitions), copied from SPRING's X records at the first frame | — |
 | DSP Y | 2,119 words `$7a5–$feb`: tables and the voice state, streamed from the ColdFire | — |
 | ColdFire | a 39.7 KB DRAM runtime (a 96 KiB, 16-page arena reserve, loader appended after the OS), 44 detours, 7 pokes, the FLEX renderer slot; about 1,200 instructions a frame per voice in ot_emu for the previous voice, of ~29,000 for the whole frame (15 Oct 2026). The 2026-10-21 voice adds a little per-frame work (the accent sweep capacitor, the knob tapers, the VOL hand-over; 32-bit arithmetic, no 64-bit divides): not re-measured | — |
@@ -307,10 +307,12 @@ from the METER on DIAG8):
 
 | | average | worst frame (a note starting) | ≈ on the chip (worst) |
 |---|---|---|---|
-| WAVE 0 (saw only) | 455 | 496 | ~575 |
-| WAVE > 0 (the square path) | 598 | 646 | ~749 |
+| WAVE 0 (saw only) | 451 | 489 | ~567 |
+| WAVE > 0 (the square path) | 591 | 636 | ~738 |
 
-(`tools/ot303/host_check.py`, the FINAL build of 16 Oct 2026; MT24–MT35 and the 2026-10-21 voice changed only
+(`tools/ot303/host_check.py`, the FINAL of 2026-11-03: the same output, bit-exact, 90 words smaller (the host's
+single-use steps written in place, one-word branches; NOTES "bp-reclaim"); before it 455 / 496 and 598 / 646 from
+the FINAL build of 16 Oct 2026; MT24–MT35 and the 2026-10-21 voice changed only
 ColdFire and data words, not these figures: the 2026-10-21 bench reads 455.1 / 598.0. On the same bench the 14 Oct build `3624a1e7…` measures 473/515 and 620/670. The bench's accounting was corrected the same day: it priced the
 instruction a DO runs with by decoding the DO's loop address as an opcode. The earlier figures
 here, 471/511 and 616/666, came from it.)
