@@ -37699,6 +37699,9 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
 - **Hardware (user, MKI, 2026-11-03): WIP RECLAIM1 (mainos 5b7dfb2f..., syx 9bd8a78f...) flashed --
   "All tests pass, sounds as it should"** (both cores' voices with slides/accents/ties and every knob,
   stock tracks, DARK REV + PLATE REV on FX2, Part change, project save/reload, power cycle, FLEX
-  round trip). First one-word branches of ours on the chip. Not promoted (user's call).
+  round trip). First one-word branches of ours on the chip.
+- **PROMOTED FINAL 2026-11-03 (user):** BLACKPYRAMIDS_303 88d49307 -> 5b7dfb2f, BUG_BP303 afc4e27b -> ca3089ca.
+  The old FINAL stays buildable from tag `ref/blackpyramids-303-2026-11-03` (bb9bead); its .syx/.bin are kept in
+  the main checkout's out/BLACKPYRAMIDS_303_FINAL_88d49307/ (SHA256SUMS).
 - octabam-modules/blackpyramids-303 regenerated (bp_dsp_data.py, bp_dsp_A/B.asm; runtime a6c4efba
   unchanged).
