@@ -206,6 +206,19 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL9 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL8 (its list below still applies; CL8 was never flashed) + ORIG PTN+PRT while playing is a pattern change to
+  itself. Edit the playing pattern and its Part (a trig, a machine setting) first, then in Clyps hold `[PTN]`+`[BANK]`
+  and press `[PAGE]` (or `[YES]`):
+  1. DIRECT JUMP off: nothing changes until the pattern's CHAIN AFTER point (or the pattern end at the default);
+     there it switches as a pattern change does -- every track from its first step, START SILENT tracks silent,
+     conditional trigs (1:2 etc.) counting from the start, the Part as saved.
+  2. DIRECT JUMP on: it jumps at the next master step, as a DIRECT JUMP to another pattern does (tracks stay
+     clock-locked), with the pattern and Part as saved.
+  3. Stop before it lands: nothing is restored (press again while playing, or stopped for an immediate restore).
+  4. Stopped: as before -- at once.
+  5. Cue another pattern after the chord, before it lands: that pattern plays; the restore is dropped.
+
 - **KYOTI CL8 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL7 (its list below still applies; CL7 was never flashed) with leaner loads: no new behaviour, the same results
   with far less written to the battery memory and read from the card. Check that nothing changed:

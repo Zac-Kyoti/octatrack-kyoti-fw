@@ -1113,6 +1113,25 @@ mirror equal to RAM after every load in both:
   record at the UI tail (~2.4 KB) is kept: deduplicating it across the worker / UI tasks risks skipping a RAM
   load's copy.
 
+### 1.13 ORIG PTN+PRT while playing = a pattern change to itself (the user, 2026-11-04; KYOTI CL9, not flashed)
+
+The user's choice: DIRECT JUMP on -> DJ's jump; off -> a stock pattern change (not the per-track in-place restore of
+CL3-CL8). Stopped: unchanged (at once). Row spacing stays 1 px (2 px mock-ups shown, declined).
+- **Request**: `cl_self` (set by `cl_restorepat` while running; a stop clears it in `cl_uitail`).
+- **Stock** (`cl_stockown`: DJ off, or a chain / the arranger running -- where DJ stays out): stock's per-master-step
+  gate computes `d6` = PEND != ACT (0x400a432a..0x400a4350); `cl_sw6` (jsr at 0x400a4352, `mvz.w 0x800065b2,%d2`)
+  forces d6 = 1, so the CHAIN AFTER rule (s % N == 0, N = 0x400d80dc[+0x8e56]) or the pattern end (default) reaches
+  the commit with stock's real-switch hand-off (`d6` path from 0x400a45b4: AFLAGS |= 2, START SILENT bits, APART,
+  the MIDI engine, COND_RESET -1). `cl_scommit` (jsr at 0x400a44a0, the commit's first instruction) copies the
+  originals in first (`cl_selfcopy`: slab 0..0x8e5c, the linked Part, ENG_RESTART for changed machines, the UI owes
+  everything); a different cue at that point drops the request. `cl_wrap` drops pending Clyps cues for it (O8).
+- **DIRECT JUMP** (KYOTI only; `DJ_SELFHOOK` in DJ's source, off by default: the standalone FINAL image is
+  unchanged, sha 3fa14332…): `dj_selfvec` -> Clyps' `cl_djvec` {`cl_sreq`, `cl_sblob`, `cl_sput`}: DJ's idle arms on
+  a self request (`dl_idle`), computes the landing from the originals' slab (`dj_selfblob` after `dj_blob`), and its
+  `dl_commit` calls `cl_sput` first (originals back before `dj_bparams` / `dj_handoff` read them).
+- Gate Z: both modes, edit -> request -> still edited until the switch -> restored byte for byte; DJ off: stock's real
+  switch ran (0x400a45ba) + COND_RESET(-1); DJ on: no stock real switch, COND_RESET(-1) from DJ's hand-off.
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)

@@ -1408,6 +1408,99 @@ def main(argv):
         u.hook_del(hmc)
         tap(NO)
 
+    if "Z" in a.only:
+        # --- Z: ORIG PTN+PART while playing = a pattern change to itself (the user, 2026-11-04). DIRECT JUMP off:
+        # stock's switch (CHAIN AFTER point, d6 hand-off 0x400a45ba, COND_RESET -1); on: DJ's jump (next
+        # landing point, its hand-off, no stock real switch). The originals come back at that point only.
+        print("Z: [PTN]+[BANK]+[PAGE] playing: a switch to the pattern as loaded (DJ off: stock's, DJ on: a jump)")
+        djm = syms.get("DJ_MODE")
+        act = rd(0x800065BE, 1)
+        sl = BLOB + bank * BANKSTRIDE + act * PATSTRIDE
+        q0 = rd(sl + 0x8E56, 1)
+        def edit():
+            u.mem_write(sl, bytes([rd(sl, 1) ^ 0x81]))                       # T1's record
+            pb = partbase(bank, act)
+            u.mem_write(pb + 0x2A, bytes([rd(pb + 0x2A, 1) ^ 0x55]))           # its Part (T1's slice)
+        def restored():
+            pb, ob = partbase(bank, act), partbase(bank, act, syms["cl_bss"])
+            ls, os_ = slab(act)[:0x8E5C], oslab(act)[:0x8E5C]
+            lp, op = bytes(u.mem_read(pb, PARTSZ)), bytes(u.mem_read(ob, PARTSZ))
+            # KYOTI: SIDE-CHAIN's sc_norm turns a COMPRESSOR's MON (Part +0x2f2 + 30t + 13 / + 19; FX1 / FX2
+            # type at +t / +8 + t == 0x18) from an older 0 / 1 into 2 when the Part is applied (as gate F)
+            def scnorm(i):
+                for t_ in range(8):
+                    for k_, fx in ((13, t_), (19, 8 + t_)):
+                        if i == 0x2F2 + 30 * t_ + k_ and lp[fx] == 0x18 and op[i] in (0, 1) and lp[i] == 2:
+                            return True
+                return False
+            return ([hex(i) for i in range(len(ls)) if ls[i] != os_[i]][:6],
+                    [hex(i) for i in range(PARTSZ) if lp[i] != op[i] and not scnorm(i)][:6])
+        d0_ = restored()
+        check(d0_ == ([], []), f"before: the playing pattern and its Part equal their originals {d0_}")
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        check(state()["open"] == 1, "Clyps open")
+        for dj in ([0, 1] if djm is not None else [0]):
+            if djm is not None and rd(djm, 4) != dj:
+                key(PTN, 1)
+                tap(YES)
+                key(PTN, 0)
+            u.mem_write(sl + 0x8E56, bytes([4 if not dj else 0xFF]))    # CHAIN AFTER 4 steps / the default
+            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+            rt.internal_clock()
+            rt.frame = True
+            rt.next_frame = rt.sample + er.FRAME_PERIOD
+            rt.exact_clock()
+            rt.start_transport_live()
+            rt.run(ms=300)
+            edit()
+            hits = {"real": 0, "cond": [], "commit_ms": None}
+            h1 = u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: hits.__setitem__("real", hits["real"] + 1),
+                            begin=0x400A45BA, end=0x400A45BA)
+            h2 = u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: hits["cond"].append(
+                rd(uc.reg_read(er.eb.UC_M68K_REG_A7) + 4, 4)), begin=0x400A539C, end=0x400A539C)
+            key(PTN, 1, 0)
+            key(BANK, 1, 0)
+            key(PAGE, 1, 0)
+            s0 = rd(0x800065B2, 2)
+            pend = rd(syms["cl_self"], 1)
+            still = restored() != ([], [])
+            key(PAGE, 0, 0)
+            key(BANK, 0, 0)
+            key(PTN, 0, 0)
+            n = 0
+            while rd(syms["cl_self"], 1) and n < 800:
+                rt.run(ms=5)
+                n += 1
+            s1 = rd(0x800065B2, 2)
+            rt.run(ms=50)
+            tailmsg()
+            u.hook_del(h1)
+            u.hook_del(h2)
+            d1_ = restored()
+            print(f"      DJ {dj}: request {pend}, edited until the switch {still}; landed after {n * 5} ms (master step "
+                  f"{s0} -> {s1}); stock real switch x{hits['real']}, COND_RESET {[hex(x) for x in hits['cond']]}; "
+                  f"differences now {d1_}", flush=True)
+            check(pend == 1 and still and rd(syms["cl_self"], 1) == 0 and d1_ == ([], []),
+                  f"DJ {dj}: requested, nothing restored before the switch, then the pattern + Part as loaded")
+            if dj:
+                check(hits["real"] == 0 and 0xFFFFFFFF in hits["cond"],
+                      "... by DIRECT JUMP's jump (no stock real switch; its hand-off reset the conditions)")
+            else:
+                check(hits["real"] >= 1 and 0xFFFFFFFF in hits["cond"],
+                      "... by stock's real switch (the d6 hand-off ran, the conditions reset)")
+            key(0x27, 1)
+            key(0x27, 0)
+            rt.run(ms=300)
+        u.mem_write(sl + 0x8E56, bytes([q0]))
+        if djm is not None and rd(djm, 4):
+            key(PTN, 1)
+            tap(YES)
+            key(PTN, 0)
+        tap(NO)
+
     if "X" in a.only:
         # --- X: a card reload of a saved pattern marks nothing (the user, 2026-11-04: after a fully saved
         # project, [PTN]+[BANK] + the trig of pattern P put the "x" on slot P in the ACTIVE track's view).

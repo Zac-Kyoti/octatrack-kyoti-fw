@@ -118,6 +118,8 @@
     .equ PEND_BANK,   0x800065bf
     .equ PEND_PAT,    0x800065c0
     .equ MASTER_STEP, 0x800065b2        | u16: the master step, ++ at each master tick 0
+    .equ CHAIN_ACT,   0x80006546        | long != 0: a pattern chain runs (DIRECT JUMP stays out)
+    .equ ARR_ACT,     0x460d1aec        | long != 0: the arranger runs (DIRECT JUMP stays out)
     .equ TICK_CTR,    0x800065b6        | byte: master ticks within the step
     .equ SCALE_IX,    0x8000663d        | byte: the live master scale index
     .equ LEN_TBL,     0x400aba50        | long[scale]: ticks per step (2 = 1x = 6)
@@ -1641,7 +1643,23 @@ rs_n:
 cl_restorepat:
     jsr     cl_origok
     tst.l   %d0
-    beq.b   rp_out
+    beq.w   rp_out
+|   playing (the user, 2026-11-04): the pattern as loaded comes back AS A PATTERN CHANGE to itself --
+|   DIRECT JUMP on: its jump (the next landing point, every track re-landed, its hand-off); off: stock's
+|   switch (the CHAIN AFTER point / the pattern end, every track from its start, the Part applied by the
+|   engine, START SILENT, the conditional counters reset). cl_self is the request: cl_sw6 / cl_scommit
+|   (stock) or dj_selfvec (DIRECT JUMP) land it, cl_selfcopy puts the originals back at that point.
+|   Stopped: at once, as before.
+    tst.l   RUNNING
+    beq.b   rp_now
+    moveq   #1,%d0
+    move.b  %d0,cl_self
+.ifdef DJ_SELFVEC
+    lea     cl_djvec,%a0
+    move.l  %a0,DJ_SELFVEC
+.endif
+    rts
+rp_now:
     moveq   #1,%d0
     move.b  %d0,cl_pwhole
     move.l  %d2,-(%sp)
@@ -2749,8 +2767,184 @@ cl_post_ui:
     move.l  4(%sp),%d1
     lsl.l   %d1,%d0
     move.l  %d0,-(%sp)
-    bsr.b   cl_postmask
+    bsr.w   cl_postmask
     addq.l  #4,%sp
+    rts
+
+| ================================================================ ORIG PTN+PART as a pattern change
+| cl_sreq -> d0 != 0: a self-switch is pending (cl_self) and the cue is the playing pattern itself (a
+| real cue or a stop cancels it at the commit). Uses d0.
+cl_sreq:
+    moveq   #0,%d0
+    tst.b   cl_self
+    beq.b   sq_out
+    move.b  PEND_PAT,%d0
+    cmp.b   ACT_PAT,%d0
+    bne.b   sq_no
+    move.b  PEND_BANK,%d0
+    cmp.b   PLAY_BANK,%d0
+    bne.b   sq_no
+    moveq   #1,%d0
+    rts
+sq_no:
+    moveq   #0,%d0
+sq_out:
+    rts
+
+| cl_stockown -> d0 != 0: stock's switch lands the request, not DIRECT JUMP's (DJ off, or a chain / the
+| arranger running: DJ stays out then). Uses d0.
+cl_stockown:
+.ifdef DJ_MODE
+    tst.l   DJ_MODE
+    beq.b   so_yes
+    tst.l   CHAIN_ACT
+    bne.b   so_yes
+    tst.l   ARR_ACT
+    bne.b   so_yes
+    moveq   #0,%d0
+    rts
+so_yes:
+.endif
+    moveq   #1,%d0
+    rts
+
+| cl_sw6: stock's per-master-step switch gate (0x400a4352, `mvz.w 0x800065b2,%d2`, jsr; d6 = PEND !=
+| ACT was just computed): a pending self-switch that stock owns counts as a real one (d6 = 1), so the
+| CHAIN AFTER rule / the pattern end lands it and the d6 hand-off runs. Keeps all but d2 / d6.
+cl_sw6:
+    tst.b   cl_self
+    beq.b   s6_out
+    move.l  %d0,-(%sp)
+    jsr     cl_stockown
+    tst.l   %d0
+    beq.b   s6_r
+    moveq   #1,%d6
+s6_r:
+    move.l  (%sp)+,%d0
+s6_out:
+    mvz.w   MASTER_STEP,%d2             | displaced
+    rts
+
+| cl_scommit: stock's commit (0x400a44a0, `lea 0x800065be,%a0`, jsr), before ACT <- PEND and every read of
+| the pattern / its Part: the originals back for a self-switch stock owns; any other cue drops it.
+cl_scommit:
+    tst.b   cl_self
+    beq.b   scm_out
+    lea     -60(%sp),%sp
+    movem.l %d0-%d7/%a0-%a6,(%sp)
+    jsr     cl_stockown
+    tst.l   %d0
+    beq.b   scm_done                     | DIRECT JUMP's: it lands it
+    jsr     cl_sreq
+    tst.l   %d0
+    beq.b   scm_clr
+    jsr     cl_selfcopy
+scm_clr:
+    clr.b   cl_self
+scm_done:
+    movem.l (%sp),%d0-%d7/%a0-%a6
+    lea     60(%sp),%sp
+scm_out:
+    lea     ACT_PAT,%a0                 | displaced
+    rts
+
+.ifdef DJ_SELFVEC
+| DIRECT JUMP's self-jump vector (dj_selfvec): [0] request?, [1] the originals' slab, [2] put them back
+| (its landing tick, before its parameters and hand-off read them). Keep d2-d7 / a2-a6.
+cl_djvec:   .long cl_sreq, cl_sblob, cl_sput
+cl_sblob:
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    jsr     cl_snapslab
+    move.l  %a0,%d0
+    rts
+cl_sput:
+    jsr     cl_sreq
+    tst.l   %d0
+    beq.b   su_clr
+    jsr     cl_selfcopy
+su_clr:
+    clr.b   cl_self
+    rts
+.endif
+
+| cl_selfcopy: the playing pattern and its Part as loaded, back in place (sequencer tick context): the
+| slab (its runtime tail +0x8e5c.. kept), the Part it links to; a changed machine restarts its voice;
+| the UI side owes the whole slab and Part (cl_postmask). Keeps d2-d7 / a2-a6.
+cl_selfcopy:
+    lea     -24(%sp),%sp
+    movem.l %d2-%d4/%a2-%a4,(%sp)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    jsr     cl_snapslab
+    movea.l %a0,%a3                     | a3 = the slab as loaded
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  %d0,-(%sp)
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     cl_slab
+    addq.l  #8,%sp
+    pea     0x8e5c
+    move.l  %a3,-(%sp)
+    move.l  %a0,-(%sp)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    movea.l #SNAPB,%a1
+    jsr     cl_partin
+    movea.l %a0,%a4                     | a4 = its Part as loaded
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    movea.l #BLOB,%a1
+    jsr     cl_partin
+    movea.l %a0,%a2                     | a2 = the live Part (the restored link)
+    moveq   #0,%d2
+sl_m:
+    move.b  0x22(%a2,%d2.l),%d0
+    cmp.b   0x22(%a4,%d2.l),%d0
+    beq.b   sl_mn
+    moveq   #1,%d0                      | a new machine: restart the voice, PICKUP setup owed
+    lsl.l   %d2,%d0
+    move.b  ENG_RESTART,%d1
+    or.l    %d1,%d0
+    move.b  %d0,ENG_RESTART
+    lea     cl_postm,%a0
+    moveq   #1,%d0
+    move.b  %d0,(%a0,%d2.l)
+sl_mn:
+    addq.l  #1,%d2
+    cmpi.l  #8,%d2
+    bne.b   sl_m
+    pea     PARTSZ
+    move.l  %a4,-(%sp)
+    move.l  %a2,-(%sp)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
+    lea     cl_postf,%a0                | the UI side: every track, the whole slab and Part
+    moveq   #15,%d0
+    moveq   #1,%d1
+sl_f:
+    move.b  %d1,(%a0,%d0.l)
+    subq.l  #1,%d0
+    bpl.b   sl_f
+    moveq   #1,%d0
+    move.b  %d0,cl_wslab
+    move.b  %d0,cl_wpart
+    move.l  %d0,RDRAW
+    moveq   #-1,%d0
+    move.w  %d0,cl_post
+    movem.l (%sp),%d2-%d4/%a2-%a4
+    lea     24(%sp),%sp
     rts
 
 | cl_bbeg / cl_bend: a batch of loads (a group, ORIG, ORIG PTN+PART, a temp chord on several tracks):
@@ -3239,7 +3433,7 @@ la_out:
 | or.l d2,d0`, 6 B). Reached at a master wrap and when a stock pattern change lands.
 cl_wrap:
     tst.b   cl_nq
-    beq.b   wr_out
+    beq.w   wr_out
     lea     -60(%sp),%sp
     movem.l %d0-%d7/%a0-%a6,(%sp)
     move.b  PEND_PAT,%d0
@@ -3248,6 +3442,13 @@ cl_wrap:
     move.b  PEND_BANK,%d0
     cmp.b   PLAY_BANK,%d0
     bne.b   wr_drop
+    jsr     cl_sreq                     | ORIG PTN+PART's switch to itself lands here: a pattern change,
+    tst.l   %d0                         | which drops every cue (as O8)
+    beq.b   wr_pl
+    jsr     cl_stockown
+    tst.l   %d0
+    bne.b   wr_drop
+wr_pl:
     moveq   #0,%d6                      | a plain wrap: every cue lands, copy only
 wr_l:
     move.l  %d6,%d0
@@ -3393,6 +3594,10 @@ cn_n:
 | The UI task's message loop, common tail 0x40062d1c (replaces `tst.l 0x46c7c72c`, 6 B; stock's
 | beq.w follows on those flags). Runs after every UI message. Does what a landing owes the UI.
 cl_uitail:
+    tst.l   RUNNING
+    bne.b   ut_run
+    clr.b   cl_self                     | stopped before it landed: ORIG PTN+PART's request goes
+ut_run:
     tst.b   cl_open
     beq.w   ut_post
 |   a pattern picked the stock way inside Clyps (scope §1.0 step 2) closes it: [PTN] + trig / a
@@ -5268,6 +5473,7 @@ cl_cue:     .fill 16, 2, 0xffff         | per track: the cued (bank<<8 | pattern
 cl_cueh:    .fill 16, 2, 0xffff         | per track: the playing (bank<<8 | pattern) it aims at
 cl_arm:     .space 16                   | per track: the gate has passed; waiting for a window start
 cl_cuef:    .space 16                   | per track: the cue is FULL (its machine / FX too)
+cl_self:    .byte 0                     | ORIG PTN+PART playing: a pattern change to itself is pending
 cl_wpart:   .byte 0                     | the rest of a Part changed (cl_slrest, a card pattern): its whole mirror
 cl_wslab:   .byte 0                     | a NORMAL -> PER TRACK conversion: the mirror owes the whole slab
 cl_bat:     .byte 0                     | a batch of loads is running (cl_bbeg / cl_bend): immediate posts wait

@@ -37899,3 +37899,13 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   a group or the [PTN]+[BANK] chord reads `MULTI LD: <label>` (ORIG PTN+PART -> `ORIG PTN+PRT`, its box to x 86).
   Gate L now starts on the audio side (JAM2 comes up on MIDI: L failed there on CL7 too, a gate gap). Gates on
   CL8: full 116, T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15 (OT DEMO); X+L 14 (JAM2). syx 9480e707….
+- **KYOTI CL9** (2026-11-04, NOT flashed; CL7 / CL8 never flashed): ORIG PTN+PRT while playing = a pattern change to
+  itself (the user: DJ on -> DJ's jump; off -> a stock pattern change; stopped unchanged; row spacing stays 1 px).
+  Stock: `cl_sw6` (jsr 0x400a4352) forces the switch gate's d6 = 1 for a pending request, so the CHAIN AFTER rule /
+  pattern end lands it through stock's real-switch hand-off (0x400a45b4.., COND_RESET -1); `cl_scommit` (jsr
+  0x400a44a0, the commit) puts the originals back first. DJ: `DJ_SELFHOOK` (off by default; standalone DJ FINAL
+  3fa14332… unchanged) + `dj_selfvec` -> Clyps' {request, originals' slab, put back}: DJ arms on the request, lands
+  from the originals' lengths, and puts them back at the top of `dl_commit`. Gate Z (both modes, OT DEMO + JAM2):
+  edited until the switch, then byte-exact (JAM2: SIDE-CHAIN's sc_norm MON 0/1 -> 2 on the Part apply tolerated, as
+  gate F); DJ off master step 3 -> 0 (restart), stock real switch x1; DJ on 3 -> 4 (clock-locked), no stock switch.
+  Gates on CL9: full 116, T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15; X+L+Z (JAM2) 20. syx 196c2239….

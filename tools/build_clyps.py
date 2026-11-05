@@ -93,7 +93,8 @@ if VARIANT:
 CAVE = 0x400d6500
 KYOTI = kyoti_place.active()
 DRAM_AT = kyoti_place.at("patch_clyps_dram", dram.ARENA_BASE) if KYOTI else dram.ARENA_BASE
-DJ_SYMS = {"DJ_LAND": "dj_land", "DJ_TOGGLE": "dj_toggle", "DJ_STATE": "dj_state", "DJ_MODE": "dj_mode"}
+DJ_SYMS = {"DJ_LAND": "dj_land", "DJ_TOGGLE": "dj_toggle", "DJ_STATE": "dj_state", "DJ_MODE": "dj_mode",
+           "DJ_SELFVEC": "dj_selfvec"}
 FREE_END = 0x400d7c3c
 DETOURS = [  # (site, symbol, stock bytes, length[, opcode: jmp unless given])
     (0x4005a044, "cl_ptn", "202f00087201", 6),
@@ -105,6 +106,10 @@ DETOURS = [  # (site, symbol, stock bytes, length[, opcode: jmp unless given])
     (0x40085864, "cl_rljob", "2d4afd762f2a0004", 8),  # type-0x14 storage case: the card reloads
     (0x40023c62, "cl_rldone", "71f9460bd910", 6),      # doneFn success: our toast, no bank reload
     (0x400a43a0, "cl_wrap", "201274018082", 6),    # wrap body entry: move.l (a2),d0; moveq #1,d2; or.l d2,d0
+    # ORIG PTN+PART playing = a pattern change to itself (the user, 2026-11-04): the switch gate's d6
+    # and the commit, before ACT <- PEND (scope §1.13)
+    (0x400a4352, "cl_sw6", "75f9800065b2", 6, "4eb9"),     # mvz.w 0x800065b2,%d2 (d6 just computed)
+    (0x400a44a0, "cl_scommit", "41f9800065be", 6, "4eb9"),  # lea 0x800065be,%a0 (the commit)
     (0x400905d4, "cl_projload", "4feffeb848d77cfc", 8),  # masked bank loader entry (every LOAD PROJECT)
     (0x40025808, "cl_sramrest", "4eb94000fbb4", 6, "4eb9"),  # power-on resume: jsr 0x4000fbb4 (SRAM -> RAM)
     # names on the card (clypsNN.work / .strd), kept in step with stock's bank files:
