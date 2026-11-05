@@ -206,6 +206,17 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL10 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL9 (its list below still applies; CL9 was never flashed) + a box per track and new grid LEDs:
+  1. Open Clyps on a track that plays its original: the box is on your pattern's slot. Load slot 5: the box is on 5,
+     slot 5 blinks red / yellow (the track's sequence), your pattern's slot stays red.
+  2. Move the box to slot 9 (not loaded): slot 9 is solid yellow, slot 5 still blinks red / yellow.
+  3. Go to another track and back: the box is on slot 5 again (what the track plays), not on 9.
+  4. Another track that plays its original (or a card reload / SAVED TRK): its box opens on your pattern's slot.
+  5. Playing, load a slot: it flashes yellow (on / off) until it lands, then blinks red / yellow.
+  6. `[PTN]`+`[BANK]` held, a pattern cued: it flashes yellow too.
+  7. A `[CUE]` group: the box goes with the view's track; a load still loads the box's slot into every member.
+
 - **KYOTI CL9 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL8 (its list below still applies; CL8 was never flashed) + ORIG PTN+PRT while playing is a pattern change to
   itself. Edit the playing pattern and its Part (a trig, a machine setting) first, then in Clyps hold `[PTN]`+`[BANK]`

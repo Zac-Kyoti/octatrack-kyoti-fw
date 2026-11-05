@@ -1132,6 +1132,19 @@ CL3-CL8). Stopped: unchanged (at once). Row spacing stays 1 px (2 px mock-ups sh
 - Gate Z: both modes, edit -> request -> still edited until the switch -> restored byte for byte; DJ off: stock's real
   switch ran (0x400a45ba) + COND_RESET(-1); DJ on: no stock real switch, COND_RESET(-1) from DJ's hand-off.
 
+### 1.14 A box per track (the user, 2026-11-04; KYOTI CL10, not flashed)
+
+- No per-track memory: the box's home is what the track plays -- `cl_srccode` = `cl_playing` (its Clyps source while
+  the load belongs to the playing pattern, else the playing pattern), ORIG / SAVED -> the pattern's own slot.
+  `cl_boxhome` puts the box (and the shown bank) there: at open and in `cl_refresh` whenever the track differs from
+  the last refresh (TRACK, [MIDI], a group's view). Moving the box within a view is free; a load leaves it where it is.
+- Grid LEDs (`cl_paint`, first match): the active track's cued slot yellow + flashing (`cl_blink` inverts both dies
+  CL_BLINK/2 ticks a period); its sequence red + the 3-tick green flash (red / yellow, as before for the box); the
+  box elsewhere solid yellow; your pattern red; green / off. The pattern view (chord held): the cued pattern flashes
+  yellow too. Was: the box red / yellow, cued solid yellow.
+- Multi: unchanged -- loads take the box's slot for every member; the box follows the view's track (CL7's view rule).
+- Gate V: open, load, move, track change and back, [PAGE], cued -- box positions and the LED_FLASH calls.
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)

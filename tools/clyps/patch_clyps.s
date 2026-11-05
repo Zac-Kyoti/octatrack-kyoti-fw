@@ -397,11 +397,7 @@ ce_noundo:
     move.b  %d0,cl_chordout             | opened by the chord: chord + SCALE closes Clyps
     clr.b   cl_ptfwd
     clr.b   cl_bkfwd
-    move.b  PLAY_BANK,%d0
-    move.b  %d0,cl_bank
-    move.b  %d0,cl_sbank
-    move.b  ACT_PAT,%d0
-    move.b  %d0,cl_cur
+    jsr     cl_boxhome                  | the box on the active track's sequence (the user, 2026-11-04)
     pea     cl_close                    | close_cb: eviction lands in the same teardown
     pea     PRIO
     clr.l   -(%sp)                      | dy
@@ -1278,6 +1274,35 @@ to_midi:
     .section .dram,"ax"
 | d0 = (bank << 8) | pattern of the sequence playing on the active track: its Clyps source
 | while the load still belongs to the playing pattern, otherwise the playing pattern itself
+| cl_srccode -> d0 = (bank << 8) | slot of the active track's sequence: where its playing sequence was
+| loaded from (cl_playing); its original, saved sequence or a card reload -> the playing pattern's own
+| slot. Uses d0, d1, a0.
+cl_srccode:
+    jsr     cl_playing
+    move.l  %d0,%d1
+    lsr.l   #8,%d1
+    cmpi.l  #16,%d1
+    bcs.b   sc2_out
+    moveq   #0,%d0                      | ORIG / SAVED: the pattern's own slot
+    move.b  PLAY_BANK,%d0
+    lsl.l   #8,%d0
+    move.b  ACT_PAT,%d0
+sc2_out:
+    rts
+
+| cl_boxhome: the select box (and the shown bank) on the active track's sequence (cl_srccode). Opening
+| Clyps and every change of the viewed track; moving it within a view is free (the user, 2026-11-04).
+| Uses d0, d1, a0.
+cl_boxhome:
+    jsr     cl_srccode
+    move.b  %d0,%d1
+    andi.l  #15,%d1
+    move.b  %d1,cl_cur
+    lsr.l   #8,%d0
+    move.b  %d0,cl_sbank
+    move.b  %d0,cl_bank
+    rts
+
 cl_playing:
     jsr     cl_trk
 | cl_playt (d0 = track): the same for any track
@@ -1349,6 +1374,11 @@ cf_full:
 cl_refresh:
     lea     -16(%sp),%sp
     movem.l %d2-%d4/%a2,(%sp)
+    jsr     cl_trk                      | another track than at the last refresh (TRACK, [MIDI], a group's
+    cmp.b   cl_lastt,%d0                | view): the box goes to ITS sequence (the user, 2026-11-04 -- each
+    beq.b   crf_same                    | track's box is where its playing sequence came from)
+    jsr     cl_boxhome
+crf_same:
     moveq   #0,%d0                      | the one cursor choke point: 16 slots
     move.b  cl_cur,%d0
     andi.l  #15,%d0
@@ -3709,30 +3739,31 @@ cv_m:
 | the context of the QLREC crash: LED bits only, CLAUDE.md; ROM, as tick-path code): the active track's cued slot, if it is shown and is not the pattern you are on,
 | alternates yellow / off
 cl_blink:
-|   (the user, 2026-10-29) the select box looks like stock's p-locked trig: red (cl_paint), and every
-|   period its green die is turned on for 3 LED ticks (LED_FLASH, stock's own call): a red / yellow
-|   flash. Not over your pattern (red) or the cued slot (yellow). The four page LEDs do the same
-|   when cl_ppaint left them "flash" (cl_pled 3).
+|   (the user, 2026-11-04) every period: the active track's sequence (cl_srccode: red, cl_paint) gets its
+|   green die for 3 LED ticks (LED_FLASH, stock's own call) -- a red / yellow flash, as stock's p-locked
+|   trig; its cued sequence (yellow) goes off for half the period -- flashing yellow. With the [PTN]+[BANK]
+|   chord held (the pattern view), the cued pattern flashes the same way. The four page LEDs do the
+|   3-tick flash when cl_ppaint left them "flash" (cl_pled 3).
     move.l  %d2,-(%sp)
-    tst.l   PTN_HELD                    | the chord held: no box (the pattern view)
+    tst.l   PTN_HELD
     beq.b   bl_box
     tst.l   BANK_HELD
-    bne.b   bl_page
-bl_box:
-    move.b  cl_sbank,%d0
-    cmp.b   cl_bank,%d0
-    bne.b   bl_page                     | the box is in another bank
-    moveq   #0,%d2
-    move.b  cl_cur,%d2
-    move.b  PLAY_BANK,%d0
-    cmp.b   cl_bank,%d0
-    bne.b   bl_cue
-    moveq   #0,%d0
+    beq.b   bl_box
+    tst.l   RUNNING                     | the pattern view: the cued pattern of the playing bank
+    beq.w   bl_page
+    move.b  PEND_BANK,%d0
+    cmp.b   PLAY_BANK,%d0
+    bne.w   bl_page
+    moveq   #0,%d1
+    move.b  PEND_PAT,%d1
     move.b  ACT_PAT,%d0
-    cmp.l   %d2,%d0
-    beq.b   bl_page                     | your pattern: red wins
-bl_cue:
-    moveq   #0,%d0                      | the active track (cl_trk, inlined: this is ROM)
+    cmp.b   %d1,%d0
+    beq.w   bl_page
+    andi.l  #15,%d1
+    bsr.b   bl_yel
+    bra.w   bl_page
+bl_box:
+    moveq   #0,%d0                      | the active track's cue
     move.b  CUR_TRACK,%d0
     andi.l  #7,%d0
     tst.l   MIDI_MODE
@@ -3743,16 +3774,45 @@ bl_trk:
     lea     cl_cue,%a0
     moveq   #0,%d1
     move.w  (%a0,%d0.l),%d1
-    moveq   #0,%d0
-    move.b  cl_bank,%d0
-    lsl.l   #8,%d0
-    or.l    %d2,%d0
-    cmp.l   %d1,%d0
-    beq.b   bl_page                     | cued: yellow wins
+    move.l  %d1,%d0
+    lsr.l   #8,%d0
+    cmp.b   cl_bank,%d0
+    bne.b   bl_src                      | none (0xffff) / in another bank
+    move.l  %d1,%d2                     | (the code, kept to skip its slot below)
+    andi.l  #15,%d1
+    bsr.b   bl_yel
+    bra.b   bl_src2
+bl_src:
+    moveq   #-1,%d2
+bl_src2:
+    jsr     cl_srccode
+    cmp.l   %d2,%d0
+    beq.b   bl_page                     | cued again (a FULL re-load): flashing yellow only
+    move.l  %d0,%d1
+    lsr.l   #8,%d1
+    cmp.b   cl_bank,%d1
+    bne.b   bl_page                     | in another bank
+    andi.l  #15,%d0
     lea     LED_TBL,%a0
-    move.l  (%a0,%d2.l*4),%d2
+    move.l  (%a0,%d0.l*4),%d2
     addq.l  #1,%d2                      | its green die
     bsr.b   bl_led
+    bra.b   bl_page
+bl_yel:                                 | d1 = a slot: both its dies off for half the period. Keeps d2.
+    lea     LED_TBL,%a0
+    move.l  (%a0,%d1.l*4),%d0
+    move.l  %d0,-(%sp)                  | (the red die, kept for the green one)
+    pea     CL_BLINK/2
+    move.l  %d0,-(%sp)
+    jsr     LED_FLASH
+    addq.l  #8,%sp
+    move.l  (%sp)+,%d0
+    addq.l  #1,%d0
+    pea     CL_BLINK/2
+    move.l  %d0,-(%sp)
+    jsr     LED_FLASH
+    addq.l  #8,%sp
+    rts
 bl_page:
     moveq   #0,%d0
     move.b  cl_pled,%d0
@@ -4629,11 +4689,14 @@ pc_out:
     rts
 
 | ================================================================ the Clyps grid (LED slot 0)
-| no args: stock calls it from 0x4007e998 / its rebuilds. Per slot of the shown bank, first match:
-|   red          the pattern you are on (red wins: the user, 2026-10-27)
-|   yellow       the active track's cued sequence -- flashing (cl_blink), solid once it plays
-|   yellow       the select box
-|   green 15 / 7 a slot with sample/note trigs / other data only; off = empty
+| no args: stock calls it from 0x4007e998 / its rebuilds. Per slot of the shown bank, first match
+| (the user, 2026-11-04):
+|   yellow, flashing   the active track's cued sequence (cl_blink: off half of every period)
+|   red / yellow blink the active track's sequence: where what it plays was loaded from (cl_srccode;
+|                      cl_blink lights its green die 3 ticks a period, as stock's p-locked trig)
+|   yellow             the select box on any other slot
+|   red                the pattern you are on
+|   green 15 / 7       a slot with sample/note trigs / other data only; off = empty
 cl_paint:
     lea     -36(%sp),%sp
     movem.l %d2-%d6/%a2-%a5,(%sp)
@@ -4649,6 +4712,12 @@ cl_paint:
     moveq   #0,%d0
     move.w  (%a0,%d0.l),%d0
     movea.l %d0,%a2                     | a2 = the active track's cue (0xffff = none)
+    jsr     cl_srccode
+    move.l  %d0,%d5                     | d5 = its sequence's slot
+    moveq   #0,%d6
+    move.b  cl_sbank,%d6
+    lsl.l   #8,%d6
+    move.b  cl_cur,%d6                  | d6 = the box
     moveq   #0,%d2
 cp_lp:
     lea     LED_TBL,%a0
@@ -4661,46 +4730,37 @@ cp_lp:
     move.l  %d4,(%sp)
     jsr     (%a3)                       | full brightness on both (half green is set below)
     addq.l  #8,%sp
+    moveq   #0,%d0
+    move.b  cl_bank,%d0
+    lsl.l   #8,%d0
+    or.l    %d2,%d0                     | d0 = this slot
+    cmp.l   %a2,%d0
+    beq.b   cp_yellow                   | cued (cl_blink flashes it)
+    cmp.l   %d5,%d0
+    beq.b   cp_red                      | its sequence (cl_blink: red / yellow)
+    cmp.l   %d6,%d0
+    beq.b   cp_yellow                   | the box: solid yellow
     move.b  cl_bank,%d0
     cmp.b   PLAY_BANK,%d0
-    bne.b   cp_nothere
+    bne.b   cp_green
     moveq   #0,%d0
     move.b  ACT_PAT,%d0
     cmp.l   %d2,%d0
-    bne.b   cp_nothere
-    move.l  %d3,-(%sp)                  | red: the pattern you are on
+    bne.b   cp_green
+cp_red:
+    move.l  %d3,-(%sp)                  | red: the pattern you are on / the track's sequence
     jsr     (%a4)
     move.l  %d4,(%sp)
     jsr     (%a5)
     addq.l  #4,%sp
     bra.w   cp_next
-cp_nothere:
-    moveq   #0,%d0
-    move.b  cl_bank,%d0
-    lsl.l   #8,%d0
-    or.l    %d2,%d0
-    cmp.l   %a2,%d0
-    beq.b   cp_yellow                   | cued: solid yellow (the user, 2026-10-29)
-    move.b  cl_bank,%d0
-    cmp.b   cl_sbank,%d0
-    bne.b   cp_green
-    moveq   #0,%d0
-    move.b  cl_cur,%d0
-    cmp.l   %d2,%d0
-    bne.b   cp_green
-    move.l  %d3,-(%sp)                  | the select box: red, flashed by cl_blink
-    jsr     (%a4)
-    move.l  %d4,(%sp)
-    jsr     (%a5)
-    addq.l  #4,%sp
-    bra.b   cp_next
 cp_yellow:
     move.l  %d3,-(%sp)                  | yellow: red + green
     jsr     (%a4)
     move.l  %d4,(%sp)
     jsr     (%a4)
     addq.l  #4,%sp
-    bra.b   cp_next
+    bra.w   cp_next
 cp_green:
     move.l  %d3,-(%sp)
     jsr     (%a5)                       | red off

@@ -37909,3 +37909,11 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   edited until the switch, then byte-exact (JAM2: SIDE-CHAIN's sc_norm MON 0/1 -> 2 on the Part apply tolerated, as
   gate F); DJ off master step 3 -> 0 (restart), stock real switch x1; DJ on 3 -> 4 (clock-locked), no stock switch.
   Gates on CL9: full 116, T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15; X+L+Z (JAM2) 20. syx 196c2239….
+- **KYOTI CL10** (2026-11-05, NOT flashed; CL7-CL9 never flashed): a box per track (the user). No per-track memory:
+  `cl_boxhome` puts the box on the track's sequence (`cl_srccode` = where what it plays was loaded from; ORIG / SAVED
+  / card reload -> the pattern's own slot) at open and whenever `cl_refresh` sees another track; moving it within
+  a view is free. Grid: cued = yellow flashing half the period (`cl_blink`, both dies CL_BLINK/2), the sequence =
+  red + 3-tick green flash, the box elsewhere = solid yellow, your pattern red; the chord's pattern view flashes
+  the cued pattern too. Gate V (new); gate B's box check updated (box = solid yellow); gate Z's "before" is
+  informational (earlier scenarios load). Harness: X stalled after Z in one session (passes alone / after O+W).
+  Gates on CL10: full 115 + B 10, T 21, F+Q 27, L+J 19, M+U 32, V 9, X+O+W 15, Z 5. syx 4160cbbc….

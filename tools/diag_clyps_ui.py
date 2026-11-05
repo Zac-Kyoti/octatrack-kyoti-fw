@@ -286,7 +286,7 @@ def main(argv):
         check(state()["cur"] == c1 ^ 8, "LEFT: the other column")
         tap(RIGHT)
         check(state()["cur"] == c1, "RIGHT: back")
-        check(led(c1) == (1, 0), "the box's slot is red (flashing on hardware)")
+        check(led(c1) == (1, 1), "the box's slot (not the track's sequence) is solid yellow (the user, 2026-11-04)")
         shot("C1_box")
         key(BANK, 1)
         tap(RIGHT)
@@ -1408,6 +1408,76 @@ def main(argv):
         u.hook_del(hmc)
         tap(NO)
 
+    if "V" in a.only:
+        # --- V: each track's box (the user, 2026-11-04): Clyps opens / a track change puts the box on that
+        # track's sequence (where what it plays was loaded from; its own slot for an original); moving it is
+        # free within a view; LEDs: the sequence red (+ a 3-tick green flash), the box elsewhere solid
+        # yellow, a cued slot yellow flashing half the period (cl_blink's LED_FLASH calls)
+        print("V: the box per track, the sequence / box / cued LEDs")
+        led_tbl_ = [rd(0x400A74CE + 4 * k, 4) for k in range(16)]
+        def flashes():
+            got = []
+            h = u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: got.append(
+                (rd(uc.reg_read(er.eb.UC_M68K_REG_A7) + 4, 4), rd(uc.reg_read(er.eb.UC_M68K_REG_A7) + 8, 4))),
+                begin=0x40013784, end=0x40013784)
+            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+            rt.call_as_main(syms["cl_blink"], budget=600000)
+            u.hook_del(h)
+            return got
+        def repaint():
+            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+            rt.call_as_main(0x4007E998, args=(0,), budget=600000)
+        tap(0x10)
+        act = rd(0x800065BE, 1)
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        check(state()["open"] == 1 and state()["cur"] == act, f"open on T1: the box on its sequence, your pattern {act + 1}")
+        q = next(x for x in range(16) if x != act and rec(x, 0) != rec(act, 0))
+        r = next(x for x in range(16) if x not in (act, q))
+        tap(q)
+        check(state()["cur"] == q and rec(act, 0) == rec(q, 0), f"trig {q + 1}: loaded, the box there")
+        while state()["cur"] != r:
+            tap(DOWN)
+        repaint()
+        fl = flashes()
+        check(led(r) == (1, 1) and led(q) == (1, 0) and led(act) == (1, 0),
+              f"box on {r + 1}: solid yellow; the sequence ({q + 1}) red; your pattern red "
+              f"(box {led(r)}, seq {led(q)}, yours {led(act)})")
+        check((led_tbl_[q] + 1, 3) in fl and not any(d in (led_tbl_[r], led_tbl_[r] + 1) for d, _ in fl),
+              f"... cl_blink: the sequence's green die 3 ticks; the box not flashed ({fl})")
+        tap(0x11)
+        check(state()["cur"] == act, f"T2: the box on T2's sequence (its original: your pattern {act + 1}; cur {state()['cur'] + 1})")
+        tap(0x10)
+        check(state()["cur"] == q, f"back to T1: the box on its sequence {q + 1}, not where it was left ({r + 1}); "
+              f"cur {state()['cur'] + 1}")
+        tap(PAGE)
+        tap(0x11)
+        tap(0x10)
+        check(state()["cur"] == act, f"[PAGE] (T1's original), T2, back: the box on your pattern {act + 1}")
+        # running: a cue flashes yellow
+        rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+        rt.internal_clock()
+        rt.frame = True
+        rt.next_frame = rt.sample + er.FRAME_PERIOD
+        rt.exact_clock()
+        rt.start_transport_live()
+        rt.run(ms=300)
+        key(q, 1, 0)
+        key(q, 0, 0)
+        cued = rd(syms["cl_cue"], 2)
+        repaint()
+        fl = flashes()
+        half = max(n for _, n in fl) if fl else 0
+        check(cued != 0xFFFF and led(q) == (1, 1) and (led_tbl_[q], half) in fl and (led_tbl_[q] + 1, half) in fl
+              and half > 3, f"cued {q + 1}: yellow, both dies flashed {half} ticks ({fl}, cue 0x{cued:04x})")
+        key(0x27, 1)
+        key(0x27, 0)
+        rt.run(ms=300)
+        tap(NO)
+        closed_ok("[NO]")
+
     if "Z" in a.only:
         # --- Z: ORIG PTN+PART while playing = a pattern change to itself (the user, 2026-11-04). DIRECT JUMP off:
         # stock's switch (CHAIN AFTER point, d6 hand-off 0x400a45ba, COND_RESET -1); on: DJ's jump (next
@@ -1436,7 +1506,7 @@ def main(argv):
             return ([hex(i) for i in range(len(ls)) if ls[i] != os_[i]][:6],
                     [hex(i) for i in range(PARTSZ) if lp[i] != op[i] and not scnorm(i)][:6])
         d0_ = restored()
-        check(d0_ == ([], []), f"before: the playing pattern and its Part equal their originals {d0_}")
+        print(f"      before: differences from the originals {d0_} (earlier scenarios may have loaded)", flush=True)
         key(PTN, 1)
         key(BANK, 1)
         key(BANK, 0)
