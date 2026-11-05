@@ -337,6 +337,18 @@ dl_idle:
     move.b  PEND_BANK,%d0
     cmp.b   ACT_BANK,%d0
     bne.b   dl_real
+    .ifdef DJ_SELFHOOK
+|   KYOTI with Clyps: cued == active, but Clyps asks for a jump to the playing pattern as it was
+|   loaded (ORIG PTN+PART, the user 2026-11-04) -> arm as for any cue (dj_selfvec, below)
+    move.l  dj_selfvec,%d0
+    beq.b   di_nself
+    movea.l %d0,%a0
+    movea.l (%a0),%a0                  | [0] -> d0 != 0: a self-jump is requested
+    jsr     (%a0)
+    tst.l   %d0
+    bne.w   dl_real
+di_nself:
+    .endif
 |   cued == active.  V7.0.1: if our last Program Change named a pattern that is NOT playing (a
 |   cue was cancelled back to the playing pattern), re-send the playing pattern's so external
 |   gear follows what the OT actually plays.  After a normal landing the last PC IS the playing
@@ -400,6 +412,9 @@ dl_arm:
     moveq   #0,%d1
     move.b  PEND_PAT,%d1
     bsr.w   dj_blob                    | a2 = incoming pattern blob
+    .ifdef DJ_SELFHOOK
+    bsr.w   dj_selfblob                | a self-jump: the pattern as it was loaded (Clyps)
+    .endif
     bsr.w   dj_bparams
     move.l  dj_T,%d7
     addi.l  #DJ_TOFS,%d7               | d7 = t of this ISR
@@ -449,6 +464,14 @@ dl_done:
 
 | dl_commit: the landing tick.  Registers are free (saved by the caller).
 dl_commit:
+    .ifdef DJ_SELFHOOK
+    move.l  dj_selfvec,%d0             | [2]: Clyps puts a self-jump's pattern + Part back now,
+    beq.b   dc_nself                   | before the parameters and the hand-off below read them
+    movea.l %d0,%a0                    | (it clears its request either way)
+    movea.l 8(%a0),%a0
+    jsr     (%a0)
+dc_nself:
+    .endif
     move.b  ACT_PAT,%d0
     move.b  %d0,PREV_PAT
     move.b  ACT_BANK,%d0
@@ -720,6 +743,27 @@ ho_nx:
     rts
 
 | ================= V7 helpers (all called from dj_land's saved-register context) ==========
+    .ifdef DJ_SELFHOOK
+| dj_selfblob: a self-jump requested -> a2 = Clyps' copy of the pattern as loaded ([1] -> d0), so
+| the landing tick is computed from the lengths / scales the jump will land with
+dj_selfblob:
+    move.l  dj_selfvec,%d0
+    beq.b   ds_out
+    move.l  %a2,-(%sp)
+    movea.l %d0,%a0
+    movea.l (%a0),%a0
+    jsr     (%a0)
+    movea.l (%sp)+,%a2
+    tst.l   %d0
+    beq.b   ds_out
+    movea.l dj_selfvec,%a0
+    movea.l 4(%a0),%a0
+    jsr     (%a0)
+    movea.l %d0,%a2
+ds_out:
+    rts
+    .endif
+
 | dj_blob: d0 = bank, d1 = pattern -> a2 = pattern blob
 dj_blob:
     move.l  #BANK_STRIDE,%d2
@@ -957,6 +1001,11 @@ fx_store:
     rts
 
     .align 2
+    .ifdef DJ_SELFHOOK
+    .align 2
+    .global dj_selfvec
+dj_selfvec: .long 0                    | KYOTI: Clyps' {request?, its originals' slab, put them back}
+    .endif
 dj_state:  .byte ST_IDLE               | 0 idle / 1 armed (we own LAND_CNTDN) / 2 landing / 3 fixup
 dj_pcpat:  .byte -1                    | cued pattern the PC was last sent for
 dj_zero:   .byte 0                     | constant 0 for Hook N's flag trick
