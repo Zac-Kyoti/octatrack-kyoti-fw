@@ -1301,6 +1301,137 @@ def main(argv):
                 tap(NO)
             closed_ok("closed")
 
+    if "X" in a.only:
+        # --- X: a card reload of a saved pattern marks nothing (the user, 2026-11-04: after a fully saved
+        # project, [PTN]+[BANK] + the trig of pattern P put the "x" on slot P in the ACTIVE track's view).
+        # Lists, per track, where the record differs from Clyps' original (cl_edited's comparison).
+        print("X: SAVE PROJECT, then the card reload of the playing pattern: no record differs from its original")
+        def worker(fn, ms, args=()):
+            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+            rt.call_as_main(fn, args=args, budget=600000)
+            rt.run(ms=ms)
+        TRAC_M_, MIDI_BASE_ = 0x8B0, 0x48D0
+        def recoff(t):
+            return (t * TRAC_A, TRAC_A) if t < 8 else (MIDI_BASE_ + (t - 8) * TRAC_M_, TRAC_M_)
+        def diffs(pat):
+            sl_, os_ = slab(pat), oslab(pat)
+            out = {}
+            for t in range(16):
+                o_, n_ = recoff(t)
+                d_ = [i for i in range(n_) if sl_[o_ + i] != os_[o_ + i]]
+                if d_:
+                    out[t + 1] = [(hex(i), sl_[o_ + i], os_[o_ + i]) for i in d_[:6]] + ([f"+{len(d_) - 6}"] if len(d_) > 6 else [])
+            rest = [hex(i) for i in range(MIDI_BASE_ + 8 * TRAC_M_, PATSTRIDE) if sl_[i] != os_[i]]
+            return out, rest[:12]
+        act = rd(0x800065BE, 1)
+        tap(0x12)                                  # T3 active
+        worker(0x40022850, 8000)                   # SAVE PROJECT: the .strd = RAM, the originals retaken
+        print(f"      active T{rd(0x80000000, 1) + 1}, pattern {act + 1}, snapshots 0x{snapok():04x}", flush=True)
+        d0_, r0_ = diffs(act)
+        print(f"      after SAVE PROJECT: records differing {d0_}; slab tail {r0_}", flush=True)
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        check(state()["open"] == 1, "Clyps open")
+        key(PTN, 1)
+        key(BANK, 1)
+        key(act, 1)
+        rt.run(ms=6000)
+        key(act, 0)
+        key(BANK, 0)
+        key(PTN, 0)
+        print(f"      toast line1 {bytes(u.mem_read(syms['rq_line1'], 12))}", flush=True)
+        d1_, r1_ = diffs(act)
+        print(f"      after the card reload: records differing (offset, now, original) {d1_}; slab tail {r1_}", flush=True)
+        check(not d1_, f"the card reload of a saved pattern: every record equals its original ({sorted(d1_)})")
+        tap(NO)
+
+    if "O" in a.only:
+        # --- O: ORIG PTN+PART's flash with DIRECT JUMP on, running (the user, 2026-11-04: on hardware
+        # the flash is very slow with DJ on, right with it off). Route A runs no UI tick and no UI tail
+        # by itself, so this measures what can starve them: how often the landing posts reach the UI
+        # tail during the 0.5 s flash, and what each one costs in instructions.
+        print("O: [PTN]+[BANK]+[PAGE] with DIRECT JUMP on, running: landings and UI-tail cost during the flash")
+        if "DJ_MODE" not in syms:
+            check(False, "this image has no DIRECT JUMP (build_kyoti.py --with CLYPS)")
+        else:
+            djm = syms["DJ_MODE"]
+            posttail[0] = True
+            act = rd(0x800065BE, 1)
+            sl = BLOB + bank * BANKSTRIDE + act * PATSTRIDE
+            q0 = rd(sl + 0x8E56, 1)
+            u.mem_write(sl + 0x8E56, b"\xff")
+            want = int(os.environ.get("CLYPS_O_DJ", "1"))
+            key(PTN, 1)
+            key(BANK, 1)
+            key(BANK, 0)
+            if rd(djm, 4) != want:
+                tap(YES)
+            key(PTN, 0)
+            check(state()["open"] == 1 and rd(djm, 4) == want, f"Clyps open, DIRECT JUMP {want}")
+            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+            rt.internal_clock()
+            rt.frame = True
+            rt.next_frame = rt.sample + er.FRAME_PERIOD
+            rt.exact_clock()
+            rt.start_transport_live()
+            rt.run(ms=300)
+            cnt = {"post_ui": 0, "flhdr": 0, "flstop": 0, "refresh": 0}
+            names = {syms["cl_post_ui"]: "post_ui", syms["cl_flhdr"]: "flhdr", syms["cl_flstop"]: "flstop",
+                     syms["cl_refresh"]: "refresh"}
+            def on_call(uc, ad, sz, ud):
+                cnt[names[ad]] += 1
+            hk = [u.hook_add(er.eb.UC_HOOK_CODE, on_call, begin=ad_, end=ad_) for ad_ in names]
+            key(PTN, 1)
+            key(BANK, 1)
+            tap(PAGE)
+            c0 = dict(cnt)
+            print(f"      after [PAGE]: {c0}, cl_nq {rd(syms['cl_nq'], 1)}, cl_flk {rd(syms['cl_flk'], 1)}", flush=True)
+            # 60 UI ticks (1 s): between ticks the system runs 16 ms; a pending landing post goes through
+            # the UI tail (as the SYS loop would), its instructions counted
+            trace, posts, costs = [], [], []
+            ninstr, inside = [0], [False]
+            u_in, u_out = syms["ut_post"], syms["ut_out"]
+            def on_any(uc, ad, sz, ud):
+                if ad == u_in:
+                    inside[0] = True
+                elif ad == u_out:
+                    inside[0] = False
+                if inside[0]:
+                    ninstr[0] += 1
+            for i in range(60):
+                rt.run(ms=16)
+                pend = rd(syms["cl_post"], 2)
+                if pend:
+                    posts.append((i, pend))
+                    ninstr[0] = 0
+                    ha = u.hook_add(er.eb.UC_HOOK_CODE, on_any)
+                    rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+                    u.mem_write(er.SYS_MSG_SCRATCH, bytes([0, 0]))
+                    rt.post_message(er.SYS_QUEUE, er.SYS_MSG_SCRATCH)
+                    rt.run(ms=20)
+                    u.hook_del(ha)
+                    costs.append(ninstr[0])
+                rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+                rt.call_as_main(0x40056C28, budget=600000)
+                trace.append(rd(syms["cl_fph"], 1))
+            for h_ in hk:
+                u.hook_del(h_)
+            flips = sum(1 for i in range(1, len(trace)) if trace[i] != trace[i - 1])
+            print(f"      phases: {''.join(map(str, trace))} ({flips} changes); calls {cnt}", flush=True)
+            print(f"      landing posts reaching the UI tail (tick, mask): {[(i, hex(m)) for i, m in posts]}", flush=True)
+            print(f"      instructions from ut_post to ut_out (the landing's UI pass): {costs}", flush=True)
+            key(BANK, 0)
+            key(PTN, 0)
+            key(0x27, 1)
+            key(0x27, 0)
+            rt.run(ms=300)
+            u.mem_write(sl + 0x8E56, bytes([q0]))
+            check(len(posts) <= 1, f"one landing for one ORIG PTN+PART ({len(posts)} posts)")
+            check(flips == 5, f"the flash: 3 cycles ({flips} changes)")
+            posttail[0] = False
+
     if "U" in a.only:
         # --- U: the [CUE] group (scope §1.9), stopped transport
         print("U: [CUE] group: sidebar tabs, track LEDs, loads into every member, ORIG per member, [NO]")
@@ -1367,11 +1498,13 @@ def main(argv):
         t2, n2 = tabs()
         led2 = tled()
         check(grp() == bits and t2 == sorted(m), f"[CUE]+TRACK: members {m} have the tabs (tabs {t2}, cells {n2})")
+        check(rd(0x80000000, 1) == m[1], f"... and the view follows the last added, T{m[1] + 1} ({rd(0x80000000, 1)})")
         check(all(led2[k] == (lact[k] if k in m else lnone[k]) for k in range(8)),
               f"... and the active colours, the others plain ({led2})")
         tap(0x10 + m[1])
+        check(rd(0x80000000, 1) == m[0], f"[CUE]+TRACK {m[1] + 1} out: the view falls back to T{m[0] + 1}")
         tap(0x10 + m[1])
-        check(grp() == bits, "[CUE]+TRACK twice: out, then in again")
+        check(grp() == bits and rd(0x80000000, 1) == m[1], "[CUE]+TRACK twice: out, then in again (the view with it)")
         key(CUE, 0)
         check(gmask() == 0x10000 | bits and tabs()[0] == sorted(m), "[CUE] released: the group stays")
         shot("U1_group")
@@ -1399,9 +1532,11 @@ def main(argv):
         key(CUE, 1)
         tap(MIDIK)
         tap(0x10)
+        check(rd(0x80000012, 4) != 0 and rd(0x80000000, 1) == 0, "... the view on MIDI track 1, on the MIDI side")
         tap(MIDIK)
         key(CUE, 0)
         check(grp() == bits | 0x100 and rd(0x80000012, 4) == 0, "[CUE]+[MIDI]+TRACK 1: MIDI track 1 joins")
+        aview = rd(0x80000000, 1)
         mrec = lambda pat: bytes(u.mem_read(BLOB + bank * BANKSTRIDE + pat * PATSTRIDE + 0x48D0, 0x8B0))
         q2 = next((x for x in range(16) if x != act and mrec(x) != mrec(act)), q)
         differs = mrec(q2) != mrec(act)
@@ -1409,10 +1544,21 @@ def main(argv):
         check(mrec(act) == mrec(q2) and all(rec(act, k) == rec(q2, k) for k in m),
               f"trig {q2 + 1}: the MIDI member too (its source record differs: {differs})")
         tap(PAGE)
+        key(CUE, 1)
+        tap(0x10 + m[1])
+        check(rd(0x80000012, 4) == 0 and rd(0x80000000, 1) == m[0],
+              f"[CUE]+TRACK {m[1] + 1} out: the newest audio member T{m[0] + 1}, not MIDI 1 (was T{aview + 1})")
+        tap(0x10 + m[0])
+        check(rd(0x80000012, 4) == 0 and rd(0x80000000, 1) == a0 and grp() == 0x100,
+              f"... T{m[0] + 1} out too: no audio member, back to T{a0 + 1} (before the group)")
+        tap(0x10 + m[0])
+        key(CUE, 0)
+        check(rd(0x80000000, 1) == m[0] and grp() == 0x100 | (1 << m[0]), f"... T{m[0] + 1} in again: the view on it")
         tap(NO)
         t3, _ = tabs()
         check(state()["open"] == 1 and grp() == 0 and gmask() == 0 and t3 == [m[0]]
-              and tled()[m[0]] == lact[m[0]], "[NO]: the group is gone, Clyps stays, the tab on the active track")
+              and tled()[m[0]] == lact[m[0]] and rd(0x80000000, 1) == m[0],
+              "[NO]: the group is gone, Clyps stays, the view and the tab stay on the active track")
         tap(NO)
         closed_ok("[NO] again")
         check(gmask() == 0, "closed: no group")

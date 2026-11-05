@@ -943,6 +943,17 @@ cl_act4` / `cl_act3`. Emulator renders calling both painters in stock's order: a
 pixel-identical to stock's active tab; none while [CUE] is held; back on the active track after [NO].
 Also: FULL -> ALL in every label and toast (widths re-measured: all narrower; group `ORIG ALL` puts
 `LOAD:` at x 57).
+**The view follows the group (the user, 2026-11-04; KYOTI CL7, not flashed).** Replaces "a plain TRACK press
+changes the view; the group never moves it": `[CUE]`+TRACK now also selects. `cl_gord` keeps the members in add
+order (`cl_gn` entries, newest last; a re-added track moves to the end), `cl_gpre` the track you were on when
+the group began. After every `[CUE]`+TRACK, `cl_gview` selects (stock's `0x40083bf8`, as a TRACK release) the
+newest member **on the side you are on**, else `cl_gpre` if it is on this side, else nothing. The view never
+switches sides (the user: the screen must never show MIDI tracks while the device is on the audio side), so a
+MIDI member never becomes the view from the audio side. Adding is always on the side shown, so an add always
+selects the added track. `[NO]` (dismiss) and closing Clyps leave the view where it is; a plain TRACK still
+moves it freely. Gate U checks add, out-and-in, MIDI add (view on MIDI 1, MIDI side), removal skipping the MIDI
+member, the empty-audio fallback to the pre-group track, and [NO] keeping the view.
+
 
 ### 1.10 DIRECT JUMP / KYOTI integration (2026-10-31; steps 1-5 built as `KYOTI CL3` on V1.7, not flashed)
 

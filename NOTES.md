@@ -37870,3 +37870,17 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   the sounding one restored that Part from the card but left stock's edited mark; now `cl_pmark` (factored out of
   `cl_postpart`) recomputes it for the Part pattern N links to, and no other. Gate L's new check fails on CL5
   (control) and passes on CL6. Gates on CL6: full 115, T 21, F+Q 27, L+J 18, M+U 26. syx bba0fbb5….
+- **KYOTI CL7** (2026-11-04, NOT flashed; unit has CL3, CL4-CL6 never flashed): (1) the `[CUE]` group's view follows
+  the group (the user): `[CUE]`+TRACK selects the added track (stock's select 0x40083bf8); after a removal the newest
+  member on the side you are on (`cl_gord` add order), else the pre-group track (`cl_gpre`) if on this side, else
+  no change -- never a side switch (the screen must not show MIDI tracks off the MIDI side). (2) The card reloads
+  copied our parse scratch over the live slab including the bytes the bank file never holds (each audio record's
+  +0x899, the slab tail +0x8e5c..): leftover 255 / 127 there made a reloaded SAVED pattern differ from its original
+  -> the "x" on its slot (gate X: FAIL before, PASS after); now those bytes keep their live values, as stock's own
+  reload (it parses into the live slab). (3) ORIG PTN+PART with DIRECT JUMP on crawled its 0.5 s flash on hardware:
+  DJ lands the restore at the next master step, inside the flash (DJ off: at the wrap, usually after it), and the
+  landing's UI pass did per track what is shared -- 16 x the 36 KB slab into the battery NVRAM mirror, 16 x the
+  Part's mark / SRAM copy / seven page redraws, SEQ_DIRTY twice per audio index. Now `cl_postmask` does each once.
+  Emulator cannot time NVRAM / LCD: the cause is a hypothesis until the unit shows the flash right (gate O shows one
+  landing and a correct flash either way; its instruction counter is not isolating the pass -- do not quote it).
+  Gates on CL7: full 115, T 21, F+Q 27, L+J 18, M+U 32, X 2, O 3. syx 796e9fde….

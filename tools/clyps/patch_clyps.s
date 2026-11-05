@@ -144,6 +144,8 @@
                                         | flash: its trig tick gives a locked trig's green die 3 ticks
                                         | every period, so the red trig blinks yellow
     .equ CUE_TRK,     0x40083dc4        | stock [CUE] + TRACK: cue toggle
+    .equ TRK_SELECT,  0x40083bf8        | (t 0..7): select track t on the side you are on (the TRACK
+                                        | release's 0x40083e40 calls it)
     .equ RSETUP_WIN,  0x460d10cc        | the Recording Setup menu's window (0 = closed; opener 0x4002fec4)
     .equ ARM_REC,     0x400834d8        | stock ARM REC TRK (TRACK + [YES]), DISARM REC TRK (+ [NO])
     .equ DISARM_REC,  0x40083488
@@ -665,6 +667,10 @@ cl_k_cue:
     bra.w   cl_draw
 
 | [CUE] held + TRACK n: track n (MIDI n + 8 on the MIDI side) in / out of the group. Press only.
+| The view follows the group (the user, 2026-11-04): an added track is selected; after a removal,
+| the newest remaining member on the side you are on, else the track you were on before the group
+| began (same side only), else no change. Never switches sides: the screen and the device's side
+| must agree. cl_gord = the members in add order (cl_gn entries, newest last).
 cl_k_cuet:
     jsr     cl_under                    | a menu over Clyps: stock's [CUE] + TRACK (its sub-map 0x400bf2a0)
     tst.l   %d0
@@ -682,13 +688,96 @@ kcu_ours:
     beq.b   kcu_t
     addq.l  #8,%d0
 kcu_t:
+    move.l  %d2,-(%sp)
+    move.l  %d0,%d2                     | d2 = t
+    jsr     cl_gdrop                    | t out of the add order (in again below when added)
+    moveq   #0,%d1
     move.w  cl_grp,%d1
-    bchg    %d0,%d1
+    bne.b   kcu_tg
+    clr.b   cl_gn                       | the group begins: a fresh order, and where you were
+    jsr     cl_trk
+    move.b  %d0,cl_gpre
+kcu_tg:
+    bchg    %d2,%d1
     move.w  %d1,cl_grp
+    btst    %d2,%d1
+    beq.b   kcu_v                       | removed
+    moveq   #0,%d0
+    move.b  cl_gn,%d0
+    lea     cl_gord,%a0
+    move.b  %d2,(%a0,%d0.l)
+    addq.l  #1,%d0
+    move.b  %d0,cl_gn
+kcu_v:
+    jsr     cl_gview
+    move.l  (%sp)+,%d2
     jsr     cl_gupd
-    bra.w   cl_draw
+    bra.w   cl_refresh                  | the view may have moved
 kcu_out:
 cl_k_nop:
+    rts
+
+| cl_gdrop: track d2 out of cl_gord. Keeps d2. Uses d0, d1, a0, a1.
+cl_gdrop:
+    lea     cl_gord,%a0
+    movea.l %a0,%a1                     | write pointer
+    moveq   #0,%d0                      | read index
+gd_l:
+    cmp.b   cl_gn,%d0
+    bcc.b   gd_end
+    move.b  (%a0,%d0.l),%d1
+    cmp.b   %d1,%d2
+    beq.b   gd_skip
+    move.b  %d1,(%a1)+
+gd_skip:
+    addq.l  #1,%d0
+    bra.b   gd_l
+gd_end:
+    move.l  %a1,%d0
+    sub.l   %a0,%d0
+    move.b  %d0,cl_gn
+    rts
+
+| cl_gview: select the group's view track -- the newest member (cl_gord, from the end) on the side
+| you are on, else cl_gpre if it is on this side, else nothing. Selects only on a change, through
+| stock's TRK_SELECT. Keeps d2-d7. Uses d0, d1, a0, a1.
+cl_gview:
+    move.l  %d3,-(%sp)
+    moveq   #0,%d1
+    tst.l   MIDI_MODE
+    beq.b   gv_s
+    moveq   #8,%d1                      | d1 = this side's bit 3
+gv_s:
+    moveq   #0,%d0
+    move.b  cl_gn,%d0
+    lea     cl_gord,%a0
+gv_l:
+    subq.l  #1,%d0
+    bmi.b   gv_pre
+    moveq   #0,%d3
+    move.b  (%a0,%d0.l),%d3
+    eor.l   %d1,%d3
+    btst    #3,%d3
+    bne.b   gv_l                        | the other side's member: skip it
+    eor.l   %d1,%d3                     | d3 = the track
+    bra.b   gv_try
+gv_pre:
+    moveq   #0,%d3
+    move.b  cl_gpre,%d3
+    move.l  %d3,%d0
+    eor.l   %d1,%d0
+    btst    #3,%d0
+    bne.b   gv_out                      | it was on the other side: stay
+gv_try:
+    jsr     cl_trk
+    cmp.l   %d3,%d0
+    beq.b   gv_out
+    andi.l  #7,%d3
+    move.l  %d3,-(%sp)
+    jsr     TRK_SELECT
+    addq.l  #4,%sp
+gv_out:
+    move.l  (%sp)+,%d3
     rts
 
 | cl_gmask = 0 without a group, else 0x10000 | the members (bit t, MIDI 8..15): the painters' test
@@ -2628,10 +2717,24 @@ bk_out:
     rts
 
     .section .dram,"ax"
-| cl_post_ui(t): what a load owes the UI side (never from the tick): the SRAM mirror, which holds
-| the UI bank only (the whole slab: covers a NORMAL->PER TRACK conversion), and stock's dirty
-| flags + refresh (the undo-restore's own 0x40029b9c).
+| cl_post_ui(t): what a load owes the UI side (never from the tick) -- cl_postmask(1 << t).
 cl_post_ui:
+    moveq   #1,%d0
+    move.l  4(%sp),%d1
+    lsl.l   %d1,%d0
+    move.l  %d0,-(%sp)
+    bsr.b   cl_postmask
+    addq.l  #4,%sp
+    rts
+
+| cl_postmask(mask: bit t, MIDI 8..15): what the loads of those tracks owe the UI side, each shared
+| piece ONCE (the user, 2026-11-04: an ORIG PTN+PART landing did all of it 16 times -- with DIRECT
+| JUMP on it lands inside the 0.5 s flash and the flash crawled): the SRAM mirror (it holds the UI
+| bank only; battery NVRAM on the external bus) gets the whole slab (covers a NORMAL->PER TRACK
+| conversion); stock's dirty flags + refresh (the undo-restore's own 0x40029b9c) once per audio
+| index (it does t and t + 8); the Part's share once (cl_postpart).
+cl_postmask:
+    move.l  %d2,-(%sp)
     move.b  PLAY_BANK,%d0
     cmp.b   UI_BANK,%d0
     bne.b   pu_dirty
@@ -2653,14 +2756,25 @@ cl_post_ui:
     jsr     MEMCPY
     lea     12(%sp),%sp
 pu_dirty:
-    move.l  4(%sp),%d0
-    andi.l  #7,%d0
-    move.l  %d0,-(%sp)
+    moveq   #0,%d2
+pu_l:
+    move.l  8(%sp),%d0
+    move.l  %d0,%d1
+    lsr.l   #8,%d1
+    or.l    %d1,%d0
+    btst    %d2,%d0
+    beq.b   pu_n
+    move.l  %d2,-(%sp)
     jsr     SEQ_DIRTY
     addq.l  #4,%sp
-    move.l  4(%sp),-(%sp)
+pu_n:
+    addq.l  #1,%d2
+    cmpi.l  #8,%d2
+    bne.b   pu_l
+    move.l  8(%sp),-(%sp)
     jsr     cl_postpart
     addq.l  #4,%sp
+    move.l  (%sp)+,%d2
     rts
 
 | cl_pmark (d3 = Part index, a2 = that Part, of the playing bank): stock's Part-edited mark follows
@@ -2738,14 +2852,32 @@ pm_fl2:
 | bank-changed flags, then -- for a new audio machine -- stock's PICKUP setup, and the page redraw
 | of stock's Part reload (0x4005e0a8). Nothing if no FULL landing is owed.
 cl_postpart:
-    move.l  4(%sp),%d0
-    lea     cl_postf,%a0
-    tst.b   (%a0,%d0.l)
-    beq.w   pp_out
-    clr.b   (%a0,%d0.l)
     lea     -20(%sp),%sp
     movem.l %d2-%d5/%a2,(%sp)
-    move.l  24(%sp),%d2                 | d2 = track
+    move.l  24(%sp),%d5                 | d5 = the mask
+    moveq   #0,%d4                      | d4 = 1: a track of it owes its Part's share (cl_postf)
+    moveq   #0,%d2                      | d2 = 1: ... and an audio one changed machine (cl_postm)
+    moveq   #0,%d3
+    lea     cl_postf,%a0
+    lea     cl_postm,%a1
+pq_l:
+    btst    %d3,%d5
+    beq.b   pq_n
+    tst.b   (%a0,%d3.l)
+    beq.b   pq_n
+    clr.b   (%a0,%d3.l)
+    moveq   #1,%d4
+    cmpi.l  #8,%d3
+    bcc.b   pq_n
+    tst.b   (%a1,%d3.l)
+    beq.b   pq_n
+    moveq   #1,%d2
+pq_n:
+    addq.l  #1,%d3
+    cmpi.l  #16,%d3
+    bne.b   pq_l
+    tst.l   %d4
+    beq.w   pp_out2
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0
     moveq   #0,%d1
@@ -2757,13 +2889,19 @@ cl_postpart:
     jsr     cl_pmark                    | its screen copy and stock's edited mark; d4 = 1: the UI bank
     tst.l   %d4
     beq.b   pp_out2                     | another bank than the UI's: nothing on screen to redraw
-    cmpi.l  #8,%d2
-    bcc.b   pp_ref
-    lea     cl_postm,%a0
-    tst.b   (%a0,%d2.l)
+    tst.l   %d2
     beq.b   pp_ref
-    clr.b   (%a0,%d2.l)
-    jsr     PICKUP_SET                  | a new machine: stock's PICKUP setup (it reads the UI bank)
+    lea     cl_postm,%a0                | the mask's audio tracks: their machine change is served
+    moveq   #0,%d0
+pq_m:
+    btst    %d0,%d5
+    beq.b   pq_mn
+    clr.b   (%a0,%d0.l)
+pq_mn:
+    addq.l  #1,%d0
+    cmpi.l  #8,%d0
+    bne.b   pq_m
+    jsr     PICKUP_SET                  | a new machine: stock's PICKUP setup (it reads the UI bank), once
 pp_ref:
     moveq   #1,%d0
     move.l  %d0,RDRAW
@@ -3179,27 +3317,13 @@ ut_refr:
 ut_post:
     move.w  cl_post,%d0
     beq.b   ut_out
-    lea     -8(%sp),%sp
-    movem.l %d2-%d3,(%sp)
     clr.w   cl_post
-    moveq   #0,%d2
-    move.l  %d0,%d3
-ut_l:
-    btst    %d2,%d3
-    beq.b   ut_n
-    move.l  %d2,-(%sp)
-    jsr     cl_post_ui
+    move.l  %d0,-(%sp)                  | every track that landed, each shared piece once
+    jsr     cl_postmask
     addq.l  #4,%sp
-ut_n:
-    addq.l  #1,%d2
-    cmpi.l  #16,%d2
-    bne.b   ut_l
     tst.b   cl_open
-    beq.b   ut_closed
+    beq.b   ut_out
     jsr     cl_refresh                  | a landing: the slot labels and the grid follow
-ut_closed:
-    movem.l (%sp),%d2-%d3
-    lea     8(%sp),%sp
 ut_out:
     tst.l   RDRAW                       | displaced; stock's beq.w follows on these flags
     jmp     UIT_RESUME
@@ -4961,6 +5085,9 @@ cl_win:     .long 0
 cl_gmask:   .long 0                     | the painters' group test (cl_gupd): 0 = none, else 0x10000 | members
 cl_grp:     .short 0                    | the group's members: bit t, MIDI 8..15 (scope §1.9)
 cl_cuh:     .byte 0                     | [CUE] held (our own press / release record)
+cl_gn:      .byte 0                     | cl_gord's entries
+cl_gpre:    .byte 0                     | the track (0..15) you were on when the group began
+cl_gord:    .space 16                   | the group's members in add order, newest last (cl_k_cuet)
 cl_open:    .byte 0
 cl_sbank:   .byte 0                     | the select box's bank (cl_cur its slot, 16 = ORIG)
 cl_bank:    .byte 0

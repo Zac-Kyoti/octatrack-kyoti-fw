@@ -206,6 +206,21 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL7 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL6 (its list below still applies) + the `[CUE]` group's view follows the group, and two fixes (5, 6):
+  1. In Clyps on T1, hold `[CUE]`, press T3 then T5: the view jumps to T3, then T5 (the grid shows that track's slots).
+  2. Still holding `[CUE]`, press T5 again (out): the view goes back to T3. Press T3 (out): no audio member is left,
+     the view goes back to T1 (where you were when the group began).
+  3. Add a MIDI track (`[CUE]`+`[MIDI]`+TRACK): the view is on it, on the MIDI side. Back on the audio side, removing
+     an audio member never jumps the view to the MIDI track: it goes to the newest audio member, else your
+     pre-group track if that was an audio track, else it stays put.
+  4. `[NO]` (dismiss the group) and closing Clyps leave the view where it is.
+  5. DIRECT JUMP on, playing: in Clyps hold `[PTN]`+`[BANK]` and press `[PAGE]` (ORIG PTN+PART): the header flashes
+     at the same quick cadence as with DIRECT JUMP off (3 quick flashes in half a second).
+  6. Load (or SAVE) a project so everything is saved. In Clyps, hold `[PTN]`+`[BANK]` and press your pattern's trig
+     (`PATTERN A01` / `RELOADED FROM PROJ`): no slot gets the edited "x", on any track's view (check a few tracks).
+     Same for `[PTN]`+TRACK and `[BANK]`+TRACK card reloads.
+
 - **KYOTI CL6 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL5 (its list below still applies; CL5 was never flashed) + one fix:
   1. Save the project with its Parts saved. Edit a Part that the playing pattern does NOT use (its mark shows).

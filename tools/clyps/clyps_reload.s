@@ -212,6 +212,25 @@ rj_parsed:
     jsr     cl_slab
     addq.l  #8,%sp
     movea.l %a0,%a4                     | a4 = the live slab of P
+|   the bytes the bank file never holds -- each audio record's +0x899 and the slab tail +0x8e5c.. --
+|   the parser leaves as the scratch had them (255 / 127 measured, gate X). Stock's own reload parses
+|   into the live slab, so they keep their live values: ours too. Else a reloaded saved pattern differs
+|   from its original there and Clyps marks it edited (the user, 2026-11-04).
+    movea.l #RQ_SLAB,%a0
+    move.l  #0x899,%d0
+rj_ns:
+    move.b  (%a4,%d0.l),%d1
+    move.b  %d1,(%a0,%d0.l)
+    addi.l  #TRAC_A,%d0
+    cmpi.l  #8*TRAC_A,%d0
+    bcs.b   rj_ns
+    move.l  #0x8e5c,%d0
+rj_nt:
+    move.b  (%a4,%d0.l),%d1
+    move.b  %d1,(%a0,%d0.l)
+    addq.l  #1,%d0
+    cmpi.l  #PATSTRIDE,%d0
+    bcs.b   rj_nt
     cmpi.l  #RQ_PTN,%d7
     beq.w   rj_ptn
 |   ---- a track: its record (and, for a NORMAL pattern, the pattern's own length / scale) ----
