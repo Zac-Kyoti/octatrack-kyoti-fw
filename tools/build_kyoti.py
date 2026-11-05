@@ -247,7 +247,8 @@ WIP_FEATURES = {"CLYPS": ("build_clyps.py", "mainos_clyps.bin", "prep",
 # The other's bytes there must be exactly `jsr <its entry>`, and the owner must have been built
 # with that entry (asserted before the composition; never a silent overwrite).
 SUPERSEDE = [("CLYPS", "DIRECT_JUMP_KYOTI", 0x400a1f72, 6, "dj_land", "DJ_LAND")]
-DJ_SIZING = {"dj_land": 0x400d6eda, "dj_toggle": 0x400d6e54, "dj_state": 0x400d7600, "dj_mode": 0x400d7606}
+DJ_SIZING = {"dj_land": 0x400d6eda, "dj_toggle": 0x400d6e54, "dj_state": 0x400d7600, "dj_mode": 0x400d7606,
+             "dj_selfvec": 0x400d7608}
 # REC_TRIG_MUTE's code regions: three dead stock routines (build_rec_trig_mute.py REGIONS),
 # and the only references allowed into them -- the base keymaps' [REC] records
 RTM_REGIONS = [(0x40032bd4, 0x40032d08), (0x4005a0e0, 0x4005a14c), (0x4009e7dc, 0x4009e884)]
@@ -265,6 +266,8 @@ def flags_for(feat):
     f = dict(FLAGS.get(feat, {}))
     if feat == "MUTE_MODES" and "SIDECHAIN_COMPRESSOR" in FEATURES:
         f["mutemode_sc_key"] = True
+    if feat == "DIRECT_JUMP_KYOTI" and "CLYPS" in FEATURES:
+        f["dj_selfhook"] = True                  # Clyps' ORIG PTN+PART as a jump (dj_selfvec)
     if feat == "CLYPS":
         f["clyps_kyoti"] = True
         if "DIRECT_JUMP_KYOTI" in FEATURES:      # pass 1 sizes with these; pass 2 gives DJ's real ones
@@ -597,7 +600,7 @@ def main():
         if feat == "CLYPS" and "DIRECT_JUMP_KYOTI" in FEATURES:     # built after DJ: its real entries
             dj = syms["patch_directjump_v7"]
             p.update(dj_land=dj["dj_land"], dj_toggle=dj["dj_toggle"], dj_state=dj["dj_state"],
-                     dj_mode=dj["DJ_MODE"])
+                     dj_mode=dj["DJ_MODE"], dj_selfvec=dj["dj_selfvec"])
         for k in keys:
             if zone_of.get(k) == "DRAM":
                 p[k + "_dram"] = True
