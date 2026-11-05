@@ -1073,6 +1073,46 @@ the pattern snapshots) take ~10 MB of the sample pool, as in the standalone Clyp
   reached via a code hook -- its masks are per-frame state), E/F use the own slot, P/S check the preload and SAVE
   PROJECT's retake.
 
+### 1.12 Lean loads (the user, 2026-11-04: "avoid read/write of data irrelevant for the target slot"; KYOTI CL8, not flashed)
+
+Measured with gate W (stock's memcpy hooked, destination in the battery NVRAM mirror; OT DEMO), CL7 -> CL8, the
+mirror equal to RAM after every load in both:
+
+| load | NVRAM written, CL7 | CL8 |
+|---|---|---|
+| trig (TRK SEQ) / [PAGE] | 36,568 | 2,466 (the record + the 136 B trailer) |
+| [FUNC]+trig (TRK FULL) | 42,890 | 8,788 at measurement; less now (slices, below) |
+| a group of 2 | 73,136 | 4,796 |
+| ORIG PTN+PART (16 tracks + the Part) | 686,240 | 42,890 |
+| card TRK SEQ / TRK FULL / pattern | 672,269 / 678,591 / 678,591 | 4,932 / 11,254 / 45,356 |
+
+- **The mirror** (0x1001614e slabs, 0x100a4ece Parts; what the unit comes back with after a power cycle) gets what
+  changed: the loaded tracks' records + the trailer (`cl_postmask`), the whole slab only after a NORMAL -> PER TRACK
+  conversion (`cl_wslab`, set by `cl_convert`); a FULL load's Part mirror only those tracks' slices (`cl_pmark`
+  d4 = slice mask, through `cl_slice`), the whole Part when the rest changed (`cl_wpart`: `cl_slrest`, a card
+  pattern reload of the sounding Part; `rj_pshare` passes 0).
+- **Card reloads** no longer call stock's 0x4000faf0 (the whole bank, ~620 KB, into the mirror -- and whether or not
+  the playing bank is the mirror's). A pattern reload copies its slab; a track reload its record + trailer of P.
+- **Card reads**: straight to pattern P's PTRN chunk and its Part's PART chunk (`rq_seek`: the card filesystem's own seek, 0x46c8243e, to the 512 B block, the read buffer
+  emptied, the remainder read and dropped -- stock's buffered seek 0x4001660c keeps a partly read buffer and
+  handed the parser no PTRN tag, -51, measured), instead of
+  parsing patterns 1..P (TRK SEQ) or all 16 + Parts 0..p (FULL / pattern). Offsets per format version, checked on
+  816 real bank files (versions 0x14-0x17): PTRN n at 0x16 + st*n, st = 0x8eec from 0x17 on, 0x8ee8 before; PART p at
+  0x16 + 16*st + 0x18bb*p. (OctaLib's 0x8EEC / 0x8EED6 table holds for version 0x17 only.) Both parsers check
+  their chunk tag; any failure reopens the file and runs the old chunk-by-chunk path (`rj_seq`). `rq_ndir` counts
+  direct reloads (gates X, L check the direct path ran).
+- **Batches**: a group load, ORIG / [FUNC]+[PAGE] per member, ORIG PTN+PART and a temp chord on several tracks
+  while stopped serve their UI side once (`cl_bbeg` / `cl_bend` -> one `cl_postmask`); landings already did (CL7).
+- **The originals**: one snapshot bank = its 16 slabs + 4 working Parts (0x95048 B, was 0x9b340: the SAVE PART
+  copies / flags / names are only read live) -> 66 pages (405 KB) back to the sample pool (1,703 -> 1,637).
+- **Not done, on purpose**: DIRECT JUMP's hand-off (`dj_handoff`) for ORIG PTN+PART -- it is stock's pattern-switch
+  apply: START SILENT honoured, every conditional counter reset (COND_RESET -1), with DJ's landing every track re-landed
+  at a new master step. Clyps restores in place, phase-continuous per track; the gain (one engine apply instead of 16
+  TRK_APPLY) is not worth that change unless the user wants ORIG PTN+PART to act as a jump to the pattern (ask). DJ's
+  core (the whole-sequencer re-land) cannot serve a one-track load. A second mirror copy of a card track reload's
+  record at the UI tail (~2.4 KB) is kept: deduplicating it across the worker / UI tasks risks skipping a RAM
+  load's copy.
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)

@@ -206,6 +206,21 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL8 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL7 (its list below still applies; CL7 was never flashed) with leaner loads: no new behaviour, the same results
+  with far less written to the battery memory and read from the card. Check that nothing changed:
+  1. Loads in Clyps (a trig, `[FUNC]`+trig, `[PAGE]`, a `[CUE]` group, `[PTN]`+`[BANK]`+`[PAGE]`) play and show as
+     before; switch tracks and come back: the grid and the slot labels as expected.
+  2. Card reloads (`[PTN]`+TRACK, `[BANK]`+TRACK, `[PTN]`+`[BANK]`+trig, also a pattern late in the bank, e.g. 15 or
+     16): the toast comes up sooner than on CL3 (they now read only the one pattern and its Part from the card), and
+     the result is what you saved.
+  3. Power-cycle right after some Clyps loads (no save): on boot the project comes back with those loads in place,
+     as on CL3 (the battery memory still gets every change).
+  4. The MEMORY page: 66 pages (about 400 KB) more free sample memory than CL7.
+  5. Header: hold `[PTN]`+`[BANK]`: `MULTI LD: ORIG PTN+PRT` (it acts on every track). A `[CUE]` group: `MULTI LD: TRK
+     SEQS` / `MULTI LD: TRKS FULL` ([FUNC]); on your own slot `MULTI LD: ORIG SEQS` / `MULTI LD: ORIGS FULL`. One track
+     unchanged: `T6 LOAD: TRK SEQ` etc.
+
 - **KYOTI CL7 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL6 (its list below still applies) + the `[CUE]` group's view follows the group, and two fixes (5, 6):
   1. In Clyps on T1, hold `[CUE]`, press T3 then T5: the view jumps to T3, then T5 (the grid shows that track's slots).

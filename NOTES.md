@@ -37884,3 +37884,18 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   Emulator cannot time NVRAM / LCD: the cause is a hypothesis until the unit shows the flash right (gate O shows one
   landing and a correct flash either way; its instruction counter is not isolating the pass -- do not quote it).
   Gates on CL7: full 115, T 21, F+Q 27, L+J 18, M+U 32, X 2, O 3. syx 796e9fde….
+- **KYOTI CL8** (2026-11-04, NOT flashed; CL7 never flashed): lean loads (the user: no read / write of data the target
+  slot does not need; scope §1.12). NVRAM mirror writes per load (gate W, OT DEMO, CL7 -> CL8): TRK SEQ 36,568 ->
+  2,466 B; TRK FULL 42,890 -> 2,466 B + its slices; group of 2 73,136 -> 4,796; ORIG PTN+PART 686,240 -> 42,890; card
+  TRK SEQ / FULL / pattern ~672-679 KB -> 4,932 / 4,932 + slices / 45,356 (stock's whole-bank 0x4000faf0 dropped);
+  mirror == RAM after every load. Card reads seek straight to PTRN P / PART p (offsets per version, 816 real files:
+  st 0x8eec from 0x17, 0x8ee8 before; OctaLib's table fits 0x17 only). TRAP: stock's buffered seek 0x4001660c keeps a
+  partly read buffer and re-seeks the backend exactly -> the parser saw no PTRN tag (-51); `rq_seek` = backend seek
+  0x46c8243e to the block + buffer index (+12) cleared + the remainder read and dropped. Fallback: reopen, chunk by
+  chunk. Batches (`cl_bbeg`/`cl_bend`) serve a stopped group / ORIG / temp chord once. Originals = slabs + working
+  Parts (0x95048 a bank): 1,703 -> 1,637 pages. TRAP caught by gate N/P: `cl_snapbank` used the snapshot stride for
+  the live source too (banks 2-16 snapshotted from the wrong place); fixed. DIRECT JUMP's hand-off NOT used for ORIG
+  PTN+PART (pattern-switch semantics: START SILENT, COND_RESET) -- a question for the user. Header (the user):
+  a group or the [PTN]+[BANK] chord reads `MULTI LD: <label>` (ORIG PTN+PART -> `ORIG PTN+PRT`, its box to x 86).
+  Gate L now starts on the audio side (JAM2 comes up on MIDI: L failed there on CL7 too, a gate gap). Gates on
+  CL8: full 116, T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15 (OT DEMO); X+L 14 (JAM2). syx 9480e707….

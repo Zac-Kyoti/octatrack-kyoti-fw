@@ -28,9 +28,9 @@
     .equ RL_PARSEPAT, 0x4008cebc        | (fh, slab, ver): parse one PTRN chunk
     .equ RL_PARSEPRT, 0x4008be2c        | (fh, part, i, ver): parse one PART chunk (stock bank reader)
     .equ RL_FMTSTRD,  0x400b86d8        | "%s/bank%02d.strd"
+    .equ RL_LLSEEK,   0x46c8243e        | -> the card filesystem's seek (id, byte offset)
     .equ RL_SCRATCH,  0x460aff60        | FBUF + 0x7000: one slab of scratch (the open uses 0x7000)
     .equ RL_CKSUM,    0x460fab5c        | the parsers' running checksum: saved / restored around us
-    .equ RL_LIVEREF,  0x4000faf0        | (bank): RAM -> the live cache (SRAM mirror), no card
     .equ RL_MASKSAV,  0x460bd910        | doneFn's displaced read
     .equ RL_DONERES,  0x40023c68        | doneFn after it
     .equ RL_DONEEPI,  0x40023c76        | doneFn's epilogue: skips stock's whole-bank reload
@@ -151,6 +151,84 @@ rj_opened:
     moveq   #0,%d0
     move.b  rq_hdr+0x15,%d0
     or.l    %d0,%d6                     | d6 = the version word
+    tst.b   rq_seq
+    bne.w   rj_seq0                     | the fallback's second open: chunk by chunk
+|   straight to pattern P, and then to its Part (the user, 2026-11-04: not every pattern before it).
+|   The chunks sit at fixed offsets per version, checked on 816 real bank files (.strd + .work,
+|   versions 0x14..0x17): PTRN n at 0x16 + st * n, st = 0x8eec from version 0x17 on, 0x8ee8 before;
+|   PART p (0..3 the working Parts) at 0x16 + 16 * st + 0x18bb * p. Both parsers check their chunk's
+|   tag (PTRN 0x400d1694 / PART 0x400d1690), so a wrong offset fails -> rj_seq.
+    cmpi.l  #0x14,%d6
+    bcs.w   rj_seq                      | an older format: chunk by chunk
+    move.l  #0x8ee8,%d4
+    cmpi.l  #0x17,%d6
+    bcs.b   rj_st
+    move.l  #0x8eec,%d4                 | d4 = the pattern chunk stride
+rj_st:
+    move.l  %d4,%d0
+    muls.l  %d5,%d0
+    addi.l  #0x16,%d0
+    move.l  %d0,-(%sp)
+    jsr     rq_seek
+    addq.l  #4,%sp
+    tst.l   %d0
+    bmi.w   rj_seq
+    move.l  %d6,-(%sp)
+    pea     RL_SCRATCH
+    pea     rq_fh
+    jsr     RL_PARSEPAT
+    lea     12(%sp),%sp
+    tst.l   %d0
+    bmi.w   rj_seq
+    pea     PATSTRIDE
+    pea     RL_SCRATCH
+    pea     RQ_SLAB
+    jsr     MEMCPY
+    lea     12(%sp),%sp
+    cmpi.l  #RQ_TRKSEQ,%d7
+    beq.b   rj_dok                      | the sequence only: no Part needed
+    moveq   #0,%d3
+    movea.l #RQ_SLAB,%a0
+    adda.l  #TRAILER,%a0
+    move.b  T_PART(%a0),%d3
+    andi.l  #3,%d3                      | d3 = the Part the saved pattern is linked to
+    move.l  #0x18bb,%d0
+    muls.l  %d3,%d0
+    lsl.l   #4,%d4
+    add.l   %d4,%d0
+    addi.l  #0x16,%d0
+    move.l  %d0,-(%sp)
+    jsr     rq_seek
+    addq.l  #4,%sp
+    tst.l   %d0
+    bmi.w   rj_seq
+    move.l  %d6,-(%sp)
+    move.l  %d3,-(%sp)
+    pea     RQ_PART
+    pea     rq_fh
+    jsr     RL_PARSEPRT
+    lea     16(%sp),%sp
+    tst.l   %d0
+    bmi.w   rj_seq
+rj_dok:
+    addq.l  #1,rq_ndir                  | gate X / L: the direct path ran
+    bra.w   rj_parsed
+|   anything unexpected on the direct path: open the file again, chunk by chunk from the top
+|   (RELOAD_FROM_PROJECT's proven path)
+rj_seq:
+    pea     rq_fh
+    jsr     FCLOSE
+    addq.l  #4,%sp
+    moveq   #1,%d0
+    move.b  %d0,rq_seq
+    jsr     cl_rlopen
+    tst.l   %d0
+    bpl.w   rj_opened
+    clr.b   rq_seq
+    moveq   #-12,%d0
+    bra.w   rj_exit
+rj_seq0:
+    clr.b   rq_seq
 |   the 16 patterns: P is kept in our slab buffer; the track sequence reload stops after it
     moveq   #0,%d4
 rj_pl:
@@ -358,6 +436,7 @@ rj_pshare:
     jsr     cl_partin                   | a0 = P's Part, d0 = its index (= d2)
     movea.l %a0,%a2
     move.l  %d2,%d3
+    moveq   #0,%d4                      | the whole Part (cl_pmark: no slice mask)
     jsr     cl_pmark
     bra.w   rj_ok
 rj_papply:
@@ -367,6 +446,8 @@ rj_papply:
     move.l  %d0,-(%sp)
     jsr     RL_PARTAPP                  | FUN_40009094(bank, part), as RELOAD's PART + PTN SEQ
     addq.l  #8,%sp
+    moveq   #1,%d0
+    move.b  %d0,cl_wpart                | the UI side owes the whole Part's mirror (cl_postpart)
     jsr     cl_trk                      | the pages: owed to the UI side (cl_postpart)
     lea     cl_postf,%a0
     moveq   #1,%d1
@@ -393,11 +474,53 @@ rj_pb:
     move.l  %d0,RDRAW
     moveq   #1,%d0
     move.b  %d0,rq_own                  | success: doneFn skips its whole-bank reload once
-    moveq   #0,%d0
+|   the live cache (SRAM mirror, the UI bank only): only what changed (the user, 2026-11-04 -- stock's
+|   0x4000faf0 rewrote the whole bank, ~620 KB of battery NVRAM, for one track). A pattern: its slab
+|   here (it need not be the playing one); a track: its record + the trailer at the UI tail
+|   (cl_postmask, the cl_post bit above); a Part: cl_pmark (rj_pshare here, or cl_postpart).
+|   A track reload copies its record + trailer of P here too: the UI tail's copy is of the pattern
+|   playing THEN, which a pattern change in between makes another one.
     move.b  PLAY_BANK,%d0
+    cmp.b   UI_BANK,%d0
+    bne.b   rj_lv
+    move.l  %d5,%d0
+    move.l  #PATSTRIDE,%d1
+    muls.l  %d1,%d0
+    addi.l  #SRAM_PAT,%d0
+    movea.l %d0,%a5                     | a5 = P's mirror
+    cmpi.l  #RQ_PTN,%d7
+    bne.b   rj_lt
+    pea     PATSTRIDE
+    move.l  %a4,-(%sp)
+    move.l  %a5,-(%sp)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
+    bra.b   rj_lv
+rj_lt:
+    moveq   #0,%d0
+    move.b  rq_t,%d0
     move.l  %d0,-(%sp)
-    jsr     RL_LIVEREF                  | the live cache of the bank we wrote
+    jsr     cl_toff                     | d0 = offset, d1 = length
     addq.l  #4,%sp
+    move.l  %d1,-(%sp)
+    move.l  %a4,%d1
+    add.l   %d0,%d1
+    move.l  %d1,-(%sp)
+    move.l  %a5,%d1
+    add.l   %d0,%d1
+    move.l  %d1,-(%sp)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
+    pea     PATSTRIDE-TRAILER
+    move.l  %a4,%d0
+    addi.l  #TRAILER,%d0
+    move.l  %d0,-(%sp)
+    move.l  %a5,%d0
+    addi.l  #TRAILER,%d0
+    move.l  %d0,-(%sp)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
+rj_lv:
     moveq   #1,%d0
 rj_exit:
     move.w  rq_cksum,%d1
@@ -411,6 +534,39 @@ rj_fail:
     addq.l  #4,%sp
     moveq   #-1,%d0
     bra.b   rj_exit
+
+| rq_seek(off) -> d0 < 0: error. rq_fh's read position = off, as if read up to there: the backend seek
+| (0x46c8243e: the card filesystem's, installed at 0x400145de / 0x400146f0 / 0x40014806) to off's 512 B
+| block, the buffer marked empty (+12, the read index: 0 = refill), then off mod 512 read and dropped.
+| Not stock's buffered seek 0x4001660c: it keeps a partly read buffer (our 22 B header) and then
+| re-seeks the backend to the exact offset -- measured: the parse after it saw no PTRN tag (-51).
+rq_seek:
+    move.l  4(%sp),%d0
+    andi.l  #-512,%d0
+    move.l  %d0,-(%sp)
+    move.l  rq_fh,-(%sp)                | the backend's file id (+0)
+    movea.l RL_LLSEEK,%a0
+    jsr     (%a0)
+    addq.l  #8,%sp
+    tst.l   %d0
+    bmi.b   rs_out
+    clr.l   rq_fh+12                    | the buffer empty: the next read refills from that block
+    move.l  4(%sp),%d0
+    andi.l  #511,%d0
+    beq.b   rs_ok
+    move.l  %d0,-(%sp)
+    clr.l   -(%sp)                      | dst 0: read and drop (0x400165ce)
+    pea     rq_fh
+    jsr     FREAD
+    lea     12(%sp),%sp
+    tst.l   %d0
+    bgt.b   rs_ok
+    moveq   #-1,%d0
+    rts
+rs_ok:
+    moveq   #0,%d0
+rs_out:
+    rts
 
 | cl_rlopen -> d0 = FOPEN's result: "<project>/bankNN.strd" of the playing bank, read-only
 cl_rlopen:
@@ -614,6 +770,8 @@ rq_cksum:   .long 0
 rq_voff:    .long 0
 rq_l2p:     .long 0
 rq_lines:   .long 0, 0
+rq_ndir:    .long 0                     | direct (seek) reloads done: gates X / L read it
+rq_seq:     .byte 0                     | the fallback's second open is running
 rq_kind:    .byte 0                     | 0 idle, 1 TRK SEQ, 2 TRK FULL, 3 PTN
 rq_pat:     .byte 0
 rq_t:       .byte 0

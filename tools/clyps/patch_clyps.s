@@ -189,7 +189,9 @@
     .equ SRAM_RESTORE,0x4000fbb4        | (bank): the SRAM mirror -> RAM (power-on resume: the
                                         | current bank's unsaved edits; one caller 0x40025808)
     .equ BANK_HASDATA,0x4000fd78        | (bank) -> d0 != 0: stock's bank LEDs light it green
-    .equ BANKSZ,      0x9b340           | one bank: 16 slabs + its Parts; 16 banks end at the arena
+    .equ BANKSZ,      0x95048           | one bank's ORIGINALS: its 16 slabs + its 4 working Parts (PART_OFF +
+                                        | 4 * PARTSZ; the live bank's SAVE PART copies, flags and names after
+                                        | them are never read from a snapshot: 405 KB less, the user 2026-11-04)
     .equ RESET_BANKS, 0x4000fd34        | (flag): every bank to defaults (bank 0 init, copied over 1..15)
     .equ CL_MAGIC,    0x434c5950        | 'CLYP': the DRAM part is loaded (cl_magic)
 | sources other than a slot: the bank byte of a cue / provenance code (bank << 8 | pattern)
@@ -1404,6 +1406,7 @@ cl_each:
     lea     -12(%sp),%sp
     movem.l %d2-%d4,(%sp)
     move.l  %d0,%d3                     | d3 = code
+    jsr     cl_bbeg
     jsr     cl_targets
     move.l  %d0,%d4                     | d4 = the tracks
     moveq   #0,%d2
@@ -1419,6 +1422,7 @@ ea_n:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
     bne.b   ea_l
+    jsr     cl_bend
     movem.l (%sp),%d2-%d4
     lea     12(%sp),%sp
     rts
@@ -1463,6 +1467,13 @@ cl_cueload:
     move.l  %d3,-(%sp)
     jsr     cl_apply                    | at once
     lea     16(%sp),%sp
+    tst.b   cl_bat
+    beq.b   lo_post
+    moveq   #1,%d0                      | a batch: its UI side once, at cl_bend
+    lsl.l   %d3,%d0
+    or.l    %d0,cl_batm
+    bra.b   lo_out
+lo_post:
     move.l  %d3,-(%sp)
     jsr     cl_post_ui
     addq.l  #4,%sp
@@ -1592,6 +1603,7 @@ cl_restore:
     lea     -12(%sp),%sp
     movem.l %d2-%d4,(%sp)
     move.l  %d0,%d3                     | d3 = 0 / 0x10000
+    jsr     cl_bbeg
     jsr     cl_targets
     move.l  %d0,%d4
     moveq   #0,%d2
@@ -1616,6 +1628,7 @@ rs_n:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
     bne.b   rs_l
+    jsr     cl_bend
     movem.l (%sp),%d2-%d4
     lea     12(%sp),%sp
     rts
@@ -1632,6 +1645,7 @@ cl_restorepat:
     moveq   #1,%d0
     move.b  %d0,cl_pwhole
     move.l  %d2,-(%sp)
+    jsr     cl_bbeg
     moveq   #0,%d2
 rp_l:
     clr.l   -(%sp)
@@ -1642,6 +1656,7 @@ rp_l:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
     bne.b   rp_l
+    jsr     cl_bend
     move.l  (%sp)+,%d2
 rp_out:
     rts
@@ -1772,6 +1787,7 @@ ty_ours:
     jsr     cl_popc                     | d1 = how many
     tst.l   %d1
     beq.w   ty_done
+    jsr     cl_bbeg
     moveq   #0,%d2
     moveq   #0,%d5                      | d5 = how many were done
 ty_l:
@@ -1788,6 +1804,7 @@ ty_n:
     addq.l  #1,%d2
     cmpi.l  #8,%d2
     bne.b   ty_l
+    jsr     cl_bend
     pea     TOAST_DUR                   | one toast, whatever the tracks (the user, 2026-11-02)
     pea     cl_s_ttsv                   | "TEMP TRK SAVED" (81 px)
     tst.l   %d4
@@ -2001,14 +2018,17 @@ ps_l:
 
 | cl_snapbank(bank): the bank as it is now -> its snapshot (the originals); mark it valid
 cl_snapbank:
-    move.l  4(%sp),%d0
+    pea     BANKSZ                      | its slabs + working Parts (BANKSZ < the live BANKSTRIDE)
+    move.l  8(%sp),%d0
+    move.l  #BANKSTRIDE,%d1
+    muls.l  %d1,%d0
+    movea.l #BLOB,%a0
+    pea     (%a0,%d0.l)                 | src: the live bank
+    move.l  12(%sp),%d0
     move.l  #BANKSZ,%d1
     muls.l  %d1,%d0
-    pea     BANKSZ
-    movea.l #BLOB,%a0
-    pea     (%a0,%d0.l)
     movea.l #SNAPB,%a0
-    pea     (%a0,%d0.l)
+    pea     (%a0,%d0.l)                 | dst: its snapshot
     jsr     MEMCPY
     lea     12(%sp),%sp
     tst.b   cl_namesok                  | the bank's names as loaded, too (ORIG restores them)
@@ -2224,6 +2244,10 @@ nl_out:
 cl_partin:
     move.l  %d2,-(%sp)
     move.l  #BANKSTRIDE,%d2
+    cmpa.l  #SNAPB,%a1
+    bne.b   pi_live
+    move.l  #BANKSZ,%d2                 | the snapshot's banks are shorter (BANKSZ)
+pi_live:
     muls.l  %d0,%d2
     adda.l  %d2,%a1                     | a1 = the bank
     move.l  #PATSTRIDE,%d2
@@ -2363,6 +2387,8 @@ fo_copy:
     tst.b   cl_pwhole
     beq.b   fo_norest
     clr.b   cl_pwhole
+    moveq   #1,%d0
+    move.b  %d0,cl_wpart                | the UI side owes the whole Part's mirror
     bsr.w   cl_slrest
 fo_norest:
     lea     12(%sp),%sp
@@ -2727,17 +2753,40 @@ cl_post_ui:
     addq.l  #4,%sp
     rts
 
+| cl_bbeg / cl_bend: a batch of loads (a group, ORIG, ORIG PTN+PART, a temp chord on several tracks):
+| the immediate (stopped) loads inside it note their tracks (cl_batm) and cl_bend serves them in one
+| cl_postmask -- not one 36 KB mirror pass a track. Not nested. cl_bend keeps d2-d7/a2-a6.
+cl_bbeg:
+    moveq   #1,%d0
+    move.b  %d0,cl_bat
+    clr.l   cl_batm
+    rts
+cl_bend:
+    clr.b   cl_bat
+    move.l  cl_batm,%d0
+    beq.b   be_out
+    clr.l   cl_batm
+    move.l  %d0,-(%sp)
+    jsr     cl_postmask
+    addq.l  #4,%sp
+be_out:
+    rts
+
 | cl_postmask(mask: bit t, MIDI 8..15): what the loads of those tracks owe the UI side, each shared
 | piece ONCE (the user, 2026-11-04: an ORIG PTN+PART landing did all of it 16 times -- with DIRECT
-| JUMP on it lands inside the 0.5 s flash and the flash crawled): the SRAM mirror (it holds the UI
-| bank only; battery NVRAM on the external bus) gets the whole slab (covers a NORMAL->PER TRACK
-| conversion); stock's dirty flags + refresh (the undo-restore's own 0x40029b9c) once per audio
-| index (it does t and t + 8); the Part's share once (cl_postpart).
+| JUMP on it lands inside the 0.5 s flash and the flash crawled), and no more than changed: the SRAM
+| mirror (the UI bank only; battery NVRAM on the external bus) gets those tracks' records and the
+| pattern trailer (2.2-2.3 KB + 136 B a track, not the 36 KB slab), the whole slab only after a NORMAL
+| -> PER TRACK conversion (cl_wslab: it rewrites every record's length / scale); stock's dirty flags +
+| refresh (the undo-restore's own 0x40029b9c) once per audio index (it does t and t + 8); the Part's
+| share once (cl_postpart).
 cl_postmask:
-    move.l  %d2,-(%sp)
+    lea     -16(%sp),%sp
+    movem.l %d2-%d4/%a2,(%sp)
+    move.l  20(%sp),%d4                 | d4 = the mask
     move.b  PLAY_BANK,%d0
     cmp.b   UI_BANK,%d0
-    bne.b   pu_dirty
+    bne.w   pu_dirty
     moveq   #0,%d0
     move.b  ACT_PAT,%d0
     move.l  %d0,-(%sp)
@@ -2745,20 +2794,55 @@ cl_postmask:
     move.l  %d0,-(%sp)
     jsr     cl_slab
     addq.l  #8,%sp
+    movea.l %a0,%a2                     | a2 = the live slab
     moveq   #0,%d0
     move.b  ACT_PAT,%d0
     move.l  #PATSTRIDE,%d1
     muls.l  %d1,%d0
     addi.l  #SRAM_PAT,%d0
+    move.l  %d0,%d3                     | d3 = its mirror
+    tst.b   cl_wslab
+    beq.b   pu_recs
     pea     PATSTRIDE
-    move.l  %a0,-(%sp)
+    move.l  %a2,-(%sp)
+    move.l  %d3,-(%sp)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
+    bra.b   pu_dirty
+pu_recs:
+    moveq   #0,%d2
+pu_rl:
+    btst    %d2,%d4
+    beq.b   pu_rn
+    move.l  %d2,-(%sp)
+    jsr     cl_toff                     | d0 = the record's offset, d1 = its length
+    addq.l  #4,%sp
+    move.l  %d1,-(%sp)
+    move.l  %a2,%d1
+    add.l   %d0,%d1
+    move.l  %d1,-(%sp)
+    add.l   %d3,%d0
+    move.l  %d0,-(%sp)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
+pu_rn:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   pu_rl
+    pea     PATSTRIDE-TRAILER           | the trailer: length / scale / mode / Part link
+    move.l  %a2,%d0
+    addi.l  #TRAILER,%d0
+    move.l  %d0,-(%sp)
+    move.l  %d3,%d0
+    addi.l  #TRAILER,%d0
     move.l  %d0,-(%sp)
     jsr     MEMCPY
     lea     12(%sp),%sp
 pu_dirty:
+    clr.b   cl_wslab
     moveq   #0,%d2
 pu_l:
-    move.l  8(%sp),%d0
+    move.l  %d4,%d0
     move.l  %d0,%d1
     lsr.l   #8,%d1
     or.l    %d1,%d0
@@ -2771,17 +2855,18 @@ pu_n:
     addq.l  #1,%d2
     cmpi.l  #8,%d2
     bne.b   pu_l
-    move.l  8(%sp),-(%sp)
+    move.l  %d4,-(%sp)
     jsr     cl_postpart
     addq.l  #4,%sp
-    move.l  (%sp)+,%d2
+    movem.l (%sp),%d2-%d4/%a2
+    lea     16(%sp),%sp
     rts
 
 | cl_pmark (d3 = Part index, a2 = that Part, of the playing bank): stock's Part-edited mark follows
 | "differs from its SAVE PART copy" (bank +0x9504a + part * PARTSZ, valid when +0x9b312 + part != 0, the
-| test stock's PART RELOAD makes); the Part's SRAM copy when the playing bank is the UI's; the bank
-| marked changed. -> d4 = 1: the playing bank is the UI's. Data only (UI task or the card worker).
-| Keeps d2, d3, a2.
+| test stock's PART RELOAD makes); the Part's SRAM copy when the playing bank is the UI's -- d4 in = the
+| tracks whose slice changed (only those slices are copied), 0 = the whole Part; the bank marked changed.
+| -> d4 = 1: the playing bank is the UI's. Data only (UI task or the card worker). Keeps d2, d3, a2.
 cl_pmark:
     move.l  %d5,-(%sp)
 |   d5 = 1: the Part now equals its SAVE PART copy (the user, 2026-10-30: then it is not edited,
@@ -2809,6 +2894,7 @@ cl_pmark:
     bne.b   pm_neq
     moveq   #1,%d5
 pm_neq:
+    move.l  %d4,%d1                     | d1 = the slices that changed (0: the whole Part)
     moveq   #0,%d4                      | d4 = 1: the UI bank
     move.b  PLAY_BANK,%d0
     cmp.b   UI_BANK,%d0
@@ -2816,12 +2902,36 @@ pm_neq:
     moveq   #1,%d4
     move.l  #PARTSZ,%d0
     muls.l  %d3,%d0
-    addi.l  #SRAM_PART,%d0
+    addi.l  #SRAM_PART,%d0              | d0 = its mirror
+    tst.l   %d1
+    bne.b   pm_slm
     pea     PARTSZ
     move.l  %a2,-(%sp)
     move.l  %d0,-(%sp)
     jsr     MEMCPY
     lea     12(%sp),%sp
+    bra.b   pm_mk
+pm_slm:                                 | only those tracks' slices (cl_slice: 0.2-1 KB each, not 6.3 KB)
+    lea     -12(%sp),%sp
+    movem.l %d6-%d7/%a3,(%sp)
+    move.l  %d1,%d6
+    movea.l %d0,%a3
+    moveq   #0,%d7
+pm_sl:
+    btst    %d7,%d6
+    beq.b   pm_sn
+    move.l  %a2,-(%sp)                  | src: the live Part
+    move.l  %a3,-(%sp)                  | dst: its mirror
+    move.l  %d7,-(%sp)
+    jsr     cl_slice
+    lea     12(%sp),%sp
+pm_sn:
+    addq.l  #1,%d7
+    cmpi.l  #16,%d7
+    bne.b   pm_sl
+    movem.l (%sp),%d6-%d7/%a3
+    lea     12(%sp),%sp
+pm_mk:
     bset    %d3,PEDIT_S
     tst.l   %d5
     beq.b   pm_flags
@@ -2855,7 +2965,7 @@ cl_postpart:
     lea     -20(%sp),%sp
     movem.l %d2-%d5/%a2,(%sp)
     move.l  24(%sp),%d5                 | d5 = the mask
-    moveq   #0,%d4                      | d4 = 1: a track of it owes its Part's share (cl_postf)
+    moveq   #0,%d4                      | d4 = the tracks of it owing their Part's share (cl_postf)
     moveq   #0,%d2                      | d2 = 1: ... and an audio one changed machine (cl_postm)
     moveq   #0,%d3
     lea     cl_postf,%a0
@@ -2866,7 +2976,7 @@ pq_l:
     tst.b   (%a0,%d3.l)
     beq.b   pq_n
     clr.b   (%a0,%d3.l)
-    moveq   #1,%d4
+    bset    %d3,%d4                     | d4 = the tracks whose slice changed
     cmpi.l  #8,%d3
     bcc.b   pq_n
     tst.b   (%a1,%d3.l)
@@ -2886,7 +2996,12 @@ pq_n:
     jsr     cl_partin
     movea.l %a0,%a2                     | a2 = the Part
     move.l  %d0,%d3                     | d3 = its index
-    jsr     cl_pmark                    | its screen copy and stock's edited mark; d4 = 1: the UI bank
+    tst.b   cl_wpart
+    beq.b   pq_sl
+    clr.b   cl_wpart
+    moveq   #0,%d4                      | the rest of the Part changed too: the whole Part
+pq_sl:
+    jsr     cl_pmark                    | its mirror (d4: those slices) and stock's edited mark; d4 = 1: the UI bank
     tst.l   %d4
     beq.b   pp_out2                     | another bank than the UI's: nothing on screen to redraw
     tst.l   %d2
@@ -3334,6 +3449,8 @@ ut_out:
 cl_convert:
     lea     -24(%sp),%sp
     movem.l %d2-%d5/%a2-%a3,(%sp)
+    moveq   #1,%d0
+    move.b  %d0,cl_wslab                | every record's length / scale: the mirror owes the whole slab
     movea.l %a2,%a3
     adda.l  #TRAILER,%a3                | a3 -> trailer
     move.b  (%a2,%d3.l),%d4             | this track's own len / scale, kept
@@ -3653,8 +3770,9 @@ cl_draw:
     pea     WIN_W-1
     bsr.w   cl_xor
     lea     16(%sp),%sp
-|   header (the user, 2026-11-02): "T6 LOAD: <label> BNK A" -- the track ("MULTI" with a group) at x 3, then
-|   "LOAD: " and the label in a dark box, "BNK A" right-aligned to x 107 (boxed while [BANK] alone is held).
+|   header (the user, 2026-11-02 / 11-04): "T6 LOAD: <label> BNK A" -- the track at x 3, then "LOAD: " and the
+|   label in a dark box, "BNK A" right-aligned to x 107 (boxed while [BANK] alone is held); a group or the
+|   [PTN]+[BANK] chord: "MULTI LD: <label> BNK A".
 |   Labels: TRK SEQ / TRK FULL ([FUNC]), the MIDI side the same; the box on your own pattern's slot (it has an
 |   original): ORIG TRK SEQ / ORIG TRK FULL; a group: TRK SEQS / TRKS FULL / ORIG SEQS / ORIGS FULL; the
 |   [PTN]+[BANK] chord held: ORIG PTN+PART. Each label's [FUNC] form is the next string (cl_s_* pairs).
@@ -3694,7 +3812,26 @@ cd_rl:
     movea.l %a2,%a0
     jsr     cl_textw
     move.l  %d0,%d5                     | d5 = the label's width
-|   the track: "T6 " / "M6 " / "MULTI " at x 3
+|   a group, or the [PTN]+[BANK] chord held (ORIG PTN+PRT acts on every track): "MULTI LD:" at x 3 and the
+|   label 2 dark columns after it (the user, 2026-11-04) -- "MULTI LD: ORIG PTN+PRT"'s box ends at x 86
+    btst    #1,%d7
+    bne.b   cd_mh
+    jsr     cl_ismulti
+    tst.l   %d0
+    beq.b   cd_one
+cd_mh:
+    pea     cl_s_multi
+    pea     HDR_Y
+    pea     3
+    bsr.w   cl_text
+    lea     12(%sp),%sp
+    lea     cl_s_multi,%a0
+    jsr     cl_textw
+    move.l  %d0,%d3
+    addq.l  #7,%d3                      | d3 = the label's x: 3 + the width + 4 (as after "LOAD:")
+    bra.b   cd_lab
+cd_one:
+|   one track: "T6 " / "M6 " at x 3, then "LOAD:"
     move.l  %d6,%d0
     moveq   #'T',%d1
     cmpi.l  #8,%d0
@@ -3706,11 +3843,6 @@ cd_ta:
     move.l  %d0,-(%sp)
     move.l  %d1,-(%sp)
     pea     cl_fmt_hdrt                 | "%c%d "
-    jsr     cl_ismulti
-    tst.l   %d0
-    beq.b   cd_lfmt
-    move.l  #cl_s_multi,(%sp)           | "MULTI " (a group; the user's choice)
-cd_lfmt:
     pea     cl_buf
     jsr     SPRINTF
     lea     16(%sp),%sp
@@ -3729,6 +3861,7 @@ cd_lfmt:
     bsr.w   cl_text
     lea     12(%sp),%sp
     addi.l  #LOADP_A,%d3                | d3 = the label's x
+cd_lab:
     move.l  %a2,-(%sp)
     pea     HDR_Y
     move.l  %d3,-(%sp)
@@ -5135,6 +5268,11 @@ cl_cue:     .fill 16, 2, 0xffff         | per track: the cued (bank<<8 | pattern
 cl_cueh:    .fill 16, 2, 0xffff         | per track: the playing (bank<<8 | pattern) it aims at
 cl_arm:     .space 16                   | per track: the gate has passed; waiting for a window start
 cl_cuef:    .space 16                   | per track: the cue is FULL (its machine / FX too)
+cl_wpart:   .byte 0                     | the rest of a Part changed (cl_slrest, a card pattern): its whole mirror
+cl_wslab:   .byte 0                     | a NORMAL -> PER TRACK conversion: the mirror owes the whole slab
+cl_bat:     .byte 0                     | a batch of loads is running (cl_bbeg / cl_bend): immediate posts wait
+    .align 2
+cl_batm:    .long 0                     | ... the tracks they owe (cl_postmask at cl_bend)
 cl_postf:   .space 16                   | per track: a FULL landing the UI side owes (cl_postpart)
 cl_postm:   .space 8                    | per audio track: ... and its machine changed
 cl_pwhole:  .byte 0                     | ORIG PTN/PART pending: the first landing copies cl_slR too
@@ -5152,7 +5290,7 @@ cl_xpix:    .byte 0,1, 2,1, 1,2, 0,3, 2,3   | the "x": corners and centre of a 3
 cl_colx:    .short 6, 8, 52, 3          | column 1: number field, bar / box 8..52, its x at 3..5
             .short 62, 60, 108, 55      | column 2: numbers 62..68, bar / box 60..108, its x at 55..57
 cl_fmt_hdrt:.asciz "%c%d "
-cl_s_multi: .asciz "MULTI "               | a group (scope §1.9)
+cl_s_multi: .asciz "MULTI LD:"            | a group, or the [PTN]+[BANK] chord held (32 px)
 cl_fmt_hdrb:.asciz "BNK %c"
 cl_s_gseq:  .asciz "TRK SEQS"
 cl_s_gfull: .asciz "TRKS FULL"
@@ -5168,7 +5306,7 @@ cl_s_emp:   .asciz "---"
 cl_s_orig:  .asciz "ORIG"
 cl_s_origs: .asciz "ORIG TRK SEQ"
 cl_s_origf: .asciz "ORIG TRK FULL"
-cl_s_origp: .asciz "ORIG PTN+PART"
+cl_s_origp: .asciz "ORIG PTN+PRT"         | 46 px: its box ends at x 86, as T6 LOAD:'s longest
 cl_s_saved: .asciz "SAVED TRK"           | 34 px: the slot label after a temp reload (the user, 2026-11-02)
 cl_fmt_srct:.asciz "%c%02d %02d TR"       | 33 px: "B14 06 TR" (the user, 2026-10-29)
 cl_fmt_srcl:.asciz "%c%02d LOCKS"         | 34 px

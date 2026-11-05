@@ -143,6 +143,8 @@ def main(argv):
     fails = []
     # FULL loads (scope §1.7): a track's Part slice (as patch_clyps.s cl_slA / cl_slM)
     PART_OFF, PARTSZ = 0x8ED80, 0x18B2
+    # one bank of the originals: CL8 and later 16 slabs + 4 Parts; CL7 and older images: CLYPS_SNAP_BANK=0x9b340
+    SNAP_BANK = int(os.environ.get("CLYPS_SNAP_BANK", "0x95048"), 0)
     SLA = [(0x000, 1, 1, 1, 0), (0x008, 1, 1, 1, 0), (0x012, 2, 2, 1, 0), (0x022, 1, 1, 1, 0),
            (0x02A, 30, 30, 1, 0), (0x1DA, 30, 30, 1, 0), (0x11A, 24, 24, 1, 0), (0x2F2, 30, 30, 1, 0),
            (0x2CA, 5, 5, 1, 0), (0x602, 12, 12, 1, 0), (0x662, 32, 32, 16, 0x100), (0x1662, 1, 1, 16, 10),
@@ -151,8 +153,9 @@ def main(argv):
 
     def partbase(b, pat, img=None):
         img = BLOB if img is None else img
-        pi = rd(img + b * BANKSTRIDE + pat * PATSTRIDE + 0x8E57, 1) & 3
-        return img + b * BANKSTRIDE + PART_OFF + pi * PARTSZ
+        st = SNAP_BANK if img == syms["cl_bss"] else BANKSTRIDE   # the originals' banks are shorter
+        pi = rd(img + b * st + pat * PATSTRIDE + 0x8E57, 1) & 3
+        return img + b * st + PART_OFF + pi * PARTSZ
 
     def pslice(t, base):
         segs, k = (SLA, t) if t < 8 else (SLM, t - 8)
@@ -164,7 +167,7 @@ def main(argv):
                 o += step
         return out
     slab = lambda pat, b=None: bytes(u.mem_read(BLOB + (bank if b is None else b) * BANKSTRIDE + pat * PATSTRIDE, PATSTRIDE))
-    BANKSZ = 0x9B340
+    BANKSZ = SNAP_BANK
     snapok = lambda: rd(syms["cl_snapok"], 2)
     oslot = lambda pat, t, b=None: bytes(u.mem_read(syms["cl_bss"] + (bank if b is None else b) * BANKSZ
                                                     + pat * PATSTRIDE + t * TRAC_A, TRAC_A))
@@ -832,6 +835,10 @@ def main(argv):
                   and all(s9[t * TRAC_A + 0x50] == plen for t in range(1, 8))
                   and all(s9[0x48D0 + m * 0x8B0 + 0x28] == plen for m in range(8)),
                   f"converted: PER TRACK, master {plen}, T1 {s9[0x50]}, every other track {plen}")
+            if rd(0x80000002, 1) == bank:
+                mm = bytes(u.mem_read(0x1001614E + nrm * PATSTRIDE, PATSTRIDE))
+                md = [hex(i) for i in range(PATSTRIDE) if mm[i] != s9[i]]
+                check(not md, f"... the NVRAM mirror has the whole converted slab ({len(md)} bytes differ {md[:6]})")
             key(PTN, 1)
             key(BANK, 1)
             tap(PAGE)
@@ -900,13 +907,17 @@ def main(argv):
     if "L" in a.only:
         # --- L: reloads from the card (scope §1.8): SAVE PROJECT, edit in RAM, reload, compare
         print("L: [PTN]+TRACK = card SEQ; [BANK]+TRACK = card ALL (track slice); chord+TRACK nothing; chord+trig = pattern")
+        ndl0 = rd(syms["rq_ndir"], 4) if "rq_ndir" in syms else None
+        print(f"      side at start: {'MIDI' if rd(0x80000012, 4) else 'audio'}", flush=True)
+        if rd(0x80000012, 4):              # L reloads audio T1: start on the audio side (as U)
+            tap(0x35)
         def worker(fn, ms, args=()):
             rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
             rt.call_as_main(fn, args=args, budget=600000)
             rt.run(ms=ms)
         tap(0x10)
         act = rd(0x800065BE, 1)
-        worker(0x40022850, 8000)          # SAVE PROJECT: the .strd = RAM now
+        worker(0x40022850, int(os.environ.get("CLYPS_SAVE_MS", "8000")))   # SAVE PROJECT: the .strd = RAM now
         dst = partbase(bank, act)
         # bytes the bank file never holds (scope §10.1): an audio record's pad +0x899 and the slab tail
         # +0x8e5c..: a card reload legitimately differs there from RAM
@@ -1014,6 +1025,9 @@ def main(argv):
                   f"chord + trig {q + 1} (Part {pq + 1}, not sounding): its Part from the card, edited mark cleared")
             check(all(bytes(u.mem_read(bb + 0x8ED80 + k * PARTSZ, PARTSZ)) == v for k, v in others.items()),
                   "... and no other Part touched")
+        if ndl0 is not None:
+            ndl = rd(syms["rq_ndir"], 4) - ndl0
+            check(ndl >= 4, f"every card reload above read its chunks directly (the seek path: {ndl} direct reloads)")
         tap(NO)
         closed_ok("[NO]")
 
@@ -1301,6 +1315,99 @@ def main(argv):
                 tap(NO)
             closed_ok("closed")
 
+    if "W" in a.only:
+        # --- W: the SRAM mirror (battery NVRAM: the live cache of the UI bank) after each kind of load
+        # equals RAM where RAM changed, and what each load writes there (stock's memcpy, dst in NVRAM)
+        # (the user, 2026-11-04: CL8 writes only what changed -- records + trailer, the touched Part)
+        print("W: the NVRAM mirror after every kind of load, and the bytes each load writes into it")
+        SRAM_PAT_, SRAM_PART_ = 0x1001614E, 0x100A4ECE
+        def mdiff(pat):
+            if rd(0x80000002, 1) != bank:
+                return None
+            m_ = bytes(u.mem_read(SRAM_PAT_ + pat * PATSTRIDE, PATSTRIDE))
+            l_ = slab(pat)
+            mp = bytes(u.mem_read(SRAM_PART_, 4 * PARTSZ))
+            lp = bytes(u.mem_read(BLOB + bank * BANKSTRIDE + PART_OFF, 4 * PARTSZ))
+            return ({i for i in range(PATSTRIDE) if m_[i] != l_[i]}, {i for i in range(4 * PARTSZ) if mp[i] != lp[i]})
+        wr = []
+        def on_mc(uc, ad, sz, ud):
+            sp_ = uc.reg_read(er.eb.UC_M68K_REG_A7)
+            dst_, n_ = rd(sp_ + 4, 4), rd(sp_ + 12, 4)
+            if 0x10000000 <= dst_ < 0x10200000:
+                wr.append(n_)
+        hmc = u.hook_add(er.eb.UC_HOOK_CODE, on_mc, begin=0x40020898, end=0x40020898)
+        tap(0x10)
+        act = rd(0x800065BE, 1)
+        base = mdiff(act)
+        check(base is not None, f"the playing bank is the mirror's (UI bank {rd(0x80000002, 1)})")
+        b_s, b_p = base if base else (set(), set())
+        print(f"      baseline: mirror differs from RAM at {len(b_s)} slab / {len(b_p)} Part bytes", flush=True)
+        def mcheck(what, pat=None):
+            d_ = mdiff(act if pat is None else pat)
+            n_ = sum(wr)
+            wr.clear()
+            if d_ is None:
+                check(False, f"{what}: the playing bank is not the mirror's")
+                return
+            ns, np_ = d_[0] - b_s, d_[1] - b_p
+            check(not ns and not np_, f"{what}: the mirror follows ({n_:,} B written into it; new differences: "
+                  f"slab {sorted(hex(x) for x in ns)[:6]}, Part {sorted(hex(x) for x in np_)[:6]})")
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        wr.clear()
+        q = next(x for x in range(16) if x != act and rec(x, 0) != rec(act, 0))
+        tap(q)
+        mcheck(f"trig {q + 1} (TRK SEQ)")
+        key(FUNC, 1)
+        tap(q)
+        key(FUNC, 0)
+        mcheck(f"[FUNC]+trig {q + 1} (TRK FULL)")
+        tap(PAGE)
+        mcheck("[PAGE] (ORIG TRK SEQ)")
+        key(CUE := 0x2A, 1)
+        tap(0x11)
+        tap(0x12)
+        key(CUE, 0)
+        wr.clear()
+        tap(q)
+        mcheck(f"a group of T2 T3, trig {q + 1}")
+        tap(NO)
+        wr.clear()
+        key(PTN, 1)
+        key(BANK, 1)
+        tap(PAGE)
+        key(BANK, 0)
+        key(PTN, 0)
+        mcheck("[PTN]+[BANK]+[PAGE] (ORIG PTN+PART, 16 tracks + the Part)")
+        key(PTN, 1)
+        key(0x10, 1)
+        rt.run(ms=6000)
+        key(0x10, 0)
+        key(PTN, 0)
+        tailmsg()
+        mcheck("[PTN]+TRACK 1 (card TRK SEQ)")
+        key(BANK, 1)
+        key(0x10, 1)
+        rt.run(ms=6000)
+        key(0x10, 0)
+        key(BANK, 0)
+        tailmsg()
+        mcheck("[BANK]+TRACK 1 (card TRK FULL)")
+        p2 = next(x for x in range(16) if x != act)
+        key(PTN, 1)
+        key(BANK, 1)
+        key(p2, 1)
+        rt.run(ms=6000)
+        key(p2, 0)
+        key(BANK, 0)
+        key(PTN, 0)
+        tailmsg()
+        mcheck(f"[PTN]+[BANK]+trig {p2 + 1} (card pattern {p2 + 1}, not the playing one)", pat=p2)
+        u.hook_del(hmc)
+        tap(NO)
+
     if "X" in a.only:
         # --- X: a card reload of a saved pattern marks nothing (the user, 2026-11-04: after a fully saved
         # project, [PTN]+[BANK] + the trig of pattern P put the "x" on slot P in the ACTIVE track's view).
@@ -1334,6 +1441,22 @@ def main(argv):
         key(BANK, 0)
         key(PTN, 0)
         check(state()["open"] == 1, "Clyps open")
+        ndir = lambda: rd(syms["rq_ndir"], 4) if "rq_ndir" in syms else -1
+        nd0 = ndir()
+        trace_ = []
+        R = er.eb
+        def reg(uc, r): return uc.reg_read(r) & 0xFFFFFFFF
+        def hk_(name, fn):
+            if name in syms:
+                return u.hook_add(R.UC_HOOK_CODE, fn, begin=syms[name], end=syms[name])
+        hx = [h for h in (
+            hk_("rj_st", lambda uc, ad, sz, ud: trace_.append(f"rj_st ver d6=0x{reg(uc, R.UC_M68K_REG_D6):x} P d5={reg(uc, R.UC_M68K_REG_D5)} st d4=0x{reg(uc, R.UC_M68K_REG_D4):x}")),
+            hk_("rj_seq", lambda uc, ad, sz, ud: trace_.append(f"rj_seq d0=0x{reg(uc, R.UC_M68K_REG_D0):x}")),
+            hk_("rj_dok", lambda uc, ad, sz, ud: trace_.append("rj_dok")),
+            u.hook_add(R.UC_HOOK_CODE, lambda uc, ad, sz, ud: trace_.append(
+                f"FSEEK(h=0x{rd(reg(uc, R.UC_M68K_REG_A7) + 4, 4):x}, off=0x{rd(reg(uc, R.UC_M68K_REG_A7) + 8, 4):x})"),
+                begin=0x4001660C, end=0x4001660C),
+        ) if h is not None]
         key(PTN, 1)
         key(BANK, 1)
         key(act, 1)
@@ -1342,9 +1465,14 @@ def main(argv):
         key(BANK, 0)
         key(PTN, 0)
         print(f"      toast line1 {bytes(u.mem_read(syms['rq_line1'], 12))}", flush=True)
+        for h_ in hx:
+            u.hook_del(h_)
+        print(f"      the card path: {trace_}", flush=True)
         d1_, r1_ = diffs(act)
         print(f"      after the card reload: records differing (offset, now, original) {d1_}; slab tail {r1_}", flush=True)
         check(not d1_, f"the card reload of a saved pattern: every record equals its original ({sorted(d1_)})")
+        check(nd0 < 0 or ndir() == nd0 + 1, f"... read straight from pattern {act + 1}'s chunk and its Part's "
+              f"(the seek path: {nd0} -> {ndir()} direct reloads)")
         tap(NO)
 
     if "O" in a.only:
