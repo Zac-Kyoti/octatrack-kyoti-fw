@@ -1187,6 +1187,18 @@ the chord reads `PTN LOAD:`, a group `MULTI LOAD:` ("ORIGS FULL"'s box to x 86).
   copy). `cl_same` skips audio +0x899, the one record byte the bank file never holds (TRAC 2329 B on the card, 2330
   in RAM), written at run time on the unit -- the likely reason a card reload left the "x" on hardware.
 
+### 1.18 The pre-select box as arrowheads; "LK" (the user, 2026-11-06; KYOTI CL14, not flashed)
+
+- The flashing frame is gone (and `cl_ptick`, the phase bytes, `cl_blink`'s phase lines with it). `cd_glyph`: at
+  each border (x0 / x1) 3 px (y + 1 .. y + 3), one in 1 px (y + 2) -- centred in the row's 7 px, a pixel clear of
+  the text (it starts / ends 2 px inside the borders, measured); XORed over the highlight bar. Visibility as before
+  (`cl_pmoved`: an arrow -> the next execution).
+- "LOCKS" -> `A01 07 LK` (`cl_fmt_lk`, also the source label): `cl_nlocks` = the steps with a trigless (lock) trig
+  (+0x08) or any parameter lock (a 32 B row != 0xff; audio +0x59, MIDI +0x30), each step once (max 64), as "TR"
+  counts trig steps. The lock rows are per step and the trig masks per bit, so the rows are mapped to bits: step n =
+  bit n of the big-endian 64-bit mask (+0 = steps 63..32), checked on 100 real tracks (the locked rows lie on the
+  trig steps in 99; a different order fit at most 5). The first draft summed parameter bytes (up to 2048) -- wrong.
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)

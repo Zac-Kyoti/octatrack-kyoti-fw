@@ -1336,6 +1336,56 @@ cy_out:
     move.l  (%sp)+,%d2
     rts
 
+| cl_nlocks (a0 = a track record, d0 = its track, MIDI 8..15) -> d0 = its locks, counted by STEP as the trigs
+| are (at most 64; the user, 2026-11-06): the steps with a trigless (lock) trig (+0x08) or a parameter lock (a
+| 32 B row of the 64 with a byte != 0xff: audio +0x59, MIDI +0x30), each step once. Step n is bit n of the
+| 64-bit mask, stored big-endian (+0 = steps 63..32, +4 = 31..0) -- checked on 100 real tracks: the locked rows
+| lie on the trig steps. Keeps d2-d7/a0/a2-a6.
+cl_nlocks:
+    lea     -20(%sp),%sp
+    movem.l %d2-%d5/%a0,(%sp)
+    lea     0x59(%a0),%a1
+    cmpi.l  #8,%d0
+    bcs.b   nl_a
+    lea     0x30(%a0),%a1
+nl_a:
+    move.l  8(%a0),%d4                  | d4 = steps 63..32: the lock trigs, then | the locked rows
+    move.l  12(%a0),%d5                 | d5 = steps 31..0
+    moveq   #0,%d2                      | d2 = step
+nl_r:
+    moveq   #0,%d0
+nl_b:
+    move.b  (%a1,%d0.l),%d1
+    cmpi.b  #-1,%d1
+    bne.b   nl_hit
+    addq.l  #1,%d0
+    cmpi.l  #32,%d0
+    bne.b   nl_b
+    bra.b   nl_n
+nl_hit:
+    move.l  %d2,%d0
+    cmpi.l  #32,%d0
+    bcc.b   nl_hi
+    bset    %d0,%d5
+    bra.b   nl_n
+nl_hi:
+    subi.l  #32,%d0
+    bset    %d0,%d4
+nl_n:
+    lea     32(%a1),%a1
+    addq.l  #1,%d2
+    cmpi.l  #64,%d2
+    bne.b   nl_r
+    moveq   #0,%d1
+    move.l  %d4,%d0
+    bsr.w   cl_popc
+    move.l  %d5,%d0
+    bsr.w   cl_popc
+    move.l  %d1,%d0
+    movem.l (%sp),%d2-%d5/%a0
+    lea     20(%sp),%sp
+    rts
+
 | cl_classify(rec, midi) -> d0 = 0 empty, 1 half (data, no sample/note trigs), 2 full
 cl_classify:
     movea.l 4(%sp),%a0
@@ -2978,39 +3028,10 @@ sl_f:
     lea     24(%sp),%sp
     rts
 
-| ================================================================ the pre-select box's slow flash
-| cl_pshow: an arrow moved the pre-select box -- it shows, on phase now. Uses d0.
+| cl_pshow: an arrow moved the pre-select box -- it shows until the next execution. Uses d0.
 cl_pshow:
     moveq   #1,%d0
     move.b  %d0,cl_pmoved
-    move.b  %d0,cl_pph
-    clr.b   cl_pcnt
-    rts
-| cl_ptick (the UI task's 1/60 s tick, cl_uitick): the pre-select box off half a blink period after
-| cl_blink turned it on, and the view redrawn when the phase changed (cl_prq). UI context: cl_draw is
-| legal here (never from the LED tick, CLAUDE.md). Uses d0-d1/a0-a1.
-cl_ptick:
-    tst.b   cl_open
-    beq.b   pt_out
-    tst.b   cl_pmoved
-    beq.b   pt_rq
-    tst.b   cl_pph
-    beq.b   pt_rq
-    moveq   #0,%d0
-    move.b  cl_pcnt,%d0
-    addq.l  #1,%d0
-    move.b  %d0,cl_pcnt
-    cmpi.l  #CL_BLINK/2,%d0
-    bne.b   pt_rq
-    clr.b   cl_pph
-    moveq   #1,%d0
-    move.b  %d0,cl_prq
-pt_rq:
-    tst.b   cl_prq
-    beq.b   pt_out
-    clr.b   cl_prq
-    jmp     cl_draw
-pt_out:
     rts
 
 | cl_bbeg / cl_bend: a batch of loads (a group, ORIG, ORIG PTN+PART, a temp chord on several tracks):
@@ -3786,13 +3807,6 @@ cl_blink:
 |   chord held (the pattern view), the cued pattern flashes the same way. The four page LEDs do the
 |   3-tick flash when cl_ppaint left them "flash" (cl_pled 3).
     move.l  %d2,-(%sp)
-    tst.b   cl_pmoved                   | the pre-select box: on at every period start (LED tick: data
-    beq.b   bl_np                       | only -- cl_ptick redraws in the UI task)
-    moveq   #1,%d0
-    move.b  %d0,cl_pph
-    move.b  %d0,cl_prq
-    clr.b   cl_pcnt
-bl_np:
     tst.l   PTN_HELD
     beq.b   bl_box
     tst.l   BANK_HELD
@@ -3891,7 +3905,6 @@ cl_uitick:
     move.l  cl_magic,%d0
     cmpi.l  #CL_MAGIC,%d0
     bne.b   uk_out
-    jsr     cl_ptick                    | the pre-select box's flash
     tst.b   cl_flk
     beq.b   uk_out
     jsr     cl_flashtick
@@ -4023,6 +4036,59 @@ by_hi:
     rts
 
 | the select box's horizontal edge at y = d4 + d0, x d5..d6; its vertical edge at x = d0, y d4..d4+4
+| cd_glyph: the pre-select box (the user, 2026-11-06): an arrowhead at each side of the cell (d5 / d6 its x,
+| d4 its y), pointing in at the text, centred in the row's 7 px (y - 1 .. y + 5): on the box border, 3 px
+| (y + 1 .. y + 3); one in from it, 1 px (y + 2) -- a pixel clear of the text (which starts / ends 2 px in).
+| d3 = 0 set, 1 inverted (over the highlight bar). Keeps d2-d7.
+cd_glyph:
+    move.l  %d5,%d0
+    moveq   #1,%d1
+    bsr.b   gl_side
+    move.l  %d6,%d0
+    moveq   #-1,%d1
+gl_side:                                | d0 = the border's x, d1 = inwards
+    lea     -8(%sp),%sp
+    movem.l %d0-%d1,(%sp)
+    move.l  %d4,%d1
+    addq.l  #3,%d1
+    move.l  %d1,-(%sp)                  | the 3 px: (x, y + 1) .. (x, y + 3)
+    move.l  %d0,-(%sp)
+    subq.l  #2,%d1
+    move.l  %d1,-(%sp)
+    move.l  %d0,-(%sp)
+    bsr.b   gl_px
+    lea     16(%sp),%sp
+    move.l  (%sp),%d0
+    add.l   4(%sp),%d0                  | the point: (x +/- 1, y + 2)
+    move.l  %d4,%d1
+    addq.l  #2,%d1
+    move.l  %d1,-(%sp)
+    move.l  %d0,-(%sp)
+    move.l  %d1,-(%sp)
+    move.l  %d0,-(%sp)
+    bsr.b   gl_px
+    lea     16(%sp),%sp
+    lea     8(%sp),%sp
+    rts
+gl_px:                                  | (x0, y0, x1, y1) set or inverted by d3
+    tst.l   %d3
+    bne.w   gl_inv
+    move.l  16(%sp),-(%sp)
+    move.l  16(%sp),-(%sp)
+    move.l  16(%sp),-(%sp)
+    move.l  16(%sp),-(%sp)
+    bsr.w   cl_set
+    lea     16(%sp),%sp
+    rts
+gl_inv:
+    move.l  16(%sp),-(%sp)
+    move.l  16(%sp),-(%sp)
+    move.l  16(%sp),-(%sp)
+    move.l  16(%sp),-(%sp)
+    bsr.w   cl_xor
+    lea     16(%sp),%sp
+    rts
+
 | cd_frame: a cell's full 1 px frame (d5 / d6 its x, d4 its y): top (y + 5) -- not on the top row, where the
 | band stands for it -- and bottom (y - 1), not on the bottom row (the frame); left and right, y .. y + 4.
 | Keeps d2-d7.
@@ -4355,12 +4421,12 @@ cd_noname:
     bne.b   cd_plain
     jsr     cl_srclbl
     move.l  %a0,%d0
-    bne.b   cd_sum
+    bne.w   cd_sum
 cd_plain:
     lea     cl_cls,%a0
     moveq   #0,%d0
     move.b  (%a0,%d2.l),%d0
-    beq.b   cd_empty
+    beq.w   cd_empty
     subq.l  #1,%d0
     beq.b   cd_half
     move.l  %d2,-(%sp)
@@ -4390,8 +4456,29 @@ cd_plain:
     lea     20(%sp),%sp
     lea     cl_buf,%a0
     bra.b   cd_sum
-cd_half:
-    lea     cl_s_lck,%a0
+cd_half:                                | data but no sample / note trigs: "A01 07 LK", its locks (the user,
+    move.l  %d2,-(%sp)                  | 2026-11-06: the trig label's convention, not "LOCKS")
+    moveq   #0,%d0
+    move.b  cl_bank,%d0
+    move.l  %d0,-(%sp)
+    jsr     cl_slab
+    addq.l  #8,%sp
+    adda.l  %d7,%a0
+    jsr     cl_trk
+    jsr     cl_nlocks
+    move.l  %d0,-(%sp)                  | locks
+    move.l  %d2,%d0
+    addq.l  #1,%d0
+    move.l  %d0,-(%sp)
+    moveq   #0,%d0
+    move.b  cl_bank,%d0
+    addi.l  #'A',%d0
+    move.l  %d0,-(%sp)
+    pea     cl_fmt_lk
+    pea     cl_buf
+    jsr     SPRINTF
+    lea     20(%sp),%sp
+    lea     cl_buf,%a0
     bra.b   cd_sum
 cd_empty:
     lea     cl_s_emp,%a0
@@ -4432,26 +4519,20 @@ cd_next:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
     bne.w   cd_cell
-|   the boxes (the user, 2026-11-05), SET after every bar -- a box in the row next to the highlight shares
+|   the boxes (the user, 2026-11-05 / 06), SET after every bar -- a box in the row next to the highlight shares
 |   a pixel row with its bar, where an XOR would cancel. None while the [PTN]+[BANK] chord is held.
 |   * the select box, a full 1 px frame: where the track's playing sequence was loaded from (cl_srccode; the
 |     grid's red / yellow blink); not moved by the keys; not shown on the playing slot (an original, a card
 |     reload, SAVED TRK)
-|   * the pre-select box, the same frame flashing slowly (cl_pph, in step with the grid's blink: cl_blink /
-|     cl_ptick): the box the arrows move (cl_sbank / cl_cur, the grid's solid yellow), shown from an arrow
-|     until the next execution (cl_pmoved). Over the select box that frame flashes; over the highlight only
-|     the bar's outline does (its inside stays)
+|   * the pre-select box, two arrowheads pointing in at the slot's text (cd_glyph): the box the arrows move
+|     (cl_sbank / cl_cur, the grid's solid yellow), shown from an arrow until the next execution (cl_pmoved);
+|     over the highlight bar they are inverted
 |   * a load confirmation (cl_fph) inverts the box's cell, phase by phase (the user, 2026-10-30)
     move.b  cl_hdrst,%d0
     btst    #1,%d0
     bne.w   cd_boxed
     jsr     cl_srccode
     move.l  %d0,%d7                     | d7 = the select box: (bank << 8) | slot
-    moveq   #0,%d0
-    move.b  cl_sbank,%d0
-    lsl.l   #8,%d0
-    move.b  cl_cur,%d0
-    movea.l %d0,%a2                     | a2 = the pre-select box
 |   the load confirmation
     tst.b   cl_ftgt
     bne.b   cd_nlf
@@ -4475,64 +4556,6 @@ cd_next:
     bsr.w   cl_xor
     lea     16(%sp),%sp
 cd_nlf:
-|   the pre-select box over the highlight, off phase: the bar's outline un-inverted -- before the select box,
-|   whose frame may share the bar's last row and must stay SET
-    tst.b   cl_pmoved
-    beq.w   cd_hlx
-    move.b  cl_bank,%d0
-    cmp.b   cl_sbank,%d0
-    bne.w   cd_hlx
-    cmp.b   PLAY_BANK,%d0
-    bne.w   cd_hlx
-    moveq   #0,%d2
-    move.b  cl_cur,%d2
-    moveq   #0,%d0
-    move.b  ACT_PAT,%d0
-    cmp.l   %d2,%d0
-    bne.w   cd_hlx
-    bsr.w   cl_cell
-    moveq   #0,%d5
-    move.w  2(%a3),%d5
-    moveq   #0,%d6
-    move.w  4(%a3),%d6
-    tst.b   cl_pph                      | on the highlight: off phase, its outline un-inverted
-    bne.w   cd_hlx
-    bsr.w   cl_bary
-    move.l  %d0,%d3                     | d3 = y0, d1 = y1
-    move.l  %d1,-(%sp)                  | top row
-    move.l  %d6,-(%sp)
-    move.l  %d1,-(%sp)
-    move.l  %d5,-(%sp)
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
-    move.l  %d3,-(%sp)                  | bottom row
-    move.l  %d6,-(%sp)
-    move.l  %d3,-(%sp)
-    move.l  %d5,-(%sp)
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
-    bsr.w   cl_bary
-    subq.l  #1,%d1
-    addq.l  #1,%d0
-    cmp.l   %d0,%d1
-    blt.w   cd_hlx
-    move.l  %d0,%d3
-    move.l  %d1,-(%sp)                  | left column, between the rows
-    move.l  %d5,-(%sp)
-    move.l  %d3,-(%sp)
-    move.l  %d5,-(%sp)
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
-    bsr.w   cl_bary
-    subq.l  #1,%d1
-    move.l  %d1,-(%sp)                  | right column
-    move.l  %d6,-(%sp)
-    move.l  %d3,-(%sp)
-    move.l  %d6,-(%sp)
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
-    bra.w   cd_hlx
-cd_hlx:
 |   the select box
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0
@@ -4544,13 +4567,6 @@ cd_hlx:
     lsr.l   #8,%d0
     cmp.b   cl_bank,%d0
     bne.b   cd_nosel
-    cmpa.l  %d7,%a2
-    bne.b   cd_sdraw
-    tst.b   cl_pmoved
-    beq.b   cd_sdraw
-    tst.b   cl_pph
-    beq.b   cd_nosel                    | the pre-select box on it, off phase: its frame off
-cd_sdraw:
     moveq   #15,%d2
     and.l   %d7,%d2
     bsr.w   cl_cell
@@ -4566,8 +4582,6 @@ cd_nosel:
     move.b  cl_bank,%d0
     cmp.b   cl_sbank,%d0
     bne.w   cd_boxed
-    cmpa.l  %d7,%a2
-    beq.w   cd_boxed                    | on the select box: done above
     moveq   #0,%d2
     move.b  cl_cur,%d2
     bsr.w   cl_cell
@@ -4575,18 +4589,17 @@ cd_nosel:
     move.w  2(%a3),%d5
     moveq   #0,%d6
     move.w  4(%a3),%d6
+    moveq   #0,%d3                      | d3 = 0: set
     move.b  cl_bank,%d0
     cmp.b   PLAY_BANK,%d0
-    bne.b   cd_pfr
+    bne.b   cd_pg
     moveq   #0,%d0
     move.b  ACT_PAT,%d0
     cmp.l   %d2,%d0
-    bne.b   cd_pfr
-    bra.w   cd_boxed                    | on the highlight: its outline flashed above (cd_hlo)
-cd_pfr:
-    tst.b   cl_pph
-    beq.w   cd_boxed                    | off phase
-    bsr.w   cd_frame
+    bne.b   cd_pg
+    moveq   #1,%d3                      | on the highlight bar: inverted
+cd_pg:
+    bsr.w   cd_glyph
 cd_boxed:
     moveq   #1,%d0
     move.l  %d0,RDRAW
@@ -4773,7 +4786,12 @@ cl_srclbl:
     pea     cl_fmt_srct
     bra.b   sl_fmt
 sl_lck:
-    clr.l   -(%sp)
+    move.l  %d1,-(%sp)
+    movea.l %a2,%a0
+    move.l  %d2,%d0
+    jsr     cl_nlocks                   | its locks
+    move.l  (%sp)+,%d1
+    move.l  %d0,-(%sp)
     move.l  %d1,-(%sp)
     move.l  %d5,-(%sp)
     pea     cl_fmt_srcl
@@ -5717,9 +5735,6 @@ cl_cueh:    .fill 16, 2, 0xffff         | per track: the playing (bank<<8 | patt
 cl_arm:     .space 16                   | per track: the gate has passed; waiting for a window start
 cl_cuef:    .space 16                   | per track: the cue is FULL (its machine / FX too)
 cl_pmoved:  .byte 0                     | the pre-select box shows (an arrow since the last execution)
-cl_pph:     .byte 0                     | ... its phase: 1 = on
-cl_pcnt:    .byte 0                     | ... UI ticks into the on phase
-cl_prq:     .byte 0                     | ... a phase change owes a redraw (cl_ptick)
             .align 2
 cl_boxreq:  .byte 0                     | a card reload: the box home at the UI tail (cl_boxhome)
 cl_self:    .byte 0                     | ORIG PTN+PART playing: a pattern change to itself is pending
@@ -5758,7 +5773,7 @@ cl_s_seqb:  .asciz "TRK SEQ"
 cl_s_seqf:  .asciz "TRK FULL"
 cl_fmt_num: .asciz "%d"
 cl_fmt_trg: .asciz "%c%02d %02d TR"       | 33 px: "A01 15 TR", as a source label (the user)
-cl_s_lck:   .asciz "LOCKS"
+cl_fmt_lk:  .asciz "%c%02d %02d LK"       | "A01 07 LK": no sample / note trigs; 7 steps with locks (the user, 2026-11-06)
 cl_s_emp:   .asciz "---"
 cl_s_orig:  .asciz "ORIG"
 cl_s_origs: .asciz "ORIG TRK SEQ"
@@ -5766,7 +5781,7 @@ cl_s_origf: .asciz "ORIG TRK FULL"
 cl_s_origp: .asciz "ORIG PTN+PRT"         | 46 px: its box ends at x 86, as T6 LOAD:'s longest
 cl_s_saved: .asciz "SAVED TRK"           | 34 px: the slot label after a temp reload (the user, 2026-11-02)
 cl_fmt_srct:.asciz "%c%02d %02d TR"       | 33 px: "B14 06 TR" (the user, 2026-10-29)
-cl_fmt_srcl:.asciz "%c%02d LOCKS"         | 34 px
+cl_fmt_srcl:.asciz "%c%02d %02d LK"       | as cl_fmt_lk
 cl_fmt_srce:.asciz "%c%02d ---"
 cl_s_rename:.asciz "RENAME SEQUENCE"
 cl_fmt_cpath:.asciz "%s/clyps%02d.%s"

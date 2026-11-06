@@ -206,6 +206,15 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL14 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL13 (its list below still applies; CL13 was never flashed) with the pre-select box as arrowheads and the
+  locks label:
+  1. Arrows: two small arrowheads, one at each side of the slot, pointing in at its text (no flashing); the grid's
+     solid yellow follows them. Over the highlight bar they show inverted. They go at the next execution.
+  2. The select box (full frame on the last load) as in CL13.
+  3. A sequence with no sample / note trigs but locks reads e.g. `A01 07 LK`: 7 steps with a lock trig or a
+     parameter lock (each step once, at most 64) -- was `LOCKS`. On the playing slot the source reads `B14 07 LK`.
+
 - **KYOTI CL13 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL11 (its list below still applies; CL11 and CL12 were never flashed; CL12's brackets are gone) + the boxes as
   decided 2026-11-05 and the "x" for sequences only:

@@ -37941,3 +37941,8 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   the likely cause of the "x" a card reload left on hardware). TRAP (caught by renders, not the gates): cl_edx kept a
   value in d1 across cl_slab, which uses d1 -> an "x" on every slot; renders compare CL12 / CL13 to catch such.
   Gates on CL13: full 116, T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15, V+Z+I 26. syx 07dda811….
+- **KYOTI CL14** (2026-11-06, NOT flashed; CL11-CL13 never flashed, CL10 on the unit): the pre-select box as two
+  arrowheads (`cd_glyph`, XORed over the highlight; the flashing frame and its phase code removed); "LOCKS" ->
+  `A01 07 LK` (`cl_nlocks`: steps with a lock trig or a parameter lock, each once, max 64; step n = bit n of the
+  big-endian 64-bit mask, checked on 100 real tracks). No renders this round (the user). Gates on CL14: full 116,
+  T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15, V+Z+I 26. syx e72e7c17….
