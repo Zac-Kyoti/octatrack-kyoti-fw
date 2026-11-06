@@ -1374,9 +1374,11 @@ cf_full:
 cl_refresh:
     lea     -16(%sp),%sp
     movem.l %d2-%d4/%a2,(%sp)
-    jsr     cl_trk                      | another track than at the last refresh (TRACK, [MIDI], a group's
-    cmp.b   cl_lastt,%d0                | view): the box goes to ITS sequence (the user, 2026-11-04 -- each
-    beq.b   crf_same                    | track's box is where its playing sequence came from)
+    jsr     cl_trk                      | another track than at the last refresh (TRACK, [MIDI]): the
+    cmp.b   cl_lastt,%d0                | pre-select box goes to ITS sequence (the user, 2026-11-04); not in
+    beq.b   crf_same                    | a group: one position for every member, kept across the view's
+    tst.l   cl_gmask                    | track changes (the user, 2026-11-05)
+    bne.b   crf_same
     jsr     cl_boxhome
 crf_same:
     moveq   #0,%d0                      | the one cursor choke point: 16 slots
@@ -3979,6 +3981,116 @@ by_hi:
     rts
 
 | the select box's horizontal edge at y = d4 + d0, x d5..d6; its vertical edge at x = d0, y d4..d4+4
+| cd_frame: a cell's frame (d5 / d6 its x, d4 its y; d3 = 0 solid, 1 corner brackets): top (y + 5) -- not on
+| the top row, where the band stands for it -- and bottom (y - 1), not on the bottom row (the frame); left and
+| right, y .. y + 4. Keeps d2-d7.
+cd_frame:
+    tst.l   %d3
+    bne.w   cd_brk
+    move.l  %d4,%d0
+    addq.l  #5,%d0
+    cmpi.l  #BODY_TOP,%d0
+    bgt.b   cf2_nt
+    moveq   #5,%d0
+    bsr.w   cd_hline
+cf2_nt:
+    move.l  %d4,%d0
+    subq.l  #1,%d0
+    ble.b   cf2_nb
+    moveq   #-1,%d0
+    bsr.w   cd_hline
+cf2_nb:
+    move.l  %d5,%d0
+    bsr.w   cd_vline
+    move.l  %d6,%d0
+    bra.w   cd_vline
+
+| cd_brk: the pre-select box as four corner brackets (the user, 2026-11-05: a dotted frame made the text
+| unreadable) -- 3 pixels a corner: the corner, one along the top / bottom edge, one along the side. Where the
+| band (top row) or the window frame (bottom row) stands for an edge, the corner is 2 pixels up the side.
+cd_brk:
+    move.l  %d4,%d0
+    addq.l  #5,%d0
+    cmpi.l  #BODY_TOP,%d0
+    bgt.b   bk2_tb
+    move.l  %d5,%d0                     | top-left
+    move.l  %d4,%d1
+    addq.l  #5,%d1
+    bsr.w   cd_px
+    addq.l  #1,%d0
+    bsr.w   cd_px
+    subq.l  #1,%d0
+    subq.l  #1,%d1
+    bsr.w   cd_px
+    move.l  %d6,%d0                     | top-right
+    move.l  %d4,%d1
+    addq.l  #5,%d1
+    bsr.w   cd_px
+    subq.l  #1,%d0
+    bsr.w   cd_px
+    addq.l  #1,%d0
+    subq.l  #1,%d1
+    bsr.w   cd_px
+    bra.b   bk2_b
+bk2_tb:
+    move.l  %d5,%d0                     | against the band: the sides' top 2 pixels
+    move.l  %d4,%d1
+    addq.l  #4,%d1
+    bsr.w   cd_px
+    subq.l  #1,%d1
+    bsr.w   cd_px
+    move.l  %d6,%d0
+    addq.l  #1,%d1
+    bsr.w   cd_px
+    subq.l  #1,%d1
+    bsr.w   cd_px
+bk2_b:
+    move.l  %d4,%d0
+    subq.l  #1,%d0
+    ble.b   bk2_bb
+    move.l  %d5,%d0                     | bottom-left
+    move.l  %d4,%d1
+    subq.l  #1,%d1
+    bsr.w   cd_px
+    addq.l  #1,%d0
+    bsr.w   cd_px
+    subq.l  #1,%d0
+    addq.l  #1,%d1
+    bsr.w   cd_px
+    move.l  %d6,%d0                     | bottom-right
+    move.l  %d4,%d1
+    subq.l  #1,%d1
+    bsr.w   cd_px
+    subq.l  #1,%d0
+    bsr.w   cd_px
+    addq.l  #1,%d0
+    addq.l  #1,%d1
+    bra.w   cd_px
+bk2_bb:
+    move.l  %d5,%d0                     | against the frame: the sides' bottom 2 pixels
+    move.l  %d4,%d1
+    bsr.w   cd_px
+    addq.l  #1,%d1
+    bsr.w   cd_px
+    move.l  %d6,%d0
+    bsr.w   cd_px
+    subq.l  #1,%d1
+    bra.w   cd_px
+
+| cd_px: set the pixel (d0, d1). Keeps every register.
+cd_px:
+    lea     -16(%sp),%sp
+    movem.l %d0-%d1/%a0-%a1,(%sp)
+    move.l  %d1,-(%sp)
+    move.l  %d0,-(%sp)
+    move.l  %d1,-(%sp)
+    move.l  %d0,-(%sp)
+    bsr.w   cl_set
+    lea     16(%sp),%sp
+    movem.l (%sp),%d0-%d1/%a0-%a1
+    lea     16(%sp),%sp
+    rts
+
 cd_hline:
     add.l   %d4,%d0
     move.l  %d0,-(%sp)
@@ -4365,28 +4477,50 @@ cd_next:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
     bne.w   cd_cell
-|   the select box: a full 1 px frame, SET after every bar -- a box in the row next to the highlight
-|   shares a pixel row with its bar, where an XOR would cancel (the user: "it's a full box").
-|   Only in the box's bank, not over the highlight (the bar alone shows it there). Not while the
-|   [PTN]+[BANK] chord is held (the user, 2026-10-30): it comes back where it was on its release.
+|   the boxes (the user, 2026-11-05), SET after every bar -- a box in the row next to the highlight shares
+|   a pixel row with its bar, where an XOR would cancel. None while the [PTN]+[BANK] chord is held.
+|   * the selection box, a full 1 px frame: where the track's playing sequence was loaded from (cl_srccode);
+|     not moved by the keys; not shown when that is the playing slot (an original, a card reload, SAVED TRK)
+|   * the pre-select box, corner brackets (cd_brk): the box the arrows move (cl_sbank / cl_cur, the
+|     grid's solid yellow); not over the selection box (the full frame shows it) nor the highlight (the bar)
+|   * a load confirmation (cl_fph) inverts the pre-select box's cell instead, the bar un-inverted when it is
+|     on your pattern (the user, 2026-10-30)
     move.b  cl_hdrst,%d0
     btst    #1,%d0
     bne.w   cd_boxed
+|   the selection box
+    jsr     cl_srccode
+    move.l  %d0,%d7                     | d7 = the sequence's (bank << 8) | slot
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    lsl.l   #8,%d0
+    move.b  ACT_PAT,%d0
+    cmp.l   %d7,%d0
+    beq.b   cd_nosel                    | the playing slot: no selection box
+    move.l  %d7,%d0
+    lsr.l   #8,%d0
+    cmp.b   cl_bank,%d0
+    bne.b   cd_nosel                    | another bank shown
+    moveq   #15,%d2
+    and.l   %d7,%d2
+    bsr.w   cl_cell
+    moveq   #0,%d5
+    move.w  2(%a3),%d5
+    moveq   #0,%d6
+    move.w  4(%a3),%d6
+    moveq   #0,%d3                      | solid
+    bsr.w   cd_frame
+cd_nosel:
+|   the pre-select box
     move.b  cl_bank,%d0
     cmp.b   cl_sbank,%d0
     bne.w   cd_boxed
     moveq   #0,%d2
     move.b  cl_cur,%d2
-    cmp.b   PLAY_BANK,%d0
-    bne.b   cd_sbx
-    moveq   #0,%d0
-    move.b  ACT_PAT,%d0
-    cmp.l   %d2,%d0
-    bne.b   cd_sbx
-    tst.b   cl_ftgt                     | the box on your pattern (the highlight): a load confirmation
-    bne.w   cd_boxed                    | flashes the bar itself -- un-inverted in alternate phases
-    tst.b   cl_fph                      | (the user, 2026-10-30)
-    beq.w   cd_boxed
+    tst.b   cl_ftgt                     | its load confirmation: the cell inverted, phase by phase
+    bne.b   cd_pre
+    tst.b   cl_fph
+    beq.b   cd_pre
     bsr.w   cl_cell
     moveq   #0,%d5
     move.w  2(%a3),%d5
@@ -4400,42 +4534,28 @@ cd_next:
     bsr.w   cl_xor
     lea     16(%sp),%sp
     bra.w   cd_boxed
-cd_sbx:
+cd_pre:
+    moveq   #0,%d0
+    move.b  cl_bank,%d0
+    lsl.l   #8,%d0
+    or.l    %d2,%d0
+    cmp.l   %d7,%d0
+    beq.w   cd_boxed                    | on the selection box (or, its bank, the highlight): no dots
+    move.b  cl_bank,%d0
+    cmp.b   PLAY_BANK,%d0
+    bne.b   cd_pdo
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    cmp.l   %d2,%d0
+    beq.w   cd_boxed                    | on the highlight: the bar shows it
+cd_pdo:
     bsr.w   cl_cell
     moveq   #0,%d5
     move.w  2(%a3),%d5
     moveq   #0,%d6
     move.w  4(%a3),%d6
-    tst.b   cl_ftgt                     | a header flash (ORIG / PTN+PART): the box as usual
-    bne.b   cd_sout
-    tst.b   cl_fph
-    beq.b   cd_sout
-    bsr.w   cl_bary                     | the load confirmation: the cell inverted, as the highlight
-    move.l  %d1,-(%sp)
-    move.l  %d6,-(%sp)
-    move.l  %d0,-(%sp)
-    move.l  %d5,-(%sp)
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
-    bra.w   cd_boxed
-cd_sout:
-    move.l  %d4,%d0                     | top (y + 5) -- not on the top row, where the band stands
-    addq.l  #5,%d0                      | for it -- and bottom (y - 1), not on the bottom row (frame)
-    cmpi.l  #BODY_TOP,%d0
-    bgt.b   cd_notop
-    moveq   #5,%d0
-    bsr.w   cd_hline
-cd_notop:
-    move.l  %d4,%d0
-    subq.l  #1,%d0
-    ble.b   cd_nobot
-    moveq   #-1,%d0
-    bsr.w   cd_hline
-cd_nobot:
-    move.l  %d5,%d0                     | left and right, y .. y + 4
-    bsr.w   cd_vline
-    move.l  %d6,%d0
-    bsr.w   cd_vline
+    moveq   #1,%d3                      | corner brackets
+    bsr.w   cd_frame
 cd_boxed:
     moveq   #1,%d0
     move.l  %d0,RDRAW
@@ -5564,8 +5684,9 @@ cl_nq:      .byte 0                     | cues pending (the tick's fast path)
 cl_corners: .short 0,63, 1,63, 0,62, WIN_W-1,63, WIN_W-2,63, WIN_W-1,62
 cl_xpix:    .byte 0,1, 2,1, 1,2, 0,3, 2,3   | the "x": corners and centre of a 3 x 3 at rows y + 1..3
             .align 2
-cl_colx:    .short 6, 8, 52, 3          | column 1: number field, bar / box 8..52, its x at 3..5
-            .short 62, 60, 108, 55      | column 2: numbers 62..68, bar / box 60..108, its x at 55..57
+cl_colx:    .short 7, 8, 52, 3          | column 1: number field, bar / box 8..52, its x at 3..5 (the text 1 px right
+            .short 63, 60, 108, 55      | column 2: numbers 63..69, bar / box 60..108, its x at 55..57   of its box,
+                                        | the user 2026-11-05: was 6 / 62)
 cl_fmt_hdrt:.asciz "%c%d "
 cl_s_multi: .asciz "MULTI LOAD:"          | a group (40 px: "ORIGS FULL"'s box ends at x 86)
 cl_s_ptnld: .asciz "PTN LOAD:"            | the [PTN]+[BANK] chord held (32 px: "ORIG PTN+PRT"'s box ends at x 86)

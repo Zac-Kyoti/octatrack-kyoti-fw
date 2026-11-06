@@ -1161,6 +1161,18 @@ loaded) and `cl_wslab` (the whole slab to the mirror); `rj_ok` clears the reload
 track, or every track homed on the reloaded pattern) and asks the UI tail for `cl_boxhome` (`cl_boxreq`). Header:
 the chord reads `PTN LOAD:`, a group `MULTI LOAD:` ("ORIGS FULL"'s box to x 86).
 
+### 1.16 Three boxes (the user, 2026-11-05; KYOTI CL12, not flashed)
+
+- The highlight bar: the playing pattern's slot (unchanged).
+- The selection box (full 1 px frame): where the track's playing sequence was loaded from (`cl_srccode`); not moved by
+  the keys; hidden when that is the playing slot (an original, a card reload, SAVED TRK). Grid: red / yellow blink.
+- The pre-select box (corner brackets, `cd_brk`: 3 px a corner; against the band / the window frame, 2 px up the side):
+  `cl_sbank` / `cl_cur`, moved by the arrows; grid solid yellow; not drawn over the selection box or the highlight.
+  A dotted frame was tried first and rejected (unreadable). A load confirmation inverts its cell, as before.
+- Groups: `cl_refresh` skips `cl_boxhome` while `cl_gmask` != 0 -- one pre-select position for every member,
+  kept across the view's track changes (gate U checks it).
+- The column text 1 px right (`cl_colx` number fields 7 / 63, were 6 / 62); bars, boxes and the "x" unchanged.
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)

@@ -1921,9 +1921,12 @@ def main(argv):
         osrc = partbase(bank, act, syms["cl_bss"])
         check(all(rec(act, k) == oslot(act, k) and pslice(k, dst) == pslice(k, osrc) for k in m),
               "[FUNC]+[PAGE]: every member its original sequence and slice")
+        tap(DOWN)
+        cg = state()["cur"]
         tap(0x10 + m[0])
-        check(rd(0x80000000, 1) == m[0] and grp() == bits and state()["open"] == 1,
-              f"plain TRACK {m[0] + 1}: the view's track changes, the group stays")
+        check(rd(0x80000000, 1) == m[0] and grp() == bits and state()["open"] == 1 and state()["cur"] == cg,
+              f"plain TRACK {m[0] + 1}: the view's track changes, the group stays, the pre-select box stays "
+              f"({cg + 1} -> {state()['cur'] + 1}; the user, 2026-11-05)")
         key(CUE, 1)
         tap(MIDIK)
         tap(0x10)

@@ -37926,3 +37926,9 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   (the card's version, not the original's: never named there -> cleared). Headers: the chord `PTN LOAD:`, a group
   `MULTI LOAD:` ("ORIGS FULL"'s box to x 86). Gates on CL11: full 116, T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15,
   V+Z 14, I 11. syx 02d37da2….
+- **KYOTI CL12** (2026-11-05, NOT flashed; CL11 never flashed, CL10 on the unit): three boxes (the user): the highlight;
+  the selection box (full frame) = where the playing sequence was loaded from, not moved by the keys, hidden on the
+  playing slot; the pre-select box = corner brackets (`cd_brk`, 3 px a corner; a dotted frame was rejected as
+  unreadable) moved by the arrows (grid solid yellow). Groups keep one pre-select position across the view's track
+  changes (`cl_refresh` skips `cl_boxhome` while `cl_gmask` != 0; gate U). Column text 1 px right (`cl_colx` 7 / 63).
+  Gates on CL12: full 116, T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15, V+Z+I 25. syx 2877c110….

@@ -206,6 +206,18 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL12 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL11 (its list below still applies; CL11 was never flashed) + three boxes and the column text 1 px right:
+  1. Open Clyps on a track playing its original: only the highlight (your pattern's slot).
+  2. Arrows: corner brackets (the pre-select box) move; the grid's solid yellow follows them. On your pattern's
+     slot the bar shows it (no brackets).
+  3. `[YES]` / a trig: the slot loads; a full box (the selection box) stays on that slot, its grid LED blinking red /
+     yellow. Move the brackets away: the full box does not move -- it shows the last load.
+  4. A card reload / ORIG / a temp reload: the full box disappears (the track plays its own slot).
+  5. Another track and back: the brackets go to that track's sequence (as CL10).
+  6. A `[CUE]` group: move the brackets, switch between member tracks (TRACK keys): the brackets stay where they are.
+  7. The slot text sits 1 px further right in both columns; boxes and bars as before.
+
 - **KYOTI CL11 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL10 (flashed 2026-11-05) + card-reload fixes (the "x", the box, the names) and the headers:
   1. Hold `[PTN]`+`[BANK]`: the header reads `PTN LOAD: ORIG PTN+PRT`. A `[CUE]` group reads `MULTI LOAD: TRK SEQS` / `TRKS FULL` / `ORIG SEQS` / `ORIGS FULL`.
