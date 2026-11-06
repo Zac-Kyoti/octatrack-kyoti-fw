@@ -1173,6 +1173,20 @@ the chord reads `PTN LOAD:`, a group `MULTI LOAD:` ("ORIGS FULL"'s box to x 86).
   kept across the view's track changes (gate U checks it).
 - The column text 1 px right (`cl_colx` number fields 7 / 63, were 6 / 62); bars, boxes and the "x" unchanged.
 
+### 1.17 The boxes as decided, and the "x" for sequences only (the user, 2026-11-05; KYOTI CL13, not flashed)
+
+- Supersedes 1.16's look (brackets tried twice, rejected): the select box (last loaded, `cl_srccode`) = the full
+  1 px frame, hidden on the playing slot; the pre-select box (`cl_sbank` / `cl_cur`, the arrows) = the same frame
+  flashing slowly: on at every grid blink period (`cl_blink`, data only: `cl_pph`, `cl_prq`), off half a period
+  later (`cl_ptick` from the UI tick, which redraws -- never the LED tick). Shown from an arrow (`cl_pshow`) to the
+  next execution (`cl_pmoved` cleared by `cl_flstart`, `cl_flhdr`, `cl_boxhome`, [PAGE], TRACK + YES / NO). Over the
+  select box that frame flashes; over the highlight the bar's outline is XORed off in the off phase (before the
+  select box is drawn, which may share the bar's last row).
+- The "x" = the sequence only (`cl_edited`): a Part-level mark (CL13 draft: `cl_edx` / `cl_pdiffs`) was built and
+  dropped -- Parts are shared (one knob marks a whole bank) and stock's Part "x" uses another reference (the SAVE PART
+  copy). `cl_same` skips audio +0x899, the one record byte the bank file never holds (TRAC 2329 B on the card, 2330
+  in RAM), written at run time on the unit -- the likely reason a card reload left the "x" on hardware.
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)

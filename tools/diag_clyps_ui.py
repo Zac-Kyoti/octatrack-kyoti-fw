@@ -1408,6 +1408,34 @@ def main(argv):
         u.hook_del(hmc)
         tap(NO)
 
+    if "H" in a.only:
+        # --- H: right after the load, which bytes of each Part differ from Clyps' originals (diagnostic)
+        print("H: Part bytes that differ from the originals after the load")
+        for k in range(4):
+            lp = bytes(u.mem_read(BLOB + bank * BANKSTRIDE + PART_OFF + k * PARTSZ, PARTSZ))
+            op = bytes(u.mem_read(syms["cl_bss"] + bank * BANKSZ + PART_OFF + k * PARTSZ, PARTSZ))
+            d = [(hex(i), op[i], lp[i]) for i in range(PARTSZ) if lp[i] != op[i]]
+            print(f"      Part {k + 1}: {len(d)} bytes differ {d[:24]}", flush=True)
+        rt.run(ms=2000)
+        for k in range(4):
+            lp = bytes(u.mem_read(BLOB + bank * BANKSTRIDE + PART_OFF + k * PARTSZ, PARTSZ))
+            op = bytes(u.mem_read(syms["cl_bss"] + bank * BANKSZ + PART_OFF + k * PARTSZ, PARTSZ))
+            d = [(hex(i), op[i], lp[i]) for i in range(PARTSZ) if lp[i] != op[i]]
+            print(f"      +2 s, Part {k + 1}: {len(d)} bytes differ {d[:24]}", flush=True)
+        t = rd(0x80000000, 1)
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+        rt.call_as_main(syms["cl_draw"], budget=2000000)
+        print(f"      open on T{t + 1}: pdf {list(bytes(u.mem_read(syms['cl_pdf'], 4)))}, snapok 0x{snapok():04x}", flush=True)
+        for k in range(16):
+            r_, o_ = rec(k, t), oslot(k, t)
+            d = [hex(i) for i in range(len(r_)) if r_[i] != o_[i]]
+            print(f"      slot {k + 1}: T{t + 1} record differs at {d[:8]} ({len(d)}); trailer now {slab(k)[0x8E50:0x8E58].hex()} "
+                  f"orig {oslab(k)[0x8E50:0x8E58].hex()}", flush=True)
+
     if "I" in a.only:
         # --- I: card reloads of a fully saved project undo a Clyps load: no "x", the box / LEDs back on the
         # pattern's own slot (the user, 2026-11-05)
@@ -1434,7 +1462,8 @@ def main(argv):
             ls, os_ = slab(act), oslab(act)
             def eff(slab_, rec_):
                 return (slab_[0x8E53], slab_[0x8E54]) if slab_[0x8E55] == 0 else (rec_[0x50], rec_[0x51])
-            dr = [hex(i) for i in range(len(r_)) if r_[i] != o_[i] and i not in (0x50, 0x51)]
+            dr = [hex(i) for i in range(len(r_)) if r_[i] != o_[i] and i not in (0x50, 0x51)
+                  and not (t < 8 and i == 0x899)]
             return dr[:6], eff(ls, r_), eff(os_, o_), ls[0x8E55], os_[0x8E55]
         key(PTN, 1)
         key(BANK, 1)
@@ -1477,6 +1506,12 @@ def main(argv):
             whole = keys_ is None
             check(nm(0) == b"SAVEDNM" and (nm(1) == (b"" if whole else b"T2NAME")),
                   f"... T1's name as saved ({nm(0)}); T2's {'gone (never saved)' if whole else 'untouched'} ({nm(1)})")
+        # the "x" = the SEQUENCE differs from its original, never its Part (the user, 2026-11-05); audio +0x899
+        # (never on the card) does not count
+        pad = sl + 0x899
+        u.mem_write(pad, bytes([rd(pad, 1) ^ 0x5A]))
+        check(not edited()[0], "T1's +0x899 (never on the card) changed: T1 still equals its original")
+        u.mem_write(pad, bytes([rd(pad, 1) ^ 0x5A]))
         tap(NO)
         # a NORMAL pattern: the load converts it to PER TRACK; the card's TRK SEQ undoes that (cl_back)
         nrm = next((x for x in range(16) if slab(x)[0x8E55] == 0), None)

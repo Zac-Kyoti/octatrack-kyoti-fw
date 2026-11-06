@@ -9,7 +9,7 @@ writes the plane as a PNG (octabam's lcd_view).
 
   python3 tools/clyps_render.py --project DIR --name NAME --keys "2e+ 2f+ 33 33" --out x.png
       keys: HEX+ = press, HEX- = release, HEX = tap; "call:ADDR" = call_as_main(ADDR);
-            "poke:ADDR=TEXT" writes ASCII there ('_' = space), e.g. into the name editor
+            "poke:ADDR=TEXT" writes ASCII there ('_' = space), e.g. into the name editor; "peek:ADDR:N" prints N bytes
 """
 import argparse
 import os
@@ -66,6 +66,9 @@ def main(argv):
         elif k.startswith("pokex:"):                   # pokex:ADDR=HEXBYTES
             ad, hx = k[6:].split("=", 1)
             rt.uc.mem_write(int(ad, 16), bytes.fromhex(hx))
+        elif k.startswith("peek:"):                    # peek:ADDR:N -- print N bytes (hex)
+            ad, nb = k[5:].split(":")
+            print(f"peek 0x{int(ad, 16):08x}: {bytes(rt.uc.mem_read(int(ad, 16), int(nb, 0))).hex()}", flush=True)
         elif k.startswith("poke:"):                    # poke:ADDR=TEXT (ASCII; '_' = space)
             ad, txt = k[5:].split("=", 1)
             rt.uc.mem_write(int(ad, 16), txt.replace("_", " ").encode())

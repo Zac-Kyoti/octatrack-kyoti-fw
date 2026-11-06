@@ -37932,3 +37932,12 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   unreadable) moved by the arrows (grid solid yellow). Groups keep one pre-select position across the view's track
   changes (`cl_refresh` skips `cl_boxhome` while `cl_gmask` != 0; gate U). Column text 1 px right (`cl_colx` 7 / 63).
   Gates on CL12: full 116, T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15, V+Z+I 25. syx 2877c110….
+- **KYOTI CL13** (2026-11-05, NOT flashed; CL11 / CL12 never flashed, CL10 on the unit): the boxes as decided (scope
+  §1.17): select box = full frame on the last load (hidden on the playing slot); pre-select box = the same frame
+  flashing slowly in step with the grid blink (`cl_blink` sets the phase, data only; `cl_ptick` on the UI tick turns
+  it off half a period later and redraws), shown from an arrow to the next execution; over the highlight only the
+  bar's outline flashes. The "x" = the sequence only: a Part-level "x" was built (cl_edx / cl_pdiffs) and dropped by
+  the user (Parts are shared; stock's Part "x" has another reference). `cl_same` skips audio +0x899 (not on the card;
+  the likely cause of the "x" a card reload left on hardware). TRAP (caught by renders, not the gates): cl_edx kept a
+  value in d1 across cl_slab, which uses d1 -> an "x" on every slot; renders compare CL12 / CL13 to catch such.
+  Gates on CL13: full 116, T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15, V+Z+I 26. syx 07dda811….

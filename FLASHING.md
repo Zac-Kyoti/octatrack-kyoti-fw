@@ -206,6 +206,21 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL13 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL11 (its list below still applies; CL11 and CL12 were never flashed; CL12's brackets are gone) + the boxes as
+  decided 2026-11-05 and the "x" for sequences only:
+  1. Load a slot: a full frame (the select box) stays on it, its grid LED blinking red / yellow; on the playing slot
+     (an original, a card reload, SAVED TRK) there is no select box.
+  2. Arrows: the pre-select box -- the same frame, flashing slowly in step with the red / yellow LED -- moves; its
+     grid LED is solid yellow. Over the select box that frame flashes; over the highlight only the bar's outline
+     flashes, its inside stays solid.
+  3. Any execution (a load, [PAGE], a reload, a temp save / reload, a track change): the pre-select box goes until
+     the next arrow; a load still flashes the bar on its slot.
+  4. A `[CUE]` group: switching between member tracks leaves the pre-select box where it is.
+  5. The "x" means only that the sequence differs from its original: edit a Part (its knobs, a machine): no slot
+     gets an "x". A card reload of a saved pattern (data as the original) leaves no "x".
+  6. The slot text sits 1 px further right in both columns.
+
 - **KYOTI CL12 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL11 (its list below still applies; CL11 was never flashed) + three boxes and the column text 1 px right:
   1. Open Clyps on a track playing its original: only the highlight (your pattern's slot).
