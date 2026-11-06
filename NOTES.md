@@ -37917,3 +37917,12 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   the cued pattern too. Gate V (new); gate B's box check updated (box = solid yellow); gate Z's "before" is
   informational (earlier scenarios load). Harness: X stalled after Z in one session (passes alone / after O+W).
   Gates on CL10: full 115 + B 10, T 21, F+Q 27, L+J 19, M+U 32, V 9, X+O+W 15, Z 5. syx 4160cbbc….
+- **KYOTI CL11** (2026-11-05, NOT flashed; CL10 flashed): card reloads end a Clyps load (the user, on CL10: after a
+  card reload of a fully saved project the "x" stayed, the box / LED stayed on the loaded slot, and the name did not
+  follow). Gate I reproduced all on CL10. Fixes in the card worker: live PER TRACK + saved NORMAL (a Clyps
+  conversion) -> the track gets the saved pattern's length / scale, `cl_back` undoes the conversion when every
+  track is original, the mirror gets the whole slab; `rj_ok` clears the reloaded tracks' provenance (`cl_home`)
+  and asks the UI tail for `cl_boxhome` (`cl_boxreq`); `rq_names` reads the reloaded names from clypsNN.strd
+  (the card's version, not the original's: never named there -> cleared). Headers: the chord `PTN LOAD:`, a group
+  `MULTI LOAD:` ("ORIGS FULL"'s box to x 86). Gates on CL11: full 116, T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15,
+  V+Z 14, I 11. syx 02d37da2….

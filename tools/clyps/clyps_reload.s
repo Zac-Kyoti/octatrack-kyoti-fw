@@ -340,7 +340,32 @@ rj_sn:
     movea.l %a4,%a0
     adda.l  #TRAILER,%a0
     tst.b   T_SMODE(%a0)
-    bne.b   rj_tfull                    | PER TRACK: the record's own bytes
+    beq.b   rj_tnorm
+    movea.l #RQ_SLAB,%a1
+    adda.l  #TRAILER,%a1
+    tst.b   T_SMODE(%a1)
+    bne.w   rj_tfull                    | PER TRACK, saved so too: the record's own bytes
+|   PER TRACK now, NORMAL as saved: a Clyps load converted it (the user, 2026-11-05: an edited "x" was left).
+|   The track plays the saved pattern's length / scale; when every track equals its original again, the
+|   conversion is undone (cl_back: the slab as loaded) and the mirror owes the whole slab.
+    moveq   #0x50,%d1
+    moveq   #0,%d0
+    move.b  rq_t,%d0
+    cmpi.l  #8,%d0
+    bcs.b   rj_tla
+    moveq   #0x28,%d1
+rj_tla:
+    add.l   rq_voff,%d1
+    move.b  T_LEN(%a1),%d0
+    move.b  %d0,(%a4,%d1.l)
+    move.b  T_SCALE(%a1),%d0
+    move.b  %d0,1(%a4,%d1.l)
+    movea.l %a4,%a2
+    jsr     cl_back
+    moveq   #1,%d0
+    move.b  %d0,cl_wslab
+    bra.w   rj_tfull
+rj_tnorm:
     movea.l #RQ_SLAB,%a1
     adda.l  #TRAILER,%a1
     move.b  T_LEN(%a1),%d0
@@ -453,6 +478,39 @@ rj_papply:
     moveq   #1,%d1
     move.b  %d1,(%a0,%d0.l)
 rj_ok:
+|   what the card brought is no Clyps load any more (the user, 2026-11-05): the reloaded tracks' provenance
+|   off -- a track: its own; a pattern: every track homed on it -- so their box / LEDs go to the pattern's
+|   own slot (cl_boxreq: cl_boxhome at the UI tail)
+    lea     cl_home,%a0
+    cmpi.l  #RQ_PTN,%d7
+    beq.b   rj_hp
+    moveq   #0,%d0
+    move.b  rq_t,%d0
+    add.l   %d0,%d0
+    moveq   #-1,%d1
+    move.b  %d1,(%a0,%d0.l)
+    move.b  %d1,1(%a0,%d0.l)
+    bra.b   rj_hd
+rj_hp:
+    moveq   #16,%d1
+rj_hpl:
+    move.b  (%a0),%d0
+    cmp.b   PLAY_BANK,%d0
+    bne.b   rj_hpn
+    moveq   #0,%d0
+    move.b  1(%a0),%d0
+    cmp.l   %d5,%d0
+    bne.b   rj_hpn
+    moveq   #-1,%d0
+    move.b  %d0,(%a0)
+    move.b  %d0,1(%a0)
+rj_hpn:
+    addq.l  #2,%a0
+    subq.l  #1,%d1
+    bne.b   rj_hpl
+rj_hd:
+    moveq   #1,%d0
+    move.b  %d0,cl_boxreq
     moveq   #0,%d0                      | the UI follows: the active track's post (SRAM, dirty,
     move.b  CUR_TRACK,%d0               | the pages)
     andi.l  #7,%d0
@@ -521,6 +579,7 @@ rj_lt:
     jsr     MEMCPY
     lea     12(%sp),%sp
 rj_lv:
+    bsr.w   rq_names                    | the reloaded sequences' names, as saved
     moveq   #1,%d0
 rj_exit:
     move.w  rq_cksum,%d1
@@ -534,6 +593,122 @@ rj_fail:
     addq.l  #4,%sp
     moveq   #-1,%d0
     bra.b   rj_exit
+
+| rq_names (d5 = pattern P, d7 = kind): the reloaded sequences' names as saved (the user, 2026-11-05) --
+| clypsNN.strd (Clyps' names file beside bankNN.strd: "CLYP", u16 1, u16 256, then 256 x NAME_W, index
+| pattern * 16 + track): a track reload its one name, a pattern reload its 16. Never saved / no file /
+| a bad one: none (the slot shows its default label). Worker context; the bank file is closed.
+rq_names:
+    tst.b   cl_namesok
+    beq.w   rn2_out
+    lea     -16(%sp),%sp
+    movem.l %d2-%d4/%a2,(%sp)
+    move.l  %d5,%d4
+    lsl.l   #4,%d4                      | d4 = the first index in the bank
+    moveq   #16,%d3                     | d3 = how many
+    cmpi.l  #RQ_PTN,%d7
+    beq.b   rn2_n
+    moveq   #0,%d0
+    move.b  rq_t,%d0
+    add.l   %d0,%d4
+    moveq   #1,%d3
+rn2_n:
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    lsl.l   #8,%d0
+    add.l   %d4,%d0
+    moveq   #NAME_W,%d1
+    muls.l  %d1,%d0
+    movea.l #NAMES,%a2
+    adda.l  %d0,%a2                     | a2 = the first name
+    moveq   #NAME_W,%d2
+    muls.l  %d3,%d2                     | d2 = the bytes
+    movea.l %a2,%a0                     | none, until the file says otherwise
+    move.l  %d2,%d0
+rn2_c:
+    clr.b   (%a0)+
+    subq.l  #1,%d0
+    bne.b   rn2_c
+    pea     cl_s_strd
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    pea     rq_path
+    jsr     cl_cpath
+    lea     12(%sp),%sp
+    lea     rq_fh,%a0
+    moveq   #16,%d0
+rn2_z:
+    clr.l   (%a0)+
+    subq.l  #1,%d0
+    bne.b   rn2_z
+    pea     0x7000
+    pea     FBUF
+    pea     S_R
+    pea     rq_path
+    pea     rq_fh
+    jsr     FOPEN
+    lea     20(%sp),%sp
+    tst.l   %d0
+    ble.w   rn2_done
+    move.l  rq_fh,-(%sp)                | its size must be exactly NF_SIZE
+    movea.l FS_SIZE,%a0
+    jsr     (%a0)
+    addq.l  #4,%sp
+    cmpi.l  #NF_SIZE,%d0
+    bne.w   rn2_cl
+    pea     8
+    pea     rq_hdr
+    pea     rq_fh
+    jsr     FREAD
+    lea     12(%sp),%sp
+    cmpi.l  #1,%d0
+    bne.w   rn2_cl
+    move.l  rq_hdr,%d0
+    cmpi.l  #0x434c5950,%d0             | "CLYP"
+    bne.w   rn2_cl
+    move.l  rq_hdr+4,%d0
+    cmpi.l  #0x00010100,%d0             | version 1, 256 names
+    bne.w   rn2_cl
+    move.l  %d4,%d0
+    moveq   #NAME_W,%d1
+    muls.l  %d1,%d0
+    addq.l  #8,%d0
+    move.l  %d0,-(%sp)
+    jsr     rq_seek
+    addq.l  #4,%sp
+    tst.l   %d0
+    bmi.w   rn2_cl
+    move.l  %d2,-(%sp)
+    move.l  %a2,-(%sp)
+    pea     rq_fh
+    jsr     FREAD
+    lea     12(%sp),%sp
+    cmpi.l  #1,%d0
+    beq.b   rn2_t
+    movea.l %a2,%a0                     | a short read: none after all
+    move.l  %d2,%d0
+rn2_c2:
+    clr.b   (%a0)+
+    subq.l  #1,%d0
+    bne.b   rn2_c2
+rn2_t:
+    movea.l %a2,%a0                     | every name ends within its NAME_W bytes
+    move.l  %d3,%d0
+rn2_tl:
+    clr.b   NAME_W-1(%a0)
+    lea     NAME_W(%a0),%a0
+    subq.l  #1,%d0
+    bne.b   rn2_tl
+rn2_cl:
+    pea     rq_fh
+    jsr     FCLOSE
+    addq.l  #4,%sp
+rn2_done:
+    movem.l (%sp),%d2-%d4/%a2
+    lea     16(%sp),%sp
+rn2_out:
+    rts
 
 | rq_seek(off) -> d0 < 0: error. rq_fh's read position = off, as if read up to there: the backend seek
 | (0x46c8243e: the card filesystem's, installed at 0x400145de / 0x400146f0 / 0x40014806) to off's 512 B

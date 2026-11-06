@@ -206,6 +206,17 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL11 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL10 (flashed 2026-11-05) + card-reload fixes (the "x", the box, the names) and the headers:
+  1. Hold `[PTN]`+`[BANK]`: the header reads `PTN LOAD: ORIG PTN+PRT`. A `[CUE]` group reads `MULTI LOAD: TRK SEQS` / `TRKS FULL` / `ORIG SEQS` / `ORIGS FULL`.
+  2. SAVE PROJECT. In Clyps load slot 5 into a track of a NORMAL pattern whose length differs (the "x" appears on
+     your pattern's slot, slot 5 blinks red / yellow). `[PTN]`+TRACK (card reload): the "x" goes, the box and the
+     red / yellow blink are back on your pattern's slot, the pattern plays at its saved length.
+  3. The same with `[BANK]`+TRACK and with `[PTN]`+`[BANK]`+your pattern's trig: no "x", the box home.
+  4. Names: name your pattern's sequence on a track ([FUNC]+[BANK] on its slot), SAVE PROJECT, rename it, then reload
+     the track from the card: the name as saved comes back. A sequence never saved with a name (named after the
+     save): the card reload clears it (the default label) -- the card's version, not the original.
+
 - **KYOTI CL10 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL9 (its list below still applies; CL9 was never flashed) + a box per track and new grid LEDs:
   1. Open Clyps on a track that plays its original: the box is on your pattern's slot. Load slot 5: the box is on 5,

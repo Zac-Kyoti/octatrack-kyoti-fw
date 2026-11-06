@@ -3673,6 +3673,11 @@ ut_post:
     addq.l  #4,%sp
     tst.b   cl_open
     beq.b   ut_out
+    tst.b   cl_boxreq                   | a card reload: the box / LEDs go to the active track's sequence
+    beq.b   ut_rf
+    clr.b   cl_boxreq
+    jsr     cl_boxhome
+ut_rf:
     jsr     cl_refresh                  | a landing: the slot labels and the grid follow
 ut_out:
     tst.l   RDRAW                       | displaced; stock's beq.w follows on these flags
@@ -4037,7 +4042,7 @@ cl_draw:
     lea     16(%sp),%sp
 |   header (the user, 2026-11-02 / 11-04): "T6 LOAD: <label> BNK A" -- the track at x 3, then "LOAD: " and the
 |   label in a dark box, "BNK A" right-aligned to x 107 (boxed while [BANK] alone is held); a group or the
-|   [PTN]+[BANK] chord: "MULTI LD: <label> BNK A".
+|   [PTN]+[BANK] chord: "MULTI LOAD: <label> BNK A" / "PTN LOAD: <label> BNK A".
 |   Labels: TRK SEQ / TRK FULL ([FUNC]), the MIDI side the same; the box on your own pattern's slot (it has an
 |   original): ORIG TRK SEQ / ORIG TRK FULL; a group: TRK SEQS / TRKS FULL / ORIG SEQS / ORIGS FULL; the
 |   [PTN]+[BANK] chord held: ORIG PTN+PART. Each label's [FUNC] form is the next string (cl_s_* pairs).
@@ -4077,20 +4082,25 @@ cd_rl:
     movea.l %a2,%a0
     jsr     cl_textw
     move.l  %d0,%d5                     | d5 = the label's width
-|   a group, or the [PTN]+[BANK] chord held (ORIG PTN+PRT acts on every track): "MULTI LD:" at x 3 and the
-|   label 2 dark columns after it (the user, 2026-11-04) -- "MULTI LD: ORIG PTN+PRT"'s box ends at x 86
+|   a group ("MULTI LOAD:") or the [PTN]+[BANK] chord held ("PTN LOAD:", the user 2026-11-05) at x 3 and the
+|   label 2 dark columns after it -- "PTN LOAD: ORIG PTN+PRT"'s box ends at x 86
     btst    #1,%d7
     bne.b   cd_mh
     jsr     cl_ismulti
     tst.l   %d0
     beq.b   cd_one
 cd_mh:
-    pea     cl_s_multi
+    lea     cl_s_multi,%a0              | a group: "MULTI LOAD:"
+    btst    #1,%d7
+    beq.b   cd_mh2
+    lea     cl_s_ptnld,%a0              | the chord: "PTN LOAD:" (the user, 2026-11-05)
+cd_mh2:
+    move.l  %a0,-(%sp)
     pea     HDR_Y
     pea     3
     bsr.w   cl_text
-    lea     12(%sp),%sp
-    lea     cl_s_multi,%a0
+    lea     8(%sp),%sp
+    movea.l (%sp)+,%a0
     jsr     cl_textw
     move.l  %d0,%d3
     addq.l  #7,%d3                      | d3 = the label's x: 3 + the width + 4 (as after "LOAD:")
@@ -5533,6 +5543,7 @@ cl_cue:     .fill 16, 2, 0xffff         | per track: the cued (bank<<8 | pattern
 cl_cueh:    .fill 16, 2, 0xffff         | per track: the playing (bank<<8 | pattern) it aims at
 cl_arm:     .space 16                   | per track: the gate has passed; waiting for a window start
 cl_cuef:    .space 16                   | per track: the cue is FULL (its machine / FX too)
+cl_boxreq:  .byte 0                     | a card reload: the box home at the UI tail (cl_boxhome)
 cl_self:    .byte 0                     | ORIG PTN+PART playing: a pattern change to itself is pending
 cl_wpart:   .byte 0                     | the rest of a Part changed (cl_slrest, a card pattern): its whole mirror
 cl_wslab:   .byte 0                     | a NORMAL -> PER TRACK conversion: the mirror owes the whole slab
@@ -5556,7 +5567,8 @@ cl_xpix:    .byte 0,1, 2,1, 1,2, 0,3, 2,3   | the "x": corners and centre of a 3
 cl_colx:    .short 6, 8, 52, 3          | column 1: number field, bar / box 8..52, its x at 3..5
             .short 62, 60, 108, 55      | column 2: numbers 62..68, bar / box 60..108, its x at 55..57
 cl_fmt_hdrt:.asciz "%c%d "
-cl_s_multi: .asciz "MULTI LD:"            | a group, or the [PTN]+[BANK] chord held (32 px)
+cl_s_multi: .asciz "MULTI LOAD:"          | a group (40 px: "ORIGS FULL"'s box ends at x 86)
+cl_s_ptnld: .asciz "PTN LOAD:"            | the [PTN]+[BANK] chord held (32 px: "ORIG PTN+PRT"'s box ends at x 86)
 cl_fmt_hdrb:.asciz "BNK %c"
 cl_s_gseq:  .asciz "TRK SEQS"
 cl_s_gfull: .asciz "TRKS FULL"

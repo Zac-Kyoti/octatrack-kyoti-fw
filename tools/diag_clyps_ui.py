@@ -1408,6 +1408,110 @@ def main(argv):
         u.hook_del(hmc)
         tap(NO)
 
+    if "I" in a.only:
+        # --- I: card reloads of a fully saved project undo a Clyps load: no "x", the box / LEDs back on the
+        # pattern's own slot (the user, 2026-11-05)
+        print("I: SAVE PROJECT, a Clyps load, then the card reloads: no edited mark, the box home")
+        def worker(fn, ms, args=()):
+            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+            rt.call_as_main(fn, args=args, budget=600000)
+            rt.run(ms=ms)
+        if rd(0x80000012, 4):
+            tap(0x35)
+        tap(0x10)
+        act = rd(0x800065BE, 1)
+        NAMES_ = syms["cl_bss"] + 16 * BANKSZ + 16 * TRAC_A
+        nadr = lambda t: NAMES_ + ((bank * 16 + act) * 16 + t) * 10
+        nm = lambda t: bytes(u.mem_read(nadr(t), 10)).split(b"\0")[0]
+        u.mem_write(nadr(0), b"SAVEDNM\0\0\0")        # T1 named before the save, T2 not
+        u.mem_write(nadr(1), b"\0" * 10)
+        worker(0x40022850, int(os.environ.get("CLYPS_SAVE_MS", "8000")))
+        sl = BLOB + bank * BANKSTRIDE + act * PATSTRIDE
+        def edited(t=0):
+            # cl_edited for the active track's slot of the playing pattern: the record (length / scale bytes
+            # aside) or its effective length / scale differ from the original
+            r_, o_ = rec(act, t), oslot(act, t)
+            ls, os_ = slab(act), oslab(act)
+            def eff(slab_, rec_):
+                return (slab_[0x8E53], slab_[0x8E54]) if slab_[0x8E55] == 0 else (rec_[0x50], rec_[0x51])
+            dr = [hex(i) for i in range(len(r_)) if r_[i] != o_[i] and i not in (0x50, 0x51)]
+            return dr[:6], eff(ls, r_), eff(os_, o_), ls[0x8E55], os_[0x8E55]
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        e0 = edited()
+        print(f"      saved, T1: record diffs {e0[0]}, eff len/scale {e0[1]} vs {e0[2]}, mode {e0[3]} vs {e0[4]}", flush=True)
+        for kind, keys_ in (("[PTN]+TRACK 1 (TRK SEQ)", (PTN,)), ("[BANK]+TRACK 1 (TRK FULL)", (BANK,)),
+                            ("[PTN]+[BANK]+trig (the pattern)", None)):
+            q = next(x for x in range(16) if x != act and (rec(x, 0) != rec(act, 0) or slab(x)[0x50] != slab(act)[0x8E53]))
+            while state()["cur"] != q:
+                tap(DOWN)
+            tap(YES)
+            u.mem_write(nadr(0), b"CHANGED\0\0\0")    # renamed since the save; T2 named, never saved
+            u.mem_write(nadr(1), b"T2NAME\0\0\0\0")
+            e1 = edited()
+            print(f"      loaded {q + 1}: record diffs {e1[0][:3]}, eff {e1[1]} vs {e1[2]}, mode {e1[3]} vs {e1[4]}; box "
+                  f"{state()['cur'] + 1}; home 0x{rd(syms['cl_home'], 2):04x}", flush=True)
+            if keys_:
+                key(keys_[0], 1)
+                key(0x10, 1)
+                rt.run(ms=6000)
+                key(0x10, 0)
+                key(keys_[0], 0)
+            else:
+                key(PTN, 1)
+                key(BANK, 1)
+                key(act, 1)
+                rt.run(ms=6000)
+                key(act, 0)
+                key(BANK, 0)
+                key(PTN, 0)
+            tailmsg()
+            e2 = edited()
+            print(f"      {kind}: record diffs {e2[0]}, eff {e2[1]} vs {e2[2]}, mode {e2[3]} vs {e2[4]}; box "
+                  f"{state()['cur'] + 1}; home 0x{rd(syms['cl_home'], 2):04x}", flush=True)
+            check(not e2[0] and e2[1] == e2[2], f"{kind}: T1 equals its original (no edited mark)")
+            check(state()["cur"] == act and rd(syms["cl_home"], 2) == 0xFFFF,
+                  f"... the box back on your pattern {act + 1}, no Clyps source left (box {state()['cur'] + 1})")
+            whole = keys_ is None
+            check(nm(0) == b"SAVEDNM" and (nm(1) == (b"" if whole else b"T2NAME")),
+                  f"... T1's name as saved ({nm(0)}); T2's {'gone (never saved)' if whole else 'untouched'} ({nm(1)})")
+        tap(NO)
+        # a NORMAL pattern: the load converts it to PER TRACK; the card's TRK SEQ undoes that (cl_back)
+        nrm = next((x for x in range(16) if slab(x)[0x8E55] == 0), None)
+        src = next((x for x in range(16) if slab(x)[0x8E55] and slab(x)[0x50] != slab(nrm)[0x8E53]), None) if nrm is not None else None
+        if nrm is None or src is None:
+            print("      (no NORMAL pattern / no PER TRACK source of another length: conversion case skipped)", flush=True)
+        else:
+            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+            rt.seq_select_live(bank, nrm)
+            rt.run(ms=300)
+            act = rd(0x800065BE, 1)
+            key(PTN, 1)
+            key(BANK, 1)
+            key(BANK, 0)
+            key(PTN, 0)
+            key(src, 1)
+            key(src, 0)
+            e1 = edited()
+            print(f"      NORMAL pattern {act + 1}, T1 from {src + 1}: mode {e1[3]} (saved {e1[4]}), eff {e1[1]} vs {e1[2]}", flush=True)
+            key(PTN, 1)
+            key(0x10, 1)
+            rt.run(ms=6000)
+            key(0x10, 0)
+            key(PTN, 0)
+            tailmsg()
+            e2 = edited()
+            mm = bytes(u.mem_read(0x1001614E + act * PATSTRIDE, PATSTRIDE)) if rd(0x80000002, 1) == bank else None
+            md = [hex(i) for i in range(PATSTRIDE) if mm is not None and mm[i] != slab(act)[i]][:6]
+            print(f"      [PTN]+TRACK 1: record diffs {e2[0]}, eff {e2[1]} vs {e2[2]}, mode {e2[3]} vs {e2[4]}; box "
+                  f"{state()['cur'] + 1}; mirror diffs {md}", flush=True)
+            check(not e2[0] and e2[1] == e2[2] and e2[3] == e2[4] and slab(act)[:0x8E5C] == oslab(act)[:0x8E5C],
+                  "NORMAL pattern: the card's TRK SEQ undoes the conversion (no edited mark, the slab as loaded)")
+            check(state()["cur"] == act and not md, "... the box on your pattern; the NVRAM mirror follows the whole slab")
+            tap(NO)
+
     if "V" in a.only:
         # --- V: each track's box (the user, 2026-11-04): Clyps opens / a track change puts the box on that
         # track's sequence (where what it plays was loaded from; its own slot for an original); moving it is

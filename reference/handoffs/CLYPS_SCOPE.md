@@ -1145,6 +1145,22 @@ CL3-CL8). Stopped: unchanged (at once). Row spacing stays 1 px (2 px mock-ups sh
 - Multi: unchanged -- loads take the box's slot for every member; the box follows the view's track (CL7's view rule).
 - Gate V: open, load, move, track change and back, [PAGE], cued -- box positions and the LED_FLASH calls.
 
+### 1.15 Card reloads end a Clyps load (the user, 2026-11-05; KYOTI CL11, not flashed)
+- Names (the user: the card's version, not the original -- an original may have a name the card does not):
+  `rq_names` reads the reloaded sequences' names from clypsNN.strd ("CLYP" v1, index pattern * 16 + track,
+  `rq_seek` to 8 + index * NAME_W): a track reload its one, a pattern reload its 16; no file / never named:
+  cleared (the default label). Gate I: T1 named + saved -> renamed -> each reload brings the saved name; T2
+  named after the save -> a track reload leaves it, the pattern reload clears it.
+
+CL10 on hardware: after a card reload of a fully saved project the "x" stayed and the box / LED stayed on the
+loaded slot. Gate I reproduced both on CL10 (OT DEMO; the "x" case = a NORMAL pattern a Clyps load converted to PER
+TRACK): the TRK SEQ / FULL reload kept the live PER TRACK trailer, so the track's effective length (its record's,
+from a NORMAL save) differed from the original's (the pattern's). Fixed in the card worker: live PER TRACK + saved
+NORMAL -> the track gets the saved pattern's length / scale, then `cl_back` (every track original -> the slab as
+loaded) and `cl_wslab` (the whole slab to the mirror); `rj_ok` clears the reloaded tracks' provenance (`cl_home`: the
+track, or every track homed on the reloaded pattern) and asks the UI tail for `cl_boxhome` (`cl_boxreq`). Header:
+the chord reads `PTN LOAD:`, a group `MULTI LOAD:` ("ORIGS FULL"'s box to x 86).
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)
