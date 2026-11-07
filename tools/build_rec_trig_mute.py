@@ -76,6 +76,7 @@ RTM_MASK = kyoti_place.at("rtm_mask", 0x400d7c3a)
 SITES = {
     0x4009d9a4: ("4a83676e243c0000091a", "rtm_gate",  "gate"),   # step handler
     0x40040146: ("7004b08c667a",         "rtm_dots",  "jmp"),    # letter renderer: the dots
+    0x400448ba: ("52844fef0020",         "rtm_mark",  "jmp"),    # mark painter: T1-4 dots kept
     0x4000f210: ("7c77bc816c5e",         "rtm_cc",    "jmp"),    # CC handler fall-through
     0x40083e84: ("c1b9460fab40",         "rtm_trel",  "jsr"),    # track-key release: close toast
 }

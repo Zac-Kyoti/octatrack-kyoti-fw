@@ -342,8 +342,10 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   Sessions 122–123 and 2026-10-29. **2026-11-06:** the mute indicator moved — two dots stacked
   beside the tab's machine letter on its inner side (letter renderer `0x40040146`; the status
   icon renderer is stock again); emulator pixel-checked, user OK'd the render, NOT flashed;
-  re-pinned on the user's instruction: standalone `fe4008da…` (syx `bd219007…`), BUG_RTM `4e6fa225…`
-  (syx `71176b70…`), KYOTI V1.7 `2f79d0c6…` (syx `1030bfaa…`) (scope §20).
+  re-pinned on the user's instruction. **2026-11-07:** hardware (KYOTI V1.7 + Clyps) lost the TOP dot on
+  T1–4: stock's mark painter `0x40044804` (runs last) rewrites that column; fixed by `rtm_mark` at
+  `0x400448ba`; re-pinned: standalone `60e97fb3…` (syx `0c289ab5…`), BUG_RTM `dac87abd…` (syx `9582710c…`),
+  KYOTI V1.7 `e7cadcca…` (syx `f50ece8d…`), NOT flashed (scope §20–21).
 - **KYOTI load audit** (Session 125) — `reference/handoffs/KYOTI_LOAD_AUDIT.md`: ranked DSP/ColdFire
   costs of every feature, the hardware test plan (HW-A first, no flash), and **a KYOTI V1.0 crash on
   the MASTER track's PLAYBACK/LFO page** (emulator; section 8), not fixed yet.

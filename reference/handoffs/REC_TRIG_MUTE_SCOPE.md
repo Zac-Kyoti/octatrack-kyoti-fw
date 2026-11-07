@@ -709,3 +709,29 @@ are gone: that renderer is stock again, so a muted track mid-recording now shows
 standalone and on KYOTI V1.7. Screen render shown to the user: "The render is correct."
 KYOTI V1.7 and BUG_RTM differ from their previous pins only inside REC_TRIG_MUTE's spans
 (147 B each). Octabam oracle: 458 B, `db610597…`. **Not flashed.**
+
+## 21. Hardware: the top dot missing on T1–T4 (2026-11-07)
+
+**Report (user, KYOTI V1.7 + Clyps flashed):** on the left-side tabs the first (top) dot is not drawn;
+the right side is fine.
+
+**Cause (C, own disassembly).** The UI pass `0x40052200` paints the tabs in three steps: the status
+icons `0x4004bd48`, the letters `0x4003fed8`, then **`0x40044804`**, the "status mark" painter
+(`0x40052238`). Audio mode, per track, it sets or clears four pixels with `SETPIX` at x = 6 + active
+(T1–4) / 127 − active (T5–8), y = a2, a2+2, a2+3, a2+4 with a2 = 55 − 15·(t & 3) (the letter's bottom
+row): a "!" lit when the voice runs (`+0`) with byte `+3` set, cleared otherwise. On T1–4 that column
+is our dot column and a2+3 is our top dot (the letter renderer's a2+4); a2+1, our bottom dot, is the
+one row it skips. On T5–8 it is x = 127, the outer edge. §20's emulator test never called it.
+
+**Fix.** 6-B detour at its per-track end `0x400448ba` (`addq.l #1,%d4 ; lea 32(%sp),%sp`) → `jmp
+rtm_mark` (`.main`, 308/308 B): replays them; on a muted, non-PICKUP T1–4 tab writes x = d2 from a2+4
+down: background, dot, background, dot, background (background = d2 − 6, so the active tab's
+inversion holds), so the dots also win over a lit "!" (they would otherwise merge into a bar); then
+`0x400448c0`. d5 saved; SETPIX touches only a0/a1/d0/d1 and saves d2/d3. Clyps hooks this painter's
+active test (`0x4004482a`), so d2 already follows Clyps's active track.
+
+**Checks.** `emu_rec_trig_mute.py` renders as hardware does (status icons, letters, marks) and checks
+rows top−1..top+3 of the dot column: muted / unmuted / PICKUP, the active tab on each side, a lit "!"
+on a muted T1 (dots win) and an unmuted T2 (stock "!"): ALL PASS 72/72, standalone and KYOTI V1.7.
+Only REC_TRIG_MUTE's spans change (106 B vs the 11-06 pins). Octabam oracle 562 B `39377c4e…`.
+**Not flashed.**

@@ -37730,3 +37730,16 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
 - **octabam:** since #977, octabam's HOOKS bridges `status_icon` / `icon_draw` (and FREE LOOP's `fl_draw`, which
   jumped to `rtm_draw`) were built on our two status-icon sites, so the pin PR also retires `icon_draw`, takes
   REC_TRIG_MUTE out of `status_icon` and reworks `verify_hooks.py` around REC THRESHOLD + FREE LOOP.
+
+## 2026-11-07 (`rec-trig-mute`) — REC_TRIG_MUTE: the top dot on T1–T4, lost to stock's mark painter (fixed, re-pinned, NOT flashed)
+
+- **Hardware (user, KYOTI V1.7 + Clyps):** T1–T4 tabs showed only the bottom dot; T5–T8 fine.
+- **Cause:** stock `0x40044804` (the tabs' "!" painter, last of the three tab painters in the UI pass,
+  `0x40052238`) rewrites x = 6 + active at the letter's top−1, top, top+1, top+3 on T1–4 every pass;
+  our top dot is in that column. Its T5–8 column is x = 127. The 11-06 emulator test never ran it.
+- **Fix:** `rtm_mark` at its per-track end `0x400448ba` rewrites the column on a muted non-PICKUP T1–4
+  tab (dots over a lit "!"). Emulator now renders in hardware order: ALL PASS 72/72 (standalone + KYOTI
+  V1.7). Test fixes: `--png` resolved against the repo (it landed in refs/octabam/out/).
+- **Re-pinned FINAL (the 11-06 pins were the buggy build), NOT flashed:** standalone mainos `60e97fb3…`
+  (syx `0c289ab5…`), BUG_RTM `dac87abd…` (syx `9582710c…`), KYOTI V1.7 `e7cadcca…` (syx `f50ece8d…`).
+  A Clyps image needs Clyps's own merge of this. Scope §21. octabam #1066 updated to the new pin.

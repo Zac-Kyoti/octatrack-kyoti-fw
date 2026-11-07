@@ -172,7 +172,9 @@ quick check for each:
   letter, on the inner side: right of it on T1–T4, left on T5–T8; inverted on the active
   track's tab), the play/stop icon below stays stock, GRID REC
   does not switch, the current recording finishes and the next cycle does not record.
-  `[TRACK]` + `[REC]` again → `REC TRIGS UNMUTED`, recording resumes. Stopped, the dots stay; unmuted, they go. Mute T1 alone, then hold T1 + T3 and press `[REC]` → `REC TRIGS TOGGLED`, T1
+  `[TRACK]` + `[REC]` again → `REC TRIGS UNMUTED`, recording resumes. Stopped, the dots stay; unmuted, they go. Check
+  BOTH dots on a left-side tab (T1–T4) as well as a right-side one: the 2026-11-06 build lost the
+  top dot on T1–T4. Mute T1 alone, then hold T1 + T3 and press `[REC]` → `REC TRIGS TOGGLED`, T1
   unmuted and T3 muted. The toast lasts 1 s while the track key stays held (also after
   `[REC]` is let go), and closes the moment the track key is released. `[REC]` with no track
   key held still switches GRID REC; `[TRACK]` +

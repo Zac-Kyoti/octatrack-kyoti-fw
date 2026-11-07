@@ -27,14 +27,14 @@ toggle, and the 1 s toast that closes on release — ran on the same MKI inside 
 `..▶` status icons) are checked pixel by pixel in the emulator, not yet on hardware. MIDI CC 80
 has not been tried on hardware. This octabam
 form — the `OCTABAM_UNIT` variant of the source — has not been flashed. Its `reference` is the
-author's build of that form (linked alone at `0x40000000`, 458 B, sha256 `db610597…`), made by
+author's build of that form (linked alone at `0x40000000`, 562 B, sha256 `39377c4e…`), made by
 `tools/build_rec_trig_mute.py` with octabam's own DRAM-unit oracle recipe on every run.
 
 ## Contents
 
 | file | what it is |
 |---|---|
-| `manifest.py` | the module: one DRAM `Linked` unit, four `Detour`s, four `SymbolRef`s |
+| `manifest.py` | the module: one DRAM `Linked` unit, five `Detour`s, four `SymbolRef`s |
 | `patch_rec_trig_mute.s` | the m68k source for every layout; octabam builds it with `--defsym OCTABAM_UNIT` |
 
 ## Sites
@@ -43,6 +43,7 @@ author's build of that form (linked alone at `0x40000000`, 458 B, sha256 `db6105
 |---|---|---|---|
 | `0x4009d9a4` | `tst.l %d3 ; beq.s ; move.l #0x91a,%d2` | `jmp`, padded to 10 B | step handler: a muted track's step has no recorder trig |
 | `0x40040146` | `moveq #4,%d0 ; cmpl %a4,%d0 ; bnes` | `jmp` | tab letter renderer: the two dots beside a muted track's letter |
+| `0x400448ba` | `addq.l #1,%d4 ; lea 32(%sp),%sp` | `jmp` | tab mark painter (runs last; rewrites T1–T4's dot column): the dots again, over its `!` |
 | `0x4000f210` | `moveq #119,%d6 ; cmp.l %d1,%d6 ; bge` | `jmp` | CC handler fall-through: CC 80 |
 | `0x40083e84` | `and.l %d0,0x460fab40` | `jsr` | track-key release: our toast closes once no track key is held |
 | `0x400c003c` / `0x400c0040` | `0x40048774` | data | T1 keymap `[REC]` record, press / release → `rtm_rec` |
