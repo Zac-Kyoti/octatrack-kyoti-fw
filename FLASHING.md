@@ -208,6 +208,15 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL20 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL19 (its list below still applies) + the "full span" cells (the approved mock-ups, 2026-11-07):
+  1. Each edited "x" sits 1 px before its slot number; the highlight bar and the select box reach left over the
+     "x" and the arrows, 1 px short of the window's border (column 1 on the left, column 2 on the right).
+  2. Arrows on the highlight: dark notches on its edges, the inverted "x" 1 px clear of the left point.
+  3. Arrows on the select box: the box loses the pixel just above and below each arrow's column (corner, gap,
+     arrow, gap, corner on each side); the select box alone keeps its full outline and corners.
+  4. Arrows on a slot without a box: the arrowheads at the same edges, 1 px clear of the "x".
+
 - **KYOTI CL19 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL18 (its list below still applies, except its step 5) + the group's tabs redrawn:
   1. Hold [CUE], add T6, T7, T1: T1 (the active track) is the normal filled tab; T6 and T7 show a one-pixel

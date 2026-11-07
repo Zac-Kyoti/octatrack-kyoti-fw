@@ -216,11 +216,11 @@
     .equ ROW0_Y,      46                | row r text at 46 - 6r: the 47-row block 4..50, centred in
                                         | 1..54 (4 rows above, 3 below: the field is odd by one); a bar /
                                         | box (text +- 1) stays inside the field (cl_bary clips anyway)
-| The cells (the user, 2026-10-27), x from the frame (0) to the right: 2 px, the "edited" x (3..5),
-| 2 px, the bar / box edge (8), 1 px, the slot number (column 1 has only single digits: x 10), 3 px,
-| the label (16, up to 35 px: a 9-character name), 1 px, the edge (52); 2 px, column 2's x (55..57),
-| 2 px, its edge (60), 1 px, its numbers (62..68), 3 px, its label (72), 1 px, its edge (108), 2 px,
-| the frame (111). Per column (cl_colx): the 2-digit number field's x, the bar / box edges, the x's x.
+| The cells (the user, 2026-10-27; "full span" 2026-11-07), x from the frame (0) to the right: 1 px, the
+| bar / box edge (2), the arrow's point (3), 1 px, the "edited" x (5..7), 1 px, the slot number (column 1
+| has only single digits: x 9), the label (up to 35 px: a 9-character name), the edge (52); 2 px; column 2's
+| edge (55), point (56), 1 px, x (58..60), 1 px, numbers (62..68), label, edge (109), 1 px, the frame (111).
+| Per column (cl_colx): the 2-digit number field's x, the bar / box edges, the x's x.
     .equ EMP_DX,      12                | "---" (11 px) centred in the 35 px label: places 4..6
     .equ SUM_GAP,     2                 | the number field (2 x DIGIT_W) + 2 = the label at col + 10
     .equ BOX_R,       109               | a dark header box's right column (text ends at 107)
@@ -4752,6 +4752,26 @@ cd_vline:
     lea     16(%sp),%sp
     rts
 
+| cd_notch: the select box's vertical edge at x = d0 cleared at y = d4 and y + 4 -- the pixels just past the
+| ends of an arrow's column (y + 1 .. y + 3) on it. Keeps d2-d7.
+cd_notch:
+    move.l  %d4,%d1
+    bsr.b   cn_px
+    move.l  %d4,%d1
+    addq.l  #4,%d1
+cn_px:
+    move.l  %d0,-(%sp)
+    clr.l   -(%sp)                      | mode 0 = clear
+    move.l  %d1,-(%sp)
+    move.l  %d0,-(%sp)
+    move.l  %d1,-(%sp)
+    move.l  %d0,-(%sp)
+    move.l  %a4,-(%sp)
+    jsr     RECT
+    lea     24(%sp),%sp
+    move.l  (%sp)+,%d0
+    rts
+
 cl_draw:
     tst.b   cl_open
     beq.w   cd_out
@@ -5220,6 +5240,18 @@ cd_nosel:
     moveq   #1,%d3                      | on the highlight bar: inverted
 cd_pg:
     bsr.w   cd_glyph
+    tst.l   %d3                         | on the select box (set, not the highlight): its frame's pixel beside
+    bne.b   cd_boxed                    | each end of each arrow's column off, so the arrows stand out (the
+    moveq   #0,%d0                      | user, 2026-11-07)
+    move.b  cl_bank,%d0
+    lsl.l   #8,%d0
+    or.l    %d2,%d0
+    cmp.l   %d7,%d0
+    bne.b   cd_boxed
+    move.l  %d5,%d0
+    bsr.w   cd_notch
+    move.l  %d6,%d0
+    bsr.w   cd_notch
 cd_boxed:
     moveq   #1,%d0
     move.l  %d0,RDRAW
@@ -6395,13 +6427,13 @@ cl_nq:      .byte 0                     | cues pending (the tick's fast path)
 cl_corners: .short 0,63, 1,63, 0,62, WIN_W-1,63, WIN_W-2,63, WIN_W-1,62
 cl_xpix:    .byte 0,1, 2,1, 1,2, 0,3, 2,3   | the "x": corners and centre of a 3 x 3 at rows y + 1..3
             .align 2
-cl_colx:    .short 5, 6, 52, 2          | column 1: number field (slots 1-8: one digit, at 9), bar / box 6..52, x 2..4
-            .short 62, 59, 109, 55      | column 2: numbers 62..68, bar / box 59..109, its x at 55..57
-| (the user, 2026-11-06) the widest text -- a 9-character name, 35 px: the editor's set is 4 px at most
-| (0x400a77fe) -- clears the pre-select arrows by 1 px on both sides (the box: 3 px, the text, 3 px); each
-| "x" clears its box, the box to its left and the window's border. Column 1 holds one-digit slots only, so
-| its box starts at the digit: 47 px against column 2's 51. 1 px from the window's border on both sides (the
-| user); the spare pixel sits between column 1's box and column 2's x (2 px there).
+cl_colx:    .short 5, 2, 52, 5          | column 1: number field (slots 1-8: one digit, at 9), bar / box 2..52, x 5..7
+            .short 62, 55, 109, 58      | column 2: numbers 62..68, bar / box 55..109, its x at 58..60
+| (the user, 2026-11-07, "full span") each "x" 1 px before its slot number; the bar / box spans the "x" and the
+| arrows, 1 px in from the window's border on the outer side (x 1 / 110 free), 2 px between the columns
+| (53, 54); the arrows on the box edges as before: point (x0 + 1) -- 1 px -- the "x" -- 1 px -- the number.
+| The widest text -- a 9-character name, 35 px: the editor's set is 4 px at most (0x400a77fe) -- still clears
+| the right arrow by 1 px (2026-11-06).
 cl_fmt_hdrt:.asciz "%c%d "
 cl_s_multi: .asciz "MULTI LOAD:"          | a group (40 px: "ORIGS FULL"'s box ends at x 86)
 cl_s_ptnld: .asciz "PTN LOAD:"            | the [PTN]+[BANK] chord held (32 px: "ORIG PTN+PRT"'s box ends at x 86)

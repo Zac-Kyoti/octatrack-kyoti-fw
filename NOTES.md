@@ -38107,3 +38107,9 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   a change of group / active / side (`cl_tabsig`). Gate U's tab check now reads filled vs outlined pixels
   (painters B, A + cl_tabhook). Gates on CL19: full 116, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15,
   V+Z+I 29, H 3. syx 2f27938b….
+- **KYOTI CL20** (2026-11-07, NOT flashed; CL16 on the unit): "full span" cells from the user's approved mock-ups:
+  `cl_colx` col 1 = 5 / 2..52 / x 5, col 2 = 62 / 55..109 / x 58 (each "x" 1 px before its number, bar / box over
+  the "x" and the arrows, 1 px from the border); `cd_notch` clears the select box's frame beside both ends of each
+  arrow's column when the arrows are on it. Real renders = the mock-ups pixel for pixel (geometry). Mock-ups:
+  out/clyps/mock1/ (mock.py, mock2.py edit a real render). Gates on CL20: full 116, T 21, F+Q 27, L 17, J 8,
+  M+U 38, X+O+W 15, V+Z+I 29, H 3. syx f5c308f2….

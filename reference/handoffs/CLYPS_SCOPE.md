@@ -1281,6 +1281,18 @@ the chord reads `PTN LOAD:`, a group `MULTI LOAD:` ("ORIGS FULL"'s box to x 86).
   (`cl_tabsig`) resets both painters' side caches so they repaint every tab, which also clears old outlines.
   Render: T1 active = T1 filled, T6 / T7 outlined; T6 active = T6 filled, T1 / T7 outlined; [NO] = stock tabs.
 
+### 1.24 Full-span cells; the arrows notch the select box (the user, 2026-11-07; KYOTI CL20, not flashed)
+
+- Chosen from pixel mock-ups (two rounds; the corner-less select box was rejected): `cl_colx` column 1 = number 5,
+  bar / box 2..52, x 5..7; column 2 = number 62, bar / box 55..109, x 58..60 (window x; screen = + 8). Each "x"
+  1 px before its number; the bar / box covers the "x" and the arrows, 1 px from the border on the outer side,
+  2 px between the columns; the arrows stay on the box edges (point x0 + 1, 1 px, the "x"). The "x" is XORed
+  before the bar, so the highlight shows it inverted.
+- Arrows on the select box (set, not the highlight): `cd_notch` clears the frame at y and y + 4 on both edges --
+  the pixels just past the ends of each arrow's column (y + 1 .. y + 3).
+- The real build rendered pixel-identical to the mock-ups for the select box and plain-slot cases (with / without
+  "x"); the highlight cases differ only in header / label text (different load history).
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)
