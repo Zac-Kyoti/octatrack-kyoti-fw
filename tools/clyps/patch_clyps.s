@@ -397,7 +397,15 @@ ce_noundo:
     move.b  %d0,cl_chordout             | opened by the chord: chord + SCALE closes Clyps
     clr.b   cl_ptfwd
     clr.b   cl_bkfwd
-    jsr     cl_boxhome                  | the box on the active track's sequence (the user, 2026-11-04)
+    jsr     cl_trk                      | the active track's own pre-select arrows (cl_pre, the user,
+    move.l  %d0,-(%sp)                  | 2026-11-06), else the box on its sequence (2026-11-04)
+    jsr     cl_pload
+    tst.l   %d0
+    bne.b   ce_ph
+    jsr     cl_boxhome
+ce_ph:
+    move.l  (%sp)+,%d0
+    move.b  %d0,cl_lastt
     pea     cl_close                    | close_cb: eviction lands in the same teardown
     pea     PRIO
     clr.l   -(%sp)                      | dy
@@ -577,20 +585,11 @@ cl_k_trig:
     clr.b   cl_chordout
     bra.w   cl_close
 kt_go:
-    move.l  4(%sp),%d0
-    andi.l  #15,%d0
-    move.b  %d0,cl_cur
-    move.b  cl_bank,%d1
-    move.b  %d1,cl_sbank
-    jsr     cl_onorig                   | your own pattern's slot: its original back (as [YES] there)
-    tst.l   %d0
-    bne.w   ky_orig
-    move.l  4(%sp),%d0
-    andi.l  #15,%d0
+    move.l  4(%sp),%d0                  | an execution: the active track takes the trig's slot, every other
+    andi.l  #15,%d0                     | member its own (cl_exec; the user, 2026-11-06)
     move.l  %d0,-(%sp)
-    jsr     cl_load
+    jsr     cl_exec
     addq.l  #4,%sp
-    jsr     cl_flstart                  | the load confirmation
     bra.w   cl_refresh
 kt_out:
     rts
@@ -615,15 +614,9 @@ cl_k_yes:
 .endif                                  | (keycode, event) are its arguments, in place)
     rts
 ky_noptn:
-    jsr     cl_onorig                   | your own pattern's slot = the original
-    tst.l   %d0
-    bne.b   ky_orig
-    moveq   #0,%d0
-    move.b  cl_cur,%d0
-    move.l  %d0,-(%sp)
-    jsr     cl_load
+    pea     -1                          | an execution: each target its arrows, else its select box, else
+    jsr     cl_exec                     | its original (cl_exec; the user, 2026-11-06)
     addq.l  #4,%sp
-    jsr     cl_flstart
     bra.w   cl_refresh
 ky_orig:
     moveq   #0,%d0
@@ -907,7 +900,7 @@ cl_k_page:
     cmpi.l  #1,%d0
     bne.w   kn_out
     clr.b   cl_flash
-    clr.b   cl_pmoved                   | a restore: the pre-select box goes
+    jsr     cl_pexec                    | a restore: its tracks' pre-select arrows go
     jsr     cl_hstate
     btst    #1,%d0
     bne.b   kp_pat
@@ -917,6 +910,9 @@ cl_k_page:
     move.l  #0x10000,%d0
 kp_one:
     jsr     cl_restore
+    jsr     cl_targets                  | nothing restored ([CUE] held, no member): nothing to flash
+    tst.l   %d0
+    beq.w   cl_refresh
     jsr     cl_onorig
     tst.l   %d0
     beq.w   cl_refresh                  | the box elsewhere: nothing to flash
@@ -950,6 +946,21 @@ hs_out:
 | track and clears the held mark). After the release the view and the grid follow.
 cl_k_track:
     FWDCHK
+    tst.w   cl_grp                      | a group (and [CUE] up): only a member can be the active track --
+    beq.b   ktr_any                     | another track's key does nothing, the view stays (the user,
+    tst.b   cl_cuh                      | 2026-11-06: multi-select owns the interface until it ends)
+    bne.b   ktr_any
+    move.l  4(%sp),%d0
+    andi.l  #7,%d0
+    tst.l   MIDI_MODE
+    beq.b   ktr_m
+    addq.l  #8,%d0
+ktr_m:
+    move.w  cl_grp,%d1
+    btst    %d0,%d1
+    bne.b   ktr_any
+    rts
+ktr_any:
     clr.b   cl_flash
     jsr     cl_flstop
 |   a card reload (scope §1.8, the user 2026-10-30): [PTN] alone held = the sequence, [BANK] alone
@@ -1187,12 +1198,15 @@ kf_out:
 | for 0.5 s (cl_draw: cl_fph); the ORIG header box likewise. An arrow, bank paging, a TRACK key or
 | closing stops it at once; a new pick restarts it on the new slot.
 cl_flhdr:                               | the header's label flashes (ORIG / ORIG PTN+PART)
-    clr.b   cl_pmoved                   | an execution: the pre-select box goes
+    jsr     cl_pexec                    | an execution: its tracks' pre-select arrows go
     moveq   #1,%d0
     move.b  %d0,cl_ftgt
     bra.b   cl_fls
 cl_flstart:                             | the select box flashes
-    clr.b   cl_pmoved                   | an execution: the pre-select box goes
+    jsr     cl_targets                  | nothing loaded ([CUE] held, no member: the user, 2026-11-06):
+    tst.l   %d0                         | no confirmation, the arrows stay
+    beq.b   fs_out
+    jsr     cl_pexec                    | an execution: its tracks' pre-select arrows go
     clr.b   cl_ftgt
 cl_fls:
     moveq   #FL_TICKS,%d0
@@ -1201,6 +1215,7 @@ cl_fls:
     move.b  %d0,cl_fcnt
     moveq   #1,%d0
     move.b  %d0,cl_fph
+fs_out:
     rts
 cl_flstop:
     clr.b   cl_flk
@@ -1299,7 +1314,12 @@ sc2_out:
 | Clyps and every change of the viewed track; moving it within a view is free (the user, 2026-11-04).
 | Uses d0, d1, a0.
 cl_boxhome:
-    clr.b   cl_pmoved                   | home: no pre-select box until the arrows move it
+    clr.b   cl_pmoved                   | home: no pre-select box until the arrows move it -- nor in the
+    jsr     cl_trk                      | active track's record (a card reload, the open of a track
+    lea     cl_pre,%a0                  | without one)
+    add.l   %d0,%d0
+    adda.l  %d0,%a0
+    bclr    #7,(%a0)
     jsr     cl_srccode
     move.b  %d0,%d1
     andi.l  #15,%d1
@@ -1430,10 +1450,16 @@ cf_full:
 cl_refresh:
     lea     -16(%sp),%sp
     movem.l %d2-%d4/%a2,(%sp)
-    jsr     cl_trk                      | another track than at the last refresh (TRACK, [MIDI]): the
-    cmp.b   cl_lastt,%d0                | pre-select box goes to ITS sequence (the user, 2026-11-04); not in
-    beq.b   crf_same                    | a group: one position for every member, kept across the view's
-    tst.l   cl_gmask                    | track changes (the user, 2026-11-05)
+    jsr     cl_trk                      | another track than at the last refresh (TRACK, [MIDI], a group's
+    cmp.b   cl_lastt,%d0                | view): the track left keeps its pre-select arrows (cl_pre), the
+    beq.b   crf_same                    | new one gets ITS own back, else the box on its sequence (the user,
+    move.l  %d0,-(%sp)                  | 2026-11-04 / 06); in a group the position is shared and stays
+    moveq   #0,%d0                      | (2026-11-05)
+    move.b  cl_lastt,%d0
+    jsr     cl_psave
+    move.l  (%sp)+,%d0
+    jsr     cl_pload                    | (a group too: every member its own arrows, the user 2026-11-06)
+    tst.l   %d0
     bne.b   crf_same
     jsr     cl_boxhome
 crf_same:
@@ -1545,6 +1571,22 @@ cl_cueload:
     andi.l  #1,%d5                      | d5 = FULL (the MIDI side too since 2026-10-30: the user
                                         | wants SEQ vs FULL there as on the audio side)
     andi.l  #0xffff,%d2
+|   the incoming data already plays -- the record and its effective length / scale (cl_samein), and for
+|   FULL the track's Part slice (cl_slsame): nothing is loaded, a pending cue for the track goes, the
+|   provenance follows the pick (the user, 2026-11-06: "unless the playing data already matches")
+    lea     cl_cue,%a2
+    jsr     cl_samein
+    tst.l   %d0
+    bne.b   lo_go
+    tst.l   %d5
+    beq.b   lo_same
+    jsr     cl_slsame
+    tst.l   %d0
+    bne.b   lo_go
+lo_same:
+    jsr     cl_provset
+    bra.w   lo_cancel
+lo_go:
     tst.l   RUNNING
     bne.b   lo_cue
     move.l  %d5,-(%sp)
@@ -1570,18 +1612,6 @@ lo_post:
     bra.b   lo_out
 lo_cue:
     lea     cl_cue,%a2
-|   re-picking the slot that already plays (its source, or the pattern's own slot) cancels the cue --
-|   only while the track plays it unedited; an ALL load is always re-applied (its slice may differ).
-|   (2026-11-02: a second temp reload after an edit was cancelled this way: toast, no data.)
-    move.l  %d3,%d0
-    jsr     cl_playt                    | d0 = playing
-    cmp.l   %d2,%d0
-    bne.b   lo_set
-    tst.l   %d5
-    bne.b   lo_set
-    jsr     cl_asplays                  | d3 = track, d2 = code -> d0 = 0: the record equals the source
-    tst.l   %d0
-    beq.b   lo_cancel
 lo_set:
     move.l  %d3,%d1
     add.l   %d1,%d1
@@ -1609,6 +1639,314 @@ lo_cancel:
 lo_out:
     movem.l (%sp),%d2-%d5/%a2
     lea     20(%sp),%sp
+    rts
+
+| cl_samein (d3 = track, d2 = code: bank << 8 | pattern / SRC_* << 8) -> d0 = 0 when that source's record equals
+| what the track plays now -- cl_same (audio +0x899 aside) and the same effective length / scale. 1 otherwise
+| or without the source. Keeps d2-d7/a2-a6.
+cl_samein:
+    lea     -16(%sp),%sp
+    movem.l %d4-%d5/%a2-%a3,(%sp)
+    moveq   #0,%d0
+    move.b  %d2,%d0
+    move.l  %d0,-(%sp)                  | spat
+    move.l  %d2,%d0
+    lsr.l   #8,%d0
+    andi.l  #0xff,%d0
+    move.l  %d0,-(%sp)                  | sbank
+    move.l  %d3,-(%sp)
+    jsr     cl_srcrec
+    lea     12(%sp),%sp
+    move.l  %a0,%d4
+    beq.b   si_ne
+    movea.l %a0,%a3                     | a3 = the source record
+    lsl.l   #8,%d0
+    or.l    %d1,%d0
+    movea.l %d0,%a2                     | a2 = its effective length << 8 | scale
+    move.l  %d3,-(%sp)
+    jsr     cl_toff
+    addq.l  #4,%sp
+    move.l  %d0,%d5                     | d5 = the record offset
+    move.l  %d3,%d4                     | d4 = the track (cl_efflen)
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  %d0,-(%sp)
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     cl_slab
+    addq.l  #8,%sp
+    move.l  %a0,-(%sp)
+    jsr     cl_efflen                   | the playing one's
+    movea.l (%sp)+,%a0
+    cmpa.l  %d0,%a2
+    bne.b   si_ne
+    adda.l  %d5,%a0
+    movea.l %a3,%a1
+    move.l  %d3,%d0
+    jsr     cl_same
+    bra.b   si_out
+si_ne:
+    moveq   #1,%d0
+si_out:
+    movem.l (%sp),%d4-%d5/%a2-%a3
+    lea     16(%sp),%sp
+    rts
+
+| cl_slsame (d3 = track, d2 = code) -> d0 = 0 when the track's Part slice (cl_slA / cl_slM) in the playing Part
+| equals that source's: a slot -> its pattern's Part; SRC_ORIG -> the playing pattern's Part as loaded;
+| SRC_SAVED -> the Part saved with it. 1 otherwise. Keeps d2-d7/a2-a6.
+cl_slsame:
+    lea     -28(%sp),%sp
+    movem.l %d2-%d6/%a2-%a3,(%sp)
+    move.l  %d2,%d4
+    lsr.l   #8,%d4
+    andi.l  #0xff,%d4                   | d4 = sbank / SRC_*
+    cmpi.l  #SRC_SAVED,%d4
+    bne.b   ss_ns
+    lea     cl_svalid,%a0
+    tst.b   (%a0,%d3.l)
+    beq.w   ss_ne
+    move.l  %d3,%d0
+    move.l  #PARTSZ,%d1
+    muls.l  %d1,%d0
+    movea.l #SAVEPART,%a3
+    adda.l  %d0,%a3
+    bra.b   ss_live
+ss_ns:
+    cmpi.l  #SRC_ORIG,%d4
+    bne.b   ss_slot
+    jsr     cl_origok
+    tst.l   %d0
+    beq.w   ss_ne
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    movea.l #SNAPB,%a1
+    jsr     cl_partin
+    movea.l %a0,%a3
+    bra.b   ss_live
+ss_slot:
+    move.l  %d4,%d0
+    moveq   #0,%d1
+    move.b  %d2,%d1
+    movea.l #BLOB,%a1
+    jsr     cl_partin
+    movea.l %a0,%a3                     | a3 = the source Part
+ss_live:
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    movea.l #BLOB,%a1
+    jsr     cl_partin
+    movea.l %a0,%a2                     | a2 = the playing Part
+    move.l  %d3,%d2
+    lea     cl_slA,%a1
+    cmpi.l  #8,%d2
+    bcs.b   ss_seg
+    subq.l  #8,%d2
+    lea     cl_slM,%a1
+ss_seg:
+    moveq   #0,%d0
+    move.w  (%a1)+,%d0                  | offset
+    cmpi.l  #0xffff,%d0
+    beq.b   ss_eq
+    moveq   #0,%d1
+    move.w  (%a1)+,%d1                  | stride
+    muls.l  %d2,%d1
+    add.l   %d1,%d0
+    moveq   #0,%d3
+    move.w  (%a1)+,%d3                  | size
+    moveq   #0,%d4
+    move.w  (%a1)+,%d4                  | count
+    moveq   #0,%d5
+    move.w  (%a1)+,%d5                  | step
+ss_rep:
+    move.l  %d3,%d1
+    lea     (%a2,%d0.l),%a0
+    move.l  %a1,-(%sp)
+    lea     (%a3,%d0.l),%a1
+ss_b:
+    move.b  (%a0)+,%d6
+    cmp.b   (%a1)+,%d6
+    bne.b   ss_neb
+    subq.l  #1,%d1
+    bne.b   ss_b
+    movea.l (%sp)+,%a1
+    add.l   %d5,%d0
+    subq.l  #1,%d4
+    bne.b   ss_rep
+    bra.b   ss_seg
+ss_neb:
+    addq.l  #4,%sp
+ss_ne:
+    moveq   #1,%d0
+    bra.b   ss_out
+ss_eq:
+    moveq   #0,%d0
+ss_out:
+    movem.l (%sp),%d2-%d6/%a2-%a3
+    lea     28(%sp),%sp
+    rts
+
+| cl_provset (d3 = track, d2 = code): the provenance of a load that needed no data -- a slot (or SAVED): the
+| track plays it on the playing pattern; its own slot / SRC_ORIG: none. Uses d0-d1/a0.
+cl_provset:
+    move.l  %d3,%d1
+    add.l   %d1,%d1
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    lsl.l   #8,%d0
+    move.b  ACT_PAT,%d0
+    cmp.l   %d2,%d0
+    beq.b   pv2_off
+    move.l  %d2,%d0
+    lsr.l   #8,%d0
+    cmpi.b  #SRC_ORIG,%d0
+    beq.b   pv2_off
+    lea     cl_src,%a0
+    move.b  %d0,(%a0,%d1.l)
+    move.b  %d2,1(%a0,%d1.l)
+    lea     cl_home,%a0
+    move.b  PLAY_BANK,%d0
+    move.b  %d0,(%a0,%d1.l)
+    move.b  ACT_PAT,%d0
+    move.b  %d0,1(%a0,%d1.l)
+    rts
+pv2_off:
+    lea     cl_home,%a0
+    moveq   #-1,%d0
+    move.b  %d0,(%a0,%d1.l)
+    move.b  %d0,1(%a0,%d1.l)
+    rts
+
+| cl_exec(k): an execution -- [YES] (k = -1) or a trig (k = its slot), [FUNC] = FULL (the user, 2026-11-06). For
+| every target (cl_targets: the group's members, or the active track) the slot it takes:
+|   * a trig: the active track the trig's slot (of the shown bank); with [CUE] held every member that slot;
+|   * else its pre-select arrows (the active track's on screen; another member's record, cl_pre);
+|   * else its select box (where its sequence was loaded from);
+|   * else its highlight (its own slot): its original (SRC_ORIG).
+| Each through cl_cueload (cued while running; nothing when it already plays that data), in one batch; the
+| active track's slot gets the load confirmation (its own slot: the header's ORIG flash).
+cl_exec:
+    lea     -28(%sp),%sp
+    movem.l %d2-%d7/%a2,(%sp)
+    move.l  32(%sp),%d7                 | d7 = k
+    jsr     cl_trk
+    move.l  %d0,%d6                     | d6 = the active track
+    jsr     cl_targets
+    move.l  %d0,%d5                     | d5 = the targets
+    beq.w   ex2_out                     | none ([CUE] held, no member)
+    moveq   #0,%d4
+    tst.b   cl_fn
+    beq.b   ex2_f
+    move.l  #0x10000,%d4                | d4 = FULL
+ex2_f:
+    movea.l #-1,%a2                     | a2 = the active track's slot
+    jsr     cl_bbeg
+    moveq   #0,%d2
+ex2_l:
+    btst    %d2,%d5
+    beq.w   ex2_n
+    tst.l   %d7
+    bmi.b   ex2_nk
+    tst.b   cl_cuh                      | a trig with [CUE] held: every member that slot (the user,
+    bne.b   ex2_trig                    | 2026-11-06: one slot for all, as before)
+ex2_nk:
+    cmp.l   %d6,%d2
+    bne.b   ex2_rec
+    tst.l   %d7
+    bmi.b   ex2_act
+ex2_trig:
+    moveq   #0,%d3                      | the active track (or, [CUE] held, any member), a trig: its slot
+    move.b  cl_bank,%d3
+    lsl.l   #8,%d3
+    or.l    %d7,%d3
+    bra.b   ex2_have
+ex2_act:
+    tst.b   cl_pmoved
+    beq.b   ex2_box
+    moveq   #0,%d3                      | the active track's arrows (on screen)
+    move.b  cl_sbank,%d3
+    lsl.l   #8,%d3
+    move.b  cl_cur,%d3
+    bra.b   ex2_have
+ex2_rec:
+    lea     cl_pre,%a0                  | another member's arrows
+    move.l  %d2,%d0
+    add.l   %d0,%d0
+    moveq   #0,%d3
+    move.w  (%a0,%d0.l),%d3
+    btst    #15,%d3
+    beq.b   ex2_box
+    andi.l  #0x0f0f,%d3
+    bra.b   ex2_have
+ex2_box:
+    move.l  %d2,%d0                     | its select box, else its own slot
+    jsr     cl_playt
+    move.l  %d0,%d3
+    move.l  %d3,%d0
+    lsr.l   #8,%d0
+    cmpi.l  #16,%d0
+    bcs.b   ex2_have
+    moveq   #0,%d3                      | SAVED (no select box): its own slot
+    move.b  PLAY_BANK,%d3
+    lsl.l   #8,%d3
+    move.b  ACT_PAT,%d3
+ex2_have:
+    cmp.l   %d6,%d2
+    bne.b   ex2_nact
+    movea.l %d3,%a2
+ex2_nact:
+    moveq   #0,%d0                      | its own slot: its original
+    move.b  PLAY_BANK,%d0
+    lsl.l   #8,%d0
+    move.b  ACT_PAT,%d0
+    cmp.l   %d3,%d0
+    bne.b   ex2_ld
+    jsr     cl_origok
+    tst.l   %d0
+    beq.b   ex2_n                       | no originals: nothing
+    move.l  #SRC_ORIG<<8,%d3
+ex2_ld:
+    or.l    %d4,%d3
+    clr.l   -(%sp)                      | cued
+    move.l  %d3,-(%sp)
+    move.l  %d2,-(%sp)
+    jsr     cl_cueload
+    lea     12(%sp),%sp
+ex2_n:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.w   ex2_l
+    jsr     cl_bend
+|   the confirmation: the active track's slot
+    move.l  %a2,%d0
+    bmi.b   ex2_out
+    moveq   #0,%d1
+    move.b  PLAY_BANK,%d1
+    lsl.l   #8,%d1
+    move.b  ACT_PAT,%d1
+    cmp.l   %d1,%d0
+    beq.b   ex2_hdr
+    move.b  %d0,%d1
+    andi.l  #15,%d1
+    move.b  %d1,cl_cur
+    lsr.l   #8,%d0
+    move.b  %d0,cl_sbank
+    jsr     cl_flstart
+    bra.b   ex2_out
+ex2_hdr:
+    move.b  %d0,%d1                     | its own slot (the box goes there, the ORIG entry)
+    andi.l  #15,%d1
+    move.b  %d1,cl_cur
+    lsr.l   #8,%d0
+    move.b  %d0,cl_sbank
+    jsr     cl_flhdr
+ex2_out:
+    movem.l (%sp),%d2-%d7/%a2
+    lea     28(%sp),%sp
     rts
 
 | cl_asplays (d3 = track, d2 = code bank<<8 | pattern / SRC_*<<8) -> d0 = 0 when the playing pattern's
@@ -1883,10 +2221,11 @@ ty_ours:
     cmpi.l  #1,%d0
     bne.w   ty_out                      | the release: nothing
     clr.l   SEL_PEND                    | the TRACK keys' release then selects no track (the user, 2026-11-02)
-    clr.b   cl_pmoved                   | a temp save / reload: the pre-select box goes
     lea     -16(%sp),%sp
     movem.l %d2-%d5,(%sp)
     move.l  %d1,%d4                     | d4 = 0 save, 1 reload
+    jsr     cl_pexec                    | a temp save / reload: the pre-select arrows go (after d1 is kept:
+                                        | it uses d0-d1)
     move.l  HELD_TRK,%d3
     andi.l  #0xff,%d3                   | d3 = the held tracks
     move.l  %d3,%d0
@@ -1997,13 +2336,22 @@ pl_counted:
     cmpi.l  #8,%d1
     bcs.w   pl_go
     movea.l #NAMES,%a0                  | a project load: the names go (they live in memory only, for
-    move.l  #(4096*NAME_W+16*NAME_W)/4,%d0 | now) -- every sequence's and every saved one's
+    move.l  #(4096*NAME_W+16*NAME_W+4096*NAME_W)/4,%d0 | now) -- every sequence's, every saved one's, and the
+                                        | names as loaded (NAMESNAP, right after: a bank this load does not
+                                        | snapshot has none, never stale DRAM -- the user, 2026-11-06: ORIG
+                                        | restores brought garbage names)
 pl_n:
     clr.l   (%a0)+
     subq.l  #1,%d0
     bne.b   pl_n
     moveq   #1,%d0
     move.b  %d0,cl_namesok
+    lea     cl_pre,%a0                  | ... no pre-select arrows (the slots are another project's)
+    moveq   #8,%d0
+pl_tp:
+    clr.l   (%a0)+
+    subq.l  #1,%d0
+    bne.b   pl_tp
     lea     cl_svalid,%a0               | ... and no saved sequence survives
     clr.l   (%a0)+
     clr.l   (%a0)+
@@ -2138,16 +2486,24 @@ cl_snapbank:
     pea     (%a0,%d0.l)                 | dst: its snapshot
     jsr     MEMCPY
     lea     12(%sp),%sp
-    tst.b   cl_namesok                  | the bank's names as loaded, too (ORIG restores them)
-    beq.b   sb_ok
-    move.l  4(%sp),%d0
+    move.l  4(%sp),%d0                  | the bank's names as loaded, too (ORIG restores them)
     move.l  #256*NAME_W,%d1
     muls.l  %d1,%d0
-    pea     256*NAME_W
-    movea.l #NAMES,%a0
-    pea     (%a0,%d0.l)
     movea.l #NAMESNAP,%a0
-    pea     (%a0,%d0.l)
+    adda.l  %d0,%a0
+    tst.b   cl_namesok
+    bne.b   sb_nm
+    move.l  #256*NAME_W/4,%d0           | no names yet (a reset before the first project load): none --
+sb_clr:                                 | never the DRAM's leftovers (ORIG restores copy these)
+    clr.l   (%a0)+
+    subq.l  #1,%d0
+    bne.b   sb_clr
+    bra.b   sb_ok
+sb_nm:
+    pea     256*NAME_W
+    movea.l #NAMES,%a1
+    pea     (%a1,%d0.l)
+    move.l  %a0,-(%sp)
     jsr     MEMCPY
     lea     12(%sp),%sp
 sb_ok:
@@ -3028,10 +3384,172 @@ sl_f:
     lea     24(%sp),%sp
     rts
 
+| ================================================================ the group's active track, in its tab
+| cl_tabhook: replaces `jsr 0x4003fed8` (the track sidebars' upper half, the last of stock's sidebar painters, at
+| 0x40052232 every pass and 0x4004d870): the painter, then -- with a [CUE] group that has members and the active
+| track one of them -- a line inside that track's tab, one pixel in from its outline: along the top, the outer
+| side and the bottom, the corners rounded (the user, 2026-11-06). The tab of column slot k spans y 61 - 15k
+| (top) .. 47 - 15k (bottom) on the main surface 0x400bf10a, x 0..8 (left, tracks 1-4) / 119..127 (right).
+| Drawing as the painters do (RECT); never a kernel / notify call here (CLAUDE.md, 0x40052200).
+    .equ TABSURF,     0x400bf10a
+    .equ TABMODE,     0                 | the line: cleared (dark) in the lit tab -- not XOR: a pass that does not repaint the tab would toggle it
+cl_tabhook:
+    jsr     0x4003fed8
+    tst.b   cl_open
+    beq.w   th_out
+    moveq   #0,%d0
+    move.w  cl_grp,%d0
+    beq.w   th_out
+    move.l  %d0,-(%sp)
+    jsr     cl_trk
+    move.l  (%sp)+,%d1
+    btst    %d0,%d1
+    beq.w   th_out                      | the active track is no member
+    lea     -16(%sp),%sp
+    movem.l %d2-%d5,(%sp)
+    moveq   #3,%d2
+    and.l   %d0,%d2
+    moveq   #-15,%d1
+    muls.l  %d1,%d2                     | d2 = -15k
+    moveq   #0,%d3                      | d3 = 0: the left side, else 127 (x mirrored: 127 - x)
+    btst    #2,%d0
+    beq.b   th_l
+    moveq   #127,%d3
+th_l:
+|   the top line: y = 60 - 15k, x 2..7
+    moveq   #60,%d4
+    add.l   %d2,%d4
+    moveq   #2,%d0
+    moveq   #7,%d1
+    bsr.b   th_h
+|   the bottom line: y = 48 - 15k
+    moveq   #48,%d4
+    add.l   %d2,%d4
+    moveq   #2,%d0
+    moveq   #7,%d1
+    bsr.b   th_h
+|   the outer side: x = 1, y 49 - 15k .. 59 - 15k
+    moveq   #49,%d4
+    add.l   %d2,%d4
+    moveq   #59,%d5
+    add.l   %d2,%d5
+    moveq   #1,%d0
+    tst.l   %d3
+    beq.b   th_sx
+    move.l  %d3,%d0
+    subq.l  #1,%d0
+th_sx:
+    pea     TABMODE
+    move.l  %d5,-(%sp)
+    move.l  %d0,-(%sp)
+    move.l  %d4,-(%sp)
+    move.l  %d0,-(%sp)
+    pea     TABSURF
+    jsr     RECT
+    lea     24(%sp),%sp
+    movem.l (%sp),%d2-%d5
+    lea     16(%sp),%sp
+th_out:
+    rts
+th_h:                                   | x d0..d1 (left side's), y d4 -> mirrored when d3 = 127
+    tst.l   %d3
+    beq.b   th_hx
+    neg.l   %d0
+    add.l   %d3,%d0
+    neg.l   %d1
+    add.l   %d3,%d1
+th_hx:
+    pea     TABMODE
+    move.l  %d4,-(%sp)
+    move.l  %d1,-(%sp)
+    move.l  %d4,-(%sp)
+    move.l  %d0,-(%sp)
+    pea     TABSURF
+    jsr     RECT
+    lea     24(%sp),%sp
+    rts
+
 | cl_pshow: an arrow moved the pre-select box -- it shows until the next execution. Uses d0.
 cl_pshow:
     moveq   #1,%d0
     move.b  %d0,cl_pmoved
+    tst.b   cl_cuh                      | [CUE] held with a group: every member's arrows to this slot (the
+    beq.b   ps3_one                     | user, 2026-11-06: one slot for all, as before -- best of both)
+    tst.w   cl_grp
+    beq.b   ps3_one
+    move.l  %d2,-(%sp)
+    moveq   #0,%d2
+ps3_l:
+    move.w  cl_grp,%d0
+    btst    %d2,%d0
+    beq.b   ps3_n
+    move.l  %d2,%d0
+    jsr     cl_psave
+ps3_n:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   ps3_l
+    move.l  (%sp)+,%d2
+    rts
+ps3_one:
+    jsr     cl_trk                      | [CUE] up: the active track's record only (each member its own)
+    jmp     cl_psave
+
+| cl_pre[16] (the user, 2026-11-06): per track, its pre-select arrows: 0x8000 = shown | bank << 8 | slot.
+| What the screen shows is the active track's (cl_sbank / cl_cur / cl_pmoved); a track change saves the one
+| left (cl_psave) and loads the new one (cl_pload). A later "execute every track's pre-select" reads them.
+| cl_psave (d0 = track): the screen's arrows -> its record. Uses d0-d1/a0.
+cl_psave:
+    lea     cl_pre,%a0
+    add.l   %d0,%d0
+    adda.l  %d0,%a0
+    moveq   #0,%d1
+    move.b  cl_sbank,%d1
+    lsl.l   #8,%d1
+    move.b  cl_cur,%d1
+    tst.b   cl_pmoved
+    beq.b   pv_w
+    ori.l   #0x8000,%d1
+pv_w:
+    move.w  %d1,(%a0)
+    rts
+| cl_pload (d0 = track) -> d0 = 1: its record shows arrows -- they are the screen's now (the shown bank too);
+| 0: none. Uses d0-d1/a0.
+cl_pload:
+    lea     cl_pre,%a0
+    add.l   %d0,%d0
+    moveq   #0,%d1
+    move.w  (%a0,%d0.l),%d1
+    btst    #15,%d1
+    beq.b   pl2_no
+    move.b  %d1,%d0
+    andi.l  #15,%d0
+    move.b  %d0,cl_cur
+    lsr.l   #8,%d1
+    andi.l  #0x7f,%d1
+    move.b  %d1,cl_sbank
+    move.b  %d1,cl_bank
+    moveq   #1,%d0
+    move.b  %d0,cl_pmoved
+    rts
+pl2_no:
+    moveq   #0,%d0
+    rts
+| cl_pexec: an execution -- the screen's arrows go, and the records of the tracks it acts on (cl_targets: the
+| group's members, or the active track). Uses d0-d1/a0.
+cl_pexec:
+    clr.b   cl_pmoved
+    jsr     cl_targets
+    lea     cl_pre,%a0
+    moveq   #16,%d1
+px_l:
+    lsr.l   #1,%d0
+    bcc.b   px_n
+    bclr    #7,(%a0)
+px_n:
+    addq.l  #2,%a0
+    subq.l  #1,%d1
+    bne.b   px_l
     rts
 
 | cl_bbeg / cl_bend: a batch of loads (a group, ORIG, ORIG PTN+PART, a temp chord on several tracks):
@@ -3709,6 +4227,18 @@ ut_box:
     beq.b   ut_pat
     jsr     cl_draw
 ut_pat:
+    tst.w   cl_grp                      | a group, [CUE] up: the active track must be a member -- a side
+    beq.b   ut_pm                       | switch onto another one goes to the newest member on that side
+    tst.b   cl_cuh                      | (cl_gview; the user, 2026-11-06)
+    bne.b   ut_pm
+    jsr     cl_trk
+    move.w  cl_grp,%d1
+    btst    %d0,%d1
+    bne.b   ut_pm
+    move.l  %d2,-(%sp)
+    jsr     cl_gview
+    move.l  (%sp)+,%d2
+ut_pm:
     jsr     cl_trk                      | the active track changed under Clyps -- the [MIDI] key
     cmp.b   cl_lastt,%d0                | (audio <-> MIDI side) is not ours: the view and grid follow
     bne.b   ut_refr
@@ -3822,7 +4352,7 @@ cl_blink:
     cmp.b   %d1,%d0
     beq.w   bl_page
     andi.l  #15,%d1
-    bsr.b   bl_yel
+    bsr.w   bl_yel
     bra.w   bl_page
 bl_box:
     moveq   #0,%d0                      | the active track's cue
@@ -3842,24 +4372,33 @@ bl_trk:
     bne.b   bl_src                      | none (0xffff) / in another bank
     move.l  %d1,%d2                     | (the code, kept to skip its slot below)
     andi.l  #15,%d1
-    bsr.b   bl_yel
+    bsr.w   bl_yel
     bra.b   bl_src2
 bl_src:
     moveq   #-1,%d2
 bl_src2:
     jsr     cl_srccode
     cmp.l   %d2,%d0
-    beq.b   bl_page                     | cued again (a FULL re-load): flashing yellow only
+    beq.w   bl_page                     | cued again (a FULL re-load): flashing yellow only
+    tst.b   cl_pmoved
+    beq.b   bl_src3
+    moveq   #0,%d1
+    move.b  cl_sbank,%d1
+    lsl.l   #8,%d1
+    move.b  cl_cur,%d1
+    cmp.l   %d1,%d0
+    beq.w   bl_page                     | the pre-select arrows on it: solid yellow (cl_paint), no flash
+bl_src3:
     move.l  %d0,%d1
     lsr.l   #8,%d1
     cmp.b   cl_bank,%d1
-    bne.b   bl_page                     | in another bank
+    bne.w   bl_page                     | in another bank
     andi.l  #15,%d0
     lea     LED_TBL,%a0
     move.l  (%a0,%d0.l*4),%d2
     addq.l  #1,%d2                      | its green die
-    bsr.b   bl_led
-    bra.b   bl_page
+    bsr.w   bl_led
+    bra.w   bl_page
 bl_yel:                                 | d1 = a slot: both its dies off for half the period. Keeps d2.
     lea     LED_TBL,%a0
     move.l  (%a0,%d1.l*4),%d0
@@ -3882,7 +4421,7 @@ bl_page:
     bne.b   bl_out
     moveq   #0x49,%d2                   | the four page LEDs' green dies
 bl_pk:
-    bsr.b   bl_led
+    bsr.w   bl_led
     addq.l  #2,%d2
     cmpi.l  #0x51,%d2
     bne.b   bl_pk
@@ -4895,7 +5434,7 @@ pc_out:
 |   yellow, flashing   the active track's cued sequence (cl_blink: off half of every period)
 |   red / yellow blink the active track's sequence: where what it plays was loaded from (cl_srccode;
 |                      cl_blink lights its green die 3 ticks a period, as stock's p-locked trig)
-|   yellow             the select box on any other slot
+|   yellow             the pre-select box while its arrows are shown (cl_pmoved), on any slot
 |   red                the pattern you are on
 |   green 15 / 7       a slot with sample/note trigs / other data only; off = empty
 cl_paint:
@@ -4937,10 +5476,14 @@ cp_lp:
     or.l    %d2,%d0                     | d0 = this slot
     cmp.l   %a2,%d0
     beq.b   cp_yellow                   | cued (cl_blink flashes it)
+    tst.b   cl_pmoved
+    beq.b   cp_nps
+    cmp.l   %d6,%d0
+    beq.b   cp_yellow                   | the pre-select arrows shown: their slot yellow, over the select box
+cp_nps:                                 | and the highlight too; not shown: no yellow (the user, 2026-11-06:
+                                        | the grid matches the screen)
     cmp.l   %d5,%d0
     beq.b   cp_red                      | its sequence (cl_blink: red / yellow)
-    cmp.l   %d6,%d0
-    beq.b   cp_yellow                   | the box: solid yellow
     move.b  cl_bank,%d0
     cmp.b   PLAY_BANK,%d0
     bne.b   cp_green
@@ -5392,6 +5935,16 @@ na_rd:
     move.l  %d2,-(%sp)
     jsr     cl_nread
     addq.l  #4,%sp
+    move.l  %d2,%d0                     | ... and they are its names as loaded (ORIG restores them; the
+    move.l  #256*NAME_W,%d1             | user, 2026-11-06: garbage names after ORIG loads)
+    muls.l  %d1,%d0
+    pea     256*NAME_W
+    movea.l #NAMES,%a0
+    pea     (%a0,%d0.l)
+    movea.l #NAMESNAP,%a0
+    pea     (%a0,%d0.l)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
 na_n:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
@@ -5735,6 +6288,8 @@ cl_cueh:    .fill 16, 2, 0xffff         | per track: the playing (bank<<8 | patt
 cl_arm:     .space 16                   | per track: the gate has passed; waiting for a window start
 cl_cuef:    .space 16                   | per track: the cue is FULL (its machine / FX too)
 cl_pmoved:  .byte 0                     | the pre-select box shows (an arrow since the last execution)
+            .align 2
+cl_pre:     .space 32                   | per track: its pre-select arrows (cl_psave / cl_pload; 0 = none)
             .align 2
 cl_boxreq:  .byte 0                     | a card reload: the box home at the UI tail (cl_boxhome)
 cl_self:    .byte 0                     | ORIG PTN+PART playing: a pattern change to itself is pending

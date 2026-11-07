@@ -1199,6 +1199,42 @@ the chord reads `PTN LOAD:`, a group `MULTI LOAD:` ("ORIGS FULL"'s box to x 86).
   bit n of the big-endian 64-bit mask (+0 = steps 63..32), checked on 100 real tracks (the locked rows lie on the
   trig steps in 99; a different order fit at most 5). The first draft summed parameter bytes (up to 2048) -- wrong.
 
+### 1.19 The grid matches the screen; the names as loaded (the user, 2026-11-06; KYOTI CL15, not flashed)
+
+- `cl_paint`: the pre-select slot is solid yellow only while its arrows are shown (`cl_pmoved`), and then over the
+  select box and the highlight too (after a cued slot, before the sequence's red / yellow and your pattern's red);
+  `cl_blink` skips the sequence's 3-tick flash under it. Every execution that hides the arrows redraws (LED_PAINT).
+- ORIG restores (SEQ, FULL, PTN+PRT) copy names from NAMESNAP (the names as loaded). It was only written by
+  `cl_snapbank` while `cl_namesok` was set -- a snapshot before that (a boot-time bank reset) left the DRAM's leftovers
+  (the .bss is not zeroed): garbage names on hardware. Now `cl_snapbank` clears the bank's NAMESNAP when there are no
+  names yet, a project load clears NAMESNAP with the names, and `cl_nload_all` copies each bank's names into NAMESNAP
+  as it reads them. Gate H: every bank's names == NAMESNAP after a load; ORIG / ORIG FULL bring the name as loaded.
+- Pre-select arrows per track (the user, 2026-11-06 -- for a later "execute every track's pre-select at once"):
+  `cl_pre[16]` words (0x8000 = shown | bank << 8 | slot). The screen's `cl_sbank` / `cl_cur` / `cl_pmoved` are the
+  active track's; `cl_refresh` on a track change saves the track left (`cl_psave`) and loads the new one
+  (`cl_pload`; none shown -> `cl_boxhome`); in a group nothing is loaded (one shared position) and `cl_pshow` writes
+  every member's record. Executions clear their targets' records (`cl_pexec`); `cl_boxhome` the active track's; a
+  project load all. They survive closing Clyps. Replaces CL10's "back on a track, the box on its sequence".
+
+### 1.20 Executions per track; multi-select owns the interface (the user, 2026-11-06; KYOTI CL16, not flashed)
+
+- `cl_exec(k)` ([YES]: k = -1; a trig: its slot) is every execution: per target (`cl_targets`) the slot is a trig's
+  (the active track; with [CUE] held every member), else the arrows (the screen's for the active track, `cl_pre`
+  for another member), else the select box (`cl_playt`), else the track's own slot = SRC_ORIG; `cl_cueload` each in
+  one batch; the active track's slot gets the confirmation (its own slot: the header's ORIG flash).
+- `cl_cueload` skips a load whose data already plays: `cl_samein` (the record via cl_same + the effective length /
+  scale) and for FULL `cl_slsame` (the track's Part slice against the source's Part: a slot's, the original's, the
+  saved one's); it then only sets the provenance (`cl_provset`) and drops a pending cue. Replaces the old cued
+  re-pick rule.
+- Groups: [CUE] up, a non-member's TRACK does nothing (`cl_k_track`); a member's makes it active with its own
+  arrows (`cl_refresh` loads `cl_pre` in groups too); `cl_pshow` writes the active track's record -- with [CUE] held
+  every member's (one slot for all). A side switch onto a non-member goes to the newest member there (`cl_uitail` ->
+  `cl_gview`; none on that side: it stays -- the one gap).
+- The active member's tab: `cl_tabhook` (jsr at 0x40052232 / 0x4004d870, after stock's sidebar painter 0x4003fed8)
+  clears a line one pixel inside the tab (top 60 - 15k, bottom 48 - 15k, side x 1 / 126, x 2..7 / 120..125) on the
+  main surface 0x400bf10a with RECT mode 0 (mode 1 is the tab's own colour; not XOR, so a pass that does not
+  repaint cannot toggle it). Mock-up approved, then the built hook rendered byte-identical to it.
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)

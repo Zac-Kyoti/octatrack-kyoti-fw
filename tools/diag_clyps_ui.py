@@ -1409,32 +1409,35 @@ def main(argv):
         tap(NO)
 
     if "H" in a.only:
-        # --- H: right after the load, which bytes of each Part differ from Clyps' originals (diagnostic)
-        print("H: Part bytes that differ from the originals after the load")
-        for k in range(4):
-            lp = bytes(u.mem_read(BLOB + bank * BANKSTRIDE + PART_OFF + k * PARTSZ, PARTSZ))
-            op = bytes(u.mem_read(syms["cl_bss"] + bank * BANKSZ + PART_OFF + k * PARTSZ, PARTSZ))
-            d = [(hex(i), op[i], lp[i]) for i in range(PARTSZ) if lp[i] != op[i]]
-            print(f"      Part {k + 1}: {len(d)} bytes differ {d[:24]}", flush=True)
-        rt.run(ms=2000)
-        for k in range(4):
-            lp = bytes(u.mem_read(BLOB + bank * BANKSTRIDE + PART_OFF + k * PARTSZ, PARTSZ))
-            op = bytes(u.mem_read(syms["cl_bss"] + bank * BANKSZ + PART_OFF + k * PARTSZ, PARTSZ))
-            d = [(hex(i), op[i], lp[i]) for i in range(PARTSZ) if lp[i] != op[i]]
-            print(f"      +2 s, Part {k + 1}: {len(d)} bytes differ {d[:24]}", flush=True)
-        t = rd(0x80000000, 1)
+        # --- H: the names as loaded (NAMESNAP) vs the names, then an ORIG restore's name (diagnostic)
+        NAMES_ = syms["cl_bss"] + 16 * BANKSZ + 16 * TRAC_A
+        SNAMES_ = NAMES_ + 4096 * 10
+        NAMESNAP_ = SNAMES_ + 16 * 10
+        print("H: the names as loaded (ORIG restores copy them) after a project load; an ORIG restore's name")
+        nb = bytes(u.mem_read(NAMES_, 16 * 2560))
+        ns = bytes(u.mem_read(NAMESNAP_, 16 * 2560))
+        bad = sorted({i // 2560 + 1 for i in range(len(nb)) if nb[i] != ns[i]})
+        check(rd(syms["cl_namesok"], 1) == 1 and not bad,
+              f"after the load: every bank's names equal its names as loaded (banks differing: {bad})")
+        tap(0x10)
+        act = rd(0x800065BE, 1)
+        idx = (bank * 16 + act) * 16
         key(PTN, 1)
         key(BANK, 1)
         key(BANK, 0)
         key(PTN, 0)
-        rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-        rt.call_as_main(syms["cl_draw"], budget=2000000)
-        print(f"      open on T{t + 1}: pdf {list(bytes(u.mem_read(syms['cl_pdf'], 4)))}, snapok 0x{snapok():04x}", flush=True)
-        for k in range(16):
-            r_, o_ = rec(k, t), oslot(k, t)
-            d = [hex(i) for i in range(len(r_)) if r_[i] != o_[i]]
-            print(f"      slot {k + 1}: T{t + 1} record differs at {d[:8]} ({len(d)}); trailer now {slab(k)[0x8E50:0x8E58].hex()} "
-                  f"orig {oslab(k)[0x8E50:0x8E58].hex()}", flush=True)
+        q = next(x for x in range(16) if x != act and rec(x, 0) != rec(act, 0))
+        tap(q)
+        print(f"      after loading slot {q + 1}: T1's name {bytes(u.mem_read(NAMES_ + idx * 10, 10)).hex()}", flush=True)
+        tap(PAGE)
+        nmo = bytes(u.mem_read(NAMESNAP_ + idx * 10, 10))
+        check(bytes(u.mem_read(NAMES_ + idx * 10, 10)) == nmo,
+              f"[PAGE] (ORIG): T1's name as loaded ({nmo.hex()}), no garbage")
+        key(FUNC, 1)
+        tap(PAGE)
+        key(FUNC, 0)
+        check(bytes(u.mem_read(NAMES_ + idx * 10, 10)) == nmo, "[FUNC]+[PAGE] (ORIG FULL): the same")
+        tap(NO)
 
     if "I" in a.only:
         # --- I: card reloads of a fully saved project undo a Clyps load: no "x", the box / LEDs back on the
@@ -1586,11 +1589,30 @@ def main(argv):
               f"(box {led(r)}, seq {led(q)}, yours {led(act)})")
         check((led_tbl_[q] + 1, 3) in fl and not any(d in (led_tbl_[r], led_tbl_[r] + 1) for d, _ in fl),
               f"... cl_blink: the sequence's green die 3 ticks; the box not flashed ({fl})")
+        pm = lambda: rd(syms["cl_pmoved"], 1)
+        tap(0x11)
+        tap(0x10)
+        check(state()["cur"] == r and pm() == 1, f"T2 and back: T1's pre-select arrows where they were ({r + 1}), "
+              f"per track (the user, 2026-11-06; cur {state()['cur'] + 1}, shown {pm()})")
+        tap(NO)
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        check(state()["open"] == 1 and state()["cur"] == r and pm() == 1,
+              f"Clyps closed and opened again: T1's arrows still on {r + 1} (cur {state()['cur'] + 1})")
+        tap(UP)
+        while state()["cur"] != q:
+            tap(DOWN)
+        repaint()
+        fl = flashes()
+        check(led(q) == (1, 1) and not any(d == led_tbl_[q] + 1 and n == 3 for d, n in fl),
+              f"the pre-select arrows on the sequence's slot ({q + 1}): solid yellow, no red / yellow flash "
+              f"(the user, 2026-11-06; led {led(q)}, flashes {fl})")
         tap(0x11)
         check(state()["cur"] == act, f"T2: the box on T2's sequence (its original: your pattern {act + 1}; cur {state()['cur'] + 1})")
         tap(0x10)
-        check(state()["cur"] == q, f"back to T1: the box on its sequence {q + 1}, not where it was left ({r + 1}); "
-              f"cur {state()['cur'] + 1}")
+        check(state()["cur"] == q, f"back to T1: its arrows where they were left ({q + 1}); cur {state()['cur'] + 1}")
         tap(PAGE)
         tap(0x11)
         tap(0x10)
@@ -1921,7 +1943,8 @@ def main(argv):
         check(rd(syms["cl_cuh"], 1) != 0 and gmask() == 0x10000 and t1 == [] and tled() == lnone,
               f"[CUE] held: no tab, no active colours (tabs {t1}, cells {n1})")
         tap(q)
-        check([rec(act, k) for k in range(8)] == before, f"[CUE] held, no member: trig {q + 1} loads nothing")
+        check([rec(act, k) for k in range(8)] == before and rd(syms["cl_flk"], 1) == 0,
+              f"[CUE] held, no member: trig {q + 1} loads nothing, and no load confirmation flashes (the user, 2026-11-06)")
         for k in m:
             tap(0x10 + k)
         bits = sum(1 << k for k in m)
@@ -1938,44 +1961,86 @@ def main(argv):
         key(CUE, 0)
         check(gmask() == 0x10000 | bits and tabs()[0] == sorted(m), "[CUE] released: the group stays")
         shot("U1_group")
+        # executions (the user, 2026-11-06): the active member a trig's slot; every other member its own
+        # arrows, else its select box, else its original; a load of what already plays does nothing
+        actv = rd(0x80000000, 1)
+        other = [k for k in m if k != actv][0]
+        check(actv == m[1], f"[CUE] up: the active track is the last member added, T{m[1] + 1} (T{actv + 1})")
         tap(q)
-        check(all(rec(act, k) == rec(q, k) for k in m) and rec(act, a0) == before[a0],
-              f"trig {q + 1}: every member its own sequence of pattern {q + 1}; T{a0 + 1} untouched")
+        check(rec(act, actv) == rec(q, actv) and rec(act, other) == before[other] and rec(act, a0) == before[a0],
+              f"trig {q + 1}: the active member T{actv + 1} takes slot {q + 1}; T{other + 1} (no arrows, its "
+              f"original) stays; T{a0 + 1} untouched")
         tap(PAGE)
         check(all(rec(act, k) == oslot(act, k) for k in m), "[PAGE]: every member its own original")
         dst = partbase(bank, act)
+        osrc = partbase(bank, act, syms["cl_bss"])
         sl_a0 = pslice(a0, dst)
         key(FUNC, 1)
         tap(q)
         key(FUNC, 0)
-        check(all(rec(act, k) == rec(q, k) and pslice(k, dst) == pslice(k, partbase(bank, q)) for k in m)
-              and pslice(a0, dst) == sl_a0, f"[FUNC]+trig: ALL into every member; T{a0 + 1}'s slice untouched")
+        check(rec(act, actv) == rec(q, actv) and pslice(actv, dst) == pslice(actv, partbase(bank, q))
+              and rec(act, other) == oslot(act, other) and pslice(other, dst) == pslice(other, osrc)
+              and pslice(a0, dst) == sl_a0,
+              f"[FUNC]+trig: FULL slot {q + 1} into T{actv + 1}; T{other + 1} its original FULL; T{a0 + 1}'s slice untouched")
         key(FUNC, 1)
         tap(PAGE)
         key(FUNC, 0)
-        osrc = partbase(bank, act, syms["cl_bss"])
         check(all(rec(act, k) == oslot(act, k) and pslice(k, dst) == pslice(k, osrc) for k in m),
               "[FUNC]+[PAGE]: every member its original sequence and slice")
+        # each member its own pre-select arrows; [YES] loads each its own
+        q3 = next(x for x in range(16) if x not in (act, q) and rec(x, other) != rec(act, other))
+        q4 = next(x for x in range(16) if x not in (act, q3) and rec(x, actv) != rec(act, actv))
+        tap(0x10 + other)
+        check(rd(0x80000000, 1) == other and grp() == bits and state()["open"] == 1,
+              f"TRACK {other + 1} (a member): the active track, the group stays")
+        while state()["cur"] != q3:
+            tap(DOWN)
+        tap(0x10 + actv)
+        while state()["cur"] != q4:
+            tap(DOWN)
+        pre = list(bytes(u.mem_read(syms["cl_pre"], 32)))
+        check(pre[2 * other] & 0x80 and pre[2 * other + 1] == q3 and rd(0x80000000, 1) == actv,
+              f"each member its own arrows: T{other + 1} on {q3 + 1} (record {pre[2 * other:2 * other + 2]}), "
+              f"T{actv + 1} on {q4 + 1} (the screen)")
+        tap(0x10 + a0)
+        check(rd(0x80000000, 1) == actv and state()["cur"] == q4,
+              f"TRACK {a0 + 1} (no member): nothing -- the active track and the view stay")
+        tap(YES)
+        check(rec(act, other) == rec(q3, other) and rec(act, actv) == rec(q4, actv),
+              f"[YES]: T{other + 1} slot {q3 + 1}, T{actv + 1} slot {q4 + 1} -- each its own arrows")
+        tap(PAGE)
+        key(CUE, 1)                        # [CUE] held: the arrows move every member's to the same slot
         tap(DOWN)
-        cg = state()["cur"]
-        tap(0x10 + m[0])
-        check(rd(0x80000000, 1) == m[0] and grp() == bits and state()["open"] == 1 and state()["cur"] == cg,
-              f"plain TRACK {m[0] + 1}: the view's track changes, the group stays, the pre-select box stays "
-              f"({cg + 1} -> {state()['cur'] + 1}; the user, 2026-11-05)")
+        cq = state()["cur"]
+        key(CUE, 0)
+        pre = list(bytes(u.mem_read(syms["cl_pre"], 32)))
+        check(all(pre[2 * k] & 0x80 and pre[2 * k + 1] == cq for k in m),
+              f"[CUE] held + DOWN: every member's arrows on slot {cq + 1} ({[pre[2 * k:2 * k + 2] for k in m]}; "
+              f"the user, 2026-11-06)")
+        tap(PAGE)
+        q5 = next(x for x in range(16) if x != act and all(rec(x, k) != rec(act, k) for k in m))
+        key(CUE, 1)                        # [CUE] held: a trig loads that slot into every member
+        tap(q5)
+        key(CUE, 0)
+        check(all(rec(act, k) == rec(q5, k) for k in m) and rec(act, a0) == before[a0],
+              f"[CUE] held + trig {q5 + 1}: every member slot {q5 + 1}; T{a0 + 1} untouched (the user, 2026-11-06)")
+        tap(PAGE)
         key(CUE, 1)
         tap(MIDIK)
         tap(0x10)
         check(rd(0x80000012, 4) != 0 and rd(0x80000000, 1) == 0, "... the view on MIDI track 1, on the MIDI side")
         tap(MIDIK)
         key(CUE, 0)
-        check(grp() == bits | 0x100 and rd(0x80000012, 4) == 0, "[CUE]+[MIDI]+TRACK 1: MIDI track 1 joins")
+        check(grp() == bits | 0x100 and rd(0x80000012, 4) == 0 and (bits >> rd(0x80000000, 1)) & 1,
+              f"[CUE]+[MIDI]+TRACK 1: MIDI track 1 joins; back on the audio side a member is active "
+              f"(T{rd(0x80000000, 1) + 1})")
         aview = rd(0x80000000, 1)
         mrec = lambda pat: bytes(u.mem_read(BLOB + bank * BANKSTRIDE + pat * PATSTRIDE + 0x48D0, 0x8B0))
-        q2 = next((x for x in range(16) if x != act and mrec(x) != mrec(act)), q)
-        differs = mrec(q2) != mrec(act)
+        morig = oslab(act)[0x48D0:0x48D0 + 0x8B0]
+        q2 = next((x for x in range(16) if x != act and rec(x, aview) != rec(act, aview)), q)
         tap(q2)
-        check(mrec(act) == mrec(q2) and all(rec(act, k) == rec(q2, k) for k in m),
-              f"trig {q2 + 1}: the MIDI member too (its source record differs: {differs})")
+        check(rec(act, aview) == rec(q2, aview) and mrec(act) == morig,
+              f"trig {q2 + 1}: the active T{aview + 1} takes it; MIDI 1 (no arrows, its original) stays")
         tap(PAGE)
         key(CUE, 1)
         tap(0x10 + m[1])

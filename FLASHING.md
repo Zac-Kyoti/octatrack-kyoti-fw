@@ -206,6 +206,33 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL16 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL15 (its list below still applies; CL15 was never flashed) + the new multi-select and executions:
+  1. Every execution ([YES] or a trig, with or without [FUNC]) takes, per track: its pre-select arrows, else its select
+     box (last loaded), else its highlight (its original). A load of data the track already plays does nothing.
+  2. Group: hold [CUE], add tracks. The active track (the one on screen) has a line inside its sidebar tab.
+  3. [CUE] up: TRACK of a member makes it active (its own slots, its own arrows); TRACK of any other track does
+     nothing. Arrows move the active member's pre-select only.
+  4. [YES]: every member loads its own (arrows, else select box, else original). A trig: the active member that slot,
+     every other member its own.
+  5. [CUE] held: the arrows move every member's pre-select to the same slot; a trig loads that slot into every
+     member.
+  6. [NO] ends the group (Clyps stays); [NO] again closes Clyps.
+
+- **KYOTI CL15 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL14 (flashed 2026-11-06) + LED / name fixes and pre-select arrows per track:
+  1. The grid's solid yellow shows only while the pre-select arrows are on screen -- on any slot, also over the
+     last-loaded slot and your pattern's slot (it wins over red / yellow and red there). When the arrows go (a load,
+     a track change, a restore...), the yellow goes with them.
+  2. ORIG SEQ, ORIG FULL and ORIG PTN+PRT bring back the slot's name as loaded (or none) -- no garbage characters,
+     also right after power-on.
+  3. Pre-select arrows per track: on T1 move the arrows to slot 5, go to T2 (its own arrows, or its last-loaded slot),
+     come back: T1's arrows are on 5 again. Close and reopen Clyps: still there. An execution on a track (a load,
+     [PAGE], a temp save / reload) clears that track's arrows; a project load clears every track's.
+  4. A `[CUE]` group: moving the arrows moves every member's to the same slot.
+  5. Hold `[CUE]` without adding a track, then `[FUNC]`+`[YES]` (or a trig, or `[PAGE]`): nothing loads and nothing
+     flashes.
+
 - **KYOTI CL14 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL13 (its list below still applies; CL13 was never flashed) with the pre-select box as arrowheads and the
   locks label:
